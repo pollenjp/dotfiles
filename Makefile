@@ -245,10 +245,13 @@ setup-vimrc:  ## .vimrc, .vim/
 		fi;\
 		ln -s "$${dir_src}" "$${dir_tgt}"
 
+# create .p10k.zsh symlink
 .PHONY: setup-zshrc
 setup-zshrc:  ## .zshrc, .zsh/
-# create .p10k.zsh symlink
-	ln -s "$${HOME}"/dotfiles/p10k/.p10k.zsh "$${HOME}"/.p10k.zsh
+	unlink "$${HOME}"/.p10k.zsh
+	ln -s \
+		"$${HOME}"/dotfiles/p10k/.p10k.zsh \
+		"$${HOME}"/.p10k.zsh
 	./script/append-load-rc-line.sh \
 		"$${HOME}"/.zshrc \
 		"$${HOME}"/dotfiles/.zshrc
