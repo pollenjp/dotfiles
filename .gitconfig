@@ -1,0 +1,39 @@
+[user]
+	email = polleninjp@gmail.com
+	name = pollenjp
+[core]
+	editor = vim
+	quotepath = false
+	autocrlf = false
+
+	# for git-delta
+    pager = delta
+
+[pager]
+	branch = false
+[push]
+	default = simple
+[alias]
+	co = checkout
+	br = branch
+	ci = commit
+	st = status
+	w  = switch
+	push-f = push --force-with-lease
+[init]
+	defaultBranch = main
+
+[interactive]
+	diffFilter = delta --color-only
+
+[delta]
+	# for git-delta
+	navigate = true
+
+[merge]
+	# for git-delta
+	conflictstyle = diff3
+
+[diff]
+	# for git-delta
+	colorMoved = default
