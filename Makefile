@@ -248,7 +248,12 @@ setup-vimrc:  ## .vimrc, .vim/
 # create .p10k.zsh symlink
 .PHONY: setup-zshrc
 setup-zshrc:  ## .zshrc, .zsh/
-	unlink "$${HOME}"/.p10k.zsh
+	(\
+		dir_tgt="$${HOME}"/.p10k.zsh ;\
+		if [[ -h "$${dir_tgt}" ]]; then \
+			unlink "$${dir_tgt}" ;\
+		fi\
+	)
 	ln -s \
 		"$${HOME}"/dotfiles/p10k/.p10k.zsh \
 		"$${HOME}"/.p10k.zsh
