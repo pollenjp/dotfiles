@@ -75,3 +75,5 @@ case "${OSTYPE}" in
         ;;
     *)
 esac
+
+alias ssh-agent-start='exec ssh-agent $SHELL'
