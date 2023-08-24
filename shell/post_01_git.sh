@@ -79,3 +79,11 @@ function c-func(){
 #   - $ git add abc.txt
 #     $ c !$
 alias c='noglob c-func'
+
+function git-fetch-pull-rquest(){
+    set +eu
+    local pr_num="${1}"
+    git fetch origin "pull/${pr_num}/head:pr${pr_num}"
+}
+
+alias gpr='git-fetch-pull-rquest'
