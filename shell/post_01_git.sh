@@ -81,7 +81,7 @@ function c-func(){
 alias c='noglob c-func'
 
 function git-fetch-pull-rquest(){
-    set +eu
+    set -u
     local pr_num="${1}"
     git fetch origin "pull/${pr_num}/head:pr${pr_num}"
 }
