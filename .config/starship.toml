@@ -1,0 +1,35 @@
+# format = """
+# $all
+# $character"""
+# format = '''
+format = """
+[┌───────────────────>](bold green)
+[│](bold green)$time
+[│](bold green)$all
+[│](bold green)$directory
+[└─>](bold green)
+$shell$character"""
+
+add_newline = true
+
+[line_break]
+disabled = true
+
+[directory]
+truncation_length = 0
+truncate_to_repo = false
+before_repo_root_style = 'bold fg:white bg:#0000ff'
+repo_root_style = 'bold fg:black bg:#6495ed'
+
+[git_metrics]
+disabled = false
+
+[shell]
+disabled = false
+
+[sudo]
+disabled = false
+
+[time]
+disabled = false
+format = '🕙[\[ $time \]]($style)'

@@ -6,6 +6,7 @@ export
 .PHONY: setup
 setup:  ## run all setup
 # shell
+	${MAKE} setup-starship
 	${MAKE} setup-sshconfig
 	${MAKE} setup-bashrc
 	${MAKE} setup-zshrc
@@ -157,6 +158,19 @@ setup-pacman-for-win:
 		pacman -S --noconfirm zsh ;\
 	fi
 
+.PHONY: setup-starship
+setup-starship:
+# config
+	mkdir -p "$${HOME}"/.config
+	file_src="$${HOME}/dotfiles/.config/starship.toml" ;\
+	file_dst="$${HOME}/.config/starship.toml" ;\
+	if [[ -h $${file_dst} ]]; then\
+		unlink $${file_dst} ;\
+	elif [[ -f $${file_dst} ]]; then\
+		rm $${file_dst} ;\
+	fi ;\
+	ln -s "$${file_src}" $${file_dst}
+
 .PHONY: setup-gitconfig
 setup-gitconfig:  ## .gitconfig, .gitignore_global, ~/.config/git/ignore
 # .gitconfig
@@ -245,18 +259,11 @@ setup-vimrc:  ## .vimrc, .vim/
 		fi;\
 		ln -s "$${dir_src}" "$${dir_tgt}"
 
-# create .p10k.zsh symlink
 .PHONY: setup-zshrc
 setup-zshrc:  ## .zshrc, .zsh/
-	(\
-		dir_tgt="$${HOME}"/.p10k.zsh ;\
-		if [[ -h "$${dir_tgt}" ]]; then \
-			unlink "$${dir_tgt}" ;\
-		fi\
-	)
-	ln -s \
-		"$${HOME}"/dotfiles/p10k/.p10k.zsh \
-		"$${HOME}"/.p10k.zsh
+# create .p10k.zsh symlink
+	-unlink "$${HOME}"/.p10k.zsh
+	ln -s "$${HOME}"/dotfiles/p10k/.p10k.zsh "$${HOME}"/.p10k.zsh
 	./script/append-load-rc-line.sh \
 		"$${HOME}"/.zshrc \
 		"$${HOME}"/dotfiles/.zshrc
