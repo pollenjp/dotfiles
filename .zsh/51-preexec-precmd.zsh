@@ -125,9 +125,9 @@ function print_rgb() {
 
 PRECMD_SEGMENT_SEPARATOR="\ue0b0"
 EMOJI_CLOCK="\U23F2"
+EMOJI_DIRECTORY="\uf4d4"
 EMOJI_SNAKE="\U1F40D"
-# EMOJI_GIT="\ue0a0"
-EMOJI_GIT="\Uf841"
+EMOJI_GIT="\ue725"
 EMOJI_RUBY="\U1F496"
 
 
@@ -281,14 +281,21 @@ function precmd_git() {
     fi
 }
 
+function precmd_pwd() {
+    precmd_section 1 " ${EMOJI_DIRECTORY} dir"
+    precmd_section 2 "$(pwd)"
+    precmd_segment_end
+}
+
 precmd () {
     # https://superuser.com/questions/974908/multiline-rprompt-in-zsh
 
     precmd_datetime
     precmd_pip
-    precmd_pyenv
-    precmd_rbenv
+    # precmd_pyenv
+    # precmd_rbenv
     precmd_git
+    precmd_pwd
 
     ###############################
     # Update Screen Terminal Name #
