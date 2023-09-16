@@ -32,6 +32,3 @@ setopt promptsubst
 # zi snippet OMZT::agnoster
 
 # zi snippet OMZP::gpg-agent
-
-# <https://github.com/romkatv/powerlevel10k>
-zi ice depth=1; zi light romkatv/powerlevel10k
