@@ -5,8 +5,6 @@ setopt histignorealldups sharehistory
 # for preexec, precmd
 GLOBAL_CMD_STR=" "
 
-PROMPT=${PROMPT}$'\n'' %# '
-
 ###############
 # Utils Funcs #
 ###############
@@ -129,6 +127,7 @@ EMOJI_DIRECTORY="\uf4d4"
 EMOJI_SNAKE="\U1F40D"
 EMOJI_GIT="\ue725"
 EMOJI_RUBY="\U1F496"
+EMOJI_TERMINAL="\uf489"
 
 
 typeset PRECMD_CURRENT_BG_R=''
@@ -281,6 +280,15 @@ function precmd_git() {
     fi
 }
 
+# prent tmux session name
+function precmd_tmux() {
+    if [[ -n "$TMUX" ]]; then
+        precmd_section 1 " ${EMOJI_TERMINAL} tmux"
+        precmd_section 2 "$(tmux display-message -p '#S')"
+        precmd_segment_end
+    fi
+}
+
 function precmd_pwd() {
     precmd_section 1 " ${EMOJI_DIRECTORY} dir"
     precmd_section 2 "$(pwd)"
@@ -296,6 +304,7 @@ precmd () {
     # precmd_rbenv
     precmd_git
     precmd_pwd
+    precmd_tmux
 
     ###############################
     # Update Screen Terminal Name #

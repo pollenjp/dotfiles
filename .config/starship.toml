@@ -3,15 +3,13 @@
 # $character"""
 # format = '''
 format = """
-[┌───────────────────>](bold green)
-[│](bold green)$all
+[┌](bold green)$time $username@$hostname $all
 [│](bold green)$git_branch\
 $git_commit\
 $git_state\
 $git_metrics\
 $git_status
-[│](bold green)$time\
-$directory
+[└](bold green)$directory
 $shell$character"""
 
 add_newline = false
@@ -30,6 +28,7 @@ disabled = false
 
 [hostname]
 ssh_only = false
+format = '[$ssh_symbol$hostname]($style)'
 
 [kubernetes]
 disabled = false
@@ -46,3 +45,4 @@ format = '🕙[\[$time\]]($style)'
 
 [username]
 show_always = true
+format = '[$user]($style)'
