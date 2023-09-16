@@ -9,7 +9,7 @@ $git_commit\
 $git_state\
 $git_metrics\
 $git_status
-[└](bold green)$directory
+[└](bold green) $directory
 $shell$character"""
 
 add_newline = false
@@ -23,6 +23,9 @@ truncate_to_repo = false
 before_repo_root_style = 'bold fg:white bg:#0000ff'
 repo_root_style = 'bold fg:black bg:#6495ed'
 
+[git_branch]
+# always_show_remote = true
+
 [git_metrics]
 disabled = false
 
@@ -31,6 +34,10 @@ ssh_only = false
 format = '[$ssh_symbol$hostname]($style)'
 
 [kubernetes]
+disabled = false
+
+[localip]
+ssh_only = false
 disabled = false
 
 [shell]
