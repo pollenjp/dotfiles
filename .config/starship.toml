@@ -31,7 +31,9 @@ disabled = false
 
 [hostname]
 ssh_only = false
-format = '[$ssh_symbol$hostname]($style)'
+format = '[$hostname$ssh_symbol]($style)'
+# ssh_symbol = '🌐'
+ssh_symbol = '🌏'
 
 [kubernetes]
 disabled = false
