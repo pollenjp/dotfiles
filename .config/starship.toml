@@ -14,9 +14,6 @@ $shell$character"""
 
 add_newline = false
 
-[line_break]
-disabled = true
-
 [directory] # <https://starship.rs/config/#directory>
 truncation_length = 0
 truncate_to_repo = false
@@ -38,9 +35,15 @@ ssh_symbol = '🌏'
 [kubernetes]
 disabled = false
 
+[line_break]
+disabled = true
+
 [localip]
 ssh_only = false
 disabled = false
+
+[python]
+disabled = true
 
 [shell]
 disabled = false
