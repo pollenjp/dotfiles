@@ -1,4 +1,5 @@
-source <(curl -sL https://git.io/zi-loader); zzinit
+source <(curl -sL https://git.io/zi-loader)
+zzinit
 zi load z-shell/H-S-MW
 zi light zsh-users/zsh-syntax-highlighting
 zi light zsh-users/zsh-autosuggestions
