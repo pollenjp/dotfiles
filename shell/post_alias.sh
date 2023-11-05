@@ -77,3 +77,6 @@ case "${OSTYPE}" in
 esac
 
 alias ssh-agent-start='exec ssh-agent $SHELL'
+
+# 末尾のスペースによって補完を有効化
+alias watch='watch '
