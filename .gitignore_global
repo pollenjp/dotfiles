@@ -3,3 +3,4 @@
 .envrc
 .python-version
 .ruby-version
+.secrets/
