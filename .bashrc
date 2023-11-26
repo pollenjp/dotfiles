@@ -32,3 +32,11 @@ for rc in ~/dotfiles/shell/post_*.sh; do
     # shellcheck disable=SC1090
     . "${rc}"
 done
+
+common_shellrc="${HOME}"/.common_shellrc.sh
+if ! [ -f "${common_shellrc}" ]; then
+    touch "${common_shellrc}"
+fi
+
+# shellcheck disable=SC1090
+. "${common_shellrc}"
