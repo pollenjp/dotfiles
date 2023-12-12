@@ -11,6 +11,7 @@ zi light zsh-users/zsh-completions
 ###############
 
 # <https://z.digitalclouds.dev/docs/getting_started/migration>
+zi snippet OMZ::lib/functions.zsh
 zi snippet OMZ::lib/clipboard.zsh
 zi snippet OMZ::lib/termsupport.zsh
 
