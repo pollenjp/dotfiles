@@ -7,7 +7,7 @@
 	autocrlf = false
 
 	# for git-delta
-    pager = delta
+	pager = delta
 
 [pager]
 	branch = false
