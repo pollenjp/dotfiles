@@ -8,12 +8,12 @@ export SUDO_EDITOR=vim
 
 local_bin_path="${HOME}/.local/bin"
 # shellcheck disable=SC2295
-if [[ -d "${local_bin_path}" ]] &&
-	[[ -n "${PATH##*${local_bin_path}}" ]] &&
-	[[ -n "${PATH##*${local_bin_path}:*}" ]]; then
-	export PATH="${local_bin_path}:${PATH}"
+if [[ -d "${local_bin_path}" ]] \
+  && [[ -n "${PATH##*${local_bin_path}}" ]] \
+  && [[ -n "${PATH##*${local_bin_path}:*}" ]]; then
+  export PATH="${local_bin_path}:${PATH}"
 fi
 
 if command -v bindkey &>/dev/null; then
-	bindkey -v
+  bindkey -v
 fi

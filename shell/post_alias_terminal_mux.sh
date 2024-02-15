@@ -13,7 +13,7 @@ alias tls-panes='tmux list-panes' # ls panes
 # Change the current directory for a tmux session, which determines
 # the starting dir for new windows/panes:
 function tmux-cwd {
-	tmux command-prompt -I "$PWD" -p "New session dir:" "attach -c %1"
+  tmux command-prompt -I "$PWD" -p "New session dir:" "attach -c %1"
 }
 alias tchdir=tmux-cwd
 
@@ -29,7 +29,7 @@ alias sls='screen -ls' # screen ls sessions
 alias sa='screen -r'   # screen attach session
 alias sd='screen -d'   # detatch session
 function screen-kill-session() {
-	screen -X -S "$1" kill
+  screen -X -S "$1" kill
 }
 alias skill-sess=screen-kill-session
 
