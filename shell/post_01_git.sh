@@ -20,7 +20,7 @@ alias gdefault="git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: 
 alias f='git fetch'
 gfb() {
 	# git fetch branch
-	git fetch origin $1:$1
+	git fetch origin "$1:$1"
 }
 gfm() {
 	# git fetch the default branch (main/master)
