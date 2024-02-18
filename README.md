@@ -1,5 +1,9 @@
 # dotfiles
 
+## Setup
+
 ```sh
-make setup
+./main.bash setup
+./main.bash fmt
+./main.bash lint
 ```
