@@ -52,9 +52,9 @@ main() {
         "${script_dir}/.screenrc"
         "${script_dir}/.config/zellij/config.kdl"
         "${script_dir}/.vimrc"
-        "${script_dir}/.vim/"
-        "${script_dir}/.config/nvim/"
-        "${script_dir}/.config/pypoetry/"
+        "${script_dir}/.vim"
+        "${script_dir}/.config/nvim"
+        "${script_dir}/.config/pypoetry"
       )
       dst_files=(
         "${HOME}/.config/starship.toml"
@@ -64,9 +64,9 @@ main() {
         "${HOME}/.screenrc"
         "${HOME}/.config/zellij/config.kdl"
         "${HOME}/.vimrc"
-        "${HOME}/.vim/"
-        "${HOME}/.config/nvim/"
-        "${HOME}/.config/pypoetry/"
+        "${HOME}/.vim"
+        "${HOME}/.config/nvim"
+        "${HOME}/.config/pypoetry"
       )
       [[ ${#src_files[@]} -eq ${#dst_files[@]} ]] || {
         echo "Invalid length of src_files and dst_files"
@@ -77,13 +77,17 @@ main() {
         src_path="${src_files[i]}"
         dst_path="${dst_files[i]}"
         mkdir -p "$(dirname "${dst_path}")"
-        [[ -L ${dst_path} || -f ${dst_path} || -f ${dst_path} ]] && rm "${dst_path}"
         case ${uname_result} in
           Darwin | Linux)
+            # if symlink exists, remove it
+            [[ -h ${dst_path} ]] && unlink "${dst_path}"
             ln -s "${src_path}" "${dst_path}"
             ;;
           MINGW* | MSYS* | CYGWIN*)
             # WindowsOS はシンボリックリンクが使えないのでコピーする
+            # if file or directory exists, remove it
+            [[ -f ${dst_path} ]] && rm "${dst_path}"
+            [[ -d ${dst_path} ]] && rm -rf "${dst_path}"
             # TODO: rsync may be better
             cp -a "${src_path}" "${dst_path}"
             ;;
@@ -118,7 +122,7 @@ main() {
         target_name="bash-completion-2.11"
         curl -L --continue-at - --output "${dst_dirpath}/${target_name}.tar.xz" \
           https://github.com/scop/bash-completion/releases/download/2.11/"${target_name}".tar.xz
-        tar -Jxvf -C "${dst_dirpath}" "${dst_dirpath}/${target_name}.tar.xz"
+        tar -Jxvf "${dst_dirpath}/${target_name}.tar.xz" -C "${dst_dirpath}"
         # TODO: rsync may be better
         cp -a "${dst_dirpath}/${target_name}/bash_completion" "${dst_path}"
       fi
