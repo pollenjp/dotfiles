@@ -23,20 +23,20 @@ gfb() {
 	git fetch origin "$1:$1"
 }
 gfm() {
-	# git fetch the default branch (main/master)
-	# You can use this if current branch is not in the default branch
-	gfb "$(gdefault)"
+  # git fetch the default branch (main/master)
+  # You can use this if current branch is not in the default branch
+  gfb "$(gdefault)"
 }
 alias gm='git merge'
 alias gop='git checkout -p'
 alias gp='git push'
 function git_push_set_upstream() {
-	local remote=${1:-origin}
-	local git_branch_name
-	git_branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
-	if [[ -n ${git_branch_name} ]]; then
-		git push --set-upstream "${remote}" "${git_branch_name}"
-	fi
+  local remote=${1:-origin}
+  local git_branch_name
+  git_branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+  if [[ -n ${git_branch_name} ]]; then
+    git push --set-upstream "${remote}" "${git_branch_name}"
+  fi
 }
 alias gpup=git_push_set_upstream
 alias gfp='git fetch --prune && git pull'
@@ -71,19 +71,19 @@ alias gw='git switch'
 
 # if log start with 'WIP', then `git reset --soft` and commit with 'WIP'
 function git-commit-WIP() {
-	local msg=""
-	msg="$(git log -1 --format=%s | tr -d '\n')"
-	if [[ ${msg} =~ ^WIP ]]; then
-		git reset --soft HEAD~1
-		git commit -m "${msg}"
-	else
-		git commit -m "WIP: temporarily commit"
-	fi
+  local msg=""
+  msg="$(git log -1 --format=%s | tr -d '\n')"
+  if [[ ${msg} =~ ^WIP ]]; then
+    git reset --soft HEAD~1
+    git commit -m "${msg}"
+  else
+    git commit -m "WIP: temporarily commit"
+  fi
 }
 alias gwip=git-commit-WIP
 
 function c-func() {
-	git commit -m "$*"
+  git commit -m "$*"
 }
 # examples
 #   - $ c hello world
@@ -92,9 +92,9 @@ function c-func() {
 alias c='noglob c-func'
 
 function git-fetch-pull-rquest() {
-	set -u
-	local pr_num="${1}"
-	git fetch origin "pull/${pr_num}/head:pr${pr_num}"
+  set -u
+  local pr_num="${1}"
+  git fetch origin "pull/${pr_num}/head:pr${pr_num}"
 }
 
 alias gpr='git-fetch-pull-rquest'

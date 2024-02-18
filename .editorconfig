@@ -1,0 +1,9 @@
+root = true
+
+[*.{sh,bash,zsh}] # for shfmt
+indent_style = space
+indent_size = 2
+# -bn, --binary-next-line  binary ops like && and | may start a line
+binary_next_line = true
+case_indent = true
+switch_case_indent = true
