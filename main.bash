@@ -14,7 +14,7 @@ mkdir -p "${cache_dir}"
 
 shfmt_target_find_options=(-name "*.sh" -o -name "*.bash")
 
-# lint / format / setup を引数にとる
+# lint / fmt / setup を引数にとる
 # 例: ./main.sh lint
 main() {
   case "${1:-}" in
@@ -24,7 +24,7 @@ main() {
       find "${script_dir}"/* -type f "${shfmt_target_find_options[@]}" -print0 | xargs -0 -t -I{} shfmt -d {}
       popd &>/dev/null
       ;;
-    format)
+    fmt)
       pushd "${script_dir}" &>/dev/null
       while IFS= read -r filepath; do
         # bash は逐次読み込み実行なので安全にファイル内容を変更するためには inode を変更する必要がある (mv で inode を変更する)
@@ -80,7 +80,7 @@ main() {
         case ${uname_result} in
           Darwin | Linux)
             # if symlink exists, remove it
-            [[ -h ${dst_path} ]] && unlink "${dst_path}"
+            [[ -L ${dst_path} ]] && unlink "${dst_path}"
             ln -s "${src_path}" "${dst_path}"
             ;;
           MINGW* | MSYS* | CYGWIN*)
@@ -127,12 +127,12 @@ main() {
         cp -a "${dst_dirpath}/${target_name}/bash_completion" "${dst_path}"
       fi
       load_cmd=". ${dst_path}"
-      if ! grep "${load_cmd}" "${HOME}"/.bashrc &> /dev/null; then
+      if ! grep "${load_cmd}" "${HOME}"/.bashrc &>/dev/null; then
         {
           echo '# use bash-completion, if available'
           # shellcheck disable=SC2016
           echo '[[ ${PS1} && -f '"${dst_path}"' ]] && '"${load_cmd}"
-        } >> "${HOME}"/.bashrc
+        } >>"${HOME}"/.bashrc
       fi
 
       popd &>/dev/null
