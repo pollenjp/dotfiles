@@ -1,5 +1,8 @@
 # shellcheck shell=bash
 
+tmp=$(manpagh -g)
+export MANPATH="${tmp}"
+
 export HISTSIZE=10000
 export SAVEHIST=10000
 export HISTFILE=~/.shell_history
