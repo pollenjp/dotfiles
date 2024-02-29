@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 
-tmp=$(manpagh -g)
-export MANPATH="${tmp}"
+tmp=$(manpath -g)
+export MANPATH="${MANPATH}:${tmp}"
 
 export HISTSIZE=10000
 export SAVEHIST=10000
