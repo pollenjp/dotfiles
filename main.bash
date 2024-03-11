@@ -46,6 +46,8 @@ main() {
 
       src_files=(
         "${script_dir}/.config/starship.toml"
+        "${script_dir}/.config/nvim"
+        "${script_dir}/.config/pypoetry"
         "${script_dir}/.gitconfig"
         "${script_dir}/.gitignore_global"
         "${script_dir}/.tmux.conf"
@@ -53,11 +55,11 @@ main() {
         "${script_dir}/.config/zellij/config.kdl"
         "${script_dir}/.vimrc"
         "${script_dir}/.vim"
-        "${script_dir}/.config/nvim"
-        "${script_dir}/.config/pypoetry"
       )
       dst_files=(
         "${HOME}/.config/starship.toml"
+        "${HOME}/.config/nvim"
+        "${HOME}/.config/pypoetry"
         "${HOME}/.gitconfig"
         "${HOME}/.config/git/ignore"
         "${HOME}/.tmux.conf"
@@ -65,8 +67,6 @@ main() {
         "${HOME}/.config/zellij/config.kdl"
         "${HOME}/.vimrc"
         "${HOME}/.vim"
-        "${HOME}/.config/nvim"
-        "${HOME}/.config/pypoetry"
       )
       [[ ${#src_files[@]} -eq ${#dst_files[@]} ]] || {
         echo "Invalid length of src_files and dst_files"
@@ -81,6 +81,7 @@ main() {
           Darwin | Linux)
             # if symlink exists, remove it
             [[ -L ${dst_path} ]] && unlink "${dst_path}"
+            [[ -a ${dst_path} ]] && echo "Already exists ${dst_path}" && exit 1
             ln -s "${src_path}" "${dst_path}"
             ;;
           MINGW* | MSYS* | CYGWIN*)
