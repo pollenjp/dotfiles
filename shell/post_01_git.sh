@@ -16,16 +16,16 @@ alias gcm='git commit -m'
 alias gcp='git commit -p -v'
 alias gcpm='git commit -p -m'
 alias gf='git fetch --prune'
-alias gdefault="git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'"
+alias git-get-default-branch="git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'"
 alias f='git fetch'
-gfb() {
+git-fetch-branch() {
   # git fetch branch
-  git fetch origin "$1:$1"
+  git fetch origin "${1:?}:${1:?}"
 }
-gfm() {
+git-fetch-base() {
   # git fetch the default branch (main/master)
   # You can use this if current branch is not in the default branch
-  gfb "$(gdefault)"
+  git-fetch-branch "$(git-get-default-branch)"
 }
 alias gm='git merge'
 alias gop='git checkout -p'

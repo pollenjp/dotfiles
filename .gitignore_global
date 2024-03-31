@@ -4,3 +4,5 @@
 .python-version
 .ruby-version
 .secrets/
+*.code-workspace
+.vscode/
