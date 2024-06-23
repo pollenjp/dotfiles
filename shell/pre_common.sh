@@ -1,7 +1,9 @@
 # shellcheck shell=bash
 
-tmp=$(manpath -g)
-export MANPATH="${MANPATH}:${tmp}"
+if command -v manpath &>/dev/null; then
+  tmp=$(manpath -g)
+  export MANPATH="${MANPATH}:${tmp}"
+fi
 
 export HISTSIZE=10000
 export SAVEHIST=10000
