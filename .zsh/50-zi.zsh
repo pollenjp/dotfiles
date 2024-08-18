@@ -21,6 +21,7 @@ zi snippet OMZ::lib/termsupport.zsh
 
 zi snippet OMZL::git.zsh
 zi snippet OMZP::git
+zi snippet OMZP::asdf
 
 # zi snippet OMZL::theme-and-appearance.zsh
 # zi snippet OMZL::prompt_info_functions.zsh
