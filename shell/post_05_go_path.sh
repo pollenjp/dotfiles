@@ -1,13 +1,14 @@
 # shellcheck shell=bash
 
-bin_path="${HOME}/.local_go/go/bin"
-case ":${PATH}:" in
-  *:"${bin_path}":*) ;;
-  *)
-    # add path to the end
-    export PATH="$PATH:${bin_path}"
-    ;;
-esac
+# ※asdf に移行
+# bin_path="${HOME}/.local_go/go/bin"
+# case ":${PATH}:" in
+#   *:"${bin_path}":*) ;;
+#   *)
+#     # add path to the end
+#     export PATH="$PATH:${bin_path}"
+#     ;;
+# esac
 
 # insert path for GOPATH
 if command -v go &>/dev/null; then

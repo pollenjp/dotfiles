@@ -14,6 +14,7 @@ zi light zsh-users/zsh-completions
 zi snippet OMZ::lib/functions.zsh
 zi snippet OMZ::lib/clipboard.zsh
 zi snippet OMZ::lib/termsupport.zsh
+zi snippet OMZ::lib/termsupport.zsh
 
 #################
 # ohmyzsh theme #
@@ -35,3 +36,6 @@ setopt promptsubst
 # zi snippet OMZT::agnoster
 
 # zi snippet OMZP::gpg-agent
+
+# asdf
+zi snippet https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/asdf
