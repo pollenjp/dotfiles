@@ -36,6 +36,3 @@ setopt promptsubst
 # zi snippet OMZT::agnoster
 
 # zi snippet OMZP::gpg-agent
-
-# asdf
-zi snippet https://github.com/ohmyzsh/ohmyzsh/tree/master/plugins/asdf
