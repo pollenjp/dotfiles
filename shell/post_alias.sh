@@ -29,6 +29,39 @@ alias echo-PATH-grep="grep -o ""'[^:]*'"' <<<"$PATH"'
 
 alias ep=echo-PATH-tr
 
+####################
+# VSCode workspace #
+####################
+
+touch-vscode-workspace() {
+  local workspace_name="${1:-workspace}"
+  if [[ -z "${workspace_name}" ]]; then
+    echo "Usage: touch-vscode-workspace <workspace_name>"
+    return 1
+  fi
+  local workspace_file="${workspace_name}.code-workspace"
+  if [[ -f "${workspace_file}" ]]; then
+    echo "File already exists: ${workspace_file}"
+    return 1
+  fi
+  cat <<__EOF__ >"${workspace_file}"
+{
+  "folders": [
+    {
+      "path": "."
+    }
+  ],
+  "settings": {}
+}
+__EOF__
+}
+
+alias ws='touch-vscode-workspace "$(basename "$(pwd)")"'
+
+#######
+# SSH #
+#######
+
 # If `ssh-copy-id` is not installed, use this instead.
 # ssh_send_key_to_remote user@hostname
 function ssh-copy-id-custom() {
