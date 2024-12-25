@@ -1,41 +1,51 @@
 [user]
-	email = polleninjp@gmail.com
-	name = pollenjp
-[core]
-	editor = vim
-	quotepath = false
-	autocrlf = false
+    email = polleninjp@gmail.com
+    name = pollenjp
 
-	# for git-delta
-	pager = delta
+[includeIf "gitdir:~/workdir/github.com/pollenjp-sub"]
+    path = ~/dotfiles/.gitconfig.pollenjp-sub.github.com
+
+[core]
+    editor = vim
+    quotepath = false
+    autocrlf = false
+
+    # for git-delta
+    pager = delta
 
 [pager]
-	branch = false
+    branch = false
 [push]
-	default = simple
+    default = simple
 [alias]
-	co = checkout
-	br = branch
-	ci = commit
-	st = status
-	w  = switch
-	push-f = push --force-with-lease
+    co = checkout
+    br = branch
+    ci = commit
+    st = status
+    w  = switch
+    push-f = push --force-with-lease
 [init]
-	defaultBranch = main
+    defaultBranch = main
 
 [interactive]
-	diffFilter = delta --color-only
+    diffFilter = delta --color-only
 
 [delta]
-	# for git-delta
-	navigate = true
+    # for git-delta
+    navigate = true
 
 [merge]
-	# for git-delta
-	conflictstyle = diff3
+    # for git-delta
+    conflictstyle = diff3
 
 [diff]
-	# for git-delta
-	colorMoved = default
+    # for git-delta
+    colorMoved = default
 [pull]
-	rebase = false
+    rebase = false
+
+[filter "lfs"]
+    smudge = git-lfs smudge -- %f
+    process = git-lfs filter-process
+    required = true
+    clean = git-lfs clean -- %f
