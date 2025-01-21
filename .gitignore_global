@@ -5,4 +5,6 @@
 .ruby-version
 .secrets/
 *.code-workspace
+# used by like asdf
+.tool-version
 .vscode/
