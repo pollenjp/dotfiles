@@ -2,16 +2,18 @@
 
 # Funcs
 
-git-fetch-branch() {
+git_fetch_branch() {
   # git fetch branch
   git fetch origin "${1:?}:${1:?}"
 }
-git-fetch-base() {
+
+git_fetch_base() {
   # git fetch the default branch (main/master)
   # You can use this if current branch is not in the default branch
-  git-fetch-branch "$(git-get-default-branch)"
+  git_fetch_branch "$(git_get_default_branch)"
 }
-function git_push_set_upstream() {
+
+git_push_set_upstream() {
   local remote=${1:-origin}
   local git_branch_name
   git_branch_name=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
@@ -19,8 +21,9 @@ function git_push_set_upstream() {
     git push --set-upstream "${remote}" "${git_branch_name}"
   fi
 }
+
 # if log start with 'WIP', then `git reset --soft` and commit with 'WIP'
-function git-commit-WIP() {
+git_commit_WIP() {
   local msg=""
   msg="$(git log -1 --format=%s | tr -d '\n')"
   if [[ ${msg} =~ ^WIP ]]; then
@@ -29,6 +32,34 @@ function git-commit-WIP() {
   else
     git commit -m "WIP: temporarily commit"
   fi
+}
+
+git_branch_cleanup() {
+  main_branch=${1:-""}
+  if [[ -z "${main_branch}" ]]; then
+    main_branch=$(git_get_default_branch)
+  fi
+  git switch "${main_branch:?}" \
+    && git fetch --prune \
+    && git pull \
+    && git branch --merged | grep -v '\*' | grep -v "${main_branch:?}" | xargs git branch -d
+}
+
+git_branch_cleanup_force() {
+  main_branch=${1:-""}
+  if [[ -z "${main_branch}" ]]; then
+    main_branch=$(git_get_default_branch)
+  fi
+  git switch "${main_branch:?}" \
+    && git fetch --prune \
+    && git pull \
+    && git branch --merged | grep -v '\*' | grep -v "${main_branch:?}" | xargs git branch -D
+}
+
+git_fetch_pull_request() {
+  set -u
+  local pr_num="${1}"
+  git fetch origin "pull/${pr_num}/head:pr${pr_num}"
 }
 
 ##############
@@ -65,11 +96,11 @@ alias gls='gl --stat'
 alias glsp='gls -p'
 
 alias gm='git merge'
-alias git-get-default-branch="git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'"
+alias git_get_default_branch="git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'"
 alias gop='git checkout -p'
 alias gp='git push'
 alias gpf='git push --force-with-lease'
-alias gpup=git_push_set_upstream
+alias gpup='git_push_set_upstream'
 alias gpul='git pull'
 alias gpull='git pull'
 
@@ -79,7 +110,7 @@ alias gr='git restore'
 alias grs='git reset --soft'
 alias gs='git status'
 alias gst='git stash'
-alias gwip=git-commit-WIP
+alias gwip='git_commit_WIP'
 alias w='git switch'
 alias gw='git switch'
 
@@ -92,10 +123,4 @@ function c-func() {
 #     $ c !$
 alias c='noglob c-func'
 
-function git-fetch-pull-rquest() {
-  set -u
-  local pr_num="${1}"
-  git fetch origin "pull/${pr_num}/head:pr${pr_num}"
-}
-
-alias gpr='git-fetch-pull-rquest'
+alias gpr='git_fetch_pull_request'
