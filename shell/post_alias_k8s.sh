@@ -5,3 +5,4 @@
 ##################
 
 alias k=kubectl
+alias ksysex='kubectl --namespace=kube-system exec -i -t'
