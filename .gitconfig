@@ -4,10 +4,6 @@
 
 [includeIf "gitdir:~/workdir/github.com/pollenjp-sub"]
     path = ~/dotfiles/.gitconfig.pollenjp-sub.github.com
-[includeIf "gitdir:~/workdir/github.jp.klab.com/"]
-	path = .gitconfig.github.jp.klab.com
-[includeIf "gitdir:~/workdir/github.com/eden734/"]
-	path = .gitconfig.eden.github.com
 
 [core]
     editor = vim
