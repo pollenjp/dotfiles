@@ -1,6 +1,13 @@
 [user]
     email = polleninjp@gmail.com
     name = pollenjp
+    signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHadoX/gHyAg3k5ipU/eBJLx5edNSCN11OJJukvNIeEi
+
+[gpg]
+    format = ssh
+
+[commit]
+    gpgsign = true
 
 [includeIf "gitdir:~/workdir/github.com/pollenjp-sub"]
     path = ~/dotfiles/.gitconfig.pollenjp-sub.github.com
