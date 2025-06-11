@@ -10,7 +10,7 @@ zi light zsh-users/zsh-completions
 # ohmyzsh lib #
 ###############
 
-# <https://z.digitalclouds.dev/docs/getting_started/migration>
+# https://z.digitalclouds.dev/docs/getting_started/migration
 zi snippet OMZ::lib/functions.zsh
 zi snippet OMZ::lib/clipboard.zsh
 zi snippet OMZ::lib/termsupport.zsh
@@ -21,6 +21,8 @@ zi snippet OMZ::lib/termsupport.zsh
 #################
 
 zi snippet OMZL::git.zsh
+
+# https://github.com/ohmyzsh/ohmyzsh/wiki/Plugins
 zi snippet OMZP::git
 zi snippet OMZP::asdf
 
