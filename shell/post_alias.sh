@@ -8,6 +8,9 @@ alias e='exit'
 alias show_ports_netstat="netstat -tulpn"
 alias show_ports_ss="ss -ltnp"
 
+# return today's date in YYYY-MM-DD format
+alias today="date '+%Y-%m-%d'"
+
 #############
 # echo PATH #
 #############
