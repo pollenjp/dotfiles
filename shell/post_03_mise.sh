@@ -6,6 +6,7 @@
 
 if command -v mise &>/dev/null; then
   pkgs=(
+    ghq
     # bat command (cat alternative)
     cargo:bat
     # fd command (fd-find) (find alternative)
