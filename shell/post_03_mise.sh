@@ -20,7 +20,7 @@ if command -v mise &>/dev/null; then
   )
   #shellcheck disable=2016
   mise_use_script='mise use -g "$1" &>/dev/null || echo "Failed to install $1"'
-  printf "%s\n" "${pkgs[@]}" | xargs -P0 -I{} bash -c "$mise_use_script" _ {}
+  printf "%s\n" "${pkgs[@]}" | xargs -P1 -I{} bash -c "$mise_use_script" _ {}
 
   if command -v bat &>/dev/null; then alias cat='bat'; fi
   if command -v exa &>/dev/null; then alias ls='exa'; fi
