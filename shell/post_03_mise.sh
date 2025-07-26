@@ -6,6 +6,9 @@
 
 if command -v mise &>/dev/null; then
   pkgs=(
+    usage
+    # mise watch
+    watchexec
     ghq
     # bat command (cat alternative)
     cargo:bat
