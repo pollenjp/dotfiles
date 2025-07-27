@@ -9,6 +9,7 @@ if command -v mise &>/dev/null; then
     usage
     # mise watch
     watchexec
+    cargo-binstall
     ghq
     # bat command (cat alternative)
     cargo:bat
