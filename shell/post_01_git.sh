@@ -35,10 +35,7 @@ git_commit_WIP() {
 }
 
 git_branch_cleanup() {
-  main_branch=${1:-""}
-  if [[ -z "${main_branch}" ]]; then
-    main_branch=$(git_get_default_branch)
-  fi
+  main_branch=${1:-"$(git_get_default_branch)"}
   git switch "${main_branch:?}" \
     && git fetch --prune \
     && git pull \
@@ -46,14 +43,11 @@ git_branch_cleanup() {
 }
 
 git_branch_cleanup_force() {
-  main_branch=${1:-""}
-  if [[ -z "${main_branch}" ]]; then
-    main_branch=$(git_get_default_branch)
-  fi
+  main_branch=${1:-"$(git_get_default_branch)"}
   git switch "${main_branch:?}" \
     && git fetch --prune \
     && git pull \
-    && git branch --merged | grep -v '\*' | grep -v "${main_branch:?}" | xargs git branch -D
+    && git branch | grep -v '\*' | grep -v "${main_branch:?}" | xargs git branch -D
 }
 
 git_fetch_pull_request() {
