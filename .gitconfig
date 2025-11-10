@@ -6,6 +6,13 @@
 [gpg]
     format = ssh
 
+## DON'T COMMIT WITH UNCOMMENT
+##
+## Only for WSL
+## https://developer.1password.com/docs/ssh/integrations/wsl/#sign-git-commits-with-ssh
+#[gpg "ssh"]
+#  program = "/mnt/c/Users/polle/AppData/Local/1Password/app/8/op-ssh-sign-wsl"
+
 [commit]
     gpgsign = true
 

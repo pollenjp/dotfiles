@@ -44,35 +44,71 @@ main() {
       append_load_rc_line "${HOME}"/.bashrc "${HOME}"/dotfiles/.bashrc
       append_load_rc_line "${HOME}"/.zshrc "${HOME}"/dotfiles/.zshrc
 
-      src_files=(
+      file_pairs=(
+        #
         "${script_dir}/.config/starship.toml"
-        "${script_dir}/.config/nvim"
-        "${script_dir}/.config/pypoetry"
-        "${script_dir}/.gitconfig"
-        "${script_dir}/.gitignore_global"
-        "${script_dir}/.tmux.conf"
-        "${script_dir}/.screenrc"
-        "${script_dir}/.config/zellij/config.kdl"
-        "${script_dir}/.vimrc"
-        "${script_dir}/.vim"
-      )
-      dst_files=(
         "${HOME}/.config/starship.toml"
+        #
+        "${script_dir}/.config/nvim"
         "${HOME}/.config/nvim"
+        #
+        "${script_dir}/.config/pypoetry"
         "${HOME}/.config/pypoetry"
+        #
+        "${script_dir}/.gitconfig"
         "${HOME}/.gitconfig"
+        #
+        "${script_dir}/.gitignore_global"
         "${HOME}/.config/git/ignore"
+        #
+        "${script_dir}/.tmux.conf"
         "${HOME}/.tmux.conf"
+        #
+        "${script_dir}/.screenrc"
         "${HOME}/.screenrc"
+        #
+        "${script_dir}/.config/zellij/config.kdl"
         "${HOME}/.config/zellij/config.kdl"
+        #
+        "${script_dir}/.vimrc"
         "${HOME}/.vimrc"
+        #
+        "${script_dir}/.vim"
         "${HOME}/.vim"
       )
+
+      uname_result=$(uname)
+
+      ## When running on WSL, use ssh.exe and ssh-add.exe for using 1password
+      case ${uname_result} in
+        Linux)
+          if command -v ssh.exe &>/dev/null; then
+            file_pairs+=(
+              # ssh.exe
+              "${script_dir}/bin/ssh-wsl.sh"
+              "${HOME}/.local/bin/ssh"
+              # ssh-add.exe
+              "${script_dir}/bin/ssh-add-wsl.sh"
+              "${HOME}/.local/bin/ssh-add"
+            )
+          fi
+          ;;
+        *) ;;
+      esac
+
+      ## odd index: src, even index: dst (0-origin)
+      src_files=()
+      dst_files=()
+      for ((i = 0; i < ${#file_pairs[@]}; i += 2)); do
+        src_files+=("${file_pairs[i]}")
+        dst_files+=("${file_pairs[i + 1]}")
+      done
       [[ ${#src_files[@]} -eq ${#dst_files[@]} ]] || {
         echo "Invalid length of src_files and dst_files"
         exit 1
       }
-      uname_result=$(uname)
+
+      ## Create symlink or copy
       for ((i = 0; i < ${#src_files[@]}; i++)); do
         src_path="${src_files[i]}"
         dst_path="${dst_files[i]}"
@@ -114,7 +150,7 @@ main() {
         print_color "Append '${match_string}' to '${config_file}'"
       fi
 
-      # bash completion for win
+      # bash completion for linux or win (git-bash)
 
       dst_path="${cache_dir}/bash-completion/bash_completion"
       dst_dirpath="$(dirname "${dst_path}")"
