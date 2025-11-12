@@ -11,7 +11,7 @@
 ## Only for WSL
 ## https://developer.1password.com/docs/ssh/integrations/wsl/#sign-git-commits-with-ssh
 #[gpg "ssh"]
-#  program = "/mnt/c/Users/polle/AppData/Local/1Password/app/8/op-ssh-sign-wsl"
+#  program = "/mnt/c/Users/polle/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe"
 
 [commit]
     gpgsign = true
