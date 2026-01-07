@@ -93,6 +93,18 @@ main() {
             )
           fi
           ;;
+        MINGW*)
+          if command -v /c/Windows/System32/OpenSSH/ssh.exe &>/dev/null; then
+            file_pairs+=(
+              # ssh.exe
+              "${script_dir}/bin/ssh-git-for-win.sh"
+              "${HOME}/.local/bin/ssh"
+              # ssh-add.exe
+              "${script_dir}/bin/ssh-add-git-for-win.sh"
+              "${HOME}/.local/bin/ssh-add"
+            )
+          fi
+          ;;
         *) ;;
       esac
 
