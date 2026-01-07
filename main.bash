@@ -175,12 +175,12 @@ main() {
         # TODO: rsync may be better
         cp -a "${dst_dirpath}/${target_name}/bash_completion" "${dst_path}"
       fi
-      load_cmd=". ${dst_path}"
+      load_cmd=". \"${dst_path}\""
       if ! grep "${load_cmd}" "${HOME}"/.bashrc &>/dev/null; then
         {
           echo '# use bash-completion, if available'
           # shellcheck disable=SC2016
-          echo '[[ ${PS1} && -f '"${dst_path}"' ]] && '"${load_cmd}"
+          echo '[[ ${PS1} && -f '"\"${dst_path}"\"' ]] && '"${load_cmd}"
         } >>"${HOME}"/.bashrc
       fi
 

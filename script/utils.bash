@@ -27,7 +27,7 @@ append_load_rc_line() {
   load_file="$2"
   load_file=$(realpath "${load_file}")
 
-  load_cmd=". ${load_file}"
+  load_cmd=". \"${load_file}\""
   if [[ -f "${shell_rc_file}" ]] \
     && (grep "${load_cmd}" "${shell_rc_file}"); then
     print_color 'already exists'
@@ -40,7 +40,7 @@ append_load_rc_line() {
       # this_file はスクリプト内で算出する必要がある
       echo "this_file=${this_file}"
       # shellcheck disable=SC2016
-      echo 'if [[ "$(realpath "${this_file}")" != '"${load_file}"' ]]; then'
+      echo 'if [[ "$(realpath "${this_file}")" != '"\"${load_file}\""' ]]; then'
       echo "  ${load_cmd}"
       echo "fi"
     } >>"${shell_rc_file}"
