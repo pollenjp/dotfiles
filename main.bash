@@ -147,6 +147,11 @@ main() {
         esac
       done
 
+      # ssh dir
+      mkdir -p "${HOME}/.ssh"
+      chmod 700 "${HOME}/.ssh"
+      mkdir -p "${HOME}/.ssh/config.d"
+      chmod 700 "${HOME}/.ssh/config.d"
       # .ssh/config
       config_file="${HOME}"/.ssh/config
       match_string='Include ~/dotfiles/ssh_config'
