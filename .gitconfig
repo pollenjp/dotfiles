@@ -1,7 +1,7 @@
 [user]
     email = polleninjp@gmail.com
     name = pollenjp
-    signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHadoX/gHyAg3k5ipU/eBJLx5edNSCN11OJJukvNIeEi
+    signingkey = ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMZZSwWYHUfyagEoMGAA3RlTV5C8X+n2K02Y2pQAjMPI
 
 [gpg]
     format = ssh
