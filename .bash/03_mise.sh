@@ -7,7 +7,6 @@ if command -v mise &>/dev/null; then
 
   # completion
   # https://mise.jdx.dev/installing-mise.html#autocompletion
-  mise use -g usage >/dev/null 2>&1
   mkdir -p ~/.local/share/bash-completion/completions
   mise completion bash --include-bash-completion-lib > ~/.local/share/bash-completion/completions/mise
 fi

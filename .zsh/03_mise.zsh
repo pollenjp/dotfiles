@@ -5,6 +5,5 @@ if command -v mise &>/dev/null; then
 
   # completion
   # https://mise.jdx.dev/installing-mise.html#autocompletion
-  mise use -g usage >/dev/null 2>&1
   mise completion zsh >"${zsh_user_custom_fpath}/_mise"
 fi
