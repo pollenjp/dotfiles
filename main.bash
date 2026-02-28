@@ -93,8 +93,12 @@ main() {
             )
           fi
           ;;
+        # MSYS*
+        # MSYS は今のところダメそう
         MINGW*)
-          if command -v /c/Windows/System32/OpenSSH/ssh.exe &>/dev/null; then
+          if command -v /c/Windows/System32/OpenSSH/ssh.exe &>/dev/null \
+            || command -v "/c/Program Files/OpenSSH/ssh.exe" &>/dev/null \
+          ; then
             file_pairs+=(
               # ssh.exe
               "${script_dir}/bin/ssh-git-for-win.sh"
