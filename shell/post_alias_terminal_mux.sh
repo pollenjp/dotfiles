@@ -44,7 +44,9 @@ alias skill-sess=screen-kill-session
 
 alias z='SHELL=/usr/bin/zsh zellij'
 alias zss='z -s'
-alias zls='z list-sessions'
+function zls() {
+  z list-sessions | grep -v "EXITED"
+}
 alias za='z attach'
 alias zkill-session='z kill-session'
 alias zkill-all='z kill-all-sessions'
