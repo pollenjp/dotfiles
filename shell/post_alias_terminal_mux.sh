@@ -8,11 +8,7 @@
 # alias tss='tmux new -s'
 function tss() {
   session_name=${1:?}
-  _sh=bash
-  if command -v zsh &>/dev/null; then
-    _sh=zsh
-  fi
-  tmux new -s "${session_name}" "${_sh}"
+  tmux -f ~/dotfiles/tmux/interactive_shell.tmux.conf new  -s "${session_name}"
 }
 alias ta='tmux a -t'      # tmux attach session
 alias td='tmux detach -s' # tmux detach session

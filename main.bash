@@ -61,7 +61,7 @@ main() {
         "${script_dir}/.gitignore_global"
         "${HOME}/.config/git/ignore"
         #
-        "${script_dir}/.tmux.conf"
+        "${script_dir}/tmux/home.tmux.conf"
         "${HOME}/.tmux.conf"
         #
         "${script_dir}/.screenrc"
