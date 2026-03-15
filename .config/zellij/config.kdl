@@ -175,7 +175,8 @@ keybinds {
         bind "Ctrl s" { SwitchToMode "scroll"; }
     }
     shared_except "locked" "tab" {
-        bind "Ctrl k" { SwitchToMode "tab"; }
+        // use 'ctrl + k' in tmux (in zellij)
+        // bind "Ctrl k" { SwitchToMode "tab"; }
         bind "Ctrl t" { SwitchToMode "tab"; }
     }
     shared_except "locked" "pane" {

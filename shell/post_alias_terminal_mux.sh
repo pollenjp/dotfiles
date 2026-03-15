@@ -43,10 +43,25 @@ alias skill-sess=screen-kill-session
 ##################
 
 alias z='SHELL=/usr/bin/zsh zellij'
-alias zss='z -s'
-function zls() {
-  z list-sessions | grep -v "EXITED"
+function zss() {
+  session_name=${1:?}
+  # if detached session exists, attach to it
+  # else create a new session
+  if _session_line=$(zellij list-sessions | grep "${session_name}"); then
+    # if EXITED session exists, delete it and create a new session
+    if [[ ${_session_line} =~ "EXITED" ]]; then
+      zellij delete-session "${session_name}"
+      z -s "${session_name}"
+    else
+      echo "Already running! Run 'zellij attach ${session_name}' to attach to it."
+    fi
+  else
+    z -s "${session_name}"
+  fi
 }
+alias zls='z list-sessions'
 alias za='z attach'
-alias zkill-session='z kill-session'
+alias zkill='z kill-session'
 alias zkill-all='z kill-all-sessions'
+alias zdel='z delete-session'
+alias zdel-all='z delete-all-sessions'
