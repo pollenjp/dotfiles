@@ -45,6 +45,9 @@ if command -v mise &>/dev/null; then
     # ---
     node
     v24
+    # ---
+    zellij
+    latest
   )
   if (( ${#pkgs[@]} % 2 != 0 )); then
     echo "Error: 'pkgs' array length must be even." >&2
