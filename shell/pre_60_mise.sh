@@ -61,9 +61,9 @@ if command -v mise &>/dev/null; then
   for ((i=0; i<${#pkgs[@]}; i+=2)); do
     pkg="${pkgs[i]}"
     version="${pkgs[i+1]}"
-    if ! grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then
+    # Use `\` to prevent alias expansion when such like `source ~/.bashrc`
+    if ! \grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then
       sed -i '/\[tools\]/a '"\"${pkg}\" = \"${version}\"" "${mise_config_path}"
-      # echo "\"${pkg}\" = \"${version}\""
     fi
   done
   # unset 0-origin array
