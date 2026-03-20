@@ -42,7 +42,18 @@ alias skill-sess=screen-kill-session
 # alias (zellij) #
 ##################
 
-alias z='SHELL=/usr/bin/zsh zellij'
+function z() {
+  _shell_path=""
+  if _shell_path=$(command -v fish); then
+    : # do nothing
+  elif _shell_path=$(command -v zsh); then
+    : # do nothing
+  else
+    zellij "$@"
+  fi
+
+  SHELL="${_shell_path}" zellij "$@"
+}
 function zss() {
   session_name=${1:?}
   # if detached session exists, attach to it
