@@ -41,10 +41,10 @@ if command -q mise
         begin
             flock -x 3
             for i in (seq 1 (count $pkg_names))
-                set -l pkg $pkg_names[$i]
-                set -l version $pkg_versions[$i]
-                if not command grep -q -E "^[\"]?$pkg[\"]? =" $mise_config_path
-                    sed -i "/\[tools\]/a \"$pkg\" = \"$version\"" $mise_config_path
+                set -l _pkg $pkg_names[$i]
+                set -l _ver $pkg_versions[$i]
+                if not command grep -q -E "^[\"]?"$_pkg"[\"]? =" $mise_config_path
+                    sed -i '/\[tools\]/a "'"$_pkg"'" = "'"$_ver"'"' $mise_config_path
                 end
             end
         end 3>$lock_file
