@@ -40,13 +40,13 @@ if command -q mise
 
     # Set up alternative command aliases
     if command -q bat
-        alias cat bat
+        abbr cat bat
     end
-    if command -q exa
-        alias ls exa
+    if command -q eza
+        abbr ls eza
     end
     if command -q rg
-        alias grep rg
+        abbr grep rg
     end
 else
     echo "mise is not installed"

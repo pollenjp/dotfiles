@@ -61,50 +61,50 @@ end
 # alias (git) #
 ##############
 
-alias f 'git fetch'
-alias g git
-alias ga 'git add'
-alias gap 'git add -p'
-alias gb 'git branch'
-alias gc 'git commit -v'
-alias gca 'git commit -v -a'
-alias gcam 'git commit -v --amend'
-alias gcl 'git clone --recurse-submodules'
-alias gcm 'git commit -m'
-alias gcp 'git commit -p -v'
-alias gcpm 'git commit -p -m'
-alias gf 'git fetch --prune'
-alias gfp 'git fetch --prune && git pull'
+abbr f 'git fetch'
+abbr g git
+abbr ga 'git add'
+abbr gap 'git add -p'
+abbr gb 'git branch'
+abbr gc 'git commit -v'
+abbr gca 'git commit -v -a'
+abbr gcam 'git commit -v --amend'
+abbr gcl 'git clone --recurse-submodules'
+abbr gcm 'git commit -m'
+abbr gcp 'git commit -p -v'
+abbr gcpm 'git commit -p -m'
+abbr gf 'git fetch --prune'
+abbr gfp 'git fetch --prune && git pull'
 
 # git log
-alias gl 'git log'
-alias glo 'git log --oneline --decorate'
-alias glog 'git log --oneline --decorate --graph'
-alias gloga 'git log --oneline --decorate --graph --all'
-alias glf "git log --format='%C(auto)%h%Creset %G? %s'"
-alias glfg "git log --format='%C(auto)%h%Creset %G? %s' --graph"
-alias glfga "git log --format='%C(auto)%h%Creset %G? %s' --graph --all"
-alias gls 'git log --stat'
-alias glsp 'git log --stat -p'
+abbr gl 'git log'
+abbr glo 'git log --oneline --decorate'
+abbr glog 'git log --oneline --decorate --graph'
+abbr gloga 'git log --oneline --decorate --graph --all'
+abbr glf "git log --format='%C(auto)%h%Creset %G? %s'"
+abbr glfg "git log --format='%C(auto)%h%Creset %G? %s' --graph"
+abbr glfga "git log --format='%C(auto)%h%Creset %G? %s' --graph --all"
+abbr gls 'git log --stat'
+abbr glsp 'git log --stat -p'
 
-alias gm 'git merge'
-alias gop 'git checkout -p'
-alias gp 'git push'
-alias gpf 'git push --force-with-lease'
-alias gpup git_push_set_upstream
-alias gpul 'git pull'
-alias gpull 'git pull'
+abbr gm 'git merge'
+abbr gop 'git checkout -p'
+abbr gp 'git push'
+abbr gpf 'git push --force-with-lease'
+abbr gpup git_push_set_upstream
+abbr gpul 'git pull'
+abbr gpull 'git pull'
 
-alias gds 'git diff --staged'
-alias gg 'git grep'
-alias gr 'git restore'
-alias grs 'git reset --soft'
-alias gs 'git status'
-alias gst 'git stash --include-untracked'
-alias gstp 'git stash pop'
-alias gwip git_commit_WIP
-alias w 'git switch'
-alias gw 'git switch'
-alias c c-func
+abbr gds 'git diff --staged'
+abbr gg 'git grep'
+abbr gr 'git restore'
+abbr grs 'git reset --soft'
+abbr gs 'git status'
+abbr gst 'git stash --include-untracked'
+abbr gstp 'git stash pop'
+abbr gwip git_commit_WIP
+abbr w 'git switch'
+abbr gw 'git switch'
+abbr c c-func
 
-alias gpr git_fetch_pull_request
+abbr gpr git_fetch_pull_request
