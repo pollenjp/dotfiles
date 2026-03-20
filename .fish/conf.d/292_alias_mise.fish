@@ -1,3 +1,3 @@
-# Mise aliases
+# Mise abbreviations
 
-alias mr 'mise run'
+abbr mr 'mise run'

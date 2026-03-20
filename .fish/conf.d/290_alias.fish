@@ -1,16 +1,16 @@
-# General aliases
+# General abbreviations
 
-alias f 'cd ..'
-alias ff 'cd ../..'
-alias fff 'cd ../../..'
-alias ffff 'cd ../../../..'
-alias e exit
-alias show_ports_netstat 'netstat -tulpn'
-alias show_ports_ss 'ss -ltnp'
-alias H head
+abbr f 'cd ..'
+abbr ff 'cd ../..'
+abbr fff 'cd ../../..'
+abbr ffff 'cd ../../../..'
+abbr e exit
+abbr show_ports_netstat 'netstat -tulpn'
+abbr show_ports_ss 'ss -ltnp'
+abbr H head
 
 # return today's date in YYYY-MM-DD format
-alias today "date '+%Y-%m-%d'"
+abbr today "date '+%Y-%m-%d'"
 
 #############
 # echo PATH #
@@ -22,7 +22,7 @@ function echo-PATH --description 'Display PATH entries one per line'
     end
 end
 
-alias ep echo-PATH
+abbr ep echo-PATH
 
 ####################
 # VSCode workspace #
@@ -48,7 +48,7 @@ function touch-vscode-workspace --description 'Create a VSCode workspace file'
 }' >$workspace_file
 end
 
-alias ws 'touch-vscode-workspace (basename (pwd))'
+abbr ws 'touch-vscode-workspace (basename (pwd))'
 
 #######
 # SSH #
@@ -68,13 +68,12 @@ function datetime-format --description 'Print current datetime'
     printf "%s" (date "+%Y{$sep}%m{$sep}%d{$sep}%H%M%S")
 end
 
-alias cp 'cp -i'
-alias mv 'mv -i'
-alias vi vim
-alias LESS 'less -imMSR'
-alias watch 'watch '
+abbr cp 'cp -i'
+abbr mv 'mv -i'
+abbr vi vim
+abbr LESS 'less -imMSR'
 
-# Platform-specific ls aliases (only if exa not aliased)
+# Platform-specific ls aliases (chained, keep as alias)
 switch (uname)
     case Darwin
         alias ls 'command ls -G'
@@ -87,7 +86,7 @@ switch (uname)
         alias l 'ls -a -CF1 --group-directories-first'
 end
 
-alias ssh-agent-start 'exec ssh-agent $SHELL'
+abbr ssh-agent-start 'exec ssh-agent $SHELL'
 
 function hatch-env-find-python --description 'Find python in hatch env'
     echo (hatch env find $argv)/bin/python

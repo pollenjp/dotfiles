@@ -1,5 +1,5 @@
 ################
-# alias (tmux) #
+# tmux         #
 ################
 
 function tss --description 'tmux start session'
@@ -11,40 +11,40 @@ function tss --description 'tmux start session'
     tmux -f ~/dotfiles/tmux/interactive_shell.tmux.conf new -s $session_name
 end
 
-alias ta 'tmux a -t'
-alias td 'tmux detach -s'
-alias tkill-sess 'tmux kill-session'
-alias tls 'tmux ls'
-alias tls-panes 'tmux list-panes'
+abbr ta 'tmux a -t'
+abbr td 'tmux detach -s'
+abbr tkill-sess 'tmux kill-session'
+abbr tls 'tmux ls'
+abbr tls-panes 'tmux list-panes'
 
 function tmux-cwd --description 'Change tmux session directory'
     tmux command-prompt -I "$PWD" -p "New session dir:" "attach -c %1"
 end
 
-alias tchdir tmux-cwd
+abbr tchdir tmux-cwd
 
 ######################
-# alias (GNU Screen) #
+# GNU Screen         #
 ######################
 
-alias schdir 'screen -X eval "chdir $PWD"'
-alias slayout 'screen -X eval "layout save default"'
-alias sss 'screen -S'
-alias sls 'screen -ls'
-alias sa 'screen -r'
-alias sd 'screen -d'
+abbr schdir 'screen -X eval "chdir $PWD"'
+abbr slayout 'screen -X eval "layout save default"'
+abbr sss 'screen -S'
+abbr sls 'screen -ls'
+abbr sa 'screen -r'
+abbr sd 'screen -d'
 
 function screen-kill-session --description 'Kill a screen session'
     screen -X -S $argv[1] kill
 end
 
-alias skill-sess screen-kill-session
+abbr skill-sess screen-kill-session
 
 ##################
-# alias (zellij) #
+# zellij         #
 ##################
 
-alias z 'SHELL=/usr/bin/fish zellij'
+abbr z 'SHELL=/usr/bin/fish zellij'
 
 function zss --description 'zellij start session'
     set -l session_name $argv[1]
@@ -65,9 +65,9 @@ function zss --description 'zellij start session'
     end
 end
 
-alias zls 'z list-sessions'
-alias za 'z attach'
-alias zkill 'z kill-session'
-alias zkill-all 'z kill-all-sessions'
-alias zdel 'z delete-session'
-alias zdel-all 'z delete-all-sessions'
+abbr zls 'z list-sessions'
+abbr za 'z attach'
+abbr zkill 'z kill-session'
+abbr zkill-all 'z kill-all-sessions'
+abbr zdel 'z delete-session'
+abbr zdel-all 'z delete-all-sessions'
