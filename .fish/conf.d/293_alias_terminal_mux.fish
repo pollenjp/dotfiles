@@ -65,9 +65,9 @@ function zss --description 'zellij start session'
     end
 end
 
-abbr zls 'z list-sessions'
-abbr za 'z attach'
-abbr zkill 'z kill-session'
-abbr zkill-all 'z kill-all-sessions'
-abbr zdel 'z delete-session'
-abbr zdel-all 'z delete-all-sessions'
+abbr zls 'zellij list-sessions'
+abbr za 'zellij attach'
+abbr zkill 'zellij kill-session'
+abbr zkill-all 'zellij kill-all-sessions'
+abbr zdel 'zellij delete-session'
+abbr zdel-all 'zellij delete-all-sessions'
