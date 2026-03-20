@@ -44,6 +44,25 @@ main() {
       append_load_rc_line "${HOME}"/.bashrc "${HOME}"/dotfiles/.bashrc
       append_load_rc_line "${HOME}"/.zshrc "${HOME}"/dotfiles/.zshrc
 
+      # fish shell config
+      fish_config_dir="${HOME}/.config/fish"
+      fish_config_file="${fish_config_dir}/config.fish"
+      fish_load_file="${HOME}/dotfiles/.fish/config.fish"
+      mkdir -p "${fish_config_dir}"
+      touch "${fish_config_file}"
+      fish_load_cmd="source \"${fish_load_file}\""
+      if grep -q "${fish_load_cmd}" "${fish_config_file}" 2>/dev/null; then
+        print_color "fish: already exists"
+      else
+        print_color "fish: append"
+        {
+          echo "# Load dotfiles fish config"
+          echo "if test -f \"${fish_load_file}\""
+          echo "    ${fish_load_cmd}"
+          echo "end"
+        } >>"${fish_config_file}"
+      fi
+
       file_pairs=(
         #
         "${script_dir}/.config/starship.toml"
