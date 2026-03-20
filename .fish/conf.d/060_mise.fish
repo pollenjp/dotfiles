@@ -4,61 +4,49 @@
 
 if command -q mise
     set -l mise_config_path ~/.config/mise/config.toml
+    set -l pkgs \
+        cargo-binstall latest \
+        cargo:bat      latest \
+        cargo:exa      latest \
+        cargo:fd-find  latest \
+        cargo:procs    latest \
+        cargo:ripgrep  latest \
+        ghq            latest \
+        go             latest \
+        node           v24 \
+        starship       latest \
+        usage          latest \
+        watchexec      latest \
+        zellij         latest
 
-    if test -f $mise_config_path
-        set -l pkg_names \
-            usage \
-            watchexec \
-            cargo-binstall \
-            ghq \
-            "cargo:bat" \
-            "cargo:fd-find" \
-            "cargo:exa" \
-            "cargo:procs" \
-            "cargo:ripgrep" \
-            go \
-            node \
-            zellij
+    # Check array length
+    # Since package names and versions are managed in pairs, the number of elements must be even
+    if test (math (count $pkgs) % 2) -ne 0
+        echo "Error: 'pkgs' array length must be even." >&2
+        exit 1
+    end
 
-        set -l pkg_versions \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            latest \
-            v24 \
-            latest
-
-        # Use flock for concurrency safety (same as bash/zsh version)
-        set -l lock_file /tmp/mise_config_lock
-        touch $lock_file
-
-        begin
-            flock -x 3
-            for i in (seq 1 (count $pkg_names))
-                set -l _pkg $pkg_names[$i]
-                set -l _ver $pkg_versions[$i]
-                if not command grep -q -E "^[\"]?"$_pkg"[\"]? =" $mise_config_path
-                    sed -i '/\[tools\]/a "'"$_pkg"'" = "'"$_ver"'"' $mise_config_path
-                end
+    # Use flock for concurrency safety (same as bash/zsh version)
+    begin
+        flock -x 9
+        for i in (seq 1 2 (count $pkgs))
+            set -l _pkg $pkgs[$i]
+            set -l _ver $pkgs[(math $i + 1)]
+            if not command grep -q -E "^[\"]?"$_pkg"[\"]? =" $mise_config_path
+                sed -i '/\[tools\]/a "'"$_pkg"'" = "'"$_ver"'"' $mise_config_path
             end
-        end 3>$lock_file
+        end
+    end 9>/tmp/mise_config_lock
 
-        # Set up alternative command aliases
-        if command -q bat
-            alias cat bat
-        end
-        if command -q exa
-            alias ls exa
-        end
-        if command -q rg
-            alias grep rg
-        end
+    # Set up alternative command aliases
+    if command -q bat
+        alias cat bat
+    end
+    if command -q exa
+        alias ls exa
+    end
+    if command -q rg
+        alias grep rg
     end
 else
     echo "mise is not installed"
