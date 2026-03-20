@@ -5,19 +5,20 @@
 if command -q mise
     set -l mise_config_path ~/.config/mise/config.toml
     set -l pkgs \
-        cargo-binstall latest \
-        cargo:bat      latest \
-        cargo:exa      latest \
-        cargo:fd-find  latest \
-        cargo:procs    latest \
-        cargo:ripgrep  latest \
-        ghq            latest \
-        go             latest \
-        node           v24 \
-        starship       latest \
-        usage          latest \
-        watchexec      latest \
-        zellij         latest
+        cargo-binstall               latest \
+        cargo:bat                    latest \
+        cargo:eza                    latest \
+        cargo:fd-find                latest \
+        cargo:procs                  latest \
+        cargo:ripgrep                latest \
+        ghq                          latest \
+        github:fish-shell/fish-shell latest \
+        go                           latest \
+        node                         v24 \
+        starship                     latest \
+        usage                        latest \
+        watchexec                    latest \
+        zellij                       latest
 
     # Check array length
     # Since package names and versions are managed in pairs, the number of elements must be even
@@ -40,13 +41,13 @@ if command -q mise
 
     # Set up alternative command aliases
     if command -q bat
-        alias cat bat
+        abbr cat bat
     end
-    if command -q exa
-        alias ls exa
+    if command -q eza
+        abbr ls eza
     end
     if command -q rg
-        alias grep rg
+        abbr grep rg
     end
 else
     echo "mise is not installed"
