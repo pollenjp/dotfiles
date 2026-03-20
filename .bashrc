@@ -13,7 +13,7 @@ function debug_rc_file() {
 }
 
 # load pre-common settings
-for rc in ~/dotfiles/shell/pre_*.sh; do
+for rc in ~/dotfiles/shell/0[0-9][0-9]_*.sh; do
     debug_rc_file "${rc}"
     # shellcheck disable=SC1090
     . "${rc}"
@@ -27,7 +27,7 @@ for rc in ~/dotfiles/.bash/*.sh; do
 done
 
 # load post-common settings
-for rc in ~/dotfiles/shell/post_*.sh; do
+for rc in ~/dotfiles/shell/2[0-9][0-9]_*.sh; do
     debug_rc_file "${rc}"
     # shellcheck disable=SC1090
     . "${rc}"
