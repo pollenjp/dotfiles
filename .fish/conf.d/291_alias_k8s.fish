@@ -2,5 +2,5 @@
 # k8s/kubernetes #
 ##################
 
-alias k kubectl
-alias ksysex 'kubectl --namespace=kube-system exec -i -t'
+abbr k kubectl
+abbr ksysex 'kubectl --namespace=kube-system exec -i -t'
