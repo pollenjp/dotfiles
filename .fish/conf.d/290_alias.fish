@@ -73,18 +73,14 @@ abbr mv 'mv -i'
 abbr vi vim
 abbr LESS 'less -imMSR'
 
-# Platform-specific ls aliases (chained, keep as alias)
-switch (uname)
-    case Darwin
-        alias ls 'command ls -G'
-        alias ll 'ls -alhF'
-        alias l 'ls -a -CF1'
-    case Linux
-        alias ls 'command ls -F --color=auto --show-control-chars'
-        alias ll 'ls -alhF --group-directories-first'
-        alias la 'ls -A'
-        alias l 'ls -a -CF1 --group-directories-first'
-end
+# abbr ls 'ls --color=auto --group-directories-first -F'
+# abbr l  'ls --color=auto --group-directories-first -F -A'
+# abbr l  'ls --color=auto --group-directories-first -F -A -1'
+# abbr ll 'ls --color=auto --group-directories-first -F -A -l --header'
+abbr ls 'eza --group-directories-first -F'
+abbr la 'eza --group-directories-first -F -a'
+abbr ll 'eza --group-directories-first -F -a -l --header'
+abbr l  'eza --group-directories-first -F -a -1'
 
 abbr ssh-agent-start 'exec ssh-agent $SHELL'
 

@@ -93,16 +93,15 @@ alias vi='vim'
 alias LESS='less -imMSR'
 
 case "${OSTYPE}" in
-  darwin*) # macos
-    alias ls="ls -G"
-    alias ll='ls -alhF'
-    alias l='ls -a -CF1'
-    ;;
-  linux*)
-    alias ls='ls -F --color=auto --show-control-chars'
-    alias ll='ls -alhF --group-directories-first'
-    alias la='ls -A'
-    alias l='ls -a -CF1 --group-directories-first'
+  darwin* | linux*)
+    # alias ls='ls --color=auto --group-directories-first -F'
+    # alias la='ls --color=auto --group-directories-first -F -A'
+    # alias ll='ls --color=auto --group-directories-first -F -A -l --header'
+    # alias l='ls --color=auto --group-directories-first -F -A -1'
+    alias ls='eza --group-directories-first -F'
+    alias la='eza --group-directories-first -F -a'
+    alias ll='eza --group-directories-first -F -a -l --header'
+    alias l='eza --group-directories-first -F -a -1'
     ;;
   msys*) # windows
     alias ls='ls -F --color=auto --show-control-chars'
