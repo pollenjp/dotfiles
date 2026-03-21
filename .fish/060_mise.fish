@@ -13,6 +13,7 @@ else
     cargo:fd-find                latest \
     cargo:procs                  latest \
     cargo:ripgrep                latest \
+    fzf                          latest \
     ghq                          latest \
     github:fish-shell/fish-shell latest \
     go                           latest \
@@ -50,6 +51,9 @@ else
   end
   if command -q rg
     abbr grep rg
+  end
+  if command -q fzf
+    abbr fuz fzf
   end
 
   mise activate fish | source

@@ -45,23 +45,23 @@ main() {
       append_load_rc_line "${HOME}"/.zshrc "${HOME}"/dotfiles/.zshrc
 
       # fish shell config
-      fish_config_dir="${HOME}/.config/fish"
-      fish_config_file="${fish_config_dir}/config.fish"
-      fish_load_file="${HOME}/dotfiles/.fish/config.fish"
-      mkdir -p "${fish_config_dir}"
-      touch "${fish_config_file}"
-      fish_load_cmd="source \"${fish_load_file}\""
-      if grep -q "${fish_load_cmd}" "${fish_config_file}" 2>/dev/null; then
-        print_color "fish: already exists"
-      else
-        print_color "fish: append"
-        {
-          echo "# Load dotfiles fish config"
-          echo "if test -f \"${fish_load_file}\""
-          echo "    ${fish_load_cmd}"
-          echo "end"
-        } >>"${fish_config_file}"
-      fi
+      # fish_config_dir="${HOME}/.config/fish"
+      # fish_config_file="${fish_config_dir}/config.fish"
+      # fish_load_file="${HOME}/dotfiles/.fish/config.fish"
+      # mkdir -p "${fish_config_dir}"
+      # touch "${fish_config_file}"
+      # fish_load_cmd="source \"${fish_load_file}\""
+      # if grep -q "${fish_load_cmd}" "${fish_config_file}" 2>/dev/null; then
+      #   print_color "fish: already exists"
+      # else
+      #   print_color "fish: append"
+      #   {
+      #     echo "# Load dotfiles fish config"
+      #     echo "if test -f \"${fish_load_file}\""
+      #     echo "    ${fish_load_cmd}"
+      #     echo "end"
+      #   } >>"${fish_config_file}"
+      # fi
 
       file_pairs=(
         #
@@ -85,7 +85,13 @@ main() {
         #
         "${script_dir}/.screenrc"
         "${HOME}/.screenrc"
+        # fish
+        "${script_dir}/.config/fish/config.fish"
+        "${HOME}/.config/fish/config.fish"
         #
+        "${script_dir}/.config/fish/fish_plugins"
+        "${HOME}/.config/fish/fish_plugins"
+        # zellij
         "${script_dir}/.config/zellij/config.kdl"
         "${HOME}/.config/zellij/config.kdl"
         #
@@ -180,7 +186,7 @@ main() {
       match_string='Include ~/dotfiles/ssh_config'
       touch "${config_file}"
       chmod 600 "${config_file}"
-      if grep "${match_string}" "${config_file}" &>/dev/null; then
+      if \grep "${match_string}" "${config_file}" &>/dev/null; then
         print_color "Already exists '${match_string}' in '${config_file}'"
       else
         # 先頭に追加
@@ -204,7 +210,7 @@ main() {
         cp -a "${dst_dirpath}/${target_name}/bash_completion" "${dst_path}"
       fi
       load_cmd=". \"${dst_path}\""
-      if ! grep "${load_cmd}" "${HOME}"/.bashrc &>/dev/null; then
+      if ! \grep "${load_cmd}" "${HOME}"/.bashrc &>/dev/null; then
         {
           echo '# use bash-completion, if available'
           # shellcheck disable=SC2016

@@ -12,6 +12,7 @@ if command -v mise &>/dev/null; then
     cargo:fd-find                latest
     cargo:procs                  latest
     cargo:ripgrep                latest
+    fzf                          latest
     ghq                          latest
     github:fish-shell/fish-shell latest
     go                           latest
@@ -56,7 +57,7 @@ if command -v mise &>/dev/null; then
     flock -x 9
     mise install
     echo "== Done 'mise install' =="
-  } 9>/tmp/mise_install_lock &
+  } 9>/tmp/mise_install_lock
 else
   echo "mise is not installed"
 fi
