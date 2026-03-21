@@ -17,9 +17,9 @@ abbr today "date '+%Y-%m-%d'"
 #############
 
 function echo-PATH --description 'Display PATH entries one per line'
-    for p in $PATH
-        echo $p
-    end
+  for p in $PATH
+    echo $p
+  end
 end
 
 abbr ep echo-PATH
@@ -29,16 +29,16 @@ abbr ep echo-PATH
 ####################
 
 function touch-vscode-workspace --description 'Create a VSCode workspace file'
-    set -l workspace_name $argv[1]
-    if test -z "$workspace_name"
-        set workspace_name workspace
-    end
-    set -l workspace_file "$workspace_name.code-workspace"
-    if test -f $workspace_file
-        echo "File already exists: $workspace_file"
-        return 1
-    end
-    echo '{
+  set -l workspace_name $argv[1]
+  if test -z "$workspace_name"
+    set workspace_name workspace
+  end
+  set -l workspace_file "$workspace_name.code-workspace"
+  if test -f $workspace_file
+    echo "File already exists: $workspace_file"
+    return 1
+  end
+  echo '{
   "folders": [
     {
       "path": "."
@@ -55,17 +55,17 @@ abbr ws 'touch-vscode-workspace (basename (pwd))'
 #######
 
 function ssh-copy-id-custom --description 'Copy SSH key to remote host'
-    set -l pubkey_file ~/.ssh/id_ed25519.pub
-    set -l ssh_host $argv[1]
-    xargs -I{} ssh $ssh_host "echo {} >> .ssh/authorized_keys" <$pubkey_file
+  set -l pubkey_file ~/.ssh/id_ed25519.pub
+  set -l ssh_host $argv[1]
+  xargs -I{} ssh $ssh_host "echo {} >> .ssh/authorized_keys" <$pubkey_file
 end
 
 function datetime-format --description 'Print current datetime'
-    set -l sep $argv[1]
-    if test -z "$sep"
-        set sep -
-    end
-    printf "%s" (date "+%Y{$sep}%m{$sep}%d{$sep}%H%M%S")
+  set -l sep $argv[1]
+  if test -z "$sep"
+    set sep -
+  end
+  printf "%s" (date "+%Y$sep%m$sep%dT%H%M%S")
 end
 
 abbr cp 'cp -i'
@@ -85,5 +85,5 @@ abbr l  'eza --group-directories-first -F -a -1'
 abbr ssh-agent-start 'exec ssh-agent $SHELL'
 
 function hatch-env-find-python --description 'Find python in hatch env'
-    echo (hatch env find $argv)/bin/python
+  echo (hatch env find $argv)/bin/python
 end

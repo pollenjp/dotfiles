@@ -1,3 +1,3 @@
 if command -q starship
-    starship init fish | source
+  starship init fish | source
 end
