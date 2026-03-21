@@ -2,7 +2,9 @@
 # Alternative Commands #
 ########################
 
-if command -q mise
+if not command -q mise
+  echo "mise is not installed. Refer to 'https://mise.jdx.dev/'"
+else
   set -l mise_config_path ~/.config/mise/config.toml
   set -l pkgs \
     cargo-binstall               latest \
@@ -49,6 +51,12 @@ if command -q mise
   if command -q rg
     abbr grep rg
   end
-else
-  echo "mise is not installed"
+
+  mise activate fish | source
+  mise completion fish | source
+
+  begin
+    flock -x 9
+    mise install
+  end 9>/tmp/mise_install_lock
 end
