@@ -6,48 +6,20 @@
 
 if command -v mise &>/dev/null; then
   pkgs=(
-    # ---
-    usage
-    latest
-    # ---
-    # mise watch
-    watchexec
-    latest
-    # ---
-    cargo-binstall
-    latest
-    # ---
-    ghq
-    latest
-    # ---
-    # 'bat' is 'cat' alternative
-    cargo:bat
-    latest
-    # ---
-    # 'fd' is 'find' alternative
-    cargo:fd-find
-    latest
-    # ---
-    # 'exa' is 'ls' alternative
-    cargo:exa
-    latest
-    # ---
-    # 'procs' is 'ps' alternative
-    cargo:procs
-    latest
-    # ---
-    # 'rg' is 'grep' alternative
-    cargo:ripgrep
-    latest
-    # ---
-    go
-    latest
-    # ---
-    node
-    v24
-    # ---
-    zellij
-    latest
+    cargo-binstall               latest
+    cargo:bat                    latest
+    cargo:eza                    latest
+    cargo:fd-find                latest
+    cargo:procs                  latest
+    cargo:ripgrep                latest
+    ghq                          latest
+    github:fish-shell/fish-shell latest
+    go                           latest
+    node                         v24
+    starship                     latest
+    usage                        latest
+    watchexec                    latest
+    zellij                       latest
   )
   if (( ${#pkgs[@]} % 2 != 0 )); then
     echo "Error: 'pkgs' array length must be even." >&2
