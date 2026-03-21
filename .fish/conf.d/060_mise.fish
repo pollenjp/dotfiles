@@ -55,8 +55,10 @@ else
   mise activate fish | source
   mise completion fish | source
 
+  # FIXME: 'fish' wait for finishing process even if background
+  echo "== Running 'mise install' =="
   begin
     flock -x 9
     mise install
-  end 9>/tmp/mise_install_lock
+  end 9>/tmp/mise_install_lock &
 end

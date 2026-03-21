@@ -78,6 +78,13 @@ if command -v mise &>/dev/null; then
   if command -v bat &>/dev/null; then alias cat='bat'; fi
   if command -v exa &>/dev/null; then alias ls='exa'; fi
   if command -v rg &>/dev/null; then alias grep='rg'; fi
+
+  echo "== Running 'mise install' in background =="
+  {
+    flock -x 9
+    mise install
+    echo "== Done 'mise install' =="
+  } 9>/tmp/mise_install_lock &
 else
   echo "mise is not installed"
 fi
