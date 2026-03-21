@@ -23,6 +23,38 @@ end
 
 abbr tchdir tmux-cwd
 
+# multi-agent-shogun aliases (added by first_setup.sh)
+function css --description 'attach to shogun tmux session'
+  set -l s "shogun-$fish_pid"
+  set -l cols (tput cols 2>/dev/null; or echo 80)
+  tmux new-session -d -t shogun -s "$s" 2>/dev/null
+  and tmux set-option -t "$s" destroy-unattached on 2>/dev/null
+
+  if test "$cols" -lt 80
+    tmux new-window -t "$s" -n mobile 2>/dev/null
+    tmux attach-session -t "$s:mobile" 2>/dev/null
+    or tmux attach-session -t shogun
+  else
+    tmux attach-session -t "$s" 2>/dev/null
+    or tmux attach-session -t shogun
+  end
+end
+function csm --description 'attach to multiagent tmux session'
+  set -l s "multi-$fish_pid"
+  set -l cols (tput cols 2>/dev/null; or echo 80)
+  tmux new-session -d -t multiagent -s "$s" 2>/dev/null
+  and tmux set-option -t "$s" destroy-unattached on 2>/dev/null
+
+  if test "$cols" -lt 80
+    tmux new-window -t "$s" -n mobile 2>/dev/null
+    tmux attach-session -t "$s:mobile" 2>/dev/null
+    or tmux attach-session -t multiagent
+  else
+    tmux attach-session -t "$s" 2>/dev/null
+    or tmux attach-session -t multiagent
+  end
+end
+
 ######################
 # GNU Screen         #
 ######################
