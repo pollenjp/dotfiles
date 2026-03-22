@@ -1,5 +1,6 @@
 # Common PATH setup
 
+fish_add_path --prepend ~/bin
 fish_add_path --prepend ~/.local/bin
 
 # Enable vi mode
