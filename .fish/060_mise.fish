@@ -59,10 +59,18 @@ else
   mise activate fish | source
   mise completion fish | source
 
-  # FIXME: 'fish' wait for finishing process even if background
-  echo "== Running 'mise install' =="
-  begin
-    flock -x 9
-    mise install
-  end 9>/tmp/mise_install_lock &
+  # Run 'mise install' only once a day
+  if not set -q _mise_installing
+    set -l flag ~/.config/mise/.mise_last_install
+    begin
+      flock 9
+      if not test -f $flag; or test (math (date +%s) - (stat -c %Y $flag 2>/dev/null; or echo 0)) -gt 86400
+        # 再起防止 (mise install の中で再起的に呼ばれるため)
+        set -gx _mise_installing 1
+        mise install
+        set -e _mise_installing
+        touch $flag
+      end
+    end 9>$flag
+  end
 end

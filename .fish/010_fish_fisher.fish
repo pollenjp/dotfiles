@@ -1,21 +1,20 @@
-function fish_greeting
-  echo "Welcome back"
-  echo "Run following command to update fish plugins!"
+# suppress the greeting message
+set -g fish_greeting
 
-  set -l msg 'fisher update'
-
-  # msg のlength 分の `-` を表示
-  set_color normal
-  string repeat -n (string length -- "$msg") -
-
-  set_color yellow
-  echo $msg
-
-  # msg のlength 分の `-` を表示
-  set_color normal
-  string repeat -n (string length -- "$msg") -
+# Run 'fisher update' only once a day
+if not set -q _fisher_updating
+  set -l flag ~/.config/fish/.fisher_last_update
+  begin
+    flock 9
+    if not test -f $flag; or test (math (date +%s) - (stat -c %Y $flag 2>/dev/null; or echo 0)) -gt 86400
+      # 再起防止 (fisher update の中で再起的に呼ばれるため)
+      set -gx _fisher_updating 1
+      fisher update
+      set -e _fisher_updating
+      touch $flag
+    end
+  end 9>$flag
 end
-funcsave fish_greeting
 
 if not type -q fisher
   curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source
