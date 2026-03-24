@@ -1,6 +1,10 @@
 # suppress the greeting message
 set -g fish_greeting
 
+if not type -q fisher
+  curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source
+end
+
 # Run 'fisher update' only once a day
 if not set -q _fisher_updating
   set -l flag ~/.config/fish/.fisher_last_update
@@ -14,10 +18,6 @@ if not set -q _fisher_updating
       touch $flag
     end
   end 9>$flag
-end
-
-if not type -q fisher
-  curl -sL https://raw.githubusercontent.com/jorgebucaran/fisher/main/functions/fisher.fish | source
 end
 
 if type -q fzf_configure_bindings
