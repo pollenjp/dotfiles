@@ -7,6 +7,8 @@
 .ruby-version
 .secrets/
 *.code-workspace
+.tmp
+
 # used by like asdf
 .tool-version
 .vscode/
