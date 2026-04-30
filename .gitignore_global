@@ -8,7 +8,9 @@
 .secrets/
 *.code-workspace
 .tmp
+node_modules/
+.vscode/
+.claude/settings.local.json
 
 # used by like asdf
 .tool-version
-.vscode/
