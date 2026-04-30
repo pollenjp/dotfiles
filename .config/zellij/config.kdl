@@ -159,11 +159,15 @@ keybinds {
         bind "Alt o" { MoveTab "right"; }
         bind "Alt p" { TogglePaneInGroup; }
         bind "Alt Shift p" { ToggleGroupMarking; }
+        // Customize - use 'ctrl + q' to quit zellij (in zellij)
         bind "Ctrl q" { Quit; }
+        // Customize - use 'ctrl + j' to switch to tmux mode (in zellij)
         bind "Ctrl j" { SwitchToMode "Tmux"; }
     }
     shared_except "locked" "move" {
-        bind "Ctrl h" { SwitchToMode "move"; }
+        // Customize - release 'ctrl + h' in tmux (in zellij)
+        // bind "Ctrl h" { SwitchToMode "move"; }
+        unbind "Ctrl h"
     }
     shared_except "locked" "session" {
         bind "Ctrl o" { SwitchToMode "session"; }
@@ -229,7 +233,7 @@ keybinds {
     shared_among "session" "tmux" {
         bind "d" { Detach; }
     }
-    // Behavior within Tmux mode (operational feel after the tmux prefix)
+    // Customize - Behavior within Tmux mode (operational feel after the tmux prefix)
     tmux {
         bind "left" { MoveFocus "left"; SwitchToMode "normal"; }
         bind "down" { MoveFocus "down"; SwitchToMode "normal"; }
