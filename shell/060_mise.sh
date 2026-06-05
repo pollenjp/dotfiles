@@ -37,10 +37,10 @@ if command -v mise &>/dev/null; then
   for ((i=0; i<${#pkgs[@]}; i+=2)); do
     pkg="${pkgs[i]}"
     version="${pkgs[i+1]}"
-    # config.toml がなければ [tools] セクションとともに作成する
+    # config.toml がなければテンプレートを初期ファイルとしてコピーする
     if [ ! -f "${mise_config_path}" ]; then
       mkdir -p "$(dirname "${mise_config_path}")"
-      printf '[tools]\n' > "${mise_config_path}"
+      cp ~/dotfiles/.config_tmpl/mise/config.toml "${mise_config_path}"
     fi
     # Use `\` to prevent alias expansion when such like `source ~/.bashrc`
     if ! \grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then

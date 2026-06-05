@@ -36,10 +36,10 @@ else
     for i in (seq 1 2 (count $pkgs))
       set -l _pkg $pkgs[$i]
       set -l _ver $pkgs[(math $i + 1)]
-      # config.toml がなければ [tools] セクションとともに作成する
+      # config.toml がなければテンプレートを初期ファイルとしてコピーする
       if not test -f $mise_config_path
         mkdir -p (dirname $mise_config_path)
-        printf '[tools]\n' > $mise_config_path
+        cp ~/dotfiles/.config_tmpl/mise/config.toml $mise_config_path
       end
       if not command grep -q -E "^[\"]?"$_pkg"[\"]? =" $mise_config_path
         sed -i '/\[tools\]/a "'"$_pkg"'" = "'"$_ver"'"' $mise_config_path

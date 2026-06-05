@@ -1,0 +1,6 @@
+[settings]
+install_before = "9d"
+lockfile = true
+
+[tools]
+"usage" = "latest"
