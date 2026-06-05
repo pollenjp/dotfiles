@@ -27,8 +27,6 @@ if command -v mise &>/dev/null; then
     exit 1
   fi
   mise_config_path=~/.config/mise/config.toml
-  mkdir -p "$(dirname "${mise_config_path}")"
-  [ -f "${mise_config_path}" ] || touch "${mise_config_path}"
 
   # 複数シェルを同時起動した時に競合するため lock を取る
   exec 3<> /tmp/mise_config_lock  # open file as '3' descriptor
@@ -39,6 +37,11 @@ if command -v mise &>/dev/null; then
   for ((i=0; i<${#pkgs[@]}; i+=2)); do
     pkg="${pkgs[i]}"
     version="${pkgs[i+1]}"
+    # config.toml がなければ [tools] セクションとともに作成する
+    if [ ! -f "${mise_config_path}" ]; then
+      mkdir -p "$(dirname "${mise_config_path}")"
+      printf '[tools]\n' > "${mise_config_path}"
+    fi
     # Use `\` to prevent alias expansion when such like `source ~/.bashrc`
     if ! \grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then
       sed -i '/\[tools\]/a '"\"${pkg}\" = \"${version}\"" "${mise_config_path}"
