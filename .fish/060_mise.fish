@@ -6,6 +6,8 @@ if not command -q mise
   echo "mise is not installed. Refer to 'https://mise.jdx.dev/'"
 else
   set -l mise_config_path ~/.config/mise/config.toml
+  mkdir -p (dirname $mise_config_path)
+  test -f $mise_config_path; or touch $mise_config_path
   set -l pkgs \
     cargo-binstall               latest \
     cargo:bat                    latest \
