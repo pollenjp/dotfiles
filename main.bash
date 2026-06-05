@@ -94,6 +94,9 @@ main() {
         # zellij
         "${script_dir}/.config/zellij/config.kdl"
         "${HOME}/.config/zellij/config.kdl"
+        # mise
+        "${script_dir}/.config/mise/mise.toml"
+        "${HOME}/.config/mise/mise.toml"
         #
         "${script_dir}/.vimrc"
         "${HOME}/.vimrc"
