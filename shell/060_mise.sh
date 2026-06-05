@@ -27,6 +27,8 @@ if command -v mise &>/dev/null; then
     exit 1
   fi
   mise_config_path=~/.config/mise/config.toml
+  mkdir -p "$(dirname "${mise_config_path}")"
+  [ -f "${mise_config_path}" ] || touch "${mise_config_path}"
 
   # 複数シェルを同時起動した時に競合するため lock を取る
   exec 3<> /tmp/mise_config_lock  # open file as '3' descriptor
