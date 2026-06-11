@@ -1,6 +1,7 @@
 [settings]
 install_before = "9d"
 lockfile = true
+fetch_remote_versions_timeout = "14d"
 
 [tools]
 "usage" = "latest"
