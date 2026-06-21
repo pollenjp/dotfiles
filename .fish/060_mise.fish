@@ -17,6 +17,7 @@ else
     ghq                          latest \
     github:fish-shell/fish-shell latest \
     go                           latest \
+    jq                           latest \
     node                         v24 \
     starship                     latest \
     usage                        latest \
