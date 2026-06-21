@@ -16,6 +16,7 @@ if command -v mise &>/dev/null; then
     ghq                          latest
     github:fish-shell/fish-shell latest
     go                           latest
+    jq                           latest
     node                         v24
     starship                     latest
     usage                        latest
