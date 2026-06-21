@@ -14,3 +14,17 @@ end
 function mise_lock_to_current_global --description 'Pin current tool versions to global mise config'
     _mise_lock_to_current -g
 end
+
+# mise install (060_mise.fish) の後、現在のツールバージョンをグローバル設定へ
+# 1 日 1 回だけ pin する。読み込み順 (060_mise.fish → 252_alias_mise.fish) により
+# mise install の完了後に実行される。
+# フラグ (mtime) で 1 日 1 回、flock で多重起動時の競合を制御する。
+begin
+    set -l _lock_flag ~/.config/mise/.mise_last_lock
+    flock -x 9
+    if not test -f $_lock_flag; or test (math (date +%s) - (stat -c %Y $_lock_flag 2>/dev/null; or echo 0)) -gt 86400
+        echo "== Pinning current mise tool versions to global config =="
+        mise_lock_to_current_global
+        touch $_lock_flag
+    end
+end 9>/tmp/mise_lock_to_current_lock
