@@ -1,0 +1,30 @@
+{{ if eq .chezmoi.os "windows" -}}
+#!/usr/bin/env bash
+# wrapper for using the 1Password ssh client on git-for-windows (MINGW)
+set -eu -o pipefail
+
+candidates=(
+  "/c/Program Files/OpenSSH/ssh-add.exe"
+  "/c/Windows/System32/OpenSSH/ssh-add.exe"
+)
+
+for _ssh_path in "${candidates[@]}"; do
+  if command -v "${_ssh_path}" &>/dev/null; then
+    exec "${_ssh_path}" "$@"
+  fi
+done
+
+echo "ERROR: ssu not found" >&2
+exit 1
+{{ else -}}
+#!/usr/bin/env bash
+# wrapper for using the 1Password ssh client on WSL
+set -eu -o pipefail
+
+use_linux_ssh="${USE_LINUX_SSH:-"0"}"
+if [[ "${use_linux_ssh}" == "0" ]]; then
+  exec ssh-add.exe "$@"
+else
+  exec /usr/bin/ssh-add "$@"
+fi
+{{ end -}}

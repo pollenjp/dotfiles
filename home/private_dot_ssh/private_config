@@ -1,0 +1,7 @@
+# Managed by chezmoi (~/.ssh/config).
+#
+# Shared private entries come from the dotfiles-ssh repo, cloned to
+# ~/.ssh/dotfiles-ssh by chezmoi externals. Machine-local entries go in
+# ~/.ssh/config.d/*.ssh_config (not tracked by the dotfiles repository).
+Include ~/.ssh/dotfiles-ssh/*.ssh_config
+Include ~/.ssh/config.d/*.ssh_config

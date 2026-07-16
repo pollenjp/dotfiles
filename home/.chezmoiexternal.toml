@@ -1,0 +1,21 @@
+# Managed external files. See https://www.chezmoi.io/reference/special-files/chezmoiexternal-format/
+#
+# Refresh on demand with:  chezmoi apply --refresh-externals
+# Skip entirely with:      chezmoi apply --exclude=externals
+
+# bash-completion library (sourced from ~/.bashrc when $PS1 is set).
+[".local/share/bash-completion-src"]
+    type = "archive"
+    url = "https://github.com/scop/bash-completion/releases/download/2.11/bash-completion-2.11.tar.xz"
+    stripComponents = 1
+    refreshPeriod = "168h"
+
+# Private ssh configs (previously the `.ssh` git submodule -> dotfiles-ssh).
+# Cloned over SSH, so the machine needs an authorized key first
+# (e.g. the 1Password SSH agent). If the clone fails, the rest of
+# `chezmoi apply` still succeeds; re-run once the key is available, or use
+# `chezmoi apply --exclude=externals` to skip it.
+[".ssh/dotfiles-ssh"]
+    type = "git-repo"
+    url = "git@github.com:pollenjp/dotfiles-ssh.git"
+    refreshPeriod = "168h"

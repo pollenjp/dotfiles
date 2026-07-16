@@ -1,0 +1,13 @@
+{{- /* The 1Password ssh/ssh-add wrappers are only useful on WSL or Windows. */ -}}
+{{- $wsl := false -}}
+{{- if eq .chezmoi.os "linux" -}}
+{{-   if .chezmoi.kernel.osrelease -}}
+{{-     if contains "microsoft" (lower .chezmoi.kernel.osrelease) -}}
+{{-       $wsl = true -}}
+{{-     end -}}
+{{-   end -}}
+{{- end -}}
+{{- if not (or (eq .chezmoi.os "windows") $wsl) }}
+.local/bin/ssh
+.local/bin/ssh-add
+{{- end }}

@@ -1,0 +1,49 @@
+# shellcheck shell=bash
+
+function debug_rc_file() {
+    local rc="${1}"
+    if [ -z "${rc}" ]; then
+        printf "arguments are not set."
+        exit 1
+    fi
+
+    if [[ -o login ]]; then
+        printf "%s\n" "${rc}"
+    fi
+}
+
+# load pre-common settings
+for rc in ~/.config/shell/0[0-9][0-9]_*.sh; do
+    debug_rc_file "${rc}"
+    # shellcheck disable=SC1090
+    . "${rc}"
+done
+
+# load shell-specific settings
+for rc in ~/.config/bash/*.sh; do
+    debug_rc_file "${rc}"
+    # shellcheck disable=SC1090
+    . "${rc}"
+done
+
+# load post-common settings
+for rc in ~/.config/shell/2[0-9][0-9]_*.sh; do
+    debug_rc_file "${rc}"
+    # shellcheck disable=SC1090
+    . "${rc}"
+done
+
+common_shellrc="${HOME}"/.common_shellrc.sh
+if ! [ -f "${common_shellrc}" ]; then
+    touch "${common_shellrc}"
+fi
+
+# shellcheck disable=SC1090
+. "${common_shellrc}"
+
+# use bash-completion, if available
+# (installed via chezmoi external into ~/.local/share/bash-completion-src)
+_bash_completion_file="${HOME}/.local/share/bash-completion-src/bash_completion"
+# shellcheck disable=SC1090
+[[ ${PS1:-} && -f ${_bash_completion_file} ]] && . "${_bash_completion_file}"
+unset _bash_completion_file

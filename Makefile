@@ -3,16 +3,8 @@ export
 
 .DEFAULT_GOAL := help
 
-.PHONY: clean
-clean:  ## remove generated symbolic links
-	-unlink "$${HOME}"/.tmux.conf
-	-unlink "$${HOME}"/.config/git/ignore
-	-unlink "$${HOME}"/.config/nvim
-	-unlink "$${HOME}"/.vim
-
-####################
-# Set Config files #
-####################
+# NOTE: dotfiles の配置・削除は chezmoi が担当します (README.md 参照)。
+#       例: chezmoi apply / chezmoi diff / chezmoi managed
 
 #########
 # Utils #

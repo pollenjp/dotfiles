@@ -1,0 +1,2 @@
+# Placeholder so chezmoi creates ~/.ssh/config.d/ (0700).
+# Drop machine-local *.ssh_config files here; they are not tracked by the repo.
