@@ -1,0 +1,42 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #666666
+}
+title 変更後: chezmoi による宣言的な配置（<color:#C62828>赤い部分が新規／変更点</color>）
+
+rectangle "リポジトリ" as repo #F5F5F5 {
+  rectangle ".chezmoiroot\n→ home/ をソースルートに指定" as root #FFCDD2
+  rectangle "home/ (chezmoi ソース)\ndot_* / private_* / create_* / *.tmpl" as src #FFCDD2
+  rectangle "main.bash\n(lint / fmt 専用に縮小)" as main
+}
+
+rectangle "chezmoi エンジン\n(apply / diff / verify)" as engine #EF9A9A
+
+rectangle "$HOME" as home #F5F5F5 {
+  rectangle "~/.bashrc, ~/.zshrc\n（本体を管理）" as rc
+  rectangle "~/.config/{shell,bash,zsh,\nfish,mise,git,tmux,...}\n（~/.config に集約）" as cfg #FFCDD2
+  rectangle "~/.ssh/config （private_, 0600）\n+ ~/.ssh/config.d/" as ssh #FFCDD2
+  rectangle "~/.local/bin/ssh, ssh-add\n（WSL / Windows のみ）" as wrap #FFCDD2
+}
+
+cloud "GitHub (git-repo) /\nアーカイブ" as extsrc
+
+root --> src
+src --> engine : chezmoi apply
+engine --> rc
+engine --> cfg
+engine --> ssh
+engine --> wrap
+engine ..> extsrc : <color:#C62828>.chezmoiexternal</color>
+extsrc ..> home : bash-completion /\ndotfiles-ssh を取得
+
+note right of engine #FFF9C4
+・テンプレート (*.tmpl) で OS 差を吸収
+・create_ で初回のみシード（以後不変）
+・.chezmoiignore で OS 別に配置除外
+・差分だけを適用（宣言的・冪等）
+end note
+@enduml

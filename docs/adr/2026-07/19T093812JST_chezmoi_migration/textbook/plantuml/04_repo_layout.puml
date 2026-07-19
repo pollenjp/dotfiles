@@ -1,0 +1,28 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+title リポジトリ構成（chezmoi ソースツリー）
+
+folder "リポジトリ (clone 先 = chezmoi ソースルート)" {
+  file ".chezmoiroot\n… home/ をソースルートに指定" as root #FFF9C4
+  folder "home/  … この配下が ~ に展開される" as home #E3F2FD {
+    file "dot_bashrc / dot_zshrc / dot_vimrc\ndot_screenrc / dot_tmux.conf"
+    file "dot_gitconfig.tmpl\n… OS 別テンプレート"
+    folder "dot_config/  → ~/.config/" {
+      file "shell/ bash/ zsh/\nfish/(fragments/) vim_common/ tmux/"
+      file "mise/create_config.toml\n… 初回のみ生成"
+      file "git/ignore, nvim/,\nstarship.toml, zellij/, pypoetry/"
+    }
+    folder "private_dot_ssh/  → ~/.ssh (0700/0600)" {
+      file "private_config, config.d/"
+    }
+    file ".chezmoiexternal.toml\n… bash-completion / dotfiles-ssh"
+    file ".chezmoiignore\n… OS 別の配置除外"
+  }
+  folder "chezmoi 管理外（開発用にリポジトリ直下へ残す）" as dev #F5F5F5 {
+    file "main.bash (lint/fmt), Makefile,\nREADME.md, p10k/, dev-tools/, script/"
+  }
+}
+
+root ..> home : 参照
+@enduml

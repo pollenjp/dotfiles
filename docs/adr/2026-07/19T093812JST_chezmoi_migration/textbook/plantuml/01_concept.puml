@@ -1,0 +1,19 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+title chezmoi の中心概念: 3 つの「状態」
+
+rectangle "① ソース状態\n(source state)\n\nGit 管理下の home/\ndot_zshrc, *.tmpl ..." as source #E3F2FD
+rectangle "② ターゲット状態\n(target state)\n\nテンプレート/属性を解決した\n「あるべき ~ の姿」" as target #FFF9C4
+rectangle "③ 配置先状態\n(destination state)\n\n実際の $HOME" as dest #E8F5E9
+
+source -right-> target : 計算\n(テンプレート展開・属性解決)
+target -right-> dest : chezmoi apply\n(差分だけ書き込み)
+dest -[#999]up-> source : chezmoi add\n(既存ファイルを取り込む)
+
+note bottom of target
+chezmoi は「あるべき姿(②)」を毎回計算し、
+現状(③)との差分だけを適用する。
+→ 何度実行しても同じ結果（冪等）
+end note
+@enduml

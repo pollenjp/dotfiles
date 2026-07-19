@@ -1,0 +1,39 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam rectangle {
+  BackgroundColor #FFFFFF
+  BorderColor #666666
+}
+title 変更前: 独自スクリプト (./main.bash setup) による手続き的な配置
+
+rectangle "リポジトリ (~/dotfiles)" as repo #F5F5F5 {
+  rectangle "main.bash setup\n（手続き的）" as setup #FFE0B2
+  rectangle "シェル設定\nshell/ .bash/ .zsh/ .fish/" as frags
+  rectangle ".gitconfig / .vimrc\n.config/ など" as dots
+  rectangle ".ssh\n(git submodule)" as sub
+  rectangle ".config_tmpl/mise\n(テンプレート)" as misetmpl
+}
+
+rectangle "$HOME" as home #F5F5F5 {
+  rectangle "~/.bashrc, ~/.zshrc\n（source 行を追記）" as rc
+  rectangle "~/.tmux.conf, ~/.gitconfig,\n~/.config/... （symlink / copy）" as links
+  rectangle "~/dotfiles/.cache/\nbash-completion" as cache
+}
+
+cloud "GitHub\nReleases" as gh
+
+setup --> rc : 追記
+setup --> links : ln -s / cp\n(OS で分岐)
+setup --> cache : curl + tar
+gh ..> cache : tarball を DL
+links ..> frags : ~/dotfiles/... を source
+sub ..> links : Include\n~/dotfiles/.ssh/*.ssh_config
+misetmpl ..> links : 初回のみ cp
+
+note bottom of setup #FFF9C4
+OS 判定・symlink/copy・rc 追記・
+chmod・curl を すべてスクリプトで実行。
+配置先は $HOME 各所に散在。
+end note
+@enduml

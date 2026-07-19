@@ -1,0 +1,22 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+title 命名規約: ソース名から配置先・属性が決まる
+
+map "home/ のソース名  →  配置先" as m {
+ dot_zshrc => ~/.zshrc
+ dot_gitconfig.tmpl => ~/.gitconfig （テンプレート展開）
+ dot_config/mise/create_config.toml => ~/.config/mise/config.toml
+ create_dot_common_shellrc.sh => ~/.common_shellrc.sh （初回のみ生成）
+ private_dot_ssh/private_config => ~/.ssh/config （0600）
+ executable_ssh.tmpl => ~/.local/bin/ssh （実行可＋展開）
+ empty_dot_gitkeep => ~/.gitkeep （空ファイルも保持）
+}
+
+note bottom of m
+接頭辞が「属性」を表す:
+dot_ = 先頭ドット / private_ = 0600 /
+create_ = 無ければ作成し以後不変 /
+executable_ = 実行権限 / 末尾 .tmpl = テンプレート
+end note
+@enduml

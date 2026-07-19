@@ -1,0 +1,35 @@
+@startuml
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+title chezmoi apply のながれ（初回導入）
+
+actor "ユーザー" as u
+participant "chezmoi" as c
+database "ソース\n(home/)" as s
+participant "外部\n(GitHub 等)" as e
+collections "$HOME" as h
+
+u -> c : chezmoi init pollenjp
+activate c
+c -> s : リポジトリを clone\n(.chezmoiroot を読み home/ を採用)
+deactivate c
+
+u -> c : chezmoi diff
+activate c
+c -> s : ソース状態を読む
+c -> c : テンプレート展開\n属性(dot_/private_/create_)を解決
+c --> u : 適用される差分を表示
+deactivate c
+
+u -> c : chezmoi apply
+activate c
+c -> e : .chezmoiexternal を取得\n(bash-completion / dotfiles-ssh)
+c -> h : 差分を書き込み\ncreate_ は「無ければ」作成
+c --> u : 完了（以後は冪等）
+deactivate c
+
+note over u,h
+確認 (diff) → 適用 (apply) の 2 段構えで
+「壊す前に見る」ことができる
+end note
+@enduml
