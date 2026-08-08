@@ -1,0 +1,60 @@
+# format = """
+# $all
+# $character"""
+# format = '''
+format = """
+[┌](bold green)$time $username@$hostname $all
+[│](bold green)$git_branch\
+$git_commit\
+$git_state\
+$git_metrics\
+$git_status
+[└](bold green) $directory
+$shell$character"""
+
+add_newline = false
+
+[directory] # <https://starship.rs/config/#directory>
+truncation_length = 0
+truncate_to_repo = false
+before_repo_root_style = 'bold fg:white bg:#0000ff'
+repo_root_style = 'bold fg:black bg:#6495ed'
+
+[git_branch]
+# always_show_remote = true
+
+[git_metrics]
+disabled = false
+
+[hostname]
+ssh_only = false
+format = '[$hostname]($style)$ssh_symbol'
+# ssh_symbol = '🌐'
+ssh_symbol = '🌏'
+
+[kubernetes]
+disabled = false
+
+[line_break]
+disabled = true
+
+[localip]
+ssh_only = false
+disabled = false
+
+[python]
+disabled = true
+
+[shell]
+disabled = false
+
+[sudo]
+disabled = false
+
+[time]
+disabled = false
+format = '🕙[\[$time\]]($style)'
+
+[username]
+show_always = true
+format = '[$user]($style)'

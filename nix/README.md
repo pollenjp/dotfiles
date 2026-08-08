@@ -80,21 +80,47 @@ nix flake update --flake ~/dotfiles/nix
 
 > ⚠️ `-b bak` は `<file>.bak` が既に存在すると失敗する。リトライ時は古い `.bak` を先に消すこと。
 
+## 管理対象のファイル
+
+| 配置先 | 実体 |
+| --- | --- |
+| `~/.config/starship.toml` | `nix/files/starship.toml` |
+| `~/.config/zellij/config.kdl` | `nix/files/zellij/config.kdl` |
+| `~/.config/nvim/init.vim` | `nix/files/nvim/init.vim` |
+| `~/.config/tmux/interactive_shell.tmux.conf` | `nix/files/tmux/interactive_shell.tmux.conf` |
+| `~/.tmux.conf` | `nix/files/tmux/home.tmux.conf` |
+| `~/.screenrc` | `nix/files/screenrc` |
+| `~/.vimrc` | `nix/files/vim/vimrc` |
+| `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
+
+複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
+
+| 元の記述 | 書き換え後 |
+| --- | --- |
+| `source ~/dotfiles/vim_common/common.vim` | `source ~/.vim/common.vim` |
+| `source-file ~/dotfiles/tmux/home.tmux.conf` | `source-file ~/.tmux.conf` |
+
 ## 検証
 
 ```sh
-cd ~/dotfiles/nix
+./nix/scripts/verify.sh
+```
 
-# git flake では untracked ファイルが self から見えない。必ず先に git add する
-git add .
+`nix flake check` → sandbox ビルド → 配置ファイル一覧 → 使い捨て `$HOME` への activate →
+冪等性確認 → `~/dotfiles` 参照の残留チェック、までを一括で行う。実際の `$HOME` には触れない。
+
+個別に実行する場合:
+
+```sh
+cd ~/dotfiles/nix
+git add .                                  # flake は untracked ファイルを見ない
 
 nix flake check                            # 現在の system 向けに評価 + ビルド
 nix flake check --all-systems --no-build   # 全 system を評価のみ (CI 向け)
 
-# 使い捨て $HOME に対する実適用と冪等性確認
-mkdir -p /tmp/hm-sandbox
-HOME=/tmp/hm-sandbox nix run home-manager -- switch --flake .#sandbox -b bak
-HOME=/tmp/hm-sandbox nix run home-manager -- switch --flake .#sandbox -b bak  # 差分なしを確認
+# 配置されるファイルを事前に確認する
+nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なので -L が必須
 ```
 
 ## ディレクトリ
@@ -108,5 +134,8 @@ nix/
 │   ├── default.nix        import 一覧 + stateVersion
 │   ├── options.nix        dotfiles.* 独自オプション
 │   └── modules/           機能単位のモジュール
-└── files/                 既存設定の複製 (store 管理される素のファイル)
+├── files/                 既存設定の複製 (store 管理される素のファイル)
+└── scripts/
+    ├── verify.sh          検証を一括実行する
+    └── preflight-unlink.sh  main.bash が張った symlink を外す
 ```

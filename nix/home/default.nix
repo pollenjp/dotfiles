@@ -4,6 +4,7 @@
   imports = [
     ./options.nix
     ./modules/packages.nix
+    ./modules/files.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。
