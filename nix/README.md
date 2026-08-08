@@ -33,20 +33,18 @@ printf 'experimental-features = nix-command flakes\n' >> ~/.config/nix/nix.conf
 systemd の無いコンテナでは `--daemon` が失敗するので `--no-daemon` を使う。
 root で single-user install する場合は `/etc/nix/nix.conf` に `build-users-group =` (空) が必要。
 
-## flake.lock の生成
-
-`flake.lock` は未コミット。**初回に一度だけ**生成してコミットする。
+## 依存の更新
 
 ```sh
-cd ~/dotfiles/nix
-nix flake lock
-git add flake.lock && git commit -m 'chore(nix): flake.lock を追加'
+nix flake update --flake ~/dotfiles/nix
 ```
 
-> このリポジトリを最初に作った環境は GitHub の tarball 取得 (`codeload.github.com`) が
-> ネットワークポリシーで遮断されており、`github:` 形式の input を解決できなかったため
-> lock を生成できなかった。git プロトコル経由なら到達できるので、その環境で検証する場合は
-> 次のように input を差し替える (flake.nix は変更しない):
+> **GitHub の tarball 取得が遮断された環境について**
+>
+> `github:` 形式の input は `codeload.github.com` からソースを取得する。
+> ネットワークポリシーでこれが遮断されている環境 (git プロトコルのみ到達可能) では
+> `flake.lock` の解決はできてもソース取得で 403 になる。
+> その場合は `flake.nix` を変更せず input を差し替えて評価する:
 >
 > ```sh
 > nix flake check \
