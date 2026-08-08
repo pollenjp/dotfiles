@@ -1,0 +1,60 @@
+@startuml
+' 段階移行の順序と、各段階での復旧経路
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #555555
+}
+
+title 段階移行の順序 — どの段階でも ./main.bash setup で戻せる
+
+start
+
+:**Stage 1** — flake 骨格 + CLI ツール;
+note right #E0FFE0
+  home.packages のみ。設定ファイルは配置しない
+  → 既存 symlink と**構造的に衝突しない**
+  リスク: なし
+end note
+
+:**Stage 2** — 検証ハーネス;
+note right #E0FFE0
+  sandbox 設定 + checks 出力
+  以降の全 PR がコマンドでレビュー可能になる
+  リスク: なし
+end note
+
+:**Stage 3** — 静的ファイル配置;
+note right #FFF8DC
+  starship / zellij / nvim / screenrc / tmux
+  ここから main.bash と**経路が衝突する**
+  → 移行するマシンで preflight-unlink.sh を先に流す
+  リスク: 中
+end note
+
+:**Stage 4** — git / starship / mise 引き継ぎ;
+note right #FFF8DC
+  .gitconfig の 1Password パス手動切替が消える
+  マーカーファイルで mise の sed -i を停止
+  リスク: 中
+end note
+
+:**Stage 5** — shell 本体 (bash / fish);
+note right #FFE0E0
+  programs.bash が ~/.bashrc を**所有**する
+  事前に append_load_rc_line の stanza 削除が必要
+  シェル 1 つにつき 1 PR
+  リスク: 高
+end note
+
+:**Stage 6** — 収束;
+note right #FFF8DC
+  レガシーツリー削除の判断 / 初 CI
+  **全マシンが移行し終えるまで削除しない**
+end note
+
+stop
+
+@enduml

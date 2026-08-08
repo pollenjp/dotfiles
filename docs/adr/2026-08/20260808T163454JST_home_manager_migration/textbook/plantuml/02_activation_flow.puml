@@ -1,0 +1,69 @@
+@startuml
+' home-manager switch を実行したときに何が起きるか
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequence {
+  ArrowColor #444444
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #666666
+  ParticipantBackgroundColor #F7F7F7
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #AAAAAA
+}
+
+title home-manager switch を実行したときに起きること
+
+actor "あなた" as user
+participant "flake.nix\nflake.lock" as flake
+participant "nixpkgs\nhome-manager" as inputs
+participant "/nix/store" as store
+participant "profile\n(世代)" as prof
+participant "$HOME" as home
+
+user -> flake : home-manager switch --flake .#pollenjp@wsl
+activate flake
+
+flake -> inputs : flake.lock のリビジョンを取得
+note right of inputs
+  lock があるので
+  **いつ実行しても同じリビジョン**
+end note
+inputs --> flake
+
+flake -> store : 評価してビルド\n(activationPackage)
+activate store
+note right of store
+  cache.nixos.org に
+  ビルド済みがあればダウンロードだけ
+end note
+store --> flake : /nix/store/xxx-home-manager-generation
+deactivate store
+
+flake -> home : checkLinkTargets\n既存ファイルと衝突しないか検査
+activate home
+note right of home
+  **管理外の実ファイルがあると中断する**
+  -b bak を付けると .bak へ退避してから続行
+end note
+home --> flake : OK
+deactivate home
+
+flake -> prof : 新しい世代を作成
+activate prof
+prof --> flake
+deactivate prof
+
+flake -> home : linkGeneration\nstore path への symlink を張る
+activate home
+home --> flake : 完了
+deactivate home
+
+deactivate flake
+
+user -> prof : home-manager generations
+prof --> user : 世代一覧 (ここから戻せる)
+
+@enduml

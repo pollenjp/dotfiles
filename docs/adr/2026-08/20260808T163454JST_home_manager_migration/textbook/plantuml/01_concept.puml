@@ -1,0 +1,49 @@
+@startuml
+' Nix の基本概念: 式 -> derivation -> store path -> profile
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 25
+skinparam ranksep 40
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #AAAAAA
+}
+
+title Nix の基本: 「同じ入力なら必ず同じ出力」を保証する仕組み
+
+rectangle "① Nix 式 (*.nix)\n「何が欲しいか」を書いたレシピ" as expr #E8F0FF
+
+rectangle "② derivation (.drv)\nビルド手順を完全に確定させた設計図\n入力・依存・ビルド script がすべて含まれる" as drv #E8F0FF
+
+rectangle "③ store path\n/nix/store/<ハッシュ>-<名前>\n**read-only・不変**" as store #FFE0E0
+
+rectangle "④ profile\n$HOME/.nix-profile/bin -> store path\n世代ごとに切り替わる symlink 群" as profile #E0FFE0
+
+expr -down-> drv : 評価 (evaluation)
+drv -down-> store : ビルド (realisation)
+store -down-> profile : symlink を張る
+
+note right of drv
+  **ハッシュは「入力すべて」から計算される**
+  コンパイラのバージョン、依存ライブラリ、
+  ビルドフラグ … が 1 つでも違えば別のハッシュになる
+end note
+
+note right of store
+  だから **同じ store path なら中身は必ず同じ**
+  他人のマシンでビルド済みならダウンロードで済む
+  (これが cache.nixos.org の仕組み)
+end note
+
+note right of profile
+  **世代 (generation)**
+  切り替えは symlink の張り替えなので一瞬
+  古い store path は残っているのでロールバックも一瞬
+end note
+
+@enduml

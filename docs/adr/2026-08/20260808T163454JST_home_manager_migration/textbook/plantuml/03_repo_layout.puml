@@ -1,0 +1,66 @@
+@startuml
+' nix/ ディレクトリの構造と、どこを触ればよいか
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 20
+skinparam ranksep 40
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #AAAAAA
+}
+
+title nix/ の構造 — どのファイルを触ればよいか
+
+rectangle "nix/" as root #FFFFFF {
+
+  rectangle "**flake.nix**\n入口。inputs と出力を宣言する" as flake #E8F0FF
+  rectangle "**flake.lock**\n依存の正確なリビジョン\n(手で編集しない)" as lock #EEEEEE
+
+  rectangle "**hosts/default.nix**\nマシン登録簿" as hosts #E0FFE0
+  rectangle "lib/mk-home.nix\n組み立てヘルパ" as lib #EEEEEE
+
+  rectangle "home/default.nix\nimport 一覧 + stateVersion" as hdefault
+  rectangle "home/options.nix\n独自オプション (dotfiles.isWSL)" as opts
+
+  rectangle "**home/modules/packages.nix**\n入れたい CLI ツール" as pkgs #E0FFE0
+  rectangle "**home/modules/*.nix**\n機能ごとの設定" as mods #E0FFE0
+  rectangle "**files/**\n設定ファイルの実体" as files #E0FFE0
+}
+
+flake -down-> hosts : homeConfigurations
+flake .down.> lock : 参照
+hosts -down-> lib
+lib -down-> hdefault
+hdefault -down-> opts
+hdefault -down-> pkgs
+hdefault -down-> mods
+mods -right-> files : source =
+
+note right of hosts
+  **新しいマシンを追加するとき**
+  ここに 1 行足すだけ
+end note
+
+note right of pkgs
+  **ツールを増やしたいとき**
+  ここにパッケージ名を書く
+end note
+
+note right of files
+  **設定を変えたいとき**
+  ここのファイルを編集し
+  home-manager switch を実行する
+end note
+
+legend right
+  <color:#008800>**緑 = 普段触るファイル**</color>
+  <color:#0066CC>**青 = 構造を変えるとき**</color>
+  灰 = 基本触らない
+endlegend
+
+@enduml

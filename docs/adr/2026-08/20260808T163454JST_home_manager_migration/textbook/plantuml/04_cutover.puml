@@ -1,0 +1,66 @@
+@startuml
+' 既存マシンを Nix 経路へ切り替える手順
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #555555
+  DiamondBackgroundColor #FFF8DC
+  DiamondBorderColor #AAAAAA
+}
+
+title 既存マシンを Nix 経路へ切り替える手順
+
+start
+
+:Nix をインストールする;
+note right
+  curl -fsSL https://install.determinate.systems/nix | sh -s -- install
+end note
+
+:**何が配置されるか先に確認する**;
+note right #E0FFE0
+  nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+  find /tmp/hm/home-files
+  → $HOME に一切触れずに「配置される全ファイル」が読める
+end note
+
+if (main.bash setup を実行済み?) then (はい)
+  :preflight-unlink.sh を実行し\n既存の symlink を外す;
+  note right #FFF8DC
+    外さないと
+    「Existing file ... would be clobbered」で中断する
+  end note
+else (いいえ)
+endif
+
+:home-manager switch --dry-run;
+
+:home-manager switch -b bak;
+note right #FFF8DC
+  -b bak は既存ファイルを .bak へ退避する
+  **.bak が既に在ると失敗する**ので
+  リトライ時は古い .bak を先に消す
+end note
+
+if (問題が起きた?) then (はい)
+  :home-manager generations で\n古い世代の activate を実行;
+  if (それでも駄目?) then (はい)
+    :home-manager uninstall;
+    :**./main.bash setup**\n(最終手段・必ず動く);
+    stop
+  else (いいえ)
+  endif
+else (いいえ)
+endif
+
+:mise の config.toml を\n手で go / node のみに削る;
+note right #FFF8DC
+  既に書き込まれた 16 エントリは
+  自動では消えない (マシン毎に一度だけ)
+end note
+
+stop
+
+@enduml
