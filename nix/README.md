@@ -54,18 +54,47 @@ nix flake update --flake ~/dotfiles/nix
 
 ## 適用
 
+### 初回 (ブートストラップ)
+
+**`home-manager` コマンドはまだ存在しない。** `programs.home-manager.enable` が CLI を
+profile へ入れるのは *初回の activate が成功した後* なので、1 回目は flake から直接実行する。
+
+```sh
+nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl
+```
+
+> ⚠️ `nix run home-manager -- ...` (レジストリ経由) は使わないこと。
+> nixpkgs 同梱の別バージョンが実行され、`flake.lock` で固定した home-manager
+> モジュールとバージョンがずれる。上の `~/dotfiles/nix#home-manager` なら
+> lock と同じバージョンが使われる。
+
+`#` の後ろは `nix/hosts/default.nix` の登録名。新しいマシンは同ファイルに 1 行足す。
+
+### 2 回目以降
+
+初回の activate が終われば `~/.nix-profile/bin/home-manager` が入るので、
+以後は短く書ける。
+
 ```sh
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 ```
 
-`#` の後ろは `nix/hosts/default.nix` の登録名。新しいマシンは同ファイルに 1 行足す。
+**`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
+Nix インストーラが用意する profile スクリプトを読み込む (ログインし直すか、以下を実行):
+
+```sh
+. ~/.nix-profile/etc/profile.d/nix.sh    # single-user install
+. /etc/profile.d/nix.sh                  # multi-user install
+```
+
+シェル設定を home-manager が持つ Stage 5 以降は、この PATH 設定も宣言的に入る。
 
 ## 日常運用
 
 ```sh
 # 何が配置されるかを $HOME に触れず確認する
 nix build ~/dotfiles/nix#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
-find /tmp/hm/home-files -mindepth 1 -maxdepth 3
+find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3   # home-files は symlink なので -L 必須
 
 # 適用 (既存ファイルは .bak へ退避)
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak

@@ -46,6 +46,24 @@
         )
       );
 
+      # 初回ブートストラップ用。
+      #
+      # programs.home-manager.enable が CLI を profile へ入れるのは
+      # **初回の activate が成功した後**なので、1 回目は home-manager コマンドが
+      # まだ存在しない。そこで flake から直接実行できるようにしておく:
+      #
+      #   nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl
+      #
+      # `nix run home-manager` (レジストリ経由) ではなくこちらを使うこと。
+      # レジストリ版は nixpkgs 同梱の別バージョンで、flake.lock で固定した
+      # home-manager モジュールとバージョンがずれる可能性がある。
+      # NOTE: rec の中では属性名 home-manager が input を影にするため、
+      #       input 側は inputs. 経由で参照する。
+      packages = forAllSystems (system: rec {
+        home-manager = inputs.home-manager.packages.${system}.default;
+        default = home-manager;
+      });
+
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);
 
       devShells = forAllSystems (

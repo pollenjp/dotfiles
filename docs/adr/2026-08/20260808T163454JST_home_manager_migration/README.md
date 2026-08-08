@@ -178,22 +178,30 @@ nixpkgs 26.11pre (`70ce2343`) / home-manager master (`7834e825`) に対して、
 curl -fsSL https://install.determinate.systems/nix | sh -s -- install
 
 # 2. 何が配置されるかを $HOME に触れず確認する
+#    (home-files は store への symlink なので find に -L が必須)
 cd ~/dotfiles/nix
 nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
-find /tmp/hm/home-files -mindepth 1 -maxdepth 3
+find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 
 # 3. main.bash が張った symlink を外す (Stage 3 以降)
 ./scripts/preflight-unlink.sh
 
-# 4. 適用
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+# 4. 初回適用
+#    この時点では home-manager コマンドはまだ存在しない。
+#    programs.home-manager.enable が CLI を profile へ入れるのは
+#    初回の activate が成功した後なので、1 回目は flake から直接実行する。
+nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
+nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
 
-# 日常
+# 日常 (初回以降は profile に入るので短く書ける)
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 home-manager generations
 nix flake update --flake ~/dotfiles/nix
 ```
+
+> `nix run home-manager -- ...`（レジストリ経由）は使わないこと。nixpkgs 同梱の別バージョンが
+> 実行され、`flake.lock` で固定した home-manager モジュールとバージョンがずれる。
+> flake が `packages.<system>.home-manager` を公開しているのはこのため。
 
 **ロールバック**は 3 段階:
 

@@ -103,12 +103,14 @@ cd ~/dotfiles/nix
 nix flake check --all-systems --no-build
 
 # 配置されるファイルを確認する
+# home-files は store への symlink なので find に -L が必須。
+# 付けないと 1 件も出ず「配置物なし」に見えてしまう。
 nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
-find /tmp/hm/home-files -mindepth 1 -maxdepth 3
+find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 
 # 使い捨て HOME で実際に試す
 mkdir -p /tmp/hm-sandbox/.local/state/nix/profiles
-HOME=/tmp/hm-sandbox nix run home-manager -- switch --flake .#sandbox -b bak
+HOME=/tmp/hm-sandbox nix run .#home-manager -- switch --flake .#sandbox -b bak
 ```
 
 ## フォーマット
@@ -123,6 +125,7 @@ cd ~/dotfiles/nix && nix fmt
 
 | エラー | 原因と対処 |
 | --- | --- |
+| `home-manager: command not found` | **初回はまだ CLI が無い。** `nix run ~/dotfiles/nix#home-manager -- switch ...` で 1 回目を実行する。2 回目以降も出るなら `~/.nix-profile/bin` が PATH に無い（`. ~/.nix-profile/etc/profile.d/nix.sh`） |
 | `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける |
 | `Existing file ... .bak already exists` | 前回の退避が残っている。古い `.bak` を消す |
 | `path does not exist` (新規 `.nix` を足した直後) | **git flake は untracked ファイルを見ない。`git add` する** |

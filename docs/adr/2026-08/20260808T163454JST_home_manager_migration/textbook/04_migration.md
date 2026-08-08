@@ -70,8 +70,31 @@ home-manager は「自分が作ったもの以外は勝手に消さない」設�
 
 ### 4. dry-run してから適用する
 
+**ここで `home-manager: command not found` になるのが正常。** まだ入っていないので、
+1 回目は flake から直接実行する。
+
 ```sh
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
+nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
+nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+```
+
+<details><summary>なぜ 1 回目だけ書き方が違うのか</summary>
+
+`programs.home-manager.enable = true` は「home-manager CLI を profile に入れる」設定だが、
+**それが効くのは初回の activate が成功した後**。つまり鶏と卵になっている。
+
+そこで `flake.nix` は `packages.<system>.home-manager` を公開しており、
+`nix run ~/dotfiles/nix#home-manager` で **`flake.lock` に固定されたのと同じバージョン**の
+CLI を直接実行できるようにしてある。
+
+`nix run home-manager -- ...`（`#` なし＝レジストリ経由）は使わないこと。nixpkgs 同梱の
+別バージョンが動き、lock で固定した home-manager モジュールとバージョンがずれる。
+
+</details>
+
+2 回目以降は `~/.nix-profile/bin/home-manager` が入るので短く書ける。
+
+```sh
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
 ```
 

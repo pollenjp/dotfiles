@@ -19,6 +19,9 @@ nix/
 │       ├── packages.nix   入れたい CLI ツール    <- よく触る
 │       └── *.nix          機能ごとの設定        <- よく触る
 ├── files/                 設定ファイルの実体     <- よく触る
+├── scripts/
+│   ├── verify.sh          検証を一括実行
+│   └── preflight-unlink.sh  main.bash の symlink を外す
 └── README.md
 ```
 
@@ -48,6 +51,11 @@ home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 ```
 
 `#` の後ろは `hosts/default.nix` に登録した名前。
+
+> ⚠️ **まだ一度も適用していないマシンでは `home-manager: command not found` になる。**
+> CLI が profile に入るのは初回の activate が成功した後なので、1 回目だけは
+> `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl` と書く。
+> 詳しくは [04_migration.md](./04_migration.md)。
 
 ## よく触る 3 箇所
 
@@ -173,7 +181,7 @@ sandbox = mkHome {
 
 ```sh
 mkdir -p /tmp/hm-sandbox/.local/state/nix/profiles
-HOME=/tmp/hm-sandbox nix run home-manager -- switch --flake .#sandbox -b bak
+HOME=/tmp/hm-sandbox nix run .#home-manager -- switch --flake .#sandbox -b bak
 ```
 
 設定を大きく変えたときは、実マシンに適用する前にここで試すとよい。
