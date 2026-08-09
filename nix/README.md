@@ -56,7 +56,7 @@ nix flake update --flake ~/dotfiles/nix
 
 ### 新規マシンの手順
 
-上から順に実行する。**2 と 5 は忘れやすいので注意。**
+上から順に実行する。**2 と 4 と 6 は忘れやすいので注意。**
 
 | # | やること | 備考 |
 | --- | --- | --- |
@@ -66,7 +66,8 @@ nix flake update --flake ~/dotfiles/nix
 | 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | 初回はこの形 |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | 既存マシンのみ（後述） |
-| 6 | `chsh` でログインシェルを変更 | 必要なら |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | Claude Code のガードフック登録 |
+| 7 | `chsh` でログインシェルを変更 | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -96,7 +97,7 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 
 冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
 
-#### 3. ログインシェルの変更 (手順 6)
+#### 3. ログインシェルの変更 (手順 7)
 
 `programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
 （`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
@@ -235,6 +236,79 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 `025_mingw` と `205_go_path` の cygpath 分岐（Windows は対象外）、`.bash/02_asdf.sh`
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
+
+## Claude Code
+
+`nix/files/claude/` 配下を `~/.claude/` へ配置する。
+
+| 配置先 | 実体 | 単位 |
+| --- | --- | --- |
+| `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル |
+| `~/.claude/skills/<名前>/` | `nix/files/claude/skills/<名前>/` | ディレクトリ |
+| `~/.claude/agents/<名前>.md` | `nix/files/claude/agents/<名前>.md` | ファイル |
+| `~/.claude/commands/<名前>.md` | `nix/files/claude/commands/<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
+
+`nix/home/modules/claude.nix` が各ディレクトリを `readDir` で自動列挙するので、
+**追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
+書き方は各ディレクトリの `README.md` を参照。
+
+### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
+
+`~/.claude/` 配下は **Claude Code 自身が書き換える**。`skills/` には `manifest.json`
+があり、Anthropic 配信の skill（`pdf` / `docx` / `xlsx` / `pptx` など）がここへ入る。
+ディレクトリごと store の symlink にすると、それらの導入・更新が壊れる。
+
+中身を 1 つずつ配置すれば、Claude Code 管理のものと**兄弟として並ぶ**だけで衝突しない。
+
+```
+~/.claude/skills/
+├── manifest.json      <- Claude Code 管理 (実ファイル)
+├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
+└── my-skill -> /nix/store/…   <- Nix 管理
+```
+
+### ⚠️ `~/.claude/` を直接編集しないこと
+
+store 上の read-only ファイルへの symlink なので、編集は実行ユーザーによって
+**壊れ方が違う**。
+
+| 実行者 | 直接編集した場合 |
+| --- | --- |
+| 一般ユーザー | `Permission denied`（明確に失敗する） |
+| **root** | **黙って成功し store が破損する**（`nix store verify` が hash 不一致を検出。変更は次の GC やリビルドで失われ、エラーも出ない） |
+
+正しい手順はリポジトリ側を編集して `home-manager switch`。
+
+これを Claude に伝えるため、`PreToolUse` フック
+（`nix/files/claude/hooks/nix-managed-guard.sh`）を用意している。
+**該当パスを編集しようとしたときだけ**介入し、正しい手順を返して拒否する。
+
+判定はパス名のパターンではなく **解決先が `/nix/store` 配下かどうか**で行う。
+そのため次は誤って止めない。
+
+- `~/.claude/skills/manifest.json`（Claude Code 管理の実ファイル）
+- `~/.claude/skills/pdf/`（Anthropic 配信 skill）
+- `~/.claude/skills/<試作>/`（直接置いて試行錯誤している最中のもの）
+- 読み取り（`Read` / `cat` / `ls`）
+
+`~/.claude/CLAUDE.md` にも同じ趣旨を**3行だけ**書いてある。全セッションで
+読まれてトークンを消費するので、詳細はフック側に持たせている。
+
+#### フックの登録（マシンごとに一度だけ）
+
+```sh
+./nix/scripts/bootstrap-claude-hook.sh
+```
+
+フックの定義は `settings.json` にしか書けないが、そのファイルは Claude Code
+自身が書き換える（権限の「常に許可」など）ため Nix 管理下に置けない。
+**スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
+冪等で、既存の設定は保持する。
+
+### 管理しないもの
+
+`settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と
+Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）。
 
 ## mise との役割分担
 

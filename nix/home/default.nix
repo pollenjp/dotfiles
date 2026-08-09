@@ -11,6 +11,7 @@
     ./modules/shell-common.nix
     ./modules/fish.nix
     ./modules/bash.nix
+    ./modules/claude.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。
