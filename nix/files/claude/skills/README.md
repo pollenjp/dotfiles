@@ -2,6 +2,10 @@
 
 ここに置いたディレクトリが `~/.claude/skills/<名前>` へ配置される。
 
+> ⚠️ **このリポジトリは public。** 業務固有の手順・社内の名前・個人的な文脈を含むものは
+> ここではなく [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）へ置く。
+> 配置は `nix/scripts/bootstrap-claude-skills.sh` が行う（詳細は `nix/README.md`）。
+
 配置しているのは `nix/home/modules/claude.nix`。**このディレクトリを `readDir` して
 サブディレクトリを自動列挙する**ので、skill を足すときに `.nix` を編集する必要はない。
 
@@ -46,16 +50,18 @@ home-manager switch --flake ~/dotfiles/nix#<host>
 ~/.claude/skills/
 ├── manifest.json      <- Claude Code 管理
 ├── pdf/  docx/  ...   <- Claude Code 管理 (Anthropic 配信)
-└── <自作>/            <- Nix 管理 (store への symlink)
+├── <自作>/            <- Nix 管理 (store への symlink)
+└── <private>/         <- claude-skills の作業クローンへの symlink
 ```
 
-Claude Code 管理のものとは兄弟として並ぶだけなので衝突しない。
+いずれも兄弟として並ぶだけなので衝突しない。
 
 ## 注意
 
 - **store 管理なので編集の度に `home-manager switch` が要る。**
   試行錯誤しながら書く場合は、一時的に `~/.claude/skills/` へ直接置いて
   固まってからこちらへ移す方が早い
+  （`claude-skills` 側は作業クローンへの symlink なのでこの制約が無い）
 - 名前は `~/.claude/skills/` 配下で一意にすること。Anthropic 配信の skill
-  (`pdf` `docx` `xlsx` `pptx` `morning` `skill-creator` など) と同名にすると
-  どちらが使われるか不定になる
+  (`pdf` `docx` `xlsx` `pptx` `morning` `skill-creator` など) や
+  `claude-skills` 側のものと同名にすると、どちらが使われるか不定になる

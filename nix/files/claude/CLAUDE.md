@@ -7,3 +7,6 @@
 
 詳しい手順は、該当パスを編集しようとしたときに `PreToolUse` フック
 （`~/.claude/hooks/nix-managed-guard.sh`）が返す。
+
+`skills/` などには private リポジトリ（`claude-skills`）の作業クローンへの symlink も
+混ざる。そちらは直接編集してよいが、実体はクローンなので **commit が要る**。

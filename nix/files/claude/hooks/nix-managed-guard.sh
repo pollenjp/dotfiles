@@ -135,6 +135,12 @@ reason=$(
 
 まだ試行錯誤の段階なら、~/.claude/skills/<仮名>/ に実ディレクトリとして置けば
 このガードは働きません。固まってから上記の手順でリポジトリへ移してください。
+
+公開できない内容 (業務固有の手順や社内の名前など) は dotfiles ではなく
+claude-skills (private) 側へ置きます。そちらは作業クローンへの symlink なので
+このガードは働かず、編集はそのまま反映されます (ただし commit は必要)。
+場所は次で判ります:
+  ~/dotfiles/nix/scripts/bootstrap-claude-skills.sh --status
 EOF
 )
 

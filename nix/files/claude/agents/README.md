@@ -2,6 +2,10 @@
 
 ここに置いた `.md` が `~/.claude/agents/<名前>.md` へ配置される。
 
+> ⚠️ **このリポジトリは public。** 公開できない内容は
+> [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）の
+> `agents/` へ置く（詳細は `nix/README.md`）。
+
 配置しているのは `nix/home/modules/claude.nix`。**このディレクトリを `readDir` して
 自動列挙する**ので、追加時に `.nix` を編集する必要はない。
 
