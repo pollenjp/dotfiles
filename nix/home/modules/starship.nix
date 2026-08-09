@@ -18,13 +18,14 @@
   programs.starship = {
     enable = true;
 
-    # fish は Stage 5 で home-manager が所有するようになったので有効化する
-    # (複製元: .fish/298_starship.fish の `starship init fish | source`)。
+    # 複製元: .fish/298_starship.fish の `starship init fish | source`
     enableFishIntegration = true;
 
-    # bash は次の PR で home-manager が所有する。それまで有効にすると
-    # まだ管理していない rc に init を差し込もうとする。
-    enableBashIntegration = false;
+    # ⚠️ 挙動変更: レガシーでは starship を初期化しているのは fish だけで、
+    #    bash には素のプロンプトしか無かった (grep で確認済み)。
+    #    両シェルで見た目を揃えるため有効にしている。
+    #    不要なら false にすればレガシーと同じ挙動に戻る。
+    enableBashIntegration = true;
 
     # zsh は Nix の対象外なので常に false
     enableZshIntegration = false;

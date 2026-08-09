@@ -8,7 +8,9 @@
     ./modules/git.nix
     ./modules/starship.nix
     ./modules/mise.nix
+    ./modules/shell-common.nix
     ./modules/fish.nix
+    ./modules/bash.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。

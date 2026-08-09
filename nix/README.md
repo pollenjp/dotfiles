@@ -166,6 +166,40 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 | `f` | `201_git` の `git fetch` | `250_alias` の `cd ..` |
 | `ls` | `060_mise` の `eza` | `250_alias` の `eza --group-directories-first -F` |
 
+## bash
+
+`.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
+内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+
+**`main.bash:199-219` の bash-completion 取得が不要になった。**
+curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、
+`programs.bash.enableCompletion` が置き換える。
+
+`~/.common_shellrc.sh` の source は維持している（マシンローカルの逃げ道）。
+
+### bash で壊れていたものを移植時に修正
+
+| 対象 | 症状 |
+| --- | --- |
+| `c` | `alias c='noglob c-func'` の `noglob` は zsh 専用。bash では `noglob: command not found` で失敗していた |
+| `cdrepo` | ガードが fish 構文の `if not command -v ghq` で書かれており、bash では `not` が見つからず終了ステータス 127 = 常に偽。一度も発火しない死んだコードだった |
+| ssh-agent | `ssh-add` の存在確認が無く、未インストール環境では起動のたびにエラーが出ていた |
+
+### 挙動が変わる点
+
+- **bash でも starship プロンプトになる。** レガシーでは starship を初期化しているのは
+  fish だけで、bash は素のプロンプトだった。両シェルで揃えている。
+  戻したい場合は `starship.nix` の `enableBashIntegration` を `false` にする。
+- `glog` などの alias 連鎖（`glog='glo --graph'`）は完全形に展開した（fish 側と同じ形）。
+- `echo-PATH` / `echo-PATH-tr` / `echo-PATH-grep` / `git_get_default_branch` は
+  alias から関数に変えた（動作は同じ）。
+
+### 移植しなかったもの
+
+`025_mingw` と `205_go_path` の cygpath 分岐（Windows は対象外）、`.bash/02_asdf.sh`
+（asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
+bash では元々発火していなかった）。
+
 ## mise との役割分担
 
 | 対象 | 管理者 |
