@@ -1,0 +1,93 @@
+name: nix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nix/**"
+      - ".github/workflows/nix.yml"
+  pull_request:
+    paths:
+      - "nix/**"
+      - ".github/workflows/nix.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # 各ランナーの system 向けに実際にビルドする。
+  #
+  # NOTE: `nix flake check` は homeConfigurations を評価しない (well-known output では
+  #       ないため)。flake.nix が activationPackage を checks へ再エクスポートしている
+  #       ので、それを通して home-manager 設定が検証される。
+  check:
+    name: flake check (${{ matrix.system }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            system: x86_64-linux
+          - os: macos-latest
+            system: aarch64-darwin
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      # 全 system の評価のみ。ランナーが存在しない aarch64-linux も含めて
+      # オプション名の誤りやプラットフォーム分岐の壊れを検出できる。
+      # ubuntu 側だけで十分なので macOS では実行しない。
+      - name: 全 system を評価 (ビルドなし)
+        if: matrix.os == 'ubuntu-latest'
+        run: nix flake check --all-systems --no-build ./nix
+
+      - name: このランナーの system をビルド
+        run: nix flake check ./nix
+
+      # 設定が壊れていないことに加えて、activate まで通ることを確認する。
+      # sandbox は homeDirectory を /tmp/hm-sandbox に固定しているので
+      # ランナーの実 HOME を汚さない。
+      - name: sandbox へ activate して冪等性を確認
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          nix build './nix#homeConfigurations.sandbox.activationPackage' -o /tmp/hm
+          mkdir -p /tmp/hm-sandbox/.local/state/nix/profiles
+          HOME=/tmp/hm-sandbox USER=user /tmp/hm/activate
+          HOME=/tmp/hm-sandbox USER=user /tmp/hm/activate
+
+      - name: warnings が空であることを確認
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          warnings=$(nix eval --json \
+            './nix#homeConfigurations.sandbox.config.warnings')
+          echo "warnings: ${warnings}"
+          test "${warnings}" = "[]"
+
+  # devShell に入っている nixfmt / shfmt / shellcheck で整形と静的解析を確認する。
+  lint:
+    name: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@v22
+
+      - name: nixfmt --check
+        run: |
+          nix develop ./nix --command bash -c '
+            find nix -name "*.nix" -print0 | xargs -0 nixfmt --check
+          '
+
+      - name: shfmt / shellcheck
+        run: |
+          nix develop ./nix --command bash -c '
+            shfmt -d nix/scripts/*.sh
+            shellcheck nix/scripts/*.sh
+          '

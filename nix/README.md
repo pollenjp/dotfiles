@@ -281,6 +281,21 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 > マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
 > だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
 
+## CI
+
+`.github/workflows/nix.yml` が `nix/**` の変更時に走る。
+
+| ジョブ | ランナー | 内容 |
+| --- | --- | --- |
+| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド → sandbox への activate と冪等性 → `warnings` が空か |
+| `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
+| `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
+
+`aarch64-linux` はランナーが無いので**評価のみ**（`--all-systems --no-build`）。
+オプション名の誤りやプラットフォーム分岐の壊れはこれで捕まる。
+
+ローカルで同じことをするには `./nix/scripts/verify.sh` を使う。
+
 ## 検証
 
 ```sh
