@@ -56,7 +56,7 @@ nix flake update --flake ~/dotfiles/nix
 
 ### 新規マシンの手順
 
-上から順に実行する。**2 と 5 は忘れやすいので注意。**
+上から順に実行する。**2 と 4 と 6 は忘れやすいので注意。**
 
 | # | やること | 備考 |
 | --- | --- | --- |
@@ -66,7 +66,8 @@ nix flake update --flake ~/dotfiles/nix
 | 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | 初回はこの形 |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | 既存マシンのみ（後述） |
-| 6 | `chsh` でログインシェルを変更 | 必要なら |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | Claude Code のガードフック登録 |
+| 7 | `chsh` でログインシェルを変更 | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -96,7 +97,7 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 
 冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
 
-#### 3. ログインシェルの変更 (手順 6)
+#### 3. ログインシェルの変更 (手順 7)
 
 `programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
 （`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
@@ -276,9 +277,33 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 | 一般ユーザー | `Permission denied`（明確に失敗する） |
 | **root** | **黙って成功し store が破損する**（`nix store verify` が hash 不一致を検出。変更は次の GC やリビルドで失われ、エラーも出ない） |
 
-正しい手順はリポジトリ側を編集して `home-manager switch`。この注意は
-`~/.claude/CLAUDE.md`（= `nix/files/claude/CLAUDE.md`）にも書いてあり、
-**Claude 自身が全セッションで読む**ようになっている。
+正しい手順はリポジトリ側を編集して `home-manager switch`。
+
+これを Claude に伝えるため、`PreToolUse` フック
+（`nix/files/claude/hooks/nix-managed-guard.sh`）を用意している。
+**該当パスを編集しようとしたときだけ**介入し、正しい手順を返して拒否する。
+
+判定はパス名のパターンではなく **解決先が `/nix/store` 配下かどうか**で行う。
+そのため次は誤って止めない。
+
+- `~/.claude/skills/manifest.json`（Claude Code 管理の実ファイル）
+- `~/.claude/skills/pdf/`（Anthropic 配信 skill）
+- `~/.claude/skills/<試作>/`（直接置いて試行錯誤している最中のもの）
+- 読み取り（`Read` / `cat` / `ls`）
+
+`~/.claude/CLAUDE.md` にも同じ趣旨を**3行だけ**書いてある。全セッションで
+読まれてトークンを消費するので、詳細はフック側に持たせている。
+
+#### フックの登録（マシンごとに一度だけ）
+
+```sh
+./nix/scripts/bootstrap-claude-hook.sh
+```
+
+フックの定義は `settings.json` にしか書けないが、そのファイルは Claude Code
+自身が書き換える（権限の「常に許可」など）ため Nix 管理下に置けない。
+**スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
+冪等で、既存の設定は保持する。
 
 ### 管理しないもの
 

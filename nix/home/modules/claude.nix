@@ -60,9 +60,21 @@ in
 {
   home.file = lib.mkMerge [
     # 全セッションで読まれるユーザーレベルの指示。
-    # skill などが Nix 管理であることをここに書いておくと、Claude が
-    # ~/.claude/ を直接編集しようとして失敗するのを防げる。
+    # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
     { ".claude/CLAUDE.md".source = claudeRoot + "/CLAUDE.md"; }
+
+    # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
+    #
+    # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
+    # そのファイルは Claude Code 自身が書き換える (権限の「常に許可」など) ため
+    # Nix 管理下に置けない。スクリプトだけを配置し、登録はマシンごとに手で行う。
+    # 手順は scripts/bootstrap-claude-hook.sh と nix/README.md を参照。
+    {
+      ".claude/hooks/nix-managed-guard.sh" = {
+        source = claudeRoot + "/hooks/nix-managed-guard.sh";
+        executable = true;
+      };
+    }
 
     (linkEntries "skills")
     (linkEntries "agents")
