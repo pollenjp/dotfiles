@@ -236,6 +236,38 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
 
+## Claude Code の skill
+
+`nix/files/claude/skills/<名前>/` に置いたディレクトリが `~/.claude/skills/<名前>` へ
+配置される。`nix/home/modules/claude.nix` が `readDir` で自動列挙するので、
+**skill を足すときに `.nix` を編集する必要はない**。
+
+```
+nix/files/claude/skills/my-skill/SKILL.md   ->  ~/.claude/skills/my-skill/SKILL.md
+```
+
+`scripts/` `references/` などの補助ファイルも同じディレクトリに置けばまとめて配置される。
+書き方は [`nix/files/claude/skills/README.md`](./files/claude/skills/README.md) を参照。
+
+### なぜディレクトリごとではなく skill 単位で symlink するのか
+
+`~/.claude/skills/` は **Claude Code 自身が書き換える**。`manifest.json` があり、
+Anthropic 配信の skill（`pdf` / `docx` / `xlsx` / `pptx` など）がここへ入る。
+ディレクトリごと store の symlink にすると、それらの導入・更新が壊れる。
+
+skill を 1 つずつ配置すれば、Claude Code 管理のものと**兄弟として並ぶ**だけで衝突しない。
+
+```
+~/.claude/skills/
+├── manifest.json      <- Claude Code 管理 (実ファイル)
+├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
+└── my-skill -> /nix/store/…   <- Nix 管理
+```
+
+> `agents/` と `commands/` も同じ構造なので、必要になれば `claude.nix` に
+> 数行足すだけで同様に管理できる。`settings.json` は Claude Code が書き換える
+> ため（権限の「常に許可」など）store 管理には向かない。
+
 ## mise との役割分担
 
 | 対象 | 管理者 |
