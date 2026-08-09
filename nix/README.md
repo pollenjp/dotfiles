@@ -54,7 +54,21 @@ nix flake update --flake ~/dotfiles/nix
 
 ## 適用
 
-### 初回 (ブートストラップ)
+### 新規マシンの手順
+
+上から順に実行する。**2 と 5 は忘れやすいので注意。**
+
+| # | やること | 備考 |
+| --- | --- | --- |
+| 0 | `hosts/default.nix` にマシンを 1 行追加 | WSL なら `windowsUserName` も |
+| 1 | Nix を入れる（前節） | |
+| 2 | `./nix/scripts/preflight-unlink.sh` | `main.bash setup` 済みのマシンのみ |
+| 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | 初回はこの形 |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | mise のグローバル設定と言語ランタイム |
+| 5 | `~/.config/mise/config.toml` を手で整理 | 既存マシンのみ（後述） |
+| 6 | `chsh` でログインシェルを変更 | 必要なら |
+
+#### 1. 初回のブートストラップ (手順 3)
 
 **`home-manager` コマンドはまだ存在しない。** `programs.home-manager.enable` が CLI を
 profile へ入れるのは *初回の activate が成功した後* なので、1 回目は flake から直接実行する。
@@ -68,7 +82,29 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 > モジュールとバージョンがずれる。上の `~/dotfiles/nix#home-manager` なら
 > lock と同じバージョンが使われる。
 
-`#` の後ろは `nix/hosts/default.nix` の登録名。新しいマシンは同ファイルに 1 行足す。
+`#` の後ろは `nix/hosts/default.nix` の登録名。
+
+#### 2. mise の初期化 (手順 4)
+
+```sh
+./nix/scripts/bootstrap-mise.sh
+```
+
+`~/.config/mise/config.toml` は **Nix 管理下に置いていない**（mise が実行時に書き換える
+ファイルなので store に置けない）。そのため `home-manager switch` だけでは作られず、
+**新規マシンでは go / node が入らないまま**になる。このスクリプトで初期化する。
+
+冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
+
+#### 3. ログインシェルの変更 (手順 6)
+
+`programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
+（`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
+
+```sh
+command -v fish | sudo tee -a /etc/shells
+chsh -s "$(command -v fish)"
+```
 
 ### 2 回目以降
 
@@ -276,6 +312,7 @@ nix/
 │   └── modules/           機能単位のモジュール
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 └── scripts/
-    ├── verify.sh          検証を一括実行する
-    └── preflight-unlink.sh  main.bash が張った symlink を外す
+    ├── verify.sh            検証を一括実行する
+    ├── preflight-unlink.sh  main.bash が張った symlink を外す (移行時に 1 回)
+    └── bootstrap-mise.sh    mise のグローバル設定を初期化する (マシンごとに 1 回)
 ```
