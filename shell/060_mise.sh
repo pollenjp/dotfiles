@@ -4,66 +4,78 @@
 # Alternative Commands #
 ########################
 
+# CLI ツールを誰が管理しているか。
+# マーカーファイルが無ければ従来どおり mise (= 挙動は変わらない)。
+# マーカーは Nix の home-manager (nix/home/modules/mise.nix) が配置する。
+_dotfiles_package_manager() {
+  cat "${XDG_STATE_HOME:-${HOME}/.local/state}/dotfiles/package-manager" 2>/dev/null || echo "mise"
+}
+
 if command -v mise &>/dev/null; then
-  pkgs=(
-    cargo-binstall               latest
-    cargo:bat                    latest
-    cargo:eza                    latest
-    cargo:fd-find                latest
-    cargo:procs                  latest
-    cargo:ripgrep                latest
-    fzf                          latest
-    ghq                          latest
-    github:fish-shell/fish-shell latest
-    go                           latest
-    jq                           latest
-    node                         v24
-    starship                     latest
-    usage                        latest
-    watchexec                    latest
-    zellij                       latest
-  )
-  if (( ${#pkgs[@]} % 2 != 0 )); then
-    echo "Error: 'pkgs' array length must be even." >&2
-    exit 1
+  # Nix が CLI ツールを持つ環境では、起動毎の config.toml 書き換えと
+  # mise install を行わない。言語ランタイム (go/node) の管理は
+  # ~/.config/mise/config.toml に残っているものが引き続き担う。
+  if [ "$(_dotfiles_package_manager)" = "mise" ]; then
+    pkgs=(
+      cargo-binstall latest
+      cargo:bat latest
+      cargo:eza latest
+      cargo:fd-find latest
+      cargo:procs latest
+      cargo:ripgrep latest
+      fzf latest
+      ghq latest
+      github:fish-shell/fish-shell latest
+      go latest
+      jq latest
+      node v24
+      starship latest
+      usage latest
+      watchexec latest
+      zellij latest
+    )
+    if ((${#pkgs[@]} % 2 != 0)); then
+      echo "Error: 'pkgs' array length must be even." >&2
+      exit 1
+    fi
+    mise_config_path=~/.config/mise/config.toml
+
+    # 複数シェルを同時起動した時に競合するため lock を取る
+    exec 3<>/tmp/mise_config_lock # open file as '3' descriptor
+    flock -x 3                    # lock
+
+    # if zsh, set 0-origin array
+    [ -n "$ZSH_VERSION" ] && setopt KSH_ARRAYS
+    for ((i = 0; i < ${#pkgs[@]}; i += 2)); do
+      pkg="${pkgs[i]}"
+      version="${pkgs[i + 1]}"
+      # config.toml がなければテンプレートを初期ファイルとしてコピーする
+      if [ ! -f "${mise_config_path}" ]; then
+        mkdir -p "$(dirname "${mise_config_path}")"
+        cp ~/dotfiles/.config_tmpl/mise/config.toml "${mise_config_path}"
+      fi
+      # Use `\` to prevent alias expansion when such like `source ~/.bashrc`
+      if ! \grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then
+        sed -i '/\[tools\]/a '"\"${pkg}\" = \"${version}\"" "${mise_config_path}"
+      fi
+    done
+    # unset 0-origin array
+    [ -n "$ZSH_VERSION" ] && unsetopt KSH_ARRAYS
+
+    flock -u 3 # unlock
+    exec 3>&-  # close file descriptor
+
+    echo "== Running 'mise install' in background =="
+    {
+      flock -x 9
+      mise install
+      echo "== Done 'mise install' =="
+    } 9>/tmp/mise_install_lock
   fi
-  mise_config_path=~/.config/mise/config.toml
-
-  # 複数シェルを同時起動した時に競合するため lock を取る
-  exec 3<> /tmp/mise_config_lock  # open file as '3' descriptor
-  flock -x 3                      # lock
-
-  # if zsh, set 0-origin array
-  [ -n "$ZSH_VERSION" ] && setopt KSH_ARRAYS
-  for ((i=0; i<${#pkgs[@]}; i+=2)); do
-    pkg="${pkgs[i]}"
-    version="${pkgs[i+1]}"
-    # config.toml がなければテンプレートを初期ファイルとしてコピーする
-    if [ ! -f "${mise_config_path}" ]; then
-      mkdir -p "$(dirname "${mise_config_path}")"
-      cp ~/dotfiles/.config_tmpl/mise/config.toml "${mise_config_path}"
-    fi
-    # Use `\` to prevent alias expansion when such like `source ~/.bashrc`
-    if ! \grep -q -E "^[\"]?${pkg}[\"]? =" "${mise_config_path:?}"; then
-      sed -i '/\[tools\]/a '"\"${pkg}\" = \"${version}\"" "${mise_config_path}"
-    fi
-  done
-  # unset 0-origin array
-  [ -n "$ZSH_VERSION" ] && unsetopt KSH_ARRAYS
-
-  flock -u 3 # unlock
-  exec 3>&-  # close file descriptor
 
   if command -v bat &>/dev/null; then alias cat='bat'; fi
   if command -v exa &>/dev/null; then alias ls='exa'; fi
   if command -v rg &>/dev/null; then alias grep='rg'; fi
-
-  echo "== Running 'mise install' in background =="
-  {
-    flock -x 9
-    mise install
-    echo "== Done 'mise install' =="
-  } 9>/tmp/mise_install_lock
 else
   echo "mise is not installed"
 fi

@@ -19,12 +19,19 @@ end
 # 1 日 1 回だけ pin する。読み込み順 (060_mise.fish → 252_alias_mise.fish) により
 # mise install の完了後に実行される。
 # フラグ (mtime) で 1 日 1 回、flock で多重起動時の競合を制御する。
-begin
-    set -l _lock_flag ~/.config/mise/.mise_last_lock
-    flock -x 9
-    if not test -f $_lock_flag; or test (math (date +%s) - (stat -c %Y $_lock_flag 2>/dev/null; or echo 0)) -gt 86400
-        echo "== Pinning current mise tool versions to global config =="
-        mise_lock_to_current_global
-        touch $_lock_flag
-    end
-end 9>/tmp/mise_lock_to_current_lock
+#
+# Nix (home-manager) が CLI ツールを管理している環境では pin しない。
+# バージョン固定は flake.lock が担うため、この自作ロックは不要であり、
+# 走らせると Nix 側から外したツールを mise に再び固定してしまう。
+# 判定に使うマーカーは 060_mise.fish の _dotfiles_package_manager を参照。
+if test (_dotfiles_package_manager) = mise
+    begin
+        set -l _lock_flag ~/.config/mise/.mise_last_lock
+        flock -x 9
+        if not test -f $_lock_flag; or test (math (date +%s) - (stat -c %Y $_lock_flag 2>/dev/null; or echo 0)) -gt 86400
+            echo "== Pinning current mise tool versions to global config =="
+            mise_lock_to_current_global
+            touch $_lock_flag
+        end
+    end 9>/tmp/mise_lock_to_current_lock
+end

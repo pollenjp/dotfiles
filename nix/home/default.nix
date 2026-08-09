@@ -5,6 +5,9 @@
     ./options.nix
     ./modules/packages.nix
     ./modules/files.nix
+    ./modules/git.nix
+    ./modules/starship.nix
+    ./modules/mise.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。
