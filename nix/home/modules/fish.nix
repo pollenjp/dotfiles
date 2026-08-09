@@ -25,28 +25,8 @@
 }:
 
 {
-  # 複製元: 000_constant / 260_env_vars
-  home.sessionVariables = {
-    SUDO_EDITOR = "vim";
-    BASE_PATH_TO_WORK = "${config.home.homeDirectory}/workdir";
-    BASE_PATH_TO_GITHUB_COM = "${config.home.homeDirectory}/workdir/github.com";
-  };
-
-  # 複製元: 050_common の fish_add_path --prepend
-  home.sessionPath = [
-    "$HOME/bin"
-    "$HOME/.local/bin"
-  ];
-
-  # 複製元: 060_mise の `mise activate fish` / `mise completion fish`
-  #
-  # NOTE: globalConfig を設定しないので ~/.config/mise/config.toml は
-  #       home-manager が生成しない。言語ランタイムの管理は引き続き mise 自身に任せる。
-  programs.mise = {
-    enable = true;
-    enableFishIntegration = true;
-    enableBashIntegration = false; # bash は次の PR で
-  };
+  # 000_constant / 050_common / 260_env_vars / 060_mise のシェル非依存部分は
+  # modules/shell-common.nix にある (bash と共有)。
 
   # 複製元: 298_starship
   # -> programs.starship.enableFishIntegration = true (modules/starship.nix)

@@ -54,7 +54,21 @@ nix flake update --flake ~/dotfiles/nix
 
 ## 適用
 
-### 初回 (ブートストラップ)
+### 新規マシンの手順
+
+上から順に実行する。**2 と 5 は忘れやすいので注意。**
+
+| # | やること | 備考 |
+| --- | --- | --- |
+| 0 | `hosts/default.nix` にマシンを 1 行追加 | WSL なら `windowsUserName` も |
+| 1 | Nix を入れる（前節） | |
+| 2 | `./nix/scripts/preflight-unlink.sh` | `main.bash setup` 済みのマシンのみ |
+| 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | 初回はこの形 |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | mise のグローバル設定と言語ランタイム |
+| 5 | `~/.config/mise/config.toml` を手で整理 | 既存マシンのみ（後述） |
+| 6 | `chsh` でログインシェルを変更 | 必要なら |
+
+#### 1. 初回のブートストラップ (手順 3)
 
 **`home-manager` コマンドはまだ存在しない。** `programs.home-manager.enable` が CLI を
 profile へ入れるのは *初回の activate が成功した後* なので、1 回目は flake から直接実行する。
@@ -68,7 +82,29 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 > モジュールとバージョンがずれる。上の `~/dotfiles/nix#home-manager` なら
 > lock と同じバージョンが使われる。
 
-`#` の後ろは `nix/hosts/default.nix` の登録名。新しいマシンは同ファイルに 1 行足す。
+`#` の後ろは `nix/hosts/default.nix` の登録名。
+
+#### 2. mise の初期化 (手順 4)
+
+```sh
+./nix/scripts/bootstrap-mise.sh
+```
+
+`~/.config/mise/config.toml` は **Nix 管理下に置いていない**（mise が実行時に書き換える
+ファイルなので store に置けない）。そのため `home-manager switch` だけでは作られず、
+**新規マシンでは go / node が入らないまま**になる。このスクリプトで初期化する。
+
+冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
+
+#### 3. ログインシェルの変更 (手順 6)
+
+`programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
+（`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
+
+```sh
+command -v fish | sudo tee -a /etc/shells
+chsh -s "$(command -v fish)"
+```
 
 ### 2 回目以降
 
@@ -166,6 +202,40 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 | `f` | `201_git` の `git fetch` | `250_alias` の `cd ..` |
 | `ls` | `060_mise` の `eza` | `250_alias` の `eza --group-directories-first -F` |
 
+## bash
+
+`.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
+内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+
+**`main.bash:199-219` の bash-completion 取得が不要になった。**
+curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、
+`programs.bash.enableCompletion` が置き換える。
+
+`~/.common_shellrc.sh` の source は維持している（マシンローカルの逃げ道）。
+
+### bash で壊れていたものを移植時に修正
+
+| 対象 | 症状 |
+| --- | --- |
+| `c` | `alias c='noglob c-func'` の `noglob` は zsh 専用。bash では `noglob: command not found` で失敗していた |
+| `cdrepo` | ガードが fish 構文の `if not command -v ghq` で書かれており、bash では `not` が見つからず終了ステータス 127 = 常に偽。一度も発火しない死んだコードだった |
+| ssh-agent | `ssh-add` の存在確認が無く、未インストール環境では起動のたびにエラーが出ていた |
+
+### 挙動が変わる点
+
+- **bash でも starship プロンプトになる。** レガシーでは starship を初期化しているのは
+  fish だけで、bash は素のプロンプトだった。両シェルで揃えている。
+  戻したい場合は `starship.nix` の `enableBashIntegration` を `false` にする。
+- `glog` などの alias 連鎖（`glog='glo --graph'`）は完全形に展開した（fish 側と同じ形）。
+- `echo-PATH` / `echo-PATH-tr` / `echo-PATH-grep` / `git_get_default_branch` は
+  alias から関数に変えた（動作は同じ）。
+
+### 移植しなかったもの
+
+`025_mingw` と `205_go_path` の cygpath 分岐（Windows は対象外）、`.bash/02_asdf.sh`
+（asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
+bash では元々発火していなかった）。
+
 ## mise との役割分担
 
 | 対象 | 管理者 |
@@ -183,7 +253,31 @@ Nix が CLI ツールを持つ環境では、レガシー経路の起動時パ�
 - `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
 - `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
 
-> ⚠️ **既に書き込まれた 16 エントリは自動では消えない。**
+### `~/.config/mise/config.toml` は Nix 管理下に置かない
+
+mise が実行時に書き換えるファイルなので store には置けない。設定の投入も
+mise 自身のコマンドで行う（config.toml は mise のスキーマであり、Nix 側に
+スナップショットを持たせると形式変更への追随が必要になるため）。
+
+**新規マシンではマシンごとに一度だけ実行する:**
+
+```sh
+./nix/scripts/bootstrap-mise.sh
+```
+
+`[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と
+言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
+触るので冪等で、既存の `[tools]` も壊さない。
+
+> ⚠️ `.config_tmpl/mise/config.toml`（レガシー側のテンプレート）にある `install_before` は
+> 現在の mise では **`minimum_release_age` に改名**されている。旧名は
+> `mise settings ls --all` に存在せず、`mise settings set` してもエラーにならず
+> **黙って無視される**。テンプレート側は以前から効いていなかった可能性が高い。
+
+> ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
+> `home-manager switch` は hermetic に保つ方針。
+
+> ⚠️ **既存マシンでは、既に書き込まれた 16 エントリが自動では消えない。**
 > マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
 > だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
 
@@ -219,10 +313,19 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.* 独自オプション
-│   └── modules/           機能単位のモジュール
+│   ├── options.nix        dotfiles.isWSL / dotfiles.windowsUserName
+│   └── modules/
+│       ├── packages.nix      programs.* を使わない CLI ツール
+│       ├── files.nix         静的な設定ファイルの配置
+│       ├── git.nix           programs.git / programs.delta
+│       ├── starship.nix      programs.starship (設定は素のファイルのまま)
+│       ├── mise.nix          mise 抑止マーカー
+│       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
+│       ├── fish.nix          abbr 88 / function 24
+│       └── bash.nix          alias 88 / 関数 24
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 └── scripts/
-    ├── verify.sh          検証を一括実行する
-    └── preflight-unlink.sh  main.bash が張った symlink を外す
+    ├── verify.sh            検証を一括実行する
+    ├── preflight-unlink.sh  main.bash が張った symlink を外す (移行時に 1 回)
+    └── bootstrap-mise.sh    mise のグローバル設定を初期化する (マシンごとに 1 回)
 ```

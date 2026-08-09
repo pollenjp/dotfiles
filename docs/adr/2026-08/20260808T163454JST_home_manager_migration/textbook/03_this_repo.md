@@ -14,16 +14,29 @@ nix/
 ├── hosts/default.nix      マシン登録簿          <- よく触る
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        独自オプション
+│   ├── options.nix        独自オプション (dotfiles.isWSL / windowsUserName)
 │   └── modules/
-│       ├── packages.nix   入れたい CLI ツール    <- よく触る
-│       └── *.nix          機能ごとの設定        <- よく触る
+│       ├── packages.nix      入れたい CLI ツール      <- よく触る
+│       ├── files.nix         静的な設定ファイルの配置
+│       ├── git.nix           programs.git / programs.delta
+│       ├── starship.nix      programs.starship
+│       ├── mise.nix          mise 抑止マーカー
+│       ├── shell-common.nix  bash/fish 共通の変数と PATH
+│       ├── fish.nix          abbr 88 / function 24  <- よく触る
+│       └── bash.nix          alias 88 / 関数 24      <- よく触る
 ├── files/                 設定ファイルの実体     <- よく触る
 ├── scripts/
-│   ├── verify.sh          検証を一括実行
-│   └── preflight-unlink.sh  main.bash の symlink を外す
+│   ├── verify.sh            検証を一括実行
+│   ├── preflight-unlink.sh  main.bash の symlink を外す (移行時に 1 回)
+│   └── bootstrap-mise.sh    mise の初期化 (マシンごとに 1 回)
 └── README.md
 ```
+
+`modules/` の分け方に決まった規則はないが、おおよそ次の方針で切っている。
+
+- **1 ツール = 1 ファイル**（`git.nix` / `starship.nix`）
+- **複数シェルで共有するもの**は `shell-common.nix` に寄せる
+- シェル本体は分量が大きいので `fish.nix` / `bash.nix` に分離
 
 ## なぜ `nix/` の下に閉じているのか
 
@@ -66,10 +79,35 @@ home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
   username = "pollenjp";
   system = "x86_64-linux";
   isWSL = true;
+  windowsUserName = "polle";
 };
 ```
 
 1 マシン 1 行。これだけ。
+
+<details><summary>windowsUserName とは</summary>
+
+WSL の**ホスト側 Windows** のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
+Linux 側の `home.username` とは別物なので独立したオプションにしてある。
+
+現在の用途は 1Password の `op-ssh-sign` のパス 1 箇所だけ。従来は `.gitconfig` に
+WSL 用と Windows 用のパスがコメントアウトで並んでおり、手で切り替える運用だった
+（切り替えたまま誤ってコミットする事故の温床）。
+
+値は WSL 上で次を実行すると判る。
+
+```sh
+pwsh.exe -NoProfile -Command '$env:USERNAME'
+```
+
+**このコマンドを Nix の評価時に実行して自動取得することはできない。**
+Nix の評価は純粋で外部コマンドを呼べず、`--impure` を使うと `nix flake check` が
+動かなくなるため。だから `hosts/default.nix` に直接書く。
+
+未設定のままだと 1Password の signer は設定されず、通常の `ssh-keygen` で署名する
+（これも正当な構成なのでエラーにはしないが、`isWSL = true` なら警告が出る）。
+
+</details>
 
 <details><summary>なぜ username を直接書くのか</summary>
 
