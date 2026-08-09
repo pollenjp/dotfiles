@@ -265,9 +265,14 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ./nix/scripts/bootstrap-mise.sh
 ```
 
-`[settings]`（`install_before` / `lockfile` / `fetch_remote_versions_timeout`）と
+`[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と
 言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
 触るので冪等で、既存の `[tools]` も壊さない。
+
+> ⚠️ `.config_tmpl/mise/config.toml`（レガシー側のテンプレート）にある `install_before` は
+> 現在の mise では **`minimum_release_age` に改名**されている。旧名は
+> `mise settings ls --all` に存在せず、`mise settings set` してもエラーにならず
+> **黙って無視される**。テンプレート側は以前から効いていなかった可能性が高い。
 
 > ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
 > `home-manager switch` は hermetic に保つ方針。
@@ -308,8 +313,16 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.* 独自オプション
-│   └── modules/           機能単位のモジュール
+│   ├── options.nix        dotfiles.isWSL / dotfiles.windowsUserName
+│   └── modules/
+│       ├── packages.nix      programs.* を使わない CLI ツール
+│       ├── files.nix         静的な設定ファイルの配置
+│       ├── git.nix           programs.git / programs.delta
+│       ├── starship.nix      programs.starship (設定は素のファイルのまま)
+│       ├── mise.nix          mise 抑止マーカー
+│       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
+│       ├── fish.nix          abbr 88 / function 24
+│       └── bash.nix          alias 88 / 関数 24
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 └── scripts/
     ├── verify.sh            検証を一括実行する

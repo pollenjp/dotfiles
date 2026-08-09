@@ -109,9 +109,35 @@ readlink ~/.config/starship.toml   # /nix/store/... を指していれば成功
 home-manager generations
 ```
 
-### 6. mise の設定を削る
+### 6. mise を初期化する
 
-**ここを忘れやすい。** 前のステップまでで「これから注入されること」は止まるが、**既に `~/.config/mise/config.toml` に書き込まれた 16 エントリは残ったまま**。
+```sh
+./nix/scripts/bootstrap-mise.sh
+```
+
+**`~/.config/mise/config.toml` は Nix 管理下に置いていない。** mise が実行時に自分で
+書き換えるファイルなので、read-only な store には置けないから（[02 章の「store に置けない
+ファイル」](./02_home_manager.md)を参照）。
+
+そのため `home-manager switch` だけではこのファイルは作られない。**新規マシンでこれを
+飛ばすと go / node が入らないまま**になる。
+
+<details><summary>なぜ Nix で seed せず mise のコマンドで入れるのか</summary>
+
+`config.toml` は mise のスキーマなので、Nix 側にスナップショットを持たせると
+mise が形式を変えたときに追随が必要になる。`mise settings set` なら該当キーだけを
+触るので冪等で、既存の `[tools]` も壊さない。store からコピーする方式だと
+read-only なので `chmod u+w` も要る。
+
+`home.activation` に入れていないのは、`mise use -g` がネットワークアクセスと
+インストールを伴うため。`home-manager switch` は hermetic に保ちたい。
+
+</details>
+
+### 7. 既存マシンのみ: mise の設定を削る
+
+**ここを忘れやすい。** 手順 6 までで「これから注入されること」は止まるが、**既に
+`~/.config/mise/config.toml` に書き込まれた 16 エントリは残ったまま**。
 
 ```sh
 $EDITOR ~/.config/mise/config.toml
@@ -120,6 +146,24 @@ $EDITOR ~/.config/mise/config.toml
 `go` / `node` / `usage` だけ残し、Nix に移したツール (`bat` `eza` `fd-find` `procs` `ripgrep` `fzf` `ghq` `jq` `starship` `watchexec` `zellij` `fish` `cargo-binstall`) を消す。
 
 消さないと **mise の shim が PATH の先頭にいるため、Nix で入れたツールが使われない**。
+
+<details><summary>shim が PATH の先頭に来る理由</summary>
+
+`mise activate` は起動時に mise の shim ディレクトリを PATH の**先頭**へ差し込む。
+そのため mise のリストに残っているツールは、Nix の `~/.nix-profile/bin` にある同名の
+ものより先に見つかる。「Nix に移したはずなのに古いバージョンが動く」の原因はほぼこれ。
+
+</details>
+
+### 8. ログインシェルを変える (必要なら)
+
+`programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない。
+`/etc/passwd` の変更は home-manager の管轄外だから。
+
+```sh
+command -v fish | sudo tee -a /etc/shells
+chsh -s "$(command -v fish)"
+```
 
 ## 困ったときの戻し方
 

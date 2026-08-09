@@ -2,11 +2,12 @@
 
 | 項目 | 内容 |
 | --- | --- |
-| ステータス | 提案中 (Proposed) — draft PR [#18](https://github.com/pollenjp/dotfiles/pull/18) |
-| 日付 | 2026-08-08 (JST) |
+| ステータス | 実装中 (Accepted / In progress) — Stage 1-3 はマージ済み、Stage 4-5 はレビュー中 |
+| 日付 | 2026-08-08 (JST) / 最終更新 2026-08-09 |
 | 決定者 | pollenjp |
-| 関連 | PR #18 / ブランチ `claude/home-manager-dotfile-management-id65ra` |
+| 関連 PR | [#18](https://github.com/pollenjp/dotfiles/pull/18) Stage 1-3 (**merged**) / [#19](https://github.com/pollenjp/dotfiles/pull/19) Stage 4 / [#20](https://github.com/pollenjp/dotfiles/pull/20) Stage 5-1 fish / [#21](https://github.com/pollenjp/dotfiles/pull/21) Stage 5-2 bash |
 | 補足資料 | [textbook/](./textbook/README.md)（新規参画者向けの解説） |
+| 運用手順 | [`nix/README.md`](../../../../nix/README.md)（日常運用はこちら） |
 
 ---
 
@@ -82,10 +83,47 @@ dotfiles の管理を [Nix home-manager](https://nix-community.github.io/home-ma
 | `shell/060_mise.sh` の `sed -i` 注入 | `home.packages` による宣言。マーカーファイルで旧注入を停止 |
 | `shell/252_alias_mise.sh` の日次 pin | `flake.lock` |
 | `cargo-binstall` によるソースビルド | nixpkgs のバイナリキャッシュ |
-| `git-delta` が未管理 | `home.packages` に含める |
-| `.gitconfig` の 1Password パス手動コメント切替 | `lib.mkIf config.dotfiles.isWSL` による自動分岐 |
-| bash-completion を `curl` + `tar` | `programs.bash.enableCompletion` |
+| `git-delta` が未管理 | `programs.delta`（本体も入る） |
+| `.gitconfig` の 1Password パス手動コメント切替 | `lib.mkIf` による自動分岐。パス中の Windows ユーザー名は `dotfiles.windowsUserName` として host から渡す |
+| bash-completion を `curl` + `tar` で 2.11 を取得 | `programs.bash.enableCompletion`（nixpkgs の 2.18.0） |
 | fisher（curl インストーラ + 日次 update） | `programs.fish.plugins` + `fishPlugins.*` |
+| `.bash/03_mise.sh` が起動毎に mise 補完を書き出す | `programs.mise`（store 上の静的ファイル） |
+| シェル断片を数字プレフィックスで読み込み順制御 | 役割別の Nix モジュール（`fish.nix` / `bash.nix` / `shell-common.nix`） |
+
+### 実装したモジュール
+
+| ファイル | 役割 |
+| --- | --- |
+| `home/modules/packages.nix` | `programs.*` を使わない CLI ツール |
+| `home/modules/files.nix` | 静的な設定ファイルの配置 |
+| `home/modules/git.nix` | `programs.git` / `programs.delta` |
+| `home/modules/starship.nix` | `programs.starship`（設定は素のファイルのまま） |
+| `home/modules/mise.nix` | mise 抑止マーカー |
+| `home/modules/shell-common.nix` | bash/fish 共通（`sessionVariables` / `sessionPath` / `programs.mise`） |
+| `home/modules/fish.nix` | abbr 88 / function 24 / `interactiveShellInit` |
+| `home/modules/bash.nix` | alias 88 / 関数 24 / `initExtra` |
+| `scripts/verify.sh` | 検証の一括実行 |
+| `scripts/preflight-unlink.sh` | `main.bash` が張った symlink を外す |
+| `scripts/bootstrap-mise.sh` | mise のグローバル設定を初期化（マシンごとに 1 回） |
+
+### 移植中に見つかった既存のバグ
+
+平坦化・移植の過程で、レガシー側に元からあった不具合が表面化した。いずれも再現を確認した上で修正している。
+
+| 対象 | 症状 |
+| --- | --- |
+| `c`（bash） | `alias c='noglob c-func'` の `noglob` は zsh 専用。bash では `noglob: command not found` で失敗していた |
+| `cdrepo`（bash） | ガードが fish 構文の `if not command -v ghq`。bash では `not` が無く終了ステータス 127 = 常に偽で、一度も発火しない死んだコードだった |
+| ssh-agent（bash/fish 両方） | `ssh-add` の存在確認が無く、未インストール環境では起動のたびにエラーが出ていた |
+| mise の `install_before` | 現在の mise では `minimum_release_age` に改名済み。旧名は `settings ls` に存在せず、書いても**エラーにならず無視される** |
+| mise 設定の seeding | Stage 4 のマーカーがテンプレート seeding も止めるため、**新規マシンでは `~/.config/mise/config.toml` が作られない**。`bootstrap-mise.sh` で対処 |
+
+平坦化で判明した重複定義（レガシーでは読み込み順で後勝ち、いずれも後勝ち側を採用）:
+
+| 名前 | 先に定義 | 後に定義（採用） |
+| --- | --- | --- |
+| `f` | `201_git` の `git fetch` | `250_alias` の `cd ..` |
+| `ls` | `060_mise` の `eza` | `250_alias` の `eza --group-directories-first -F` |
 
 ### store 管理の例外
 
@@ -143,7 +181,12 @@ dotfiles の管理を [Nix home-manager](https://nix-community.github.io/home-ma
 - ⚠️ **編集ワークフローが変わる。** store 管理のため、設定を変えたら `home-manager switch` が必要になる。symlink 直接編集の即時反映は失われる。
 - ⚠️ **`mise activate` は shim を PATH の先頭に差す。** `.zsh/103_mise.zsh` は `shell/0xx_*` の**後**にロードされるため、mise のリストに残っている限り mise 側が Nix 側を上書きする。**Stage 4 のリスト削減は美観ではなく必須。**
 - ⚠️ **既に `~/.config/mise/config.toml` に書き込まれた 16 エントリは自動では消えない。** マシン毎に一度だけ手で言語ランタイムのみへ削る必要がある。
-- ⚠️ **Stage 5 で `programs.bash` が `~/.bashrc` を所有する。** 事前に `append_load_rc_line` (`script/utils.bash:25-49`) が追記したガード付き stanza と、bash-completion のローダ行 (`main.bash:213-219`) を削除しないと `Existing file ... would be clobbered` で失敗する。
+- ⚠️ **Stage 5 で `programs.bash` が `~/.bashrc` を所有する。** `~/.bashrc` は symlink ではなく `main.bash` が**追記**したファイルなので `preflight-unlink.sh` では外せない。事前に `append_load_rc_line` (`script/utils.bash:25-49`) が追記したガード付き stanza と、bash-completion のローダ行 (`main.bash:213-219`) を手で削除しないと `Existing file ... would be clobbered` で失敗する。
+- ⚠️ **`git config --global` が使えなくなる。** 書込先の `~/.config/git/config` が store 上の read-only ファイルになるため。マシン固有の設定は `~/.gitconfig` を作れば足せる（git の読み込み順により home-manager の設定を上書きできる）。同じ理由で `~/.gitconfig` の symlink は必ず外すこと。
+- ⚠️ **タグにも署名が付くようになる。** `signing.signByDefault` が `commit.gpgSign` と `tag.gpgSign` の両方を立てるため。元は commit のみだった。
+- ⚠️ **bash でも starship プロンプトになる。** レガシーで starship を初期化しているのは fish だけで、bash は素のプロンプトだった。両シェルで揃える判断だが、実質的な挙動変更。戻す場合は `starship.nix` の `enableBashIntegration` を `false` にする。
+- ⚠️ **`bootstrap-mise.sh` の実行を忘れると新規マシンで go / node が入らない。** `~/.config/mise/config.toml` を Nix 管理下に置いていないため、`home-manager switch` だけでは作られない。
+- **ログインシェルの変更は手作業。** `programs.fish.enable` はインストールのみで `chsh` はしない。
 - ⚠️ **`-b bak` は `<file>.bak` が既に存在すると失敗する。** 部分失敗からのリトライ時は古い `.bak` を先に消すこと。
 - ⚠️ **x86_64-darwin (Intel Mac) は対象外。** nixpkgs 26.11 でサポートが打ち切られ、評価時点で `Nixpkgs 26.11 has dropped support for x86_64-darwin.` で落ちる。
 - **移行期間中は設定が 2 箇所に存在する。** 意図的な選択だが、片方だけ直す事故に注意。Stage 6 で収束を判断する。
@@ -152,20 +195,51 @@ dotfiles の管理を [Nix home-manager](https://nix-community.github.io/home-ma
 
 ## 6. 検証 (Verification)
 
-nixpkgs 26.11pre (`70ce2343`) / home-manager master (`7834e825`) に対して、Stage 1 の内容を検証した。
+nixpkgs 26.11pre (`70ce2343`) / home-manager master (`7834e825`) に対して検証した。
+Stage 2 以降は `./nix/scripts/verify.sh` で一括実行できる（実際の `$HOME` には触れない）。
+
+**全ステージ共通**
 
 - `nix flake check --all-systems --no-build` が 3 system 全てで通過（`all checks passed!`）
-- `nix build .#homeConfigurations.sandbox.activationPackage` が成功
-- 使い捨て `$HOME` (`/tmp/hm-sandbox`) への `activate` が成功
-- 再実行しても世代が増えないこと（冪等）を確認
-- 導入対象 18 個のバイナリがすべて profile に存在することを確認
-- `nixfmt --check` が全 `.nix` ファイルで通過
+- `config.warnings` が空
+- 使い捨て `$HOME` (`/tmp/hm-sandbox`) への `activate` が成功し、再実行しても世代が増えない（冪等）
+- `nixfmt --check` / `shfmt` / `shellcheck` が通過
+
+**Stage 3（ファイル配置）**
+
+- 配置された 9 ファイルすべてが `/nix/store` を指すこと
+- 書き換えた参照先（`~/.vim/common.vim` など）が配置後に実在すること
+
+**Stage 4（git / starship / mise）**
+
+- 生成された git config の全セクションを目視確認（`user` / `includeIf` / `ignore` 含む）
+- WSL 版と非 WSL 版の差分が op-ssh-sign の 1 行のみ
+- `isWSL = true` かつ `windowsUserName` 未設定のホストで警告が出て、signer が既定へフォールバックすること
+- 偽 `mise` を使った機能テストで、マーカー有無による挙動差を確認
+  （なし: 16 エントリ注入 + `mise install` / あり: 一切触らない）
+
+**Stage 5（シェル）**
+
+- fish: abbr 88/88・function 24/24 がレガシー定義と一致（欠落・余剰ゼロ）
+- bash: レガシー 92 種 → alias 88 + 関数化 4 で完全一致
+- 生成された `config.fish` と function 24 個が `fish -n`、`.bashrc` が `bash -n` を通過
+- **実際に対話シェルを起動**してエラー出力が無いこと、vi モード / greeting 抑制 /
+  starship / mise / kubectl 補完が有効なことを確認
+- Nix の `${` エスケープ漏れが無いこと（`touch-vscode-workspace` を実行して
+  ヒアドキュメントから正しい JSON が生成されるところまで確認）
 
 検証で判明し、その場で修正した点:
 
 - `x86_64-darwin` は nixpkgs 26.11 で評価が落ちるため対象 system から除外した
 - `nixfmt-rfc-style` は非推奨（`now the same as pkgs.nixfmt`）だったため `nixfmt` に変更した
 - `home.stateVersion` の有効値は `26.11` が最大。greenfield なので最新に合わせた
+- `programs.git.delta` および `userName`/`userEmail`/`aliases`/`extraConfig` は
+  home-manager 26.11 で改名・非推奨になっていたため新 API へ移行した
+- **初回は `home-manager` コマンドが存在しない**（`programs.home-manager.enable` が
+  CLI を入れるのは初回 activate の後）。flake に `packages.<system>.home-manager` を
+  追加し、`nix run ~/dotfiles/nix#home-manager -- switch ...` で解決した
+- `activationPackage` の `home-files` は store への symlink なので、`find` に `-L` が
+  必要。付けないと 1 件も列挙されず「配置物なし」に見える
 
 > **検証環境の制約**: 作業環境は `codeload.github.com` がネットワークポリシーで遮断されており、`github:` 形式 input のソース取得ができない。検証は input を git プロトコル / channels tarball に差し替えて実施した（同一リビジョン）。`flake.lock` の narHash 照合のみ未実施。
 
@@ -193,11 +267,25 @@ find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
 nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
 
+# 5. mise のグローバル設定を初期化する (マシンごとに 1 回)
+#    ~/.config/mise/config.toml は Nix 管理下に置いていないため、
+#    これを飛ばすと新規マシンでは go / node が入らないままになる。
+./scripts/bootstrap-mise.sh
+
+# 6. 既存マシンのみ: ~/.config/mise/config.toml から Nix へ移した
+#    CLI ツールを手で削り、go / node / usage だけ残す
+$EDITOR ~/.config/mise/config.toml
+
 # 日常 (初回以降は profile に入るので短く書ける)
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 home-manager generations
 nix flake update --flake ~/dotfiles/nix
 ```
+
+`programs.fish.enable` は fish を**インストールするだけ**でログインシェルには設定しない
+（`/etc/passwd` の変更は home-manager の管轄外）。必要なら別途 `chsh` する。
+
+手順の詳細と新規マシン向けチェックリストは [`nix/README.md`](../../../../nix/README.md) にある。
 
 > `nix run home-manager -- ...`（レジストリ経由）は使わないこと。nixpkgs 同梱の別バージョンが
 > 実行され、`flake.lock` で固定した home-manager モジュールとバージョンがずれる。
