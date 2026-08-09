@@ -85,9 +85,11 @@ jobs:
             find nix -name "*.nix" -print0 | xargs -0 nixfmt --check
           '
 
+      # nix/scripts/ だけでなく nix/files/ 配下 (Claude Code のフックや
+      # skill に同梱するスクリプト) も対象にする。
       - name: shfmt / shellcheck
         run: |
           nix develop ./nix --command bash -c '
-            shfmt -d nix/scripts/*.sh
-            shellcheck nix/scripts/*.sh
+            find nix -name "*.sh" -print0 | xargs -0 shfmt -d
+            find nix -name "*.sh" -print0 | xargs -0 shellcheck
           '

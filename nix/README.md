@@ -303,6 +303,23 @@ bash では元々発火していなかった）。
 **追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
 書き方は各ディレクトリの `README.md` を参照。
 
+### 新しい skill を作るとき
+
+`dotfiles-claude-skill` skill（`nix/files/claude/skills/dotfiles-claude-skill/`）が
+置き場所と反映手順を持っている。**別のリポジトリで作業している最中でも**、
+「`~/.claude` 用の skill を作りたい」と言えばここへ作らせる。
+
+雛形だけ欲しいなら直接叩ける。
+
+```sh
+~/.claude/skills/dotfiles-claude-skill/scripts/new.sh skill <名前>
+# skill / agent / command のいずれか。git add まで済ませる
+```
+
+後述のガードフックは「解決先が `/nix/store` 配下か」で判定するため、
+**まだ存在しないものを新規に作る場合は発火しない**（`~/.claude/skills/` 直下に
+試作を置く用途を潰さないための仕様）。そこを埋めるのがこの skill。
+
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
 `~/.claude/` 配下は **Claude Code 自身が書き換える**。`skills/` には `manifest.json`
@@ -462,8 +479,10 @@ nix/
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
-│       └── bash.nix          alias 88 / 関数 24
+│       ├── bash.nix          alias 88 / 関数 24
+│       └── claude.nix        ~/.claude/ への配置 (readDir で自動列挙)
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
+│   └── claude/            CLAUDE.md / skills / agents / commands / hooks
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── verify.sh                   検証を一括実行する

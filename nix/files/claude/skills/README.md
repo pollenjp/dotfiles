@@ -10,6 +10,10 @@
 
 ## skill の追加
 
+雛形作りから適用までは `dotfiles-claude-skill` skill が案内する。
+別のリポジトリで作業していて「`~/.claude` 用の skill を作りたい」となったときに
+起動し、`~/.claude/` ではなくここへ作らせる。手で作るなら以下。
+
 ```
 nix/files/claude/skills/<名前>/SKILL.md
 ```
