@@ -217,7 +217,26 @@ Nix が CLI ツールを持つ環境では、レガシー経路の起動時パ�
 - `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
 - `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
 
-> ⚠️ **既に書き込まれた 16 エントリは自動では消えない。**
+### `~/.config/mise/config.toml` は Nix 管理下に置かない
+
+mise が実行時に書き換えるファイルなので store には置けない。設定の投入も
+mise 自身のコマンドで行う（config.toml は mise のスキーマであり、Nix 側に
+スナップショットを持たせると形式変更への追随が必要になるため）。
+
+**新規マシンではマシンごとに一度だけ実行する:**
+
+```sh
+./nix/scripts/bootstrap-mise.sh
+```
+
+`[settings]`（`install_before` / `lockfile` / `fetch_remote_versions_timeout`）と
+言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
+触るので冪等で、既存の `[tools]` も壊さない。
+
+> ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
+> `home-manager switch` は hermetic に保つ方針。
+
+> ⚠️ **既存マシンでは、既に書き込まれた 16 エントリが自動では消えない。**
 > マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
 > だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
 
