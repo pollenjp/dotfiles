@@ -54,20 +54,68 @@ nix flake update --flake ~/dotfiles/nix
 
 ## 適用
 
+### まとめて実行する
+
+次節の手順表をそのまま実行するスクリプトがある。引数なしで起動するとメニューが出る。
+
+```sh
+./nix/scripts/setup.sh
+```
+
+```
+  対象ホスト: pollenjp@wsl  (h で変更)
+
+  ❯ 新しいマシン適用
+    既存マシン更新
+    カスタム
+    終了
+```
+
+| 選択肢 | 実行される手順 |
+| --- | --- |
+| 新しいマシン適用 | 1 → 2 → 3 → 4 → 6 |
+| 既存マシン更新 | 3 (`home-manager switch`) だけ |
+| カスタム | 手順を 1 つずつチェックして選ぶ |
+
+操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
+カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
+
+対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
+（WSL なら `<user>@wsl` を優先）。違うものを使うなら `h` で選び直すか `--host <名前>`。
+
+自動化していないのは手順 0（`hosts/default.nix` への追加）と
+手順 5（mise の `config.toml` 整理）だけ。手順 7 (`chsh`) は
+「必要なら」なのでプリセットには入れていないが、カスタムから選べる。
+
+メニューを出さずに実行することもできる。
+
+```sh
+./nix/scripts/setup.sh --new-machine            # 「新しいマシン適用」と同じ
+./nix/scripts/setup.sh --update                 # 「既存マシン更新」と同じ
+./nix/scripts/setup.sh --steps switch,bootstrap-mise
+./nix/scripts/setup.sh --list                   # 手順の id 一覧
+./nix/scripts/setup.sh --new-machine --dry-run  # 走るコマンドを見るだけ
+```
+
+Nix が入る前に走るので、依存は bash / coreutils / curl のみ
+（jq も fzf も使えないのでメニューは自前描画）。
+`bootstrap-*.sh` は glob で自動列挙するため、スクリプトを足しても
+`setup.sh` の編集は要らない。
+
 ### 新規マシンの手順
 
-上から順に実行する。**2 と 4 と 6 は忘れやすいので注意。**
+上から順に実行する。**2 と 4 と 6 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
 
-| # | やること | 備考 |
-| --- | --- | --- |
-| 0 | `hosts/default.nix` にマシンを 1 行追加 | WSL なら `windowsUserName` も |
-| 1 | Nix を入れる（前節） | |
-| 2 | `./nix/scripts/preflight-unlink.sh` | `main.bash setup` 済みのマシンのみ |
-| 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | 初回はこの形 |
-| 4 | `./nix/scripts/bootstrap-mise.sh` | mise のグローバル設定と言語ランタイム |
-| 5 | `~/.config/mise/config.toml` を手で整理 | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | Claude Code のガードフック登録 |
-| 7 | `chsh` でログインシェルを変更 | 必要なら |
+| # | やること | `--steps` の id | 備考 |
+| --- | --- | --- | --- |
+| 0 | `hosts/default.nix` にマシンを 1 行追加 | — | WSL なら `windowsUserName` も |
+| 1 | Nix を入れる（前節） | `nix-install` | |
+| 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
+| 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | `switch` | 初回はこの形 |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
+| 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -115,6 +163,9 @@ chsh -s "$(command -v fish)"
 ```sh
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 ```
+
+`./nix/scripts/setup.sh --update`（メニューの「既存マシン更新」）でも同じことをする。
+ホスト名を覚えていなくてよいのでこちらが楽。
 
 **`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
 Nix インストーラが用意する profile スクリプトを読み込む (ログインし直すか、以下を実行):
@@ -414,7 +465,9 @@ nix/
 │       └── bash.nix          alias 88 / 関数 24
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 └── scripts/
-    ├── verify.sh            検証を一括実行する
-    ├── preflight-unlink.sh  main.bash が張った symlink を外す (移行時に 1 回)
-    └── bootstrap-mise.sh    mise のグローバル設定を初期化する (マシンごとに 1 回)
+    ├── setup.sh                   「適用」の手順を選んで実行する (入口)
+    ├── verify.sh                   検証を一括実行する
+    ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
+    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
+    └── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
 ```
