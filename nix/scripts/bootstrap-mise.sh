@@ -34,7 +34,12 @@ fi
 
 echo "==> settings"
 # 複製元: .config_tmpl/mise/config.toml の [settings]
-mise settings set install_before 9d
+#
+# NOTE: テンプレートの install_before は現在の mise では minimum_release_age に
+#       改名されている。install_before は `mise settings ls --all` に存在せず、
+#       set しても黙って書き込まれるだけで **無視される** (エラーにならないので
+#       気付きにくい)。
+mise settings set minimum_release_age 9d
 mise settings set lockfile true
 mise settings set fetch_remote_versions_timeout 14d
 
