@@ -236,26 +236,28 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
 
-## Claude Code の skill
+## Claude Code
 
-`nix/files/claude/skills/<名前>/` に置いたディレクトリが `~/.claude/skills/<名前>` へ
-配置される。`nix/home/modules/claude.nix` が `readDir` で自動列挙するので、
-**skill を足すときに `.nix` を編集する必要はない**。
+`nix/files/claude/` 配下を `~/.claude/` へ配置する。
 
-```
-nix/files/claude/skills/my-skill/SKILL.md   ->  ~/.claude/skills/my-skill/SKILL.md
-```
+| 配置先 | 実体 | 単位 |
+| --- | --- | --- |
+| `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル |
+| `~/.claude/skills/<名前>/` | `nix/files/claude/skills/<名前>/` | ディレクトリ |
+| `~/.claude/agents/<名前>.md` | `nix/files/claude/agents/<名前>.md` | ファイル |
+| `~/.claude/commands/<名前>.md` | `nix/files/claude/commands/<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
 
-`scripts/` `references/` などの補助ファイルも同じディレクトリに置けばまとめて配置される。
-書き方は [`nix/files/claude/skills/README.md`](./files/claude/skills/README.md) を参照。
+`nix/home/modules/claude.nix` が各ディレクトリを `readDir` で自動列挙するので、
+**追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
+書き方は各ディレクトリの `README.md` を参照。
 
-### なぜディレクトリごとではなく skill 単位で symlink するのか
+### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
-`~/.claude/skills/` は **Claude Code 自身が書き換える**。`manifest.json` があり、
-Anthropic 配信の skill（`pdf` / `docx` / `xlsx` / `pptx` など）がここへ入る。
+`~/.claude/` 配下は **Claude Code 自身が書き換える**。`skills/` には `manifest.json`
+があり、Anthropic 配信の skill（`pdf` / `docx` / `xlsx` / `pptx` など）がここへ入る。
 ディレクトリごと store の symlink にすると、それらの導入・更新が壊れる。
 
-skill を 1 つずつ配置すれば、Claude Code 管理のものと**兄弟として並ぶ**だけで衝突しない。
+中身を 1 つずつ配置すれば、Claude Code 管理のものと**兄弟として並ぶ**だけで衝突しない。
 
 ```
 ~/.claude/skills/
@@ -264,9 +266,24 @@ skill を 1 つずつ配置すれば、Claude Code 管理のものと**兄弟と
 └── my-skill -> /nix/store/…   <- Nix 管理
 ```
 
-> `agents/` と `commands/` も同じ構造なので、必要になれば `claude.nix` に
-> 数行足すだけで同様に管理できる。`settings.json` は Claude Code が書き換える
-> ため（権限の「常に許可」など）store 管理には向かない。
+### ⚠️ `~/.claude/` を直接編集しないこと
+
+store 上の read-only ファイルへの symlink なので、編集は実行ユーザーによって
+**壊れ方が違う**。
+
+| 実行者 | 直接編集した場合 |
+| --- | --- |
+| 一般ユーザー | `Permission denied`（明確に失敗する） |
+| **root** | **黙って成功し store が破損する**（`nix store verify` が hash 不一致を検出。変更は次の GC やリビルドで失われ、エラーも出ない） |
+
+正しい手順はリポジトリ側を編集して `home-manager switch`。この注意は
+`~/.claude/CLAUDE.md`（= `nix/files/claude/CLAUDE.md`）にも書いてあり、
+**Claude 自身が全セッションで読む**ようになっている。
+
+### 管理しないもの
+
+`settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と
+Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）。
 
 ## mise との役割分担
 
