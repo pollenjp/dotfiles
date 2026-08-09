@@ -25,6 +25,9 @@
     username = "pollenjp";
     system = "x86_64-linux";
     isWSL = true;
+    # ホスト側 Windows のユーザー名。1Password の op-ssh-sign のパス
+    # (/mnt/c/Users/<名前>/AppData/...) の組み立てに使う。
+    windowsUserName = "polle";
   };
 
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。
