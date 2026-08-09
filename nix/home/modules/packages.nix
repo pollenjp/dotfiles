@@ -24,13 +24,15 @@
     jq
     watchexec
     zellij
-    fish
 
-    # starship は programs.starship (modules/starship.nix) が入れるので
-    # ここには書かない。
-    # delta / git-lfs も同様に programs.git (modules/git.nix) が入れる。
+    # 以下は対応する programs.* モジュールが入れるのでここには書かない:
+    #   starship -> modules/starship.nix
+    #   delta / git-lfs -> modules/git.nix
+    #   fish -> modules/fish.nix
+    #   mise -> modules/fish.nix (programs.mise)
+    #
     # .gitconfig が pager = delta を要求しているのに git-delta が
-    # どの管理下にも無かった問題は、そちらで解消している。
+    # どの管理下にも無かった問題は modules/git.nix で解消している。
 
     ##########################################
     # これまでどの管理下にも無かった依存
@@ -38,9 +40,5 @@
     tmux
     vim
     neovim
-
-    # 言語ランタイム (node/go) の管理は引き続き mise が担うので、
-    # mise 自体は Nix で入れる
-    mise
   ];
 }

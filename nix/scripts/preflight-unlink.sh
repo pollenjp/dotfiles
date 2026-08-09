@@ -28,11 +28,16 @@ targets=(
   # home-manager の設定を黙って上書きしてしまう。必ず外すこと。
   "${HOME}/.gitconfig"
   "${HOME}/.config/git/ignore"
+  # Stage 5 (fish) で追加。
+  # fish_plugins は fisher 用の一覧で、programs.fish.plugins に置き換わったため
+  # 配置自体が不要になった。残っていても害はないが外しておく。
+  "${HOME}/.config/fish/config.fish"
+  "${HOME}/.config/fish/fish_plugins"
 )
 
-# Stage 5 以降で管理対象になったら、ここへ移す:
-#   "${HOME}/.config/fish/config.fish"
-#   "${HOME}/.config/fish/fish_plugins"
+# Stage 5 (bash) で管理対象になったら、ここへ移す:
+#   ~/.bashrc は symlink ではなく main.bash が **追記** したファイルなので
+#   unlink ではなく、追記された stanza を手で削る必要がある。
 
 unlinked=0
 skipped=0

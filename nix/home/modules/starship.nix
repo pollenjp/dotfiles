@@ -18,10 +18,14 @@
   programs.starship = {
     enable = true;
 
-    # シェル設定を home-manager が所有するのは Stage 5 から。
-    # それまで有効にすると、まだ管理していない rc に init を差し込もうとする。
+    # fish は Stage 5 で home-manager が所有するようになったので有効化する
+    # (複製元: .fish/298_starship.fish の `starship init fish | source`)。
+    enableFishIntegration = true;
+
+    # bash は次の PR で home-manager が所有する。それまで有効にすると
+    # まだ管理していない rc に init を差し込もうとする。
     enableBashIntegration = false;
-    enableFishIntegration = false;
+
     # zsh は Nix の対象外なので常に false
     enableZshIntegration = false;
   };

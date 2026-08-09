@@ -146,6 +146,26 @@ nix flake update --flake ~/dotfiles/nix
 read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
 よい（git の読み込み順により home-manager の設定を上書きできる）。
 
+## fish
+
+`.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。
+レガシー側の数字プレフィックスによる読み込み順制御はやめ、役割別に整理してある。
+順序が本質的に効くもの (PATH の前置、mise activate、starship init) だけを
+`interactiveShellInit` の並び順で表現している。
+
+内訳: abbr 88 個 / function 24 個 / `interactiveShellInit`。
+
+**fisher は不要になった。** `programs.fish.plugins` が `fishPlugins.autopair` と
+`fishPlugins.fzf-fish` を宣言的に入れるため、curl でのインストーラ取得と日次
+`fisher update` が消える。`~/.config/fish/fish_plugins` も不要。
+
+平坦化で判明した重複 (レガシーでは読み込み順で後勝ちだった):
+
+| 名前 | 先に定義 | 後に定義 (採用) |
+| --- | --- | --- |
+| `f` | `201_git` の `git fetch` | `250_alias` の `cd ..` |
+| `ls` | `060_mise` の `eza` | `250_alias` の `eza --group-directories-first -F` |
+
 ## mise との役割分担
 
 | 対象 | 管理者 |
