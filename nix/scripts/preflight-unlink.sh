@@ -13,7 +13,7 @@
 
 set -eu -o pipefail
 
-# home-manager が管理するパス (Stage 3 時点)
+# home-manager が管理するパス (Stage 4 時点)
 targets=(
   "${HOME}/.config/starship.toml"
   "${HOME}/.config/zellij/config.kdl"
@@ -22,11 +22,15 @@ targets=(
   "${HOME}/.tmux.conf"
   "${HOME}/.vimrc"
   "${HOME}/.vim"
+  # Stage 4 で追加。
+  # home-manager は ~/.config/git/config を書くが、git は ~/.gitconfig を
+  # **後に**読むため、main.bash が張った ~/.gitconfig の symlink が残っていると
+  # home-manager の設定を黙って上書きしてしまう。必ず外すこと。
+  "${HOME}/.gitconfig"
+  "${HOME}/.config/git/ignore"
 )
 
-# Stage 4 以降で管理対象になったら、ここへ移す:
-#   "${HOME}/.gitconfig"
-#   "${HOME}/.config/git/ignore"
+# Stage 5 以降で管理対象になったら、ここへ移す:
 #   "${HOME}/.config/fish/config.fish"
 #   "${HOME}/.config/fish/fish_plugins"
 

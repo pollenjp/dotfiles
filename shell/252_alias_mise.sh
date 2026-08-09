@@ -20,14 +20,21 @@ mise_lock_to_current_global() {
 # 1 日 1 回だけ pin する。読み込み順 (060_mise.sh → 252_alias_mise.sh) により
 # mise install の完了後に実行される。
 # フラグ (mtime) で 1 日 1 回、flock で多重起動時の競合を制御する。
-_mise_lock_flag=~/.config/mise/.mise_last_lock
-{
-  flock -x 9
-  if [ ! -f "${_mise_lock_flag}" ] || \
-     [ "$(( $(date +%s) - $(stat -c %Y "${_mise_lock_flag}" 2>/dev/null || echo 0) ))" -gt 86400 ]; then
-    echo "== Pinning current mise tool versions to global config =="
-    mise_lock_to_current_global
-    touch "${_mise_lock_flag}"
-  fi
-} 9>/tmp/mise_lock_to_current_lock
-unset _mise_lock_flag
+#
+# Nix (home-manager) が CLI ツールを管理している環境では pin しない。
+# バージョン固定は flake.lock が担うため、この自作ロックは不要であり、
+# 走らせると Nix 側から外したツールを mise に再び固定してしまう。
+# 判定に使うマーカーは 060_mise.sh の _dotfiles_package_manager を参照。
+if [ "$(_dotfiles_package_manager 2>/dev/null || echo mise)" = "mise" ]; then
+  _mise_lock_flag=~/.config/mise/.mise_last_lock
+  {
+    flock -x 9
+    if [ ! -f "${_mise_lock_flag}" ] \
+      || [ "$(($(date +%s) - $(stat -c %Y "${_mise_lock_flag}" 2>/dev/null || echo 0)))" -gt 86400 ]; then
+      echo "== Pinning current mise tool versions to global config =="
+      mise_lock_to_current_global
+      touch "${_mise_lock_flag}"
+    fi
+  } 9>/tmp/mise_lock_to_current_lock
+  unset _mise_lock_flag
+fi

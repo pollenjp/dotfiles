@@ -25,6 +25,16 @@
     username = "pollenjp";
     system = "x86_64-linux";
     isWSL = true;
+    # ホスト側 Windows のユーザー名。1Password の op-ssh-sign のパス
+    # (/mnt/c/Users/<名前>/AppData/...) の組み立てに使う。
+    #
+    # 値は WSL 上で次を実行すると判る:
+    #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+    # (pwsh.exe が無ければ powershell.exe でも同じ)
+    #
+    # Nix の評価は純粋なのでこのコマンドを評価時に実行することはできない。
+    # (getEnv や --impure は nix flake check を壊す)。よってここに直接書く。
+    windowsUserName = "polle";
   };
 
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。

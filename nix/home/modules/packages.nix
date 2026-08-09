@@ -22,17 +22,19 @@
     fzf
     ghq
     jq
-    starship
     watchexec
     zellij
     fish
 
+    # starship は programs.starship (modules/starship.nix) が入れるので
+    # ここには書かない。
+    # delta / git-lfs も同様に programs.git (modules/git.nix) が入れる。
+    # .gitconfig が pager = delta を要求しているのに git-delta が
+    # どの管理下にも無かった問題は、そちらで解消している。
+
     ##########################################
     # これまでどの管理下にも無かった依存
     ##########################################
-    # .gitconfig の `pager = delta` が要求しているが未インストールだった
-    delta
-
     tmux
     vim
     neovim

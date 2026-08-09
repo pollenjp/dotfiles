@@ -9,6 +9,9 @@
   homeDirectory ?
     if inputs.nixpkgs.lib.hasSuffix "darwin" system then "/Users/${username}" else "/home/${username}",
   isWSL ? false,
+  # WSL のホスト側 Windows ユーザー名 (/mnt/c/Users/<名前>/... の組み立てに使う)。
+  # Linux 側の username とは別物。
+  windowsUserName ? null,
   modules ? [ ],
 }:
 
@@ -19,7 +22,7 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles.isWSL = isWSL;
+      dotfiles = { inherit isWSL windowsUserName; };
     }
   ]
   ++ modules;

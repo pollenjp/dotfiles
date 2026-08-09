@@ -121,6 +121,8 @@ nix flake update --flake ~/dotfiles/nix
 | `~/.screenrc` | `nix/files/screenrc` |
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
+| `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
+| `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -128,6 +130,42 @@ nix flake update --flake ~/dotfiles/nix
 | --- | --- |
 | `source ~/dotfiles/vim_common/common.vim` | `source ~/.vim/common.vim` |
 | `source-file ~/dotfiles/tmux/home.tmux.conf` | `source-file ~/.tmux.conf` |
+
+## git について
+
+`programs.git` で `~/.config/git/config` を **生成** している（素のファイル配置ではない）。
+目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
+並んでおり手で切り替える運用だった。これを `dotfiles.isWSL` による自動分岐に置き換えている。
+
+> ⚠️ **`~/.gitconfig` の symlink は必ず外すこと。**
+> git は `~/.config/git/config` を読んだ **後に** `~/.gitconfig` を読むため、
+> `main.bash` が張った symlink が残っていると home-manager の設定を黙って上書きする。
+> `preflight-unlink.sh` が対象に含めている。
+
+**`git config --global` は使えなくなる。** 書込先の `~/.config/git/config` が store 上の
+read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
+よい（git の読み込み順により home-manager の設定を上書きできる）。
+
+## mise との役割分担
+
+| 対象 | 管理者 |
+| --- | --- |
+| グローバルな CLI ツール | Nix (`home/modules/packages.nix`) |
+| 言語ランタイム (go / node) | mise |
+| プロジェクト毎のツール固定 | mise (`mise.toml`) |
+
+Nix が CLI ツールを持つ環境では、レガシー経路の起動時パッケージ注入を止める必要がある。
+その合図に `~/.local/state/dotfiles/package-manager` というマーカーファイルを使っている
+（内容は `nix`）。配置するのは `nix/home/modules/mise.nix`。
+
+このマーカーがあると次が停止する。**マーカーが無い環境の挙動は従来どおり。**
+
+- `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
+- `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
+
+> ⚠️ **既に書き込まれた 16 エントリは自動では消えない。**
+> マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
+> だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
 
 ## 検証
 
