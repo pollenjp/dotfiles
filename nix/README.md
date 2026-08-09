@@ -155,7 +155,16 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 `pollenjp/claude-skills`（private）を clone して `~/.claude/` へ繋ぐ。
 詳細は後述の「Claude Code > private な skill 置き場」を参照。
 
-このリポジトリを使わないマシンでは飛ばしてよい（他の手順には影響しない）。
+> ⚠️ **private リポジトリなので SSH 鍵が要る。** 取得に失敗すると `setup.sh` はそこで
+> 止まり、後続の手順（`bootstrap-mise`）が走らない。まだ鍵を用意していないマシンでは、
+> 先に `ssh -T git@github.com` が通ることを確認しておくか、「カスタム」でこの手順の
+> 選択を外して進め、あとから個別に実行する。
+>
+> ```sh
+> ./nix/scripts/setup.sh --steps bootstrap-claude-skills
+> ```
+
+このリポジトリを使わないマシンでは、この手順ごと飛ばしてよい。
 
 #### 4. ログインシェルの変更 (手順 8)
 
