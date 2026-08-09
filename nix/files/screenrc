@@ -1,0 +1,63 @@
+# .screenrc
+# http://aircastle.hatenablog.com/entry/20080501/1209641600
+
+#defencodig utf-8
+escape ^Jj          # <Ctrl-a> --> <Ctrl-j>
+shell "/usr/bin/zsh"
+
+defscrollback 10000
+
+#----------------------------------------
+bind ' ' windows  # bind the space key to the command that displays a list of windows
+
+
+#----------------------------------------
+# 分割ウィンドウのリサイズの設定
+#----------------------------------------
+bind r eval 'echo "Resize window"' 'command -c resize'      # <Ctrl-a> r でリサイズモードに入る
+bind -c resize ^]  command
+bind -c resize j eval 'resize +1' 'command -c resize'       # j でサイズを広げる
+bind -c resize k eval 'resize -1' 'command -c resize'       # k でサイズを縮める
+
+#----------------------------------------
+# Command: focus
+# <Ctrl-a> <Ctrl-Tab>
+# https://www.gnu.org/software/screen/manual/html_node/Focus.html#Focus
+#----------------------------------------
+bind j focus down       # <Ctrl-a> j
+bind k focus up         # <Ctrl-a> k
+bind t focus top        # <Ctrl-a> t
+bind b focus bottom     # <Ctrl-a> b
+
+
+#--------------------------------------------------------------------------------
+#   open tabs window
+#--------------------------------------------------------------------------------
+#   - ref
+#       - https://unix.stackexchange.com/questions/74785/how-to-open-tabs-windows-in-gnu-screen-execute-commands-within-each-one/74791
+#       - http://bigdatums.net/2017/03/25/how-to-display-window-tabs-in-linux-screen/
+altscreen on
+term screen-256color
+bind ',' prev
+bind '.' next
+#
+#change the hardstatus settings to give an window list at the bottom of the
+#screen, with the time and date and with the current window highlighted
+hardstatus alwayslastline
+#hardstatus string '%{= kG}%-Lw%{= kW}%50> %n%f* %t%{= kG}%+Lw%< %{= kG}%-=%c:%s%{-}'
+hardstatus string '%{= kG}[ %{G}%H %{g}][%= %{= kw}%?%-Lw%?%{r}(%{W}%n*%f%t%?(%u)%?%{r})%{w}%?%+Lw%?%?%= %{g}][%{B} %m-%d %{W}%c %{g}]'
+
+
+#--------------------------------------------------------------------------------
+#--------------------------------------------------------------------------------
+#
+#let &titlestring = hostname() . "[vim(" . expand("%:t") . ")]"
+#if &term == "screen"
+#  set t_ts=^[k
+#  set t_fs=^[\
+#endif
+#if &term == "screen" || &term == "xterm"
+#  set title
+#endif
+shelltitle "% |zsh"
+

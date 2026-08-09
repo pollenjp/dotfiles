@@ -1,0 +1,80 @@
+@startuml
+' 変更後のアーキテクチャ: Nix home-manager による宣言的管理
+' 赤 = 新規追加 / 青 = 既存のまま温存
+' NOTE: PlantUML では "~" がエスケープ文字として消費されるため "$HOME/" 表記を使う
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 25
+skinparam ranksep 45
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #AAAAAA
+}
+
+title 変更後: Nix home-manager による宣言的管理\n<color:#CC0000>**赤 = 新規追加**</color>   /   <color:#0066CC>**青 = 既存のまま温存**</color>
+
+rectangle "リポジトリ  $HOME/dotfiles" as repo #FFFFFF {
+
+  rectangle "**nix/**  — 新規・自己完結" as nixdir #FFE0E0 {
+    rectangle "flake.nix / flake.lock\nhosts/default.nix (マシン登録簿)\nhome/modules/*.nix" as mods #FFC8C8
+    rectangle "files/\n設定ファイルの**複製**" as nixfiles #FFC8C8
+  }
+
+  rectangle "レガシー経路 — **無変更**" as legacy #E8F0FF {
+    rectangle "main.bash setup" as setup #D0E0FF
+    rectangle "shell/  .bash/  .zsh/  .fish/\n.config/  .gitconfig  tmux/" as frag #D0E0FF
+  }
+}
+
+cloud "cache.nixos.org" as cache #FFEEEE
+
+rectangle "/nix/store  (read-only)" as store #FFE0E0 {
+  rectangle "home-manager-generation\n世代ごとに不変" as gen #FFC8C8
+  rectangle "CLI ツール群\nbat eza fd rg fzf delta ..." as pkgs #FFC8C8
+}
+
+rectangle "$HOME" as home #FFFFFF {
+  rectangle "$HOME/.config/starship.toml\n$HOME/.tmux.conf\n$HOME/.config/zellij/  ..." as links
+  rectangle "$HOME/.nix-profile/bin" as profile #FFE0E0
+  rectangle "$HOME/.config/mise/config.toml\ngo / node のみに縮小" as miseconf
+  rectangle "$HOME/.common_shellrc.sh\nマシンローカル・非管理" as localrc #E8F0FF
+}
+
+mods -[#CC0000]right-> nixfiles : 参照
+nixfiles -[#CC0000]-> gen : ビルド時に store へ複製
+cache -[#CC0000]-> pkgs : バイナリキャッシュ\n(ソースビルド不要)
+gen -[#CC0000]-> links : **symlink**\n宣言的・検証可能
+pkgs -[#CC0000]-> profile
+setup -[#0066CC].-> links : Windows / ロールバック時のみ
+frag -[#0066CC].-> localrc
+
+note right of gen
+  **世代管理とロールバック**
+  home-manager generations で一覧し
+  古い世代の activate を叩けば即座に戻せる
+end note
+
+note right of profile
+  **flake.lock で全マシンのバージョンが一致**
+  従来の「日次 mise pin」が不要になる
+end note
+
+note bottom of legacy
+  **既存ツリーは一切変更しない**
+  設定は nix/files/ へ複製しているため
+  ./main.bash setup がいつでも復旧経路として機能する
+end note
+
+note bottom of miseconf
+  **役割分担**
+  グローバル CLI ツール -> Nix
+  言語ランタイム (go / node) -> mise
+  sed -i による起動時注入は停止する
+end note
+
+@enduml

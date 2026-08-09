@@ -1,0 +1,71 @@
+@startuml
+' 変更前のアーキテクチャ: main.bash による手続き的な配置
+' NOTE: PlantUML では "~" がエスケープ文字として消費されるため "$HOME/" 表記を使う
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 25
+skinparam ranksep 45
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam note {
+  BackgroundColor #FFF8DC
+  BorderColor #AAAAAA
+}
+
+title 変更前: main.bash setup による手続き的な配置
+
+rectangle "リポジトリ  $HOME/dotfiles" as repo #FFFFFF {
+  rectangle "**main.bash setup**\n(一度だけ実行)" as setup #E8E8E8
+  rectangle "設定ファイル本体\n.config/  .gitconfig\ntmux/  .vimrc  .screenrc" as conf
+  rectangle "シェル断片\nshell/  .bash/  .zsh/  .fish/" as frag
+}
+
+rectangle "$HOME" as home #FFFFFF {
+  rectangle "$HOME/.bashrc\n$HOME/.zshrc" as rc #FFE0E0
+  rectangle "$HOME/.config/starship.toml\n$HOME/.tmux.conf\n$HOME/.config/zellij/  ..." as links
+  rectangle "$HOME/.config/mise/config.toml" as miseconf #FFE0E0
+}
+
+rectangle "シェルを起動する **たびに** 実行される処理" as startup #FFEEEE {
+  rectangle "shell/060_mise.sh\nsed -i で [tools] に注入" as misesh
+  rectangle "shell/252_alias_mise.sh\n日次でバージョンを pin" as misepin
+  rectangle ".zsh/150-zi.zsh\n毎回 curl zi-loader" as zi
+  rectangle ".fish/010_fish_fisher.fish\n日次 fisher update" as fisher
+}
+
+cloud "ネットワーク" as net #F0F0F0
+
+setup -down-> rc : **追記** (append_load_rc_line)
+setup -down-> links : ln -s (Unix) / cp -a (Win)
+links -[#0066CC]-> conf : symlink
+rc -right-> frag : source
+
+frag -down-> startup
+misesh -[#CC0000]-> miseconf
+misepin -[#CC0000]-> miseconf
+misesh -[#CC0000]-> net
+zi -[#CC0000]-> net
+fisher -[#CC0000]-> net
+
+note bottom of rc
+  **課題1: 所有者が曖昧**
+  リポジトリ管理下のファイルではなく
+  「追記された」ユーザーファイル
+end note
+
+note bottom of links
+  **課題2: 配置状態が不透明**
+  何がどこに配置されたか一覧・検証できない
+  Makefile clean は 13 個中 4 個しか unlink しない
+end note
+
+note right of startup
+  **課題3: 起動のたびに破壊的変更 + ネットワークアクセス**
+  再現性がなく、起動レイテンシも悪化する
+  日次 pin は flake.lock の役割を手で再実装したもの
+end note
+
+@enduml
