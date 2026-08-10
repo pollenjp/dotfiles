@@ -66,7 +66,7 @@
       # **初回の activate が成功した後**なので、1 回目は home-manager コマンドが
       # まだ存在しない。そこで flake から直接実行できるようにしておく:
       #
-      #   nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl
+      #   nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
       #
       # `nix run home-manager` (レジストリ経由) ではなくこちらを使うこと。
       # レジストリ版は nixpkgs 同梱の別バージョンで、flake.lock で固定した

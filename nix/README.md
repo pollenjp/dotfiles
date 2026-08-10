@@ -70,6 +70,19 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 > `DOTFILES_ALLOW_ANY_PATH=1` を、`~/dotfiles` 以外に置くなら
 > `DOTFILES_LOCAL_DIR` を指定する。
 
+> ⚠️ **旧経路 `main.bash setup` を使っていたマシンでは `~/dotfiles` がリポジトリ本体になっている。**
+> 先に本体を ghq 配下へ移すこと。`setup-local-flake.sh` は `~/dotfiles` が git 作業ツリーだと
+> 何もせず止まるので、取り違えて壊すことはない。
+>
+> ```sh
+> mkdir -p "$(ghq root)/github.com/pollenjp"
+> mv ~/dotfiles "$(ghq root)/github.com/pollenjp/dotfiles"
+> ```
+>
+> 旧経路が配置した設定ファイルは `~/dotfiles/...` を直接参照しているため、移動すると
+> 旧経路側は壊れる。Nix 経路へ切り替えるマシンでのみ行うこと（手順 2 の
+> `preflight-unlink.sh` で symlink を外すのが前提）。
+
 `~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**を
 足す場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、
 入口を 1 つに揃えるために常に置く。
