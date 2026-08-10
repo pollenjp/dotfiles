@@ -208,6 +208,7 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 6.5 | `./nix/scripts/bootstrap-ssh-config.sh` | `bootstrap-ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -438,6 +439,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
 | `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
+| `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みだけ) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
@@ -481,6 +483,58 @@ WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非
 **`git config --global` は使えなくなる。** 書込先の `~/.config/git/config` が store 上の
 read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
 よい（git の読み込み順により home-manager の設定を上書きできる）。
+
+## ssh について
+
+`programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
+
+```
+Include config.d/*.ssh_config
+```
+
+（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決するので、これは
+`~/.ssh/config.d/*.ssh_config` を指す）
+
+### なぜ中身を Nix で配らないのか
+
+1. **`/nix/store` は誰でも読める。** 接続先ホスト名・ユーザー名・踏み台の構成を
+   store に置きたくない。store のファイルは 444 なのでパーミッションで隠せない。
+2. 実体は `.ssh` submodule (private repo) にあり、**flake root (`nix/`) の外**なので
+   そもそも flake から読めない。
+
+そこで骨組みだけを Nix が持ち、中身は `bootstrap-ssh-config.sh` が
+`~/.ssh/config.d/` へ symlink する。骨組みが Nix 管理なので、
+「`Include` 行が入っているか」をマシンごとに気にしなくてよくなる
+（従来は `main.bash` が `~/.ssh/config` へ追記済みかどうかが曖昧だった）。
+
+```sh
+./nix/scripts/bootstrap-ssh-config.sh
+```
+
+冪等。`.ssh` submodule が未取得なら教えてくれる。
+
+| `~/.ssh/config.d/` の中身 | 出所 |
+| --- | --- |
+| `00-local.ssh_config` | 旧 `~/.ssh/config` の退避先（後述） |
+| `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
+| それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
+
+submodule 側でファイル名が変わった場合、**参照先が消えた symlink はスクリプトが外す**。
+手で置いたファイルや、submodule 以外を指す symlink には触らない。
+
+### ⚠️ 既存の `~/.ssh/config` がある場合
+
+`main.bash` は `~/.ssh/config` に `Include` 行を**追記**していたので、多くのマシンでは
+実ファイルとして存在する。home-manager はこれを上書きせず
+`Existing file '...' would be clobbered` で中断する。
+
+`bootstrap-ssh-config.sh` は実ファイルの `~/.ssh/config` を
+`~/.ssh/config.d/00-local.ssh_config` へ退避する。**初回の switch より前**に
+実行しておくとよい（既に switch 済みなら `~/.ssh/config` は store への symlink に
+なっており、スクリプトはそれを検出して触らない）。
+
+マシン固有の設定を足したいときは `~/.ssh/config.d/` にファイルを置く。
+`ssh` は同じキーワードについて**最初に得た値**を採るので、`config.d` が優先される。
 
 ## fish
 
