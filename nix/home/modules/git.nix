@@ -6,7 +6,11 @@
 # 目的は .gitconfig:11-17 の 1Password op-ssh-sign のパスで、
 # 従来は WSL 用と Windows 用がコメントアウトで並んでおり手で切り替える運用だった
 # (切り替えたまま誤ってコミットする事故の温床)。
-# Windows を対象外にしたので、これを isWSL による自動分岐に置き換えられる。
+# Windows を対象外にしたので、これをマシンごとの指定による分岐に置き換えられる。
+#
+# 署名まわりは dotfiles.onePassword.enable で丸ごと切り替わる。
+# 1Password の無いマシンに commit.gpgSign だけが残ると、署名鍵が見つからず
+# git commit そのものが失敗するため、片方だけを残さない。
 #
 # NOTE: home-manager 26.11 で programs.git のオプションが改名された。
 #       userName / userEmail / aliases / extraConfig は programs.git.settings
@@ -16,22 +20,42 @@
 let
   cfg = config.dotfiles;
 
-  # 1Password の署名プログラム。
-  # WSL であることに加え、ホスト側 Windows のユーザー名が判っている場合にのみ設定する。
-  # windowsUserName が null のマシンでは signer を設定せず、
-  # home-manager 既定の ssh-keygen で署名する (これも正当な構成)。
-  useOpSshSign = cfg.isWSL && cfg.windowsUserName != null;
+  # 署名を 1Password 経由にするか。マシンごとに hosts/default.nix で選ぶ。
+  # false のマシンでは署名関連の設定を一切書き出さない (下の signing / gpg 参照)。
+  useOnePassword = cfg.onePassword.enable;
+
+  # 1Password の署名プログラム。WSL のときだけ必要になる。
+  # Windows 側の実体を呼ぶので、パスにホスト側の Windows ユーザー名が要る。
+  # Linux / macOS ネイティブの 1Password は ssh-agent 経由で完結するため
+  # signer の指定は不要 (既定の ssh-keygen が agent の鍵で署名する)。
+  useOpSshSign = useOnePassword && cfg.isWSL && cfg.windowsUserName != null;
   opSshSignPath = "/mnt/c/Users/${cfg.windowsUserName}/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
 in
 
 {
-  # WSL なのに windowsUserName が未設定だと 1Password 連携が黙って無効になり、
-  # 「署名はできているが 1Password を経由していない」状態に気付きにくい。
-  warnings = lib.optional (cfg.isWSL && cfg.windowsUserName == null) ''
-    dotfiles.isWSL = true ですが dotfiles.windowsUserName が未設定です。
-    1Password の op-ssh-sign は設定されず、git の署名は通常の ssh-keygen で行われます。
-    1Password を使う場合は hosts/default.nix で windowsUserName を指定してください。
-  '';
+  assertions = [
+    # 1Password を使う WSL マシンで windowsUserName を書き忘れると、
+    # op-ssh-sign が黙って無効のまま commit.gpgSign だけが残り、
+    # 「署名しようとするが署名できない」状態になる。評価時に止める。
+    {
+      assertion = useOnePassword && cfg.isWSL -> cfg.windowsUserName != null;
+      message = ''
+        dotfiles.onePassword.enable と dotfiles.isWSL が true ですが
+        dotfiles.windowsUserName が未設定です。Windows 側の op-ssh-sign-wsl.exe の
+        パスを組み立てられません。hosts/default.nix で windowsUserName を指定するか、
+        1Password を使わないマシンなら onePassword を外してください。
+      '';
+    }
+    # windowsUserName は WSL 用の値なので、isWSL = false のマシンで指定されていたら
+    # 登録簿の書き間違いを疑う。
+    {
+      assertion = cfg.windowsUserName != null -> cfg.isWSL;
+      message = ''
+        dotfiles.windowsUserName が指定されていますが dotfiles.isWSL が false です。
+        windowsUserName は WSL から /mnt/c/Users/<名前>/... を組み立てるための値です。
+      '';
+    }
+  ];
 
   # git-delta。pager / interactive.diffFilter / delta.* を設定し、
   # delta 本体も home.packages に入れてくれる。
@@ -51,7 +75,10 @@ in
   programs.git = {
     enable = true;
 
-    signing = {
+    # 署名の設定は 1Password を使うマシンにだけ書き出す。
+    # 1Password の無いマシンに signByDefault だけ残すと、署名鍵が見つからず
+    # commit そのものが失敗する。「署名しない」も正当な構成として扱う。
+    signing = lib.mkIf useOnePassword {
       format = "ssh";
       signByDefault = true;
       # 鍵は defaultKeyCommand (下の settings) が ssh-agent から解決するので
@@ -129,8 +156,12 @@ in
       pull.rebase = false;
 
       # [gpg "ssh"] — HM に対応オプションが無いので直接書く。
-      # ssh-agent が持つ鍵から "Signing" を含むものを署名鍵として選ぶ。
-      gpg.ssh.defaultKeyCommand = "sh -c 'echo key::$(ssh-add -L | grep \"Signing\" | awk NR=1)'";
+      # 1Password の ssh-agent が持つ鍵から "Signing" を含むものを署名鍵として選ぶ。
+      # 鍵名で引く前提なので 1Password 以外では当たらない。上の signing と揃えて、
+      # 1Password を使うマシンにだけ書き出す (セクションごと消す)。
+      gpg = lib.mkIf useOnePassword {
+        ssh.defaultKeyCommand = "sh -c 'echo key::$(ssh-add -L | grep \"Signing\" | awk NR=1)'";
+      };
     };
   };
 }

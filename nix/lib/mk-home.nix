@@ -12,6 +12,9 @@
   # WSL のホスト側 Windows ユーザー名 (/mnt/c/Users/<名前>/... の組み立てに使う)。
   # Linux 側の username とは別物。
   windowsUserName ? null,
+  # 1Password の SSH agent を使うマシンか。git の署名設定が丸ごと切り替わる。
+  # WSL では windowsUserName と併せて op-ssh-sign-wsl.exe のパスを組み立てる。
+  onePassword ? false,
   modules ? [ ],
 }:
 
@@ -22,7 +25,10 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles = { inherit isWSL windowsUserName; };
+      dotfiles = {
+        inherit isWSL windowsUserName;
+        onePassword.enable = onePassword;
+      };
     }
   ]
   ++ modules;

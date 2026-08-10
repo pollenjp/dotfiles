@@ -108,7 +108,7 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
-| 0 | `hosts/default.nix` にマシンを 1 行追加 | — | WSL なら `windowsUserName` も |
+| 0 | `hosts/default.nix` にマシンを 1 行追加 | — | 1Password を使うなら `onePassword`、WSL ならさらに `windowsUserName`（[後述](#マシン登録簿-hostsdefaultnix)） |
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | `switch` | 初回はこの形 |
@@ -177,6 +177,56 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 
 シェル設定を home-manager が持つ Stage 5 以降は、この PATH 設定も宣言的に入る。
 
+## マシン登録簿 (hosts/default.nix)
+
+1 エントリが 1 マシン。マシンごとの差は `mkHome` に渡す値で吸収する。
+
+| 引数 | 既定 | 用途 |
+| --- | --- | --- |
+| `username` | (必須) | Linux / macOS 側のユーザー名。`$USER` と一致しないと activate が中断する |
+| `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
+| `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
+| `isWSL` | `false` | WSL 固有の分岐 |
+| `onePassword` | `false` | 1Password の SSH agent を使うか。git の署名設定が丸ごと切り替わる |
+| `windowsUserName` | `null` | WSL + 1Password のときだけ必要。ホスト側 Windows のユーザー名 |
+
+### WSL の 2 通り
+
+WSL は **ホスト側 Windows に 1Password があるかどうか** で設定が変わる。
+どちらを使うかは登録簿のエントリで選ぶ。
+
+| 登録名 | 指定 | git の署名 |
+| --- | --- | --- |
+| `pollenjp@wsl` | `isWSL = true; onePassword = true; windowsUserName = "polle";` | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+| `pollenjp@wsl-no-1password` | `isWSL = true; onePassword = false;` | 署名の設定を書き出さない（署名なしで commit する） |
+
+適用時に `#` の後ろで選ぶ。
+
+```sh
+home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl-no-1password
+```
+
+`setup.sh` の自動判定は WSL なら `<user>@wsl`（= 1Password あり）を選ぶ。
+1Password の無いマシンではメニューの `h` で選び直すか、
+`--host pollenjp@wsl-no-1password` を渡す。
+
+> 1Password を使わないマシンで署名設定を書き出さないのは、`commit.gpgSign = true`
+> だけが残ると署名鍵が見つからず `git commit` そのものが失敗するため。
+> 「署名しない」も正当な構成として扱っている。
+
+`windowsUserName` の値は WSL 上で次を実行すると判る（Nix の評価は純粋なので
+自動取得はできない。`getEnv` や `--impure` は `nix flake check` を壊す）。
+
+```sh
+pwsh.exe -NoProfile -Command '$env:USERNAME'
+```
+
+組み合わせの書き間違いは `assertions` で評価時に止まる。
+
+- `onePassword = true` かつ `isWSL = true` なのに `windowsUserName` が無い
+- `windowsUserName` があるのに `isWSL = false`
+
 ## 日常運用
 
 ```sh
@@ -223,7 +273,21 @@ nix flake update --flake ~/dotfiles/nix
 
 `programs.git` で `~/.config/git/config` を **生成** している（素のファイル配置ではない）。
 目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
-並んでおり手で切り替える運用だった。これを `dotfiles.isWSL` による自動分岐に置き換えている。
+並んでおり手で切り替える運用だった。これを登録簿の指定による分岐に置き換えている。
+
+署名まわりは `dotfiles.onePassword.enable` で丸ごと切り替わる
+（マシンごとの指定は[マシン登録簿](#マシン登録簿-hostsdefaultnix)を参照）。
+
+| 生成される項目 | `onePassword = true` | `onePassword = false` |
+| --- | --- | --- |
+| `commit.gpgSign` / `tag.gpgSign` | `true` | 書き出さない |
+| `gpg.format` | `ssh` | 書き出さない |
+| `gpg.ssh.defaultKeyCommand` | ssh-agent の鍵から `Signing` を含むものを選ぶ | 書き出さない |
+| `gpg.ssh.program` | WSL のみ `op-ssh-sign-wsl.exe`（Linux / macOS ネイティブは agent 経由で完結するため不要） | 書き出さない |
+
+`defaultKeyCommand` は 1Password が鍵に付ける名前で引くものなので、1Password の
+無いマシンでは当たらない。片方だけ残すと「署名しようとして鍵が見つからず commit が
+失敗する」状態になるため、`false` のマシンでは署名設定を丸ごと省いている。
 
 > ⚠️ **`~/.gitconfig` の symlink は必ず外すこと。**
 > git は `~/.config/git/config` を読んだ **後に** `~/.gitconfig` を読むため、
@@ -453,7 +517,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.isWSL / dotfiles.windowsUserName
+│   ├── options.nix        dotfiles.isWSL / windowsUserName / onePassword.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
