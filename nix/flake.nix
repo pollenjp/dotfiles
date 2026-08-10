@@ -36,6 +36,20 @@
     {
       homeConfigurations = import ./hosts { inherit mkHome; };
 
+      # 登録簿に載せないマシン用の入口。
+      #
+      # flake は git の**追跡済みファイル**しか見ないので、リポジトリ内に
+      # gitignore したホスト定義を置いても評価されない。代わりにリポジトリの外へ
+      # 自分用の flake を置き、そこからこれを呼ぶ:
+      #
+      #   inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
+      #   outputs = { dotfiles, ... }: {
+      #     homeConfigurations."tmp" = dotfiles.lib.mkHome { ... };
+      #   };
+      #
+      # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
+      lib = { inherit mkHome; };
+
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
       # 各 system には、その system 向けの設定だけを載せる。
@@ -52,7 +66,7 @@
       # **初回の activate が成功した後**なので、1 回目は home-manager コマンドが
       # まだ存在しない。そこで flake から直接実行できるようにしておく:
       #
-      #   nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl
+      #   nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
       #
       # `nix run home-manager` (レジストリ経由) ではなくこちらを使うこと。
       # レジストリ版は nixpkgs 同梱の別バージョンで、flake.lock で固定した
