@@ -35,6 +35,11 @@ targets=(
   # 配置自体が不要になった。残っていても害はないが外しておく。
   "${HOME}/.config/fish/config.fish"
   "${HOME}/.config/fish/fish_plugins"
+  # ssh (home/modules/ssh.nix で追加)。
+  # main.bash は ~/.ssh/config へ Include 行を **追記** していたので、
+  # 実ファイルとして残っていることが多い。その場合ここでは外さず警告になる。
+  # (退避は setup.sh の -b に任せる。~/.bashrc などと同じ扱い)
+  "${HOME}/.ssh/config"
 )
 
 # bash は Stage 5 で管理対象になったが、ここには入れない。

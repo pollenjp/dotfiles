@@ -214,8 +214,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 3 → 4 → 6 |
-| 既存マシン更新 | 3 (`home-manager switch`) だけ |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 |
+| 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
@@ -311,6 +311,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
+| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
@@ -555,6 +556,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
 | `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
+| `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みだけ) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
@@ -598,6 +600,54 @@ WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非
 **`git config --global` は使えなくなる。** 書込先の `~/.config/git/config` が store 上の
 read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
 よい（git の読み込み順により home-manager の設定を上書きできる）。
+
+## ssh について
+
+`programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
+接続情報の実体は `.ssh` submodule にあり、`setup-ssh-config.sh` が
+`~/.ssh/config.d/` へ symlink する。
+
+```
+Include config.d/*.ssh_config
+```
+
+（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する）
+
+```sh
+./nix/scripts/setup-ssh-config.sh
+```
+
+冪等。`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入っている
+ので、submodule を更新したら `--update` で張り直される。
+submodule が未取得なら教えてくれる（処理は止めない）。
+
+| `~/.ssh/config.d/` の中身 | 出所 |
+| --- | --- |
+| `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
+| それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
+
+submodule 側でファイル名が変わった場合、参照先が消えた symlink はスクリプトが外す。
+手で置いたファイルや、submodule 以外を指す symlink には触らない。
+
+マシン固有の設定を足すときは `~/.ssh/config.d/` にファイルを置く。
+`ssh` は同じキーワードについて**最初に得た値**を採るので、**ファイル名の順序が
+優先順位**になる。実効値は `ssh -G <ホスト名>` で確認できる。
+
+### ⚠️ 既存の `~/.ssh/config` がある場合
+
+`main.bash` は `~/.ssh/config` に `Include` 行を**追記**していたので、多くのマシンでは
+実ファイルとして存在する。home-manager はこれを上書きせず
+`Existing file '...' would be clobbered` で中断する。
+
+退避は [`--backup`](#既存ファイルを退避するか選ぶ) が行う（`~/.bashrc` などと同じ扱い）。
+`~/.ssh/config` は `hm_managed_paths` に入れてあるので、指定が無ければメニューが訊いてくる。
+
+**退避先の `~/.ssh/config.backup` は Include されないので、設定としては効かなくなる。**
+残したい `Host` ブロックは中身を見てから `~/.ssh/config.d/` へ手で移すこと。
+
+> 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
+> `config.d` へ移す案を棄却した実測）は
+> [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
 
 ## fish
 
@@ -837,6 +887,7 @@ nix/
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
+    ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
