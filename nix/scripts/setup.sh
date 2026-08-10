@@ -18,12 +18,41 @@
 
 set -eu -o pipefail
 
-script_dir=$(
-  cd -- "$(dirname "$0")" &>/dev/null
-  pwd -P
-)
+# ~/dotfiles/setup は このファイルへの symlink なので、$0 の指す先を辿って
+# 実体の位置を出す。辿らないと nix_dir が ~ になる。
+# macOS の readlink には -f が無いので手で辿る。
+resolve_dir() {
+  local src=$1 dir
+  while [[ -L ${src} ]]; do
+    dir=$(
+      cd -P -- "$(dirname -- "${src}")" &>/dev/null
+      pwd
+    )
+    src=$(readlink -- "${src}")
+    case ${src} in
+      /*) ;;
+      *) src="${dir}/${src}" ;;
+    esac
+  done
+  cd -P -- "$(dirname -- "${src}")" &>/dev/null
+  pwd
+}
+
+script_dir=$(resolve_dir "$0")
 nix_dir=$(dirname "${script_dir}")
+repo_dir=$(dirname "${nix_dir}")
 hosts_file="${nix_dir}/hosts/default.nix"
+
+# 実行に使う flake。ローカル flake (~/dotfiles) があればそちらを優先する。
+# 本体の homeConfigurations をそのまま再輸出しているので、登録簿のホストは
+# どちらからでも同じように引ける。
+# 詳細は setup-local-flake.sh の冒頭を参照。
+local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
+if [[ -f ${local_dir}/flake.nix ]]; then
+  flake_dir=${local_dir}
+else
+  flake_dir=${nix_dir}
+fi
 
 dry_run=0
 host=""
@@ -35,7 +64,7 @@ usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 
-使い方:
+使い方 (~/dotfiles/setup は このスクリプトへの symlink):
   setup.sh                 メニューを出す (既定)
   setup.sh --new-machine   「新しいマシン適用」をそのまま実行
   setup.sh --update        「既存マシン更新」をそのまま実行
@@ -51,6 +80,7 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 
 環境変数:
   DOTFILES_HOST       --host と同じ
+  DOTFILES_LOCAL_DIR  ローカル flake の場所 (既定: ~/dotfiles)
   NIX_INSTALLER_ARGS  Determinate Systems インストーラへの引数 (既定: install)
                       systemd の無いコンテナでは "install linux --init none"
   NO_COLOR            色を付けない
@@ -158,6 +188,11 @@ add_step preflight-unlink \
   '手順 2。main.bash setup が張った symlink を外す。忘れると switch が中断する。' \
   step 0
 
+add_step local-flake \
+  './nix/scripts/setup-local-flake.sh' \
+  'ローカル flake (~/dotfiles) と setup の symlink を置く。以後の入口になる。' \
+  step 0
+
 add_step switch \
   'home-manager switch' \
   '手順 3。初回は home-manager コマンドがまだ無いので nix run 経由で実行する。' \
@@ -237,7 +272,7 @@ apply_preset() {
     new-machine)
       # 手順 1 → 2 → 3 → 4/6。
       # 手順 7 (chsh) は README でも「必要なら」なので既定では入れない。
-      ids=(nix-install preflight-unlink switch)
+      ids=(nix-install preflight-unlink local-flake switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -409,7 +444,10 @@ header() {
     printf '  対象ホスト: %s未判定%s  %s(h で選ぶ / 手順 0 が未了かも)%s\n' \
       "${c_red}" "${c_reset}" "${c_dim}" "${c_reset}"
   fi
-  note "flake:      ${nix_dir}"
+  note "flake:      ${flake_dir}"
+  if [[ ${flake_dir} != "${nix_dir}" ]]; then
+    note "本体:       ${repo_dir}"
+  fi
   if [[ ${dry_run} == 1 ]]; then
     printf '  %s--dry-run: 実際には実行しません%s\n' "${c_yellow}" "${c_reset}"
   fi
@@ -564,7 +602,7 @@ set_all() {
 note_of() {
   local i=$1
   case ${step_ids[i]} in
-    switch) printf '%s (--flake %s#%s)' "${step_notes[i]}" "${nix_dir}" "${host:-<ホスト未定>}" ;;
+    switch) printf '%s (--flake %s#%s)' "${step_notes[i]}" "${flake_dir}" "${host:-<ホスト未定>}" ;;
     *) printf '%s' "${step_notes[i]}" ;;
   esac
 }
@@ -712,9 +750,22 @@ step_script() {
   run "${path}" || return 1
 }
 
-# flake は git 管理下の **追跡済みファイル** しか見ない。
-# 追加したモジュールが untracked のままだと評価に入らず、
+step_local_flake() {
+  step_script setup-local-flake.sh || return 1
+  # 今この実行で作られたばかりのこともあるので選び直す。
+  if [[ -f ${local_dir}/flake.nix ]]; then
+    flake_dir=${local_dir}
+  fi
+}
+
+# untracked ファイルが評価に入るかは flake の指し方で変わる。
+#
+#   --flake <repo>/nix   git リポジトリ内のパス -> git 解決。追跡済みしか見えない。
+#   --flake ~/dotfiles   path: でのディレクトリ複製 -> untracked も入る。
+#
+# 前者では追加したモジュールが untracked のままだと評価に入らず、
 # 「そんなオプションは無い」という分かりにくいエラーになる。
+# 後者では手元で通ってしまうので、逆に commit 忘れが CI で出る。
 warn_untracked() {
   local untracked
   if ! have git; then
@@ -724,10 +775,17 @@ warn_untracked() {
     return 0
   fi
   untracked=$(git -C "${nix_dir}" ls-files --others --exclude-standard -- "${nix_dir}")
-  if [[ -n ${untracked} ]]; then
+  if [[ -z ${untracked} ]]; then
+    return 0
+  fi
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
     warn "git 未追跡のファイルがあります。flake からは見えません:"
     printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
     warn "必要なら git add してから実行してください。"
+  else
+    warn "git 未追跡のファイルがあります (path: 経由なので今回の switch には入ります):"
+    printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
+    warn "CI は git 管理下しか見ないので、残すなら git add してください。"
   fi
 }
 
@@ -736,7 +794,7 @@ step_switch() {
   warn_untracked
   if have home-manager; then
     # 2 回目以降。profile に入った CLI をそのまま使う。
-    run home-manager switch --flake "${nix_dir}#${host}" || return 1
+    run home-manager switch --flake "${flake_dir}#${host}" || return 1
     return 0
   fi
   # 初回。programs.home-manager.enable が CLI を profile へ入れるのは
@@ -747,7 +805,7 @@ step_switch() {
     warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
     return 1
   fi
-  run nix run "${nix_dir}#home-manager" -- switch --flake "${nix_dir}#${host}" || return 1
+  run nix run "${flake_dir}#home-manager" -- switch --flake "${flake_dir}#${host}" || return 1
 }
 
 step_chsh() {
@@ -779,6 +837,7 @@ run_step() {
   case $1 in
     nix-install) step_nix_install ;;
     preflight-unlink) step_script preflight-unlink.sh ;;
+    local-flake) step_local_flake ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
     bootstrap-*) step_script "$1.sh" ;;
@@ -807,6 +866,10 @@ post_notes() {
   if is_selected switch && ! have home-manager; then
     note 'home-manager コマンドは新しいシェルから使える。今のシェルで使うなら:'
     note '  . ~/.nix-profile/etc/profile.d/nix.sh'
+  fi
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
+    note 'ローカル flake が未設置です。一度だけ --steps local-flake を実行すると'
+    note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
