@@ -36,6 +36,20 @@
     {
       homeConfigurations = import ./hosts { inherit mkHome; };
 
+      # 登録簿に載せないマシン用の入口。
+      #
+      # flake は git の**追跡済みファイル**しか見ないので、リポジトリ内に
+      # gitignore したホスト定義を置いても評価されない。代わりにリポジトリの外へ
+      # 自分用の flake を置き、そこからこれを呼ぶ:
+      #
+      #   inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
+      #   outputs = { dotfiles, ... }: {
+      #     homeConfigurations."tmp" = dotfiles.lib.mkHome { ... };
+      #   };
+      #
+      # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
+      lib = { inherit mkHome; };
+
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
       # 各 system には、その system 向けの設定だけを載せる。

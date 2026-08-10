@@ -108,7 +108,7 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
-| 0 | `hosts/default.nix` にマシンを 1 行追加 | — | 1Password を使うなら `onePassword`、WSL ならさらに `windowsUserName`（[後述](#マシン登録簿-hostsdefaultnix)） |
+| 0 | `hosts/default.nix` にマシンを 1 エントリ追加 | — | WSL なら `wsl = { ... }` も（[後述](#マシン登録簿-hostsdefaultnix)） |
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | `switch` | 初回はこの形 |
@@ -186,21 +186,34 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `username` | (必須) | Linux / macOS 側のユーザー名。`$USER` と一致しないと activate が中断する |
 | `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
-| `isWSL` | `false` | WSL 固有の分岐 |
-| `onePassword` | `false` | 1Password の SSH agent を使うか。git の署名設定が丸ごと切り替わる |
-| `windowsUserName` | `null` | WSL + 1Password のときだけ必要。ホスト側 Windows のユーザー名 |
+| `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
 
-### WSL の 2 通り
+### WSL 固有の設定は入れ子で渡す
 
-WSL は **ホスト側 Windows に 1Password があるかどうか** で設定が変わる。
-どちらを使うかは登録簿のエントリで選ぶ。
+`wsl` は入れ子の attrset で、**親が有効なときだけ子が意味を持つ**という関係を
+そのまま構造にしてある。平坦なフラグの並びだと「どの組み合わせが有効なのか」が
+読み取れないため。
 
-| 登録名 | 指定 | git の署名 |
+```nix
+wsl = {
+  enable = true;              # WSL か
+  onePassword = {
+    enable = true;            # ホスト側 Windows の 1Password を使うか (WSL 専用)
+    windowsUserName = "polle"; # その 1Password のパスに要る Windows ユーザー名
+  };
+};
+```
+
+有効な組み合わせは次の 3 通りだけになる。
+
+| マシン | 指定 | git の署名 |
 | --- | --- | --- |
-| `pollenjp@wsl` | `isWSL = true; onePassword = true; windowsUserName = "polle";` | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
-| `pollenjp@wsl-no-1password` | `isWSL = true; onePassword = false;` | 署名の設定を書き出さない（署名なしで commit する） |
+| 非 WSL | `wsl` を書かない | 署名の設定を書き出さない |
+| WSL / 1Password 無し | `wsl.enable = true;` | 同上 |
+| WSL / 1Password 有り | 上のブロックまるごと | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
 
-適用時に `#` の後ろで選ぶ。
+登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
+これに当たる。適用時に `#` の後ろで選ぶ。
 
 ```sh
 home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
@@ -222,10 +235,80 @@ home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl-no-1password
 pwsh.exe -NoProfile -Command '$env:USERNAME'
 ```
 
-組み合わせの書き間違いは `assertions` で評価時に止まる。
+階層で表現しきれない「親が false なのに子が true」は `assertions` で評価時に止まる。
 
-- `onePassword = true` かつ `isWSL = true` なのに `windowsUserName` が無い
-- `windowsUserName` があるのに `isWSL = false`
+- `wsl.onePassword.enable` が true なのに `wsl.enable` が false
+- `wsl.onePassword.enable` が true なのに `windowsUserName` が無い
+
+### 登録簿に載せずにマシンを足す
+
+一時的な環境など、`hosts/default.nix` を編集したくない・git で管理したくない場合。
+
+> ⚠️ **リポジトリ内に gitignore したホスト定義を置く方法は使えない。**
+> flake は git の**追跡済みファイル**しか見ないため、`hosts/local.nix` を足しても
+> 評価対象にならず「そんなホストは無い」になる。
+
+代わりに **リポジトリの外へ自分用の flake を置き**、そこから `mkHome` を呼ぶ。
+`flake.nix` が `lib.mkHome` を公開しているのはこのため。
+
+`~/.config/dotfiles-local/flake.nix`（置き場所はどこでもよい。git 管理は不要）:
+
+```nix
+{
+  inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
+
+  outputs =
+    { dotfiles, ... }:
+    {
+      homeConfigurations."tmp" = dotfiles.lib.mkHome {
+        username = "tmp";
+        system = "x86_64-linux";
+        wsl.enable = true;
+
+        # このマシンだけの設定は modules で渡す。
+        # 既に nix/home/modules/ が定義している値を差し替えるには mkForce が要る
+        # (同じ優先度の定義が 2 つあると "conflicting definition values" で落ちる)。
+        modules = [
+          (
+            { lib, ... }:
+            {
+              programs.git.settings.user.email = lib.mkForce "tmp@example.com";
+            }
+          )
+        ];
+      };
+    };
+}
+```
+
+```sh
+home-manager switch --flake ~/.config/dotfiles-local#tmp
+```
+
+`git+file://` は **コミット済みの内容**を見る。作業中の変更をそのまま試すなら
+`path:/home/pollenjp/dotfiles/nix`（git を無視してディレクトリごと複製する）。
+
+いずれも `inputs.dotfiles` は lock で固定されるので、`~/dotfiles` を更新したら
+反映のために lock を更新する。
+
+```sh
+nix flake update dotfiles --flake ~/.config/dotfiles-local
+# 毎回最新を取りたいなら switch 時に上書きしてもよい
+home-manager switch --flake ~/.config/dotfiles-local#tmp \
+  --override-input dotfiles "git+file:///home/pollenjp/dotfiles?dir=nix"
+```
+
+**使い捨ての 1 回きり**ならファイルすら要らない。`--impure` で直接組み立てる。
+
+```sh
+nix build --impure --expr '
+  ((builtins.getFlake "path:/home/pollenjp/dotfiles/nix").lib.mkHome {
+    username = "tmp";
+    system = "x86_64-linux";
+    wsl.enable = true;
+  }).activationPackage' -o /tmp/hm
+/tmp/hm/activate
+```
 
 ## 日常運用
 
@@ -275,19 +358,25 @@ nix flake update --flake ~/dotfiles/nix
 目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
 並んでおり手で切り替える運用だった。これを登録簿の指定による分岐に置き換えている。
 
-署名まわりは `dotfiles.onePassword.enable` で丸ごと切り替わる
+署名まわりは `dotfiles.wsl.onePassword.enable` で丸ごと切り替わる
 （マシンごとの指定は[マシン登録簿](#マシン登録簿-hostsdefaultnix)を参照）。
 
-| 生成される項目 | `onePassword = true` | `onePassword = false` |
+| 生成される項目 | 有効 | 無効 |
 | --- | --- | --- |
 | `commit.gpgSign` / `tag.gpgSign` | `true` | 書き出さない |
 | `gpg.format` | `ssh` | 書き出さない |
 | `gpg.ssh.defaultKeyCommand` | ssh-agent の鍵から `Signing` を含むものを選ぶ | 書き出さない |
-| `gpg.ssh.program` | WSL のみ `op-ssh-sign-wsl.exe`（Linux / macOS ネイティブは agent 経由で完結するため不要） | 書き出さない |
+| `gpg.ssh.program` | Windows 側の `op-ssh-sign-wsl.exe` | 書き出さない |
 
 `defaultKeyCommand` は 1Password が鍵に付ける名前で引くものなので、1Password の
 無いマシンでは当たらない。片方だけ残すと「署名しようとして鍵が見つからず commit が
-失敗する」状態になるため、`false` のマシンでは署名設定を丸ごと省いている。
+失敗する」状態になるため、無効のマシンでは署名設定を丸ごと省いている。
+
+**署名が入るのは `wsl.onePassword.enable = true` のマシンだけ**になる。1Password は
+WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非 WSL のマシン
+（`pollenjp@x86_64-linux` / `aarch64-linux` / `aarch64-darwin`）には署名設定が入らない。
+これらでも 1Password で署名したくなったら、`onePassword` を `dotfiles.wsl` の外へ
+出して `windowsUserName` を WSL のときだけ要求する形にする。
 
 > ⚠️ **`~/.gitconfig` の symlink は必ず外すこと。**
 > git は `~/.config/git/config` を読んだ **後に** `~/.gitconfig` を読むため、
@@ -517,7 +606,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.isWSL / windowsUserName / onePassword.enable
+│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置

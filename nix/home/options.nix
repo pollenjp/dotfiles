@@ -1,63 +1,69 @@
 # このリポジトリ独自のオプション定義。
+#
+# 有効な組み合わせが構造に出るよう、WSL 固有の設定は dotfiles.wsl 配下へ入れ子にしている。
+#
+#   dotfiles.wsl.enable                          WSL か
+#   dotfiles.wsl.onePassword.enable              ホスト側 Windows の 1Password を使うか
+#   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名
+#
+# 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
+# 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
 { lib, ... }:
 
 {
-  options.dotfiles = {
-    isWSL = lib.mkOption {
+  options.dotfiles.wsl = {
+    enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
       description = ''
-        WSL 上で動作しているか。
-        1Password の op-ssh-sign のパスなど、WSL 固有の分岐に使う。
+        WSL 上で動作しているか。WSL 固有の分岐に使う。
+
+        hosts/default.nix では `wsl.enable = true;` のように指定する。
       '';
     };
 
-    windowsUserName = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      example = "polle";
-      description = ''
-        WSL のホスト側 Windows ユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
+    onePassword = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        example = true;
+        description = ''
+          ホスト側 Windows の 1Password を使うか。`wsl.enable = true` のときだけ有効。
 
-        Linux 側のユーザー名 (home.username) とは別物なので、マシンごとに
-        hosts/default.nix で指定する。値は WSL 上で次を実行すると判る:
+          true のとき、git の署名を 1Password 経由に設定する:
 
-            pwsh.exe -NoProfile -Command '$env:USERNAME'
+          - `gpg.ssh.program` に Windows 側の op-ssh-sign-wsl.exe を指定する
+            (パスは windowsUserName から組み立てる)
+          - `gpg.ssh.defaultKeyCommand` で ssh-agent の鍵から署名鍵を選ぶ
+          - `commit.gpgSign = true` (署名を既定にする)
 
-        Nix の評価は純粋なのでこのコマンドを評価時に実行して自動取得すること
-        はできない (getEnv や --impure は nix flake check を壊す)。
+          false のときは署名関連の設定を一切書き出さない。1Password の無いマシンで
+          `commit.gpgSign = true` だけが残ると、署名鍵が見つからず `git commit`
+          そのものが失敗するため。
 
-        今の用途は `dotfiles.onePassword.enable = true` かつ WSL のときの
-        op-ssh-sign-wsl.exe のパスだけなので、1Password を使わないマシンでは
-        指定しなくてよい。
-      '';
-    };
+          NOTE: 1Password 連携を WSL 以外 (Linux / macOS ネイティブ) でも使いたく
+                なったら、このオプションを dotfiles.wsl の外へ出すこと。今は
+                「1Password を使うのは WSL のときだけ」という前提で入れ子にしている。
+        '';
+      };
 
-    onePassword.enable = lib.mkOption {
-      type = lib.types.bool;
-      default = false;
-      example = true;
-      description = ''
-        このマシンで 1Password の SSH agent を使うか。マシンごとに
-        hosts/default.nix で指定する (`onePassword = true;`)。
+      windowsUserName = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "polle";
+        description = ''
+          ホスト側 Windows のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
+          `wsl.onePassword.enable = true` のときだけ必要 (未設定なら評価時に止まる)。
 
-        true のとき、git の署名を 1Password 経由に設定する:
+          Linux 側のユーザー名 (home.username) とは別物なので、マシンごとに
+          hosts/default.nix で指定する。値は WSL 上で次を実行すると判る:
 
-        - `gpg.ssh.defaultKeyCommand` で ssh-agent の鍵から署名鍵を選ぶ
-        - `commit.gpgSign = true` (署名を既定にする)
-        - WSL なら さらに `windowsUserName` から Windows 側の
-          op-ssh-sign-wsl.exe のパスを組み立てて signer に設定する
-          (Linux / macOS ネイティブの 1Password では signer の指定は不要)
+              pwsh.exe -NoProfile -Command '$env:USERNAME'
 
-        false のときは署名関連の設定を一切書き出さない。1Password の無い
-        マシンで `commit.gpgSign = true` だけが残ると、署名鍵が見つからず
-        `git commit` そのものが失敗するため。
-
-        WSL の場合、この 2 通りを hosts/default.nix で選び分ける:
-
-        - WSL + Windows 側 1Password ... `isWSL = true; onePassword = true; windowsUserName = "...";`
-        - WSL で 1Password 無し       ... `isWSL = true;` (onePassword は既定の false)
-      '';
+          Nix の評価は純粋なのでこのコマンドを評価時に実行して自動取得すること
+          はできない (getEnv や --impure は nix flake check を壊す)。
+        '';
+      };
     };
   };
 }

@@ -8,7 +8,7 @@
 # (切り替えたまま誤ってコミットする事故の温床)。
 # Windows を対象外にしたので、これをマシンごとの指定による分岐に置き換えられる。
 #
-# 署名まわりは dotfiles.onePassword.enable で丸ごと切り替わる。
+# 署名まわりは dotfiles.wsl.onePassword.enable で丸ごと切り替わる。
 # 1Password の無いマシンに commit.gpgSign だけが残ると、署名鍵が見つからず
 # git commit そのものが失敗するため、片方だけを残さない。
 #
@@ -18,41 +18,40 @@
 { config, lib, ... }:
 
 let
-  cfg = config.dotfiles;
+  wsl = config.dotfiles.wsl;
 
   # 署名を 1Password 経由にするか。マシンごとに hosts/default.nix で選ぶ。
   # false のマシンでは署名関連の設定を一切書き出さない (下の signing / gpg 参照)。
-  useOnePassword = cfg.onePassword.enable;
+  #
+  # 入れ子の親も見ているのは、wsl.enable = false のまま onePassword.enable だけを
+  # true にした登録を「有効」と誤認しないため (その組み合わせは下の assertion で止まる)。
+  useOnePassword = wsl.enable && wsl.onePassword.enable;
 
-  # 1Password の署名プログラム。WSL のときだけ必要になる。
-  # Windows 側の実体を呼ぶので、パスにホスト側の Windows ユーザー名が要る。
-  # Linux / macOS ネイティブの 1Password は ssh-agent 経由で完結するため
-  # signer の指定は不要 (既定の ssh-keygen が agent の鍵で署名する)。
-  useOpSshSign = useOnePassword && cfg.isWSL && cfg.windowsUserName != null;
-  opSshSignPath = "/mnt/c/Users/${cfg.windowsUserName}/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
+  # 1Password の署名プログラム。Windows 側の実体を呼ぶので、パスにホスト側の
+  # Windows ユーザー名が要る。useOnePassword が false のときは参照されない
+  # (mkIf の中身は条件が false なら評価されないので null 補間にならない)。
+  opSshSignPath = "/mnt/c/Users/${wsl.onePassword.windowsUserName}/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
 in
 
 {
+  # 階層で表現しきれない「親が false なのに子が true」を評価時に止める。
   assertions = [
-    # 1Password を使う WSL マシンで windowsUserName を書き忘れると、
-    # op-ssh-sign が黙って無効のまま commit.gpgSign だけが残り、
-    # 「署名しようとするが署名できない」状態になる。評価時に止める。
     {
-      assertion = useOnePassword && cfg.isWSL -> cfg.windowsUserName != null;
+      assertion = wsl.onePassword.enable -> wsl.enable;
       message = ''
-        dotfiles.onePassword.enable と dotfiles.isWSL が true ですが
-        dotfiles.windowsUserName が未設定です。Windows 側の op-ssh-sign-wsl.exe の
-        パスを組み立てられません。hosts/default.nix で windowsUserName を指定するか、
-        1Password を使わないマシンなら onePassword を外してください。
+        dotfiles.wsl.onePassword.enable が true ですが dotfiles.wsl.enable が false です。
+        1Password 連携はホスト側 Windows の op-ssh-sign-wsl.exe を呼ぶ WSL 専用の設定です。
       '';
     }
-    # windowsUserName は WSL 用の値なので、isWSL = false のマシンで指定されていたら
-    # 登録簿の書き間違いを疑う。
+    # windowsUserName を書き忘れると op-ssh-sign が黙って無効のまま
+    # commit.gpgSign だけが残り、「署名しようとするが署名できない」状態になる。
     {
-      assertion = cfg.windowsUserName != null -> cfg.isWSL;
+      assertion = wsl.onePassword.enable -> wsl.onePassword.windowsUserName != null;
       message = ''
-        dotfiles.windowsUserName が指定されていますが dotfiles.isWSL が false です。
-        windowsUserName は WSL から /mnt/c/Users/<名前>/... を組み立てるための値です。
+        dotfiles.wsl.onePassword.enable が true ですが windowsUserName が未設定です。
+        Windows 側の op-ssh-sign-wsl.exe のパスを組み立てられません。
+        hosts/default.nix の wsl.onePassword.windowsUserName を指定するか、
+        1Password を使わないマシンなら wsl.onePassword.enable を外してください。
       '';
     }
   ];
@@ -86,7 +85,7 @@ in
       key = null;
       # 1Password の署名プログラム。パス中の Windows ユーザー名は
       # マシンごとに異なるので hosts/default.nix から渡す。
-      signer = lib.mkIf useOpSshSign opSshSignPath;
+      signer = opSshSignPath;
     };
 
     # [filter "lfs"] の 4 項目を生成し git-lfs も入れる
