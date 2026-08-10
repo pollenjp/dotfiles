@@ -316,14 +316,32 @@ list_steps() {
 # ホスト #
 ##########
 
-# hosts/default.nix の登録名を並べる。
-# 手順 1 の前に呼ぶので nix には頼れない。sandbox は検証専用なので外す。
-list_hosts() {
+# `<名前> = mkHome {` / `"<名前>" = dotfiles.lib.mkHome {` の左辺を取り出す。
+# 修飾子 (dotfiles.lib.) が付くのはローカル flake 側の書き方。
+# 行頭が # の行は拾わないので、雛形のコメント例は出てこない。
+parse_hosts() {
+  [[ -f $1 ]] || return 0
   sed -n \
-    -e 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*=[[:space:]]*mkHome.*/\1/p' \
-    -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_-]*\)[[:space:]]*=[[:space:]]*mkHome.*/\1/p' \
-    "${hosts_file}" \
-    | grep -vx 'sandbox' || true
+    -e 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_-]*\)[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    "$1"
+}
+
+# 選べる登録名を並べる。
+#
+# 本体の登録簿だけでなく **ローカル flake (~/dotfiles/flake.nix) の追加分も**
+# 見る。見ないと ~/dotfiles にだけ足したホストがメニューに出ず、--host で
+# 指定しても「登録されていません」で弾かれる。
+#
+# 手順 1 の前に呼ぶので nix には頼れず、sed で拾う。
+# sandbox は検証専用なので外す。
+list_hosts() {
+  {
+    parse_hosts "${hosts_file}"
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      parse_hosts "${flake_dir}/flake.nix"
+    fi
+  } | grep -vx 'sandbox' | awk '!seen[$0]++' || true
 }
 
 is_wsl() {
@@ -369,7 +387,11 @@ ensure_host_registered() {
   elif list_hosts | grep -qxF "${host}"; then
     return 0
   else
-    warn "${host} は ${hosts_file} に登録されていません (手順 0)。"
+    warn "${host} は登録されていません (手順 0)。"
+    warn "  登録簿:       ${hosts_file}"
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      warn "  ローカル追加: ${flake_dir}/flake.nix"
+    fi
   fi
   printf '   登録済み:\n' >&2
   list_hosts | sed 's/^/     /' >&2
@@ -677,7 +699,10 @@ menu_host() {
     printf '\n'
     hr
     note "登録簿: ${hosts_file}"
-    note '無いマシンは hosts/default.nix に 1 行足す (手順 0)'
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      note "ローカル: ${flake_dir}/flake.nix (このマシンだけのホスト)"
+    fi
+    note '無いマシンは hosts/default.nix か ~/dotfiles/flake.nix に足す'
 
     read_key || return 1
     case ${key} in

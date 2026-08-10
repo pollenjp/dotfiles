@@ -338,6 +338,10 @@ home-manager switch --flake ~/dotfiles#tmp
 `dotfiles.homeConfigurations // { ... }` としているので、登録簿のホストも同じ場所から
 引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。
 
+`~/dotfiles/setup` のホスト選択（`h`）にもここで足したものが出る。`setup.sh` は
+登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。
+コメントアウトした雛形の例は拾わない。
+
 生成される雛形にはこの例がコメントで入っている。`lib.mkHome` を公開しているのは
 このためで、引数は[登録簿](#マシン登録簿-hostsdefaultnix)と同じ。
 
