@@ -7,7 +7,8 @@
 | 決定者 | pollenjp |
 | 関連 PR | [#18](https://github.com/pollenjp/dotfiles/pull/18) Stage 1-3 (**merged**) / [#19](https://github.com/pollenjp/dotfiles/pull/19) Stage 4 / [#20](https://github.com/pollenjp/dotfiles/pull/20) Stage 5-1 fish / [#21](https://github.com/pollenjp/dotfiles/pull/21) Stage 5-2 bash |
 | 補足資料 | [textbook/](./textbook/README.md)（新規参画者向けの解説） |
-| 運用手順 | [`nix/README.md`](../../../../nix/README.md)（日常運用はこちら） |
+| 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
+| 後続 ADR | [002_nix_hosts_and_local_flake_20260810T153848JST](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md) — マシン固有設定の表現と実行の入口パスを決めた。**「7. 移行・運用手順」と `textbook/` は現行の形に更新済み。**「2. 決定」「3. 変更点の詳細」「6. 検証」に出てくる `~/dotfiles/nix#...` や `isWSL` などは決定当時の記録としてそのまま残してある |
 
 ---
 
@@ -247,25 +248,36 @@ Stage 2 以降は `./nix/scripts/verify.sh` で一括実行できる（実際の
 
 ## 7. 移行・運用手順
 
+> パスは[後続 ADR](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)で
+> 変わっている。リポジトリ本体は `$(ghq root)/github.com/pollenjp/dotfiles`、
+> 日々の入口は `~/dotfiles`（ローカル専用 flake）。以下はその形に更新してある。
+
 ```sh
+# 0. リポジトリ本体を ghq 配下へ
+ghq get git@github.com:pollenjp/dotfiles.git
+REPO="$(ghq root)/github.com/pollenjp/dotfiles"
+
 # 1. Nix を導入
 curl -fsSL https://install.determinate.systems/nix | sh -s -- install
 
 # 2. 何が配置されるかを $HOME に触れず確認する
 #    (home-files は store への symlink なので find に -L が必須)
-cd ~/dotfiles/nix
+cd "${REPO}/nix"
 nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 
 # 3. main.bash が張った symlink を外す (Stage 3 以降)
 ./scripts/preflight-unlink.sh
 
+# 3.5 ~/dotfiles にローカル flake と setup の symlink を置く
+./scripts/setup-local-flake.sh
+
 # 4. 初回適用
 #    この時点では home-manager コマンドはまだ存在しない。
 #    programs.home-manager.enable が CLI を profile へ入れるのは
 #    初回の activate が成功した後なので、1 回目は flake から直接実行する。
-nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
-nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak --dry-run
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
 # 5. mise のグローバル設定を初期化する (マシンごとに 1 回)
 #    ~/.config/mise/config.toml は Nix 管理下に置いていないため、
@@ -277,15 +289,15 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 $EDITOR ~/.config/mise/config.toml
 
 # 日常 (初回以降は profile に入るので短く書ける)
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 home-manager generations
-nix flake update --flake ~/dotfiles/nix
+nix flake update --flake "${REPO}/nix"
 ```
 
 `programs.fish.enable` は fish を**インストールするだけ**でログインシェルには設定しない
 （`/etc/passwd` の変更は home-manager の管轄外）。必要なら別途 `chsh` する。
 
-手順の詳細と新規マシン向けチェックリストは [`nix/README.md`](../../../../nix/README.md) にある。
+手順の詳細と新規マシン向けチェックリストは [`nix/README.md`](../../../nix/README.md) にある。
 
 > `nix run home-manager -- ...`（レジストリ経由）は使わないこと。nixpkgs 同梱の別バージョンが
 > 実行され、`flake.lock` で固定した home-manager モジュールとバージョンがずれる。

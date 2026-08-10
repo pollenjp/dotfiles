@@ -6,8 +6,8 @@
 | 日付 | 2026-08-10 (JST) |
 | 決定者 | pollenjp |
 | 関連 PR | [#29](https://github.com/pollenjp/dotfiles/pull/29) |
-| 前提 ADR | [20260808T163454JST_home_manager_migration](../20260808T163454JST_home_manager_migration/README.md) |
-| 運用手順 | [`nix/README.md`](../../../../nix/README.md)（日常運用はこちら） |
+| 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md) |
+| 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 
 前提 ADR で home-manager への移行そのものは決めた。この ADR はその上で残っていた
 2 つの問題 — **マシンごとの差をどう書くか** と **どのパスから実行するか** — を決める。
@@ -326,11 +326,16 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl  # 直接
 
 ## 8. 参考 (References)
 
-- 前提 ADR: [dotfiles 管理を Nix home-manager へ移行する](../20260808T163454JST_home_manager_migration/README.md)
-  - 移行期の記録であり将来削除する予定のため、**この ADR に合わせた更新はしていない**。
-    同 ADR とその `textbook/` に出てくる `~/dotfiles/nix#...` というパスや
-    `isWSL` / `windowsUserName` といったオプション名は、本 ADR で置き換わっている。
-    現行の手順は [`nix/README.md`](../../../../nix/README.md) を参照すること。
-- 運用手順: [`nix/README.md`](../../../../nix/README.md)
+- 前提 ADR: [dotfiles 管理を Nix home-manager へ移行する](../001_home_manager_migration_20260808T163454JST/README.md)
+  - 追従の方針: **手順書として読まれる部分**（「7. 移行・運用手順」と `textbook/`）は
+    本 ADR の形に更新した。読んだ人がそのまま叩けてしまうため。
+    一方、**当時の決定と検証の記録**（「2. 決定」「3. 変更点の詳細」「6. 検証」）は
+    `~/dotfiles/nix#...` や `isWSL` のまま残した。記録を後から書き換えると
+    「そのとき何を決めて何を確かめたか」が失われるため。同 ADR の冒頭に注記した。
+  - `textbook/plantuml/03_repo_layout.puml` のラベルも更新したが、
+    **`out/03_repo_layout.svg` は再生成していない。** 図は `mise run plantuml:generate`
+    （PlantUML 1.2026.6 固定）で作られており、手元の graphviz とフォントが違うと
+    変更のない図まで差分が出る。生成環境で再実行すること。
+- 運用手順: [`nix/README.md`](../../../nix/README.md)
 - [Nix flake の input 形式](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-flake.html#url-like-syntax)（`path:` と `git+file:` の違い）
 - [ghq](https://github.com/x-motemen/ghq)（`ghq root` の決め方）
