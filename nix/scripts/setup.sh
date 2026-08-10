@@ -244,7 +244,7 @@ add_step local-flake \
 
 add_step ssh-config \
   './nix/scripts/setup-ssh-config.sh' \
-  '手順 2.5。~/.ssh/config を退避し .ssh submodule を config.d へ張る。switch の前に。' \
+  '.ssh submodule を ~/.ssh/config.d/ へ張る。submodule 更新後の張り直しにも使う。' \
   step 0
 
 add_step switch \
@@ -478,6 +478,8 @@ hm_managed_paths=(
   # programs.git
   ".config/git/config"
   ".config/git/ignore"
+  # programs.ssh
+  ".ssh/config"
   # modules/files.nix
   ".screenrc"
   ".tmux.conf"

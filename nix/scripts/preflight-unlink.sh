@@ -38,7 +38,7 @@ targets=(
   # ssh (home/modules/ssh.nix で追加)。
   # main.bash は ~/.ssh/config へ Include 行を **追記** していたので、
   # 実ファイルとして残っていることが多い。その場合ここでは外さず警告になる。
-  # bootstrap-ssh-config.sh が ~/.ssh/config.d/00-local.ssh_config へ退避する。
+  # (退避は setup.sh の -b に任せる。~/.bashrc などと同じ扱い)
   "${HOME}/.ssh/config"
 )
 

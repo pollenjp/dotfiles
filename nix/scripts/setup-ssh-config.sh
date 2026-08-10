@@ -14,27 +14,32 @@
 #
 #     Include config.d/*.ssh_config
 #
+# ## 既存の ~/.ssh/config について
+#
+# **このスクリプトは ~/.ssh/config を触らない。** 実ファイルとして残っていると
+# home-manager が「would be clobbered」で switch を中断するが、その退避は
+# setup.sh の `-b` (--backup) に任せる。~/.bashrc などと同じ扱いにして、
+# 「switch を邪魔する既存ファイル」の退き方を 1 つに統一するため。
+#
+# かつてはここで ~/.ssh/config.d/00-local.ssh_config へ移していたが、やめた。
+# config.d は Include されるので **移した瞬間から設定として生き続ける**うえ、
+# 00- 始まりで最初に読まれる。ssh は同じキーワードについて最初に得た値を採るので、
+# 旧い設定が submodule の設定を **上書きする** ことになっていた (実測で確認)。
+#
+# 退避された ~/.ssh/config.backup に残したい Host ブロックがあれば、
+# 中身を見てから config.d/ へ手で移すこと。
+#
 # ## 実行のタイミング
 #
-# **home-manager switch より前**に実行する必要がある。setup.sh の手順でも
-# switch の手前に置いてある (bootstrap-*.sh の枠には入れられない。あれは
-# switch の後に走るので手遅れになる)。
-#
-# 理由: ~/.ssh/config が実ファイルとして残っていると home-manager が
-#       「Existing file '...' would be clobbered」で **switch ごと中断する**。
-#       それをここで config.d へ退避しておく。
-#
-# 既に switch 済み (= ~/.ssh/config が store への symlink) の場合は
-# 退避処理を飛ばし、symlink を張り直すだけ。submodule を更新したあとに
-# 張り直す用途でも使うので、何度実行してもよい。
+# いつでもよい。setup.sh では switch の手前に置いてあるが、これは
+# switch 直後から ssh が引けるようにするためで、順序の制約ではない。
+# submodule を更新したあとに張り直す用途でも使うので、何度実行してもよい。
 
 set -eu -o pipefail
 
 ssh_dir="${HOME}/.ssh"
 conf="${ssh_dir}/config"
 conf_d="${ssh_dir}/config.d"
-migrated="${conf_d}/00-local.ssh_config"
-
 # $0 が symlink 経由でも実体の場所を返す。
 # macOS の readlink には -f が無いので手で辿る。
 resolve_dir() {
@@ -63,26 +68,16 @@ mkdir -p "${conf_d}"
 # ssh は自分と親ディレクトリのパーミッションを見る。緩いと黙って設定を無視する。
 chmod 700 "${ssh_dir}" "${conf_d}"
 
-# 既存の ~/.ssh/config を退避する。
-#
-# - 実ファイル ... home-manager が上書きを拒んで中断するので config.d へ移す
-# - symlink    ... main.bash 経路の名残なら外す。store 指向なら Nix 管理済みなので触らない
+# ~/.ssh/config には触らない (上の設計メモを参照)。状態だけ報告する。
 if [[ -L ${conf} ]]; then
   if [[ $(readlink -f "${conf}" 2>/dev/null || true) == /nix/store/* ]]; then
-    echo "  config: Nix 管理済み (そのまま)"
+    echo "  config: Nix 管理済み"
   else
-    echo "  config: 旧経路の symlink を外します"
-    unlink "${conf}"
+    echo "  config: Nix 管理外の symlink です。preflight-unlink.sh が外します" >&2
   fi
 elif [[ -f ${conf} ]]; then
-  if [[ -e ${migrated} ]]; then
-    echo "  config: 実ファイルが残っていますが ${migrated##*/} が既にあります" >&2
-    echo "          中身を確認して手で退けてください。" >&2
-  else
-    echo "  config: 実ファイルを ${migrated##*/} へ退避します"
-    mv "${conf}" "${migrated}"
-    chmod 600 "${migrated}"
-  fi
+  echo "  config: 実ファイルがあります。switch は退避が要ります (setup.sh の --backup)" >&2
+  echo "          退避後、残したい Host は config.d/ へ手で移してください" >&2
 else
   echo "  config: まだありません (switch が作ります)"
 fi

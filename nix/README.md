@@ -311,7 +311,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
-| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | **`switch` より前に**（[後述](#ssh-について)） |
+| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
@@ -619,7 +619,7 @@ Include config.d/*.ssh_config
 2. 実体は `.ssh` submodule (private repo) にあり、**flake root (`nix/`) の外**なので
    そもそも flake から読めない。
 
-そこで骨組みだけを Nix が持ち、中身は `bootstrap-ssh-config.sh` が
+そこで骨組みだけを Nix が持ち、中身は `setup-ssh-config.sh` が
 `~/.ssh/config.d/` へ symlink する。骨組みが Nix 管理なので、
 「`Include` 行が入っているか」をマシンごとに気にしなくてよくなる
 （従来は `main.bash` が `~/.ssh/config` へ追記済みかどうかが曖昧だった）。
@@ -629,20 +629,20 @@ Include config.d/*.ssh_config
 ```
 
 冪等。`.ssh` submodule が未取得なら教えてくれる（その場合も他の設定は効くので
-処理は止めない）。submodule を更新したあとに張り直す用途でも使う。
-
-> ⚠️ **`switch` より前に実行する必要がある。** `bootstrap-*.sh` の枠に入れていないのは
-> そのため（あれは `switch` の後に走るので手遅れになる）。`setup.sh` の手順でも
-> `switch` の手前に置いてあり、「新しいマシン適用」「既存マシン更新」の両方に入る。
+処理は止めない）。submodule を更新したあとに張り直す用途でも使うので、
+`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入れてある。
 
 | `~/.ssh/config.d/` の中身 | 出所 |
 | --- | --- |
-| `00-local.ssh_config` | 旧 `~/.ssh/config` の退避先（後述） |
 | `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
 | それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
 
 submodule 側でファイル名が変わった場合、**参照先が消えた symlink はスクリプトが外す**。
 手で置いたファイルや、submodule 以外を指す symlink には触らない。
+
+マシン固有の設定を足したいときは `~/.ssh/config.d/` にファイルを置く。
+`ssh` は同じキーワードについて**最初に得た値**を採るので、**ファイル名の順序が
+優先順位**になる。
 
 ### ⚠️ 既存の `~/.ssh/config` がある場合
 
@@ -650,16 +650,22 @@ submodule 側でファイル名が変わった場合、**参照先が消えた s
 実ファイルとして存在する。home-manager はこれを上書きせず
 `Existing file '...' would be clobbered` で中断する。
 
-`setup-ssh-config.sh` がこれを `~/.ssh/config.d/00-local.ssh_config` へ退避する。
-退避後も `Include` 経由でそのまま効く。既に switch 済みなら `~/.ssh/config` は
-store への symlink になっており、スクリプトはそれを検出して触らない。
+**退避は [`--backup`](#既存ファイルを退避するか選ぶ) に任せる。** `~/.bashrc` などと
+同じ扱いで、`~/.ssh/config.backup` へ退く。`~/.ssh/config` は `hm_managed_paths` に
+入れてあるので、指定が無ければメニューが訊いてくる。
 
-> [`--backup`](#既存ファイルを退避するか選ぶ) でも switch は通るが、そちらは
-> `~/.ssh/config.backup` へ退けるだけなので **設定が効かなくなる**（誰も Include
-> しない）。ssh については `setup-ssh-config.sh` の退避を使うこと。
+退避したファイルは **Include されないので設定としては効かなくなる**。残したい
+`Host` ブロックがあれば、中身を見てから `~/.ssh/config.d/` へ手で移すこと。
 
-マシン固有の設定を足したいときは `~/.ssh/config.d/` にファイルを置く。
-`ssh` は同じキーワードについて**最初に得た値**を採るので、`config.d` が優先される。
+> かつては `setup-ssh-config.sh` が `~/.ssh/config.d/00-local.ssh_config` へ移して
+> いた（Include 経由でそのまま効かせる狙い）。やめた理由は 2 つ。
+>
+> - `config.d` は Include されるので、**移した瞬間から設定として生き続ける**。
+>   中身を見直す機会が無いまま、旧い設定が黙って残る。
+> - `00-` 始まりで最初に読まれるため、**旧い設定が submodule の設定を上書き**して
+>   いた（`ssh -G` で実測。`00-local` の `User` が `10-github` より優先された）。
+>
+> 「switch を邪魔する既存ファイル」の退き方は `-b` に一本化した方が判りやすい。
 
 ## fish
 
