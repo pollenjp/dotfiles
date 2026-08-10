@@ -9,6 +9,7 @@
 | --- | --- | --- |
 | [001](./001_home_manager_migration_20260808T163454JST/README.md) | dotfiles 管理を Nix home-manager へ移行する | 2026-08-08 |
 | [002](./002_nix_hosts_and_local_flake_20260810T153848JST/README.md) | マシン固有設定の表現と、実行の入口となるパスを決める | 2026-08-10 |
+| [003](./003_nix_ssh_config_20260810T210714JST/README.md) | ssh の設定を Nix 管理に載せる範囲を決める | 2026-08-10 |
 
 ## ディレクトリ名
 

@@ -604,45 +604,34 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 ## ssh について
 
 `programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
+接続情報の実体は `.ssh` submodule にあり、`setup-ssh-config.sh` が
+`~/.ssh/config.d/` へ symlink する。
 
 ```
 Include config.d/*.ssh_config
 ```
 
-（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決するので、これは
-`~/.ssh/config.d/*.ssh_config` を指す）
-
-### なぜ中身を Nix で配らないのか
-
-1. **`/nix/store` は誰でも読める。** 接続先ホスト名・ユーザー名・踏み台の構成を
-   store に置きたくない。store のファイルは 444 なのでパーミッションで隠せない。
-2. 実体は `.ssh` submodule (private repo) にあり、**flake root (`nix/`) の外**なので
-   そもそも flake から読めない。
-
-そこで骨組みだけを Nix が持ち、中身は `setup-ssh-config.sh` が
-`~/.ssh/config.d/` へ symlink する。骨組みが Nix 管理なので、
-「`Include` 行が入っているか」をマシンごとに気にしなくてよくなる
-（従来は `main.bash` が `~/.ssh/config` へ追記済みかどうかが曖昧だった）。
+（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する）
 
 ```sh
 ./nix/scripts/setup-ssh-config.sh
 ```
 
-冪等。`.ssh` submodule が未取得なら教えてくれる（その場合も他の設定は効くので
-処理は止めない）。submodule を更新したあとに張り直す用途でも使うので、
-`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入れてある。
+冪等。`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入っている
+ので、submodule を更新したら `--update` で張り直される。
+submodule が未取得なら教えてくれる（処理は止めない）。
 
 | `~/.ssh/config.d/` の中身 | 出所 |
 | --- | --- |
 | `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
 | それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
 
-submodule 側でファイル名が変わった場合、**参照先が消えた symlink はスクリプトが外す**。
+submodule 側でファイル名が変わった場合、参照先が消えた symlink はスクリプトが外す。
 手で置いたファイルや、submodule 以外を指す symlink には触らない。
 
-マシン固有の設定を足したいときは `~/.ssh/config.d/` にファイルを置く。
+マシン固有の設定を足すときは `~/.ssh/config.d/` にファイルを置く。
 `ssh` は同じキーワードについて**最初に得た値**を採るので、**ファイル名の順序が
-優先順位**になる。
+優先順位**になる。実効値は `ssh -G <ホスト名>` で確認できる。
 
 ### ⚠️ 既存の `~/.ssh/config` がある場合
 
@@ -650,22 +639,15 @@ submodule 側でファイル名が変わった場合、**参照先が消えた s
 実ファイルとして存在する。home-manager はこれを上書きせず
 `Existing file '...' would be clobbered` で中断する。
 
-**退避は [`--backup`](#既存ファイルを退避するか選ぶ) に任せる。** `~/.bashrc` などと
-同じ扱いで、`~/.ssh/config.backup` へ退く。`~/.ssh/config` は `hm_managed_paths` に
-入れてあるので、指定が無ければメニューが訊いてくる。
+退避は [`--backup`](#既存ファイルを退避するか選ぶ) が行う（`~/.bashrc` などと同じ扱い）。
+`~/.ssh/config` は `hm_managed_paths` に入れてあるので、指定が無ければメニューが訊いてくる。
 
-退避したファイルは **Include されないので設定としては効かなくなる**。残したい
-`Host` ブロックがあれば、中身を見てから `~/.ssh/config.d/` へ手で移すこと。
+**退避先の `~/.ssh/config.backup` は Include されないので、設定としては効かなくなる。**
+残したい `Host` ブロックは中身を見てから `~/.ssh/config.d/` へ手で移すこと。
 
-> かつては `setup-ssh-config.sh` が `~/.ssh/config.d/00-local.ssh_config` へ移して
-> いた（Include 経由でそのまま効かせる狙い）。やめた理由は 2 つ。
->
-> - `config.d` は Include されるので、**移した瞬間から設定として生き続ける**。
->   中身を見直す機会が無いまま、旧い設定が黙って残る。
-> - `00-` 始まりで最初に読まれるため、**旧い設定が submodule の設定を上書き**して
->   いた（`ssh -G` で実測。`00-local` の `User` が `10-github` より優先された）。
->
-> 「switch を邪魔する既存ファイル」の退き方は `-b` に一本化した方が判りやすい。
+> 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
+> `config.d` へ移す案を棄却した実測）は
+> [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
 
 ## fish
 

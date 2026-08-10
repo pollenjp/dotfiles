@@ -3,37 +3,27 @@
 #
 # .ssh submodule の *.ssh_config を ~/.ssh/config.d/ へ張る。冪等。
 #
-# ## なぜ Nix で配らないのか
-#
-# 1. **/nix/store は誰でも読める。** 接続先ホスト名・ユーザー名・踏み台の構成を
-#    store に置きたくない。store のファイルは 444 なので隠しようがない。
-# 2. 実体は `.ssh` submodule にあり **flake root (nix/) の外**なので、
-#    そもそも flake から読めない。
-#
 # Nix 側 (home/modules/ssh.nix) が生成するのは Include の骨組みだけ:
 #
 #     Include config.d/*.ssh_config
 #
-# ## 既存の ~/.ssh/config について
+# 中身を Nix で配らない理由 (store が誰でも読めること / submodule が flake root の
+# 外にあること) は ADR 003 を参照:
+#   docs/adr/003_nix_ssh_config_20260810T210714JST/README.md
 #
-# **このスクリプトは ~/.ssh/config を触らない。** 実ファイルとして残っていると
-# home-manager が「would be clobbered」で switch を中断するが、その退避は
-# setup.sh の `-b` (--backup) に任せる。~/.bashrc などと同じ扱いにして、
-# 「switch を邪魔する既存ファイル」の退き方を 1 つに統一するため。
+# ## このスクリプトは ~/.ssh/config を触らない
 #
-# かつてはここで ~/.ssh/config.d/00-local.ssh_config へ移していたが、やめた。
-# config.d は Include されるので **移した瞬間から設定として生き続ける**うえ、
-# 00- 始まりで最初に読まれる。ssh は同じキーワードについて最初に得た値を採るので、
-# 旧い設定が submodule の設定を **上書きする** ことになっていた (実測で確認)。
+# 実ファイルとして残っていると home-manager が「would be clobbered」で switch を
+# 中断するが、その退避は setup.sh の `-b` (--backup) に任せる。~/.bashrc などと
+# 同じ扱いにして、「switch を邪魔する既存ファイル」の退き方を 1 つに統一するため。
 #
-# 退避された ~/.ssh/config.backup に残したい Host ブロックがあれば、
-# 中身を見てから config.d/ へ手で移すこと。
+# かつてはここで ~/.ssh/config.d/00-local.ssh_config へ移していたが、旧い設定が
+# submodule の設定を上書きしてしまうためやめた (経緯と実測は ADR 003)。
 #
 # ## 実行のタイミング
 #
-# いつでもよい。setup.sh では switch の手前に置いてあるが、これは
-# switch 直後から ssh が引けるようにするためで、順序の制約ではない。
-# submodule を更新したあとに張り直す用途でも使うので、何度実行してもよい。
+# いつでもよい。setup.sh では switch の手前に置いてあるが、これは switch 直後から
+# ssh が引けるようにするためで、順序の制約ではない。
 
 set -eu -o pipefail
 
