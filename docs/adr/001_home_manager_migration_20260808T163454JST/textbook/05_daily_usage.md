@@ -52,6 +52,18 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 
 ## 更新する
 
+「更新」には別の軸が 2 つある。
+
+### 他のマシンでの変更を取り込む (本体の checkout)
+
+```sh
+~/dotfiles/setup --self-update --update
+```
+
+`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、`git pull` すればスクリプトも設定も一度に新しくなる。未コミットの変更があるときや fast-forward できないときは警告だけ出して何もしない（本体は開発対象でもあるため）。詳細は [`nix/README.md`](../../../../nix/README.md#本体を最新にする---self-update)。
+
+### 依存 (nixpkgs / home-manager) を更新する
+
 ```sh
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
@@ -126,7 +138,7 @@ cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 | エラー | 原因と対処 |
 | --- | --- |
 | `home-manager: command not found` | **初回はまだ CLI が無い。** `nix run ~/dotfiles#home-manager -- switch ...` で 1 回目を実行する。2 回目以降も出るなら `~/.nix-profile/bin` が PATH に無い（`. ~/.nix-profile/etc/profile.d/nix.sh`） |
-| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける |
+| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける（`~/dotfiles/setup` なら `b` / `--backup`） |
 | `Existing file ... .bak already exists` | 前回の退避が残っている。古い `.bak` を消す |
 | `path does not exist` (新規 `.nix` を足した直後) | **git flake は untracked ファイルを見ない。`git add` する** |
 | 入れたはずのツールが古いまま | mise のリストに残っている。`~/.config/mise/config.toml` から消す |

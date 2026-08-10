@@ -9,7 +9,9 @@
 #   Existing file '...' would be clobbered by home-manager
 #
 # 安全のため **シンボリックリンクのみ** を外す。実ファイル/実ディレクトリは
-# 警告して残す (手で退避するか -b bak を使うこと)。
+# 警告して残す (中身を確認してから捨てたいので、消す判断はしない)。
+# それらは手で退けるか、switch に -b <拡張子> を付けて退避する
+# (setup.sh の --backup / メニューの b で選べる)。
 
 set -eu -o pipefail
 
@@ -35,9 +37,16 @@ targets=(
   "${HOME}/.config/fish/fish_plugins"
 )
 
-# Stage 5 (bash) で管理対象になったら、ここへ移す:
-#   ~/.bashrc は symlink ではなく main.bash が **追記** したファイルなので
-#   unlink ではなく、追記された stanza を手で削る必要がある。
+# bash は Stage 5 で管理対象になったが、ここには入れない。
+#
+# programs.bash が書くのは ~/.bashrc / ~/.bash_profile / ~/.profile の 3 つで、
+# いずれも symlink ではない実ファイル (ディストリの初期ファイル、または
+# main.bash が **追記** したもの)。unlink できないし、追記された stanza を
+# 消すには中身を読む必要がある。
+#
+# よって扱いは switch 側に任せる。`-b <拡張子>` を付ければ <名前>.<拡張子> へ
+# 退避してから置き換わるので、中身は後から見比べられる。
+# 付けるかどうかは setup.sh が訊く (--backup / --no-backup / メニューの b)。
 
 unlinked=0
 skipped=0
@@ -59,7 +68,8 @@ printf '\n%d 個を外しました。' "${unlinked}"
 if [[ ${skipped} -gt 0 ]]; then
   printf '%d 個は実ファイル/実ディレクトリのため残しています。\n' "${skipped}"
   printf 'これらは home-manager が中断する原因になります。\n' >&2
-  printf '手で退避するか、switch に -b bak を付けてください。\n' >&2
+  printf '手で退けるか、switch に -b <拡張子> を付けて退避してください\n' >&2
+  printf '(setup.sh なら --backup / メニューの b で選べます)。\n' >&2
 else
   printf '\n'
 fi

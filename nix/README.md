@@ -118,7 +118,59 @@ printf 'experimental-features = nix-command flakes\n' >> ~/.config/nix/nix.conf
 systemd の無いコンテナでは `--daemon` が失敗するので `--no-daemon` を使う。
 root で single-user install する場合は `/etc/nix/nix.conf` に `build-users-group =` (空) が必要。
 
-## 依存の更新
+## 更新
+
+「更新」には別の軸が 3 つある。混ぜると分からなくなるので分けて扱う。
+
+| 何が古くなるか | 何をする | 誰が |
+| --- | --- | --- |
+| 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
+| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | 手で実行（下記） |
+| `~/dotfiles/flake.lock` | 何もしない | `path:` 入力を評価ごとに追うため不要 |
+
+**`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
+古くなるのは symlink の先、つまり本体の checkout。
+
+### 本体を最新にする (`--self-update`)
+
+```sh
+~/dotfiles/setup --self-update            # fetch -> fast-forward -> 新しい自分で続行
+~/dotfiles/setup --self-update --update   # 最新にしてから home-manager switch
+```
+
+メニューからは `u`。`--self-update` を付けない限り git は触らない。
+
+`git pull` は**実行中の `setup.sh` 自身を置き換える**。bash はスクリプトを読み進めながら
+実行するので、書き換え方によって次の 2 通りになる（bash 5.2 で実測）。
+
+| 書き換え方 | 実行中のプロセスが見る内容 |
+| --- | --- |
+| 同じ inode を上書き（`cat > file`） | 途中から新しい内容を読む（挙動が混ざる） |
+| unlink + 新規作成（`git checkout` / `merge`） | 古い内容を読み続ける |
+
+git は後者なので壊れはしないが、**古いロジックで最後まで走る**。更新後の
+`bootstrap-*.sh` や登録簿を古いオーケストレータが呼ぶ形になるので、更新できたら
+`exec` で自分を張り替え、続きは新しい `setup.sh` に任せる。対象ホストや退避の設定は
+引き継がれる。更新で `setup.sh` 自体が移動していて `exec` できないときは、
+古いまま続けずに止める。
+
+本体は**開発対象でもある**（`path:` を選んだのは commit せずに試せるから）ので、
+次の場合は警告だけ出して何もしない。手順の実行自体は続ける（オフラインでも
+setup は使えるべきなので、`fetch` の失敗も止める理由にしない）。
+
+| 状況 | 理由 |
+| --- | --- |
+| 未 commit の変更がある | 作業中の変更を巻き込みたくない（`.ssh` submodule の状態は見ない） |
+| detached HEAD / upstream 無し | どこへ進めるべきか決められない |
+| fast-forward できない | rebase か merge かの判断はしない |
+
+メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
+（毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
+
+`flake.lock` の更新は `--self-update` では扱わない。本体を書き換えて commit が要るもので、
+pull と衝突しやすいため。
+
+### 依存 (flake.lock) の更新
 
 ```sh
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
@@ -152,6 +204,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 ```
   対象ホスト: pollenjp@wsl  (h で変更)
+  既存ファイル: 退避しない  (b で変更)
 
   ❯ 新しいマシン適用
     既存マシン更新
@@ -166,6 +219,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
+`h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
+`u` で[本体を最新にする](#本体を最新にする---self-update)（更新できたら新しい setup で再起動する）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
 対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
@@ -183,6 +238,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ~/dotfiles/setup --steps switch,bootstrap-mise
 ~/dotfiles/setup --list                   # 手順の id 一覧
 ~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
+~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
+~/dotfiles/setup --self-update --update   # 本体を最新にしてから switch
 ```
 
 `~/dotfiles/setup` は実体への symlink なので、どちらから呼んでも同じ。
@@ -194,6 +251,56 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 `bootstrap-*.sh` は glob で自動列挙するため、スクリプトを足しても
 `setup.sh` の編集は要らない。
 
+#### 既存ファイルを退避するか選ぶ
+
+`programs.bash` は `~/.bashrc` / `~/.bash_profile` / `~/.profile` を書く。これらは
+**ディストリの初期ファイルとして最初から在る**のが普通で、home-manager は自分が
+作ったのではないファイルを消さないため、そのままでは switch がここで止まる。
+
+```
+Existing file '/home/pollenjp/.bashrc' would be clobbered by home-manager
+```
+
+`-b <拡張子>` を付けると `~/.bashrc.backup` へ改名してから置き換える。
+付けるかどうかは好みが分かれるので、setup が決め打ちにせず選ばせる。
+
+| 選択 | 結果 |
+| --- | --- |
+| 退避しない（既定） | 実ファイルが在ると switch が中断する。中身を見て手で退ける |
+| `-b backup` で退避 | `<名前>.backup` へ改名してから置き換える。`main.bash` の追記も残る |
+
+メニューではいつでも `b` で変更できる。加えて、**switch を含む実行を始めるときに
+中断させる実ファイルが見つかれば、この画面を挟む**（見つからなければ訊かない）。
+
+```
+    退避しない
+  ❯ -b backup で退避してから置き換える
+
+────────────────────────────────────────────────────────
+  下のファイルを <名前>.backup へ改名してから置き換える。
+  中身 (main.bash の追記など) は残るので後から見比べられる。
+
+  中断させる実ファイル (2 件):
+    /home/pollenjp/.bashrc
+    /home/pollenjp/.profile
+```
+
+メニューを通らない経路では引数か環境変数で指定する（既定は「退避しない」で、
+中断させるファイルが在れば実行直前に警告が出る）。
+
+```sh
+~/dotfiles/setup --new-machine --backup       # -b backup
+~/dotfiles/setup --new-machine --backup=bak   # -b bak (拡張子を変える)
+~/dotfiles/setup --new-machine --no-backup    # 付けない (既定)
+DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
+```
+
+> ⚠️ 退避先が既に在ると `-b` は失敗する（上書きしない）。setup は実行前に見つけて
+> 知らせるので、古い `<名前>.backup` を消してから実行し直す。
+
+`preflight-unlink.sh` が外すのは **symlink だけ**で、`~/.bashrc` のような実ファイルは
+残す（中身を確認してから捨てたいので、消す判断はしない）。役割が分かれている。
+
 ### 新規マシンの手順
 
 上から順に実行する。**2 と 4 と 6 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
@@ -204,7 +311,7 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
-| 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形 |
+| 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
@@ -259,6 +366,13 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）でも同じことをする。
 ホスト名を覚えていなくてよいのでこちらが楽。
+
+ただし**これは手元の checkout を適用するだけ**で、リモートの変更は取ってこない。
+本体ごと最新にするなら `--self-update` を足す（[前述](#本体を最新にする---self-update)）。
+
+```sh
+~/dotfiles/setup --self-update --update
+```
 
 **`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
 Nix インストーラが用意する profile スクリプトを読み込む (ログインし直すか、以下を実行):
@@ -412,12 +526,15 @@ nix build --impure --expr '
 nix build ~/dotfiles#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3   # home-files は symlink なので -L 必須
 
-# 適用 (既存ファイルは .bak へ退避)
+# 適用 (既存ファイルは .bak へ退避。setup なら --backup=bak / メニューの b)
 home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
 # 世代一覧とロールバック
 home-manager generations
 /nix/store/<older>-home-manager-generation/activate
+
+# 本体を最新にしてから適用 (git pull -> switch)
+~/dotfiles/setup --self-update --update
 
 # 依存の更新 (本体の flake.lock を触るのでリポジトリ側を指す)
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
@@ -506,6 +623,11 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
 内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+
+`programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
+どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
+[退避するかどうか](#既存ファイルを退避するか選ぶ)を選ぶことになる。
+`preflight-unlink.sh` の対象 (symlink) には入らない。
 
 **`main.bash:199-219` の bash-completion 取得が不要になった。**
 curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、

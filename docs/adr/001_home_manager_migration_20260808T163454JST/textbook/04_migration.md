@@ -102,6 +102,10 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
 > ⚠️ **`.bak` が既に存在すると失敗する。** 途中で失敗して再挑戦するときは、古い `.bak` を先に消すこと。
 
+`~/dotfiles/setup` から実行する場合、この `-b` を付けるかどうかはメニューが訊く
+（`b` でいつでも変更、引数なら `--backup` / `--backup=bak` / `--no-backup`）。
+詳細は [`nix/README.md`](../../../../nix/README.md#既存ファイルを退避するか選ぶ)。
+
 ### 5. 確認する
 
 ```sh
