@@ -193,6 +193,11 @@ add_step local-flake \
   'ローカル flake (~/dotfiles) と setup の symlink を置く。以後の入口になる。' \
   step 0
 
+add_step ssh-config \
+  './nix/scripts/setup-ssh-config.sh' \
+  '手順 2.5。~/.ssh/config を退避し .ssh submodule を config.d へ張る。switch の前に。' \
+  step 0
+
 add_step switch \
   'home-manager switch' \
   '手順 3。初回は home-manager コマンドがまだ無いので nix run 経由で実行する。' \
@@ -272,7 +277,7 @@ apply_preset() {
     new-machine)
       # 手順 1 → 2 → 3 → 4/6。
       # 手順 7 (chsh) は README でも「必要なら」なので既定では入れない。
-      ids=(nix-install preflight-unlink local-flake switch)
+      ids=(nix-install preflight-unlink local-flake ssh-config switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -280,7 +285,10 @@ apply_preset() {
     update)
       # README 「2 回目以降」。bootstrap は済んでいる前提なので switch だけ。
       # 入れ直したくなったらカスタムか --steps で選ぶ。
-      ids=(switch)
+      #
+      # ssh-config だけは入れてある。.ssh submodule を更新したときに
+      # ~/.ssh/config.d/ を張り直す必要があり、冪等で副作用も無いため。
+      ids=(ssh-config switch)
       ;;
     *) die "unknown preset: $1" ;;
   esac
@@ -863,6 +871,7 @@ run_step() {
     nix-install) step_nix_install ;;
     preflight-unlink) step_script preflight-unlink.sh ;;
     local-flake) step_local_flake ;;
+    ssh-config) step_script setup-ssh-config.sh ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
     bootstrap-*) step_script "$1.sh" ;;

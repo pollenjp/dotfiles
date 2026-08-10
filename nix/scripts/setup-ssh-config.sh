@@ -16,12 +16,17 @@
 #
 # ## 実行のタイミング
 #
-# **初回の home-manager switch より前**に実行するとよい。
-# 既に ~/.ssh/config が実ファイルとして存在すると home-manager が
-# 「would be clobbered」で中断するため、それをここで退避する。
+# **home-manager switch より前**に実行する必要がある。setup.sh の手順でも
+# switch の手前に置いてある (bootstrap-*.sh の枠には入れられない。あれは
+# switch の後に走るので手遅れになる)。
+#
+# 理由: ~/.ssh/config が実ファイルとして残っていると home-manager が
+#       「Existing file '...' would be clobbered」で **switch ごと中断する**。
+#       それをここで config.d へ退避しておく。
 #
 # 既に switch 済み (= ~/.ssh/config が store への symlink) の場合は
-# 退避処理を飛ばし、symlink を張り直すだけ。
+# 退避処理を飛ばし、symlink を張り直すだけ。submodule を更新したあとに
+# 張り直す用途でも使うので、何度実行してもよい。
 
 set -eu -o pipefail
 
@@ -85,9 +90,13 @@ fi
 # submodule から張る。
 echo "==> ${src_dir}"
 if [[ ! -d ${src_dir} ]]; then
-  echo "  .ssh submodule がありません。次で取得してください:" >&2
+  # ここで落とさない。ssh の骨組み (~/.ssh/config) と config.d は既に整っており、
+  # 手で置いた設定はそのまま効く。submodule はあくまで追加分なので、
+  # 未取得を理由に setup 全体を止める必要はない。
+  echo "  .ssh submodule がありません。使うなら次で取得してください:" >&2
   echo "    git -C \"${repo_dir}\" submodule update --init .ssh" >&2
-  exit 1
+  echo "    (取得後にこのスクリプトを再実行する)" >&2
+  exit 0
 fi
 
 # 先に submodule 由来の symlink を落としてから張り直す。

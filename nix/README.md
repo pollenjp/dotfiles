@@ -161,8 +161,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 3 → 4 → 6 |
-| 既存マシン更新 | 3 (`home-manager switch`) だけ |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 |
+| 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
@@ -204,11 +204,11 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
+| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | **`switch` より前に**（[後述](#ssh-について)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形 |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
-| 6.5 | `./nix/scripts/bootstrap-ssh-config.sh` | `bootstrap-ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -508,10 +508,15 @@ Include config.d/*.ssh_config
 （従来は `main.bash` が `~/.ssh/config` へ追記済みかどうかが曖昧だった）。
 
 ```sh
-./nix/scripts/bootstrap-ssh-config.sh
+./nix/scripts/setup-ssh-config.sh
 ```
 
-冪等。`.ssh` submodule が未取得なら教えてくれる。
+冪等。`.ssh` submodule が未取得なら教えてくれる（その場合も他の設定は効くので
+処理は止めない）。submodule を更新したあとに張り直す用途でも使う。
+
+> ⚠️ **`switch` より前に実行する必要がある。** `bootstrap-*.sh` の枠に入れていないのは
+> そのため（あれは `switch` の後に走るので手遅れになる）。`setup.sh` の手順でも
+> `switch` の手前に置いてあり、「新しいマシン適用」「既存マシン更新」の両方に入る。
 
 | `~/.ssh/config.d/` の中身 | 出所 |
 | --- | --- |
@@ -528,10 +533,9 @@ submodule 側でファイル名が変わった場合、**参照先が消えた s
 実ファイルとして存在する。home-manager はこれを上書きせず
 `Existing file '...' would be clobbered` で中断する。
 
-`bootstrap-ssh-config.sh` は実ファイルの `~/.ssh/config` を
-`~/.ssh/config.d/00-local.ssh_config` へ退避する。**初回の switch より前**に
-実行しておくとよい（既に switch 済みなら `~/.ssh/config` は store への symlink に
-なっており、スクリプトはそれを検出して触らない）。
+`setup-ssh-config.sh` がこれを `~/.ssh/config.d/00-local.ssh_config` へ退避する。
+退避後も `Include` 経由でそのまま効く。既に switch 済みなら `~/.ssh/config` は
+store への symlink になっており、スクリプトはそれを検出して触らない。
 
 マシン固有の設定を足したいときは `~/.ssh/config.d/` にファイルを置く。
 `ssh` は同じキーワードについて**最初に得た値**を採るので、`config.d` が優先される。
@@ -769,6 +773,7 @@ nix/
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
+    ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
