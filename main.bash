@@ -42,7 +42,6 @@ main() {
       pushd "${script_dir}" &>/dev/null
 
       append_load_rc_line "${HOME}"/.bashrc "${HOME}"/dotfiles/.bashrc
-      append_load_rc_line "${HOME}"/.zshrc "${HOME}"/dotfiles/.zshrc
 
       # fish shell config
       # fish_config_dir="${HOME}/.config/fish"
