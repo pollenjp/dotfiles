@@ -6,13 +6,13 @@
 
 ```sh
 # 設定を変えたら適用する
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 # 今どの世代にいるか / 過去の世代を見る
 home-manager generations
 
 # 依存 (nixpkgs / home-manager) を更新する
-nix flake update --flake ~/dotfiles/nix
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 `--flake ...` を毎回打つのが面倒なら alias を作るとよい。
@@ -37,8 +37,8 @@ nix flake update --flake ~/dotfiles/nix
 ## ツールを増やす
 
 ```sh
-$EDITOR ~/dotfiles/nix/home/modules/packages.nix
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+$EDITOR ~/ghq/github.com/pollenjp/dotfiles/nix/home/modules/packages.nix
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 パッケージ名は <https://search.nixos.org/packages> で調べる。
@@ -52,9 +52,21 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 
 ## 更新する
 
+「更新」には別の軸が 2 つある。
+
+### 他のマシンでの変更を取り込む (本体の checkout)
+
 ```sh
-nix flake update --flake ~/dotfiles/nix
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+~/dotfiles/setup --self-update --update
+```
+
+`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、`git pull` すればスクリプトも設定も一度に新しくなる。未コミットの変更があるときや fast-forward できないときは警告だけ出して何もしない（本体は開発対象でもあるため）。詳細は [`nix/README.md`](../../../../nix/README.md#本体を最新にする---self-update)。
+
+### 依存 (nixpkgs / home-manager) を更新する
+
+```sh
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `nix flake update` は `flake.lock` を書き換える。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
@@ -62,7 +74,7 @@ home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 特定の input だけ更新することもできる。
 
 ```sh
-nix flake update nixpkgs --flake ~/dotfiles/nix
+nix flake update nixpkgs --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 ## 壊れたら戻す
@@ -97,7 +109,7 @@ Nix は「どこかの世代から参照されている store path」を消さ�
 設定を大きく変えたときは、実マシンに適用する前に確認する。
 
 ```sh
-cd ~/dotfiles/nix
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
 
 # 全 system で評価が通るか (ビルドはしない。速い)
 nix flake check --all-systems --no-build
@@ -116,7 +128,7 @@ HOME=/tmp/hm-sandbox nix run .#home-manager -- switch --flake .#sandbox -b bak
 ## フォーマット
 
 ```sh
-cd ~/dotfiles/nix && nix fmt
+cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 ```
 
 `.nix` ファイルを nixfmt で整形する。シェルスクリプトは従来どおり `./main.bash fmt` (shfmt)。
@@ -125,8 +137,8 @@ cd ~/dotfiles/nix && nix fmt
 
 | エラー | 原因と対処 |
 | --- | --- |
-| `home-manager: command not found` | **初回はまだ CLI が無い。** `nix run ~/dotfiles/nix#home-manager -- switch ...` で 1 回目を実行する。2 回目以降も出るなら `~/.nix-profile/bin` が PATH に無い（`. ~/.nix-profile/etc/profile.d/nix.sh`） |
-| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける |
+| `home-manager: command not found` | **初回はまだ CLI が無い。** `nix run ~/dotfiles#home-manager -- switch ...` で 1 回目を実行する。2 回目以降も出るなら `~/.nix-profile/bin` が PATH に無い（`. ~/.nix-profile/etc/profile.d/nix.sh`） |
+| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける（`~/dotfiles/setup` なら `b` / `--backup`） |
 | `Existing file ... .bak already exists` | 前回の退避が残っている。古い `.bak` を消す |
 | `path does not exist` (新規 `.nix` を足した直後) | **git flake は untracked ファイルを見ない。`git add` する** |
 | 入れたはずのツールが古いまま | mise のリストに残っている。`~/.config/mise/config.toml` から消す |

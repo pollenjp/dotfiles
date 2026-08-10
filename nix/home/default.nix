@@ -6,6 +6,7 @@
     ./modules/packages.nix
     ./modules/files.nix
     ./modules/git.nix
+    ./modules/ssh.nix
     ./modules/starship.nix
     ./modules/mise.nix
     ./modules/shell-common.nix

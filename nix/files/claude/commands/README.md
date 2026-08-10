@@ -39,7 +39,7 @@ nix/files/claude/commands/git/sync.md   ->  /git:sync
 
 ```sh
 git -C ~/dotfiles add nix/files/claude   # flake は untracked ファイルを見ない
-home-manager switch --flake ~/dotfiles/nix#<ホスト名>
+home-manager switch --flake ~/dotfiles#<ホスト名>
 ```
 
 ## 注意

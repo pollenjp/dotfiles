@@ -72,7 +72,7 @@ Nix の記述から設定ファイルを**生成**する。OS 分岐や条件付
 
 ```nix
 # WSL のときだけ 1Password のパスを設定する
-programs.git.extraConfig = lib.mkIf config.dotfiles.isWSL {
+programs.git.extraConfig = lib.mkIf config.dotfiles.wsl.enable {
   "gpg \"ssh\"".program = "/mnt/c/Users/.../op-ssh-sign-wsl.exe";
 };
 ```

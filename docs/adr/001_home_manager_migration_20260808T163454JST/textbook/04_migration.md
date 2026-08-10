@@ -39,7 +39,7 @@ systemd のないコンテナでは `--daemon` が失敗するので `--no-daemo
 **ここが最も重要。** `$HOME` に一切触れずに、配置される全ファイルを確認できる。
 
 ```sh
-cd ~/dotfiles/nix
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
 nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find /tmp/hm/home-files -mindepth 1 -maxdepth 3
 ```
@@ -74,8 +74,8 @@ home-manager は「自分が作ったもの以外は勝手に消さない」設�
 1 回目は flake から直接実行する。
 
 ```sh
-nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak --dry-run
-nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak --dry-run
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak
 ```
 
 <details><summary>なぜ 1 回目だけ書き方が違うのか</summary>
@@ -84,7 +84,7 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 **それが効くのは初回の activate が成功した後**。つまり鶏と卵になっている。
 
 そこで `flake.nix` は `packages.<system>.home-manager` を公開しており、
-`nix run ~/dotfiles/nix#home-manager` で **`flake.lock` に固定されたのと同じバージョン**の
+`nix run ~/dotfiles#home-manager` で **`flake.lock` に固定されたのと同じバージョン**の
 CLI を直接実行できるようにしてある。
 
 `nix run home-manager -- ...`（`#` なし＝レジストリ経由）は使わないこと。nixpkgs 同梱の
@@ -95,12 +95,16 @@ CLI を直接実行できるようにしてある。
 2 回目以降は `~/.nix-profile/bin/home-manager` が入るので短く書ける。
 
 ```sh
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 ```
 
 `-b bak` は既存ファイルを `<名前>.bak` に退避してから進める。
 
 > ⚠️ **`.bak` が既に存在すると失敗する。** 途中で失敗して再挑戦するときは、古い `.bak` を先に消すこと。
+
+`~/dotfiles/setup` から実行する場合、この `-b` を付けるかどうかはメニューが訊く
+（`b` でいつでも変更、引数なら `--backup` / `--backup=bak` / `--no-backup`）。
+詳細は [`nix/README.md`](../../../../nix/README.md#既存ファイルを退避するか選ぶ)。
 
 ### 5. 確認する
 

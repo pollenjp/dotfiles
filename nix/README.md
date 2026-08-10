@@ -18,6 +18,91 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 
 対象シェルは **bash / fish**。zsh は Nix 管理の対象外。
 
+## 置き場所
+
+パスは 2 つある。**リポジトリ本体は ghq が決める場所に置き、日々の操作は
+`~/dotfiles` から行う。**
+
+| パス | 中身 | git |
+| --- | --- | --- |
+| `~/ghq/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
+| `~/dotfiles` | ローカル専用の flake と `setup` への symlink | **管理外** |
+
+本体を ghq 配下に置くのは、`cdrepo` など ghq 前提の仕組みと置き場所を揃え、
+他のリポジトリと同じ規則で辿れるようにするため。一方で日々叩くパスは短く
+固定したいので、`~/dotfiles` を「常にここから実行する入口」として別に用意する。
+
+### 最初の clone
+
+**この時点では `ghq` はまだ無い。** `ghq` は Nix が入れるもの (`home/modules/packages.nix`)
+なので、初回は `$(ghq root)` も `ghq get` も使えない。既定のパスへ `git clone` で置く。
+
+```sh
+mkdir -p ~/ghq/github.com/pollenjp
+
+# https (初回はこちら。SSH 鍵 (1Password) の設定もまだのことが多いため)
+git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
+
+# SSH 鍵が既に使えるなら
+git clone git@github.com:pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
+```
+
+2 台目以降 (`ghq` が入っている環境) なら `ghq get` でも同じ場所に置ける。
+
+```sh
+ghq get https://github.com/pollenjp/dotfiles.git
+ghq get git@github.com:pollenjp/dotfiles.git
+```
+
+> このドキュメントは `ghq root` の既定値 `~/ghq` を直接書いている。
+> `GHQ_ROOT` や `git config ghq.root` で変えている場合はそのパスに読み替えること。
+> スクリプト側は `ghq` → `GHQ_ROOT` → `git config ghq.root` → `~/ghq` の順で
+> 自動判定するので、変えていても正しく動く。
+
+### `~/dotfiles` を用意する
+
+```sh
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh
+```
+
+冪等。次の 2 つを置く（既にあるものは触らない）。
+
+```
+~/dotfiles/
+├── flake.nix   本体を input として取り込み、homeConfigurations を再輸出する
+├── flake.lock  nix が生成する
+└── setup -> .../nix/scripts/setup.sh
+```
+
+以後はここから実行する。
+
+```sh
+~/dotfiles/setup                                  # メニュー
+~/dotfiles/setup --update                         # 既存マシンの更新
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
+```
+
+> パスが違うと `setup-local-flake.sh` は止まる。意図して別の場所に置くなら
+> `DOTFILES_ALLOW_ANY_PATH=1` を、`~/dotfiles` 以外に置くなら
+> `DOTFILES_LOCAL_DIR` を指定する。
+
+> ⚠️ **旧経路 `main.bash setup` を使っていたマシンでは `~/dotfiles` がリポジトリ本体になっている。**
+> 先に本体を ghq 配下へ移すこと。`setup-local-flake.sh` は `~/dotfiles` が git 作業ツリーだと
+> 何もせず止まるので、取り違えて壊すことはない。
+>
+> ```sh
+> mkdir -p ~/ghq/github.com/pollenjp
+> mv ~/dotfiles ~/ghq/github.com/pollenjp/dotfiles
+> ```
+>
+> 旧経路が配置した設定ファイルは `~/dotfiles/...` を直接参照しているため、移動すると
+> 旧経路側は壊れる。Nix 経路へ切り替えるマシンでのみ行うこと（手順 2 の
+> `preflight-unlink.sh` で symlink を外すのが前提）。
+
+`~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**を
+足す場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、
+入口を 1 つに揃えるために常に置く。
+
 ## Nix のインストール
 
 ```sh
@@ -33,11 +118,65 @@ printf 'experimental-features = nix-command flakes\n' >> ~/.config/nix/nix.conf
 systemd の無いコンテナでは `--daemon` が失敗するので `--no-daemon` を使う。
 root で single-user install する場合は `/etc/nix/nix.conf` に `build-users-group =` (空) が必要。
 
-## 依存の更新
+## 更新
+
+「更新」には別の軸が 3 つある。混ぜると分からなくなるので分けて扱う。
+
+| 何が古くなるか | 何をする | 誰が |
+| --- | --- | --- |
+| 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
+| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | 手で実行（下記） |
+| `~/dotfiles/flake.lock` | 何もしない | `path:` 入力を評価ごとに追うため不要 |
+
+**`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
+古くなるのは symlink の先、つまり本体の checkout。
+
+### 本体を最新にする (`--self-update`)
 
 ```sh
-nix flake update --flake ~/dotfiles/nix
+~/dotfiles/setup --self-update            # fetch -> fast-forward -> 新しい自分で続行
+~/dotfiles/setup --self-update --update   # 最新にしてから home-manager switch
 ```
+
+メニューからは `u`。`--self-update` を付けない限り git は触らない。
+
+`git pull` は**実行中の `setup.sh` 自身を置き換える**。bash はスクリプトを読み進めながら
+実行するので、書き換え方によって次の 2 通りになる（bash 5.2 で実測）。
+
+| 書き換え方 | 実行中のプロセスが見る内容 |
+| --- | --- |
+| 同じ inode を上書き（`cat > file`） | 途中から新しい内容を読む（挙動が混ざる） |
+| unlink + 新規作成（`git checkout` / `merge`） | 古い内容を読み続ける |
+
+git は後者なので壊れはしないが、**古いロジックで最後まで走る**。更新後の
+`bootstrap-*.sh` や登録簿を古いオーケストレータが呼ぶ形になるので、更新できたら
+`exec` で自分を張り替え、続きは新しい `setup.sh` に任せる。対象ホストや退避の設定は
+引き継がれる。更新で `setup.sh` 自体が移動していて `exec` できないときは、
+古いまま続けずに止める。
+
+本体は**開発対象でもある**（`path:` を選んだのは commit せずに試せるから）ので、
+次の場合は警告だけ出して何もしない。手順の実行自体は続ける（オフラインでも
+setup は使えるべきなので、`fetch` の失敗も止める理由にしない）。
+
+| 状況 | 理由 |
+| --- | --- |
+| 未 commit の変更がある | 作業中の変更を巻き込みたくない（`.ssh` submodule の状態は見ない） |
+| detached HEAD / upstream 無し | どこへ進めるべきか決められない |
+| fast-forward できない | rebase か merge かの判断はしない |
+
+メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
+（毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
+
+`flake.lock` の更新は `--self-update` では扱わない。本体を書き換えて commit が要るもので、
+pull と衝突しやすいため。
+
+### 依存 (flake.lock) の更新
+
+```sh
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+```
+
+`~/dotfiles` 側の lock は `path:` 入力を追うだけなので、更新は要らない。
 
 > **GitHub の tarball 取得が遮断された環境について**
 >
@@ -59,11 +198,13 @@ nix flake update --flake ~/dotfiles/nix
 次節の手順表をそのまま実行するスクリプトがある。引数なしで起動するとメニューが出る。
 
 ```sh
-./nix/scripts/setup.sh
+~/dotfiles/setup            # 用意済みならこれ (symlink)
+./nix/scripts/setup.sh      # 実体。~/dotfiles を用意する前はこちら
 ```
 
 ```
   対象ホスト: pollenjp@wsl  (h で変更)
+  既存ファイル: 退避しない  (b で変更)
 
   ❯ 新しいマシン適用
     既存マシン更新
@@ -73,34 +214,92 @@ nix flake update --flake ~/dotfiles/nix
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 3 → 4 → 6 → 7 |
-| 既存マシン更新 | 3 (`home-manager switch`) だけ |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.5 |
+| 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
+`h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
+`u` で[本体を最新にする](#本体を最新にする---self-update)（更新できたら新しい setup で再起動する）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
 対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
 （WSL なら `<user>@wsl` を優先）。違うものを使うなら `h` で選び直すか `--host <名前>`。
 
 自動化していないのは手順 0（`hosts/default.nix` への追加）と
-手順 5（mise の `config.toml` 整理）だけ。手順 8 (`chsh`) は
+手順 5（mise の `config.toml` 整理）だけ。手順 7 (`chsh`) は
 「必要なら」なのでプリセットには入れていないが、カスタムから選べる。
 
 メニューを出さずに実行することもできる。
 
 ```sh
-./nix/scripts/setup.sh --new-machine            # 「新しいマシン適用」と同じ
-./nix/scripts/setup.sh --update                 # 「既存マシン更新」と同じ
-./nix/scripts/setup.sh --steps switch,bootstrap-mise
-./nix/scripts/setup.sh --list                   # 手順の id 一覧
-./nix/scripts/setup.sh --new-machine --dry-run  # 走るコマンドを見るだけ
+~/dotfiles/setup --new-machine            # 「新しいマシン適用」と同じ
+~/dotfiles/setup --update                 # 「既存マシン更新」と同じ
+~/dotfiles/setup --steps switch,bootstrap-mise
+~/dotfiles/setup --list                   # 手順の id 一覧
+~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
+~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
+~/dotfiles/setup --self-update --update   # 本体を最新にしてから switch
 ```
+
+`~/dotfiles/setup` は実体への symlink なので、どちらから呼んでも同じ。
+使う flake は `~/dotfiles/flake.nix` があればそちら、無ければリポジトリ側を指す
+(既存マシンを移行するときは `--steps local-flake` を一度だけ実行する)。
 
 Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 （jq も fzf も使えないのでメニューは自前描画）。
 `bootstrap-*.sh` は glob で自動列挙するため、スクリプトを足しても
 `setup.sh` の編集は要らない。
+
+#### 既存ファイルを退避するか選ぶ
+
+`programs.bash` は `~/.bashrc` / `~/.bash_profile` / `~/.profile` を書く。これらは
+**ディストリの初期ファイルとして最初から在る**のが普通で、home-manager は自分が
+作ったのではないファイルを消さないため、そのままでは switch がここで止まる。
+
+```
+Existing file '/home/pollenjp/.bashrc' would be clobbered by home-manager
+```
+
+`-b <拡張子>` を付けると `~/.bashrc.backup` へ改名してから置き換える。
+付けるかどうかは好みが分かれるので、setup が決め打ちにせず選ばせる。
+
+| 選択 | 結果 |
+| --- | --- |
+| 退避しない（既定） | 実ファイルが在ると switch が中断する。中身を見て手で退ける |
+| `-b backup` で退避 | `<名前>.backup` へ改名してから置き換える。`main.bash` の追記も残る |
+
+メニューではいつでも `b` で変更できる。加えて、**switch を含む実行を始めるときに
+中断させる実ファイルが見つかれば、この画面を挟む**（見つからなければ訊かない）。
+
+```
+    退避しない
+  ❯ -b backup で退避してから置き換える
+
+────────────────────────────────────────────────────────
+  下のファイルを <名前>.backup へ改名してから置き換える。
+  中身 (main.bash の追記など) は残るので後から見比べられる。
+
+  中断させる実ファイル (2 件):
+    /home/pollenjp/.bashrc
+    /home/pollenjp/.profile
+```
+
+メニューを通らない経路では引数か環境変数で指定する（既定は「退避しない」で、
+中断させるファイルが在れば実行直前に警告が出る）。
+
+```sh
+~/dotfiles/setup --new-machine --backup       # -b backup
+~/dotfiles/setup --new-machine --backup=bak   # -b bak (拡張子を変える)
+~/dotfiles/setup --new-machine --no-backup    # 付けない (既定)
+DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
+```
+
+> ⚠️ 退避先が既に在ると `-b` は失敗する（上書きしない）。setup は実行前に見つけて
+> 知らせるので、古い `<名前>.backup` を消してから実行し直す。
+
+`preflight-unlink.sh` が外すのは **symlink だけ**で、`~/.bashrc` のような実ファイルは
+残す（中身を確認してから捨てたいので、消す判断はしない）。役割が分かれている。
 
 ### 新規マシンの手順
 
@@ -108,15 +307,17 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
-| 0 | `hosts/default.nix` にマシンを 1 行追加 | — | WSL なら `windowsUserName` も |
+| 0 | `hosts/default.nix` にマシンを 1 エントリ追加 | — | WSL なら `wsl = { ... }` も（[後述](#マシン登録簿-hostsdefaultnix)） |
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
-| 3 | `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#<host>` | `switch` | 初回はこの形 |
+| 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
+| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
+| 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
-| 7 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
-| 8 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
+| 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
+| 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -124,12 +325,12 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 profile へ入れるのは *初回の activate が成功した後* なので、1 回目は flake から直接実行する。
 
 ```sh
-nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 > ⚠️ `nix run home-manager -- ...` (レジストリ経由) は使わないこと。
 > nixpkgs 同梱の別バージョンが実行され、`flake.lock` で固定した home-manager
-> モジュールとバージョンがずれる。上の `~/dotfiles/nix#home-manager` なら
+> モジュールとバージョンがずれる。上の `~/dotfiles#home-manager` なら
 > lock と同じバージョンが使われる。
 
 `#` の後ろは `nix/hosts/default.nix` の登録名。
@@ -146,7 +347,7 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 
 冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
 
-#### 3. private な skill の取得 (手順 7)
+#### 3. private な skill の取得 (手順 6.5)
 
 ```sh
 ./nix/scripts/bootstrap-claude-skills.sh
@@ -161,12 +362,12 @@ nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@ws
 > 選択を外して進め、あとから個別に実行する。
 >
 > ```sh
-> ./nix/scripts/setup.sh --steps bootstrap-claude-skills
+> ~/dotfiles/setup --steps bootstrap-claude-skills
 > ```
 
 このリポジトリを使わないマシンでは、この手順ごと飛ばしてよい。
 
-#### 4. ログインシェルの変更 (手順 8)
+#### 4. ログインシェルの変更 (手順 7)
 
 `programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
 （`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
@@ -182,11 +383,18 @@ chsh -s "$(command -v fish)"
 以後は短く書ける。
 
 ```sh
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
-`./nix/scripts/setup.sh --update`（メニューの「既存マシン更新」）でも同じことをする。
+`~/dotfiles/setup --update`（メニューの「既存マシン更新」）でも同じことをする。
 ホスト名を覚えていなくてよいのでこちらが楽。
+
+ただし**これは手元の checkout を適用するだけ**で、リモートの変更は取ってこない。
+本体ごと最新にするなら `--self-update` を足す（[前述](#本体を最新にする---self-update)）。
+
+```sh
+~/dotfiles/setup --self-update --update
+```
 
 **`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
 Nix インストーラが用意する profile スクリプトを読み込む (ログインし直すか、以下を実行):
@@ -198,22 +406,160 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 
 シェル設定を home-manager が持つ Stage 5 以降は、この PATH 設定も宣言的に入る。
 
+## マシン登録簿 (hosts/default.nix)
+
+1 エントリが 1 マシン。マシンごとの差は `mkHome` に渡す値で吸収する。
+
+| 引数 | 既定 | 用途 |
+| --- | --- | --- |
+| `username` | (必須) | Linux / macOS 側のユーザー名。`$USER` と一致しないと activate が中断する |
+| `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
+| `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
+| `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
+
+### WSL 固有の設定は入れ子で渡す
+
+`wsl` は入れ子の attrset で、**親が有効なときだけ子が意味を持つ**という関係を
+そのまま構造にしてある。平坦なフラグの並びだと「どの組み合わせが有効なのか」が
+読み取れないため。
+
+```nix
+wsl = {
+  enable = true;              # WSL か
+  onePassword = {
+    enable = true;            # ホスト側 Windows の 1Password を使うか (WSL 専用)
+    windowsUserName = "polle"; # その 1Password のパスに要る Windows ユーザー名
+  };
+};
+```
+
+有効な組み合わせは次の 3 通りだけになる。
+
+| マシン | 指定 | git の署名 |
+| --- | --- | --- |
+| 非 WSL | `wsl` を書かない | 署名の設定を書き出さない |
+| WSL / 1Password 無し | `wsl.enable = true;` | 同上 |
+| WSL / 1Password 有り | 上のブロックまるごと | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+
+登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
+これに当たる。適用時に `#` の後ろで選ぶ。
+
+```sh
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#pollenjp@wsl-no-1password
+```
+
+`setup.sh` の自動判定は WSL なら `<user>@wsl`（= 1Password あり）を選ぶ。
+1Password の無いマシンではメニューの `h` で選び直すか、
+`--host pollenjp@wsl-no-1password` を渡す。
+
+> 1Password を使わないマシンで署名設定を書き出さないのは、`commit.gpgSign = true`
+> だけが残ると署名鍵が見つからず `git commit` そのものが失敗するため。
+> 「署名しない」も正当な構成として扱っている。
+
+`windowsUserName` の値は WSL 上で次を実行すると判る（Nix の評価は純粋なので
+自動取得はできない。`getEnv` や `--impure` は `nix flake check` を壊す）。
+
+```sh
+pwsh.exe -NoProfile -Command '$env:USERNAME'
+```
+
+階層で表現しきれない「親が false なのに子が true」は `assertions` で評価時に止まる。
+
+- `wsl.onePassword.enable` が true なのに `wsl.enable` が false
+- `wsl.onePassword.enable` が true なのに `windowsUserName` が無い
+
+### 登録簿に載せずにマシンを足す
+
+一時的な環境など、`hosts/default.nix` を編集したくない・git で管理したくない場合は
+`~/dotfiles/flake.nix` に足す。[置き場所](#置き場所)で用意したものがそのまま使える。
+
+```nix
+homeConfigurations = dotfiles.homeConfigurations // {
+  tmp = dotfiles.lib.mkHome {
+    username = "pollenjp";
+    system = "x86_64-linux";
+    wsl.enable = true;
+
+    # このマシンだけの設定は modules で渡す。
+    # 本体が既に定義している値を差し替えるには mkForce が要る
+    # (同じ優先度の定義が 2 つあると "conflicting definition values" で落ちる)。
+    modules = [
+      (
+        { lib, ... }:
+        {
+          programs.git.settings.user.email = lib.mkForce "tmp@example.com";
+        }
+      )
+    ];
+  };
+};
+```
+
+```sh
+home-manager switch --flake ~/dotfiles#tmp
+```
+
+`dotfiles.homeConfigurations // { ... }` としているので、登録簿のホストも同じ場所から
+引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。
+
+`~/dotfiles/setup` のホスト選択（`h`）にもここで足したものが出る。`setup.sh` は
+登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。
+コメントアウトした雛形の例は拾わない。
+
+生成される雛形にはこの例がコメントで入っている。`lib.mkHome` を公開しているのは
+このためで、引数は[登録簿](#マシン登録簿-hostsdefaultnix)と同じ。
+
+#### なぜリポジトリの中に置かないのか
+
+`hosts/local.nix` を gitignore して置く手も考えられるが、**見えるかどうかが
+flake の指し方で変わる**ので採らない。
+
+| 指し方 | 解決方法 | 追跡していないファイル |
+| --- | --- | --- |
+| `--flake <repo>/nix` | git リポジトリ内のパスなので **git 解決** | 見えない |
+| `--flake ~/dotfiles`（`path:` 経由） | ディレクトリをそのまま複製 | 見える |
+
+同じ定義が経路によって在ったり無かったりするうえ、CI は前者なので手元だけ通る。
+`~/dotfiles` は git 管理外なので、この食い違いが起きない。
+
+なお後者の性質のおかげで、**本体を編集したら commit しなくてもそのまま試せる**
+（lock も評価のたびに追随するので `nix flake update` は要らない）。
+その代わり commit 忘れは CI で出る。
+
+#### 使い捨ての 1 回きり
+
+ファイルを残したくなければ `--impure` で直接組み立てる。
+
+```sh
+nix build --impure --expr '
+  ((builtins.getFlake "path:'"${HOME}"'/ghq/github.com/pollenjp/dotfiles/nix").lib.mkHome {
+    username = "tmp";
+    system = "x86_64-linux";
+    wsl.enable = true;
+  }).activationPackage' -o /tmp/hm
+/tmp/hm/activate
+```
+
 ## 日常運用
 
 ```sh
 # 何が配置されるかを $HOME に触れず確認する
-nix build ~/dotfiles/nix#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
+nix build ~/dotfiles#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3   # home-files は symlink なので -L 必須
 
-# 適用 (既存ファイルは .bak へ退避)
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl -b bak
+# 適用 (既存ファイルは .bak へ退避。setup なら --backup=bak / メニューの b)
+home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
 # 世代一覧とロールバック
 home-manager generations
 /nix/store/<older>-home-manager-generation/activate
 
-# 依存の更新
-nix flake update --flake ~/dotfiles/nix
+# 本体を最新にしてから適用 (git pull -> switch)
+~/dotfiles/setup --self-update --update
+
+# 依存の更新 (本体の flake.lock を触るのでリポジトリ側を指す)
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 > ⚠️ `-b bak` は `<file>.bak` が既に存在すると失敗する。リトライ時は古い `.bak` を先に消すこと。
@@ -231,6 +577,7 @@ nix flake update --flake ~/dotfiles/nix
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
 | `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
+| `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みだけ) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
@@ -244,7 +591,27 @@ nix flake update --flake ~/dotfiles/nix
 
 `programs.git` で `~/.config/git/config` を **生成** している（素のファイル配置ではない）。
 目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
-並んでおり手で切り替える運用だった。これを `dotfiles.isWSL` による自動分岐に置き換えている。
+並んでおり手で切り替える運用だった。これを登録簿の指定による分岐に置き換えている。
+
+署名まわりは `dotfiles.wsl.onePassword.enable` で丸ごと切り替わる
+（マシンごとの指定は[マシン登録簿](#マシン登録簿-hostsdefaultnix)を参照）。
+
+| 生成される項目 | 有効 | 無効 |
+| --- | --- | --- |
+| `commit.gpgSign` / `tag.gpgSign` | `true` | 書き出さない |
+| `gpg.format` | `ssh` | 書き出さない |
+| `gpg.ssh.defaultKeyCommand` | ssh-agent の鍵から `Signing` を含むものを選ぶ | 書き出さない |
+| `gpg.ssh.program` | Windows 側の `op-ssh-sign-wsl.exe` | 書き出さない |
+
+`defaultKeyCommand` は 1Password が鍵に付ける名前で引くものなので、1Password の
+無いマシンでは当たらない。片方だけ残すと「署名しようとして鍵が見つからず commit が
+失敗する」状態になるため、無効のマシンでは署名設定を丸ごと省いている。
+
+**署名が入るのは `wsl.onePassword.enable = true` のマシンだけ**になる。1Password は
+WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非 WSL のマシン
+（`pollenjp@x86_64-linux` / `aarch64-linux` / `aarch64-darwin`）には署名設定が入らない。
+これらでも 1Password で署名したくなったら、`onePassword` を `dotfiles.wsl` の外へ
+出して `windowsUserName` を WSL のときだけ要求する形にする。
 
 > ⚠️ **`~/.gitconfig` の symlink は必ず外すこと。**
 > git は `~/.config/git/config` を読んだ **後に** `~/.gitconfig` を読むため、
@@ -254,6 +621,54 @@ nix flake update --flake ~/dotfiles/nix
 **`git config --global` は使えなくなる。** 書込先の `~/.config/git/config` が store 上の
 read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
 よい（git の読み込み順により home-manager の設定を上書きできる）。
+
+## ssh について
+
+`programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
+接続情報の実体は `.ssh` submodule にあり、`setup-ssh-config.sh` が
+`~/.ssh/config.d/` へ symlink する。
+
+```
+Include config.d/*.ssh_config
+```
+
+（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する）
+
+```sh
+./nix/scripts/setup-ssh-config.sh
+```
+
+冪等。`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入っている
+ので、submodule を更新したら `--update` で張り直される。
+submodule が未取得なら教えてくれる（処理は止めない）。
+
+| `~/.ssh/config.d/` の中身 | 出所 |
+| --- | --- |
+| `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
+| それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
+
+submodule 側でファイル名が変わった場合、参照先が消えた symlink はスクリプトが外す。
+手で置いたファイルや、submodule 以外を指す symlink には触らない。
+
+マシン固有の設定を足すときは `~/.ssh/config.d/` にファイルを置く。
+`ssh` は同じキーワードについて**最初に得た値**を採るので、**ファイル名の順序が
+優先順位**になる。実効値は `ssh -G <ホスト名>` で確認できる。
+
+### ⚠️ 既存の `~/.ssh/config` がある場合
+
+`main.bash` は `~/.ssh/config` に `Include` 行を**追記**していたので、多くのマシンでは
+実ファイルとして存在する。home-manager はこれを上書きせず
+`Existing file '...' would be clobbered` で中断する。
+
+退避は [`--backup`](#既存ファイルを退避するか選ぶ) が行う（`~/.bashrc` などと同じ扱い）。
+`~/.ssh/config` は `hm_managed_paths` に入れてあるので、指定が無ければメニューが訊いてくる。
+
+**退避先の `~/.ssh/config.backup` は Include されないので、設定としては効かなくなる。**
+残したい `Host` ブロックは中身を見てから `~/.ssh/config.d/` へ手で移すこと。
+
+> 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
+> `config.d` へ移す案を棄却した実測）は
+> [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
 
 ## fish
 
@@ -279,6 +694,11 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
 内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+
+`programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
+どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
+[退避するかどうか](#既存ファイルを退避するか選ぶ)を選ぶことになる。
+`preflight-unlink.sh` の対象 (symlink) には入らない。
 
 **`main.bash:199-219` の bash-completion 取得が不要になった。**
 curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、
@@ -388,6 +808,7 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 ```sh
 ./nix/scripts/bootstrap-claude-skills.sh            # 取得 / 更新してリンクを張り直す
 ./nix/scripts/bootstrap-claude-skills.sh --status   # いま何が繋がっているか
+~/dotfiles/setup --steps bootstrap-claude-skills    # 入口 (symlink) から呼ぶ場合
 ```
 
 `$(ghq root)/github.com/pollenjp/claude-skills` へ clone し、`skills/` `agents/`
@@ -515,8 +936,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 個別に実行する場合:
 
 ```sh
-cd ~/dotfiles/nix
-git add .                                  # flake は untracked ファイルを見ない
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
+git add .                                  # git 解決なので untracked は見えない (後述)
 
 nix flake check                            # 現在の system 向けに評価 + ビルド
 nix flake check --all-systems --no-build   # 全 system を評価のみ (CI 向け)
@@ -535,7 +956,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.isWSL / dotfiles.windowsUserName
+│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
@@ -548,6 +969,8 @@ nix/
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
+    ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
+    ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)

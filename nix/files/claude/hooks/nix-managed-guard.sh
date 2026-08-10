@@ -118,17 +118,19 @@ reason=$(
 '${hit}' は Nix (home-manager) 管理です。/nix/store への symlink なので直接編集できません。
 一般ユーザーでは Permission denied になり、root では黙って成功して store が破損します。
 
-正しい手順:
-  1. ~/dotfiles/nix/files/claude/ 配下の対応するファイルを編集する
-       ~/.claude/skills/<名前>/     -> ~/dotfiles/nix/files/claude/skills/<名前>/
-       ~/.claude/agents/<名前>.md   -> ~/dotfiles/nix/files/claude/agents/<名前>.md
-       ~/.claude/commands/<名前>.md -> ~/dotfiles/nix/files/claude/commands/<名前>.md
-       ~/.claude/CLAUDE.md          -> ~/dotfiles/nix/files/claude/CLAUDE.md
-  2. 新規ファイルなら git add する (flake は untracked ファイルを見ない)
-       git -C ~/dotfiles add nix/files/claude
+正しい手順 (リポジトリ本体は ghq 配下。以下 REPO="\$(ghq root)/github.com/pollenjp/dotfiles"):
+  1. \${REPO}/nix/files/claude/ 配下の対応するファイルを編集する
+       ~/.claude/skills/<名前>/     -> \${REPO}/nix/files/claude/skills/<名前>/
+       ~/.claude/agents/<名前>.md   -> \${REPO}/nix/files/claude/agents/<名前>.md
+       ~/.claude/commands/<名前>.md -> \${REPO}/nix/files/claude/commands/<名前>.md
+       ~/.claude/CLAUDE.md          -> \${REPO}/nix/files/claude/CLAUDE.md
+  2. 新規ファイルなら git add する
+       git -C "\${REPO}" add nix/files/claude
+     (~/dotfiles 経由の switch は path: なので untracked でも入るが、
+      CI は git 管理下しか見ないので commit 忘れはそこで出る)
   3. 適用する
-       home-manager switch --flake ~/dotfiles/nix#<ホスト名>
-     ホスト名は ~/dotfiles/nix/hosts/default.nix に登録されている
+       home-manager switch --flake ~/dotfiles#<ホスト名>
+     ホスト名は \${REPO}/nix/hosts/default.nix と ~/dotfiles/flake.nix に登録されている
 
 新しい skill / agent / command を足すだけなら .nix の編集は不要です
 (nix/home/modules/claude.nix が readDir で自動列挙します)。
@@ -140,7 +142,7 @@ reason=$(
 claude-skills (private) 側へ置きます。そちらは作業クローンへの symlink なので
 このガードは働かず、編集はそのまま反映されます (ただし commit は必要)。
 場所は次で判ります:
-  ~/dotfiles/nix/scripts/bootstrap-claude-skills.sh --status
+  \${REPO}/nix/scripts/bootstrap-claude-skills.sh --status
 EOF
 )
 

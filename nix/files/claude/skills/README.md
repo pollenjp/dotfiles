@@ -38,7 +38,7 @@ description: いつ使うかを書く。Claude はここを読んで起動を判
 追加したら適用する。
 
 ```sh
-home-manager switch --flake ~/dotfiles/nix#<host>
+home-manager switch --flake ~/dotfiles#<host>
 ```
 
 ## 配置後の構造

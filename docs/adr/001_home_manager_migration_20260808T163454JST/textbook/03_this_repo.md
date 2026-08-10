@@ -14,7 +14,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿          <- よく触る
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        独自オプション (dotfiles.isWSL / windowsUserName)
+│   ├── options.nix        独自オプション (dotfiles.wsl.*)
 │   └── modules/
 │       ├── packages.nix      入れたい CLI ツール      <- よく触る
 │       ├── files.nix         静的な設定ファイルの配置
@@ -60,14 +60,18 @@ flake の中で `self` と書くと、**`flake.nix` があるディレクトリ*
 ## 適用してみる
 
 ```sh
-home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `#` の後ろは `hosts/default.nix` に登録した名前。
 
+`~/dotfiles` はリポジトリ本体ではなく、そこを指すローカル専用の flake。
+本体は `~/ghq/github.com/pollenjp/dotfiles` に置く
+（[nix/README.md 「置き場所」](../../../../nix/README.md#置き場所)）。
+
 > ⚠️ **まだ一度も適用していないマシンでは `home-manager: command not found` になる。**
 > CLI が profile に入るのは初回の activate が成功した後なので、1 回目だけは
-> `nix run ~/dotfiles/nix#home-manager -- switch --flake ~/dotfiles/nix#pollenjp@wsl` と書く。
+> `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl` と書く。
 > 詳しくは [04_migration.md](./04_migration.md)。
 
 ## よく触る 3 箇所
@@ -78,12 +82,21 @@ home-manager switch --flake ~/dotfiles/nix#pollenjp@wsl
 "pollenjp@wsl" = mkHome {
   username = "pollenjp";
   system = "x86_64-linux";
-  isWSL = true;
-  windowsUserName = "polle";
+  wsl = {
+    enable = true;
+    onePassword = {
+      enable = true;
+      windowsUserName = "polle";
+    };
+  };
 };
 ```
 
-1 マシン 1 行。これだけ。
+1 マシン 1 エントリ。これだけ。
+
+WSL 固有の設定は入れ子で渡す。**親が有効なときだけ子が意味を持つ**という関係を
+そのまま構造にしてあるので、有効な組み合わせが構造から読める（非 WSL なら `wsl`
+ごと書かない、1Password が無いなら `wsl.enable = true;` だけ）。
 
 <details><summary>windowsUserName とは</summary>
 
@@ -104,8 +117,12 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 Nix の評価は純粋で外部コマンドを呼べず、`--impure` を使うと `nix flake check` が
 動かなくなるため。だから `hosts/default.nix` に直接書く。
 
-未設定のままだと 1Password の signer は設定されず、通常の `ssh-keygen` で署名する
-（これも正当な構成なのでエラーにはしないが、`isWSL = true` なら警告が出る）。
+`wsl.onePassword.enable = true` にしたのに未設定だと、パスを組み立てられないまま
+「署名しようとして鍵が見つからない」状態になるので、`assertions` で評価時に止まる。
+
+1Password を使わないマシンでは `wsl.onePassword` ごと書かない。このとき署名関連の
+設定は**一切書き出されない**（`commit.gpgSign = true` だけが残ると `git commit`
+そのものが失敗するため）。
 
 </details>
 

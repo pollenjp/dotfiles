@@ -15,15 +15,51 @@
 #   同じ方針)。説明文も各スクリプト冒頭のコメントから取るので二重管理しない。
 # - `set -e` は関数を if の条件に置くと **その中で無効になる**。手順の関数は
 #   失敗しうるコマンドを必ず `|| return 1` で受けること。
+# - **実行中にこのファイル自身が書き換わると挙動が混ざる**。bash はスクリプトを
+#   読み進めながら実行するため、書き換え方によって次の 2 通りになる (実測):
+#     同じ inode を上書き (cat > file) -> 途中から新しい内容を読む
+#     unlink + 新規作成 (git checkout) -> 古い内容を読み続ける
+#   git は後者なので壊れはしないが、**古いロジックで最後まで走る**。更新後の
+#   bootstrap-*.sh や登録簿を古いオーケストレータが呼ぶ形になるので、
+#   --self-update は pull の後 必ず exec で自分を張り替える。
 
 set -eu -o pipefail
 
-script_dir=$(
-  cd -- "$(dirname "$0")" &>/dev/null
-  pwd -P
-)
+# ~/dotfiles/setup は このファイルへの symlink なので、$0 の指す先を辿って
+# 実体の位置を出す。辿らないと nix_dir が ~ になる。
+# macOS の readlink には -f が無いので手で辿る。
+resolve_dir() {
+  local src=$1 dir
+  while [[ -L ${src} ]]; do
+    dir=$(
+      cd -P -- "$(dirname -- "${src}")" &>/dev/null
+      pwd
+    )
+    src=$(readlink -- "${src}")
+    case ${src} in
+      /*) ;;
+      *) src="${dir}/${src}" ;;
+    esac
+  done
+  cd -P -- "$(dirname -- "${src}")" &>/dev/null
+  pwd
+}
+
+script_dir=$(resolve_dir "$0")
 nix_dir=$(dirname "${script_dir}")
+repo_dir=$(dirname "${nix_dir}")
 hosts_file="${nix_dir}/hosts/default.nix"
+
+# 実行に使う flake。ローカル flake (~/dotfiles) があればそちらを優先する。
+# 本体の homeConfigurations をそのまま再輸出しているので、登録簿のホストは
+# どちらからでも同じように引ける。
+# 詳細は setup-local-flake.sh の冒頭を参照。
+local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
+if [[ -f ${local_dir}/flake.nix ]]; then
+  flake_dir=${local_dir}
+else
+  flake_dir=${nix_dir}
+fi
 
 dry_run=0
 host=""
@@ -31,29 +67,72 @@ mode=""
 steps_arg=""
 nix_installer_args=${NIX_INSTALLER_ARGS:-install}
 
+# home-manager switch に付ける `-b <拡張子>`。空文字なら付けない。
+#
+# ~/.bashrc / ~/.profile などが **実ファイルとして先に在る**とき、
+# home-manager は勝手に消さずに switch を中断する。`-b` はそれらを
+# <名前>.<拡張子> へ退避してから置き換える。付けるかどうかは好みが分かれる
+# (退避ファイルが増えるのを嫌う人もいる) ので、こちらで決め打ちにせず
+# メニューの `b` / --backup / --no-backup / DOTFILES_BACKUP_EXT で選ばせる。
+backup_ext=""
+backup_ext_default="backup"
+# 明示的に決めたか。決めていないまま switch を実行しようとしていて、かつ
+# 中断しそうなファイルが見つかったときだけメニューで訊く (下の ask_backup)。
+backup_chosen=0
+if [[ -n ${DOTFILES_BACKUP_EXT+x} ]]; then
+  backup_ext=${DOTFILES_BACKUP_EXT}
+  backup_chosen=1
+fi
+
+# --self-update: 手順を実行する前に本体リポジトリを git で最新にする。
+# exec で自分を張り替えたかどうかは環境変数で子に伝える (二重更新の防止)。
+self_update=0
+self_updated=${DOTFILES_SETUP_SELF_UPDATED:-0}
+# upstream より何 commit 遅れているか。空なら判らない (git が無い等)。
+# ヘッダの表示に使う。起動時に一度だけ数える (再描画のたびに git を呼ばない)。
+repo_behind_count=""
+
 usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 
-使い方:
+使い方 (~/dotfiles/setup は このスクリプトへの symlink):
   setup.sh                 メニューを出す (既定)
   setup.sh --new-machine   「新しいマシン適用」をそのまま実行
   setup.sh --update        「既存マシン更新」をそのまま実行
   setup.sh --steps a,b,c   指定した手順だけ実行 (id は --list で確認)
   setup.sh --list          手順の一覧を出す
+  setup.sh --self-update   本体を git で最新にしてから続ける (下記)
   setup.sh --host <名前>   対象ホスト (既定は hosts/default.nix から自動判定)
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
 
+既存ファイル (~/.bashrc / ~/.profile など) の扱い:
+  setup.sh --backup          <名前>.backup へ退避してから置き換える (-b backup)
+  setup.sh --backup=<拡張子> 退避先の拡張子を変える (既定: backup)
+  setup.sh --no-backup       退避しない (既定。衝突すると switch が中断する)
+
+  指定が無いときは、中断しそうなファイルが在ればメニューで訊く。
+
+本体の更新 (このファイルは本体への symlink なので、更新 = 本体の git pull):
+  setup.sh --self-update            fetch -> fast-forward -> 新しい自分で続行
+  setup.sh --self-update --update   最新にしてから home-manager switch
+
+  未 commit の変更 / detached HEAD / upstream 無し / fast-forward できない
+  ときは警告だけ出して何もしない (本体は開発対象でもあるため)。
+  flake.lock の更新は扱わない (nix flake update を手で実行する)。
+
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
-  h 対象ホストの変更   a 全選択   n 全解除
+  h 対象ホストの変更   b 既存ファイルの退避   u 本体の更新   a 全選択   n 全解除
 
 環境変数:
-  DOTFILES_HOST       --host と同じ
-  NIX_INSTALLER_ARGS  Determinate Systems インストーラへの引数 (既定: install)
-                      systemd の無いコンテナでは "install linux --init none"
-  NO_COLOR            色を付けない
+  DOTFILES_HOST        --host と同じ
+  DOTFILES_LOCAL_DIR   ローカル flake の場所 (既定: ~/dotfiles)
+  DOTFILES_BACKUP_EXT  --backup=<拡張子> と同じ。空文字なら --no-backup と同じ
+  NIX_INSTALLER_ARGS   Determinate Systems インストーラへの引数 (既定: install)
+                       systemd の無いコンテナでは "install linux --init none"
+  NO_COLOR             色を付けない
 EOS
 }
 
@@ -158,6 +237,16 @@ add_step preflight-unlink \
   '手順 2。main.bash setup が張った symlink を外す。忘れると switch が中断する。' \
   step 0
 
+add_step local-flake \
+  './nix/scripts/setup-local-flake.sh' \
+  'ローカル flake (~/dotfiles) と setup の symlink を置く。以後の入口になる。' \
+  step 0
+
+add_step ssh-config \
+  './nix/scripts/setup-ssh-config.sh' \
+  '.ssh submodule を ~/.ssh/config.d/ へ張る。submodule 更新後の張り直しにも使う。' \
+  step 0
+
 add_step switch \
   'home-manager switch' \
   '手順 3。初回は home-manager コマンドがまだ無いので nix run 経由で実行する。' \
@@ -168,7 +257,7 @@ add_step bootstrap \
   '下のスクリプトをまとめて選ぶ。いずれも冪等で、何度実行してもよい。' \
   group 0
 
-# 手順 4 / 6 / 7。増えても自動でメニューに載る。
+# 手順 4 / 6 / 6.5。増えても自動でメニューに載る。
 for f in "${script_dir}"/bootstrap-*.sh; do
   [[ -f ${f} ]] || continue
   base=$(basename "${f}")
@@ -237,7 +326,7 @@ apply_preset() {
     new-machine)
       # 手順 1 → 2 → 3 → 4/6。
       # 手順 7 (chsh) は README でも「必要なら」なので既定では入れない。
-      ids=(nix-install preflight-unlink switch)
+      ids=(nix-install preflight-unlink local-flake ssh-config switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -245,7 +334,10 @@ apply_preset() {
     update)
       # README 「2 回目以降」。bootstrap は済んでいる前提なので switch だけ。
       # 入れ直したくなったらカスタムか --steps で選ぶ。
-      ids=(switch)
+      #
+      # ssh-config だけは入れてある。.ssh submodule を更新したときに
+      # ~/.ssh/config.d/ を張り直す必要があり、冪等で副作用も無いため。
+      ids=(ssh-config switch)
       ;;
     *) die "unknown preset: $1" ;;
   esac
@@ -281,14 +373,32 @@ list_steps() {
 # ホスト #
 ##########
 
-# hosts/default.nix の登録名を並べる。
-# 手順 1 の前に呼ぶので nix には頼れない。sandbox は検証専用なので外す。
-list_hosts() {
+# `<名前> = mkHome {` / `"<名前>" = dotfiles.lib.mkHome {` の左辺を取り出す。
+# 修飾子 (dotfiles.lib.) が付くのはローカル flake 側の書き方。
+# 行頭が # の行は拾わないので、雛形のコメント例は出てこない。
+parse_hosts() {
+  [[ -f $1 ]] || return 0
   sed -n \
-    -e 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*=[[:space:]]*mkHome.*/\1/p' \
-    -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_-]*\)[[:space:]]*=[[:space:]]*mkHome.*/\1/p' \
-    "${hosts_file}" \
-    | grep -vx 'sandbox' || true
+    -e 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_-]*\)[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    "$1"
+}
+
+# 選べる登録名を並べる。
+#
+# 本体の登録簿だけでなく **ローカル flake (~/dotfiles/flake.nix) の追加分も**
+# 見る。見ないと ~/dotfiles にだけ足したホストがメニューに出ず、--host で
+# 指定しても「登録されていません」で弾かれる。
+#
+# 手順 1 の前に呼ぶので nix には頼れず、sed で拾う。
+# sandbox は検証専用なので外す。
+list_hosts() {
+  {
+    parse_hosts "${hosts_file}"
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      parse_hosts "${flake_dir}/flake.nix"
+    fi
+  } | grep -vx 'sandbox' | awk '!seen[$0]++' || true
 }
 
 is_wsl() {
@@ -334,11 +444,232 @@ ensure_host_registered() {
   elif list_hosts | grep -qxF "${host}"; then
     return 0
   else
-    warn "${host} は ${hosts_file} に登録されていません (手順 0)。"
+    warn "${host} は登録されていません (手順 0)。"
+    warn "  登録簿:       ${hosts_file}"
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      warn "  ローカル追加: ${flake_dir}/flake.nix"
+    fi
   fi
   printf '   登録済み:\n' >&2
   list_hosts | sed 's/^/     /' >&2
   return 1
+}
+
+###########################
+# 既存ファイルの退避 (-b)  #
+###########################
+
+# home-manager が書くパスのうち、**先に実ファイルとして在りがち**なもの。
+#
+# ~/.bashrc / ~/.profile / ~/.bash_profile は programs.bash が書く。
+# ディストリの初期ファイルや main.bash の追記がそのまま残っているのが普通で、
+# symlink ではないので preflight-unlink.sh では外れない (外すべきものでもない。
+# 中身を確認してから捨てたいファイルなので退避して残す)。
+#
+# この一覧は **注意書きを出すため**だけに使う。実際の判定は home-manager 自身が
+# activate 時に行うので、漏れがあっても switch の挙動は変わらない。
+hm_managed_paths=(
+  # programs.bash
+  ".bashrc"
+  ".bash_profile"
+  ".profile"
+  # programs.fish
+  ".config/fish/config.fish"
+  # programs.git
+  ".config/git/config"
+  ".config/git/ignore"
+  # programs.ssh
+  ".ssh/config"
+  # modules/files.nix
+  ".screenrc"
+  ".tmux.conf"
+  ".vimrc"
+  ".vim/common.vim"
+  ".vim/clipboard.vim"
+  ".config/starship.toml"
+  ".config/zellij/config.kdl"
+  ".config/nvim/init.vim"
+  ".config/tmux/interactive_shell.tmux.conf"
+)
+
+# home-manager は <名前>.<拡張子> を作るので、拡張子に . や / は入れない。
+# 空文字は「退避しない」の意味なので、ここには渡さない。
+validate_backup_ext() {
+  case ${1:?} in
+    .*) die "拡張子の先頭に . は要りません (~/.bashrc.$1 になります)" ;;
+    */* | *[[:space:]]*) die "退避先の拡張子に / と空白は使えません: $1" ;;
+  esac
+}
+
+# 退避しないと switch が中断するパスを並べる。
+#
+# 数えるのは **実ファイル/実ディレクトリ**だけ。旧経路が張った symlink も
+# 同じく switch を止めるが、そちらは preflight-unlink.sh が外す担当で
+# 直し方が違うため、-b の判断材料には混ぜない。
+clobber_paths() {
+  local p full
+  for p in "${hm_managed_paths[@]}"; do
+    full="${HOME}/${p}"
+    if [[ -e ${full} && ! -L ${full} ]]; then
+      printf '%s\n' "${full}"
+    fi
+  done
+}
+
+# -b を付けても失敗するパス (退避先が既に在るもの) を並べる。
+# home-manager は退避先を上書きしないので、残骸があると switch が止まる。
+# 拡張子は引数で受ける (まだ確定していない候補についても見たいため)。
+backup_collision_paths() {
+  local ext=${1:?} p full
+  for p in "${hm_managed_paths[@]}"; do
+    full="${HOME}/${p}.${ext}"
+    if [[ -e ${full} || -L ${full} ]]; then
+      printf '%s\n' "${full}"
+    fi
+  done
+}
+
+backup_summary() {
+  if [[ -n ${backup_ext} ]]; then
+    printf -- '-b %s で退避する' "${backup_ext}"
+  else
+    printf '退避しない'
+  fi
+}
+
+##############################
+# 本体の更新 (--self-update) #
+##############################
+
+# ~/dotfiles/setup は本体の setup.sh への **symlink** なので、それ自体が古くなる
+# ことはない。古くなるのは symlink の先、つまり本体の checkout。
+# よって「setup を最新にする」= 「本体を git pull する」。
+#
+# ただし pull は **実行中の自分**を置き換える。git は unlink + 新規作成なので
+# こちらのプロセスは古い inode を掴んだまま (= 古いロジックで最後まで走る) になり、
+# 更新後の bootstrap-*.sh や登録簿を古いオーケストレータが呼ぶ形になってしまう。
+# そこで pull できたら exec で自分を張り替え、続きは新しい setup.sh に任せる。
+#
+# 本体は開発対象でもある (path: を選んだのは commit せずに試せるから) ので、
+# 勝手に動かさない条件を厳しめにしてある。いずれも警告だけ出して手順の実行は
+# 続ける (オフラインでも setup は使えるべき)。
+#
+#   未 commit の変更がある     -> 触らない
+#   detached HEAD / upstream 無し -> 触らない
+#   fast-forward できない       -> 触らない (rebase か merge かの判断はしない)
+#
+# flake.lock (nixpkgs / home-manager) の更新はここでは扱わない。本体を書き換えて
+# commit が要るものなので pull と衝突しやすい。README の手順どおり手で行う。
+
+git_repo_ok() {
+  have git && git -C "${repo_dir}" rev-parse --is-inside-work-tree &>/dev/null
+}
+
+# upstream より何 commit 遅れているか。判らなければ何も出さない。
+#
+# **fetch はしない** (起動のたびにネットワークへ出たくない) ので、最後に fetch
+# した時点の話になる。ヘッダにもそう書いてある。
+repo_behind() {
+  if ! git_repo_ok; then
+    return 0
+  fi
+  git -C "${repo_dir}" rev-list --count "HEAD..@{u}" 2>/dev/null || true
+}
+
+# fetch して fast-forward できるなら進める。進めたら 0、何もしなければ 1。
+pull_repo() {
+  local branch remote behind
+  if ! git_repo_ok; then
+    warn "git の作業ツリーではないので更新できません: ${repo_dir}"
+    return 1
+  fi
+  # --ignore-submodules=all: .ssh は別リポジトリで nix 経路とは関係が無く、
+  # そちらの状態で更新を止めたくない。
+  if ! git -C "${repo_dir}" diff --quiet --ignore-submodules=all \
+    || ! git -C "${repo_dir}" diff --cached --quiet --ignore-submodules=all; then
+    warn "未 commit の変更があるので本体は更新しません。自分で pull してください:"
+    warn "  git -C ${repo_dir} status"
+    return 1
+  fi
+  if ! branch=$(git -C "${repo_dir}" symbolic-ref --short -q HEAD); then
+    warn "detached HEAD なので本体は更新しません。"
+    return 1
+  fi
+  if ! remote=$(git -C "${repo_dir}" config "branch.${branch}.remote"); then
+    warn "${branch} に upstream が無いので本体は更新しません。"
+    return 1
+  fi
+  if ! run git -C "${repo_dir}" fetch "${remote}" "${branch}"; then
+    warn "fetch に失敗しました。オフラインなら無視して続けます。"
+    return 1
+  fi
+  if [[ ${dry_run} == 1 ]]; then
+    note '(--dry-run なので更新はしません)'
+    return 1
+  fi
+  behind=$(git -C "${repo_dir}" rev-list --count "HEAD..@{u}" 2>/dev/null || printf '0')
+  if [[ ${behind} == 0 ]]; then
+    note "本体は既に最新です (${branch})。"
+    return 1
+  fi
+  note "${behind} commit 遅れています。fast-forward します。"
+  if ! run git -C "${repo_dir}" merge --ff-only "@{u}"; then
+    warn "fast-forward できませんでした (ローカルに commit がある?)。手で確認してください。"
+    return 1
+  fi
+}
+
+# exec で自分を張り替えるときの引数。**いま持っている状態**から組み立てる。
+# メニューで選んだ対象ホストや退避の設定を引き継ぐため、元の argv は使わない。
+# --self-update は渡さない (更新は済んでいる)。
+rebuild_args=()
+build_rebuild_args() {
+  rebuild_args=()
+  if [[ -n ${host} ]]; then
+    rebuild_args+=(--host "${host}")
+  fi
+  if [[ ${backup_chosen} == 1 ]]; then
+    if [[ -n ${backup_ext} ]]; then
+      rebuild_args+=("--backup=${backup_ext}")
+    else
+      rebuild_args+=(--no-backup)
+    fi
+  fi
+  if [[ ${dry_run} == 1 ]]; then
+    rebuild_args+=(--dry-run)
+  fi
+  case ${mode} in
+    new-machine) rebuild_args+=(--new-machine) ;;
+    update) rebuild_args+=(--update) ;;
+    steps) rebuild_args+=("--steps=${steps_arg}") ;;
+    list) rebuild_args+=(--list) ;;
+  esac
+}
+
+# 本体を更新し、更新できたら新しい自分へ exec する (戻ってこない)。
+# 更新しなかった / できなかったときだけ 1 を返して呼び元に戻る。
+self_update_and_reexec() {
+  if [[ ${self_updated} == 1 ]]; then
+    note 'この実行では既に本体を更新しています。'
+    return 1
+  fi
+  printf '\n%s==> 本体を更新 (%s)%s\n' "${c_bold}" "${repo_dir}" "${c_reset}"
+  if ! pull_repo; then
+    # fetch だけ通っていることがあるので数え直す
+    repo_behind_count=$(repo_behind)
+    return 1
+  fi
+  # 更新で自分が移動・改名されていると exec できない ($0 が ~/dotfiles/setup の
+  # ような symlink なら宙に浮く)。ここで古いまま続けると「新しい checkout を
+  # 古いオーケストレータが回す」形になるので、続行せず止める。
+  if [[ ! -x $0 ]]; then
+    die "本体は更新しましたが $0 が実行できなくなりました。${repo_dir} から実行し直してください。"
+  fi
+  build_rebuild_args
+  note '新しい setup.sh で続けます。'
+  export DOTFILES_SETUP_SELF_UPDATED=1
+  # bash 3.2 では set -u と空配列の展開が両立しないので ${arr[@]+...} で受ける
+  exec "$0" ${rebuild_args[@]+"${rebuild_args[@]}"}
 }
 
 ##########
@@ -409,7 +740,23 @@ header() {
     printf '  対象ホスト: %s未判定%s  %s(h で選ぶ / 手順 0 が未了かも)%s\n' \
       "${c_red}" "${c_reset}" "${c_dim}" "${c_reset}"
   fi
-  note "flake:      ${nix_dir}"
+  if [[ -n ${backup_ext} ]]; then
+    printf '  既存ファイル: %s%s%s  %s(b で変更)%s\n' \
+      "${c_green}" "$(backup_summary)" "${c_reset}" "${c_dim}" "${c_reset}"
+  else
+    printf '  既存ファイル: %s  %s(b で変更)%s\n' \
+      "$(backup_summary)" "${c_dim}" "${c_reset}"
+  fi
+  note "flake:      ${flake_dir}"
+  if [[ ${flake_dir} != "${nix_dir}" ]]; then
+    note "本体:       ${repo_dir}"
+  fi
+  # 遅れていないとき (と判らないとき) は出さない。u / --self-update が要るときだけ
+  # 目に入れば十分なので。
+  if [[ -n ${repo_behind_count} && ${repo_behind_count} != 0 ]]; then
+    printf '  %s本体が %s commit 遅れ%s  %s(最後の fetch 時点。--self-update で更新)%s\n' \
+      "${c_yellow}" "${repo_behind_count}" "${c_reset}" "${c_dim}" "${c_reset}"
+  fi
   if [[ ${dry_run} == 1 ]]; then
     printf '  %s--dry-run: 実際には実行しません%s\n' "${c_yellow}" "${c_reset}"
   fi
@@ -443,7 +790,7 @@ menu_main() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Enter 決定   h ホスト変更   q 中止'
+    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   u 本体を更新   q 中止'
     printf '\n'
     for ((i = 0; i < count; i++)); do
       if [[ ${i} == "${cursor}" ]]; then
@@ -473,19 +820,35 @@ menu_main() {
       up | k) cursor=$(((cursor + count - 1) % count)) ;;
       down | j) cursor=$(((cursor + 1) % count)) ;;
       h) menu_host ;;
+      b) menu_backup ;;
+      u)
+        # 更新できれば exec して戻ってこない。できなければ元の画面へ戻す。
+        # 手順の選択を持っている menu_steps では受けない (exec で消えるため)。
+        tui_end
+        if ! self_update_and_reexec; then
+          # 更新しなかった理由 (dirty など) は代替スクリーンへ戻ると流れてしまう。
+          # 読ませてから戻る。
+          printf '\n%s何かキーを押すと戻ります。%s\n' "${c_dim}" "${c_reset}"
+          read_key || true
+        fi
+        tui_begin
+        ;;
       q) return 1 ;;
       enter)
         case ${cursor} in
           0)
             apply_preset new-machine
+            ask_backup
             return 0
             ;;
           1)
             apply_preset update
+            ask_backup
             return 0
             ;;
           2)
             if menu_steps; then
+              ask_backup
               return 0
             fi
             ;;
@@ -562,9 +925,15 @@ set_all() {
 
 # 手順によっては実行時に決まる値 (ホストなど) を説明に足す
 note_of() {
-  local i=$1
+  local i=$1 extra=""
   case ${step_ids[i]} in
-    switch) printf '%s (--flake %s#%s)' "${step_notes[i]}" "${nix_dir}" "${host:-<ホスト未定>}" ;;
+    switch)
+      if [[ -n ${backup_ext} ]]; then
+        extra=" -b ${backup_ext}"
+      fi
+      printf '%s (--flake %s#%s%s)' \
+        "${step_notes[i]}" "${flake_dir}" "${host:-<ホスト未定>}" "${extra}"
+      ;;
     *) printf '%s' "${step_notes[i]}" ;;
   esac
 }
@@ -574,7 +943,7 @@ menu_steps() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Space 選択   a 全選択   n 全解除   Enter 実行   q 戻る'
+    note '↑/↓ 移動   Space 選択   a 全選択   n 全解除   b 退避   Enter 実行   q 戻る'
     printf '\n'
     for ((i = 0; i < step_count; i++)); do
       indent=""
@@ -600,6 +969,7 @@ menu_steps() {
       a) set_all 1 ;;
       n) set_all 0 ;;
       h) menu_host ;;
+      b) menu_backup ;;
       q | esc) return 1 ;;
       enter)
         if [[ -z $(selected_indexes) ]]; then
@@ -639,7 +1009,10 @@ menu_host() {
     printf '\n'
     hr
     note "登録簿: ${hosts_file}"
-    note '無いマシンは hosts/default.nix に 1 行足す (手順 0)'
+    if [[ ${flake_dir} != "${nix_dir}" ]]; then
+      note "ローカル: ${flake_dir}/flake.nix (このマシンだけのホスト)"
+    fi
+    note '無いマシンは hosts/default.nix か ~/dotfiles/flake.nix に足す'
 
     read_key || return 1
     case ${key} in
@@ -652,6 +1025,103 @@ menu_host() {
         ;;
     esac
   done
+}
+
+# 既存ファイルを退避するか (`-b <拡張子>`) を選ぶ。
+#
+# ~/.bashrc / ~/.profile はディストリの初期ファイルがまず在るので、新しい
+# マシンではほぼ必ずここに当たる。switch が中断してから調べ直すのは手戻りなので、
+# 当たりそうなときは実行前にこの画面を出す (ask_backup)。
+menu_backup() {
+  local cursor=0 ext i n labels=() conflicts=() collisions line
+  ext=${backup_ext:-${backup_ext_default}}
+  labels=(
+    '退避しない'
+    "-b ${ext} で退避してから置き換える"
+  )
+  while IFS= read -r line; do
+    conflicts+=("${line}")
+  done < <(clobber_paths)
+  if [[ -n ${backup_ext} ]]; then
+    cursor=1
+  elif [[ ${backup_chosen} == 0 && ${#conflicts[@]} -gt 0 ]]; then
+    # まだ決めていなくて中断しそうなら、退避する側から見せる
+    cursor=1
+  fi
+
+  while :; do
+    clear_screen
+    header
+    note '既存ファイルの扱いを選ぶ   ↑/↓ 移動   Enter 決定   q 戻る'
+    printf '\n'
+    for ((i = 0; i < 2; i++)); do
+      if [[ ${i} == "${cursor}" ]]; then
+        printf '  %s❯ %s%s\n' "${c_green}" "${labels[i]}" "${c_reset}"
+      else
+        printf '    %s\n' "${labels[i]}"
+      fi
+    done
+    printf '\n'
+    hr
+    case ${cursor} in
+      0)
+        note 'home-manager は自分が作ったのではないファイルを消さないので、'
+        note '下のファイルが残っていると switch はそこで中断する。'
+        note '中身を確認して手で退けたい場合はこちら。'
+        ;;
+      1)
+        note "下のファイルを <名前>.${ext} へ改名してから置き換える。"
+        note '中身 (main.bash の追記など) は残るので後から見比べられる。'
+        collisions=$(backup_collision_paths "${ext}")
+        if [[ -n ${collisions} ]]; then
+          printf '  %s!! 退避先が既にあります。上書きされないので switch は失敗します:%s\n' \
+            "${c_yellow}" "${c_reset}"
+          printf '%s\n' "${collisions}" | sed 's/^/       /'
+          note '  先に消すか、--backup=<別の拡張子> を使う。'
+        fi
+        ;;
+    esac
+    printf '\n'
+    n=${#conflicts[@]}
+    if [[ ${n} -gt 0 ]]; then
+      printf '  %s中断させる実ファイル (%d 件):%s\n' "${c_yellow}" "${n}" "${c_reset}"
+      for ((i = 0; i < n && i < 8; i++)); do
+        note "  ${conflicts[i]}"
+      done
+      if [[ ${n} -gt 8 ]]; then
+        note "  ... 他 $((n - 8)) 件"
+      fi
+    else
+      note '中断させる実ファイルは見つかりません (どちらでも同じ結果になる)。'
+    fi
+
+    read_key || return 1
+    case ${key} in
+      up | k | down | j) cursor=$(((cursor + 1) % 2)) ;;
+      q | esc) return 1 ;;
+      enter)
+        if [[ ${cursor} == 1 ]]; then
+          backup_ext=${ext}
+        else
+          backup_ext=""
+        fi
+        backup_chosen=1
+        return 0
+        ;;
+    esac
+  done
+}
+
+# switch を実行する前に、まだ決めていなければ退避の有無を訊く。
+# 中断しそうなファイルが無いときは訊かない (選んでも結果が変わらない)。
+ask_backup() {
+  if [[ ${backup_chosen} == 1 ]] || ! is_selected switch; then
+    return 0
+  fi
+  if [[ -z $(clobber_paths) ]]; then
+    return 0
+  fi
+  menu_backup || true
 }
 
 ##############
@@ -712,9 +1182,22 @@ step_script() {
   run "${path}" || return 1
 }
 
-# flake は git 管理下の **追跡済みファイル** しか見ない。
-# 追加したモジュールが untracked のままだと評価に入らず、
+step_local_flake() {
+  step_script setup-local-flake.sh || return 1
+  # 今この実行で作られたばかりのこともあるので選び直す。
+  if [[ -f ${local_dir}/flake.nix ]]; then
+    flake_dir=${local_dir}
+  fi
+}
+
+# untracked ファイルが評価に入るかは flake の指し方で変わる。
+#
+#   --flake <repo>/nix   git リポジトリ内のパス -> git 解決。追跡済みしか見えない。
+#   --flake ~/dotfiles   path: でのディレクトリ複製 -> untracked も入る。
+#
+# 前者では追加したモジュールが untracked のままだと評価に入らず、
 # 「そんなオプションは無い」という分かりにくいエラーになる。
+# 後者では手元で通ってしまうので、逆に commit 忘れが CI で出る。
 warn_untracked() {
   local untracked
   if ! have git; then
@@ -724,19 +1207,55 @@ warn_untracked() {
     return 0
   fi
   untracked=$(git -C "${nix_dir}" ls-files --others --exclude-standard -- "${nix_dir}")
-  if [[ -n ${untracked} ]]; then
+  if [[ -z ${untracked} ]]; then
+    return 0
+  fi
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
     warn "git 未追跡のファイルがあります。flake からは見えません:"
     printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
     warn "必要なら git add してから実行してください。"
+  else
+    warn "git 未追跡のファイルがあります (path: 経由なので今回の switch には入ります):"
+    printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
+    warn "CI は git 管理下しか見ないので、残すなら git add してください。"
+  fi
+}
+
+# 退避の有無が実際に効くファイルを実行直前に出す。
+# --new-machine のようにメニューを通らない経路では、ここが唯一の知らせになる。
+warn_clobber() {
+  local paths
+  if [[ -n ${backup_ext} ]]; then
+    note "既存ファイルは <名前>.${backup_ext} へ退避してから置き換えます (-b ${backup_ext})。"
+    paths=$(backup_collision_paths "${backup_ext}")
+    if [[ -n ${paths} ]]; then
+      warn "退避先が既にあります。上書きされないので switch は失敗します:"
+      printf '%s\n' "${paths}" | sed 's/^/     /' >&2
+      warn "先に消すか、--backup=<別の拡張子> を使ってください。"
+    fi
+    return 0
+  fi
+  paths=$(clobber_paths)
+  if [[ -n ${paths} ]]; then
+    warn "home-manager 管理下ではない実ファイルがあります:"
+    printf '%s\n' "${paths}" | sed 's/^/     /' >&2
+    warn "退避しない設定なので、switch はこれらで中断します。"
+    warn "退避するなら --backup を付けて実行してください (メニューでは b)。"
   fi
 }
 
 step_switch() {
+  local hm_args=()
   ensure_host_registered || return 1
   warn_untracked
+  warn_clobber
+  hm_args=(switch --flake "${flake_dir}#${host}")
+  if [[ -n ${backup_ext} ]]; then
+    hm_args+=(-b "${backup_ext}")
+  fi
   if have home-manager; then
     # 2 回目以降。profile に入った CLI をそのまま使う。
-    run home-manager switch --flake "${nix_dir}#${host}" || return 1
+    run home-manager "${hm_args[@]}" || return 1
     return 0
   fi
   # 初回。programs.home-manager.enable が CLI を profile へ入れるのは
@@ -747,7 +1266,7 @@ step_switch() {
     warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
     return 1
   fi
-  run nix run "${nix_dir}#home-manager" -- switch --flake "${nix_dir}#${host}" || return 1
+  run nix run "${flake_dir}#home-manager" -- "${hm_args[@]}" || return 1
 }
 
 step_chsh() {
@@ -779,6 +1298,8 @@ run_step() {
   case $1 in
     nix-install) step_nix_install ;;
     preflight-unlink) step_script preflight-unlink.sh ;;
+    local-flake) step_local_flake ;;
+    ssh-config) step_script setup-ssh-config.sh ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
     bootstrap-*) step_script "$1.sh" ;;
@@ -804,9 +1325,18 @@ post_notes() {
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
   fi
+  if is_selected switch && [[ -n ${backup_ext} ]]; then
+    note "退避したファイルは <名前>.${backup_ext} に残っている。中身 (main.bash の"
+    note "        追記など) を確認して、要らなければ消す。次に -b ${backup_ext} で"
+    note '        switch するとき、残っていると失敗する。'
+  fi
   if is_selected switch && ! have home-manager; then
     note 'home-manager コマンドは新しいシェルから使える。今のシェルで使うなら:'
     note '  . ~/.nix-profile/etc/profile.d/nix.sh'
+  fi
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
+    note 'ローカル flake が未設置です。一度だけ --steps local-flake を実行すると'
+    note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
@@ -830,6 +1360,9 @@ execute() {
     states+=("pending")
   done
   note "対象ホスト: ${host:-<未定>}"
+  if is_selected switch; then
+    note "既存ファイル: $(backup_summary)"
+  fi
 
   for ((n = 0; n < total; n++)); do
     i=${idxs[n]}
@@ -891,6 +1424,21 @@ while [[ $# -gt 0 ]]; do
       host=$1
       ;;
     --host=*) host=${1#*=} ;;
+    --backup)
+      backup_ext=${backup_ext_default}
+      backup_chosen=1
+      ;;
+    --backup=*)
+      backup_ext=${1#*=}
+      # `--backup=` は意図が読めないので弾く (退避しないなら --no-backup)
+      [[ -n ${backup_ext} ]] || die "--backup=<拡張子> が空です (退避しないなら --no-backup)"
+      backup_chosen=1
+      ;;
+    --no-backup)
+      backup_ext=""
+      backup_chosen=1
+      ;;
+    --self-update) self_update=1 ;;
     --dry-run) dry_run=1 ;;
     --list) mode=list ;;
     -h | --help)
@@ -906,12 +1454,26 @@ if [[ ! -f ${hosts_file} ]]; then
   die "${hosts_file} がありません。リポジトリの中から実行してください。"
 fi
 
+# --backup / DOTFILES_BACKUP_EXT のどちらから来た値もここで検査する。
+# 空文字は「退避しない」なのでそのまま通す。
+if [[ -n ${backup_ext} ]]; then
+  validate_backup_ext "${backup_ext}"
+fi
+
+# 何かを実行する前に本体を最新にする。ホストの自動判定より前に置くのは、
+# 更新後の (新しい) 判定ロジックに任せるため。更新できれば戻ってこない。
+if [[ ${self_update} == 1 ]]; then
+  self_update_and_reexec || true
+fi
+
 if [[ -z ${host} ]]; then
   host=${DOTFILES_HOST:-}
 fi
 if [[ -z ${host} ]]; then
   host=$(detect_host || true)
 fi
+
+repo_behind_count=$(repo_behind)
 
 case ${mode} in
   list)

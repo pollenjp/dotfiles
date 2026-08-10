@@ -25,7 +25,7 @@ rectangle "nix/" as root #FFFFFF {
   rectangle "lib/mk-home.nix\n組み立てヘルパ" as lib #EEEEEE
 
   rectangle "home/default.nix\nimport 一覧 + stateVersion" as hdefault
-  rectangle "home/options.nix\n独自オプション (dotfiles.isWSL)" as opts
+  rectangle "home/options.nix\n独自オプション (dotfiles.wsl.*)" as opts
 
   rectangle "**home/modules/packages.nix**\n入れたい CLI ツール" as pkgs #E0FFE0
   rectangle "**home/modules/*.nix**\n機能ごとの設定" as mods #E0FFE0

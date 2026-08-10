@@ -8,10 +8,20 @@
   # macOS だけ home の親ディレクトリが異なる
   homeDirectory ?
     if inputs.nixpkgs.lib.hasSuffix "darwin" system then "/Users/${username}" else "/home/${username}",
-  isWSL ? false,
-  # WSL のホスト側 Windows ユーザー名 (/mnt/c/Users/<名前>/... の組み立てに使う)。
-  # Linux 側の username とは別物。
-  windowsUserName ? null,
+  # WSL 固有の設定をまとめて渡す (dotfiles.wsl にそのまま入る)。
+  # 有効な組み合わせが構造に出るよう、1Password は WSL の下、Windows ユーザー名は
+  # さらに 1Password の下に置いている。
+  #
+  #   wsl = {
+  #     enable = true;
+  #     onePassword = {
+  #       enable = true;
+  #       windowsUserName = "polle";
+  #     };
+  #   };
+  #
+  # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
+  wsl ? { },
   modules ? [ ],
 }:
 
@@ -22,7 +32,7 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles = { inherit isWSL windowsUserName; };
+      dotfiles = { inherit wsl; };
     }
   ]
   ++ modules;
