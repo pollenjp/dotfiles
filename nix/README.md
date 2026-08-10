@@ -152,6 +152,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 ```
   対象ホスト: pollenjp@wsl  (h で変更)
+  既存ファイル: 退避しない  (b で変更)
 
   ❯ 新しいマシン適用
     既存マシン更新
@@ -166,6 +167,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
+`h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
 対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
@@ -183,6 +185,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ~/dotfiles/setup --steps switch,bootstrap-mise
 ~/dotfiles/setup --list                   # 手順の id 一覧
 ~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
+~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
 ```
 
 `~/dotfiles/setup` は実体への symlink なので、どちらから呼んでも同じ。
@@ -194,6 +197,56 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 `bootstrap-*.sh` は glob で自動列挙するため、スクリプトを足しても
 `setup.sh` の編集は要らない。
 
+#### 既存ファイルを退避するか選ぶ
+
+`programs.bash` は `~/.bashrc` / `~/.bash_profile` / `~/.profile` を書く。これらは
+**ディストリの初期ファイルとして最初から在る**のが普通で、home-manager は自分が
+作ったのではないファイルを消さないため、そのままでは switch がここで止まる。
+
+```
+Existing file '/home/pollenjp/.bashrc' would be clobbered by home-manager
+```
+
+`-b <拡張子>` を付けると `~/.bashrc.backup` へ改名してから置き換える。
+付けるかどうかは好みが分かれるので、setup が決め打ちにせず選ばせる。
+
+| 選択 | 結果 |
+| --- | --- |
+| 退避しない（既定） | 実ファイルが在ると switch が中断する。中身を見て手で退ける |
+| `-b backup` で退避 | `<名前>.backup` へ改名してから置き換える。`main.bash` の追記も残る |
+
+メニューではいつでも `b` で変更できる。加えて、**switch を含む実行を始めるときに
+中断させる実ファイルが見つかれば、この画面を挟む**（見つからなければ訊かない）。
+
+```
+    退避しない
+  ❯ -b backup で退避してから置き換える
+
+────────────────────────────────────────────────────────
+  下のファイルを <名前>.backup へ改名してから置き換える。
+  中身 (main.bash の追記など) は残るので後から見比べられる。
+
+  中断させる実ファイル (2 件):
+    /home/pollenjp/.bashrc
+    /home/pollenjp/.profile
+```
+
+メニューを通らない経路では引数か環境変数で指定する（既定は「退避しない」で、
+中断させるファイルが在れば実行直前に警告が出る）。
+
+```sh
+~/dotfiles/setup --new-machine --backup       # -b backup
+~/dotfiles/setup --new-machine --backup=bak   # -b bak (拡張子を変える)
+~/dotfiles/setup --new-machine --no-backup    # 付けない (既定)
+DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
+```
+
+> ⚠️ 退避先が既に在ると `-b` は失敗する（上書きしない）。setup は実行前に見つけて
+> 知らせるので、古い `<名前>.backup` を消してから実行し直す。
+
+`preflight-unlink.sh` が外すのは **symlink だけ**で、`~/.bashrc` のような実ファイルは
+残す（中身を確認してから捨てたいので、消す判断はしない）。役割が分かれている。
+
 ### 新規マシンの手順
 
 上から順に実行する。**2 と 4 と 6 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
@@ -204,7 +257,7 @@ Nix が入る前に走るので、依存は bash / coreutils / curl のみ
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
-| 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形 |
+| 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
@@ -412,7 +465,7 @@ nix build --impure --expr '
 nix build ~/dotfiles#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3   # home-files は symlink なので -L 必須
 
-# 適用 (既存ファイルは .bak へ退避)
+# 適用 (既存ファイルは .bak へ退避。setup なら --backup=bak / メニューの b)
 home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
 # 世代一覧とロールバック
@@ -506,6 +559,11 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
 内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+
+`programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
+どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
+[退避するかどうか](#既存ファイルを退避するか選ぶ)を選ぶことになる。
+`preflight-unlink.sh` の対象 (symlink) には入らない。
 
 **`main.bash:199-219` の bash-completion 取得が不要になった。**
 curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、

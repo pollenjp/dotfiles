@@ -60,6 +60,23 @@ mode=""
 steps_arg=""
 nix_installer_args=${NIX_INSTALLER_ARGS:-install}
 
+# home-manager switch に付ける `-b <拡張子>`。空文字なら付けない。
+#
+# ~/.bashrc / ~/.profile などが **実ファイルとして先に在る**とき、
+# home-manager は勝手に消さずに switch を中断する。`-b` はそれらを
+# <名前>.<拡張子> へ退避してから置き換える。付けるかどうかは好みが分かれる
+# (退避ファイルが増えるのを嫌う人もいる) ので、こちらで決め打ちにせず
+# メニューの `b` / --backup / --no-backup / DOTFILES_BACKUP_EXT で選ばせる。
+backup_ext=""
+backup_ext_default="backup"
+# 明示的に決めたか。決めていないまま switch を実行しようとしていて、かつ
+# 中断しそうなファイルが見つかったときだけメニューで訊く (下の ask_backup)。
+backup_chosen=0
+if [[ -n ${DOTFILES_BACKUP_EXT+x} ]]; then
+  backup_ext=${DOTFILES_BACKUP_EXT}
+  backup_chosen=1
+fi
+
 usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
@@ -74,16 +91,24 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
 
+既存ファイル (~/.bashrc / ~/.profile など) の扱い:
+  setup.sh --backup          <名前>.backup へ退避してから置き換える (-b backup)
+  setup.sh --backup=<拡張子> 退避先の拡張子を変える (既定: backup)
+  setup.sh --no-backup       退避しない (既定。衝突すると switch が中断する)
+
+  指定が無いときは、中断しそうなファイルが在ればメニューで訊く。
+
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
-  h 対象ホストの変更   a 全選択   n 全解除
+  h 対象ホストの変更   b 既存ファイルの退避   a 全選択   n 全解除
 
 環境変数:
-  DOTFILES_HOST       --host と同じ
-  DOTFILES_LOCAL_DIR  ローカル flake の場所 (既定: ~/dotfiles)
-  NIX_INSTALLER_ARGS  Determinate Systems インストーラへの引数 (既定: install)
-                      systemd の無いコンテナでは "install linux --init none"
-  NO_COLOR            色を付けない
+  DOTFILES_HOST        --host と同じ
+  DOTFILES_LOCAL_DIR   ローカル flake の場所 (既定: ~/dotfiles)
+  DOTFILES_BACKUP_EXT  --backup=<拡張子> と同じ。空文字なら --no-backup と同じ
+  NIX_INSTALLER_ARGS   Determinate Systems インストーラへの引数 (既定: install)
+                       systemd の無いコンテナでは "install linux --init none"
+  NO_COLOR             色を付けない
 EOS
 }
 
@@ -398,6 +423,86 @@ ensure_host_registered() {
   return 1
 }
 
+###########################
+# 既存ファイルの退避 (-b)  #
+###########################
+
+# home-manager が書くパスのうち、**先に実ファイルとして在りがち**なもの。
+#
+# ~/.bashrc / ~/.profile / ~/.bash_profile は programs.bash が書く。
+# ディストリの初期ファイルや main.bash の追記がそのまま残っているのが普通で、
+# symlink ではないので preflight-unlink.sh では外れない (外すべきものでもない。
+# 中身を確認してから捨てたいファイルなので退避して残す)。
+#
+# この一覧は **注意書きを出すため**だけに使う。実際の判定は home-manager 自身が
+# activate 時に行うので、漏れがあっても switch の挙動は変わらない。
+hm_managed_paths=(
+  # programs.bash
+  ".bashrc"
+  ".bash_profile"
+  ".profile"
+  # programs.fish
+  ".config/fish/config.fish"
+  # programs.git
+  ".config/git/config"
+  ".config/git/ignore"
+  # modules/files.nix
+  ".screenrc"
+  ".tmux.conf"
+  ".vimrc"
+  ".vim/common.vim"
+  ".vim/clipboard.vim"
+  ".config/starship.toml"
+  ".config/zellij/config.kdl"
+  ".config/nvim/init.vim"
+  ".config/tmux/interactive_shell.tmux.conf"
+)
+
+# home-manager は <名前>.<拡張子> を作るので、拡張子に . や / は入れない。
+# 空文字は「退避しない」の意味なので、ここには渡さない。
+validate_backup_ext() {
+  case ${1:?} in
+    .*) die "拡張子の先頭に . は要りません (~/.bashrc.$1 になります)" ;;
+    */* | *[[:space:]]*) die "退避先の拡張子に / と空白は使えません: $1" ;;
+  esac
+}
+
+# 退避しないと switch が中断するパスを並べる。
+#
+# 数えるのは **実ファイル/実ディレクトリ**だけ。旧経路が張った symlink も
+# 同じく switch を止めるが、そちらは preflight-unlink.sh が外す担当で
+# 直し方が違うため、-b の判断材料には混ぜない。
+clobber_paths() {
+  local p full
+  for p in "${hm_managed_paths[@]}"; do
+    full="${HOME}/${p}"
+    if [[ -e ${full} && ! -L ${full} ]]; then
+      printf '%s\n' "${full}"
+    fi
+  done
+}
+
+# -b を付けても失敗するパス (退避先が既に在るもの) を並べる。
+# home-manager は退避先を上書きしないので、残骸があると switch が止まる。
+# 拡張子は引数で受ける (まだ確定していない候補についても見たいため)。
+backup_collision_paths() {
+  local ext=${1:?} p full
+  for p in "${hm_managed_paths[@]}"; do
+    full="${HOME}/${p}.${ext}"
+    if [[ -e ${full} || -L ${full} ]]; then
+      printf '%s\n' "${full}"
+    fi
+  done
+}
+
+backup_summary() {
+  if [[ -n ${backup_ext} ]]; then
+    printf -- '-b %s で退避する' "${backup_ext}"
+  else
+    printf '退避しない'
+  fi
+}
+
 ##########
 # TUI    #
 ##########
@@ -466,6 +571,13 @@ header() {
     printf '  対象ホスト: %s未判定%s  %s(h で選ぶ / 手順 0 が未了かも)%s\n' \
       "${c_red}" "${c_reset}" "${c_dim}" "${c_reset}"
   fi
+  if [[ -n ${backup_ext} ]]; then
+    printf '  既存ファイル: %s%s%s  %s(b で変更)%s\n' \
+      "${c_green}" "$(backup_summary)" "${c_reset}" "${c_dim}" "${c_reset}"
+  else
+    printf '  既存ファイル: %s  %s(b で変更)%s\n' \
+      "$(backup_summary)" "${c_dim}" "${c_reset}"
+  fi
   note "flake:      ${flake_dir}"
   if [[ ${flake_dir} != "${nix_dir}" ]]; then
     note "本体:       ${repo_dir}"
@@ -503,7 +615,7 @@ menu_main() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Enter 決定   h ホスト変更   q 中止'
+    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 既存ファイルの退避   q 中止'
     printf '\n'
     for ((i = 0; i < count; i++)); do
       if [[ ${i} == "${cursor}" ]]; then
@@ -533,19 +645,23 @@ menu_main() {
       up | k) cursor=$(((cursor + count - 1) % count)) ;;
       down | j) cursor=$(((cursor + 1) % count)) ;;
       h) menu_host ;;
+      b) menu_backup ;;
       q) return 1 ;;
       enter)
         case ${cursor} in
           0)
             apply_preset new-machine
+            ask_backup
             return 0
             ;;
           1)
             apply_preset update
+            ask_backup
             return 0
             ;;
           2)
             if menu_steps; then
+              ask_backup
               return 0
             fi
             ;;
@@ -622,9 +738,15 @@ set_all() {
 
 # 手順によっては実行時に決まる値 (ホストなど) を説明に足す
 note_of() {
-  local i=$1
+  local i=$1 extra=""
   case ${step_ids[i]} in
-    switch) printf '%s (--flake %s#%s)' "${step_notes[i]}" "${flake_dir}" "${host:-<ホスト未定>}" ;;
+    switch)
+      if [[ -n ${backup_ext} ]]; then
+        extra=" -b ${backup_ext}"
+      fi
+      printf '%s (--flake %s#%s%s)' \
+        "${step_notes[i]}" "${flake_dir}" "${host:-<ホスト未定>}" "${extra}"
+      ;;
     *) printf '%s' "${step_notes[i]}" ;;
   esac
 }
@@ -634,7 +756,7 @@ menu_steps() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Space 選択   a 全選択   n 全解除   Enter 実行   q 戻る'
+    note '↑/↓ 移動   Space 選択   a 全選択   n 全解除   b 退避   Enter 実行   q 戻る'
     printf '\n'
     for ((i = 0; i < step_count; i++)); do
       indent=""
@@ -660,6 +782,7 @@ menu_steps() {
       a) set_all 1 ;;
       n) set_all 0 ;;
       h) menu_host ;;
+      b) menu_backup ;;
       q | esc) return 1 ;;
       enter)
         if [[ -z $(selected_indexes) ]]; then
@@ -715,6 +838,103 @@ menu_host() {
         ;;
     esac
   done
+}
+
+# 既存ファイルを退避するか (`-b <拡張子>`) を選ぶ。
+#
+# ~/.bashrc / ~/.profile はディストリの初期ファイルがまず在るので、新しい
+# マシンではほぼ必ずここに当たる。switch が中断してから調べ直すのは手戻りなので、
+# 当たりそうなときは実行前にこの画面を出す (ask_backup)。
+menu_backup() {
+  local cursor=0 ext i n labels=() conflicts=() collisions line
+  ext=${backup_ext:-${backup_ext_default}}
+  labels=(
+    '退避しない'
+    "-b ${ext} で退避してから置き換える"
+  )
+  while IFS= read -r line; do
+    conflicts+=("${line}")
+  done < <(clobber_paths)
+  if [[ -n ${backup_ext} ]]; then
+    cursor=1
+  elif [[ ${backup_chosen} == 0 && ${#conflicts[@]} -gt 0 ]]; then
+    # まだ決めていなくて中断しそうなら、退避する側から見せる
+    cursor=1
+  fi
+
+  while :; do
+    clear_screen
+    header
+    note '既存ファイルの扱いを選ぶ   ↑/↓ 移動   Enter 決定   q 戻る'
+    printf '\n'
+    for ((i = 0; i < 2; i++)); do
+      if [[ ${i} == "${cursor}" ]]; then
+        printf '  %s❯ %s%s\n' "${c_green}" "${labels[i]}" "${c_reset}"
+      else
+        printf '    %s\n' "${labels[i]}"
+      fi
+    done
+    printf '\n'
+    hr
+    case ${cursor} in
+      0)
+        note 'home-manager は自分が作ったのではないファイルを消さないので、'
+        note '下のファイルが残っていると switch はそこで中断する。'
+        note '中身を確認して手で退けたい場合はこちら。'
+        ;;
+      1)
+        note "下のファイルを <名前>.${ext} へ改名してから置き換える。"
+        note '中身 (main.bash の追記など) は残るので後から見比べられる。'
+        collisions=$(backup_collision_paths "${ext}")
+        if [[ -n ${collisions} ]]; then
+          printf '  %s!! 退避先が既にあります。上書きされないので switch は失敗します:%s\n' \
+            "${c_yellow}" "${c_reset}"
+          printf '%s\n' "${collisions}" | sed 's/^/       /'
+          note '  先に消すか、--backup=<別の拡張子> を使う。'
+        fi
+        ;;
+    esac
+    printf '\n'
+    n=${#conflicts[@]}
+    if [[ ${n} -gt 0 ]]; then
+      printf '  %s中断させる実ファイル (%d 件):%s\n' "${c_yellow}" "${n}" "${c_reset}"
+      for ((i = 0; i < n && i < 8; i++)); do
+        note "  ${conflicts[i]}"
+      done
+      if [[ ${n} -gt 8 ]]; then
+        note "  ... 他 $((n - 8)) 件"
+      fi
+    else
+      note '中断させる実ファイルは見つかりません (どちらでも同じ結果になる)。'
+    fi
+
+    read_key || return 1
+    case ${key} in
+      up | k | down | j) cursor=$(((cursor + 1) % 2)) ;;
+      q | esc) return 1 ;;
+      enter)
+        if [[ ${cursor} == 1 ]]; then
+          backup_ext=${ext}
+        else
+          backup_ext=""
+        fi
+        backup_chosen=1
+        return 0
+        ;;
+    esac
+  done
+}
+
+# switch を実行する前に、まだ決めていなければ退避の有無を訊く。
+# 中断しそうなファイルが無いときは訊かない (選んでも結果が変わらない)。
+ask_backup() {
+  if [[ ${backup_chosen} == 1 ]] || ! is_selected switch; then
+    return 0
+  fi
+  if [[ -z $(clobber_paths) ]]; then
+    return 0
+  fi
+  menu_backup || true
 }
 
 ##############
@@ -814,12 +1034,41 @@ warn_untracked() {
   fi
 }
 
+# 退避の有無が実際に効くファイルを実行直前に出す。
+# --new-machine のようにメニューを通らない経路では、ここが唯一の知らせになる。
+warn_clobber() {
+  local paths
+  if [[ -n ${backup_ext} ]]; then
+    note "既存ファイルは <名前>.${backup_ext} へ退避してから置き換えます (-b ${backup_ext})。"
+    paths=$(backup_collision_paths "${backup_ext}")
+    if [[ -n ${paths} ]]; then
+      warn "退避先が既にあります。上書きされないので switch は失敗します:"
+      printf '%s\n' "${paths}" | sed 's/^/     /' >&2
+      warn "先に消すか、--backup=<別の拡張子> を使ってください。"
+    fi
+    return 0
+  fi
+  paths=$(clobber_paths)
+  if [[ -n ${paths} ]]; then
+    warn "home-manager 管理下ではない実ファイルがあります:"
+    printf '%s\n' "${paths}" | sed 's/^/     /' >&2
+    warn "退避しない設定なので、switch はこれらで中断します。"
+    warn "退避するなら --backup を付けて実行してください (メニューでは b)。"
+  fi
+}
+
 step_switch() {
+  local hm_args=()
   ensure_host_registered || return 1
   warn_untracked
+  warn_clobber
+  hm_args=(switch --flake "${flake_dir}#${host}")
+  if [[ -n ${backup_ext} ]]; then
+    hm_args+=(-b "${backup_ext}")
+  fi
   if have home-manager; then
     # 2 回目以降。profile に入った CLI をそのまま使う。
-    run home-manager switch --flake "${flake_dir}#${host}" || return 1
+    run home-manager "${hm_args[@]}" || return 1
     return 0
   fi
   # 初回。programs.home-manager.enable が CLI を profile へ入れるのは
@@ -830,7 +1079,7 @@ step_switch() {
     warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
     return 1
   fi
-  run nix run "${flake_dir}#home-manager" -- switch --flake "${flake_dir}#${host}" || return 1
+  run nix run "${flake_dir}#home-manager" -- "${hm_args[@]}" || return 1
 }
 
 step_chsh() {
@@ -888,6 +1137,11 @@ post_notes() {
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
   fi
+  if is_selected switch && [[ -n ${backup_ext} ]]; then
+    note "退避したファイルは <名前>.${backup_ext} に残っている。中身 (main.bash の"
+    note "        追記など) を確認して、要らなければ消す。次に -b ${backup_ext} で"
+    note '        switch するとき、残っていると失敗する。'
+  fi
   if is_selected switch && ! have home-manager; then
     note 'home-manager コマンドは新しいシェルから使える。今のシェルで使うなら:'
     note '  . ~/.nix-profile/etc/profile.d/nix.sh'
@@ -918,6 +1172,9 @@ execute() {
     states+=("pending")
   done
   note "対象ホスト: ${host:-<未定>}"
+  if is_selected switch; then
+    note "既存ファイル: $(backup_summary)"
+  fi
 
   for ((n = 0; n < total; n++)); do
     i=${idxs[n]}
@@ -979,6 +1236,20 @@ while [[ $# -gt 0 ]]; do
       host=$1
       ;;
     --host=*) host=${1#*=} ;;
+    --backup)
+      backup_ext=${backup_ext_default}
+      backup_chosen=1
+      ;;
+    --backup=*)
+      backup_ext=${1#*=}
+      # `--backup=` は意図が読めないので弾く (退避しないなら --no-backup)
+      [[ -n ${backup_ext} ]] || die "--backup=<拡張子> が空です (退避しないなら --no-backup)"
+      backup_chosen=1
+      ;;
+    --no-backup)
+      backup_ext=""
+      backup_chosen=1
+      ;;
     --dry-run) dry_run=1 ;;
     --list) mode=list ;;
     -h | --help)
@@ -992,6 +1263,12 @@ done
 
 if [[ ! -f ${hosts_file} ]]; then
   die "${hosts_file} がありません。リポジトリの中から実行してください。"
+fi
+
+# --backup / DOTFILES_BACKUP_EXT のどちらから来た値もここで検査する。
+# 空文字は「退避しない」なのでそのまま通す。
+if [[ -n ${backup_ext} ]]; then
+  validate_backup_ext "${backup_ext}"
 fi
 
 if [[ -z ${host} ]]; then

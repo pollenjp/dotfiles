@@ -126,7 +126,7 @@ cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 | エラー | 原因と対処 |
 | --- | --- |
 | `home-manager: command not found` | **初回はまだ CLI が無い。** `nix run ~/dotfiles#home-manager -- switch ...` で 1 回目を実行する。2 回目以降も出るなら `~/.nix-profile/bin` が PATH に無い（`. ~/.nix-profile/etc/profile.d/nix.sh`） |
-| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける |
+| `Existing file ... would be clobbered` | 管理外の実ファイルが既にある。外すか `-b bak` を付ける（`~/dotfiles/setup` なら `b` / `--backup`） |
 | `Existing file ... .bak already exists` | 前回の退避が残っている。古い `.bak` を消す |
 | `path does not exist` (新規 `.nix` を足した直後) | **git flake は untracked ファイルを見ない。`git add` する** |
 | 入れたはずのツールが古いまま | mise のリストに残っている。`~/.config/mise/config.toml` から消す |
