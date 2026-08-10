@@ -52,6 +52,18 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 
 ## 更新する
 
+「更新」には別の軸が 2 つある。
+
+### 他のマシンでの変更を取り込む (本体の checkout)
+
+```sh
+~/dotfiles/setup --self-update --update
+```
+
+`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、`git pull` すればスクリプトも設定も一度に新しくなる。未コミットの変更があるときや fast-forward できないときは警告だけ出して何もしない（本体は開発対象でもあるため）。詳細は [`nix/README.md`](../../../../nix/README.md#本体を最新にする---self-update)。
+
+### 依存 (nixpkgs / home-manager) を更新する
+
 ```sh
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 home-manager switch --flake ~/dotfiles#pollenjp@wsl

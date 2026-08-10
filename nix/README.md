@@ -118,7 +118,49 @@ printf 'experimental-features = nix-command flakes\n' >> ~/.config/nix/nix.conf
 systemd の無いコンテナでは `--daemon` が失敗するので `--no-daemon` を使う。
 root で single-user install する場合は `/etc/nix/nix.conf` に `build-users-group =` (空) が必要。
 
-## 依存の更新
+## 更新
+
+「更新」には別の軸が 3 つある。混ぜると分からなくなるので分けて扱う。
+
+| 何が古くなるか | 何をする | 誰が |
+| --- | --- | --- |
+| 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
+| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | 手で実行（下記） |
+| `~/dotfiles/flake.lock` | 何もしない | `path:` 入力を評価ごとに追うため不要 |
+
+**`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
+古くなるのは symlink の先、つまり本体の checkout。
+
+### 本体を最新にする (`--self-update`)
+
+```sh
+~/dotfiles/setup --self-update            # fetch -> fast-forward -> 新しい自分で続行
+~/dotfiles/setup --self-update --update   # 最新にしてから home-manager switch
+```
+
+メニューからは `u`。`--self-update` を付けない限り git は触らない。
+
+`git pull` は**実行中の `setup.sh` 自身を書き換える**（bash は読み進めながら実行するので、
+内容が変わるとオフセットがずれて壊れる）。そのため更新できた場合は `exec` で自分を
+張り替え、続きは新しい `setup.sh` に任せる。対象ホストや退避の設定は引き継がれる。
+
+本体は**開発対象でもある**（`path:` を選んだのは commit せずに試せるから）ので、
+次の場合は警告だけ出して何もしない。手順の実行自体は続ける（オフラインでも
+setup は使えるべきなので、`fetch` の失敗も止める理由にしない）。
+
+| 状況 | 理由 |
+| --- | --- |
+| 未 commit の変更がある | 作業中の変更を巻き込みたくない（`.ssh` submodule の状態は見ない） |
+| detached HEAD / upstream 無し | どこへ進めるべきか決められない |
+| fast-forward できない | rebase か merge かの判断はしない |
+
+メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
+（毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
+
+`flake.lock` の更新は `--self-update` では扱わない。本体を書き換えて commit が要るもので、
+pull と衝突しやすいため。
+
+### 依存 (flake.lock) の更新
 
 ```sh
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
@@ -168,6 +210,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
+`u` で[本体を最新にする](#本体を最新にする---self-update)（更新できたら新しい setup で再起動する）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
 対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
@@ -186,6 +229,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ~/dotfiles/setup --list                   # 手順の id 一覧
 ~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
 ~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
+~/dotfiles/setup --self-update --update   # 本体を最新にしてから switch
 ```
 
 `~/dotfiles/setup` は実体への symlink なので、どちらから呼んでも同じ。
@@ -312,6 +356,13 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）でも同じことをする。
 ホスト名を覚えていなくてよいのでこちらが楽。
+
+ただし**これは手元の checkout を適用するだけ**で、リモートの変更は取ってこない。
+本体ごと最新にするなら `--self-update` を足す（[前述](#本体を最新にする---self-update)）。
+
+```sh
+~/dotfiles/setup --self-update --update
+```
 
 **`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
 Nix インストーラが用意する profile スクリプトを読み込む (ログインし直すか、以下を実行):
@@ -471,6 +522,9 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
 # 世代一覧とロールバック
 home-manager generations
 /nix/store/<older>-home-manager-generation/activate
+
+# 本体を最新にしてから適用 (git pull -> switch)
+~/dotfiles/setup --self-update --update
 
 # 依存の更新 (本体の flake.lock を触るのでリポジトリ側を指す)
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix

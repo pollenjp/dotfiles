@@ -15,6 +15,9 @@
 #   同じ方針)。説明文も各スクリプト冒頭のコメントから取るので二重管理しない。
 # - `set -e` は関数を if の条件に置くと **その中で無効になる**。手順の関数は
 #   失敗しうるコマンドを必ず `|| return 1` で受けること。
+# - **実行中にこのファイル自身を書き換えると壊れる**。bash はスクリプトを
+#   読み進めながら実行するのでオフセットがずれる。--self-update は git pull の後
+#   必ず exec で自分を張り替える (下の self_update_and_reexec)。
 
 set -eu -o pipefail
 
@@ -77,6 +80,14 @@ if [[ -n ${DOTFILES_BACKUP_EXT+x} ]]; then
   backup_chosen=1
 fi
 
+# --self-update: 手順を実行する前に本体リポジトリを git で最新にする。
+# exec で自分を張り替えたかどうかは環境変数で子に伝える (二重更新の防止)。
+self_update=0
+self_updated=${DOTFILES_SETUP_SELF_UPDATED:-0}
+# upstream より何 commit 遅れているか。空なら判らない (git が無い等)。
+# ヘッダの表示に使う。起動時に一度だけ数える (再描画のたびに git を呼ばない)。
+repo_behind_count=""
+
 usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
@@ -87,6 +98,7 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   setup.sh --update        「既存マシン更新」をそのまま実行
   setup.sh --steps a,b,c   指定した手順だけ実行 (id は --list で確認)
   setup.sh --list          手順の一覧を出す
+  setup.sh --self-update   本体を git で最新にしてから続ける (下記)
   setup.sh --host <名前>   対象ホスト (既定は hosts/default.nix から自動判定)
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
@@ -98,9 +110,17 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 
   指定が無いときは、中断しそうなファイルが在ればメニューで訊く。
 
+本体の更新 (このファイルは本体への symlink なので、更新 = 本体の git pull):
+  setup.sh --self-update            fetch -> fast-forward -> 新しい自分で続行
+  setup.sh --self-update --update   最新にしてから home-manager switch
+
+  未 commit の変更 / detached HEAD / upstream 無し / fast-forward できない
+  ときは警告だけ出して何もしない (本体は開発対象でもあるため)。
+  flake.lock の更新は扱わない (nix flake update を手で実行する)。
+
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
-  h 対象ホストの変更   b 既存ファイルの退避   a 全選択   n 全解除
+  h 対象ホストの変更   b 既存ファイルの退避   u 本体の更新   a 全選択   n 全解除
 
 環境変数:
   DOTFILES_HOST        --host と同じ
@@ -503,6 +523,133 @@ backup_summary() {
   fi
 }
 
+##############################
+# 本体の更新 (--self-update) #
+##############################
+
+# ~/dotfiles/setup は本体の setup.sh への **symlink** なので、それ自体が古くなる
+# ことはない。古くなるのは symlink の先、つまり本体の checkout。
+# よって「setup を最新にする」= 「本体を git pull する」。
+#
+# ただし **実行中の自分を書き換えると壊れる**ので、pull できたら exec で
+# 自分を張り替え、続きは新しい setup.sh に任せる。
+#
+# 本体は開発対象でもある (path: を選んだのは commit せずに試せるから) ので、
+# 勝手に動かさない条件を厳しめにしてある。いずれも警告だけ出して手順の実行は
+# 続ける (オフラインでも setup は使えるべき)。
+#
+#   未 commit の変更がある     -> 触らない
+#   detached HEAD / upstream 無し -> 触らない
+#   fast-forward できない       -> 触らない (rebase か merge かの判断はしない)
+#
+# flake.lock (nixpkgs / home-manager) の更新はここでは扱わない。本体を書き換えて
+# commit が要るものなので pull と衝突しやすい。README の手順どおり手で行う。
+
+git_repo_ok() {
+  have git && git -C "${repo_dir}" rev-parse --is-inside-work-tree &>/dev/null
+}
+
+# upstream より何 commit 遅れているか。判らなければ何も出さない。
+#
+# **fetch はしない** (起動のたびにネットワークへ出たくない) ので、最後に fetch
+# した時点の話になる。ヘッダにもそう書いてある。
+repo_behind() {
+  if ! git_repo_ok; then
+    return 0
+  fi
+  git -C "${repo_dir}" rev-list --count "HEAD..@{u}" 2>/dev/null || true
+}
+
+# fetch して fast-forward できるなら進める。進めたら 0、何もしなければ 1。
+pull_repo() {
+  local branch remote behind
+  if ! git_repo_ok; then
+    warn "git の作業ツリーではないので更新できません: ${repo_dir}"
+    return 1
+  fi
+  # --ignore-submodules=all: .ssh は別リポジトリで nix 経路とは関係が無く、
+  # そちらの状態で更新を止めたくない。
+  if ! git -C "${repo_dir}" diff --quiet --ignore-submodules=all \
+    || ! git -C "${repo_dir}" diff --cached --quiet --ignore-submodules=all; then
+    warn "未 commit の変更があるので本体は更新しません。自分で pull してください:"
+    warn "  git -C ${repo_dir} status"
+    return 1
+  fi
+  if ! branch=$(git -C "${repo_dir}" symbolic-ref --short -q HEAD); then
+    warn "detached HEAD なので本体は更新しません。"
+    return 1
+  fi
+  if ! remote=$(git -C "${repo_dir}" config "branch.${branch}.remote"); then
+    warn "${branch} に upstream が無いので本体は更新しません。"
+    return 1
+  fi
+  if ! run git -C "${repo_dir}" fetch "${remote}" "${branch}"; then
+    warn "fetch に失敗しました。オフラインなら無視して続けます。"
+    return 1
+  fi
+  if [[ ${dry_run} == 1 ]]; then
+    note '(--dry-run なので更新はしません)'
+    return 1
+  fi
+  behind=$(git -C "${repo_dir}" rev-list --count "HEAD..@{u}" 2>/dev/null || printf '0')
+  if [[ ${behind} == 0 ]]; then
+    note "本体は既に最新です (${branch})。"
+    return 1
+  fi
+  note "${behind} commit 遅れています。fast-forward します。"
+  if ! run git -C "${repo_dir}" merge --ff-only "@{u}"; then
+    warn "fast-forward できませんでした (ローカルに commit がある?)。手で確認してください。"
+    return 1
+  fi
+}
+
+# exec で自分を張り替えるときの引数。**いま持っている状態**から組み立てる。
+# メニューで選んだ対象ホストや退避の設定を引き継ぐため、元の argv は使わない。
+# --self-update は渡さない (更新は済んでいる)。
+rebuild_args=()
+build_rebuild_args() {
+  rebuild_args=()
+  if [[ -n ${host} ]]; then
+    rebuild_args+=(--host "${host}")
+  fi
+  if [[ ${backup_chosen} == 1 ]]; then
+    if [[ -n ${backup_ext} ]]; then
+      rebuild_args+=("--backup=${backup_ext}")
+    else
+      rebuild_args+=(--no-backup)
+    fi
+  fi
+  if [[ ${dry_run} == 1 ]]; then
+    rebuild_args+=(--dry-run)
+  fi
+  case ${mode} in
+    new-machine) rebuild_args+=(--new-machine) ;;
+    update) rebuild_args+=(--update) ;;
+    steps) rebuild_args+=("--steps=${steps_arg}") ;;
+    list) rebuild_args+=(--list) ;;
+  esac
+}
+
+# 本体を更新し、更新できたら新しい自分へ exec する (戻ってこない)。
+# 更新しなかった / できなかったときだけ 1 を返して呼び元に戻る。
+self_update_and_reexec() {
+  if [[ ${self_updated} == 1 ]]; then
+    note 'この実行では既に本体を更新しています。'
+    return 1
+  fi
+  printf '\n%s==> 本体を更新 (%s)%s\n' "${c_bold}" "${repo_dir}" "${c_reset}"
+  if ! pull_repo; then
+    # fetch だけ通っていることがあるので数え直す
+    repo_behind_count=$(repo_behind)
+    return 1
+  fi
+  build_rebuild_args
+  note '新しい setup.sh で続けます。'
+  export DOTFILES_SETUP_SELF_UPDATED=1
+  # bash 3.2 では set -u と空配列の展開が両立しないので ${arr[@]+...} で受ける
+  exec "$0" ${rebuild_args[@]+"${rebuild_args[@]}"}
+}
+
 ##########
 # TUI    #
 ##########
@@ -582,6 +729,12 @@ header() {
   if [[ ${flake_dir} != "${nix_dir}" ]]; then
     note "本体:       ${repo_dir}"
   fi
+  # 遅れていないとき (と判らないとき) は出さない。u / --self-update が要るときだけ
+  # 目に入れば十分なので。
+  if [[ -n ${repo_behind_count} && ${repo_behind_count} != 0 ]]; then
+    printf '  %s本体が %s commit 遅れ%s  %s(最後の fetch 時点。--self-update で更新)%s\n' \
+      "${c_yellow}" "${repo_behind_count}" "${c_reset}" "${c_dim}" "${c_reset}"
+  fi
   if [[ ${dry_run} == 1 ]]; then
     printf '  %s--dry-run: 実際には実行しません%s\n' "${c_yellow}" "${c_reset}"
   fi
@@ -615,7 +768,7 @@ menu_main() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 既存ファイルの退避   q 中止'
+    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   u 本体を更新   q 中止'
     printf '\n'
     for ((i = 0; i < count; i++)); do
       if [[ ${i} == "${cursor}" ]]; then
@@ -646,6 +799,18 @@ menu_main() {
       down | j) cursor=$(((cursor + 1) % count)) ;;
       h) menu_host ;;
       b) menu_backup ;;
+      u)
+        # 更新できれば exec して戻ってこない。できなければ元の画面へ戻す。
+        # 手順の選択を持っている menu_steps では受けない (exec で消えるため)。
+        tui_end
+        if ! self_update_and_reexec; then
+          # 更新しなかった理由 (dirty など) は代替スクリーンへ戻ると流れてしまう。
+          # 読ませてから戻る。
+          printf '\n%s何かキーを押すと戻ります。%s\n' "${c_dim}" "${c_reset}"
+          read_key || true
+        fi
+        tui_begin
+        ;;
       q) return 1 ;;
       enter)
         case ${cursor} in
@@ -1250,6 +1415,7 @@ while [[ $# -gt 0 ]]; do
       backup_ext=""
       backup_chosen=1
       ;;
+    --self-update) self_update=1 ;;
     --dry-run) dry_run=1 ;;
     --list) mode=list ;;
     -h | --help)
@@ -1271,12 +1437,20 @@ if [[ -n ${backup_ext} ]]; then
   validate_backup_ext "${backup_ext}"
 fi
 
+# 何かを実行する前に本体を最新にする。ホストの自動判定より前に置くのは、
+# 更新後の (新しい) 判定ロジックに任せるため。更新できれば戻ってこない。
+if [[ ${self_update} == 1 ]]; then
+  self_update_and_reexec || true
+fi
+
 if [[ -z ${host} ]]; then
   host=${DOTFILES_HOST:-}
 fi
 if [[ -z ${host} ]]; then
   host=$(detect_host || true)
 fi
+
+repo_behind_count=$(repo_behind)
 
 case ${mode} in
   list)
