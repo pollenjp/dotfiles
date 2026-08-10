@@ -5,8 +5,12 @@
 #
 # ## 置き場所の前提
 #
-#   リポジトリ本体  $(ghq root)/github.com/pollenjp/dotfiles  git 管理
-#   ローカル flake  ~/dotfiles                                git 管理外
+#   リポジトリ本体  ~/ghq/github.com/pollenjp/dotfiles  git 管理
+#   ローカル flake  ~/dotfiles                          git 管理外
+#
+# ~/ghq は ghq root の既定値。GHQ_ROOT や git config ghq.root で変えていれば
+# そちらを使う (下の ghq_root() が判定する)。ghq 本体は Nix が入れるものなので、
+# 初回はまだ PATH に無い前提で書いてある。
 #
 # リポジトリは ghq が決めるパスに置く。`cdrepo` など ghq 前提の仕組みと
 # 置き場所が揃い、他のリポジトリと同じ規則で辿れるため。
@@ -145,10 +149,13 @@ if [[ ${repo_dir} != "${expected_repo}" ]]; then
 
    ghq 配下へ置き直してください。
 
-     ghq get git@github.com:pollenjp/dotfiles.git
-     # 既存の作業を持ち越すなら移動でもよい
+     # 既存の作業を持ち越すなら移動が早い
      mkdir -p "$(dirname "${expected_repo}")"
      mv "${repo_dir}" "${expected_repo}"
+
+     # 取り直すなら (ghq がまだ無ければ git clone。https / SSH はどちらでも)
+     git clone https://github.com/pollenjp/dotfiles.git "${expected_repo}"
+     ghq get https://github.com/pollenjp/dotfiles.git
 
    このパスのまま進めるなら DOTFILES_ALLOW_ANY_PATH=1 を付けてください。
 EOS

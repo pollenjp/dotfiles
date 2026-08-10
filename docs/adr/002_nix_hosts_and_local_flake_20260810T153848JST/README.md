@@ -104,14 +104,14 @@ false のマシンでは署名関連を**丸ごと**書き出さない。`commit
 
 | パス | 中身 | git |
 | --- | --- | --- |
-| `$(ghq root)/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
+| `~/ghq/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
 | `~/dotfiles` | ローカル専用の flake と `setup` への symlink | **管理外** |
 
 ```
 ~/dotfiles/
 ├── flake.nix   本体を input に取り、homeConfigurations などを再輸出する
 ├── flake.lock  nix が生成する
-└── setup -> $(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/setup.sh
+└── setup -> ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup.sh
 ```
 
 本体を ghq 配下に置くことで、`cdrepo` など ghq 前提の仕組みと置き場所が揃う。
@@ -295,21 +295,24 @@ input 差し替え（`--override-input`）で実行している。
 
 ```sh
 # 1. 本体を ghq 配下へ
-ghq get git@github.com:pollenjp/dotfiles.git
+#    この時点では ghq はまだ無い (Nix が入れる) ので git clone で置く。
+#    SSH 鍵の設定もまだのことが多いので https を使う。
+mkdir -p ~/ghq/github.com/pollenjp
+git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
 
 # 2. 以降はメニューから (手順 local-flake が ~/dotfiles を用意する)
-"$(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/setup.sh" --new-machine
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup.sh --new-machine
 ```
 
 ### 既存マシン（旧レイアウトからの移行）
 
 ```sh
 # 1. 本体を ghq 配下へ移す (~/dotfiles を空ける)
-mkdir -p "$(ghq root)/github.com/pollenjp"
-mv ~/dotfiles "$(ghq root)/github.com/pollenjp/dotfiles"
+mkdir -p ~/ghq/github.com/pollenjp
+mv ~/dotfiles ~/ghq/github.com/pollenjp/dotfiles
 
 # 2. ローカル flake と setup の symlink を置く (一度だけ)
-"$(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/setup.sh" --steps local-flake
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup.sh --steps local-flake
 
 # 3. 以後
 ~/dotfiles/setup --update

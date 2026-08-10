@@ -4,7 +4,7 @@
 
 | 経路 | リポジトリの置き場所 | 手順 |
 | --- | --- | --- |
-| Nix home-manager（推奨） | `$(ghq root)/github.com/pollenjp/dotfiles` | [`nix/README.md`](./nix/README.md) |
+| Nix home-manager（推奨） | `~/ghq/github.com/pollenjp/dotfiles` | [`nix/README.md`](./nix/README.md) |
 | `main.bash setup`（従来） | `~/dotfiles` | 下記 |
 
 > ⚠️ `~/dotfiles` の意味が経路によって違う。従来経路では**リポジトリ本体**だが、

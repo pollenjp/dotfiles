@@ -66,7 +66,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 `#` の後ろは `hosts/default.nix` に登録した名前。
 
 `~/dotfiles` はリポジトリ本体ではなく、そこを指すローカル専用の flake。
-本体は `$(ghq root)/github.com/pollenjp/dotfiles` に置く
+本体は `~/ghq/github.com/pollenjp/dotfiles` に置く
 （[nix/README.md 「置き場所」](../../../../nix/README.md#置き場所)）。
 
 > ⚠️ **まだ一度も適用していないマシンでは `home-manager: command not found` になる。**

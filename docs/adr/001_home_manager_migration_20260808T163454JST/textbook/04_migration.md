@@ -39,7 +39,7 @@ systemd のないコンテナでは `--daemon` が失敗するので `--no-daemo
 **ここが最も重要。** `$HOME` に一切触れずに、配置される全ファイルを確認できる。
 
 ```sh
-cd "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
 nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find /tmp/hm/home-files -mindepth 1 -maxdepth 3
 ```

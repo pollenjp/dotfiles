@@ -25,7 +25,7 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 
 | パス | 中身 | git |
 | --- | --- | --- |
-| `$(ghq root)/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
+| `~/ghq/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
 | `~/dotfiles` | ローカル専用の flake と `setup` への symlink | **管理外** |
 
 本体を ghq 配下に置くのは、`cdrepo` など ghq 前提の仕組みと置き場所を揃え、
@@ -34,19 +34,35 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 
 ### 最初の clone
 
+**この時点では `ghq` はまだ無い。** `ghq` は Nix が入れるもの (`home/modules/packages.nix`)
+なので、初回は `$(ghq root)` も `ghq get` も使えない。既定のパスへ `git clone` で置く。
+
 ```sh
-ghq get git@github.com:pollenjp/dotfiles.git
-# ghq が無ければ手で置いてもよい (パスが同じであればよい)
+mkdir -p ~/ghq/github.com/pollenjp
+
+# https (初回はこちら。SSH 鍵 (1Password) の設定もまだのことが多いため)
+git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
+
+# SSH 鍵が既に使えるなら
 git clone git@github.com:pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
 ```
 
-`ghq root` の既定は `~/ghq`。`GHQ_ROOT` や `git config ghq.root` で変えていれば
-そちらが使われる。
+2 台目以降 (`ghq` が入っている環境) なら `ghq get` でも同じ場所に置ける。
+
+```sh
+ghq get https://github.com/pollenjp/dotfiles.git
+ghq get git@github.com:pollenjp/dotfiles.git
+```
+
+> このドキュメントは `ghq root` の既定値 `~/ghq` を直接書いている。
+> `GHQ_ROOT` や `git config ghq.root` で変えている場合はそのパスに読み替えること。
+> スクリプト側は `ghq` → `GHQ_ROOT` → `git config ghq.root` → `~/ghq` の順で
+> 自動判定するので、変えていても正しく動く。
 
 ### `~/dotfiles` を用意する
 
 ```sh
-"$(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh"
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh
 ```
 
 冪等。次の 2 つを置く（既にあるものは触らない）。
@@ -75,8 +91,8 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 > 何もせず止まるので、取り違えて壊すことはない。
 >
 > ```sh
-> mkdir -p "$(ghq root)/github.com/pollenjp"
-> mv ~/dotfiles "$(ghq root)/github.com/pollenjp/dotfiles"
+> mkdir -p ~/ghq/github.com/pollenjp
+> mv ~/dotfiles ~/ghq/github.com/pollenjp/dotfiles
 > ```
 >
 > 旧経路が配置した設定ファイルは `~/dotfiles/...` を直接参照しているため、移動すると
@@ -105,7 +121,7 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 ## 依存の更新
 
 ```sh
-nix flake update --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 `~/dotfiles` 側の lock は `path:` 入力を追うだけなので、更新は要らない。
@@ -381,7 +397,7 @@ flake の指し方で変わる**ので採らない。
 
 ```sh
 nix build --impure --expr '
-  ((builtins.getFlake "path:'"$(ghq root)"'/github.com/pollenjp/dotfiles/nix").lib.mkHome {
+  ((builtins.getFlake "path:'"${HOME}"'/ghq/github.com/pollenjp/dotfiles/nix").lib.mkHome {
     username = "tmp";
     system = "x86_64-linux";
     wsl.enable = true;
@@ -404,7 +420,7 @@ home-manager generations
 /nix/store/<older>-home-manager-generation/activate
 
 # 依存の更新 (本体の flake.lock を触るのでリポジトリ側を指す)
-nix flake update --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 > ⚠️ `-b bak` は `<file>.bak` が既に存在すると失敗する。リトライ時は古い `.bak` を先に消すこと。
@@ -665,7 +681,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 個別に実行する場合:
 
 ```sh
-cd "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
 git add .                                  # git 解決なので untracked は見えない (後述)
 
 nix flake check                            # 現在の system 向けに評価 + ビルド

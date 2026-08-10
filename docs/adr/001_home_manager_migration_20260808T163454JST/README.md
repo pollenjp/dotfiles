@@ -249,13 +249,15 @@ Stage 2 以降は `./nix/scripts/verify.sh` で一括実行できる（実際の
 ## 7. 移行・運用手順
 
 > パスは[後続 ADR](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)で
-> 変わっている。リポジトリ本体は `$(ghq root)/github.com/pollenjp/dotfiles`、
+> 変わっている。リポジトリ本体は `~/ghq/github.com/pollenjp/dotfiles`、
 > 日々の入口は `~/dotfiles`（ローカル専用 flake）。以下はその形に更新してある。
 
 ```sh
 # 0. リポジトリ本体を ghq 配下へ
-ghq get git@github.com:pollenjp/dotfiles.git
-REPO="$(ghq root)/github.com/pollenjp/dotfiles"
+#    ghq は Nix が入れるのでこの時点ではまだ無い。git clone で置く。
+mkdir -p ~/ghq/github.com/pollenjp
+git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
+REPO=~/ghq/github.com/pollenjp/dotfiles
 
 # 1. Nix を導入
 curl -fsSL https://install.determinate.systems/nix | sh -s -- install

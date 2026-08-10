@@ -12,7 +12,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 home-manager generations
 
 # 依存 (nixpkgs / home-manager) を更新する
-nix flake update --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 `--flake ...` を毎回打つのが面倒なら alias を作るとよい。
@@ -37,7 +37,7 @@ nix flake update --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
 ## ツールを増やす
 
 ```sh
-$EDITOR "$(ghq root)/github.com/pollenjp/dotfiles/nix/home/modules/packages.nix"
+$EDITOR ~/ghq/github.com/pollenjp/dotfiles/nix/home/modules/packages.nix
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
@@ -53,7 +53,7 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 ## 更新する
 
 ```sh
-nix flake update --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
@@ -62,7 +62,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 特定の input だけ更新することもできる。
 
 ```sh
-nix flake update nixpkgs --flake "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+nix flake update nixpkgs --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
 ## 壊れたら戻す
@@ -97,7 +97,7 @@ Nix は「どこかの世代から参照されている store path」を消さ�
 設定を大きく変えたときは、実マシンに適用する前に確認する。
 
 ```sh
-cd "$(ghq root)/github.com/pollenjp/dotfiles/nix"
+cd ~/ghq/github.com/pollenjp/dotfiles/nix
 
 # 全 system で評価が通るか (ビルドはしない。速い)
 nix flake check --all-systems --no-build
@@ -116,7 +116,7 @@ HOME=/tmp/hm-sandbox nix run .#home-manager -- switch --flake .#sandbox -b bak
 ## フォーマット
 
 ```sh
-cd "$(ghq root)/github.com/pollenjp/dotfiles/nix" && nix fmt
+cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 ```
 
 `.nix` ファイルを nixfmt で整形する。シェルスクリプトは従来どおり `./main.bash fmt` (shfmt)。
