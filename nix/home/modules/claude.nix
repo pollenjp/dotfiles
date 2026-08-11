@@ -20,7 +20,9 @@
 #   ~/.claude/skills/
 #   ├── manifest.json      <- Claude Code 管理 (実ファイル)
 #   ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
-#   └── <自作>/            <- Nix 管理 (store への symlink)
+#   ├── <自作>/            <- Nix 管理 (store への symlink)
+#   └── <private>/         <- claude-skills の作業クローンへの symlink
+#                             (scripts/bootstrap-claude-skills.sh が張る)
 #
 # ## 追加方法
 #
@@ -29,9 +31,13 @@
 #
 # ## 管理しないもの
 #
-#   settings.json : Claude Code が書き換える (権限の「常に許可」など)。
-#                   store 管理にすると書けなくなる
-#   plugins/      : 実行時に取得・更新される
+#   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
+#                    store 管理にすると書けなくなる
+#   plugins/       : 実行時に取得・更新される
+#   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
+#                    載せると CI の nix flake check も fetch できずに落ちる。
+#                    scripts/bootstrap-claude-skills.sh が作業クローンへ
+#                    symlink を張る。詳細は nix/README.md
 { lib, ... }:
 
 let
