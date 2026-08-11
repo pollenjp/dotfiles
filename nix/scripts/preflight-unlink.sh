@@ -5,7 +5,8 @@
 # home-manager が管理するパスだけを外す。
 #
 # home-manager は自分が作ったのではないファイルを勝手に消さないため、
-# 外さないまま switch すると次で中断する:
+# 外さないまま switch すると次で中断する (置き換え後と中身が同じ場合だけは
+# 警告に留まり、そのまま置き換わる):
 #   Existing file '...' would be clobbered by home-manager
 #
 # 安全のため **シンボリックリンクのみ** を外す。実ファイル/実ディレクトリは
@@ -40,6 +41,21 @@ targets=(
   # 実ファイルとして残っていることが多い。その場合ここでは外さず警告になる。
   # (退避は setup.sh の -b に任せる。~/.bashrc などと同じ扱い)
   "${HOME}/.ssh/config"
+  # WSL の ssh ラッパー (home/modules/ssh.nix が同じパスへ置き直す)。
+  #
+  # main.bash は ~/dotfiles/bin/ssh-wsl.sh への symlink を張っていた。本体を
+  # ghq 配下へ移すと参照先が消えて dangling になるが、**bash は dangling を
+  # 読み飛ばして PATH 探索を続ける**ため、エラーも出ないまま Linux の ssh に
+  # すり替わる (bash 5.2 で実測)。1Password の鍵が見えなくなるだけでなく、
+  # git.nix の defaultKeyCommand が使う `ssh-add -L` も Linux 側の agent を引く
+  # ようになり、署名鍵が見つからず git commit が失敗する。
+  #
+  # 複製は verbatim なので、外し忘れても switch は通る (中身が一致するため
+  # 警告だけ出て store のリンクに置き換わる)。ただし**どちらかを編集していると
+  # "would be clobbered" で止まり、symlink は -b <拡張子> の退避対象外なので
+  # 手で外すしか無くなる**。先に外しておく。
+  "${HOME}/.local/bin/ssh"
+  "${HOME}/.local/bin/ssh-add"
 )
 
 # bash は Stage 5 で管理対象になったが、ここには入れない。
