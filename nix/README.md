@@ -579,6 +579,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
 | `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みだけ) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
+| `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
+| `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -606,6 +608,12 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 `defaultKeyCommand` は 1Password が鍵に付ける名前で引くものなので、1Password の
 無いマシンでは当たらない。片方だけ残すと「署名しようとして鍵が見つからず commit が
 失敗する」状態になるため、無効のマシンでは署名設定を丸ごと省いている。
+
+> ⚠️ **`defaultKeyCommand` は `ssh-add` が Windows 側であることに依存している。**
+> 鍵を持っているのはホスト側 Windows の 1Password なので、`ssh-add -L` が Linux の
+> ssh-agent を引くと鍵が並ばず、署名鍵が見つからないまま `commit.gpgSign = true`
+> だけが残る。`op-ssh-sign` のパス指定だけでは足りない。差し替えは
+> [ssh ラッパー](#wsl-では-ssh-自体を-windows-側に差し替える)が行う。
 
 **署名が入るのは `wsl.onePassword.enable = true` のマシンだけ**になる。1Password は
 WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非 WSL のマシン
@@ -669,6 +677,55 @@ submodule 側でファイル名が変わった場合、参照先が消えた sym
 > 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
 > `config.d` へ移す案を棄却した実測）は
 > [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
+
+### WSL では ssh 自体を Windows 側に差し替える
+
+1Password の ssh-agent は**ホスト側 Windows**にいる。この dotfiles は npiperelay や
+socat で `SSH_AUTH_SOCK` を橋渡ししていないので、WSL 側の Linux ssh からは agent が
+見えない。そこで `ssh` / `ssh-add` そのものを Windows 側の実体へ `exec` する
+ラッパーに差し替える。
+
+| 配置先 | 実体 | 何をする |
+| --- | --- | --- |
+| `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` | `exec ssh.exe "$@"` |
+| `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` | `exec ssh-add.exe "$@"` |
+
+置かれるのは **`wsl.onePassword.enable = true` のマシンだけ**（レガシーの
+`main.bash` は `uname` と `ssh.exe` の有無で実行時に判定していたが、Nix 経路では
+[登録簿](#マシン登録簿-hostsdefaultnix)の指定で決まる）。`$HOME/.local/bin` は
+`home.sessionPath` で PATH の前に入るので、これがディストリの `ssh` より先に当たる。
+
+Linux 側の ssh を使いたいときは `USE_LINUX_SSH=1` を渡す（ラッパー側の分岐）。
+
+```sh
+USE_LINUX_SSH=1 ssh <ホスト名>
+```
+
+**git の署名もこれに依存している。** `gpg.ssh.defaultKeyCommand` は `ssh-add -L` の
+出力から `Signing` を含む鍵を選ぶので、`ssh-add` が Linux 側だと 1Password の鍵が
+並ばない。詳細は[git について](#git-について)を参照。
+
+> ⚠️ **`main.bash` 経路から移行するマシンでは、同じパスの symlink を先に外すこと。**
+> `preflight-unlink.sh` が対象に含めているので、[手順 2](#新規マシンの手順) を
+> 飛ばさなければよい。
+>
+> 外し忘れても複製が verbatim なので通常は通る（下表）。止まるのはどちらかを
+> **編集していた場合**で、そのとき `-b` は効かないので手で外すしかない。
+>
+> | 旧 symlink | switch の挙動 |
+> | --- | --- |
+> | 生きている / 中身が同じ | 警告のみ（`will be skipped since they are the same`）で store のリンクに置き換わる |
+> | 生きている / 中身が違う | `would be clobbered` で中断。**symlink は `-b <拡張子>` の退避対象外**なので手で外す |
+> | リンク先が消えている | 警告も出ずに置き換わる |
+>
+> リンク先が消えている状態そのものは、switch する前が危ない。本体を ghq 配下へ移すと
+> `~/dotfiles/bin/ssh-wsl.sh` が無くなるが、**bash は dangling な symlink を読み飛ばして
+> PATH 探索を続ける**ので、エラーも警告も出ないままディストリの `ssh` にすり替わる
+> （bash 5.2 で実測）。気づく合図が無いので、移行後は `command -v ssh` が
+> `~/.local/bin/ssh` を指しているか確認するとよい。
+
+Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
+Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
 
 ## fish
 
@@ -961,12 +1018,15 @@ nix/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
+│       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
+│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙)
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       └── bash.nix          alias 88 / 関数 24
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
+│   └── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く

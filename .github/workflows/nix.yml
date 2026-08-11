@@ -85,9 +85,11 @@ jobs:
             find nix -name "*.nix" -print0 | xargs -0 nixfmt --check
           '
 
+      # files/bin/ も対象に入れる。Nix が実行ファイルとして配置するものなので、
+      # scripts/ と同じ静的解析にかけておく。
       - name: shfmt / shellcheck
         run: |
           nix develop ./nix --command bash -c '
-            shfmt -d nix/scripts/*.sh
-            shellcheck nix/scripts/*.sh
+            shfmt -d nix/scripts/*.sh nix/files/bin/*.sh
+            shellcheck nix/scripts/*.sh nix/files/bin/*.sh
           '
