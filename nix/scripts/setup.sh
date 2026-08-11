@@ -253,11 +253,11 @@ add_step switch \
   step 0
 
 add_step bootstrap \
-  'bootstrap (マシンごとに一度だけ)' \
-  '下のスクリプトをまとめて選ぶ。いずれも冪等。' \
+  'bootstrap (マシンごとの初期化)' \
+  '下のスクリプトをまとめて選ぶ。いずれも冪等で、何度実行してもよい。' \
   group 0
 
-# 手順 4 / 6。増えても自動でメニューに載る。
+# 手順 4 / 6 / 6.5。増えても自動でメニューに載る。
 for f in "${script_dir}"/bootstrap-*.sh; do
   [[ -f ${f} ]] || continue
   base=$(basename "${f}")

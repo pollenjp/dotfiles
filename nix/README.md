@@ -214,7 +214,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.5 |
 | 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
@@ -303,7 +303,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 
 ### 新規マシンの手順
 
-上から順に実行する。**2 と 4 と 6 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
+上から順に実行する。**2 と 4 と 6 と 7 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
@@ -316,6 +316,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -346,7 +347,27 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
 
 冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
 
-#### 3. ログインシェルの変更 (手順 7)
+#### 3. private な skill の取得 (手順 6.5)
+
+```sh
+./nix/scripts/bootstrap-claude-skills.sh
+```
+
+`pollenjp/claude-skills`（private）を clone して `~/.claude/` へ繋ぐ。
+詳細は後述の「Claude Code > private な skill 置き場」を参照。
+
+> ⚠️ **private リポジトリなので SSH 鍵が要る。** 取得に失敗すると `setup.sh` はそこで
+> 止まり、後続の手順（`bootstrap-mise`）が走らない。まだ鍵を用意していないマシンでは、
+> 先に `ssh -T git@github.com` が通ることを確認しておくか、「カスタム」でこの手順の
+> 選択を外して進め、あとから個別に実行する。
+>
+> ```sh
+> ~/dotfiles/setup --steps bootstrap-claude-skills
+> ```
+
+このリポジトリを使わないマシンでは、この手順ごと飛ばしてよい。
+
+#### 4. ログインシェルの変更 (手順 7)
 
 `programs.fish.enable` は fish を**インストールするだけ**で、ログインシェルには設定しない
 （`/etc/passwd` の変更は home-manager の管轄外）。必要なら手で変更する。
@@ -723,6 +744,9 @@ bash では元々発火していなかった）。
 **追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
 書き方は各ディレクトリの `README.md` を参照。
 
+**このリポジトリは public なので、ここに置けるのは公開して差し支えないものだけ。**
+公開できないものは次節の `claude-skills` へ置く。
+
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
 `~/.claude/` 配下は **Claude Code 自身が書き換える**。`skills/` には `manifest.json`
@@ -776,10 +800,69 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 **スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
 冪等で、既存の設定は保持する。
 
+### private な skill 置き場 (claude-skills)
+
+公開できない skill / agent / command は [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）に置き、
+**Nix ではなく `bootstrap-claude-skills.sh` が作業クローンへの symlink を張る**。
+
+```sh
+./nix/scripts/bootstrap-claude-skills.sh            # 取得 / 更新してリンクを張り直す
+./nix/scripts/bootstrap-claude-skills.sh --status   # いま何が繋がっているか
+~/dotfiles/setup --steps bootstrap-claude-skills    # 入口 (symlink) から呼ぶ場合
+```
+
+`$(ghq root)/github.com/pollenjp/claude-skills` へ clone し、`skills/` `agents/`
+`commands/` の中身を 1 つずつ `~/.claude/<種類>/` へ symlink する。冪等なので、
+skill を足したあとや別マシンの変更を取り込むときに何度でも実行してよい。
+
+```
+~/.claude/skills/
+├── manifest.json      <- Claude Code 管理 (実ファイル)
+├── pdf/ docx/ ...     <- Anthropic 配信 (実ディレクトリ)
+├── <公開してよいもの> -> /nix/store/…                       (nix/files/claude/skills/)
+└── <private>          -> ~/ghq/…/claude-skills/skills/…     (bootstrap-claude-skills.sh)
+```
+
+`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、3 系統が兄弟として
+並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
+
+#### なぜ flake input にしないのか
+
+**claude-skills は private で、この dotfiles は public。** flake input にすると:
+
+- public な `flake.lock` に private repo の URL と rev が載る
+- GitHub Actions の `nix flake check` が fetch できずに落ちる
+  （deploy key か PAT をリポジトリに足さないと直らない）
+
+加えて skill は試行錯誤しながら書くもので、store 管理だと 1 文字直すたびに
+commit → push → `flake update` → `home-manager switch` が要る。作業クローンへ
+symlink すれば編集がそのまま反映される（`nix/files/claude/skills/README.md` に
+書いてある「試行錯誤中は直接置く方が早い」の問題がそもそも起きない）。
+
+引き換えに rev の pin は無くなるが、pin したければクローン側で `git checkout <tag>` すればよい。
+
+clone / pull はネットワークアクセスを伴うため `home.activation` には入れていない
+（`bootstrap-mise.sh` と同じ理由。`home-manager switch` は hermetic に保つ）。
+
+#### 掃除の判定
+
+台帳は持たず、**リンク先が作業クローンの中を指しているか**だけで自分の張ったリンクを
+判定する（`nix-managed-guard.sh` が `/nix/store` を指すかで判定しているのと同じ考え方）。
+そのため Claude Code 管理のものや Nix 管理のものには触れない。
+クローン先を引っ越した場合に備えて、最後に使ったパスだけ
+`~/.local/state/dotfiles/claude-skills-dir` に控えている。
+
+#### ⚠️ 反映されるのと commit されるのは別
+
+store 管理ではないので `~/.claude/skills/<名前>/` は**書き込める**。`nix-managed-guard.sh`
+も（`/nix/store` を指さないので）止めない。編集はそのまま効くが、実体は
+claude-skills の作業クローンなので **commit / push しないと他のマシンには届かない**。
+
 ### 管理しないもの
 
 `settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と
-Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）。
+Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
+`claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 
 ## mise との役割分担
 
@@ -891,5 +974,6 @@ nix/
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
-    └── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
+    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
+    └── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
 ```
