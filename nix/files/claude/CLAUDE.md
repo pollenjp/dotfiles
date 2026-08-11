@@ -10,3 +10,24 @@
 
 `skills/` などには private リポジトリ（`claude-skills`）の作業クローンへの symlink も
 混ざる。そちらは直接編集してよいが、実体はクローンなので **commit が要る**。
+
+## 同梱 script の依存ツール
+
+skill や repo に script を足し、その script が手元に無い外部ツールを要求するとき、
+用意する手段はこの順に検討する。
+
+1. **nix flake** — その skill / repo に `flake.nix` と `flake.lock` を置き、
+   devShell に入れる。script 側は PATH に無ければ
+   `exec nix develop --command "$0"` で入り直す
+   （実例は `claude-skills/scripts/lint.sh`）
+2. **mise** — flake が過剰なとき。`mise.toml` の `[tools]` に書く
+3. **system へ直接入れる** — 1 も 2 も不可能なときだけ
+
+`pip install` / `npm install -g` / `apt install` / `brew install` は実行しない。
+3 を選ぶ場合は、1 と 2 が不可能な理由を述べて**確認を取ってから**にする。
+
+ここで決めているのは **その script に閉じた依存** の話。自分のグローバル環境に
+何を入れるか（グローバル CLI は Nix、言語ランタイムは mise）は別で、
+ADR 001 の決定 6 に従う。
+
+書き方は各 `skills/README.md` を参照（置き場所によって形が変わる）。
