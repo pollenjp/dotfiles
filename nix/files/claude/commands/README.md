@@ -34,7 +34,10 @@ nix/files/claude/commands/git/sync.md   ->  /git:sync
 追加したら適用する。
 
 ```sh
-git -C ~/dotfiles add nix/files/claude   # flake は untracked ファイルを見ない
+# 新規ファイルなら git add する (~/dotfiles 経由の switch は path: なので
+# untracked でも入るが、CI は git 管理下しか見ないので commit 忘れはそこで出る)
+git -C "$(ghq root)/github.com/pollenjp/dotfiles" add nix/files/claude
+
 home-manager switch --flake ~/dotfiles#<ホスト名>
 ```
 
