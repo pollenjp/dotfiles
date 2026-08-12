@@ -41,6 +41,51 @@ description: いつ使うかを書く。Claude はここを読んで起動を判
 home-manager switch --flake ~/dotfiles#<host>
 ```
 
+## script が外部ツールを要求するとき
+
+`scripts/` に置く script が手元に無いツールを要求する場合、用意する手段は
+**nix flake → mise → system** の順に検討する（ユーザーレベルの `CLAUDE.md` にも書いてある）。
+`pip install` / `npm install -g` / `apt install` で環境へ直接入れない。
+
+こちら側の skill は **store へコピーされる**ので、`claude-skills`（作業クローン）とは形が変わる。
+
+| 依存の性質 | 置き場 |
+| --- | --- |
+| 常用する / 他からも使う | `nix/home/modules/packages.nix` の `home.packages` |
+| その skill でしか使わない | `nix/files/claude/skills/<名前>/flake.nix` + **`flake.lock`** |
+
+前者で済むならその方が単純。skill を消したときにツールも一緒に消えてほしい、
+バージョンをこの skill だけで固定したい、といった理由があるときに後者。
+
+### skill 側に flake を持たせる場合
+
+**`flake.lock` を必ず一緒に commit すること。** store は読み取り専用なので、
+lock が無いと nix がその場で lock を書こうとして失敗する。
+
+```
+error: opening file "/nix/store/....../flake.lock": Permission denied
+```
+
+script から devShell へ入り直すときは、**symlink を解決した実体のパス**を渡す。
+`~/.claude/skills/<名前>` は store への symlink なので、`$0` をそのまま使うと
+flake の位置を見失う。
+
+```sh
+# 印を付けて 1 回だけにする (devShell に入っても揃わない場合の無限ループ防止)
+if ! command -v <tool> &>/dev/null; then
+  if [[ -z ${MY_SKILL_REEXEC:-} ]] && command -v nix &>/dev/null; then
+    export MY_SKILL_REEXEC=1
+    skill_dir=$(cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." && pwd -P)
+    exec nix develop "path:${skill_dir}" --command "$0" "$@"
+  fi
+  echo "<tool> が見つかりません。nix があれば devShell へ入り直します。" >&2
+  exit 1
+fi
+```
+
+`claude-skills` 側は実ディレクトリなので `path:` も `readlink` も要らない。
+そちらの `skills/README.md` を参照。
+
 ## 配置後の構造
 
 `~/.claude/skills/` は **Claude Code 自身が書き換える**ディレクトリなので、
