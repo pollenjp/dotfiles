@@ -126,7 +126,7 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 | --- | --- | --- |
 | 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
 | `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
-| `~/dotfiles/flake.lock` | `nix flake update` | 本体の lock を更新したら `--flake-update` が続けて張り直す（[後述](#ローカル-flake-の-lock-も張り直す)） |
+| `~/dotfiles/flake.lock` | `nix flake update` | `setup.sh` が `switch` の前に張り直す（[後述](#ローカル-flake-の-lock-も張り直す)。本体を編集しただけでも要る） |
 
 **`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
 古くなるのは symlink の先、つまり本体の checkout。
@@ -202,26 +202,33 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 
 #### ローカル flake の lock も張り直す
 
-本体の lock を更新したら、続けて `~/dotfiles` 側の lock も張り直す必要がある
-（`--flake-update` は自動で行う）。
-
-```sh
-nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix   # 本体
-nix flake update --flake ~/dotfiles                               # ローカル (これが要る)
-```
-
 いまの nix（Determinate 3.21.9 / 2.34 で実測）は **`path:` 入力を narHash で厳密に lock する**。
-本体の `flake.lock` を書き換えると `nix/` の narHash が変わり、`~/dotfiles/flake.lock` が
-持つ値と合わなくなって switch がここで落ちる。
+`~/dotfiles/flake.lock` は本体（`nix/`）をその narHash で pin しているので、
+**`nix/` の中身が 1 文字でも変われば**評価がここで落ちる。
 
 ```
 error: NAR hash mismatch in input 'path:/home/pollenjp/ghq/.../nix?narHash=sha256-…'
        expected 'sha256-…' but got 'sha256-…'
 ```
 
+落ちる条件は「本体を編集した」「`flake.lock` を更新した」「`git pull` した」の全部。
 `nix flake lock` では直らない（同じエラーになる）。`nix flake update` だけが張り直す。
-張り直すと本体の新しい pin が推移的に伝わる（`Updated input 'dotfiles/nixpkgs'`）。
 `path:` の先が git 作業ツリーの中かどうかは無関係。
+
+**`setup.sh` は `switch` の前に自動で張り直す**（`sync_local_flake_lock`）。
+判定は「実物の narHash が lock に入っているか」だけで、
+**合っているときは何もしない**（変わっていないのに lock を触ると、触ったのか判らなくなる）。
+`nix hash path` は本体のディレクトリで 0.07 秒程度なので毎回計算して構わない。
+
+手でやるなら input 名を指定する。張り直すと本体の新しい pin も推移的に伝わる
+（`Updated input 'dotfiles/nixpkgs'`）。
+
+```sh
+nix flake update dotfiles --flake ~/dotfiles
+```
+
+> `nix flake update --flake ~/dotfiles`（input 名なし）でも直るが、`~/dotfiles/flake.nix` に
+> 自分で足した input まで巻き込んで更新してしまう。`setup.sh` も input 名を指定する。
 
 > **GitHub の tarball 取得が遮断された環境について**
 >
@@ -579,7 +586,7 @@ flake の指し方で変わる**ので採らない。
 `~/dotfiles` は git 管理外なので、この食い違いが起きない。
 
 なお後者の性質のおかげで、**本体を編集したら commit しなくてもそのまま試せる**
-（lock も評価のたびに追随するので `nix flake update` は要らない）。
+（ただし `~/dotfiles/flake.lock` の張り直しが要る。[後述](#ローカル-flake-の-lock-も張り直す)）。
 その代わり commit 忘れは CI で出る。
 
 #### 使い捨ての 1 回きり

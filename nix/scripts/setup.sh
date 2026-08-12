@@ -1312,27 +1312,73 @@ warn_clobber() {
   fi
 }
 
+# ローカル flake が pin している本体の narHash を実物に合わせる。
+#
+# ~/dotfiles/flake.lock は本体 (nix/) を path: 入力として **narHash で** pin する。
+# いまの nix (Determinate 3.21.9 / 2.34 で実測) は path: 入力を厳密に lock するので、
+# nix/ の中身が 1 文字でも変わると評価がこう落ちる:
+#
+#   error: NAR hash mismatch in input 'path:.../nix?narHash=sha256-…'
+#          expected 'sha256-…' but got 'sha256-…'
+#
+# 落ちる条件は「本体を編集した」「flake.lock を更新した」「git pull した」の全部。
+# path: を選んだ理由が「commit せずに試せる」ことなので、編集のたびに落ちては
+# 意味がない。switch の前と flake-update の後に張り直す。
+#
+# `nix flake lock` では直らない (同じエラーになる)。update だけが張り直す。
+# 張り直すと本体の新しい pin も推移的に伝わる (Updated input 'dotfiles/nixpkgs')。
+#
+# **合っているときは何もしない。** 毎 switch で lock を書き換えると、変わっていない
+# のに触ったのか判らなくなる。判定は実物の narHash が lock の中に在るかどうかだけ
+# (該当ノードを取り出す必要はない。この文字列が入っていれば同期している)。
+# jq は使えないので、これで済むのは都合がよい。
+#
+# 比べる相手は **ローカル flake が実際に指しているパス**で、nix_dir ではない。
+# 両者は git worktree から実行したときにずれる (~/dotfiles は元の checkout を
+# 指したまま)。nix_dir で比べると毎回ずれて張り直し続けることになる。
+sync_local_flake_lock() {
+  local decl name path current
+  # ローカル flake が無い (本体を直接指している) なら path: 入力は無い。
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
+    return 0
+  fi
+  # 手順 1 より前。nix が要る手順は自分で nix の有無を見て止める。
+  if ! have nix; then
+    return 0
+  fi
+  # lock がまだ無ければ評価のときに作られる。
+  if [[ ! -f ${flake_dir}/flake.lock ]]; then
+    return 0
+  fi
+  # inputs.<名前>.url = "path:<パス>" を拾う (setup-local-flake.sh が書く形)。
+  decl=$(sed -n \
+    's|^[[:space:]]*inputs\.\([A-Za-z0-9_-]*\)\.url[[:space:]]*=[[:space:]]*"path:\([^"]*\)".*|\1 \2|p' \
+    "${flake_dir}/flake.nix" 2>/dev/null | head -n 1)
+  if [[ -z ${decl} ]]; then
+    return 0 # path: 入力が無い。narHash で pin される入力もない
+  fi
+  name=${decl%% *}
+  path=${decl#* }
+  if [[ ! -d ${path} ]]; then
+    return 0 # 指す先が無い。ここで直せる話ではないので nix のエラーに任せる
+  fi
+  current=$(nix hash path --sri --type sha256 "${path}") || return 0
+  if grep -qF "${current}" "${flake_dir}/flake.lock"; then
+    return 0
+  fi
+  note "ローカル flake の lock が ${path} と合っていません (path: は narHash で pin される)。"
+  run nix flake update "${name}" --flake "${flake_dir}" || return 1
+}
+
 # nixpkgs / home-manager を最新にする。
 #
-# 更新するのは **本体の nix/flake.lock**。~/dotfiles 側の lock は path: 入力を
-# 評価のたびに追うだけで、nixpkgs / home-manager の pin は dotfiles ノード経由で
-# 本体の lock から来る。つまり flake_dir を指しても何も上がらない。
+# 更新するのは **本体の nix/flake.lock**。~/dotfiles 側を指しても何も上がらない
+# (あちらは path: 入力を張り直すだけで、pin は dotfiles ノード経由で本体の lock
+# から来る)。その張り直しは sync_local_flake_lock が続けて行う。
 #
 # 追跡されている flake.lock を書き換えるので、リポジトリは dirty になる。
 # 以後 u / --self-update は本体を更新しなくなるので、確認したら commit する
 # (post_notes で促す)。
-#
-# 本体を更新したら **ローカル flake の lock も張り直す**。
-#
-# いまの nix (Determinate 3.21.9 / 2.34 で実測) は path: 入力を narHash で
-# 厳密に lock する。本体の flake.lock を書き換えると nix/ の narHash が変わり、
-# ~/dotfiles/flake.lock が持つ値と合わなくなって switch がこう落ちる:
-#
-#   error: NAR hash mismatch in input 'path:.../nix?narHash=sha256-…'
-#
-# `nix flake lock` では直らない (同じエラーになる)。update だけが張り直す。
-# 張り直すと本体の新しい pin が推移的に伝わる (Updated input 'dotfiles/nixpkgs')。
-# ローカル flake の宣言済み input はこれ 1 つなので update は全 input で構わない。
 step_flake_update() {
   if ! have nix; then
     if [[ ${dry_run} == 0 ]]; then
@@ -1342,10 +1388,9 @@ step_flake_update() {
     note '(nix はまだ無い。--dry-run なのでコマンドを見せるだけ)'
   fi
   run nix flake update --flake "${nix_dir}" || return 1
-  if [[ ${flake_dir} != "${nix_dir}" ]]; then
-    note 'ローカル flake の lock を張り直します (path: 入力は narHash で lock されるため)。'
-    run nix flake update --flake "${flake_dir}" || return 1
-  fi
+  # --dry-run では本体の lock を実際には書き換えないので、ここは同期したままに
+  # 見えて何も出ない。実行時は必ず張り直しが走る。
+  sync_local_flake_lock || return 1
 }
 
 step_switch() {
@@ -1353,6 +1398,7 @@ step_switch() {
   ensure_host_registered || return 1
   warn_untracked
   warn_clobber
+  sync_local_flake_lock || return 1
   hm_args=(switch --flake "${flake_dir}#${host}")
   if [[ -n ${backup_ext} ]]; then
     hm_args+=(-b "${backup_ext}")
