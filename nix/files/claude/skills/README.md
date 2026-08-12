@@ -68,7 +68,12 @@ error: opening file "/nix/store/....../flake.lock": Permission denied
 
 script から devShell へ入り直すときは、**symlink を解決した実体のパス**を渡す。
 `~/.claude/skills/<名前>` は store への symlink なので、`$0` をそのまま使うと
-flake の位置を見失う。
+flake の位置を見失う。symlink を `path:` へ渡すと、解決先を外部パス扱いされて
+こう落ちる。
+
+```
+error: access to absolute path '/nix/store/...' is forbidden in pure evaluation mode
+```
 
 ```sh
 # 印を付けて 1 回だけにする (devShell に入っても揃わない場合の無限ループ防止)
