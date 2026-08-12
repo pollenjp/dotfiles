@@ -48,8 +48,19 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: nix flake check --all-systems --no-build ./nix
 
+      # --no-eval-cache は必須。外すと x86_64-linux だけが
+      # `error: path '/nix/store/...-hm_screenrc' is not valid` で落ちる
+      # (落ちる check もパスも実行ごとに変わる)。
+      #
+      # 直前の `--no-build` は eval だけして derivation を実体化しないため、
+      # その評価結果を eval cache 経由でこのステップが再利用すると、まだ
+      # store に無いソースを参照する .drv を build しようとする。
+      # --no-build を実行しない macOS 側で再現しないこととも整合する。
+      #
+      # cache を捨てて評価し直させるだけなので検証内容は変わらない。
+      # 外すときは x86_64-linux が通ることを必ず確認すること。
       - name: このランナーの system をビルド
-        run: nix flake check ./nix
+        run: nix flake check --no-eval-cache ./nix
 
       # 設定が壊れていないことに加えて、activate まで通ることを確認する。
       # sandbox は homeDirectory を /tmp/hm-sandbox に固定しているので
