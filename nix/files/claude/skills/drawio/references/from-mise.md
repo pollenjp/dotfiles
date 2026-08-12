@@ -49,3 +49,6 @@ git add flake.nix flake.lock
 以降は `nix develop ./drawio --command drawio ...` や `nix run ./drawio#drawio` が使える。
 スクリプトそのものを CI で使いたい場合は `scripts/drawio-export.sh` もコピーする
 （skill 側の `flake.lock` とプロジェクト側の `flake.lock` は別管理になる）。
+
+MCP サーバをプロジェクトの `.mcp.json` から使う場合も、置くのはこの同じ flake。
+手順は `references/mcp.md`。
