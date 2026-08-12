@@ -33,8 +33,16 @@
 # ## なぜ path: を使うのか
 #
 # `path:` は git を介さずディレクトリをそのまま複製するので、**commit して
-# いない変更もそのまま試せる**。lock は評価のたびに追随するため
-# `nix flake update` も要らない。
+# いない変更もそのまま試せる**。
+#
+# ただし いまの nix (Determinate 3.21.9 / 2.34 で実測) は path: 入力を
+# **narHash で厳密に lock する**ので、本体を編集すると flake.lock が合わなくなり
+# 評価が NAR hash mismatch で落ちる。張り直しは setup.sh が switch の前に行う
+# (sync_local_flake_lock)。手で直すなら:
+#
+#   nix flake update dotfiles --flake ~/dotfiles
+#
+# `nix flake lock` では直らない (同じエラーになる)。
 #
 # 対して `--flake <repo>/nix` のように git リポジトリ内のパスを直接指すと
 # git 解決になり、**追跡済みファイルしか見えない**。CI はこちらなので、
@@ -200,7 +208,11 @@ if [[ ${write_flake} == 1 ]]; then
 #   ~/dotfiles/setup --update
 {
   # path: は git を介さずそのまま複製するので commit していない変更も試せる。
-  # lock は評価のたびに追随するため nix flake update は要らない。
+  #
+  # ただし path: 入力は flake.lock の narHash で厳密に pin されるので、本体を
+  # 編集したらこの lock を張り直さないと NAR hash mismatch で落ちる。
+  # setup.sh は switch の前に自動で張り直す。手で直すなら:
+  #   nix flake update dotfiles --flake ~/dotfiles
   inputs.dotfiles.url = "path:${nix_dir}";
 
   outputs =
