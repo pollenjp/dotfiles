@@ -635,6 +635,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | --- | --- |
 | `~/.config/starship.toml` | `nix/files/starship.toml` |
 | `~/.config/zellij/config.kdl` | `nix/files/zellij/config.kdl` |
+| `~/.config/herdr/config.toml` | `nix/files/herdr/config.toml` |
 | `~/.config/nvim/init.vim` | `nix/files/nvim/init.vim` |
 | `~/.config/tmux/interactive_shell.tmux.conf` | `nix/files/tmux/interactive_shell.tmux.conf` |
 | `~/.tmux.conf` | `nix/files/tmux/home.tmux.conf` |
