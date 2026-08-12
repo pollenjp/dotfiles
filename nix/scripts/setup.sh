@@ -88,6 +88,15 @@ fi
 # exec で自分を張り替えたかどうかは環境変数で子に伝える (二重更新の防止)。
 self_update=0
 self_updated=${DOTFILES_SETUP_SELF_UPDATED:-0}
+
+# --flake-update / メニューの f。本体の flake.lock (nixpkgs / home-manager) を
+# 更新する手順を、プリセットや --steps で選んだものに **足す**。
+#
+# 「本体の checkout」(--self-update) とは別軸の更新なので独立させてある。
+# こちらは手順表に載せてあるので、実行順 (switch の直前) と --dry-run と
+# 結果一覧はそのまま効く。プリセットには入れない: nixpkgs を上げるのは重く、
+# 壊れうる操作なので、`--update` が黙って行うべきではない。
+flake_update=0
 # upstream より何 commit 遅れているか。空なら判らない (git が無い等)。
 # ヘッダの表示に使う。起動時に一度だけ数える (再描画のたびに git を呼ばない)。
 repo_behind_count=""
@@ -103,6 +112,7 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   setup.sh --steps a,b,c   指定した手順だけ実行 (id は --list で確認)
   setup.sh --list          手順の一覧を出す
   setup.sh --self-update   本体を git で最新にしてから続ける (下記)
+  setup.sh --flake-update  「flake.lock を更新」を手順に足す (下記)
   setup.sh --host <名前>   対象ホスト (既定は hosts/default.nix から自動判定)
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
@@ -120,11 +130,20 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 
   未 commit の変更 / detached HEAD / upstream 無し / fast-forward できない
   ときは警告だけ出して何もしない (本体は開発対象でもあるため)。
-  flake.lock の更新は扱わない (nix flake update を手で実行する)。
+  flake.lock はここでは扱わない (別軸なので下の --flake-update)。
+
+依存の更新 (nixpkgs / home-manager):
+  setup.sh --flake-update --update   flake.lock を更新してから switch
+  setup.sh --steps flake-update      更新だけ
+
+  更新するのは **本体の** nix/flake.lock (~/dotfiles 側は path: 入力を追うだけ)。
+  追跡されているファイルを書き換えるので、動作を確認したら commit する。
+  未 commit のままだと --self-update / u は本体を更新しなくなる。
 
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
-  h 対象ホストの変更   b 既存ファイルの退避   u 本体の更新   a 全選択   n 全解除
+  h 対象ホストの変更   b 既存ファイルの退避   a 全選択   n 全解除
+  u 本体の更新 (--self-update)   f 依存の更新 (--flake-update)
 
 環境変数:
   DOTFILES_HOST        --host と同じ
@@ -247,6 +266,11 @@ add_step ssh-config \
   '.ssh submodule を ~/.ssh/config.d/ へ張る。submodule 更新後の張り直しにも使う。' \
   step 0
 
+add_step flake-update \
+  'flake.lock を更新 (nix flake update)' \
+  'nixpkgs / home-manager を最新にする。既定では入らない (f / --flake-update で足す)。' \
+  step 0
+
 add_step switch \
   'home-manager switch' \
   '手順 3。初回は home-manager コマンドがまだ無いので nix run 経由で実行する。' \
@@ -320,6 +344,19 @@ is_selected() {
   [[ ${sel[i]} == 1 ]]
 }
 
+# --flake-update / メニューの f を選択へ反映する。
+#
+# select_only が他を全部落とすので、プリセットや --steps を当てた **後** に呼ぶ。
+# 足すだけで、外しはしない (カスタム画面で手で入れたものを消さないため)。
+apply_flake_update_opt() {
+  local i
+  if [[ ${flake_update} != 1 ]]; then
+    return 0
+  fi
+  i=$(index_of flake-update) || return 0
+  sel[i]=1
+}
+
 apply_preset() {
   local ids=() id
   case $1 in
@@ -342,6 +379,10 @@ apply_preset() {
     *) die "unknown preset: $1" ;;
   esac
   select_only "${ids[@]}"
+  # どちらのプリセットにも flake-update は入れていない。足すのはこの後。
+  # メニューのプレビュー (preview_preset) もここを通るので、f を押すと
+  # 「実行される手順」にそのまま現れる。
+  apply_flake_update_opt
 }
 
 # 選択されている手順の添字を **手順表の並び順** で返す。
@@ -635,6 +676,9 @@ build_rebuild_args() {
       rebuild_args+=(--no-backup)
     fi
   fi
+  if [[ ${flake_update} == 1 ]]; then
+    rebuild_args+=(--flake-update)
+  fi
   if [[ ${dry_run} == 1 ]]; then
     rebuild_args+=(--dry-run)
   fi
@@ -790,7 +834,15 @@ menu_main() {
   while :; do
     clear_screen
     header
-    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   u 本体を更新   q 中止'
+    note '↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   q 中止'
+    # f が ON かどうかは下のプレビューにも出るが、カスタム / 終了に
+    # カーソルがあるときはプレビューが出ないので、ここでも状態を見せる。
+    if [[ ${flake_update} == 1 ]]; then
+      printf '  %su 本体を更新   %sf 依存を更新 [x]%s %s(flake.lock)%s\n' \
+        "${c_dim}" "${c_green}" "${c_reset}" "${c_dim}" "${c_reset}"
+    else
+      note 'u 本体を更新   f 依存を更新 [ ] (flake.lock)'
+    fi
     printf '\n'
     for ((i = 0; i < count; i++)); do
       if [[ ${i} == "${cursor}" ]]; then
@@ -821,6 +873,15 @@ menu_main() {
       down | j) cursor=$(((cursor + 1) % count)) ;;
       h) menu_host ;;
       b) menu_backup ;;
+      f)
+        # u と違い、ここでは実行しない。手順表に載っているので switch の直前で
+        # 走らせられる。選択への反映は apply_preset / menu_steps が行う。
+        if [[ ${flake_update} == 1 ]]; then
+          flake_update=0
+        else
+          flake_update=1
+        fi
+        ;;
       u)
         # 更新できれば exec して戻ってこない。できなければ元の画面へ戻す。
         # 手順の選択を持っている menu_steps では受けない (exec で消えるため)。
@@ -927,6 +988,10 @@ set_all() {
 note_of() {
   local i=$1 extra=""
   case ${step_ids[i]} in
+    flake-update)
+      # 更新するのは本体側。flake_dir (~/dotfiles) ではないことを見せる。
+      printf '%s (--flake %s)' "${step_notes[i]}" "${nix_dir}"
+      ;;
     switch)
       if [[ -n ${backup_ext} ]]; then
         extra=" -b ${backup_ext}"
@@ -940,6 +1005,9 @@ note_of() {
 
 menu_steps() {
   local cursor=0 i indent
+  # 主メニューで f を押してから来たときに、チェックが入っていないと辻褄が合わない。
+  # ここから先は sel[] が唯一の状態で、f キーは受けない (Space で切り替える)。
+  apply_flake_update_opt
   while :; do
     clear_screen
     header
@@ -1244,11 +1312,93 @@ warn_clobber() {
   fi
 }
 
+# ローカル flake が pin している本体の narHash を実物に合わせる。
+#
+# ~/dotfiles/flake.lock は本体 (nix/) を path: 入力として **narHash で** pin する。
+# いまの nix (Determinate 3.21.9 / 2.34 で実測) は path: 入力を厳密に lock するので、
+# nix/ の中身が 1 文字でも変わると評価がこう落ちる:
+#
+#   error: NAR hash mismatch in input 'path:.../nix?narHash=sha256-…'
+#          expected 'sha256-…' but got 'sha256-…'
+#
+# 落ちる条件は「本体を編集した」「flake.lock を更新した」「git pull した」の全部。
+# path: を選んだ理由が「commit せずに試せる」ことなので、編集のたびに落ちては
+# 意味がない。switch の前と flake-update の後に張り直す。
+#
+# `nix flake lock` では直らない (同じエラーになる)。update だけが張り直す。
+# 張り直すと本体の新しい pin も推移的に伝わる (Updated input 'dotfiles/nixpkgs')。
+#
+# **合っているときは何もしない。** 毎 switch で lock を書き換えると、変わっていない
+# のに触ったのか判らなくなる。判定は実物の narHash が lock の中に在るかどうかだけ
+# (該当ノードを取り出す必要はない。この文字列が入っていれば同期している)。
+# jq は使えないので、これで済むのは都合がよい。
+#
+# 比べる相手は **ローカル flake が実際に指しているパス**で、nix_dir ではない。
+# 両者は git worktree から実行したときにずれる (~/dotfiles は元の checkout を
+# 指したまま)。nix_dir で比べると毎回ずれて張り直し続けることになる。
+sync_local_flake_lock() {
+  local decl name path current
+  # ローカル flake が無い (本体を直接指している) なら path: 入力は無い。
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
+    return 0
+  fi
+  # 手順 1 より前。nix が要る手順は自分で nix の有無を見て止める。
+  if ! have nix; then
+    return 0
+  fi
+  # lock がまだ無ければ評価のときに作られる。
+  if [[ ! -f ${flake_dir}/flake.lock ]]; then
+    return 0
+  fi
+  # inputs.<名前>.url = "path:<パス>" を拾う (setup-local-flake.sh が書く形)。
+  decl=$(sed -n \
+    's|^[[:space:]]*inputs\.\([A-Za-z0-9_-]*\)\.url[[:space:]]*=[[:space:]]*"path:\([^"]*\)".*|\1 \2|p' \
+    "${flake_dir}/flake.nix" 2>/dev/null | head -n 1)
+  if [[ -z ${decl} ]]; then
+    return 0 # path: 入力が無い。narHash で pin される入力もない
+  fi
+  name=${decl%% *}
+  path=${decl#* }
+  if [[ ! -d ${path} ]]; then
+    return 0 # 指す先が無い。ここで直せる話ではないので nix のエラーに任せる
+  fi
+  current=$(nix hash path --sri --type sha256 "${path}") || return 0
+  if grep -qF "${current}" "${flake_dir}/flake.lock"; then
+    return 0
+  fi
+  note "ローカル flake の lock が ${path} と合っていません (path: は narHash で pin される)。"
+  run nix flake update "${name}" --flake "${flake_dir}" || return 1
+}
+
+# nixpkgs / home-manager を最新にする。
+#
+# 更新するのは **本体の nix/flake.lock**。~/dotfiles 側を指しても何も上がらない
+# (あちらは path: 入力を張り直すだけで、pin は dotfiles ノード経由で本体の lock
+# から来る)。その張り直しは sync_local_flake_lock が続けて行う。
+#
+# 追跡されている flake.lock を書き換えるので、リポジトリは dirty になる。
+# 以後 u / --self-update は本体を更新しなくなるので、確認したら commit する
+# (post_notes で促す)。
+step_flake_update() {
+  if ! have nix; then
+    if [[ ${dry_run} == 0 ]]; then
+      warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
+      return 1
+    fi
+    note '(nix はまだ無い。--dry-run なのでコマンドを見せるだけ)'
+  fi
+  run nix flake update --flake "${nix_dir}" || return 1
+  # --dry-run では本体の lock を実際には書き換えないので、ここは同期したままに
+  # 見えて何も出ない。実行時は必ず張り直しが走る。
+  sync_local_flake_lock || return 1
+}
+
 step_switch() {
   local hm_args=()
   ensure_host_registered || return 1
   warn_untracked
   warn_clobber
+  sync_local_flake_lock || return 1
   hm_args=(switch --flake "${flake_dir}#${host}")
   if [[ -n ${backup_ext} ]]; then
     hm_args+=(-b "${backup_ext}")
@@ -1300,6 +1450,7 @@ run_step() {
     preflight-unlink) step_script preflight-unlink.sh ;;
     local-flake) step_local_flake ;;
     ssh-config) step_script setup-ssh-config.sh ;;
+    flake-update) step_flake_update ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
     bootstrap-*) step_script "$1.sh" ;;
@@ -1324,6 +1475,11 @@ post_notes() {
   fi
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
+  fi
+  if is_selected flake-update; then
+    note 'flake.lock を更新した。動作を確認したら commit する:'
+    note "  git -C ${repo_dir} add nix/flake.lock"
+    note '  未 commit のままだと u / --self-update は本体を更新しない。'
   fi
   if is_selected switch && [[ -n ${backup_ext} ]]; then
     note "退避したファイルは <名前>.${backup_ext} に残っている。中身 (main.bash の"
@@ -1439,6 +1595,7 @@ while [[ $# -gt 0 ]]; do
       backup_chosen=1
       ;;
     --self-update) self_update=1 ;;
+    --flake-update) flake_update=1 ;;
     --dry-run) dry_run=1 ;;
     --list) mode=list ;;
     -h | --help)
@@ -1488,6 +1645,7 @@ case ${mode} in
     IFS=', ' read -r -a step_list <<<"${steps_arg}"
     [[ ${#step_list[@]} -gt 0 ]] || die "--steps が空です"
     select_only "${step_list[@]}"
+    apply_flake_update_opt
     ;;
   *)
     if [[ ! -t 0 || ! -t 1 ]]; then

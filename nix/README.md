@@ -125,8 +125,8 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 | 何が古くなるか | 何をする | 誰が |
 | --- | --- | --- |
 | 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
-| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | 手で実行（下記） |
-| `~/dotfiles/flake.lock` | 何もしない | `path:` 入力を評価ごとに追うため不要 |
+| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
+| `~/dotfiles/flake.lock` | `nix flake update` | `setup.sh` が `switch` の前に張り直す（[後述](#ローカル-flake-の-lock-も張り直す)。本体を編集しただけでも要る） |
 
 **`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
 古くなるのは symlink の先、つまり本体の checkout。
@@ -167,16 +167,68 @@ setup は使えるべきなので、`fetch` の失敗も止める理由にしな
 メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
 （毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
 
-`flake.lock` の更新は `--self-update` では扱わない。本体を書き換えて commit が要るもので、
-pull と衝突しやすいため。
+`flake.lock` の更新は `--self-update` では扱わない。別軸なので `--flake-update`（下記）で分けている。
+`git pull` は未 commit の変更があると止まるので、**両方やるなら pull が先**
+（`--self-update` は手順の実行より前に走るため、`--self-update --flake-update` の順序は勝手に合う）。
 
 ### 依存 (flake.lock) の更新
 
 ```sh
+~/dotfiles/setup --flake-update --update   # 更新してから switch
+~/dotfiles/setup --steps flake-update      # 更新だけ
+
+# setup を通さないなら (同じことをする)
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 
-`~/dotfiles` 側の lock は `path:` 入力を追うだけなので、更新は要らない。
+メニューからは `f`。`flake.lock を更新` という手順が `switch` の直前に入る
+（`u` と違ってその場では実行しない。手順表に載っているので `--dry-run` と結果一覧に乗る）。
+重くて壊れうる操作なので**プリセットには入れていない**。`--update` は指定しない限り lock を触らない。
+
+nixpkgs / home-manager を上げるには**本体の `nix/flake.lock`** を更新する。`~/dotfiles` 側だけ
+更新しても何も上がらない（`nix flake update --flake ~/dotfiles` は `dotfiles` という `path:` 入力を
+張り直すだけで、pin は `dotfiles` ノード経由で本体の lock から来る）。
+
+追跡されているファイルを書き換えるのでリポジトリは dirty になる。
+**動作を確認したら commit すること**（未 commit のままだと `u` / `--self-update` が本体を更新しない）。
+dirty でも switch には新しい lock が入る（`path:` はディレクトリを複製し、
+`git+file:` は作業ツリーの内容を見るため）。
+
+> `nix flake update` に `#<ホスト>` は付けられない。`--flake` は flake ref だけを取る。
+>
+> ```
+> error: unexpected fragment 'pollenjp@wsl' in flake reference '~/dotfiles#pollenjp@wsl'
+> ```
+
+#### ローカル flake の lock も張り直す
+
+いまの nix（Determinate 3.21.9 / 2.34 で実測）は **`path:` 入力を narHash で厳密に lock する**。
+`~/dotfiles/flake.lock` は本体（`nix/`）をその narHash で pin しているので、
+**`nix/` の中身が 1 文字でも変われば**評価がここで落ちる。
+
+```
+error: NAR hash mismatch in input 'path:/home/pollenjp/ghq/.../nix?narHash=sha256-…'
+       expected 'sha256-…' but got 'sha256-…'
+```
+
+落ちる条件は「本体を編集した」「`flake.lock` を更新した」「`git pull` した」の全部。
+`nix flake lock` では直らない（同じエラーになる）。`nix flake update` だけが張り直す。
+`path:` の先が git 作業ツリーの中かどうかは無関係。
+
+**`setup.sh` は `switch` の前に自動で張り直す**（`sync_local_flake_lock`）。
+判定は「実物の narHash が lock に入っているか」だけで、
+**合っているときは何もしない**（変わっていないのに lock を触ると、触ったのか判らなくなる）。
+`nix hash path` は本体のディレクトリで 0.07 秒程度なので毎回計算して構わない。
+
+手でやるなら input 名を指定する。張り直すと本体の新しい pin も推移的に伝わる
+（`Updated input 'dotfiles/nixpkgs'`）。
+
+```sh
+nix flake update dotfiles --flake ~/dotfiles
+```
+
+> `nix flake update --flake ~/dotfiles`（input 名なし）でも直るが、`~/dotfiles/flake.nix` に
+> 自分で足した input まで巻き込んで更新してしまう。`setup.sh` も input 名を指定する。
 
 > **GitHub の tarball 取得が遮断された環境について**
 >
@@ -206,6 +258,9 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
   対象ホスト: pollenjp@wsl  (h で変更)
   既存ファイル: 退避しない  (b で変更)
 
+  ↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   q 中止
+  u 本体を更新   f 依存を更新 [ ] (flake.lock)
+
   ❯ 新しいマシン適用
     既存マシン更新
     カスタム
@@ -221,6 +276,9 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
 `u` で[本体を最新にする](#本体を最新にする---self-update)（更新できたら新しい setup で再起動する）。
+`f` で[依存を更新する](#依存-flakelock-の更新)（`u` と違いその場では実行せず、
+どちらのプリセットにも `flake.lock を更新` を `switch` の直前に足す。`[x]` が付いていれば
+下の「実行される手順」にも出る）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
 対象ホストは `$USER` と `uname` から `hosts/default.nix` を引いて自動判定する
@@ -240,6 +298,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
 ~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
 ~/dotfiles/setup --self-update --update   # 本体を最新にしてから switch
+~/dotfiles/setup --flake-update --update  # 依存 (flake.lock) を更新してから switch
 ```
 
 `~/dotfiles/setup` は実体への symlink なので、どちらから呼んでも同じ。
@@ -389,11 +448,14 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）でも同じことをする。
 ホスト名を覚えていなくてよいのでこちらが楽。
 
-ただし**これは手元の checkout を適用するだけ**で、リモートの変更は取ってこない。
-本体ごと最新にするなら `--self-update` を足す（[前述](#本体を最新にする---self-update)）。
+ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
+本体ごと最新にするなら `--self-update`（[前述](#本体を最新にする---self-update)）、
+nixpkgs / home-manager も上げるなら `--flake-update`（[前述](#依存-flakelock-の更新)）を足す。
 
 ```sh
-~/dotfiles/setup --self-update --update
+~/dotfiles/setup --self-update --update                  # 本体
+~/dotfiles/setup --flake-update --update                 # 依存
+~/dotfiles/setup --self-update --flake-update --update   # 両方 (pull -> lock 更新 -> switch)
 ```
 
 **`command not found` になる場合**は `~/.nix-profile/bin` が PATH に無い。
@@ -524,7 +586,7 @@ flake の指し方で変わる**ので採らない。
 `~/dotfiles` は git 管理外なので、この食い違いが起きない。
 
 なお後者の性質のおかげで、**本体を編集したら commit しなくてもそのまま試せる**
-（lock も評価のたびに追随するので `nix flake update` は要らない）。
+（ただし `~/dotfiles/flake.lock` の張り直しが要る。[後述](#ローカル-flake-の-lock-も張り直す)）。
 その代わり commit 忘れは CI で出る。
 
 #### 使い捨ての 1 回きり
@@ -558,7 +620,10 @@ home-manager generations
 # 本体を最新にしてから適用 (git pull -> switch)
 ~/dotfiles/setup --self-update --update
 
-# 依存の更新 (本体の flake.lock を触るのでリポジトリ側を指す)
+# 依存も更新してから適用 (nix flake update -> switch。lock は確認後に commit する)
+~/dotfiles/setup --flake-update --update
+
+# setup を通さない場合 (本体の flake.lock を触るのでリポジトリ側を指す)
 nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 ```
 

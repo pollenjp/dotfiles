@@ -88,6 +88,49 @@ is_nix_managed() {
   [[ ${real} == /nix/store/* ]]
 }
 
+# コマンド文字列から **書き込み先になっているトークン** だけを取り出す。
+#
+# ## なぜ「書き込み先」に限るのか
+#
+# 以前は「行のどこかに書き込み系の演算子がある」かつ「行のどこかに store を
+# 指す .claude パスがある」で判定していた。この 2 つは互いに無関係なので、
+# **読み取りや実行まで巻き込んで拒否していた**。
+#
+#   ~/.claude/skills/plantuml/scripts/plantuml-export.sh -f png 2>&1 | tail
+#     -> 2>&1 の "2>" が演算子に一致し、script のパスが store なので deny
+#
+#   printf '@startuml' > 01.puml && ~/.claude/skills/drawio/scripts/...
+#     -> 書き込み先はカレントの 01.puml なのに deny
+#
+# skill の script を叩く形は SKILL.md が案内している通常の使い方なので、
+# これでは skill 自体が使えない。演算子の **対象** だけを見れば両方とも通る。
+# 2>&1 のような fd 複製は対象が "&1" でパスではないため自然に外れる。
+#
+# ## 限界
+#
+# 正規表現による近似で、bash を解釈しているわけではない。eval、変数に入った
+# パス、xargs 経由などは判定できない。**安全網であって境界ではない。**
+write_targets() {
+  local cmd="${1}"
+
+  # リダイレクト先 (> file, >> file)。
+  # 直前の [^0-9<>&] は 2> や >& を除くためのもの。
+  grep -oE '(^|[^0-9<>&])>>?[[:space:]]*[^[:space:]"'"'"';|&()<>]+' <<<"${cmd}" \
+    | sed -E 's/.*>>?[[:space:]]*//' || true
+
+  # 引数がすべて書き込み先になるもの。
+  grep -oE '\b(sed[[:space:]]+-i|tee|truncate|rm[[:space:]])[^;|&]*' <<<"${cmd}" \
+    | grep -oE '[^[:space:]"'"'"';|&()]*\.claude[^[:space:]"'"'"';|&()]*' || true
+
+  # cp / mv / install は **最後の引数だけ** が書き込み先。
+  # `cp ~/.claude/skills/<名前>/flake.nix ./` のように store から読み出す形を
+  # 巻き込まないため (skill の flake をプロジェクトへ複製する手順で実際に使う)。
+  while read -r segment; do
+    [[ -z ${segment} ]] && continue
+    awk '{ print $NF }' <<<"${segment}"
+  done < <(grep -oE '\b(cp|mv|install)[[:space:]][^;|&]*' <<<"${cmd}" || true)
+}
+
 hit=""
 
 file_path=$(jq -r '.tool_input.file_path // .tool_input.notebook_path // empty' <<<"${input}")
@@ -96,18 +139,17 @@ if [[ -n ${file_path} ]] && is_nix_managed "${file_path}"; then
 fi
 
 # Bash 経由の書き換え (sed -i / リダイレクト / mv など) も見る。
-# コマンド文字列から .claude 配下らしきトークンを拾って個別に判定する。
+# 書き込み先になっているトークンだけを取り出して個別に判定する (write_targets)。
 if [[ -z ${hit} ]]; then
   command_str=$(jq -r '.tool_input.command // empty' <<<"${input}")
-  if [[ -n ${command_str} ]] \
-    && [[ ${command_str} =~ (sed[[:space:]]+-i|tee|[^|]>|>>|mv[[:space:]]|cp[[:space:]]|rm[[:space:]]|truncate|install[[:space:]]) ]]; then
+  if [[ -n ${command_str} ]]; then
     while read -r token; do
       [[ -z ${token} ]] && continue
       if is_nix_managed "${token}"; then
         hit="${token}"
         break
       fi
-    done < <(grep -oE '[^[:space:]"'"'"';|&()]*\.claude[^[:space:]"'"'"';|&()]*' <<<"${command_str}" || true)
+    done < <(write_targets "${command_str}")
   fi
 fi
 
