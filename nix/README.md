@@ -126,7 +126,7 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 | --- | --- | --- |
 | 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
 | `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
-| `~/dotfiles/flake.lock` | 何もしない | `path:` 入力を評価ごとに追うため不要 |
+| `~/dotfiles/flake.lock` | `nix flake update` | 本体の lock を更新したら `--flake-update` が続けて張り直す（[後述](#ローカル-flake-の-lock-も張り直す)） |
 
 **`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
 古くなるのは symlink の先、つまり本体の checkout。
@@ -185,14 +185,43 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 （`u` と違ってその場では実行しない。手順表に載っているので `--dry-run` と結果一覧に乗る）。
 重くて壊れうる操作なので**プリセットには入れていない**。`--update` は指定しない限り lock を触らない。
 
-更新するのは**本体の `nix/flake.lock`**。`~/dotfiles` 側の lock は `path:` 入力を追うだけで、
-nixpkgs / home-manager の pin は `dotfiles` ノード経由で本体の lock から来るため、
-そちらを更新しても何も上がらない。
+nixpkgs / home-manager を上げるには**本体の `nix/flake.lock`** を更新する。`~/dotfiles` 側だけ
+更新しても何も上がらない（`nix flake update --flake ~/dotfiles` は `dotfiles` という `path:` 入力を
+張り直すだけで、pin は `dotfiles` ノード経由で本体の lock から来る）。
 
 追跡されているファイルを書き換えるのでリポジトリは dirty になる。
 **動作を確認したら commit すること**（未 commit のままだと `u` / `--self-update` が本体を更新しない）。
-switch 自体は dirty でも新しい lock を見る（`path:` はディレクトリを複製し、
+dirty でも switch には新しい lock が入る（`path:` はディレクトリを複製し、
 `git+file:` は作業ツリーの内容を見るため）。
+
+> `nix flake update` に `#<ホスト>` は付けられない。`--flake` は flake ref だけを取る。
+>
+> ```
+> error: unexpected fragment 'pollenjp@wsl' in flake reference '~/dotfiles#pollenjp@wsl'
+> ```
+
+#### ローカル flake の lock も張り直す
+
+本体の lock を更新したら、続けて `~/dotfiles` 側の lock も張り直す必要がある
+（`--flake-update` は自動で行う）。
+
+```sh
+nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix   # 本体
+nix flake update --flake ~/dotfiles                               # ローカル (これが要る)
+```
+
+いまの nix（Determinate 3.21.9 / 2.34 で実測）は **`path:` 入力を narHash で厳密に lock する**。
+本体の `flake.lock` を書き換えると `nix/` の narHash が変わり、`~/dotfiles/flake.lock` が
+持つ値と合わなくなって switch がここで落ちる。
+
+```
+error: NAR hash mismatch in input 'path:/home/pollenjp/ghq/.../nix?narHash=sha256-…'
+       expected 'sha256-…' but got 'sha256-…'
+```
+
+`nix flake lock` では直らない（同じエラーになる）。`nix flake update` だけが張り直す。
+張り直すと本体の新しい pin が推移的に伝わる（`Updated input 'dotfiles/nixpkgs'`）。
+`path:` の先が git 作業ツリーの中かどうかは無関係。
 
 > **GitHub の tarball 取得が遮断された環境について**
 >
