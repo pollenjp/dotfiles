@@ -1,0 +1,95 @@
+# herdr (https://herdr.dev) の設定。
+#
+# キーバインドは tmux / zellij と指の動きが揃うようにしてある。
+#   zellij 側の意図 -> nix/files/zellij/config.kdl の "Customize" コメント
+#   tmux 側の意図   -> nix/files/tmux/home.tmux.conf の Keybind 節
+#
+# 変更を反映するには home-manager switch のあと、herdr の中で prefix + shift + r
+# (または `herdr server reload-config`)。
+#
+# 有効なキー名・既定値は `herdr --default-config` で全部出せる。
+# 起動中なら prefix + ? で今効いているバインドが一覧できる。
+
+# 初回起動時のオンボーディングを出さない。
+#
+# 未設定 (既定 true) だと、オンボーディング完了時に herdr が
+# `onboarding = false` を**この設定ファイルへ書き戻す**。Nix 管理下のパスは
+# store への symlink で read-only なので書き込みに失敗し、次の起動でも
+# またオンボーディングが出る。最初から false を書いておいて書き込ませない。
+onboarding = false
+
+[keys]
+# prefix は ctrl+j (herdr の既定は ctrl+b)。
+#
+# zellij でも tmux mode の入口として ctrl+j を張っている。herdr の prefix は
+# 1 つしか持てないので、zellij 既定の ctrl+b ではなくこちらへ寄せる。
+# tmux 側の prefix は ctrl+k なので、herdr の中で tmux を動かしても衝突しない。
+#
+# 注意: ctrl+j は端末上では LF (0x0a) なので、kitty keyboard protocol が
+# 効かない端末だと enter と区別できないことがある。zellij で同じキーが
+# 効いている端末なら問題ない。
+prefix = "ctrl+j"
+
+##############################################################################
+# tmux 由来のキーに寄せる (zellij の tmux mode へ入れたのと同じ変更)
+##############################################################################
+
+# 分割。tmux 側の `bind | split-window -h` / `bind S split-window -v` に合わせる。
+#
+# tmux と herdr で horizontal / vertical の語の向きが逆なので注意:
+#   tmux -h (左右に並べる) = herdr split_vertical
+#   tmux -v (上下に積む)   = herdr split_horizontal
+#
+# herdr 既定の prefix+v / prefix+minus も残してあるので、どちらでも切れる。
+split_vertical = ["prefix+v", "prefix+|"]
+split_horizontal = ["prefix+minus", "prefix+shift+s"]
+
+# tmux 側で `bind '"' choose-tree -w` に振っているので `"` は一覧を開く。
+# zellij でも tmux mode の `"` を「分割」から「tab 選択」へ振り替えている。
+# herdr で対応するのは goto (session / workspace / tab / pane のナビゲータ)。
+# `"` は TOML の引用符と紛らわしいので別名の double_quote で書く。
+goto = ["prefix+g", "prefix+double_quote"]
+
+# tmux の prefix+, (rename-window) 相当。既定の prefix+shift+t も残す。
+rename_tab = ["prefix+shift+t", "prefix+comma"]
+
+# tmux の prefix+d (detach) 相当。
+#
+# zellij の Ctrl+q (Quit) に当たるものは herdr のキーバインドには無い。
+# session を常駐させ続けるのが herdr の前提なので、離脱は detach が正道
+# (落とすなら `herdr kill`)。既定の prefix+q はそのまま残してある。
+detach = ["prefix+q", "prefix+d"]
+
+# tmux の prefix+o (次の pane へ) 相当。
+#
+# 既定では prefix+o が open_notification_target なので、そちらを shift+o へ
+# 退避させてから奪う。退避先を書かずに奪うと、通知が来た pane へ飛ぶ操作が
+# 黙って消える (herdr 側は「後勝ちで default を無効化」して警告も出さない)。
+cycle_pane_next = ["prefix+tab", "prefix+o"]
+open_notification_target = "prefix+shift+o"
+
+##############################################################################
+# 触っていないもの / 書き足すときの注意
+##############################################################################
+#
+# ctrl+h と ctrl+k は **prefix 無しの直接バインドに使わないこと**。
+# herdr の中で tmux を動かしたときに、tmux の prefix (ctrl+k) と pane 移動が
+# herdr に食われる。zellij は既定で食っていたので `unbind "Ctrl h"` と
+# 「tab mode を ctrl+k から ctrl+t へ」の 2 つが要ったが、herdr は既定で
+# 直接バインドをほとんど持たないので、こちらから足さない限り何もしなくてよい。
+#
+# 既定のままで tmux と同じもの (だから上に書いていない):
+#   prefix+c         新しい tab
+#   prefix+n / p     次 / 前の tab
+#   prefix+1..9      番号で tab 移動
+#   prefix+x         pane を閉じる
+#   prefix+z         pane の zoom
+#   prefix+[         copy mode
+#   prefix+h/j/k/l   pane 移動
+#   prefix+ctrl+j    prefix を 2 回押すとリテラルの ctrl+j が下へ流れる
+#
+# herdr に対応物が無くて落としたもの:
+#   zellij Ctrl+q (Quit)      常駐前提なので Quit が無い。detach で代用
+#   zellij Ctrl+b (tmux mode) prefix は 1 つしか持てない。ctrl+j に寄せた
+#   zellij Ctrl+t (tab mode)  herdr にモードは無く prefix+ の直打ちで完結する
+#   zellij space  (swap layout) herdr に layout の概念が無い

@@ -25,6 +25,10 @@
     watchexec
     zellij
 
+    # coding agent 向けの multiplexer。
+    # 設定は modules/files.nix -> files/herdr/config.toml
+    herdr
+
     # 以下は対応する programs.* モジュールが入れるのでここには書かない:
     #   starship -> modules/starship.nix
     #   delta / git-lfs -> modules/git.nix
