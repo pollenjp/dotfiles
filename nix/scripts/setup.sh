@@ -1320,8 +1320,19 @@ warn_clobber() {
 #
 # 追跡されている flake.lock を書き換えるので、リポジトリは dirty になる。
 # 以後 u / --self-update は本体を更新しなくなるので、確認したら commit する
-# (post_notes で促す)。dirty でも switch には新しい lock が入る
-# (path: はディレクトリを複製し、git+file: は作業ツリーの内容を見るため)。
+# (post_notes で促す)。
+#
+# 本体を更新したら **ローカル flake の lock も張り直す**。
+#
+# いまの nix (Determinate 3.21.9 / 2.34 で実測) は path: 入力を narHash で
+# 厳密に lock する。本体の flake.lock を書き換えると nix/ の narHash が変わり、
+# ~/dotfiles/flake.lock が持つ値と合わなくなって switch がこう落ちる:
+#
+#   error: NAR hash mismatch in input 'path:.../nix?narHash=sha256-…'
+#
+# `nix flake lock` では直らない (同じエラーになる)。update だけが張り直す。
+# 張り直すと本体の新しい pin が推移的に伝わる (Updated input 'dotfiles/nixpkgs')。
+# ローカル flake の宣言済み input はこれ 1 つなので update は全 input で構わない。
 step_flake_update() {
   if ! have nix; then
     if [[ ${dry_run} == 0 ]]; then
@@ -1331,6 +1342,10 @@ step_flake_update() {
     note '(nix はまだ無い。--dry-run なのでコマンドを見せるだけ)'
   fi
   run nix flake update --flake "${nix_dir}" || return 1
+  if [[ ${flake_dir} != "${nix_dir}" ]]; then
+    note 'ローカル flake の lock を張り直します (path: 入力は narHash で lock されるため)。'
+    run nix flake update --flake "${flake_dir}" || return 1
+  fi
 }
 
 step_switch() {
