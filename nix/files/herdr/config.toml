@@ -61,9 +61,11 @@ split_horizontal = ["prefix+minus", "prefix+shift+s"]
 
 # tmux 側で `bind '"' choose-tree -w` に振っているので `"` は一覧を開く。
 # zellij でも tmux mode の `"` を「分割」から「tab 選択」へ振り替えている。
-# herdr で対応するのは goto (session / workspace / tab / pane のナビゲータ)。
+# 開く先は workspace navigation の面 (workspace_picker)。既定の prefix+w も残す。
 # `"` は TOML の引用符と紛らわしいので別名の double_quote で書く。
-goto = ["prefix+g", "prefix+double_quote"]
+#
+# goto (session 横断のナビゲータ) は既定の prefix+g のまま触っていない。
+workspace_picker = ["prefix+w", "prefix+double_quote"]
 
 # tmux の prefix+, (rename-window) 相当。既定の prefix+shift+t も残す。
 rename_tab = ["prefix+shift+t", "prefix+comma"]
