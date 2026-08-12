@@ -68,6 +68,22 @@ goto = ["prefix+g", "prefix+double_quote"]
 # tmux の prefix+, (rename-window) 相当。既定の prefix+shift+t も残す。
 rename_tab = ["prefix+shift+t", "prefix+comma"]
 
+# prefix を挟まずに tab を移動する。
+#
+# 本当は ctrl+pgup / ctrl+pgdown にしたかったが、**herdr は PageUp /
+# PageDown をキー名として持っていない** (0.7.5 / 0.8.0 / master いずれの
+# parse_key_combo にも無い。pgup / pageup / page_up などどう綴っても
+# `invalid keybinding` で無効化される)。バージョンを上げても解決しない。
+#
+# そこで修飾キーと向きをそのままに ctrl+up / ctrl+down へ寄せる。
+# ctrl+left / ctrl+right は shell の単語移動を潰すので避けた。
+#
+# 注意: これらは prefix 無しの直接バインドなので herdr が握り、pane の中
+# (tmux や vim) には届かなくなる。ctrl+up / ctrl+down は shell でも vim でも
+# 既定では使われていないので実害は無いはず。
+previous_tab = ["prefix+p", "ctrl+up"]
+next_tab = ["prefix+n", "ctrl+down"]
+
 # tmux の prefix+d (detach) 相当。
 #
 # zellij の Ctrl+q (Quit) に当たるものは herdr のキーバインドには無い。
