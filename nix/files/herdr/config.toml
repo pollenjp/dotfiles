@@ -84,6 +84,14 @@ rename_tab = ["prefix+shift+t", "prefix+comma"]
 previous_tab = ["prefix+p", "ctrl+up"]
 next_tab = ["prefix+n", "ctrl+down"]
 
+# 同じく prefix を挟まずに workspace を移動する。
+# alt を足すと 1 段上の階層 (tab -> workspace) になる、という対応にしてある。
+#
+# previous_workspace / next_workspace は herdr の既定では**未割り当て**なので、
+# ここで初めてキーが付く (既定バインドを潰す心配は無い)。
+previous_workspace = "ctrl+alt+up"
+next_workspace = "ctrl+alt+down"
+
 # tmux の prefix+d (detach) 相当。
 #
 # zellij の Ctrl+q (Quit) に当たるものは herdr のキーバインドには無い。
