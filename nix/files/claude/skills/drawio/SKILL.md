@@ -80,8 +80,8 @@ drawio/
 </mxfile>
 ```
 
-style の語彙は多いので、凝った図を作るときは MCP サーバの `search_shapes` を使うか、
-`references/mcp.md` にあるリファレンスの場所を見る。
+style の語彙は多い。凝った図を作るときは公式 MCP サーバの `search_shapes` が使える
+（任意。入れるなら `references/mcp.md`）。
 
 ## 日本語
 
@@ -104,5 +104,7 @@ lock が無いと動かない）。
 ## その他
 
 - headless 特有のハマりどころ、無視してよいエラー出力 → `references/troubleshooting.md`
-- 公式 MCP サーバ（図をエディタで開く）の登録 → `references/mcp.md`
 - 旧 `mise.toml` 構成からの移行 → `references/from-mise.md`
+- 公式 MCP サーバ（図をエディタで開く）→ `references/mcp.md`。**任意で、書き出しには
+  要らない。** 入れるなら設定はプロジェクトの `.mcp.json` に置く（`claude mcp add` で
+  ユーザ全体へ入れるのは、個人的に全プロジェクトで使いたいときだけ）
