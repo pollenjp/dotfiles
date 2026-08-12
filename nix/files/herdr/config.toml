@@ -18,6 +18,21 @@
 # またオンボーディングが出る。最初から false を書いておいて書き込ませない。
 onboarding = false
 
+[terminal]
+# 新しい pane のシェル。未設定だと $SHELL -> /bin/sh の順で決まるが、
+# ログインシェルは fish ではないので明示する
+# (zellij では `z` 関数が SHELL を差し替えて同じことをしている)。
+#
+# ここは PATH から引かれる。fish は programs.fish が home profile へ入れる
+# ので、対話的に起動した herdr なら必ず解決できる。store の絶対パスを
+# 書けば PATH に依存しなくなるが、それには設定ファイルを Nix 側で生成する
+# 必要があり、files/ を「そのまま置くだけ」に保つ方針から外れるので採らない。
+default_shell = "fish"
+
+# shell_mode は既定の "auto" (macOS だけログインシェル) のまま。
+# fish は login/非 login どちらでも ~/.config/fish/config.fish を読むので
+# bash と違って差が出ない。
+
 [keys]
 # prefix は ctrl+j (herdr の既定は ctrl+b)。
 #
