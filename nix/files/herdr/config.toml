@@ -108,8 +108,35 @@ cycle_pane_next = ["prefix+tab", "prefix+o"]
 open_notification_target = "prefix+shift+o"
 
 ##############################################################################
+# herdr 固有 (tmux / zellij に対応物が無い)
+##############################################################################
+
+# git worktree を切って workspace として開く。
+#
+# 既定は prefix+shift+g だが、
+#   - 素の prefix+g は goto (ナビゲータ) に張ってあるので指が同じで意味が違う
+#   - 「新しい作業場所を作る」操作は prefix+c (new_tab) の親戚として覚えたい
+# ので prefix+shift+c を足す。既定の prefix+shift+g もそのまま残す。
+#
+# prefix+shift+c は herdr 既定では**未割り当て** (`herdr --default-config` で確認)
+# なので、上の cycle_pane_next のように退避先を用意する必要は無い。
+#
+# shift 付きは素のキーと別物として扱われる (既定が prefix+x / prefix+shift+x の
+# ように両方持っている) ので、prefix+c の new_tab とは衝突しない。
+#
+# 切った worktree の置き場は [worktrees] directory の既定 (~/.herdr/worktrees)
+# のまま。変えるならこのファイルに [worktrees] 節を足す。
+new_worktree = ["prefix+shift+g", "prefix+shift+c"]
+
+##############################################################################
 # 触っていないもの / 書き足すときの注意
 ##############################################################################
+#
+# `herdr config check` は**キー名の綴りしか見ない**。存在しないキー
+# (prefix+shift+pgup など) は `invalid keybinding` で落としてくれるが、
+# 既定バインドの奪い合いは検出しない (new_worktree に prefix+c を張って
+# new_tab を潰しても `config: ok` と言う)。奪っていないことは
+# `herdr --default-config | grep <キー>` で自分で確かめる。
 #
 # ctrl+h と ctrl+k は **prefix 無しの直接バインドに使わないこと**。
 # herdr の中で tmux を動かしたときに、tmux の prefix (ctrl+k) と pane 移動が
