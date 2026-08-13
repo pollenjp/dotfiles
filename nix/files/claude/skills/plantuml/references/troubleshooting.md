@@ -99,8 +99,43 @@ plantuml -testdot
 ```
 
 `Error: No dot executable found` が出るなら、この skill の flake を通さずに
-素の `plantuml` を叩いている。`scripts/plantuml-export.sh` を使うか
-`nix develop ~/.claude/skills/plantuml` に入る。
+素の `plantuml` を叩いている。`scripts/plantuml-export.sh` を使うか、下記の形で
+devShell に入る。
+
+## `nix develop ~/.claude/skills/plantuml` は動かない
+
+素で devShell に入りたいとき、パスをそのまま渡すと落ちる。
+
+```
+error: argument '/nix/store/…-home-manager-files' did not evaluate to a derivation
+```
+
+`~/.claude/skills/<name>` は home-manager が作る store path への symlink なので、
+nix がこれを「store path + attribute path」として解釈してしまう。
+かといって `path:` を付けて symlink のまま渡すと、今度は解決先を外部パス扱いされる。
+
+```
+error: access to absolute path '/nix/store/…-home-manager-files/.claude/skills/plantuml/flake.nix'
+       is forbidden in pure evaluation mode (use '--impure' to override)
+```
+
+`readlink -f` で実体まで解決してから `path:` に渡すのが唯一動く形。
+
+```sh
+nix develop "path:$(readlink -f ~/.claude/skills/plantuml)" --command plantuml -version
+#=> PlantUML version 1.2026.3
+```
+
+`scripts/*.sh` はもともとこれをやっているので、スクリプト経由なら踏まない。
+
+## `java` や `dot` が devShell の PATH に無い
+
+壊れていない。nixpkgs の `plantuml` は `makeCWrapper` 製のバイナリ wrapper で、
+`GRAPHVIZ_DOT` と java・jar のパスを内部に固定している。そのため devShell で
+`echo $GRAPHVIZ_DOT` は空、`command -v java` も無いのが正常。
+
+ホストに別版の graphviz があっても引きずられない。`plantuml -testdot` が報告する
+版が store 側（`flake.lock` で固定した版）なら、それが使われている証拠。
 
 ## レイアウトが崩れる
 

@@ -235,9 +235,11 @@ insert_white_bg() {
 
 mkdir -p "${out_dir}"
 
-# NOTE: --disable-gpu を付けてはいけない。Electron のフラグが drawio CLI
+# NOTE: --disable-gpu は付けない。古い drawio では Electron のフラグが drawio CLI
 #       (commander) の引数解析に混ざり、位置引数がずれて
-#       "Error: input file/directory not found" になる。
+#       "Error: input file/directory not found" になった。30.2.6 では再現しないが、
+#       GPU 関連のエラー出力はもともと無害なので付ける利点も無い
+#       (references/troubleshooting.md)。
 args=(
   --export
   --format "${format}"

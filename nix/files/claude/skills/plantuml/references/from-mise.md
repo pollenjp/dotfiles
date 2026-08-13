@@ -15,7 +15,7 @@ nixpkgs の `plantuml` が JDK と graphviz を同梱していて `GRAPHVIZ_DOT`
 | `[tools] java = "25"` | 不要（`pkgs.plantuml` が JDK を同梱）|
 | `PLANTUML_VERSION` / `PLANTUML_JAR` | 不要（版は `flake.lock` が固定）|
 | `mise run plantuml:download` | **廃止**（jar を落とす手順ごと無くなる）|
-| `mise run plantuml:run <args>` | `nix develop ~/.claude/skills/plantuml --command plantuml <args>` |
+| `mise run plantuml:run <args>` | `nix develop "path:$(readlink -f ~/.claude/skills/plantuml)" --command plantuml <args>`（`readlink -f` が要る理由は `troubleshooting.md`）|
 | `mise run plantuml:generate` | `~/.claude/skills/plantuml/scripts/plantuml-export.sh` |
 | `mise run plantuml:generate png` | `… /plantuml-export.sh -f png` |
 | `mise run plantuml:generate svg,png` | `… /plantuml-export.sh -f svg,png` |
