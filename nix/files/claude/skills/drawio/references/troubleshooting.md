@@ -43,17 +43,27 @@ xvfb-run --auto-display --auth-file="${tmp}/Xauthority" --error-file=/dev/stderr
 nixpkgs の `drawio-headless` を使っていないのはこれが理由。あれは `xvfb-run` を
 内側に抱えていて外せないので、WSLg では常に失敗する。
 
-## `--disable-gpu` を付けてはいけない（最大の罠）
+## `--disable-gpu`（かつての罠。30.2.6 では解消済み）
+
+以前は、ファイルが存在するのにこう言われた。
 
 ```
 Error: input file/directory not found
 ```
 
-ファイルが存在するのにこう言われる。**Electron のフラグが drawio CLI（commander）の
-引数解析に混ざり、位置引数がずれる。** GPU 無効化のつもりで付けると、原因の見当が
-つかないエラーになる。GPU 関連のエラー出力は無害なので、そもそも消す必要がない。
+**Electron のフラグが drawio CLI（commander）の引数解析に混ざり、位置引数がずれる**
+のが原因だった。
 
-`--no-sandbox` は混ざらない（root で動かすときだけ必要）。
+**2026-08-13 に 30.2.6 で再検証したところ、再現しない。** フラグ位置（先頭 / 中間 /
+ファイル直前 / 直後）、`-o` の有無、`-o` がファイルかディレクトリか、入力が相対パスか
+絶対パスか、`-x -f` と `--export --format` の両表記 — いずれの組み合わせでも正常に
+書き出せた。上流で解消されたと見られる。
+
+とはいえ**付ける利点も無い**。GPU 関連のエラー出力はもともと無害で消す必要が無く、
+`scripts/drawio-export.sh` は付けないままにしてある。古い drawio を使う環境で上記の
+エラーに当たったら、まずこのフラグを疑う。
+
+`--no-sandbox` は当時から混ざらない（root で動かすときだけ必要）。
 
 ```
 FATAL:electron_main_delegate.cc:312] Running as root without --no-sandbox is not supported.

@@ -15,7 +15,7 @@
 | `mise run drawio:png` | `… /drawio-export.sh -f png -s 1.4` |
 | `DRAWIO_THEME=light`（`mise.toml` の `[env]`）| 常に `--svg-theme light`（スクリプトが渡す）|
 | 図の中に置いていた背景用の白い矩形セル | 不要（出力後に差し込む）|
-| `realpath` を挟んでいた箇所 | 不要（相対パスで動く。`--disable-gpu` を付けなければ）|
+| `realpath` を挟んでいた箇所 | 不要（相対パスで動く）|
 
 ## 手順
 
