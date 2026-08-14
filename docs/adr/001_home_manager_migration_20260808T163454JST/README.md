@@ -9,6 +9,7 @@
 | 補足資料 | [textbook/](./textbook/README.md)（新規参画者向けの解説） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 | 後続 ADR | [002_nix_hosts_and_local_flake_20260810T153848JST](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md) — マシン固有設定の表現と実行の入口パスを決めた。**「7. 移行・運用手順」と `textbook/` は現行の形に更新済み。**「2. 決定」「3. 変更点の詳細」「6. 検証」に出てくる `~/dotfiles/nix#...` や `isWSL` などは決定当時の記録としてそのまま残してある |
+| 後続 ADR | [005_nix_flake_lock_min_release_age_20260813T184522JST](../005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) — 依存の更新手段を素の `nix flake update` から `flake-lock-age.sh update`（公開から 7 日以上経った revision だけを取る）へ差し替えた。**`textbook/05_daily_usage.md` は現行の形に更新済み。**本文に出てくる `nix flake update` は決定当時の記録としてそのまま残してある |
 
 ---
 
