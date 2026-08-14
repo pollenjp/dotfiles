@@ -12,7 +12,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 home-manager generations
 
 # 依存 (nixpkgs / home-manager) を更新する
-nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/flake-lock-age.sh update
 ```
 
 `--flake ...` を毎回打つのが面倒なら alias を作るとよい。
@@ -65,17 +65,22 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 ### 依存 (nixpkgs / home-manager) を更新する
 
 ```sh
-nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/flake-lock-age.sh update
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
-`nix flake update` は `flake.lock` を書き換える。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
+`flake.lock` が書き換わる。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
 
-特定の input だけ更新することもできる。
+**素の `nix flake update` は使わない。** 上げ先は追跡先の先端ではなく、**公開から 7 日以上経った revision** に限っている（npm / pnpm の `minimumReleaseAge` に相当する遅延）。素の `nix flake update` は先端を取るのでこの遅延が黙って外れ、CI の `lock-age` ジョブが落ちる。
+
+選ばれる revision を見るだけなら `resolve`、今の `flake.lock` を検査するなら `check`。
 
 ```sh
-nix flake update nixpkgs --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+./nix/scripts/flake-lock-age.sh resolve
+./nix/scripts/flake-lock-age.sh check
 ```
+
+日数は `DOTFILES_MIN_RELEASE_AGE_DAYS` で変える（`0` で遅延なし）。理由と外し方は [`nix/README.md`](../../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)。
 
 ## 壊れたら戻す
 

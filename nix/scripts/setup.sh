@@ -96,6 +96,9 @@ self_updated=${DOTFILES_SETUP_SELF_UPDATED:-0}
 # こちらは手順表に載せてあるので、実行順 (switch の直前) と --dry-run と
 # 結果一覧はそのまま効く。プリセットには入れない: nixpkgs を上げるのは重く、
 # 壊れうる操作なので、`--update` が黙って行うべきではない。
+#
+# 上げ先は先端ではなく「公開から一定日数が経った revision」。決めているのは
+# flake-lock-age.sh 側で、ここはその手順を選択へ足すかどうかだけを持つ。
 flake_update=0
 # upstream より何 commit 遅れているか。空なら判らない (git が無い等)。
 # ヘッダの表示に使う。起動時に一度だけ数える (再描画のたびに git を呼ばない)。
@@ -140,6 +143,10 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   追跡されているファイルを書き換えるので、動作を確認したら commit する。
   未 commit のままだと --self-update / u は本体を更新しなくなる。
 
+  取るのは先端ではなく **公開から 7 日以上経った revision**。出たばかりのものを
+  掴まないための遅延で、npm / pnpm の minimumReleaseAge に相当する。日数は
+  DOTFILES_MIN_RELEASE_AGE_DAYS で変える (0 で遅延なし = 先端)。
+
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
   h 対象ホストの変更   b 既存ファイルの退避   a 全選択   n 全解除
@@ -149,6 +156,9 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   DOTFILES_HOST        --host と同じ
   DOTFILES_LOCAL_DIR   ローカル flake の場所 (既定: ~/dotfiles)
   DOTFILES_BACKUP_EXT  --backup=<拡張子> と同じ。空文字なら --no-backup と同じ
+  DOTFILES_MIN_RELEASE_AGE_DAYS
+                       flake.lock に入れる revision の下限日数 (既定 7)。
+                       0 で遅延なし = 先端を取る
   NIX_INSTALLER_ARGS   Determinate Systems インストーラへの引数 (既定: install)
                        systemd の無いコンテナでは "install linux --init none"
   NO_COLOR             色を付けない
@@ -267,8 +277,8 @@ add_step ssh-config \
   step 0
 
 add_step flake-update \
-  'flake.lock を更新 (nix flake update)' \
-  'nixpkgs / home-manager を最新にする。既定では入らない (f / --flake-update で足す)。' \
+  'flake.lock を更新 (7 日以上前の revision へ)' \
+  'nixpkgs / home-manager を上げる。先端は取らない。既定では入らない (f / --flake-update)。' \
   step 0
 
 add_step switch \
@@ -1387,7 +1397,12 @@ step_flake_update() {
     fi
     note '(nix はまだ無い。--dry-run なのでコマンドを見せるだけ)'
   fi
-  run nix flake update --flake "${nix_dir}" || return 1
+  # 素の `nix flake update` ではなく flake-lock-age.sh を通す。あちらは
+  # 「公開から一定日数が経った revision」だけを選ぶ (既定 7 日)。
+  # ゼロデイ対策として、出たばかりのものを掴まないための遅延を入れている。
+  # 遅延を外したいときは DOTFILES_MIN_RELEASE_AGE_DAYS=0 を付ける。
+  # 詳細は nix/scripts/flake-lock-age.sh の冒頭と README を参照。
+  run "${script_dir}/flake-lock-age.sh" update || return 1
   # --dry-run では本体の lock を実際には書き換えないので、ここは同期したままに
   # 見えて何も出ない。実行時は必ず張り直しが走る。
   sync_local_flake_lock || return 1

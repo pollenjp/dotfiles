@@ -125,7 +125,7 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 | 何が古くなるか | 何をする | 誰が |
 | --- | --- | --- |
 | 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
-| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `nix flake update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
+| `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `flake-lock-age.sh update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
 | `~/dotfiles/flake.lock` | `nix flake update` | `setup.sh` が `switch` の前に張り直す（[後述](#ローカル-flake-の-lock-も張り直す)。本体を編集しただけでも要る） |
 
 **`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
@@ -178,8 +178,11 @@ setup は使えるべきなので、`fetch` の失敗も止める理由にしな
 ~/dotfiles/setup --steps flake-update      # 更新だけ
 
 # setup を通さないなら (同じことをする)
-nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/flake-lock-age.sh update
 ```
+
+**素の `nix flake update` は使わない。** あれは追跡先の先端を取るので、下の
+[遅延](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)が黙って外れる。
 
 メニューからは `f`。`flake.lock を更新` という手順が `switch` の直前に入る
 （`u` と違ってその場では実行しない。手順表に載っているので `--dry-run` と結果一覧に乗る）。
@@ -199,6 +202,55 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 > ```
 > error: unexpected fragment 'pollenjp@wsl' in flake reference '~/dotfiles#pollenjp@wsl'
 > ```
+
+#### 新しすぎる revision を pin しない (minimumReleaseAge 相当)
+
+上げ先は追跡先の**先端ではなく、公開から 7 日以上経った revision**。
+出たばかりのものを掴まないための遅延で、npm / pnpm の `minimumReleaseAge` に相当する。
+決めているのは [`scripts/flake-lock-age.sh`](./scripts/flake-lock-age.sh)。
+
+```sh
+./nix/scripts/flake-lock-age.sh resolve   # 選ぶ revision を見るだけ
+./nix/scripts/flake-lock-age.sh update    # その revision へ flake.lock を更新
+./nix/scripts/flake-lock-age.sh check     # 今の flake.lock を検査 (CI が回している)
+```
+
+Nix にはパッケージ単位のバージョン解決が無い。入るものは `flake.lock` が指す
+nixpkgs ツリー 1 点で決まるので、**「新しすぎるパッケージを避ける」は「新しすぎる
+revision を pin しない」と同義**になる。日数の下限はここでしか表現できない。
+
+日数の根拠は input ごとに違う。
+
+| input | 何の時刻で測るか | なぜ |
+| --- | --- | --- |
+| `nixpkgs` | `releases.nixos.org` のチャンネル公開時刻（`Last-Modified`） | 各公開は Hydra を通った commit なので binary cache が揃っている。master の任意の commit を日付だけで選ぶとほぼ全部ソースビルドになる |
+| `home-manager` | 既定ブランチの commit 時刻（GitHub API の `until=`） | home-manager にはチャンネルが無い |
+
+日数は `DOTFILES_MIN_RELEASE_AGE_DAYS` で変える。
+
+```sh
+DOTFILES_MIN_RELEASE_AGE_DAYS=14 ./nix/scripts/flake-lock-age.sh update
+DOTFILES_MIN_RELEASE_AGE_DAYS=0  ./nix/scripts/flake-lock-age.sh update  # 遅延なし = 先端
+```
+
+**遅延を伸ばすほど、既知 CVE が未修正のまま残る期間も伸びる**（ブラウザ / curl /
+openssl のような日常的に踏むものはこちら側のリスクが大きい）。7 日はその折り返し点として
+選んだ既定値で、長くすれば安全になるという種類の数字ではない。
+
+##### 遅延が外れたことに気付く仕組み
+
+`flake.nix` は `nixpkgs-unstable` を追ったままで、遅延は **`flake.lock` の pin にしか
+現れない**。つまり素で `nix flake update` を叩けば黙って先端に飛ぶ。そのための番人が
+CI の `lock-age` ジョブ（`flake-lock-age.sh check`）で、下限より新しい pin があると落ちる。
+
+判定に使う `flake.lock` の `lastModified` は **commit 時刻**でチャンネル公開時刻ではないので、
+Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。先端への事故を捕まえる用途には足りる。
+
+##### 遅延を外す
+
+緊急の CVE 修正を先端から入れたいときは `DOTFILES_MIN_RELEASE_AGE_DAYS=0` で `update` する。
+その commit では CI の `lock-age` が落ちるが、**それは意図どおり**。通したいときは
+`workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
 
 #### ローカル flake の lock も張り直す
 

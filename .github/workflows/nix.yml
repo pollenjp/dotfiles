@@ -11,6 +11,14 @@ on:
       - "nix/**"
       - ".github/workflows/nix.yml"
   workflow_dispatch:
+    inputs:
+      # lock-age ジョブの下限日数を一時的に下げるための逃げ道。
+      # 緊急で先端の CVE 修正を入れた commit を通したいときに 0 で再実行する。
+      # 空なら script の既定 (7 日) を使う。
+      min_release_age_days:
+        description: "flake.lock の pin の下限日数 (空なら既定の 7)"
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -80,6 +88,29 @@ jobs:
             './nix#homeConfigurations.sandbox.config.warnings')
           echo "warnings: ${warnings}"
           test "${warnings}" = "[]"
+
+  # flake.lock が「先端」へ飛んでいないことを確認する。
+  #
+  # flake.nix は nixpkgs-unstable を追ったままで、遅延は flake-lock-age.sh が
+  # lock に書く pin でしか表現されていない。つまり素で `nix flake update` を
+  # 叩くと遅延は黙って外れる。それに気付くための番人がこのジョブ。
+  #
+  # 判定に使う lastModified は commit 時刻なので、チャンネル公開時刻より
+  # 1〜2 日古い側に出る (= 判定は少し緩い)。先端への事故を捕まえるには十分。
+  lock-age:
+    name: flake.lock の遅延ポリシー
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # script は flake.lock の JSON を nix に読ませる (jq に依存しない)。
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: pin が下限日数を満たすか
+        env:
+          # workflow_dispatch 以外では空になり、script 側の既定 (7) が効く。
+          DOTFILES_MIN_RELEASE_AGE_DAYS: ${{ inputs.min_release_age_days }}
+        run: ./nix/scripts/flake-lock-age.sh check
 
   # devShell に入っている nixfmt / shfmt / shellcheck で整形と静的解析を確認する。
   lint:
