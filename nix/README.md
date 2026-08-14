@@ -894,7 +894,7 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 - **bash でも starship プロンプトになる。** レガシーでは starship を初期化しているのは
   fish だけで、bash は素のプロンプトだった。両シェルで揃えている。
   戻したい場合は `starship.nix` の `enableBashIntegration` を `false` にする。
-- `glog` などの alias 連鎖（`glog='glo --graph'`）は完全形に展開した（fish 側と同じ形）。
+- `glfg` などの alias 連鎖（`glfg='glf --graph'`）は完全形に展開した（fish 側と同じ形）。
 - `echo-PATH` / `echo-PATH-tr` / `echo-PATH-grep` / `git_get_default_branch` は
   alias から関数に変えた（動作は同じ）。
 
