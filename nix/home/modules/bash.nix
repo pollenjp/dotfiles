@@ -91,12 +91,12 @@
       gf = "git fetch --prune";
       gfp = "git fetch --prune && git pull";
 
-      # NOTE: レガシーでは alias が alias を参照する連鎖 (glog='glo --graph' など)
+      # NOTE: レガシーでは alias が alias を参照する連鎖 (glfg='glf --graph' など)
       #       になっていたが、fish 側と揃えて完全形に展開してある。
       gl = "git log";
       glo = "git log --oneline --decorate";
-      glog = "git log --oneline --decorate --graph";
-      gloga = "git log --oneline --decorate --graph --all";
+      glog = "git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always";
+      gloga = "git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always --all";
       glf = "git log --format='%C(auto)%h%Creset %G? %s'";
       glfg = "git log --format='%C(auto)%h%Creset %G? %s' --graph";
       glfga = "git log --format='%C(auto)%h%Creset %G? %s' --graph --all";

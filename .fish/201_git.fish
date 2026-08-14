@@ -79,8 +79,8 @@ abbr gfp 'git fetch --prune && git pull'
 # git log
 abbr gl 'git log'
 abbr glo 'git log --oneline --decorate'
-abbr glog 'git log --oneline --decorate --graph'
-abbr gloga 'git log --oneline --decorate --graph --all'
+abbr glog "git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always"
+abbr gloga "git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always --all"
 abbr glf "git log --format='%C(auto)%h%Creset %G? %s'"
 abbr glfg "git log --format='%C(auto)%h%Creset %G? %s' --graph"
 abbr glfga "git log --format='%C(auto)%h%Creset %G? %s' --graph --all"

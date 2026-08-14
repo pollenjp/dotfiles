@@ -79,7 +79,8 @@ alias gfp='git fetch --prune && git pull'
 alias gl='git log'
 # oneline
 alias glo='git log --oneline --decorate'
-alias glog='glo --graph'
+# graph (hash, date, refs, subject)
+alias glog="git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always"
 alias gloga='glog --all'
 # custom oneline format (hash, signature, subject)
 alias glf="gl --format='%C(auto)%h%Creset %G? %s'"
