@@ -1,5 +1,5 @@
 ---
-name: drawio
+name: pjp-drawio
 description: draw.io / diagrams.net で図を描く・直す・書き出すときに使う。`.drawio` を
   新規に書くとき、ネットワーク構成図・アーキテクチャ図・構成図などを drawio で作るよう
   頼まれたとき、`drawio/` ディレクトリを用意するとき、図を SVG / PNG へ出力するときに読む。
@@ -7,7 +7,7 @@ description: draw.io / diagrams.net で図を描く・直す・書き出すと�
   出力先、白背景などの規約、headless 特有のハマりどころを含む
 ---
 
-# drawio
+# pjp-drawio
 
 実行環境は **Nix flake**（この skill 自身が抱えている）。`drawio-desktop` の `.deb` も
 `xvfb` も `fonts-noto-cjk` も system へ入れない。`scripts/drawio-export.sh` は PATH に
@@ -31,9 +31,9 @@ drawio/
 `drawio/`（`.drawio` があるディレクトリ）の中で実行する。
 
 ```sh
-~/.claude/skills/drawio/scripts/drawio-export.sh                # *.drawio -> out/*.svg
-~/.claude/skills/drawio/scripts/drawio-export.sh -f png -s 1.4  # 目視確認用
-~/.claude/skills/drawio/scripts/drawio-export.sh 01_network_topology.drawio
+~/.claude/skills/pjp-drawio/scripts/drawio-export.sh                # *.drawio -> out/*.svg
+~/.claude/skills/pjp-drawio/scripts/drawio-export.sh -f png -s 1.4  # 目視確認用
+~/.claude/skills/pjp-drawio/scripts/drawio-export.sh 01_network_topology.drawio
 ```
 
 | オプション | |

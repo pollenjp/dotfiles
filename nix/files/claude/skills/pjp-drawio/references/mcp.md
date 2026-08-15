@@ -24,7 +24,7 @@
 `drawio/` に flake を置き、リポジトリのルートに `.mcp.json` を書く。
 
 ```sh
-cp ~/.claude/skills/drawio/flake.nix ~/.claude/skills/drawio/flake.lock drawio/
+cp ~/.claude/skills/pjp-drawio/flake.nix ~/.claude/skills/pjp-drawio/flake.lock drawio/
 git add drawio/flake.nix drawio/flake.lock
 ```
 
@@ -64,12 +64,12 @@ user scope に入れる。**この場合プロジェクト側に flake は要ら
 使う）。マシンごとに一度だけ実行する。
 
 ```sh
-claude mcp add drawio --scope user -- "${HOME}/.claude/skills/drawio/scripts/drawio-mcp.sh"
+claude mcp add drawio --scope user -- "${HOME}/.claude/skills/pjp-drawio/scripts/drawio-mcp.sh"
 claude mcp list
 claude mcp remove drawio --scope user
 ```
 
-`~/.claude/skills/drawio` は home-manager が張り替えてもパスが変わらないので、
+`~/.claude/skills/pjp-drawio` は home-manager が張り替えてもパスが変わらないので、
 そのまま指してよい（store の実体はラッパが解決する）。
 
 **共有リポジトリの `.mcp.json` にこの形（skill のパス）を書かない。** この skill を

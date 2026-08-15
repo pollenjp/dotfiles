@@ -10,7 +10,7 @@
 | --- | --- |
 | `sudo apt install xvfb fonts-noto-cjk` | 不要（flake が持つ）|
 | `.deb` を GitHub Releases から入れる | 不要（nixpkgs の drawio を `flake.lock` で固定）|
-| `mise run drawio:generate` | `~/.claude/skills/drawio/scripts/drawio-export.sh` |
+| `mise run drawio:generate` | `~/.claude/skills/pjp-drawio/scripts/drawio-export.sh` |
 | `mise run drawio:generate png` | `… /drawio-export.sh -f png` |
 | `mise run drawio:png` | `… /drawio-export.sh -f png -s 1.4` |
 | `DRAWIO_THEME=light`（`mise.toml` の `[env]`）| 常に `--svg-theme light`（スクリプトが渡す）|
@@ -22,7 +22,7 @@
 ```sh
 cd <プロジェクト>/drawio
 rm mise.toml                    # drawio 以外の task が同居しているなら該当部分だけ削る
-~/.claude/skills/drawio/scripts/drawio-export.sh
+~/.claude/skills/pjp-drawio/scripts/drawio-export.sh
 git diff --stat out/            # 出力が変わっていないか確認する
 ```
 
@@ -41,7 +41,7 @@ git diff --stat out/            # 出力が変わっていないか確認する
 `drawio/` へコピーして `nix flake lock` し、両方 commit する。
 
 ```sh
-cp ~/.claude/skills/drawio/flake.nix drawio/
+cp ~/.claude/skills/pjp-drawio/flake.nix drawio/
 cd drawio && nix flake lock
 git add flake.nix flake.lock
 ```

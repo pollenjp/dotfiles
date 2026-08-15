@@ -14,8 +14,11 @@
 
 ## 追加
 
+**名前は `pjp-` で始める**（skill と同じ規約。理由は `nix/README.md` の
+「命名: `pjp-` で始める」）。呼び出しは `/pjp-<名前>` になる。
+
 ```
-nix/files/claude/commands/<名前>.md
+nix/files/claude/commands/pjp-<名前>.md
 ```
 
 ```markdown
@@ -30,7 +33,7 @@ argument-hint: <path>        # 省略可
 サブディレクトリで名前空間を切ることもできる。
 
 ```
-nix/files/claude/commands/git/sync.md   ->  /git:sync
+nix/files/claude/commands/pjp-git/sync.md   ->  /pjp-git:sync
 ```
 
 ディレクトリも配置対象なので、そのまま置けば動く。

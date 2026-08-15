@@ -15,8 +15,8 @@ nixpkgs の `plantuml` が JDK と graphviz を同梱していて `GRAPHVIZ_DOT`
 | `[tools] java = "25"` | 不要（`pkgs.plantuml` が JDK を同梱）|
 | `PLANTUML_VERSION` / `PLANTUML_JAR` | 不要（版は `flake.lock` が固定）|
 | `mise run plantuml:download` | **廃止**（jar を落とす手順ごと無くなる）|
-| `mise run plantuml:run <args>` | `nix develop "path:$(readlink -f ~/.claude/skills/plantuml)" --command plantuml <args>`（`readlink -f` が要る理由は `troubleshooting.md`）|
-| `mise run plantuml:generate` | `~/.claude/skills/plantuml/scripts/plantuml-export.sh` |
+| `mise run plantuml:run <args>` | `nix develop "path:$(readlink -f ~/.claude/skills/pjp-plantuml)" --command plantuml <args>`（`readlink -f` が要る理由は `troubleshooting.md`）|
+| `mise run plantuml:generate` | `~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh` |
 | `mise run plantuml:generate png` | `… /plantuml-export.sh -f png` |
 | `mise run plantuml:generate svg,png` | `… /plantuml-export.sh -f svg,png` |
 | `sudo apt install graphviz` | 不要（flake が持つ）|
@@ -28,7 +28,7 @@ nixpkgs の `plantuml` が JDK と graphviz を同梱していて `GRAPHVIZ_DOT`
 ```sh
 cd <プロジェクト>/plantuml
 rm mise.toml                    # plantuml 以外の task が同居しているなら該当部分だけ削る
-~/.claude/skills/plantuml/scripts/plantuml-export.sh
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh
 git diff --stat out/            # 出力が変わっていないか確認する
 ```
 
@@ -46,7 +46,7 @@ git diff --stat out/            # 出力が変わっていないか確認する
 `PLANTUML_VERSION` のような明示の指定は無くなる。
 
 ```sh
-cd ~/dotfiles/nix/files/claude/skills/plantuml
+cd ~/dotfiles/nix/files/claude/skills/pjp-plantuml
 nix flake update
 git add flake.lock              # store は read-only なので lock は必ず commit する
 ```
@@ -76,7 +76,7 @@ hash は `nix store prefetch-file <url>` で取る。
 `plantuml/` へコピーして `nix flake lock` し、両方 commit する。
 
 ```sh
-cp ~/.claude/skills/plantuml/flake.nix plantuml/
+cp ~/.claude/skills/pjp-plantuml/flake.nix plantuml/
 cd plantuml && nix flake lock
 git add flake.nix flake.lock
 ```
@@ -95,5 +95,5 @@ JVM の起動は 1 形式につき 1 回で済むが、図が増えると時間�
 対象を絞りたいときはファイルを明示する。
 
 ```sh
-~/.claude/skills/plantuml/scripts/plantuml-export.sh 01_order_flow.puml
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh 01_order_flow.puml
 ```

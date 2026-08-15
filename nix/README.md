@@ -911,9 +911,9 @@ bash では元々発火していなかった）。
 | 配置先 | 実体 | 単位 |
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル |
-| `~/.claude/skills/<名前>/` | `nix/files/claude/skills/<名前>/` | ディレクトリ |
-| `~/.claude/agents/<名前>.md` | `nix/files/claude/agents/<名前>.md` | ファイル |
-| `~/.claude/commands/<名前>.md` | `nix/files/claude/commands/<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
+| `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
+| `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
+| `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
 
 `nix/home/modules/claude.nix` が各ディレクトリを `readDir` で自動列挙するので、
 **追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
@@ -921,6 +921,17 @@ bash では元々発火していなかった）。
 
 **このリポジトリは public なので、ここに置けるのは公開して差し支えないものだけ。**
 公開できないものは次節の `claude-skills` へ置く。
+
+### 命名: `pjp-` で始める
+
+**自作のものは名前を `pjp-` で始める。** skill はディレクトリ名と `SKILL.md` の
+`name` の両方（`pjp-drawio` `pjp-plantuml`）。agent / command も同じ。
+
+`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills` の 3 系統が
+同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
+配信物は増減するので一般名詞（`dataviz` `run` `init` など）は将来ぶつかる。
+`claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する
+（こちら側に相当する検査は無い）。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
@@ -934,7 +945,7 @@ bash では元々発火していなかった）。
 ~/.claude/skills/
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
-└── my-skill -> /nix/store/…   <- Nix 管理
+└── pjp-my-skill -> /nix/store/…   <- Nix 管理
 ```
 
 ### ⚠️ `~/.claude/` を直接編集しないこと

@@ -96,10 +96,10 @@ is_nix_managed() {
 # 指す .claude パスがある」で判定していた。この 2 つは互いに無関係なので、
 # **読み取りや実行まで巻き込んで拒否していた**。
 #
-#   ~/.claude/skills/plantuml/scripts/plantuml-export.sh -f png 2>&1 | tail
+#   ~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh -f png 2>&1 | tail
 #     -> 2>&1 の "2>" が演算子に一致し、script のパスが store なので deny
 #
-#   printf '@startuml' > 01.puml && ~/.claude/skills/drawio/scripts/...
+#   printf '@startuml' > 01.puml && ~/.claude/skills/pjp-drawio/scripts/...
 #     -> 書き込み先はカレントの 01.puml なのに deny
 #
 # skill の script を叩く形は SKILL.md が案内している通常の使い方なので、

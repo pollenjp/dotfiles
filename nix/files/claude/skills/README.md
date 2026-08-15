@@ -12,22 +12,38 @@
 > このファイル自体はディレクトリを git 管理下に残すために置いてある。
 > `readDir` はディレクトリのみを拾うので、配置対象にはならない。
 
+## 命名: `pjp-` で始める
+
+**自作 skill の名前は `pjp-` で始める**（`pjp-drawio` `pjp-plantuml` など）。
+ディレクトリ名と `SKILL.md` の `name` の両方。
+
+`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills` の
+3 系統が同じ名前空間で並ぶ。prefix が無いと、`/skills` の一覧やセッション冒頭の
+skill 一覧を見ても **どれが自分のものか判らない**。配信物は増減するので、
+「今ぶつかっていないこと」を確認しても将来ぶつかる（`dataviz` `run` `init` など、
+一般名詞は取られていくと思っておく）。prefix を付けておけば衝突しない。
+
+`claude-skills`（private）側も同じ規約。あちらは `scripts/lint.sh` が検査する。
+
+> agent / command も同じ名前空間の問題を持つので、足すときは `pjp-` を付ける。
+> command は `/pjp-<名前>` で呼ぶことになる。
+
 ## skill の追加
 
 ```
-nix/files/claude/skills/<名前>/SKILL.md
+nix/files/claude/skills/pjp-<名前>/SKILL.md
 ```
 
 `SKILL.md` には YAML frontmatter が要る。
 
 ```markdown
 ---
-name: my-skill
+name: pjp-my-skill
 description: いつ使うかを書く。Claude はここを読んで起動を判断するので、
              「何をするか」より「どういう時に使うか」を具体的に書く
 ---
 
-# My Skill
+# pjp-my-skill
 
 本文。手順や規約をここに書く。
 ```
@@ -52,7 +68,7 @@ home-manager switch --flake ~/dotfiles#<host>
 | 依存の性質 | 置き場 |
 | --- | --- |
 | 常用する / 他からも使う | `nix/home/modules/packages.nix` の `home.packages` |
-| その skill でしか使わない | `nix/files/claude/skills/<名前>/flake.nix` + **`flake.lock`** |
+| その skill でしか使わない | `nix/files/claude/skills/pjp-<名前>/flake.nix` + **`flake.lock`** |
 
 前者で済むならその方が単純。skill を消したときにツールも一緒に消えてほしい、
 バージョンをこの skill だけで固定したい、といった理由があるときに後者。
@@ -112,6 +128,5 @@ fi
   試行錯誤しながら書く場合は、一時的に `~/.claude/skills/` へ直接置いて
   固まってからこちらへ移す方が早い
   （`claude-skills` 側は作業クローンへの symlink なのでこの制約が無い）
-- 名前は `~/.claude/skills/` 配下で一意にすること。Anthropic 配信の skill
-  (`pdf` `docx` `xlsx` `pptx` `morning` `skill-creator` など) や
-  `claude-skills` 側のものと同名にすると、どちらが使われるか不定になる
+- 名前は `pjp-` で始める（上の「命名」）。`~/.claude/skills/` 配下で
+  一意にするためと、自分のものを見分けるため
