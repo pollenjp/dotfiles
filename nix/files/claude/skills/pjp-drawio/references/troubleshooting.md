@@ -165,6 +165,6 @@ pkgs.runCommand "font-test" { nativeBuildInputs = [ pkgs.drawio pkgs.xvfb-run ];
 - **SVG も入れておく**。表示は閲覧側のフォント次第だが、drawio はエクスポート時に
   フォントメトリクスでレイアウトを計算するため、無いと文字幅がずれる
 
-可変フォント（`NotoSansCJK-VF.otf.ttc`）のままで描ける。plantuml skill が
+可変フォント（`NotoSansCJK-VF.otf.ttc`）のままで描ける。pjp-plantuml skill が
 `noto-fonts-cjk-sans-static` を使っているのは OpenJDK が可変フォントを描けないためで、
 Chromium にはその制約が無い。

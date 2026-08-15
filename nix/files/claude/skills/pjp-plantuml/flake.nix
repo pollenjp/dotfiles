@@ -1,5 +1,5 @@
 {
-  description = "plantuml skill の依存 (PlantUML + 日本語フォント)";
+  description = "pjp-plantuml skill の依存 (PlantUML + 日本語フォント)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -30,7 +30,7 @@
           # フォント NotoSansCJK-VF.otf.ttc で、OpenJDK はこれを描画できず豆腐に
           # なる。図の生成自体は成功しエラーも警告も出ないので気付きにくい。
           # -static は NotoSansCJK-Regular.ttc を持つので描ける。
-          # drawio skill が可変フォントのままなのは Chromium にその制約が無いため。
+          # pjp-drawio skill が可変フォントのままなのは Chromium にその制約が無いため。
           #
           # makeFontsConf は /usr/share/fonts などの実環境のフォントを残したまま
           # store のフォントを足すので、ホストの設定を奪わない。

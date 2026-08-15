@@ -20,7 +20,7 @@
 
 set -eu -o pipefail
 
-# ~/.claude/skills/plantuml は store への symlink なので、$0 のままでは flake の
+# ~/.claude/skills/pjp-plantuml は store への symlink なので、$0 のままでは flake の
 # 位置を見失う。symlink を path: へ渡すと解決先を外部パス扱いされてこう落ちる。
 #
 #   error: access to absolute path '/nix/store/...' is forbidden in pure evaluation mode

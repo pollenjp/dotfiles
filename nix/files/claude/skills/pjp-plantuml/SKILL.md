@@ -1,5 +1,5 @@
 ---
-name: plantuml
+name: pjp-plantuml
 description: PlantUML で図を描く・直す・書き出すときに使う。`.puml` を新規に書くとき、
   シーケンス図・クラス図・ER 図・コンポーネント図・状態遷移図などを PlantUML で作るよう
   頼まれたとき、`plantuml/` ディレクトリを用意するとき、図を SVG / PNG へ出力するときに読む。
@@ -7,7 +7,7 @@ description: PlantUML で図を描く・直す・書き出すときに使う。`
   出力先、白背景などの規約を含む
 ---
 
-# plantuml
+# pjp-plantuml
 
 実行環境は **Nix flake**（この skill 自身が抱えている）。`plantuml.jar` も `java` も
 `graphviz` も `fonts-noto-cjk` も system へ入れない。`scripts/plantuml-export.sh` は
@@ -32,10 +32,10 @@ plantuml/
 `plantuml/`（`.puml` があるディレクトリ）の中で実行する。
 
 ```sh
-~/.claude/skills/plantuml/scripts/plantuml-export.sh              # *.puml -> out/*.svg
-~/.claude/skills/plantuml/scripts/plantuml-export.sh -f png       # 目視確認用
-~/.claude/skills/plantuml/scripts/plantuml-export.sh -f svg,png   # 両方まとめて
-~/.claude/skills/plantuml/scripts/plantuml-export.sh 01_order_flow.puml
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh              # *.puml -> out/*.svg
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh -f png       # 目視確認用
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh -f svg,png   # 両方まとめて
+~/.claude/skills/pjp-plantuml/scripts/plantuml-export.sh 01_order_flow.puml
 ```
 
 | オプション | |

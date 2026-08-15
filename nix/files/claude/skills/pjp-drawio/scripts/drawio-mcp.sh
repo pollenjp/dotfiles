@@ -7,12 +7,12 @@
 # ## なぜ薄いラッパを挟むか
 #
 # サーバ本体は flake.nix が持っているが、MCP の設定に書けるのはコマンド 1 つで、
-# store のパスは home-manager switch ごとに変わる。~/.claude/skills/drawio は
+# store のパスは home-manager switch ごとに変わる。~/.claude/skills/pjp-drawio は
 # 変わらないので、ここで実体を解決してから nix へ渡す。
 #
 # symlink をそのまま path: に渡すと、解決先を外部パス扱いされて失敗する。
 #
-#   nix run "path:${HOME}/.claude/skills/drawio#drawio-mcp"
+#   nix run "path:${HOME}/.claude/skills/pjp-drawio#drawio-mcp"
 #   error: access to absolute path '/nix/store/...' is forbidden in
 #          pure evaluation mode
 

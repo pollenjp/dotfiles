@@ -30,4 +30,9 @@ skill や repo に script を足し、その script が手元に無い外部ツ�
 何を入れるか（グローバル CLI は Nix、言語ランタイムは mise）は別で、
 ADR 001 の決定 6 に従う。
 
+## 命名
+
+自作の skill / agent / command は、名前を **`pjp-` で始める**（`pjp-drawio` など）。
+配信物と同じ名前空間に並ぶので、prefix が無いと一覧で自分のものを見分けられない。
+
 書き方は各 `skills/README.md` を参照（置き場所によって形が変わる）。

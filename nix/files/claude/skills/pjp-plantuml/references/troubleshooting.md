@@ -16,7 +16,7 @@
 
 `-static` の方は `NotoSansCJK-Regular.ttc`（静的）を配るので描ける。
 
-drawio skill が可変フォントのままなのは Chromium にその制約が無いためで、
+pjp-drawio skill が可変フォントのままなのは Chromium にその制約が無いためで、
 **同じフォント指定を skill 間でコピーしてはいけない。**
 
 紛らわしいのは、fontconfig からは可変フォントも普通に見えていること。
@@ -102,7 +102,7 @@ plantuml -testdot
 素の `plantuml` を叩いている。`scripts/plantuml-export.sh` を使うか、下記の形で
 devShell に入る。
 
-## `nix develop ~/.claude/skills/plantuml` は動かない
+## `nix develop ~/.claude/skills/pjp-plantuml` は動かない
 
 素で devShell に入りたいとき、パスをそのまま渡すと落ちる。
 
@@ -115,14 +115,14 @@ nix がこれを「store path + attribute path」として解釈してしまう�
 かといって `path:` を付けて symlink のまま渡すと、今度は解決先を外部パス扱いされる。
 
 ```
-error: access to absolute path '/nix/store/…-home-manager-files/.claude/skills/plantuml/flake.nix'
+error: access to absolute path '/nix/store/…-home-manager-files/.claude/skills/pjp-plantuml/flake.nix'
        is forbidden in pure evaluation mode (use '--impure' to override)
 ```
 
 `readlink -f` で実体まで解決してから `path:` に渡すのが唯一動く形。
 
 ```sh
-nix develop "path:$(readlink -f ~/.claude/skills/plantuml)" --command plantuml -version
+nix develop "path:$(readlink -f ~/.claude/skills/pjp-plantuml)" --command plantuml -version
 #=> PlantUML version 1.2026.3
 ```
 

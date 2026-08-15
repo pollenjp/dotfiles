@@ -19,7 +19,7 @@
 
 set -eu -o pipefail
 
-# ~/.claude/skills/drawio は store への symlink なので、$0 のままでは flake の
+# ~/.claude/skills/pjp-drawio は store への symlink なので、$0 のままでは flake の
 # 位置を見失う。実体まで解決してから親を取る。
 skill_dir=$(
   cd -- "$(dirname -- "$(readlink -f -- "$0")")/.." &>/dev/null

@@ -14,13 +14,16 @@
 
 ## 追加
 
+**名前は `pjp-` で始める**（skill と同じ規約。理由は `nix/README.md` の
+「命名: `pjp-` で始める」）。ファイル名と `name` の両方。
+
 ```
-nix/files/claude/agents/<名前>.md
+nix/files/claude/agents/pjp-<名前>.md
 ```
 
 ```markdown
 ---
-name: my-agent
+name: pjp-my-agent
 description: いつ起動すべきかを書く。Claude はここを読んで委譲を判断する
 tools: Read, Grep, Glob      # 省略すると全ツール
 model: sonnet                # 省略すると親から継承

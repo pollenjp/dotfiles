@@ -1,5 +1,5 @@
 {
-  description = "drawio skill の依存 (エクスポート用 drawio + 日本語フォント + 公式 MCP サーバ)";
+  description = "pjp-drawio skill の依存 (エクスポート用 drawio + 日本語フォント + 公式 MCP サーバ)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -31,7 +31,7 @@
           # store のフォントを足すので、ホストの設定を奪わない。
           #
           # NOTE: 可変フォント (NotoSansCJK-VF.otf.ttc) のままで描ける。
-          #       plantuml skill が -static を使っているのは OpenJDK が可変
+          #       pjp-plantuml skill が -static を使っているのは OpenJDK が可変
           #       フォントを描けないためで、Chromium にはその制約が無い。
           fontsConf = pkgs.makeFontsConf {
             fontDirectories = [
