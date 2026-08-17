@@ -593,7 +593,16 @@ homeConfigurations = dotfiles.homeConfigurations // {
   tmp = dotfiles.lib.mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
-    wsl.enable = true;
+    wsl = {
+      enable = true;
+      onePassword = {
+        enable = true;
+        # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
+        # 別の名前のマシンはここで足す。値はこのマシンで:
+        #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+        windowsUserName = "polle";
+      };
+    };
 
     # このマシンだけの設定は modules で渡す。
     # 本体が既に定義している値を差し替えるには mkForce が要る
