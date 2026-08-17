@@ -11,14 +11,19 @@
 # 「新しすぎる revision を pin しない」と同義になる。`nix flake update` は常に
 # 追跡先の先端を取るため、遅延はこちらで作るしかない。
 #
-# ## 何を根拠に日数を測るか
+# ## 何を対象にするか
 #
-# - **nixpkgs**: releases.nixos.org 上のチャンネル公開時刻 (`Last-Modified`)。
-#   `nixpkgs-unstable` の各公開は Hydra を通った commit なので、master の任意の
-#   commit を日付だけで選ぶのとは違い binary cache が揃っている。ここを外すと
-#   ほぼ全部ソースビルドになるので、公開の一覧から選ぶ形を崩さないこと。
-# - **home-manager**: 既定ブランチの commit 時刻 (GitHub API の `until=`)。
-#   home-manager にはチャンネルが無いので commit 時刻で測るしかない。
+# 渡された flake の **root の直下 input すべて**。input ごとに flake.lock から
+# 種別を読んで測り方を選ぶ。片方だけ遅らせても、もう片方が先端に張り付く。
+#
+# - **nixpkgs** (nixpkgs-unstable を追うもの): releases.nixos.org 上のチャンネル
+#   公開時刻 (`Last-Modified`)。各公開は Hydra を通った commit なので、master の
+#   任意の commit を日付だけで選ぶのとは違い binary cache が揃っている。ここを
+#   外すとほぼ全部ソースビルドになるので、公開の一覧から選ぶ形を崩さないこと。
+# - **その他の github input** (home-manager など): 追跡先の commit 時刻
+#   (GitHub API の `until=`)。これらにはチャンネルが無いので commit 時刻で測る。
+# - **follows / github 以外の input**: 対象外。自分の revision を持たないか、
+#   持っていても公開という概念が無い (`path:` など)。
 #
 # `check` の判定だけは flake.lock の `lastModified` を使う。これは **commit 時刻**
 # であって公開時刻ではなく、Hydra の遅れ (実測で 1〜2 日) の分だけ古い側に出る。
@@ -26,13 +31,19 @@
 #
 # ## 使い方
 #
-#   ./nix/scripts/flake-lock-age.sh resolve   選ぶ revision を出すだけ
-#   ./nix/scripts/flake-lock-age.sh update    flake.lock をその revision へ更新
-#   ./nix/scripts/flake-lock-age.sh check     今の flake.lock を検査 (CI 用)
+#   flake-lock-age.sh resolve [<flake ディレクトリ>...]  選ぶ revision を出すだけ
+#   flake-lock-age.sh update  [<flake ディレクトリ>...]  flake.lock をその revision へ更新
+#   flake-lock-age.sh check   [<flake ディレクトリ>...]  今の flake.lock を検査 (CI 用)
 #
-# 日数は `DOTFILES_MIN_RELEASE_AGE_DAYS` で変える (既定 7)。0 で遅延なし。
-# 緊急で CVE 修正を先端から入れたいときは 0 で `update` し、`check` の CI が
-# 赤くなるのは意図どおりとして扱う (nix/README.md 「遅延を外す」)。
+# ディレクトリを省いたときの既定は、**この script の隣** (`<script>/../flake.lock`)
+# があればそこ、無ければカレントディレクトリ。前者は dotfiles のチェックアウトから
+# 直接叩く場合、後者は他のリポジトリから nix run で呼ぶ場合を想定している。
+#
+#   nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
+#
+# 日数は `--min-age-days N` か環境変数 `FLAKE_MIN_RELEASE_AGE_DAYS` で変える
+# (既定 7)。0 で遅延なし。緊急で CVE 修正を先端から入れたいときは 0 で `update` し、
+# `check` の CI が赤くなるのは意図どおりとして扱う (nix/README.md 「遅延を外す」)。
 #
 # ## 依存
 #
@@ -45,23 +56,9 @@ script_dir=$(
   cd -- "$(dirname "$0")" &>/dev/null
   pwd -P
 )
-nix_dir=$(dirname "${script_dir}")
-lock_file="${nix_dir}/flake.lock"
 
-# 空文字も既定へ落とす。CI は workflow_dispatch 以外で空を渡してくる。
-min_age_days=${DOTFILES_MIN_RELEASE_AGE_DAYS:-7}
-case ${min_age_days} in
-  '' | *[!0-9]*)
-    printf 'ERROR: DOTFILES_MIN_RELEASE_AGE_DAYS は 0 以上の整数で指定すること (受け取った値: %s)\n' \
-      "${min_age_days}" >&2
-    exit 1
-    ;;
-esac
-# 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
-min_age_days=$((10#${min_age_days}))
-
-# 追跡しているチャンネル。flake.nix の nixpkgs.url と一致していること
-# (require_channel_input が実際に照合する)。
+# 追跡しているチャンネル。nixpkgs input の original.ref がこれと違えば止める
+# (classify_input が実際に照合する)。
 channel=nixpkgs-unstable
 channel_url="https://channels.nixos.org/${channel}"
 releases_url="https://releases.nixos.org/nixpkgs"
@@ -100,6 +97,91 @@ die() {
   exit 1
 }
 
+usage() {
+  cat <<'EOS'
+使い方: flake-lock-age.sh [オプション] <resolve|update|check> [<flake ディレクトリ>...]
+
+  resolve  遅延を満たす revision を表示するだけ (flake.lock は触らない)
+  update   その revision へ flake.lock を更新する
+  check    今の flake.lock が下限日数を満たすか検査する (CI 用)
+
+オプション:
+  --min-age-days N  下限日数 (既定 7 / 環境変数 FLAKE_MIN_RELEASE_AGE_DAYS)
+  -h, --help        この使い方を出す
+
+ディレクトリを省くと、この script の隣 (<script>/../flake.lock) があればそこ、
+無ければカレントディレクトリを対象にする。複数渡せば順に処理する。
+EOS
+}
+
+##########
+# 引数   #
+##########
+
+# 空文字も既定へ落とす。CI は workflow_dispatch 以外で空を渡してくる。
+min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS:-7}
+cmd=""
+flake_dirs=()
+
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --min-age-days)
+      [[ $# -ge 2 ]] || die '--min-age-days には日数が要ります。'
+      min_age_days=$2
+      shift 2
+      ;;
+    --min-age-days=*)
+      min_age_days=${1#*=}
+      shift
+      ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    resolve | update | check)
+      [[ -z ${cmd} ]] || die "動作は 1 つだけ指定すること (${cmd} と $1 が指定されました)。"
+      cmd=$1
+      shift
+      ;;
+    -*)
+      usage >&2
+      die "不明なオプション: $1"
+      ;;
+    *)
+      flake_dirs+=("$1")
+      shift
+      ;;
+  esac
+done
+
+if [[ -z ${cmd} ]]; then
+  usage >&2
+  exit 2
+fi
+
+case ${min_age_days} in
+  '') min_age_days=7 ;;
+  *[!0-9]*)
+    die "下限日数は 0 以上の整数で指定すること (受け取った値: ${min_age_days})"
+    ;;
+esac
+# 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
+min_age_days=$((10#${min_age_days}))
+
+# 省略時の既定。チェックアウトから直接叩く形 (dotfiles) と、store から nix run で
+# 呼ぶ形の両方を通すため、script の隣に flake があるかで分ける。
+# 空配列への [@] 展開は bash 4.3 以前の set -u で落ちるので +x で見る。
+if [[ -z ${flake_dirs[*]+x} ]]; then
+  if [[ -f "${script_dir}/../flake.lock" ]]; then
+    flake_dirs=("$(
+      cd -- "${script_dir}/.." &>/dev/null
+      pwd -P
+    )")
+  else
+    flake_dirs=(.)
+  fi
+fi
+
 ##########
 # 日付   #
 ##########
@@ -137,26 +219,89 @@ http_date_to_epoch() {
   esac
 }
 
+# ISO 8601 (GitHub API の commit 日時) -> epoch
+iso_to_epoch() {
+  case ${date_flavor} in
+    gnu) date -u -d "$1" +%s ;;
+    bsd) LC_ALL=C date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$1" +%s ;;
+  esac
+}
+
+age_days() {
+  printf '%s\n' "$((($1 - $2) / 86400))"
+}
+
 ##############
 # flake.lock #
 ##############
 
-# flake.lock の 1 フィールドを読む。読めなければ空を返す (呼び側で判定する)。
-# 属性名に `-` が入る (home-manager) ので引用符を付けて引く。
-lock_field() {
-  nix eval --raw --impure --expr \
-    "toString (builtins.fromJSON (builtins.readFile \"${lock_file}\")).nodes.\"$1\".$2" \
-    2>/dev/null || true
+# root の直下 input を 1 行 1 件で出す。区切りはタブ。
+#
+#   <名前> <type> <owner> <repo> <lastModified> <original.ref>
+#
+# 今 pin されている rev は出さない。update は新しい rev を自分で決めるし、
+# check は lastModified しか見ないので誰も使わない。
+#
+# follows で他の input を指しているものは自分の locked ノードを持たない
+# (root.inputs の値が文字列ではなく配列になる) ので落とす。
+lock_inputs() {
+  nix eval --raw --impure --expr "
+    let
+      lock = builtins.fromJSON (builtins.readFile \"$1\");
+      root = lock.nodes.\${lock.root};
+      names = builtins.filter (n: builtins.isString root.inputs.\${n})
+        (builtins.attrNames (root.inputs or { }));
+      line = n:
+        let
+          node = lock.nodes.\${root.inputs.\${n}};
+          l = node.locked or { };
+          o = node.original or { };
+        in
+        builtins.concatStringsSep \"\t\" [
+          n
+          (l.type or \"\")
+          (l.owner or \"\")
+          (l.repo or \"\")
+          (toString (l.lastModified or 0))
+          (o.ref or \"\")
+        ];
+    in
+    builtins.concatStringsSep \"\n\" (map line names)
+  "
 }
 
-# この script の遅延の作り方はチャンネル前提なので、追跡先が変わっていたら止める。
-require_channel_input() {
-  local ref
-  ref=$(lock_field nixpkgs 'original.ref')
-  if [[ ${ref} != "${channel}" ]]; then
-    die "flake.nix の nixpkgs が ${channel} を追っていません (ref=${ref:-なし})。
-公開の一覧から選ぶ形が崩れるので、追跡先を変えたならこの script も直すこと。"
+# lock_inputs を呼んで、読めなかったときにその場で止める。
+# `< <(...)` で while へ流すと nix 側の失敗を取りこぼす (while は 0 で終わる)
+# ので、一度変数へ受けてから流す。
+read_lock_inputs() {
+  local rows
+  rows=$(lock_inputs "$1") || die "flake.lock を読めませんでした: $1"
+  printf '%s\n' "${rows}"
+}
+
+# input 1 件の測り方を決めて input_kind へ入れる (channel / commit / skip)。
+# 返り値ではなくグローバルへ置くのは、追跡先が想定外のときに die でここから
+# 抜けたいため。$(...) で呼ぶと subshell になって exit が効かない。
+input_kind=""
+classify_input() {
+  local name=$1 type=$2 owner=$3 repo=$4 ref=$5 slug
+  if [[ ${type} != github ]]; then
+    input_kind=skip
+    return 0
   fi
+  # GitHub の owner は大文字小文字を区別しない。lock には書かれたとおり入る。
+  slug=$(printf '%s/%s' "${owner}" "${repo}" | tr '[:upper:]' '[:lower:]')
+  if [[ ${slug} == nixos/nixpkgs ]]; then
+    # この script の遅延の作り方はチャンネル前提。追跡先が変わっていたら止める。
+    if [[ ${ref} != "${channel}" ]]; then
+      die "input '${name}' の nixpkgs が ${channel} を追っていません (ref=${ref:-なし})。
+公開の一覧から選ぶ形が崩れると binary cache の揃わない revision を掴むので、
+追跡先を変えたならこの script も直すこと。"
+    fi
+    input_kind=channel
+    return 0
+  fi
+  input_kind=commit
 }
 
 ################
@@ -230,7 +375,7 @@ picked_rev=""
 hit_candidate_cap=0
 pick_nixpkgs_release() {
   local cutoff=$1 series rel epoch i seen=0
-  local -a releases=()
+  local releases=()
   shift
   hit_candidate_cap=0
   for series in "$@"; do
@@ -261,60 +406,6 @@ pick_nixpkgs_release() {
   return 1
 }
 
-#####################
-# home-manager 側   #
-#####################
-
-hm_rev=""
-hm_epoch=""
-# cutoff 以前で最新の commit を GitHub に直接引かせる。flake.nix が ref を
-# 指定していないので既定ブランチが対象 (sha= は渡さない)。
-pick_home_manager_commit() {
-  local cutoff=$1 owner repo url json date_str
-  owner=$(lock_field home-manager 'locked.owner')
-  repo=$(lock_field home-manager 'locked.repo')
-  if [[ -z ${owner} || -z ${repo} ]]; then
-    die "flake.lock から home-manager の owner/repo が読めませんでした。"
-  fi
-  url="https://api.github.com/repos/${owner}/${repo}/commits?per_page=1&until=$(epoch_to_iso "${cutoff}")"
-  # 未認証は 60 req/hour。1 回の実行で 1 本しか投げないので通常は足りるが、
-  # CI では GITHUB_TOKEN があれば使う。
-  if [[ -n ${GITHUB_TOKEN:-} ]]; then
-    json=$(curl -fsS -H 'Accept: application/vnd.github+json' \
-      -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}")
-  else
-    json=$(curl -fsS -H 'Accept: application/vnd.github+json' "${url}")
-  fi
-  # 応答の最初の "sha" が commit 自身の sha (以降は tree / parents のもの)。
-  hm_rev=$(printf '%s\n' "${json}" \
-    | grep -oE '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' \
-    | head -n 1 \
-    | grep -oE '[0-9a-f]{40}')
-  if [[ -z ${hm_rev} ]]; then
-    die "${owner}/${repo} に ${cutoff} 以前の commit が見つかりませんでした。"
-  fi
-  # 表示用。committer の日付が commit そのものの時刻。
-  date_str=$(printf '%s\n' "${json}" \
-    | grep -oE '"date"[[:space:]]*:[[:space:]]*"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z"' \
-    | tail -n 1 \
-    | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z')
-  hm_epoch=""
-  if [[ -n ${date_str} ]]; then
-    case ${date_flavor} in
-      gnu) hm_epoch=$(date -u -d "${date_str}" +%s) ;;
-      bsd) hm_epoch=$(LC_ALL=C date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "${date_str}" +%s) ;;
-    esac
-  fi
-}
-
-##########
-# 各動作 #
-##########
-
-age_days() {
-  printf '%s\n' "$((($1 - $2) / 86400))"
-}
-
 die_not_found() {
   if [[ ${hit_candidate_cap} -eq 1 ]]; then
     die "${min_age_days} 日以上前のチャンネル公開に、新しい側から ${max_candidates} 件
@@ -323,13 +414,12 @@ die_not_found() {
   die "${min_age_days} 日以上前のチャンネル公開が見つかりませんでした。"
 }
 
-resolve() {
-  local now cutoff series prev
-  now=$(date -u +%s)
-  cutoff=$((now - min_age_days * 86400))
-
-  require_channel_input
-
+# 選ぶ公開は cutoff だけで決まる。複数の flake を続けて処理するとき、同じ
+# HEAD を何度も投げないよう 1 度だけ解決する。
+nixpkgs_resolved=0
+resolve_nixpkgs_once() {
+  local cutoff=$1 series prev
+  [[ ${nixpkgs_resolved} -eq 0 ]] || return 0
   series=$(series_of "$(current_release)")
   [[ ${series} != pre ]] || die "チャンネル ${channel} の現在の公開名が取れませんでした。"
   if ! pick_nixpkgs_release "${cutoff}" "${series}"; then
@@ -338,78 +428,200 @@ resolve() {
     note "${series} に ${min_age_days} 日以上前の公開が無いので ${prev} も見ます。"
     pick_nixpkgs_release "${cutoff}" "${prev}" "${series}" || die_not_found
   fi
+  nixpkgs_resolved=1
+}
 
-  pick_home_manager_commit "${cutoff}"
+#####################
+# github の commit  #
+#####################
 
-  printf '%s==> %s 日以上前の revision を選びました%s\n' \
-    "${c_cyan}" "${min_age_days}" "${c_reset}"
-  printf '  %-13s %s\n' nixpkgs "${picked_rev}"
-  detail "${picked_release} / 公開 $(epoch_to_day "${picked_epoch}") ($(age_days "${now}" "${picked_epoch}") 日前)"
-  printf '  %-13s %s\n' home-manager "${hm_rev}"
-  if [[ -n ${hm_epoch} ]]; then
-    detail "commit $(epoch_to_day "${hm_epoch}") ($(age_days "${now}" "${hm_epoch}") 日前)"
+gh_rev=""
+gh_epoch=""
+# cutoff 以前で最新の commit を GitHub に直接引かせる。ref を指定していない
+# input は既定ブランチが対象になる。
+pick_github_commit() {
+  local name=$1 owner=$2 repo=$3 ref=$4 cutoff=$5 url json date_str
+  url="https://api.github.com/repos/${owner}/${repo}/commits?per_page=1&until=$(epoch_to_iso "${cutoff}")"
+  if [[ -n ${ref} ]]; then
+    url="${url}&sha=${ref}"
   fi
+  # 未認証は 60 req/hour。input 1 件につき 1 本しか投げないので通常は足りるが、
+  # CI では GITHUB_TOKEN があれば使う。
+  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+    json=$(curl -fsS -H 'Accept: application/vnd.github+json' \
+      -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}")
+  else
+    json=$(curl -fsS -H 'Accept: application/vnd.github+json' "${url}")
+  fi
+  # 応答の最初の "sha" が commit 自身の sha (以降は tree / parents のもの)。
+  # 空振りは下で判定するので、pipefail に殺されないよう握る。
+  gh_rev=$(printf '%s\n' "${json}" \
+    | grep -oE '"sha"[[:space:]]*:[[:space:]]*"[0-9a-f]{40}"' \
+    | head -n 1 \
+    | grep -oE '[0-9a-f]{40}' || true)
+  if [[ -z ${gh_rev} ]]; then
+    die "input '${name}' (${owner}/${repo}) に $(epoch_to_day "${cutoff}") 以前の commit が
+見つかりませんでした。"
+  fi
+  # 表示用。committer の日付が commit そのものの時刻。
+  date_str=$(printf '%s\n' "${json}" \
+    | grep -oE '"date"[[:space:]]*:[[:space:]]*"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z"' \
+    | tail -n 1 \
+    | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}Z' || true)
+  gh_epoch=""
+  if [[ -n ${date_str} ]]; then
+    gh_epoch=$(iso_to_epoch "${date_str}")
+  fi
+}
+
+##########
+# 各動作 #
+##########
+
+# flake ディレクトリを検算して lock の **絶対パス** を出す。
+# 絶対にするのは builtins.readFile が相対パスの文字列を受け付けないため
+# ("string './nix/flake.lock' doesn't represent an absolute path")。
+lock_path_of() {
+  local dir=$1 abs
+  [[ -d ${dir} ]] || die "flake ディレクトリがありません: ${dir}"
+  [[ -f ${dir}/flake.lock ]] || die "flake.lock がありません: ${dir}/flake.lock
+(まだ lock が無いなら先に nix flake lock を実行すること)"
+  abs=$(
+    cd -- "${dir}" &>/dev/null
+    pwd -P
+  )
+  printf '%s/flake.lock\n' "${abs}"
+}
+
+# resolve_dir が埋める。update はこれをそのまま --override-input へ渡す。
+# URL の owner/repo は flake.lock の locked から取る (追跡先を勝手に変えないため)。
+resolved_names=()
+resolved_urls=()
+
+resolve_dir() {
+  local dir=$1 lock now cutoff rows
+  local name type owner repo lastmod ref
+  # die は $(...) の中では subshell を抜けるだけなので、呼び側で失敗を見る。
+  lock=$(lock_path_of "${dir}") || return 1
+  rows=$(read_lock_inputs "${lock}") || return 1
+  now=$(date -u +%s)
+  cutoff=$((now - min_age_days * 86400))
+
+  resolved_names=()
+  resolved_urls=()
+
+  printf '%s==> %s (下限 %s 日)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${c_reset}"
+
+  while IFS=$'\t' read -r name type owner repo lastmod ref; do
+    [[ -n ${name} ]] || continue
+    classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
+    case ${input_kind} in
+      channel)
+        resolve_nixpkgs_once "${cutoff}"
+        resolved_names+=("${name}")
+        resolved_urls+=("github:${owner}/${repo}/${picked_rev}")
+        printf '  %-14s %s\n' "${name}" "${picked_rev}"
+        detail "${picked_release} / 公開 $(epoch_to_day "${picked_epoch}") ($(age_days "${now}" "${picked_epoch}") 日前)"
+        ;;
+      commit)
+        pick_github_commit "${name}" "${owner}" "${repo}" "${ref}" "${cutoff}"
+        resolved_names+=("${name}")
+        resolved_urls+=("github:${owner}/${repo}/${gh_rev}")
+        printf '  %-14s %s\n' "${name}" "${gh_rev}"
+        if [[ -n ${gh_epoch} ]]; then
+          detail "${owner}/${repo}${ref:+ (${ref})} / commit $(epoch_to_day "${gh_epoch}") ($(age_days "${now}" "${gh_epoch}") 日前)"
+        fi
+        ;;
+      skip)
+        printf '  %-14s %s(%s なので対象外)%s\n' \
+          "${name}" "${c_dim}" "${type:-follows}" "${c_reset}"
+        ;;
+    esac
+  done <<<"${rows}"
+
+  if [[ -z ${resolved_names[*]+x} ]]; then
+    warn "${dir}: 遅延の対象になる input がありませんでした。"
+    return 1
+  fi
+}
+
+cmd_resolve() {
+  local dir failed=0
+  for dir in "${flake_dirs[@]}"; do
+    resolve_dir "${dir}" || failed=1
+  done
+  return "${failed}"
 }
 
 cmd_update() {
-  resolve
-  printf '%s+ nix flake update nixpkgs home-manager --flake %s ...%s\n' \
-    "${c_cyan}" "${nix_dir}" "${c_reset}"
-  # --override-input は flake.nix を書き換えずに lock の pin だけを差し替える。
-  # `nix flake update` 経由なら lock へ書き込まれる (nix 2.34 で実測)。
-  # flake.nix 側は ${channel} を指したままなので、素で `nix flake update` を
-  # 叩くと先端へ飛ぶ。そのための保険が check (CI で回している)。
-  nix flake update nixpkgs home-manager --flake "${nix_dir}" \
-    --override-input nixpkgs "github:NixOS/nixpkgs/${picked_rev}" \
-    --override-input home-manager "github:nix-community/home-manager/${hm_rev}"
+  local dir i args failed=0
+  for dir in "${flake_dirs[@]}"; do
+    # 1 つ落ちても残りは更新する (複数の flake をまとめて上げる用)。
+    resolve_dir "${dir}" || {
+      failed=1
+      continue
+    }
+    # --override-input は flake.nix を書き換えずに lock の pin だけを差し替える。
+    # `nix flake update` 経由なら lock へ書き込まれる (nix 2.34 で実測)。
+    # flake.nix 側は追跡先を指したままなので、素で `nix flake update` を叩くと
+    # 先端へ飛ぶ。そのための保険が check (CI で回している)。
+    args=()
+    for ((i = 0; i < ${#resolved_names[@]}; i++)); do
+      args+=("${resolved_names[i]}")
+    done
+    args+=(--flake "${dir}")
+    for ((i = 0; i < ${#resolved_names[@]}; i++)); do
+      args+=(--override-input "${resolved_names[i]}" "${resolved_urls[i]}")
+    done
+    printf '%s+ nix flake update %s%s\n' "${c_cyan}" "${args[*]}" "${c_reset}"
+    nix flake update "${args[@]}"
+  done
 }
 
 cmd_check() {
-  local now node lm age failed=0
+  local dir lock rows now name type owner repo lastmod ref age failed=0 checked
   now=$(date -u +%s)
-  printf '%s==> flake.lock の pin の古さ (下限 %s 日)%s\n' \
-    "${c_cyan}" "${min_age_days}" "${c_reset}"
-  if [[ ${min_age_days} -eq 0 ]]; then
-    note '下限 0 なので常に通ります (DOTFILES_MIN_RELEASE_AGE_DAYS=0)。'
-  fi
-  for node in nixpkgs home-manager; do
-    lm=$(lock_field "${node}" 'locked.lastModified')
-    if [[ -z ${lm} ]]; then
-      die "flake.lock から ${node} の lastModified が読めませんでした。"
+  for dir in "${flake_dirs[@]}"; do
+    lock=$(lock_path_of "${dir}")
+    rows=$(read_lock_inputs "${lock}")
+    checked=0
+    printf '%s==> %s の pin の古さ (下限 %s 日)%s\n' \
+      "${c_cyan}" "${dir}" "${min_age_days}" "${c_reset}"
+    if [[ ${min_age_days} -eq 0 ]]; then
+      note '下限 0 なので常に通ります。'
     fi
-    age=$(age_days "${now}" "${lm}")
-    if [[ ${age} -lt ${min_age_days} ]]; then
-      printf '  %-13s %s (%s 日前)  %sNG%s\n' \
-        "${node}" "$(epoch_to_day "${lm}")" "${age}" "${c_red}" "${c_reset}"
-      failed=1
-    else
-      printf '  %-13s %s (%s 日前)  OK\n' \
-        "${node}" "$(epoch_to_day "${lm}")" "${age}"
+    while IFS=$'\t' read -r name type owner repo lastmod ref; do
+      [[ -n ${name} ]] || continue
+      classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
+      [[ ${input_kind} != skip ]] || continue
+      checked=$((checked + 1))
+      if [[ -z ${lastmod} || ${lastmod} == 0 ]]; then
+        die "${lock} から ${name} の lastModified が読めませんでした。"
+      fi
+      age=$(age_days "${now}" "${lastmod}")
+      if [[ ${age} -lt ${min_age_days} ]]; then
+        printf '  %-14s %s (%s 日前)  %sNG%s\n' \
+          "${name}" "$(epoch_to_day "${lastmod}")" "${age}" "${c_red}" "${c_reset}"
+        failed=1
+      else
+        printf '  %-14s %s (%s 日前)  OK\n' \
+          "${name}" "$(epoch_to_day "${lastmod}")" "${age}"
+      fi
+    done <<<"${rows}"
+    if [[ ${checked} -eq 0 ]]; then
+      warn "${dir}: 判定できる input がありませんでした (github 以外か follows だけ)。"
     fi
   done
   if [[ ${failed} -eq 1 ]]; then
     die "先端に近すぎる pin があります。
-./nix/scripts/flake-lock-age.sh update で ${min_age_days} 日以上前の revision へ
-下げ直すこと。意図して先端を入れた (緊急の CVE 修正など) 場合は、この失敗は
-意図どおりなので、そのまま記録として残すか workflow_dispatch で下限を下げて
-再実行する。"
+flake-lock-age.sh update で ${min_age_days} 日以上前の revision へ下げ直すこと。
+意図して先端を入れた (緊急の CVE 修正など) 場合は、この失敗は意図どおりなので、
+そのまま記録として残すか下限を下げて再実行する。"
   fi
 }
 
-case ${1:-} in
-  resolve) resolve ;;
+case ${cmd} in
+  resolve) cmd_resolve ;;
   update) cmd_update ;;
   check) cmd_check ;;
-  *)
-    cat <<'EOS' >&2
-使い方: flake-lock-age.sh <resolve|update|check>
-
-  resolve  遅延を満たす revision を表示するだけ (flake.lock は触らない)
-  update   その revision へ flake.lock を更新する
-  check    今の flake.lock が下限日数を満たすか検査する (CI 用)
-
-日数は DOTFILES_MIN_RELEASE_AGE_DAYS で変える (既定 7)。
-EOS
-    exit 2
-    ;;
 esac

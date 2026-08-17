@@ -80,7 +80,14 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ./nix/scripts/flake-lock-age.sh check
 ```
 
-日数は `DOTFILES_MIN_RELEASE_AGE_DAYS` で変える（`0` で遅延なし）。理由と外し方は [`nix/README.md`](../../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)。
+日数は `--min-age-days N` で変える（`0` で遅延なし）。`setup` 経由なら `DOTFILES_MIN_RELEASE_AGE_DAYS`。理由と外し方は [`nix/README.md`](../../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)。
+
+この遅延は**本体の `nix/` だけの話ではない**。リポジトリ内の flake（skill 側のものを含む）は全部同じ扱いで、CI の `lock-age` ジョブがまとめて検査している。
+
+```sh
+./nix/scripts/flake-lock-age.sh check \
+  ./nix ./nix/files/claude/skills/pjp-drawio ./nix/files/claude/skills/pjp-plantuml
+```
 
 ## 壊れたら戻す
 

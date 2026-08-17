@@ -1402,7 +1402,14 @@ step_flake_update() {
   # ゼロデイ対策として、出たばかりのものを掴まないための遅延を入れている。
   # 遅延を外したいときは DOTFILES_MIN_RELEASE_AGE_DAYS=0 を付ける。
   # 詳細は nix/scripts/flake-lock-age.sh の冒頭と README を参照。
-  run "${script_dir}/flake-lock-age.sh" update || return 1
+  #
+  # あちらは任意の flake を取れる汎用の道具になったので、対象は明示して渡す。
+  # 日数の環境変数もあちらの名前へ橋渡しする (DOTFILES_ は setup.sh の一族、
+  # FLAKE_ は単体で使える道具としての名前)。
+  if [[ -n ${DOTFILES_MIN_RELEASE_AGE_DAYS:-} ]]; then
+    export FLAKE_MIN_RELEASE_AGE_DAYS="${DOTFILES_MIN_RELEASE_AGE_DAYS}"
+  fi
+  run "${script_dir}/flake-lock-age.sh" update "${nix_dir}" || return 1
   # --dry-run では本体の lock を実際には書き換えないので、ここは同期したままに
   # 見えて何も出ない。実行時は必ず張り直しが走る。
   sync_local_flake_lock || return 1
