@@ -30,8 +30,9 @@ skill や repo に script を足し、その script が手元に無い外部ツ�
 何を入れるか（グローバル CLI は Nix、言語ランタイムは mise）は別で、
 ADR 001 の決定 6 に従う。
 
-`flake.nix` の骨組み・devShell へ入り直す script の形・`.env` の読み込みなど、
-実際に書くときの詳細は `pjp-nix-flake` skill。
+`flake.nix` の骨組み・devShell へ入り直す script の形・`.env` の読み込み・
+`flake.lock` の更新（**素の `nix flake update` は使わない**）など、実際に書くときの
+詳細は `pjp-nix-flake` skill。
 
 ## 命名
 

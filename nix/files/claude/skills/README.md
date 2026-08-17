@@ -82,6 +82,17 @@ lock が無いと nix がその場で lock を書こうとして失敗する。
 error: opening file "/nix/store/....../flake.lock": Permission denied
 ```
 
+lock を更新するときは素の `nix flake update` を使わない。**公開から 7 日以上経った
+revision に限る**遅延が入っており、CI の `lock-age` ジョブが検査している
+（`nix/README.md` 「新しすぎる revision を pin しない」）。
+
+```sh
+./nix/scripts/flake-lock-age.sh update nix/files/claude/skills/pjp-<名前>
+```
+
+> **flake を足したら `.github/workflows/nix.yml` の `lock-age` にも足すこと。**
+> 対象はディレクトリの列挙なので、足し忘れると黙って検査から漏れる。
+
 script から devShell へ入り直すときは、**symlink を解決した実体のパス**を渡す。
 `~/.claude/skills/<名前>` は store への symlink なので、`$0` をそのまま使うと
 flake の位置を見失う。symlink を `path:` へ渡すと、解決先を外部パス扱いされて
