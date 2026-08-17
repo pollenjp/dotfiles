@@ -467,14 +467,16 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
 `pollenjp/claude-skills`（private）を clone して `~/.claude/` へ繋ぐ。
 詳細は後述の「Claude Code > private な skill 置き場」を参照。
 
-> ⚠️ **private リポジトリなので SSH 鍵が要る。** 取得に失敗すると `setup.sh` はそこで
-> 止まり、後続の手順（`bootstrap-mise`）が走らない。まだ鍵を用意していないマシンでは、
-> 先に `ssh -T git@github.com` が通ることを確認しておくか、「カスタム」でこの手順の
-> 選択を外して進め、あとから個別に実行する。
->
-> ```sh
-> ~/dotfiles/setup --steps bootstrap-claude-skills
-> ```
+**private リポジトリなので SSH 鍵が要る**が、取得に失敗しても**エラーにはならない**。
+警告を出して正常終了するので、`setup.sh` の後続（`bootstrap-mise` など）はそのまま走る
+（この dotfiles は public で、claude-skills を取れないマシンでも通す必要があるため）。
+
+失敗したときは `~/.claude/` に一切触らない（リンクを張りも消しもしない）。鍵を用意した
+あとで、この手順だけ実行し直せばよい。
+
+```sh
+~/dotfiles/setup --steps bootstrap-claude-skills
+```
 
 このリポジトリを使わないマシンでは、この手順ごと飛ばしてよい。
 
@@ -1011,6 +1013,25 @@ skill を足したあとや別マシンの変更を取り込むときに何度�
 
 `nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、3 系統が兄弟として
 並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
+
+#### 取得できないマシンでも止まらない
+
+dotfiles は public なので、claude-skills を取れないマシン（鍵がまだ無い、メンバー
+ではない、オフライン）でも setup を通したい。そのため**取得の失敗はエラーにせず、
+警告を出して exit 0 する**。`setup.sh` は手順が 1 つでも失敗すると残りを走らせないので、
+ここで落ちると後続の `bootstrap-*` まで巻き添えになる。
+
+| 状況 | 挙動 |
+| --- | --- |
+| clone できない（鍵が無い / オフライン / `git` が無い） | `~/.claude/` には触らず、警告して終了 |
+| clone はあるが pull できない | 手元のクローンの内容でリンクを張り直し、警告を添える |
+
+取得できなかったときにリンクを**消しにいかない**のは重要で、掃除は「リンク先が
+クローンの中を指しているか」で判定するため、クローンが無い状態で prune すると
+別マシンで張ったリンクを全部消してしまう。
+
+鍵が無いマシンで対話プロンプト（`known_hosts` の確認など）に固まらないよう、
+`GIT_TERMINAL_PROMPT=0` と `ssh -o BatchMode=yes` で即座に失敗させている。
 
 #### なぜ flake input にしないのか
 
