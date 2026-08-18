@@ -11,6 +11,19 @@
 #
 # 冪等。skill を足したあとや、別マシンでの変更を取り込むときに何度でも実行してよい。
 #
+# ## claude-skills へアクセスできないマシンでも止まらない
+#
+# dotfiles は **public** なので、claude-skills を取れないマシン (SSH 鍵がまだ無い、
+# メンバーではない、オフライン) でも setup を通したい。そこで **取得に失敗しても
+# エラーにしない**。警告を出して exit 0 する。
+#
+#   - clone できない -> private skill 無しで続行 (リンクは張らないし消さない)
+#   - pull できない   -> 手元のクローンの内容でリンクを張り直す
+#
+# setup.sh は手順が 1 つ失敗すると残りを走らせないので、ここで exit 1 すると
+# 後続の bootstrap-* まで巻き込んで落ちる。それを避けるため。
+# 取得できたかどうかは最後のログの !! を見る。
+#
 # ## なぜ Nix (flake input) で管理しないのか
 #
 # claude-skills は **private** で、dotfiles は **public**。flake input にすると:
@@ -54,6 +67,12 @@
 
 set -eu -o pipefail
 
+# 鍵が無い / known_hosts に github.com が無いマシンでは、git や ssh が対話プロンプトを
+# 出して入力を待つ。setup.sh ごと固まるより即座に失敗した方がよいので封じる
+# (ssh-agent に載っている鍵は BatchMode でもそのまま使える)。
+export GIT_TERMINAL_PROMPT=0
+export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
+
 repo_url="git@github.com:pollenjp/claude-skills.git"
 repo_path="github.com/pollenjp/claude-skills"
 kinds=(skills agents commands)
@@ -66,6 +85,11 @@ dir_arg=""
 do_pull=1
 dry_run=0
 status_only=0
+
+# クローンが手元に無い (= リンクの張りようが無い) 状態。最後に警告を出して exit 0 する。
+unreachable=0
+# クローンはあるが更新できなかった状態。手元の内容でリンクは張る。
+stale=0
 
 usage() {
   cat <<'EOS'
@@ -84,6 +108,9 @@ private な skill 置き場 (pollenjp/claude-skills) を取得して ~/.claude/ 
   2. $CLAUDE_SKILLS_DIR
   3. $(ghq root)/github.com/pollenjp/claude-skills
   4. ~/ghq/github.com/pollenjp/claude-skills
+
+claude-skills は private なので、アクセスできないマシンでは取得に失敗する。
+その場合はエラーにせず、警告を出して正常終了する (~/.claude/ には触らない)。
 EOS
 }
 
@@ -129,7 +156,10 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-command -v git &>/dev/null || die "git が見つかりません。"
+# git が無いと取得も掃除もできないが、これも「取得できない」の一種として扱う
+# (die にすると setup.sh の後続が落ちる)。
+have_git=1
+command -v git &>/dev/null || have_git=0
 
 ########################
 # クローン先を決める   #
@@ -195,12 +225,20 @@ ensure_clone() {
       warn "upstream が無いブランチなので pull を飛ばします: ${dir}"
       return 0
     fi
-    run git -C "${dir}" pull --ff-only || die "pull に失敗しました。手で解決してください: ${dir}"
+    # 取れなくても手元のクローンは使えるので、警告だけ残して続ける。
+    if ! run git -C "${dir}" pull --ff-only; then
+      warn "pull に失敗しました。手元のクローンのまま続けます: ${dir}"
+      note "鍵もネットワークも問題ないなら、履歴が分岐しています。手で解決してください。"
+      stale=1
+    fi
     return 0
   fi
 
   if [[ -e ${dir} ]]; then
-    die "${dir} は git リポジトリではありません。退けてから実行してください。"
+    warn "${dir} は git リポジトリではありません。取得を飛ばします。"
+    note "退けてから再実行してください。"
+    unreachable=1
+    return 0
   fi
 
   run mkdir -p "$(dirname "${dir}")"
@@ -208,8 +246,9 @@ ensure_clone() {
     warn "clone に失敗しました: ${repo_url}"
     note "private リポジトリなので SSH 鍵が要ります。次で疎通を確認してください:"
     note "  ssh -T git@github.com"
-    exit 1
+    unreachable=1
   fi
+  return 0
 }
 
 ##########
@@ -356,23 +395,46 @@ if [[ ${status_only} == 1 ]]; then
 fi
 
 echo "==> クローン (${dir})"
-ensure_clone
+if [[ ${have_git} == 0 ]]; then
+  warn "git が見つかりません。取得を飛ばします。"
+  note "先に home-manager switch を実行してください。"
+  unreachable=1
+else
+  ensure_clone
+fi
 
-echo "==> ~/.claude/ へリンク"
-for kind in "${kinds[@]}"; do
-  link_kind "${kind}"
-  prune_kind "${kind}"
-done
-note "追加/更新 ${linked} / 削除 ${removed} / 飛ばした ${skipped}"
+# クローンが無いまま prune すると、別マシンで張ったリンクを消しに行ってしまう。
+# 取得できていないときは ~/.claude/ には一切触らない。
+if [[ ${unreachable} == 0 ]]; then
+  echo "==> ~/.claude/ へリンク"
+  for kind in "${kinds[@]}"; do
+    link_kind "${kind}"
+    prune_kind "${kind}"
+  done
+  note "追加/更新 ${linked} / 削除 ${removed} / 飛ばした ${skipped}"
 
-if [[ ${dry_run} == 0 ]]; then
-  mkdir -p "${state_dir}"
-  printf '%s\n' "${dir}" >"${state_file}"
+  if [[ ${dry_run} == 0 ]]; then
+    mkdir -p "${state_dir}"
+    printf '%s\n' "${dir}" >"${state_file}"
+  fi
 fi
 
 echo
+if [[ ${unreachable} == 1 ]]; then
+  warn "claude-skills を取得できていません。private な skill 無しで続けます。"
+  note "公開している skill / agent / command は Nix が配置するので、そちらは使えます。"
+  note "このリポジトリを使わないマシンなら、これで問題ありません。"
+  note "鍵やネットワークを整えたら、この手順だけ実行し直せばよい:"
+  note "  $0"
+  exit 0
+fi
+
 echo "完了しました。Claude Code を再起動すると読み込まれます。"
 note "いま繋がっているもの: $0 --status"
+if [[ ${stale} == 1 ]]; then
+  echo
+  warn "claude-skills を更新できていません (上の !! を参照)。手元のクローンのままです。"
+fi
 if [[ ${skipped} -gt 0 ]]; then
   echo
   warn "飛ばしたものがあります (上の !! を参照)。名前の衝突を解消してから再実行してください。"
