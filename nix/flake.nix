@@ -73,9 +73,42 @@
       # home-manager モジュールとバージョンがずれる可能性がある。
       # NOTE: rec の中では属性名 home-manager が input を影にするため、
       #       input 側は inputs. 経由で参照する。
-      packages = forAllSystems (system: rec {
-        home-manager = inputs.home-manager.packages.${system}.default;
-        default = home-manager;
+      packages = forAllSystems (
+        system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        rec {
+          home-manager = inputs.home-manager.packages.${system}.default;
+          default = home-manager;
+
+          # flake.lock の pin を「公開から N 日以上経った revision」に限る道具。
+          # 他のリポジトリからも呼べるように出している (dotfiles 専用ではない):
+          #
+          #   nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
+          #
+          # nix 自身は runtimeInputs に入れない。呼び出し側の nix
+          # (Determinate 版など) をそのまま使わせる。
+          flake-lock-age = pkgs.writeShellApplication {
+            name = "flake-lock-age";
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.curl
+              pkgs.gnused
+              pkgs.gnugrep
+            ];
+            text = builtins.readFile ./scripts/flake-lock-age.sh;
+          };
+        }
+      );
+
+      # `nix run <flake>#flake-lock-age` の入口。
+      apps = forAllSystems (system: {
+        flake-lock-age = {
+          type = "app";
+          program = "${self.packages.${system}.flake-lock-age}/bin/flake-lock-age";
+          meta.description = "flake.lock の pin に最小経過日数を課す";
+        };
       });
 
       formatter = forAllSystems (system: nixpkgs.legacyPackages.${system}.nixfmt);

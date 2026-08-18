@@ -95,6 +95,9 @@ jobs:
   # lock に書く pin でしか表現されていない。つまり素で `nix flake update` を
   # 叩くと遅延は黙って外れる。それに気付くための番人がこのジョブ。
   #
+  # 対象はリポジトリ内の flake **すべて**。本体だけ見ていると、skill 側の
+  # flake が先端に張り付いたままになる。flake を足したらここへも足すこと。
+  #
   # 判定に使う lastModified は commit 時刻なので、チャンネル公開時刻より
   # 1〜2 日古い側に出る (= 判定は少し緩い)。先端への事故を捕まえるには十分。
   lock-age:
@@ -109,8 +112,12 @@ jobs:
       - name: pin が下限日数を満たすか
         env:
           # workflow_dispatch 以外では空になり、script 側の既定 (7) が効く。
-          DOTFILES_MIN_RELEASE_AGE_DAYS: ${{ inputs.min_release_age_days }}
-        run: ./nix/scripts/flake-lock-age.sh check
+          FLAKE_MIN_RELEASE_AGE_DAYS: ${{ inputs.min_release_age_days }}
+        run: |
+          ./nix/scripts/flake-lock-age.sh check \
+            ./nix \
+            ./nix/files/claude/skills/pjp-drawio \
+            ./nix/files/claude/skills/pjp-plantuml
 
   # devShell に入っている nixfmt / shfmt / shellcheck で整形と静的解析を確認する。
   lint:

@@ -1,12 +1,15 @@
 ---
 name: pjp-nix-flake
-description: repo や script が手元に無い外部ツールを要求するときの用意の仕方。
-  「この repo に nix flake を用意して」「devShell を作って」「依存ツールを入れて」
-  「mise から flake へ移したい」と言われたとき、script を足してそれが未インストールの
-  コマンドを使うとき、`pip install` / `npm install -g` / `apt install` / `brew install`
-  を打ちたくなったときに読む。flake / mise / system の選択順、`flake.nix` の骨組み、
-  script から devShell へ自動で入り直すパターン、`flake.lock` を必ず commit する理由、
-  `.env` の読み込みや git 追跡まわりのハマりどころを含む。
+description: repo や script が手元に無い外部ツールを要求するときの用意の仕方と、
+  `flake.lock` の更新の作法。「この repo に nix flake を用意して」「devShell を作って」
+  「依存ツールを入れて」「mise から flake へ移したい」と言われたとき、script を足して
+  それが未インストールのコマンドを使うとき、`pip install` / `npm install -g` /
+  `apt install` / `brew install` を打ちたくなったとき、そして
+  **`nix flake update` で版を上げる・`flake.lock` を更新する**ときに読む。
+  flake / mise / system の選択順、`flake.nix` の骨組み、script から devShell へ
+  自動で入り直すパターン、`flake.lock` を必ず commit する理由、**出たばかりの
+  revision を pin しない遅延 (minimumReleaseAge 相当)**、`.env` の読み込みや
+  git 追跡まわりのハマりどころを含む。
 ---
 
 # pjp-nix-flake
@@ -31,7 +34,13 @@ ADR 001 決定 6 に従う。
 ```sh
 nix develop                    # devShell に入る
 nix develop --command <cmd>    # 1 コマンドだけ実行する
-nix flake update               # 版を上げる (flake.lock が書き変わる)
+```
+
+版を上げるときは素の `nix flake update` を使わない（下の「新しすぎる revision を
+pin しない」）。
+
+```sh
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
 ```
 
 ## `flake.nix` の骨組み
@@ -80,6 +89,39 @@ nix flake update               # 版を上げる (flake.lock が書き変わる)
 }
 ```
 
+## 新しすぎる revision を pin しない
+
+**上げ先は追跡先の先端ではなく、公開から 7 日以上経った revision に限る。**
+出たばかりのものを掴まないための遅延で、npm / pnpm の `minimumReleaseAge` に相当する。
+`flake.nix` を持つリポジトリは全部これに従う（dotfiles 本体だけの決まりではない）。
+
+```sh
+FLA="github:pollenjp/dotfiles?dir=nix#flake-lock-age"
+
+nix run "${FLA}" -- resolve   # 選ばれる revision を見るだけ
+nix run "${FLA}" -- update    # その revision へ flake.lock を更新
+nix run "${FLA}" -- check     # 今の flake.lock を検査 (CI 用)
+```
+
+対象は root の直下 input **すべて**。1 つでも先端に張り付いていれば意味がない。
+input ごとに測り方が変わる（nixpkgs はチャンネル公開時刻、その他の GitHub input は
+commit 時刻）が、それは script 側が `flake.lock` を読んで判断する。
+
+⚠️ **`flake.nix` は追跡先（`nixpkgs-unstable` など）を指したままで、遅延は
+`flake.lock` の pin にしか現れない。** つまり素で `nix flake update` を叩けば
+黙って先端に飛ぶ。だから **CI に `check` を置いて番人にする**（下の例）。
+
+```yaml
+- uses: DeterminateSystems/nix-installer-action@<pin>
+- run: nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
+```
+
+日数は `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS` で変える。緊急の CVE 修正を
+先端から入れたいときは `0`。**遅延を伸ばすほど既知 CVE が未修正のまま残る期間も
+伸びる**ので、長くすれば安全になる種類の数字ではない。
+
+根拠・新規リポジトリへの入れ方・効かない範囲 → `references/lock-age.md`
+
 ## `flake.lock` は必ず commit する
 
 版を固定しているのは `flake.lock`。`PLANTUML_VERSION` のような明示の版指定は要らない。
@@ -88,7 +130,7 @@ nix flake update               # 版を上げる (flake.lock が書き変わる)
 read-only なので、nix がその場で lock を書こうとして失敗する。
 
 ```sh
-nix flake update
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
 git add flake.lock
 ```
 
@@ -134,3 +176,6 @@ claude-skills の `skills/README.md`（作業クローン側）を参照。
 
 `.env` の読み込み、git 追跡まわりの罠、差分ビルドが無いこと、mise からの移行
 → `references/gotchas.md`
+
+pin の遅延の根拠、新規リポジトリへの入れ方、効かない範囲
+→ `references/lock-age.md`

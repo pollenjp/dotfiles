@@ -54,22 +54,32 @@ npm ほど劇的には効かない**という位置づけになる。
 ## 2. 決定 (Decision)
 
 1. `flake.lock` に入れる revision は、**公開から 7 日以上経ったもの**に限る。
-   日数は `DOTFILES_MIN_RELEASE_AGE_DAYS` で変えられる（`0` で遅延なし）。
-2. 対象は `nixpkgs` と `home-manager` の**両方**。片方だけ遅らせても、もう片方が
-   先端に張り付いたままになる。
-3. 上げ先の決定と `flake.lock` への書き込みは
+   日数は `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS` で変えられる
+   （`0` で遅延なし）。`setup.sh` 経由では同名の一族に合わせて
+   `DOTFILES_MIN_RELEASE_AGE_DAYS` を受け、あちらが橋渡しする。
+2. 対象は **root の直下 input すべて**。片方だけ遅らせても、もう片方が先端に
+   張り付いたままになる。測り方は input ごとに変わるが、それは `flake.lock` を
+   読んで判別する（下表）。
+3. **適用先は dotfiles 本体だけではなく、自分が管理する flake すべて。**
+   このリポジトリでは `nix/` に加えて skill 側の flake
+   （`nix/files/claude/skills/pjp-drawio` / `pjp-plantuml`）が対象。
+4. 上げ先の決定と `flake.lock` への書き込みは
    [`nix/scripts/flake-lock-age.sh`](../../../nix/scripts/flake-lock-age.sh) に置く。
    `setup.sh` の `flake-update` 手順はこれを呼ぶ。**素の `nix flake update` は使わない。**
-4. `flake.nix` は `nixpkgs-unstable` を追ったままにし、pin は `flake.lock` にだけ書く。
+   他のリポジトリからも同じものを呼べるように、flake の app として出す
+   （`nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age'`）。
+5. `flake.nix` は `nixpkgs-unstable` を追ったままにし、pin は `flake.lock` にだけ書く。
    その結果**素で `nix flake update` を叩けば遅延は黙って外れる**ので、CI に
    `lock-age` ジョブ（`flake-lock-age.sh check`）を置いて気付けるようにする。
+   対象 flake はジョブ内で列挙する（flake を足したらここへも足す）。
 
 ### 日数の根拠を input ごとに変える
 
 | input | 何の時刻で測るか | なぜ |
 | --- | --- | --- |
-| `nixpkgs` | `releases.nixos.org` のチャンネル公開時刻（`git-revision` の `Last-Modified`） | 各公開は Hydra を通った commit なので binary cache が揃っている |
-| `home-manager` | 既定ブランチの commit 時刻（GitHub API の `until=`） | home-manager にはチャンネルが無い |
+| `nixpkgs`（`nixpkgs-unstable` を追うもの） | `releases.nixos.org` のチャンネル公開時刻（`git-revision` の `Last-Modified`） | 各公開は Hydra を通った commit なので binary cache が揃っている |
+| その他の GitHub input（`home-manager` など） | 追跡先の commit 時刻（GitHub API の `until=`） | これらにはチャンネルが無い |
+| `follows` / `path:` などの input | 対象外 | 自分の revision を持たない |
 
 **nixpkgs で「master の任意の commit を日付だけで選ぶ」のは採れない。** Hydra は
 master の全 commit を評価しているわけではないので、チャンネル公開でない commit は
@@ -87,6 +97,20 @@ derivation が cache に無く、ほぼ全部ソースビルドになる。`nixp
 | `nix/flake.lock` | 新しい方針に合わせて pin を下げ直した（下記） |
 | `nix/README.md` | 「新しすぎる revision を pin しない」節を追加。更新の表と手順を追随 |
 | `docs/adr/001_.../textbook/05_daily_usage.md` | 手順書なので現行に追随（ADR README の方針どおり） |
+
+### 適用先を広げたときの追加分（2026-08-17）
+
+初回は dotfiles 本体（`nix/`）だけを対象に作った。決定 3 のとおり適用先を
+「自分が管理する flake すべて」へ広げるにあたり、次を足した。**§6 の検証は
+初回の実装に対するもの**で、下の分は別に実測した（§8）。
+
+| ファイル | 変更 |
+| --- | --- |
+| `nix/scripts/flake-lock-age.sh` | 対象 flake を引数で取る（複数可）。対象 input を `flake.lock` の root inputs から自動判別（それまでは `nixpkgs` / `home-manager` 決め打ち）。`--min-age-days` を追加し、環境変数を `FLAKE_MIN_RELEASE_AGE_DAYS` へ改名 |
+| `nix/flake.nix` | `packages.<system>.flake-lock-age`（`writeShellApplication`）と `apps.<system>.flake-lock-age` を追加。他リポジトリから `nix run` で呼べるようにするため |
+| `.github/workflows/nix.yml` | `lock-age` の対象を 3 つの flake へ。環境変数名を追随 |
+| `nix/files/claude/skills/pjp-plantuml/flake.lock` | 下限 7 日を満たしていなかった（6 日前）ので下げ直した |
+| `nix/files/claude/skills/pjp-nix-flake/` | `SKILL.md` に「新しすぎる revision を pin しない」節、`references/lock-age.md` に根拠と他リポジトリへの入れ方 |
 
 ### pin の下げ直し
 
@@ -131,13 +155,16 @@ curl だけ（`jq` は Nix が入れるもの）。`flake-lock-age.sh` は同じ
 ### 注意が必要なこと
 
 - **既知 CVE の未修正期間が最大 7 日伸びる。** 緊急時は
-  `DOTFILES_MIN_RELEASE_AGE_DAYS=0` で先端へ上げ、`lock-age` が落ちるのは
+  `--min-age-days 0` で先端へ上げ、`lock-age` が落ちるのは
   意図どおりとして扱う（`workflow_dispatch` で下限 `0` を渡せば通せる）
 - **`flake.nix` だけ見ても遅延は判らない。** pin は `flake.lock` にしかない
 - `check` の判定に使う `lastModified` は **commit 時刻**であって公開時刻ではない。
   Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る
-- 未認証の GitHub API は 60 req/hour。1 回の実行で 1 本しか投げないので通常は
+- 未認証の GitHub API は 60 req/hour。input 1 件につき 1 本しか投げないので通常は
   問題にならないが、CI では `GITHUB_TOKEN` があれば使う
+- **CI の対象 flake は列挙。** flake を足したら `lock-age` ジョブへも足す必要があり、
+  足し忘れるとその flake だけ黙って検査から漏れる。自動列挙にしなかったのは、
+  `flake.lock` を探して回ると外部由来のものまで拾ってしまうため
 - unstable の系列は半年ごとに変わる（`26.11pre` → `27.05pre`）。分岐直後は新しい
   系列に十分古い公開が無いので、`flake-lock-age.sh` は 1 つ前の系列まで見る
 - **この遅延が効くのは Nix 管理の範囲だけ。** mise が入れる言語ランタイムや
@@ -213,12 +240,40 @@ $ nix flake check --all-systems --no-build ./nix
 ./nix/scripts/flake-lock-age.sh resolve
 
 # 今の lock を検査する (CI が回しているものと同じ)
-./nix/scripts/flake-lock-age.sh check
+./nix/scripts/flake-lock-age.sh check \
+  ./nix ./nix/files/claude/skills/pjp-drawio ./nix/files/claude/skills/pjp-plantuml
 
 # 日数を変える / 遅延を外す
-DOTFILES_MIN_RELEASE_AGE_DAYS=14 ./nix/scripts/flake-lock-age.sh update
-DOTFILES_MIN_RELEASE_AGE_DAYS=0  ./nix/scripts/flake-lock-age.sh update
+./nix/scripts/flake-lock-age.sh --min-age-days 14 update
+./nix/scripts/flake-lock-age.sh --min-age-days 0  update
 ```
 
 遅延を外した commit は CI の `lock-age` が落ちる。通したいときは
 `workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
+
+他のリポジトリからは flake の app として呼ぶ（チェックアウトは要らない）。
+入れ方の手順は `pjp-nix-flake` skill の `references/lock-age.md`。
+
+```sh
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
+```
+
+## 8. 適用先を広げた分の検証 (2026-08-17)
+
+Determinate Nix 3.21.9 (nix 2.34.8) / WSL2 で実測。
+
+| 確認 | 結果 |
+| --- | --- |
+| `check`（3 flake をまとめて） | `pjp-plantuml` が 6 日前で NG → 終了コード 1。他 2 つは OK |
+| `check`（`update` 後） | 3 つとも OK（nixpkgs 11〜13 日前 / home-manager 10 日前） |
+| `resolve`（2 つの skill flake） | チャンネル解決が 1 回だけ走り、2 件目は再取得なし（4.9 秒） |
+| `resolve`（`nix/`） | `home-manager` は GitHub API 経由、`nixpkgs` はチャンネル公開から。決め打ちを外しても両方の経路が出る |
+| `update`（使い捨ての 2 input flake） | `--override-input` を 2 本組み立てて両方の pin が下がる。`home-manager.inputs.nixpkgs.follows` は locked ノードを持たないので対象から外れる（root の 2 件だけが解決される） |
+| `check`（引数なし / チェックアウト） | script の隣の `nix/` を対象にする |
+| `check`（引数なし / store の app） | カレントディレクトリを対象にする |
+| `--min-age-days 0` / `=abc` / 空文字 | それぞれ素通し / 終了コード 1 / 既定 7 |
+| `setup.sh --dry-run --steps flake-update` | `flake-lock-age.sh update <nix_dir>` を表示するだけ |
+| `nix flake check --all-systems --no-build` | `nix/` は `apps.*.flake-lock-age` を含め通過。skill 側の 2 flake も通過 |
+| `nix build ./nix/files/claude/skills/pjp-plantuml#plantuml` | 下げ直した pin でビルド成功 |
+
+`shfmt -d` / `shellcheck` / `nixfmt --check` は変更したファイルすべてで通過。
