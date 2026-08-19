@@ -350,7 +350,7 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.5 |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.5 → 6.6 |
 | 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
@@ -457,6 +457,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
+| 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -952,12 +953,19 @@ bash では元々発火していなかった）。
 
 `bash.nix` の `initExtra` と `fish.nix` の `interactiveShellInit` の両方に
 ローダが入っていて、**ファイルが在れば読む / 無ければ何もしない**。
-home-manager が作りも消しもしないので、要るマシンで自分で置く。
+home-manager は作りも消しもしない（秘密情報なので store には置けない）。
+
+ファイルを置くのは setup の手順 6.6 (`bootstrap-local-env`)。
+**新しいマシン適用に含まれている**ので、新規マシンでは何もしなくてよい。
 
 ```sh
-mkdir -p ~/.config/pjp
-touch ~/.config/pjp/env && chmod 600 ~/.config/pjp/env
+./nix/scripts/bootstrap-local-env.sh          # 実体
+~/dotfiles/setup --steps bootstrap-local-env  # 既存マシンで後から足す場合
 ```
+
+初回だけ形式を書いたテンプレート（全行コメント = 実質空）を置き、`chmod 600` する。
+**2 回目以降は中身に触らない。** 実際の API キーが入っているファイルなので、
+上書きは一切しない（緩いパーミッションだけは 600 へ締める）。
 
 ### ⚠️ `home.sessionVariables` に書かないこと
 
@@ -1276,5 +1284,6 @@ nix/
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
-    └── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
+    ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
+    └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```
