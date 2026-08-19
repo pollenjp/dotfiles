@@ -35,17 +35,23 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
 | その他の GitHub input | 追跡先の commit 時刻（GitHub API の `until=`） |
 | `follows` / `path:` などの input | 対象外（自分の revision を持たない） |
 
-判別は script が `flake.lock` を読んで自動で行うので、呼ぶ側で input を並べる必要は無い。
+判別は script が自動で行う（`flake.lock` があればそこから、まだ無ければ `flake.nix` の
+`inputs` から読む）ので、呼ぶ側で input を並べる必要は無い。
 
 ## 新しいリポジトリへ入れる
 
 1. `flake.nix` は**追跡先を指したままにする**（`nixpkgs-unstable` など）。
    revision の直書きはしない。pin は `flake.lock` にだけ置く
-2. lock を更新するときは素の `nix flake update` を使わず、こちらを通す
+2. lock は最初の 1 本目からこちらで作る。素の `nix flake update` / `nix flake lock`
+   は使わない
 
    ```sh
+   git add flake.nix   # flake は git の追跡済みファイルしか見ない
    nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
    ```
+
+   **`flake.lock` がまだ無くてもこれで作られる。** 先に `nix flake lock` を打っては
+   いけない（一度先端へ pin される）。更新するときも同じコマンド
 
 3. **CI に番人を置く。** これが無いと、素の `nix flake update` を 1 回叩いた時点で
    遅延が黙って外れる
@@ -103,4 +109,11 @@ nix run "${FLA}" -- --min-age-days 0  update   # 遅延なし = 先端
 - unstable の系列は半年ごとに変わる（`26.11pre` → `27.05pre`）。分岐直後は新しい
   系列に十分古い公開が無いので、script は 1 つ前の系列まで遡る
 - 未認証の GitHub API は 60 req/hour。CI では `GITHUB_TOKEN` があれば使われる
-- `flake.lock` がまだ無いリポジトリでは先に `nix flake lock` を実行する
+- **`flake.lock` がまだ無いリポジトリでも `update` がそのまま作る。**
+  ここで `nix flake lock` を先に打つと一度先端へ pin され、遅延が最初から外れた
+  lock を commit することになる（`check` も落ちる）。`check` だけは今 pin されて
+  いるものを測るので lock が要る
+- `flake.nix` を `git add` していないと `update` が nix 側で止まる（flake は git の
+  追跡済みファイルしか見ない）。新規リポジトリでは lock を作る前に `git add` する
+- `follows` / `path:` / registry の indirect 参照（`inputs.nixpkgs.url = "nixpkgs"` など）は
+  対象外として飛ばされる。遅延を効かせたい input は `github:owner/repo/<追跡先>` で書く

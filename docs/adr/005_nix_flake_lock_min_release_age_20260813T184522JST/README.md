@@ -112,6 +112,26 @@ derivation が cache に無く、ほぼ全部ソースビルドになる。`nixp
 | `nix/files/claude/skills/pjp-plantuml/flake.lock` | 下限 7 日を満たしていなかった（6 日前）ので下げ直した |
 | `nix/files/claude/skills/pjp-nix-flake/` | `SKILL.md` に「新しすぎる revision を pin しない」節、`references/lock-age.md` に根拠と他リポジトリへの入れ方 |
 
+### lock がまだ無い flake を通した分（2026-08-19）
+
+他のリポジトリへ**これから入れる**ときに、`flake.lock` がまだ無い状態で止まっていた
+（`ERROR: flake.lock がありません`）。案内していた回避策が「先に `nix flake lock`」で、
+これは**一度先端へ pin する**——この決定が避けたいものそのものだった。2 手目の
+`update` で下がるとはいえ、1 手目で先端の nixpkgs を取得するし、忘れれば遅延の
+外れた lock が commit される。**最初の lock も `update` で作れる**ようにした。
+
+| ファイル | 変更 |
+| --- | --- |
+| `nix/scripts/flake-lock-age.sh` | lock が無ければ input の一覧を `flake.nix` の `inputs` から読む（`resolve` / `update`）。flake ref の解釈は自前で切らず `builtins.parseFlakeRef` に任せる。`check` は lock を要求したまま（今 pin されているものを測るので）。既定ディレクトリの目印を `flake.lock` から `flake.nix` へ。GitHub API の取得に `-L` を追加（下記） |
+| `nix/README.md` | 「新しすぎる revision を pin しない」節に lock が無い場合を追記 |
+| `nix/files/claude/skills/pjp-nix-flake/references/lock-age.md` | 「先に `nix flake lock` を実行する」を撤回。`git add` が要ること、対象外になる input の書き方を追記 |
+| `nix/files/claude/skills/pjp-drawio/`, `pjp-plantuml/` | flake をプロジェクトへコピーする手順が `nix flake lock` を案内していたので差し替え |
+
+**`-L` は別の取りこぼしの修正。** 改名・移管された repo は GitHub API が 301 を
+**JSON の本体付きで**返し、`curl -f` は 3xx で落ちない。追わないと「`sha` の無い応答」
+として空振り判定に化け、「その日以前の commit が見つかりません」という無関係な
+メッセージになる（`edolstra/flake-compat` で実測。実際は repo が動いているだけ）。
+
 ### pin の下げ直し
 
 方針の導入時点の `flake.lock` は下限 7 日を満たしていなかったので、`update` で下げた。
@@ -277,3 +297,21 @@ Determinate Nix 3.21.9 (nix 2.34.8) / WSL2 で実測。
 | `nix build ./nix/files/claude/skills/pjp-plantuml#plantuml` | 下げ直した pin でビルド成功 |
 
 `shfmt -d` / `shellcheck` / `nixfmt --check` は変更したファイルすべてで通過。
+
+## 9. lock が無い flake を通した分の検証 (2026-08-19)
+
+Determinate Nix 3.21.9 (nix 2.34.8) / WSL2 で実測。
+
+| 確認 | 結果 |
+| --- | --- |
+| `resolve`（lock 無し / `nixpkgs` + `home-manager` + `flake-utils`） | 3 件とも解決。nixpkgs はチャンネル公開から、他は GitHub API から |
+| `update`（lock 無し） | `flake.lock` が新規に作られ、pin は `resolve` と同じ revision（**先端を経由しない**）。対象外の推移 input（`flake-utils/systems`）は nix が普通に解決する |
+| `check`（上の `update` 後） | 3 件とも OK（643 / 7 / 9 日前） |
+| `check`（lock 無し） | 終了コード 1。案内は `update` で作ること（`nix flake lock` ではない） |
+| input の書き方（文字列 / `url` / `type` 直書き / `follows` / `path:` / registry の indirect / `?dir=` 付き） | github だけを対象にし、他は種別を出して「対象外」と表示 |
+| `flake.nix` が git 未追加 | `update` は nix 側で止まる。`git add` を促すのは nix のメッセージなので script では見ない |
+| 改名・移管された repo（`edolstra/flake-compat`） | `-L` 追加前は「commit が見つかりません」に化けていた。追加後は 301 を追って解決 |
+| `check`（既存 lock / CI と同じ 3 flake） | 従来どおり OK（退行なし） |
+| `check`（引数なし / チェックアウト） | script の隣の `nix/` を対象にする（目印を `flake.nix` へ変えても同じ） |
+
+`shfmt -d` / `shellcheck` は変更した script で通過。

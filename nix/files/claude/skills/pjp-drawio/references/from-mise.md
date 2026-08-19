@@ -38,12 +38,14 @@ git diff --stat out/            # 出力が変わっていないか確認する
 ## CI で生成していた場合
 
 `mise` の代わりにプロジェクトの flake から呼ぶ。この skill の `flake.nix` を
-`drawio/` へコピーして `nix flake lock` し、両方 commit する。
+`drawio/` へコピーして lock を作り、両方 commit する。**`nix flake lock` は使わない**
+（先端へ pin される。`pjp-nix-flake` skill の `references/lock-age.md`）。
 
 ```sh
 cp ~/.claude/skills/pjp-drawio/flake.nix drawio/
-cd drawio && nix flake lock
-git add flake.nix flake.lock
+git add drawio/flake.nix   # flake は git の追跡済みファイルしか見ない
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update ./drawio
+git add drawio/flake.lock
 ```
 
 以降は `nix develop ./drawio --command drawio ...` や `nix run ./drawio#drawio` が使える。

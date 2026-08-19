@@ -35,7 +35,12 @@
 #   flake-lock-age.sh update  [<flake ディレクトリ>...]  flake.lock をその revision へ更新
 #   flake-lock-age.sh check   [<flake ディレクトリ>...]  今の flake.lock を検査 (CI 用)
 #
-# ディレクトリを省いたときの既定は、**この script の隣** (`<script>/../flake.lock`)
+# `flake.lock` がまだ無い flake でも resolve / update は通る (input の一覧を
+# flake.nix の `inputs` から読む)。**最初の lock も update で作ること。** 先に
+# `nix flake lock` を打つと一度先端へ pin されるので、遅延が最初から外れた lock を
+# commit することになる。`check` は「今 pin されているもの」を測るので lock が要る。
+#
+# ディレクトリを省いたときの既定は、**この script の隣** (`<script>/../flake.nix`)
 # があればそこ、無ければカレントディレクトリ。前者は dotfiles のチェックアウトから
 # 直接叩く場合、後者は他のリポジトリから nix run で呼ぶ場合を想定している。
 #
@@ -109,8 +114,11 @@ usage() {
   --min-age-days N  下限日数 (既定 7 / 環境変数 FLAKE_MIN_RELEASE_AGE_DAYS)
   -h, --help        この使い方を出す
 
-ディレクトリを省くと、この script の隣 (<script>/../flake.lock) があればそこ、
+ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
 無ければカレントディレクトリを対象にする。複数渡せば順に処理する。
+
+flake.lock がまだ無い flake でも resolve / update は通る (最初の lock も update で
+作る)。先に nix flake lock を打つと一度先端へ pin されるので使わないこと。
 EOS
 }
 
@@ -169,10 +177,13 @@ esac
 min_age_days=$((10#${min_age_days}))
 
 # 省略時の既定。チェックアウトから直接叩く形 (dotfiles) と、store から nix run で
-# 呼ぶ形の両方を通すため、script の隣に flake があるかで分ける。
+# 呼ぶ形の両方を通すため、script の隣に flake があるかで分ける。目印は flake.nix。
+# flake.lock で見ると、lock がまだ無い flake から呼んだときに判定が変わる。
+# nix run 経由では script は writeShellApplication の bin/ に居るだけなので、
+# 隣に flake.nix は無く、カレントディレクトリ側へ落ちる。
 # 空配列への [@] 展開は bash 4.3 以前の set -u で落ちるので +x で見る。
 if [[ -z ${flake_dirs[*]+x} ]]; then
-  if [[ -f "${script_dir}/../flake.lock" ]]; then
+  if [[ -f "${script_dir}/../flake.nix" ]]; then
     flake_dirs=("$(
       cd -- "${script_dir}/.." &>/dev/null
       pwd -P
@@ -231,9 +242,9 @@ age_days() {
   printf '%s\n' "$((($1 - $2) / 86400))"
 }
 
-##############
-# flake.lock #
-##############
+################
+# input の一覧 #
+################
 
 # root の直下 input を 1 行 1 件で出す。区切りはタブ。
 #
@@ -270,6 +281,47 @@ lock_inputs() {
   "
 }
 
+# lock がまだ無い flake 用。同じ形の行を flake.nix の `inputs` から作る。
+#
+# lastModified は常に 0 を置く。pin がまだ無いので測るものが無い。この行を使うのは
+# resolve / update だけで、lastModified を見る check は lock を要求する。
+#
+# url の文字列は builtins.parseFlakeRef に解かせる。github:owner/repo/ref?dir=...
+# の細部を自前で切ると必ずずれるし、nix が実際に解くのと同じ結果が要る。
+#
+# flake の評価ではなく flake.nix の import なので、input の取得は起きず、
+# flake.nix が git に追加されていなくても読める (追加は update の nix 側で要る)。
+# `outputs` は関数だが遅延評価なので触らなければ問題にならない。
+flake_nix_inputs() {
+  nix eval --raw --impure --expr "
+    let
+      flake = import \"$1\";
+      inputs = flake.inputs or { };
+      line = n:
+        let
+          spec = inputs.\${n};
+          # 文字列と url は flake ref として解く。どちらでもなければ type などを
+          # 直に書いた形と見る。follows だけの input は自分の revision を持たない
+          # ので、type を follows にして下の classify_input で対象外へ落とす。
+          r =
+            if builtins.isString spec then builtins.parseFlakeRef spec
+            else if spec ? url then builtins.parseFlakeRef spec.url
+            else if spec ? type then spec
+            else { type = if spec ? follows then \"follows\" else \"\"; };
+        in
+        builtins.concatStringsSep \"\t\" [
+          n
+          (r.type or \"\")
+          (r.owner or \"\")
+          (r.repo or \"\")
+          \"0\"
+          (r.ref or \"\")
+        ];
+    in
+    builtins.concatStringsSep \"\n\" (map line (builtins.attrNames inputs))
+  "
+}
+
 # lock_inputs を呼んで、読めなかったときにその場で止める。
 # `< <(...)` で while へ流すと nix 側の失敗を取りこぼす (while は 0 で終わる)
 # ので、一度変数へ受けてから流す。
@@ -277,6 +329,38 @@ read_lock_inputs() {
   local rows
   rows=$(lock_inputs "$1") || die "flake.lock を読めませんでした: $1"
   printf '%s\n' "${rows}"
+}
+
+read_flake_nix_inputs() {
+  local rows
+  rows=$(flake_nix_inputs "$1") || die "flake.nix の inputs を読めませんでした: $1"
+  printf '%s\n' "${rows}"
+}
+
+# flake ディレクトリを検算して **絶対パス** を出す。絶対にするのは
+# builtins.readFile / import が相対パスの文字列を受け付けないため
+# ("string './nix/flake.lock' doesn't represent an absolute path")。
+abs_flake_dir() {
+  local dir=$1
+  [[ -d ${dir} ]] || die "flake ディレクトリがありません: ${dir}"
+  [[ -f ${dir}/flake.nix ]] || die "flake.nix がありません: ${dir}/flake.nix"
+  (
+    cd -- "${dir}" &>/dev/null
+    pwd -P
+  )
+}
+
+# resolve / update が使う入口。lock があればその locked から、無ければ flake.nix
+# から読む。lock が無い状態で止めないのは、そこで `nix flake lock` を打たせると
+# 一度先端へ pin されてしまうため。最初の lock も update で作れる。
+read_inputs() {
+  local dir=$1 abs
+  abs=$(abs_flake_dir "${dir}") || return 1
+  if [[ -f ${abs}/flake.lock ]]; then
+    read_lock_inputs "${abs}/flake.lock"
+  else
+    read_flake_nix_inputs "${abs}/flake.nix"
+  fi
 }
 
 # input 1 件の測り方を決めて input_kind へ入れる (channel / commit / skip)。
@@ -447,11 +531,16 @@ pick_github_commit() {
   fi
   # 未認証は 60 req/hour。input 1 件につき 1 本しか投げないので通常は足りるが、
   # CI では GITHUB_TOKEN があれば使う。
+  #
+  # -L が要る。改名・移管された repo は 301 を JSON の本体付きで返し、-f は 3xx で
+  # 落ちないので、追わないと「sha が無い応答」として下の空振り判定に化ける
+  # (「commit が見つかりません」に見えるが実際は repo が動いている)。転送先は同じ
+  # api.github.com なので Authorization ヘッダは維持される。
   if [[ -n ${GITHUB_TOKEN:-} ]]; then
-    json=$(curl -fsS -H 'Accept: application/vnd.github+json' \
+    json=$(curl -fsSL -H 'Accept: application/vnd.github+json' \
       -H "Authorization: Bearer ${GITHUB_TOKEN}" "${url}")
   else
-    json=$(curl -fsS -H 'Accept: application/vnd.github+json' "${url}")
+    json=$(curl -fsSL -H 'Accept: application/vnd.github+json' "${url}")
   fi
   # 応答の最初の "sha" が commit 自身の sha (以降は tree / parents のもの)。
   # 空振りは下で判定するので、pipefail に殺されないよう握る。
@@ -478,32 +567,29 @@ pick_github_commit() {
 # 各動作 #
 ##########
 
-# flake ディレクトリを検算して lock の **絶対パス** を出す。
-# 絶対にするのは builtins.readFile が相対パスの文字列を受け付けないため
-# ("string './nix/flake.lock' doesn't represent an absolute path")。
+# check 専用。check は「今 pin されているもの」を測るので lock が要る。
+# ここで `nix flake lock` を勧めてはいけない (一度先端へ pin されるので、
+# その lock は check を通らない)。最初の lock は update が作る。
 lock_path_of() {
   local dir=$1 abs
-  [[ -d ${dir} ]] || die "flake ディレクトリがありません: ${dir}"
-  [[ -f ${dir}/flake.lock ]] || die "flake.lock がありません: ${dir}/flake.lock
-(まだ lock が無いなら先に nix flake lock を実行すること)"
-  abs=$(
-    cd -- "${dir}" &>/dev/null
-    pwd -P
-  )
+  abs=$(abs_flake_dir "${dir}")
+  [[ -f ${abs}/flake.lock ]] || die "flake.lock がありません: ${dir}/flake.lock
+(まだ lock が無いなら flake-lock-age.sh update で作ること。素の nix flake lock は
+先端へ pin するので、遅延が最初から外れた lock になる。)"
   printf '%s/flake.lock\n' "${abs}"
 }
 
 # resolve_dir が埋める。update はこれをそのまま --override-input へ渡す。
-# URL の owner/repo は flake.lock の locked から取る (追跡先を勝手に変えないため)。
+# URL の owner/repo は読んだ側 (flake.lock の locked、無ければ flake.nix の inputs)
+# から取る。追跡先を勝手に変えないため。
 resolved_names=()
 resolved_urls=()
 
 resolve_dir() {
-  local dir=$1 lock now cutoff rows
+  local dir=$1 now cutoff rows
   local name type owner repo lastmod ref
   # die は $(...) の中では subshell を抜けるだけなので、呼び側で失敗を見る。
-  lock=$(lock_path_of "${dir}") || return 1
-  rows=$(read_lock_inputs "${lock}") || return 1
+  rows=$(read_inputs "${dir}") || return 1
   now=$(date -u +%s)
   cutoff=$((now - min_age_days * 86400))
 
@@ -511,6 +597,9 @@ resolve_dir() {
   resolved_urls=()
 
   printf '%s==> %s (下限 %s 日)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${c_reset}"
+  if [[ ! -f ${dir}/flake.lock ]]; then
+    note 'flake.lock がまだ無いので flake.nix の inputs から決めます。'
+  fi
 
   while IFS=$'\t' read -r name type owner repo lastmod ref; do
     [[ -n ${name} ]] || continue
@@ -533,8 +622,10 @@ resolve_dir() {
         fi
         ;;
       skip)
+        # type は lock なら locked.type、flake.nix なら flake ref の type
+        # (follows だけの input には follows が入る)。どちらでも読めなければ「不明」。
         printf '  %-14s %s(%s なので対象外)%s\n' \
-          "${name}" "${c_dim}" "${type:-follows}" "${c_reset}"
+          "${name}" "${c_dim}" "${type:-不明}" "${c_reset}"
         ;;
     esac
   done <<<"${rows}"
@@ -562,9 +653,13 @@ cmd_update() {
       continue
     }
     # --override-input は flake.nix を書き換えずに lock の pin だけを差し替える。
-    # `nix flake update` 経由なら lock へ書き込まれる (nix 2.34 で実測)。
+    # `nix flake update` 経由なら lock へ書き込まれる (nix 2.34 で実測)。lock が
+    # まだ無ければここで作られる (対象外の input は nix が普通に解決する)。
     # flake.nix 側は追跡先を指したままなので、素で `nix flake update` を叩くと
     # 先端へ飛ぶ。そのための保険が check (CI で回している)。
+    #
+    # flake.nix が git に追加されていないと nix 側が止まる (flake は追跡済み
+    # ファイルしか見ない)。その旨は nix が git add を促す形で出すのでここでは見ない。
     args=()
     for ((i = 0; i < ${#resolved_names[@]}; i++)); do
       args+=("${resolved_names[i]}")

@@ -55,8 +55,9 @@ git add drawio/flake.nix drawio/flake.lock
 > `headers` で展開される。パスをプロジェクトルート起点で明示したいなら
 > `path:${CLAUDE_PROJECT_DIR:-.}/drawio#drawio-mcp` と書ける。
 
-`flake.lock` はコピーせず `cd drawio && nix flake lock` で作ってもよい。その場合
-skill 側とは別に版が動く。
+`flake.lock` はコピーせず、その場で作ってもよい（`nix flake lock` ではなく
+`nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update ./drawio`）。
+その場合 skill 側とは別に版が動く。
 
 ## 個人的に全プロジェクトで使いたい場合
 

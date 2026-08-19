@@ -94,12 +94,18 @@ style の語彙は多い。凝った図を作るときは公式 MCP サーバの
 
 ## 版
 
-drawio の版は nixpkgs が決め、`flake.lock` が固定する。上げるときは
-`nix flake update` してから **`flake.lock` を commit する**（store は read-only なので
-lock が無いと動かない）。
+drawio の版は nixpkgs が決め、`flake.lock` が固定する。上げるときは **素の
+`nix flake update` を使わず**、遅延を通してから **`flake.lock` を commit する**
+（store は read-only なので lock が無いと動かない）。
+
+```sh
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
+git add flake.lock
+```
 
 プロジェクト側で版を固定したい・CI で図を生成したい場合は、この skill の `flake.nix`
-をプロジェクトへコピーして `nix flake lock` すればよい（`nix run .#drawio` が使える）。
+をプロジェクトへコピーして、同じコマンドで lock を作ればよい（`nix run .#drawio` が
+使える）。理由は `pjp-nix-flake` skill の `references/lock-age.md`。
 
 ## その他
 
