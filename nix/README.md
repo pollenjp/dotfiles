@@ -216,6 +216,11 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 ./nix/scripts/flake-lock-age.sh check     # 今の flake.lock を検査 (CI が回している)
 ```
 
+`flake.lock` がまだ無い flake でも `resolve` / `update` は通る（input の一覧を
+`flake.nix` の `inputs` から読む）。**flake を新しく足したときの 1 本目の lock も
+`update` で作ること。** 先に `nix flake lock` を打つと一度先端へ pin されるので、
+遅延が最初から外れた lock を commit することになる（`check` も落ちる）。
+
 ディレクトリを省くと `nix/` が対象。**リポジトリ内の flake は本体だけではない**ので、
 まとめて見るときは並べて渡す（CI の `lock-age` はこの形で回している）。
 

@@ -73,12 +73,14 @@ hash は `nix store prefetch-file <url>` で取る。
 ## CI で生成していた場合
 
 `mise` の代わりにプロジェクトの flake から呼ぶ。この skill の `flake.nix` を
-`plantuml/` へコピーして `nix flake lock` し、両方 commit する。
+`plantuml/` へコピーして lock を作り、両方 commit する。**`nix flake lock` は使わない**
+（先端へ pin される。`pjp-nix-flake` skill の `references/lock-age.md`）。
 
 ```sh
 cp ~/.claude/skills/pjp-plantuml/flake.nix plantuml/
-cd plantuml && nix flake lock
-git add flake.nix flake.lock
+git add plantuml/flake.nix   # flake は git の追跡済みファイルしか見ない
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update ./plantuml
+git add plantuml/flake.lock
 ```
 
 以降は `nix develop ./plantuml --command plantuml ...` や
