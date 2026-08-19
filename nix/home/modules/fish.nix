@@ -514,6 +514,26 @@
           end
         end
       end
+
+      # マシンローカルの環境変数。home-manager の管理下には置かない。
+      # bash.nix の initExtra と同じファイルを同じ形式で読む
+      # (形式と、home.sessionVariables を使わない理由はそちらのコメント)。
+      #
+      # fish には値の展開が無いので、bash 側を export "KEY=VALUE" にして
+      # 展開しない方へ揃えてある。識別子で始まる行だけに絞ってあるのも同じ理由。
+      set -l _config_home $XDG_CONFIG_HOME
+      if test -z "$_config_home"
+        set _config_home "$HOME/.config"
+      end
+      set -l _env_file "$_config_home/pjp/env"
+      if test -f "$_env_file"
+        for _line in (cat "$_env_file")
+          if string match -qr '^[A-Za-z_][A-Za-z0-9_]*=' -- $_line
+            set -l _kv (string split -m1 '=' -- $_line)
+            set -gx $_kv[1] $_kv[2]
+          end
+        end
+      end
     '';
   };
 }
