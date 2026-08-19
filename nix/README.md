@@ -919,7 +919,8 @@ Windows は `main.bash setup` 経路のままなので、リポジトリ直下�
 curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行を追記していたが、
 `programs.bash.enableCompletion` が置き換える。
 
-`~/.common_shellrc.sh` の source は維持している（マシンローカルの逃げ道）。
+`~/.common_shellrc.sh` の source は維持している（マシンローカルの逃げ道。
+[後述](#マシンローカルの環境変数-configpjpenv)）。
 
 ### bash で壊れていたものを移植時に修正
 
@@ -943,6 +944,58 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 `025_mingw` と `205_go_path` の cygpath 分岐（Windows は対象外）、`.bash/02_asdf.sh`
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
+
+## マシンローカルの環境変数 (`~/.config/pjp/env`)
+
+そのマシンでしか使わない API キーのように、**tracked にできない環境変数**の置き場。
+`$XDG_CONFIG_HOME` が設定されていればそちらが優先される。
+
+`bash.nix` の `initExtra` と `fish.nix` の `interactiveShellInit` の両方に
+ローダが入っていて、**ファイルが在れば読む / 無ければ何もしない**。
+home-manager が作りも消しもしないので、要るマシンで自分で置く。
+
+```sh
+mkdir -p ~/.config/pjp
+touch ~/.config/pjp/env && chmod 600 ~/.config/pjp/env
+```
+
+### ⚠️ `home.sessionVariables` に書かないこと
+
+あれは `/nix/store` 経由で `~/.config/environment.d/10-home-manager.conf` として
+配置される。**`/nix/store` は誰でも読める**うえ、値は tracked な `.nix` にも残る。
+秘密情報は必ずこのファイル側へ。
+
+### 形式
+
+```
+# コメントと空行は無視される
+FOO_API_KEY=sk-xxxx
+BAR_TOKEN=abc def
+```
+
+- 行頭から `KEY=VALUE`、1 行 1 個、改行は LF
+- **クォートしない。** `=` の後ろは行末までがそのまま値（`FOO='x'` は `'x'` になる）
+- **展開もコマンド置換もしない。** `$X` は文字列 `$X` のまま
+- 複数行の値は不可。要るなら `~/.common_shellrc.sh` 側へ
+
+fish には値の展開が無く、bash の `set -a; . file; set +a` と同じ意味を再現できない。
+そこで bash 側を `export "KEY=VALUE"`（引数を再スキャンしないので展開が起きない）に
+して、**展開しない方へ両シェルを揃えてある**。flake の `shellHook` で使っている
+`set -a; . ./.env; set +a` とは意味が違うので注意。
+
+識別子で始まらない行は黙って読み飛ばす。壊れた行が混ざってもシェル起動のたびに
+エラーを出さないため。
+
+### `~/.common_shellrc.sh` との使い分け
+
+| | `~/.config/pjp/env` | `~/.common_shellrc.sh` |
+| --- | --- | --- |
+| 中身 | **データ**（`KEY=VALUE` だけ） | **コード**（任意のシェル文） |
+| 読むシェル | bash / fish | bash のみ |
+| 用途 | マシン固有の環境変数・API キー | 緊急時に PATH を直書きする復旧経路 |
+
+bash では `~/.config/pjp/env` → `~/.common_shellrc.sh` の順に読む。逃げ道から
+env の値を上書きできるようにするためなので、順序を入れ替えないこと。
 
 ## Claude Code
 
