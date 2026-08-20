@@ -229,6 +229,10 @@ if [[ ${write_flake} == 1 ]]; then
       homeConfigurations = dotfiles.homeConfigurations // {
         # このマシンだけのホストはここに足す (登録簿 hosts/default.nix は触らない)。
         #
+        # ここに足した名前は setup の **既定の対象ホスト** になる (登録簿からの
+        # 推測より優先する)。複数足したときは一番上のものが既定になるので、
+        # 切り替えたいときは行を入れ替える。
+        #
         # tmp = dotfiles.lib.mkHome {
         #   username = "pollenjp";
         #   system = "x86_64-linux";
