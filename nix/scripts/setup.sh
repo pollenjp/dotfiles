@@ -116,9 +116,17 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   setup.sh --list          手順の一覧を出す
   setup.sh --self-update   本体を git で最新にしてから続ける (下記)
   setup.sh --flake-update  「flake.lock を更新」を手順に足す (下記)
-  setup.sh --host <名前>   対象ホスト (既定は hosts/default.nix から自動判定)
+  setup.sh --host <名前>   対象ホスト (既定は自動判定。下記)
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
+
+対象ホストの決め方 (--host / DOTFILES_HOST が無いとき):
+  1. ~/dotfiles/flake.nix が定義しているホスト (登録簿を上書きする側)
+  2. $USER と uname からの推測 (<user>@wsl / <user>@<system>)
+
+  1 を先に見るので、ローカル flake に足したホスト (tmp など) がそのまま既定に
+  なる。複数書いてあるときは一番上のものを採る。2 へ落ちるのは、ローカル flake
+  がホストを 1 つも定義していないときだけ。
 
 既存ファイル (~/.bashrc / ~/.profile など) の扱い:
   setup.sh --backup          <名前>.backup へ退避してから置き換える (-b backup)
@@ -435,6 +443,18 @@ parse_hosts() {
     "$1"
 }
 
+# ローカル flake (~/dotfiles/flake.nix) が定義しているホスト。
+#
+# あちらは `dotfiles.homeConfigurations // { ... }` なので、ここに出る名前は
+# **登録簿に無い、または登録簿を上書きしているホスト**である。
+# ローカル flake が無いマシン (本体の flake を直接指している) では空。
+local_flake_hosts() {
+  if [[ ${flake_dir} == "${nix_dir}" ]]; then
+    return 0
+  fi
+  parse_hosts "${flake_dir}/flake.nix" | grep -vx 'sandbox' | awk '!seen[$0]++' || true
+}
+
 # 選べる登録名を並べる。
 #
 # 本体の登録簿だけでなく **ローカル flake (~/dotfiles/flake.nix) の追加分も**
@@ -446,10 +466,15 @@ parse_hosts() {
 list_hosts() {
   {
     parse_hosts "${hosts_file}"
-    if [[ ${flake_dir} != "${nix_dir}" ]]; then
-      parse_hosts "${flake_dir}/flake.nix"
-    fi
+    local_flake_hosts
   } | grep -vx 'sandbox' | awk '!seen[$0]++' || true
+}
+
+# いま選んでいるホストがローカル flake 由来か。表示にだけ使う。
+# 既定が登録簿の推測ではなくローカルの上書きから来たことを見せるため。
+host_is_local() {
+  [[ -n ${host} ]] || return 1
+  local_flake_hosts | grep -qxF "${host}"
 }
 
 is_wsl() {
@@ -459,9 +484,33 @@ is_wsl() {
   grep -qi microsoft /proc/version 2>/dev/null
 }
 
-# $USER と uname から登録名を推測する。当たらなければ 1 を返して呼び元に選ばせる。
+# 対象ホストを決める。決められなければ 1 を返して呼び元に選ばせる。
+#
+# 見る順は次の 2 つ。
+#
+#   1. ローカル flake (~/dotfiles/flake.nix) が定義しているホスト
+#   2. $USER と uname からの推測 (<user>@wsl / <user>@<system>)
+#
+# 1 を先に見るのは、あちらが登録簿を `//` で **上書き** するための場所だから。
+# そこに名前を書いた時点で「このマシンはこれで switch する」という意思表示に
+# なっているので、推測より強い情報として扱う。名前が登録簿と揃っていない
+# (`tmp` など) だけで既定から外れると、毎回 h か --host で選び直すことになる。
+#
+# 複数書いてあるときは **ファイルで一番上** のものを採る。推測の候補
+# (`<user>@wsl` など) と同名のものが下にあってもそちらへは行かない。順番で
+# 決まるので、既定を変えたいときは行を入れ替えるだけで済む。
+# 2 へ落ちるのは、ローカル flake がホストを 1 つも定義していないときだけ。
 detect_host() {
-  local user os arch system registered candidates=() cand
+  local user os arch system registered candidates=() cand first_local
+  # 1. ローカル flake。head で先頭だけ取る (パイプの status は
+  #    local_flake_hosts 側で潰してある)。
+  first_local=$(local_flake_hosts | head -n 1)
+  if [[ -n ${first_local} ]]; then
+    printf '%s' "${first_local}"
+    return 0
+  fi
+
+  # 2. $USER と uname からの推測。
   user=${USER:-$(id -un)}
   os=$(uname -s)
   arch=$(uname -m)
@@ -788,8 +837,15 @@ header() {
   note 'README.md 「適用 > 新規マシンの手順」を実行する'
   printf '\n'
   if [[ -n ${host} ]]; then
-    printf '  対象ホスト: %s%s%s  %s(h で変更)%s\n' \
-      "${c_green}" "${host}" "${c_reset}" "${c_dim}" "${c_reset}"
+    # ローカル flake 由来なら明示する。登録簿に無い名前が既定になっていても
+    # 「~/dotfiles/flake.nix に書いたから」と辿れるようにするため。
+    if host_is_local; then
+      printf '  対象ホスト: %s%s%s  %s(ローカル flake / h で変更)%s\n' \
+        "${c_green}" "${host}" "${c_reset}" "${c_dim}" "${c_reset}"
+    else
+      printf '  対象ホスト: %s%s%s  %s(h で変更)%s\n' \
+        "${c_green}" "${host}" "${c_reset}" "${c_dim}" "${c_reset}"
+    fi
   else
     printf '  対象ホスト: %s未判定%s  %s(h で選ぶ / 手順 0 が未了かも)%s\n' \
       "${c_red}" "${c_reset}" "${c_dim}" "${c_reset}"
@@ -1537,7 +1593,13 @@ execute() {
     printf '  %d. %s\n' "$((n + 1))" "${step_labels[i]}"
     states+=("pending")
   done
-  note "対象ホスト: ${host:-<未定>}"
+  # --new-machine / --update ではメニューを通らないので、ここが対象ホストを
+  # 見せる唯一の場所になる。ローカル flake 由来なら出所も添える。
+  if host_is_local; then
+    note "対象ホスト: ${host}  (${flake_dir}/flake.nix で定義)"
+  else
+    note "対象ホスト: ${host:-<未定>}"
+  fi
   if is_selected switch; then
     note "既存ファイル: $(backup_summary)"
   fi
