@@ -161,6 +161,22 @@
       zkill-all = "z kill-all-sessions";
       zdel = "z delete-session";
       zdel-all = "z delete-all-sessions";
+
+      # herdr。zellij の z* の先頭を h に変えただけ。対応表・`hd` を作れない
+      # 理由・落としたものは fish.nix の同じ節に書いてある。
+      #
+      # 上の z* が `z` 経由なのは SHELL を差し替える必要があるからで、herdr は
+      # config.toml の default_shell が同じ役目を果たす。なので `h` は挟まず
+      # `herdr` を直に呼ぶ。
+      h = "herdr";
+      hss = "herdr --session";
+      hls = "herdr session list";
+      ha = "herdr session attach";
+      hkill = "herdr session stop";
+      hdel = "herdr session delete";
+
+      hst = "herdr status";
+      hreload = "herdr server reload-config";
     };
 
     initExtra = ''

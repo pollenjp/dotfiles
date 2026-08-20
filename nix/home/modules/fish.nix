@@ -163,6 +163,47 @@
       zkill-all = "zellij kill-all-sessions";
       zdel = "zellij delete-session";
       zdel-all = "zellij delete-all-sessions";
+
+      # herdr。zellij の z* と指の動きが揃うよう、先頭の z を h に変えただけ。
+      # キーバインドを揃えたのと同じ方針 (files/herdr/config.toml)。
+      #
+      #   z -> h    zss -> hss    zls -> hls    za -> ha    zkill -> hkill    zdel -> hdel
+      #
+      # zellij の `z` は SHELL を差し替えるための function だが、herdr では
+      # config.toml の default_shell = "fish" が同じ役目を果たすのでラップする
+      # ものが無い。`h` は素の abbr で足りる。以下も `h` ではなく `herdr` を
+      # 直に呼んでいるので、`h` を消しても残りは動く。
+      #
+      # 名前の衝突は PATH 上の `h` で始まる短いコマンドと、bash / fish の実環境の
+      # alias / abbr / function / builtin の両方で確認済み。下記はすべて空いていた。
+      # **`hd` だけは埋まっている** (`/usr/bin/hd` = hexdump)。sd / td にあたる
+      # detach の枠だが、herdr の detach は prefix+d のキーバインドだけで CLI に
+      # 無いので、そもそも作れない。
+      #
+      # 対応物が無くて落としたもの:
+      #   hkill-all / hdel-all  herdr に kill-all-sessions / delete-all-sessions が
+      #                         無い。近いのは `herdr server stop` (今動いている
+      #                         server を止める) だが対象が違うので別名にしない
+      #   worktree / workspace / tab / pane / agent
+      #                         socket API を直に叩いて生の JSON を吐く。中から
+      #                         スクリプトで使うためのもので対話用ではないため、
+      #                         session 系だけを入れている
+      h = "herdr";
+      # 無ければ作る / 在れば繋ぐ (`--session` の "Use or create")。zss にあった
+      # EXITED 判定と作り直しは herdr 側が面倒を見るので要らない。
+      hss = "herdr --session";
+      hls = "herdr session list";
+      ha = "herdr session attach";
+      # zellij の kill-session 相当。herdr の語彙では stop なので、名前
+      # (kill) と実体 (stop) がずれる。指の記憶を zellij と揃える方を採った。
+      hkill = "herdr session stop";
+      hdel = "herdr session delete";
+
+      # ここから下は herdr 固有 (tmux / zellij に対応物が無い)。
+      hst = "herdr status";
+      # config.toml を直して home-manager switch した後、herdr を落とさずに
+      # 反映させる。herdr の中なら prefix + shift + r で同じことができる。
+      hreload = "herdr server reload-config";
     };
 
     functions = {
