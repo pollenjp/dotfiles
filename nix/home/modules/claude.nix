@@ -3,6 +3,7 @@
 # nix/files/claude/ 配下を ~/.claude/ へ配置する。
 #
 #   files/claude/CLAUDE.md      -> ~/.claude/CLAUDE.md      (全セッションで読まれる指示)
+#   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
@@ -78,6 +79,19 @@ in
     {
       ".claude/hooks/nix-managed-guard.sh" = {
         source = claudeRoot + "/hooks/nix-managed-guard.sh";
+        executable = true;
+      };
+    }
+
+    # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
+    # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
+    #
+    # 既存マシンには /statusline が書いた実ファイルが在る。home-manager は
+    # 自分が作ったのではないファイルを消さないので、初回の switch は
+    # "would be clobbered" で止まる。退避するか消してから switch する。
+    {
+      ".claude/statusline-command.sh" = {
+        source = claudeRoot + "/statusline-command.sh";
         executable = true;
       };
     }
