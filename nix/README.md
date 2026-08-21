@@ -471,6 +471,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -1107,6 +1108,32 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 **スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
 冪等で、既存の設定は保持する。
 
+### statusLine
+
+Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
+
+```
+<model> · <dir basename> · <git branch>[*] · <context% left>
+```
+
+shell prompt（starship）が既に出しているもの（時刻・`user@host`・フルパス）は
+意図的に繰り返さない。数百 ms ごとに呼ばれるので `jq` は 1 回にまとめて起動している。
+
+#### 登録（マシンごとに一度だけ）
+
+```sh
+./nix/scripts/bootstrap-claude-statusline.sh
+```
+
+フックとまったく同じ事情で、**登録**だけが `settings.json` 側に残る。
+スクリプト本体は Nix が配置し、`.statusLine` をそこへ向けるのがこのコマンド。
+冪等で、他のキーは保持する。別の statusLine が設定されていたら元の値を
+表示してから置き換える。
+
+> ⚠️ `/statusline` で作った実ファイルが既に `~/.claude/statusline-command.sh` に
+> 在るマシンでは、初回の switch が `would be clobbered` で止まる。
+> 先に消す（または `-b` を付けて退避する）こと。
+
 ### private な skill 置き場 (claude-skills)
 
 公開できない skill / agent / command は [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）に置き、
@@ -1304,6 +1331,7 @@ nix/
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
+    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (マシンごとに 1 回)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```
