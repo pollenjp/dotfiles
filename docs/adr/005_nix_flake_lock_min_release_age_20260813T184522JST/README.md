@@ -6,6 +6,7 @@
 | 日付 | 2026-08-13 (JST) |
 | 決定者 | pollenjp |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md)（`nix flake update` を更新手段として据えた ADR。本 ADR はその更新手段を差し替える） |
+| 後続 ADR | [006_nix_closure_sbom_osv_scan](../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)（この遅延が新しく作る「発覚済みの侵害バージョンを固定し続ける」リスクを、閉包スキャンと pin↔先端の差分照合で塞ぐ。本 ADR の決定はそのまま） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)（日常運用はこちら） |
 
 ---
