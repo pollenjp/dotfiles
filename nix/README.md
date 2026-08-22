@@ -286,6 +286,55 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 その commit では CI の `lock-age` が落ちるが、**それは意図どおり**。通したいときは
 `workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
 
+#### 閉包のスキャンと pin↔先端の差分 (遅延の補完)
+
+上の遅延は「未発覚の侵害を誰かが先に踏む時間」を稼ぐ一方、**発覚済みの侵害
+バージョンを下限日数のあいだ固定し続ける**というリスクを新しく作る。それを塞ぐ
+道具が 2 つある（なぜこの組み合わせなのかは
+[ADR 006](../docs/adr/006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。
+
+**[`closure-scan.sh`](./scripts/closure-scan.sh)** — 実際に入る閉包をビルドして
+SBOM 化し、vulnxscan（OSV + Grype + vulnix）で照合する。サプライチェーン侵害の
+advisory の主戦場が OSV / GHSA なので、NVD しか見ない vulnix は補助線の扱い。
+CI の `closure-scan` ジョブが PR / push に加えて**毎日の定期実行**でも回していて
+（advisory は pin より後から出るため）、whitelist
+（[`vulnxscan-whitelist.csv`](./vulnxscan-whitelist.csv)）に無い findings があると落ちる。
+
+```sh
+./nix/scripts/closure-scan.sh scan       # CI と同じ (whitelist に無い findings で非ゼロ)
+./nix/scripts/closure-scan.sh baseline   # 今の findings を whitelist へ追記して受け入れ
+```
+
+落ちたときの対応は 2 択。
+
+1. **pin を動かして直るか見る** — `flake-lock-age.sh resolve / update`。修正が
+   下限より新しい側にしか無いなら、[遅延を外す](#遅延を外す)判断まで含む
+2. **意図して受け入れる** — `baseline` で whitelist へ追記し、comment に理由を
+   書いてから commit する
+
+whitelist は「安全と確認した」印ではなく**増分検知の基準線**。閉包には既知 CVE が
+常に数十件あるので（導入時点で 67 件）、全 findings で落とすとゲートは初日から
+赤いままになる。受け入れは git 管理の csv への追記なので、PR の diff がそのまま
+監査線になる。
+
+**[`closure-head-diff.sh`](./scripts/closure-head-diff.sh)** — pin と現在の
+チャンネル先端の両方で閉包を組み、入るパッケージの版差分を出す。侵害の発覚後、
+advisory より先に nixpkgs 側の対応（bump / revert / `knownVulnerabilities`）が
+入ることがよくあるので、**pin を更新する PR で「動いたパッケージのうち見覚えの
+無いものだけ nixpkgs のコミットログを見る」**ための材料になる。CI の `head-diff`
+ジョブが `nix/flake.lock` の動いた PR で summary に貼る。版が動くこと自体は
+日常なので、**差分があっても落とさない**。
+
+```sh
+./nix/scripts/closure-head-diff.sh
+```
+
+sbomnix（vulnxscan 同梱）が PATH に無ければ、script が **pin された nixpkgs** から
+`nix shell --inputs-from` で自動で入り直す。スキャナ自身の版も同じ遅延ポリシーに
+従わせるための形。対象の閉包は `homeConfigurations.sandbox`（パッケージ集合は
+全ホスト共通で、ホスト差は設定側にしか無い。x86_64-linux の代表として使う）。
+skill 側 flake（`pjp-drawio` / `pjp-plantuml`）の閉包はまだ対象外。
+
 #### ローカル flake の lock も張り直す
 
 いまの nix（Determinate 3.21.9 / 2.34 で実測）は **`path:` 入力を narHash で厳密に lock する**。

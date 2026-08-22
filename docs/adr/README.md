@@ -12,6 +12,7 @@
 | [003](./003_nix_ssh_config_20260810T210714JST/README.md) | ssh の設定を Nix 管理に載せる範囲を決める | 2026-08-10 |
 | [004](./004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md) | WSL の ssh ラッパーを Nix 管理に載せる | 2026-08-11 |
 | [005](./005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) | flake.lock に入れる revision へ最小経過日数を課す | 2026-08-13 |
+| [006](./006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md) | 閉包を SBOM 化して OSV ベースでスキャンし、pin と先端の差分を照合する | 2026-08-23 |
 
 ## ディレクトリ名
 

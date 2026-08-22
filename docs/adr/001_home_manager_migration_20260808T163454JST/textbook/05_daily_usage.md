@@ -89,6 +89,11 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
   ./nix ./nix/files/claude/skills/pjp-drawio ./nix/files/claude/skills/pjp-plantuml
 ```
 
+pin を更新する PR では、CI が 2 つのレポートを出す（[ADR 006](../../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。
+
+- **`closure-scan`** — 実際に入る閉包を脆弱性データベース（OSV / GHSA / NVD）と照合する。whitelist（`nix/vulnxscan-whitelist.csv`）に無い findings があると落ちる。対応は「pin を動かす」か「理由を書いて whitelist へ足す」の 2 択で、手順は [`nix/README.md`](../../../../nix/README.md#閉包のスキャンと-pin先端の差分-遅延の補完)
+- **`head-diff`** — pin と先端で入るパッケージの版差分。見覚えの無い動きだけ nixpkgs のコミットログを確認する（落ちない）
+
 ## 壊れたら戻す
 
 ```sh
