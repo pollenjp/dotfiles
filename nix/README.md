@@ -212,9 +212,16 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 
 ```sh
 ./nix/scripts/flake-lock-age.sh resolve   # 選ぶ revision を見るだけ
-./nix/scripts/flake-lock-age.sh update    # その revision へ flake.lock を更新
+./nix/scripts/flake-lock-age.sh update    # その revision へ更新し、入る閉包をスキャン
 ./nix/scripts/flake-lock-age.sh check     # 今の flake.lock を検査 (CI が回している)
 ```
+
+**`update` は lock を書いたあと、その lock で実際に入る閉包のスキャン
+（[後述](#閉包のスキャンと-pin先端の差分-遅延の補完)）を自動で差し込む。**
+lock を作る・上げる入口はここしか無いので、「新しい pin を初めて実行する前に
+必ず照合が挟まる」ようにしてある。whitelist のある flake（本体の `nix/` など）
+ではゲートとして働き、新規 findings があると失敗する（lock 自体は更新済み）。
+whitelist の無い flake（初回の lock など）では表示だけ。`--no-scan` で飛ばせる。
 
 `flake.lock` がまだ無い flake でも `resolve` / `update` は通る（input の一覧を
 `flake.nix` の `inputs` から読む）。**flake を新しく足したときの 1 本目の lock も
@@ -302,8 +309,21 @@ CI の `closure-scan` ジョブが PR / push に加えて**毎日の定期実行
 
 ```sh
 ./nix/scripts/closure-scan.sh scan       # CI と同じ (whitelist に無い findings で非ゼロ)
+./nix/scripts/closure-scan.sh report     # 表示するだけ (落ちない。whitelist は無くてもよい)
 ./nix/scripts/closure-scan.sh baseline   # 今の findings を whitelist へ追記して受け入れ
 ```
+
+回るタイミングは 3 つ。
+
+| いつ | 形 |
+| --- | --- |
+| `flake-lock-age.sh update` の完了時（自動） | whitelist があれば `scan`、無ければ `report`。**新しい pin を初めて実行する前に必ず照合が挟まる** |
+| PR / push の CI | `scan`（ゲート） |
+| 毎日の定期実行 | `scan`（pin 更新が無い期間も advisory の増分を照合） |
+
+対象の属性は flake で変わる。dotfiles 本体は home 閉包
+（`homeConfigurations.sandbox`）、それ以外の flake は `devShells.<system>.default`
+（「これから実行するツール」は devShell に入っているものなので）。`--attr` で変えられる。
 
 落ちたときの対応は 2 択。
 
@@ -329,11 +349,21 @@ advisory より先に nixpkgs 側の対応（bump / revert / `knownVulnerabiliti
 ./nix/scripts/closure-head-diff.sh
 ```
 
-sbomnix（vulnxscan 同梱）が PATH に無ければ、script が **pin された nixpkgs** から
-`nix shell --inputs-from` で自動で入り直す。スキャナ自身の版も同じ遅延ポリシーに
-従わせるための形。対象の閉包は `homeConfigurations.sandbox`（パッケージ集合は
-全ホスト共通で、ホスト差は設定側にしか無い。x86_64-linux の代表として使う）。
-skill 側 flake（`pjp-drawio` / `pjp-plantuml`）の閉包はまだ対象外。
+sbomnix（vulnxscan 同梱）が PATH に無ければ、script が**対象 flake の pin された
+nixpkgs** から `nix shell --inputs-from` で自動で入り直す。スキャナ自身の版も
+同じ遅延ポリシーに従わせるための形。
+
+dotfiles 本体の既定対象 `homeConfigurations.sandbox` は、パッケージ集合が
+全ホスト共通（ホスト差は設定側にしか無い）なので x86_64-linux の代表として使う。
+skill 側 flake（`pjp-drawio` / `pjp-plantuml`）は `update` 時の自動スキャン
+（whitelist が無いので表示のみ）だけで、**CI の定期スキャンは本体の閉包しか
+見ていない**。
+
+他のリポジトリからは flake の app として呼べる（`flake-lock-age` と同じ形）。
+
+```sh
+nix run 'github:pollenjp/dotfiles?dir=nix#closure-scan' -- report
+```
 
 #### ローカル flake の lock も張り直す
 

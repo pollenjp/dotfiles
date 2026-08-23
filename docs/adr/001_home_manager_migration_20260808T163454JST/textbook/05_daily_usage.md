@@ -69,6 +69,8 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
+`update` は lock を書いたあと、**その lock で実際に入る閉包のスキャンを自動で差し込む**（[ADR 006](../../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。whitelist に無い findings があると失敗するので、switch の前に対応する（pin を動かすか、理由を書いて whitelist へ足すか）。`--no-scan` で飛ばせる。
+
 `flake.lock` が書き換わる。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
 
 **素の `nix flake update` は使わない。** 上げ先は追跡先の先端ではなく、**公開から 7 日以上経った revision** に限っている（npm / pnpm の `minimumReleaseAge` に相当する遅延）。素の `nix flake update` は先端を取るのでこの遅延が黙って外れ、CI の `lock-age` ジョブが落ちる。

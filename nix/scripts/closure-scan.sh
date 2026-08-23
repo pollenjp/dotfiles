@@ -34,11 +34,19 @@
 # ## 使い方
 #
 #   closure-scan.sh scan     [<flake ディレクトリ>]  スキャンして基準線と照合 (CI 用)
+#   closure-scan.sh report   [<flake ディレクトリ>]  スキャンして表示するだけ (ゲートしない)
 #   closure-scan.sh baseline [<flake ディレクトリ>]  今の findings を whitelist へ追記
 #
-# オプションは --help を参照。既定の対象は homeConfigurations.sandbox の
-# activationPackage (CI がビルドしているものと同じ。登録簿のホストは
-# パッケージ集合がこれとほぼ同一で、差は設定ファイル側にしか無い)。
+# report は「lock を作った直後、そのツールを実行する前に何が入るか見る」ための形。
+# flake-lock-age.sh update が完了時に自動で差し込む (whitelist があれば scan、
+# 無ければ report)。whitelist が無くても通り、あれば適用して「基準線に無いもの
+# だけ」を表示する。
+#
+# オプションは --help を参照。既定の対象は、この script の隣の flake (dotfiles
+# 本体) なら homeConfigurations.sandbox の activationPackage (CI がビルドして
+# いるものと同じ。登録簿のホストはパッケージ集合がこれとほぼ同一で、差は設定
+# ファイル側にしか無い)。それ以外の flake なら devShells.<system>.default
+# (「これから実行するツール」は devShell に入っているものなので)。
 #
 # ## 依存
 #
@@ -81,16 +89,19 @@ die() {
 
 usage() {
   cat <<'EOS'
-使い方: closure-scan.sh [オプション] <scan|baseline> [<flake ディレクトリ>]
+使い方: closure-scan.sh [オプション] <scan|report|baseline> [<flake ディレクトリ>]
 
   scan      閉包を SBOM 化してスキャンし、whitelist に無い findings があれば
-            終了コード 1 (CI 用のゲート)
+            終了コード 1 (CI 用のゲート。whitelist が無いと落ちる)
+  report    同じスキャンをして表示するだけ (findings では落ちない)。whitelist は
+            無くてもよく、あれば適用して基準線に無いものだけを表示する
   baseline  scan と同じスキャンを行い、whitelist に無い findings を whitelist へ
             追記する (導入時と、新規 findings を意図して受け入れるとき)
 
 オプション:
-  --attr ATTR       ビルドする属性
-                    (既定 homeConfigurations.sandbox.activationPackage)
+  --attr ATTR       ビルドする属性。既定は flake で変わる:
+                    dotfiles 本体 -> homeConfigurations.sandbox.activationPackage
+                    それ以外     -> devShells.<system>.default
   --whitelist CSV   whitelist の場所 (既定 <flake ディレクトリ>/vulnxscan-whitelist.csv)
   --out-dir DIR     SBOM・findings・レポートの書き出し先 (既定 mktemp -d)
   -h, --help        この使い方を出す
@@ -113,7 +124,7 @@ orig_args=("$@")
 
 cmd=""
 flake_dir=""
-attr="homeConfigurations.sandbox.activationPackage"
+attr="" # 空なら flake に合わせて後で決める (dotfiles 本体か否か)
 whitelist=""
 out_dir=""
 
@@ -138,7 +149,7 @@ while [[ $# -gt 0 ]]; do
       usage
       exit 0
       ;;
-    scan | baseline)
+    scan | report | baseline)
       [[ -z ${cmd} ]] || die "動作は 1 つだけ指定すること (${cmd} と $1 が指定されました)。"
       cmd=$1
       shift
@@ -179,6 +190,29 @@ flake_dir=$(
 
 [[ -n ${whitelist} ]] || whitelist="${flake_dir}/vulnxscan-whitelist.csv"
 
+# 対象属性の既定。dotfiles 本体 (この script の隣の flake) なら home 閉包、
+# それ以外なら devShell。「lock が入れる、これから実行するもの」に合わせる。
+# 明示指定かどうかは report の挙動に効くので覚えておく (既定属性が無い flake を
+# update の自動差し込みで止めないため)。
+attr_defaulted=0
+if [[ -z ${attr} ]]; then
+  attr_defaulted=1
+  sibling=""
+  if [[ -f "${script_dir}/../flake.nix" ]]; then
+    sibling=$(
+      cd -- "${script_dir}/.." &>/dev/null
+      pwd -P
+    )
+  fi
+  if [[ -n ${sibling} && ${flake_dir} == "${sibling}" ]]; then
+    attr="homeConfigurations.sandbox.activationPackage"
+  else
+    system=$(nix eval --raw --impure --expr builtins.currentSystem) \
+      || die "builtins.currentSystem が取れませんでした。"
+    attr="devShells.${system}.default"
+  fi
+fi
+
 ################################
 # sbomnix (vulnxscan) の用意   #
 ################################
@@ -208,9 +242,10 @@ mkdir -p "${out_dir}"
 # `","` で切って残った quote を剥ぐ。フィールドに `","` を含む値は入らない前提
 # (vuln_id / URL / パッケージ名 / 数値と、自分たちで書く comment だけ)。
 #
-# whitelist に無い findings を「vuln_id<TAB>package」で出す (重複あり)。
-non_whitelisted() {
-  awk -F'","' '
+# findings を「vuln_id<TAB>package」で出す (重複あり)。
+# mode=new は whitelist 列が False の行だけ、all は全行。
+csv_pairs() {
+  awk -F'","' -v mode="$2" '
     NR == 1 {
       for (i = 1; i <= NF; i++) {
         f = $i
@@ -220,16 +255,19 @@ non_whitelisted() {
       next
     }
     {
-      w = col["whitelist"]
       i = col["vuln_id"]
       p = col["package"]
-      wl = $w
       id = $i
       pkg = $p
-      gsub(/"/, "", wl)
       gsub(/"/, "", id)
       gsub(/"/, "", pkg)
-      if (wl == "False") print id "\t" pkg
+      if (mode == "new") {
+        w = col["whitelist"]
+        wl = $w
+        gsub(/"/, "", wl)
+        if (wl != "False") next
+      }
+      print id "\t" pkg
     }
   ' "$1"
 }
@@ -248,11 +286,22 @@ whitelist_pairs() {
   ' "$1"
 }
 
+# scan / baseline は 1 (whitelist 必須・照合)、report は 0 (あれば適用するだけ)。
+scan_gate=1
+
 run_scan() {
-  # baseline は先にヘッダだけのファイルを作ってからここへ来る。
-  [[ -f ${whitelist} ]] || die "whitelist がありません: ${whitelist}
+  local wl_args=()
+  if [[ -f ${whitelist} ]]; then
+    wl_args=(--whitelist "${whitelist}")
+  elif [[ ${scan_gate} -eq 1 ]]; then
+    # baseline は先にヘッダだけのファイルを作ってからここへ来る。
+    die "whitelist がありません: ${whitelist}
 (初回は closure-scan.sh baseline で作ること。空の基準線から始めるならヘッダ行
-\"vuln_id\",\"package\",\"comment\" だけのファイルを置く。)"
+\"vuln_id\",\"package\",\"comment\" だけのファイルを置く。ゲートせず眺めるだけなら
+report を使う。)"
+  else
+    note "whitelist が無いので全 findings を表示します。"
+  fi
 
   step "nix build ${flake_dir}#${attr}"
   nix build "${flake_dir}#${attr}" -o "${out_dir}/closure"
@@ -265,9 +314,13 @@ run_scan() {
     --cdx "${out_dir}/sbom.cdx.json" \
     --spdx "${out_dir}/sbom.spdx.json"
 
-  step "vulnxscan (OSV + Grype + vulnix, whitelist 適用)"
+  if [[ -n ${wl_args[*]+x} ]]; then
+    step "vulnxscan (OSV + Grype + vulnix, whitelist 適用)"
+  else
+    step "vulnxscan (OSV + Grype + vulnix)"
+  fi
   # 表は stdout、ログは stderr。表を report.txt に残して CI の summary に使う。
-  vulnxscan "${target}" -o "${out_dir}/vulns.csv" --whitelist "${whitelist}" \
+  vulnxscan "${target}" -o "${out_dir}/vulns.csv" ${wl_args[@]+"${wl_args[@]}"} \
     | tee "${out_dir}/report.txt"
 
   # findings が 1 件も無いと csv 自体が書かれない。
@@ -276,19 +329,23 @@ run_scan() {
     : >"${out_dir}/new-findings.txt"
     return 0
   fi
-  # whitelist 列が無い = whitelist が読まれていない (列不足などで黙って無視される)。
-  head -n 1 "${out_dir}/vulns.csv" | grep -q '"whitelist"' \
-    || die "vulns.csv に whitelist 列がありません。whitelist が読めていない可能性:
+  if [[ -n ${wl_args[*]+x} ]]; then
+    # whitelist 列が無い = whitelist が読まれていない (列不足などで黙って無視される)。
+    head -n 1 "${out_dir}/vulns.csv" | grep -q '"whitelist"' \
+      || die "vulns.csv に whitelist 列がありません。whitelist が読めていない可能性:
 ${whitelist}"
-  non_whitelisted "${out_dir}/vulns.csv" | sort -u >"${out_dir}/new-findings.txt"
+    csv_pairs "${out_dir}/vulns.csv" new | sort -u >"${out_dir}/new-findings.txt"
+  else
+    csv_pairs "${out_dir}/vulns.csv" all | sort -u >"${out_dir}/new-findings.txt"
+  fi
 }
 
 report_paths() {
   note "成果物: ${out_dir}"
   note "  sbom.cdx.json / sbom.spdx.json / sbom.csv (SBOM)"
-  note "  vulns.csv (findings 全件。whitelist 判定の列つき)"
-  note "  report.txt (whitelist 適用後の表)"
-  note "  new-findings.txt (whitelist に無い findings)"
+  note "  vulns.csv (findings 全件。whitelist があれば判定の列つき)"
+  note "  report.txt (表示された表)"
+  note "  new-findings.txt (whitelist に無い findings。whitelist が無ければ全件)"
 }
 
 cmd_scan() {
@@ -306,6 +363,34 @@ cmd_scan() {
      追記された comment に理由を書いてから commit する"
   fi
   printf 'OK: whitelist に無い findings はありません。\n'
+}
+
+cmd_report() {
+  local n
+  scan_gate=0
+  # 既定属性が無い flake は黙って通す。flake-lock-age.sh update が完了時に自動で
+  # ここを差し込むので、スキャン対象を持たない flake (devShell の無い flake など)
+  # で update まで失敗させないため。--attr で明示されたときは普通に落ちる。
+  if [[ ${attr_defaulted} -eq 1 ]] \
+    && ! nix eval --raw "${flake_dir}#${attr}.drvPath" &>/dev/null; then
+    warn "${flake_dir} に ${attr} が無いのでスキャンを飛ばします (--attr で指定すれば見ます)。"
+    return 0
+  fi
+  run_scan
+  report_paths
+  n=$(($(wc -l <"${out_dir}/new-findings.txt")))
+  if [[ ${n} -eq 0 ]]; then
+    printf '表示すべき findings はありません。\n'
+    return 0
+  fi
+  # findings があっても落とさないのが report の仕様 (眺めるための形)。
+  if [[ -f ${whitelist} ]]; then
+    printf '%s 件の findings が whitelist の外にあります (上の表)。\n' "${n}"
+    printf 'ゲートに載せるなら closure-scan.sh baseline で受け入れてから scan を使う。\n'
+  else
+    printf '%s 件の findings があります (上の表)。ツールを実行する前に目を通すこと。\n' "${n}"
+    printf '基準線を作ってゲート化するなら closure-scan.sh baseline。\n'
+  fi
 }
 
 cmd_baseline() {
@@ -342,5 +427,6 @@ cmd_baseline() {
 
 case ${cmd} in
   scan) cmd_scan ;;
+  report) cmd_report ;;
   baseline) cmd_baseline ;;
 esac

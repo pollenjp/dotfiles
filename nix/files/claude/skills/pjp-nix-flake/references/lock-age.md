@@ -53,6 +53,14 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
    **`flake.lock` がまだ無くてもこれで作られる。** 先に `nix flake lock` を打っては
    いけない（一度先端へ pin される）。更新するときも同じコマンド
 
+   `update` は完了時に、その lock で実際に入る閉包のスキャン（`closure-scan`、
+   OSV / GHSA / NVD 照合）を自動で差し込む。whitelist
+   （`<flake>/vulnxscan-whitelist.csv`）が無いうちは表示だけで落ちないが、
+   **表に目を通してからツールを実行する**こと（そのための差し込み）。ゲート化
+   したければ `closure-scan baseline` で基準線を作る。`--no-scan` で飛ばせる。
+   なぜスキャンするのかは dotfiles の ADR 006（遅延は「発覚済みの侵害バージョンを
+   固定し続ける」リスクを新しく作るので、advisory との照合で塞ぐ）
+
 3. **CI に番人を置く。** これが無いと、素の `nix flake update` を 1 回叩いた時点で
    遅延が黙って外れる
 

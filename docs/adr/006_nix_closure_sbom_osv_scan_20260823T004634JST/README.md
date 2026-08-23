@@ -96,15 +96,23 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 
 補足の決定:
 
+- **`flake-lock-age.sh update` はスキャンを完了時に自動で差し込む。** lock を
+  作る・上げる入口は `update` しか無い（素の `nix flake update` / `nix flake lock`
+  は使わない決まり）ので、ここに置けば「新しい pin を初めて実行する前に必ず
+  照合が挟まる」になる。whitelist のある flake ではゲート（新規 findings で失敗。
+  lock 自体は書き込み済み）、whitelist の無い flake（**初回の lock** など）では
+  表示だけの `report` になり、全 findings を目に入れてから使い始める形。
+  `--no-scan` で外せる（強制は従来どおり CI 側が持つ）
 - **スキャナ自身も pin された nixpkgs から取る。** script は sbomnix が PATH に
   無ければ `nix shell --inputs-from <flake> nixpkgs#sbomnix` で入り直す。
   スキャナも外部ツールである以上、その供給網にも同じ遅延ポリシーを効かせる
 - **スキャンは PR / push に加えて毎日の定期実行でも回す。** advisory は pin より
   後から出るので、commit の無い期間も現在の pin が指す閉包を照合し続ける
-- **対象の閉包は `homeConfigurations.sandbox`**（x86_64-linux）。パッケージ集合は
-  全ホスト共通（`nix/home/modules/packages.nix` に集約されていて、ホスト差は
-  設定側にしか無い）ので代表として使う。skill 側 flake（`pjp-drawio` /
-  `pjp-plantuml`）の閉包と buildtime 閉包は今回の対象外（§5）
+- **対象の閉包は flake で変える。** dotfiles 本体は `homeConfigurations.sandbox`
+  （x86_64-linux。パッケージ集合は `nix/home/modules/packages.nix` に集約されて
+  いて全ホスト共通、ホスト差は設定側にしか無いので代表として使える）。それ以外の
+  flake は `devShells.<system>.default`（「これから実行するツール」は devShell に
+  入っているものなので）。buildtime 閉包と darwin の閉包は今回の対象外（§5）
 - **比較先は git master の HEAD ではなくチャンネル先端。** master は Hydra を
   通っていない commit を含み binary cache が揃わないし、将来の pin が辿り着く
   先もチャンネル公開だけ（ADR 005 と同じ理由）
@@ -113,13 +121,15 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 
 | ファイル | 変更 |
 | --- | --- |
-| `nix/scripts/closure-scan.sh` | 新規。`scan`（SBOM 化 + vulnxscan + whitelist 照合。新規 findings で終了コード 1）と `baseline`（今の findings を whitelist へ追記）の 2 動作 |
+| `nix/scripts/closure-scan.sh` | 新規。`scan`（SBOM 化 + vulnxscan + whitelist 照合。新規 findings で終了コード 1）、`report`（同じスキャンを表示するだけ。whitelist は無くてもよい）、`baseline`（今の findings を whitelist へ追記）の 3 動作。対象属性の既定は dotfiles 本体なら home 閉包、他の flake なら devShell |
 | `nix/scripts/closure-head-diff.sh` | 新規。pin と先端で閉包を組んで `nix store diff-closures`。差分の有無では落ちない |
+| `nix/scripts/flake-lock-age.sh` | `update` の完了時に closure-scan を自動で差し込む（whitelist あり→`scan`、無し→`report`。`--no-scan` で外す）。複数 flake の `update` で 1 つが失敗しても終了コードに乗らなかった取りこぼしも修正 |
 | `nix/vulnxscan-whitelist.csv` | 新規。`baseline` で生成した 67 件（詳細は下）。列は `"vuln_id","package","comment"`（vuln_id は正規表現・完全一致、package は完全一致） |
+| `nix/flake.nix` | `packages.<system>.closure-scan` / `apps.<system>.closure-scan` を追加（`flake-lock-age` と同じく他リポジトリから `nix run` で呼べる）。store の app として `update` を叩いたときもスキャンが差し込めるよう、`flake-lock-age` の runtimeInputs へ closure-scan を追加。**sbomnix は焼き込まない**（スキャナの版は対象 flake の pin から取る決めのため） |
 | `.github/workflows/nix.yml` | `closure-scan` ジョブ（PR / push / workflow_dispatch / **毎日の schedule**。summary へ表、SBOM と findings を artifact へ）と `head-diff` ジョブ（`nix/flake.lock` の動いた PR のみ）を追加。schedule では他ジョブを回さない。concurrency の group へ `event_name` を足した（schedule と push が同じ ref を共有して互いを取り消すため） |
-| `nix/README.md` | 「閉包のスキャンと pin↔先端の差分」節を追加 |
-| `docs/adr/001_.../textbook/05_daily_usage.md` | pin 更新 PR で CI が出す 2 つのレポートを追記（手順書なので現行に追随） |
-| `nix/files/claude/skills/pjp-nix-flake/references/lock-age.md` | 「効かない範囲・限界」に「発覚済みの侵害バージョンを固定し続ける」を追記し、本 ADR を指す |
+| `nix/README.md` | 「閉包のスキャンと pin↔先端の差分」節を追加。update への自動差し込みを追記 |
+| `docs/adr/001_.../textbook/05_daily_usage.md` | pin 更新 PR で CI が出す 2 つのレポートと、update 時の自動スキャンを追記（手順書なので現行に追随） |
+| `nix/files/claude/skills/pjp-nix-flake/` | `SKILL.md` と `references/lock-age.md` に、遅延の限界（発覚済みの侵害バージョンを固定し続ける）と update 時の自動スキャンを追記 |
 
 ### sbomnix の採用確認（メンテ状況）
 
@@ -155,6 +165,8 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 | **比較先を git master の HEAD にする** | binary cache が揃わない（ほぼ全部ソースビルド）。将来の pin が辿り着く先もチャンネル公開（ADR 005 と同じ理由） |
 | **buildtime 閉包までスキャンする** | toolchain 全体が入って findings のノイズが桁で増える。まず実際にディスクへ載る runtime 閉包から。必要になったら `--buildtime` で広げられる |
 | **定期スキャンを週次にする** | advisory 掲載から検知までの遅れが最大 7 日＝遅延と同じ長さになり本末転倒。毎日なら ≤1 日。public リポジトリなので CI 分は無料 |
+| **update への差し込みをせず、手順書で「update のあと scan」を案内する** | 人は忘れる。lock を作る・上げる入口が `update` の 1 箇所に集約されている（素の `nix flake update` は使わない決まり）からこそ、そこに置けば漏れない |
+| **実行する側（`nix develop` / `switch` など）に差し込む** | 実行の入口は多すぎて塞ぎきれない（nix develop / nix run / home-manager switch / direnv …）。lock を書く側の 1 箇所に置く方が確実で、「pin が変わったときだけ走る」にもなる |
 | **eval だけで pin↔先端の差分を取る**（ビルドせず drv を列挙） | runtime の依存はビルド産物を走査して決まるので、eval だけでは buildtime 閉包（超集合）しか出せずノイズが増える。両側ともチャンネル公開でビルド＝ほぼダウンロードなので、実物の runtime 閉包を比べる |
 
 ## 5. 影響 (Consequences)
@@ -179,16 +191,19 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 - `nix store diff-closures` は**版とサイズの変化しか出さない**。同じ版のまま
   ビルドだけ変わる対応は映らない。ただし `knownVulnerabilities` が付いた場合は
   先端側のビルドが insecure で**止まる**ので、ジョブの失敗として見える
-- スキャン対象は sandbox（x86_64-linux）の runtime 閉包だけ。**skill 側 flake
-  （electron を含む pjp-drawio など）、buildtime 閉包、darwin の閉包は見ていない。**
-  広げるなら ADR 005 が適用先を広げたのと同じ形で別途（whitelist の運用コストと
-  相談）
+- CI がゲート・定期実行で見るのは sandbox（x86_64-linux）の runtime 閉包だけ。
+  skill 側 flake（electron を含む pjp-drawio など）は **update 時の自動スキャン
+  （whitelist が無いので表示のみ）しか掛からず**、buildtime 閉包と darwin の
+  閉包は見ていない。広げるなら ADR 005 が適用先を広げたのと同じ形で別途
+  （whitelist の運用コストと相談）
 - vulnxscan がスキャナ内部の失敗を握りつぶす形（例: ネットワーク断で 0 件に
   見える）は、この構成では検知できない。終了コードが非ゼロになる失敗は CI で
   見える
 - grype の DB・OSV / NVD への照会で**毎回ネットワークアクセスが要る**（スキャン
   部分のローカル実測は 1 分 30 秒、閉包と grype DB のダウンロードを含む CI の
   ジョブ全体では実測 2 分 45 秒）。オフラインでは回らない
+- **`flake-lock-age.sh update` がスキャンの分だけ遅くなる**（1〜3 分）。急ぐ
+  ときは `--no-scan` で外せるが、外した update を常用したら差し込みの意味が無い
 - 定期実行の失敗に気付く経路は GitHub の workflow 失敗通知
 - **この網も Nix 管理の範囲だけ。** mise / npm / uv 側の依存には効かない
   （ADR 005 と同じ注意）
@@ -219,12 +234,31 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 | 差分が空のとき | pin `104240a` の hello 閉包 ↔ 先端で「版差分はありません」（store path は変わっても版が同じなら出ない、の実例でもある） |
 | `--override-input` が lock を書かないこと | `nix build` 経由では "not writing modified lock file" の警告どおり書かれない（`--no-write-lock-file` も明示） |
 
+### update への自動差し込み
+
+使い捨ての flake（devShell に hello だけ入れた閉包）で一巡を実測。
+
+| 確認 | 結果 |
+| --- | --- |
+| 初回 lock（whitelist 無し） | `update` が lock を新規作成し、続けて `report` が devShell 閉包をスキャン。findings 13 件（glibc / zlib / gcc）を表示して終了コード 0。「ツールを実行する前に目を通すこと」を案内 |
+| whitelist（ヘッダだけ）を置いて `update` | ゲートに切り替わり 13 件で終了コード 1。「lock は更新済み」と対応 2 択を案内 |
+| `closure-scan.sh baseline` 後の `update` | 13 件が whitelist へ追記され、`update` は終了コード 0 |
+| `--no-scan` | スキャンを飛ばす旨を出して終了コード 0 |
+| devShell の無い flake（packages だけ） | 既定属性 `devShells.<system>.default` が無いので `report` が警告して skip。`update` 自体は終了コード 0 |
+| store の app 経由（`nix run ./nix#flake-lock-age -- update`） | runtimeInputs の closure-scan が PATH から見つかり、ゲートが走って緑。sbomnix への再入は `--inputs-from` に**対象 flake** を渡すので、スキャナの版も対象側の pin から取れている |
+| dotfiles 本体をディレクトリ明示でスキャン（`closure-scan.sh scan ./nix`） | 隣接判定で対象が home 閉包（`homeConfigurations.sandbox`）になり、whitelist 照合で緑 |
+
+dotfiles 本体の `update` はこの PR では実行していない（pin が動いてしまう）。
+差し込みの code path は上の使い捨て flake と同一で、違うのは対象属性の既定だけ
+（それは直前の行で実測済み）。
+
 ### 静的検査
 
 | 確認 | 結果 |
 | --- | --- |
 | `shfmt -d` / `shellcheck` | `nix/` 配下の `*.sh` 全 20 ファイル（新規 2 本を含む）で通過 |
-| `nixfmt --check` | 通過（`flake.nix` は変更していない） |
+| `nixfmt --check` | 通過 |
+| `nix build ./nix#closure-scan` / `#flake-lock-age` | 通過（writeShellApplication が内蔵の shellcheck を通す） |
 | actionlint | 追加ジョブに指摘なし（既存 lint ジョブの意図的な single quote への SC2016 のみ） |
 
 ### CI 上の初回実行（PR #62）
@@ -240,9 +274,15 @@ Plugin の CVE が当たる等）が混ざっており、単体でゲートを�
 日常運用は [`nix/README.md`](../../../nix/README.md#閉包のスキャンと-pin先端の差分-遅延の補完)
 を参照。要点だけ。
 
+ふだんは何もしなくてよい。`flake-lock-age.sh update` が完了時にスキャンを
+自動で差し込み、CI が PR / push / 毎日で回す。手で叩くのは次の形。
+
 ```sh
 # CI と同じスキャン (whitelist に無い findings があれば非ゼロ)
 ./nix/scripts/closure-scan.sh scan
+
+# 表示するだけ (落ちない。whitelist の無い flake でも通る)
+./nix/scripts/closure-scan.sh report
 
 # findings を意図して受け入れる (whitelist へ追記 → comment に理由 → commit)
 ./nix/scripts/closure-scan.sh baseline
