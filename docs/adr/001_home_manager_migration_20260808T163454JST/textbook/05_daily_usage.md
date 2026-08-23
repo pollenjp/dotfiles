@@ -69,6 +69,8 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
+`update` は lock を書いたあと、**その lock で実際に入る閉包のスキャンを自動で差し込む**（[ADR 006](../../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。whitelist に無い findings があると失敗するので、switch の前に対応する（pin を動かすか、理由を書いて whitelist へ足すか）。`--no-scan` で飛ばせる。
+
 `flake.lock` が書き換わる。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
 
 **素の `nix flake update` は使わない。** 上げ先は追跡先の先端ではなく、**公開から 7 日以上経った revision** に限っている（npm / pnpm の `minimumReleaseAge` に相当する遅延）。素の `nix flake update` は先端を取るのでこの遅延が黙って外れ、CI の `lock-age` ジョブが落ちる。
@@ -88,6 +90,11 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ./nix/scripts/flake-lock-age.sh check \
   ./nix ./nix/files/claude/skills/pjp-drawio ./nix/files/claude/skills/pjp-plantuml
 ```
+
+pin を更新する PR では、CI が 2 つのレポートを出す（[ADR 006](../../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。
+
+- **`closure-scan`** — 実際に入る閉包を脆弱性データベース（OSV / GHSA / NVD）と照合する。whitelist（`nix/vulnxscan-whitelist.csv`）に無い findings があると落ちる。対応は「pin を動かす」か「理由を書いて whitelist へ足す」の 2 択で、手順は [`nix/README.md`](../../../../nix/README.md#閉包のスキャンと-pin先端の差分-遅延の補完)
+- **`head-diff`** — pin と先端で入るパッケージの版差分。見覚えの無い動きだけ nixpkgs のコミットログを確認する（落ちない）
 
 ## 壊れたら戻す
 

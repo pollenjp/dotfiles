@@ -82,6 +82,24 @@
           home-manager = inputs.home-manager.packages.${system}.default;
           default = home-manager;
 
+          # 閉包を SBOM 化して脆弱性データベース (OSV / GHSA / NVD) と照合する
+          # 道具 (ADR 006)。flake-lock-age と同じく他のリポジトリからも呼べる:
+          #
+          #   nix run 'github:pollenjp/dotfiles?dir=nix#closure-scan' -- report
+          #
+          # sbomnix は焼き込まない。スキャナの版は「対象 flake の pin された
+          # nixpkgs」から取る決めなので、script 側の nix shell --inputs-from に
+          # 任せる (焼き込むと dotfiles の pin が他リポジトリにも効いてしまう)。
+          closure-scan = pkgs.writeShellApplication {
+            name = "closure-scan";
+            runtimeInputs = [
+              pkgs.coreutils
+              pkgs.gnugrep
+              pkgs.gawk
+            ];
+            text = builtins.readFile ./scripts/closure-scan.sh;
+          };
+
           # flake.lock の pin を「公開から N 日以上経った revision」に限る道具。
           # 他のリポジトリからも呼べるように出している (dotfiles 専用ではない):
           #
@@ -91,23 +109,32 @@
           # (Determinate 版など) をそのまま使わせる。
           flake-lock-age = pkgs.writeShellApplication {
             name = "flake-lock-age";
+            # closure-scan を PATH へ入れるのは、store の app として update を
+            # 叩いたときも完了時のスキャンを差し込めるようにするため
+            # (チェックアウトから叩いたときは隣の closure-scan.sh を使う)。
             runtimeInputs = [
               pkgs.coreutils
               pkgs.curl
               pkgs.gnused
               pkgs.gnugrep
+              closure-scan
             ];
             text = builtins.readFile ./scripts/flake-lock-age.sh;
           };
         }
       );
 
-      # `nix run <flake>#flake-lock-age` の入口。
+      # `nix run <flake>#<名前>` の入口。
       apps = forAllSystems (system: {
         flake-lock-age = {
           type = "app";
           program = "${self.packages.${system}.flake-lock-age}/bin/flake-lock-age";
           meta.description = "flake.lock の pin に最小経過日数を課す";
+        };
+        closure-scan = {
+          type = "app";
+          program = "${self.packages.${system}.closure-scan}/bin/closure-scan";
+          meta.description = "閉包を SBOM 化して OSV / GHSA / NVD と照合する";
         };
       });
 

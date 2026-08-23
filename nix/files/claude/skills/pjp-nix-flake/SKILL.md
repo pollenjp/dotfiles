@@ -99,9 +99,16 @@ nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
 FLA="github:pollenjp/dotfiles?dir=nix#flake-lock-age"
 
 nix run "${FLA}" -- resolve   # 選ばれる revision を見るだけ
-nix run "${FLA}" -- update    # その revision へ flake.lock を更新
+nix run "${FLA}" -- update    # その revision へ更新し、入る閉包をスキャン
 nix run "${FLA}" -- check     # 今の flake.lock を検査 (CI 用)
 ```
+
+`update` は lock を書いたあと、その lock で実際に入る閉包のスキャン
+（`closure-scan`、OSV / GHSA / NVD 照合）を自動で差し込む。whitelist
+（`<flake>/vulnxscan-whitelist.csv`）が無いうちは表示だけで落ちないが、
+**表に目を通してからツールを実行する**こと（そのための差し込み。初回の lock で
+特に効く）。`--no-scan` で飛ばせる。理由と whitelist の作り方は
+`references/lock-age.md`。
 
 対象は root の直下 input **すべて**。1 つでも先端に張り付いていれば意味がない。
 input ごとに測り方が変わる（nixpkgs はチャンネル公開時刻、その他の GitHub input は

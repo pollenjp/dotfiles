@@ -35,6 +35,12 @@
 #   flake-lock-age.sh update  [<flake ディレクトリ>...]  flake.lock をその revision へ更新
 #   flake-lock-age.sh check   [<flake ディレクトリ>...]  今の flake.lock を検査 (CI 用)
 #
+# `update` は lock を書いたあと、その lock で実際に入る閉包のスキャン
+# (closure-scan.sh / ADR 006) を自動で差し込む。lock を作る・上げる入口はここ
+# しか無いので、「新しい pin を初めて実行する前に必ず照合が挟まる」を、この
+# 位置に置くことで作っている。whitelist のある flake ではゲート (新規 findings
+# で失敗)、無い flake (初回の lock など) では表示だけ。--no-scan で飛ばせる。
+#
 # `flake.lock` がまだ無い flake でも resolve / update は通る (input の一覧を
 # flake.nix の `inputs` から読む)。**最初の lock も update で作ること。** 先に
 # `nix flake lock` を打つと一度先端へ pin されるので、遅延が最初から外れた lock を
@@ -107,11 +113,13 @@ usage() {
 使い方: flake-lock-age.sh [オプション] <resolve|update|check> [<flake ディレクトリ>...]
 
   resolve  遅延を満たす revision を表示するだけ (flake.lock は触らない)
-  update   その revision へ flake.lock を更新する
+  update   その revision へ flake.lock を更新し、入る閉包をスキャンする
+           (whitelist のある flake はゲート、無い flake は表示だけ)
   check    今の flake.lock が下限日数を満たすか検査する (CI 用)
 
 オプション:
   --min-age-days N  下限日数 (既定 7 / 環境変数 FLAKE_MIN_RELEASE_AGE_DAYS)
+  --no-scan         update 後の閉包スキャン (closure-scan) を飛ばす
   -h, --help        この使い方を出す
 
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
@@ -130,6 +138,7 @@ EOS
 min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS:-7}
 cmd=""
 flake_dirs=()
+no_scan=0
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -140,6 +149,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --min-age-days=*)
       min_age_days=${1#*=}
+      shift
+      ;;
+    --no-scan)
+      no_scan=1
       shift
       ;;
     -h | --help)
@@ -644,6 +657,45 @@ cmd_resolve() {
   return "${failed}"
 }
 
+# update が書いた lock で実際に入る閉包を、ツールを実行する前にスキャンする
+# (closure-scan.sh / ADR 006)。lock を作る・上げる入口はここしか無いので、この
+# 位置に差し込むことで「新しい pin を初めて実行する前に必ず照合が挟まる」を作る。
+#
+# whitelist (<flake>/vulnxscan-whitelist.csv) がある flake ではゲートとして呼ぶ
+# (新規 findings があれば失敗)。無い flake では表示だけ (report)。初回の lock は
+# まだ基準線が無いのが普通で、そこで止めるより全 findings を目に入れる方が
+# 「実行する前に見る」という目的に合う。
+#
+# scanner の探し方は 2 段。チェックアウトから叩いたときは隣の closure-scan.sh、
+# nix run (store の app) のときは flake-lock-age と同じパッケージが PATH へ入れる
+# closure-scan。どちらも無ければ案内だけ出して通す (scan の強制は CI 側の仕事)。
+auto_scan() {
+  local dir=$1 scanner
+  if [[ ${no_scan} -eq 1 ]]; then
+    note "--no-scan なので更新後のスキャンを飛ばします。"
+    return 0
+  fi
+  if [[ -x "${script_dir}/closure-scan.sh" ]]; then
+    scanner="${script_dir}/closure-scan.sh"
+  elif command -v closure-scan &>/dev/null; then
+    scanner=closure-scan
+  else
+    warn "closure-scan が見つからないので更新後のスキャンを飛ばします。
+入るものを実行する前に手で照合すること:
+  nix run 'github:pollenjp/dotfiles?dir=nix#closure-scan' -- report ${dir}"
+    return 0
+  fi
+  if [[ -f "${dir}/vulnxscan-whitelist.csv" ]]; then
+    "${scanner}" scan "${dir}" || {
+      warn "lock は更新済み。上の findings に対応してから使うこと
+(pin を動かして直るか見るか、理由を書いて whitelist へ足すか)。"
+      return 1
+    }
+  else
+    "${scanner}" report "${dir}"
+  fi
+}
+
 cmd_update() {
   local dir i args failed=0
   for dir in "${flake_dirs[@]}"; do
@@ -670,7 +722,9 @@ cmd_update() {
     done
     printf '%s+ nix flake update %s%s\n' "${c_cyan}" "${args[*]}" "${c_reset}"
     nix flake update "${args[@]}"
+    auto_scan "${dir}" || failed=1
   done
+  return "${failed}"
 }
 
 cmd_check() {
