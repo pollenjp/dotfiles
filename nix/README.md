@@ -551,6 +551,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude の commit を無署名にする env 登録（[後述](#claude-の-commit-を無署名にする)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -889,6 +890,9 @@ WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非
 read-only ファイルになるため。マシン固有の設定を足したい場合は `~/.gitconfig` を作れば
 よい（git の読み込み順により home-manager の設定を上書きできる）。
 
+なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
+止まるため。[Claude の commit を無署名にする](#claude-の-commit-を無署名にする)を参照。
+
 ## ssh について
 
 `programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
@@ -1213,6 +1217,60 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
 
+### Claude の commit を無署名にする
+
+このマシンの git は 1Password の `op-ssh-sign` で署名する（[前述](#git-について)）。
+署名のたびにホスト側 Windows の 1Password が承認ダイアログを出すため、Claude に
+commit させるとそこで止まる。**Claude のセッションからの commit だけ**署名を外す。
+
+#### 登録（マシンごとに一度だけ）
+
+```sh
+./nix/scripts/bootstrap-claude-env.sh
+```
+
+`~/.claude/settings.json` の `env` へ、git の config を環境変数の形で書く。
+
+```json
+"env": {
+  "GIT_CONFIG_COUNT": "2",
+  "GIT_CONFIG_KEY_0": "commit.gpgsign",
+  "GIT_CONFIG_VALUE_0": "false",
+  "GIT_CONFIG_KEY_1": "tag.gpgsign",
+  "GIT_CONFIG_VALUE_1": "false"
+}
+```
+
+git は `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` で渡された
+config を **config ファイルより優先する**。そのため効き方がこうなる。
+
+- **Claude のセッション（Bash tool）にだけ効く。** 自分の手元のターミナルからの commit は
+  今どおり 1Password で署名される
+- `git commit` 直打ちでも `--amend` でも `rebase --continue` でも `git tag` でも効く。
+  「`--no-gpg-sign` を付ける」という指示と違い、忘れる余地が無い
+
+Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入するが、
+**既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない。
+
+冪等で、`env` の他のキーは保持する。無関係な `GIT_CONFIG_*` ペアが既にあれば順序を保って
+残し、番号だけ 0 から振り直す（番号に穴があると git はその手前までしか読まない）。
+
+**実行中のセッションにも入る**（このマシンでは再起動なしで反映された）。確認は
+`env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign` を実行させて
+`false` になること（自分のターミナルで実行すると `true` のまま）。入らなければ再起動する。
+
+#### 採らなかった案
+
+| 案 | 却下理由 |
+| --- | --- |
+| `CLAUDE.md` に「`--no-gpg-sign` を付ける」と書く | soft な指示なので忘れうる。全セッションでトークンも食う |
+| repo local に `commit.gpgsign false` | 自分の commit も無署名になる。repo ごとに要る |
+| `includeIf "gitdir:~/.herdr/worktrees/"` | worktree の外で Claude が commit すると効かず、逆に worktree で自分が commit すると無署名になる |
+| `PreToolUse` で `git commit` を deny | 効くが bash 文字列の解析（複合コマンド・クォート）が要る。env で足りる |
+
+> ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
+> commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+
 ### private な skill 置き場 (claude-skills)
 
 公開できない skill / agent / command は [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）に置き、
@@ -1411,6 +1469,7 @@ nix/
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (マシンごとに 1 回)
+    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (マシンごとに 1 回)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```
