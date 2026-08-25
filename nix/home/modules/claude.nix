@@ -33,7 +33,9 @@
 # ## 管理しないもの
 #
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
-#                    store 管理にすると書けなくなる
+#                    store 管理にすると書けなくなる。ここにしか書けないもの
+#                    (フック / statusLine の登録、git の署名を切る env) は
+#                    scripts/bootstrap-claude-*.sh がマシンごとに注入する
 #   plugins/       : 実行時に取得・更新される
 #   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
 #                    載せると CI の nix flake check も fetch できずに落ちる。
