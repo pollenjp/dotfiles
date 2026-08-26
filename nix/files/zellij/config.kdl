@@ -48,7 +48,9 @@ keybinds {
         bind "h" { GoToPreviousTab; }
         bind "j" { GoToNextTab; }
         bind "k" { GoToPreviousTab; }
-        bind "Ctrl k" { SwitchToMode "normal"; }
+        // Customize - 既定の `bind "Ctrl k" { SwitchToMode "normal"; }` を外した。
+        // ctrl + k は tmux mode の入口へ回したので、残すと tab mode の中だけ
+        // 「normal へ戻る」に食われて挙動が割れる。tab の入口/出口は ctrl + t。
         bind "l" { GoToNextTab; }
         bind "n" { NewTab; SwitchToMode "normal"; }
         bind "r" { SwitchToMode "renametab"; TabNameInput 0; }
@@ -161,8 +163,6 @@ keybinds {
         bind "Alt Shift p" { ToggleGroupMarking; }
         // Customize - use 'ctrl + q' to quit zellij (in zellij)
         bind "Ctrl q" { Quit; }
-        // Customize - use 'ctrl + j' to switch to tmux mode (in zellij)
-        bind "Ctrl j" { SwitchToMode "Tmux"; }
     }
     shared_except "locked" "move" {
         // Customize - release 'ctrl + h' in tmux (in zellij)
@@ -174,12 +174,23 @@ keybinds {
     }
     shared_except "locked" "scroll" "search" "tmux" {
         bind "Ctrl b" { SwitchToMode "tmux"; }
+        // Customize - use 'ctrl + k' to switch to tmux mode (in zellij)
+        //
+        // herdr の prefix と揃えてある (nix/files/herdr/config.toml の [keys])。
+        // もとは ctrl + j だったが、LF (0x0a) は中継を挟むと enter に潰されて
+        // 届かないので両方 ctrl + k へ移した。理由は herdr 側のコメントに詳しい。
+        //
+        // "tmux" を除外した group に置くのが要点。除外しないと tmux mode の中で
+        // ctrl + k が「tmux mode へ入る」に食われて、下の Write 11 (リテラルの
+        // ctrl + k を流す) が発火しない。ctrl + b が既定でここに居るのと同じ理由。
+        bind "Ctrl k" { SwitchToMode "tmux"; }
     }
     shared_except "locked" "scroll" "search" {
         bind "Ctrl s" { SwitchToMode "scroll"; }
     }
     shared_except "locked" "tab" {
-        // use 'ctrl + k' in tmux (in zellij)
+        // 既定の tab mode は ctrl + k だが、そこは tmux mode の入口
+        // (と、その先の tmux prefix passthrough) へ回したので ctrl + t にしてある。
         // bind "Ctrl k" { SwitchToMode "tab"; }
         bind "Ctrl t" { SwitchToMode "tab"; }
     }
@@ -250,6 +261,10 @@ keybinds {
         bind "," { SwitchToMode "renametab"; }
         bind "[" { SwitchToMode "scroll"; }
         bind "Ctrl b" { Write 2; SwitchToMode "normal"; }
+        // Customize - ctrl + k を 2 回押すとリテラルの ctrl + k (0x0b = 11) が
+        // 下へ流れる。zellij の中で tmux を動かすとき、tmux の prefix (C-k) を
+        // 届かせる唯一の手段。上の Ctrl b / Write 2 と同じ形。
+        bind "Ctrl k" { Write 11; SwitchToMode "normal"; }
         bind "c" { NewTab; SwitchToMode "normal"; }
         bind "h" { MoveFocus "left"; SwitchToMode "normal"; }
         bind "j" { MoveFocus "down"; SwitchToMode "normal"; }
