@@ -4,6 +4,9 @@
 #   zellij 側の意図 -> nix/files/zellij/config.kdl の "Customize" コメント
 #   tmux 側の意図   -> nix/files/tmux/home.tmux.conf の Keybind 節
 #
+# prefix (herdr) と tmux mode の入口 (zellij) は両方 ctrl+k で揃えてある。
+# もとは両方 ctrl+j だったが、中継越しに届かないので移した ([keys] 冒頭)。
+#
 # 変更を反映するには home-manager switch のあと、herdr の中で prefix + shift + r
 # (または `herdr server reload-config`)。
 #
@@ -34,16 +37,29 @@ default_shell = "fish"
 # bash と違って差が出ない。
 
 [keys]
-# prefix は ctrl+j (herdr の既定は ctrl+b)。
+# prefix は ctrl+k (herdr の既定は ctrl+b)。
 #
-# zellij でも tmux mode の入口として ctrl+j を張っている。herdr の prefix は
-# 1 つしか持てないので、zellij 既定の ctrl+b ではなくこちらへ寄せる。
-# tmux 側の prefix は ctrl+k なので、herdr の中で tmux を動かしても衝突しない。
+# もともと ctrl+j にしていた (zellij の tmux mode 入口と指を揃えるため) が、
+# **中継を挟むと herdr まで届かない**ので移した。
 #
-# 注意: ctrl+j は端末上では LF (0x0a) なので、kitty keyboard protocol が
-# 効かない端末だと enter と区別できないことがある。zellij で同じキーが
-# 効いている端末なら問題ない。
-prefix = "ctrl+j"
+# ctrl+j は端末上では LF (0x0a) で、enter (CR, 0x0d) と並んで「行末」の意味を
+# 背負っているバイトなので、行端末の正規化をする中継はここを潰す。実際に
+# 次の 2 経路で届かなかった:
+#   powershell -> wsl -> ssh -> linux
+#   aws ssm start-session
+# powershell から ssh.exe で直結したときだけ通る。ssh.exe は INPUT_RECORD の
+# UnicodeChar を自前で読むので 0x0a が生き残る、というのが理由と思われる
+# (未確定。WSL 側で showkey -a を見れば確定する)。
+#
+# 同じ理由で避けるべきキー: ctrl+m (CR), ctrl+i (Tab), ctrl+[ (Esc),
+# ctrl+h (BS), ctrl+s / ctrl+q (XON/XOFF)。
+#
+# 注意: **tmux 側の prefix も ctrl+k なので衝突する** (home.tmux.conf の
+# `set-option -g prefix C-k`)。herdr の中で tmux を動かすと tmux の prefix は
+# herdr に食われるので、下へ届かせるには prefix を 2 回 (prefix+ctrl+k) 押して
+# リテラルを流す。tmux in tmux と同じ作法で、1 打鍵増えるのを承知の上で
+# 「中継越しに届くこと」を優先した判断。
+prefix = "ctrl+k"
 
 ##############################################################################
 # tmux 由来のキーに寄せる (zellij の tmux mode へ入れたのと同じ変更)
@@ -138,11 +154,13 @@ new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 # new_tab を潰しても `config: ok` と言う)。奪っていないことは
 # `herdr --default-config | grep <キー>` で自分で確かめる。
 #
-# ctrl+h と ctrl+k は **prefix 無しの直接バインドに使わないこと**。
-# herdr の中で tmux を動かしたときに、tmux の prefix (ctrl+k) と pane 移動が
-# herdr に食われる。zellij は既定で食っていたので `unbind "Ctrl h"` と
-# 「tab mode を ctrl+k から ctrl+t へ」の 2 つが要ったが、herdr は既定で
-# 直接バインドをほとんど持たないので、こちらから足さない限り何もしなくてよい。
+# ctrl+h は **prefix 無しの直接バインドに使わないこと**。herdr の中で tmux を
+# 動かしたときに pane 移動が herdr に食われる。zellij は既定で食っていたので
+# `unbind "Ctrl h"` が要ったが、herdr は既定で直接バインドをほとんど持たない
+# ので、こちらから足さない限り何もしなくてよい。
+#
+# ctrl+k は prefix そのものに使っている ([keys] 冒頭を参照)。tmux の prefix と
+# 衝突しているのは承知の上での判断。
 #
 # 既定のままで tmux と同じもの (だから上に書いていない):
 #   prefix+c         新しい tab
@@ -152,10 +170,11 @@ new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 #   prefix+z         pane の zoom
 #   prefix+[         copy mode
 #   prefix+h/j/k/l   pane 移動
-#   prefix+ctrl+j    prefix を 2 回押すとリテラルの ctrl+j が下へ流れる
+#   prefix+ctrl+k    prefix を 2 回押すとリテラルの ctrl+k が下へ流れる
+#                    (中の tmux へ prefix を届かせる唯一の手段。要動作確認)
 #
 # herdr に対応物が無くて落としたもの:
 #   zellij Ctrl+q (Quit)      常駐前提なので Quit が無い。detach で代用
-#   zellij Ctrl+b (tmux mode) prefix は 1 つしか持てない。ctrl+j に寄せた
+#   zellij Ctrl+b (tmux mode) prefix は 1 つしか持てない。ctrl+k に寄せた
 #   zellij Ctrl+t (tab mode)  herdr にモードは無く prefix+ の直打ちで完結する
 #   zellij space  (swap layout) herdr に layout の概念が無い
