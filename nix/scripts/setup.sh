@@ -111,7 +111,7 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
 使い方 (~/dotfiles/setup は このスクリプトへの symlink):
   setup.sh                 メニューを出す (既定)
   setup.sh --new-machine   「新しいマシン適用」をそのまま実行
-  setup.sh --update        「既存マシン更新」をそのまま実行
+  setup.sh --update        「既存マシン更新」をそのまま実行 (switch + 冪等な手順)
   setup.sh --steps a,b,c   指定した手順だけ実行 (id は --list で確認)
   setup.sh --list          手順の一覧を出す
   setup.sh --self-update   本体を git で最新にしてから続ける (下記)
@@ -296,7 +296,7 @@ add_step switch \
 
 add_step bootstrap \
   'bootstrap (マシンごとの初期化)' \
-  '下のスクリプトをまとめて選ぶ。いずれも冪等で、何度実行してもよい。' \
+  '下のスクリプトをまとめて選ぶ。いずれも冪等なので「既存マシン更新」にも入る。' \
   group 0
 
 # 手順 4 / 6 / 6.5。増えても自動でメニューに載る。
@@ -387,12 +387,33 @@ apply_preset() {
       done < <(child_ids)
       ;;
     update)
-      # README 「2 回目以降」。bootstrap は済んでいる前提なので switch だけ。
-      # 入れ直したくなったらカスタムか --steps で選ぶ。
+      # README 「2 回目以降」。switch に加えて **冪等な手順を全部** 走らせる。
       #
-      # ssh-config だけは入れてある。.ssh submodule を更新したときに
-      # ~/.ssh/config.d/ を張り直す必要があり、冪等で副作用も無いため。
+      # bootstrap-*.sh はどれも冪等 (「既に同じなら何もしない」「既に在れば中身に
+      # 触らない」) なので、毎回走らせても状態は変わらない。走らせないと、
+      # スクリプトを足したときや別マシンで変えたとき (claude-skills など) に
+      # そのマシンだけ取り残され、取り込むには --steps に名前を並べるしかなく、
+      # 「何が増えたか」を人間が覚えている必要があった。
+      # ssh-config も同じ理由で入っている (.ssh submodule を更新したら張り直す)。
+      #
+      # 入れていないのは、冪等でないか ここでは有害なもの:
+      #
+      #   nix-install       既にあれば飛ばすだけ。足しても何も起きない
+      #   preflight-unlink  **home-manager 自身が張った symlink まで外す**
+      #                     (対象パスの symlink を無条件に unlink する)。
+      #                     旧 main.bash からの移行用で、switch 済みのマシンで
+      #                     繰り返すものではない
+      #   local-flake       ~/dotfiles/setup を **実行元の checkout** へ張り直す。
+      #                     worktree から走らせると symlink がそちらを向いて、
+      #                     worktree を消した後に dangling で残る。ghq の決める
+      #                     パス外では exit 1 になり、後続まで巻き添えにする
+      #   chsh              sudo が要る。README でも「必要なら」
+      #
+      # 外したいときは「カスタム」か --steps で選び直す。
       ids=(ssh-config switch)
+      while IFS= read -r id; do
+        ids+=("${id}")
+      done < <(child_ids)
       ;;
     *) die "unknown preset: $1" ;;
   esac
@@ -927,7 +948,7 @@ menu_main() {
       1)
         printf '  %s実行される手順:%s\n' "${c_dim}" "${c_reset}"
         preview_preset update
-        note '(bootstrap を入れ直したいときは「カスタム」で選ぶ)'
+        note '(bootstrap は冪等なので毎回走る。外すときは「カスタム」で)'
         ;;
       2) note '次の画面で手順を 1 つずつ選ぶ。' ;;
       3) note '何もせずに終了する。' ;;
@@ -1543,13 +1564,43 @@ run_step() {
 # 実行   #
 ##########
 
+# ~/.config/mise/config.toml の [tools] に残っている go / node / usage 以外の名前。
+#
+# 手順 5 (旧経路が書いた分を手で整理する) の案内を出すかどうかにだけ使う。
+# bootstrap-mise は「既存マシン更新」で毎回走るようになったので、無条件に案内すると
+# 片付いた後も毎回出ることになる。
+#
+# 見るのは [tools] だけで、次の見出し ([settings] など) で抜ける。`[tools.<名前>]`
+# 形式は見ない (案内が出なくなるだけで、判定を誤って余計なことは言わない)。
+mise_extra_tools() {
+  local f="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml"
+  [[ -f ${f} ]] || return 0
+  awk '
+    /^[[:space:]]*\[/ { in_tools = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*$/); next }
+    !in_tools         { next }
+    /^[[:space:]]*#/  { next }
+    /^[[:space:]]*$/  { next }
+    {
+      key = $0
+      sub(/[[:space:]]*=.*$/, "", key)
+      gsub(/[[:space:]"]/, "", key)
+      if (key != "go" && key != "node" && key != "usage") { print key }
+    }
+  ' "${f}"
+}
+
 # 自動化できない手順 (0 / 5 / 7) と、次にやることを出す
 post_notes() {
+  local extra
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
   if is_selected bootstrap-mise; then
-    note '手順 5: 既存マシンは ~/.config/mise/config.toml を手で整理する。'
-    note '        go / node / usage だけ残す。消さないと mise の shim が'
-    note '        PATH の先頭に居座り Nix 側のツールが使われない。'
+    extra=$(mise_extra_tools || true)
+    if [[ -n ${extra} ]]; then
+      note '手順 5: ~/.config/mise/config.toml の [tools] に go / node / usage 以外が残っている:'
+      note "          $(printf '%s' "${extra}" | tr '\n' ' ')"
+      note '        手で消す。残っていると mise の shim が PATH の先頭に居座り'
+      note '        Nix 側のツールが使われない。'
+    fi
   fi
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
