@@ -434,9 +434,25 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3（`ssh-config` は冪等。submodule 更新の取り込みも兼ねる） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.1 → 6.2 → 6.5 → 6.6 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 6 → 6.1 → 6.2 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
+
+「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
+どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、繰り返しても
+状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
+（`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
+並べるしかなくなる。時間が気になるとき・一部だけ走らせたいときは「カスタム」か
+`--steps` で選び直す。
+
+入っていないのは、冪等でないか更新時には有害な手順。
+
+| 手順 | 入れていない理由 |
+| --- | --- |
+| 1 `nix-install` | 既にあれば飛ばすだけ。足しても何も起きない |
+| 2 `preflight-unlink` | **home-manager 自身が張った symlink まで外す**（対象パスの symlink を無条件に unlink する）。旧 `main.bash` からの移行用 |
+| 2.5 `local-flake` | `~/dotfiles/setup` を**実行元の checkout** へ張り直す（worktree から走らせると dangling で残る）。ghq の決めるパス外では `exit 1` になり後続まで止まる |
+| 7 `chsh` | `sudo` が要る。README でも「必要なら」 |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
@@ -625,8 +641,9 @@ chsh -s "$(command -v fish)"
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
-`~/dotfiles/setup --update`（メニューの「既存マシン更新」）でも同じことをする。
-ホスト名を覚えていなくてよいのでこちらが楽。
+`~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
+`ssh-config` と `bootstrap-*` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
 本体ごと最新にするなら `--self-update`（[前述](#本体を最新にする---self-update)）、
@@ -1060,11 +1077,11 @@ bash では元々発火していなかった）。
 home-manager は作りも消しもしない（秘密情報なので store には置けない）。
 
 ファイルを置くのは setup の手順 6.6 (`bootstrap-local-env`)。
-**新しいマシン適用に含まれている**ので、新規マシンでは何もしなくてよい。
+**「新しいマシン適用」「既存マシン更新」の両方に含まれている**ので、普段は何もしなくてよい。
 
 ```sh
 ./nix/scripts/bootstrap-local-env.sh          # 実体
-~/dotfiles/setup --steps bootstrap-local-env  # 既存マシンで後から足す場合
+~/dotfiles/setup --steps bootstrap-local-env  # これだけ走らせる場合
 ```
 
 初回だけ形式を書いたテンプレート（全行コメント = 実質空）を置き、`chmod 600` する。
@@ -1285,6 +1302,7 @@ Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入
 `$(ghq root)/github.com/pollenjp/claude-skills` へ clone し、`skills/` `agents/`
 `commands/` の中身を 1 つずつ `~/.claude/<種類>/` へ symlink する。冪等なので、
 skill を足したあとや別マシンの変更を取り込むときに何度でも実行してよい。
+「既存マシン更新」にも入っているので、`--update` するだけで別マシンの変更が入る。
 
 ```
 ~/.claude/skills/
@@ -1398,6 +1416,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 > ⚠️ **既存マシンでは、既に書き込まれた 16 エントリが自動では消えない。**
 > マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
 > だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
+> `setup.sh` は `[tools]` に残っている名前を実行後の「残りの手作業」に並べる
+> （片付いていれば何も出さない）。
 
 ## CI
 
