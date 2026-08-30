@@ -23,7 +23,7 @@
 # マシンで `cc-pages.service` が failed のまま残り、`systemctl --user status` が
 # 常に赤くなる。
 #
-# そこで **ConditionPathIsExecutable** を使う。条件が偽の unit は「起動しなかった」
+# そこで **ConditionFileIsExecutable** を使う。条件が偽の unit は「起動しなかった」
 # ではなく「条件不成立でスキップ」として扱われ、**失敗として記録されない**。
 # bootstrap がバイナリを置いた後は、次の起動 (または bootstrap 内の restart) から
 # 普通に上がる。
@@ -41,7 +41,13 @@
       Description = "cc-pages — Claude Code の応答を読むローカル web ビューア";
       Documentation = "https://github.com/pollenjp/cc-pages";
       # バイナリが無いマシンでは静かにスキップする (上のコメント参照)。
-      ConditionPathIsExecutable = "%h/bin/cc-pages";
+      #
+      # キー名に注意: ConditionPathIs* に Executable は無い (Directory /
+      # SymbolicLink / MountPoint / ReadWrite / Encrypted だけ)。実行可能かを
+      # 見るのは ConditionFileIsExecutable。間違えても systemd は
+      # "Unknown key name ... ignoring" と言うだけで**無視して起動する**ので、
+      # 条件が効いていないことに気付けない。
+      ConditionFileIsExecutable = "%h/bin/cc-pages";
     };
 
     Service = {
