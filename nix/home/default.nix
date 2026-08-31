@@ -13,6 +13,7 @@
     ./modules/fish.nix
     ./modules/bash.nix
     ./modules/claude.nix
+    ./modules/cc-pages.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。
