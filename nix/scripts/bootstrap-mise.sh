@@ -4,6 +4,12 @@
 # mise のグローバル設定 (~/.config/mise/config.toml) を初期化する。
 # **マシンごとに一度だけ** 実行する。
 #
+# order: 10
+#
+# ^ setup.sh が読む実行順。既定は 50 で、小さいほど先に走る。
+#   bootstrap-claude-plugins.sh が claude を要求し、その claude を入れるのは
+#   ここなので、辞書順 (bootstrap-mise は最後尾) より前に出す必要がある。
+#
 # ## なぜ Nix で管理しないのか
 #
 # このファイルは mise 自身が実行時に書き換える (mise use --pin など)。
@@ -45,10 +51,25 @@ mise settings set fetch_remote_versions_timeout 14d
 
 echo "==> 言語ランタイム"
 # CLI ツール (bat/eza/fd/ripgrep/fzf/jq/...) は Nix が管理するので入れない。
-# ここに書くのはプロジェクト毎の切り替えが必要なものだけ。
+# ここに書くのはプロジェクト毎の切り替えが必要なものだけ (例外は下の claude)。
 mise use -g usage@latest # mise 自身の補完に必要
 mise use -g go@latest
 mise use -g node@24
+
+echo "==> claude (役割分担の例外)"
+# claude は「グローバルな CLI」なので、上の役割分担どおりなら Nix
+# (packages.nix) 側が筋。nixpkgs にも claude-code は在り、wrapper が
+# DISABLE_AUTOUPDATER を立てるので Nix 管理でも動作自体は問題ない。
+#
+# それでも mise に置くのは **リリース頻度が flake.lock の更新周期に
+# 合わない**ため。nixpkgs pin にすると、版は flake.lock を上げるまで動かない。
+# mise の `latest` + 上の minimum_release_age = 9d なら「先端は取らないが
+# nixpkgs pin よりは速い」中間の刻みになり、repo の「先端は取らない」方針
+# (flake-lock-age.sh) とも矛盾しない。
+#
+# ここで入れておかないと bootstrap-claude-plugins.sh が動けない。
+# そのためヘッダの `order: 10` で bootstrap-* の先頭に出してある。
+mise use -g claude@latest
 
 echo
 echo "完了しました。現在のグローバル設定:"

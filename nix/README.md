@@ -434,8 +434,8 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 6 → 6.1 → 6.2 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 6 → 6.1 → 6.2 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.5 → 6.6 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
@@ -551,6 +551,32 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 `preflight-unlink.sh` が外すのは **symlink だけ**で、`~/.bashrc` のような実ファイルは
 残す（中身を確認してから捨てたいので、消す判断はしない）。役割が分かれている。
 
+#### bootstrap の実行順
+
+`bootstrap-*.sh` は glob で自動列挙するので、**スクリプトを足しても `setup.sh` の編集は
+要らない**。並びは既定では辞書順だが、それでは表せない依存がある。
+`bootstrap-claude-plugins.sh` は `claude` を要求し、その `claude` を入れるのは
+`bootstrap-mise.sh` なのに、辞書順では mise が最後尾に来てしまう。
+
+そこで**スクリプト自身のヘッダ**に順序を書く。説明文を冒頭コメントから取っているのと
+同じ考え方で、順序を `setup.sh` 側の一覧に持つと二重管理になるため。
+
+```sh
+# order: 10
+```
+
+小さいほど先に走る。**書かなければ 50** に落ちて従来どおり辞書順に並ぶので、
+新しいスクリプトを足すときに意識する必要はない。同じ値のものは辞書順を保つ。
+
+| スクリプト | order | 理由 |
+| --- | --- | --- |
+| `bootstrap-mise.sh` | 10 | `claude` を入れる |
+| `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
+| その他 | 50（既定） | 依存なし |
+
+> ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
+> 拾われてしまう。
+
 ### 新規マシンの手順
 
 上から順に実行する。**2 と 4 と 6 と 7 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
@@ -563,7 +589,8 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
-| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定と言語ランタイム |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
+| 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
@@ -599,6 +626,39 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
 **新規マシンでは go / node が入らないまま**になる。このスクリプトで初期化する。
 
 冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
+
+`claude` もここで入る。グローバルな CLI なので役割分担どおりなら Nix 側だが、
+例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。
+
+#### 2.1 Claude Code の公式プラグイン (手順 4.1)
+
+```sh
+./nix/scripts/bootstrap-claude-plugins.sh
+```
+
+公式 marketplace（`anthropics/claude-plugins-official`）を登録し、
+`superpowers` / `frontend-design` / `playwright` を導入する。
+足したいプラグインはスクリプト冒頭の `plugins` 配列に書く。
+
+**なぜ他の `bootstrap-claude-*.sh` のように jq で `settings.json` を書かないのか。**
+プラグインだけはそれでは足りない。`enabledPlugins` は「既に入っているものを有効にする」
+フラグでしかなく、書いても**実体は取得されない**（使い捨ての `CLAUDE_CONFIG_DIR` に
+`enabledPlugins` だけを書いて実セッションを起動し、`installed_plugins.json` が `{}` の
+ままであることを確認済み）。marketplace の登録も別途要る。どちらも CLI が
+`settings.json` へ書く（`extraKnownMarketplaces` / `enabledPlugins`）ので、
+このスクリプトは jq を触らない。
+
+冪等。既に在れば `already installed` と出るだけで、**版は上げない**
+（`plugin update` は呼ばない。「先端は取らない」方針に合わせている）。
+
+`claude` が見つからないときは警告を出して **exit 0** する。`setup.sh` は手順が 1 つ
+失敗すると残りを走らせないので、ここで落とすと後続の bootstrap が巻き添えになるため。
+marketplace の clone は SSH（`git@github.com:`）で行われるので GitHub の鍵が要る。
+鍵が無くて失敗した場合も同じく exit 0 で流す。
+
+> ⚠️ `claude` は `bootstrap-mise.sh` が入れるので、**このスクリプトはその後に走る必要がある**。
+> 実行順は `bootstrap-mise.sh` の `order: 10` と、こちらの `order: 20` で決めている
+> （[後述](#bootstrap-の実行順)）。
 
 #### 3. private な skill の取得 (手順 6.5)
 
@@ -1379,6 +1439,21 @@ Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions
 | グローバルな CLI ツール | Nix (`home/modules/packages.nix`) |
 | 言語ランタイム (go / node) | mise |
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
+| `claude` | mise（この表の例外。[理由](#claude-だけ-mise-に置いている理由)） |
+
+### `claude` だけ mise に置いている理由
+
+`claude` はグローバルな CLI なので、上の表どおりなら `packages.nix` 側が筋。
+nixpkgs にも `claude-code` は在り、wrapper が `DISABLE_AUTOUPDATER` を立てるので
+Nix 管理でも動作自体に問題はない。
+
+それでも mise に置いているのは **リリース頻度が `flake.lock` の更新周期に合わない**ため。
+nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。mise の `latest` と
+`minimum_release_age = 9d` の組み合わせなら「先端は取らないが nixpkgs pin よりは速い」
+中間の刻みになり、[「先端は取らない」方針](#依存-flakelock-の更新)とも矛盾しない。
+
+この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
+実行順の制御が必要になっている（次節）。
 
 Nix が CLI ツールを持つ環境では、レガシー経路の起動時パッケージ注入を止める必要がある。
 その合図に `~/.local/state/dotfiles/package-manager` というマーカーファイルを使っている
