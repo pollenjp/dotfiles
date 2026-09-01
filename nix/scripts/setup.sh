@@ -264,6 +264,26 @@ script_summary() {
   ' "$1"
 }
 
+# bootstrap-*.sh 冒頭の `# order: <数値>` を読む。書いていなければ 50。
+#
+# 実行順は既定では glob 順 (辞書順) だが、それでは表せない依存がある。
+# bootstrap-claude-plugins は claude を要求し、その claude を入れるのは
+# bootstrap-mise なので、辞書順 (mise が最後尾) では間に合わない。
+#
+# 順序を setup.sh 側の一覧で持つと script とで二重管理になるので、説明文
+# (script_summary) と同じく **script 自身のヘッダ**から読む。書いていない
+# script は 50 に落ちて従来どおり辞書順に並ぶので、増やすときに意識は要らない。
+#
+# NOTE: 説明の 1 行目より **後ろ** に書くこと。先頭に置くと script_summary が
+#       それを説明として拾ってしまう。
+script_order() {
+  local n
+  n=$(sed -n '1,40p' "$1" \
+    | sed -n 's/^#[[:space:]]*order:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
+    | head -1)
+  printf '%s' "${n:-50}"
+}
+
 add_step nix-install \
   'Nix をインストール' \
   '手順 1。Determinate Systems 版 (flakes が最初から有効)。既にあれば飛ばす。' \
@@ -300,12 +320,24 @@ add_step bootstrap \
   group 0
 
 # 手順 4 / 6 / 6.5。増えても自動でメニューに載る。
-for f in "${script_dir}"/bootstrap-*.sh; do
-  [[ -f ${f} ]] || continue
+#
+# 並びは script_order() (ヘッダの `# order:`)、同値なら glob 順 (辞書順)。
+# sort -s で同値の入力順を保つので、order を書いていない大多数は従来どおり。
+#
+# NOTE: パイプで while に流すと subshell になり add_step の書き込みが消える。
+#       いったん変数へ受けて here-string で渡す (bash 3.2 に mapfile は無い)。
+bootstrap_sorted=$(
+  for f in "${script_dir}"/bootstrap-*.sh; do
+    [[ -f ${f} ]] || continue
+    printf '%s\t%s\n' "$(script_order "${f}")" "${f}"
+  done | sort -n -k1,1 -s
+)
+while IFS=$'\t' read -r _ f; do
+  [[ -n ${f} ]] || continue
   base=$(basename "${f}")
   add_step "${base%.sh}" "./nix/scripts/${base}" "$(script_summary "${f}")" step 1
-done
-unset f base
+done <<<"${bootstrap_sorted}"
+unset f base bootstrap_sorted
 
 add_step chsh \
   'ログインシェルを fish に変更' \
