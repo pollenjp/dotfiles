@@ -92,7 +92,8 @@ nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
 ## 新しすぎる revision を pin しない
 
 **上げ先は追跡先の先端ではなく、公開から 7 日以上経った revision に限る。**
-出たばかりのものを掴まないための遅延で、npm / pnpm の `minimumReleaseAge` に相当する。
+出たばかりのものを掴まないための遅延で、npm / pnpm の `minimumReleaseAge` に相当する
+（パッケージマネージャ側で同じ 7 日を適用する話は pjp-dep-release-age skill）。
 `flake.nix` を持つリポジトリは全部これに従う（dotfiles 本体だけの決まりではない）。
 
 ```sh
