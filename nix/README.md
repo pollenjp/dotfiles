@@ -1067,6 +1067,45 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
 Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
 
+### forward された agent を固定名で見せる
+
+ssh 先で herdr や tmux を常駐させると、**ssh を張り直したときに中から agent が
+引けなくなる。** sshd が接続ごとに作る `/tmp/ssh-XXXXXX/agent.<pid>` は logout で
+消えるのに、常駐している server はその値を env に抱えたままで、実行中プロセスの
+env は外から書き換えられないため。
+
+そこで `bash.nix` / `fish.nix` の shell init が固定名 `~/.ssh/agent.sock` を挟む。
+判断の経緯と安全性の根拠は
+[ADR 007](../docs/adr/007_ssh_agent_stable_sock_20260909T144947JST/README.md)。
+
+| # | 役割 | 発動条件 |
+| --- | --- | --- |
+| 1 | forward された生きた socket を固定名へ張り替える | `SSH_CONNECTION` がある（sshd 越しのログイン shell）かつ `SSH_AUTH_SOCK` が生きた socket |
+| 2 | 固定名が生きていれば `SSH_AUTH_SOCK` をそこへ向ける | `ssh-add -l` が失敗する（env が古い / 空）かつ固定名が生きている |
+
+2 は**保存済み `~/.ssh-agent` の読み込みとローカル agent の新規起動より前**にある。
+forward された鍵があるのに別の鍵を持つローカル agent へ倒れると、「agent は応答するのに
+鍵が違う」という切り分けにくい壊れ方をするため。
+
+> **WSL の挙動は変わらない。** ローカル shell に `SSH_CONNECTION` は無いので 1 は
+> 発火せず、`ssh-add` は Windows 側の実体（[上記](#wsl-では-ssh-自体を-windows-側に差し替える)）で
+> `SSH_AUTH_SOCK` を見ないので `ssh-add -l` が成功し 2 も発火しない。
+
+適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
+`herdr server stop` して ssh し直すか、session の中で 1 回だけ次を打つ。
+
+```sh
+export SSH_AUTH_SOCK=~/.ssh/agent.sock
+```
+
+確認は ssh 先で次のとおり。
+
+```sh
+echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock
+readlink ~/.ssh/agent.sock   # /tmp/ssh-XXXXXX/agent.<pid>
+ssh-add -l                   # 鍵が並ぶ
+```
+
 ## fish
 
 `.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。

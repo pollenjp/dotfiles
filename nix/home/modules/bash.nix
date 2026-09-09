@@ -412,24 +412,61 @@
       #
       # NOTE: 元のコードには ssh-add の存在確認が無く、ssh-add が無い環境では
       #       起動のたびにエラーが出ていた。ガードを追加している。
+      #
+      # NOTE: forward された agent を固定名 ~/.ssh/agent.sock 越しに見せる処理を
+      #       足している (ADR 007)。sshd が接続ごとに作る
+      #       /tmp/ssh-XXXXXX/agent.<pid> は logout で消えるので、その値を env に
+      #       抱えたまま常駐する多重化ソフト (herdr / tmux) の中では、再 ssh 後に
+      #       agent が引けなくなる。実行中プロセスの env は外から書き換えられない
+      #       ため、パスの側を固定して指す先を張り替える。
+      #
+      #       判定の順序が要点。固定名を保存済み agent 情報 (~/.ssh-agent) と
+      #       ローカル agent の新規起動より前に置く。forward された鍵があるのに
+      #       別の鍵を持つローカル agent へ倒れると、「agent は応答するのに鍵が
+      #       違う」という分かりにくい壊れ方をする。
       ##############################################################
       if command -v ssh-add &>/dev/null; then
         SSH_AGENT_FILE="''${HOME}/.ssh-agent"
+        SSH_AGENT_STABLE_SOCK="''${HOME}/.ssh/agent.sock"
 
-        if ! ssh-add -l >/dev/null 2>&1 && test -f "''${SSH_AGENT_FILE}"; then
-          # shellcheck disable=SC1090
-          source "''${SSH_AGENT_FILE}"
+        # ssh 先のログイン shell。SSH_CONNECTION は sshd が置くので、
+        # WSL やデスクトップのローカル shell では発火しない。
+        #
+        # 3 つめの比較は、固定名と一致するときに ln -sfn が自分自身を指す
+        # symlink (ELOOP) を作って生きたリンクを壊すのを防ぐガード。
+        if [[ -n "''${SSH_CONNECTION:-}" ]] \
+          && [[ -S "''${SSH_AUTH_SOCK:-}" ]] \
+          && [[ "''${SSH_AUTH_SOCK}" != "''${SSH_AGENT_STABLE_SOCK}" ]]; then
+          ln -sfn "''${SSH_AUTH_SOCK}" "''${SSH_AGENT_STABLE_SOCK}"
+          export SSH_AUTH_SOCK="''${SSH_AGENT_STABLE_SOCK}"
         fi
 
+        # ここから下は agent が引けないときだけ。ssh-add は WSL では
+        # ホスト側 Windows の ssh-add.exe (interop 越し) なので、呼ぶ回数を
+        # 増やさないよう入れ子にしてある。
         if ! ssh-add -l >/dev/null 2>&1; then
-          if [[ -z "''${SSH_AGENT_PID:-}" ]]; then
-            ssh-agent >"''${SSH_AGENT_FILE}"
+          # herdr の pane などで env が古い場合。-S は symlink を辿るので、
+          # logout 中で張り替え前 (dangling) なら偽になる。
+          if [[ -S "''${SSH_AGENT_STABLE_SOCK}" ]] \
+            && [[ "''${SSH_AUTH_SOCK:-}" != "''${SSH_AGENT_STABLE_SOCK}" ]]; then
+            export SSH_AUTH_SOCK="''${SSH_AGENT_STABLE_SOCK}"
+          fi
+
+          if ! ssh-add -l >/dev/null 2>&1 && test -f "''${SSH_AGENT_FILE}"; then
             # shellcheck disable=SC1090
             source "''${SSH_AGENT_FILE}"
           fi
 
-          if [ -f "''${HOME}/.ssh/id_ed25519" ]; then
-            ssh-add "''${HOME}/.ssh/id_ed25519"
+          if ! ssh-add -l >/dev/null 2>&1; then
+            if [[ -z "''${SSH_AGENT_PID:-}" ]]; then
+              ssh-agent >"''${SSH_AGENT_FILE}"
+              # shellcheck disable=SC1090
+              source "''${SSH_AGENT_FILE}"
+            fi
+
+            if [ -f "''${HOME}/.ssh/id_ed25519" ]; then
+              ssh-add "''${HOME}/.ssh/id_ed25519"
+            fi
           fi
         fi
       fi

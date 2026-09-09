@@ -13,6 +13,7 @@
 | [004](./004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md) | WSL の ssh ラッパーを Nix 管理に載せる | 2026-08-11 |
 | [005](./005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) | flake.lock に入れる revision へ最小経過日数を課す | 2026-08-13 |
 | [006](./006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md) | 閉包を SBOM 化して OSV ベースでスキャンし、pin と先端の差分を照合する | 2026-08-23 |
+| [007](./007_ssh_agent_stable_sock_20260909T144947JST/README.md) | forward された ssh-agent を固定名の symlink 越しに見せ、ssh を張り直しても多重化ソフトの中で使えるようにする | 2026-09-09 |
 
 ## ディレクトリ名
 
