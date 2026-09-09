@@ -52,7 +52,11 @@ mise settings set fetch_remote_versions_timeout 14d
 echo "==> 言語ランタイム"
 # CLI ツール (bat/eza/fd/ripgrep/fzf/jq/...) は Nix が管理するので入れない。
 # ここに書くのはプロジェクト毎の切り替えが必要なものだけ (例外は下の claude)。
-mise use -g usage@latest # mise 自身の補完に必要
+# 短縮名 `usage` は registry に 3 つの backend を持つ
+# (aqua:jdx/usage / asdf:mise-plugins/mise-usage / cargo:usage-cli)。
+# 短縮名のままだとどれが選ばれるかを mise に委ねることになるので、
+# prebuilt が降ってくる aqua を明示する。
+mise use -g aqua:jdx/usage@latest # mise 自身の補完に必要
 mise use -g go@latest
 mise use -g node@24
 
