@@ -28,7 +28,7 @@ nix/
 ├── scripts/
 │   ├── verify.sh            検証を一括実行
 │   ├── preflight-unlink.sh  main.bash の symlink を外す (移行時に 1 回)
-│   └── bootstrap-mise.sh    mise の初期化 (マシンごとに 1 回)
+│   └── bootstrap-mise.sh    mise の初期化 (冪等。更新時も毎回走る)
 └── README.md
 ```
 

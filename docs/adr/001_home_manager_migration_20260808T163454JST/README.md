@@ -106,7 +106,7 @@ dotfiles の管理を [Nix home-manager](https://nix-community.github.io/home-ma
 | `home/modules/bash.nix` | alias 88 / 関数 24 / `initExtra` |
 | `scripts/verify.sh` | 検証の一括実行 |
 | `scripts/preflight-unlink.sh` | `main.bash` が張った symlink を外す |
-| `scripts/bootstrap-mise.sh` | mise のグローバル設定を初期化（マシンごとに 1 回） |
+| `scripts/bootstrap-mise.sh` | mise のグローバル設定を初期化（冪等。当時はマシンごとに 1 回だったが、68f1d13 以降は更新時も毎回走る） |
 
 ### 移植中に見つかった既存のバグ
 
@@ -282,9 +282,11 @@ find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak --dry-run
 nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak
 
-# 5. mise のグローバル設定を初期化する (マシンごとに 1 回)
+# 5. mise のグローバル設定を初期化する
 #    ~/.config/mise/config.toml は Nix 管理下に置いていないため、
 #    これを飛ばすと新規マシンでは go / node が入らないままになる。
+#    (この ADR の時点ではマシンごとに 1 回。68f1d13 以降は setup.sh の
+#     「既存マシン更新」に入り、冪等な手順として毎回走る)
 ./scripts/bootstrap-mise.sh
 
 # 6. 既存マシンのみ: ~/.config/mise/config.toml から Nix へ移した
