@@ -160,13 +160,22 @@ jobs:
       # files/bin/ files/claude/hooks/ files/claude/skills/*/scripts/ も
       # 実行されるものなので同じ静的解析にかける。nixfmt と同じく find で
       # 拾うので、置き場所が増えてもここを直さなくてよい。
+      #
+      # NOTE: `bash -c` の中に set -e は置かない。置くと shfmt が落ちた時点で
+      #       shellcheck が走らず、1 回の CI で片方の指摘しか見えなくなる。
+      #       代わりに両方走らせて rc に畳み、最後に exit する。
+      #       (以前はここが素の並びだったため、ステップの終了コードが最後の
+      #        shellcheck のものになり、shfmt の差分が緑のまま素通りしていた)
       - name: shfmt / shellcheck
         run: |
           nix develop ./nix --command bash -c '
+            set -uo pipefail
             mapfile -t files < <(find nix -type f -name "*.sh" | sort)
             printf "checking %s\n" "${files[@]}"
-            shfmt -d "${files[@]}"
-            shellcheck "${files[@]}"
+            rc=0
+            shfmt -d "${files[@]}" || rc=1
+            shellcheck "${files[@]}" || rc=1
+            exit "${rc}"
           '
 
   # 閉包を SBOM 化して OSV / GHSA / NVD と照合する (ADR 006)。
