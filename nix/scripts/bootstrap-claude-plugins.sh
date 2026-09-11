@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # Claude Code の公式プラグインを導入する。
-# **マシンごとに一度だけ** 実行する (冪等なので更新時に再実行してもよい)。
+# 冪等。`setup.sh --update` でも毎回走る。
 #
 # order: 20
 #

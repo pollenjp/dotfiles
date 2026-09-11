@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # Claude Code の statusLine を ~/.claude/settings.json へ登録する。
-# **マシンごとに一度だけ** 実行する。
+# 冪等。`setup.sh --update` でも毎回走る。
 #
 # ## なぜ Nix でやらないのか
 #
