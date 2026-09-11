@@ -1257,7 +1257,7 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 `~/.claude/CLAUDE.md` にも同じ趣旨を**3行だけ**書いてある。全セッションで
 読まれてトークンを消費するので、詳細はフック側に持たせている。
 
-#### フックの登録（マシンごとに一度だけ）
+#### フックの登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-hook.sh
@@ -1279,7 +1279,7 @@ Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`�
 shell prompt（starship）が既に出しているもの（時刻・`user@host`・フルパス）は
 意図的に繰り返さない。数百 ms ごとに呼ばれるので `jq` は 1 回にまとめて起動している。
 
-#### 登録（マシンごとに一度だけ）
+#### 登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-statusline.sh
@@ -1300,7 +1300,7 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 署名のたびにホスト側 Windows の 1Password が承認ダイアログを出すため、Claude に
 commit させるとそこで止まる。**Claude のセッションからの commit だけ**署名を外す。
 
-#### 登録（マシンごとに一度だけ）
+#### 登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-env.sh
@@ -1470,7 +1470,7 @@ mise が実行時に書き換えるファイルなので store には置けな�
 mise 自身のコマンドで行う（config.toml は mise のスキーマであり、Nix 側に
 スナップショットを持たせると形式変更への追随が必要になるため）。
 
-**新規マシンではマシンごとに一度だけ実行する:**
+**新規マシンで実行する（冪等なので更新時も毎回走る）:**
 
 ```sh
 ./nix/scripts/bootstrap-mise.sh
@@ -1561,10 +1561,10 @@ nix/
     ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
-    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
-    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
-    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (マシンごとに 1 回)
-    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (マシンごとに 1 回)
+    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```
