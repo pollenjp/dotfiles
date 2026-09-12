@@ -523,23 +523,33 @@
       # NOTE: 元のコードには ssh-add の存在確認が無く、ssh-add が無い環境では
       #       起動のたびに "Unknown command: ssh-add" が 2 回出ていた。
       #       移植にあたってガードを追加している。
+      #
+      # NOTE: forward された agent を固定名 ~/.ssh/agent.sock 越しに見せる処理を
+      #       足している (ADR 007)。理由と判定順序の意味は bash.nix 側の同じ
+      #       ブロックのコメントに書いた (両シェルで同じ挙動に揃えてある)。
       if command -q ssh-add
         set -l SSH_AGENT_FILE "$HOME/.ssh-agent"
+        set -l SSH_AGENT_STABLE_SOCK "$HOME/.ssh/agent.sock"
 
-        if not ssh-add -l >/dev/null 2>&1; and test -f $SSH_AGENT_FILE
-          set -l auth_sock (grep SSH_AUTH_SOCK $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
-          set -l agent_pid (grep SSH_AGENT_PID $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
-          if test -n "$auth_sock"
-            set -gx SSH_AUTH_SOCK $auth_sock
-          end
-          if test -n "$agent_pid"
-            set -gx SSH_AGENT_PID $agent_pid
-          end
+        # ssh 先のログイン shell。SSH_CONNECTION は sshd が置くので、
+        # WSL やデスクトップのローカル shell では発火しない。
+        if test -n "$SSH_CONNECTION"
+          and test -S "$SSH_AUTH_SOCK"
+          and test "$SSH_AUTH_SOCK" != "$SSH_AGENT_STABLE_SOCK"
+          ln -sfn "$SSH_AUTH_SOCK" "$SSH_AGENT_STABLE_SOCK"
+          set -gx SSH_AUTH_SOCK "$SSH_AGENT_STABLE_SOCK"
         end
 
+        # ここから下は agent が引けないときだけ (ssh-add を余分に呼ばない)。
         if not ssh-add -l >/dev/null 2>&1
-          if not set -q SSH_AGENT_PID; or test -z "$SSH_AGENT_PID"
-            ssh-agent >$SSH_AGENT_FILE
+          # herdr の pane などで env が古い場合。-S は symlink を辿るので、
+          # logout 中で張り替え前 (dangling) なら偽になる。
+          if test -S "$SSH_AGENT_STABLE_SOCK"
+            and test "$SSH_AUTH_SOCK" != "$SSH_AGENT_STABLE_SOCK"
+            set -gx SSH_AUTH_SOCK "$SSH_AGENT_STABLE_SOCK"
+          end
+
+          if not ssh-add -l >/dev/null 2>&1; and test -f $SSH_AGENT_FILE
             set -l auth_sock (grep SSH_AUTH_SOCK $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
             set -l agent_pid (grep SSH_AGENT_PID $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
             if test -n "$auth_sock"
@@ -550,8 +560,22 @@
             end
           end
 
-          if test -f "$HOME/.ssh/id_ed25519"
-            ssh-add "$HOME/.ssh/id_ed25519" 2>/dev/null
+          if not ssh-add -l >/dev/null 2>&1
+            if not set -q SSH_AGENT_PID; or test -z "$SSH_AGENT_PID"
+              ssh-agent >$SSH_AGENT_FILE
+              set -l auth_sock (grep SSH_AUTH_SOCK $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
+              set -l agent_pid (grep SSH_AGENT_PID $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
+              if test -n "$auth_sock"
+                set -gx SSH_AUTH_SOCK $auth_sock
+              end
+              if test -n "$agent_pid"
+                set -gx SSH_AGENT_PID $agent_pid
+              end
+            end
+
+            if test -f "$HOME/.ssh/id_ed25519"
+              ssh-add "$HOME/.ssh/id_ed25519" 2>/dev/null
+            end
           end
         end
       end
