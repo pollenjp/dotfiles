@@ -66,6 +66,13 @@
     wsl.enable = true;
   };
 
+  # NixOS の実機 (NEC LaVie、nixos-config の laptop)。system 側は nixos-config が持ち、
+  # home はここから standalone で当てる (nixos-config の ADR 002)。
+  "pollenjp@laptop" = mkHome {
+    username = "pollenjp";
+    system = "x86_64-linux";
+  };
+
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。
   #   HOME=/tmp/hm-sandbox nix run home-manager -- switch --flake .#sandbox
   sandbox = mkHome {
