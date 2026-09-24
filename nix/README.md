@@ -1452,6 +1452,11 @@ nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 `minimum_release_age = 9d` の組み合わせなら「先端は取らないが nixpkgs pin よりは速い」
 中間の刻みになり、[「先端は取らない」方針](#依存-flakelock-の更新)とも矛盾しない。
 
+9 日待てないとき (出たばかりの版にしか無い修正が要るなど) は
+`mise_with_no_release_age use -g claude@latest` で、その 1 回だけ遅延を外して取れる
+(`MISE_MINIMUM_RELEASE_AGE=0d mise …` の alias / abbr。bash・fish の両方にある)。
+`config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
+
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
 

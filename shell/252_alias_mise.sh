@@ -3,6 +3,11 @@
 alias m='mise'
 alias mr='mise run'
 
+# settings.minimum_release_age を、この 1 回の実行だけ 0 にする。
+# 公開からの日数がその遅延に満たない版が `mise use -g claude@latest` で要るときの逃げ道。
+# config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
+alias mise_with_no_release_age='MISE_MINIMUM_RELEASE_AGE=0d mise'
+
 # 現在 (mise ls --current) で有効なツールのバージョンを mise に固定する。
 # 引数なしでカレントの設定 (mise.toml 等) に、`-g` を渡すとグローバル設定に固定する。
 # $@: `mise use` に渡す追加オプション (例: "-g")
