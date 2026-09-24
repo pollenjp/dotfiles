@@ -138,6 +138,10 @@
       #########################
       m = "mise";
       mr = "mise run";
+      # settings.minimum_release_age (bootstrap-mise.sh が 9d を入れる) を、この 1 回の
+      # 実行だけ 0 にする。`mise use -g claude@latest` で公開 9 日未満の版が要るときの
+      # 逃げ道。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
+      mise_with_no_release_age = "MISE_MINIMUM_RELEASE_AGE=0d mise";
 
       #########################
       # 複製元: 253_alias_terminal_mux
