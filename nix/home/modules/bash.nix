@@ -414,7 +414,7 @@
       #       起動のたびにエラーが出ていた。ガードを追加している。
       #
       # NOTE: forward された agent を固定名 ~/.ssh/agent.sock 越しに見せる処理を
-      #       足している (ADR 007)。sshd が接続ごとに作る
+      #       足している (ADR 008)。sshd が接続ごとに作る
       #       /tmp/ssh-XXXXXX/agent.<pid> は logout で消えるので、その値を env に
       #       抱えたまま常駐する多重化ソフト (herdr / tmux) の中では、再 ssh 後に
       #       agent が引けなくなる。実行中プロセスの env は外から書き換えられない

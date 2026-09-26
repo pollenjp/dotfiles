@@ -1076,7 +1076,7 @@ env は外から書き換えられないため。
 
 そこで `bash.nix` / `fish.nix` の shell init が固定名 `~/.ssh/agent.sock` を挟む。
 判断の経緯と安全性の根拠は
-[ADR 007](../docs/adr/007_ssh_agent_stable_sock_20260909T144947JST/README.md)。
+[ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)。
 
 | # | 役割 | 発動条件 |
 | --- | --- | --- |

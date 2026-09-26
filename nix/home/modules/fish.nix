@@ -525,7 +525,7 @@
       #       移植にあたってガードを追加している。
       #
       # NOTE: forward された agent を固定名 ~/.ssh/agent.sock 越しに見せる処理を
-      #       足している (ADR 007)。理由と判定順序の意味は bash.nix 側の同じ
+      #       足している (ADR 008)。理由と判定順序の意味は bash.nix 側の同じ
       #       ブロックのコメントに書いた (両シェルで同じ挙動に揃えてある)。
       if command -q ssh-add
         set -l SSH_AGENT_FILE "$HOME/.ssh-agent"
