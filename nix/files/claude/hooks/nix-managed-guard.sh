@@ -168,6 +168,8 @@ reason=$(
        ~/.claude/agents/<名前>.md   -> \${REPO}/nix/files/claude/agents/<名前>.md
        ~/.claude/commands/<名前>.md -> \${REPO}/nix/files/claude/commands/<名前>.md
        ~/.claude/CLAUDE.md          -> \${REPO}/nix/files/claude/CLAUDE.md
+       (「タスク管理」の節だけは同じ場所の CLAUDE.dev-tracker.md。claude.nix が
+        dotfiles.claude.devTracker.enable のマシンでだけ末尾に連結している)
   2. 新規ファイルなら git add する
        git -C "\${REPO}" add nix/files/claude
      (~/dotfiles 経由の switch は path: なので untracked でも入るが、

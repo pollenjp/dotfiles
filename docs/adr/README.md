@@ -13,6 +13,7 @@
 | [004](./004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md) | WSL の ssh ラッパーを Nix 管理に載せる | 2026-08-11 |
 | [005](./005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) | flake.lock に入れる revision へ最小経過日数を課す | 2026-08-13 |
 | [006](./006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md) | 閉包を SBOM 化して OSV ベースでスキャンし、pin と先端の差分を照合する | 2026-08-23 |
+| [007](./007_claude_skill_host_option_20260926T130250JST/README.md) | Claude Code の skill の on / off を host option に持たせ、settings.json へ流す経路を決める | 2026-09-26 |
 
 ## ディレクトリ名
 

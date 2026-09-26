@@ -19,8 +19,10 @@
 #
 # ## ~/dotfiles に置くもの
 #
-#   flake.nix   本体を input として取り込み、homeConfigurations をそのまま
-#               再輸出する。このマシンだけのホストをここに足せる。
+#   flake.nix   本体を input として取り込み、homeConfigurations を再輸出する。
+#               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
+#               雛形の local は dotfiles.claude.devTracker.enable = false を持つ
+#               (Notion Dev Tracker を使うマシンだけ true に直す)。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -192,6 +194,13 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
   write_flake=0
   if grep -qF "\"path:${nix_dir}\"" "${flake_file}"; then
     echo "  flake.nix: 既にあります (そのまま)"
+    # 雛形が変わっても既存のファイルには触らない。古い形のままだと、登録簿のホストに
+    # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
+    if ! grep -q 'hostsWith' "${flake_file}"; then
+      warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
+      warn "Notion Dev Tracker を使うマシンならこのままでよい (option の既定 true が効く)。"
+      warn "使わないマシンは、手で足したホストが無ければ --force で作り直す。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
+    fi
   else
     warn "既存の ${flake_file} が別のパスを指しています:"
     grep -n 'inputs.dotfiles.url' "${flake_file}" >&2 || true
@@ -217,6 +226,22 @@ if [[ ${write_flake} == 1 ]]; then
 
   outputs =
     { dotfiles, ... }:
+    let
+      # このマシンだけの設定。登録簿 (hosts/default.nix) のホストにも、下で足した
+      # ホストにも同じものが当たる。本体の option (nix/home/options.nix) をここで決める。
+      #
+      # 登録簿側が同じ option を既に定義していて差し替えたいときは、関数の形にして
+      # mkForce を使う (同じ優先度の定義が 2 つあると conflicting definition values で落ちる):
+      #   local = { lib, ... }: { dotfiles.claude.devTracker.enable = lib.mkForce false; };
+      local = {
+        # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。
+        # 本体の既定は true だが、この雛形では false にしてある (使うマシンだけ
+        # true に直す)。CLAUDE.md の「タスク管理」の節と settings.json の
+        # skillOverrides の両方がこの値から決まる。
+        # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
+        dotfiles.claude.devTracker.enable = false;
+      };
+    in
     {
       # 本体の出力をそのまま引き継ぐ。日々の操作は ~/dotfiles だけ見ればよい。
       inherit (dotfiles)
@@ -226,7 +251,9 @@ if [[ ${write_flake} == 1 ]]; then
         lib
         ;
 
-      homeConfigurations = dotfiles.homeConfigurations // {
+      # 登録簿のホストに local を当てて引き継ぐ (dotfiles.homeConfigurations に
+      # local を足したもの)。
+      homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
         # このマシンだけのホストはここに足す (登録簿 hosts/default.nix は触らない)。
         #
         # ここに足した名前は setup の **既定の対象ホスト** になる (登録簿からの
@@ -247,8 +274,10 @@ if [[ ${write_flake} == 1 ]]; then
         #     };
         #   };
         #
+        #   # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
         #   # 本体が既に定義している値を差し替えるには mkForce が要る。
         #   modules = [
+        #     local
         #     (
         #       { lib, ... }:
         #       {
