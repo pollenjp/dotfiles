@@ -68,6 +68,12 @@ if ! jq -e . "${settings}" >/dev/null 2>&1; then
   exit 1
 fi
 
+# merge 先が object でないと jq の加算が生エラーで落ちる。生成ファイル側と同じく型を見る。
+if ! jq -e '(.skillOverrides // {}) | type == "object"' "${settings}" >/dev/null 2>&1; then
+  echo "${settings} の skillOverrides が map (JSON object) ではありません。手で直してください。" >&2
+  exit 1
+fi
+
 tmp=$(mktemp "${settings}.XXXXXX")
 # jq が落ちたときに settings.json の隣へ中間ファイルを残さない。
 trap 'rm -f "${tmp}"' EXIT
