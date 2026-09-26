@@ -40,9 +40,3 @@ ADR 001 の決定 6 に従う。
 配信物と同じ名前空間に並ぶので、prefix が無いと一覧で自分のものを見分けられない。
 
 書き方は各 `skills/README.md` を参照（置き場所によって形が変わる）。
-
-## タスク管理
-
-実装・修正の作業は Notion の Dev Tracker のチケットに紐づける。
-作業を始めるとき・branch を切るとき・PR を出すとき・進捗を聞かれたときは
-`pjp-dev-tracker` skill を読み、その `scripts/ticket.sh` で操作する。

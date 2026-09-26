@@ -22,6 +22,14 @@
   #
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
   wsl ? { },
+  # Claude Code まわりのマシン固有設定 (dotfiles.claude にそのまま入る)。
+  #
+  #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
+  #
+  # 省略すれば既定 (使う)。ローカル flake (~/dotfiles/flake.nix) の雛形は
+  # 登録簿のホストにも当たる module で false にしているので、そちら経由の
+  # マシンでは雛形側を見ること。
+  claude ? { },
   modules ? [ ],
 }:
 
@@ -32,7 +40,7 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles = { inherit wsl; };
+      dotfiles = { inherit wsl claude; };
     }
   ]
   ++ modules;
