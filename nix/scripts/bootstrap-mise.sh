@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # mise のグローバル設定 (~/.config/mise/config.toml) を初期化する。
-# **マシンごとに一度だけ** 実行する。
+# 冪等。`setup.sh --update` でも毎回走る。
 #
 # order: 10
 #
@@ -52,8 +52,19 @@ mise settings set fetch_remote_versions_timeout 14d
 echo "==> 言語ランタイム"
 # CLI ツール (bat/eza/fd/ripgrep/fzf/jq/...) は Nix が管理するので入れない。
 # ここに書くのはプロジェクト毎の切り替えが必要なものだけ (例外は下の claude)。
-mise use -g usage@latest # mise 自身の補完に必要
-mise use -g go@latest
+# 短縮名 `usage` は registry に 3 つの backend を持つ
+# (aqua:jdx/usage / asdf:mise-plugins/mise-usage / cargo:usage-cli)。
+# 短縮名のままだとどれが選ばれるかを mise に委ねることになるので、
+# prebuilt が降ってくる aqua を明示する。
+#
+# バージョンを省いているのは意図的。省くと `mise use` は **既に入っている
+# 中の最高版**へ解決し、`@latest` を書いたときだけ remote の先端を取りに行く。
+# config.toml へ書かれる値はどちらも `latest` で同じなので、差が出るのは
+# この場の install だけ。このスクリプトは --update で毎回走るため、
+# `@latest` にしておくと更新のたびに新しい版が積み上がる。
+# 上げたいときは明示的に `mise up go` を打つ。
+mise use -g aqua:jdx/usage # mise 自身の補完に必要
+mise use -g go
 mise use -g node@24
 
 echo "==> claude (役割分担の例外)"
@@ -69,6 +80,10 @@ echo "==> claude (役割分担の例外)"
 #
 # ここで入れておかないと bootstrap-claude-plugins.sh が動けない。
 # そのためヘッダの `order: 10` で bootstrap-* の先頭に出してある。
+#
+# 上の go / usage と違ってここだけ `@latest` を明示するのは、まさにその
+# 「自動で上がってほしい」を成立させるため。省くと --update を何度回しても
+# 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
 mise use -g claude@latest
 
 echo

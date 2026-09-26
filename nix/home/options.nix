@@ -5,12 +5,41 @@
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.onePassword.enable              ホスト側 Windows の 1Password を使うか
 #   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名
+#   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
 { lib, ... }:
 
 {
+  options.dotfiles.claude = {
+    devTracker.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        このマシンで Notion Dev Tracker (pjp-dev-tracker skill) を使うか。
+
+        1 つの値から 2 つが決まる (home/modules/claude.nix):
+
+        - `~/.claude/CLAUDE.md` の「タスク管理」の節 (files/claude/CLAUDE.dev-tracker.md)。
+          false なら連結しない。節だけが残ると Claude が無い skill を探しに行くため
+        - `~/.local/state/dotfiles/claude-skill-overrides.json` の値 ("on" / "off")。
+          nix/scripts/bootstrap-claude-skill-overrides.sh がこれを
+          `~/.claude/settings.json` の skillOverrides へ写し、false なら skill が
+          Claude の一覧からも `/` メニューからも消える
+
+        settings.json は Claude Code 自身が書き換えるので Nix では置けない。
+        そのため反映は 2 段で、`home-manager switch` だけでは skillOverrides に
+        届かない。`~/dotfiles/setup --update` (bootstrap まで走る) で揃える。
+
+        ローカル flake の雛形 (scripts/setup-local-flake.sh) は false を書いて
+        いるので、`~/dotfiles` 経由のマシンは使うところだけ true にする。
+        登録簿 (hosts/default.nix) のホストを直接指すときはこの既定 (true)。
+      '';
+    };
+  };
+
   options.dotfiles.wsl = {
     enable = lib.mkOption {
       type = lib.types.bool;

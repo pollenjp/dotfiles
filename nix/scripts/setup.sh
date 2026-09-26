@@ -51,8 +51,9 @@ repo_dir=$(dirname "${nix_dir}")
 hosts_file="${nix_dir}/hosts/default.nix"
 
 # 実行に使う flake。ローカル flake (~/dotfiles) があればそちらを優先する。
-# 本体の homeConfigurations をそのまま再輸出しているので、登録簿のホストは
-# どちらからでも同じように引ける。
+# 登録簿のホストはどちらからでも引けるが、ローカル flake 経由では雛形の local
+# (このマシンだけの設定。dotfiles.claude.devTracker.enable = false など) が乗る。
+# ローカル flake が無いマシンでは本体の flake に落ち、local は掛からない。
 # 詳細は setup-local-flake.sh の冒頭を参照。
 local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
 if [[ -f ${local_dir}/flake.nix ]]; then
@@ -498,7 +499,8 @@ parse_hosts() {
 
 # ローカル flake (~/dotfiles/flake.nix) が定義しているホスト。
 #
-# あちらは `dotfiles.homeConfigurations // { ... }` なので、ここに出る名前は
+# あちらは `dotfiles.lib.hostsWith [ local ] // { ... }` (旧雛形は
+# `dotfiles.homeConfigurations // { ... }`) なので、ここに出る名前は
 # **登録簿に無い、または登録簿を上書きしているホスト**である。
 # ローカル flake が無いマシン (本体の flake を直接指している) では空。
 local_flake_hosts() {
@@ -1654,6 +1656,13 @@ post_notes() {
   if [[ ${flake_dir} == "${nix_dir}" ]]; then
     note 'ローカル flake が未設置です。一度だけ --steps local-flake を実行すると'
     note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
+  elif ! grep -q 'hostsWith' "${flake_dir}/flake.nix"; then
+    # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
+    # ここで知らせる。使うマシンでは何もしなくてよい (setup-local-flake.sh の警告と同じ)。
+    note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
+    note '        Notion Dev Tracker を使うマシンならそのままでよい (option の既定 true)。'
+    note '        使わないマシンは、手で足したホストが無ければ次で作り直す:'
+    note "          ${script_dir}/setup-local-flake.sh --force"
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }

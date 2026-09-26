@@ -99,9 +99,9 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 > 旧経路側は壊れる。Nix 経路へ切り替えるマシンでのみ行うこと（手順 2 の
 > `preflight-unlink.sh` で symlink を外すのが前提）。
 
-`~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**を
-足す場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、
-入口を 1 つに揃えるために常に置く。
+`~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**と
+**このマシンだけの設定（`local`）**を書く場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。
+足さなくても、入口を 1 つに揃えるために常に置く。
 
 ## Nix のインストール
 
@@ -434,8 +434,8 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
@@ -595,6 +595,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude の commit を無署名にする env 登録（[後述](#claude-の-commit-を無署名にする)） |
+| 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -794,42 +795,69 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 `~/dotfiles/flake.nix` に足す。[置き場所](#置き場所)で用意したものがそのまま使える。
 
 ```nix
-homeConfigurations = dotfiles.homeConfigurations // {
-  tmp = dotfiles.lib.mkHome {
-    username = "pollenjp";
-    system = "x86_64-linux";
-    wsl = {
-      enable = true;
-      onePassword = {
-        enable = true;
-        # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
-        # 別の名前のマシンはここで足す。値はこのマシンで:
-        #   pwsh.exe -NoProfile -Command '$env:USERNAME'
-        windowsUserName = "polle";
+outputs =
+  { dotfiles, ... }:
+  let
+    # このマシンだけの設定。登録簿のホストにも、下で足したホストにも当たる。
+    local = {
+      dotfiles.claude.devTracker.enable = false;
+    };
+  in
+  {
+    inherit (dotfiles) packages devShells formatter lib;
+
+    homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
+      tmp = dotfiles.lib.mkHome {
+        username = "pollenjp";
+        system = "x86_64-linux";
+        wsl = {
+          enable = true;
+          onePassword = {
+            enable = true;
+            # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
+            # 別の名前のマシンはここで足す。値はこのマシンで:
+            #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+            windowsUserName = "polle";
+          };
+        };
+
+        # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
+        # 本体が既に定義している値を差し替えるには mkForce が要る
+        # (同じ優先度の定義が 2 つあると "conflicting definition values" で落ちる)。
+        modules = [
+          local
+          (
+            { lib, ... }:
+            {
+              programs.git.settings.user.email = lib.mkForce "tmp@example.com";
+            }
+          )
+        ];
       };
     };
-
-    # このマシンだけの設定は modules で渡す。
-    # 本体が既に定義している値を差し替えるには mkForce が要る
-    # (同じ優先度の定義が 2 つあると "conflicting definition values" で落ちる)。
-    modules = [
-      (
-        { lib, ... }:
-        {
-          programs.git.settings.user.email = lib.mkForce "tmp@example.com";
-        }
-      )
-    ];
   };
-};
 ```
 
 ```sh
 home-manager switch --flake ~/dotfiles#tmp
 ```
 
-`dotfiles.homeConfigurations // { ... }` としているので、登録簿のホストも同じ場所から
-引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。
+`dotfiles.lib.hostsWith [ local ] // { ... }` としているので、登録簿のホストも同じ場所から
+引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。`hostsWith` は登録簿の
+全ホストに引数の module を前置して組み立て直すもので、本体の `dotfiles.homeConfigurations`
+は `hostsWith [ ]` に等しい。
+
+#### このマシンだけの設定 (`local`)
+
+雛形の `local` は **`dotfiles.claude.devTracker.enable = false`** を持つ。本体の option の
+既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
+（何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
+
+- `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
+  素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
+- 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
+  古い形（`hostsWith` が無い）を見つけると警告する。手で足したホストが無ければ
+  `--force` で作り直す。残すなら上の形に合わせて `local` と `hostsWith` を足す
 
 `~/dotfiles/setup` のホスト選択（`h`）にもここで足したものが出る。`setup.sh` は
 登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。
@@ -1231,7 +1259,8 @@ env の値を上書きできるようにするためなので、順序を入れ�
 
 | 配置先 | 実体 | 単位 |
 | --- | --- | --- |
-| `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル |
+| `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
+| （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1296,7 +1325,7 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 `~/.claude/CLAUDE.md` にも同じ趣旨を**3行だけ**書いてある。全セッションで
 読まれてトークンを消費するので、詳細はフック側に持たせている。
 
-#### フックの登録（マシンごとに一度だけ）
+#### フックの登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-hook.sh
@@ -1318,7 +1347,7 @@ Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`�
 shell prompt（starship）が既に出しているもの（時刻・`user@host`・フルパス）は
 意図的に繰り返さない。数百 ms ごとに呼ばれるので `jq` は 1 回にまとめて起動している。
 
-#### 登録（マシンごとに一度だけ）
+#### 登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-statusline.sh
@@ -1339,7 +1368,7 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 署名のたびにホスト側 Windows の 1Password が承認ダイアログを出すため、Claude に
 commit させるとそこで止まる。**Claude のセッションからの commit だけ**署名を外す。
 
-#### 登録（マシンごとに一度だけ）
+#### 登録（冪等。更新時も毎回走る）
 
 ```sh
 ./nix/scripts/bootstrap-claude-env.sh
@@ -1386,6 +1415,72 @@ Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入
 
 > ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
 > commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+
+### Claude Code の skill を host ごとに止める
+
+使う skill はマシンごとに違う。例えば会社のマシンでは Notion Dev Tracker の
+`pjp-dev-tracker` を発火させたくない。その宣言は host option
+**`dotfiles.claude.devTracker.enable`**（既定 true）に置き、1 つの値から 2 つが決まる。
+
+| 層 | enable = true | enable = false | 決める場所 |
+| --- | --- | --- | --- |
+| `~/.claude/CLAUDE.md` の「タスク管理」の節 | 末尾に連結（分割前のファイルとバイト単位で同一） | 無し | `home/modules/claude.nix`（`files/claude/CLAUDE.dev-tracker.md` を連結） |
+| `~/.claude/settings.json` の `skillOverrides.pjp-dev-tracker` | `"on"` | `"off"`（Claude の一覧からも `/` メニューからも消える） | `bootstrap-claude-skill-overrides.sh` |
+
+2 層とも切るのは、片方だけだと壊れ方が悪いため。節だけ残ると Claude が無い skill を
+探しに行き（off の skill を呼ぶと「override を外せ」というエラー文が返る）、skill だけ
+残ると節が無くても description で発火する。
+
+#### 値の置き場
+
+- `~/dotfiles` 経由（通常）なら **ローカル flake の `local`** に書く。雛形は
+  `dotfiles.claude.devTracker.enable = false` を持つので、**Dev Tracker を使うマシンだけ
+  true に直す**（[前述](#このマシンだけの設定-local)）。会社のマシンのように public に
+  載せたくない差分を登録簿に書かずに済ませるための向き
+- 登録簿のホストを直接指すなら `hosts/default.nix` の `mkHome` に
+  `claude.devTracker.enable = false;`（`wsl` と同じ形の引数）
+
+#### 反映（冪等。更新時も毎回走る）
+
+```sh
+~/dotfiles/setup --update                            # switch + bootstrap をまとめて
+./nix/scripts/bootstrap-claude-skill-overrides.sh    # skillOverrides の部分だけ
+```
+
+`switch` が置くのは 2 つ。連結済みの `~/.claude/CLAUDE.md` と、skillOverrides に流す値を
+書いた `~/.local/state/dotfiles/claude-skill-overrides.json`（`{"pjp-dev-tracker":"off"}`）。
+settings.json は Claude Code 自身が書き換えるので Nix では置けず（フック / statusLine /
+env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` が jq で
+`.skillOverrides` へ merge する。
+
+- **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
+  あり得る。`setup --update` なら bootstrap まで走るので揃う
+- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。
+  `/skills` で切った他の skill には触らない。逆にこの key は option が正で、`/skills` で
+  変えても次の update で戻る
+- 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して exit 0
+- 実行中の Claude Code には効かない。新しい session で `/skills` を見ると状態が判る
+
+#### 確認
+
+```sh
+jq .skillOverrides ~/.claude/settings.json      # {"pjp-dev-tracker":"off"} なら止まっている
+grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
+```
+
+#### 採らなかった案
+
+| 案 | 却下理由 |
+| --- | --- |
+| SKILL.md の `disable-model-invocation: true` | skill は git で全マシンに配られるので、使うマシンでも止まる |
+| `permissions.deny` に `Skill(pjp-dev-tracker)` | 呼ぼうとした時点で止める仕組みなので description は context に残り、毎回発火してから拒否される。rule も settings.json にしか書けず、host ごとの宣言の置き場は解決しない。CLAUDE.md の節も残る |
+| `PreToolUse` フックで `Skill` の `pjp-dev-tracker` を deny | 上と同じく反応型。加えて hook script と登録の改修が要る |
+| skill 側で印（env）を見て何もしない | 毎回 SKILL.md を読み込む token を払い、降りるかどうかを Claude の判断に委ねる |
+| `bootstrap-claude-skills.sh` に除外リストを足して symlink を張らない | skill のファイルまで消えるが、skillOverrides で見えなくなる以上、ファイルの有無まで気にする理由が無い |
+| `home.activation` で settings.json を書く | Claude Code 所有のファイルを switch が書くことになり、「Nix 管理か否か」の線が崩れる |
+| CLAUDE.md を 1 ファイルのまま Nix でマーカー間を切り抜く | Nix の `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
+
+経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
 
 ### private な skill 置き場 (claude-skills)
 
@@ -1470,6 +1565,8 @@ claude-skills の作業クローンなので **commit / push しないと他の�
 `settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
+`settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
+`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -1491,6 +1588,11 @@ nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 `minimum_release_age = 9d` の組み合わせなら「先端は取らないが nixpkgs pin よりは速い」
 中間の刻みになり、[「先端は取らない」方針](#依存-flakelock-の更新)とも矛盾しない。
 
+9 日待てないとき (出たばかりの版にしか無い修正が要るなど) は
+`mise_with_no_release_age use -g claude@latest` で、その 1 回だけ遅延を外して取れる
+(`MISE_MINIMUM_RELEASE_AGE=0d mise …` の alias / abbr。bash・fish の両方にある)。
+`config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
+
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
 
@@ -1509,7 +1611,7 @@ mise が実行時に書き換えるファイルなので store には置けな�
 mise 自身のコマンドで行う（config.toml は mise のスキーマであり、Nix 側に
 スナップショットを持たせると形式変更への追随が必要になるため）。
 
-**新規マシンではマシンごとに一度だけ実行する:**
+**新規マシンで実行する（冪等なので更新時も毎回走る）:**
 
 ```sh
 ./nix/scripts/bootstrap-mise.sh
@@ -1580,30 +1682,32 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}}
+│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.devTracker.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
-│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙)
+│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       └── bash.nix          alias 88 / 関数 24
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
-│   └── bin/               WSL 用 ssh ラッパー (実行ビット付き)
+│   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
+│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
     ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
-    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (マシンごとに 1 回)
-    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (マシンごとに 1 回)
-    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (マシンごとに 1 回)
-    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (マシンごとに 1 回)
+    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```

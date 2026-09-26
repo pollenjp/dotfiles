@@ -9,6 +9,11 @@
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン
+#   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
+#                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
+#                   会社のマシンのように public に載せたくない差分は、この登録簿ではなく
+#                   ローカル flake (~/dotfiles/flake.nix) の local module に書く。雛形は
+#                   devTracker.enable = false を既定にしている (README「登録簿に載せずにマシンを足す」)
 #
 # wsl は入れ子の attrset。親が有効なときだけ子が意味を持つ、という関係を
 # そのまま構造にしてあるので、有効な組み合わせは次の 3 通りしかない:
@@ -64,6 +69,13 @@
     username = "pollenjp";
     system = "x86_64-linux";
     wsl.enable = true;
+  };
+
+  # NixOS の実機 (NEC LaVie、nixos-config の laptop)。system 側は nixos-config が持ち、
+  # home はここから standalone で当てる (nixos-config の ADR 002)。
+  "pollenjp@laptop" = mkHome {
+    username = "pollenjp";
+    system = "x86_64-linux";
   };
 
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。

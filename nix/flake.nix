@@ -32,9 +32,25 @@
       forAllSystems = lib.genAttrs systems;
 
       mkHome = import ./lib/mk-home.nix { inherit inputs; };
+
+      # 登録簿 (hosts/default.nix) を、全ホスト共通の追加 module を挟んで組み立てる。
+      #
+      # 本体は空で呼ぶ。ローカル flake (~/dotfiles/flake.nix) が「このマシンだけの
+      # 設定」を **登録簿のホストにも** 当てるための入口で、そちらの雛形は
+      #
+      #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // { ... };
+      #
+      # と呼ぶ (scripts/setup-local-flake.sh)。mkHome の modules に前置するので、
+      # 登録簿側の定義と同じ優先度になる。同じ option を両方が定義したら
+      # "conflicting definition values" で落ちるので、差し替えるなら mkForce を使う。
+      hostsWith =
+        extraModules:
+        import ./hosts {
+          mkHome = args: mkHome (args // { modules = extraModules ++ (args.modules or [ ]); });
+        };
     in
     {
-      homeConfigurations = import ./hosts { inherit mkHome; };
+      homeConfigurations = hostsWith [ ];
 
       # 登録簿に載せないマシン用の入口。
       #
@@ -43,12 +59,15 @@
       # 自分用の flake を置き、そこからこれを呼ぶ:
       #
       #   inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
-      #   outputs = { dotfiles, ... }: {
-      #     homeConfigurations."tmp" = dotfiles.lib.mkHome { ... };
-      #   };
+      #   outputs = { dotfiles, ... }:
+      #     let local = { dotfiles.claude.devTracker.enable = false; }; in {
+      #       homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
+      #         "tmp" = dotfiles.lib.mkHome { ...; modules = [ local ]; };
+      #       };
+      #     };
       #
       # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
-      lib = { inherit mkHome; };
+      lib = { inherit mkHome hostsWith; };
 
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。

@@ -220,8 +220,8 @@ if [[ ${unreachable} == 0 && ${no_go} == 0 ]]; then
   else
     run systemctl --user daemon-reload
     # enable は unit が配置済みのときだけ成功する (home-manager switch 済みが前提)。
-    if systemctl --user list-unit-files "${unit}" >/dev/null 2>&1 &&
-      systemctl --user cat "${unit}" >/dev/null 2>&1; then
+    if systemctl --user list-unit-files "${unit}" >/dev/null 2>&1 \
+      && systemctl --user cat "${unit}" >/dev/null 2>&1; then
       run systemctl --user enable --now "${unit}"
       run systemctl --user restart "${unit}"
       note "$(systemctl --user is-active "${unit}" 2>/dev/null || true): ${unit}"
