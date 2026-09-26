@@ -454,6 +454,38 @@
         '';
       };
 
+      # ssh 先で herdr を開くときだけ、forward された agent を固定名
+      # ~/.ssh/agent.sock 越しに見せる (ADR 008)。理由は bash.nix の同じ関数の
+      # コメントに書いた (両シェルで同じ挙動に揃えてある)。
+      #
+      # 関数名とコマンド名が同じなので、補完は名前で引かれる (wraps は要らない)。
+      ssh-agent-link = {
+        description = "Point ~/.ssh/agent.sock at this connection's forwarded agent";
+        body = ''
+          # forward されていない shell (手元の WSL、ssh -a、herdr の pane) では何もしない。
+          # 固定名そのものと、フォールバックが起こしたローカル agent (SSH_AGENT_PID が
+          # 入っている) は張らない。理由は bash.nix の同じ関数のコメント。
+          set -l stable "$HOME/.ssh/agent.sock"
+          if test -S "$SSH_AUTH_SOCK"
+            and test "$SSH_AUTH_SOCK" != "$stable"
+            and test -z "$SSH_AGENT_PID"
+            ln -sfn "$SSH_AUTH_SOCK" "$stable"
+          end
+        '';
+      };
+
+      herdr = {
+        description = "herdr with a stable SSH_AUTH_SOCK on ssh hosts";
+        body = ''
+          if test -n "$SSH_CONNECTION"
+            ssh-agent-link
+            SSH_AUTH_SOCK="$HOME/.ssh/agent.sock" command herdr $argv
+          else
+            command herdr $argv
+          end
+        '';
+      };
+
       #########################
       # 複製元: 254_alias_fzf
       #########################
@@ -528,32 +560,16 @@
       #       起動のたびに "Unknown command: ssh-add" が 2 回出ていた。
       #       移植にあたってガードを追加している。
       #
-      # NOTE: forward された agent を固定名 ~/.ssh/agent.sock 越しに見せる処理を
-      #       足している (ADR 008)。理由と判定順序の意味は bash.nix 側の同じ
-      #       ブロックのコメントに書いた (両シェルで同じ挙動に揃えてある)。
+      # NOTE: SSH_AUTH_SOCK が固定名 ~/.ssh/agent.sock の shell (= ssh 先の herdr の
+      #       pane。functions の herdr を参照) では何もしない (ADR 008)。理由と、
+      #       ssh-add -l の判定を 1 回にまとめた理由は bash.nix の同じブロックに
+      #       書いた (両シェルで同じ挙動に揃えてある)。
       if command -q ssh-add
         set -l SSH_AGENT_FILE "$HOME/.ssh-agent"
-        set -l SSH_AGENT_STABLE_SOCK "$HOME/.ssh/agent.sock"
 
-        # ssh 先のログイン shell。SSH_CONNECTION は sshd が置くので、
-        # WSL やデスクトップのローカル shell では発火しない。
-        if test -n "$SSH_CONNECTION"
-          and test -S "$SSH_AUTH_SOCK"
-          and test "$SSH_AUTH_SOCK" != "$SSH_AGENT_STABLE_SOCK"
-          ln -sfn "$SSH_AUTH_SOCK" "$SSH_AGENT_STABLE_SOCK"
-          set -gx SSH_AUTH_SOCK "$SSH_AGENT_STABLE_SOCK"
-        end
-
-        # ここから下は agent が引けないときだけ (ssh-add を余分に呼ばない)。
-        if not ssh-add -l >/dev/null 2>&1
-          # herdr の pane などで env が古い場合。-S は symlink を辿るので、
-          # logout 中で張り替え前 (dangling) なら偽になる。
-          if test -S "$SSH_AGENT_STABLE_SOCK"
-            and test "$SSH_AUTH_SOCK" != "$SSH_AGENT_STABLE_SOCK"
-            set -gx SSH_AUTH_SOCK "$SSH_AGENT_STABLE_SOCK"
-          end
-
-          if not ssh-add -l >/dev/null 2>&1; and test -f $SSH_AGENT_FILE
+        if test "$SSH_AUTH_SOCK" != "$HOME/.ssh/agent.sock"
+          and not ssh-add -l >/dev/null 2>&1
+          if test -f $SSH_AGENT_FILE
             set -l auth_sock (grep SSH_AUTH_SOCK $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
             set -l agent_pid (grep SSH_AGENT_PID $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')
             if test -n "$auth_sock"

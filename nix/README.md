@@ -1097,40 +1097,36 @@ Windows は `main.bash setup` 経路のままなので、リポジトリ直下�
 
 ### forward された agent を固定名で見せる
 
-ssh 先で herdr や tmux を常駐させると、**ssh を張り直したときに中から agent が
-引けなくなる。** sshd が接続ごとに作る `/tmp/ssh-XXXXXX/agent.<pid>` は logout で
-消えるのに、常駐している server はその値を env に抱えたままで、実行中プロセスの
-env は外から書き換えられないため。
+ssh 先で herdr を常駐させると、**ssh を張り直したときに中から agent が引けなくなる。**
+sshd が接続ごとに作る `/tmp/ssh-XXXXXX/agent.<pid>` は logout で消えるのに、herdr server は
+起動したときの env を抱えて常駐し、実行中のプロセスの env は外から書き換えられないため。
 
-そこで `bash.nix` / `fish.nix` の shell init が固定名 `~/.ssh/agent.sock` を挟む。
-判断の経緯と安全性の根拠は
+そこで固定名 `~/.ssh/agent.sock` を挟み、**ssh 先で herdr を開くときだけ**、その接続が
+forward してきた socket へ張り替える。判断の経緯と安全性の根拠は
 [ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)。
 
-| # | 役割 | 発動条件 |
-| --- | --- | --- |
-| 1 | forward された生きた socket を固定名へ張り替える | `SSH_CONNECTION` がある（sshd 越しのログイン shell）かつ `SSH_AUTH_SOCK` が生きた socket |
-| 2 | 固定名が生きていれば `SSH_AUTH_SOCK` をそこへ向ける | `ssh-add -l` が失敗する（env が古い / 空）かつ固定名が生きている |
+| 置き場所 (`bash.nix` / `fish.nix`) | 役割 |
+| --- | --- |
+| `ssh-agent-link` 関数 | 固定名を、この shell の接続が forward してきた socket へ向ける |
+| `herdr` 関数 | ssh 先では `ssh-agent-link` を呼んでから、`SSH_AUTH_SOCK=~/.ssh/agent.sock` を付けて本物の herdr を起動する。`h` / `ha` / `hss` などの alias もここを通る |
+| init の `299_ssh_agent` ブロック | `SSH_AUTH_SOCK` が固定名の shell（herdr の pane）では、ローカル agent へのフォールバックをしない |
 
-2 は**保存済み `~/.ssh-agent` の読み込みとローカル agent の新規起動より前**にある。
-forward された鍵があるのに別の鍵を持つローカル agent へ倒れると、「agent は応答するのに
-鍵が違う」という切り分けにくい壊れ方をするため。
+- 張り替えるのは herdr を開いた接続だけ。覗くだけの 2 本目の ssh は固定名に触れず、
+  herdr の外の shell は自分の接続の socket をそのまま使う
+- `ssh -a` で入った shell（フォールバックが起こしたローカル agent）からは張らない。`SSH_AGENT_PID` で見分ける
+- 手元（`SSH_CONNECTION` が無い）では何も変えない。**WSL の挙動は変わらない**
 
-> **WSL の挙動は変わらない。** ローカル shell に `SSH_CONNECTION` は無いので 1 は
-> 発火せず、`ssh-add` は Windows 側の実体（[上記](#wsl-では-ssh-自体を-windows-側に差し替える)）で
-> `SSH_AUTH_SOCK` を見ないので `ssh-add -l` が成功し 2 も発火しない。
+> ⚠️ 適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
+> 一度 `herdr server stop` して、`ssh -A` で入り直してから `herdr` で開く。
 
-適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
-`herdr server stop` して ssh し直すか、session の中で 1 回だけ次を打つ。
-
-```sh
-export SSH_AUTH_SOCK=~/.ssh/agent.sock
-```
+herdr の中で鍵が引けなくなったら、detach して `herdr` で開き直す（固定名が今の接続へ向き直る）。
 
 確認は ssh 先で次のとおり。
 
 ```sh
-echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock
-readlink ~/.ssh/agent.sock   # /tmp/ssh-XXXXXX/agent.<pid>
+readlink ~/.ssh/agent.sock   # 今の接続の /tmp/ssh-XXXXXX/agent.<pid>
+# herdr の pane の中で
+echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock (展開済みのパス)
 ssh-add -l                   # 鍵が並ぶ
 ```
 
