@@ -36,7 +36,8 @@ Claude は ② の description だけを見て起動を決めるので、② が
 
 Claude Code は `settings.json` の `skillOverrides` で skill ごとの見え方を変えられる
 (`"off"` で一覧からも `/` メニューからも消える。公式 docs `skills` と、手元の 2.1.270 の
-バイナリで確認)。`Skill(<名前>)` のような permission rule は無い。
+バイナリで確認)。permission rule (`Skill(pjp-dev-tracker)` を deny) もあるが、それは
+Claude が呼ぼうとした時点で止める仕組みで、description は context に残る (§4)。
 
 一方 `~/.claude/settings.json` は Claude Code 自身が書き換えるファイルなので Nix 管理下に
 置けず、これまではフックの登録・statusLine・`env` を `bootstrap-claude-*.sh` が
@@ -132,13 +133,14 @@ outputs = { dotfiles, ... }:
 | --- | --- |
 | `settings.json` に `skillOverrides` を手で書く + CLAUDE.md の文言を「一覧に無い環境では無視」にする | 今すぐ効くが、宣言が settings.json と CLAUDE.md の文言の 2 箇所に散り、片方だけ戻す事故が起きる。host の性質として残すなら option |
 | SKILL.md の frontmatter `disable-model-invocation: true` | skill は git (claude-skills) で全マシンに配られるので、使うマシンでも止まる |
-| `PreToolUse` フックで `Skill` tool の `pjp-dev-tracker` を deny | description は context に残るので毎回発火してから拒否される往復が挟まる。① も残る |
+| `permissions.deny` に `Skill(pjp-dev-tracker)` (公式 docs `skills` の "Restrict Claude's skill access") | 呼ぼうとした時点で止める仕組みなので description は context に残り、毎回発火してから拒否される。rule 自体も settings.json にしか書けず「host ごとの値をどこで宣言するか」は解決しない。① も残る |
+| `PreToolUse` フックで `Skill` tool の `pjp-dev-tracker` を deny | 上と同じく反応型。加えて hook script と登録の改修が要る |
 | skill 側 (SKILL.md / `ticket.sh`) で env の印を見て何もしない | 毎回 SKILL.md を読み込む token を払い、降りるかどうかを Claude の判断に委ねる |
 | `bootstrap-claude-skills.sh` に除外リストを足して symlink を張らない | ファイルまで消えるが script の改修が要る。`skillOverrides` で ② が消える以上、ファイルの有無まで気にする理由が無い |
 | `home.activation` で settings.json を書く | Claude Code 所有のファイルを switch が書くことになり、「Nix 管理か否か」の線が崩れる (`bootstrap-local-env.sh` が退けたのと同じ理由) |
 | CLAUDE.md を 1 ファイルのまま、Nix でマーカー間を切り抜く | `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
 | 汎用の `dotfiles.claude.skillOverrides` (attrset をそのまま流す) | CLAUDE.md の断片との対応が名前規約頼みになる。今は 1 skill なので専用 option の方が意味が読める。生成 JSON は map の形なので、後から汎用化しても script は変えずに済む |
-| ローカル flake の `local` を `extendModules` で当てる | home-manager の `homeManagerConfiguration` の結果 (`activationPackage` など) を保てない。`mkHome` を呼び直す `hostsWith` の方が単純 |
+| ローカル flake 側で `builtins.mapAttrs (_: h: h.extendModules { modules = [ local ]; }) dotfiles.homeConfigurations` と書く | 動く (`extendModules` の結果にも `activationPackage` は残る) ので、本体に `hostsWith` を足さなくても実現はできた。それでも `hostsWith` にしたのは、ホストの構築経路を `mkHome` 1 本に保つため・雛形に module system の API を出さないため・本体の `homeConfigurations` が `hostsWith [ ]` に等しいと説明できるため |
 
 ## 5. 影響 (Consequences)
 

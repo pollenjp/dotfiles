@@ -198,7 +198,8 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
       warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
-      warn "手で足したホストが無ければ --force で作り直せます。残すなら README「登録簿に載せずにマシンを足す」を見て local を足してください。"
+      warn "Notion Dev Tracker を使うマシンならこのままでよい (option の既定 true が効く)。"
+      warn "使わないマシンは、手で足したホストが無ければ --force で作り直す。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
   else
     warn "既存の ${flake_file} が別のパスを指しています:"
@@ -228,6 +229,10 @@ if [[ ${write_flake} == 1 ]]; then
     let
       # このマシンだけの設定。登録簿 (hosts/default.nix) のホストにも、下で足した
       # ホストにも同じものが当たる。本体の option (nix/home/options.nix) をここで決める。
+      #
+      # 登録簿側が同じ option を既に定義していて差し替えたいときは、関数の形にして
+      # mkForce を使う (同じ優先度の定義が 2 つあると conflicting definition values で落ちる):
+      #   local = { lib, ... }: { dotfiles.claude.devTracker.enable = lib.mkForce false; };
       local = {
         # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。
         # 本体の既定は true だが、この雛形では false にしてある (使うマシンだけ

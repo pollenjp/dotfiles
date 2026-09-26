@@ -1434,7 +1434,8 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | 案 | 却下理由 |
 | --- | --- |
 | SKILL.md の `disable-model-invocation: true` | skill は git で全マシンに配られるので、使うマシンでも止まる |
-| `PreToolUse` フックで `Skill` の `pjp-dev-tracker` を deny | description は context に残るので毎回発火してから拒否される。CLAUDE.md の節も残る |
+| `permissions.deny` に `Skill(pjp-dev-tracker)` | 呼ぼうとした時点で止める仕組みなので description は context に残り、毎回発火してから拒否される。rule も settings.json にしか書けず、host ごとの宣言の置き場は解決しない。CLAUDE.md の節も残る |
+| `PreToolUse` フックで `Skill` の `pjp-dev-tracker` を deny | 上と同じく反応型。加えて hook script と登録の改修が要る |
 | skill 側で印（env）を見て何もしない | 毎回 SKILL.md を読み込む token を払い、降りるかどうかを Claude の判断に委ねる |
 | `bootstrap-claude-skills.sh` に除外リストを足して symlink を張らない | skill のファイルまで消えるが、skillOverrides で見えなくなる以上、ファイルの有無まで気にする理由が無い |
 | `home.activation` で settings.json を書く | Claude Code 所有のファイルを switch が書くことになり、「Nix 管理か否か」の線が崩れる |

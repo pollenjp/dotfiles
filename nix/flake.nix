@@ -41,7 +41,7 @@
       #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // { ... };
       #
       # と呼ぶ (scripts/setup-local-flake.sh)。mkHome の modules に前置するので、
-      # 登録簿側の定義と同じ優先度になる。同じ値を両方が定義したら
+      # 登録簿側の定義と同じ優先度になる。同じ option を両方が定義したら
       # "conflicting definition values" で落ちるので、差し替えるなら mkForce を使う。
       hostsWith =
         extraModules:
@@ -59,11 +59,12 @@
       # 自分用の flake を置き、そこからこれを呼ぶ:
       #
       #   inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
-      #   outputs = { dotfiles, ... }: {
-      #     homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
-      #       "tmp" = dotfiles.lib.mkHome { ...; modules = [ local ]; };
+      #   outputs = { dotfiles, ... }:
+      #     let local = { dotfiles.claude.devTracker.enable = false; }; in {
+      #       homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
+      #         "tmp" = dotfiles.lib.mkHome { ...; modules = [ local ]; };
+      #       };
       #     };
-      #   };
       #
       # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
       lib = { inherit mkHome hostsWith; };
