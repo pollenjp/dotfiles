@@ -1095,6 +1095,41 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
 Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
 
+### forward された agent を固定名で見せる
+
+ssh 先で herdr を常駐させると、**ssh を張り直したときに中から agent が引けなくなる。**
+sshd が接続ごとに作る `/tmp/ssh-XXXXXX/agent.<pid>` は logout で消えるのに、herdr server は
+起動したときの env を抱えて常駐し、実行中のプロセスの env は外から書き換えられないため。
+
+そこで固定名 `~/.ssh/agent.sock` を挟み、**ssh 先で herdr を開くときだけ**、その接続が
+forward してきた socket へ張り替える。判断の経緯と安全性の根拠は
+[ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)。
+
+| 置き場所 (`bash.nix` / `fish.nix`) | 役割 |
+| --- | --- |
+| `ssh-agent-link` 関数 | 固定名を、この shell の接続が forward してきた socket へ向ける |
+| `herdr` 関数 | ssh 先では `ssh-agent-link` を呼んでから、`SSH_AUTH_SOCK=~/.ssh/agent.sock` を付けて本物の herdr を起動する。`h` / `ha` / `hss` などの alias もここを通る |
+| init の `299_ssh_agent` ブロック | `SSH_AUTH_SOCK` が固定名の shell（herdr の pane）では、ローカル agent へのフォールバックをしない |
+
+- 張り替えるのは herdr を開いた接続だけ。覗くだけの 2 本目の ssh は固定名に触れず、
+  herdr の外の shell は自分の接続の socket をそのまま使う
+- `ssh -a` で入った shell（フォールバックが起こしたローカル agent）からは張らない。`SSH_AGENT_PID` で見分ける
+- 手元（`SSH_CONNECTION` が無い）では何も変えない。**WSL の挙動は変わらない**
+
+> ⚠️ 適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
+> 一度 `herdr server stop` して、`ssh -A` で入り直してから `herdr` で開く。
+
+herdr の中で鍵が引けなくなったら、detach して `herdr` で開き直す（固定名が今の接続へ向き直る）。
+
+確認は ssh 先で次のとおり。
+
+```sh
+readlink ~/.ssh/agent.sock   # 今の接続の /tmp/ssh-XXXXXX/agent.<pid>
+# herdr の pane の中で
+echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock (展開済みのパス)
+ssh-add -l                   # 鍵が並ぶ
+```
+
 ## fish
 
 `.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。

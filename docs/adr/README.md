@@ -14,6 +14,7 @@
 | [005](./005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) | flake.lock に入れる revision へ最小経過日数を課す | 2026-08-13 |
 | [006](./006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md) | 閉包を SBOM 化して OSV ベースでスキャンし、pin と先端の差分を照合する | 2026-08-23 |
 | [007](./007_claude_skill_host_option_20260926T130250JST/README.md) | Claude Code の skill の on / off を host option に持たせ、settings.json へ流す経路を決める | 2026-09-26 |
+| [008](./008_ssh_agent_stable_sock_20260909T144947JST/README.md) | ssh 先で herdr を開くときだけ、forward された ssh-agent を固定名の symlink へ張り替え、ssh を張り直しても herdr の中で使えるようにする | 2026-09-09 |
 
 ## ディレクトリ名
 
