@@ -3,13 +3,15 @@
 # 有効な組み合わせが構造に出るよう、WSL 固有の設定は dotfiles.wsl 配下へ入れ子にしている。
 #
 #   dotfiles.wsl.enable                          WSL か
+#   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
+#   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.onePassword.enable              ホスト側 Windows の 1Password を使うか
-#   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名
+#   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
-{ lib, ... }:
+{ config, lib, ... }:
 
 {
   options.dotfiles.claude = {
@@ -51,6 +53,49 @@
       '';
     };
 
+    windowsUserName = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "polle";
+      description = ''
+        ホスト側 Windows のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
+        `wsl.enable = true` のときだけ意味を持つ。
+
+        使うところは 2 つ:
+
+        - `windowsFiles.enable` の配り先 (`/mnt/c/Users/<名前>`)。未設定なら評価時に止まる
+        - `onePassword.windowsUserName` の既定値 (1Password の op-ssh-sign のパス)
+
+        Linux 側のユーザー名 (home.username) とは別物なので、マシンごとに
+        hosts/default.nix で指定する。値は WSL 上で次を実行すると判る:
+
+            pwsh.exe -NoProfile -Command '$env:USERNAME'
+
+        Nix の評価は純粋なのでこのコマンドを評価時に実行して自動取得すること
+        はできない (getEnv や --impure は nix flake check を壊す)。
+      '';
+    };
+
+    windowsFiles.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        repo 直下の `win/` を Windows 側 (`/mnt/c/Users/<windowsUserName>`) へ配るマシンか。
+        `wsl.enable = true` と `windowsUserName` が要る (欠けていれば評価時に止まる)。
+
+        switch は Windows 側に触らない。home-manager は配り先を
+        `~/.local/state/dotfiles/windows-files.json` に置くだけで
+        (home/modules/windows-files.nix)、`win/` を読んで /mnt/c へコピーするのは
+        nix/scripts/bootstrap-windows-files.sh。`~/dotfiles/setup --update`
+        (bootstrap まで走る) で揃う。
+
+        `win/` を home-manager で読まないのは、ローカル flake が本体を
+        `path:<repo>/nix` で読むので、その評価から repo 直下が見えないため
+        (docs/adr/010_win_files_from_wsl_*)。
+      '';
+    };
+
     onePassword = {
       enable = lib.mkOption {
         type = lib.types.bool;
@@ -78,19 +123,17 @@
 
       windowsUserName = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
-        default = null;
+        default = config.dotfiles.wsl.windowsUserName;
+        defaultText = lib.literalExpression "config.dotfiles.wsl.windowsUserName";
         example = "polle";
         description = ''
-          ホスト側 Windows のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
-          `wsl.onePassword.enable = true` のときだけ必要 (未設定なら評価時に止まる)。
+          1Password の op-ssh-sign のパス (`/mnt/c/Users/<名前>/AppData/...`) に使う
+          Windows ユーザー名。`wsl.onePassword.enable = true` のときだけ必要
+          (未設定なら評価時に止まる)。
 
-          Linux 側のユーザー名 (home.username) とは別物なので、マシンごとに
-          hosts/default.nix で指定する。値は WSL 上で次を実行すると判る:
-
-              pwsh.exe -NoProfile -Command '$env:USERNAME'
-
-          Nix の評価は純粋なのでこのコマンドを評価時に実行して自動取得すること
-          はできない (getEnv や --impure は nix flake check を壊す)。
+          既定は `dotfiles.wsl.windowsUserName`。ふつうはそちらに書けばよく、
+          ここに書くのは 1Password だけ別の名前を指したいときに限る
+          (書けばこちらが勝つ)。
         '';
       };
     };

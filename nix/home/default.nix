@@ -14,6 +14,7 @@
     ./modules/bash.nix
     ./modules/claude.nix
     ./modules/cc-pages.nix
+    ./modules/windows-files.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。

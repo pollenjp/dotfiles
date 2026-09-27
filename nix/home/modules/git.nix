@@ -50,7 +50,7 @@ in
       message = ''
         dotfiles.wsl.onePassword.enable が true ですが windowsUserName が未設定です。
         Windows 側の op-ssh-sign-wsl.exe のパスを組み立てられません。
-        hosts/default.nix の wsl.onePassword.windowsUserName を指定するか、
+        hosts/default.nix の wsl.windowsUserName を指定するか、
         1Password を使わないマシンなら wsl.onePassword.enable を外してください。
       '';
     }

@@ -16,11 +16,14 @@
 #                   devTracker.enable = false を既定にしている (README「登録簿に載せずにマシンを足す」)
 #
 # wsl は入れ子の attrset。親が有効なときだけ子が意味を持つ、という関係を
-# そのまま構造にしてあるので、有効な組み合わせは次の 3 通りしかない:
+# そのまま構造にしてある。git の署名で見ると、有効な組み合わせは次の 3 通りしかない:
 #
-#   (指定しない)                                        非 WSL
-#   wsl.enable = true;                                  WSL / 1Password 無し
-#   wsl = { enable = true; onePassword = { ... }; }      WSL / 1Password 有り
+#   (指定しない)                                                              非 WSL
+#   wsl.enable = true;                                                        WSL / 1Password 無し
+#   wsl = { enable = true; windowsUserName = "…"; onePassword.enable = true; }  WSL / 1Password 有り
+#
+# wsl.windowsFiles.enable = true で、repo 直下の win/ を Windows 側へ配るマシンになる
+# (windowsUserName が要る。docs/adr/010_win_files_from_wsl_*)。
 { mkHome }:
 
 {
@@ -41,24 +44,24 @@
 
   # WSL + ホスト側 Windows の 1Password。
   # git の署名は Windows 側の op-ssh-sign-wsl.exe を経由する。
+  # repo 直下の win/ (Orca の設定など) も Windows 側へ配る。
   "pollenjp@wsl" = mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
     wsl = {
       enable = true;
-      onePassword = {
-        enable = true;
-        # ホスト側 Windows のユーザー名。1Password の op-ssh-sign のパス
-        # (/mnt/c/Users/<名前>/AppData/...) の組み立てに使う。
-        #
-        # 値は WSL 上で次を実行すると判る:
-        #   pwsh.exe -NoProfile -Command '$env:USERNAME'
-        # (pwsh.exe が無ければ powershell.exe でも同じ)
-        #
-        # Nix の評価は純粋なのでこのコマンドを評価時に実行することはできない。
-        # (getEnv や --impure は nix flake check を壊す)。よってここに直接書く。
-        windowsUserName = "polle";
-      };
+      # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
+      # (1Password の op-ssh-sign のパスと、win/ の配り先)。
+      #
+      # 値は WSL 上で次を実行すると判る:
+      #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+      # (pwsh.exe が無ければ powershell.exe でも同じ)
+      #
+      # Nix の評価は純粋なのでこのコマンドを評価時に実行することはできない。
+      # (getEnv や --impure は nix flake check を壊す)。よってここに直接書く。
+      windowsUserName = "polle";
+      windowsFiles.enable = true;
+      onePassword.enable = true;
     };
   };
 

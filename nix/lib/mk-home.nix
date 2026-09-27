@@ -9,15 +9,13 @@
   homeDirectory ?
     if inputs.nixpkgs.lib.hasSuffix "darwin" system then "/Users/${username}" else "/home/${username}",
   # WSL 固有の設定をまとめて渡す (dotfiles.wsl にそのまま入る)。
-  # 有効な組み合わせが構造に出るよう、1Password は WSL の下、Windows ユーザー名は
-  # さらに 1Password の下に置いている。
+  # 有効な組み合わせが構造に出るよう、1Password と win/ の配布は WSL の下に置いている。
   #
   #   wsl = {
   #     enable = true;
-  #     onePassword = {
-  #       enable = true;
-  #       windowsUserName = "polle";
-  #     };
+  #     windowsUserName = "polle";
+  #     windowsFiles.enable = true;
+  #     onePassword.enable = true;
   #   };
   #
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
