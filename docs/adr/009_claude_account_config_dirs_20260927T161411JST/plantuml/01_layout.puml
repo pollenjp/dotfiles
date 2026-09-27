@@ -33,13 +33,13 @@ rectangle "$HOME/.claude（本体。今まで通り）" as base #FFFFFF {
 
 rectangle "$HOME/.claude-personal（薄い dir）" as p #EEF8EE {
   rectangle "CLAUDE.md\nsettings.json\nprojects" as p_ln #D5E8D4
-  rectangle "skills/ agents/ commands/\n中の symlink だけ写す" as p_sk #D5E8D4
+  rectangle "skills/ agents/ commands/\n中身をリンクで写す" as p_sk #D5E8D4
   rectangle "plugins/\n.credentials.json\n.claude.json" as p_own #D5E8D4
 }
 
 rectangle "$HOME/.claude-work（薄い dir）" as w #EEF8EE {
   rectangle "CLAUDE.md\nsettings.json\nprojects" as w_ln #D5E8D4
-  rectangle "skills/ agents/ commands/\n中の symlink だけ写す" as w_sk #D5E8D4
+  rectangle "skills/ agents/ commands/\n中身をリンクで写す" as w_sk #D5E8D4
   rectangle "plugins/\n.credentials.json\n.claude.json" as w_own #D5E8D4
 }
 
@@ -71,6 +71,7 @@ legend right
   |<#F7F7F7>| 既存（変えない） |
   点線 = symlink（$HOME/.claude の実体を指す）
   $HOME/.claude-personal / $HOME/.claude-work が実体で持つのは
-  ログイン（.credentials.json・.claude.json）と plugins/ だけ
+  ログイン（.credentials.json・.claude.json）・plugins/ と実行時の状態（history.jsonl など）
+  skills/ は symlink と pjp-* だけ、agents/ commands/ は synced 以外を写す
 endlegend
 @enduml

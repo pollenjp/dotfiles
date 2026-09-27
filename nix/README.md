@@ -1492,9 +1492,11 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | `claude-personal` | `~/.claude-personal` | 個人のアカウント（初回に `/login`） |
 | `claude-work` | `~/.claude-work` | 会社のアカウント（初回に `/login`） |
 
-どちらも `ANTHROPIC_API_KEY` を外し、`CLAUDE_CONFIG_DIR` をその dir にして `claude` を
-exec する。`home/modules/claude.nix` が `writeShellApplication` で作るので PATH にあり、
-bash / fish のどちらからも、シェルを通さない起動元からも呼べる。どのマシンにも両方ある。
+どちらも `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN`（`/login` の
+資格情報より優先される env）を外し、`CLAUDE_CONFIG_DIR` をその dir にして `claude` を exec する。
+`home/modules/claude.nix` が `writeShellApplication` で作るので PATH にあり、bash / fish の
+どちらからも、シェルを通さない起動元からも呼べる（`claude` が PATH に無ければ
+`mise which claude` で探す）。どのマシンにも両方ある。
 
 #### `~/.claude-<名前>/` の中身
 
@@ -1503,18 +1505,26 @@ bash / fish のどちらからも、シェルを通さない起動元からも�
 | もの | 扱い |
 | --- | --- |
 | `CLAUDE.md`・`settings.json`・`projects` | `~/.claude` への 1 段の symlink（共有） |
-| `skills/`・`agents/`・`commands/` | 実体の dir。`~/.claude/<種類>/` の中の **symlink だけ**を同名のリンクで写す |
+| `skills/` | 実体の dir。`~/.claude/skills/` の中の **symlink と、実体でも `pjp-*` のもの**を同名のリンクで写す |
+| `agents/`・`commands/` | 実体の dir。`~/.claude/<種類>/` の中身を同名のリンクで写す（`synced` を除く） |
 | `plugins/` | 実体。`settings.json` の `enabledPlugins` のうち未導入のものを入れる（版は上げない） |
 | `.credentials.json`・`.claude.json` など | 実体。`/login` と起動のときに Claude Code が作る |
 
 - `hooks/` と `statusline-command.sh` は置かない。`settings.json` が `~/.claude/…` の
   絶対パスで登録しているので、それだけで効く
-- `skills/` を丸ごと共有しないのは、`synced/` にアカウントごとの配信 skill が入るため。
-  Nix と claude-skills が置くものは必ず symlink なので、symlink かどうかで線を引いている
+- `skills/` を丸ごと共有しないのは、`synced/` にアカウントごとの配信 skill が入るため
+  （古い版の Claude Code は `pdf/` などを直下に実体で置く）。Nix と claude-skills が置くものは
+  symlink、自作の試作は命名規約どおり `pjp-*` なので、その 2 つだけを写す
 - `plugins/` を共有しないのは、別の config dir から symlink 越しに使うと cache に
-  `unknown` 版のコピーができるため
+  `unknown` 版のコピーができるため。plugin は `~/.claude` 自身にも揃える（薄い dir で
+  入れた plugin も共有の `enabledPlugins` に載るため）。外した plugin は消さない
+- marketplace を足すと、Claude Code がリンク越しに共有の `settings.json` の
+  `extraKnownMarketplaces` へ 1 項目書く
 - リンクを `home.file` で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
   `settings.json` に書けなくなるため（readlink を 1 回しか辿らない）
+- 薄い dir か `skills/` などが `~/.claude` へのリンクになっている（または `~/.claude` が
+  薄い dir へのリンクになっている）と、張ったリンクが自分自身を指して `~/.claude` を壊すので、
+  そのアカウント・その種類は飛ばして警告する
 - アカウントの一覧は `claude.nix` の `accounts` にだけある。`switch` がそこから
   `~/.local/state/dotfiles/claude-accounts.json`（`["personal","work"]`）を置き、
   script はそれを読む
@@ -1532,19 +1542,42 @@ claude-work                                 # 初回は /login で会社のア�
 どのアカウントで動いているかは各セッションの `/status` で確かめる。
 `~/.claude` には触らないので、動いているセッションはそのままでよい。
 
+#### 既に `~/.claude-<名前>` があるとき
+
+`CLAUDE_CONFIG_DIR=~/.claude-work claude` のように先に起動していると、Claude Code が
+`settings.json` や `projects/` を実体で作っている。bootstrap は実体を上書きしないので
+（`!!` で知らせる）、コマンドも「実ファイルです」と言って起動しない。片付けてから流し直す。
+
+```sh
+jq -S . ~/.claude-work/settings.json       # 残したい設定は ~/.claude/settings.json へ移す
+rm ~/.claude-work/settings.json
+
+# projects/ は ~/.claude/projects へ寄せる (同じ名前のファイルは上書きしない)
+cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/projects
+
+~/dotfiles/setup --steps bootstrap-claude-accounts
+```
+
+`~/.claude-personal` なら dir を読み替える（bash でも fish でもそのまま打てる形にしてある）。
+ログイン（`.credentials.json`・`.claude.json`）と `plugins/` はそのまま残してよいので、
+`/login` し直す必要は無い。
+
 #### 注意
 
 - **bootstrap より先に起動しない。** コマンドは `settings.json` がリンクになっていなければ
   止まって手順を案内する。Claude Code に空の dir を作らせないため
-- 実体があるところにリンクは張らない（警告だけ）。先に Claude Code が作ってしまったものは、
-  中身を片付けて（必要なら `~/.claude` 側へ移して）から流し直す
 - アカウントごとに分かれるもの: `.claude.json`（リポジトリごとの「信頼する」の確認・
-  MCP のユーザー設定など）、↑ キーの入力履歴（`history.jsonl`）、巻き戻し（`file-history/`）、
-  `plugins/`（容量は dir の数だけ要る）
+  MCP サーバーの設定）、↑ キーの入力履歴（`history.jsonl`）、巻き戻し（`file-history/`）、
+  `plugins/`（容量は dir の数だけ要る）、`skills/synced/`
+- 薄い dir の中で作ったもの（`/agents` で作った agent、`~/.claude-<名前>/skills/` に置いた
+  試作）はその dir にしか無い。どれでも使いたいものは `~/.claude` 側に置く（skill は `pjp-*`）
+- 共有の `settings.json` にある設定（`apiKeyHelper` や `model` など）はどのアカウントにも効く
 - `~/.claude` に skill を足した・消したあと、薄い dir が追従するのは次の `setup --update`
   （または `--steps bootstrap-claude-accounts`）から
+- marketplace の clone は SSH なので、初回は dir ごとに 1Password の承認が出ることがある
 - `claude-work` のセッションの中（Bash ツールなど）で素の `claude` を打つと
-  `CLAUDE_CONFIG_DIR` が引き継がれて work で起動する
+  `CLAUDE_CONFIG_DIR` が引き継がれて work で起動する（`bootstrap-claude-plugins.sh` は
+  これを外してから `~/.claude` へ入れる）
 
 経緯と、採らなかった案（`~/.claude` をリンクにする、3 つの dir に一式を配る、など）は
 [ADR 009](../docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
