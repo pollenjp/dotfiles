@@ -157,6 +157,11 @@ fi
 
 [[ -z ${hit} ]] && exit 0
 
+# 試作の skill を置く場所は、いま動いている config dir の skills/。
+# claude-personal / claude-work (CLAUDE_CONFIG_DIR=~/.claude-<名前>) のセッションでは
+# ~/.claude/skills/ に置いてもそのセッションからは見えない (bootstrap が写すまで) ため。
+trial_skills="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skills"
+
 reason=$(
   cat <<EOF
 '${hit}' は Nix (home-manager) 管理です。/nix/store への symlink なので直接編集できません。
@@ -181,8 +186,10 @@ reason=$(
 新しい skill / agent / command を足すだけなら .nix の編集は不要です
 (nix/home/modules/claude.nix が readDir で自動列挙します)。
 
-まだ試行錯誤の段階なら、~/.claude/skills/<仮名>/ に実ディレクトリとして置けば
+まだ試行錯誤の段階なら、${trial_skills}/<仮名>/ に実ディレクトリとして置けば
 このガードは働きません。固まってから上記の手順でリポジトリへ移してください。
+(claude-personal / claude-work からも使いたい試作は ~/.claude/skills/pjp-<仮名>/ に置くと、
+ 次の setup --update でそれぞれの ~/.claude-<名前>/skills/ へ写ります)
 
 公開できない内容 (業務固有の手順や社内の名前など) は dotfiles ではなく
 claude-skills (private) 側へ置きます。そちらは作業クローンへの symlink なので

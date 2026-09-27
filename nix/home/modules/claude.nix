@@ -47,11 +47,90 @@
 #                    載せると CI の nix flake check も fetch できずに落ちる。
 #                    scripts/bootstrap-claude-skills.sh が作業クローンへ
 #                    symlink を張る。詳細は nix/README.md
-{ config, lib, ... }:
+#   ~/.claude-<名前>/ : 下の claude-<名前> コマンドが使う dir。中身の symlink と plugin は
+#                    scripts/bootstrap-claude-accounts.sh が用意する (次節)
+#
+# ## ログインアカウントを分ける (claude-personal / claude-work)
+#
+# `claude-<名前>` は CLAUDE_CONFIG_DIR=~/.claude-<名前> で claude を起動するコマンド。
+# 分けるのはログインだけで、~/.claude-<名前>/ は CLAUDE.md・settings.json・projects を
+# ~/.claude への symlink で共有し、skills/ などは中身をリンクで写す。実体で持つのは
+# ログイン (.credentials.json・.claude.json)・plugins/ と、Claude Code が実行中に書くもの
+# (history.jsonl・sessions/ など)。素の `claude` と ~/.claude は今まで通り。
+#
+# リンクを home.file で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
+# settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
+# docs/adr/009_claude_account_config_dirs_* を参照。
+#
+# アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
+# ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
+
+  # dir 名 (~/.claude-<名前>) とコマンド名に使う。bootstrap も同じ規則で弾くので、
+  # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
+  accounts =
+    let
+      names = [
+        "personal"
+        "work"
+      ];
+      valid = n: builtins.match "[a-z0-9][a-z0-9_-]*" n != null;
+    in
+    assert lib.assertMsg (builtins.all valid names)
+      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにする (${builtins.toJSON names})";
+    names;
+
+  # claude-<名前> コマンド。シェル関数ではなく PATH に置くので、bash と fish の両方から、
+  # シェルを通さずに起動するもの (herdr や IDE の設定など) からも呼べる。
+  mkAccountCommand =
+    name:
+    pkgs.writeShellApplication {
+      name = "claude-${name}";
+      text = ''
+        dir="''${HOME}/.claude-${name}"
+
+        # bootstrap が済んでいなければ起動しない。起動すると Claude Code が空の dir を作り、
+        # CLAUDE.md も skill も無いまま動いてしまう (そうしてできた実体は bootstrap が触らない)。
+        if [[ ! -L "''${dir}/settings.json" ]]; then
+          if [[ -e "''${dir}/settings.json" ]]; then
+            echo "claude-${name}: ''${dir}/settings.json が実ファイルです (bootstrap より先に" >&2
+            echo "  この dir で Claude Code を起動した、など)。nix/README.md「Claude Code の" >&2
+            echo "  アカウントを分ける」の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、" >&2
+            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          else
+            echo "claude-${name}: ''${dir} がまだ用意されていません。" >&2
+            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          fi
+          exit 1
+        fi
+
+        # claude は mise 管理。`mise activate` したシェルなら PATH にあるが、シェルを
+        # 通さずに起動されたときは mise に実体を聞く (bootstrap-claude-plugins.sh と同じ)。
+        claude=$(command -v claude || true)
+        if [[ -z "''${claude}" ]] && command -v mise >/dev/null; then
+          claude=$(mise which claude 2>/dev/null || true)
+        fi
+        if [[ -z "''${claude}" ]]; then
+          echo "claude-${name}: claude が見つかりません (mise で入れる: ~/dotfiles/setup --steps bootstrap-mise)。" >&2
+          exit 127
+        fi
+
+        # この dir で /login したアカウントで動かす。/login の資格情報より優先される
+        # env (API キー・OAuth トークン) は外す
+        unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN
+        export CLAUDE_CONFIG_DIR="''${dir}"
+        exec "''${claude}" "$@"
+      '';
+    };
 
   # <kind> 直下のエントリを 1 つずつ ~/.claude/<kind>/ へ配置する。
   #
@@ -74,6 +153,8 @@ let
 in
 
 {
+  home.packages = map mkAccountCommand accounts;
+
   home.file = lib.mkMerge [
     # 全セッションで読まれるユーザーレベルの指示。
     # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
@@ -110,6 +191,12 @@ in
           "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
         }
         + "\n";
+    }
+
+    # claude-<名前> のアカウント一覧。bootstrap-claude-accounts.sh がこれを読んで
+    # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
+    {
+      ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
     }
 
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。

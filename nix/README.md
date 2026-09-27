@@ -573,6 +573,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-mise.sh` | 10 | `claude` を入れる |
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
+| `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -598,6 +599,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
+| 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -1478,6 +1480,108 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 
 経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
 
+### Claude Code のアカウントを分ける (claude-personal / claude-work)
+
+ログインするアカウントを明示したいときだけ、素の `claude` の代わりに次を使う。
+**分かれるのはログインだけ**で、CLAUDE.md・skill・フック・設定・履歴と memory は
+素の `claude` と同じものが効く。素の `claude` と `~/.claude` は今まで通り。
+
+| コマンド | 使う config dir | ログイン |
+| --- | --- | --- |
+| `claude` | `~/.claude`（今まで通り） | 今まで通り |
+| `claude-personal` | `~/.claude-personal` | 個人のアカウント（初回に `/login`） |
+| `claude-work` | `~/.claude-work` | 会社のアカウント（初回に `/login`） |
+
+どちらも `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN`（`/login` の
+資格情報より優先される env）を外し、`CLAUDE_CONFIG_DIR` をその dir にして `claude` を exec する。
+`home/modules/claude.nix` が `writeShellApplication` で作るので PATH にあり、bash / fish の
+どちらからも、シェルを通さない起動元からも呼べる（`claude` が PATH に無ければ
+`mise which claude` で探す）。どのマシンにも両方ある。
+
+#### `~/.claude-<名前>/` の中身
+
+`bootstrap-claude-accounts.sh` が用意する（冪等。更新時も毎回走る）。
+
+| もの | 扱い |
+| --- | --- |
+| `CLAUDE.md`・`settings.json`・`projects` | `~/.claude` への 1 段の symlink（共有） |
+| `skills/` | 実体の dir。`~/.claude/skills/` の中の **symlink と、実体でも `pjp-*` のもの**を同名のリンクで写す |
+| `agents/`・`commands/` | 実体の dir。`~/.claude/<種類>/` の中身を同名のリンクで写す（`synced` を除く） |
+| `plugins/` | 実体。`settings.json` の `enabledPlugins` のうち未導入のものを入れる（版は上げない） |
+| `.credentials.json`・`.claude.json` など | 実体。`/login` と起動のときに Claude Code が作る |
+
+- `hooks/` と `statusline-command.sh` は置かない。`settings.json` が `~/.claude/…` の
+  絶対パスで登録しているので、それだけで効く
+- `skills/` を丸ごと共有しないのは、`synced/` にアカウントごとの配信 skill が入るため
+  （古い版の Claude Code は `pdf/` などを直下に実体で置く）。Nix と claude-skills が置くものは
+  symlink、自作の試作は命名規約どおり `pjp-*` なので、その 2 つだけを写す
+- `plugins/` を共有しないのは、別の config dir から symlink 越しに使うと cache に
+  `unknown` 版のコピーができるため。plugin は `~/.claude` 自身にも揃える（薄い dir で
+  入れた plugin も共有の `enabledPlugins` に載るため）。外した plugin は消さない
+- marketplace を足すと、Claude Code がリンク越しに共有の `settings.json` の
+  `extraKnownMarketplaces` へ 1 項目書く
+- リンクを `home.file` で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
+  `settings.json` に書けなくなるため（readlink を 1 回しか辿らない）
+- 薄い dir か `skills/` などが `~/.claude` へのリンクになっている（または `~/.claude` が
+  薄い dir へのリンクになっている）と、張ったリンクが自分自身を指して `~/.claude` を壊すので、
+  そのアカウント・その種類は飛ばして警告する
+- アカウントの一覧は `claude.nix` の `accounts` にだけある。`switch` がそこから
+  `~/.local/state/dotfiles/claude-accounts.json`（`["personal","work"]`）を置き、
+  script はそれを読む
+
+#### 使い始める
+
+```sh
+~/dotfiles/setup --update                   # switch + bootstrap
+ls -l ~/.claude-personal ~/.claude-work     # CLAUDE.md / settings.json / projects がリンク
+
+claude-personal                             # 初回は /login で個人のアカウント
+claude-work                                 # 初回は /login で会社のアカウント
+```
+
+どのアカウントで動いているかは各セッションの `/status` で確かめる。
+`~/.claude` には触らないので、動いているセッションはそのままでよい。
+
+#### 既に `~/.claude-<名前>` があるとき
+
+`CLAUDE_CONFIG_DIR=~/.claude-work claude` のように先に起動していると、Claude Code が
+`settings.json` や `projects/` を実体で作っている。bootstrap は実体を上書きしないので
+（`!!` で知らせる）、コマンドも「実ファイルです」と言って起動しない。片付けてから流し直す。
+
+```sh
+jq -S . ~/.claude-work/settings.json       # 残したい設定は ~/.claude/settings.json へ移す
+rm ~/.claude-work/settings.json
+
+# projects/ は ~/.claude/projects へ寄せる (同じ名前のファイルは上書きしない)
+cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/projects
+
+~/dotfiles/setup --steps bootstrap-claude-accounts
+```
+
+`~/.claude-personal` なら dir を読み替える（bash でも fish でもそのまま打てる形にしてある）。
+ログイン（`.credentials.json`・`.claude.json`）と `plugins/` はそのまま残してよいので、
+`/login` し直す必要は無い。
+
+#### 注意
+
+- **bootstrap より先に起動しない。** コマンドは `settings.json` がリンクになっていなければ
+  止まって手順を案内する。Claude Code に空の dir を作らせないため
+- アカウントごとに分かれるもの: `.claude.json`（リポジトリごとの「信頼する」の確認・
+  MCP サーバーの設定）、↑ キーの入力履歴（`history.jsonl`）、巻き戻し（`file-history/`）、
+  `plugins/`（容量は dir の数だけ要る）、`skills/synced/`
+- 薄い dir の中で作ったもの（`/agents` で作った agent、`~/.claude-<名前>/skills/` に置いた
+  試作）はその dir にしか無い。どれでも使いたいものは `~/.claude` 側に置く（skill は `pjp-*`）
+- 共有の `settings.json` にある設定（`apiKeyHelper` や `model` など）はどのアカウントにも効く
+- `~/.claude` に skill を足した・消したあと、薄い dir が追従するのは次の `setup --update`
+  （または `--steps bootstrap-claude-accounts`）から
+- marketplace の clone は SSH なので、初回は dir ごとに 1Password の承認が出ることがある
+- `claude-work` のセッションの中（Bash ツールなど）で素の `claude` を打つと
+  `CLAUDE_CONFIG_DIR` が引き継がれて work で起動する（`bootstrap-claude-plugins.sh` は
+  これを外してから `~/.claude` へ入れる）
+
+経緯と、採らなかった案（`~/.claude` をリンクにする、3 つの dir に一式を配る、など）は
+[ADR 009](../docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
+
 ### private な skill 置き場 (claude-skills)
 
 公開できない skill / agent / command は [`pollenjp/claude-skills`](https://github.com/pollenjp/claude-skills)（private）に置き、
@@ -1684,7 +1788,7 @@ nix/
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
-│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)
+│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
@@ -1705,5 +1809,6 @@ nix/
     ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
+    ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
     └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
 ```

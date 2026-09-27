@@ -1,0 +1,77 @@
+@startuml
+' 変更後の構成: ~/.claude はそのまま、~/.claude-personal / ~/.claude-work はログインだけを持つ薄い dir
+' NOTE: PlantUML では "~" がエスケープ文字として消費されるため "$HOME/" 表記を使う
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 30
+skinparam ranksep 55
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title claude-personal / claude-work と config dir の関係
+
+rectangle "claude（素）\n今まで通り" as c0
+rectangle "**claude-personal**\nPATH のコマンド" as cp #D5E8D4
+rectangle "**claude-work**\nPATH のコマンド" as cw #D5E8D4
+
+rectangle "$HOME/.claude.json\n素の claude のアカウント情報" as b_json
+
+rectangle "$HOME/.claude（本体。今まで通り）" as base #FFFFFF {
+  rectangle "CLAUDE.md\n(Nix)" as b_md
+  rectangle "settings.json\n(bootstrap-claude-*.sh が書く)" as b_set
+  rectangle "projects/\n(履歴・auto memory)" as b_proj
+  rectangle "skills/ agents/ commands/\n(Nix・claude-skills の symlink)" as b_sk
+  rectangle "plugins/\n.credentials.json" as b_own
+}
+
+rectangle "$HOME/.claude-personal（薄い dir）" as p #EEF8EE {
+  rectangle "CLAUDE.md\nsettings.json\nprojects" as p_ln #D5E8D4
+  rectangle "skills/ agents/ commands/\n中身をリンクで写す" as p_sk #D5E8D4
+  rectangle "plugins/\n.credentials.json\n.claude.json" as p_own #D5E8D4
+}
+
+rectangle "$HOME/.claude-work（薄い dir）" as w #EEF8EE {
+  rectangle "CLAUDE.md\nsettings.json\nprojects" as w_ln #D5E8D4
+  rectangle "skills/ agents/ commands/\n中身をリンクで写す" as w_sk #D5E8D4
+  rectangle "plugins/\n.credentials.json\n.claude.json" as w_own #D5E8D4
+}
+
+rectangle "**bootstrap-claude-accounts.sh**\norder 60・冪等" as boot #D5E8D4
+
+c0 -[hidden]right-> cp
+cp -[hidden]right-> cw
+
+c0 --> base
+c0 --> b_json
+cp --> p : CLAUDE_CONFIG_DIR
+cw --> w : CLAUDE_CONFIG_DIR
+
+p_ln ..> b_md : symlink（1 段）
+p_ln ..> b_set
+p_ln ..> b_proj
+p_sk ..> b_sk : 項目ごとの symlink
+w_ln ..> b_md
+w_ln ..> b_set
+w_ln ..> b_proj
+w_sk ..> b_sk
+
+boot -up-> p : 作る・plugin を入れる
+boot -up-> w
+
+legend right
+  |= 色 |= 意味 |
+  |<#D5E8D4>| 今回追加 |
+  |<#F7F7F7>| 既存（変えない） |
+  点線 = symlink（$HOME/.claude の実体を指す）
+  $HOME/.claude-personal / $HOME/.claude-work が実体で持つのは
+  ログイン（.credentials.json・.claude.json）・plugins/ と実行時の状態（history.jsonl など）
+  skills/ は symlink と pjp-* だけ、agents/ commands/ は synced 以外を写す
+endlegend
+@enduml

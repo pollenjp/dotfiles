@@ -39,6 +39,11 @@
 
 set -eu -o pipefail
 
+# 入れる先は ~/.claude。claude-personal / claude-work のセッションの中から setup を流すと
+# CLAUDE_CONFIG_DIR が引き継がれ、そちらの dir へ入ってしまうので外す。
+# (~/.claude を指定するのも不可。.claude.json の置き場所まで変わる)
+unset CLAUDE_CONFIG_DIR
+
 marketplace_repo="anthropics/claude-plugins-official"
 marketplace="claude-plugins-official"
 
