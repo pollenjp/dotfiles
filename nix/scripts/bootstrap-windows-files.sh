@@ -130,12 +130,12 @@ if ((check_only)); then
   exit 0
 fi
 
-for cmd in jq sha256sum; do
-  if ! command -v "${cmd}" &>/dev/null; then
-    echo "${cmd} が見つかりません。先に home-manager switch を実行してください。" >&2
-    exit 1
-  fi
-done
+# jq は state を読むのに要る (home-manager が入れる)。sha256sum は配るときにだけ要るので、
+# 下の enable の判定の後で見る (macOS には無く、配らないマシンで求めると setup が落ちる)。
+if ! command -v jq &>/dev/null; then
+  echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
+  exit 1
+fi
 
 if [[ ! -r ${state_file} ]]; then
   echo "!! 配り先の設定がありません: ${state_file}" >&2
@@ -158,6 +158,11 @@ windows_home=$(jq -r '.windowsHome // ""' "${state_file}")
 if [[ -z ${windows_home} || ! -d ${windows_home} ]]; then
   echo "Windows 側のホームが見えません: ${windows_home:-(windowsHome が空)}" >&2
   echo "  /mnt/c が mount されているか、dotfiles.wsl.windowsUserName が合っているかを確かめてください。" >&2
+  exit 1
+fi
+
+if ! command -v sha256sum &>/dev/null; then
+  echo "sha256sum が見つかりません (coreutils)。置き先の中身を比べられないので配れません。" >&2
   exit 1
 fi
 
