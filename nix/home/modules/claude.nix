@@ -47,11 +47,61 @@
 #                    載せると CI の nix flake check も fetch できずに落ちる。
 #                    scripts/bootstrap-claude-skills.sh が作業クローンへ
 #                    symlink を張る。詳細は nix/README.md
-{ config, lib, ... }:
+#   ~/.claude-<名前>/ : 下の claude-<名前> コマンドが使う dir。中身の symlink と plugin は
+#                    scripts/bootstrap-claude-accounts.sh が用意する (次節)
+#
+# ## ログインアカウントを分ける (claude-personal / claude-work)
+#
+# `claude-<名前>` は CLAUDE_CONFIG_DIR=~/.claude-<名前> で claude を起動するコマンド。
+# 分けるのはログインだけで、~/.claude-<名前>/ は CLAUDE.md・settings.json・projects を
+# ~/.claude への symlink で共有し、ログインと plugins/ だけを実体で持つ。素の `claude` と
+# ~/.claude は今まで通り。
+#
+# リンクを home.file で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
+# settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
+# docs/adr/009_claude_account_config_dirs_* を参照。
+#
+# アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
+# ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
+
+  accounts = [
+    "personal"
+    "work"
+  ];
+
+  # claude-<名前> コマンド。シェル関数ではなく PATH に置くので、bash と fish の両方から、
+  # シェルを通さずに起動するもの (herdr や IDE の設定など) からも呼べる。
+  mkAccountCommand =
+    name:
+    pkgs.writeShellApplication {
+      name = "claude-${name}";
+      text = ''
+        dir="''${HOME}/.claude-${name}"
+
+        # bootstrap が済んでいなければ起動しない。起動すると Claude Code が空の dir を作り、
+        # CLAUDE.md も skill も無いまま動いてしまう (そうしてできた実体は bootstrap が触らない)。
+        if [[ ! -L "''${dir}/settings.json" ]]; then
+          echo "claude-${name}: ''${dir} がまだ用意されていません。" >&2
+          echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          exit 1
+        fi
+
+        # API キーではなく、この dir で /login したアカウントで動かす
+        unset ANTHROPIC_API_KEY
+        export CLAUDE_CONFIG_DIR="''${dir}"
+        exec claude "$@"
+      '';
+    };
 
   # <kind> 直下のエントリを 1 つずつ ~/.claude/<kind>/ へ配置する。
   #
@@ -74,6 +124,8 @@ let
 in
 
 {
+  home.packages = map mkAccountCommand accounts;
+
   home.file = lib.mkMerge [
     # 全セッションで読まれるユーザーレベルの指示。
     # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
@@ -110,6 +162,12 @@ in
           "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
         }
         + "\n";
+    }
+
+    # claude-<名前> のアカウント一覧。bootstrap-claude-accounts.sh がこれを読んで
+    # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
+    {
+      ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
     }
 
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
