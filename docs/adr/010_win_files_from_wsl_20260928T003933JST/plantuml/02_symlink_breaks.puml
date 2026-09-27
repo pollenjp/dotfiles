@@ -1,0 +1,25 @@
+@startuml
+' 配置先を symlink にした場合に、Orca の保存 (tmp に書いて rename) で repo と切れる様子
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequenceMessageAlign center
+skinparam participant {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+
+title 配置先を symlink にすると、Orca の保存で repo と切れる
+
+participant "Orca\n（設定画面）" as O
+participant "keybindings.json.tmp" as T
+participant "keybindings.json" as K #FFF2CC
+participant "repo の\nwin/orca/keybindings.json" as R
+
+note over K, R : 配置直後: keybindings.json は repo のファイルを指す symlink
+
+O -> T : writeFileSync（新しい中身）
+O -> K : renameSync（.tmp → keybindings.json）
+note over K #F8CECC : symlink そのものが\n実ファイルに置き換わる
+note over R : 何も書かれない\n（古い中身のまま取り残される）
+@enduml
