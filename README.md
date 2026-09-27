@@ -14,6 +14,9 @@
 
 Windows (MINGW/MSYS) は Nix が動かないので従来経路を使う。
 
+Windows 側のアプリの設定（Orca など）は repo 直下の [`win/`](./win/README.md) にある。
+WSL のマシンで、Nix 経路の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る。
+
 ## Setup（従来経路）
 
 `~/dotfiles` に clone してから実行する。

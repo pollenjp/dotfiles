@@ -205,9 +205,10 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
   `--check` (manifest の検証だけ。state が無くても動き、`jq` も要らない)
 - `# order: 90` で bootstrap の最後に走らせる。衝突の exit 1 がほかの bootstrap を
   止めないようにするため
-- CI の flake check のジョブで `bootstrap-windows-files.sh --check` を走らせる。
-  home-manager の評価では manifest を読まないので、`nix flake check` だけでは
-  manifest の誤りが switch の後まで見つからない
+- CI の lint ジョブで `bootstrap-windows-files.sh --check` を走らせ、workflow の対象パスに
+  `win/**` を足す (足さないと manifest だけを変えた PR で CI が走らない)。home-manager の
+  評価では manifest を読まないので、`nix flake check` だけでは manifest の誤りが switch の
+  後まで見つからない
 
 ### E. 旧経路 (`main.bash` の MINGW 分岐と `C:\Users\polle\dotfiles`) は今回触らない
 
@@ -229,8 +230,8 @@ Git Bash の `.bashrc`・`.gitconfig` などを配っていて、`win/` はま�
 | `nix/hosts/default.nix` | `pollenjp@wsl` を `wsl.windowsUserName` と `wsl.windowsFiles.enable = true` に。ヘッダの説明 |
 | `nix/lib/mk-home.nix` | コメントの例を合わせる (引数は変えない) |
 | `nix/scripts/bootstrap-windows-files.sh` | 新規。判定とコピー。`--force` / `--dry-run` / `--check`。`# order: 90` |
-| `.github/workflows/nix.yml` | flake check のジョブで `bootstrap-windows-files.sh --check` |
-| `nix/README.md` | 「Windows 側のファイルを配る」の節、新規マシンの手順表 (6.8)、「bootstrap の実行順」の表 (90) |
+| `.github/workflows/nix.yml` | 対象パスに `win/**` を足し、lint ジョブで `bootstrap-windows-files.sh --check` |
+| `nix/README.md` | 「Windows 側のファイルを配る」の節、新規マシンの手順表 (6.8)、「bootstrap の実行順」の表 (90) (6.7 の抜けも直す) |
 | `README.md` | Windows 側のアプリの設定は `win/` にある、と案内 |
 | `docs/adr/README.md` | 一覧に 010 |
 | `docs/adr/010_…/` | この ADR と図 |
@@ -281,20 +282,22 @@ Git Bash の `.bashrc`・`.gitconfig` などを配っていて、`win/` はま�
 
 ## 6. 検証 (Verification)
 
-`feat/TKT-31-win-files` で実施する (結果は実装の後に記入する)。テストは使い捨ての `HOME`
-で流す script で、repo には入れない (ADR 007・009 と同じく結果をここに残す)。どれも
-テストを先に書き、実装前に落ちるのを見てから通す。
+`feat/TKT-31-win-files` で実施。テストは使い捨ての `HOME` で流す script で、repo には入れて
+いない (ADR 007・009 と同じく結果をここに残す)。どれもテストを先に書き、実装前に落ちるのを
+見てから通した。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
-| 計画を作る関数 | fixture の manifest を `nix-instantiate --eval --strict --json` で評価。正常系 (3 つの変数の解決、`hint` の有無、`[[files]]` が無い manifest) と異常系 (未知の変数、`src` / `dst` の `..`、`\`、`src` が無い・ディレクトリ、未知のキー、必須キーの欠け、`dst` の重複) | (実装後に記入) |
-| bootstrap の判定 | 使い捨ての `HOME`、repo の形を真似た一時ディレクトリ、置き先を一時ディレクトリに向けた state で: state 無し / `enable = false` / `windowsHome` 無し / 新規 / 同じ (記録の有無) / repo 側の更新 / 衝突 (exit 1、置き先は変わらない、diff が出る、ほかのファイルは処理される) / `--force` / `--dry-run` (置き先も記録も変わらない) / `--check` (state と `jq` が無くても動く) | (実装後に記入) |
-| assertion | `windowsFiles.enable = true` で `windowsUserName` が無い / `wsl.enable = false` を `nix eval` | (実装後に記入) |
-| 1Password の設定が変わらない | `pollenjp@wsl` の git の `gpg.ssh.program` を変更の前後で `nix eval` して比べる | (実装後に記入) |
-| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` (CI と同じ集合) | (実装後に記入) |
-| flake / activation | `./nix/scripts/verify.sh`。配置一覧に `.local/state/dotfiles/windows-files.json` が出る | (実装後に記入) |
-| `setup.sh` の手順一覧 | `./nix/scripts/setup.sh --list` で `bootstrap-windows-files` が最後に並ぶ | (実装後に記入) |
-| 実機 | `~/dotfiles/setup --update` → `/mnt/c/Users/polle/.orca/keybindings.json` が置かれる → Orca で再読み込み → Ctrl+Alt+↑↓・Ctrl+↑↓・Ctrl+W (TKT-25 の完了条件) | (実装後に記入) |
+| 計画を作る関数 | fixture の manifest を `nix-instantiate --eval --strict --json` で評価。正常系 (3 つの変数の解決、`hint` の有無、`[[files]]` が無い manifest、空白を含む `src` / `dst`) と異常系 (未知の変数、`src` / `dst` の `..`・末尾の `/`・`\`、`src` が無い・ディレクトリ・絶対パス、未知のキー、必須キーの欠け、`hint` の型、`dst` の重複と大文字小文字だけ違う重複、知らない表、`files` の型、manifest が無い、相対パスの引数) | 27 / 27 (実装前は 0 / 27) |
+| bootstrap の判定 | 使い捨ての `HOME`、repo の形を真似た一時ディレクトリ、置き先を空白入りの一時ディレクトリに向けた state で: state 無し / `enable = false` / `windowsHome` 無し / 新規 (親ディレクトリも無い) / 2 回目は何もしない / 同じ中身で記録無し / repo 側の更新 / 衝突 (exit 1、置き先も記録も変わらない、`-` が Windows 側・`+` が repo 側の diff、取り込み方と `--force` の案内) / `--force` / 記録が無く中身が違う / 衝突があってもほかのファイルは処理する / `--dry-run` (置き先も記録も作らない) / `--dry-run` でも衝突は exit 1 / 記録が壊れている / manifest の無い checkout / 置き先がディレクトリ / `--check` (state も `jq` も無しで動く、manifest の誤りで exit 1) / 不明な引数は exit 2 | 55 / 55 (実装前に通っていたのは「何も置かない」の類の 11 項目だけ) |
+| option と state | 登録簿のホストの `windows-files.json` の中身、assertion 2 つ (`windowsUserName` が無い / `wsl.enable = false`)、`onePassword.windowsUserName` の既定と上書きと今までの書き方 | 9 / 9 (実装前は 2 / 9) |
+| 1Password の設定が変わらない | `pollenjp@wsl` の `git/config` の生成結果を変更の前に控え、後と比べる | バイト単位で同じ (上の 9 項目に含む) |
+| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` (CI と同じ集合)、workflow は `actionlint` | 指摘なし。`actionlint` は変更前からある SC2016 (info) の 1 件だけで、今回の差分からの指摘は無い |
+| manifest の検証 | `nix/scripts/bootstrap-windows-files.sh --check` | `win/manifest.toml: OK (1 件)`。`win/` を置く前は「見つかりません」で exit 1 |
+| flake / activation | `./nix/scripts/verify.sh` | `nix flake check --all-systems --no-build`・build・activate 2 回まで通過。配置一覧に `.local/state/dotfiles/windows-files.json` が出る (sandbox は非 WSL なので `{"enable":false,"version":1,"windowsHome":null}`)。最後の `~/dotfiles` 参照チェックは **main でも同じ 10 件で落ちる**既知の誤検知 |
+| `setup.sh` の手順一覧 | `./nix/scripts/setup.sh --list` と、setup が使うのと同じ awk / sed で説明と order を抜く | `bootstrap-windows-files` が bootstrap の最後に並ぶ。説明は冒頭の 1 行、order は 90 |
+| 実機の置き先への dry-run | 使い捨ての `HOME` の state を `/mnt/c/Users/polle` に向けて `--dry-run` | `[dry-run] コピー: /mnt/c/Users/polle/.orca/keybindings.json`、exit 0。Windows 側にも記録にも何も書かない |
+| 実機 | `~/dotfiles/setup --update` → `/mnt/c/Users/polle/.orca/keybindings.json` が置かれる → Orca で再読み込み → Ctrl+Alt+↑↓・Ctrl+↑↓・Ctrl+W (TKT-25 の完了条件) | merge 後に確認する (Orca の再読み込みとキー操作はユーザーの操作が要る) |
 
 ## 7. 移行・運用手順
 

@@ -434,8 +434,8 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
@@ -574,6 +574,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
+| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、ほかの bootstrap を止めない |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -600,6 +601,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
+| 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -747,21 +749,23 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 
 ```nix
 wsl = {
-  enable = true;              # WSL か
-  onePassword = {
-    enable = true;            # ホスト側 Windows の 1Password を使うか (WSL 専用)
-    windowsUserName = "polle"; # その 1Password のパスに要る Windows ユーザー名
-  };
+  enable = true;               # WSL か
+  windowsUserName = "polle";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
+  windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
+  onePassword.enable = true;   # ホスト側 Windows の 1Password を使うか（WSL 専用）
 };
 ```
 
-有効な組み合わせは次の 3 通りだけになる。
+git の署名で見ると、有効な組み合わせは次の 3 通りだけになる。
 
 | マシン | 指定 | git の署名 |
 | --- | --- | --- |
 | 非 WSL | `wsl` を書かない | 署名の設定を書き出さない |
 | WSL / 1Password 無し | `wsl.enable = true;` | 同上 |
-| WSL / 1Password 有り | 上のブロックまるごと | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+| WSL / 1Password 有り | `wsl.enable`・`windowsUserName`・`onePassword.enable` | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+
+`windowsFiles.enable` は 1Password と独立に選べる（`windowsUserName` は要る）。
+何をするかは[後述](#windows-側のファイルを配る)。
 
 登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
 これに当たる。適用時に `#` の後ろで選ぶ。
@@ -789,7 +793,9 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 階層で表現しきれない「親が false なのに子が true」は `assertions` で評価時に止まる。
 
 - `wsl.onePassword.enable` が true なのに `wsl.enable` が false
-- `wsl.onePassword.enable` が true なのに `windowsUserName` が無い
+- `wsl.onePassword.enable` が true なのに `onePassword.windowsUserName`（既定は `wsl.windowsUserName`）が無い
+- `wsl.windowsFiles.enable` が true なのに `wsl.enable` が false
+- `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
 
 ### 登録簿に載せずにマシンを足す
 
@@ -955,6 +961,43 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | --- | --- |
 | `source ~/dotfiles/vim_common/common.vim` | `source ~/.vim/common.vim` |
 | `source-file ~/dotfiles/tmux/home.tmux.conf` | `source-file ~/.tmux.conf` |
+
+## Windows 側のファイルを配る
+
+Windows 側のアプリの設定（Orca のキーバインドなど）は repo 直下の
+[`win/`](../win/README.md) に置き、WSL から `/mnt/c` 越しにコピーして配る。置き先は
+アプリ自身が書き換えるので Nix では置けず、Claude Code の `settings.json` と同じく
+「Nix が値を置き、bootstrap が写す」2 段にしてある。
+
+| 段 | すること | 決める場所 |
+| --- | --- | --- |
+| `switch` | 配り先と on / off を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト） | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName`） |
+| bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
+
+**`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
+読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
+forbidden になる）。CI の `nix flake check ./nix` は `git+file` になって見えてしまうので、
+CI では通るのにマシン上の switch で落ちる。module から `../../../` で repo 直下を指さないこと。
+
+### 反映（冪等。更新時も毎回走る）
+
+```sh
+~/dotfiles/setup --update                           # switch + bootstrap をまとめて
+./nix/scripts/bootstrap-windows-files.sh            # 配る部分だけ
+./nix/scripts/bootstrap-windows-files.sh --dry-run  # 判定だけ見る
+./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
+```
+
+- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
+  それ以外は「このマシンは Windows 側へ配りません」と言って exit 0
+- 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
+- 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
+  sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（order 90 なので止まるのは
+  この手順だけ）。取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
+- 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
+  設定画面の「ディスクから再読み込み」が要る
+
+経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
 ## git について
 
@@ -1779,10 +1822,11 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 nix/
 ├── flake.nix              inputs / homeConfigurations / checks / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
+├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.devTracker.enable
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.devTracker.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
@@ -1793,7 +1837,8 @@ nix/
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
-│       └── bash.nix          alias 88 / 関数 24
+│       ├── bash.nix          alias 88 / 関数 24
+│       └── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
@@ -1810,5 +1855,6 @@ nix/
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
-    └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
+    ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
+    └── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
 ```
