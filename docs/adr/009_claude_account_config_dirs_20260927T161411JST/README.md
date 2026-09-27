@@ -112,8 +112,11 @@ CLAUDE.md と skill、`bootstrap-claude-*.sh` が `settings.json` へ入れる�
 - リンクを張る場所の状態ごとに扱いを決める: 無い → 張る / 正しいリンク → そのまま /
   別の先を指すリンク → 張り直して知らせる / **実体 → 触らずに警告する**
 - `skills/` などに写したリンクのうち、`~/.claude` 側から消えたものは掃除する
-- plugin は、`settings.json` の `extraKnownMarketplaces` の marketplace を足し、
-  `enabledPlugins` のうちその dir に入っていないものだけを入れる。**入れ終わった版は上げない**
+- plugin は、`enabledPlugins` (値が `true` のもの) のうちその dir に入っていないものだけを、
+  要る marketplace を足してから入れる。marketplace の元は `settings.json` の
+  `extraKnownMarketplaces`、無ければ `~/.claude/plugins/known_marketplaces.json` から引く
+  (手元の `~/.claude` にも `anthropic-agent-skills` のように `known_marketplaces.json` にだけ
+  載っている marketplace がある)。**入れ終わった版は上げない**
   (`bootstrap-claude-plugins.sh` と同じく「先端は取らない」)
 - 失敗 (状態ファイルが無い、marketplace の clone に失敗する、など) は警告して exit 0 する。
   `setup.sh` は手順が 1 つ失敗すると残りを走らせないため
@@ -217,11 +220,13 @@ exec claude "$@"
 | `settings.json` / `.claude.json` がリンク越しに書ける | 同上 (`allowSymlink`) | 書ける (コードを読んだ範囲) |
 | `plugins/` の symlink 共有 | 使い捨ての複製で `CLAUDE_CONFIG_DIR=<薄い dir> claude plugin list` | 一覧は出るが cache に `unknown` 版のコピーができる → 共有しない |
 | `plugins/` が無い薄い dir | 同上 | `No plugins installed.` (自動では入らない) |
-| コマンドの生成 | `nix build` した `claude-personal` / `claude-work` の中身、未準備のときの exit 1 | (実装後に記入) |
-| bootstrap script | 使い捨ての `HOME` で: 状態ファイル無し → exit 0 / 2 回目は変更なし / 実体を上書きしない / 別の先を指すリンクを張り直す / 消えた skill のリンクを掃除する / `synced/` や実体の skill を写さない | (実装後に記入) |
-| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` (CI と同じ集合) | (実装後に記入) |
-| flake / activation | `./nix/scripts/verify.sh` | (実装後に記入) |
-| 実機 | `setup --update` → `ls -l ~/.claude-{personal,work}` → 両方で `/login` → `/status`。`claude plugin list` が `~/.claude` と同じ一覧。plugin を入れた後も `settings.json` がリンクのまま | (実装後に記入) |
+| コマンドの生成 | `sandbox` の activationPackage をビルドし、`home-path/bin` の `claude-personal` / `claude-work` を使い捨ての `HOME` と stub の `claude` で実行。状態ファイルの中身 / 未準備なら exit 1・`claude` を起動しない・dir を作らない・手順を案内する / 準備済みなら外の `CLAUDE_CONFIG_DIR` を上書き・`ANTHROPIC_API_KEY` を外す・空白入りの引数をそのまま渡す | 21 / 21 (テストを先に書き、実装前に 17 件落ちるのを確認) |
+| bootstrap script | 使い捨ての `HOME` と stub の `claude` で 71 項目。状態ファイル無し → exit 0 / 1 回目のリンクと plugin 導入 (marketplace は `extraKnownMarketplaces` → `~/.claude` の `known_marketplaces.json` の順に引く、`false` の plugin は入れない) / 2 回目は dir の中身も `claude` の呼び出しも変わらない / 消えた skill のリンクを掃除し、自分で張ったリンクと実体の `synced/` は残す / 実体を上書きせず警告、別の先を指すリンクは張り直す / `~/.claude` 側の `settings.json`・`projects` が無ければ作る / `claude` が無い・marketplace や install が失敗しても exit 0 / 一覧は状態ファイルから読む / パスを壊す名前は飛ばす / 配列でない状態ファイルは exit 1 | 71 / 71 (実装前は 49 件落ちるのを確認) |
+| 実 CLI での plugin 導入 | 使い捨ての config dir (`settings.json` は複製への symlink) で `claude plugin marketplace add anthropics/claude-plugins-official` と `claude plugin install superpowers@claude-plugins-official -y` | 両方成功。`settings.json` はリンクのまま、リンク先の中身も変わらず、その dir の `installed_plugins.json` に入る |
+| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` (CI と同じ集合、`*.sh` 25 本) | 指摘なし。`writeShellApplication` のビルド時の shellcheck も通過 |
+| flake / activation | `./nix/scripts/verify.sh` | `nix flake check --all-systems --no-build`・build・activate 2 回まで通過。配置一覧に `.local/state/dotfiles/claude-accounts.json` が出る。最後の `~/dotfiles` 参照チェックは **main でも同じ 10 件で落ちる**既知の誤検知で、この変更は `nix/files/` を触っていない |
+| `setup.sh` の手順一覧 | `./nix/scripts/setup.sh --list` | `bootstrap-claude-accounts` が order 50 の bootstrap の後に並ぶ |
+| 実機 | merge 後に `setup --update` → `ls -l ~/.claude-{personal,work}` → 両方で `/login` → `/status`。`claude plugin list` が `~/.claude` と同じ一覧 | merge 後に確認する (`/login` はユーザーの操作が要る) |
 
 ## 7. 移行・運用手順
 
