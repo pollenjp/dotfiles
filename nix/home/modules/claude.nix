@@ -54,8 +54,9 @@
 #
 # `claude-<名前>` は CLAUDE_CONFIG_DIR=~/.claude-<名前> で claude を起動するコマンド。
 # 分けるのはログインだけで、~/.claude-<名前>/ は CLAUDE.md・settings.json・projects を
-# ~/.claude への symlink で共有し、ログインと plugins/ だけを実体で持つ。素の `claude` と
-# ~/.claude は今まで通り。
+# ~/.claude への symlink で共有し、skills/ などは中身をリンクで写す。実体で持つのは
+# ログイン (.credentials.json・.claude.json)・plugins/ と、Claude Code が実行中に書くもの
+# (history.jsonl・sessions/ など)。素の `claude` と ~/.claude は今まで通り。
 #
 # リンクを home.file で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
 # settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
@@ -74,10 +75,19 @@ let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
 
-  accounts = [
-    "personal"
-    "work"
-  ];
+  # dir 名 (~/.claude-<名前>) とコマンド名に使う。bootstrap も同じ規則で弾くので、
+  # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
+  accounts =
+    let
+      names = [
+        "personal"
+        "work"
+      ];
+      valid = n: builtins.match "[a-z0-9][a-z0-9_-]*" n != null;
+    in
+    assert lib.assertMsg (builtins.all valid names)
+      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにする (${builtins.toJSON names})";
+    names;
 
   # claude-<名前> コマンド。シェル関数ではなく PATH に置くので、bash と fish の両方から、
   # シェルを通さずに起動するもの (herdr や IDE の設定など) からも呼べる。
@@ -91,15 +101,34 @@ let
         # bootstrap が済んでいなければ起動しない。起動すると Claude Code が空の dir を作り、
         # CLAUDE.md も skill も無いまま動いてしまう (そうしてできた実体は bootstrap が触らない)。
         if [[ ! -L "''${dir}/settings.json" ]]; then
-          echo "claude-${name}: ''${dir} がまだ用意されていません。" >&2
-          echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          if [[ -e "''${dir}/settings.json" ]]; then
+            echo "claude-${name}: ''${dir}/settings.json が実ファイルです (bootstrap より先に" >&2
+            echo "  この dir で Claude Code を起動した、など)。nix/README.md「Claude Code の" >&2
+            echo "  アカウントを分ける」の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、" >&2
+            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          else
+            echo "claude-${name}: ''${dir} がまだ用意されていません。" >&2
+            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
+          fi
           exit 1
         fi
 
-        # API キーではなく、この dir で /login したアカウントで動かす
-        unset ANTHROPIC_API_KEY
+        # claude は mise 管理。`mise activate` したシェルなら PATH にあるが、シェルを
+        # 通さずに起動されたときは mise に実体を聞く (bootstrap-claude-plugins.sh と同じ)。
+        claude=$(command -v claude || true)
+        if [[ -z "''${claude}" ]] && command -v mise >/dev/null; then
+          claude=$(mise which claude 2>/dev/null || true)
+        fi
+        if [[ -z "''${claude}" ]]; then
+          echo "claude-${name}: claude が見つかりません (mise で入れる: ~/dotfiles/setup --steps bootstrap-mise)。" >&2
+          exit 127
+        fi
+
+        # この dir で /login したアカウントで動かす。/login の資格情報より優先される
+        # env (API キー・OAuth トークン) は外す
+        unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN
         export CLAUDE_CONFIG_DIR="''${dir}"
-        exec claude "$@"
+        exec "''${claude}" "$@"
       '';
     };
 
