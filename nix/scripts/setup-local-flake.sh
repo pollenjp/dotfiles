@@ -23,6 +23,7 @@
 #               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
 #               雛形の local は dotfiles.claude.devTracker.enable = false を持つ
 #               (Notion Dev Tracker を使うマシンだけ true に直す)。
+#               Notion へ書く skill の宛先 dotfiles.claude.notion.profile は null (選ぶまで止まる)。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -201,6 +202,10 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
       warn "Notion Dev Tracker を使うマシンならこのままでよい (option の既定 true が効く)。"
       warn "使わないマシンは、手で足したホストが無ければ --force で作り直す。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
+    if ! grep -q 'notion\.profile' "${flake_file}"; then
+      warn "flake.nix の local に dotfiles.claude.notion.profile がありません。"
+      warn "Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
+    fi
   else
     warn "既存の ${flake_file} が別のパスを指しています:"
     grep -n 'inputs.dotfiles.url' "${flake_file}" >&2 || true
@@ -240,6 +245,14 @@ if [[ ${write_flake} == 1 ]]; then
         # skillOverrides の両方がこの値から決まる。
         # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
         dotfiles.claude.devTracker.enable = false;
+
+        # Notion へ書く skill (pjp-dev-tracker・pjp-notion-authoring など) の宛先。
+        # 中身は private の claude-skills (skills/pjp-notion-profile/profiles.toml) にあり、
+        # ここでは名前を選ぶ ("personal" / "work")。null のままだと skill は止まる。
+        # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
+        dotfiles.claude.notion.profile = null;
+        # このマシンだけ一部を差し替えるなら (キーは profiles.toml と同じ。null はキーを消す):
+        #   dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
       };
     in
     {
