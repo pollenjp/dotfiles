@@ -23,6 +23,8 @@
 #               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
 #               雛形の local は dotfiles.claude.devTracker.enable = false を持つ
 #               (Notion Dev Tracker を使うマシンだけ true に直す)。
+#               dotfiles.claude.gitViaGh.enable は既定の true のままで、
+#               コメントアウトした false の例だけ置く (gh にログインしないマシンだけ外す)。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -240,6 +242,12 @@ if [[ ${write_flake} == 1 ]]; then
         # skillOverrides の両方がこの値から決まる。
         # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
         dotfiles.claude.devTracker.enable = false;
+
+        # Claude のセッションの git を、gh の資格情報で GitHub へ HTTPS で通すか。
+        # 本体の既定は true で、gh auth login 済みが前提 (未ログインなら setup が警告する)。
+        # gh にログインしないマシンは false にすると、今までどおり ssh を通る。
+        # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
+        # dotfiles.claude.gitViaGh.enable = false;
       };
     in
     {
