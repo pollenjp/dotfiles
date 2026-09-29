@@ -1399,7 +1399,15 @@ ssh の remote への push / fetch は、WSL では `ssh.exe`（1Password の ag
 Claude は素の `git push` を打つだけでよい。skill が打つ `git push -u origin …` も
 HTTPS になり、origin 名のまま通るので `origin/<branch>` も普段どおり進む。
 
-**前提は `gh auth login` 済みであること。** 未ログインなら bootstrap が警告する。
+読み替わるのは `git@github.com:` と `ssh://git@github.com/` で始まる URL だけ。ssh の
+ホスト別名（`~/.ssh/config` の `Host` で付けた名前）や `gist.github.com` の remote は
+今までどおり ssh を通る。別名は別アカウントの鍵を使うためのものなので、gh の token
+（1 アカウント分）に寄せないのはむしろ都合がよい。
+
+**前提は gh が入っていて `gh auth login` 済みであること。** gh が無い・未ログインなら
+bootstrap が警告し、`setup` の最後のまとめ（残りの手作業）にも出す。git の設定ファイルに
+別の credential helper があるときも警告する（gh より先に呼ばれ、gh の token がそちらにも
+保存されるため）。
 gh にログインしないマシンは option を false にすると、今までどおり ssh を通る。
 
 ```nix
@@ -1474,8 +1482,9 @@ config を **config ファイルより優先する**。そのため効き方が�
 - `git commit` 直打ちでも `--amend` でも `rebase --continue` でも `git tag` でも効く。
   「`--no-gpg-sign` を付ける」という指示と違い、忘れる余地が無い
 
-Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入するが、
-**既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない。
+Claude Code 自身も条件によって同じ仕組みで `credential.interactive=false` を注入するが、
+**既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない
+（このマシンの Bash tool の env には出ていない。本体に処理があることは確認済み）。
 
 冪等で、`env` の他のキーは保持する。`managed`（と `gitConfig`）のキーを持つ組は
 いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
@@ -1506,7 +1515,7 @@ GitHub へは HTTPS:
 | `CLAUDE.md` に「push は `https://` の URL で」と書く | soft な指示なので忘れうる。skill は素の `git push` を打つ。URL を直に指定する push は `origin/<branch>` を進めない |
 | global の git config（home-manager）に `insteadOf` | 自分の push も 1Password の ssh を通らなくなる |
 | `pushInsteadOf`（push だけ読み替える） | fetch / pull は ssh.exe を通るまま |
-| 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない |
+| 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない（あれば bootstrap が警告する） |
 | gh 未ログインなら HTTPS の組を書かない | 結果が option ではなくその時のログイン状態で決まる。警告だけにする |
 
 ### Claude Code の skill を host ごとに止める

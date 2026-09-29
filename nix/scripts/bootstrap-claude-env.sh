@@ -44,8 +44,9 @@
 #   global の git config      自分の push も 1Password の ssh を通らなくなる
 #   pushInsteadOf (push だけ) fetch / pull は ssh.exe を通るまま
 #
-# Claude Code 自身も同じ仕組みで credential.interactive=false を注入するが、
-# **既存の GIT_CONFIG_COUNT を読んでその先に足す**実装なので競合しない。
+# Claude Code 自身も条件によって同じ仕組みで credential.interactive=false を注入するが、
+# **既存の GIT_CONFIG_COUNT を読んでその先に足す**実装なので競合しない
+# (このマシンの Bash tool の env には出ていない。本体に処理があることは確認済み)。
 #
 # credential helper を空値で消す組 (`credential.helper=`) は入れない。Claude Code が
 # 空文字の env を渡さなかった場合、GIT_CONFIG_VALUE_<n> が欠けて git が
@@ -69,9 +70,12 @@
 #   - それ以外の組は順序を保って残し、その後ろに gitConfig を足す
 #   - 番号は 0 から振り直す (番号に穴があると git はその手前までしか読まない)
 #
-# 冪等 (既に同じなら何もしない)。gitConfig が gh を credential helper に使うのに
-# gh にログインしていなければ警告する。env は書く (option が正で、止めると
-# setup の残りが走らないため)。
+# 冪等 (既に同じなら何もしない)。gitConfig が gh を credential helper に使うなら、
+# 次のときに警告する。env は書く (option が正で、止めると setup の残りが走らないため)。
+#
+#   - gh が無い / gh にログインしていない (setup.sh の最後のまとめにも出る)
+#   - git の設定ファイルに別の credential helper がある (gh より先に呼ばれ、
+#     gh の token がそちらにも保存される)
 #
 # ## 注意
 #
@@ -114,14 +118,33 @@ if ! jq -e '
   exit 1
 fi
 
-# gh を credential helper に使うのに未ログインなら、push で資格情報を取れない。
+# gh を credential helper に使うのに gh が無い・未ログインなら、push で資格情報を取れない。
 # 登録済みでも毎回見る (後から logout していることがあるため)。
 uses_gh=0
 if jq -e 'any(.gitConfig[]; .v | startswith("!gh "))' "${generated}" >/dev/null; then
   uses_gh=1
-  if ! command -v gh &>/dev/null || ! gh auth token --hostname github.com &>/dev/null; then
+  if ! command -v gh &>/dev/null; then
+    echo "!! gh が見つかりません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
+    echo "   gh を入れて gh auth login するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+  elif ! gh auth token --hostname github.com &>/dev/null; then
     echo "!! gh にログインしていません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
     echo "   gh auth login を実行するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+  fi
+
+  # git の設定ファイル (system / global) にある credential helper は、env で足す gh より
+  # 先に呼ばれる。そちらが古い資格情報を返せば gh は使われず、gh で認証が通れば git は
+  # 全 helper に store を流すので、gh の token がそちらにも保存される (store なら平文の
+  # ~/.git-credentials)。無い前提で空値のリセットを入れていないので、あれば知らせる。
+  # env (command scope) は Claude のセッションの中から流したときの自分の組なので見ない。
+  # gh auth setup-git が書く形 (空のリセットと gh 自身) も害が無いので見ない。
+  others=$(git config --show-scope --get-regexp '^credential\..*helper$' 2>/dev/null \
+    | awk -F'\t' '$1 != "command"' \
+    | grep -vE '^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]*$|gh auth git-credential' || true)
+  if [[ -n ${others} ]]; then
+    echo "!! git の設定ファイルに credential helper があります。Claude の git では gh より先に呼ばれ、" >&2
+    echo "   gh で認証が通ると gh の token がそちらにも保存されます (store なら平文の ~/.git-credentials):" >&2
+    sed 's/\t/ /; s/^/     /' <<<"${others}" >&2
+    echo "   外すか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
   fi
 fi
 

@@ -238,7 +238,9 @@ in
     #
     #   managed    bootstrap が面倒を見るキー。env にあるこのキーの組はいったん全部外し、
     #              gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
-    #              消えるよう、option の値によらず両方の組のキーを載せる
+    #              消えるよう、option の値によらず両方の組のキーを載せる。
+    #              使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
+    #              組が残り続ける)
     #   gitConfig  入れる組
     {
       ".local/state/dotfiles/claude-env.json".text =

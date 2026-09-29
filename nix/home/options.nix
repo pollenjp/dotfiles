@@ -60,7 +60,8 @@
         通っても 1Password の承認ダイアログで止まる。gh は HTTPS の API なので
         どちらにも依らない。
 
-        前提は `gh auth login` 済みであること (未ログインなら bootstrap が警告する)。
+        前提は gh が入っていて `gh auth login` 済みであること (gh が無い・未ログインなら
+        bootstrap が警告し、setup の最後のまとめにも出す)。
         token に workflow scope が無いと、`.github/workflows/` を変える push を
         GitHub が拒否する (`gh auth refresh -h github.com -s workflow` で足す)。
 
