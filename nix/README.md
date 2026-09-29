@@ -1522,6 +1522,8 @@ local = {
 - profile が `null`（雛形の既定）で override も空なら、skill は「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため
 - override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `devTracker.enable = true` なのに profile も override も無いマシンでは、switch のときに警告が出る
+  （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
 
 #### 確認
 

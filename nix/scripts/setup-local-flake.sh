@@ -199,8 +199,8 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
       warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
-      warn "Notion Dev Tracker を使うマシンならこのままでよい (option の既定 true が効く)。"
-      warn "使わないマシンは、手で足したホストが無ければ --force で作り直す。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
+      warn "local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、Notion へ書く skill は止まる。"
+      warn "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
     if ! grep -q 'notion\.profile' "${flake_file}"; then
       warn "flake.nix の local に dotfiles.claude.notion.profile がありません。"

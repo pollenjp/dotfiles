@@ -1658,11 +1658,14 @@ post_notes() {
     note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
   elif ! grep -q 'hostsWith' "${flake_dir}/flake.nix"; then
     # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
-    # ここで知らせる。使うマシンでは何もしなくてよい (setup-local-flake.sh の警告と同じ)。
+    # ここで知らせる (setup-local-flake.sh の警告と同じ)。
     note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
-    note '        Notion Dev Tracker を使うマシンならそのままでよい (option の既定 true)。'
-    note '        使わないマシンは、手で足したホストが無ければ次で作り直す:'
+    note '        local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、'
+    note '        Notion へ書く skill は止まる。手で足したホストが無ければ次で作り直して local に書く:'
     note "          ${script_dir}/setup-local-flake.sh --force"
+  elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
+    note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
+    note '        Notion へ書く skill は宛先が決まらず止まる。README「Notion の宛先を host ごとに選ぶ」の形で足す。'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }

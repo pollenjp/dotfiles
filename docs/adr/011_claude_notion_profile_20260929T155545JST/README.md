@@ -48,7 +48,8 @@ workspace の id・Dev Tracker の場所・既定の親ページ・Scan Data DB 
 | ファイル | 変更 |
 | --- | --- |
 | `nix/home/options.nix` | `dotfiles.claude.notion.{profile,override}` |
-| `nix/home/modules/claude.nix` | `~/.local/state/dotfiles/claude-notion.json` を書く |
+| `nix/home/modules/claude.nix` | `~/.local/state/dotfiles/claude-notion.json` を書く。Dev Tracker を使うのに宛先が未設定なら `warnings` を出す |
+| `nix/scripts/setup.sh` | `--update` の最後の案内を「local が無いと宛先を選べず止まる」に直し、`notion.profile` の無い flake.nix も知らせる |
 | `nix/scripts/setup-local-flake.sh` | 雛形の `local` に `dotfiles.claude.notion.profile = null;` と override の例。既存の flake.nix に無ければ警告 |
 | `nix/lib/mk-home.nix`・`nix/hosts/default.nix` | `claude.notion.profile` のコメント |
 | `nix/README.md` | 「Notion の宛先を host ごとに選ぶ」節、配置の表 |
@@ -67,7 +68,8 @@ workspace の id・Dev Tracker の場所・既定の親ページ・Scan Data DB 
 
 - 良くなること: public に出るのは option 2 つと JSON の置き場所だけ。宛先のキーを足すときは `claude-skills` だけ直せばよい。値がファイルで渡るので、どの起動経路でも同じ宛先になる
 - 注意: override のキーの綴りは Nix の評価では捕まらず、skill が使うときに resolver が止める
-- 注意: 選んでいないマシン（雛形のまま）では Notion へ書く skill が止まる。止まったら `local` に `profile` を書いて switch する
+- 注意: 選んでいないマシン（雛形のまま）では Notion へ書く skill が止まる。止まったら `local` に `profile` を書いて switch する。Dev Tracker を使うマシン（`devTracker.enable = true`）では switch のときに警告が出る
+- 注意: 登録簿のホストは profile を持たないので、`nix flake check`（CI）と `verify.sh` の評価でも同じ警告が trace として出る。失敗にはならない
 
 ## 6. 検証 (Verification)
 
@@ -76,8 +78,9 @@ workspace の id・Dev Tracker の場所・既定の親ページ・Scan Data DB 
 | `nix/scripts/verify.sh`（flake check・sandbox の activate・冪等性） | ✅ flake check・sandbox の build・配置の一覧（`claude-notion.json` が出る）・activate・冪等性まで通過。最後の段（`nix/files/` の `dotfiles/` の grep）は main でも同じ 10 行が当たって落ちる既知の誤検知で、この変更は `nix/files/` に触れていない |
 | nixfmt / shfmt / shellcheck | ✅ |
 | 既定（`local` 無し）の `claude-notion.json` | ✅ `{"override":{},"profile":null}` |
-| `local` で profile と override を当てた `claude-notion.json` | ✅ `{"override":{"devTracker":{"hub":"3e379149a66f819bbe10ee205b6a9a89"},"scanData":null},"profile":"personal"}` |
+| `local` で profile と override を当てた `claude-notion.json` | ✅ `{"override":{"devTracker":{"hub":"0123456789abcdef0123456789abcdef"},"scanData":null},"profile":"personal"}` |
 | profile に `"Work"` を入れると評価で落ちる | ✅ `is not of type` |
+| `config.warnings`（登録簿の `pollenjp@laptop`） | ✅ 未設定なら警告 1 件、`profile = "personal"` を当てると `[]`、`devTracker.enable = false` なら `[]` |
 | 雛形から作ったローカル flake が評価でき、`notion.profile` の無い flake.nix で警告が出る | ✅ |
 
 ## 7. 移行・運用手順
