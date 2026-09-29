@@ -20,6 +20,11 @@
     ripgrep
 
     fzf
+    # GitHub CLI (mise では github-cli)。Claude の git の credential helper
+    # (dotfiles.claude.gitViaGh.enable、modules/claude.nix) と pjp-dev-tracker が使う。
+    # programs.gh は使わない。~/.config/gh/config.yml を store に置くと gh 自身が
+    # 書けなくなり、gitCredentialHelper は自分のターミナルの git まで gh に向けるため。
+    gh
     ghq
     jq
     watchexec

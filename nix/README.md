@@ -1404,7 +1404,9 @@ HTTPS になり、origin 名のまま通るので `origin/<branch>` も普段ど
 今までどおり ssh を通る。別名は別アカウントの鍵を使うためのものなので、gh の token
 （1 アカウント分）に寄せないのはむしろ都合がよい。
 
-**前提は gh が入っていて `gh auth login` 済みであること。** gh が無い・未ログインなら
+**前提は `gh auth login` 済みであること。** gh 自体は `home/modules/packages.nix` が入れる
+（以前は mise の `github-cli` で入れていた。mise 側が残っていても動き、PATH の先にある方が
+使われる）。gh が無い・未ログインなら
 bootstrap が警告し、`setup` の最後のまとめ（残りの手作業）にも出す。git の設定ファイルに
 別の credential helper があるときも警告する（gh より先に呼ばれ、gh の token がそちらにも
 保存されるため）。

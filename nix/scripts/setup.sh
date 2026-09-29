@@ -1649,7 +1649,7 @@ post_notes() {
     gh_problem=$(claude_env_gh_problem || true)
     if [[ -n ${gh_problem} ]]; then
       note "Claude の git は gh の資格情報で GitHub へ通す設定だが、${gh_problem}。"
-      note '        gh を用意して gh auth login するか、ローカル flake の local で'
+      note '        gh (packages.nix が入れる) で gh auth login するか、ローカル flake の local で'
       note '        dotfiles.claude.gitViaGh.enable = false にする。'
     fi
   fi

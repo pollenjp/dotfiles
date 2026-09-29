@@ -125,7 +125,8 @@ if jq -e 'any(.gitConfig[]; .v | startswith("!gh "))' "${generated}" >/dev/null;
   uses_gh=1
   if ! command -v gh &>/dev/null; then
     echo "!! gh が見つかりません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
-    echo "   gh を入れて gh auth login するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+    echo "   gh は packages.nix が入れます。home-manager switch の後に gh auth login するか、" >&2
+    echo "   このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
   elif ! gh auth token --hostname github.com &>/dev/null; then
     echo "!! gh にログインしていません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
     echo "   gh auth login を実行するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
