@@ -595,7 +595,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
-| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude の commit を無署名にする env 登録（[後述](#claude-の-commit-を無署名にする)） |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
@@ -855,6 +855,11 @@ home-manager switch --flake ~/dotfiles#tmp
 既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
 （何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
 
+`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git は gh の資格情報で GitHub へ
+HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
+置いてある。gh にログインしないマシンだけ外す
+（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
+
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
@@ -998,7 +1003,8 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 よい（git の読み込み順により home-manager の設定を上書きできる）。
 
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
-止まるため。[Claude の commit を無署名にする](#claude-の-commit-を無署名にする)を参照。
+止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
+gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
 
 ## ssh について
 
@@ -1360,27 +1366,103 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
 
-### Claude の commit を無署名にする
+### Claude のセッションだけ git の設定を変える
+
+Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
+ターミナルの git は変わらない。
+
+- **commit を無署名にする**（いつも）
+- **GitHub へは gh の資格情報（HTTPS）で通す**（host option `dotfiles.claude.gitViaGh.enable`、既定 true）
+
+#### commit を無署名にする
 
 このマシンの git は 1Password の `op-ssh-sign` で署名する（[前述](#git-について)）。
 署名のたびにホスト側 Windows の 1Password が承認ダイアログを出すため、Claude に
 commit させるとそこで止まる。**Claude のセッションからの commit だけ**署名を外す。
+tag も同じダイアログで止まるので併せて落とす。
+
+> ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
+> commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+
+#### GitHub へは gh の資格情報（HTTPS）で通す
+
+ssh の remote への push / fetch は、WSL では `ssh.exe`（1Password の agent）を通る
+（[ssh について](#ssh-について)）。そのため interop が外れると `Exec format error` で落ち、
+通っても 1Password の承認ダイアログで止まる。gh は HTTPS の API で動くのでどちらにも依らない。
+そこで Claude のセッションでは、GitHub の ssh の URL を https に読み替え、資格情報を gh から取る。
+
+| git の設定 | 値 | 効き方 |
+| --- | --- | --- |
+| `url.https://github.com/.insteadOf` | `git@github.com:` と `ssh://git@github.com/` | fetch と push の両方で URL を読み替える。origin の URL は書き換えない |
+| `credential.https://github.com.helper` | `!gh auth git-credential` | gh の token を git に渡す |
+
+Claude は素の `git push` を打つだけでよい。skill が打つ `git push -u origin …` も
+HTTPS になり、origin 名のまま通るので `origin/<branch>` も普段どおり進む。
+
+**前提は `gh auth login` 済みであること。** 未ログインなら bootstrap が警告する。
+gh にログインしないマシンは option を false にすると、今までどおり ssh を通る。
+
+```nix
+# ~/dotfiles/flake.nix の local（このマシンだけ）
+local = {
+  dotfiles.claude.gitViaGh.enable = false;
+};
+
+# または登録簿 hosts/default.nix の mkHome
+claude.gitViaGh.enable = false;
+```
+
+> ⚠️ gh の token に **workflow scope** が無いと、`.github/workflows/` を変える push を
+> GitHub が拒否する（`refusing to allow an OAuth App to create or update workflow … without
+> 'workflow' scope`）。`gh auth refresh -h github.com -s workflow` で足す。
+> scope は自動では足さない（token の権限を広げるかは人が決める）。
 
 #### 登録（冪等。更新時も毎回走る）
 
 ```sh
-./nix/scripts/bootstrap-claude-env.sh
+~/dotfiles/setup --update                 # switch + bootstrap をまとめて
+./nix/scripts/bootstrap-claude-env.sh     # env の部分だけ
 ```
 
-`~/.claude/settings.json` の `env` へ、git の config を環境変数の形で書く。
+`switch` が望む値を `~/.local/state/dotfiles/claude-env.json` に置き
+（`home/modules/claude.nix`）、bootstrap がそれを `~/.claude/settings.json` の `env` へ
+git の config を環境変数の形で写す。settings.json は Claude Code 自身が書き換えるので
+Nix では置けない（[skill の host option](#claude-code-の-skill-を-host-ごとに止める) と同じ 2 段）。
+
+```json
+{
+  "managed": [
+    "commit.gpgsign",
+    "tag.gpgsign",
+    "url.https://github.com/.insteadOf",
+    "credential.https://github.com.helper"
+  ],
+  "gitConfig": [
+    { "k": "commit.gpgsign", "v": "false" },
+    { "k": "tag.gpgsign", "v": "false" },
+    { "k": "url.https://github.com/.insteadOf", "v": "git@github.com:" },
+    { "k": "url.https://github.com/.insteadOf", "v": "ssh://git@github.com/" },
+    { "k": "credential.https://github.com.helper", "v": "!gh auth git-credential" }
+  ]
+}
+```
+
+gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`managed` は option の値に
+よらず 4 つのまま。settings.json にはこう入る（true のとき）。
 
 ```json
 "env": {
-  "GIT_CONFIG_COUNT": "2",
+  "GIT_CONFIG_COUNT": "5",
   "GIT_CONFIG_KEY_0": "commit.gpgsign",
   "GIT_CONFIG_VALUE_0": "false",
   "GIT_CONFIG_KEY_1": "tag.gpgsign",
-  "GIT_CONFIG_VALUE_1": "false"
+  "GIT_CONFIG_VALUE_1": "false",
+  "GIT_CONFIG_KEY_2": "url.https://github.com/.insteadOf",
+  "GIT_CONFIG_VALUE_2": "git@github.com:",
+  "GIT_CONFIG_KEY_3": "url.https://github.com/.insteadOf",
+  "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
+  "GIT_CONFIG_KEY_4": "credential.https://github.com.helper",
+  "GIT_CONFIG_VALUE_4": "!gh auth git-credential"
 }
 ```
 
@@ -1388,21 +1470,27 @@ git は `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` で�
 config を **config ファイルより優先する**。そのため効き方がこうなる。
 
 - **Claude のセッション（Bash tool）にだけ効く。** 自分の手元のターミナルからの commit は
-  今どおり 1Password で署名される
+  今どおり 1Password で署名され、push も今どおり ssh を通る
 - `git commit` 直打ちでも `--amend` でも `rebase --continue` でも `git tag` でも効く。
   「`--no-gpg-sign` を付ける」という指示と違い、忘れる余地が無い
 
 Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入するが、
 **既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない。
 
-冪等で、`env` の他のキーは保持する。無関係な `GIT_CONFIG_*` ペアが既にあれば順序を保って
-残し、番号だけ 0 から振り直す（番号に穴があると git はその手前までしか読まない）。
+冪等で、`env` の他のキーは保持する。`managed`（と `gitConfig`）のキーを持つ組は
+いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
+3 組が消える。無関係な `GIT_CONFIG_*` の組は順序を保って残し、番号だけ 0 から振り直す
+（番号に穴があると git はその手前までしか読まない）。生成ファイルが無ければ（この形を
+置く世代へまだ switch していなければ）警告して飛ばす。
 
 **実行中のセッションにも入る**（このマシンでは再起動なしで反映された）。確認は
-`env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign` を実行させて
-`false` になること（自分のターミナルで実行すると `true` のまま）。入らなければ再起動する。
+`env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign`（`false`）と
+`git remote get-url --push origin`（gitViaGh なら https）を実行させる。自分のターミナルで
+実行すると `true` と ssh の URL のまま。入らなければ再起動する。
 
 #### 採らなかった案
+
+無署名:
 
 | 案 | 却下理由 |
 | --- | --- |
@@ -1411,8 +1499,15 @@ Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入
 | `includeIf "gitdir:~/.herdr/worktrees/"` | worktree の外で Claude が commit すると効かず、逆に worktree で自分が commit すると無署名になる |
 | `PreToolUse` で `git commit` を deny | 効くが bash 文字列の解析（複合コマンド・クォート）が要る。env で足りる |
 
-> ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
-> commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+GitHub へは HTTPS:
+
+| 案 | 却下理由 |
+| --- | --- |
+| `CLAUDE.md` に「push は `https://` の URL で」と書く | soft な指示なので忘れうる。skill は素の `git push` を打つ。URL を直に指定する push は `origin/<branch>` を進めない |
+| global の git config（home-manager）に `insteadOf` | 自分の push も 1Password の ssh を通らなくなる |
+| `pushInsteadOf`（push だけ読み替える） | fetch / pull は ssh.exe を通るまま |
+| 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない |
+| gh 未ログインなら HTTPS の組を書かない | 結果が option ではなくその時のログイン状態で決まる。警告だけにする |
 
 ### Claude Code の skill を host ごとに止める
 
@@ -1782,13 +1877,13 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.devTracker.enable
+│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
-│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成) と claude-personal / claude-work
+│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
@@ -1806,7 +1901,7 @@ nix/
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
