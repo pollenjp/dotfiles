@@ -85,5 +85,8 @@
     username = "user";
     system = "x86_64-linux";
     homeDirectory = "/tmp/hm-sandbox";
+    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。選ばないと
+    # home/modules/claude.nix が warnings を出し、CI の「warnings が空」で落ちる。
+    claude.notion.profile = "personal";
   };
 }

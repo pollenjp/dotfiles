@@ -51,7 +51,7 @@ workspace の id・Dev Tracker の場所・既定の親ページ・Scan Data DB 
 | `nix/home/modules/claude.nix` | `~/.local/state/dotfiles/claude-notion.json` を書く。Dev Tracker を使うのに宛先が未設定なら `warnings` を出す |
 | `nix/scripts/setup.sh` | `--update` の最後の案内を「local が無いと宛先を選べず止まる」に直し、`notion.profile` の無い flake.nix も知らせる |
 | `nix/scripts/setup-local-flake.sh` | 雛形の `local` に `dotfiles.claude.notion.profile = null;` と override の例。既存の flake.nix に無ければ警告 |
-| `nix/lib/mk-home.nix`・`nix/hosts/default.nix` | `claude.notion.profile` のコメント |
+| `nix/lib/mk-home.nix`・`nix/hosts/default.nix` | `claude.notion.profile` のコメント。検証用の `sandbox` には `claude.notion.profile = "personal"` を渡す（CI の「warnings が空」を満たすため） |
 | `nix/README.md` | 「Notion の宛先を host ごとに選ぶ」節、配置の表 |
 
 ## 4. 検討した代替案
@@ -80,6 +80,7 @@ workspace の id・Dev Tracker の場所・既定の親ページ・Scan Data DB 
 | 既定（`local` 無し）の `claude-notion.json` | ✅ `{"override":{},"profile":null}` |
 | `local` で profile と override を当てた `claude-notion.json` | ✅ `{"override":{"devTracker":{"hub":"0123456789abcdef0123456789abcdef"},"scanData":null},"profile":"personal"}` |
 | profile に `"Work"` を入れると評価で落ちる | ✅ `is not of type` |
+| CI と同じ「`sandbox` の `config.warnings` が `[]`」 | ✅ `[]` |
 | `config.warnings`（登録簿の `pollenjp@laptop`） | ✅ 未設定なら警告 1 件、`profile = "personal"` を当てると `[]`、`devTracker.enable = false` なら `[]` |
 | 雛形から作ったローカル flake が評価でき、`notion.profile` の無い flake.nix で警告が出る | ✅ |
 
