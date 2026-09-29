@@ -37,11 +37,11 @@
 #
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
-#                    (フック / statusLine の登録、git の署名を切る env、
+#                    (フック / statusLine の登録、git の設定を渡す env、
 #                    skill を隠す skillOverrides) は scripts/bootstrap-claude-*.sh
-#                    がマシンごとに注入する。skillOverrides だけは望む値を
-#                    ~/.local/state/dotfiles/claude-skill-overrides.json に
-#                    Nix が置き (下記)、script はそれを写すだけにしている
+#                    がマシンごとに注入する。skillOverrides と env は望む値を
+#                    ~/.local/state/dotfiles/claude-skill-overrides.json /
+#                    claude-env.json に Nix が置き (下記)、script はそれを写すだけにしている
 #   plugins/       : 実行時に取得・更新される
 #   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
 #                    載せると CI の nix flake check も fetch できずに落ちる。
@@ -74,6 +74,38 @@
 let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
+
+  # Claude のセッション (Bash tool) にだけ渡す git の設定。1 組が
+  # GIT_CONFIG_KEY_<n> / GIT_CONFIG_VALUE_<n> の 1 対になる (並びもこのまま)。
+  #
+  #   gitConfigBase  いつも入れる。commit / tag を無署名にする (1Password の
+  #                  承認ダイアログで止まるため)
+  #   gitConfigGh    gitViaGh.enable のときだけ入れる。GitHub の ssh の URL を
+  #                  https に読み替え、資格情報を gh の token から取る
+  gitConfigBase = [
+    {
+      k = "commit.gpgsign";
+      v = "false";
+    }
+    {
+      k = "tag.gpgsign";
+      v = "false";
+    }
+  ];
+  gitConfigGh = [
+    {
+      k = "url.https://github.com/.insteadOf";
+      v = "git@github.com:";
+    }
+    {
+      k = "url.https://github.com/.insteadOf";
+      v = "ssh://git@github.com/";
+    }
+    {
+      k = "credential.https://github.com.helper";
+      v = "!gh auth git-credential";
+    }
+  ];
 
   # dir 名 (~/.claude-<名前>) とコマンド名に使う。bootstrap も同じ規則で弾くので、
   # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
@@ -197,6 +229,24 @@ in
     # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
     {
       ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
+    }
+
+    # Claude のセッションに渡す git の設定 (settings.json の env の GIT_CONFIG_*)。
+    #
+    # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+    # nix/scripts/bootstrap-claude-env.sh が写す。
+    #
+    #   managed    bootstrap が面倒を見るキー。env にあるこのキーの組はいったん全部外し、
+    #              gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
+    #              消えるよう、option の値によらず両方の組のキーを載せる
+    #   gitConfig  入れる組
+    {
+      ".local/state/dotfiles/claude-env.json".text =
+        builtins.toJSON {
+          managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
+          gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
+        }
+        + "\n";
     }
 
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
