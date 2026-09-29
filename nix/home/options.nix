@@ -6,11 +6,17 @@
 #   dotfiles.wsl.onePassword.enable              ホスト側 Windows の 1Password を使うか
 #   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
+#   dotfiles.claude.notion.profile               Notion へ書く skill の宛先のプロファイル名
+#   dotfiles.claude.notion.override              そのプロファイルの値をこのマシンだけ差し替える
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
-{ lib, ... }:
+{ lib, pkgs, ... }:
 
+let
+  # JSON にそのまま書き出せる値 (dotfiles.claude.notion.override 用)
+  jsonValue = (pkgs.formats.json { }).type;
+in
 {
   options.dotfiles.claude = {
     devTracker.enable = lib.mkOption {
@@ -37,6 +43,49 @@
         いるので、`~/dotfiles` 経由のマシンは使うところだけ true にする。
         登録簿 (hosts/default.nix) のホストを直接指すときはこの既定 (true)。
       '';
+    };
+
+    notion = {
+      profile = lib.mkOption {
+        type = lib.types.nullOr (lib.types.strMatching "[a-z0-9][a-z0-9_-]*");
+        default = null;
+        example = "personal";
+        description = ''
+          Notion へ書く skill (claude-skills の pjp-dev-tracker・pjp-notion-authoring・
+          pjp-docs-to-notion・pjp-scan-to-notion) が使う宛先のプロファイル名。
+
+          中身 (workspace の id・Dev Tracker の場所・新しいページの既定の親・Scan Data DB)
+          は private の claude-skills (skills/pjp-notion-profile/profiles.toml) が持ち、
+          ここでは名前だけを選ぶ。ページ名入りの URL を public なこのリポジトリに
+          出さないため。
+
+          null (既定) で override も空なら、skill は宛先が決まらないとして止まる
+          (黙って別の workspace へ書かないため)。ローカル flake の雛形も null を書く。
+
+          home/modules/claude.nix が ~/.local/state/dotfiles/claude-notion.json に
+          書き出し、claude-skills の resolver がそれを読む。反映は home-manager switch
+          (~/dotfiles/setup --update でもよい)。
+        '';
+      };
+
+      override = lib.mkOption {
+        type = lib.types.attrsOf jsonValue;
+        default = { };
+        example = lib.literalExpression ''
+          {
+            scanData = "https://app.notion.com/p/…";
+            devTracker = null;
+          }
+        '';
+        description = ''
+          profile の値を、このマシンだけ差し替える。キーは profiles.toml と同じ
+          (workspace.id / defaultParent / scanData / devTracker.hub など)。
+          入れ子は profile の値へ重ね、同じキーはこちらが勝ち、null はそのキーを消す。
+
+          キーの綴りはここでは検査しない (キーの形は claude-skills が持つ)。
+          skill が使うときに resolver が知らないキーとして止める。
+        '';
+      };
     };
   };
 

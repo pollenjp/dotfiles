@@ -50,6 +50,12 @@
 #   ~/.claude-<名前>/ : 下の claude-<名前> コマンドが使う dir。中身の symlink と plugin は
 #                    scripts/bootstrap-claude-accounts.sh が用意する (次節)
 #
+# ## Notion へ書く skill の宛先 (claude-notion.json)
+#
+# dotfiles.claude.notion.{profile,override} を ~/.local/state/dotfiles/claude-notion.json に
+# 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
+# (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
+#
 # ## ログインアカウントを分ける (claude-personal / claude-work)
 #
 # `claude-<名前>` は CLAUDE_CONFIG_DIR=~/.claude-<名前> で claude を起動するコマンド。
@@ -197,6 +203,18 @@ in
     # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
     {
       ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
+    }
+
+    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの上書き)。
+    #
+    # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
+    # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
+    {
+      ".local/state/dotfiles/claude-notion.json".text =
+        builtins.toJSON {
+          inherit (cfg.notion) profile override;
+        }
+        + "\n";
     }
 
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
