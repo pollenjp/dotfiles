@@ -803,6 +803,7 @@ outputs =
     # このマシンだけの設定。登録簿のホストにも、下で足したホストにも当たる。
     local = {
       dotfiles.claude.devTracker.enable = false;
+      dotfiles.claude.notion.profile = null; # "personal" / "work"
     };
   in
   {
@@ -859,6 +860,9 @@ home-manager switch --flake ~/dotfiles#tmp
 HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
 置いてある。gh にログインしないマシンだけ外す
 （[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
+
+Notion へ書く skill の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで skill が止まる）で、
+使うマシンでは `"personal"` / `"work"` を書く（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
@@ -1265,6 +1269,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
+| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1586,6 +1591,56 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 
 経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
 
+### Notion の宛先を host ごとに選ぶ
+
+Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-authoring`・
+`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、マシンごとに違う（会社のマシンは
+仕事の workspace、自宅は個人の workspace）。宛先の**名前**を host option
+**`dotfiles.claude.notion.profile`** で選び、**値**は private の `claude-skills` の
+`skills/pjp-notion-profile/profiles.toml` が持つ。
+
+| 置くもの | 場所 | 例 |
+| --- | --- | --- |
+| どのプロファイルを使うか | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
+| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ scanData = "https://app.notion.com/p/…"; }` |
+| プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
+
+値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
+
+#### 値の置き場
+
+```nix
+local = {
+  dotfiles.claude.notion.profile = "personal";
+  # このマシンだけ一部を差し替える。キーは profiles.toml と同じで、null はキーを消す
+  dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
+};
+```
+
+登録簿のホストを直接指すなら `mkHome` に `claude.notion.profile = "personal";`。
+
+#### 反映
+
+`switch` が `~/.local/state/dotfiles/claude-notion.json`（`{"override":{},"profile":"personal"}`）を置き、
+`claude-skills` の resolver がそれを `profiles.toml` と重ねる。settings.json は触らないので
+`switch` だけで揃う（`~/dotfiles/setup --update` でもよい）。
+
+- profile が `null`（雛形の既定）で override も空なら、skill は「宛先が決まらない」と止まる。
+  黙って別の workspace へ書かないため
+- override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `devTracker.enable = true` なのに profile も override も無いマシンでは、switch のときに警告が出る
+  （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
+
+#### 確認
+
+```sh
+cat ~/.local/state/dotfiles/claude-notion.json
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と出どころ
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
+```
+
+経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)。
+
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 
 ログインするアカウントを明示したいときだけ、素の `claude` の代わりに次を使う。
@@ -1888,7 +1943,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable
+│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,override}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
