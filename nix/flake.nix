@@ -72,11 +72,29 @@
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
       # 各 system には、その system 向けの設定だけを載せる。
+      #
+      # home 以外に、nix/pkgs/ の道具の unittest も載せる (Linux だけ)。トレーサの BPF と
+      # systemd の unit は root とカーネルが要るので、ここで確かめるのは純粋な部分
+      # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
       checks = forAllSystems (
         system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          unittest =
+            name:
+            pkgs.runCommand "${name}-unittest" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              cd ${./pkgs + "/${name}"}
+              PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
+              touch $out
+            '';
+        in
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          exe-exec-trace-unittest = unittest "exe-exec-trace";
+          who-is-asking-unittest = unittest "who-is-asking";
+        }
       );
 
       # 初回ブートストラップ用。
@@ -140,6 +158,15 @@
             ];
             text = builtins.readFile ./scripts/flake-lock-age.sh;
           };
+        }
+        # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
+        # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:
+        #
+        #   sudo "$(nix build --no-link --print-out-paths ./nix#exe-exec-trace)/bin/exe-exec-trace"
+        #   nix run ./nix#who-is-asking
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          exe-exec-trace = pkgs.callPackage ./pkgs/exe-exec-trace { };
+          who-is-asking = pkgs.callPackage ./pkgs/who-is-asking { };
         }
       );
 
