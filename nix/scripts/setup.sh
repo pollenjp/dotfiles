@@ -345,6 +345,11 @@ add_step chsh \
   '手順 7。/etc/shells への追記に sudo が要る。必要なときだけ。' \
   step 0
 
+add_step exe-exec-trace \
+  'WSL の .exe の起動を常時記録する system の unit' \
+  'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。sudo が要る。更新のたびに。' \
+  step 0
+
 step_count=${#step_ids[@]}
 
 sel=()
@@ -441,6 +446,8 @@ apply_preset() {
       #                     worktree を消した後に dangling で残る。ghq の決める
       #                     パス外では exit 1 になり、後続まで巻き添えにする
       #   chsh              sudo が要る。README でも「必要なら」
+      #   exe-exec-trace    sudo が要る (system の unit を /etc へ入れる)。ずれていれば
+      #                     post_notes が知らせる
       #
       # 外したいときは「カスタム」か --steps で選び直す。
       ids=(ssh-config switch)
@@ -1577,6 +1584,96 @@ step_chsh() {
   run chsh -s "${fish_path}" || return 1
 }
 
+# 手順 exe-exec-trace が扱うもの。home/modules/exe-exec-trace.nix と揃える。
+exe_exec_trace_unit=dotfiles-exe-exec-trace.service
+exe_exec_trace_gcroot=/nix/var/nix/gcroots/dotfiles-exe-exec-trace
+
+# home-manager が生成した unit (option が false なら無い) と、入れ先
+exe_exec_trace_src() { printf '%s' "${HOME}/.local/share/dotfiles/systemd/${exe_exec_trace_unit}"; }
+exe_exec_trace_dst() { printf '%s' "/etc/systemd/system/${exe_exec_trace_unit}"; }
+
+# dotfiles.wsl.exeExecTrace.enable の system の unit を、home-manager が生成したものに揃える
+# (ADR 012)。
+#
+# home-manager は system の unit を置けないので、生成された unit ファイルを sudo で
+# /etc/systemd/system へ複製する。ExecStart は store の固定パスなので、unit の store パスへ
+# GC root を張り、nix-collect-garbage で消えないようにする。option が false (unit が
+# 生成されていない) なら、入っている unit を止めて消す。
+step_exe_exec_trace() {
+  local src dst real since
+  src=$(exe_exec_trace_src)
+  dst=$(exe_exec_trace_dst)
+  if ! have systemctl; then
+    note 'systemctl が無いので飛ばします (systemd の無いマシン)。'
+    return 0
+  fi
+  if [[ ! -e ${src} ]]; then
+    if [[ ! -e ${dst} ]]; then
+      note 'option が無効で unit も入っていないので何もしない。'
+      return 0
+    fi
+    note "option が無効なので、入っている ${exe_exec_trace_unit} を止めて消します。"
+    run sudo systemctl disable --now "${exe_exec_trace_unit}" || return 1
+    run sudo rm -f "${dst}" "${exe_exec_trace_gcroot}" || return 1
+    run sudo systemctl daemon-reload || return 1
+    return 0
+  fi
+  # home-manager が置いた symlink を store の実体まで辿る (GC root はこれに張る)
+  real=$(readlink -f "${src}") || return 1
+  if cmp -s "${real}" "${dst}" && [[ $(readlink "${exe_exec_trace_gcroot}" 2>/dev/null || true) == "${real}" ]]; then
+    if systemctl is-enabled --quiet "${exe_exec_trace_unit}" && systemctl is-active --quiet "${exe_exec_trace_unit}"; then
+      note "${exe_exec_trace_unit} は最新で、動いています。"
+      return 0
+    fi
+    note "${exe_exec_trace_unit} は最新ですが、止まっているので起こします。"
+  else
+    run sudo install -m 0644 "${real}" "${dst}" || return 1
+    run sudo ln -sfn "${real}" "${exe_exec_trace_gcroot}" || return 1
+    run sudo systemctl daemon-reload || return 1
+  fi
+  since=$(date +%s)
+  run sudo systemctl enable "${exe_exec_trace_unit}" || return 1
+  run sudo systemctl restart "${exe_exec_trace_unit}" || return 1
+  [[ ${dry_run} == 1 ]] && return 0
+  exe_exec_trace_wait_ready "${since}"
+}
+
+# restart は起動を待たずに返り、bcc は BPF のプログラムをコンパイルするのに数秒かかる。
+# 記録を始めた印 (トレーサが最初に出す 1 行) が journald に出るまで待つ。
+exe_exec_trace_wait_ready() {
+  local since=$1 i
+  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+    if sudo journalctl -u "${exe_exec_trace_unit}" --since "@${since}" -o cat -q 2>/dev/null \
+      | grep -q 'tracing .exe execs'; then
+      note "${exe_exec_trace_unit} が記録を始めた。読むとき:"
+      note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | exe-exec-trace --pretty"
+      return 0
+    fi
+    sleep 1
+  done
+  warn "${exe_exec_trace_unit} が ${i} 秒たっても記録を始めていません:"
+  warn "  sudo journalctl -u ${exe_exec_trace_unit} -n 30"
+  return 1
+}
+
+# 生成された unit と入っている unit のずれ。揃っていれば何も出さない。
+# post_notes (手順を選ばなかったとき) の案内にだけ使う。
+exe_exec_trace_drift() {
+  local src dst
+  src=$(exe_exec_trace_src)
+  dst=$(exe_exec_trace_dst)
+  have systemctl || return 0
+  if [[ -e ${src} ]]; then
+    if [[ ! -e ${dst} ]]; then
+      echo 'unit がまだ入っていない'
+    elif ! cmp -s "${src}" "${dst}"; then
+      echo '入っている unit が古い (トレーサを更新した)'
+    fi
+  elif [[ -e ${dst} ]]; then
+    echo 'option を false にしたが unit が残っている'
+  fi
+}
+
 run_step() {
   case $1 in
     nix-install) step_nix_install ;;
@@ -1586,6 +1683,7 @@ run_step() {
     flake-update) step_flake_update ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
+    exe-exec-trace) step_exe_exec_trace ;;
     bootstrap-*) step_script "$1.sh" ;;
     *)
       warn "未実装の手順: $1"
@@ -1643,7 +1741,7 @@ claude_env_gh_problem() {
 
 # 自動化できない手順 (0 / 5 / 7) と、次にやることを出す
 post_notes() {
-  local extra gh_problem
+  local extra gh_problem drift
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
   if is_selected bootstrap-claude-env; then
     gh_problem=$(claude_env_gh_problem || true)
@@ -1664,6 +1762,13 @@ post_notes() {
   fi
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
+  fi
+  if ! is_selected exe-exec-trace; then
+    drift=$(exe_exec_trace_drift || true)
+    if [[ -n ${drift} ]]; then
+      note ".exe の起動を記録する system の unit: ${drift}。"
+      note '        --steps exe-exec-trace で揃える (sudo が要る。ADR 012)。'
+    fi
   fi
   if is_selected flake-update; then
     note 'flake.lock を更新した。動作を確認したら commit する:'
