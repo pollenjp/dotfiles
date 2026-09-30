@@ -1623,10 +1623,36 @@ mise_extra_tools() {
   ' "${f}"
 }
 
+# Claude の git を gh の資格情報で通す設定 (dotfiles.claude.gitViaGh.enable) なのに
+# gh が使えない理由。使えるなら何も出さない。
+#
+# bootstrap-claude-env.sh も同じ警告を出すが、手順の途中に 1 度出るだけで結果は ✔ になり
+# 埋もれる。後で Claude の push が「could not read Username」で落ちても gh と結び付け
+# にくいので、最後のまとめにも残すためにだけ使う。
+claude_env_gh_problem() {
+  local f="${HOME}/.local/state/dotfiles/claude-env.json"
+  [[ -r ${f} ]] || return 0
+  command -v jq &>/dev/null || return 0
+  jq -e 'any(.gitConfig[]?; .v | startswith("!gh "))' "${f}" &>/dev/null || return 0
+  if ! command -v gh &>/dev/null; then
+    echo 'gh が見つからない'
+  elif ! gh auth token --hostname github.com &>/dev/null; then
+    echo 'gh にログインしていない'
+  fi
+}
+
 # 自動化できない手順 (0 / 5 / 7) と、次にやることを出す
 post_notes() {
-  local extra
+  local extra gh_problem
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
+  if is_selected bootstrap-claude-env; then
+    gh_problem=$(claude_env_gh_problem || true)
+    if [[ -n ${gh_problem} ]]; then
+      note "Claude の git は gh の資格情報で GitHub へ通す設定だが、${gh_problem}。"
+      note '        gh (packages.nix が入れる) で gh auth login するか、ローカル flake の local で'
+      note '        dotfiles.claude.gitViaGh.enable = false にする。'
+    fi
+  fi
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)
     if [[ -n ${extra} ]]; then

@@ -25,10 +25,11 @@
   # Claude Code まわりのマシン固有設定 (dotfiles.claude にそのまま入る)。
   #
   #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
+  #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の宛先 (claude-skills の profiles.toml の名前)
   #
-  # 省略すれば既定 (使う)。ローカル flake (~/dotfiles/flake.nix) の雛形は
-  # 登録簿のホストにも当たる module で false にしているので、そちら経由の
+  # 省略すれば既定 (どちらも true)。ローカル flake (~/dotfiles/flake.nix) の雛形は
+  # 登録簿のホストにも当たる module で devTracker を false にしているので、そちら経由の
   # マシンでは雛形側を見ること。
   claude ? { },
   modules ? [ ],

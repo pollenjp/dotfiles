@@ -11,6 +11,8 @@
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
+#                   claude.gitViaGh.enable = false で、Claude の git を gh の資格情報 (HTTPS)
+#                   ではなく ssh で GitHub へ通すマシンにする (既定は gh。gh auth login が前提)。
 #                   claude.notion.profile で Notion へ書く skill の宛先のプロファイルを選ぶ (既定は null)。
 #                   会社のマシンのように public に載せたくない差分は、この登録簿ではなく
 #                   ローカル flake (~/dotfiles/flake.nix) の local module に書く。雛形は
