@@ -51,6 +51,9 @@ sudo を使うのは setup の手順 7 (`chsh` のための `/etc/shells`) だ�
 ヘッダ (WSL のカーネルは `CONFIG_IKHEADERS=m`) を読むための `modprobe kheaders` に使う。
 Linux の system だけ、flake の `packages` にも出す。
 
+BPF とカーネルに触らない純粋な部分 (記録の組み立て・整形・`who-is-asking` の対の取り方と木) は
+unittest にし、flake の `checks` に載せる (Linux だけ)。CI の `nix flake check` で毎回流れる。
+
 ### B. option が true のとき、home-manager が unit を生成する
 
 `dotfiles.wsl.exeExecTrace.enable` (既定 false、`wsl.enable` のときだけ意味を持つ) を足す。
@@ -73,6 +76,8 @@ true のとき、home-manager は次の 2 つを置く。
   (止まっていれば起こす)
 - option が false: unit が入っていれば `disable --now` して、unit と GC root を消す
 
+restart の後は、トレーサが記録を始めた印が journald に出るまで最大 20 秒待つ (bcc が BPF の
+プログラムをコンパイルするのに数秒かかり、失敗しても restart 自体は成功して返るため)。
 setup の最後に、生成された unit と入っている unit がずれていれば知らせる (手順を打ち直す合図)。
 
 ### D. 記録は journald に 1 行 1 イベントの JSON で残す
@@ -96,7 +101,8 @@ home-manager switch ──生成──> ~/.local/share/dotfiles/systemd/dotfiles
 ~/dotfiles/setup --steps exe-exec-trace   (sudo)
   ├─ 複製    → /etc/systemd/system/dotfiles-exe-exec-trace.service
   ├─ GC root → /nix/var/nix/gcroots/dotfiles-exe-exec-trace
-  └─ systemctl daemon-reload / enable / restart
+  ├─ systemctl daemon-reload / enable / restart
+  └─ 記録を始めた印が journald に出るまで待つ (最大 20 秒)
 
 systemd (root) ── exe-exec-trace --json ──> journald
 journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
@@ -106,15 +112,17 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 
 | ファイル | 変更 |
 | --- | --- |
-| `nix/pkgs/exe-exec-trace/exe-exec-trace.py` | 新規。TKT-54 の試作に、journald の記録を読む `--pretty` を足したもの |
+| `nix/pkgs/exe-exec-trace/exe_exec_trace.py` | 新規。TKT-54 の試作に、journald の記録を読む `--pretty` を足したもの。bcc はトレースするときだけ読み込む |
+| `nix/pkgs/exe-exec-trace/test_exe_exec_trace.py` | 新規。記録の組み立て・整形・`--pretty` の unittest (12 件) |
 | `nix/pkgs/exe-exec-trace/default.nix` | 新規。`writeShellApplication` で包む |
-| `nix/pkgs/who-is-asking/who-is-asking.sh` | 新規。TKT-54 の試作 |
+| `nix/pkgs/who-is-asking/who_is_asking.py` | 新規。TKT-54 の試作 (bash に埋め込んでいた Python) を、テストできる関数に分けたもの |
+| `nix/pkgs/who-is-asking/test_who_is_asking.py` | 新規。対の取り方と木の unittest (18 件)。データは TKT-54 の実機のプロセス表を縮めたもの |
 | `nix/pkgs/who-is-asking/default.nix` | 新規。`writeShellApplication` で包む (runtimeInputs は python3) |
 | `nix/home/modules/exe-exec-trace.nix` | 新規。unit の生成と PATH への配置 |
 | `nix/home/options.nix` | `dotfiles.wsl.exeExecTrace.enable` を足す |
 | `nix/home/default.nix` | 上のモジュールを読み込む |
 | `nix/hosts/default.nix` / `nix/lib/mk-home.nix` | `pollenjp@wsl` で true にし、説明を足す |
-| `nix/flake.nix` | Linux の `packages` に 2 つを足す |
+| `nix/flake.nix` | Linux の `packages` に 2 つを、`checks` に 2 つの unittest を足す |
 | `nix/scripts/setup.sh` | 手順 `exe-exec-trace` と、最後のずれの知らせを足す |
 | `nix/README.md` | 運用手順 (有効にする・入れる・読む・外す) を足す |
 
@@ -129,6 +137,7 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 | user の unit にしてケーパビリティを渡す | user の unit は capability を得られない。python に file capability を付けるのは影響が広すぎる |
 | JSONL ファイルに書く | ローテーションを自前で持つことになる |
 | npiperelay + ログ付き agent プロキシ | agent への要求ごとに PID (`SO_PEERCRED`) が取れるが、1Password の表示が `npiperelay.exe` になり、ADR 004 の経路を作り直すことになる |
+| BPF を build 時にコンパイルする (libbpf の CO-RE) | 実行時に clang と LLVM が要らなくなり閉包が小さくなるが、ローダーを C などで書き直すことになり、試作 (bcc) から離れる。閉包の 1.5 GiB が問題になったら検討する |
 
 ## 5. 影響 (Consequences)
 
@@ -139,23 +148,63 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 
 ### 注意が必要なこと
 
-- option を true にした WSL のマシンは、閉包が 170 MiB ほど増える (bcc と python)
+- option を true にした WSL のマシンは、閉包が約 1.5 GiB 増える (bcc 158 MiB・clang 813 MiB・
+  LLVM 540 MiB)。bcc は実行時に BPF を clang でコンパイルするので、clang と LLVM を丸ごと持つ。
+  CI の `nix flake check` も `pollenjp@wsl` を build するので、これを binary cache から取る
 - トレーサを更新したら `--steps exe-exec-trace` を打ち直す。打つまでは古い版が動き続ける
   (setup の最後に知らせる)
 - root で python と bcc が動く。実行するのは store の固定パスだけにしている
 - CI の閉包スキャンは `sandbox` (WSL ではない) だけが対象なので、bcc は照合されない
-- 起動のたびに bcc が BPF のプログラムを clang でコンパイルするので、数秒 CPU を使う
+- 起動のたびに bcc が BPF のプログラムを clang でコンパイルするので、数秒 CPU を使う (実測 3.9 秒)。
+  常駐中のメモリは約 160 MB (LLVM を読み込んだまま)
 - 他ディストロの起動は、祖先が comm と PID だけになる (その `/proc` は見えない)
 - 親が先に終了した要求は、祖先がセッションの `/init` で途切れる (fork 時点の親は追っていない)
 
 ## 6. 検証 (Verification)
 
-(実装後に書く。予定は次のとおり)
+2026-09-30〜10-01 に、この PC (Windows 11 + WSL 2.7.14 の Ubuntu-24.04、カーネル
+6.18.33.2-microsoft-standard-WSL2) で確かめた。
 
-- `nix flake check` (全 system の評価と、x86_64-linux の build)・nixfmt・shfmt・shellcheck
-- worktree の版をこの PC に当て、`--steps exe-exec-trace` で unit を入れて、agent を使わない
-  `ssh.exe` の起動が journald に祖先付きで残ることを見る
-- `--pretty` の表示、再度打ったときに何もしないこと、option を false にしたときに外れること
+### テストと CI 相当の検査
+
+| 検査 | 結果 |
+| --- | --- |
+| unittest (flake の `checks`、Nix のサンドボックスの python 3.14) | `exe-exec-trace` 12 件・`who-is-asking` 18 件が通る |
+| home module (`nix eval` / `nix build`) | `pollenjp@wsl` に unit と 2 つのコマンド、`pollenjp@wsl-no-1password` に `who-is-asking` だけ、`sandbox` にはどちらも入らない。`wsl.enable` が false のまま option だけ true にすると assertion で止まる。unit の `ExecStart` は store の固定パス |
+| setup の手順 (`--dry-run`) | `--list` に出る。`--update` では走らない。入れるときの sudo のコマンドが並ぶ。option が無効で unit も無ければ何もしない |
+| `nix flake check --all-systems --no-build` / `nix flake check` (x86_64-linux の build) | 通る |
+| nixfmt / shfmt / shellcheck / `sandbox` の warnings が空 | 通る |
+
+unittest と home module と setup の手順は、実装より先に確かめ方を書き、落ちるのを見てから実装した。
+
+### 実機
+
+1. ローカル flake の `dotfiles` 入力を worktree に差し替えて (`--override-input dotfiles path:<worktree>/nix`)
+   home を build し、`activate` した。閉包の差分は bcc・clang・LLVM・python の依存と、今回の
+   2 つのコマンドと unit だけだった
+2. `setup --steps exe-exec-trace` で unit を入れると、保護設定 (`NoNewPrivileges` / `PrivateTmp` /
+   `ProtectHome=read-only` / `ProtectSystem=full`) の下でも bcc が動き、数秒で記録を始めた
+3. agent を使わない `ssh.exe` (`-o IdentityAgent=none` で `192.0.2.1` へ) を 3 通り起動すると、
+   どれも journald に祖先付きで残った
+
+   | 起動の仕方 | 記録 |
+   | --- | --- |
+   | git から | `ssh.exe` ← git ← zsh ← claude ← herdr |
+   | `cmd.exe /c ssh.exe …` | `cmd.exe` (踏み台かもしれない .exe) ← zsh ← claude。Linux 側に `ssh.exe` は現れない |
+   | `wsl.exe -e ssh.exe …` | `wsl.exe` (踏み台かもしれない .exe) ← zsh ← claude の 0.13 秒後に、新しいセッションの `ssh.exe` (祖先は `/init` まで) |
+
+4. もう一度打つと何もしない。option が無効な状態 (`HOME` を空のディレクトリにして再現) で打つと
+   `disable --now` して unit と GC root を消す。入れ直せる。GC root からトレーサ本体まで辿れる
+5. 生成された unit と入っている unit がずれていると「残りの手作業」に出る (unit が古い /
+   option が無効なのに残っている)。揃っていれば出ない
+
+### 確かめていないこと
+
+- WSL を再起動したときに unit が起動時に上がること (`WantedBy=multi-user.target` で enable 済み。
+  WSL を止めると作業中のセッションも落ちるため)
+- `wslhost.exe` がセッションを持つ場合の `who-is-asking` の対 (タブの `wsl.exe` が先に終わったとき)
+- 他ディストロからの起動が `distro=other(…)` で残ること (他ディストロが止まっていた)
+- 1Password の承認ダイアログを伴う要求 (経路は TKT-54 で、ダイアログを出して確かめている)
 
 ## 7. 移行・運用手順
 
