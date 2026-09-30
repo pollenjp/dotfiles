@@ -347,7 +347,7 @@ add_step chsh \
 
 add_step exe-exec-trace \
   'WSL の .exe の起動を常時記録する system の unit' \
-  'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。sudo が要る。更新のたびに。' \
+  'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。中で sudo を呼ぶ。更新のたびに。' \
   step 0
 
 step_count=${#step_ids[@]}
@@ -446,7 +446,7 @@ apply_preset() {
       #                     worktree を消した後に dangling で残る。ghq の決める
       #                     パス外では exit 1 になり、後続まで巻き添えにする
       #   chsh              sudo が要る。README でも「必要なら」
-      #   exe-exec-trace    sudo が要る (system の unit を /etc へ入れる)。ずれていれば
+      #   exe-exec-trace    中で sudo を呼ぶ (system の unit を /etc へ入れる)。ずれていれば
       #                     post_notes が知らせる
       #
       # 外したいときは「カスタム」か --steps で選び直す。
@@ -1592,6 +1592,10 @@ exe_exec_trace_gcroot=/nix/var/nix/gcroots/dotfiles-exe-exec-trace
 exe_exec_trace_src() { printf '%s' "${HOME}/.local/share/dotfiles/systemd/${exe_exec_trace_unit}"; }
 exe_exec_trace_dst() { printf '%s' "/etc/systemd/system/${exe_exec_trace_unit}"; }
 
+# systemd が PID 1 として動いているか。WSL は systemd を有効にしていなくても systemctl
+# コマンド自体はあるので、コマンドの有無では判らない (sd_booted と同じ見方)。
+systemd_running() { [[ -d /run/systemd/system ]]; }
+
 # dotfiles.wsl.exeExecTrace.enable の system の unit を、home-manager が生成したものに揃える
 # (ADR 012)。
 #
@@ -1600,20 +1604,28 @@ exe_exec_trace_dst() { printf '%s' "/etc/systemd/system/${exe_exec_trace_unit}";
 # GC root を張り、nix-collect-garbage で消えないようにする。option が false (unit が
 # 生成されていない) なら、入っている unit を止めて消す。
 step_exe_exec_trace() {
-  local src dst real since
+  local src dst real
   src=$(exe_exec_trace_src)
   dst=$(exe_exec_trace_dst)
-  if ! have systemctl; then
-    note 'systemctl が無いので飛ばします (systemd の無いマシン)。'
+  # sudo を付けて打つと HOME が root のものになり、生成された unit を見失って
+  # 「option が無効」と取り違え、入っている unit を消してしまう
+  if [[ ${EUID} -eq 0 ]]; then
+    warn 'root (sudo) では打たないでください。この手順は中で sudo を呼びます。'
+    return 1
+  fi
+  if ! systemd_running; then
+    note 'systemd が動いていないので飛ばします (WSL なら /etc/wsl.conf の [boot] に systemd=true)。'
     return 0
   fi
   if [[ ! -e ${src} ]]; then
-    if [[ ! -e ${dst} ]]; then
-      note 'option が無効で unit も入っていないので何もしない。'
+    if [[ ! -e ${dst} && ! -L ${exe_exec_trace_gcroot} ]]; then
+      note '生成された unit が無く (option が無効か、まだ switch していない)、入ってもいないので何もしない。'
       return 0
     fi
-    note "option が無効なので、入っている ${exe_exec_trace_unit} を止めて消します。"
-    run sudo systemctl disable --now "${exe_exec_trace_unit}" || return 1
+    note "生成された unit が無い (option が無効か、まだ switch していない) ので、${exe_exec_trace_unit} を止めて消します。"
+    if [[ -e ${dst} ]]; then
+      run sudo systemctl disable --now "${exe_exec_trace_unit}" || return 1
+    fi
     run sudo rm -f "${dst}" "${exe_exec_trace_gcroot}" || return 1
     run sudo systemctl daemon-reload || return 1
     return 0
@@ -1631,29 +1643,16 @@ step_exe_exec_trace() {
     run sudo ln -sfn "${real}" "${exe_exec_trace_gcroot}" || return 1
     run sudo systemctl daemon-reload || return 1
   fi
-  since=$(date +%s)
   run sudo systemctl enable "${exe_exec_trace_unit}" || return 1
-  run sudo systemctl restart "${exe_exec_trace_unit}" || return 1
+  # unit は Type=notify なので、restart はトレーサが BPF を読み込み終えるまで待ち
+  # (数秒かかる)、読み込みに失敗すれば restart が失敗する
+  if ! run sudo systemctl restart "${exe_exec_trace_unit}"; then
+    warn "${exe_exec_trace_unit} を起動できませんでした: sudo journalctl -u ${exe_exec_trace_unit} -n 30"
+    return 1
+  fi
   [[ ${dry_run} == 1 ]] && return 0
-  exe_exec_trace_wait_ready "${since}"
-}
-
-# restart は起動を待たずに返り、bcc は BPF のプログラムをコンパイルするのに数秒かかる。
-# 記録を始めた印 (トレーサが最初に出す 1 行) が journald に出るまで待つ。
-exe_exec_trace_wait_ready() {
-  local since=$1 i
-  for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if sudo journalctl -u "${exe_exec_trace_unit}" --since "@${since}" -o cat -q 2>/dev/null \
-      | grep -q 'tracing .exe execs'; then
-      note "${exe_exec_trace_unit} が記録を始めた。読むとき:"
-      note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | exe-exec-trace --pretty"
-      return 0
-    fi
-    sleep 1
-  done
-  warn "${exe_exec_trace_unit} が ${i} 秒たっても記録を始めていません:"
-  warn "  sudo journalctl -u ${exe_exec_trace_unit} -n 30"
-  return 1
+  note "${exe_exec_trace_unit} が記録を始めた。読むとき:"
+  note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | exe-exec-trace --pretty"
 }
 
 # 生成された unit と入っている unit のずれ。揃っていれば何も出さない。
@@ -1662,15 +1661,19 @@ exe_exec_trace_drift() {
   local src dst
   src=$(exe_exec_trace_src)
   dst=$(exe_exec_trace_dst)
-  have systemctl || return 0
+  systemd_running || return 0
   if [[ -e ${src} ]]; then
     if [[ ! -e ${dst} ]]; then
       echo 'unit がまだ入っていない'
     elif ! cmp -s "${src}" "${dst}"; then
       echo '入っている unit が古い (トレーサを更新した)'
+    elif [[ ! -L ${exe_exec_trace_gcroot} ]]; then
+      echo 'GC root が無い (nix-collect-garbage でトレーサが消されうる)'
+    elif ! systemctl is-active --quiet "${exe_exec_trace_unit}"; then
+      echo "入っているが動いていない (理由は sudo journalctl -u ${exe_exec_trace_unit} -n 30)"
     fi
-  elif [[ -e ${dst} ]]; then
-    echo 'option を false にしたが unit が残っている'
+  elif [[ -e ${dst} || -L ${exe_exec_trace_gcroot} ]]; then
+    echo 'option を false にしたが unit か GC root が残っている'
   fi
 }
 
@@ -1767,7 +1770,7 @@ post_notes() {
     drift=$(exe_exec_trace_drift || true)
     if [[ -n ${drift} ]]; then
       note ".exe の起動を記録する system の unit: ${drift}。"
-      note '        --steps exe-exec-trace で揃える (sudo が要る。ADR 012)。'
+      note '        --steps exe-exec-trace で揃える (中で sudo を呼ぶ。ADR 012)。'
     fi
   fi
   if is_selected flake-update; then

@@ -32,6 +32,13 @@ let
   exeExecTrace = pkgs.callPackage ../../pkgs/exe-exec-trace { };
   whoIsAsking = pkgs.callPackage ../../pkgs/who-is-asking { };
 
+  # Type=notify: トレーサは BPF を読み込み終えてから READY=1 を送る。systemctl restart は
+  # それまで待ち、読み込みに失敗すれば restart 自体が失敗する (setup の手順がそれで気付く)。
+  #
+  # StartLimit*: 起動に失敗し続けたら (WSL のカーネルの更新で BPF が読み込めなくなったとき
+  # など) 諦めて failed にする。既定 (10 秒に 5 回) は RestartSec=10 では決して超えないので、
+  # 付けないと clang のコンパイルを 10 秒おきに無限に繰り返す。
+  #
   # 保護設定は、systemd の下で bcc が動くことを確かめた範囲に留めている (ADR 012 の検証)。
   #
   #   PrivateTmp          bcc はカーネルヘッダ (kheaders) を /tmp/kheaders-<release> へ展開する。
@@ -43,9 +50,12 @@ let
     Description=dotfiles: WSL から起動された Windows の .exe を祖先付きで記録する (eBPF)
     Documentation=https://github.com/pollenjp/dotfiles/blob/main/docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md
     ConditionVirtualization=wsl
+    RequiresMountsFor=/nix/store
+    StartLimitIntervalSec=10min
+    StartLimitBurst=5
 
     [Service]
-    Type=simple
+    Type=notify
     ExecStart=${exeExecTrace}/bin/exe-exec-trace --json
     Restart=on-failure
     RestartSec=10

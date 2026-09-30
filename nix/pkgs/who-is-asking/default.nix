@@ -12,6 +12,6 @@ writeShellApplication {
   name = "who-is-asking";
   runtimeInputs = [ python3 ];
   text = ''
-    exec python3 ${./who_is_asking.py} "$@"
+    exec python3 -I ${./who_is_asking.py} "$@"
   '';
 }

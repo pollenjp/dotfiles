@@ -65,10 +65,11 @@ true のとき、home-manager は次の 2 つを置く。
 
 登録簿の `pollenjp@wsl` で true にする。
 
-### C. /etc へ入れるのは setup の手順 `exe-exec-trace` (sudo が要る)
+### C. /etc へ入れるのは setup の手順 `exe-exec-trace` (中で sudo を呼ぶ)
 
 `~/dotfiles/setup --steps exe-exec-trace` が次をする。`chsh` と同じく、既定の手順
-(新規マシン・既存マシンの更新) には入れない。
+(新規マシン・既存マシンの更新) には入れない。`sudo` を付けて打つと `HOME` が root のものに
+なって生成された unit を見失う (option が無効と取り違えて消してしまう) ので、root では断る。
 
 - option が true: 生成された unit を `/etc/systemd/system/` へ複製し、unit の store パスへ
   GC root (`/nix/var/nix/gcroots/dotfiles-exe-exec-trace`) を張って、`daemon-reload` →
@@ -76,9 +77,14 @@ true のとき、home-manager は次の 2 つを置く。
   (止まっていれば起こす)
 - option が false: unit が入っていれば `disable --now` して、unit と GC root を消す
 
-restart の後は、トレーサが記録を始めた印が journald に出るまで最大 20 秒待つ (bcc が BPF の
-プログラムをコンパイルするのに数秒かかり、失敗しても restart 自体は成功して返るため)。
+unit は `Type=notify` にする。トレーサは BPF を読み込み終えてから `READY=1` を送るので、
+手順の `restart` はそれまで待ち (bcc のコンパイルに数秒かかる)、読み込みに失敗すれば `restart`
+自体が失敗する。起動に失敗し続けたら (WSL のカーネルの更新で BPF が読み込めなくなったときなど)
+10 分に 5 回で諦めて `failed` にする (`StartLimit*`。既定の 10 秒に 5 回は `RestartSec=10` では
+超えないので、付けないと clang のコンパイルを無限に繰り返す)。
+
 setup の最後に、生成された unit と入っている unit がずれていれば知らせる (手順を打ち直す合図)。
+unit が同じでも、GC root が無い・動いていないときは知らせる。
 
 ### D. 記録は journald に 1 行 1 イベントの JSON で残す
 
@@ -101,8 +107,7 @@ home-manager switch ──生成──> ~/.local/share/dotfiles/systemd/dotfiles
 ~/dotfiles/setup --steps exe-exec-trace   (sudo)
   ├─ 複製    → /etc/systemd/system/dotfiles-exe-exec-trace.service
   ├─ GC root → /nix/var/nix/gcroots/dotfiles-exe-exec-trace
-  ├─ systemctl daemon-reload / enable / restart
-  └─ 記録を始めた印が journald に出るまで待つ (最大 20 秒)
+  └─ systemctl daemon-reload / enable / restart (Type=notify なので BPF を読み込み終えるまで待つ)
 
 systemd (root) ── exe-exec-trace --json ──> journald
 journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
@@ -113,10 +118,10 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 | ファイル | 変更 |
 | --- | --- |
 | `nix/pkgs/exe-exec-trace/exe_exec_trace.py` | 新規。TKT-54 の試作に、journald の記録を読む `--pretty` を足したもの。bcc はトレースするときだけ読み込む |
-| `nix/pkgs/exe-exec-trace/test_exe_exec_trace.py` | 新規。記録の組み立て・整形・`--pretty` の unittest (12 件) |
+| `nix/pkgs/exe-exec-trace/test_exe_exec_trace.py` | 新規。記録の組み立て・整形・`--pretty`・表示の無害化の unittest (21 件) |
 | `nix/pkgs/exe-exec-trace/default.nix` | 新規。`writeShellApplication` で包む |
 | `nix/pkgs/who-is-asking/who_is_asking.py` | 新規。TKT-54 の試作 (bash に埋め込んでいた Python) を、テストできる関数に分けたもの |
-| `nix/pkgs/who-is-asking/test_who_is_asking.py` | 新規。対の取り方と木の unittest (18 件)。データは TKT-54 の実機のプロセス表を縮めたもの |
+| `nix/pkgs/who-is-asking/test_who_is_asking.py` | 新規。対の取り方と木・PowerShell の出力の読み取りの unittest (24 件)。データは TKT-54 の実機のプロセス表を縮めたもの |
 | `nix/pkgs/who-is-asking/default.nix` | 新規。`writeShellApplication` で包む (runtimeInputs は python3) |
 | `nix/home/modules/exe-exec-trace.nix` | 新規。unit の生成と PATH への配置 |
 | `nix/home/options.nix` | `dotfiles.wsl.exeExecTrace.enable` を足す |
@@ -137,6 +142,7 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 | user の unit にしてケーパビリティを渡す | user の unit は capability を得られない。python に file capability を付けるのは影響が広すぎる |
 | JSONL ファイルに書く | ローテーションを自前で持つことになる |
 | npiperelay + ログ付き agent プロキシ | agent への要求ごとに PID (`SO_PEERCRED`) が取れるが、1Password の表示が `npiperelay.exe` になり、ADR 004 の経路を作り直すことになる |
+| 名前ではなく、interop の実体 (`/init`) で絞る | 今は `bprm->filename` が `.exe` で終わるものを拾うので、`.exe` でない名前にした Windows の実行ファイルは抜ける (binfmt_misc はファイル名ではなく先頭の `MZ` で interop に回す)。exec の後の `mm->exe_file` が `/init` かで見れば名前によらず拾えるが、他ディストロの `/init` の見分けも要り、今回の対象 (隠れる気の無い呼び出し元) には要らない。隠れようとする相手まで記録したくなったら検討する |
 | BPF を build 時にコンパイルする (libbpf の CO-RE) | 実行時に clang と LLVM が要らなくなり閉包が小さくなるが、ローダーを C などで書き直すことになり、試作 (bcc) から離れる。閉包の 1.5 GiB が問題になったら検討する |
 
 ## 5. 影響 (Consequences)
@@ -159,6 +165,17 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
   常駐中のメモリは約 160 MB (LLVM を読み込んだまま)
 - 他ディストロの起動は、祖先が comm と PID だけになる (その `/proc` は見えない)
 - 親が先に終了した要求は、祖先がセッションの `/init` で途切れる (fork 時点の親は追っていない)
+- **隠れようとする相手の記録には使えない。** `.exe` でない名前にした Windows の実行ファイル、
+  `$WSL_INTEROP` のソケットを直接叩く interop、journald の流量制限を超える大量の起動では
+  抜けられる。パスワード無しで `sudo` できるマシンなら、同じユーザーのプロセスは unit ごと
+  止められる (store の固定パスにしたのは、ユーザーの書き換えられるパスを root に実行させない
+  ためで、記録を止められないようにするためではない)。記録できるのは隠れる気の無い呼び出し元
+  (普通のツールやエージェント) まで
+- 記録には argv と祖先のコマンドライン (それぞれ 1 KiB まで) が残る。`/var/log/journal` は
+  `adm` のグループで読め、`wsl --export` にも入る。表示 (`--pretty` と `who-is-asking`) では
+  制御文字を `\xNN` にして、記録される側が偽の行を差し込めないようにしている
+- コンテナや sandbox (`unshare --pid`) の中のプロセスも、トレーサの pid namespace から見える
+  番号で記録し、祖先を入れ子の外までたどる。他ディストロだけが `distro=other(…)` になる
 
 ## 6. 検証 (Verification)
 
@@ -169,9 +186,9 @@ journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
 
 | 検査 | 結果 |
 | --- | --- |
-| unittest (flake の `checks`、Nix のサンドボックスの python 3.14) | `exe-exec-trace` 12 件・`who-is-asking` 18 件が通る |
+| unittest (flake の `checks`、Nix のサンドボックスの python 3.14) | `exe-exec-trace` 21 件・`who-is-asking` 24 件が通る |
 | home module (`nix eval` / `nix build`) | `pollenjp@wsl` に unit と 2 つのコマンド、`pollenjp@wsl-no-1password` に `who-is-asking` だけ、`sandbox` にはどちらも入らない。`wsl.enable` が false のまま option だけ true にすると assertion で止まる。unit の `ExecStart` は store の固定パス |
-| setup の手順 (`--dry-run`) | `--list` に出る。`--update` では走らない。入れるときの sudo のコマンドが並ぶ。option が無効で unit も無ければ何もしない |
+| setup の手順 (`--dry-run`) | `--list` に出る。`--update` では走らない。入れるときの sudo のコマンドが並ぶ。option が無効で unit も無ければ何もしない。root で打つと断る |
 | `nix flake check --all-systems --no-build` / `nix flake check` (x86_64-linux の build) | 通る |
 | nixfmt / shfmt / shellcheck / `sandbox` の warnings が空 | 通る |
 
@@ -198,6 +215,19 @@ unittest と home module と setup の手順は、実装より先に確かめ方
 5. 生成された unit と入っている unit がずれていると「残りの手作業」に出る (unit が古い /
    option が無効なのに残っている)。揃っていれば出ない
 
+### レビューを受けて足したものの検証
+
+コードレビュー (subagent) の指摘を受けて直し、同じくこの PC で確かめた。
+
+| 直したこと | 確かめたこと |
+| --- | --- |
+| `Type=notify` と `StartLimit*` | 手順の `restart` がトレーサの `READY=1` まで待って返る。同じ `StartLimit*` の一時的な unit に `/bin/false` を 1 秒おきに起こさせると、5 回起こし直したところで諦めて `failed` になった |
+| 入れ子の pid namespace | `sudo unshare --pid --fork ping.exe` が、直す前は `pid=1 distro=other(…)` だったのが、`distro=this` で `/proc` から `unshare ← sudo ← zsh ← claude` までたどれた |
+| 動いていないときの知らせ | unit を止めると「入っているが動いていない」と出て、手順で起こし直せた |
+| root では断る | `sudo ~/dotfiles/setup --steps exe-exec-trace` が断り、動いている unit には触らない |
+| 表示の制御文字・欠けた記録・`--pretty \| head` | unittest (改行で偽の行を差し込めない・ESC が端末に届かない・欠けた記録はそのまま出す)。`head` で閉じても終了時にエラーを出さない |
+| root 無しで記録しようとしたとき | bcc を読み込む前に案内を出して終わる |
+
 ### 確かめていないこと
 
 - WSL を再起動したときに unit が起動時に上がること (`WantedBy=multi-user.target` で enable 済み。
@@ -211,7 +241,7 @@ unittest と home module と setup の手順は、実装より先に確かめ方
 ```sh
 # 有効にする (登録簿の pollenjp@wsl は true。それ以外は local で true にする)
 ~/dotfiles/setup --update
-~/dotfiles/setup --steps exe-exec-trace   # sudo が要る。更新のたびに打ち直す
+~/dotfiles/setup --steps exe-exec-trace   # 中で sudo を呼ぶ (sudo を付けない)。更新のたびに打ち直す
 
 # 読む
 journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty

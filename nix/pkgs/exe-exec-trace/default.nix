@@ -6,6 +6,8 @@
 # 記録するには root が要る。常時動かすのは systemd の system の unit
 # (home/modules/exe-exec-trace.nix が生成し、setup の手順 exe-exec-trace が入れる)。
 # 記録を読む `--pretty` は root も bcc も要らない。
+#
+# python は -I (隔離モード) で動かす。root で動くので PYTHON* の環境変数と user site を見ない。
 {
   writeShellApplication,
   python3,
@@ -19,6 +21,6 @@ writeShellApplication {
     kmod
   ];
   text = ''
-    exec python3 ${./exe_exec_trace.py} "$@"
+    exec python3 -I ${./exe_exec_trace.py} "$@"
   '';
 }

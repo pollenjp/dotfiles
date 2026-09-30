@@ -453,7 +453,7 @@ nix flake update dotfiles --flake ~/dotfiles
 | 2 `preflight-unlink` | **home-manager 自身が張った symlink まで外す**（対象パスの symlink を無条件に unlink する）。旧 `main.bash` からの移行用 |
 | 2.5 `local-flake` | `~/dotfiles/setup` を**実行元の checkout** へ張り直す（worktree から走らせると dangling で残る）。ghq の決めるパス外では `exit 1` になり後続まで止まる |
 | 7 `chsh` | `sudo` が要る。README でも「必要なら」 |
-| 8 `exe-exec-trace` | `sudo` が要る（system の unit を `/etc` へ入れる）。ずれていれば最後の「残りの手作業」が知らせる（[後述](#wsl-の-exe-の起動を常時記録する)） |
+| 8 `exe-exec-trace` | 中で `sudo` を呼ぶ（system の unit を `/etc` へ入れる）。ずれていれば最後の「残りの手作業」が知らせる（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
@@ -602,7 +602,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
-| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ。`sudo` が要る（[後述](#wsl-の-exe-の起動を常時記録する)） |
+| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -1135,12 +1135,18 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
 `local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
 **switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順で、
-`sudo` が要る。
+手順が中で `sudo` を呼ぶ。**`sudo` を付けて打たないこと**（`HOME` が root のものになり、
+生成された unit を見失うので、手順は root では断る）。
 
 ```sh
 ~/dotfiles/setup --update                 # unit ファイルを生成する (まだ何も動かない)
-~/dotfiles/setup --steps exe-exec-trace   # /etc へ入れて起こす (sudo)
+~/dotfiles/setup --steps exe-exec-trace   # /etc へ入れて起こす (中で sudo を呼ぶ)
 ```
+
+unit は `Type=notify` なので、手順の `restart` はトレーサが BPF を読み込み終えるまで待ち、
+読み込みに失敗すれば手順も失敗する。起動に失敗し続けたら（WSL のカーネルが更新されて
+BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になり、「残りの手作業」に
+「入っているが動いていない」と出る。
 
 unit の `ExecStart` は store の固定パスにしてある（root がユーザーの書き換えられるパスを
 実行しないため）。その代わり、**トレーサが更新されたら同じ手順を打ち直す。** 打つまでは
@@ -1166,10 +1172,14 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 ```
 
 - `adm` か `systemd-journal` のグループに入っていれば `sudo` は要らない
-- `ssh.exe` 以外の `.exe` には「踏み台かもしれない .exe」と付く。`wsl.exe` や `cmd.exe` を
-  経由した要求は、`ssh.exe` の祖先が新しいセッションの `/init` で途切れるので、直前に
-  起動した踏み台の祖先を見る
-- 1 行 1 イベントの JSON なので、`jq` でも読める
+- agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
+  以外には「踏み台かもしれない .exe」と付く。`wsl.exe` や `cmd.exe` を経由した要求は、
+  `ssh.exe` の祖先が新しいセッションの `/init` で途切れるので、直前に起動した踏み台の祖先を見る
+- agent に届くものだけ見るなら `exe-exec-trace --pretty --only-agent`
+- 1 行 1 イベントの JSON。`-o cat` には systemd の「Started …」のような JSON でない行も
+  混ざるので、`jq` で読むなら `jq -cR 'fromjson? | select(.agent)'` のように読めない行を飛ばす
+- 表示では、記録の中の改行や ESC などの制御文字を `\xNN` にする（記録される側が argv で
+  偽の行を差し込んだり端末を操作したりできないように）
 
 ダイアログが出ている間なら、その場で木を出す方が早い。
 
@@ -1196,6 +1206,14 @@ unit が無いので、入っている unit を止めて消す（GC root も消�
 - 他ディストロの起動も記録されるが、祖先は comm と PID だけになる（その `/proc` は見えない）
 - 親が先に終了した要求（`cmd & exit` や `nohup`）は、祖先がセッションの `/init` で途切れる。
   代わりに env（`CLAUDE_CODE_SESSION_ID` / `HERDR_PANE_ID` / `WT_SESSION`）と cwd が残る
+- **隠れようとする相手の記録には使えない。** 記録するのは名前が `.exe` で終わる実行ファイルの
+  起動だけで、`.exe` でない名前にした Windows の実行ファイル・`$WSL_INTEROP` のソケットを直接
+  叩く interop・journald の流量制限を超える大量の起動では抜けられる。パスワード無しで
+  `sudo` できるマシンなら、同じユーザーのプロセスは unit ごと止められる。記録できるのは
+  「隠れる気の無い呼び出し元」（普通のツールやエージェント）までと考える
+- 記録には argv と祖先のコマンドライン（それぞれ 1 KiB まで）が残る。`/var/log/journal` は
+  `adm` のグループで読め、`wsl --export` にも入るので、コマンドラインに秘密を渡す使い方には
+  向かない
 
 ### forward された agent を固定名で見せる
 

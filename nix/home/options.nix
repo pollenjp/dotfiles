@@ -154,7 +154,7 @@ in
         - PATH の `exe-exec-trace` (記録を読む `--pretty` 用)
 
         eBPF には root が要るので、switch だけでは動かない。unit を /etc/systemd/system へ
-        入れるのは `~/dotfiles/setup --steps exe-exec-trace` (sudo が要る)。トレーサを
+        入れるのは `~/dotfiles/setup --steps exe-exec-trace` (中で sudo を呼ぶ)。トレーサを
         更新したら打ち直す (ずれていれば setup の最後に知らせる)。false に戻して同じ
         手順を打つと、入っている unit を止めて消す。
 

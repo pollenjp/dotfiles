@@ -115,8 +115,17 @@ def tree_nodes(w, procs, pair, linux_nodes):
     return list(reversed(out))
 
 
+# ラベルの中身 (argv・コマンドライン) は要求元が決められる。改行や ESC をそのまま出すと
+# 偽の行を差し込んだり端末を操作したりできるので、表示する前に \xNN にする
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def safe(s):
+    return CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}", s)
+
+
 def cut(s, width):
-    s = s.replace("\n", " ")
+    s = safe(s)
     return s if len(s) <= width else s[: max(width - 1, 20)] + "…"
 
 
@@ -164,14 +173,18 @@ def ppid_of(pid):
     return int(m.group(1)) if m else 0
 
 
-def start_ms(pid, boot):
-    # /proc/<pid>/stat の 22 番目 (comm の後ろから数えて 20 番目) は起動からの tick 数
-    stat = (read(pid, "stat") or b"").decode(errors="replace")
+def start_ticks(stat):
+    """/proc/<pid>/stat の 22 番目 (起動からの tick 数)。comm は ")" や空白を含みうるので、
+    最後の ")" の後ろから数える (そこから 20 番目)"""
     try:
-        ticks = int(stat.rsplit(")", 1)[1].split()[19])
+        return int(stat.rsplit(")", 1)[1].split()[19])
     except (IndexError, ValueError):
         return None
-    return int((boot + ticks / os.sysconf("SC_CLK_TCK")) * 1000)
+
+
+def start_ms(pid, boot):
+    ticks = start_ticks((read(pid, "stat") or b"").decode(errors="replace"))
+    return None if ticks is None else int((boot + ticks / os.sysconf("SC_CLK_TCK")) * 1000)
 
 
 def env_of(pid):
@@ -266,6 +279,24 @@ $out = foreach ($p in Get-CimInstance Win32_Process) {
 """
 
 
+def parse_windows(text):
+    """PS の出力 (JSON) をプロセス表にする。PowerShell 自身と、キーの欠けた行は落とす"""
+    try:
+        d = json.loads(text.lstrip("\ufeff"))
+    except ValueError:
+        return {}
+    if not isinstance(d, dict):
+        return {}
+    out = {}
+    for p in d.get("procs") or []:
+        if not isinstance(p, dict) or not all(k in p for k in ("pid", "ppid", "name", "t")):
+            continue
+        if p["pid"] == d.get("self"):
+            continue
+        out[p["pid"]] = {**p, "cmd": p.get("cmd") or ""}
+    return out
+
+
 def windows_procs():
     enc = base64.b64encode(PS.encode("utf-16le")).decode()
     try:
@@ -274,11 +305,13 @@ def windows_procs():
             ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
             cwd="/mnt/c", capture_output=True, stdin=subprocess.DEVNULL, timeout=60,
         )
-        d = json.loads(r.stdout.decode("utf-8", errors="replace").lstrip("﻿"))
-    except (OSError, subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+    except (OSError, subprocess.TimeoutExpired) as e:
         print(f"(Windows 側を取れなかった: {e})\n")
         return {}
-    return {p["pid"]: p for p in d["procs"] if p["pid"] != d["self"]}
+    procs = parse_windows(r.stdout.decode("utf-8", errors="replace"))
+    if not procs:
+        print("(Windows 側を取れなかった: powershell.exe の出力を読めない)\n")
+    return procs
 
 
 # ------------------------------------------------------------------ main

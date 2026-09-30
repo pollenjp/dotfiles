@@ -188,5 +188,38 @@ class TestRender(unittest.TestCase):
         self.assertLessEqual(len(line), len("[Windows] ") + 40)
 
 
+class TestUntrustedText(unittest.TestCase):
+    def test_control_characters_are_escaped_in_labels(self):
+        line = w.render([("L", 1, "ssh.exe x\n[Windows] 999 fake\x1b[1A", None)])[0]
+        self.assertNotIn("\x1b", line)
+        self.assertNotIn("\n", line)
+
+
+class TestParseWindows(unittest.TestCase):
+    def test_reads_powershell_json_with_bom_and_drops_itself(self):
+        text = "\ufeff" + '{"self": 5, "procs": [{"pid": 5, "ppid": 1, "name": "powershell.exe", "cmd": "", "t": 1},' \
+            ' {"pid": 6, "ppid": 1, "name": "ssh.exe", "cmd": "ssh.exe -V", "t": 2}]}'
+        self.assertEqual(list(w.parse_windows(text)), [6])
+
+    def test_non_json_output_gives_nothing(self):
+        self.assertEqual(w.parse_windows("#< CLIXML\n<Objs>"), {})
+
+    def test_entries_missing_keys_are_skipped(self):
+        text = '{"self": 5, "procs": [{"pid": 6}, {"pid": 7, "ppid": 1, "name": "ssh.exe", "cmd": null, "t": 2}]}'
+        procs = w.parse_windows(text)
+        self.assertEqual(list(procs), [7])
+        self.assertEqual(procs[7]["cmd"], "")
+
+
+class TestStartTicks(unittest.TestCase):
+    def test_comm_with_parens_and_spaces(self):
+        # comm は ")" や空白を含みうるので、最後の ")" の後ろから数える
+        stat = "123 (a) b) c) S 1 123 123 0 -1 4194304 1 0 0 0 0 0 0 0 20 0 1 0 98765 0 0"
+        self.assertEqual(w.start_ticks(stat), 98765)
+
+    def test_garbage_gives_none(self):
+        self.assertIsNone(w.start_ticks(""))
+
+
 if __name__ == "__main__":
     unittest.main()

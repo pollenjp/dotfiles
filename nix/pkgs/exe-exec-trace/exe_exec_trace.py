@@ -23,6 +23,7 @@ import datetime
 import json
 import os
 import re
+import socket
 import sys
 
 PROG = r"""
@@ -46,19 +47,36 @@ struct event_t {
 BPF_PERF_OUTPUT(events);
 BPF_PERCPU_ARRAY(scratch, struct event_t, 1);
 
-/* プロセス (thread group leader) の、自分の pid namespace での PID */
+/* プロセス (thread group leader) の PID。
+   このトレーサの pid namespace (MY_PIDNS。-D で渡す) から見えるなら、そこでの値を返す。
+   コンテナや sandbox (unshare --pid) の中の入れ子のプロセスも、こちらの /proc で引ける
+   番号になり、祖先も入れ子の外までたどれる。見えなければ (他ディストロ)、そのプロセス
+   自身の namespace での値を返す。*inum には、見えたなら MY_PIDNS、でなければ自身の
+   namespace の inode 番号を入れる */
 static __always_inline u32 ns_tgid(struct task_struct *t, u32 *inum) {
     struct task_struct *leader = NULL;
     struct pid *p = NULL;
     unsigned int level = 0;
     struct upid up = {};
+    u32 ino = 0;
     bpf_probe_read_kernel(&leader, sizeof(leader), &t->group_leader);
     bpf_probe_read_kernel(&p, sizeof(p), &leader->thread_pid);
     bpf_probe_read_kernel(&level, sizeof(level), &p->level);
-    bpf_probe_read_kernel(&up, sizeof(up), &p->numbers[level & 31]);
-    if (inum) {
-        bpf_probe_read_kernel(inum, sizeof(*inum), &up.ns->ns.inum);
+    #pragma unroll
+    for (int i = 0; i < 8; i++) {
+        if (i > level)
+            break;
+        bpf_probe_read_kernel(&up, sizeof(up), &p->numbers[i]);
+        bpf_probe_read_kernel(&ino, sizeof(ino), &up.ns->ns.inum);
+        if (ino == MY_PIDNS) {
+            if (inum)
+                *inum = ino;
+            return up.nr;
+        }
     }
+    bpf_probe_read_kernel(&up, sizeof(up), &p->numbers[level & 31]);
+    if (inum)
+        bpf_probe_read_kernel(inum, sizeof(*inum), &up.ns->ns.inum);
     return up.nr;
 }
 
@@ -91,7 +109,7 @@ TRACEPOINT_PROBE(sched, sched_process_exec) {
     e->uid = bpf_get_current_uid_gid() & 0xFFFFFFFF;
     e->depth = 0;
 
-    struct task_struct *p = NULL;
+    struct task_struct *p = NULL, *pl = NULL;
     bpf_probe_read_kernel(&p, sizeof(p), &t->real_parent);
     #pragma unroll
     for (int k = 0; k < MAX_DEPTH; k++) {
@@ -99,7 +117,9 @@ TRACEPOINT_PROBE(sched, sched_process_exec) {
             break;
         u32 ppid = ns_tgid(p, NULL);
         e->anc_pid[k] = ppid;
-        bpf_probe_read_kernel(e->anc_comm[k], TASK_COMM_LEN, &p->comm);
+        /* PID は thread group leader のものなので、comm も leader から取る */
+        bpf_probe_read_kernel(&pl, sizeof(pl), &p->group_leader);
+        bpf_probe_read_kernel(e->anc_comm[k], TASK_COMM_LEN, &pl->comm);
         e->depth = k + 1;
         if (ppid <= 1)
             break;
@@ -134,6 +154,23 @@ AGENT = re.compile(r"^(ssh|ssh-add|scp|sftp|op-ssh-sign|op-ssh-sign-wsl)\.exe$",
 ENV_KEYS = ("WSL_INTEROP", "WT_SESSION", "HERDR_PANE_ID", "TMUX", "SSH_CONNECTION", "CLAUDE_CODE_SESSION_ID")
 REPARENTED = "    (親は既に終了していて、/proc の祖先は付け替え後のもの)"
 
+# argv や cmdline の 1 つの長さの上限。journald の 1 行の上限 (LineMax、既定 48K) を超えると
+# 記録が割れるのと、コマンドラインの秘密を長く残しすぎないため
+FIELD_MAX = 1024
+ARGV_MAX = 64
+
+# 記録の中身 (argv・cwd・ファイル名) は記録される側が決められる。改行や ESC をそのまま
+# 表示すると、偽の行を差し込んだり端末を操作したりできるので、表示するときに \xNN にする
+CTRL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def safe(s):
+    return CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}", str(s))
+
+
+def clip(s):
+    return s if len(s) <= FIELD_MAX else s[: FIELD_MAX - 1] + "…"
+
 
 def is_agent(exe):
     return bool(AGENT.match(exe))
@@ -142,6 +179,13 @@ def is_agent(exe):
 def stub_argv(argv):
     """interop の代理プロセスの argv は ["/init", <exe のパス>, <argv0>, <引数…>] なので先頭 2 つを落とす"""
     return argv[2:] if len(argv) >= 2 and argv[0] == "/init" else argv
+
+
+def clip_argv(argv):
+    out = [clip(a) for a in argv[:ARGV_MAX]]
+    if len(argv) > ARGV_MAX:
+        out.append(f"…(+{len(argv) - ARGV_MAX})")
+    return out
 
 
 class ProcFS:
@@ -193,41 +237,46 @@ def make_record(ev, my_pidns, proc, now):
     if ev["pidns"] != my_pidns:
         return rec  # 他ディストロの /proc は見えない
     argv = proc.argv(ev["pid"])
-    rec["argv"] = stub_argv(argv) if argv else None
-    rec["cwd"] = proc.cwd(ev["pid"])
-    rec["env"] = {k: v for k, v in proc.environ(ev["pid"]).items() if k in ENV_KEYS}
+    rec["argv"] = clip_argv(stub_argv(argv)) if argv else None
+    cwd = proc.cwd(ev["pid"])
+    rec["cwd"] = clip(cwd) if cwd else None
+    rec["env"] = {k: clip(v) for k, v in proc.environ(ev["pid"]).items() if k in ENV_KEYS}
     anc, p = [], proc.ppid(ev["pid"])
     while p > 1 and len(anc) < 20:
         a = proc.argv(p)
-        anc.append({"pid": p, "cmdline": " ".join(a).replace("\n", " ") if a else None})
+        anc.append({"pid": p, "cmdline": clip(" ".join(a)) if a else None})
         p = proc.ppid(p)
     rec["ancestry"] = anc
     return rec
 
 
 def format_record(rec):
-    """記録 1 件を人が読む形 (複数行) にする"""
-    exe = rec["exe"].rsplit("/", 1)[-1]
+    """記録 1 件を人が読む形 (複数行) にする。記録から来る文字列は safe() を通す"""
+    exe = safe(rec["exe"].rsplit("/", 1)[-1])
     mark = "" if rec.get("agent") else "  (踏み台かもしれない .exe)"
-    lines = [f"{rec['time']}  {exe}  pid={rec['pid']} uid={rec['uid']} distro={rec['distro']}{mark}"]
+    lines = [f"{safe(rec['time'])}  {exe}  pid={rec['pid']} uid={rec['uid']} distro={safe(rec['distro'])}{mark}"]
     if rec.get("argv"):
-        lines.append(f"    argv: {' '.join(rec['argv'])[:300]}")
+        lines.append(f"    argv: {safe(' '.join(rec['argv'])[:300])}")
     if rec.get("cwd"):
-        lines.append(f"    cwd : {rec['cwd']}")
+        lines.append(f"    cwd : {safe(rec['cwd'])}")
     if rec.get("env"):
-        lines.append("    env : " + " ".join(f"{k}={v}" for k, v in rec["env"].items()))
+        lines.append("    env : " + safe(" ".join(f"{k}={v}" for k, v in rec["env"].items())))
     kanc = rec.get("kernel_ancestry") or []
-    lines.append("    at exec: " + " <- ".join(f"{a['comm']}({a['pid']})" for a in kanc))
+    lines.append("    at exec: " + " <- ".join(f"{safe(a['comm'])}({a['pid']})" for a in kanc))
     anc = rec.get("ancestry") or []
     if anc and kanc and anc[0]["pid"] != kanc[0]["pid"]:
         lines.append(REPARENTED)
     for a in anc:
-        lines.append(f"      {a['pid']:<7} {(a['cmdline'] or '?')[:160]}")
+        lines.append(f"      {a['pid']:<7} {safe((a['cmdline'] or '?')[:160])}")
     return "\n".join(lines)
 
 
-def pretty(lines):
-    """journald から読んだ行を人が読む形にする。記録でない行 (起動のメッセージなど) はそのまま返す"""
+def pretty(lines, only_agent=False):
+    """journald から読んだ行を人が読む形にする。
+
+    記録でない行 (起動のメッセージなど) と、読めない記録 (形が古い・欠けている) は
+    そのまま返す (制御文字だけ \\xNN にする)。only_agent なら agent に届く .exe の記録だけ出す。
+    """
     for line in lines:
         line = line.rstrip("\n")
         if not line.strip():
@@ -235,12 +284,29 @@ def pretty(lines):
         try:
             rec = json.loads(line)
         except ValueError:
-            yield line
+            yield safe(line)
             continue
-        if isinstance(rec, dict) and "exe" in rec and "kernel_ancestry" in rec:
+        if not (isinstance(rec, dict) and "exe" in rec and "kernel_ancestry" in rec):
+            yield safe(line)
+            continue
+        if only_agent and not rec.get("agent"):
+            continue
+        try:
             yield format_record(rec)
-        else:
-            yield line
+        except (KeyError, TypeError, AttributeError):
+            yield safe(line)
+
+
+def sd_notify(msg, env=os.environ):
+    """systemd (Type=notify) に状態を知らせる。NOTIFY_SOCKET が無ければ何もしない"""
+    addr = env.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    if addr.startswith("@"):  # abstract namespace
+        addr = "\0" + addr[1:]
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as s:
+        s.connect(addr)
+        s.sendall(msg.encode())
 
 
 def trace(opts):
@@ -248,7 +314,7 @@ def trace(opts):
 
     my_pidns = os.stat("/proc/self/ns/pid").st_ino
     proc = ProcFS()
-    b = BPF(text=PROG, cflags=["-Wno-duplicate-decl-specifier"])
+    b = BPF(text=PROG, cflags=["-Wno-duplicate-decl-specifier", f"-DMY_PIDNS={my_pidns}U"])
 
     def handle(_cpu, data, _size):
         e = ct.cast(data, ct.POINTER(Event)).contents
@@ -267,6 +333,9 @@ def trace(opts):
 
     b["events"].open_perf_buffer(handle, page_cnt=64)
     print("tracing .exe execs... (Ctrl-C で終了)", file=sys.stderr, flush=True)
+    # unit は Type=notify。BPF を読み込み終えてから起動の完了を知らせるので、
+    # systemctl restart はここまで待ち、読み込みに失敗すれば restart が失敗する
+    sd_notify("READY=1")
     while True:
         try:
             b.perf_buffer_poll()
@@ -282,11 +351,19 @@ def main(argv=None):
     opts = ap.parse_args(argv)
     if opts.pretty:
         try:
-            for block in pretty(sys.stdin):
+            for block in pretty(sys.stdin, only_agent=opts.only_agent):
                 print(block, flush=True)
-        except BrokenPipeError:  # head などで途中で閉じられた
-            pass
+        except BrokenPipeError:
+            # head などで途中で閉じられた。終了時の flush でもう一度落ちないよう、出力先を捨てる
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
         return 0
+    if os.geteuid() != 0:
+        print(
+            "exe-exec-trace: 記録するには root が要る (systemd の unit か sudo で動かす)。"
+            "記録を読むだけなら --pretty に journalctl の出力を流す",
+            file=sys.stderr,
+        )
+        return 1
     return trace(opts)
 
 
