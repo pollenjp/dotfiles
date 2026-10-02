@@ -24,6 +24,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -31,7 +32,6 @@ import time
 # 1Password の agent (named pipe) か署名に届きうる .exe
 AGENT = re.compile(r"^(ssh|ssh-add|scp|sftp|op-ssh-sign|op-ssh-sign-wsl)\.exe$", re.I)
 ENV_KEYS = ("WSL_INTEROP", "WT_SESSION", "HERDR_PANE_ID", "TMUX", "SSH_CONNECTION", "CLAUDE_CODE_SESSION_ID")
-LINE = 170  # 1 行の幅の目安 (字下げ込み)
 
 # Windows 側は代理より 0.1〜0.6 秒遅れて起動するが、WSL と Windows の時計は 0.5 秒ほど
 # ずれていることがある (Windows 側が先に見えることもある)。引数の一致を優先し、
@@ -124,22 +124,25 @@ def safe(s):
     return CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}", s)
 
 
-def cut(s, width):
-    s = safe(s)
-    return s if len(s) <= width else s[: max(width - 1, 20)] + "…"
+def join_argv(argv):
+    """表示用に argv をつなぐ。1 つの引数に空白があっても区切りが分かるよう、シェルの引用を使う"""
+    return shlex.join(argv)
 
 
-def render(nodes, width=LINE):
-    """木を 1 行ずつの文字列にする。OS が切り替わる行には <== WSL interop を付ける"""
+def render(nodes):
+    """木を 1 行ずつの文字列にする。OS が切り替わる行には <== WSL interop を付ける。
+
+    ラベル (コマンドライン) は切らない。長い行は端末の折り返しに任せる
+    (Claude の Bash ツールの zsh -c は、実際のコマンドが長い前置きの後ろにあるため)。
+    """
     out, prev = [], None
     for depth, (os_, pid, label, note) in enumerate(nodes):
         tag = "[Windows]" if os_ == "W" else "[Linux  ]"
         indent = "  " * max(depth - 1, 0) + ("└─ " if depth else "")
         cross = "  <== WSL interop" if prev and prev != os_ else ""
-        out.append(f"{tag} {indent}{cut(f'{pid} {label}', width - len(indent))}{cross}")
+        out.append(f"{tag} {indent}{safe(f'{pid} {label}')}{cross}")
         for line in note or []:
-            pad = "  " * depth + "   "
-            out.append(f"{tag} {pad}{cut(line, width - len(pad))}")
+            out.append(f"{tag} {'  ' * depth}   {safe(line)}")
         prev = os_
     return out
 
@@ -230,11 +233,11 @@ def linux_label(pid):
     argv = argv_of(pid) or ["(終了済み)"]
     if is_stub(argv):
         # "/init <exe のパス> <argv0> <引数…>" を "<exe 名> <引数…>" にする
-        return " ".join([argv[1].rsplit("/", 1)[-1]] + argv[3:])
+        return join_argv([argv[1].rsplit("/", 1)[-1]] + argv[3:])
     if argv == ["/init"]:
         sock = f"/run/WSL/{pid}_interop"
         return "/init  (WSL のセッション" + (f": {sock}" if os.path.exists(sock) else "") + ")"
-    return " ".join(argv)
+    return join_argv(argv)
 
 
 def hhmmss(ms):

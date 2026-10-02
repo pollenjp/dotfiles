@@ -23,6 +23,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import socket
 import sys
 
@@ -244,19 +245,25 @@ def make_record(ev, my_pidns, proc, now):
     anc, p = [], proc.ppid(ev["pid"])
     while p > 1 and len(anc) < 20:
         a = proc.argv(p)
-        anc.append({"pid": p, "cmdline": clip(" ".join(a)) if a else None})
+        # シェルの引用でつなぐ (1 つの引数に空白があっても区切りが分かるように)
+        anc.append({"pid": p, "cmdline": clip(shlex.join(a)) if a else None})
         p = proc.ppid(p)
     rec["ancestry"] = anc
     return rec
 
 
 def format_record(rec):
-    """記録 1 件を人が読む形 (複数行) にする。記録から来る文字列は safe() を通す"""
+    """記録 1 件を人が読む形 (複数行) にする。記録から来る文字列は safe() を通す。
+
+    引数は 1 引数 1 行で、祖先のコマンドラインは 1 プロセス 1 行で、記録してある分を切らずに出す
+    (Claude の Bash ツールの zsh -c は、実際のコマンドが長い前置きの後ろにあるため)。
+    """
     exe = safe(rec["exe"].rsplit("/", 1)[-1])
     mark = "" if rec.get("agent") else "  (踏み台かもしれない .exe)"
     lines = [f"{safe(rec['time'])}  {exe}  pid={rec['pid']} uid={rec['uid']} distro={safe(rec['distro'])}{mark}"]
-    if rec.get("argv"):
-        lines.append(f"    argv: {safe(' '.join(rec['argv'])[:300])}")
+    argv = rec.get("argv")
+    for i, a in enumerate([argv] if isinstance(argv, str) else argv or []):
+        lines.append(f"    argv[{i}]: {safe(a)}")
     if rec.get("cwd"):
         lines.append(f"    cwd : {safe(rec['cwd'])}")
     if rec.get("env"):
@@ -267,7 +274,7 @@ def format_record(rec):
     if anc and kanc and anc[0]["pid"] != kanc[0]["pid"]:
         lines.append(REPARENTED)
     for a in anc:
-        lines.append(f"      {a['pid']:<7} {safe((a['cmdline'] or '?')[:160])}")
+        lines.append(f"      {a['pid']:<7} {safe(a['cmdline'] or '?')}")
     return "\n".join(lines)
 
 

@@ -95,7 +95,9 @@ class TestFormatRecord(unittest.TestCase):
             t.format_record(rec).splitlines(),
             [
                 "2026-10-01T00:00:00.000+09:00  ssh.exe  pid=30 uid=1000 distro=this",
-                "    argv: ssh.exe -T git@github.com",
+                "    argv[0]: ssh.exe",
+                "    argv[1]: -T",
+                "    argv[2]: git@github.com",
                 "    cwd : /home/u/repo",
                 "    env : WSL_INTEROP=/run/WSL/644_interop CLAUDE_CODE_SESSION_ID=abc",
                 "    at exec: git(20) <- zsh(10)",
@@ -113,6 +115,40 @@ class TestFormatRecord(unittest.TestCase):
         procs = FakeProc({30: {"argv": ["/init", SSH, "ssh.exe"], "ppid": 644}, 644: {"argv": ["/init"], "ppid": 1}})
         rec = t.make_record(event(), my_pidns=111, proc=procs, now="T")
         self.assertIn("    (親は既に終了していて、/proc の祖先は付け替え後のもの)", t.format_record(rec).splitlines())
+
+
+class TestFullDetail(unittest.TestCase):
+    """引数もコマンドラインも、記録してある分 (1 つ 1 KiB まで) は表示で切らない"""
+
+    def test_long_argument_is_shown_in_full_on_its_own_line(self):
+        long = "x" * 900
+        procs = FakeProc({30: {"argv": ["/init", SSH, "ssh.exe", "-o", long], "ppid": 1}})
+        lines = t.format_record(t.make_record(event(), my_pidns=111, proc=procs, now="T")).splitlines()
+        self.assertIn(f"    argv[2]: {long}", lines)
+
+    def test_long_ancestor_cmdline_is_shown_in_full(self):
+        script = "source snapshot.sh && eval " + "'git push'" + " #" + "y" * 600
+        procs = FakeProc({
+            30: {"argv": ["/init", SSH, "ssh.exe"], "ppid": 20},
+            20: {"argv": ["/usr/bin/zsh", "-c", script], "ppid": 1},
+        })
+        rec = t.make_record(event(), my_pidns=111, proc=procs, now="T")
+        self.assertIn(rec["ancestry"][0]["cmdline"], t.format_record(rec))
+
+    def test_ancestor_arguments_keep_their_boundaries(self):
+        # 祖先はシェルの引用で残すので、1 つの引数に空白があっても区切りが分かる
+        procs = FakeProc({
+            30: {"argv": ["/init", SSH, "ssh.exe"], "ppid": 20},
+            20: {"argv": ["zsh", "-c", "echo a b"], "ppid": 1},
+        })
+        rec = t.make_record(event(), my_pidns=111, proc=procs, now="T")
+        self.assertEqual(rec["ancestry"][0]["cmdline"], "zsh -c 'echo a b'")
+
+    def test_old_records_with_joined_argv_still_render(self):
+        # 形を変える前の記録 (argv は list、祖先は空白でつないだ文字列) もそのまま読める
+        rec = {"time": "T", "exe": SSH, "agent": True, "pid": 1, "uid": 0, "distro": "this",
+               "kernel_ancestry": [], "argv": ["ssh.exe", "-V"], "ancestry": [{"pid": 2, "cmdline": "zsh -c echo a b"}]}
+        self.assertIn("      2       zsh -c echo a b", t.format_record(rec).splitlines())
 
 
 class TestPretty(unittest.TestCase):
