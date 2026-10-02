@@ -159,9 +159,10 @@ in
         - PATH の `pjp-exe-exec-trace` (記録を読む `--pretty` 用)
 
         eBPF には root が要るので、switch だけでは動かない。unit を /etc/systemd/system へ
-        入れるのは `~/dotfiles/setup --steps exe-exec-trace` (中で sudo を呼ぶ)。トレーサを
-        更新したら打ち直す (ずれていれば setup の最後に知らせる)。false に戻して同じ
-        手順を打つと、入っている unit を止めて消す。
+        入れるのは setup の手順 exe-exec-trace (中で sudo を呼ぶ) で、`~/dotfiles/setup --update`
+        の最後に走る。トレーサを更新したときも --update で入れ替わる (sudo がパスワードを
+        訊けずに飛ばしたら、setup の最後に知らせる)。false に戻して --update を打つと、
+        入っている unit を止めて消す。
 
         記録は journald に残る:
 

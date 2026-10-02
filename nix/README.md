@@ -435,15 +435,21 @@ nix flake update dotfiles --flake ~/dotfiles
 | 選択肢 | 実行される手順 |
 | --- | --- |
 | 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
-「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
-どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、繰り返しても
-状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
+「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*`、`exe-exec-trace` を
+毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
+繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
 並べるしかなくなる。時間が気になるとき・一部だけ走らせたいときは「カスタム」か
 `--steps` で選び直す。
+
+8 `exe-exec-trace` は中で `sudo` を呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・
+止まっているのを起こすときだけで、揃っていれば（option が無効なマシンも）呼ばない。
+`sudo` がパスワードを訊けないとき（パスワード無しで通らず、端末も無い。Claude の Bash
+ツールから打ったときなど）は失敗にせず飛ばし、最後の「残りの手作業」がずれを知らせる
+（[後述](#wsl-の-exe-の起動を常時記録する)）。
 
 入っていないのは、冪等でないか更新時には有害な手順。
 
@@ -453,7 +459,6 @@ nix flake update dotfiles --flake ~/dotfiles
 | 2 `preflight-unlink` | **home-manager 自身が張った symlink まで外す**（対象パスの symlink を無条件に unlink する）。旧 `main.bash` からの移行用 |
 | 2.5 `local-flake` | `~/dotfiles/setup` を**実行元の checkout** へ張り直す（worktree から走らせると dangling で残る）。ghq の決めるパス外では `exit 1` になり後続まで止まる |
 | 7 `chsh` | `sudo` が要る。README でも「必要なら」 |
-| 8 `exe-exec-trace` | 中で `sudo` を呼ぶ（system の unit を `/etc` へ入れる）。ずれていれば最後の「残りの手作業」が知らせる（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
@@ -602,7 +607,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
-| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
+| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -707,7 +712,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`ssh-config` と `bootstrap-*` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`ssh-config` と `bootstrap-*`、`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
@@ -1134,23 +1139,31 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 
 登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
 `local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
-**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順で、
-手順が中で `sudo` を呼ぶ。**`sudo` を付けて打たないこと**（`HOME` が root のものになり、
-生成された unit を見失うので、手順は root では断る）。
+**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順
+`exe-exec-trace` で、「既存マシン更新」（`--update`）の最後に走り、中で `sudo` を呼ぶ。
+**`sudo` を付けて打たないこと**（`HOME` が root のものになり、生成された unit を見失うので、
+手順は root では断る）。
 
 ```sh
-~/dotfiles/setup --update                 # unit ファイルを生成する (まだ何も動かない)
-~/dotfiles/setup --steps exe-exec-trace   # /etc へ入れて起こす (中で sudo を呼ぶ)
+~/dotfiles/setup --update   # unit ファイルを生成し、/etc へ入れて起こす (中で sudo を呼ぶ)
 ```
+
+パスワード無しで `sudo` できないマシンで、端末の無いところ（Claude の Bash ツールなど）から
+打つと、手順は入れずに飛ばし、最後の「残りの手作業」に「unit がまだ入っていない」と出る。
+そのときは端末から `~/dotfiles/setup --steps exe-exec-trace` を打つ。
 
 unit は `Type=notify` なので、手順の `restart` はトレーサが BPF を読み込み終えるまで待ち、
 読み込みに失敗すれば手順も失敗する。起動に失敗し続けたら（WSL のカーネルが更新されて
-BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になり、「残りの手作業」に
-「入っているが動いていない」と出る。
+BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になる。手順は止まっている
+unit を起こし直すので、直るまでは `--update` の最後のこの手順が失敗する
+（理由は `sudo journalctl -u dotfiles-exe-exec-trace -n 30` で見る。止めておきたいなら
+option を false にする）。
 
 unit の `ExecStart` は store の固定パスにしてある（root がユーザーの書き換えられるパスを
-実行しないため）。その代わり、**トレーサが更新されたら同じ手順を打ち直す。** 打つまでは
-古い版が動き続け、`--update` の最後の「残りの手作業」に「入っている unit が古い」と出る。
+実行しないため）。その代わり、トレーサが更新されたら unit を入れ替える必要がある。
+`--update` が switch の後にこの手順も走らせるので、更新と一緒に入れ替わる。手順を外して
+走らせたときや `sudo` を訊けずに飛ばしたときは古い版が動き続け、最後の「残りの手作業」に
+「入っている unit が古い」と出る。
 手順は unit の store パスへ GC root（`/nix/var/nix/gcroots/dotfiles-exe-exec-trace`）を
 張るので、`nix-collect-garbage` で動いているトレーサが消えることはない。
 
@@ -1206,12 +1219,11 @@ pjp-who-is-asking --no-windows   # Linux 側だけ
 
 #### 外す
 
-`exeExecTrace.enable` を false にして `--update` で switch し、同じ手順を打つ。生成された
-unit が無いので、入っている unit を止めて消す（GC root も消す）。
+`exeExecTrace.enable` を false にして `--update` を打つ。switch の後に走る手順が、
+生成された unit が無いので、入っている unit を止めて消す（GC root も消す）。
 
 ```sh
 ~/dotfiles/setup --update
-~/dotfiles/setup --steps exe-exec-trace
 ```
 
 #### 気を付けること

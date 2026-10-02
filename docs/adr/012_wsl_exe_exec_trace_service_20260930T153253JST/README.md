@@ -18,6 +18,25 @@
 > - 本文は決めた時点の記録としてそのまま残し、「7. 移行・運用手順」だけを新しい名前に追従させた
 > - WSL を再起動したときに unit が起動時に上がることを確かめた (6.「確かめていないこと」の 1 つ目)
 
+> **追記 (2026-10-02、[TKT-72](https://app.notion.com/p/setup-exe-exec-trace-TKT-63-3ed79149a66f812c99e2ca951f22cb97))**
+>
+> - C を変え、setup の手順 `exe-exec-trace` を「既存マシン更新」(`--update`) にも入れた。入れないと
+>   トレーサを更新するたびに `--steps exe-exec-trace` を打ち直すことになり、`bootstrap-*` を
+>   `--update` に入れたのと同じ理由で取り残しが出るため (ユーザーの依頼)。新規マシン適用には
+>   入れていない (次の `--update` で入る)
+> - 「`--update` は対話無しで sudo も要らない」前提 (4. の `bootstrap-*.sh` の行) は次のように緩めた。
+>   sudo を呼ぶのは unit を入れる・入れ替える・消す・止まっているのを起こすときだけで、揃っていれば
+>   (option が無効なマシンも) 呼ばない。sudo がパスワードを訊けない (パスワード無しで通らず、端末も
+>   無い) ときは失敗にせず飛ばし、setup の最後の案内でずれを知らせる。setup は失敗した手順で止まり
+>   最後の案内も出さなくなるので、訊けないだけで `--update` 全体を失敗にしない
+> - option が無効なマシン (macOS を含む) に更新のたびに systemd の案内を出さないよう、手順は systemd の
+>   有無より先に「生成されておらず、入ってもいない」を見る
+> - 手順は止まっている unit を起こし直すので、トレーサが起動できない状態 (カーネルの更新で BPF が
+>   読み込めないなど) では、直すか option を false にするまで `--update` の最後の手順が失敗する
+>   (前は最後の案内に「入っているが動いていない」と出るだけだった)。止めておいた unit も
+>   `--update` で起こされる
+> - 本文は決めた時点の記録として残し、「7. 移行・運用手順」だけを追従させた
+
 ---
 
 ## 1. 背景 (Context)
@@ -249,9 +268,9 @@ unittest と home module と setup の手順は、実装より先に確かめ方
 
 ```sh
 # 有効にする (登録簿の pollenjp@wsl は true。それ以外は local で true にする)
-~/dotfiles/setup --update
-~/dotfiles/setup --steps exe-exec-trace   # 中で sudo を呼ぶ (sudo を付けない)。更新のたびに打ち直す
-                                          # (コマンド名を変えた TKT-66 の後も、ExecStart が変わるので打ち直す)
+~/dotfiles/setup --update   # 最後に手順 exe-exec-trace が走り、中で sudo を呼ぶ (sudo を付けない)。
+                            # トレーサを更新したときも --update で入れ替わる (TKT-72)
+~/dotfiles/setup --steps exe-exec-trace   # sudo がパスワードを訊けずに飛ばしたときだけ、端末から打つ
 
 # 読む
 journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty
@@ -261,5 +280,4 @@ pjp-who-is-asking
 
 # 外す: option を false にして
 ~/dotfiles/setup --update
-~/dotfiles/setup --steps exe-exec-trace
 ```

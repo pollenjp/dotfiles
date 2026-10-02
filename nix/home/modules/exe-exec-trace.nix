@@ -9,12 +9,14 @@
 #
 # eBPF には root が要るので、systemd の **system** の unit で動かす。home-manager は
 # system の unit を置けないので、ここでは unit ファイルを生成するだけにして、
-# /etc/systemd/system へ入れるのは setup の手順 exe-exec-trace (sudo が要る) に任せる。
+# /etc/systemd/system へ入れるのは setup の手順 exe-exec-trace (sudo が要る。
+# 「既存マシン更新」の最後に走る) に任せる。
 #
 # ExecStart は store の固定パスにする。~/.nix-profile/bin を指すと、root がユーザーの
 # 書き換えられるパスを実行することになり、同じユーザーの他のプロセスがトレーサを
 # 差し替えられる (記録したい相手に記録を止められる)。その代わり、トレーサを更新したら
-# 手順を打ち直す (ずれていれば setup の最後に知らせる)。
+# unit を入れ替える必要がある。setup --update がこの手順も走らせるので一緒に入れ替わる
+# (ずれが残れば setup の最後に知らせる)。
 #
 # 生成する場所 (~/.local/share/dotfiles/systemd/) と unit の名前は scripts/setup.sh と
 # 揃えている。変えるなら両方。
