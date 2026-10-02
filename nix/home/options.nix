@@ -88,7 +88,8 @@ in
           Notion へ書く skill (claude-skills の pjp-dev-tracker・pjp-notion-authoring・
           pjp-docs-to-notion・pjp-scan-to-notion) が使う宛先のプロファイル名。
 
-          中身 (workspace の id・Dev Tracker の場所・新しいページの既定の親・Scan Data DB)
+          中身 (workspace の id・Dev Tracker の場所・新しいページの既定の親・Scan Data DB・
+          repo にチケットの ID と URL を書くか)
           は private の claude-skills (skills/pjp-notion-profile/profiles.toml) が持ち、
           ここでは名前だけを選ぶ。ページ名入りの URL を public なこのリポジトリに
           出さないため。
@@ -113,8 +114,12 @@ in
         '';
         description = ''
           profile の値を、このマシンだけ差し替える。キーは profiles.toml と同じ
-          (workspace.id / defaultParent / scanData / devTracker.hub など)。
+          (workspace.id / defaultParent / scanData / devTracker.hub / devTracker.linkFromRepo など)。
           入れ子は profile の値へ重ね、同じキーはこちらが勝ち、null はそのキーを消す。
+
+          devTracker.linkFromRepo だけは真偽値で、pjp-dev-tracker が branch・PR・commit に
+          チケットの ID と URL を書くかを決める (書かなければ true。work のプロファイルは false)。
+          このマシンだけ変えるなら `{ devTracker.linkFromRepo = true; }` のように書く。
 
           キーの綴りはここでは検査しない (キーの形は claude-skills が持つ)。
           skill が使うときに resolver が知らないキーとして止める。
