@@ -15,7 +15,7 @@
 }:
 
 writeShellApplication {
-  name = "exe-exec-trace";
+  name = "pjp-exe-exec-trace";
   runtimeInputs = [
     (python3.withPackages (ps: [ ps.bcc ]))
     kmod

@@ -92,8 +92,8 @@
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          exe-exec-trace-unittest = unittest "exe-exec-trace";
-          who-is-asking-unittest = unittest "who-is-asking";
+          pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
+          pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
         }
       );
 
@@ -162,11 +162,11 @@
         # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
         # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:
         #
-        #   sudo "$(nix build --no-link --print-out-paths ./nix#exe-exec-trace)/bin/exe-exec-trace"
-        #   nix run ./nix#who-is-asking
+        #   sudo "$(nix build --no-link --print-out-paths ./nix#pjp-exe-exec-trace)/bin/pjp-exe-exec-trace"
+        #   nix run ./nix#pjp-who-is-asking
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
-          exe-exec-trace = pkgs.callPackage ./pkgs/exe-exec-trace { };
-          who-is-asking = pkgs.callPackage ./pkgs/who-is-asking { };
+          pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
+          pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
         }
       );
 

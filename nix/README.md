@@ -963,8 +963,8 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
-| `who-is-asking` (PATH) | `nix/pkgs/who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
-| `exe-exec-trace` (PATH) | `nix/pkgs/exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
+| `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
@@ -1127,8 +1127,8 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 
 | 道具 | 置かれるマシン | 使いどころ |
 | --- | --- | --- |
-| `who-is-asking` | `wsl.enable` | ダイアログが出ている間に打つ。要求元を Windows と Linux をまたいだ 1 本の木で出す |
-| `exe-exec-trace` | `wsl.exeExecTrace.enable` | root の systemd の unit で常時動かす。WSL から起動された `.exe` を祖先付きで journald に残す（黙って通った要求も残る） |
+| `pjp-who-is-asking` | `wsl.enable` | ダイアログが出ている間に打つ。要求元を Windows と Linux をまたいだ 1 本の木で出す |
+| `pjp-exe-exec-trace` | `wsl.exeExecTrace.enable` | root の systemd の unit で常時動かす。WSL から起動された `.exe` を祖先付きで journald に残す（黙って通った要求も残る） |
 
 #### 入れる
 
@@ -1157,9 +1157,9 @@ unit の `ExecStart` は store の固定パスにしてある（root がユー�
 #### 読む
 
 ```sh
-journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty           # 全部
-journalctl -u dotfiles-exe-exec-trace -o cat --since today | exe-exec-trace --pretty
-journalctl -u dotfiles-exe-exec-trace -o cat -f | exe-exec-trace --pretty        # 流れてくるのを見る
+journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty           # 全部
+journalctl -u dotfiles-exe-exec-trace -o cat --since today | pjp-exe-exec-trace --pretty
+journalctl -u dotfiles-exe-exec-trace -o cat -f | pjp-exe-exec-trace --pretty        # 流れてくるのを見る
 ```
 
 ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動したときの記録（cwd・env・
@@ -1175,7 +1175,7 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 - agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
   以外には「踏み台かもしれない .exe」と付く。`wsl.exe` や `cmd.exe` を経由した要求は、
   `ssh.exe` の祖先が新しいセッションの `/init` で途切れるので、直前に起動した踏み台の祖先を見る
-- agent に届くものだけ見るなら `exe-exec-trace --pretty --only-agent`
+- agent に届くものだけ見るなら `pjp-exe-exec-trace --pretty --only-agent`
 - 1 行 1 イベントの JSON。`-o cat` には systemd の「Started …」のような JSON でない行も
   混ざるので、`jq` で読むなら `jq -cR 'fromjson? | select(.agent)'` のように読めない行を飛ばす
 - 表示では、記録の中の改行や ESC などの制御文字を `\xNN` にする（記録される側が argv で
@@ -1184,8 +1184,8 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 ダイアログが出ている間なら、その場で木を出す方が早い。
 
 ```sh
-who-is-asking                # Windows 側も取る (powershell.exe で 1〜2 秒)
-who-is-asking --no-windows   # Linux 側だけ
+pjp-who-is-asking                # Windows 側も取る (powershell.exe で 1〜2 秒)
+pjp-who-is-asking --no-windows   # Linux 側だけ
 ```
 
 #### 外す

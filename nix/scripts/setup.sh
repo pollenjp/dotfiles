@@ -1652,7 +1652,7 @@ step_exe_exec_trace() {
   fi
   [[ ${dry_run} == 1 ]] && return 0
   note "${exe_exec_trace_unit} が記録を始めた。読むとき:"
-  note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | exe-exec-trace --pretty"
+  note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | pjp-exe-exec-trace --pretty"
 }
 
 # 生成された unit と入っている unit のずれ。揃っていれば何も出さない。

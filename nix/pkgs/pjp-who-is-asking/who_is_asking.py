@@ -319,7 +319,7 @@ def windows_procs():
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        prog="who-is-asking",
+        prog="pjp-who-is-asking",
         description="1Password の承認ダイアログが出ている間に、要求元を Windows と Linux をまたいだ木で出す",
     )
     ap.add_argument("--no-windows", action="store_true", help="Windows 側 (powershell.exe で 1〜2 秒かかる) を省き、Linux 側の木だけ出す")
