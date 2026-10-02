@@ -182,10 +182,18 @@ class TestRender(unittest.TestCase):
             ],
         )
 
-    def test_long_labels_are_cut(self):
-        line = w.render([("W", 1, "x" * 500, None)], width=40)[0]
-        self.assertTrue(line.endswith("…"))
-        self.assertLessEqual(len(line), len("[Windows] ") + 40)
+    def test_long_labels_are_shown_in_full(self):
+        line = w.render([("W", 1, "x" * 500, None)])[0]
+        self.assertEqual(line, "[Windows] 1 " + "x" * 500)
+
+
+class TestJoinArgv(unittest.TestCase):
+    def test_arguments_with_spaces_are_quoted(self):
+        # Linux 側のコマンドラインは、1 つの引数に空白があっても区切りが分かるように引用する
+        self.assertEqual(w.join_argv(["zsh", "-c", "echo a b"]), "zsh -c 'echo a b'")
+
+    def test_plain_arguments_stay_as_they_are(self):
+        self.assertEqual(w.join_argv(["git", "ls-remote", "ssh://x@192.0.2.1/r.git"]), "git ls-remote ssh://x@192.0.2.1/r.git")
 
 
 class TestUntrustedText(unittest.TestCase):

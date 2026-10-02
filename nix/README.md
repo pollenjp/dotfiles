@@ -1167,9 +1167,25 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 
 ```
 2026-10-01T00:53:26.981+09:00  ssh.exe  pid=446394 uid=1000 distro=this
-    argv: ssh.exe -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=3 -o SendEnv=GIT_PROTOCOL fake@192.0.2.1 git-upload-pack '/pollenjp/example.git'
+    argv[0]: ssh.exe
+    argv[1]: -o
+    argv[2]: IdentityAgent=none
+    argv[3]: -o
+    argv[4]: BatchMode=yes
+    argv[5]: -o
+    argv[6]: ConnectTimeout=3
+    argv[7]: -o
+    argv[8]: SendEnv=GIT_PROTOCOL
+    argv[9]: fake@192.0.2.1
+    argv[10]: git-upload-pack '/pollenjp/example.git'
     at exec: git(446393) <- zsh(446388) <- claude(15259) <- fish(1328) <- herdr(972) <- …
 ```
+
+- 引数は 1 引数 1 行で、祖先のコマンドラインは 1 プロセス 1 行で、記録してある分（1 つ 1 KiB
+  まで）を切らずに出す。Claude の Bash ツールは `zsh -c 'source <スナップショット> … && eval '<実際の
+  コマンド>''` の形で、実際のコマンドが長い前置きの後ろにあるので、祖先の行は長くなる
+- 祖先のコマンドラインは、1 つの引数に空白があっても区切りが分かるようシェルの引用でつないで
+  記録する（`zsh -c 'echo a b'`）。2026-10-02 より前の記録は空白でつないだまま
 
 - `adm` か `systemd-journal` のグループに入っていれば `sudo` は要らない
 - agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
