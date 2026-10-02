@@ -945,6 +945,30 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 
 > ⚠️ `-b bak` は `<file>.bak` が既に存在すると失敗する。リトライ時は古い `.bak` を先に消すこと。
 
+### 使わなくなったデータの定期削除
+
+`dotfiles.cleanup.enable` (既定で有効) のマシンでは、週 1 回 (systemd の weekly = 月曜 0:00) に
+次の 2 つが走る (`nix/home/modules/cleanup.nix`)。マシンを止めていて逃した回は、次に起動したときに走る。
+
+| timer | すること |
+| --- | --- |
+| `nix-gc.timer` | `nix-collect-garbage --delete-older-than 14d` (home-manager の `nix.gc`)。14 日より古い世代を消してから、どこからも辿れない store path を消す |
+| `mise-prune.timer` | `mise prune --yes` と、mise の `downloads/` に残った 7 日より古いアーカイブの削除 |
+
+```sh
+systemctl --user list-timers nix-gc.timer mise-prune.timer   # 次に走る時刻
+journalctl --user -u nix-gc.service -u mise-prune.service    # 走った結果
+systemctl --user start nix-gc.service mise-prune.service     # 今すぐ走らせる
+```
+
+darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` / `org.nix-community.home.mise-prune`) で動く。
+
+- 14 日より古い世代へは、ロールバックできなくなる
+- root を張っていない devShell や `nix build` の結果も消え、次に使うときは取り直し (手元でビルドするものは再ビルド) になる。残したい devShell は `nix develop --profile <パス>` で root を張っておく
+- mise は、使ったことのある設定ファイルのどれもが指していない版を消す。プロジェクトの `mise.toml` が固定している版は残る
+- WSL では、消しても `ext4.vhdx` は縮まない。C: の空きにするには、`wsl --shutdown` してから管理者の PowerShell で `Optimize-VHD -Path <ext4.vhdx> -Mode Full` を打つ
+- 止めたいマシンは、ローカル flake の `local` で `dotfiles.cleanup.enable = false;` にする
+
 ## 管理対象のファイル
 
 | 配置先 | 実体 |
@@ -966,6 +990,7 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
+| `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
