@@ -8,7 +8,10 @@
 #   username        Linux/macOS 側のユーザー名 (必須)
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
-#   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン
+#   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
+#                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
+#                   祖先付きで journald に常時記録する (ADR 012。switch に加えて一度
+#                   `~/dotfiles/setup --steps exe-exec-trace` を打つ。中で sudo を呼ぶ)
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
 #                   claude.gitViaGh.enable = false で、Claude の git を gh の資格情報 (HTTPS)
@@ -49,6 +52,12 @@
     system = "x86_64-linux";
     wsl = {
       enable = true;
+      # WSL から起動された Windows の .exe (ssh.exe など) を、起動元の祖先付きで journald に
+      # 常時記録する (ADR 012)。1Password の承認ダイアログは要求元を「Windows Terminal」と
+      # しか出さず、承認後は同じタブのどのプロセスも黙って鍵を使えるため。
+      # eBPF に root が要るので、switch に加えて一度 `~/dotfiles/setup --steps exe-exec-trace`
+      # (中で sudo を呼ぶ) を打つ。打つまでは unit ファイルが置かれるだけで、何も動かない。
+      exeExecTrace.enable = true;
       onePassword = {
         enable = true;
         # ホスト側 Windows のユーザー名。1Password の op-ssh-sign のパス

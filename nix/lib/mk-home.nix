@@ -14,6 +14,7 @@
   #
   #   wsl = {
   #     enable = true;
+  #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
   #     onePassword = {
   #       enable = true;
   #       windowsUserName = "polle";

@@ -453,6 +453,7 @@ nix flake update dotfiles --flake ~/dotfiles
 | 2 `preflight-unlink` | **home-manager 自身が張った symlink まで外す**（対象パスの symlink を無条件に unlink する）。旧 `main.bash` からの移行用 |
 | 2.5 `local-flake` | `~/dotfiles/setup` を**実行元の checkout** へ張り直す（worktree から走らせると dangling で残る）。ghq の決めるパス外では `exit 1` になり後続まで止まる |
 | 7 `chsh` | `sudo` が要る。README でも「必要なら」 |
+| 8 `exe-exec-trace` | 中で `sudo` を呼ぶ（system の unit を `/etc` へ入れる）。ずれていれば最後の「残りの手作業」が知らせる（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
@@ -601,6 +602,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
+| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -748,6 +750,7 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 ```nix
 wsl = {
   enable = true;              # WSL か
+  exeExecTrace.enable = true; # WSL から起動された .exe を常時記録するか (後述)
   onePassword = {
     enable = true;            # ホスト側 Windows の 1Password を使うか (WSL 専用)
     windowsUserName = "polle"; # その 1Password のパスに要る Windows ユーザー名
@@ -790,6 +793,9 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 - `wsl.onePassword.enable` が true なのに `wsl.enable` が false
 - `wsl.onePassword.enable` が true なのに `windowsUserName` が無い
+- `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
+
+`exeExecTrace` は 1Password の有無とは別に選べる（登録簿では `pollenjp@wsl` だけ true）。
 
 ### 登録簿に載せずにマシンを足す
 
@@ -957,6 +963,9 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
+| `who-is-asking` (PATH) | `nix/pkgs/who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
+| `exe-exec-trace` (PATH) | `nix/pkgs/exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -1106,6 +1115,105 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 
 Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
 Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
+
+### WSL の .exe の起動を常時記録する
+
+上のラッパーで、WSL の `ssh` は Windows の `ssh.exe` として 1Password に届く。そのため
+**1Password の承認ダイアログは要求元を「Windows Terminal」としか出さない。** しかも承認は
+タブ（`wsl.exe`）単位で効くので、一度承認すると同じタブのどのプロセス（herdr の別ペインや
+Claude Code など）もダイアログ無しで鍵を使える。要求元が分かるのは Linux 側で `.exe` の
+起動を見たときだけなので、そのための道具を 2 つ置く（経緯は
+[ADR 012](../docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md)）。
+
+| 道具 | 置かれるマシン | 使いどころ |
+| --- | --- | --- |
+| `who-is-asking` | `wsl.enable` | ダイアログが出ている間に打つ。要求元を Windows と Linux をまたいだ 1 本の木で出す |
+| `exe-exec-trace` | `wsl.exeExecTrace.enable` | root の systemd の unit で常時動かす。WSL から起動された `.exe` を祖先付きで journald に残す（黙って通った要求も残る） |
+
+#### 入れる
+
+登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
+`local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
+**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順で、
+手順が中で `sudo` を呼ぶ。**`sudo` を付けて打たないこと**（`HOME` が root のものになり、
+生成された unit を見失うので、手順は root では断る）。
+
+```sh
+~/dotfiles/setup --update                 # unit ファイルを生成する (まだ何も動かない)
+~/dotfiles/setup --steps exe-exec-trace   # /etc へ入れて起こす (中で sudo を呼ぶ)
+```
+
+unit は `Type=notify` なので、手順の `restart` はトレーサが BPF を読み込み終えるまで待ち、
+読み込みに失敗すれば手順も失敗する。起動に失敗し続けたら（WSL のカーネルが更新されて
+BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になり、「残りの手作業」に
+「入っているが動いていない」と出る。
+
+unit の `ExecStart` は store の固定パスにしてある（root がユーザーの書き換えられるパスを
+実行しないため）。その代わり、**トレーサが更新されたら同じ手順を打ち直す。** 打つまでは
+古い版が動き続け、`--update` の最後の「残りの手作業」に「入っている unit が古い」と出る。
+手順は unit の store パスへ GC root（`/nix/var/nix/gcroots/dotfiles-exe-exec-trace`）を
+張るので、`nix-collect-garbage` で動いているトレーサが消えることはない。
+
+#### 読む
+
+```sh
+journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty           # 全部
+journalctl -u dotfiles-exe-exec-trace -o cat --since today | exe-exec-trace --pretty
+journalctl -u dotfiles-exe-exec-trace -o cat -f | exe-exec-trace --pretty        # 流れてくるのを見る
+```
+
+ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動したときの記録（cwd・env・
+祖先の cmdline の行は略）:
+
+```
+2026-10-01T00:53:26.981+09:00  ssh.exe  pid=446394 uid=1000 distro=this
+    argv: ssh.exe -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=3 -o SendEnv=GIT_PROTOCOL fake@192.0.2.1 git-upload-pack '/pollenjp/example.git'
+    at exec: git(446393) <- zsh(446388) <- claude(15259) <- fish(1328) <- herdr(972) <- …
+```
+
+- `adm` か `systemd-journal` のグループに入っていれば `sudo` は要らない
+- agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
+  以外には「踏み台かもしれない .exe」と付く。`wsl.exe` や `cmd.exe` を経由した要求は、
+  `ssh.exe` の祖先が新しいセッションの `/init` で途切れるので、直前に起動した踏み台の祖先を見る
+- agent に届くものだけ見るなら `exe-exec-trace --pretty --only-agent`
+- 1 行 1 イベントの JSON。`-o cat` には systemd の「Started …」のような JSON でない行も
+  混ざるので、`jq` で読むなら `jq -cR 'fromjson? | select(.agent)'` のように読めない行を飛ばす
+- 表示では、記録の中の改行や ESC などの制御文字を `\xNN` にする（記録される側が argv で
+  偽の行を差し込んだり端末を操作したりできないように）
+
+ダイアログが出ている間なら、その場で木を出す方が早い。
+
+```sh
+who-is-asking                # Windows 側も取る (powershell.exe で 1〜2 秒)
+who-is-asking --no-windows   # Linux 側だけ
+```
+
+#### 外す
+
+`exeExecTrace.enable` を false にして `--update` で switch し、同じ手順を打つ。生成された
+unit が無いので、入っている unit を止めて消す（GC root も消す）。
+
+```sh
+~/dotfiles/setup --update
+~/dotfiles/setup --steps exe-exec-trace
+```
+
+#### 気を付けること
+
+- **閉包が約 1.5 GiB 増える。** bcc は実行時に BPF のプログラムを clang でコンパイルするので、
+  clang と LLVM を丸ごと持つ
+- 常駐中のメモリは約 160 MB。起動のたびに数秒 CPU を使う（BPF のコンパイル）
+- 他ディストロの起動も記録されるが、祖先は comm と PID だけになる（その `/proc` は見えない）
+- 親が先に終了した要求（`cmd & exit` や `nohup`）は、祖先がセッションの `/init` で途切れる。
+  代わりに env（`CLAUDE_CODE_SESSION_ID` / `HERDR_PANE_ID` / `WT_SESSION`）と cwd が残る
+- **隠れようとする相手の記録には使えない。** 記録するのは名前が `.exe` で終わる実行ファイルの
+  起動だけで、`.exe` でない名前にした Windows の実行ファイル・`$WSL_INTEROP` のソケットを直接
+  叩く interop・journald の流量制限を超える大量の起動では抜けられる。パスワード無しで
+  `sudo` できるマシンなら、同じユーザーのプロセスは unit ごと止められる。記録できるのは
+  「隠れる気の無い呼び出し元」（普通のツールやエージェント）までと考える
+- 記録には argv と祖先のコマンドライン（それぞれ 1 KiB まで）が残る。`/var/log/journal` は
+  `adm` のグループで読め、`wsl --export` にも入るので、コマンドラインに秘密を渡す使い方には
+  向かない
 
 ### forward された agent を固定名で見せる
 
