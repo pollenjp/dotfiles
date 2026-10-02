@@ -1728,8 +1728,14 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 | どのプロファイルを使うか | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
 | このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ scanData = "https://app.notion.com/p/…"; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
+| repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
 
 値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
+
+`devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
+Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
+Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
+このマシンだけ変えるなら `dotfiles.claude.notion.override = { devTracker.linkFromRepo = true; };`。
 
 #### 値の置き場
 
