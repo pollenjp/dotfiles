@@ -144,14 +144,14 @@ in
 
         1Password の承認ダイアログは要求元を「Windows Terminal」としか出さず、承認した後は
         同じタブのどのプロセスもダイアログ無しで鍵を使える。要求元が分かるのは Linux 側で
-        .exe の起動を見たときだけなので、eBPF のトレーサ (pkgs/exe-exec-trace) を systemd の
+        .exe の起動を見たときだけなので、eBPF のトレーサ (pkgs/pjp-exe-exec-trace) を systemd の
         system の unit で動かす (ADR 012)。
 
         true のとき home/modules/exe-exec-trace.nix が次を置く:
 
         - unit ファイル `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service`。
           ExecStart は store の固定パス
-        - PATH の `exe-exec-trace` (記録を読む `--pretty` 用)
+        - PATH の `pjp-exe-exec-trace` (記録を読む `--pretty` 用)
 
         eBPF には root が要るので、switch だけでは動かない。unit を /etc/systemd/system へ
         入れるのは `~/dotfiles/setup --steps exe-exec-trace` (中で sudo を呼ぶ)。トレーサを
@@ -160,9 +160,9 @@ in
 
         記録は journald に残る:
 
-            journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
+            journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty
 
-        承認ダイアログが出ている間に要求元をたどる `who-is-asking` は、この option に
+        承認ダイアログが出ている間に要求元をたどる `pjp-who-is-asking` は、この option に
         よらず `wsl.enable` のマシンの PATH に入る (root が要らないため)。
       '';
     };

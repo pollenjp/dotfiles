@@ -12,7 +12,7 @@ wsl.exe や cmd.exe を踏み台にされると、ssh.exe の祖先は新しい�
 systemd の unit (dotfiles-exe-exec-trace.service) は --json で動かし、記録は journald に
 1 行 1 イベントで残る。人が読むときは --pretty に流す:
 
-    journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
+    journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty
 
 経緯は docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
 """
@@ -344,7 +344,7 @@ def trace(opts):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="exe-exec-trace", description=__doc__.splitlines()[0])
+    ap = argparse.ArgumentParser(prog="pjp-exe-exec-trace", description=__doc__.splitlines()[0])
     ap.add_argument("--only-agent", action="store_true", help="ssh.exe / ssh-add.exe / op-ssh-sign-wsl.exe など agent に届くものだけ記録する")
     ap.add_argument("--json", action="store_true", help="1 イベント 1 行の JSON で出す (journald に流す用)")
     ap.add_argument("--pretty", action="store_true", help="標準入力の JSON の記録を人が読む形にする (root は要らない)")
@@ -359,7 +359,7 @@ def main(argv=None):
         return 0
     if os.geteuid() != 0:
         print(
-            "exe-exec-trace: 記録するには root が要る (systemd の unit か sudo で動かす)。"
+            "pjp-exe-exec-trace: 記録するには root が要る (systemd の unit か sudo で動かす)。"
             "記録を読むだけなら --pretty に journalctl の出力を流す",
             file=sys.stderr,
         )

@@ -9,7 +9,7 @@
 }:
 
 writeShellApplication {
-  name = "who-is-asking";
+  name = "pjp-who-is-asking";
   runtimeInputs = [ python3 ];
   text = ''
     exec python3 -I ${./who_is_asking.py} "$@"

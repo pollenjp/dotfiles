@@ -9,6 +9,15 @@
 | 前提 ADR | [004](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（WSL の ssh を Windows の `ssh.exe` へ回すラッパー。本 ADR はその経路を通る要求を記録する） |
 | 運用手順 | [`nix/README.md`「WSL の .exe の起動を常時記録する」](../../../nix/README.md#wsl-の-exe-の起動を常時記録する) |
 
+> **追記 (2026-10-02、[TKT-66](https://app.notion.com/p/exe-exec-trace-who-is-asking-pjp-TKT-63-3ed79149a66f8188bac2cfe1778a0f47))**
+>
+> - コマンド名に `pjp-` を付けた (`pjp-exe-exec-trace` / `pjp-who-is-asking`。`nix/pkgs/` の
+>   ディレクトリと flake の `packages`・`checks` も同じ)。自作のものは `pjp-` で始める命名に揃えるため。
+>   unit (`dotfiles-exe-exec-trace.service`)・GC root・setup の手順 id (`exe-exec-trace`)・option は
+>   変えていない
+> - 本文は決めた時点の記録としてそのまま残し、「7. 移行・運用手順」だけを新しい名前に追従させた
+> - WSL を再起動したときに unit が起動時に上がることを確かめた (6.「確かめていないこと」の 1 つ目)
+
 ---
 
 ## 1. 背景 (Context)
@@ -242,9 +251,13 @@ unittest と home module と setup の手順は、実装より先に確かめ方
 # 有効にする (登録簿の pollenjp@wsl は true。それ以外は local で true にする)
 ~/dotfiles/setup --update
 ~/dotfiles/setup --steps exe-exec-trace   # 中で sudo を呼ぶ (sudo を付けない)。更新のたびに打ち直す
+                                          # (コマンド名を変えた TKT-66 の後も、ExecStart が変わるので打ち直す)
 
 # 読む
-journalctl -u dotfiles-exe-exec-trace -o cat | exe-exec-trace --pretty
+journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty
+
+# 承認ダイアログが出ている間に要求元を見る
+pjp-who-is-asking
 
 # 外す: option を false にして
 ~/dotfiles/setup --update

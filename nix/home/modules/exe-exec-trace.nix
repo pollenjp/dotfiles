@@ -1,11 +1,11 @@
-# WSL から起動された Windows の .exe を常時記録するトレーサ (exe-exec-trace) と、
-# 1Password の承認ダイアログが出ている間に要求元をたどる who-is-asking (ADR 012)。
+# WSL から起動された Windows の .exe を常時記録するトレーサ (pjp-exe-exec-trace) と、
+# 1Password の承認ダイアログが出ている間に要求元をたどる pjp-who-is-asking (ADR 012)。
 #
-# # 1. who-is-asking
+# # 1. pjp-who-is-asking
 #
 # dotfiles.wsl.enable のマシンの PATH に置く。root は要らないので option は設けない。
 #
-# # 2. exe-exec-trace (dotfiles.wsl.exeExecTrace.enable)
+# # 2. pjp-exe-exec-trace (dotfiles.wsl.exeExecTrace.enable)
 #
 # eBPF には root が要るので、systemd の **system** の unit で動かす。home-manager は
 # system の unit を置けないので、ここでは unit ファイルを生成するだけにして、
@@ -29,9 +29,12 @@ let
   wsl = config.dotfiles.wsl;
   traceEnabled = wsl.enable && wsl.exeExecTrace.enable;
 
-  exeExecTrace = pkgs.callPackage ../../pkgs/exe-exec-trace { };
-  whoIsAsking = pkgs.callPackage ../../pkgs/who-is-asking { };
+  exeExecTrace = pkgs.callPackage ../../pkgs/pjp-exe-exec-trace { };
+  whoIsAsking = pkgs.callPackage ../../pkgs/pjp-who-is-asking { };
 
+  # ExecStart は lib.getExe (writeShellApplication の name = meta.mainProgram) で引く。
+  # bin の名前を直書きすると、コマンド名を変えたときに無いパスを指したまま build が通ってしまう。
+  #
   # Type=notify: トレーサは BPF を読み込み終えてから READY=1 を送る。systemctl restart は
   # それまで待ち、読み込みに失敗すれば restart 自体が失敗する (setup の手順がそれで気付く)。
   #
@@ -56,7 +59,7 @@ let
 
     [Service]
     Type=notify
-    ExecStart=${exeExecTrace}/bin/exe-exec-trace --json
+    ExecStart=${lib.getExe exeExecTrace} --json
     Restart=on-failure
     RestartSec=10
     SyslogIdentifier=exe-exec-trace
