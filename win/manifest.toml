@@ -9,3 +9,8 @@
 src = "orca/keybindings.json"
 dst = "%USERPROFILE%/.orca/keybindings.json"
 hint = "Orca の設定 → キーボードショートカット → 「ディスクから再読み込み」"
+
+[[files]]
+src = "powershell/dotfiles.ps1"
+dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
+hint = "初回は $PROFILE に 1 行足す (win/README.md の「PowerShell」)。開いている PowerShell は . $PROFILE で読み直す"
