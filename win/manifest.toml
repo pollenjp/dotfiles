@@ -13,4 +13,4 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 [[files]]
 src = "powershell/dotfiles.ps1"
 dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
-hint = "初回は $PROFILE に 1 行足す (win/README.md の「PowerShell」)。開いている PowerShell は . $PROFILE で読み直す"
+hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は bootstrap-windows-powershell-profile.sh が足す)"

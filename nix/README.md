@@ -434,8 +434,8 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 8（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*`、`exe-exec-trace` を
@@ -581,6 +581,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、ほかの bootstrap を止めない |
+| `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -608,6 +609,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
+| 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
@@ -1009,6 +1011,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh            # 配る部分だけ
 ./nix/scripts/bootstrap-windows-files.sh --dry-run  # 判定だけ見る
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
+./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ```
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
@@ -1019,6 +1022,10 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   この手順だけ）。取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
 - 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
   設定画面の「ディスクから再読み込み」が要る
+- PowerShell の共有設定 (`win/powershell/dotfiles.ps1`) は、続く `bootstrap-windows-powershell-profile.sh`
+  (order 95) が `$PROFILE` に読み込みの 1 行を足して読ませる。`$PROFILE` の場所はマシンごとに
+  変わる (OneDrive のドキュメント) ので `pwsh.exe` に聞く。interop が落ちていたら手で打つ
+  コマンドを出して exit 0。配る経路 (コピー) には exe を挟まない（[`win/README.md`](../win/README.md#powershell)）
 
 経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
@@ -2131,6 +2138,7 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | --- | --- | --- |
 | `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
 | `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
+| `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
