@@ -1,0 +1,40 @@
+@startuml
+' bootstrap-windows-files.sh が manifest の 1 件ごとに行う判定
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #D5E8D4
+  BorderColor #666666
+  DiamondBackgroundColor #F7F7F7
+  DiamondBorderColor #666666
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title 1 ファイルごとの判定（bootstrap-windows-files.sh）
+
+start
+if (置き先はある?) then (無い)
+  :コピーする（tmp + mv）\n記録する\nhint を表示;
+elseif (置き先の中身は計画と同じ?) then (同じ)
+  :何もしない\n（記録が無ければ記録だけ）; <<#F7F7F7>>
+elseif (置き先の中身の hash は\n前回置いたときの記録と一致?) then (一致 = repo 側が更新された)
+  :上書きする（tmp + mv）\n記録を更新する\nhint を表示;
+elseif (--force?) then (あり)
+  :上書きする（tmp + mv）\n記録を更新する\nhint を表示;
+else (無し = Windows 側で変わった\nか、記録が無い)
+  :衝突\ndiff を出して触らない; <<#FFE6CC>>
+  note right : 全ファイルを処理し終えてから exit 1
+endif
+stop
+
+legend right
+  |<#D5E8D4> 置き先を書く |
+  |<#F7F7F7> 置き先に触らない |
+  |<#FFE6CC> 衝突（触らない） |
+  --dry-run は判定だけ出し、どの分岐でも書かない
+endlegend
+@enduml

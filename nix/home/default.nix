@@ -14,6 +14,7 @@
     ./modules/bash.nix
     ./modules/claude.nix
     ./modules/cc-pages.nix
+    ./modules/windows-files.nix
     ./modules/exe-exec-trace.nix
   ];
 
