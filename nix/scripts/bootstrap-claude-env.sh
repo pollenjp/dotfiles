@@ -144,7 +144,9 @@ if jq -e 'any(.gitConfig[]; .v | startswith("!gh "))' "${generated}" >/dev/null;
   if [[ -n ${others} ]]; then
     echo "!! git の設定ファイルに credential helper があります。Claude の git では gh より先に呼ばれ、" >&2
     echo "   gh で認証が通ると gh の token がそちらにも保存されます (store なら平文の ~/.git-credentials):" >&2
-    sed 's/\t/ /; s/^/     /' <<<"${others}" >&2
+    # scope と key の間の tab を空白にして字下げする。sed の \t は macOS の BSD sed では
+    # tab にならないので tr で替える。
+    tr '\t' ' ' <<<"${others}" | sed 's/^/     /' >&2
     echo "   外すか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
   fi
 fi

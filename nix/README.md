@@ -1640,6 +1640,9 @@ Claude Code 自身も条件によって同じ仕組みで `credential.interactiv
 `git remote get-url --push origin`（gitViaGh なら https）を実行させる。自分のターミナルで
 実行すると `true` と ssh の URL のまま。入らなければ再起動する。
 
+この振る舞い（option どおりの書き直し・警告）と状態ファイルの中身は、`nix/tests/` のテストが
+flake の `checks` で確かめている（[テスト](#テスト)）。
+
 #### 採らなかった案
 
 無署名:
@@ -2044,7 +2047,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 | ジョブ | ランナー | 内容 |
 | --- | --- | --- |
-| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド → sandbox への activate と冪等性 → `warnings` が空か |
+| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
 | `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
 
@@ -2076,6 +2079,32 @@ nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なので -L が必須
 ```
 
+### テスト
+
+`nix/tests/` に置き、flake の `checks` で流す。CI の `nix flake check` が毎回通す。
+`nix/pkgs/` の道具の unittest（ADR 012）と同じ扱い。
+
+| テスト | 確かめること | check の名前 |
+| --- | --- | --- |
+| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
+| `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
+| `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
+
+bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
+引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
+
+```sh
+nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ
+bash nix/tests/bootstrap-claude-env.test.sh                                    # サンドボックスの外で
+```
+
+- 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
+  `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
+  抜けないため
+- 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
+- `claude-env.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。外れた項目の
+  名前がエラーに出る
+
 ## ディレクトリ
 
 ```
@@ -2100,6 +2129,7 @@ nix/
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
