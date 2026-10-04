@@ -6,6 +6,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr の alias)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 
 ## 配る
 
@@ -72,3 +73,64 @@ jq --indent 2 . win/orca/keybindings.json | cmp - win/orca/keybindings.json   # 
 
 `null` はその操作の割り当てを外す。Ctrl+W をターミナルへ渡すため、`tab.close` と
 `terminal.closePane` を外している。値の書き方は Orca の設定画面で変えたときと同じ。
+
+## PowerShell
+
+配るのは共有設定の `powershell/dotfiles.ps1` だけで、`$PROFILE` そのものは配らない。
+`$PROFILE` はドキュメントの下にあり、ドキュメントの位置は OneDrive の設定でマシンごとに
+変わる (この PC では `OneDrive\ドキュメント`) ので、manifest の `dst` に書けない。
+
+新しいマシンでは、配った後に PowerShell で 1 回だけ打ち、`$PROFILE` に読み込む 1 行を足す:
+
+```powershell
+Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
+```
+
+- `Test-Path` で囲むのは、`$PROFILE` が OneDrive で他の PC へ同期されるため。dotfiles を
+  配っていない PC でも、起動のたびにエラーを出さずに済む
+- dot-source (`.`) で読む。`&` で呼ぶと子の scope で定義され、呼び終わりに消える
+- 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
+- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
+  そこに置いたままでよい
+
+alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) とそろえてある。
+足す・直すときは両方を変える。
+
+| 名前 | 中身 |
+| --- | --- |
+| `h` | `herdr` (`Set-Alias`。既定の alias の `h` = `Get-History` を上書きする) |
+| `hss` | `herdr --session` |
+| `hls` | `herdr session list` |
+| `ha` | `herdr session attach` |
+| `hkill` | `herdr session stop` |
+| `hdel` | `herdr session delete` |
+| `hst` | `herdr status` |
+| `hreload` | `herdr server reload-config` |
+
+叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr.Preview`) で、WSL の herdr とは
+別の server (session を共有しない)。
+
+### dotfiles.ps1 を書くときの注意
+
+- **BOM 付きの UTF-8 で保存する** (`.editorconfig` も `*.ps1` を `utf-8-bom` にしている)。
+  Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読み、日本語コメントの次の行を
+  黙って読み飛ばすことがある (`Set-Alias` の行が消えたのを確かめた)。PowerShell 7 はどちらでも読む
+
+  ```sh
+  head -c3 win/powershell/dotfiles.ps1 | od -An -tx1   # ef bb bf と出れば BOM 付き
+  ```
+
+- PowerShell の alias は引数を持てない。引数を足すものは function にする
+- 既定の alias と同じ名前は `Set-Alias -Option AllScope -Force` で上書きする。alias は function
+  より先に引かれるので、function を書いても既定の alias が当たる。5.1 の既定の alias には
+  AllScope が付いていて、`-Option AllScope` が無いと上書きできない
+
+### Windows PowerShell 5.1 でも使うなら
+
+5.1 は実行ポリシーの既定が Restricted で、`$PROFILE` を読まない。使うなら 5.1 で次の 2 つを打つ
+(5.1 の実行ポリシーと `$PROFILE` は PowerShell 7 とは別):
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
+```

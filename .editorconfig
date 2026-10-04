@@ -7,3 +7,6 @@ indent_size = 2
 binary_next_line = true
 case_indent = true
 switch_case_indent = true
+
+[*.ps1] # Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む (win/README.md)
+charset = utf-8-bom
