@@ -9,6 +9,18 @@
 | 前提 ADR | [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（マシン固有の値は host option で明示する / ローカル flake は本体の `nix/` を `path:` で読む）、[007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（アプリが書き換えるファイルへは「Nix が値を置き、bootstrap が写す」） |
 | 運用手順 | [`win/README.md`](../../../win/README.md)、[`nix/README.md`「Windows 側のファイルを配る」](../../../nix/README.md#windows-側のファイルを配る) |
 
+> **追記 (2026-10-05、[TKT-82](https://app.notion.com/p/PowerShell-PROFILE-1-bootstrap-TKT-77-3ef79149a66f816d8b0bf7a8d68b20c5))**
+>
+> - PowerShell の共有設定 (`win/powershell/dotfiles.ps1`、TKT-77) を `$PROFILE` から読ませる
+>   1 行だけは、bootstrap が `pwsh.exe` に `$PROFILE` の場所を聞いて足す
+>   (`nix/scripts/bootstrap-windows-powershell-profile.sh`、order 95)。`$PROFILE` はドキュメントの下に
+>   あり、その位置は OneDrive の設定でマシンごとに変わるので、manifest の `dst` にも host option にも書けない
+> - 1-5「配る経路に Windows の exe を挟まない」は変えていない。ファイルを配る経路 (コピー) は
+>   今のまま exe を通らず、この手順は別の手順として後に走る。interop が落ちていたら手で打つ
+>   コマンドを出して exit 0 で飛ばす (配布も setup の後続も止めない)
+> - 足した記録があるのに行が消えていたら、Windows 側で外したものとして足し直さない
+>   (D の「衝突したら止める」と同じ考え方)。`--force` で足し直す
+
 ---
 
 ## 1. 背景 (Context)

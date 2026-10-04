@@ -80,10 +80,12 @@ jq --indent 2 . win/orca/keybindings.json | cmp - win/orca/keybindings.json   # 
 `$PROFILE` はドキュメントの下にあり、ドキュメントの位置は OneDrive の設定でマシンごとに
 変わる (この PC では `OneDrive\ドキュメント`) ので、manifest の `dst` に書けない。
 
-新しいマシンでは、配った後に PowerShell で 1 回だけ打ち、`$PROFILE` に読み込む 1 行を足す:
+`$PROFILE` に読み込みの 1 行を足すのは、`setup --update` の
+`nix/scripts/bootstrap-windows-powershell-profile.sh` (`dotfiles.ps1` を配る手順の後に走る)。
+`pwsh.exe` に `$PROFILE` の場所を聞き、次の 1 行が無ければ足す:
 
 ```powershell
-Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
+if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }
 ```
 
 - `Test-Path` で囲むのは、`$PROFILE` が OneDrive で他の PC へ同期されるため。dotfiles を
@@ -92,6 +94,14 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 - 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
 - `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
   そこに置いたままでよい
+- 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
+  `nix/scripts/bootstrap-windows-powershell-profile.sh --force`
+- `$PROFILE` の場所は WSL の interop で聞く。interop が落ちていると足せないので、そのときは
+  setup が出す次のコマンドを PowerShell 7 で 1 回打つ:
+
+  ```powershell
+  Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
+  ```
 
 alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) とそろえてある。
 足す・直すときは両方を変える。
