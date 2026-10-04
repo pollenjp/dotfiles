@@ -76,6 +76,11 @@
       # home 以外に、nix/pkgs/ の道具の unittest も載せる (Linux だけ)。トレーサの BPF と
       # systemd の unit は root とカーネルが要るので、ここで確かめるのは純粋な部分
       # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
+      #
+      # nix/tests/ のテストも載せる。
+      #   <名前>.test.sh   bootstrap などの script の振る舞い。bash・jq・git だけの
+      #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
+      #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
       checks = forAllSystems (
         system:
         let
@@ -87,6 +92,19 @@
               PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
               touch $out
             '';
+          scriptTest =
+            name: target:
+            pkgs.runCommand "${name}-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests + "/${name}.test.sh"} ${target}
+                touch $out
+              '';
         in
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
@@ -94,6 +112,18 @@
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
+          bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
+          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+        }
+        // {
+          claude-env-state = import ./tests/claude-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 
