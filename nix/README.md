@@ -435,15 +435,21 @@ nix flake update dotfiles --flake ~/dotfiles
 | 選択肢 | 実行される手順 |
 | --- | --- |
 | 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8（**冪等な手順は全部走る**。下記） |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
-「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
-どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、繰り返しても
-状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
+「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*`、`exe-exec-trace` を
+毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
+繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
 並べるしかなくなる。時間が気になるとき・一部だけ走らせたいときは「カスタム」か
 `--steps` で選び直す。
+
+8 `exe-exec-trace` は中で `sudo` を呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・
+止まっているのを起こすときだけで、揃っていれば（option が無効なマシンも）呼ばない。
+`sudo` がパスワードを訊けないとき（パスワード無しで通らず、端末も無い。Claude の Bash
+ツールから打ったときなど）は失敗にせず飛ばし、最後の「残りの手作業」がずれを知らせる
+（[後述](#wsl-の-exe-の起動を常時記録する)）。
 
 入っていないのは、冪等でないか更新時には有害な手順。
 
@@ -596,13 +602,14 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
-| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude の commit を無署名にする env 登録（[後述](#claude-の-commit-を無署名にする)） |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
+| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -707,7 +714,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`ssh-config` と `bootstrap-*` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`ssh-config` と `bootstrap-*`、`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
@@ -752,6 +759,7 @@ wsl = {
   enable = true;               # WSL か
   windowsUserName = "polle";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
   windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
+  exeExecTrace.enable = true;  # WSL から起動された .exe を常時記録するか（後述）
   onePassword.enable = true;   # ホスト側 Windows の 1Password を使うか（WSL 専用）
 };
 ```
@@ -796,6 +804,9 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 - `wsl.onePassword.enable` が true なのに `onePassword.windowsUserName`（既定は `wsl.windowsUserName`）が無い
 - `wsl.windowsFiles.enable` が true なのに `wsl.enable` が false
 - `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
+- `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
+
+`exeExecTrace` は 1Password の有無とは別に選べる（登録簿では `pollenjp@wsl` だけ true）。
 
 ### 登録簿に載せずにマシンを足す
 
@@ -809,6 +820,7 @@ outputs =
     # このマシンだけの設定。登録簿のホストにも、下で足したホストにも当たる。
     local = {
       dotfiles.claude.devTracker.enable = false;
+      dotfiles.claude.notion.profile = null; # "personal" / "work"
     };
   in
   {
@@ -860,6 +872,14 @@ home-manager switch --flake ~/dotfiles#tmp
 雛形の `local` は **`dotfiles.claude.devTracker.enable = false`** を持つ。本体の option の
 既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
 （何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
+
+`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git は gh の資格情報で GitHub へ
+HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
+置いてある。gh にログインしないマシンだけ外す
+（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
+
+Notion へ書く skill の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで skill が止まる）で、
+使うマシンでは `"personal"` / `"work"` を書く（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
@@ -954,6 +974,9 @@ nix flake update --flake ~/ghq/github.com/pollenjp/dotfiles/nix
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
+| `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
+| `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -1041,7 +1064,8 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 よい（git の読み込み順により home-manager の設定を上書きできる）。
 
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
-止まるため。[Claude の commit を無署名にする](#claude-の-commit-を無署名にする)を参照。
+止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
+gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
 
 ## ssh について
 
@@ -1139,6 +1163,128 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 
 Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
 Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
+
+### WSL の .exe の起動を常時記録する
+
+上のラッパーで、WSL の `ssh` は Windows の `ssh.exe` として 1Password に届く。そのため
+**1Password の承認ダイアログは要求元を「Windows Terminal」としか出さない。** しかも承認は
+タブ（`wsl.exe`）単位で効くので、一度承認すると同じタブのどのプロセス（herdr の別ペインや
+Claude Code など）もダイアログ無しで鍵を使える。要求元が分かるのは Linux 側で `.exe` の
+起動を見たときだけなので、そのための道具を 2 つ置く（経緯は
+[ADR 012](../docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md)）。
+
+| 道具 | 置かれるマシン | 使いどころ |
+| --- | --- | --- |
+| `pjp-who-is-asking` | `wsl.enable` | ダイアログが出ている間に打つ。要求元を Windows と Linux をまたいだ 1 本の木で出す |
+| `pjp-exe-exec-trace` | `wsl.exeExecTrace.enable` | root の systemd の unit で常時動かす。WSL から起動された `.exe` を祖先付きで journald に残す（黙って通った要求も残る） |
+
+#### 入れる
+
+登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
+`local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
+**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順
+`exe-exec-trace` で、「既存マシン更新」（`--update`）の最後に走り、中で `sudo` を呼ぶ。
+**`sudo` を付けて打たないこと**（`HOME` が root のものになり、生成された unit を見失うので、
+手順は root では断る）。
+
+```sh
+~/dotfiles/setup --update   # unit ファイルを生成し、/etc へ入れて起こす (中で sudo を呼ぶ)
+```
+
+パスワード無しで `sudo` できないマシンで、端末の無いところ（Claude の Bash ツールなど）から
+打つと、手順は入れずに飛ばし、最後の「残りの手作業」に「unit がまだ入っていない」と出る。
+そのときは端末から `~/dotfiles/setup --steps exe-exec-trace` を打つ。
+
+unit は `Type=notify` なので、手順の `restart` はトレーサが BPF を読み込み終えるまで待ち、
+読み込みに失敗すれば手順も失敗する。起動に失敗し続けたら（WSL のカーネルが更新されて
+BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になる。手順は止まっている
+unit を起こし直すので、直るまでは `--update` の最後のこの手順が失敗する
+（理由は `sudo journalctl -u dotfiles-exe-exec-trace -n 30` で見る。止めておきたいなら
+option を false にする）。
+
+unit の `ExecStart` は store の固定パスにしてある（root がユーザーの書き換えられるパスを
+実行しないため）。その代わり、トレーサが更新されたら unit を入れ替える必要がある。
+`--update` が switch の後にこの手順も走らせるので、更新と一緒に入れ替わる。手順を外して
+走らせたときや `sudo` を訊けずに飛ばしたときは古い版が動き続け、最後の「残りの手作業」に
+「入っている unit が古い」と出る。
+手順は unit の store パスへ GC root（`/nix/var/nix/gcroots/dotfiles-exe-exec-trace`）を
+張るので、`nix-collect-garbage` で動いているトレーサが消えることはない。
+
+#### 読む
+
+```sh
+journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty           # 全部
+journalctl -u dotfiles-exe-exec-trace -o cat --since today | pjp-exe-exec-trace --pretty
+journalctl -u dotfiles-exe-exec-trace -o cat -f | pjp-exe-exec-trace --pretty        # 流れてくるのを見る
+```
+
+ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動したときの記録（cwd・env・
+祖先の cmdline の行は略）:
+
+```
+2026-10-01T00:53:26.981+09:00  ssh.exe  pid=446394 uid=1000 distro=this
+    argv[0]: ssh.exe
+    argv[1]: -o
+    argv[2]: IdentityAgent=none
+    argv[3]: -o
+    argv[4]: BatchMode=yes
+    argv[5]: -o
+    argv[6]: ConnectTimeout=3
+    argv[7]: -o
+    argv[8]: SendEnv=GIT_PROTOCOL
+    argv[9]: fake@192.0.2.1
+    argv[10]: git-upload-pack '/pollenjp/example.git'
+    at exec: git(446393) <- zsh(446388) <- claude(15259) <- fish(1328) <- herdr(972) <- …
+```
+
+- 引数は 1 引数 1 行で、祖先のコマンドラインは 1 プロセス 1 行で、記録してある分（1 つ 1 KiB
+  まで）を切らずに出す。Claude の Bash ツールは `zsh -c 'source <スナップショット> … && eval '<実際の
+  コマンド>''` の形で、実際のコマンドが長い前置きの後ろにあるので、祖先の行は長くなる
+- 祖先のコマンドラインは、1 つの引数に空白があっても区切りが分かるようシェルの引用でつないで
+  記録する（`zsh -c 'echo a b'`）。2026-10-02 より前の記録は空白でつないだまま
+
+- `adm` か `systemd-journal` のグループに入っていれば `sudo` は要らない
+- agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
+  以外には「踏み台かもしれない .exe」と付く。`wsl.exe` や `cmd.exe` を経由した要求は、
+  `ssh.exe` の祖先が新しいセッションの `/init` で途切れるので、直前に起動した踏み台の祖先を見る
+- agent に届くものだけ見るなら `pjp-exe-exec-trace --pretty --only-agent`
+- 1 行 1 イベントの JSON。`-o cat` には systemd の「Started …」のような JSON でない行も
+  混ざるので、`jq` で読むなら `jq -cR 'fromjson? | select(.agent)'` のように読めない行を飛ばす
+- 表示では、記録の中の改行や ESC などの制御文字を `\xNN` にする（記録される側が argv で
+  偽の行を差し込んだり端末を操作したりできないように）
+
+ダイアログが出ている間なら、その場で木を出す方が早い。
+
+```sh
+pjp-who-is-asking                # Windows 側も取る (powershell.exe で 1〜2 秒)
+pjp-who-is-asking --no-windows   # Linux 側だけ
+```
+
+#### 外す
+
+`exeExecTrace.enable` を false にして `--update` を打つ。switch の後に走る手順が、
+生成された unit が無いので、入っている unit を止めて消す（GC root も消す）。
+
+```sh
+~/dotfiles/setup --update
+```
+
+#### 気を付けること
+
+- **閉包が約 1.5 GiB 増える。** bcc は実行時に BPF のプログラムを clang でコンパイルするので、
+  clang と LLVM を丸ごと持つ
+- 常駐中のメモリは約 160 MB。起動のたびに数秒 CPU を使う（BPF のコンパイル）
+- 他ディストロの起動も記録されるが、祖先は comm と PID だけになる（その `/proc` は見えない）
+- 親が先に終了した要求（`cmd & exit` や `nohup`）は、祖先がセッションの `/init` で途切れる。
+  代わりに env（`CLAUDE_CODE_SESSION_ID` / `HERDR_PANE_ID` / `WT_SESSION`）と cwd が残る
+- **隠れようとする相手の記録には使えない。** 記録するのは名前が `.exe` で終わる実行ファイルの
+  起動だけで、`.exe` でない名前にした Windows の実行ファイル・`$WSL_INTEROP` のソケットを直接
+  叩く interop・journald の流量制限を超える大量の起動では抜けられる。パスワード無しで
+  `sudo` できるマシンなら、同じユーザーのプロセスは unit ごと止められる。記録できるのは
+  「隠れる気の無い呼び出し元」（普通のツールやエージェント）までと考える
+- 記録には argv と祖先のコマンドライン（それぞれ 1 KiB まで）が残る。`/var/log/journal` は
+  `adm` のグループで読め、`wsl --export` にも入るので、コマンドラインに秘密を渡す使い方には
+  向かない
 
 ### forward された agent を固定名で見せる
 
@@ -1302,6 +1448,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
+| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1403,27 +1550,113 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
 
-### Claude の commit を無署名にする
+### Claude のセッションだけ git の設定を変える
+
+Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
+ターミナルの git は変わらない。
+
+- **commit を無署名にする**（いつも）
+- **GitHub へは gh の資格情報（HTTPS）で通す**（host option `dotfiles.claude.gitViaGh.enable`、既定 true）
+
+#### commit を無署名にする
 
 このマシンの git は 1Password の `op-ssh-sign` で署名する（[前述](#git-について)）。
 署名のたびにホスト側 Windows の 1Password が承認ダイアログを出すため、Claude に
 commit させるとそこで止まる。**Claude のセッションからの commit だけ**署名を外す。
+tag も同じダイアログで止まるので併せて落とす。
+
+> ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
+> commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+
+#### GitHub へは gh の資格情報（HTTPS）で通す
+
+ssh の remote への push / fetch は、WSL では `ssh.exe`（1Password の agent）を通る
+（[ssh について](#ssh-について)）。そのため interop が外れると `Exec format error` で落ち、
+通っても 1Password の承認ダイアログで止まる。gh は HTTPS の API で動くのでどちらにも依らない。
+そこで Claude のセッションでは、GitHub の ssh の URL を https に読み替え、資格情報を gh から取る。
+
+| git の設定 | 値 | 効き方 |
+| --- | --- | --- |
+| `url.https://github.com/.insteadOf` | `git@github.com:` と `ssh://git@github.com/` | fetch と push の両方で URL を読み替える。origin の URL は書き換えない |
+| `credential.https://github.com.helper` | `!gh auth git-credential` | gh の token を git に渡す |
+
+Claude は素の `git push` を打つだけでよい。skill が打つ `git push -u origin …` も
+HTTPS になり、origin 名のまま通るので `origin/<branch>` も普段どおり進む。
+
+読み替わるのは `git@github.com:` と `ssh://git@github.com/` で始まる URL だけ。ssh の
+ホスト別名（`~/.ssh/config` の `Host` で付けた名前）や `gist.github.com` の remote は
+今までどおり ssh を通る。別名は別アカウントの鍵を使うためのものなので、gh の token
+（1 アカウント分）に寄せないのはむしろ都合がよい。
+
+**前提は `gh auth login` 済みであること。** gh 自体は `home/modules/packages.nix` が入れる
+（以前は mise の `github-cli` で入れていた。mise 側が残っていても動き、PATH の先にある方が
+使われる）。gh が無い・未ログインなら
+bootstrap が警告し、`setup` の最後のまとめ（残りの手作業）にも出す。git の設定ファイルに
+別の credential helper があるときも警告する（gh より先に呼ばれ、gh の token がそちらにも
+保存されるため）。
+gh にログインしないマシンは option を false にすると、今までどおり ssh を通る。
+
+```nix
+# ~/dotfiles/flake.nix の local（このマシンだけ）
+local = {
+  dotfiles.claude.gitViaGh.enable = false;
+};
+
+# または登録簿 hosts/default.nix の mkHome
+claude.gitViaGh.enable = false;
+```
+
+> ⚠️ gh の token に **workflow scope** が無いと、`.github/workflows/` を変える push を
+> GitHub が拒否する（`refusing to allow an OAuth App to create or update workflow … without
+> 'workflow' scope`）。`gh auth refresh -h github.com -s workflow` で足す。
+> scope は自動では足さない（token の権限を広げるかは人が決める）。
 
 #### 登録（冪等。更新時も毎回走る）
 
 ```sh
-./nix/scripts/bootstrap-claude-env.sh
+~/dotfiles/setup --update                 # switch + bootstrap をまとめて
+./nix/scripts/bootstrap-claude-env.sh     # env の部分だけ
 ```
 
-`~/.claude/settings.json` の `env` へ、git の config を環境変数の形で書く。
+`switch` が望む値を `~/.local/state/dotfiles/claude-env.json` に置き
+（`home/modules/claude.nix`）、bootstrap がそれを `~/.claude/settings.json` の `env` へ
+git の config を環境変数の形で写す。settings.json は Claude Code 自身が書き換えるので
+Nix では置けない（[skill の host option](#claude-code-の-skill-を-host-ごとに止める) と同じ 2 段）。
+
+```json
+{
+  "managed": [
+    "commit.gpgsign",
+    "tag.gpgsign",
+    "url.https://github.com/.insteadOf",
+    "credential.https://github.com.helper"
+  ],
+  "gitConfig": [
+    { "k": "commit.gpgsign", "v": "false" },
+    { "k": "tag.gpgsign", "v": "false" },
+    { "k": "url.https://github.com/.insteadOf", "v": "git@github.com:" },
+    { "k": "url.https://github.com/.insteadOf", "v": "ssh://git@github.com/" },
+    { "k": "credential.https://github.com.helper", "v": "!gh auth git-credential" }
+  ]
+}
+```
+
+gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`managed` は option の値に
+よらず 4 つのまま。settings.json にはこう入る（true のとき）。
 
 ```json
 "env": {
-  "GIT_CONFIG_COUNT": "2",
+  "GIT_CONFIG_COUNT": "5",
   "GIT_CONFIG_KEY_0": "commit.gpgsign",
   "GIT_CONFIG_VALUE_0": "false",
   "GIT_CONFIG_KEY_1": "tag.gpgsign",
-  "GIT_CONFIG_VALUE_1": "false"
+  "GIT_CONFIG_VALUE_1": "false",
+  "GIT_CONFIG_KEY_2": "url.https://github.com/.insteadOf",
+  "GIT_CONFIG_VALUE_2": "git@github.com:",
+  "GIT_CONFIG_KEY_3": "url.https://github.com/.insteadOf",
+  "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
+  "GIT_CONFIG_KEY_4": "credential.https://github.com.helper",
+  "GIT_CONFIG_VALUE_4": "!gh auth git-credential"
 }
 ```
 
@@ -1431,21 +1664,31 @@ git は `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` / `GIT_CONFIG_VALUE_<n>` で�
 config を **config ファイルより優先する**。そのため効き方がこうなる。
 
 - **Claude のセッション（Bash tool）にだけ効く。** 自分の手元のターミナルからの commit は
-  今どおり 1Password で署名される
+  今どおり 1Password で署名され、push も今どおり ssh を通る
 - `git commit` 直打ちでも `--amend` でも `rebase --continue` でも `git tag` でも効く。
   「`--no-gpg-sign` を付ける」という指示と違い、忘れる余地が無い
 
-Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入するが、
-**既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない。
+Claude Code 自身も条件によって同じ仕組みで `credential.interactive=false` を注入するが、
+**既存の `GIT_CONFIG_COUNT` を読んでその先に足す**実装なので競合しない
+（このマシンの Bash tool の env には出ていない。本体に処理があることは確認済み）。
 
-冪等で、`env` の他のキーは保持する。無関係な `GIT_CONFIG_*` ペアが既にあれば順序を保って
-残し、番号だけ 0 から振り直す（番号に穴があると git はその手前までしか読まない）。
+冪等で、`env` の他のキーは保持する。`managed`（と `gitConfig`）のキーを持つ組は
+いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
+3 組が消える。無関係な `GIT_CONFIG_*` の組は順序を保って残し、番号だけ 0 から振り直す
+（番号に穴があると git はその手前までしか読まない）。生成ファイルが無ければ（この形を
+置く世代へまだ switch していなければ）警告して飛ばす。
 
 **実行中のセッションにも入る**（このマシンでは再起動なしで反映された）。確認は
-`env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign` を実行させて
-`false` になること（自分のターミナルで実行すると `true` のまま）。入らなければ再起動する。
+`env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign`（`false`）と
+`git remote get-url --push origin`（gitViaGh なら https）を実行させる。自分のターミナルで
+実行すると `true` と ssh の URL のまま。入らなければ再起動する。
+
+この振る舞い（option どおりの書き直し・警告）と状態ファイルの中身は、`nix/tests/` のテストが
+flake の `checks` で確かめている（[テスト](#テスト)）。
 
 #### 採らなかった案
+
+無署名:
 
 | 案 | 却下理由 |
 | --- | --- |
@@ -1454,8 +1697,15 @@ Claude Code 自身も同じ仕組みで `credential.interactive=false` を注入
 | `includeIf "gitdir:~/.herdr/worktrees/"` | worktree の外で Claude が commit すると効かず、逆に worktree で自分が commit すると無署名になる |
 | `PreToolUse` で `git commit` を deny | 効くが bash 文字列の解析（複合コマンド・クォート）が要る。env で足りる |
 
-> ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
-> commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+GitHub へは HTTPS:
+
+| 案 | 却下理由 |
+| --- | --- |
+| `CLAUDE.md` に「push は `https://` の URL で」と書く | soft な指示なので忘れうる。skill は素の `git push` を打つ。URL を直に指定する push は `origin/<branch>` を進めない |
+| global の git config（home-manager）に `insteadOf` | 自分の push も 1Password の ssh を通らなくなる |
+| `pushInsteadOf`（push だけ読み替える） | fetch / pull は ssh.exe を通るまま |
+| 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない（あれば bootstrap が警告する） |
+| gh 未ログインなら HTTPS の組を書かない | 結果が option ではなくその時のログイン状態で決まる。警告だけにする |
 
 ### Claude Code の skill を host ごとに止める
 
@@ -1522,6 +1772,62 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | CLAUDE.md を 1 ファイルのまま Nix でマーカー間を切り抜く | Nix の `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
 
 経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
+
+### Notion の宛先を host ごとに選ぶ
+
+Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-authoring`・
+`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、マシンごとに違う（会社のマシンは
+仕事の workspace、自宅は個人の workspace）。宛先の**名前**を host option
+**`dotfiles.claude.notion.profile`** で選び、**値**は private の `claude-skills` の
+`skills/pjp-notion-profile/profiles.toml` が持つ。
+
+| 置くもの | 場所 | 例 |
+| --- | --- | --- |
+| どのプロファイルを使うか | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
+| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ scanData = "https://app.notion.com/p/…"; }` |
+| プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
+| repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
+
+値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
+
+`devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
+Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
+Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
+このマシンだけ変えるなら `dotfiles.claude.notion.override = { devTracker.linkFromRepo = true; };`。
+
+#### 値の置き場
+
+```nix
+local = {
+  dotfiles.claude.notion.profile = "personal";
+  # このマシンだけ一部を差し替える。キーは profiles.toml と同じで、null はキーを消す
+  dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
+};
+```
+
+登録簿のホストを直接指すなら `mkHome` に `claude.notion.profile = "personal";`。
+
+#### 反映
+
+`switch` が `~/.local/state/dotfiles/claude-notion.json`（`{"override":{},"profile":"personal"}`）を置き、
+`claude-skills` の resolver がそれを `profiles.toml` と重ねる。settings.json は触らないので
+`switch` だけで揃う（`~/dotfiles/setup --update` でもよい）。
+
+- profile が `null`（雛形の既定）で override も空なら、skill は「宛先が決まらない」と止まる。
+  黙って別の workspace へ書かないため
+- override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `devTracker.enable = true` なのに profile も override も無いマシンでは、switch のときに警告が出る
+  （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
+
+#### 確認
+
+```sh
+cat ~/.local/state/dotfiles/claude-notion.json
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と出どころ
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
+```
+
+経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)。
 
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 
@@ -1784,7 +2090,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 | ジョブ | ランナー | 内容 |
 | --- | --- | --- |
-| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド → sandbox への activate と冪等性 → `warnings` が空か |
+| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
 | `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
 
@@ -1816,6 +2122,32 @@ nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なので -L が必須
 ```
 
+### テスト
+
+`nix/tests/` に置き、flake の `checks` で流す。CI の `nix flake check` が毎回通す。
+`nix/pkgs/` の道具の unittest（ADR 012）と同じ扱い。
+
+| テスト | 確かめること | check の名前 |
+| --- | --- | --- |
+| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
+| `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
+| `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
+
+bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
+引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
+
+```sh
+nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ
+bash nix/tests/bootstrap-claude-env.test.sh                                    # サンドボックスの外で
+```
+
+- 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
+  `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
+  抜けないため
+- 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
+- `claude-env.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。外れた項目の
+  名前がエラーに出る
+
 ## ディレクトリ
 
 ```
@@ -1826,13 +2158,13 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.devTracker.enable
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,override}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
-│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成) と claude-personal / claude-work
+│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
@@ -1842,6 +2174,7 @@ nix/
 ├── files/                 既存設定の複製 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -1851,7 +2184,7 @@ nix/
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-env.sh     Claude の commit を無署名にする env を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)

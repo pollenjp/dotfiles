@@ -37,11 +37,11 @@
 #
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
-#                    (フック / statusLine の登録、git の署名を切る env、
+#                    (フック / statusLine の登録、git の設定を渡す env、
 #                    skill を隠す skillOverrides) は scripts/bootstrap-claude-*.sh
-#                    がマシンごとに注入する。skillOverrides だけは望む値を
-#                    ~/.local/state/dotfiles/claude-skill-overrides.json に
-#                    Nix が置き (下記)、script はそれを写すだけにしている
+#                    がマシンごとに注入する。skillOverrides と env は望む値を
+#                    ~/.local/state/dotfiles/claude-skill-overrides.json /
+#                    claude-env.json に Nix が置き (下記)、script はそれを写すだけにしている
 #   plugins/       : 実行時に取得・更新される
 #   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
 #                    載せると CI の nix flake check も fetch できずに落ちる。
@@ -49,6 +49,12 @@
 #                    symlink を張る。詳細は nix/README.md
 #   ~/.claude-<名前>/ : 下の claude-<名前> コマンドが使う dir。中身の symlink と plugin は
 #                    scripts/bootstrap-claude-accounts.sh が用意する (次節)
+#
+# ## Notion へ書く skill の宛先 (claude-notion.json)
+#
+# dotfiles.claude.notion.{profile,override} を ~/.local/state/dotfiles/claude-notion.json に
+# 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
+# (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
 #
 # ## ログインアカウントを分ける (claude-personal / claude-work)
 #
@@ -74,6 +80,38 @@
 let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
+
+  # Claude のセッション (Bash tool) にだけ渡す git の設定。1 組が
+  # GIT_CONFIG_KEY_<n> / GIT_CONFIG_VALUE_<n> の 1 対になる (並びもこのまま)。
+  #
+  #   gitConfigBase  いつも入れる。commit / tag を無署名にする (1Password の
+  #                  承認ダイアログで止まるため)
+  #   gitConfigGh    gitViaGh.enable のときだけ入れる。GitHub の ssh の URL を
+  #                  https に読み替え、資格情報を gh の token から取る
+  gitConfigBase = [
+    {
+      k = "commit.gpgsign";
+      v = "false";
+    }
+    {
+      k = "tag.gpgsign";
+      v = "false";
+    }
+  ];
+  gitConfigGh = [
+    {
+      k = "url.https://github.com/.insteadOf";
+      v = "git@github.com:";
+    }
+    {
+      k = "url.https://github.com/.insteadOf";
+      v = "ssh://git@github.com/";
+    }
+    {
+      k = "credential.https://github.com.helper";
+      v = "!gh auth git-credential";
+    }
+  ];
 
   # dir 名 (~/.claude-<名前>) とコマンド名に使う。bootstrap も同じ規則で弾くので、
   # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
@@ -153,6 +191,20 @@ let
 in
 
 {
+  # Dev Tracker を使うのに Notion の宛先を選んでいないマシンでは、pjp-dev-tracker の
+  # ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
+  # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
+  warnings =
+    lib.optional (cfg.devTracker.enable && cfg.notion.profile == null && cfg.notion.override == { })
+      ''
+        dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
+        Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。
+        ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
+        switch してください。local が無い古い雛形なら setup-local-flake.sh --force で作り直し、
+        登録簿のホストを直接使っているなら mkHome に claude.notion.profile を渡します
+        (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
+      '';
+
   home.packages = map mkAccountCommand accounts;
 
   home.file = lib.mkMerge [
@@ -197,6 +249,38 @@ in
     # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
     {
       ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
+    }
+
+    # Claude のセッションに渡す git の設定 (settings.json の env の GIT_CONFIG_*)。
+    #
+    # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+    # nix/scripts/bootstrap-claude-env.sh が写す。
+    #
+    #   managed    bootstrap が面倒を見るキー。env にあるこのキーの組はいったん全部外し、
+    #              gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
+    #              消えるよう、option の値によらず両方の組のキーを載せる。
+    #              使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
+    #              組が残り続ける)
+    #   gitConfig  入れる組
+    {
+      ".local/state/dotfiles/claude-env.json".text =
+        builtins.toJSON {
+          managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
+          gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
+        }
+        + "\n";
+    }
+
+    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの上書き)。
+    #
+    # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
+    # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
+    {
+      ".local/state/dotfiles/claude-notion.json".text =
+        builtins.toJSON {
+          inherit (cfg.notion) profile override;
+        }
+        + "\n";
     }
 
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。

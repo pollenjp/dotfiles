@@ -72,11 +72,59 @@
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
       # 各 system には、その system 向けの設定だけを載せる。
+      #
+      # home 以外に、nix/pkgs/ の道具の unittest も載せる (Linux だけ)。トレーサの BPF と
+      # systemd の unit は root とカーネルが要るので、ここで確かめるのは純粋な部分
+      # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
+      #
+      # nix/tests/ のテストも載せる。
+      #   <名前>.test.sh   bootstrap などの script の振る舞い。bash・jq・git だけの
+      #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
+      #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
       checks = forAllSystems (
         system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          unittest =
+            name:
+            pkgs.runCommand "${name}-unittest" { nativeBuildInputs = [ pkgs.python3 ]; } ''
+              cd ${./pkgs + "/${name}"}
+              PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
+              touch $out
+            '';
+          scriptTest =
+            name: target:
+            pkgs.runCommand "${name}-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests + "/${name}.test.sh"} ${target}
+                touch $out
+              '';
+        in
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
+          pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
+          bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
+          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+        }
+        // {
+          claude-env-state = import ./tests/claude-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+        }
       );
 
       # 初回ブートストラップ用。
@@ -140,6 +188,15 @@
             ];
             text = builtins.readFile ./scripts/flake-lock-age.sh;
           };
+        }
+        # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
+        # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:
+        #
+        #   sudo "$(nix build --no-link --print-out-paths ./nix#pjp-exe-exec-trace)/bin/pjp-exe-exec-trace"
+        #   nix run ./nix#pjp-who-is-asking
+        // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
+          pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
         }
       );
 

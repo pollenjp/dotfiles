@@ -8,9 +8,15 @@
 #   username        Linux/macOS 側のユーザー名 (必須)
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
-#   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン
+#   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
+#                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
+#                   祖先付きで journald に常時記録する (ADR 012。unit を /etc へ入れるのは
+#                   `~/dotfiles/setup --update` の最後の手順 exe-exec-trace。中で sudo を呼ぶ)
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
+#                   claude.gitViaGh.enable = false で、Claude の git を gh の資格情報 (HTTPS)
+#                   ではなく ssh で GitHub へ通すマシンにする (既定は gh。gh auth login が前提)。
+#                   claude.notion.profile で Notion へ書く skill の宛先のプロファイルを選ぶ (既定は null)。
 #                   会社のマシンのように public に載せたくない差分は、この登録簿ではなく
 #                   ローカル flake (~/dotfiles/flake.nix) の local module に書く。雛形は
 #                   devTracker.enable = false を既定にしている (README「登録簿に載せずにマシンを足す」)
@@ -61,6 +67,13 @@
       # (getEnv や --impure は nix flake check を壊す)。よってここに直接書く。
       windowsUserName = "polle";
       windowsFiles.enable = true;
+      # WSL から起動された Windows の .exe (ssh.exe など) を、起動元の祖先付きで journald に
+      # 常時記録する (ADR 012)。1Password の承認ダイアログは要求元を「Windows Terminal」と
+      # しか出さず、承認後は同じタブのどのプロセスも黙って鍵を使えるため。
+      # eBPF に root が要るので、home-manager switch だけでは unit ファイルが置かれるだけで
+      # 何も動かない。`~/dotfiles/setup --update` の最後の手順 exe-exec-trace が /etc へ
+      # 入れて起こす (中で sudo を呼ぶ)。
+      exeExecTrace.enable = true;
       onePassword.enable = true;
     };
   };
@@ -87,5 +100,8 @@
     username = "user";
     system = "x86_64-linux";
     homeDirectory = "/tmp/hm-sandbox";
+    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。選ばないと
+    # home/modules/claude.nix が warnings を出し、CI の「warnings が空」で落ちる。
+    claude.notion.profile = "personal";
   };
 }
