@@ -186,6 +186,11 @@ jobs:
       - name: win/manifest.toml
         run: ./nix/scripts/bootstrap-windows-files.sh --check
 
+      # herdr のキーバインドを WSL (nix/files/herdr/config.toml) と Windows (win/herdr/config.toml)
+      # でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
+      - name: herdr のキーバインド (WSL と Windows)
+        run: ./nix/scripts/check-herdr-keys.sh
+
   # 閉包を SBOM 化して OSV / GHSA / NVD と照合する (ADR 006)。
   #
   # 遅延 pin (lock-age) は「発覚済みの侵害バージョンを下限日数のあいだ固定し

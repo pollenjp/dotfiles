@@ -7,6 +7,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | --- | --- | --- |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr の alias)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドは WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 
 ## 配る
 
@@ -144,3 +145,37 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
 ```
+
+## herdr
+
+`herdr/config.toml` は Windows の herdr (WinGet の `Herdr.Herdr.Preview`) の設定で、
+`%APPDATA%\herdr\config.toml` へ配る。キーバインドは WSL の herdr
+(`nix/files/herdr/config.toml`) と同じにしてあり、キーごとの意図はそちらのコメントにある。
+
+- `[keys]` と `onboarding` は WSL 側と同じに保つ。CI の lint が 2 つを比べ、違えば落ちる。
+  手元でも確かめられる:
+
+  ```sh
+  nix/scripts/check-herdr-keys.sh   # 「WSL と Windows で同じ (13 個)」と出れば揃っている
+  ```
+
+- WSL 側との違いは `[terminal]` を書かないことだけ。WSL 側の `default_shell = "fish"` は
+  Windows に無い。空のままなら、Windows の herdr は PATH の `pwsh.exe` (PowerShell 7) を使い、
+  無ければ `powershell.exe` (5.1) を使う。pwsh 7 なら上の alias も pane の中で使える
+- 配った後は、herdr の中で prefix + shift + r (外からなら PowerShell で `hreload`) で読み直す
+- 書いたキー名が Windows の herdr で通るかは、`HERDR_CONFIG_PATH` で場所を差し替えて確かめる
+  (本物の設定には触れない):
+
+  ```sh
+  HERDR_CONFIG_PATH='C:\Users\<名前>\…\config.toml' WSLENV=HERDR_CONFIG_PATH herdr.exe config check
+  ```
+
+- Orca の中で動かすと、`ctrl+up` / `ctrl+down` / `ctrl+alt+up` / `ctrl+alt+down` は Orca が
+  先に取る (`orca/keybindings.json` のタブと worktree の移動)。Orca の中では prefix+n / prefix+p で
+  タブを移る。Windows Terminal ならすべて herdr に届く
+- 初めて配るマシンで、Windows 側に herdr が作った `config.toml` (`onboarding = false` だけ) が
+  あると、記録が無いので衝突として止まる。新しいファイルもその行を持つので、差分を見たうえで
+  `nix/scripts/bootstrap-windows-files.sh --force` で上書きしてよい
+- herdr が `config.toml` を書き戻すのはオンボーディングのときだけ (`onboarding = false` を
+  入れてあるので起きない)。設定画面 (prefix+s) で変えて書き戻されたら、次の `setup --update` が
+  衝突として止まる ([衝突したら](#衝突したら))
