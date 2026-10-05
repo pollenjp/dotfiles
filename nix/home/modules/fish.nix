@@ -187,7 +187,8 @@
       # 対応物が無くて落としたもの:
       #   hkill-all / hdel-all  herdr に kill-all-sessions / delete-all-sessions が
       #                         無い。近いのは `herdr server stop` (今動いている
-      #                         server を止める) だが対象が違うので別名にしない
+      #                         server を止める) だが対象が違うので、この名前には
+      #                         しない (server stop は下の hsvstop)
       #   worktree / workspace / tab / pane / agent
       #                         socket API を直に叩いて生の JSON を吐く。中から
       #                         スクリプトで使うためのもので対話用ではないため、
@@ -211,6 +212,9 @@
       # config.toml を直して home-manager switch した後、herdr を落とさずに
       # 反映させる。herdr の中なら prefix + shift + r で同じことができる。
       hreload = "herdr server reload-config";
+      # 今動いている herdr server を止める。hkill (= session stop) と「stop」が
+      # 紛らわしいので、hstop ではなく server の sv を挟む。
+      hsvstop = "herdr server stop";
     };
 
     functions = {
