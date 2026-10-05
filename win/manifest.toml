@@ -14,3 +14,8 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 src = "powershell/dotfiles.ps1"
 dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
 hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は bootstrap-windows-powershell-profile.sh が足す)"
+
+[[files]]
+src = "herdr/config.toml"
+dst = "%APPDATA%/herdr/config.toml"
+hint = "herdr の中なら prefix + shift + r、外からなら PowerShell で hreload (herdr server reload-config) で読み直す"
