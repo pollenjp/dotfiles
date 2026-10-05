@@ -104,8 +104,9 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
   Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
   ```
 
-alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) とそろえてある。
-足す・直すときは両方を変える。
+alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) と bash の alias
+(`nix/home/modules/bash.nix`) とそろえてある。
+足す・直すときは 3 つを変える。
 
 | 名前 | 中身 |
 | --- | --- |

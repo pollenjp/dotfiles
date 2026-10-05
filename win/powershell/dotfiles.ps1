@@ -4,7 +4,8 @@
 # BOM 付きの UTF-8 で保存すること。Windows PowerShell 5.1 は BOM の無い UTF-8 を
 # CP932 として読み、日本語コメントの次の行を黙って読み飛ばすことがある。
 
-# herdr。WSL の fish の abbr (nix/home/modules/fish.nix) と同じ名前・同じ中身にそろえる。
+# herdr。WSL の fish の abbr (nix/home/modules/fish.nix) と bash の alias
+# (nix/home/modules/bash.nix) と同じ名前・同じ中身にそろえる。
 #
 # PowerShell の alias は引数を持てないので、h 以外は function にする。
 # h は PowerShell 既定の alias (Get-History) と重なり、alias は function より先に
