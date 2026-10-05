@@ -117,6 +117,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `hdel` | `herdr session delete` |
 | `hst` | `herdr status` |
 | `hreload` | `herdr server reload-config` |
+| `hsvstop` | `herdr server stop` |
 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr.Preview`) で、WSL の herdr とは
 別の server (session を共有しない)。

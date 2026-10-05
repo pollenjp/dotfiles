@@ -18,3 +18,4 @@ function hkill { herdr session stop @args }
 function hdel { herdr session delete @args }
 function hst { herdr status @args }
 function hreload { herdr server reload-config @args }
+function hsvstop { herdr server stop @args }
