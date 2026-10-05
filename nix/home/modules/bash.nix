@@ -169,6 +169,9 @@
       # herdr。zellij の z* の先頭を h に変えただけ。対応表・`hd` を作れない
       # 理由・落としたものは fish.nix の同じ節に書いてある。
       #
+      # 同じ名前を fish (fish.nix の abbr) と Windows の PowerShell
+      # (win/powershell/dotfiles.ps1) にも置いている。足す・直すときは 3 つをそろえる。
+      #
       # 上の z* が `z` 経由なのは SHELL を差し替える必要があるからで、herdr は
       # config.toml の default_shell が同じ役目を果たす。なので `h` は挟まず
       # `herdr` を直に呼ぶ。
@@ -181,6 +184,8 @@
 
       hst = "herdr status";
       hreload = "herdr server reload-config";
+      # hstop にしない理由は fish.nix の同じ行に書いてある (hkill = session stop と紛らわしい)。
+      hsvstop = "herdr server stop";
     };
 
     initExtra = ''

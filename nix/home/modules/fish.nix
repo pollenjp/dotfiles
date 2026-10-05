@@ -194,8 +194,8 @@
       #                         スクリプトで使うためのもので対話用ではないため、
       #                         session 系だけを入れている
       #
-      # Windows の PowerShell にも同じ名前を置いている (win/powershell/dotfiles.ps1)。
-      # 足す・直すときは両方をそろえる。
+      # 同じ名前を bash (bash.nix の shellAliases) と Windows の PowerShell
+      # (win/powershell/dotfiles.ps1) にも置いている。足す・直すときは 3 つをそろえる。
       h = "herdr";
       # 無ければ作る / 在れば繋ぐ (`--session` の "Use or create")。zss にあった
       # EXITED 判定と作り直しは herdr 側が面倒を見るので要らない。
