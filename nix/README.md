@@ -2046,14 +2046,22 @@ nixpkgs にも `claude-code` は在り、wrapper が `DISABLE_AUTOUPDATER` を�
 Nix 管理でも動作自体に問題はない。
 
 それでも mise に置いているのは **リリース頻度が `flake.lock` の更新周期に合わない**ため。
-nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。mise の `latest` と
-`minimum_release_age = 9d` の組み合わせなら「先端は取らないが nixpkgs pin よりは速い」
-中間の刻みになり、[「先端は取らない」方針](#依存-flakelock-の更新)とも矛盾しない。
+nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 
-9 日待てないとき (出たばかりの版にしか無い修正が要るなど) は
-`mise_with_no_release_age use -g claude@latest` で、その 1 回だけ遅延を外して取れる
-(`MISE_MINIMUM_RELEASE_AGE=0d mise …` の alias / abbr。bash・fish の両方にある)。
+遅延も `claude` だけ settings の `minimum_release_age = 9d` ではなく **1d** に縮めて
+`latest` を入れている（`bootstrap-mise.sh` の
+`MISE_MINIMUM_RELEASE_AGE=1d mise use -g claude@latest`。下の `mise1` と同じ）。
+`claude` は新しい版をこまめに使いたいことが多いが、ほぼ毎日出るので 9d を課すと手元の版が
+常に 9 日ぶん遅れるため。1d でも公開から 1 日経っていない版は取らないので、
+[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。
+
+遅延をその 1 回だけ変える alias / abbr を bash・fish の両方に置いている。
 `config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
+
+| 名前 | 短縮形 | 中身 | 使いどころ |
+| --- | --- | --- | --- |
+| `mise_with_no_release_age` | `mise0` | `MISE_MINIMUM_RELEASE_AGE=0d mise` | 1 日も待てないとき（出たばかりの版にしか無い修正が要るなど）。`mise0 use -g claude@latest` |
+| `mise_with_one_release_age` | `mise1` | `MISE_MINIMUM_RELEASE_AGE=1d mise` | `setup.sh --update` を待たずに `claude` を上げるとき（`mise1 use -g claude@latest`）や、9d の他のツールを 1d で取るとき |
 
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
