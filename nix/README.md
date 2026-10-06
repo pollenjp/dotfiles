@@ -835,13 +835,12 @@ outputs =
         system = "x86_64-linux";
         wsl = {
           enable = true;
-          onePassword = {
-            enable = true;
-            # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
-            # 別の名前のマシンはここで足す。値はこのマシンで:
-            #   pwsh.exe -NoProfile -Command '$env:USERNAME'
-            windowsUserName = "polle";
-          };
+          # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
+          # (1Password の op-ssh-sign のパスと、win/ の配り先)。登録簿の pollenjp@wsl は
+          # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
+          #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+          windowsUserName = "polle";
+          onePassword.enable = true;
         };
 
         # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
@@ -889,6 +888,11 @@ Notion へ書く skill の宛先 **`dotfiles.claude.notion.profile`** は `null`
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
   古い形（`hostsWith` が無い）を見つけると警告する。手で足したホストが無ければ
   `--force` で作り直す。残すなら上の形に合わせて `local` と `hostsWith` を足す
+- `windowsUserName` を `onePassword` の下に書いた古い形
+  （`onePassword = { enable = true; windowsUserName = "…"; };`）もそのまま動く
+  （`onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。
+  `windowsFiles.enable` を足すときは配り先にも名前が要るので、上の形のように
+  `wsl.windowsUserName` へ移す
 
 `~/dotfiles/setup` のホスト選択（`h`）にもここで足したものが出る。`setup.sh` は
 登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。

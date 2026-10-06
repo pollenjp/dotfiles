@@ -286,13 +286,12 @@ if [[ ${write_flake} == 1 ]]; then
         #   system = "x86_64-linux";
         #   wsl = {
         #     enable = true;
-        #     onePassword = {
-        #       enable = true;
-        #       # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
-        #       # 別の名前のマシンはここで足す。値はこのマシンで:
-        #       #   pwsh.exe -NoProfile -Command '\$env:USERNAME'
-        #       windowsUserName = "polle";
-        #     };
+        #     # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
+        #     # (1Password の op-ssh-sign のパスと、win/ の配り先)。登録簿の pollenjp@wsl は
+        #     # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
+        #     #   pwsh.exe -NoProfile -Command '\$env:USERNAME'
+        #     windowsUserName = "polle";
+        #     onePassword.enable = true;
         #   };
         #
         #   # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
