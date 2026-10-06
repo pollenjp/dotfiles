@@ -15,7 +15,7 @@
     ".tmux.conf".source = ../../files/tmux/home.tmux.conf;
 
     # vim / neovim で共有する設定断片。
-    # 複製元は vim_common/ にあり、参照元は ~/dotfiles/vim_common/... を
+    # 複製元は旧経路の vim_common/ (ADR 013 で削除) で、参照元は ~/dotfiles/vim_common/... を
     # 見ていたが、store 管理では成立しないので ~/.vim/ 配下に置き直している。
     ".vimrc".source = ../../files/vim/vimrc;
     ".vim/common.vim".source = ../../files/vim/common.vim;
