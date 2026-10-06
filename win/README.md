@@ -9,6 +9,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr の alias)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドは WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
+| `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 
 ## 配る
 
@@ -163,9 +164,10 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
   nix/scripts/check-herdr-keys.sh   # 「WSL と Windows で同じ (13 個)」と出れば揃っている
   ```
 
-- WSL 側との違いは `[terminal]` を書かないことだけ。WSL 側の `default_shell = "fish"` は
+- WSL 側との違いは 2 つ。`[terminal]` を書かない (WSL 側の `default_shell = "fish"` は
   Windows に無い。空のままなら、Windows の herdr は PATH の `pwsh.exe` (PowerShell 7) を使い、
-  無ければ `powershell.exe` (5.1) を使う。pwsh 7 なら上の alias も pane の中で使える
+  無ければ `powershell.exe` (5.1) を使う。pwsh 7 なら上の alias も pane の中で使える)。
+  `[update] version_check = false` で新しい版の通知を止める ([herdr を入れる](#herdr-を入れる-winget))
 - 配った後は、herdr の中で prefix + shift + r (外からなら PowerShell で `hreload`) で読み直す
 - 書いたキー名が Windows の herdr で通るかは、`HERDR_CONFIG_PATH` で場所を差し替えて確かめる
   (本物の設定には触れない):
@@ -183,6 +185,55 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 - herdr が `config.toml` を書き戻すのはオンボーディングのときだけ (`onboarding = false` を
   入れてあるので起きない)。設定画面 (prefix+s) で変えて書き戻されたら、次の `setup --update` が
   衝突として止まる ([衝突したら](#衝突したら))
+
+### herdr を入れる (winget)
+
+Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管理者は要らない) で入れ、
+版を `herdr/Install-Herdr.ps1` の `-Version` の既定値 (今は `0.9.2-preview.2026-09-29-8e78f929d8f0`)
+の 1 か所で固定する。winget に安定版のパッケージは無いので preview になる。
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Herdr -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-Herdr` (PowerShell) | 揃える (入れる・入れ替える・pin を足す) |
+| `nix/scripts/bootstrap-windows-herdr.sh` (WSL) | `setup --update` でも毎回走る。入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない) |
+| `nix/scripts/bootstrap-windows-herdr.sh --apply` (WSL) | WSL から揃える |
+
+揃えるときにすること:
+
+1. 入っている版 (winget の置き場所の `herdr.exe --version`) と固定した版を比べる。違えば
+   `winget uninstall` してから `winget install --version` で入れる。portable の置き場所は版によらず
+   同じで、`%APPDATA%\herdr` の設定やセッションは消えない
+2. 入れ替えの前に pin を外し、入れた後に `winget pin add` で `winget upgrade --all` から外す
+3. 読み直して、版・pin・PATH で引かれる herdr を確かめる
+
+- 入れ替えるときに herdr が動いていると (server・`herdr --remote`・conpty の OpenConsole.exe)、
+  herdr.exe を置き換えられないので、何も変えずに止まる。herdr の外の PowerShell
+  (Windows Terminal など) で `hsvstop` を打ち、`--remote` の窓も閉じてから打ち直す。
+  スクリプトが server を止めないのは、herdr の pane の中で打つと自分ごと消えるため
+- `herdr update` は打たない。herdr 自身の installer が `%USERPROFILE%\.herdr\packages\standalone` に
+  別に入れ、`%LOCALAPPDATA%\Programs\Herdr\bin` と `%USERPROFILE%\.herdr\packages\standalone\current` を
+  ユーザーの PATH の先頭に足すので、winget の herdr が引かれなくなる。新しい版の通知は
+  `herdr/config.toml` の `[update] version_check = false` で止めてある。打ってしまったら
+  (`-Check` の「PATH の herdr」が ⚠ になる)、ユーザーの PATH から上の 2 つを外し、
+  `%USERPROFILE%\.herdr\packages` と `%LOCALAPPDATA%\Programs\Herdr` を消す
+- 版を変えるときは、`-Version` の既定値を変えて commit し、`setup --update` で配る (差が ⚠ で出る)。
+  そのあと `Install-Herdr` か `--apply` で揃える。新しい preview が出たかは `-Check` の ※ の行で分かる
+- 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
+  Windows に UAC が出る
+
+### Install-Herdr.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (版の読み方・並び・plan・winget の引数・PATH の解決・状態の表) は
+  `herdr/Install-Herdr.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない
+  (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/herdr/Install-Herdr.Tests.ps1
+  ```
+
+- winget やプロセスに触る部分は、実機で `-Check` と本番を打って確かめる
 
 ## OpenSSH
 

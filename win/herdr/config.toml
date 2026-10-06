@@ -4,9 +4,9 @@
 # [keys] と onboarding は WSL 側 (nix/files/herdr/config.toml) と同じに保つ。キーごとの意図は
 # そちらのコメントにある。CI が 2 つを比べ、違えば落ちる (nix/scripts/check-herdr-keys.sh)。
 #
-# WSL 側との違いは [terminal] を書かないことだけ。WSL 側の default_shell = "fish" は Windows に
+# WSL 側との違いは 2 つ。[terminal] を書かない (WSL 側の default_shell = "fish" は Windows に
 # 無い。空のままなら、Windows の herdr は PATH の pwsh.exe (PowerShell 7) を使い、無ければ
-# powershell.exe (5.1) を使う。
+# powershell.exe (5.1) を使う)。[update] で新しい版の通知を止める (下のコメント)。
 #
 # 反映: 配った後、herdr の中で prefix + shift + r (外からなら PowerShell で hreload =
 # herdr server reload-config)。有効なキー名は `herdr --default-config` で出る。
@@ -14,6 +14,13 @@
 # 初回のオンボーディングを出さない。未設定だと完了時に herdr がこのファイルへ
 # onboarding = false を書き戻し、次の setup --update で衝突として止まる。
 onboarding = false
+
+[update]
+# 新しい版の通知を出さない。通知から herdr update を打つと、herdr 自身の installer が
+# %USERPROFILE%\.herdr に別に入れてユーザーの PATH の先頭に足し、winget で入れた herdr
+# (Herdr.Herdr.Preview) が引かれなくなる。版は Install-Herdr.ps1 で固定していて、新しい版は
+# Install-Herdr -Check (setup --update でも走る) の ※ の行で分かる (win/README.md の「herdr を入れる」)。
+version_check = false
 
 [keys]
 # Orca の中で動かすと、ctrl+up / ctrl+down / ctrl+alt+up / ctrl+alt+down は Orca が握る

@@ -26,3 +26,8 @@ function hr { herdr --remote @args }
 # 中身は同じ場所へ配る Install-OpenSSH.ps1 (win/README.md の「OpenSSH」)。-Check なら確かめるだけ。
 # @args で引数をそのまま渡す (-Check / -Version / -Force もスクリプトの引数として効く)。
 function Install-OpenSSH { & "$HOME\.config\powershell\Install-OpenSSH.ps1" @args }
+
+# Windows の herdr (winget の Herdr.Herdr.Preview) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-Herdr.ps1 (win/README.md の「herdr を入れる」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、先に herdr の外の PowerShell で hsvstop を打つ (動いていると止まる)。
+function Install-Herdr { & "$HOME\.config\powershell\Install-Herdr.ps1" @args }

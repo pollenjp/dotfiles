@@ -24,3 +24,8 @@ hint = "herdr の中なら prefix + shift + r、外からなら PowerShell で h
 src = "openssh/Install-OpenSSH.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-OpenSSH.ps1"
 hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+
+[[files]]
+src = "herdr/Install-Herdr.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
+hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
