@@ -2044,11 +2044,12 @@ Nix 管理でも動作自体に問題はない。
 それでも mise に置いているのは **リリース頻度が `flake.lock` の更新周期に合わない**ため。
 nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 
-同じ理由で、遅延も `claude` だけ settings の `minimum_release_age = 9d` ではなく **1d** に
-縮めて `latest` を入れている（`bootstrap-mise.sh` の
+遅延も `claude` だけ settings の `minimum_release_age = 9d` ではなく **1d** に縮めて
+`latest` を入れている（`bootstrap-mise.sh` の
 `MISE_MINIMUM_RELEASE_AGE=1d mise use -g claude@latest`。下の `mise1` と同じ）。
-ほぼ毎日出る `claude` に 9d を課すと、手元の版が常に 9 日ぶん遅れるため。1d でも公開から
-1 日経っていない版は取らないので、[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。
+`claude` は新しい版をこまめに使いたいことが多いが、ほぼ毎日出るので 9d を課すと手元の版が
+常に 9 日ぶん遅れるため。1d でも公開から 1 日経っていない版は取らないので、
+[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。
 
 遅延をその 1 回だけ変える alias / abbr を bash・fish の両方に置いている。
 `config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
