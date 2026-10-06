@@ -201,7 +201,8 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 
 揃えるときにすること:
 
-1. 入っている版 (winget の置き場所の `herdr.exe --version`) と固定した版を比べる。違えば
+1. 入っている版 (winget の置き場所の `herdr.exe --version`) と固定した版を比べる。違えば、先に
+   `winget download` で固定した版の取得とハッシュを確かめ (落ちたら何も変えずに止まる)、
    `winget uninstall` してから `winget install --version` で入れる。portable の置き場所は版によらず
    同じで、`%APPDATA%\herdr` の設定やセッションは消えない
 2. 入れ替えの前に pin を外し、入れた後に `winget pin add` で `winget upgrade --all` から外す
@@ -211,12 +212,15 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
   herdr.exe を置き換えられないので、何も変えずに止まる。herdr の外の PowerShell
   (Windows Terminal など) で `hsvstop` を打ち、`--remote` の窓も閉じてから打ち直す。
   スクリプトが server を止めないのは、herdr の pane の中で打つと自分ごと消えるため
-- `herdr update` は打たない。herdr 自身の installer が `%USERPROFILE%\.herdr\packages\standalone` に
-  別に入れ、`%LOCALAPPDATA%\Programs\Herdr\bin` と `%USERPROFILE%\.herdr\packages\standalone\current` を
+- `herdr update` は打たない。herdr 自身の installer が
+  `%USERPROFILE%\.herdr\packages\standalone\releases\<版>-<target>` に別に入れ、そのディレクトリを
   ユーザーの PATH の先頭に足すので、winget の herdr が引かれなくなる。新しい版の通知は
   `herdr/config.toml` の `[update] version_check = false` で止めてある。打ってしまったら
-  (`-Check` の「PATH の herdr」が ⚠ になる)、ユーザーの PATH から上の 2 つを外し、
-  `%USERPROFILE%\.herdr\packages` と `%LOCALAPPDATA%\Programs\Herdr` を消す
+  (`-Check` の「PATH の herdr」が ⚠ になり、外すディレクトリが ※ の行に出る)、そのディレクトリを
+  ユーザーの PATH から外し、`%USERPROFILE%\.herdr\packages` と `%LOCALAPPDATA%\Programs\Herdr` を消す。
+  `Install-Herdr` は PATH を直さない
+- 入れ替えの途中で `winget install` が落ちると、herdr が入っていない状態で止まることがある
+  (取得は先に確かめてあるので稀)。そのときは `Install-Herdr` を打ち直す (`setup --update` でも入る)
 - 版を変えるときは、`-Version` の既定値を変えて commit し、`setup --update` で配る (差が ⚠ で出る)。
   そのあと `Install-Herdr` か `--apply` で揃える。新しい preview が出たかは `-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに

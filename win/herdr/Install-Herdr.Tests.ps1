@@ -176,6 +176,85 @@ Test-Case '思わぬ例外では終了コード 2 で止まる' '2' {
     $LASTEXITCODE
 }
 
+# PATH のずれは Install-Herdr では直らないので、直し方を ※ で添える (レビューの I2)
+$rel = 'C:\Users\u\.herdr\packages\standalone\releases\0.9.3-x86_64-pc-windows-msvc'
+Test-Case 'PATH で別の herdr が先なら、外すディレクトリを ※ で添える' "※ PATH のずれは Install-Herdr では直らない。$rel をユーザーの PATH から外す (win/README.md の「herdr を入れる」)" { (Get-Rows (New-State @{ PathKind = 'other'; PathResolved = "$rel\herdr.exe" }))[6].Text }
+Test-Case 'winget の置き場所が PATH に無ければ、足し直し方を ※ で添える' '※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id Herdr.Herdr.Preview の後に Install-Herdr で入れ直す' { (Get-Rows (New-State @{ PathKind = 'none'; PathResolved = $null }))[6].Text }
+Test-Case '入っていないときは PATH の ※ を出さない' 6 { (Get-Rows (New-State $missing)).Count }
+
+# Get-HerdrInstalledVersion: 起動できない herdr.exe (壊れた・0 バイト) でも例外で止まらず、版は空 (レビューの M2)
+$broken = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-tests-broken-$PID.exe"
+Set-Content -LiteralPath $broken -Value '' -NoNewline
+if (-not $IsWindows) { chmod +x $broken }
+Test-Case '起動できない herdr.exe なら版は空 (入れ替えの対象になる)' '' { Get-HerdrInstalledVersion -Exe $broken }
+Remove-Item -LiteralPath $broken -Force
+
+# Get-WingetDownloadArguments: 入れ替えの前に、取得とハッシュだけを確かめる引数 (レビューの I1)
+Test-Case '取得だけを確かめる winget download の引数' "download --id $Id --exact --source winget --version $V --download-directory C:\tmp\dl --skip-dependencies --accept-package-agreements --accept-source-agreements --disable-interactivity" { (Get-WingetDownloadArguments -PackageId $Id -Version $V -Directory 'C:\tmp\dl') -join ' ' }
+
+# ---------------------------------------------------------------------------
+# Invoke-InstallHerdr の流れ (レビューの I3)。Windows に触る関数を偽物に差し替えて、
+# 打つ winget の順と、途中で失敗したときの扱いを確かめる。ここより後ろでは本物の関数は使えない
+# ---------------------------------------------------------------------------
+$env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-tests-$PID"
+$FakeExe = Join-Path (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe') 'herdr.exe'
+
+# Get-Command winget を通すためだけの関数 (呼ばれるのは下の Invoke-Winget)
+function winget { }
+# 打った winget を記録する (pin は 'pin add' のように 2 語)。install は herdr.exe を置き、uninstall は消す
+function Invoke-Winget {
+    param([string[]]$Arguments)
+    $verb = if ($Arguments[0] -eq 'pin') { "pin $($Arguments[1])" } else { $Arguments[0] }
+    $script:Calls.Add($verb)
+    $code = 0
+    if ($script:Fail.ContainsKey($verb)) { $code = $script:Fail[$verb] }
+    if (($code -eq 0) -and ($verb -eq 'install')) { New-Item -ItemType File -Force -Path $FakeExe | Out-Null }
+    if (($code -eq 0) -and ($verb -eq 'uninstall')) { Remove-Item -LiteralPath $FakeExe -Force -ErrorAction SilentlyContinue }
+    $lines = @()
+    if (($verb -eq 'pin list') -and $script:PinListed) { $lines = @("herdr (Preview) $Id $V winget Pinning") }
+    [pscustomobject]@{ ExitCode = $code; Lines = $lines }
+}
+function Get-HerdrState { param($PackageId, $PackageDir, $Target) $script:States.Dequeue() }
+function Get-HerdrBusyProcess { param($PackageDir) @($script:Busy) }
+function Get-CimInstance { [pscustomobject]@{ CommandLine = 'herdr.exe server' } }
+
+# 1 回ぶんの流れを走らせ、打った winget・画面の行・終了コードを返す。
+# $States は Get-HerdrState が返す順 (揃える前と、揃えた後に読み直したもの)
+function Invoke-Flow {
+    param([object[]]$States, [switch]$Check, [switch]$IfMissing, [hashtable]$Fail = @{}, [int]$Busy = 0, [switch]$ExeExists, [switch]$PinListed)
+    $script:Calls = [System.Collections.Generic.List[string]]::new()
+    $script:States = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($s in $States) { $script:States.Enqueue($s) }
+    $script:Fail = $Fail
+    $script:Busy = @()
+    if ($Busy -gt 0) { $script:Busy = @(1..$Busy | ForEach-Object { [pscustomobject]@{ Id = 1000 + $_ } }) }
+    $script:PinListed = [bool]$PinListed
+    Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
+    if ($ExeExists) { New-Item -ItemType File -Force -Path $FakeExe | Out-Null }
+    $out = @(Invoke-InstallHerdr -Version $V -Check:$Check -IfMissing:$IfMissing 6>&1)
+    [pscustomobject]@{
+        Calls = ($script:Calls -join ' ')
+        Text  = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+        Code  = @($out | Where-Object { $_ -is [int] })[-1]
+    }
+}
+
+$changeState = New-State @{ Installed = $Older; Plan = 'change'; Direction = 'up' }
+$synced = New-State
+Test-Case '-Check は winget を打たない' '1 []' { $r = Invoke-Flow -States @($changeState) -Check -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '-IfMissing は入っていれば何も打たない (pin が無くても足さない)' '1 []' { $r = Invoke-Flow -States @((New-State @{ Pinned = $false })) -IfMissing -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '-IfMissing は入っていなければ install して pin を足す' '0 [install pin list pin add]' { $r = Invoke-Flow -States @((New-State $missing), $synced) -IfMissing; "$($r.Code) [$($r.Calls)]" }
+Test-Case '揃っていれば何も打たない' '0 []' { $r = Invoke-Flow -States @($synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'pin だけ無ければ pin を足すだけ' '0 [pin list pin add]' { $r = Invoke-Flow -States @((New-State @{ Pinned = $false }), $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '動いている herdr があれば、winget を 1 つも打たずに止まる' '1 []' { $r = Invoke-Flow -States @((New-State @{ Installed = $Older; Plan = 'change'; Direction = 'up'; BusyCount = 2 })) -Busy 2 -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '動いている herdr があれば、止め方と PID を出す' $true { $r = Invoke-Flow -States @((New-State @{ Installed = $Older; Plan = 'change'; Direction = 'up'; BusyCount = 2 })) -Busy 2 -ExeExists; ($r.Text -like '*hsvstop*') -and ($r.Text -like '*1001*herdr.exe server*') }
+Test-Case '入れ替えは取得を確かめてから pin を外し、uninstall → install して pin を足す' '0 [download pin remove uninstall install pin list pin add]' { $r = Invoke-Flow -States @($changeState, $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '取得が落ちたら、何も変えずに止まる' '1 [download]' { $r = Invoke-Flow -States @($changeState) -Fail @{ download = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '取得が落ちたら、何も変えていないと出す' $true { $r = Invoke-Flow -States @($changeState) -Fail @{ download = 1 } -ExeExists; $r.Text -like '*何も変えていない*' }
+Test-Case 'uninstall が落ちたら install せず、外した pin を足し直す' '1 [download pin remove uninstall pin list pin add]' { $r = Invoke-Flow -States @($changeState, $changeState) -Fail @{ uninstall = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出す' $true { $r = Invoke-Flow -States @($changeState, (New-State $missing)) -Fail @{ install = 1 } -ExeExists; ($r.Code -eq 1) -and ($r.Text -like '*Install-Herdr を打ち直す*') }
+Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
+
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
     exit 1

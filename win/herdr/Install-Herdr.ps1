@@ -101,6 +101,15 @@ function Get-WingetCommands {
     }
 }
 
+# 入れ替えの前に、固定した版の取得とハッシュだけを確かめる winget download の引数。
+# 依存 (VCRedist) は入っているマシンでしか入れ替えないので見ない
+function Get-WingetDownloadArguments {
+    param([string]$PackageId, [string]$Version, [string]$Directory)
+    @('download', '--id', $PackageId, '--exact', '--source', 'winget', '--version', $Version,
+        '--download-directory', $Directory, '--skip-dependencies', '--accept-package-agreements',
+        '--accept-source-agreements', '--disable-interactivity')
+}
+
 # PATH (; 区切り) を前から見て、$Name が最初に見つかったパスを返す。無ければ $null。
 # $Exists はファイルがあるかを答える scriptblock (テストでは偽物を渡す)。
 # 区切りは \ で組む (Linux の pwsh で流すテストでも同じ文字列になるよう、Join-Path は使わない)
@@ -187,6 +196,14 @@ function Format-HerdrState {
     } elseif (($versions.Count -gt 0) -and ($versions[0] -cne $Target)) {
         [pscustomobject]@{ Text = "※ winget に固定した版より新しい $($versions[0]) がある。上げるなら Install-Herdr.ps1 の -Version の既定値を変える"; Warn = $false }
     }
+    # PATH のずれは揃える手順 (Install-Herdr) では直らないので、直し方を添える
+    if ($State.PathKind -eq 'other') {
+        $cut = $State.PathResolved.LastIndexOf('\')
+        $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
+        [pscustomobject]@{ Text = "※ PATH のずれは Install-Herdr では直らない。$dir をユーザーの PATH から外す (win/README.md の「herdr を入れる」)"; Warn = $false }
+    } elseif (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install')) {
+        [pscustomobject]@{ Text = '※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id Herdr.Herdr.Preview の後に Install-Herdr で入れ直す'; Warn = $false }
+    }
     if (($State.Plan -eq 'change') -and ($State.BusyCount -gt 0)) {
         [pscustomobject]@{ Text = "※ herdr.exe などが $($State.BusyCount) 個動いている。入れ替えるには、herdr の外の PowerShell で hsvstop を打ち、herdr --remote の窓も閉じる"; Warn = $false }
     }
@@ -210,7 +227,12 @@ function Invoke-Winget {
 function Get-HerdrInstalledVersion {
     param([string]$Exe)
     $ErrorActionPreference = 'Continue'
-    $out = @(& $Exe --version 2>&1 | ForEach-Object { "$_" })
+    try {
+        $out = @(& $Exe --version 2>&1 | ForEach-Object { "$_" })
+    } catch {
+        # 起動できない (壊れた・0 バイト・方針で止められた) ときも、版が読めないとして入れ替えの対象にする
+        return $null
+    }
     Get-HerdrVersionFromOutput -Lines $out
 }
 
@@ -309,6 +331,21 @@ function Invoke-InstallHerdr {
         return 1
     }
 
+    # 入れ替えは外してから入れるので、取得が落ちると herdr が消えたまま終わる。
+    # 外す前に、固定した版を取得してハッシュまで確かめる (落ちたら何も変えずに止める)
+    if ($state.Plan -eq 'change') {
+        $downloadDir = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-$PID"
+        $arguments = @(Get-WingetDownloadArguments -PackageId $packageId -Version $Version -Directory $downloadDir)
+        Write-Host "winget $($arguments -join ' ')"
+        $download = Invoke-Winget -Arguments $arguments
+        Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
+        if ($download.ExitCode -ne 0) {
+            $download.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+            Write-Host ('固定した版を取得できなかった (終了コード 0x{0:X8})。何も変えていない。ネットワークを確かめて打ち直す' -f $download.ExitCode)
+            return 1
+        }
+    }
+
     # 入れ替えるときは、古い版の pin を残さないよう先に外す (入れた後に足し直す)
     if (($state.Plan -eq 'change') -and $state.Pinned) {
         $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
@@ -320,6 +357,9 @@ function Invoke-InstallHerdr {
         $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
         if ($result.ExitCode -ne 0) {
             Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
+            if ($arguments[0] -eq 'install') {
+                Write-Host 'install が落ちたので、herdr が入っていないことがある。ネットワークを確かめて Install-Herdr を打ち直す (setup --update でも入る)'
+            }
             break
         }
     }
