@@ -192,6 +192,7 @@
       hreload = "herdr server reload-config";
       # hstop にしない理由は fish.nix の同じ行に書いてある (hkill = session stop と紛らわしい)。
       hsvstop = "herdr server stop";
+      hr = "herdr --remote";
     };
 
     initExtra = ''
