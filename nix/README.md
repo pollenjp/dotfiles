@@ -2066,15 +2066,6 @@ nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
 
-Nix が CLI ツールを持つ環境では、レガシー経路の起動時パッケージ注入を止める必要がある。
-その合図に `~/.local/state/dotfiles/package-manager` というマーカーファイルを使っている
-（内容は `nix`）。配置するのは `nix/home/modules/mise.nix`。
-
-このマーカーがあると次が停止する。**マーカーが無い環境の挙動は従来どおり。**
-
-- `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
-- `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
-
 ### `~/.config/mise/config.toml` は Nix 管理下に置かない
 
 mise が実行時に書き換えるファイルなので store には置けない。設定の投入も
@@ -2188,7 +2179,6 @@ nix/
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
-│       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       ├── bash.nix          alias 88 / 関数 24

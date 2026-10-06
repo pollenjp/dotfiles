@@ -232,7 +232,7 @@ in
     # skillOverrides でしか変えられず、そのファイルは Claude Code 自身が書き換える
     # ので Nix 管理下に置けない (フックの登録と同じ事情)。そこで望む値だけを
     # store に置き、nix/scripts/bootstrap-claude-skill-overrides.sh が settings.json へ
-    # merge する。置き場は mise.nix のマーカーと同じ ~/.local/state/dotfiles/。
+    # merge する。置き場は windows-files.json などと同じ ~/.local/state/dotfiles/。
     #
     # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
     # この key は option が正だと settings.json 側からも読めるよう、enable = true
