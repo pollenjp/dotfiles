@@ -120,6 +120,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `hst` | `herdr status` |
 | `hreload` | `herdr server reload-config` |
 | `hsvstop` | `herdr server stop` |
+| `hr` | `herdr --remote` (`hr <ssh-target>`。SSH 越しに別のマシンの herdr server へ attach する) |
 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr.Preview`) で、WSL の herdr とは
 別の server (session を共有しない)。

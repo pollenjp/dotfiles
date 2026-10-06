@@ -221,6 +221,9 @@
       # 今動いている herdr server を止める。hkill (= session stop) と「stop」が
       # 紛らわしいので、hstop ではなく server の sv を挟む。
       hsvstop = "herdr server stop";
+      # SSH 越しに別のマシンの herdr server へ attach する (`hr <ssh-target>`)。
+      # 後ろに `--session <name>` を続ければ、その session に入る。r は remote の r。
+      hr = "herdr --remote";
     };
 
     functions = {
