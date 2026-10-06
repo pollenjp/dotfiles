@@ -139,9 +139,15 @@
       m = "mise";
       mr = "mise run";
       # settings.minimum_release_age (bootstrap-mise.sh が 9d を入れる) を、この 1 回の
-      # 実行だけ 0 にする。`mise use -g claude@latest` で公開 9 日未満の版が要るときの
-      # 逃げ道。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
+      # 実行だけ 0d / 1d にする。公開 9 日未満の版が要るときの逃げ道
+      # (`mise0 use -g claude@latest` など。bootstrap-mise.sh も claude は mise1 と同じ
+      # 1d で入れる)。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
       mise_with_no_release_age = "MISE_MINIMUM_RELEASE_AGE=0d mise";
+      mise_with_one_release_age = "MISE_MINIMUM_RELEASE_AGE=1d mise";
+      # 上の 2 つの短縮形。fish の abbr は展開した結果をもう一度は展開しないので、
+      # 長い名前を指さずに中身をそのまま書く (bash.nix / fish.nix で揃える)。
+      mise0 = "MISE_MINIMUM_RELEASE_AGE=0d mise";
+      mise1 = "MISE_MINIMUM_RELEASE_AGE=1d mise";
 
       #########################
       # 複製元: 253_alias_terminal_mux

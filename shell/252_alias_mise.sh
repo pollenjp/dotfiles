@@ -3,10 +3,14 @@
 alias m='mise'
 alias mr='mise run'
 
-# settings.minimum_release_age を、この 1 回の実行だけ 0 にする。
+# settings.minimum_release_age を、この 1 回の実行だけ 0d / 1d にする。
 # 公開からの日数がその遅延に満たない版が `mise use -g claude@latest` で要るときの逃げ道。
 # config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
 alias mise_with_no_release_age='MISE_MINIMUM_RELEASE_AGE=0d mise'
+alias mise_with_one_release_age='MISE_MINIMUM_RELEASE_AGE=1d mise'
+# 上の 2 つの短縮形 (fish の abbr に揃えて、長い名前を指さずに中身をそのまま書く)
+alias mise0='MISE_MINIMUM_RELEASE_AGE=0d mise'
+alias mise1='MISE_MINIMUM_RELEASE_AGE=1d mise'
 
 # 現在 (mise ls --current) で有効なツールのバージョンを mise に固定する。
 # 引数なしでカレントの設定 (mise.toml 等) に、`-g` を渡すとグローバル設定に固定する。

@@ -74,9 +74,13 @@ echo "==> claude (役割分担の例外)"
 #
 # それでも mise に置くのは **リリース頻度が flake.lock の更新周期に
 # 合わない**ため。nixpkgs pin にすると、版は flake.lock を上げるまで動かない。
-# mise の `latest` + 上の minimum_release_age = 9d なら「先端は取らないが
-# nixpkgs pin よりは速い」中間の刻みになり、repo の「先端は取らない」方針
-# (flake-lock-age.sh) とも矛盾しない。
+#
+# 同じ理由で、遅延も claude だけ上の 9d ではなく 1d に縮める (対話シェルの
+# `mise1` と同じ。script では alias が効かないので env を直接書く)。ほぼ毎日
+# 出る claude に 9d を課すと、手元の版が常に 9 日ぶん遅れる。1d でも公開から
+# 1 日経っていない版は取らないので、repo の「先端は取らない」方針
+# (flake-lock-age.sh) の線は残る。env が効くのはこの 1 回だけで、config.toml の
+# minimum_release_age は 9d のまま。
 #
 # ここで入れておかないと bootstrap-claude-plugins.sh が動けない。
 # そのためヘッダの `order: 10` で bootstrap-* の先頭に出してある。
@@ -84,7 +88,7 @@ echo "==> claude (役割分担の例外)"
 # 上の go / usage と違ってここだけ `@latest` を明示するのは、まさにその
 # 「自動で上がってほしい」を成立させるため。省くと --update を何度回しても
 # 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
-mise use -g claude@latest
+MISE_MINIMUM_RELEASE_AGE=1d mise use -g claude@latest
 
 echo
 echo "完了しました。現在のグローバル設定:"
