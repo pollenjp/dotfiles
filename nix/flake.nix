@@ -116,6 +116,7 @@
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
+          bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
