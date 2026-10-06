@@ -10,6 +10,7 @@
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 | 後続 ADR | [002_nix_hosts_and_local_flake_20260810T153848JST](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md) — マシン固有設定の表現と実行の入口パスを決めた。**「7. 移行・運用手順」と `textbook/` は現行の形に更新済み。**「2. 決定」「3. 変更点の詳細」「6. 検証」に出てくる `~/dotfiles/nix#...` や `isWSL` などは決定当時の記録としてそのまま残してある |
 | 後続 ADR | [005_nix_flake_lock_min_release_age_20260813T184522JST](../005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) — 依存の更新手段を素の `nix flake update` から `flake-lock-age.sh update`（公開から 7 日以上経った revision だけを取る）へ差し替えた。**`textbook/05_daily_usage.md` は現行の形に更新済み。**本文に出てくる `nix flake update` は決定当時の記録としてそのまま残してある |
+| 後続 ADR | [013_remove_legacy_tree_20261007T015646JST](../013_remove_legacy_tree_20261007T015646JST/README.md) — Stage 6 として旧経路 (`main.bash setup`) を Windows の Git Bash 用も含めて削除した。決定 4 の「`main.bash setup` を Windows 用および復旧用に残す」と決定 7 の「どの段階でも `./main.bash setup` で戻せる」はここで終わる。**「7. 移行・運用手順」のロールバックと `textbook/`（`00`・`03`・`04`・`05` の章と図 `04_cutover`）は現行の形に更新済み。**「1. 背景」〜「6. 検証」に出てくる旧経路のファイル（`main.bash`・`shell/` など）と図 `01_before`〜`03_staging` は決定当時の記録としてそのまま残してある（ファイルは `4a54c96` までの履歴で読める） |
 
 ---
 
@@ -308,11 +309,13 @@ nix flake update --flake "${REPO}/nix"
 > 実行され、`flake.lock` で固定した home-manager モジュールとバージョンがずれる。
 > flake が `packages.<system>.home-manager` を公開しているのはこのため。
 
-**ロールバック**は 3 段階:
+**ロールバック**は 2 段階:
 
 1. `home-manager generations` で古い世代の `activate` を実行する
 2. `home-manager uninstall` で全撤去する
-3. **最終手段として `./main.bash setup` が動く** — Stage 6 まで `main.bash` を触らないのはこのため
+
+最終手段だった `./main.bash setup` は、Stage 6 で旧経路ごと削除した
+（[ADR 013](../013_remove_legacy_tree_20261007T015646JST/README.md)）。
 
 ---
 

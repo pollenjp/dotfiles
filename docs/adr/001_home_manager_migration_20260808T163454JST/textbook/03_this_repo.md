@@ -20,7 +20,6 @@ nix/
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── starship.nix      programs.starship
-│       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通の変数と PATH
 │       ├── fish.nix          abbr 88 / function 24  <- よく触る
 │       └── bash.nix          alias 88 / 関数 24      <- よく触る

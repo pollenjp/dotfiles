@@ -8,6 +8,7 @@
 | チケット | [TKT-31](https://app.notion.com/p/dotfiles-Windows-win-Orca-keybindings-json-3e779149a66f817993faed920e623f97)（最初に配る中身は [TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)） |
 | 前提 ADR | [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（マシン固有の値は host option で明示する / ローカル flake は本体の `nix/` を `path:` で読む）、[007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（アプリが書き換えるファイルへは「Nix が値を置き、bootstrap が写す」） |
 | 運用手順 | [`win/README.md`](../../../win/README.md)、[`nix/README.md`「Windows 側のファイルを配る」](../../../nix/README.md#windows-側のファイルを配る) |
+| 後続 ADR | [013_remove_legacy_tree_20261007T015646JST](../013_remove_legacy_tree_20261007T015646JST/README.md)（E の「`win/` へ移し終えた時点で、別の ADR で畳む」は、Git Bash の設定を `win/` へ移さずに畳んだ。Git Bash の設定は管理しない。本文はそのまま） |
 
 > **追記 (2026-10-05、[TKT-82](https://app.notion.com/p/PowerShell-PROFILE-1-bootstrap-TKT-77-3ef79149a66f816d8b0bf7a8d68b20c5))**
 >
