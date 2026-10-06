@@ -20,3 +20,8 @@ function hdel { herdr session delete @args }
 function hst { herdr status @args }
 function hreload { herdr server reload-config @args }
 function hsvstop { herdr server stop @args }
+
+# Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-OpenSSH.ps1 (win/README.md の「OpenSSH」)。-Check なら確かめるだけ。
+# @args で引数をそのまま渡す (-Check / -Version / -Force もスクリプトの引数として効く)。
+function Install-OpenSSH { & "$HOME\.config\powershell\Install-OpenSSH.ps1" @args }

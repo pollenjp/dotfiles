@@ -19,3 +19,8 @@ hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE へ�
 src = "herdr/config.toml"
 dst = "%APPDATA%/herdr/config.toml"
 hint = "herdr の中なら prefix + shift + r、外からなら PowerShell で hreload (herdr server reload-config) で読み直す"
+
+[[files]]
+src = "openssh/Install-OpenSSH.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-OpenSSH.ps1"
+hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
