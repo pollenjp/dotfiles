@@ -1,28 +1,17 @@
 # dotfiles
 
-配置方法は 2 経路ある。**マシン単位でどちらかを選ぶ。同一マシンで両方を走らせないこと。**
+Nix home-manager で配置する。リポジトリ本体は `~/ghq/github.com/pollenjp/dotfiles` に置き、
+日々の操作は `~/dotfiles/setup` から行う（`~/dotfiles` はローカル専用 flake の置き場所）。
+手順は [`nix/README.md`](./nix/README.md)。
 
-| 経路 | リポジトリの置き場所 | 手順 |
-| --- | --- | --- |
-| Nix home-manager（推奨） | `~/ghq/github.com/pollenjp/dotfiles` | [`nix/README.md`](./nix/README.md) |
-| `main.bash setup`（従来） | `~/dotfiles` | 下記 |
+| パス | 中身 |
+| --- | --- |
+| [`nix/`](./nix/README.md) | home-manager の flake と `setup.sh`。対象は Linux / macOS / WSL |
+| [`win/`](./win/README.md) | Windows 側のアプリの設定（Orca など）。WSL の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る |
+| `.ssh` | ssh の接続先（private な submodule）。`setup` が `~/.ssh/config.d/` へ張る |
+| [`docs/adr/`](./docs/adr/README.md) | 決めたことと、その理由の記録 |
 
-> ⚠️ `~/dotfiles` の意味が経路によって違う。従来経路では**リポジトリ本体**だが、
-> Nix 経路では**ローカル専用 flake の置き場所**（リポジトリ本体は ghq 配下）になる。
-> 従来経路が配置する設定ファイルは `~/dotfiles/...` を直接参照するため、
-> この置き場所を変えられない。
-
-Windows (MINGW/MSYS) は Nix が動かないので従来経路を使う。
-
-Windows 側のアプリの設定（Orca など）は repo 直下の [`win/`](./win/README.md) にある。
-WSL のマシンで、Nix 経路の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る。
-
-## Setup（従来経路）
-
-`~/dotfiles` に clone してから実行する。
-
-```sh
-./main.bash setup
-./main.bash fmt
-./main.bash lint
-```
+> 以前は `~/dotfiles` に clone して `./main.bash setup` で symlink を張る旧経路もあった
+> （Windows の Git Bash もこれを使っていた）。
+> [ADR 013](./docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md) で削除し、
+> Git Bash の設定は管理しなくなった。旧経路のファイルは `4a54c96` までの履歴にある。
