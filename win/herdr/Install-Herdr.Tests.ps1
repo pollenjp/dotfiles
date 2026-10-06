@@ -168,6 +168,14 @@ Test-Case '固定した版が winget に無くて入れられないなら ⚠' '
 Test-Case '入れ替えが要るのに herdr が動いていれば ※ で止め方を添える' '※ herdr.exe などが 2 個動いている。入れ替えるには、herdr の外の PowerShell で hsvstop を打ち、herdr --remote の窓も閉じる' { (Get-Rows (New-State @{ Installed = $Older; Plan = 'change'; Direction = 'up'; BusyCount = 2 }))[-1].Text }
 Test-Case '入れ替えが要らなければ動いている数は出さない' 6 { (Get-Rows (New-State @{ BusyCount = 2 })).Count }
 
+# 本体の入口: Linux の pwsh には $env:LOCALAPPDATA が無く、本体の最初で例外になる。
+# それでも終了コード 2 で止まり、成功 (0) に見せない
+Test-Case '思わぬ例外では終了コード 2 で止まる' '2' {
+    $pwsh = (Get-Process -Id $PID).Path
+    $null = & $pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Install-Herdr.ps1') -Check 2>&1
+    $LASTEXITCODE
+}
+
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
     exit 1

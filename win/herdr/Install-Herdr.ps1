@@ -192,6 +192,159 @@ function Format-HerdrState {
     }
 }
 
+# ---------------------------------------------------------------------------
+# Windows に触る関数 (実機で -Check と本番を打って確かめる)
+# ---------------------------------------------------------------------------
+
+# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す (Install-OpenSSH.ps1 と同じ)
+function Invoke-Winget {
+    param([string[]]$Arguments)
+    # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
+    $ErrorActionPreference = 'Continue'
+    $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
+        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[\u2588\u2592]' }
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
+}
+
+# winget の置き場所の herdr.exe に版を聞く (herdr.exe には FileVersion が無い)。読めなければ $null
+function Get-HerdrInstalledVersion {
+    param([string]$Exe)
+    $ErrorActionPreference = 'Continue'
+    $out = @(& $Exe --version 2>&1 | ForEach-Object { "$_" })
+    Get-HerdrVersionFromOutput -Lines $out
+}
+
+# これから開く PowerShell が使う PATH (マシン → ユーザーの順)。今のプロセスの PATH は古いことがある
+function Get-HerdrPathValue {
+    @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
+}
+
+# winget の置き場所から起動して動いているプロセス (herdr server・herdr --remote・conpty の OpenConsole.exe)
+function Get-HerdrBusyProcess {
+    param([string]$PackageDir)
+    $prefix = $PackageDir.TrimEnd('\') + '\'
+    @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
+            $path = $null
+            try { $path = $_.Path } catch { $path = $null }
+            $path -and $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
+        })
+}
+
+# 今の状態を読む (何も変えない。管理者は要らない)
+function Get-HerdrState {
+    param([string]$PackageId, [string]$PackageDir, [string]$Target)
+    $exe = Join-Path $PackageDir 'herdr.exe'
+    $exists = Test-Path -LiteralPath $exe -PathType Leaf
+    $installed = $null
+    if ($exists) { $installed = Get-HerdrInstalledVersion -Exe $exe }
+    $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+    $show = Invoke-Winget -Arguments @('show', '--id', $PackageId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
+    # @() で包む。関数が返す空の配列は呼び出し側で $null にほどける (Install-OpenSSH.ps1 で踏んだ)
+    $versions = @(Get-WingetVersionList -Lines $show.Lines)
+    $latest = $null
+    if ($versions.Count -gt 0) { $latest = $versions[0] }
+    $resolved = Resolve-HerdrOnPath -PathValue (Get-HerdrPathValue) -Name 'herdr.exe' -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    [pscustomobject]@{
+        Exists       = $exists
+        Installed    = $installed
+        Plan         = Get-HerdrPlan -Exists $exists -Installed $installed -Target $Target
+        Direction    = Get-HerdrDirection -Versions $versions -Installed $installed -Target $Target
+        Pinned       = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
+        Versions     = $versions
+        Latest       = $latest
+        PathResolved = $resolved
+        PathKind     = Get-HerdrPathKind -Resolved $resolved -PackageDir $PackageDir
+        BusyCount    = @(Get-HerdrBusyProcess -PackageDir $PackageDir).Count
+    }
+}
+
+# 状態の表を出す。直すことがある行 (⚠) は黄色にする
+function Write-HerdrState {
+    param($State, [string]$Target, [string]$PackageDir)
+    foreach ($row in (Format-HerdrState -State $State -Target $Target -PackageDir $PackageDir)) {
+        if ($row.Warn) { Write-Host $row.Text -ForegroundColor Yellow } else { Write-Host $row.Text }
+    }
+}
+
+function Invoke-InstallHerdr {
+    param([string]$Version, [switch]$Check, [switch]$IfMissing)
+    $packageId = 'Herdr.Herdr.Preview'
+    # portable の置き場所は <Id>_<ソースの識別子>。winget のソースから入れると、どのマシンでも同じ名前になる
+    $packageDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
+        return 2
+    }
+
+    $state = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -Target $Version
+    Write-HerdrState -State $state -Target $Version -PackageDir $packageDir
+    $code = Get-HerdrExitCode -State $state
+
+    # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
+    if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
+        switch ($code) {
+            0 { Write-Host '揃っている' }
+            3 { Write-Host '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️' -ForegroundColor Yellow }
+            default { Write-Host '⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️' -ForegroundColor Yellow }
+        }
+        return $code
+    }
+    if ($code -eq 0) {
+        Write-Host '揃っている。何もしない'
+        return 0
+    }
+
+    $blocker = Get-HerdrApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version -BusyCount $state.BusyCount
+    if ($blocker -eq 'not-listed') {
+        Write-Host "固定した版 $Version が winget に無いので入れられない。-Version を winget show --id $packageId --versions にある版へ変える"
+        return 1
+    }
+    if ($blocker -eq 'busy') {
+        Write-Host 'herdr.exe などが動いていて置き換えられない。herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じてから打ち直す:'
+        foreach ($p in @(Get-HerdrBusyProcess -PackageDir $packageDir)) {
+            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
+            Write-Host "  $($p.Id)  $commandLine"
+        }
+        return 1
+    }
+
+    # 入れ替えるときは、古い版の pin を残さないよう先に外す (入れた後に足し直す)
+    if (($state.Plan -eq 'change') -and $state.Pinned) {
+        $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
+    }
+    foreach ($arguments in @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)) {
+        Write-Host "winget $($arguments -join ' ')"
+        $result = Invoke-Winget -Arguments $arguments
+        $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+        if ($result.ExitCode -ne 0) {
+            Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
+            break
+        }
+    }
+    # 入っていれば pin を足す (入れ替えた後は、上で外したので足し直しになる)
+    $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+    if ((Test-Path -LiteralPath (Join-Path $packageDir 'herdr.exe')) -and -not (Test-WingetPinned -Lines $pins.Lines -PackageId $packageId)) {
+        $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ($pin.ExitCode -eq 0) { Write-Host 'winget pin を足した (winget upgrade --all から外れる)' }
+        else { Write-Host ('winget pin add が失敗した (終了コード 0x{0:X8})' -f $pin.ExitCode) }
+    }
+
+    # 揃ったかを読み直して確かめる
+    Write-Host ''
+    $after = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -Target $Version
+    Write-HerdrState -State $after -Target $Version -PackageDir $packageDir
+    if ($after.PathKind -eq 'other') {
+        Write-Host 'PATH で先に引かれる herdr は、herdr update で入ったもの。外し方は win/README.md の「herdr を入れる」'
+    }
+    if ((Get-HerdrExitCode -State $after) -eq 0) {
+        Write-Host '揃った'
+        return 0
+    }
+    return 1
+}
+
 # dot-source されたとき (テスト) は関数だけを読み、本体は走らせない。
 # 思わぬ例外は受け止めて終了コード 2 で終える。受け止めないと exit まで届かず、
 # -Command から呼んだとき外側の exit $LASTEXITCODE が中の winget の 0 を返して成功に見える
