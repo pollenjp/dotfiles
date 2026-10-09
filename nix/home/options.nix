@@ -10,7 +10,7 @@
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.gitViaGh.enable              Claude の git を gh の資格情報 (HTTPS) で GitHub へ通すか
-#   dotfiles.claude.notion.profile               Notion へ書く skill の宛先のプロファイル名
+#   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #
@@ -128,6 +128,7 @@ in
           名前を決める。キーは "owner/*" か "owner/repo"、値は profiles.toml にあるプロファイルの名前。
 
           claude-skills の profiles.toml の [routes] (全マシンで共通の規則) より先に見る。
+          同じ層の中 (このマシンの規則どうし、共通の規則どうし) では、"owner/repo" の行が "owner/*" の行に勝つ。
           どちらにも当たらない repo と repo の外では profile (このマシンの既定) を使う。
 
           キーと値の綴りはここでは検査しない (resolver が使うときに止める)。

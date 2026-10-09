@@ -193,8 +193,8 @@ let
 in
 
 {
-  # Dev Tracker を使うのに Notion の宛先を選んでいないマシンでは、pjp-dev-tracker の
-  # ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
+  # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
+  # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
   # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
   warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
     dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
