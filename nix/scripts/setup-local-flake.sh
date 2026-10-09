@@ -202,12 +202,12 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
       warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
-      warn "local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、Notion へ書く skill は止まる。"
+      warn "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。"
       warn "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
     if ! grep -q 'notion\.profile' "${flake_file}"; then
       warn "flake.nix の local に dotfiles.claude.notion.profile がありません。"
-      warn "Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
+      warn "規則に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
     fi
   else
     warn "既存の ${flake_file} が別のパスを指しています:"

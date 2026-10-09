@@ -1818,12 +1818,14 @@ post_notes() {
     # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
     # ここで知らせる (setup-local-flake.sh の警告と同じ)。
     note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
-    note '        local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、'
-    note '        Notion へ書く skill は止まる。手で足したホストが無ければ次で作り直して local に書く:'
+    note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
+    note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
+    note '        手で足したホストが無ければ次で作り直して local に書く:'
     note "          ${script_dir}/setup-local-flake.sh --force"
   elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
     note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
-    note '        Notion へ書く skill は宛先が決まらず止まる。README「Notion の宛先を host ごとに選ぶ」の形で足す。'
+    note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
+    note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
