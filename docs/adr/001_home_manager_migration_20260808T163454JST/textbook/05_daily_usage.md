@@ -150,7 +150,8 @@ HOME=/tmp/hm-sandbox nix run .#home-manager -- switch --flake .#sandbox -b bak
 cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 ```
 
-`.nix` ファイルを nixfmt で整形する。シェルスクリプトは従来どおり `./main.bash fmt` (shfmt)。
+`.nix` ファイルを nixfmt で整形する。シェルスクリプトは devShell の shfmt で整形する
+（`nix develop --command shfmt -w scripts/<名前>.sh`）。旧経路の `./main.bash fmt` は ADR 013 で削除した。
 
 ## よくあるエラー
 

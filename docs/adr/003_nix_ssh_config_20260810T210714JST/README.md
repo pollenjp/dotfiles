@@ -8,6 +8,7 @@
 | 関連 PR | [#32](https://github.com/pollenjp/dotfiles/pull/32) |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md) / [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md) |
 | 後続 ADR | [004_nix_wsl_ssh_wrapper](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（本 ADR が触れていない WSL 用 `bin/ssh-*-wsl.sh` の扱いを決めた。本文の決定は変えていない） |
+| 後続 ADR | [013_remove_legacy_tree_20261007T015646JST](../013_remove_legacy_tree_20261007T015646JST/README.md)（「5. 影響」で「Windows を畳むときに一緒に消す」とした `ssh_config` と `bin/ssh-*-git-for-win.sh` を、旧経路ごと削除した。本文はそのまま） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 
 ---

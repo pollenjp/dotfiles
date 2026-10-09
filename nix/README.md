@@ -2,8 +2,10 @@
 
 dotfiles を Nix home-manager で宣言的に管理するためのディレクトリ。
 
-既存の `main.bash setup` 経路とは**独立**しており、設定ファイルは `nix/files/` に複製されている。
-どちらの経路を使うかはマシン単位で選ぶ。同一マシンで両方を走らせないこと。
+設定ファイルの実体は `nix/files/` にある。repo 直下にあった旧経路 (`main.bash setup`) から
+複製して始めたもので、旧経路は [ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)
+で削除した。以下で「移植元」「複製元」として挙げる旧経路のファイルは、git の履歴
+(`git show 4a54c96:shell/250_alias.sh` など) で読める。
 
 ## 対象範囲
 
@@ -14,7 +16,8 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 | 言語ランタイム (node / go) | mise (プロジェクト毎の切替が必要なため) |
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
 
-対象 OS は **Linux / macOS / WSL**。Windows (MINGW/MSYS) は Nix が動かないため `main.bash setup` を使う。
+対象 OS は **Linux / macOS / WSL**。Windows 側のアプリの設定は WSL から配る
+（[後述](#windows-側のファイルを配る)）。Git Bash (MINGW/MSYS) の設定は管理しない。
 
 対象シェルは **bash / fish**。zsh は Nix 管理の対象外。
 
@@ -1175,8 +1178,8 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 > （bash 5.2 で実測）。気づく合図が無いので、移行後は `command -v ssh` が
 > `~/.local/bin/ssh` を指しているか確認するとよい。
 
-Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
-Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
+Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移さず、旧経路と一緒に削除した
+（[ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)）。
 
 ### WSL の .exe の起動を常時記録する
 
@@ -2067,15 +2070,6 @@ nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
 
-Nix が CLI ツールを持つ環境では、レガシー経路の起動時パッケージ注入を止める必要がある。
-その合図に `~/.local/state/dotfiles/package-manager` というマーカーファイルを使っている
-（内容は `nix`）。配置するのは `nix/home/modules/mise.nix`。
-
-このマーカーがあると次が停止する。**マーカーが無い環境の挙動は従来どおり。**
-
-- `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
-- `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
-
 ### `~/.config/mise/config.toml` は Nix 管理下に置かない
 
 mise が実行時に書き換えるファイルなので store には置けない。設定の投入も
@@ -2091,11 +2085,6 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 `[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と
 言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
 触るので冪等で、既存の `[tools]` も壊さない。
-
-> ⚠️ `.config_tmpl/mise/config.toml`（レガシー側のテンプレート）にある `install_before` は
-> 現在の mise では **`minimum_release_age` に改名**されている。旧名は
-> `mise settings ls --all` に存在せず、`mise settings set` してもエラーにならず
-> **黙って無視される**。テンプレート側は以前から効いていなかった可能性が高い。
 
 > ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
 > `home-manager switch` は hermetic に保つ方針。
@@ -2189,12 +2178,11 @@ nix/
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
-│       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       ├── bash.nix          alias 88 / 関数 24
 │       └── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
-├── files/                 既存設定の複製 (store 管理される素のファイル)
+├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
 ├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル)
