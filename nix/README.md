@@ -1846,7 +1846,8 @@ local = {
 };
 ```
 
-登録簿のホストを直接指すなら `mkHome` に `claude.notion.profile = "personal";`。
+登録簿のホストを直接指すなら、`mkHome` に `claude.notion.profile = "personal";` を渡す
+（このマシンだけの規則は `claude.notion.routes = { … };`）。
 
 #### 反映
 
@@ -1859,7 +1860,7 @@ JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profi
 
 - profile が `null`（雛形の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため
-- override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `routes`（キーと値）と `override`（キー）の綴りは Nix では検査しない。skill が使うときに resolver が止める
 - `devTracker.enable = true` なのに profile が無いマシンでは、switch のときに警告が出る
   （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
 - 古い形の override（`override = { devTracker.linkFromRepo = …; };` のように、外側がキーの名前）が
