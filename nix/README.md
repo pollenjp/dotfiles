@@ -1482,11 +1482,15 @@ env の値を上書きできるようにするためなので、順序を入れ�
 **自作のものは名前を `pjp-` で始める。** skill はディレクトリ名と `SKILL.md` の
 `name` の両方（`pjp-drawio` `pjp-plantuml`）。agent / command も同じ。
 
-`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills` の 3 系統が
-同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
+`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills`・パッケージ同梱
+（herdr）の 4 系統が同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
 配信物は増減するので一般名詞（`dataviz` `run` `init` など）は将来ぶつかる。
 `claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する
 （こちら側に相当する検査は無い）。
+
+パッケージ同梱の skill（nixpkgs の `installAgentSkills` が `share/skills/` に入れるもの）は
+自作ではないので、upstream の名前のまま置く。張り方は `nix/files/claude/skills/README.md`
+の「パッケージ同梱の skill」。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
@@ -1500,7 +1504,8 @@ env の値を上書きできるようにするためなので、順序を入れ�
 ~/.claude/skills/
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
-└── pjp-my-skill -> /nix/store/…   <- Nix 管理
+├── pjp-my-skill -> /nix/store/…   <- Nix 管理
+└── herdr -> /nix/store/…-herdr-…/share/skills/herdr/herdr   <- Nix 管理 (パッケージ同梱)
 ```
 
 ### ⚠️ `~/.claude/` を直接編集しないこと
@@ -1969,10 +1974,11 @@ skill を足したあとや別マシンの変更を取り込むときに何度�
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/ docx/ ...     <- Anthropic 配信 (実ディレクトリ)
 ├── <公開してよいもの> -> /nix/store/…                       (nix/files/claude/skills/)
+├── herdr              -> /nix/store/…-herdr-…/share/skills/… (パッケージ同梱。claude.nix)
 └── <private>          -> ~/ghq/…/claude-skills/skills/…     (bootstrap-claude-skills.sh)
 ```
 
-`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、3 系統が兄弟として
+`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、4 系統が兄弟として
 並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
 
 #### 取得できないマシンでも止まらない

@@ -10,6 +10,7 @@
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
+#   pkgs.herdr の share/skills/herdr/herdr/ -> ~/.claude/skills/herdr  (パッケージ同梱の skill。下記)
 #
 # ## なぜ skills/ agents/ commands/ ごとではなく中身を 1 つずつ配置するのか
 #
@@ -25,6 +26,7 @@
 #   ├── manifest.json      <- Claude Code 管理 (実ファイル)
 #   ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
 #   ├── <自作>/            <- Nix 管理 (store への symlink)
+#   ├── herdr/             <- Nix 管理 (herdr パッケージの中への symlink。下記)
 #   └── <private>/         <- claude-skills の作業クローンへの symlink
 #                             (scripts/bootstrap-claude-skills.sh が張る)
 #
@@ -307,6 +309,23 @@ in
         source = claudeRoot + "/statusline-command.sh";
         executable = true;
       };
+    }
+
+    # パッケージが同梱する agent skill。今は herdr だけ。
+    #
+    # nixpkgs の installAgentSkills は skill を $out/share/skills/<pname>/<skill>/ に
+    # 入れるだけで、Claude Code はそこを探さない。使うものを 1 つずつ ~/.claude/skills/ へ
+    # 張る (nixpkgs manual の installAgentSkills の節が勧める形)。
+    #
+    # home.packages の herdr (modules/packages.nix) と同じ pkgs.herdr を指すので、skill の
+    # 版は CLI と揃い、flake.lock を上げれば一緒に上がる。公式の手順
+    # (npx skills add herdrdev/herdr --skill herdr -g) は打った日の master を取り、
+    # 宣言的でもないので使わない。名前は公式どおり herdr (pjp- は自作の印)。
+    #
+    # 張る元が無くても home-manager は切れた symlink を黙って作る。nixpkgs が置き場所を
+    # 変えたら tests/claude-herdr-skill.nix (flake の checks) で落ちる。
+    {
+      ".claude/skills/herdr".source = "${pkgs.herdr}/share/skills/herdr/herdr";
     }
 
     (linkEntries "skills")

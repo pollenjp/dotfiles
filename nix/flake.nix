@@ -81,6 +81,9 @@
       #   <名前>.test.sh   bootstrap などの script の振る舞い。bash・jq・git だけの
       #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
       #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
+      #   claude-herdr-skill.nix
+      #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
+      #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
       checks = forAllSystems (
         system:
         let
@@ -120,6 +123,14 @@
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-herdr-skill = import ./tests/claude-herdr-skill.nix {
             inherit
               lib
               pkgs
