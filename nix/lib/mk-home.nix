@@ -26,6 +26,7 @@
   #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
   #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の宛先 (claude-skills の profiles.toml の名前)
+  #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則
   #
   # 省略すれば既定 (どちらも true)。ローカル flake (~/dotfiles/flake.nix) の雛形は
   # 登録簿のホストにも当たる module で devTracker を false にしているので、そちら経由の
