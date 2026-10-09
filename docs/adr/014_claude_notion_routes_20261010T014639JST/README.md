@@ -23,8 +23,8 @@ Dev Tracker へ書かれるようになった。逆に、会社の PC で個人�
 
 ### A. 宛先は作業中の repo (origin の owner/repo) で決める
 
-全マシンで共通の規則は private の claude-skills の `profiles.toml` の `[routes]` に置く。
-キーは `"owner/*"` か `"owner/repo"`。owner 名を public なこのリポジトリに出さない。
+規則のキーは `"owner/*"` か `"owner/repo"`。全マシンで共通の規則は private の claude-skills の
+`profiles.toml` の `[routes]` に置き、仕事の org 名を public なこのリポジトリに出さない。
 
 ### B. マシンごとの上書きは host option `dotfiles.claude.notion.routes`
 
@@ -38,8 +38,14 @@ override だけで宛先を組む使い方は無くす。
 
 ### D. 認証は host option に持たせない
 
-そのマシンに `PJP_NOTION_TOKEN_<名前>` (`~/.config/pjp/env`) があれば API キー、無ければ ntn login。
-秘密は store に置けないので、host option ではなくマシンローカルの環境変数ファイルに置く。
+そのマシンに `PJP_NOTION_TOKEN_<名前>` (環境変数か `~/.config/pjp/env`) があれば API キー、無ければ
+workspace ごとの ntn login。変数名はプロファイル名を大文字にし `-` を `_` にする
+(personal → `PJP_NOTION_TOKEN_PERSONAL`)。ntn が読まない名前なので、ほかの workspace への呼び出しは
+上書きしない。秘密は store に置けないので、host option ではなくマシンローカルの環境変数ファイルに置く。
+
+環境にもう `NOTION_API_TOKEN` があれば、何も足さずにそれに従う (repo の devShell が `.env` で入れる token を
+壊さないため)。だから `NOTION_API_TOKEN` は `~/.config/pjp/env` に書かない。シェルが環境へ読み込むので、
+repo の規則で決まる認証を通らず、どの repo でもそれが使われてしまう。
 
 ## 3. 変更点の詳細
 
@@ -80,7 +86,7 @@ override だけで宛先を組む使い方は無くす。
 | 確認 | 結果 |
 | --- | --- |
 | `nix build ./nix#checks.x86_64-linux.claude-notion-state` (評価時の assert。6 項目) | 通過。既定の JSON・値を入れた JSON・profile が null なら warnings が出る・profile があれば出ない・profile が null で routes や override だけでも出る・`devTracker.enable = false` なら出ない |
-| warnings の条件を壊すと、上の check が落ちる | 通過。条件に `override == { }` を戻すと「routes や override だけあっても warnings が出る」の項目だけが、`cfg.devTracker.enable &&` を外すと「devTracker.enable = false なら…」の項目だけが落ちた |
+| warnings の条件を壊すと、上の check が落ちる | 期待どおり、条件に `override == { }` を戻すと「routes や override だけあっても warnings が出る」の項目だけが、`cfg.devTracker.enable &&` を外すと「devTracker.enable = false なら…」の項目だけが落ちた |
 | `nix flake check --all-systems --no-build ./nix` (CI と同じ。3 system) | 通過 |
 | CI と同じ「`sandbox` の `config.warnings` が `[]`」 | 通過 (`[]`) |
 | `nixfmt --check` / `shfmt -d` / `shellcheck` (`nix/` の `*.sh` 35 本) | 通過 |
@@ -96,7 +102,7 @@ override だけで宛先を組む使い方は無くす。
 ~/dotfiles/setup --update
 cat ~/.local/state/dotfiles/claude-notion.json   # {"override":{},"profile":"personal","routes":{}}
 
-# このマシンだけ規則を変えるなら local に書いて switch
+# このマシンだけ規則を変えるなら local に書いて switch (例: 会社の PC で pollenjp の repo も work に書く)
 $EDITOR ~/dotfiles/flake.nix   # local = { dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; }; };
 ~/dotfiles/setup --update
 
@@ -107,4 +113,4 @@ $EDITOR ~/dotfiles/flake.nix   # local = { dotfiles.claude.notion.routes = { "po
 
 - override を使っていたマシンは `{ <プロファイル名> = { … }; }` の形に書き直す
 - 使う workspace ごとに認証を用意する: ntn login なら workspace ごとに入る。API キーなら `~/.config/pjp/env` に
-  `PJP_NOTION_TOKEN_<名前>` (大文字、`-` は `_`) を書く
+  `PJP_NOTION_TOKEN_<名前>` (大文字、`-` は `_`) を書く。`NOTION_API_TOKEN` は書かない (2 節 D)
