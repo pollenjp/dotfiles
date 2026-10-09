@@ -84,6 +84,7 @@
       #   claude-herdr-skill.nix
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
+      #   claude-notion.nix  notion.{profile,routes,override} から作られる JSON と warnings。評価時に assert するので全 system
       checks = forAllSystems (
         system:
         let
@@ -131,6 +132,14 @@
               ;
           };
           claude-herdr-skill = import ./tests/claude-herdr-skill.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-notion-state = import ./tests/claude-notion.nix {
             inherit
               lib
               pkgs
