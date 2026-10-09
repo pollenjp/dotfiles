@@ -58,6 +58,8 @@ repo の規則で決まる認証を通らず、どの repo でもそれが使わ
 | `nix/scripts/setup.sh` | `--update` の最後の案内を、同じ言い方に直す |
 | `nix/lib/mk-home.nix`・`nix/hosts/default.nix` | `claude.notion.routes` のコメント |
 | `nix/README.md` | 「Notion の宛先を host ごとに選ぶ」節 |
+| `docs/adr/011_…/README.md` | 冒頭の表に後続 ADR の行（本文はそのまま） |
+| `docs/adr/README.md` | 一覧に 014 |
 
 ## 4. 検討した代替案
 
@@ -68,6 +70,10 @@ repo の規則で決まる認証を通らず、どの repo でもそれが使わ
 | clone ごとの git config で指定する | clone のたび・マシンのたびに設定が要り、忘れると黙って既定へ書く |
 | ディレクトリの環境変数 (.envrc / devShell の .env) | Claude の環境は起動時に固まり、Bash tool は direnv を通らない |
 | 規則を host option だけに書く | 同じ規則を全マシンのローカル flake に書き写すことになる |
+| B: マシンごとの上書きを、profiles.toml にホスト名ごとの表として置く | マシンごとの差が共通の表に混ざり、マシンを足すたびに claude-skills を直して配ることになる。マシンごとの差は ADR 002 / 007 / 011 と同じくローカル flake に置く |
+| B: repo の行を層より優先する (共通の `pollenjp/foo` が、マシンの `pollenjp/*` に勝つ) | 「このマシンでは `pollenjp/*` を全部 work に」の「全部」が効かなくなる。共通の規則に例外の repo の行があると、その repo だけ personal のまま残る。層の順番を先に決め、repo の行が owner の行に勝つのは同じ層の中だけにした |
+| B: 表に当たらない repo では止まる (マシンの既定を持たない) | 規則に載せていない repo (OSS の clone など) と、repo の外で動く skill (`pjp-scan-to-notion`) が毎回止まる。マシンの既定 (`profile`) を使い、既定も無いときだけ止める |
+| C: override を、選んだ 1 つのプロファイルに重ねる (ADR 011 の形) | 1 台で複数のプロファイルを使うと、どちらに重ねるのかが決まらない。プロファイルの名前ごとに書く |
 
 ## 5. 影響 (Consequences)
 
