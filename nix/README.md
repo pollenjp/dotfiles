@@ -1814,12 +1814,25 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 | repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
 | API キー（そのマシンでそのプロファイルを API キーで使うとき） | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
 
+見る順番は、このマシンの `routes` → 共通の `[routes]` → このマシンの `profile`（既定）→ 止まる。
+各層の中では `owner/repo` の行が `owner/*` の行に勝つが、層の順番が先なので、
+このマシンの `pollenjp/*` は共通の `pollenjp/<repo>` にも勝つ。
+
 値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
 
 `devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
 Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
 Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
 このマシンだけ変えるなら `dotfiles.claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`。
+
+認証は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
+あればその API キー、無ければ workspace ごとの `ntn login` を使う。変数名はプロファイル名を大文字にし
+`-` を `_` にする（personal → `PJP_NOTION_TOKEN_PERSONAL`）。
+
+**`NOTION_API_TOKEN` は `~/.config/pjp/env` に書かない。** 環境に `NOTION_API_TOKEN` があれば
+（repo の devShell が `.env` を読んだときなど）、repo の規則で決まる認証（`PJP_NOTION_TOKEN_<名前>` か
+`ntn login`）を通らず、それが何より先に使われる。シェルは `~/.config/pjp/env` を環境へ読み込むので、
+書くとどの repo でもそれが勝つ。
 
 #### 値の置き場
 
@@ -1849,12 +1862,18 @@ JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profi
 - override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
 - `devTracker.enable = true` なのに profile が無いマシンでは、switch のときに警告が出る
   （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
+- 古い形の override（`override = { devTracker.linkFromRepo = …; };` のように、外側がキーの名前）が
+  ローカル flake に残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
+  書き直し方（`{ <プロファイル名> = { … }; }`）を出して止まるので、更新するときに書き直しておく
 
 #### 確認
 
+宛先は cwd の repo で決まるので、`show` と `check` は確かめたい repo の中で打つ
+（別の場所からは `--cwd <repo のディレクトリ>` を付ける。repo の外ではこのマシンの既定で決まる）。
+
 ```sh
 cat ~/.local/state/dotfiles/claude-notion.json
-~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と出どころ
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と、どの規則で決まったか
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
 ```
 
