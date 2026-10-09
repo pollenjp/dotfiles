@@ -1807,7 +1807,7 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 | 置くもの | 場所 | 例 |
 | --- | --- | --- |
 | 共通の規則（repo → プロファイル） | `claude-skills` の `profiles.toml` の `[routes]` | `"<仕事の org>/*" = "work"` |
-| このマシンだけの規則（共通の規則より先に見る） | ローカル flake の `local`（`dotfiles.claude.notion.routes`） | `{ "pollenjp/*" = "work"; }` |
+| このマシンだけの規則（共通の規則より先に見る。例: 会社の PC で pollenjp の repo も work に書く） | ローカル flake の `local`（`dotfiles.claude.notion.routes`） | `{ "pollenjp/*" = "work"; }` |
 | 規則に当たらない repo と repo の外で使う既定 | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
 | このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
@@ -1825,10 +1825,11 @@ Dev Tracker が個人の private ページの下にあり、チームの repo �
 
 ```nix
 local = {
-  dotfiles.claude.notion.profile = "personal";                 # 規則に当たらない repo と repo の外
-  dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの規則
-  # このマシンだけプロファイルの値を差し替える。外側はプロファイルの名前で、null はキーを消す
-  dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
+  dotfiles.claude.notion.profile = "personal";  # 規則に当たらない repo と repo の外
+  # このマシンだけの規則 (例: 会社の PC で pollenjp の repo も work に書く):
+  #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
+  # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
+  #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
 };
 ```
 
@@ -1836,9 +1837,12 @@ local = {
 
 #### 反映
 
-`switch` が `~/.local/state/dotfiles/claude-notion.json`（`{"override":{},"profile":"personal","routes":{}}`）を置き、
-`claude-skills` の resolver がそれを `profiles.toml` と重ねる。settings.json は触らないので
+`switch` が `~/.local/state/dotfiles/claude-notion.json` を置き、`claude-skills` の resolver が
+それを `profiles.toml` と重ねる。settings.json は触らないので
 `switch` だけで揃う（`~/dotfiles/setup --update` でもよい）。
+
+JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profile":"personal","routes":{}}`。
+`routes` のコメントを外すと `"routes":{"pollenjp/*":"work"}` になる。
 
 - profile が `null`（雛形の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため

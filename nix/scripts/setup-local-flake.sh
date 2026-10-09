@@ -262,7 +262,8 @@ if [[ ${write_flake} == 1 ]]; then
         # ここでは名前を選ぶ ("personal" / "work")。null のままだと、規則に当たらない所で skill は止まる。
         # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
         dotfiles.claude.notion.profile = null;
-        # このマシンだけ規則を足す・上書きする (共通の [routes] より先に見る):
+        # このマシンだけ規則を足す・上書きする (例: 会社の PC で pollenjp の repo も work に書く)。
+        # 共通の [routes] より先に見る:
         #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
         # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
         #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
