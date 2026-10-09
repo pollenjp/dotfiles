@@ -17,9 +17,10 @@
 **自作 skill の名前は `pjp-` で始める**（`pjp-drawio` `pjp-plantuml` など）。
 ディレクトリ名と `SKILL.md` の `name` の両方。
 
-`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills` の
-3 系統が同じ名前空間で並ぶ。prefix が無いと、`/skills` の一覧やセッション冒頭の
-skill 一覧を見ても **どれが自分のものか判らない**。配信物は増減するので、
+`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills`・
+パッケージ同梱（下の「パッケージ同梱の skill」）の 4 系統が同じ名前空間で並ぶ。
+prefix が無いと、`/skills` の一覧やセッション冒頭の skill 一覧を見ても
+**どれが自分のものか判らない**。配信物は増減するので、
 「今ぶつかっていないこと」を確認しても将来ぶつかる（`dataviz` `run` `init` など、
 一般名詞は取られていくと思っておく）。prefix を付けておけば衝突しない。
 
@@ -118,6 +119,19 @@ fi
 `claude-skills` 側は実ディレクトリなので `path:` も `readlink` も要らない。
 そちらの `skills/README.md` を参照。
 
+## パッケージ同梱の skill
+
+nixpkgs のパッケージが同梱している skill（`installAgentSkills` が
+`share/skills/<pname>/<skill>/` に入れるもの）は、このディレクトリへ写さない。
+`nix/home/modules/claude.nix` がパッケージの中を `~/.claude/skills/<skill>` へ直接張る。
+今は herdr だけ。
+
+- 本体（`home.packages`）と同じ derivation を指すので、skill の版は CLI の版と揃い、
+  `flake.lock` を上げれば一緒に上がる
+- 名前は upstream のまま。`pjp-` は自作の印なので付けない
+- 張る元が無くても home-manager は切れた symlink を黙って作る。在ることは
+  `nix/tests/claude-herdr-skill.nix`（flake の checks）で確かめる
+
 ## 配置後の構造
 
 `~/.claude/skills/` は **Claude Code 自身が書き換える**ディレクトリなので、
@@ -128,6 +142,7 @@ fi
 ├── manifest.json      <- Claude Code 管理
 ├── pdf/  docx/  ...   <- Claude Code 管理 (Anthropic 配信)
 ├── <自作>/            <- Nix 管理 (store への symlink)
+├── herdr/             <- Nix 管理 (herdr パッケージの中への symlink)
 └── <private>/         <- claude-skills の作業クローンへの symlink
 ```
 
