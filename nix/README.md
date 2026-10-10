@@ -2225,18 +2225,24 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 ## CI
 
-`.github/workflows/nix.yml` が `nix/**` の変更時に走る。
+`.github/workflows/nix.yml` が、main への push と PR で走る（`nix/**`・`win/**`・workflow 自身が変わったときだけ）。
+毎朝 6:00 (JST) の定期実行では `closure-scan` だけが回る。Actions の画面から手で流すこともできる
+（`workflow_dispatch`。lock-age の下限日数を下げる `min_release_age_days` は[前述](#依存-flakelock-の更新)）。
 
-| ジョブ | ランナー | 内容 |
-| --- | --- | --- |
-| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
-| `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
-| `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
+| ジョブ | 表示名 | ランナー | いつ | 内容 |
+| --- | --- | --- | --- | --- |
+| `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
+| `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
+| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → herdr のキーバインドが WSL と Windows で同じか |
+| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
+| `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
 `aarch64-linux` はランナーが無いので**評価のみ**（`--all-systems --no-build`）。
 オプション名の誤りやプラットフォーム分岐の壊れはこれで捕まる。
 
-ローカルで同じことをするには `./nix/scripts/verify.sh` を使う。
+`check` と同じことを手元でするには `./nix/scripts/verify.sh` を使う。`lock-age`・`closure-scan`・`head-diff` は、
+表の script を手元で打てば同じ判定になる。
 
 ## 検証
 
