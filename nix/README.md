@@ -2298,29 +2298,34 @@ node nix/tests/claude-footer-links.test.mjs                                    #
 
 ```
 nix/
-├── flake.nix              inputs / homeConfigurations / checks / formatter / devShells
+├── flake.nix              inputs / homeConfigurations / lib / checks / packages / apps / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
 ├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
+│       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       ├── bash.nix          alias 88 / 関数 24
 │       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
+│       ├── exe-exec-trace.nix  WSL のマシンの PATH に pjp-who-is-asking を置き、exeExecTrace.enable なら .exe の起動を記録するトレーサの unit ファイルを作る (/etc へは setup が入れる。ADR 012)
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現)
+├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix が使う。flake の packages と checks にも載せる)
+│   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
+│   └── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、Windows と Linux をまたいだ 1 本の木で出す
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現 / herdr の skill のリンク)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -2328,6 +2333,7 @@ nix/
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-plugins.sh  Claude Code の公式プラグインを導入する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
@@ -2335,6 +2341,14 @@ nix/
     ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
+    ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
     ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
-    └── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-powershell-profile.sh  win/ から配った dotfiles.ps1 を PowerShell 7 の $PROFILE から読ませる (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)
+    ├── bootstrap-windows-herdr.sh  Windows の herdr が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、入れ替えはしない)
+    ├── flake-lock-age.sh           flake.lock の pin を、出てから一定日数が経った revision に限る (setup --flake-update と CI の lock-age が呼ぶ)
+    ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
+    ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
+    └── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
 ```
