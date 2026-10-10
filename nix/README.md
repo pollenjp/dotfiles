@@ -606,7 +606,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
@@ -1547,6 +1547,23 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 **スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
 冪等で、既存の設定は保持する。
 
+#### 解説動画を作るか聞くフック
+
+`PostToolUse` フック（`nix/files/claude/hooks/video-offer-nudge.sh`）。設計を書き出した・
+PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画を作るかを聞け」
+と Claude の文脈へ 1 文を差し込む。聞くかどうか・聞き方は skill の側（private な claude-skills）が持つ。
+
+| 知らせる場面 | 条件 |
+| --- | --- |
+| PR の作成 | Bash で `gh pr create` が成功した（stdout に PR の URL がある） |
+| 設計のページ | Write でタグ「設計」を含む cc-page の `index.html` を新しく作った |
+| 設計の文書 | Write で `docs/superpowers/specs/*.md` か、ADR そのもの（`docs/adr/<名前>.md` か `docs/adr/<名前>/README.md`）を新しく作った |
+
+subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図では黙る。
+ユーザーが「このセッションでは聞かない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
+`./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
+
 ### statusLine
 
 Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
@@ -2203,6 +2220,8 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `claude-footer-links.test.mjs` | `footer-links.json` の正規表現が、`ticket.sh` や `gh` の出力のどの行からどのバッジを作るか。Claude Code と同じ JavaScript の RegExp で流す（18 件） | `claude-footer-links-test`（Linux） |
 | `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
+| `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
+| `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を

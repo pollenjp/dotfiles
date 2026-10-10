@@ -7,6 +7,7 @@
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
+#   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。下記)
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
@@ -308,6 +309,17 @@ in
     {
       ".claude/hooks/nix-managed-guard.sh" = {
         source = claudeRoot + "/hooks/nix-managed-guard.sh";
+        executable = true;
+      };
+    }
+
+    # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
+    # 見つけ、解説動画を作るか聞くよう Claude に知らせる。聞き方を持つ skill
+    # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
+    # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/video-offer-nudge.sh" = {
+        source = claudeRoot + "/hooks/video-offer-nudge.sh";
         executable = true;
       };
     }
