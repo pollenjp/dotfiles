@@ -78,7 +78,7 @@
       # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
       #
       # nix/tests/ のテストも載せる。
-      #   <名前>.test.sh   bootstrap などの script の振る舞い。bash・jq・git だけの
+      #   <名前>.test.sh   bootstrap や hook などの script の振る舞い。bash・jq・git だけの
       #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
       #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
       #   claude-herdr-skill.nix
@@ -120,6 +120,7 @@
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
+          video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
