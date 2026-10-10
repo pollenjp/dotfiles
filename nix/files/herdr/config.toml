@@ -12,6 +12,10 @@
 #
 # 有効なキー名・既定値は `herdr --default-config` で全部出せる。
 # 起動中なら prefix + ? で今効いているバインドが一覧できる。
+#
+# Windows 側の herdr にも、同じ [keys] と onboarding を win/herdr/config.toml で配っている
+# ([terminal] だけ持たない)。キーを変えたら両方を直す。CI が 2 つを比べ、違えば落ちる
+# (nix/scripts/check-herdr-keys.sh)。
 
 # 初回起動時のオンボーディングを出さない。
 #

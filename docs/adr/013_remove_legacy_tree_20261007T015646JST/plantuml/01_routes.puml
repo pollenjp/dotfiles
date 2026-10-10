@@ -1,0 +1,49 @@
+@startuml
+' 配置の経路: 旧経路 (main.bash setup) を削除した後の姿
+' 赤 = 今回削除した経路。灰 = 変わらない経路。
+' NOTE: PlantUML では "~" がエスケープ文字として消費されるため "$HOME/" 表記を使う
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 70
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+left to right direction
+
+title 配置の経路（赤は ADR 013 で削除した旧経路）
+
+rectangle "pollenjp/dotfiles（repo 直下）" as repo #FFFFFF {
+  rectangle "**nix/**\nhome-manager の flake と setup.sh" as nix
+  rectangle "**.ssh**\nprivate な submodule" as sshsub
+  rectangle "**win/**\nWindows 側アプリの設定" as win
+  rectangle "**main.bash・shell/・.fish/ など 66 ファイル**\n旧経路（削除）" as legacy #F8CECC
+}
+
+rectangle "Linux / macOS / WSL の $HOME" as home
+rectangle "Windows のアプリ\nOrca・PowerShell・herdr" as winapps
+rectangle "Windows の Git Bash の HOME" as gitbash
+
+nix --> home : $HOME/dotfiles/setup\n（home-manager switch）
+sshsub --> home : setup-ssh-config.sh\n（$HOME/.ssh/config.d/ へ symlink）
+win --> winapps : bootstrap-windows-files.sh\n（WSL から /mnt/c へコピー）
+legacy -[#B85450,dashed]-> home : <color:#B85450>main.bash setup（symlink）</color>\n<color:#B85450>全マシンが Nix 経路へ移った</color>
+legacy -[#B85450,dashed]-> gitbash : <color:#B85450>main.bash setup（cp -a）</color>\n<color:#B85450>今後は管理しない</color>
+
+note right of gitbash
+  旧経路の clone とコピー済みのファイルのまま動き続ける。
+  clone を pull すると、起動時に読み込み先が無いエラーが出る
+end note
+
+legend right
+  |= 色 |= 意味 |
+  |<#F8CECC>| ADR 013 で削除した旧経路 |
+  |<#F7F7F7>| 変わらない経路 |
+endlegend
+@enduml

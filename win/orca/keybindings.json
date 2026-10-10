@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "keybindings": {
+    "worktree.navigateUp": "Mod+Alt+ArrowUp",
+    "worktree.navigateDown": "Mod+Alt+ArrowDown",
+    "tab.previousAllTypes": "Mod+ArrowUp",
+    "tab.nextAllTypes": "Mod+ArrowDown",
+    "tab.close": null,
+    "terminal.closePane": null
+  },
+  "platforms": {
+    "darwin": {},
+    "linux": {},
+    "win32": {}
+  }
+}

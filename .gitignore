@@ -1,5 +1,3 @@
-/.cache
-
 # nix build の成果物シンボリックリンク
 result
 result-*

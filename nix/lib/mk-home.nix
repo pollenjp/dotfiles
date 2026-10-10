@@ -9,16 +9,14 @@
   homeDirectory ?
     if inputs.nixpkgs.lib.hasSuffix "darwin" system then "/Users/${username}" else "/home/${username}",
   # WSL 固有の設定をまとめて渡す (dotfiles.wsl にそのまま入る)。
-  # 有効な組み合わせが構造に出るよう、1Password は WSL の下、Windows ユーザー名は
-  # さらに 1Password の下に置いている。
+  # 有効な組み合わせが構造に出るよう、1Password と win/ の配布は WSL の下に置いている。
   #
   #   wsl = {
   #     enable = true;
+  #     windowsUserName = "polle";
+  #     windowsFiles.enable = true;
   #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
-  #     onePassword = {
-  #       enable = true;
-  #       windowsUserName = "polle";
-  #     };
+  #     onePassword.enable = true;
   #   };
   #
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
@@ -27,7 +25,8 @@
   #
   #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
   #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git を ssh で通す)
-  #   claude.notion.profile = "personal";  # Notion へ書く skill の宛先 (claude-skills の profiles.toml の名前)
+  #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
+  #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
   #
   # 省略すれば既定 (どちらも true)。ローカル flake (~/dotfiles/flake.nix) の雛形は
   # 登録簿のホストにも当たる module で devTracker を false にしているので、そちら経由の

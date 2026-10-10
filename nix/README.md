@@ -2,8 +2,10 @@
 
 dotfiles を Nix home-manager で宣言的に管理するためのディレクトリ。
 
-既存の `main.bash setup` 経路とは**独立**しており、設定ファイルは `nix/files/` に複製されている。
-どちらの経路を使うかはマシン単位で選ぶ。同一マシンで両方を走らせないこと。
+設定ファイルの実体は `nix/files/` にある。repo 直下にあった旧経路 (`main.bash setup`) から
+複製して始めたもので、旧経路は [ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)
+で削除した。以下で「移植元」「複製元」として挙げる旧経路のファイルは、git の履歴
+(`git show 4a54c96:shell/250_alias.sh` など) で読める。
 
 ## 対象範囲
 
@@ -14,7 +16,8 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 | 言語ランタイム (node / go) | mise (プロジェクト毎の切替が必要なため) |
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
 
-対象 OS は **Linux / macOS / WSL**。Windows (MINGW/MSYS) は Nix が動かないため `main.bash setup` を使う。
+対象 OS は **Linux / macOS / WSL**。Windows 側のアプリの設定は WSL から配る
+（[後述](#windows-側のファイルを配る)）。Git Bash (MINGW/MSYS) の設定は管理しない。
 
 対象シェルは **bash / fish**。zsh は Nix 管理の対象外。
 
@@ -434,16 +437,22 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
+| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
-「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*` を毎回走らせる。
-どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、繰り返しても
-状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
+「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*`、`exe-exec-trace` を
+毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
+繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
 並べるしかなくなる。時間が気になるとき・一部だけ走らせたいときは「カスタム」か
 `--steps` で選び直す。
+
+8 `exe-exec-trace` は中で `sudo` を呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・
+止まっているのを起こすときだけで、揃っていれば（option が無効なマシンも）呼ばない。
+`sudo` がパスワードを訊けないとき（パスワード無しで通らず、端末も無い。Claude の Bash
+ツールから打ったときなど）は失敗にせず飛ばし、最後の「残りの手作業」がずれを知らせる
+（[後述](#wsl-の-exe-の起動を常時記録する)）。
 
 入っていないのは、冪等でないか更新時には有害な手順。
 
@@ -453,7 +462,6 @@ nix flake update dotfiles --flake ~/dotfiles
 | 2 `preflight-unlink` | **home-manager 自身が張った symlink まで外す**（対象パスの symlink を無条件に unlink する）。旧 `main.bash` からの移行用 |
 | 2.5 `local-flake` | `~/dotfiles/setup` を**実行元の checkout** へ張り直す（worktree から走らせると dangling で残る）。ghq の決めるパス外では `exit 1` になり後続まで止まる |
 | 7 `chsh` | `sudo` が要る。README でも「必要なら」 |
-| 8 `exe-exec-trace` | 中で `sudo` を呼ぶ（system の unit を `/etc` へ入れる）。ずれていれば最後の「残りの手作業」が知らせる（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 操作は ↑/↓ で移動、Space で選択、**Enter で実行**、q で戻る/中止。
 `h` で対象ホスト、`b` で[既存ファイルの扱い](#既存ファイルを退避するか選ぶ)を変えられる。
@@ -575,6 +583,10 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
+| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、ほかの bootstrap を止めない |
+| `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
+| `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
+| `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -594,15 +606,18 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のガードフック登録 |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
+| 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
+| 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
+| 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
-| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
+| 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -707,7 +722,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`ssh-config` と `bootstrap-*` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`ssh-config` と `bootstrap-*`、`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
@@ -749,22 +764,24 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 
 ```nix
 wsl = {
-  enable = true;              # WSL か
-  exeExecTrace.enable = true; # WSL から起動された .exe を常時記録するか (後述)
-  onePassword = {
-    enable = true;            # ホスト側 Windows の 1Password を使うか (WSL 専用)
-    windowsUserName = "polle"; # その 1Password のパスに要る Windows ユーザー名
-  };
+  enable = true;               # WSL か
+  windowsUserName = "polle";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
+  windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
+  exeExecTrace.enable = true;  # WSL から起動された .exe を常時記録するか（後述）
+  onePassword.enable = true;   # ホスト側 Windows の 1Password を使うか（WSL 専用）
 };
 ```
 
-有効な組み合わせは次の 3 通りだけになる。
+git の署名で見ると、有効な組み合わせは次の 3 通りだけになる。
 
 | マシン | 指定 | git の署名 |
 | --- | --- | --- |
 | 非 WSL | `wsl` を書かない | 署名の設定を書き出さない |
 | WSL / 1Password 無し | `wsl.enable = true;` | 同上 |
-| WSL / 1Password 有り | 上のブロックまるごと | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+| WSL / 1Password 有り | `wsl.enable`・`windowsUserName`・`onePassword.enable` | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
+
+`windowsFiles.enable` は 1Password と独立に選べる（`windowsUserName` は要る）。
+何をするかは[後述](#windows-側のファイルを配る)。
 
 登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
 これに当たる。適用時に `#` の後ろで選ぶ。
@@ -792,7 +809,9 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 階層で表現しきれない「親が false なのに子が true」は `assertions` で評価時に止まる。
 
 - `wsl.onePassword.enable` が true なのに `wsl.enable` が false
-- `wsl.onePassword.enable` が true なのに `windowsUserName` が無い
+- `wsl.onePassword.enable` が true なのに `onePassword.windowsUserName`（既定は `wsl.windowsUserName`）が無い
+- `wsl.windowsFiles.enable` が true なのに `wsl.enable` が false
+- `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
 - `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
 
 `exeExecTrace` は 1Password の有無とは別に選べる（登録簿では `pollenjp@wsl` だけ true）。
@@ -821,13 +840,12 @@ outputs =
         system = "x86_64-linux";
         wsl = {
           enable = true;
-          onePassword = {
-            enable = true;
-            # ホスト側 Windows のユーザー名。登録簿の pollenjp@wsl は "polle" 固定なので、
-            # 別の名前のマシンはここで足す。値はこのマシンで:
-            #   pwsh.exe -NoProfile -Command '$env:USERNAME'
-            windowsUserName = "polle";
-          };
+          # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
+          # (1Password の op-ssh-sign のパスと、win/ の配り先)。登録簿の pollenjp@wsl は
+          # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
+          #   pwsh.exe -NoProfile -Command '$env:USERNAME'
+          windowsUserName = "polle";
+          onePassword.enable = true;
         };
 
         # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
@@ -867,14 +885,20 @@ HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形には�
 置いてある。gh にログインしないマシンだけ外す
 （[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
 
-Notion へ書く skill の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで skill が止まる）で、
-使うマシンでは `"personal"` / `"work"` を書く（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
+Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで、規則に当たらない repo と
+repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
+（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
   古い形（`hostsWith` が無い）を見つけると警告する。手で足したホストが無ければ
   `--force` で作り直す。残すなら上の形に合わせて `local` と `hostsWith` を足す
+- `windowsUserName` を `onePassword` の下に書いた古い形
+  （`onePassword = { enable = true; windowsUserName = "…"; };`）もそのまま動く
+  （`onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。
+  `windowsFiles.enable` を足すときは配り先にも名前が要るので、上の形のように
+  `wsl.windowsUserName` へ移す
 
 `~/dotfiles/setup` のホスト選択（`h`）にもここで足したものが出る。`setup.sh` は
 登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。
@@ -998,6 +1022,49 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | --- | --- |
 | `source ~/dotfiles/vim_common/common.vim` | `source ~/.vim/common.vim` |
 | `source-file ~/dotfiles/tmux/home.tmux.conf` | `source-file ~/.tmux.conf` |
+
+## Windows 側のファイルを配る
+
+Windows 側のアプリの設定（Orca のキーバインドなど）は repo 直下の
+[`win/`](../win/README.md) に置き、WSL から `/mnt/c` 越しにコピーして配る。置き先は
+アプリ自身が書き換えるので Nix では置けず、Claude Code の `settings.json` と同じく
+「Nix が値を置き、bootstrap が写す」2 段にしてある。
+
+| 段 | すること | 決める場所 |
+| --- | --- | --- |
+| `switch` | 配り先と on / off を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト） | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName`） |
+| bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
+
+**`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
+読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
+forbidden になる）。CI の `nix flake check ./nix` は `git+file` になって見えてしまうので、
+CI では通るのにマシン上の switch で落ちる。module から `../../../` で repo 直下を指さないこと。
+
+### 反映（冪等。更新時も毎回走る）
+
+```sh
+~/dotfiles/setup --update                           # switch + bootstrap をまとめて
+./nix/scripts/bootstrap-windows-files.sh            # 配る部分だけ
+./nix/scripts/bootstrap-windows-files.sh --dry-run  # 判定だけ見る
+./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
+./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
+./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
+```
+
+- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
+  それ以外は「このマシンは Windows 側へ配りません」と言って exit 0
+- 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
+- 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
+  sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（order 90 なので止まるのは
+  この手順だけ）。取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
+- 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
+  設定画面の「ディスクから再読み込み」が要る
+- PowerShell の共有設定 (`win/powershell/dotfiles.ps1`) は、続く `bootstrap-windows-powershell-profile.sh`
+  (order 95) が `$PROFILE` に読み込みの 1 行を足して読ませる。`$PROFILE` の場所はマシンごとに
+  変わる (OneDrive のドキュメント) ので `pwsh.exe` に聞く。interop が落ちていたら手で打つ
+  コマンドを出して exit 0。配る経路 (コピー) には exe を挟まない（[`win/README.md`](../win/README.md#powershell)）
+
+経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
 ## git について
 
@@ -1138,8 +1205,8 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 > （bash 5.2 で実測）。気づく合図が無いので、移行後は `command -v ssh` が
 > `~/.local/bin/ssh` を指しているか確認するとよい。
 
-Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移していない。
-Windows は `main.bash setup` 経路のままなので、リポジトリ直下に残してある。
+Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移さず、旧経路と一緒に削除した
+（[ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)）。
 
 ### WSL の .exe の起動を常時記録する
 
@@ -1159,23 +1226,31 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 
 登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
 `local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
-**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順で、
-手順が中で `sudo` を呼ぶ。**`sudo` を付けて打たないこと**（`HOME` が root のものになり、
-生成された unit を見失うので、手順は root では断る）。
+**switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順
+`exe-exec-trace` で、「既存マシン更新」（`--update`）の最後に走り、中で `sudo` を呼ぶ。
+**`sudo` を付けて打たないこと**（`HOME` が root のものになり、生成された unit を見失うので、
+手順は root では断る）。
 
 ```sh
-~/dotfiles/setup --update                 # unit ファイルを生成する (まだ何も動かない)
-~/dotfiles/setup --steps exe-exec-trace   # /etc へ入れて起こす (中で sudo を呼ぶ)
+~/dotfiles/setup --update   # unit ファイルを生成し、/etc へ入れて起こす (中で sudo を呼ぶ)
 ```
+
+パスワード無しで `sudo` できないマシンで、端末の無いところ（Claude の Bash ツールなど）から
+打つと、手順は入れずに飛ばし、最後の「残りの手作業」に「unit がまだ入っていない」と出る。
+そのときは端末から `~/dotfiles/setup --steps exe-exec-trace` を打つ。
 
 unit は `Type=notify` なので、手順の `restart` はトレーサが BPF を読み込み終えるまで待ち、
 読み込みに失敗すれば手順も失敗する。起動に失敗し続けたら（WSL のカーネルが更新されて
-BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になり、「残りの手作業」に
-「入っているが動いていない」と出る。
+BPF が読み込めなくなったときなど）10 分に 5 回で諦めて `failed` になる。手順は止まっている
+unit を起こし直すので、直るまでは `--update` の最後のこの手順が失敗する
+（理由は `sudo journalctl -u dotfiles-exe-exec-trace -n 30` で見る。止めておきたいなら
+option を false にする）。
 
 unit の `ExecStart` は store の固定パスにしてある（root がユーザーの書き換えられるパスを
-実行しないため）。その代わり、**トレーサが更新されたら同じ手順を打ち直す。** 打つまでは
-古い版が動き続け、`--update` の最後の「残りの手作業」に「入っている unit が古い」と出る。
+実行しないため）。その代わり、トレーサが更新されたら unit を入れ替える必要がある。
+`--update` が switch の後にこの手順も走らせるので、更新と一緒に入れ替わる。手順を外して
+走らせたときや `sudo` を訊けずに飛ばしたときは古い版が動き続け、最後の「残りの手作業」に
+「入っている unit が古い」と出る。
 手順は unit の store パスへ GC root（`/nix/var/nix/gcroots/dotfiles-exe-exec-trace`）を
 張るので、`nix-collect-garbage` で動いているトレーサが消えることはない。
 
@@ -1192,9 +1267,25 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 
 ```
 2026-10-01T00:53:26.981+09:00  ssh.exe  pid=446394 uid=1000 distro=this
-    argv: ssh.exe -o IdentityAgent=none -o BatchMode=yes -o ConnectTimeout=3 -o SendEnv=GIT_PROTOCOL fake@192.0.2.1 git-upload-pack '/pollenjp/example.git'
+    argv[0]: ssh.exe
+    argv[1]: -o
+    argv[2]: IdentityAgent=none
+    argv[3]: -o
+    argv[4]: BatchMode=yes
+    argv[5]: -o
+    argv[6]: ConnectTimeout=3
+    argv[7]: -o
+    argv[8]: SendEnv=GIT_PROTOCOL
+    argv[9]: fake@192.0.2.1
+    argv[10]: git-upload-pack '/pollenjp/example.git'
     at exec: git(446393) <- zsh(446388) <- claude(15259) <- fish(1328) <- herdr(972) <- …
 ```
+
+- 引数は 1 引数 1 行で、祖先のコマンドラインは 1 プロセス 1 行で、記録してある分（1 つ 1 KiB
+  まで）を切らずに出す。Claude の Bash ツールは `zsh -c 'source <スナップショット> … && eval '<実際の
+  コマンド>''` の形で、実際のコマンドが長い前置きの後ろにあるので、祖先の行は長くなる
+- 祖先のコマンドラインは、1 つの引数に空白があっても区切りが分かるようシェルの引用でつないで
+  記録する（`zsh -c 'echo a b'`）。2026-10-02 より前の記録は空白でつないだまま
 
 - `adm` か `systemd-journal` のグループに入っていれば `sudo` は要らない
 - agent に届く `.exe`（`ssh.exe`・`ssh-add.exe`・`scp.exe`・`sftp.exe`・`op-ssh-sign*.exe`）
@@ -1215,12 +1306,11 @@ pjp-who-is-asking --no-windows   # Linux 側だけ
 
 #### 外す
 
-`exeExecTrace.enable` を false にして `--update` で switch し、同じ手順を打つ。生成された
-unit が無いので、入っている unit を止めて消す（GC root も消す）。
+`exeExecTrace.enable` を false にして `--update` を打つ。switch の後に走る手順が、
+生成された unit が無いので、入っている unit を止めて消す（GC root も消す）。
 
 ```sh
 ~/dotfiles/setup --update
-~/dotfiles/setup --steps exe-exec-trace
 ```
 
 #### 気を付けること
@@ -1316,7 +1406,6 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 
 | 対象 | 症状 |
 | --- | --- |
-| `c` | `alias c='noglob c-func'` の `noglob` は zsh 専用。bash では `noglob: command not found` で失敗していた |
 | `cdrepo` | ガードが fish 構文の `if not command -v ghq` で書かれており、bash では `not` が見つからず終了ステータス 127 = 常に偽。一度も発火しない死んだコードだった |
 | ssh-agent | `ssh-add` の存在確認が無く、未インストール環境では起動のたびにエラーが出ていた |
 
@@ -1402,7 +1491,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
-| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
+| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1419,11 +1508,15 @@ env の値を上書きできるようにするためなので、順序を入れ�
 **自作のものは名前を `pjp-` で始める。** skill はディレクトリ名と `SKILL.md` の
 `name` の両方（`pjp-drawio` `pjp-plantuml`）。agent / command も同じ。
 
-`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills` の 3 系統が
-同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
+`~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills`・パッケージ同梱
+（herdr）の 4 系統が同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
 配信物は増減するので一般名詞（`dataviz` `run` `init` など）は将来ぶつかる。
 `claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する
 （こちら側に相当する検査は無い）。
+
+パッケージ同梱の skill（nixpkgs の `installAgentSkills` が `share/skills/` に入れるもの）は
+自作ではないので、upstream の名前のまま置く。張り方は `nix/files/claude/skills/README.md`
+の「パッケージ同梱の skill」。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
@@ -1437,7 +1530,8 @@ env の値を上書きできるようにするためなので、順序を入れ�
 ~/.claude/skills/
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
-└── pjp-my-skill -> /nix/store/…   <- Nix 管理
+├── pjp-my-skill -> /nix/store/…   <- Nix 管理
+└── herdr -> /nix/store/…-herdr-…/share/skills/herdr/herdr   <- Nix 管理 (パッケージ同梱)
 ```
 
 ### ⚠️ `~/.claude/` を直接編集しないこと
@@ -1478,6 +1572,23 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 **スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
 冪等で、既存の設定は保持する。
 
+#### 解説動画を作るか聞くフック
+
+`PostToolUse` フック（`nix/files/claude/hooks/video-offer-nudge.sh`）。設計を書き出した・
+PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画を作るかを聞け」
+と Claude の文脈へ 1 文を差し込む。聞くかどうか・聞き方は skill の側（private な claude-skills）が持つ。
+
+| 知らせる場面 | 条件 |
+| --- | --- |
+| PR の作成 | Bash で `gh pr create` が成功した（stdout に PR の URL がある） |
+| 設計のページ | Write でタグ「設計」を含む cc-page の `index.html` を新しく作った |
+| 設計の文書 | Write で `docs/superpowers/specs/*.md` か、ADR そのもの（`docs/adr/<名前>.md` か `docs/adr/<名前>/README.md`）を新しく作った |
+
+subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図では黙る。
+ユーザーが「このセッションでは聞かない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
+`./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
+
 ### statusLine
 
 Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
@@ -1503,6 +1614,57 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > ⚠️ `/statusline` で作った実ファイルが既に `~/.claude/statusline-command.sh` に
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
+
+### footer に会話のチケットと PR のリンクを出す
+
+会話の中で触れた Dev Tracker のチケット（`TKT-n` / `WRK-TKT-n`）と GitHub の PR を、
+プロンプト下の footer にクリックできるバッジとして並べる。
+
+```
+⏵⏵ bypass permissions on (shift+tab to cycle) · TKT-12 · dotfiles#34 · claude-skills#5 · TKT-9
+```
+
+Claude Code の `footerLinksRegexes`（2.1.176〜）を使う。turn の終わりに、その turn の
+出力（tool の結果と Claude の応答の文章）を正規表現で走査し、当たったものをバッジにする。
+
+- 並ぶのは今の branch の PR バッジ（組み込み）込みで最大 5 個。新しいものが先頭に入り、
+  6 個目が来ると一番古いものが落ちる。同じ URL は 1 個にまとまる
+- ユーザーが打った文は拾わない。Claude が応答で同じリンクに触れれば拾う
+- `/clear` で消え、resume すると transcript の末尾から作り直す
+- `settings.json` を書き換えると、実行中の session にも次の turn から効く
+
+| 項目 | 拾うもの | バッジ |
+| --- | --- | --- |
+| チケット | ID と `https://app.notion.com/p/…` が同じ行に並ぶもの（`ticket.sh` の書き込み系の出力 `TKT-n: …  URL`、応答の `TKT-n: URL` や `[TKT-n](URL)`） | `TKT-12` |
+| PR | `https://github.com/<owner>/<repo>/pull/<番号>`。`ticket.sh list` の行（空白 2 つ + `TKT-n` で始まる）に載るものは外す | `dotfiles#34` |
+
+値は `nix/files/claude/footer-links.json`。この形にしている理由:
+
+- チケットの URL はタイトルの英数字の部分と 32 桁の id でできていて、`TKT-n` を含まない。
+  label に ID を出すため、ID と URL が同じ行に並ぶ形を拾う。間に別の ID を挟んだ URL とは組ませない
+- url の `{名前}` に差し込む値は `encodeURIComponent` されるので、URL を丸ごと 1 つの
+  placeholder で差し込めない。owner・repo・番号や、Notion の page の部分を別々に取って組み直す
+- 会話の始めに打つ `ticket.sh list` には、他のチケットの PR が載る。素朴に拾うと関係の無い PR が
+  毎回 footer に居座るので、否定の後読みで外している
+- `footerLinksRegexes` は user / flag / managed の settings からしか読まれない。repo の
+  `.claude/settings.json` に置いても効かない
+
+> ⚠️ tool の出力に出たリンクは何でも拾う。PR の URL を多く含む docs を読むと、5 枠がそれで
+> 埋まる。作業中のチケットは `ticket.sh` を打つたびに出力に出るので、すぐ先頭へ戻る。
+
+正規表現の当たり方は `nix/tests/claude-footer-links.test.mjs` が確かめる（[テスト](#テスト)）。
+Dev Tracker の ID の prefix を増やしたら（新しい workspace）、`footer-links.json` とテストの両方に足す。
+
+#### 登録（冪等。更新時も毎回走る）
+
+```sh
+./nix/scripts/bootstrap-claude-footer-links.sh
+```
+
+statusLine と同じ事情で、値は `settings.json` にしか書けない。skill-overrides と同じく、
+home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置き、このコマンドが
+`.footerLinksRegexes` を丸ごと置き換える。このキーは dotfiles が持つので、手で足した項目も
+次の実行で消える。足したいなら `footer-links.json` に書く。
 
 ### Claude のセッションだけ git の設定を変える
 
@@ -1637,6 +1799,9 @@ Claude Code 自身も条件によって同じ仕組みで `credential.interactiv
 `git remote get-url --push origin`（gitViaGh なら https）を実行させる。自分のターミナルで
 実行すると `true` と ssh の URL のまま。入らなければ再起動する。
 
+この振る舞い（option どおりの書き直し・警告）と状態ファイルの中身は、`nix/tests/` のテストが
+flake の `checks` で確かめている（[テスト](#テスト)）。
+
 #### 採らなかった案
 
 無署名:
@@ -1727,52 +1892,86 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 ### Notion の宛先を host ごとに選ぶ
 
 Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-authoring`・
-`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、マシンごとに違う（会社のマシンは
-仕事の workspace、自宅は個人の workspace）。宛先の**名前**を host option
-**`dotfiles.claude.notion.profile`** で選び、**値**は private の `claude-skills` の
-`skills/pjp-notion-profile/profiles.toml` が持つ。
+`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、**作業中の repo** で決まる（仕事の org の repo は
+仕事の workspace、pollenjp の repo は個人の workspace）。規則は private の `claude-skills` の
+`skills/pjp-notion-profile/profiles.toml` の `[routes]` にあり、このマシンだけの規則と、
+規則に当たらないときの既定を host option で選ぶ。
 
 | 置くもの | 場所 | 例 |
 | --- | --- | --- |
-| どのプロファイルを使うか | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
-| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ scanData = "https://app.notion.com/p/…"; }` |
+| 共通の規則（repo → プロファイル） | `claude-skills` の `profiles.toml` の `[routes]` | `"<仕事の org>/*" = "work"` |
+| このマシンだけの規則（共通の規則より先に見る。例: 会社の PC で pollenjp の repo も work に書く） | ローカル flake の `local`（`dotfiles.claude.notion.routes`） | `{ "pollenjp/*" = "work"; }` |
+| 規則に当たらない repo と repo の外で使う既定 | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
+| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
+| repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
+| API キー（そのマシンでそのプロファイルを API キーで使うとき） | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
+
+見る順番は、このマシンの `routes` → 共通の `[routes]` → このマシンの `profile`（既定）→ 止まる。
+各層の中では `owner/repo` の行が `owner/*` の行に勝つが、層の順番が先なので、
+このマシンの `pollenjp/*` は共通の `pollenjp/<repo>` にも勝つ。
 
 値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
+
+`devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
+Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
+Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
+このマシンだけ変えるなら `dotfiles.claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`。
+
+認証は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
+あればその API キー、無ければ workspace ごとの `ntn login` を使う。変数名はプロファイル名を大文字にし
+`-` を `_` にする（personal → `PJP_NOTION_TOKEN_PERSONAL`）。
+
+**`NOTION_API_TOKEN` は `~/.config/pjp/env` に書かない。** 環境に `NOTION_API_TOKEN` があれば
+（repo の devShell が `.env` を読んだときなど）、repo の規則で決まる認証（`PJP_NOTION_TOKEN_<名前>` か
+`ntn login`）を通らず、それが何より先に使われる。シェルは `~/.config/pjp/env` を環境へ読み込むので、
+書くとどの repo でもそれが勝つ。
 
 #### 値の置き場
 
 ```nix
 local = {
-  dotfiles.claude.notion.profile = "personal";
-  # このマシンだけ一部を差し替える。キーは profiles.toml と同じで、null はキーを消す
-  dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
+  dotfiles.claude.notion.profile = "personal";  # 規則に当たらない repo と repo の外
+  # このマシンだけの規則 (例: 会社の PC で pollenjp の repo も work に書く):
+  #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
+  # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
+  #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
 };
 ```
 
-登録簿のホストを直接指すなら `mkHome` に `claude.notion.profile = "personal";`。
+登録簿のホストを直接指すなら、`mkHome` に `claude.notion.profile = "personal";` を渡す
+（このマシンだけの規則は `claude.notion.routes = { … };`）。
 
 #### 反映
 
-`switch` が `~/.local/state/dotfiles/claude-notion.json`（`{"override":{},"profile":"personal"}`）を置き、
-`claude-skills` の resolver がそれを `profiles.toml` と重ねる。settings.json は触らないので
+`switch` が `~/.local/state/dotfiles/claude-notion.json` を置き、`claude-skills` の resolver が
+それを `profiles.toml` と重ねる。settings.json は触らないので
 `switch` だけで揃う（`~/dotfiles/setup --update` でもよい）。
 
-- profile が `null`（雛形の既定）で override も空なら、skill は「宛先が決まらない」と止まる。
+JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profile":"personal","routes":{}}`。
+`routes` のコメントを外すと `"routes":{"pollenjp/*":"work"}` になる。
+
+- profile が `null`（雛形の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため
-- override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
-- `devTracker.enable = true` なのに profile も override も無いマシンでは、switch のときに警告が出る
+- `routes`（キーと値）と `override`（キー）の綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `devTracker.enable = true` なのに profile が無いマシンでは、switch のときに警告が出る
   （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
+- 古い形の override（`override = { devTracker.linkFromRepo = …; };` のように、外側がキーの名前）が
+  ローカル flake に残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
+  書き直し方（`{ <プロファイル名> = { … }; }`）を出して止まるので、更新するときに書き直しておく
 
 #### 確認
 
+宛先は cwd の repo で決まるので、`show` と `check` は確かめたい repo の中で打つ
+（別の場所からは `--cwd <repo のディレクトリ>` を付ける。repo の外ではこのマシンの既定で決まる）。
+
 ```sh
 cat ~/.local/state/dotfiles/claude-notion.json
-~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と出どころ
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と、どの規則で決まったか
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
 ```
 
-経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)。
+経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](../docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
 
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 
@@ -1897,10 +2096,11 @@ skill を足したあとや別マシンの変更を取り込むときに何度�
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/ docx/ ...     <- Anthropic 配信 (実ディレクトリ)
 ├── <公開してよいもの> -> /nix/store/…                       (nix/files/claude/skills/)
+├── herdr              -> /nix/store/…-herdr-…/share/skills/… (パッケージ同梱。claude.nix)
 └── <private>          -> ~/ghq/…/claude-skills/skills/…     (bootstrap-claude-skills.sh)
 ```
 
-`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、3 系統が兄弟として
+`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、4 系統が兄弟として
 並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
 
 #### 取得できないマシンでも止まらない
@@ -1960,7 +2160,7 @@ claude-skills の作業クローンなので **commit / push しないと他の�
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -1978,26 +2178,25 @@ nixpkgs にも `claude-code` は在り、wrapper が `DISABLE_AUTOUPDATER` を�
 Nix 管理でも動作自体に問題はない。
 
 それでも mise に置いているのは **リリース頻度が `flake.lock` の更新周期に合わない**ため。
-nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。mise の `latest` と
-`minimum_release_age = 9d` の組み合わせなら「先端は取らないが nixpkgs pin よりは速い」
-中間の刻みになり、[「先端は取らない」方針](#依存-flakelock-の更新)とも矛盾しない。
+nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 
-9 日待てないとき (出たばかりの版にしか無い修正が要るなど) は
-`mise_with_no_release_age use -g claude@latest` で、その 1 回だけ遅延を外して取れる
-(`MISE_MINIMUM_RELEASE_AGE=0d mise …` の alias / abbr。bash・fish の両方にある)。
+遅延も `claude` だけ settings の `minimum_release_age = 9d` ではなく **1d** に縮めて
+`latest` を入れている（`bootstrap-mise.sh` の
+`MISE_MINIMUM_RELEASE_AGE=1d mise use -g claude@latest`。下の `mise1` と同じ）。
+`claude` は新しい版をこまめに使いたいことが多いが、ほぼ毎日出るので 9d を課すと手元の版が
+常に 9 日ぶん遅れるため。1d でも公開から 1 日経っていない版は取らないので、
+[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。
+
+遅延をその 1 回だけ変える alias / abbr を bash・fish の両方に置いている。
 `config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
+
+| 名前 | 短縮形 | 中身 | 使いどころ |
+| --- | --- | --- | --- |
+| `mise_with_no_release_age` | `mise0` | `MISE_MINIMUM_RELEASE_AGE=0d mise` | 1 日も待てないとき（出たばかりの版にしか無い修正が要るなど）。`mise0 use -g claude@latest` |
+| `mise_with_one_release_age` | `mise1` | `MISE_MINIMUM_RELEASE_AGE=1d mise` | `setup.sh --update` を待たずに `claude` を上げるとき（`mise1 use -g claude@latest`）や、9d の他のツールを 1d で取るとき |
 
 この選択には副作用があり、`bootstrap-claude-plugins.sh` が `claude` を要求するので
 実行順の制御が必要になっている（次節）。
-
-Nix が CLI ツールを持つ環境では、レガシー経路の起動時パッケージ注入を止める必要がある。
-その合図に `~/.local/state/dotfiles/package-manager` というマーカーファイルを使っている
-（内容は `nix`）。配置するのは `nix/home/modules/mise.nix`。
-
-このマーカーがあると次が停止する。**マーカーが無い環境の挙動は従来どおり。**
-
-- `shell/060_mise.sh` / `.fish/060_mise.fish` の `sed -i` によるパッケージ注入と `mise install`
-- `shell/252_alias_mise.sh` / `.fish/252_alias_mise.fish` の日次バージョン pin
 
 ### `~/.config/mise/config.toml` は Nix 管理下に置かない
 
@@ -2015,11 +2214,6 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
 触るので冪等で、既存の `[tools]` も壊さない。
 
-> ⚠️ `.config_tmpl/mise/config.toml`（レガシー側のテンプレート）にある `install_before` は
-> 現在の mise では **`minimum_release_age` に改名**されている。旧名は
-> `mise settings ls --all` に存在せず、`mise settings set` してもエラーにならず
-> **黙って無視される**。テンプレート側は以前から効いていなかった可能性が高い。
-
 > ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
 > `home-manager switch` は hermetic に保つ方針。
 
@@ -2035,7 +2229,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 | ジョブ | ランナー | 内容 |
 | --- | --- | --- |
-| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド → sandbox への activate と冪等性 → `warnings` が空か |
+| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
 | `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
 
@@ -2067,16 +2261,50 @@ nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なので -L が必須
 ```
 
+### テスト
+
+`nix/tests/` に置き、flake の `checks` で流す。CI の `nix flake check` が毎回通す。
+`nix/pkgs/` の道具の unittest（ADR 012）と同じ扱い。
+
+| テスト | 確かめること | check の名前 |
+| --- | --- | --- |
+| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
+| `bootstrap-claude-footer-links.test.sh` | `bootstrap-claude-footer-links.sh` が settings.json の footerLinksRegexes を生成ファイルどおりに書くこと・他のキーを残すこと・形の違う入力では書かずに落ちること（13 件） | `bootstrap-claude-footer-links-test`（Linux） |
+| `claude-footer-links.test.mjs` | `footer-links.json` の正規表現が、`ticket.sh` や `gh` の出力のどの行からどのバッジを作るか。Claude Code と同じ JavaScript の RegExp で流す（18 件） | `claude-footer-links-test`（Linux） |
+| `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
+| `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
+| `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
+| `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
+| `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
+| `claude-notion.nix` | `notion.{profile,routes,override}` の既定・`claude-notion.json` の中身・profile が無いときの warnings（評価時の assert） | `claude-notion-state`（全 system） |
+
+bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
+引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
+
+```sh
+nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ
+bash nix/tests/bootstrap-claude-env.test.sh                                    # サンドボックスの外で
+node nix/tests/claude-footer-links.test.mjs                                    # mjs のテスト (node が要る)
+```
+
+- 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
+  `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
+  抜けないため
+- 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
+- `claude-env.nix` と `claude-notion.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。
+  外れた項目の名前がエラーに出る
+
 ## ディレクトリ
 
 ```
 nix/
 ├── flake.nix              inputs / homeConfigurations / checks / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
+├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,override}
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
@@ -2084,13 +2312,14 @@ nix/
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
-│       ├── mise.nix          mise 抑止マーカー
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
-│       └── bash.nix          alias 88 / 関数 24
-├── files/                 既存設定の複製 (store 管理される素のファイル)
+│       ├── bash.nix          alias 88 / 関数 24
+│       └── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
+├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
-│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
+│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -2102,7 +2331,9 @@ nix/
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
-    └── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
+    ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
+    └── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
 ```

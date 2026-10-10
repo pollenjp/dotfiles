@@ -347,7 +347,7 @@ add_step chsh \
 
 add_step exe-exec-trace \
   'WSL の .exe の起動を常時記録する system の unit' \
-  'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。中で sudo を呼ぶ。更新のたびに。' \
+  'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。「既存マシン更新」にも入る。sudo は揃っていないときだけ呼ぶ。' \
   step 0
 
 step_count=${#step_ids[@]}
@@ -434,6 +434,12 @@ apply_preset() {
       # 「何が増えたか」を人間が覚えている必要があった。
       # ssh-config も同じ理由で入っている (.ssh submodule を更新したら張り直す)。
       #
+      # exe-exec-trace も同じ理由で入れる (TKT-72。ADR 012 の追記)。入れないと、
+      # トレーサを更新するたびに --steps exe-exec-trace を打ち直すことになる。中で sudo を
+      # 呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・止まっているのを起こすときだけで、
+      # 揃っていれば (option が無効なマシンも) sudo を呼ばない。sudo がパスワードを訊けない
+      # ときは飛ばし、ずれは post_notes が知らせる。
+      #
       # 入れていないのは、冪等でないか ここでは有害なもの:
       #
       #   nix-install       既にあれば飛ばすだけ。足しても何も起きない
@@ -446,14 +452,13 @@ apply_preset() {
       #                     worktree を消した後に dangling で残る。ghq の決める
       #                     パス外では exit 1 になり、後続まで巻き添えにする
       #   chsh              sudo が要る。README でも「必要なら」
-      #   exe-exec-trace    中で sudo を呼ぶ (system の unit を /etc へ入れる)。ずれていれば
-      #                     post_notes が知らせる
       #
       # 外したいときは「カスタム」か --steps で選び直す。
       ids=(ssh-config switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
+      ids+=(exe-exec-trace)
       ;;
     *) die "unknown preset: $1" ;;
   esac
@@ -1596,6 +1601,19 @@ exe_exec_trace_dst() { printf '%s' "/etc/systemd/system/${exe_exec_trace_unit}";
 # コマンド自体はあるので、コマンドの有無では判らない (sd_booted と同じ見方)。
 systemd_running() { [[ -d /run/systemd/system ]]; }
 
+# sudo がパスワード無しで通るか、パスワードを訊ける (端末がある) か。どちらでもないのに
+# sudo を呼ぶとその場で失敗し、setup はそこで止まって残りの手作業も出さなくなる
+# (Claude の Bash ツールから --update を打ったときなど)。訊けなければ飛ばすと言って偽を
+# 返す。揃っていないことは post_notes が知らせる。--dry-run では打つコマンドを見せたいので
+# 確かめない。
+exe_exec_trace_can_sudo() {
+  if [[ ${dry_run} == 1 ]] || sudo -n true 2>/dev/null || [[ -t 0 ]]; then
+    return 0
+  fi
+  note "sudo がパスワードを訊けない (パスワード無しで通らず、端末も無い) ので、${exe_exec_trace_unit} を揃えずに飛ばします。端末から --steps exe-exec-trace を打つ。"
+  return 1
+}
+
 # dotfiles.wsl.exeExecTrace.enable の system の unit を、home-manager が生成したものに揃える
 # (ADR 012)。
 #
@@ -1603,6 +1621,8 @@ systemd_running() { [[ -d /run/systemd/system ]]; }
 # /etc/systemd/system へ複製する。ExecStart は store の固定パスなので、unit の store パスへ
 # GC root を張り、nix-collect-garbage で消えないようにする。option が false (unit が
 # 生成されていない) なら、入っている unit を止めて消す。
+#
+# 「既存マシン更新」で毎回走るので、sudo は揃っていないときだけ呼ぶ。
 step_exe_exec_trace() {
   local src dst real
   src=$(exe_exec_trace_src)
@@ -1613,16 +1633,19 @@ step_exe_exec_trace() {
     warn 'root (sudo) では打たないでください。この手順は中で sudo を呼びます。'
     return 1
   fi
+  # systemd より先に見る。option が無効なマシン (macOS を含む) に、更新のたびに
+  # systemd の案内を出さないため
+  if [[ ! -e ${src} && ! -e ${dst} && ! -L ${exe_exec_trace_gcroot} ]]; then
+    note '生成された unit が無く (option が無効か、まだ switch していない)、入ってもいないので何もしない。'
+    return 0
+  fi
   if ! systemd_running; then
     note 'systemd が動いていないので飛ばします (WSL なら /etc/wsl.conf の [boot] に systemd=true)。'
     return 0
   fi
   if [[ ! -e ${src} ]]; then
-    if [[ ! -e ${dst} && ! -L ${exe_exec_trace_gcroot} ]]; then
-      note '生成された unit が無く (option が無効か、まだ switch していない)、入ってもいないので何もしない。'
-      return 0
-    fi
     note "生成された unit が無い (option が無効か、まだ switch していない) ので、${exe_exec_trace_unit} を止めて消します。"
+    exe_exec_trace_can_sudo || return 0
     if [[ -e ${dst} ]]; then
       run sudo systemctl disable --now "${exe_exec_trace_unit}" || return 1
     fi
@@ -1638,7 +1661,9 @@ step_exe_exec_trace() {
       return 0
     fi
     note "${exe_exec_trace_unit} は最新ですが、止まっているので起こします。"
+    exe_exec_trace_can_sudo || return 0
   else
+    exe_exec_trace_can_sudo || return 0
     run sudo install -m 0644 "${real}" "${dst}" || return 1
     run sudo ln -sfn "${real}" "${exe_exec_trace_gcroot}" || return 1
     run sudo systemctl daemon-reload || return 1
@@ -1656,7 +1681,7 @@ step_exe_exec_trace() {
 }
 
 # 生成された unit と入っている unit のずれ。揃っていれば何も出さない。
-# post_notes (手順を選ばなかったとき) の案内にだけ使う。
+# post_notes の案内にだけ使う (手順を選ばなかったときと、sudo を訊けずに飛ばしたとき)。
 exe_exec_trace_drift() {
   local src dst
   src=$(exe_exec_trace_src)
@@ -1766,12 +1791,11 @@ post_notes() {
   if ! is_selected chsh; then
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
   fi
-  if ! is_selected exe-exec-trace; then
-    drift=$(exe_exec_trace_drift || true)
-    if [[ -n ${drift} ]]; then
-      note ".exe の起動を記録する system の unit: ${drift}。"
-      note '        --steps exe-exec-trace で揃える (中で sudo を呼ぶ。ADR 012)。'
-    fi
+  # 手順を選んでいても、sudo がパスワードを訊けずに飛ばしていればずれが残っている
+  drift=$(exe_exec_trace_drift || true)
+  if [[ -n ${drift} ]]; then
+    note ".exe の起動を記録する system の unit: ${drift}。"
+    note '        --steps exe-exec-trace で揃える (中で sudo を呼ぶ。ADR 012)。'
   fi
   if is_selected flake-update; then
     note 'flake.lock を更新した。動作を確認したら commit する:'
@@ -1794,12 +1818,14 @@ post_notes() {
     # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
     # ここで知らせる (setup-local-flake.sh の警告と同じ)。
     note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
-    note '        local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、'
-    note '        Notion へ書く skill は止まる。手で足したホストが無ければ次で作り直して local に書く:'
+    note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
+    note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
+    note '        手で足したホストが無ければ次で作り直して local に書く:'
     note "          ${script_dir}/setup-local-flake.sh --force"
   elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
     note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
-    note '        Notion へ書く skill は宛先が決まらず止まる。README「Notion の宛先を host ごとに選ぶ」の形で足す。'
+    note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
+    note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }

@@ -7,8 +7,6 @@
 #
 # ## bash で壊れていたものを移植時に修正した
 #
-#   c        : `alias c='noglob c-func'` の noglob は zsh 専用で bash には無く、
-#              `c` は "noglob: command not found" で失敗していた -> c-func を直接呼ぶ
 #   cdrepo   : ガードが `if not command -v ghq` と fish 構文で書かれており、
 #              bash では `not` が見つからず終了ステータス 127 -> 常に偽。
 #              つまりガードが一度も発火しない死んだコードだった -> `!` に修正
@@ -122,8 +120,6 @@
       gpr = "git_fetch_pull_request";
       w = "git switch";
       gw = "git switch";
-      # noglob (zsh 専用) を外した。詳細はファイル冒頭の注記を参照
-      c = "c-func";
 
       #########################
       # 複製元: 251_alias_k8s / .bash/08-k8s.sh
@@ -137,9 +133,15 @@
       m = "mise";
       mr = "mise run";
       # settings.minimum_release_age (bootstrap-mise.sh が 9d を入れる) を、この 1 回の
-      # 実行だけ 0 にする。`mise use -g claude@latest` で公開 9 日未満の版が要るときの
-      # 逃げ道。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
+      # 実行だけ 0d / 1d にする。公開 9 日未満の版が要るときの逃げ道
+      # (`mise0 use -g claude@latest` など。bootstrap-mise.sh も claude は mise1 と同じ
+      # 1d で入れる)。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。
       mise_with_no_release_age = "MISE_MINIMUM_RELEASE_AGE=0d mise";
+      mise_with_one_release_age = "MISE_MINIMUM_RELEASE_AGE=1d mise";
+      # 上の 2 つの短縮形。fish の abbr は展開した結果をもう一度は展開しないので、
+      # 長い名前を指さずに中身をそのまま書く (bash.nix / fish.nix で揃える)。
+      mise0 = "MISE_MINIMUM_RELEASE_AGE=0d mise";
+      mise1 = "MISE_MINIMUM_RELEASE_AGE=1d mise";
 
       #########################
       # 複製元: 253_alias_terminal_mux
@@ -169,6 +171,9 @@
       # herdr。zellij の z* の先頭を h に変えただけ。対応表・`hd` を作れない
       # 理由・落としたものは fish.nix の同じ節に書いてある。
       #
+      # 同じ名前を fish (fish.nix の abbr) と Windows の PowerShell
+      # (win/powershell/dotfiles.ps1) にも置いている。足す・直すときは 3 つをそろえる。
+      #
       # 上の z* が `z` 経由なのは SHELL を差し替える必要があるからで、herdr は
       # config.toml の default_shell が同じ役目を果たす。なので `h` は挟まず
       # `herdr` を直に呼ぶ。
@@ -181,6 +186,16 @@
 
       hst = "herdr status";
       hreload = "herdr server reload-config";
+      # hstop にしない理由は fish.nix の同じ行に書いてある (hkill = session stop と紛らわしい)。
+      hsvstop = "herdr server stop";
+      hr = "herdr --remote";
+
+      #########################
+      # Claude Code
+      #########################
+      # 何をするか・以前の c (c-func) のことは fish.nix の同じ節に書いてある。
+      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function の 3 つをそろえる。
+      c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5";
     };
 
     initExtra = ''
@@ -323,10 +338,6 @@
       git_fetch_pull_request() {
         local pr_num="''${1:?}"
         git fetch origin "pull/''${pr_num}/head:pr''${pr_num}"
-      }
-
-      c-func() {
-        git commit -m "$*"
       }
 
       ##############################################################

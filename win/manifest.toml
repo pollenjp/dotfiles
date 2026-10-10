@@ -1,0 +1,31 @@
+# Windows 側へ配るファイル。WSL の nix/scripts/bootstrap-windows-files.sh が
+# /mnt/c へコピーする (~/dotfiles/setup --update で走る)。書き方は README.md。
+#
+#   src   win/ からの相対パス
+#   dst   Windows 側の置き先。%USERPROFILE% / %APPDATA% / %LOCALAPPDATA% のどれかで始める
+#   hint  置き先を書き換えたときに出す文 (任意)
+
+[[files]]
+src = "orca/keybindings.json"
+dst = "%USERPROFILE%/.orca/keybindings.json"
+hint = "Orca の設定 → キーボードショートカット → 「ディスクから再読み込み」"
+
+[[files]]
+src = "powershell/dotfiles.ps1"
+dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
+hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は bootstrap-windows-powershell-profile.sh が足す)"
+
+[[files]]
+src = "herdr/config.toml"
+dst = "%APPDATA%/herdr/config.toml"
+hint = "herdr の中なら prefix + shift + r、外からなら PowerShell で hreload (herdr server reload-config) で読み直す"
+
+[[files]]
+src = "openssh/Install-OpenSSH.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-OpenSSH.ps1"
+hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+
+[[files]]
+src = "herdr/Install-Herdr.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
+hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"

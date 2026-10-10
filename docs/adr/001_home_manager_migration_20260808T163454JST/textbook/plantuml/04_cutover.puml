@@ -48,7 +48,10 @@ if (問題が起きた?) then (はい)
   :home-manager generations で\n古い世代の activate を実行;
   if (それでも駄目?) then (はい)
     :home-manager uninstall;
-    :**./main.bash setup**\n(最終手段・必ず動く);
+    note right #FFF8DC
+      最終手段だった ./main.bash setup (旧経路) は
+      ADR 013 (Stage 6) で削除した
+    end note
     stop
   else (いいえ)
   endif

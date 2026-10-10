@@ -10,7 +10,7 @@
 
 どちらも同じパスを管理しようとするため。マシン単位でどちらか一方を選ぶ。
 
-そして、**いつでも `./main.bash setup` に戻れる**。これが移行を安全にしている土台なので、Stage 6 まで `main.bash` には手を触れない。
+移行中は、**いつでも `./main.bash setup` に戻れる**ことを土台にしていた。全マシンの移行が済んだので、Stage 6 で旧経路ごと削除した（[ADR 013](../../013_remove_legacy_tree_20261007T015646JST/README.md)）。この章は、古い clone で旧経路を使っているマシンを移すときの手順として残している。
 
 ## 手順
 
@@ -171,7 +171,7 @@ chsh -s "$(command -v fish)"
 
 ## 困ったときの戻し方
 
-軽い順に 3 段階。
+軽い順に 2 段階（3 段階目だった旧経路は削除した）。
 
 ### ① 前の世代に戻す
 
@@ -189,13 +189,10 @@ home-manager uninstall
 
 home-manager が管理していた symlink がすべて外れる。
 
-### ③ 元の仕組みに戻す
+### ③ 元の仕組みに戻す（削除済み）
 
-```sh
-cd ~/dotfiles && ./main.bash setup
-```
-
-**これは必ず動く。** Stage 6 まで `main.bash` を触らないのはこのため。
+最終手段だった `./main.bash setup` は、Stage 6 で旧経路ごと削除した
+（[ADR 013](../../013_remove_legacy_tree_20261007T015646JST/README.md)）。今の checkout には無い。
 
 ## シェルが壊れたときの保険
 

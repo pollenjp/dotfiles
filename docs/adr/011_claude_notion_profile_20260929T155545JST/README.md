@@ -8,6 +8,7 @@
 | チケット | [TKT-44](https://app.notion.com/p/Notion-skill-workspace-DB-URL-3e979149a66f810a87cbc3357dada5f3) |
 | 前提 ADR | [002](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（ローカル flake）/ [007](../007_claude_skill_host_option_20260926T130250JST/README.md)（`dotfiles.claude.*` と `~/.local/state/dotfiles/` の JSON） |
 | 運用手順 | [`nix/README.md`「Notion の宛先を host ごとに選ぶ」](../../../nix/README.md#notion-の宛先を-host-ごとに選ぶ) |
+| 後続 ADR | [014_claude_notion_routes_20261010T014639JST](../014_claude_notion_routes_20261010T014639JST/README.md)（宛先はマシンではなく作業中の repo で決める。override はプロファイルの名前ごとに書く形に変わった。本文はそのまま） |
 
 ---
 

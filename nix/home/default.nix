@@ -8,12 +8,12 @@
     ./modules/git.nix
     ./modules/ssh.nix
     ./modules/starship.nix
-    ./modules/mise.nix
     ./modules/shell-common.nix
     ./modules/fish.nix
     ./modules/bash.nix
     ./modules/claude.nix
     ./modules/cc-pages.nix
+    ./modules/windows-files.nix
     ./modules/exe-exec-trace.nix
     ./modules/cleanup.nix
   ];

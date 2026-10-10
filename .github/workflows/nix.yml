@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "nix/**"
+      - "win/**"
       - ".github/workflows/nix.yml"
   pull_request:
     paths:
       - "nix/**"
+      - "win/**"
       - ".github/workflows/nix.yml"
   workflow_dispatch:
     inputs:
@@ -177,6 +179,17 @@ jobs:
             shellcheck "${files[@]}" || rc=1
             exit "${rc}"
           '
+
+      # win/manifest.toml の検証 (ADR 010)。home-manager の評価は manifest を読まない
+      # (ローカル flake からは repo 直下が見えない) ので、flake check では誤りが見つからない。
+      # nix-instantiate だけで動くので devShell は要らない。
+      - name: win/manifest.toml
+        run: ./nix/scripts/bootstrap-windows-files.sh --check
+
+      # herdr のキーバインドを WSL (nix/files/herdr/config.toml) と Windows (win/herdr/config.toml)
+      # でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
+      - name: herdr のキーバインド (WSL と Windows)
+        run: ./nix/scripts/check-herdr-keys.sh
 
   # 閉包を SBOM 化して OSV / GHSA / NVD と照合する (ADR 006)。
   #

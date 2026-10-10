@@ -7,9 +7,13 @@
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
+#   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
+#   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
+#                                     (settings.json の footerLinksRegexes に写す値。下記)
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
+#   pkgs.herdr の share/skills/herdr/herdr/ -> ~/.claude/skills/herdr  (パッケージ同梱の skill。下記)
 #
 # ## なぜ skills/ agents/ commands/ ごとではなく中身を 1 つずつ配置するのか
 #
@@ -25,6 +29,7 @@
 #   ├── manifest.json      <- Claude Code 管理 (実ファイル)
 #   ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
 #   ├── <自作>/            <- Nix 管理 (store への symlink)
+#   ├── herdr/             <- Nix 管理 (herdr パッケージの中への symlink。下記)
 #   └── <private>/         <- claude-skills の作業クローンへの symlink
 #                             (scripts/bootstrap-claude-skills.sh が張る)
 #
@@ -38,10 +43,12 @@
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
 #                    (フック / statusLine の登録、git の設定を渡す env、
-#                    skill を隠す skillOverrides) は scripts/bootstrap-claude-*.sh
-#                    がマシンごとに注入する。skillOverrides と env は望む値を
+#                    skill を隠す skillOverrides、footer のリンクの footerLinksRegexes)
+#                    は scripts/bootstrap-claude-*.sh がマシンごとに注入する。
+#                    skillOverrides・env・footerLinksRegexes は望む値を
 #                    ~/.local/state/dotfiles/claude-skill-overrides.json /
-#                    claude-env.json に Nix が置き (下記)、script はそれを写すだけにしている
+#                    claude-env.json / claude-footer-links.json に Nix が置き (下記)、
+#                    script はそれを写すだけにしている
 #   plugins/       : 実行時に取得・更新される
 #   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
 #                    載せると CI の nix flake check も fetch できずに落ちる。
@@ -52,7 +59,7 @@
 #
 # ## Notion へ書く skill の宛先 (claude-notion.json)
 #
-# dotfiles.claude.notion.{profile,override} を ~/.local/state/dotfiles/claude-notion.json に
+# dotfiles.claude.notion.{profile,routes,override} を ~/.local/state/dotfiles/claude-notion.json に
 # 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
 # (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
 #
@@ -191,19 +198,17 @@ let
 in
 
 {
-  # Dev Tracker を使うのに Notion の宛先を選んでいないマシンでは、pjp-dev-tracker の
-  # ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
+  # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
+  # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
   # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
-  warnings =
-    lib.optional (cfg.devTracker.enable && cfg.notion.profile == null && cfg.notion.override == { })
-      ''
-        dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
-        Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。
-        ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
-        switch してください。local が無い古い雛形なら setup-local-flake.sh --force で作り直し、
-        登録簿のホストを直接使っているなら mkHome に claude.notion.profile を渡します
-        (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
-      '';
+  warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
+    dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
+    規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
+    ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
+    switch してください。local が無い古い雛形なら setup-local-flake.sh --force で作り直し、
+    登録簿のホストを直接使っているなら mkHome に claude.notion.profile を渡します
+    (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
+  '';
 
   home.packages = map mkAccountCommand accounts;
 
@@ -232,7 +237,7 @@ in
     # skillOverrides でしか変えられず、そのファイルは Claude Code 自身が書き換える
     # ので Nix 管理下に置けない (フックの登録と同じ事情)。そこで望む値だけを
     # store に置き、nix/scripts/bootstrap-claude-skill-overrides.sh が settings.json へ
-    # merge する。置き場は mise.nix のマーカーと同じ ~/.local/state/dotfiles/。
+    # merge する。置き場は windows-files.json などと同じ ~/.local/state/dotfiles/。
     #
     # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
     # この key は option が正だと settings.json 側からも読めるよう、enable = true
@@ -271,14 +276,24 @@ in
         + "\n";
     }
 
-    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの上書き)。
+    # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
+    # チケットと PR を、Claude Code の footer にクリックできるバッジとして並べる。
+    #
+    # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+    # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず、
+    # files/claude/footer-links.json をそのまま置く (マシンごとに変える理由がまだ無い)。
+    {
+      ".local/state/dotfiles/claude-footer-links.json".source = claudeRoot + "/footer-links.json";
+    }
+
+    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。
     #
     # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
     # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
     {
       ".local/state/dotfiles/claude-notion.json".text =
         builtins.toJSON {
-          inherit (cfg.notion) profile override;
+          inherit (cfg.notion) profile routes override;
         }
         + "\n";
     }
@@ -296,6 +311,17 @@ in
       };
     }
 
+    # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
+    # 見つけ、解説動画を作るか聞くよう Claude に知らせる。聞き方を持つ skill
+    # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
+    # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/video-offer-nudge.sh" = {
+        source = claudeRoot + "/hooks/video-offer-nudge.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #
@@ -307,6 +333,23 @@ in
         source = claudeRoot + "/statusline-command.sh";
         executable = true;
       };
+    }
+
+    # パッケージが同梱する agent skill。今は herdr だけ。
+    #
+    # nixpkgs の installAgentSkills は skill を $out/share/skills/<pname>/<skill>/ に
+    # 入れるだけで、Claude Code はそこを探さない。使うものを 1 つずつ ~/.claude/skills/ へ
+    # 張る (nixpkgs manual の installAgentSkills の節が勧める形)。
+    #
+    # home.packages の herdr (modules/packages.nix) と同じ pkgs.herdr を指すので、skill の
+    # 版は CLI と揃い、flake.lock を上げれば一緒に上がる。公式の手順
+    # (npx skills add herdrdev/herdr --skill herdr -g) は打った日の master を取り、
+    # 宣言的でもないので使わない。名前は公式どおり herdr (pjp- は自作の印)。
+    #
+    # 張る元が無くても home-manager は切れた symlink を黙って作る。nixpkgs が置き場所を
+    # 変えたら tests/claude-herdr-skill.nix (flake の checks) で落ちる。
+    {
+      ".claude/skills/herdr".source = "${pkgs.herdr}/share/skills/herdr/herdr";
     }
 
     (linkEntries "skills")

@@ -16,8 +16,11 @@
 | [007](./007_claude_skill_host_option_20260926T130250JST/README.md) | Claude Code の skill の on / off を host option に持たせ、settings.json へ流す経路を決める | 2026-09-26 |
 | [008](./008_ssh_agent_stable_sock_20260909T144947JST/README.md) | ssh 先で herdr を開くときだけ、forward された ssh-agent を固定名の symlink へ張り替え、ssh を張り直しても herdr の中で使えるようにする | 2026-09-09 |
 | [009](./009_claude_account_config_dirs_20260927T161411JST/README.md) | Claude Code のログインだけを personal / work で分けるため、`~/.claude` はそのままに、ログインだけを持ち残りを `~/.claude` へリンクする `~/.claude-personal` / `~/.claude-work` を全マシンに置く | 2026-09-27 |
+| [010](./010_win_files_from_wsl_20260928T003933JST/README.md) | Windows 側のアプリの設定を repo 直下の `win/` に置き、WSL の bootstrap が `/mnt/c` へコピーして配る | 2026-09-28 |
 | [011](./011_claude_notion_profile_20260929T155545JST/README.md) | Notion へ書く skill の宛先をプロファイルで選び、名前と上書きだけを host option に持たせる | 2026-09-29 |
 | [012](./012_wsl_exe_exec_trace_service_20260930T153253JST/README.md) | WSL から起動された Windows の .exe を eBPF で常時記録する system の unit を、sudo の要る setup の手順で入れる (ExecStart は store の固定パス) | 2026-09-30 |
+| [013](./013_remove_legacy_tree_20261007T015646JST/README.md) | 旧経路 (`main.bash setup`) を Windows の Git Bash 用も含めて削除し、配置を Nix 経路と `win/` だけにする | 2026-10-07 |
+| [014](./014_claude_notion_routes_20261010T014639JST/README.md) | Notion へ書く skill の宛先を、マシンではなく作業中の repo で決める | 2026-10-09 |
 
 ## ディレクトリ名
 

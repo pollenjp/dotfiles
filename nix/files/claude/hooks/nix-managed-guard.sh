@@ -175,6 +175,9 @@ reason=$(
        ~/.claude/CLAUDE.md          -> \${REPO}/nix/files/claude/CLAUDE.md
        (「タスク管理」の節だけは同じ場所の CLAUDE.dev-tracker.md。claude.nix が
         dotfiles.claude.devTracker.enable のマシンでだけ末尾に連結している)
+       ~/.claude/skills/herdr/      -> repo に実体は無い。herdr パッケージ同梱の skill を
+                                       nix/home/modules/claude.nix が張っていて、中身は
+                                       flake.lock の herdr の版で決まる
   2. 新規ファイルなら git add する
        git -C "\${REPO}" add nix/files/claude
      (~/dotfiles 経由の switch は path: なので untracked でも入るが、

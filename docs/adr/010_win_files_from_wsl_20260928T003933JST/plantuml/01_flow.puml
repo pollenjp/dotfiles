@@ -1,0 +1,56 @@
+@startuml
+' 変更後の構成: win/ の中身を、WSL の bootstrap が /mnt/c へコピーして配る
+' 上の段が home-manager switch、下の段が setup --update の bootstrap。
+' NOTE: PlantUML では "~" がエスケープ文字として消費されるため "$HOME/" 表記を使う
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 50
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title Windows 側のファイルを配る経路
+
+rectangle "$HOME/dotfiles（ローカル flake）\ninputs.dotfiles.url = path:<repo>/nix" as local
+rectangle "nix/hosts/default.nix\nwsl.windowsUserName\n**wsl.windowsFiles.enable**" as hosts
+rectangle "home-manager switch\n**nix/home/modules/windows-files.nix**" as hm
+
+rectangle "$HOME/.local/state/dotfiles/" as st #FFFFFF {
+  rectangle "**windows-files.json**\n{ enable, windowsHome }\nhome-manager が置く" as state #D5E8D4
+  rectangle "**windows-files.deployed.json**\n{ 置き先: 前回置いた中身の sha256 }\nbootstrap が書く" as rec #D5E8D4
+}
+
+rectangle "**win/**（repo 直下）\nmanifest.toml\norca/keybindings.json" as win #D5E8D4
+rectangle "**nix/lib/windows-files.nix**\nmanifest → 配置計画\n（builtins だけの純粋関数）" as lib #D5E8D4
+rectangle "$HOME/dotfiles/setup --update\n**nix/scripts/bootstrap-windows-files.sh**\n（order: 90）" as boot #D5E8D4
+
+rectangle "Windows（/mnt/c/Users/polle）" as wroot #FFFFFF {
+  rectangle ".orca/keybindings.json" as dst #FFF2CC
+}
+rectangle "Orca\n「ディスクから再読み込み」" as orca
+
+local -right-> hosts : path: で読む\n（見えるのは nix/ だけ）
+hosts -right-> hm
+hm -down-> state : 置く
+boot -up-> state : 読む
+boot -up-> rec : 読む / 書く
+boot -left-> lib : nix-instantiate\n--eval
+lib -left-> win : 読む\n（working tree）
+boot -right-> dst : コピー（tmp + mv）\n衝突なら止めて diff
+dst -right-> orca : hint で\n読み直しを案内
+
+note bottom of win : home-manager の評価からは見えない\n（ローカル flake は nix/ だけを読む）
+
+legend right
+  |<#D5E8D4> 今回追加 |
+  |<#FFF2CC> Windows のアプリが持つファイル |
+  |<#F7F7F7> 既存 |
+endlegend
+@enduml
