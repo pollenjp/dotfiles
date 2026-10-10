@@ -40,6 +40,10 @@
 }:
 
 let
+  # home-manager の nix.gc と同じ選び方 (nix.package を設定していなければ pkgs.nix)。
+  nixPackage =
+    if config.nix.enable && config.nix.package != null then config.nix.package else pkgs.nix;
+
   # unit からしか呼ばないので PATH には入れない。
   # 今すぐ回すなら `systemctl --user start mise-prune.service`。
   misePrune = pkgs.writeShellApplication {
@@ -68,6 +72,14 @@ lib.mkIf config.dotfiles.cleanup.enable {
     dates = "weekly";
     options = "--delete-older-than 14d";
   };
+
+  # home-manager の nix.gc は、darwin の agent に options を 1 つの引数のまま渡す
+  # (modules/services/nix-gc.nix)。"--delete-older-than 14d" が 1 要素になり、
+  # nix-collect-garbage が受け付けない。Linux の unit は shell を通るので空白で分かれる。
+  # ここでも空白で分けて渡し直す。home-manager 側が直ったら消す。
+  launchd.agents.nix-gc.config.ProgramArguments = lib.mkForce (
+    [ "${nixPackage}/bin/nix-collect-garbage" ] ++ lib.splitString " " config.nix.gc.options
+  );
 
   systemd.user.services.mise-prune = {
     Unit.Description = "mise: どの設定も指していない版と、downloads/ の古いアーカイブを消す";
