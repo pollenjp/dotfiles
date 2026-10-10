@@ -125,7 +125,6 @@
       gpr = "git_fetch_pull_request";
       w = "git switch";
       gw = "git switch";
-      c = "c-func";
 
       #########################
       # 複製元: 251_alias_k8s
@@ -224,6 +223,16 @@
       # SSH 越しに別のマシンの herdr server へ attach する (`hr <ssh-target>`)。
       # 後ろに `--session <name>` を続ければ、その session に入る。r は remote の r。
       hr = "herdr --remote";
+
+      #########################
+      # Claude Code
+      #########################
+      # 権限の確認を飛ばし (--dangerously-skip-permissions)、effort を max、モデルを
+      # Opus 5.5 に固定して claude を起動する。c は以前 c-func (git commit -m "$*") を
+      # 呼んでいた。git commit -m は gcm で打てる。
+      # 同じ名前・同じ中身を bash (bash.nix の shellAliases) と Windows の PowerShell
+      # (win/powershell/dotfiles.ps1) にも置いている。直すときは 3 つをそろえる。
+      c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5";
     };
 
     functions = {
@@ -342,11 +351,6 @@
         set -l pr_num $argv[1]
         git fetch origin "pull/$pr_num/head:pr$pr_num"
       '';
-
-      c-func = {
-        description = "git commit with message";
-        body = ''git commit -m "$argv"'';
-      };
 
       #########################
       # 複製元: 252_alias_mise
