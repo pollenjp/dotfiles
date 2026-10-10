@@ -1380,7 +1380,6 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 
 | 対象 | 症状 |
 | --- | --- |
-| `c` | `alias c='noglob c-func'` の `noglob` は zsh 専用。bash では `noglob: command not found` で失敗していた |
 | `cdrepo` | ガードが fish 構文の `if not command -v ghq` で書かれており、bash では `not` が見つからず終了ステータス 127 = 常に偽。一度も発火しない死んだコードだった |
 | ssh-agent | `ssh-add` の存在確認が無く、未インストール環境では起動のたびにエラーが出ていた |
 

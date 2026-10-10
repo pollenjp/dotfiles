@@ -22,6 +22,10 @@ function hreload { herdr server reload-config @args }
 function hsvstop { herdr server stop @args }
 function hr { herdr --remote @args }
 
+# Claude Code。WSL の fish の abbr と bash の alias の c と同じ中身にそろえる。
+# 権限の確認を飛ばし、effort を max、モデルを Opus 5.5 に固定して claude.exe を起動する。
+function c { claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 @args }
+
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-OpenSSH.ps1 (win/README.md の「OpenSSH」)。-Check なら確かめるだけ。
 # @args で引数をそのまま渡す (-Check / -Version / -Force もスクリプトの引数として効く)。

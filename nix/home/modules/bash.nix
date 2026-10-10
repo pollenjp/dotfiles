@@ -7,8 +7,6 @@
 #
 # ## bash で壊れていたものを移植時に修正した
 #
-#   c        : `alias c='noglob c-func'` の noglob は zsh 専用で bash には無く、
-#              `c` は "noglob: command not found" で失敗していた -> c-func を直接呼ぶ
 #   cdrepo   : ガードが `if not command -v ghq` と fish 構文で書かれており、
 #              bash では `not` が見つからず終了ステータス 127 -> 常に偽。
 #              つまりガードが一度も発火しない死んだコードだった -> `!` に修正
@@ -122,8 +120,6 @@
       gpr = "git_fetch_pull_request";
       w = "git switch";
       gw = "git switch";
-      # noglob (zsh 専用) を外した。詳細はファイル冒頭の注記を参照
-      c = "c-func";
 
       #########################
       # 複製元: 251_alias_k8s / .bash/08-k8s.sh
@@ -193,6 +189,13 @@
       # hstop にしない理由は fish.nix の同じ行に書いてある (hkill = session stop と紛らわしい)。
       hsvstop = "herdr server stop";
       hr = "herdr --remote";
+
+      #########################
+      # Claude Code
+      #########################
+      # 何をするか・以前の c (c-func) のことは fish.nix の同じ節に書いてある。
+      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function の 3 つをそろえる。
+      c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5";
     };
 
     initExtra = ''
@@ -335,10 +338,6 @@
       git_fetch_pull_request() {
         local pr_num="''${1:?}"
         git fetch origin "pull/''${pr_num}/head:pr''${pr_num}"
-      }
-
-      c-func() {
-        git commit -m "$*"
       }
 
       ##############################################################
