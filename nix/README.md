@@ -885,8 +885,9 @@ HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形には�
 置いてある。gh にログインしないマシンだけ外す
 （[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
 
-Notion へ書く skill の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで skill が止まる）で、
-使うマシンでは `"personal"` / `"work"` を書く（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
+Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで、規則に当たらない repo と
+repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
+（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
@@ -1466,7 +1467,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
-| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
+| `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1867,58 +1868,86 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 ### Notion の宛先を host ごとに選ぶ
 
 Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-authoring`・
-`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、マシンごとに違う（会社のマシンは
-仕事の workspace、自宅は個人の workspace）。宛先の**名前**を host option
-**`dotfiles.claude.notion.profile`** で選び、**値**は private の `claude-skills` の
-`skills/pjp-notion-profile/profiles.toml` が持つ。
+`pjp-docs-to-notion`・`pjp-scan-to-notion`）の宛先は、**作業中の repo** で決まる（仕事の org の repo は
+仕事の workspace、pollenjp の repo は個人の workspace）。規則は private の `claude-skills` の
+`skills/pjp-notion-profile/profiles.toml` の `[routes]` にあり、このマシンだけの規則と、
+規則に当たらないときの既定を host option で選ぶ。
 
 | 置くもの | 場所 | 例 |
 | --- | --- | --- |
-| どのプロファイルを使うか | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
-| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ scanData = "https://app.notion.com/p/…"; }` |
+| 共通の規則（repo → プロファイル） | `claude-skills` の `profiles.toml` の `[routes]` | `"<仕事の org>/*" = "work"` |
+| このマシンだけの規則（共通の規則より先に見る。例: 会社の PC で pollenjp の repo も work に書く） | ローカル flake の `local`（`dotfiles.claude.notion.routes`） | `{ "pollenjp/*" = "work"; }` |
+| 規則に当たらない repo と repo の外で使う既定 | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
+| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
 | repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
+| API キー（そのマシンでそのプロファイルを API キーで使うとき） | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
+
+見る順番は、このマシンの `routes` → 共通の `[routes]` → このマシンの `profile`（既定）→ 止まる。
+各層の中では `owner/repo` の行が `owner/*` の行に勝つが、層の順番が先なので、
+このマシンの `pollenjp/*` は共通の `pollenjp/<repo>` にも勝つ。
 
 値を public なこのリポジトリに書かないのは、ページ名入りの URL が出るため。
 
 `devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
 Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
 Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
-このマシンだけ変えるなら `dotfiles.claude.notion.override = { devTracker.linkFromRepo = true; };`。
+このマシンだけ変えるなら `dotfiles.claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`。
+
+認証は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
+あればその API キー、無ければ workspace ごとの `ntn login` を使う。変数名はプロファイル名を大文字にし
+`-` を `_` にする（personal → `PJP_NOTION_TOKEN_PERSONAL`）。
+
+**`NOTION_API_TOKEN` は `~/.config/pjp/env` に書かない。** 環境に `NOTION_API_TOKEN` があれば
+（repo の devShell が `.env` を読んだときなど）、repo の規則で決まる認証（`PJP_NOTION_TOKEN_<名前>` か
+`ntn login`）を通らず、それが何より先に使われる。シェルは `~/.config/pjp/env` を環境へ読み込むので、
+書くとどの repo でもそれが勝つ。
 
 #### 値の置き場
 
 ```nix
 local = {
-  dotfiles.claude.notion.profile = "personal";
-  # このマシンだけ一部を差し替える。キーは profiles.toml と同じで、null はキーを消す
-  dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
+  dotfiles.claude.notion.profile = "personal";  # 規則に当たらない repo と repo の外
+  # このマシンだけの規則 (例: 会社の PC で pollenjp の repo も work に書く):
+  #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
+  # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
+  #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
 };
 ```
 
-登録簿のホストを直接指すなら `mkHome` に `claude.notion.profile = "personal";`。
+登録簿のホストを直接指すなら、`mkHome` に `claude.notion.profile = "personal";` を渡す
+（このマシンだけの規則は `claude.notion.routes = { … };`）。
 
 #### 反映
 
-`switch` が `~/.local/state/dotfiles/claude-notion.json`（`{"override":{},"profile":"personal"}`）を置き、
-`claude-skills` の resolver がそれを `profiles.toml` と重ねる。settings.json は触らないので
+`switch` が `~/.local/state/dotfiles/claude-notion.json` を置き、`claude-skills` の resolver が
+それを `profiles.toml` と重ねる。settings.json は触らないので
 `switch` だけで揃う（`~/dotfiles/setup --update` でもよい）。
 
-- profile が `null`（雛形の既定）で override も空なら、skill は「宛先が決まらない」と止まる。
+JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profile":"personal","routes":{}}`。
+`routes` のコメントを外すと `"routes":{"pollenjp/*":"work"}` になる。
+
+- profile が `null`（雛形の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため
-- override のキーの綴りは Nix では検査しない。skill が使うときに resolver が止める
-- `devTracker.enable = true` なのに profile も override も無いマシンでは、switch のときに警告が出る
+- `routes`（キーと値）と `override`（キー）の綴りは Nix では検査しない。skill が使うときに resolver が止める
+- `devTracker.enable = true` なのに profile が無いマシンでは、switch のときに警告が出る
   （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
+- 古い形の override（`override = { devTracker.linkFromRepo = …; };` のように、外側がキーの名前）が
+  ローカル flake に残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
+  書き直し方（`{ <プロファイル名> = { … }; }`）を出して止まるので、更新するときに書き直しておく
 
 #### 確認
 
+宛先は cwd の repo で決まるので、`show` と `check` は確かめたい repo の中で打つ
+（別の場所からは `--cwd <repo のディレクトリ>` を付ける。repo の外ではこのマシンの既定で決まる）。
+
 ```sh
 cat ~/.local/state/dotfiles/claude-notion.json
-~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と出どころ
+~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と、どの規則で決まったか
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
 ```
 
-経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)。
+経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](../docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
 
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 
@@ -2223,6 +2252,7 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
 | `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
+| `claude-notion.nix` | `notion.{profile,routes,override}` の既定・`claude-notion.json` の中身・profile が無いときの warnings（評価時の assert） | `claude-notion-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
 引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
@@ -2237,8 +2267,8 @@ node nix/tests/claude-footer-links.test.mjs                                    #
   `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
   抜けないため
 - 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
-- `claude-env.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。外れた項目の
-  名前がエラーに出る
+- `claude-env.nix` と `claude-notion.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。
+  外れた項目の名前がエラーに出る
 
 ## ディレクトリ
 
@@ -2250,7 +2280,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,override}
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override}
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
@@ -2265,7 +2295,7 @@ nix/
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル / footer のリンクの正規表現)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く

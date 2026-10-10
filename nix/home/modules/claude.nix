@@ -59,7 +59,7 @@
 #
 # ## Notion へ書く skill の宛先 (claude-notion.json)
 #
-# dotfiles.claude.notion.{profile,override} を ~/.local/state/dotfiles/claude-notion.json に
+# dotfiles.claude.notion.{profile,routes,override} を ~/.local/state/dotfiles/claude-notion.json に
 # 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
 # (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
 #
@@ -198,19 +198,17 @@ let
 in
 
 {
-  # Dev Tracker を使うのに Notion の宛先を選んでいないマシンでは、pjp-dev-tracker の
-  # ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
+  # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
+  # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
   # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
-  warnings =
-    lib.optional (cfg.devTracker.enable && cfg.notion.profile == null && cfg.notion.override == { })
-      ''
-        dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
-        Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。
-        ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
-        switch してください。local が無い古い雛形なら setup-local-flake.sh --force で作り直し、
-        登録簿のホストを直接使っているなら mkHome に claude.notion.profile を渡します
-        (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
-      '';
+  warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
+    dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
+    規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
+    ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
+    switch してください。local が無い古い雛形なら setup-local-flake.sh --force で作り直し、
+    登録簿のホストを直接使っているなら mkHome に claude.notion.profile を渡します
+    (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
+  '';
 
   home.packages = map mkAccountCommand accounts;
 
@@ -288,14 +286,14 @@ in
       ".local/state/dotfiles/claude-footer-links.json".source = claudeRoot + "/footer-links.json";
     }
 
-    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの上書き)。
+    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。
     #
     # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
     # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
     {
       ".local/state/dotfiles/claude-notion.json".text =
         builtins.toJSON {
-          inherit (cfg.notion) profile override;
+          inherit (cfg.notion) profile routes override;
         }
         + "\n";
     }

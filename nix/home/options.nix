@@ -10,8 +10,9 @@
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.gitViaGh.enable              Claude の git を gh の資格情報 (HTTPS) で GitHub へ通すか
-#   dotfiles.claude.notion.profile               Notion へ書く skill の宛先のプロファイル名
-#   dotfiles.claude.notion.override              そのプロファイルの値をこのマシンだけ差し替える
+#   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
+#   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
+#   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
@@ -93,7 +94,10 @@ in
         example = "personal";
         description = ''
           Notion へ書く skill (claude-skills の pjp-dev-tracker・pjp-notion-authoring・
-          pjp-docs-to-notion・pjp-scan-to-notion) が使う宛先のプロファイル名。
+          pjp-docs-to-notion・pjp-scan-to-notion) が、このマシンで既定に使う宛先のプロファイル名。
+
+          宛先は作業中の repo で決まる: このマシンの routes → profiles.toml の [routes] → この既定。
+          規則に当たらない repo (OSS の clone など) と repo の外 (スキャンのフォルダなど) でこれを使う。
 
           中身 (workspace の id・Dev Tracker の場所・新しいページの既定の親・Scan Data DB・
           repo にチケットの ID と URL を書くか)
@@ -101,7 +105,7 @@ in
           ここでは名前だけを選ぶ。ページ名入りの URL を public なこのリポジトリに
           出さないため。
 
-          null (既定) で override も空なら、skill は宛先が決まらないとして止まる
+          null (既定) のマシンでは、規則に当たらない repo と repo の外で skill が止まる
           (黙って別の workspace へ書かないため)。ローカル flake の雛形も null を書く。
 
           home/modules/claude.nix が ~/.local/state/dotfiles/claude-notion.json に
@@ -110,23 +114,47 @@ in
         '';
       };
 
+      routes = lib.mkOption {
+        type = lib.types.attrsOf lib.types.str;
+        default = { };
+        example = lib.literalExpression ''
+          {
+            "pollenjp/*" = "work";
+            "pollenjp/some-repo" = "personal";
+          }
+        '';
+        description = ''
+          このマシンだけの宛先の規則。作業中の repo (origin の owner/repo) から、使うプロファイルの
+          名前を決める。キーは "owner/*" か "owner/repo"、値は profiles.toml にあるプロファイルの名前。
+
+          claude-skills の profiles.toml の [routes] (全マシンで共通の規則) より先に見る。
+          同じ層の中 (このマシンの規則どうし、共通の規則どうし) では、"owner/repo" の行が "owner/*" の行に勝つ。
+          どちらにも当たらない repo と repo の外では profile (このマシンの既定) を使う。
+
+          キーと値の綴りはここでは検査しない (resolver が使うときに止める)。
+        '';
+      };
+
       override = lib.mkOption {
         type = lib.types.attrsOf jsonValue;
         default = { };
         example = lib.literalExpression ''
           {
-            scanData = "https://app.notion.com/p/…";
-            devTracker = null;
+            personal = {
+              scanData = "https://app.notion.com/p/…";
+              devTracker = null;
+            };
           }
         '';
         description = ''
-          profile の値を、このマシンだけ差し替える。キーは profiles.toml と同じ
-          (workspace.id / defaultParent / scanData / devTracker.hub / devTracker.linkFromRepo など)。
-          入れ子は profile の値へ重ね、同じキーはこちらが勝ち、null はそのキーを消す。
+          プロファイルの値を、このマシンだけ差し替える。外側のキーはプロファイルの名前で、
+          中のキーは profiles.toml と同じ (workspace.id / defaultParent / scanData / devTracker.hub /
+          devTracker.linkFromRepo など)。入れ子はプロファイルの値へ重ね、同じキーはこちらが勝ち、
+          null はそのキーを消す。
 
           devTracker.linkFromRepo だけは真偽値で、pjp-dev-tracker が branch・PR・commit に
           チケットの ID と URL を書くかを決める (書かなければ true。work のプロファイルは false)。
-          このマシンだけ変えるなら `{ devTracker.linkFromRepo = true; }` のように書く。
+          このマシンだけ変えるなら `{ work = { devTracker.linkFromRepo = true; }; }` のように書く。
 
           キーの綴りはここでは検査しない (キーの形は claude-skills が持つ)。
           skill が使うときに resolver が知らないキーとして止める。

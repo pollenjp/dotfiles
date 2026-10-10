@@ -25,7 +25,8 @@
 #               (Notion Dev Tracker を使うマシンだけ true に直す)。
 #               dotfiles.claude.gitViaGh.enable は既定の true のままで、
 #               コメントアウトした false の例だけ置く (gh にログインしないマシンだけ外す)。
-#               Notion へ書く skill の宛先 dotfiles.claude.notion.profile は null (選ぶまで止まる)。
+#               Notion へ書く skill の既定の宛先 dotfiles.claude.notion.profile は null
+#               (選ぶまで、規則に当たらない repo と repo の外で止まる)。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -201,12 +202,12 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
       warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
-      warn "local が無いと Notion の宛先 (dotfiles.claude.notion.profile) を選べず、Notion へ書く skill は止まる。"
+      warn "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。"
       warn "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
     if ! grep -q 'notion\.profile' "${flake_file}"; then
       warn "flake.nix の local に dotfiles.claude.notion.profile がありません。"
-      warn "Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
+      warn "規則に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
     fi
   else
     warn "既存の ${flake_file} が別のパスを指しています:"
@@ -255,12 +256,17 @@ if [[ ${write_flake} == 1 ]]; then
         # dotfiles.claude.gitViaGh.enable = false;
 
         # Notion へ書く skill (pjp-dev-tracker・pjp-notion-authoring など) の宛先。
-        # 中身は private の claude-skills (skills/pjp-notion-profile/profiles.toml) にあり、
-        # ここでは名前を選ぶ ("personal" / "work")。null のままだと skill は止まる。
+        # 宛先は作業中の repo で決まる: このマシンの routes → claude-skills の profiles.toml の
+        # [routes] → この profile (規則に当たらない repo と repo の外で使う既定)。
+        # 値は private の claude-skills (skills/pjp-notion-profile/profiles.toml) にあり、
+        # ここでは名前を選ぶ ("personal" / "work")。null のままだと、規則に当たらない所で skill は止まる。
         # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
         dotfiles.claude.notion.profile = null;
-        # このマシンだけ一部を差し替えるなら (キーは profiles.toml と同じ。null はキーを消す):
-        #   dotfiles.claude.notion.override = { scanData = "https://app.notion.com/p/…"; };
+        # このマシンだけ規則を足す・上書きする (例: 会社の PC で pollenjp の repo も work に書く)。
+        # 共通の [routes] より先に見る:
+        #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
+        # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
+        #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
       };
     in
     {
