@@ -7,6 +7,8 @@
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
+#   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
+#                                     (settings.json の footerLinksRegexes に写す値。下記)
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
@@ -40,10 +42,12 @@
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
 #                    (フック / statusLine の登録、git の設定を渡す env、
-#                    skill を隠す skillOverrides) は scripts/bootstrap-claude-*.sh
-#                    がマシンごとに注入する。skillOverrides と env は望む値を
+#                    skill を隠す skillOverrides、footer のリンクの footerLinksRegexes)
+#                    は scripts/bootstrap-claude-*.sh がマシンごとに注入する。
+#                    skillOverrides・env・footerLinksRegexes は望む値を
 #                    ~/.local/state/dotfiles/claude-skill-overrides.json /
-#                    claude-env.json に Nix が置き (下記)、script はそれを写すだけにしている
+#                    claude-env.json / claude-footer-links.json に Nix が置き (下記)、
+#                    script はそれを写すだけにしている
 #   plugins/       : 実行時に取得・更新される
 #   claude-skills/ : private リポジトリなので public な flake.lock に載せられず、
 #                    載せると CI の nix flake check も fetch できずに落ちる。
@@ -271,6 +275,16 @@ in
           gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
         }
         + "\n";
+    }
+
+    # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
+    # チケットと PR を、Claude Code の footer にクリックできるバッジとして並べる。
+    #
+    # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+    # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず、
+    # files/claude/footer-links.json をそのまま置く (マシンごとに変える理由がまだ無い)。
+    {
+      ".local/state/dotfiles/claude-footer-links.json".source = claudeRoot + "/footer-links.json";
     }
 
     # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの上書き)。
