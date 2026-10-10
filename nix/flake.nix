@@ -78,8 +78,11 @@
       # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
       #
       # nix/tests/ のテストも載せる。
-      #   <名前>.test.sh   bootstrap などの script の振る舞い。bash・jq・git だけの
+      #   <名前>.test.sh   bootstrap や hook などの script の振る舞い。bash・jq・git だけの
       #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
+      #   claude-footer-links.test.mjs
+      #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
+      #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
       #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
       #   claude-herdr-skill.nix
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
@@ -117,10 +120,19 @@
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
+          bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
+          claude-footer-links-test =
+            pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; }
+              ''
+                node ${./tests/claude-footer-links.test.mjs} ${./files/claude/footer-links.json}
+                touch $out
+              '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
+          video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
+          bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {

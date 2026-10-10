@@ -1,0 +1,14 @@
+[
+  {
+    "type": "regex",
+    "pattern": "\\b(?<id>(?:WRK-)?TKT-\\d+)\\b(?:(?!(?:WRK-)?TKT-\\d)[^\\n]){0,160}?https://app\\.notion\\.com/p/(?<page>[A-Za-z0-9-]*[0-9a-f]{32})",
+    "url": "https://app.notion.com/p/{page}",
+    "label": "{id}"
+  },
+  {
+    "type": "regex",
+    "pattern": "(?<!\\n {2}(?:WRK-)?TKT-\\d+ [^\\n]*)https://github\\.com/(?<owner>[A-Za-z0-9_.-]+)/(?<repo>[A-Za-z0-9_.-]+)/pull/(?<num>\\d+)",
+    "url": "https://github.com/{owner}/{repo}/pull/{num}",
+    "label": "{repo}#{num}"
+  }
+]
