@@ -618,6 +618,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
+| 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
@@ -1017,6 +1018,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
+| `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -2155,6 +2157,52 @@ clone / pull はネットワークアクセスを伴うため `home.activation` 
 store 管理ではないので `~/.claude/skills/<名前>/` は**書き込める**。`nix-managed-guard.sh`
 も（`/nix/store` を指さないので）止めない。編集はそのまま効くが、実体は
 claude-skills の作業クローンなので **commit / push しないと他のマシンには届かない**。
+
+### 長い応答を読む web ビューア (cc-pages)
+
+[`pollenjp/cc-pages`](https://github.com/pollenjp/cc-pages)（private）は、Claude Code の長い応答を HTML のページとして
+手元に残し、ブラウザで読むためのツール。skill の `pjp-cc-page`（claude-skills 側）が `cc-pages new` でページを書き、
+常駐する daemon（`cc-pages serve`）が `http://localhost:7777` で見せる。
+
+claude-skills と同じく private なので、**バイナリは Nix ではなく `bootstrap-cc-pages.sh` が置く**。
+Nix が置くのは daemon の unit だけ。
+
+| 段 | すること | 決める場所 |
+| --- | --- | --- |
+| `switch` | `~/.config/systemd/user/cc-pages.service`（`~/bin/cc-pages serve` を常駐させる）を置く | `home/modules/cc-pages.nix` |
+| bootstrap | `$(ghq root)/github.com/pollenjp/cc-pages` へ clone（あれば ff-only で pull）→ `go build` して `~/bin/cc-pages` へ symlink → unit を enable して再起動 | `scripts/bootstrap-cc-pages.sh` |
+
+```sh
+./nix/scripts/bootstrap-cc-pages.sh            # 取得 / 更新してビルドし、daemon を再起動する
+./nix/scripts/bootstrap-cc-pages.sh --no-pull  # pull せず、手元のクローンでビルドし直す
+./nix/scripts/bootstrap-cc-pages.sh --status   # いまの状態を見る
+systemctl --user status cc-pages               # daemon の状態
+```
+
+- 冪等なので `--update` のたびに走り、cc-pages の更新もこれで入る
+- 待ち受けとデータの置き場は、既定で `127.0.0.1:7777` と `~/.local/share/cc-pages`。変えるなら
+  `~/.config/cc-pages/config.toml` か `CC_PAGES_ADDR` / `CC_PAGES_ROOT`
+- clone 先は `--dir` → `$CC_PAGES_DIR` → `$(ghq root)/github.com/pollenjp/cc-pages` の順に決まる
+- ビルドに使う `go` は `bootstrap-mise.sh`（order 10）が入れる
+- daemon を起こすのは Linux の user の systemd だけ。darwin には launchd の agent を置いていないので、
+  バイナリは作るが常駐はしない
+- `cc-pages` が PATH（`~/bin`）に無いマシンでは、skill はページを作らずにターミナルで答える
+
+#### 取得できないマシンでも止まらない
+
+claude-skills と同じく、**取得やビルドの失敗はエラーにせず、警告を出して exit 0 する**。
+
+| 状況 | 挙動 |
+| --- | --- |
+| clone できない（鍵が無い / オフライン） | `~/bin` にも systemd にも触らず、ビューア無しで続ける |
+| clone はあるが pull できない | 手元のクローンの内容でビルドする |
+| `go` が無い / ビルドに失敗する | daemon は起こさない |
+| user の systemd が無い / unit がまだ無い | バイナリだけ置き、daemon は起こさない（手で動かすなら `~/bin/cc-pages serve`） |
+
+unit は `ConditionFileIsExecutable=%h/bin/cc-pages` でバイナリの有無を見る。バイナリが無いマシンでも
+`cc-pages.service` が failed で残らず、条件不成立として静かに飛ばされる。
+
+flake input にしない理由も claude-skills と同じ（[前述](#なぜ-flake-input-にしないのか)）。
 
 ### 管理しないもの
 
