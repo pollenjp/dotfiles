@@ -13,6 +13,7 @@
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
+#   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
@@ -161,6 +162,24 @@ in
         '';
       };
     };
+  };
+
+  options.dotfiles.cleanup.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    example = false;
+    description = ''
+      使わなくなった Nix の store path・古い世代と、mise の使っていない版を、
+      週 1 回自動で消すか (home/modules/cleanup.nix)。
+
+      - Nix: home-manager の nix.gc で `nix-collect-garbage --delete-older-than 14d`。
+        14 日より古い世代は消え、そこへはロールバックできなくなる
+      - mise: `mise prune --yes` と、mise の downloads/ に残った 7 日より古いアーカイブの削除
+
+      どちらも systemd の user timer (darwin は launchd の agent) で動き、マシンを
+      止めていて逃した回は次の起動時に走る。止めたいマシンはローカル flake の
+      local で false にする。
+    '';
   };
 
   options.dotfiles.wsl = {
