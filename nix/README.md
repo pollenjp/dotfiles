@@ -616,6 +616,9 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
+| 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
+| 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
+| 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
@@ -1015,6 +1018,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
+| `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -2154,6 +2158,52 @@ store 管理ではないので `~/.claude/skills/<名前>/` は**書き込める
 も（`/nix/store` を指さないので）止めない。編集はそのまま効くが、実体は
 claude-skills の作業クローンなので **commit / push しないと他のマシンには届かない**。
 
+### 長い応答を読む web ビューア (cc-pages)
+
+[`pollenjp/cc-pages`](https://github.com/pollenjp/cc-pages)（private）は、Claude Code の長い応答を HTML のページとして
+手元に残し、ブラウザで読むためのツール。skill の `pjp-cc-page`（claude-skills 側）が `cc-pages new` でページを書き、
+常駐する daemon（`cc-pages serve`）が `http://localhost:7777` で見せる。
+
+claude-skills と同じく private なので、**バイナリは Nix ではなく `bootstrap-cc-pages.sh` が置く**。
+Nix が置くのは daemon の unit だけ。
+
+| 段 | すること | 決める場所 |
+| --- | --- | --- |
+| `switch` | `~/.config/systemd/user/cc-pages.service`（`~/bin/cc-pages serve` を常駐させる）を置く | `home/modules/cc-pages.nix` |
+| bootstrap | `$(ghq root)/github.com/pollenjp/cc-pages` へ clone（あれば ff-only で pull）→ `go build` して `~/bin/cc-pages` へ symlink → unit を enable して再起動 | `scripts/bootstrap-cc-pages.sh` |
+
+```sh
+./nix/scripts/bootstrap-cc-pages.sh            # 取得 / 更新してビルドし、daemon を再起動する
+./nix/scripts/bootstrap-cc-pages.sh --no-pull  # pull せず、手元のクローンでビルドし直す
+./nix/scripts/bootstrap-cc-pages.sh --status   # いまの状態を見る
+systemctl --user status cc-pages               # daemon の状態
+```
+
+- 冪等なので `--update` のたびに走り、cc-pages の更新もこれで入る
+- 待ち受けとデータの置き場は、既定で `127.0.0.1:7777` と `~/.local/share/cc-pages`。変えるなら
+  `~/.config/cc-pages/config.toml` か `CC_PAGES_ADDR` / `CC_PAGES_ROOT`
+- clone 先は `--dir` → `$CC_PAGES_DIR` → `$(ghq root)/github.com/pollenjp/cc-pages` の順に決まる
+- ビルドに使う `go` は `bootstrap-mise.sh`（order 10）が入れる
+- daemon を起こすのは Linux の user の systemd だけ。darwin には launchd の agent を置いていないので、
+  バイナリは作るが常駐はしない
+- `cc-pages` が PATH（`~/bin`）に無いマシンでは、skill はページを作らずにターミナルで答える
+
+#### 取得できないマシンでも止まらない
+
+claude-skills と同じく、**取得やビルドの失敗はエラーにせず、警告を出して exit 0 する**。
+
+| 状況 | 挙動 |
+| --- | --- |
+| clone できない（鍵が無い / オフライン） | `~/bin` にも systemd にも触らず、ビューア無しで続ける |
+| clone はあるが pull できない | 手元のクローンの内容でビルドする |
+| `go` が無い / ビルドに失敗する | daemon は起こさない |
+| user の systemd が無い / unit がまだ無い | バイナリだけ置き、daemon は起こさない（手で動かすなら `~/bin/cc-pages serve`） |
+
+unit は `ConditionFileIsExecutable=%h/bin/cc-pages` でバイナリの有無を見る。バイナリが無いマシンでも
+`cc-pages.service` が failed で残らず、条件不成立として静かに飛ばされる。
+
+flake input にしない理由も claude-skills と同じ（[前述](#なぜ-flake-input-にしないのか)）。
+
 ### 管理しないもの
 
 `settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と
@@ -2225,18 +2275,24 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 ## CI
 
-`.github/workflows/nix.yml` が `nix/**` の変更時に走る。
+`.github/workflows/nix.yml` が、main への push と PR で走る（`nix/**`・`win/**`・workflow 自身が変わったときだけ）。
+毎朝 6:00 (JST) の定期実行では `closure-scan` だけが回る。Actions の画面から手で流すこともできる
+（`workflow_dispatch`。lock-age の下限日数を下げる `min_release_age_days` は[前述](#依存-flakelock-の更新)）。
 
-| ジョブ | ランナー | 内容 |
-| --- | --- | --- |
-| `check (x86_64-linux)` | ubuntu-latest | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
-| `check (aarch64-darwin)` | macos-latest | aarch64-darwin のビルド |
-| `lint` | ubuntu-latest | `nixfmt --check` / `shfmt -d` / `shellcheck` |
+| ジョブ | 表示名 | ランナー | いつ | 内容 |
+| --- | --- | --- | --- | --- |
+| `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
+| `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
+| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → herdr のキーバインドが WSL と Windows で同じか |
+| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
+| `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
 `aarch64-linux` はランナーが無いので**評価のみ**（`--all-systems --no-build`）。
 オプション名の誤りやプラットフォーム分岐の壊れはこれで捕まる。
 
-ローカルで同じことをするには `./nix/scripts/verify.sh` を使う。
+`check` と同じことを手元でするには `./nix/scripts/verify.sh` を使う。`lock-age`・`closure-scan`・`head-diff` は、
+表の script を手元で打てば同じ判定になる。
 
 ## 検証
 
@@ -2298,29 +2354,34 @@ node nix/tests/claude-footer-links.test.mjs                                    #
 
 ```
 nix/
-├── flake.nix              inputs / homeConfigurations / checks / formatter / devShells
+├── flake.nix              inputs / homeConfigurations / lib / checks / packages / apps / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
 ├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
+│       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       ├── bash.nix          alias 88 / 関数 24
 │       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
+│       ├── exe-exec-trace.nix  WSL のマシンの PATH に pjp-who-is-asking を置き、exeExecTrace.enable なら .exe の起動を記録するトレーサの unit ファイルを作る (/etc へは setup が入れる。ADR 012)
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現)
+├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix が使う。flake の packages と checks にも載せる)
+│   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
+│   └── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、Windows と Linux をまたいだ 1 本の木で出す
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現 / herdr の skill のリンク)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -2328,6 +2389,7 @@ nix/
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-plugins.sh  Claude Code の公式プラグインを導入する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
@@ -2335,6 +2397,14 @@ nix/
     ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
+    ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
     ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
-    └── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-powershell-profile.sh  win/ から配った dotfiles.ps1 を PowerShell 7 の $PROFILE から読ませる (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)
+    ├── bootstrap-windows-herdr.sh  Windows の herdr が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、入れ替えはしない)
+    ├── flake-lock-age.sh           flake.lock の pin を、出てから一定日数が経った revision に限る (setup --flake-update と CI の lock-age が呼ぶ)
+    ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
+    ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
+    └── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
 ```
