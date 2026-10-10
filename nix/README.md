@@ -610,6 +610,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
+| 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
@@ -1572,6 +1573,57 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
 
+### footer に会話のチケットと PR のリンクを出す
+
+会話の中で触れた Dev Tracker のチケット（`TKT-n` / `WRK-TKT-n`）と GitHub の PR を、
+プロンプト下の footer にクリックできるバッジとして並べる。
+
+```
+⏵⏵ bypass permissions on (shift+tab to cycle) · TKT-12 · dotfiles#34 · claude-skills#5 · TKT-9
+```
+
+Claude Code の `footerLinksRegexes`（2.1.176〜）を使う。turn の終わりに、その turn の
+出力（tool の結果と Claude の応答の文章）を正規表現で走査し、当たったものをバッジにする。
+
+- 並ぶのは今の branch の PR バッジ（組み込み）込みで最大 5 個。新しいものが先頭に入り、
+  6 個目が来ると一番古いものが落ちる。同じ URL は 1 個にまとまる
+- ユーザーが打った文は拾わない。Claude が応答で同じリンクに触れれば拾う
+- `/clear` で消え、resume すると transcript の末尾から作り直す
+- `settings.json` を書き換えると、実行中の session にも次の turn から効く
+
+| 項目 | 拾うもの | バッジ |
+| --- | --- | --- |
+| チケット | ID と `https://app.notion.com/p/…` が同じ行に並ぶもの（`ticket.sh` の書き込み系の出力 `TKT-n: …  URL`、応答の `TKT-n: URL` や `[TKT-n](URL)`） | `TKT-12` |
+| PR | `https://github.com/<owner>/<repo>/pull/<番号>`。`ticket.sh list` の行（空白 2 つ + `TKT-n` で始まる）に載るものは外す | `dotfiles#34` |
+
+値は `nix/files/claude/footer-links.json`。この形にしている理由:
+
+- チケットの URL はタイトルの英数字の部分と 32 桁の id でできていて、`TKT-n` を含まない。
+  label に ID を出すため、ID と URL が同じ行に並ぶ形を拾う。間に別の ID を挟んだ URL とは組ませない
+- url の `{名前}` に差し込む値は `encodeURIComponent` されるので、URL を丸ごと 1 つの
+  placeholder で差し込めない。owner・repo・番号や、Notion の page の部分を別々に取って組み直す
+- 会話の始めに打つ `ticket.sh list` には、他のチケットの PR が載る。素朴に拾うと関係の無い PR が
+  毎回 footer に居座るので、否定の後読みで外している
+- `footerLinksRegexes` は user / flag / managed の settings からしか読まれない。repo の
+  `.claude/settings.json` に置いても効かない
+
+> ⚠️ tool の出力に出たリンクは何でも拾う。PR の URL を多く含む docs を読むと、5 枠がそれで
+> 埋まる。作業中のチケットは `ticket.sh` を打つたびに出力に出るので、すぐ先頭へ戻る。
+
+正規表現の当たり方は `nix/tests/claude-footer-links.test.mjs` が確かめる（[テスト](#テスト)）。
+Dev Tracker の ID の prefix を増やしたら（新しい workspace）、`footer-links.json` とテストの両方に足す。
+
+#### 登録（冪等。更新時も毎回走る）
+
+```sh
+./nix/scripts/bootstrap-claude-footer-links.sh
+```
+
+statusLine と同じ事情で、値は `settings.json` にしか書けない。skill-overrides と同じく、
+home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置き、このコマンドが
+`.footerLinksRegexes` を丸ごと置き換える。このキーは dotfiles が持つので、手で足した項目も
+次の実行で消える。足したいなら `footer-links.json` に書く。
+
 ### Claude のセッションだけ git の設定を変える
 
 Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
@@ -2038,7 +2090,7 @@ claude-skills の作業クローンなので **commit / push しないと他の�
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -2147,6 +2199,8 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | テスト | 確かめること | check の名前 |
 | --- | --- | --- |
 | `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
+| `bootstrap-claude-footer-links.test.sh` | `bootstrap-claude-footer-links.sh` が settings.json の footerLinksRegexes を生成ファイルどおりに書くこと・他のキーを残すこと・形の違う入力では書かずに落ちること（13 件） | `bootstrap-claude-footer-links-test`（Linux） |
+| `claude-footer-links.test.mjs` | `footer-links.json` の正規表現が、`ticket.sh` や `gh` の出力のどの行からどのバッジを作るか。Claude Code と同じ JavaScript の RegExp で流す（18 件） | `claude-footer-links-test`（Linux） |
 | `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
@@ -2157,6 +2211,7 @@ bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボ
 ```sh
 nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ
 bash nix/tests/bootstrap-claude-env.test.sh                                    # サンドボックスの外で
+node nix/tests/claude-footer-links.test.mjs                                    # mjs のテスト (node が要る)
 ```
 
 - 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
@@ -2190,8 +2245,8 @@ nix/
 │       └── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
-│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル)
+│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh の状態ファイル / footer のリンクの正規表現)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -2203,6 +2258,7 @@ nix/
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
     ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
