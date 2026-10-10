@@ -2304,7 +2304,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override}
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
@@ -2315,7 +2315,8 @@ nix/
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
 │       ├── bash.nix          alias 88 / 関数 24
-│       └── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
+│       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)
+│       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
