@@ -1556,9 +1556,11 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 | --- | --- |
 | PR の作成 | Bash で `gh pr create` が成功した（stdout に PR の URL がある） |
 | 設計のページ | Write でタグ「設計」を含む cc-page の `index.html` を新しく作った |
-| 設計の文書 | Write で `docs/superpowers/specs/*.md` か `docs/adr/` の下を新しく作った |
+| 設計の文書 | Write で `docs/superpowers/specs/*.md` か、ADR そのもの（`docs/adr/<名前>.md` か `docs/adr/<名前>/README.md`）を新しく作った |
 
-subagent の中（入力に `agent_id` がある）と、skill が無いマシンでは黙る。登録は上と同じ
+subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図では黙る。
+ユーザーが「このセッションでは聞かない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
 
 ### statusLine
@@ -2165,7 +2167,7 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
-| `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書の新規作成で知らせ、それ以外・subagent の中・skill が無いマシン・壊れた入力では黙ること（16 件） | `video-offer-nudge-test`（Linux） |
+| `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を

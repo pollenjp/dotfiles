@@ -11,8 +11,12 @@
 # ## 確かめること
 #
 #   - gh pr create の成功・タグ「設計」の cc-page・spec / ADR の新規作成で知らせる
-#   - それ以外 (失敗した PR・タグの無いページ・上書き・関係ないファイル) では黙る
-#   - subagent の中・skill が無いマシン・壊れた入力でも黙り、いつも exit 0
+#   - それ以外 (失敗した PR・タグの無いページ・上書き・関係ないファイル・ADR の dir の中の
+#     textbook や図・ADR の一覧) では黙る
+#   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは聞かない」の印が
+#     あるセッションでも黙り、いつも exit 0
+#
+# 印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) は使い捨ての dir に作る。
 
 set -u -o pipefail
 
@@ -45,9 +49,13 @@ echo '---' >"${with_skill}/skills/pjp-video-explainer-offer/SKILL.md"
 without_skill="${work}/without-skill"
 mkdir -p "${without_skill}"
 
+# 「このセッションでは聞かない」の印を置く dir (XDG_STATE_HOME)
+state="${work}/state"
+mkdir -p "${state}"
+
 # run <設定 dir> <入力> : stdout を ${work}/out に、exit code を ${work}/rc に残す
 run() {
-  printf '%s' "$2" | CLAUDE_CONFIG_DIR="$1" bash "${script}" >"${work}/out" 2>"${work}/err"
+  printf '%s' "$2" | CLAUDE_CONFIG_DIR="$1" XDG_STATE_HOME="${state}" bash "${script}" >"${work}/out" 2>"${work}/err"
   echo $? >"${work}/rc"
 }
 context() {
@@ -183,6 +191,39 @@ if silent; then ok "skill が無いマシンでは黙る"; else ng "skill が無
 # 16. 壊れた入力 → 黙って exit 0
 run "${with_skill}" '{"tool_name": "Bash", '
 if silent; then ok "壊れた入力でも黙って exit 0"; else ng "壊れた入力でも黙って exit 0" "rc=$(cat "${work}/rc") out=$(cat "${work}/out")"; fi
+
+# 17. 1 ファイルの ADR (docs/adr/<名前>.md) の新規作成 → design-doc の文
+run "${with_skill}" "$(write_input /r/docs/adr/0011-use-x.md create)"
+if [[ $(context) == "[解説動画] 設計の文書を作った (/r/docs/adr/0011-use-x.md)。"* ]]; then
+  ok "1 ファイルの ADR の新規作成で知らせる"
+else
+  ng "1 ファイルの ADR の新規作成で知らせる" "out=$(cat "${work}/out")"
+fi
+
+# 18. ADR の一覧 (docs/adr/README.md) の新規作成 → 黙る
+run "${with_skill}" "$(write_input /r/docs/adr/README.md create)"
+if silent; then ok "ADR の一覧の新規作成では黙る"; else ng "ADR の一覧の新規作成では黙る" "out=$(cat "${work}/out")"; fi
+
+# 19. ADR の dir の中の textbook の章 → 黙る
+run "${with_skill}" "$(write_input /r/docs/adr/010_x/textbook/01-intro.md create)"
+if silent; then ok "ADR の dir の中の textbook では黙る"; else ng "ADR の dir の中の textbook では黙る" "out=$(cat "${work}/out")"; fi
+
+# 20. ADR の dir の中の図 → 黙る
+run "${with_skill}" "$(write_input /r/docs/adr/010_x/plantuml/flow.puml create)"
+if silent; then ok "ADR の dir の中の図では黙る"; else ng "ADR の dir の中の図では黙る" "out=$(cat "${work}/out")"; fi
+
+# 21. このセッションに「聞かない」の印がある → 黙る。別のセッションの印では黙らない
+mkdir -p "${state}/pjp-video-offer"
+touch "${state}/pjp-video-offer/off-s"
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/8')"
+s1=$(silent && echo yes)
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/8' | jq -c '.session_id = "other"')"
+if [[ ${s1} == yes && $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/8)。"* ]]; then
+  ok "「聞かない」の印があるセッションでは黙り、別のセッションでは知らせる"
+else
+  ng "「聞かない」の印があるセッションでは黙り、別のセッションでは知らせる" "s1=${s1} out=$(cat "${work}/out")"
+fi
+rm -f "${state}/pjp-video-offer/off-s"
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

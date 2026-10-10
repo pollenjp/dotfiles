@@ -11,13 +11,18 @@
 #
 #   PR の作成     Bash で gh pr create が成功した (stdout に PR の URL がある)
 #   設計のページ  Write でタグ「設計」を含む cc-page の index.html を新しく作った
-#   設計の文書    Write で docs/superpowers/specs/*.md か docs/adr/ の下を新しく作った
+#   設計の文書    Write で docs/superpowers/specs/*.md か、ADR そのもの (docs/adr/<名前>.md か
+#                 docs/adr/<名前>/README.md) を新しく作った
 #
 # ## 黙る場面
 #
 #   - subagent の中 (入力に agent_id がある)。subagent はユーザーに質問できない
 #   - skill が入っていないマシン (claude-skills を取れない、public な dotfiles だけの環境)
+#   - ユーザーが「このセッションでは聞かない」を選んだセッション。skill がそのとき
+#     ${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id> を置く。
+#     会話の圧縮で選んだことが消えても、ここで黙らせる
 #   - 新しく作ったのではない書き込み (type が create でない)。版を直すたびに知らせない
+#   - ADR の dir の中の textbook や図、ADR の一覧 (docs/adr/README.md)。1 本の ADR で何度も知らせない
 #   - 想定外の入力。tool の流れを止めないよう、何があっても exit 0 で終える
 #
 # ## 登録
@@ -40,6 +45,12 @@ field() {
 }
 
 [[ -z $(field '.agent_id') ]] || exit 0
+
+# 「このセッションでは聞かない」の印。session_id は Claude Code の UUID だが、パスに使うので形を確かめる
+session_id=$(field '.session_id')
+if [[ ${session_id} =~ ^[A-Za-z0-9_-]+$ && -e "${XDG_STATE_HOME:-${HOME}/.local/state}/pjp-video-offer/off-${session_id}" ]]; then
+  exit 0
+fi
 
 kind=""
 target=""
@@ -66,9 +77,17 @@ case $(field '.tool_name') in
           target=${dir}
         fi
         ;;
-      */docs/superpowers/specs/*.md | */docs/adr/*)
+      */docs/superpowers/specs/*.md)
         kind="design-doc"
         target=${path}
+        ;;
+      */docs/adr/*)
+        # ADR そのものだけ。case の * は / もまたぐので、docs/adr/ から後ろの形で絞る
+        rest=${path#*/docs/adr/}
+        if [[ ${rest} =~ ^[^/]+/README\.md$ || (${rest} =~ ^[^/]+\.md$ && ${rest} != README.md) ]]; then
+          kind="design-doc"
+          target=${path}
+        fi
         ;;
     esac
     ;;
