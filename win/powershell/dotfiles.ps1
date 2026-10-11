@@ -4,6 +4,13 @@
 # BOM 付きの UTF-8 で保存すること。Windows PowerShell 5.1 は BOM の無い UTF-8 を
 # CP932 として読み、日本語コメントの次の行を黙って読み飛ばすことがある。
 
+# e でシェルを抜ける。WSL の fish の abbr (nix/home/modules/fish.nix) と bash の alias
+# (nix/home/modules/bash.nix) の e と同じ。
+# exit はコマンドではなくキーワードなので、Set-Alias では指せない (e を打つと
+# 「The term 'exit' is not recognized」になる)。function にすれば、プロンプトで打った
+# e の中の exit がセッションを終わらせる。
+function e { exit }
+
 # herdr。WSL の fish の abbr (nix/home/modules/fish.nix) と bash の alias
 # (nix/home/modules/bash.nix) と同じ名前・同じ中身にそろえる。
 #

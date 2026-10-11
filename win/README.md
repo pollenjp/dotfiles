@@ -6,7 +6,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドは WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -112,6 +112,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 
 | 名前 | 中身 |
 | --- | --- |
+| `e` | `exit` (シェルを抜ける。`exit` はキーワードなので function にしてある) |
 | `h` | `herdr` (`Set-Alias`。既定の alias の `h` = `Get-History` を上書きする) |
 | `hss` | `herdr --session` |
 | `hls` | `herdr session list` |
@@ -139,6 +140,8 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
   ```
 
 - PowerShell の alias は引数を持てない。引数を足すものは function にする
+- `exit` はコマンドではなくキーワードなので、`Set-Alias` で指せない (`Set-Alias e exit` だと
+  `e` が「The term 'exit' is not recognized」で落ちる)。function の中に書く
 - 既定の alias と同じ名前は `Set-Alias -Option AllScope -Force` で上書きする。alias は function
   より先に引かれるので、function を書いても既定の alias が当たる。5.1 の既定の alias には
   AllScope が付いていて、`-Option AllScope` が無いと上書きできない

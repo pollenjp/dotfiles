@@ -43,6 +43,8 @@
       ff = "cd ../..";
       fff = "cd ../../..";
       ffff = "cd ../../../..";
+      # e は fish.nix の abbr と Windows の PowerShell (win/powershell/dotfiles.ps1) にも
+      # 置いている。直すときは 3 つをそろえる。
       e = "exit";
       H = "head";
       show_ports_netstat = "netstat -tulpn";
