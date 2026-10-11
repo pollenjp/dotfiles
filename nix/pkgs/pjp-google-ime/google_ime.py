@@ -8,7 +8,8 @@ Windows には触らない。読み書きするのは渡されたパスのファ
 
   <config-dir>/config.txtpb    config1.db のうち、general_config・custom_keymap_table・
                                custom_roman_table を除いた全項目 (protobuf のテキスト形式)
-  <config-dir>/keymap.tsv      custom_keymap_table の文字列そのもの (キー設定の画面のエクスポートと同じ)
+  <config-dir>/keymap.tsv      custom_keymap_table の文字列そのもの (キー設定の画面のエクスポートと同じ。
+                               表が空なら置かない)
   <config-dir>/romaji.tsv      custom_roman_table の文字列そのもの (カスタムしたときだけ置く)
   <dictionary-dir>/<名前>.tsv  辞書 1 つ。「読み<TAB>単語<TAB>品詞<TAB>コメント」(辞書ツールのエクスポートと同じ)
 
@@ -237,23 +238,29 @@ def config_to_text(cfg):
     rest.CopyFrom(cfg)
     tables = []
     for name, file in (("custom_keymap_table", KEYMAP), ("custom_roman_table", ROMAJI)):
-        if not rest.HasField(name):
+        table = getattr(rest, name)
+        rest.ClearField(name)
+        # 空の表は「無い」と同じに扱う。設定画面は、キー設定を一度もカスタムしていなくても
+        # custom_keymap_table を空文字で入れる (Mozc の gui/config_dialog/config_dialog.cc)
+        if not table:
             tables.append(None)
             continue
         try:
-            tables.append(getattr(rest, name).decode())
+            tables.append(table.decode())
         except UnicodeDecodeError:
             raise TextError(f"{CONFIG_DB} の {name} が UTF-8 ではないので {file} に書けない") from None
-        rest.ClearField(name)
     rest.ClearField("general_config")
     return TXTPB_HEADER + text_format.MessageToString(rest, as_utf8=True), tables[0], tables[1]
 
 
 def config_digest(cfg):
-    """比べるための sha256。general_config (時刻・版・OS) は外す"""
+    """比べるための sha256。general_config (時刻・版・OS) は外し、空の表は「無い」にそろえる"""
     c = type(cfg)()
     c.CopyFrom(cfg)
     c.ClearField("general_config")
+    for name in ("custom_keymap_table", "custom_roman_table"):
+        if not getattr(c, name):
+            c.ClearField(name)  # 設定画面はカスタムしていない表も空文字で入れる (config_to_text と同じ)
     return hashlib.sha256(serialize(c)).hexdigest()
 
 
@@ -284,18 +291,31 @@ def dictionaries_from_tsv(files):
         d = storage.dictionaries.add()
         d.id = dictionary_id(name)
         d.name = name
+        # エラーにはセルの中身 (読み・単語・品詞・コメント) を出さない。setup の出力は Claude などの
+        # ログにも残るため。列がずれると品詞の列に語が入るので、品詞の値も出さない
         for n, line in enumerate(lines, start=1):
             fields = line.split("\t")
+            if len(fields) not in (3, 4):
+                raise TextError(
+                    f"{name}.tsv:{n}: 列が {len(fields)} 個ある (「読み<TAB>単語<TAB>品詞<TAB>コメント」の 4 列。"
+                    "コメントが無ければ 3 列でもよい)"
+                )
             if len(fields) == 3:
                 fields.append("")
-            if len(fields) != 4 or not fields[0] or not fields[1]:
-                raise TextError(f"{name}.tsv:{n}: 「読み<TAB>単語<TAB>品詞<TAB>コメント」になっていない: {line!r}")
+            empty = [label for label, cell in (("1 列目の読み", fields[0]), ("2 列目の単語", fields[1])) if not cell]
+            if empty:
+                raise TextError(f"{name}.tsv:{n}: {'と'.join(empty)}が空")
             if fields[2] not in POS_INDEX:
-                raise TextError(f"{name}.tsv:{n}: 品詞 {fields[2]!r} は Mozc に無い")
+                raise TextError(
+                    f"{name}.tsv:{n}: 3 列目の品詞が Mozc に無い (品詞の名前は Mozc の user_pos.def と同じ書き方。"
+                    "辞書ツールのエクスポートと同じ)"
+                )
             e = d.entries.add()
             e.key = fields[0]
             e.value = fields[1]
-            # 画面で作った語は、コメントが空でも必ず「ある」扱いで入っている。そろえる
+            # コメントが空の語は、Windows 側では、辞書ツールの表で編集した語なら comment が「ある」で、
+            # 単語登録ダイアログ・インポートで入れた語なら「無い」で入っている。ここでは必ず入れ、
+            # 比べる digest (dictionary_digest) は両方を同じに扱う
             e.comment = fields[3]
             e.pos = POS_INDEX[fields[2]]
     return storage
@@ -314,18 +334,20 @@ def dictionaries_to_tsv(storage):
         if d.name in files:
             raise TextError(f"辞書の名前 {d.name!r} が 2 つある (画面で名前を変える)")
         rows = []
-        for e in d.entries:
+        # エラーには語を出さない (何番目の語かだけ。dictionaries_from_tsv と同じ理由)
+        for i, e in enumerate(d.entries, start=1):
             if e.locale:
-                raise TextError(f"辞書 {d.name!r} の語 {e.key!r} に locale が付いていて、TSV に書けない")
+                raise TextError(f"辞書 {d.name!r} の {i} 番目の語に locale が付いていて、TSV に書けない")
             if any(c in v for v in (e.key, e.value, e.comment) for c in "\t\n\r"):
-                raise TextError(f"辞書 {d.name!r} の語 {e.key!r} にタブか改行が入っていて、TSV に書けない")
+                raise TextError(f"辞書 {d.name!r} の {i} 番目の語にタブか改行が入っていて、TSV に書けない")
             rows.append(f"{e.key}\t{e.value}\t{POS_NAMES[e.pos]}\t{e.comment}\n")
         files[d.name] = "".join(rows)
     return files
 
 
 def dictionary_digest(storage):
-    """比べるための sha256。辞書の id と辞書の並びは外す (画面で作った辞書の id は乱数のため)"""
+    """比べるための sha256。辞書の id と辞書の並びは外し (画面で作った辞書の id は乱数のため)、
+    空のコメントは「無い」にそろえる"""
     s = type(storage)()
     s.CopyFrom(storage)
     s.ClearField("dictionaries")
@@ -333,6 +355,9 @@ def dictionary_digest(storage):
         c = s.dictionaries.add()
         c.CopyFrom(d)
         c.ClearField("id")
+        for e in c.entries:
+            if not e.comment:
+                e.ClearField("comment")  # 単語登録ダイアログとインポートは空のコメントを入れない
     return hashlib.sha256(serialize(s)).hexdigest()
 
 
@@ -479,13 +504,16 @@ def cmd_import(a):
     if config_digest(config_from_text(*texts)) != config_digest(cfg):
         raise TextError(f"{CONFIG_DB} をテキストに戻すと中身が変わる (テキストで表せない項目がある)")
     files = None
-    if a.dictionary_dir:
-        _, storage_cls = messages()
-        p = win / DICTIONARY_DB
-        storage = read_dictionary_db(p) if p.is_file() else storage_cls()
+    p = win / DICTIONARY_DB
+    if a.dictionary_dir and p.is_file():
+        storage = read_dictionary_db(p)
         files = dictionaries_to_tsv(storage)
         if dictionary_digest(dictionaries_from_tsv(files)) != dictionary_digest(storage):
             raise TextError(f"{DICTIONARY_DB} をテキストに戻すと中身が変わる (TSV で表せない項目がある)")
+    elif a.dictionary_dir:
+        # ファイルが無いのは、まだ辞書を作っていないか置き場所が違うかで、辞書を全部消したのとは
+        # 違う。TSV は消さずに残す (消えた辞書の TSV を消すのは、ファイルがあって辞書が無いとき)
+        print(f"pjp-google-ime: {p} が無いので、辞書は取り込みません (TSV はそのまま)", file=sys.stderr)
     # ここまで通ってから書く (途中で止まっても、テキストを半端に書き換えない)
     changed = write_config_texts(a.config_dir, *texts)
     if files is not None:

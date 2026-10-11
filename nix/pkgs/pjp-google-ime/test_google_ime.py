@@ -21,6 +21,11 @@ KEYMAP = "status\tkey\tcommand\nDirectInput\tF13\tIMEOn\nPrecomposition\tF13\tIM
 ROMAJI = "a\tあ\nkk\tっ\tk\n"
 KEYMAP_HEADER_ONLY = "status\tkey\tcommand\n"
 DICT = "てすと\tテスト\t名詞\t\nぐーぐる\tGoogle\t固有名詞\t会社\n"
+# キー設定をカスタムしていない設定 (keymap.tsv を持たない)
+MSIME_TXTPB = "session_keymap: MSIME\npunctuation_method: TOUTEN_KUTEN\n"
+# エラーや出力に出てはいけない語 (架空の語)。setup の出力は Claude などのログにも残るため
+SECRET_KEY = "かくうのよみ"
+SECRET_VALUE = "架空の単語"
 
 
 def setUpModule():
@@ -39,6 +44,15 @@ def with_general_config(c, t):
     c2.general_config.config_version = 1
     c2.general_config.last_modified_time = t
     c2.general_config.platform = "Windows.10.0.0.0"
+    return c2
+
+
+def with_empty_tables(c):
+    """設定画面が保存したときのように、空のキー設定とローマ字テーブルを入れたものを返す"""
+    c2 = type(c)()
+    c2.CopyFrom(c)
+    c2.custom_keymap_table = b""
+    c2.custom_roman_table = b""
     return c2
 
 
@@ -146,6 +160,25 @@ class TestConfigDigest(unittest.TestCase):
         self.assertNotEqual(g.config_digest(cfg()), g.config_digest(cfg(txtpb=TXTPB + "suggestions_size: 5\n")))
 
 
+class TestEmptyTables(unittest.TestCase):
+    """設定画面は、キー設定を一度もカスタムしていなくても custom_keymap_table を空文字で入れる
+    (Mozc の gui/config_dialog/config_dialog.cc)。空の表は「無い」と同じに扱う"""
+
+    def test_to_text_drops_empty_tables(self):
+        c = with_empty_tables(cfg(txtpb=MSIME_TXTPB, keymap=None))
+        self.assertTrue(c.HasField("custom_keymap_table"))
+        txtpb, keymap, romaji = g.config_to_text(c)
+        self.assertIsNone(keymap)
+        self.assertIsNone(romaji)
+        self.assertNotIn("custom_keymap_table", txtpb)
+        self.assertNotIn("custom_roman_table", txtpb)
+
+    def test_digest_treats_empty_tables_as_absent(self):
+        c = cfg(txtpb=MSIME_TXTPB, keymap=None)
+        self.assertNotEqual(g.serialize(with_empty_tables(c)), g.serialize(c))  # 直列化は違う
+        self.assertEqual(g.config_digest(with_empty_tables(c)), g.config_digest(c))
+
+
 class TestUnknownFields(unittest.TestCase):
     def test_config_with_unknown_field_is_refused(self):
         config_cls, _ = g.messages()
@@ -180,7 +213,7 @@ class TestDictionaries(unittest.TestCase):
         )
 
     def test_unknown_pos(self):
-        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 品詞 '名刺'"):
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 3 列目の品詞が Mozc に無い"):
             g.dictionaries_from_tsv({"x": "てすと\tテスト\t名刺\t\n"})
 
     def test_bad_columns(self):
@@ -212,6 +245,86 @@ class TestDictionaries(unittest.TestCase):
             g.dictionary_digest(g.dictionaries_from_tsv({"a": DICT})),
             g.dictionary_digest(g.dictionaries_from_tsv({"a": DICT + "あ\t亜\t名詞\t\n"})),
         )
+
+    def test_digest_treats_missing_comment_as_empty(self):
+        # 単語登録ダイアログと辞書ツールのインポートは、コメントが空なら comment を入れない。
+        # 表で編集した語と TSV から組み立てた語は、空でも入れる。直列化は違うが digest はそろえる
+        st = g.dictionaries_from_tsv({"x": DICT})
+        other = type(st)()
+        other.CopyFrom(st)
+        other.dictionaries[0].entries[0].ClearField("comment")
+        self.assertNotEqual(g.serialize(other), g.serialize(st))
+        self.assertEqual(g.dictionary_digest(other), g.dictionary_digest(st))
+
+    def test_digest_still_sees_comments(self):
+        st = g.dictionaries_from_tsv({"x": DICT})
+        other = type(st)()
+        other.CopyFrom(st)
+        other.dictionaries[0].entries[0].comment = "メモ"
+        self.assertNotEqual(g.dictionary_digest(other), g.dictionary_digest(st))
+
+
+class TestDictionaryErrorsHideWords(unittest.TestCase):
+    """辞書の TSV のエラーは、ファイル・行・列までにし、セルの中身 (読み・単語・品詞・コメント) を出さない"""
+
+    def assertHidesWords(self, cm, *words):
+        message = str(cm.exception)
+        for w in (SECRET_KEY, SECRET_VALUE, *words):
+            self.assertNotIn(w, message)
+
+    def test_too_few_columns(self):
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 列が 2 個") as cm:
+            g.dictionaries_from_tsv({"x": f"{SECRET_KEY}\t{SECRET_VALUE}\n"})
+        self.assertHidesWords(cm)
+
+    def test_too_many_columns(self):
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:2: 列が 5 個") as cm:
+            g.dictionaries_from_tsv({"x": f"あ\t亜\t名詞\t\n{SECRET_KEY}\t{SECRET_VALUE}\t名詞\tメモ\tひみつのメモ\n"})
+        self.assertHidesWords(cm, "ひみつのメモ")
+
+    def test_empty_reading_or_word(self):
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 1 列目の読みが空") as cm:
+            g.dictionaries_from_tsv({"x": f"\t{SECRET_VALUE}\t名詞\t\n"})
+        self.assertHidesWords(cm)
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 2 列目の単語が空") as cm:
+            g.dictionaries_from_tsv({"x": f"{SECRET_KEY}\t\t名詞\t\n"})
+        self.assertHidesWords(cm)
+
+    def test_unknown_pos(self):
+        # 列がずれると品詞の列に語が入るので、品詞の値も出さない
+        with self.assertRaisesRegex(g.TextError, r"x\.tsv:1: 3 列目の品詞が Mozc に無い") as cm:
+            g.dictionaries_from_tsv({"x": f"{SECRET_KEY}\t名詞\t{SECRET_VALUE}\t\n"})
+        self.assertHidesWords(cm)
+
+    def test_locale(self):
+        st = g.dictionaries_from_tsv({"x": DICT + f"{SECRET_KEY}\t{SECRET_VALUE}\t名詞\t\n"})
+        st.dictionaries[0].entries[2].locale = "ja"
+        with self.assertRaisesRegex(g.TextError, "辞書 'x' の 3 番目の語に locale") as cm:
+            g.dictionaries_to_tsv(st)
+        self.assertHidesWords(cm)
+
+    def test_tab_or_newline(self):
+        for field, bad in (("key", f"{SECRET_KEY}\n"), ("value", f"{SECRET_VALUE}\t"), ("comment", "ひみつ\rのメモ")):
+            with self.subTest(field=field):
+                st = g.dictionaries_from_tsv({"x": f"{SECRET_KEY}\t{SECRET_VALUE}\t名詞\t\n"})
+                setattr(st.dictionaries[0].entries[0], field, bad)
+                with self.assertRaisesRegex(g.TextError, "辞書 'x' の 1 番目の語にタブか改行") as cm:
+                    g.dictionaries_to_tsv(st)
+                self.assertHidesWords(cm, "ひみつ")
+
+    def test_check_command_hides_words(self):
+        # build と check のエラーは setup の出力にそのまま出る
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(tmp))
+        (tmp / "conf").mkdir()
+        (tmp / "dicts").mkdir()
+        (tmp / "conf" / "config.txtpb").write_text(MSIME_TXTPB, encoding="utf-8")
+        (tmp / "dicts" / "x.tsv").write_text(f"{SECRET_KEY}\t{SECRET_VALUE}\t名刺\t\n", encoding="utf-8")
+        rc, out, err = run("check", "--config-dir", str(tmp / "conf"), "--dictionary-dir", str(tmp / "dicts"))
+        self.assertEqual(rc, 1)
+        self.assertIn("x.tsv:1:", err)
+        for w in (SECRET_KEY, SECRET_VALUE, "名刺"):
+            self.assertNotIn(w, out + err)
 
 
 class TestCommands(unittest.TestCase):
@@ -319,6 +432,64 @@ class TestCommands(unittest.TestCase):
         self.assertIn("ファイル名にできない", err)
         self.assertEqual((self.conf / "config.txtpb").read_text(encoding="utf-8"), before)
         self.assertTrue((self.dicts / "ユーザー辞書 1.tsv").exists())
+
+    def test_import_word_registered_without_comment(self):
+        # 単語登録ダイアログで足した語 (comment を持たない) があっても取り込め、4 列目は空になる
+        win = self.tmp / "win"
+        win.mkdir()
+        (win / "config1.db").write_bytes(g.serialize(cfg()))
+        st = g.dictionaries_from_tsv({"ユーザー辞書 1": DICT})
+        e = st.dictionaries[0].entries.add()
+        e.key, e.value, e.pos = SECRET_KEY, SECRET_VALUE, g.POS_INDEX["名詞"]  # comment は入れない
+        self.assertFalse(e.HasField("comment"))
+        (win / "user_dictionary.db").write_bytes(g.serialize(st))
+        rc, _, err = run("import", "--windows-dir", str(win), "--config-dir", str(self.conf), "--dictionary-dir", str(self.dicts))
+        self.assertEqual(rc, 0, err)
+        rows = (self.dicts / "ユーザー辞書 1.tsv").read_text(encoding="utf-8").splitlines()
+        self.assertEqual(rows[-1].split("\t"), [SECRET_KEY, SECRET_VALUE, "名詞", ""])
+        # 取り込んだテキストから組み立てると、Windows 側と同じ digest になる
+        self.build(self.tmp / "o")
+        self.assertEqual(
+            g.dictionary_digest(g.read_dictionary_db(self.tmp / "o" / "user_dictionary.db")), g.dictionary_digest(st)
+        )
+
+    def test_import_with_empty_tables(self):
+        # 設定画面が保存した config1.db (カスタムしていないキー設定が空文字で入っている) を取り込む
+        win = self.tmp / "win"
+        win.mkdir()
+        c = with_general_config(with_empty_tables(cfg(txtpb=MSIME_TXTPB, keymap=None)), 1782652220)
+        (win / "config1.db").write_bytes(g.serialize(c))
+        rc, _, err = run("import", "--windows-dir", str(win), "--config-dir", str(self.conf))
+        self.assertEqual(rc, 0, err)
+        self.assertFalse((self.conf / "keymap.tsv").exists())
+        self.assertFalse((self.conf / "romaji.tsv").exists())
+        self.assertIn("session_keymap: MSIME", (self.conf / "config.txtpb").read_text(encoding="utf-8"))
+        self.assertEqual(g.config_digest(g.read_config_db(win / "config1.db")), g.config_digest(g.build_config(self.conf)))
+
+    def test_import_custom_keymap_with_empty_table_stops(self):
+        # session_keymap が CUSTOM なのに表が空なら、組み立てられないので止まる (何も書かない)
+        win = self.tmp / "win"
+        win.mkdir()
+        c = cfg()
+        c.custom_keymap_table = b""
+        (win / "config1.db").write_bytes(g.serialize(c))
+        before = (self.conf / "keymap.tsv").read_text(encoding="utf-8")
+        rc, _, err = run("import", "--windows-dir", str(win), "--config-dir", str(self.conf))
+        self.assertEqual(rc, 1)
+        self.assertIn("CUSTOM なのに keymap.tsv が無い", err)
+        self.assertEqual((self.conf / "keymap.tsv").read_text(encoding="utf-8"), before)
+
+    def test_import_without_windows_dictionary_keeps_tsv(self):
+        # Windows 側に user_dictionary.db が無ければ、辞書は取り込まない (TSV を消さない)。設定は取り込む
+        win = self.tmp / "win"
+        win.mkdir()
+        (win / "config1.db").write_bytes(g.serialize(cfg(txtpb=TXTPB + "suggestions_size: 7\n")))
+        before = (self.dicts / "ユーザー辞書 1.tsv").read_text(encoding="utf-8")
+        rc, _, err = run("import", "--windows-dir", str(win), "--config-dir", str(self.conf), "--dictionary-dir", str(self.dicts))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((self.dicts / "ユーザー辞書 1.tsv").read_text(encoding="utf-8"), before)
+        self.assertIn(f"{win / 'user_dictionary.db'} が無いので、辞書は取り込みません (TSV はそのまま)", err)
+        self.assertIn("suggestions_size: 7", (self.conf / "config.txtpb").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
