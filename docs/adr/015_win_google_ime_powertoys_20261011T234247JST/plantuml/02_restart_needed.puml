@@ -1,0 +1,40 @@
+@startuml
+' 変換サーバーは config1.db を起動時にしか読まない。置き換えたまま設定画面で OK を押すと、
+' サーバーが覚えている古い設定で置いたファイルが上書きされる。だから置いたら落とす。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequence {
+  ParticipantBorderColor #666666
+  ParticipantBackgroundColor #F7F7F7
+  LifeLineBorderColor #AAAAAA
+}
+skinparam note {
+  BorderColor #AAAAAA
+}
+
+title 置き換えただけでは効かず、古い設定で上書きされうる
+
+participant "setup（WSL）" as S
+participant "config1.db" as F
+participant "変換サーバー\nGoogleIMEJaConverter.exe" as V
+participant "設定画面\nGoogleIMEJaTool.exe" as G
+
+== 置き換えるだけのとき（採らない） ==
+V -> F : 起動時に読む（v1）
+S -> F : v2 に置き換える
+note over V #FFE6CC : メモリは v1 のまま\n（ConfigHandler::Reload は\nコンストラクタでしか呼ばれない）
+G -> V : 開く（GetConfig）
+V --> G : v1 が画面に出る
+G -> V : OK（SetConfig）
+V -> F : v1 + 変更で書く
+note over F #FFE6CC : 置いた v2 が消える
+
+== この ADR の手順 ==
+note over G #D5E8D4 : 設定画面と辞書ツールが\n開いていたら置かずに止まる
+S -> F : v2 を置く（tmp + mv）
+S -> V : taskkill /F
+note over V #D5E8D4 : 落ちる
+... 次のキー入力で、Google 日本語入力のクライアントがサーバーを起動し直す（実機で確かめた） ...
+V -> F : 起動時に読む（v2）
+@enduml
