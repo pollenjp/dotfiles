@@ -11,11 +11,19 @@
 # 全ホストで置く。enable = false でも置くのは、bootstrap が「まだ switch していない
 # (ファイルが無い)」と「このマシンは配らない」を区別できるようにするため
 # (claude-skill-overrides.json が "on" でも書くのと同じ)。
-{ config, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   wsl = config.dotfiles.wsl;
   enable = wsl.windowsFiles.enable;
+  # Google 日本語入力の設定とテキストを行き来させる道具 (ADR 015)。bootstrap-windows-google-ime.sh が
+  # PATH から呼ぶ。win/ を配るマシンでだけ要る
+  googleIme = pkgs.callPackage ../../pkgs/pjp-google-ime { };
 in
 {
   # 階層で表現しきれない「親が false なのに子が true」を評価時に止める (git.nix と同じ)。
@@ -36,6 +44,8 @@ in
       '';
     }
   ];
+
+  home.packages = lib.optional enable googleIme;
 
   home.file.".local/state/dotfiles/windows-files.json".text =
     builtins.toJSON {
