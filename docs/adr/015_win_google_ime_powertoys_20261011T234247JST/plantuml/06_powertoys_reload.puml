@@ -27,7 +27,7 @@ if (前回読み直させたときの記録と同じ?\n（--force なら比べ�
   :何もしない\nexit 0; <<#F7F7F7>>
   stop
 endif
-:powershell.exe -EncodedCommand で\nPowerToys_KeyboardManager_Event_Settings を\nTryOpenExisting → Set();
+:powershell.exe -Command で\nPowerToys_KeyboardManager_Event_Settings を\nTryOpenExisting → Set();
 if (結果) then (送れた)
   :記録する\n「読み直させた」と出す;
 elseif () then (イベントが無い = PowerToys が動いていない)

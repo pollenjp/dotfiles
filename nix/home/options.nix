@@ -225,9 +225,11 @@ in
         `wsl.enable = true` と `windowsUserName` が要る (欠けていれば評価時に止まる)。
 
         switch は Windows 側に触らない。home-manager は配り先を
-        `~/.local/state/dotfiles/windows-files.json` に置くだけで
-        (home/modules/windows-files.nix)、`win/` を読んで /mnt/c へコピーするのは
-        nix/scripts/bootstrap-windows-files.sh。`~/dotfiles/setup --update`
+        `~/.local/state/dotfiles/windows-files.json` に置き、Google 日本語入力の設定を
+        組み立てる `pjp-google-ime` を PATH に入れるだけで (home/modules/windows-files.nix)、
+        `win/` を読んで /mnt/c へコピーするのは nix/scripts/bootstrap-windows-files.sh、
+        Google 日本語入力の設定を組み立てて置くのは nix/scripts/bootstrap-windows-google-ime.sh
+        (docs/adr/015_win_google_ime_powertoys_*)。`~/dotfiles/setup --update`
         (bootstrap まで走る) で揃う。
 
         `win/` を home-manager で読まないのは、ローカル flake が本体を

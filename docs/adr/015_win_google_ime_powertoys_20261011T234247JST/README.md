@@ -326,6 +326,8 @@ WSL から `powershell.exe -EncodedCommand` で `EventWaitHandle.TryOpenExisting
 | `win/google-japanese-input/config.txtpb`・`keymap.tsv` | 新規。この PC の今の設定を `--import` で書き出したもの |
 | `win/powertoys/keyboard-manager/default.json`・`editorSettings.json` | 新規。この PC の今のファイルをそのまま写したもの |
 | `win/manifest.toml` | PowerToys の 2 件を足す |
+| `.gitattributes` | 新規。`win/powertoys/**` の改行を変えない (`-text`) |
+| `.editorconfig` | `win/powertoys/**.json` は末尾に改行を足さない、`editorSettings.json` は CRLF |
 | `win/README.md` | 「Google 日本語入力」「PowerToys」の節 |
 | `nix/pkgs/pjp-google-ime/` | 新規。`default.nix`・`google_ime.py`・`test_google_ime.py`・`proto/` (Mozc の `.proto` の写しと LICENSE) |
 | `nix/home/modules/windows-files.nix` | `windowsFiles.enable` のとき `pjp-google-ime` を `home.packages` に入れる |

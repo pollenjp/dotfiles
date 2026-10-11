@@ -12,7 +12,8 @@
 #
 # 配る中身 (repo 直下の win/) はここでは読まない。ローカル flake は本体を
 # path:<repo>/nix で読むので、この評価から win/ は見えない (ADR 010 §1 の 3)。
-# win/ を読んで /mnt/c へコピーするのは nix/scripts/bootstrap-windows-files.sh。
+# win/ を読んで /mnt/c へコピーするのは nix/scripts/bootstrap-windows-files.sh、Google 日本語入力の
+# 設定を組み立てて置くのは nix/scripts/bootstrap-windows-google-ime.sh。
 #
 # windows-files.json は全ホストで置く。enable = false でも置くのは、bootstrap が
 # 「まだ switch していない (ファイルが無い)」と「このマシンは配らない」を区別できる

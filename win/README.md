@@ -10,6 +10,9 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドは WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
+| `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
+| `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
+| `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 
 ## 配る
 
@@ -290,3 +293,86 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   ```
 
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる
+
+## PowerToys
+
+`powertoys/keyboard-manager/` は PowerToys の Keyboard Manager の割り当てで、manifest で配る。
+IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) は、ここの CapsLock → F13 が前提になっている
+([TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b))。
+
+| ファイル | 中身 |
+| --- | --- |
+| `default.json` | エンジンが読む割り当て。CapsLock (VK 20) → F13 (VK 124)、左 Shift + 英数 (VK 160 + 240) → CapsLock |
+| `editorSettings.json` | 新しいエディタ (WinUI 3) が持つ割り当ての一覧。エンジンは読まない |
+
+- **PowerToys が書いたバイト列のまま置く。** `default.json` は改行の無い 1 行、`editorSettings.json` は
+  CRLF で、どちらも末尾に改行が無い。エディタで同じ内容を保存し直してもバイト列が変わらず、衝突に
+  ならない。`.gitattributes` (改行を変えない) と `.editorconfig` (末尾に改行を足さない・CRLF) で守っている
+- 配ったあと、続く `nix/scripts/bootstrap-windows-powertoys.sh` (order 91) が、名前付きイベント
+  `PowerToys_KeyboardManager_Event_Settings` を `powershell.exe` から送って読み直させる (エンジンは
+  ファイルを見張っていない)。`default.json` の sha256 が前回読み直させたときと同じなら何もしない。
+  PowerToys が動いていなければ、起動したときに読む
+- interop が落ちていて送れないときは、PowerToys の設定 → Keyboard Manager を一度オフにしてオンに戻す
+- エディタで割り当てを変えると、次の `setup --update` が衝突として止まる ([衝突したら](#衝突したら))。
+  `cp` で取り込むときは 2 つとも取り込む
+
+  ```sh
+  d='/mnt/c/Users/<名前>/AppData/Local/Microsoft/PowerToys/Keyboard Manager'
+  cp "${d}/default.json" "${d}/editorSettings.json" win/powertoys/keyboard-manager/
+  ```
+
+## Google 日本語入力
+
+`google-japanese-input/` は Google 日本語入力の設定とキー設定のテキストで、manifest では配らない。
+Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに時刻が入るので、
+`nix/scripts/bootstrap-windows-google-ime.sh` (order 98) がテキストから組み立てて配る
+([ADR 015](../docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)、
+[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b))。
+
+| ファイル | 中身 |
+| --- | --- |
+| `config.txtpb` | キー設定とローマ字テーブル以外の全項目 (句読点・サジェストなど)。protobuf のテキスト形式 |
+| `keymap.tsv` | キー設定。キー設定の画面のエクスポートと同じ形 (MS-IME 風に F13 → IMEOn / IMEOff の行を足してある) |
+| `romaji.tsv` | ローマ字テーブル。カスタムしたときだけ置く (今は無い) |
+
+ユーザー辞書は公開しないので、private な `pollenjp/dotfiles-private` の
+`google-japanese-input/dictionaries/<名前>.tsv` (辞書ツールのエクスポートと同じ形) に置く。
+`nix/scripts/bootstrap-dotfiles-private.sh` (order 50) が `$(ghq root)/github.com/pollenjp/dotfiles-private`
+へ clone / pull する。取れないマシンでは辞書だけ飛ばす。
+
+| 打つもの | すること |
+| --- | --- |
+| `nix/scripts/bootstrap-windows-google-ime.sh` | 組み立てて配る (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-google-ime.sh --dry-run` | 判定だけ見る |
+| `nix/scripts/bootstrap-windows-google-ime.sh --import` | 画面で変えた分を、テキストへ取り込む |
+| `nix/scripts/bootstrap-windows-google-ime.sh --force` | 衝突でも repo の中身で置き直す |
+| `nix/scripts/bootstrap-windows-google-ime.sh --check` | テキストの検証だけ (CI の lint でも走る) |
+
+- 比べるのは、時刻・版・OS (`general_config`) と辞書の id・並びを外した中身 (`pjp-google-ime digest`)。
+  画面で OK を押しただけなら衝突にならない
+- 置いたら `taskkill.exe /F` で変換サーバー (`GoogleIMEJaConverter.exe`) を落とす。次のキー入力で
+  起動し直し、置いた設定を読む。変換サーバーは設定を起動時にしか読まず、落とさないまま設定画面で
+  OK を押すと、置いた設定が古い設定で上書きされるため
+- 直接入力モードのキー (F13 → IMEOn など) を変えたときは、アプリを起動し直すと効く
+- 設定画面か辞書ツール (`GoogleIMEJaTool.exe`) が開いていると、閉じるよう出して止まる (exit 1)。
+  interop が落ちていると置かない (exit 0)
+- 置き換える前のファイルは `~/.local/state/dotfiles/google-japanese-input/backup/<時刻>/` に退避する
+  (新しい方から 10 回分)
+- 画面で変えたら、次の `setup --update` が衝突として diff を出して止まる。`--import` で取り込み、
+  `git diff` を見て、dotfiles と dotfiles-private の両方で commit する
+- テキストは画面のエクスポートと同じ形なので、仕組みが動かないときも、GUI の「インポート」で手で戻せる
+
+### pjp-google-ime
+
+テキストとバイナリを行き来させる CLI (`nix/pkgs/pjp-google-ime/`)。`windowsFiles.enable` のマシンでは
+home-manager が PATH に入れる。Windows には触らない。
+
+```sh
+pjp-google-ime check --config-dir win/google-japanese-input     # 検証だけ
+pjp-google-ime decode --kind config <config1.db> --out <dir>    # バイナリをテキストに戻す
+pjp-google-ime digest --kind config <config1.db>                # 比べるための sha256
+```
+
+- Mozc の `.proto` の写しは `nix/pkgs/pjp-google-ime/proto/` にある (写した commit と、新しくする手順は
+  そこの README)。新しい版の Google 日本語入力が項目を足すと、`--import` が止まって知らせる
+- テストは `nix build ./nix#checks.x86_64-linux.pjp-google-ime-unittest`

@@ -18,7 +18,7 @@
 # ## 何を読むか
 #
 # - ~/.local/state/dotfiles/windows-files.json (home-manager が置く。ADR 010)。配り先と on / off
-# - この script がいる checkout の win/google-japanese-input/ (config.txtpb・keymap.tsv・romaji.tsv)
+# - この script がいる checkout の win/google-japanese-input/ (config.txtpb・keymap.tsv・あれば romaji.tsv)
 # - pollenjp/dotfiles-private の clone の google-japanese-input/dictionaries/ (無ければ辞書は飛ばす)。
 #   clone の場所は bootstrap-dotfiles-private.sh と同じ決め方 ($DOTFILES_PRIVATE_DIR →
 #   $(ghq root)/github.com/pollenjp/dotfiles-private → ~/ghq/github.com/pollenjp/dotfiles-private)
