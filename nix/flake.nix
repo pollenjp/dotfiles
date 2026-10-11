@@ -148,13 +148,18 @@
                 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
                 touch $out
               '';
+          # 偽の repo と dotfiles-private を git の checkout にし、build では作れない形の辞書
+          # (単語登録で足した語など) を protobuf の入った python で組む
           bootstrap-windows-google-ime-test =
             pkgs.runCommand "bootstrap-windows-google-ime-test"
               {
                 nativeBuildInputs = [
                   pkgs.jq
+                  pkgs.git
                   googleIme
+                  googleIme.python
                 ];
+                PJP_GOOGLE_IME_DESCRIPTORS = googleIme.descriptors;
               }
               ''
                 bash ${./tests/bootstrap-windows-google-ime.test.sh} ${./scripts/bootstrap-windows-google-ime.sh}

@@ -7,7 +7,8 @@
 #   bash nix/tests/bootstrap-windows-google-ime.test.sh [<script のパス>]
 #
 # flake の checks (bootstrap-windows-google-ime-test) が Nix のサンドボックスで流す。
-# 使うのは bash・jq・coreutils・findutils・diffutils・grep・sed と、PATH の pjp-google-ime だけ。
+# 使うのは bash・jq・git・coreutils・findutils・diffutils・grep・sed と、PATH の pjp-google-ime、
+# protobuf の入った python3 (辞書のファイルを組む。記述子は PJP_GOOGLE_IME_DESCRIPTORS で受け取る)。
 #
 # ## 確かめること
 #
@@ -16,8 +17,17 @@
 #   - 壊れたテキストは何も置かずに exit 1 (行番号を出す)
 #   - 4 通りの判定 (置く・同じ・repo 側が進んだ・衝突)、画面で保存しただけ (時刻だけ違う) は「同じ」
 #   - 置いたときだけ taskkill.exe /F で変換サーバーを落とす。動いていない (128) のは成功扱い
+#   - 落とせなかったら印を残し、次の回が置くものが無くても落とし直す (--dry-run は印に触らない)
 #   - 退避は新しい方から 10 回分。--force / --dry-run / --import / --check
+#   - --import と --dry-run は一緒に使えない。--import は commit していない変更があると止まる
 #   - 辞書のテキストが無ければ辞書は飛ばす (Windows 側の辞書を消さない)
+#   - 単語登録の形の辞書 (comment の無い語) も取り込め、取り込んだ後は「同じ」
+#   - 辞書の衝突は語を出さず、辞書ごとの行の数だけを出す (--show-words で diff)
+#
+# ## 偽の repo と dotfiles-private
+#
+# どちらも git の checkout にする (--import が commit していない変更を確かめるため)。git は
+# 使い捨ての設定で動かし、偽の HOME より上の repo を拾わない (GIT_CEILING_DIRECTORIES)。
 #
 # ## 本物の Windows のコマンドを見せない
 #
@@ -37,6 +47,9 @@ here=$(
 script=${1:-${here}/../scripts/bootstrap-windows-google-ime.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-windows-google-ime-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
+
+export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CEILING_DIRECTORIES="${work}"
 
 pass=0
 fail=0
@@ -62,7 +75,7 @@ dict=$'てすと\tテスト\t名詞\t\n'
 # 要るコマンドだけを並べた PATH (tasklist.exe と taskkill.exe は入れない)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env jq grep sed tr cat head tail mkdir mktemp mv rm cp dirname basename chmod date sort find diff timeout pjp-google-ime; do
+for c in env jq grep sed tr cat head tail mkdir mktemp mv rm cp dirname basename chmod date sort find diff cmp comm wc timeout git python3 pjp-google-ime; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -75,9 +88,9 @@ done
 #   $3: 1 なら Google 日本語入力が入っている (ディレクトリがある) 状態にする
 # 配り先 (Windows のホームに見立てる) は <HOME>/win。repo は <HOME>/repo、dotfiles-private は <HOME>/private。
 new_home() {
-  local h="${work}/$1"
+  local h="${work}/$1" d
   mkdir -p "${h}/.local/state/dotfiles" "${h}/bin" "${h}/win" "${h}/repo/nix/scripts" \
-    "${h}/repo/win/google-japanese-input" "${h}/private/.git" "${h}/private/google-japanese-input/dictionaries"
+    "${h}/repo/win/google-japanese-input" "${h}/private/google-japanese-input/dictionaries"
   if [[ -n $2 ]]; then
     printf '%s\n' "${2//@WIN@/${h}/win}" >"${h}/.local/state/dotfiles/windows-files.json"
   fi
@@ -88,6 +101,12 @@ new_home() {
   printf '%s' "${txtpb}" >"${h}/repo/win/google-japanese-input/config.txtpb"
   printf '%s' "${keymap}" >"${h}/repo/win/google-japanese-input/keymap.tsv"
   printf '%s' "${dict}" >"${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv"
+  # 偽の repo と dotfiles-private は、最初の中身を commit した git の checkout にする
+  for d in "${h}/repo" "${h}/private"; do
+    git -C "${d}" init --quiet -b main
+    git -C "${d}" add -A
+    git -C "${d}" commit --quiet -m init
+  done
   # 偽の tasklist.exe。FAKE_TOOL_RUNNING があれば設定画面が開いている行を、無ければ (日本語の) 見つからない行を出す
   {
     printf '#!%s\n' "${BASH}"
@@ -142,6 +161,56 @@ put_windows() {
   pjp-google-ime build --config-dir "${d}/conf" --out "${d}/out" >/dev/null
   cp "${d}/out/config1.db" "$(ime "$1")/config1.db"
 }
+
+# Windows 側の辞書を、TSV から組み立てたものにする (画面で語を足した・消したことに見立てる)。
+# $1: HOME、残り: 「辞書の名前=TSV の中身」
+put_windows_dictionaries() {
+  local h=$1 d="${work}/gui-$$-${RANDOM}" kv
+  shift
+  mkdir -p "${d}/conf" "${d}/dicts"
+  printf '%s' "${txtpb}" >"${d}/conf/config.txtpb"
+  printf '%s' "${keymap}" >"${d}/conf/keymap.tsv"
+  for kv in "$@"; do
+    printf '%s' "${kv#*=}" >"${d}/dicts/${kv%%=*}.tsv"
+  done
+  pjp-google-ime build --config-dir "${d}/conf" --dictionary-dir "${d}/dicts" --out "${d}/out" >/dev/null
+  cp "${d}/out/user_dictionary.db" "$(ime "${h}")/user_dictionary.db"
+}
+
+# protobuf で Windows 側の辞書を組む (pjp-google-ime build では作れない形)。辞書は「テスト辞書」1 つで、
+# 表で編集した語 (コメントが空でも comment を入れる) の「てすと」を持つ。$1: HOME、$2 は足すもの:
+#   wordreg  単語登録ダイアログで足した語 (comment を入れない。Mozc の WordRegisterDialog::SaveEntry)
+#   version  TSV に出ない項目 (UserDictionaryStorage の version)
+put_windows_proto_dictionary() {
+  python3 -I - "$(ime "$1")/user_dictionary.db" "$2" <<'EOF'
+import os
+import sys
+
+from google.protobuf import descriptor_pb2, descriptor_pool, message_factory
+
+with open(os.environ["PJP_GOOGLE_IME_DESCRIPTORS"], "rb") as f:
+    fds = descriptor_pb2.FileDescriptorSet.FromString(f.read())
+pool = descriptor_pool.DescriptorPool()
+for f in fds.file:
+    pool.Add(f)
+storage = message_factory.GetMessageClass(pool.FindMessageTypeByName("mozc.user_dictionary.UserDictionaryStorage"))()
+d = storage.dictionaries.add()
+d.id = 11262860659733797146  # 画面で作った辞書のような乱数の id
+d.name = "テスト辞書"
+e = d.entries.add()
+e.key, e.value, e.comment, e.pos = "てすと", "テスト", "", 1  # 1 = 名詞
+if sys.argv[2] == "wordreg":
+    e = d.entries.add()
+    e.key, e.value, e.pos = "かくうのよみ", "架空の単語", 1
+else:
+    storage.version = 1
+with open(sys.argv[1], "wb") as out:
+    out.write(storage.SerializeToString(deterministic=True))
+EOF
+}
+
+pending_of() { echo "$1/.local/state/dotfiles/google-japanese-input/restart-pending"; }
+tsv_of() { echo "$1/private/google-japanese-input/dictionaries/$2.tsv"; }
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
 state_off='{"enable":false,"version":1,"windowsHome":null}'
@@ -276,6 +345,8 @@ else
 fi
 
 # 14. --import: Windows 側をテキストへ取り込み、記録を合わせる。次は同じ
+# (11 で進めた repo 側を先に commit する。commit していない変更があると --import は止まる)
+git -C "${h}/repo" commit --quiet -am 'repo 側を進めた'
 run "${h}" 0 --import
 imported_rc=$(rc "${h}")
 run "${h}" 0
@@ -388,6 +459,171 @@ if [[ $(rc "${h}") == 2 ]] && ! killed "${h}"; then
   ok "知らない引数は exit 2"
 else
   ng "知らない引数" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 24. 単語登録の形の辞書 (comment の無い語) が Windows 側にある: 衝突になり、--import が通り、
+#     次の実行は 2 つとも「同じです」。取り込んだ語の 4 列目 (コメント) は空
+h=$(new_home t24 "${state_on}" 1)
+if [[ -z ${PJP_GOOGLE_IME_DESCRIPTORS:-} ]]; then
+  ng "単語登録の形の辞書" "PJP_GOOGLE_IME_DESCRIPTORS が無い (flake の check から流す)"
+else
+  put_windows "${h}" "${keymap}"
+  put_windows_proto_dictionary "${h}" wordreg
+  run "${h}" 0
+  conflict_rc=$(rc "${h}")
+  run "${h}" 0 --import
+  import_rc=$(rc "${h}")
+  import_log=$(outerr "${h}")
+  run "${h}" 0
+  if [[ ${conflict_rc} == 1 && ${import_rc} == 0 && $(rc "${h}") == 0 && $(outerr "${h}" | grep -c '^同じです: ') == 2 ]] \
+    && grep -qxF $'かくうのよみ\t架空の単語\t名詞\t' "$(tsv_of "${h}" テスト辞書)" && ! killed "${h}"; then
+    ok "単語登録の形の辞書 (comment の無い語) も --import で取り込め、次の実行は 2 つとも同じになる"
+  else
+    ng "単語登録の形の辞書" "conflict_rc=${conflict_rc} import_rc=${import_rc} rc=$(rc "${h}") ${import_log} $(outerr "${h}")"
+  fi
+fi
+
+# 25. 変換サーバーを落とせなかった: 印を残して exit 1。次の回は 2 つとも「同じです」でも落とし直して
+#     印を消し、その次の回は落とさない
+h=$(new_home t25 "${state_on}" 1)
+FAKE_TASKKILL_RC=1 run "${h}" 0
+r1="rc=$(rc "${h}") kills=$(nkills "${h}") pending=$([[ -e $(pending_of "${h}") ]] && echo yes || echo no)"
+log1=$(outerr "${h}")
+run "${h}" 0
+r2="rc=$(rc "${h}") kills=$(nkills "${h}") same=$(outerr "${h}" | grep -c '^同じです: ') pending=$([[ -e $(pending_of "${h}") ]] && echo yes || echo no)"
+log2=$(outerr "${h}")
+run "${h}" 0
+r3="rc=$(rc "${h}") kills=$(nkills "${h}")"
+if [[ ${r1} == "rc=1 kills=1 pending=yes" && ${r2} == "rc=0 kills=2 same=2 pending=no" && ${r3} == "rc=0 kills=2" ]] \
+  && grep -q '次の setup でも落とし直します' <<<"${log1}" && grep -q '前回は変換サーバーを落とせなかったので、落とし直します' <<<"${log2}"; then
+  ok "変換サーバーを落とせなければ印を残し、次の回は置くものが無くても落とし直して印を消す"
+else
+  ng "落とし直しの印" "1: ${r1} / 2: ${r2} / 3: ${r3}"$'\n'"${log1}"$'\n'"${log2}"
+fi
+
+# 26. 印がある回の --dry-run・interop が使えない回・--import は、印に触らず落とさない。
+#     印がある回の衝突には、古い設定が書き戻されたものかもしれないと添える
+h=$(new_home t26 "${state_on}" 1)
+FAKE_TASKKILL_RC=1 run "${h}" 0
+run "${h}" 0 --dry-run
+dry="rc=$(rc "${h}") kills=$(nkills "${h}")"
+dry_log=$(outerr "${h}")
+FAKE_TASKLIST_RC=126 run "${h}" 0
+nointerop="rc=$(rc "${h}") kills=$(nkills "${h}")"
+run "${h}" 0 --import
+imported="rc=$(rc "${h}") kills=$(nkills "${h}")"
+if [[ ${dry} == "rc=0 kills=1" && ${nointerop} == "rc=0 kills=1" && ${imported} == "rc=0 kills=1" && -e $(pending_of "${h}") ]] \
+  && grep -qF '[dry-run] 変換サーバーを落とし直します (前回落とせなかった)' <<<"${dry_log}"; then
+  ok "印がある回の --dry-run・interop が使えない回・--import は、印を残して落とさない"
+else
+  ng "印と --dry-run" "dry: ${dry} / interop: ${nointerop} / import: ${imported}"$'\n'"${dry_log}"
+fi
+put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
+run "${h}" 0 --dry-run
+if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '前回は変換サーバーを落とせていません。この差は、古い設定が書き戻されたものかもしれません'; then
+  ok "印がある回の衝突には、古い設定の書き戻しかもしれないと添える"
+else
+  ng "印がある回の衝突" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 27. --import は、repo 側に commit していない変更 (未追跡のファイルも) があると、何も書かずに exit 1。
+#     git の checkout か確かめられないときも止まる。記録も変えない
+h=$(new_home t27 "${state_on}" 1)
+run "${h}" 0
+rec="${h}/.local/state/dotfiles/google-japanese-input/deployed.json"
+cp "${rec}" "${h}/rec.before"
+put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
+printf 'Composition\tF14\tIMEOff\n' >>"${h}/repo/win/google-japanese-input/keymap.tsv"
+cp "${h}/repo/win/google-japanese-input/keymap.tsv" "${h}/keymap.before"
+run "${h}" 0 --import
+if [[ $(rc "${h}") == 1 ]] && cmp -s "${h}/keymap.before" "${h}/repo/win/google-japanese-input/keymap.tsv" && cmp -s "${h}/rec.before" "${rec}" \
+  && outerr "${h}" | grep -q 'google-japanese-input に commit していない変更があります' && outerr "${h}" | grep -q 'M keymap.tsv'; then
+  ok "--import は repo に commit していない変更があると、何も書かずに exit 1 (変わったファイルを出す)"
+else
+  ng "--import と未コミットの変更" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+git -C "${h}/repo" checkout --quiet -- win/google-japanese-input/keymap.tsv
+printf 'あ\t亜\t名詞\t\n' >"$(tsv_of "${h}" 新しい辞書)"
+run "${h}" 0 --import
+if [[ $(rc "${h}") == 1 && -f $(tsv_of "${h}" 新しい辞書) ]] && cmp -s "${h}/rec.before" "${rec}" \
+  && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" \
+  && outerr "${h}" | grep -q 'dictionaries に commit していない変更があります'; then
+  ok "--import は dotfiles-private に未追跡の TSV があると、何も書かずに exit 1"
+else
+  ng "--import と未追跡の TSV" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+rm -f "$(tsv_of "${h}" 新しい辞書)"
+rm -rf "${h}/private/.git"
+run "${h}" 0 --import
+if [[ $(rc "${h}") == 1 && -f $(tsv_of "${h}" テスト辞書) ]] && cmp -s "${h}/rec.before" "${rec}" \
+  && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" && outerr "${h}" | grep -q '確かめられません'; then
+  ok "--import は git の checkout か確かめられなければ、何も書かずに exit 1"
+else
+  ng "--import と checkout でない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 28. 辞書の衝突: 語は stdout にも stderr にも出さず、辞書ごとの行の数だけを出す。--show-words なら diff を出す
+h=$(new_home t28 "${state_on}" 1)
+w_secret=$'ひみつのよみ\t秘密の単語\t名詞\t\n'
+w_one=$'いちのよみ\t一の単語\t名詞\t\n'
+w_two=$'にのよみ\t二の単語\t名詞\t\n'
+w_out=$'そとのよみ\t外の単語\t名詞\t\nそとのよみに\t外の単語に\t名詞\t\n'
+w_in=$'うちのよみ\t内の単語\t名詞\t\n'
+printf '%s' "${w_in}" >"$(tsv_of "${h}" 手元の辞書)"
+printf '%s' "${w_one}${w_two}" >"$(tsv_of "${h}" 並びの辞書)"
+put_windows "${h}" "${keymap}"
+put_windows_dictionaries "${h}" "テスト辞書=${dict}${w_secret}" "並びの辞書=${w_two}${w_one}" "窓の辞書=${w_out}"
+run "${h}" 0
+leaked=""
+for w in てすと ひみつのよみ 秘密の単語 いちのよみ 一の単語 にのよみ 二の単語 そとのよみ 外の単語 うちのよみ 内の単語; do
+  if outerr "${h}" | grep -qF "${w}"; then
+    leaked+=" ${w}"
+  fi
+done
+if [[ $(rc "${h}") == 1 && -z ${leaked} ]] \
+  && outerr "${h}" | grep -qF '辞書「テスト辞書」: Windows 側にだけある行 1・repo 側にだけある行 0' \
+  && outerr "${h}" | grep -qF '辞書「並びの辞書」: 行は同じで、並びだけが違う' \
+  && outerr "${h}" | grep -qF '辞書「手元の辞書」: repo 側にだけある (1 語)' \
+  && outerr "${h}" | grep -qF '辞書「窓の辞書」: Windows 側にだけある (2 語)' \
+  && outerr "${h}" | grep -qF -- '--dry-run --show-words'; then
+  ok "辞書の衝突は語を出さず、辞書ごとの行の数と --show-words の案内だけを出す"
+else
+  ng "辞書の衝突の件数" "rc=$(rc "${h}") leaked=${leaked:-(なし)} $(outerr "${h}")"
+fi
+run "${h}" 0 --dry-run --show-words
+if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '^-ひみつのよみ' && ! killed "${h}"; then
+  ok "--show-words を付けると、辞書の衝突でも語の diff を出す"
+else
+  ng "--show-words" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 29. 辞書の TSV に出ない項目だけが違う: 件数の行は無く、どの辞書も TSV は同じと出す
+h=$(new_home t29 "${state_on}" 1)
+if [[ -z ${PJP_GOOGLE_IME_DESCRIPTORS:-} ]]; then
+  ng "TSV に出ない項目だけが違う" "PJP_GOOGLE_IME_DESCRIPTORS が無い (flake の check から流す)"
+else
+  put_windows "${h}" "${keymap}"
+  put_windows_proto_dictionary "${h}" version
+  run "${h}" 0
+  if [[ $(rc "${h}") == 1 ]] && ! outerr "${h}" | grep -q '辞書「' \
+    && outerr "${h}" | grep -qF 'どの辞書も TSV に出る中身は同じです (TSV に出ない項目だけが違う)'; then
+    ok "辞書の TSV に出ない項目だけが違うときは、どの辞書も TSV は同じと出す"
+  else
+    ng "TSV に出ない項目だけが違う" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
+fi
+
+# 30. config.txtpb が無い: --check は確かめるテキストが無いので exit 1。普段の回は飛ばして exit 0
+h=$(new_home t30 "" 0)
+rm "${h}/repo/win/google-japanese-input/config.txtpb"
+run "${h}" 1 --check
+check_rc=$(rc "${h}")
+check_log=$(outerr "${h}")
+run "${h}" 1
+if [[ ${check_rc} == 1 && $(rc "${h}") == 0 ]] && grep -q 'config.txtpb' <<<"${check_log}" && outerr "${h}" | grep -q '飛ばします'; then
+  ok "--check は config.txtpb が無ければ exit 1 (普段の回は飛ばして exit 0)"
+else
+  ng "--check と config.txtpb が無い" "check_rc=${check_rc} rc=$(rc "${h}") ${check_log} $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
