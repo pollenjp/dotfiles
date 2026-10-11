@@ -160,6 +160,7 @@
                 bash ${./tests/bootstrap-windows-google-ime.test.sh} ${./scripts/bootstrap-windows-google-ime.sh}
                 touch $out
               '';
+          bootstrap-dotfiles-private-test = scriptTest "bootstrap-dotfiles-private" ./scripts/bootstrap-dotfiles-private.sh;
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
