@@ -1,7 +1,8 @@
 @startuml
 ' bootstrap-windows-google-ime.sh の流れと、ファイルごとの判定。
 ' 比べる中身 (digest) は、config1.db は general_config を、辞書は辞書の id と並びを外して
-' 直列化した sha256。
+' 直列化した sha256。空のコメントと空の表は「無い」と同じに扱う。
+' 落とし直しの印 (restart-pending) は、置いたのに変換サーバーを落とせていない間だけある。
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontName "Noto Sans CJK JP"
 skinparam shadowing false
@@ -28,7 +29,7 @@ if (Google 日本語入力の\nディレクトリがある?) then (無い)
   stop
 endif
 if (interop が使える?) then (使えない)
-  :再起動できないので置かない\n手で打つことを出して exit 0; <<#F7F7F7>>
+  :再起動できないので置かない\n手で打つことを出して exit 0\n（落とし直しの印は残す）; <<#F7F7F7>>
   stop
 endif
 if (設定画面・辞書ツール\n（GoogleIMEJaTool.exe）が開いている?) then (開いている)
@@ -37,7 +38,7 @@ if (設定画面・辞書ツール\n（GoogleIMEJaTool.exe）が開いている?
 endif
 :pjp-google-ime build\nwin/google-japanese-input/ と\ndotfiles-private の辞書から組み立てる;
 if (検証が通る?\n（読み直すと元のテキストに戻る・\n列の数・状態名・品詞名）) then (通らない)
-  :壊れている行を出す\n何も書かずに exit 1; <<#FFE6CC>>
+  :壊れている行を出す\n（辞書は語を出さず、行と列だけ）\n何も書かずに exit 1; <<#FFE6CC>>
   stop
 endif
 partition "ファイルごと（config1.db・user_dictionary.db）" {
@@ -50,21 +51,28 @@ partition "ファイルごと（config1.db・user_dictionary.db）" {
   elseif (--force?) then (あり)
     :退避してから置く;
   else (無し = 画面で変えた\nか、記録が無い)
-    :衝突\ndecode したテキストの diff を出す; <<#FFE6CC>>
+    :衝突\n設定は decode したテキストの diff、\n辞書は辞書ごとの行の数を出す\n（語の diff は ~--show-words のときだけ）; <<#FFE6CC>>
   endif
 }
-if (置いたものがある?) then (ある)
+if (置いたものがある?\n落とし直しの印がある?) then (どちらか)
   :taskkill /F で変換サーバーを落とす\n（次のキー入力で起き直し、新しい中身を読む）;
+  if (落とせた?\n（終了コード 0 か 128）) then (落とせた)
+    :落とし直しの印を消す; <<#F7F7F7>>
+  else (落とせない)
+    :印を残して exit 1\n（次の回は、置くものが無くても落とし直す）; <<#FFE6CC>>
+    stop
+  endif
 endif
 :衝突があれば exit 1\n（~--import で取り込むか ~--force で上書き）;
 stop
 
 legend right
   |<#D5E8D4> Windows 側に書く・落とす |
-  |<#F7F7F7> 何も書かない |
+  |<#F7F7F7> Windows 側には何も書かない |
   |<#FFE6CC> 止まる・衝突 |
-  置くのは同じディレクトリの一時ファイルから mv
-  退避先: $HOME/.local/state/dotfiles/google-japanese-input/backup/<時刻>/（新しい方から 10 回分）
-  --dry-run は判定だけ出し、どの分岐でも書かない
+  置くのは同じディレクトリの一時ファイルから mv。最初に置く直前に落とし直しの印を置く
+  退避先: $HOME/.local/state/dotfiles/google-japanese-input/backup/<UTC の時刻>-<pid>/（新しい方から 10 回分）
+  落とし直しの印: $HOME/.local/state/dotfiles/google-japanese-input/restart-pending
+  --dry-run は判定だけ出し、どの分岐でも書かない（印があれば「落とし直す」と出すだけ）
 endlegend
 @enduml

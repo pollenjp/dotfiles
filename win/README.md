@@ -53,7 +53,9 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 ## 衝突したら
 
 Windows 側でファイルが変わっていた (アプリの設定画面で変えた、など) と、上書きせずに
-diff を出して止まる。`setup --update` ではこの手順だけ失敗する (最後に走るので、ほかは止めない)。
+diff を出して止まる。`setup --update` はこの手順 (order 90) で失敗して止まる。前の手順は済んで
+いるが、後ろの bootstrap (91〜98) と exe-exec-trace、最後の「残りの手作業」は、直して流し直す
+まで走らない。
 
 ```sh
 # Windows 側の変更を残す: win/ へ取り込んで流し直す (中身が揃うので記録だけ更新される)
@@ -331,8 +333,8 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 
 | ファイル | 中身 |
 | --- | --- |
-| `config.txtpb` | キー設定とローマ字テーブル以外の全項目 (句読点・サジェストなど)。protobuf のテキスト形式 |
-| `keymap.tsv` | キー設定。キー設定の画面のエクスポートと同じ形 (MS-IME 風に F13 → IMEOn / IMEOff の行を足してある) |
+| `config.txtpb` | キー設定・ローマ字テーブルと、時刻・版・OS (`general_config`。Google 日本語入力が保存のたびに入れる) を除いた全項目 (句読点・サジェストなど)。protobuf のテキスト形式 |
+| `keymap.tsv` | キー設定。キー設定の画面のエクスポートと同じ形 (MS-IME 風に F13 → IMEOn / IMEOff の行を足してある)。カスタムしていなければ置かない |
 | `romaji.tsv` | ローマ字テーブル。カスタムしたときだけ置く (今は無い) |
 
 ユーザー辞書は公開しないので、private な `pollenjp/dotfiles-private` の
@@ -344,22 +346,44 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 | --- | --- |
 | `nix/scripts/bootstrap-windows-google-ime.sh` | 組み立てて配る (`setup --update` でも毎回走る) |
 | `nix/scripts/bootstrap-windows-google-ime.sh --dry-run` | 判定だけ見る |
+| `nix/scripts/bootstrap-windows-google-ime.sh --dry-run --show-words` | 辞書の衝突でも語の diff を出す。自分の端末で打つ (Claude などのログに残る場所では流さない) |
 | `nix/scripts/bootstrap-windows-google-ime.sh --import` | 画面で変えた分を、テキストへ取り込む |
 | `nix/scripts/bootstrap-windows-google-ime.sh --force` | 衝突でも repo の中身で置き直す |
-| `nix/scripts/bootstrap-windows-google-ime.sh --check` | テキストの検証だけ (CI の lint でも走る) |
+| `nix/scripts/bootstrap-windows-google-ime.sh --check` | テキストの検証だけ (CI の lint でも走る。`config.txtpb` が無ければ exit 1) |
 
 - 比べるのは、時刻・版・OS (`general_config`) と辞書の id・並びを外した中身 (`pjp-google-ime digest`)。
-  画面で OK を押しただけなら衝突にならない
+  画面で OK を押しただけなら衝突にならない。空のコメントと空の表も「無い」と同じに扱う (単語登録
+  ダイアログで足した語は、コメントが空だとコメントの項目を持たず、設定画面はカスタムしていない
+  キー設定も空文字で入れるため)
 - 置いたら `taskkill.exe /F` で変換サーバー (`GoogleIMEJaConverter.exe`) を落とす。次のキー入力で
   起動し直し、置いた設定を読む。変換サーバーは設定を起動時にしか読まず、落とさないまま設定画面で
   OK を押すと、置いた設定が古い設定で上書きされるため
+- 落とせなかったら exit 1 にし、落とし直しの印 (`~/.local/state/dotfiles/google-japanese-input/restart-pending`)
+  を残す。次の `setup --update` は、置くものが無くても印があれば落とし直し、落とせたら印を消す。
+  印がある回の衝突は、古い設定が書き戻されたものかもしれない (repo 側を残すなら `--force`)
 - 直接入力モードのキー (F13 → IMEOn など) を変えたときは、アプリを起動し直すと効く
 - 設定画面か辞書ツール (`GoogleIMEJaTool.exe`) が開いていると、閉じるよう出して止まる (exit 1)。
-  interop が落ちていると置かない (exit 0)
-- 置き換える前のファイルは `~/.local/state/dotfiles/google-japanese-input/backup/<時刻>/` に退避する
-  (新しい方から 10 回分)
-- 画面で変えたら、次の `setup --update` が衝突として diff を出して止まる。`--import` で取り込み、
-  `git diff` を見て、dotfiles と dotfiles-private の両方で commit する
+  interop が落ちていると置かない (exit 0。落とし直しの印は残る)。`--import` と `--dry-run` は一緒に
+  使えない (exit 2)
+- 置き換える前のファイルは `~/.local/state/dotfiles/google-japanese-input/backup/<UTC の時刻>-<pid>/` に
+  退避する (新しい方から 10 回分)。退避から戻すときは:
+  1. 設定画面と辞書ツールを閉じる
+  2. 退避したファイルを IME のディレクトリ (`%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input`。
+     WSL からは `/mnt/c/Users/<名前>/AppData/LocalLow/Google/Google Japanese Input`) へ `cp` する
+  3. `taskkill.exe /F /IM GoogleIMEJaConverter.exe` で変換サーバーを落とす (次のキー入力で起き直して読む)
+
+  戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
+- 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
+  済んでいるが、後ろの exe-exec-trace と最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
+  出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
+  など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
+- `--import` で取り込み、`git diff` を見て、dotfiles と dotfiles-private の両方で commit する
+  - `--import` は repo のテキストを Windows 側の中身で置き換える (diff の + の行は消える)。両方を
+    残すなら、テキストを手で直してから `--force`
+  - repo 側 (`win/google-japanese-input/` と dotfiles-private の辞書) に commit していない変更 (未追跡の
+    ファイルも) があると、変わったファイル名を出して何も書かずに止まる (exit 1)。先に commit するか、
+    戻してから流し直す。git の checkout か確かめられないときも止まる
+  - Windows 側に `user_dictionary.db` が無ければ、辞書は取り込まない (TSV はそのまま)
 - テキストは画面のエクスポートと同じ形なので、仕組みが動かないときも、GUI の「インポート」で手で戻せる
 
 ### pjp-google-ime
@@ -375,4 +399,6 @@ pjp-google-ime digest --kind config <config1.db>                # 比べるた�
 
 - Mozc の `.proto` の写しは `nix/pkgs/pjp-google-ime/proto/` にある (写した commit と、新しくする手順は
   そこの README)。新しい版の Google 日本語入力が項目を足すと、`--import` が止まって知らせる
+- 辞書の TSV のエラーは、ファイル・行・列の数・どの列が悪いかまでを出し、読み・単語・品詞・コメントの
+  中身は出さない (列がずれると品詞の列に語が入るので、品詞の値も出さない)
 - テストは `nix build ./nix#checks.x86_64-linux.pjp-google-ime-unittest`

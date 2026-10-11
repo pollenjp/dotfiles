@@ -188,6 +188,7 @@ jobs:
 
       # win/google-japanese-input/ のテキストの検証 (ADR 015)。flake からは win/ が見えないので
       # checkout の上で流す。組み立てる道具 (pjp-google-ime) は nix shell で借りる。
+      # CI で確かめるのは config.txtpb と keymap.tsv だけ (辞書は private repo にあり、ランナーに無い)。
       - name: win/google-japanese-input/
         run: nix shell ./nix#pjp-google-ime --command ./nix/scripts/bootstrap-windows-google-ime.sh --check
 

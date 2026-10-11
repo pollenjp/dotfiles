@@ -584,12 +584,12 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
-| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、ほかの bootstrap を止めない |
+| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜98 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた PowerToys の `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときの exit 1 で、ほかの bootstrap を止めない |
+| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -1022,6 +1022,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
@@ -1061,15 +1062,16 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # 配った PowerToys の割り当てを Keyboard Manager に読み直させる部分だけ
-./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check）
+./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ```
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
   それ以外は「このマシンは Windows 側へ配りません」と言って exit 0
 - 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
 - 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
-  sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（order 90 なので止まるのは
-  この手順だけ）。取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
+  sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（setup はこの手順で止まり、後ろの
+  91〜98 の bootstrap と exe-exec-trace、最後の「残りの手作業」は流し直すまで走らない）。
+  取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
 - 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
   設定画面の「ディスクから再読み込み」が要る
 - PowerShell の共有設定 (`win/powershell/dotfiles.ps1`) は、続く `bootstrap-windows-powershell-profile.sh`
@@ -1081,6 +1083,10 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   組み立て、時刻を除いた中身で比べて配り、変換サーバーを落として読み直させる。辞書は private な
   dotfiles-private (`bootstrap-dotfiles-private.sh`) から取る（[`win/README.md`](../win/README.md#google-日本語入力)、
   [ADR 015](../docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)）
+  - 衝突で出すのは、設定は diff、辞書は辞書ごとの行の数だけ (辞書の語は setup の出力に出さない。
+    語の diff は自分の端末で `--dry-run --show-words`)
+  - 変換サーバーを落とせなかったら落とし直しの印を残し、次の回が置くものが無くても落とし直す
+  - `--import` は、repo 側に commit していない変更があると何も書かずに止まる
 
 経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
@@ -2298,7 +2304,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
@@ -2345,15 +2351,18 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
 | `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
-| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128)。偽の `tasklist.exe` と `taskkill.exe` で流す（23 件） | `bootstrap-windows-google-ime-test`（Linux） |
+| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（34 件） | `bootstrap-windows-google-ime-test`（Linux） |
 | `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い)。偽の `powershell.exe` で流す（12 件） | `bootstrap-windows-powertoys-test`（Linux） |
 | `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない)。手元の bare repo で流す（6 件） | `bootstrap-dotfiles-private-test`（Linux） |
-| `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest・検証・import (Mozc の `.proto` の写しから作った記述子で流す。41 件) | `pjp-google-ime-unittest`（Linux） |
+| `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest (空のコメントと空の表を含む)・検証・エラーに語を出さない・import (Mozc の `.proto` の写しから作った記述子で流す。56 件) | `pjp-google-ime-unittest`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
 | `claude-notion.nix` | `notion.{profile,routes,override}` の既定・`claude-notion.json` の中身・profile が無いときの warnings（評価時の assert） | `claude-notion-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
 引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
+`bootstrap-windows-google-ime-test` だけは、ほかに `pjp-google-ime` と、protobuf の入った python
+(と記述子の `PJP_GOOGLE_IME_DESCRIPTORS`) も使う。build では作れない形の辞書 (単語登録で足した語など)
+を python で組むため。サンドボックスの外で流すときも、この 2 つを PATH と環境変数に用意する。
 
 ```sh
 nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ

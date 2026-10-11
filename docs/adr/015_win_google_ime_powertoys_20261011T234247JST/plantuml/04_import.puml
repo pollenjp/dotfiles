@@ -24,10 +24,17 @@ U -> G : キー設定を変えて OK
 G -> F : 書く（サーバー経由）
 U -> B : setup --update
 B -> F : digest を比べる
-note over B #FFE6CC : 衝突\ndecode したテキストの diff を出して止まる
+note over B #FFE6CC : 衝突\n設定は decode したテキストの diff、\n辞書は辞書ごとの行の数を出して止まる\n（語の diff は、自分の端末で ~--dry-run ~--show-words）
 U -> B : --import
+B -> T : commit していない変更が無いかを見る\n（git status --porcelain。未追跡のファイルも）
+alt 変更がある・git の checkout か確かめられない
+  note over B #FFE6CC : 変わったファイル名を出して\n何も書かずに exit 1
+  U -> T : commit するか、変更を戻す
+  U -> B : --import
+end
 B -> F : decode する
-B -> T : テキストを書き直す
+note over F : user_dictionary.db が無ければ\n辞書は取り込まない（TSV はそのまま）
+B -> T : テキストを書き直す\n（repo 側にだけあった行は消える）
 note over B #D5E8D4 : 組み立て直して Windows 側と\n同じ中身になることを確かめてから\n記録を合わせる
 U -> T : git diff を見て commit\n（dotfiles と dotfiles-private）
 U -> B : setup --update
