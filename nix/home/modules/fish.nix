@@ -57,6 +57,8 @@
       ff = "cd ../..";
       fff = "cd ../../..";
       ffff = "cd ../../../..";
+      # e は bash (bash.nix の shellAliases) と Windows の PowerShell
+      # (win/powershell/dotfiles.ps1) にも置いている。直すときは 3 つをそろえる。
       e = "exit";
       H = "head";
       show_ports_netstat = "netstat -tulpn";
