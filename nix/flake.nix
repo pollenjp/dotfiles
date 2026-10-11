@@ -148,6 +148,18 @@
                 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
                 touch $out
               '';
+          bootstrap-windows-google-ime-test =
+            pkgs.runCommand "bootstrap-windows-google-ime-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  googleIme
+                ];
+              }
+              ''
+                bash ${./tests/bootstrap-windows-google-ime.test.sh} ${./scripts/bootstrap-windows-google-ime.sh}
+                touch $out
+              '';
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
