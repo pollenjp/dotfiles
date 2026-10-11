@@ -79,6 +79,12 @@ for arg in "$@"; do
   esac
 done
 
+if ((do_import && dry_run)); then
+  echo "--import と --dry-run は一緒に使えません (--import は repo のテキストを書き直します)。" >&2
+  usage >&2
+  exit 2
+fi
+
 script_dir=$(
   cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null || exit
   pwd -P

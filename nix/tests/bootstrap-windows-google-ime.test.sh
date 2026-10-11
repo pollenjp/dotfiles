@@ -365,8 +365,24 @@ else
   ng "--check" "ok_rc=${check_ok} rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# 22. 知らない引数: exit 2
+# 22. --import と --dry-run を一緒に付けると exit 2。何も書かない (repo のテキスト・辞書・記録・変換サーバーに触らない)
 h=$(new_home t22 "${state_on}" 1)
+put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
+cp "${h}/repo/win/google-japanese-input/keymap.tsv" "${h}/keymap.before"
+before=$(digest config "$(ime "${h}")/config1.db")
+run "${h}" 0 --import --dry-run
+if [[ $(rc "${h}") == 2 ]] && outerr "${h}" | grep -q '一緒に使えません' \
+  && cmp -s "${h}/keymap.before" "${h}/repo/win/google-japanese-input/keymap.tsv" \
+  && [[ -f ${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv ]] \
+  && [[ ! -e ${h}/.local/state/dotfiles/google-japanese-input/deployed.json ]] \
+  && ! killed "${h}" && [[ $(digest config "$(ime "${h}")/config1.db") == "${before}" ]]; then
+  ok "--import と --dry-run を一緒に付けると exit 2 で、何も書かない"
+else
+  ng "--import と --dry-run" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 23. 知らない引数: exit 2
+h=$(new_home t23 "${state_on}" 1)
 run "${h}" 0 --bogus
 if [[ $(rc "${h}") == 2 ]] && ! killed "${h}"; then
   ok "知らない引数は exit 2"
