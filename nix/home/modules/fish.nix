@@ -227,12 +227,17 @@
       #########################
       # Claude Code
       #########################
-      # 権限の確認を飛ばし (--dangerously-skip-permissions)、effort を max、モデルを
-      # Opus 5.5 に固定して claude を起動する。c は以前 c-func (git commit -m "$*") を
-      # 呼んでいた。git commit -m は gcm で打てる。
+      # Remote Control を有効にし (--remote-control。claude.ai/code やモバイルアプリから
+      # 操作できる)、権限の確認を飛ばし (--dangerously-skip-permissions)、effort を max、
+      # モデルを Opus 5.5 に固定して claude を起動する。
+      # --remote-control は省略できる名前 ([name]) を取り、すぐ後ろの語が - で始まらなければ
+      # セッションの名前として読む。末尾に置くと c "質問" の質問が名前になるので、claude の
+      # 直後に置く。Remote Control が使えない環境 (claude.ai のサブスクリプションで
+      # ログインしていない・組織のポリシーで無効など) では警告を出して無視し、そのまま起動する。
+      # c は以前 c-func (git commit -m "$*") を呼んでいた。git commit -m は gcm で打てる。
       # 同じ名前・同じ中身を bash (bash.nix の shellAliases) と Windows の PowerShell
       # (win/powershell/dotfiles.ps1) にも置いている。直すときは 3 つをそろえる。
-      c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5";
+      c = "claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5";
     };
 
     functions = {
