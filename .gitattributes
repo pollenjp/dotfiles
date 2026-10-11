@@ -1,0 +1,2 @@
+# PowerToys が書いたバイト列のまま置く (改行を変えない。win/README.md「PowerToys」)
+win/powertoys/** -text

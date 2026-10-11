@@ -10,3 +10,9 @@ switch_case_indent = true
 
 [*.ps1] # Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む (win/README.md)
 charset = utf-8-bom
+
+[win/powertoys/**.json] # PowerToys が書いたバイト列のまま置く (末尾に改行を足さない。win/README.md)
+insert_final_newline = false
+
+[win/powertoys/keyboard-manager/editorSettings.json] # 改行は CRLF (PowerToys の新しいエディタが書く形)
+end_of_line = crlf
