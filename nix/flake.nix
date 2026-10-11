@@ -88,10 +88,14 @@
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
       #   claude-notion.nix  notion.{profile,routes,override} から作られる JSON と warnings。評価時に assert するので全 system
+      #
+      # pjp-google-ime (ADR 015) の unittest と bootstrap-windows-google-ime.test.sh は、protobuf の入った
+      # python と記述子 (Mozc の .proto から作る) が要るので、unittest / scriptTest ではなく専用に組む。
       checks = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          googleIme = pkgs.callPackage ./pkgs/pjp-google-ime { };
           unittest =
             name:
             pkgs.runCommand "${name}-unittest" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -133,6 +137,17 @@
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
+          pjp-google-ime-unittest =
+            pkgs.runCommand "pjp-google-ime-unittest"
+              {
+                nativeBuildInputs = [ googleIme.python ];
+                PJP_GOOGLE_IME_DESCRIPTORS = googleIme.descriptors;
+              }
+              ''
+                cd ${./pkgs/pjp-google-ime}
+                PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -v -p 'test_*.py'
+                touch $out
+              '';
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
@@ -229,9 +244,13 @@
         #
         #   sudo "$(nix build --no-link --print-out-paths ./nix#pjp-exe-exec-trace)/bin/pjp-exe-exec-trace"
         #   nix run ./nix#pjp-who-is-asking
+        #
+        # Google 日本語入力の設定とテキストを行き来させる道具 (ADR 015) も、WSL のマシンでしか使わない。
+        # home には home/modules/windows-files.nix が入れる。CI の lint は nix shell ./nix#pjp-google-ime で借りる。
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
+          pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
         }
       );
 
