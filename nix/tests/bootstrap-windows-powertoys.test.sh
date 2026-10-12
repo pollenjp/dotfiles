@@ -344,7 +344,7 @@ if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 && -s $
   && pwsh_calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && outerr "${h}" | grep -q 'PowerToys を入れました' \
   && outerr "${h}" | grep -q '読み直させました' && ! outerr "${h}" | grep -q '⚠️' \
   && [[ $(tr '\n' ',' <"${h}/timeout-calls") == "60 pwsh.exe,600 pwsh.exe,60 powershell.exe," ]] \
-  && grep -q 'winget で入れます' "${h}/out-at-ifmissing"; then
+  && grep -q 'winget で入れます' "${h}/out-at-ifmissing" && grep -q '600 秒まで待ちます' "${h}/out-at-ifmissing"; then
   ok "入っていなければ -IfMissing で入れてから読み直させる"
 else
   ng "入っていない → 入れる" "rc=$(rc "${h}") calls=$(pwsh_calls "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"

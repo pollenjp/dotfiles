@@ -156,7 +156,7 @@ install_powertoys() {
     return 0
   fi
   if ((rc == 3 && header)); then
-    echo "Windows に PowerToys が入っていないので、winget で入れます (Install-PowerToys.ps1 -IfMissing。user スコープ)。"
+    echo "Windows に PowerToys が入っていないので、winget で入れます (Install-PowerToys.ps1 -IfMissing。user スコープ。600 秒まで待ちます)。"
     # installer のダウンロードを待つので長めに待つ
     rc=0
     out=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?

@@ -17,8 +17,9 @@
 #   - -Check が 0 なら 1 行 (※ の補足があれば添える)。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す (上げはしない)。
 #     入っている版の方が新しいときは、揃えるコマンドの代わりに repo の版の上げ方を出す。固定した版が
 #     winget に無いときは repo の版の直し方、入っている版が読めないときは確かめ方を出す
-#   - -Check が 3 (入っていない) なら、UAC の確認が出ると先に出してから -IfMissing で入れる。入ったら
-#     一度使ってから流し直すよう出す。入れられない・時間切れなら ⚠ で囲んで知らせる。ただし固定した版が
+#   - -Check が 3 (入っていない) なら、UAC の確認が出ると先に出してから -IfMissing で入れる。入ったら、続く
+#     98 が「まだ使われていません」と出したときだけ一度使ってから流し直すよう出す。入れられない・時間切れなら
+#     ⚠ で囲んで知らせる (時間切れなら、UAC の確認が残っているときの打ち直し方も)。ただし固定した版が
 #     winget に無いときは、-IfMissing を打たず、UAC の案内も出さずに repo の版の直し方を出す
 #   - 偽の timeout が上限の秒数を記録し、-Check は 120 秒・-IfMissing は 600 秒で打つこと、UAC の案内が
 #     -IfMissing を打つより前に出ることを確かめる
@@ -358,14 +359,15 @@ else
 fi
 
 # 10. 入っていない (-Check が 3): UAC の確認が出ると先に出してから -IfMissing で入れる。入ったら ⚠ は出さず、
-#     一度使ってから流し直すよう出す
+#     続く 98 が「まだ使われていません」と出したら一度使ってから流し直すよう出す (入れた途中で置き先ができていれば、
+#     98 がそのまま置くので、流し直しは条件付き)
 h=$(new_home t10 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && outerr "${h}" | grep -q 'UAC の確認が出たら' \
   && grep -q 'UAC の確認が出たら' "${h}/out-at-ifmissing" && [[ $(tr '\n' ' ' <"${h}/timeout-calls") == "120 600 " ]] \
-  && outerr "${h}" | grep -q '入れました' && outerr "${h}" | grep -q '一度何か打ってから、setup --update を流し直して' \
+  && outerr "${h}" | grep -q '入れました' && outerr "${h}" | grep -qF '「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから setup --update を流し直して' \
   && calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && ! calls "${h}" | tail -n 1 | grep -q -- '-Check'; then
-  ok "入っていなければ UAC が出ると出してから -IfMissing で入れ、一度使ってから流し直すよう出して exit 0"
+  ok "入っていなければ UAC が出ると出してから -IfMissing で入れ、98 が「まだ使われていません」と出したら一度使ってから流し直すよう出して exit 0"
 else
   ng "入っていない → 入れる" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
@@ -380,12 +382,14 @@ else
   ng "入れられない" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
 fi
 
-# 12. UAC を押さないまま 600 秒たった (timeout の 124): 時間切れと出して ⚠ で囲む。setup は止めない
+# 12. UAC を押さないまま 600 秒たった (timeout の 124): 時間切れと出して ⚠ で囲む。UAC の確認が残っていれば
+#     先に押すか閉じてから打ち直すよう添える (残ったまま打ち直すと 1618 で落ちる)。setup は止めない
 h=$(new_home t12 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && outerr "${h}" | grep -q '600 秒待っても終わらない' \
-  && outerr "${h}" | grep -qF 'PowerShell: Install-GoogleJapaneseInput'; then
-  ok "UAC を押さないまま時間切れになったら ⚠ で囲んで知らせて exit 0"
+  && outerr "${h}" | grep -qF 'PowerShell: Install-GoogleJapaneseInput' \
+  && grep -qF 'UAC の確認が残っていれば、先に押すか閉じてから打ち直して' "${h}/err" && grep -qF '(1618)' "${h}/err"; then
+  ok "UAC を押さないまま時間切れになったら ⚠ で囲んで知らせ、確認が残っているときの打ち直し方も添えて exit 0"
 else
   ng "時間切れ" "rc=$(rc "${h}") $(outerr "${h}")"
 fi

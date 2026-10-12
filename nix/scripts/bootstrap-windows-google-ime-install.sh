@@ -134,7 +134,7 @@ clean() {
   tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g"
 }
 
-# ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)
+# ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)、$3: 揃えるコマンドの前に添える 1 行 (省略可)
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
   {
@@ -143,6 +143,10 @@ warn_frame() {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     # PowerShell の締めの 1 行 (⚠️ … → Install-GoogleJapaneseInput …) は、下の揃えるコマンドと重なるので落とす
     printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
+    # 添える 1 行 ($3) があれば、揃えるコマンドの前に出す
+    if [[ -n ${3-} ]]; then
+      printf '%s⚠️  %s%s\n' "${c_warn}" "$3" "${c_reset}"
+    fi
     if grep -qF '(下げない)' <<<"$2"; then
       # 入っている版の方が新しい: 揃えるコマンドを打っても下げないので、repo の版の上げ方だけを出す
       printf '%s⚠️  入っている版の方が新しいので、下げはしません。上の ※ のとおり、repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を上げてください%s\n' "${c_warn}" "${c_reset}"
@@ -212,11 +216,12 @@ if ((rc == 3 && header)); then
   if ((rc == 0)); then
     printf '%s\n' "${out}" | sed 's/^/  /'
     echo "Windows に Google 日本語入力を入れました。"
-    echo "Google 日本語入力で一度何か打ってから、setup --update を流し直してください (bootstrap-windows-google-ime.sh が設定と辞書を置きます)。"
+    echo "続く bootstrap-windows-google-ime.sh が「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから setup --update を流し直してください。"
     exit 0
   fi
   if ((rc == 124)); then
-    warn_frame "Windows に Google 日本語入力を入れられませんでした (600 秒待っても終わらない。UAC の確認が出たままかもしれません)" "${out}"
+    warn_frame "Windows に Google 日本語入力を入れられませんでした (600 秒待っても終わらない。UAC の確認が出たままかもしれません)" "${out}" \
+      "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから打ち直してください (残ったまま打ち直すと、別のインストールが進行中 (1618) で落ちます)"
     exit 0
   fi
   warn_frame "Windows に Google 日本語入力を入れられませんでした (終了コード ${rc})" "${out}"
