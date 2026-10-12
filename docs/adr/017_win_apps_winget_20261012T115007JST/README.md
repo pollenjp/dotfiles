@@ -206,6 +206,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 
   ![新しいマシン](./plantuml/out/03_new_machine.svg)
 
+- 新しいマシンでは、PowerToys の設定画面を一度開くまで、Keyboard Manager が割り当てを読まない (§1 の 7)。1 回目の setup で 91 が案内したら、設定画面を開いてから 91 (か 2 回目の setup) を流す
 - Google 日本語入力が入っていないマシンで setup を流すと、UAC の確認が 1 回出る。押さないまま 600 秒たつと、⚠ と手で打つコマンドを出して先へ進む
 - Google 日本語入力が自分で上がると、95 が ⚠ を出し続ける。repo の版 (`-Version` の既定値) を上げ、98 で設定を読み書きできるかを確かめてから commit する
 - 95 がずれを知らせている間も、98 は今入っている版に設定を置く
@@ -254,6 +255,8 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 1. `~/dotfiles/setup --update` を流す。95 で UAC の確認が出たら押す
 2. 98 が「まだ使われていません」と出したら、日本語入力を一度使う (何か打つ)
 3. 2 で使ったら、もう一度 `~/dotfiles/setup --update` を流す。98 が設定と辞書を置く
+
+PowerToys は、1 回目の setup で 91 が、Keyboard Manager の設定 (settings.json) がまだ無いと出したら、設定画面を一度開いてから 91 (`nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す (3 の setup で流してもよい)。91 が割り当てを読み直させる (§1 の 7)。
 
 新しいマシンで通しては、まだ確かめていない (§6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、置いた記録が無いので衝突になる)、`--import` (Windows 側を残す) か `--force` (repo 側で置き直す) を選ぶ
 

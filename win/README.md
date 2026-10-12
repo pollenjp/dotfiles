@@ -472,6 +472,9 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
    (入力方式が別なら切り替えてから)
 3. 2 で打ったら、もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
 
+PowerToys の割り当ては、これとは別に、91 が Keyboard Manager の設定 (`settings.json`) がまだ無いと出したら、設定画面を一度開いてから
+91 を流し直すと効く ([PowerToys を入れる](#powertoys-を入れる-winget))。
+
 新しいマシンで通しては、まだ確かめていない (ADR 017 §6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、
 置いた記録が無いので衝突になる)、`--import` (Windows 側を残す。[Google 日本語入力](#google-日本語入力)) か
 `--force` (repo 側で置き直す) を選ぶ
