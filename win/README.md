@@ -317,6 +317,10 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   `PowerToys_KeyboardManager_Event_Settings` を `powershell.exe` から送って読み直させる (エンジンは
   ファイルを見張っていない)。`default.json` の sha256 が前回読み直させたときと同じなら何もしない。
   PowerToys が動いていなければ、起動したときに読む
+- エンジンが読むのは、同じディレクトリの `settings.json` が指す有効なプロファイル (`activeConfiguration`) の JSON。
+  `settings.json` が無い (PowerToys の設定画面をまだ開いていない) ときと、プロファイルが `default` でないときは、
+  送っても起動し直しても `default.json` は読まれない。91 は送る前にこれを確かめ、読まれないときは送らず記録もせずに
+  案内して飛ばす (exit 0。入れたばかりのマシンは[PowerToys を入れる](#powertoys-を入れる-winget))
 - interop が落ちていて送れないときは、PowerToys の設定 → Keyboard Manager を一度オフにしてオンに戻す
 - エディタで割り当てを変えると、次の `setup --update` が衝突として止まる ([衝突したら](#衝突したら))。
   `cp` で取り込むときは 2 つとも取り込む
@@ -344,10 +348,12 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
   (setup は止めない)。次の `setup --update` でも、もう一度入れにいく
 - setup が待つ上限は、`-Check` が 60 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、そのまま読み直しへ進む
   (どちらでも setup は止めない)
-- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動すると、配った `default.json` を読むはず
-  (読むかは次の箇条のとおり、まだ確かめていない)
-- 入れたばかりのマシンで、Keyboard Manager が配った割り当てを読むか (`settings.json` ができるか) は、まだ確かめていない
-  (次の新しいマシンで確かめる。ADR 017 §1 の 7)
+- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動する
+- 入れたばかりのマシンでは、PowerToys の設定画面を一度開くまで、Keyboard Manager は配った割り当てを読まない。
+  エンジンが読む `settings.json` (有効なプロファイルの名前) を作るのは設定画面だけで、作っても読み直しはしないため
+  ([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md) §1 の 7)。91 はこれを見分けて、
+  記録せずに「設定画面を一度開いてから流し直す」よう案内するので、開いてから `setup --update`
+  (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。そのときに 91 が読み直させる
 
 ### Install-PowerToys.ps1 を書くときの注意
 
@@ -458,13 +464,15 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
 - setup が待つ上限は、`-Check` が 120 秒、入れる `-IfMissing` が 600 秒。時間切れになったらそう出して先へ進む (setup は止めない)。
   入れるときに UAC の確認を押さないまま 600 秒たった場合は、⚠ で囲んで、手で打つコマンドも出す
 
-新しいマシンでは setup を 2 回流す (98 の置き先は、Google 日本語入力を初めて使ったときにできるため):
+新しいマシンでは、98 の置き先がまだ無ければ setup を 2 回流す (置き先は、Google 日本語入力が初めて起動したときにできる。
+固定した版の MSI は入れる途中で作る見込みで、そのときは 1 回で済む。ADR 017 §1 の 8):
 
 1. `~/dotfiles/setup --update` を流す。UAC の確認が出たら「はい」を押す
-2. Google 日本語入力で一度何か打つ (入力方式が別なら切り替えてから)
-3. もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
+2. `bootstrap-windows-google-ime.sh` が「まだ使われていません」と出したら、Google 日本語入力で一度何か打つ
+   (入力方式が別なら切り替えてから)
+3. 2 で打ったら、もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
 
-新しいマシンで通しては、まだ確かめていない (ADR 017 §6)。2 回目に 98 が衝突を出したら (初回の起動で `config1.db` ができていると、
+新しいマシンで通しては、まだ確かめていない (ADR 017 §6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、
 置いた記録が無いので衝突になる)、`--import` (Windows 側を残す。[Google 日本語入力](#google-日本語入力)) か
 `--force` (repo 側で置き直す) を選ぶ
 

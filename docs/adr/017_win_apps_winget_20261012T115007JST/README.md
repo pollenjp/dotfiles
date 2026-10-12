@@ -55,7 +55,7 @@ winget-pkgs の `Google.JapaneseIME` 3.34.6260.0 の installer manifest は `Ins
 
 - `C:\Program Files (x86)\Google\Google Japanese Input\GoogleIMEJaConverter.exe` の ProductVersion は `2.29.5370.0` (FileVersion は `2.29.5370.0  (build 63)`)
 - winget の最新は `3.34.6260.0` (2026-07-27)。この PC では自分で上がっていない
-- 3.34 の MSI は x64 (`GoogleJapaneseInput64-3.34.6260.0.msi`) なので、置き場所が `C:\Program Files\Google\Google Japanese Input\` に変わるかもしれない
+- 3.34 の MSI (`GoogleJapaneseInput64-3.34.6260.0.msi`) は 64 ビットの MSI だが、winget の 2.29.5370.0 も 64 ビットの MSI で、この PC では x86 の側に入っている。Mozc の `installer_64bit.wxs` は `ProgramFilesFolder` (= `C:\Program Files (x86)`) の下に入れるので、3.34 も x86 の側に入る見込み (まだ確かめていない)。コードは `C:\Program Files\` と `C:\Program Files (x86)\` の両方を見る
 
 #### 5. pjp-google-ime の .proto は 3.34 より新しい
 
@@ -72,15 +72,26 @@ ADR 015 で写した Mozc の commit (`18e76511…`) は 2026-10-09 のもので
 | ずれている | ⚠ で知らせ、揃えるのは手で打つ (UAC が要り、動いている ssh も巻き込むため) | ⚠ で知らせ、揃えるのは手で打つ |
 | テスト | 副作用の無い関数を `Install-OpenSSH.Tests.ps1` (Linux の pwsh。Pester は使わない)、bootstrap は偽の `pwsh.exe` | 同じ |
 
-#### 7. Keyboard Manager は default.json の前に settings.json を読む
+#### 7. Keyboard Manager は default.json の前に settings.json を読み、settings.json は設定画面だけが作る
 
-PowerToys の `MappingConfiguration::LoadSettings` は、Keyboard Manager の `settings.json` の `activeConfiguration` (有効なプロファイルの名前) を読み、その名前の JSON (`default.json`) を読む。
-入れた直後に `settings.json` ができるかは、入っていない状態から試さないと分からない。
+PowerToys の main の source で確かめた (2026-10-12)。
 
-#### 8. 98 の置き先は、日本語入力を初めて使ったときにできる
+- Keyboard Manager のエンジン (`MappingConfiguration::LoadSettings`) は、`%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\settings.json` の `properties.activeConfiguration.value` (有効なプロファイルの名前) を読み、その名前の JSON (`default.json`) を読む。`settings.json` が無いと何も読まずに false を返し、`default` に戻す処理も無い
+- `settings.json` を作るのは PowerToys の設定画面 (Settings UI) だけ。Dashboard・Quick Access・Keyboard Manager のページが、無ければ既定の中身 (有効なプロファイルは `default`) で書く (`SettingsUtils.GetSettingsOrDefault` など)。作っても、読み直しのイベントは送らない
+- この PC の `settings.json` は次のとおり
 
-98 が置く `AppData/LocalLow/Google/Google Japanese Input` は、Google 日本語入力のプロセスが初めて起動したときにできる。入れただけのマシンでは、まだ無い。
+  ```json
+  {"properties":{"activeConfiguration":{"value":"default"},"keyboardConfigurations":{"value":["default"]}},"name":"Keyboard Manager","version":"1"}
+  ```
+
+入れたばかりで設定画面を一度も開いていないマシンでは、イベントを送っても、起動し直しても、配った `default.json` は読まれない。
+
+#### 8. 98 の置き先は、日本語入力を初めて使ったときにできる (3.34 の MSI なら、入れたときにできる見込み)
+
+98 が置く `AppData/LocalLow/Google/Google Japanese Input` は、Google 日本語入力のプロセスが初めて起動したときにできる。
 Mozc の `UserProfileDirectoryImpl::GetDir()` (`src/base/system_util.cc`) が、初めて呼ばれたときに `FileUtil::CreateDirectory` で作る。
+
+入れた直後にも、置き先はできている見込み (まだ確かめていない)。Mozc の `installer_64bit.wxs` は、新規でも上げるときでも、commit の段で `FixupConfigFilePermission` (`Impersonate="yes"`) を走らせる (Mozc の commit `161849a68e`、2024-10-16 から)。これが `user://config1.db` の場所を引くので (`ConfigFileStream::GetFileName` が `SystemUtil::GetUserProfileDirectory()` を呼ぶ)、入れたユーザーの LocalLow に置き先ができる。`config1.db` そのものは作らない (あるときだけ権限を直す)。
 
 ---
 
@@ -131,6 +142,7 @@ Mozc の `UserProfileDirectoryImpl::GetDir()` (`src/base/system_util.cc`) が、
 - pin は足さない。PowerToys は自分で更新を知らせる
 - bootstrap-windows-powertoys.sh (91) は、default.json を読み直させる前に `-Check` を流し、3 なら `-IfMissing` で入れる
 - 入れられなかったら ⚠ を出して、読み直しへ進む。91 は今までどおり 2 以外で 0 以外を返さない
+- 91 は読み直させる前に、Keyboard Manager の `settings.json` の有効なプロファイル (`properties.activeConfiguration.value`) が `default` かを確かめる。無い・読めない・`default` 以外なら、イベントを送らず記録もせずに案内して exit 0 (無いときは、設定画面を一度開いてから流し直すよう出す)。記録すると、`settings.json` ができた後も「読み直し済み」で送らなくなるため (§1 の 7)
 
 ### C. 98 は「入っているが、まだ使っていない」を見分けて案内する
 
@@ -162,7 +174,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | `win/powertoys/Install-PowerToys.ps1` | 新規。決定 B |
 | `win/powertoys/Install-PowerToys.Tests.ps1` | 新規。副作用の無い関数のテスト |
 | `nix/scripts/bootstrap-windows-google-ime-install.sh` | 新規。order 95 |
-| `nix/scripts/bootstrap-windows-powertoys.sh` | 読み直させる前に、無ければ入れる |
+| `nix/scripts/bootstrap-windows-powertoys.sh` | 読み直させる前に、無ければ入れる。Keyboard Manager の `settings.json` の有効なプロファイルが `default` でなければ、読み直させず記録もせずに案内する |
 | `nix/scripts/bootstrap-windows-google-ime.sh` | 入っているが使っていないときの案内。`--import` の、commit していない変更の確かめを 3 つのテキストに絞る (決定 C) |
 | `nix/tests/bootstrap-windows-google-ime-install.test.sh` | 新規。偽の pwsh.exe |
 | `nix/tests/bootstrap-windows-powertoys.test.sh`・`bootstrap-windows-google-ime.test.sh` | 足した分のテスト |
@@ -190,7 +202,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 
 ## 5. 影響 (Consequences)
 
-- 新しいマシンでは setup を 2 回流す。1 回目で 2 つが入り、日本語入力を一度使ってから 2 回目で 98 が設定を置く
+- 新しいマシンでは、98 の置き先がまだ無ければ setup を 2 回流す。1 回目で 2 つが入り、98 が「まだ使われていません」と出したら、日本語入力を一度使ってから 2 回目で 98 が設定を置く。3.34 の MSI は入れた直後に置き先を作る見込みで (§1 の 8)、そのときは 1 回目で 98 が置く
 
   ![新しいマシン](./plantuml/out/03_new_machine.svg)
 
@@ -223,7 +235,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | 実機: 95 のずれ | 2.29.5370.0 と 3.34.6260.0 のずれを ⚠ で出す | — |
 | 実機: 揃える | `Install-GoogleJapaneseInput` で 3.34.6260.0 に上げる (UAC)。上げた後の 95 は 1 行 | — |
 | 実機: 上げた後の設定 | 98 の `--dry-run`・`--import` で、3.34 の設定と辞書を読み書きできる。句読点を変えて配ると効く | — |
-| 新しいマシン | `-IfMissing` で 2 つが入る・setup を 2 回流すと揃う・Keyboard Manager が置いた割り当てを読む | まだ (次の新しいマシンで確かめる) |
+| 新しいマシン | `-IfMissing` で 2 つが入る・入れた直後に置き先 (`AppData/LocalLow/Google/Google Japanese Input`) があるか・setup を (置き先がまだ無ければ 2 回) 流すと揃う・設定画面を一度開いた後に、91 が読み直させて割り当てが効く | まだ (次の新しいマシンで確かめる) |
 
 ---
 
@@ -237,9 +249,13 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 
 ### 新しいマシン
 
+98 の置き先がまだ無ければ、setup を 2 回流す (§1 の 8)。
+
 1. `~/dotfiles/setup --update` を流す。95 で UAC の確認が出たら押す
-2. 日本語入力を一度使う (何か打つ)
-3. もう一度 `~/dotfiles/setup --update` を流す。98 が設定と辞書を置く
+2. 98 が「まだ使われていません」と出したら、日本語入力を一度使う (何か打つ)
+3. 2 で使ったら、もう一度 `~/dotfiles/setup --update` を流す。98 が設定と辞書を置く
+
+新しいマシンで通しては、まだ確かめていない (§6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、置いた記録が無いので衝突になる)、`--import` (Windows 側を残す) か `--force` (repo 側で置き直す) を選ぶ
 
 ### 版を上げる
 

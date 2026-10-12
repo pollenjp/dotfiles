@@ -1,12 +1,12 @@
 @startuml
-' 新しいマシンで setup を流したときの流れ。98 の置き先は日本語入力を初めて使ったときに
-' できるので、2 回目の setup で設定と辞書が入る。
+' 新しいマシンで setup を流したときの流れ。98 の置き先 (日本語入力を初めて使ったときにできる。
+' 3.34 の MSI は入れた直後に作る見込み) がまだ無ければ、2 回目の setup で設定と辞書が入る。
 skinparam backgroundColor #FFFFFF
 skinparam defaultFontName "Noto Sans CJK JP"
 skinparam shadowing false
 skinparam sequenceMessageAlign left
 
-title 新しいマシンでの setup（2 回流す）
+title 新しいマシンでの setup（置き先がまだ無ければ 2 回）
 
 actor "ユーザー" as U
 participant "setup --update" as S
@@ -23,9 +23,9 @@ S -> P95 : 95
 P95 -> W : Google 日本語入力が無ければ\n-IfMissing で入れる
 W -> U : UAC の確認
 U -> W : はい
-P95 -> U : 「一度使ってから流し直す」
+P95 -> U : 「98 が『まだ使われていません』と出したら、\n一度使ってから流し直す」
 S -> P98 : 98
-P98 -> U : 置き先がまだ無いので案内して飛ばす
+P98 -> U : （無ければ）置き先がまだ無いので案内して飛ばす
 ...
 U -> W : 日本語入力を一度使う\n（置き先のディレクトリができる）
 ...

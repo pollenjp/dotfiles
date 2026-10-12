@@ -506,7 +506,7 @@ git commit                                             # 両方で commit する
 
 ### 新しいマシン
 
-- Google 日本語入力と PowerToys は、setup が winget で入れる ([ADR 017](../017_win_apps_winget_20261012T115007JST/README.md))。Google 日本語入力の置き先は一度使うまで無いので、何か打ってから setup をもう一度流す
+- Google 日本語入力と PowerToys は、setup が winget で入れる ([ADR 017](../017_win_apps_winget_20261012T115007JST/README.md))。Google 日本語入力の置き先がまだ無い (98 が「まだ使われていません」と出す) ときは、何か打ってから setup をもう一度流す
 - `dotfiles.wsl.windowsFiles.enable = true` のホストで `~/dotfiles/setup --update` を流す
 - Windows 側に既に設定があると、記録が無いので初回は衝突になる。差を見て (辞書は、自分の端末で
   `--dry-run --show-words`)、`--import` で取り込むか `--force` で置き直す
