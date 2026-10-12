@@ -27,6 +27,7 @@ if [[ -z ${PJP_D3JS_NODE_MODULES:-} ]]; then
 fi
 
 export_sh=${skill_dir}/scripts/d3js-export.sh
+vendor_sh=${skill_dir}/scripts/d3js-vendor.sh
 
 work=$(mktemp -d)
 trap 'rm -rf "${work}"' EXIT
@@ -143,6 +144,21 @@ cd "${ok_dir}"
 check "知らない形式は止まる" fails_with "知らない形式" "${export_sh}" -f pdf
 check "devShell の外から呼んでも書き出せる" run env -u PJP_D3JS_NODE_MODULES -u PJP_D3JS_FONTS_DIR -u D3JS_SKILL_REEXEC "${export_sh}" -o out9 01_d3_axis.mjs
 check "devShell の外から呼んだ出力がある" test -f out9/01_d3_axis.svg
+
+echo "## 写す (d3js-vendor.sh)"
+
+page=${work}/page
+check "d3.min.js と plot.umd.min.js を写せる" run "${vendor_sh}" --plot "${page}/assets"
+check "d3.min.js がある" test -s "${page}/assets/d3.min.js"
+check "plot.umd.min.js がある" test -s "${page}/assets/plot.umd.min.js"
+check "d3.min.js は d3 7.9.0" grep -qF 'd3js.org v7.9.0' "${page}/assets/d3.min.js"
+check "plot.umd.min.js は Plot 0.6.17" grep -qF '@observablehq/plot v0.6.17' "${page}/assets/plot.umd.min.js"
+check "写したファイルに書き込める" test -w "${page}/assets/d3.min.js"
+check "写し直せる" run "${vendor_sh}" --plot "${page}/assets"
+check "貼る <script> の行を出す" grep -qF '<script src="assets/d3.min.js"></script>' "${log}"
+check "--plot なしなら d3.min.js だけ写せる" run "${vendor_sh}" "${work}/page2/assets"
+check "--plot なしなら plot.umd.min.js は無い" test ! -e "${work}/page2/assets/plot.umd.min.js"
+check "写す先が無ければ止まる" fails_with "写す先の DIR" "${vendor_sh}"
 
 echo
 echo "${passed} ok / ${failed} FAIL"
