@@ -182,14 +182,24 @@ if ((skipped > 0)); then
   echo "   中身を見て、要らなければ消してから流し直してください (正本は ${src_dir})。" >&2
 fi
 
-# 旧 .ssh submodule の作業ツリーが残っていれば知らせる (自分では消さない)
-if [[ -e ${repo_dir}/.ssh/.git ]]; then
+# 旧 .ssh submodule の作業ツリーが残っていれば知らせる (自分では消さない)。
+# commit していない変更・push していない commit があるとき、状態を確かめられないときは、
+# 消すコマンドを出さずに警告だけにする (消すと手元の変更が失われるため)。
+legacy="${repo_dir}/.ssh"
+if [[ -e ${legacy}/.git ]]; then
   echo
-  echo "旧 .ssh submodule の作業ツリーが残っています (もう使っていません)。消すなら:"
-  if [[ -d ${repo_dir}/.git/modules/.ssh ]]; then
-    echo "  rm -rf '${repo_dir}/.ssh' '${repo_dir}/.git/modules/.ssh'"
+  if st=$(git -C "${legacy}" status --porcelain 2>/dev/null) && [[ -z ${st} ]] \
+    && unpushed=$(git -C "${legacy}" log --branches --not --remotes --oneline 2>/dev/null) && [[ -z ${unpushed} ]]; then
+    echo "旧 .ssh submodule の作業ツリーが残っています (もう使っていません)。消すなら:"
+    if [[ -d ${repo_dir}/.git/modules/.ssh ]]; then
+      echo "  rm -rf '${legacy}' '${repo_dir}/.git/modules/.ssh'"
+    else
+      echo "  rm -rf '${legacy}'"
+    fi
   else
-    echo "  rm -rf '${repo_dir}/.ssh'"
+    warn "旧 .ssh submodule の作業ツリーに、commit していない変更か push していない commit があります (または状態を確かめられません): ${legacy}"
+    echo "   中身を見て、要るものは dotfiles-private の ssh/ へ移してから消してください:" >&2
+    echo "     git -C '${legacy}' status && git -C '${legacy}' log --branches --not --remotes" >&2
   fi
 fi
 

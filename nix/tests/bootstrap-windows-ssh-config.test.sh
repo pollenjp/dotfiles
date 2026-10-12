@@ -101,9 +101,20 @@ case ${mode} in
     sleep 5
     exit 0
     ;;
+  ignoreterm)
+    # SIGTERM を無視して固まる (無視は exec した子の sleep にも引き継がれる)
+    trap '' TERM
+    sleep 20
+    exit 0
+    ;;
 esac
 echo "debug1: OpenSSH_for_Windows_10.0p2 Win32-OpenSSH-GitHub, LibreSSL 4.2.0" >&2
 echo 'debug1: Reading configuration data C:\\Users\\tester/.ssh/config' >&2
+if [[ ${mode} == partial ]]; then
+  # 読み始めたところで固まる
+  sleep 5
+  exit 0
+fi
 first=1
 for f in "${FAKE_WIN_HOME}"/.ssh/config.d/*.ssh_config; do
   [[ -f ${f} ]] || continue
@@ -125,6 +136,12 @@ for f in "${FAKE_WIN_HOME}"/.ssh/config.d/*.ssh_config; do
 done
 if [[ ${mode} == legacy ]]; then
   echo 'debug1: Reading configuration data C:\\Users\\tester/dotfiles/ssh_config' >&2
+fi
+if [[ ${mode} == badopt ]]; then
+  # 全部読んでから、知らないオプションで止まる (どの接続先でも exit 255 になる)
+  echo 'C:\\Users\\tester/.ssh/config.d/b c.ssh_config: line 2: Bad configuration option: nosuchoption' >&2
+  echo 'C:\\Users\\tester/.ssh/config.d/b c.ssh_config: terminating, 1 bad configuration options' >&2
+  exit 255
 fi
 exit 0
 EOF
@@ -422,6 +439,37 @@ if [[ $(rc "${c}") == 2 && ! -e $(wssh "${c}") ]]; then
   ok "知らない引数は何もせず exit 2"
 else
   ng "知らない引数" "rc=$(rc "${c}")"
+fi
+
+# 23. 確かめ: ssh.exe が読み始めたところで固まったら、時間切れとして手で打つコマンドを出して exit 0
+c=$(new_case t23 "${state_on}")
+FAKE_SSH_MODE=partial BOOTSTRAP_SSH_CHECK_TIMEOUT=1 run "${c}" 0
+if [[ $(rc "${c}") == 0 ]] && grep -q '確かめられませんでした (終了コード 124' "${c}/err" \
+  && ! grep -q '読まなかったファイル' "${c}/err"; then
+  ok "ssh.exe が途中まで出して固まっても、時間切れとして exit 0 (読まれないとは言わない)"
+else
+  ng "途中で固まる" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 24. 確かめ: ssh.exe が全部読んでから設定の誤りで exit 255 なら、⚠ の枠で出して exit 1
+c=$(new_case t24 "${state_on}")
+FAKE_SSH_MODE=badopt run "${c}" 0
+if [[ $(rc "${c}") == 1 ]] && grep -q '設定を読み終えられませんでした (終了コード 255' "${c}/err" \
+  && grep -q 'Bad configuration option: nosuchoption' "${c}/err" && ! grep -q '確かめ: ssh.exe が' "${c}/out"; then
+  ok "ssh.exe が設定の誤りで exit 255 なら、エラーの行を添えて exit 1"
+else
+  ng "設定の誤り" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 25. 確かめ: SIGTERM を無視する ssh.exe も、少し待ってから KILL して先へ進む
+c=$(new_case t25 "${state_on}")
+start=${SECONDS}
+FAKE_SSH_MODE=ignoreterm BOOTSTRAP_SSH_CHECK_TIMEOUT=1 run "${c}" 0
+elapsed=$((SECONDS - start))
+if [[ $(rc "${c}") == 0 ]] && ((elapsed < 15)) && grep -q '確かめられませんでした (終了コード 137' "${c}/err"; then
+  ok "SIGTERM を無視する ssh.exe も KILL して、手で打つコマンドを出して exit 0"
+else
+  ng "SIGTERM を無視" "rc=$(rc "${c}") elapsed=${elapsed}s $(outerr "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

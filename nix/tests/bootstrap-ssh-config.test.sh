@@ -16,7 +16,8 @@
 #   - 旧 .ssh submodule を指す symlink は外して張り替える
 #   - 同じ名前の通常のファイル・ほかを指す symlink は上書きせず警告する。名前の違う手置きには触らない
 #   - ssh/ が無い・空なら何も外さず張らずに exit 0
-#   - 旧 submodule の作業ツリーが残っていれば知らせる。知らない引数は exit 2
+#   - 旧 submodule の作業ツリーが手付かずなら消すコマンドを出し、変更・未 push の commit があるか
+#     確かめられないなら警告だけにする。知らない引数は exit 2
 #
 # ## script の置き場所
 #
@@ -170,16 +171,58 @@ else
   ng "ssh/ が空" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
-# 8. 旧 submodule の作業ツリーが残っていれば知らせる (消さない)
+# 旧 submodule の作業ツリーに見立てた git の repo を作る。$1: ケース
+legacy_repo() {
+  git -c init.defaultBranch=main init -q "$1/repo/.ssh"
+  mkdir -p "$1/repo/.git/modules/.ssh"
+}
+legacy_commit() {
+  git -C "$1/repo/.ssh" -c user.name=tester -c user.email=tester@example.test commit -q --allow-empty -m local
+}
+
+# 8. 旧 submodule の作業ツリーが手付かずで残っていれば、消すコマンドを出す (消さない)
 c=$(new_case t8)
-mkdir -p "${c}/repo/.ssh" "${c}/repo/.git/modules/.ssh"
-printf 'gitdir: ../.git/modules/.ssh\n' >"${c}/repo/.ssh/.git"
+legacy_repo "${c}"
 run "${c}"
 if [[ $(rc "${c}") == 0 && -e ${c}/repo/.ssh/.git ]] \
   && grep -qF "rm -rf '${c}/repo/.ssh' '${c}/repo/.git/modules/.ssh'" "${c}/out"; then
-  ok "旧 submodule の作業ツリーが残っていれば、消すコマンドを出す (自分では消さない)"
+  ok "旧 submodule の作業ツリーが手付かずで残っていれば、消すコマンドを出す (自分では消さない)"
 else
   ng "作業ツリーの残り" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 8b. commit していないファイルがあれば、消すコマンドは出さずに警告する
+c=$(new_case t8b)
+legacy_repo "${c}"
+printf 'Host local\n' >"${c}/repo/.ssh/local.ssh_config"
+run "${c}"
+if [[ $(rc "${c}") == 0 && -e ${c}/repo/.ssh/local.ssh_config ]] && ! grep -q 'rm -rf' "${c}/out" \
+  && grep -q '旧 .ssh submodule の作業ツリーに' "${c}/err"; then
+  ok "旧 submodule に commit していない変更があれば、消すコマンドを出さずに警告する"
+else
+  ng "commit していない変更" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 8c. push していない commit があれば、消すコマンドは出さずに警告する
+c=$(new_case t8c)
+legacy_repo "${c}"
+legacy_commit "${c}"
+run "${c}"
+if [[ $(rc "${c}") == 0 ]] && ! grep -q 'rm -rf' "${c}/out" && grep -q '旧 .ssh submodule の作業ツリーに' "${c}/err"; then
+  ok "旧 submodule に push していない commit があれば、消すコマンドを出さずに警告する"
+else
+  ng "push していない commit" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 8d. 状態を確かめられない (.git が壊れている) ときも、消すコマンドは出さない
+c=$(new_case t8d)
+mkdir -p "${c}/repo/.ssh" "${c}/repo/.git/modules/.ssh"
+printf 'gitdir: ../.git/modules/.ssh\n' >"${c}/repo/.ssh/.git"
+run "${c}"
+if [[ $(rc "${c}") == 0 ]] && ! grep -q 'rm -rf' "${c}/out" && grep -q '旧 .ssh submodule の作業ツリーに' "${c}/err"; then
+  ok "旧 submodule の状態を確かめられなければ、消すコマンドを出さない"
+else
+  ng "確かめられない" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
 # 9. 知らない引数: exit 2

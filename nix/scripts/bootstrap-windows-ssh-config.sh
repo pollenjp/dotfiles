@@ -41,9 +41,10 @@
 # *.ssh_config で終わらないので Include されない。
 #
 # 書いたあとに ssh.exe -v -G nonexistent.invalid を流して、読んだファイルを確かめる (TKT-147)。
-# Bad owner or permissions が出た・置いたファイルが読まれない・旧 clone の ssh_config を読んだ、
-# のどれかなら、衝突と同じく ⚠ の枠で出して exit 1。ssh.exe を呼べない (interop が外れている
-# など) ときは、手で打つコマンドを出して exit 0。
+# Bad owner or permissions が出た・設定の誤りなどで読み終えられない (exit 255 など)・置いたファイルが
+# 読まれない・旧 clone の ssh_config を読んだ、のどれかなら、衝突と同じく ⚠ の枠で出して exit 1。
+# ssh.exe を呼べない (interop が外れているなど)・応答しない (時間切れ。SIGTERM を無視されたら
+# KILL する) ときは、手で打つコマンドを出して exit 0。
 
 set -eu -o pipefail
 
@@ -380,7 +381,8 @@ if ((! dry_run)); then
     manual_check
   else
     rc=0
-    out=$(timeout "${check_timeout}" ssh.exe -v -G nonexistent.invalid </dev/null 2>&1 >/dev/null) || rc=$?
+    # -k: SIGTERM を無視されても、少し待って KILL する (setup を止めない)
+    out=$(timeout -k 5 "${check_timeout}" ssh.exe -v -G nonexistent.invalid </dev/null 2>&1 >/dev/null) || rc=$?
     out=$(printf '%s\n' "${out}" | tr -d '\r')
     if grep -q 'Bad owner or permissions' <<<"${out}"; then
       check_failed+=("ssh.exe がアクセス権を理由に設定を読みませんでした (どの接続先でも exit 255 になります):")
@@ -388,12 +390,19 @@ if ((! dry_run)); then
         check_failed+=("  ${line}")
       done < <(grep -E 'Bad (owner|permissions)' <<<"${out}")
       check_failed+=("  .ssh の ACL を見る: icacls.exe '$(wslpath -w "${win_ssh}" 2>/dev/null || printf '%s' "${win_ssh}")'")
-    elif ! grep -q 'Reading configuration data' <<<"${out}"; then
-      warn "ssh.exe で確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません)。"
+    elif ((rc == 124 || rc == 126 || rc == 127 || rc == 137)) || ! grep -q 'Reading configuration data' <<<"${out}"; then
+      # 時間切れ (124・KILL の 137) と、起動できない (126・127) は、確かめられなかったものとして扱う
+      warn "ssh.exe で確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているか、ssh.exe が応答しません)。"
       if [[ -n ${out} ]]; then
         printf '%s\n' "${out}" | head -5 | sed 's/^/   /' >&2
       fi
       manual_check
+    elif ((rc != 0)); then
+      # 設定の誤りなどで読み終えられなかった。ssh.exe はどの接続先でも同じように失敗する
+      check_failed+=("ssh.exe が設定を読み終えられませんでした (終了コード ${rc}。どの接続先でも同じように失敗します):")
+      while IFS= read -r line; do
+        check_failed+=("  ${line}")
+      done < <(grep -v '^debug' <<<"${out}" | head -5)
     else
       # ssh.exe は C:\\Users\\<名前>/.ssh/config のように出すので、/ 区切りの小文字に揃えて末尾で比べる
       read_paths=$(sed -n 's/^debug1: Reading configuration data //p' <<<"${out}" \
