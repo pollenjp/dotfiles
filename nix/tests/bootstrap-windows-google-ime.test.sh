@@ -24,6 +24,7 @@
 #   - 単語登録の形の辞書 (comment の無い語) も取り込め、取り込んだ後は「同じ」
 #   - 辞書の衝突は語を出さず、辞書ごとの行の数だけを出す (--show-words で diff)
 #   - 入っているがまだ使っていない (置き先が無い) ときは、一度使ってから流し直すよう出す (exit 0)
+#   - --import は、同じディレクトリの Install-GoogleJapaneseInput.ps1 の変更では止まらない
 #
 # ## 偽の repo と dotfiles-private
 #
@@ -645,6 +646,23 @@ for t in "t31:Program Files (x86)" "t32:Program Files"; do
     ng "入っているが使っていない (${t#*:})" "rc=$(rc "${h}") $(outerr "${h}")"
   fi
 done
+
+# 33. --import は、同じディレクトリの Install-GoogleJapaneseInput.ps1 に commit していない変更 (版を上げる途中) があっても止まらない
+h=$(new_home t33 "${state_on}" 1)
+printf '# Install-GoogleJapaneseInput.ps1\n' >"${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
+git -C "${h}/repo" add -A
+git -C "${h}/repo" commit --quiet -m 'Install-GoogleJapaneseInput.ps1 を足した'
+run "${h}" 0
+put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
+printf "    [string]\$Version = '3.35.0.0',\n" >>"${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
+run "${h}" 0 --import
+if [[ $(rc "${h}") == 0 ]] && ! grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" \
+  && grep -qF '3.35.0.0' "${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1" \
+  && outerr "${h}" | grep -q '取り込みました'; then
+  ok "--import は Install-GoogleJapaneseInput.ps1 に commit していない変更があっても止まらず、テキストだけを取り込む"
+else
+  ng "--import と Install-GoogleJapaneseInput.ps1" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]
