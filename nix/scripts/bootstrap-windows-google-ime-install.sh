@@ -30,7 +30,9 @@
 #    (入っている版の方が新しい・固定した版が winget に無い・入っている版が読めないときは、打っても
 #    直らないので、揃えるコマンドの代わりに repo の版の上げ方・直し方・確かめ方を出す)。
 #    3 (入っていない) なら Install-GoogleJapaneseInput.ps1 -IfMissing で入れる。machine スコープの MSI
-#    なので Windows に UAC の確認が出る (その場にいて押せるはずの、新しいマシンで起きる)。どれも exit 0
+#    なので Windows に UAC の確認が出る (その場にいて押せるはずの、新しいマシンで起きる)。ただし固定した版が
+#    winget に無いときは、打っても入れられない (UAC も出ない) ので -IfMissing は打たず、直し方を出す。
+#    どれも exit 0。待つ上限は -Check が 120 秒、-IfMissing が 600 秒 (-Check が時間切れなら、そう出す)
 #
 # 上げる (入れ替える) のは setup からはしない。日本語入力は全部のアプリに読み込まれていて、入れ替えると
 # アプリや Windows の再起動が要ることがあるため。--apply を付けて手で流すと、-Check を付けずに流して揃える
@@ -195,6 +197,11 @@ if ((rc == 1 && header)); then
   warn_frame "Windows の Google 日本語入力が、dotfiles で固定した版と揃っていません" "${out}"
   exit 0
 fi
+# 入っていないが、固定した版が winget に無い: -IfMissing を打っても入れられない (UAC も出ない) ので、打たずに直し方を出す
+if ((rc == 3 && header)) && grep -qF 'winget show --versions に無い' <<<"${out}"; then
+  warn_frame "Windows に Google 日本語入力が入っていませんが、固定した版が winget に無いので入れられません" "${out}"
+  exit 0
+fi
 if ((rc == 3 && header)); then
   echo "Windows に Google 日本語入力が入っていないので、winget で固定した版を入れます (Install-GoogleJapaneseInput.ps1 -IfMissing)。"
   echo "Windows のデスクトップに UAC の確認が出たら「はい」を押してください (600 秒まで待ちます)。"
@@ -215,7 +222,11 @@ if ((rc == 3 && header)); then
   warn_frame "Windows に Google 日本語入力を入れられませんでした (終了コード ${rc})" "${out}"
   exit 0
 fi
-echo "!! pwsh.exe で Windows の Google 日本語入力を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+if ((rc == 124)); then
+  echo "!! pwsh.exe が 120 秒たっても終わりませんでした (時間切れ。winget の応答か、WSL の interop が止まっているかもしれません):" >&2
+else
+  echo "!! pwsh.exe で Windows の Google 日本語入力を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+fi
 if [[ -n ${out} ]]; then
   printf '%s\n' "${out}" | sed 's/^/   /' >&2
 fi

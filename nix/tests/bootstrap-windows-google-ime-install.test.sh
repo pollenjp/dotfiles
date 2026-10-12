@@ -13,11 +13,15 @@
 #
 #   - 配らないマシン・Install-GoogleJapaneseInput.ps1 が無いときは pwsh.exe を呼ばずに飛ばす
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
+#     (-Check が時間切れ (124) のときは、時間切れと出す)
 #   - -Check が 0 なら 1 行だけ。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す (上げはしない)。
 #     入っている版の方が新しいときは、揃えるコマンドの代わりに repo の版の上げ方を出す。固定した版が
 #     winget に無いときは repo の版の直し方、入っている版が読めないときは確かめ方を出す
 #   - -Check が 3 (入っていない) なら、UAC の確認が出ると先に出してから -IfMissing で入れる。入ったら
-#     一度使ってから流し直すよう出す。入れられない・時間切れなら ⚠ で囲んで知らせる
+#     一度使ってから流し直すよう出す。入れられない・時間切れなら ⚠ で囲んで知らせる。ただし固定した版が
+#     winget に無いときは、-IfMissing を打たず、UAC の案内も出さずに repo の版の直し方を出す
+#   - 偽の timeout が上限の秒数を記録し、-Check は 120 秒・-IfMissing は 600 秒で打つこと、UAC の案内が
+#     -IfMissing を打つより前に出ることを確かめる
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
 #   - jq が無くても exit 0 (知らない引数の 2 以外で 0 以外を返さない)
@@ -97,6 +101,15 @@ notlisted_out="Google 日本語入力 (winget の Google.JapaneseIME)
 ⚠ 固定した版が winget show --versions に無い (書き間違いか、winget から消えた) ので入れられない
 ⚠️ 固定した版 ${v} が winget に無い → Install-GoogleJapaneseInput.ps1 の -Version を winget show --id Google.JapaneseIME --versions にある版へ変える ⚠️"
 
+# Install-GoogleJapaneseInput.ps1 -Check の出力 (入っていないが、固定した版が winget に無い)
+missing_notlisted_out="Google 日本語入力 (winget の Google.JapaneseIME)
+  入っている版    : 入っていない
+⚠ 固定した版      : ${v} → 入れる
+  winget の最新版 : 3.35.6300.0
+⚠ winget pin      : 無し → 足す
+⚠ 固定した版が winget show --versions に無い (書き間違いか、winget から消えた) ので入れられない
+⚠️ 固定した版 ${v} が winget に無い → Install-GoogleJapaneseInput.ps1 の -Version を winget show --id Google.JapaneseIME --versions にある版へ変える ⚠️"
+
 # Install-GoogleJapaneseInput.ps1 -Check の出力 (入っていない)
 missing_out="Google 日本語入力 (winget の Google.JapaneseIME)
   入っている版    : 入っていない
@@ -147,6 +160,7 @@ new_home() {
 printf '%s\n' "$*" >>"${HOME}/pwsh-calls"
 case "$*" in
   *-IfMissing*)
+    cat "${HOME}/out" >"${HOME}/out-at-ifmissing"
     out=${FAKE_PWSH_OUT2-}
     rc=${FAKE_PWSH_RC2:-0}
     ;;
@@ -161,6 +175,16 @@ fi
 exit "${rc}"
 EOF
   } >"${h}/bin/pwsh.exe"
+  # 偽の timeout。上限 (秒) を記録して、残りをそのまま流す
+  {
+    printf '#!%s\n' "${BASH}"
+    cat <<'EOF'
+printf '%s\n' "$1" >>"${HOME}/timeout-calls"
+shift
+exec "$@"
+EOF
+  } >"${h}/bin/timeout"
+  chmod +x "${h}/bin/timeout"
   # 偽の wslpath。-w <パス> を C:\fake\<ファイル名> にする
   {
     printf '#!%s\n' "${BASH}"
@@ -250,7 +274,8 @@ h=$(new_home t6 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '揃っています' \
   && calls "${h}" | grep -q -- '-NoProfile' && calls "${h}" | grep -q -- '-Check' \
-  && calls "${h}" | grep -qF 'C:\fake\Install-GoogleJapaneseInput.ps1'; then
+  && calls "${h}" | grep -qF 'C:\fake\Install-GoogleJapaneseInput.ps1' \
+  && [[ $(cat "${h}/timeout-calls") == 120 ]]; then
   ok "揃っていれば 1 行だけ出して exit 0 (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
   ng "揃っている" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -337,6 +362,7 @@ fi
 h=$(new_home t10 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && outerr "${h}" | grep -q 'UAC の確認が出たら' \
+  && grep -q 'UAC の確認が出たら' "${h}/out-at-ifmissing" && [[ $(tr '\n' ' ' <"${h}/timeout-calls") == "120 600 " ]] \
   && outerr "${h}" | grep -q '入れました' && outerr "${h}" | grep -q '一度何か打ってから、setup --update を流し直して' \
   && calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && ! calls "${h}" | tail -n 1 | grep -q -- '-Check'; then
   ok "入っていなければ UAC が出ると出してから -IfMissing で入れ、一度使ってから流し直すよう出して exit 0"
@@ -374,6 +400,16 @@ else
   ng "3 だが出力が来ない" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
 
+# 13b. 入っていないが、固定した版が winget に無い (-Check が 3): -IfMissing は打たず、UAC の案内も出さずに、repo の版の直し方を出す
+h=$(new_home t13b "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_notlisted_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'winget に無いので、入れることも上げることもできません' \
+  && ! outerr "${h}" | grep -q 'UAC の確認が出たら' && ! outerr "${h}" | grep -qF -- '--apply'; then
+  ok "入っていなくても固定した版が winget に無ければ、-IfMissing を打たずに repo の版の直し方を出す"
+else
+  ng "入っていないが固定した版が winget に無い" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
+fi
+
 # 14. -Check が 2 (winget が無い・例外): 手で打つコマンドを出して exit 0
 h=$(new_home t14 "${state_on}" 1)
 FAKE_PWSH_RC=2 FAKE_PWSH_OUT='winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる' run "${h}" 0
@@ -382,6 +418,15 @@ if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '
   ok "-Check が 2 (winget が無い) なら、スクリプトの出力と手で打つコマンドを出して exit 0"
 else
   ng "-Check が 2" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 14b. -Check が 120 秒で時間切れ (124): 時間切れと出して、手で打つコマンドを出す (exit 0)
+h=$(new_home t14b "${state_on}" 1)
+FAKE_PWSH_RC=124 FAKE_PWSH_OUT='' run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '120 秒たっても終わりませんでした' && outerr "${h}" | grep -q 'Install-GoogleJapaneseInput -Check'; then
+  ok "-Check が時間切れなら、時間切れと出して手で打つコマンドを出す"
+else
+  ng "-Check の時間切れ" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 # 15. --apply: -Check も -IfMissing も付けずに流す。成功なら exit 0
