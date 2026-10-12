@@ -344,7 +344,8 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
   (setup は止めない)。次の `setup --update` でも、もう一度入れにいく
 - setup が待つ上限は、`-Check` が 60 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、そのまま読み直しへ進む
   (どちらでも setup は止めない)
-- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動すると、配った `default.json` を読む
+- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動すると、配った `default.json` を読むはず
+  (読むかは次の箇条のとおり、まだ確かめていない)
 - 入れたばかりのマシンで、Keyboard Manager が配った割り当てを読むか (`settings.json` ができるか) は、まだ確かめていない
   (次の新しいマシンで確かめる。ADR 017 §1 の 7)
 
@@ -454,8 +455,8 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
   (UAC も出さず)、repo の版 (`-Version` の既定値) の直し方を出す
 - 入っている版が読めないときと、固定した版が winget に無いときは、揃えるコマンドを打っても直らないので、
   その代わりにそれぞれの直し方 (入っている版の確かめ方・repo の版の直し方) を出す
-- setup が入れるときに UAC を押さないまま 600 秒たつと、⚠ と手で打つコマンドを出して先へ進む
-- setup が待つ上限は、`-Check` が 120 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、先へ進む (setup は止めない)
+- setup が待つ上限は、`-Check` が 120 秒、入れる `-IfMissing` が 600 秒。時間切れになったらそう出して先へ進む (setup は止めない)。
+  入れるときに UAC の確認を押さないまま 600 秒たった場合は、⚠ で囲んで、手で打つコマンドも出す
 
 新しいマシンでは setup を 2 回流す (98 の置き先は、Google 日本語入力を初めて使ったときにできるため):
 
@@ -463,14 +464,22 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
 2. Google 日本語入力で一度何か打つ (入力方式が別なら切り替えてから)
 3. もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
 
+新しいマシンで通しては、まだ確かめていない (ADR 017 §6)。2 回目に 98 が衝突を出したら (初回の起動で `config1.db` ができていると、
+置いた記録が無いので衝突になる)、`--import` (Windows 側を残す。[Google 日本語入力](#google-日本語入力)) か
+`--force` (repo 側で置き直す) を選ぶ
+
 版を上げる:
 
 1. `Install-GoogleJapaneseInput.ps1` の `-Version` の既定値を、`winget show --id Google.JapaneseIME --versions` にある新しい版にする
-2. この PC で `Install-GoogleJapaneseInput` を打って揃え、`nix/scripts/bootstrap-windows-google-ime.sh --dry-run` と
+2. `nix/scripts/bootstrap-windows-files.sh` を流して、書き換えた `Install-GoogleJapaneseInput.ps1` を Windows へ配る
+   (commit していなくても、作業ツリーのものが配られる。PowerShell の `Install-GoogleJapaneseInput` は配った方を呼ぶので、
+   配るまでは古い `-Version` のまま動く)
+3. この PC で `Install-GoogleJapaneseInput` を打って揃え、`nix/scripts/bootstrap-windows-google-ime.sh --dry-run` と
    `--import` で設定を読み書きできるかを見る (`--import` は `Install-GoogleJapaneseInput.ps1` の変更では止まらない)
-3. `--import` が「今の .proto に無い項目がある」で止まったら、`nix/pkgs/pjp-google-ime/proto/` の写しを新しくする
+4. `--import` が「今の .proto に無い項目がある」で止まったら、`nix/pkgs/pjp-google-ime/proto/` の写しを新しくする
    ([pjp-google-ime](#pjp-google-ime))
-4. commit して `~/dotfiles/setup --update` を流し、`bootstrap-windows-google-ime-install.sh` が 1 行で終わることを見る
+5. commit して `~/dotfiles/setup --update` を流し、`bootstrap-windows-google-ime-install.sh` が「揃っています」の 1 行
+   (winget にもっと新しい版があれば ※ の補足も) で終わることを見る
 
 ### Install-GoogleJapaneseInput.ps1 を書くときの注意
 

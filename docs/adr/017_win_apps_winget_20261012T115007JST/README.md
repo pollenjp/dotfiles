@@ -110,8 +110,8 @@ Mozc の `UserProfileDirectoryImpl::GetDir()` (`src/base/system_util.cc`) が、
 | `-Check` | 95 がすること |
 | --- | --- |
 | 0 | 1 行を出す (winget に新しい版があるなどの ※ の補足があれば、それも添える) |
-| 1 | ⚠ で囲み、状態の表と揃えるコマンド (`Install-GoogleJapaneseInput`) を出す |
-| 3 | `-IfMissing` で入れる。UAC の確認が出ることを先に出し、上限 600 秒で待つ |
+| 1 | ⚠ で囲み、状態の表と揃えるコマンド (`Install-GoogleJapaneseInput`) を出す。入っている版の方が新しい・版が読めない・固定した版が winget に無いときは、打っても直らないので、揃えるコマンドの代わりにそれぞれの直し方 (repo の版の上げ方・`winget list` での確かめ方・`-Version` の直し方) を出す |
+| 3 | `-IfMissing` で入れる。UAC の確認が出ることを先に出し、上限 600 秒で待つ。固定した版が winget に無ければ、打っても入れられない (UAC も出ない) ので入れにいかず、`-Version` の直し方を出す |
 | ほか | interop・pwsh.exe・winget の失敗や時間切れ。手で打つコマンドを出して飛ばす |
 
 - どの場合も exit 0 (setup を止めない)。`--apply` を付けて手で流すと、`-Check` を付けずに流して揃える (OpenSSH の 96 と同じ)
@@ -170,7 +170,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | `win/manifest.toml`・`win/powershell/dotfiles.ps1` | 2 つのスクリプトを配る・関数を足す |
 | `win/README.md`・`nix/README.md` | 使い方 (「Google 日本語入力を入れる」「PowerToys を入れる」と、スクリプトを書くときの注意)・bootstrap の実行順・新しいマシンの手順・テストの表・ディレクトリの木 |
 | `docs/adr/README.md` | 一覧に 017 を足す |
-| `docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md` | 冒頭の表に後続 ADR (この ADR) の行。§7「新しいマシン」を今の形に (本文の決定はそのまま) |
+| `docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md` | 冒頭の表に後続 ADR (この ADR) の行を置き、§7 (新しいマシンの手順と `--import` の文) を今の形にする (§1〜§6 の本文の決定はそのまま) |
 
 ---
 
@@ -244,5 +244,6 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 ### 版を上げる
 
 1. `Install-GoogleJapaneseInput.ps1` の `-Version` の既定値を新しい版にする
-2. この PC で `Install-GoogleJapaneseInput` を打って揃え、98 の `--dry-run` と `--import` で設定を読み書きできるかを見る
-3. .proto に無い項目が出たら、`nix/pkgs/pjp-google-ime/proto/` の写しを新しくする (ADR 015)
+2. `nix/scripts/bootstrap-windows-files.sh` を流して、書き換えたスクリプトを Windows へ配る (commit していなくても、作業ツリーのものが配られる。PowerShell の `Install-GoogleJapaneseInput` と 95 の `--apply` は、配ったスクリプトを呼ぶ)
+3. この PC で `Install-GoogleJapaneseInput` を打って揃え、98 の `--dry-run` と `--import` で設定を読み書きできるかを見る
+4. .proto に無い項目が出たら、`nix/pkgs/pjp-google-ime/proto/` の写しを新しくする (ADR 015)
