@@ -2,35 +2,40 @@
 # shellcheck shell=bash
 #
 # win/ から配った PowerToys の Keyboard Manager の割り当て (default.json) を、Keyboard Manager に読み直させる。
-# 冪等。`setup.sh --update` でも毎回走る。
+# 冪等。`setup.sh --update` でも毎回走る。PowerToys が入っていなければ、先に winget で入れる。
 #
 # order: 91
 #
-# ^ setup.sh が読む実行順。bootstrap-windows-files.sh (order: 90) が default.json を置いた後に
-#   走らせる。仕組みは nix/README.md「bootstrap の実行順」。
+# ^ setup.sh が読む実行順。bootstrap-windows-files.sh (order: 90) が default.json と
+#   Install-PowerToys.ps1 を置いた後に走らせる。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
 #
 # Keyboard Manager のエンジンは、起動したときと、名前付きイベント
 # PowerToys_KeyboardManager_Event_Settings を受けたときにしか default.json を読まない
 # (docs/adr/015_win_google_ime_powertoys_*)。win/ の割り当てを配っても、そのままでは効かない。
+# 新しいマシンでは PowerToys そのものが入っていないので、読み直させる前に入れる (docs/adr/016_win_apps_winget_*)。
 #
 # ## 何をするか
 #
-# 1. ~/.local/state/dotfiles/windows-files.json を読み、配らないマシンなら飛ばす。
-#    <windowsHome>/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json が無いときも飛ばす
-# 2. default.json の sha256 が、前回読み直させたときの記録
+# 1. ~/.local/state/dotfiles/windows-files.json を読み、配らないマシンなら飛ばす
+# 2. pwsh.exe で <windowsHome>/.config/powershell/Install-PowerToys.ps1 -Check を流し、3 (入っていない) なら
+#    -IfMissing で入れる (user スコープ。管理者は要らない)。版は固定しないので、入っていれば何もしない。
+#    スクリプトが無い・interop が使えない・入れられないときは、知らせて 3 へ進む
+# 3. <windowsHome>/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json が無ければ飛ばす
+# 4. default.json の sha256 が、前回読み直させたときの記録
 #    (~/.local/state/dotfiles/powertoys-keyboard-manager.reloaded) と同じなら何もしない (--force なら比べない)
-# 3. powershell.exe でイベントを送る。送れたら記録する。イベントが無い (PowerToys が動いていない) ときも
+# 5. powershell.exe でイベントを送る。送れたら記録する。イベントが無い (PowerToys が動いていない) ときも
 #    記録する (起動したときに読むため)。interop が使えなければ手で読み直す方法を出し、記録しない
 #
-# どの場合も exit 0 (後ろの手順を止めない)。
+# どの場合も exit 0 (後ろの手順を止めない)。知らない引数だけ exit 2。
 
 set -eu -o pipefail
 
 usage() {
   cat <<'EOS'
 win/ から配った PowerToys の Keyboard Manager の割り当て (default.json) を、Keyboard Manager に読み直させる。
+PowerToys が入っていなければ、先に winget で入れる。
 
 使い方:
   bootstrap-windows-powertoys.sh          前回から変わっていれば読み直させる
@@ -54,12 +59,114 @@ for arg in "$@"; do
   esac
 done
 
+script_dir=$(
+  cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null || exit
+  pwd -P
+)
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
 record_file="${HOME}/.local/state/dotfiles/powertoys-keyboard-manager.reloaded"
 event=PowerToys_KeyboardManager_Event_Settings
 
+# ⚠ の枠を色付きで出すか。端末のときだけ (パイプや NO_COLOR では付けない)
+if [[ -t 2 && -z ${NO_COLOR-} ]]; then
+  c_warn=$'\e[1;33m'
+  c_reset=$'\e[0m'
+else
+  c_warn=""
+  c_reset=""
+fi
+
 manual() {
   echo "   PowerToys の設定 → Keyboard Manager を一度オフにしてオンに戻すと、読み直します。" >&2
+}
+
+# PowerToys が入っているかを自動で確かめられないときに、手で確かめて入れるコマンドを出す
+install_manual() {
+  echo "   Windows の PowerShell で次を打つと、確かめて、入っていなければ入れられます:" >&2
+  echo "     Install-PowerToys" >&2
+}
+
+# CRLF と、PowerShell が付けうる色のエスケープを落とす (枠の色はこちらで付ける)
+esc=$'\e'
+clean() {
+  tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g"
+}
+
+# ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)
+rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
+warn_frame() {
+  {
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+    printf '%s⚠️  %s%s\n' "${c_warn}" "$1" "${c_reset}"
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+    # PowerShell の締めの 1 行 (⚠️ … → Install-PowerToys …) は、下の入れるコマンドと重なるので落とす
+    printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
+    printf '%s⚠️  入れるには次のどちらかを打つ (管理者は要りません):%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️    WSL:        %s/bootstrap-windows-powertoys.sh (流し直すと、もう一度入れにいく)%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
+    printf '%s⚠️    PowerShell: Install-PowerToys%s\n' "${c_warn}" "${c_reset}"
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+  } >&2
+}
+
+# pwsh.exe に渡すコマンド (95・97 の pwsh_command と同じ形)。$1 はスクリプトに渡す引数 (" -Check" など)。
+# 呼ぶ前に $LASTEXITCODE を 2 にしておく。スクリプトが exit まで届かずに終わったときに、中で打った
+# 外部コマンドの 0 を返して成功に見せないため。${quoted} は呼ぶ側 (install_powertoys) の local を読む
+pwsh_command() {
+  echo "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \$global:LASTEXITCODE = 2; & '${quoted}'$1; exit \$LASTEXITCODE"
+}
+
+# PowerToys が入っていなければ、Install-PowerToys.ps1 -IfMissing で入れる (docs/adr/016_win_apps_winget_*)。
+# 入っているかは -Check (PowerToys.exe があるか) で見る。何があっても 0 を返し、読み直しへ進む
+install_powertoys() {
+  local deployed="${windows_home}/.config/powershell/Install-PowerToys.ps1"
+  local win_script quoted rc out header=0
+  if [[ -z ${windows_home} || ! -f ${deployed} ]]; then
+    echo "Install-PowerToys.ps1 がまだ配られていません (${deployed})。PowerToys が入っているかは確かめずに進みます。"
+    return 0
+  fi
+  if ! command -v pwsh.exe &>/dev/null; then
+    echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。PowerToys が入っているかを確かめられません。" >&2
+    install_manual
+    return 0
+  fi
+  if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]]; then
+    echo "!! Install-PowerToys.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" >&2
+    install_manual
+    return 0
+  fi
+  quoted=${win_script//\'/\'\'}
+  rc=0
+  out=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -Check")" </dev/null 2>&1) || rc=$?
+  out=$(printf '%s\n' "${out}" | clean)
+  # 入っていないときの出力には、状態の表の見出し (パッケージ名) が必ず入る。
+  # 3 でも見出しが無ければ、スクリプトが動いていない (入っていないとは扱わない)
+  if grep -qF 'Microsoft.PowerToys' <<<"${out}"; then
+    header=1
+  fi
+  if ((rc == 0)); then
+    echo "PowerToys は入っています。"
+    return 0
+  fi
+  if ((rc == 3 && header)); then
+    echo "Windows に PowerToys が入っていないので、winget で入れます (Install-PowerToys.ps1 -IfMissing。user スコープ)。"
+    # installer のダウンロードを待つので長めに待つ
+    rc=0
+    out=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
+    out=$(printf '%s\n' "${out}" | clean)
+    if ((rc == 0)); then
+      printf '%s\n' "${out}" | sed 's/^/  /'
+      echo "Windows に PowerToys を入れました。動いていなければ、スタートメニューから PowerToys を起動してください。"
+      return 0
+    fi
+    warn_frame "Windows に PowerToys を入れられませんでした (終了コード ${rc})" "${out}"
+    return 0
+  fi
+  echo "!! pwsh.exe で PowerToys が入っているかを確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+  if [[ -n ${out} ]]; then
+    printf '%s\n' "${out}" | sed 's/^/   /' >&2
+  fi
+  install_manual
+  return 0
 }
 
 if ! command -v jq &>/dev/null; then
@@ -75,6 +182,9 @@ if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   exit 0
 fi
 windows_home=$(jq -r '.windowsHome // ""' "${state_file}")
+
+install_powertoys
+
 default_json="${windows_home}/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json"
 if [[ -z ${windows_home} || ! -f ${default_json} ]]; then
   echo "Keyboard Manager の default.json がまだありません (${default_json})。この手順は飛ばします。"
