@@ -29,9 +29,9 @@
 
 ### 設計を縛る事実
 
-#### 1. 2 つとも winget にあり、手で入れたものも ID で見える
+#### 1. 2 つとも winget にあり、入っている版を ID で引ける
 
-この PC の 2 つは winget で入れていないが、`winget list --id <ID> --exact` で ID と版が出た (2026-10-12)。
+`winget list --id <ID> --exact` で、2 つとも ID と版が出た (2026-10-12)。
 
 ```text
 Name              Id                 Version     Available   Source
@@ -40,6 +40,10 @@ Google 日本語入力 Google.JapaneseIME 2.29.5370.0 3.34.6260.0 winget
 Name                    Id                  Version Available    Source
 PowerToys (Preview) x64 Microsoft.PowerToys 0.100.2 0.101.2362.0 winget
 ```
+
+- 設計の時点では、この PC の 2 つは winget で入れていないと考えていた。Google 日本語入力は違っていて、2.29.5370.0 は winget で入れたものだった (実装の確認で分かった)
+- ARP の `InstallSource` が `%TEMP%\WinGet\Google.JapaneseIME.2.29.5370.0\` (2024-12-09) で、ProductCode は winget-pkgs の 2.29.5370.0 の manifest と同じ
+- 2.29.5370.0 と 3.34.6260.0 の MSI は UpgradeCode が同じ (`{C1A818AF-6EC9-49EF-ADCF-35A40475D156}`) で、`winget upgrade` は MSI の major upgrade として古い版を置き換えた (§6)
 
 #### 2. Google 日本語入力は machine スコープの MSI だけで、管理者権限が要る
 
@@ -55,7 +59,7 @@ winget-pkgs の `Google.JapaneseIME` 3.34.6260.0 の installer manifest は `Ins
 
 - `C:\Program Files (x86)\Google\Google Japanese Input\GoogleIMEJaConverter.exe` の ProductVersion は `2.29.5370.0` (FileVersion は `2.29.5370.0  (build 63)`)
 - winget の最新は `3.34.6260.0` (2026-07-27)。この PC では自分で上がっていない
-- 3.34 の MSI (`GoogleJapaneseInput64-3.34.6260.0.msi`) は 64 ビットの MSI だが、winget の 2.29.5370.0 も 64 ビットの MSI で、この PC では x86 の側に入っている。Mozc の `installer_64bit.wxs` は `ProgramFilesFolder` (= `C:\Program Files (x86)`) の下に入れるので、3.34 も x86 の側に入る見込み (まだ確かめていない)。コードは `C:\Program Files\` と `C:\Program Files (x86)\` の両方を見る
+- 3.34 の MSI (`GoogleJapaneseInput64-3.34.6260.0.msi`) は 64 ビットの MSI だが、winget の 2.29.5370.0 も 64 ビットの MSI で、この PC では x86 の側に入っている。Mozc の `installer_64bit.wxs` は `ProgramFilesFolder` (= `C:\Program Files (x86)`) の下に入れるので、3.34 も x86 の側に入る見込みだった。この PC で上げると、3.34.6260.0 も `C:\Program Files (x86)\Google\Google Japanese Input` に入った (§6)。コードは `C:\Program Files\` と `C:\Program Files (x86)\` の両方を見る
 
 #### 5. pjp-google-ime の .proto は 3.34 より新しい
 
@@ -225,17 +229,17 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | 版の読み方 | `GoogleIMEJaConverter.exe` の VersionInfo | ProductVersion が `2.29.5370.0` で、winget の版と同じ書き方 |
 | PowerToys の場所 | `PowerToys.exe` の有無 | `%LOCALAPPDATA%\PowerToys\` にあり、`C:\Program Files\PowerToys\` には無い |
 
-実装で確かめること (実装の PR で結果を埋める)。
+実装で確かめたこと (2026-10-12、TKT-143 の PR。実機はこの PC)。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
-| 副作用の無い関数 | `Install-GoogleJapaneseInput.Tests.ps1`・`Install-PowerToys.Tests.ps1` (Linux の pwsh) | — |
-| bootstrap | nix/tests/ のテスト (偽の pwsh.exe) | — |
-| 静的 | `nixfmt` / `shfmt` / `shellcheck` | — |
-| 実機: 91 | PowerToys が入っているので、入れずに今までどおり読み直させる | — |
-| 実機: 95 のずれ | 2.29.5370.0 と 3.34.6260.0 のずれを ⚠ で出す | — |
-| 実機: 揃える | `Install-GoogleJapaneseInput` で 3.34.6260.0 に上げる (UAC)。上げた後の 95 は 1 行 | — |
-| 実機: 上げた後の設定 | 98 の `--dry-run`・`--import` で、3.34 の設定と辞書を読み書きできる。句読点を変えて配ると効く | — |
+| 副作用の無い関数 | `Install-GoogleJapaneseInput.Tests.ps1`・`Install-PowerToys.Tests.ps1` (Linux の pwsh) | `Install-GoogleJapaneseInput.Tests.ps1` 87 件・`Install-PowerToys.Tests.ps1` 29 件、すべて通過 |
+| bootstrap | nix/tests/ のテスト (偽の pwsh.exe) | Google 日本語入力の版 29 件・PowerToys 29 件・Google 日本語入力の設定 41 件、すべて通過 |
+| 静的 | `nixfmt` / `shfmt` / `shellcheck` | 指摘なし |
+| 実機: 91 | PowerToys が入っているので、入れずに今までどおり読み直させる | 「PowerToys は入っています。」のあと「Keyboard Manager は、今の default.json を読み直し済みです。」(rc 0)。winget は打たなかった |
+| 実機: 95 のずれ | 2.29.5370.0 と 3.34.6260.0 のずれを ⚠ で出す | ⚠ の枠に「2.29.5370.0 (`C:\Program Files (x86)\Google\Google Japanese Input`)」「3.34.6260.0 → 上げる」「winget pin 無し → 足す」と揃えるコマンドが出た (rc 0) |
+| 実機: 揃える | `Install-GoogleJapaneseInput` で 3.34.6260.0 に上げる (UAC)。上げた後の 95 は 1 行 | 95 の `--apply` (配った `Install-GoogleJapaneseInput.ps1` を WSL から呼ぶ。setup の `-IfMissing` と同じ経路) で上げた。winget がインストーラのハッシュを確かめて入れ、「Restart your PC to finish installation.」を出した。続けて pin を足し、読み直すと 3.34.6260.0 (x86 の側のまま) で「揃った」(rc 0)。UAC の確認は 1 回だけで、pin を足すときは出なかった。Windows を再起動した後の 95 は「揃っています」の 1 行 |
+| 実機: 上げた後の設定 | 98 の `--dry-run`・`--import` で、3.34 の設定と辞書を読み書きできる。句読点を変えて配ると効く | `--dry-run` は再起動の前も後も「同じです」が 2 つ。`--import` は「テキストは今のままで同じです。」で通り (rc 0)、dotfiles と dotfiles-private の `git status` は空 (3.34 の `config1.db` と `user_dictionary.db` を今の .proto で読めた)。句読点を `COMMA_PERIOD` にして配ると「，．」になり、戻して配ると「、。」に戻った |
 | 新しいマシン | `-IfMissing` で 2 つが入る・入れた直後に置き先 (`AppData/LocalLow/Google/Google Japanese Input`) があるか・setup を (置き先がまだ無ければ 2 回) 流すと揃う・設定画面を一度開いた後に、91 が読み直させて割り当てが効く | まだ (次の新しいマシンで確かめる) |
 
 ---
@@ -244,9 +248,10 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 
 ### この PC
 
-1. merge の後に `~/dotfiles/setup --update` を流す。95 が「2.29.5370.0 と 3.34.6260.0 がずれている」と ⚠ で知らせる
-2. 日本語入力を使っているアプリをできるだけ閉じ、PowerShell で `Install-GoogleJapaneseInput` を打つ (UAC を押す)
-3. もう一度 `~/dotfiles/setup --update` を流し、95 が 1 行になり、98 が「同じです」か衝突を出すことを見る (衝突なら `--import` で取り込む)
+Google 日本語入力は、実装の確認で 3.34.6260.0 に上げて pin も足してある (§6)。
+
+1. merge の後に `~/dotfiles/setup --update` を流す (main の `win/` から配り直す)
+2. 95 が「揃っています」の 1 行、91 が「PowerToys は入っています。」のあと読み直し済み、98 が「同じです」を出すことを見る (98 が衝突を出したら `--import` で取り込む)
 
 ### 新しいマシン
 
