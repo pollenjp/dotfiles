@@ -158,10 +158,18 @@ install_powertoys() {
       echo "Windows に PowerToys を入れました。動いていなければ、スタートメニューから PowerToys を起動してください。"
       return 0
     fi
+    if ((rc == 124)); then
+      warn_frame "Windows に PowerToys を入れられませんでした (600 秒待っても終わらない。Windows 側でまだ入れている途中かもしれません)" "${out}"
+      return 0
+    fi
     warn_frame "Windows に PowerToys を入れられませんでした (終了コード ${rc})" "${out}"
     return 0
   fi
-  echo "!! pwsh.exe で PowerToys が入っているかを確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+  if ((rc == 124)); then
+    echo "!! pwsh.exe が 60 秒たっても終わりませんでした (時間切れ。WSL の interop が止まっているかもしれません):" >&2
+  else
+    echo "!! pwsh.exe で PowerToys が入っているかを確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+  fi
   if [[ -n ${out} ]]; then
     printf '%s\n' "${out}" | sed 's/^/   /' >&2
   fi

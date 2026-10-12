@@ -106,6 +106,7 @@ EOF
 printf '%s\n' "$*" >>"${HOME}/pwsh-calls"
 case "$*" in
   *-IfMissing*)
+    cat "${HOME}/out" >"${HOME}/out-at-ifmissing"
     out=${FAKE_PWSH_OUT2-}
     rc=${FAKE_PWSH_RC2:-0}
     ;;
@@ -120,6 +121,15 @@ fi
 exit "${rc}"
 EOF
   } >"${h}/bin/pwsh.exe"
+  # 偽の timeout。上限 (秒) と呼ぶコマンドを記録して、残りをそのまま流す
+  {
+    printf '#!%s\n' "${BASH}"
+    cat <<'EOF'
+printf '%s %s\n' "$1" "$2" >>"${HOME}/timeout-calls"
+shift
+exec "$@"
+EOF
+  } >"${h}/bin/timeout"
   # 偽の wslpath。-w <パス> を C:\fake\<ファイル名> にする
   {
     printf '#!%s\n' "${BASH}"
@@ -128,7 +138,7 @@ EOF
 printf 'C:\\fake\\%s\n' "${2##*/}"
 EOF
   } >"${h}/bin/wslpath"
-  chmod +x "${h}/bin/powershell.exe" "${h}/bin/pwsh.exe" "${h}/bin/wslpath"
+  chmod +x "${h}/bin/powershell.exe" "${h}/bin/pwsh.exe" "${h}/bin/wslpath" "${h}/bin/timeout"
   echo "${h}"
 }
 
@@ -266,7 +276,8 @@ run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'PowerToys は入っています' \
   && outerr "${h}" | grep -q '読み直させました' && pwsh_calls "${h}" | grep -q -- '-NoProfile' \
   && pwsh_calls "${h}" | grep -q -- '-Check' && ! pwsh_calls "${h}" | grep -q -- '-IfMissing' \
-  && pwsh_calls "${h}" | grep -qF 'C:\fake\Install-PowerToys.ps1'; then
+  && pwsh_calls "${h}" | grep -qF 'C:\fake\Install-PowerToys.ps1' \
+  && [[ $(head -n 1 "${h}/timeout-calls") == "60 pwsh.exe" ]]; then
   ok "入っていれば入れずに読み直させる (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
   ng "入っている" "rc=$(rc "${h}") calls=$(pwsh_calls "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -293,7 +304,9 @@ h=$(new_home t13 "${state_on}" 1 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${added_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] \
   && pwsh_calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && outerr "${h}" | grep -q 'PowerToys を入れました' \
-  && outerr "${h}" | grep -q '読み直させました' && ! outerr "${h}" | grep -q '⚠️'; then
+  && outerr "${h}" | grep -q '読み直させました' && ! outerr "${h}" | grep -q '⚠️' \
+  && [[ $(tr '\n' ',' <"${h}/timeout-calls") == "60 pwsh.exe,600 pwsh.exe,60 powershell.exe," ]] \
+  && grep -q 'winget で入れます' "${h}/out-at-ifmissing"; then
   ok "入っていなければ -IfMissing で入れてから読み直させる"
 else
   ng "入っていない → 入れる" "rc=$(rc "${h}") calls=$(pwsh_calls "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -301,17 +314,18 @@ fi
 
 # 14. 入れられない (-IfMissing が 1): ⚠ で囲んで知らせ、それでも読み直しへ進む
 h=$(new_home t14 "${state_on}" 1 1)
-FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='winget が失敗した (終了コード 0x8A150011)' run "${h}" 0
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2=$'winget が失敗した (終了コード 0x8A150011)\e[0m' run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'PowerToys を入れられませんでした (終了コード 1)' \
   && outerr "${h}" | grep -qF '0x8A150011' && outerr "${h}" | grep -qF 'PowerShell: Install-PowerToys' \
-  && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]] && ! outerr "${h}" | grep -q $'\e\['; then
+  && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]] && ! outerr "${h}" | grep -q $'\e\[' \
+  && ! outerr "${h}" | grep -q $'\r'; then
   ok "入れられなければ ⚠ で囲んで知らせ、読み直しへ進んで exit 0 (端末でなければ色を付けない)"
 else
   ng "入れられない" "rc=$(rc "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
 fi
 
 # 15. -Check が 3 でもこちらの出力が無い・pwsh.exe が失敗する: 入れには行かず、手で打つコマンドを出して読み直しへ進む
-for t in "3:Exec format error" "126:"; do
+for t in "3:Exec format error" "126:" "2:PowerToys (winget の Microsoft.PowerToys。版は固定しない)"; do
   h=$(new_home "t15-${t%%:*}" "${state_on}" 1 1)
   FAKE_PWSH_RC=${t%%:*} FAKE_PWSH_OUT=${t#*:} run "${h}" 0
   if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '確かめられませんでした' \
@@ -321,6 +335,26 @@ for t in "3:Exec format error" "126:"; do
     ng "pwsh.exe の失敗 (rc=${t%%:*})" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
   fi
 done
+
+# 15b. -Check が 60 秒で時間切れ (124): 時間切れと出し、入れには行かず、手で打つコマンドを出して読み直しへ進む
+h=$(new_home t15b "${state_on}" 1 1)
+FAKE_PWSH_RC=124 FAKE_PWSH_OUT='' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '60 秒たっても終わりませんでした' \
+  && outerr "${h}" | grep -qF 'Install-PowerToys'; then
+  ok "-Check が時間切れなら、時間切れと出して手で打つコマンドを出し、読み直しへ進む"
+else
+  ng "-Check の時間切れ" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
+fi
+
+# 15c. -IfMissing が 600 秒で時間切れ (124): ⚠ で囲んで 600 秒待ったと出し、読み直しへ進む
+h=$(new_home t15c "${state_on}" 1 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '600 秒待っても終わらない' \
+  && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]]; then
+  ok "-IfMissing が時間切れなら、⚠ で囲んで 600 秒待ったと出し、読み直しへ進む"
+else
+  ng "-IfMissing の時間切れ" "rc=$(rc "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
+fi
 
 # 16. pwsh.exe が無い (powershell.exe はある): 手で打つコマンドを出して、読み直しへ進む
 h=$(new_home t16 "${state_on}" 1 1)
