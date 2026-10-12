@@ -1,0 +1,49 @@
+@startuml
+' bootstrap-windows-ssh-config.sh が書いたあとに行う確かめ (TKT-147 の ssh -v -G)
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #666666
+  DiamondBackgroundColor #F7F7F7
+  DiamondBorderColor #666666
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title 書いたあとの確かめ（bootstrap-windows-ssh-config.sh）
+
+start
+:ssh.exe -v -G nonexistent.invalid を流す
+（接続はしない）;
+if (ssh.exe を呼べた?) then (呼べない)
+  :interop が外れている・ssh.exe が無い
+  手で打つ確かめのコマンドを出して exit 0;
+  stop
+else (呼べた)
+endif
+if (Bad owner or permissions が出た?) then (出た)
+  :⚠ の枠で出し、icacls で ACL を見る
+  コマンドを添えて exit 1; <<#FFE6CC>>
+  stop
+elseif (置いたファイルが全部
+Reading configuration data に出た?) then (出ないものがある)
+  :⚠ の枠で、読まれなかったファイルを出して exit 1; <<#FFE6CC>>
+  stop
+elseif (旧 clone の ssh_config を読んだ?) then (読んだ)
+  :⚠ の枠で出して exit 1; <<#FFE6CC>>
+  stop
+else (揃っている)
+  :1 行出して exit 0; <<#D5E8D4>>
+endif
+stop
+
+legend right
+  |<#D5E8D4> 揃っている |
+  |<#FFE6CC> ssh.exe が設定を読めない・旧 clone を読んでいる（要対応） |
+  |<#F7F7F7> 確かめられなかった（手で打つ） |
+  アクセス権で弾かれると、ssh.exe はどの接続先でも exit 255 になる
+endlegend
+@enduml
