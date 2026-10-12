@@ -16,17 +16,20 @@ skinparam legend {
 title 書いたあとの確かめ（bootstrap-windows-ssh-config.sh）
 
 start
-:ssh.exe -v -G nonexistent.invalid を流す
+:timeout -k 5 で ssh.exe -v -G nonexistent.invalid を流す
 （接続はしない）;
-if (ssh.exe を呼べた?) then (呼べない)
-  :interop が外れている・ssh.exe が無い
-  手で打つ確かめのコマンドを出して exit 0;
-  stop
-else (呼べた)
-endif
 if (Bad owner or permissions が出た?) then (出た)
   :⚠ の枠で出し、icacls で ACL を見る
   コマンドを添えて exit 1; <<#FFE6CC>>
+  stop
+elseif (呼べない・時間切れ?
+（126・127・124・137、Reading の行が無い）) then (そう)
+  :interop が外れている・ssh.exe が無い・応答しない
+  手で打つ確かめのコマンドを出して exit 0;
+  stop
+elseif (終了コードが 0 以外?) then (0 以外)
+  :設定の誤りなどで読み終えられない
+  ⚠ の枠で ssh.exe のエラーの行を添えて exit 1; <<#FFE6CC>>
   stop
 elseif (置いたファイルが全部
 Reading configuration data に出た?) then (出ないものがある)
@@ -44,6 +47,6 @@ legend right
   |<#D5E8D4> 揃っている |
   |<#FFE6CC> ssh.exe が設定を読めない・旧 clone を読んでいる（要対応） |
   |<#F7F7F7> 確かめられなかった（手で打つ） |
-  アクセス権で弾かれると、ssh.exe はどの接続先でも exit 255 になる
+  アクセス権で弾かれたり設定に誤りがあったりすると、ssh.exe はどの接続先でも exit 255 になる
 endlegend
 @enduml

@@ -317,8 +317,8 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 - 旧経路が置いた `Include ~/dotfiles/ssh_config` の 1 行だけの `config` は、衝突にせず置き換える
 - 書いたあとに `ssh.exe -v -G nonexistent.invalid` を流し、`config` と置いたファイルが読まれること、
   旧 clone (`C:\Users\<名前>\dotfiles`) の `ssh_config` を読んでいないことを確かめる。アクセス権で弾かれる
-  (`Bad owner or permissions`) などがあれば ⚠ の枠で出して止まる。ssh.exe を呼べないときは、手で打つ
-  コマンドを出して進む
+  (`Bad owner or permissions`)・設定の誤りで読み終えられない、などがあれば ⚠ の枠で出して止まる。
+  ssh.exe を呼べない・応答しないときは、手で打つコマンドを出して進む
 
 ### ssh の設定が衝突したら
 

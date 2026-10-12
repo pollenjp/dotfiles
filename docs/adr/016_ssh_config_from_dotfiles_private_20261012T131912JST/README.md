@@ -206,11 +206,15 @@ dotfiles-private を submodule にしなかった。
 
 - 確かめ方は TKT-147 の手順で、`ssh.exe -v -G nonexistent.invalid` の
   `Reading configuration data` の行を見る
-- `Bad owner or permissions` が出た・置いたファイルが読まれていない・旧 clone の `ssh_config` を
-  読んだ、のどれかなら ⚠ の枠で出して exit 1 にする。アクセス権で弾かれると、ssh.exe はどの
-  接続先でも exit 255 になるため。アクセス権のときは `icacls` で `.ssh` の ACL を見るコマンドを添える
-- interop が外れて ssh.exe を呼べないときは、手で打つ確かめのコマンドを出して exit 0 にする
-  (bootstrap-windows-powershell-profile.sh と同じ扱い)
+- `Bad owner or permissions` が出た・設定の誤りなどで読み終えられない (終了コードが 0 以外)・置いた
+  ファイルが読まれていない・旧 clone の `ssh_config` を読んだ、のどれかなら ⚠ の枠で出して exit 1 に
+  する。アクセス権で弾かれたり設定に誤りがあったりすると、ssh.exe はどの接続先でも exit 255 になるため。
+  アクセス権のときは `icacls` で `.ssh` の ACL を見るコマンドを、設定の誤りのときは ssh.exe のエラーの
+  行を添える
+- interop が外れて ssh.exe を呼べない (終了コード 126・127)・応答しない (時間切れの 124) ときは、手で
+  打つ確かめのコマンドを出して exit 0 にする (bootstrap-windows-powershell-profile.sh と同じ扱い)。
+  `timeout -k 5` で、SIGTERM を無視されても KILL して進む (137)。途中まで出して固まった場合も、
+  「読まれない」とは扱わない
 - ⚠ の枠は bootstrap-windows-openssh.sh と同じ形 (`⚠️ ━━━ ⚠️` の行で挟む) にする。setup の最後に
   警告をまとめて出す話 (TKT-146) には、そちらで載せる
 
@@ -218,9 +222,9 @@ dotfiles-private を submodule にしなかった。
 | --- | --- |
 | 揃った・書いた・対象外 (`enable` が false)・`windows-files.json` が無い | 0 |
 | dotfiles-private の `ssh/` が無い・空 (警告だけ出し、何も変えない) | 0 |
-| ssh.exe を呼べない (手で打つ確かめのコマンドを出す) | 0 |
+| ssh.exe を呼べない・応答しない (手で打つ確かめのコマンドを出す) | 0 |
 | 衝突が 1 件以上 (全部を処理してから) | 1 |
-| 確かめで、アクセス権・読まれないファイル・旧 clone のどれかが見つかった | 1 |
+| 確かめで、アクセス権・設定の誤り (読み終えられない)・読まれないファイル・旧 clone のどれかが見つかった | 1 |
 | 引数の誤り | 2 |
 
 ### E. 移行は dotfiles-private → この repo → 各マシンの順で進める
@@ -304,8 +308,8 @@ WSL の symlink は旧 submodule を指したまま、Windows は旧 clone を�
 
 | 何を | どうやって | 結果 |
 | --- | --- | --- |
-| WSL 側の bootstrap | `nix/tests/bootstrap-ssh-config.test.sh` (使い捨ての HOME・dotfiles-private・checkout)。flake の checks で流す | 9 件すべて通過 |
-| Windows 側の bootstrap | `nix/tests/bootstrap-windows-ssh-config.test.sh` (偽の Windows のホームと `ssh.exe`)。flake の checks で流す | 26 件すべて通過 |
+| WSL 側の bootstrap | `nix/tests/bootstrap-ssh-config.test.sh` (使い捨ての HOME・dotfiles-private・checkout)。flake の checks で流す | 12 件すべて通過 (最終レビューの指摘で、旧 submodule の残りの案内の 3 件を足した) |
+| Windows 側の bootstrap | `nix/tests/bootstrap-windows-ssh-config.test.sh` (偽の Windows のホームと `ssh.exe`)。flake の checks で流す | 29 件すべて通過 (最終レビューの指摘で、確かめの終了コードと時間切れの 3 件を足した) |
 | 全体 | `nix flake check ./nix`、`nix/` の `*.sh` 全部の shfmt / shellcheck と `*.nix` の nixfmt | 通過 |
 | この PC での初回 | `bootstrap-windows-ssh-config.sh --dry-run` の判定を見てから本番を流した | `config` は旧経路の Include を置き換え、`config.d` へ 4 件をコピー。衝突なし。2 回目は「揃っています」の 1 行 |
 | 読むファイル | `ssh.exe -v -G nonexistent.invalid` | `config` と `config.d` の 7 件 (dotfiles の 4 件と my-cloud などの 3 件) を読み、旧 clone の `ssh_config` は読まない |
