@@ -250,7 +250,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 
 Google 日本語入力は、実装の確認で 3.34.6260.0 に上げて pin も足してある (§6)。
 
-1. merge の後に `~/dotfiles/setup --update` を流す (main の `win/` から配り直す)
+1. merge の後に `~/dotfiles/setup --self-update --update` を流す (本体を main に進めてから、`win/` を配り直す。`--update` だけでは本体が古いまま)
 2. 95 が「揃っています」の 1 行、91 が「PowerToys は入っています。」のあと読み直し済み、98 が「同じです」を出すことを見る (98 が衝突を出したら `--import` で取り込む)
 
 ### 新しいマシン
