@@ -41,10 +41,14 @@ param(
 
 # 版の文字列 ("2.29.5370.0") を [version] にする。数字を . でつないだ 2〜4 個の形でなければ $null
 # (FileVersion の "2.29.5370.0  (build 63)" のような形は読まない)
+# 書かれていない成分は 0 にそろえる (3.34.6260 と 3.34.6260.0 は同じ版として比べる)
 function ConvertTo-GoogleImeVersion {
     param([string]$Text)
     $v = $null
-    if (("$Text" -match '^\s*(\d+(\.\d+){1,3})\s*$') -and [version]::TryParse($Matches[1], [ref]$v)) { return $v }
+    if (("$Text" -match '^\s*(\d+(\.\d+){1,3})\s*$') -and [version]::TryParse($Matches[1], [ref]$v)) {
+        # 書かれていない成分は 0 にそろえる ([version] は無い成分を -1 として比べ、3.34.6260 が 3.34.6260.0 より小さくなる)
+        return [version]::new($v.Major, $v.Minor, [Math]::Max($v.Build, 0), [Math]::Max($v.Revision, 0))
+    }
     $null
 }
 
@@ -200,7 +204,7 @@ function Invoke-Winget {
     # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
     $ErrorActionPreference = 'Continue'
     $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
-        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[█▒]' }
+        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[\u2588\u2592]' }
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
 }
 
@@ -258,7 +262,8 @@ function Invoke-InstallGoogleJapaneseInput {
     param([string]$Version, [switch]$Check, [switch]$IfMissing)
     $packageId = 'Google.JapaneseIME'
     # 書き間違えた -Version は、winget を打つ前にここで例外になる (終了コード 2)
-    $target = [version]$Version
+    $target = ConvertTo-GoogleImeVersion -Text $Version
+    if (-not $target) { throw "-Version の形が違う: $Version" }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
@@ -268,15 +273,22 @@ function Invoke-InstallGoogleJapaneseInput {
     $state = Get-GoogleImeState -PackageId $packageId -Target $target
     Write-GoogleImeState -State $state -Target $Version
     $code = Get-GoogleImeExitCode -State $state
+    $blocker = Get-GoogleImeApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version
 
     # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
     if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
         if ($code -eq 0) {
             Write-Host '揃っている'
+        } elseif ($blocker -eq 'not-listed') {
+            Write-Host "⚠️ 固定した版 $Version が winget に無い → Install-GoogleJapaneseInput.ps1 の -Version を winget show --id $packageId --versions にある版へ変える ⚠️" -ForegroundColor Yellow
         } elseif ($code -eq 3) {
             Write-Host '⚠️ Google 日本語入力が入っていない → Install-GoogleJapaneseInput で入れる (UAC の確認が出る) ⚠️' -ForegroundColor Yellow
         } elseif ($state.Plan -eq 'newer') {
             Write-Host '⚠️ 入っている版の方が新しい → 下げずに Install-GoogleJapaneseInput.ps1 の -Version を上げる ⚠️' -ForegroundColor Yellow
+        } elseif ($state.Plan -eq 'unknown') {
+            Write-Host "⚠️ 入っている版が読めない → winget list --id $packageId で入っている版を確かめる ⚠️" -ForegroundColor Yellow
+        } elseif ($state.Plan -eq 'none') {
+            Write-Host '⚠️ winget pin が無い → Install-GoogleJapaneseInput で足す (UAC の確認は出ない) ⚠️' -ForegroundColor Yellow
         } else {
             Write-Host '⚠️ 固定した版と揃っていない → Install-GoogleJapaneseInput で揃える (上げるときは UAC の確認が出る) ⚠️' -ForegroundColor Yellow
         }
@@ -287,7 +299,6 @@ function Invoke-InstallGoogleJapaneseInput {
         return 0
     }
 
-    $blocker = Get-GoogleImeApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version
     if ($blocker -eq 'newer') {
         Write-Host "入っている版 ($($state.Installed)) の方が固定した版 ($Version) より新しいので、下げない。Install-GoogleJapaneseInput.ps1 の -Version の既定値を上げる (win/README.md の「Google 日本語入力を入れる」)"
         return 1

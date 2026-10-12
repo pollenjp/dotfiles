@@ -66,6 +66,8 @@ Test-Case 'FileVersion の形 (build 付き) は読まない' '' { ConvertTo-Goo
 Test-Case '空なら空' '' { ConvertTo-GoogleImeVersion -Text '' }
 Test-Case '$null なら空' '' { ConvertTo-GoogleImeVersion -Text $null }
 Test-Case '[version] に収まらない数なら空 (例外にしない)' '' { ConvertTo-GoogleImeVersion -Text '99999999999.1' }
+Test-Case '3 つ区切りは 4 つ目を 0 にそろえる' '3.34.6260.0' { ConvertTo-GoogleImeVersion -Text '3.34.6260' }
+Test-Case '3 つ区切りと 4 つ区切りの同じ版は等しい' $true { (ConvertTo-GoogleImeVersion -Text '3.34.6260') -eq (ConvertTo-GoogleImeVersion -Text '3.34.6260.0') }
 
 # Get-WingetVersionList: winget show --versions の出力から、版の行だけを新しい順に拾う
 Test-Case '版の行だけを上から順に拾う (見出し・区切りは拾わない)' ($versions -join ' ') { Get-WingetVersionList -Lines $show }
@@ -242,6 +244,14 @@ Test-Case '固定した版が winget に無ければ何も打たずに 1' '1 []'
 Test-Case 'install が落ちたら (UAC で断った) pin を足さずに 1' '1 [install pin list]' { $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -IfMissing -Fail @{ install = 0x8A150011 }; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'install が落ちたら、打ち直し方を出す' $true { $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -IfMissing -Fail @{ install = 0x8A150011 }; $r.Text -like '*Install-GoogleJapaneseInput を打ち直す*' }
 Test-Case '上げても版が古いまま (再起動待ち) なら、再起動を案内して 1' '1 True' { $r = Invoke-Flow -States @((New-State $thisPc), (New-State $thisPcPinned)) -Installed; "$($r.Code) $($r.Text -like '*再起動してから*')" }
+
+# -Check の締めの行 (最後の行) は、揃える経路が実際にすることを案内する
+function Get-LastLine { param([string]$Text) @($Text -split "`n")[-1] }
+Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃っている' { $r = Invoke-Flow -States @($synced) -Check -Installed; Get-LastLine $r.Text }
+Test-Case '-Check の締め: 版が読めなければ winget list を案内し、揃えるとは言わない' 'True False' { $r = Invoke-Flow -States @((New-State @{ Installed = $null; Plan = 'unknown' })) -Check -Installed; $l = Get-LastLine $r.Text; "$($l -like '*winget list*') $($l -like '*で揃える*')" }
+Test-Case '-Check の締め: 固定した版が winget に無ければ -Version を変えるよう出す (入れるとは言わない)' 'True False' { $r = Invoke-Flow -States @((New-State ($missing + @{ Versions = @('3.35.6300.0'); Latest = '3.35.6300.0' }))) -Check; $l = Get-LastLine $r.Text; "$($l -like '*-Version を*') $($l -like '*で入れる*')" }
+Test-Case '-Check の締め: pin だけ無ければ pin を足すと出し、UAC は出ないと言う' 'True True' { $r = Invoke-Flow -States @((New-State @{ Pinned = $false })) -Check -Installed; $l = Get-LastLine $r.Text; "$($l -like '*pin*') $($l -like '*UAC の確認は出ない*')" }
+Test-Case '-Check の締めは FE0F 付きの ⚠️ で始まる (95 が見分ける)' $true { $r = Invoke-Flow -States @((New-State $thisPc)) -Check -Installed; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ") }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
