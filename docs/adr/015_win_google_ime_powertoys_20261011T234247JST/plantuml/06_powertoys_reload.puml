@@ -1,0 +1,48 @@
+@startuml
+' bootstrap-windows-powertoys.sh: bootstrap-windows-files.sh が置いた default.json を、
+' Keyboard Manager に読み直させる。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #D5E8D4
+  BorderColor #666666
+  DiamondBackgroundColor #F7F7F7
+  DiamondBorderColor #666666
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title bootstrap-windows-powertoys.sh（order 91）
+
+start
+if (windows-files.json の enable で、\nKeyboard Manager の default.json がある?) then (どちらか無い)
+  :何もしない\nexit 0; <<#F7F7F7>>
+  stop
+endif
+:置いた default.json の sha256 を取る;
+if (前回読み直させたときの記録と同じ?\n（--force なら比べない）) then (同じ)
+  :何もしない\nexit 0; <<#F7F7F7>>
+  stop
+endif
+:powershell.exe -Command で\nPowerToys_KeyboardManager_Event_Settings を\nTryOpenExisting → Set();
+if (結果) then (送れた)
+  :記録する\n「読み直させた」と出す;
+elseif () then (イベントが無い = PowerToys が動いていない)
+  :記録する\n「起動したときに読む」と出す;
+else (interop が使えない)
+  :手で読み直す方法を出す\n（Keyboard Manager を一度オフにしてオンに戻す）\n記録しない; <<#FFE6CC>>
+endif
+:exit 0\n（後ろの手順を止めない）;
+stop
+
+legend right
+  |<#D5E8D4> 送る・記録する |
+  |<#F7F7F7> 何もしない |
+  |<#FFE6CC> 次の setup に回す |
+  記録: $HOME/.local/state/dotfiles/powertoys-keyboard-manager.reloaded
+  エンジンが読むのは default.json だけなので、editorSettings.json は比べない
+endlegend
+@enduml

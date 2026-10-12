@@ -1,0 +1,50 @@
+@startuml
+' repo のテキストが、Windows 側のバイナリのどの項目になるか。
+left to right direction
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 14
+skinparam ranksep 70
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title テキストとバイナリの対応
+
+rectangle "win/google-japanese-input/（public）" as pub #FFFFFF {
+  rectangle "config.txtpb\nprotobuf のテキスト形式\n（protoc --decode と同じ書き方）" as txtpb #DAE8FC
+  rectangle "keymap.tsv\nキー設定の画面のエクスポートと同じ" as keymap #DAE8FC
+  rectangle "romaji.tsv\nローマ字テーブル（カスタムしたときだけ）" as romaji #DAE8FC
+}
+rectangle "dotfiles-private（private）" as prv #FFFFFF {
+  rectangle "google-japanese-input/dictionaries/<名前>.tsv\n読み・単語・品詞・コメント\n（辞書ツールのエクスポートと同じ）" as dict #FFE6CC
+}
+
+rectangle "config1.db（mozc.config.Config）" as cfg #FFFFFF {
+  rectangle "残りの項目すべて\n句読点・記号・サジェストなど" as rest #FFF2CC
+  rectangle "custom_keymap_table\n（文字列をそのまま）" as ckt #FFF2CC
+  rectangle "custom_roman_table\n（文字列をそのまま）" as crt #FFF2CC
+  rectangle "general_config\n時刻・版・OS\n（書かない。IME が保存のたびに入れる）" as gen #F7F7F7
+}
+rectangle "user_dictionary.db（UserDictionaryStorage）" as ud #FFFFFF {
+  rectangle "辞書 1 つ（UserDictionary）\nname = ファイル名\nid = 名前の sha256 の先頭 8 バイト\n辞書は名前の順・語は行の順" as udict #FFF2CC
+}
+
+txtpb --> rest
+keymap --> ckt
+romaji --> crt
+dict --> udict
+
+legend right
+  |<#DAE8FC> public のテキスト |
+  |<#FFE6CC> private のテキスト |
+  |<#FFF2CC> 組み立てる項目 |
+  |<#F7F7F7> テキストに持たない項目 |
+endlegend
+@enduml

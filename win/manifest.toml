@@ -29,3 +29,13 @@ hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版と�
 src = "herdr/Install-Herdr.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
 hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+
+[[files]]
+src = "powertoys/keyboard-manager/default.json"
+dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/default.json"
+hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager に読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (PowerToys が動いていなければ、起動したときに読む)"
+
+[[files]]
+src = "powertoys/keyboard-manager/editorSettings.json"
+dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/editorSettings.json"
+hint = "Keyboard Manager のエディタを開いていたら、閉じて開き直す"
