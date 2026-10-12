@@ -666,9 +666,7 @@ else
   ng "--import と Install-GoogleJapaneseInput.ps1" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# ---- review 用の追加テスト (提案): 絞った確かめの 3 つ全部・--short・stderr・exe の有無 ----
-
-# X1. --import は config.txtpb・romaji.tsv の commit していない変更でも止まる (keymap.tsv は 27 が見ている)
+# 34. --import は config.txtpb・romaji.tsv の commit していない変更でも止まる (keymap.tsv は 27 が見ている)
 h=$(new_home x1 "${state_on}" 1)
 printf 'a\tb\n' >"${h}/repo/win/google-japanese-input/romaji.tsv"
 git -C "${h}/repo" add -A
@@ -702,12 +700,12 @@ for mut in txtpb romaji_modified romaji_deleted romaji_untracked_showno keymap_s
   fi
 done
 if ((x1_ok)); then
-  ok "[extra] --import は config.txtpb・romaji.tsv (変更・削除・未追跡)・staged の keymap.tsv でも止まる"
+  ok "--import は config.txtpb・romaji.tsv (変更・削除・未追跡)・staged の keymap.tsv でも止まる"
 else
-  ng "[extra] --import と 3 つのテキスト"
+  ng "--import と 3 つのテキスト"
 fi
 
-# X2. --short の一覧は、止める理由のファイルだけ (Install-GoogleJapaneseInput.ps1 の変更は出さない)
+# 35. --short の一覧は、止める理由のファイルだけ (Install-GoogleJapaneseInput.ps1 の変更は出さない)
 h=$(new_home x2 "${state_on}" 1)
 printf '# Install-GoogleJapaneseInput.ps1\n' >"${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
 git -C "${h}/repo" add -A
@@ -716,32 +714,32 @@ printf 'more\n' >>"${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInp
 printf 'Composition\tF14\tIMEOff\n' >>"${h}/repo/win/google-japanese-input/keymap.tsv"
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'M keymap.tsv' && ! outerr "${h}" | grep -q 'Install-GoogleJapaneseInput'; then
-  ok "[extra] 止めたときの一覧は keymap.tsv だけで、Install-GoogleJapaneseInput.ps1 は出ない"
+  ok "止めたときの一覧は keymap.tsv だけで、Install-GoogleJapaneseInput.ps1 は出ない"
 else
-  ng "[extra] --short の一覧" "rc=$(rc "${h}") $(outerr "${h}")"
+  ng "--short の一覧" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# X3. 案内は stderr に出る (stdout は空)
+# 36. 案内は stderr に出る (stdout は空)
 h=$(new_home x3 "" 0)
 mkdir -p "${h}/c/Users/u" "${h}/c/Program Files/Google/Google Japanese Input"
 printf 'exe' >"${h}/c/Program Files/Google/Google Japanese Input/GoogleIMEJaConverter.exe"
 printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h}/c/Users/u" >"${h}/.local/state/dotfiles/windows-files.json"
 run "${h}" 0
 if [[ $(rc "${h}") == 0 && ! -s ${h}/out ]] && grep -q 'まだ使われていません' "${h}/err"; then
-  ok "[extra] 「まだ使われていません」は stderr に出て、stdout は空"
+  ok "「まだ使われていません」は stderr に出て、stdout は空"
 else
-  ng "[extra] 案内の出し先" "rc=$(rc "${h}") out=$(cat "${h}/out") err=$(cat "${h}/err")"
+  ng "案内の出し先" "rc=$(rc "${h}") out=$(cat "${h}/out") err=$(cat "${h}/err")"
 fi
 
-# X4. Program Files に Google/Google Japanese Input のディレクトリだけがあって exe が無い (アンインストールの残り): 入っていない扱い
+# 37. Program Files に Google/Google Japanese Input のディレクトリだけがあって exe が無い (アンインストールの残り): 入っていない扱い
 h=$(new_home x4 "" 0)
 mkdir -p "${h}/c/Users/u" "${h}/c/Program Files/Google/Google Japanese Input" "${h}/c/Program Files (x86)/Google/Google Japanese Input"
 printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h}/c/Users/u" >"${h}/.local/state/dotfiles/windows-files.json"
 run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '入っていません' && ! outerr "${h}" | grep -q 'まだ使われていません'; then
-  ok "[extra] 本物と同じ並び (<ドライブ>/Users/<名前>) で exe が無ければ、入っていない扱い"
+  ok "本物と同じ並び (<ドライブ>/Users/<名前>) で exe が無ければ、入っていない扱い"
 else
-  ng "[extra] exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+  ng "exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
