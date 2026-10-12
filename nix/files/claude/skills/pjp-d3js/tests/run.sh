@@ -72,6 +72,11 @@ eq() {
   [[ $1 == "$2" ]]
 }
 
+# not_in_log <文字列>: 直前のログに <文字列> が無い
+not_in_log() {
+  ! grep -qF -- "$1" "${log}"
+}
+
 # 先頭の子要素が白い rect か (属性の順は linkedom が決めるので問わない)
 starts_with_white_rect() {
   grep -qE '^<svg[^>]*><rect [^>]*fill="#ffffff"' "$1"
@@ -88,13 +93,16 @@ png_size() {
 }
 
 cp -R "${tests_dir}/fixtures" "${work}/fx"
+# 配置後の skill (store のコピー) から流すと、写したものも読み取り専用になる。
+# 書き出しも、終わったあとの rm -rf も通るよう、書き込めるようにしておく。
+chmod -R u+w "${work}/fx"
 ok_dir=${work}/fx/ok
 
 echo "## 書き出し (d3js-export.sh)"
 
 cd "${ok_dir}"
 check "ok/ を SVG と PNG に書き出せる" run "${export_sh}" -f svg,png
-for name in 01_d3_axis 02_plot_bars 03_force 04_no_viewbox "05 日本語の名前" 06_body_a 07_body_b; do
+for name in 01_d3_axis 02_plot_bars 03_force 04_no_viewbox "05 日本語の名前" 06_body_a 07_body_b 08_escape; do
   check "${name}.svg がある" test -f "out/${name}.svg"
   check "${name}.svg に xmlns がある" grep -qF 'xmlns="http://www.w3.org/2000/svg"' "out/${name}.svg"
   check "${name}.svg の先頭に白背景" starts_with_white_rect "out/${name}.svg"
@@ -106,6 +114,12 @@ check "部品 (_palette.mjs) の import が効く" grep -qF '#2a78d6' out/01_d3_
 check "viewBox の左上から白背景を敷く" eq "$(first_rect_attr out/03_force.svg x) $(first_rect_attr out/03_force.svg y) $(first_rect_attr out/03_force.svg width) $(first_rect_attr out/03_force.svg height)" "-200 -120 400 240"
 check "viewBox が無ければ width / height で敷く" eq "$(first_rect_attr out/04_no_viewbox.svg width) $(first_rect_attr out/04_no_viewbox.svg height)" "300 150"
 check "PNG の大きさは width × height" eq "$(png_size out/01_d3_axis.png)" "640 320"
+check "属性値の & と < をエスケープする" grep -qF 'aria-label="R&amp;D &lt;推移&gt;"' out/08_escape.svg
+check "文字の & と < をエスケープする" grep -qF '>A &amp; B &lt;C&gt;<' out/08_escape.svg
+check "URL の & もエスケープする" grep -qF 'href="https://example.com/?a=1&amp;b=2"' out/08_escape.svg
+check "xlink:href はそのまま書く" grep -qF 'xlink:href="#dot"' out/08_escape.svg
+check "xlink を使ったら xmlns:xlink を宣言する" grep -qF 'xmlns:xlink="http://www.w3.org/1999/xlink"' out/08_escape.svg
+check "要素名の大文字を保つ (clipPath・linearGradient)" grep -qE '<clipPath .*<linearGradient ' out/08_escape.svg
 
 check "2 回目も書き出せる" run "${export_sh}" -o out2
 for name in 01_d3_axis 02_plot_bars 03_force; do
@@ -136,6 +150,13 @@ check "無いパッケージは名前を出して止まる" fails_with "left-pad
 
 check "1 つ失敗しても残りは書く (終了コードは失敗)" fails_with "失敗した chart module があります" "${export_sh}" -o out8 ok/01_d3_axis.mjs ng/throws.mjs
 check "失敗と一緒に渡した図も書けている" test -f out8/01_d3_axis.svg
+
+check "止まらない timer があっても終わる" run timeout 60 "${export_sh}" -o out10 timer/10_interval.mjs
+check "timer が残ったら知らせる" grep -qF "timer が動いたまま" "${log}"
+check ".stop() を忘れた力学グラフでも書き出せる" run timeout 60 "${export_sh}" -o out10 timer/09_force_nostop.mjs
+check ".stop() を忘れた力学グラフも知らせる" grep -qF "timer が動いたまま" "${log}"
+check ".stop() した力学グラフを書き出せる" run "${export_sh}" -o out11 ok/03_force.mjs
+check ".stop() した力学グラフでは知らせない" not_in_log "timer が動いたまま"
 
 mkdir -p empty
 cd empty

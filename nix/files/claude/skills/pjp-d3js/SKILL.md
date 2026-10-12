@@ -202,4 +202,5 @@ nix/files/claude/skills/pjp-d3js/tests/run.sh                              # 書
 
 - DOM の無い Node で踏む罠・エラーの読み方 → `references/troubleshooting.md`
 - 対話ページの骨組み・CSP・確かめ方 → `references/interactive.md`
-- `tests/run.sh` は scripts/ を直したとき・版を上げたときに流す
+- `tests/run.sh` は scripts/ を直したとき・版を上げたときに流す（dotfiles の repo の
+  `nix/files/claude/skills/pjp-d3js/tests/run.sh`。配置後の `~/.claude/skills/pjp-d3js/tests/run.sh` でも動く）

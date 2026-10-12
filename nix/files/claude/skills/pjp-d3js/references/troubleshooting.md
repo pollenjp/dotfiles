@@ -77,8 +77,9 @@ Plot はデータに気になる点を見つけると、`Warning: …` を出し
 
 ### 力学グラフが散らばらない・毎回形が違う・枠の外へ飛ぶ
 
-`forceSimulation` は既定で timer で動くので、そのまま返すと動く前の位置で書き出される。
-`.stop()` して `tick()` を手で回す。d3-force は固定の種の乱数を使うので、毎回同じ形になる。
+`forceSimulation` は既定で timer で動くので、そのまま返すと動く前の位置で書き出される
+（d3js-export.sh は `timer が動いたまま書き出しました` と知らせる）。`.stop()` して `tick()` を手で回す。
+d3-force は固定の種の乱数を使うので、毎回同じ形になる。
 
 ```js
 const sim = d3.forceSimulation(nodes)
