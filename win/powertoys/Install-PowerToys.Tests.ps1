@@ -84,6 +84,19 @@ Test-Case '入口: -Check は入っていなければ終了コード 3' '3 True'
     "$code $(($out -join "`n") -like '*入っていない*')"
 }
 
+Test-Case '入口: -IfMissing は winget が無ければ終了コード 2' '2 True' {
+    $pwsh = (Get-Process -Id $PID).Path
+    $savedPath = $env:PATH
+    try {
+        $env:PATH = ''
+        $out = @(& $pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Install-PowerToys.ps1') -IfMissing 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } finally {
+        $env:PATH = $savedPath
+    }
+    "$code $(($out -join "`n") -like '*winget が見つからない*')"
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-InstallPowerToys の流れ。Windows に触る関数を偽物に差し替えて、打つ winget と、
 # 失敗したときの扱いを確かめる。ここより後ろでは本物の関数は使えない
@@ -94,6 +107,7 @@ function winget { }
 function Invoke-Winget {
     param([string[]]$Arguments)
     $script:Calls.Add($Arguments[0])
+    $script:LastArgs = $Arguments -join ' '
     [pscustomobject]@{ ExitCode = $script:WingetCode; Lines = @() }
 }
 function Get-PowerToysState { $script:States.Dequeue() }
@@ -128,6 +142,13 @@ Test-Case 'winget が無ければ 2' '2 []' {
     }
     "$($r.Code) [$($r.Calls)]"
 }
+
+# 締めの行 (最後の行) は bootstrap 91 が見分ける: 入っている・入った・FE0F 付きの ⚠️
+function Get-LastLine { param([string]$Text) @($Text -split "`n")[-1] }
+Test-Case '締め: 入っていれば「入っている」' '入っている' { $r = Invoke-Flow -States @($installed) -Check; Get-LastLine $r.Text }
+Test-Case '締め: 入れて入れば「入った」' '入った' { $r = Invoke-Flow -States @($missing, $installed); Get-LastLine $r.Text }
+Test-Case '締め: -Check で入っていなければ FE0F 付きの ⚠️ で始まる' $true { $r = Invoke-Flow -States @($missing) -Check; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ") }
+Test-Case 'install には Microsoft.PowerToys の引数をそのまま渡す' (@(Get-PowerToysInstallArguments -PackageId 'Microsoft.PowerToys') -join ' ') { $null = Invoke-Flow -States @($missing, $installed); $script:LastArgs }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
