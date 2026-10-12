@@ -20,7 +20,7 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
 ```
 
 - `~/dotfiles/setup` は本体の `nix/scripts/setup.sh` への symlink
-- 走る手順は `ssh-config` → `flake-update` → `switch` → `bootstrap-*`
+- 走る手順は `flake-update` → `switch` → `bootstrap-*`
   （`--update` プリセットに `--flake-update` を足した形）。`bootstrap-*` は
   どれも冪等で、`switch` の**後**に走る（`jq` / `mise` が要るため）
 - **`--update` はメニューを通らないので対話は無い。** sudo も要らない
