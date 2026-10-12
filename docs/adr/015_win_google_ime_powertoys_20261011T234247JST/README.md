@@ -461,19 +461,22 @@ ADR 010 のまま)、`setup.sh` (bootstrap は自動で列挙される)。
 | 読み直して書き戻す | 使い捨てのスクリプトで、この PC の 2 つのファイルを読み直して書き戻す | 1 バイトも違わない。unknown fields は 0 |
 | PowerToys の読み直し | WSL から `powershell.exe` でイベントを送り、Keyboard Manager のログを見る | 合図と読み込みの行が出た |
 
-実装で確かめること (実装の PR で結果を埋める)。
+実装で確かめたこと (2026-10-12、TKT-139 の PR。実機はこの PC の Google 日本語入力 2.29.5370 と PowerToys 0.100.2)。
 
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
-| `pjp-google-ime` | unittest (組み立て → decode で戻る・2 回組み立てて同じバイト列・digest が時刻と辞書の id・並び・空のコメントと空の表に効かない・壊れたテキストで止まる・エラーに語を出さない・unknown fields で import が止まる・Windows 側に辞書が無い import) | — |
-| 3 つの bootstrap | nix/tests/ のテスト (偽の Windows のホームと、`taskkill.exe`・`tasklist.exe`・`powershell.exe` の偽物。偽の repo と dotfiles-private は git の checkout) | — |
-| 静的 | `nixfmt` / `shfmt` / `shellcheck` | — |
-| 実機: Google 日本語入力 | キー設定を 1 行変えて `setup --update` を流し、変換サーバーが起き直して変更が効くこと | — |
-| 実機: PowerToys | 割り当てを 1 つ変えて `setup --update` を流し、オフ・オンなしで効くこと | — |
-| 実機: 初回 | `--import` で書き出したテキストで、初めての `setup --update` が「同じ」で終わること | — |
-| 実機: 単語登録 | 架空の語を単語登録ダイアログで足す → `setup --update` が衝突 → `--import` → 次の `setup --update` が 2 ファイルとも「同じです」 | — |
-| 実機: 設定画面 | 設定画面を開いたまま `setup --update` を流すと、この手順が exit 1 で止まること | — |
-| 実機: 語を出さない | 辞書の衝突を起こした `setup --update` の出力に、辞書の語 (読み・単語) が出ないこと | — |
+| `pjp-google-ime` | unittest (組み立て → decode で戻る・2 回組み立てて同じバイト列・digest が時刻と辞書の id・並び・空のコメントと空の表に効かない・壊れたテキストで止まる・エラーに語を出さない・unknown fields で import が止まる・Windows 側に辞書が無い import) | 56 件すべて通過 |
+| 3 つの bootstrap | nix/tests/ のテスト (偽の Windows のホームと、`taskkill.exe`・`tasklist.exe`・`powershell.exe` の偽物。偽の repo と dotfiles-private は git の checkout) | Google 日本語入力 34 件・PowerToys 12 件・dotfiles-private 6 件、すべて通過 |
+| 静的 | `nixfmt` / `shfmt` / `shellcheck` | 指摘なし |
+| 実機: Google 日本語入力 | `config.txtpb` の `punctuation_method` を `COMMA_PERIOD` に変えて `bootstrap-windows-google-ime.sh` を流し、日本語で「、。」を打つ。戻してもう一度流す | 「上書き (repo 側が進んだ)」と退避のあと変換サーバーを落とし、次のキー入力で起き直した (PID 55528 → 7308)。「，．」になり、戻すと「、。」に戻った |
+| 実機: PowerToys | `bootstrap-windows-files.sh --dry-run` のあと `bootstrap-windows-powertoys.sh` を 2 回流し、Keyboard Manager のログを見る。割り当てを変えての確認は、ユーザーの判断でしていない | 2 つのファイルは「同じです」。1 回目は「読み直させました」、2 回目は「読み直し済みです」(どちらも rc 0)。ログに流した時刻の `event was signaled` と `SettingsHelper::LoadSettings()` が出た |
+| 実機: 初回 | 辞書を `--import` で dotfiles-private へ取り込んだあと、`bootstrap-windows-google-ime.sh` を初めて流す | 2 ファイルとも「同じです」で rc 0。変換サーバーは落とさなかった |
+| 実機: 単語登録 | 語を 1 つ単語登録で足す → 流すと衝突 → `--import` → もう一度流す | 辞書が衝突 (rc 1) → `--import` は rc 0 → 次は 2 ファイルとも「同じです」。この版は単語登録で足した語にも空の comment を入れていた (全部の語に comment がある)。Mozc のソースにある「comment が無い」形はこの版では起きず、digest のそろえは Mozc の書き方と辞書ツールのインポートの経路のために残す |
+| 実機: 設定画面 | 設定画面を開いたまま `bootstrap-windows-google-ime.sh` を流す | 「設定画面か辞書ツール (GoogleIMEJaTool.exe) が開いています」で exit 1 |
+| 実機: 語を出さない | 上の単語登録で辞書の衝突を起こした回の出力を、辞書の読み・単語と照らし合わせる | 出たのは「辞書「User Dictionary 1」: Windows 側にだけある行 1・repo 側にだけある行 0」の件数だけで、語は出なかった |
+| 実機: 画面での変更 | プロパティでキー設定を 1 行足し、テンキーの入力を変えて OK → 流す → `--import` → 画面で戻し、テキストも戻して流す | 衝突の diff に変えた 2 つだけが出た (rc 1)。`--import` でテキストに入ったのもその 2 つだけ。戻すと 2 ファイルとも「同じです」 |
+| 実機: 未コミットの変更 | `--import` のあと commit せずに、もう一度 `--import` を流す | 変わったファイル (config.txtpb・keymap.tsv) の名前を出して exit 1。テキストは書き換わらなかった |
+| 閉包スキャン | `nix/scripts/closure-scan.sh --attr packages.x86_64-linux.pjp-google-ime report ./nix` (CI のスキャンの対象に入らないため、手で流した) | whitelist に無い findings は無かった |
 
 ## 7. 移行・運用手順
 
