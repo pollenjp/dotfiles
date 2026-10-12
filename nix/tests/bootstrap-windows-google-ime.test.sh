@@ -23,6 +23,7 @@
 #   - 辞書のテキストが無ければ辞書は飛ばす (Windows 側の辞書を消さない)
 #   - 単語登録の形の辞書 (comment の無い語) も取り込め、取り込んだ後は「同じ」
 #   - 辞書の衝突は語を出さず、辞書ごとの行の数だけを出す (--show-words で diff)
+#   - 入っているがまだ使っていない (置き先が無い) ときは、一度使ってから流し直すよう出す (exit 0)
 #
 # ## 偽の repo と dotfiles-private
 #
@@ -627,6 +628,23 @@ if [[ ${check_rc} == 1 && $(rc "${h}") == 0 ]] && grep -q 'config.txtpb' <<<"${c
 else
   ng "--check と config.txtpb が無い" "check_rc=${check_rc} rc=$(rc "${h}") ${check_log} $(outerr "${h}")"
 fi
+
+# 31〜32. Google 日本語入力は入っているが、まだ使っていない (置き先が無い): 一度使ってから流し直すよう出して exit 0。
+#     Program Files は 64 ビットと x86 のどちらにあってもよい。windowsHome は本物と同じく <ドライブ>/Users/<名前> の形にする
+for t in "t31:Program Files (x86)" "t32:Program Files"; do
+  h=$(new_home "${t%%:*}" "" 0)
+  mkdir -p "${h}/c/Users/u" "${h}/c/${t#*:}/Google/Google Japanese Input"
+  printf 'exe' >"${h}/c/${t#*:}/Google/Google Japanese Input/GoogleIMEJaConverter.exe"
+  printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h}/c/Users/u" >"${h}/.local/state/dotfiles/windows-files.json"
+  run "${h}" 0
+  if [[ $(rc "${h}") == 0 && ! -e ${h}/tasklist-calls && ! -e "${h}/c/Users/u/AppData/LocalLow/Google/Google Japanese Input" ]] \
+    && outerr "${h}" | grep -q 'まだ使われていません' && outerr "${h}" | grep -q '一度何か打ってから' \
+    && ! outerr "${h}" | grep -q '入っていません'; then
+    ok "入っているがまだ使っていなければ (${t#*:})、一度使ってから流し直すよう出して exit 0 (置き先は作らない)"
+  else
+    ng "入っているが使っていない (${t#*:})" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
+done
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

@@ -28,6 +28,7 @@
 # ## 何をするか
 #
 # 1. 前提を確かめる。配らないマシン・Google 日本語入力が入っていないマシンは exit 0 で飛ばす。
+#    入っているがまだ使っていない (置き先が無い) マシンは、一度使ってから流し直すよう出して exit 0。
 #    interop (tasklist.exe) が使えなければ置かずに exit 0 (変換サーバーを再起動できず、置いたものが
 #    古い設定で上書きされうるため)。設定画面・辞書ツール (GoogleIMEJaTool.exe) が開いていれば exit 1
 # 2. pjp-google-ime build で組み立てる。テキストが壊れていれば何も書かずに exit 1
@@ -168,6 +169,20 @@ if [[ -z ${windows_home} || ! -d ${windows_home} ]]; then
 fi
 ime_dir="${windows_home}/AppData/LocalLow/Google/Google Japanese Input"
 if [[ ! -d ${ime_dir} ]]; then
+  # 置き先は、Google 日本語入力が初めて起動したときに作る。入れただけでまだ使っていないマシン
+  # (新しいマシンの 1 回目の setup) では無いので、変換サーバーの exe で「入っている」を見分けて案内する
+  # (docs/adr/016_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
+  # 権限と揃わないおそれがある)。Program Files は Windows のホーム (/mnt/c/Users/<名前>) と同じドライブにある
+  windows_root=${windows_home%/Users/*}
+  for d in "${windows_root}/Program Files" "${windows_root}/Program Files (x86)"; do
+    if [[ -f "${d}/Google/Google Japanese Input/GoogleIMEJaConverter.exe" ]]; then
+      {
+        echo "!! Google 日本語入力は入っていますが、まだ使われていません (${ime_dir} が無い)。この手順は飛ばします。"
+        echo "   Google 日本語入力で一度何か打ってから (置き先ができる)、setup --update を流し直してください。"
+      } >&2
+      exit 0
+    fi
+  done
   echo "Google 日本語入力が入っていません (${ime_dir} が無い)。この手順は飛ばします。"
   exit 0
 fi
