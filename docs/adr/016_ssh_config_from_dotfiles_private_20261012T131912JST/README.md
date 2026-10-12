@@ -300,16 +300,20 @@ WSL の symlink は旧 submodule を指したまま、Windows は旧 clone を�
 
 ## 6. 検証 (Verification)
 
-実装のあとに結果を書く。予定は次のとおり。
+2026-10-12 に確かめた。
 
-| 何を | どうやって |
-| --- | --- |
-| 2 本の bootstrap の振る舞い | `nix/tests/` のテスト (使い捨ての HOME・Windows のホーム・dotfiles-private と、偽の `ssh.exe`)。flake の checks で流す |
-| この PC での初回 | `bootstrap-windows-ssh-config.sh --dry-run` の判定を見てから本番を流し、`ssh.exe -v -G nonexistent.invalid` で旧 clone を読まず `config.d` の 7 件を読むことを見る |
-| 接続 | `ssh -T git@github.com` が通り、my-cloud の Host の `ssh -G` の値が変わらない |
-| WSL 側 | `USE_LINUX_SSH=1 ssh -G github.com` で、新しい symlink が読まれる |
+| 何を | どうやって | 結果 |
+| --- | --- | --- |
+| WSL 側の bootstrap | `nix/tests/bootstrap-ssh-config.test.sh` (使い捨ての HOME・dotfiles-private・checkout)。flake の checks で流す | 9 件すべて通過 |
+| Windows 側の bootstrap | `nix/tests/bootstrap-windows-ssh-config.test.sh` (偽の Windows のホームと `ssh.exe`)。flake の checks で流す | 26 件すべて通過 |
+| 全体 | `nix flake check ./nix`、`nix/` の `*.sh` 全部の shfmt / shellcheck と `*.nix` の nixfmt | 通過 |
+| この PC での初回 | `bootstrap-windows-ssh-config.sh --dry-run` の判定を見てから本番を流した | `config` は旧経路の Include を置き換え、`config.d` へ 4 件をコピー。衝突なし。2 回目は「揃っています」の 1 行 |
+| 読むファイル | `ssh.exe -v -G nonexistent.invalid` | `config` と `config.d` の 7 件 (dotfiles の 4 件と my-cloud などの 3 件) を読み、旧 clone の `ssh_config` は読まない |
+| ツールの Host | my-cloud などが書いた Host 5 件の `ssh.exe -G` の出力を、前後で sha256 で比べた | 5 件とも変わらない |
+| WSL 側 | `USE_LINUX_SSH=1 ssh -v -G github.com` と `ls -l ~/.ssh/config.d/` | dotfiles-private の `ssh/` を指す symlink 4 件と、手置きの 1 件を読む |
 
-`nix/scripts/verify.sh` は実機の user systemd に触るので流さず、flake check と check の build で確かめる。
+`ssh -T git@github.com` は 1Password の承認が出るので、ここでは流していない。
+`nix/scripts/verify.sh` は実機の user systemd に触るので流さず、flake check と check の build で確かめた。
 
 ## 7. 移行・運用手順
 
