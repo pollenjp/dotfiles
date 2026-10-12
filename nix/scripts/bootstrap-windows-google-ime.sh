@@ -48,7 +48,7 @@
 #
 # 衝突が 1 件でもあれば、全部を処理し終えてから exit 1 する。--import で Windows 側を
 # テキストへ取り込むか、--force で repo の中身で置き直す。--import は、取り込みが書き換える
-# テキスト (config.txtpb・keymap.tsv・romaji.tsv と、dotfiles-private の辞書の TSV) に commit して
+# テキスト (config.txtpb・keymap.tsv・romaji.tsv と、dotfiles-private の辞書のディレクトリ (dictionaries/) の中身) に commit して
 # いない変更があると何も書かずに止まる (取り込むと、その変更が痕跡なく消えるため)。
 
 set -eu -o pipefail

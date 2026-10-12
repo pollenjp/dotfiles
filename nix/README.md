@@ -585,7 +585,8 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜98 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
-| `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた PowerToys の `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
+| `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
+| `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
@@ -619,11 +620,12 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
-| 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | 配った PowerToys の割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#powertoys)） |
+| 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#powertoys-を入れる-winget)） |
+| 6.8.2 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
-| 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る（[`win/README.md`](../win/README.md#google-日本語入力)） |
+| 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンでは置き先が Google 日本語入力を一度使うまで無いので、使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
@@ -1061,7 +1063,8 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
-./nix/scripts/bootstrap-windows-powertoys.sh         # 配った PowerToys の割り当てを Keyboard Manager に読み直させる部分だけ
+./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
+./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ```
 
@@ -1078,6 +1081,11 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   (order 95) が `$PROFILE` に読み込みの 1 行を足して読ませる。`$PROFILE` の場所はマシンごとに
   変わる (OneDrive のドキュメント) ので `pwsh.exe` に聞く。interop が落ちていたら手で打つ
   コマンドを出して exit 0。配る経路 (コピー) には exe を挟まない（[`win/README.md`](../win/README.md#powershell)）
+- PowerToys と Google 日本語入力の本体は、`bootstrap-windows-powertoys.sh` (order 91) と
+  `bootstrap-windows-google-ime-install.sh` (order 95) が、配った `Install-PowerToys.ps1`・
+  `Install-GoogleJapaneseInput.ps1` を `pwsh.exe` で呼び、入っていなければ winget で入れる。Google 日本語入力は
+  版を固定し、ずれは ⚠ で知らせるだけ (上げるのは手で打つ。UAC の確認が出る)。PowerToys は版を固定しない
+  （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
 - Google 日本語入力の設定 (`win/google-japanese-input/`) は manifest では配らない。protobuf のバイナリで
   保存のたびに時刻が入るので、`bootstrap-windows-google-ime.sh` (order 98) が `pjp-google-ime` で
   組み立て、時刻を除いた中身で比べて配り、変換サーバーを落として読み直させる。辞書は private な
@@ -1086,7 +1094,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   - 衝突で出すのは、設定は diff、辞書は辞書ごとの行の数だけ (辞書の語は setup の出力に出さない。
     語の diff は自分の端末で `--dry-run --show-words`)
   - 変換サーバーを落とせなかったら落とし直しの印を残し、次の回が置くものが無くても落とし直す
-  - `--import` は、repo 側に commit していない変更があると何も書かずに止まる
+  - `--import` は、取り込みが書き換えるテキスト (`config.txtpb`・`keymap.tsv`・`romaji.tsv` と、dotfiles-private の辞書のディレクトリ `dictionaries/` の中身) に commit していない変更があると何も書かずに止まる
 
 経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
@@ -2351,8 +2359,9 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
 | `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
-| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（34 件） | `bootstrap-windows-google-ime-test`（Linux） |
-| `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い)。偽の `powershell.exe` で流す（12 件） | `bootstrap-windows-powertoys-test`（Linux） |
+| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（41 件） | `bootstrap-windows-google-ime-test`（Linux） |
+| `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い)。偽の `pwsh.exe` と `wslpath` で流す（29 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
+| `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット)。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（26 件） | `bootstrap-windows-powertoys-test`（Linux） |
 | `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない)。手元の bare repo で流す（6 件） | `bootstrap-dotfiles-private-test`（Linux） |
 | `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest (空のコメントと空の表を含む)・検証・エラーに語を出さない・import (Mozc の `.proto` の写しから作った記述子で流す。56 件) | `pjp-google-ime-unittest`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
@@ -2429,7 +2438,8 @@ nix/
     ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
     ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
     ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
-    ├── bootstrap-windows-powertoys.sh  win/ から配った PowerToys の割り当てを Keyboard Manager に読み直させる (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-powertoys.sh  win/ から配った PowerToys の割り当てを Keyboard Manager に読み直させる (冪等。更新時も毎回走る。PowerToys が無ければ先に入れる)
+    ├── bootstrap-windows-google-ime-install.sh  Windows の Google 日本語入力が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、上げはしない)
     ├── bootstrap-windows-powershell-profile.sh  win/ から配った dotfiles.ps1 を PowerShell 7 の $PROFILE から読ませる (冪等。更新時も毎回走る)
     ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)
     ├── bootstrap-windows-herdr.sh  Windows の herdr が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、入れ替えはしない)

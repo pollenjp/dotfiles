@@ -43,7 +43,7 @@ hint = "Keyboard Manager のエディタを開いていたら、閉じて開き�
 [[files]]
 src = "google-japanese-input/Install-GoogleJapaneseInput.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-GoogleJapaneseInput.ps1"
-hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。入れる・上げるときは UAC の確認が出る)"
+hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。ずれていても上げず、⚠ で知らせるだけ。入れる・上げるときは UAC の確認が出る)"
 
 [[files]]
 src = "powertoys/Install-PowerToys.ps1"

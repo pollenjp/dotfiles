@@ -12,7 +12,9 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
-| `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
+| `powertoys/Install-PowerToys.ps1` | `%USERPROFILE%\.config\powershell\Install-PowerToys.ps1` | Windows の PowerToys が入っていなければ winget で入れる。PowerShell の `Install-PowerToys` から呼ぶ ([後述](#powertoys-を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
+| `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
+| `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 
 ## 配る
 
@@ -310,7 +312,8 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
 - **PowerToys が書いたバイト列のまま置く。** `default.json` は改行の無い 1 行、`editorSettings.json` は
   CRLF で、どちらも末尾に改行が無い。エディタで同じ内容を保存し直してもバイト列が変わらず、衝突に
   ならない。`.gitattributes` (改行を変えない) と `.editorconfig` (末尾に改行を足さない・CRLF) で守っている
-- 配ったあと、続く `nix/scripts/bootstrap-windows-powertoys.sh` (order 91) が、名前付きイベント
+- 配ったあと、続く `nix/scripts/bootstrap-windows-powertoys.sh` (order 91) が、PowerToys が入っていなければ先に入れ
+  ([PowerToys を入れる](#powertoys-を入れる-winget))、名前付きイベント
   `PowerToys_KeyboardManager_Event_Settings` を `powershell.exe` から送って読み直させる (エンジンは
   ファイルを見張っていない)。`default.json` の sha256 が前回読み直させたときと同じなら何もしない。
   PowerToys が動いていなければ、起動したときに読む
@@ -322,6 +325,40 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   d='/mnt/c/Users/<名前>/AppData/Local/Microsoft/PowerToys/Keyboard Manager'
   cp "${d}/default.json" "${d}/editorSettings.json" win/powertoys/keyboard-manager/
   ```
+
+### PowerToys を入れる (winget)
+
+PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToysUserSetup-…exe`。管理者は要らない) で入れる。
+版は固定せず、winget pin も足さない。PowerToys は自分で新しい版を知らせる
+([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-PowerToys -Check` (PowerShell) | 入っているかを出すだけ。入っていれば終了コード 0、入っていなければ 3 |
+| `Install-PowerToys` (PowerShell) | 入っていなければ入れる (`-IfMissing` を付けても同じ) |
+| `nix/scripts/bootstrap-windows-powertoys.sh` (WSL) | `setup --update` でも毎回走る。読み直させる前に `-Check` を流し、入っていなければ `-IfMissing` で入れる |
+
+- 入っているかは、`PowerToys.exe` が `%LOCALAPPDATA%\PowerToys\` (user スコープ) か `C:\Program Files\PowerToys\`
+  (machine スコープ) にあるかで見る。この PC は user スコープ
+- 入れられなかったら (ネットワーク・winget の失敗)、⚠ で囲んで知らせ、そのまま `default.json` の読み直しへ進む
+  (setup は止めない)。次の `setup --update` でも、もう一度入れにいく
+- setup が待つ上限は、`-Check` が 60 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、そのまま読み直しへ進む
+  (どちらでも setup は止めない)
+- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動すると、配った `default.json` を読む
+- 入れたばかりのマシンで、Keyboard Manager が配った割り当てを読むか (`settings.json` ができるか) は、まだ確かめていない
+  (次の新しいマシンで確かめる。ADR 017 §1 の 7)
+
+### Install-PowerToys.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (置き場所の候補・winget の引数・状態の表・流れ) は `powertoys/Install-PowerToys.Tests.ps1` で
+  確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/powertoys/Install-PowerToys.Tests.ps1
+  ```
+
+- winget やファイルに触る部分は、実機で `-Check` を打って確かめる
 
 ## Google 日本語入力
 
@@ -365,6 +402,10 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 - 設定画面か辞書ツール (`GoogleIMEJaTool.exe`) が開いていると、閉じるよう出して止まる (exit 1)。
   interop が落ちていると置かない (exit 0。落とし直しの印は残る)。`--import` と `--dry-run` は一緒に
   使えない (exit 2)
+- Google 日本語入力は入っているが置き先 (`%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input`) がまだ無い
+  (入れただけで一度も使っていない) ときは、一度使ってから流し直すよう出して飛ばす (exit 0)。置き先は Google 日本語入力が
+  初めて起動したときに作るので、先に作って置くことはしない (作るときの権限と揃わないおそれがある)。新しいマシンの流れは
+  [Google 日本語入力を入れる](#google-日本語入力を入れる-winget)
 - 置き換える前のファイルは `~/.local/state/dotfiles/google-japanese-input/backup/<UTC の時刻>-<pid>/` に
   退避する (新しい方から 10 回分)。退避から戻すときは:
   1. 設定画面と辞書ツールを閉じる
@@ -380,11 +421,69 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 - `--import` で取り込み、`git diff` を見て、dotfiles と dotfiles-private の両方で commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)
   - `--import` は repo のテキストを Windows 側の中身で置き換える (diff の + の行は消える)。両方を
     残すなら、テキストを手で直してから `--force`
-  - repo 側 (`win/google-japanese-input/` と dotfiles-private の辞書) に commit していない変更 (未追跡の
-    ファイルも) があると、変わったファイル名を出して何も書かずに止まる (exit 1)。先に commit するか、
-    戻してから流し直す。git の checkout か確かめられないときも止まる
+  - repo 側 (`win/google-japanese-input/` の `config.txtpb`・`keymap.tsv`・`romaji.tsv` と dotfiles-private の辞書) に
+    commit していない変更 (未追跡のファイルも) があると、変わったファイル名を出して何も書かずに止まる (exit 1)。
+    先に commit するか、戻してから流し直す。git の checkout か確かめられないときも止まる。同じディレクトリの
+    `Install-GoogleJapaneseInput.ps1` の変更では止まらない (版を上げる途中でも取り込めるように)
   - Windows 側に `user_dictionary.db` が無ければ、辞書は取り込まない (TSV はそのまま)
 - テキストは画面のエクスポートと同じ形なので、仕組みが動かないときも、GUI の「インポート」で手で戻せる
+
+### Google 日本語入力を入れる (winget)
+
+Google 日本語入力は winget の `Google.JapaneseIME` (machine スコープの MSI。入れる・上げるときは Windows のデスクトップに
+UAC の確認が出る) で入れ、版を `google-japanese-input/Install-GoogleJapaneseInput.ps1` の `-Version` の既定値の
+1 か所で固定する。設定 (`config.txtpb`) を読み書きできると確かめた版に留めるため
+([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-GoogleJapaneseInput -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-GoogleJapaneseInput` (PowerShell) | 揃える (入れる・上げる・pin を足す)。入れる・上げるときは UAC の確認が出る |
+| `nix/scripts/bootstrap-windows-google-ime-install.sh` (WSL) | `setup --update` でも毎回走る (order 95)。入っていなければ入れ (UAC の確認が出る)、差があれば ⚠ で囲んで知らせる (上げはしない) |
+| `nix/scripts/bootstrap-windows-google-ime-install.sh --apply` (WSL) | WSL から揃える。UAC の確認は Windows のデスクトップに出る |
+
+- 版は `GoogleIMEJaConverter.exe` の ProductVersion で読む。`C:\Program Files\` と `C:\Program Files (x86)\` の
+  `Google\Google Japanese Input\` の両方を見る (版によって、入る先が違うため)
+- 上げるのは setup からはしない。日本語入力は全部のアプリに読み込まれていて、入れ替えるとアプリや Windows の
+  再起動が要ることがあるため。上げる前に、日本語入力を使っているアプリをできるだけ閉じる。上げた後も `-Check` が
+  古い版を出すなら、Windows を再起動してからもう一度 `-Check` で確かめる
+- 入れた後と上げた後に `winget pin add` で `winget upgrade --all` から外す (上げるときは先に pin を外し、上げた後に足し直す)
+- 入っている版の方が新しい (Google 日本語入力が自分で上がった) ときは下げない。`-Check` と setup が ⚠ で知らせ続けるので、
+  下の「版を上げる」で repo の版を追いつかせる
+- 入っていなくても、固定した版が winget に無い (`-Version` の書き間違いか、winget から消えた) ときは、setup は入れにいかず
+  (UAC も出さず)、repo の版 (`-Version` の既定値) の直し方を出す
+- 入っている版が読めないときと、固定した版が winget に無いときは、揃えるコマンドを打っても直らないので、
+  その代わりにそれぞれの直し方 (入っている版の確かめ方・repo の版の直し方) を出す
+- setup が入れるときに UAC を押さないまま 600 秒たつと、⚠ と手で打つコマンドを出して先へ進む
+- setup が待つ上限は、`-Check` が 120 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、先へ進む (setup は止めない)
+
+新しいマシンでは setup を 2 回流す (98 の置き先は、Google 日本語入力を初めて使ったときにできるため):
+
+1. `~/dotfiles/setup --update` を流す。UAC の確認が出たら「はい」を押す
+2. Google 日本語入力で一度何か打つ (入力方式が別なら切り替えてから)
+3. もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
+
+版を上げる:
+
+1. `Install-GoogleJapaneseInput.ps1` の `-Version` の既定値を、`winget show --id Google.JapaneseIME --versions` にある新しい版にする
+2. この PC で `Install-GoogleJapaneseInput` を打って揃え、`nix/scripts/bootstrap-windows-google-ime.sh --dry-run` と
+   `--import` で設定を読み書きできるかを見る (`--import` は `Install-GoogleJapaneseInput.ps1` の変更では止まらない)
+3. `--import` が「今の .proto に無い項目がある」で止まったら、`nix/pkgs/pjp-google-ime/proto/` の写しを新しくする
+   ([pjp-google-ime](#pjp-google-ime))
+4. commit して `~/dotfiles/setup --update` を流し、`bootstrap-windows-google-ime-install.sh` が 1 行で終わることを見る
+
+### Install-GoogleJapaneseInput.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (版の読み方・探す場所・plan・winget の引数・状態の表・流れ) は
+  `google-japanese-input/Install-GoogleJapaneseInput.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない
+  (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/google-japanese-input/Install-GoogleJapaneseInput.Tests.ps1
+  ```
+
+- winget やファイルに触る部分は、実機で `-Check` と本番を打って確かめる
 
 ### pjp-google-ime
 

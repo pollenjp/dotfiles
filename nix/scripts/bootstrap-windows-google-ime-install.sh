@@ -26,7 +26,7 @@
 #    マシンなら飛ばす。<windowsHome>/.config/powershell/Install-GoogleJapaneseInput.ps1 が無いときも飛ばす
 # 2. pwsh.exe で Install-GoogleJapaneseInput.ps1 -Check を流す (何も変えない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
-# 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す
+# 3. 終了コード 0 なら 1 行を出す (※ の補足があれば添える)。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す
 #    (入っている版の方が新しい・固定した版が winget に無い・入っている版が読めないときは、打っても
 #    直らないので、揃えるコマンドの代わりに repo の版の上げ方・直し方・確かめ方を出す)。
 #    3 (入っていない) なら Install-GoogleJapaneseInput.ps1 -IfMissing で入れる。machine スコープの MSI

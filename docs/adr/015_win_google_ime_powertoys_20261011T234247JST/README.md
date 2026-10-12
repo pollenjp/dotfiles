@@ -8,6 +8,7 @@
 | チケット | [TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b) |
 | 前提 ADR | [010_win_files_from_wsl](../010_win_files_from_wsl_20260928T003933JST/README.md)（`win/` を WSL の bootstrap が `/mnt/c` へコピーして配る。衝突したら止める）、[006_nix_closure_sbom_osv_scan](../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)（home の閉包をスキャンする） |
 | 運用手順 | [`win/README.md`「Google 日本語入力」「PowerToys」](../../../win/README.md)、[`nix/README.md`「bootstrap の実行順」](../../../nix/README.md#bootstrap-の実行順) |
+| 後続 ADR | [017_win_apps_winget](../017_win_apps_winget_20261012T115007JST/README.md)（2 つのアプリの本体を、setup の中で winget から入れるようにした。**「7. 移行・運用手順」は現行の形に更新済み。**「2. 決定」D と「5. 影響」にある `--import` の確かめ（`win/google-japanese-input/` の下の全部）は、017 の決定 C で取り込みが書き換える 3 つのテキストに絞ったが、「1. 背景」〜「6. 検証」の本文は決定当時の記録としてそのまま残してある） |
 
 ---
 
@@ -498,14 +499,14 @@ git diff                                               # dotfiles と dotfiles-p
 git commit                                             # 両方で commit する
 ```
 
-- `--import` は、repo 側に commit していない変更があると止まる。先に commit するか戻しておく
+- `--import` は、取り込みが書き換えるテキスト (`config.txtpb`・`keymap.tsv`・`romaji.tsv` と、dotfiles-private の辞書のディレクトリ `dictionaries/` の中身) に commit していない変更があると止まる。先に commit するか戻しておく
 - repo の側で上書きするなら `nix/scripts/bootstrap-windows-google-ime.sh --force`。両方を残すなら、
   テキストを手で直してから `--force`
 - PowerToys のエディタで変えたときは、ADR 010 の衝突と同じく `cp` で `win/` へ取り込むか `--force`
 
 ### 新しいマシン
 
-- Google 日本語入力と PowerToys は手で入れる (この ADR の範囲の外)
+- Google 日本語入力と PowerToys は、setup が winget で入れる ([ADR 017](../017_win_apps_winget_20261012T115007JST/README.md))。Google 日本語入力の置き先は一度使うまで無いので、何か打ってから setup をもう一度流す
 - `dotfiles.wsl.windowsFiles.enable = true` のホストで `~/dotfiles/setup --update` を流す
 - Windows 側に既に設定があると、記録が無いので初回は衝突になる。差を見て (辞書は、自分の端末で
   `--dry-run --show-words`)、`--import` で取り込むか `--force` で置き直す

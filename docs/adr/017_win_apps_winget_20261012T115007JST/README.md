@@ -109,10 +109,10 @@ Mozc の `UserProfileDirectoryImpl::GetDir()` (`src/base/system_util.cc`) が、
 
 | `-Check` | 95 がすること |
 | --- | --- |
-| 0 | 1 行だけ出す |
+| 0 | 1 行を出す (winget に新しい版があるなどの ※ の補足があれば、それも添える) |
 | 1 | ⚠ で囲み、状態の表と揃えるコマンド (`Install-GoogleJapaneseInput`) を出す |
 | 3 | `-IfMissing` で入れる。UAC の確認が出ることを先に出し、上限 600 秒で待つ |
-| ほか | interop・pwsh.exe・winget の失敗。手で打つコマンドを出して飛ばす |
+| ほか | interop・pwsh.exe・winget の失敗や時間切れ。手で打つコマンドを出して飛ばす |
 
 - どの場合も exit 0 (setup を止めない)。`--apply` を付けて手で流すと、`-Check` を付けずに流して揃える (OpenSSH の 96 と同じ)
 - 揃える (入れ替える) のは setup からはしない。日本語入力は全部のアプリに読み込まれていて、入れ替えるとアプリや Windows の再起動が要ることがあるため
@@ -137,6 +137,7 @@ Mozc の `UserProfileDirectoryImpl::GetDir()` (`src/base/system_util.cc`) が、
 - IME のディレクトリが無いとき、`GoogleIMEJaConverter.exe` が 2 つの Program Files のどちらかにあれば、「日本語入力を一度使ってから setup を流し直す」と出して exit 0
 - 無ければ今までどおり「Google 日本語入力が入っていません」で飛ばす
 - ディレクトリを先に作って置くことはしない。Google 日本語入力が作るときの権限と揃わないおそれがある
+- `--import` が commit していない変更を確かめる範囲は、`win/google-japanese-input/` では、取り込みが書き換える `config.txtpb`・`keymap.tsv`・`romaji.tsv` だけに絞る (dotfiles-private の辞書は今までどおり)。同じディレクトリの `Install-GoogleJapaneseInput.ps1` の変更で止まると、§7 の「版を上げる」(`-Version` を変えてから、commit する前に `--import` で確かめる) が通らないため
 
 ### D. 入れるマシンは windowsFiles.enable のマシン
 
@@ -162,13 +163,14 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | `win/powertoys/Install-PowerToys.Tests.ps1` | 新規。副作用の無い関数のテスト |
 | `nix/scripts/bootstrap-windows-google-ime-install.sh` | 新規。order 95 |
 | `nix/scripts/bootstrap-windows-powertoys.sh` | 読み直させる前に、無ければ入れる |
-| `nix/scripts/bootstrap-windows-google-ime.sh` | 入っているが使っていないときの案内 |
+| `nix/scripts/bootstrap-windows-google-ime.sh` | 入っているが使っていないときの案内。`--import` の、commit していない変更の確かめを 3 つのテキストに絞る (決定 C) |
 | `nix/tests/bootstrap-windows-google-ime-install.test.sh` | 新規。偽の pwsh.exe |
 | `nix/tests/bootstrap-windows-powertoys.test.sh`・`bootstrap-windows-google-ime.test.sh` | 足した分のテスト |
 | `nix/flake.nix` | 新しい bootstrap のテストを checks に足す |
 | `win/manifest.toml`・`win/powershell/dotfiles.ps1` | 2 つのスクリプトを配る・関数を足す |
-| `win/README.md`・`nix/README.md` | 使い方・bootstrap の実行順・新しいマシンの手順・テストの表 |
+| `win/README.md`・`nix/README.md` | 使い方 (「Google 日本語入力を入れる」「PowerToys を入れる」と、スクリプトを書くときの注意)・bootstrap の実行順・新しいマシンの手順・テストの表・ディレクトリの木 |
 | `docs/adr/README.md` | 一覧に 017 を足す |
+| `docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md` | 冒頭の表に後続 ADR (この ADR) の行。§7「新しいマシン」を今の形に (本文の決定はそのまま) |
 
 ---
 
