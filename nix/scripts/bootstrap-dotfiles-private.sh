@@ -5,13 +5,14 @@
 #
 # order: 50
 #
-# ^ setup.sh が読む実行順 (既定と同じ)。中身を読む bootstrap-windows-google-ime.sh (order: 98) より
+# ^ setup.sh が読む実行順 (既定と同じ)。中身を読む bootstrap-ssh-config.sh (order: 60)・
+#   bootstrap-windows-ssh-config.sh (order: 91)・bootstrap-windows-google-ime.sh (order: 98) より
 #   先に走ればよい。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
 #
-# 公開したくない設定 (今は Google 日本語入力のユーザー辞書) を、public なこの repo と分けて
-# private repo に置く (docs/adr/015_win_google_ime_powertoys_*)。flake input や submodule に
+# 公開したくない設定 (ssh の接続先と、Google 日本語入力のユーザー辞書) を、public なこの repo と分けて
+# private repo に置く (docs/adr/015_win_google_ime_powertoys_*・docs/adr/016_ssh_config_from_dotfiles_private_*)。flake input や submodule に
 # しないのは、public な repo に private repo の rev を残さず、辞書を変えるたびにこの repo で
 # 指す先を進める commit を要らなくするため。
 #
@@ -112,7 +113,7 @@ fi
 if ! git clone --quiet "${repo_url}" "${dir}"; then
   warn "clone に失敗しました: ${repo_url}"
   printf '   private な repo なので SSH 鍵が要ります。ssh -T git@github.com で疎通を確かめてください。\n' >&2
-  printf '   取れないあいだ、Google 日本語入力の辞書は配られません。\n' >&2
+  printf '   取れないあいだ、ssh の接続先と Google 日本語入力の辞書は配られません。\n' >&2
   exit 0
 fi
 echo "dotfiles-private を clone しました: ${dir}"

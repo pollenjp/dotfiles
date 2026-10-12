@@ -7,6 +7,7 @@
 | 決定者 | pollenjp |
 | チケット | [TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b) |
 | 前提 ADR | [010_win_files_from_wsl](../010_win_files_from_wsl_20260928T003933JST/README.md)（`win/` を WSL の bootstrap が `/mnt/c` へコピーして配る。衝突したら止める）、[006_nix_closure_sbom_osv_scan](../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)（home の閉包をスキャンする） |
+| 後続 ADR | [016_ssh_config_from_dotfiles_private](../016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)（dotfiles-private に ssh の接続先 (`ssh/`) も置くようにした。本文はそのまま） |
 | 運用手順 | [`win/README.md`「Google 日本語入力」「PowerToys」](../../../win/README.md)、[`nix/README.md`「bootstrap の実行順」](../../../nix/README.md#bootstrap-の実行順) |
 | 後続 ADR | [017_win_apps_winget](../017_win_apps_winget_20261012T115007JST/README.md)（2 つのアプリの本体を、setup の中で winget から入れるようにした。**「7. 移行・運用手順」は現行の形に更新済み。**「2. 決定」D と「5. 影響」にある `--import` の確かめ（`win/google-japanese-input/` の下の全部）は、017 の決定 C で取り込みが書き換える 3 つのテキストに絞ったが、「1. 背景」〜「6. 検証」の本文は決定当時の記録としてそのまま残してある） |
 

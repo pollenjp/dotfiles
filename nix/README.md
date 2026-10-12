@@ -164,7 +164,7 @@ setup は使えるべきなので、`fetch` の失敗も止める理由にしな
 
 | 状況 | 理由 |
 | --- | --- |
-| 未 commit の変更がある | 作業中の変更を巻き込みたくない（`.ssh` submodule の状態は見ない） |
+| 未 commit の変更がある | 作業中の変更を巻き込みたくない |
 | detached HEAD / upstream 無し | どこへ進めるべきか決められない |
 | fast-forward できない | rebase か merge かの判断はしない |
 
@@ -437,11 +437,11 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
-| 既存マシン更新 | 2.6 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.5 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
+| 既存マシン更新 | 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
-「既存マシン更新」は `switch` に加えて `ssh-config` と `bootstrap-*`、`exe-exec-trace` を
+「既存マシン更新」は `switch` に加えて `bootstrap-*` と `exe-exec-trace` を
 毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
 繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
@@ -582,10 +582,12 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-mise.sh` | 10 | `claude` を入れる |
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
-| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
+| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
+| `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜98 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
+| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜98 と exe-exec-trace は、直して流し直すまで走らない） |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
@@ -605,7 +607,6 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
-| 2.6 | `./nix/scripts/setup-ssh-config.sh` | `ssh-config` | `.ssh` submodule を `~/.ssh/config.d/` へ（[後述](#ssh-について)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
@@ -733,7 +734,7 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`ssh-config` と `bootstrap-*`、`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`bootstrap-*` と `exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
@@ -1146,8 +1147,6 @@ gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git �
 ## ssh について
 
 `programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
-接続情報の実体は `.ssh` submodule にあり、`setup-ssh-config.sh` が
-`~/.ssh/config.d/` へ symlink する。
 
 ```
 Include config.d/*.ssh_config
@@ -1155,25 +1154,33 @@ Include config.d/*.ssh_config
 
 （`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する）
 
+接続先の実体は private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の
+`ssh/*.ssh_config` にある（公開したくないので、この repo にも `/nix/store` にも置かない）。
+`bootstrap-dotfiles-private.sh`（order 50）が clone / pull し、`bootstrap-ssh-config.sh`（order 60）が
+`~/.ssh/config.d/` へ symlink する。どちらも `setup --update` で毎回走る。
+
 ```sh
-./nix/scripts/setup-ssh-config.sh
+./nix/scripts/bootstrap-ssh-config.sh
 ```
 
-冪等。`setup.sh` では「新しいマシン適用」「既存マシン更新」の両方に入っている
-ので、submodule を更新したら `--update` で張り直される。
-submodule が未取得なら教えてくれる（処理は止めない）。
+冪等。dotfiles-private を取れていない・`ssh/` が空なら、今ある symlink を外さずに警告だけ出す（処理は止めない）。
 
 | `~/.ssh/config.d/` の中身 | 出所 |
 | --- | --- |
-| `*.ssh_config` (symlink) | `.ssh` submodule。スクリプトが張る |
-| それ以外 | 手で置いたマシン固有の設定。スクリプトは触らない |
+| `*.ssh_config` (symlink) | dotfiles-private の `ssh/`。スクリプトが張る |
+| それ以外 | 手で置いたマシン固有の設定や、ほかのツール（my-cloud など）が書いた設定。スクリプトは触らない |
 
-submodule 側でファイル名が変わった場合、参照先が消えた symlink はスクリプトが外す。
-手で置いたファイルや、submodule 以外を指す symlink には触らない。
+正本からファイルが消えた場合、それを指す symlink はスクリプトが外す（以前の `.ssh` submodule を指す
+symlink も外して張り替える）。手で置いたファイルや、ほかを指す symlink には触らず、同じ名前のものが
+あれば上書きせずに警告する。
 
 マシン固有の設定を足すときは `~/.ssh/config.d/` にファイルを置く。
 `ssh` は同じキーワードについて**最初に得た値**を採るので、**ファイル名の順序が
-優先順位**になる。実効値は `ssh -G <ホスト名>` で確認できる。
+優先順位**になる。実効値は `ssh -G <ホスト名>`、読んだファイルは `ssh -v -G <ホスト名>` の
+`Reading configuration data` の行で確認できる。
+
+Windows 側（`%USERPROFILE%\.ssh`）へは `bootstrap-windows-ssh-config.sh`（order 91）が同じ形で
+コピーする。[`win/README.md`「ssh の設定」](../win/README.md#ssh-の設定) を参照。
 
 ### ⚠️ 既存の `~/.ssh/config` がある場合
 
@@ -1190,6 +1197,8 @@ submodule 側でファイル名が変わった場合、参照先が消えた sym
 > 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
 > `config.d` へ移す案を棄却した実測）は
 > [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
+> 接続先を `.ssh` submodule から dotfiles-private へ移し、Windows へも配るようにした経緯は
+> [ADR 016](../docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)。
 
 ### WSL では ssh 自体を Windows 側に差し替える
 
@@ -1213,6 +1222,10 @@ Linux 側の ssh を使いたいときは `USE_LINUX_SSH=1` を渡す（ラッ�
 ```sh
 USE_LINUX_SSH=1 ssh <ホスト名>
 ```
+
+このため、WSL の `ssh` が読む設定は Windows 側の `%USERPROFILE%\.ssh\config` になる（WSL 側の
+`~/.ssh/config` が効くのは `USE_LINUX_SSH=1` のときだけ）。Windows 側の設定は
+`bootstrap-windows-ssh-config.sh` が置く（[`win/README.md`「ssh の設定」](../win/README.md#ssh-の設定)）。
 
 **git の署名もこれに依存している。** `gpg.ssh.defaultKeyCommand` は `ssh-add -L` の
 出力から `Signing` を含む鍵を選ぶので、`ssh-add` が Linux 側だと 1Password の鍵が
@@ -2422,7 +2435,6 @@ nix/
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
-    ├── setup-ssh-config.sh         ~/.ssh/config.d/ を整える (switch より前)
     ├── verify.sh                   検証を一括実行する
     ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
     ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
@@ -2434,11 +2446,13 @@ nix/
     ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
     ├── bootstrap-dotfiles-private.sh  private な dotfiles-private を取得する (冪等。更新時も毎回走る。取れなくても止めない)
+    ├── bootstrap-ssh-config.sh     dotfiles-private の ssh/*.ssh_config を ~/.ssh/config.d/ へ張る (冪等。更新時も毎回走る。取れていなければ何もしない)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
     ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
     ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
     ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
     ├── bootstrap-windows-powertoys.sh  win/ から配った PowerToys の割り当てを Keyboard Manager に読み直させる (冪等。更新時も毎回走る。PowerToys が無ければ先に入れる)
+    ├── bootstrap-windows-ssh-config.sh  dotfiles-private の ssh/*.ssh_config を Windows の %USERPROFILE%\.ssh へコピーし、config を置く (冪等。更新時も毎回走る)
     ├── bootstrap-windows-google-ime-install.sh  Windows の Google 日本語入力が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、上げはしない)
     ├── bootstrap-windows-powershell-profile.sh  win/ から配った dotfiles.ps1 を PowerShell 7 の $PROFILE から読ませる (冪等。更新時も毎回走る)
     ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)

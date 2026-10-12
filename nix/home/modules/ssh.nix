@@ -17,11 +17,11 @@
 # 1. **`/nix/store` は誰でも読める。** ssh の接続先ホスト名・ユーザー名・踏み台の
 #    構成は他ユーザーに見せたくないので、store に入れてはいけない。
 #    パーミッションで隠すこともできない (store のファイルは 444)。
-# 2. 実体は `.ssh` submodule にあり、**flake root (`nix/`) の外**なので
-#    そもそも flake から読めない。
+# 2. 実体は private な dotfiles-private (別の repo) の `ssh/` にあり、
+#    そもそも flake から読めない (docs/adr/016_ssh_config_from_dotfiles_private_*)。
 #
 # そこでここでは **Include の骨組みだけ**を生成し、中身は
-# `scripts/setup-ssh-config.sh` が `~/.ssh/config.d/` へ symlink する。
+# `scripts/bootstrap-ssh-config.sh` が `~/.ssh/config.d/` へ symlink する。
 # 骨組みが Nix 管理なので「Include 行が入っているか」を気にしなくてよくなる
 # (従来は main.bash の追記が済んでいるかどうかがマシンごとに曖昧だった)。
 #
@@ -60,7 +60,7 @@ in
     # つまりこれは ~/.ssh/config.d/*.ssh_config を読む。
     #
     # ここに置かれるもの:
-    #   - .ssh submodule の *.ssh_config (setup-ssh-config.sh が symlink)
+    #   - dotfiles-private の ssh/*.ssh_config (bootstrap-ssh-config.sh が symlink)
     #   - マシン固有の設定 (手で置く。git 管理外)
     #
     # ssh は同じキーワードについて **最初に得た値**を採るので、
