@@ -139,6 +139,7 @@ jobs:
         run: |
           ./nix/scripts/flake-lock-age.sh check \
             ./nix \
+            ./nix/files/claude/skills/pjp-d3js \
             ./nix/files/claude/skills/pjp-drawio \
             ./nix/files/claude/skills/pjp-plantuml
 
