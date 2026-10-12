@@ -270,6 +270,20 @@ else
   ng "有効なプロファイルが default でない" "rc=$(rc "${h}") calls=$(ncalls "${h}") record=$([[ -e $(record "${h}") ]] && echo あり) $(outerr "${h}")"
 fi
 
+# 6d. 読み直させて記録した後に settings.json が無くなった: 前の記録で「読み直し済み」と素通りせず (sha を比べる前に確かめる)、
+#     送らず記録も変えずに、設定画面を一度開くよう stderr に出す
+h=$(new_home t6d "${state_on}" 1)
+run "${h}" 0
+before=$(cat "$(record "${h}")")
+rm "$(km_settings_json "${h}")"
+run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && $(cat "$(record "${h}")") == "${before}" ]] \
+  && grep -q '設定画面を一度開いてから' "${h}/err" && ! outerr "${h}" | grep -q '読み直し済み'; then
+  ok "記録があっても settings.json が無ければ、読み直し済みとは言わずに設定画面を一度開くよう出す (記録は変えない)"
+else
+  ng "記録があって settings.json が無い" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
+fi
+
 # 7. powershell.exe が無い: 手で読み直す方法を出し、記録しない
 h=$(new_home t7 "${state_on}" 1)
 run "${h}" 1

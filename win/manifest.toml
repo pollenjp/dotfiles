@@ -33,7 +33,7 @@ hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との
 [[files]]
 src = "powertoys/keyboard-manager/default.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/default.json"
-hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager に読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (PowerToys が動いていなければ、起動したときに読む)"
+hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager に読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (PowerToys が動いていなければ、起動したときに読む。ただし PowerToys の設定画面を一度開いて settings.json ができるまでは読まれず、bootstrap-windows-powertoys.sh が案内する)"
 
 [[files]]
 src = "powertoys/keyboard-manager/editorSettings.json"

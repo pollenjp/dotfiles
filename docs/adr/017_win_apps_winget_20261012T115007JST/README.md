@@ -256,7 +256,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 2. 98 が「まだ使われていません」と出したら、日本語入力を一度使う (何か打つ)
 3. 2 で使ったら、もう一度 `~/dotfiles/setup --update` を流す。98 が設定と辞書を置く
 
-PowerToys は、1 回目の setup で 91 が、Keyboard Manager の設定 (settings.json) がまだ無いと出したら、設定画面を一度開いてから 91 (`nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す (3 の setup で流してもよい)。91 が割り当てを読み直させる (§1 の 7)。
+PowerToys は、1 回目の setup で 91 が、Keyboard Manager の設定 (settings.json) がまだ無いと出したら、設定画面を一度開いてから 91 (`nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す (もう一度 setup --update を流してもよい)。91 が割り当てを読み直させる (§1 の 7)。
 
 新しいマシンで通しては、まだ確かめていない (§6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、置いた記録が無いので衝突になる)、`--import` (Windows 側を残す) か `--force` (repo 側で置き直す) を選ぶ
 
