@@ -129,7 +129,8 @@ root で single-user install する場合は `/etc/nix/nix.conf` に `build-user
 | --- | --- | --- |
 | 本体の checkout（`setup.sh` と各モジュール） | `git pull` | `~/dotfiles/setup --self-update`（[後述](#本体を最新にする---self-update)） |
 | `nix/flake.lock`（nixpkgs / home-manager のバージョン） | `flake-lock-age.sh update` | `~/dotfiles/setup --flake-update`（[後述](#依存-flakelock-の更新)）か手で実行 |
-| skill 側の `flake.lock`（`pjp-drawio` / `pjp-plantuml`） | `flake-lock-age.sh update <そのディレクトリ>` | 手で実行（`setup` は本体しか見ない） |
+| skill 側の `flake.lock`（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`） | `flake-lock-age.sh update <そのディレクトリ>` | 手で実行（`setup` は本体しか見ない） |
+| `pjp-d3js` の `package-lock.json`（d3・Observable Plot・linkedom） | `npm install --package-lock-only`（skill の `SKILL.md`「版」） | 手で実行（`setup` も CI も見ない） |
 | `~/dotfiles/flake.lock` | `nix flake update` | `setup.sh` が `switch` の前に張り直す（[後述](#ローカル-flake-の-lock-も張り直す)。本体を編集しただけでも要る） |
 
 **`~/dotfiles/setup` は本体の `setup.sh` への symlink なので、それ自体が古くなることはない。**
@@ -237,6 +238,7 @@ whitelist の無い flake（初回の lock など）では表示だけ。`--no-s
 ```sh
 ./nix/scripts/flake-lock-age.sh check \
   ./nix \
+  ./nix/files/claude/skills/pjp-d3js \
   ./nix/files/claude/skills/pjp-drawio \
   ./nix/files/claude/skills/pjp-plantuml
 ```
@@ -358,7 +360,7 @@ nixpkgs** から `nix shell --inputs-from` で自動で入り直す。スキャ�
 
 dotfiles 本体の既定対象 `homeConfigurations.sandbox` は、パッケージ集合が
 全ホスト共通（ホスト差は設定側にしか無い）なので x86_64-linux の代表として使う。
-skill 側 flake（`pjp-drawio` / `pjp-plantuml`）は `update` 時の自動スキャン
+skill 側 flake（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）は `update` 時の自動スキャン
 （whitelist が無いので表示のみ）だけで、**CI の定期スキャンは本体の閉包しか
 見ていない**。
 
@@ -2316,7 +2318,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | --- | --- | --- | --- | --- |
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
-| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
+| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
 | `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
