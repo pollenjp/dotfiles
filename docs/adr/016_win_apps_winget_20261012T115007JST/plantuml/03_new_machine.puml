@@ -1,0 +1,36 @@
+@startuml
+' 新しいマシンで setup を流したときの流れ。98 の置き先は日本語入力を初めて使ったときに
+' できるので、2 回目の setup で設定と辞書が入る。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+
+title 新しいマシンでの setup（2 回流す）
+
+actor "ユーザー" as U
+participant "setup --update" as S
+participant "90 / 91" as P91
+participant "95（新）" as P95
+participant "98" as P98
+participant "Windows" as W
+
+U -> S : 1 回目
+S -> P91 : 90 がスクリプトと JSON を置く
+P91 -> W : 91: PowerToys が無ければ\nuser スコープで入れる
+P91 -> W : default.json を読み直させる\n（動いていなければ記録だけ）
+S -> P95 : 95
+P95 -> W : Google 日本語入力が無ければ\n-IfMissing で入れる
+W -> U : UAC の確認
+U -> W : はい
+P95 -> U : 「一度使ってから流し直す」
+S -> P98 : 98
+P98 -> U : 置き先がまだ無いので案内して飛ばす
+...
+U -> W : 日本語入力を一度使う\n（置き先のディレクトリができる）
+...
+U -> S : 2 回目
+S -> P95 : 95: 固定した版と同じ（1 行）
+S -> P98 : 98
+P98 -> W : 設定と辞書を組み立てて置き、\n変換サーバーを落とす
+@enduml
