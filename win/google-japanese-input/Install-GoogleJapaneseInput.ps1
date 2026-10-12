@@ -9,7 +9,7 @@ PowerShell では dotfiles.ps1 の Install-GoogleJapaneseInput から呼ぶ (win
 winget の Google.JapaneseIME は machine スコープの MSI (wix) だけで、入れる・上げるときは Windows の
 デスクトップに UAC の確認が出る。日本語入力は全部のアプリに読み込まれているので、上げるとアプリや
 Windows の再起動が要ることがある。そこで setup (bootstrap-windows-google-ime-install.sh) は入っていない
-ときだけ -IfMissing で入れ、上げるのは人がこのスクリプトを打つ (ADR 016)。入っている版の方が新しくても
+ときだけ -IfMissing で入れ、上げるのは人がこのスクリプトを打つ (ADR 017)。入っている版の方が新しくても
 下げない (repo の版を上げるよう案内する)。
 
 版は GoogleIMEJaConverter.exe の ProductVersion で読む (FileVersion は "2.29.5370.0  (build 63)" の形で、

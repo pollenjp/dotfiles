@@ -168,7 +168,7 @@ herdr と同じく、`dotfiles.wsl.windowsFiles.enable` のマシン (今は `po
 | `nix/flake.nix` | 新しい bootstrap のテストを checks に足す |
 | `win/manifest.toml`・`win/powershell/dotfiles.ps1` | 2 つのスクリプトを配る・関数を足す |
 | `win/README.md`・`nix/README.md` | 使い方・bootstrap の実行順・新しいマシンの手順・テストの表 |
-| `docs/adr/README.md` | 一覧に 016 を足す |
+| `docs/adr/README.md` | 一覧に 017 を足す |
 
 ---
 

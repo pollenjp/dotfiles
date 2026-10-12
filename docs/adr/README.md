@@ -22,7 +22,7 @@
 | [013](./013_remove_legacy_tree_20261007T015646JST/README.md) | 旧経路 (`main.bash setup`) を Windows の Git Bash 用も含めて削除し、配置を Nix 経路と `win/` だけにする | 2026-10-07 |
 | [014](./014_claude_notion_routes_20261010T014639JST/README.md) | Notion へ書く skill の宛先を、マシンではなく作業中の repo で決める | 2026-10-09 |
 | [015](./015_win_google_ime_powertoys_20261011T234247JST/README.md) | Windows 側の Google 日本語入力と PowerToys の設定を、repo のテキストから組み立て直して配る | 2026-10-11 |
-| [016](./016_win_apps_winget_20261012T115007JST/README.md) | Windows の Google 日本語入力と PowerToys を、setup の中で winget から入れる | 2026-10-12 |
+| [017](./017_win_apps_winget_20261012T115007JST/README.md) | Windows の Google 日本語入力と PowerToys を、setup の中で winget から入れる | 2026-10-12 |
 
 ## ディレクトリ名
 

@@ -6,7 +6,7 @@ Windows の PowerToys (winget の Microsoft.PowerToys) が入っていなけれ�
 dotfiles の win/powertoys/Install-PowerToys.ps1 を %USERPROFILE%\.config\powershell\ へ配り、
 PowerShell では dotfiles.ps1 の Install-PowerToys から呼ぶ (win/README.md の「PowerToys を入れる」)。
 
-版は固定しない。PowerToys は自分で新しい版を知らせるので、winget pin も足さない (ADR 016)。
+版は固定しない。PowerToys は自分で新しい版を知らせるので、winget pin も足さない (ADR 017)。
 入っているかは、PowerToys.exe が %LOCALAPPDATA%\PowerToys\ (user スコープ) か
 %ProgramFiles%\PowerToys\ (machine スコープ) にあるかで見る。入れるときは user スコープの
 installer (PowerToysUserSetup-…exe) にするので、管理者は要らない。

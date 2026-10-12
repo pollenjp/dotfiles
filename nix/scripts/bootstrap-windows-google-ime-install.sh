@@ -16,7 +16,7 @@
 #
 # Windows の Google 日本語入力は winget の Google.JapaneseIME で入れ、版は
 # win/google-japanese-input/Install-GoogleJapaneseInput.ps1 の -Version の既定値で固定する
-# (win/README.md の「Google 日本語入力を入れる」、docs/adr/016_win_apps_winget_*)。
+# (win/README.md の「Google 日本語入力を入れる」、docs/adr/017_win_apps_winget_*)。
 # 設定 (bootstrap-windows-google-ime.sh が置く) を読み書きできると確かめた版に留めるため、
 # 自分で上がったときも気付けるよう、setup のたびに差を確かめて見せる。新しいマシンでは入れるところまでする。
 #

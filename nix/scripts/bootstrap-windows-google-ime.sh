@@ -172,7 +172,7 @@ ime_dir="${windows_home}/AppData/LocalLow/Google/Google Japanese Input"
 if [[ ! -d ${ime_dir} ]]; then
   # 置き先は、Google 日本語入力が初めて起動したときに作る。入れただけでまだ使っていないマシン
   # (新しいマシンの 1 回目の setup) では無いので、変換サーバーの exe で「入っている」を見分けて案内する
-  # (docs/adr/016_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
+  # (docs/adr/017_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
   # 権限と揃わないおそれがある)。Program Files は Windows のホーム (/mnt/c/Users/<名前>) と同じドライブにある
   windows_root=${windows_home%/Users/*}
   for d in "${windows_root}/Program Files" "${windows_root}/Program Files (x86)"; do
@@ -242,7 +242,7 @@ if ((do_import)); then
   # 出すのはファイル名だけ (辞書の中身は出ない)。--no-optional-locks は index を書かないため。
   # --untracked-files=normal は、未追跡を見せない設定 (status.showUntrackedFiles=no) でも見るため。
   # 設定の側で見るのは取り込みが書き換える 3 つだけ。同じディレクトリの Install-GoogleJapaneseInput.ps1
-  # (ADR 016) は取り込みで変わらないので、版を上げる途中 (-Version を変えて commit する前) でも取り込める
+  # (ADR 017) は取り込みで変わらないので、版を上げる途中 (-Version を変えて commit する前) でも取り込める
   for d in "${config_dir}" ${dict_dir:+"${dict_dir}"}; do
     if [[ ${d} == "${config_dir}" ]]; then
       # pjp-google-ime の import (google_ime.py の write_config_texts) が書き換える・消すファイルと同じにする

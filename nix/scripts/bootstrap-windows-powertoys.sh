@@ -14,7 +14,7 @@
 # Keyboard Manager のエンジンは、起動したときと、名前付きイベント
 # PowerToys_KeyboardManager_Event_Settings を受けたときにしか default.json を読まない
 # (docs/adr/015_win_google_ime_powertoys_*)。win/ の割り当てを配っても、そのままでは効かない。
-# 新しいマシンでは PowerToys そのものが入っていないので、読み直させる前に入れる (docs/adr/016_win_apps_winget_*)。
+# 新しいマシンでは PowerToys そのものが入っていないので、読み直させる前に入れる (docs/adr/017_win_apps_winget_*)。
 #
 # ## 何をするか
 #
@@ -115,7 +115,7 @@ pwsh_command() {
   echo "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \$global:LASTEXITCODE = 2; & '${quoted}'$1; exit \$LASTEXITCODE"
 }
 
-# PowerToys が入っていなければ、Install-PowerToys.ps1 -IfMissing で入れる (docs/adr/016_win_apps_winget_*)。
+# PowerToys が入っていなければ、Install-PowerToys.ps1 -IfMissing で入れる (docs/adr/017_win_apps_winget_*)。
 # 入っているかは -Check (PowerToys.exe があるか) で見る。何があっても 0 を返し、読み直しへ進む
 install_powertoys() {
   local deployed="${windows_home}/.config/powershell/Install-PowerToys.ps1"
