@@ -13,6 +13,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
+| (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
 
 ## 配る
 
@@ -295,6 +296,43 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   ```
 
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる
+
+## ssh の設定
+
+1Password を使う WSL のマシンでは、WSL の `ssh` は Windows の `ssh.exe` を呼ぶ ([OpenSSH](#openssh))。
+`ssh.exe` が読むのは Windows 側の `%USERPROFILE%\.ssh\config` なので、そこにも WSL と同じ形を置く
+(経緯は [ADR 016](../docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md))。
+`manifest.toml` では配らず、`nix/scripts/bootstrap-windows-ssh-config.sh` (order 91) が
+`setup --update` のたびにコピーする。
+
+| Windows 側 | 中身 | 出所 |
+| --- | --- | --- |
+| `%USERPROFILE%\.ssh\config` | `Include config.d/*.ssh_config` の 1 行と説明のコメント | script が置く |
+| `%USERPROFILE%\.ssh\config.d\<名前>.ssh_config` | 接続先 | private な dotfiles-private の `ssh/` からコピー |
+| `%USERPROFILE%\.ssh\config.d\` のほかのファイル | マシン固有の接続先 | my-cloud の `ssh-config.sh` などが書く。script は触らない |
+
+- `config.d` はファイル名の順に読まれ、同じキーは先に読んだ値が効く (WSL と同じ)
+- 置いたファイルは、中身の sha256 を WSL の `~/.local/state/dotfiles/windows-ssh-config.deployed.json` に覚える。
+  正本が変われば上書きし、正本から消えれば消す
+- 旧経路が置いた `Include ~/dotfiles/ssh_config` の 1 行だけの `config` は、衝突にせず置き換える
+- 書いたあとに `ssh.exe -v -G nonexistent.invalid` を流し、`config` と置いたファイルが読まれること、
+  旧 clone (`C:\Users\<名前>\dotfiles`) の `ssh_config` を読んでいないことを確かめる。アクセス権で弾かれる
+  (`Bad owner or permissions`) などがあれば ⚠ の枠で出して止まる。ssh.exe を呼べないときは、手で打つ
+  コマンドを出して進む
+
+### ssh の設定が衝突したら
+
+Windows で `config` や dotfiles のファイルを直していたら、触らずに diff を出して止まる。どちらかで解く。
+
+1. 直した中身を dotfiles-private の `ssh/` へ取り込み、commit して push する。`config` に手で書いた
+   `Host` は `config.d\<名前>.ssh_config` へ移す
+2. 上書きする。元は `<名前>.dotfiles-bak-<日時>` に退避される (`*.ssh_config` で終わらないので読まれない)
+
+```sh
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-ssh-config.sh --force
+```
+
+判定だけ見るなら `--dry-run` を付ける。
 
 ## PowerToys
 

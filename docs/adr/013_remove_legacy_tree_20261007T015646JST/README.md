@@ -7,6 +7,7 @@
 | 決定者 | pollenjp |
 | チケット | [TKT-117](https://app.notion.com/p/nix-win-main-bash-setup-3f179149a66f81e186b2d67aca2dbb18) |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md)（段階移行の Stage 6 で旧経路の削除を判断する。条件は全マシンの移行）、[003_nix_ssh_config](../003_nix_ssh_config_20260810T210714JST/README.md)（Windows 用の `ssh_config` と `bin/ssh-*-git-for-win.sh` は Windows を畳むときに消す）、[010_win_files_from_wsl](../010_win_files_from_wsl_20260928T003933JST/README.md)（E: Git Bash の設定を `win/` へ移し終えたら別の ADR で畳む） |
+| 後続 ADR | [016_ssh_config_from_dotfiles_private](../016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)（「C. 残すもの」の `.ssh` submodule と `.gitmodules` を外した。接続先は dotfiles-private の `ssh/` へ移した。本文はそのまま） |
 | 運用手順 | [`README.md`](../../../README.md)、[`nix/README.md`](../../../nix/README.md) |
 
 ---

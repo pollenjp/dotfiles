@@ -194,8 +194,8 @@ dotfiles-private を submodule にしなかった。
   - `--force` は元を `<名前>.dotfiles-bak-<日時>` に退避してから上書き・削除する。Windows の
     `config` に手で書いた Host を失わないため。退避の名前は `*.ssh_config` で終わらないので
     `Include` されない
-- 一時ファイルの名前 (`.<名前>.tmp`) も `*.ssh_config` で終わらないので、書いている途中に
-  ssh.exe が読んでも `Include` されない
+- 一時ファイルの名前 (`<名前>.dotfiles-tmp.XXXXXX`、bootstrap-windows-files.sh と同じ) も
+  `*.ssh_config` で終わらないので、書いている途中に ssh.exe が読んでも `Include` されない
 - `.ssh` と `config.d` が無ければ作り、ACL は Windows の継承に任せる
 - 正本の `ssh/` が無い・空なら、何も書かず消さずに警告して exit 0 にする (取り損ねで全部消さない)
 - `--dry-run` は判定だけ出し、何も書かず、確かめも流さない

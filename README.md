@@ -8,8 +8,11 @@ Nix home-manager で配置する。リポジトリ本体は `~/ghq/github.com/po
 | --- | --- |
 | [`nix/`](./nix/README.md) | home-manager の flake と `setup.sh`。対象は Linux / macOS / WSL |
 | [`win/`](./win/README.md) | Windows 側のアプリの設定（Orca など）。WSL の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る |
-| `.ssh` | ssh の接続先（private な submodule）。`setup` が `~/.ssh/config.d/` へ張る |
 | [`docs/adr/`](./docs/adr/README.md) | 決めたことと、その理由の記録 |
+
+ssh の接続先は private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の `ssh/` に置き、
+`setup` が `~/.ssh/config.d/` へ張り、Windows の `%USERPROFILE%\.ssh` へはコピーする
+（[ADR 016](./docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)）。
 
 > 以前は `~/dotfiles` に clone して `./main.bash setup` で symlink を張る旧経路もあった
 > （Windows の Git Bash もこれを使っていた）。
