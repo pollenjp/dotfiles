@@ -1,0 +1,41 @@
+@startuml
+' 新しいマシンで setup を流したときの流れ。98 の置き先 (日本語入力を初めて使ったときにできる。
+' 3.34 の MSI は入れた直後に作る見込み) がまだ無ければ、2 回目の setup で設定と辞書が入る。
+' PowerToys は設定画面を一度開くまで割り当てを読まない (settings.json が無い) ので、開いてから 91 を流し直す。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+
+title 新しいマシンでの setup（置き先がまだ無ければ 2 回）
+
+actor "ユーザー" as U
+participant "setup --update" as S
+participant "90 / 91" as P91
+participant "95（新）" as P95
+participant "98" as P98
+participant "Windows" as W
+
+U -> S : 1 回目
+S -> P91 : 90 がスクリプトと JSON を置く
+P91 -> W : 91: PowerToys が無ければ\nuser スコープで入れる
+P91 -> U : （settings.json がまだ無ければ）\n「設定画面を一度開いてから流し直す」
+S -> P95 : 95
+P95 -> W : Google 日本語入力が無ければ\n-IfMissing で入れる
+W -> U : UAC の確認
+U -> W : はい
+P95 -> U : 「98 が『まだ使われていません』と出したら、\n一度使ってから流し直す」
+S -> P98 : 98
+P98 -> U : （無ければ）置き先がまだ無いので案内して飛ばす
+...
+U -> W : PowerToys の設定画面を一度開く\n（settings.json ができる）
+U -> P91 : 91 を流し直す\n（2 回目の setup でもよい）
+P91 -> W : default.json を読み直させる
+...
+U -> W : 日本語入力を一度使う\n（置き先のディレクトリができる）
+...
+U -> S : 2 回目
+S -> P95 : 95: 固定した版と同じ（1 行）
+S -> P98 : 98
+P98 -> W : 設定と辞書を組み立てて置き、\n変換サーバーを落とす
+@enduml

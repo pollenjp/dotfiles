@@ -33,9 +33,19 @@ hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との
 [[files]]
 src = "powertoys/keyboard-manager/default.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/default.json"
-hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager に読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (PowerToys が動いていなければ、起動したときに読む)"
+hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager に読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (PowerToys が動いていなければ、起動したときに読む。ただし PowerToys の設定画面を一度開いて settings.json ができるまでは読まれず、bootstrap-windows-powertoys.sh が案内する)"
 
 [[files]]
 src = "powertoys/keyboard-manager/editorSettings.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/editorSettings.json"
 hint = "Keyboard Manager のエディタを開いていたら、閉じて開き直す"
+
+[[files]]
+src = "google-japanese-input/Install-GoogleJapaneseInput.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-GoogleJapaneseInput.ps1"
+hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。ずれていても上げず、⚠ で知らせるだけ。入れる・上げるときは UAC の確認が出る)"
+
+[[files]]
+src = "powertoys/Install-PowerToys.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-PowerToys.ps1"
+hint = "PowerShell で Install-PowerToys -Check を打つと、入っているかが分かる (setup --update でも確かめ、入っていなければ入れる)"
