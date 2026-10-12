@@ -377,7 +377,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
   済んでいるが、後ろの exe-exec-trace と最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
   など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
-- `--import` で取り込み、`git diff` を見て、dotfiles と dotfiles-private の両方で commit する
+- `--import` で取り込み、`git diff` を見て、dotfiles と dotfiles-private の両方で commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)
   - `--import` は repo のテキストを Windows 側の中身で置き換える (diff の + の行は消える)。両方を
     残すなら、テキストを手で直してから `--force`
   - repo 側 (`win/google-japanese-input/` と dotfiles-private の辞書) に commit していない変更 (未追跡の

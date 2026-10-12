@@ -544,11 +544,13 @@ else
 fi
 git -C "${h}/repo" checkout --quiet -- win/google-japanese-input/keymap.tsv
 printf 'あ\t亜\t名詞\t\n' >"$(tsv_of "${h}" 新しい辞書)"
+# 未追跡を見せない設定でも見えること (script は --untracked-files=normal で見る)
+git -C "${h}/private" config status.showUntrackedFiles no
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 1 && -f $(tsv_of "${h}" 新しい辞書) ]] && cmp -s "${h}/rec.before" "${rec}" \
   && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" \
   && outerr "${h}" | grep -q 'dictionaries に commit していない変更があります'; then
-  ok "--import は dotfiles-private に未追跡の TSV があると、何も書かずに exit 1"
+  ok "--import は dotfiles-private に未追跡の TSV があると、未追跡を見せない設定でも何も書かずに exit 1"
 else
   ng "--import と未追跡の TSV" "rc=$(rc "${h}") $(outerr "${h}")"
 fi

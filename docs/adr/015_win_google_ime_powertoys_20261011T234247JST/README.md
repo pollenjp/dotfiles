@@ -491,7 +491,7 @@ gh repo create pollenjp/dotfiles-private --private   # 辞書の置き場所 (�
 ```sh
 nix/scripts/bootstrap-windows-google-ime.sh --dry-run --show-words   # 差を見る (辞書の語も出るので自分の端末で)
 nix/scripts/bootstrap-windows-google-ime.sh --import   # Windows 側をテキストへ取り込む
-git diff                                               # dotfiles と dotfiles-private の両方で見る
+git diff                                               # dotfiles と dotfiles-private の両方で見る (dotfiles-private は辞書の語が出るので自分の端末で)
 git commit                                             # 両方で commit する
 ```
 

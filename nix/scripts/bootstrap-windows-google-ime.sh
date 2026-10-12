@@ -223,9 +223,10 @@ if ((do_import)); then
   # 取り込みは repo のテキストを Windows 側の中身で置き換える。commit していない変更 (未追跡の
   # ファイルも) があると痕跡なく消えるので、何も書かずに止まる。git が無い・checkout の外で
   # 確かめられないときも、消えた変更は戻せないので止まる側に倒す。
-  # 出すのはファイル名だけ (辞書の中身は出ない)。--no-optional-locks は index を書かないため
+  # 出すのはファイル名だけ (辞書の中身は出ない)。--no-optional-locks は index を書かないため。
+  # --untracked-files=normal は、未追跡を見せない設定 (status.showUntrackedFiles=no) でも見るため
   for d in "${config_dir}" ${dict_dir:+"${dict_dir}"}; do
-    if ! changes=$(git --no-optional-locks -C "${d}" status --porcelain -- . 2>"${tmp}/git-status.err"); then
+    if ! changes=$(git --no-optional-locks -C "${d}" status --porcelain --untracked-files=normal -- . 2>"${tmp}/git-status.err"); then
       {
         echo "!! ${d} に commit していない変更が無いかを確かめられません (git が無いか、git の checkout ではない):"
         sed 's/^/   /' "${tmp}/git-status.err"
@@ -236,7 +237,7 @@ if ((do_import)); then
     if [[ -n ${changes} ]]; then
       {
         echo "!! ${d} に commit していない変更があります。--import はテキストを Windows 側の中身で置き換えるので、先に commit するか、変更を戻してから流し直してください。"
-        git --no-optional-locks -c core.quotePath=false -C "${d}" status --short -- . | sed 's/^/   /'
+        git --no-optional-locks -c core.quotePath=false -C "${d}" status --short --untracked-files=normal -- . | sed 's/^/   /'
       } >&2
       exit 1
     fi
@@ -252,7 +253,7 @@ if ((do_import)); then
     fi
   done
   write_records
-  echo "取り込みました。git diff を見て、dotfiles と dotfiles-private の両方で commit してください。"
+  echo "取り込みました。git diff を見て、dotfiles と dotfiles-private の両方で commit してください (dotfiles-private の diff には辞書の語が出るので、自分の端末で見てください)。"
   exit 0
 fi
 
