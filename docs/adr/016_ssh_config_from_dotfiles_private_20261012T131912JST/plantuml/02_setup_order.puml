@@ -1,0 +1,39 @@
+@startuml
+' setup (新しいマシン / --update) の中で走る順番と、ADR 016 で変わる手順
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #F7F7F7
+  BorderColor #666666
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title setup の中で走る順番（緑は足す手順、赤は外す手順）
+
+start
+:ssh-config（setup-ssh-config.sh）
+switch より前に走り、dotfiles-private を取る前になる; <<#F8CECC>>
+note right : 外す
+:switch（home-manager）;
+:bootstrap 50: dotfiles-private
+clone / pull;
+:bootstrap 60: ssh-config
+$HOME/.ssh/config.d/ へ symlink を張る; <<#D5E8D4>>
+note right : 新規（setup-ssh-config.sh を置き換える）
+:bootstrap 90: windows-files;
+:bootstrap 91: windows-ssh-config
+Windows の config と config.d へコピーする; <<#D5E8D4>>
+note right : 新規（windowsFiles を有効にしたマシンだけ書く）
+:bootstrap 95〜98: ほかの Windows の手順;
+stop
+
+legend right
+  |<#D5E8D4> ADR 016 で足す手順 |
+  |<#F8CECC> ADR 016 で外す手順 |
+  |<#F7F7F7> 変わらない手順 |
+  bootstrap は order の小さい方から走る
+endlegend
+@enduml

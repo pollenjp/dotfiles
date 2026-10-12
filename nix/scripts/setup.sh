@@ -300,11 +300,6 @@ add_step local-flake \
   'ローカル flake (~/dotfiles) と setup の symlink を置く。以後の入口になる。' \
   step 0
 
-add_step ssh-config \
-  './nix/scripts/setup-ssh-config.sh' \
-  '.ssh submodule を ~/.ssh/config.d/ へ張る。submodule 更新後の張り直しにも使う。' \
-  step 0
-
 add_step flake-update \
   'flake.lock を更新 (7 日以上前の revision へ)' \
   'nixpkgs / home-manager を上げる。先端は取らない。既定では入らない (f / --flake-update)。' \
@@ -419,7 +414,7 @@ apply_preset() {
     new-machine)
       # 手順 1 → 2 → 3 → 4/6。
       # 手順 7 (chsh) は README でも「必要なら」なので既定では入れない。
-      ids=(nix-install preflight-unlink local-flake ssh-config switch)
+      ids=(nix-install preflight-unlink local-flake switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -432,7 +427,6 @@ apply_preset() {
       # スクリプトを足したときや別マシンで変えたとき (claude-skills など) に
       # そのマシンだけ取り残され、取り込むには --steps に名前を並べるしかなく、
       # 「何が増えたか」を人間が覚えている必要があった。
-      # ssh-config も同じ理由で入っている (.ssh submodule を更新したら張り直す)。
       #
       # exe-exec-trace も同じ理由で入れる (TKT-72。ADR 012 の追記)。入れないと、
       # トレーサを更新するたびに --steps exe-exec-trace を打ち直すことになる。中で sudo を
@@ -454,7 +448,7 @@ apply_preset() {
       #   chsh              sudo が要る。README でも「必要なら」
       #
       # 外したいときは「カスタム」か --steps で選び直す。
-      ids=(ssh-config switch)
+      ids=(switch)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -750,10 +744,8 @@ pull_repo() {
     warn "git の作業ツリーではないので更新できません: ${repo_dir}"
     return 1
   fi
-  # --ignore-submodules=all: .ssh は別リポジトリで nix 経路とは関係が無く、
-  # そちらの状態で更新を止めたくない。
-  if ! git -C "${repo_dir}" diff --quiet --ignore-submodules=all \
-    || ! git -C "${repo_dir}" diff --cached --quiet --ignore-submodules=all; then
+  if ! git -C "${repo_dir}" diff --quiet \
+    || ! git -C "${repo_dir}" diff --cached --quiet; then
     warn "未 commit の変更があるので本体は更新しません。自分で pull してください:"
     warn "  git -C ${repo_dir} status"
     return 1
@@ -1707,7 +1699,6 @@ run_step() {
     nix-install) step_nix_install ;;
     preflight-unlink) step_script preflight-unlink.sh ;;
     local-flake) step_local_flake ;;
-    ssh-config) step_script setup-ssh-config.sh ;;
     flake-update) step_flake_update ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
