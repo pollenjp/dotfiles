@@ -15,6 +15,10 @@
 # PowerToys_KeyboardManager_Event_Settings を受けたときにしか default.json を読まない
 # (docs/adr/015_win_google_ime_powertoys_*)。win/ の割り当てを配っても、そのままでは効かない。
 # 新しいマシンでは PowerToys そのものが入っていないので、読み直させる前に入れる (docs/adr/017_win_apps_winget_*)。
+# エンジンが読むのは、同じディレクトリの settings.json が指す有効なプロファイルの JSON で、settings.json が
+# 無ければ何も読まない。settings.json を作るのは PowerToys の設定画面だけで、作っても読み直させはしないので、
+# 入れたばかりで設定画面を開いていないマシンでは、イベントを送っても default.json は読まれない
+# (docs/adr/017_win_apps_winget_* の §1 の 7)。
 #
 # ## 何をするか
 #
@@ -23,9 +27,13 @@
 #    -IfMissing で入れる (user スコープ。管理者は要らない)。版は固定しないので、入っていれば何もしない。
 #    スクリプトが無い・interop が使えない・入れられないときは、知らせて 3 へ進む
 # 3. <windowsHome>/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json が無ければ飛ばす
-# 4. default.json の sha256 が、前回読み直させたときの記録
+# 4. 同じディレクトリの settings.json の有効なプロファイル (properties.activeConfiguration.value) が
+#    default でなければ、記録もイベントも触らずに案内して飛ばす (無い・読めないときは設定画面を一度
+#    開いてから流し直すよう、default 以外のときは default に戻すよう出す)。記録すると、次の回から
+#    「読み直し済み」で送らなくなるため
+# 5. default.json の sha256 が、前回読み直させたときの記録
 #    (~/.local/state/dotfiles/powertoys-keyboard-manager.reloaded) と同じなら何もしない (--force なら比べない)
-# 5. powershell.exe でイベントを送る。送れたら記録する。イベントが無い (PowerToys が動いていない) ときも
+# 6. powershell.exe でイベントを送る。送れたら記録する。イベントが無い (PowerToys が動いていない) ときも
 #    記録する (起動したときに読むため)。interop が使えなければ手で読み直す方法を出し、記録しない
 #
 # どの場合も exit 0 (後ろの手順を止めない)。知らない引数だけ exit 2。
@@ -193,9 +201,27 @@ windows_home=$(jq -r '.windowsHome // ""' "${state_file}")
 
 install_powertoys
 
-default_json="${windows_home}/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json"
+km_dir="${windows_home}/AppData/Local/Microsoft/PowerToys/Keyboard Manager"
+default_json="${km_dir}/default.json"
 if [[ -z ${windows_home} || ! -f ${default_json} ]]; then
   echo "Keyboard Manager の default.json がまだありません (${default_json})。この手順は飛ばします。"
+  exit 0
+fi
+
+# エンジンは settings.json の有効なプロファイルの名前を読み、その名前の JSON を読む (settings.json が無ければ
+# 何も読まない)。default でなければ、送っても配った default.json は読まれないので、記録もイベントも触らずに
+# 案内する (記録すると、次の回から「読み直し済み」で送らなくなる)
+settings_json="${km_dir}/settings.json"
+active=$(jq -r '.properties.activeConfiguration.value // empty' "${settings_json}" 2>/dev/null) || active=""
+if [[ -z ${active} ]]; then
+  {
+    echo "!! Keyboard Manager の設定 (settings.json) がまだ無いので、配った default.json は読まれません (${settings_json} が無いか、読めない)。"
+    echo "   PowerToys の設定画面を一度開いてから、setup --update (か ${script_dir}/bootstrap-windows-powertoys.sh) を流し直してください。"
+  } >&2
+  exit 0
+fi
+if [[ ${active} != default ]]; then
+  echo "!! Keyboard Manager の有効なプロファイルが default ではありません (${active})。配った default.json は読まれません。PowerToys の設定で、プロファイルを default に戻してください (${settings_json} の activeConfiguration)。" >&2
   exit 0
 fi
 

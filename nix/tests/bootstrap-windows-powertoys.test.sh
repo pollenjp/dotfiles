@@ -15,6 +15,9 @@
 #   - 送れたら記録し、同じ default.json では呼ばない。変われば呼ぶ。--force なら変わらなくても呼ぶ
 #   - PowerToys が動いていない (absent) ときも記録する。interop が使えない・出力がおかしいときは
 #     手で読み直す方法を出し、記録しない。どれも exit 0
+#   - Keyboard Manager の settings.json が無い・有効なプロファイルが default でないときは、
+#     default.json が読まれないので、送らず記録もせずに stderr に案内して exit 0。settings.json が
+#     できた後の回では送って記録する
 #   - 読み直させる前に Install-PowerToys.ps1 -Check を流し、3 (入っていない) なら -IfMissing で入れる。
 #     入っていれば入れない。スクリプトが無い・pwsh.exe が無い・失敗する・入れられないときも、
 #     知らせて読み直しへ進む (exit 0)。default.json が無くても、読み直し済みでも確かめる
@@ -55,6 +58,8 @@ installed_out='PowerToys (winget の Microsoft.PowerToys。版は固定しない
 missing_out='PowerToys (winget の Microsoft.PowerToys。版は固定しない)
 ⚠ 入っている場所 : 入っていない → user スコープで入れる
 ⚠️ PowerToys が入っていない → Install-PowerToys で入れる ⚠️'
+# PowerToys の設定画面が作る Keyboard Manager の settings.json (この PC と同じ形。有効なプロファイルは default)
+km_settings='{"properties":{"activeConfiguration":{"value":"default"},"keyboardConfigurations":{"value":["default"]}},"name":"Keyboard Manager","version":"1"}'
 # Install-PowerToys.ps1 -IfMissing が入れ終えたときの出力
 added_out="winget install --id Microsoft.PowerToys --exact --source winget --scope user --silent --accept-source-agreements --disable-interactivity --accept-package-agreements
   Successfully installed
@@ -71,7 +76,7 @@ for c in env jq grep sed tr cat head tail cut mkdir dirname sha256sum timeout od
   ln -s "${p}" "${sys_bin}/${c}"
 done
 
-# $1: 名前、$2: windows-files.json の中身 (空なら作らない)、$3: 1 なら default.json を置く、
+# $1: 名前、$2: windows-files.json の中身 (空なら作らない)、$3: 1 なら default.json と settings.json を置く、
 # $4: 1 なら Install-PowerToys.ps1 を配った状態にする (省略は 0)
 new_home() {
   local h="${work}/$1"
@@ -83,6 +88,7 @@ new_home() {
     mkdir -p "${h}/win/AppData/Local/Microsoft/PowerToys/Keyboard Manager"
     printf '{"remapKeys":{"inProcess":[{"originalKeys":"20","newRemapKeys":"124"}]}}' \
       >"${h}/win/AppData/Local/Microsoft/PowerToys/Keyboard Manager/default.json"
+    printf '%s' "${km_settings}" >"$(km_settings_json "${h}")"
   fi
   if [[ ${4:-0} == 1 ]]; then
     mkdir -p "${h}/win/.config/powershell"
@@ -166,6 +172,7 @@ ncalls() { grep -c '' "$1/ps-calls" 2>/dev/null || echo 0; }
 npwsh() { grep -c '' "$1/pwsh-calls" 2>/dev/null || echo 0; }
 pwsh_calls() { cat "$1/pwsh-calls" 2>/dev/null; }
 record() { echo "$1/.local/state/dotfiles/powertoys-keyboard-manager.reloaded"; }
+km_settings_json() { echo "$1/win/AppData/Local/Microsoft/PowerToys/Keyboard Manager/settings.json"; }
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
 state_off='{"enable":false,"version":1,"windowsHome":null}'
@@ -230,6 +237,37 @@ if [[ $(rc "${h}") == 0 && -s $(record "${h}") ]] && outerr "${h}" | grep -q '�
   ok "PowerToys が動いていなければ記録する (起動したときに読む)"
 else
   ng "absent" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 6b. settings.json が無い (PowerToys の設定画面をまだ開いていない): Keyboard Manager は default.json を読まないので、
+#     送らず記録もせず、設定画面を一度開いてから流し直すよう stderr に出す。設定画面が作った後の回では送って記録する
+h=$(new_home t6b "${state_on}" 1)
+rm "$(km_settings_json "${h}")"
+run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 0 && ! -e $(record "${h}") ]] \
+  && grep -qF 'settings.json' "${h}/err" && grep -q '設定画面を一度開いてから' "${h}/err" \
+  && ! grep -q '設定画面を一度開いてから' "${h}/out"; then
+  printf '%s' "${km_settings}" >"$(km_settings_json "${h}")"
+  run "${h}" 0
+  if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && outerr "${h}" | grep -q '読み直させました'; then
+    ok "settings.json が無ければ送らず記録もせずに、設定画面を一度開くよう stderr に出す (できた後の回で送る)"
+  else
+    ng "settings.json ができた後の回" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
+  fi
+else
+  ng "settings.json が無い" "rc=$(rc "${h}") calls=$(ncalls "${h}") record=$([[ -e $(record "${h}") ]] && echo あり) $(outerr "${h}")"
+fi
+
+# 6c. 有効なプロファイル (activeConfiguration) が default でない: default.json は読まれないので、
+#     送らず記録もせず、そのプロファイルの名前を stderr に出す
+h=$(new_home t6c "${state_on}" 1)
+printf '%s' '{"properties":{"activeConfiguration":{"value":"work"},"keyboardConfigurations":{"value":["default","work"]}},"name":"Keyboard Manager","version":"1"}' \
+  >"$(km_settings_json "${h}")"
+run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 0 && ! -e $(record "${h}") ]] && grep -qF 'default ではありません (work)' "${h}/err"; then
+  ok "有効なプロファイルが default でなければ送らず記録もせずに、その名前を stderr に出す"
+else
+  ng "有効なプロファイルが default でない" "rc=$(rc "${h}") calls=$(ncalls "${h}") record=$([[ -e $(record "${h}") ]] && echo あり) $(outerr "${h}")"
 fi
 
 # 7. powershell.exe が無い: 手で読み直す方法を出し、記録しない
