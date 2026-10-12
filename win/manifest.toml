@@ -39,3 +39,13 @@ hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Key
 src = "powertoys/keyboard-manager/editorSettings.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/editorSettings.json"
 hint = "Keyboard Manager のエディタを開いていたら、閉じて開き直す"
+
+[[files]]
+src = "google-japanese-input/Install-GoogleJapaneseInput.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-GoogleJapaneseInput.ps1"
+hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。入れる・上げるときは UAC の確認が出る)"
+
+[[files]]
+src = "powertoys/Install-PowerToys.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-PowerToys.ps1"
+hint = "PowerShell で Install-PowerToys -Check を打つと、入っているかが分かる (setup --update でも確かめ、入っていなければ入れる)"
