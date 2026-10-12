@@ -245,6 +245,7 @@ if ((do_import)); then
   # (ADR 016) は取り込みで変わらないので、版を上げる途中 (-Version を変えて commit する前) でも取り込める
   for d in "${config_dir}" ${dict_dir:+"${dict_dir}"}; do
     if [[ ${d} == "${config_dir}" ]]; then
+      # pjp-google-ime の import (google_ime.py の write_config_texts) が書き換える・消すファイルと同じにする
       watched=(config.txtpb keymap.tsv romaji.tsv)
     else
       watched=(.)
