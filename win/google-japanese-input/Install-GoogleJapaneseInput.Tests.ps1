@@ -24,7 +24,8 @@ function Test-Case {
     }
     $e = @($Expected | ForEach-Object { "$_" }) -join ' '
     $a = @($got | ForEach-Object { "$_" }) -join ' '
-    if ($e -ceq $a) {
+    # 文化に依存しない比較 (Ordinal)。-ceq は U+FE0F のような無視できる文字を無視するので、締めの行の ⚠️ を見分けられない
+    if ([string]::Equals($e, $a, [System.StringComparison]::Ordinal)) {
         Write-Host "ok   $Name"
     } else {
         Write-Host "FAIL $Name"
@@ -251,7 +252,7 @@ Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃って
 Test-Case '-Check の締め: 版が読めなければ winget list を案内し、揃えるとは言わない' 'True False' { $r = Invoke-Flow -States @((New-State @{ Installed = $null; Plan = 'unknown' })) -Check -Installed; $l = Get-LastLine $r.Text; "$($l -like '*winget list*') $($l -like '*で揃える*')" }
 Test-Case '-Check の締め: 固定した版が winget に無ければ -Version を変えるよう出す (入れるとは言わない)' 'True False' { $r = Invoke-Flow -States @((New-State ($missing + @{ Versions = @('3.35.6300.0'); Latest = '3.35.6300.0' }))) -Check; $l = Get-LastLine $r.Text; "$($l -like '*-Version を*') $($l -like '*で入れる*')" }
 Test-Case '-Check の締め: pin だけ無ければ pin を足すと出し、UAC は出ないと言う' 'True True' { $r = Invoke-Flow -States @((New-State @{ Pinned = $false })) -Check -Installed; $l = Get-LastLine $r.Text; "$($l -like '*pin*') $($l -like '*UAC の確認は出ない*')" }
-Test-Case '-Check の締めは FE0F 付きの ⚠️ で始まる (95 が見分ける)' $true { $r = Invoke-Flow -States @((New-State $thisPc)) -Check -Installed; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ") }
+Test-Case '-Check の締めは FE0F 付きの ⚠️ で始まる (95 が見分ける)' $true { $r = Invoke-Flow -States @((New-State $thisPc)) -Check -Installed; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ", [System.StringComparison]::Ordinal) }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"

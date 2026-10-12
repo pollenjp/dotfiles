@@ -24,7 +24,8 @@ function Test-Case {
     }
     $e = @($Expected | ForEach-Object { "$_" }) -join ' '
     $a = @($got | ForEach-Object { "$_" }) -join ' '
-    if ($e -ceq $a) {
+    # 文化に依存しない比較 (Ordinal)。-ceq は U+FE0F のような無視できる文字を無視するので、締めの行の ⚠️ を見分けられない
+    if ([string]::Equals($e, $a, [System.StringComparison]::Ordinal)) {
         Write-Host "ok   $Name"
     } else {
         Write-Host "FAIL $Name"
@@ -147,8 +148,8 @@ Test-Case 'winget が無ければ 2' '2 []' {
 function Get-LastLine { param([string]$Text) @($Text -split "`n")[-1] }
 Test-Case '締め: 入っていれば「入っている」' '入っている' { $r = Invoke-Flow -States @($installed) -Check; Get-LastLine $r.Text }
 Test-Case '締め: 入れて入れば「入った」' '入った' { $r = Invoke-Flow -States @($missing, $installed); Get-LastLine $r.Text }
-Test-Case '締め: -Check で入っていなければ FE0F 付きの ⚠️ で始まる' $true { $r = Invoke-Flow -States @($missing) -Check; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ") }
-Test-Case 'install には Microsoft.PowerToys の引数をそのまま渡す' (@(Get-PowerToysInstallArguments -PackageId 'Microsoft.PowerToys') -join ' ') { $null = Invoke-Flow -States @($missing, $installed); $script:LastArgs }
+Test-Case '締め: -Check で入っていなければ FE0F 付きの ⚠️ で始まる' $true { $r = Invoke-Flow -States @($missing) -Check; (Get-LastLine $r.Text).StartsWith("$([char]0x26A0)$([char]0xFE0F) ", [System.StringComparison]::Ordinal) }
+Test-Case 'install には Microsoft.PowerToys の引数をそのまま渡す' (@(Get-PowerToysInstallArguments -PackageId 'Microsoft.PowerToys') -join ' ') { $script:LastArgs = $null; $null = Invoke-Flow -States @($missing, $installed); $script:LastArgs }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
