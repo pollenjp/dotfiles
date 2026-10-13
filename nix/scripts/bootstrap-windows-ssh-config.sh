@@ -35,6 +35,9 @@
 #   config が旧経路の Include の 1 行だけ  置き換える (ADR 013 で消した旧経路からの移行)
 #   それ以外                                衝突。diff を出して触らない (--force なら退避して上書き)
 #
+# 衝突のメッセージは、記録があれば「Windows 側で変わった」、無ければ「この script が置く前から
+# Windows 側にあった」(手で書いた config など) と分けて出す。
+#
 # 記録にあって正本から消えたファイルは、置き先が記録と同じなら消す。違えば衝突 (--force なら
 # 退避して消す)。記録に無いファイル (my-cloud などが書いたもの) には触らない。
 # 退避は <名前>.dotfiles-bak-<日時>、一時ファイルは <名前>.dotfiles-tmp.XXXXXX で、どちらも
@@ -296,7 +299,11 @@ for i in "${!plan_rel[@]}"; do
     conflict)
       conflicts+=("${rel}")
       {
-        echo "!! 衝突: ${dst} は Windows 側で変わっています (前回ここへ置いた中身と違う)。"
+        if [[ -n ${rec} ]]; then
+          echo "!! 衝突: ${dst} は Windows 側で変わっています (前回ここへ置いた中身と違う)。"
+        else
+          echo "!! 衝突: ${dst} は、置いた記録が無く、正本と中身が違います (この script が置く前から Windows 側にあった。手で書いたものなど)。"
+        fi
         diff -u --label "${rel} (Windows 側)" --label "${rel} (dotfiles)" -- "${dst}" "${src}" || true
       } >&2
       ;;
@@ -462,12 +469,12 @@ rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━�
   printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   printf '%s⚠️  Windows の ssh の設定に、手で直すことがあります%s\n' "${c_warn}" "${c_reset}"
   if ((${#conflicts[@]} > 0)); then
-    printf '%s⚠️  Windows 側で変わっていたので、次のファイルには触っていません (diff は上):%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️  Windows 側で変わっていた (か、置く前からあった) ので、次のファイルには触っていません (diff は上):%s\n' "${c_warn}" "${c_reset}"
     for rel in "${conflicts[@]}"; do
       printf '%s⚠️    %s%s\n' "${c_warn}" "${rel}" "${c_reset}"
     done
     printf '%s⚠️  解き方 (どちらか):%s\n' "${c_warn}" "${c_reset}"
-    printf '%s⚠️    1. Windows で直した中身を dotfiles-private の ssh/ へ取り込み、commit して push する%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️    1. Windows 側の中身を dotfiles-private の ssh/ へ取り込み、commit して push する%s\n' "${c_warn}" "${c_reset}"
     printf '%s⚠️       (config に手で書いた Host は config.d\\<名前>.ssh_config へ移す)%s\n' "${c_warn}" "${c_reset}"
     printf '%s⚠️    2. 上書きする (元は <名前>.dotfiles-bak-<日時> に残る):%s\n' "${c_warn}" "${c_reset}"
     printf '%s⚠️       %s/bootstrap-windows-ssh-config.sh --force%s\n' "${c_warn}" "${script_dir}" "${c_reset}"

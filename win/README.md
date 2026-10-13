@@ -329,9 +329,11 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 ### ssh の設定が衝突したら
 
-Windows で `config` や dotfiles のファイルを直していたら、触らずに diff を出して止まる。どちらかで解く。
+Windows で `config` や dotfiles のファイルを直していたら、触らずに diff を出して止まる。置いた記録が無いのに
+中身の違うファイルが先にある (初めて配るマシンで、手で書いた `config` など) ときも同じで、「置いた記録が無く」と
+出る。どちらかで解く。
 
-1. 直した中身を dotfiles-private の `ssh/` へ取り込み、commit して push する。`config` に手で書いた
+1. Windows 側の中身を dotfiles-private の `ssh/` へ取り込み、commit して push する。`config` に手で書いた
    `Host` は `config.d\<名前>.ssh_config` へ移す
 2. 上書きする。元は `<名前>.dotfiles-bak-<日時>` に退避される (`*.ssh_config` で終わらないので読まれない)
 
