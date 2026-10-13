@@ -22,6 +22,7 @@
 #   - --import と --dry-run は一緒に使えない。--import は commit していない変更があると止まる
 #   - 辞書のテキストが無ければ辞書は飛ばす (Windows 側の辞書を消さない)
 #   - 単語登録の形の辞書 (comment の無い語) も取り込め、取り込んだ後は「同じ」
+#   - 読みも単語も空の語 (辞書ツールで行を足して何も入れなかった) だけが違うなら「同じ」
 #   - 辞書の衝突は語を出さず、辞書ごとの行の数だけを出す (--show-words で diff)
 #   - 入っているがまだ使っていない (置き先が無い) ときは、一度使ってから流し直すよう出す (exit 0)
 #   - --import は、同じディレクトリの Install-GoogleJapaneseInput.ps1 の変更では止まらない
@@ -185,6 +186,7 @@ put_windows_dictionaries() {
 # 表で編集した語 (コメントが空でも comment を入れる) の「てすと」を持つ。$1: HOME、$2 は足すもの:
 #   wordreg  単語登録ダイアログで足した語 (comment を入れない。Mozc の WordRegisterDialog::SaveEntry)
 #   version  TSV に出ない項目 (UserDictionaryStorage の version)
+#   blank    読みも単語も空の語 (辞書ツールで行を足して何も入れなかった。品詞だけが入る)
 put_windows_proto_dictionary() {
   python3 -I - "$(ime "$1")/user_dictionary.db" "$2" <<'EOF'
 import os
@@ -206,6 +208,9 @@ e.key, e.value, e.comment, e.pos = "てすと", "テスト", "", 1  # 1 = 名詞
 if sys.argv[2] == "wordreg":
     e = d.entries.add()
     e.key, e.value, e.pos = "かくうのよみ", "架空の単語", 1
+elif sys.argv[2] == "blank":
+    e = d.entries.add()
+    e.pos = 1
 else:
     storage.version = 1
 with open(sys.argv[1], "wb") as out:
@@ -740,6 +745,24 @@ if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '入っていません' &&
   ok "本物と同じ並び (<ドライブ>/Users/<名前>) で exe が無ければ、入っていない扱い"
 else
   ng "exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 38. 読みも単語も空の語 (辞書ツールで行を足して何も入れなかった) だけが違う: Mozc が使わない語なので同じ扱いで、
+#     Windows 側のファイルに触らず、落とさない
+h=$(new_home t38 "${state_on}" 1)
+if [[ -z ${PJP_GOOGLE_IME_DESCRIPTORS:-} ]]; then
+  ng "読みも単語も空の語" "PJP_GOOGLE_IME_DESCRIPTORS が無い (flake の check から流す)"
+else
+  put_windows "${h}" "${keymap}"
+  put_windows_proto_dictionary "${h}" blank
+  before=$(od -An -tx1 "$(ime "${h}")/user_dictionary.db" | tr -d ' \n')
+  run "${h}" 0
+  after=$(od -An -tx1 "$(ime "${h}")/user_dictionary.db" | tr -d ' \n')
+  if [[ $(rc "${h}") == 0 && ${before} == "${after}" && $(outerr "${h}" | grep -c '^同じです: ') == 2 ]] && ! killed "${h}"; then
+    ok "読みも単語も空の語だけが違うなら同じ扱いで、Windows 側の辞書に触らない"
+  else
+    ng "読みも単語も空の語" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
 fi
 
 echo "== ${pass} passed, ${fail} failed"

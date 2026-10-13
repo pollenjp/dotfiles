@@ -11,7 +11,8 @@ Windows には触らない。読み書きするのは渡されたパスのファ
   <config-dir>/keymap.tsv      custom_keymap_table の文字列そのもの (キー設定の画面のエクスポートと同じ。
                                表が空なら置かない)
   <config-dir>/romaji.tsv      custom_roman_table の文字列そのもの (カスタムしたときだけ置く)
-  <dictionary-dir>/<名前>.tsv  辞書 1 つ。「読み<TAB>単語<TAB>品詞<TAB>コメント」(辞書ツールのエクスポートと同じ)
+  <dictionary-dir>/<名前>.tsv  辞書 1 つ。「読み<TAB>単語<TAB>品詞<TAB>コメント」(辞書ツールのエクスポートと同じ。
+                               読みか単語が空の語は、Mozc が使わないので書かない)
 
 同じテキストからは毎回同じバイト列を組み立てる。直列化は deterministic にし、時刻も乱数も入れない
 (general_config は書かず、辞書の id は名前の sha256 から作る)。
@@ -333,8 +334,15 @@ def dictionaries_from_tsv(files):
     return storage
 
 
+def is_blank_entry(e):
+    """読みか単語が空の語か。Mozc は変換に使わない (dictionary/user_dictionary_util.cc の ValidateEntry が
+    弾き、dictionary/user_dictionary.cc の TokensIndex::AddEntry が読み飛ばす)。辞書ツールで行を足して
+    何も入れずに閉じると残る。TSV にも書けない (1 列目と 2 列目は空にできない) ので、「無い」と同じに扱う"""
+    return not e.key or not e.value
+
+
 def dictionaries_to_tsv(storage):
-    """UserDictionaryStorage を {辞書の名前: TSV の中身} にする"""
+    """UserDictionaryStorage を {辞書の名前: TSV の中身} にする。読みか単語が空の語は書かない"""
     if has_unknown(storage):
         raise TextError(
             f"{DICTIONARY_DB} に今の .proto に無い項目がある (新しい版の Google 日本語入力が足した項目)。"
@@ -348,6 +356,8 @@ def dictionaries_to_tsv(storage):
         rows = []
         # エラーには語を出さない (何番目の語かだけ。dictionaries_from_tsv と同じ理由)
         for i, e in enumerate(d.entries, start=1):
+            if is_blank_entry(e):
+                continue
             if e.locale:
                 raise TextError(f"辞書 {d.name!r} の {i} 番目の語に locale が付いていて、TSV に書けない")
             if any(c in v for v in (e.key, e.value, e.comment) for c in "\t\n\r"):
@@ -359,7 +369,7 @@ def dictionaries_to_tsv(storage):
 
 def dictionary_digest(storage):
     """比べるための sha256。辞書の id と辞書の並びは外し (画面で作った辞書の id は乱数のため)、
-    空のコメントは「無い」にそろえる"""
+    読みか単語が空の語は外し、空のコメントは「無い」にそろえる"""
     s = type(storage)()
     s.CopyFrom(storage)
     s.ClearField("dictionaries")
@@ -367,9 +377,14 @@ def dictionary_digest(storage):
         c = s.dictionaries.add()
         c.CopyFrom(d)
         c.ClearField("id")
-        for e in c.entries:
-            if not e.comment:
-                e.ClearField("comment")  # 単語登録ダイアログとインポートは空のコメントを入れない
+        c.ClearField("entries")
+        for e in d.entries:
+            if is_blank_entry(e):
+                continue
+            ce = c.entries.add()
+            ce.CopyFrom(e)
+            if not ce.comment:
+                ce.ClearField("comment")  # 単語登録ダイアログとインポートは空のコメントを入れない
     return hashlib.sha256(serialize(s)).hexdigest()
 
 
