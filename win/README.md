@@ -73,6 +73,11 @@ nix/scripts/bootstrap-windows-files.sh --force
 判定は「前回ここへ置いた中身の sha256」(`~/.local/state/dotfiles/windows-files.deployed.json`)
 と比べて行う。置き先が記録どおりなら、変えたのは repo 側なので黙って上書きする。
 
+置いた記録が無いのに、repo と違う中身の置き先が既にある (初めて配るマシンで、アプリが作っていた・
+手で設定してあった) ときも衝突になり、「置いた記録が無く」と出る。手で同じ設定をしてあっても、id や
+書式が違えばバイト列は揃わない ([PowerToys](#powertoys) など)。diff を見て、違いがそれだけなら
+`--force` で上書きしてよい。
+
 ## Orca の keybindings.json
 
 Orca が自分で書く形 (`JSON.stringify(…, null, 2)` + 改行) に揃えてある。Orca が同じ内容を
@@ -367,6 +372,13 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   d='/mnt/c/Users/<名前>/AppData/Local/Microsoft/PowerToys/Keyboard Manager'
   cp "${d}/default.json" "${d}/editorSettings.json" win/powertoys/keyboard-manager/
   ```
+
+- PowerToys のエディタで同じ割り当てを手で作ってあったマシンでは、初めて配るときに 2 つとも衝突になる
+  (「置いた記録が無く」と出る)。`editorSettings.json` の id (GUID) は割り当てを作るたびに振られ、
+  `default.json` は `"operationType":0` (普通の割り当て) の有無が違うことがあり、同じ割り当てでも
+  バイト列が揃わない。diff がこれだけ (id とその並び・`operationType`) なら、
+  `nix/scripts/bootstrap-windows-files.sh --force` で上書きしてよい (取り込むより、repo もほかのマシンも
+  変えずに済む)
 
 ### PowerToys を入れる (winget)
 
