@@ -202,6 +202,14 @@ def check_romaji(text):
     return "\n".join(lines) + "\n"
 
 
+def fill_verbose_level(cfg):
+    """verbose_level が無ければ既定の値 (0) を入れる (cfg を書き換える)。設定画面は保存のたびに入れる
+    (Mozc の gui/config_dialog/config_dialog.cc の ConvertToProto) が、持たない config1.db もある。
+    持たないものと 0 のものを、組み立てたもの・テキスト・比べる digest のどれでもそろえる"""
+    if not cfg.HasField("verbose_level"):
+        cfg.verbose_level = cfg.DESCRIPTOR.fields_by_name["verbose_level"].default_value
+
+
 def config_from_text(txtpb, keymap=None, romaji=None):
     """テキストから Config を組み立てる"""
     config_cls, _ = messages()
@@ -217,6 +225,7 @@ def config_from_text(txtpb, keymap=None, romaji=None):
     ):
         if cfg.HasField(name):
             raise TextError(f"{TXTPB}: {name} は{hint}")
+    fill_verbose_level(cfg)
     if keymap is not None:
         cfg.custom_keymap_table = check_keymap(keymap).encode()
     if romaji is not None:
@@ -236,6 +245,7 @@ def config_to_text(cfg):
         )
     rest = type(cfg)()
     rest.CopyFrom(cfg)
+    fill_verbose_level(rest)
     tables = []
     for name, file in (("custom_keymap_table", KEYMAP), ("custom_roman_table", ROMAJI)):
         table = getattr(rest, name)
@@ -254,10 +264,12 @@ def config_to_text(cfg):
 
 
 def config_digest(cfg):
-    """比べるための sha256。general_config (時刻・版・OS) は外し、空の表は「無い」にそろえる"""
+    """比べるための sha256。general_config (時刻・版・OS) は外し、空の表は「無い」に、
+    無い verbose_level は既定の 0 にそろえる"""
     c = type(cfg)()
     c.CopyFrom(cfg)
     c.ClearField("general_config")
+    fill_verbose_level(c)
     for name in ("custom_keymap_table", "custom_roman_table"):
         if not getattr(c, name):
             c.ClearField(name)  # 設定画面はカスタムしていない表も空文字で入れる (config_to_text と同じ)

@@ -179,6 +179,39 @@ class TestEmptyTables(unittest.TestCase):
         self.assertEqual(g.config_digest(with_empty_tables(c)), g.config_digest(c))
 
 
+def without_verbose_level(c):
+    """verbose_level を持たない config1.db (設定画面で保存していないもの) に見立てたものを返す"""
+    c2 = type(c)()
+    c2.CopyFrom(c)
+    c2.ClearField("verbose_level")
+    return c2
+
+
+class TestVerboseLevel(unittest.TestCase):
+    """設定画面は保存のたびに verbose_level を入れる (Mozc の gui/config_dialog/config_dialog.cc の
+    ConvertToProto) が、持たない config1.db もある。持たないものは既定の 0 と同じに扱う"""
+
+    def test_build_has_verbose_level(self):
+        self.assertNotIn("verbose_level", TXTPB)
+        self.assertTrue(cfg().HasField("verbose_level"))
+        self.assertEqual(cfg().verbose_level, 0)
+
+    def test_to_text_writes_verbose_level(self):
+        txtpb, _, _ = g.config_to_text(without_verbose_level(cfg()))
+        self.assertIn("\nverbose_level: 0\n", txtpb)
+
+    def test_digest_treats_missing_verbose_level_as_default(self):
+        c = cfg()
+        c.verbose_level = 0
+        self.assertNotEqual(g.serialize(without_verbose_level(c)), g.serialize(c))  # 直列化は違う
+        self.assertEqual(g.config_digest(without_verbose_level(c)), g.config_digest(c))
+
+    def test_digest_still_sees_verbose_level(self):
+        c = cfg()
+        c.verbose_level = 1
+        self.assertNotEqual(g.config_digest(c), g.config_digest(without_verbose_level(c)))
+
+
 class TestUnknownFields(unittest.TestCase):
     def test_config_with_unknown_field_is_refused(self):
         config_cls, _ = g.messages()
