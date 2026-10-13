@@ -17,6 +17,7 @@
 #   - 手書きの config・Windows で変えたファイルは衝突 (exit 1・触らない)。--force は退避して上書きする
 #   - 正本の更新は上書き、正本から消えたファイルは消す (Windows で変えていれば衝突、--force で退避して消す)
 #   - 同じ名前のファイルは、中身が同じなら記録だけ、違えば衝突。--dry-run は何も書かない
+#   - 衝突の 1 行目は、置いた記録があれば「前回ここへ置いた中身と違う」、無ければ置いた記録が無いと出す
 #   - 確かめ: 揃っている / Bad owner / 読まれないファイル / 旧 clone / 呼べない・無い・固まる / 区切りと大小の違い
 #   - 壊れた記録は exit 1、知らない引数は exit 2
 #
@@ -470,6 +471,28 @@ if [[ $(rc "${c}") == 0 ]] && ((elapsed < 15)) && grep -q '確かめられませ
   ok "SIGTERM を無視する ssh.exe も KILL して、手で打つコマンドを出して exit 0"
 else
   ng "SIGTERM を無視" "rc=$(rc "${c}") elapsed=${elapsed}s $(outerr "${c}")"
+fi
+
+# 26. 衝突の 1 行目は、置いた記録の有無で分ける。記録が無い (この script が置く前から Windows 側にあった) なら、
+#     一度も置いていないので「前回ここへ置いた中身と違う」とは出さず、置いた記録が無いと出す
+c=$(new_case t26 "${state_on}")
+mkdir -p "$(wssh "${c}")/config.d"
+printf 'Host b\n  User mine\n' >"$(wssh "${c}")/config.d/b c.ssh_config"
+run "${c}" 0
+if [[ $(rc "${c}") == 1 ]] && grep -qF 'config.d/b c.ssh_config は、置いた記録が無く' "${c}/err" \
+  && ! grep -qF '前回ここへ置いた中身と違う' "${c}/err"; then
+  ok "置いた記録の無い衝突は、記録が無いと出し、前回置いた中身と違うとは出さない"
+else
+  ng "記録の無い衝突" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+run "${c}" 0 --force
+printf 'Host a\n  User edited\n' >"$(wssh "${c}")/config.d/a.ssh_config"
+run "${c}" 0
+if [[ $(rc "${c}") == 1 ]] && grep -qF 'config.d/a.ssh_config は Windows 側で変わっています (前回ここへ置いた中身と違う)' "${c}/err" \
+  && ! grep -qF '置いた記録が無く' "${c}/err"; then
+  ok "置いた記録がある衝突は、前回ここへ置いた中身と違うと出す"
+else
+  ng "記録がある衝突" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

@@ -11,7 +11,8 @@ Windows には触らない。読み書きするのは渡されたパスのファ
   <config-dir>/keymap.tsv      custom_keymap_table の文字列そのもの (キー設定の画面のエクスポートと同じ。
                                表が空なら置かない)
   <config-dir>/romaji.tsv      custom_roman_table の文字列そのもの (カスタムしたときだけ置く)
-  <dictionary-dir>/<名前>.tsv  辞書 1 つ。「読み<TAB>単語<TAB>品詞<TAB>コメント」(辞書ツールのエクスポートと同じ)
+  <dictionary-dir>/<名前>.tsv  辞書 1 つ。「読み<TAB>単語<TAB>品詞<TAB>コメント」(辞書ツールのエクスポートと同じ。
+                               読みか単語が空の語は、Mozc が使わないので書かない)
 
 同じテキストからは毎回同じバイト列を組み立てる。直列化は deterministic にし、時刻も乱数も入れない
 (general_config は書かず、辞書の id は名前の sha256 から作る)。
@@ -202,6 +203,14 @@ def check_romaji(text):
     return "\n".join(lines) + "\n"
 
 
+def fill_verbose_level(cfg):
+    """verbose_level が無ければ既定の値 (0) を入れる (cfg を書き換える)。設定画面は保存のたびに入れる
+    (Mozc の gui/config_dialog/config_dialog.cc の ConvertToProto) が、持たない config1.db もある。
+    持たないものと 0 のものを、組み立てたもの・テキスト・比べる digest のどれでもそろえる"""
+    if not cfg.HasField("verbose_level"):
+        cfg.verbose_level = cfg.DESCRIPTOR.fields_by_name["verbose_level"].default_value
+
+
 def config_from_text(txtpb, keymap=None, romaji=None):
     """テキストから Config を組み立てる"""
     config_cls, _ = messages()
@@ -217,6 +226,7 @@ def config_from_text(txtpb, keymap=None, romaji=None):
     ):
         if cfg.HasField(name):
             raise TextError(f"{TXTPB}: {name} は{hint}")
+    fill_verbose_level(cfg)
     if keymap is not None:
         cfg.custom_keymap_table = check_keymap(keymap).encode()
     if romaji is not None:
@@ -236,6 +246,7 @@ def config_to_text(cfg):
         )
     rest = type(cfg)()
     rest.CopyFrom(cfg)
+    fill_verbose_level(rest)
     tables = []
     for name, file in (("custom_keymap_table", KEYMAP), ("custom_roman_table", ROMAJI)):
         table = getattr(rest, name)
@@ -254,10 +265,12 @@ def config_to_text(cfg):
 
 
 def config_digest(cfg):
-    """比べるための sha256。general_config (時刻・版・OS) は外し、空の表は「無い」にそろえる"""
+    """比べるための sha256。general_config (時刻・版・OS) は外し、空の表は「無い」に、
+    無い verbose_level は既定の 0 にそろえる"""
     c = type(cfg)()
     c.CopyFrom(cfg)
     c.ClearField("general_config")
+    fill_verbose_level(c)
     for name in ("custom_keymap_table", "custom_roman_table"):
         if not getattr(c, name):
             c.ClearField(name)  # 設定画面はカスタムしていない表も空文字で入れる (config_to_text と同じ)
@@ -321,8 +334,15 @@ def dictionaries_from_tsv(files):
     return storage
 
 
+def is_blank_entry(e):
+    """読みか単語が空の語か。Mozc は変換に使わない (dictionary/user_dictionary_util.cc の ValidateEntry が
+    弾き、dictionary/user_dictionary.cc の TokensIndex::AddEntry が読み飛ばす)。辞書ツールで行を足して
+    何も入れずに閉じると残る。TSV にも書けない (1 列目と 2 列目は空にできない) ので、「無い」と同じに扱う"""
+    return not e.key or not e.value
+
+
 def dictionaries_to_tsv(storage):
-    """UserDictionaryStorage を {辞書の名前: TSV の中身} にする"""
+    """UserDictionaryStorage を {辞書の名前: TSV の中身} にする。読みか単語が空の語は書かない"""
     if has_unknown(storage):
         raise TextError(
             f"{DICTIONARY_DB} に今の .proto に無い項目がある (新しい版の Google 日本語入力が足した項目)。"
@@ -336,6 +356,8 @@ def dictionaries_to_tsv(storage):
         rows = []
         # エラーには語を出さない (何番目の語かだけ。dictionaries_from_tsv と同じ理由)
         for i, e in enumerate(d.entries, start=1):
+            if is_blank_entry(e):
+                continue
             if e.locale:
                 raise TextError(f"辞書 {d.name!r} の {i} 番目の語に locale が付いていて、TSV に書けない")
             if any(c in v for v in (e.key, e.value, e.comment) for c in "\t\n\r"):
@@ -347,7 +369,7 @@ def dictionaries_to_tsv(storage):
 
 def dictionary_digest(storage):
     """比べるための sha256。辞書の id と辞書の並びは外し (画面で作った辞書の id は乱数のため)、
-    空のコメントは「無い」にそろえる"""
+    読みか単語が空の語は外し、空のコメントは「無い」にそろえる"""
     s = type(storage)()
     s.CopyFrom(storage)
     s.ClearField("dictionaries")
@@ -355,9 +377,14 @@ def dictionary_digest(storage):
         c = s.dictionaries.add()
         c.CopyFrom(d)
         c.ClearField("id")
-        for e in c.entries:
-            if not e.comment:
-                e.ClearField("comment")  # 単語登録ダイアログとインポートは空のコメントを入れない
+        c.ClearField("entries")
+        for e in d.entries:
+            if is_blank_entry(e):
+                continue
+            ce = c.entries.add()
+            ce.CopyFrom(e)
+            if not ce.comment:
+                ce.ClearField("comment")  # 単語登録ダイアログとインポートは空のコメントを入れない
     return hashlib.sha256(serialize(s)).hexdigest()
 
 

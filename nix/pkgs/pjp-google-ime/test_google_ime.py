@@ -179,6 +179,39 @@ class TestEmptyTables(unittest.TestCase):
         self.assertEqual(g.config_digest(with_empty_tables(c)), g.config_digest(c))
 
 
+def without_verbose_level(c):
+    """verbose_level を持たない config1.db (設定画面で保存していないもの) に見立てたものを返す"""
+    c2 = type(c)()
+    c2.CopyFrom(c)
+    c2.ClearField("verbose_level")
+    return c2
+
+
+class TestVerboseLevel(unittest.TestCase):
+    """設定画面は保存のたびに verbose_level を入れる (Mozc の gui/config_dialog/config_dialog.cc の
+    ConvertToProto) が、持たない config1.db もある。持たないものは既定の 0 と同じに扱う"""
+
+    def test_build_has_verbose_level(self):
+        self.assertNotIn("verbose_level", TXTPB)
+        self.assertTrue(cfg().HasField("verbose_level"))
+        self.assertEqual(cfg().verbose_level, 0)
+
+    def test_to_text_writes_verbose_level(self):
+        txtpb, _, _ = g.config_to_text(without_verbose_level(cfg()))
+        self.assertIn("\nverbose_level: 0\n", txtpb)
+
+    def test_digest_treats_missing_verbose_level_as_default(self):
+        c = cfg()
+        c.verbose_level = 0
+        self.assertNotEqual(g.serialize(without_verbose_level(c)), g.serialize(c))  # 直列化は違う
+        self.assertEqual(g.config_digest(without_verbose_level(c)), g.config_digest(c))
+
+    def test_digest_still_sees_verbose_level(self):
+        c = cfg()
+        c.verbose_level = 1
+        self.assertNotEqual(g.config_digest(c), g.config_digest(without_verbose_level(c)))
+
+
 class TestUnknownFields(unittest.TestCase):
     def test_config_with_unknown_field_is_refused(self):
         config_cls, _ = g.messages()
@@ -262,6 +295,37 @@ class TestDictionaries(unittest.TestCase):
         other.CopyFrom(st)
         other.dictionaries[0].entries[0].comment = "メモ"
         self.assertNotEqual(g.dictionary_digest(other), g.dictionary_digest(st))
+
+
+def with_blank_entry(st, key="", value=""):
+    """1 つ目の辞書の末尾に、読みか単語が空の語 (辞書ツールで行を足して何も入れなかった) を足したものを返す"""
+    st2 = type(st)()
+    st2.CopyFrom(st)
+    e = st2.dictionaries[0].entries.add()
+    e.key, e.value, e.pos = key, value, g.POS_INDEX["名詞"]
+    return st2
+
+
+class TestBlankEntries(unittest.TestCase):
+    """読みか単語が空の語は、Mozc が変換に使わない (dictionary/user_dictionary_util.cc の ValidateEntry が
+    弾き、dictionary/user_dictionary.cc の TokensIndex::AddEntry が読み飛ばす)。TSV にも書けないので、
+    「無い」と同じに扱う"""
+
+    def test_to_tsv_skips_blank_entries(self):
+        st = g.dictionaries_from_tsv({"x": DICT})
+        for key, value in (("", ""), ("よみ", ""), ("", "単語")):
+            with self.subTest(key=key, value=value):
+                self.assertEqual(g.dictionaries_to_tsv(with_blank_entry(st, key, value)), {"x": DICT})
+
+    def test_dictionary_of_only_blank_entries_becomes_empty(self):
+        st = g.dictionaries_from_tsv({"x": ""})
+        self.assertEqual(g.dictionaries_to_tsv(with_blank_entry(st)), {"x": ""})
+
+    def test_digest_ignores_blank_entries(self):
+        st = g.dictionaries_from_tsv({"x": DICT})
+        blank = with_blank_entry(st)
+        self.assertNotEqual(g.serialize(blank), g.serialize(st))  # 直列化は違う
+        self.assertEqual(g.dictionary_digest(blank), g.dictionary_digest(st))
 
 
 class TestDictionaryErrorsHideWords(unittest.TestCase):
@@ -452,6 +516,17 @@ class TestCommands(unittest.TestCase):
         self.assertEqual(
             g.dictionary_digest(g.read_dictionary_db(self.tmp / "o" / "user_dictionary.db")), g.dictionary_digest(st)
         )
+
+    def test_import_skips_blank_entries(self):
+        # 辞書ツールで行を足して何も入れなかった語 (読みも単語も空) があっても取り込め、TSV には書かない
+        win = self.tmp / "win"
+        win.mkdir()
+        (win / "config1.db").write_bytes(g.serialize(cfg()))
+        st = with_blank_entry(g.dictionaries_from_tsv({"ユーザー辞書 1": DICT}))
+        (win / "user_dictionary.db").write_bytes(g.serialize(st))
+        rc, _, err = run("import", "--windows-dir", str(win), "--config-dir", str(self.conf), "--dictionary-dir", str(self.dicts))
+        self.assertEqual(rc, 0, err)
+        self.assertEqual((self.dicts / "ユーザー辞書 1.tsv").read_text(encoding="utf-8"), DICT)
 
     def test_import_with_empty_tables(self):
         # 設定画面が保存した config1.db (カスタムしていないキー設定が空文字で入っている) を取り込む

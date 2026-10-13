@@ -39,10 +39,14 @@
 #   置き先が無い                           コピーする
 #   置き先が計画と同じ中身                 何もしない (記録が無ければ記録だけする)
 #   置き先が記録と同じ中身 (計画とは違う)  repo 側が更新された。上書きする
-#   それ以外                               Windows 側で変わった (衝突)。diff を出して触らない
+#   それ以外                               衝突。diff を出して触らない
+#
+# 衝突は 2 通りある。記録があれば、Windows 側で変わった (アプリの設定画面で変えた、など)。記録が
+# 無ければ、この script が置く前から Windows 側にあった (アプリが作った・手で設定した、など)。手で
+# 同じ設定をしてあっても、バイト列が揃わなければ衝突になる。メッセージはこの 2 つを分けて出す。
 #
 # 衝突が 1 件でもあれば、全部を処理し終えてから exit 1 する。解き方 (Windows 側の
-# 変更を win/ へ取り込む / --force で上書きする) はメッセージに出す。
+# 中身を win/ へ取り込む / --force で上書きする) はメッセージに出す。
 #
 # 書き込みは置き先と同じディレクトリの一時ファイルから mv する (途中で落ちても壊れた
 # ファイルを残さない)。置き先を書き換えたら manifest の hint を出す (Orca のように、
@@ -258,9 +262,13 @@ while IFS= read -r entry; do
     conflict)
       conflicts=$((conflicts + 1))
       {
-        echo "!! 衝突: ${dst} は Windows 側で変わっています (前回ここへ置いた中身と違う)。"
+        if [[ -n ${recorded} ]]; then
+          echo "!! 衝突: ${dst} は Windows 側で変わっています (前回ここへ置いた中身と違う)。"
+        else
+          echo "!! 衝突: ${dst} は、置いた記録が無く、repo と中身が違います (この script が置く前から Windows 側にあった。アプリが作ったか、手で設定したもの)。"
+        fi
         diff -u --label "${dst} (Windows 側)" --label "${repo_path} (repo)" -- "${dst}" "${src}" || true
-        echo "   Windows 側の変更を残すなら: cp '${dst}' '${repo_dir}/${repo_path}'"
+        echo "   Windows 側の中身を残すなら: cp '${dst}' '${repo_dir}/${repo_path}'"
         echo "   repo 側で上書きするなら:   ${script_dir}/bootstrap-windows-files.sh --force"
       } >&2
       ;;

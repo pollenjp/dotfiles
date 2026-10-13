@@ -73,6 +73,11 @@ nix/scripts/bootstrap-windows-files.sh --force
 判定は「前回ここへ置いた中身の sha256」(`~/.local/state/dotfiles/windows-files.deployed.json`)
 と比べて行う。置き先が記録どおりなら、変えたのは repo 側なので黙って上書きする。
 
+置いた記録が無いのに、repo と違う中身の置き先が既にある (初めて配るマシンで、アプリが作っていた・
+手で設定してあった) ときも衝突になり、「置いた記録が無く」と出る。手で同じ設定をしてあっても、id や
+書式が違えばバイト列は揃わない ([PowerToys](#powertoys) など)。diff を見て、違いがそれだけなら
+`--force` で上書きしてよい。
+
 ## Orca の keybindings.json
 
 Orca が自分で書く形 (`JSON.stringify(…, null, 2)` + 改行) に揃えてある。Orca が同じ内容を
@@ -324,9 +329,11 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 ### ssh の設定が衝突したら
 
-Windows で `config` や dotfiles のファイルを直していたら、触らずに diff を出して止まる。どちらかで解く。
+Windows で `config` や dotfiles のファイルを直していたら、触らずに diff を出して止まる。置いた記録が無いのに
+中身の違うファイルが先にある (初めて配るマシンで、手で書いた `config` など) ときも同じで、「置いた記録が無く」と
+出る。どちらかで解く。
 
-1. 直した中身を dotfiles-private の `ssh/` へ取り込み、commit して push する。`config` に手で書いた
+1. Windows 側の中身を dotfiles-private の `ssh/` へ取り込み、commit して push する。`config` に手で書いた
    `Host` は `config.d\<名前>.ssh_config` へ移す
 2. 上書きする。元は `<名前>.dotfiles-bak-<日時>` に退避される (`*.ssh_config` で終わらないので読まれない)
 
@@ -367,6 +374,13 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   d='/mnt/c/Users/<名前>/AppData/Local/Microsoft/PowerToys/Keyboard Manager'
   cp "${d}/default.json" "${d}/editorSettings.json" win/powertoys/keyboard-manager/
   ```
+
+- PowerToys のエディタで同じ割り当てを手で作ってあったマシンでは、初めて配るときに 2 つとも衝突になる
+  (「置いた記録が無く」と出る)。`editorSettings.json` の id (GUID) は割り当てを作るたびに振られ、
+  `default.json` は `"operationType":0` (普通の割り当て) の有無が違うことがあり、同じ割り当てでも
+  バイト列が揃わない。diff がこれだけ (id とその並び・`operationType`) なら、
+  `nix/scripts/bootstrap-windows-files.sh --force` で上書きしてよい (取り込むより、repo もほかのマシンも
+  変えずに済む)
 
 ### PowerToys を入れる (winget)
 
@@ -437,6 +451,12 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
   画面で OK を押しただけなら衝突にならない。空のコメントと空の表も「無い」と同じに扱う (単語登録
   ダイアログで足した語は、コメントが空だとコメントの項目を持たず、設定画面はカスタムしていない
   キー設定も空文字で入れるため)
+- `verbose_level` が無い設定は、既定の 0 と同じに扱う (比べるときも、テキストにするときも、組み立てる
+  ときも 0 で埋める)。設定画面は保存のたびに入れるが、持たない `config1.db` もあった (手で設定してあった
+  マシンに初めて配ったとき、差がこれだけで衝突になった)
+- 読みか単語が空の語 (辞書ツールで行を足して何も入れずに閉じると残る) は、無いものとして扱う。Mozc は
+  変換に使わず、TSV にも書けないため。比べるときに外し、`--import` でも TSV に書かない (前は
+  `--import` が「1 列目の読みと2 列目の単語が空」で止まっていた)
 - 置いたら `taskkill.exe /F` で変換サーバー (`GoogleIMEJaConverter.exe`) を落とす。次のキー入力で
   起動し直し、置いた設定を読む。変換サーバーは設定を起動時にしか読まず、落とさないまま設定画面で
   OK を押すと、置いた設定が古い設定で上書きされるため
