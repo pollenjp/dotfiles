@@ -1,0 +1,58 @@
+@startuml
+' bootstrap-windows-google-ime-install.sh (order 95) の判定。
+' Install-GoogleJapaneseInput.ps1 -Check の終了コードで出し分け、どの場合も exit 0。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam activity {
+  BackgroundColor #D5E8D4
+  BorderColor #666666
+  DiamondBackgroundColor #F7F7F7
+  DiamondBorderColor #666666
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title bootstrap-windows-google-ime-install.sh（order 95）
+
+start
+if (windows-files.json の enable で、\nInstall-GoogleJapaneseInput.ps1 が配られている?) then (どちらか無い)
+  :何もしない\nexit 0; <<#F7F7F7>>
+  stop
+endif
+:pwsh.exe で Install-GoogleJapaneseInput.ps1 -Check\n（何も変えない。上限 120 秒）;
+switch (終了コード)
+case (0: 固定した版と同じ)
+  :1 行を出す\n（winget に新しい版があるなどの ※ の補足があれば添える）; <<#F7F7F7>>
+case (1: 版がずれている)
+  if (表に何が出ている?) then (入っている版の方が新しい・\n版が読めない・\n固定した版が winget に無い)
+    :⚠ で囲み、揃えるコマンドの代わりに\nそれぞれの直し方を出す\n（repo の版の上げ方・winget list での確かめ方・\n-Version の直し方）; <<#FFE6CC>>
+  else (古い・pin が無い)
+    :⚠ で囲み、状態の表と\n揃えるコマンド（Install-GoogleJapaneseInput）を出す\n**入れ替えはしない**; <<#FFE6CC>>
+  endif
+case (3: 入っていない)
+  if (固定した版が winget に無い?) then (無い)
+    :⚠ で囲み、-Version の直し方を出す\n（打っても入れられないので、-IfMissing は打たない）; <<#FFE6CC>>
+  else (ある)
+    :「UAC の確認が出る」と出してから\n-IfMissing で入れる（上限 600 秒）;
+    if (入った?) then (はい)
+      :「98 が『まだ使われていません』と出したら、\n日本語入力を一度使ってから\nsetup を流し直す」と出す;
+    else (いいえ・時間切れ)
+      :⚠ と手で打つコマンドを出す; <<#FFE6CC>>
+    endif
+  endif
+case (ほか)
+  :interop・pwsh.exe・winget の失敗や時間切れ。\n手で打つコマンドを出す; <<#FFE6CC>>
+endswitch
+:exit 0\n（setup を止めない）;
+stop
+
+legend right
+  |<#D5E8D4> 入れる |
+  |<#F7F7F7> 何もしない |
+  |<#FFE6CC> 知らせるだけ |
+  --apply を付けて手で流すと、-Check を付けずに揃える（OpenSSH の 96 と同じ）
+endlegend
+@enduml

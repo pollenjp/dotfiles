@@ -28,6 +28,7 @@
 # ## 何をするか
 #
 # 1. 前提を確かめる。配らないマシン・Google 日本語入力が入っていないマシンは exit 0 で飛ばす。
+#    入っているがまだ使っていない (置き先が無い) マシンは、一度使ってから流し直すよう出して exit 0。
 #    interop (tasklist.exe) が使えなければ置かずに exit 0 (変換サーバーを再起動できず、置いたものが
 #    古い設定で上書きされうるため)。設定画面・辞書ツール (GoogleIMEJaTool.exe) が開いていれば exit 1
 # 2. pjp-google-ime build で組み立てる。テキストが壊れていれば何も書かずに exit 1
@@ -46,7 +47,8 @@
 #    (restart-pending) を残し、次の回は置くものが無くても落とし直す
 #
 # 衝突が 1 件でもあれば、全部を処理し終えてから exit 1 する。--import で Windows 側を
-# テキストへ取り込むか、--force で repo の中身で置き直す。--import は、repo 側に commit して
+# テキストへ取り込むか、--force で repo の中身で置き直す。--import は、取り込みが書き換える
+# テキスト (config.txtpb・keymap.tsv・romaji.tsv と、dotfiles-private の辞書のディレクトリ (dictionaries/) の中身) に commit して
 # いない変更があると何も書かずに止まる (取り込むと、その変更が痕跡なく消えるため)。
 
 set -eu -o pipefail
@@ -168,6 +170,20 @@ if [[ -z ${windows_home} || ! -d ${windows_home} ]]; then
 fi
 ime_dir="${windows_home}/AppData/LocalLow/Google/Google Japanese Input"
 if [[ ! -d ${ime_dir} ]]; then
+  # 置き先は、Google 日本語入力が初めて起動したときに作る。入れただけでまだ使っていないマシン
+  # (新しいマシンの 1 回目の setup) では無いので、変換サーバーの exe で「入っている」を見分けて案内する
+  # (docs/adr/017_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
+  # 権限と揃わないおそれがある)。Program Files は Windows のホーム (/mnt/c/Users/<名前>) と同じドライブにある
+  windows_root=${windows_home%/Users/*}
+  for d in "${windows_root}/Program Files" "${windows_root}/Program Files (x86)"; do
+    if [[ -f "${d}/Google/Google Japanese Input/GoogleIMEJaConverter.exe" ]]; then
+      {
+        echo "!! Google 日本語入力は入っていますが、まだ使われていません (${ime_dir} が無い)。この手順は飛ばします。"
+        echo "   Google 日本語入力で一度何か打ってから (置き先ができる)、setup --update を流し直してください。"
+      } >&2
+      exit 0
+    fi
+  done
   echo "Google 日本語入力が入っていません (${ime_dir} が無い)。この手順は飛ばします。"
   exit 0
 fi
@@ -224,9 +240,17 @@ if ((do_import)); then
   # ファイルも) があると痕跡なく消えるので、何も書かずに止まる。git が無い・checkout の外で
   # 確かめられないときも、消えた変更は戻せないので止まる側に倒す。
   # 出すのはファイル名だけ (辞書の中身は出ない)。--no-optional-locks は index を書かないため。
-  # --untracked-files=normal は、未追跡を見せない設定 (status.showUntrackedFiles=no) でも見るため
+  # --untracked-files=normal は、未追跡を見せない設定 (status.showUntrackedFiles=no) でも見るため。
+  # 設定の側で見るのは取り込みが書き換える 3 つだけ。同じディレクトリの Install-GoogleJapaneseInput.ps1
+  # (ADR 017) は取り込みで変わらないので、版を上げる途中 (-Version を変えて commit する前) でも取り込める
   for d in "${config_dir}" ${dict_dir:+"${dict_dir}"}; do
-    if ! changes=$(git --no-optional-locks -C "${d}" status --porcelain --untracked-files=normal -- . 2>"${tmp}/git-status.err"); then
+    if [[ ${d} == "${config_dir}" ]]; then
+      # pjp-google-ime の import (google_ime.py の write_config_texts) が書き換える・消すファイルと同じにする
+      watched=(config.txtpb keymap.tsv romaji.tsv)
+    else
+      watched=(.)
+    fi
+    if ! changes=$(git --no-optional-locks -C "${d}" status --porcelain --untracked-files=normal -- "${watched[@]}" 2>"${tmp}/git-status.err"); then
       {
         echo "!! ${d} に commit していない変更が無いかを確かめられません (git が無いか、git の checkout ではない):"
         sed 's/^/   /' "${tmp}/git-status.err"
@@ -237,7 +261,7 @@ if ((do_import)); then
     if [[ -n ${changes} ]]; then
       {
         echo "!! ${d} に commit していない変更があります。--import はテキストを Windows 側の中身で置き換えるので、先に commit するか、変更を戻してから流し直してください。"
-        git --no-optional-locks -c core.quotePath=false -C "${d}" status --short --untracked-files=normal -- . | sed 's/^/   /'
+        git --no-optional-locks -c core.quotePath=false -C "${d}" status --short --untracked-files=normal -- "${watched[@]}" | sed 's/^/   /'
       } >&2
       exit 1
     fi
