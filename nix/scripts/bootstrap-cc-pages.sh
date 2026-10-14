@@ -45,6 +45,10 @@ bin_link="${HOME}/bin/cc-pages"
 state_dir="${HOME}/.local/state/dotfiles"
 state_file="${state_dir}/cc-pages-dir"
 
+# daemon が読む設定。cc-pages は XDG_CONFIG_HOME を見ず、常にここを読む。
+# addr を書くのは home-manager (dotfiles.ccPages.port。home/modules/cc-pages.nix)。
+config_file="${HOME}/.config/cc-pages/config.toml"
+
 dir_arg=""
 do_pull=1
 dry_run=0
@@ -153,6 +157,31 @@ resolve_dir() {
 
 dir="$(resolve_dir)"
 
+# daemon を開く URL。daemon と同じく config.toml の addr から組み、無ければ cc-pages の既定。
+# host は cc-pages の BaseURL と同じく最初の ":" で切り、127.0.0.1 などは localhost にする。
+# 環境変数 CC_PAGES_ADDR は見ない。systemd の user service の daemon には届かないため。
+viewer_url() {
+  local addr="" line host
+  if [[ -f ${config_file} ]]; then
+    while IFS= read -r line || [[ -n ${line} ]]; do
+      if [[ ${line} =~ ^[[:space:]]*addr[[:space:]]*=[[:space:]]*\"([^\"]*)\" ]]; then
+        addr=${BASH_REMATCH[1]}
+        break
+      fi
+    done <"${config_file}"
+  fi
+  addr=${addr:-127.0.0.1:7777}
+  if [[ ${addr} != *:* ]]; then
+    printf 'http://%s\n' "${addr}"
+    return
+  fi
+  host=${addr%%:*}
+  case ${host} in
+    "" | 127.0.0.1 | 0.0.0.0) host=localhost ;;
+  esac
+  printf 'http://%s:%s\n' "${host}" "${addr#*:}"
+}
+
 if [[ ${status_only} == 1 ]]; then
   echo "クローン: ${dir}"
   if [ -d "${dir}/.git" ]; then
@@ -168,6 +197,7 @@ if [[ ${status_only} == 1 ]]; then
   fi
   echo "サービス: ${unit}"
   systemctl --user status "${unit}" --no-pager 2>&1 | sed -n '1,4p' | sed 's/^/  /' || true
+  echo "ビューア: $(viewer_url)"
   exit 0
 fi
 
@@ -258,7 +288,7 @@ if [[ ${no_daemon} == 1 ]]; then
   exit 0
 fi
 
-echo "完了しました。http://localhost:7777 で開けます。"
+echo "完了しました。$(viewer_url) で開けます。"
 note "いまの状態: $0 --status"
 if [[ ${stale} == 1 ]]; then
   echo

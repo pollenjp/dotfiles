@@ -14,6 +14,7 @@
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
+#   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
@@ -179,6 +180,32 @@ in
       どちらも systemd の user timer (darwin は launchd の agent) で動き、マシンを
       止めていて逃した回は次の起動時に走る。止めたいマシンはローカル flake の
       local で false にする。
+    '';
+  };
+
+  options.dotfiles.ccPages.port = lib.mkOption {
+    # types.port は 0 も通す。0 だと cc-pages は空いている port を選び、返すリンクが合わない
+    type = lib.types.nullOr (lib.types.ints.between 1 65535);
+    default = null;
+    example = 7778;
+    description = ''
+      cc-pages (cc-page のページを見せるローカル web ビューア。home/modules/cc-pages.nix) が
+      待ち受ける port。bind 先は 127.0.0.1 のまま変えない (LAN には出さない)。
+
+      null (既定) なら何も置かず、cc-pages の既定の 7777 で待ち受ける。7777 が
+      ほかと衝突するマシンだけ、ローカル flake の local で選ぶ。
+
+      値を入れると home-manager が ~/.config/cc-pages/config.toml に
+      `addr = "127.0.0.1:<port>"` を書く。daemon (`cc-pages serve`) も、skill が
+      ページを作る `cc-pages new` (返すリンク) も、このファイルを読む。systemd の unit の
+      環境変数 (CC_PAGES_ADDR) で渡さないのは、new に届かずリンクが 7777 のまま残るため。
+
+      - 反映は home-manager switch (~/dotfiles/setup --update でもよい)。port が変わると
+        switch が cc-pages.service を再起動する
+      - config.toml を home-manager が持つので、手で書いた config.toml があると switch が
+        「既にファイルがある」で止まる。退けてから switch する
+      - port を変える前に作ったページのリンク (http://localhost:<前の port>/…) は開けなくなる。
+        ページそのものは残るので、リンクの port を今の値に書き換えれば開ける
     '';
   };
 

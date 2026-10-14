@@ -27,6 +27,8 @@
 #               コメントアウトした false の例だけ置く (gh にログインしないマシンだけ外す)。
 #               Notion へ書く skill の既定の宛先 dotfiles.claude.notion.profile は null
 #               (選ぶまで、規則に当たらない repo と repo の外で止まる)。
+#               cc-pages の待ち受け port (dotfiles.ccPages.port) は、コメントアウトした
+#               例だけ置く (7777 がほかと衝突するマシンだけ書く)。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -267,6 +269,11 @@ if [[ ${write_flake} == 1 ]]; then
         #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
         # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
         #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
+
+        # cc-pages (cc-page のページを見せるローカル web ビューア) が待ち受ける port。
+        # 書かなければ cc-pages の既定の 7777。7777 がほかと衝突するマシンだけ書く。
+        # 反映は ~/dotfiles/setup --update (switch だけでもよい。daemon は switch が再起動する)。
+        # dotfiles.ccPages.port = 7778;
       };
     in
     {

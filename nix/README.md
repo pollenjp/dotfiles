@@ -903,6 +903,10 @@ Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** �
 repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
 （[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
 
+cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなければ cc-pages の既定の 7777 で、
+雛形にはコメントアウトした例だけ置いてある。7777 がほかと衝突するマシンだけ書く
+（[待ち受けの port を変える](#待ち受けの-port-を変える)）。
+
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
@@ -1031,6 +1035,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
+| `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -2212,24 +2217,47 @@ Nix が置くのは daemon の unit だけ。
 
 | 段 | すること | 決める場所 |
 | --- | --- | --- |
-| `switch` | `~/.config/systemd/user/cc-pages.service`（`~/bin/cc-pages serve` を常駐させる）を置く | `home/modules/cc-pages.nix` |
+| `switch` | `~/.config/systemd/user/cc-pages.service`（`~/bin/cc-pages serve` を常駐させる）を置く。`dotfiles.ccPages.port` を選んだマシンには `~/.config/cc-pages/config.toml` も置く | `home/modules/cc-pages.nix` |
 | bootstrap | `$(ghq root)/github.com/pollenjp/cc-pages` へ clone（あれば ff-only で pull）→ `go build` して `~/bin/cc-pages` へ symlink → unit を enable して再起動 | `scripts/bootstrap-cc-pages.sh` |
 
 ```sh
 ./nix/scripts/bootstrap-cc-pages.sh            # 取得 / 更新してビルドし、daemon を再起動する
 ./nix/scripts/bootstrap-cc-pages.sh --no-pull  # pull せず、手元のクローンでビルドし直す
-./nix/scripts/bootstrap-cc-pages.sh --status   # いまの状態を見る
+./nix/scripts/bootstrap-cc-pages.sh --status   # いまの状態 (クローン・バイナリ・daemon・ビューアの URL) を見る
 systemctl --user status cc-pages               # daemon の状態
 ```
 
 - 冪等なので `--update` のたびに走り、cc-pages の更新もこれで入る
-- 待ち受けとデータの置き場は、既定で `127.0.0.1:7777` と `~/.local/share/cc-pages`。変えるなら
-  `~/.config/cc-pages/config.toml` か `CC_PAGES_ADDR` / `CC_PAGES_ROOT`
+- 待ち受けとデータの置き場は、既定で `127.0.0.1:7777` と `~/.local/share/cc-pages`。port はローカル flake で
+  変える（[待ち受けの port を変える](#待ち受けの-port-を変える)）
 - clone 先は `--dir` → `$CC_PAGES_DIR` → `$(ghq root)/github.com/pollenjp/cc-pages` の順に決まる
 - ビルドに使う `go` は `bootstrap-mise.sh`（order 10）が入れる
 - daemon を起こすのは Linux の user の systemd だけ。darwin には launchd の agent を置いていないので、
   バイナリは作るが常駐はしない
 - `cc-pages` が PATH（`~/bin`）に無いマシンでは、skill はページを作らずにターミナルで答える
+
+#### 待ち受けの port を変える
+
+7777 がほかと衝突するマシンでは、ローカル flake の `local` で port を選ぶ
+（登録簿のホストなら、`mkHome` の `modules` に同じ 1 行を書く）。
+
+```nix
+# ~/dotfiles/flake.nix の local
+dotfiles.ccPages.port = 7778;
+```
+
+`~/dotfiles/setup --update`（switch だけでもよい）で効く。home-manager が `~/.config/cc-pages/config.toml` に
+`addr = "127.0.0.1:7778"` を書き、port が変わった switch で `cc-pages.service` を再起動する。
+bind 先の `127.0.0.1` は変えない（LAN には出さない）。
+
+- daemon（`cc-pages serve`）も、skill がページを作る `cc-pages new`（返すリンク）も、この config.toml を読む。
+  unit の環境変数（`CC_PAGES_ADDR`）で渡さないのは、`cc-pages new` に届かずリンクが 7777 のまま残るため
+- 書かなければ（既定の `null`）config.toml は置かず、cc-pages の既定の 7777 で待ち受ける
+- port を書いたマシンでは config.toml を home-manager が持つ。手で書いた config.toml があると switch が
+  「既にファイルがある」で止まるので、退けてから switch する
+- port を変える前に作ったページのリンク（`http://localhost:7777/…`）は開けなくなる。ページそのものは
+  `~/.local/share/cc-pages` に残っている
+- いまの URL は `bootstrap-cc-pages.sh --status` の「ビューア」に出る（config.toml の `addr` から組む）
 
 #### 取得できないマシンでも止まらない
 
@@ -2378,9 +2406,11 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い)。偽の `pwsh.exe` と `wslpath` で流す（29 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
 | `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い・`settings.json` が無い / 有効なプロファイルが `default` でないときは送らず記録もしない) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット)。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（29 件） | `bootstrap-windows-powertoys-test`（Linux） |
 | `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない)。手元の bare repo で流す（6 件） | `bootstrap-dotfiles-private-test`（Linux） |
+| `bootstrap-cc-pages.test.sh` | `bootstrap-cc-pages.sh --status` が出すビューアの URL を、config.toml の `addr` から組むこと (config.toml が無い・`127.0.0.1`・ほかの host・`addr` が無い)。clone もビルドもしない（4 件） | `bootstrap-cc-pages-test`（Linux） |
 | `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest (空のコメントと空の表を含む)・検証・エラーに語を出さない・import (Mozc の `.proto` の写しから作った記述子で流す。56 件) | `pjp-google-ime-unittest`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
 | `claude-notion.nix` | `notion.{profile,routes,override}` の既定・`claude-notion.json` の中身・profile が無いときの warnings（評価時の assert） | `claude-notion-state`（全 system） |
+| `cc-pages.nix` | `ccPages.port` の既定では config.toml を置かないこと・config.toml の `addr`・1〜65535 の外で止まること・port を変えると unit ファイルが変わること (Linux だけ)（評価時の assert） | `cc-pages-state`（全 system） |
 
 bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
 引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
@@ -2398,7 +2428,7 @@ node nix/tests/claude-footer-links.test.mjs                                    #
   `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
   抜けないため
 - 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
-- `claude-env.nix` と `claude-notion.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。
+- `claude-env.nix`・`claude-notion.nix`・`cc-pages.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。
   外れた項目の名前がエラーに出る
 
 ## ディレクトリ
@@ -2411,14 +2441,14 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable
+│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable / dotfiles.ccPages.port
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置
 │       ├── git.nix           programs.git / programs.delta
 │       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
 │       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
-│       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)
+│       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)。ccPages.port を選んだマシンには config.toml も置く
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
 │       ├── fish.nix          abbr 88 / function 24
@@ -2433,7 +2463,7 @@ nix/
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、Windows と Linux をまたいだ 1 本の木で出す
 │   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / footer のリンクの正規表現 / herdr の skill のリンク)
+├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / cc-pages の config.toml / footer のリンクの正規表現 / herdr の skill のリンク)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
