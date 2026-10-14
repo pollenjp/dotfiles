@@ -3,7 +3,7 @@
 # cc-pages は Claude Code の長い応答を HTML としてローカルに残し、web app で読むための
 # ツール。ここではその daemon (`cc-pages serve`) を systemd user service として常駐させる。
 #
-#   ~/bin/cc-pages serve    -> 127.0.0.1:7777 で待ち受ける
+#   ~/bin/cc-pages serve    -> 127.0.0.1:7777 で待ち受ける (port は dotfiles.ccPages.port で変えられる)
 #
 # バイナリの配置は Nix ではなく `nix/scripts/bootstrap-cc-pages.sh` が行う。
 #
@@ -33,9 +33,35 @@
 # 設計では `.socket` を置いて最初のアクセスで起こし、`--idle-timeout` で寝る形を
 # 想定していたが、v1 では採らない。Go 側に go-systemd/activation が要り、外部依存が
 # 2 つ目になる。常駐しっぱなしでもメモリは数十 MB で、困ってから足せばよい。
-{ ... }:
+#
+# ## 待ち受けの port
+#
+# dotfiles.ccPages.port を選んだマシンだけ、~/.config/cc-pages/config.toml に
+# `addr = "127.0.0.1:<port>"` を書く (null なら何も置かず、cc-pages の既定の 7777)。
+#
+# unit の Environment=CC_PAGES_ADDR にしないのは、cc-pages が serve と new で同じ解決
+# (環境変数 → config.toml → 既定) を通るため。環境変数は daemon にしか届かず、skill が
+# 打つ `cc-pages new` は 7777 のリンクを返し続ける。config.toml なら両方が読む。
+#
+# cc-pages は XDG_CONFIG_HOME を見ず、常に ~/.config/cc-pages/config.toml を読むので、
+# xdg.configFile ではなく home.file でその場所に置く。
+#
+# port を変えても unit ファイルが同じだと、switch (sd-switch) は daemon を再起動せず、
+# 前の port で動き続ける。X-Restart-Triggers に config.toml の store path を書いて、
+# config.toml が変われば unit ファイルも変わるようにしている。
+{ config, lib, ... }:
 
+let
+  cfg = config.dotfiles.ccPages;
+  configToml = ".config/cc-pages/config.toml";
+in
 {
+  home.file = lib.mkIf (cfg.port != null) {
+    ${configToml}.text = ''
+      addr = "127.0.0.1:${toString cfg.port}"
+    '';
+  };
+
   systemd.user.services.cc-pages = {
     Unit = {
       Description = "cc-pages — Claude Code の応答を読むローカル web ビューア";
@@ -48,11 +74,13 @@
       # "Unknown key name ... ignoring" と言うだけで**無視して起動する**ので、
       # 条件が効いていないことに気付けない。
       ConditionFileIsExecutable = "%h/bin/cc-pages";
+      # port を変えた switch で再起動させる (上の「待ち受けの port」参照)。
+      X-Restart-Triggers = lib.optional (cfg.port != null) "${config.home.file.${configToml}.source}";
     };
 
     Service = {
-      # 既定は 127.0.0.1:7777 / ~/.local/share/cc-pages。
-      # 変えたい場合は ~/.config/cc-pages/config.toml か CC_PAGES_ADDR / CC_PAGES_ROOT。
+      # 待ち受けは ~/.config/cc-pages/config.toml の addr (上の「待ち受けの port」)。
+      # データの置き場は既定の ~/.local/share/cc-pages。
       ExecStart = "%h/bin/cc-pages serve";
       Restart = "on-failure";
       RestartSec = 5;
