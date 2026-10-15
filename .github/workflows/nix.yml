@@ -181,6 +181,11 @@ jobs:
             exit "${rc}"
           '
 
+      # nix/tests と nix/pkgs のテストの先頭のコメントに「## 確かめること」があるか。何を確かめるかは
+      # README に写さず、各テストの先頭にだけ書く (README の「テスト」)。bash だけで動くので devShell は要らない。
+      - name: テストの先頭の「## 確かめること」
+        run: ./nix/scripts/check-test-headers.sh
+
       # win/manifest.toml の検証 (ADR 010)。home-manager の評価は manifest を読まない
       # (ローカル flake からは repo 直下が見えない) ので、flake check では誤りが見つからない。
       # nix-instantiate だけで動くので devShell は要らない。
