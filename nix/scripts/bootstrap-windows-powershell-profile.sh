@@ -80,11 +80,29 @@ line='if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\
 # 「読む行がある」の判定。書き方が違っても dotfiles.ps1 を指していればよい
 marker='.config\powershell\dotfiles.ps1'
 
-# 自動で足せないときに、同じ 1 行を手で足すコマンドを出す
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+# 自動で足せないときに、同じ 1 行を手で足すコマンド (warn の続きの行にする)
 manual() {
-  echo "   PowerShell 7 で次を 1 回打つと、同じ 1 行が足されます:" >&2
+  echo "PowerShell 7 で次を 1 回打つと、同じ 1 行が足されます:"
   # shellcheck disable=SC2016
-  printf '     Add-Content -Path $PROFILE -Value '\''%s'\''\n' "${line}" >&2
+  printf '  Add-Content -Path $PROFILE -Value '\''%s'\''\n' "${line}"
 }
 
 if ! command -v jq &>/dev/null; then
@@ -119,30 +137,27 @@ else
 fi
 
 if ! command -v pwsh.exe &>/dev/null; then
-  echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" >&2
-  manual
+  warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
   exit 0
 fi
 
 # WSL の interop を通る。落ちていると Exec format error などで失敗する。
 # -NoProfile: これから書き換える $PROFILE を読ませない。出力は UTF-8 にする (ドキュメントが化けないよう)。
+# 警告の続きの行には、pwsh.exe の出力 (CR は落とす。空なら出さない) と手で打つコマンドを並べる。
 # shellcheck disable=SC2016
 if ! out=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -Command '[Console]::OutputEncoding = [Text.Encoding]::UTF8; $PROFILE.CurrentUserCurrentHost' </dev/null 2>&1); then
-  echo "!! pwsh.exe に \$PROFILE の場所を聞けませんでした (WSL の interop が落ちているかもしれません):" >&2
-  printf '   %s\n' "${out}" >&2
-  manual
+  out=${out//$'\r'/}
+  warn "pwsh.exe に \$PROFILE の場所を聞けませんでした (WSL の interop が落ちているかもしれません):" ${out:+"${out}"} "$(manual)"
   exit 0
 fi
 win_profile=$(printf '%s\n' "${out}" | tr -d '\r' | grep -E '^[A-Za-z]:[\]' | tail -n 1 || true)
 if [[ -z ${win_profile} ]]; then
-  echo "!! pwsh.exe が \$PROFILE の場所を返しませんでした:" >&2
-  printf '   %s\n' "${out}" >&2
-  manual
+  out=${out//$'\r'/}
+  warn "pwsh.exe が \$PROFILE の場所を返しませんでした:" ${out:+"${out}"} "$(manual)"
   exit 0
 fi
 if ! profile=$(wslpath -u "${win_profile}" 2>/dev/null) || [[ -z ${profile} ]]; then
-  echo "!! \$PROFILE の場所を WSL のパスに直せませんでした: ${win_profile}" >&2
-  manual
+  warn "\$PROFILE の場所を WSL のパスに直せませんでした: ${win_profile}" "$(manual)"
   exit 0
 fi
 
@@ -167,16 +182,15 @@ if [[ -f ${profile} ]] && grep -qF -- "${marker}" "${profile}"; then
 fi
 
 if [[ ${recorded} == added ]] && ((! force)); then
-  echo "!! 以前 \$PROFILE に足した 1 行が見当たりません: ${profile}" >&2
-  echo "   Windows 側で外したのなら、そのままにします。足し直すなら --force を付けて流してください。" >&2
+  warn "以前 \$PROFILE に足した 1 行が見当たりません: ${profile}" \
+    "Windows 側で外したのなら、そのままにします。足し直すなら --force を付けて流してください。"
   exit 0
 fi
 
 if [[ -s ${profile} ]]; then
   bom=$(head -c 2 -- "${profile}" | od -An -tx1 | tr -d ' \n')
   if [[ ${bom} == fffe || ${bom} == feff ]]; then
-    echo "!! \$PROFILE が UTF-16 なので書き足しません: ${profile}" >&2
-    manual
+    warn "\$PROFILE が UTF-16 なので書き足しません: ${profile}" "$(manual)"
     exit 0
   fi
 fi

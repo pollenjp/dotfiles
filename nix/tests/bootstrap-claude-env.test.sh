@@ -14,6 +14,8 @@
 #     HTTPS の組が消え、管理しない組は順序ごと残り、再実行では変わらない
 #   - 状態ファイルが無い・形が違う・settings.json が無いときの扱い
 #   - gh が無い / 未ログイン / 設定ファイルに別の credential helper があるときの警告
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、その警告を直し方ごと setup の
+#     最後のまとめ用のファイルにも残す
 #
 # ## 「gh が無い」の作り方
 #
@@ -290,6 +292,37 @@ if ! grep -q 'credential helper' "${h}/err"; then
   ok "env で渡された helper は設定ファイルの helper として扱わない"
 else
   ng "env の helper は扱わない" "err=$(cat "${h}/err")"
+fi
+
+# 19. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): gh の警告を、直し方ごと setup の
+#     最後のまとめ用のファイルに残す (以前は setup.sh が最後に判定し直していた。TKT-146)
+h=$(new_home t19 "{\"env\":${env_current}}" "${state_true}")
+run "${h}" GH_FAKE_LOGGED_IN=0 DOTFILES_SETUP_WARNINGS="${h}/warnings"
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'gh にログインしていません。'* ]] \
+  && grep -qE '^[[:space:]]+gh auth login' "${h}/warnings"; then
+  ok "setup から走るとき、gh の警告を直し方ごとまとめ用に残す"
+else
+  ng "gh の警告をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 20. 設定ファイルの credential helper の警告も、helper の一覧ごと残す
+h=$(new_home t20 "{\"env\":${env_current}}" "${state_true}")
+printf '[credential]\n\thelper = store\n' >"${h}/.gitconfig"
+run "${h}" DOTFILES_SETUP_WARNINGS="${h}/warnings"
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == *'credential helper があります'* ]] \
+  && grep -qx '     global credential.helper store' "${h}/warnings"; then
+  ok "setup から走るとき、設定ファイルの helper の警告を一覧ごとまとめ用に残す"
+else
+  ng "helper の警告をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 21. 警告が無ければ、まとめ用には何も残さない
+h=$(new_home t21 "{\"env\":${env_current}}" "${state_true}")
+run "${h}" GH_FAKE_LOGGED_IN=1 DOTFILES_SETUP_WARNINGS="${h}/warnings"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]]; then
+  ok "警告が無ければ、まとめ用には何も残さない"
+else
+  ng "警告が無いのにまとめ用に残した" "warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

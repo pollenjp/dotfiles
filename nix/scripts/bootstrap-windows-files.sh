@@ -105,6 +105,24 @@ state_dir="${HOME}/.local/state/dotfiles"
 state_file="${state_dir}/windows-files.json"
 record_file="${state_dir}/windows-files.deployed.json"
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
 if ! command -v nix-instantiate &>/dev/null; then
   echo "nix-instantiate が見つかりません (Nix が入っていないか、PATH に無い)。" >&2
   exit 1
@@ -142,9 +160,9 @@ if ! command -v jq &>/dev/null; then
 fi
 
 if [[ ! -r ${state_file} ]]; then
-  echo "!! 配り先の設定がありません: ${state_file}" >&2
-  echo "   dotfiles.wsl.windowsFiles を持つ世代へ先に home-manager switch してください。" >&2
-  echo "   この手順は飛ばします。" >&2
+  warn "配り先の設定がありません: ${state_file}" \
+    "dotfiles.wsl.windowsFiles を持つ世代へ先に home-manager switch してください。" \
+    "この手順は飛ばします。"
   exit 0
 fi
 

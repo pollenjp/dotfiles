@@ -36,7 +36,8 @@
 # 6. powershell.exe でイベントを送る。送れたら記録する。イベントが無い (PowerToys が動いていない) ときも
 #    記録する (起動したときに読むため)。interop が使えなければ手で読み直す方法を出し、記録しない
 #
-# どの場合も exit 0 (後ろの手順を止めない)。知らない引数だけ exit 2。
+# どの場合も exit 0 (後ろの手順を止めない)。知らない引数だけ exit 2。知らせたこと (⚠ の枠は見出しと
+# 入れるコマンド) は、setup の最後の「警告のまとめ」にも残す (warn / summary_warn)。
 
 set -eu -o pipefail
 
@@ -84,14 +85,33 @@ else
   c_reset=""
 fi
 
-manual() {
-  echo "   PowerToys の設定 → Keyboard Manager を一度オフにしてオンに戻すと、読み直します。" >&2
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
 }
 
-# PowerToys が入っているかを自動で確かめられないときに、手で確かめて入れるコマンドを出す
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+# 読み直させられないときに、手で読み直す方法 (warn の続きの行にする)
+manual() {
+  echo "PowerToys の設定 → Keyboard Manager を一度オフにしてオンに戻すと、読み直します。"
+}
+
+# PowerToys が入っているかを自動で確かめられないときに、手で確かめて入れるコマンド (warn の続きの行にする)
 install_manual() {
-  echo "   Windows の PowerShell で次を打つと、確かめて、入っていなければ入れられます:" >&2
-  echo "     Install-PowerToys" >&2
+  echo "Windows の PowerShell で次を打つと、確かめて、入っていなければ入れられます:"
+  echo "  Install-PowerToys"
 }
 
 # CRLF と、PowerShell が付けうる色のエスケープを落とす (枠の色はこちらで付ける)
@@ -103,17 +123,24 @@ clean() {
 # ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
+  local line fix=(
+    "入れるには次のどちらかを打つ (管理者は要りません):"
+    "  WSL:        ${script_dir}/bootstrap-windows-powertoys.sh (流し直すと、もう一度入れにいく)"
+    "  PowerShell: Install-PowerToys"
+  )
   {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     printf '%s⚠️  %s%s\n' "${c_warn}" "$1" "${c_reset}"
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     # PowerShell の締めの 1 行 (⚠️ … → Install-PowerToys …) は、下の入れるコマンドと重なるので落とす
     printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
-    printf '%s⚠️  入れるには次のどちらかを打つ (管理者は要りません):%s\n' "${c_warn}" "${c_reset}"
-    printf '%s⚠️    WSL:        %s/bootstrap-windows-powertoys.sh (流し直すと、もう一度入れにいく)%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
-    printf '%s⚠️    PowerShell: Install-PowerToys%s\n' "${c_warn}" "${c_reset}"
+    for line in "${fix[@]}"; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
+    done
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   } >&2
+  # setup の最後のまとめには、見出しと入れるコマンドだけを残す (winget の出力は、その場の枠に出ている)
+  summary_warn "$1" "${fix[@]}"
 }
 
 # pwsh.exe に渡すコマンド (95・97 の pwsh_command と同じ形)。$1 はスクリプトに渡す引数 (" -Check" など)。
@@ -133,13 +160,12 @@ install_powertoys() {
     return 0
   fi
   if ! command -v pwsh.exe &>/dev/null; then
-    echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。PowerToys が入っているかを確かめられません。" >&2
-    install_manual
+    warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。PowerToys が入っているかを確かめられません。" \
+      "$(install_manual)"
     return 0
   fi
   if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]]; then
-    echo "!! Install-PowerToys.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" >&2
-    install_manual
+    warn "Install-PowerToys.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" "$(install_manual)"
     return 0
   fi
   quoted=${win_script//\'/\'\'}
@@ -173,20 +199,19 @@ install_powertoys() {
     warn_frame "Windows に PowerToys を入れられませんでした (終了コード ${rc})" "${out}"
     return 0
   fi
+  local headline
   if ((rc == 124)); then
-    echo "!! pwsh.exe が 60 秒たっても終わりませんでした (時間切れ。WSL の interop が止まっているかもしれません):" >&2
+    headline="pwsh.exe が 60 秒たっても終わりませんでした (時間切れ。WSL の interop が止まっているかもしれません):"
   else
-    echo "!! pwsh.exe で PowerToys が入っているかを確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+    headline="pwsh.exe で PowerToys が入っているかを確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):"
   fi
-  if [[ -n ${out} ]]; then
-    printf '%s\n' "${out}" | sed 's/^/   /' >&2
-  fi
-  install_manual
+  # pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする
+  warn "${headline}" ${out:+"${out}"} "$(install_manual)"
   return 0
 }
 
 if ! command -v jq &>/dev/null; then
-  echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
+  warn "jq が見つかりません。先に home-manager switch を実行してください。この手順は飛ばします。"
   exit 0
 fi
 if [[ ! -r ${state_file} ]]; then
@@ -214,14 +239,12 @@ fi
 settings_json="${km_dir}/settings.json"
 active=$(jq -r '.properties.activeConfiguration.value // empty' "${settings_json}" 2>/dev/null) || active=""
 if [[ -z ${active} ]]; then
-  {
-    echo "!! Keyboard Manager の設定 (settings.json) がまだ無いので、配った default.json は読まれません (${settings_json} が無いか、読めない)。"
-    echo "   PowerToys の設定画面を一度開いてから、setup --update (か ${script_dir}/bootstrap-windows-powertoys.sh) を流し直してください。"
-  } >&2
+  warn "Keyboard Manager の設定 (settings.json) がまだ無いので、配った default.json は読まれません (${settings_json} が無いか、読めない)。" \
+    "PowerToys の設定画面を一度開いてから、setup --update (か ${script_dir}/bootstrap-windows-powertoys.sh) を流し直してください。"
   exit 0
 fi
 if [[ ${active} != default ]]; then
-  echo "!! Keyboard Manager の有効なプロファイルが default ではありません (${active})。配った default.json は読まれません。PowerToys の設定で、プロファイルを default に戻してください (${settings_json} の activeConfiguration)。" >&2
+  warn "Keyboard Manager の有効なプロファイルが default ではありません (${active})。配った default.json は読まれません。PowerToys の設定で、プロファイルを default に戻してください (${settings_json} の activeConfiguration)。"
   exit 0
 fi
 
@@ -253,9 +276,7 @@ if ((rc == 0)) && [[ ${out} == absent ]]; then
   echo "PowerToys (Keyboard Manager) が動いていません。起動したときに今の default.json を読みます。"
   exit 0
 fi
-echo "!! powershell.exe で Keyboard Manager に読み直させられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
-if [[ -n ${out} ]]; then
-  printf '%s\n' "${out}" | sed 's/^/   /' >&2
-fi
-manual
+# powershell.exe の出力 (あれば) と、手で読み直す方法を続きの行にする
+warn "powershell.exe で Keyboard Manager に読み直させられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" \
+  ${out:+"${out}"} "$(manual)"
 exit 0

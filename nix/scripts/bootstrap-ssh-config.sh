@@ -62,8 +62,22 @@ for arg in "$@"; do
   esac
 done
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  printf '!! %s\n' "$*" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 # $0 が symlink 経由でも実体の場所を返す。
@@ -143,9 +157,9 @@ if [[ -d ${src_dir} ]]; then
   done
 fi
 if ((${#srcs[@]} == 0)); then
-  warn "張る *.ssh_config がありません: ${src_dir}"
-  echo "   dotfiles-private を取れていないか、ssh/ が空です。今ある symlink はそのまま残します。" >&2
-  echo "   取るには: ${script_dir}/bootstrap-dotfiles-private.sh" >&2
+  warn "張る *.ssh_config がありません: ${src_dir}" \
+    "dotfiles-private を取れていないか、ssh/ が空です。今ある symlink はそのまま残します。" \
+    "取るには: ${script_dir}/bootstrap-dotfiles-private.sh"
   exit 0
 fi
 
@@ -165,22 +179,18 @@ fi
 
 # 2. 張る
 linked=0
-skipped=0
 for src in "${srcs[@]}"; do
   dst="${conf_d}/$(basename "${src}")"
   if [[ -e ${dst} || -L ${dst} ]]; then
     # 1 で外した後に残っているのは、手で置いたファイルか、ほかを指す symlink
-    warn "同じ名前のものがあるので張りません: ${dst}"
-    skipped=$((skipped + 1))
+    warn "同じ名前のものがあるので張りません: ${dst}" \
+      "中身を見て、要らなければ消してから流し直してください (正本は ${src_dir})。"
     continue
   fi
   ln -s "${src}" "${dst}"
   linked=$((linked + 1))
 done
 echo "  ${linked} 個を張りました"
-if ((skipped > 0)); then
-  echo "   中身を見て、要らなければ消してから流し直してください (正本は ${src_dir})。" >&2
-fi
 
 # 旧 .ssh submodule の作業ツリーが残っていれば知らせる (自分では消さない)。
 # commit していない変更・push していない commit があるとき、状態を確かめられないときは、
@@ -197,9 +207,9 @@ if [[ -e ${legacy}/.git ]]; then
       echo "  rm -rf '${legacy}'"
     fi
   else
-    warn "旧 .ssh submodule の作業ツリーに、commit していない変更か push していない commit があります (または状態を確かめられません): ${legacy}"
-    echo "   中身を見て、要るものは dotfiles-private の ssh/ へ移してから消してください:" >&2
-    echo "     git -C '${legacy}' status && git -C '${legacy}' log --branches --not --remotes" >&2
+    warn "旧 .ssh submodule の作業ツリーに、commit していない変更か push していない commit があります (または状態を確かめられません): ${legacy}" \
+      "中身を見て、要るものは dotfiles-private の ssh/ へ移してから消してください:" \
+      "  git -C '${legacy}' status && git -C '${legacy}' log --branches --not --remotes"
   fi
 fi
 

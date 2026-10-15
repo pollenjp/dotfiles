@@ -16,6 +16,8 @@
 #   - -Check が 0 なら 1 行だけ。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す
 #   - -Check が 3 (入っていない) なら -IfMissing で入れる。入れられなければ ⚠ で囲んで知らせる
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
+#     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -336,6 +338,53 @@ if [[ $(rc "${h}") == 0 ]] && ! outerr "${h}" | grep -q $'\e' && outerr "${h}" |
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
   ng "エスケープが残る" "rc=$(rc "${h}") $(outerr "${h}" | od -c | head -8)"
+fi
+
+# 17. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 差があれば、⚠ の見出しと揃えるコマンドを
+#     まとめ用に残す (状態の表は残さない。その場の ⚠ の枠には出ている)
+h=$(new_home t17 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の herdr が、dotfiles で固定した版と揃っていません' ]] \
+  && grep -qE '^[[:space:]]+揃えるには.*hsvstop' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-herdr\.sh --apply$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+PowerShell: Install-Herdr$' "${h}/warnings" \
+  && ! grep -q 'winget pin' "${h}/warnings"; then
+  ok "setup から走るとき、差があれば ⚠ の見出しと揃えるコマンドをまとめ用に残す"
+else
+  ng "差をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 18. 入れられなかったときも、⚠ の見出し (終了コードつき) と揃えるコマンドを残す
+h=$(new_home t18 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 \
+  FAKE_PWSH_OUT2='winget が失敗した (終了コード 0x8A150014)' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に herdr を入れられませんでした (終了コード 1)' ]] \
+  && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-herdr\.sh --apply$' "${h}/warnings"; then
+  ok "入れられなければ、⚠ の見出しと揃えるコマンドをまとめ用に残す"
+else
+  ng "入れられないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 19. 揃っている・入れられたときは、まとめ用には何も残さない
+h=$(new_home t19 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 \
+  FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
+h2=$(new_home t19b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}" run "${h2}" 0
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings && $(rc "${h2}") == 0 && ! -s ${h2}/warnings ]]; then
+  ok "揃っている・入れられたときは、まとめ用には何も残さない"
+else
+  ng "警告が無いのにまとめ用に残した" "$(cat "${h}/warnings" "${h2}/warnings" 2>/dev/null)"
+fi
+
+# 20. pwsh.exe が無いときも、見出しと手で打つコマンドをまとめ用に残す
+h=$(new_home t20 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 1
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe が見つかりません'* ]] \
+  && grep -qE '^[[:space:]]+Install-Herdr -Check$' "${h}/warnings"; then
+  ok "pwsh.exe が無ければ、見出しと手で打つコマンドをまとめ用に残す"
+else
+  ng "pwsh.exe が無いときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
 # 16. 知らない引数: exit 2

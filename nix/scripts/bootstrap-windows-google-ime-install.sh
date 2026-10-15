@@ -32,7 +32,8 @@
 #    3 (入っていない) なら Install-GoogleJapaneseInput.ps1 -IfMissing で入れる。machine スコープの MSI
 #    なので Windows に UAC の確認が出る (その場にいて押せるはずの、新しいマシンで起きる)。ただし固定した版が
 #    winget に無いときは、打っても入れられない (UAC も出ない) ので -IfMissing は打たず、直し方を出す。
-#    どれも exit 0。待つ上限は -Check が 120 秒、-IfMissing が 600 秒 (-Check が時間切れなら、そう出す)
+#    どれも exit 0。待つ上限は -Check が 120 秒、-IfMissing が 600 秒 (-Check が時間切れなら、そう出す)。
+#    ⚠ の見出しと直し方は、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # 上げる (入れ替える) のは setup からはしない。日本語入力は全部のアプリに読み込まれていて、入れ替えると
 # アプリや Windows の再起動が要ることがあるため。--apply を付けて手で流すと、-Check を付けずに流して揃える
@@ -81,15 +82,33 @@ else
   c_reset=""
 fi
 
-# 自動で確かめられないときに、同じことを手で確かめるコマンドを出す
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+# 自動で確かめられないときに、同じことを手で確かめるコマンド (warn の続きの行にする)
 manual() {
-  echo "   Windows の PowerShell で次を打つと、同じことを確かめられます:" >&2
-  echo "     Install-GoogleJapaneseInput -Check" >&2
+  echo "Windows の PowerShell で次を打つと、同じことを確かめられます:"
+  echo "  Install-GoogleJapaneseInput -Check"
 }
 
 # jq が無くても setup は止めない (この手順は知らない引数の 2 以外で 0 以外を返さない)
 if ! command -v jq &>/dev/null; then
-  echo "jq が見つかりません。先に home-manager switch を実行してください。この手順は飛ばします。" >&2
+  warn "jq が見つかりません。先に home-manager switch を実行してください。この手順は飛ばします。"
   exit 0
 fi
 
@@ -109,13 +128,11 @@ if [[ -z ${windows_home} || ! -f ${deployed} ]]; then
 fi
 
 if ! command -v pwsh.exe &>/dev/null; then
-  echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" >&2
-  manual
+  warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
   exit 0
 fi
 if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]]; then
-  echo "!! Install-GoogleJapaneseInput.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" >&2
-  manual
+  warn "Install-GoogleJapaneseInput.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" "$(manual)"
   exit 0
 fi
 
@@ -137,32 +154,40 @@ clean() {
 # ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)、$3: 揃えるコマンドの前に添える 1 行 (省略可)
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
+  local line fix=()
+  # 添える 1 行 ($3) があれば、揃えるコマンドの前に出す
+  if [[ -n ${3-} ]]; then
+    fix+=("$3")
+  fi
+  if grep -qF '(下げない)' <<<"$2"; then
+    # 入っている版の方が新しい: 揃えるコマンドを打っても下げないので、repo の版の上げ方だけを出す
+    fix+=("入っている版の方が新しいので、下げはしません。上の ※ のとおり、repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を上げてください")
+  elif grep -qF 'winget show --versions に無い' <<<"$2"; then
+    # 固定した版が winget に無い: 揃えるコマンドを打っても入れられないので、repo の版の直し方だけを出す
+    fix+=("固定した版が winget に無いので、入れることも上げることもできません。repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を winget show --id Google.JapaneseIME --versions にある版へ変えてください")
+  elif grep -qF '比べられない' <<<"$2"; then
+    # 入っている版が読めない: 揃えるコマンドは何もしないので、確かめ方だけを出す
+    fix+=("入っている版が読めないので、揃えられません。上の ※ のとおり、PowerShell で winget list --id Google.JapaneseIME を打って入っている版を確かめてください")
+  else
+    fix+=(
+      "揃えるには次のどちらかを打つ (入れる・上げるときは Windows に UAC の確認が出ます。上げる前に、日本語入力を使っているアプリをできるだけ閉じる):"
+      "  WSL:        ${script_dir}/bootstrap-windows-google-ime-install.sh --apply"
+      "  PowerShell: Install-GoogleJapaneseInput"
+    )
+  fi
   {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     printf '%s⚠️  %s%s\n' "${c_warn}" "$1" "${c_reset}"
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     # PowerShell の締めの 1 行 (⚠️ … → Install-GoogleJapaneseInput …) は、下の揃えるコマンドと重なるので落とす
     printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
-    # 添える 1 行 ($3) があれば、揃えるコマンドの前に出す
-    if [[ -n ${3-} ]]; then
-      printf '%s⚠️  %s%s\n' "${c_warn}" "$3" "${c_reset}"
-    fi
-    if grep -qF '(下げない)' <<<"$2"; then
-      # 入っている版の方が新しい: 揃えるコマンドを打っても下げないので、repo の版の上げ方だけを出す
-      printf '%s⚠️  入っている版の方が新しいので、下げはしません。上の ※ のとおり、repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を上げてください%s\n' "${c_warn}" "${c_reset}"
-    elif grep -qF 'winget show --versions に無い' <<<"$2"; then
-      # 固定した版が winget に無い: 揃えるコマンドを打っても入れられないので、repo の版の直し方だけを出す
-      printf '%s⚠️  固定した版が winget に無いので、入れることも上げることもできません。repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を winget show --id Google.JapaneseIME --versions にある版へ変えてください%s\n' "${c_warn}" "${c_reset}"
-    elif grep -qF '比べられない' <<<"$2"; then
-      # 入っている版が読めない: 揃えるコマンドは何もしないので、確かめ方だけを出す
-      printf '%s⚠️  入っている版が読めないので、揃えられません。上の ※ のとおり、PowerShell で winget list --id Google.JapaneseIME を打って入っている版を確かめてください%s\n' "${c_warn}" "${c_reset}"
-    else
-      printf '%s⚠️  揃えるには次のどちらかを打つ (入れる・上げるときは Windows に UAC の確認が出ます。上げる前に、日本語入力を使っているアプリをできるだけ閉じる):%s\n' "${c_warn}" "${c_reset}"
-      printf '%s⚠️    WSL:        %s/bootstrap-windows-google-ime-install.sh --apply%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
-      printf '%s⚠️    PowerShell: Install-GoogleJapaneseInput%s\n' "${c_warn}" "${c_reset}"
-    fi
+    for line in "${fix[@]}"; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
+    done
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   } >&2
+  # setup の最後のまとめには、見出しと直し方だけを残す (状態の表は、その場の枠に出ている)
+  summary_warn "$1" "${fix[@]}"
 }
 
 if ((apply)); then
@@ -228,12 +253,10 @@ if ((rc == 3 && header)); then
   exit 0
 fi
 if ((rc == 124)); then
-  echo "!! pwsh.exe が 120 秒たっても終わりませんでした (時間切れ。winget の応答か、WSL の interop が止まっているかもしれません):" >&2
+  headline="pwsh.exe が 120 秒たっても終わりませんでした (時間切れ。winget の応答か、WSL の interop が止まっているかもしれません):"
 else
-  echo "!! pwsh.exe で Windows の Google 日本語入力を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
+  headline="pwsh.exe で Windows の Google 日本語入力を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):"
 fi
-if [[ -n ${out} ]]; then
-  printf '%s\n' "${out}" | sed 's/^/   /' >&2
-fi
-manual
+# pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする
+warn "${headline}" ${out:+"${out}"} "$(manual)"
 exit 0

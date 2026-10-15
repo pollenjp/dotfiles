@@ -53,6 +53,24 @@ plugins=(
   playwright
 )
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
 # claude の探し方。
 #
 # claude は mise 管理 (bootstrap-mise.sh が入れる)。そして mise は
@@ -71,10 +89,10 @@ fi
 # 残りを走らせないため。ここで落とすと後続の bootstrap が巻き添えになる。
 # bootstrap-claude-skills.sh が鍵の無いマシンで exit 0 しているのと同じ扱い。
 if [[ -z ${claude} || ! -x ${claude} ]]; then
-  echo "claude が見つかりません。プラグインの導入は飛ばします。" >&2
-  echo "先に ./nix/scripts/bootstrap-mise.sh を実行してから" >&2
-  echo "  ~/dotfiles/setup --steps bootstrap-claude-plugins" >&2
-  echo "で入れ直してください。" >&2
+  warn "claude が見つかりません。プラグインの導入は飛ばします。" \
+    "先に ./nix/scripts/bootstrap-mise.sh を実行してから" \
+    "  ~/dotfiles/setup --steps bootstrap-claude-plugins" \
+    "で入れ直してください。"
   exit 0
 fi
 
@@ -85,8 +103,8 @@ echo "==> marketplace: ${marketplace_repo}"
 # これも「環境がまだ整っていない」側の失敗なので exit 0 で流す。
 if ! "${claude}" plugin marketplace add "${marketplace_repo}"; then
   echo >&2
-  echo "marketplace の登録に失敗しました。プラグインの導入は飛ばします。" >&2
-  echo "clone は SSH (git@github.com:) で行われるので、GitHub の鍵が要ります。" >&2
+  warn "marketplace の登録に失敗しました。プラグインの導入は飛ばします。" \
+    "clone は SSH (git@github.com:) で行われるので、GitHub の鍵が要ります。"
   exit 0
 fi
 

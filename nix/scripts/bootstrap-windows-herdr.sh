@@ -25,7 +25,8 @@
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。
 #    3 (入っていない) なら Install-Herdr.ps1 -IfMissing で入れる (入っていないなら herdr server も
-#    動いていないので、何も巻き込まない)。どれも exit 0 (setup を止めない)
+#    動いていないので、何も巻き込まない)。どれも exit 0 (setup を止めない)。⚠ の見出しと揃える
+#    コマンドは、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。入れ替えが要るときに herdr が動いて
 # いれば、スクリプトは何も変えずに止まる (herdr server は止めない。先に herdr の外で hsvstop)。
@@ -73,10 +74,28 @@ else
   c_reset=""
 fi
 
-# 自動で確かめられないときに、同じことを手で確かめるコマンドを出す
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+# 自動で確かめられないときに、同じことを手で確かめるコマンド (warn の続きの行にする)
 manual() {
-  echo "   Windows の PowerShell で次を打つと、同じことを確かめられます:" >&2
-  echo "     Install-Herdr -Check" >&2
+  echo "Windows の PowerShell で次を打つと、同じことを確かめられます:"
+  echo "  Install-Herdr -Check"
 }
 
 if ! command -v jq &>/dev/null; then
@@ -100,13 +119,11 @@ if [[ -z ${windows_home} || ! -f ${deployed} ]]; then
 fi
 
 if ! command -v pwsh.exe &>/dev/null; then
-  echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" >&2
-  manual
+  warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
   exit 0
 fi
 if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]]; then
-  echo "!! Install-Herdr.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" >&2
-  manual
+  warn "Install-Herdr.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" "$(manual)"
   exit 0
 fi
 
@@ -128,17 +145,24 @@ clean() {
 # ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
+  local line fix=(
+    "揃えるには次のどちらかを打つ (入れ替えるときは、先に herdr の外の PowerShell で hsvstop):"
+    "  WSL:        ${script_dir}/bootstrap-windows-herdr.sh --apply"
+    "  PowerShell: Install-Herdr"
+  )
   {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     printf '%s⚠️  %s%s\n' "${c_warn}" "$1" "${c_reset}"
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     # PowerShell の締めの 1 行 (⚠️ … → Install-Herdr …) は、下の揃えるコマンドと重なるので落とす
     printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
-    printf '%s⚠️  揃えるには次のどちらかを打つ (入れ替えるときは、先に herdr の外の PowerShell で hsvstop):%s\n' "${c_warn}" "${c_reset}"
-    printf '%s⚠️    WSL:        %s/bootstrap-windows-herdr.sh --apply%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
-    printf '%s⚠️    PowerShell: Install-Herdr%s\n' "${c_warn}" "${c_reset}"
+    for line in "${fix[@]}"; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
+    done
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   } >&2
+  # setup の最後のまとめには、見出しと揃えるコマンドだけを残す (状態の表は、その場の枠に出ている)
+  summary_warn "$1" "${fix[@]}"
 }
 
 if ((apply)); then
@@ -191,9 +215,7 @@ if ((rc == 3 && header)); then
   warn_frame "Windows に herdr を入れられませんでした (終了コード ${rc})" "${out}"
   exit 0
 fi
-echo "!! pwsh.exe で Windows の herdr を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
-if [[ -n ${out} ]]; then
-  printf '%s\n' "${out}" | sed 's/^/   /' >&2
-fi
-manual
+# pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする
+warn "pwsh.exe で Windows の herdr を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" \
+  ${out:+"${out}"} "$(manual)"
 exit 0

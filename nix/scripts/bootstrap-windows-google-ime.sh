@@ -111,6 +111,24 @@ pending_file="${state_dir}/restart-pending"
 tool=pjp-google-ime
 keep_backups=10
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
 # dotfiles-private の clone の場所 (bootstrap-dotfiles-private.sh と同じ決め方)
 private_dir() {
   local root
@@ -177,10 +195,8 @@ if [[ ! -d ${ime_dir} ]]; then
   windows_root=${windows_home%/Users/*}
   for d in "${windows_root}/Program Files" "${windows_root}/Program Files (x86)"; do
     if [[ -f "${d}/Google/Google Japanese Input/GoogleIMEJaConverter.exe" ]]; then
-      {
-        echo "!! Google 日本語入力は入っていますが、まだ使われていません (${ime_dir} が無い)。この手順は飛ばします。"
-        echo "   Google 日本語入力で一度何か打ってから (置き先ができる)、setup --update を流し直してください。"
-      } >&2
+      warn "Google 日本語入力は入っていますが、まだ使われていません (${ime_dir} が無い)。この手順は飛ばします。" \
+        "Google 日本語入力で一度何か打ってから (置き先ができる)、setup --update を流し直してください。"
       exit 0
     fi
   done
@@ -193,7 +209,7 @@ if [[ ! -d ${dict_dir} ]]; then
   if [[ -d $(private_dir)/.git ]] && ((do_import)); then
     mkdir -p "${dict_dir}"
   else
-    echo "!! 辞書のテキスト (${dict_dir}) が無いので、辞書は飛ばします (dotfiles-private を取れていないかも)。" >&2
+    warn "辞書のテキスト (${dict_dir}) が無いので、辞書は飛ばします (dotfiles-private を取れていないかも)。"
     dict_dir=""
   fi
 fi
@@ -284,9 +300,9 @@ fi
 # 設定画面・辞書ツールが開いていたら止まる。interop が使えなければ置かない (exit 0)
 if ((! dry_run)); then
   if ! listing=$(timeout 30 tasklist.exe /FI "IMAGENAME eq GoogleIMEJaTool.exe" /FO CSV /NH </dev/null 2>&1); then
-    echo "!! tasklist.exe を呼べませんでした (WSL の interop が落ちているかもしれません)。Google 日本語入力の設定は置きません。" >&2
-    echo "   変換サーバーを再起動できないと、置いた設定が古い設定で上書きされうるためです。" >&2
-    echo "   interop が戻ったら ${script_dir}/bootstrap-windows-google-ime.sh を流してください。" >&2
+    warn "tasklist.exe を呼べませんでした (WSL の interop が落ちているかもしれません)。Google 日本語入力の設定は置きません。" \
+      "変換サーバーを再起動できないと、置いた設定が古い設定で上書きされうるためです。" \
+      "interop が戻ったら ${script_dir}/bootstrap-windows-google-ime.sh を流してください。"
     exit 0
   fi
   if grep -qi '"GoogleIMEJaTool.exe"' <<<"${listing}"; then

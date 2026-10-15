@@ -14,6 +14,8 @@
 #
 #   - 配らないマシン・Google 日本語入力が入っていないマシンは飛ばす (exit 0)
 #   - interop (tasklist.exe) が使えなければ置かずに exit 0。設定画面が開いていれば exit 1
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、exit 0 で続ける警告を続きの行ごと setup の
+#     最後のまとめ用のファイルにも残す
 #   - 壊れたテキストは何も置かずに exit 1 (行番号を出す)
 #   - 4 通りの判定 (置く・同じ・repo 側が進んだ・衝突)、画面で保存しただけ (時刻だけ違う) は「同じ」
 #   - 置いたときだけ taskkill.exe /F で変換サーバーを落とす。動いていない (128) のは成功扱い
@@ -269,6 +271,28 @@ if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '置きません' && [[ ! 
   ok "tasklist.exe が失敗したら置かずに exit 0"
 else
   ng "tasklist.exe が失敗" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 5b. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): exit 0 で続ける警告 (tasklist.exe が失敗して置かない・
+#     辞書のテキストが無い・入っているがまだ使っていない) を、続きの行ごと setup の最後のまとめ用のファイルにも残す
+h=$(new_home t5b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_TASKLIST_RC=126 run "${h}" 0
+h2=$(new_home t5c "${state_on}" 1)
+rm -rf "${h2}/private/google-japanese-input"
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}" 0
+h3=$(new_home t5d "" 0)
+mkdir -p "${h3}/c/Users/u" "${h3}/c/Program Files/Google/Google Japanese Input"
+printf 'exe' >"${h3}/c/Program Files/Google/Google Japanese Input/GoogleIMEJaConverter.exe"
+printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h3}/c/Users/u" >"${h3}/.local/state/dotfiles/windows-files.json"
+DOTFILES_SETUP_WARNINGS="${h3}/warnings" run "${h3}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'tasklist.exe を呼べませんでした'* ]] \
+  && grep -qE '^[[:space:]]+interop が戻ったら .*/bootstrap-windows-google-ime\.sh を流してください' "${h}/warnings" \
+  && [[ $(rc "${h2}") == 0 && $(head -n 1 "${h2}/warnings" 2>/dev/null) == '辞書のテキスト ('*'が無いので、辞書は飛ばします'* ]] \
+  && [[ $(rc "${h3}") == 0 && $(head -n 1 "${h3}/warnings" 2>/dev/null) == 'Google 日本語入力は入っていますが、まだ使われていません'* ]] \
+  && grep -qE '^[[:space:]]+Google 日本語入力で一度何か打ってから' "${h3}/warnings"; then
+  ok "setup から走るとき、exit 0 で続ける警告を続きの行ごとまとめ用に残す"
+else
+  ng "警告のまとめ" "$(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null) / $(cat "${h3}/warnings" 2>/dev/null)"
 fi
 
 # 6. 設定画面が開いている: exit 1、何も置かない

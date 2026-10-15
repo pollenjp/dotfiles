@@ -107,9 +107,23 @@ mirrored_kinds=(skills agents commands)
 warned=0
 changed=0
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  echo "!! $*" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
   warned=1
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 if ! command -v jq &>/dev/null; then
@@ -118,9 +132,9 @@ if ! command -v jq &>/dev/null; then
 fi
 
 if [[ ! -r ${generated} ]]; then
-  warn "生成ファイルがありません: ${generated}"
-  echo "   claude-personal / claude-work を持つ世代へ先に home-manager switch してください。" >&2
-  echo "   この手順は飛ばします。" >&2
+  warn "生成ファイルがありません: ${generated}" \
+    "claude-personal / claude-work を持つ世代へ先に home-manager switch してください。" \
+    "この手順は飛ばします。"
   exit 0
 fi
 
@@ -176,8 +190,8 @@ ensure_link() {
     echo "   張り直した: ${link} -> ${target} (元: ${current})"
     changed=1
   elif [[ -e ${link} ]]; then
-    warn "実体があるので触りません: ${link}"
-    echo "   片付け方は ${migrate_doc}。済んだらこの手順を流し直してください。" >&2
+    warn "実体があるので触りません: ${link}" \
+      "片付け方は ${migrate_doc}。済んだらこの手順を流し直してください。"
   else
     ln -s "${target}" "${link}"
     echo "   張った: ${link} -> ${target}"
@@ -283,8 +297,8 @@ sync_plugins() {
       continue
     fi
     if [[ -z ${claude} ]]; then
-      warn "claude が見つからないので plugin を入れられません: ${dir}"
-      echo "   先に ./nix/scripts/bootstrap-mise.sh を実行してから、この手順を流し直してください。" >&2
+      warn "claude が見つからないので plugin を入れられません: ${dir}" \
+        "先に ./nix/scripts/bootstrap-mise.sh を実行してから、この手順を流し直してください。"
       return 0
     fi
 
@@ -313,8 +327,8 @@ sync_plugins() {
   # plugin install は settings.json (enabledPlugins) を書く。リンク越しに届かず実ファイルに
   # 置き換わると、その dir だけ設定が分かれてしまうので知らせる。
   if [[ ${was_link} -eq 1 && ! -L ${dir}/settings.json ]]; then
-    warn "${dir}/settings.json がリンクから実ファイルに置き換わりました"
-    echo "   中身を ~/.claude/settings.json と見比べてから消し、この手順を流し直してください。" >&2
+    warn "${dir}/settings.json がリンクから実ファイルに置き換わりました" \
+      "中身を ~/.claude/settings.json と見比べてから消し、この手順を流し直してください。"
   fi
 }
 

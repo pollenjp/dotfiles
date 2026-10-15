@@ -20,6 +20,8 @@
 #   - 衝突の 1 行目は、置いた記録があれば「前回ここへ置いた中身と違う」、無ければ置いた記録が無いと出す
 #   - 確かめ: 揃っている / Bad owner / 読まれないファイル / 旧 clone / 呼べない・無い・固まる / 区切りと大小の違い
 #   - 壊れた記録は exit 1、知らない引数は exit 2
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、exit 0 で続ける警告を続きの行
+#     (取り方・手で打つコマンド) ごと setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の ssh.exe を見せない
 #
@@ -493,6 +495,40 @@ if [[ $(rc "${c}") == 1 ]] && grep -qF 'config.d/a.ssh_config は Windows 側で
   ok "置いた記録がある衝突は、前回ここへ置いた中身と違うと出す"
 else
   ng "記録がある衝突" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 27. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 正本が無い・ssh.exe が無いときの警告を、
+#     続きの行 (取り方・手で打つコマンド) ごとまとめ用に残す
+c=$(new_case t27 "${state_on}")
+rm -rf "${c}/private/ssh"
+DOTFILES_SETUP_WARNINGS="${c}/warnings" run "${c}" 0
+c2=$(new_case t27b "${state_on}")
+DOTFILES_SETUP_WARNINGS="${c2}/warnings" run "${c2}" 1
+if [[ $(rc "${c}") == 0 && $(head -n 1 "${c}/warnings" 2>/dev/null) == 'Windows の ssh の設定を配りません: 正本の *.ssh_config がありません'* ]] \
+  && grep -qE '^[[:space:]]+取るには: .*/bootstrap-dotfiles-private\.sh$' "${c}/warnings" \
+  && [[ $(rc "${c2}") == 0 && $(head -n 1 "${c2}/warnings" 2>/dev/null) == 'ssh.exe が見つからない'* ]] \
+  && grep -qE "^[[:space:]]+ssh -v -G nonexistent\.invalid 2>&1 \| Select-String 'Reading configuration'$" "${c2}/warnings"; then
+  ok "setup から走るとき、正本が無い・ssh.exe が無いときの警告を続きの行ごとまとめ用に残す"
+else
+  ng "警告のまとめ" "$(cat "${c}/warnings" 2>/dev/null) / $(cat "${c2}/warnings" 2>/dev/null)"
+fi
+
+# 28. 確かめられない (ssh.exe が固まる) ときは、見出しと手で打つコマンドを 1 件として残す。揃っていれば残さない
+c=$(new_case t28 "${state_on}")
+DOTFILES_SETUP_WARNINGS="${c}/warnings" FAKE_SSH_MODE=hang BOOTSTRAP_SSH_CHECK_TIMEOUT=1 run "${c}" 0
+if [[ $(rc "${c}") == 0 && $(head -n 1 "${c}/warnings" 2>/dev/null) == 'ssh.exe で確かめられませんでした (終了コード 124'* ]] \
+  && grep -qE "^[[:space:]]+ssh -v -G nonexistent\.invalid" "${c}/warnings" \
+  && [[ $(grep -c '^[^[:space:]]' "${c}/warnings") == 1 ]]; then
+  ok "確かめられなければ、見出しと手で打つコマンドを 1 件としてまとめ用に残す"
+else
+  ng "確かめられないときのまとめ" "rc=$(rc "${c}") warnings=$(cat "${c}/warnings" 2>/dev/null)"
+fi
+c=$(new_case t28b "${state_on}")
+DOTFILES_SETUP_WARNINGS="${c}/warnings" run "${c}" 0
+if [[ $(rc "${c}") == 0 && ! -s ${c}/warnings ]]; then
+  ok "揃っていれば、まとめ用には何も残さない"
+else
+  ng "揃っているのにまとめ用に残した" "rc=$(rc "${c}") warnings=$(cat "${c}/warnings" 2>/dev/null)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

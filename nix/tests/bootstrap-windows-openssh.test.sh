@@ -15,6 +15,8 @@
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す。どちらも exit 0
 #   - --apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
+#     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -267,6 +269,53 @@ if [[ $(rc "${h}") == 0 ]] && ! outerr "${h}" | grep -q $'\e' && outerr "${h}" |
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
   ng "エスケープが残る" "rc=$(rc "${h}") $(outerr "${h}" | od -c | head -8)"
+fi
+
+# 14. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 差があれば、⚠ の見出しと揃えるコマンドを
+#     まとめ用に残す (状態の表は残さない。その場の ⚠ の枠には出ている)
+h=$(new_home t14 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の OpenSSH が、dotfiles で固定した版と揃っていません' ]] \
+  && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-openssh\.sh --apply$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+PowerShell: Install-OpenSSH$' "${h}/warnings" \
+  && ! grep -q '入っている版' "${h}/warnings"; then
+  ok "setup から走るとき、差があれば ⚠ の見出しと揃えるコマンドをまとめ用に残す"
+else
+  ng "差をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 15. 揃っていれば、まとめ用には何も残さない
+h=$(new_home t15 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]]; then
+  ok "揃っていれば、まとめ用には何も残さない"
+else
+  ng "揃っているのにまとめ用に残した" "warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 16. pwsh.exe が無い・失敗するときも、見出しと手で打つコマンドをまとめ用に残す
+h=$(new_home t16 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 1
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe が見つかりません'* ]] \
+  && grep -qE '^[[:space:]]+Install-OpenSSH -Check$' "${h}/warnings"; then
+  ok "pwsh.exe が無ければ、見出しと手で打つコマンドをまとめ用に残す"
+else
+  ng "pwsh.exe が無いときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+h=$(new_home t16b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=126 FAKE_PWSH_OUT='Exec format error' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe で Windows の OpenSSH を確かめられませんでした'* ]] \
+  && grep -qE '^[[:space:]]+Exec format error$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+Install-OpenSSH -Check$' "${h}/warnings" \
+  && [[ $(grep -c '^[^[:space:]]' "${h}/warnings") == 1 ]]; then
+  ok "pwsh.exe が失敗したら、見出し・pwsh.exe の出力・手で打つコマンドを 1 件としてまとめ用に残す"
+else
+  ng "pwsh.exe が失敗したときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+if outerr "${h}" | grep -qx '   Exec format error' && outerr "${h}" | grep -qx '     Install-OpenSSH -Check'; then
+  ok "その場の出力は今のまま (pwsh.exe の出力と手で打つコマンドを字下げして出す)"
+else
+  ng "その場の出力が変わった" "$(outerr "${h}")"
 fi
 
 # 11. 知らない引数: exit 2

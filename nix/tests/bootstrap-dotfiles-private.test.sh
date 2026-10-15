@@ -13,6 +13,8 @@
 #   - 無ければ clone し、あれば pull --ff-only する
 #   - 未コミットの変更があれば pull を飛ばす。git の repo でないものがあれば触らない
 #   - clone できなくても exit 0 (警告だけ)。知らない引数は exit 2
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告を続きの行ごと setup の最後の
+#     まとめ用のファイルにも残す
 
 set -u -o pipefail
 
@@ -114,6 +116,24 @@ if [[ $(rc "${h}") == 0 && ! -e ${h}/private ]] && outerr "${h}" | grep -q 'clon
   ok "clone できなくても exit 0 (警告だけ)"
 else
   ng "clone できない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 7. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): clone できない警告を、続きの行 (鍵の確かめ方と、
+#    取れないあいだに配られないもの) ごとまとめ用に残す
+h="${work}/t7"
+mkdir -p "${h}"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" DOTFILES_PRIVATE_URL_OVERRIDE="file://${work}/no-such.git" run "${h}"
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'clone に失敗しました: '* ]] \
+  && grep -qE '^[[:space:]]+private な repo なので SSH 鍵が要ります' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+取れないあいだ' "${h}/warnings"; then
+  ok "setup から走るとき、clone できない警告を続きの行ごとまとめ用に残す"
+else
+  ng "clone できないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+if grep -qx '   private な repo なので SSH 鍵が要ります。ssh -T git@github.com で疎通を確かめてください。' "${h}/err"; then
+  ok "その場の続きの行は今のまま (3 文字字下げして stderr に出す)"
+else
+  ng "その場の続きの行が変わった" "$(cat "${h}/err")"
 fi
 
 # 6. 知らない引数: exit 2

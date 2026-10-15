@@ -599,6 +599,61 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
 
+#### 途中の警告のまとめ
+
+手順を止めない警告（`!!` の行や ⚠ の枠。手順は ✔ のまま進む）は、長い出力の途中に 1 度
+出るだけでは流れて気付かない。そこで `setup` は、その場に出すのに加えて、最後の「結果」の
+直後に ⚠ の枠でまとめて出し直す（TKT-146）。見出しの行には出した手順の id（`--steps` に
+渡す名前。`--self-update` で本体を更新しなかった理由は `[本体の更新]`）を付け、直し方などの
+続きの行を下に並べる。警告が無ければ何も足さない。
+
+```
+==> 結果
+  ✔ home-manager switch
+  ✔ ./nix/scripts/bootstrap-claude-env.sh
+  …
+
+⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️
+⚠️  途中で出た警告が 2 件あります (どれも手順を止めていないので、上の出力に流れています)
+⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️
+⚠️  [本体の更新] 未 commit の変更があるので本体は更新しません。自分で pull してください:
+         git -C /home/…/dotfiles status
+⚠️  [bootstrap-claude-env] gh にログインしていません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。
+       gh auth login を実行するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。
+⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️
+
+==> 残りの手作業
+  …
+```
+
+途中の手順が ✖ で止まったときも、それより前の ✔ の手順の分は出す。✖ の手順の分は載せない
+（まとめるのは手順を止めなかった警告。`setup` は最初の ✖ で止まるので、その手順の警告は
+最後の手順の出力、つまり「[N/M] …」の見出しから「結果」までの中にある）。
+
+`home-manager switch` が ✔ なら、その設定のモジュールの `warnings`（switch の出力に nix の
+evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile が未設定です` など）も
+`[switch]` で載せる。nix の出力を写すと進捗表示が消えるので、switch の後に同じ設定の
+`config.warnings` を `nix eval` で読み直して取る（eval cache が効けば 1 秒ほど。`--dry-run` では
+読まない。読めなければ黙って飛ばす）。読めたときは、「残りの手作業」は古い雛形・
+`notion.profile` の案内を出し直さない（未設定なら、その warning がまとめに載る）。
+
+続きの行が長い警告（`pwsh.exe` の出力ごと残したものなど）は、頭の 6 行と末尾の 3 行（直し方は
+末尾に来る）を残して間を省く。全部はその場の出力にある。
+
+`bootstrap-*.sh` などを足す・直すときは、次の形に合わせる。
+
+- 手順を止めない警告は `warn` で出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行
+  （直し方・手で打つコマンド）になる。各 script が同じ形の `warn()` / `summary_warn()` を持つ
+  （単体で配り・テストするので共通のファイルにしない。`warn-helpers-test` が全部の振る舞いを比べる）
+- ⚠ の枠のように出し方を自分で決めるときは、その場は今どおり出し、`summary_warn` で見出しと
+  直し方だけをまとめに残す（状態の表などは残さない）
+- `exit 1` で止まる前のエラーは今のまま `echo … >&2` でよい（まとめに載らない）
+
+受け渡しは環境変数 `DOTFILES_SETUP_WARNINGS`。`setup` が手順ごとにファイルを渡し、`warn` /
+`summary_warn` はそこへ同じ行を足す（`setup` の外で流したときは何もしない）。子の stderr を
+写して拾う形にしなかったのは、stderr が端末でなくなり、⚠ の枠の色や nix の進捗表示が消える
+ため（home-manager の warnings を写さずに読み直すのも同じ理由）。
+
 ### 新規マシンの手順
 
 上から順に実行する。**2 と 4 と 6 と 7 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
@@ -1759,7 +1814,7 @@ HTTPS になり、origin 名のまま通るので `origin/<branch>` も普段ど
 **前提は `gh auth login` 済みであること。** gh 自体は `home/modules/packages.nix` が入れる
 （以前は mise の `github-cli` で入れていた。mise 側が残っていても動き、PATH の先にある方が
 使われる）。gh が無い・未ログインなら
-bootstrap が警告し、`setup` の最後のまとめ（残りの手作業）にも出す。git の設定ファイルに
+bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警告のまとめ)にも出す。git の設定ファイルに
 別の credential helper があるときも警告する（gh より先に呼ばれ、gh の token がそちらにも
 保存されるため）。
 gh にログインしないマシンは option を false にすると、今までどおり ssh を通る。
@@ -2395,17 +2450,18 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 
 | テスト | 確かめること | check の名前 |
 | --- | --- | --- |
-| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告（19 件） | `bootstrap-claude-env-test`（Linux） |
-| `bootstrap-claude-footer-links.test.sh` | `bootstrap-claude-footer-links.sh` が settings.json の footerLinksRegexes を生成ファイルどおりに書くこと・他のキーを残すこと・形の違う入力では書かずに落ちること（13 件） | `bootstrap-claude-footer-links-test`（Linux） |
+| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告と、その警告を setup の最後の警告のまとめにも残すこと（22 件） | `bootstrap-claude-env-test`（Linux） |
+| `bootstrap-claude-footer-links.test.sh` | `bootstrap-claude-footer-links.sh` が settings.json の footerLinksRegexes を生成ファイルどおりに書くこと・他のキーを残すこと・形の違う入力では書かずに落ちること・飛ばす警告を警告のまとめにも残すこと（14 件） | `bootstrap-claude-footer-links-test`（Linux） |
 | `claude-footer-links.test.mjs` | `footer-links.json` の正規表現が、`ticket.sh` や `gh` の出力のどの行からどのバッジを作るか。Claude Code と同じ JavaScript の RegExp で流す（18 件） | `claude-footer-links-test`（Linux） |
-| `setup-post-notes.test.sh` | `setup.sh` が「残りの手作業」に gh の件を出すかの判定（5 件） | `setup-post-notes-test`（Linux） |
-| `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`）。偽の `pwsh.exe` と `wslpath` で流す（18 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
+| `setup-post-notes.test.sh` | `setup.sh` が最後に出すもの。途中の警告を「結果」の後に [手順の id] 付きでまとめること (警告が無ければ出さない・✖ の手順の分は載せない・本体の更新と setup.sh の中の手順の分・switch の後に読む home-manager の warnings・長い警告は間を省く・一時ファイルを残さない (本体を更新して exec し直すときも)) と、「残りの手作業」で同じ警告を出し直さないこと (gh・古い雛形)。使い捨ての checkout と偽の手順・`home-manager`・`nix` で流す（20 件） | `setup-post-notes-test`（Linux） |
+| `warn-helpers.test.sh` | `nix/scripts/` の `warn()` を持つ script のすべて (書き方は `warn() {`・`warn () {`・`function warn {` のどれでも) で、`warn` / `summary_warn` がその場と警告のまとめ用のファイルへ同じ形で出すこと (変数が無ければ書かない・書けなくても止まらない) | `warn-helpers-test`（Linux） |
+| `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`・警告のまとめに残すもの）。偽の `pwsh.exe` と `wslpath` で流す（21 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
 | `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
-| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（41 件） | `bootstrap-windows-google-ime-test`（Linux） |
-| `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い)。偽の `pwsh.exe` と `wslpath` で流す（29 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
-| `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い・`settings.json` が無い / 有効なプロファイルが `default` でないときは送らず記録もしない) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット)。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（29 件） | `bootstrap-windows-powertoys-test`（Linux） |
-| `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない)。手元の bare repo で流す（6 件） | `bootstrap-dotfiles-private-test`（Linux） |
+| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと・警告のまとめに残すもの)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（43 件） | `bootstrap-windows-google-ime-test`（Linux） |
+| `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い・警告のまとめに残す見出しと直し方)。偽の `pwsh.exe` と `wslpath` で流す（33 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
+| `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い・`settings.json` が無い / 有効なプロファイルが `default` でないときは送らず記録もしない) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット) と、警告のまとめに残すもの。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（33 件） | `bootstrap-windows-powertoys-test`（Linux） |
+| `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない・その警告を警告のまとめにも残す)。手元の bare repo で流す（8 件） | `bootstrap-dotfiles-private-test`（Linux） |
 | `bootstrap-cc-pages.test.sh` | `bootstrap-cc-pages.sh --status` が出すビューアの URL を、config.toml の `addr` から組むこと (config.toml が無い・`127.0.0.1`・ほかの host・`addr` が無い)。clone もビルドもしない（4 件） | `bootstrap-cc-pages-test`（Linux） |
 | `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest (空のコメントと空の表を含む)・検証・エラーに語を出さない・import (Mozc の `.proto` の写しから作った記述子で流す。56 件) | `pjp-google-ime-unittest`（Linux） |
 | `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |

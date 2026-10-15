@@ -26,6 +26,8 @@
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
 #   - jq が無くても exit 0 (知らない引数の 2 以外で 0 以外を返さない)
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと、枠に出したのと同じ直し方
+#     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -480,6 +482,55 @@ if [[ $(rc "${h}") == 2 ]] && ! pwsh_called "${h}"; then
   ok "知らない引数は exit 2"
 else
   ng "知らない引数" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 22. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 差があれば、⚠ の見出しと揃えるコマンドを
+#     まとめ用に残す (状態の表は残さない。その場の ⚠ の枠には出ている)
+h=$(new_home t22 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の Google 日本語入力が、dotfiles で固定した版と揃っていません' ]] \
+  && grep -qE '^[[:space:]]+揃えるには次のどちらかを打つ' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-google-ime-install\.sh --apply$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+PowerShell: Install-GoogleJapaneseInput$' "${h}/warnings" \
+  && ! grep -q 'winget pin' "${h}/warnings"; then
+  ok "setup から走るとき、差があれば ⚠ の見出しと揃えるコマンドをまとめ用に残す"
+else
+  ng "差をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 23. 入っている版の方が新しいときは、揃えるコマンドの代わりに、枠と同じ repo の版の上げ方を残す
+h=$(new_home t23 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${newer_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && grep -qE '^[[:space:]]+入っている版の方が新しいので、下げはしません' "${h}/warnings" \
+  && ! grep -qF -- '--apply' "${h}/warnings"; then
+  ok "入っている版の方が新しいときは、揃えるコマンドではなく repo の版の上げ方をまとめ用に残す"
+else
+  ng "新しいときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 24. -IfMissing の時間切れでは、UAC の確認が残っているときの打ち直し方も、揃えるコマンドの前に残す
+h=$(new_home t24 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
+uac_at=$(grep -n 'UAC の確認が残っていれば' "${h}/warnings" 2>/dev/null | head -1 | cut -d: -f1)
+apply_at=$(grep -n -- '--apply' "${h}/warnings" 2>/dev/null | head -1 | cut -d: -f1)
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に Google 日本語入力を入れられませんでした (600 秒待っても'* ]] \
+  && [[ -n ${uac_at} && -n ${apply_at} ]] && ((uac_at < apply_at)); then
+  ok "-IfMissing の時間切れでは、UAC の確認が残っているときの打ち直し方も揃えるコマンドの前に残す"
+else
+  ng "時間切れのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 25. 揃っていれば、まとめ用には何も残さない。pwsh.exe が無ければ、見出しと手で打つコマンドを残す
+h=$(new_home t25 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}" run "${h}" 0
+h2=$(new_home t25b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}" 1
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]] \
+  && [[ $(rc "${h2}") == 0 && $(head -n 1 "${h2}/warnings" 2>/dev/null) == 'pwsh.exe が見つかりません'* ]] \
+  && grep -qE '^[[:space:]]+Install-GoogleJapaneseInput -Check$' "${h2}/warnings"; then
+  ok "揃っていれば何も残さず、pwsh.exe が無ければ見出しと手で打つコマンドをまとめ用に残す"
+else
+  ng "揃っている・pwsh.exe が無いときのまとめ" "$(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null)"
 fi
 
 # 20. script に実行ビットがある (setup.sh は実行ビットの無い bootstrap を「実行できません」で止める)

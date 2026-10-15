@@ -18,6 +18,8 @@
 #   - ssh/ が無い・空なら何も外さず張らずに exit 0
 #   - 旧 submodule の作業ツリーが手付かずなら消すコマンドを出し、変更・未 push の commit があるか
 #     確かめられないなら警告だけにする。知らない引数は exit 2
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告を続きの行ごと setup の最後の
+#     まとめ用のファイルにも残す
 #
 # ## script の置き場所
 #
@@ -223,6 +225,29 @@ if [[ $(rc "${c}") == 0 ]] && ! grep -q 'rm -rf' "${c}/out" && grep -q '旧 .ssh
   ok "旧 submodule の状態を確かめられなければ、消すコマンドを出さない"
 else
   ng "確かめられない" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 10. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): ssh/ が無い警告と、旧 submodule の警告を、
+#     続きの行 (取り方・確かめるコマンド) ごとまとめ用に残す
+c=$(new_case t10)
+rm -rf "${c}/private/ssh"
+DOTFILES_SETUP_WARNINGS="${c}/warnings" run "${c}"
+c2=$(new_case t10b)
+legacy_repo "${c2}"
+legacy_commit "${c2}"
+DOTFILES_SETUP_WARNINGS="${c2}/warnings" run "${c2}"
+if [[ $(rc "${c}") == 0 && $(head -n 1 "${c}/warnings" 2>/dev/null) == '張る *.ssh_config がありません: '* ]] \
+  && grep -qE '^[[:space:]]+取るには: .*/bootstrap-dotfiles-private\.sh$' "${c}/warnings" \
+  && [[ $(rc "${c2}") == 0 && $(head -n 1 "${c2}/warnings" 2>/dev/null) == '旧 .ssh submodule の作業ツリーに'* ]] \
+  && grep -qE "^[[:space:]]+git -C '.*' status && git -C" "${c2}/warnings"; then
+  ok "setup から走るとき、警告を続きの行ごとまとめ用に残す"
+else
+  ng "警告のまとめ" "$(cat "${c}/warnings" 2>/dev/null) / $(cat "${c2}/warnings" 2>/dev/null)"
+fi
+if grep -qx "     git -C '${c2}/repo/.ssh' status && git -C '${c2}/repo/.ssh' log --branches --not --remotes" "${c2}/err"; then
+  ok "その場の続きの行は今のまま (確かめるコマンドは 5 文字字下げ)"
+else
+  ng "その場の続きの行が変わった" "$(cat "${c2}/err")"
 fi
 
 # 9. 知らない引数: exit 2
