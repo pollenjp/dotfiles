@@ -129,6 +129,14 @@
       gw = "git switch";
 
       #########################
+      # PR の差分を見る
+      #########################
+      # PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す
+      # (nix/pkgs/pjp-pr-diff)。gds (git diff --staged) と同じ並びで、p は PR の p。
+      # 同じ名前を bash (bash.nix の shellAliases) にも置いている。直すときは 2 つをそろえる。
+      gdp = "pjp-pr-diff";
+
+      #########################
       # 複製元: 251_alias_k8s
       #########################
       k = "kubectl";
