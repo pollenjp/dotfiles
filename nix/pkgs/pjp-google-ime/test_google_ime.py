@@ -2,6 +2,20 @@
 
 Mozc の .proto の写し (proto/) から作った記述子を PJP_GOOGLE_IME_DESCRIPTORS で受け取る
 (flake の checks の pjp-google-ime-unittest が設定する)。Windows には触らない。
+
+## 確かめること
+
+- テキストとバイナリの行き来: config.txtpb・keymap.tsv・romaji.tsv と config1.db、辞書の TSV と
+  user_dictionary.db。組み立ては決定論的で、keymap.tsv の CRLF や末尾の改行の有無でも同じバイトになる
+- 検証: config.txtpb に置けないもの (general_config・キー設定の表)、keymap.tsv・romaji.tsv・辞書の TSV の
+  形 (見出し・列の数・状態名・品詞・辞書の名前)。エラーにはファイルと行を出す。品詞の名前は .proto の
+  コメントと enum に揃う
+- digest (比べるための sha256) は、general_config・辞書の id と並び・空のコメント・空の表・無い
+  verbose_level・読みも単語も空の語の違いを見ず、設定・語・コメントの違いは見る
+- .proto に無い項目を持つ設定は断る
+- 辞書のエラーに語 (読み・単語・品詞・コメント) を出さない (check の出力も)
+- コマンド: build・check・digest・decode と import (Windows 側を写す・2 回目は「同じです」・断るときは
+  何も書かない・単語登録の形の辞書・空の語・空の表・Windows 側に辞書が無ければ TSV を残す)
 """
 
 import contextlib

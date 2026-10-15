@@ -21,6 +21,10 @@
 #   - 読み直させる前に Install-PowerToys.ps1 -Check を流し、3 (入っていない) なら -IfMissing で入れる。
 #     入っていれば入れない。スクリプトが無い・pwsh.exe が無い・失敗する・入れられないときも、
 #     知らせて読み直しへ進む (exit 0)。default.json が無くても、読み直し済みでも確かめる
+#   - 偽の timeout が上限の秒数を記録し、-Check は 60 秒・-IfMissing は 600 秒・読み直し (powershell.exe) は
+#     60 秒で打つこと、-IfMissing を打つ前に winget で入れることと 600 秒まで待つことを出すことを確かめる。
+#     -Check が時間切れなら時間切れと手で打つコマンドを、-IfMissing が時間切れなら ⚠ で囲んで 600 秒
+#     待ったことを出し、どちらも読み直しへ進む
 #   - script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告 (⚠ の枠は見出しと入れるコマンド) を
 #     setup の最後のまとめ用のファイルにも残す。何も無ければ残さない

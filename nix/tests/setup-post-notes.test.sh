@@ -31,7 +31,8 @@
 # 偽の手順は、子の script の warn() と同じ形 (見出しの行と、字下げした続きの行) で
 # DOTFILES_SETUP_WARNINGS のファイルへ書く。shebang は $BASH から作る (サンドボックスに
 # /usr/bin/env が無い)。PATH は要るコマンドだけを symlink で並べる (手元で流しても、本物の
-# git・gh・nix を見せない)。
+# git・gh・nix を見せない)。switch の手順は、偽の home-manager (何もせず 0 を返す) と偽の nix
+# (nix eval ならケースごとの warnings を返す) で流す。
 
 set -u -o pipefail
 

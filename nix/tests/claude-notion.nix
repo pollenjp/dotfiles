@@ -1,15 +1,17 @@
 # home/options.nix の dotfiles.claude.notion.{profile,routes,override} から作られる
 # ~/.local/state/dotfiles/claude-notion.json の中身と warnings を、評価時に確かめる。
 #
+# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
+# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
+# flake.nix の checks (claude-notion-state) から呼ぶ。
+#
+# ## 確かめること
+#
 #   - 既定は {"override":{},"profile":null,"routes":{}}
 #   - 値を入れると、そのまま JSON に入る (キーの意味は claude-skills の resolver が持つ)
 #   - devTracker.enable (既定 true) で profile が null なら warnings が出る。routes や override
 #     だけあっても出る (profile が無いと、規則に当たらない repo と repo の外で止まるため)
 #   - profile があれば warnings は出ない。devTracker.enable = false なら profile が null でも出ない
-#
-# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
-# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
-# flake.nix の checks (claude-notion-state) から呼ぶ。
 {
   lib,
   pkgs,
