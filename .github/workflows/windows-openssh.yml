@@ -5,6 +5,8 @@ name: windows-openssh
 #
 # 新しい版が出ても、手元では setup --update の ※ の 1 行でしか見えず、流さない間は気付けない。
 # そこで週 1 回ここで確かめ、固定した版より新しい版 (見送りの一覧に無いもの) があれば落ちて知らせる。
+# GitHub に出た最新の版が 7 日たっても winget に載らないとき (パッケージ ID が移ったなど) と、
+# 確かめられなかったとき (API の失敗など) も落ちる。何で落ちたかは summary と ::error の行に出る。
 # 落ちた定期実行の通知は、closure-scan の定期実行 (nix.yml) と同じく workflow を作った人に届く。
 # 上げるか見送るかの手順は win/README.md の「OpenSSH の新しい版が出たとき」。
 #
@@ -12,11 +14,13 @@ name: windows-openssh
 # (gh と jq は GitHub の ubuntu のランナーに入っている)。
 
 on:
-  # 月曜の朝 (JST 7:00)。nix.yml に cron を足さず workflow を分けるのは、足すとその日に
+  # 月曜の朝 (JST 7:23)。毎時 0 分は混んで遅れたり飛ばされたりするのでずらす (週 1 回なので、
+  # 1 回飛ぶと 2 週間空く)。nix.yml に cron を足さず workflow を分けるのは、足すとその日に
   # closure-scan も 2 回走るため
   schedule:
-    - cron: "0 22 * * 0"
-  # 固定した版を変える・見送りを足す PR で、書いた版が winget にあるかと、落ちなくなるかを確かめる
+    - cron: "23 22 * * 0"
+  # 固定した版を変える・見送りを足す PR で、書いた版が winget にあるかと、落ちなくなるかを確かめる。
+  # 上流に未対応の新しい版がある間は、別の理由でこれらを直す PR も赤くなる (merge は止まらない)
   pull_request:
     paths:
       - "win/openssh/Install-OpenSSH.ps1"
@@ -56,5 +60,5 @@ jobs:
             echo '```'
             grep -v '^::' report.txt 2>/dev/null || echo "(report.txt なし: 比べる前に失敗)"
             echo '```'
-            echo "手順: [win/README.md の「OpenSSH の新しい版が出たとき」](${{ github.server_url }}/${{ github.repository }}/blob/main/win/README.md#openssh-の新しい版が出たとき)"
+            echo "手順: [win/README.md の「OpenSSH の新しい版が出たとき」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/win/README.md#openssh-の新しい版が出たとき)"
           } >>"$GITHUB_STEP_SUMMARY"
