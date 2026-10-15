@@ -270,6 +270,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 | `Install-OpenSSH` (PowerShell) | 揃える。直すことがあるときだけ UAC が 1 回出る |
 | `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る。`-Check` を流し、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
+| `nix/scripts/check-windows-openssh-version.sh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `windows-openssh` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
 
 揃えるときにすること:
 
@@ -286,10 +287,75 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   使用中のファイルは再起動まで置き換わらないことがある
 - 終わったら WSL で `ssh.exe -V` と `ssh-add -l` を確かめる。鍵が見えなければ、1Password をトレイから
   終了して起動し直す
-- 版を変えるときは、`-Version` の既定値を変えて commit し、`setup --update` で配る (差が ⚠ で出る)。
-  そのあと `Install-OpenSSH` か `--apply` で揃える。新しい版は先に入れずに試す (GitHub の ZIP を展開して
-  `ssh.exe -V`・`ssh -G <host>`・`ssh-add.exe -l` を流す。[TKT-107](https://app.notion.com/p/Windows-ssh-exe-Win32-OpenSSH-3f079149a66f8153877df4a8e87ed0d7))
-- 新しい版が出たかは `-Check` の「winget の最新版」と ※ の行で分かる
+- 版を変える・新しい版を見送るときは、次の「OpenSSH の新しい版が出たとき」の手順で
+- 手元でも、`-Check` の「winget の最新版」と ※ の行で新しい版が出たことが分かる (`setup --update` で流したときだけ)
+
+### OpenSSH の新しい版が出たとき
+
+固定した版より新しい版が GitHub に出て 30 日たつと、GitHub Actions の `windows-openssh`
+([`.github/workflows/windows-openssh.yml`](../.github/workflows/windows-openssh.yml)) が落ちて知らせる
+([TKT-110](https://app.notion.com/p/Windows-OpenSSH-Win32-OpenSSH-3f179149a66f81eaa691e12ef3e0b86c))。
+週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で走り、落ちた定期実行の通知は
+`nix.yml` の closure-scan と同じく GitHub から届く。
+
+- 確かめるのは `nix/scripts/check-windows-openssh-version.sh`。`Install-OpenSSH.ps1` から固定した版と
+  パッケージ ID (`$packageId`) を読み、winget-pkgs (`manifests/m/Microsoft/OpenSSH/Preview/<版>/`) と
+  GitHub の release を GitHub API で読むので、Windows は要らない。手元で打つなら gh のログインが要る
+- 新しい版は、GitHub に出てから 30 日 (猶予) は落とさずに待つ。待つ間は、実行の画面に notice
+  (版・出た日・あと何日で知らせるか) が出る。summary にも ※ の行で出る
+  - 追いついていない版がいくつかあるときは、いちばん早く出た版の日から数える。遅れ始めてから 30 日で知らせ、
+    新しい版が続けて出ても先送りしない
+  - 見送った版は数えない。猶予の中に上げるか見送るかを決めておけば、落ちずに済む
+  - 30 日は script の先頭の `grace_days` の 1 か所で決める
+- 猶予がたって落ちる (exit 1) のは:
+  - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 下の「上げるとき」か「見送るとき」。
+    その版に合う GitHub の release が無く、出た日が分からないときは、待たずに落ちる
+  - GitHub に出た版が winget のこのパッケージに無い (パッケージ ID が移ると、古い ID には新しい版が来ない。
+    2024-10 に Preview ができてから、Beta には新しい版が来なかった) → 下の「パッケージ ID を確かめる」
+- 猶予を置かずに落ちる (exit 1) のは、新しい版の知らせではなく、壊れていることの知らせ:
+  - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
+  - パッケージが winget に無い (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)
+    → 下の「パッケージ ID を確かめる」
+  - 版の形でないディレクトリがある・GitHub の最新 release に `OpenSSH-Win64-v<版>.msi` が無い
+    (版や名前の付け方が変わった) → script の読み方を直す
+- パッケージ ID を確かめる: `winget search OpenSSH` で今のパッケージ ID を確かめる。移るなら
+  `git grep Microsoft.OpenSSH.Preview` で出る所 (`Install-OpenSSH.ps1` の `$packageId` と状態の表の見出し・
+  `bootstrap-windows-openssh.sh` の見分け・テスト) と固定した版を直す
+- 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・`Install-OpenSSH.ps1` から版か ID が読めない・
+  見送りの一覧の書き損じ。GitHub の release の一覧だけが取れないときも、新しい版が猶予の中かを決められないので
+  exit 2 になる。summary の `!!` の行を見て、一時的な失敗なら流し直し、書き損じなら直す
+- GitHub の release から winget に載るまでは、これまで 5 時間〜4 日だった
+- 猶予がたった新しい版がある間は、別の理由で `Install-OpenSSH.ps1` や script を直す PR も赤くなる
+  (merge は止まらない)
+
+上げるとき:
+
+1. 落ちた実行の summary で、新しい版と release notes の URL を見る (猶予の中に上げるなら、notice に出た版を
+   GitHub の releases で探す)
+2. release notes を読む。ssh-agent・named pipe・MSI (サービスの作り直し) に触る変更が無いかを見る
+3. 入れずに試す ([TKT-107](https://app.notion.com/p/Windows-ssh-exe-Win32-OpenSSH-3f079149a66f8153877df4a8e87ed0d7) で通した形)。
+   release の `OpenSSH-Win64.zip` を使い捨ての場所に展開し、sha256 を release の digest
+   (`gh api repos/PowerShell/Win32-OpenSSH/releases/tags/<tag>` の `assets[].digest`) と照らしてから、
+   WSL でその `ssh.exe` を直に流す:
+   - `ssh.exe -V` (版と LibreSSL)
+   - `ssh.exe -G <host>` (Windows 側の config が Include 込みでエラー無く読める)
+   - `ssh-add.exe -l` (1Password の鍵が見える)
+   - GitHub へつなぐ (`ssh.exe -T git@github.com`)
+4. `openssh/Install-OpenSSH.ps1` の `-Version` の既定値と、「OpenSSH」の冒頭の「今は」を新しい版にし、
+   `Install-OpenSSH.Tests.ps1` を流して PR を出す (`windows-openssh` が、書いた版が winget にあるかを確かめる)
+5. merge したら、各マシンで `setup --update` を流す (差が ⚠ で出る)。Windows で動いている `ssh.exe`
+   (herdr の remote など) を閉じてから、`Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` で揃える
+   (UAC が 1 回出る)
+6. WSL で `ssh.exe -V`・`ssh-add -l`・GitHub への ssh を確かめる。鍵が見えなければ、1Password を
+   トレイから終了して起動し直す
+
+見送るとき (2・3 で合わないと分かったとき):
+
+- `openssh/skipped-versions.txt` に「版 理由」を 1 行足して commit する。その版では落ちなくなり、
+  もっと新しい版が出ると、その版が GitHub に出てから 30 日でまた落ちる。このファイルは manifest に無いので
+  Windows へは配らない
+- 固定した版以下になった行は消してよい (job が「消してよい」と出す)
+- `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
 ### Install-OpenSSH.ps1 を書くときの注意
 
