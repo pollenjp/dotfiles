@@ -2457,7 +2457,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
@@ -2492,47 +2492,49 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 
 ### テスト
 
-`nix/tests/` に置き、flake の `checks` で流す。CI の `nix flake check` が毎回通す。
-`nix/pkgs/` の道具の unittest（ADR 012）と同じ扱い。
+置き場所は次の 3 つで、どれも flake の `checks` に載せる。CI の `check` ジョブの `nix flake check` が毎回通す。
 
-| テスト | 確かめること | check の名前 |
-| --- | --- | --- |
-| `bootstrap-claude-env.test.sh` | `bootstrap-claude-env.sh` が settings.json の env を option どおりに書き直すこと・警告と、その警告を setup の最後の警告のまとめにも残すこと（22 件） | `bootstrap-claude-env-test`（Linux） |
-| `bootstrap-claude-footer-links.test.sh` | `bootstrap-claude-footer-links.sh` が settings.json の footerLinksRegexes を生成ファイルどおりに書くこと・他のキーを残すこと・形の違う入力では書かずに落ちること・飛ばす警告を警告のまとめにも残すこと（14 件） | `bootstrap-claude-footer-links-test`（Linux） |
-| `claude-footer-links.test.mjs` | `footer-links.json` の正規表現が、`ticket.sh` や `gh` の出力のどの行からどのバッジを作るか。Claude Code と同じ JavaScript の RegExp で流す（18 件） | `claude-footer-links-test`（Linux） |
-| `setup-post-notes.test.sh` | `setup.sh` が最後に出すもの。途中の警告を「結果」の後に [手順の id] 付きでまとめること (警告が無ければ出さない・✖ の手順の分は載せない・本体の更新と setup.sh の中の手順の分・switch の後に読む home-manager の warnings・長い警告は間を省く・一時ファイルを残さない (本体を更新して exec し直すときも)) と、「残りの手作業」で同じ警告を出し直さないこと (gh・古い雛形)。使い捨ての checkout と偽の手順・`home-manager`・`nix` で流す（20 件） | `setup-post-notes-test`（Linux） |
-| `warn-helpers.test.sh` | `nix/scripts/` の `warn()` を持つ script のすべて (書き方は `warn() {`・`warn () {`・`function warn {` のどれでも) で、`warn` / `summary_warn` がその場と警告のまとめ用のファイルへ同じ形で出すこと (変数が無ければ書かない・書けなくても止まらない) | `warn-helpers-test`（Linux） |
-| `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`・警告のまとめに残すもの）。偽の `pwsh.exe` と `wslpath` で流す（21 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
-| `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
-| `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
-| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと・読みも単語も空の語だけの差は同じ扱い・`--import` の最後の案内は、テキストが変わった repo でだけ commit を促すこと・警告のまとめに残すもの)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（48 件） | `bootstrap-windows-google-ime-test`（Linux） |
-| `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い・警告のまとめに残す見出しと直し方)。偽の `pwsh.exe` と `wslpath` で流す（33 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
-| `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い・`settings.json` が無い / 有効なプロファイルが `default` でないときは送らず記録もしない) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット) と、警告のまとめに残すもの。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（33 件） | `bootstrap-windows-powertoys-test`（Linux） |
-| `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない・その警告を警告のまとめにも残す)。手元の bare repo で流す（8 件） | `bootstrap-dotfiles-private-test`（Linux） |
-| `bootstrap-cc-pages.test.sh` | `bootstrap-cc-pages.sh --status` が出すビューアの URL を、config.toml の `addr` から組むこと (config.toml が無い・`127.0.0.1`・ほかの host・`addr` が無い)。clone もビルドもしない（4 件） | `bootstrap-cc-pages-test`（Linux） |
-| `nix/pkgs/pjp-google-ime/test_google_ime.py` | テキストとバイナリの行き来・決定論・digest (空のコメントと空の表を含む)・検証・エラーに語を出さない・import (Mozc の `.proto` の写しから作った記述子で流す。56 件) | `pjp-google-ime-unittest`（Linux） |
-| `claude-env.nix` | `gitViaGh.enable` の既定・状態ファイルの中身・gh が入ること（評価時の assert） | `claude-env-state`（全 system） |
-| `claude-notion.nix` | `notion.{profile,routes,override}` の既定・`claude-notion.json` の中身・profile が無いときの warnings（評価時の assert） | `claude-notion-state`（全 system） |
-| `cc-pages.nix` | `ccPages.port` の既定では config.toml を置かないこと・config.toml の `addr`・1〜65535 の外で止まること・port を変えると unit ファイルが変わること (Linux だけ)（評価時の assert） | `cc-pages-state`（全 system） |
+- `nix/tests/<名前>.test.sh`・`<名前>.test.mjs`: bash・node で流すテスト。bootstrap や hook などの script の
+  振る舞いや、設定ファイルの中身を確かめる（Linux だけ）
+- `nix/tests/<名前>.nix`: home の設定が作るもの（状態ファイル・`home.file` など）を確かめる。評価時の assert は
+  全 system で流れ、`--all-systems --no-build` でも落ちる（外れた項目の名前がエラーに出る）。ビルドして
+  確かめる項目は、そのランナーの system だけ
+- `nix/pkgs/<道具>/test_*.py`: `nix/pkgs/` の道具の unittest（ADR 012。Linux だけ）
 
-bash のテストは、bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を
-引数で渡して流す。引数を省けば repo の script を使うので、サンドボックスの外でも流せる。
-`bootstrap-windows-google-ime-test` だけは、ほかに `pjp-google-ime` と、protobuf の入った python
-(と記述子の `PJP_GOOGLE_IME_DESCRIPTORS`) も使う。build では作れない形の辞書 (単語登録で足した語など)
-を python で組むため。サンドボックスの外で流すときも、この 2 つを PATH と環境変数に用意する。
+何を確かめるかはここに写さず、各テストの先頭のコメント（unittest は module の docstring）の
+「## 確かめること」にだけ書く。全部のテストの「## 確かめること」は、これで並べて読める:
 
 ```sh
-nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 つだけ
+./nix/scripts/check-test-headers.sh --show | less
+```
+
+流し方:
+
+```sh
+nix flake check ./nix                                                          # 全部 (home のビルドも)
+nix build --no-link -L './nix#checks.x86_64-linux.bootstrap-claude-env-test'   # 1 本だけ
 bash nix/tests/bootstrap-claude-env.test.sh                                    # サンドボックスの外で
 node nix/tests/claude-footer-links.test.mjs                                    # mjs のテスト (node が要る)
 ```
 
+1 本だけ流すときの check の名前は、各テストの先頭に書いてある。bash のテストは、
+bash・jq・git・coreutils だけの Nix のサンドボックスで、確かめる script を引数で渡して流す。引数を省けば
+repo の script を使うので、サンドボックスの外でも流せる（ほかに要るものは各テストの先頭にある）。
+
+#### テストを足すとき
+
+- 先頭のコメントに、check の名前と「## 確かめること」を書く（`*.test.sh` と `*.test.mjs` は流し方の 1 行も）。
+  同じ種類の既存のテストの先頭を写すとよい。件数は書かない
+- 「## 確かめること」の見出しと、その下の中身が無いテストは、CI の `lint` ジョブ（`check-test-headers.sh`）で
+  落ちる。先頭のコメントは、1 行目（shebang の次）から空行を挟まずに続く `#`（`*.test.mjs` は `//`）の行で、
+  unittest は module の docstring。手元では `./nix/scripts/check-test-headers.sh` で確かめる
+- `nix/tests/` の直下にはテストだけを置く。読み方を知らない種類のファイルも `lint` で落ちる
+  （テストが使うデータはディレクトリに入れる）
+- `nix/flake.nix` の `checks` に載せる（`nix/tests/<名前>.test.sh` は、ほかの道具が要らなければ `scriptTest` で足りる）
+- 偽のコマンドの shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
 - 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
   `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
   抜けないため
-- 偽の gh の shebang は `$BASH` から作る。サンドボックスには `/usr/bin/env` が無い
-- `claude-env.nix`・`claude-notion.nix`・`cc-pages.nix` は評価で止まるので、`--all-systems --no-build` でも落ちる。
-  外れた項目の名前がエラーに出る
 
 ## ディレクトリ
 
@@ -2566,7 +2568,7 @@ nix/
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、Windows と Linux をまたいだ 1 本の木で出す
 │   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)
-├── tests/                 flake の checks で流すテスト (bootstrap などの script の振る舞い / gitViaGh と notion の状態ファイル / cc-pages の config.toml / footer のリンクの正規表現 / herdr の skill のリンク)
+├── tests/                 flake の checks で流すテスト (何を確かめるかは各テストの先頭の「## 確かめること」。check-test-headers.sh --show で並べる)
 └── scripts/
     ├── setup.sh                   「適用」の手順を選んで実行する (入口)
     ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
@@ -2596,5 +2598,6 @@ nix/
     ├── flake-lock-age.sh           flake.lock の pin を、出てから一定日数が経った revision に限る (setup --flake-update と CI の lock-age が呼ぶ)
     ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
     ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
-    └── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
+    ├── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
+    └── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
 ```

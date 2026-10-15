@@ -1,15 +1,17 @@
 # home/options.nix の dotfiles.ccPages.port から作られるもの (home/modules/cc-pages.nix) を、評価時に確かめる。
 #
+# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
+# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
+# flake.nix の checks (cc-pages-state) から呼ぶ。
+#
+# ## 確かめること
+#
 #   - 既定 (null) では ~/.config/cc-pages/config.toml を置かない (手で書いた config.toml とぶつからない)
 #   - port を書くと、config.toml の addr が 127.0.0.1:<port> になる (daemon も cc-pages new もこれを読む)
 #   - 1〜65535 の外は評価で止まる (0 だと cc-pages は空いている port を選び、返すリンクが合わない)
 #   - port を変えると cc-pages.service の unit ファイルが変わる。home-manager の switch (sd-switch) は
 #     unit ファイルが変わった service だけを再起動するので、daemon が新しい port で上がり直す。
 #     unit ファイルは Linux でしか作られないので、この項目は Linux だけ
-#
-# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
-# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
-# flake.nix の checks (cc-pages-state) から呼ぶ。
 {
   lib,
   pkgs,

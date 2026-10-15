@@ -4,6 +4,17 @@
 //
 // flake の checks (claude-footer-links-test) が Nix のサンドボックスで流す。
 //
+// ## 確かめること
+//
+//   - 各項目の pattern が RegExp として通り、url が https の固定 origin で始まる (Claude Code は合わない
+//     項目を黙って捨てるので、ここで落とす)
+//   - チケット: ticket.sh の書き込み系・new の 1 行と、応答の markdown のリンクから「TKT-n」のバッジを作る。
+//     work の WRK-TKT-n は WRK-TKT-n のまま拾う。間に別の ID を挟んだ URL とは組ませず、ID の無い URL・
+//     TKT の無い Notion の URL・ID と URL が別の行のもの (ticket.sh show) は拾わない
+//   - PR: gh pr create・ticket.sh pr・ticket.sh show の pr 行から「<repo>#<番号>」のバッジを作る。
+//     /files などが続いても PR の URL に戻す。ticket.sh list の行に載る PR は拾わない
+//   - 1 行にチケットと PR があれば、出現順に両方
+//
 // ## なぜ JavaScript なのか
 //
 // Claude Code は footerLinksRegexes の pattern を JavaScript の RegExp (フラグ "g") で解釈する。

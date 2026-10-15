@@ -8,7 +8,9 @@
 #
 # flake の checks (bootstrap-windows-google-ime-test) が Nix のサンドボックスで流す。
 # 使うのは bash・jq・git・coreutils・findutils・diffutils・grep・sed と、PATH の pjp-google-ime、
-# protobuf の入った python3 (辞書のファイルを組む。記述子は PJP_GOOGLE_IME_DESCRIPTORS で受け取る)。
+# protobuf の入った python3 (build では作れない形の辞書 (単語登録で足した語など) のファイルを組む。
+# 記述子は PJP_GOOGLE_IME_DESCRIPTORS で受け取る)。サンドボックスの外で流すときも、pjp-google-ime と
+# protobuf の入った python3 を PATH に、記述子を PJP_GOOGLE_IME_DESCRIPTORS に用意する。
 #
 # ## 確かめること
 #
@@ -18,6 +20,7 @@
 #     最後のまとめ用のファイルにも残す
 #   - 壊れたテキストは何も置かずに exit 1 (行番号を出す)
 #   - 4 通りの判定 (置く・同じ・repo 側が進んだ・衝突)、画面で保存しただけ (時刻だけ違う) は「同じ」
+#   - 読めない (壊れた) Windows 側のファイルは衝突として扱い、traceback を出さない
 #   - 置いたときだけ taskkill.exe /F で変換サーバーを落とす。動いていない (128) のは成功扱い
 #   - 落とせなかったら印を残し、次の回が置くものが無くても落とし直す (--dry-run は印に触らない)
 #   - 退避は新しい方から 10 回分。--force / --dry-run / --import / --check

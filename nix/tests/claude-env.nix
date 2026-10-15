@@ -1,13 +1,15 @@
 # home/options.nix の dotfiles.claude.gitViaGh.enable から作られるものを、評価時に確かめる。
 #
+# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
+# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
+# flake.nix の checks (claude-env-state) から呼ぶ。
+#
+# ## 確かめること
+#
 #   - 既定は true
 #   - ~/.local/state/dotfiles/claude-env.json の中身 (true / false それぞれ)。
 #     nix/scripts/bootstrap-claude-env.sh がこれを ~/.claude/settings.json の env へ写す
 #   - home.packages に gh が入る (true の前提)
-#
-# 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
-# CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
-# flake.nix の checks (claude-env-state) から呼ぶ。
 {
   lib,
   pkgs,

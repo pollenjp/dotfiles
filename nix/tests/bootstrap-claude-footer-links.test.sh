@@ -13,7 +13,8 @@
 #
 #   - 生成ファイルの配列を settings.json の footerLinksRegexes へ書き、他のキーは残す。
 #     再実行では変わらず、別の値が入っていたら元の値を見せてから置き換える
-#   - settings.json が無い / 壊れている、生成ファイルが無い / 形が違うときの扱い
+#   - settings.json が無ければ作る。生成ファイルが無ければ警告して飛ばし (exit 0)、settings.json が壊れている・
+#     生成ファイルの形が違うときは書かずに落ちる (exit 1)
 #   - settings.json の隣に中間ファイルを残さない
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、生成ファイルが無くて飛ばす警告を
 #     続きの行ごと setup の最後のまとめ用のファイルにも残す
