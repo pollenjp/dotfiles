@@ -2,9 +2,9 @@
 # shellcheck shell=bash
 #
 # Claude Code の PostToolUse フック。設計を書き出した・PR を作った瞬間に、
-# 「解説動画を作るか聞く場面か判断せよ」と Claude の文脈へ 1 文を差し込む。
+# 「解説動画の短尺を裏で作り始める場面か判断せよ」と Claude の文脈へ 1 文を差し込む。
 #
-# 聞くかどうかはここでは決めない。決めるのは skill (pjp-video-explainer-offer。
+# 作るかどうかはここでは決めない。決めるのは skill (pjp-video-explainer-offer。
 # private な claude-skills にある) の側で、ここは瞬間を見つけて知らせるだけ。
 #
 # ## 知らせる場面
@@ -16,11 +16,13 @@
 #
 # ## 黙る場面
 #
-#   - subagent の中 (入力に agent_id がある)。subagent はユーザーに質問できない
+#   - subagent の中 (入力に agent_id がある)。subagent の中では作らない (受け取る人がいない)
 #   - skill が入っていないマシン (claude-skills を取れない、public な dotfiles だけの環境)
-#   - ユーザーが「このセッションでは聞かない」を選んだセッション。skill がそのとき
+#   - ユーザーが「このセッションでは作らない」を選んだセッション。skill がそのとき
 #     ${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id> を置く。
 #     会話の圧縮で選んだことが消えても、ここで黙らせる
+#   - 既存の PR を返しただけの gh pr create (stdout に「a pull request for branch … already exists」)。
+#     gh は exit 1 で終わるが、2>&1 | tail でつなぐと exit code が tail の 0 になり、成功として届く
 #   - 新しく作ったのではない書き込み (type が create でない)。版を直すたびに知らせない
 #   - ADR の dir の中の textbook や図、ADR の一覧 (docs/adr/README.md)。1 本の ADR で何度も知らせない
 #   - 想定外の入力。tool の流れを止めないよう、何があっても exit 0 で終える
@@ -46,7 +48,7 @@ field() {
 
 [[ -z $(field '.agent_id') ]] || exit 0
 
-# 「このセッションでは聞かない」の印。session_id は Claude Code の UUID だが、パスに使うので形を確かめる
+# 「このセッションでは作らない」の印。session_id は Claude Code の UUID だが、パスに使うので形を確かめる
 session_id=$(field '.session_id')
 if [[ ${session_id} =~ ^[A-Za-z0-9_-]+$ && -e "${XDG_STATE_HOME:-${HOME}/.local/state}/pjp-video-offer/off-${session_id}" ]]; then
   exit 0
@@ -57,9 +59,11 @@ target=""
 case $(field '.tool_name') in
   Bash)
     if [[ $(field '.tool_input.command') == *"gh pr create"* ]]; then
+      stdout=$(field '.tool_response.stdout')
+      # 既存の PR を返しただけなら、作ったのではない (gh の文: a pull request for branch "x" into branch "y" already exists:)
+      [[ ${stdout} != *"a pull request for branch"*"already exists"* ]] || exit 0
       target=$(
-        field '.tool_response.stdout' \
-          | grep -oE 'https://[^[:space:]/]+/[^[:space:]/]+/[^[:space:]/]+/pull/[0-9]+' \
+        grep -oE 'https://[^[:space:]/]+/[^[:space:]/]+/[^[:space:]/]+/pull/[0-9]+' <<<"${stdout}" \
           | tail -n 1
       )
       [[ -z ${target} ]] || kind="pr"
@@ -95,13 +99,13 @@ esac
 
 case ${kind} in
   pr)
-    msg="[解説動画] PR を作った (${target})。pjp-video-explainer-offer skill を読み、聞く条件に合えば、PR の URL を返すときに解説動画を作るかを聞くこと。合わなければ何もしない。"
+    msg="[解説動画] PR を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、PR の URL を返すときに解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
     ;;
   design-page)
-    msg="[解説動画] タグ「設計」の cc-page を作った (${target})。pjp-video-explainer-offer skill を読み、聞く条件に合えば、承認を聞く前に解説動画を作るかを聞くこと。合わなければ何もしない。"
+    msg="[解説動画] タグ「設計」の cc-page を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、承認を聞く前に解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
     ;;
   design-doc)
-    msg="[解説動画] 設計の文書を作った (${target})。pjp-video-explainer-offer skill を読み、聞く条件に合えば、レビューや承認を頼む前に解説動画を作るかを聞くこと。合わなければ何もしない。"
+    msg="[解説動画] 設計の文書を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、レビューや承認を頼む前に解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
     ;;
   *)
     exit 0

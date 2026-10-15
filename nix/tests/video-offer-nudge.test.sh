@@ -7,15 +7,16 @@
 #
 # flake の checks (video-offer-nudge-test) が Nix のサンドボックスで流す。使うのは
 # bash・jq・coreutils・grep だけ。skill の有無は CLAUDE_CONFIG_DIR を使い捨ての dir に向けて作る。
-# 「このセッションでは聞かない」の印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) も
+# 「このセッションでは作らない」の印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) も
 # 使い捨ての dir に作る。
 #
 # ## 確かめること
 #
-#   - gh pr create の成功・タグ「設計」の cc-page・spec / ADR の新規作成で知らせる
-#   - それ以外 (失敗した PR・タグの無いページ・上書き・関係ないファイル・ADR の dir の中の
-#     textbook や図・ADR の一覧) では黙る
-#   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは聞かない」の印が
+#   - gh pr create の成功・タグ「設計」の cc-page・spec / ADR の新規作成で知らせる。知らせる文は、
+#     解説動画の短尺を裏で作り始めることと、その時機 (PR の URL を返すとき・承認やレビューの前) を言う
+#   - それ以外 (失敗した PR・既存の PR を返しただけの gh pr create (already exists)・タグの無いページ・
+#     上書き・関係ないファイル・ADR の dir の中の textbook や図・ADR の一覧) では黙る
+#   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは作らない」の印が
 #     あるセッションでも黙り、いつも exit 0
 
 set -u -o pipefail
@@ -49,7 +50,7 @@ echo '---' >"${with_skill}/skills/pjp-video-explainer-offer/SKILL.md"
 without_skill="${work}/without-skill"
 mkdir -p "${without_skill}"
 
-# 「このセッションでは聞かない」の印を置く dir (XDG_STATE_HOME)
+# 「このセッションでは作らない」の印を置く dir (XDG_STATE_HOME)
 state="${work}/state"
 mkdir -p "${state}"
 
@@ -85,10 +86,10 @@ new_page() {
 
 echo "== video-offer-nudge.sh"
 
-# 1. gh pr create が成功 → pr の文と URL
+# 1. gh pr create が成功 → pr の文と URL。短尺を作り始める時機を言う
 run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/pollenjp/claude-skills/pull/71')"
 c=$(context)
-if [[ ${c} == "[解説動画] PR を作った (https://github.com/pollenjp/claude-skills/pull/71)。"* && ${c} == *"PR の URL を返すときに"* ]]; then
+if [[ ${c} == "[解説動画] PR を作った (https://github.com/pollenjp/claude-skills/pull/71)。"* && ${c} == *"PR の URL を返すときに解説動画の短尺を裏で作り始める"* ]]; then
   ok "gh pr create の成功で知らせる"
 else
   ng "gh pr create の成功で知らせる" "out=$(cat "${work}/out")"
@@ -118,14 +119,14 @@ else
   ng "GitHub Enterprise のホストの URL も拾う" "out=$(cat "${work}/out")"
 fi
 
-# 5. gh pr create が失敗 (URL が無い) → 黙る
-run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'a pull request for branch "feat/x" into branch "main" already exists')"
+# 5. gh pr create が失敗 (URL が無い) → 黙る。already exists の文は 22 で見るので、ここでは使わない
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b 2>&1 | tail -2' 'pull request create failed: GraphQL: No commits between main and feat/x (createPullRequest)')"
 if silent; then ok "URL の無い gh pr create では黙る"; else ng "URL の無い gh pr create では黙る" "out=$(cat "${work}/out")"; fi
 
 # 6. タグ「設計」の cc-page を新規作成 (dir に日本語と空白) → design-page の文と dir
 page=$(new_page '0002-通知の流し方 案-b-の設計' '{"title":"通知の流し方 (案 B) の設計","tags":["設計","TKT-1"]}')
 run "${with_skill}" "$(write_input "${page}/index.html" create)"
-if [[ $(context) == "[解説動画] タグ「設計」の cc-page を作った (${page})。"* && $(context) == *"承認を聞く前に"* ]]; then
+if [[ $(context) == "[解説動画] タグ「設計」の cc-page を作った (${page})。"* && $(context) == *"承認を聞く前に解説動画の短尺を裏で作り始める"* ]]; then
   ok "タグ「設計」の cc-page の新規作成で知らせる (日本語と空白の dir)"
 else
   ng "タグ「設計」の cc-page の新規作成で知らせる" "out=$(cat "${work}/out")"
@@ -170,7 +171,7 @@ run "${with_skill}" "$(write_input /r/docs/superpowers/specs/2026-10-10-x-design
 r1=$(context)
 run "${with_skill}" "$(write_input /r/docs/adr/010_x/README.md create)"
 r2=$(context)
-if [[ ${r1} == "[解説動画] 設計の文書を作った (/r/docs/superpowers/specs/2026-10-10-x-design.md)。"* && ${r2} == "[解説動画] 設計の文書を作った (/r/docs/adr/010_x/README.md)。"* ]]; then
+if [[ ${r1} == "[解説動画] 設計の文書を作った (/r/docs/superpowers/specs/2026-10-10-x-design.md)。"* && ${r1} == *"レビューや承認を頼む前に解説動画の短尺を裏で作り始める"* && ${r2} == "[解説動画] 設計の文書を作った (/r/docs/adr/010_x/README.md)。"* ]]; then
   ok "spec と ADR の新規作成で知らせる"
 else
   ng "spec と ADR の新規作成で知らせる" "r1=${r1} r2=${r2}"
@@ -212,18 +213,30 @@ if silent; then ok "ADR の dir の中の textbook では黙る"; else ng "ADR �
 run "${with_skill}" "$(write_input /r/docs/adr/010_x/plantuml/flow.puml create)"
 if silent; then ok "ADR の dir の中の図では黙る"; else ng "ADR の dir の中の図では黙る" "out=$(cat "${work}/out")"; fi
 
-# 21. このセッションに「聞かない」の印がある → 黙る。別のセッションの印では黙らない
+# 21. このセッションに「作らない」の印がある → 黙る。別のセッションの印では黙らない
 mkdir -p "${state}/pjp-video-offer"
 touch "${state}/pjp-video-offer/off-s"
 run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/8')"
 s1=$(silent && echo yes)
 run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/8' | jq -c '.session_id = "other"')"
 if [[ ${s1} == yes && $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/8)。"* ]]; then
-  ok "「聞かない」の印があるセッションでは黙り、別のセッションでは知らせる"
+  ok "「作らない」の印があるセッションでは黙り、別のセッションでは知らせる"
 else
-  ng "「聞かない」の印があるセッションでは黙り、別のセッションでは知らせる" "s1=${s1} out=$(cat "${work}/out")"
+  ng "「作らない」の印があるセッションでは黙り、別のセッションでは知らせる" "s1=${s1} out=$(cat "${work}/out")"
 fi
 rm -f "${state}/pjp-video-offer/off-s"
+
+# 22. 既存の PR を返しただけの gh pr create → 黙る。gh は "already exists" と既存の PR の URL を出して
+#     exit 1 になるが、2>&1 | tail でつなぐと exit code が tail の 0 になり、成功として hook に届く。
+#     gh のその文でない "already exists" (ほかの警告) だけなら、作った PR として知らせる
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b 2>&1 | tail -2' $'a pull request for branch "feat/x" into branch "main" already exists:\nhttps://github.com/o/r/pull/12')"
+s1=$(silent && echo yes)
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b 2>&1 | tail -2' $'warning: tag v1 already exists\nhttps://github.com/o/r/pull/13')"
+if [[ ${s1} == yes && $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/13)。"* ]]; then
+  ok "既存の PR (already exists) を返しただけの gh pr create では黙り、ほかの文の already exists では知らせる"
+else
+  ng "既存の PR (already exists) を返しただけの gh pr create では黙り、ほかの文の already exists では知らせる" "s1=${s1} out=$(cat "${work}/out")"
+fi
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]
