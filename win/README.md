@@ -298,13 +298,25 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で走り、落ちた定期実行の通知は
 `nix.yml` の closure-scan と同じく GitHub から届く。
 
-- 確かめるのは `nix/scripts/check-windows-openssh-version.sh`。winget-pkgs
-  (`manifests/m/Microsoft/OpenSSH/Preview/<版>/`) を GitHub API で読むので、Windows は要らない。
-  手元で打つなら gh のログインが要る
-- 落ちるのは 3 つ: 固定した版より新しい版がある (見送りの一覧に無いもの)・固定した版が winget に無い
-  (新しいマシンで入れられない)・`Microsoft.OpenSSH.Preview` が winget に無い
-  (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)
+- 確かめるのは `nix/scripts/check-windows-openssh-version.sh`。`Install-OpenSSH.ps1` から固定した版と
+  パッケージ ID (`$packageId`) を読み、winget-pkgs (`manifests/m/Microsoft/OpenSSH/Preview/<版>/`) と
+  GitHub の release を GitHub API で読むので、Windows は要らない。手元で打つなら gh のログインが要る
+- 知らせて落ちる (exit 1) のは:
+  - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 下の「上げるとき」か「見送るとき」
+  - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
+  - パッケージが winget に無い (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)・
+    GitHub の最新の版が出て 7 日たっても winget のこのパッケージに無い (パッケージ ID が移ると、古い ID には
+    新しい版が来ない。2024-10 に Preview ができてから、Beta には新しい版が来なかった)
+    → `winget search OpenSSH` で今のパッケージ ID を確かめる。移るなら `git grep Microsoft.OpenSSH.Preview` で
+    出る所 (`Install-OpenSSH.ps1` の `$packageId` と状態の表の見出し・`bootstrap-windows-openssh.sh` の見分け・
+    テスト) と固定した版を直す
+  - 版の形でないディレクトリがある・GitHub の最新 release に `OpenSSH-Win64-v<版>.msi` が無い
+    (版や名前の付け方が変わった) → script の読み方を直す
+- 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・`Install-OpenSSH.ps1` から版か ID が読めない・
+  見送りの一覧の書き損じ。summary の `!!` の行を見て、一時的な失敗なら流し直し、書き損じなら直す
 - GitHub の release から winget に載るまでは、これまで 5 時間〜4 日だった
+- 上流に未対応の新しい版がある間は、別の理由で `Install-OpenSSH.ps1` や script を直す PR も赤くなる
+  (merge は止まらない)
 
 上げるとき:
 
