@@ -230,22 +230,40 @@ run() {
 }
 
 rc() { cat "$1/rc"; }
-out() { cat "$1/out"; }
 outerr() { cat "$1/out" "$1/err"; }
 calls() { cat "$1/gh-calls"; }
 gh_called() { [[ -s $1/gh-calls ]]; }
+
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (CI の混んだランナーで実際に落ちた)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
+seen_out() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out"
+}
+called() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/gh-calls"
+}
 
 echo "== check-windows-openssh-version.sh: ${script}"
 
 # 1. 固定した版が winget-pkgs の最新: exit 0、⚠ は出さない。9.8.3.0 を 10.0.0.0 より新しいと読まない
 d=$(new_case t1 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠' && outerr "${d}" | grep -qF '10.0.0.0'; then
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F '10.0.0.0'; then
   ok "固定した版が最新なら exit 0 で ⚠ を出さない (9.8.3.0 は 10.0.0.0 より古いと読む)"
 else
   ng "最新" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
-if calls "${d}" | grep -qxF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/OpenSSH/Preview'; then
+if called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/OpenSSH/Preview'; then
   ok "Microsoft.OpenSSH.Preview なら winget-pkgs の manifests/m/Microsoft/OpenSSH/Preview を読む"
 else
   ng "読む場所が違う" "calls=$(calls "${d}")"
@@ -254,7 +272,7 @@ fi
 # 2. winget-pkgs の場所は Install-OpenSSH.ps1 のパッケージ ID から組む (ID を移したら、見る場所も移る)
 d=$(new_case t2 10.0.0.0 - Microsoft.OpenSSH.Beta)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if calls "${d}" | grep -qxF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/OpenSSH/Beta'; then
+if called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/OpenSSH/Beta'; then
   ok "winget-pkgs の場所は Install-OpenSSH.ps1 のパッケージ ID から組む"
 else
   ng "パッケージ ID から組んでいない" "calls=$(calls "${d}") $(outerr "${d}")"
@@ -263,9 +281,9 @@ fi
 # 3. 固定した版より新しい版がある: exit 1。版・release notes の URL・見送りの一覧の場所を出す
 d=$(new_case t3 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' \
-  && outerr "${d}" | grep -qF 'https://github.com/PowerShell/Win32-OpenSSH/releases/tag/v10.1.0.0p1-Preview' \
-  && outerr "${d}" | grep -qF 'skipped-versions.txt'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' \
+  && seen "${d}" -F 'https://github.com/PowerShell/Win32-OpenSSH/releases/tag/v10.1.0.0p1-Preview' \
+  && seen "${d}" -F 'skipped-versions.txt'; then
   ok "新しい版があれば exit 1 で、版・release notes の URL・見送りの一覧の場所を出す"
 else
   ng "新しい版がある" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -275,8 +293,8 @@ fi
 d=$(new_case t4 10.0.0.0 $'# 見送った版\n\n10.1.0.0  1Password の agent に繋がらない (TKT-999)')
 sed -i 's/$/\r/' "${d}/Install-OpenSSH.ps1"
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠' \
-  && outerr "${d}" | grep -qF '1Password の agent に繋がらない (TKT-999)'; then
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' \
+  && seen "${d}" -F '1Password の agent に繋がらない (TKT-999)'; then
   ok "新しい版が見送りの一覧にあれば exit 0 で、見送った理由を出す (ps1 が CRLF でも読む)"
 else
   ng "見送った" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -286,7 +304,7 @@ fi
 d=$(new_case t5 10.0.0.0 -)
 printf '\xef\xbb\xbf# 見送った版\r\n10.1.0.0 MSI が ssh-agent を自動に戻す\r\n' >"${d}/skipped-versions.txt"
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && outerr "${d}" | grep -q 'MSI が ssh-agent を自動に戻す)$'; then
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" 'MSI が ssh-agent を自動に戻す)$'; then
   ok "見送りの一覧が BOM 付き・CRLF でも読み、理由に CR を残さない"
 else
   ng "BOM 付き・CRLF の見送りの一覧" "rc=$(rc "${d}") $(outerr "${d}" | od -c | head -20)"
@@ -295,7 +313,7 @@ fi
 # 6. 見送りは版ごと: 10.2.0.0 だけ見送っても、10.1.0.0 は知らせる
 d=$(new_case t6 10.0.0.0 '10.2.0.0 MSI が ssh-agent を消す')
 FAKE_GH_CONTENTS="${winget_102}" FAKE_GH_RELEASES="${releases_102}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' && ! outerr "${d}" | grep -q '⚠.*10\.2\.0\.0'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' && ! seen "${d}" '⚠.*10\.2\.0\.0'; then
   ok "見送りは版ごと (10.2.0.0 を見送っても、見送っていない 10.1.0.0 は知らせる)"
 else
   ng "見送りは版ごと" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -304,7 +322,7 @@ fi
 # 7. 新しい版の release が GitHub に見つからない: releases の一覧の URL を代わりに出す
 d=$(new_case t7 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '10\.1\.0\.0.*https://github\.com/PowerShell/Win32-OpenSSH/releases$'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '10\.1\.0\.0.*https://github\.com/PowerShell/Win32-OpenSSH/releases$'; then
   ok "新しい版の release が見つからなければ、releases の一覧の URL を出す"
 else
   ng "release が見つからない" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -313,8 +331,8 @@ fi
 # 8. release notes が取れなくても、新しい版は知らせる (releases の一覧の URL を代わりに出す)
 d=$(new_case t8 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES_ERR='gh: HTTP 502' FAKE_GH_RELEASES_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' \
-  && outerr "${d}" | grep -qF 'https://github.com/PowerShell/Win32-OpenSSH/releases'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' \
+  && seen "${d}" -F 'https://github.com/PowerShell/Win32-OpenSSH/releases'; then
   ok "release notes が取れなくても exit 1 で知らせ、releases の一覧の URL を出す"
 else
   ng "release notes が取れない" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -323,7 +341,7 @@ fi
 # 8b. release の一覧が取れず、winget の版では知らせることも無い: GitHub と比べられなかったので exit 2
 d=$(new_case t8b 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES_ERR='gh: HTTP 502' FAKE_GH_RELEASES_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF 'gh: HTTP 502'; then
+if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F 'gh: HTTP 502'; then
   ok "release の一覧が取れず、ほかに知らせることも無ければ、gh のエラーを見せて exit 2"
 else
   ng "release の一覧だけ取れない" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -332,7 +350,7 @@ fi
 # 9. 固定した版が winget-pkgs に無い (新しいマシンで入れられない): exit 1
 d=$(new_case t9 10.0.0.0 -)
 FAKE_GH_CONTENTS=$(contents_json 9.5.0.0 9.8.3.0) FAKE_GH_RELEASES=$(releases_json "${rel_983}") run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.0\.0\.0'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.0\.0\.0'; then
   ok "固定した版が winget-pkgs に無ければ exit 1"
 else
   ng "固定した版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -341,7 +359,7 @@ fi
 # 10. パッケージごと winget-pkgs に無い (404。Microsoft.OpenSSH.Beta は 2025-04 に丸ごと外された): exit 1
 d=$(new_case t10 10.0.0.0 -)
 FAKE_GH_CONTENTS="${not_found}" FAKE_GH_CONTENTS_ERR='gh: Not Found (HTTP 404)' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*Microsoft\.OpenSSH\.Preview'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*Microsoft\.OpenSSH\.Preview'; then
   ok "パッケージが winget-pkgs に無ければ (404) exit 1"
 else
   ng "パッケージが無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -350,7 +368,7 @@ fi
 # 11. 版の形でないディレクトリがある (版の付け方が変わったなど): exit 1。ファイルの項目は版として扱わない
 d=$(new_case t11 10.0.0.0 -)
 FAKE_GH_CONTENTS=$(contents_json 10.0.0.0 10.1.0.0p1 9.8.3.0 file:README.md) FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0p1' && ! outerr "${d}" | grep -q '⚠.*README'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0p1' && ! seen "${d}" '⚠.*README'; then
   ok "版の形でないディレクトリがあれば exit 1 (ファイルの項目は数えない)"
 else
   ng "版の形でないディレクトリ" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -360,7 +378,7 @@ fi
 #     (2024-10 に Microsoft.OpenSSH.Preview ができた後、Beta には新しい版が来なくなった)
 d=$(new_case t12 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0'; then
   ok "GitHub の最新 release が 7 日たっても winget に無ければ exit 1"
 else
   ng "GitHub の最新が winget に無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -369,7 +387,7 @@ fi
 # 13. GitHub に出て 7 日たっていない版は、winget にまだ無くても落とさない (これまで載るまで 5 時間〜4 日)
 d=$(new_case t13 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101_recent}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠' && outerr "${d}" | grep -q '10\.1\.0\.0'; then
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '10\.1\.0\.0'; then
   ok "GitHub に出て 7 日たっていない版は、winget に無くても落とさずに出すだけ"
 else
   ng "7 日たっていない" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -378,7 +396,7 @@ fi
 # 14. GitHub の最新 release を見送ってあれば、winget に無くても落とさない
 d=$(new_case t14 10.0.0.0 '10.1.0.0 1Password の agent に繋がらない')
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠'; then
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠'; then
   ok "見送った版は、GitHub にあって winget に無くても落とさない"
 else
   ng "見送った版が GitHub だけにある" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -387,7 +405,7 @@ fi
 # 15. GitHub の最新 release に Win64 の MSI (OpenSSH-Win64-v<版>.msi) が無い (名前が変わった): exit 1
 d=$(new_case t15 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101_nomsi}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*v10\.1\.0\.0p1-Preview'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*v10\.1\.0\.0p1-Preview'; then
   ok "GitHub の最新 release に Win64 の MSI が無ければ exit 1"
 else
   ng "MSI が無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -396,7 +414,7 @@ fi
 # 16. API が失敗した (404 以外): 確かめられなかったので exit 2 (揃っている扱いにしない)
 d=$(new_case t16 10.0.0.0 -)
 FAKE_GH_CONTENTS_ERR='error connecting to api.github.com' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF 'error connecting to api.github.com'; then
+if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F 'error connecting to api.github.com'; then
   ok "API が 404 以外で失敗したら、gh のエラーを見せて exit 2"
 else
   ng "API の失敗" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -432,7 +450,7 @@ fi
 # 20. Install-OpenSSH.ps1 が無い: 行が無いとは言わず、ファイルが読めないと言って exit 2
 d=$(new_case t20 10.0.0.0 -)
 run "${d}" 0 "${d}/no-such.ps1" "${d}/skipped-versions.txt"
-if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF "${d}/no-such.ps1" && ! outerr "${d}" | grep -q '行がありません'; then
+if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F "${d}/no-such.ps1" && ! seen "${d}" '行がありません'; then
   ok "Install-OpenSSH.ps1 が無ければ、行が無いとは言わずに exit 2"
 else
   ng "Install-OpenSSH.ps1 が無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -441,7 +459,7 @@ fi
 # 21. 見送りの一覧に理由の無い行がある: exit 2 (版と理由を 1 行に書く決まり)
 d=$(new_case t21 10.0.0.0 '10.1.0.0')
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF 'skipped-versions.txt'; then
+if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F 'skipped-versions.txt'; then
   ok "見送りの一覧に理由の無い行があれば、ファイルの場所を出して exit 2"
 else
   ng "見送りの一覧が壊れている" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -450,7 +468,7 @@ fi
 # 22. 固定した版以下の見送りが残っている: 落とさず、消してよいと出す
 d=$(new_case t22 10.0.0.0 '9.8.3.0 試した時期の 1Password と合わない')
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && outerr "${d}" | grep -q '9\.8\.3\.0.*消して'; then
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" '9\.8\.3\.0.*消して'; then
   ok "固定した版以下の見送りは落とさず、消してよいと出す"
 else
   ng "古い見送り" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -459,28 +477,28 @@ fi
 # 23. GitHub Actions の中では、落ちるとき (exit 1 も 2 も) だけ ::error の行を出す (stdout)
 d=$(new_case t23 10.0.0.0 -)
 GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && out "${d}" | grep -q '^::error.*10\.1\.0\.0'; then
+if [[ $(rc "${d}") == 1 ]] && seen_out "${d}" '^::error.*10\.1\.0\.0'; then
   ok "GitHub Actions の中で新しい版があれば、::error の行を出す"
 else
   ng "::error が出ない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 d=$(new_case t23b 10.0.0.0 -)
 GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS_ERR='error connecting to api.github.com' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && out "${d}" | grep -q '^::error'; then
+if [[ $(rc "${d}") == 2 ]] && seen_out "${d}" '^::error'; then
   ok "GitHub Actions の中では、確かめられなかったとき (exit 2) も ::error の行を出す"
 else
   ng "exit 2 で ::error が出ない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 d=$(new_case t23c 10.0.0.0 -)
 GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '^::error'; then
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '^::error'; then
   ok "GitHub Actions の中でも、知らせることが無ければ ::error を出さない"
 else
   ng "揃っているのに ::error" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 d=$(new_case t23d 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && ! outerr "${d}" | grep -q '^::error'; then
+if [[ $(rc "${d}") == 1 ]] && ! seen "${d}" '^::error'; then
   ok "GitHub Actions の外では、新しい版があっても ::error を出さない"
 else
   ng "外で ::error" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -489,7 +507,7 @@ fi
 # 24. gh が無い: exit 2
 d=$(new_case t24 10.0.0.0 -)
 run "${d}" 1
-if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -q 'gh'; then
+if [[ $(rc "${d}") == 2 ]] && seen "${d}" 'gh'; then
   ok "gh が無ければ exit 2"
 else
   ng "gh が無い" "rc=$(rc "${d}") $(outerr "${d}")"
