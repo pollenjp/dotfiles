@@ -1071,6 +1071,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
+./nix/scripts/check-windows-openssh-version.sh       # Windows の OpenSSH の固定した版が winget の最新か（CI の windows-openssh が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
