@@ -247,12 +247,12 @@ watched_of() {
 }
 
 # 取り込みで $1 (config_dir か dict_dir) のテキストが変わったか。取り込む前に commit していない変更が無いことを
-# 確かめてあるので、今ある変更は取り込みが書いたもの (commit するもの)。git を呼べなければ変わった側に倒す
-# (commit を促しても、git diff を見れば分かる)
+# 確かめてあるので、今ある変更は取り込みが書いたもの (commit するもの)。git を呼べなければ (git のエラーは
+# そのまま出す) 変わった側に倒す (commit を促しても、git diff を見れば分かる)
 import_changed() {
   local changes
   watched_of "$1"
-  if ! changes=$(git --no-optional-locks -C "$1" status --porcelain --untracked-files=normal -- "${watched[@]}" 2>/dev/null); then
+  if ! changes=$(git --no-optional-locks -C "$1" status --porcelain --untracked-files=normal -- "${watched[@]}"); then
     return 0
   fi
   [[ -n ${changes} ]]
@@ -311,7 +311,7 @@ if ((do_import)); then
   elif ((private_changed)); then
     echo "取り込みました。git diff を見て、dotfiles-private で commit してください (diff には辞書の語が出るので、自分の端末で見てください)。"
   else
-    echo "取り込んでもテキストは変わらなかったので、commit するものはありません。"
+    echo "取り込んでもテキストは変わらなかったので、取り込みの分で commit するものはありません。"
   fi
   exit 0
 fi

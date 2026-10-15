@@ -800,7 +800,7 @@ fi
 #     必ず書き換わる)、名前に合わせて Windows 側を変えて取り込む。辞書は、dict では今の辞書に語を足し (TSV が変わる)、
 #     both では辞書を 1 つ足す (未追跡の TSV ができる)
 for c in \
-  "none:なし:--import でテキストが変わらなければ、commit を促さない" \
+  "none:なし:--import でテキストが変わらなければ、commit を促さず、commit するものは無いと出す" \
   "config:dotfiles:--import で設定だけが変わったら、dotfiles でだけ commit を促す" \
   "dict:dotfiles-private:--import で辞書だけが変わったら、dotfiles-private でだけ commit を促し、diff は自分の端末で見るよう添える" \
   "both:dotfiles dotfiles-private:--import で設定と辞書が変わったら、両方で commit を促す" \
@@ -829,9 +829,10 @@ for c in \
   run "${h}" 0 --import
   prompted=$(commit_prompted "${h}")
   dirty=$(dirty_repos "${h}")
+  last=$(tail -n 1 "${h}/out")
   if [[ $(rc "${h}") == 0 && ${prompted} == "${want}" && ${dirty} == "${want}" ]] \
-    && { [[ ${want} != *dotfiles-private* ]] || tail -n 1 "${h}/out" | grep -q '自分の端末'; } \
-    && { [[ ${want} != なし ]] || ! outerr "${h}" | grep -q 'commit してください'; }; then
+    && { [[ ${want} != *dotfiles-private* ]] || [[ ${last} == *自分の端末* ]]; } \
+    && { [[ ${want} != なし ]] || { [[ ${last} == *'commit するものはありません'* ]] && ! outerr "${h}" | grep -q 'commit してください'; }; }; then
     ok "${desc}"
   else
     ng "--import の案内 (${name})" "rc=$(rc "${h}") prompted=${prompted} dirty=${dirty} $(outerr "${h}")"
