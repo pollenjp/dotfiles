@@ -1,0 +1,10 @@
+# Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) で、上げずに見送った版 (TKT-110)。
+#
+# nix/scripts/check-windows-openssh-version.sh (GitHub Actions の windows-openssh が週 1 回流す) が読み、
+# ここに書いた版は、固定した版より新しくても知らせない。手順は win/README.md の「OpenSSH の新しい版が出たとき」。
+#
+# 1 行に 1 つ、「版 理由」を空白で区切って書く。# で始まる行と空行は読まない。理由の無い行は読めずに落ちる。
+# 固定した版以下になった行は消してよい (job が知らせる)。manifest に無いので Windows へは配らない。
+#
+# 例:
+# 10.1.0.0 MSI の更新のあと 1Password の agent に繋がらない (TKT-xxx)

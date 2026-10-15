@@ -30,6 +30,7 @@
 #   - --import は、同じディレクトリの Install-GoogleJapaneseInput.ps1 の変更では止まらない
 #   - --import は 3 つのテキストのどれの変更 (削除・staged・未追跡も) でも止まり、止めたときの一覧には止める理由のファイルだけを出す
 #   - 「まだ使っていない」の案内は stderr に出す (stdout は空)。exe が無く、Program Files にディレクトリだけ残っているなら入っていない扱い
+#   - --import の最後の案内は、テキストが変わった repo でだけ commit を促す (どちらも変わらなければ促さない)
 #
 # ## 偽の repo と dotfiles-private
 #
@@ -222,6 +223,33 @@ EOF
 
 pending_of() { echo "$1/.local/state/dotfiles/google-japanese-input/restart-pending"; }
 tsv_of() { echo "$1/private/google-japanese-input/dictionaries/$2.tsv"; }
+
+# --import の最後の行 (stdout) が commit を促した repo。dotfiles・dotfiles-private の順に空白区切りで、促していなければ「なし」
+commit_prompted() {
+  local last r=()
+  last=$(tail -n 1 "$1/out")
+  if [[ ${last} == *'commit してください'* ]]; then
+    if [[ ${last//dotfiles-private/} == *dotfiles* ]]; then
+      r+=(dotfiles)
+    fi
+    if [[ ${last} == *dotfiles-private* ]]; then
+      r+=(dotfiles-private)
+    fi
+  fi
+  echo "${r[*]:-なし}"
+}
+
+# commit していない変更がある repo。commit_prompted と同じ形で出す
+dirty_repos() {
+  local r=()
+  if [[ -n $(git -C "$1/repo" status --porcelain --untracked-files=normal) ]]; then
+    r+=(dotfiles)
+  fi
+  if [[ -d $1/private/.git && -n $(git -C "$1/private" status --porcelain --untracked-files=normal) ]]; then
+    r+=(dotfiles-private)
+  fi
+  echo "${r[*]:-なし}"
+}
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
 state_off='{"enable":false,"version":1,"windowsHome":null}'
@@ -788,6 +816,52 @@ else
     ng "読みも単語も空の語" "rc=$(rc "${h}") $(outerr "${h}")"
   fi
 fi
+
+# 39〜43. --import の最後の案内は、取り込みでテキストが変わった repo でだけ commit を促す (どちらも変わらなければ促さない)。
+#     dotfiles-private で促すときは、diff を自分の端末で見るよう添える (辞書の語が出る)。
+#     「名前:促す repo:表示」。置いて Windows 側を repo と同じにし、一度取り込んで commit してから (テキストを
+#     pjp-google-ime の書く形にそろえる。この test の config.txtpb は見出しのコメントが無いので、最初の取り込みで
+#     必ず書き換わる)、名前に合わせて Windows 側を変えて取り込む。辞書は、dict では今の辞書に語を足し (TSV が変わる)、
+#     both では辞書を 1 つ足す (未追跡の TSV ができる)
+for c in \
+  "none:なし:--import でテキストが変わらなければ、commit を促さず、commit するものは無いと出す" \
+  "config:dotfiles:--import で設定だけが変わったら、dotfiles でだけ commit を促す" \
+  "dict:dotfiles-private:--import で辞書だけが変わったら、dotfiles-private でだけ commit を促し、diff は自分の端末で見るよう添える" \
+  "both:dotfiles dotfiles-private:--import で設定と辞書が変わったら、両方で commit を促す" \
+  "noprivate:dotfiles:dotfiles-private が無いマシンの --import は、設定が変わったら dotfiles でだけ commit を促す"; do
+  IFS=: read -r name want desc <<<"${c}"
+  h=$(new_home "t39-${name}" "${state_on}" 1)
+  if [[ ${name} == noprivate ]]; then
+    rm -rf "${h}/private"
+  fi
+  run "${h}" 0
+  run "${h}" 0 --import
+  for d in "${h}/repo" "${h}/private"; do
+    if [[ -d ${d}/.git ]]; then
+      git -C "${d}" add -A
+      git -C "${d}" commit --quiet --allow-empty -m '取り込んだテキスト'
+    fi
+  done
+  if [[ ${name} == config || ${name} == both || ${name} == noprivate ]]; then
+    put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
+  fi
+  if [[ ${name} == dict ]]; then
+    put_windows_dictionaries "${h}" "テスト辞書=${dict}"$'あ\t亜\t名詞\t\n'
+  elif [[ ${name} == both ]]; then
+    put_windows_dictionaries "${h}" "テスト辞書=${dict}" $'足した辞書=あ\t亜\t名詞\t\n'
+  fi
+  run "${h}" 0 --import
+  prompted=$(commit_prompted "${h}")
+  dirty=$(dirty_repos "${h}")
+  last=$(tail -n 1 "${h}/out")
+  if [[ $(rc "${h}") == 0 && ${prompted} == "${want}" && ${dirty} == "${want}" ]] \
+    && { [[ ${want} != *dotfiles-private* ]] || [[ ${last} == *自分の端末* ]]; } \
+    && { [[ ${want} != なし ]] || { [[ ${last} == *'commit するものはありません'* ]] && ! outerr "${h}" | grep -q 'commit してください'; }; }; then
+    ok "${desc}"
+  else
+    ng "--import の案内 (${name})" "rc=$(rc "${h}") prompted=${prompted} dirty=${dirty} $(outerr "${h}")"
+  fi
+done
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

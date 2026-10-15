@@ -82,6 +82,8 @@
       #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)。
       #                    warn-helpers は scripts/ を丸ごと渡し、各 script の warn() / summary_warn()
       #                    (setup の最後の警告のまとめへ足す) が同じ振る舞いかを見る
+      #   pjp-pr-diff.test.sh
+      #                    nix/pkgs/pjp-pr-diff の script。上と同じ形に fzf を足して流す (Linux だけ)
       #   claude-footer-links.test.mjs
       #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
       #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
@@ -139,6 +141,7 @@
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
+          check-windows-openssh-version-test = scriptTest "check-windows-openssh-version" ./scripts/check-windows-openssh-version.sh;
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
@@ -177,6 +180,22 @@
           bootstrap-windows-powertoys-test = scriptTest "bootstrap-windows-powertoys" ./scripts/bootstrap-windows-powertoys.sh;
           bootstrap-windows-google-ime-install-test = scriptTest "bootstrap-windows-google-ime-install" ./scripts/bootstrap-windows-google-ime-install.sh;
           bootstrap-windows-files-test = scriptTest "bootstrap-windows-files" ./scripts/bootstrap-windows-files.sh;
+          # 主に包む前の script を流す。runtimeInputs の fzf が PATH の先頭に来ると、テストが置く
+          # 書き留め役の fzf が隠れるため。包んだ後の package は fzf を使わない --list だけを見る
+          pjp-pr-diff-test =
+            pkgs.runCommand "pjp-pr-diff-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.fzf
+                ];
+              }
+              ''
+                bash ${./tests/pjp-pr-diff.test.sh} ${./pkgs/pjp-pr-diff/pjp-pr-diff.sh} \
+                  ${lib.getExe (pkgs.callPackage ./pkgs/pjp-pr-diff { })}
+                touch $out
+              '';
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
@@ -275,6 +294,13 @@
             ];
             text = builtins.readFile ./scripts/flake-lock-age.sh;
           };
+
+          # PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す。
+          # home には modules/packages.nix が入れる。switch せずに試すなら、見たい PR の branch の
+          # checkout の中で:
+          #
+          #   nix run ~/ghq/github.com/pollenjp/dotfiles/nix#pjp-pr-diff
+          pjp-pr-diff = pkgs.callPackage ./pkgs/pjp-pr-diff { };
         }
         # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
         # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:

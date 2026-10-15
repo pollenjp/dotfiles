@@ -1087,6 +1087,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
+| `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
@@ -1126,6 +1127,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
+./nix/scripts/check-windows-openssh-version.sh       # Windows の OpenSSH の固定した版が winget の最新か（CI の windows-openssh が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
@@ -1205,6 +1207,51 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
 止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
 gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
+
+### PR の差分からファイルを選んで見る (pjp-pr-diff)
+
+`pjp-pr-diff`（fish の abbr と bash の alias は `gdp`）は、PR 全体の変更ファイルを fzf で選び、
+選んだファイルだけの `git diff` を出す（実体は `nix/pkgs/pjp-pr-diff/`。全ホストの PATH に入る）。
+Claude に PR を作らせた後、確かめるファイルを絞って読むためのもの。PR の branch の checkout
+（herdr の worktree など）の中で打つ。選んでいる間は、カーソルの行のファイルの差分をプレビューに
+出す（端末の 60% の幅で 100 桁が取れれば右、取れなければ下）。
+
+| 操作 | すること |
+| --- | --- |
+| 文字を打つ | パスで絞る（状態の文字 `M` / `A` / `D` / `R` には当たらない） |
+| Tab / Shift-Tab | 選んで、下 / 上の行へ動く（複数選べる。もう一度押すと外れる。端では反対の端へ回る） |
+| Enter | 選んだファイル（選んでいなければカーソルの行）の差分を `git diff` で出す。pager は git の設定（delta） |
+| Esc | 何も出さずにやめる |
+
+一覧は上からパスの順に並ぶ（`--layout=reverse`。fzf.fish の一覧と同じ向き）。
+
+比べる範囲は `merge-base(<base>, HEAD)` から `HEAD` まで（`<base>...HEAD`）。GitHub の PR の
+Files changed と同じ三点の比較で、`<base>` 側が後から進めた変更は混ざらない。作業ツリーの
+未コミットの変更は含めない。`<base>` は上から順に決める。
+
+1. `--base <ref>`（`--base=<ref>` でもよい）
+2. `gh pr view` が返す、この branch の PR の base（`origin/<名前>`）。main 以外へ向けた PR でも、その PR の差分になる
+3. `origin/HEAD`（PR が無い・gh が無い・ログインしていない・通信できないとき）
+
+- PR の base が手元に無い（fetch していない）ときは、3 へ落とさずに止まる。別の base と比べると、
+  PR に無いファイルまで並ぶため
+- 2 の remote はいつも `origin` と読む。fork から upstream へ出した PR では `--base upstream/<名前>` で指定する
+- 2 で GitHub にある PR の head が `HEAD` と違う（push していない・pull していない commit がある）
+  ときは、比べるのは手元の `HEAD` のまま、そのことを知らせる
+- どれに決めたか・merge-base・ファイルの数は、fzf のヘッダ（`--list` では stderr）に出る
+
+```sh
+gdp                          # 選んで出す
+gdp --base origin/develop    # 比べる相手を指定する (gh を引かない)
+gdp --list | sort            # 選ばずに並べる。push 済みなら gh pr diff --name-only | sort と同じ集合になる
+```
+
+`gh pr diff --name-only` は ASCII 以外を含むパスを `"nix/\346\227\245..."` のように引用して出す。
+`--list` は git の設定どおり（`core.quotepath = false` なので引用しない）に出すので、日本語などを
+含むパスだけ書き方が違う。
+
+rename は元と先の両方を `git diff` に渡すので、rename として出る（`--list` では先のパスだけ）。
+空白・改行・タブ・glob の文字（`[ab].txt` など）を含むパスも、そのままのファイルを指す。
 
 ## ssh について
 
@@ -2458,7 +2505,7 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 | `bootstrap-windows-powershell-profile.test.sh` | `$PROFILE` に読み込みの 1 行を足す判定（飛ばす・手で打つ案内・改行の合わせ方・消された行を足し直さない・`--force` / `--dry-run`・警告のまとめに残すもの）。偽の `pwsh.exe` と `wslpath` で流す（21 件） | `bootstrap-windows-powershell-profile-test`（Linux） |
 | `bootstrap-claude-hook.test.sh` | `bootstrap-claude-hook.sh` がガードと PostToolUse の 2 件を冪等に登録し、他の hook とキーを残すこと・止まる場合（6 件） | `bootstrap-claude-hook-test`（Linux） |
 | `video-offer-nudge.test.sh` | `video-offer-nudge.sh` が PR の作成・設計のページと文書（spec・ADR そのもの）の新規作成で知らせ、それ以外・ADR の dir の中のファイル・subagent の中・skill が無いマシン・「聞かない」の印があるセッション・壊れた入力では黙ること（21 件） | `video-offer-nudge-test`（Linux） |
-| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと・警告のまとめに残すもの)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（43 件） | `bootstrap-windows-google-ime-test`（Linux） |
+| `bootstrap-windows-google-ime.test.sh` | 組み立てて配る判定 (飛ばす・interop が無い・設定画面が開いている・壊れたテキスト・置く・同じ・時刻だけ違う・repo 側が進んだ・衝突・`--dry-run` / `--import` / `--force` / `--check`・読めないファイル・辞書が無い・退避の間引き・taskkill の 128・落とし直しの印・`--import` と commit していない変更・単語登録の形の辞書・辞書の衝突で語を出さない・`--show-words`・入っているがまだ使っていない (案内の出し先・exe が無ければ入っていない扱い)・`--import` が見る 3 つのテキストと、`Install-GoogleJapaneseInput.ps1` の変更では止まらないこと・読みも単語も空の語だけの差は同じ扱い・`--import` の最後の案内は、テキストが変わった repo でだけ commit を促すこと・警告のまとめに残すもの)。偽の `tasklist.exe` と `taskkill.exe` で流し、偽の repo と dotfiles-private は git の checkout にする（48 件） | `bootstrap-windows-google-ime-test`（Linux） |
 | `bootstrap-windows-google-ime-install.test.sh` | Google 日本語入力の版を確かめる判定 (飛ばす・手で打つ案内・揃っている・差がある・入っている版の方が新しい・入っている版が読めない・固定した版が winget に無い・入っていなければ UAC を知らせて入れる・入れられない・時間切れと待つ上限・揃っていても出す ※ の行・`--apply`・実行ビット・jq が無い・警告のまとめに残す見出しと直し方)。偽の `pwsh.exe` と `wslpath` で流す（33 件） | `bootstrap-windows-google-ime-install-test`（Linux） |
 | `bootstrap-windows-powertoys.test.sh` | Keyboard Manager に読み直させる判定 (飛ばす・送れた・同じなら送らない・`--force`・動いていない・interop が無い・`settings.json` が無い / 有効なプロファイルが `default` でないときは送らず記録もしない) と、その前に PowerToys が入っているかを確かめる判定 (入っている・無ければ入れる・入れられない・時間切れと待つ上限・スクリプトや `pwsh.exe` が無い・読み直し済みでも確かめる・実行ビット) と、警告のまとめに残すもの。偽の `powershell.exe`・`pwsh.exe`・`wslpath` で流す（33 件） | `bootstrap-windows-powertoys-test`（Linux） |
 | `bootstrap-dotfiles-private.test.sh` | dotfiles-private の clone / pull (未コミットの変更・repo でないもの・clone できない・その警告を警告のまとめにも残す)。手元の bare repo で流す（8 件） | `bootstrap-dotfiles-private-test`（Linux） |

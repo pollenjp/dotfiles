@@ -495,9 +495,9 @@ gh repo create pollenjp/dotfiles-private --private   # 辞書の置き場所 (�
 
 ```sh
 nix/scripts/bootstrap-windows-google-ime.sh --dry-run --show-words   # 差を見る (辞書の語も出るので自分の端末で)
-nix/scripts/bootstrap-windows-google-ime.sh --import   # Windows 側をテキストへ取り込む
-git diff                                               # dotfiles と dotfiles-private の両方で見る (dotfiles-private は辞書の語が出るので自分の端末で)
-git commit                                             # 両方で commit する
+nix/scripts/bootstrap-windows-google-ime.sh --import   # Windows 側をテキストへ取り込む。最後の行に commit する repo が出る
+git diff                                               # 出た repo で見る (dotfiles-private は辞書の語が出るので自分の端末で)
+git commit                                             # 出た repo で commit する (「取り込みの分で commit するものはありません」なら要らない)
 ```
 
 - `--import` は、取り込みが書き換えるテキスト (`config.txtpb`・`keymap.tsv`・`romaji.tsv` と、dotfiles-private の辞書のディレクトリ `dictionaries/` の中身) に commit していない変更があると止まる。先に commit するか戻しておく
