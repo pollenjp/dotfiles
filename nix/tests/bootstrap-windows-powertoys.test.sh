@@ -29,6 +29,8 @@
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告 (⚠ の枠は見出しと入れるコマンド) を
 #     setup の最後のまとめ用のファイルにも残す。何も無ければ残さない
 #
+# ## 本物の powershell.exe と pwsh.exe を見せない
+#
 # 本物の powershell.exe と pwsh.exe を見せないよう、要るコマンドだけを symlink で並べた PATH で流す。
 # 偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
 

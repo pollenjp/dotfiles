@@ -7,6 +7,8 @@
 #
 # flake の checks (video-offer-nudge-test) が Nix のサンドボックスで流す。使うのは
 # bash・jq・coreutils・grep だけ。skill の有無は CLAUDE_CONFIG_DIR を使い捨ての dir に向けて作る。
+# 「このセッションでは聞かない」の印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) も
+# 使い捨ての dir に作る。
 #
 # ## 確かめること
 #
@@ -15,8 +17,6 @@
 #     textbook や図・ADR の一覧) では黙る
 #   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは聞かない」の印が
 #     あるセッションでも黙り、いつも exit 0
-#
-# 印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) は使い捨ての dir に作る。
 
 set -u -o pipefail
 

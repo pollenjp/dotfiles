@@ -2496,8 +2496,9 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 
 - `nix/tests/<名前>.test.sh`・`<名前>.test.mjs`: bash・node で流すテスト。bootstrap や hook などの script の
   振る舞いや、設定ファイルの中身を確かめる（Linux だけ）
-- `nix/tests/<名前>.nix`: home の option から作られるもの。評価時に assert するので全 system で流れ、
-  `--all-systems --no-build` でも落ちる（外れた項目の名前がエラーに出る）
+- `nix/tests/<名前>.nix`: home の設定が作るもの（状態ファイル・`home.file` など）を確かめる。評価時の assert は
+  全 system で流れ、`--all-systems --no-build` でも落ちる（外れた項目の名前がエラーに出る）。ビルドして
+  確かめる項目は、そのランナーの system だけ
 - `nix/pkgs/<道具>/test_*.py`: `nix/pkgs/` の道具の unittest（ADR 012。Linux だけ）
 
 何を確かめるかはここに写さず、各テストの先頭のコメント（unittest は module の docstring）の
@@ -2522,10 +2523,11 @@ repo の script を使うので、サンドボックスの外でも流せる（�
 
 #### テストを足すとき
 
-- 先頭のコメント（unittest は module の docstring）に、流し方の 1 行・check の名前・「## 確かめること」を書く。
-  既存のテストの先頭を写すとよい。件数は書かない
-- 「## 確かめること」が無いテストは、CI の `lint` ジョブ（`check-test-headers.sh`）で落ちる。手元では
-  `./nix/scripts/check-test-headers.sh` で確かめる
+- 先頭のコメントに、check の名前と「## 確かめること」を書く（`*.test.sh` と `*.test.mjs` は流し方の 1 行も）。
+  同じ種類の既存のテストの先頭を写すとよい。件数は書かない
+- 「## 確かめること」の見出しと、その下の中身が無いテストは、CI の `lint` ジョブ（`check-test-headers.sh`）で
+  落ちる。先頭のコメントは、1 行目（shebang の次）から空行を挟まずに続く `#`（`*.test.mjs` は `//`）の行で、
+  unittest は module の docstring。手元では `./nix/scripts/check-test-headers.sh` で確かめる
 - `nix/tests/` の直下にはテストだけを置く。読み方を知らない種類のファイルも `lint` で落ちる
   （テストが使うデータはディレクトリに入れる）
 - `nix/flake.nix` の `checks` に載せる（`nix/tests/<名前>.test.sh` は、ほかの道具が要らなければ `scriptTest` で足りる）

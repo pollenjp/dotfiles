@@ -7,46 +7,62 @@
 #
 # 何を確かめるかは nix/README.md に写さず、各テストの先頭の「## 確かめること」にだけ書く
 # (TKT-162)。見るのは <nix>/tests 直下のファイル全部と <nix>/pkgs/*/test_*.py で、先頭の
-# コメントはファイルの種類で読み分ける。
+# コメントはファイルの種類で読み分ける (1 行目の shebang は飛ばす)。
 #
-#   *.test.sh・*.nix   1 行目から続く「#」の行
-#   *.test.mjs         1 行目から続く「//」の行
-#   test_*.py          module の docstring
+#   *.test.sh・*.nix   1 行目から空行を挟まずに続く「#」の行
+#   *.test.mjs         1 行目から空行を挟まずに続く「//」の行
+#   test_*.py          module の docstring (""" で囲む。前に置けるのは # の行と空行だけ)
 #
-# どれにも「## 確かめること」で始まる行があれば exit 0。無いテストがあれば、その名前を全部出して
-# exit 1。nix/tests に読み方を知らない種類のファイルがあっても exit 1 (新しい種類のテストが
-# 黙ってこの検査から外れないように)。--show は、各テストの「## 確かめること」の節 (次の ## の
-# 見出しか、先頭のコメントの終わりまで) を、コメントの印を外して並べる (テストの一覧の代わり)。
+# どれにも「## 確かめること」で始まる行と、その下に空でない行があれば exit 0。無いテストがあれば、
+# その名前を全部出して exit 1。nix/tests に読み方を知らない種類のファイルがあっても exit 1 (新しい
+# 種類のテストが黙ってこの検査から外れないように)。--show は、各テストの「## 確かめること」の節
+# (次の ## の見出しか、先頭のコメントの終わりまで) を、コメントの印を外して並べる (テストの一覧の代わり)。
 #
 # CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を見る。
 
 set -eu -o pipefail
 
 usage() {
-  echo "使い方: $(basename "$0") [--show] [<nix のパス>]" >&2
+  cat <<'EOS'
+テストの先頭のコメントに「## 確かめること」があるかを確かめる。
+
+使い方:
+  check-test-headers.sh [<nix のパス>]          確かめる (省けば、この script の隣の nix/)
+  check-test-headers.sh --show [<nix のパス>]   各テストの「## 確かめること」を並べる
+  check-test-headers.sh -h, --help              これ
+EOS
 }
 
 show=0
-case ${1:-} in
-  --show)
-    show=1
-    shift
-    ;;
-  -*)
-    usage
-    exit 2
-    ;;
-esac
-if (($# > 1)); then
-  usage
-  exit 2
-fi
+nix_dir=
+for arg in "$@"; do
+  case ${arg} in
+    --show) show=1 ;;
+    -h | --help)
+      usage
+      exit 0
+      ;;
+    -*)
+      echo "不明な引数です: ${arg}" >&2
+      usage >&2
+      exit 2
+      ;;
+    *)
+      if [[ -n ${nix_dir} ]]; then
+        echo "<nix のパス> は 1 つだけです: ${arg}" >&2
+        usage >&2
+        exit 2
+      fi
+      nix_dir=${arg}
+      ;;
+  esac
+done
 
 script_dir=$(
   cd -- "$(dirname -- "$0")" &>/dev/null
   pwd -P
 )
-nix_dir=${1:-$(dirname "${script_dir}")}
+nix_dir=${nix_dir:-$(dirname "${script_dir}")}
 
 # 先頭の印を外した行 (コメントの印と、その後ろの空白 1 つまで) を出す
 strip_marker() {
@@ -91,13 +107,14 @@ head_of() {
   done <"${file}"
 }
 
-# 先頭のコメント (標準入力) から「## 確かめること」の節を出す。末尾の空行は落とす。無ければ何も出さない
+# 先頭のコメント (標準入力) から「## 確かめること」の節を出す。末尾の空行は落とす。
+# 見出しが無いか、見出しの下が空なら何も出さない
 section_of() {
-  local line in=0 lines=()
+  local line found=0 lines=()
   while IFS= read -r line; do
-    if ((in == 0)); then
-      if [[ ${line} == '## 確かめること' || ${line} == '## 確かめること '* ]]; then
-        in=1
+    if ((found == 0)); then
+      if [[ ${line} == '## 確かめること'* ]]; then
+        found=1
         lines+=("${line}")
       fi
       continue
@@ -108,7 +125,7 @@ section_of() {
   while ((${#lines[@]} > 0)) && [[ -z ${lines[-1]//[[:space:]]/} ]]; do
     unset 'lines[-1]'
   done
-  if ((${#lines[@]} > 0)); then
+  if ((${#lines[@]} > 1)); then
     printf '%s\n' "${lines[@]}"
   fi
 }
@@ -135,6 +152,10 @@ for f in "${files[@]}"; do
   fi
   section=$(section_of <<<"${head}")
   if [[ -z ${section} ]]; then
+    # 見えているのに「無い」と言われて迷わないよう、見出しの文字がファイルにあればそう添える
+    if grep -qF '## 確かめること' "${f}"; then
+      name+=" (「## 確かめること」の文字はあるが、先頭のコメントの外にあるか、見出しの形が違うか、下が空)"
+    fi
     missing+=("${name}")
     continue
   fi
@@ -146,13 +167,14 @@ done
 if ((${#missing[@]} > 0)); then
   echo "!! 先頭のコメントに「## 確かめること」が無いテストがあります:" >&2
   printf '   %s\n' "${missing[@]}" >&2
-  echo "   何を確かめるかを、先頭のコメント (test_*.py は module の docstring) の「## 確かめること」に" >&2
-  echo "   書いてください (nix/README.md の「テスト」)。" >&2
+  echo "   何を確かめるかを、先頭のコメントの「## 確かめること」の下に書いてください (nix/README.md の「テスト」)。" >&2
+  echo "   先頭のコメントは、1 行目 (shebang の次) から空行を挟まずに続く「#」(*.test.mjs は「//」) の行で、" >&2
+  echo "   test_*.py は module の docstring です。" >&2
 fi
 if ((${#unknown[@]} > 0)); then
   echo "!! 先頭のコメントの読み方を知らない種類のファイルが tests にあります:" >&2
   printf '   %s\n' "${unknown[@]}" >&2
-  echo "   テストなら $(basename "$0") に読み方を足し、テストでなければ tests の外へ移してください。" >&2
+  echo "   テストなら $(basename "$0") に読み方を足し、テストでなければ tests の中のディレクトリか tests の外へ移してください。" >&2
 fi
 if ((${#missing[@]} > 0 || ${#unknown[@]} > 0)); then
   exit 1
