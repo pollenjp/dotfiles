@@ -17,7 +17,7 @@
 #                Nix 管理パスを編集しようとしたら止めて、正しい手順を返す
 #   PostToolUse  Bash (if "Bash(gh pr create *)")  video-offer-nudge.sh
 #   PostToolUse  Write                           video-offer-nudge.sh
-#                設計の書き出しと PR の作成を Claude に知らせる (解説動画を作るか聞く)
+#                設計の書き出しと PR の作成を Claude に知らせる (解説動画の短尺を作り始める)
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
 
