@@ -92,7 +92,24 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-warn() { printf '!! %s\n' "$*" >&2; }
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
 die() {
   printf '!! %s\n' "$*" >&2
   exit 1
@@ -203,18 +220,20 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     # 雛形が変わっても既存のファイルには触らない。古い形のままだと、登録簿のホストに
     # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
-      warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。"
-      warn "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。"
-      warn "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
+      warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。" \
+        "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。" \
+        "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
     fi
     if ! grep -q 'notion\.profile' "${flake_file}"; then
-      warn "flake.nix の local に dotfiles.claude.notion.profile がありません。"
-      warn "規則に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
+      warn "flake.nix の local に dotfiles.claude.notion.profile がありません。" \
+        "規則に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
     fi
   else
-    warn "既存の ${flake_file} が別のパスを指しています:"
-    grep -n 'inputs.dotfiles.url' "${flake_file}" >&2 || true
-    warn "本体は ${nix_dir} です。作り直すなら --force を付けてください。"
+    # 指している先の行 (あれば) を続きの行にする
+    pointed=$(grep -n 'inputs.dotfiles.url' "${flake_file}" || true)
+    warn "既存の ${flake_file} が別のパスを指しています:" \
+      ${pointed:+"${pointed}"} \
+      "本体は ${nix_dir} です。作り直すなら --force を付けてください。"
   fi
 fi
 

@@ -15,6 +15,8 @@
 #     再実行では変わらず、別の値が入っていたら元の値を見せてから置き換える
 #   - settings.json が無い / 壊れている、生成ファイルが無い / 形が違うときの扱い
 #   - settings.json の隣に中間ファイルを残さない
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、生成ファイルが無くて飛ばす警告を
+#     続きの行ごと setup の最後のまとめ用のファイルにも残す
 
 set -u -o pipefail
 
@@ -151,6 +153,20 @@ if [[ $(leftovers "${work}/t1") == 0 && $(leftovers "${work}/t3") == 0 && $(left
   ok "settings.json の隣に中間ファイルを残さない"
 else
   ng "settings.json の隣に中間ファイルを残さない" "$(find "${work}" -name 'settings.json.*')"
+fi
+
+# 9. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 生成ファイルが無くて飛ばす警告を、続きの行
+#    (先に switch する世代) ごとまとめ用に残す。書けたときは何も残さない
+h=$(new_home t9 '{"model":"opus"}' "")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+h2=$(new_home t9b '{"model":"opus"}' "${links}")
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}"
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == '生成ファイルがありません: '* ]] \
+  && grep -qE '^[[:space:]]+footer-links\.json を置く世代へ先に home-manager switch してください' "${h}/warnings" \
+  && [[ $(rc "${h2}") == 0 && ! -s ${h2}/warnings ]]; then
+  ok "setup から走るとき、生成ファイルが無い警告を続きの行ごとまとめ用に残す (書けたときは残さない)"
+else
+  ng "生成ファイルが無いときのまとめ" "rc=$(rc "${h}") $(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

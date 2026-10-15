@@ -79,7 +79,9 @@
       #
       # nix/tests/ のテストも載せる。
       #   <名前>.test.sh   bootstrap や hook などの script の振る舞い。bash・jq・git だけの
-      #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)
+      #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)。
+      #                    warn-helpers は scripts/ を丸ごと渡し、各 script の warn() / summary_warn()
+      #                    (setup の最後の警告のまとめへ足す) が同じ振る舞いかを見る
       #   pjp-pr-diff.test.sh
       #                    nix/pkgs/pjp-pr-diff の script。上と同じ形に fzf を足して流す (Linux だけ)
       #   claude-footer-links.test.mjs
@@ -136,6 +138,7 @@
                 touch $out
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+          warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-windows-openssh-version-test = scriptTest "check-windows-openssh-version" ./scripts/check-windows-openssh-version.sh;

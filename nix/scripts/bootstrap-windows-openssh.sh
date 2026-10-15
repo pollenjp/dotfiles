@@ -25,7 +25,8 @@
 # 2. pwsh.exe で Install-OpenSSH.ps1 -Check を流す (管理者は要らない。何も変えない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。
-#    どちらも exit 0 (setup を止めない。揃えるのは人が決める)
+#    どちらも exit 0 (setup を止めない。揃えるのは人が決める)。⚠ の見出しと揃えるコマンドは、
+#    setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。差があれば Windows のデスクトップに
 # UAC が 1 回出る。setup から --apply では流さない (UAC を押すまで止まり、動いている ssh も巻き込むため)。
@@ -73,10 +74,28 @@ else
   c_reset=""
 fi
 
-# 自動で確かめられないときに、同じことを手で確かめるコマンドを出す
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+# 自動で確かめられないときに、同じことを手で確かめるコマンド (warn の続きの行にする)
 manual() {
-  echo "   Windows の PowerShell で次を打つと、同じことを確かめられます:" >&2
-  echo "     Install-OpenSSH -Check" >&2
+  echo "Windows の PowerShell で次を打つと、同じことを確かめられます:"
+  echo "  Install-OpenSSH -Check"
 }
 
 if ! command -v jq &>/dev/null; then
@@ -100,13 +119,11 @@ if [[ -z ${windows_home} || ! -f ${deployed} ]]; then
 fi
 
 if ! command -v pwsh.exe &>/dev/null; then
-  echo "!! pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" >&2
-  manual
+  warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
   exit 0
 fi
 if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]]; then
-  echo "!! Install-OpenSSH.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" >&2
-  manual
+  warn "Install-OpenSSH.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" "$(manual)"
   exit 0
 fi
 
@@ -153,22 +170,28 @@ if ((rc == 0)); then
 fi
 if ((rc == 1)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
   rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
+  title="Windows の OpenSSH が、dotfiles で固定した版と揃っていません"
+  fix=(
+    "揃えるには次のどちらかを打つ (差があれば Windows に UAC が 1 回出ます):"
+    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh --apply"
+    "  PowerShell: Install-OpenSSH"
+  )
   {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-    printf '%s⚠️  Windows の OpenSSH が、dotfiles で固定した版と揃っていません%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️  %s%s\n' "${c_warn}" "${title}" "${c_reset}"
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
     # PowerShell の締めの 1 行 (⚠️ … 揃っていない → Install-OpenSSH …) は、下の揃えるコマンドと重なるので落とす
     printf '%s\n' "${out}" | grep -v '^⚠️ 固定した版と揃っていない' | sed 's/^/    /'
-    printf '%s⚠️  揃えるには次のどちらかを打つ (差があれば Windows に UAC が 1 回出ます):%s\n' "${c_warn}" "${c_reset}"
-    printf '%s⚠️    WSL:        %s/bootstrap-windows-openssh.sh --apply%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
-    printf '%s⚠️    PowerShell: Install-OpenSSH%s\n' "${c_warn}" "${c_reset}"
+    for line in "${fix[@]}"; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
+    done
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   } >&2
+  # setup の最後のまとめには、見出しと揃えるコマンドだけを残す (状態の表は、その場の枠に出ている)
+  summary_warn "${title}" "${fix[@]}"
   exit 0
 fi
-echo "!! pwsh.exe で Windows の OpenSSH を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" >&2
-if [[ -n ${out} ]]; then
-  printf '%s\n' "${out}" | sed 's/^/   /' >&2
-fi
-manual
+# pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする
+warn "pwsh.exe で Windows の OpenSSH を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" \
+  ${out:+"${out}"} "$(manual)"
 exit 0

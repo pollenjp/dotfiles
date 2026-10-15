@@ -118,8 +118,22 @@ note() {
   printf '  %s\n' "$*"
 }
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  printf '!! %s\n' "$*" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 die() {
@@ -227,25 +241,25 @@ ensure_clone() {
     fi
     # 取れなくても手元のクローンは使えるので、警告だけ残して続ける。
     if ! run git -C "${dir}" pull --ff-only; then
-      warn "pull に失敗しました。手元のクローンのまま続けます: ${dir}"
-      note "鍵もネットワークも問題ないなら、履歴が分岐しています。手で解決してください。"
+      warn "pull に失敗しました。手元のクローンのまま続けます: ${dir}" \
+        "鍵もネットワークも問題ないなら、履歴が分岐しています。手で解決してください。"
       stale=1
     fi
     return 0
   fi
 
   if [[ -e ${dir} ]]; then
-    warn "${dir} は git リポジトリではありません。取得を飛ばします。"
-    note "退けてから再実行してください。"
+    warn "${dir} は git リポジトリではありません。取得を飛ばします。" \
+      "退けてから再実行してください。"
     unreachable=1
     return 0
   fi
 
   run mkdir -p "$(dirname "${dir}")"
   if ! run git clone "${repo_url}" "${dir}"; then
-    warn "clone に失敗しました: ${repo_url}"
-    note "private リポジトリなので SSH 鍵が要ります。次で疎通を確認してください:"
-    note "  ssh -T git@github.com"
+    warn "clone に失敗しました: ${repo_url}" \
+      "private リポジトリなので SSH 鍵が要ります。次で疎通を確認してください:" \
+      "  ssh -T git@github.com"
     unreachable=1
   fi
   return 0
@@ -292,8 +306,8 @@ link_kind() {
       fi
       real=$(readlink -f "${dest}" 2>/dev/null || true)
       if [[ ${real} == /nix/store/* ]]; then
-        warn "${kind}/${name}: Nix 管理のものと名前が衝突しています。飛ばします。"
-        note "nix/files/claude/${kind}/${name} と、どちらか一方へ寄せてください。"
+        warn "${kind}/${name}: Nix 管理のものと名前が衝突しています。飛ばします。" \
+          "nix/files/claude/${kind}/${name} と、どちらか一方へ寄せてください。"
       else
         warn "${kind}/${name}: 別の symlink が既にあります (-> ${target})。飛ばします。"
       fi
@@ -302,8 +316,8 @@ link_kind() {
     fi
 
     if [[ -e ${dest} ]]; then
-      warn "${kind}/${name}: 実体が既にあります。飛ばします。"
-      note "Anthropic 配信のものか、直接置いた試作と同名の可能性があります。"
+      warn "${kind}/${name}: 実体が既にあります。飛ばします。" \
+        "Anthropic 配信のものか、直接置いた試作と同名の可能性があります。"
       skipped=$((skipped + 1))
       continue
     fi
@@ -396,8 +410,8 @@ fi
 
 echo "==> クローン (${dir})"
 if [[ ${have_git} == 0 ]]; then
-  warn "git が見つかりません。取得を飛ばします。"
-  note "先に home-manager switch を実行してください。"
+  warn "git が見つかりません。取得を飛ばします。" \
+    "先に home-manager switch を実行してください。"
   unreachable=1
 else
   ensure_clone
@@ -421,11 +435,11 @@ fi
 
 echo
 if [[ ${unreachable} == 1 ]]; then
-  warn "claude-skills を取得できていません。private な skill 無しで続けます。"
-  note "公開している skill / agent / command は Nix が配置するので、そちらは使えます。"
-  note "このリポジトリを使わないマシンなら、これで問題ありません。"
-  note "鍵やネットワークを整えたら、この手順だけ実行し直せばよい:"
-  note "  $0"
+  warn "claude-skills を取得できていません。private な skill 無しで続けます。" \
+    "公開している skill / agent / command は Nix が配置するので、そちらは使えます。" \
+    "このリポジトリを使わないマシンなら、これで問題ありません。" \
+    "鍵やネットワークを整えたら、この手順だけ実行し直せばよい:" \
+    "  $0"
   exit 0
 fi
 

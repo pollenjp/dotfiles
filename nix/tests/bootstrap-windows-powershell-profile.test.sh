@@ -18,6 +18,8 @@
 #   - $PROFILE が無ければ作り、改行 (CRLF / LF・末尾の改行の有無) を合わせて 1 行を足す
 #   - 1 行が既にあれば変えない。足した記録があって消えていたら足し直さず、--force で足す
 #   - --dry-run は書かない。UTF-16 の $PROFILE には書かない。壊れた記録では止まる
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、exit 0 で続ける警告を続きの行
+#     (手で打つコマンド・--force の案内) ごと setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -305,6 +307,37 @@ if [[ $(rc "${h}") == 2 ]]; then
   ok "知らない引数は exit 2"
 else
   ng "知らない引数" "rc=$(rc "${h}")"
+fi
+
+# 18. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): pwsh.exe が無ければ、見出しと手で打つコマンドを
+#     まとめ用に残す。足せたときは何も残さない
+h=$(new_home t18 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 1
+h2=$(new_home t18b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe が見つかりません'* ]] \
+  && grep -qF "  Add-Content -Path \$PROFILE -Value '${line}'" "${h}/warnings" \
+  && [[ $(rc "${h2}") == 0 && -f $(profile "${h2}") && ! -s ${h2}/warnings ]]; then
+  ok "setup から走るとき、pwsh.exe が無ければ見出しと手で打つコマンドをまとめ用に残す (足せたときは残さない)"
+else
+  ng "pwsh.exe が無いときのまとめ" "$(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null)"
+fi
+if outerr "${h}" | grep -qF "     Add-Content -Path \$PROFILE -Value '${line}'"; then
+  ok "その場の手で打つコマンドは今のまま (5 文字字下げ)"
+else
+  ng "その場の手で打つコマンドが変わった" "$(outerr "${h}")"
+fi
+
+# 19. 足した記録があって 1 行が消えているときの案内も、--force の案内ごとまとめ用に残す
+h=$(new_home t19 "${state_on}" 1)
+run "${h}" 0
+printf 'Invoke-Expression (&starship init powershell)\n' >"$(profile "${h}")"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == "以前 \$PROFILE に足した 1 行が見当たりません: "* ]] \
+  && grep -qE '^[[:space:]]+.*--force' "${h}/warnings"; then
+  ok "足した 1 行が消えているときの案内も、--force の案内ごとまとめ用に残す"
+else
+  ng "消えているときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

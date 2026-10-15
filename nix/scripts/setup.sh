@@ -22,6 +22,9 @@
 #   git は後者なので壊れはしないが、**古いロジックで最後まで走る**。更新後の
 #   bootstrap-*.sh や登録簿を古いオーケストレータが呼ぶ形になるので、
 #   --self-update は pull の後 必ず exec で自分を張り替える。
+# - 途中で出た警告は、最後の「結果」の後にもまとめて出す (TKT-146)。手順を止めない
+#   警告は warn() で出すと、子の bootstrap-*.sh の分も DOTFILES_SETUP_WARNINGS の
+#   ファイル経由で集まる。仕組みは「警告のまとめ」の節。
 
 set -eu -o pipefail
 
@@ -105,6 +108,11 @@ flake_update=0
 # ヘッダの表示に使う。起動時に一度だけ数える (再描画のたびに git を呼ばない)。
 repo_behind_count=""
 
+# 途中で出た警告を溜めるディレクトリ (「警告のまとめ」の節)。main で作る。
+# 外から渡された DOTFILES_SETUP_WARNINGS は使わない (どの区切りのファイルかは自分で決める)。
+warn_dir=""
+unset DOTFILES_SETUP_WARNINGS
+
 usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
@@ -186,6 +194,7 @@ if [[ -t 1 && -z ${NO_COLOR:-} ]]; then
   c_green=$'\033[32m'
   c_yellow=$'\033[33m'
   c_red=$'\033[31m'
+  c_warn=$'\033[1;33m'
 else
   c_reset=""
   c_bold=""
@@ -194,6 +203,7 @@ else
   c_green=""
   c_yellow=""
   c_red=""
+  c_warn=""
 fi
 
 hr() {
@@ -204,8 +214,23 @@ note() {
   printf '  %s%s%s\n' "${c_dim}" "$*" "${c_reset}"
 }
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# 最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  printf '%s!! %s%s\n' "${c_yellow}" "$*" "${c_reset}" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '%s!! %s%s\n' "${c_yellow}" "${text//${nl}/${nl}   }" "${c_reset}" >&2
+  summary_warn "$@"
+}
+
+# 最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# DOTFILES_SETUP_WARNINGS が指すファイルへ足す。子の bootstrap-*.sh も同じ形の
+# warn() / summary_warn() を持ち、同じ変数のファイルへ足す (「警告のまとめ」の節)。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 die() {
@@ -746,8 +771,8 @@ pull_repo() {
   fi
   if ! git -C "${repo_dir}" diff --quiet \
     || ! git -C "${repo_dir}" diff --cached --quiet; then
-    warn "未 commit の変更があるので本体は更新しません。自分で pull してください:"
-    warn "  git -C ${repo_dir} status"
+    warn "未 commit の変更があるので本体は更新しません。自分で pull してください:" \
+      "  git -C ${repo_dir} status"
     return 1
   fi
   if ! branch=$(git -C "${repo_dir}" symbolic-ref --short -q HEAD); then
@@ -816,11 +841,16 @@ self_update_and_reexec() {
     return 1
   fi
   printf '\n%s==> 本体を更新 (%s)%s\n' "${c_bold}" "${repo_dir}" "${c_reset}"
+  # 更新しなかった理由 (未 commit の変更など) は、まとめでは [本体の更新] として出す。
+  # 手順より前に出るので、いちばん流れやすい。
+  warn_context self-update
   if ! pull_repo; then
+    warn_context ""
     # fetch だけ通っていることがあるので数え直す
     repo_behind_count=$(repo_behind)
     return 1
   fi
+  warn_context ""
   # 更新で自分が移動・改名されていると exec できない ($0 が ~/dotfiles/setup の
   # ような symlink なら宙に浮く)。ここで古いまま続けると「新しい checkout を
   # 古いオーケストレータが回す」形になるので、続行せず止める。
@@ -829,6 +859,9 @@ self_update_and_reexec() {
   fi
   build_rebuild_args
   note '新しい setup.sh で続けます。'
+  # exec では EXIT の trap が走らないので、警告を溜める場所はここで片付ける
+  # (更新できたときは、まだ何も溜まっていない)。新しい setup.sh は自分で作り直す。
+  cleanup_warnings
   export DOTFILES_SETUP_SELF_UPDATED=1
   # bash 3.2 では set -u と空配列の展開が両立しないので ${arr[@]+...} で受ける
   exec "$0" ${rebuild_args[@]+"${rebuild_args[@]}"}
@@ -853,7 +886,12 @@ tui_end() {
   fi
 }
 
-trap tui_end EXIT
+on_exit() {
+  tui_end
+  cleanup_warnings
+}
+
+trap on_exit EXIT
 
 clear_screen() {
   printf '\033[H\033[2J'
@@ -1403,14 +1441,16 @@ warn_untracked() {
   if [[ -z ${untracked} ]]; then
     return 0
   fi
+  # ファイルの一覧は続きの行にする (まとめにも並ぶ)
+  untracked=$(printf '%s\n' "${untracked}" | sed 's/^/  /')
   if [[ ${flake_dir} == "${nix_dir}" ]]; then
-    warn "git 未追跡のファイルがあります。flake からは見えません:"
-    printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
-    warn "必要なら git add してから実行してください。"
+    warn "git 未追跡のファイルがあります。flake からは見えません:" \
+      "${untracked}" \
+      "必要なら git add してから実行してください。"
   else
-    warn "git 未追跡のファイルがあります (path: 経由なので今回の switch には入ります):"
-    printf '%s\n' "${untracked}" | sed 's/^/     /' >&2
-    warn "CI は git 管理下しか見ないので、残すなら git add してください。"
+    warn "git 未追跡のファイルがあります (path: 経由なので今回の switch には入ります):" \
+      "${untracked}" \
+      "CI は git 管理下しか見ないので、残すなら git add してください。"
   fi
 }
 
@@ -1422,18 +1462,18 @@ warn_clobber() {
     note "既存ファイルは <名前>.${backup_ext} へ退避してから置き換えます (-b ${backup_ext})。"
     paths=$(backup_collision_paths "${backup_ext}")
     if [[ -n ${paths} ]]; then
-      warn "退避先が既にあります。上書きされないので switch は失敗します:"
-      printf '%s\n' "${paths}" | sed 's/^/     /' >&2
-      warn "先に消すか、--backup=<別の拡張子> を使ってください。"
+      warn "退避先が既にあります。上書きされないので switch は失敗します:" \
+        "$(printf '%s\n' "${paths}" | sed 's/^/  /')" \
+        "先に消すか、--backup=<別の拡張子> を使ってください。"
     fi
     return 0
   fi
   paths=$(clobber_paths)
   if [[ -n ${paths} ]]; then
-    warn "home-manager 管理下ではない実ファイルがあります:"
-    printf '%s\n' "${paths}" | sed 's/^/     /' >&2
-    warn "退避しない設定なので、switch はこれらで中断します。"
-    warn "退避するなら --backup を付けて実行してください (メニューでは b)。"
+    warn "home-manager 管理下ではない実ファイルがあります:" \
+      "$(printf '%s\n' "${paths}" | sed 's/^/  /')" \
+      "退避しない設定なので、switch はこれらで中断します。" \
+      "退避するなら --backup を付けて実行してください (メニューでは b)。"
   fi
 }
 
@@ -1543,17 +1583,43 @@ step_switch() {
   if have home-manager; then
     # 2 回目以降。profile に入った CLI をそのまま使う。
     run home-manager "${hm_args[@]}" || return 1
+  else
+    # 初回。programs.home-manager.enable が CLI を profile へ入れるのは
+    # activate が成功した後なので、まだ home-manager コマンドが無い。
+    # レジストリ経由の `nix run home-manager` は flake.lock で固定したものと
+    # 別バージョンになるため使わない (README の警告)。
+    if ! have nix && [[ ${dry_run} == 0 ]]; then
+      warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
+      return 1
+    fi
+    run nix run "${flake_dir}#home-manager" -- "${hm_args[@]}" || return 1
+  fi
+  hm_warnings_to_summary
+}
+
+# switch した設定のモジュールの warnings (config.warnings) を、警告のまとめに足す。
+#
+# home-manager はこれを switch の出力に (nix の evaluation warning として) 1 度出すだけで、
+# switch は ✔ のまま進むので埋もれる (dotfiles.claude.notion.profile が未設定、など)。
+# nix の出力を写すと進捗表示が消えるので、同じ設定の config.warnings を評価し直して取る
+# (eval cache が効けば 1 秒ほど)。1 件を 1 つの見出しにし、warning の 2 行目からは字下げして
+# 続きの行にする (まとめのファイルの形)。読めなければ黙って飛ばす。lock は書き換えない。
+hm_warnings_read=0
+hm_warnings_to_summary() {
+  local out
+  if [[ ${dry_run} == 1 || -z ${DOTFILES_SETUP_WARNINGS-} ]] || ! have nix; then
     return 0
   fi
-  # 初回。programs.home-manager.enable が CLI を profile へ入れるのは
-  # activate が成功した後なので、まだ home-manager コマンドが無い。
-  # レジストリ経由の `nix run home-manager` は flake.lock で固定したものと
-  # 別バージョンになるため使わない (README の警告)。
-  if ! have nix && [[ ${dry_run} == 0 ]]; then
-    warn "nix がありません。手順「Nix をインストール」を先に実行してください。"
-    return 1
+  if ! out=$(nix eval --raw --no-write-lock-file \
+    "${flake_dir}#homeConfigurations.\"${host}\".config.warnings" \
+    --apply 'ws: builtins.concatStringsSep "\n" (map (w: builtins.replaceStrings ["\n"] ["\n   "] w) ws)' \
+    2>/dev/null); then
+    return 0
   fi
-  run nix run "${flake_dir}#home-manager" -- "${hm_args[@]}" || return 1
+  hm_warnings_read=1
+  if [[ -n ${out} ]]; then
+    { printf '%s\n' "${out}" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+  fi
 }
 
 step_chsh() {
@@ -1740,36 +1806,14 @@ mise_extra_tools() {
   ' "${f}"
 }
 
-# Claude の git を gh の資格情報で通す設定 (dotfiles.claude.gitViaGh.enable) なのに
-# gh が使えない理由。使えるなら何も出さない。
+# 自動化できない手順 (0 / 5 / 7) と、次にやることを出す。
 #
-# bootstrap-claude-env.sh も同じ警告を出すが、手順の途中に 1 度出るだけで結果は ✔ になり
-# 埋もれる。後で Claude の push が「could not read Username」で落ちても gh と結び付け
-# にくいので、最後のまとめにも残すためにだけ使う。
-claude_env_gh_problem() {
-  local f="${HOME}/.local/state/dotfiles/claude-env.json"
-  [[ -r ${f} ]] || return 0
-  command -v jq &>/dev/null || return 0
-  jq -e 'any(.gitConfig[]?; .v | startswith("!gh "))' "${f}" &>/dev/null || return 0
-  if ! command -v gh &>/dev/null; then
-    echo 'gh が見つからない'
-  elif ! gh auth token --hostname github.com &>/dev/null; then
-    echo 'gh にログインしていない'
-  fi
-}
-
-# 自動化できない手順 (0 / 5 / 7) と、次にやることを出す
+# 手順が出した警告の出し直しはここに書かない。警告のまとめ (print_warning_summary) が
+# 結果の直後に出すので、ここでも出すと二重になる (bootstrap-claude-env.sh の gh の警告を
+# 以前ここで判定し直していたのも、まとめに寄せた。TKT-146)。
 post_notes() {
-  local extra gh_problem drift
+  local extra drift
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
-  if is_selected bootstrap-claude-env; then
-    gh_problem=$(claude_env_gh_problem || true)
-    if [[ -n ${gh_problem} ]]; then
-      note "Claude の git は gh の資格情報で GitHub へ通す設定だが、${gh_problem}。"
-      note '        gh (packages.nix が入れる) で gh auth login するか、ローカル flake の local で'
-      note '        dotfiles.claude.gitViaGh.enable = false にする。'
-    fi
-  fi
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)
     if [[ -n ${extra} ]]; then
@@ -1805,24 +1849,140 @@ post_notes() {
   if [[ ${flake_dir} == "${nix_dir}" ]]; then
     note 'ローカル flake が未設置です。一度だけ --steps local-flake を実行すると'
     note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
-  elif ! grep -q 'hostsWith' "${flake_dir}/flake.nix"; then
+  elif ! is_selected local-flake && [[ ${hm_warnings_read} != 1 ]]; then
     # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
-    # ここで知らせる (setup-local-flake.sh の警告と同じ)。
-    note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
-    note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
-    note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
-    note '        手で足したホストが無ければ次で作り直して local に書く:'
-    note "          ${script_dir}/setup-local-flake.sh --force"
-  elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
-    note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
-    note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
-    note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
+    # ここで知らせる (setup-local-flake.sh の警告と同じ)。次のときは出さない (二重になる)。
+    #   local-flake を流した   setup-local-flake.sh の同じ警告がまとめに載る
+    #   switch の後に home-manager の warnings を読めた
+    #                          notion.profile が未設定なら、その warning がまとめに載る
+    #                          (local の無い古い雛形でも同じ warning が出る)。ここの grep
+    #                          より正確 (mkHome で渡したときも見分ける)
+    if ! grep -q 'hostsWith' "${flake_dir}/flake.nix"; then
+      note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
+      note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
+      note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
+      note '        手で足したホストが無ければ次で作り直して local に書く:'
+      note "          ${script_dir}/setup-local-flake.sh --force"
+    elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
+      note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
+      note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
+      note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
+    fi
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
 
+##################
+# 警告のまとめ   #
+##################
+
+# 途中で出た警告を、最後の「結果」の直後に ⚠ の枠でまとめて出し直す (TKT-146)。
+#
+# 手順を止めない警告は exit 0 のまま手順を ✔ にするので、長い出力の途中に 1 度出るだけで
+# 流れてしまう。そこで setup.sh と子の bootstrap-*.sh などは、手順を止めない警告を
+# warn() で出す。warn() はその場に出すのに加えて、DOTFILES_SETUP_WARNINGS が指す
+# ファイルへ同じ行を足す (⚠ の枠のように出し方を自分で決めるものは summary_warn() で
+# 足すだけ)。子の script の warn() / summary_warn() も同じ形にしてある。
+#
+#   ファイル  区切り (本体の更新・手順) ごとに 1 つ。setup.sh が区切りに入るたびに
+#             DOTFILES_SETUP_WARNINGS を差し替えるので、子は自分がどの手順かを知らなくてよい
+#   形        字下げの無い行が 1 件の見出しで、続く字下げした行 (直し方など) がその続き
+#
+# まとめに載せるのは、✔ で終わった手順と本体の更新 (--self-update) の分だけ (載せるのは手順を
+# 止めなかった警告で、✖ は結果の ✖ と最後の赤い案内が知らせる)。✖ の手順の警告は、
+# execute() が最初の ✖ で止まるので、最後の手順の出力 (「[N/M] …」の見出しから「結果」まで)
+# の中にあり、失敗を調べるときに読む。exit 1 で止まる前のエラーを warn() で出さないのも同じ理由。
+#
+# setup.sh の stderr を写して「!! 」の行を拾う形にしなかったのは、子の stderr が端末で
+# なくなり、⚠ の枠の色 ([[ -t 2 ]]) や nix の進捗表示が消えるため。home-manager switch の
+# 中で nix が出す evaluation warning (モジュールの warnings) も同じ理由で写さず、switch の後に
+# config.warnings を評価し直して取る (hm_warnings_to_summary)。
+
+# 警告を足す先 (区切り) を切り替える。$1 は区切りの名前で、空なら足さない。
+# 区切りに入るたびに空にする (メニューで u を押し直したときに、前の分を残さない)。
+warn_context() {
+  unset DOTFILES_SETUP_WARNINGS
+  if [[ -z $1 || -z ${warn_dir} ]]; then
+    return 0
+  fi
+  export DOTFILES_SETUP_WARNINGS="${warn_dir}/$1"
+  { : >"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
+cleanup_warnings() {
+  unset DOTFILES_SETUP_WARNINGS
+  if [[ -n ${warn_dir} ]]; then
+    rm -rf "${warn_dir}" || true
+    warn_dir=""
+  fi
+}
+
+# 区切りごとに溜まった警告を、⚠ の枠でまとめて出す。引数は「まとめに出す名前 区切り」の組の
+# 並び (区切りは warn_context に渡した名前)。どこにも溜まっていなければ何も出さない。
+#
+# 数えるのも出すのも、いったん読み込んだ行から行う (外のコマンドに頼らない)。空白だけの行は
+# 捨てる。続きの行が長い警告 (pwsh.exe の出力ごと残したものなど) は、頭と末尾 (直し方は末尾に
+# 来る) を残して間を省く。全部はその場の出力にある。
+print_warning_summary() {
+  local args=("$@") tags=() lines=() count=0 i k file line head start end body
+  local rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
+  local max_body=10 keep_head=6 keep_tail=3
+  [[ -n ${warn_dir} ]] || return 0
+  # tags[n] は lines[n] が見出しならまとめに出す名前、続きの行なら空
+  for ((i = 0; i + 1 < ${#args[@]}; i += 2)); do
+    file="${warn_dir}/${args[i + 1]}"
+    [[ -s ${file} ]] || continue
+    head=0
+    while IFS= read -r line || [[ -n ${line} ]]; do
+      case ${line} in
+        *[![:space:]]*) ;;
+        *) continue ;;
+      esac
+      # 字下げの無い行が見出し。見出しより前に続きの行があれば、それを見出しにする
+      if [[ ${line} == [[:space:]]* && ${head} == 1 ]]; then
+        tags+=("")
+      else
+        line=${line#"${line%%[![:space:]]*}"}
+        tags+=("${args[i]}")
+        count=$((count + 1))
+        head=1
+      fi
+      lines+=("${line}")
+    done <"${file}"
+  done
+  if ((count == 0)); then
+    return 0
+  fi
+  printf '\n%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+  printf '%s⚠️  途中で出た警告が %d 件あります (どれも手順を止めていないので、上の出力に流れています)%s\n' \
+    "${c_warn}" "${count}" "${c_reset}"
+  printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+  i=0
+  while ((i < ${#lines[@]})); do
+    printf '%s⚠️  [%s] %s%s\n' "${c_warn}" "${tags[i]}" "${lines[i]}" "${c_reset}"
+    # 見出しの後ろの、次の見出しまでが続きの行
+    start=$((i + 1))
+    end=${start}
+    while ((end < ${#lines[@]})) && [[ -z ${tags[end]} ]]; do
+      end=$((end + 1))
+    done
+    body=$((end - start))
+    for ((k = start; k < end; k++)); do
+      if ((body > max_body && k == start + keep_head)); then
+        printf '    %s   … (%d 行を省いた。全部はその場の出力にある)%s\n' \
+          "${c_dim}" "$((body - keep_head - keep_tail))" "${c_reset}"
+        k=$((end - keep_tail - 1))
+        continue
+      fi
+      printf '    %s\n' "${lines[k]}"
+    done
+    i=${end}
+  done
+  printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+}
+
 execute() {
-  local idxs=() states=() i n total failed=0
+  local idxs=() states=() summary=() i n total failed=0
 
   while IFS= read -r i; do
     idxs+=("${i}")
@@ -1856,6 +2016,8 @@ execute() {
     hr
     printf '%s[%d/%d] %s%s\n' "${c_bold}" "$((n + 1))" "${total}" "${step_labels[i]}" "${c_reset}"
     hr
+    # この手順 (と子の bootstrap-*.sh) の警告は、手順ごとの区切りに溜める
+    warn_context "step-${n}"
     if run_step "${step_ids[i]}"; then
       states[n]="ok"
     else
@@ -1865,16 +2027,23 @@ execute() {
       break
     fi
   done
+  warn_context ""
 
   printf '\n%s==> 結果%s\n' "${c_bold}" "${c_reset}"
+  # まとめに載せるのは本体の更新と、✔ で終わった手順の分 (「警告のまとめ」の節)
+  summary=("本体の更新" self-update)
   for ((n = 0; n < total; n++)); do
     i=${idxs[n]}
     case ${states[n]} in
-      ok) printf '  %s✔%s %s\n' "${c_green}" "${c_reset}" "${step_labels[i]}" ;;
+      ok)
+        printf '  %s✔%s %s\n' "${c_green}" "${c_reset}" "${step_labels[i]}"
+        summary+=("${step_ids[i]}" "step-${n}")
+        ;;
       fail) printf '  %s✖%s %s\n' "${c_red}" "${c_reset}" "${step_labels[i]}" ;;
       *) printf '  %s· %s (未実行)%s\n' "${c_dim}" "${step_labels[i]}" "${c_reset}" ;;
     esac
   done
+  print_warning_summary "${summary[@]}"
 
   if [[ ${failed} == 1 ]]; then
     printf '\n%s失敗した手順があります。直してから同じ手順を選び直してください。%s\n' \
@@ -1946,6 +2115,10 @@ fi
 if [[ -n ${backup_ext} ]]; then
   validate_backup_ext "${backup_ext}"
 fi
+
+# 途中で出た警告を溜める場所 (「警告のまとめ」の節)。本体の更新の警告も載せるので、
+# その前に作る。作れなければ、まとめを出さないだけで続ける。
+warn_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-setup.XXXXXX" 2>/dev/null) || warn_dir=""
 
 # 何かを実行する前に本体を最新にする。ホストの自動判定より前に置くのは、
 # 更新後の (新しい) 判定ロジックに任せるため。更新できれば戻ってこない。

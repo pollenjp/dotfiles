@@ -22,6 +22,8 @@
 #     入っていれば入れない。スクリプトが無い・pwsh.exe が無い・失敗する・入れられないときも、
 #     知らせて読み直しへ進む (exit 0)。default.json が無くても、読み直し済みでも確かめる
 #   - script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告 (⚠ の枠は見出しと入れるコマンド) を
+#     setup の最後のまとめ用のファイルにも残す。何も無ければ残さない
 #
 # 本物の powershell.exe と pwsh.exe を見せないよう、要るコマンドだけを symlink で並べた PATH で流す。
 # 偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
@@ -426,6 +428,56 @@ if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 0 ]] && o
   ok "default.json が無くても、入っていなければ入れてから飛ばす"
 else
   ng "default.json が無い" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
+fi
+
+# 19. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 入れられなければ、⚠ の見出しと入れるコマンドを
+#     まとめ用に残す (winget の出力は残さない。その場の ⚠ の枠には出ている)
+h=$(new_home t19 "${state_on}" 1 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 \
+  FAKE_PWSH_OUT2='winget が失敗した (終了コード 0x8A150011)' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に PowerToys を入れられませんでした (終了コード 1)' ]] \
+  && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-powertoys\.sh ' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+PowerShell: Install-PowerToys$' "${h}/warnings" \
+  && ! grep -q '0x8A150011' "${h}/warnings"; then
+  ok "setup から走るとき、入れられなければ ⚠ の見出しと入れるコマンドをまとめ用に残す"
+else
+  ng "入れられないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 20. 有効なプロファイルが default でない・settings.json が無いときの案内も、まとめ用に残す
+h=$(new_home t20 "${state_on}" 1)
+printf '%s' '{"properties":{"activeConfiguration":{"value":"work"}},"name":"Keyboard Manager","version":"1"}' \
+  >"$(km_settings_json "${h}")"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 0
+h2=$(new_home t20b "${state_on}" 1)
+rm "$(km_settings_json "${h2}")"
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == *'default ではありません (work)'* ]] \
+  && [[ $(rc "${h2}") == 0 && $(head -n 1 "${h2}/warnings" 2>/dev/null) == *'settings.json'*'がまだ無い'* ]] \
+  && grep -qE '^[[:space:]]+PowerToys の設定画面を一度開いてから' "${h2}/warnings"; then
+  ok "プロファイルが default でない・settings.json が無いときの案内も、まとめ用に残す"
+else
+  ng "Keyboard Manager の案内のまとめ" "$(cat "${h}/warnings" "${h2}/warnings" 2>/dev/null)"
+fi
+
+# 21. 読み直させられない (powershell.exe が失敗する) ときは、見出し・出力・手で読み直す方法を 1 件として残す
+h=$(new_home t21 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PS_RC=126 FAKE_PS_OUT='Exec format error' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'powershell.exe で Keyboard Manager に読み直させられませんでした'* ]] \
+  && grep -qE '^[[:space:]]+Exec format error$' "${h}/warnings" && grep -qE '^[[:space:]]+.*オフにしてオンに戻す' "${h}/warnings" \
+  && [[ $(grep -c '^[^[:space:]]' "${h}/warnings") == 1 ]]; then
+  ok "読み直させられなければ、見出し・出力・手で読み直す方法を 1 件としてまとめ用に残す"
+else
+  ng "読み直させられないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 22. 入っていて読み直させられたときは、まとめ用には何も残さない
+h=$(new_home t22 "${state_on}" 1 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 0
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]] && outerr "${h}" | grep -q '読み直させました'; then
+  ok "入っていて読み直させられたときは、まとめ用には何も残さない"
+else
+  ng "警告が無いのにまとめ用に残した" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"
 fi
 
 # 18. script に実行ビットがある (setup.sh は実行ビットの無い bootstrap を「実行できません」で止める)

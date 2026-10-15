@@ -97,15 +97,33 @@ set -eu -o pipefail
 settings="${HOME}/.claude/settings.json"
 generated="${HOME}/.local/state/dotfiles/claude-env.json"
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
+warn() {
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
+}
+
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
 if [[ ! -r ${generated} ]]; then
-  echo "!! 生成ファイルがありません: ${generated}" >&2
-  echo "   dotfiles.claude.gitViaGh.enable を持つ世代へ先に home-manager switch してください。" >&2
-  echo "   この手順は飛ばします。" >&2
+  warn "生成ファイルがありません: ${generated}" \
+    "dotfiles.claude.gitViaGh.enable を持つ世代へ先に home-manager switch してください。" \
+    "この手順は飛ばします。"
   exit 0
 fi
 
@@ -124,12 +142,12 @@ uses_gh=0
 if jq -e 'any(.gitConfig[]; .v | startswith("!gh "))' "${generated}" >/dev/null; then
   uses_gh=1
   if ! command -v gh &>/dev/null; then
-    echo "!! gh が見つかりません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
-    echo "   gh は packages.nix が入れます。home-manager switch の後に gh auth login するか、" >&2
-    echo "   このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+    warn "gh が見つかりません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" \
+      "gh は packages.nix が入れます。home-manager switch の後に gh auth login するか、" \
+      "このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。"
   elif ! gh auth token --hostname github.com &>/dev/null; then
-    echo "!! gh にログインしていません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" >&2
-    echo "   gh auth login を実行するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+    warn "gh にログインしていません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。" \
+      "gh auth login を実行するか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。"
   fi
 
   # git の設定ファイル (system / global) にある credential helper は、env で足す gh より
@@ -142,12 +160,12 @@ if jq -e 'any(.gitConfig[]; .v | startswith("!gh "))' "${generated}" >/dev/null;
     | awk -F'\t' '$1 != "command"' \
     | grep -vE '^[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]*$|gh auth git-credential' || true)
   if [[ -n ${others} ]]; then
-    echo "!! git の設定ファイルに credential helper があります。Claude の git では gh より先に呼ばれ、" >&2
-    echo "   gh で認証が通ると gh の token がそちらにも保存されます (store なら平文の ~/.git-credentials):" >&2
     # scope と key の間の tab を空白にして字下げする。sed の \t は macOS の BSD sed では
     # tab にならないので tr で替える。
-    tr '\t' ' ' <<<"${others}" | sed 's/^/     /' >&2
-    echo "   外すか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。" >&2
+    warn "git の設定ファイルに credential helper があります。Claude の git では gh より先に呼ばれ、" \
+      "gh で認証が通ると gh の token がそちらにも保存されます (store なら平文の ~/.git-credentials):" \
+      "$(tr '\t' ' ' <<<"${others}" | sed 's/^/  /')" \
+      "外すか、このマシンの flake で dotfiles.claude.gitViaGh.enable = false にしてください。"
   fi
 fi
 

@@ -17,6 +17,8 @@
 #     「前回ここへ置いた中身と違う」とは出さず、置いた記録が無いことを出す
 #   - --force は衝突でも上書きして記録する。--dry-run は置き先も記録も書かない
 #   - script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、配り先の設定が無くて飛ばす警告を
+#     続きの行ごと setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の nix-instantiate を見せない
 #
@@ -205,6 +207,21 @@ if [[ -x ${script} ]]; then
   ok "script に実行ビットがある (setup.sh は実行できない bootstrap で止まる)"
 else
   ng "script に実行ビットが無い" "$(ls -l "${script}")"
+fi
+
+# 9. 配り先の設定が無い (まだ switch していない): 飛ばして exit 0。setup から走るとき
+#    (DOTFILES_SETUP_WARNINGS がある) は、その警告を続きの行ごとまとめ用に残す。配れたときは何も残さない
+h=$(new_home t9 'repo v1')
+rm "${h}/.local/state/dotfiles/windows-files.json"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+h2=$(new_home t9b 'repo v1')
+DOTFILES_SETUP_WARNINGS="${h2}/warnings" run "${h2}"
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == '配り先の設定がありません: '* ]] \
+  && grep -qE '^[[:space:]]+dotfiles\.wsl\.windowsFiles を持つ世代へ先に home-manager switch してください' "${h}/warnings" \
+  && [[ $(rc "${h2}") == 0 && ! -s ${h2}/warnings ]]; then
+  ok "配り先の設定が無ければ、その警告を続きの行ごとまとめ用に残す (配れたときは残さない)"
+else
+  ng "配り先の設定が無いときのまとめ" "rc=$(rc "${h}") $(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

@@ -78,8 +78,23 @@ step() {
   printf '%s+ %s%s\n' "${c_cyan}" "$*" "${c_reset}"
 }
 
+# 止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh の手順 (flake-lock-age.sh 経由) から走るときは、最後の「警告のまとめ」にも
+# 同じ行を残す (summary_warn)。
 warn() {
-  printf '%s!! %s%s\n' "${c_yellow}" "$*" "${c_reset}" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '%s!! %s%s\n' "${c_yellow}" "${text//${nl}/${nl}   }" "${c_reset}" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 die() {

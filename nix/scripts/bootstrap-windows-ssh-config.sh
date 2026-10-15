@@ -100,8 +100,22 @@ else
   c_reset=""
 fi
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  printf '!! %s\n' "$*" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 # dotfiles-private の clone の場所 (bootstrap-dotfiles-private.sh と同じ決め方)
@@ -127,10 +141,10 @@ Include config.d/*.ssh_config
 EOF
 }
 
-# ssh.exe で確かめられなかったときに、同じことを手で確かめるコマンドを出す
+# ssh.exe で確かめられなかったときに、同じことを手で確かめるコマンド (warn の続きの行にする)
 manual_check() {
-  echo "   Windows の PowerShell で次を打つと、読んだファイルを確かめられます:" >&2
-  echo "     ssh -v -G nonexistent.invalid 2>&1 | Select-String 'Reading configuration'" >&2
+  echo "Windows の PowerShell で次を打つと、読んだファイルを確かめられます:"
+  echo "  ssh -v -G nonexistent.invalid 2>&1 | Select-String 'Reading configuration'"
 }
 
 if ! command -v jq &>/dev/null; then
@@ -139,9 +153,9 @@ if ! command -v jq &>/dev/null; then
 fi
 
 if [[ ! -r ${state_file} ]]; then
-  echo "!! 配り先の設定がありません: ${state_file}" >&2
-  echo "   dotfiles.wsl.windowsFiles を持つ世代へ先に home-manager switch してください。" >&2
-  echo "   この手順は飛ばします。" >&2
+  warn "配り先の設定がありません: ${state_file}" \
+    "dotfiles.wsl.windowsFiles を持つ世代へ先に home-manager switch してください。" \
+    "この手順は飛ばします。"
   exit 0
 fi
 if ! jq -e 'type == "object"' "${state_file}" >/dev/null 2>&1; then
@@ -175,9 +189,9 @@ if [[ -d ${src_dir} ]]; then
   done
 fi
 if ((${#srcs[@]} == 0)); then
-  warn "Windows の ssh の設定を配りません: 正本の *.ssh_config がありません (${src_dir})。"
-  echo "   dotfiles-private を取れていないか、ssh/ が空です。Windows 側のファイルはそのまま残します。" >&2
-  echo "   取るには: ${script_dir}/bootstrap-dotfiles-private.sh" >&2
+  warn "Windows の ssh の設定を配りません: 正本の *.ssh_config がありません (${src_dir})。" \
+    "dotfiles-private を取れていないか、ssh/ が空です。Windows 側のファイルはそのまま残します。" \
+    "取るには: ${script_dir}/bootstrap-dotfiles-private.sh"
   exit 0
 fi
 
@@ -384,8 +398,7 @@ if ((! dry_run)); then
     fi
   done
   if ! command -v ssh.exe &>/dev/null; then
-    warn "ssh.exe が見つからないので、Windows の ssh が読むファイルを確かめていません。"
-    manual_check
+    warn "ssh.exe が見つからないので、Windows の ssh が読むファイルを確かめていません。" "$(manual_check)"
   else
     rc=0
     # -k: SIGTERM を無視されても、少し待って KILL する (setup を止めない)
@@ -398,12 +411,11 @@ if ((! dry_run)); then
       done < <(grep -E 'Bad (owner|permissions)' <<<"${out}")
       check_failed+=("  .ssh の ACL を見る: icacls.exe '$(wslpath -w "${win_ssh}" 2>/dev/null || printf '%s' "${win_ssh}")'")
     elif ((rc == 124 || rc == 126 || rc == 127 || rc == 137)) || ! grep -q 'Reading configuration data' <<<"${out}"; then
-      # 時間切れ (124・KILL の 137) と、起動できない (126・127) は、確かめられなかったものとして扱う
-      warn "ssh.exe で確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているか、ssh.exe が応答しません)。"
-      if [[ -n ${out} ]]; then
-        printf '%s\n' "${out}" | head -5 | sed 's/^/   /' >&2
-      fi
-      manual_check
+      # 時間切れ (124・KILL の 137) と、起動できない (126・127) は、確かめられなかったものとして扱う。
+      # ssh.exe の出力 (あれば先頭の 5 行) と、手で打つコマンドを続きの行にする
+      out_head=$(printf '%s\n' "${out}" | head -5)
+      warn "ssh.exe で確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているか、ssh.exe が応答しません)。" \
+        ${out_head:+"${out_head}"} "$(manual_check)"
     elif ((rc != 0)); then
       # 設定の誤りなどで読み終えられなかった。ssh.exe はどの接続先でも同じように失敗する
       check_failed+=("ssh.exe が設定を読み終えられませんでした (終了コード ${rc}。どの接続先でも同じように失敗します):")

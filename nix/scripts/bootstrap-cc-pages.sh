@@ -90,8 +90,22 @@ note() {
   printf '  %s\n' "$*"
 }
 
+# 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
+# setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
 warn() {
-  printf '!! %s\n' "$*" >&2
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  printf '!! %s\n' "${text//${nl}/${nl}   }" >&2
+  summary_warn "$@"
+}
+
+# setup.sh の最後の「警告のまとめ」にだけ警告を残す (その場には出さない。引数は warn と同じ)。
+# setup.sh が手順ごとに DOTFILES_SETUP_WARNINGS でファイルを渡す。単体で流したときは何もしない。
+summary_warn() {
+  [[ -n ${DOTFILES_SETUP_WARNINGS-} ]] || return 0
+  local IFS=$'\n' nl=$'\n' text
+  text="$*"
+  { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
 die() {
@@ -224,8 +238,8 @@ if [[ ${unreachable} == 0 ]]; then
   echo
   echo "==> ビルド"
   if ! command -v go >/dev/null 2>&1; then
-    warn "go が見つかりません。ビルドを飛ばします。"
-    note "mise が go を入れた後に、この手順だけ実行し直せば済みます。"
+    warn "go が見つかりません。ビルドを飛ばします。" \
+      "mise が go を入れた後に、この手順だけ実行し直せば済みます。"
     no_go=1
   else
     note "go: $(go version 2>/dev/null)"
@@ -244,8 +258,8 @@ if [[ ${unreachable} == 0 && ${no_go} == 0 ]]; then
   echo
   echo "==> daemon"
   if ! systemctl --user show-environment >/dev/null 2>&1; then
-    warn "systemd の user session がありません。daemon は起こしません。"
-    note "手で動かすなら: ${bin_link} serve"
+    warn "systemd の user session がありません。daemon は起こしません。" \
+      "手で動かすなら: ${bin_link} serve"
     no_daemon=1
   else
     run systemctl --user daemon-reload
@@ -269,22 +283,22 @@ fi
 
 echo
 if [[ ${unreachable} == 1 ]]; then
-  warn "cc-pages を取得できていません。ビューア無しで続けます。"
-  note "このリポジトリを使わないマシンなら、これで問題ありません。"
-  note "鍵やネットワークを整えたら、この手順だけ実行し直せばよい:"
-  note "  $0"
+  warn "cc-pages を取得できていません。ビューア無しで続けます。" \
+    "このリポジトリを使わないマシンなら、これで問題ありません。" \
+    "鍵やネットワークを整えたら、この手順だけ実行し直せばよい:" \
+    "  $0"
   exit 0
 fi
 
 if [[ ${no_go} == 1 ]]; then
-  warn "バイナリを作れていません (上の !! を参照)。daemon は起こしていません。"
-  note "直したら、この手順だけ実行し直せばよい: $0"
+  warn "バイナリを作れていません (上の !! を参照)。daemon は起こしていません。" \
+    "直したら、この手順だけ実行し直せばよい: $0"
   exit 0
 fi
 
 if [[ ${no_daemon} == 1 ]]; then
-  warn "バイナリは置きましたが、daemon は起こせていません (上の !! を参照)。"
-  note "いまの状態: $0 --status"
+  warn "バイナリは置きましたが、daemon は起こせていません (上の !! を参照)。" \
+    "いまの状態: $0 --status"
   exit 0
 fi
 
