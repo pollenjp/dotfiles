@@ -13,13 +13,17 @@
 #
 #   - winget-pkgs の場所は Install-OpenSSH.ps1 のパッケージ ID から組む
 #   - 固定した版が winget-pkgs の最新なら exit 0。版は数として比べる (9.8.3.0 < 10.0.0.0)
-#   - 固定した版より新しい版があり、見送りの一覧に無ければ exit 1。release notes の URL を添える
-#   - 見送りは版ごと。新しい版がどれも見送り済みなら exit 0
-#   - 固定した版・パッケージが winget-pkgs に無い、版の形でないディレクトリがある、は exit 1
-#   - GitHub の最新 release が winget に 7 日たっても載らない (パッケージ ID が移ったなど) は exit 1。
-#     7 日たつまでと、見送った版は落とさない。最新 release に Win64 の MSI が無いのも exit 1
-#   - 確かめられなかった (固定した版が読めない・見送りの一覧が壊れている・API の失敗・gh が無い) は exit 2
-#   - GitHub Actions の中では、落ちるときに ::error の行を出す
+#   - 固定した版より新しい版があり、見送りの一覧に無ければ、GitHub に出て 30 日 (猶予) たったら exit 1。
+#     release notes の URL を添える。29 日までは exit 0 で、版・出た日・あと何日で知らせるかを 1 行出す。
+#     新しい版がいくつかあれば、いちばん早く出た版から数える。出た日が分からない版は待たない
+#   - 見送りは版ごと。新しい版がどれも見送り済みなら exit 0。見送った版は猶予の数えにも入れない
+#   - 固定した版・パッケージが winget-pkgs に無い、版の形でないディレクトリがある、は猶予を置かずに exit 1
+#   - GitHub に出た版が 30 日たっても winget に載らない (パッケージ ID が移ったなど) は exit 1。
+#     30 日たつまでと、見送った版は落とさない。最新 release に Win64 の MSI が無いのは猶予を置かずに exit 1
+#   - 確かめられなかった (固定した版が読めない・見送りの一覧が壊れている・API の失敗・gh が無い・
+#     猶予の日数が読めない) は exit 2。release の一覧だけ取れず、新しい版が出た日が分からないときも exit 2
+#   - 猶予の日数は CHECK_WINDOWS_OPENSSH_GRACE_DAYS で変えられる
+#   - GitHub Actions の中では、落ちるときに ::error の行を、猶予の中の版には ::notice の行を出す
 #
 # ## 本物の gh を見せない
 #
@@ -132,20 +136,20 @@ contents_json() {
   done | jq -s '.'
 }
 
-# Win32-OpenSSH の releases (新しい順)。引数は「tag|winget の版|公開日時」。MSI の名前に winget の版が
-# 入る。版が空なら Win64 の MSI を持たない release にする
+# Win32-OpenSSH の releases (新しい順)。引数は「tag|winget の版|公開日時」で、4 つめに |pre を足すと
+# prerelease にする。MSI の名前に winget の版が入る。版が空なら Win64 の MSI を持たない release にする
 releases_json() {
-  local e tag v at
+  local e tag v at pre
   for e in "$@"; do
-    IFS='|' read -r tag v at <<<"${e}"
-    jq -n --arg tag "${tag}" --arg v "${v}" --arg at "${at}" '{
+    IFS='|' read -r tag v at pre <<<"${e}"
+    jq -n --arg tag "${tag}" --arg v "${v}" --arg at "${at}" --arg pre "${pre}" '{
       url: "https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/1",
       html_url: ("https://github.com/PowerShell/Win32-OpenSSH/releases/tag/" + $tag),
       id: 1,
       tag_name: $tag,
       name: $tag,
       draft: false,
-      prerelease: false,
+      prerelease: ($pre == "pre"),
       created_at: $at,
       published_at: $at,
       assets: ([
@@ -176,8 +180,15 @@ rel_102='v10.2.0.0p1-Preview|10.2.0.0|2026-06-01T18:00:00Z'
 releases_now=$(releases_json "${rel_100}" "${rel_983}")
 releases_101=$(releases_json "${rel_101}" "${rel_100}" "${rel_983}")
 releases_102=$(releases_json "${rel_102}" "${rel_101}" "${rel_100}")
+# 猶予 (30 日) の境目を確かめる release。ago N は、出てからの日数が N になる公開日時、rel <版> <公開日時> は
+# releases_json の 1 件。ちょうど N 日前にすると、script が日数を数えるまでの間に時計が 1 秒戻るだけで
+# N - 1 日になる (手元で 8 本並べて流したとき、40 日が 39 日になって落ちた)。半日ずらし、どちらへ時計が
+# ずれても日数が変わらないようにする
+ago() { date -u -d "-$1 day -12 hour" +%Y-%m-%dT%H:%M:%SZ; }
+rel() { printf 'v%sp1-Preview|%s|%s' "$1" "$1" "$2"; }
+at29=$(ago 29)
 # 昨日出た 10.1.0.0 (まだ winget に載っていなくてよい)・Win64 の MSI を持たない 10.1.0.0
-releases_101_recent=$(releases_json "v10.1.0.0p1-Preview|10.1.0.0|$(date -u -d '-1 day' +%Y-%m-%dT%H:%M:%SZ)" "${rel_100}" "${rel_983}")
+releases_101_recent=$(releases_json "$(rel 10.1.0.0 "$(ago 1)")" "${rel_100}" "${rel_983}")
 releases_101_nomsi=$(releases_json 'v10.1.0.0p1-Preview||2026-03-02T18:00:00Z' "${rel_100}" "${rel_983}")
 not_found='{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/contents#get-repository-content","status":"404"}'
 
@@ -213,7 +224,7 @@ new_case() {
 
 # $1: ケースのディレクトリ、$2: 1 なら偽の gh を PATH に置かない、残り: script の引数。
 # 引数を渡さなければ、ケースの Install-OpenSSH.ps1 と skipped-versions.txt を渡す。
-# 環境変数 (FAKE_GH_*・GITHUB_ACTIONS_FOR_TEST) は呼び出し側で付ける。
+# 環境変数 (FAKE_GH_*・GITHUB_ACTIONS_FOR_TEST・GRACE_DAYS_FOR_TEST) は呼び出し側で付ける。
 run() {
   local d=$1 nogh=$2
   shift 2
@@ -225,6 +236,7 @@ run() {
     set -- "${d}/Install-OpenSSH.ps1" "${d}/skipped-versions.txt"
   fi
   env PATH="${path}" FAKE_GH_LOG="${d}/gh-calls" GITHUB_ACTIONS="${GITHUB_ACTIONS_FOR_TEST-}" \
+    CHECK_WINDOWS_OPENSSH_GRACE_DAYS="${GRACE_DAYS_FOR_TEST-}" \
     "${BASH}" "${script}" "$@" >"${d}/out" 2>"${d}/err"
   echo $? >"${d}/rc"
 }
@@ -278,15 +290,66 @@ else
   ng "パッケージ ID から組んでいない" "calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-# 3. 固定した版より新しい版がある: exit 1。版・release notes の URL・見送りの一覧の場所を出す
+# 3. 固定した版より新しい版があり、GitHub に出て 30 日を過ぎた: exit 1。版・release notes の URL・
+#    見送りの一覧の場所を出す
 d=$(new_case t3 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
 if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' \
   && seen "${d}" -F 'https://github.com/PowerShell/Win32-OpenSSH/releases/tag/v10.1.0.0p1-Preview' \
   && seen "${d}" -F 'skipped-versions.txt'; then
-  ok "新しい版があれば exit 1 で、版・release notes の URL・見送りの一覧の場所を出す"
+  ok "新しい版が 30 日を過ぎていれば exit 1 で、版・release notes の URL・見送りの一覧の場所を出す"
 else
   ng "新しい版がある" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3b. 猶予の境目: GitHub に出て 29 日の新しい版は、まだ知らせない (exit 0)。版・出た日・あと何日で
+#     知らせるかを 1 行に出す。新しい版が無いとは言わない。GitHub Actions の外では :: の行を出さない
+d=$(new_case t3b 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "${at29}")" "${rel_100}" "${rel_983}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" '^::' \
+  && seen "${d}" "10\\.1\\.0\\.0.*${at29:0:10}.*あと 1 日" \
+  && ! seen "${d}" '見送っていないものは winget にも GitHub にも無い'; then
+  ok "GitHub に出て 29 日の新しい版は exit 0 で待ち、版・出た日・あと 1 日を 1 行に出す"
+else
+  ng "29 日の新しい版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3c. 猶予の境目: GitHub に出て 30 日たった新しい版は知らせる (exit 1)
+d=$(new_case t3c 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "$(ago 30)")" "${rel_100}" "${rel_983}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0'; then
+  ok "GitHub に出て 30 日たった新しい版は exit 1 で知らせる"
+else
+  ng "30 日の新しい版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3d. 新しい版がいくつかあるときは、いちばん早く出た版から数える (25 日前の 10.1.0.0 から数えて、あと 5 日。
+#     5 日前の 10.2.0.0 から数えると、あと 25 日になってしまう)
+d=$(new_case t3d 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_102}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.2.0.0 "$(ago 5)")" "$(rel 10.1.0.0 "$(ago 25)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' \
+  && seen "${d}" '10\.1\.0\.0.*あと 5 日' && seen "${d}" '10\.2\.0\.0.*あと 5 日'; then
+  ok "新しい版がいくつかあるときは、いちばん早く出た版から数える (あと 5 日)"
+else
+  ng "いくつかの新しい版 (待つ)" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3e. いちばん早い版が 30 日を過ぎたら、あとから出た版がまだ新しくても知らせる。どちらの版も出す
+d=$(new_case t3e 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_102}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.2.0.0 "$(ago 5)")" "$(rel 10.1.0.0 "$(ago 31)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' && seen "${d}" '⚠.*10\.2\.0\.0'; then
+  ok "いちばん早い版が 30 日を過ぎたら、あとから出た版が新しくても exit 1 で両方を知らせる"
+else
+  ng "いくつかの新しい版 (知らせる)" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3f. 見送った版は数えない: 40 日前の 10.1.0.0 を見送ったら、5 日前の 10.2.0.0 から数えて、あと 25 日
+d=$(new_case t3f 10.0.0.0 '10.1.0.0 1Password の agent に繋がらない')
+FAKE_GH_CONTENTS="${winget_102}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.2.0.0 "$(ago 5)")" "$(rel 10.1.0.0 "$(ago 40)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '10\.2\.0\.0.*あと 25 日'; then
+  ok "見送った版は数えず、見送っていない版のうちいちばん早く出たものから数える (あと 25 日)"
+else
+  ng "見送った版を数えた" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # 4. 新しい版を見送った: exit 0 で、見送った理由を出す。ps1 が CRLF でも読める
@@ -319,23 +382,26 @@ else
   ng "見送りは版ごと" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# 7. 新しい版の release が GitHub に見つからない: releases の一覧の URL を代わりに出す
+# 7. 新しい版の release が GitHub に見つからない: 出た日が分からないので待たずに知らせ (exit 1)、
+#    releases の一覧の URL を代わりに出す
 d=$(new_case t7 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '10\.1\.0\.0.*https://github\.com/PowerShell/Win32-OpenSSH/releases$'; then
-  ok "新しい版の release が見つからなければ、releases の一覧の URL を出す"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*出た日が分からない' \
+  && seen "${d}" '10\.1\.0\.0.*https://github\.com/PowerShell/Win32-OpenSSH/releases$'; then
+  ok "新しい版の release が見つからなければ、出た日が分からないので待たずに exit 1 で、releases の一覧の URL を出す"
 else
   ng "release が見つからない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# 8. release notes が取れなくても、新しい版は知らせる (releases の一覧の URL を代わりに出す)
+# 8. release の一覧が取れず、新しい版が GitHub に出た日が分からない: 猶予の中かを決められないので exit 2
+#    (API の失敗は新しい版の知らせではないので、⚠ で「上げるか見送るか」を迫らない)
 d=$(new_case t8 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES_ERR='gh: HTTP 502' FAKE_GH_RELEASES_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0' \
-  && seen "${d}" -F 'https://github.com/PowerShell/Win32-OpenSSH/releases'; then
-  ok "release notes が取れなくても exit 1 で知らせ、releases の一覧の URL を出す"
+if [[ $(rc "${d}") == 2 ]] && ! seen "${d}" '⚠' \
+  && seen "${d}" '10\.1\.0\.0' && seen "${d}" -F 'gh: HTTP 502'; then
+  ok "release の一覧が取れず、新しい版が出た日が分からなければ、⚠ を出さずに exit 2"
 else
-  ng "release notes が取れない" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "新しい版があって release の一覧が取れない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # 8b. release の一覧が取れず、winget の版では知らせることも無い: GitHub と比べられなかったので exit 2
@@ -374,23 +440,62 @@ else
   ng "版の形でないディレクトリ" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# 12. GitHub の最新 release が、出て 7 日たっても winget に載らない (パッケージ ID が移ったなど): exit 1
+# 12. GitHub の最新 release が、出て 30 日を過ぎても winget に載らない (パッケージ ID が移ったなど): exit 1
 #     (2024-10 に Microsoft.OpenSSH.Preview ができた後、Beta には新しい版が来なくなった)
 d=$(new_case t12 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
 if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0'; then
-  ok "GitHub の最新 release が 7 日たっても winget に無ければ exit 1"
+  ok "GitHub の最新 release が 30 日を過ぎても winget に無ければ exit 1"
 else
   ng "GitHub の最新が winget に無い" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# 13. GitHub に出て 7 日たっていない版は、winget にまだ無くても落とさない (これまで載るまで 5 時間〜4 日)
+# 13. GitHub に出て 30 日たっていない版は、winget にまだ無くても落とさず、あと何日で知らせるかを出す
+#     (これまで載るまで 5 時間〜4 日)
 d=$(new_case t13 10.0.0.0 -)
 FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_101_recent}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '10\.1\.0\.0'; then
-  ok "GitHub に出て 7 日たっていない版は、winget に無くても落とさずに出すだけ"
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '10\.1\.0\.0.*あと 29 日' \
+  && ! seen "${d}" '見送っていないものは winget にも GitHub にも無い'; then
+  ok "GitHub に出て 1 日の版は、winget に無くても落とさず、あと 29 日で知らせると出す"
 else
-  ng "7 日たっていない" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "30 日たっていない" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13b. 猶予の境目: GitHub に出て 29 日の版は、winget に無くてもまだ落とさない
+d=$(new_case t13b 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "${at29}")" "${rel_100}" "${rel_983}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" "10\\.1\\.0\\.0.*${at29:0:10}.*あと 1 日"; then
+  ok "GitHub に出て 29 日の版は、winget に無くても exit 0 で待ち、出た日とあと 1 日を出す"
+else
+  ng "GitHub だけにある 29 日の版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13c. 猶予の境目: GitHub に出て 30 日たっても winget に無ければ落とす
+d=$(new_case t13c 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "$(ago 30)")" "${rel_100}" "${rel_983}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0'; then
+  ok "GitHub に出て 30 日たっても winget に無ければ exit 1"
+else
+  ng "GitHub だけにある 30 日の版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13d. GitHub にだけある版がいくつかあるときも、いちばん早く出た版から数える (31 日前の 10.1.0.0 で知らせる。
+#      いちばん新しい 10.2.0.0 だけを見ると、出て 5 日なので黙ってしまう)
+d=$(new_case t13d 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.2.0.0 "$(ago 5)")" "$(rel 10.1.0.0 "$(ago 31)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*10\.1\.0\.0'; then
+  ok "GitHub にだけある版がいくつかあるときも、いちばん早く出た版から数える"
+else
+  ng "GitHub だけにある版がいくつか" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13e. GitHub の prerelease は、winget に載らなくても数えない (40 日前の prerelease だけなら落とさない)
+d=$(new_case t13e 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "$(ago 40)")|pre" "${rel_100}" "${rel_983}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" '10\.1\.0\.0'; then
+  ok "GitHub の prerelease は、winget に無くても数えない"
+else
+  ng "prerelease を数えた" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # 14. GitHub の最新 release を見送ってあれば、winget に無くても落とさない
@@ -503,6 +608,16 @@ if [[ $(rc "${d}") == 1 ]] && ! seen "${d}" '^::error'; then
 else
   ng "外で ::error" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
+# 23e. 猶予の中の版は ::notice の行で出す (落とさないので ::error は出さない)。summary は :: の行を除いて
+#      写すので、※ の行も残す
+d=$(new_case t23e 10.0.0.0 -)
+GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "$(ago 10)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && seen_out "${d}" '^::notice.*10\.1\.0\.0.*あと 20 日' \
+  && seen_out "${d}" '^  ※.*10\.1\.0\.0.*あと 20 日' && ! seen "${d}" '^::error'; then
+  ok "GitHub Actions の中では、猶予の中の版を ::notice の行と ※ の行で出し、::error は出さない"
+else
+  ng "猶予の中の ::notice" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
 
 # 24. gh が無い: exit 2
 d=$(new_case t24 10.0.0.0 -)
@@ -521,6 +636,28 @@ if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}"; then
 else
   ng "知らない引数" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
+
+# 26. 猶予の日数は CHECK_WINDOWS_OPENSSH_GRACE_DAYS で変えられる (60 日なら、出て 40 日の版はまだ待つ)
+d=$(new_case t26 10.0.0.0 -)
+GRACE_DAYS_FOR_TEST=60 FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES=$(releases_json "$(rel 10.1.0.0 "$(ago 40)")" "${rel_100}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" '10\.1\.0\.0.*あと 20 日'; then
+  ok "猶予の日数は CHECK_WINDOWS_OPENSSH_GRACE_DAYS で変えられる (60 日なら、出て 40 日の版はあと 20 日)"
+else
+  ng "猶予の日数を変える" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 27. 猶予の日数が読めない: gh を呼ばずに exit 2 (030 は bash の算術で 8 進数になるので受けない)
+i=0
+for g in '1か月' '-1' '030'; do
+  i=$((i + 1))
+  d=$(new_case "t27-${i}" 10.0.0.0 -)
+  GRACE_DAYS_FOR_TEST=${g} FAKE_GH_CONTENTS="${winget_now}" FAKE_GH_RELEASES="${releases_now}" run "${d}" 0
+  if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}" && seen "${d}" -F 'CHECK_WINDOWS_OPENSSH_GRACE_DAYS'; then
+    ok "猶予の日数が ${g} なら、gh を呼ばずに exit 2"
+  else
+    ng "猶予の日数 ${g}" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+  fi
+done
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]
