@@ -34,6 +34,10 @@
     # 設定は modules/files.nix -> files/herdr/config.toml
     herdr
 
+    # PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す。
+    # 実体は nix/pkgs/pjp-pr-diff/。fish の abbr と bash の alias の gdp で呼ぶ
+    (callPackage ../../pkgs/pjp-pr-diff { })
+
     # 以下は対応する programs.* モジュールが入れるのでここには書かない:
     #   starship -> modules/starship.nix
     #   delta / git-lfs -> modules/git.nix

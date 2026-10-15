@@ -1032,6 +1032,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
+| `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
@@ -1150,6 +1151,41 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
 止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
 gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
+
+### PR の差分からファイルを選んで見る (pjp-pr-diff)
+
+`pjp-pr-diff`（fish の abbr と bash の alias は `gdp`）は、PR 全体の変更ファイルを fzf で選び、
+選んだファイルだけの `git diff` を出す（実体は `nix/pkgs/pjp-pr-diff/`。全ホストの PATH に入る）。
+Claude に PR を作らせた後、確かめるファイルを絞って読むためのもの。PR の branch の checkout
+（herdr の worktree など）の中で打つ。選んでいる間は、カーソルの行のファイルの差分をプレビューに
+出す（端末の 60% の幅で 100 桁が取れれば右、取れなければ下）。
+
+| 操作 | すること |
+| --- | --- |
+| 文字を打つ | パスで絞る（状態の文字 `M` / `A` / `D` / `R` には当たらない） |
+| Tab / Shift-Tab | 選んで、下 / 上の行へ動く（複数選べる。もう一度押すと外れる） |
+| Enter | 選んだファイル（選んでいなければカーソルの行）の差分を `git diff` で出す。pager は git の設定（delta） |
+| Esc | 何も出さずにやめる |
+
+比べる範囲は `merge-base(<base>, HEAD)` から `HEAD` まで（`<base>...HEAD`）。GitHub の PR の
+Files changed と同じ三点の比較で、`<base>` 側が後から進めた変更は混ざらない。作業ツリーの
+未コミットの変更は含めない。`<base>` は上から順に決める。
+
+1. `--base <ref>`
+2. `gh pr view` が返す、この branch の PR の base（`origin/<名前>`）。main 以外へ向けた PR でも、その PR の差分になる
+3. `origin/HEAD`（PR が無い・gh が無い・ログインしていないとき）
+
+PR の base が手元に無い（fetch していない）ときは、3 へ落とさずに止まる。別の base と比べると、
+PR に無いファイルまで並ぶため。どれに決めたかは fzf のヘッダ（`--list` では stderr）に出る。
+
+```sh
+gdp                          # 選んで出す
+gdp --base origin/develop    # 比べる相手を指定する (gh を引かない)
+gdp --list | sort            # 選ばずに並べる。gh pr diff --name-only | sort と同じになる
+```
+
+rename は元と先の両方を `git diff` に渡すので、rename として出る（`--list` では先のパスだけ）。
+空白・改行・タブ・glob の文字（`[ab].txt` など）を含むパスも、そのままのファイルを指す。
 
 ## ssh について
 
