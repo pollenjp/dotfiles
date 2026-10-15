@@ -1,0 +1,359 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# nix/scripts/check-windows-openssh-version.sh の振る舞いを、偽の gh と手で作った
+# Install-OpenSSH.ps1 / skipped-versions.txt で確かめる。
+#
+#   bash nix/tests/check-windows-openssh-version.test.sh [<script のパス>]
+#
+# flake の checks (check-windows-openssh-version-test) が Nix のサンドボックスで流す。
+# CI の `nix flake check` もこれを通る。使うのは bash・jq・coreutils・grep だけ。
+#
+# ## 確かめること
+#
+#   - 固定した版が winget-pkgs の最新なら exit 0。版は数として比べる (9.8.3.0 < 10.0.0.0)
+#   - 固定した版より新しい版があり、見送りの一覧に無ければ exit 1。release notes の URL を添える
+#   - 見送りは版ごと。新しい版がどれも見送り済みなら exit 0
+#   - 固定した版・パッケージが winget-pkgs に無ければ exit 1
+#   - 確かめられなかった (固定した版が読めない・見送りの一覧が壊れている・API の失敗・gh が無い) は exit 2
+#   - GitHub Actions の中では、知らせることがあるときだけ ::error の行を出す
+#
+# ## 本物の gh を見せない
+#
+# 手元では PATH に本物の gh があり、見えると本物の GitHub API を呼ぶ。要るコマンドだけを
+# symlink で並べた PATH で流す (bootstrap-windows-openssh.test.sh と同じ作り)。偽の gh の shebang は
+# $BASH から作る (サンドボックスに /usr/bin/env が無い)。偽の gh が返す JSON は、本物の API の
+# 応答 (2026-10-15 に取ったもの) と同じ形にしてある。
+
+set -u -o pipefail
+
+here=$(
+  cd -- "$(dirname "$0")" &>/dev/null || exit
+  pwd -P
+)
+script=${1:-${here}/../scripts/check-windows-openssh-version.sh}
+work=$(mktemp -d "${TMPDIR:-/tmp}/check-windows-openssh-version-test.XXXXXX")
+trap 'rm -rf "${work}"' EXIT
+
+pass=0
+fail=0
+ok() {
+  pass=$((pass + 1))
+  echo "  ok   $1"
+}
+ng() {
+  fail=$((fail + 1))
+  echo "  FAIL $1"
+  if [[ -n ${2:-} ]]; then
+    echo "       ${2//$'\n'/$'\n'       }"
+  fi
+}
+
+# 要るコマンドだけを並べた PATH (gh は入れない)
+sys_bin="${work}/sys-bin"
+mkdir -p "${sys_bin}"
+for c in env jq grep sed sort tr cat head tail mktemp rm dirname basename; do
+  if ! p=$(command -v "${c}"); then
+    echo "見つからない: ${c}" >&2
+    exit 1
+  fi
+  ln -s "${p}" "${sys_bin}/${c}"
+done
+
+# 偽の gh。引数を FAKE_GH_LOG に足し、叩いた API ごとに決めた応答を返す。
+#   contents (winget-pkgs のディレクトリ)  FAKE_GH_CONTENTS (stdout)・FAKE_GH_CONTENTS_ERR (stderr)・FAKE_GH_CONTENTS_RC
+#   releases (Win32-OpenSSH)               FAKE_GH_RELEASES・FAKE_GH_RELEASES_ERR・FAKE_GH_RELEASES_RC
+fake_bin="${work}/fake-bin"
+mkdir -p "${fake_bin}"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+printf '%s\n' "$*" >>"${FAKE_GH_LOG}"
+[[ $1 == api ]] || { echo "偽の gh: api 以外は知らない: $*" >&2; exit 99; }
+case $2 in
+  repos/microsoft/winget-pkgs/contents/*)
+    out=${FAKE_GH_CONTENTS-} err=${FAKE_GH_CONTENTS_ERR-} rc=${FAKE_GH_CONTENTS_RC:-0} ;;
+  repos/PowerShell/Win32-OpenSSH/releases*)
+    out=${FAKE_GH_RELEASES-} err=${FAKE_GH_RELEASES_ERR-} rc=${FAKE_GH_RELEASES_RC:-0} ;;
+  *)
+    echo "偽の gh: 知らない API: $2" >&2
+    exit 99 ;;
+esac
+[[ -z ${out} ]] || printf '%s\n' "${out}"
+[[ -z ${err} ]] || printf '%s\n' "${err}" >&2
+exit "${rc}"
+EOF
+} >"${fake_bin}/gh"
+chmod +x "${fake_bin}/gh"
+
+# winget-pkgs の manifests/m/Microsoft/OpenSSH/Preview の一覧 (contents API の応答)。引数は版
+contents_json() {
+  local v base='https://api.github.com/repos/microsoft/winget-pkgs'
+  for v in "$@"; do
+    jq -n --arg v "${v}" --arg base "${base}" '{
+      _links: {
+        git: ($base + "/git/trees/0000000000000000000000000000000000000000"),
+        html: ("https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Microsoft/OpenSSH/Preview/" + $v),
+        self: ($base + "/contents/manifests/m/Microsoft/OpenSSH/Preview/" + $v + "?ref=master")
+      },
+      download_url: null,
+      git_url: ($base + "/git/trees/0000000000000000000000000000000000000000"),
+      html_url: ("https://github.com/microsoft/winget-pkgs/tree/master/manifests/m/Microsoft/OpenSSH/Preview/" + $v),
+      name: $v,
+      path: ("manifests/m/Microsoft/OpenSSH/Preview/" + $v),
+      sha: "0000000000000000000000000000000000000000",
+      size: 0,
+      type: "dir",
+      url: ($base + "/contents/manifests/m/Microsoft/OpenSSH/Preview/" + $v + "?ref=master")
+    }'
+  done | jq -s '.'
+}
+
+# Win32-OpenSSH の releases (新しい順)。引数は「tag:winget の版」。MSI の名前に winget の版が入る
+releases_json() {
+  local pair tag v
+  for pair in "$@"; do
+    tag=${pair%%:*}
+    v=${pair#*:}
+    jq -n --arg tag "${tag}" --arg v "${v}" '{
+      url: "https://api.github.com/repos/PowerShell/Win32-OpenSSH/releases/1",
+      html_url: ("https://github.com/PowerShell/Win32-OpenSSH/releases/tag/" + $tag),
+      id: 1,
+      tag_name: $tag,
+      name: $tag,
+      draft: false,
+      prerelease: false,
+      created_at: "2025-04-29T18:52:56Z",
+      published_at: "2025-10-27T18:58:57Z",
+      assets: [
+        { name: "OpenSSH-ARM64-v\($v).msi", size: 6295552,
+          browser_download_url: "https://github.com/PowerShell/Win32-OpenSSH/releases/download/\($tag)/OpenSSH-ARM64-v\($v).msi",
+          digest: "sha256:7a17d0e22d004fb47ca4bfd8fef926fa305de4ebf70a6f3c7a29c39aabef0023" },
+        { name: "OpenSSH-Win64-v\($v).msi", size: 6586368,
+          browser_download_url: "https://github.com/PowerShell/Win32-OpenSSH/releases/download/\($tag)/OpenSSH-Win64-v\($v).msi",
+          digest: "sha256:ddec9c53864280759cf9f74791cefd387100e3946aa849a1c138a4ed1b96b7d9" },
+        { name: "OpenSSH-Win64.zip", size: 5704583,
+          browser_download_url: "https://github.com/PowerShell/Win32-OpenSSH/releases/download/\($tag)/OpenSSH-Win64.zip",
+          digest: "sha256:23f50f3458c4c5d0b12217c6a5ddfde0137210a30fa870e98b29827f7b43aba5" }
+      ]
+    }'
+  done | jq -s '.'
+}
+
+# 今の winget-pkgs (2026-10-15) と、その上に 10.1.0.0 / 10.2.0.0 が出た後
+winget_now=$(contents_json 10.0.0.0 9.5.0.0 9.8.0.0 9.8.1.0 9.8.2.0 9.8.3.0)
+winget_101=$(contents_json 10.0.0.0 10.1.0.0 9.5.0.0 9.8.0.0 9.8.1.0 9.8.2.0 9.8.3.0)
+winget_102=$(contents_json 10.0.0.0 10.1.0.0 10.2.0.0 9.5.0.0 9.8.0.0 9.8.1.0 9.8.2.0 9.8.3.0)
+releases_101=$(releases_json v10.1.0.0p1-Preview:10.1.0.0 10.0.0.0p2-Preview:10.0.0.0 v9.8.3.0p2-Preview:9.8.3.0)
+releases_102=$(releases_json v10.2.0.0p1-Preview:10.2.0.0 v10.1.0.0p1-Preview:10.1.0.0 10.0.0.0p2-Preview:10.0.0.0)
+not_found='{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/contents#get-repository-content","status":"404"}'
+
+# 1 ケースぶんのディレクトリを作る。
+#   $1: 名前、$2: 固定した版 (空なら -Version の行を書かない)、$3: 見送りの一覧の中身 (- なら作らない)
+# Install-OpenSSH.ps1 は本物と同じく BOM 付きで、param ブロックの形も本物に合わせる。
+new_case() {
+  local d="${work}/$1"
+  mkdir -p "${d}"
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWin32-OpenSSH を、決めた版に揃える。\n#>\n'
+    printf '[CmdletBinding()]\nparam(\n'
+    if [[ -n $2 ]]; then
+      printf "    [string]\$Version = '%s',\n" "$2"
+    fi
+    # shellcheck disable=SC2016 # PowerShell の $Check などを文字のまま書く
+    printf '    [switch]$Check,\n    [switch]$Force,\n    [string]$LogPath\n)\n'
+  } >"${d}/Install-OpenSSH.ps1"
+  if [[ $3 != - ]]; then
+    printf '%s\n' "$3" >"${d}/skipped-versions.txt"
+  fi
+  : >"${d}/gh-calls"
+  echo "${d}"
+}
+
+# $1: ケースのディレクトリ、$2: 1 なら偽の gh を PATH に置かない、残り: script の引数。
+# 引数を渡さなければ、ケースの Install-OpenSSH.ps1 と skipped-versions.txt を渡す。
+# 環境変数 (FAKE_GH_*・GITHUB_ACTIONS) は呼び出し側で付ける。
+run() {
+  local d=$1 nogh=$2
+  shift 2
+  local path="${fake_bin}:${sys_bin}"
+  if [[ ${nogh} == 1 ]]; then
+    path="${sys_bin}"
+  fi
+  if (($# == 0)); then
+    set -- "${d}/Install-OpenSSH.ps1" "${d}/skipped-versions.txt"
+  fi
+  env PATH="${path}" FAKE_GH_LOG="${d}/gh-calls" GITHUB_ACTIONS="${GITHUB_ACTIONS_FOR_TEST-}" \
+    "${BASH}" "${script}" "$@" >"${d}/out" 2>"${d}/err"
+  echo $? >"${d}/rc"
+}
+
+rc() { cat "$1/rc"; }
+out() { cat "$1/out"; }
+outerr() { cat "$1/out" "$1/err"; }
+calls() { cat "$1/gh-calls"; }
+gh_called() { [[ -s $1/gh-calls ]]; }
+
+echo "== check-windows-openssh-version.sh: ${script}"
+
+# 1. 固定した版が winget-pkgs の最新: exit 0、⚠ は出さない。9.8.3.0 を 10.0.0.0 より新しいと読まない
+d=$(new_case t1 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠' && outerr "${d}" | grep -qF '10.0.0.0'; then
+  ok "固定した版が最新なら exit 0 で ⚠ を出さない (9.8.3.0 は 10.0.0.0 より古いと読む)"
+else
+  ng "最新" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+if calls "${d}" | grep -qF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/OpenSSH/Preview'; then
+  ok "winget-pkgs の manifests/m/Microsoft/OpenSSH/Preview を読む"
+else
+  ng "読む場所が違う" "calls=$(calls "${d}")"
+fi
+
+# 2. 固定した版より新しい版がある: exit 1。版・release notes の URL・見送りの一覧の場所を出す
+d=$(new_case t2 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' \
+  && outerr "${d}" | grep -qF 'https://github.com/PowerShell/Win32-OpenSSH/releases/tag/v10.1.0.0p1-Preview' \
+  && outerr "${d}" | grep -qF 'skipped-versions.txt'; then
+  ok "新しい版があれば exit 1 で、版・release notes の URL・見送りの一覧の場所を出す"
+else
+  ng "新しい版がある" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 3. 新しい版を見送った: exit 0 で、見送った理由を出す。ps1 が CRLF でも読める
+d=$(new_case t3 10.0.0.0 $'# 見送った版\n\n10.1.0.0  1Password の agent に繋がらない (TKT-999)')
+sed -i 's/$/\r/' "${d}/Install-OpenSSH.ps1"
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '⚠' \
+  && outerr "${d}" | grep -qF '1Password の agent に繋がらない (TKT-999)'; then
+  ok "新しい版が見送りの一覧にあれば exit 0 で、見送った理由を出す (ps1 が CRLF でも読む)"
+else
+  ng "見送った" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 4. 見送りは版ごと: 10.2.0.0 だけ見送っても、10.1.0.0 は知らせる
+d=$(new_case t4 10.0.0.0 '10.2.0.0 MSI が ssh-agent を消す')
+FAKE_GH_CONTENTS="${winget_102}" FAKE_GH_RELEASES="${releases_102}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' && ! outerr "${d}" | grep -q '⚠.*10\.2\.0\.0'; then
+  ok "見送りは版ごと (10.2.0.0 を見送っても、見送っていない 10.1.0.0 は知らせる)"
+else
+  ng "見送りは版ごと" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 5. 固定した版が winget-pkgs に無い (新しいマシンで入れられない): exit 1
+d=$(new_case t5 10.0.0.0 -)
+FAKE_GH_CONTENTS=$(contents_json 9.5.0.0 9.8.3.0) run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.0\.0\.0'; then
+  ok "固定した版が winget-pkgs に無ければ exit 1"
+else
+  ng "固定した版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 6. パッケージごと winget-pkgs に無い (404。Microsoft.OpenSSH.Beta は 2025-04 に丸ごと外された): exit 1
+d=$(new_case t6 10.0.0.0 -)
+FAKE_GH_CONTENTS="${not_found}" FAKE_GH_CONTENTS_ERR='gh: Not Found (HTTP 404)' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*Microsoft\.OpenSSH\.Preview'; then
+  ok "パッケージが winget-pkgs に無ければ (404) exit 1"
+else
+  ng "パッケージが無い" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 7. API が失敗した (404 以外): 確かめられなかったので exit 2 (揃っている扱いにしない)
+d=$(new_case t7 10.0.0.0 -)
+FAKE_GH_CONTENTS_ERR='error connecting to api.github.com' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
+if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF 'error connecting to api.github.com'; then
+  ok "API が 404 以外で失敗したら、gh のエラーを見せて exit 2"
+else
+  ng "API の失敗" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 8. 応答が JSON の一覧でない: exit 2
+d=$(new_case t8 10.0.0.0 -)
+FAKE_GH_CONTENTS='<html>rate limited</html>' run "${d}" 0
+if [[ $(rc "${d}") == 2 ]]; then
+  ok "応答が JSON の一覧でなければ exit 2"
+else
+  ng "JSON でない" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 9. 固定した版が読めない: gh を呼ばずに exit 2
+d=$(new_case t9 '' -)
+FAKE_GH_CONTENTS="${winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}"; then
+  ok "Install-OpenSSH.ps1 から固定した版が読めなければ、gh を呼ばずに exit 2"
+else
+  ng "固定した版が読めない" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# 10. 見送りの一覧に理由の無い行がある: exit 2 (版と理由を 1 行に書く決まり)
+d=$(new_case t10 10.0.0.0 '10.1.0.0')
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
+if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -qF 'skipped-versions.txt'; then
+  ok "見送りの一覧に理由の無い行があれば、ファイルの場所を出して exit 2"
+else
+  ng "見送りの一覧が壊れている" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 11. 固定した版以下の見送りが残っている: 落とさず、消してよいと出す
+d=$(new_case t11 10.0.0.0 '9.8.3.0 試した時期の 1Password と合わない')
+FAKE_GH_CONTENTS="${winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && outerr "${d}" | grep -q '9\.8\.3\.0.*消して'; then
+  ok "固定した版以下の見送りは落とさず、消してよいと出す"
+else
+  ng "古い見送り" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 12. release notes が取れなくても、新しい版は知らせる (releases の一覧の URL を代わりに出す)
+d=$(new_case t12 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES_ERR='gh: HTTP 502' FAKE_GH_RELEASES_RC=1 run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && outerr "${d}" | grep -q '⚠.*10\.1\.0\.0' \
+  && outerr "${d}" | grep -qF 'https://github.com/PowerShell/Win32-OpenSSH/releases'; then
+  ok "release notes が取れなくても exit 1 で知らせ、releases の一覧の URL を出す"
+else
+  ng "release notes が取れない" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13. GitHub Actions の中では、知らせることがあるときだけ ::error の行を出す (stdout)
+d=$(new_case t13 10.0.0.0 -)
+GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && out "${d}" | grep -q '^::error.*10\.1\.0\.0'; then
+  ok "GitHub Actions の中で新しい版があれば、::error の行を出す"
+else
+  ng "::error が出ない" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+d=$(new_case t13b 10.0.0.0 -)
+GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! outerr "${d}" | grep -q '^::error'; then
+  ok "GitHub Actions の中でも、知らせることが無ければ ::error を出さない"
+else
+  ng "揃っているのに ::error" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+d=$(new_case t13c 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_101}" FAKE_GH_RELEASES="${releases_101}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && ! outerr "${d}" | grep -q '^::error'; then
+  ok "GitHub Actions の外では、新しい版があっても ::error を出さない"
+else
+  ng "外で ::error" "$(outerr "${d}")"
+fi
+
+# 14. gh が無い: exit 2
+d=$(new_case t14 10.0.0.0 -)
+run "${d}" 1
+if [[ $(rc "${d}") == 2 ]] && outerr "${d}" | grep -q 'gh'; then
+  ok "gh が無ければ exit 2"
+else
+  ng "gh が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 15. 知らない引数: gh を呼ばずに exit 2
+d=$(new_case t15 10.0.0.0 -)
+FAKE_GH_CONTENTS="${winget_now}" run "${d}" 0 --bogus
+if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}"; then
+  ok "知らない引数は、gh を呼ばずに exit 2"
+else
+  ng "知らない引数" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+echo "== ${pass} passed, ${fail} failed"
+[[ ${fail} == 0 ]]
