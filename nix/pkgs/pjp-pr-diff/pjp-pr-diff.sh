@@ -20,7 +20,9 @@
 #
 # PR の base が手元に無い (fetch していない) ときは 3 へ落とさずに止まる。別の base と比べると、
 # PR に無いファイルまで並ぶため。2 の remote はいつも origin と読む。fork から upstream へ出した
-# PR では、--base upstream/<名前> で指定する。
+# PR では、--base upstream/<名前> で指定する。2 で GitHub にある PR の head が HEAD と違えば
+# (push していない・pull していない commit がある)、比べるのは手元の HEAD のまま、そのことを
+# fzf のヘッダ (--list では stderr) に出す。
 #
 # ## fzf に渡す行
 #
@@ -128,6 +130,10 @@ while (($#)); do
       base=$2
       shift 2
       ;;
+    --base=?*)
+      base=${1#--base=}
+      shift
+      ;;
     -l | --list)
       list=1
       shift
@@ -151,23 +157,29 @@ case $0 in
 esac
 cd_top
 
-# 比べる相手 (base_ref) と、それに決めた理由 (base_why)
+head=$(git rev-parse --verify --quiet 'HEAD^{commit}') || die "HEAD がまだ commit を指していません。"
+
+# 比べる相手 (base_ref) と、それに決めた理由 (base_why)。PR の head (GitHub にある commit) が HEAD と
+# 違えば、比べるのは手元の HEAD のまま知らせる (push していない・pull していない commit があると、
+# GitHub の Files changed とずれる)
 if [[ -n ${base} ]]; then
   base_ref=${base} base_why='--base で指定'
-elif pr=$(gh pr view --json number,baseRefName --jq '"\(.number)\t\(.baseRefName)"' 2>/dev/null) && [[ -n ${pr} ]]; then
-  number=${pr%%$'\t'*} name=${pr#*$'\t'}
+elif pr=$(gh pr view --json number,baseRefName,headRefOid --jq '"\(.number)\t\(.baseRefName)\t\(.headRefOid)"' 2>/dev/null) && [[ -n ${pr} ]]; then
+  IFS=$'\t' read -r number name pr_head <<<"${pr}"
   if ! git rev-parse --verify --quiet "refs/remotes/origin/${name}" >/dev/null; then
     die "PR #${number} の base (${name}) が origin にありません。git fetch origin ${name} を打つか、--base で指定してください。"
   fi
   base_ref=origin/${name} base_why="PR #${number} の base"
+  if [[ ${pr_head} != "${head}" ]]; then
+    base_why+="。HEAD は PR の head (${pr_head:0:7}) と違う"
+  fi
 elif base_ref=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD); then
-  base_why='origin/HEAD。この branch の PR は見つからない'
+  base_why='origin/HEAD。gh でこの branch の PR を引けなかった'
 else
   die "比べる相手が決まりません。--base <ref> で指定するか、git remote set-head origin --auto を打ってください。"
 fi
 
 base_commit=$(git rev-parse --verify --quiet "${base_ref}^{commit}") || die "${base_ref} が見つかりません。"
-head=$(git rev-parse --verify --quiet 'HEAD^{commit}') || die "HEAD がまだ commit を指していません。"
 mb=$(git merge-base "${base_commit}" "${head}") || die "${base_ref} と HEAD に共通の祖先がありません。"
 collect "${mb}" "${head}"
 range="${base_ref}...HEAD (${base_why})  merge-base $(git rev-parse --short "${mb}")  ${#st[@]} ファイル"
@@ -193,9 +205,13 @@ items() {
 }
 
 # 選んだ行の番号 (1 列目) だけを受け取る (--accept-nth 1)。Esc や当たる行が無いときは fzf の
-# 終了コードのまま終える (選んでいないのに PR 全体の差分を出さない)
+# 終了コードのまま終える (選んでいないのに PR 全体の差分を出さない)。
+#
+# 一覧は上から並べる (--layout=reverse)。既定の下から上の並びでは、カーソルが最初にいる一番下の
+# 行で Tab (選んで下へ) を押しても動けず、同じ行を選んで外すだけになる。fzf.fish の一覧と同じく
+# --cycle も付け、端で反対の端へ回る
 chosen=$(
-  fzf --multi --read0 --accept-nth 1 \
+  fzf --multi --layout=reverse --cycle --read0 --accept-nth 1 \
     --delimiter '\t' --with-nth '2..' --nth '2..' \
     --with-shell "${BASH} -c" \
     --preview "$(printf '%q ' "${BASH}" "${self}" __preview "${mb}" "${head}"){1}" \

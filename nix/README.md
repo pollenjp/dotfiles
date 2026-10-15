@@ -1163,26 +1163,36 @@ Claude に PR を作らせた後、確かめるファイルを絞って読むた
 | 操作 | すること |
 | --- | --- |
 | 文字を打つ | パスで絞る（状態の文字 `M` / `A` / `D` / `R` には当たらない） |
-| Tab / Shift-Tab | 選んで、下 / 上の行へ動く（複数選べる。もう一度押すと外れる） |
+| Tab / Shift-Tab | 選んで、下 / 上の行へ動く（複数選べる。もう一度押すと外れる。端では反対の端へ回る） |
 | Enter | 選んだファイル（選んでいなければカーソルの行）の差分を `git diff` で出す。pager は git の設定（delta） |
 | Esc | 何も出さずにやめる |
+
+一覧は上からパスの順に並ぶ（`--layout=reverse`。fzf.fish の一覧と同じ向き）。
 
 比べる範囲は `merge-base(<base>, HEAD)` から `HEAD` まで（`<base>...HEAD`）。GitHub の PR の
 Files changed と同じ三点の比較で、`<base>` 側が後から進めた変更は混ざらない。作業ツリーの
 未コミットの変更は含めない。`<base>` は上から順に決める。
 
-1. `--base <ref>`
+1. `--base <ref>`（`--base=<ref>` でもよい）
 2. `gh pr view` が返す、この branch の PR の base（`origin/<名前>`）。main 以外へ向けた PR でも、その PR の差分になる
-3. `origin/HEAD`（PR が無い・gh が無い・ログインしていないとき）
+3. `origin/HEAD`（PR が無い・gh が無い・ログインしていない・通信できないとき）
 
-PR の base が手元に無い（fetch していない）ときは、3 へ落とさずに止まる。別の base と比べると、
-PR に無いファイルまで並ぶため。どれに決めたかは fzf のヘッダ（`--list` では stderr）に出る。
+- PR の base が手元に無い（fetch していない）ときは、3 へ落とさずに止まる。別の base と比べると、
+  PR に無いファイルまで並ぶため
+- 2 の remote はいつも `origin` と読む。fork から upstream へ出した PR では `--base upstream/<名前>` で指定する
+- 2 で GitHub にある PR の head が `HEAD` と違う（push していない・pull していない commit がある）
+  ときは、比べるのは手元の `HEAD` のまま、そのことを知らせる
+- どれに決めたか・merge-base・ファイルの数は、fzf のヘッダ（`--list` では stderr）に出る
 
 ```sh
 gdp                          # 選んで出す
 gdp --base origin/develop    # 比べる相手を指定する (gh を引かない)
-gdp --list | sort            # 選ばずに並べる。gh pr diff --name-only | sort と同じになる
+gdp --list | sort            # 選ばずに並べる。push 済みなら gh pr diff --name-only | sort と同じ集合になる
 ```
+
+`gh pr diff --name-only` は ASCII 以外を含むパスを `"nix/\346\227\245..."` のように引用して出す。
+`--list` は git の設定どおり（`core.quotepath = false` なので引用しない）に出すので、日本語などを
+含むパスだけ書き方が違う。
 
 rename は元と先の両方を `git diff` に渡すので、rename として出る（`--list` では先のパスだけ）。
 空白・改行・タブ・glob の文字（`[ab].txt` など）を含むパスも、そのままのファイルを指す。

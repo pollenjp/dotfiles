@@ -3,10 +3,11 @@
 #
 # nix/pkgs/pjp-pr-diff/pjp-pr-diff.sh の振る舞いを、使い捨ての git repo で確かめる。
 #
-#   bash nix/tests/pjp-pr-diff.test.sh [<pjp-pr-diff.sh のパス>]
+#   bash nix/tests/pjp-pr-diff.test.sh [<pjp-pr-diff.sh のパス> [<包んだ後の bin/pjp-pr-diff のパス>]]
 #
 # flake の checks (pjp-pr-diff-test) が Nix のサンドボックスで流す。使うのは bash・git・fzf・jq・
-# coreutils・grep だけ。GitHub には出ない (origin は手元の bare repo、gh は偽物)。
+# coreutils・grep だけ。GitHub には出ない (origin は手元の bare repo、gh は偽物)。2 つ目のパスを
+# 渡すと、writeShellApplication で包んだ後の package でも --list が同じ一覧を出すかを見る。
 #
 # fzf は端末が無いと選べないので、本物の fzf を FZF_DEFAULT_OPTS の --filter=<query> で非対話にして
 # 流す (query に当たった行をすべて選んで Enter したのと同じになる)。PATH の先頭には、引数・入力・
@@ -17,8 +18,10 @@
 # ## 確かめること
 #
 #   - 比べる範囲は merge-base(base, HEAD) から HEAD まで。base が後から進めた変更は混ざらない
-#   - base は --base > gh pr view の baseRefName (origin/<名前>) > origin/HEAD の順に決まる。
-#     PR の base が手元に無いときと、どれも決まらないときは、別の base へ黙って落ちずに止まる
+#   - base は --base (--base=<ref> も) > gh pr view の baseRefName (origin/<名前>) > origin/HEAD の順に
+#     決まる。PR の base が手元に無いときと、どれも決まらないときは、別の base へ黙って落ちずに止まる。
+#     GitHub にある PR の head が HEAD と違えば知らせる
+#   - fzf は複数選べ、上から並べる (Tab を続けて押すと次の行へ進みながら選べる)
 #   - 1 つ選べばそのファイルだけ、複数選べばそれらだけの差分を出す。何も選ばなければ何も出さない
 #     (エラーも出さない)。検索はパスだけに当たり、状態の文字 (A・D など) では選ばれない
 #   - プレビューは、その行のファイルの差分を色付きで出す (SHELL が fish でも、script を相対パスで
@@ -33,6 +36,10 @@ here=$(
   pwd -P
 )
 script=$(realpath -- "${1:-${here}/../pkgs/pjp-pr-diff/pjp-pr-diff.sh}")
+package=''
+if [[ -n ${2:-} ]]; then
+  package=$(realpath -- "$2")
+fi
 invoke=${script}
 work=$(mktemp -d "${TMPDIR:-/tmp}/pjp-pr-diff-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
@@ -115,10 +122,10 @@ EOF
 chmod +x "${bin}/fzf" "${bin}/gh" "${work}/fish"
 export SHELL="${work}/fish"
 
-# gh pr view --json が返す JSON (PR #7)。$1: baseRefName
+# gh pr view --json が返す JSON (PR #7)。$1: baseRefName、$2: headRefOid (GitHub にある PR の head)
 pr_json() {
-  local f="${work}/pr-$1.json"
-  jq -n --arg base "$1" '{number: 7, title: "t", state: "OPEN", isDraft: true, baseRefName: $base, headRefName: "stacked", url: "https://github.com/o/r/pull/7"}' >"${f}"
+  local f="${work}/pr-$1-$2.json"
+  jq -n --arg base "$1" --arg oid "$2" '{number: 7, title: "t", state: "OPEN", isDraft: true, baseRefName: $base, headRefName: "stacked", headRefOid: $oid, url: "https://github.com/o/r/pull/7"}' >"${f}"
   printf '%s' "${f}"
 }
 
@@ -161,6 +168,7 @@ commit d1
 git -C "${repo}" switch --quiet -c stacked
 put stacked.txt stacked
 commit s1
+s1=$(git -C "${repo}" rev-parse HEAD)
 
 git -C "${repo}" switch --quiet -c feat "${c1}"
 put keep.txt keep-1
@@ -284,13 +292,22 @@ else
   ng "PR が無ければ origin/HEAD との merge-base から HEAD までを並べる" "$(detail)"
 fi
 
-# 2. develop へ向けた PR → gh が返す base (origin/develop) と比べる
+# 2. develop へ向けた PR → gh が返す base (origin/develop) と比べる。PR の head は HEAD と同じ
 git -C "${repo}" switch --quiet stacked
-run "${repo}" FAKE_GH_PR="$(pr_json develop)" -- --list
-if [[ $(rc) == 0 && $(out) == stacked.txt && $(err) == *origin/develop* && $(err) == *'#7'* ]]; then
+run "${repo}" FAKE_GH_PR="$(pr_json develop "${s1}")" -- --list
+if [[ $(rc) == 0 && $(out) == stacked.txt && $(err) == *origin/develop* && $(err) == *'#7'* && $(err) != *違う* ]]; then
   ok "PR があれば gh pr view の baseRefName (origin/<名前>) と比べる"
 else
   ng "PR があれば gh pr view の baseRefName (origin/<名前>) と比べる" "$(detail)"
+fi
+
+# 2b. GitHub にある PR の head が HEAD と違う (push していない・pull していない) → 比べるのは手元の
+#     HEAD のまま、違うことを知らせる (GitHub の Files changed とずれる理由がその場で分かる)
+run "${repo}" FAKE_GH_PR="$(pr_json develop "${c1}")" -- --list
+if [[ $(rc) == 0 && $(out) == stacked.txt && $(err) == *違う* && $(err) == *"${c1:0:7}"* ]]; then
+  ok "PR の head が HEAD と違えば知らせる"
+else
+  ng "PR の head が HEAD と違えば知らせる" "$(detail)"
 fi
 
 # 3. 同じ branch でも PR が無ければ origin/HEAD と比べ、develop の変更も並ぶ
@@ -302,15 +319,23 @@ else
 fi
 
 # 4. --base は gh より優先する (gh は main を返すが、--base の origin/develop と比べる)
-run "${repo}" FAKE_GH_PR="$(pr_json main)" -- --base origin/develop --list
+run "${repo}" FAKE_GH_PR="$(pr_json main "${s1}")" -- --base origin/develop --list
 if [[ $(rc) == 0 && $(out) == stacked.txt && $(err) == *origin/develop* ]]; then
   ok "--base を gh pr view より優先する"
 else
   ng "--base を gh pr view より優先する" "$(detail)"
 fi
 
+# 4b. --base=<ref> の形でも渡せる
+run "${repo}" -- --base=origin/develop --list
+if [[ $(rc) == 0 && $(out) == stacked.txt ]]; then
+  ok "--base=<ref> の形でも渡せる"
+else
+  ng "--base=<ref> の形でも渡せる" "$(detail)"
+fi
+
 # 5. PR の base が手元に無い → origin/HEAD へ黙って落ちずに止まる
-run "${repo}" FAKE_GH_PR="$(pr_json gone)" -- --list
+run "${repo}" FAKE_GH_PR="$(pr_json gone "${s1}")" -- --list
 if [[ $(rc) == 1 && -z $(out) && $(err) == *gone* ]]; then
   ok "PR の base が origin に無ければ止まる"
 else
@@ -391,10 +416,12 @@ fi
 invoke=$(realpath --relative-to="${repo}/sub/dir" "${script}")
 run "${repo}/sub/dir" FZF_DEFAULT_OPTS='--exact --filter=keep' --
 invoke=${script}
-if fzf_has --multi -m; then
-  ok "fzf を --multi で開く"
+# 既定の並び (下から上) では、カーソルが最初にいる一番下の行で Tab (選んで下へ) を押しても動けず、
+# 同じ行を選んで外すだけになる。上から並べれば Tab を続けて押すだけで複数選べる
+if fzf_has --multi -m && [[ $(fzf_opt --layout) == reverse ]]; then
+  ok "fzf を --multi と --layout=reverse で開く (Tab を続けて押すと複数選べる)"
 else
-  ng "fzf を --multi で開く" "args=$(tr '\0' ' ' <"${log}/args" 2>&1)"
+  ng "fzf を --multi と --layout=reverse で開く (Tab を続けて押すと複数選べる)" "args=$(tr '\0' ' ' <"${log}/args" 2>&1)"
 fi
 idx_keep=$(fzf_field1 keep.txt)
 idx_rename=$(fzf_field1 'old name.txt -> renamed/new name.txt')
@@ -435,6 +462,19 @@ if [[ ${rc_bogus} == 2 && $(rc) == 2 ]]; then
   ok "知らない引数と値の無い --base は exit 2"
 else
   ng "知らない引数と値の無い --base は exit 2" "--bogus: rc=${rc_bogus} / --base: $(detail)"
+fi
+
+# 19. 包んだ後の package (writeShellApplication。runtimeInputs を PATH の前に足す) でも同じ一覧を出す。
+#     第 2 引数で渡したときだけ流す。fzf を使う形は、書き留め役の fzf が PATH で隠れるので流さない
+if [[ -n ${package} ]]; then
+  invoke=${package}
+  run "${repo}" -- --list
+  invoke=${script}
+  if [[ $(rc) == 0 && $(out) == "${expected}" ]]; then
+    ok "包んだ後の package でも同じ一覧を出す"
+  else
+    ng "包んだ後の package でも同じ一覧を出す" "$(detail)"
+  fi
 fi
 
 echo "== ${pass} passed, ${fail} failed"
