@@ -109,6 +109,12 @@ next_tab = ["prefix+n", "ctrl+down"]
 #
 # previous_workspace / next_workspace は herdr の既定では**未割り当て**なので、
 # ここで初めてキーが付く (既定バインドを潰す心配は無い)。
+#
+# ただし **GNOME は既定でこの 2 つを自分の workspace の上下移動に取る**ので、
+# 何もしないと端末 (herdr) まで届かない。NixOS の laptop では nixos-config の
+# modules/desktop.nix が GNOME 側の割り当てを外している。GNOME の別のマシンで
+# 使うときも同じことが要る。GNOME は ctrl+alt+left / right、ctrl+shift+alt+矢印、
+# super+alt+up / down も既定で取るので、直接バインドに足すときは同様に外すこと。
 previous_workspace = "ctrl+alt+up"
 next_workspace = "ctrl+alt+down"
 
