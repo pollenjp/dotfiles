@@ -6,7 +6,7 @@
 # order: 91
 #
 # ^ setup.sh が読む実行順。コピー元を取る bootstrap-dotfiles-private.sh (order: 50) より後に
-#   走ればよい。衝突や確かめの失敗で exit 1 すると setup はここで止まる (後ろの 95〜98 と
+#   走ればよい。衝突や確かめの失敗で exit 1 すると setup はここで止まる (後ろの 95〜99 と
 #   exe-exec-trace は、直して流し直すまで走らない)。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
