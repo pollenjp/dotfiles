@@ -53,6 +53,7 @@ jobs:
     strategy:
       # 1 つが落ちても、ほかの名前は最後まで確かめる
       fail-fast: false
+      # title は script の title、section と anchor は win/README.md の見出しと同じにする
       matrix:
         include:
           - package: openssh

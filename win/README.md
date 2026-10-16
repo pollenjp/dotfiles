@@ -118,8 +118,8 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
   - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
   - パッケージが winget に無い (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)
     → 下の「パッケージ ID を確かめる」
-  - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない (版や名前の付け方が変わった)
-    → script の読み方を直す
+  - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
+    ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
 - パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
@@ -311,10 +311,13 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 - preview は週に何度か出るので、固定した版より新しい preview が 1 つ出た日から 30 日の猶予が始まり
   (後から出た preview では数え直さない)、ほぼ毎月上げることになる。見送っても、その次に出た preview の日から数える
 - GitHub と比べるのは preview だけ。安定版 (`v0.9.5` など) にも Windows の zip が付くが、winget には安定版の
-  パッケージが無い (2026-10 の時点)。winget に安定版のパッケージができたら、preview から移るかを決める
-- winget の最新より新しい preview が 30 日たっても winget に無いと落ちる。preview が別の ID へ移ったか、winget に
+  パッケージが無い (2026-10 の時点)。安定版のパッケージができたかは、この job では見ていない
+  (`winget search herdr` で分かる。できたら、preview から移るかを決める)
+- winget の最新より後に出た preview が 30 日たっても winget に無いと落ちる。preview が別の ID へ移ったか、winget に
   載らなくなったかもしれないので、`winget search herdr` で確かめる。winget の bot は preview をたまに飛ばすが、
-  後の preview が載れば落ちない
+  後の preview が載れば落ちない。前か後かは出た時刻で決める (同じ日の build を hash の並びで比べない)
+- GitHub の直近 100 件の release に preview が 1 つも無いと、猶予を置かずに落ちる (preview の出し方が変わったか、
+  止まった)
 
 上げるとき:
 
@@ -331,7 +334,8 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 見送るとき (2 や 5 で合わないと分かったとき):
 
 - `herdr/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版は winget の版の形
-  (`<semver>-preview.<日付>-<hash>`) で書く
+  (`<semver>-preview.<日付>-<hash>`) で書く。winget に無い preview (job が `<日付>-<hash>` だけを出したもの) は、
+  `<日付>-<hash>` だけを書く
 - 5 で分かったなら、`-Version` の既定値も前の版に戻し、`Install-Herdr` で揃え直す (下げるのもできる)
 - `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
