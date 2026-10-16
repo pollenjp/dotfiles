@@ -1,0 +1,11 @@
+# Windows の Google 日本語入力 (winget の Google.JapaneseIME) で、上げずに見送った版 (TKT-156)。
+#
+# nix/scripts/check-winget-version.sh google-japanese-input (GitHub Actions の winget-versions が週 1 回流す) が
+# 読み、ここに書いた版は、固定した版より新しくても知らせない。手順は win/README.md の
+# 「Google 日本語入力の新しい版が出たとき」。
+#
+# 1 行に 1 つ、「版 理由」を空白で区切って書く。# で始まる行と空行は読まない。理由の無い行は読めずに落ちる。
+# 固定した版以下になった行は消してよい (job が知らせる)。manifest に無いので Windows へは配らない。
+#
+# 例:
+# 3.35.6300.0 --import が「今の .proto に無い項目がある」で止まる (TKT-xxx)
