@@ -10,19 +10,20 @@
 #
 # ## 確かめること
 #
-#   - grep -q (-qF・-Fxq などのまとめ書き・--quiet・--silent・引用符で囲んだ "-q") をパイプ (| と |&) の先に
-#     置いた行を、ファイルと grep の行番号付きで全部出して exit 1。! で打ち消した判定・if や && の中・$(…) の中・
-#     3 段以上のパイプの最後・command grep・\grep・egrep / fgrep・パターンより後ろの -q (GNU grep は並べ替えて読む) も
-#     数える。行をまたいだパイプ (\ で続けた行・| で終わる行) は、grep のある行を出す
+#   - パイプ (| と |&) の先の grep -q を、ファイルと grep の行番号付きで全部出して exit 1。数える書き方は、
+#     -qF・-Fxq などのまとめ書き・--quiet・--silent・引用符で囲んだ "-q"・パターンより後ろの -q (GNU grep は
+#     並べ替えて読む)・-e の値が展開でもその後ろの -q・! で打ち消した判定・if や && の中・$(…) の中・3 段以上の
+#     パイプの最後・command grep・\grep・egrep / fgrep。行をまたいだパイプ (\ で続けた行・| で終わる行) は、
+#     grep のある行を出す
 #   - 数えないもの: ファイルを直に読む grep -q・<<< で渡す grep -q・-q の無い grep (-c・-e q・-eq・-m 1 など)・
-#     -- と -e の後ろの "-q" (パターン)・展開を含む引数・コメント・文字列・ヒアドキュメントの中の「| grep -q」。
-#     数えないものだけなら、見た本数を出して exit 0
+#     --・-e・--regexp の後ろの "-q" (パターン)・展開を含む引数・コメント・文字列・ヒアドキュメントの中の
+#     「| grep -q」。数えないものだけなら、見た本数を出して exit 0
 #   - 引数のディレクトリは直下の *.sh だけを見る (中のディレクトリと *.sh でないファイルは見ない)。引数を省けば、
 #     script の隣の nix/tests を見る。ファイルとディレクトリを並べれば、全部の見つけたものを出す
 #   - shfmt が読めないファイルがあれば、名前を出して exit 2。無いパス・*.sh の無いディレクトリ・知らない引数も
 #     exit 2。--help は使い方を出して exit 0
-#   - shfmt か jq が PATH に無ければ、nix/ の devShell に入り直して (nix develop <nix> --command) 同じ引数で
-#     流し直す。入り直しても無ければ (印の環境変数がある)、入り直さずに exit 2
+#   - shfmt と jq のどちらかでも PATH に無ければ、nix/ の devShell に入り直して (nix develop <nix> --command)
+#     同じ引数で流し直す。入り直しても無ければ (印の環境変数がある)、入り直さずに exit 2
 #   - このテストのファイル自身 (文字列の中に「| grep -q」を多く持つ) は通る
 #   - script に実行ビットがある (CI の lint ジョブが ./nix/scripts/check-test-grep-q.sh で直に呼ぶ)
 
@@ -34,6 +35,13 @@ here=$(
 )
 script=${1:-${here}/../scripts/check-test-grep-q.sh}
 self="${here}/$(basename "$0")"
+# script は shfmt と jq が無いと devShell に入り直すので、それではこのテストの多くが確かめられない
+for cmd in shfmt jq; do
+  if ! command -v "${cmd}" >/dev/null; then
+    echo "見つからない: ${cmd} (nix/ の devShell で流す: nix develop ./nix --command bash nix/tests/check-test-grep-q.test.sh)" >&2
+    exit 1
+  fi
+done
 work=$(mktemp -d "${TMPDIR:-/tmp}/check-test-grep-q-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
@@ -92,7 +100,7 @@ got_lines() { sed -n "s|^ *$2:\([0-9][0-9]*\): .*|\1|p" "$1/err"; }
 
 echo "== check-test-grep-q.sh: ${script}"
 
-# 1. パイプの先の grep -q は、形を問わず全部数える。行をまたいだパイプは grep のある行を出す
+# 1. パイプの先の grep -q は、下の書き方のどれでも数える。行をまたいだパイプは grep のある行を出す
 c=$(new_case t1)
 cat >"${c}/bad.test.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -108,6 +116,7 @@ outerr "${d}" | grep "-q" x # 出す
 outerr "${d}" | grep x -q # 出す
 outerr "${d}" | grep -qe x # 出す
 outerr "${d}" | grep -e x -q # 出す
+outerr "${d}" | grep -e "${p}" -q x # 出す
 x=$(outerr "${d}" | grep -q x && echo y) # 出す
 outerr "${d}" | tail -n 1 | grep -q x # 出す
 outerr "${d}" | command grep -q x # 出す
@@ -123,7 +132,7 @@ run "${c}" "${c}/bad.test.sh"
 want=$(want_lines "${c}/bad.test.sh")
 got=$(got_lines "${c}" "${c}/bad.test.sh")
 if [[ $(rc "${c}") == 1 && -n ${want} && ${got} == "${want}" ]]; then
-  ok "パイプの先の grep -q は形を問わず全部出して exit 1 (行をまたげば grep の行)"
+  ok "パイプの先の grep -q は、まとめ書き・長い形・引用符・並べ替え・! ・\$(…)・3 段・command grep などの書き方でも全部出して exit 1 (行をまたげば grep の行)"
 else
   ng "パイプの先の grep -q" "rc=$(rc "${c}")"$'\n'"$(diff <(echo "${want}") <(echo "${got}"))"$'\n'"$(err "${c}")"
 fi
@@ -157,6 +166,7 @@ cat "${d}/out" | grep -eq
 cat "${d}/out" | grep -m 1 x
 cat "${d}/out" | grep -- -q
 cat "${d}/out" | grep -e -q
+cat "${d}/out" | grep --regexp -q
 cat "${d}/out" | grep "${opt}" x
 echo "outerr \"\${d}\" | grep -q x"
 echo 'outerr "${d}" | grep -q x'
@@ -170,7 +180,7 @@ echo "${n} ${x}"
 EOF
 run "${c}" "${c}/good.test.sh"
 if [[ $(rc "${c}") == 0 && ! -s ${c}/err ]] && seen_out "${c}" '1 本'; then
-  ok "ファイルを直に読む・<<< で渡す・-q の無い grep・パターンの -q・コメント・文字列・ヒアドキュメントは数えない"
+  ok "ファイルを直に読む・<<< で渡す・-q の無い grep・パターン (-- / -e / --regexp の後ろ) の -q・コメント・文字列・ヒアドキュメントは数えない"
 else
   ng "数えないもの" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
 fi
@@ -245,13 +255,38 @@ printf '%s\n' "$@" >"${NIX_CALLS}"
 EOF
 } >"${c}/bin/nix"
 chmod +x "${c}/bin/nix"
-NIX_CALLS="${c}/nix-calls" PATH="${c}/bin" "${BASH}" "${c}/nix/scripts/check-test-grep-q.sh" a.test.sh b >"${c}/out" 2>"${c}/err"
-echo $? >"${c}/rc"
+# 偽の shfmt と jq (どちらか片方だけを置いた PATH を作る)
+for cmd in shfmt jq; do
+  mkdir -p "${c}/bin-${cmd}"
+  ln -s "${c}"/bin/* "${c}/bin-${cmd}/"
+  printf '#!%s\n' "${BASH}" >"${c}/bin-${cmd}/${cmd}"
+  chmod +x "${c}/bin-${cmd}/${cmd}"
+done
 want_calls=$(printf '%s\n' develop "$(cd "${c}/nix" && pwd -P)" --command "${c}/nix/scripts/check-test-grep-q.sh" a.test.sh b)
-if [[ $(rc "${c}") == 0 && $(cat "${c}/nix-calls" 2>/dev/null) == "${want_calls}" ]]; then
-  ok "shfmt か jq が無ければ、nix develop <nix> --command で同じ引数のまま入り直す"
+# $1: PATH にするディレクトリ。入り直したら (偽の nix を同じ引数で呼んだら) 0 を返す
+reexecs() {
+  rm -f "${c}/nix-calls"
+  NIX_CALLS="${c}/nix-calls" PATH="$1" "${BASH}" "${c}/nix/scripts/check-test-grep-q.sh" a.test.sh b >"${c}/out" 2>"${c}/err"
+  echo $? >"${c}/rc"
+  [[ $(rc "${c}") == 0 && $(cat "${c}/nix-calls" 2>/dev/null) == "${want_calls}" ]]
+}
+if reexecs "${c}/bin"; then
+  ok "shfmt も jq も無ければ、nix develop <nix> --command で同じ引数のまま入り直す"
 else
   ng "devShell に入り直す" "rc=$(rc "${c}") calls=$(cat "${c}/nix-calls" 2>/dev/null) err=$(err "${c}")"
+fi
+reexec_shfmt_only=0
+reexec_jq_only=0
+if reexecs "${c}/bin-shfmt"; then
+  reexec_shfmt_only=1
+fi
+if reexecs "${c}/bin-jq"; then
+  reexec_jq_only=1
+fi
+if [[ ${reexec_shfmt_only} == 1 && ${reexec_jq_only} == 1 ]]; then
+  ok "shfmt か jq の片方だけが無くても入り直す"
+else
+  ng "片方だけが無い" "shfmt だけがあるとき ${reexec_shfmt_only} / jq だけがあるとき ${reexec_jq_only}"
 fi
 rm -f "${c}/nix-calls"
 CHECK_TEST_GREP_Q_REEXEC=1 NIX_CALLS="${c}/nix-calls" PATH="${c}/bin" "${BASH}" "${c}/nix/scripts/check-test-grep-q.sh" a.test.sh \

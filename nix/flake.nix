@@ -360,7 +360,7 @@
               pkgs.shfmt
               pkgs.shellcheck
               pkgs.nixfmt
-              # check-test-grep-q.sh が shfmt の構文木を読む
+              # check-test-grep-q.sh が shfmt の構文木を jq で読む
               pkgs.jq
               home-manager.packages.${system}.default
             ];

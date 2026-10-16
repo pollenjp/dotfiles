@@ -17,7 +17,12 @@
 # 行をまたいだパイプも見つける。見つけたら「<ファイル>:<grep の行>: <その行>」を全部出して exit 1。構文木に
 # できない (shfmt か jq が読めない) ファイル・無いパス・*.sh の無いディレクトリがあれば exit 2。
 #
-# CI の lint ジョブが流す。shfmt か jq が PATH に無ければ、nix/ の devShell に入り直す。
+# 見るのはパイプの右に直に置いた grep (egrep / fgrep・command grep・\grep も) だけで、次の形は見えない:
+# `| { grep -q …; }`・`| (grep -q …)`・`| env grep -q`・`| timeout 5 grep -q` のように包んだもの、grep -q を
+# 中で呼ぶ関数へのパイプ、省いた長いオプション (--qu など)。今の nix/tests にこれらの形は無い。
+#
+# CI の lint ジョブが流す。shfmt か jq が PATH に無ければ、nix/ の devShell に入り直す (入り直しの
+# nix develop 自体が落ちたときは、nix の終了コード (多くは 1) のまま終わる。CI は devShell の中から直に呼ぶ)。
 
 set -eu -o pipefail
 
@@ -70,14 +75,14 @@ fi
 files=()
 for t in "${targets[@]}"; do
   if [[ -d ${t} ]]; then
-    found=0
+    any=0
     for f in "${t}"/*.sh; do
       if [[ -f ${f} ]]; then
         files+=("${f}")
-        found=1
+        any=1
       fi
     done
-    if ((found == 0)); then
+    if ((any == 0)); then
       echo "!! *.sh がありません: ${t}" >&2
       exit 2
     fi
