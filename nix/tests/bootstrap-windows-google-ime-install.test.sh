@@ -217,8 +217,29 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 pwsh_called() { [[ -s $1/pwsh-calls ]]; }
 calls() { cat "$1/pwsh-calls" 2>/dev/null; }
+# pwsh.exe の呼び出しの記録 (1 回 1 行) に、grep の引数で合う行があるか。記録が無ければ合わない
+# (判定はパイプで受けない。seen と同じ)
+called() {
+  local h=$1
+  shift
+  grep -qs "$@" "${h}/pwsh-calls"
+}
+# 最後の pwsh.exe の呼び出しが、grep の引数で合うか
+called_last() {
+  local h=$1
+  shift
+  grep -q "$@" <<<"$(tail -n 1 "${h}/pwsh-calls" 2>/dev/null)"
+}
 ncalls() { calls "$1" | grep -c ''; }
 warn_lines() { outerr "$1" | grep -c '⚠️'; }
 
@@ -230,7 +251,7 @@ echo "== bootstrap-windows-google-ime-install.sh: ${script}"
 # 1. 状態ファイルが無い: 飛ばす
 h=$(new_home t1 "" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '飛ばします'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '飛ばします'; then
   ok "windows-files.json が無ければ pwsh.exe を呼ばずに飛ばす"
 else
   ng "状態ファイルが無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -239,7 +260,7 @@ fi
 # 2. enable = false: 飛ばす
 h=$(new_home t2 "${state_off}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '配りません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '配りません'; then
   ok "enable = false なら pwsh.exe を呼ばずに飛ばす"
 else
   ng "enable = false" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -248,7 +269,7 @@ fi
 # 3. Install-GoogleJapaneseInput.ps1 が配られていない: 飛ばす
 h=$(new_home t3 "${state_on}" 0)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q 'まだ配られていません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" 'まだ配られていません'; then
   ok "Install-GoogleJapaneseInput.ps1 が配られていなければ飛ばす"
 else
   ng "Install-GoogleJapaneseInput.ps1 が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -257,7 +278,7 @@ fi
 # 4. pwsh.exe が無い: 手で打つコマンドを出して exit 0
 h=$(new_home t4 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -qF 'Install-GoogleJapaneseInput -Check'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-GoogleJapaneseInput -Check'; then
   ok "pwsh.exe が無ければ手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -266,7 +287,7 @@ fi
 # 5. pwsh.exe が失敗する (interop が落ちている): 手で打つコマンドを出して exit 0
 h=$(new_home t5 "${state_on}" 1)
 FAKE_PWSH_RC=126 FAKE_PWSH_OUT='' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -qF 'Install-GoogleJapaneseInput -Check' && outerr "${h}" | grep -q '確かめられませんでした'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-GoogleJapaneseInput -Check' && seen "${h}" '確かめられませんでした'; then
   ok "pwsh.exe が失敗したら手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が失敗する" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -275,9 +296,9 @@ fi
 # 6. 揃っている (-Check が 0): 1 行だけで ⚠ は出さない。pwsh.exe は -NoProfile と -Check で、配った場所を渡す
 h=$(new_home t6 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '揃っています' \
-  && calls "${h}" | grep -q -- '-NoProfile' && calls "${h}" | grep -q -- '-Check' \
-  && calls "${h}" | grep -qF 'C:\fake\Install-GoogleJapaneseInput.ps1' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
+  && called "${h}" -- '-NoProfile' && called "${h}" -- '-Check' \
+  && called "${h}" -F 'C:\fake\Install-GoogleJapaneseInput.ps1' \
   && [[ $(cat "${h}/timeout-calls") == 120 ]]; then
   ok "揃っていれば 1 行だけ出して exit 0 (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
@@ -286,7 +307,7 @@ fi
 
 # 6b. スクリプトが exit まで届かずに終わっても成功扱いにしない: 呼ぶ前に $LASTEXITCODE を 2 にしておく
 # shellcheck disable=SC2016 # PowerShell の $global:… を文字のまま探す
-if calls "${h}" | grep -qF '$global:LASTEXITCODE = 2; &'; then
+if called "${h}" -F '$global:LASTEXITCODE = 2; &'; then
   ok "pwsh.exe には、スクリプトを呼ぶ前に \$LASTEXITCODE を 2 にするコマンドを渡す"
 else
   ng "\$LASTEXITCODE を先に 2 にしていない" "calls=$(calls "${h}")"
@@ -295,26 +316,26 @@ fi
 # 7. 差がある (-Check が 1): ⚠ で上下を囲み、状態と揃えるコマンドを出す。上げはしない
 h=$(new_home t7 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && outerr "${h}" | grep -q '揃っていません' \
-  && outerr "${h}" | grep -qF "⚠ 固定した版      : ${v} → 上げる" && outerr "${h}" | grep -qF '2.29.5370.0' \
-  && outerr "${h}" | grep -qF -- 'bootstrap-windows-google-ime-install.sh --apply' \
-  && outerr "${h}" | grep -qF 'PowerShell: Install-GoogleJapaneseInput' && outerr "${h}" | grep -qF 'UAC' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '揃っていません' \
+  && seen "${h}" -F "⚠ 固定した版      : ${v} → 上げる" && seen "${h}" -F '2.29.5370.0' \
+  && seen "${h}" -F -- 'bootstrap-windows-google-ime-install.sh --apply' \
+  && seen "${h}" -F 'PowerShell: Install-GoogleJapaneseInput' && seen "${h}" -F 'UAC' \
   && [[ $(ncalls "${h}") == 1 ]]; then
   ok "差があれば ⚠ で囲んだ注意と状態と揃えるコマンドを出して exit 0 (上げはしない)"
 else
   ng "差がある" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
-if ! outerr "${h}" | grep -qF '揃っていない → Install-GoogleJapaneseInput'; then
+if ! seen "${h}" -F '揃っていない → Install-GoogleJapaneseInput'; then
   ok "PowerShell の締めの 1 行は、枠の揃えるコマンドと重なるので出さない"
 else
   ng "締めの 1 行が重なっている" "$(outerr "${h}")"
 fi
-if ! outerr "${h}" | grep -q $'\e\['; then
+if ! seen "${h}" $'\e\['; then
   ok "端末でなければ色 (エスケープ) を付けない"
 else
   ng "端末でないのに色が付いている" "$(outerr "${h}" | od -c | head -5)"
 fi
-if ! outerr "${h}" | grep -q $'\r'; then
+if ! seen "${h}" $'\r'; then
   ok "pwsh.exe の CRLF は落として出す"
 else
   ng "CR が残っている" "$(outerr "${h}" | od -c | head -5)"
@@ -323,8 +344,8 @@ fi
 # 8. 入っている版の方が新しい (-Check が 1): 枠に入れるが、揃えるコマンドではなく repo の版の上げ方を出す
 h=$(new_home t8 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${newer_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '下げはしません' \
-  && outerr "${h}" | grep -qF '※ 入っている版の方が新しい' && ! outerr "${h}" | grep -qF -- '--apply'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && seen "${h}" '下げはしません' \
+  && seen "${h}" -F '※ 入っている版の方が新しい' && ! seen "${h}" -F -- '--apply'; then
   ok "入っている版の方が新しければ、揃えるコマンドの代わりに repo の版の上げ方を出す"
 else
   ng "入っている版の方が新しい" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
@@ -333,8 +354,8 @@ fi
 # 8b. 固定した版が winget に無い (-Check が 1): 枠に入れるが、揃えるコマンドではなく repo の版の直し方を出す
 h=$(new_home t8b "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${notlisted_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'winget に無いので、入れることも上げることもできません' \
-  && ! outerr "${h}" | grep -qF -- '--apply'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'winget に無いので、入れることも上げることもできません' \
+  && ! seen "${h}" -F -- '--apply'; then
   ok "固定した版が winget に無ければ、揃えるコマンドの代わりに repo の版の直し方を出す"
 else
   ng "固定した版が winget に無い" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
@@ -343,8 +364,8 @@ fi
 # 8c. 入っている版が読めない (-Check が 1): 枠に入れるが、揃えるコマンドではなく確かめ方を出す
 h=$(new_home t8c "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${unknown_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '入っている版が読めないので、揃えられません' \
-  && ! outerr "${h}" | grep -qF -- '--apply'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && seen "${h}" '入っている版が読めないので、揃えられません' \
+  && ! seen "${h}" -F -- '--apply'; then
   ok "入っている版が読めなければ、揃えるコマンドの代わりに確かめ方を出す"
 else
   ng "入っている版が読めない" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
@@ -353,8 +374,8 @@ fi
 # 9. -Check が 1 でも、こちらの出力が無い (スクリプトが壊れている等): 差とは扱わず、手で打つコマンドを出す
 h=$(new_home t9 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT='The term is not recognized as a name of a cmdlet' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '確かめられませんでした' \
-  && outerr "${h}" | grep -qF 'Install-GoogleJapaneseInput -Check'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '確かめられませんでした' \
+  && seen "${h}" -F 'Install-GoogleJapaneseInput -Check'; then
   ok "-Check の出力が来なければ差とは扱わず、手で打つコマンドを出して exit 0"
 else
   ng "出力が来ない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -365,10 +386,10 @@ fi
 #     98 がそのまま置くので、流し直しは条件付き)
 h=$(new_home t10 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && outerr "${h}" | grep -q 'UAC の確認が出たら' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && seen "${h}" 'UAC の確認が出たら' \
   && grep -q 'UAC の確認が出たら' "${h}/out-at-ifmissing" && [[ $(tr '\n' ' ' <"${h}/timeout-calls") == "120 600 " ]] \
-  && outerr "${h}" | grep -q '入れました' && outerr "${h}" | grep -qF '「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから setup --update を流し直して' \
-  && calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && ! calls "${h}" | tail -n 1 | grep -q -- '-Check'; then
+  && seen "${h}" '入れました' && seen "${h}" -F '「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから setup --update を流し直して' \
+  && called_last "${h}" -- '-IfMissing' && ! called_last "${h}" -- '-Check'; then
   ok "入っていなければ UAC が出ると出してから -IfMissing で入れ、98 が「まだ使われていません」と出したら一度使ってから流し直すよう出して exit 0"
 else
   ng "入っていない → 入れる" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -377,8 +398,8 @@ fi
 # 11. 入っていないので入れようとしたが失敗 (UAC で断った など): ⚠ で囲んで知らせる。setup は止めない
 h=$(new_home t11 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='winget が失敗した (終了コード 0x8A150011)。UAC で「いいえ」を押したなら、Install-GoogleJapaneseInput を打ち直す' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && outerr "${h}" | grep -q '入れられませんでした (終了コード 1)' \
-  && outerr "${h}" | grep -qF '0x8A150011' && outerr "${h}" | grep -qF -- 'bootstrap-windows-google-ime-install.sh --apply'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '入れられませんでした (終了コード 1)' \
+  && seen "${h}" -F '0x8A150011' && seen "${h}" -F -- 'bootstrap-windows-google-ime-install.sh --apply'; then
   ok "入れられなければ ⚠ で囲んで知らせて exit 0"
 else
   ng "入れられない" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
@@ -388,8 +409,8 @@ fi
 #     先に押すか閉じてから打ち直すよう添える (残ったまま打ち直すと 1618 で落ちる)。setup は止めない
 h=$(new_home t12 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && outerr "${h}" | grep -q '600 秒待っても終わらない' \
-  && outerr "${h}" | grep -qF 'PowerShell: Install-GoogleJapaneseInput' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '600 秒待っても終わらない' \
+  && seen "${h}" -F 'PowerShell: Install-GoogleJapaneseInput' \
   && grep -qF 'UAC の確認が残っていれば、先に押すか閉じてから打ち直して' "${h}/err" && grep -qF '(1618)' "${h}/err"; then
   ok "UAC を押さないまま時間切れになったら ⚠ で囲んで知らせ、確認が残っているときの打ち直し方も添えて exit 0"
 else
@@ -399,8 +420,8 @@ fi
 # 13. -Check が 3 でも、こちらの出力が無い: 入れには行かず、手で打つコマンドを出す
 h=$(new_home t13 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT='Exec format error' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '確かめられませんでした' \
-  && outerr "${h}" | grep -qF 'Install-GoogleJapaneseInput -Check'; then
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" '確かめられませんでした' \
+  && seen "${h}" -F 'Install-GoogleJapaneseInput -Check'; then
   ok "-Check が 3 でも出力が来なければ、入れずに手で打つコマンドを出す"
 else
   ng "3 だが出力が来ない" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -409,8 +430,8 @@ fi
 # 13b. 入っていないが、固定した版が winget に無い (-Check が 3): -IfMissing は打たず、UAC の案内も出さずに、repo の版の直し方を出す
 h=$(new_home t13b "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_notlisted_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'winget に無いので、入れることも上げることもできません' \
-  && ! outerr "${h}" | grep -q 'UAC の確認が出たら' && ! outerr "${h}" | grep -qF -- '--apply'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'winget に無いので、入れることも上げることもできません' \
+  && ! seen "${h}" 'UAC の確認が出たら' && ! seen "${h}" -F -- '--apply'; then
   ok "入っていなくても固定した版が winget に無ければ、-IfMissing を打たずに repo の版の直し方を出す"
 else
   ng "入っていないが固定した版が winget に無い" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
@@ -419,8 +440,8 @@ fi
 # 14. -Check が 2 (winget が無い・例外): 手で打つコマンドを出して exit 0
 h=$(new_home t14 "${state_on}" 1)
 FAKE_PWSH_RC=2 FAKE_PWSH_OUT='winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '確かめられませんでした (終了コード 2' \
-  && outerr "${h}" | grep -qF 'アプリ インストーラー'; then
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" '確かめられませんでした (終了コード 2' \
+  && seen "${h}" -F 'アプリ インストーラー'; then
   ok "-Check が 2 (winget が無い) なら、スクリプトの出力と手で打つコマンドを出して exit 0"
 else
   ng "-Check が 2" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -429,7 +450,7 @@ fi
 # 14b. -Check が 120 秒で時間切れ (124): 時間切れと出して、手で打つコマンドを出す (exit 0)
 h=$(new_home t14b "${state_on}" 1)
 FAKE_PWSH_RC=124 FAKE_PWSH_OUT='' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '120 秒たっても終わりませんでした' && outerr "${h}" | grep -q 'Install-GoogleJapaneseInput -Check'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '120 秒たっても終わりませんでした' && seen "${h}" 'Install-GoogleJapaneseInput -Check'; then
   ok "-Check が時間切れなら、時間切れと出して手で打つコマンドを出す"
 else
   ng "-Check の時間切れ" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -438,9 +459,9 @@ fi
 # 15. --apply: -Check も -IfMissing も付けずに流す。成功なら exit 0
 h=$(new_home t15 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="揃った" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 0 ]] && pwsh_called "${h}" && ! calls "${h}" | grep -q -- '-Check' \
-  && ! calls "${h}" | grep -q -- '-IfMissing' && calls "${h}" | grep -qF 'C:\fake\Install-GoogleJapaneseInput.ps1' \
-  && outerr "${h}" | grep -q '揃いました'; then
+if [[ $(rc "${h}") == 0 ]] && pwsh_called "${h}" && ! called "${h}" -- '-Check' \
+  && ! called "${h}" -- '-IfMissing' && called "${h}" -F 'C:\fake\Install-GoogleJapaneseInput.ps1' \
+  && seen "${h}" '揃いました'; then
   ok "--apply は -Check を付けずに流し、成功なら exit 0"
 else
   ng "--apply 成功" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -449,7 +470,7 @@ fi
 # 16. --apply が失敗: exit 1 (手で流すものなので失敗を返す)
 h=$(new_home t16 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="入っている版 (3.35.0.0) の方が固定した版 (${v}) より新しいので、下げない" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '揃いませんでした'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした'; then
   ok "--apply が失敗したら exit 1"
 else
   ng "--apply 失敗" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -459,8 +480,8 @@ fi
 h=$(new_home t17 "${state_on}" 1)
 newer_listed='※ winget に固定した版より新しい 3.35.6300.0 がある。上げるなら Install-GoogleJapaneseInput.ps1 の -Version の既定値を変える'
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}"$'\n'"${newer_listed}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '揃っています' \
-  && outerr "${h}" | grep -qF "${newer_listed}"; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
+  && seen "${h}" -F "${newer_listed}"; then
   ok "揃っていても、winget に新しい版があれば ※ の行を出す"
 else
   ng "新しい版がある" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -469,7 +490,7 @@ fi
 # 18. pwsh.exe の出力に色のエスケープが混ざっていても、取り除いてから枠に入れる
 h=$(new_home t18 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT='Google 日本語入力 (winget の Google.JapaneseIME)'$'\n\e[33m⚠ winget pin      : 無し → 足す\e[0m' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! outerr "${h}" | grep -q $'\e' && outerr "${h}" | grep -qF '⚠ winget pin      : 無し → 足す'; then
+if [[ $(rc "${h}") == 0 ]] && ! seen "${h}" $'\e' && seen "${h}" -F '⚠ winget pin      : 無し → 足す'; then
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
   ng "エスケープが残る" "rc=$(rc "${h}") $(outerr "${h}" | od -c | head -8)"
@@ -551,7 +572,7 @@ done
 h=$(new_home t21 "${state_on}" 1)
 env HOME="${h}" PATH="${h}/bin:${nojq_bin}" "${BASH}" "${script}" >"${h}/out" 2>"${h}/err"
 echo $? >"${h}/rc"
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q 'jq が見つかりません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" 'jq が見つかりません'; then
   ok "jq が無くても exit 0 で飛ばす (setup を止めない)"
 else
   ng "jq が無い" "rc=$(rc "${h}") $(outerr "${h}")"

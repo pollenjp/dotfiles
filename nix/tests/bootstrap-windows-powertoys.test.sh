@@ -176,9 +176,30 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 ncalls() { grep -c '' "$1/ps-calls" 2>/dev/null || echo 0; }
 npwsh() { grep -c '' "$1/pwsh-calls" 2>/dev/null || echo 0; }
 pwsh_calls() { cat "$1/pwsh-calls" 2>/dev/null; }
+# pwsh.exe の呼び出しの記録 (1 回 1 行) に、grep の引数で合う行があるか。記録が無ければ合わない
+# (判定はパイプで受けない。seen と同じ)
+pwsh_called() {
+  local h=$1
+  shift
+  grep -qs "$@" "${h}/pwsh-calls"
+}
+# 最後の pwsh.exe の呼び出しが、grep の引数で合うか
+pwsh_called_last() {
+  local h=$1
+  shift
+  grep -q "$@" <<<"$(tail -n 1 "${h}/pwsh-calls" 2>/dev/null)"
+}
 record() { echo "$1/.local/state/dotfiles/powertoys-keyboard-manager.reloaded"; }
 km_settings_json() { echo "$1/win/AppData/Local/Microsoft/PowerToys/Keyboard Manager/settings.json"; }
 
@@ -205,7 +226,7 @@ done
 # 2. 送れた: 記録する。名前付きイベントの名前を渡す
 h=$(new_home t2 "${state_on}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && outerr "${h}" | grep -q '読み直させました' \
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && seen "${h}" '読み直させました' \
   && grep -qF 'PowerToys_KeyboardManager_Event_Settings' "${h}/ps-calls" && grep -qF -- '-NoProfile' "${h}/ps-calls"; then
   ok "送れたら記録し、イベントの名前を渡す (CRLF の出力も読める)"
 else
@@ -214,7 +235,7 @@ fi
 
 # 3. 同じ default.json: 呼ばない
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '読み直し済み'; then
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" '読み直し済み'; then
   ok "同じ default.json なら呼ばない"
 else
   ng "同じ default.json" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
@@ -241,7 +262,7 @@ fi
 # 6. PowerToys が動いていない (absent): 記録する
 h=$(new_home t6 "${state_on}" 1)
 FAKE_PS_OUT=absent run "${h}" 0
-if [[ $(rc "${h}") == 0 && -s $(record "${h}") ]] && outerr "${h}" | grep -q '動いていません'; then
+if [[ $(rc "${h}") == 0 && -s $(record "${h}") ]] && seen "${h}" '動いていません'; then
   ok "PowerToys が動いていなければ記録する (起動したときに読む)"
 else
   ng "absent" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -257,7 +278,7 @@ if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 0 && ! -e $(record "${h}") ]] \
   && ! grep -q '設定画面を一度開いてから' "${h}/out"; then
   printf '%s' "${km_settings}" >"$(km_settings_json "${h}")"
   run "${h}" 0
-  if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && outerr "${h}" | grep -q '読み直させました'; then
+  if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && seen "${h}" '読み直させました'; then
     ok "settings.json が無ければ送らず記録もせずに、設定画面を一度開くよう stderr に出す (できた後の回で送る)"
   else
     ng "settings.json ができた後の回" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
@@ -286,7 +307,7 @@ before=$(cat "$(record "${h}")")
 rm "$(km_settings_json "${h}")"
 run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && $(cat "$(record "${h}")") == "${before}" ]] \
-  && grep -q '設定画面を一度開いてから' "${h}/err" && ! outerr "${h}" | grep -q '読み直し済み'; then
+  && grep -q '設定画面を一度開いてから' "${h}/err" && ! seen "${h}" '読み直し済み'; then
   ok "記録があっても settings.json が無ければ、読み直し済みとは言わずに設定画面を一度開くよう出す (記録は変えない)"
 else
   ng "記録があって settings.json が無い" "rc=$(rc "${h}") calls=$(ncalls "${h}") $(outerr "${h}")"
@@ -295,7 +316,7 @@ fi
 # 7. powershell.exe が無い: 手で読み直す方法を出し、記録しない
 h=$(new_home t7 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 && ! -e $(record "${h}") ]] && outerr "${h}" | grep -q 'オフにしてオンに戻す'; then
+if [[ $(rc "${h}") == 0 && ! -e $(record "${h}") ]] && seen "${h}" 'オフにしてオンに戻す'; then
   ok "powershell.exe が無ければ手で読み直す方法を出し、記録しない"
 else
   ng "powershell.exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -305,7 +326,7 @@ fi
 for t in "126:" "0:Exec format error"; do
   h=$(new_home "t8-${t%%:*}" "${state_on}" 1)
   FAKE_PS_RC=${t%%:*} FAKE_PS_OUT=${t#*:} run "${h}" 0
-  if [[ $(rc "${h}") == 0 && ! -e $(record "${h}") ]] && outerr "${h}" | grep -q 'オフにしてオンに戻す'; then
+  if [[ $(rc "${h}") == 0 && ! -e $(record "${h}") ]] && seen "${h}" 'オフにしてオンに戻す'; then
     ok "powershell.exe が失敗・知らない出力 (rc=${t%%:*}) なら記録しない"
   else
     ng "失敗 (rc=${t%%:*})" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -324,7 +345,7 @@ fi
 # 10. Install-PowerToys.ps1 が配られていない: pwsh.exe は呼ばず、確かめずに読み直しへ進む
 h=$(new_home t10 "${state_on}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'Install-PowerToys.ps1 がまだ配られていません'; then
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'Install-PowerToys.ps1 がまだ配られていません'; then
   ok "Install-PowerToys.ps1 が配られていなければ pwsh.exe を呼ばずに、読み直しへ進む"
 else
   ng "Install-PowerToys.ps1 が無い" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -333,10 +354,10 @@ fi
 # 11. 入っている (-Check が 0): 入れずに読み直させる。pwsh.exe は -NoProfile -Check で、配った場所を渡す
 h=$(new_home t11 "${state_on}" 1 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'PowerToys は入っています' \
-  && outerr "${h}" | grep -q '読み直させました' && pwsh_calls "${h}" | grep -q -- '-NoProfile' \
-  && pwsh_calls "${h}" | grep -q -- '-Check' && ! pwsh_calls "${h}" | grep -q -- '-IfMissing' \
-  && pwsh_calls "${h}" | grep -qF 'C:\fake\Install-PowerToys.ps1' \
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'PowerToys は入っています' \
+  && seen "${h}" '読み直させました' && pwsh_called "${h}" -- '-NoProfile' \
+  && pwsh_called "${h}" -- '-Check' && ! pwsh_called "${h}" -- '-IfMissing' \
+  && pwsh_called "${h}" -F 'C:\fake\Install-PowerToys.ps1' \
   && [[ $(head -n 1 "${h}/timeout-calls") == "60 pwsh.exe" ]]; then
   ok "入っていれば入れずに読み直させる (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
@@ -345,7 +366,7 @@ fi
 
 # 11b. スクリプトが exit まで届かずに終わっても成功扱いにしない: 呼ぶ前に $LASTEXITCODE を 2 にしておく
 # shellcheck disable=SC2016 # PowerShell の $global:… を文字のまま探す
-if pwsh_calls "${h}" | grep -qF '$global:LASTEXITCODE = 2; &'; then
+if pwsh_called "${h}" -F '$global:LASTEXITCODE = 2; &'; then
   ok "pwsh.exe には、スクリプトを呼ぶ前に \$LASTEXITCODE を 2 にするコマンドを渡す"
 else
   ng "\$LASTEXITCODE を先に 2 にしていない" "calls=$(pwsh_calls "${h}")"
@@ -353,7 +374,7 @@ fi
 
 # 12. 読み直し済みでも、入っているかは毎回確かめる (確かめてから「読み直し済み」で終わる)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '読み直し済み'; then
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 ]] && seen "${h}" '読み直し済み'; then
   ok "読み直し済みでも、入っているかは毎回確かめる"
 else
   ng "読み直し済み" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -363,8 +384,8 @@ fi
 h=$(new_home t13 "${state_on}" 1 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${added_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] \
-  && pwsh_calls "${h}" | tail -n 1 | grep -q -- '-IfMissing' && outerr "${h}" | grep -q 'PowerToys を入れました' \
-  && outerr "${h}" | grep -q '読み直させました' && ! outerr "${h}" | grep -q '⚠️' \
+  && pwsh_called_last "${h}" -- '-IfMissing' && seen "${h}" 'PowerToys を入れました' \
+  && seen "${h}" '読み直させました' && ! seen "${h}" '⚠️' \
   && [[ $(tr '\n' ',' <"${h}/timeout-calls") == "60 pwsh.exe,600 pwsh.exe,60 powershell.exe," ]] \
   && grep -q 'winget で入れます' "${h}/out-at-ifmissing" && grep -q '600 秒まで待ちます' "${h}/out-at-ifmissing"; then
   ok "入っていなければ -IfMissing で入れてから読み直させる"
@@ -375,10 +396,10 @@ fi
 # 14. 入れられない (-IfMissing が 1): ⚠ で囲んで知らせ、それでも読み直しへ進む
 h=$(new_home t14 "${state_on}" 1 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2=$'winget が失敗した (終了コード 0x8A150011)\e[0m' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q 'PowerToys を入れられませんでした (終了コード 1)' \
-  && outerr "${h}" | grep -qF '0x8A150011' && outerr "${h}" | grep -qF 'PowerShell: Install-PowerToys' \
-  && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]] && ! outerr "${h}" | grep -q $'\e\[' \
-  && ! outerr "${h}" | grep -q $'\r'; then
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'PowerToys を入れられませんでした (終了コード 1)' \
+  && seen "${h}" -F '0x8A150011' && seen "${h}" -F 'PowerShell: Install-PowerToys' \
+  && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]] && ! seen "${h}" $'\e\[' \
+  && ! seen "${h}" $'\r'; then
   ok "入れられなければ ⚠ で囲んで知らせ、読み直しへ進んで exit 0 (端末でなければ色を付けない)"
 else
   ng "入れられない" "rc=$(rc "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -388,8 +409,8 @@ fi
 for t in "3:Exec format error" "126:" "2:PowerToys (winget の Microsoft.PowerToys。版は固定しない)"; do
   h=$(new_home "t15-${t%%:*}" "${state_on}" 1 1)
   FAKE_PWSH_RC=${t%%:*} FAKE_PWSH_OUT=${t#*:} run "${h}" 0
-  if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '確かめられませんでした' \
-    && outerr "${h}" | grep -qF 'Install-PowerToys'; then
+  if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && seen "${h}" '確かめられませんでした' \
+    && seen "${h}" -F 'Install-PowerToys'; then
     ok "pwsh.exe の出力が来ない・失敗する (rc=${t%%:*}) なら、入れずに手で打つコマンドを出して読み直しへ進む"
   else
     ng "pwsh.exe の失敗 (rc=${t%%:*})" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -399,8 +420,8 @@ done
 # 15b. -Check が 60 秒で時間切れ (124): 時間切れと出し、入れには行かず、手で打つコマンドを出して読み直しへ進む
 h=$(new_home t15b "${state_on}" 1 1)
 FAKE_PWSH_RC=124 FAKE_PWSH_OUT='' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '60 秒たっても終わりませんでした' \
-  && outerr "${h}" | grep -qF 'Install-PowerToys'; then
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && seen "${h}" '60 秒たっても終わりませんでした' \
+  && seen "${h}" -F 'Install-PowerToys'; then
   ok "-Check が時間切れなら、時間切れと出して手で打つコマンドを出し、読み直しへ進む"
 else
   ng "-Check の時間切れ" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -409,7 +430,7 @@ fi
 # 15c. -IfMissing が 600 秒で時間切れ (124): ⚠ で囲んで 600 秒待ったと出し、読み直しへ進む
 h=$(new_home t15c "${state_on}" 1 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && outerr "${h}" | grep -q '600 秒待っても終わらない' \
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" '600 秒待っても終わらない' \
   && [[ $(outerr "${h}" | grep -c '⚠️') -ge 2 ]]; then
   ok "-IfMissing が時間切れなら、⚠ で囲んで 600 秒待ったと出し、読み直しへ進む"
 else
@@ -419,8 +440,8 @@ fi
 # 16. pwsh.exe が無い (powershell.exe はある): 手で打つコマンドを出して、読み直しへ進む
 h=$(new_home t16 "${state_on}" 1 1)
 run "${h}" 2
-if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && outerr "${h}" | grep -q 'pwsh.exe が見つかりません' \
-  && outerr "${h}" | grep -qF 'Install-PowerToys'; then
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] && seen "${h}" 'pwsh.exe が見つかりません' \
+  && seen "${h}" -F 'Install-PowerToys'; then
   ok "pwsh.exe が無ければ手で打つコマンドを出して、読み直しへ進む"
 else
   ng "pwsh.exe が無い" "rc=$(rc "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -429,8 +450,8 @@ fi
 # 17. default.json がまだ無くても、PowerToys が入っているかは確かめる (入れるのは default.json に依らない)
 h=$(new_home t17 "${state_on}" 0 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${added_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 0 ]] && outerr "${h}" | grep -q 'PowerToys を入れました' \
-  && outerr "${h}" | grep -q 'default.json がまだありません'; then
+if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 0 ]] && seen "${h}" 'PowerToys を入れました' \
+  && seen "${h}" 'default.json がまだありません'; then
   ok "default.json が無くても、入っていなければ入れてから飛ばす"
 else
   ng "default.json が無い" "rc=$(rc "${h}") pwsh=$(npwsh "${h}") ps=$(ncalls "${h}") $(outerr "${h}")"
@@ -480,7 +501,7 @@ fi
 # 22. 入っていて読み直させられたときは、まとめ用には何も残さない
 h=$(new_home t22 "${state_on}" 1 1)
 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" 0
-if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]] && outerr "${h}" | grep -q '読み直させました'; then
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]] && seen "${h}" '読み直させました'; then
   ok "入っていて読み直させられたときは、まとめ用には何も残さない"
 else
   ng "警告が無いのにまとめ用に残した" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"

@@ -122,8 +122,23 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 pwsh_called() { [[ -s $1/pwsh-calls ]]; }
 calls() { cat "$1/pwsh-calls" 2>/dev/null; }
+# pwsh.exe の呼び出しの記録 (1 回 1 行) に、grep の引数で合う行があるか。記録が無ければ合わない
+# (判定はパイプで受けない。seen と同じ)
+called() {
+  local h=$1
+  shift
+  grep -qs "$@" "${h}/pwsh-calls"
+}
 warn_lines() { outerr "$1" | grep -c '⚠️'; }
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
@@ -134,7 +149,7 @@ echo "== bootstrap-windows-openssh.sh: ${script}"
 # 1. 状態ファイルが無い: 飛ばす
 h=$(new_home t1 "" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '飛ばします'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '飛ばします'; then
   ok "windows-files.json が無ければ pwsh.exe を呼ばずに飛ばす"
 else
   ng "状態ファイルが無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -143,7 +158,7 @@ fi
 # 2. enable = false: 飛ばす
 h=$(new_home t2 "${state_off}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '配りません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '配りません'; then
   ok "enable = false なら pwsh.exe を呼ばずに飛ばす"
 else
   ng "enable = false" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -152,7 +167,7 @@ fi
 # 3. Install-OpenSSH.ps1 が配られていない: 飛ばす
 h=$(new_home t3 "${state_on}" 0)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q 'まだ配られていません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" 'まだ配られていません'; then
   ok "Install-OpenSSH.ps1 が配られていなければ飛ばす"
 else
   ng "Install-OpenSSH.ps1 が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -161,7 +176,7 @@ fi
 # 4. pwsh.exe が無い: 手で打つコマンドを出して exit 0
 h=$(new_home t4 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -qF 'Install-OpenSSH -Check'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-OpenSSH -Check'; then
   ok "pwsh.exe が無ければ手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -170,7 +185,7 @@ fi
 # 5. pwsh.exe が失敗する (interop が落ちている): 手で打つコマンドを出して exit 0
 h=$(new_home t5 "${state_on}" 1)
 FAKE_PWSH_RC=126 FAKE_PWSH_OUT='' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -qF 'Install-OpenSSH -Check' && outerr "${h}" | grep -q '確かめられませんでした'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-OpenSSH -Check' && seen "${h}" '確かめられませんでした'; then
   ok "pwsh.exe が失敗したら手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が失敗する" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -179,9 +194,9 @@ fi
 # 6. 揃っている (-Check が 0): 1 行だけで ⚠ は出さない。pwsh.exe は -NoProfile と -Check で、配った場所を渡す
 h=$(new_home t6 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '揃っています' \
-  && calls "${h}" | grep -q -- '-NoProfile' && calls "${h}" | grep -q -- '-Check' \
-  && calls "${h}" | grep -qF 'C:\fake\Install-OpenSSH.ps1'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
+  && called "${h}" -- '-NoProfile' && called "${h}" -- '-Check' \
+  && called "${h}" -F 'C:\fake\Install-OpenSSH.ps1'; then
   ok "揃っていれば 1 行だけ出して exit 0 (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
   ng "揃っている" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -190,7 +205,7 @@ fi
 # 6b. スクリプトが exit まで届かずに終わっても成功扱いにしない: 呼ぶ前に $LASTEXITCODE を 2 にしておく
 #     (2026-10-06 の本番で、スクリプトの中の例外のあと、外側の exit $LASTEXITCODE が中の winget の 0 を返した)
 # shellcheck disable=SC2016 # PowerShell の $global:… を文字のまま探す
-if calls "${h}" | grep -qF '$global:LASTEXITCODE = 2; &'; then
+if called "${h}" -F '$global:LASTEXITCODE = 2; &'; then
   ok "pwsh.exe には、スクリプトを呼ぶ前に \$LASTEXITCODE を 2 にするコマンドを渡す"
 else
   ng "\$LASTEXITCODE を先に 2 にしていない" "calls=$(calls "${h}")"
@@ -199,24 +214,24 @@ fi
 # 7. 差がある (-Check が 1): ⚠ で上下を囲み、状態と揃えるコマンドを出す。setup は止めない
 h=$(new_home t7 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && outerr "${h}" | grep -q '揃っていません' \
-  && outerr "${h}" | grep -qF '固定した版      : 10.0.0.0 → 上げる' \
-  && outerr "${h}" | grep -qF -- 'bootstrap-windows-openssh.sh --apply' && outerr "${h}" | grep -qF 'Install-OpenSSH'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '揃っていません' \
+  && seen "${h}" -F '固定した版      : 10.0.0.0 → 上げる' \
+  && seen "${h}" -F -- 'bootstrap-windows-openssh.sh --apply' && seen "${h}" -F 'Install-OpenSSH'; then
   ok "差があれば ⚠ で囲んだ注意と状態と揃えるコマンドを出して exit 0"
 else
   ng "差がある" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
 fi
-if ! outerr "${h}" | grep -qF '揃っていない → Install-OpenSSH'; then
+if ! seen "${h}" -F '揃っていない → Install-OpenSSH'; then
   ok "PowerShell の締めの 1 行は、枠の揃えるコマンドと重なるので出さない"
 else
   ng "締めの 1 行が重なっている" "$(outerr "${h}")"
 fi
-if ! outerr "${h}" | grep -q $'\e\['; then
+if ! seen "${h}" $'\e\['; then
   ok "端末でなければ色 (エスケープ) を付けない"
 else
   ng "端末でないのに色が付いている" "$(outerr "${h}" | od -c | head -5)"
 fi
-if ! outerr "${h}" | grep -q $'\r'; then
+if ! seen "${h}" $'\r'; then
   ok "pwsh.exe の CRLF は落として出す"
 else
   ng "CR が残っている" "$(outerr "${h}" | od -c | head -5)"
@@ -225,8 +240,8 @@ fi
 # 8. -Check が 1 でも、こちらの出力が無い (スクリプトが壊れている等): 差とは扱わず、手で打つコマンドを出す
 h=$(new_home t8 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT='The term is not recognized as a name of a cmdlet' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '確かめられませんでした' \
-  && outerr "${h}" | grep -qF 'Install-OpenSSH -Check'; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '確かめられませんでした' \
+  && seen "${h}" -F 'Install-OpenSSH -Check'; then
   ok "-Check の出力が来なければ差とは扱わず、手で打つコマンドを出して exit 0"
 else
   ng "出力が来ない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -235,8 +250,8 @@ fi
 # 9. --apply: -Check を付けずに流す。成功なら exit 0
 h=$(new_home t9 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="揃った" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 0 ]] && pwsh_called "${h}" && ! calls "${h}" | grep -q -- '-Check' \
-  && calls "${h}" | grep -qF 'C:\fake\Install-OpenSSH.ps1'; then
+if [[ $(rc "${h}") == 0 ]] && pwsh_called "${h}" && ! called "${h}" -- '-Check' \
+  && called "${h}" -F 'C:\fake\Install-OpenSSH.ps1'; then
   ok "--apply は -Check を付けずに流し、成功なら exit 0"
 else
   ng "--apply 成功" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -245,7 +260,7 @@ fi
 # 10. --apply が失敗: exit 1 (手で流すものなので失敗を返す)
 h=$(new_home t10 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="版が揃っていない" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '揃いませんでした'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした'; then
   ok "--apply が失敗したら exit 1"
 else
   ng "--apply 失敗" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -255,8 +270,8 @@ fi
 h=$(new_home t12 "${state_on}" 1)
 newer='※ winget に固定した版より新しい 10.1.0.0 がある。上げるなら Install-OpenSSH.ps1 の -Version の既定値を変える'
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}"$'\n'"${newer}"$'\n揃っている' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && outerr "${h}" | grep -q '揃っています' \
-  && outerr "${h}" | grep -qF "${newer}"; then
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
+  && seen "${h}" -F "${newer}"; then
   ok "揃っていても、winget に新しい版があれば ※ の行を出す"
 else
   ng "新しい版がある" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -265,7 +280,7 @@ fi
 # 13. pwsh.exe の出力に色のエスケープが混ざっていても、取り除いてから枠に入れる
 h=$(new_home t13 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT=$'OpenSSH (winget の Microsoft.OpenSSH.Preview、C:\\Program Files\\OpenSSH)\n\e[33m⚠ winget pin      : 無し → 足す\e[0m' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! outerr "${h}" | grep -q $'\e' && outerr "${h}" | grep -qF '⚠ winget pin      : 無し → 足す'; then
+if [[ $(rc "${h}") == 0 ]] && ! seen "${h}" $'\e' && seen "${h}" -F '⚠ winget pin      : 無し → 足す'; then
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
   ng "エスケープが残る" "rc=$(rc "${h}") $(outerr "${h}" | od -c | head -8)"
@@ -312,7 +327,7 @@ if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe
 else
   ng "pwsh.exe が失敗したときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
-if outerr "${h}" | grep -qx '   Exec format error' && outerr "${h}" | grep -qx '     Install-OpenSSH -Check'; then
+if seen "${h}" -x '   Exec format error' && seen "${h}" -x '     Install-OpenSSH -Check'; then
   ok "その場の出力は今のまま (pwsh.exe の出力と手で打つコマンドを字下げして出す)"
 else
   ng "その場の出力が変わった" "$(outerr "${h}")"

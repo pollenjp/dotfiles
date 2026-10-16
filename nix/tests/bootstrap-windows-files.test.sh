@@ -116,6 +116,14 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 
 echo "== bootstrap-windows-files.sh: ${script}"
 
@@ -123,7 +131,7 @@ echo "== bootstrap-windows-files.sh: ${script}"
 h=$(new_home t1 'repo v1')
 run "${h}"
 if [[ $(rc "${h}") == 0 && $(cat "$(dst "${h}")") == 'repo v1' && $(recorded "${h}") == "$(sha "$(src "${h}")")" ]] \
-  && outerr "${h}" | grep -qF "コピー: $(dst "${h}")"; then
+  && seen "${h}" -F "コピー: $(dst "${h}")"; then
   ok "置き先が無ければコピーして記録する"
 else
   ng "置き先が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -135,7 +143,7 @@ put_dst "${h}" 'same'
 before=$(ino "$(dst "${h}")")
 run "${h}"
 if [[ $(rc "${h}") == 0 && $(ino "$(dst "${h}")") == "${before}" && $(recorded "${h}") == "$(sha "$(src "${h}")")" ]] \
-  && outerr "${h}" | grep -qF "同じです: $(dst "${h}")"; then
+  && seen "${h}" -F "同じです: $(dst "${h}")"; then
   ok "置き先が同じ中身なら書かずに記録だけする"
 else
   ng "同じ中身" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -147,7 +155,7 @@ put_dst "${h}" 'repo v1'
 set_record "${h}" 'repo v1'
 run "${h}"
 if [[ $(rc "${h}") == 0 && $(cat "$(dst "${h}")") == 'repo v2' && $(recorded "${h}") == "$(sha "$(src "${h}")")" ]] \
-  && outerr "${h}" | grep -qF '上書き (repo 側が更新された)'; then
+  && seen "${h}" -F '上書き (repo 側が更新された)'; then
   ok "置き先が記録どおりなら (repo 側が更新された) 上書きして記録を更新する"
 else
   ng "repo 側が更新された" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -160,9 +168,9 @@ set_record "${h}" 'repo v1'
 before=$(recorded "${h}")
 run "${h}"
 if [[ $(rc "${h}") == 1 && $(cat "$(dst "${h}")") == 'edited on windows' && $(recorded "${h}") == "${before}" ]] \
-  && outerr "${h}" | grep -qF '前回ここへ置いた中身と違う' \
-  && outerr "${h}" | grep -qxF -- '-edited on windows' && outerr "${h}" | grep -qxF -- '+repo v2' \
-  && outerr "${h}" | grep -qF "cp '$(dst "${h}")'" && outerr "${h}" | grep -qF -- '--force'; then
+  && seen "${h}" -F '前回ここへ置いた中身と違う' \
+  && seen "${h}" -xF -- '-edited on windows' && seen "${h}" -xF -- '+repo v2' \
+  && seen "${h}" -F "cp '$(dst "${h}")'" && seen "${h}" -F -- '--force'; then
   ok "置き先が記録と違えば衝突: 触らずに diff と解き方を出し、exit 1"
 else
   ng "Windows 側で変えた" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -174,8 +182,8 @@ h=$(new_home t5 'repo v1')
 put_dst "${h}" 'made by hand'
 run "${h}"
 if [[ $(rc "${h}") == 1 && $(cat "$(dst "${h}")") == 'made by hand' && -z $(recorded "${h}") ]] \
-  && outerr "${h}" | grep -qF '置いた記録が無く' && ! outerr "${h}" | grep -qF '前回ここへ置いた中身と違う' \
-  && outerr "${h}" | grep -qF "cp '$(dst "${h}")'" && outerr "${h}" | grep -qF -- '--force'; then
+  && seen "${h}" -F '置いた記録が無く' && ! seen "${h}" -F '前回ここへ置いた中身と違う' \
+  && seen "${h}" -F "cp '$(dst "${h}")'" && seen "${h}" -F -- '--force'; then
   ok "記録が無く中身が違えば衝突: 前回置いた中身とは言わず、置いた記録が無いと出す"
 else
   ng "記録が無い衝突" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -186,7 +194,7 @@ h=$(new_home t6 'repo v1')
 put_dst "${h}" 'made by hand'
 run "${h}" --force
 if [[ $(rc "${h}") == 0 && $(cat "$(dst "${h}")") == 'repo v1' && $(recorded "${h}") == "$(sha "$(src "${h}")")" ]] \
-  && outerr "${h}" | grep -qF '上書き (--force)'; then
+  && seen "${h}" -F '上書き (--force)'; then
   ok "--force なら衝突でも上書きして記録する"
 else
   ng "--force" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -196,7 +204,7 @@ fi
 h=$(new_home t7 'repo v1')
 run "${h}" --dry-run
 if [[ $(rc "${h}") == 0 && ! -e $(dst "${h}") && ! -e $(record_file "${h}") ]] \
-  && outerr "${h}" | grep -qF "[dry-run] コピー: $(dst "${h}")"; then
+  && seen "${h}" -F "[dry-run] コピー: $(dst "${h}")"; then
   ok "--dry-run は置き先も記録も書かない"
 else
   ng "--dry-run" "rc=$(rc "${h}") $(outerr "${h}")"
