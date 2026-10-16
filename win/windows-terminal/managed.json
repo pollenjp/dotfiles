@@ -1,0 +1,7 @@
+{
+    "profiles": {
+        "defaults": {
+            "bellSound": "C:\\Windows\\Media\\Windows Information Bar.wav"
+        }
+    }
+}

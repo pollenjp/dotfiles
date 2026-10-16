@@ -16,6 +16,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
+| `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 
 ## 配る
 
@@ -57,7 +58,7 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 
 Windows 側でファイルが変わっていた (アプリの設定画面で変えた、など) と、上書きせずに
 diff を出して止まる。`setup --update` はこの手順 (order 90) で失敗して止まる。前の手順は済んで
-いるが、後ろの bootstrap (91〜98) と exe-exec-trace、最後の「残りの手作業」は、直して流し直す
+いるが、後ろの bootstrap (91〜99) と exe-exec-trace、最後の「残りの手作業」は、直して流し直す
 まで走らない。
 
 ```sh
@@ -546,7 +547,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 
   戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
 - 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
-  済んでいるが、後ろの exe-exec-trace と最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
+  済んでいるが、後ろの [Windows Terminal](#windows-terminal) の手順 (order 99) と exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
   など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
 - `--import` で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
@@ -645,3 +646,81 @@ pjp-google-ime digest --kind config <config1.db>                # 比べるた�
 - 辞書の TSV のエラーは、ファイル・行・列の数・どの列が悪いかまでを出し、読み・単語・品詞・コメントの
   中身は出さない (列がずれると品詞の列に語が入るので、品詞の値も出さない)
 - テストは `nix build ./nix#checks.x86_64-linux.pjp-google-ime-unittest`
+
+## Windows Terminal
+
+`windows-terminal/managed.json` は、Windows Terminal の `settings.json` のうち、dotfiles が持つキーだけを書いたもの。
+`manifest.toml` では配らず、`nix/scripts/bootstrap-windows-terminal.sh` (order 99) が `setup --update` のたびに、
+そのキーだけを Store 版の `settings.json`
+(`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json`) へ書き足す
+(経緯は [ADR 018](../docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef))。
+
+`settings.json` をファイルごと配らないのは、Windows Terminal 自身も書き換えるから (新しい WSL の distro などの
+profile を見つけたとき・設定画面で保存したとき)。PC ごとに違う profile の一覧も入っている (WSL の profile の
+GUID は、distro を登録したときの ID から作られる)。
+
+| キー | 値 | 何のため |
+| --- | --- | --- |
+| `profiles.defaults.bellSound` | `C:\Windows\Media\Windows Information Bar.wav` | BEL で鳴る音を、既定のエラー音 (SystemHand。この PC では `Windows Foreground.wav` で 2.1 秒) から 0.1 秒の短い音に替える。`bellStyle` は既定の `audible` のまま |
+
+| 打つもの | すること |
+| --- | --- |
+| `nix/scripts/bootstrap-windows-terminal.sh` | 書き足す (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-terminal.sh --dry-run` | 判定だけ見る |
+| `nix/scripts/bootstrap-windows-terminal.sh --import` | 設定画面で変えた値を `managed.json` へ取り込む ([衝突したら](#windows-terminal-の設定が衝突したら)) |
+| `nix/scripts/bootstrap-windows-terminal.sh --force` | 衝突でも `managed.json` の値で書く |
+| `nix/scripts/bootstrap-windows-terminal.sh --check` | `managed.json` の検証だけ (CI の lint でも走る) |
+
+- 書くのは `managed.json` に書いたキーだけで、ほかのキーには触らない。`profiles.defaults` に書けば全 profile に効く
+- `managed.json` は `settings.json` と同じ形で書く。object を辿った先の、object でない値 1 つが、持つキー 1 つ。
+  配列 (`actions`・`keybindings` など) は中を見ず、丸ごと 1 つの値として持つ
+- `profiles.list` (profile の一覧) は持てない (`--check` が落ちる)。PC ごとに違うため
+- 形は `jq --indent 4` の出力に揃える。`--import` が書き直したときの差分を、値の変更だけにするため (`--check` が見る)
+- Windows Terminal は `settings.json` を見張っていて、書いたらその場で読み直す
+- 書く前の `settings.json` は `~/.local/state/dotfiles/windows-terminal/backup/<UTC の時刻>-<pid>/` に退避する
+  (新しい方から 10 回分)。書くと字下げなどの形が jq のものに変わるが、Windows Terminal は気にせず読む
+- 書いた値は `~/.local/state/dotfiles/windows-terminal.applied.json` に覚える。`managed.json` から消したキーは、
+  `settings.json` からは消さない (記録からだけ消す)
+- `settings.json` がまだ無い (Windows Terminal を一度も起動していない) ときと、JSON として読めない (手で書いた
+  コメントや末尾のカンマがある) ときは、⚠ で知らせて書かずに進む
+- 見るのは Store 版だけ。Preview (`Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe`) と zip 版は見ない
+
+### 音のファイルは repo に入れない
+
+`bellSound` には、Windows に入っている音のパス (`C:\Windows\Media\…`) を書く。wav などのファイルそのものは
+commit しない。この repo は public で、Windows に付いてくる音は Microsoft の著作物なので、ファイルを置くと配布に
+なる。パスを書くだけなら、各 PC の Windows に入っている音をその PC で鳴らすだけで済む。
+
+- パスのファイルが無い PC では、その音は鳴らない
+- 候補は WSL から鳴らして聞き比べられる:
+
+  ```sh
+  powershell.exe -NoProfile -Command '(New-Object Media.SoundPlayer "C:\Windows\Media\Windows Information Bar.wav").PlaySync()'
+  ```
+
+### Windows Terminal の設定が衝突したら
+
+`managed.json` が持つキーを設定画面で変えていた (か、既定に戻していた) と、触らずに両方の値を出して止まる。
+書いた記録が無いのに違う値が先にある (初めて書くマシンで、手で設定してあった) ときも同じで、「書いた記録が無く」と
+出る。`setup --update` はこの手順 (order 99) で止まり、後ろの exe-exec-trace と最後の「残りの手作業」は、
+解いて流し直すまで走らない。衝突しないキーは書いてある。どちらかで解く。
+
+1. Windows 側の値を残す: `--import` で `managed.json` へ取り込み、`git diff` を見て commit して push する。
+   `managed.json` に commit していない変更があると、取り込みは何も書かずに止まる
+2. `managed.json` の値で書く: `--force`。元の `settings.json` は退避される
+
+```sh
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-terminal.sh --import
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-terminal.sh --force
+```
+
+`settings.json` の `profiles` が配列の古い形のときは、`profiles.defaults` へ書けないので ⚠ で知らせて止まる。
+設定画面で何か 1 つ変えて保存すると、Windows Terminal が object の形 (`defaults` と `list`) で書き直す。
+
+### キーを足す
+
+1. Windows Terminal の設定画面で値を決める (その場で効く)
+2. `settings.json` の同じ場所の値を、同じ形で `managed.json` に写す
+3. `nix/scripts/bootstrap-windows-terminal.sh --check` で検証し、`--dry-run` で「揃っています」と出るのを見る
+   (設定画面で入れた値と同じなので、記録だけが作られる)
+4. commit して `~/dotfiles/setup --update`
