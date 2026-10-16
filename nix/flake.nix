@@ -182,6 +182,7 @@
           bootstrap-windows-powertoys-test = scriptTest "bootstrap-windows-powertoys" ./scripts/bootstrap-windows-powertoys.sh;
           bootstrap-windows-google-ime-install-test = scriptTest "bootstrap-windows-google-ime-install" ./scripts/bootstrap-windows-google-ime-install.sh;
           bootstrap-windows-files-test = scriptTest "bootstrap-windows-files" ./scripts/bootstrap-windows-files.sh;
+          bootstrap-windows-terminal-test = scriptTest "bootstrap-windows-terminal" ./scripts/bootstrap-windows-terminal.sh;
           # 主に包む前の script を流す。runtimeInputs の fzf が PATH の先頭に来ると、テストが置く
           # 書き留め役の fzf が隠れるため。包んだ後の package は fzf を使わない --list だけを見る
           pjp-pr-diff-test =

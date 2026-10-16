@@ -7,8 +7,9 @@
 # order: 98
 #
 # ^ setup.sh が読む実行順。衝突や「設定画面が開いている」で exit 1 しても、ほかの bootstrap が
-#   済んでいるよう、bootstrap の最後に走らせる。setup は失敗した手順で止まるので、後ろの
-#   exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない。仕組みは
+#   済んでいるよう、bootstrap の最後の方に走らせる (後ろは、同じく衝突で止まりうる
+#   bootstrap-windows-terminal.sh (order: 99) だけ)。setup は失敗した手順で止まるので、後ろの 99 と
+#   exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない。仕組みは
 #   nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
