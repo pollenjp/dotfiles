@@ -27,7 +27,7 @@ on:
     paths:
       - "win/openssh/Install-OpenSSH.ps1"
       - "win/openssh/skipped-versions.txt"
-      - "nix/scripts/check-windows-openssh-version.sh"
+      - "nix/scripts/check-winget-version.sh"
       - ".github/workflows/windows-openssh.yml"
   workflow_dispatch:
 
@@ -51,7 +51,7 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./nix/scripts/check-windows-openssh-version.sh 2>&1 | tee report.txt
+        run: ./nix/scripts/check-winget-version.sh 2>&1 | tee report.txt
 
       # 落ちた実行でも、何が出たかを summary で読めるようにする (::error の行は実行の画面の先頭に出る)
       - name: レポートを summary へ

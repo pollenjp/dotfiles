@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# nix/scripts/check-windows-openssh-version.sh の振る舞いを、偽の gh と手で作った
+# nix/scripts/check-winget-version.sh の振る舞いを、偽の gh と手で作った
 # Install-OpenSSH.ps1 / skipped-versions.txt で確かめる。
 #
-#   bash nix/tests/check-windows-openssh-version.test.sh [<script のパス>]
+#   bash nix/tests/check-winget-version.test.sh [<script のパス>]
 #
-# flake の checks (check-windows-openssh-version-test) が Nix のサンドボックスで流す。
+# flake の checks (check-winget-version-test) が Nix のサンドボックスで流す。
 # CI の `nix flake check` もこれを通る。使うのは bash・jq・coreutils・grep だけ。
 #
 # ## 確かめること
@@ -38,8 +38,8 @@ here=$(
   cd -- "$(dirname "$0")" &>/dev/null || exit
   pwd -P
 )
-script=${1:-${here}/../scripts/check-windows-openssh-version.sh}
-work=$(mktemp -d "${TMPDIR:-/tmp}/check-windows-openssh-version-test.XXXXXX")
+script=${1:-${here}/../scripts/check-winget-version.sh}
+work=$(mktemp -d "${TMPDIR:-/tmp}/check-winget-version-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
 pass=0
@@ -265,7 +265,7 @@ called() {
   grep -q "$@" "${d}/gh-calls"
 }
 
-echo "== check-windows-openssh-version.sh: ${script}"
+echo "== check-winget-version.sh: ${script}"
 
 # 1. 固定した版が winget-pkgs の最新: exit 0、⚠ は出さない。9.8.3.0 を 10.0.0.0 より新しいと読まない
 d=$(new_case t1 10.0.0.0 -)

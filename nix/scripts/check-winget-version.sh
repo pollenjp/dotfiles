@@ -4,7 +4,7 @@
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) で固定した版が、winget の最新に
 # 追いついているかを確かめる。
 #
-#   check-windows-openssh-version.sh [<Install-OpenSSH.ps1> [<skipped-versions.txt>]]
+#   check-winget-version.sh [<Install-OpenSSH.ps1> [<skipped-versions.txt>]]
 #
 # 既定では repo の win/openssh/Install-OpenSSH.ps1 から、-Version の既定値 (固定した版) と
 # $packageId (winget のパッケージ ID) を読む。どちらも書くのはそこ 1 か所だけ。それを
@@ -70,7 +70,7 @@ usage() {
 Windows の OpenSSH で固定した版が、winget の最新に追いついているかを確かめる。
 
 使い方:
-  check-windows-openssh-version.sh [<Install-OpenSSH.ps1> [<skipped-versions.txt>]]
+  check-winget-version.sh [<Install-OpenSSH.ps1> [<skipped-versions.txt>]]
 
   既定は repo の win/openssh/Install-OpenSSH.ps1 と win/openssh/skipped-versions.txt。
 
@@ -249,7 +249,7 @@ wait_note() {
   annotate notice "$1"
 }
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-windows-openssh-version.XXXXXX")
+tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-winget-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
 
 # winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない
