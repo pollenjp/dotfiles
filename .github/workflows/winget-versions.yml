@@ -1,0 +1,95 @@
+name: winget-versions
+
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力) が、winget の最新に
+# 追いついているかを確かめる (TKT-110・TKT-156)。固定した版は win/<名前>/Install-*.ps1 の -Version の既定値。
+#
+# 新しい版が出ても、手元では setup --update の ※ の 1 行でしか見えず、流さない間は気付けない。
+# そこで週 1 回ここで確かめ、固定した版より新しい版 (見送りの一覧に無いもの) が出て 30 日たつと
+# 落ちて知らせる。30 日の間は落ちず、版・出た日・あと何日で知らせるかを ::notice の行と summary に出す。
+# 出た日は、OpenSSH と herdr は GitHub の release、Google 日本語入力は winget-pkgs に載った日
+# (nix/scripts/check-winget-version.sh の先頭)。GitHub に出た版が 30 日たっても winget に載らないとき
+# (パッケージ ID が移ったなど)・固定した版やパッケージが winget に無いときと、確かめられなかったとき
+# (API の失敗など) も落ちる。何で落ちたかは summary と ::error の行に出る。
+# 名前ごとに別の job にするので、1 つが落ちてもほかは確かめ、どれで落ちたかが job の名前で分かる。
+# 落ちた定期実行の通知は、closure-scan の定期実行 (nix.yml) と同じく workflow を作った人に届く。
+# 上げるか見送るかの手順は win/README.md の「<名前> の新しい版が出たとき」。
+#
+# 版の一覧は winget-pkgs を GitHub API で読むので、Windows も Nix も要らない
+# (gh と jq は GitHub の ubuntu のランナーに入っている)。
+
+on:
+  # 月曜の朝 (JST 7:23)。毎時 0 分は混んで遅れたり飛ばされたりするのでずらす (週 1 回なので、
+  # 1 回飛ぶと 2 週間空く)。nix.yml に cron を足さず workflow を分けるのは、足すとその日に
+  # closure-scan も 2 回走るため
+  schedule:
+    - cron: "23 22 * * 0"
+  # 固定した版を変える・見送りを足す PR で、書いた版が winget にあるかと、落ちなくなるかを確かめる。
+  # どれか 1 つを変えた PR でも 3 つの job が走るので、猶予 (30 日) がたった新しい版がある間は、
+  # 別の理由でこれらを直す PR も赤くなる (merge は止まらない)
+  pull_request:
+    paths:
+      - "win/openssh/Install-OpenSSH.ps1"
+      - "win/openssh/skipped-versions.txt"
+      - "win/herdr/Install-Herdr.ps1"
+      - "win/herdr/skipped-versions.txt"
+      - "win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
+      - "win/google-japanese-input/skipped-versions.txt"
+      - "nix/scripts/check-winget-version.sh"
+      - ".github/workflows/winget-versions.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 固定した版と winget の版 (${{ matrix.title }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    strategy:
+      # 1 つが落ちても、ほかの名前は最後まで確かめる
+      fail-fast: false
+      matrix:
+        include:
+          - package: openssh
+            title: Windows の OpenSSH
+            section: OpenSSH の新しい版が出たとき
+            anchor: openssh-の新しい版が出たとき
+          - package: herdr
+            title: Windows の herdr
+            section: herdr の新しい版が出たとき
+            anchor: herdr-の新しい版が出たとき
+          - package: google-japanese-input
+            title: Google 日本語入力
+            section: Google 日本語入力の新しい版が出たとき
+            anchor: google-日本語入力の新しい版が出たとき
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # shell: bash を書くと pipefail が付く。既定の bash -e のままだと tee の 0 が残り、落ちない
+      - name: 比べる
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE: ${{ matrix.package }}
+        run: ./nix/scripts/check-winget-version.sh "${PACKAGE}" 2>&1 | tee report.txt
+
+      # 落ちた実行でも、何が出たかを summary で読めるようにする (::error の行は実行の画面の先頭に出る)
+      - name: レポートを summary へ
+        if: always()
+        env:
+          TITLE: ${{ matrix.title }}
+          SECTION: ${{ matrix.section }}
+          ANCHOR: ${{ matrix.anchor }}
+        run: |
+          {
+            echo "## ${TITLE} の版 (winget)"
+            echo '```'
+            grep -v '^::' report.txt 2>/dev/null || echo "(report.txt なし: 比べる前に失敗)"
+            echo '```'
+            echo "手順: [win/README.md の「${SECTION}」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/win/README.md#${ANCHOR})"
+          } >>"$GITHUB_STEP_SUMMARY"
