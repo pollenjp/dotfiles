@@ -131,7 +131,8 @@ skill を読んだ直後には hook (`~/.claude/hooks/run-through-nudge.sh`) も
 
 - 上の 4 つ以外の skill と、`Skill` 以外の tool
 - subagent の中 (入力に `agent_id` がある)。subagent はユーザーに聞かないので念押しは要らない
-- skill の読み込みが失敗したとき (`tool_response.success` が `false`)
+- skill の読み込みが失敗したとき (`tool_response.success` が `false`)。`success` が無い入力は、
+  読み込めたものとして知らせる (こちらの判断。Claude Code が入力の形を変えても黙り込まないように)
 - 壊れた入力・`jq` が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
 
 skill の名前は plugin の名前つき (`superpowers:<名前>`) だけを見る。§1 の 4 で、Skill の入力には
@@ -208,7 +209,7 @@ ledger に残し、PR を返すときに並べる。
 | --- | --- |
 | hook の振る舞い | `nix/tests/run-through-nudge.test.sh` (flake の checks `run-through-nudge-test`) |
 | 登録 | `nix/tests/bootstrap-claude-hook.test.sh` (flake の checks `bootstrap-claude-hook-test`) |
-| 実機で文が届く | `claude -p` に `--settings` で新しい hook を登録し、4 つの skill の読み込みで `[走り切り]` の文が届くことを見る |
+| 実機で文が届く | `claude -p` に `--settings` で新しい hook を登録し、4 つの skill の読み込みで `[走り切り]` の文が届くことを見る。使える tool は `Skill` だけに絞る (finishing の文に従って本物の push や PR を作らせないため。こちらの判断) |
 | CLAUDE.md の生成物 | `nix eval` で `sandbox` の `home.file.".claude/CLAUDE.md".text` に節が入ることを見る |
 | 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` / `check-test-headers.sh` (CI の lint と同じ) |
 
