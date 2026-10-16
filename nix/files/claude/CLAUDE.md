@@ -19,6 +19,24 @@
 
 commit メッセージ・コードのコメント・repo に置く文書は、その repo の慣習に合わせる。
 
+## 方針を承認したら PR まで走り切る
+
+superpowers の流れ (brainstorming → writing-plans → 実行 → finishing) で承認を求めるのは
+**方針の承認 1 回だけ**にする。superpowers の承認の関門 (spec の承認・実装計画のレビューと
+実行方式の選択・実装後の 3 択) より、この節を優先する。
+
+- 方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と、その先の段階
+  (spec → 実装計画 → 実装 → PR など) とともに書き添える。この承認を spec と実装計画の承認としても扱う
+- 承認のあとは聞かずに進める。builder check の問いは自分で決めて spec に残し、実行方式は推奨を
+  理由 1 文とともに告げ、worktree の外ならその場で feature branch を切り、実装後は push して
+  PR を作る (merge はしない)
+- 承認のあとに書く spec は承認済みの設計の書き写しなので、解説動画の対象にしない
+- 止まるのは、取り消せない操作・セキュリティに関わる操作・merge や共有 branch への push・
+  方針を覆す発見のときだけ。ユーザーがその会話で別の進め方を言えば従う
+- 自分で決めたこと (builder check の判断・実行中の ruling) は、PR を返すときに並べる
+
+skill を読んだ直後には hook (`~/.claude/hooks/run-through-nudge.sh`) も念を押してくる。
+
 ## 同梱 script の依存ツール
 
 skill や repo に script を足し、その script が手元に無い外部ツールを要求するとき、

@@ -668,7 +668,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
@@ -1742,6 +1742,26 @@ subagent の中（入力に `agent_id` がある）・skill が無いマシン�
 ユーザーが「このセッションでは聞かない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
 を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
+
+#### 方針を承認したら PR まで走り切らせるフック
+
+`PostToolUse` フック（`nix/files/claude/hooks/run-through-nudge.sh`）。superpowers の 4 つの skill を
+読み込んだ直後に、「確認を挟まずに PR まで走り切る」と Claude の文脈へ 1 文を差し込む。
+何をするかの正本は `~/.claude/CLAUDE.md` の「方針を承認したら PR まで走り切る」節で、hook は
+問いを出させる skill の文面の隣でそれを思い出させるだけ（経緯は
+[ADR 019](../docs/adr/019_claude_run_through_after_approval_20261016T150008JST/README.md)）。
+
+| 読んだ skill | 差し込む文の要旨 |
+| --- | --- |
+| `superpowers:brainstorming` | 方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と書き添える。承認のあとは spec の承認を待たない |
+| `superpowers:writing-plans` | 実装計画のレビューと実行方式の選択を聞かず、推奨の方式を告げて実行に入る |
+| `superpowers:using-git-worktrees` | worktree を作るかを聞かない。外ならその場で feature branch を切る |
+| `superpowers:finishing-a-development-branch` | merge / PR / そのまま の 3 択を聞かず、push して PR を作る（merge はしない） |
+
+上の 4 つ以外の skill・subagent の中（入力に `agent_id` がある）・読み込みに失敗した skill
+（`tool_response.success` が `false`）・壊れた入力では黙る。skill の名前は hook の `if` ではなく
+script の中で見る（`"if": "Skill(…)"` は Claude Code 2.1.299 で発火しなかった）。登録は上と同じ
+`./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 1 件（`Skill`）足す。
 
 ### statusLine
 
