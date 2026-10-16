@@ -198,6 +198,11 @@ jobs:
       - name: win/google-japanese-input/
         run: nix shell ./nix#pjp-google-ime --command ./nix/scripts/bootstrap-windows-google-ime.sh --check
 
+      # win/windows-terminal/managed.json の検証 (ADR 018)。flake からは win/ が見えないので、上と同じく
+      # checkout の上で流す。jq は flake が固定している nixpkgs から借りる。
+      - name: win/windows-terminal/
+        run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-terminal.sh --check
+
       # herdr のキーバインドを WSL (nix/files/herdr/config.toml) と Windows (win/herdr/config.toml)
       # でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
       - name: herdr のキーバインド (WSL と Windows)
