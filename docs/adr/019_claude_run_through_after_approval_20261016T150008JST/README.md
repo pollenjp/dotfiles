@@ -98,16 +98,21 @@ claude-skills PR #80、この ADR の時点で open) の新しい `pjp-video-exp
 
 superpowers の流れ (brainstorming → writing-plans → 実行 → finishing) で承認を求めるのは
 **方針の承認 1 回だけ**にする。superpowers の承認の関門 (spec の承認・実装計画のレビューと
-実行方式の選択・実装後の 3 択) より、この節を優先する。
+実行方式の選択・実装後の 3 択) より、この節を優先する。ユーザーと話している会話のための節で、
+subagent は自分への依頼に従う。
 
-- 方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と、その先の段階
+- 方針の承認は spec を書く前に 1 回聞き、「承認したら PR まで確認を挟まずに進める」と、その先の段階
   (spec → 実装計画 → 実装 → PR など) とともに書き添える。この承認を spec と実装計画の承認としても扱う
+- この承認を得ないまま writing-plans や finishing に来たら (計画だけ頼まれた・brainstorming を
+  通らなかったなど)、そこで 1 回だけ聞く。writing-plans では同じく書き添えて承認を、finishing では
+  PR を出してよいかを聞く
 - 承認のあとは聞かずに進める。builder check の問いは自分で決めて spec に残し、実行方式は推奨を
-  理由 1 文とともに告げ、worktree の外ならその場で feature branch を切り、実装後は push して
-  PR を作る (merge はしない)
+  理由 1 文とともに告げ、worktree の外なら既定の branch から feature branch を切り、実装後は
+  push して PR を作る (merge はしない)。push の前に、PR に載る commit が今回の作業だけかを確かめる
 - 承認のあとに書く spec は承認済みの設計の書き写しなので、解説動画の対象にしない
 - 止まるのは、取り消せない操作・セキュリティに関わる操作・merge や共有 branch への push・
-  方針を覆す発見のときだけ。ユーザーがその会話で別の進め方を言えば従う
+  方針を覆す発見・PR に今回の作業でない commit が載るとき・この CLAUDE.md の他の節や
+  superpowers 以外の skill が確認を求める操作のとき。ユーザーがその会話で別の進め方を言えば従う
 - 自分で決めたこと (builder check の判断・実行中の ruling) は、PR を返すときに並べる
 
 skill を読んだ直後には hook (`~/.claude/hooks/run-through-nudge.sh`) も念を押してくる。
@@ -122,10 +127,14 @@ skill を読んだ直後には hook (`~/.claude/hooks/run-through-nudge.sh`) も
 
 | `tool_input.skill` | 差し込む文 |
 | --- | --- |
-| `superpowers:brainstorming` | [走り切り] superpowers:brainstorming を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
-| `superpowers:writing-plans` | [走り切り] superpowers:writing-plans を読んだ。実装計画を書いたら、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
-| `superpowers:using-git-worktrees` | [走り切り] superpowers:using-git-worktrees を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
-| `superpowers:finishing-a-development-branch` | [走り切り] superpowers:finishing-a-development-branch を読んだ。merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
+| `superpowers:brainstorming` | [走り切り] superpowers:brainstorming を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。方針の承認は spec を書く前に 1 回聞き、「承認したら PR まで確認を挟まずに進める」と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
+| `superpowers:writing-plans` | [走り切り] superpowers:writing-plans を読んだ。この会話で「承認したら PR まで確認を挟まずに進める」と書き添えた方針の承認を得ていれば、実装計画を書いたあと、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る。まだ得ていなければ、計画と推奨の方式を見せるときに 1 回だけ、同じく書き添えて承認を聞く (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
+| `superpowers:using-git-worktrees` | [走り切り] superpowers:using-git-worktrees を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で既定の branch から feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
+| `superpowers:finishing-a-development-branch` | [走り切り] superpowers:finishing-a-development-branch を読んだ。この会話で「承認したら PR まで確認を挟まずに進める」と書き添えた方針の承認を得ていれば、merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。push の前に、PR に載る commit が今回の作業だけかを git log で確かめ、他の commit が混ざっていれば止まって聞く。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる。まだ承認を得ていなければ、3 択の代わりに PR を出してよいかを 1 回だけ聞く (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。 |
+
+writing-plans と finishing の文は「書き添えつきの方針の承認を得ていれば」で始まる。計画だけ頼まれた会話や
+brainstorming を通らなかった会話で、告げずに実装・push・PR まで進まないようにするため (最終レビューの指摘)。
+まだ得ていなければ、その場で 1 回だけ聞くので、承認はちょうど 1 回のまま。
 
 黙る場面 (何も出さず exit 0):
 
@@ -150,7 +159,14 @@ ledger に残し、PR を返すときに並べる。
 - 取り消せない操作・セキュリティに関わる操作
 - merge や共有 branch への push (自分の feature branch への push と PR の作成は止まらない)
 - 承認した方針のままでは作れないと分かったとき (builder check や実装で方針そのものが崩れる)
+- PR に今回の作業でない commit が載るとき (push の前に `git log` で確かめる)
+- この CLAUDE.md の他の節や、superpowers 以外の skill が確認を求める操作 (system へ直接入れる・
+  閉包スキャンの findings を受け入れる、など)
+- 書き添えつきの方針の承認を得ないまま writing-plans や finishing に来たとき (そこで 1 回だけ聞く)
 - ユーザーがその会話で別の進め方を言ったとき (「spec を見せて」「方式は自分で選ぶ」など)
+
+この節は、ユーザーと話している会話のためのもの。subagent にも CLAUDE.md は届くが、subagent は
+自分への依頼に従い、push や PR は会話の側 (finishing) で行う。
 
 ### D. 解説動画
 
@@ -194,7 +210,8 @@ ledger に残し、PR を返すときに並べる。
 
 - builder check の「ユーザーにしか答えられない問い」も Claude が決める。外れていれば PR のレビューで直す
 - 小さい変更 (チャットの設計で承認するもの) でも、実装後は PR まで出す
-- push と PR の作成を確認なしに行う (merge はしない)
+- 書き添えつきの承認を得た会話では、push と PR の作成を確認なしに行う (merge はしない)。PR に載る commit は push の前に確かめる
+- 計画だけ頼まれた会話などでは、writing-plans や finishing で 1 回だけ聞く
 - superpowers が skill の名前を変えると hook は黙る。CLAUDE.md の節は効き続ける。名前の一覧は hook の 1 か所にある
 - PR #126 (TKT-148) と同じファイル (CLAUDE.md・`bootstrap-claude-hook.sh` の冒頭のコメント・`nix/README.md` の
   hook の節) を触る。後から merge する側で衝突を解く
@@ -209,7 +226,7 @@ ledger に残し、PR を返すときに並べる。
 | --- | --- | --- |
 | hook の振る舞い | `nix/tests/run-through-nudge.test.sh` (flake の checks `run-through-nudge-test`) | 13 / 13。4 つの skill で表のとおりの文、success の無い入力でも知らせ、他の skill・Skill 以外の tool・subagent・読み込みの失敗・壊れた入力・jq が無いときは黙る |
 | 登録 | `nix/tests/bootstrap-claude-hook.test.sh` (flake の checks `bootstrap-claude-hook-test`) | 8 / 8。1 つ前の形には Skill の 1 件だけを足し、他の道具の matcher `Skill` の hook は残す。Skill の hook だけが無いときも止まる |
-| 実機で文が届く | `claude -p` (2.1.299・sonnet) に `--settings` で新しい hook を登録し、4 つの skill を順に読ませる。使える tool は `--tools Skill` と `--strict-mcp-config` で `Skill` だけに絞る (finishing の文に従って本物の push や PR を作らせないため。こちらの判断) | 4 つとも `[走り切り] superpowers:<名前> を読んだ。` で始まる文がモデルに届き、引用された |
+| 実機で文が届く | `claude -p` (2.1.299・sonnet) に `--settings` で新しい hook を登録し、4 つの skill を順に読ませる。使える tool は `--tools Skill` と `--strict-mcp-config` で `Skill` だけに絞る (finishing の文に従って本物の push や PR を作らせないため。こちらの判断) | 4 つとも `[走り切り] superpowers:<名前> を読んだ。` で始まる文がモデルに届き、引用された。最終レビューの直しのあとにも流し直し、条件つきの文 (承認を得ていれば聞かずに進む・得ていなければ 1 回だけ聞く) が 4 つとも届いたことを、モデルの要約で確かめた |
 | CLAUDE.md の生成物 | `nix eval` で `sandbox` の `home.file.".claude/CLAUDE.md".text` を取り出し、`## ` の見出しを並べる | 「方針を承認したら PR まで走り切る」が 1 つ、「応答の言語」と「同梱 script の依存ツール」の間にある |
 | 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` / `check-test-headers.sh` (CI の lint と同じ集合) | 指摘なし (テストの先頭の「## 確かめること」は 29 本とも書いてある) |
 

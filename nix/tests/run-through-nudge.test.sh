@@ -77,10 +77,10 @@ skill_input() {
 }
 
 # ADR 019 §2 B の表の 4 文
-want_brainstorming='[走り切り] superpowers:brainstorming を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
-want_writing_plans='[走り切り] superpowers:writing-plans を読んだ。実装計画を書いたら、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
-want_worktrees='[走り切り] superpowers:using-git-worktrees を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
-want_finishing='[走り切り] superpowers:finishing-a-development-branch を読んだ。merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
+want_brainstorming='[走り切り] superpowers:brainstorming を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。方針の承認は spec を書く前に 1 回聞き、「承認したら PR まで確認を挟まずに進める」と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
+want_writing_plans='[走り切り] superpowers:writing-plans を読んだ。この会話で「承認したら PR まで確認を挟まずに進める」と書き添えた方針の承認を得ていれば、実装計画を書いたあと、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る。まだ得ていなければ、計画と推奨の方式を見せるときに 1 回だけ、同じく書き添えて承認を聞く (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
+want_worktrees='[走り切り] superpowers:using-git-worktrees を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で既定の branch から feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
+want_finishing='[走り切り] superpowers:finishing-a-development-branch を読んだ。この会話で「承認したら PR まで確認を挟まずに進める」と書き添えた方針の承認を得ていれば、merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。push の前に、PR に載る commit が今回の作業だけかを git log で確かめ、他の commit が混ざっていれば止まって聞く。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる。まだ承認を得ていなければ、3 択の代わりに PR を出してよいかを 1 回だけ聞く (~/.claude/CLAUDE.md「方針を承認したら PR まで走り切る」)。ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
 
 # expect_nudge <skill> <期待する文>
 expect_nudge() {

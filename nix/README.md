@@ -1753,12 +1753,13 @@ subagent の中（入力に `agent_id` がある）・skill が無いマシン�
 
 | 読んだ skill | 差し込む文の要旨 |
 | --- | --- |
-| `superpowers:brainstorming` | 方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と書き添える。承認のあとは spec の承認を待たない |
-| `superpowers:writing-plans` | 実装計画のレビューと実行方式の選択を聞かず、推奨の方式を告げて実行に入る |
-| `superpowers:using-git-worktrees` | worktree を作るかを聞かない。外ならその場で feature branch を切る |
-| `superpowers:finishing-a-development-branch` | merge / PR / そのまま の 3 択を聞かず、push して PR を作る（merge はしない） |
+| `superpowers:brainstorming` | 方針の承認を spec の前に 1 回聞き、「承認したら PR まで確認を挟まずに進める」と書き添える。承認のあとは spec の承認を待たない |
+| `superpowers:writing-plans` | 書き添えつきの承認を得ていれば、実装計画のレビューと実行方式の選択を聞かず、推奨の方式を告げて実行に入る。得ていなければ、ここで 1 回だけ聞く |
+| `superpowers:using-git-worktrees` | worktree を作るかを聞かない。外ならその場で既定の branch から feature branch を切る |
+| `superpowers:finishing-a-development-branch` | 書き添えつきの承認を得ていれば、3 択を聞かずに push して PR を作る（merge はしない。載る commit を先に確かめる）。得ていなければ、PR を出してよいかだけ聞く |
 
-上の 4 つ以外の skill・subagent の中（入力に `agent_id` がある）・読み込みに失敗した skill
+writing-plans と finishing を条件つきにしているのは、計画だけ頼まれた会話などで、告げずに push と PR まで
+進まないようにするため。上の 4 つ以外の skill・subagent の中（入力に `agent_id` がある）・読み込みに失敗した skill
 （`tool_response.success` が `false`）・壊れた入力では黙る。skill の名前は hook の `if` ではなく
 script の中で見る（`"if": "Skill(…)"` は Claude Code 2.1.299 で発火しなかった）。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 1 件（`Skill`）足す。

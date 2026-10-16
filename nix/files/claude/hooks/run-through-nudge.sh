@@ -9,10 +9,16 @@
 #
 # ## 知らせる場面
 #
-#   superpowers:brainstorming                    方針の承認に「PR まで進む」と書き添え、spec の承認を待たない
-#   superpowers:writing-plans                    計画のレビューと実行方式の選択を聞かず、推奨の方式で実行に入る
-#   superpowers:using-git-worktrees              worktree を作るかを聞かない
-#   superpowers:finishing-a-development-branch   merge / PR / そのまま の 3 択を聞かず、push して PR を作る
+#   superpowers:brainstorming                    方針の承認を spec の前に 1 回聞き、「PR まで進む」と書き添える。
+#                                                承認のあとは spec の承認を待たない
+#   superpowers:writing-plans                    書き添えつきの承認を得ていれば、計画のレビューと実行方式の選択を
+#                                                聞かずに推奨の方式で実行に入る。得ていなければ、ここで 1 回だけ聞く
+#   superpowers:using-git-worktrees              worktree を作るかを聞かない (外なら既定の branch から切る)
+#   superpowers:finishing-a-development-branch   書き添えつきの承認を得ていれば、3 択を聞かずに push して PR を作る
+#                                                (載る commit を先に確かめる)。得ていなければ、PR を出してよいかだけ聞く
+#
+# writing-plans と finishing は、承認を得ていない会話 (計画だけ頼まれたなど) で告げずに push と PR まで
+# 進まないよう、「承認を得ていれば」の条件つきにしてある (ADR 019)。
 #
 # skill の名前は plugin の名前つき (superpowers:<名前>) だけを見る。Skill の入力には名前つきで入る。
 #
@@ -49,20 +55,21 @@ field() {
 
 skill=$(field '.tool_input.skill')
 section='方針を承認したら PR まで走り切る'
+phrase='「承認したら PR まで確認を挟まずに進める」'
 follow='ユーザーがこの会話で別の進め方を言っていれば、そちらに従う。'
 
 case ${skill} in
   superpowers:brainstorming)
-    msg="[走り切り] ${skill} を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「${section}」)。方針の承認を聞くとき「承認したら PR まで確認を挟まずに進める」と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。${follow}"
+    msg="[走り切り] ${skill} を読んだ。このユーザーは方針の承認 1 回のあと PR まで走り切る (~/.claude/CLAUDE.md「${section}」)。方針の承認は spec を書く前に 1 回聞き、${phrase}と、その先の段階 (spec → 実装計画 → 実装 → PR など) とともに書き添える。承認のあとは spec の承認を待たずに writing-plans へ進み、builder check の問いは自分で決めて spec に「こちらの判断」として残す。${follow}"
     ;;
   superpowers:writing-plans)
-    msg="[走り切り] ${skill} を読んだ。実装計画を書いたら、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る (~/.claude/CLAUDE.md「${section}」)。${follow}"
+    msg="[走り切り] ${skill} を読んだ。この会話で${phrase}と書き添えた方針の承認を得ていれば、実装計画を書いたあと、計画のレビューも実行方式 (Subagent-driven / Native) の選択も聞かず、推奨の方式を理由 1 文とともに告げてそのまま実行に入る。まだ得ていなければ、計画と推奨の方式を見せるときに 1 回だけ、同じく書き添えて承認を聞く (~/.claude/CLAUDE.md「${section}」)。${follow}"
     ;;
   superpowers:using-git-worktrees)
-    msg="[走り切り] ${skill} を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「${section}」)。${follow}"
+    msg="[走り切り] ${skill} を読んだ。worktree を作るかは聞かない。worktree の外なら、その場で既定の branch から feature branch を切って進める (main では作業しない。~/.claude/CLAUDE.md「${section}」)。${follow}"
     ;;
   superpowers:finishing-a-development-branch)
-    msg="[走り切り] ${skill} を読んだ。merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる (~/.claude/CLAUDE.md「${section}」)。${follow}"
+    msg="[走り切り] ${skill} を読んだ。この会話で${phrase}と書き添えた方針の承認を得ていれば、merge / PR / そのまま の 3 択を聞かず、テストが通っていれば push して PR を作る (merge はしない)。push の前に、PR に載る commit が今回の作業だけかを git log で確かめ、他の commit が混ざっていれば止まって聞く。自分で決めたこと (builder check の判断・ruling) は PR を返すときに並べる。まだ承認を得ていなければ、3 択の代わりに PR を出してよいかを 1 回だけ聞く (~/.claude/CLAUDE.md「${section}」)。${follow}"
     ;;
   *)
     exit 0
