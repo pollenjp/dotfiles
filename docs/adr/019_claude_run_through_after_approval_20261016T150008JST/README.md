@@ -203,15 +203,15 @@ ledger に残し、PR を返すときに並べる。
 
 ## 6. 検証 (Verification)
 
-`chore/TKT-168-run-through-after-approval` で実施する。
+`chore/TKT-168-run-through-after-approval` で実施した。
 
-| 確認 | 方法 |
-| --- | --- |
-| hook の振る舞い | `nix/tests/run-through-nudge.test.sh` (flake の checks `run-through-nudge-test`) |
-| 登録 | `nix/tests/bootstrap-claude-hook.test.sh` (flake の checks `bootstrap-claude-hook-test`) |
-| 実機で文が届く | `claude -p` に `--settings` で新しい hook を登録し、4 つの skill の読み込みで `[走り切り]` の文が届くことを見る。使える tool は `Skill` だけに絞る (finishing の文に従って本物の push や PR を作らせないため。こちらの判断) |
-| CLAUDE.md の生成物 | `nix eval` で `sandbox` の `home.file.".claude/CLAUDE.md".text` に節が入ることを見る |
-| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` / `check-test-headers.sh` (CI の lint と同じ) |
+| 確認 | 方法 | 結果 |
+| --- | --- | --- |
+| hook の振る舞い | `nix/tests/run-through-nudge.test.sh` (flake の checks `run-through-nudge-test`) | 13 / 13。4 つの skill で表のとおりの文、success の無い入力でも知らせ、他の skill・Skill 以外の tool・subagent・読み込みの失敗・壊れた入力・jq が無いときは黙る |
+| 登録 | `nix/tests/bootstrap-claude-hook.test.sh` (flake の checks `bootstrap-claude-hook-test`) | 8 / 8。1 つ前の形には Skill の 1 件だけを足し、他の道具の matcher `Skill` の hook は残す。Skill の hook だけが無いときも止まる |
+| 実機で文が届く | `claude -p` (2.1.299・sonnet) に `--settings` で新しい hook を登録し、4 つの skill を順に読ませる。使える tool は `--tools Skill` と `--strict-mcp-config` で `Skill` だけに絞る (finishing の文に従って本物の push や PR を作らせないため。こちらの判断) | 4 つとも `[走り切り] superpowers:<名前> を読んだ。` で始まる文がモデルに届き、引用された |
+| CLAUDE.md の生成物 | `nix eval` で `sandbox` の `home.file.".claude/CLAUDE.md".text` を取り出し、`## ` の見出しを並べる | 「方針を承認したら PR まで走り切る」が 1 つ、「応答の言語」と「同梱 script の依存ツール」の間にある |
+| 静的 | `nixfmt --check` / `shfmt -d` / `shellcheck` / `check-test-headers.sh` (CI の lint と同じ集合) | 指摘なし (テストの先頭の「## 確かめること」は 29 本とも書いてある) |
 
 ## 7. 移行・運用手順
 
