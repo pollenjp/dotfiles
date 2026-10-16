@@ -1735,11 +1735,11 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 **スクリプト本体だけを Nix が配置し、登録はこのコマンドで行う。**
 冪等で、既存の設定は保持する。
 
-#### 解説動画を作るか聞くフック
+#### 解説動画を作る場面を知らせるフック
 
 `PostToolUse` フック（`nix/files/claude/hooks/video-offer-nudge.sh`）。設計を書き出した・
-PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画を作るかを聞け」
-と Claude の文脈へ 1 文を差し込む。聞くかどうか・聞き方は skill の側（private な claude-skills）が持つ。
+PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画の短尺を裏で作り始めよ」
+と Claude の文脈へ 1 文を差し込む。作るかどうか・確かめ方は skill の側（private な claude-skills）が持つ。
 
 | 知らせる場面 | 条件 |
 | --- | --- |
@@ -1747,8 +1747,10 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 | 設計のページ | Write でタグ「設計」を含む cc-page の `index.html` を新しく作った |
 | 設計の文書 | Write で `docs/superpowers/specs/*.md` か、ADR そのもの（`docs/adr/<名前>.md` か `docs/adr/<名前>/README.md`）を新しく作った |
 
-subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図では黙る。
-ユーザーが「このセッションでは聞かない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図・
+既存の PR を返しただけの `gh pr create`（stdout に `a pull request for branch … already exists`。`2>&1 | tail`
+でつなぐと exit code が隠れて成功として届く）では黙る。
+ユーザーが「このセッションでは作らない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
 を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
 

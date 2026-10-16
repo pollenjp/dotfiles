@@ -17,7 +17,7 @@
 #                Nix 管理パスを編集しようとしたら止めて、正しい手順を返す
 #   PostToolUse  Bash (if "Bash(gh pr create *)")  video-offer-nudge.sh
 #   PostToolUse  Write                           video-offer-nudge.sh
-#                設計の書き出しと PR の作成を Claude に知らせる (解説動画を作るか聞く)
+#                設計の書き出しと PR の作成を Claude に知らせる (解説動画の短尺を作り始める)
 #   PostToolUse  Skill                           run-through-nudge.sh
 #                superpowers の 4 つの skill を読んだ直後に、確認を挟まずに PR まで
 #                走り切るよう念を押す (ADR 019)

@@ -312,7 +312,7 @@ in
     }
 
     # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
-    # 見つけ、解説動画を作るか聞くよう Claude に知らせる。聞き方を持つ skill
+    # 見つけ、解説動画の短尺を作り始めるよう Claude に知らせる。作るかどうかを決める skill
     # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
     # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
     {
