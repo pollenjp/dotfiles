@@ -145,6 +145,7 @@
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
+          run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           pjp-google-ime-unittest =
             pkgs.runCommand "pjp-google-ime-unittest"

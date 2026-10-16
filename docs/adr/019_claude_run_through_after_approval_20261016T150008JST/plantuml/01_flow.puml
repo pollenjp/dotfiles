@@ -1,0 +1,60 @@
+@startuml
+' superpowers の流れで、ユーザーに聞いて止まる場所の前と後。
+' 赤が止まって聞く所、緑がユーザーの承認 (後は 1 回だけ)、青が確認を挟まずに進むようにした区間。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam nodesep 40
+skinparam ranksep 22
+skinparam rectangle {
+  BorderColor #666666
+  BackgroundColor #F7F7F7
+}
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title superpowers の流れで止まって聞く場所（TKT-168 の前と後）
+
+rectangle "前（superpowers 7.0.0 のまま）" as before {
+  rectangle "会話\n質問・方針" as b1
+  rectangle "spec を書く\n+ builder check" as b2
+  rectangle "**spec の承認**" as b3 #F8CECC
+  rectangle "実装計画を書く" as b4
+  rectangle "**計画のレビュー**\n**実行方式の選択**" as b5 #F8CECC
+  rectangle "**worktree を作るか**\n（外で始めたときだけ）" as b6 #F8CECC
+  rectangle "実装\n最終レビュー" as b7
+  rectangle "**merge / PR / そのまま**\n**の 3 択**" as b8 #F8CECC
+}
+
+rectangle "後（TKT-168）" as after {
+  rectangle "会話\n質問・方針" as a1
+  rectangle "**方針の承認**\n「承認したら PR まで\n確認を挟まずに進める」と書き添える" as a2 #D5E8D4
+  rectangle "spec を書く\nbuilder check の問いは自分で決める" as a3 #DAE8FC
+  rectangle "実装計画を書く\n推奨の方式を告げる" as a4 #DAE8FC
+  rectangle "実装\n外ならその場で branch を切る\n最終レビュー" as a5 #DAE8FC
+  rectangle "push して PR\n（merge はしない）\n決めたことを並べる" as a6 #DAE8FC
+}
+
+b1 --> b2
+b2 --> b3
+b3 --> b4
+b4 --> b5
+b5 --> b6
+b6 --> b7
+b7 --> b8
+
+a1 --> a2
+a2 --> a3
+a3 --> a4
+a4 --> a5
+a5 --> a6
+
+legend right
+  |<#F8CECC> 止まってユーザーに聞く |
+  |<#D5E8D4> ユーザーの承認（後は 1 回だけ） |
+  |<#DAE8FC> 確認を挟まずに進む（TKT-168 で変えた） |
+  |<#F7F7F7> 今のまま |
+endlegend
+@enduml

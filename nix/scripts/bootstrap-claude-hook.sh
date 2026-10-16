@@ -18,6 +18,9 @@
 #   PostToolUse  Bash (if "Bash(gh pr create *)")  video-offer-nudge.sh
 #   PostToolUse  Write                           video-offer-nudge.sh
 #                設計の書き出しと PR の作成を Claude に知らせる (解説動画を作るか聞く)
+#   PostToolUse  Skill                           run-through-nudge.sh
+#                superpowers の 4 つの skill を読んだ直後に、確認を挟まずに PR まで
+#                走り切るよう念を押す (ADR 019)
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
 
@@ -27,13 +30,14 @@ settings="${HOME}/.claude/settings.json"
 hooks_dir="${HOME}/.claude/hooks"
 guard="${hooks_dir}/nix-managed-guard.sh"
 nudge="${hooks_dir}/video-offer-nudge.sh"
+run_through="${hooks_dir}/run-through-nudge.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}"; do
+for hook in "${guard}" "${nudge}" "${run_through}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -79,6 +83,7 @@ register() {
 register PreToolUse "Edit|Write|NotebookEdit|Bash" "" "${guard}"
 register PostToolUse "Bash" "Bash(gh pr create *)" "${nudge}"
 register PostToolUse "Write" "" "${nudge}"
+register PostToolUse "Skill" "" "${run_through}"
 
 if [[ ${changed} == 1 ]]; then
   echo
