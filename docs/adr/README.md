@@ -25,6 +25,7 @@
 | [016](./016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md) | ssh の接続先を `.ssh` submodule から dotfiles-private へ移し、WSL へは symlink、Windows の `%USERPROFILE%\.ssh` へはコピーで配る | 2026-10-12 |
 | [017](./017_win_apps_winget_20261012T115007JST/README.md) | Windows の Google 日本語入力と PowerToys を、setup の中で winget から入れる | 2026-10-12 |
 | [018](./018_win_terminal_settings_keys_20261016T105116JST/README.md) | Windows Terminal の `settings.json` は、dotfiles が持つキーだけを setup が書き足す (ファイルごと配らない) | 2026-10-16 |
+| [019](./019_claude_run_through_after_approval_20261016T150008JST/README.md) | superpowers で承認を求めるのは方針の 1 回だけにし、承認のあとは PR まで走り切らせる (CLAUDE.md の節と、skill を読んだ直後に念を押す hook) | 2026-10-16 |
 
 ## ディレクトリ名
 

@@ -322,6 +322,17 @@ in
       };
     }
 
+    # PostToolUse フック。superpowers の 4 つの skill (brainstorming・writing-plans・
+    # using-git-worktrees・finishing-a-development-branch) を読んだ直後に、確認を挟まずに
+    # PR まで走り切るよう Claude に念を押す。正本は CLAUDE.md の「方針を承認したら PR まで
+    # 走り切る」節 (ADR 019)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/run-through-nudge.sh" = {
+        source = claudeRoot + "/hooks/run-through-nudge.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #
