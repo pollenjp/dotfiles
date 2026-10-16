@@ -24,6 +24,7 @@
 | [015](./015_win_google_ime_powertoys_20261011T234247JST/README.md) | Windows 側の Google 日本語入力と PowerToys の設定を、repo のテキストから組み立て直して配る | 2026-10-11 |
 | [016](./016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md) | ssh の接続先を `.ssh` submodule から dotfiles-private へ移し、WSL へは symlink、Windows の `%USERPROFILE%\.ssh` へはコピーで配る | 2026-10-12 |
 | [017](./017_win_apps_winget_20261012T115007JST/README.md) | Windows の Google 日本語入力と PowerToys を、setup の中で winget から入れる | 2026-10-12 |
+| [018](./018_win_terminal_settings_keys_20261016T105116JST/README.md) | Windows Terminal の `settings.json` は、dotfiles が持つキーだけを setup が書き足す (ファイルごと配らない) | 2026-10-16 |
 
 ## ディレクトリ名
 

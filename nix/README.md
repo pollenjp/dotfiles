@@ -587,14 +587,15 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
-| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜98 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
-| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜98 と exe-exec-trace は、直して流し直すまで走らない） |
+| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜99 と exe-exec-trace は、直して流し直すまで走らない） |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` (99) と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。衝突で exit 1 しても、99 より前の bootstrap は済んでいる (後ろの exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -684,6 +685,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
+| 6.11.2 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
@@ -1112,6 +1114,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | `switch` | 配り先と on / off を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト）。`windowsFiles.enable` のホストでは `pjp-google-ime` も PATH に入れる | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName`） |
 | bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
+| bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
 読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
@@ -1131,6 +1134,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
+./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
 ```
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
@@ -1138,7 +1142,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 - 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
 - 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
   sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（setup はこの手順で止まり、後ろの
-  91〜98 の bootstrap と exe-exec-trace、最後の「残りの手作業」は流し直すまで走らない）。
+  91〜99 の bootstrap と exe-exec-trace、最後の「残りの手作業」は流し直すまで走らない）。
   取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
 - 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
   設定画面の「ディスクから再読み込み」が要る
@@ -1160,6 +1164,11 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
     語の diff は自分の端末で `--dry-run --show-words`)
   - 変換サーバーを落とせなかったら落とし直しの印を残し、次の回が置くものが無くても落とし直す
   - `--import` は、取り込みが書き換えるテキスト (`config.txtpb`・`keymap.tsv`・`romaji.tsv` と、dotfiles-private の辞書のディレクトリ `dictionaries/` の中身) に commit していない変更があると何も書かずに止まる
+- Windows Terminal の設定 (`win/windows-terminal/managed.json`) も manifest では配らない。`settings.json` は
+  Windows Terminal 自身も書き換え (新しい profile を見つけたとき・設定画面で保存したとき)、PC ごとに違う profile の
+  一覧も入るので、`bootstrap-windows-terminal.sh` (order 99) が持つキーだけを書き足し、キーごとに前回書いた値
+  (`~/.local/state/dotfiles/windows-terminal.applied.json`) と比べて衝突を見る（[`win/README.md`](../win/README.md#windows-terminal)、
+  [ADR 018](../docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)）
 
 経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
@@ -2595,6 +2604,7 @@ nix/
     ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)
     ├── bootstrap-windows-herdr.sh  Windows の herdr が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、入れ替えはしない)
     ├── bootstrap-windows-google-ime.sh  Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る (冪等。更新時も毎回走る)
+    ├── bootstrap-windows-terminal.sh  win/windows-terminal/managed.json のキーだけを、Windows Terminal の settings.json へ書き足す (冪等。更新時も毎回走る)
     ├── flake-lock-age.sh           flake.lock の pin を、出てから一定日数が経った revision に限る (setup --flake-update と CI の lock-age が呼ぶ)
     ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
     ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
