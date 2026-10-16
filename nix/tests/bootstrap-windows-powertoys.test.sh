@@ -188,14 +188,15 @@ ncalls() { grep -c '' "$1/ps-calls" 2>/dev/null || echo 0; }
 npwsh() { grep -c '' "$1/pwsh-calls" 2>/dev/null || echo 0; }
 pwsh_calls() { cat "$1/pwsh-calls" 2>/dev/null; }
 # pwsh.exe の呼び出しの記録 (1 回 1 行) に、grep の引数で合う行があるか。記録が無ければ合わない
-# (判定はパイプで受けない。seen と同じ)
-pwsh_called() {
+# (判定はパイプで受けない。seen と同じ)。ほかのテストの pwsh_called (呼ばれたか) とは別のものなので、
+# 名前を分ける
+pwsh_called_with() {
   local h=$1
   shift
   grep -qs "$@" "${h}/pwsh-calls"
 }
 # 最後の pwsh.exe の呼び出しが、grep の引数で合うか
-pwsh_called_last() {
+pwsh_last_called_with() {
   local h=$1
   shift
   grep -q "$@" <<<"$(tail -n 1 "${h}/pwsh-calls" 2>/dev/null)"
@@ -355,9 +356,9 @@ fi
 h=$(new_home t11 "${state_on}" 1 1)
 run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 1 && $(ncalls "${h}") == 1 ]] && seen "${h}" 'PowerToys は入っています' \
-  && seen "${h}" '読み直させました' && pwsh_called "${h}" -- '-NoProfile' \
-  && pwsh_called "${h}" -- '-Check' && ! pwsh_called "${h}" -- '-IfMissing' \
-  && pwsh_called "${h}" -F 'C:\fake\Install-PowerToys.ps1' \
+  && seen "${h}" '読み直させました' && pwsh_called_with "${h}" -- '-NoProfile' \
+  && pwsh_called_with "${h}" -- '-Check' && ! pwsh_called_with "${h}" -- '-IfMissing' \
+  && pwsh_called_with "${h}" -F 'C:\fake\Install-PowerToys.ps1' \
   && [[ $(head -n 1 "${h}/timeout-calls") == "60 pwsh.exe" ]]; then
   ok "入っていれば入れずに読み直させる (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
 else
@@ -366,7 +367,7 @@ fi
 
 # 11b. スクリプトが exit まで届かずに終わっても成功扱いにしない: 呼ぶ前に $LASTEXITCODE を 2 にしておく
 # shellcheck disable=SC2016 # PowerShell の $global:… を文字のまま探す
-if pwsh_called "${h}" -F '$global:LASTEXITCODE = 2; &'; then
+if pwsh_called_with "${h}" -F '$global:LASTEXITCODE = 2; &'; then
   ok "pwsh.exe には、スクリプトを呼ぶ前に \$LASTEXITCODE を 2 にするコマンドを渡す"
 else
   ng "\$LASTEXITCODE を先に 2 にしていない" "calls=$(pwsh_calls "${h}")"
@@ -384,7 +385,7 @@ fi
 h=$(new_home t13 "${state_on}" 1 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${added_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(npwsh "${h}") == 2 && $(ncalls "${h}") == 1 && -s $(record "${h}") ]] \
-  && pwsh_called_last "${h}" -- '-IfMissing' && seen "${h}" 'PowerToys を入れました' \
+  && pwsh_last_called_with "${h}" -- '-IfMissing' && seen "${h}" 'PowerToys を入れました' \
   && seen "${h}" '読み直させました' && ! seen "${h}" '⚠️' \
   && [[ $(tr '\n' ',' <"${h}/timeout-calls") == "60 pwsh.exe,600 pwsh.exe,60 powershell.exe," ]] \
   && grep -q 'winget で入れます' "${h}/out-at-ifmissing" && grep -q '600 秒まで待ちます' "${h}/out-at-ifmissing"; then
