@@ -1,0 +1,36 @@
+@startuml
+' skill を読み込んだ直後に、PostToolUse の hook (run-through-nudge.sh) が 1 文を足す流れ。
+' 青が今回足したもの。
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontName "Noto Sans CJK JP"
+skinparam shadowing false
+skinparam sequenceMessageAlign left
+skinparam legend {
+  BackgroundColor #FFFFFF
+  BorderColor #AAAAAA
+}
+
+title skill を読んだ直後に念押しが届く流れ（例: superpowers:writing-plans）
+
+participant "Claude\n（モデル）" as M
+participant "Claude Code" as CC
+participant "**run-through-nudge.sh**\nPostToolUse・matcher Skill" as H #DAE8FC
+
+note over M #DAE8FC
+  セッションの最初に <U+007E>/.claude/CLAUDE.md の
+  「**方針を承認したら PR まで走り切る**」を読んでいる
+end note
+
+M -> CC : Skill を呼ぶ\nskill: "superpowers:writing-plans"
+CC -> CC : skill の本文を読み込む\n（…Which execution approach would you prefer?…）
+CC -> H : stdin: tool_name "Skill"\ntool_input.skill "superpowers:writing-plans"
+H --> CC : additionalContext\n「[走り切り] … 推奨の方式を告げてそのまま実行に入る …」
+CC --> M : skill の本文と、そのすぐ後ろに 1 文
+M -> M : 実装計画を書き、推奨の方式を\n理由 1 文とともに告げて実行に入る
+
+legend right
+  |<#DAE8FC> TKT-168 で足した |
+  4 つの skill（brainstorming・writing-plans・
+  using-git-worktrees・finishing-a-development-branch）で同じ形
+endlegend
+@enduml
