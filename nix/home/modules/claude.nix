@@ -42,7 +42,7 @@
 #
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
-#                    (フック / statusLine の登録、git の設定を渡す env、
+#                    (フック / statusLine の登録、git の設定と Bash tool の shell を渡す env、
 #                    skill を隠す skillOverrides、footer のリンクの footerLinksRegexes)
 #                    は scripts/bootstrap-claude-*.sh がマシンごとに注入する。
 #                    skillOverrides・env・footerLinksRegexes は望む値を
@@ -119,6 +119,19 @@ let
       v = "!gh auth git-credential";
     }
   ];
+
+  # Claude Code の Bash tool を動かす shell (settings.json の env の CLAUDE_CODE_SHELL。TKT-192)。
+  #
+  # 指定が無いと Claude Code は、$SHELL が bash / zsh ならそれを、それ以外 (ログインシェルの fish)
+  # なら zsh を先に探して使う。zsh の入ったマシンでは Bash tool が zsh で動き、Claude が書く
+  # bash の script やテストと食い違う (glob が合わないと zsh は nomatch で止まる、など) ので bash にする。
+  #
+  # 値は home-manager の profile の bash。store のパスと違い、世代を切り替えても変わらないので、
+  # flake.lock を上げても bootstrap を流し直す必要が無く、古い世代の GC でも消えない。
+  # profile の置き場所とユーザー名は home-manager が決めるので、マシンが変わっても合う。
+  # bash は programs.bash (modules/bash.nix) が profile に入れる (package の既定は bashInteractive)。
+  # 値は bash か zsh を含まないと Claude Code に使われない (そのときは黙って zsh を探し直す)。
+  claudeShell = "${config.home.profileDirectory}/bin/bash";
 
   # dir 名 (~/.claude-<名前>) とコマンド名に使う。bootstrap も同じ規則で弾くので、
   # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
@@ -198,6 +211,19 @@ let
 in
 
 {
+  # CLAUDE_CODE_SHELL は profile の bin/bash を指す。programs.bash が profile に bash を入れない
+  # 設定では指す先が無くなり、Claude Code は黙って zsh を探し直すので、評価で止める。
+  assertions = [
+    {
+      assertion = config.programs.bash.enable && config.programs.bash.package != null;
+      message = ''
+        claude.nix: Claude Code の Bash tool の shell (CLAUDE_CODE_SHELL) は profile の bash
+        (${claudeShell}) を指します。programs.bash.enable を true のままにし、
+        programs.bash.package を null にしないでください (既定は bashInteractive)。
+      '';
+    }
+  ];
+
   # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
   # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
   # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
@@ -256,22 +282,30 @@ in
       ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
     }
 
-    # Claude のセッションに渡す git の設定 (settings.json の env の GIT_CONFIG_*)。
+    # Claude のセッションに渡す env (settings.json の env)。git の設定 (GIT_CONFIG_*) と、
+    # Bash tool の shell (CLAUDE_CODE_SHELL)。
     #
     # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
     # nix/scripts/bootstrap-claude-env.sh が写す。
     #
-    #   managed    bootstrap が面倒を見るキー。env にあるこのキーの組はいったん全部外し、
-    #              gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
-    #              消えるよう、option の値によらず両方の組のキーを載せる。
-    #              使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
-    #              組が残り続ける)
-    #   gitConfig  入れる組
+    #   managed      bootstrap が面倒を見る git のキー。env にあるこのキーの組はいったん全部外し、
+    #                gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
+    #                消えるよう、option の値によらず両方の組のキーを載せる。
+    #                使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
+    #                組が残り続ける)
+    #   gitConfig    入れる組
+    #   managedVars  bootstrap が面倒を見る env の名前 (GIT_CONFIG_* 以外)。vars に無い名前は
+    #                env から消す。managed と同じく、使わなくなった名前もここからは外さない
+    #   vars         入れる env (名前 → 値)
     {
       ".local/state/dotfiles/claude-env.json".text =
         builtins.toJSON {
           managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
           gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
+          managedVars = [ "CLAUDE_CODE_SHELL" ];
+          vars = {
+            CLAUDE_CODE_SHELL = claudeShell;
+          };
         }
         + "\n";
     }
