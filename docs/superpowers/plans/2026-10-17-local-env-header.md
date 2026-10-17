@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `bootstrap-local-env.sh` を「無ければ作る」から「頭の印付きの欄を `setup --update` のたびに書き直し、欄の外は 1 バイトも変えない」へ変え、欄に並べる環境変数の一覧を dotfiles の `nix/files/pjp-env/dotfiles.txt` と各 skill の `pjp-env.txt` から集める。
+**Goal:** `bootstrap-local-env.sh` を「無ければ作る」から「頭の印付きの欄を `setup --update` のたびに書き直し、欄の外は 1 バイトも変えない」へ変え、欄に並べる環境変数の一覧を dotfiles の `nix/pjp-env/dotfiles.txt` と各 skill の `pjp-env.txt` から集める。
 
 **Architecture:** script は欄を一時ファイルに組み (`render_block`)、今のファイルの印の行を awk で探して、印の外を `head` / `tail` でバイトのまま切り出し、欄と継ぎ合わせる。書き上がりが今と違うときだけ、前の版を `env.bak` に写してから一時ファイルを `mv` する。迷う場面 (印が壊れている・symlink・書けない) は warn で知らせて exit 0。
 
@@ -42,7 +42,7 @@
 
 **Files:**
 - Modify: `nix/scripts/bootstrap-local-env.sh` (全体を書き直す。頭のコメントの約束も ADR 021 に合わせる)
-- Create: `nix/files/pjp-env/dotfiles.txt`
+- Create: `nix/pjp-env/dotfiles.txt`
 - Create: `nix/tests/bootstrap-local-env.test.sh`
 - Modify: `nix/flake.nix` (checks に `bootstrap-local-env-test` を足す)
 
@@ -74,7 +74,7 @@
 #
 ```
 
-`nix/files/pjp-env/dotfiles.txt` (このまま):
+`nix/pjp-env/dotfiles.txt` (このまま):
 
 ```
 setup が対象にするホストを決めるための変数 (--host と同じ)。取り得る値: ~/dotfiles/flake.nix か nix/hosts/default.nix に載っているホスト名。
@@ -101,7 +101,7 @@ CC_PAGES_DIR=xxxxxx
 
 `nix/tests/bootstrap-local-env.test.sh <script> [<dotfiles.txt>]`。形は `bootstrap-windows-terminal.test.sh` に揃える (`set -u -o pipefail`・`ok` / `ng`・最後に件数を出して失敗があれば exit 1)。
 
-- `new_case <名前>`: `<work>/<名前>/repo/nix/scripts/` に script を写し、`<work>/<名前>/repo/nix/files/pjp-env/dotfiles.txt` にテスト用の断片 (2 変数) を置き、`<work>/<名前>/home/.claude/skills/` に下の skill を置く
+- `new_case <名前>`: `<work>/<名前>/repo/nix/scripts/` に script を写し、`<work>/<名前>/repo/nix/pjp-env/dotfiles.txt` にテスト用の断片 (2 変数) を置き、`<work>/<名前>/home/.claude/skills/` に下の skill を置く
   - `alpha/pjp-env.txt` (普通の 1 変数)・`zeta/pjp-env.txt` (`FOO=bar` の行と空行を含む)・`empty/pjp-env.txt` (空行だけ)・`noenv/` (pjp-env.txt 無し)・`linked` → `<ケース>/clone/skills/linked/` への symlink (pjp-env.txt あり)・`broken` → 無い場所への symlink・`bad/pjp-env.txt` (`<<< dotfiles を足す` の行を含む)・`crlf/pjp-env.txt` (CRLF で、末尾に改行が無い)
 - `run <ケース>`: `env HOME=<ケース>/home XDG_CONFIG_HOME=<ケース>/home/.config DOTFILES_SETUP_WARNINGS=<ケース>/warnings "${BASH}" <ケース>/repo/nix/scripts/bootstrap-local-env.sh` を流し、`out`・`err`・`rc` をケースの dir に落とす
 - テスト用の秘密の値 `secret=ntn_test_secret_do_not_print` を決めておく
@@ -118,7 +118,7 @@ CC_PAGES_DIR=xxxxxx
 
 - [ ] **Step 2: テストが落ちることを確かめる**
 
-Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/files/pjp-env/dotfiles.txt`
+Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/pjp-env/dotfiles.txt`
 Expected: T1〜T6 が FAIL (今の script は欄を作らない。dotfiles.txt もまだ無い)
 
 - [ ] **Step 3: `dotfiles.txt` を置き、script の作る側を書く**
@@ -131,14 +131,14 @@ Expected: T1〜T6 が FAIL (今の script は欄を作らない。dotfiles.txt �
 
 ```nix
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
-            bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./files/pjp-env/dotfiles.txt}
+            bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}
             touch $out
           '';
 ```
 
 - [ ] **Step 5: テストが通ることを確かめる**
 
-Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/files/pjp-env/dotfiles.txt` と `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test -L`
+Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/pjp-env/dotfiles.txt` と `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test -L`
 Expected: T1〜T6 が ok、build が通る
 
 - [ ] **Step 6: lint を流す**
@@ -149,7 +149,7 @@ Expected: どれも何も言わずに通る
 - [ ] **Step 7: Commit**
 
 ```bash
-git add nix/scripts/bootstrap-local-env.sh nix/files/pjp-env/dotfiles.txt nix/tests/bootstrap-local-env.test.sh nix/flake.nix
+git add nix/scripts/bootstrap-local-env.sh nix/pjp-env/dotfiles.txt nix/tests/bootstrap-local-env.test.sh nix/flake.nix
 git commit -m "feat(nix): ~/.config/pjp/env が無ければ、受け取る環境変数の一覧の欄を組んで作る (ADR 021)"
 ```
 
@@ -211,7 +211,7 @@ git commit -m "feat(nix): ~/.config/pjp/env が無ければ、受け取る環境
 
 - [ ] **Step 2: テストが落ちることを確かめる**
 
-Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/files/pjp-env/dotfiles.txt`
+Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/pjp-env/dotfiles.txt`
 Expected: T1〜T6 は ok、T7〜T16・T18 が FAIL
 
 - [ ] **Step 3: 継ぎ合わせを書く**
@@ -220,7 +220,7 @@ Expected: T1〜T6 は ok、T7〜T16・T18 が FAIL
 
 - [ ] **Step 4: テストが通ることを確かめる**
 
-Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/files/pjp-env/dotfiles.txt` と `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test -L`
+Run: `bash nix/tests/bootstrap-local-env.test.sh nix/scripts/bootstrap-local-env.sh nix/pjp-env/dotfiles.txt` と `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test -L`
 Expected: T1〜T18 がすべて ok
 
 - [ ] **Step 5: lint を流す** (Task 1 の Step 6 と同じ)
@@ -245,7 +245,7 @@ git commit -m "feat(nix): ~/.config/pjp/env の頭の欄だけを書き直し、
 - [ ] **Step 1: `nix/README.md` を直す**
 
 - 手順の表 6.6 の説明: 「`~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（後述）」
-- 「マシンローカルの環境変数」の節: 「初回だけ形式を書いたテンプレート…上書きは一切しない」の段落を、ADR 021 の振る舞い (欄だけ書き直す・欄の外は 1 バイトも変えない・欄の中の値は欄の下へ移す・迷ったら書かずに warn・`env.bak`) に書き換える。その下に「### 一覧の欄 (ADR 021)」を足し、欄の形の短い例・出どころ (`nix/files/pjp-env/dotfiles.txt` と `~/.claude/skills/*/pjp-env.txt`)・載せる基準 (ADR 021 の F)・変数を足すとき・印の無い古いファイルの移り方を書く
+- 「マシンローカルの環境変数」の節: 「初回だけ形式を書いたテンプレート…上書きは一切しない」の段落を、ADR 021 の振る舞い (欄だけ書き直す・欄の外は 1 バイトも変えない・欄の中の値は欄の下へ移す・迷ったら書かずに warn・`env.bak`) に書き換える。その下に「### 一覧の欄 (ADR 021)」を足し、欄の形の短い例・出どころ (`nix/pjp-env/dotfiles.txt` と `~/.claude/skills/*/pjp-env.txt`)・載せる基準 (ADR 021 の F)・変数を足すとき・印の無い古いファイルの移り方を書く
 - ファイルの木: `scripts/bootstrap-local-env.sh` の行を「~/.config/pjp/env を置き、頭の一覧の欄を書き直す (冪等。更新時も毎回走る。欄の外は書き換えない)」に。`files/` の下に `pjp-env/  ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt)` を足す
 
 - [ ] **Step 2: `nix/files/claude/skills/README.md` に節を足す**

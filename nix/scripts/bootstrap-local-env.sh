@@ -13,7 +13,7 @@
 # ファイルの頭には、dotfiles と skill が受け取る環境変数の一覧を、印で囲んだ欄として置く
 # (ADR 021)。一覧の文言は、変数を読むコードの隣に置いた断片から集める:
 #
-#   dotfiles の script が読む変数   この script のいる checkout の nix/files/pjp-env/dotfiles.txt
+#   dotfiles の script が読む変数   この script のいる checkout の nix/pjp-env/dotfiles.txt
 #   skill が読む変数                 ~/.claude/skills/<名前>/pjp-env.txt (名前の順)
 #
 # 断片は素のテキストで、各行の頭に「# 」を付けて欄に並べる。欄の中はすべて # で始まるので、
@@ -47,7 +47,7 @@ script_dir=$(
   pwd -P
 )
 repo_dir=$(dirname "$(dirname "${script_dir}")")
-dotfiles_fragment="${repo_dir}/nix/files/pjp-env/dotfiles.txt"
+dotfiles_fragment="${repo_dir}/nix/pjp-env/dotfiles.txt"
 skills_dir="${HOME}/.claude/skills"
 
 env_file="${XDG_CONFIG_HOME:-${HOME}/.config}/pjp/env"

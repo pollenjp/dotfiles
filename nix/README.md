@@ -1710,7 +1710,7 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 
 | 変数を読むもの | 断片 | 欄の節 |
 | --- | --- | --- |
-| dotfiles の script | `nix/files/pjp-env/dotfiles.txt` | `# ---- dotfiles ----` |
+| dotfiles の script | `nix/pjp-env/dotfiles.txt` | `# ---- dotfiles ----` |
 | skill | skill のディレクトリの `pjp-env.txt`（`~/.claude/skills/*/pjp-env.txt` から、名前の順） | `# ---- skill: <名前> ----` |
 
 - 断片の書き方は [`files/claude/skills/README.md`「環境変数を受け取るとき」](files/claude/skills/README.md#環境変数を受け取るとき-pjp-envtxt)
@@ -2746,8 +2746,8 @@ nix/
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
-│   ├── pjp-env/           ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt。store には置かず、bootstrap-local-env が読む)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
+├── pjp-env/               ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt。store には置かず、bootstrap-local-env が checkout から読む)
 ├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す

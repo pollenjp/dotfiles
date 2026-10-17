@@ -200,7 +200,7 @@
           bootstrap-windows-terminal-test = scriptTest "bootstrap-windows-terminal" ./scripts/bootstrap-windows-terminal.sh;
           # repo の dotfiles.txt も渡し、警告なしに欄へ入ることを確かめる
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
-            bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./files/pjp-env/dotfiles.txt}
+            bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}
             touch $out
           '';
           # 主に包む前の script を流す。runtimeInputs の fzf が PATH の先頭に来ると、テストが置く

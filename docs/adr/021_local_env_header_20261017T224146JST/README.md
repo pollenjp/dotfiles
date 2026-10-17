@@ -142,7 +142,7 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 
 | 出どころ | ファイル | 欄の中の節の見出し |
 | --- | --- | --- |
-| dotfiles の script が読む変数 | dotfiles の `nix/files/pjp-env/dotfiles.txt` (script のいる checkout から読む) | `# ---- dotfiles ----` |
+| dotfiles の script が読む変数 | dotfiles の `nix/pjp-env/dotfiles.txt` (script のいる checkout から読む) | `# ---- dotfiles ----` |
 | skill が読む変数 | skill のディレクトリの `pjp-env.txt` (`~/.claude/skills/*/pjp-env.txt` から集める) | `# ---- skill: <ディレクトリ名> ----` |
 
 - 並びは dotfiles が先、skill はディレクトリ名の順 (C ロケール)
@@ -180,6 +180,8 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
   本物の `notion_profile.read_env_file` で確かめた (`# x\rPJP_NOTION_TOKEN_PERSONAL=…` の行から変数が 1 つ読まれる)。
   UTF-8 として読めない断片は、resolver が置き換え文字にして読むだけで行は分けないので、止めない
 - `CLAUDE_SKILLS_DIR`・`CC_PAGES_DIR` (clone の置き場所) も、`DOTFILES_PRIVATE_DIR` と同じ基準で載せる (F)
+- dotfiles の断片は `nix/files/` ではなく `nix/pjp-env/` に置く (E)。`nix/files/` は store が配るファイルの置き場所で、
+  `dotfiles.txt` は store に置かず bootstrap が checkout から読むため (`nix/vulnxscan-whitelist.csv` と同じ扱い)
 - この PC の本物の `~/.config/pjp/env` は、merge の前には書き換えない。確かめるのは写しで行い (6)、本物は merge の
   後にユーザーが流す `setup --update` で書き換わる
 
@@ -188,7 +190,7 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 | ファイル | 変更 |
 | --- | --- |
 | `nix/scripts/bootstrap-local-env.sh` | 「無ければ作る」から「欄を書き直す」へ。頭のコメントの約束 (中身は上書きしない) も改める |
-| `nix/files/pjp-env/dotfiles.txt` | 新規。dotfiles の script が読む変数の一覧 |
+| `nix/pjp-env/dotfiles.txt` | 新規。dotfiles の script が読む変数の一覧 |
 | `nix/tests/bootstrap-local-env.test.sh`・`nix/flake.nix` | 偽の HOME と checkout で欄の書き直しを確かめる check (`bootstrap-local-env-test`)。repo の `dotfiles.txt` も渡して、欄に入れられることを確かめる |
 | `nix/README.md` | 「マシンローカルの環境変数」の節 (2 回目以降の振る舞い・欄・断片の書き方)、手順の表、ファイルの木 |
 | `nix/files/claude/skills/README.md` | skill が環境変数を受け取るときの `pjp-env.txt` の書き方 |
@@ -261,6 +263,6 @@ ADR 018 のように書いた記録を持てば見分けられるが、`env.bak`
 
 ### 変数を足すとき
 
-- dotfiles の script が読む変数は `nix/files/pjp-env/dotfiles.txt` に足す
+- dotfiles の script が読む変数は `nix/pjp-env/dotfiles.txt` に足す
 - skill が読む変数は、その skill のディレクトリの `pjp-env.txt` に足す (無ければ作る)。書き方は
   [`nix/files/claude/skills/README.md`](../../../nix/files/claude/skills/README.md) と claude-skills の `skills/README.md`

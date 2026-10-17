@@ -41,7 +41,7 @@
 #
 # ## 偽の checkout
 #
-# script は自分のいる checkout の nix/files/pjp-env/dotfiles.txt を読むので、ケースごとに
+# script は自分のいる checkout の nix/pjp-env/dotfiles.txt を読むので、ケースごとに
 # <ケース>/repo/nix/scripts/ へ写して流す。HOME は <ケース>/home、XDG_CONFIG_HOME は <ケース>/home/.config。
 
 set -u -o pipefail
@@ -82,14 +82,14 @@ file_mode() {
 new_case() {
   local c="${work}/$1" s
   s="${c}/home/.claude/skills"
-  mkdir -p "${c}/repo/nix/scripts" "${c}/repo/nix/files/pjp-env" "${s}" "${c}/clone/skills/linked"
+  mkdir -p "${c}/repo/nix/scripts" "${c}/repo/nix/pjp-env" "${s}" "${c}/clone/skills/linked"
   cp "${script}" "${c}/repo/nix/scripts/bootstrap-local-env.sh"
   printf '%s\n' \
     'テスト用の 1 つめの変数。取り得る値: 何でも。' \
     'TEST_DOTFILES_ONE=xxxxxx' \
     '' \
     'テスト用の 2 つめの変数。取り得る値: 0, 1。' \
-    'TEST_DOTFILES_TWO=1' >"${c}/repo/nix/files/pjp-env/dotfiles.txt"
+    'TEST_DOTFILES_TWO=1' >"${c}/repo/nix/pjp-env/dotfiles.txt"
   mkdir -p "${s}/alpha" "${s}/zeta" "${s}/empty" "${s}/noenv" "${s}/bad" "${s}/crlf"
   printf '%s\n' 'alpha が読む変数。取り得る値: パス。' 'ALPHA_PATH=xxxxxx' >"${s}/alpha/pjp-env.txt"
   printf '%s\n' '' '' 'zeta が読む変数。取り得る値: 何でも。' 'FOO=bar' '' 'zeta の 2 つめ。' 'ZETA_TWO=xxxxxx' '' \
@@ -206,7 +206,7 @@ fi
 # T6. 本物の dotfiles.txt
 if [[ -n ${real_fragment} ]]; then
   new_case t6
-  cp "${real_fragment}" "${work}/t6/repo/nix/files/pjp-env/dotfiles.txt"
+  cp "${real_fragment}" "${work}/t6/repo/nix/pjp-env/dotfiles.txt"
   rm -rf "${work}/t6/home/.claude/skills/bad"
   run t6
   f=$(envf t6)
