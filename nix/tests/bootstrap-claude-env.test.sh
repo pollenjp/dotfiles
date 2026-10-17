@@ -12,6 +12,11 @@
 #
 #   - option の true / false どおりに env の GIT_CONFIG_* を書き直す。true → false で
 #     HTTPS の組が消え、管理しない組は順序ごと残り、再実行では変わらない
+#   - 状態ファイルの vars (Bash tool の shell の CLAUDE_CODE_SHELL) を env に書き、古い値は
+#     置き換える。managedVars にあって vars に無い名前は env から消す
+#   - vars を持たない古い状態ファイル (switch 前) では、GIT_CONFIG_* だけ書き、env の
+#     CLAUDE_CODE_SHELL には触れずに switch を促す
+#   - CLAUDE_CODE_SHELL のパスが実行できなければ警告する (書くのは止めない)
 #   - 状態ファイルが無い・形が違う・settings.json が無いときの扱い
 #   - gh が無い / 未ログイン / 設定ファイルに別の credential helper があるときの警告
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、その警告を直し方ごと setup の
@@ -53,8 +58,18 @@ managed='["commit.gpgsign","tag.gpgsign","url.https://github.com/.insteadOf","cr
 base_pairs='[{"k":"commit.gpgsign","v":"false"},{"k":"tag.gpgsign","v":"false"}]'
 gh_pairs='[{"k":"url.https://github.com/.insteadOf","v":"git@github.com:"},{"k":"url.https://github.com/.insteadOf","v":"ssh://git@github.com/"},{"k":"credential.https://github.com.helper","v":"!gh auth git-credential"}]'
 all_pairs=$(jq -cn --argjson b "${base_pairs}" --argjson g "${gh_pairs}" '$b + $g')
-state_true=$(jq -cn --argjson m "${managed}" --argjson p "${all_pairs}" '{managed: $m, gitConfig: $p}')
-state_false=$(jq -cn --argjson m "${managed}" --argjson p "${base_pairs}" '{managed: $m, gitConfig: $p}')
+managed_vars='["CLAUDE_CODE_SHELL"]'
+# Bash tool の shell。実行できる bash なら何でもよいので、このテストを流している bash を指す
+shell_vars=$(jq -cn --arg s "${BASH}" '{CLAUDE_CODE_SHELL: $s}')
+# $1: gitConfig の組、$2: vars → 状態ファイル
+state_of() {
+  jq -cn --argjson m "${managed}" --argjson p "$1" --argjson mv "${managed_vars}" --argjson v "$2" \
+    '{managed: $m, gitConfig: $p, managedVars: $mv, vars: $v}'
+}
+state_true=$(state_of "${all_pairs}" "${shell_vars}")
+state_false=$(state_of "${base_pairs}" "${shell_vars}")
+# vars を持たない古い形 (CLAUDE_CODE_SHELL を足す前の世代が置いたもの)
+state_old=$(jq -cn --argjson m "${managed}" --argjson p "${all_pairs}" '{managed: $m, gitConfig: $p}')
 
 # 無署名の 2 組だけが入った settings.json の env (gitViaGh より前の形)
 env_current='{"GIT_CONFIG_COUNT":"2","GIT_CONFIG_KEY_0":"commit.gpgsign","GIT_CONFIG_VALUE_0":"false","GIT_CONFIG_KEY_1":"tag.gpgsign","GIT_CONFIG_VALUE_1":"false"}'
@@ -113,6 +128,8 @@ run() {
 
 rc() { cat "$1/rc"; }
 git_env() { jq -cS '.env // {} | with_entries(select(.key | startswith("GIT_CONFIG_")))' "$1/.claude/settings.json"; }
+# settings.json の env の 1 つの値 (無ければ空)
+env_value() { jq -r --arg k "$2" '.env[$k] // empty' "$1/.claude/settings.json"; }
 same() { [[ $(jq -cS . <<<"$1") == $(jq -cS . <<<"$2") ]]; }
 
 echo "== bootstrap-claude-env.sh: ${script}"
@@ -323,6 +340,82 @@ if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings ]]; then
   ok "警告が無ければ、まとめ用には何も残さない"
 else
   ng "警告が無いのにまとめ用に残した" "warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 22. vars の CLAUDE_CODE_SHELL を env に書く (2 回目で変わらないことは 2. が確かめる)
+h=$(new_home t22 "{\"env\":${env_current}}" "${state_true}")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(env_value "${h}" CLAUDE_CODE_SHELL) == "${BASH}" ]]; then
+  ok "vars の CLAUDE_CODE_SHELL を env に書く"
+else
+  ng "vars の CLAUDE_CODE_SHELL を env に書く" "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json")"
+fi
+
+# 23. managedVars の名前の古い値 (zsh) は vars の値で置き換わり、管理しないキーは残る
+init=$(jq -cn --argjson e "${env_current}" '{env: ($e + {CLAUDE_CODE_SHELL: "/usr/bin/zsh", FOO: "bar"})}')
+h=$(new_home t23 "${init}" "${state_true}")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(env_value "${h}" CLAUDE_CODE_SHELL) == "${BASH}" && $(env_value "${h}" FOO) == bar ]]; then
+  ok "CLAUDE_CODE_SHELL の古い値 (zsh) は vars の値で置き換わり、管理しないキー (FOO) は残る"
+else
+  ng "CLAUDE_CODE_SHELL の古い値は vars の値で置き換わる" "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json")"
+fi
+
+# 24. managedVars にあって vars に無い名前は env から消す (vars から外したとき)
+h=$(new_home t24 "${init}" "$(state_of "${all_pairs}" '{}')")
+run "${h}"
+if [[ $(rc "${h}") == 0 && -z $(env_value "${h}" CLAUDE_CODE_SHELL) && $(env_value "${h}" FOO) == bar ]]; then
+  ok "managedVars にあって vars に無い CLAUDE_CODE_SHELL は env から消え、FOO は残る"
+else
+  ng "vars に無い CLAUDE_CODE_SHELL は env から消える" "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json")"
+fi
+
+# 25. vars を持たない古い状態ファイル (switch 前): GIT_CONFIG_* は書き、手で入れた CLAUDE_CODE_SHELL には
+#     触れず、switch を促す。setup から走るときは、まとめにも残す
+init=$(jq -cn --argjson e "${env_current}" '{env: ($e + {CLAUDE_CODE_SHELL: "/usr/bin/zsh"})}')
+h=$(new_home t25 "${init}" "${state_old}")
+run "${h}" DOTFILES_SETUP_WARNINGS="${h}/warnings"
+if [[ $(rc "${h}") == 0 ]] && same "$(git_env "${h}")" "$(expect_env "${all_pairs}")" \
+  && [[ $(env_value "${h}" CLAUDE_CODE_SHELL) == /usr/bin/zsh ]] \
+  && grep -q 'CLAUDE_CODE_SHELL' "${h}/err" && grep -q 'home-manager switch' "${h}/err" \
+  && grep -q 'CLAUDE_CODE_SHELL' "${h}/warnings"; then
+  ok "古い状態ファイルでは GIT_CONFIG_* だけ書き、CLAUDE_CODE_SHELL に触れずに switch を促す"
+else
+  ng "古い状態ファイルでは CLAUDE_CODE_SHELL に触れずに switch を促す" \
+    "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json") err=$(cat "${h}/err") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 26. CLAUDE_CODE_SHELL のパスが実行できない: 警告して書く (exit 0)。setup から走るときは、まとめにも残す
+#     (警告が出ないときのことは 21. が確かめる)
+missing="${work}/no-such-dir/bash"
+h=$(new_home t26 "{\"env\":${env_current}}" "$(state_of "${all_pairs}" "$(jq -cn --arg s "${missing}" '{CLAUDE_CODE_SHELL: $s}')")")
+run "${h}" DOTFILES_SETUP_WARNINGS="${h}/warnings"
+if [[ $(rc "${h}") == 0 && $(env_value "${h}" CLAUDE_CODE_SHELL) == "${missing}" ]] \
+  && grep -qF "${missing}" "${h}/err" && grep -qF "${missing}" "${h}/warnings"; then
+  ok "CLAUDE_CODE_SHELL のパスが実行できなければ警告し (まとめにも残す)、値は書く"
+else
+  ng "CLAUDE_CODE_SHELL のパスが実行できなければ警告する" \
+    "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json") err=$(cat "${h}/err") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 27. vars の値が文字列でない: exit 1 で止まり、settings.json は変えない
+h=$(new_home t27 "{\"env\":${env_current}}" "$(state_of "${all_pairs}" '{"CLAUDE_CODE_SHELL":1}')")
+before=$(jq -cS . "${h}/.claude/settings.json")
+run "${h}"
+if [[ $(rc "${h}") == 1 && $(jq -cS . "${h}/.claude/settings.json") == "${before}" ]]; then
+  ok "vars の値が文字列でなければ exit 1 で止まり、変更しない"
+else
+  ng "vars の値が文字列でなければ exit 1" "rc=$(rc "${h}") err=$(cat "${h}/err")"
+fi
+
+# 28. managedVars が名前の配列でない: exit 1 で止まり、settings.json は変えない
+h=$(new_home t28 "{\"env\":${env_current}}" "$(jq -cn --argjson s "${state_true}" '$s + {managedVars: "CLAUDE_CODE_SHELL"}')")
+before=$(jq -cS . "${h}/.claude/settings.json")
+run "${h}"
+if [[ $(rc "${h}") == 1 && $(jq -cS . "${h}/.claude/settings.json") == "${before}" ]]; then
+  ok "managedVars が名前の配列でなければ exit 1 で止まり、変更しない"
+else
+  ng "managedVars が名前の配列でなければ exit 1" "rc=$(rc "${h}") err=$(cat "${h}/err")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
