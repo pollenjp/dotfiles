@@ -87,7 +87,8 @@
       #   claude-footer-links.test.mjs
       #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
       #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
-      #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
+      #   claude-env.nix   gitViaGh.enable から作られるものと、Bash tool の shell (CLAUDE_CODE_SHELL) と
+      #                    その bash を profile に入れる設定。評価時に assert するので全 system
       #   claude-herdr-skill.nix
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
@@ -138,11 +139,25 @@
                 touch $out
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+          verify-test = scriptTest "verify" ./scripts/verify.sh;
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
-          check-windows-openssh-version-test = scriptTest "check-windows-openssh-version" ./scripts/check-windows-openssh-version.sh;
+          check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
+          # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
+          check-test-grep-q-test =
+            pkgs.runCommand "check-test-grep-q-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.shfmt
+                ];
+              }
+              ''
+                bash ${./tests/check-test-grep-q.test.sh} ${./scripts/check-test-grep-q.sh}
+                touch $out
+              '';
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
@@ -347,6 +362,8 @@
               pkgs.shfmt
               pkgs.shellcheck
               pkgs.nixfmt
+              # check-test-grep-q.sh が shfmt の構文木を jq で読む
+              pkgs.jq
               home-manager.packages.${system}.default
             ];
           };

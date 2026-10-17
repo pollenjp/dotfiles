@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # home-manager 設定の検証を一括で実行する。
-# 実際の $HOME には一切触れず、使い捨ての $HOME に対して activate を試す。
+# 実際の $HOME にも手元の user systemd にも触れず、使い捨ての $HOME に対して activate を試す。
 #
 # 使い方:
 #   ./nix/scripts/verify.sh
@@ -54,11 +54,17 @@ fi
 
 echo "==> 使い捨て \$HOME (${sandbox_home}) へ activate"
 rm -rf "${sandbox_home}"
-mkdir -p "${sandbox_home}/.local/state/nix/profiles"
-HOME="${sandbox_home}" USER=user "${result_link}/activate"
+mkdir -p "${sandbox_home}/.local/state/nix/profiles" "${sandbox_home}/run"
+# XDG_RUNTIME_DIR を systemd のソケットが無い場所へ向ける (CI の nix.yml と同じ)。
+# activate は `systemctl --user is-system-running` で user systemd に届くかを見て、
+# 届かなければ "Skipping reload." で systemd に触れない。
+# 向けないと手元の user systemd に届き、sandbox と同じ名前の unit (cc-pages.service
+# など) を止めて起こし直す。実 systemd は実 HOME の unit しか見ないので、手元で
+# 常駐しているものが 1 回落ちて立ち上がり直す。
+HOME="${sandbox_home}" USER=user XDG_RUNTIME_DIR="${sandbox_home}/run" "${result_link}/activate"
 
 echo "==> 冪等性の確認 (2 回目の activate)"
-HOME="${sandbox_home}" USER=user "${result_link}/activate"
+HOME="${sandbox_home}" USER=user XDG_RUNTIME_DIR="${sandbox_home}/run" "${result_link}/activate"
 
 # 配置物は store への symlink なので grep -r では中身まで辿れない。
 # 複製元 (nix/files/) を直接検査する方が確実。

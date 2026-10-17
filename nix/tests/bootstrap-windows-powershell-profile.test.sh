@@ -122,6 +122,14 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 profile() { printf '%s' "$1/mnt/c/Users/tester/OneDrive/ドキュメント/PowerShell/Microsoft.PowerShell_profile.ps1"; }
 record() { cat "$1/.local/state/dotfiles/windows-powershell-profile.json" 2>/dev/null; }
 pwsh_called() { [[ -s $1/pwsh-calls ]]; }
@@ -136,7 +144,7 @@ echo "== bootstrap-windows-powershell-profile.sh: ${script}"
 # 1. 状態ファイルが無い: 飛ばす
 h=$(new_home t1 "" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '飛ばします'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '飛ばします'; then
   ok "windows-files.json が無ければ pwsh.exe を呼ばずに飛ばす"
 else
   ng "状態ファイルが無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -145,7 +153,7 @@ fi
 # 2. enable = false: 飛ばす
 h=$(new_home t2 "${state_off}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q '配りません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '配りません'; then
   ok "enable = false なら pwsh.exe を呼ばずに飛ばす"
 else
   ng "enable = false" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -154,7 +162,7 @@ fi
 # 3. dotfiles.ps1 が配られていない: 飛ばす
 h=$(new_home t3 "${state_on}" 0)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && outerr "${h}" | grep -q 'まだ配られていません'; then
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" 'まだ配られていません'; then
   ok "dotfiles.ps1 が配られていなければ飛ばす"
 else
   ng "dotfiles.ps1 が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -163,7 +171,7 @@ fi
 # 4. pwsh.exe が無い: 手で打つコマンドを出して exit 0
 h=$(new_home t4 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && outerr "${h}" | grep -qF "Add-Content -Path \$PROFILE -Value '${line}'"; then
+if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && seen "${h}" -F "Add-Content -Path \$PROFILE -Value '${line}'"; then
   ok "pwsh.exe が無ければ手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -172,7 +180,7 @@ fi
 # 5. pwsh.exe が失敗する (interop が落ちている): 手で打つコマンドを出して exit 0
 h=$(new_home t5 "${state_on}" 1)
 FAKE_PWSH_RC=126 FAKE_PWSH_OUT='' run "${h}" 0
-if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && outerr "${h}" | grep -qF 'Add-Content -Path $PROFILE'; then
+if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && seen "${h}" -F 'Add-Content -Path $PROFILE'; then
   ok "pwsh.exe が失敗したら手で打つコマンドを出して exit 0"
 else
   ng "pwsh.exe が失敗する" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -181,7 +189,7 @@ fi
 # 6. pwsh.exe が Windows のパスを返さない: 手で打つコマンドを出して exit 0
 h=$(new_home t6 "${state_on}" 1)
 FAKE_PWSH_OUT='WARNING: something' run "${h}" 0
-if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && outerr "${h}" | grep -qF 'Add-Content -Path $PROFILE'; then
+if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") ]] && seen "${h}" -F 'Add-Content -Path $PROFILE'; then
   ok "pwsh.exe が Windows のパスを返さなければ手で打つコマンドを出して exit 0"
 else
   ng "パスを返さない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -197,7 +205,7 @@ if [[ $(rc "${h}") == 0 && -f ${p} && $(cat "${p}") == "${line}" ]] && [[ $(hex 
 else
   ng "\$PROFILE が無い" "rc=$(rc "${h}") record=$(record "${h}") calls=$(cat "${h}/pwsh-calls" 2>/dev/null) $(outerr "${h}")"
 fi
-if outerr "${h}" | grep -qF '. $PROFILE'; then
+if seen "${h}" -F '. $PROFILE'; then
   ok "足したら . \$PROFILE で読み直すよう案内する"
 else
   ng "読み直しの案内" "$(outerr "${h}")"
@@ -206,7 +214,7 @@ fi
 # 8. 2 回目: 変えない
 before=$(hex "${p}")
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && outerr "${h}" | grep -q '読み込み済み'; then
+if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && seen "${h}" '読み込み済み'; then
   ok "2 回流しても変わらない"
 else
   ng "2 回目" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -254,7 +262,7 @@ fi
 printf 'Invoke-Expression (&starship init powershell)\n' >"${p}"
 before=$(hex "${p}")
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && outerr "${h}" | grep -q -- '--force'; then
+if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && seen "${h}" -- '--force'; then
   ok "足した記録があって消えていれば、足し直さず --force を案内する"
 else
   ng "消えている" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -271,7 +279,7 @@ fi
 # 14. --dry-run: $PROFILE も記録も書かない
 h=$(new_home t14 "${state_on}" 1)
 run "${h}" 0 --dry-run
-if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") && -z $(record "${h}") ]] && outerr "${h}" | grep -q '\[dry-run\]'; then
+if [[ $(rc "${h}") == 0 && ! -e $(profile "${h}") && -z $(record "${h}") ]] && seen "${h}" '\[dry-run\]'; then
   ok "--dry-run は \$PROFILE にも記録にも書かない"
 else
   ng "--dry-run" "rc=$(rc "${h}") record=$(record "${h}") $(outerr "${h}")"
@@ -284,7 +292,7 @@ mkdir -p "$(dirname "${p}")"
 printf '\xff\xfe#\x00\n\x00' >"${p}"
 before=$(hex "${p}")
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && outerr "${h}" | grep -qF 'Add-Content -Path $PROFILE'; then
+if [[ $(rc "${h}") == 0 && $(hex "${p}") == "${before}" ]] && seen "${h}" -F 'Add-Content -Path $PROFILE'; then
   ok "UTF-16 の \$PROFILE には書かず、手で打つコマンドを出す"
 else
   ng "UTF-16" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -322,7 +330,7 @@ if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe
 else
   ng "pwsh.exe が無いときのまとめ" "$(cat "${h}/warnings" 2>/dev/null) / $(cat "${h2}/warnings" 2>/dev/null)"
 fi
-if outerr "${h}" | grep -qF "     Add-Content -Path \$PROFILE -Value '${line}'"; then
+if seen "${h}" -F "     Add-Content -Path \$PROFILE -Value '${line}'"; then
   ok "その場の手で打つコマンドは今のまま (5 文字字下げ)"
 else
   ng "その場の手で打つコマンドが変わった" "$(outerr "${h}")"

@@ -77,6 +77,14 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 confd() { printf '%s' "$1/home/.ssh/config.d"; }
 target() { readlink "$(confd "$1")/$2"; }
 mode() { stat -c '%a' "$1"; }
@@ -101,7 +109,7 @@ fi
 before=$(listing "${c}")
 run "${c}"
 after=$(listing "${c}")
-if [[ $(rc "${c}") == 0 && ${before} == "${after}" ]] && outerr "${c}" | grep -q '2 個を張りました'; then
+if [[ $(rc "${c}") == 0 && ${before} == "${after}" ]] && seen "${c}" '2 個を張りました'; then
   ok "2 回目も同じ結果になる"
 else
   ng "2 回目" "rc=$(rc "${c}") ${before} / ${after}"
@@ -111,7 +119,7 @@ fi
 rm "${c}/private/ssh/b c.ssh_config"
 run "${c}"
 if [[ $(rc "${c}") == 0 && ! -e $(confd "${c}")/"b c.ssh_config" && ! -L $(confd "${c}")/"b c.ssh_config" ]] \
-  && outerr "${c}" | grep -q '正本に無い symlink を 1 個外しました'; then
+  && seen "${c}" '正本に無い symlink を 1 個外しました'; then
   ok "正本から消えたファイルを指す symlink を外す"
 else
   ng "消えたファイル" "rc=$(rc "${c}") $(outerr "${c}")"
@@ -127,7 +135,7 @@ ln -s "${c}/ghq/github.com/pollenjp/dotfiles/.ssh/old.ssh_config" "$(confd "${c}
 run "${c}"
 if [[ $(rc "${c}") == 0 && $(target "${c}" a.ssh_config) == "${c}/private/ssh/a.ssh_config" ]] \
   && [[ ! -L $(confd "${c}")/old.ssh_config ]] \
-  && outerr "${c}" | grep -q '正本に無い symlink を 1 個外しました'; then
+  && seen "${c}" '正本に無い symlink を 1 個外しました'; then
   ok "旧 submodule を指す symlink を外し、同じ名前は dotfiles-private へ張り替える"
 else
   ng "旧 submodule" "rc=$(rc "${c}") $(outerr "${c}") $(listing "${c}" 2>&1)"

@@ -169,6 +169,14 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 wssh() { printf '%s' "$1/win/.ssh"; }
 record() { cat "$1/home/.local/state/dotfiles/windows-ssh-config.deployed.json" 2>/dev/null; }
 same_file() { cmp -s "$1" "$2"; }
@@ -184,7 +192,7 @@ echo "== bootstrap-windows-ssh-config.sh: ${script}"
 # 1. 状態ファイルが無い: 飛ばす
 c=$(new_case t1 "")
 run "${c}" 0
-if [[ $(rc "${c}") == 0 && ! -e $(wssh "${c}") ]] && outerr "${c}" | grep -q '飛ばします'; then
+if [[ $(rc "${c}") == 0 && ! -e $(wssh "${c}") ]] && seen "${c}" '飛ばします'; then
   ok "windows-files.json が無ければ何も書かずに飛ばす"
 else
   ng "状態ファイルが無い" "rc=$(rc "${c}") $(outerr "${c}")"
@@ -193,7 +201,7 @@ fi
 # 2. enable = false: 飛ばす
 c=$(new_case t2 "${state_off}")
 run "${c}" 0
-if [[ $(rc "${c}") == 0 && ! -e $(wssh "${c}") ]] && outerr "${c}" | grep -q '配りません'; then
+if [[ $(rc "${c}") == 0 && ! -e $(wssh "${c}") ]] && seen "${c}" '配りません'; then
   ok "enable = false なら何も書かない"
 else
   ng "enable = false" "rc=$(rc "${c}") $(outerr "${c}")"

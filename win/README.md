@@ -79,6 +79,59 @@ nix/scripts/bootstrap-windows-files.sh --force
 書式が違えばバイト列は揃わない ([PowerToys](#powertoys) など)。diff を見て、違いがそれだけなら
 `--force` で上書きしてよい。
 
+## winget の新しい版を確かめる
+
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力) は、新しい版が出ても手元では
+`-Check` の ※ の行でしか見えない (`setup --update` を流したときだけ)。そこで GitHub Actions の
+`winget-versions` ([`.github/workflows/winget-versions.yml`](../.github/workflows/winget-versions.yml)) が
+週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で確かめ、新しい版が出て 30 日たつと落ちて知らせる
+([TKT-110](https://app.notion.com/p/Windows-OpenSSH-Win32-OpenSSH-3f179149a66f81eaa691e12ef3e0b86c)、
+[TKT-156](https://app.notion.com/p/herdr-Google-windows-openssh-1-3fa79149a66f81ee8d2bd07a0769cab0))。
+名前ごとに別の job で、落ちた定期実行の通知は `nix.yml` の closure-scan と同じく GitHub から届く。
+
+| 名前 | 固定した版 (`-Version` の既定値) と見送りの一覧 | 出た日 (猶予を数える起点) | 手順 |
+| --- | --- | --- | --- |
+| `openssh` | `openssh/Install-OpenSSH.ps1`・`openssh/skipped-versions.txt` | GitHub の release (`PowerShell/Win32-OpenSSH`) が出た日 | [OpenSSH の新しい版が出たとき](#openssh-の新しい版が出たとき) |
+| `herdr` | `herdr/Install-Herdr.ps1`・`herdr/skipped-versions.txt` | GitHub の preview の release (`herdrdev/herdr`) が出た日 | [herdr の新しい版が出たとき](#herdr-の新しい版が出たとき) |
+| `google-japanese-input` | `google-japanese-input/Install-GoogleJapaneseInput.ps1`・`google-japanese-input/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い) | [Google 日本語入力の新しい版が出たとき](#google-日本語入力の新しい版が出たとき) |
+
+- 確かめるのは `nix/scripts/check-winget-version.sh <名前>`。ps1 から固定した版とパッケージ ID (`$packageId`) を読み、
+  winget-pkgs (`manifests/<頭文字>/<ID の . を / に>/<版>/`) と、出た日を引く先を GitHub API で読むので、
+  Windows は要らない。手元で打つなら gh のログインが要る:
+
+  ```sh
+  nix/scripts/check-winget-version.sh herdr   # 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
+  ```
+
+- 新しい版は、出てから 30 日 (猶予) は落とさずに待つ。待つ間は、実行の画面に notice (版・出た日・あと何日で
+  知らせるか) が出る。summary にも ※ の行で出る
+  - 追いついていない版がいくつかあるときは、いちばん早く出た版の日から数える。遅れ始めてから 30 日で知らせ、
+    新しい版が続けて出ても先送りしない
+  - 見送った版は数えない。猶予の中に上げるか見送るかを決めておけば、落ちずに済む
+  - 30 日は script の先頭の `grace_days` の 1 か所で決める (3 つで同じ)
+- 猶予がたって落ちる (exit 1) のは:
+  - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 名前ごとの手順で、上げるか見送るかを決める。
+    出た日が分からない (合う release や commit が無い) ときは、待たずに落ちる
+  - GitHub に出た版が winget のこのパッケージに無い (OpenSSH と herdr だけ。パッケージ ID が移ると、古い ID には
+    新しい版が来ない) → 下の「パッケージ ID を確かめる」
+- 猶予を置かずに落ちる (exit 1) のは、新しい版の知らせではなく、壊れていることの知らせ:
+  - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
+  - パッケージが winget に無い (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)
+    → 下の「パッケージ ID を確かめる」
+  - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
+    ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`) で今のパッケージ ID を
+  確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
+  固定した版を直す
+- 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・ps1 から版か ID が読めない・見送りの一覧の書き損じ。
+  出た日を引く一覧 (GitHub の release・winget-pkgs の commit) だけが取れないときも、新しい版が猶予の中かを
+  決められないので exit 2 になる。summary の `!!` の行を見て、一時的な失敗なら流し直し、書き損じなら直す
+- 見送るときは、その名前の `skipped-versions.txt` に「版 理由」を 1 行足して commit する。その版では落ちなくなり、
+  もっと新しい版が出ると、その版が出てから 30 日でまた落ちる。固定した版以下になった行は消してよい (job が
+  「消してよい」と出す)。このファイルは manifest に無いので Windows へは配らない
+- 猶予がたった新しい版がある間は、別の理由で ps1 や script を直す PR も赤くなる (merge は止まらない)。
+  どれか 1 つを変えた PR でも、3 つの job が走る
+
 ## Orca の keybindings.json
 
 Orca が自分で書く形 (`JSON.stringify(…, null, 2)` + 改行) に揃えてある。Orca が同じ内容を
@@ -217,6 +270,7 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 | `Install-Herdr` (PowerShell) | 揃える (入れる・入れ替える・pin を足す) |
 | `nix/scripts/bootstrap-windows-herdr.sh` (WSL) | `setup --update` でも毎回走る。入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない) |
 | `nix/scripts/bootstrap-windows-herdr.sh --apply` (WSL) | WSL から揃える |
+| `nix/scripts/check-winget-version.sh herdr` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい preview が GitHub に出て 30 日たつと落ちて知らせる ([後述](#herdr-の新しい版が出たとき)) |
 
 揃えるときにすること:
 
@@ -240,10 +294,50 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
   `Install-Herdr` は PATH を直さない
 - 入れ替えの途中で `winget install` が落ちると、herdr が入っていない状態で止まることがある
   (取得は先に確かめてあるので稀)。そのときは `Install-Herdr` を打ち直す (`setup --update` でも入る)
-- 版を変えるときは、`-Version` の既定値を変えて commit し、`setup --update` で配る (差が ⚠ で出る)。
-  そのあと `Install-Herdr` か `--apply` で揃える。新しい preview が出たかは `-Check` の ※ の行で分かる
+- 版を変える・新しい版を見送るときは、次の「herdr の新しい版が出たとき」の手順で。新しい preview が出たかは、
+  `winget-versions` の notice か、`-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
   Windows に UAC が出る
+
+### herdr の新しい版が出たとき
+
+固定した版より新しい preview が GitHub に出て 30 日たつと、GitHub Actions の `winget-versions` の
+`Windows の herdr` の job が落ちて知らせる ([TKT-156](https://app.notion.com/p/herdr-Google-windows-openssh-1-3fa79149a66f81ee8d2bd07a0769cab0))。
+猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+- 出た日は、GitHub の preview の build の release (prerelease) から取る。winget の版
+  (`0.9.2-preview.2026-09-29-8e78f929d8f0`) の `-preview.` の後ろと、tag (`preview-2026-09-29-8e78f929d8f0`) の
+  `preview-` の後ろで突き合わせる。版の中の日付はビルドの日なので使わない
+- preview は週に何度か出るので、固定した版より新しい preview が 1 つ出た日から 30 日の猶予が始まり
+  (後から出た preview では数え直さない)、ほぼ毎月上げることになる。見送っても、その次に出た preview の日から数える
+- GitHub と比べるのは preview だけ。安定版 (`v0.9.5` など) にも Windows の zip が付くが、winget には安定版の
+  パッケージが無い (2026-10 の時点)。安定版のパッケージができたかは、この job では見ていない
+  (`winget search herdr` で分かる。できたら、preview から移るかを決める)
+- winget の最新より後に出た preview が 30 日たっても winget に無いと落ちる。preview が別の ID へ移ったか、winget に
+  載らなくなったかもしれないので、`winget search herdr` で確かめる。winget の bot は preview をたまに飛ばすが、
+  後の preview が載れば落ちない。前か後かは出た時刻で決める (同じ日の build を hash の並びで比べない)
+- GitHub の直近 100 件の release に preview が 1 つも無いと、猶予を置かずに落ちる (preview の出し方が変わったか、
+  止まった)
+
+上げるとき:
+
+1. 落ちた実行の summary で、新しい版と release notes の URL を見る (猶予の中に上げるなら、notice に出た版)
+2. release notes の「View changes」(前の安定版からの差分) で、設定のキー・PATH・portable の置き場所・
+   `herdr update` に触る変更が無いかを見る
+3. `herdr/Install-Herdr.ps1` の `-Version` の既定値と、「herdr を入れる (winget)」の「今は」を新しい版にし、
+   `Install-Herdr.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
+4. merge したら、各マシンで `setup --update` を流す (差が ⚠ で出る)。herdr の外の PowerShell
+   (Windows Terminal など) で `hsvstop` を打ち、`herdr --remote` の窓も閉じてから、`Install-Herdr` か
+   `bootstrap-windows-herdr.sh --apply` で揃える
+5. 揃えた後の `-Check` が「揃っている」になり、herdr を起動して設定が読める (キーが効く) ことを確かめる
+
+見送るとき (2 や 5 で合わないと分かったとき):
+
+- `herdr/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版は winget の版の形
+  (`<semver>-preview.<日付>-<hash>`) で書く。winget に無い preview (job が `<日付>-<hash>` だけを出したもの) は、
+  `<日付>-<hash>` だけを書く
+- 5 で分かったなら、`-Version` の既定値も前の版に戻し、`Install-Herdr` で揃え直す (下げるのもできる)
+- `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
 ### Install-Herdr.ps1 を書くときの注意
 
@@ -271,7 +365,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 | `Install-OpenSSH` (PowerShell) | 揃える。直すことがあるときだけ UAC が 1 回出る |
 | `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る。`-Check` を流し、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
-| `nix/scripts/check-windows-openssh-version.sh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `windows-openssh` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
+| `nix/scripts/check-winget-version.sh openssh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
 
 揃えるときにすること:
 
@@ -293,41 +387,20 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 ### OpenSSH の新しい版が出たとき
 
-固定した版より新しい版が GitHub に出て 30 日たつと、GitHub Actions の `windows-openssh`
-([`.github/workflows/windows-openssh.yml`](../.github/workflows/windows-openssh.yml)) が落ちて知らせる
+固定した版より新しい版が GitHub に出て 30 日たつと、GitHub Actions の `winget-versions` の
+`Windows の OpenSSH` の job が落ちて知らせる
 ([TKT-110](https://app.notion.com/p/Windows-OpenSSH-Win32-OpenSSH-3f179149a66f81eaa691e12ef3e0b86c))。
-週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で走り、落ちた定期実行の通知は
-`nix.yml` の closure-scan と同じく GitHub から届く。
+猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
 
-- 確かめるのは `nix/scripts/check-windows-openssh-version.sh`。`Install-OpenSSH.ps1` から固定した版と
-  パッケージ ID (`$packageId`) を読み、winget-pkgs (`manifests/m/Microsoft/OpenSSH/Preview/<版>/`) と
-  GitHub の release を GitHub API で読むので、Windows は要らない。手元で打つなら gh のログインが要る
-- 新しい版は、GitHub に出てから 30 日 (猶予) は落とさずに待つ。待つ間は、実行の画面に notice
-  (版・出た日・あと何日で知らせるか) が出る。summary にも ※ の行で出る
-  - 追いついていない版がいくつかあるときは、いちばん早く出た版の日から数える。遅れ始めてから 30 日で知らせ、
-    新しい版が続けて出ても先送りしない
-  - 見送った版は数えない。猶予の中に上げるか見送るかを決めておけば、落ちずに済む
-  - 30 日は script の先頭の `grace_days` の 1 か所で決める
-- 猶予がたって落ちる (exit 1) のは:
-  - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 下の「上げるとき」か「見送るとき」。
-    その版に合う GitHub の release が無く、出た日が分からないときは、待たずに落ちる
-  - GitHub に出た版が winget のこのパッケージに無い (パッケージ ID が移ると、古い ID には新しい版が来ない。
-    2024-10 に Preview ができてから、Beta には新しい版が来なかった) → 下の「パッケージ ID を確かめる」
-- 猶予を置かずに落ちる (exit 1) のは、新しい版の知らせではなく、壊れていることの知らせ:
-  - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
-  - パッケージが winget に無い (`Microsoft.OpenSSH.Beta` は 2025-04-09 に全部の版が外された)
-    → 下の「パッケージ ID を確かめる」
-  - 版の形でないディレクトリがある・GitHub の最新 release に `OpenSSH-Win64-v<版>.msi` が無い
-    (版や名前の付け方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: `winget search OpenSSH` で今のパッケージ ID を確かめる。移るなら
-  `git grep Microsoft.OpenSSH.Preview` で出る所 (`Install-OpenSSH.ps1` の `$packageId` と状態の表の見出し・
-  `bootstrap-windows-openssh.sh` の見分け・テスト) と固定した版を直す
-- 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・`Install-OpenSSH.ps1` から版か ID が読めない・
-  見送りの一覧の書き損じ。GitHub の release の一覧だけが取れないときも、新しい版が猶予の中かを決められないので
-  exit 2 になる。summary の `!!` の行を見て、一時的な失敗なら流し直し、書き損じなら直す
-- GitHub の release から winget に載るまでは、これまで 5 時間〜4 日だった
-- 猶予がたった新しい版がある間は、別の理由で `Install-OpenSSH.ps1` や script を直す PR も赤くなる
-  (merge は止まらない)
+- 出た日は、GitHub の release (prerelease を除く) から取る。tag の形は揃っていない
+  (`v9.8.3.0p2-Preview` / `10.0.0.0p2-Preview`) ので、winget の版とは `OpenSSH-Win64-v<版>.msi` の名前で突き合わせる。
+  GitHub の release から winget に載るまでは、これまで 5 時間〜4 日だった
+- GitHub に出た版が 30 日たっても winget に無いと落ちるのは、パッケージ ID の移動を捕まえるため
+  (2024-10 に Preview ができてから、Beta には新しい版が来なかった)。`winget search OpenSSH` で今のパッケージ ID を
+  確かめ、移るなら `git grep Microsoft.OpenSSH.Preview` で出る所 (`Install-OpenSSH.ps1` の `$packageId` と状態の表の
+  見出し・`bootstrap-windows-openssh.sh` の見分け・テスト) と固定した版を直す
+- GitHub の最新の release に `OpenSSH-Win64-v<版>.msi` が無いと、猶予を置かずに落ちる (名前の付け方が変わると、
+  版も出た日も引けない)
 
 上げるとき:
 
@@ -343,7 +416,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
    - `ssh-add.exe -l` (1Password の鍵が見える)
    - GitHub へつなぐ (`ssh.exe -T git@github.com`)
 4. `openssh/Install-OpenSSH.ps1` の `-Version` の既定値と、「OpenSSH」の冒頭の「今は」を新しい版にし、
-   `Install-OpenSSH.Tests.ps1` を流して PR を出す (`windows-openssh` が、書いた版が winget にあるかを確かめる)
+   `Install-OpenSSH.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
 5. merge したら、各マシンで `setup --update` を流す (差が ⚠ で出る)。Windows で動いている `ssh.exe`
    (herdr の remote など) を閉じてから、`Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` で揃える
    (UAC が 1 回出る)
@@ -353,9 +426,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 見送るとき (2・3 で合わないと分かったとき):
 
 - `openssh/skipped-versions.txt` に「版 理由」を 1 行足して commit する。その版では落ちなくなり、
-  もっと新しい版が出ると、その版が GitHub に出てから 30 日でまた落ちる。このファイルは manifest に無いので
-  Windows へは配らない
-- 固定した版以下になった行は消してよい (job が「消してよい」と出す)
+  もっと新しい版が出ると、その版が GitHub に出てから 30 日でまた落ちる。固定した版以下になった行は消してよい
 - `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
 ### Install-OpenSSH.ps1 を書くときの注意
@@ -573,6 +644,7 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
 | `Install-GoogleJapaneseInput` (PowerShell) | 揃える (入れる・上げる・pin を足す)。入れる・上げるときは UAC の確認が出る |
 | `nix/scripts/bootstrap-windows-google-ime-install.sh` (WSL) | `setup --update` でも毎回走る (order 95)。入っていなければ入れ (UAC の確認が出る)、差があれば ⚠ で囲んで知らせる (上げはしない) |
 | `nix/scripts/bootstrap-windows-google-ime-install.sh --apply` (WSL) | WSL から揃える。UAC の確認は Windows のデスクトップに出る |
+| `nix/scripts/check-winget-version.sh google-japanese-input` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#google-日本語入力の新しい版が出たとき)) |
 
 - 版は `GoogleIMEJaConverter.exe` の ProductVersion で読む。`C:\Program Files\` と `C:\Program Files (x86)\` の
   `Google\Google Japanese Input\` の両方を見る (版によって、入る先が違うため)
@@ -616,6 +688,26 @@ PowerToys の割り当ては、これとは別に、91 が Keyboard Manager の�
    ([pjp-google-ime](#pjp-google-ime))
 5. commit して `~/dotfiles/setup --update` を流し、`bootstrap-windows-google-ime-install.sh` が「揃っています」の 1 行
    (winget にもっと新しい版があれば ※ の補足も) で終わることを見る
+
+### Google 日本語入力の新しい版が出たとき
+
+固定した版より新しい版が winget に載って 30 日たつと、GitHub Actions の `winget-versions` の
+`Google 日本語入力` の job が落ちて知らせる ([TKT-156](https://app.notion.com/p/herdr-Google-windows-openssh-1-3fa79149a66f81ee8d2bd07a0769cab0))。
+猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+- GitHub の release が無いので、出た日は、その版のディレクトリを winget-pkgs に足した commit の日から取る
+  (manifest の `ReleaseDate` は版によって無い)。上流で出てから winget に載るまでは数日 (3.34.6260.0 は 3 日)
+- 落ちた実行の summary には、新しい版の manifest (winget-pkgs のディレクトリ) の URL が出る
+- 比べる相手が無いので、パッケージ ID が移って winget に新しい版が来なくなっても気付けない
+
+上げるとき: 上の「版を上げる」の 1〜5。commit を PR にすると、`winget-versions` が、書いた版が winget にあるかを確かめる
+
+見送るとき (3・4 で設定を読み書きできないと分かったとき):
+
+- `google-japanese-input/skipped-versions.txt` に「版 理由」を 1 行足し、`-Version` の既定値を前の版に戻して commit する
+- 3 で上げたこの PC は、`Install-GoogleJapaneseInput` が下げないので、`-Check` が「入っている版の方が新しい」と
+  ⚠ を出し続ける
+- `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
 ### Install-GoogleJapaneseInput.ps1 を書くときの注意
 

@@ -671,7 +671,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
-| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS は[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
@@ -1130,7 +1130,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドが WSL と Windows で同じか（CI の lint でも走る）
-./nix/scripts/check-windows-openssh-version.sh       # Windows の OpenSSH の固定した版が winget の最新か（CI の windows-openssh が週 1 回流す。gh のログインが要る）
+./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
@@ -1953,12 +1953,15 @@ Nix では置けない（[skill の host option](#claude-code-の-skill-を-host
     { "k": "url.https://github.com/.insteadOf", "v": "git@github.com:" },
     { "k": "url.https://github.com/.insteadOf", "v": "ssh://git@github.com/" },
     { "k": "credential.https://github.com.helper", "v": "!gh auth git-credential" }
-  ]
+  ],
+  "managedVars": ["CLAUDE_CODE_SHELL"],
+  "vars": { "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash" }
 }
 ```
 
 gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`managed` は option の値に
-よらず 4 つのまま。settings.json にはこう入る（true のとき）。
+よらず 4 つのまま。`managedVars` と `vars` は [Bash tool の shell](#claude-code-の-bash-tool-を-bash-で動かす)
+の分で、option によらない。settings.json にはこう入る（true のとき）。
 
 ```json
 "env": {
@@ -1972,7 +1975,8 @@ gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`ma
   "GIT_CONFIG_KEY_3": "url.https://github.com/.insteadOf",
   "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
   "GIT_CONFIG_KEY_4": "credential.https://github.com.helper",
-  "GIT_CONFIG_VALUE_4": "!gh auth git-credential"
+  "GIT_CONFIG_VALUE_4": "!gh auth git-credential",
+  "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash"
 }
 ```
 
@@ -1991,8 +1995,10 @@ Claude Code 自身も条件によって同じ仕組みで `credential.interactiv
 冪等で、`env` の他のキーは保持する。`managed`（と `gitConfig`）のキーを持つ組は
 いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
 3 組が消える。無関係な `GIT_CONFIG_*` の組は順序を保って残し、番号だけ 0 から振り直す
-（番号に穴があると git はその手前までしか読まない）。生成ファイルが無ければ（この形を
-置く世代へまだ switch していなければ）警告して飛ばす。
+（番号に穴があると git はその手前までしか読まない）。`managedVars`（と `vars`）の名前も
+いったん外してから `vars` を足すので、`vars` から外した名前は消える。生成ファイルが無ければ
+（この形を置く世代へまだ switch していなければ）警告して飛ばす。`managedVars` と `vars` が
+無ければ（`CLAUDE_CODE_SHELL` を足す前の世代）、`GIT_CONFIG_*` だけを書き、switch を促す警告を出す。
 
 **実行中のセッションにも入る**（このマシンでは再起動なしで反映された）。確認は
 `env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign`（`false`）と
@@ -2022,6 +2028,68 @@ GitHub へは HTTPS:
 | `pushInsteadOf`（push だけ読み替える） | fetch / pull は ssh.exe を通るまま |
 | 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない（あれば bootstrap が警告する） |
 | gh 未ログインなら HTTPS の組を書かない | 結果が option ではなくその時のログイン状態で決まる。警告だけにする |
+
+### Claude Code の Bash tool を bash で動かす
+
+Claude Code の Bash tool は、`settings.json` の `env` の `CLAUDE_CODE_SHELL` が指す shell で動く
+（TKT-192）。値は home-manager の profile の bash（`home.profileDirectory` の `bin/bash`。
+このマシンなら `/home/pollenjp/.nix-profile/bin/bash`）で、どのマシンでも入れる（host option は無い）。
+登録は[上の git の env](#claude-のセッションだけ-git-の設定を変える) と同じ `bootstrap-claude-env.sh` が行い、
+`~/dotfiles/setup --update` で入る。
+
+#### なぜ要るのか
+
+Claude Code（2.1.300 で本体のコードを読んで確かめた）は shell をこう選ぶ。
+
+1. `CLAUDE_CODE_SHELL` が bash か zsh を含み、実行できれば（できなければ `<値> --version` が 0 で返れば）それ
+2. `$SHELL` が bash か zsh を含めばそれ
+3. それ以外（ログインシェルの fish など）は zsh を先に探し（`which zsh`、次に `/bin`・`/usr/bin`・
+   `/usr/local/bin`・`/opt/homebrew/bin`）、無ければ bash
+
+ログインシェルが fish で `/usr/bin/zsh` もあるマシンでは、3. で Bash tool が zsh で動く。Claude が書く
+script やテストは bash なので、Bash tool で試した結果と本番が食い違う（glob が何にも合わないと zsh は
+`no matches found` で止まる、など）。そこで bash にそろえる。
+
+#### 効き方
+
+- `claude`・`claude-<名前>`（`settings.json` を symlink で共有する）・`c` の alias・herdr の `agent start` の
+  どれで起動しても、起動した shell によらず効く。`settings.json` の `env` は起動の早い段階で読まれ、shell を
+  選ぶより前に入る（`claude -p --settings` に同じ `env` を渡し、Bash tool の中で `BASH_VERSION` が出ることを確かめた）
+- Bash tool は最初に snapshot を作る。bash なら `bash -c -l` で `~/.bashrc` を source する（zsh なら `~/.zshrc`）。
+  home-manager の `.bashrc` は先頭で非対話なら return するので、alias（`cat=bat`・`grep=rg` など）と
+  `initExtra` の関数は Bash tool に入らない
+- shell は Claude Code の起動時に決まる。実行中のセッションは、起動し直すまで前の shell のままのことがある
+  （plugin の入れ替えで snapshot を作り直すときは選び直す）
+- 端末で `CLAUDE_CODE_SHELL=… claude` と渡しても、settings の `env` が後から上書きする（起動時の env に zsh、
+  `--settings` の `env` に bash を渡すと bash で動いた）。1 回だけ別の shell で動かすなら
+  `claude --settings '{"env":{"CLAUDE_CODE_SHELL":"/usr/bin/zsh"}}'`（`--settings` の `env` は `settings.json` より後に入る）
+
+確認は、起動し直した Claude に `echo "$BASH_VERSION"` を実行させる（bash なら版が出る。zsh なら空）。
+起動するときに `--debug` を付けると、ログに `Using shell override: <値>` と `Creating shell snapshot for bash` が出る。
+
+#### 値を profile の bash にする理由
+
+profile のパスは世代を切り替えても変わらず、置き場所とユーザー名は home-manager が決めるので、
+マシンが変わっても合う。bash は `programs.bash`（`home/modules/bash.nix`）が profile に入れる
+（`programs.bash.package` の既定は `bashInteractive`）。`programs.bash.enable` を false にするか
+`programs.bash.package` を null にすると指す先が無くなるので、評価で止める（assertion）。
+
+パスが実行できないとき（switch より前など）、Claude Code はログに出すだけで zsh を探し直すので、
+bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警告のまとめ)にも出す（env には書く）。
+
+| 値の案 | 却下理由 |
+| --- | --- |
+| `bash`（PATH で引く） | 起動したときの PATH 次第で `/usr/bin/bash`（5.2）や macOS の `/bin/bash`（3.2）になる。起動のたびに `bash --version` を 1 回起こす |
+| Nix store の bash（`${pkgs.bashInteractive}/bin/bash`） | flake.lock を上げるたびにパスが変わり、bootstrap より先に古い世代を GC すると消えて、黙って zsh に戻る |
+| `/bin/bash`・`/usr/bin/bash` | NixOS には無く、macOS は bash 3.2 |
+
+#### 置き場所で採らなかった案
+
+| 案 | 却下理由 |
+| --- | --- |
+| fish の設定や `home.sessionVariables` で export する | fish や login shell を通らない起動（IDE の拡張・デスクトップアプリ・hook や cron からの `claude -p`）に効かない。Claude 以外のプロセスにも漏れる |
+| `claude-<名前>` の wrapper で export する | 素の `claude`・`c` の alias・herdr の `agent start` に効かない |
+| 新しい状態ファイルと bootstrap を足す | `settings.json` の `env` を 2 つの script が書くことになり、setup の手順も 1 つ増える |
 
 ### Claude Code の skill を host ごとに止める
 
@@ -2429,7 +2497,7 @@ flake input にしない理由も claude-skills と同じ（[前述](#なぜ-fla
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -2503,7 +2571,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
@@ -2513,6 +2581,10 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 `check` と同じことを手元でするには `./nix/scripts/verify.sh` を使う。`lock-age`・`closure-scan`・`head-diff` は、
 表の script を手元で打てば同じ判定になる。
 
+Windows の winget で固定した版 (OpenSSH・herdr・Google 日本語入力) が winget の最新に追いついているかは、別の
+workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめる (`check-winget-version.sh`。
+[`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。
+
 ## 検証
 
 ```sh
@@ -2520,7 +2592,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ```
 
 `nix flake check` → sandbox ビルド → 配置ファイル一覧 → 使い捨て `$HOME` への activate →
-冪等性確認 → `~/dotfiles` 参照の残留チェック、までを一括で行う。実際の `$HOME` には触れない。
+冪等性確認 → `~/dotfiles` 参照の残留チェック、までを一括で行う。実際の `$HOME` にも、手元の user systemd にも
+触れない (activate へ渡す `XDG_RUNTIME_DIR` を使い捨ての `$HOME` の下へ向ける。CI の `check` と同じ)。
 
 個別に実行する場合:
 
@@ -2574,6 +2647,11 @@ repo の script を使うので、サンドボックスの外でも流せる（�
 - 「## 確かめること」の見出しと、その下の中身が無いテストは、CI の `lint` ジョブ（`check-test-headers.sh`）で
   落ちる。先頭のコメントは、1 行目（shebang の次）から空行を挟まずに続く `#`（`*.test.mjs` は `//`）の行で、
   unittest は module の docstring。手元では `./nix/scripts/check-test-headers.sh` で確かめる
+- 判定の `grep -q` はパイプの先に置かない。`outerr "${d}" | grep -q …` は、grep が合って先に抜けると前の `cat` が
+  SIGPIPE で終わり、pipefail で「合わない」に見える（前のコマンドが 2 回以上書くときだけ当たり、混んだ CI でたまに
+  落ちる。TKT-155）。読むファイルを `grep` に直に渡すか（既存のテストの `seen` / `called`）、`grep -q … <<<"$(…)"`
+  で渡す。パイプの先に置いたテストは、CI の `lint` ジョブ（`check-test-grep-q.sh`）で落ちる。手元では
+  `./nix/scripts/check-test-grep-q.sh` で確かめる（shfmt と jq が無ければ `nix/` の devShell に入り直す）
 - `nix/tests/` の直下にはテストだけを置く。読み方を知らない種類のファイルも `lint` で落ちる
   （テストが使うデータはディレクトリに入れる）
 - `nix/flake.nix` の `checks` に載せる（`nix/tests/<名前>.test.sh` は、ほかの道具が要らなければ `scriptTest` で足りる）
@@ -2624,7 +2702,7 @@ nix/
     ├── bootstrap-claude-plugins.sh  Claude Code の公式プラグインを導入する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude のセッションに渡す env (git の無署名・GitHub へは gh の HTTPS、Bash tool の shell) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
@@ -2646,5 +2724,6 @@ nix/
     ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
     ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
     ├── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
-    └── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
+    ├── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
+    └── check-test-grep-q.sh        テストの判定で grep -q をパイプの先に置いていないかを確かめる (CI の lint が呼ぶ)
 ```
