@@ -53,7 +53,8 @@ ADR 012 の `pjp-who-is-asking` は、1Password の承認ダイアログが出�
 ### A. journal の直近の記録を、いま動いている木より先に出す
 
 `pjp-who-is-asking` は、`journalctl -u dotfiles-exe-exec-trace` から直近の記録を読み、agent に届く
-`.exe` (記録の `agent` が true) の起動を古い順に出す。そのあとに、今までの「いま動いている木」を出す。
+`.exe` (記録の `agent` が true) と、それを引数で呼ぶ踏み台 (下の F) の起動を古い順に出す。
+そのあとに、今までの「いま動いている木」を出す。
 
 - 遡る長さは既定 180 秒。`--recent SEC` で変える。`--recent 0` なら journal を読まず、今までと同じ
   中身になる (見出しの行だけが増える)
@@ -85,11 +86,11 @@ ADR 012 の `pjp-who-is-asking` は、1Password の承認ダイアログが出�
 
 | 部分 | 中身 |
 | --- | --- |
-| 見出し | `== <exe 名>  Linux pid <pid>  起動 <HH:MM:SS.mmm> (<N> 秒前)  <状態>`。状態は「動いている (下の木にも出る)」か「終了済み」。他のディストロの記録は `Linux pid` の代わりに記録の `distro` をそのまま出し、状態は「他のディストロ: 祖先は comm だけ」 |
+| 見出し | `== <exe 名>  Linux pid <pid>  起動 <HH:MM:SS.mmm> (<N> 秒前)  <状態>`。状態は「動いている (下の木にも出る)」か「終了済み」。他のディストロの記録は `Linux pid` の代わりに記録の `distro` をそのまま出し、状態は「他のディストロ: 祖先は comm だけ」。踏み台 (F) の記録は末尾に `  (踏み台かもしれない .exe)` |
 | 木 | カーネルが exec の時点で集めた祖先 (`kernel_ancestry`) を、要求元に近い方からセッションの `/init` までたどり、根から順に出す。各節のラベルは、`/proc` で取れた祖先のコマンドライン (`ancestry`) を PID で引いて使い、無ければ comm を使う |
 | セッションの `/init` | コマンドラインが `/init` の最初の祖先 (WSL では comm が `Relay(<pid>)`)。コマンドラインが無ければ comm が `Relay(<数字>)` のもの。ラベルは `/init  (WSL のセッション)`。見つからなければ祖先を最後まで出す |
 | 末端 | 記録の PID と、`<exe 名> <argv[1:]>` (argv をシェルの引用でつなぐ。argv が無ければ exe 名だけ) |
-| 末端の注記 | `cwd <cwd>`、`env <K=V …>` (記録にあるものだけ)。セッションの `/init` の直下が末端なら「親は /init: 親が先に終了したか、wsl.exe や cmd.exe を踏み台にした要求 (pjp-exe-exec-trace --pretty で直前の .exe を見る)」 |
+| 末端の注記 | `cwd <cwd>`、`env <K=V …>` (記録にあるものだけ)。セッションの `/init` の直下が末端なら「親は /init: 親が先に終了したか、wsl.exe -e を踏み台にした要求 (踏み台の wsl.exe の記録が近くに並ぶ)」 |
 | 書式 | 今の `render()` (`[Linux  ]` と `└─`) をそのまま使う。記録の中身は記録される側が決められるので、制御文字は `safe()` で `\xNN` にする |
 
 - 2 件以上あれば、節の最後に「ダイアログの要求は、たいてい一番新しいもの (一番下)」を出す
@@ -128,13 +129,30 @@ ADR 012 の `pjp-who-is-asking` は、1Password の承認ダイアログが出�
 該当が無いときの行は `(none: いま動いている ssh.exe などは無い)` にする
 (「承認待ちの」を外す。承認待ちの要求元が既に終わっていることがあるため)。
 
+### F. 踏み台の記録も出す (こちらの判断)
+
+設計の文書を読んだ確認役の指摘を受けて、方針の承認のあとに足した。
+
+- `cmd.exe /c ssh.exe …` (Emacs の TRAMP がこの形) では、`ssh.exe` は Windows 側で起動されるので
+  Linux 側に現れず、記録は `cmd.exe` (`agent` が false) だけになる (ADR 012 の検証)。agent の記録だけを
+  出すと、この経路の要求は「記録された要求は無い」になる
+- そこで、agent に届かない `.exe` の記録のうち、引数 (`argv[1:]`) のどれかに agent に届く exe
+  (`ssh`・`ssh-add`・`scp`・`sftp`・`op-ssh-sign`・`op-ssh-sign-wsl`。`.exe` は有っても無くてもよい) が
+  コマンドとして出てくるものも出す。コマンドとして出てくるとは、前が引数の先頭・`/`・`\`・空白・引用符で、
+  後ろが引数の終わり・空白・引用符のこと (`sshd` や `ssh-config.txt` には当たらない)
+- 見出しの末尾に `  (踏み台かもしれない .exe)` を付ける。`wsl.exe -e …/ssh.exe` の記録もこれに当たるので、
+  セッションの `/init` で祖先が途切れた `ssh.exe` の記録の近くに、呼び出し元までの木を持つ `wsl.exe` の
+  記録が並ぶ
+- agent でない記録は多い (2026-10-17 04:32〜11:40 の 540 件のほとんどが `reg.exe` と `powershell.exe`) が、
+  この規則で選ばれたのは agent の 8 件だけで、踏み台の誤検出は無かった
+
 ### 流れ
 
 ```
 pjp-who-is-asking
   ├─ systemctl show … dotfiles-exe-exec-trace   (入っているか・動いているか)
   ├─ journalctl -u dotfiles-exe-exec-trace --since @… -o cat
-  │     └─ agent の記録を古い順に、kernel_ancestry と ancestry から木にして出す   ← 今回足す
+  │     └─ agent と踏み台の記録を古い順に、kernel_ancestry と ancestry から木にして出す   ← 今回足す
   └─ powershell.exe (Get-CimInstance) と /proc
         └─ いま動いている ssh.exe などを、Windows と Linux をまたいだ木で出す   ← 今まで
 ```
@@ -160,7 +178,8 @@ pjp-who-is-asking
 | 案内だけ足す (「`pjp-exe-exec-trace --pretty` を見る」) | 2 つのコマンドを行き来する。`--pretty` は祖先を 1 行に並べるので、木で見るより追いにくい |
 | 次の要求を待ち構える `--wait` / 常駐モード | ダイアログに気付いた時点の要求は、もう起動し終わっている。待ち構えるなら記録 (常駐のトレーサ) が既にある |
 | 1Password のログとダイアログを突き合わせる | ログには要求元の PID が無く、結末 (拒否・時間切れ) が時刻とともに残るだけ。ログの形式は 1Password の内部で、変わりうる |
-| 記録の踏み台 (`wsl.exe` / `cmd.exe`) もたどって対にする | 今回の要求 (直接の呼び出し) には要らない。祖先が `/init` で途切れた記録には案内を付けるにとどめる |
+| agent に届く `.exe` の記録だけを出す (最初の案) | `cmd.exe /c ssh.exe …` の要求が「記録された要求は無い」になる (2. F) |
+| 踏み台の記録と agent の記録を対にして 1 本の木にする | 踏み台の記録を並べれば呼び出し元までの木は出る。`cmd.exe` の先の `ssh.exe` は Linux 側の記録に無く、対にする相手が無い |
 | `pjp-exe-exec-trace` の `format_record` を import して使う | 別のパッケージ (bcc を持つ) に依存することになる。`pjp-who-is-asking` は `wsl.enable` だけのマシンにも入る |
 
 ## 5. 影響 (Consequences)
@@ -175,6 +194,7 @@ pjp-who-is-asking
 - 記録は「起動された」ことしか分からない。どの記録がいまのダイアログの要求かは、時刻から推すしかない
   (1Password は要求元の PID を外に出さない)。承認済みのセッションから黙って通った要求も記録に並ぶ
 - 記録を読むには `adm` か `systemd-journal` のグループが要る (`pollenjp@wsl` は `adm` に入っている)
+- 踏み台の見分けは引数の字面による。exe を別名で呼ぶ・コマンドを変数で組み立てる、といった呼び出しは拾わない
 - 記録の中身 (argv・cwd・env・祖先のコマンドライン) は記録される側が決められる。表示では制御文字を
   `\xNN` にする (ADR 012 と同じ)
 - unit の名前 `dotfiles-exe-exec-trace` を持つ場所が 3 つになる (`exe-exec-trace.nix`・`scripts/setup.sh`・

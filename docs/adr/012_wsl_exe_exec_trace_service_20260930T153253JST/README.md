@@ -37,6 +37,15 @@
 >   `--update` で起こされる
 > - 本文は決めた時点の記録として残し、「7. 移行・運用手順」だけを追従させた
 
+> **追記 (2026-10-17、[TKT-69](https://app.notion.com/p/pjp-who-is-asking-1Password-SSH-4cb73f40bc434dd7b4d76d9191b3b6cd))**
+>
+> - `pjp-who-is-asking` が、いま動いているプロセスの木の前に、`pjp-exe-exec-trace` の journal から
+>   直近 (既定 180 秒) の agent に届く `.exe` の起動も木で出すようにした。要求元がダイアログに気付く前に
+>   終わる (Claude Code の GitHub SSH の確かめは 3 秒で kill され、ダイアログは約 60 秒残る) と、
+>   「ダイアログが出ている間に打つ」だけでは何も出なかったため。決定と経緯は
+>   [ADR 020](../020_who_is_asking_recent_journal_20261017T110906JST/README.md)
+> - 本文は決めた時点の記録としてそのまま残した
+
 ---
 
 ## 1. 背景 (Context)

@@ -16,6 +16,11 @@ agent の応答を待って止まっているので、Linux 側には comm=ssh.e
 wsl.exe や cmd.exe を踏み台にした要求も、対を繰り返したどると元の呼び出し元まで届く。
 親が先に終了した要求は、Linux 側の祖先がセッションの /init で途切れる (env を手掛かりに出す)。
 経緯は docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
+
+ただし、ダイアログに気付いた時点で要求元が既に終わっていることがある (Claude Code の GitHub SSH の
+確かめは 3 秒で kill されるが、ダイアログは約 60 秒残る)。そのため、exe-exec-trace が journald に
+残した直近 (既定 180 秒) の記録からも木を出し、いま動いている木より先に出す。
+経緯は docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md。
 """
 
 import argparse
@@ -158,9 +163,10 @@ ALIVE_SKEW_MS = 3000  # 代理プロセスの起動時刻と記録の時刻の�
 SINCE_SLACK_S = 5  # journald の時刻と記録の時刻は数 ms ずれるので、journalctl には多めに遡らせる
 SESSION_LABEL = "/init  (WSL のセッション)"
 SESSION_COMM = re.compile(r"^Relay\(\d+\)$")  # WSL のセッションの /init の comm
-PARENT_IS_INIT = (
-    "親は /init: 親が先に終了したか、wsl.exe や cmd.exe を踏み台にした要求 (pjp-exe-exec-trace --pretty で直前の .exe を見る)"
-)
+PARENT_IS_INIT = "親は /init: 親が先に終了したか、wsl.exe -e を踏み台にした要求 (踏み台の wsl.exe の記録が近くに並ぶ)"
+# 踏み台かもしれない .exe の引数に、agent に届く exe がコマンドとして出てくるか (cmd.exe /c ssh.exe … や
+# wsl.exe -e …/ssh.exe …)。cmd.exe を踏み台にすると Linux 側に ssh.exe が現れず、記録は cmd.exe だけになる
+TRAMPOLINE_ARG = re.compile(r"(?:^|[\\/\s\"'])(?:ssh|ssh-add|scp|sftp|op-ssh-sign|op-ssh-sign-wsl)(?:\.exe)?(?=$|[\s\"'])", re.I)
 EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
 
 
@@ -172,8 +178,19 @@ def record_ms(rec):
         return None
 
 
+def is_trampoline(rec):
+    """agent に届かない .exe の記録のうち、引数 (argv[1:]) で agent に届く exe を呼んでいるもの"""
+    argv = rec.get("argv")
+    return (
+        rec.get("agent") is not True
+        and isinstance(argv, list)
+        and any(isinstance(a, str) and TRAMPOLINE_ARG.search(a) for a in argv[1:])
+    )
+
+
 def parse_records(lines, now_ms, window_ms):
-    """journalctl -o cat の行から、agent に届く .exe の記録のうち now_ms - window_ms 以降のものを古い順に返す。
+    """journalctl -o cat の行から、agent に届く .exe と、それを呼ぶ踏み台 (is_trampoline) の記録のうち、
+    now_ms - window_ms 以降のものを古い順に返す。
 
     記録でない行 (起動のメッセージなど)・形の欠けた記録・time の読めない記録は黙って飛ばす。
     """
@@ -185,10 +202,10 @@ def parse_records(lines, now_ms, window_ms):
             continue
         if not (
             isinstance(rec, dict)
-            and rec.get("agent") is True
             and isinstance(rec.get("exe"), str)
             and isinstance(rec.get("pid"), int)
             and isinstance(rec.get("kernel_ancestry"), list)
+            and (rec.get("agent") is True or is_trampoline(rec))
         ):
             continue
         t = record_ms(rec)
@@ -246,6 +263,55 @@ def stub_matches(rec, argv, start):
     t = record_ms(rec)
     same_exe = argv[1].rsplit("/", 1)[-1].lower() == exe_name(rec).lower()
     return same_exe and t is not None and abs(start - t) <= ALIVE_SKEW_MS
+
+
+NOT_INSTALLED = "(exe-exec-trace が入っていないので記録は読まない。入れるには dotfiles.wsl.exeExecTrace.enable を true にして setup --update)"
+NO_JOURNALCTL = "(journalctl が無いので記録は読まない)"
+NO_PERMISSION = "(他のユーザーの記録が見えない。adm か systemd-journal のグループに入ると読める)"
+# journalctl が「system の記録を読めていない」と知らせる文 (stderr)
+PERMISSION_HINTS = ("not seeing messages from other users", "insufficient permissions")
+
+
+def fmt_window(sec):
+    """遡る長さの見出し用の書き方。60 で割り切れれば分、でなければ秒"""
+    return f"{sec // 60} 分" if sec % 60 == 0 else f"{sec} 秒"
+
+
+def parse_unit_state(text):
+    """systemctl show --property=LoadState,ActiveState の出力から (LoadState, ActiveState)"""
+    kv = dict(line.split("=", 1) for line in text.splitlines() if "=" in line)
+    return kv.get("LoadState"), kv.get("ActiveState")
+
+
+def journalctl_message(returncode, stderr):
+    """journalctl の結果から、記録を読めなかったときに出す 1 行。読めたら None"""
+    if any(h in stderr for h in PERMISSION_HINTS):
+        return NO_PERMISSION
+    if returncode != 0:
+        first = next((s.strip() for s in stderr.splitlines() if s.strip()), "")
+        return f"(記録を読めなかった: {first or f'終了コード {returncode}'})"
+    return None
+
+
+def journal_body(recs, alive, recent_s):
+    """記録の節の中身 (節の見出しは除く)。記録ごとに見出しと木を出す。alive(rec) は要求元がまだ動いているか"""
+    if not recs:
+        return [f"(none: 直近 {fmt_window(recent_s)}に記録された要求は無い)", ""]
+    out = []
+    for rec in recs:
+        t = record_ms(rec)
+        if rec.get("distro") == "this":
+            where = f"Linux pid {rec['pid']}"
+            state = "動いている (下の木にも出る)" if alive(rec) else "終了済み"
+        else:
+            # 他のディストロの PID はここの /proc と名前空間が違うので、動いているかは見ない
+            where = f"{rec.get('distro')} pid {rec['pid']}"
+            state = "他のディストロ: 祖先は comm だけ"
+        mark = "  (踏み台かもしれない .exe)" if is_trampoline(rec) else ""
+        out += [safe(f"== {exe_name(rec)}  {where}  起動 {hhmmss(t)} ({ago(t)})  {state}{mark}"), *render(record_nodes(rec)), ""]
+    if len(recs) > 1:
+        out.append("ダイアログの要求は、たいてい一番新しいもの (一番下)")
+    return out
 
 
 # ------------------------------------------------------------------ Linux (/proc)
@@ -418,22 +484,106 @@ def windows_procs():
     return procs
 
 
+# ------------------------------------------------------------------ exe-exec-trace の記録 (systemctl / journalctl / /proc)
+
+
+def unit_state():
+    """exe-exec-trace の unit の (LoadState, ActiveState)。systemctl が無い・失敗したら (None, None)"""
+    try:
+        r = subprocess.run(
+            ["systemctl", "show", "--property=LoadState,ActiveState", UNIT],
+            capture_output=True, stdin=subprocess.DEVNULL, timeout=10, text=True, errors="replace",
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+    return parse_unit_state(r.stdout) if r.returncode == 0 else (None, None)
+
+
+def read_journal(since_s):
+    """exe-exec-trace の記録のうち since_s (epoch 秒) 以降の行と、読めなかったときに出す 1 行 (読めたら None)。
+
+    journalctl は system のもの (PATH) を使う。記録の形式が system の journald と揃っている方が確実なため。
+    -q は付けない (system の記録を読めないときの Hint を stderr で見る)。
+    """
+    try:
+        r = subprocess.run(
+            ["journalctl", "-u", UNIT, "--since", f"@{since_s}", "-o", "cat", "--no-pager"],
+            capture_output=True, stdin=subprocess.DEVNULL, timeout=20, text=True, errors="replace",
+        )
+    except FileNotFoundError:
+        return [], NO_JOURNALCTL
+    except subprocess.TimeoutExpired:
+        return [], "(記録を読めなかった: 20 秒で返らなかった)"
+    except OSError as e:
+        return [], f"(記録を読めなかった: {e})"
+    msg = journalctl_message(r.returncode, r.stderr)
+    return ([], msg) if msg else (r.stdout.splitlines(), None)
+
+
+def is_alive(rec, boot):
+    """記録の要求元 (interop の代理プロセス) が、まだ動いているか"""
+    if rec.get("distro") != "this":
+        return False
+    return stub_matches(rec, argv_of(rec["pid"]), start_ms(rec["pid"], boot))
+
+
+def journal_lines(recent_s, boot):
+    """記録の節の行 (見出しから、最後の空行まで)。unit の状態を見て、journal を読み、記録ごとに木を出す"""
+    out = [f"## 直近 {fmt_window(recent_s)}に起動された要求 (exe-exec-trace の記録、古い順)"]
+    _, active = state = unit_state()
+    if state[0] == "not-found":
+        return out + [NOT_INSTALLED, ""]
+    lines, msg = read_journal(int(NOW - recent_s - SINCE_SLACK_S))
+    if msg:
+        return out + [safe(msg), ""]
+    recs = parse_records(lines, int(NOW * 1000), recent_s * 1000)
+    out += journal_body(recs, lambda rec: is_alive(rec, boot), recent_s)
+    if active not in (None, "active"):
+        out.append(safe(f"(exe-exec-trace が動いていない (ActiveState={active})。止まっている間の要求は記録に無い)"))
+    if out[-1] != "":
+        out.append("")
+    return out
+
+
 # ------------------------------------------------------------------ main
+
+
+def non_negative_int(s):
+    """--recent の値 (0 以上の整数)"""
+    try:
+        n = int(s)
+    except ValueError:
+        n = -1
+    if n < 0:
+        raise argparse.ArgumentTypeError(f"0 以上の整数で渡す: {s!r}")
+    return n
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
         prog="pjp-who-is-asking",
-        description="1Password の承認ダイアログが出ている間に、要求元を Windows と Linux をまたいだ木で出す",
+        description="1Password の承認ダイアログが出たときに、直近の要求 (exe-exec-trace の記録) と、"
+        "いま動いている要求元を Windows と Linux をまたいだ木で出す",
     )
     ap.add_argument("--no-windows", action="store_true", help="Windows 側 (powershell.exe で 1〜2 秒かかる) を省き、Linux 側の木だけ出す")
+    ap.add_argument(
+        "--recent",
+        type=non_negative_int,
+        default=RECENT_DEFAULT,
+        metavar="SEC",
+        help=f"exe-exec-trace の記録を何秒遡って出すか (既定 {RECENT_DEFAULT}。0 なら記録を読まない)",
+    )
     opts = ap.parse_args(argv)
 
     boot = boot_time()
+    if opts.recent > 0:
+        # 記録の節は Windows 側 (powershell.exe で 1〜2 秒) を待たずに出せるので、先に出す
+        print("\n".join(journal_lines(opts.recent, boot)), flush=True)
     stubs = linux_stubs(boot)
     linux_nodes = make_linux_nodes(boot)
     lines = []
     if opts.no_windows:
+        lines.append("## いま動いている .exe (Linux 側だけ)")
         if not stubs:
             lines.append("(none: 動いている .exe は無い)")
         for lp in sorted(stubs, key=lambda x: stubs[x]["t"] or 0):
@@ -442,11 +592,13 @@ def main(argv=None):
         print("\n".join(lines))
         return 0
 
+    # 見出しは powershell.exe を待つ前に出す (取れなかったときの知らせが見出しの下に来るように)
+    print("## いま動いている ssh.exe など (Windows と Linux の木)", flush=True)
     procs = windows_procs()
     pair = pair_up(procs, stubs)
     targets = sorted((p for p in procs.values() if AGENT.match(p["name"])), key=lambda p: p["t"])
     if not targets:
-        lines += ["(none: 承認待ちの ssh.exe などは無い)", ""]
+        lines += ["(none: いま動いている ssh.exe などは無い)", ""]
     shown = set()
     for t in targets:
         nodes = tree_nodes(t, procs, pair, linux_nodes)

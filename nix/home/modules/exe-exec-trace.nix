@@ -4,6 +4,7 @@
 # # 1. pjp-who-is-asking
 #
 # dotfiles.wsl.enable のマシンの PATH に置く。root は要らないので option は設けない。
+# 2. の記録が入っていれば、その journal から直近の要求も出す (ADR 020)。
 #
 # # 2. pjp-exe-exec-trace (dotfiles.wsl.exeExecTrace.enable)
 #
@@ -19,7 +20,7 @@
 # (ずれが残れば setup の最後に知らせる)。
 #
 # 生成する場所 (~/.local/share/dotfiles/systemd/) と unit の名前は scripts/setup.sh と
-# 揃えている。変えるなら両方。
+# 揃えている。変えるなら両方。unit の名前は pjp-who-is-asking (who_is_asking.py の UNIT) も持つ。
 {
   config,
   lib,
