@@ -114,6 +114,12 @@ envf() { printf '%s' "${work}/$1/home/.config/pjp/env"; }
 rc() { cat "${work}/$1/rc"; }
 outerr() { cat "${work}/$1/out" "${work}/$1/err"; }
 
+# 失敗の表示用に、ファイルの頭を od -c で出す (パイプの先に head を置かない)。$1: ファイル、$2: 行数
+odump() {
+  od -c "$1" >"$1.od" 2>&1
+  head -n "$2" "$1.od"
+}
+
 # 欄の中の 1 節 (見出しの行から、次の見出しか ##### の行の手前まで) を出す。$1: ファイル、$2: 見出しの行
 section() {
   awk -v h="$2" '
@@ -165,7 +171,8 @@ fi
 if ! grep -q $'\r' "${f}" && grep -qxF '# CRLF_LAST=xxxxxx' "${f}"; then
   ok "CRLF の断片でも欄に CR は混ざらず、末尾に改行の無い最後の行も落ちない"
 else
-  ng "CRLF の断片" "$(section "${f}" '# ---- skill: crlf ----' | od -c | head -n 20)"
+  section "${f}" '# ---- skill: crlf ----' >"${work}/t1/crlf_section"
+  ng "CRLF の断片" "$(odump "${work}/t1/crlf_section" 20)"
 fi
 
 # T5. 印に化ける断片は入れない
@@ -287,7 +294,7 @@ if [[ $(rc t7) == 0 ]] \
   && [[ $(file_mode "$(dirname "${f}")/env.bak") == 600 ]]; then
   ok "古いテンプレートの 10 行は欄に替わり、11 行目からはバイトで同じ。前の版は env.bak (600)"
 else
-  ng "古いテンプレート" "rc=$(rc t7)"$'\n'"$(outerr t7)"$'\n'"$(od -c "${work}/t7/got_below" | head -n 10)"
+  ng "古いテンプレート" "rc=$(rc t7)"$'\n'"$(outerr t7)"$'\n'"$(odump "${work}/t7/got_below" 10)"
 fi
 
 # T8. テンプレートが 1 文字違えば消さない
@@ -319,7 +326,7 @@ if [[ $(rc t9) == 0 ]] \
   && grep -qF '書き直しました' "${work}/t9/out" && ! grep -qF '移しました' "${work}/t9/err"; then
   ok "印が 1 組なら印の間だけが替わり、印より上と下はバイトで同じ (移す行が無ければ warn も無い)"
 else
-  ng "印が 1 組" "rc=$(rc t9)"$'\n'"$(outerr t9)"$'\n'"$(od -c "${work}/t9/got_below" | head -n 10)"
+  ng "印が 1 組" "rc=$(rc t9)"$'\n'"$(outerr t9)"$'\n'"$(odump "${work}/t9/got_below" 10)"
 fi
 
 # T18 (t9). ローダが読むのは欄の外だけ
@@ -367,7 +374,7 @@ if [[ $(rc t10) == 0 ]] && same "${work}/t10/got_below" "${work}/t10/want_below"
   && grep -qF 'FOO_API_KEY' "${work}/t10/warnings"; then
   ok "印の間の # でない行は、元の順のまま終わりの印のすぐ下へ移り、変数名を warn で知らせる"
 else
-  ng "欄の中の値" "rc=$(rc t10)"$'\n'"$(outerr t10)"$'\n'"$(od -c "${work}/t10/got_below" | head -n 10)"
+  ng "欄の中の値" "rc=$(rc t10)"$'\n'"$(outerr t10)"$'\n'"$(odump "${work}/t10/got_below" 10)"
 fi
 
 # T18 (t10)
@@ -390,7 +397,8 @@ if [[ $(rc t12a) == 0 && $(head -n 1 "${f}") == "${begin_text}" ]] \
   && same "${work}/t12a/got_below" "${work}/t12a/want_below"; then
   ok "頭に BOM があっても古いテンプレートとして見分け、欄の頭に BOM は付かない"
 else
-  ng "BOM と古いテンプレート" "rc=$(rc t12a)"$'\n'"$(outerr t12a)"$'\n'"$(head -n 1 "${f}" | od -c | head -n 3)"
+  head -n 1 "${f}" >"${work}/t12a/first_line"
+  ng "BOM と古いテンプレート" "rc=$(rc t12a)"$'\n'"$(outerr t12a)"$'\n'"$(odump "${work}/t12a/first_line" 3)"
 fi
 new_case t12b
 put t12b "${bom}${begin_text}"$'\n''# old'$'\n'"${end_text}"$'\n''V=1'$'\n'
