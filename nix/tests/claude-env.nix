@@ -1,4 +1,5 @@
-# home/options.nix の dotfiles.claude.gitViaGh.enable から作られるものを、評価時に確かめる。
+# home/options.nix の dotfiles.claude.gitViaGh.enable から作られるものと、Claude Code の Bash tool の
+# shell (CLAUDE_CODE_SHELL) を、評価時に確かめる。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
@@ -8,8 +9,11 @@
 #
 #   - 既定は true
 #   - ~/.local/state/dotfiles/claude-env.json の中身 (true / false それぞれ)。
-#     nix/scripts/bootstrap-claude-env.sh がこれを ~/.claude/settings.json の env へ写す
+#     nix/scripts/bootstrap-claude-env.sh がこれを ~/.claude/settings.json の env へ写す。
+#     CLAUDE_CODE_SHELL は option によらず profile の bash (<home>/.nix-profile/bin/bash)
 #   - home.packages に gh が入る (true の前提)
+#   - home.packages に bash が入る (CLAUDE_CODE_SHELL が指す profile の bin/bash の元)。
+#     programs.bash.enable を false にしても、programs.bash.package を null にしても評価で止まる
 {
   lib,
   pkgs,
@@ -18,12 +22,14 @@
 }:
 
 let
-  configWith =
-    claude:
-    (mkHome {
+  # modules は mkHome にそのまま渡す (option 以外の設定を足して確かめるとき)
+  homeWith =
+    claude: modules:
+    mkHome {
       username = "tester";
-      inherit system claude;
-    }).config;
+      inherit system claude modules;
+    };
+  configWith = claude: (homeWith claude [ ]).config;
 
   textOf = cfg: cfg.home.file.".local/state/dotfiles/claude-env.json".text;
 
@@ -58,8 +64,28 @@ let
     }
   ];
 
+  # Bash tool の shell。mkHome の既定の home (/home/<名前>、darwin は /Users/<名前>) の profile の bash
+  managedVars = [ "CLAUDE_CODE_SHELL" ];
+  vars = {
+    CLAUDE_CODE_SHELL =
+      if lib.hasSuffix "darwin" system then
+        "/Users/tester/.nix-profile/bin/bash"
+      else
+        "/home/tester/.nix-profile/bin/bash";
+  };
+
   byDefault = configWith { };
   disabled = configWith { gitViaGh.enable = false; };
+
+  # programs.bash.package を null にした設定と、programs.bash を止めた設定 (bash.nix が enable = true と
+  # 書いているので mkForce で上書きする)。どちらも profile に bash が入らない。
+  # 評価 (.config を読む) で止まれば success が false になる
+  noBashPackage = builtins.tryEval (
+    (homeWith { } [ { programs.bash.package = null; } ]).config.home.username
+  );
+  noBashEnable = builtins.tryEval (
+    (homeWith { } [ { programs.bash.enable = lib.mkForce false; } ]).config.home.username
+  );
 
   cases = [
     {
@@ -67,18 +93,18 @@ let
       ok = byDefault.dotfiles.claude.gitViaGh.enable;
     }
     {
-      name = "既定 (true) の状態ファイルは無署名の 2 組と HTTPS の 3 組で、管理キーは 4 つ";
+      name = "既定 (true) の状態ファイルは無署名の 2 組と HTTPS の 3 組で、管理キーは 4 つ。CLAUDE_CODE_SHELL は profile の bash";
       ok =
         builtins.fromJSON (textOf byDefault) == {
-          inherit managed;
+          inherit managed managedVars vars;
           gitConfig = base ++ gh;
         };
     }
     {
-      name = "false の状態ファイルは無署名の 2 組だけで、管理キーは 4 つのまま";
+      name = "false の状態ファイルは無署名の 2 組だけで、管理キーは 4 つのまま。CLAUDE_CODE_SHELL は変わらない";
       ok =
         builtins.fromJSON (textOf disabled) == {
-          inherit managed;
+          inherit managed managedVars vars;
           gitConfig = base;
         };
     }
@@ -89,6 +115,18 @@ let
     {
       name = "home.packages に gh が入る";
       ok = builtins.any (p: lib.getName p == "gh") byDefault.home.packages;
+    }
+    {
+      name = "home.packages に bash (bash-interactive) が入る";
+      ok = builtins.any (p: lib.getName p == "bash-interactive") byDefault.home.packages;
+    }
+    {
+      name = "programs.bash.package を null にすると評価で止まる";
+      ok = !noBashPackage.success;
+    }
+    {
+      name = "programs.bash.enable を false にすると評価で止まる";
+      ok = !noBashEnable.success;
     }
   ];
 

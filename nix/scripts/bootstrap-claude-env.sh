@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Claude Code のセッションにだけ渡す git の設定を ~/.claude/settings.json の env へ登録する。
+# Claude Code のセッションにだけ渡す env (git の設定と、Bash tool の shell) を ~/.claude/settings.json へ登録する。
 # 冪等。`setup.sh --update` でも毎回走る。
 #
 # ## 何のために
@@ -15,6 +15,12 @@
 #    ssh は WSL の ssh.exe (1Password の agent) を通るので、interop が外れると
 #    Exec format error で落ち、通っても承認ダイアログで止まる。gh は HTTPS の API なので
 #    どちらにも依らない。false のマシンは今までどおり ssh を通る。
+# 3. Bash tool を bash で動かす (CLAUDE_CODE_SHELL。いつも。TKT-192)。
+#    指定が無いと Claude Code は、$SHELL が bash / zsh でなければ (ログインシェルの fish)
+#    zsh を先に探して使う。Claude が書く script やテストは bash なので、Bash tool もそろえる。
+#    値は home-manager の profile の bash (nix/home/modules/claude.nix の claudeShell)。
+#    settings.json の env は claude・claude-<名前>・herdr の agent start のどれで起動しても
+#    読まれ、起動した shell によらない (fish で export する案はそこが弱い)。
 #
 # ## なぜ env なのか
 #
@@ -56,19 +62,24 @@
 #
 # home-manager が置く ~/.local/state/dotfiles/claude-env.json (nix/home/modules/claude.nix):
 #
-#   {"managed": [<キー>, ...], "gitConfig": [{"k": <キー>, "v": <値>}, ...]}
+#   {"managed": [<キー>, ...], "gitConfig": [{"k": <キー>, "v": <値>}, ...],
+#    "managedVars": [<名前>, ...], "vars": {<名前>: <値>, ...}}
 #
 # 無ければ、この形を置く世代へまだ switch していないということなので、
 # 警告して exit 0 する (setup.sh は手順が 1 つ失敗すると残りを走らせないため)。
+# managedVars と vars が無い (CLAUDE_CODE_SHELL を足す前の世代) なら、GIT_CONFIG_* だけを
+# 書き、env の他の名前には触れずに、switch を促す警告を出す。
 #
 # ## 何をするか
 #
-# ~/.claude/settings.json の .env の GIT_CONFIG_* を書き直す。他のキーは保持する。
+# ~/.claude/settings.json の .env の GIT_CONFIG_* と managedVars の名前を書き直す。
+# 他のキーは保持する。
 #
 #   - managed (と gitConfig) のキーを持つ既存の組は外す。gitViaGh.enable を false に
 #     したとき HTTPS の組が消えるのはこのため
 #   - それ以外の組は順序を保って残し、その後ろに gitConfig を足す
 #   - 番号は 0 から振り直す (番号に穴があると git はその手前までしか読まない)
+#   - managedVars (と vars) の名前はいったん外し、vars を足す。vars から外した名前は消える
 #
 # 冪等 (既に同じなら何もしない)。gitConfig が gh を credential helper に使うなら、
 # 次のときに警告する。env は書く (option が正で、止めると setup の残りが走らないため)。
@@ -77,6 +88,9 @@
 #   - git の設定ファイルに別の credential helper がある (gh より先に呼ばれ、
 #     gh の token がそちらにも保存される)
 #
+# CLAUDE_CODE_SHELL のパスが実行できないときも警告する (同じく env は書く)。Claude Code は
+# ログに出すだけで、黙って zsh / bash を探し直すため。
+#
 # ## 注意
 #
 #   - GitHub の branch protection "Require signed commits" が有効な repo では、
@@ -84,6 +98,8 @@
 #   - Claude が rebase / amend した既存 commit の署名も落ちる
 #   - gh の token に workflow scope が無いと、.github/workflows/ を変える push を
 #     GitHub が拒否する (gh auth refresh -h github.com -s workflow で足す)
+#   - Bash tool の shell は Claude Code の起動時に決まる。実行中のセッションは、
+#     起動し直すまで前の shell のままのことがある
 #
 # ## なぜ Nix でやらないのか
 #
@@ -127,13 +143,34 @@ if [[ ! -r ${generated} ]]; then
   exit 0
 fi
 
+# managedVars と vars は無くてよい (古い世代。下で警告する)。あれば名前の配列と、名前 → 文字列。
 if ! jq -e '
   (.managed | type == "array") and all(.managed[]; type == "string")
   and (.gitConfig | type == "array")
   and all(.gitConfig[]; (.k | type == "string") and (.v | type == "string"))
+  and ((.managedVars // []) | type == "array") and all((.managedVars // [])[]; type == "string")
+  and ((.vars // {}) | type == "object") and all((.vars // {})[]; type == "string")
 ' "${generated}" >/dev/null 2>&1; then
-  echo "${generated} の形が違います ({\"managed\": [...], \"gitConfig\": [{\"k\": ..., \"v\": ...}, ...]})。" >&2
+  echo "${generated} の形が違います ({\"managed\": [...], \"gitConfig\": [{\"k\": ..., \"v\": ...}, ...]," \
+    "\"managedVars\": [...], \"vars\": {...}})。" >&2
   exit 1
+fi
+
+# CLAUDE_CODE_SHELL を足す前の世代が置いた生成ファイルには managedVars と vars が無い。
+# 下の書き直しは無いものを空として扱うので、GIT_CONFIG_* だけを書き、env の他の名前には触れない。
+if ! jq -e 'has("managedVars") and has("vars")' "${generated}" >/dev/null; then
+  warn "生成ファイルに Bash tool の shell (CLAUDE_CODE_SHELL) がありません: ${generated}" \
+    "それを置く世代へ先に home-manager switch してください (~/dotfiles/setup --update なら続けて流れます)。" \
+    "git の設定 (GIT_CONFIG_*) だけを登録し、CLAUDE_CODE_SHELL は飛ばします。"
+fi
+
+# Claude Code は CLAUDE_CODE_SHELL のパスが実行できないと、ログに出すだけで zsh / bash を探し直す。
+# env には書く (値は option の側が決める) が、気付けるように警告する。登録済みでも毎回見る。
+shell=$(jq -r '.vars.CLAUDE_CODE_SHELL // empty' "${generated}")
+if [[ -n ${shell} ]] && ! [[ -f ${shell} && -x ${shell} ]]; then
+  warn "Bash tool の shell (CLAUDE_CODE_SHELL) の ${shell} が実行できません。" \
+    "Claude Code はこれを使わず、zsh / bash を探し直します (ログインシェルが fish なら zsh が先)。" \
+    "home-manager switch が済んでいるか (profile に bash があるか) を確かめてください。"
 fi
 
 # gh を credential helper に使うのに gh が無い・未ログインなら、push で資格情報を取れない。
@@ -181,14 +218,16 @@ tmp=$(mktemp "${settings}.XXXXXX")
 # jq が落ちたときに settings.json の隣へ中間ファイルを残さない。
 trap 'rm -f "${tmp}"' EXIT
 
-# .env の GIT_CONFIG_* を生成ファイルの gitConfig で置き換える。
+# .env の GIT_CONFIG_* を生成ファイルの gitConfig で、managedVars の名前を vars で置き換える。
 #   - managed と gitConfig のキーを持つ既存の組は落とす (値が違っても gitConfig が勝つ)
 #   - 無関係な組は順序を保って残す
 #   - 残したものと gitConfig を連結し、0 から番号を振り直す
 #     (番号に穴があると git はその手前までしか読まないため、通し番号にする)
+#   - managedVars と vars の名前は落としてから vars を足す (vars に無い名前は消える)
 jq --slurpfile gen "${generated}" '
   $gen[0] as $g
   | ($g.managed + [$g.gitConfig[].k]) as $ours
+  | (($g.managedVars // []) + (($g.vars // {}) | keys)) as $ourVars
   | (.env // {}) as $env
   | (($env.GIT_CONFIG_COUNT // "0") | tonumber) as $n
   | [ range(0; $n)
@@ -198,11 +237,14 @@ jq --slurpfile gen "${generated}" '
   | [ $existing[] | .k as $k | select(($ours | index($k)) == null) ] as $kept
   | ($kept + $g.gitConfig) as $all
   | .env = (
-      ($env | with_entries(select(.key | test("^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$") | not)))
+      ($env | with_entries(select(
+        (.key | test("^GIT_CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+)$") | not)
+        and (.key as $k | $ourVars | index($k)) == null)))
       + { GIT_CONFIG_COUNT: ($all | length | tostring) }
       + ([ $all | to_entries[]
            | { ("GIT_CONFIG_KEY_" + (.key | tostring)): .value.k,
                ("GIT_CONFIG_VALUE_" + (.key | tostring)): .value.v } ] | add // {})
+      + ($g.vars // {})
     )
 ' "${settings}" >"${tmp}"
 
@@ -218,13 +260,20 @@ if [[ ${uses_gh} -eq 1 ]]; then
 else
   echo "登録しました: commit / tag を無署名にする env (GitHub へは ssh のまま)"
 fi
+if [[ -n ${shell} ]]; then
+  echo "              Bash tool の shell を ${shell} にする env (CLAUDE_CODE_SHELL)"
+fi
 echo
 echo "--- ${settings} の env ---"
 jq '.env' "${settings}"
 echo
 echo "確認:  Claude に git config --get commit.gpgsign (false) と"
 echo "       git remote get-url --push origin (gitViaGh なら https) を実行させる"
-echo "実行中のセッションにも入る。入らなければ Claude Code を再起動する。"
+echo "git の設定は実行中のセッションにも入る。入らなければ Claude Code を再起動する。"
+if [[ -n ${shell} ]]; then
+  echo "確認:  Claude に echo \"\$BASH_VERSION\" を実行させる (bash なら版が出る。zsh なら空)"
+  echo "Bash tool の shell は起動時に決まる。実行中のセッションは Claude Code を起動し直してから確かめる。"
+fi
 echo
 echo '注意: "Require signed commits" が有効な repo では、Claude の commit は push で弾かれます。'
 if [[ ${uses_gh} -eq 1 ]]; then
