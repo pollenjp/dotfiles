@@ -52,12 +52,16 @@ skills_dir="${HOME}/.claude/skills"
 
 env_file="${XDG_CONFIG_HOME:-${HOME}/.config}/pjp/env"
 env_dir=$(dirname "${env_file}")
+# 前の版を 1 世代だけ残す (欄の中に手で書いたコメントの逃げ場。秘密の写しを増やさないため 1 つだけ)
+bak_file="${env_dir}/env.bak"
 
 # 印として見るのは行の頭だけ。後ろの文言は変えてよい (ADR 021 の A)
 begin_prefix='# >>> dotfiles'
 end_prefix='# <<< dotfiles'
 begin_line="${begin_prefix} が書く欄 (setup --update のたびに書き直す。ここには書かない) >>>"
 end_line="${end_prefix} が書く欄ここまで。この行より下に生の KEY=VALUE を書く (setup はここから下を書き換えない) <<<"
+# Windows のエディタが頭に付ける UTF-8 の BOM。印と古いテンプレートを見分けるときだけ外す
+bom=$'\xef\xbb\xbf'
 
 # 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
 # setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
@@ -165,24 +169,162 @@ PREAMBLE
   printf '%s\n' '#####################################################' "${end_line}"
 }
 
+# 印の無い古いテンプレート (ADR 021 の前の、この script が初回に置いたもの)。
+# 頭の 10 行がこれと同じなら、欄に替えてよい (ユーザーが書いたものではない)。
+legacy_template() {
+  cat <<'TEMPLATE'
+# マシンローカルの環境変数。git にも /nix/store にも入らない。
+# bash / fish の両方が起動時に読む (nix/README.md も参照)。
+#
+#   - 行頭から KEY=VALUE、1 行 1 個、改行は LF
+#   - クォートしない。= の後ろは行末までそのまま値 (FOO='x' は 'x' になる)
+#   - 展開もコマンド置換もしない ($X は文字列 "$X" のまま)
+#   - 識別子で始まらない行は黙って無視される
+#
+# 例:
+#   FOO_API_KEY=sk-xxxx
+TEMPLATE
+}
+
+# 行末の CR と 1 行目の頭の BOM を外した行を line に入れる awk の断片
+# (印と古いテンプレートの見分けにだけ使う。書くときは元のバイトのまま)。$0 は awk の変数
+# shellcheck disable=SC2016
+awk_plain_line='line = $0; sub(/\r$/, "", line); if (NR == 1 && index(line, bom) == 1) line = substr(line, length(bom) + 1)'
+
+# 印の行を数える。出力 (1 行): <始まりの数> <終わりの数> <始まりの行番号> <終わりの行番号> <全行数>
+# 行番号は「,」区切りで、無ければ「無し」
+scan_markers() {
+  awk -v b="${begin_prefix}" -v e="${end_prefix}" -v bom="${bom}" '
+    { '"${awk_plain_line}"' }
+    index(line, b) == 1 { nb++; bl = bl (bl == "" ? "" : ",") NR }
+    index(line, e) == 1 { ne++; el = el (el == "" ? "" : ",") NR }
+    END { printf "%d %d %s %s %d\n", nb, ne, (bl == "" ? "無し" : bl), (el == "" ? "無し" : el), NR }
+  ' "$1"
+}
+
+# 頭の 10 行が古いテンプレートと 1 行ずつ同じか
+is_legacy() {
+  local head10
+  head10=$(awk -v bom="${bom}" 'NR > 10 { exit } { '"${awk_plain_line}"'; print line }' "$1")
+  [[ ${head10} == "$(legacy_template)" ]]
+}
+
+# 印の間 (行 $2 と行 $3 の間) の、空白だけでなく # で始まらない行 (ユーザーが書いたもの)。
+# $4 が lines なら元のバイトのまま出す。names なら「<KEY=VALUE の形でない行の数><TAB><変数名のカンマ区切り>」
+# (数を先に置く。TAB は read が空白として読み飛ばすので、空になりうる名前を先に置くとずれる)
+rescue() {
+  awk -v b="$2" -v e="$3" -v mode="$4" '
+    NR <= b || NR >= e { next }
+    { l = $0; gsub(/[ \t\r]/, "", l) }
+    l == "" || substr($0, 1, 1) == "#" { next }
+    mode == "lines" { print; next }
+    match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) { names = names (names == "" ? "" : ", ") substr($0, 1, RLENGTH - 1); next }
+    { other++ }
+    END { if (mode == "names") printf "%d\t%s\n", other, names }
+  ' "$1"
+}
+
 # 書けないときも setup を止めない (warn して exit 0)
 give_up() {
   warn "$@"
   exit 0
 }
 
-if [[ -e ${env_file} || -L ${env_file} ]]; then
-  echo "既に在るので中身には触りません: ${env_file}"
+# --- 書いてよいファイルか ----------------------------------------------------
+
+if [[ -L ${env_file} ]]; then
+  give_up "${env_file} は symlink なので書き換えません (指す先: $(readlink "${env_file}"))。" \
+    "頭の欄を足すなら、symlink をやめて実体のファイルを置いてください。"
+fi
+if [[ -e ${env_file} && ! -f ${env_file} ]]; then
+  give_up "${env_file} が普通のファイルではないので書き換えません。"
+fi
+if [[ -f ${env_file} && ! (-r ${env_file} && -w ${env_file}) ]]; then
+  give_up "${env_file} を読み書きできないので書き換えません。"
+fi
+
+# --- 書き上がりを一時ファイルに組む ------------------------------------------
+
+mkdir -p "${env_dir}" 2>/dev/null \
+  || give_up "${env_dir} を作れないので、${env_file} を書けません。"
+block_tmp=$(mktemp "${env_dir}/.env.XXXXXX" 2>/dev/null) \
+  || give_up "${env_dir} に一時ファイルを作れないので、${env_file} を書き換えません。"
+new_tmp=$(mktemp "${env_dir}/.env.XXXXXX" 2>/dev/null) \
+  || give_up "${env_dir} に一時ファイルを作れないので、${env_file} を書き換えません。"
+render_block >"${block_tmp}" || give_up "${env_file} の欄を組めませんでした。"
+
+rescued_names=""
+rescued_other=0
+if [[ ! -e ${env_file} ]]; then
+  kind=created
+  cat "${block_tmp}" >"${new_tmp}" || give_up "${env_file} を書けませんでした。"
 else
-  mkdir -p "${env_dir}" 2>/dev/null \
-    || give_up "${env_dir} を作れないので、${env_file} を置きません。"
-  block_tmp=$(mktemp "${env_dir}/.env.XXXXXX" 2>/dev/null) \
-    || give_up "${env_dir} に一時ファイルを作れないので、${env_file} を置きません。"
-  if ! { render_block >"${block_tmp}" && chmod 600 "${block_tmp}" && mv -f "${block_tmp}" "${env_file}"; }; then
-    give_up "${env_file} を書けませんでした。"
+  markers=$(scan_markers "${env_file}") || give_up "${env_file} を読めないので書き換えません。"
+  read -r nb ne blist elist total <<<"${markers}"
+  if [[ ${nb} == 1 && ${ne} == 1 ]] && ((blist < elist)); then
+    # 印の間だけを替える。印より上と下は head / tail でバイトのまま写す。
+    # 印の間のユーザーの行は、終わりの印のすぐ下 (下の行より前) へ移し、後の行が勝つ順を変えない
+    kind=replaced
+    kept=$((blist - 1 + total - elist))
+    {
+      if ((blist > 1)); then
+        head -n "$((blist - 1))" "${env_file}"
+      fi
+      cat "${block_tmp}"
+      rescue "${env_file}" "${blist}" "${elist}" lines
+      tail -n "+$((elist + 1))" "${env_file}"
+    } >"${new_tmp}" || give_up "${env_file} を書けませんでした。"
+    IFS=$'\t' read -r rescued_other rescued_names <<<"$(rescue "${env_file}" "${blist}" "${elist}" names)"
+  elif [[ ${nb} == 0 && ${ne} == 0 ]]; then
+    if is_legacy "${env_file}"; then
+      kind=legacy
+      kept=$((total > 10 ? total - 10 : 0))
+      { cat "${block_tmp}" && tail -n +11 "${env_file}"; } >"${new_tmp}" \
+        || give_up "${env_file} を書けませんでした。"
+    else
+      kind=prepended
+      kept=${total}
+      { cat "${block_tmp}" && cat "${env_file}"; } >"${new_tmp}" \
+        || give_up "${env_file} を書けませんでした。"
+    fi
+  else
+    give_up "${env_file} の印の行が 1 組になっていないので、書き換えません (${begin_prefix} の行: ${blist}、${end_prefix} の行: ${elist})。" \
+      "直すには、印の行を 1 組だけ残すか、欄ごと消して印の無い形に戻し、~/dotfiles/setup --steps bootstrap-local-env で流し直してください。"
   fi
-  block_tmp=""
-  echo "作りました: ${env_file}"
+fi
+
+# --- 書く (今と違うときだけ) -------------------------------------------------
+
+if [[ ${kind} != created ]] && cmp -s "${new_tmp}" "${env_file}"; then
+  echo "欄は最新です: ${env_file}"
+else
+  if [[ ${kind} != created ]]; then
+    bak_tmp=$(mktemp "${env_dir}/.env.bak.XXXXXX" 2>/dev/null) \
+      || give_up "${env_dir} に一時ファイルを作れないので、${env_file} を書き換えません。"
+    if ! { cp "${env_file}" "${bak_tmp}" && chmod 600 "${bak_tmp}" && mv -f "${bak_tmp}" "${bak_file}"; }; then
+      give_up "前の版を ${bak_file} へ写せないので、${env_file} を書き換えません。"
+    fi
+    bak_tmp=""
+  fi
+  if ! { chmod 600 "${new_tmp}" && mv -f "${new_tmp}" "${env_file}"; }; then
+    give_up "${env_file} を書けませんでした (中身は元のまま)。"
+  fi
+  new_tmp=""
+  case ${kind} in
+    created) echo "作りました: ${env_file}" ;;
+    replaced) echo "欄を書き直しました: ${env_file} (欄の外の ${kept} 行には触れていません。前の版は ${bak_file})" ;;
+    legacy) echo "印の無い古い形だったので、頭のテンプレート 10 行を欄に替えました: ${env_file} (残りの ${kept} 行には触れていません。前の版は ${bak_file})" ;;
+    prepended) echo "印が無かったので、欄を頭に足しました: ${env_file} (今あった ${kept} 行はすべて欄の下に残しています。前の版は ${bak_file})" ;;
+  esac
+fi
+
+if [[ -n ${rescued_names} || ${rescued_other} != 0 ]]; then
+  moved=${rescued_names:-(無し)}
+  if [[ ${rescued_other} != 0 ]]; then
+    moved+="。ほかに KEY=VALUE の形でない行 ${rescued_other} 行"
+  fi
+  warn "${env_file} の欄の中に書かれていた行を、欄のすぐ下へ移しました: ${moved} (値は出しません)。" \
+    "欄 (# >>> dotfiles から # <<< dotfiles まで) は setup が書き直すので、値は欄より下に書いてください。"
 fi
 
 # 秘密情報を置く前提のファイルなので、緩ければ締める。
