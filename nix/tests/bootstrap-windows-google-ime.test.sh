@@ -158,6 +158,14 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 ime() { echo "$1/win/AppData/LocalLow/Google/Google Japanese Input"; }
 killed() { [[ -s $1/taskkill-calls ]]; }
 nkills() { grep -c '' "$1/taskkill-calls" 2>/dev/null || echo 0; }
@@ -262,7 +270,7 @@ echo "== bootstrap-windows-google-ime.sh: ${script}"
 # 1. 状態ファイルが無い: 飛ばす
 h=$(new_home t1 "" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! killed "${h}" && outerr "${h}" | grep -q '飛ばします' && [[ ! -e $(ime "${h}")/config1.db ]]; then
+if [[ $(rc "${h}") == 0 ]] && ! killed "${h}" && seen "${h}" '飛ばします' && [[ ! -e $(ime "${h}")/config1.db ]]; then
   ok "windows-files.json が無ければ飛ばす"
 else
   ng "状態ファイルが無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -271,7 +279,7 @@ fi
 # 2. enable = false: 飛ばす
 h=$(new_home t2 "${state_off}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '配りません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '配りません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
   ok "enable = false なら飛ばす"
 else
   ng "enable = false" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -280,7 +288,7 @@ fi
 # 3. Google 日本語入力が入っていない: 飛ばす
 h=$(new_home t3 "${state_on}" 0)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '入っていません' && [[ ! -e ${h}/tasklist-calls ]]; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入っていません' && [[ ! -e ${h}/tasklist-calls ]]; then
   ok "Google 日本語入力が入っていなければ飛ばす"
 else
   ng "入っていない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -289,7 +297,7 @@ fi
 # 4. interop が無い (tasklist.exe が見つからない): 置かずに exit 0
 h=$(new_home t4 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '置きません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '置きません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
   ok "interop が無ければ置かずに exit 0"
 else
   ng "interop が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -298,7 +306,7 @@ fi
 # 5. tasklist.exe が失敗する: 置かずに exit 0
 h=$(new_home t5 "${state_on}" 1)
 FAKE_TASKLIST_RC=126 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '置きません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '置きません' && [[ ! -e $(ime "${h}")/config1.db ]]; then
   ok "tasklist.exe が失敗したら置かずに exit 0"
 else
   ng "tasklist.exe が失敗" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -329,7 +337,7 @@ fi
 # 6. 設定画面が開いている: exit 1、何も置かない
 h=$(new_home t6 "${state_on}" 1)
 FAKE_TOOL_RUNNING=1 run "${h}" 0
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'GoogleIMEJaTool.exe' && [[ ! -e $(ime "${h}")/config1.db ]] && ! killed "${h}"; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" 'GoogleIMEJaTool.exe' && [[ ! -e $(ime "${h}")/config1.db ]] && ! killed "${h}"; then
   ok "設定画面が開いていれば exit 1 で何も置かない"
 else
   ng "設定画面が開いている" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -339,7 +347,7 @@ fi
 h=$(new_home t7 "${state_on}" 1)
 printf '%s' "${keymap}"$'Composition\tF13\n' >"${h}/repo/win/google-japanese-input/keymap.tsv"
 run "${h}" 0
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'keymap.tsv:4:' && [[ ! -e $(ime "${h}")/config1.db ]] && ! killed "${h}"; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" 'keymap.tsv:4:' && [[ ! -e $(ime "${h}")/config1.db ]] && ! killed "${h}"; then
   ok "壊れたテキストは行番号を出して exit 1 (何も置かない)"
 else
   ng "壊れたテキスト" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -359,7 +367,7 @@ fi
 
 # 9. 2 回目: 同じなので何もしない (落とさない)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 ]] && outerr "${h}" | grep -q '同じです'; then
+if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 ]] && seen "${h}" '同じです'; then
   ok "2 回目は同じなので何もせず、落とさない"
 else
   ng "2 回目" "rc=$(rc "${h}") kills=$(nkills "${h}") $(outerr "${h}")"
@@ -370,7 +378,7 @@ printf '\x0a\x02\x18\x01' >>"$(ime "${h}")/config1.db"
 before=$(cat "$(ime "${h}")/config1.db" | od -An -tx1 | tr -d ' \n')
 run "${h}" 0
 after=$(cat "$(ime "${h}")/config1.db" | od -An -tx1 | tr -d ' \n')
-if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 && ${before} == "${after}" ]] && outerr "${h}" | grep -q '同じです: .*config1.db'; then
+if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 && ${before} == "${after}" ]] && seen "${h}" '同じです: .*config1.db'; then
   ok "時刻だけが違う (画面で保存しただけ) なら同じ扱いで、Windows 側のファイルに触らない"
 else
   ng "時刻だけ違う" "rc=$(rc "${h}") kills=$(nkills "${h}") $(outerr "${h}")"
@@ -380,7 +388,7 @@ fi
 printf '%s' "${keymap2}" >"${h}/repo/win/google-japanese-input/keymap.tsv"
 run "${h}" 0
 backups=$(find "${h}/.local/state/dotfiles/google-japanese-input/backup" -name config1.db | grep -c '')
-if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 2 && ${backups} == 1 ]] && outerr "${h}" | grep -q 'repo 側が進んだ' \
+if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 2 && ${backups} == 1 ]] && seen "${h}" 'repo 側が進んだ' \
   && pjp-google-ime decode --kind config "$(ime "${h}")/config1.db" --out "${h}/dec" && grep -q '^Composition' "${h}/dec/keymap.tsv"; then
   ok "repo 側が進んだら退避して上書きし、変換サーバーを落とす"
 else
@@ -392,8 +400,8 @@ put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
 before=$(digest config "$(ime "${h}")/config1.db")
 run "${h}" 0
 if [[ $(rc "${h}") == 1 && $(digest config "$(ime "${h}")/config1.db") == "${before}" && $(nkills "${h}") == 2 ]] \
-  && outerr "${h}" | grep -q '衝突' && outerr "${h}" | grep -q '^--- Windows 側/keymap.tsv' \
-  && outerr "${h}" | grep -q '^+Precomposition' && outerr "${h}" | grep -qF -- '--import' && outerr "${h}" | grep -qF -- '--force'; then
+  && seen "${h}" '衝突' && seen "${h}" '^--- Windows 側/keymap.tsv' \
+  && seen "${h}" '^+Precomposition' && seen "${h}" -F -- '--import' && seen "${h}" -F -- '--force'; then
   ok "画面で変えていたら衝突として diff (- が Windows 側) と解き方を出し、触らずに exit 1"
 else
   ng "衝突" "rc=$(rc "${h}") kills=$(nkills "${h}") $(outerr "${h}")"
@@ -415,7 +423,7 @@ run "${h}" 0 --import
 imported_rc=$(rc "${h}")
 run "${h}" 0
 if [[ ${imported_rc} == 0 && $(rc "${h}") == 0 && $(nkills "${h}") == 2 ]] \
-  && ! grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" && outerr "${h}" | grep -q '同じです: .*config1.db'; then
+  && ! grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" && seen "${h}" '同じです: .*config1.db'; then
   ok "--import は Windows 側をテキストへ取り込み、次の実行は同じになる"
 else
   ng "--import" "import_rc=${imported_rc} rc=$(rc "${h}") $(outerr "${h}")"
@@ -425,7 +433,7 @@ fi
 h=$(new_home t15 "${state_on}" 1)
 put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
 run "${h}" 0 --force
-if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 ]] && outerr "${h}" | grep -q '上書き (--force)' \
+if [[ $(rc "${h}") == 0 && $(nkills "${h}") == 1 ]] && seen "${h}" '上書き (--force)' \
   && pjp-google-ime decode --kind config "$(ime "${h}")/config1.db" --out "${h}/dec" && grep -q '^Precomposition' "${h}/dec/keymap.tsv"; then
   ok "--force は衝突でも repo の中身で置き直す"
 else
@@ -436,7 +444,7 @@ fi
 h=$(new_home t16 "${state_on}" 1)
 printf '\xff\xff\xff' >"$(ime "${h}")/config1.db"
 run "${h}" 0
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '衝突' && ! outerr "${h}" | grep -q 'Traceback'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '衝突' && ! seen "${h}" 'Traceback'; then
   ok "読めない Windows 側のファイルは衝突として扱う (traceback を出さない)"
 else
   ng "読めないファイル" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -448,7 +456,7 @@ rm -rf "${h}/private/google-japanese-input"
 printf 'windows-dictionary' >"$(ime "${h}")/user_dictionary.db"
 run "${h}" 0
 if [[ $(rc "${h}") == 0 && -f "$(ime "${h}")/config1.db" && $(cat "$(ime "${h}")/user_dictionary.db") == windows-dictionary ]] \
-  && outerr "${h}" | grep -q '辞書は飛ばします'; then
+  && seen "${h}" '辞書は飛ばします'; then
   ok "辞書のテキストが無ければ辞書は飛ばし、Windows 側の辞書を残す"
 else
   ng "辞書のテキストが無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -473,7 +481,7 @@ fi
 # 19. 変換サーバーが動いていない (taskkill.exe が 128): 成功扱い
 h=$(new_home t19 "${state_on}" 1)
 FAKE_TASKKILL_RC=128 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '動いていませんでした'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '動いていませんでした'; then
   ok "変換サーバーが動いていなければ (128) 成功扱い"
 else
   ng "128" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -482,7 +490,7 @@ fi
 # 20. taskkill.exe がほかの理由で失敗: exit 1 で、手で終了する方法を出す
 h=$(new_home t20 "${state_on}" 1)
 FAKE_TASKKILL_RC=1 run "${h}" 0
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'タスクマネージャー'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" 'タスクマネージャー'; then
   ok "変換サーバーを落とせなければ exit 1 で、手で終了する方法を出す"
 else
   ng "taskkill 失敗" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -494,7 +502,7 @@ run "${h}" 1 --check
 check_ok=$(rc "${h}")
 printf '%s' $'status\tkey\tcommand\nDirect input\tF13\tIMEOn\n' >"${h}/repo/win/google-japanese-input/keymap.tsv"
 run "${h}" 1 --check
-if [[ ${check_ok} == 0 && $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'keymap.tsv:2:'; then
+if [[ ${check_ok} == 0 && $(rc "${h}") == 1 ]] && seen "${h}" 'keymap.tsv:2:'; then
   ok "--check は state も Windows も無しでテキストを確かめる"
 else
   ng "--check" "ok_rc=${check_ok} rc=$(rc "${h}") $(outerr "${h}")"
@@ -506,7 +514,7 @@ put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
 cp "${h}/repo/win/google-japanese-input/keymap.tsv" "${h}/keymap.before"
 before=$(digest config "$(ime "${h}")/config1.db")
 run "${h}" 0 --import --dry-run
-if [[ $(rc "${h}") == 2 ]] && outerr "${h}" | grep -q '一緒に使えません' \
+if [[ $(rc "${h}") == 2 ]] && seen "${h}" '一緒に使えません' \
   && cmp -s "${h}/keymap.before" "${h}/repo/win/google-japanese-input/keymap.tsv" \
   && [[ -f ${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv ]] \
   && [[ ! -e ${h}/.local/state/dotfiles/google-japanese-input/deployed.json ]] \
@@ -584,7 +592,7 @@ else
 fi
 put_windows "${h}" $'status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n'
 run "${h}" 0 --dry-run
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '前回は変換サーバーを落とせていません。この差は、古い設定が書き戻されたものかもしれません'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '前回は変換サーバーを落とせていません。この差は、古い設定が書き戻されたものかもしれません'; then
   ok "印がある回の衝突には、古い設定の書き戻しかもしれないと添える"
 else
   ng "印がある回の衝突" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -601,7 +609,7 @@ printf 'Composition\tF14\tIMEOff\n' >>"${h}/repo/win/google-japanese-input/keyma
 cp "${h}/repo/win/google-japanese-input/keymap.tsv" "${h}/keymap.before"
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 1 ]] && cmp -s "${h}/keymap.before" "${h}/repo/win/google-japanese-input/keymap.tsv" && cmp -s "${h}/rec.before" "${rec}" \
-  && outerr "${h}" | grep -q 'google-japanese-input に commit していない変更があります' && outerr "${h}" | grep -q 'M keymap.tsv'; then
+  && seen "${h}" 'google-japanese-input に commit していない変更があります' && seen "${h}" 'M keymap.tsv'; then
   ok "--import は repo に commit していない変更があると、何も書かずに exit 1 (変わったファイルを出す)"
 else
   ng "--import と未コミットの変更" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -613,7 +621,7 @@ git -C "${h}/private" config status.showUntrackedFiles no
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 1 && -f $(tsv_of "${h}" 新しい辞書) ]] && cmp -s "${h}/rec.before" "${rec}" \
   && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" \
-  && outerr "${h}" | grep -q 'dictionaries に commit していない変更があります'; then
+  && seen "${h}" 'dictionaries に commit していない変更があります'; then
   ok "--import は dotfiles-private に未追跡の TSV があると、未追跡を見せない設定でも何も書かずに exit 1"
 else
   ng "--import と未追跡の TSV" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -622,7 +630,7 @@ rm -f "$(tsv_of "${h}" 新しい辞書)"
 rm -rf "${h}/private/.git"
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 1 && -f $(tsv_of "${h}" テスト辞書) ]] && cmp -s "${h}/rec.before" "${rec}" \
-  && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" && outerr "${h}" | grep -q '確かめられません'; then
+  && grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" && seen "${h}" '確かめられません'; then
   ok "--import は git の checkout か確かめられなければ、何も書かずに exit 1"
 else
   ng "--import と checkout でない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -642,22 +650,22 @@ put_windows_dictionaries "${h}" "テスト辞書=${dict}${w_secret}" "並びの�
 run "${h}" 0
 leaked=""
 for w in てすと ひみつのよみ 秘密の単語 いちのよみ 一の単語 にのよみ 二の単語 そとのよみ 外の単語 うちのよみ 内の単語; do
-  if outerr "${h}" | grep -qF "${w}"; then
+  if seen "${h}" -F "${w}"; then
     leaked+=" ${w}"
   fi
 done
 if [[ $(rc "${h}") == 1 && -z ${leaked} ]] \
-  && outerr "${h}" | grep -qF '辞書「テスト辞書」: Windows 側にだけある行 1・repo 側にだけある行 0' \
-  && outerr "${h}" | grep -qF '辞書「並びの辞書」: 行は同じで、並びだけが違う' \
-  && outerr "${h}" | grep -qF '辞書「手元の辞書」: repo 側にだけある (1 語)' \
-  && outerr "${h}" | grep -qF '辞書「窓の辞書」: Windows 側にだけある (2 語)' \
-  && outerr "${h}" | grep -qF -- '--dry-run --show-words'; then
+  && seen "${h}" -F '辞書「テスト辞書」: Windows 側にだけある行 1・repo 側にだけある行 0' \
+  && seen "${h}" -F '辞書「並びの辞書」: 行は同じで、並びだけが違う' \
+  && seen "${h}" -F '辞書「手元の辞書」: repo 側にだけある (1 語)' \
+  && seen "${h}" -F '辞書「窓の辞書」: Windows 側にだけある (2 語)' \
+  && seen "${h}" -F -- '--dry-run --show-words'; then
   ok "辞書の衝突は語を出さず、辞書ごとの行の数と --show-words の案内だけを出す"
 else
   ng "辞書の衝突の件数" "rc=$(rc "${h}") leaked=${leaked:-(なし)} $(outerr "${h}")"
 fi
 run "${h}" 0 --dry-run --show-words
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q '^-ひみつのよみ' && ! killed "${h}"; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '^-ひみつのよみ' && ! killed "${h}"; then
   ok "--show-words を付けると、辞書の衝突でも語の diff を出す"
 else
   ng "--show-words" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -671,8 +679,8 @@ else
   put_windows "${h}" "${keymap}"
   put_windows_proto_dictionary "${h}" version
   run "${h}" 0
-  if [[ $(rc "${h}") == 1 ]] && ! outerr "${h}" | grep -q '辞書「' \
-    && outerr "${h}" | grep -qF 'どの辞書も TSV に出る中身は同じです (TSV に出ない項目だけが違う)'; then
+  if [[ $(rc "${h}") == 1 ]] && ! seen "${h}" '辞書「' \
+    && seen "${h}" -F 'どの辞書も TSV に出る中身は同じです (TSV に出ない項目だけが違う)'; then
     ok "辞書の TSV に出ない項目だけが違うときは、どの辞書も TSV は同じと出す"
   else
     ng "TSV に出ない項目だけが違う" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -686,7 +694,7 @@ run "${h}" 1 --check
 check_rc=$(rc "${h}")
 check_log=$(outerr "${h}")
 run "${h}" 1
-if [[ ${check_rc} == 1 && $(rc "${h}") == 0 ]] && grep -q 'config.txtpb' <<<"${check_log}" && outerr "${h}" | grep -q '飛ばします'; then
+if [[ ${check_rc} == 1 && $(rc "${h}") == 0 ]] && grep -q 'config.txtpb' <<<"${check_log}" && seen "${h}" '飛ばします'; then
   ok "--check は config.txtpb が無ければ exit 1 (普段の回は飛ばして exit 0)"
 else
   ng "--check と config.txtpb が無い" "check_rc=${check_rc} rc=$(rc "${h}") ${check_log} $(outerr "${h}")"
@@ -701,8 +709,8 @@ for t in "t31:Program Files (x86)" "t32:Program Files"; do
   printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h}/c/Users/u" >"${h}/.local/state/dotfiles/windows-files.json"
   run "${h}" 0
   if [[ $(rc "${h}") == 0 && ! -e ${h}/tasklist-calls && ! -e "${h}/c/Users/u/AppData/LocalLow/Google/Google Japanese Input" ]] \
-    && outerr "${h}" | grep -q 'まだ使われていません' && outerr "${h}" | grep -q '一度何か打ってから' \
-    && ! outerr "${h}" | grep -q '入っていません'; then
+    && seen "${h}" 'まだ使われていません' && seen "${h}" '一度何か打ってから' \
+    && ! seen "${h}" '入っていません'; then
     ok "入っているがまだ使っていなければ (${t#*:})、一度使ってから流し直すよう出して exit 0 (置き先は作らない)"
   else
     ng "入っているが使っていない (${t#*:})" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -720,7 +728,7 @@ printf "    [string]\$Version = '3.35.0.0',\n" >>"${h}/repo/win/google-japanese-
 run "${h}" 0 --import
 if [[ $(rc "${h}") == 0 ]] && ! grep -q '^Precomposition' "${h}/repo/win/google-japanese-input/keymap.tsv" \
   && grep -qF '3.35.0.0' "${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1" \
-  && outerr "${h}" | grep -q '取り込みました'; then
+  && seen "${h}" '取り込みました'; then
   ok "--import は Install-GoogleJapaneseInput.ps1 に commit していない変更があっても止まらず、テキストだけを取り込む"
 else
   ng "--import と Install-GoogleJapaneseInput.ps1" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -754,7 +762,7 @@ for mut in txtpb romaji_modified romaji_deleted romaji_untracked_showno keymap_s
       ;;
   esac
   run "${h}" 0 --import
-  if [[ $(rc "${h}") != 1 ]] || ! outerr "${h}" | grep -q 'google-japanese-input に commit していない変更があります'; then
+  if [[ $(rc "${h}") != 1 ]] || ! seen "${h}" 'google-japanese-input に commit していない変更があります'; then
     x1_ok=0
     echo "       x1 ${mut}: rc=$(rc "${h}") $(outerr "${h}")"
   fi
@@ -773,7 +781,7 @@ git -C "${h}/repo" commit --quiet -m 'ps1'
 printf 'more\n' >>"${h}/repo/win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
 printf 'Composition\tF14\tIMEOff\n' >>"${h}/repo/win/google-japanese-input/keymap.tsv"
 run "${h}" 0 --import
-if [[ $(rc "${h}") == 1 ]] && outerr "${h}" | grep -q 'M keymap.tsv' && ! outerr "${h}" | grep -q 'Install-GoogleJapaneseInput'; then
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" 'M keymap.tsv' && ! seen "${h}" 'Install-GoogleJapaneseInput'; then
   ok "止めたときの一覧は keymap.tsv だけで、Install-GoogleJapaneseInput.ps1 は出ない"
 else
   ng "--short の一覧" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -796,7 +804,7 @@ h=$(new_home x4 "" 0)
 mkdir -p "${h}/c/Users/u" "${h}/c/Program Files/Google/Google Japanese Input" "${h}/c/Program Files (x86)/Google/Google Japanese Input"
 printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${h}/c/Users/u" >"${h}/.local/state/dotfiles/windows-files.json"
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '入っていません' && ! outerr "${h}" | grep -q 'まだ使われていません'; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入っていません' && ! seen "${h}" 'まだ使われていません'; then
   ok "本物と同じ並び (<ドライブ>/Users/<名前>) で exe が無ければ、入っていない扱い"
 else
   ng "exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -859,7 +867,7 @@ for c in \
   last=$(tail -n 1 "${h}/out")
   if [[ $(rc "${h}") == 0 && ${prompted} == "${want}" && ${dirty} == "${want}" ]] \
     && { [[ ${want} != *dotfiles-private* ]] || [[ ${last} == *自分の端末* ]]; } \
-    && { [[ ${want} != なし ]] || { [[ ${last} == *'commit するものはありません'* ]] && ! outerr "${h}" | grep -q 'commit してください'; }; }; then
+    && { [[ ${want} != なし ]] || { [[ ${last} == *'commit するものはありません'* ]] && ! seen "${h}" 'commit してください'; }; }; then
     ok "${desc}"
   else
     ng "--import の案内 (${name})" "rc=$(rc "${h}") prompted=${prompted} dirty=${dirty} $(outerr "${h}")"

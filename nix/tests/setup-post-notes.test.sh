@@ -148,6 +148,19 @@ out() { cat "$1/out"; }
 after_result() { sed -n '/^==> 結果/,$p' "$1/out"; }
 # 「残りの手作業」より後の stdout
 after_post_notes() { sed -n '/^==> 残りの手作業/,$p' "$1/out"; }
+# 判定の grep -q はパイプで受けず、<<< で渡す。sed から grep -q へパイプでつなぐと、grep が合って先に
+# 抜けたあと sed が書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」に見えることがある
+# (check-test-grep-q.sh が CI の lint で落とす)。$1: ケース、残り: grep の引数
+seen_after_result() {
+  local c=$1
+  shift
+  grep -q "$@" <<<"$(after_result "${c}")"
+}
+seen_after_post_notes() {
+  local c=$1
+  shift
+  grep -q "$@" <<<"$(after_post_notes "${c}")"
+}
 # 見出しの行 ($2) の次の行
 line_after() { grep -A1 -F -- "$2" "$1/out" | sed -n '2p'; }
 # 一時ファイルが残っていないか
@@ -171,14 +184,14 @@ fake_step "${c}" bootstrap-a.sh "$(warn_body '見出し A' '続き A1' '続き A
 fake_step "${c}" bootstrap-b.sh 'echo "b は何も言わない"'
 fake_step "${c}" bootstrap-c.sh "$(warn_body '見出し C')"
 run "${c}" --steps bootstrap-a,bootstrap-b,bootstrap-c
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -qx '⚠️  \[bootstrap-a\] 見出し A' \
-  && after_result "${c}" | grep -qx '⚠️  \[bootstrap-c\] 見出し C'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" -x '⚠️  \[bootstrap-a\] 見出し A' \
+  && seen_after_result "${c}" -x '⚠️  \[bootstrap-c\] 見出し C'; then
   ok "子の手順の警告は、結果の後に [手順の id] を付けて出す"
 else
   ng "子の手順の警告がまとめに出ない" "rc=$(rc "${c}") $(out "${c}")"
 fi
 if [[ $(line_after "${c}" '[bootstrap-a] 見出し A') =~ ^[[:space:]]+続き\ A1$ ]] \
-  && grep -A2 -F '[bootstrap-a] 見出し A' "${c}/out" | sed -n '3p' | grep -qE '^[[:space:]]+続き A2$'; then
+  && [[ $(grep -A2 -F '[bootstrap-a] 見出し A' "${c}/out" | sed -n '3p') =~ ^[[:space:]]+続き\ A2$ ]]; then
   ok "続きの行は、見出しの下に字下げして並べる"
 else
   ng "続きの行の並び" "$(out "${c}")"
@@ -212,7 +225,7 @@ c=$(new_case t3)
 fake_step "${c}" bootstrap-a.sh "$(warn_body '見出し A')"
 fake_step "${c}" bootstrap-b.sh "$(warn_body '見出し B')"$'\n''exit 1'
 run "${c}" --steps bootstrap-a,bootstrap-b
-if [[ $(rc "${c}") == 1 ]] && after_result "${c}" | grep -qx '⚠️  \[bootstrap-a\] 見出し A' \
+if [[ $(rc "${c}") == 1 ]] && seen_after_result "${c}" -x '⚠️  \[bootstrap-a\] 見出し A' \
   && ! grep -q '見出し B' "${c}/out"; then
   ok "✖ で止まっても、それより前の ✔ の手順の警告は出し、✖ の手順の分は載せない"
 else
@@ -228,7 +241,7 @@ fi
 c=$(new_case t4)
 fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
 run "${c}" --self-update --steps bootstrap-a
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -q '^⚠️  \[本体の更新\] git の作業ツリーではないので更新できません'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[本体の更新\] git の作業ツリーではないので更新できません'; then
   ok "--self-update で本体を更新しなかった理由は [本体の更新] で載る"
 else
   ng "本体の更新の警告" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
@@ -239,8 +252,8 @@ fi
 c=$(new_case t5)
 printf '# ディストリの初期ファイル\n' >"${c}/home/.bashrc"
 run "${c}" --dry-run --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -q '^⚠️  \[switch\] home-manager 管理下ではない実ファイルがあります' \
-  && after_result "${c}" | grep -F "${c}/home/.bashrc" | grep -qE '^[[:space:]]+/'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[switch\] home-manager 管理下ではない実ファイルがあります' \
+  && grep -qE '^[[:space:]]+/' <<<"$(after_result "${c}" | grep -F "${c}/home/.bashrc")"; then
   ok "setup.sh の中の手順 (switch) の warn も、続きの行ごと載る"
 else
   ng "switch の warn" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
@@ -253,8 +266,8 @@ printf '%s\n' '{"managed":["credential.https://github.com.helper"],"gitConfig":[
   >"${c}/home/.local/state/dotfiles/claude-env.json"
 fake_step "${c}" bootstrap-claude-env.sh "$(warn_body 'gh が見つかりません。Claude の git は gh の資格情報で GitHub へ HTTPS で通します。' 'gh auth login するか、gitViaGh.enable = false にしてください。')"
 run "${c}" --steps bootstrap-claude-env
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -q '^⚠️  \[bootstrap-claude-env\] gh が見つかりません' \
-  && ! after_post_notes "${c}" | grep -qE '\bgh\b'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[bootstrap-claude-env\] gh が見つかりません' \
+  && ! seen_after_post_notes "${c}" -E '\bgh\b'; then
   ok "gh の警告はまとめにだけ出し、残りの手作業で出し直さない"
 else
   ng "gh の警告" "rc=$(rc "${c}") $(out "${c}")"
@@ -268,8 +281,8 @@ fake_step "${c}" setup-local-flake.sh "mkdir -p \"\${DOTFILES_LOCAL_DIR}\"
 printf '%s\\n' '${old_flake}' >\"\${DOTFILES_LOCAL_DIR}/flake.nix\"
 $(warn_body 'flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。')"
 run "${c}" --steps local-flake
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -q '^⚠️  \[local-flake\] flake.nix が古い雛形のまま' \
-  && ! after_post_notes "${c}" | grep -q '古い雛形'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[local-flake\] flake.nix が古い雛形のまま' \
+  && ! seen_after_post_notes "${c}" '古い雛形'; then
   ok "local-flake を流したときは、古い雛形の案内をまとめにだけ出す"
 else
   ng "local-flake を流したとき" "rc=$(rc "${c}") $(out "${c}")"
@@ -281,7 +294,7 @@ mkdir -p "${c}/local"
 printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
 fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
 run "${c}" --steps bootstrap-a
-if [[ $(rc "${c}") == 0 ]] && after_post_notes "${c}" | grep -q '古い雛形'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" '古い雛形'; then
   ok "local-flake を流さないときは、残りの手作業で古い雛形を知らせる"
 else
   ng "local-flake を流さないとき" "rc=$(rc "${c}") $(out "${c}")"
@@ -292,7 +305,7 @@ fi
 hm_out=$'notion.profile が未設定です。\n   規則に当たらない repo で止まります。\n   \nもう 1 件の warning'
 c=$(new_case t9)
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_OUT="${hm_out}" run "${c}" --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -qx '⚠️  \[switch\] notion.profile が未設定です。' \
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" -x '⚠️  \[switch\] notion.profile が未設定です。' \
   && [[ $(line_after "${c}" '[switch] notion.profile が未設定です。') =~ ^[[:space:]]+規則に当たらない ]] \
   && [[ $(line_after "${c}" '規則に当たらない repo で止まります。') == '⚠️  [switch] もう 1 件の warning' ]] \
   && grep -q '途中で出た警告が 2 件' "${c}/out" && grep -q 'config.warnings' "${c}/home/nix-calls"; then
@@ -307,7 +320,7 @@ c=$(new_case t10)
 mkdir -p "${c}/local"
 printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_OUT='' run "${c}" --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && grep -q 'config.warnings' "${c}/home/nix-calls" && ! after_post_notes "${c}" | grep -q '古い雛形'; then
+if [[ $(rc "${c}") == 0 ]] && grep -q 'config.warnings' "${c}/home/nix-calls" && ! seen_after_post_notes "${c}" '古い雛形'; then
   ok "home-manager の warnings を読めたときは、残りの手作業で古い雛形を出し直さない"
 else
   ng "warnings を読めたとき" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
@@ -319,7 +332,7 @@ c=$(new_case t11)
 mkdir -p "${c}/local"
 printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_RC=1 run "${c}" --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && ! grep -q '途中で出た警告' "${c}/out" && after_post_notes "${c}" | grep -q '古い雛形'; then
+if [[ $(rc "${c}") == 0 ]] && ! grep -q '途中で出た警告' "${c}/out" && seen_after_post_notes "${c}" '古い雛形'; then
   ok "home-manager の warnings を読めなければ黙って飛ばし、残りの手作業で古い雛形を知らせる"
 else
   ng "warnings を読めないとき" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
@@ -341,10 +354,10 @@ long=('長い見出し')
 for ((i = 1; i <= 15; i++)); do long+=("続き ${i}"); done
 fake_step "${c}" bootstrap-a.sh "$(warn_body "${long[@]}")"
 run "${c}" --steps bootstrap-a
-if [[ $(rc "${c}") == 0 ]] && after_result "${c}" | grep -qE '^[[:space:]]+続き 6$' \
-  && ! after_result "${c}" | grep -qE '^[[:space:]]+続き (7|12)$' \
-  && after_result "${c}" | grep -qE '^[[:space:]]+続き 13$' && after_result "${c}" | grep -qE '^[[:space:]]+続き 15$' \
-  && after_result "${c}" | grep -q '6 行を省いた'; then
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" -E '^[[:space:]]+続き 6$' \
+  && ! seen_after_result "${c}" -E '^[[:space:]]+続き (7|12)$' \
+  && seen_after_result "${c}" -E '^[[:space:]]+続き 13$' && seen_after_result "${c}" -E '^[[:space:]]+続き 15$' \
+  && seen_after_result "${c}" '6 行を省いた'; then
   ok "続きの行が長い警告は、頭と末尾を残して間を省き、省いた行の数を出す"
 else
   ng "長い警告" "rc=$(rc "${c}") $(out "${c}")"

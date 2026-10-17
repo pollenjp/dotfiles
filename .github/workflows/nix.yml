@@ -186,6 +186,12 @@ jobs:
       - name: テストの先頭の「## 確かめること」
         run: ./nix/scripts/check-test-headers.sh
 
+      # nix/tests のテストの判定で、grep -q をパイプの先に置いていないか (TKT-155)。pipefail の下では、grep が
+      # 先に抜けると前のコマンドが SIGPIPE で終わり、合っているのに落ちる (混んだランナーでだけ当たる)。
+      # shfmt の構文木を jq で読むので devShell で流す。
+      - name: テストの判定の grep -q (パイプで受けない)
+        run: nix develop ./nix --command ./nix/scripts/check-test-grep-q.sh
+
       # win/manifest.toml の検証 (ADR 010)。home-manager の評価は manifest を読まない
       # (ローカル flake からは repo 直下が見えない) ので、flake check では誤りが見つからない。
       # nix-instantiate だけで動くので devShell は要らない。

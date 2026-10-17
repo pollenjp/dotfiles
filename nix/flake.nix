@@ -143,6 +143,19 @@
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-windows-openssh-version-test = scriptTest "check-windows-openssh-version" ./scripts/check-windows-openssh-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
+          # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
+          check-test-grep-q-test =
+            pkgs.runCommand "check-test-grep-q-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.shfmt
+                ];
+              }
+              ''
+                bash ${./tests/check-test-grep-q.test.sh} ${./scripts/check-test-grep-q.sh}
+                touch $out
+              '';
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
@@ -347,6 +360,8 @@
               pkgs.shfmt
               pkgs.shellcheck
               pkgs.nixfmt
+              # check-test-grep-q.sh が shfmt の構文木を jq で読む
+              pkgs.jq
               home-manager.packages.${system}.default
             ];
           };

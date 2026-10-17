@@ -2489,7 +2489,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
@@ -2560,6 +2560,11 @@ repo の script を使うので、サンドボックスの外でも流せる（�
 - 「## 確かめること」の見出しと、その下の中身が無いテストは、CI の `lint` ジョブ（`check-test-headers.sh`）で
   落ちる。先頭のコメントは、1 行目（shebang の次）から空行を挟まずに続く `#`（`*.test.mjs` は `//`）の行で、
   unittest は module の docstring。手元では `./nix/scripts/check-test-headers.sh` で確かめる
+- 判定の `grep -q` はパイプの先に置かない。`outerr "${d}" | grep -q …` は、grep が合って先に抜けると前の `cat` が
+  SIGPIPE で終わり、pipefail で「合わない」に見える（前のコマンドが 2 回以上書くときだけ当たり、混んだ CI でたまに
+  落ちる。TKT-155）。読むファイルを `grep` に直に渡すか（既存のテストの `seen` / `called`）、`grep -q … <<<"$(…)"`
+  で渡す。パイプの先に置いたテストは、CI の `lint` ジョブ（`check-test-grep-q.sh`）で落ちる。手元では
+  `./nix/scripts/check-test-grep-q.sh` で確かめる（shfmt と jq が無ければ `nix/` の devShell に入り直す）
 - `nix/tests/` の直下にはテストだけを置く。読み方を知らない種類のファイルも `lint` で落ちる
   （テストが使うデータはディレクトリに入れる）
 - `nix/flake.nix` の `checks` に載せる（`nix/tests/<名前>.test.sh` は、ほかの道具が要らなければ `scriptTest` で足りる）
@@ -2632,5 +2637,6 @@ nix/
     ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
     ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
     ├── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
-    └── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
+    ├── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
+    └── check-test-grep-q.sh        テストの判定で grep -q をパイプの先に置いていないかを確かめる (CI の lint が呼ぶ)
 ```

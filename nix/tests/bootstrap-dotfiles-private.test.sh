@@ -66,13 +66,21 @@ run() {
 
 rc() { cat "$1/rc"; }
 outerr() { cat "$1/out" "$1/err"; }
+# 判定の grep -q はパイプで受けず、ファイルを直に読む。outerr を grep -q へパイプでつなぐと、grep が
+# out で合って先に抜けたあと cat が err を書こうとして SIGPIPE (141) で終わり、pipefail で「合わない」
+# に見える (check-test-grep-q.sh が CI の lint で落とす)。$1: ケースのディレクトリ、残り: grep の引数
+seen() {
+  local d=$1
+  shift
+  grep -q "$@" "${d}/out" "${d}/err"
+}
 
 echo "== bootstrap-dotfiles-private.sh: ${script}"
 
 # 1. 無ければ clone する
 h="${work}/t1"
 run "${h}"
-if [[ $(rc "${h}") == 0 && -f ${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv ]] && outerr "${h}" | grep -q 'clone しました'; then
+if [[ $(rc "${h}") == 0 && -f ${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv ]] && seen "${h}" 'clone しました'; then
   ok "無ければ clone する"
 else
   ng "clone" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -83,7 +91,7 @@ printf 'あ\t亜\t名詞\t\n' >>"${work}/author/google-japanese-input/dictionari
 git -C "${work}/author" commit --quiet -am second
 git -C "${work}/author" push --quiet origin HEAD:main
 run "${h}"
-if [[ $(rc "${h}") == 0 ]] && grep -q '^あ' "${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv" && outerr "${h}" | grep -q '更新しました'; then
+if [[ $(rc "${h}") == 0 ]] && grep -q '^あ' "${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv" && seen "${h}" '更新しました'; then
   ok "あれば pull --ff-only で追いつく"
 else
   ng "pull" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -92,7 +100,7 @@ fi
 # 3. 未コミットの変更があれば pull を飛ばす (変更は残す)
 printf 'い\t伊\t名詞\t\n' >>"${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv"
 run "${h}"
-if [[ $(rc "${h}") == 0 ]] && outerr "${h}" | grep -q '未コミットの変更' && grep -q '^い' "${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv"; then
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '未コミットの変更' && grep -q '^い' "${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv"; then
   ok "未コミットの変更があれば pull を飛ばし、変更を残す"
 else
   ng "未コミット" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -103,7 +111,7 @@ h="${work}/t4"
 mkdir -p "${h}/private"
 printf 'keep\n' >"${h}/private/file"
 run "${h}"
-if [[ $(rc "${h}") == 0 && $(cat "${h}/private/file") == keep ]] && outerr "${h}" | grep -q 'git の repo ではありません'; then
+if [[ $(rc "${h}") == 0 && $(cat "${h}/private/file") == keep ]] && seen "${h}" 'git の repo ではありません'; then
   ok "git の repo でないものがあれば触らずに exit 0"
 else
   ng "repo でない" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -112,7 +120,7 @@ fi
 # 5. clone できない: 警告して exit 0 (何も作らない)
 h="${work}/t5"
 DOTFILES_PRIVATE_URL_OVERRIDE="file://${work}/no-such.git" run "${h}"
-if [[ $(rc "${h}") == 0 && ! -e ${h}/private ]] && outerr "${h}" | grep -q 'clone に失敗しました'; then
+if [[ $(rc "${h}") == 0 && ! -e ${h}/private ]] && seen "${h}" 'clone に失敗しました'; then
   ok "clone できなくても exit 0 (警告だけ)"
 else
   ng "clone できない" "rc=$(rc "${h}") $(outerr "${h}")"
