@@ -143,7 +143,7 @@ ADR 012 の `pjp-who-is-asking` は、1Password の承認ダイアログが出�
 - 見出しの末尾に `  (踏み台かもしれない .exe)` を付ける。`wsl.exe -e …/ssh.exe` の記録もこれに当たるので、
   セッションの `/init` で祖先が途切れた `ssh.exe` の記録の近くに、呼び出し元までの木を持つ `wsl.exe` の
   記録が並ぶ
-- agent でない記録は多い (2026-10-17 04:32〜11:40 の 540 件のほとんどが `reg.exe` と `powershell.exe`) が、
+- agent でない記録は多い (2026-10-17 05:32〜11:23 に journal に残っていた 540 件のうち、`reg.exe` が 378・`powershell.exe` が 141・`cmd.exe` が 12) が、
   この規則で選ばれたのは agent の 8 件だけで、踏み台の誤検出は無かった
 
 ### 流れ
@@ -206,8 +206,8 @@ pjp-who-is-asking
 
 | 検査 | 結果 |
 | --- | --- |
-| unittest (手元の python 3.12.3) | `pjp-who-is-asking` 62 件が通る (前からの 26 件 + 今回の 36 件) |
-| unittest (flake の `checks` の `pjp-who-is-asking-unittest`、Nix の python 3.14.7) | 62 件が通る。`hhmmss` はローカル時刻なので、テストは TZ を POSIX の `JST-9` にそろえる (zoneinfo の無いサンドボックスでも効く) |
+| unittest (手元の python 3.12.3) | `pjp-who-is-asking` 64 件が通る (前からの 26 件 + 今回の 38 件) |
+| unittest (flake の `checks` の `pjp-who-is-asking-unittest`、Nix の python 3.14.7) | 64 件が通る。`hhmmss` はローカル時刻なので、テストは TZ を POSIX の `JST-9` にそろえる (zoneinfo の無いサンドボックスでも効く) |
 | `nix/scripts/check-test-headers.sh` | 30 本とも「## 確かめること」がある |
 
 ### 実機 (`pollenjp@wsl`、2026-10-17 11:24〜11:26)
@@ -232,7 +232,7 @@ pjp-who-is-asking
 
 (各記録の木の claude の行だけを抜き出した)
 
-- 2026-10-17 04:32〜11:40 の journal の 540 行に記録を選ぶ規則を当てると、選ばれたのは agent の 8 件
+- 2026-10-17 05:32〜11:23 に journal に残っていた 540 件 (11:23 の時点で読めた全部) に記録を選ぶ規則を当てると、選ばれたのは agent の 8 件
   (`ssh.exe` 6・`ssh-add.exe` 2) だけで、踏み台の誤検出は無かった
 
 ### 確かめていないこと
