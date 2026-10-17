@@ -6,7 +6,7 @@
 #   bash nix/tests/bootstrap-local-env.test.sh [<script のパス>] [<dotfiles.txt のパス>]
 #
 # flake の checks (bootstrap-local-env-test) が Nix のサンドボックスで流す。
-# 使うのは bash・coreutils・awk・grep・cmp だけ。
+# 使うのは bash・coreutils・awk・grep・sed・cmp だけ (touch -d と stat -c は GNU の形。サンドボックスで流す前提)。
 #
 # ## 確かめること
 #
@@ -17,26 +17,30 @@
 #   - 節は dotfiles が先、skill は ~/.claude/skills/ のディレクトリ名の順。pjp-env.txt の無い skill・空の
 #     断片・切れた symlink は節を作らず、切れた symlink では何も言わない
 #   - 断片の各行に「# 」を付ける (空行は「#」、先頭と末尾の空行は落とす)。FOO=bar と書いても欄では # FOO=bar
-#   - CRLF の断片でも欄の行に CR は混ざらず、末尾に改行の無い最後の行も落ちない
+#   - CRLF の断片・頭に BOM のある断片でも、欄の行に CR と BOM は混ざらず、末尾に改行の無い最後の行も落ちない
 #   - 印として読まれてしまう行 (>>> dotfiles / <<< dotfiles で始まる) を持つ断片は入れず、warn で知らせる
 #     (setup の最後の警告のまとめにも残す)
+#   - 行の途中に制御文字や U+2028 などがある断片 (Python の str.splitlines が行を分ける) は入れない
+#   - 名前に改行などを含む skill のディレクトリは、節を作らずに warn で知らせる (見出しから生きた行が生まれない)
 #   - repo の dotfiles.txt (第 2 引数) は、警告なしに欄に入る
 #
 # 今あるファイルを書き直す (ADR 021 の B・C):
 #
 #   - 印の無い古いテンプレート (10 行) は欄に替わり、11 行目からはバイトで同じ。前の版は env.bak (600) に残る
 #   - テンプレートが 1 文字でも違えば消さず、欄を頭に足すだけ (今の中身はバイトで同じまま欄の下に残る)
-#   - 印が 1 組なら印の間だけが替わる。始まりの印より上と、終わりの印より下 (メモ・コメントアウトした値・
-#     CRLF の行・末尾に改行の無い行) はバイトで同じ
+#   - 印が 1 組なら印の間だけが替わる。始まりの印より上 (値・CRLF の行) と、終わりの印より下 (メモ・
+#     コメントアウトした値・CRLF の行・末尾に改行の無い行) はバイトで同じ
 #   - 印の間の # でない行は、元の順・元のバイトのまま終わりの印のすぐ下へ移り、変数名を warn で知らせる
-#     (KEY=VALUE の形でない行は数だけ)
+#     (KEY=VALUE の形でない行は数だけ。= だけで終わる行 (パディング付きの base64 の値) も名前として出さない)
 #   - 書き上がりが今と同じなら何も書かない (更新時刻も env.bak も変わらない)
 #   - ファイルの頭の UTF-8 BOM があっても、古いテンプレートと印を見分け、書き直した欄の頭に BOM は付かない
 #   - 空のファイルは欄だけになる
-#   - 印が壊れている (始まりだけ・2 組・終わりが先)・symlink・ディレクトリに書けないときは、書かずに
-#     warn で知らせて exit 0 (中身はバイトで同じ、env.bak も作らない)
-#   - 中身が最新でもパーミッションが 600 でなければ 600 にする
-#   - 値は out・err・警告のまとめのどれにも出さない
+#   - 次のときは書かずに warn で知らせて exit 0 (中身はバイトで同じ、env.bak も作らない)。印が壊れている
+#     (始まりだけ・2 組・終わりが先。warn に両方の印の行番号)・symlink・普通のファイルでない・読み書きできない・
+#     ディレクトリに書けない・NUL を含む (UTF-16 など)・env.bak がディレクトリ
+#   - group と other の権限があれば外す。書かずに抜けるときも、symlink の先も、中身が最新のときも。600 より
+#     狭い権限 (000 など) は広げない
+#   - 値は out・err・警告のまとめのどれにも出さない。bash -x で流しても trace に出ない
 #   - 書き直した後にローダ (識別子で始まる KEY= の行) が読むのは、欄の外の行だけ
 #
 # ## 偽の checkout
@@ -53,7 +57,7 @@ here=$(
 script=${1:-${here}/../scripts/bootstrap-local-env.sh}
 real_fragment=${2:-}
 work=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-local-env-test.XXXXXX")
-trap 'chmod -R u+w "${work}" 2>/dev/null; rm -rf "${work}"' EXIT
+trap 'chmod -R u+rwx "${work}" 2>/dev/null; rm -rf "${work}"' EXIT
 
 pass=0
 fail=0
@@ -71,6 +75,7 @@ ng() {
 
 # 値を出していないかを確かめるための、テスト用の秘密の値
 secret=ntn_test_secret_do_not_print
+bom=$'\xef\xbb\xbf'
 begin_text='# >>> dotfiles が書く欄 (setup --update のたびに書き直す。ここには書かない) >>>'
 end_text='# <<< dotfiles が書く欄ここまで。この行より下に生の KEY=VALUE を書く (setup はここから下を書き換えない) <<<'
 
@@ -96,17 +101,19 @@ new_case() {
     >"${s}/zeta/pjp-env.txt"
   printf '\n  \n\n' >"${s}/empty/pjp-env.txt"
   printf '%s\n' 'bad の変数。' '<<< dotfiles を足す' 'BAD=xxxxxx' >"${s}/bad/pjp-env.txt"
-  printf 'crlf の変数。\r\nCRLF_LAST=xxxxxx' >"${s}/crlf/pjp-env.txt"
+  # Windows のエディタで保存した形 (頭に BOM、CRLF、末尾に改行が無い)
+  printf '\xef\xbb\xbfcrlf の変数。\r\nCRLF_LAST=xxxxxx' >"${s}/crlf/pjp-env.txt"
   printf '%s\n' 'linked が読む変数。' 'LINKED=xxxxxx' >"${c}/clone/skills/linked/pjp-env.txt"
   ln -s "${c}/clone/skills/linked" "${s}/linked"
   ln -s "${c}/no-such-dir" "${s}/broken"
 }
 
-# script を流し、out・err・rc をケースの dir に落とす。$1: 名前
+# script を流し、out・err・rc をケースの dir に落とす。$1: 名前、$2 から: bash へのオプション (-x など)
 run() {
   local c="${work}/$1"
+  shift
   env HOME="${c}/home" XDG_CONFIG_HOME="${c}/home/.config" DOTFILES_SETUP_WARNINGS="${c}/warnings" \
-    "${BASH}" "${c}/repo/nix/scripts/bootstrap-local-env.sh" >"${c}/out" 2>"${c}/err"
+    "${BASH}" "$@" "${c}/repo/nix/scripts/bootstrap-local-env.sh" >"${c}/out" 2>"${c}/err"
   echo $? >"${c}/rc"
 }
 
@@ -167,9 +174,10 @@ else
   ng "断片の行の付け方" "${got_zeta}"
 fi
 
-# T4. CRLF と末尾に改行の無い断片
-if ! grep -q $'\r' "${f}" && grep -qxF '# CRLF_LAST=xxxxxx' "${f}"; then
-  ok "CRLF の断片でも欄に CR は混ざらず、末尾に改行の無い最後の行も落ちない"
+# T4. CRLF・頭の BOM・末尾に改行の無い断片
+if ! grep -q $'\r' "${f}" && ! grep -qF "${bom}" "${f}" \
+  && grep -qxF '# crlf の変数。' "${f}" && grep -qxF '# CRLF_LAST=xxxxxx' "${f}"; then
+  ok "CRLF・頭に BOM のある断片でも欄に CR と BOM は混ざらず、末尾に改行の無い最後の行も落ちない"
 else
   section "${f}" '# ---- skill: crlf ----' >"${work}/t1/crlf_section"
   ng "CRLF の断片" "$(odump "${work}/t1/crlf_section" 20)"
@@ -201,6 +209,20 @@ if [[ $(rc t5b) == 0 ]] && grep -qF 'ctrl/pjp-env.txt' "${work}/t5b/err" \
   ok "行の途中に制御文字 (CR・U+2028 など) がある断片は入れず、欄に行の区切りになる文字は 1 つも無い"
 else
   ng "制御文字の断片" "rc=$(rc t5b)"$'\n'"$(cat "${work}/t5b/err")"
+fi
+
+# T5c. 名前に改行のある skill のディレクトリは節を作らない (見出しの行から生きた行が生まれる)
+new_case t5c
+d="${work}/t5c/home/.claude/skills/nl"$'\n''INJECT_NL=1'
+mkdir -p "${d}"
+printf '%s\n' 'nl の変数。' 'NL=xxxxxx' >"${d}/pjp-env.txt"
+run t5c
+f=$(envf t5c)
+if [[ $(rc t5c) == 0 ]] && ! grep -qv '^#' "${f}" && ! grep -qF 'INJECT_NL' "${f}" \
+  && grep -qF 'INJECT_NL' "${work}/t5c/err"; then
+  ok "名前に改行を含む skill のディレクトリは節を作らず、warn で知らせる"
+else
+  ng "skill のディレクトリ名" "rc=$(rc t5c)"$'\n'"$(cat "${work}/t5c/err")"$'\n'"$(cat "${f}" 2>&1)"
 fi
 
 # T6. 本物の dotfiles.txt
@@ -313,14 +335,16 @@ fi
 
 # T9. 印が 1 組なら印の間だけ
 new_case t9
-put t9 "# above"$'\n'"${begin_text}"$'\n''# old text'$'\n'"${end_text}"$'\n'"PJP_NOTION_TOKEN_PERSONAL=${secret}"$'\n''# 会社の PC 用'$'\n'"#PJP_NOTION_TOKEN_WORK=${secret}"$'\n'$'CRLF_VAR=1\r\n''LAST_VAR=2'
+put t9 $'ABOVE_VAR=1\r\n''# above'$'\n'"${begin_text}"$'\n''# old text'$'\n'"${end_text}"$'\n'"PJP_NOTION_TOKEN_PERSONAL=${secret}"$'\n''# 会社の PC 用'$'\n'"#PJP_NOTION_TOKEN_WORK=${secret}"$'\n'$'CRLF_VAR=1\r\n''LAST_VAR=2'
 run t9
 check_leak t9
 f=$(envf t9)
+head -n 2 "${f}" >"${work}/t9/got_above"
+head -n 2 "${work}/t9/before" >"${work}/t9/want_above"
 below_end "${f}" >"${work}/t9/got_below"
 below_end "${work}/t9/before" >"${work}/t9/want_below"
 if [[ $(rc t9) == 0 ]] \
-  && [[ $(head -n 1 "${f}") == '# above' && $(sed -n 2p "${f}") == "${begin_text}" ]] \
+  && same "${work}/t9/got_above" "${work}/t9/want_above" && [[ $(sed -n 3p "${f}") == "${begin_text}" ]] \
   && ! grep -qxF '# old text' "${f}" && grep -qxF '# ---- dotfiles ----' "${f}" \
   && same "${work}/t9/got_below" "${work}/t9/want_below" \
   && grep -qF '書き直しました' "${work}/t9/out" && ! grep -qF '移しました' "${work}/t9/err"; then
@@ -330,7 +354,7 @@ else
 fi
 
 # T18 (t9). ローダが読むのは欄の外だけ
-if [[ $(loader_names "${f}") == $'PJP_NOTION_TOKEN_PERSONAL\nCRLF_VAR\nLAST_VAR' ]]; then
+if [[ $(loader_names "${f}") == $'ABOVE_VAR\nPJP_NOTION_TOKEN_PERSONAL\nCRLF_VAR\nLAST_VAR' ]]; then
   ok "書き直した後にローダが読むのは、欄の外の行だけ (印が 1 組)"
 else
   ng "ローダが読む行 (印が 1 組)" "$(loader_names "${f}")"
@@ -349,14 +373,14 @@ else
   ng "2 回目" "rc=$(rc t9)"$'\n'"$(outerr t9)"
 fi
 
-# T16. 中身が最新でもパーミッションは締める
+# T16. 中身が最新でも、group と other の権限は外す
 chmod 644 "${f}"
 cp -p "${f}" "${work}/t9/before2"
 run t9
 check_leak t9
 if [[ $(rc t9) == 0 && $(file_mode "${f}") == 600 ]] && same "${f}" "${work}/t9/before2" \
   && grep -qF '最新' "${work}/t9/out"; then
-  ok "中身が最新でも、パーミッションが 600 でなければ 600 にする"
+  ok "中身が最新でも、group と other の権限があれば外す (644 -> 600)"
 else
   ng "パーミッション" "rc=$(rc t9) mode=$(file_mode "${f}")"$'\n'"$(outerr t9)"
 fi
@@ -384,8 +408,22 @@ else
   ng "ローダが読む行 (欄の中から移した)" "$(loader_names "${f}")"
 fi
 
+# T10b. = だけで終わる行 (KEY= を付けずに貼ったパディング付きの base64 の値) は、名前として出さない
+new_case t10b
+put t10b "${begin_text}"$'\n'"${secret}=="$'\n'"${end_text}"$'\n''MINE=1'$'\n'
+run t10b
+check_leak t10b
+f=$(envf t10b)
+below_end "${f}" >"${work}/t10b/got_below"
+printf '%s\n' "${secret}==" 'MINE=1' >"${work}/t10b/want_below"
+if [[ $(rc t10b) == 0 ]] && same "${work}/t10b/got_below" "${work}/t10b/want_below" \
+  && grep -qF 'KEY=VALUE の形でない行 1 行' "${work}/t10b/err"; then
+  ok "= だけで終わる行は欄の下へ移すが、名前として出さず、形でない行として数える"
+else
+  ng "= だけで終わる行" "rc=$(rc t10b)"$'\n'"$(odump "${work}/t10b/got_below" 10)"
+fi
+
 # T12. 頭の BOM
-bom=$'\xef\xbb\xbf'
 new_case t12a
 put t12a "${bom}$(legacy_template)"$'\n''V=1'$'\n'
 run t12a
@@ -425,64 +463,140 @@ else
   ng "空のファイル" "rc=$(rc t13)"$'\n'"$(outerr t13)"
 fi
 
-# T14. 印が壊れている
+# T14. 印が壊れている。書かずに両方の印の行番号を知らせ、権限だけは外す
 broken_ok=1
 broken_msg=""
 for k in a b c; do
   new_case "t14${k}"
   case ${k} in
-    a) put t14a "${begin_text}"$'\n'"V=${secret}"$'\n' ;;
-    b) put t14b "${begin_text}"$'\n'"${end_text}"$'\n'"V=${secret}"$'\n'"${begin_text}"$'\n'"${end_text}"$'\n' ;;
-    c) put t14c "${end_text}"$'\n'"V=${secret}"$'\n'"${begin_text}"$'\n' ;;
+    a)
+      put t14a "${begin_text}"$'\n'"V=${secret}"$'\n'
+      want_lines='# >>> dotfiles の行: 1、# <<< dotfiles の行: 無し'
+      ;;
+    b)
+      put t14b "${begin_text}"$'\n'"${end_text}"$'\n'"V=${secret}"$'\n'"${begin_text}"$'\n'"${end_text}"$'\n'
+      want_lines='# >>> dotfiles の行: 1,4、# <<< dotfiles の行: 2,5'
+      ;;
+    c)
+      put t14c "${end_text}"$'\n'"V=${secret}"$'\n'"${begin_text}"$'\n'
+      want_lines='# >>> dotfiles の行: 3、# <<< dotfiles の行: 1'
+      ;;
   esac
+  f=$(envf "t14${k}")
+  chmod 644 "${f}"
   run "t14${k}"
   check_leak "t14${k}"
-  f=$(envf "t14${k}")
-  if ! { [[ $(rc "t14${k}") == 0 ]] && same "${f}" "${work}/t14${k}/before" \
-    && grep -qF '書き換えません' "${work}/t14${k}/err" && grep -qE '[0-9]' "${work}/t14${k}/err" \
+  if ! { [[ $(rc "t14${k}") == 0 && $(file_mode "${f}") == 600 ]] && same "${f}" "${work}/t14${k}/before" \
+    && grep -qF '書き換えません' "${work}/t14${k}/err" && grep -qF -- "${want_lines}" "${work}/t14${k}/err" \
     && [[ ! -e "$(dirname "${f}")/env.bak" ]]; }; then
     broken_ok=0
-    broken_msg+="t14${k}: rc=$(rc "t14${k}") $(outerr "t14${k}")"$'\n'
+    broken_msg+="t14${k}: rc=$(rc "t14${k}") mode=$(file_mode "${f}") $(outerr "t14${k}")"$'\n'
   fi
 done
 if [[ ${broken_ok} == 1 ]]; then
-  ok "印が壊れている (始まりだけ・2 組・終わりが先) なら、書かずに行番号を warn で知らせる"
+  ok "印が壊れている (始まりだけ・2 組・終わりが先) なら、書かずに両方の行番号を知らせ、権限だけは外す"
 else
   ng "印が壊れている" "${broken_msg}"
 fi
 
-# T15. symlink と書けないディレクトリ
+# T15. 書かずに抜ける形 (symlink・書けないディレクトリ・普通のファイルでない・読み書きできない・NUL・env.bak)
 new_case t15a
 mkdir -p "${work}/t15a/home/.config/pjp"
 printf 'V=%s\n' "${secret}" >"${work}/t15a/target"
+chmod 644 "${work}/t15a/target"
 cp -p "${work}/t15a/target" "${work}/t15a/before"
 ln -s "${work}/t15a/target" "$(envf t15a)"
 run t15a
 check_leak t15a
-if [[ $(rc t15a) == 0 && -L "$(envf t15a)" ]] && same "${work}/t15a/target" "${work}/t15a/before" \
-  && grep -qF 'symlink' "${work}/t15a/err"; then
-  ok "env が symlink なら、書かずに warn で知らせる"
+if [[ $(rc t15a) == 0 && -L "$(envf t15a)" && $(file_mode "${work}/t15a/target") == 600 ]] \
+  && same "${work}/t15a/target" "${work}/t15a/before" && grep -qF 'symlink' "${work}/t15a/err"; then
+  ok "env が symlink なら、書かずに warn で知らせる (指す先の権限は外す)"
 else
-  ng "symlink" "rc=$(rc t15a)"$'\n'"$(outerr t15a)"
+  ng "symlink" "rc=$(rc t15a) mode=$(file_mode "${work}/t15a/target")"$'\n'"$(outerr t15a)"
 fi
+
+new_case t15c
+mkdir -p "$(envf t15c)"
+run t15c
+if [[ $(rc t15c) == 0 && -d "$(envf t15c)" ]] && grep -qF '普通のファイルではない' "${work}/t15c/err"; then
+  ok "env が普通のファイルでない (ディレクトリ) なら、書かずに warn で知らせる"
+else
+  ng "普通のファイルでない" "rc=$(rc t15c)"$'\n'"$(outerr t15c)"
+fi
+
+new_case t15e
+put t15e "$(legacy_template)"$'\n'"V=${secret}"$'\n'
+mkdir -p "$(dirname "$(envf t15e)")/env.bak"
+run t15e
+check_leak t15e
+if [[ $(rc t15e) == 0 ]] && same "$(envf t15e)" "${work}/t15e/before" \
+  && [[ -z $(ls -A "$(dirname "$(envf t15e)")/env.bak") ]] && grep -qF 'env.bak' "${work}/t15e/err"; then
+  ok "env.bak がディレクトリなら、前の版を写せないので書かずに warn で知らせる"
+else
+  ng "env.bak がディレクトリ" "rc=$(rc t15e)"$'\n'"$(outerr t15e)"
+fi
+
+new_case t15f
+f=$(envf t15f)
+mkdir -p "$(dirname "${f}")"
+printf 'V\000=\0001\000\n\000' >"${f}"
+chmod 600 "${f}"
+cp -p "${f}" "${work}/t15f/before"
+run t15f
+if [[ $(rc t15f) == 0 ]] && same "${f}" "${work}/t15f/before" && grep -qF 'UTF-8' "${work}/t15f/err"; then
+  ok "NUL を含む (UTF-16 で保存された) なら、書かずに UTF-8 で保存し直すよう warn で知らせる"
+else
+  ng "NUL を含む" "rc=$(rc t15f)"$'\n'"$(outerr t15f)"
+fi
+
 if [[ $(id -u) != 0 ]]; then
   new_case t15b
   put t15b "V=${secret}"$'\n'
+  chmod 644 "$(envf t15b)"
   chmod 555 "$(dirname "$(envf t15b)")"
   run t15b
   check_leak t15b
   chmod 755 "$(dirname "$(envf t15b)")"
-  if [[ $(rc t15b) == 0 ]] && same "$(envf t15b)" "${work}/t15b/before" \
+  if [[ $(rc t15b) == 0 && $(file_mode "$(envf t15b)") == 600 ]] && same "$(envf t15b)" "${work}/t15b/before" \
     && grep -qF '!! ' "${work}/t15b/err"; then
-    ok "ディレクトリに書けなければ、書かずに warn で知らせて exit 0"
+    ok "ディレクトリに書けなければ、書かずに warn で知らせて exit 0 (権限は外す)"
   else
-    ng "書けないディレクトリ" "rc=$(rc t15b)"$'\n'"$(outerr t15b)"
+    ng "書けないディレクトリ" "rc=$(rc t15b) mode=$(file_mode "$(envf t15b)")"$'\n'"$(outerr t15b)"
   fi
+
+  new_case t15d
+  put t15d "V=${secret}"$'\n'
+  chmod 000 "$(envf t15d)"
+  run t15d
+  check_leak t15d
+  mode_after=$(file_mode "$(envf t15d)")
+  chmod 600 "$(envf t15d)"
+  if [[ $(rc t15d) == 0 && ${mode_after} == 0 ]] && same "$(envf t15d)" "${work}/t15d/before" \
+    && grep -qF '読み書きできない' "${work}/t15d/err"; then
+    ok "読み書きできなければ、書かずに warn で知らせ、600 より狭い権限は広げない"
+  else
+    ng "読み書きできない" "rc=$(rc t15d) mode=${mode_after}"$'\n'"$(outerr t15d)"
+  fi
+fi
+
+# T17b. bash -x で流しても、値は trace に出ない (印の無いファイルの頭・欄の中から移す行)
+new_case t17b
+put t17b "${secret}"$'\n'"V=${secret}"$'\n'
+run t17b -x
+check_leak t17b
+new_case t17c
+put t17c "${begin_text}"$'\n'"K=${secret}"$'\n'"${end_text}"$'\n'
+run t17c -x
+check_leak t17c
+if [[ $(rc t17b) == 0 && $(rc t17c) == 0 ]] && grep -qF '+ ' "${work}/t17b/err"; then
+  ok "bash -x で流せる (値が trace に出ないことは T17 でまとめて見る)"
+else
+  ng "bash -x" "rc=$(rc t17b) $(rc t17c)"
 fi
 
 # T17. 値を出さない
 if [[ -z ${leaks} ]]; then
-  ok "値は out・err・警告のまとめのどれにも出さない"
+  ok "値は out・err・警告のまとめのどれにも出さない (bash -x の trace にも)"
 else
   ng "値が出た" "${leaks}"
 fi

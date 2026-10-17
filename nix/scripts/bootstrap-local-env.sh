@@ -34,8 +34,9 @@
 #
 # 実際の API キーが入っているファイルなので、書き換えるのは印 (# >>> dotfiles の行から
 # # <<< dotfiles の行まで) の間だけ。印の外 (ユーザーが書いた値・メモ・コメントアウトした値) は、
-# 改行の形も含めてそのまま残す。迷う場面 (印が壊れている・symlink・書けない) では書かずに
-# warn で知らせ、exit 0 で終える (setup の後ろの手順を巻き込まない)。
+# 改行の形も含めてそのまま残す。迷う場面 (印が壊れている・symlink・普通のファイルでない・書けない・
+# NUL を含む・env.bak がディレクトリ) では書かずに warn で知らせ、exit 0 で終える (setup の後ろの手順を
+# 巻き込まない)。どの場合も、group と other の権限があれば外す (600 より狭い権限は広げない)。
 
 set -eu -o pipefail
 
@@ -81,13 +82,32 @@ summary_warn() {
   { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
-# stat のオプションは GNU (Linux) と BSD (macOS) で違う。
+# stat のオプションは GNU (Linux) と BSD (macOS) で違う。symlink は指す先を見る。
 file_mode() {
   local mode
-  if mode=$(stat -c '%a' "$1" 2>/dev/null); then
+  if mode=$(stat -L -c '%a' "$1" 2>/dev/null); then
     printf '%s' "${mode}"
   else
-    stat -f '%Lp' "$1"
+    stat -L -f '%Lp' "$1"
+  fi
+}
+
+# 秘密情報を置く前提のファイルなので、group と other の権限があれば外す (600 より狭い権限は広げない)。
+# 書かずに抜けるときも、symlink の先 (普通のファイルなら) も締める。締められなくても止めない。
+tighten_mode() {
+  local mode
+  [[ -f ${env_file} ]] || return 0
+  mode=$(file_mode "${env_file}" 2>/dev/null) || return 0
+  # stat は 004 を「4」と出すので、3 桁に揃えてから group と other の桁を見る
+  while ((${#mode} < 3)); do
+    mode="0${mode}"
+  done
+  [[ ${mode: -2} != 00 ]] || return 0
+  if chmod go-rwx "${env_file}" 2>/dev/null; then
+    echo "パーミッションを ${mode} -> $(file_mode "${env_file}") にしました。"
+  else
+    warn "${env_file} の group と other の権限を外せませんでした (今は ${mode})。" \
+      "chmod go-rwx ${env_file} で外してください。"
   fi
 }
 
@@ -105,7 +125,7 @@ cleanup() {
 trap cleanup EXIT
 
 # 欄の 1 節を stdout へ出す。$1: 見出し、$2: 断片のファイル。
-# 行末の CR を外し、先頭と末尾の空行を落とし、空行は「#」、それ以外は「# 」+ 行にする。
+# 行末の CR と 1 行目の頭の BOM を外し、先頭と末尾の空行を落とし、空行は「#」、それ以外は「# 」+ 行にする。
 # 空 (空行だけ) なら何も出さない。次の断片は、warn して何も出さず 1 を返す:
 #
 #   - 読めない
@@ -115,8 +135,8 @@ trap cleanup EXIT
 render_fragment() {
   local heading=$1 file=$2 body rc=0
   body=$(
-    awk -v cc=$'[\x01-\x08\x0b-\x1f\x7f]' -v nel=$'\xc2\x85' -v lsep=$'\xe2\x80\xa8' -v psep=$'\xe2\x80\xa9' '
-      { sub(/\r$/, ""); lines[++n] = $0 }
+    awk -v cc=$'[\x01-\x08\x0b-\x1f\x7f]' -v nel=$'\xc2\x85' -v lsep=$'\xe2\x80\xa8' -v psep=$'\xe2\x80\xa9' -v bom="${bom}" '
+      { sub(/\r$/, ""); if (NR == 1 && index($0, bom) == 1) $0 = substr($0, length(bom) + 1); lines[++n] = $0 }
       END {
         first = 0
         for (i = 1; i <= n; i++) if (lines[i] !~ /^[ \t]*$/) { if (!first) first = i; last = i }
@@ -152,7 +172,7 @@ render_fragment() {
 
 # 欄の全体 (始まりの印から終わりの印まで) を stdout へ出す
 render_block() {
-  local d
+  local d name
   printf '%s\n' "${begin_line}"
   cat <<'PREAMBLE'
 #
@@ -176,7 +196,14 @@ PREAMBLE
   for d in "${skills_dir}"/*/; do
     [[ -f "${d}pjp-env.txt" ]] || continue
     d=${d%/}
-    render_fragment "skill: ${d##*/}" "${d}/pjp-env.txt" || true
+    name=${d##*/}
+    # 名前は見出しの行にそのまま入るので、改行などを含む名前は入れない (見出しから生きた行が生まれる)
+    if [[ ! ${name} =~ ^[A-Za-z0-9._-]+$ ]]; then
+      warn "$(printf '%q' "${d}") は ~/.config/pjp/env の欄に入れません。" \
+        "skill のディレクトリ名に英数字と . _ - 以外の文字 (改行など) があり、欄の見出しが壊れるため。"
+      continue
+    fi
+    render_fragment "skill: ${name}" "${d}/pjp-env.txt" || true
   done
   printf '%s\n' '#####################################################' "${end_line}"
 }
@@ -214,31 +241,36 @@ scan_markers() {
   ' "$1"
 }
 
-# 頭の 10 行が古いテンプレートと 1 行ずつ同じか
+# 頭の 10 行が古いテンプレートと 1 行ずつ同じか。シェルの変数に入れずにファイル同士で比べる
+# (印の無いファイルの頭には値の行がありうる。bash -x で流しても trace に出さないため)
 is_legacy() {
-  local head10
-  head10=$(awk -v bom="${bom}" 'NR > 10 { exit } { '"${awk_plain_line}"'; print line }' "$1")
-  [[ ${head10} == "$(legacy_template)" ]]
+  cmp -s <(awk -v bom="${bom}" 'NR > 10 { exit } { '"${awk_plain_line}"'; print line }' "$1") <(legacy_template)
 }
 
 # 印の間 (行 $2 と行 $3 の間) の、空白だけでなく # で始まらない行 (ユーザーが書いたもの)。
 # $4 が lines なら元のバイトのまま出す。names なら「<KEY=VALUE の形でない行の数><TAB><変数名のカンマ区切り>」
-# (数を先に置く。TAB は read が空白として読み飛ばすので、空になりうる名前を先に置くとずれる)
+# (数を先に置く。TAB は read が空白として読み飛ばすので、空になりうる名前を先に置くとずれる)。
+# = の後ろが空か = だけの行は、名前として数えない。KEY= を付けずに貼ったパディング付きの base64 の値
+# (abc…XYZ==) は識別子の形に見え、名前として出すと値そのものを出すことになるため。
 rescue() {
   awk -v b="$2" -v e="$3" -v mode="$4" '
     NR <= b || NR >= e { next }
     { l = $0; gsub(/[ \t\r]/, "", l) }
     l == "" || substr($0, 1, 1) == "#" { next }
     mode == "lines" { print; next }
-    match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) { names = names (names == "" ? "" : ", ") substr($0, 1, RLENGTH - 1); next }
+    match($0, /^[A-Za-z_][A-Za-z0-9_]*=/) && substr($0, RLENGTH + 1) !~ /^=*\r?$/ {
+      names = names (names == "" ? "" : ", ") substr($0, 1, RLENGTH - 1)
+      next
+    }
     { other++ }
     END { if (mode == "names") printf "%d\t%s\n", other, names }
   ' "$1"
 }
 
-# 書けないときも setup を止めない (warn して exit 0)
+# 書けないときも setup を止めない (warn して exit 0)。書かずに抜けるときも権限は締める
 give_up() {
   warn "$@"
+  tighten_mode
   exit 0
 }
 
@@ -271,6 +303,12 @@ if [[ ! -e ${env_file} ]]; then
   kind=created
   cat "${block_tmp}" >"${new_tmp}" || give_up "${env_file} を書けませんでした。"
 else
+  # NUL があるなら UTF-16 などで保存されている。UTF-8 の欄を足すと文字コードが混ざるので書かない
+  # (一時ファイルは、この後で書き上がりに使い直す)
+  if ! { tr -d '\000' <"${env_file}" >"${new_tmp}" && cmp -s "${new_tmp}" "${env_file}"; }; then
+    give_up "${env_file} に NUL があるので書き換えません (UTF-16 で保存された、など)。" \
+      "UTF-8 で保存し直してから、~/dotfiles/setup --steps bootstrap-local-env で流し直してください。"
+  fi
   markers=$(scan_markers "${env_file}") || give_up "${env_file} を読めないので書き換えません。"
   read -r nb ne blist elist total <<<"${markers}"
   if [[ ${nb} == 1 && ${ne} == 1 ]] && ((blist < elist)); then
@@ -278,13 +316,13 @@ else
     # 印の間のユーザーの行は、終わりの印のすぐ下 (下の行より前) へ移し、後の行が勝つ順を変えない
     kind=replaced
     kept=$((blist - 1 + total - elist))
+    # どれか 1 つでも失敗したら書かない (短くなった中身で置き換えない)。BSD の head は -n 0 を受けないので、
+    # 始まりの印が 1 行目なら head を呼ばない
     {
-      if ((blist > 1)); then
-        head -n "$((blist - 1))" "${env_file}"
-      fi
-      cat "${block_tmp}"
-      rescue "${env_file}" "${blist}" "${elist}" lines
-      tail -n "+$((elist + 1))" "${env_file}"
+      { ((blist == 1)) || head -n "$((blist - 1))" "${env_file}"; } \
+        && cat "${block_tmp}" \
+        && rescue "${env_file}" "${blist}" "${elist}" lines \
+        && tail -n "+$((elist + 1))" "${env_file}"
     } >"${new_tmp}" || give_up "${env_file} を書けませんでした。"
     IFS=$'\t' read -r rescued_other rescued_names <<<"$(rescue "${env_file}" "${blist}" "${elist}" names)"
   elif [[ ${nb} == 0 && ${ne} == 0 ]]; then
@@ -311,6 +349,11 @@ if [[ ${kind} != created ]] && cmp -s "${new_tmp}" "${env_file}"; then
   echo "欄は最新です: ${env_file}"
 else
   if [[ ${kind} != created ]]; then
+    # ディレクトリへ mv すると、その中へ写しが溜まっていく (1 世代だけ、が崩れる)
+    if [[ -d ${bak_file} ]]; then
+      give_up "${bak_file} がディレクトリなので前の版を写せず、${env_file} を書き換えません。" \
+        "${bak_file} をどけてから、~/dotfiles/setup --steps bootstrap-local-env で流し直してください。"
+    fi
     bak_tmp=$(mktemp "${env_dir}/.env.bak.XXXXXX" 2>/dev/null) \
       || give_up "${env_dir} に一時ファイルを作れないので、${env_file} を書き換えません。"
     if ! { cp "${env_file}" "${bak_tmp}" && chmod 600 "${bak_tmp}" && mv -f "${bak_tmp}" "${bak_file}"; }; then
@@ -339,12 +382,7 @@ if [[ -n ${rescued_names} || ${rescued_other} != 0 ]]; then
     "欄 (# >>> dotfiles から # <<< dotfiles まで) は setup が書き直すので、値は欄より下に書いてください。"
 fi
 
-# 秘密情報を置く前提のファイルなので、緩ければ締める。
-mode=$(file_mode "${env_file}")
-if [[ ${mode} != 600 ]]; then
-  chmod 600 "${env_file}"
-  echo "パーミッションを ${mode} -> 600 にしました。"
-fi
+tighten_mode
 
 echo
 echo "値を足すには (新しいシェルから有効になる):"
