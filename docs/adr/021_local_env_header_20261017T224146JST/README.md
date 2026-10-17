@@ -5,6 +5,7 @@
 | ステータス | 承認 (Accepted) — 方針は 2026-10-17 にユーザーが承認。文面は PR でレビュー |
 | 日付 | 2026-10-17 (JST) |
 | 決定者 | pollenjp |
+| チケット | [TKT-203](https://app.notion.com/p/config-pjp-env-setup-3fc79149a66f81c39cddefbcd4ccbb76) |
 | 運用手順 | [`nix/README.md`「マシンローカルの環境変数」](../../../nix/README.md#マシンローカルの環境変数-configpjpenv) |
 
 ---

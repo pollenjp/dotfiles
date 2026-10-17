@@ -8,7 +8,7 @@
 
 **Tech Stack:** bash (macOS の 3.2 でも動く書き方)・POSIX の awk / head / tail / cmp・Nix flake の checks (`runCommand`)
 
-**Spec:** `docs/adr/021_local_env_header_20261017T224146JST/README.md` (ADR 021、方針は 2026-10-17 にユーザーが承認)
+**Spec:** `docs/adr/021_local_env_header_20261017T224146JST/README.md` (ADR 021、方針は 2026-10-17 にユーザーが承認。チケットは TKT-203)
 
 ## Global Constraints
 
