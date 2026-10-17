@@ -16,7 +16,7 @@ flake の checks (pjp-who-is-asking-unittest) が流す。
 - 木: 直接の呼び出しは Windows と Linux を 1 本の道につなぎ、wsl.exe -e の踏み台は元のセッションの
   呼び出し元まで戻る。親の PID が使い回されていたら (親の方が後から起動している) そこで止める
 - 表示: Windows と Linux をまたぐ所に印を付け、長い見出しも切らない。Linux 側の引数は空白があれば
-  引用する。見出しの制御文字は無害化する
+  引用する。見出しの制御文字 (C0・C1・U+2028 / U+2029) は無害化する
 - PowerShell の出力: BOM 付きの JSON を読み、自分 (powershell.exe) を外す。JSON でなければ空にし、
   欄の欠けた項目は飛ばす
 - /proc/<pid>/stat の起動時刻: comm に ")" や空白があっても読み、壊れていれば None
@@ -31,6 +31,7 @@ flake の checks (pjp-who-is-asking-unittest) が流す。
   他のディストロの記録は見ない
 - 記録の節: 記録ごとに状態つきの見出しと木を出し、踏み台には印を付ける。0 件ならその旨、2 件以上なら
   一番新しいものを指す。記録の中の制御文字は無害化する。遡る長さは 60 で割り切れれば分で書く
+- journal の行の割り方: 記録の中に U+2028 や U+0085 があっても、\n だけで割って 1 件のまま読む
 - 記録を読めないとき: unit が無ければ読まずに 1 行、止まっていれば読んだうえで最後に 1 行、読めなければ
   1 行 (権限の Hint・journalctl の失敗)。systemctl の状態が分からなければ見ずに読む。窓に 5 秒足して遡らせる
 - main: 記録の節をいま動いている木より先に出し、`--recent 0` なら記録を読まない。負の `--recent` は
@@ -258,6 +259,11 @@ class TestUntrustedText(unittest.TestCase):
         line = w.render([("L", 1, "ssh.exe x\n[Windows] 999 fake\x1b[1A", None)])[0]
         self.assertNotIn("\x1b", line)
         self.assertNotIn("\n", line)
+
+    def test_c1_controls_and_unicode_line_separators_are_escaped(self):
+        # U+0085 (NEL) や U+009B (CSI) は端末によっては改行や制御として効く。U+2028 / U+2029 は行の区切り
+        line = w.render([("L", 1, "a\u0085b\u009bc d e", None)])[0]
+        self.assertEqual(line, "[Linux  ] 1 a\\x85b\\x9bc\\u2028d\\u2029e")
 
 
 class TestParseWindows(unittest.TestCase):
@@ -556,6 +562,22 @@ class TestJournalBody(unittest.TestCase):
         for line in out:
             for ch in ("\x1b", "\n", "\x07"):
                 self.assertNotIn(ch, line)
+
+
+class TestReadJournal(unittest.TestCase):
+    def test_records_with_unicode_line_separators_stay_whole(self):
+        # トレーサは ensure_ascii=False で書くので、argv や cmdline の U+2028 / U+0085 は生のまま 1 行に入る。
+        # str.splitlines() はこれらでも割るので、記録が 2 つの壊れた JSON になって黙って消えていた
+        recs = [
+            probe_record(pid=1, argv=["ssh.exe", "a b", "git@github.com"]),
+            probe_record(pid=2, ancestry=[{"pid": 980424, "cmdline": "zsh -c 'x\u0085y'"}]),
+        ]
+        out = "Started dotfiles-exe-exec-trace.service\n" + "".join(as_line(r) + "\n" for r in recs)
+        done = w.subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
+        with mock.patch.object(w.subprocess, "run", return_value=done):
+            lines, msg = w.read_journal(1_792_200_000)
+        self.assertIsNone(msg)
+        self.assertEqual([r["pid"] for r in w.parse_records(lines, PROBE_MS, 180_000)], [1, 2])
 
 
 class TestJournalLines(unittest.TestCase):

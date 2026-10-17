@@ -121,12 +121,18 @@ def tree_nodes(w, procs, pair, linux_nodes):
 
 
 # ラベルの中身 (argv・コマンドライン) は要求元が決められる。改行や ESC をそのまま出すと
-# 偽の行を差し込んだり端末を操作したりできるので、表示する前に \xNN にする
-CTRL = re.compile(r"[\x00-\x1f\x7f]")
+# 偽の行を差し込んだり端末を操作したりできるので、表示する前に \xNN にする。
+# C1 (U+0080〜U+009F。U+0085 は改行、U+009B は CSI として効く端末がある) と、Unicode の行・段落の
+# 区切り (U+2028 / U+2029) も同じ扱いにする (後者は \uNNNN)
+CTRL = re.compile(r"[\x00-\x1f\x7f-\x9f  ]")
 
 
 def safe(s):
-    return CTRL.sub(lambda m: f"\\x{ord(m.group()):02x}", s)
+    def esc(m):
+        o = ord(m.group())
+        return f"\\x{o:02x}" if o < 0x100 else f"\\u{o:04x}"
+
+    return CTRL.sub(esc, s)
 
 
 def join_argv(argv):
@@ -517,7 +523,9 @@ def read_journal(since_s):
     except OSError as e:
         return [], f"(記録を読めなかった: {e})"
     msg = journalctl_message(r.returncode, r.stderr)
-    return ([], msg) if msg else (r.stdout.splitlines(), None)
+    # 記録は 1 行 1 件 (トレーサは ensure_ascii=False で書く)。splitlines() は U+2028 / U+0085 などでも
+    # 割り、記録の中にそれがあると 1 件が 2 つの壊れた JSON になって黙って消えるので、\n だけで割る
+    return ([], msg) if msg else (r.stdout.split("\n"), None)
 
 
 def is_alive(rec, boot):
