@@ -202,7 +202,46 @@ pjp-who-is-asking
 
 ## 6. 検証 (Verification)
 
-実装のあとに書く。
+### テストと CI 相当の検査
+
+| 検査 | 結果 |
+| --- | --- |
+| unittest (手元の python 3.12.3) | `pjp-who-is-asking` 62 件が通る (前からの 26 件 + 今回の 36 件) |
+| unittest (flake の `checks` の `pjp-who-is-asking-unittest`、Nix の python 3.14.7) | 62 件が通る。`hhmmss` はローカル時刻なので、テストは TZ を POSIX の `JST-9` にそろえる (zoneinfo の無いサンドボックスでも効く) |
+| `nix/scripts/check-test-headers.sh` | 30 本とも「## 確かめること」がある |
+
+### 実機 (`pollenjp@wsl`、2026-10-17 11:24〜11:26)
+
+- `ssh -V` (ラッパー経由で `ssh.exe -V`。agent に触れない) を打った直後の `pjp-who-is-asking --no-windows`:
+  記録の節に `ssh.exe -V` が「終了済み」で出て、木がこのセッションの claude (pid 980424) と Bash ツールの
+  `zsh -c` まで届いた。同じ 3 分の中の、別のペインの `ssh-add.exe -l` も出た
+- `pjp-who-is-asking` (Windows 側も取る): 記録の節のあとに「いま動いている」の節が出て、00:37 から続く
+  `ssh.exe -A pollenjp@lavie.local` (Windows pid 43356) が出た
+- `--recent 0`: 記録の節が出ない
+- `--recent 7200`: 1. の 6 回の確かめ (10:26:48〜10:35:37) が、それぞれの claude (940915・941852・
+  947654・949044・951100・980424) まで届く木で出た。調査のときに手で突き合わせた結果と同じ
+
+```
+## 直近 120 分に起動された要求 (exe-exec-trace の記録、古い順)
+== ssh.exe  Linux pid 947133  起動 10:26:48.347 (3502 秒前)  終了済み
+[Linux  ]         └─ 940915 claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5 --continue
+…
+== ssh.exe  Linux pid 1037709  起動 10:35:37.246 (2973 秒前)  終了済み
+[Linux  ]         └─ 980424 claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5
+```
+
+(各記録の木の claude の行だけを抜き出した)
+
+- 2026-10-17 04:32〜11:40 の journal の 540 行に記録を選ぶ規則を当てると、選ばれたのは agent の 8 件
+  (`ssh.exe` 6・`ssh-add.exe` 2) だけで、踏み台の誤検出は無かった
+
+### 確かめていないこと
+
+- `adm` / `systemd-journal` に入っていないユーザーでの権限の案内 (`pollenjp` は `adm` に入っている。
+  journalctl の Hint の文はテストで押さえた)
+- unit が入っていない・止まっているマシンでの表示 (テストだけ)
+- 踏み台 (`cmd.exe /c ssh.exe …`) の実機の記録 (今日の journal に無かった。形はテストで押さえた)
+- 他のディストロからの要求の記録 (テストだけ)
 
 ## 7. 移行・運用手順
 
