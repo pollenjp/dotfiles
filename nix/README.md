@@ -2510,7 +2510,8 @@ workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめ
 ```
 
 `nix flake check` → sandbox ビルド → 配置ファイル一覧 → 使い捨て `$HOME` への activate →
-冪等性確認 → `~/dotfiles` 参照の残留チェック、までを一括で行う。実際の `$HOME` には触れない。
+冪等性確認 → `~/dotfiles` 参照の残留チェック、までを一括で行う。実際の `$HOME` にも、手元の user systemd にも
+触れない (activate へ渡す `XDG_RUNTIME_DIR` を使い捨ての `$HOME` の下へ向ける。CI の `check` と同じ)。
 
 個別に実行する場合:
 

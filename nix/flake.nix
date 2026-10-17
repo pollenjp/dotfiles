@@ -138,6 +138,7 @@
                 touch $out
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+          verify-test = scriptTest "verify" ./scripts/verify.sh;
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
