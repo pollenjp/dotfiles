@@ -106,18 +106,25 @@ trap cleanup EXIT
 
 # 欄の 1 節を stdout へ出す。$1: 見出し、$2: 断片のファイル。
 # 行末の CR を外し、先頭と末尾の空行を落とし、空行は「#」、それ以外は「# 」+ 行にする。
-# 空 (空行だけ) なら何も出さない。読めない断片と、「# 」を付けると印として読まれてしまう行
-# (>>> dotfiles / <<< dotfiles で始まる行) を持つ断片は、warn して何も出さず 1 を返す。
+# 空 (空行だけ) なら何も出さない。次の断片は、warn して何も出さず 1 を返す:
+#
+#   - 読めない
+#   - 「# 」を付けると印として読まれてしまう行 (>>> dotfiles / <<< dotfiles で始まる行) がある
+#   - 行の途中に制御文字 (タブを除く) か U+0085・U+2028・U+2029 がある。claude-skills の resolver
+#     (Python の str.splitlines) はそこでも行を分けるので、欄の中に生きた KEY= の行が生まれうる
 render_fragment() {
   local heading=$1 file=$2 body rc=0
   body=$(
-    awk '
+    awk -v cc=$'[\x01-\x08\x0b-\x1f\x7f]' -v nel=$'\xc2\x85' -v lsep=$'\xe2\x80\xa8' -v psep=$'\xe2\x80\xa9' '
       { sub(/\r$/, ""); lines[++n] = $0 }
       END {
         first = 0
         for (i = 1; i <= n; i++) if (lines[i] !~ /^[ \t]*$/) { if (!first) first = i; last = i }
         if (!first) exit 0
-        for (i = first; i <= last; i++) if (lines[i] ~ /^(>>>|<<<) dotfiles/) exit 3
+        for (i = first; i <= last; i++) {
+          if (lines[i] ~ /^(>>>|<<<) dotfiles/) exit 3
+          if (lines[i] ~ cc || index(lines[i], nel) || index(lines[i], lsep) || index(lines[i], psep)) exit 4
+        }
         for (i = first; i <= last; i++) print (lines[i] ~ /^[ \t]*$/ ? "#" : "# " lines[i])
       }
     ' "${file}" 2>/dev/null
@@ -127,6 +134,11 @@ render_fragment() {
     3)
       warn "${file} は ~/.config/pjp/env の欄に入れません。" \
         "印と同じ頭 (>>> dotfiles / <<< dotfiles) で始まる行があり、欄が壊れるため。その行の頭を変えてください。"
+      return 1
+      ;;
+    4)
+      warn "${file} は ~/.config/pjp/env の欄に入れません。" \
+        "行の途中に制御文字 (CR・改ページ・U+2028 など) があり、Notion の宛先の resolver (Python) がそこで行を分けて、欄の中に生きた変数が生まれうるため。その文字を消してください。"
       return 1
       ;;
     *)

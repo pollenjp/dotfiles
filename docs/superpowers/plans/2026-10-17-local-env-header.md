@@ -54,7 +54,7 @@
 - Produces (テストの道具。Task 2 が足すケースも使う): `new_case <名前>`・`run <ケース>`・`envf <ケース>`・`ok` / `ng`
 - 欄の組み方 (ADR 021 の A・E): 始まりの印 → 下の「前置き」 → 節 (dotfiles が先、skill は `~/.claude/skills/*/pjp-env.txt` をディレクトリ名の C ロケール順) → `#####################################################` (# が 53 個) → 終わりの印
 - 1 節: `# ---- <見出し> ----`・`#`・断片の各行・`#`。見出しは `dotfiles` か `skill: <ディレクトリ名>`
-- 断片の行: 行末の CR を外す。先頭と末尾の空行は落とす。空行は `#`、それ以外は `# ` + 行。`# ` を付けた行が印として読まれるもの (行頭が `>>> dotfiles` か `<<< dotfiles`) を持つ断片は、節ごと入れない
+- 断片の行: 行末の CR を外す。先頭と末尾の空行は落とす。空行は `#`、それ以外は `# ` + 行。`# ` を付けた行が印として読まれるもの (行頭が `>>> dotfiles` か `<<< dotfiles`) を持つ断片と、行の途中に制御文字 (タブを除く) か U+0085・U+2028・U+2029 を持つ断片 (ADR 021 の G) は、節ごと入れない
 
 前置き (始まりの印の次から、そのまま書く):
 
@@ -86,6 +86,12 @@ DOTFILES_LOCAL_DIR=xxxxxx
 dotfiles-private の clone の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は $(ghq root)/github.com/pollenjp/dotfiles-private)。
 DOTFILES_PRIVATE_DIR=xxxxxx
 
+claude-skills (private な skill 置き場) の clone の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は $(ghq root)/github.com/pollenjp/claude-skills)。
+CLAUDE_SKILLS_DIR=xxxxxx
+
+cc-pages (長い応答を読む web ビューア) の clone の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は $(ghq root)/github.com/pollenjp/cc-pages)。
+CC_PAGES_DIR=xxxxxx
+
 ここには書かない (コマンドの前に付けて 1 回だけ使う):
   USE_LINUX_SSH=1 ssh <ホスト>  常に効かせると ssh-add も Linux 側になり、git の署名鍵が並ばない
   DOTFILES_MIN_RELEASE_AGE_DAYS=0 ~/dotfiles/setup --steps flake-update  常に効かせると flake.lock の遅延が外れたままになる (FLAKE_MIN_RELEASE_AGE_DAYS も同じ)
@@ -107,6 +113,7 @@ DOTFILES_PRIVATE_DIR=xxxxxx
 - T3「断片から生きた変数は生まれない」: `zeta` の `FOO=bar` は `# FOO=bar` として欄にあり、断片の空行は `#` になっている。各節は見出しの次が `#`、その次が断片の 1 行目 (先頭の空行が落ちている)
 - T4「CRLF と末尾に改行の無い断片」: 欄のどの行にも CR が無く、`crlf` の最後の行が欄にある
 - T5「印に化ける断片は入れない」: err に `!! ` と `bad/pjp-env.txt` があり、`warnings` にも同じ行がある。欄の始まりの印・終わりの印はそれぞれ 1 つだけ
+- T5b「行の途中に制御文字がある断片は入れない」(ADR 021 の G で足した): `ctrl/pjp-env.txt` (`…\rPJP_NOTION_TOKEN_PERSONAL=bogus`) と `uline/pjp-env.txt` (行の途中に U+2028) → 両方 err に出て節が無い。欄に C0 の制御文字 (タブと改行を除く)・DEL・U+0085・U+2028・U+2029 が 1 つも無い
 - T6「本物の dotfiles.txt」(第 2 引数があるときだけ): それを偽の checkout に置いて作ると、rc 0・err が空・`dotfiles.txt` の空でない各行が `# ` を付けて欄にある
 
 - [ ] **Step 2: テストが落ちることを確かめる**

@@ -177,6 +177,25 @@ else
   ng "印に化ける断片" "$(cat "${work}/t1/err")"$'\n'"$(cat "${work}/t1/warnings" 2>&1)"
 fi
 
+# T5b. 行の途中に制御文字がある断片は入れない。claude-skills の resolver (Python の str.splitlines) は
+# CR・\v・\f・\x1c〜\x1e・U+0085・U+2028・U+2029 でも行を分けるので、欄の中に生きた変数が生まれうる
+new_case t5b
+s="${work}/t5b/home/.claude/skills"
+mkdir -p "${s}/ctrl" "${s}/uline"
+printf 'ctrl の変数。\rPJP_NOTION_TOKEN_PERSONAL=bogus\n' >"${s}/ctrl/pjp-env.txt"
+printf 'uline の変数。\xe2\x80\xa8Z_INJECT=1\n' >"${s}/uline/pjp-env.txt"
+run t5b
+f=$(envf t5b)
+if [[ $(rc t5b) == 0 ]] && grep -qF 'ctrl/pjp-env.txt' "${work}/t5b/err" \
+  && grep -qF 'uline/pjp-env.txt' "${work}/t5b/err" \
+  && ! grep -qF 'skill: ctrl' "${f}" && ! grep -qF 'skill: uline' "${f}" \
+  && ! grep -q $'[\x01-\x08\x0b-\x1f\x7f]' "${f}" \
+  && ! grep -qF -e $'\xc2\x85' -e $'\xe2\x80\xa8' -e $'\xe2\x80\xa9' "${f}"; then
+  ok "行の途中に制御文字 (CR・U+2028 など) がある断片は入れず、欄に行の区切りになる文字は 1 つも無い"
+else
+  ng "制御文字の断片" "rc=$(rc t5b)"$'\n'"$(cat "${work}/t5b/err")"
+fi
+
 # T6. 本物の dotfiles.txt
 if [[ -n ${real_fragment} ]]; then
   new_case t6

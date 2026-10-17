@@ -98,7 +98,8 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 ```
 
 - 印の始まりの行は `# >>> dotfiles`、終わりの行は `# <<< dotfiles` で始まる。印として見るのはこの頭だけで
-  (行末の CR は外して見る)、後ろの日本語の文言は変えてよい。別の文字コードで保存されても印を見失わない
+  (行末の CR と、1 行目の頭の UTF-8 BOM は外して見る)、後ろの日本語の文言は変えてよい。別の文字コードで
+  保存されても印を見失わない
 - 印の間 (印の行を含む) が setup のもの。すべての行が `#` で始まるので、3 つのローダはどれも欄を読まない
 - 印の外 (始まりより上と、終わりより下) はユーザーのもの。setup は 1 バイトも変えない
   (CRLF の行・末尾に改行の無い行・UTF-8 でない文字も、そのまま)
@@ -148,8 +149,12 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 - `pjp-env.txt` は素のテキストで書く。setup が各行の頭に `# ` を付け (空行は `#`)、先頭と末尾の空行は落とす。
   空 (空行だけ) なら節を作らない
 - 頭に `# ` が付くので、断片に `FOO=bar` と書いても欄の中では `# FOO=bar` になり、生きた変数は生まれない
-- `# ` を付けた行が印として読まれてしまう断片 (`>>> dotfiles` や `<<< dotfiles` で始まる行を持つもの) と、
-  読めない断片は、欄に入れずに warn で知らせる
+- 次の断片は欄に入れずに warn で知らせる
+  - 読めない断片
+  - `# ` を付けた行が印として読まれてしまう断片 (`>>> dotfiles` や `<<< dotfiles` で始まる行を持つもの)
+  - 行の途中に制御文字 (タブを除く) か U+0085・U+2028・U+2029 を持つ断片。claude-skills の resolver は
+    Python の `str.splitlines()` で行を切り、CR・`\v`・`\f`・`\x1c`〜`\x1e`・U+0085・U+2028・U+2029 でも行を分ける。
+    bash と fish からは `#` で始まる 1 行でも、resolver からは欄の中に生きた `KEY=` の行が生まれる
 - 1 変数の書き方は「何のための変数か。取り得る値: …。」の行と `<名前>=xxxxxx` の行 (値が決まっているなら
   その値)。変数の間は空行で区切る。ここに書くと困る変数は、最後に「ここには書かない」の行でまとめる
 - skill の文言は skill と一緒に届く。claude-skills を直して push すれば、各 PC の次の `setup --update` で欄に出る。
@@ -161,9 +166,22 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 
 | 扱い | 変数 |
 | --- | --- |
-| 載せる (例の行つき) | `PJP_NOTION_TOKEN_<名前>` (pjp-notion-profile)・`WHISPER_MODEL` (pjp-video-explainer-pictogram)・`DOTFILES_HOST`・`DOTFILES_LOCAL_DIR`・`DOTFILES_PRIVATE_DIR` (dotfiles) |
+| 載せる (例の行つき) | `PJP_NOTION_TOKEN_<名前>` (pjp-notion-profile)・`WHISPER_MODEL` (pjp-video-explainer-pictogram)・`DOTFILES_HOST`・`DOTFILES_LOCAL_DIR`・`DOTFILES_PRIVATE_DIR`・`CLAUDE_SKILLS_DIR`・`CC_PAGES_DIR` (dotfiles) |
 | 「ここには書かない」の行でだけ触れる | `NOTION_API_TOKEN` (書くと、どの repo でもその token が勝つ)・`USE_LINUX_SSH` (常に効くと `ssh-add` も Linux 側になり、git の署名鍵が並ばない)・`DOTFILES_MIN_RELEASE_AGE_DAYS` と `FLAKE_MIN_RELEASE_AGE_DAYS` (常に効くと flake.lock の遅延が外れたままになる) |
 | 載せない | 1 回だけコマンドの前に付ける上書き (`DOTFILES_BACKUP_EXT`・`DOTFILES_ALLOW_ANY_PATH`・`NIX_INSTALLER_ARGS` など)、devShell・テスト・CI が自分で張る変数 (`*_REEXEC`・`PJP_D3JS_*`・`CHROMIUM_BIN`・`VOICEVOX_ENGINE_BIN`・`FAKE_*` など)、ほかの道具の変数 (`GHQ_ROOT`・`GITHUB_TOKEN`) |
+
+### G. 方針の承認のあとに決めたこと (こちらの判断)
+
+設計を読んだ reviewer が「自分で決められる」と挙げた点を、次のように決めた。
+
+- 1 行目の頭の UTF-8 BOM は、印と古いテンプレートを見分けるときに外す (A)。Windows のエディタで BOM 付きで
+  保存し直されると、始まりの印を見失って「印が壊れている」の warn が毎回出るため。書き直した欄の頭に BOM は付かない
+- 行の途中に制御文字を持つ断片は入れない (E)。claude-skills の resolver から見て欄の中に生きた変数が生まれるのを、
+  本物の `notion_profile.read_env_file` で確かめた (`# x\rPJP_NOTION_TOKEN_PERSONAL=…` の行から変数が 1 つ読まれる)。
+  UTF-8 として読めない断片は、resolver が置き換え文字にして読むだけで行は分けないので、止めない
+- `CLAUDE_SKILLS_DIR`・`CC_PAGES_DIR` (clone の置き場所) も、`DOTFILES_PRIVATE_DIR` と同じ基準で載せる (F)
+- この PC の本物の `~/.config/pjp/env` は、merge の前には書き換えない。確かめるのは写しで行い (6)、本物は merge の
+  後にユーザーが流す `setup --update` で書き換わる
 
 ## 3. 変更点の詳細
 
@@ -227,8 +245,8 @@ ADR 018 のように書いた記録を持てば見分けられるが、`env.bak`
 
 - `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test`
 - shfmt・shellcheck・`check-test-headers.sh`・`warn-helpers.test.sh`
-- この PC で `~/dotfiles/setup --steps bootstrap-local-env` を流し、テンプレートの 10 行が欄に替わり、
-  値の行 (と行数) が変わらないことを、値を画面に出さずに確かめる
+- この PC の `~/.config/pjp/env` の写し (使い捨ての 700 の dir に 600 で写す) に流し、テンプレートの 10 行が欄に
+  替わり、値の行がバイトで変わらないことを、値を画面に出さずに確かめる (本物は書き換えない)
 
 ## 7. 移行・運用手順
 
