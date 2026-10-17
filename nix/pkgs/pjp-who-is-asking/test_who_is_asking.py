@@ -21,6 +21,7 @@ flake の checks (pjp-who-is-asking-unittest) が流す。
 - /proc/<pid>/stat の起動時刻: comm に ")" や空白があっても読み、壊れていれば None
 """
 
+import json
 import unittest
 
 import who_is_asking as w
@@ -244,6 +245,169 @@ class TestStartTicks(unittest.TestCase):
 
     def test_garbage_gives_none(self):
         self.assertIsNone(w.start_ticks(""))
+
+
+# ------------------------------------------------------------------ exe-exec-trace の記録
+
+PROBE_MS = 1_792_200_937_246  # 2026-10-17T01:35:37.246Z (= 10:35:37.246 JST)
+
+
+def probe_record(**over):
+    """実機 (2026-10-17 10:35:37) の、Claude Code の GitHub SSH の確かめの記録を縮めたもの"""
+    rec = {
+        "time": "2026-10-17T10:35:37.246+09:00",
+        "exe": "/mnt/c/Program Files/OpenSSH/ssh.exe",
+        "agent": True,
+        "pid": 1037709,
+        "uid": 1000,
+        "distro": "this",
+        "kernel_ancestry": [
+            {"pid": 980424, "comm": "claude"},
+            {"pid": 2305724, "comm": "fish"},
+            {"pid": 1256, "comm": "herdr"},
+            {"pid": 660, "comm": "Relay(661)"},
+            {"pid": 659, "comm": "SessionLeader"},
+            {"pid": 1, "comm": "systemd"},
+        ],
+        "argv": ["ssh.exe", "-T", "-o", "BatchMode=yes", "git@github.com"],
+        "cwd": "/home/pollenjp",
+        "env": {"HERDR_PANE_ID": "w1T:pE"},
+        "ancestry": [
+            {"pid": 980424, "cmdline": "claude --remote-control"},
+            {"pid": 2305724, "cmdline": "fish"},
+            {"pid": 1256, "cmdline": "herdr server"},
+            {"pid": 660, "cmdline": "/init"},
+            {"pid": 659, "cmdline": "/init"},
+        ],
+    }
+    rec.update(over)
+    return rec
+
+
+def other_distro_record():
+    """他のディストロの記録 (/proc が見えないので argv・cwd・env・ancestry が無い)"""
+    return {
+        "time": "2026-10-17T10:35:00.000+09:00",
+        "exe": "/mnt/c/Program Files/OpenSSH/ssh.exe",
+        "agent": True,
+        "pid": 31,
+        "uid": 1000,
+        "distro": "other(pidns=4026532000)",
+        "kernel_ancestry": [{"pid": 30, "comm": "bash"}, {"pid": 28, "comm": "Relay(29)"}, {"pid": 1, "comm": "init"}],
+    }
+
+
+def as_line(rec):
+    return json.dumps(rec, ensure_ascii=False)
+
+
+def labels(nodes):
+    return [(pid, label) for _, pid, label, _ in nodes]
+
+
+class TestRecordMs(unittest.TestCase):
+    def test_iso_time_with_offset_becomes_epoch_ms(self):
+        self.assertEqual(w.record_ms(probe_record()), PROBE_MS)
+
+    def test_unreadable_time_gives_none(self):
+        for bad in ("x", None, 12345):
+            self.assertIsNone(w.record_ms(probe_record(time=bad)), bad)
+        rec = probe_record()
+        del rec["time"]
+        self.assertIsNone(w.record_ms(rec))
+
+
+class TestParseRecords(unittest.TestCase):
+    WINDOW = 180_000
+
+    def test_keeps_agent_records_in_window_oldest_first(self):
+        older = probe_record(pid=1, time="2026-10-17T10:34:00.000+09:00")
+        newer = probe_record(pid=2, time="2026-10-17T10:35:00.000+09:00")
+        got = w.parse_records([as_line(newer), as_line(older)], PROBE_MS, self.WINDOW)
+        self.assertEqual([r["pid"] for r in got], [1, 2])
+
+    def test_skips_lines_that_are_not_records(self):
+        no_ancestry = {"exe": "/x/ssh.exe", "agent": True, "pid": 5, "time": "2026-10-17T10:35:00+09:00"}
+        lines = [
+            "Started dotfiles-exe-exec-trace.service - dotfiles: WSL から起動された Windows の .exe を祖先付きで記録する (eBPF).",
+            "[1, 2]",
+            json.dumps(no_ancestry),
+            as_line(probe_record(time="x")),
+            as_line(probe_record(pid="1037709")),
+            as_line(probe_record(exe=None)),
+            as_line(probe_record(kernel_ancestry="claude")),
+            "",
+        ]
+        self.assertEqual(w.parse_records(lines, PROBE_MS, self.WINDOW), [])
+
+    def test_skips_non_agent_and_old_records(self):
+        edge = probe_record(pid=3, time="2026-10-17T10:32:37.246+09:00")  # ちょうど窓の端 (180 秒前)
+        older = probe_record(pid=4, time="2026-10-17T10:32:37.245+09:00")  # それより 1 ms 古い
+        tool = probe_record(pid=5, exe="/mnt/c/Windows/System32/reg.exe", agent=False)
+        got = w.parse_records([as_line(edge), as_line(older), as_line(tool)], PROBE_MS, self.WINDOW)
+        self.assertEqual([r["pid"] for r in got], [3])
+
+
+class TestRecordNodes(unittest.TestCase):
+    def test_stops_at_the_session_init_and_uses_command_lines(self):
+        nodes = w.record_nodes(probe_record())
+        self.assertEqual(
+            labels(nodes),
+            [
+                (660, "/init  (WSL のセッション)"),
+                (1256, "herdr server"),
+                (2305724, "fish"),
+                (980424, "claude --remote-control"),
+                (1037709, "ssh.exe -T -o BatchMode=yes git@github.com"),
+            ],
+        )
+        self.assertEqual(nodes[-1][3], ["cwd /home/pollenjp", "env HERDR_PANE_ID=w1T:pE"])
+        self.assertEqual({os_ for os_, _, _, _ in nodes}, {"L"})
+
+    def test_falls_back_to_comm_when_the_parent_had_exited(self):
+        # 親が先に終わると、/proc で読んだ祖先は付け替え後のもの (セッションの /init だけ) になる
+        nodes = w.record_nodes(probe_record(ancestry=[{"pid": 660, "cmdline": "/init"}]))
+        self.assertEqual(
+            labels(nodes)[:4],
+            [(660, "/init  (WSL のセッション)"), (1256, "herdr"), (2305724, "fish"), (980424, "claude")],
+        )
+
+    def test_other_distro_record_uses_comm_and_relay(self):
+        nodes = w.record_nodes(other_distro_record())
+        self.assertEqual(labels(nodes), [(28, "/init  (WSL のセッション)"), (30, "bash"), (31, "ssh.exe")])
+        self.assertIsNone(nodes[-1][3])
+
+    def test_parent_is_session_init_adds_a_hint(self):
+        rec = probe_record(kernel_ancestry=[{"pid": 4, "comm": "Relay(5)"}, {"pid": 1, "comm": "init"}], ancestry=[])
+        self.assertIn(
+            "親は /init: 親が先に終了したか、wsl.exe や cmd.exe を踏み台にした要求 (pjp-exe-exec-trace --pretty で直前の .exe を見る)",
+            w.record_nodes(rec)[-1][3],
+        )
+
+    def test_without_session_init_shows_the_whole_chain(self):
+        rec = probe_record(kernel_ancestry=[{"pid": 9, "comm": "a"}, {"pid": 8, "comm": "b"}, {"pid": 7, "comm": "c"}], ancestry=[])
+        self.assertEqual([pid for pid, _ in labels(w.record_nodes(rec))], [7, 8, 9, 1037709])
+
+
+class TestStubMatches(unittest.TestCase):
+    ARGV = ["/init", "/mnt/c/Program Files/OpenSSH/ssh.exe", "ssh.exe", "-T"]
+
+    def test_same_stub_started_close_to_the_record_is_alive(self):
+        self.assertTrue(w.stub_matches(probe_record(), self.ARGV, PROBE_MS + 2000))
+
+    def test_started_too_far_from_the_record_is_another_process(self):
+        # PID が使い回されて、同じ exe の別の代理プロセスが居る
+        self.assertFalse(w.stub_matches(probe_record(), self.ARGV, PROBE_MS + 4000))
+
+    def test_pid_now_used_by_something_else(self):
+        rec = probe_record()
+        self.assertFalse(w.stub_matches(rec, ["bash"], PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, ["/init", "/mnt/c/Program Files/OpenSSH/ssh-add.exe", "ssh-add.exe"], PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, None, PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, self.ARGV, None))
+
+    def test_other_distro_is_never_alive_here(self):
+        self.assertFalse(w.stub_matches(probe_record(distro="other(pidns=1)"), self.ARGV, PROBE_MS))
 
 
 if __name__ == "__main__":

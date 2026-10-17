@@ -147,6 +147,107 @@ def render(nodes):
     return out
 
 
+# ------------------------------------------------------------------ exe-exec-trace の記録 (純粋な関数)
+
+# 要求元はダイアログに気付く前に終わっていることが多い (Claude Code の GitHub SSH の確かめは 3 秒で
+# kill される) ので、exe-exec-trace が journald に残した直近の記録からも木を出す (ADR 020)。
+# unit の名前は nix/home/modules/exe-exec-trace.nix と scripts/setup.sh に揃える
+UNIT = "dotfiles-exe-exec-trace"
+RECENT_DEFAULT = 180  # 遡る秒数の既定。1Password のダイアログは約 60 秒で時間切れになる
+ALIVE_SKEW_MS = 3000  # 代理プロセスの起動時刻と記録の時刻の差がこの幅なら、記録の要求元がまだ動いている
+SINCE_SLACK_S = 5  # journald の時刻と記録の時刻は数 ms ずれるので、journalctl には多めに遡らせる
+SESSION_LABEL = "/init  (WSL のセッション)"
+SESSION_COMM = re.compile(r"^Relay\(\d+\)$")  # WSL のセッションの /init の comm
+PARENT_IS_INIT = (
+    "親は /init: 親が先に終了したか、wsl.exe や cmd.exe を踏み台にした要求 (pjp-exe-exec-trace --pretty で直前の .exe を見る)"
+)
+EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+
+
+def record_ms(rec):
+    """記録の time (ISO 8601。ミリ秒とタイムゾーン付き) を epoch ms にする。読めなければ None"""
+    try:
+        return (datetime.datetime.fromisoformat(rec["time"]) - EPOCH) // datetime.timedelta(milliseconds=1)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def parse_records(lines, now_ms, window_ms):
+    """journalctl -o cat の行から、agent に届く .exe の記録のうち now_ms - window_ms 以降のものを古い順に返す。
+
+    記録でない行 (起動のメッセージなど)・形の欠けた記録・time の読めない記録は黙って飛ばす。
+    """
+    out = []
+    for line in lines:
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        if not (
+            isinstance(rec, dict)
+            and rec.get("agent") is True
+            and isinstance(rec.get("exe"), str)
+            and isinstance(rec.get("pid"), int)
+            and isinstance(rec.get("kernel_ancestry"), list)
+        ):
+            continue
+        t = record_ms(rec)
+        if t is not None and t >= now_ms - window_ms:
+            out.append((t, rec))
+    out.sort(key=lambda x: x[0])
+    return [rec for _, rec in out]
+
+
+def exe_name(rec):
+    return rec["exe"].rsplit("/", 1)[-1]
+
+
+def record_nodes(rec):
+    """記録 1 件から、根から順の Linux 側の節 (os, pid, label, note) の列を作る。末端が記録の .exe。
+
+    木は、カーネルが exec の時点で集めた祖先 (kernel_ancestry) でたどる (親が後で終わっても変わらない)。
+    ラベルは /proc で取れた祖先のコマンドライン (ancestry) を PID で引き、無ければ comm にする。
+    セッションの /init (コマンドラインが /init、無ければ comm が Relay(<pid>)) で止める。
+    """
+    cmdlines = {a.get("pid"): a.get("cmdline") for a in rec.get("ancestry") or [] if isinstance(a, dict)}
+    chain, at_session = [], False
+    for a in rec["kernel_ancestry"]:
+        if not isinstance(a, dict):
+            continue
+        pid, comm = a.get("pid"), str(a.get("comm") or "?")
+        cmd = cmdlines.get(pid)
+        if cmd == "/init" or (cmd is None and SESSION_COMM.match(comm)):
+            chain.append(("L", pid, SESSION_LABEL, None))
+            at_session = True
+            break
+        chain.append(("L", pid, str(cmd) if cmd else comm, None))
+
+    argv = rec.get("argv")
+    label = join_argv([exe_name(rec)] + [str(x) for x in argv[1:]]) if isinstance(argv, list) and argv else exe_name(rec)
+    note = []
+    if rec.get("cwd"):
+        note.append(f"cwd {rec['cwd']}")
+    env = rec.get("env")
+    if isinstance(env, dict) and env:
+        note.append("env " + " ".join(f"{k}={v}" for k, v in env.items()))
+    if at_session and len(chain) == 1:
+        note.append(PARENT_IS_INIT)
+    return list(reversed(chain)) + [("L", rec["pid"], label, note or None)]
+
+
+def stub_matches(rec, argv, start):
+    """記録の PID に今いるプロセス (argv と、epoch ms の起動時刻 start) が、記録の代理プロセスそのものか。
+
+    PID は使い回されるので、exe の名前と起動時刻 (記録から ALIVE_SKEW_MS 以内) で見分ける。
+    他のディストロの記録は、PID の名前空間が違うので、ここの /proc とは比べない。
+    """
+    if rec.get("distro") != "this" or not is_stub(argv) or start is None:
+        return False
+    t = record_ms(rec)
+    same_exe = argv[1].rsplit("/", 1)[-1].lower() == exe_name(rec).lower()
+    return same_exe and t is not None and abs(start - t) <= ALIVE_SKEW_MS
+
+
 # ------------------------------------------------------------------ Linux (/proc)
 
 NOW = time.time()
