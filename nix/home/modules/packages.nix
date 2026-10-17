@@ -30,6 +30,16 @@
     watchexec
     zellij
 
+    # リソースモニタ。btop・htop・bottom (コマンド名は btm) を使い比べる。
+    # programs.btop / programs.htop の settings は使わない。どちらも TUI の設定画面で
+    # 変えた値を設定ファイルへ書き戻すが、settings を書くとそのファイルが store への
+    # 読み取り専用の symlink になり、TUI での変更が残らなくなるため。
+    btop
+    htop
+    bottom
+    # htop の l (開いているファイルの一覧) が呼ぶ
+    lsof
+
     # coding agent 向けの multiplexer。
     # 設定は modules/files.nix -> files/herdr/config.toml
     herdr
