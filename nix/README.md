@@ -676,7 +676,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
-| 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置く（[後述](#マシンローカルの環境変数-configpjpenv)） |
+| 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#powertoys-を入れる-winget)） |
@@ -1618,9 +1618,10 @@ home-manager は作りも消しもしない（秘密情報なので store には
 ~/dotfiles/setup --steps bootstrap-local-env  # これだけ走らせる場合
 ```
 
-初回だけ形式を書いたテンプレート（全行コメント = 実質空）を置き、`chmod 600` する。
-**2 回目以降は中身に触らない。** 実際の API キーが入っているファイルなので、
-上書きは一切しない（緩いパーミッションだけは 600 へ締める）。
+ファイルの頭には、dotfiles と skill が受け取る環境変数の一覧を「dotfiles が書く欄」として置き、
+手順 6.6 が流れるたびに書き直す（[後述](#一覧の欄-adr-021)）。**書き換えるのは欄の中だけで、欄の外は
+1 バイトも変えない。** 実際の API キーが入っているファイルなので、値は欄より下に書く。group と other の
+権限があれば外す（644 なら 600。600 より狭くしてあれば広げない）。
 
 ### ⚠️ `home.sessionVariables` に書かないこと
 
@@ -1659,6 +1660,64 @@ fish には値の展開が無く、bash の `set -a; . file; set +a` と同じ�
 
 bash では `~/.config/pjp/env` → `~/.common_shellrc.sh` の順に読む。逃げ道から
 env の値を上書きできるようにするためなので、順序を入れ替えないこと。
+
+### 一覧の欄 (ADR 021)
+
+ファイルの頭に、dotfiles と skill が受け取る環境変数の一覧を、印で囲んだ欄として置く
+（[ADR 021](../docs/adr/021_local_env_header_20261017T224146JST/README.md)）。値を書くときに開くファイルで、
+書ける変数とその意味が読めるようにするため。
+
+```
+# >>> dotfiles が書く欄 (setup --update のたびに書き直す。ここには書かない) >>>
+#
+# マシンローカルの環境変数。git にも /nix/store にも入らない。
+# …(形式の決まり)
+#
+# ---- dotfiles ----
+#
+# setup が対象にするホストを決めるための変数 (--host と同じ)。取り得る値: …。
+# DOTFILES_HOST=xxxxxx
+# …
+# ---- skill: pjp-notion-profile ----
+# …
+#####################################################
+# <<< dotfiles が書く欄ここまで。この行より下に生の KEY=VALUE を書く (setup はここから下を書き換えない) <<<
+PJP_NOTION_TOKEN_PERSONAL=ntn_…
+```
+
+- `# >>> dotfiles` で始まる行から `# <<< dotfiles` で始まる行までが setup のもの。すべて `#` で始まるので、
+  ローダは欄を読まない。印として見るのは行の頭だけ（行末の CR と、1 行目の頭の UTF-8 BOM は外して見る）
+- 使う変数は、欄より下へ `#` を外して書き写し、値を入れる
+
+手順 6.6 がすること:
+
+| ファイルの様子 | すること |
+| --- | --- |
+| 無い | 欄だけのファイルを作る |
+| 印が 1 組 | 印の間を新しい欄に替える。印より上と下は 1 バイトも変えない |
+| 印の間に `#` で始まらない行がある | その行を元の順のまま、終わりの印のすぐ下へ移し、変数名を `!!` で知らせる |
+| 印が無く、頭がこの ADR の前のテンプレート (10 行) | その 10 行を欄に替える |
+| 印が無く、それ以外 | 欄を頭に足す。今の行は 1 行も消さない |
+| 印が壊れている・symlink・書けない・NUL を含む（UTF-16 で保存した）・`env.bak` がディレクトリ | 書かずに `!!` で知らせる（setup は止めない） |
+
+- 書き上がりが今と同じなら何も書かない。違えば前の版を `env.bak`（600、1 世代）に写し、同じディレクトリの
+  一時ファイルから `mv` する。値は画面に出さない
+- 欄の中に手で書いたコメントは、次に欄が変わったときに消える（`env.bak` に 1 世代だけ残る）
+- テンプレートを手で直していたファイルは、テンプレートを残したまま欄が頭に足される。要らなければ欄の下に
+  残った古いテンプレートを手で消す
+
+一覧の文言は、変数を読むコードの隣に置いた断片から集める。
+
+| 変数を読むもの | 断片 | 欄の節 |
+| --- | --- | --- |
+| dotfiles の script | `nix/pjp-env/dotfiles.txt` | `# ---- dotfiles ----` |
+| skill | skill のディレクトリの `pjp-env.txt`（`~/.claude/skills/*/pjp-env.txt` から、名前の順） | `# ---- skill: <名前> ----` |
+
+- 断片の書き方は [`files/claude/skills/README.md`「環境変数を受け取るとき」](files/claude/skills/README.md#環境変数を受け取るとき-pjp-envtxt)
+- 載せるのは「このファイルに書いて、そのマシンで常に効かせる意味がある」変数。1 回だけコマンドの前に付ける上書きと、
+  devShell・テストが自分で張る変数は載せない。ここに書くと困る変数（`NOTION_API_TOKEN` など）は「ここには書かない」の
+  行でだけ触れる
+- skill の文言は skill と一緒に届く。claude-skills の断片を直して push すれば、各 PC の次の `setup --update` で欄に出る
 
 ## Claude Code
 
@@ -2688,6 +2747,7 @@ nix/
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
+├── pjp-env/               ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt。store には置かず、bootstrap-local-env が checkout から読む)
 ├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す
@@ -2710,7 +2770,7 @@ nix/
     ├── bootstrap-ssh-config.sh     dotfiles-private の ssh/*.ssh_config を ~/.ssh/config.d/ へ張る (冪等。更新時も毎回走る。取れていなければ何もしない)
     ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
     ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
-    ├── bootstrap-local-env.sh      ~/.config/pjp/env を置く (中身は上書きしない)
+    ├── bootstrap-local-env.sh      ~/.config/pjp/env を置き、頭の一覧の欄を書き直す (冪等。更新時も毎回走る。欄の外は書き換えない)
     ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
     ├── bootstrap-windows-powertoys.sh  win/ から配った PowerToys の割り当てを Keyboard Manager に読み直させる (冪等。更新時も毎回走る。PowerToys が無ければ先に入れる)
     ├── bootstrap-windows-ssh-config.sh  dotfiles-private の ssh/*.ssh_config を Windows の %USERPROFILE%\.ssh へコピーし、config を置く (冪等。更新時も毎回走る)
