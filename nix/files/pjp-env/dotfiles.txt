@@ -1,0 +1,12 @@
+setup が対象にするホストを決めるための変数 (--host と同じ)。取り得る値: ~/dotfiles/flake.nix か nix/hosts/default.nix に載っているホスト名。
+DOTFILES_HOST=xxxxxx
+
+ローカル flake の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は ~/dotfiles)。
+DOTFILES_LOCAL_DIR=xxxxxx
+
+dotfiles-private の clone の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は $(ghq root)/github.com/pollenjp/dotfiles-private)。
+DOTFILES_PRIVATE_DIR=xxxxxx
+
+ここには書かない (コマンドの前に付けて 1 回だけ使う):
+  USE_LINUX_SSH=1 ssh <ホスト>  常に効かせると ssh-add も Linux 側になり、git の署名鍵が並ばない
+  DOTFILES_MIN_RELEASE_AGE_DAYS=0 ~/dotfiles/setup --steps flake-update  常に効かせると flake.lock の遅延が外れたままになる (FLAKE_MIN_RELEASE_AGE_DAYS も同じ)
