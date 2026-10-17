@@ -87,7 +87,8 @@
       #   claude-footer-links.test.mjs
       #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
       #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
-      #   claude-env.nix   gitViaGh.enable から作られるもの。評価時に assert するので全 system
+      #   claude-env.nix   gitViaGh.enable から作られるものと、Bash tool の shell (CLAUDE_CODE_SHELL) と
+      #                    その bash を profile に入れる設定。評価時に assert するので全 system
       #   claude-herdr-skill.nix
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)

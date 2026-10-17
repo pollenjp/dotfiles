@@ -2025,7 +2025,7 @@ Claude Code の Bash tool は、`settings.json` の `env` の `CLAUDE_CODE_SHELL
 
 #### なぜ要るのか
 
-指定が無いと、Claude Code（2.1.300 で本体のコードを読んで確かめた）は shell をこう選ぶ。
+Claude Code（2.1.300 で本体のコードを読んで確かめた）は shell をこう選ぶ。
 
 1. `CLAUDE_CODE_SHELL` が bash か zsh を含み、実行できれば（できなければ `<値> --version` が 0 で返れば）それ
 2. `$SHELL` が bash か zsh を含めばそれ
@@ -2046,6 +2046,9 @@ script やテストは bash なので、Bash tool で試した結果と本番が
   `initExtra` の関数は Bash tool に入らない
 - shell は Claude Code の起動時に決まる。実行中のセッションは、起動し直すまで前の shell のままのことがある
   （plugin の入れ替えで snapshot を作り直すときは選び直す）
+- 端末で `CLAUDE_CODE_SHELL=… claude` と渡しても、settings の `env` が後から上書きする（起動時の env に zsh、
+  `--settings` の `env` に bash を渡すと bash で動いた）。1 回だけ別の shell で動かすなら
+  `claude --settings '{"env":{"CLAUDE_CODE_SHELL":"/usr/bin/zsh"}}'`（`--settings` の `env` は `settings.json` より後に入る）
 
 確認は、起動し直した Claude に `echo "$BASH_VERSION"` を実行させる（bash なら版が出る。zsh なら空）。
 起動するときに `--debug` を付けると、ログに `Using shell override: <値>` と `Creating shell snapshot for bash` が出る。
@@ -2054,8 +2057,8 @@ script やテストは bash なので、Bash tool で試した結果と本番が
 
 profile のパスは世代を切り替えても変わらず、置き場所とユーザー名は home-manager が決めるので、
 マシンが変わっても合う。bash は `programs.bash`（`home/modules/bash.nix`）が profile に入れる
-（`programs.bash.package` の既定は `bashInteractive`）。`programs.bash.package` を null にすると
-指す先が無くなるので、評価で止める（assertion）。
+（`programs.bash.package` の既定は `bashInteractive`）。`programs.bash.enable` を false にするか
+`programs.bash.package` を null にすると指す先が無くなるので、評価で止める（assertion）。
 
 パスが実行できないとき（switch より前など）、Claude Code はログに出すだけで zsh を探し直すので、
 bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警告のまとめ)にも出す（env には書く）。

@@ -13,7 +13,7 @@
 #     CLAUDE_CODE_SHELL は option によらず profile の bash (<home>/.nix-profile/bin/bash)
 #   - home.packages に gh が入る (true の前提)
 #   - home.packages に bash が入る (CLAUDE_CODE_SHELL が指す profile の bin/bash の元)。
-#     programs.bash.package を null にすると評価で止まる
+#     programs.bash.enable を false にしても、programs.bash.package を null にしても評価で止まる
 {
   lib,
   pkgs,
@@ -77,9 +77,14 @@ let
   byDefault = configWith { };
   disabled = configWith { gitViaGh.enable = false; };
 
-  # programs.bash.package を null にした設定。評価 (.config を読む) で止まれば success が false になる
+  # programs.bash.package を null にした設定と、programs.bash を止めた設定 (bash.nix が enable = true と
+  # 書いているので mkForce で上書きする)。どちらも profile に bash が入らない。
+  # 評価 (.config を読む) で止まれば success が false になる
   noBashPackage = builtins.tryEval (
     (homeWith { } [ { programs.bash.package = null; } ]).config.home.username
+  );
+  noBashEnable = builtins.tryEval (
+    (homeWith { } [ { programs.bash.enable = lib.mkForce false; } ]).config.home.username
   );
 
   cases = [
@@ -118,6 +123,10 @@ let
     {
       name = "programs.bash.package を null にすると評価で止まる";
       ok = !noBashPackage.success;
+    }
+    {
+      name = "programs.bash.enable を false にすると評価で止まる";
+      ok = !noBashEnable.success;
     }
   ];
 
