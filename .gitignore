@@ -1,3 +1,6 @@
 # nix build の成果物シンボリックリンク
 result
 result-*
+
+# Python のバイトコード (テストや import で作られる)
+__pycache__/

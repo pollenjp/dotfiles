@@ -1,7 +1,8 @@
-"""who_is_asking の対の取り方と木の組み立てのテスト。
+"""who_is_asking の対の取り方と木の組み立て、exe-exec-trace の記録の出し方のテスト。
 
-データは TKT-54 の実機 (2026-09-30) で見たプロセス表を縮めたもの。
-/proc と powershell.exe には触らない (Linux 側の祖先は linux_nodes を差し替えて渡す)。
+データは TKT-54 の実機 (2026-09-30) で見たプロセス表と、TKT-69 の実機 (2026-10-17) の記録
+(Claude Code の GitHub SSH の確かめ) を縮めたもの。/proc・powershell.exe・journalctl・systemctl には
+触らない (Linux 側の祖先は linux_nodes を差し替えて渡し、I/O の関数は mock で差し替える)。
 flake の checks (pjp-who-is-asking-unittest) が流す。
 
 ## 確かめること
@@ -15,15 +16,55 @@ flake の checks (pjp-who-is-asking-unittest) が流す。
 - 木: 直接の呼び出しは Windows と Linux を 1 本の道につなぎ、wsl.exe -e の踏み台は元のセッションの
   呼び出し元まで戻る。親の PID が使い回されていたら (親の方が後から起動している) そこで止める
 - 表示: Windows と Linux をまたぐ所に印を付け、長い見出しも切らない。Linux 側の引数は空白があれば
-  引用する。見出しの制御文字は無害化する
+  引用する。見出しの制御文字 (C0・C1・U+2028 / U+2029) は無害化する
 - PowerShell の出力: BOM 付きの JSON を読み、自分 (powershell.exe) を外す。JSON でなければ空にし、
   欄の欠けた項目は飛ばす
 - /proc/<pid>/stat の起動時刻: comm に ")" や空白があっても読み、壊れていれば None
+- 記録の時刻: タイムゾーン付きの ISO 8601 を epoch ms にし、読めなければ None
+- 記録の選び方: agent に届く .exe の記録と、引数で agent の exe をコマンドとして呼ぶ踏み台の記録
+  (cmd.exe /c ssh.exe … など。sshd のような語や argv[0] には当たらない) だけを、窓の中 (ちょうど端は含む)
+  から古い順に選ぶ。記録でない行・形の欠けた記録・時刻の読めない記録は黙って飛ばす
+- 記録の木: カーネルの祖先をセッションの /init (コマンドラインが /init、無ければ comm が Relay(<pid>)) まで
+  たどり、ラベルは /proc のコマンドライン、無ければ comm。末端に cwd と env、親がセッションの /init なら
+  踏み台の案内を付ける。/init が無ければ祖先を全部出す。他のディストロの記録は comm だけ
+- 動いているか: 記録の PID に居るのが同じ exe の代理プロセスで、起動時刻が記録から 3 秒以内のときだけ。
+  他のディストロの記録は見ない
+- 記録の節: 記録ごとに状態つきの見出しと木を出し、踏み台には印を付ける。0 件ならその旨、2 件以上なら
+  一番新しいものを指す。記録の中の制御文字は無害化する。遡る長さは 60 で割り切れれば分で書く
+- journal の行の割り方: 記録の中に U+2028 や U+0085 があっても、\n だけで割って 1 件のまま読む
+- 記録を読めないとき: unit が無ければ読まずに 1 行、止まっていれば読んだうえで最後に 1 行、読めなければ
+  1 行 (権限の Hint・journalctl の失敗)。systemctl の状態が分からなければ見ずに読む。窓に 5 秒足して遡らせる
+- main: 記録の節をいま動いている木より先に出し、`--recent 0` なら記録を読まない。負の `--recent` は
+  argparse のエラー。いま動いている木には見出しを付け、該当が無ければその旨を出す
 """
 
+import io
+import json
+import os
+import time
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 import who_is_asking as w
+
+_TZ = None
+
+
+def setUpModule():
+    # hhmmss はローカル時刻で出す。zoneinfo の無い Nix のサンドボックスでも効く POSIX の書き方で JST にそろえる
+    global _TZ
+    _TZ = os.environ.get("TZ")
+    os.environ["TZ"] = "JST-9"
+    time.tzset()
+
+
+def tearDownModule():
+    if _TZ is None:
+        os.environ.pop("TZ", None)
+    else:
+        os.environ["TZ"] = _TZ
+    time.tzset()
 
 T = 1_790_748_000_000  # 基準の時刻 (epoch ms)
 
@@ -219,6 +260,11 @@ class TestUntrustedText(unittest.TestCase):
         self.assertNotIn("\x1b", line)
         self.assertNotIn("\n", line)
 
+    def test_c1_controls_and_unicode_line_separators_are_escaped(self):
+        # U+0085 (NEL) や U+009B (CSI) は端末によっては改行や制御として効く。U+2028 / U+2029 は行の区切り
+        line = w.render([("L", 1, "a\u0085b\u009bc d e", None)])[0]
+        self.assertEqual(line, "[Linux  ] 1 a\\x85b\\x9bc\\u2028d\\u2029e")
+
 
 class TestParseWindows(unittest.TestCase):
     def test_reads_powershell_json_with_bom_and_drops_itself(self):
@@ -244,6 +290,376 @@ class TestStartTicks(unittest.TestCase):
 
     def test_garbage_gives_none(self):
         self.assertIsNone(w.start_ticks(""))
+
+
+# ------------------------------------------------------------------ exe-exec-trace の記録
+
+PROBE_MS = 1_792_200_937_246  # 2026-10-17T01:35:37.246Z (= 10:35:37.246 JST)
+
+
+def probe_record(**over):
+    """実機 (2026-10-17 10:35:37) の、Claude Code の GitHub SSH の確かめの記録を縮めたもの"""
+    rec = {
+        "time": "2026-10-17T10:35:37.246+09:00",
+        "exe": "/mnt/c/Program Files/OpenSSH/ssh.exe",
+        "agent": True,
+        "pid": 1037709,
+        "uid": 1000,
+        "distro": "this",
+        "kernel_ancestry": [
+            {"pid": 980424, "comm": "claude"},
+            {"pid": 2305724, "comm": "fish"},
+            {"pid": 1256, "comm": "herdr"},
+            {"pid": 660, "comm": "Relay(661)"},
+            {"pid": 659, "comm": "SessionLeader"},
+            {"pid": 1, "comm": "systemd"},
+        ],
+        "argv": ["ssh.exe", "-T", "-o", "BatchMode=yes", "git@github.com"],
+        "cwd": "/home/pollenjp",
+        "env": {"HERDR_PANE_ID": "w1T:pE"},
+        "ancestry": [
+            {"pid": 980424, "cmdline": "claude --remote-control"},
+            {"pid": 2305724, "cmdline": "fish"},
+            {"pid": 1256, "cmdline": "herdr server"},
+            {"pid": 660, "cmdline": "/init"},
+            {"pid": 659, "cmdline": "/init"},
+        ],
+    }
+    rec.update(over)
+    return rec
+
+
+def other_distro_record():
+    """他のディストロの記録 (/proc が見えないので argv・cwd・env・ancestry が無い)"""
+    return {
+        "time": "2026-10-17T10:35:00.000+09:00",
+        "exe": "/mnt/c/Program Files/OpenSSH/ssh.exe",
+        "agent": True,
+        "pid": 31,
+        "uid": 1000,
+        "distro": "other(pidns=4026532000)",
+        "kernel_ancestry": [{"pid": 30, "comm": "bash"}, {"pid": 28, "comm": "Relay(29)"}, {"pid": 1, "comm": "init"}],
+    }
+
+
+def as_line(rec):
+    return json.dumps(rec, ensure_ascii=False)
+
+
+def labels(nodes):
+    return [(pid, label) for _, pid, label, _ in nodes]
+
+
+class TestRecordMs(unittest.TestCase):
+    def test_iso_time_with_offset_becomes_epoch_ms(self):
+        self.assertEqual(w.record_ms(probe_record()), PROBE_MS)
+
+    def test_unreadable_time_gives_none(self):
+        for bad in ("x", None, 12345):
+            self.assertIsNone(w.record_ms(probe_record(time=bad)), bad)
+        rec = probe_record()
+        del rec["time"]
+        self.assertIsNone(w.record_ms(rec))
+
+
+class TestParseRecords(unittest.TestCase):
+    WINDOW = 180_000
+
+    def test_keeps_agent_records_in_window_oldest_first(self):
+        older = probe_record(pid=1, time="2026-10-17T10:34:00.000+09:00")
+        newer = probe_record(pid=2, time="2026-10-17T10:35:00.000+09:00")
+        got = w.parse_records([as_line(newer), as_line(older)], PROBE_MS, self.WINDOW)
+        self.assertEqual([r["pid"] for r in got], [1, 2])
+
+    def test_skips_lines_that_are_not_records(self):
+        no_ancestry = {"exe": "/x/ssh.exe", "agent": True, "pid": 5, "time": "2026-10-17T10:35:00+09:00"}
+        lines = [
+            "Started dotfiles-exe-exec-trace.service - dotfiles: WSL から起動された Windows の .exe を祖先付きで記録する (eBPF).",
+            "[1, 2]",
+            json.dumps(no_ancestry),
+            as_line(probe_record(time="x")),
+            as_line(probe_record(pid="1037709")),
+            as_line(probe_record(exe=None)),
+            as_line(probe_record(kernel_ancestry="claude")),
+            "",
+        ]
+        self.assertEqual(w.parse_records(lines, PROBE_MS, self.WINDOW), [])
+
+    def test_skips_non_agent_and_old_records(self):
+        edge = probe_record(pid=3, time="2026-10-17T10:32:37.246+09:00")  # ちょうど窓の端 (180 秒前)
+        older = probe_record(pid=4, time="2026-10-17T10:32:37.245+09:00")  # それより 1 ms 古い
+        tool = probe_record(pid=5, exe="/mnt/c/Windows/System32/reg.exe", agent=False, argv=["reg.exe", "query", "HKCU\\Software"])
+        got = w.parse_records([as_line(edge), as_line(older), as_line(tool)], PROBE_MS, self.WINDOW)
+        self.assertEqual([r["pid"] for r in got], [3])
+
+    def test_keeps_trampolines_that_call_an_agent_exe(self):
+        # cmd.exe /c ssh.exe では Linux 側に ssh.exe が現れず、記録は cmd.exe (agent ではない) だけになる
+        def tramp(pid, exe, argv):
+            return as_line(probe_record(pid=pid, exe=exe, agent=False, argv=argv))
+
+        lines = [
+            tramp(11, "/mnt/c/WINDOWS/system32/cmd.exe", ["cmd.exe", "/c", "ssh.exe -o BatchMode=yes tramp@192.0.2.1"]),
+            tramp(12, "/mnt/c/WINDOWS/system32/wsl.exe",
+                  ["wsl.exe", "-d", "Ubuntu-24.04", "-e", "/mnt/c/Program Files/OpenSSH/ssh.exe", "-T", "git@github.com"]),
+            tramp(13, "/mnt/c/WINDOWS/system32/wsl.exe", ["wsl.exe", "-e", "ssh", "-T", "git@github.com"]),
+            tramp(14, "/mnt/c/WINDOWS/System32/WindowsPowerShell/v1.0/powershell.exe", ["powershell.exe", "-Command", "Write-Output sshd"]),
+            tramp(15, "/mnt/c/WINDOWS/system32/cmd.exe", ["cmd.exe", "/c", "type ssh-config.txt openssh.txt"]),
+            tramp(16, "/mnt/c/WINDOWS/system32/cmd.exe", ["ssh.exe"]),  # argv[0] は踏み台自身なので見ない
+        ]
+        self.assertEqual([r["pid"] for r in w.parse_records(lines, PROBE_MS, self.WINDOW)], [11, 12, 13])
+
+
+class TestRecordNodes(unittest.TestCase):
+    def test_stops_at_the_session_init_and_uses_command_lines(self):
+        nodes = w.record_nodes(probe_record())
+        self.assertEqual(
+            labels(nodes),
+            [
+                (660, "/init  (WSL のセッション)"),
+                (1256, "herdr server"),
+                (2305724, "fish"),
+                (980424, "claude --remote-control"),
+                (1037709, "ssh.exe -T -o BatchMode=yes git@github.com"),
+            ],
+        )
+        self.assertEqual(nodes[-1][3], ["cwd /home/pollenjp", "env HERDR_PANE_ID=w1T:pE"])
+        self.assertEqual({os_ for os_, _, _, _ in nodes}, {"L"})
+
+    def test_falls_back_to_comm_when_the_parent_had_exited(self):
+        # 親が先に終わると、/proc で読んだ祖先は付け替え後のもの (セッションの /init だけ) になる
+        nodes = w.record_nodes(probe_record(ancestry=[{"pid": 660, "cmdline": "/init"}]))
+        self.assertEqual(
+            labels(nodes)[:4],
+            [(660, "/init  (WSL のセッション)"), (1256, "herdr"), (2305724, "fish"), (980424, "claude")],
+        )
+
+    def test_other_distro_record_uses_comm_and_relay(self):
+        nodes = w.record_nodes(other_distro_record())
+        self.assertEqual(labels(nodes), [(28, "/init  (WSL のセッション)"), (30, "bash"), (31, "ssh.exe")])
+        self.assertIsNone(nodes[-1][3])
+
+    def test_parent_is_session_init_adds_a_hint(self):
+        rec = probe_record(kernel_ancestry=[{"pid": 4, "comm": "Relay(5)"}, {"pid": 1, "comm": "init"}], ancestry=[])
+        self.assertIn(
+            "親は /init: 親が先に終了したか、wsl.exe -e を踏み台にした要求 (踏み台の wsl.exe の記録が近くに並ぶ)",
+            w.record_nodes(rec)[-1][3],
+        )
+
+    def test_without_session_init_shows_the_whole_chain(self):
+        rec = probe_record(kernel_ancestry=[{"pid": 9, "comm": "a"}, {"pid": 8, "comm": "b"}, {"pid": 7, "comm": "c"}], ancestry=[])
+        self.assertEqual([pid for pid, _ in labels(w.record_nodes(rec))], [7, 8, 9, 1037709])
+
+
+class TestStubMatches(unittest.TestCase):
+    ARGV = ["/init", "/mnt/c/Program Files/OpenSSH/ssh.exe", "ssh.exe", "-T"]
+
+    def test_same_stub_started_close_to_the_record_is_alive(self):
+        self.assertTrue(w.stub_matches(probe_record(), self.ARGV, PROBE_MS + 2000))
+
+    def test_started_too_far_from_the_record_is_another_process(self):
+        # PID が使い回されて、同じ exe の別の代理プロセスが居る
+        self.assertFalse(w.stub_matches(probe_record(), self.ARGV, PROBE_MS + 4000))
+
+    def test_pid_now_used_by_something_else(self):
+        rec = probe_record()
+        self.assertFalse(w.stub_matches(rec, ["bash"], PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, ["/init", "/mnt/c/Program Files/OpenSSH/ssh-add.exe", "ssh-add.exe"], PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, None, PROBE_MS))
+        self.assertFalse(w.stub_matches(rec, self.ARGV, None))
+
+    def test_other_distro_is_never_alive_here(self):
+        self.assertFalse(w.stub_matches(probe_record(distro="other(pidns=1)"), self.ARGV, PROBE_MS))
+
+
+HEAD = "## 直近 3 分に起動された要求 (exe-exec-trace の記録、古い順)"
+NOT_INSTALLED = "(exe-exec-trace が入っていないので記録は読まない。入れるには dotfiles.wsl.exeExecTrace.enable を true にして setup --update)"
+
+
+class TestFmtWindow(unittest.TestCase):
+    def test_minutes_when_divisible_otherwise_seconds(self):
+        self.assertEqual(w.fmt_window(180), "3 分")
+        self.assertEqual(w.fmt_window(60), "1 分")
+        self.assertEqual(w.fmt_window(90), "90 秒")
+
+
+class TestParseUnitState(unittest.TestCase):
+    def test_reads_load_and_active_state(self):
+        self.assertEqual(w.parse_unit_state("LoadState=loaded\nActiveState=active\n"), ("loaded", "active"))
+        self.assertEqual(w.parse_unit_state("LoadState=not-found\nActiveState=inactive\n"), ("not-found", "inactive"))
+
+    def test_empty_output_gives_nothing(self):
+        self.assertEqual(w.parse_unit_state(""), (None, None))
+
+
+class TestJournalctlMessage(unittest.TestCase):
+    NO_PERMISSION = "(他のユーザーの記録が見えない。adm か systemd-journal のグループに入ると読める)"
+
+    def test_success_gives_none(self):
+        self.assertIsNone(w.journalctl_message(0, ""))
+
+    def test_permission_hints_say_which_groups(self):
+        hint = (
+            "Hint: You are currently not seeing messages from other users and the system.\n"
+            "      Users in groups 'adm', 'systemd-journal' can see all messages.\n"
+        )
+        self.assertEqual(w.journalctl_message(0, hint), self.NO_PERMISSION)
+        self.assertEqual(
+            w.journalctl_message(1, "No journal files were opened due to insufficient permissions.\n"), self.NO_PERMISSION
+        )
+
+    def test_failure_shows_first_line_or_exit_code(self):
+        self.assertEqual(w.journalctl_message(1, "Failed to open journal\nmore"), "(記録を読めなかった: Failed to open journal)")
+        self.assertEqual(w.journalctl_message(1, ""), "(記録を読めなかった: 終了コード 1)")
+
+
+class TestJournalBody(unittest.TestCase):
+    NOTE = "[Linux  ]" + " " * 12  # 深さ 4 の節の注記の字下げ (1 + 2×4 + 3)
+    TREE = [
+        "[Linux  ] 660 /init  (WSL のセッション)",
+        "[Linux  ] └─ 1256 herdr server",
+        "[Linux  ]   └─ 2305724 fish",
+        "[Linux  ]     └─ 980424 claude --remote-control",
+        "[Linux  ]       └─ 1037709 ssh.exe -T -o BatchMode=yes git@github.com",
+        NOTE + "cwd /home/pollenjp",
+        NOTE + "env HERDR_PANE_ID=w1T:pE",
+    ]
+
+    def test_shows_each_record_as_a_tree_with_state(self):
+        rec = probe_record()
+        with mock.patch.object(w, "NOW", PROBE_MS / 1000 + 35):
+            gone = w.journal_body([rec], lambda r: False, 180)
+            alive = w.journal_body([rec], lambda r: True, 180)
+        self.assertEqual(gone, ["== ssh.exe  Linux pid 1037709  起動 10:35:37.246 (35 秒前)  終了済み", *self.TREE, ""])
+        self.assertEqual(alive, ["== ssh.exe  Linux pid 1037709  起動 10:35:37.246 (35 秒前)  動いている (下の木にも出る)", *self.TREE, ""])
+
+    def test_other_distro_heading_does_not_look_at_proc(self):
+        alive = mock.Mock(side_effect=AssertionError("他のディストロの記録で /proc を見た"))
+        with mock.patch.object(w, "NOW", 1_792_200_900 + 5):
+            out = w.journal_body([other_distro_record()], alive, 180)
+        self.assertEqual(out[0], "== ssh.exe  other(pidns=4026532000) pid 31  起動 10:35:00.000 (5 秒前)  他のディストロ: 祖先は comm だけ")
+
+    def test_no_records_says_none(self):
+        self.assertEqual(w.journal_body([], lambda r: False, 180), ["(none: 直近 3 分に記録された要求は無い)", ""])
+
+    def test_trampoline_record_is_marked(self):
+        rec = probe_record(exe="/mnt/c/WINDOWS/system32/cmd.exe", agent=False, argv=["cmd.exe", "/c", "ssh.exe tramp@192.0.2.1"])
+        with mock.patch.object(w, "NOW", PROBE_MS / 1000 + 1):
+            out = w.journal_body([rec], lambda r: False, 180)
+        self.assertEqual(out[0], "== cmd.exe  Linux pid 1037709  起動 10:35:37.246 (1 秒前)  終了済み  (踏み台かもしれない .exe)")
+
+    def test_two_or_more_records_point_at_the_newest(self):
+        with mock.patch.object(w, "NOW", PROBE_MS / 1000 + 1):
+            out = w.journal_body([probe_record(pid=1), probe_record(pid=2)], lambda r: False, 180)
+        self.assertEqual(sum(line.startswith("== ") for line in out), 2)
+        self.assertEqual(out[-1], "ダイアログの要求は、たいてい一番新しいもの (一番下)")
+
+    def test_control_characters_in_records_are_escaped(self):
+        rec = probe_record(
+            exe="/mnt/c/x\x1b[2J.exe", argv=["x.exe", "a\nb"], cwd="/tmp/\x1b]0;x\x07", env={"WT_SESSION": "\x1b[1A"}
+        )
+        with mock.patch.object(w, "NOW", PROBE_MS / 1000 + 1):
+            out = w.journal_body([rec], lambda r: False, 180)
+        for line in out:
+            for ch in ("\x1b", "\n", "\x07"):
+                self.assertNotIn(ch, line)
+
+
+class TestReadJournal(unittest.TestCase):
+    def test_records_with_unicode_line_separators_stay_whole(self):
+        # トレーサは ensure_ascii=False で書くので、argv や cmdline の U+2028 / U+0085 は生のまま 1 行に入る。
+        # str.splitlines() はこれらでも割るので、記録が 2 つの壊れた JSON になって黙って消えていた
+        recs = [
+            probe_record(pid=1, argv=["ssh.exe", "a b", "git@github.com"]),
+            probe_record(pid=2, ancestry=[{"pid": 980424, "cmdline": "zsh -c 'x\u0085y'"}]),
+        ]
+        out = "Started dotfiles-exe-exec-trace.service\n" + "".join(as_line(r) + "\n" for r in recs)
+        done = w.subprocess.CompletedProcess(args=[], returncode=0, stdout=out, stderr="")
+        with mock.patch.object(w.subprocess, "run", return_value=done):
+            lines, msg = w.read_journal(1_792_200_000)
+        self.assertIsNone(msg)
+        self.assertEqual([r["pid"] for r in w.parse_records(lines, PROBE_MS, 180_000)], [1, 2])
+
+
+class TestJournalLines(unittest.TestCase):
+    def run_lines(self, state, journal=None):
+        """unit の状態と journal の読み取りを差し替えて journal_lines を走らせる。journal が None なら読ませない"""
+        if journal is None:
+            read = mock.Mock(side_effect=AssertionError("journal を読んだ"))
+        else:
+            read = mock.Mock(return_value=journal)
+        with (
+            mock.patch.object(w, "unit_state", return_value=state),
+            mock.patch.object(w, "read_journal", read),
+            mock.patch.object(w, "is_alive", return_value=False),
+            mock.patch.object(w, "NOW", PROBE_MS / 1000 + 10),
+        ):
+            return w.journal_lines(180, 0.0), read
+
+    def test_not_installed_skips_reading(self):
+        out, _ = self.run_lines(("not-found", "inactive"))
+        self.assertEqual(out, [HEAD, NOT_INSTALLED, ""])
+
+    def test_inactive_unit_still_reads_and_warns(self):
+        out, _ = self.run_lines(("loaded", "failed"), ([as_line(probe_record())], None))
+        self.assertIn("== ssh.exe  Linux pid 1037709  起動 10:35:37.246 (10 秒前)  終了済み", out)
+        self.assertEqual(out[-2:], ["(exe-exec-trace が動いていない (ActiveState=failed)。止まっている間の要求は記録に無い)", ""])
+
+    def test_read_failure_is_one_line(self):
+        out, _ = self.run_lines(("loaded", "active"), ([], "(journalctl が無いので記録は読まない)"))
+        self.assertEqual(out, [HEAD, "(journalctl が無いので記録は読まない)", ""])
+
+    def test_unknown_unit_state_still_reads(self):
+        # systemctl が無い・失敗したときは、状態を見ずに読む
+        out, read = self.run_lines((None, None), ([as_line(probe_record())], None))
+        read.assert_called_once()
+        self.assertIn("== ssh.exe  Linux pid 1037709  起動 10:35:37.246 (10 秒前)  終了済み", out)
+        self.assertFalse(any("動いていない" in line for line in out))
+
+    def test_reads_back_the_window_plus_slack(self):
+        # 10:35:47.246 から 180 + 5 秒遡った epoch 秒 (10:32:42)
+        _, read = self.run_lines(("loaded", "active"), ([], None))
+        read.assert_called_once_with(1_792_200_762)
+
+
+class TestMain(unittest.TestCase):
+    def run_main(self, argv, journal=None):
+        """/proc・powershell.exe・journal を差し替えて main を走らせ、(終了コード, stdout) を返す"""
+        journal = journal or mock.Mock(side_effect=AssertionError("journal を読んだ"))
+        buf = io.StringIO()
+        with (
+            mock.patch.object(w, "boot_time", return_value=0.0),
+            mock.patch.object(w, "linux_stubs", return_value={}),
+            mock.patch.object(w, "windows_procs", return_value={}),
+            mock.patch.object(w, "journal_lines", journal),
+            redirect_stdout(buf),
+        ):
+            rc = w.main(argv)
+        return rc, buf.getvalue()
+
+    def test_recent_zero_skips_the_journal(self):
+        rc, out = self.run_main(["--no-windows", "--recent", "0"])
+        self.assertEqual(rc, 0)
+        self.assertIn("## いま動いている .exe (Linux 側だけ)", out)
+        self.assertIn("(none: 動いている .exe は無い)", out)
+        self.assertNotIn("## 直近", out)
+
+    def test_journal_section_comes_first_with_the_default_window(self):
+        journal = mock.Mock(return_value=[HEAD, "x", ""])
+        _, out = self.run_main(["--no-windows"], journal)
+        self.assertLess(out.index("## 直近"), out.index("## いま動いている"))
+        self.assertEqual(journal.call_args.args[0], 180)
+
+    def test_windows_mode_heading_and_none_line(self):
+        _, out = self.run_main(["--recent", "60"], mock.Mock(return_value=[]))
+        self.assertIn("## いま動いている ssh.exe など (Windows と Linux の木)", out)
+        self.assertIn("(none: いま動いている ssh.exe などは無い)", out)
+
+    def test_negative_recent_is_rejected(self):
+        err = io.StringIO()
+        with redirect_stderr(err), self.assertRaises(SystemExit) as cm:
+            w.main(["--recent", "-1"])
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("0 以上の整数", err.getvalue())
 
 
 if __name__ == "__main__":

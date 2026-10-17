@@ -1382,7 +1382,7 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 
 | 道具 | 置かれるマシン | 使いどころ |
 | --- | --- | --- |
-| `pjp-who-is-asking` | `wsl.enable` | ダイアログが出ている間に打つ。要求元を Windows と Linux をまたいだ 1 本の木で出す |
+| `pjp-who-is-asking` | `wsl.enable` | ダイアログが出たら打つ。直近の要求（下の記録。入っていれば）と、いま動いている要求元を Windows と Linux をまたいだ木で出す |
 | `pjp-exe-exec-trace` | `wsl.exeExecTrace.enable` | root の systemd の unit で常時動かす。WSL から起動された `.exe` を祖先付きで journald に残す（黙って通った要求も残る） |
 
 #### 入れる
@@ -1460,12 +1460,26 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 - 表示では、記録の中の改行や ESC などの制御文字を `\xNN` にする（記録される側が argv で
   偽の行を差し込んだり端末を操作したりできないように）
 
-ダイアログが出ている間なら、その場で木を出す方が早い。
+ダイアログが出たら `pjp-who-is-asking` を打つ。先に直近 3 分の記録（agent に届く `.exe` と、
+`cmd.exe /c ssh.exe …` のようにそれを引数で呼ぶ踏み台）を要求元までの木で出し、そのあとに、
+いま動いている要求元を Windows と Linux をまたいだ木で出す。
+要求元はダイアログに気付く前に終わっていることが多いので（Claude Code の GitHub SSH の確かめは
+3 秒で kill されるが、ダイアログは約 60 秒残る）、たいていは記録の節に答えがある
+（[ADR 020](../docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md)）。
 
 ```sh
-pjp-who-is-asking                # Windows 側も取る (powershell.exe で 1〜2 秒)
-pjp-who-is-asking --no-windows   # Linux 側だけ
+pjp-who-is-asking                # 直近 3 分の記録と、いま動いている木 (Windows 側は powershell.exe で 1〜2 秒)
+pjp-who-is-asking --recent 600   # 直近 10 分まで遡る
+pjp-who-is-asking --recent 0     # 記録を読まない
+pjp-who-is-asking --no-windows   # Windows 側を省く (記録の節は出す)
 ```
+
+- 記録の節は古い順で、ダイアログの要求はたいてい一番下（一番新しいもの）。要求元がまだ動いていれば
+  「動いている (下の木にも出る)」、終わっていれば「終了済み」と付く
+- 記録は「起動された」ことしか分からない。承認済みのセッションから黙って通った要求も並ぶので、
+  どれがいまのダイアログの要求かは時刻から推す
+- `exeExecTrace.enable` が無いマシンでは、記録の節は「入っていない」の 1 行だけになり、
+  いま動いている木は今までどおり出る
 
 #### 外す
 
@@ -2676,7 +2690,7 @@ nix/
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
 ├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
-│   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、Windows と Linux をまたいだ 1 本の木で出す
+│   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す
 │   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)
 ├── tests/                 flake の checks で流すテスト (何を確かめるかは各テストの先頭の「## 確かめること」。check-test-headers.sh --show で並べる)
 └── scripts/
