@@ -251,10 +251,21 @@ ADR 018 のように書いた記録を持てば見分けられるが、`env.bak`
 
 ## 6. 検証 (Verification)
 
-- `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test`
-- shfmt・shellcheck・`check-test-headers.sh`・`warn-helpers.test.sh`
+- `nix build ./nix#checks.x86_64-linux.bootstrap-local-env-test` (29 件)。何を確かめるかはテストの先頭の
+  「## 確かめること」。同じテストを GNU の bash 3.2.57 と one-true-awk 20260426 (macOS の awk と同じ系統) でも流し、
+  29 件通った
+- shfmt・shellcheck・nixfmt・`check-test-headers.sh`・`check-test-grep-q.sh`・`warn-helpers-test` (97 件)
+- `./nix/scripts/verify.sh`: flake の評価・使い捨ての HOME への activate・冪等性は通った。最後の段 (`nix/files/` に
+  `dotfiles/` への参照が無いか) は、main にも既にある 11 件で落ちる (この変更で件数は変わらない)
+- 本物の `notion_profile.read_env_file` (claude-skills) に、制御文字を含む断片を入れて組んだ欄を読ませ、欄から
+  読まれる変数が 0 件であることを確かめた。制御文字を含む行を欄の外に直接書くと 1 件読まれる (この穴を E で塞いだ)
 - この PC の `~/.config/pjp/env` の写し (使い捨ての 700 の dir に 600 で写す) に流し、テンプレートの 10 行が欄に
-  替わり、値の行がバイトで変わらないことを、値を画面に出さずに確かめる (本物は書き換えない)
+  替わり、残りの 1 行がバイトで同じ・ローダが読む行が 1 行のまま・`env.bak` が元とバイトで同じ (600)・2 回目は
+  「最新」で何も書かない、を値を画面に出さずに確かめた。本物は書き換えていない
+- 本物の `~/.claude/skills` から使い捨ての `XDG_CONFIG_HOME` へ欄を組み、`pjp-notion-profile` と
+  `pjp-video-explainer-pictogram` (claude-skills の PR) の節が警告なしに入ることを確かめた
+- 書き上がりを別の reviewer が読み、指摘 (書かずに抜けるときに権限を締めない・`=` だけで終わる行を名前として出す
+  ほか) を G のとおり直した
 
 ## 7. 移行・運用手順
 
