@@ -671,7 +671,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
-| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションの git に効かせる env 登録（無署名・GitHub へは gh の HTTPS。[後述](#claude-のセッションだけ-git-の設定を変える)） |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS は[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
@@ -1939,12 +1939,15 @@ Nix では置けない（[skill の host option](#claude-code-の-skill-を-host
     { "k": "url.https://github.com/.insteadOf", "v": "git@github.com:" },
     { "k": "url.https://github.com/.insteadOf", "v": "ssh://git@github.com/" },
     { "k": "credential.https://github.com.helper", "v": "!gh auth git-credential" }
-  ]
+  ],
+  "managedVars": ["CLAUDE_CODE_SHELL"],
+  "vars": { "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash" }
 }
 ```
 
 gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`managed` は option の値に
-よらず 4 つのまま。settings.json にはこう入る（true のとき）。
+よらず 4 つのまま。`managedVars` と `vars` は [Bash tool の shell](#claude-code-の-bash-tool-を-bash-で動かす)
+の分で、option によらない。settings.json にはこう入る（true のとき）。
 
 ```json
 "env": {
@@ -1958,7 +1961,8 @@ gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`ma
   "GIT_CONFIG_KEY_3": "url.https://github.com/.insteadOf",
   "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
   "GIT_CONFIG_KEY_4": "credential.https://github.com.helper",
-  "GIT_CONFIG_VALUE_4": "!gh auth git-credential"
+  "GIT_CONFIG_VALUE_4": "!gh auth git-credential",
+  "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash"
 }
 ```
 
@@ -1977,8 +1981,10 @@ Claude Code 自身も条件によって同じ仕組みで `credential.interactiv
 冪等で、`env` の他のキーは保持する。`managed`（と `gitConfig`）のキーを持つ組は
 いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
 3 組が消える。無関係な `GIT_CONFIG_*` の組は順序を保って残し、番号だけ 0 から振り直す
-（番号に穴があると git はその手前までしか読まない）。生成ファイルが無ければ（この形を
-置く世代へまだ switch していなければ）警告して飛ばす。
+（番号に穴があると git はその手前までしか読まない）。`managedVars`（と `vars`）の名前も
+いったん外してから `vars` を足すので、`vars` から外した名前は消える。生成ファイルが無ければ
+（この形を置く世代へまだ switch していなければ）警告して飛ばす。`managedVars` と `vars` が
+無ければ（`CLAUDE_CODE_SHELL` を足す前の世代）、`GIT_CONFIG_*` だけを書き、switch を促す警告を出す。
 
 **実行中のセッションにも入る**（このマシンでは再起動なしで反映された）。確認は
 `env | grep GIT_CONFIG`、または Claude に `git config --get commit.gpgsign`（`false`）と
@@ -2008,6 +2014,65 @@ GitHub へは HTTPS:
 | `pushInsteadOf`（push だけ読み替える） | fetch / pull は ssh.exe を通るまま |
 | 空の `credential.helper=` で file 側の helper を消してから gh を足す | Claude Code が空文字の env を渡さないと `GIT_CONFIG_VALUE_<n>` が欠け、git が `unable to parse command-line config` で全部落ちる。今は file 側に helper が無いので要らない（あれば bootstrap が警告する） |
 | gh 未ログインなら HTTPS の組を書かない | 結果が option ではなくその時のログイン状態で決まる。警告だけにする |
+
+### Claude Code の Bash tool を bash で動かす
+
+Claude Code の Bash tool は、`settings.json` の `env` の `CLAUDE_CODE_SHELL` が指す shell で動く
+（TKT-192）。値は home-manager の profile の bash（`home.profileDirectory` の `bin/bash`。
+このマシンなら `/home/pollenjp/.nix-profile/bin/bash`）で、どのマシンでも入れる（host option は無い）。
+登録は[上の git の env](#claude-のセッションだけ-git-の設定を変える) と同じ `bootstrap-claude-env.sh` が行い、
+`~/dotfiles/setup --update` で入る。
+
+#### なぜ要るのか
+
+指定が無いと、Claude Code（2.1.300 で本体のコードを読んで確かめた）は shell をこう選ぶ。
+
+1. `CLAUDE_CODE_SHELL` が bash か zsh を含み、実行できれば（できなければ `<値> --version` が 0 で返れば）それ
+2. `$SHELL` が bash か zsh を含めばそれ
+3. それ以外（ログインシェルの fish など）は zsh を先に探し（`which zsh`、次に `/bin`・`/usr/bin`・
+   `/usr/local/bin`・`/opt/homebrew/bin`）、無ければ bash
+
+ログインシェルが fish で `/usr/bin/zsh` もあるマシンでは、3. で Bash tool が zsh で動く。Claude が書く
+script やテストは bash なので、Bash tool で試した結果と本番が食い違う（glob が何にも合わないと zsh は
+`no matches found` で止まる、など）。そこで bash にそろえる。
+
+#### 効き方
+
+- `claude`・`claude-<名前>`（`settings.json` を symlink で共有する）・`c` の alias・herdr の `agent start` の
+  どれで起動しても、起動した shell によらず効く。`settings.json` の `env` は起動の早い段階で読まれ、shell を
+  選ぶより前に入る（`claude -p --settings` に同じ `env` を渡し、Bash tool の中で `BASH_VERSION` が出ることを確かめた）
+- Bash tool は最初に snapshot を作る。bash なら `bash -c -l` で `~/.bashrc` を source する（zsh なら `~/.zshrc`）。
+  home-manager の `.bashrc` は先頭で非対話なら return するので、alias（`cat=bat`・`grep=rg` など）と
+  `initExtra` の関数は Bash tool に入らない
+- shell は Claude Code の起動時に決まる。実行中のセッションは、起動し直すまで前の shell のままのことがある
+  （plugin の入れ替えで snapshot を作り直すときは選び直す）
+
+確認は、起動し直した Claude に `echo "$BASH_VERSION"` を実行させる（bash なら版が出る。zsh なら空）。
+起動するときに `--debug` を付けると、ログに `Using shell override: <値>` と `Creating shell snapshot for bash` が出る。
+
+#### 値を profile の bash にする理由
+
+profile のパスは世代を切り替えても変わらず、置き場所とユーザー名は home-manager が決めるので、
+マシンが変わっても合う。bash は `programs.bash`（`home/modules/bash.nix`）が profile に入れる
+（`programs.bash.package` の既定は `bashInteractive`）。`programs.bash.package` を null にすると
+指す先が無くなるので、評価で止める（assertion）。
+
+パスが実行できないとき（switch より前など）、Claude Code はログに出すだけで zsh を探し直すので、
+bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警告のまとめ)にも出す（env には書く）。
+
+| 値の案 | 却下理由 |
+| --- | --- |
+| `bash`（PATH で引く） | 起動したときの PATH 次第で `/usr/bin/bash`（5.2）や macOS の `/bin/bash`（3.2）になる。起動のたびに `bash --version` を 1 回起こす |
+| Nix store の bash（`${pkgs.bashInteractive}/bin/bash`） | flake.lock を上げるたびにパスが変わり、bootstrap より先に古い世代を GC すると消えて、黙って zsh に戻る |
+| `/bin/bash`・`/usr/bin/bash` | NixOS には無く、macOS は bash 3.2 |
+
+#### 置き場所で採らなかった案
+
+| 案 | 却下理由 |
+| --- | --- |
+| fish の設定や `home.sessionVariables` で export する | fish や login shell を通らない起動（IDE の拡張・デスクトップアプリ・hook や cron からの `claude -p`）に効かない。Claude 以外のプロセスにも漏れる |
+| `claude-<名前>` の wrapper で export する | 素の `claude`・`c` の alias・herdr の `agent start` に効かない |
+| 新しい状態ファイルと bootstrap を足す | `settings.json` の `env` を 2 つの script が書くことになり、setup の手順も 1 つ増える |
 
 ### Claude Code の skill を host ごとに止める
 
@@ -2415,7 +2480,7 @@ flake input にしない理由も claude-skills と同じ（[前述](#なぜ-fla
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -2619,7 +2684,7 @@ nix/
     ├── bootstrap-claude-plugins.sh  Claude Code の公式プラグインを導入する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-env.sh     Claude のセッションの git に効かせる env (無署名・GitHub へは gh の HTTPS) を登録する (冪等。更新時も毎回走る)
+    ├── bootstrap-claude-env.sh     Claude のセッションに渡す env (git の無署名・GitHub へは gh の HTTPS、Bash tool の shell) を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
     ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
