@@ -119,6 +119,33 @@ fi
 `claude-skills` 側は実ディレクトリなので `path:` も `readlink` も要らない。
 そちらの `skills/README.md` を参照。
 
+## 環境変数を受け取るとき (`pjp-env.txt`)
+
+skill の script が環境変数を読み、それを「そのマシンで常に効かせる意味がある」（API キー・置き場所・
+マシンごとの切り替え）なら、skill のディレクトリに `pjp-env.txt` を置く。`setup --update` の
+`bootstrap-local-env` が `~/.claude/skills/*/pjp-env.txt` を集め、`~/.config/pjp/env` の頭の欄に
+`# ---- skill: <名前> ----` の節として並べる（[ADR 021](../../../../docs/adr/021_local_env_header_20261017T224146JST/README.md)、
+[`nix/README.md`「一覧の欄」](../../../README.md#一覧の欄-adr-020)）。
+
+```
+<何のための変数か>。取り得る値: <値>。
+<名前>=xxxxxx
+
+ここには書かない:
+  <名前>  <書くと困る理由>
+```
+
+- 素のテキストで書く。setup が各行の頭に `# ` を付けるので、`<名前>=xxxxxx` と書いても欄では
+  コメントになる（値が決まっているなら `xxxxxx` の代わりにその値を書く）
+- 変数の間は空行で区切る。先頭と末尾の空行は落ちる
+- ここに書くと困る変数（常に効くと壊れるもの・1 回だけコマンドの前に付けるもの）は、最後に「ここには書かない」の
+  行でまとめる
+- 次の行を持つ `pjp-env.txt` は、欄に入らず `setup` が `!!` で知らせる
+  - `>>> dotfiles` か `<<< dotfiles` で始まる行（欄の印と同じ頭になる）
+  - 行の途中に制御文字（タブを除く）か U+0085・U+2028・U+2029 がある行（Notion の宛先の resolver が、そこで行を分ける）
+- devShell・テストが自分で張る変数（`*_REEXEC` など）は載せない
+- 文言は skill と一緒に配られる。変数を足す・変える変更では、`pjp-env.txt` も同じ commit で直す
+
 ## パッケージ同梱の skill
 
 nixpkgs のパッケージが同梱している skill（`installAgentSkills` が
