@@ -18,6 +18,10 @@
 #
 #   - subagent の中 (入力に agent_id がある)。subagent の中では作らない (受け取る人がいない)
 #   - skill が入っていないマシン (claude-skills を取れない、public な dotfiles だけの環境)
+#   - skill を Claude が呼べないマシン。settings.json の skillOverrides で pjp-video-explainer-offer が
+#     off か user-invocable-only (dotfiles.claude.videoOffer.enable = false のマシンでは bootstrap が
+#     off を書く。既定)。知らせても skill は呼べず、SKILL.md を直接読ませることになる。
+#     見るのは user の settings.json (${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json) だけ
 #   - ユーザーが「このセッションでは作らない」を選んだセッション。skill がそのとき
 #     ${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id> を置く。
 #     会話の圧縮で選んだことが消えても、ここで黙らせる
@@ -40,6 +44,13 @@ input=$(cat) || exit 0
 skill_md="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skills/pjp-video-explainer-offer/SKILL.md"
 [[ -f ${skill_md} ]] || exit 0
 command -v jq &>/dev/null || exit 0
+
+# skill を Claude が呼べない値なら黙る。読めない・壊れている・知らない値なら、今どおり知らせる
+# (止めるかどうかを hook で決めない。作るかどうかは skill が決める)
+settings="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/settings.json"
+case $(jq -r '.skillOverrides["pjp-video-explainer-offer"] // empty' "${settings}" 2>/dev/null) in
+  off | user-invocable-only) exit 0 ;;
+esac
 
 # 入力の 1 項目を取り出す。無い・壊れている → 空文字
 field() {

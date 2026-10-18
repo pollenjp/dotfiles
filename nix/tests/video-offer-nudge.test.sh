@@ -6,7 +6,8 @@
 #   bash nix/tests/video-offer-nudge.test.sh [<video-offer-nudge.sh のパス>]
 #
 # flake の checks (video-offer-nudge-test) が Nix のサンドボックスで流す。使うのは
-# bash・jq・coreutils・grep だけ。skill の有無は CLAUDE_CONFIG_DIR を使い捨ての dir に向けて作る。
+# bash・jq・coreutils・grep だけ。skill の有無は CLAUDE_CONFIG_DIR を使い捨ての dir に向けて作り、
+# skillOverrides を書いた settings.json も同じ dir に置く。
 # 「このセッションでは作らない」の印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) も
 # 使い捨ての dir に作る。
 #
@@ -18,6 +19,9 @@
 #     上書き・関係ないファイル・ADR の dir の中の textbook や図・ADR の一覧) では黙る
 #   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは作らない」の印が
 #     あるセッションでも黙り、いつも exit 0
+#   - settings.json の skillOverrides で skill を Claude が呼べない値 (off・user-invocable-only。
+#     symlink の先の settings.json でも) なら黙る。on・name-only・ほかの skill だけの off・
+#     壊れた settings.json・object でない skillOverrides では今どおり知らせる
 
 set -u -o pipefail
 
@@ -237,6 +241,74 @@ if [[ ${s1} == yes && $(context) == "[解説動画] PR を作った (https://git
 else
   ng "既存の PR (already exists) を返しただけの gh pr create では黙り、ほかの文の already exists では知らせる" "s1=${s1} out=$(cat "${work}/out")"
 fi
+
+# config_with_settings <dir 名> <settings.json の中身 (空なら作らない)> : skill を入れた設定 dir を作り、パスを返す
+config_with_settings() {
+  local dir="${work}/$1"
+  mkdir -p "${dir}/skills/pjp-video-explainer-offer"
+  echo '---' >"${dir}/skills/pjp-video-explainer-offer/SKILL.md"
+  if [[ -n $2 ]]; then
+    printf '%s' "$2" >"${dir}/settings.json"
+  fi
+  printf '%s' "${dir}"
+}
+
+# 23. settings.json の skillOverrides で off → PR の作成でも設計の文書でも黙る
+#     (dotfiles.claude.videoOffer.enable = false のマシンで bootstrap が書く値)
+cfg=$(config_with_settings off '{"skillOverrides":{"pjp-dev-tracker":"on","pjp-video-explainer-offer":"off"}}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/20')"
+s1=$(silent && echo yes)
+run "${cfg}" "$(write_input /r/docs/adr/012_y/README.md create)"
+if [[ ${s1} == yes ]] && silent; then
+  ok "skillOverrides で off なら、PR の作成でも設計の文書でも黙る"
+else
+  ng "skillOverrides で off なら、PR の作成でも設計の文書でも黙る" "s1=${s1} out=$(cat "${work}/out")"
+fi
+
+# 24. user-invocable-only (Claude の一覧に出ず、ユーザーの / からだけ呼べる) → 黙る
+cfg=$(config_with_settings user-only '{"skillOverrides":{"pjp-video-explainer-offer":"user-invocable-only"}}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/21')"
+if silent; then ok "skillOverrides で user-invocable-only なら黙る"; else ng "skillOverrides で user-invocable-only なら黙る" "out=$(cat "${work}/out")"; fi
+
+# 25. on と name-only (Claude が自分で呼べる) → 知らせる
+cfg=$(config_with_settings on '{"skillOverrides":{"pjp-video-explainer-offer":"on"}}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/22')"
+r1=$(context)
+cfg=$(config_with_settings name-only '{"skillOverrides":{"pjp-video-explainer-offer":"name-only"}}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/23')"
+if [[ ${r1} == "[解説動画] PR を作った (https://github.com/o/r/pull/22)。"* && $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/23)。"* ]]; then
+  ok "skillOverrides で on・name-only なら知らせる"
+else
+  ng "skillOverrides で on・name-only なら知らせる" "r1=${r1} out=$(cat "${work}/out")"
+fi
+
+# 26. ほかの skill だけ off → 知らせる
+cfg=$(config_with_settings other-off '{"skillOverrides":{"pjp-dev-tracker":"off"}}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/24')"
+if [[ $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/24)。"* ]]; then
+  ok "ほかの skill だけ off なら知らせる"
+else
+  ng "ほかの skill だけ off なら知らせる" "out=$(cat "${work}/out")"
+fi
+
+# 27. 壊れた settings.json・object でない skillOverrides → 今どおり知らせ、exit 0
+cfg=$(config_with_settings broken '{"skillOverrides": ')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/25')"
+r1=$(context)
+rc1=$(cat "${work}/rc")
+cfg=$(config_with_settings not-object '{"skillOverrides":"off"}')
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/26')"
+if [[ ${r1} == "[解説動画] PR を作った (https://github.com/o/r/pull/25)。"* && ${rc1} == 0 && $(context) == "[解説動画] PR を作った (https://github.com/o/r/pull/26)。"* && $(cat "${work}/rc") == 0 ]]; then
+  ok "壊れた settings.json・object でない skillOverrides では知らせ、exit 0"
+else
+  ng "壊れた settings.json・object でない skillOverrides では知らせ、exit 0" "r1=${r1} rc1=${rc1} out=$(cat "${work}/out")"
+fi
+
+# 28. settings.json が symlink (claude-<名前> の dir は ~/.claude/settings.json を指す) → 先の off を読んで黙る
+cfg=$(config_with_settings linked '')
+ln -s "${work}/off/settings.json" "${cfg}/settings.json"
+run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/27')"
+if silent; then ok "symlink の先の settings.json で off なら黙る"; else ng "symlink の先の settings.json で off なら黙る" "out=$(cat "${work}/out")"; fi
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

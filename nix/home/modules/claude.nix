@@ -357,6 +357,7 @@ in
     # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
     # 見つけ、解説動画の短尺を作り始めるよう Claude に知らせる。作るかどうかを決める skill
     # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
+    # settings.json の skillOverrides で skill が off のマシン (videoOffer.enable = false。既定) でも黙る。
     # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
     {
       ".claude/hooks/video-offer-nudge.sh" = {
