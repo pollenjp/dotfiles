@@ -8,6 +8,7 @@
 | 決定者 | pollenjp |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md)（決定 3「既存ツリーは一切変更しない」に従い、変更は `nix/` 側だけに閉じる）/ [004_nix_wsl_ssh_wrapper](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（WSL では `ssh-add` が Windows 側の実体になる。本 ADR の判定はその前提の上に乗る） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md#forward-された-agent-を固定名で見せる)（日常運用はこちら） |
+| 後続 ADR | [021_one_password_outside_wsl](../021_one_password_outside_wsl_20261018T105655JST/README.md)（手元で herdr を開いたときも、`SSH_AUTH_SOCK` がそのマシンの 1Password（`~/.1password/agent.sock`）なら固定名をそこへ張り替え、フォールバックも 1Password の socket では起こさないようにした。本文の「手元では何も変えない」は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「forward された agent を固定名で見せる」） |
 
 ---
 

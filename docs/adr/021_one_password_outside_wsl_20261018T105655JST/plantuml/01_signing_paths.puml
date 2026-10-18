@@ -1,0 +1,30 @@
+@startuml
+!theme plain
+left to right direction
+title git の署名の経路（dotfiles.onePassword.enable = true のとき）
+
+' PlantUML の creole では ~ がエスケープになるので、パスは $HOME で書く
+
+rectangle "git commit" as GIT
+rectangle "鍵を選ぶ（共通）\ngpg.ssh.defaultKeyCommand\nssh-add -L から Signing を含む鍵" as KEY
+
+package "WSL（今まで）" {
+  rectangle "op-ssh-sign-wsl.exe\n（Windows 側の実体）" as OPW
+  rectangle "Windows の 1Password" as WIN
+}
+
+package "WSL でないマシン（今回）" #D5E8D4 {
+  rectangle "ssh-keygen -Y sign\n（home-manager の既定）" as KEYGEN
+  rectangle "SSH_AUTH_SOCK のエージェント" as SOCK
+  rectangle "手元: このマシンの 1Password\n$HOME/.1password/agent.sock" as LOCAL
+  rectangle "ssh 先: 転送されてきたエージェント\n（herdr の pane は $HOME/.ssh/agent.sock）" as FWD
+}
+
+GIT --> KEY
+KEY --> OPW
+OPW --> WIN
+KEY --> KEYGEN
+KEYGEN --> SOCK
+SOCK --> LOCAL
+SOCK --> FWD
+@enduml
