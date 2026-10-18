@@ -951,10 +951,11 @@ home-manager switch --flake ~/dotfiles#tmp
 既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
 （何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
 
-`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git は gh の資格情報で GitHub へ
-HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
+`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git と、fetch 系の abbr / alias は gh の資格情報で
+GitHub へ HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
 置いてある。gh にログインしないマシンだけ外す
-（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
+（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・
+[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)）。
 
 Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで、規則に当たらない repo と
 repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
@@ -1216,6 +1217,8 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
 止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
 gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
+自分のターミナルでも、fetch 系の abbr / alias（`gf`・`gfp`・`gpul` など）は同じ option で gh を通る
+（[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)）。
 
 ### PR の差分からファイルを選んで見る (pjp-pr-diff)
 
@@ -1261,6 +1264,48 @@ gdp --list | sort            # 選ばずに並べる。push 済みなら gh pr d
 
 rename は元と先の両方を `git diff` に渡すので、rename として出る（`--list` では先のパスだけ）。
 空白・改行・タブ・glob の文字（`[ab].txt` など）を含むパスも、そのままのファイルを指す。
+
+### fetch 系を gh の資格情報で通す (git gh)
+
+`git gh <コマンド>` は、GitHub との通信だけを gh の資格情報（HTTPS）に向けて git を呼ぶ（実体は
+`nix/pkgs/git-gh/`。全ホストの PATH に入る。`git-gh <コマンド>` と直に呼んでも同じ）。Claude のセッションに
+渡しているのと同じ組（`nix/lib/git-via-gh.nix`。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）を
+`-c` で付けて git を呼ぶだけで、効くのはそのコマンドの間だけ。origin の URL も git の設定ファイルも書き換えない。
+WSL でも `ssh.exe` と 1Password の承認ダイアログを通らない。
+
+host option **`dotfiles.claude.gitViaGh.enable`**（既定 true）のマシンでは、fish の abbr と bash の alias の
+fetch 系がこれを使う。false なら今までどおり `git`（ssh）で打つ。
+
+| 名前 | true（既定） | false |
+| --- | --- | --- |
+| `gfp` | `git gh fetch --prune && git gh pull`（`gfp-gh` と同じ中身） | `git fetch --prune && git pull`（`gfp-base` と同じ中身） |
+| `gfp-gh` | `git gh fetch --prune && git gh pull` | 同じ |
+| `gfp-base` | `git fetch --prune && git pull`（今までの `gfp`） | 同じ |
+| `gf`・`gpul`・`gpull`・`gcl` | `git gh fetch --prune` などで打つ | `git fetch --prune` などで打つ |
+| `gpr` と `git_*` の関数 | `remote show`・`fetch`・`pull` を `git gh` で打つ | `git` で打つ |
+| `gp`・`gpf`・`gpup`（push） | `git`（ssh）のまま | 同じ |
+
+関数は `git_get_default_branch`・`git_fetch_branch`・`git_fetch_base`・`git_branch_cleanup`（`_force` も）・
+`git_fetch_pull_request`（`gpr`）。
+
+- `gfp` には `gfp-gh` / `gfp-base` の名前ではなく中身を書いている。fish の abbr は展開した結果をもう一度は
+  展開しないので、名前に展開すると、その名前のコマンドが無くて落ちるため
+- `gfp-base`・`gfp-gh`・`git gh` は option によらず使える。true のマシンで 1 回だけ ssh で通すなら、`gfp-base`
+  か、`git` で直に打つ
+- gh が無い・github.com にログインしていないと、`git gh` は git を呼ばずに止まり、`gh auth login` と
+  `gfp-base` を案内する（そのまま git を呼ぶと、資格情報が取れずに Username の入力待ちになるため）
+- 読み替わるのは GitHub の ssh の URL（`git@github.com:` と `ssh://git@github.com/`）だけ。GitHub 以外の remote と
+  ssh のホスト別名は ssh を通る
+- 自分のターミナルの素の git は変わらない。git の設定ファイルで全部を読み替える形にしないのは、エディタの git や
+  push まで gh に向く（`insteadOf` は push の URL も読み替える）ため。`programs.gh` を使わない理由と同じ
+  （`home/modules/packages.nix`）
+- abbr / alias は `home-manager switch` だけで変わる（開き直したシェルから）。Claude の側の反映は `setup --update` まで要る
+
+```sh
+gfp                       # true のマシンでは git gh fetch --prune && git gh pull に展開される
+git gh ls-remote origin   # 1 回だけ gh で通す
+gfp-base                  # true のマシンで 1 回だけ ssh で通す
+```
 
 ## ssh について
 
@@ -1549,7 +1594,7 @@ ssh-add -l                   # 鍵が並ぶ
 順序が本質的に効くもの (PATH の前置、mise activate、starship init) だけを
 `interactiveShellInit` の並び順で表現している。
 
-内訳: abbr 88 個 / function 24 個 / `interactiveShellInit`。
+内訳: abbr 105 個 / function 25 個 / `interactiveShellInit`。
 
 **fisher は不要になった。** `programs.fish.plugins` が `fishPlugins.autopair` と
 `fishPlugins.fzf-fish` を宣言的に入れるため、curl でのインストーラ取得と日次
@@ -1565,7 +1610,7 @@ ssh-add -l                   # 鍵が並ぶ
 ## bash
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
-内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+内訳: alias 105 個 / 関数 25 個 / `initExtra`。
 
 `programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
 どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
@@ -1869,7 +1914,8 @@ home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置
 ### Claude のセッションだけ git の設定を変える
 
 Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
-ターミナルの git は変わらない。
+ターミナルの素の git は変わらない（fetch 系の abbr / alias だけは、同じ option で
+[git gh](#fetch-系を-gh-の資格情報で通す-git-gh) を使う）。
 
 - **commit を無署名にする**（いつも）
 - **GitHub へは gh の資格情報（HTTPS）で通す**（host option `dotfiles.claude.gitViaGh.enable`、既定 true）
@@ -2667,6 +2713,7 @@ nix/
 ├── flake.nix              inputs / homeConfigurations / lib / checks / packages / apps / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
 ├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
+├── lib/git-via-gh.nix     GitHub を gh の資格情報 (HTTPS) で通す git の設定の組 (modules/claude.nix と pkgs/git-gh が読む)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
@@ -2680,15 +2727,17 @@ nix/
 │       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)。ccPages.port を選んだマシンには config.toml も置く
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
-│       ├── fish.nix          abbr 88 / function 24
-│       ├── bash.nix          alias 88 / 関数 24
+│       ├── fish.nix          abbr 105 / function 25
+│       ├── bash.nix          alias 105 / 関数 25
 │       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)。win/ を配るマシンの PATH に pjp-google-ime を置く
 │       ├── exe-exec-trace.nix  WSL のマシンの PATH に pjp-who-is-asking を置き、exeExecTrace.enable なら .exe の起動を記録するトレーサの unit ファイルを作る (/etc へは setup が入れる。ADR 012)
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
-├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
+├── pkgs/                  自作のパッケージ (modules/packages.nix・exe-exec-trace.nix・windows-files.nix が使う。flake の packages と checks にも載せる)
+│   ├── pjp-pr-diff/         PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す
+│   ├── git-gh/              GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す
 │   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)
