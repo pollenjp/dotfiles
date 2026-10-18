@@ -27,10 +27,11 @@
   #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
   #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
+  #   claude.videoOffer.enable = true;    # 設計・PR のときに解説動画の短尺を既定で作り始めるマシン (既定は作らない)
   #
-  # 省略すれば既定 (どちらも true)。ローカル flake (~/dotfiles/flake.nix) の雛形は
-  # 登録簿のホストにも当たる module で devTracker を false にしているので、そちら経由の
-  # マシンでは雛形側を見ること。
+  # 省略すれば既定 (devTracker と gitViaGh は true、videoOffer は false。個々は home/options.nix)。
+  # ローカル flake (~/dotfiles/flake.nix) の雛形は登録簿のホストにも当たる module で devTracker を
+  # false にしているので、そちら経由のマシンでは雛形側を見ること。
   claude ? { },
   modules ? [ ],
 }:

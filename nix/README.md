@@ -964,6 +964,10 @@ cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなけ�
 雛形にはコメントアウトした例だけ置いてある。7777 がほかと衝突するマシンだけ書く
 （[待ち受けの port を変える](#待ち受けの-port-を変える)）。
 
+解説動画を既定で作るか **`dotfiles.claude.videoOffer.enable`** は本体の既定の false（1 本ごとに token を
+大きく使うため）のままで、雛形にはコメントアウトした true の例だけ置いてある。使うマシンだけ書く
+（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
+
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
@@ -1667,6 +1671,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | 配置先 | 実体 | 単位 |
 | --- | --- | --- |
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
+| （同上）「解説動画を作る」の節 | `nix/files/claude/CLAUDE.video-offer.md` | `dotfiles.claude.videoOffer.enable` のマシンでだけ連結（既定はしない。[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
@@ -1764,6 +1769,10 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図・
 既存の PR を返しただけの `gh pr create`（stdout に `a pull request for branch … already exists`。`2>&1 | tail`
 でつなぐと exit code が隠れて成功として届く）では黙る。
+user の `settings.json`（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `skillOverrides` で
+`pjp-video-explainer-offer` が `off` か `user-invocable-only`（Claude が skill を呼べない値）のときも黙る。
+`dotfiles.claude.videoOffer.enable = false`（既定）のマシンでは bootstrap が `off` を書くので、
+既定ではこのフックは何も知らせない（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
 ユーザーが「このセッションでは作らない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
 を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
@@ -2094,26 +2103,39 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 ### Claude Code の skill を host ごとに止める
 
 使う skill はマシンごとに違う。例えば会社のマシンでは Notion Dev Tracker の
-`pjp-dev-tracker` を発火させたくない。その宣言は host option
-**`dotfiles.claude.devTracker.enable`**（既定 true）に置き、1 つの値から 2 つが決まる。
+`pjp-dev-tracker` を発火させたくない。設計や PR のたびに解説動画の短尺を裏で作り始める
+`pjp-video-explainer-offer` は、1 本ごとに token を大きく使うので、使うマシンでだけ動かしたい。
+その宣言は host option に置き、1 つの値から CLAUDE.md の節と skill の見え方が決まる。
+
+| option | 既定 | skill | CLAUDE.md の節 | 経緯 |
+| --- | --- | --- | --- | --- |
+| **`dotfiles.claude.devTracker.enable`** | true（ローカル flake の雛形は false） | `pjp-dev-tracker` | 「タスク管理」（`files/claude/CLAUDE.dev-tracker.md`） | [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md) |
+| **`dotfiles.claude.videoOffer.enable`** | false | `pjp-video-explainer-offer` | 「解説動画を作る」（`files/claude/CLAUDE.video-offer.md`） | [ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md) |
 
 | 層 | enable = true | enable = false | 決める場所 |
 | --- | --- | --- | --- |
-| `~/.claude/CLAUDE.md` の「タスク管理」の節 | 末尾に連結（分割前のファイルとバイト単位で同一） | 無し | `home/modules/claude.nix`（`files/claude/CLAUDE.dev-tracker.md` を連結） |
-| `~/.claude/settings.json` の `skillOverrides.pjp-dev-tracker` | `"on"` | `"off"`（Claude の一覧からも `/` メニューからも消える） | `bootstrap-claude-skill-overrides.sh` |
+| `~/.claude/CLAUDE.md` の節 | 末尾に連結（並びは解説動画 → タスク管理。両方 true なら分割前のファイルとバイト単位で同一） | 無し | `home/modules/claude.nix` |
+| `~/.claude/settings.json` の `skillOverrides.<skill>` | `"on"` | `"off"`（Claude の一覧からも `/` メニューからも消える） | `bootstrap-claude-skill-overrides.sh` |
+| 解説動画のフックの知らせ（videoOffer だけ） | 知らせる | 黙る（フックが settings.json の `skillOverrides` を見る） | `video-offer-nudge.sh`（[前述](#解説動画を作る場面を知らせるフック)） |
 
 2 層とも切るのは、片方だけだと壊れ方が悪いため。節だけ残ると Claude が無い skill を
 探しに行き（off の skill を呼ぶと「override を外せ」というエラー文が返る）、skill だけ
-残ると節が無くても description で発火する。
+残ると節が無くても description で発火する。解説動画はフックも黙らせる。skill を off にしても
+`SKILL.md` のファイルは残るので、フックが知らせ続けると Claude が直接読んで作り始めかねない。
+
+名指しで頼んだ解説動画（`pjp-video-explainer-pictogram` / `pjp-video-explainer-dialogue`）は、
+`videoOffer.enable` によらず作れる。
 
 #### 値の置き場
 
 - `~/dotfiles` 経由（通常）なら **ローカル flake の `local`** に書く。雛形は
   `dotfiles.claude.devTracker.enable = false` を持つので、**Dev Tracker を使うマシンだけ
-  true に直す**（[前述](#このマシンだけの設定-local)）。会社のマシンのように public に
-  載せたくない差分を登録簿に書かずに済ませるための向き
+  true に直す**（[前述](#このマシンだけの設定-local)）。`dotfiles.claude.videoOffer.enable` は
+  本体の既定が false なので、**解説動画を既定で作りたいマシンだけ** `true` を書く（雛形に
+  コメントアウトした例がある）。会社のマシンのように public に載せたくない差分を登録簿に
+  書かずに済ませるための向き
 - 登録簿のホストを直接指すなら `hosts/default.nix` の `mkHome` に
-  `claude.devTracker.enable = false;`（`wsl` と同じ形の引数）
+  `claude.devTracker.enable = false;` / `claude.videoOffer.enable = true;`（`wsl` と同じ形の引数）
 
 #### 反映（冪等。更新時も毎回走る）
 
@@ -2123,24 +2145,29 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 ```
 
 `switch` が置くのは 2 つ。連結済みの `~/.claude/CLAUDE.md` と、skillOverrides に流す値を
-書いた `~/.local/state/dotfiles/claude-skill-overrides.json`（`{"pjp-dev-tracker":"off"}`）。
-settings.json は Claude Code 自身が書き換えるので Nix では置けず（フック / statusLine /
+書いた `~/.local/state/dotfiles/claude-skill-overrides.json`（`{"pjp-dev-tracker":"off","pjp-video-explainer-offer":"off"}`
+など）。settings.json は Claude Code 自身が書き換えるので Nix では置けず（フック / statusLine /
 env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` が jq で
 `.skillOverrides` へ merge する。
 
 - **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
-  あり得る。`setup --update` なら bootstrap まで走るので揃う
-- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。
-  `/skills` で切った他の skill には触らない。逆にこの key は option が正で、`/skills` で
-  変えても次の update で戻る
+  あり得る（解説動画のフックも settings.json を見るので、bootstrap までは知らせ続ける）。
+  `setup --update` なら bootstrap まで走るので揃う
+- 生成 JSON に載っている key（今は `pjp-dev-tracker` と `pjp-video-explainer-offer`）だけ上書きし、
+  他は残す。user の settings.json のこの key は option が正で、手で書き換えても次の update で戻る
+- `/skills` での切り替えは、その project の `.claude/settings.local.json` に保存され、user の
+  settings.json より優先される（公式 docs `skills` の「Override skill visibility from settings」）。
+  update では戻らない。解説動画のフックは user の settings.json だけを見るので、`/skills` で
+  切った project でも知らせは来る（option が true なら、CLAUDE.md の節の「一覧に無ければ何もしない」が止める）
 - 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して exit 0
 - 実行中の Claude Code には効かない。新しい session で `/skills` を見ると状態が判る
 
 #### 確認
 
 ```sh
-jq .skillOverrides ~/.claude/settings.json      # {"pjp-dev-tracker":"off"} なら止まっている
+jq .skillOverrides ~/.claude/settings.json      # 対象の skill が "off" なら止まっている
 grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
+grep -c '解説動画を作る' ~/.claude/CLAUDE.md       # 0 なら節が無い
 ```
 
 #### 採らなかった案
@@ -2154,8 +2181,11 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | `bootstrap-claude-skills.sh` に除外リストを足して symlink を張らない | skill のファイルまで消えるが、skillOverrides で見えなくなる以上、ファイルの有無まで気にする理由が無い |
 | `home.activation` で settings.json を書く | Claude Code 所有のファイルを switch が書くことになり、「Nix 管理か否か」の線が崩れる |
 | CLAUDE.md を 1 ファイルのまま Nix でマーカー間を切り抜く | Nix の `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
+| `videoOffer.enable` も module の既定は true のまま、雛形だけ false にする | 雛形は初回にしか書かれないので、既にある `~/dotfiles/flake.nix` のマシンは on のまま残る |
+| 解説動画のフックの登録を option で出し入れする | 登録を消す仕組みと、settings.json に残った登録の後始末が増える。黙るフックの費用は起動 1 回で小さい |
 
-経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
+経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md) と
+[ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)。
 
 ### Notion の宛先を host ごとに選ぶ
 
