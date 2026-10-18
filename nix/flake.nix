@@ -93,6 +93,9 @@
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
       #   claude-notion.nix  notion.{profile,routes,override} から作られる JSON と warnings。評価時に assert するので全 system
+      #   claude-skill-toggles.nix
+      #                    devTracker.enable・videoOffer.enable から作られる CLAUDE.md の節と skill-overrides の
+      #                    JSON。評価時に assert するので全 system
       #   cc-pages.nix     ccPages.port から作られる config.toml と、port を変えた switch での再起動。
       #                    評価時に assert するので全 system
       #

@@ -26,8 +26,10 @@
 #
 # ~/.claude/settings.json の .skillOverrides に、生成ファイルの key を上書きで merge する。
 #
-#   - 生成ファイルに載っている key だけ触る。/skills で切った他の skill はそのまま
-#   - 逆に載っている key は option が正で、/skills で変えても次の実行で戻る
+#   - 生成ファイルに載っている key だけ触る。手で足した他の skill の key はそのまま
+#   - 逆に載っている key は、user の settings.json では option が正で、手で変えても次の実行で戻る。
+#     /skills の切り替えは project の .claude/settings.local.json に保存され (user の値より優先される)、
+#     ここでは触らない
 #   - 他のキーは保持する。同じ内容なら何もしない
 #
 # 実行中の Claude Code には効かない。新しい session から反映される。

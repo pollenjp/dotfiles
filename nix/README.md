@@ -2527,7 +2527,7 @@ flake input にしない理由も claude-skills と同じ（[前述](#なぜ-fla
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL` / `skillOverrides.pjp-dev-tracker`・`skillOverrides.pjp-video-explainer-offer` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 
@@ -2717,7 +2717,7 @@ nix/
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
 ├── files/                 設定ファイルの実体 (store 管理される素のファイル)
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
-│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
+│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.video-offer.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
 ├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す

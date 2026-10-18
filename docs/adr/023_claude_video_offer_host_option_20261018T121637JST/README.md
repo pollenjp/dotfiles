@@ -182,9 +182,11 @@ hook が dotfiles の中間ファイルに依らずに済む (今も Claude Code
 | 両方 true の CLAUDE.md が分割前と同じ | `lib.hostsWith [ { dotfiles.claude.videoOffer.enable = true; } ]` の `pollenjp@x86_64-linux` の CLAUDE.md を、`git show main:nix/files/claude/CLAUDE.md` + 空行 + `CLAUDE.dev-tracker.md` と `diff` | 差分なし |
 | このマシンのローカル flake (`devTracker.enable = true`、videoOffer は書いていない) | `nix eval --no-write-lock-file --override-input dotfiles path:<repo>/nix ~/dotfiles#homeConfigurations."pollenjp@wsl"…` (lock は書き換えない) | CLAUDE.md は「タスク管理」だけ。JSON は `{"pjp-dev-tracker":"on","pjp-video-explainer-offer":"off"}` |
 | hook が値ごとに黙る・知らせる | `nix/tests/video-offer-nudge.test.sh` (checks の `video-offer-nudge-test`) | 28 / 28。足した 6 ケースのうち off・user-invocable-only・symlink の 3 つは、hook を直す前に FAIL することを先に確かめた |
+| 実物の `~/.claude/settings.json` の写し | 使い捨ての `HOME` に写し、このマシンの生成 JSON で `bootstrap-claude-skill-overrides.sh` → hook | `skillOverrides` に `"pjp-video-explainer-offer": "off"` が 1 行増えるだけで、ほかのキーは同じ。hook は off で黙り、on に書き換えると知らせる |
 | 雛形 | `DOTFILES_LOCAL_DIR` を使い捨ての dir にして `setup-local-flake.sh` で生成し、例の行のコメントを外して `nix eval` | 例の行がある。外すと `videoOffer.enable` が `true` |
 | 静的 | 変えたファイルに `nixfmt --check` / `shfmt -d` / `shellcheck`、`check-test-headers.sh`、`check-test-grep-q.sh` | 指摘なし |
 | flake / activation | `./nix/scripts/verify.sh` (`nix flake check --all-systems --no-build` + 使い捨ての `$HOME` での activate) | `nix flake check --all-systems --no-build` と activate 2 回は通過し、配置一覧に `.claude/CLAUDE.md` と `.local/state/dotfiles/claude-skill-overrides.json` が出る。最後の `~/dotfiles` 参照の検査は main と同じ 11 件で落ちる (この変更で増減なし。ADR 007 §6 の既知の件) |
+| コードレビュー (subagent) | branch 全体 | Critical・Important なし。文書の Minor 6 件のうち、この ADR の key とファイルが別の文書に書き漏れていた 4 件を直した。残り 2 件 (逆向きの場合の 1 文・§4 の言い回し) は PR に書いた |
 
 ## 7. 移行・運用手順
 
