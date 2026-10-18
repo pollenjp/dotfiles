@@ -24,6 +24,18 @@
   ...
 }:
 
+let
+  # fetch 系 (GitHub から読むだけのコマンド) の abbr と function が打つ git。
+  # dotfiles.claude.gitViaGh.enable なら、GitHub との通信を gh の資格情報 (HTTPS) に向ける
+  # git gh (nix/pkgs/git-gh)。push 系 (gp・gpf・gpup) は含めず、今までどおり git (ssh) で打つ。
+  # bash.nix の同じ let とそろえる。
+  gitFetch = if config.dotfiles.claude.gitViaGh.enable then "git gh" else "git";
+
+  # gfp の中身。gfp-base は今までの gfp、gfp-gh は git gh で同じことをし、gfp は上の gitFetch で選ぶ
+  # (gitViaGh.enable なら gfp-gh と、でなければ gfp-base と同じ中身)。fish の abbr は展開した結果を
+  # もう一度は展開しないので、gfp には gfp-gh / gfp-base の名前ではなく中身を書く。
+  gfpWith = git: "${git} fetch --prune && ${git} pull";
+in
 {
   # 000_constant / 050_common / 260_env_vars / 060_mise のシェル非依存部分は
   # modules/shell-common.nix にある (bash と共有)。
@@ -86,6 +98,8 @@
       #########################
       # 複製元: 201_git
       #########################
+      # fetch 系 (gcl・gf・gfp・gpul・gpull) は gitFetch で打つ (上の let)。gfp-base / gfp-gh は
+      # option によらず ssh / gh の経路を選んで打つためのもの。
       g = "git";
       ga = "git add";
       gap = "git add -p";
@@ -93,12 +107,14 @@
       gc = "git commit -v";
       gca = "git commit -v -a";
       gcam = "git commit -v --amend";
-      gcl = "git clone --recurse-submodules";
+      gcl = "${gitFetch} clone --recurse-submodules";
       gcm = "git commit -m";
       gcp = "git commit -p -v";
       gcpm = "git commit -p -m";
-      gf = "git fetch --prune";
-      gfp = "git fetch --prune && git pull";
+      gf = "${gitFetch} fetch --prune";
+      gfp = gfpWith gitFetch;
+      gfp-base = gfpWith "git";
+      gfp-gh = gfpWith "git gh";
       gl = "git log";
       glo = "git log --oneline --decorate";
       glog = "git log --graph --decorate --pretty=format:'%C(auto)%h %C(cyan)%ad%C(auto) %d %s' --date=iso --color=always";
@@ -113,8 +129,8 @@
       gp = "git push";
       gpf = "git push --force-with-lease";
       gpup = "git_push_set_upstream";
-      gpul = "git pull";
-      gpull = "git pull";
+      gpul = "${gitFetch} pull";
+      gpull = "${gitFetch} pull";
       gds = "git diff --staged";
       gg = "git grep";
       gr = "git restore";
@@ -316,12 +332,13 @@
       #########################
       # 複製元: 201_git
       #########################
+      # remote を読むもの (remote show・fetch・pull) は gitFetch で打つ (上の let)。
       git_get_default_branch.body = ''
-        git remote show origin 2>/dev/null | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
+        ${gitFetch} remote show origin 2>/dev/null | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
       '';
 
       git_fetch_branch.body = ''
-        git fetch origin "$argv[1]:$argv[1]"
+        ${gitFetch} fetch origin "$argv[1]:$argv[1]"
       '';
 
       git_fetch_base.body = ''
@@ -349,22 +366,22 @@
       git_branch_cleanup.body = ''
         set -l main_branch (test (count $argv) -ge 1; and echo $argv[1]; or git_get_default_branch)
         git switch $main_branch
-        and git fetch --prune
-        and git pull
+        and ${gitFetch} fetch --prune
+        and ${gitFetch} pull
         and git branch --merged | string match -rv '\*' | string match -rv $main_branch | xargs git branch -d
       '';
 
       git_branch_cleanup_force.body = ''
         set -l main_branch (test (count $argv) -ge 1; and echo $argv[1]; or git_get_default_branch)
         git switch $main_branch
-        and git fetch --prune
-        and git pull
+        and ${gitFetch} fetch --prune
+        and ${gitFetch} pull
         and git branch | string match -rv '\*' | string match -rv $main_branch | xargs git branch -D
       '';
 
       git_fetch_pull_request.body = ''
         set -l pr_num $argv[1]
-        git fetch origin "pull/$pr_num/head:pr$pr_num"
+        ${gitFetch} fetch origin "pull/$pr_num/head:pr$pr_num"
       '';
 
       #########################

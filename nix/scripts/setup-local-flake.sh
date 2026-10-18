@@ -270,7 +270,8 @@ if [[ ${write_flake} == 1 ]]; then
         # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
         dotfiles.claude.devTracker.enable = false;
 
-        # Claude のセッションの git を、gh の資格情報で GitHub へ HTTPS で通すか。
+        # Claude のセッションの git と、fetch 系の abbr / alias (gf・gfp・gpul など) を、
+        # gh の資格情報で GitHub へ HTTPS で通すか。
         # 本体の既定は true で、gh auth login 済みが前提 (未ログインなら setup が警告する)。
         # gh にログインしないマシンは false にすると、今までどおり ssh を通る。
         # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。

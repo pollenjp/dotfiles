@@ -9,7 +9,7 @@
 #   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
-#   dotfiles.claude.gitViaGh.enable              Claude の git を gh の資格情報 (HTTPS) で GitHub へ通すか
+#   dotfiles.claude.gitViaGh.enable              Claude の git と fetch 系の abbr / alias を gh の資格情報 (HTTPS) で GitHub へ通すか
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
@@ -62,16 +62,23 @@ in
       default = true;
       example = false;
       description = ''
-        Claude Code のセッションの git が GitHub と通信するとき、gh の資格情報で
-        HTTPS を使うか。false なら今までどおり ssh (WSL では 1Password の agent) を通る。
+        Claude Code のセッションの git と、自分のターミナルの fetch 系の abbr / alias が
+        GitHub と通信するとき、gh の資格情報で HTTPS を使うか。false なら今までどおり
+        ssh (WSL では 1Password の agent) を通る。
 
-        true のとき、Claude のセッション (Bash tool) にだけ次の git の設定を env で渡す。
-        自分のターミナルの git は変わらない:
+        true のとき、Claude のセッション (Bash tool) にだけ次の git の設定を env で渡す
+        (組は lib/git-via-gh.nix):
 
         - `url.https://github.com/.insteadOf` に `git@github.com:` と `ssh://git@github.com/`。
           fetch と push の両方で、GitHub の ssh の URL を https に読み替える
         - `credential.https://github.com.helper = !gh auth git-credential`。
           資格情報は gh の token から取る
+
+        自分のターミナルでは、素の git は変わらない。変わるのは fish の abbr と bash の alias の
+        fetch 系 (gf・gfp・gpul・gpull・gcl と、gpr などの git_* の関数) で、同じ組を -c で付ける
+        `git gh` (pkgs/git-gh) で打つようになる (home/modules/fish.nix・bash.nix)。gfp は gfp-gh と
+        同じ中身になり、false なら gfp-base (今までの gfp) と同じ中身になる。push 系 (gp・gpf・gpup) は
+        option によらず ssh のまま。gfp-base・gfp-gh・git gh は option によらず使える。
 
         ssh は WSL の ssh.exe を通るので、interop が外れると Exec format error で落ち、
         通っても 1Password の承認ダイアログで止まる。gh は HTTPS の API なので
@@ -82,10 +89,11 @@ in
         token に workflow scope が無いと、`.github/workflows/` を変える push を
         GitHub が拒否する (`gh auth refresh -h github.com -s workflow` で足す)。
 
-        値は `~/.local/state/dotfiles/claude-env.json` (home/modules/claude.nix) に落ち、
+        Claude の側の値は `~/.local/state/dotfiles/claude-env.json` (home/modules/claude.nix) に落ち、
         nix/scripts/bootstrap-claude-env.sh が `~/.claude/settings.json` の env へ写す。
         devTracker.enable と同じく反映は 2 段で、`home-manager switch` だけでは
-        settings.json に届かない。`~/dotfiles/setup --update` で揃える。
+        settings.json に届かない。`~/dotfiles/setup --update` で揃える。abbr / alias の側は
+        switch だけで変わる (開き直したシェルから)。
       '';
     };
 

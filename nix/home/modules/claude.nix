@@ -94,7 +94,8 @@ let
   #   gitConfigBase  いつも入れる。commit / tag を無署名にする (1Password の
   #                  承認ダイアログで止まるため)
   #   gitConfigGh    gitViaGh.enable のときだけ入れる。GitHub の ssh の URL を
-  #                  https に読み替え、資格情報を gh の token から取る
+  #                  https に読み替え、資格情報を gh の token から取る。中身は
+  #                  lib/git-via-gh.nix で、自分のターミナルの git gh (pkgs/git-gh) も同じ組を使う
   gitConfigBase = [
     {
       k = "commit.gpgsign";
@@ -105,20 +106,7 @@ let
       v = "false";
     }
   ];
-  gitConfigGh = [
-    {
-      k = "url.https://github.com/.insteadOf";
-      v = "git@github.com:";
-    }
-    {
-      k = "url.https://github.com/.insteadOf";
-      v = "ssh://git@github.com/";
-    }
-    {
-      k = "credential.https://github.com.helper";
-      v = "!gh auth git-credential";
-    }
-  ];
+  gitConfigGh = import ../../lib/git-via-gh.nix;
 
   # Claude Code の Bash tool を動かす shell (settings.json の env の CLAUDE_CODE_SHELL。TKT-192)。
   #

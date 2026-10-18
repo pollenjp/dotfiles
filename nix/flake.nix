@@ -84,11 +84,16 @@
       #                    (setup の最後の警告のまとめへ足す) が同じ振る舞いかを見る
       #   pjp-pr-diff.test.sh
       #                    nix/pkgs/pjp-pr-diff の script。上と同じ形に fzf を足して流す (Linux だけ)
+      #   git-gh.test.sh   nix/pkgs/git-gh (git gh)。-c で付ける組は Nix が書き込むので、包んだ後の
+      #                    package を上と同じ形で流す (Linux だけ)
       #   claude-footer-links.test.mjs
       #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
       #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
       #   claude-env.nix   gitViaGh.enable から作られるものと、Bash tool の shell (CLAUDE_CODE_SHELL) と
       #                    その bash を profile に入れる設定。評価時に assert するので全 system
+      #   git-gh-aliases.nix
+      #                    gitViaGh.enable で変わる fetch 系の abbr / alias と function (gfp・gfp-base・gfp-gh も)。
+      #                    評価時に assert するので全 system
       #   claude-herdr-skill.nix
       #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
       #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
@@ -214,9 +219,19 @@
                   ${lib.getExe (pkgs.callPackage ./pkgs/pjp-pr-diff { })}
                 touch $out
               '';
+          # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
+          git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          git-gh-aliases-state = import ./tests/git-gh-aliases.nix {
             inherit
               lib
               pkgs
@@ -319,6 +334,10 @@
           #
           #   nix run ~/ghq/github.com/pollenjp/dotfiles/nix#pjp-pr-diff
           pjp-pr-diff = pkgs.callPackage ./pkgs/pjp-pr-diff { };
+
+          # GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)。
+          # home には modules/packages.nix が入れる。checks の git-gh-test もこれを流す。
+          git-gh = pkgs.callPackage ./pkgs/git-gh { };
         }
         # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
         # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:
