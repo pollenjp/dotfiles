@@ -964,6 +964,10 @@ cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなけ�
 雛形にはコメントアウトした例だけ置いてある。7777 がほかと衝突するマシンだけ書く
 （[待ち受けの port を変える](#待ち受けの-port-を変える)）。
 
+解説動画を答えを待たずに作り始めるか **`dotfiles.claude.videoOffer.autoStart.enable`** は本体の既定の false
+（作る前に「解説動画を作りますか？」と聞く。1 本ごとに token を大きく使うため）のままで、雛形にはコメントアウトした
+true の例だけ置いてある。聞かずに作り始めたいマシンだけ書く（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)）。
+
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
@@ -1669,6 +1673,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
+| `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1752,8 +1757,22 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 #### 解説動画を作る場面を知らせるフック
 
 `PostToolUse` フック（`nix/files/claude/hooks/video-offer-nudge.sh`）。設計を書き出した・
-PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画の短尺を裏で作り始めよ」
-と Claude の文脈へ 1 文を差し込む。作るかどうか・確かめ方は skill の側（private な claude-skills）が持つ。
+PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画を作るかを聞け」
+と Claude の文脈へ 1 文を差し込む。作るかどうか・聞き方は skill の側（private な claude-skills）が持つ。
+
+聞くか、答えを待たずに作り始めるかは、host option **`dotfiles.claude.videoOffer.autoStart.enable`**（既定 false）で
+選ぶ。home-manager が値を `~/.local/state/dotfiles/claude-video-offer.json`（`{"autoStart":false}`）に置き、
+このフックと skill が読む（[ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)）。
+
+| `autoStart` | フックが差し込む文 | skill の動き |
+| --- | --- | --- |
+| false（既定）・ファイルが無い・壊れている | 「…解説動画を作るかを聞くこと」 | 作る前に聞く（短く作る / 詳しく作る / 今回は作らない / このセッションでは聞かない） |
+| true | 「…解説動画の短尺を裏で作り始めること」 | 答えを待たずに短尺を作り始め、作り始めてから「このまま作るか」を確かめる |
+
+- 使うマシンはローカル flake の `local` に `dotfiles.claude.videoOffer.autoStart.enable = true;` を書く。反映は
+  `home-manager switch`（`~/dotfiles/setup --update` でもよい）。settings.json は通らない
+- `~/.claude/CLAUDE.md` の「解説動画を作るか聞く」の節は、値によらず同じ文（どちらにするかは skill が決める）
+- 名指しで頼んだ解説動画（`pjp-video-explainer-pictogram` / `pjp-video-explainer-dialogue`）は、値によらず作れる
 
 | 知らせる場面 | 条件 |
 | --- | --- |
@@ -1764,7 +1783,10 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図・
 既存の PR を返しただけの `gh pr create`（stdout に `a pull request for branch … already exists`。`2>&1 | tail`
 でつなぐと exit code が隠れて成功として届く）では黙る。
-ユーザーが「このセッションでは作らない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+user の `settings.json`（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `skillOverrides` で
+`pjp-video-explainer-offer` を `off` か `user-invocable-only`（Claude が skill を呼べない値）にしたときも黙る
+（dotfiles はこの key を書かない。聞くことも止めたいマシンが手で書く）。
+ユーザーが「このセッションでは聞かない」（作り始める側では「このセッションでは作らない」）を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
 を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
 
@@ -2130,9 +2152,11 @@ env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` �
 
 - **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
   あり得る。`setup --update` なら bootstrap まで走るので揃う
-- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。
-  `/skills` で切った他の skill には触らない。逆にこの key は option が正で、`/skills` で
-  変えても次の update で戻る
+- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。user の settings.json の
+  この key は option が正で、手で書き換えても次の update で戻る
+- `/skills` での切り替えは、その project の `.claude/settings.local.json` に保存され、user の
+  settings.json より優先される（公式 docs `skills` の「Override skill visibility from settings」）。
+  update では戻らない
 - 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して exit 0
 - 実行中の Claude Code には効かない。新しい session で `/skills` を見ると状態が判る
 

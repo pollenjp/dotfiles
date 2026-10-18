@@ -13,6 +13,7 @@
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
+#   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
@@ -162,6 +163,35 @@ in
           skill が使うときに resolver が知らないキーとして止める。
         '';
       };
+    };
+
+    videoOffer.autoStart.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏の subagent で
+        作り始めるか (claude-skills の pjp-video-explainer-offer)。false (既定) なら、作る前に
+        「解説動画を作りますか？」と聞き、選ばれたときだけ作る。1 本ごとにコンテキストを大きく
+        使うので、既定は聞く方にしている (docs/adr/023_claude_video_offer_host_option_*)。
+
+        値は `~/.local/state/dotfiles/claude-video-offer.json` (`{"autoStart": <bool>}`) に落ち
+        (home/modules/claude.nix)、次の 2 つが読む:
+
+        - hook (files/claude/hooks/video-offer-nudge.sh): 設計の書き出しと PR の作成で Claude に
+          差し込む文を、true なら「短尺を作り始める」、false なら「作るかを聞く」にする
+        - claude-skills の pjp-video-explainer-offer: true なら答えを待たずに作り始め、
+          false なら先に聞く。ファイルが無い・壊れているときも聞く
+
+        `~/.claude/CLAUDE.md` の「解説動画を作るか聞く」の節は、この値によらず同じ文で、
+        どちらにするかは skill に任せている。skill の見え方 (skillOverrides) も変えない。
+        ユーザーが名指しで頼んだ解説動画 (pjp-video-explainer-pictogram / dialogue) は、
+        この値によらず作れる。
+
+        反映は home-manager switch (~/dotfiles/setup --update でもよい)。settings.json は
+        通らないので bootstrap は要らない。作り始める方にしたいマシンはローカル flake の
+        local で true にする。
+      '';
     };
   };
 
