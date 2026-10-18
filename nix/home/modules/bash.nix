@@ -445,6 +445,11 @@
       #       detach 中でもエージェントは herdr pane split で pane を作れるので、
       #       この経路は実際に踏む。
       #
+      # NOTE: SSH_AUTH_SOCK が 1Password の SSH エージェント (~/.1password/agent.sock。NixOS の
+      #       laptop では system がログインのセッションに入れる) の shell でも何もしない (ADR 021)。
+      #       1Password が起動前やロック中だと ssh-add -l は失敗するが、ここでローカル agent に
+      #       すり替えると、その shell は 1Password が使えるようになっても戻らない。
+      #
       # NOTE: 元のコードは agent が生きているときも ssh-add -l を 2 回呼んでいた。
       #       ssh-add は WSL ではホスト側 Windows の ssh-add.exe (interop 越し) なので、
       #       判定を 1 回にまとめてある。
@@ -453,6 +458,7 @@
         SSH_AGENT_FILE="''${HOME}/.ssh-agent"
 
         if [[ "''${SSH_AUTH_SOCK:-}" != "''${HOME}/.ssh/agent.sock" ]] \
+          && [[ "''${SSH_AUTH_SOCK:-}" != "''${HOME}/.1password/agent.sock" ]] \
           && ! ssh-add -l >/dev/null 2>&1; then
           if test -f "''${SSH_AGENT_FILE}"; then
             # shellcheck disable=SC1090
@@ -508,9 +514,19 @@
       # forward の無い接続 (ssh -a) から server を起動するときも渡す。渡さないと、
       # その server の pane は寿命が尽きるまで agent 無しになる。
       # alias の h / hss / ha なども herdr を呼ぶので、全部ここを通る。
+      #
+      # 手元でも、SSH_AUTH_SOCK がこのマシンの 1Password (~/.1password/agent.sock) なら
+      # 固定名をそこへ張って渡す (ADR 021)。張らないと、手元で開いた herdr の pane が最後に
+      # ssh で開いた接続の転送を指したままになる。これで固定名は「最後に herdr を開いた場所」の
+      # 1Password を指す。1Password の socket は場所が決まっているので、まだ無くても張る
+      # (アプリが起動すれば生きる)。WSL の手元と pane の中 (SSH_AUTH_SOCK が固定名) はこの
+      # 分岐に当たらず、今までどおり何もしない。
       herdr() {
         if [[ -n "''${SSH_CONNECTION:-}" ]]; then
           ssh-agent-link
+          SSH_AUTH_SOCK="''${HOME}/.ssh/agent.sock" command herdr "$@"
+        elif [[ "''${SSH_AUTH_SOCK:-}" == "''${HOME}/.1password/agent.sock" ]]; then
+          ln -sfn "''${HOME}/.1password/agent.sock" "''${HOME}/.ssh/agent.sock"
           SSH_AUTH_SOCK="''${HOME}/.ssh/agent.sock" command herdr "$@"
         else
           command herdr "$@"
