@@ -18,9 +18,12 @@
 #     ssh のホスト別名は読み替えない。git-gh を通さない git は読み替えない
 #   - origin の URL (設定ファイルの値) は書き換えない
 #   - github.com の資格情報は gh (gh auth git-credential get) から取る。github.com 以外には gh を使わない
+#   - git の設定ファイルにある別の credential helper (store) は、github.com には呼ばない (gh の token を
+#     保存しない・古い資格情報で gh を隠さない)。github.com 以外の host では今までどおり使える
 #   - git gh <コマンド> (git の subcommand) で呼べる。引数・cwd・終了コードはそのまま git へ渡る
-#   - gh が github.com にログインしていない・gh が無いときは、git を呼ばずに止まり、gh auth login と
-#     gh を通さない打ち方 (gfp なら gfp-base) を案内する
+#   - gh が無い・github.com にログインしていないときは、git を呼ばずに止まり、gh を通さない打ち方
+#     (gfp なら gfp-base) を案内する。未ログインなら gh auth login と、gh が出した理由も出す。
+#     git gh <コマンド> で呼んでも、終了コードと案内はそのまま
 #
 # ## 「gh が無い」の作り方
 #
@@ -55,10 +58,10 @@ ng() {
 }
 
 # git の global / system の設定と、流す人の env の git の設定 (Claude のセッションの GIT_CONFIG_* など) を
-# 持ち込まない。端末に Username を聞かせない
+# 持ち込まない。端末にも askpass (VS Code の端末などが GIT_ASKPASS を入れる) にも Username を聞かせない
 export HOME="${work}/home" XDG_CONFIG_HOME="${work}/home/.config"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_TERMINAL_PROMPT=0
-unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS
+unset GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS GIT_ASKPASS SSH_ASKPASS
 mkdir -p "${HOME}"
 
 # 偽の gh。呼ばれた引数を FAKE_GH_LOG に 1 行ずつ書き留める。FAKE_GH_LOGGED_IN=0 なら auth token が失敗する
@@ -93,7 +96,8 @@ chmod +x "${bin}/gh"
 ln -s "${gitgh}" "${bin}/git-gh"
 export PATH="${bin}:${PATH}"
 
-# gh だけを持たない PATH。要るコマンド (git-gh が gh の次に呼ぶ git だけ) を symlink で並べる
+# gh だけを持たない PATH。要るコマンド (git-gh が gh の次に呼ぶ git と、git gh で呼ぶための git-gh) を
+# symlink で並べる
 nogh_bin="${work}/nogh-bin"
 mkdir -p "${nogh_bin}"
 if ! real_git=$(command -v git); then
@@ -101,6 +105,7 @@ if ! real_git=$(command -v git); then
   exit 1
 fi
 ln -s "${real_git}" "${nogh_bin}/git"
+ln -s "${gitgh}" "${nogh_bin}/git-gh"
 
 # 空白を含む名前の repo。origin は GitHub の ssh の URL
 repo="${work}/repo dir"
@@ -188,20 +193,37 @@ else
   ng "github.com 以外の資格情報には gh を使わない" "rc=$(rc "${d}") out=$(out "${d}") gh=$(cat "${FAKE_GH_LOG}")"
 fi
 
+# 8. git の設定ファイルにある別の helper (store)。github.com には呼ばれず、古い資格情報を返さず、gh の token も
+#    保存しない (approve は認証が通ったときに git がたどる流れ)。github.com 以外の host では今までどおり使える
+store_cfg="${work}/store-gitconfig"
+store_file="${work}/git-credentials"
+printf '[credential]\n\thelper = store --file=%s\n' "${store_file}" >"${store_cfg}"
+printf 'https://x-access-token:stale@github.com\nhttps://u:p@gitlab.com\n' >"${store_file}"
+d=$(run t8a GIT_CONFIG_GLOBAL="${store_cfg}" "${gitgh}" credential fill <<<$'protocol=https\nhost=github.com\n')
+e=$(run t8b GIT_CONFIG_GLOBAL="${store_cfg}" "${gitgh}" credential approve \
+  <<<$'protocol=https\nhost=github.com\nusername=x-access-token\npassword=gho_fake\n')
+f=$(run t8c GIT_CONFIG_GLOBAL="${store_cfg}" "${gitgh}" credential fill <<<$'protocol=https\nhost=gitlab.com\n')
+if grep -qx 'password=gho_fake' "${d}/out" && [[ $(rc "${e}") == 0 ]] && ! grep -q 'gho_fake' "${store_file}" \
+  && grep -qx 'password=p' "${f}/out"; then
+  ok "設定ファイルの別の helper は github.com には呼ばれず、github.com 以外では使える"
+else
+  ng "設定ファイルの別の helper は github.com には呼ばれない" "github=$(out "${d}") approve_rc=$(rc "${e}") store=$(cat "${store_file}") gitlab=$(out "${f}")"
+fi
+
 echo "== 呼び方と、git へ渡すもの"
 
-# 8. git の subcommand として
-d=$(run t8 git gh ls-remote --get-url git@github.com:o/r.git)
+# 9. git の subcommand として
+d=$(run t9 git gh ls-remote --get-url git@github.com:o/r.git)
 if [[ $(rc "${d}") == 0 && $(out "${d}") == https://github.com/o/r.git ]]; then
   ok "git gh <コマンド> で呼べる"
 else
   ng "git gh <コマンド> で呼べる" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}")"
 fi
 
-# 9. cwd (サブディレクトリから)・空白を含む引数 (-C)・終了コード
-d=$(cd "${repo}/sub" && run t9a "${gitgh}" rev-parse --show-prefix)
-e=$(run t9b "${gitgh}" -C "${repo}" rev-parse --show-toplevel)
-f=$(run t9c "${gitgh}" -C "${repo}" rev-parse --verify --quiet refs/heads/nope)
+# 10. cwd (サブディレクトリから)・空白を含む引数 (-C)・終了コード
+d=$(cd "${repo}/sub" && run t10a "${gitgh}" rev-parse --show-prefix)
+e=$(run t10b "${gitgh}" -C "${repo}" rev-parse --show-toplevel)
+f=$(run t10c "${gitgh}" -C "${repo}" rev-parse --verify --quiet refs/heads/nope)
 if [[ $(out "${d}") == sub/ && $(out "${e}") == "${repo}" && $(rc "${f}") == 1 ]]; then
   ok "cwd・空白を含む引数・終了コードをそのまま git へ渡す"
 else
@@ -210,22 +232,35 @@ fi
 
 echo "== gh が使えないとき"
 
-# 10. 未ログイン: git を呼ばない (init の dir ができない)
-d=$(run t10 FAKE_GH_LOGGED_IN=0 "${gitgh}" init -q "${work}/t10-repo")
-if [[ $(rc "${d}") == 1 && ! -e "${work}/t10-repo" && ! -s "${d}/out" ]] \
-  && grep -q 'gh auth login' "${d}/err" && grep -q 'gfp-base' "${d}/err"; then
-  ok "未ログインなら git を呼ばずに exit 1 で止まり、gh auth login と gfp-base を案内する"
+# 11. 未ログイン: git を呼ばない (init の dir ができない)。gh が出した理由 (keyring の失敗などもここに出る) も見せる
+d=$(run t11 FAKE_GH_LOGGED_IN=0 "${gitgh}" init -q "${work}/t11-repo")
+if [[ $(rc "${d}") == 1 && ! -e "${work}/t11-repo" && ! -s "${d}/out" ]] \
+  && grep -q 'gh auth login' "${d}/err" && grep -q 'gfp-base' "${d}/err" \
+  && grep -q 'no oauth token found for github.com' "${d}/err"; then
+  ok "未ログインなら git を呼ばずに exit 1 で止まり、gh auth login・gh の出した理由・gfp-base を出す"
 else
-  ng "未ログインなら git を呼ばずに止まる" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}") dir=$([[ -e "${work}/t10-repo" ]] && echo できた)"
+  ng "未ログインなら git を呼ばずに止まる" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}") dir=$([[ -e "${work}/t11-repo" ]] && echo できた)"
 fi
 
-# 11. gh が無い: git を呼ばない
-d=$(run t11 PATH="${nogh_bin}" "${gitgh}" init -q "${work}/t11-repo")
-if [[ $(rc "${d}") == 127 && ! -e "${work}/t11-repo" ]] \
+# 12. gh が無い: git を呼ばない
+d=$(run t12 PATH="${nogh_bin}" "${gitgh}" init -q "${work}/t12-repo")
+if [[ $(rc "${d}") == 127 && ! -e "${work}/t12-repo" ]] \
   && grep -q 'gh が見つかりません' "${d}/err" && grep -q 'gfp-base' "${d}/err"; then
   ok "gh が無ければ git を呼ばずに exit 127 で止まり、gfp-base を案内する"
 else
-  ng "gh が無ければ git を呼ばずに止まる" "rc=$(rc "${d}") err=$(err "${d}") dir=$([[ -e "${work}/t11-repo" ]] && echo できた)"
+  ng "gh が無ければ git を呼ばずに止まる" "rc=$(rc "${d}") err=$(err "${d}") dir=$([[ -e "${work}/t12-repo" ]] && echo できた)"
+fi
+
+# 13. git gh <コマンド> で呼んでも、止まったときの終了コードと案内はそのまま (git の「gh は git の
+#     コマンドではない」に化けない)
+d=$(run t13a PATH="${nogh_bin}" git gh init -q "${work}/t13a-repo")
+e=$(run t13b FAKE_GH_LOGGED_IN=0 git gh init -q "${work}/t13b-repo")
+if [[ $(rc "${d}") == 127 && $(rc "${e}") == 1 && ! -e "${work}/t13a-repo" && ! -e "${work}/t13b-repo" ]] \
+  && grep -q 'gh が見つかりません' "${d}/err" && grep -q 'gh auth login' "${e}/err" \
+  && ! grep -q 'is not a git command' "${d}/err"; then
+  ok "git gh で呼んでも、止まったときの終了コード (127・1) と案内はそのまま"
+else
+  ng "git gh で呼んでも、止まったときの終了コードと案内はそのまま" "gh 無し: rc=$(rc "${d}") err=$(err "${d}") / 未ログイン: rc=$(rc "${e}") err=$(err "${e}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

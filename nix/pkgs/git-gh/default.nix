@@ -10,8 +10,15 @@
 # dotfiles.claude.gitViaGh.enable のマシンでこれを使う (home/modules/fish.nix・bash.nix)。gfp-gh は
 # option によらずこれを使う。
 #
+# 組の前に、github.com の credential helper を空にする 1 組を足す (gh auth setup-git が書くのと同じ形)。
+# git の設定ファイルに別の helper (store など) があると、gh より先に呼ばれて古い資格情報を返したり、
+# 認証が通ったあと gh の token を保存したりするため。空にするのは github.com だけで、ほかの host の
+# helper はそのまま使われる。Claude のセッションの env には入れない (空の値を env で渡せるか確かめて
+# いないため。代わりに bootstrap-claude-env.sh が、別の helper があれば警告する)。
+#
 # gh が無い・github.com にログインしていないときは、git を呼ばずに止まる。そのまま git を呼ぶと、
 # 資格情報が取れずに Username の入力待ち (端末が無ければ失敗) になり、原因が分かりにくいため。
+# gh が出した理由 (未ログイン・keyring の失敗など) も添える。
 #
 # git と gh は runtimeInputs に入れず、PATH のものを使う (home には modules/git.nix の git と
 # modules/packages.nix の gh がある)。git gh と呼ばれたときは、git が自分の exec-path を PATH の先頭に
@@ -22,7 +29,13 @@
 }:
 
 let
-  gitConfig = import ../../lib/git-via-gh.nix;
+  gitConfig = [
+    {
+      k = "credential.https://github.com.helper";
+      v = "";
+    }
+  ]
+  ++ import ../../lib/git-via-gh.nix;
 in
 writeShellApplication {
   name = "git-gh";
@@ -34,9 +47,12 @@ writeShellApplication {
       echo "''${hint}" >&2
       exit 127
     fi
-    # token は捨てる (ログインしているかだけを見る)
-    if ! gh auth token --hostname github.com >/dev/null 2>&1; then
+    # token は捨て、gh の stderr (失敗の理由) だけを取る (ログインしているかだけを見る)
+    if ! reason=$(gh auth token --hostname github.com 2>&1 >/dev/null); then
       echo "git-gh: gh が github.com にログインしていません。gh auth login を実行してください。" >&2
+      if [[ -n ''${reason} ]]; then
+        echo "  gh: ''${reason}" >&2
+      fi
       echo "''${hint}" >&2
       exit 1
     fi

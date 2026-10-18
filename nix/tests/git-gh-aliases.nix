@@ -128,6 +128,12 @@ let
         && hasAll f.git_fetch_pull_request.body [ "git gh fetch origin" ];
     }
     {
+      # git gh が止まったときの案内 (gh auth login・gfp-base) は stderr に出る。捨てると、呼んだ側
+      # (git_fetch_base・git_branch_cleanup) が空の branch 名で進み、理由の分からない git のエラーだけが残る
+      name = "fish の git_get_default_branch は stderr を捨てない (bash と同じ)";
+      ok = !(lib.hasInfix "2>/dev/null" (fishFns byDefault).git_get_default_branch.body);
+    }
+    {
       name = "false の fish の fetch 系の function は git gh を使わない";
       ok =
         !(lib.hasInfix "git gh" (fishFetchText disabled))

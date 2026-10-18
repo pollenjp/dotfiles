@@ -1271,7 +1271,8 @@ rename は元と先の両方を `git diff` に渡すので、rename として出
 `nix/pkgs/git-gh/`。全ホストの PATH に入る。`git-gh <コマンド>` と直に呼んでも同じ）。Claude のセッションに
 渡しているのと同じ組（`nix/lib/git-via-gh.nix`。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）を
 `-c` で付けて git を呼ぶだけで、効くのはそのコマンドの間だけ。origin の URL も git の設定ファイルも書き換えない。
-WSL でも `ssh.exe` と 1Password の承認ダイアログを通らない。
+GitHub との通信と認証は、WSL でも `ssh.exe` と 1Password の承認ダイアログを通らない（`pull` が merge commit を
+作るときの署名は別で、今までどおり 1Password を通る）。
 
 host option **`dotfiles.claude.gitViaGh.enable`**（既定 true）のマシンでは、fish の abbr と bash の alias の
 fetch 系がこれを使う。false なら今までどおり `git`（ssh）で打つ。
@@ -1292,10 +1293,14 @@ fetch 系がこれを使う。false なら今までどおり `git`（ssh）で�
   展開しないので、名前に展開すると、その名前のコマンドが無くて落ちるため
 - `gfp-base`・`gfp-gh`・`git gh` は option によらず使える。true のマシンで 1 回だけ ssh で通すなら、`gfp-base`
   か、`git` で直に打つ
-- gh が無い・github.com にログインしていないと、`git gh` は git を呼ばずに止まり、`gh auth login` と
-  `gfp-base` を案内する（そのまま git を呼ぶと、資格情報が取れずに Username の入力待ちになるため）
+- gh が無い・github.com にログインしていないと、`git gh` は git を呼ばずに止まり、gh を通さない打ち方
+  （`gfp` なら `gfp-base`）を案内する。ログインしていなければ `gh auth login` と、gh が出した理由も出す
+  （そのまま git を呼ぶと、資格情報が取れずに Username の入力待ちになるため）
 - 読み替わるのは GitHub の ssh の URL（`git@github.com:` と `ssh://git@github.com/`）だけ。GitHub 以外の remote と
   ssh のホスト別名は ssh を通る
+- git の設定ファイルに別の credential helper（`store` など）があっても、github.com には gh だけを使う。`git gh` は
+  github.com の helper をいったん空にしてから gh を足す（`gh auth setup-git` が書くのと同じ形）。ほかの host の
+  helper はそのまま使われる
 - 自分のターミナルの素の git は変わらない。git の設定ファイルで全部を読み替える形にしないのは、エディタの git や
   push まで gh に向く（`insteadOf` は push の URL も読み替える）ため。`programs.gh` を使わない理由と同じ
   （`home/modules/packages.nix`）

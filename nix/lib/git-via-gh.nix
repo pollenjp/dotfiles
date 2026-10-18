@@ -9,7 +9,8 @@
 # 読むのは 2 か所で、どちらも同じ組で GitHub へ通す:
 #
 #   home/modules/claude.nix  Claude のセッションの env (~/.claude/settings.json) へ写す
-#   pkgs/git-gh              自分のターミナルの git gh が -c で付ける (fetch 系の abbr / alias が使う)
+#   pkgs/git-gh              自分のターミナルの git gh が -c で付ける (fetch 系の abbr / alias が使う)。
+#                            その前に github.com の helper を空にする 1 組を足す (env には入れない。理由は git-gh の先頭)
 #
 # nixpkgs を引かずに読めるよう、ただの値にしている。
 [

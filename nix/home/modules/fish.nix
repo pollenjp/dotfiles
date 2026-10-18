@@ -333,8 +333,10 @@ in
       # 複製元: 201_git
       #########################
       # remote を読むもの (remote show・fetch・pull) は gitFetch で打つ (上の let)。
+      # git_get_default_branch は stderr を捨てない (bash と同じ)。git gh が止まったときの案内
+      # (gh auth login・gfp-base) が、呼んだ側 (git_fetch_base・git_branch_cleanup) の前に見えるように。
       git_get_default_branch.body = ''
-        ${gitFetch} remote show origin 2>/dev/null | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
+        ${gitFetch} remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
       '';
 
       git_fetch_branch.body = ''
