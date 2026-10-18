@@ -29,17 +29,16 @@
 #
 # 複製元: リポジトリ直下の bin/ssh-wsl.sh / bin/ssh-add-wsl.sh
 #   main.bash setup が uname と ssh.exe の有無を見て ~/.local/bin/ へ symlink して
-#   いた。Nix 経路では登録簿の指定 (dotfiles.wsl.onePassword.enable) で分岐する。
-#   詳細は下の home.file のコメントを参照。
+#   いた。Nix 経路では登録簿の指定 (dotfiles.wsl.enable と dotfiles.onePassword.enable)
+#   で分岐する。詳細は下の home.file のコメントを参照。
 { config, lib, ... }:
 
 let
   wsl = config.dotfiles.wsl;
 
-  # git.nix と同じ判定。入れ子の親も見るのは、wsl.enable = false のまま
-  # onePassword.enable だけ true になった登録を「有効」と誤認しないため
-  # (その組み合わせは git.nix の assertion で評価時に止まる)。
-  useOnePassword = wsl.enable && wsl.onePassword.enable;
+  # ラッパーが要るのは WSL で 1Password を使うときだけ。WSL でないマシンの 1Password は
+  # SSH_AUTH_SOCK 越しに Linux の ssh / ssh-add がそのまま使う (ADR 021)。
+  useOnePassword = wsl.enable && config.dotfiles.onePassword.enable;
 in
 
 {

@@ -2,11 +2,11 @@
 #
 # 有効な組み合わせが構造に出るよう、WSL 固有の設定は dotfiles.wsl 配下へ入れ子にしている。
 #
+#   dotfiles.onePassword.enable                  1Password を使うか (WSL ならホスト側 Windows の、それ以外はこのマシンの)
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
-#   dotfiles.wsl.onePassword.enable              ホスト側 Windows の 1Password を使うか
-#   dotfiles.wsl.onePassword.windowsUserName     その 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
+#   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.gitViaGh.enable              Claude の git を gh の資格情報 (HTTPS) で GitHub へ通すか
@@ -30,6 +30,42 @@ let
   jsonValue = (pkgs.formats.json { }).type;
 in
 {
+  # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう
+  # dotfiles.onePassword.enable へ出した (ADR 021)。ローカル flake (git 管理外) に旧名が残っていても
+  # 評価が止まらないよう、旧名は新しい名前へ渡して警告を出す。
+  imports = [
+    (lib.mkRenamedOptionModule
+      [ "dotfiles" "wsl" "onePassword" "enable" ]
+      [ "dotfiles" "onePassword" "enable" ]
+    )
+  ];
+
+  options.dotfiles.onePassword.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    example = true;
+    description = ''
+      1Password を使うか。WSL (`wsl.enable = true`) ならホスト側 Windows の、それ以外のマシンなら
+      そのマシンの 1Password を使う。
+
+      true のとき、git の署名を 1Password の鍵で行う:
+
+      - `gpg.format = ssh`、`commit.gpgSign = true` (署名を既定にする)
+      - `gpg.ssh.defaultKeyCommand` で ssh-agent の鍵から名前に "Signing" を含むものを選ぶ
+      - 署名のプログラム (`gpg.ssh.program`):
+        - WSL: Windows 側の op-ssh-sign-wsl.exe (パスは `wsl.onePassword.windowsUserName` から組み立てる)。
+          ssh / ssh-add も Windows 側の実体へ差し替える (home/modules/ssh.nix)
+        - それ以外: home-manager の既定 (openssh の ssh-keygen)。`SSH_AUTH_SOCK` のエージェントで
+          署名するので、手元では 1Password の SSH エージェント、ssh 先では転送されてきたエージェントの
+          同じ鍵で署名できる。`SSH_AUTH_SOCK` を 1Password へ向けるのは system の側
+          (NixOS の laptop は nixos-config の ADR 009)
+
+      false のときは署名関連の設定を一切書き出さない。1Password の無いマシンで
+      `commit.gpgSign = true` だけが残ると、署名鍵が見つからず `git commit`
+      そのものが失敗するため。
+    '';
+  };
+
   options.dotfiles.claude = {
     devTracker.enable = lib.mkOption {
       type = lib.types.bool;
@@ -299,31 +335,8 @@ in
       '';
     };
 
+    # enable は dotfiles.onePassword.enable へ出した (上の imports の改名)。
     onePassword = {
-      enable = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        example = true;
-        description = ''
-          ホスト側 Windows の 1Password を使うか。`wsl.enable = true` のときだけ有効。
-
-          true のとき、git の署名を 1Password 経由に設定する:
-
-          - `gpg.ssh.program` に Windows 側の op-ssh-sign-wsl.exe を指定する
-            (パスは windowsUserName から組み立てる)
-          - `gpg.ssh.defaultKeyCommand` で ssh-agent の鍵から署名鍵を選ぶ
-          - `commit.gpgSign = true` (署名を既定にする)
-
-          false のときは署名関連の設定を一切書き出さない。1Password の無いマシンで
-          `commit.gpgSign = true` だけが残ると、署名鍵が見つからず `git commit`
-          そのものが失敗するため。
-
-          NOTE: 1Password 連携を WSL 以外 (Linux / macOS ネイティブ) でも使いたく
-                なったら、このオプションを dotfiles.wsl の外へ出すこと。今は
-                「1Password を使うのは WSL のときだけ」という前提で入れ子にしている。
-        '';
-      };
-
       windowsUserName = lib.mkOption {
         type = lib.types.nullOr lib.types.str;
         default = config.dotfiles.wsl.windowsUserName;
@@ -331,7 +344,7 @@ in
         example = "polle";
         description = ''
           1Password の op-ssh-sign のパス (`/mnt/c/Users/<名前>/AppData/...`) に使う
-          Windows ユーザー名。`wsl.onePassword.enable = true` のときだけ必要
+          Windows ユーザー名。WSL で `onePassword.enable = true` のときだけ必要
           (未設定なら評価時に止まる)。
 
           既定は `dotfiles.wsl.windowsUserName`。ふつうはそちらに書けばよく、

@@ -9,6 +9,8 @@
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
+#   onePassword     onePassword.enable = true で 1Password を git の署名に使う (ADR 021)。
+#                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
 #                   祖先付きで journald に常時記録する (ADR 012。unit を /etc へ入れるのは
 #                   `~/dotfiles/setup --update` の最後の手順 exe-exec-trace。中で sudo を呼ぶ)
@@ -23,11 +25,12 @@
 #                   devTracker.enable = false を既定にしている (README「登録簿に載せずにマシンを足す」)
 #
 # wsl は入れ子の attrset。親が有効なときだけ子が意味を持つ、という関係を
-# そのまま構造にしてある。git の署名で見ると、有効な組み合わせは次の 3 通りしかない:
+# そのまま構造にしてある。git の署名で見ると、組み合わせは次の 4 通り:
 #
-#   (指定しない)                                                              非 WSL
+#   (指定しない)                                                              非 WSL / 1Password 無し
+#   onePassword.enable = true;                                                非 WSL / 1Password 有り (ssh-keygen)
 #   wsl.enable = true;                                                        WSL / 1Password 無し
-#   wsl = { enable = true; windowsUserName = "…"; onePassword.enable = true; }  WSL / 1Password 有り
+#   wsl = { enable = true; windowsUserName = "…"; }; onePassword.enable = true;  WSL / 1Password 有り (op-ssh-sign-wsl.exe)
 #
 # wsl.windowsFiles.enable = true で、repo 直下の win/ を Windows 側へ配るマシンになる
 # (windowsUserName が要る。docs/adr/010_win_files_from_wsl_*)。
@@ -75,8 +78,8 @@
       # 何も動かない。`~/dotfiles/setup --update` の最後の手順 exe-exec-trace が /etc へ
       # 入れて起こす (中で sudo を呼ぶ)。
       exeExecTrace.enable = true;
-      onePassword.enable = true;
     };
+    onePassword.enable = true;
   };
 
   # WSL だがホスト側に 1Password が無いマシン。
@@ -93,6 +96,10 @@
   "pollenjp@laptop" = mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
+    # git の署名を lavie の 1Password の鍵で行う (ssh-keygen が SSH_AUTH_SOCK のエージェントで署名する)。
+    # SSH_AUTH_SOCK を 1Password へ向けるのは nixos-config (ADR 009)。ssh で入ったときは
+    # 転送されてきたエージェント (Windows の 1Password) の同じ鍵で署名する (ADR 021)。
+    onePassword.enable = true;
   };
 
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。
