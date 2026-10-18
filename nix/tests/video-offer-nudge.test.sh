@@ -7,14 +7,17 @@
 #
 # flake の checks (video-offer-nudge-test) が Nix のサンドボックスで流す。使うのは
 # bash・jq・coreutils・grep だけ。skill の有無は CLAUDE_CONFIG_DIR を使い捨ての dir に向けて作り、
-# skillOverrides を書いた settings.json も同じ dir に置く。
+# skillOverrides を書いた settings.json も同じ dir に置く。HOME も使い捨ての dir に向け、
+# dotfiles が置く claude-video-offer.json (~/.local/state/dotfiles/) をそこに作る。
 # 「このセッションでは作らない」の印 (XDG_STATE_HOME の pjp-video-offer/off-<session_id>) も
 # 使い捨ての dir に作る。
 #
 # ## 確かめること
 #
 #   - gh pr create の成功・タグ「設計」の cc-page・spec / ADR の新規作成で知らせる。知らせる文は、
-#     解説動画の短尺を裏で作り始めることと、その時機 (PR の URL を返すとき・承認やレビューの前) を言う
+#     解説動画を作るかを聞くことと、その時機 (PR の URL を返すとき・承認やレビューの前) を言う
+#   - claude-video-offer.json の autoStart が真偽値の true のときだけ、聞く代わりに解説動画の短尺を
+#     裏で作り始めることを言う。false・ファイルが無い・壊れている・文字列の "true" では聞く
 #   - それ以外 (失敗した PR・既存の PR を返しただけの gh pr create (already exists)・タグの無いページ・
 #     上書き・関係ないファイル・ADR の dir の中の textbook や図・ADR の一覧) では黙る
 #   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは作らない」の印が
@@ -59,8 +62,20 @@ state="${work}/state"
 mkdir -p "${state}"
 
 # run <設定 dir> <入力> : stdout を ${work}/out に、exit code を ${work}/rc に残す
+# dotfiles が claude-video-offer.json を置く HOME
+home="${work}/home"
+mkdir -p "${home}/.local/state/dotfiles"
+# set_state <claude-video-offer.json の中身 (空なら消す)>
+set_state() {
+  if [[ -n $1 ]]; then
+    printf '%s' "$1" >"${home}/.local/state/dotfiles/claude-video-offer.json"
+  else
+    rm -f "${home}/.local/state/dotfiles/claude-video-offer.json"
+  fi
+}
+
 run() {
-  printf '%s' "$2" | CLAUDE_CONFIG_DIR="$1" XDG_STATE_HOME="${state}" bash "${script}" >"${work}/out" 2>"${work}/err"
+  printf '%s' "$2" | HOME="${home}" CLAUDE_CONFIG_DIR="$1" XDG_STATE_HOME="${state}" bash "${script}" >"${work}/out" 2>"${work}/err"
   echo $? >"${work}/rc"
 }
 context() {
@@ -90,10 +105,10 @@ new_page() {
 
 echo "== video-offer-nudge.sh"
 
-# 1. gh pr create が成功 → pr の文と URL。短尺を作り始める時機を言う
+# 1. gh pr create が成功 → pr の文と URL。既定 (claude-video-offer.json が無い) は作るかを聞く時機を言う
 run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/pollenjp/claude-skills/pull/71')"
 c=$(context)
-if [[ ${c} == "[解説動画] PR を作った (https://github.com/pollenjp/claude-skills/pull/71)。"* && ${c} == *"PR の URL を返すときに解説動画の短尺を裏で作り始める"* ]]; then
+if [[ ${c} == "[解説動画] PR を作った (https://github.com/pollenjp/claude-skills/pull/71)。"* && ${c} == *"PR の URL を返すときに解説動画を作るかを聞く"* ]]; then
   ok "gh pr create の成功で知らせる"
 else
   ng "gh pr create の成功で知らせる" "out=$(cat "${work}/out")"
@@ -130,7 +145,7 @@ if silent; then ok "URL の無い gh pr create では黙る"; else ng "URL の�
 # 6. タグ「設計」の cc-page を新規作成 (dir に日本語と空白) → design-page の文と dir
 page=$(new_page '0002-通知の流し方 案-b-の設計' '{"title":"通知の流し方 (案 B) の設計","tags":["設計","TKT-1"]}')
 run "${with_skill}" "$(write_input "${page}/index.html" create)"
-if [[ $(context) == "[解説動画] タグ「設計」の cc-page を作った (${page})。"* && $(context) == *"承認を聞く前に解説動画の短尺を裏で作り始める"* ]]; then
+if [[ $(context) == "[解説動画] タグ「設計」の cc-page を作った (${page})。"* && $(context) == *"承認を聞く前に解説動画を作るかを聞く"* ]]; then
   ok "タグ「設計」の cc-page の新規作成で知らせる (日本語と空白の dir)"
 else
   ng "タグ「設計」の cc-page の新規作成で知らせる" "out=$(cat "${work}/out")"
@@ -175,7 +190,7 @@ run "${with_skill}" "$(write_input /r/docs/superpowers/specs/2026-10-10-x-design
 r1=$(context)
 run "${with_skill}" "$(write_input /r/docs/adr/010_x/README.md create)"
 r2=$(context)
-if [[ ${r1} == "[解説動画] 設計の文書を作った (/r/docs/superpowers/specs/2026-10-10-x-design.md)。"* && ${r1} == *"レビューや承認を頼む前に解説動画の短尺を裏で作り始める"* && ${r2} == "[解説動画] 設計の文書を作った (/r/docs/adr/010_x/README.md)。"* ]]; then
+if [[ ${r1} == "[解説動画] 設計の文書を作った (/r/docs/superpowers/specs/2026-10-10-x-design.md)。"* && ${r1} == *"レビューや承認を頼む前に解説動画を作るかを聞く"* && ${r2} == "[解説動画] 設計の文書を作った (/r/docs/adr/010_x/README.md)。"* ]]; then
   ok "spec と ADR の新規作成で知らせる"
 else
   ng "spec と ADR の新規作成で知らせる" "r1=${r1} r2=${r2}"
@@ -309,6 +324,48 @@ cfg=$(config_with_settings linked '')
 ln -s "${work}/off/settings.json" "${cfg}/settings.json"
 run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/27')"
 if silent; then ok "symlink の先の settings.json で off なら黙る"; else ng "symlink の先の settings.json で off なら黙る" "out=$(cat "${work}/out")"; fi
+
+# 29. autoStart が true → 3 つの場面とも、聞く代わりに短尺を裏で作り始めることを言う
+set_state '{"autoStart":true}'
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/30')"
+r1=$(context)
+page=$(new_page '0009-t' '{"tags":["設計"]}')
+run "${with_skill}" "$(write_input "${page}/index.html" create)"
+r2=$(context)
+run "${with_skill}" "$(write_input /r/docs/superpowers/specs/2026-10-18-t-design.md create)"
+r3=$(context)
+set_state ''
+if [[ ${r1} == "[解説動画] PR を作った (https://github.com/o/r/pull/30)。"*"PR の URL を返すときに解説動画の短尺を裏で作り始めること。"* &&
+  ${r2} == *"承認を聞く前に解説動画の短尺を裏で作り始めること。"* &&
+  ${r3} == *"レビューや承認を頼む前に解説動画の短尺を裏で作り始めること。"* &&
+  ${r1}${r2}${r3} != *"作るかを聞く"* ]]; then
+  ok "autoStart が true なら、3 つの場面とも短尺を作り始めることを言う"
+else
+  ng "autoStart が true なら、3 つの場面とも短尺を作り始めることを言う" "r1=${r1} r2=${r2} r3=${r3}"
+fi
+
+# 30. autoStart が false → 聞く
+set_state '{"autoStart":false}'
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/31')"
+set_state ''
+if [[ $(context) == *"PR の URL を返すときに解説動画を作るかを聞くこと。"* ]]; then
+  ok "autoStart が false なら作るかを聞く"
+else
+  ng "autoStart が false なら作るかを聞く" "out=$(cat "${work}/out")"
+fi
+
+# 31. 壊れた claude-video-offer.json・文字列の "true" → 作り始めず、聞く
+set_state '{"autoStart": '
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/32')"
+r1=$(context)
+set_state '{"autoStart":"true"}'
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/33')"
+set_state ''
+if [[ ${r1} == *"PR の URL を返すときに解説動画を作るかを聞くこと。"* && $(context) == *"PR の URL を返すときに解説動画を作るかを聞くこと。"* ]]; then
+  ok "壊れた claude-video-offer.json・文字列の true では作るかを聞く"
+else
+  ng "壊れた claude-video-offer.json・文字列の true では作るかを聞く" "r1=${r1} out=$(cat "${work}/out")"
+fi
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]
