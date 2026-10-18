@@ -8,16 +8,15 @@
 #
 # skill の見え方 (Claude が自動で起動するか / `/` の一覧に出るか) は settings.json の
 # skillOverrides でしか変えられない。使う skill はマシンごとに違う (例: 会社のマシンでは
-# Notion Dev Tracker の pjp-dev-tracker を発火させない、解説動画を既定で作る
-# pjp-video-explainer-offer は使うマシンでだけ動かす) ので、その宣言は host option
-# (dotfiles.claude.devTracker.enable / videoOffer.enable) に置き、ここで settings.json へ写す。
+# Notion Dev Tracker の pjp-dev-tracker を発火させない) ので、その宣言は host option
+# (dotfiles.claude.devTracker.enable) に置き、ここで settings.json へ写す。
 #
 # ## 何を読むか
 #
 # home-manager が置く ~/.local/state/dotfiles/claude-skill-overrides.json
 # (nix/home/modules/claude.nix)。中身は skillOverrides に merge する map そのもの:
 #
-#   {"pjp-dev-tracker":"off","pjp-video-explainer-offer":"off"}
+#   {"pjp-dev-tracker":"off"}
 #
 # 無ければ、この option を含む世代へまだ switch していないということなので、
 # 警告して exit 0 する (setup.sh は手順が 1 つ失敗すると残りを走らせないため)。
@@ -117,4 +116,4 @@ echo "--- ${settings} の skillOverrides ---"
 jq '.skillOverrides' "${settings}"
 echo
 echo "新しい Claude Code の session から効きます (実行中の session は再起動)。"
-echo "確認: /skills で pjp-dev-tracker と pjp-video-explainer-offer の状態を見る"
+echo "確認: /skills で pjp-dev-tracker の状態を見る"

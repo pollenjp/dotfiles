@@ -8,7 +8,7 @@
 | チケット | [TKT-21](https://app.notion.com/p/claude-host-option-1-pjp-dev-tracker-CLAUDE-md-skillOverrides-3e779149a66f81dfa42cdb52f3db2177) |
 | 前提 ADR | [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（マシン固有設定は option で明示する / ローカル flake の位置づけ） |
 | 運用手順 | [`nix/README.md`「Claude Code の skill を host ごとに止める」](../../../nix/README.md#claude-code-の-skill-を-host-ごとに止める) |
-| 後続 ADR | [023_claude_video_offer_host_option](../023_claude_video_offer_host_option_20261018T121637JST/README.md)（解説動画の `pjp-video-explainer-offer` も同じ経路に載せ、`dotfiles.claude.videoOffer.enable`（既定 false）で CLAUDE.md の節・skillOverrides・hook を切り替えるようにした。`/skills` の切り替えは project の `.claude/settings.local.json` に保存されるので、§2 B と §5 の「`/skills` で手で変えても次の update で戻る」は当たらない。運用手順の `nix/README.md` は現行の形に直した。本文は決定当時の記録としてそのまま残してある） |
+| 後続 ADR | [023_claude_video_offer_host_option](../023_claude_video_offer_host_option_20261018T121637JST/README.md)（解説動画の option を足した作業で、`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、user の値より優先されると分かった。§2 B と §5 の「`/skills` で手で変えても次の update で戻る」は当たらない。運用手順の `nix/README.md` は直した。本文は決定当時の記録としてそのまま残してある） |
 
 ---
 

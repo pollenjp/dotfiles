@@ -29,8 +29,8 @@
 #               (選ぶまで、規則に当たらない repo と repo の外で止まる)。
 #               cc-pages の待ち受け port (dotfiles.ccPages.port) は、コメントアウトした
 #               例だけ置く (7777 がほかと衝突するマシンだけ書く)。
-#               解説動画を既定で作るか (dotfiles.claude.videoOffer.enable) は本体の既定の
-#               false のままで、コメントアウトした true の例だけ置く (使うマシンだけ書く)。
+#               解説動画を答えを待たずに作り始めるか (dotfiles.claude.videoOffer.autoStart.enable) は
+#               本体の既定の false (作る前に聞く) のままで、コメントアウトした true の例だけ置く。
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
@@ -297,11 +297,11 @@ if [[ ${write_flake} == 1 ]]; then
         # dotfiles.ccPages.port = 7778;
 
         # 設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏で作り始めるか
-        # (claude-skills の pjp-video-explainer-offer)。1 本ごとに token を大きく使うので、本体の
-        # 既定は false で、使うマシンだけ true にする。CLAUDE.md の「解説動画を作る」の節・
-        # settings.json の skillOverrides・hook の知らせがこの値から決まる (名指しで頼んだ動画は作れる)。
-        # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
-        # dotfiles.claude.videoOffer.enable = true;
+        # (claude-skills の pjp-video-explainer-offer)。本体の既定は false で、作る前に「解説動画を
+        # 作りますか？」と聞き、選ばれたときだけ作る (1 本ごとに token を大きく使うため)。
+        # 聞かずに作り始めたいマシンだけ true にする。
+        # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
+        # dotfiles.claude.videoOffer.autoStart.enable = true;
       };
     in
     {

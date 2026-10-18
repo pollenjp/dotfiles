@@ -27,7 +27,7 @@
 | [018](./018_win_terminal_settings_keys_20261016T105116JST/README.md) | Windows Terminal の `settings.json` は、dotfiles が持つキーだけを setup が書き足す (ファイルごと配らない) | 2026-10-16 |
 | [019](./019_claude_run_through_after_approval_20261016T150008JST/README.md) | superpowers で承認を求めるのは方針の 1 回だけにし、承認のあとは PR まで走り切らせる (CLAUDE.md の節と、skill を読んだ直後に念を押す hook) | 2026-10-16 |
 | [020](./020_who_is_asking_recent_journal_20261017T110906JST/README.md) | pjp-who-is-asking は、要求元が先に終わっていても出せるよう、exe-exec-trace の journal から直近の要求も出す | 2026-10-17 |
-| [023](./023_claude_video_offer_host_option_20261018T121637JST/README.md) | 解説動画を既定で作る仕組み (pjp-video-explainer-offer) を host option で切り替え、既定を off にする (CLAUDE.md の節・skillOverrides・hook の 3 層) | 2026-10-18 |
+| [023](./023_claude_video_offer_host_option_20261018T121637JST/README.md) | 解説動画を答えを待たずに作り始めるかを host option で切り替え、既定は作る前に聞く (値は claude-video-offer.json に置き、hook と skill が読む) | 2026-10-18 |
 
 ## ディレクトリ名
 

@@ -269,7 +269,7 @@ config_with_settings() {
 }
 
 # 23. settings.json の skillOverrides で off → PR の作成でも設計の文書でも黙る
-#     (dotfiles.claude.videoOffer.enable = false のマシンで bootstrap が書く値)
+#     (聞くことも止めたいマシンが手で書く値)
 cfg=$(config_with_settings off '{"skillOverrides":{"pjp-dev-tracker":"on","pjp-video-explainer-offer":"off"}}')
 run "${cfg}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/20')"
 s1=$(silent && echo yes)

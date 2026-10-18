@@ -1,13 +1,13 @@
-# ADR: 解説動画を既定で作る仕組みを host option で切り替え、既定を off にする
+# ADR: 解説動画を答えを待たずに作り始めるかを host option で切り替え、既定は作る前に聞く
 
 | 項目 | 内容 |
 | --- | --- |
-| ステータス | 承認 (Accepted) — 方針は 2026-10-18 にユーザーが承認。文面は PR でレビュー |
+| ステータス | 承認 (Accepted) — 方針は 2026-10-18 にユーザーが承認 (同じ日に前提を訂正して承認し直した)。文面は PR でレビュー |
 | 日付 | 2026-10-18 (JST) |
 | 決定者 | pollenjp |
 | チケット | [TKT-211](https://app.notion.com/p/flake-option-off-3fd79149a66f8188b335e672d60582dd) |
-| 前提 ADR | [007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（skill の on / off を host option に持たせ、settings.json へ流す経路） |
-| 運用手順 | [`nix/README.md`「Claude Code の skill を host ごとに止める」](../../../nix/README.md#claude-code-の-skill-を-host-ごとに止める) |
+| 関連 ADR | [011_claude_notion_profile](../011_claude_notion_profile_20260929T155545JST/README.md)（dotfiles の option の値を `~/.local/state/dotfiles/` の JSON に置き、claude-skills が読む形。この ADR も同じ形を使う） |
+| 運用手順 | [`nix/README.md`「解説動画を作る場面を知らせるフック」](../../../nix/README.md#解説動画を作る場面を知らせるフック) |
 
 ---
 
@@ -15,194 +15,171 @@
 
 ### やりたかったこと
 
-設計を出したとき・PR を作ったときに、解説動画の短尺 (2〜3 分) を答えを待たずに裏の subagent で
-作り始める仕組みがある (claude-skills の TKT-124 で入れ、TKT-148 で「聞く」から「作り始める」に変えた)。
-1 本作るたびに subagent がコンテキストを大きく使う。ユーザーの言葉では次のとおり (TKT-211)。
+設計を出したとき・PR を作ったときの解説動画は、はじめ「作るかを聞く」形で入れ (claude-skills の TKT-124)、
+その後「短尺 (2〜3 分) を答えを待たずに裏の subagent で作り始め、作り始めてから確かめる」形に変えた (TKT-148)。
+1 本ごとに subagent がコンテキストを大きく使うので、既定で作り始めるのをやめたい。ユーザーの言葉では次のとおり (TKT-211)。
 
 > デフォで短尺動画を作るやつ。やっぱりtoken使いすぎるから local flake からオンオフ切り替えられるようにしたい。(default で off)
 
-### 仕組みは 3 層で、置き場所がそれぞれ違う
+> デフォで短尺動画を作成するのをやめさせたいだけで、短尺動画を作るかをユーザー側に聞くことはして欲しい
 
-| 層 | 実体 | 置き場所 |
+やめたいのは「答えを待たずに作り始める」ことだけで、作るかを聞くことは続ける。
+
+### 動きを決めているのは 3 か所
+
+| 場所 | 実体 | 今の中身 |
 | --- | --- | --- |
-| ① CLAUDE.md の「解説動画を作る」の節 | `nix/files/claude/CLAUDE.md` | dotfiles。**全マシン共通** |
-| ② skill `pjp-video-explainer-offer` | `~/.claude/skills/pjp-video-explainer-offer` (claude-skills の作業クローンへの symlink) | claude-skills。`bootstrap-claude-skills.sh` が張る |
-| ③ PostToolUse の hook | `nix/files/claude/hooks/video-offer-nudge.sh` | dotfiles。登録は `bootstrap-claude-hook.sh` |
+| ① CLAUDE.md の「解説動画を作る」の節 | `nix/files/claude/CLAUDE.md` (dotfiles。全マシン共通) | 「条件に合えば解説動画の短尺を答えを待たずに裏で作り始める」 |
+| ② skill `pjp-video-explainer-offer` | claude-skills (`~/.claude/skills/` へ symlink) | 作る条件・作り始め方・確かめ方・届け方。TKT-148 で「聞く」流れを「作り始める」流れに置き換えた |
+| ③ PostToolUse の hook `video-offer-nudge.sh` | `nix/files/claude/hooks/` (dotfiles) | PR の作成・タグ「設計」の cc-page・spec / ADR の新規作成で「② を読み、条件に合えば短尺を作り始めよ」と差し込む |
 
-③ は PR の作成・タグ「設計」の cc-page・spec / ADR の新規作成を見つけ、「② を読み、条件に合えば短尺を
-作り始めよ」と Claude の文脈へ 1 文を差し込む。① はその知らせが無いとき (会話の中で出し終えた設計など) の
-ための正本。
-
-### ADR 007 の経路だけでは ③ が止まらない
-
-① と ② は ADR 007 で `pjp-dev-tracker` を止めたのと同じ経路で切れる (① は節を別ファイルに切り出して
-option で連結、② は `settings.json` の `skillOverrides` を `"off"`)。
-
-ところが ③ は `SKILL.md` が**あるかどうか**しか見ていない。`skillOverrides` で ② を切っても
-`~/.claude/skills/` のファイルは残るので、③ は知らせ続ける。知らせを受けた Claude は skill を呼べず
-(off の skill を呼ぶと「override を外せ」という文が返る)、`SKILL.md` を直接読んで作り始めうる。
-3 層とも切らないと止まらない。
-
-### 頼んだときの動画は別の話
-
-ユーザーが「解説動画を作って」と名指しで頼んだときに読む `pjp-video-explainer-pictogram` /
-`pjp-video-explainer-dialogue` は、作るかどうかをユーザーが決めている。token の問題は「頼んでいないのに
-作る」ことなので、こちらは止めない。
+3 か所とも「作り始める」と言っているので、どれか 1 か所だけ変えると食い違う。マシンごとに選べるようにするには、
+3 か所が同じ値を見る必要がある。
 
 ## 2. 決定 (Decision)
 
-### A. 「解説動画を既定で作るか」を host option にし、既定は false
+### A. 「答えを待たずに作り始めるか」を host option にし、既定は false
 
-`dotfiles.claude.videoOffer.enable` (bool、**既定 false**) を `home/options.nix` に足す。名前は
-skill (`pjp-video-explainer-offer`)・hook (`video-offer-nudge.sh`)・印の dir (`pjp-video-offer/`) に揃える。
+`dotfiles.claude.videoOffer.autoStart.enable` (bool、**既定 false**) を `home/options.nix` に足す。
 
-- 使うマシンはローカル flake の `local` に `dotfiles.claude.videoOffer.enable = true;` を書く。
+| 値 | 設計を出したとき・PR を作ったとき |
+| --- | --- |
+| false (既定) | 作る前に「解説動画を作りますか？」と聞く (TKT-124 の聞き方)。作るのは選ばれたときだけ |
+| true | 答えを待たずに短尺を作り始め、作り始めてから「このまま作るか」を確かめる (TKT-148 の流れ) |
+
+- 使うマシンはローカル flake の `local` に `dotfiles.claude.videoOffer.autoStart.enable = true;` を書く。
   雛形 (`setup-local-flake.sh`) にはコメントアウトした例だけ置く
-- 登録簿のホストを直接指すなら `mkHome` の既存の `claude` 引数で渡す (`claude.videoOffer.enable = true;`)
-- module の既定そのものを false にする。`devTracker.enable` は「module の既定 true・雛形が false」だったが、
-  雛形は初回にしか書かれないので、同じ形では既にある `~/dotfiles/flake.nix` のマシンが on のまま残る
+- 登録簿のホストを直接指すなら `mkHome` の既存の `claude` 引数で渡す (`claude.videoOffer.autoStart.enable = true;`)
+- module の既定そのものを false にする。`devTracker.enable` のように「module の既定は true・雛形が false」にすると、
+  雛形は初回にしか書かれないので、既にある `~/dotfiles/flake.nix` のマシンが作り始めるまま残る
+- 名前は skill (`pjp-video-explainer-offer`)・hook (`video-offer-nudge.sh`) に揃えた `videoOffer` の下に置く
 
-### B. 1 つの値から 3 層が決まる
+### B. 値は `~/.local/state/dotfiles/claude-video-offer.json` に置き、② と ③ が読む
 
-| 層 | enable = true | enable = false (既定) | 決める場所 |
-| --- | --- | --- | --- |
-| ① `~/.claude/CLAUDE.md` の「解説動画を作る」の節 | 連結 | 無し | `home/modules/claude.nix` (`files/claude/CLAUDE.video-offer.md` を連結) |
-| ② `settings.json` の `skillOverrides.pjp-video-explainer-offer` | `"on"` | `"off"` | `claude-skill-overrides.json` → `bootstrap-claude-skill-overrides.sh` |
-| ③ hook の知らせ | 今どおり | 黙る | `video-offer-nudge.sh` が `settings.json` の `skillOverrides` を見る (C) |
+`home/modules/claude.nix` が `{"autoStart": <bool>}` + 改行を必ず書く。Notion の宛先の `claude-notion.json`
+(ADR 011) と同じく、dotfiles の option の値を claude-skills に渡す置き場で、`home-manager switch` だけで効く
+(settings.json を通さないので bootstrap は要らない)。
 
-① の連結は「常時部分 + 空行 + 解説動画の節 + 空行 + タスク管理の節」(どちらも option が true のときだけ)。
-両方 true なら、今の `~/.claude/CLAUDE.md` と**バイト単位で同じ**になる (今の CLAUDE.md は解説動画の節で
-終わり、その後ろにタスク管理の節を連結しているため)。
-
-② は ADR 007 の生成 JSON に key を 1 つ足すだけで、`bootstrap-claude-skill-overrides.sh` は変えない
-(生成 JSON の key をそのまま merge する作りのため)。
-
-### C. hook は Claude Code と同じ `settings.json` の `skillOverrides` を見て黙る
-
-③ は `${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json` の `.skillOverrides["pjp-video-explainer-offer"]` が、
-Claude が skill を自分で呼べない値なら黙る。
-
-| 値 | Claude が自分で呼べるか | ③ |
+| 読む側 | `autoStart` が false・ファイルが無い・壊れている | `autoStart` が true |
 | --- | --- | --- |
-| (無い) / `"on"` | 呼べる | 知らせる |
-| `"name-only"` | 呼べる (一覧に名前だけ出る) | 知らせる |
-| `"user-invocable-only"` | 呼べない (ユーザーの `/` からだけ) | 黙る |
-| `"off"` | 呼べない (一覧からも `/` からも消える) | 黙る |
+| ② skill | 作る前に聞く (D) | 答えを待たずに短尺を作り始める (今の流れ) |
+| ③ hook | 「作る条件に合えば、…解説動画を作るかを聞くこと」 | 「作る条件に合えば、…解説動画の短尺を裏で作り始めること」 |
 
-- dotfiles が書く値は `"on"` / `"off"` だけ。ほかの値は user の `settings.json` を手で書き換えたときに入る
-- `settings.json` が無い・壊れている・知らない値なら、今どおり知らせる (止める判断を hook でしない。
-  作るかどうかは今までどおり ② が決める)
-- hook の登録 (`bootstrap-claude-hook.sh`) は変えない。黙る hook の費用は Write と `gh pr create` の
-  たびのプロセス 1 回で、登録を出し入れする仕組みより小さい
+- ファイルが無い・壊れている・`autoStart` が真偽値の true でないときは、聞く側に倒す。dotfiles の古いマシンや、
+  dotfiles の無いマシンでも、頼んでいない動画を作り始めない
+- ① は値を読まない。文を 1 つにし、「条件に合えば解説動画を作るかを聞く。答えを待たずに短尺を作り始めるのは、
+  dotfiles でそう設定したマシンだけ (どちらにするかは skill が決める)」とする。① は skill を読ませる入口で、
+  どちらの流れにするかは ② が値を見て決める
 
-dotfiles が置く望む値 (`~/.local/state/dotfiles/claude-skill-overrides.json`) ではなく `settings.json` を
-見るのは、③ の役目が「② を読め」と知らせることだから。② の値を Claude Code に渡すのは user の
-`settings.json` なので、hook も同じ場所を見れば、bootstrap のあとは ③ と ② が同じ値で動く。
-hook が dotfiles の中間ファイルに依らずに済む (今も Claude Code のパスしか見ていない)。
+### C. skill の見え方と CLAUDE.md の節は変えない
 
-見るのは user の `settings.json` だけで、Claude Code の優先順位 (managed・`--settings` → project の
-`.claude/settings.local.json` → `.claude/settings.json` / user) はたどらない (こちらの判断。E)。
+聞くには ② を読む必要があるので、`skillOverrides` で ② を隠さず、① の節も全マシンに残す。
+③ の登録 (`bootstrap-claude-hook.sh`) も変えない。
 
-### D. 頼んだときの動画と、ほかの記述は止めない
+### D. 作る前に聞く流れ (② の既定)
 
-- `pjp-video-explainer-pictogram` / `pjp-video-explainer-dialogue` の `skillOverrides` には触らない
-- CLAUDE.md の「方針を承認したら PR まで走り切る」の節にある 1 行 (承認のあとに書く spec は解説動画の
-  対象にしない) は残す。skill を名指ししておらず、動画を作らせる向きの文でもないため
-- claude-skills は直さない (② を off にすれば Claude からは見えない)
+TKT-124 の聞き方を、TKT-148 で足した「承認してほしいことを先に書く」「出来たら詳細版も作るか聞く」に合わせて戻す。
 
-### E. 設計のレビュー (builder check) の問いに、こちらで決めたこと
+- 問いは AskUserQuestion の 1 問 (header「解説動画」)。設計は承認を聞く前、PR は URL を返すとき
+- 選択肢は「短く作る (2〜3 分)」「詳しく作る (5〜8 分)」「今回は作らない」「このセッションでは聞かない」
+- 作ると選ばれたら、そのときから subagent が作る。設計の承認は動画を渡すときに聞く (TKT-148 と同じ)。
+  作らないなら、続けてそのまま承認を聞く
+- 「このセッションでは聞かない」は、今の「このセッションでは作らない」と同じ印のファイル
+  (`pjp-video-offer/off-<session_id>`) を置く。③ もその印で黙る
+- 指揮役から動かされる worker は、問いを報告に書き、答えが届くまで作らない
 
-方針の承認のあと、この文書を別の目 (subagent) に読ませて出た問いを、ユーザーに戻さずに決めた。
+### E. hook の `skillOverrides` の確かめは残す
+
+③ は、user の `settings.json` の `skillOverrides` で ② が `off` か `user-invocable-only` (Claude が skill を呼べない値)
+なら黙る。option とは関係なく、手で ② を止めたマシンで「呼べない skill を読め」と知らせないため。
+`skillOverrides` の値は `on` / `name-only` / `user-invocable-only` / `off` の 4 つ (公式 docs `skills` の
+「Override skill visibility from settings」)。
+
+### F. 方針の承認のあとに、こちらで決めたこと
 
 | 問い | 決めたこと | 理由 |
 | --- | --- | --- |
-| hook は user の `settings.json` だけを見るか、Claude Code と同じ優先順位で値を引くか。`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、user の値より優先される (公式 docs `skills` の「Override skill visibility from settings」と、手元の 2.1.302) | user の `settings.json` だけを見る | 切り替えの入口は option で、option が書くのは user の `settings.json`。option が true のマシンで `/skills` から ② を隠した project では知らせが来るが、CLAUDE.md の節が「一覧に無ければ何もしない」と止める。優先順位をたどると、project の dir の決め方と組み合わせのテストが増える |
+| hook の文を値で切り替えるか、どちらにも合う 1 つの文 (「skill のとおりに」) にするか | 値で切り替える | ユーザーに示した方針どおり。文が「作るかを聞くこと」と直に言う方が、Claude が取り違えにくい。② と ③ は同じファイルを読むので食い違わない |
+| ① の文を値で切り替えるか | 切り替えない (1 つの文) | ② が値を読む以上、① まで値で作り分けると読む場所が 2 つになる。Nix で断片を連結する仕組みも要らなくなる |
+| 「全部止める」(聞きもしない) を option に持たせるか | 持たせない | 頼まれていない。止めたいマシンは `skillOverrides` で ② を手で off にすれば、③ も黙る (E) |
 | ADR の番号 | 023 | 021 と 022 は open の PR (#136・#137) が使っている |
+| dotfiles と claude-skills の PR の merge の順 | 2 本を続けて merge する | 片方だけ入った間は ①③ と ② が食い違う。claude-skills の clone は symlink なので pull したとき、dotfiles は `switch` したときに効く |
+| 書き直した設計を別の目 (builder check) に読ませるか | 自分で読んで足りない点を埋めた | 1 回目の builder check と最終レビューで、3 か所の関係と hook の入力の扱いは確かめてある。変わったのは値の渡し方と ② の流れで、最終レビューで見る |
 
 ## 3. 変更点の詳細
 
+dotfiles:
+
 | ファイル | 変更 |
 | --- | --- |
-| `nix/home/options.nix` | `dotfiles.claude.videoOffer.enable` (bool、既定 false) を追加 |
-| `nix/home/modules/claude.nix` | CLAUDE.md の連結に解説動画の節を足す。`claude-skill-overrides.json` に `pjp-video-explainer-offer` を足す |
-| `nix/files/claude/CLAUDE.md` | 「解説動画を作る」の節を抜く (常時部分) |
-| `nix/files/claude/CLAUDE.video-offer.md` | 新規。抜いた節そのもの |
-| `nix/files/claude/hooks/video-offer-nudge.sh` | `settings.json` の `skillOverrides` で skill が呼べない値なら黙る |
-| `nix/files/claude/hooks/nix-managed-guard.sh` | 案内文に断片ファイル `CLAUDE.video-offer.md` を足す |
-| `nix/scripts/setup-local-flake.sh` | 雛形の `local` にコメントアウトした `videoOffer.enable = true` の例 |
-| `nix/scripts/bootstrap-claude-skill-overrides.sh` | コメントと確認の案内に `pjp-video-explainer-offer` を足す (処理は変えない) |
-| `nix/lib/mk-home.nix` / `nix/hosts/default.nix` | `claude` 引数の説明に `videoOffer.enable` を足す |
-| `nix/tests/claude-skill-toggles.nix` | 新規。option の値ごとの CLAUDE.md の節と `claude-skill-overrides.json` を評価時に確かめる |
-| `nix/tests/video-offer-nudge.test.sh` | `skillOverrides` の値ごとに黙る・知らせるを足す |
-| `nix/flake.nix` | checks に `claude-skill-toggles` を足す |
-| `nix/README.md` | 配置の表・解説動画のフック・ローカル flake の `local`・「Claude Code の skill を host ごとに止める」(2 つの option の表と 3 層の表。`/skills` の保存先の記述を今の docs に合わせる) |
-| `docs/adr/007_…/README.md` | 冒頭に後続 ADR (この ADR) へのポインタ |
-| `docs/adr/README.md` | 一覧に 023 |
+| `nix/home/options.nix` | `dotfiles.claude.videoOffer.autoStart.enable` (bool、既定 false) を追加 |
+| `nix/home/modules/claude.nix` | `~/.local/state/dotfiles/claude-video-offer.json` を置く。hook のコメント |
+| `nix/files/claude/CLAUDE.md` | 「解説動画を作る」の節を「解説動画を作るか聞く」に直す (A・B の文) |
+| `nix/files/claude/hooks/video-offer-nudge.sh` | `claude-video-offer.json` の `autoStart` で文を切り替える。`skillOverrides` で skill が呼べないなら黙る |
+| `nix/tests/claude-video-offer.nix` | 新規。option の既定・生成 JSON・CLAUDE.md の節が値によらないこと・skill を隠さないことを評価時に確かめる |
+| `nix/tests/video-offer-nudge.test.sh` | 値ごとの文、`skillOverrides` の値ごとに黙る・知らせるを足す |
+| `nix/flake.nix` | checks に `claude-video-offer-state` |
+| `nix/scripts/setup-local-flake.sh` | 雛形の `local` にコメントアウトした `videoOffer.autoStart.enable = true` の例 |
+| `nix/lib/mk-home.nix` / `nix/hosts/default.nix` | `claude` 引数の説明 |
+| `nix/scripts/bootstrap-claude-skill-overrides.sh` | コメントの `/skills` の記述を直す (処理は変えない。G) |
+| `nix/README.md` | 配置の表・解説動画のフック・ローカル flake の `local`・`/skills` の記述 (G) |
+| `docs/adr/007_…/README.md` | 冒頭に、`/skills` の記述が当たらないことを書いた後続 ADR のポインタ (G) |
+
+claude-skills:
+
+| ファイル | 変更 |
+| --- | --- |
+| `skills/pjp-video-explainer-offer/SKILL.md` | 値を読み、false (既定) なら作る前に聞く流れ (D)、true なら今の流れ |
+| `skills/pjp-video-explainer-offer/references/brief.md` | 同意の文 (A) / (B) の選び方を、聞いて選ばれた短尺も (B) と読めるようにする |
+
+### G. ついでに直した記述
+
+ADR 007 と README・`bootstrap-claude-skill-overrides.sh` のコメントは「`/skills` で変えても次の update で戻る」と
+書いていたが、`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、user の値より優先される
+(公式 docs と、手元の 2.1.302)。この作業で分かったので、README とコメントを直し、ADR 007 に後続 ADR のポインタを置く。
 
 ## 4. 検討した代替案
 
 | 案 | 採らなかった理由 |
 | --- | --- |
-| module の既定は true のまま、雛形だけ false (`devTracker.enable` と同じ形) | 雛形は初回にしか書かれないので、既にある `~/dotfiles/flake.nix` のマシンは on のまま残る。登録簿のホストを直接指しても on。「既定で off」にならない |
-| hook の登録を option で出し入れする (`bootstrap-claude-hook.sh` が登録を消す) | 登録を消す仕組みと、settings.json に残った登録の後始末が増える。黙る hook の費用はプロセスの起動 1 回で小さい |
-| hook の script を option で配らない | settings.json の登録が無いファイルを指し、Write のたびに hook のエラーになる |
-| hook が `~/.local/state/dotfiles/claude-skill-overrides.json` (dotfiles が置く望む値) を見る | `switch` 直後から黙るが、bootstrap までは ② (settings.json) と違う値で動く。hook が dotfiles の中間ファイルに依る |
-| hook が Claude Code と同じ優先順位 (project の `.claude/settings.local.json` など) で値を引く | §2 E |
-| skill 側で印を見て降りる | ADR 007 と同じ理由。毎回 SKILL.md を読み込む token を払い、降りるかどうかを Claude の判断に委ねる |
-| claude-skills から skill を外す・`disable-model-invocation: true` | skill は git で全マシンに配られるので、使いたいマシンでも止まる |
-| 汎用の `dotfiles.claude.skillOverrides` (attrset をそのまま流す) | ADR 007 と同じ理由。CLAUDE.md の断片と hook との対応が名前規約頼みになる。専用 option の方が 3 層の対応が読める |
+| option で解説動画の仕組みごと止める (`skillOverrides` で ② を off・① の節を外す・③ を黙らせる。この PR の最初の形) | 聞くことまで止まる。ユーザーがやめたいのは既定で作り始めることだけ |
+| module の既定は true のまま、雛形だけ false | 雛形は初回にしか書かれないので、既にある `~/dotfiles/flake.nix` のマシンは作り始めるまま残る |
+| 値を settings.json の `env` で渡す (`bootstrap-claude-env.sh`) | 反映が 2 段になり、Bash tool のすべてのコマンドに env が見える。claude-skills が dotfiles の値を読む形は ADR 011 の state の JSON が先にある |
+| ① を値で作り分ける (2 つの断片を Nix で連結) | ② が値を読む以上、読む場所が 2 つになる (F) |
+| ③ の文を値によらない 1 つにする | F |
+| option を 3 値 (聞く / 作り始める / 止める) にする | 止めるは頼まれていない。手で止める道は E で残る |
 
 ## 5. 影響 (Consequences)
 
 良くなること。
 
-- 頼んでいない解説動画を既定で作らない。使うマシンは `local` に 1 行足せば戻る
-- ③ が ② と同じ user の `settings.json` を見るので、option で切ったマシンで「skill は見えないのに
-  知らせは来る」状態が無くなる
-- `skillOverrides` の値を option が持つ skill が 2 つになっても、bootstrap の script は変わらない
+- 既定では頼んでいない動画を作り始めず、作るかは聞かれる。作り始める動きに戻すのは `local` の 1 行
+- ①②③ が同じ値に従う。値は `switch` だけで効く
 
 注意が必要なこと。
 
-- **今動いているマシンは、この変更を取り込むと off になる**。使い続けるマシンは `local` に true を書く
-- 反映は 2 段 (ADR 007 と同じ)。`switch` だけでは CLAUDE.md の節が消えるだけで、② と ③ は
-  `bootstrap-claude-skill-overrides.sh` が settings.json を書くまで残る。`~/dotfiles/setup --update` で揃う
-- user の `settings.json` の `skillOverrides.pjp-video-explainer-offer` は option が持つ。手で書き換えても
-  次の `setup --update` で戻る。`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、
-  user の値より優先される (update では戻らない)
-- ③ が見るのは user の `settings.json` だけ。project の設定 (`/skills` が書く `.claude/settings.local.json` を
-  含む) で切っても ③ は黙らない。② は呼べないので、option が true なら CLAUDE.md の節が止める (§2 E)
+- **今作り始める動きのマシンは、この変更を取り込むと「先に聞く」に変わる**。作り始めるまま使うマシンは `local` に true を書く
+- dotfiles と claude-skills の 2 本を続けて merge する。片方だけ入った間は、① と ③ の文と ② の流れが食い違う
+- 動いているセッションの CLAUDE.md は起動したときのまま。新しいセッションから効く (② と ③ はファイルを読むたびに今の値を見る)
 
 ## 6. 検証 (Verification)
 
-`feat/TKT-211-video-offer-toggle` で実施。
-
-| 確認 | 方法 | 結果 |
-| --- | --- | --- |
-| option の値ごとの CLAUDE.md と生成 JSON | `nix/tests/claude-skill-toggles.nix` (checks の `claude-skill-toggles`)。4 つの組み合わせ | 12 / 12。option を足す前は評価が `attribute 'videoOffer' missing` で落ちることを先に確かめた |
-| 両方 true の CLAUDE.md が分割前と同じ | `lib.hostsWith [ { dotfiles.claude.videoOffer.enable = true; } ]` の `pollenjp@x86_64-linux` の CLAUDE.md を、`git show main:nix/files/claude/CLAUDE.md` + 空行 + `CLAUDE.dev-tracker.md` と `diff` | 差分なし |
-| このマシンのローカル flake (`devTracker.enable = true`、videoOffer は書いていない) | `nix eval --no-write-lock-file --override-input dotfiles path:<repo>/nix ~/dotfiles#homeConfigurations."pollenjp@wsl"…` (lock は書き換えない) | CLAUDE.md は「タスク管理」だけ。JSON は `{"pjp-dev-tracker":"on","pjp-video-explainer-offer":"off"}` |
-| hook が値ごとに黙る・知らせる | `nix/tests/video-offer-nudge.test.sh` (checks の `video-offer-nudge-test`) | 28 / 28。足した 6 ケースのうち off・user-invocable-only・symlink の 3 つは、hook を直す前に FAIL することを先に確かめた |
-| 実物の `~/.claude/settings.json` の写し | 使い捨ての `HOME` に写し、このマシンの生成 JSON で `bootstrap-claude-skill-overrides.sh` → hook | `skillOverrides` に `"pjp-video-explainer-offer": "off"` が 1 行増えるだけで、ほかのキーは同じ。hook は off で黙り、on に書き換えると知らせる |
-| 雛形 | `DOTFILES_LOCAL_DIR` を使い捨ての dir にして `setup-local-flake.sh` で生成し、例の行のコメントを外して `nix eval` | 例の行がある。外すと `videoOffer.enable` が `true` |
-| 静的 | 変えたファイルに `nixfmt --check` / `shfmt -d` / `shellcheck`、`check-test-headers.sh`、`check-test-grep-q.sh` | 指摘なし |
-| flake / activation | `./nix/scripts/verify.sh` (`nix flake check --all-systems --no-build` + 使い捨ての `$HOME` での activate) | `nix flake check --all-systems --no-build` と activate 2 回は通過し、配置一覧に `.claude/CLAUDE.md` と `.local/state/dotfiles/claude-skill-overrides.json` が出る。最後の `~/dotfiles` 参照の検査は main と同じ 11 件で落ちる (この変更で増減なし。ADR 007 §6 の既知の件) |
-| コードレビュー (subagent) | branch 全体 | Critical・Important なし。文書の Minor 6 件のうち、この ADR の key とファイルが別の文書に書き漏れていた 4 件を直した。残り 2 件 (逆向きの場合の 1 文・§4 の言い回し) は PR に書いた |
+`feat/TKT-211-video-offer-toggle` (dotfiles) と `feat/TKT-211-video-offer-ask-first` (claude-skills) で実施する。
+結果は実装のあとに書き足す。
 
 ## 7. 移行・運用手順
 
-既定 (off) のまま使う:
+2 本の merge のあとに:
 
 ```sh
-~/dotfiles/setup --update                                        # switch + bootstrap
-jq '.skillOverrides["pjp-video-explainer-offer"]' ~/.claude/settings.json   # "off"
-grep -c '解説動画を作る' ~/.claude/CLAUDE.md                        # 0
+~/dotfiles/setup --self-update --update      # dotfiles (switch で claude-video-offer.json と CLAUDE.md が変わる)
+git -C "$(ghq root)/github.com/pollenjp/claude-skills" pull --ff-only   # claude-skills の skill
+cat ~/.local/state/dotfiles/claude-video-offer.json                    # {"autoStart":false}
 ```
 
-使うマシン (on にする):
+作り始める動きにしたいマシン:
 
 ```sh
-$EDITOR ~/dotfiles/flake.nix      # local に dotfiles.claude.videoOffer.enable = true;
-~/dotfiles/setup --update         # "on" が merge され、CLAUDE.md に節が戻る
+$EDITOR ~/dotfiles/flake.nix      # local に dotfiles.claude.videoOffer.autoStart.enable = true;
+~/dotfiles/setup --update         # {"autoStart":true} になる
 ```
-
-実行中の Claude Code には効かない。新しいセッションから効く。

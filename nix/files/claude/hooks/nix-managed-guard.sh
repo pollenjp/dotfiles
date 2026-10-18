@@ -173,9 +173,8 @@ reason=$(
        ~/.claude/agents/<名前>.md   -> \${REPO}/nix/files/claude/agents/<名前>.md
        ~/.claude/commands/<名前>.md -> \${REPO}/nix/files/claude/commands/<名前>.md
        ~/.claude/CLAUDE.md          -> \${REPO}/nix/files/claude/CLAUDE.md
-       (「タスク管理」の節は同じ場所の CLAUDE.dev-tracker.md、「解説動画を作る」の節は
-        CLAUDE.video-offer.md。claude.nix が dotfiles.claude.devTracker.enable /
-        videoOffer.enable のマシンでだけ末尾に連結している)
+       (「タスク管理」の節だけは同じ場所の CLAUDE.dev-tracker.md。claude.nix が
+        dotfiles.claude.devTracker.enable のマシンでだけ末尾に連結している)
        ~/.claude/skills/herdr/      -> repo に実体は無い。herdr パッケージ同梱の skill を
                                        nix/home/modules/claude.nix が張っていて、中身は
                                        flake.lock の herdr の版で決まる
