@@ -1,3 +1,5 @@
+# dotfiles の flake の入口。登録簿のマシンの homeConfigurations と、ローカル flake が呼ぶ lib (mkHome・hostsWith)・
+# checks・packages・apps・formatter・devShells を出す。
 {
   description = "pollenjp dotfiles managed by Nix home-manager";
 
