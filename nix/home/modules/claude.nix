@@ -94,7 +94,8 @@ let
   #   gitConfigBase  いつも入れる。commit / tag を無署名にする (1Password の
   #                  承認ダイアログで止まるため)
   #   gitConfigGh    gitViaGh.enable のときだけ入れる。GitHub の ssh の URL を
-  #                  https に読み替え、資格情報を gh の token から取る
+  #                  https に読み替え、資格情報を gh の token から取る。中身は
+  #                  lib/git-via-gh.nix で、自分のターミナルの git gh (pkgs/git-gh) も同じ組を使う
   gitConfigBase = [
     {
       k = "commit.gpgsign";
@@ -105,20 +106,7 @@ let
       v = "false";
     }
   ];
-  gitConfigGh = [
-    {
-      k = "url.https://github.com/.insteadOf";
-      v = "git@github.com:";
-    }
-    {
-      k = "url.https://github.com/.insteadOf";
-      v = "ssh://git@github.com/";
-    }
-    {
-      k = "credential.https://github.com.helper";
-      v = "!gh auth git-credential";
-    }
-  ];
+  gitConfigGh = import ../../lib/git-via-gh.nix;
 
   # Claude Code の Bash tool を動かす shell (settings.json の env の CLAUDE_CODE_SHELL。TKT-192)。
   #
@@ -332,6 +320,19 @@ in
         + "\n";
     }
 
+    # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
+    #
+    # claude-notion.json と同じく、claude-skills の skill (pjp-video-explainer-offer) に option の値を
+    # 渡す置き場で、下の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
+    # false・ファイルが無い・壊れているときは作る前に聞く。false でも必ず書く。
+    {
+      ".local/state/dotfiles/claude-video-offer.json".text =
+        builtins.toJSON {
+          autoStart = cfg.videoOffer.autoStart.enable;
+        }
+        + "\n";
+    }
+
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
     #
     # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
@@ -346,8 +347,10 @@ in
     }
 
     # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
-    # 見つけ、解説動画の短尺を作り始めるよう Claude に知らせる。作るかどうかを決める skill
-    # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
+    # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (上の claude-video-offer.json の
+    # autoStart が true なら、答えを待たずに短尺を作り始めるよう知らせる)。作るかどうかを決める
+    # skill (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンと、
+    # settings.json の skillOverrides で skill を止めたマシンでは黙る。
     # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
     {
       ".claude/hooks/video-offer-nudge.sh" = {

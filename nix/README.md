@@ -951,10 +951,11 @@ home-manager switch --flake ~/dotfiles#tmp
 既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
 （何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
 
-`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git は gh の資格情報で GitHub へ
-HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
+`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git と、fetch 系の abbr / alias は gh の資格情報で
+GitHub へ HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
 置いてある。gh にログインしないマシンだけ外す
-（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）。
+（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・
+[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)）。
 
 Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで、規則に当たらない repo と
 repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
@@ -963,6 +964,10 @@ repo の外で skill が止まる）で、使うマシンでは `"personal"` / `
 cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなければ cc-pages の既定の 7777 で、
 雛形にはコメントアウトした例だけ置いてある。7777 がほかと衝突するマシンだけ書く
 （[待ち受けの port を変える](#待ち受けの-port-を変える)）。
+
+解説動画を答えを待たずに作り始めるか **`dotfiles.claude.videoOffer.autoStart.enable`** は本体の既定の false
+（作る前に「解説動画を作りますか？」と聞く。1 本ごとに token を大きく使うため）のままで、雛形にはコメントアウトした
+true の例だけ置いてある。聞かずに作り始めたいマシンだけ書く（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)）。
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
@@ -1216,6 +1221,8 @@ read-only ファイルになるため。マシン固有の設定を足したい�
 なお **Claude のセッションからの commit だけは署名しない**。1Password の承認ダイアログで
 止まるため。また既定では、Claude のセッションの GitHub への push / fetch は ssh ではなく
 gh の資格情報（HTTPS）で通す。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)を参照。
+自分のターミナルでも、fetch 系の abbr / alias（`gf`・`gfp`・`gpul` など）は同じ option で gh を通る
+（[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)）。
 
 ### PR の差分からファイルを選んで見る (pjp-pr-diff)
 
@@ -1261,6 +1268,53 @@ gdp --list | sort            # 選ばずに並べる。push 済みなら gh pr d
 
 rename は元と先の両方を `git diff` に渡すので、rename として出る（`--list` では先のパスだけ）。
 空白・改行・タブ・glob の文字（`[ab].txt` など）を含むパスも、そのままのファイルを指す。
+
+### fetch 系を gh の資格情報で通す (git gh)
+
+`git gh <コマンド>` は、GitHub との通信だけを gh の資格情報（HTTPS）に向けて git を呼ぶ（実体は
+`nix/pkgs/git-gh/`。全ホストの PATH に入る。`git-gh <コマンド>` と直に呼んでも同じ）。Claude のセッションに
+渡しているのと同じ組（`nix/lib/git-via-gh.nix`。[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)）を
+`-c` で付けて git を呼ぶだけで、効くのはそのコマンドの間だけ。origin の URL も git の設定ファイルも書き換えない。
+GitHub との通信と認証は、WSL でも `ssh.exe` と 1Password の承認ダイアログを通らない（`pull` が merge commit を
+作るときの署名は別で、今までどおり 1Password を通る）。
+
+host option **`dotfiles.claude.gitViaGh.enable`**（既定 true）のマシンでは、fish の abbr と bash の alias の
+fetch 系がこれを使う。false なら今までどおり `git`（ssh）で打つ。
+
+| 名前 | true（既定） | false |
+| --- | --- | --- |
+| `gfp` | `git gh fetch --prune && git gh pull`（`gfp-gh` と同じ中身） | `git fetch --prune && git pull`（`gfp-base` と同じ中身） |
+| `gfp-gh` | `git gh fetch --prune && git gh pull` | 同じ |
+| `gfp-base` | `git fetch --prune && git pull`（今までの `gfp`） | 同じ |
+| `gf`・`gpul`・`gpull`・`gcl` | `git gh fetch --prune` などで打つ | `git fetch --prune` などで打つ |
+| `gpr` と `git_*` の関数 | `remote show`・`fetch`・`pull` を `git gh` で打つ | `git` で打つ |
+| `gp`・`gpf`・`gpup`（push） | `git`（ssh）のまま | 同じ |
+
+関数は `git_get_default_branch`・`git_fetch_branch`・`git_fetch_base`・`git_branch_cleanup`（`_force` も）・
+`git_fetch_pull_request`（`gpr`）。
+
+- `gfp` には `gfp-gh` / `gfp-base` の名前ではなく中身を書いている。fish の abbr は展開した結果をもう一度は
+  展開しないので、名前に展開すると、その名前のコマンドが無くて落ちるため
+- `gfp-base`・`gfp-gh`・`git gh` は option によらず使える。true のマシンで 1 回だけ ssh で通すなら、`gfp-base`
+  か、`git` で直に打つ
+- gh が無い・github.com にログインしていないと、`git gh` は git を呼ばずに止まり、gh を通さない打ち方
+  （`gfp` なら `gfp-base`）を案内する。ログインしていなければ `gh auth login` と、gh が出した理由も出す
+  （そのまま git を呼ぶと、資格情報が取れずに Username の入力待ちになるため）
+- 読み替わるのは GitHub の ssh の URL（`git@github.com:` と `ssh://git@github.com/`）だけ。GitHub 以外の remote と
+  ssh のホスト別名は ssh を通る
+- git の設定ファイルに別の credential helper（`store` など）があっても、github.com には gh だけを使う。`git gh` は
+  github.com の helper をいったん空にしてから gh を足す（`gh auth setup-git` が書くのと同じ形）。ほかの host の
+  helper はそのまま使われる
+- 自分のターミナルの素の git は変わらない。git の設定ファイルで全部を読み替える形にしないのは、エディタの git や
+  push まで gh に向く（`insteadOf` は push の URL も読み替える）ため。`programs.gh` を使わない理由と同じ
+  （`home/modules/packages.nix`）
+- abbr / alias は `home-manager switch` だけで変わる（開き直したシェルから）。Claude の側の反映は `setup --update` まで要る
+
+```sh
+gfp                       # true のマシンでは git gh fetch --prune && git gh pull に展開される
+git gh ls-remote origin   # 1 回だけ gh で通す
+gfp-base                  # true のマシンで 1 回だけ ssh で通す
+```
 
 ## ssh について
 
@@ -1549,7 +1603,7 @@ ssh-add -l                   # 鍵が並ぶ
 順序が本質的に効くもの (PATH の前置、mise activate、starship init) だけを
 `interactiveShellInit` の並び順で表現している。
 
-内訳: abbr 88 個 / function 24 個 / `interactiveShellInit`。
+内訳: abbr 105 個 / function 25 個 / `interactiveShellInit`。
 
 **fisher は不要になった。** `programs.fish.plugins` が `fishPlugins.autopair` と
 `fishPlugins.fzf-fish` を宣言的に入れるため、curl でのインストーラ取得と日次
@@ -1565,7 +1619,7 @@ ssh-add -l                   # 鍵が並ぶ
 ## bash
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
-内訳: alias 88 個 / 関数 24 個 / `initExtra`。
+内訳: alias 105 個 / 関数 25 個 / `initExtra`。
 
 `programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
 どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
@@ -1728,6 +1782,7 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
+| `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -1811,8 +1866,22 @@ store 上の read-only ファイルへの symlink なので、編集は実行ユ
 #### 解説動画を作る場面を知らせるフック
 
 `PostToolUse` フック（`nix/files/claude/hooks/video-offer-nudge.sh`）。設計を書き出した・
-PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画の短尺を裏で作り始めよ」
-と Claude の文脈へ 1 文を差し込む。作るかどうか・確かめ方は skill の側（private な claude-skills）が持つ。
+PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条件に合えば解説動画を作るかを聞け」
+と Claude の文脈へ 1 文を差し込む。作るかどうか・聞き方は skill の側（private な claude-skills）が持つ。
+
+聞くか、答えを待たずに作り始めるかは、host option **`dotfiles.claude.videoOffer.autoStart.enable`**（既定 false）で
+選ぶ。home-manager が値を `~/.local/state/dotfiles/claude-video-offer.json`（`{"autoStart":false}`）に置き、
+このフックと skill が読む（[ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)）。
+
+| `autoStart` | フックが差し込む文 | skill の動き |
+| --- | --- | --- |
+| false（既定）・ファイルが無い・壊れている | 「…解説動画を作るかを聞くこと」 | 作る前に聞く（短く作る / 詳しく作る / 今回は作らない / このセッションでは聞かない） |
+| true | 「…解説動画の短尺を裏で作り始めること」 | 答えを待たずに短尺を作り始め、作り始めてから「このまま作るか」を確かめる |
+
+- 使うマシンはローカル flake の `local` に `dotfiles.claude.videoOffer.autoStart.enable = true;` を書く。反映は
+  `home-manager switch`（`~/dotfiles/setup --update` でもよい）。settings.json は通らない
+- `~/.claude/CLAUDE.md` の「解説動画を作るか聞く」の節は、値によらず同じ文（どちらにするかは skill が決める）
+- 名指しで頼んだ解説動画（`pjp-video-explainer-pictogram` / `pjp-video-explainer-dialogue`）は、値によらず作れる
 
 | 知らせる場面 | 条件 |
 | --- | --- |
@@ -1823,7 +1892,10 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 subagent の中（入力に `agent_id` がある）・skill が無いマシン・ADR の dir の中の textbook や図・
 既存の PR を返しただけの `gh pr create`（stdout に `a pull request for branch … already exists`。`2>&1 | tail`
 でつなぐと exit code が隠れて成功として届く）では黙る。
-ユーザーが「このセッションでは作らない」を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
+user の `settings.json`（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の `skillOverrides` で
+`pjp-video-explainer-offer` を `off` か `user-invocable-only`（Claude が skill を呼べない値）にしたときも黙る
+（dotfiles はこの key を書かない。聞くことも止めたいマシンが手で書く）。
+ユーザーが「このセッションでは聞かない」（作り始める側では「このセッションでは作らない」）を選ぶと、skill が `${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id>`
 を置き、そのセッションでは会話の圧縮の後も黙る。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 2 件（`Bash` + `if: "Bash(gh pr create *)"`・`Write`）足す。
 
@@ -1928,7 +2000,8 @@ home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置
 ### Claude のセッションだけ git の設定を変える
 
 Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
-ターミナルの git は変わらない。
+ターミナルの素の git は変わらない（fetch 系の abbr / alias だけは、同じ option で
+[git gh](#fetch-系を-gh-の資格情報で通す-git-gh) を使う）。
 
 - **commit を無署名にする**（いつも）
 - **GitHub へは gh の資格情報（HTTPS）で通す**（host option `dotfiles.claude.gitViaGh.enable`、既定 true）
@@ -2189,9 +2262,11 @@ env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` �
 
 - **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
   あり得る。`setup --update` なら bootstrap まで走るので揃う
-- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。
-  `/skills` で切った他の skill には触らない。逆にこの key は option が正で、`/skills` で
-  変えても次の update で戻る
+- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。user の settings.json の
+  この key は option が正で、手で書き換えても次の update で戻る
+- `/skills` での切り替えは、その project の `.claude/settings.local.json` に保存され、user の
+  settings.json より優先される（公式 docs `skills` の「Override skill visibility from settings」）。
+  update では戻らない
 - 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して exit 0
 - 実行中の Claude Code には効かない。新しい session で `/skills` を見ると状態が判る
 
@@ -2726,6 +2801,7 @@ nix/
 ├── flake.nix              inputs / homeConfigurations / lib / checks / packages / apps / formatter / devShells
 ├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
 ├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
+├── lib/git-via-gh.nix     GitHub を gh の資格情報 (HTTPS) で通す git の設定の組 (modules/claude.nix と pkgs/git-gh が読む)
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
@@ -2739,8 +2815,8 @@ nix/
 │       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)。ccPages.port を選んだマシンには config.toml も置く
 │       ├── starship.nix      programs.starship (設定は素のファイルのまま)
 │       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
-│       ├── fish.nix          abbr 88 / function 24
-│       ├── bash.nix          alias 88 / 関数 24
+│       ├── fish.nix          abbr 105 / function 25
+│       ├── bash.nix          alias 105 / 関数 25
 │       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)。win/ を配るマシンの PATH に pjp-google-ime を置く
 │       ├── exe-exec-trace.nix  WSL のマシンの PATH に pjp-who-is-asking を置き、exeExecTrace.enable なら .exe の起動を記録するトレーサの unit ファイルを作る (/etc へは setup が入れる。ADR 012)
 │       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
@@ -2748,7 +2824,9 @@ nix/
 │   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
 │   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
 ├── pjp-env/               ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt。store には置かず、bootstrap-local-env が checkout から読む)
-├── pkgs/                  自作のパッケージ (modules/exe-exec-trace.nix と modules/windows-files.nix が使う。flake の packages と checks にも載せる)
+├── pkgs/                  自作のパッケージ (modules/packages.nix・exe-exec-trace.nix・windows-files.nix が使う。flake の packages と checks にも載せる)
+│   ├── pjp-pr-diff/         PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す
+│   ├── git-gh/              GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)
 │   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
 │   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す
 │   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)

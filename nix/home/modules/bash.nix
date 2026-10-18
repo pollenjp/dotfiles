@@ -19,6 +19,12 @@
 #                                             bash では元々発火していなかった
 { config, ... }:
 
+let
+  # fetch 系の alias と関数が打つ git と、gfp の中身。何をするか・gfp に名前ではなく中身を書く理由は
+  # fish.nix の同じ let に書いてある。直すときは fish.nix とそろえる。
+  gitFetch = if config.dotfiles.claude.gitViaGh.enable then "git gh" else "git";
+  gfpWith = git: "${git} fetch --prune && ${git} pull";
+in
 {
   programs.bash = {
     enable = true;
@@ -77,6 +83,7 @@
       #########################
       # 複製元: 201_git
       #########################
+      # fetch 系 (gcl・gf・gfp・gpul・gpull) は gitFetch で打つ (上の let。fish.nix と同じ中身)。
       g = "git";
       ga = "git add";
       gap = "git add -p";
@@ -84,12 +91,14 @@
       gc = "git commit -v";
       gca = "git commit -v -a";
       gcam = "git commit -v --amend";
-      gcl = "git clone --recurse-submodules";
+      gcl = "${gitFetch} clone --recurse-submodules";
       gcm = "git commit -m";
       gcp = "git commit -p -v";
       gcpm = "git commit -p -m";
-      gf = "git fetch --prune";
-      gfp = "git fetch --prune && git pull";
+      gf = "${gitFetch} fetch --prune";
+      gfp = gfpWith gitFetch;
+      gfp-base = gfpWith "git";
+      gfp-gh = gfpWith "git gh";
 
       # NOTE: レガシーでは alias が alias を参照する連鎖 (glfg='glf --graph' など)
       #       になっていたが、fish 側と揃えて完全形に展開してある。
@@ -108,8 +117,8 @@
       gp = "git push";
       gpf = "git push --force-with-lease";
       gpup = "git_push_set_upstream";
-      gpul = "git pull";
-      gpull = "git pull";
+      gpul = "${gitFetch} pull";
+      gpull = "${gitFetch} pull";
       gds = "git diff --staged";
       gg = "git grep";
       gr = "git restore";
@@ -294,13 +303,15 @@
 
       ##############################################################
       # 複製元: 201_git の関数群
+      # remote を読むもの (remote show・fetch・pull) は、dotfiles.claude.gitViaGh.enable なら
+      # gh の資格情報で GitHub へ通す (bash.nix の let の gitFetch。fish.nix とそろえる)
       ##############################################################
       git_get_default_branch() {
-        git remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
+        ${gitFetch} remote show origin | head -n 5 | sed -n '/HEAD branch/s/.*: //p'
       }
 
       git_fetch_branch() {
-        git fetch origin "''${1:?}:''${1:?}"
+        ${gitFetch} fetch origin "''${1:?}:''${1:?}"
       }
 
       git_fetch_base() {
@@ -331,22 +342,22 @@
       git_branch_cleanup() {
         local main_branch="''${1:-"$(git_get_default_branch)"}"
         git switch "''${main_branch:?}" \
-          && git fetch --prune \
-          && git pull \
+          && ${gitFetch} fetch --prune \
+          && ${gitFetch} pull \
           && git branch --merged | grep -v '\*' | grep -v "''${main_branch:?}" | xargs git branch -d
       }
 
       git_branch_cleanup_force() {
         local main_branch="''${1:-"$(git_get_default_branch)"}"
         git switch "''${main_branch:?}" \
-          && git fetch --prune \
-          && git pull \
+          && ${gitFetch} fetch --prune \
+          && ${gitFetch} pull \
           && git branch | grep -v '\*' | grep -v "''${main_branch:?}" | xargs git branch -D
       }
 
       git_fetch_pull_request() {
         local pr_num="''${1:?}"
-        git fetch origin "pull/''${pr_num}/head:pr''${pr_num}"
+        ${gitFetch} fetch origin "pull/''${pr_num}/head:pr''${pr_num}"
       }
 
       ##############################################################

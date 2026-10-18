@@ -72,9 +72,10 @@ ADR 001 の決定 6 に従う。
 
 書き方は各 `skills/README.md` を参照（置き場所によって形が変わる）。
 
-## 解説動画を作る
+## 解説動画を作るか聞く
 
 `pjp-video-explainer-offer` が skill の一覧にあるときだけ、まとまった設計を提案したとき・
-PR を作ったときにその skill を読み、条件に合えば解説動画の短尺を答えを待たずに裏で作り始める。
-一覧に無ければ何もしない (ファイルを探さない・作らない)。PR の作成・タグ「設計」の cc-page・
-spec / ADR の書き出しは hook (`~/.claude/hooks/video-offer-nudge.sh`) も知らせてくる。
+PR を作ったときにその skill を読み、条件に合えば解説動画を作るかを聞く。答えを待たずに短尺を
+作り始めるのは、dotfiles でそう設定したマシンだけ (どちらにするかは skill が決める)。
+一覧に無ければ何もしない (ファイルを探さない・聞かない・作らない)。PR の作成・タグ「設計」の
+cc-page・spec / ADR の書き出しは hook (`~/.claude/hooks/video-offer-nudge.sh`) も知らせてくる。
