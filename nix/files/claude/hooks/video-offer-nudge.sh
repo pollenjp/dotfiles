@@ -116,8 +116,9 @@ esac
 
 [[ -n ${kind} ]] || exit 0
 
-# 真偽値の true のときだけ作り始める。読めない・壊れている・別の型なら jq は false か空を返し、聞く側になる
-if [[ $(jq -r '.autoStart == true' "${HOME}/.local/state/dotfiles/claude-video-offer.json" 2>/dev/null) == true ]]; then
+# 真偽値の true のときだけ作り始める。jq -e の終了コードで決めるので、false・読めない・空・壊れている
+# (true の後ろのゴミを含む)・別の型はどれも 0 以外になり、聞く側になる
+if jq -e '.autoStart == true' "${HOME}/.local/state/dotfiles/claude-video-offer.json" &>/dev/null; then
   act="解説動画の短尺を裏で作り始めること"
 else
   act="解説動画を作るかを聞くこと"

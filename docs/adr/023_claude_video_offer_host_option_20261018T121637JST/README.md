@@ -170,7 +170,7 @@ ADR 007 と README・`bootstrap-claude-skill-overrides.sh` のコメントは「
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
 | option の既定・生成 JSON・CLAUDE.md・skill を隠さないこと | `nix/tests/claude-video-offer.nix` (checks の `claude-video-offer-state`) | 9 / 9。option を足す前は評価が `attribute 'autoStart' missing` で落ちることを先に確かめた |
-| hook の文が値ごとに変わる・壊れたら聞く | `nix/tests/video-offer-nudge.test.sh` (checks の `video-offer-nudge-test`) | 31 / 31。既定 (ファイル無し)・false・壊れたファイル・文字列の `"true"` の「聞く」側は、hook を直す前に FAIL することを先に確かめた (main の hook に当てると 8 件が FAIL) |
+| hook の文が値ごとに変わる・壊れたら聞く | `nix/tests/video-offer-nudge.test.sh` (checks の `video-offer-nudge-test`) | 32 / 32。既定 (ファイル無し)・false・壊れたファイル・文字列の `"true"` の「聞く」側は、hook を直す前に FAIL することを先に確かめた (main の hook に当てると 8 件が FAIL)。空のファイルと、true の後ろにゴミがあるものも聞く (`jq -e` の終了コードで決める) |
 | このマシンのローカル flake | `nix eval --no-write-lock-file --override-input dotfiles path:<repo>/nix ~/dotfiles#…"pollenjp@wsl"…` (lock は書き換えない) | `claude-video-offer.json` は `{"autoStart":false}`、skill-overrides は `{"pjp-dev-tracker":"on"}` だけ、CLAUDE.md は main と比べて解説動画の節の見出しと文だけが変わる |
 | 雛形 | `DOTFILES_LOCAL_DIR` を使い捨ての dir にして `setup-local-flake.sh` で生成し、例の行のコメントを外して `nix eval` | 例の行がある。外すと `claude-video-offer.json` が `{"autoStart":true}` |
 | skill の流れ (claude-skills) | 状態ファイルを決めた場面を subagent に渡し、SKILL.md のとおりに取る行動を並べさせた | 直す前の SKILL.md は、ファイルが無くても答えより前に短尺を作り始めた。直したあとは、ファイル無しの PR で先に 4 択で聞き、`{"autoStart":true}` の設計で作り始め、worker では答えが届くまで作らなかった |
@@ -183,9 +183,8 @@ ADR 007 と README・`bootstrap-claude-skill-overrides.sh` のコメントは「
 claude-skills → dotfiles の順で 2 本を merge したあとに:
 
 ```sh
-~/dotfiles/setup --self-update --update      # dotfiles (switch で claude-video-offer.json と CLAUDE.md が変わる)
-git -C "$(ghq root)/github.com/pollenjp/claude-skills" pull --ff-only   # claude-skills の skill
-cat ~/.local/state/dotfiles/claude-video-offer.json                    # {"autoStart":false}
+~/dotfiles/setup --self-update --update      # switch で claude-video-offer.json と CLAUDE.md が変わり、bootstrap-claude-skills が claude-skills を pull する
+cat ~/.local/state/dotfiles/claude-video-offer.json   # {"autoStart":false}
 ```
 
 作り始める動きにしたいマシン:

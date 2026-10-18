@@ -1761,7 +1761,7 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 と Claude の文脈へ 1 文を差し込む。作るかどうか・聞き方は skill の側（private な claude-skills）が持つ。
 
 聞くか、答えを待たずに作り始めるかは、host option **`dotfiles.claude.videoOffer.autoStart.enable`**（既定 false）で
-選ぶ。home-manager が値を `~/.local/state/dotfiles/claude-video-offer.json`（`{"autoStart": false}`）に置き、
+選ぶ。home-manager が値を `~/.local/state/dotfiles/claude-video-offer.json`（`{"autoStart":false}`）に置き、
 このフックと skill が読む（[ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)）。
 
 | `autoStart` | フックが差し込む文 | skill の動き |

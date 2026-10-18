@@ -17,7 +17,7 @@
 #   - gh pr create の成功・タグ「設計」の cc-page・spec / ADR の新規作成で知らせる。知らせる文は、
 #     解説動画を作るかを聞くことと、その時機 (PR の URL を返すとき・承認やレビューの前) を言う
 #   - claude-video-offer.json の autoStart が真偽値の true のときだけ、聞く代わりに解説動画の短尺を
-#     裏で作り始めることを言う。false・ファイルが無い・壊れている・文字列の "true" では聞く
+#     裏で作り始めることを言う。false・ファイルが無い・空・壊れている (後ろのゴミを含む)・文字列の "true" では聞く
 #   - それ以外 (失敗した PR・既存の PR を返しただけの gh pr create (already exists)・タグの無いページ・
 #     上書き・関係ないファイル・ADR の dir の中の textbook や図・ADR の一覧) では黙る
 #   - subagent の中・skill が無いマシン・壊れた入力・「このセッションでは作らない」の印が
@@ -61,7 +61,6 @@ mkdir -p "${without_skill}"
 state="${work}/state"
 mkdir -p "${state}"
 
-# run <設定 dir> <入力> : stdout を ${work}/out に、exit code を ${work}/rc に残す
 # dotfiles が claude-video-offer.json を置く HOME
 home="${work}/home"
 mkdir -p "${home}/.local/state/dotfiles"
@@ -74,6 +73,7 @@ set_state() {
   fi
 }
 
+# run <設定 dir> <入力> : stdout を ${work}/out に、exit code を ${work}/rc に残す
 run() {
   printf '%s' "$2" | HOME="${home}" CLAUDE_CONFIG_DIR="$1" XDG_STATE_HOME="${state}" bash "${script}" >"${work}/out" 2>"${work}/err"
   echo $? >"${work}/rc"
@@ -365,6 +365,20 @@ if [[ ${r1} == *"PR の URL を返すときに解説動画を作るかを聞く�
   ok "壊れた claude-video-offer.json・文字列の true では作るかを聞く"
 else
   ng "壊れた claude-video-offer.json・文字列の true では作るかを聞く" "r1=${r1} out=$(cat "${work}/out")"
+fi
+
+# 32. 空の claude-video-offer.json・true の後ろにゴミがあるもの → 作り始めず、聞く
+set_state ''
+: >"${home}/.local/state/dotfiles/claude-video-offer.json"
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/34')"
+r1=$(context)
+set_state '{"autoStart":true} x'
+run "${with_skill}" "$(bash_input 'gh pr create --title t --body b' 'https://github.com/o/r/pull/35')"
+set_state ''
+if [[ ${r1} == *"PR の URL を返すときに解説動画を作るかを聞くこと。"* && $(context) == *"PR の URL を返すときに解説動画を作るかを聞くこと。"* ]]; then
+  ok "空の claude-video-offer.json・true の後ろにゴミがあるものでは作るかを聞く"
+else
+  ng "空の claude-video-offer.json・true の後ろにゴミがあるものでは作るかを聞く" "r1=${r1} out=$(cat "${work}/out")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
