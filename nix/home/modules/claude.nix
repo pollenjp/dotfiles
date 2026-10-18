@@ -335,7 +335,7 @@ in
     # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
     #
     # claude-notion.json と同じく、claude-skills の skill (pjp-video-explainer-offer) に option の値を
-    # 渡す置き場で、上の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
+    # 渡す置き場で、下の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
     # false・ファイルが無い・壊れているときは作る前に聞く。false でも必ず書く。
     {
       ".local/state/dotfiles/claude-video-offer.json".text =
@@ -359,7 +359,7 @@ in
     }
 
     # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
-    # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (下の claude-video-offer.json の
+    # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (上の claude-video-offer.json の
     # autoStart が true なら、答えを待たずに短尺を作り始めるよう知らせる)。作るかどうかを決める
     # skill (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンと、
     # settings.json の skillOverrides で skill を止めたマシンでは黙る。

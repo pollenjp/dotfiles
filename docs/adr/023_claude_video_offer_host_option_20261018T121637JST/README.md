@@ -103,7 +103,7 @@ TKT-124 の聞き方を、TKT-148 で足した「承認してほしいことを�
 | ① の文を値で切り替えるか | 切り替えない (1 つの文) | ② が値を読む以上、① まで値で作り分けると読む場所が 2 つになる。Nix で断片を連結する仕組みも要らなくなる |
 | 「全部止める」(聞きもしない) を option に持たせるか | 持たせない | 頼まれていない。止めたいマシンは `skillOverrides` で ② を手で off にすれば、③ も黙る (E) |
 | ADR の番号 | 023 | 021 と 022 は open の PR (#136・#137) が使っている |
-| dotfiles と claude-skills の PR の merge の順 | 2 本を続けて merge する | 片方だけ入った間は ①③ と ② が食い違う。claude-skills の clone は symlink なので pull したとき、dotfiles は `switch` したときに効く |
+| dotfiles と claude-skills の PR の merge の順 | **claude-skills → dotfiles** の順で続けて merge する | claude-skills が先なら、新しい ② が値を読み、状態ファイルの無い間は聞く側に倒れる (古い ① の「作り始める」より ② の §2 が決める)。dotfiles が先だと、古い ② はいつも作り始め、新しい ① は「skill が決める」と任せるので、作り始めてしまう。claude-skills の clone は symlink なので pull したとき、dotfiles は `switch` したときに効く |
 | 書き直した設計を別の目 (builder check) に読ませるか | 自分で読んで足りない点を埋めた | 1 回目の builder check と最終レビューで、3 か所の関係と hook の入力の扱いは確かめてある。変わったのは値の渡し方と ② の流れで、最終レビューで見る |
 
 ## 3. 変更点の詳細
@@ -159,17 +159,28 @@ ADR 007 と README・`bootstrap-claude-skill-overrides.sh` のコメントは「
 注意が必要なこと。
 
 - **今作り始める動きのマシンは、この変更を取り込むと「先に聞く」に変わる**。作り始めるまま使うマシンは `local` に true を書く
-- dotfiles と claude-skills の 2 本を続けて merge する。片方だけ入った間は、① と ③ の文と ② の流れが食い違う
+- dotfiles と claude-skills の 2 本は、**claude-skills → dotfiles** の順で続けて merge する。dotfiles だけ先に入ると、
+  古い ② が答えを待たずに作り始める (§2 F)
 - 動いているセッションの CLAUDE.md は起動したときのまま。新しいセッションから効く (② と ③ はファイルを読むたびに今の値を見る)
 
 ## 6. 検証 (Verification)
 
-`feat/TKT-211-video-offer-toggle` (dotfiles) と `feat/TKT-211-video-offer-ask-first` (claude-skills) で実施する。
-結果は実装のあとに書き足す。
+`feat/TKT-211-video-offer-toggle` (dotfiles) と `feat/TKT-211-video-offer-ask-first` (claude-skills) で実施。
+
+| 確認 | 方法 | 結果 |
+| --- | --- | --- |
+| option の既定・生成 JSON・CLAUDE.md・skill を隠さないこと | `nix/tests/claude-video-offer.nix` (checks の `claude-video-offer-state`) | 9 / 9。option を足す前は評価が `attribute 'autoStart' missing` で落ちることを先に確かめた |
+| hook の文が値ごとに変わる・壊れたら聞く | `nix/tests/video-offer-nudge.test.sh` (checks の `video-offer-nudge-test`) | 31 / 31。既定 (ファイル無し)・false・壊れたファイル・文字列の `"true"` の「聞く」側は、hook を直す前に FAIL することを先に確かめた (main の hook に当てると 8 件が FAIL) |
+| このマシンのローカル flake | `nix eval --no-write-lock-file --override-input dotfiles path:<repo>/nix ~/dotfiles#…"pollenjp@wsl"…` (lock は書き換えない) | `claude-video-offer.json` は `{"autoStart":false}`、skill-overrides は `{"pjp-dev-tracker":"on"}` だけ、CLAUDE.md は main と比べて解説動画の節の見出しと文だけが変わる |
+| 雛形 | `DOTFILES_LOCAL_DIR` を使い捨ての dir にして `setup-local-flake.sh` で生成し、例の行のコメントを外して `nix eval` | 例の行がある。外すと `claude-video-offer.json` が `{"autoStart":true}` |
+| skill の流れ (claude-skills) | 状態ファイルを決めた場面を subagent に渡し、SKILL.md のとおりに取る行動を並べさせた | 直す前の SKILL.md は、ファイルが無くても答えより前に短尺を作り始めた。直したあとは、ファイル無しの PR で先に 4 択で聞き、`{"autoStart":true}` の設計で作り始め、worker では答えが届くまで作らなかった |
+| 静的 | 変えたファイルに `nixfmt --check` / `shfmt -d` / `shellcheck`、`check-test-headers.sh`、`check-test-grep-q.sh`、claude-skills の `scripts/lint.sh` | 指摘なし (lint.sh は 44 件 / エラー 0) |
+| flake | `nix flake check --all-systems --no-build ./nix` | 通過 |
+| コードレビュー (subagent) | 2 repo の差分をまとめて | Critical なし。Important 2 件 (brief.md の古い節番号・この §6 の空欄) と、格上げした 2 件 (merge の順・claude.nix のコメントの上下) を直した。「§3 で作り始めた動画を止めてと言われたときの定めが無い」は、直す前の SKILL.md で subagent に試させると §4 を当てはめて正しく止め、承認の問いも出したので、足さなかった。残りの Minor は PR に書いた |
 
 ## 7. 移行・運用手順
 
-2 本の merge のあとに:
+claude-skills → dotfiles の順で 2 本を merge したあとに:
 
 ```sh
 ~/dotfiles/setup --self-update --update      # dotfiles (switch で claude-video-offer.json と CLAUDE.md が変わる)
