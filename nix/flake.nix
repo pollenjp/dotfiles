@@ -240,7 +240,7 @@
               system
               ;
           };
-          cc-pages-state = import ./tests/cc-pages.nix {
+          claude-skill-toggles = import ./tests/claude-skill-toggles.nix {
             inherit
               lib
               pkgs
@@ -248,7 +248,7 @@
               system
               ;
           };
-          claude-skill-toggles = import ./tests/claude-skill-toggles.nix {
+          cc-pages-state = import ./tests/cc-pages.nix {
             inherit
               lib
               pkgs

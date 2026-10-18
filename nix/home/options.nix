@@ -172,7 +172,7 @@ in
       description = ''
         設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏の subagent で
         作り始めるか (claude-skills の pjp-video-explainer-offer)。1 本ごとにコンテキストを
-        大きく使うので、既定は false (docs/adr/022_claude_video_offer_host_option_*)。
+        大きく使うので、既定は false (docs/adr/023_claude_video_offer_host_option_*)。
 
         1 つの値から 3 つが決まる (home/modules/claude.nix):
 
