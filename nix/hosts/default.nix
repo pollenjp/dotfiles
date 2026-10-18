@@ -19,6 +19,8 @@
 #                   gh auth login が前提)。
 #                   claude.notion.profile で Notion へ書く skill が既定に使う宛先のプロファイルを選ぶ (既定は null)。
 #                   claude.notion.routes で、このマシンだけの宛先の規則 (origin の owner/repo → プロファイル) を足せる。
+#                   claude.videoOffer.autoStart.enable = true で、設計・PR のときに解説動画の短尺を答えを
+#                   待たずに作り始めるマシンにする (既定は作る前に聞く。token を大きく使うため。ADR 023)。
 #                   会社のマシンのように public に載せたくない差分は、この登録簿ではなく
 #                   ローカル flake (~/dotfiles/flake.nix) の local module に書く。雛形は
 #                   devTracker.enable = false を既定にしている (README「登録簿に載せずにマシンを足す」)

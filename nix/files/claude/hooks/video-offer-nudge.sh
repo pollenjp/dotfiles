@@ -2,10 +2,16 @@
 # shellcheck shell=bash
 #
 # Claude Code の PostToolUse フック。設計を書き出した・PR を作った瞬間に、
-# 「解説動画の短尺を裏で作り始める場面か判断せよ」と Claude の文脈へ 1 文を差し込む。
+# 「解説動画を作るか聞く場面か判断せよ」と Claude の文脈へ 1 文を差し込む。
 #
 # 作るかどうかはここでは決めない。決めるのは skill (pjp-video-explainer-offer。
 # private な claude-skills にある) の側で、ここは瞬間を見つけて知らせるだけ。
+#
+# ## 聞くか、作り始めるか
+#
+# dotfiles が置く ~/.local/state/dotfiles/claude-video-offer.json (dotfiles.claude.videoOffer.autoStart.enable。
+# ADR 023) の autoStart が真偽値の true のときだけ、「解説動画の短尺を裏で作り始めること」と知らせる。
+# false・ファイルが無い・壊れているときは「解説動画を作るかを聞くこと」と知らせる。skill も同じファイルを読む。
 #
 # ## 知らせる場面
 #
@@ -18,7 +24,11 @@
 #
 #   - subagent の中 (入力に agent_id がある)。subagent の中では作らない (受け取る人がいない)
 #   - skill が入っていないマシン (claude-skills を取れない、public な dotfiles だけの環境)
-#   - ユーザーが「このセッションでは作らない」を選んだセッション。skill がそのとき
+#   - skill を Claude が呼べないマシン。settings.json の skillOverrides で pjp-video-explainer-offer を
+#     off か user-invocable-only にしたとき (dotfiles はこの key を書かない。聞くことも止めたいマシンが
+#     手で書く)。知らせても skill は呼べず、SKILL.md を直接読ませることになる。
+#     見るのは user の settings.json (${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json) だけ
+#   - ユーザーが「このセッションでは聞かない・作らない」を選んだセッション。skill がそのとき
 #     ${XDG_STATE_HOME:-~/.local/state}/pjp-video-offer/off-<session_id> を置く。
 #     会話の圧縮で選んだことが消えても、ここで黙らせる
 #   - 既存の PR を返しただけの gh pr create (stdout に「a pull request for branch … already exists」)。
@@ -40,6 +50,13 @@ input=$(cat) || exit 0
 skill_md="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/skills/pjp-video-explainer-offer/SKILL.md"
 [[ -f ${skill_md} ]] || exit 0
 command -v jq &>/dev/null || exit 0
+
+# skill を Claude が呼べない値なら黙る。読めない・壊れている・知らない値なら、今どおり知らせる
+# (止めるかどうかを hook で決めない。作るかどうかは skill が決める)
+settings="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}/settings.json"
+case $(jq -r '.skillOverrides["pjp-video-explainer-offer"] // empty' "${settings}" 2>/dev/null) in
+  off | user-invocable-only) exit 0 ;;
+esac
 
 # 入力の 1 項目を取り出す。無い・壊れている → 空文字
 field() {
@@ -97,15 +114,25 @@ case $(field '.tool_name') in
     ;;
 esac
 
+[[ -n ${kind} ]] || exit 0
+
+# 真偽値の true のときだけ作り始める。jq -e の終了コードで決めるので、false・読めない・空・壊れている
+# (true の後ろのゴミを含む)・別の型はどれも 0 以外になり、聞く側になる
+if jq -e '.autoStart == true' "${HOME}/.local/state/dotfiles/claude-video-offer.json" &>/dev/null; then
+  act="解説動画の短尺を裏で作り始めること"
+else
+  act="解説動画を作るかを聞くこと"
+fi
+
 case ${kind} in
   pr)
-    msg="[解説動画] PR を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、PR の URL を返すときに解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
+    msg="[解説動画] PR を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、PR の URL を返すときに${act}。合わなければ何もしない。"
     ;;
   design-page)
-    msg="[解説動画] タグ「設計」の cc-page を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、承認を聞く前に解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
+    msg="[解説動画] タグ「設計」の cc-page を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、承認を聞く前に${act}。合わなければ何もしない。"
     ;;
   design-doc)
-    msg="[解説動画] 設計の文書を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、レビューや承認を頼む前に解説動画の短尺を裏で作り始めること。合わなければ何もしない。"
+    msg="[解説動画] 設計の文書を作った (${target})。pjp-video-explainer-offer skill を読み、作る条件に合えば、レビューや承認を頼む前に${act}。合わなければ何もしない。"
     ;;
   *)
     exit 0
