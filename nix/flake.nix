@@ -248,6 +248,14 @@
               system
               ;
           };
+          claude-skill-toggles = import ./tests/claude-skill-toggles.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 

@@ -6,6 +6,9 @@
 #   files/claude/CLAUDE.dev-tracker.md   CLAUDE.md の「タスク管理」の節。
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
+#   files/claude/CLAUDE.video-offer.md   CLAUDE.md の「解説動画を作る」の節。
+#                                        dotfiles.claude.videoOffer.enable のマシンでだけ
+#                                        「タスク管理」の節の前に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
@@ -242,16 +245,20 @@ in
     # 全セッションで読まれるユーザーレベルの指示。
     # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
     #
-    # 「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
-    # CLAUDE.dev-tracker.md に分けてあり、dotfiles.claude.devTracker.enable の
-    # マシンでだけ末尾に連結する。skill を隠したマシンに節だけが残ると、Claude が
-    # 無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
+    # 「解説動画を作る」の節 (pjp-video-explainer-offer skill を読めという指示) は
+    # CLAUDE.video-offer.md に、「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
+    # CLAUDE.dev-tracker.md に分けてあり、それぞれ dotfiles.claude.videoOffer.enable /
+    # devTracker.enable のマシンでだけ末尾に連結する。skill を隠したマシンに節だけが
+    # 残ると、Claude が無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
     #
-    # 連結は「常時部分 (末尾は改行 1 つ) + 空行 + 節」で、enable = true の出力は
-    # 分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
+    # 連結は節ごとに「ここまで (末尾は改行 1 つ) + 空行 + 節」で、並びは解説動画 → タスク管理。
+    # 両方 true の出力は分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
     {
       ".claude/CLAUDE.md".text =
         builtins.readFile (claudeRoot + "/CLAUDE.md")
+        + lib.optionalString cfg.videoOffer.enable (
+          "\n" + builtins.readFile (claudeRoot + "/CLAUDE.video-offer.md")
+        )
         + lib.optionalString cfg.devTracker.enable (
           "\n" + builtins.readFile (claudeRoot + "/CLAUDE.dev-tracker.md")
         );
@@ -267,11 +274,13 @@ in
     #
     # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
     # この key は option が正だと settings.json 側からも読めるよう、enable = true
-    # でも明示して書く。
+    # でも明示して書く。pjp-video-explainer-offer の値は video-offer-nudge.sh も
+    # settings.json から読み、off なら知らせない。
     {
       ".local/state/dotfiles/claude-skill-overrides.json".text =
         builtins.toJSON {
           "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
+          "pjp-video-explainer-offer" = if cfg.videoOffer.enable then "on" else "off";
         }
         + "\n";
     }

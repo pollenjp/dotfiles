@@ -13,6 +13,7 @@
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
+#   dotfiles.claude.videoOffer.enable            設計・PR のときに解説動画の短尺を既定で作り始めるか (既定 false)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
@@ -162,6 +163,35 @@ in
           skill が使うときに resolver が知らないキーとして止める。
         '';
       };
+    };
+
+    videoOffer.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏の subagent で
+        作り始めるか (claude-skills の pjp-video-explainer-offer)。1 本ごとにコンテキストを
+        大きく使うので、既定は false (docs/adr/022_claude_video_offer_host_option_*)。
+
+        1 つの値から 3 つが決まる (home/modules/claude.nix):
+
+        - `~/.claude/CLAUDE.md` の「解説動画を作る」の節 (files/claude/CLAUDE.video-offer.md)。
+          false なら連結しない
+        - `~/.local/state/dotfiles/claude-skill-overrides.json` の値 ("on" / "off")。
+          nix/scripts/bootstrap-claude-skill-overrides.sh がこれを
+          `~/.claude/settings.json` の skillOverrides へ写し、false なら skill が
+          Claude の一覧からも `/` メニューからも消える
+        - hook (files/claude/hooks/video-offer-nudge.sh) の知らせ。hook は settings.json の
+          skillOverrides を見て、skill を Claude が呼べない値 (off など) なら黙る
+
+        ユーザーが名指しで頼んだ解説動画 (pjp-video-explainer-pictogram / dialogue) は、
+        この値によらず作れる。
+
+        devTracker.enable と同じく反映は 2 段で、`home-manager switch` だけでは
+        settings.json に届かない。`~/dotfiles/setup --update` で揃える。
+        使うマシンはローカル flake の local で true にする。
+      '';
     };
   };
 
