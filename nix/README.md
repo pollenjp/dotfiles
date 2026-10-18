@@ -7,6 +7,10 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 で削除した。以下で「移植元」「複製元」として挙げる旧経路のファイルは、git の履歴
 (`git show 4a54c96:shell/250_alias.sh` など) で読める。
 
+各ファイルの役割はここに写さず、そのファイルの先頭のコメントにだけ書く (テストは「## 確かめること」。
+[後述](#テスト))。ディレクトリを辿れば分かるファイルの一覧も置かない。ファイルや option を足すたびに
+直す所が増え、書き漏れるため。
+
 ## 対象範囲
 
 | 対象 | 管理者 |
@@ -1622,7 +1626,7 @@ ssh-add -l                   # 鍵が並ぶ
 順序が本質的に効くもの (PATH の前置、mise activate、starship init) だけを
 `interactiveShellInit` の並び順で表現している。
 
-内訳: abbr 105 個 / function 25 個 / `interactiveShellInit`。
+内訳: abbr / function / `interactiveShellInit`。
 
 **fisher は不要になった。** `programs.fish.plugins` が `fishPlugins.autopair` と
 `fishPlugins.fzf-fish` を宣言的に入れるため、curl でのインストーラ取得と日次
@@ -1638,7 +1642,7 @@ ssh-add -l                   # 鍵が並ぶ
 ## bash
 
 `.bashrc` / `.bash/*.sh` / `shell/*.sh` を `nix/home/modules/bash.nix` へ全面移植した。
-内訳: alias 105 個 / 関数 25 個 / `initExtra`。
+内訳: alias / 関数 / `initExtra`。
 
 `programs.bash` が書き出すのは `~/.bashrc` / `~/.bash_profile` / `~/.profile` の 3 つ。
 どれも symlink ではない実ファイルとして先に在るのが普通なので、初回の switch では
@@ -2812,75 +2816,3 @@ repo の script を使うので、サンドボックスの外でも流せる（�
 - 「gh が無い」場合は、要るコマンドだけを symlink で並べた PATH で作る。GitHub の runner の
   `/usr/bin` や Nix の profile では、gh が bash・jq・git と同じディレクトリにあり、PATH から
   抜けないため
-
-## ディレクトリ
-
-```
-nix/
-├── flake.nix              inputs / homeConfigurations / lib / checks / packages / apps / formatter / devShells
-├── lib/mk-home.nix        homeConfiguration 組み立てヘルパ
-├── lib/windows-files.nix  win/manifest.toml → 配置計画 (bootstrap-windows-files.sh が呼ぶ。flake からは呼ばない)
-├── lib/git-via-gh.nix     GitHub を gh の資格情報 (HTTPS) で通す git の設定の組 (modules/claude.nix と pkgs/git-gh が読む)
-├── hosts/default.nix      マシン登録簿
-├── home/
-│   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.onePassword.enable / dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.windowsUserName} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable / dotfiles.ccPages.port
-│   └── modules/
-│       ├── packages.nix      programs.* を使わない CLI ツール
-│       ├── files.nix         静的な設定ファイルの配置
-│       ├── git.nix           programs.git / programs.delta
-│       ├── ssh.nix           ~/.ssh/config の骨組み + WSL の ssh ラッパー
-│       ├── claude.nix        ~/.claude/ 配下 (readDir で自動列挙。CLAUDE.md は option で節を連結して生成)、bootstrap が読む状態ファイル (~/.local/state/dotfiles/) と claude-personal / claude-work
-│       ├── cc-pages.nix      cc-pages の daemon (cc-pages serve) を systemd の user service で常駐させる (バイナリは bootstrap-cc-pages.sh が置く)。ccPages.port を選んだマシンには config.toml も置く
-│       ├── starship.nix      programs.starship (設定は素のファイルのまま)
-│       ├── shell-common.nix  bash/fish 共通 (sessionVariables / sessionPath / mise)
-│       ├── fish.nix          abbr 105 / function 25
-│       ├── bash.nix          alias 105 / 関数 25
-│       ├── windows-files.nix  ~/.local/state/dotfiles/windows-files.json (win/ の配り先と on / off)。win/ を配るマシンの PATH に pjp-google-ime を置く
-│       ├── exe-exec-trace.nix  WSL のマシンの PATH に pjp-who-is-asking を置き、exeExecTrace.enable なら .exe の起動を記録するトレーサの unit ファイルを作る (/etc へは setup が入れる。ADR 012)
-│       └── cleanup.nix       使わなくなった Nix の store path・世代と mise の版を週 1 回消す (nix.gc / mise-prune)
-├── files/                 設定ファイルの実体 (store 管理される素のファイル)
-│   ├── bin/               WSL 用 ssh ラッパー (実行ビット付き)
-│   └── claude/            ~/.claude/ 配下 (CLAUDE.md + CLAUDE.dev-tracker.md / skills / hooks / statusline) と footer のリンクの正規表現 (footer-links.json)
-├── pjp-env/               ~/.config/pjp/env の頭の欄に並べる、dotfiles の script が受け取る環境変数 (dotfiles.txt。store には置かず、bootstrap-local-env が checkout から読む)
-├── pkgs/                  自作のパッケージ (modules/packages.nix・exe-exec-trace.nix・windows-files.nix が使う。flake の packages と checks にも載せる)
-│   ├── pjp-pr-diff/         PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す
-│   ├── git-gh/              GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)
-│   ├── pjp-exe-exec-trace/  WSL から起動された Windows の .exe を、起動元の祖先付きで記録する eBPF のトレーサ
-│   ├── pjp-who-is-asking/   1Password の承認ダイアログの要求元を、直近の記録といま動いているプロセスから、Windows と Linux をまたいだ木で出す
-│   └── pjp-google-ime/      Google 日本語入力の設定・辞書と repo のテキストを行き来させる (Mozc の .proto の写しを持つ。ADR 015)
-├── tests/                 flake の checks で流すテスト (何を確かめるかは各テストの先頭の「## 確かめること」。check-test-headers.sh --show で並べる)
-└── scripts/
-    ├── setup.sh                   「適用」の手順を選んで実行する (入口)
-    ├── setup-local-flake.sh        ~/dotfiles にローカル flake と setup の symlink を置く
-    ├── verify.sh                   検証を一括実行する
-    ├── preflight-unlink.sh         main.bash が張った symlink を外す (移行時に 1 回)
-    ├── bootstrap-mise.sh           mise のグローバル設定を初期化する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-plugins.sh  Claude Code の公式プラグインを導入する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-hook.sh    Claude Code のフックを登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-statusline.sh  Claude Code の statusLine を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-env.sh     Claude のセッションに渡す env (git の無署名・GitHub へは gh の HTTPS、Bash tool の shell) を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-skill-overrides.sh  Claude Code の skillOverrides を host option どおりに登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-footer-links.sh  Claude Code の footer に会話のチケットと PR のリンクを出す設定を登録する (冪等。更新時も毎回走る)
-    ├── bootstrap-claude-skills.sh  private な skill 置き場を取得して繋ぐ (冪等)
-    ├── bootstrap-dotfiles-private.sh  private な dotfiles-private を取得する (冪等。更新時も毎回走る。取れなくても止めない)
-    ├── bootstrap-ssh-config.sh     dotfiles-private の ssh/*.ssh_config を ~/.ssh/config.d/ へ張る (冪等。更新時も毎回走る。取れていなければ何もしない)
-    ├── bootstrap-claude-accounts.sh  claude-personal / claude-work が使う ~/.claude-<名前>/ を用意する (冪等。更新時も毎回走る)
-    ├── bootstrap-cc-pages.sh       private な cc-pages を取得してビルドし、常駐 daemon を起こす (冪等。更新時も毎回走る。取れなくても止めない)
-    ├── bootstrap-local-env.sh      ~/.config/pjp/env を置き、頭の一覧の欄を書き直す (冪等。更新時も毎回走る。欄の外は書き換えない)
-    ├── bootstrap-windows-files.sh  repo 直下の win/ を /mnt/c へコピーして配る (冪等。更新時も毎回走る)
-    ├── bootstrap-windows-powertoys.sh  win/ から配った PowerToys の割り当てを Keyboard Manager に読み直させる (冪等。更新時も毎回走る。PowerToys が無ければ先に入れる)
-    ├── bootstrap-windows-ssh-config.sh  dotfiles-private の ssh/*.ssh_config を Windows の %USERPROFILE%\.ssh へコピーし、config を置く (冪等。更新時も毎回走る)
-    ├── bootstrap-windows-google-ime-install.sh  Windows の Google 日本語入力が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、上げはしない)
-    ├── bootstrap-windows-powershell-profile.sh  win/ から配った dotfiles.ps1 を PowerShell 7 の $PROFILE から読ませる (冪等。更新時も毎回走る)
-    ├── bootstrap-windows-openssh.sh  Windows の OpenSSH が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。揃えはしない)
-    ├── bootstrap-windows-herdr.sh  Windows の herdr が固定した版に揃っているかを確かめる (冪等。更新時も毎回走る。無ければ入れ、入れ替えはしない)
-    ├── bootstrap-windows-google-ime.sh  Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る (冪等。更新時も毎回走る)
-    ├── bootstrap-windows-terminal.sh  win/windows-terminal/managed.json のキーだけを、Windows Terminal の settings.json へ書き足す (冪等。更新時も毎回走る)
-    ├── flake-lock-age.sh           flake.lock の pin を、出てから一定日数が経った revision に限る (setup --flake-update と CI の lock-age が呼ぶ)
-    ├── closure-scan.sh             home の閉包を SBOM にし、OSV / GHSA / NVD で脆弱性をスキャンする (flake-lock-age.sh update と CI の closure-scan が呼ぶ)
-    ├── closure-head-diff.sh        閉包を pin とチャンネル先端の両方で組み、入るパッケージの版の差を出す (CI の head-diff が呼ぶ)
-    ├── check-herdr-keys.sh         herdr のキーバインドが WSL と Windows で同じかを確かめる (CI の lint が呼ぶ)
-    ├── check-test-headers.sh       テストの先頭に「## 確かめること」があるかを確かめる。--show で並べる (CI の lint が呼ぶ)
-    └── check-test-grep-q.sh        テストの判定で grep -q をパイプの先に置いていないかを確かめる (CI の lint が呼ぶ)
-```
