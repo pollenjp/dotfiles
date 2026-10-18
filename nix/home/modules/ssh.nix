@@ -37,7 +37,7 @@ let
   wsl = config.dotfiles.wsl;
 
   # ラッパーが要るのは WSL で 1Password を使うときだけ。WSL でないマシンの 1Password は
-  # SSH_AUTH_SOCK 越しに Linux の ssh / ssh-add がそのまま使う (ADR 021)。
+  # SSH_AUTH_SOCK 越しに Linux の ssh / ssh-add がそのまま使う (ADR 022)。
   useOnePassword = wsl.enable && config.dotfiles.onePassword.enable;
 in
 

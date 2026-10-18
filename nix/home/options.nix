@@ -31,7 +31,7 @@ let
 in
 {
   # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう
-  # dotfiles.onePassword.enable へ出した (ADR 021)。ローカル flake (git 管理外) に旧名が残っていても
+  # dotfiles.onePassword.enable へ出した (ADR 022)。ローカル flake (git 管理外) に旧名が残っていても
   # 評価が止まらないよう、旧名は新しい名前へ渡して警告を出す。
   imports = [
     (lib.mkRenamedOptionModule

@@ -7,7 +7,7 @@
 | 決定者 | pollenjp |
 | 前提 ADR | [003_nix_ssh_config](../003_nix_ssh_config_20260810T210714JST/README.md)（`bin/` のうち Windows 用 2 本の扱いを決めた ADR。本 ADR はその決定を変えず、触れていなかった WSL 用 2 本を扱う） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
-| 後続 ADR | [021_one_password_outside_wsl](../021_one_password_outside_wsl_20261018T105655JST/README.md)（`wsl.onePassword.enable` を `dotfiles.onePassword.enable` へ出した。ラッパーを置く条件は `wsl.enable && onePassword.enable` で、WSL での挙動は変わらない。本文の `wsl.onePassword.enable` は決定当時の記録としてそのまま残してある） |
+| 後続 ADR | [022_one_password_outside_wsl](../022_one_password_outside_wsl_20261018T105655JST/README.md)（`wsl.onePassword.enable` を `dotfiles.onePassword.enable` へ出した。ラッパーを置く条件は `wsl.enable && onePassword.enable` で、WSL での挙動は変わらない。本文の `wsl.onePassword.enable` は決定当時の記録としてそのまま残してある） |
 
 ---
 

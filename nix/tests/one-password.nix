@@ -1,5 +1,5 @@
 # home/options.nix の dotfiles.onePassword.enable から作られる git の署名と ssh のラッパーを、
-# 評価時に確かめる (ADR 021)。
+# 評価時に確かめる (ADR 022)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。

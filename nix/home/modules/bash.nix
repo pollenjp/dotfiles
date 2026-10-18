@@ -446,7 +446,7 @@
       #       この経路は実際に踏む。
       #
       # NOTE: SSH_AUTH_SOCK が 1Password の SSH エージェント (~/.1password/agent.sock。NixOS の
-      #       laptop では system がログインのセッションに入れる) の shell でも何もしない (ADR 021)。
+      #       laptop では system がログインのセッションに入れる) の shell でも何もしない (ADR 022)。
       #       1Password が起動前やロック中だと ssh-add -l は失敗するが、ここでローカル agent に
       #       すり替えると、その shell は 1Password が使えるようになっても戻らない。
       #
@@ -516,7 +516,7 @@
       # alias の h / hss / ha なども herdr を呼ぶので、全部ここを通る。
       #
       # 手元でも、SSH_AUTH_SOCK がこのマシンの 1Password (~/.1password/agent.sock) なら
-      # 固定名をそこへ張って渡す (ADR 021)。張らないと、手元で開いた herdr の pane が最後に
+      # 固定名をそこへ張って渡す (ADR 022)。張らないと、手元で開いた herdr の pane が最後に
       # ssh で開いた接続の転送を指したままになる。これで固定名は「最後に herdr を開いた場所」の
       # 1Password を指す。1Password の socket は場所が決まっているので、まだ無くても張る
       # (アプリが起動すれば生きる)。WSL の手元と pane の中 (SSH_AUTH_SOCK が固定名) はこの

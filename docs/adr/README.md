@@ -27,7 +27,7 @@
 | [018](./018_win_terminal_settings_keys_20261016T105116JST/README.md) | Windows Terminal の `settings.json` は、dotfiles が持つキーだけを setup が書き足す (ファイルごと配らない) | 2026-10-16 |
 | [019](./019_claude_run_through_after_approval_20261016T150008JST/README.md) | superpowers で承認を求めるのは方針の 1 回だけにし、承認のあとは PR まで走り切らせる (CLAUDE.md の節と、skill を読んだ直後に念を押す hook) | 2026-10-16 |
 | [020](./020_who_is_asking_recent_journal_20261017T110906JST/README.md) | pjp-who-is-asking は、要求元が先に終わっていても出せるよう、exe-exec-trace の journal から直近の要求も出す | 2026-10-17 |
-| [021](./021_one_password_outside_wsl_20261018T105655JST/README.md) | 1Password のオプションを `dotfiles.wsl` の外へ出し、WSL でないマシンでは `ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで git の署名をする。herdr の固定名は手元で開いたときも 1Password へ張り替える | 2026-10-18 |
+| [022](./022_one_password_outside_wsl_20261018T105655JST/README.md) | 1Password のオプションを `dotfiles.wsl` の外へ出し、WSL でないマシンでは `ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで git の署名をする。herdr の固定名は手元で開いたときも 1Password へ張り替える | 2026-10-18 |
 
 ## ディレクトリ名
 

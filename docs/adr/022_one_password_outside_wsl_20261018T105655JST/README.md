@@ -179,9 +179,15 @@ lavie（nixos-config の ADR 009 の switch・再起動・1Password のサイン
 ```sh
 ~/dotfiles/setup --update --host pollenjp@laptop
 git config --get gpg.ssh.program   # …-openssh-…/bin/ssh-keygen
-# herdr を開き直す (今の server は古い env を持つので、lavie の前で h / ha)
+# lavie の前で新しい端末を開き、h / ha で herdr を開き直す
 readlink ~/.ssh/agent.sock         # /home/pollenjp/.1password/agent.sock
 ```
+
+- **新しい端末で開く。** 前からある端末の shell は、フォールバックが起こしたローカル ssh-agent
+  （`~/.ssh/agent/s.*.agent.*`）を `SSH_AUTH_SOCK` に持っていることがあり、そのままでは `herdr` 関数の
+  手元の分岐に当たらない
+- ssh から起動した今の herdr の server は、すでに固定名を持っているので、開き直せば張り替えが効く。
+  手元の端末から起動した古い server（固定名を持たない）は、`herdr server stop` してから開き直す
 
 WSL: 何もしなくてよい。ローカル flake に `wsl.onePassword.enable = true;` があれば、改名の警告が出るので
 `onePassword.enable = true;`（`mkHome` の引数）へ移す。

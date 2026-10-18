@@ -510,7 +510,7 @@
       };
 
       # 手元でも、SSH_AUTH_SOCK がこのマシンの 1Password なら固定名をそこへ張って渡す
-      # (ADR 021)。理由は bash.nix の同じ関数のコメント。
+      # (ADR 022)。理由は bash.nix の同じ関数のコメント。
       herdr = {
         description = "herdr with a stable SSH_AUTH_SOCK on ssh hosts and with the local 1Password";
         body = ''
@@ -606,7 +606,7 @@
       #       書いた (両シェルで同じ挙動に揃えてある)。
       #
       # NOTE: SSH_AUTH_SOCK が 1Password の SSH エージェント (~/.1password/agent.sock) の shell でも
-      #       何もしない (ADR 021)。理由は bash.nix の同じブロック。
+      #       何もしない (ADR 022)。理由は bash.nix の同じブロック。
       if command -q ssh-add
         set -l SSH_AGENT_FILE "$HOME/.ssh-agent"
 

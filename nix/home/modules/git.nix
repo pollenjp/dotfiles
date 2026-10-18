@@ -12,7 +12,7 @@
 # 1Password の無いマシンに commit.gpgSign だけが残ると、署名鍵が見つからず
 # git commit そのものが失敗するため、片方だけを残さない。
 #
-# 署名のプログラムは WSL とそれ以外で分かれる (ADR 021)。
+# 署名のプログラムは WSL とそれ以外で分かれる (ADR 022)。
 #   - WSL: Windows 側の op-ssh-sign-wsl.exe (1Password はホスト側 Windows にいる)
 #   - それ以外: home-manager の既定 (openssh の ssh-keygen)。SSH_AUTH_SOCK のエージェントで
 #     署名するので、手元では 1Password、ssh 先では転送されてきたエージェントの鍵で署名する。

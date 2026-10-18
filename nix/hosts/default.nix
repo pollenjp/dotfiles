@@ -9,11 +9,11 @@
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
-#   onePassword     onePassword.enable = true で 1Password を git の署名に使う (ADR 021)。
-#                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
 #                   祖先付きで journald に常時記録する (ADR 012。unit を /etc へ入れるのは
 #                   `~/dotfiles/setup --update` の最後の手順 exe-exec-trace。中で sudo を呼ぶ)
+#   onePassword     onePassword.enable = true で 1Password を git の署名に使う (ADR 022)。
+#                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
 #                   claude.gitViaGh.enable = false で、Claude の git を gh の資格情報 (HTTPS)
@@ -98,7 +98,7 @@
     system = "x86_64-linux";
     # git の署名を lavie の 1Password の鍵で行う (ssh-keygen が SSH_AUTH_SOCK のエージェントで署名する)。
     # SSH_AUTH_SOCK を 1Password へ向けるのは nixos-config (ADR 009)。ssh で入ったときは
-    # 転送されてきたエージェント (Windows の 1Password) の同じ鍵で署名する (ADR 021)。
+    # 転送されてきたエージェント (Windows の 1Password) の同じ鍵で署名する (ADR 022)。
     onePassword.enable = true;
   };
 

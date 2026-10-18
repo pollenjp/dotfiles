@@ -844,7 +844,7 @@ wsl = {
 onePassword.enable = true;     # 1Password で git の署名をするか（WSL ならホスト側 Windows の 1Password）
 ```
 
-`onePassword` は `wsl` の外に置く（WSL でないマシンでも使うため。[ADR 021](../docs/adr/021_one_password_outside_wsl_20261018T105655JST/README.md)）。
+`onePassword` は `wsl` の外に置く（WSL でないマシンでも使うため。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
 git の署名で見ると、組み合わせは次の 4 通り。
 
 | マシン | 指定 | git の署名 |
@@ -975,7 +975,7 @@ cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなけ�
   （`wsl.onePassword = { enable = true; windowsUserName = "…"; };`）も動く
   （`wsl.onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。ただし
   `wsl.onePassword.enable` は `onePassword.enable` へ改名したので、switch のたびに改名の警告が出る。
-  `onePassword.enable = true;` を `wsl` の外へ移す（[ADR 021](../docs/adr/021_one_password_outside_wsl_20261018T105655JST/README.md)）。
+  `onePassword.enable = true;` を `wsl` の外へ移す（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
   `windowsFiles.enable` を足すときは配り先にも名前が要るので、上の形のように
   `wsl.windowsUserName` へ移す
 
@@ -1203,7 +1203,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 > [ssh ラッパー](#wsl-では-ssh-自体を-windows-側に差し替える)が行う。
 
 **WSL でないマシンでは、`ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで署名する**
-（[ADR 021](../docs/adr/021_one_password_outside_wsl_20261018T105655JST/README.md)）。ssh と同じ経路なので、
+（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。ssh と同じ経路なので、
 手元ではそのマシンの 1Password（`SSH_AUTH_SOCK` を `~/.1password/agent.sock` へ向けるのは system の側。
 NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されてきたエージェント、herdr の pane では
 固定名の指す先の、同じ "Signing" の鍵で署名する。ラッパーは置かない。
@@ -1538,7 +1538,7 @@ forward してきた socket へ張り替える。判断の経緯と安全性の�
   herdr の外の shell は自分の接続の socket をそのまま使う
 - `ssh -a` で入った shell（フォールバックが起こしたローカル agent）からは張らない。`SSH_AGENT_PID` で見分ける
 - 手元（`SSH_CONNECTION` が無い）で張り替えるのは、`SSH_AUTH_SOCK` がそのマシンの 1Password のときだけ
-  （NixOS の laptop。[ADR 021](../docs/adr/021_one_password_outside_wsl_20261018T105655JST/README.md)）。
+  （NixOS の laptop。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
   固定名は「最後に herdr を開いた場所」の 1Password を指す。ssh で入って開けば転送、lavie の前で開けば lavie。
   1Password の socket は場所が決まっているので、アプリの起動前でも張る。**WSL の挙動は変わらない**
 - `hr`（`herdr --remote`）で attach したときに、関数が走って固定名が張り替わるかは確かめていない。
@@ -1548,6 +1548,9 @@ forward してきた socket へ張り替える。判断の経緯と安全性の�
 > 一度 `herdr server stop` して、`ssh -A` で入り直してから `herdr` で開く。
 
 herdr の中で鍵が引けなくなったら、detach して `herdr` で開き直す（固定名が今の接続へ向き直る）。
+手元（NixOS の laptop）で開き直すときは、新しい端末から開く。前からある端末の shell は、フォールバックが
+起こしたローカル ssh-agent を `SSH_AUTH_SOCK` に持っていることがあり、手元の分岐に当たらない。
+手元の端末から起動した古い server（固定名を持たない）は、`herdr server stop` してから開き直す。
 
 確認は ssh 先で次のとおり。
 

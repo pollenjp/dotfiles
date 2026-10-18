@@ -21,7 +21,7 @@
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
   wsl ? { },
   # 1Password を使うか (dotfiles.onePassword にそのまま入る)。WSL ならホスト側 Windows の、
-  # それ以外はこのマシンの 1Password で git の署名をする (ADR 021)。
+  # それ以外はこのマシンの 1Password で git の署名をする (ADR 022)。
   #
   #   onePassword.enable = true;
   #
