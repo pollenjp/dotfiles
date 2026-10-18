@@ -1,3 +1,5 @@
+# dotfiles の flake の入口。登録簿のマシンの homeConfigurations と、ローカル flake が呼ぶ lib (mkHome・hostsWith)・
+# checks・packages・apps・formatter・devShells を出す。
 {
   description = "pollenjp dotfiles managed by Nix home-manager";
 
@@ -77,34 +79,14 @@
       # systemd の unit は root とカーネルが要るので、ここで確かめるのは純粋な部分
       # (記録の組み立て・整形・Windows と Linux の対の取り方) だけ (ADR 012)。
       #
-      # nix/tests/ のテストも載せる。
-      #   <名前>.test.sh   bootstrap や hook などの script の振る舞い。bash・jq・git だけの
-      #                    サンドボックスで、確かめる script を渡して流す (Linux だけ。unittest と揃える)。
-      #                    warn-helpers は scripts/ を丸ごと渡し、各 script の warn() / summary_warn()
-      #                    (setup の最後の警告のまとめへ足す) が同じ振る舞いかを見る
-      #   pjp-pr-diff.test.sh
-      #                    nix/pkgs/pjp-pr-diff の script。上と同じ形に fzf を足して流す (Linux だけ)
-      #   git-gh.test.sh   nix/pkgs/git-gh (git gh)。-c で付ける組は Nix が書き込むので、包んだ後の
-      #                    package を上と同じ形で流す (Linux だけ)
-      #   claude-footer-links.test.mjs
-      #                    files/claude/footer-links.json の正規表現が、出力のどの行からどのバッジを
-      #                    作るか。Claude Code と同じ JavaScript の RegExp で流す (Linux だけ)
-      #   claude-env.nix   gitViaGh.enable から作られるものと、Bash tool の shell (CLAUDE_CODE_SHELL) と
-      #                    その bash を profile に入れる設定。評価時に assert するので全 system
-      #   git-gh-aliases.nix
-      #                    gitViaGh.enable で変わる fetch 系の abbr / alias と function (gfp・gfp-base・gfp-gh も)。
-      #                    評価時に assert するので全 system
-      #   claude-herdr-skill.nix
-      #                    ~/.claude/skills/herdr に張る herdr 同梱の skill。張る元が home.packages の
-      #                    herdr の中かは評価時に、SKILL.md はビルドして確かめる (全 system)
-      #   claude-notion.nix  notion.{profile,routes,override} から作られる JSON と warnings。評価時に assert するので全 system
-      #   claude-video-offer.nix
-      #                    videoOffer.autoStart.enable から作られる claude-video-offer.json と、CLAUDE.md の
-      #                    解説動画の節。評価時に assert するので全 system
-      #   cc-pages.nix     ccPages.port から作られる config.toml と、port を変えた switch での再起動。
-      #                    評価時に assert するので全 system
-      #   one-password.nix onePassword.enable から作られる git の署名と ssh のラッパー (WSL / それ以外 /
-      #                    旧名)、登録簿のどのホストで有効か。評価時に assert するので全 system
+      # nix/tests/ のテストも載せる。何を確かめるかは各テストの先頭の「## 確かめること」にだけ書き、
+      # ここには写さない (README の「テスト」)。
+      #   <名前>.test.sh   bash・jq・git だけのサンドボックスで、確かめる script を渡して流す
+      #                    (scriptTest。Linux だけ。unittest と揃える)。ほかの道具が要るもの・script の
+      #                    ほかに渡すものがあるものは、その check の上に理由を書いて組む
+      #   <名前>.test.mjs  node で流す (Linux だけ)
+      #   <名前>.nix       home の設定が作るもの。評価時に assert するので全 system (ビルドして
+      #                    確かめる項目は、その system のランナーだけ)
       #
       # pjp-google-ime (ADR 015) の unittest と bootstrap-windows-google-ime.test.sh は、protobuf の入った
       # python と記述子 (Mozc の .proto から作る) が要るので、unittest / scriptTest ではなく専用に組む。
@@ -142,6 +124,8 @@
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
+          # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
+          # 同じ RegExp で確かめられる node で流す
           claude-footer-links-test =
             pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; }
               ''
@@ -150,6 +134,7 @@
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
+          # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;

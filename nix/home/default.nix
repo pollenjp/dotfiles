@@ -1,3 +1,5 @@
+# home-manager の設定の入口 (lib/mk-home.nix がマシンごとに読む)。options.nix と modules/ の各 module を
+# import し、stateVersion を固定する。
 { ... }:
 
 {
