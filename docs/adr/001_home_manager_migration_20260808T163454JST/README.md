@@ -11,6 +11,7 @@
 | 後続 ADR | [002_nix_hosts_and_local_flake_20260810T153848JST](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md) — マシン固有設定の表現と実行の入口パスを決めた。**「7. 移行・運用手順」と `textbook/` は現行の形に更新済み。**「2. 決定」「3. 変更点の詳細」「6. 検証」に出てくる `~/dotfiles/nix#...` や `isWSL` などは決定当時の記録としてそのまま残してある |
 | 後続 ADR | [005_nix_flake_lock_min_release_age_20260813T184522JST](../005_nix_flake_lock_min_release_age_20260813T184522JST/README.md) — 依存の更新手段を素の `nix flake update` から `flake-lock-age.sh update`（公開から 7 日以上経った revision だけを取る）へ差し替えた。**`textbook/05_daily_usage.md` は現行の形に更新済み。**本文に出てくる `nix flake update` は決定当時の記録としてそのまま残してある |
 | 後続 ADR | [013_remove_legacy_tree_20261007T015646JST](../013_remove_legacy_tree_20261007T015646JST/README.md) — Stage 6 として旧経路 (`main.bash setup`) を Windows の Git Bash 用も含めて削除した。決定 4 の「`main.bash setup` を Windows 用および復旧用に残す」と決定 7 の「どの段階でも `./main.bash setup` で戻せる」はここで終わる。**「7. 移行・運用手順」のロールバックと `textbook/`（`00`・`03`・`04`・`05` の章と図 `04_cutover`）は現行の形に更新済み。**「1. 背景」〜「6. 検証」に出てくる旧経路のファイル（`main.bash`・`shell/` など）と図 `01_before`〜`03_staging` は決定当時の記録としてそのまま残してある（ファイルは `4a54c96` までの履歴で読める） |
+| 後続 ADR | [022_one_password_outside_wsl_20261018T105655JST](../022_one_password_outside_wsl_20261018T105655JST/README.md) — 1Password のオプションを `dotfiles.wsl` の外へ出し（`onePassword.enable`）、WSL でないマシンでも git の署名に使うようにした。**`textbook/03_this_repo.md` の「1. マシンを増やす」は現行の形に更新済み。**本文に出てくる 1Password の記述（`dotfiles.windowsUserName` など）は決定当時の記録としてそのまま残してある |
 
 ---
 

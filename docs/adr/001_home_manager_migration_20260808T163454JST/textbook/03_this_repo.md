@@ -61,11 +61,9 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
   system = "x86_64-linux";
   wsl = {
     enable = true;
-    onePassword = {
-      enable = true;
-      windowsUserName = "polle";
-    };
+    windowsUserName = "polle";
   };
+  onePassword.enable = true;
 };
 ```
 
@@ -73,15 +71,17 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 WSL 固有の設定は入れ子で渡す。**親が有効なときだけ子が意味を持つ**という関係を
 そのまま構造にしてあるので、有効な組み合わせが構造から読める（非 WSL なら `wsl`
-ごと書かない、1Password が無いなら `wsl.enable = true;` だけ）。
+ごと書かない）。1Password は WSL でないマシンでも使うので、`wsl` の外の
+`onePassword.enable` で選ぶ（使わないなら書かない）。`wsl` のほかの子と組み合わせの一覧は
+[nix/README.md「WSL 固有の設定は入れ子で渡す」](../../../../nix/README.md#wsl-固有の設定は入れ子で渡す)。
 
 <details><summary>windowsUserName とは</summary>
 
 WSL の**ホスト側 Windows** のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
 Linux 側の `home.username` とは別物なので独立したオプションにしてある。
 
-現在の用途は 1Password の `op-ssh-sign` のパス 1 箇所だけ。従来は `.gitconfig` に
-WSL 用と Windows 用のパスがコメントアウトで並んでおり、手で切り替える運用だった
+用途は 1Password の `op-ssh-sign` のパスと、`win/` の配り先。1Password のパスは、従来は
+`.gitconfig` に WSL 用と Windows 用のパスがコメントアウトで並んでおり、手で切り替える運用だった
 （切り替えたまま誤ってコミットする事故の温床）。
 
 値は WSL 上で次を実行すると判る。
@@ -94,10 +94,10 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 Nix の評価は純粋で外部コマンドを呼べず、`--impure` を使うと `nix flake check` が
 動かなくなるため。だから `hosts/default.nix` に直接書く。
 
-`wsl.onePassword.enable = true` にしたのに未設定だと、パスを組み立てられないまま
+WSL で `onePassword.enable = true` にしたのに未設定だと、パスを組み立てられないまま
 「署名しようとして鍵が見つからない」状態になるので、`assertions` で評価時に止まる。
 
-1Password を使わないマシンでは `wsl.onePassword` ごと書かない。このとき署名関連の
+1Password を使わないマシンでは `onePassword.enable` を書かない。このとき署名関連の
 設定は**一切書き出されない**（`commit.gpgSign = true` だけが残ると `git commit`
 そのものが失敗するため）。
 
