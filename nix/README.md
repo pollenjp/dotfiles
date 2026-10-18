@@ -826,6 +826,7 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
 | `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
+| `onePassword` | `{ }` | `onePassword.enable = true` で 1Password を git の署名に使う（WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password。[git について](#git-について)） |
 
 ### WSL 固有の設定は入れ子で渡す
 
@@ -839,23 +840,25 @@ wsl = {
   windowsUserName = "polle";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
   windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
   exeExecTrace.enable = true;  # WSL から起動された .exe を常時記録するか（後述）
-  onePassword.enable = true;   # ホスト側 Windows の 1Password を使うか（WSL 専用）
 };
+onePassword.enable = true;     # 1Password で git の署名をするか（WSL ならホスト側 Windows の 1Password）
 ```
 
-git の署名で見ると、有効な組み合わせは次の 3 通りだけになる。
+`onePassword` は `wsl` の外に置く（WSL でないマシンでも使うため。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
+git の署名で見ると、組み合わせは次の 4 通り。
 
 | マシン | 指定 | git の署名 |
 | --- | --- | --- |
-| 非 WSL | `wsl` を書かない | 署名の設定を書き出さない |
-| WSL / 1Password 無し | `wsl.enable = true;` | 同上 |
+| 非 WSL / 1Password 無し | どちらも書かない | 署名の設定を書き出さない |
+| 非 WSL / 1Password 有り | `onePassword.enable` | openssh の `ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで署名する |
+| WSL / 1Password 無し | `wsl.enable = true;` | 署名の設定を書き出さない |
 | WSL / 1Password 有り | `wsl.enable`・`windowsUserName`・`onePassword.enable` | Windows 側の `op-ssh-sign-wsl.exe` を経由して署名する |
 
 `windowsFiles.enable` は 1Password と独立に選べる（`windowsUserName` は要る）。
 何をするかは[後述](#windows-側のファイルを配る)。
 
 登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
-これに当たる。適用時に `#` の後ろで選ぶ。
+WSL の 2 行に、`pollenjp@laptop`（NixOS の実機）が非 WSL / 1Password 有りに当たる。適用時に `#` の後ろで選ぶ。
 
 ```sh
 home-manager switch --flake ~/dotfiles#pollenjp@wsl
@@ -879,8 +882,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 階層で表現しきれない「親が false なのに子が true」は `assertions` で評価時に止まる。
 
-- `wsl.onePassword.enable` が true なのに `wsl.enable` が false
-- `wsl.onePassword.enable` が true なのに `onePassword.windowsUserName`（既定は `wsl.windowsUserName`）が無い
+- WSL で `onePassword.enable` が true なのに `wsl.onePassword.windowsUserName`（既定は `wsl.windowsUserName`）が無い
 - `wsl.windowsFiles.enable` が true なのに `wsl.enable` が false
 - `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
 - `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
@@ -916,8 +918,8 @@ outputs =
           # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
           #   pwsh.exe -NoProfile -Command '$env:USERNAME'
           windowsUserName = "polle";
-          onePassword.enable = true;
         };
+        onePassword.enable = true;
 
         # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
         # 本体が既に定義している値を差し替えるには mkForce が要る
@@ -974,9 +976,11 @@ true の例だけ置いてある。聞かずに作り始めたいマシンだけ
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
   古い形（`hostsWith` が無い）を見つけると警告する。手で足したホストが無ければ
   `--force` で作り直す。残すなら上の形に合わせて `local` と `hostsWith` を足す
-- `windowsUserName` を `onePassword` の下に書いた古い形
-  （`onePassword = { enable = true; windowsUserName = "…"; };`）もそのまま動く
-  （`onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。
+- `windowsUserName` を `wsl.onePassword` の下に書いた古い形
+  （`wsl.onePassword = { enable = true; windowsUserName = "…"; };`）も動く
+  （`wsl.onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。ただし
+  `wsl.onePassword.enable` は `onePassword.enable` へ改名したので、switch のたびに改名の警告が出る。
+  `onePassword.enable = true;` を `wsl` の外へ移す（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
   `windowsFiles.enable` を足すときは配り先にも名前が要るので、上の形のように
   `wsl.windowsUserName` へ移す
 
@@ -1183,7 +1187,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
 並んでおり手で切り替える運用だった。これを登録簿の指定による分岐に置き換えている。
 
-署名まわりは `dotfiles.wsl.onePassword.enable` で丸ごと切り替わる
+署名まわりは `dotfiles.onePassword.enable` で丸ごと切り替わる
 （マシンごとの指定は[マシン登録簿](#マシン登録簿-hostsdefaultnix)を参照）。
 
 | 生成される項目 | 有効 | 無効 |
@@ -1191,23 +1195,30 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 | `commit.gpgSign` / `tag.gpgSign` | `true` | 書き出さない |
 | `gpg.format` | `ssh` | 書き出さない |
 | `gpg.ssh.defaultKeyCommand` | ssh-agent の鍵から `Signing` を含むものを選ぶ | 書き出さない |
-| `gpg.ssh.program` | Windows 側の `op-ssh-sign-wsl.exe` | 書き出さない |
+| `gpg.ssh.program` | WSL は Windows 側の `op-ssh-sign-wsl.exe`、それ以外は openssh の `ssh-keygen`（home-manager の既定） | 書き出さない |
 
 `defaultKeyCommand` は 1Password が鍵に付ける名前で引くものなので、1Password の
 無いマシンでは当たらない。片方だけ残すと「署名しようとして鍵が見つからず commit が
 失敗する」状態になるため、無効のマシンでは署名設定を丸ごと省いている。
 
-> ⚠️ **`defaultKeyCommand` は `ssh-add` が Windows 側であることに依存している。**
+> ⚠️ **WSL の `defaultKeyCommand` は `ssh-add` が Windows 側であることに依存している。**
 > 鍵を持っているのはホスト側 Windows の 1Password なので、`ssh-add -L` が Linux の
 > ssh-agent を引くと鍵が並ばず、署名鍵が見つからないまま `commit.gpgSign = true`
 > だけが残る。`op-ssh-sign` のパス指定だけでは足りない。差し替えは
 > [ssh ラッパー](#wsl-では-ssh-自体を-windows-側に差し替える)が行う。
 
-**署名が入るのは `wsl.onePassword.enable = true` のマシンだけ**になる。1Password は
-WSL 専用の設定として `dotfiles.wsl` の下に置いているため、非 WSL のマシン
-（`pollenjp@x86_64-linux` / `aarch64-linux` / `aarch64-darwin`）には署名設定が入らない。
-これらでも 1Password で署名したくなったら、`onePassword` を `dotfiles.wsl` の外へ
-出して `windowsUserName` を WSL のときだけ要求する形にする。
+**WSL でないマシンでは、`ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで署名する**
+（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。ssh と同じ経路なので、
+手元ではそのマシンの 1Password（`SSH_AUTH_SOCK` を `~/.1password/agent.sock` へ向けるのは system の側。
+NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されてきたエージェント、herdr の pane では
+固定名の指す先の、同じ "Signing" の鍵で署名する。ラッパーは置かない。
+
+署名が入るのは `onePassword.enable = true` のマシンだけ。登録簿では `pollenjp@wsl` と `pollenjp@laptop`。
+lavie（`pollenjp@laptop`）の home は `--host pollenjp@laptop` で当てる。`--host` なしの `setup` は、
+ローカル flake がホストを定義していないと汎用の `pollenjp@x86_64-linux` を選び、署名が入らない。
+
+`git log --show-signature` は `gpg.ssh.allowedSignersFile` が無いのでエラーになる（WSL も同じ）。
+署名されたかは `git cat-file -p HEAD` の `gpgsig` か、push したあとの GitHub の Verified で見る。
 
 > ⚠️ **`~/.gitconfig` の symlink は必ず外すこと。**
 > git は `~/.config/git/config` を読んだ **後に** `~/.gitconfig` を読むため、
@@ -1384,7 +1395,7 @@ socat で `SSH_AUTH_SOCK` を橋渡ししていないので、WSL 側の Linux s
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` | `exec ssh.exe "$@"` |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` | `exec ssh-add.exe "$@"` |
 
-置かれるのは **`wsl.onePassword.enable = true` のマシンだけ**（レガシーの
+置かれるのは **WSL で `onePassword.enable = true` のマシンだけ**（レガシーの
 `main.bash` は `uname` と `ssh.exe` の有無で実行時に判定していたが、Nix 経路では
 [登録簿](#マシン登録簿-hostsdefaultnix)の指定で決まる）。`$HOME/.local/bin` は
 `home.sessionPath` で PATH の前に入るので、これがディストリの `ssh` より先に当たる。
@@ -1574,18 +1585,26 @@ forward してきた socket へ張り替える。判断の経緯と安全性の�
 | 置き場所 (`bash.nix` / `fish.nix`) | 役割 |
 | --- | --- |
 | `ssh-agent-link` 関数 | 固定名を、この shell の接続が forward してきた socket へ向ける |
-| `herdr` 関数 | ssh 先では `ssh-agent-link` を呼んでから、`SSH_AUTH_SOCK=~/.ssh/agent.sock` を付けて本物の herdr を起動する。`h` / `ha` / `hss` などの alias もここを通る |
-| init の `299_ssh_agent` ブロック | `SSH_AUTH_SOCK` が固定名の shell（herdr の pane）では、ローカル agent へのフォールバックをしない |
+| `herdr` 関数 | ssh 先では `ssh-agent-link` を呼んでから、`SSH_AUTH_SOCK=~/.ssh/agent.sock` を付けて本物の herdr を起動する。手元でも `SSH_AUTH_SOCK` がそのマシンの 1Password（`~/.1password/agent.sock`）なら、固定名をそこへ張ってから同じく起動する。`h` / `ha` / `hss` などの alias もここを通る |
+| init の `299_ssh_agent` ブロック | `SSH_AUTH_SOCK` が固定名の shell（herdr の pane）と、そのマシンの 1Password の shell では、ローカル agent へのフォールバックをしない |
 
 - 張り替えるのは herdr を開いた接続だけ。覗くだけの 2 本目の ssh は固定名に触れず、
   herdr の外の shell は自分の接続の socket をそのまま使う
 - `ssh -a` で入った shell（フォールバックが起こしたローカル agent）からは張らない。`SSH_AGENT_PID` で見分ける
-- 手元（`SSH_CONNECTION` が無い）では何も変えない。**WSL の挙動は変わらない**
+- 手元（`SSH_CONNECTION` が無い）で張り替えるのは、`SSH_AUTH_SOCK` がそのマシンの 1Password のときだけ
+  （NixOS の laptop。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
+  固定名は「最後に herdr を開いた場所」の 1Password を指す。ssh で入って開けば転送、lavie の前で開けば lavie。
+  1Password の socket は場所が決まっているので、アプリの起動前でも張る。**WSL の挙動は変わらない**
+- `hr`（`herdr --remote`）で attach したときに、関数が走って固定名が張り替わるかは確かめていない。
+  承認が思った画面に出ないときは、ssh で入って `h` で開き直す
 
 > ⚠️ 適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
 > 一度 `herdr server stop` して、`ssh -A` で入り直してから `herdr` で開く。
 
 herdr の中で鍵が引けなくなったら、detach して `herdr` で開き直す（固定名が今の接続へ向き直る）。
+手元（NixOS の laptop）で開き直すときは、新しい端末から開く。前からある端末の shell は、フォールバックが
+起こしたローカル ssh-agent を `SSH_AUTH_SOCK` に持っていることがあり、手元の分岐に当たらない。
+手元の端末から起動した古い server（固定名を持たない）は、`herdr server stop` してから開き直す。
 
 確認は ssh 先で次のとおり。
 
@@ -2805,7 +2824,7 @@ nix/
 ├── hosts/default.nix      マシン登録簿
 ├── home/
 │   ├── default.nix        import 一覧 + stateVersion
-│   ├── options.nix        dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.{enable,windowsUserName}} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable / dotfiles.ccPages.port
+│   ├── options.nix        dotfiles.onePassword.enable / dotfiles.wsl.{enable,windowsUserName,windowsFiles.enable,exeExecTrace.enable,onePassword.windowsUserName} / dotfiles.claude.{devTracker,gitViaGh}.enable / dotfiles.claude.notion.{profile,routes,override} / dotfiles.cleanup.enable / dotfiles.ccPages.port
 │   └── modules/
 │       ├── packages.nix      programs.* を使わない CLI ツール
 │       ├── files.nix         静的な設定ファイルの配置

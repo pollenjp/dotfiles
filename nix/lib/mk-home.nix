@@ -9,18 +9,24 @@
   homeDirectory ?
     if inputs.nixpkgs.lib.hasSuffix "darwin" system then "/Users/${username}" else "/home/${username}",
   # WSL 固有の設定をまとめて渡す (dotfiles.wsl にそのまま入る)。
-  # 有効な組み合わせが構造に出るよう、1Password と win/ の配布は WSL の下に置いている。
+  # 有効な組み合わせが構造に出るよう、win/ の配布などは WSL の下に置いている。
   #
   #   wsl = {
   #     enable = true;
   #     windowsUserName = "polle";
   #     windowsFiles.enable = true;
   #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
-  #     onePassword.enable = true;
   #   };
   #
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
   wsl ? { },
+  # 1Password を使うか (dotfiles.onePassword にそのまま入る)。WSL ならホスト側 Windows の、
+  # それ以外はこのマシンの 1Password で git の署名をする (ADR 022)。
+  #
+  #   onePassword.enable = true;
+  #
+  # 省略すれば使わない (署名の設定を書き出さない)。
+  onePassword ? { },
   # Claude Code まわりのマシン固有設定 (dotfiles.claude にそのまま入る)。
   #
   #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
@@ -43,7 +49,7 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles = { inherit wsl claude; };
+      dotfiles = { inherit wsl claude onePassword; };
     }
   ]
   ++ modules;

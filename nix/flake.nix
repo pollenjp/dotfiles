@@ -103,6 +103,8 @@
       #                    解説動画の節。評価時に assert するので全 system
       #   cc-pages.nix     ccPages.port から作られる config.toml と、port を変えた switch での再起動。
       #                    評価時に assert するので全 system
+      #   one-password.nix onePassword.enable から作られる git の署名と ssh のラッパー (WSL / それ以外 /
+      #                    旧名)、登録簿のどのホストで有効か。評価時に assert するので全 system
       #
       # pjp-google-ime (ADR 015) の unittest と bootstrap-windows-google-ime.test.sh は、protobuf の入った
       # python と記述子 (Mozc の .proto から作る) が要るので、unittest / scriptTest ではなく専用に組む。
@@ -272,6 +274,14 @@
               ;
           };
           cc-pages-state = import ./tests/cc-pages.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          one-password-state = import ./tests/one-password.nix {
             inherit
               lib
               pkgs

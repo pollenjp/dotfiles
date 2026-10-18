@@ -528,11 +528,16 @@ in
         '';
       };
 
+      # 手元でも、SSH_AUTH_SOCK がこのマシンの 1Password なら固定名をそこへ張って渡す
+      # (ADR 022)。理由は bash.nix の同じ関数のコメント。
       herdr = {
-        description = "herdr with a stable SSH_AUTH_SOCK on ssh hosts";
+        description = "herdr with a stable SSH_AUTH_SOCK on ssh hosts and with the local 1Password";
         body = ''
           if test -n "$SSH_CONNECTION"
             ssh-agent-link
+            SSH_AUTH_SOCK="$HOME/.ssh/agent.sock" command herdr $argv
+          else if test "$SSH_AUTH_SOCK" = "$HOME/.1password/agent.sock"
+            ln -sfn "$HOME/.1password/agent.sock" "$HOME/.ssh/agent.sock"
             SSH_AUTH_SOCK="$HOME/.ssh/agent.sock" command herdr $argv
           else
             command herdr $argv
@@ -618,10 +623,14 @@ in
       #       pane。functions の herdr を参照) では何もしない (ADR 008)。理由と、
       #       ssh-add -l の判定を 1 回にまとめた理由は bash.nix の同じブロックに
       #       書いた (両シェルで同じ挙動に揃えてある)。
+      #
+      # NOTE: SSH_AUTH_SOCK が 1Password の SSH エージェント (~/.1password/agent.sock) の shell でも
+      #       何もしない (ADR 022)。理由は bash.nix の同じブロック。
       if command -q ssh-add
         set -l SSH_AGENT_FILE "$HOME/.ssh-agent"
 
         if test "$SSH_AUTH_SOCK" != "$HOME/.ssh/agent.sock"
+          and test "$SSH_AUTH_SOCK" != "$HOME/.1password/agent.sock"
           and not ssh-add -l >/dev/null 2>&1
           if test -f $SSH_AGENT_FILE
             set -l auth_sock (grep SSH_AUTH_SOCK $SSH_AGENT_FILE | sed 's/.*=\([^;]*\);.*/\1/')

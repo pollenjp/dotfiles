@@ -1,0 +1,24 @@
+@startuml
+!theme plain
+title 固定名 $HOME/.ssh/agent.sock は、最後に herdr を開いた場所の 1Password を指す
+
+' PlantUML の creole では ~ がエスケープになるので、パスは $HOME で書く
+
+state "転送の socket" as FWD : $HOME/.ssh/agent/s.*.sshd.*\n承認は手元の Windows
+state "このマシンの 1Password" as OPL : $HOME/.1password/agent.sock\n承認はこのマシンの画面
+state "張られていない" as NONE
+
+[*] --> NONE
+NONE --> FWD : ssh で入り herdr を開く\n（ADR 008）
+NONE --> OPL : 手元で herdr を開く\n（今回）
+FWD --> OPL : 手元で herdr を開く\n（今回）
+OPL --> FWD : ssh で入り herdr を開く\n（ADR 008）
+FWD --> FWD : 別の接続から ssh で開く
+OPL --> OPL : pane の中で herdr を打つ\n（張り替えない）
+
+note bottom of OPL
+  手元の分岐に当たるのは
+  SSH_AUTH_SOCK が $HOME/.1password/agent.sock の
+  shell だけ（WSL の手元・pane の中は当たらない）
+end note
+@enduml

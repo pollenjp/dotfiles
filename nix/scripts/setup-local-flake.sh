@@ -333,8 +333,9 @@ if [[ ${write_flake} == 1 ]]; then
         #     # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
         #     #   pwsh.exe -NoProfile -Command '\$env:USERNAME'
         #     windowsUserName = "polle";
-        #     onePassword.enable = true;
         #   };
+        #   # 1Password で git の署名をする (WSL ならホスト側 Windows の 1Password)。
+        #   onePassword.enable = true;
         #
         #   # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
         #   # 本体が既に定義している値を差し替えるには mkForce が要る。
