@@ -6,9 +6,6 @@
 #   files/claude/CLAUDE.dev-tracker.md   CLAUDE.md の「タスク管理」の節。
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
-#   files/claude/CLAUDE.video-offer.md   CLAUDE.md の「解説動画を作る」の節。
-#                                        dotfiles.claude.videoOffer.enable のマシンでだけ
-#                                        「タスク管理」の節の前に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
@@ -245,20 +242,16 @@ in
     # 全セッションで読まれるユーザーレベルの指示。
     # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
     #
-    # 「解説動画を作る」の節 (pjp-video-explainer-offer skill を読めという指示) は
-    # CLAUDE.video-offer.md に、「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
-    # CLAUDE.dev-tracker.md に分けてあり、それぞれ dotfiles.claude.videoOffer.enable /
-    # devTracker.enable のマシンでだけ末尾に連結する。skill を隠したマシンに節だけが
-    # 残ると、Claude が無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
+    # 「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
+    # CLAUDE.dev-tracker.md に分けてあり、dotfiles.claude.devTracker.enable の
+    # マシンでだけ末尾に連結する。skill を隠したマシンに節だけが残ると、Claude が
+    # 無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
     #
-    # 連結は節ごとに「ここまで (末尾は改行 1 つ) + 空行 + 節」で、並びは解説動画 → タスク管理。
-    # 両方 true の出力は分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
+    # 連結は「常時部分 (末尾は改行 1 つ) + 空行 + 節」で、enable = true の出力は
+    # 分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
     {
       ".claude/CLAUDE.md".text =
         builtins.readFile (claudeRoot + "/CLAUDE.md")
-        + lib.optionalString cfg.videoOffer.enable (
-          "\n" + builtins.readFile (claudeRoot + "/CLAUDE.video-offer.md")
-        )
         + lib.optionalString cfg.devTracker.enable (
           "\n" + builtins.readFile (claudeRoot + "/CLAUDE.dev-tracker.md")
         );
@@ -274,13 +267,11 @@ in
     #
     # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
     # この key は option が正だと settings.json 側からも読めるよう、enable = true
-    # でも明示して書く。pjp-video-explainer-offer の値は video-offer-nudge.sh も
-    # settings.json から読み、off なら知らせない。
+    # でも明示して書く。
     {
       ".local/state/dotfiles/claude-skill-overrides.json".text =
         builtins.toJSON {
           "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
-          "pjp-video-explainer-offer" = if cfg.videoOffer.enable then "on" else "off";
         }
         + "\n";
     }
@@ -341,6 +332,19 @@ in
         + "\n";
     }
 
+    # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
+    #
+    # claude-notion.json と同じく、claude-skills の skill (pjp-video-explainer-offer) に option の値を
+    # 渡す置き場で、上の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
+    # false・ファイルが無い・壊れているときは作る前に聞く。false でも必ず書く。
+    {
+      ".local/state/dotfiles/claude-video-offer.json".text =
+        builtins.toJSON {
+          autoStart = cfg.videoOffer.autoStart.enable;
+        }
+        + "\n";
+    }
+
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
     #
     # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
@@ -355,9 +359,10 @@ in
     }
 
     # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
-    # 見つけ、解説動画の短尺を作り始めるよう Claude に知らせる。作るかどうかを決める skill
-    # (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンでは黙る。
-    # settings.json の skillOverrides で skill が off のマシン (videoOffer.enable = false。既定) でも黙る。
+    # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (下の claude-video-offer.json の
+    # autoStart が true なら、答えを待たずに短尺を作り始めるよう知らせる)。作るかどうかを決める
+    # skill (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンと、
+    # settings.json の skillOverrides で skill を止めたマシンでは黙る。
     # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
     {
       ".claude/hooks/video-offer-nudge.sh" = {
