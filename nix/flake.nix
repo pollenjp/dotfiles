@@ -136,6 +136,8 @@
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
+          # これも scripts/ を丸ごと渡す (git_github() を持つ script を全部見る)
+          git-github-helpers-test = scriptTest "git-github-helpers" ./scripts;
           bootstrap-windows-powershell-profile-test = scriptTest "bootstrap-windows-powershell-profile" ./scripts/bootstrap-windows-powershell-profile.sh;
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
