@@ -23,6 +23,10 @@
 #     残りの手作業で出し直さない (どちらでもなければ今どおり出す)
 #   - 続きの行が長い警告は、頭と末尾 (直し方) を残して間を省く。空白だけの行は出さない
 #   - 警告を溜めた一時ファイルを残さない (--self-update で本体を更新して exec し直すときも)
+#   - gitViaGh のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、本体の更新の fetch を
+#     gh の資格情報 (git gh) で取る。git gh で取れず ssh (git) で取ったときの警告は、本体を更新して exec し直した
+#     あとも [本体の更新] で載り、引き継ぎに使う変数は手順に渡らない。exec されたのでない実行は、外から渡された
+#     引き継ぎの変数を読まない (TKT-221)
 #
 # ## 作り
 #
@@ -138,6 +142,7 @@ run() {
     PATH="${PATH_EXTRA:+${PATH_EXTRA}:}${sys_bin}" \
     DOTFILES_LOCAL_DIR="${c}/local" GIT_CONFIG_NOSYSTEM=1 \
     ${FAKE_NIX_EVAL_OUT+"FAKE_NIX_EVAL_OUT=${FAKE_NIX_EVAL_OUT}"} ${FAKE_NIX_EVAL_RC+"FAKE_NIX_EVAL_RC=${FAKE_NIX_EVAL_RC}"} \
+    ${DOTFILES_SETUP_SELF_UPDATE_WARNINGS+"DOTFILES_SETUP_SELF_UPDATE_WARNINGS=${DOTFILES_SETUP_SELF_UPDATE_WARNINGS}"} \
     "${BASH}" "${c}/repo/nix/scripts/setup.sh" "$@" >"${c}/out" 2>"${c}/err"
   echo $? >"${c}/rc"
 }
@@ -393,6 +398,87 @@ if [[ $(rc "${c}") == 0 && -f ${c}/repo/next.txt ]] && grep -q '新しい setup.
   ok "--self-update で本体を更新して exec し直しても、警告を溜めた一時ファイルを残さない"
 else
   ng "本体を更新して exec し直すとき" "rc=$(rc "${c}") left=$(tmp_left "${c}") $(out "${c}") $(cat "${c}/err")"
+fi
+
+# 本体の更新で、origin が 1 commit 進んでいる checkout を作り、その場所を出す (14 番と同じ組み立て)。
+# $1: ケースの名前、$2: 偽の手順 bootstrap-a.sh の本体 (checkout に commit するので、後から変えない)。
+# HOME に {"enable":true} の状態ファイルを置く (gitViaGh のマシン)
+new_update_case() {
+  local c
+  c=$(new_case "$1")
+  sed -i "1s|.*|#!${BASH}|" "${c}/repo/nix/scripts/setup.sh"
+  fake_step "${c}" bootstrap-a.sh "$2"
+  mkdir -p "${c}/home/.local/state/dotfiles"
+  printf '{"enable":true}\n' >"${c}/home/.local/state/dotfiles/git-via-gh.json"
+  tgit init -q --bare "${c}/origin.git"
+  tgit -C "${c}/repo" init -q
+  tgit -C "${c}/repo" add -A
+  tgit -C "${c}/repo" commit -qm init
+  tgit -C "${c}/repo" remote add origin "${c}/origin.git"
+  tgit -C "${c}/repo" push -q -u origin main 2>/dev/null
+  tgit clone -q "${c}/origin.git" "${c}/other"
+  printf 'next\n' >"${c}/other/next.txt"
+  tgit -C "${c}/other" add next.txt
+  tgit -C "${c}/other" commit -qm next
+  tgit -C "${c}/other" push -q 2>/dev/null
+  echo "${c}"
+}
+
+# 偽の gh と git-gh を置いた bin を作り、その場所を出す。$1: ケース、$2: git-gh が落ちるか (1 / 0)。
+# gh は何にでも 0 を返す (ログイン済み)。git-gh は引数を <ケース>/gitgh.log に書き、落ちないなら本物の git に
+# 渡す。run は env -i で流すので、書き留め先は中に書き込む
+fake_gh_bin() {
+  local b="$1/gh-bin"
+  mkdir -p "${b}"
+  printf '#!%s\nexit 0\n' "${BASH}" >"${b}/gh"
+  {
+    printf '#!%s\n' "${BASH}"
+    printf 'printf '\''%%s\\n'\'' "$*" >>'\''%s'\''\n' "$1/gitgh.log"
+    if [[ $2 == 1 ]]; then
+      printf '%s\n' 'echo "git-gh (偽物): gh の資格情報で通れませんでした" >&2' 'exit 128'
+    else
+      printf '%s\n' 'exec git "$@"'
+    fi
+  } >"${b}/git-gh"
+  chmod +x "${b}/gh" "${b}/git-gh"
+  echo "${b}"
+}
+
+# 15. gitViaGh のマシン: 本体の更新の fetch を gh の資格情報 (git gh) で取り、警告は出さない
+c=$(new_update_case t15 'echo "a を流した"')
+gb=$(fake_gh_bin "${c}" 0)
+PATH_EXTRA="${gb}:${git_bin}" run "${c}" --self-update --steps bootstrap-a
+if [[ $(rc "${c}") == 0 && -f ${c}/repo/next.txt ]] && grep -q 'fetch origin main' "${c}/gitgh.log" 2>/dev/null \
+  && grep -q 'gh の資格情報 (HTTPS) で取りました。' "${c}/out" && grep -q 'a を流した' "${c}/out" \
+  && ! grep -q '途中で出た警告' "${c}/out" && [[ -z $(tmp_left "${c}") ]]; then
+  ok "gitViaGh のマシンでは、本体の更新の fetch を gh の資格情報 (git gh) で取る"
+else
+  ng "本体の更新を gh で取る" "rc=$(rc "${c}") log=$(cat "${c}/gitgh.log" 2>/dev/null) $(out "${c}") $(cat "${c}/err")"
+fi
+
+# 16. git gh で取れず ssh (git) で取った: 本体を更新して exec し直したあとも [本体の更新] で載る。
+#     引き継ぎに使う変数は、exec した先で手順に渡らない
+# shellcheck disable=SC2016 # 偽の手順の中で展開する (手順に変数が渡っていないかを見る)
+c=$(new_update_case t16 'echo "carried=${DOTFILES_SETUP_SELF_UPDATE_WARNINGS-unset}"')
+gb=$(fake_gh_bin "${c}" 1)
+PATH_EXTRA="${gb}:${git_bin}" run "${c}" --self-update --steps bootstrap-a
+if [[ $(rc "${c}") == 0 && -f ${c}/repo/next.txt ]] && grep -q '新しい setup.sh で続けます' "${c}/out" \
+  && seen_after_result "${c}" '^⚠️  \[本体の更新\] gh の資格情報では取れず、ssh (ssh-agent) で取りました。' \
+  && seen_after_result "${c}" 'gh auth status で確かめてください' \
+  && grep -q 'carried=unset' "${c}/out" && [[ -z $(tmp_left "${c}") ]]; then
+  ok "gh で取れず ssh で取った本体の更新の警告は、exec し直したあとも [本体の更新] で載り、手順には渡らない"
+else
+  ng "exec をまたぐ本体の更新の警告" "rc=$(rc "${c}") left=$(tmp_left "${c}") $(out "${c}") $(cat "${c}/err")"
+fi
+
+# 17. exec されたのでない実行は、外から渡された引き継ぎの変数を読まない
+c=$(new_case t17)
+fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
+DOTFILES_SETUP_SELF_UPDATE_WARNINGS='外から渡した警告' run "${c}" --steps bootstrap-a
+if [[ $(rc "${c}") == 0 ]] && ! grep -q '外から渡した警告' "${c}/out" && ! grep -q '途中で出た警告' "${c}/out"; then
+  ok "exec されたのでない実行は、外から渡された引き継ぎの変数を読まない"
+else
+  ng "外から渡された引き継ぎの変数" "rc=$(rc "${c}") $(out "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
