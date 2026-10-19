@@ -25,6 +25,9 @@
 # - 途中で出た警告は、最後の「結果」の後にもまとめて出す (TKT-146)。手順を止めない
 #   警告は warn() で出すと、子の bootstrap-*.sh の分も DOTFILES_SETUP_WARNINGS の
 #   ファイル経由で集まる。仕組みは「警告のまとめ」の節。
+# - GitHub から取るところ (本体の更新の fetch と、bootstrap-*.sh の clone / 取得) は
+#   git_github を通す。dotfiles.claude.gitViaGh.enable のマシンでは gh の資格情報を先に
+#   試し、だめなら ssh で取り直す (TKT-221)。子の script も同じ形の git_github を持つ。
 
 set -eu -o pipefail
 
@@ -113,6 +116,9 @@ repo_behind_count=""
 warn_dir=""
 unset DOTFILES_SETUP_WARNINGS
 
+# git_github (本体の更新の fetch) が取れなかったときの案内 (警告の続きの行に添える)
+git_github_hint=""
+
 usage() {
   cat <<'EOS'
 README.md 「適用 > 新規マシンの手順」を対話的に実行する。
@@ -151,6 +157,9 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   未 commit の変更 / detached HEAD / upstream 無し / fast-forward できない
   ときは警告だけ出して何もしない (本体は開発対象でもあるため)。
   flake.lock はここでは扱わない (別軸なので下の --flake-update)。
+  dotfiles.claude.gitViaGh.enable のマシンでは、origin が GitHub の ssh の URL なら
+  fetch を gh の資格情報 (git gh) で先に試し、だめなら ssh で取り直す
+  (bootstrap の clone / 取得も同じ。https の origin は今までどおり git で取る)。
 
 依存の更新 (nixpkgs / home-manager):
   setup.sh --flake-update --update   flake.lock を更新してから switch
@@ -258,6 +267,57 @@ run() {
     return 0
   fi
   "$@"
+}
+
+# GitHub と通信する git (clone / fetch) を流す。引数は git の引数そのまま (git_github -C <dir> fetch など)。
+#
+# dotfiles.claude.gitViaGh.enable のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、
+# gh の資格情報 (git gh。HTTPS) で先に試し、gh か git-gh が無い・gh が github.com にログインしていない・
+# git gh で取れないときだけ git (ssh。ssh-agent) で流す (TKT-221)。どの経路で取ったかを 1 行出し、gh で
+# 取れず ssh で取れたときは警告する (gh の token が切れていると Claude の git も通らないため)。
+# 取れなければ git の終了コードを返し、呼び元の警告に添える案内を git_github_hint に入れる。
+#
+# setup.sh と bootstrap-*.sh に同じ形で持つ (nix/tests/git-github-helpers.test.sh が本文の一致を見る)。
+# setup.sh は Nix より前にも走るので、状態ファイルは jq を使わずに読む (bash 3.2 でも動く書き方)。
+git_github() {
+  local state="${HOME}/.local/state/dotfiles/git-via-gh.json" json="" rc=0
+  git_github_hint=""
+  if [[ -r ${state} ]]; then
+    json=$(<"${state}") || json=""
+  fi
+  if ! [[ ${json} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
+    git "$@" || rc=$?
+    if ((rc != 0)); then
+      git_github_hint="SSH 鍵 (ssh-agent) で取れませんでした。疎通は ssh -T git@github.com で確かめられます。"
+    fi
+    return "${rc}"
+  fi
+  if ! command -v gh &>/dev/null || ! command -v git-gh &>/dev/null; then
+    printf '  %s\n' "gh (git gh) が見つからないので、ssh (ssh-agent) で取ります。"
+  elif ! gh auth token --hostname github.com &>/dev/null; then
+    printf '  %s\n' "gh が github.com にログインしていないので、ssh (ssh-agent) で取ります。"
+  else
+    git gh "$@" || rc=$?
+    if ((rc == 0)); then
+      printf '  %s\n' "gh の資格情報 (HTTPS) で取りました。"
+      return 0
+    fi
+    printf '  %s\n' "gh の資格情報では取れませんでした。ssh (ssh-agent) で取り直します。"
+    rc=0
+    git "$@" || rc=$?
+    if ((rc == 0)); then
+      warn "gh の資格情報では取れず、ssh (ssh-agent) で取りました。" \
+        "gh の token が切れていると Claude の git (gitViaGh) も通りません。gh auth status で確かめてください。"
+      return 0
+    fi
+    git_github_hint="gh の資格情報でも SSH 鍵 (ssh-agent) でも取れませんでした。gh auth status と ssh -T git@github.com で確かめてください。"
+    return "${rc}"
+  fi
+  git "$@" || rc=$?
+  if ((rc != 0)); then
+    git_github_hint="gh が使えず、SSH 鍵 (ssh-agent) でも取れませんでした。gh auth login すれば ssh-agent なしで取れます。"
+  fi
+  return "${rc}"
 }
 
 ##########
@@ -744,6 +804,12 @@ backup_summary() {
 #   detached HEAD / upstream 無し -> 触らない
 #   fast-forward できない       -> 触らない (rebase か merge かの判断はしない)
 #
+# origin が GitHub の ssh の URL なら、fetch は git_github を通す。gitViaGh のマシンでは
+# gh の資格情報で先に試すので、ssh を張り直したあとの herdr の中のように SSH_AUTH_SOCK が
+# 切れていても取れる (TKT-221)。https などの origin は ssh-agent に頼らないので、今までどおり
+# git で取る。本体を更新して exec し直すときは、ここで出た警告 ([本体の更新]) を env で
+# 新しい setup.sh へ渡す (self_update_and_reexec。「警告のまとめ」の節)。
+#
 # flake.lock (nixpkgs / home-manager) の更新はここでは扱わない。本体を書き換えて
 # commit が要るものなので pull と衝突しやすい。README の手順どおり手で行う。
 
@@ -764,7 +830,7 @@ repo_behind() {
 
 # fetch して fast-forward できるなら進める。進めたら 0、何もしなければ 1。
 pull_repo() {
-  local branch remote behind
+  local branch remote behind url
   if ! git_repo_ok; then
     warn "git の作業ツリーではないので更新できません: ${repo_dir}"
     return 1
@@ -783,10 +849,24 @@ pull_repo() {
     warn "${branch} に upstream が無いので本体は更新しません。"
     return 1
   fi
-  if ! run git -C "${repo_dir}" fetch "${remote}" "${branch}"; then
-    warn "fetch に失敗しました。オフラインなら無視して続けます。"
-    return 1
-  fi
+  # origin が GitHub の ssh の URL なら git_github を通す (gitViaGh のマシンでは gh の資格情報で先に試す。
+  # bootstrap の取得と同じ)。https などの origin は ssh-agent に頼らないので、今までどおり git で取り、
+  # ssh や gh の案内も付けない。URL は insteadOf で読み替える前の、設定に書いてある値で見る
+  url=$(git -C "${repo_dir}" config --get "remote.${remote}.url" || true)
+  case ${url} in
+    git@github.com:* | ssh://git@github.com/*)
+      if ! run git_github -C "${repo_dir}" fetch "${remote}" "${branch}"; then
+        warn "fetch に失敗しました。オフラインなら無視して続けます。" "${git_github_hint}"
+        return 1
+      fi
+      ;;
+    *)
+      if ! run git -C "${repo_dir}" fetch "${remote}" "${branch}"; then
+        warn "fetch に失敗しました。オフラインなら無視して続けます。"
+        return 1
+      fi
+      ;;
+  esac
   if [[ ${dry_run} == 1 ]]; then
     note '(--dry-run なので更新はしません)'
     return 1
@@ -859,8 +939,15 @@ self_update_and_reexec() {
   fi
   build_rebuild_args
   note '新しい setup.sh で続けます。'
-  # exec では EXIT の trap が走らないので、警告を溜める場所はここで片付ける
-  # (更新できたときは、まだ何も溜まっていない)。新しい setup.sh は自分で作り直す。
+  # 更新の途中で出た警告 (fetch を gh の資格情報で取れず ssh で取ったときなど。TKT-221) は、
+  # 新しい setup.sh のまとめでも [本体の更新] に載るよう、中身ごと env で渡す。受け取った側は
+  # 警告を溜める場所を作った直後に書き戻し、手順には渡さない。
+  if [[ -n ${warn_dir} && -s ${warn_dir}/self-update ]]; then
+    DOTFILES_SETUP_SELF_UPDATE_WARNINGS=$(<"${warn_dir}/self-update")
+    export DOTFILES_SETUP_SELF_UPDATE_WARNINGS
+  fi
+  # exec では EXIT の trap が走らないので、警告を溜める場所はここで片付ける。
+  # 新しい setup.sh は自分で作り直す。
   cleanup_warnings
   export DOTFILES_SETUP_SELF_UPDATED=1
   # bash 3.2 では set -u と空配列の展開が両立しないので ${arr[@]+...} で受ける
@@ -1893,6 +1980,11 @@ post_notes() {
 # execute() が最初の ✖ で止まるので、最後の手順の出力 (「[N/M] …」の見出しから「結果」まで)
 # の中にあり、失敗を調べるときに読む。exit 1 で止まる前のエラーを warn() で出さないのも同じ理由。
 #
+# 本体を更新して exec し直すときは、exec の前に一時ファイルを消すので、本体の更新の分
+# (fetch を gh の資格情報で取れず ssh で取ったときの警告など) は中身ごと
+# DOTFILES_SETUP_SELF_UPDATE_WARNINGS で渡し、新しい setup.sh が自分の区切りへ書き戻す
+# (TKT-221)。受け取るのは exec されたとき (DOTFILES_SETUP_SELF_UPDATED=1) だけで、手順には渡さない。
+#
 # setup.sh の stderr を写して「!! 」の行を拾う形にしなかったのは、子の stderr が端末で
 # なくなり、⚠ の枠の色 ([[ -t 2 ]]) や nix の進捗表示が消えるため。home-manager switch の
 # 中で nix が出す evaluation warning (モジュールの warnings) も同じ理由で写さず、switch の後に
@@ -2119,6 +2211,14 @@ fi
 # 途中で出た警告を溜める場所 (「警告のまとめ」の節)。本体の更新の警告も載せるので、
 # その前に作る。作れなければ、まとめを出さないだけで続ける。
 warn_dir=$(mktemp -d "${TMPDIR:-/tmp}/dotfiles-setup.XXXXXX" 2>/dev/null) || warn_dir=""
+
+# 本体を更新して exec し直す前の setup.sh が、本体の更新で出た警告を env で渡してくる
+# (self_update_and_reexec)。この実行の [本体の更新] へ書き戻す。受け取るのは exec されたとき
+# (DOTFILES_SETUP_SELF_UPDATED=1) だけで、値の有無によらず消す (手順に渡さない)。
+if [[ ${self_updated} == 1 && -n ${DOTFILES_SETUP_SELF_UPDATE_WARNINGS-} && -n ${warn_dir} ]]; then
+  { printf '%s\n' "${DOTFILES_SETUP_SELF_UPDATE_WARNINGS}" >"${warn_dir}/self-update"; } 2>/dev/null || true
+fi
+unset DOTFILES_SETUP_SELF_UPDATE_WARNINGS
 
 # 何かを実行する前に本体を最新にする。ホストの自動判定より前に置くのは、
 # 更新後の (新しい) 判定ロジックに任せるため。更新できれば戻ってこない。

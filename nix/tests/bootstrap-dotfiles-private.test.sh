@@ -10,11 +10,18 @@
 #
 # ## 確かめること
 #
-#   - 無ければ clone し、あれば pull --ff-only する
+#   - 無ければ clone し、あれば取得 (fetch) して fast-forward する
 #   - 未コミットの変更があれば pull を飛ばす。git の repo でないものがあれば触らない
 #   - clone できなくても exit 0 (警告だけ)。知らない引数は exit 2
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告を続きの行ごと setup の最後の
 #     まとめ用のファイルにも残す
+#   - gitViaGh のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、gh の資格情報
+#     (git gh) で clone・取得する。git gh で取れなければ ssh (git) で取り直し、まとめにも警告を残す。
+#     false なら gh があっても使わない (TKT-221)
+#   - 履歴が分岐していたら fast-forward できない警告だけを出し、ssh で取り直さない (手元の commit は残す)
+#
+# git gh の代わりに偽の git-gh を置く (引数を書き留めて本物の git に渡すか、落ちる)。gh も偽物で、
+# auth token の終了コードだけを返す。
 
 set -u -o pipefail
 
@@ -41,7 +48,8 @@ ng() {
 }
 
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
-export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+# 流す人の env の git の設定 (Claude のセッションの GIT_CONFIG_* など) も効かせない
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null GIT_CONFIG_COUNT=0
 
 # 手元の「GitHub」: bare repo と、そこへ commit を足すための作業用の clone
 bare="${work}/remote.git"
@@ -62,6 +70,43 @@ run() {
   env HOME="${h}" DOTFILES_PRIVATE_DIR="${h}/private" DOTFILES_PRIVATE_URL="${DOTFILES_PRIVATE_URL_OVERRIDE:-file://${bare}}" \
     "${BASH}" "${script}" "$@" >"${h}/out" 2>"${h}/err"
   echo $? >"${h}/rc"
+}
+
+# 偽の gh と git-gh。gh は auth token なら FAKE_GH_AUTH_RC で終わる。git-gh は引数を GITGH_LOG に書き、
+# FAKE_GITGH_FAIL=1 なら落ち、でなければ本物の git に渡す (gh の資格情報で通った代わり)。shebang は $BASH
+# から作る (サンドボックスに /usr/bin/env が無い)
+fakebin="${work}/fake-bin"
+mkdir -p "${fakebin}"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+if [[ ${1-} == auth && ${2-} == token ]]; then
+  exit "${FAKE_GH_AUTH_RC:-0}"
+fi
+exit 0
+EOF
+} >"${fakebin}/gh"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+printf '%s\n' "$*" >>"${GITGH_LOG}"
+if [[ ${FAKE_GITGH_FAIL-} == 1 ]]; then
+  echo "git-gh (偽物): gh の資格情報で通れませんでした" >&2
+  exit 128
+fi
+exec git "$@"
+EOF
+} >"${fakebin}/git-gh"
+chmod +x "${fakebin}/gh" "${fakebin}/git-gh"
+
+# run と同じく流す。HOME に状態ファイル (既定は {"enable":true}。VIA_GH で変える) を置き、偽の gh・git-gh を
+# PATH の先頭に足す。git-gh の書き留めは <HOME>/gitgh.log
+run_gh() {
+  local h=$1 state=${VIA_GH-}
+  [[ -n ${state} ]] || state='{"enable":true}'
+  mkdir -p "${h}/.local/state/dotfiles"
+  printf '%s\n' "${state}" >"${h}/.local/state/dotfiles/git-via-gh.json"
+  PATH="${fakebin}:${PATH}" GITGH_LOG="${h}/gitgh.log" run "$@"
 }
 
 rc() { cat "$1/rc"; }
@@ -86,13 +131,13 @@ else
   ng "clone" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# 2. あれば pull --ff-only する
+# 2. あれば取得して fast-forward する
 printf 'あ\t亜\t名詞\t\n' >>"${work}/author/google-japanese-input/dictionaries/テスト辞書.tsv"
 git -C "${work}/author" commit --quiet -am second
 git -C "${work}/author" push --quiet origin HEAD:main
 run "${h}"
 if [[ $(rc "${h}") == 0 ]] && grep -q '^あ' "${h}/private/google-japanese-input/dictionaries/テスト辞書.tsv" && seen "${h}" '更新しました'; then
-  ok "あれば pull --ff-only で追いつく"
+  ok "あれば取得して fast-forward で追いつく"
 else
   ng "pull" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
@@ -132,16 +177,16 @@ h="${work}/t7"
 mkdir -p "${h}"
 DOTFILES_SETUP_WARNINGS="${h}/warnings" DOTFILES_PRIVATE_URL_OVERRIDE="file://${work}/no-such.git" run "${h}"
 if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'clone に失敗しました: '* ]] \
-  && grep -qE '^[[:space:]]+private な repo なので SSH 鍵が要ります' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+SSH 鍵 \(ssh-agent\) で取れませんでした' "${h}/warnings" \
   && grep -qE '^[[:space:]]+取れないあいだ' "${h}/warnings"; then
   ok "setup から走るとき、clone できない警告を続きの行ごとまとめ用に残す"
 else
   ng "clone できないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
-if grep -qx '   private な repo なので SSH 鍵が要ります。ssh -T git@github.com で疎通を確かめてください。' "${h}/err"; then
-  ok "その場の続きの行は今のまま (3 文字字下げして stderr に出す)"
+if grep -qx '   SSH 鍵 (ssh-agent) で取れませんでした。疎通は ssh -T git@github.com で確かめられます。' "${h}/err"; then
+  ok "その場の続きの行は 3 文字字下げして stderr に出す (gitViaGh でなければ ssh の確かめ方だけ)"
 else
-  ng "その場の続きの行が変わった" "$(cat "${h}/err")"
+  ng "その場の続きの行" "$(cat "${h}/err")"
 fi
 
 # 6. 知らない引数: exit 2
@@ -151,6 +196,66 @@ if [[ $(rc "${h}") == 2 && ! -e ${h}/private ]]; then
   ok "知らない引数は exit 2"
 else
   ng "知らない引数" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+dict=google-japanese-input/dictionaries/テスト辞書.tsv
+# bare repo へ 1 行足した commit を送る。$1: 足す行
+remote_commit() {
+  printf '%s\n' "$1" >>"${work}/author/${dict}"
+  git -C "${work}/author" commit --quiet -am "$1"
+  git -C "${work}/author" push --quiet origin HEAD:main
+}
+
+# 8. gitViaGh のマシン: gh の資格情報 (git gh) で clone する
+h="${work}/t8"
+run_gh "${h}"
+if [[ $(rc "${h}") == 0 && -f ${h}/private/${dict} ]] && [[ $(head -n 1 "${h}/gitgh.log" 2>/dev/null) == 'clone '* ]] \
+  && seen "${h}" 'gh の資格情報 (HTTPS) で取りました。'; then
+  ok "gitViaGh のマシンでは gh の資格情報 (git gh) で clone する"
+else
+  ng "gh で clone" "rc=$(rc "${h}") log=$(cat "${h}/gitgh.log" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 9. gitViaGh のマシン: gh の資格情報 (git gh) で取得して追いつく
+remote_commit $'う\t宇\t名詞\t'
+run_gh "${h}"
+if [[ $(rc "${h}") == 0 ]] && grep -q '^う' "${h}/private/${dict}" && grep -q 'fetch --quiet' "${h}/gitgh.log" \
+  && seen "${h}" '更新しました'; then
+  ok "gitViaGh のマシンでは gh の資格情報 (git gh) で取得して追いつく"
+else
+  ng "gh で取得" "rc=$(rc "${h}") log=$(cat "${h}/gitgh.log" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 10. git gh で取れなければ ssh (git) で取り直し、まとめにも警告を残す
+remote_commit $'え\t絵\t名詞\t'
+FAKE_GITGH_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings10" run_gh "${h}"
+if [[ $(rc "${h}") == 0 ]] && grep -q '^え' "${h}/private/${dict}" && seen "${h}" '取り直します' \
+  && [[ $(head -n 1 "${h}/warnings10" 2>/dev/null) == 'gh の資格情報では取れず、ssh (ssh-agent) で取りました。' ]]; then
+  ok "git gh で取れなければ ssh で取り直し、まとめにも警告を残す"
+else
+  ng "gh で落ちて ssh で取る" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings10" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 11. 履歴が分岐している: fast-forward できない警告だけを出し、ssh で取り直さない (手元の commit は残す)
+printf 'お\t尾\t名詞\t\n' >>"${h}/private/${dict}"
+git -C "${h}/private" commit --quiet -am local
+local_head=$(git -C "${h}/private" rev-parse HEAD)
+remote_commit $'か\t蚊\t名詞\t'
+run_gh "${h}"
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" 'fast-forward できません' && ! seen "${h}" '取り直します' \
+  && [[ $(git -C "${h}/private" rev-parse HEAD) == "${local_head}" ]]; then
+  ok "履歴が分岐していたら fast-forward できない警告だけを出し、ssh で取り直さない"
+else
+  ng "履歴の分岐" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 12. gitViaGh が false: gh があっても使わず、今までどおり git (ssh) で取る
+h="${work}/t12"
+VIA_GH='{"enable":false}' run_gh "${h}"
+if [[ $(rc "${h}") == 0 && -f ${h}/private/${dict} && ! -e ${h}/gitgh.log ]] && ! seen "${h}" 'gh の資格情報'; then
+  ok "gitViaGh が false なら、gh があっても使わずに git (ssh) で取る"
+else
+  ng "gitViaGh が false" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

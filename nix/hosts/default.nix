@@ -16,9 +16,9 @@
 #                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = false で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使わないマシンにする (既定は使う)。
-#                   claude.gitViaGh.enable = false で、Claude の git と fetch 系の abbr / alias を
-#                   gh の資格情報 (HTTPS) ではなく ssh で GitHub へ通すマシンにする (既定は gh。
-#                   gh auth login が前提)。
+#                   claude.gitViaGh.enable = false で、Claude の git・fetch 系の abbr / alias・
+#                   setup の取得を gh の資格情報 (HTTPS) ではなく ssh で GitHub へ通すマシンにする
+#                   (既定は gh。gh auth login が前提)。
 #                   claude.notion.profile で Notion へ書く skill が既定に使う宛先のプロファイルを選ぶ (既定は null)。
 #                   claude.notion.routes で、このマシンだけの宛先の規則 (origin の owner/repo → プロファイル) を足せる。
 #                   claude.videoOffer.autoStart.enable = true で、設計・PR のときに解説動画の短尺を答えを

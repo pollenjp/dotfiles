@@ -9,7 +9,7 @@
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
-#   dotfiles.claude.gitViaGh.enable              Claude の git と fetch 系の abbr / alias を gh の資格情報 (HTTPS) で GitHub へ通すか
+#   dotfiles.claude.gitViaGh.enable              Claude の git・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
@@ -99,9 +99,9 @@ in
       default = true;
       example = false;
       description = ''
-        Claude Code のセッションの git と、自分のターミナルの fetch 系の abbr / alias が
-        GitHub と通信するとき、gh の資格情報で HTTPS を使うか。false なら今までどおり
-        ssh (WSL では 1Password の agent) を通る。
+        Claude Code のセッションの git と、自分のターミナルの fetch 系の abbr / alias と、
+        setup の取得が GitHub と通信するとき、gh の資格情報で HTTPS を使うか。false なら
+        今までどおり ssh (WSL では 1Password の agent) を通る。
 
         true のとき、Claude のセッション (Bash tool) にだけ次の git の設定を env で渡す
         (組は lib/git-via-gh.nix):
@@ -116,6 +116,14 @@ in
         `git gh` (pkgs/git-gh) で打つようになる (home/modules/fish.nix・bash.nix)。gfp は gfp-gh と
         同じ中身になり、false なら gfp-base (今までの gfp) と同じ中身になる。push 系 (gp・gpf・gpup) は
         option によらず ssh のまま。gfp-base・gfp-gh・git gh は option によらず使える。
+
+        setup が GitHub から取るとき (bootstrap の claude-skills・cc-pages・dotfiles-private の
+        clone / 取得と、origin が GitHub の ssh の URL のときの本体の更新 (--self-update) の fetch) も、
+        git gh で先に試す。gh か git-gh が無い・github.com にログインしていない・git gh で
+        取れないときは ssh で取り直す (nix/scripts/ の git_github。TKT-221)。ssh を張り直したあとの herdr の中のように
+        SSH_AUTH_SOCK が切れていても、gh が使えれば取れる。値は
+        `~/.local/state/dotfiles/git-via-gh.json` (home/modules/claude.nix) に落ち、switch の後の
+        setup の手順から効く (本体の更新は switch より前に走るので、前の世代の値で動く)。
 
         ssh は WSL の ssh.exe を通るので、interop が外れると Exec format error で落ち、
         通っても 1Password の承認ダイアログで止まる。gh は HTTPS の API なので

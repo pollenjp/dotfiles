@@ -8,7 +8,9 @@
 #
 # fish の abbr と bash の alias の fetch 系 (gf・gfp・gpul・gpull・gcl と、fetch / pull を含む関数) は、
 # dotfiles.claude.gitViaGh.enable のマシンでこれを使う (home/modules/fish.nix・bash.nix)。gfp-gh は
-# option によらずこれを使う。
+# option によらずこれを使う。setup の取得 (bootstrap の clone / 取得と本体の更新の fetch) も、
+# gitViaGh のマシンでこれを先に試し、gh が使えない・取れないときは ssh で取り直す
+# (nix/scripts/ の git_github。未ログインで止まるこの script の案内は出ない。TKT-221)。
 #
 # 組の前に、github.com の credential helper を空にする 1 組を足す (gh auth setup-git が書くのと同じ形)。
 # git の設定ファイルに別の helper (store など) があると、gh より先に呼ばれて古い資格情報を返したり、

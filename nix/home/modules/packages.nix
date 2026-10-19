@@ -51,7 +51,8 @@
 
     # GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)。
     # 実体は nix/pkgs/git-gh/。fish の abbr と bash の alias の gfp-gh と、gitViaGh.enable のマシンの
-    # fetch 系 (gf・gfp・gpul・gpull・gcl と git_* の関数) が使う。option によらず入れる
+    # fetch 系 (gf・gfp・gpul・gpull・gcl と git_* の関数) と setup の取得 (nix/scripts/ の git_github) が
+    # 使う。option によらず入れる
     (callPackage ../../pkgs/git-gh { })
 
     # 以下は対応する programs.* モジュールが入れるのでここには書かない:
