@@ -143,7 +143,10 @@ git -C "${dir}" merge --ff-only '@{u}'  # 失敗 → 「fast-forward できま�
 
 ### 4. setup.sh の本体の更新
 
-- `pull_repo` の `run git -C "${repo_dir}" fetch "${remote}" "${branch}"` を `run git_github …` にする
+- `pull_repo` の `run git -C "${repo_dir}" fetch "${remote}" "${branch}"` を `run git_github …` にする。ただし通すのは
+  origin (設定に書いてある、insteadOf で読み替える前の URL) が GitHub の ssh の URL (`git@github.com:`・
+  `ssh://git@github.com/`) のときだけで、https などの origin は今までどおり `git` で取り、案内も付けない (最終レビューの
+  指摘。README は本体の最初の clone に https を勧めており、そのままでは fetch の失敗に誤った「SSH 鍵」の案内が載る)
 - fetch の失敗の警告 (「fetch に失敗しました。オフラインなら無視して続けます。」) に `git_github_hint` を続きの行で添える
 - 警告は今どおり `[本体の更新]` としてまとめに載る (`warn_context self-update`)
 - 本体が進んで exec し直すときも載せる。今の `self_update_and_reexec` は exec の前に警告の一時ディレクトリを消し
@@ -205,6 +208,9 @@ git -C "${dir}" merge --ff-only '@{u}'  # 失敗 → 「fast-forward できま�
   「既に最新のときだけ載る」と割り切る案は、bootstrap を含まない `--steps` と流したときに気付けなくなるので採らない
 - cc-pages は取得の前に未コミットの変更・upstream を確かめていないので、merge の失敗の警告は「履歴が分岐しています」と
   言い切らず、「履歴が分岐していないか確かめてください: git -C <dir> status」とする (3 つの bootstrap でそろえる)
+- 最終レビューの指摘で、本体の更新は origin が GitHub の ssh の URL のときだけ `git_github` を通す (4 節)。bootstrap の
+  3 つは clone の URL が ssh に決まっているので、そのまま `git_github` を通す (https で clone し直した clone でも、
+  gitViaGh のマシンでは gh の資格情報で private の repo を取れる方が得なため)
 
 ## 実装に任せること
 

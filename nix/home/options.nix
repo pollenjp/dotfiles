@@ -118,9 +118,9 @@ in
         option によらず ssh のまま。gfp-base・gfp-gh・git gh は option によらず使える。
 
         setup が GitHub から取るとき (bootstrap の claude-skills・cc-pages・dotfiles-private の
-        clone / 取得と、本体の更新 (--self-update) の fetch) も、git gh で先に試す。gh か git-gh が
-        無い・github.com にログインしていない・git gh で取れないときは ssh で取り直す
-        (nix/scripts/ の git_github。TKT-221)。ssh を張り直したあとの herdr の中のように
+        clone / 取得と、origin が GitHub の ssh の URL のときの本体の更新 (--self-update) の fetch) も、
+        git gh で先に試す。gh か git-gh が無い・github.com にログインしていない・git gh で
+        取れないときは ssh で取り直す (nix/scripts/ の git_github。TKT-221)。ssh を張り直したあとの herdr の中のように
         SSH_AUTH_SOCK が切れていても、gh が使えれば取れる。値は
         `~/.local/state/dotfiles/git-via-gh.json` (home/modules/claude.nix) に落ち、switch の後の
         setup の手順から効く (本体の更新は switch より前に走るので、前の世代の値で動く)。

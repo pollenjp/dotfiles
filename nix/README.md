@@ -173,8 +173,9 @@ setup は使えるべきなので、`fetch` の失敗も止める理由にしな
 | detached HEAD / upstream 無し | どこへ進めるべきか決められない |
 | fast-forward できない | rebase か merge かの判断はしない |
 
-`dotfiles.claude.gitViaGh.enable` のマシンでは、この `fetch` も gh の資格情報で先に試し、だめなら ssh で
-取り直す（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
+`dotfiles.claude.gitViaGh.enable` のマシンでは、origin が GitHub の ssh の URL（`git@github.com:…`）なら、
+この `fetch` も gh の資格情報で先に試し、だめなら ssh で取り直す（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
+https で clone した本体は、今までどおり `git` で取る。
 
 メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
 （毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
@@ -1348,7 +1349,7 @@ ssh-agent に触れずに取れる。
 | `bootstrap-claude-skills.sh` | claude-skills の clone と取得 |
 | `bootstrap-cc-pages.sh` | cc-pages の clone と取得 |
 | `bootstrap-dotfiles-private.sh` | dotfiles-private の clone と取得 |
-| `setup.sh`（`--self-update`） | 本体の fetch |
+| `setup.sh`（`--self-update`） | 本体の fetch（origin が GitHub の ssh の URL のとき。https の origin は ssh-agent に頼らないので、今までどおり `git` で取る） |
 
 4 つとも同じ関数 `git_github` を持ち（単体で配るので共通のファイルにしない。`git-github-helpers-test` が
 本文の一致と振る舞いを見る）、次の順に試す。
@@ -2680,7 +2681,8 @@ claude-skills と同じく、**取得やビルドの失敗はエラーにせず�
 | 状況 | 挙動 |
 | --- | --- |
 | clone できない（鍵が無い / オフライン） | `~/bin` にも systemd にも触らず、ビューア無しで続ける |
-| clone はあるが取得できない・fast-forward できない | 手元のクローンの内容でビルドする（取得の失敗だけ ssh で取り直す） |
+| clone はあるが取得できない（鍵が無い / オフライン） | 手元のクローンの内容でビルドする |
+| 取得できたが fast-forward できない（履歴の分岐） | 同じ（ssh で取り直さない） |
 | `go` が無い / ビルドに失敗する | daemon は起こさない |
 | user の systemd が無い / unit がまだ無い | バイナリだけ置き、daemon は起こさない（手で動かすなら `~/bin/cc-pages serve`） |
 

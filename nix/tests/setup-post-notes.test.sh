@@ -23,10 +23,12 @@
 #     残りの手作業で出し直さない (どちらでもなければ今どおり出す)
 #   - 続きの行が長い警告は、頭と末尾 (直し方) を残して間を省く。空白だけの行は出さない
 #   - 警告を溜めた一時ファイルを残さない (--self-update で本体を更新して exec し直すときも)
-#   - gitViaGh のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、本体の更新の fetch を
-#     gh の資格情報 (git gh) で取る。git gh で取れず ssh (git) で取ったときの警告は、本体を更新して exec し直した
-#     あとも [本体の更新] で載り、引き継ぎに使う変数は手順に渡らない。exec されたのでない実行は、外から渡された
-#     引き継ぎの変数を読まない (TKT-221)
+#   - gitViaGh のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、origin が GitHub の
+#     ssh の URL なら本体の更新の fetch を gh の資格情報 (git gh) で取る。git gh で取れず ssh (git) で取ったときの
+#     警告は、本体を更新して exec し直したあとも [本体の更新] で載り、引き継ぎに使う変数は手順に渡らない。
+#     exec されたのでない実行は、外から渡された引き継ぎの変数を読まない (TKT-221)
+#   - origin が ssh の URL でない (https など) なら、gitViaGh のマシンでも gh を通さずに今までどおり git で取り、
+#     fetch に失敗しても SSH 鍵の案内を付けない
 #
 # ## 作り
 #
@@ -401,7 +403,9 @@ else
 fi
 
 # 本体の更新で、origin が 1 commit 進んでいる checkout を作り、その場所を出す (14 番と同じ組み立て)。
-# $1: ケースの名前、$2: 偽の手順 bootstrap-a.sh の本体 (checkout に commit するので、後から変えない)。
+# $1: ケースの名前、$2: 偽の手順 bootstrap-a.sh の本体 (checkout に commit するので、後から変えない)、
+# $3: origin の URL の形 (ssh なら GitHub の ssh の URL にし、repo の insteadOf で手元の bare repo へ向ける。
+# path なら手元の bare repo のパスのまま (https などの、ssh でない origin の代わり))。
 # HOME に {"enable":true} の状態ファイルを置く (gitViaGh のマシン)
 new_update_case() {
   local c
@@ -414,7 +418,12 @@ new_update_case() {
   tgit -C "${c}/repo" init -q
   tgit -C "${c}/repo" add -A
   tgit -C "${c}/repo" commit -qm init
-  tgit -C "${c}/repo" remote add origin "${c}/origin.git"
+  if [[ ${3:-ssh} == ssh ]]; then
+    tgit -C "${c}/repo" remote add origin git@github.com:pollenjp/dotfiles.git
+    tgit -C "${c}/repo" config "url.${c}/origin.git.insteadOf" git@github.com:pollenjp/dotfiles.git
+  else
+    tgit -C "${c}/repo" remote add origin "${c}/origin.git"
+  fi
   tgit -C "${c}/repo" push -q -u origin main 2>/dev/null
   tgit clone -q "${c}/origin.git" "${c}/other"
   printf 'next\n' >"${c}/other/next.txt"
@@ -479,6 +488,34 @@ if [[ $(rc "${c}") == 0 ]] && ! grep -q '外から渡した警告' "${c}/out" &&
   ok "exec されたのでない実行は、外から渡された引き継ぎの変数を読まない"
 else
   ng "外から渡された引き継ぎの変数" "rc=$(rc "${c}") $(out "${c}")"
+fi
+
+# 18. origin が GitHub の ssh の URL でない (https など): gitViaGh のマシンでも gh を通さず、今までどおり git で取る
+c=$(new_update_case t18 'echo "a を流した"' path)
+gb=$(fake_gh_bin "${c}" 0)
+PATH_EXTRA="${gb}:${git_bin}" run "${c}" --self-update --steps bootstrap-a
+if [[ $(rc "${c}") == 0 && -f ${c}/repo/next.txt && ! -e ${c}/gitgh.log ]] && ! grep -q 'gh の資格情報' "${c}/out" \
+  && ! grep -q '途中で出た警告' "${c}/out"; then
+  ok "origin が ssh の URL でなければ、gitViaGh のマシンでも gh を通さずに本体を取る"
+else
+  ng "ssh でない origin" "rc=$(rc "${c}") log=$(cat "${c}/gitgh.log" 2>/dev/null) $(out "${c}") $(cat "${c}/err")"
+fi
+
+# 19. ssh でない origin の fetch に失敗した: 警告に SSH 鍵の案内を付けない (ssh を通っていないため)
+c=$(new_case t19)
+fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
+tgit -C "${c}/repo" init -q
+tgit -C "${c}/repo" add -A
+tgit -C "${c}/repo" commit -qm init
+tgit -C "${c}/repo" remote add origin "${c}/無い.git"
+tgit -C "${c}/repo" config branch.main.remote origin
+tgit -C "${c}/repo" config branch.main.merge refs/heads/main
+PATH_EXTRA="${git_bin}" run "${c}" --self-update --steps bootstrap-a
+if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[本体の更新\] fetch に失敗しました' \
+  && ! seen_after_result "${c}" 'SSH 鍵'; then
+  ok "ssh でない origin の fetch に失敗しても、SSH 鍵の案内は付けない"
+else
+  ng "ssh でない origin の fetch の失敗" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
