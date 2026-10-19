@@ -59,7 +59,7 @@ ng() {
 }
 
 # git_github() を持つはずの script
-expected=(bootstrap-cc-pages.sh bootstrap-dotfiles-private.sh)
+expected=(bootstrap-cc-pages.sh bootstrap-claude-skills.sh bootstrap-dotfiles-private.sh)
 
 # script から git_github()・warn()・summary_warn() の定義だけを取り出す (読み込むと script が最後まで走るため)
 helpers_of() {

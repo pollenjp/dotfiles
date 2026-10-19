@@ -5,11 +5,15 @@
 #
 # ## 何をするか
 #
-#   1. claude-skills を ghq root 配下へ clone する (既にあれば ff-only で pull)
+#   1. claude-skills を ghq root 配下へ clone する (既にあれば取得 (fetch) して fast-forward する)
 #   2. skills/ agents/ commands/ の中身を 1 つずつ ~/.claude/<種類>/ へ symlink する
 #   3. リポジトリから消えたものの symlink を掃除する
 #
 # 冪等。skill を足したあとや、別マシンでの変更を取り込むときに何度でも実行してよい。
+#
+# GitHub から取るとき (clone と取得) は git_github を通す。dotfiles.claude.gitViaGh.enable のマシンでは
+# gh の資格情報 (git gh。HTTPS) で先に試し、gh が使えない・取れないときだけ ssh (ssh-agent) で取る
+# (TKT-221。ssh を張り直したあとの herdr の中のように、SSH_AUTH_SOCK が切れていても取れる)。
 #
 # ## claude-skills へアクセスできないマシンでも止まらない
 #
@@ -18,7 +22,7 @@
 # エラーにしない**。警告を出して exit 0 する。
 #
 #   - clone できない -> private skill 無しで続行 (リンクは張らないし消さない)
-#   - pull できない   -> 手元のクローンの内容でリンクを張り直す
+#   - 取得できない・fast-forward できない -> 手元のクローンの内容でリンクを張り直す
 #
 # setup.sh は手順が 1 つ失敗すると残りを走らせないので、ここで exit 1 すると
 # 後続の bootstrap-* まで巻き込んで落ちる。それを避けるため。
@@ -76,6 +80,8 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 repo_url="git@github.com:pollenjp/claude-skills.git"
 repo_path="github.com/pollenjp/claude-skills"
 kinds=(skills agents commands)
+# git_github が取れなかったときの案内 (警告の続きの行に添える)
+git_github_hint=""
 
 claude_dir="${HOME}/.claude"
 state_dir="${HOME}/.local/state/dotfiles"
@@ -109,6 +115,7 @@ private な skill 置き場 (pollenjp/claude-skills) を取得して ~/.claude/ 
   3. $(ghq root)/github.com/pollenjp/claude-skills
   4. ~/ghq/github.com/pollenjp/claude-skills
 
+dotfiles.claude.gitViaGh.enable のマシンでは gh の資格情報 (git gh) で先に取り、だめなら ssh で取る。
 claude-skills は private なので、アクセスできないマシンでは取得に失敗する。
 その場合はエラーにせず、警告を出して正常終了する (~/.claude/ には触らない)。
 EOS
@@ -148,6 +155,57 @@ run() {
     return 0
   fi
   "$@"
+}
+
+# GitHub と通信する git (clone / fetch) を流す。引数は git の引数そのまま (git_github -C <dir> fetch など)。
+#
+# dotfiles.claude.gitViaGh.enable のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、
+# gh の資格情報 (git gh。HTTPS) で先に試し、gh か git-gh が無い・gh が github.com にログインしていない・
+# git gh で取れないときだけ git (ssh。ssh-agent) で流す (TKT-221)。どの経路で取ったかを 1 行出し、gh で
+# 取れず ssh で取れたときは警告する (gh の token が切れていると Claude の git も通らないため)。
+# 取れなければ git の終了コードを返し、呼び元の警告に添える案内を git_github_hint に入れる。
+#
+# setup.sh と bootstrap-*.sh に同じ形で持つ (nix/tests/git-github-helpers.test.sh が本文の一致を見る)。
+# setup.sh は Nix より前にも走るので、状態ファイルは jq を使わずに読む。
+git_github() {
+  local state="${HOME}/.local/state/dotfiles/git-via-gh.json" json="" rc=0
+  git_github_hint=""
+  if [[ -r ${state} ]]; then
+    json=$(<"${state}") || json=""
+  fi
+  if ! [[ ${json} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
+    git "$@" || rc=$?
+    if ((rc != 0)); then
+      git_github_hint="SSH 鍵 (ssh-agent) で取れませんでした。疎通は ssh -T git@github.com で確かめられます。"
+    fi
+    return "${rc}"
+  fi
+  if ! command -v gh &>/dev/null || ! command -v git-gh &>/dev/null; then
+    printf '  %s\n' "gh (git gh) が見つからないので、ssh (ssh-agent) で取ります。"
+  elif ! gh auth token --hostname github.com &>/dev/null; then
+    printf '  %s\n' "gh が github.com にログインしていないので、ssh (ssh-agent) で取ります。"
+  else
+    git gh "$@" || rc=$?
+    if ((rc == 0)); then
+      printf '  %s\n' "gh の資格情報 (HTTPS) で取りました。"
+      return 0
+    fi
+    printf '  %s\n' "gh の資格情報では取れませんでした。ssh (ssh-agent) で取り直します。"
+    rc=0
+    git "$@" || rc=$?
+    if ((rc == 0)); then
+      warn "gh の資格情報では取れず、ssh (ssh-agent) で取りました。" \
+        "gh の token が切れていると Claude の git (gitViaGh) も通りません。gh auth status で確かめてください。"
+      return 0
+    fi
+    git_github_hint="gh の資格情報でも SSH 鍵 (ssh-agent) でも取れませんでした。gh auth status と ssh -T git@github.com で確かめてください。"
+    return "${rc}"
+  fi
+  git "$@" || rc=$?
+  if ((rc != 0)); then
+    git_github_hint="gh が使えず、SSH 鍵 (ssh-agent) でも取れませんでした。gh auth login すれば ssh-agent なしで取れます。"
+  fi
+  return "${rc}"
 }
 
 while [[ $# -gt 0 ]]; do
@@ -239,10 +297,14 @@ ensure_clone() {
       warn "upstream が無いブランチなので pull を飛ばします: ${dir}"
       return 0
     fi
-    # 取れなくても手元のクローンは使えるので、警告だけ残して続ける。
-    if ! run git -C "${dir}" pull --ff-only; then
-      warn "pull に失敗しました。手元のクローンのまま続けます: ${dir}" \
-        "鍵もネットワークも問題ないなら、履歴が分岐しています。手で解決してください。"
+    # 取れなくても手元のクローンは使えるので、警告だけ残して続ける。取得と merge を分けるのは、
+    # 履歴の分岐で落ちたときに、ssh で取り直して同じ失敗を 2 回出さないため。
+    if ! run git_github -C "${dir}" fetch; then
+      warn "取得 (fetch) に失敗しました。手元のクローンのまま続けます: ${dir}" "${git_github_hint}"
+      stale=1
+    elif ! run git -C "${dir}" merge --ff-only '@{u}'; then
+      warn "fast-forward できません。手元のクローンのまま続けます: ${dir}" \
+        "履歴が分岐していないか確かめてください: git -C ${dir} status"
       stale=1
     fi
     return 0
@@ -256,10 +318,8 @@ ensure_clone() {
   fi
 
   run mkdir -p "$(dirname "${dir}")"
-  if ! run git clone "${repo_url}" "${dir}"; then
-    warn "clone に失敗しました: ${repo_url}" \
-      "private リポジトリなので SSH 鍵が要ります。次で疎通を確認してください:" \
-      "  ssh -T git@github.com"
+  if ! run git_github clone "${repo_url}" "${dir}"; then
+    warn "clone に失敗しました: ${repo_url}" "${git_github_hint}"
     unreachable=1
   fi
   return 0
