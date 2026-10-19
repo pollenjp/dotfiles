@@ -173,6 +173,9 @@ setup は使えるべきなので、`fetch` の失敗も止める理由にしな
 | detached HEAD / upstream 無し | どこへ進めるべきか決められない |
 | fast-forward できない | rebase か merge かの判断はしない |
 
+`dotfiles.claude.gitViaGh.enable` のマシンでは、この `fetch` も gh の資格情報で先に試し、だめなら ssh で
+取り直す（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
+
 メニューのヘッダには「本体が N commit 遅れ」を出す。ただし**起動時に `fetch` はしない**
 （毎回ネットワークへ出たくない）ので、最後に `fetch` した時点の話になる。
 
@@ -766,7 +769,8 @@ marketplace の clone は SSH（`git@github.com:`）で行われるので GitHub
 `pollenjp/claude-skills`（private）を clone して `~/.claude/` へ繋ぐ。
 詳細は後述の「Claude Code > private な skill 置き場」を参照。
 
-**private リポジトリなので SSH 鍵が要る**が、取得に失敗しても**エラーにはならない**。
+**private リポジトリなので SSH 鍵（gitViaGh のマシンでは先に試す gh の資格情報でもよい）が要る**が、
+取得に失敗しても**エラーにはならない**。
 警告を出して正常終了するので、`setup.sh` の後続（`bootstrap-mise` など）はそのまま走る
 （この dotfiles は public で、claude-skills を取れないマシンでも通す必要があるため）。
 
@@ -1332,6 +1336,38 @@ gfp                       # true のマシンでは git gh fetch --prune && git 
 git gh ls-remote origin   # 1 回だけ gh で通す
 gfp-base                  # true のマシンで 1 回だけ ssh で通す
 ```
+
+#### setup の取得も gh で先に試す
+
+`dotfiles.claude.gitViaGh.enable` のマシンでは、`setup` が GitHub から取るところも `git gh` を先に試す（TKT-221）。
+ssh を張り直したあとの herdr の中のように `SSH_AUTH_SOCK` が消えた socket を指していても、gh が使えれば
+ssh-agent に触れずに取れる。
+
+| どこ | 取るもの |
+| --- | --- |
+| `bootstrap-claude-skills.sh` | claude-skills の clone と取得 |
+| `bootstrap-cc-pages.sh` | cc-pages の clone と取得 |
+| `bootstrap-dotfiles-private.sh` | dotfiles-private の clone と取得 |
+| `setup.sh`（`--self-update`） | 本体の fetch |
+
+4 つとも同じ関数 `git_github` を持ち（単体で配るので共通のファイルにしない。`git-github-helpers-test` が
+本文の一致と振る舞いを見る）、次の順に試す。
+
+1. `~/.local/state/dotfiles/git-via-gh.json`（home-manager が option の値を書く。jq を使わずに読む）の
+   `enable` が `true` でなければ、今までどおり `git`（ssh）だけで取る
+2. gh か git-gh が無い・`gh auth token --hostname github.com` が通らないなら、その理由を 1 行出して ssh で取る
+3. `git gh` で取る。取れたら「gh の資格情報 (HTTPS) で取りました。」を出す
+4. `git gh` で取れなければ ssh で取り直し、取れたら警告する。最後のまとめにも出る（gh の token が切れていると
+   Claude の git も通らないため。`gh auth status` で確かめる）
+
+- どちらでも取れなければ、今までどおり手元の clone のまま続ける。警告の続きの行は、試した経路に合わせて
+  `ssh -T git@github.com`・`gh auth login`・`gh auth status` を案内する
+- gh が使えずに ssh へ回したことは、まとめに出さない（未ログインは `bootstrap-claude-env` が既にまとめに出す）
+- bootstrap の 3 つは、取得（`fetch`）と `merge --ff-only` を分けている。ssh で取り直すのは取得の失敗だけで、
+  履歴が分岐して fast-forward できないときは、その警告を 1 回だけ出す
+- 状態ファイルは switch で置かれるので、option を変えた直後の `setup --update` では switch の後の手順から効く。
+  本体の更新は switch より前に走るので、前の世代の値で動く
+- `git gh clone` で取っても origin の URL は ssh の形のまま残る。option を false にしても、その clone は ssh で取れる
 
 ## ssh について
 
@@ -2540,7 +2576,8 @@ dotfiles は public なので、claude-skills を取れないマシン（鍵が�
 | 状況 | 挙動 |
 | --- | --- |
 | clone できない（鍵が無い / オフライン / `git` が無い） | `~/.claude/` には触らず、警告して終了 |
-| clone はあるが pull できない | 手元のクローンの内容でリンクを張り直し、警告を添える |
+| clone はあるが取得できない（鍵が無い / オフライン） | 手元のクローンの内容でリンクを張り直し、警告を添える |
+| 取得できたが fast-forward できない（履歴の分岐） | 同じ（ssh で取り直さない） |
 
 取得できなかったときにリンクを**消しにいかない**のは重要で、掃除は「リンク先が
 クローンの中を指しているか」で判定するため、クローンが無い状態で prune すると
@@ -2548,6 +2585,8 @@ dotfiles は public なので、claude-skills を取れないマシン（鍵が�
 
 鍵が無いマシンで対話プロンプト（`known_hosts` の確認など）に固まらないよう、
 `GIT_TERMINAL_PROMPT=0` と `ssh -o BatchMode=yes` で即座に失敗させている。
+`dotfiles.claude.gitViaGh.enable` のマシンでは、clone も取得も gh の資格情報で先に試す
+（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
 
 #### なぜ flake input にしないのか
 
@@ -2593,7 +2632,7 @@ Nix が置くのは daemon の unit だけ。
 | 段 | すること | 決める場所 |
 | --- | --- | --- |
 | `switch` | `~/.config/systemd/user/cc-pages.service`（`~/bin/cc-pages serve` を常駐させる）を置く。`dotfiles.ccPages.port` を選んだマシンには `~/.config/cc-pages/config.toml` も置く | `home/modules/cc-pages.nix` |
-| bootstrap | `$(ghq root)/github.com/pollenjp/cc-pages` へ clone（あれば ff-only で pull）→ `go build` して `~/bin/cc-pages` へ symlink → unit を enable して再起動 | `scripts/bootstrap-cc-pages.sh` |
+| bootstrap | `$(ghq root)/github.com/pollenjp/cc-pages` へ clone（あれば取得して fast-forward）→ `go build` して `~/bin/cc-pages` へ symlink → unit を enable して再起動 | `scripts/bootstrap-cc-pages.sh` |
 
 ```sh
 ./nix/scripts/bootstrap-cc-pages.sh            # 取得 / 更新してビルドし、daemon を再起動する
@@ -2641,7 +2680,7 @@ claude-skills と同じく、**取得やビルドの失敗はエラーにせず�
 | 状況 | 挙動 |
 | --- | --- |
 | clone できない（鍵が無い / オフライン） | `~/bin` にも systemd にも触らず、ビューア無しで続ける |
-| clone はあるが pull できない | 手元のクローンの内容でビルドする |
+| clone はあるが取得できない・fast-forward できない | 手元のクローンの内容でビルドする（取得の失敗だけ ssh で取り直す） |
 | `go` が無い / ビルドに失敗する | daemon は起こさない |
 | user の systemd が無い / unit がまだ無い | バイナリだけ置き、daemon は起こさない（手で動かすなら `~/bin/cc-pages serve`） |
 
@@ -2649,6 +2688,7 @@ unit は `ConditionFileIsExecutable=%h/bin/cc-pages` でバイナリの有無を
 `cc-pages.service` が failed で残らず、条件不成立として静かに飛ばされる。
 
 flake input にしない理由も claude-skills と同じ（[前述](#なぜ-flake-input-にしないのか)）。
+gitViaGh のマシンで gh の資格情報を先に試すのも同じ（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
 
 ### 管理しないもの
 
