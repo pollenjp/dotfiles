@@ -5,11 +5,15 @@
 #
 # ## 何をするか
 #
-#   1. cc-pages を ghq root 配下へ clone する (既にあれば ff-only で pull)
+#   1. cc-pages を ghq root 配下へ clone する (既にあれば取得 (fetch) して fast-forward する)
 #   2. go build して ~/bin/cc-pages へ symlink を張る
 #   3. systemd user service (cc-pages.service) を有効化して起動 / 再起動する
 #
 # 冪等。更新を取り込みたいときに何度でも実行してよい。
+#
+# GitHub から取るとき (clone と取得) は git_github を通す。dotfiles.claude.gitViaGh.enable のマシンでは
+# gh の資格情報 (git gh。HTTPS) で先に試し、gh が使えない・取れないときだけ ssh (ssh-agent) で取る
+# (TKT-221。ssh を張り直したあとの herdr の中のように、SSH_AUTH_SOCK が切れていても取れる)。
 #
 # ## cc-pages へアクセスできないマシンでも止まらない
 #
@@ -18,7 +22,7 @@
 # 失敗してもエラーにしない**。警告を出して exit 0 する。
 #
 #   - clone できない -> ビューア無しで続行 (~/bin にも systemd にも触らない)
-#   - pull できない   -> 手元のクローンの内容でビルドする
+#   - 取得できない・fast-forward できない -> 手元のクローンの内容でビルドする
 #   - go が無い       -> ビルドを飛ばす (mise が go を入れる前かもしれない)
 #
 # unit 側も ConditionPathIsExecutable でバイナリの有無を見ているので、
@@ -39,6 +43,8 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 
 repo_url="git@github.com:pollenjp/cc-pages.git"
 repo_path="github.com/pollenjp/cc-pages"
+# git_github が取れなかったときの案内 (警告の続きの行に添える)
+git_github_hint=""
 unit="cc-pages.service"
 bin_link="${HOME}/bin/cc-pages"
 
@@ -81,6 +87,7 @@ private な cc-pages を取得してビルドし、常駐 daemon を起こす。
   3. $(ghq root)/github.com/pollenjp/cc-pages
   4. ~/ghq/github.com/pollenjp/cc-pages
 
+dotfiles.claude.gitViaGh.enable のマシンでは gh の資格情報 (git gh) で先に取り、だめなら ssh で取る。
 cc-pages は private なので、アクセスできないマシンでは取得に失敗する。
 その場合はエラーにせず、警告を出して正常終了する (~/bin にも systemd にも触らない)。
 EOS
@@ -119,6 +126,57 @@ run() {
   else
     "$@"
   fi
+}
+
+# GitHub と通信する git (clone / fetch) を流す。引数は git の引数そのまま (git_github -C <dir> fetch など)。
+#
+# dotfiles.claude.gitViaGh.enable のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、
+# gh の資格情報 (git gh。HTTPS) で先に試し、gh か git-gh が無い・gh が github.com にログインしていない・
+# git gh で取れないときだけ git (ssh。ssh-agent) で流す (TKT-221)。どの経路で取ったかを 1 行出し、gh で
+# 取れず ssh で取れたときは警告する (gh の token が切れていると Claude の git も通らないため)。
+# 取れなければ git の終了コードを返し、呼び元の警告に添える案内を git_github_hint に入れる。
+#
+# setup.sh と bootstrap-*.sh に同じ形で持つ (nix/tests/git-github-helpers.test.sh が本文の一致を見る)。
+# setup.sh は Nix より前にも走るので、状態ファイルは jq を使わずに読む。
+git_github() {
+  local state="${HOME}/.local/state/dotfiles/git-via-gh.json" json="" rc=0
+  git_github_hint=""
+  if [[ -r ${state} ]]; then
+    json=$(<"${state}") || json=""
+  fi
+  if ! [[ ${json} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
+    git "$@" || rc=$?
+    if ((rc != 0)); then
+      git_github_hint="SSH 鍵 (ssh-agent) で取れませんでした。疎通は ssh -T git@github.com で確かめられます。"
+    fi
+    return "${rc}"
+  fi
+  if ! command -v gh &>/dev/null || ! command -v git-gh &>/dev/null; then
+    printf '  %s\n' "gh (git gh) が見つからないので、ssh (ssh-agent) で取ります。"
+  elif ! gh auth token --hostname github.com &>/dev/null; then
+    printf '  %s\n' "gh が github.com にログインしていないので、ssh (ssh-agent) で取ります。"
+  else
+    git gh "$@" || rc=$?
+    if ((rc == 0)); then
+      printf '  %s\n' "gh の資格情報 (HTTPS) で取りました。"
+      return 0
+    fi
+    printf '  %s\n' "gh の資格情報では取れませんでした。ssh (ssh-agent) で取り直します。"
+    rc=0
+    git "$@" || rc=$?
+    if ((rc == 0)); then
+      warn "gh の資格情報では取れず、ssh (ssh-agent) で取りました。" \
+        "gh の token が切れていると Claude の git (gitViaGh) も通りません。gh auth status で確かめてください。"
+      return 0
+    fi
+    git_github_hint="gh の資格情報でも SSH 鍵 (ssh-agent) でも取れませんでした。gh auth status と ssh -T git@github.com で確かめてください。"
+    return "${rc}"
+  fi
+  git "$@" || rc=$?
+  if ((rc != 0)); then
+    git_github_hint="gh が使えず、SSH 鍵 (ssh-agent) でも取れませんでした。gh auth login すれば ssh-agent なしで取れます。"
+  fi
+  return "${rc}"
 }
 
 while [ $# -gt 0 ]; do
@@ -219,8 +277,13 @@ echo "==> cc-pages を取得"
 if [ -d "${dir}/.git" ]; then
   note "既にある: ${dir}"
   if [[ ${do_pull} == 1 ]]; then
-    if ! run git -C "${dir}" pull --ff-only; then
-      warn "pull できませんでした。手元のクローンのまま続けます。"
+    # 取得と merge を分ける。履歴の分岐で落ちたときに、ssh で取り直して同じ失敗を 2 回出さないため
+    if ! run git_github -C "${dir}" fetch; then
+      warn "取得できませんでした。手元のクローンのまま続けます。" "${git_github_hint}"
+      stale=1
+    elif ! run git -C "${dir}" merge --ff-only '@{u}'; then
+      warn "fast-forward できませんでした。手元のクローンのまま続けます。" \
+        "履歴が分岐していないか確かめてください: git -C ${dir} status"
       stale=1
     fi
   else
@@ -228,8 +291,8 @@ if [ -d "${dir}/.git" ]; then
   fi
 else
   run mkdir -p "$(dirname "${dir}")"
-  if ! run git clone "${repo_url}" "${dir}"; then
-    warn "clone できませんでした: ${repo_url}"
+  if ! run git_github clone "${repo_url}" "${dir}"; then
+    warn "clone できませんでした: ${repo_url}" "${git_github_hint}"
     unreachable=1
   fi
 fi
