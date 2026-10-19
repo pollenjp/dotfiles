@@ -298,6 +298,14 @@ in
         + "\n";
     }
 
+    # gitViaGh.enable の値。setup が GitHub から取るとき (bootstrap の clone / 取得と、本体の更新の fetch) に
+    # nix/scripts/ の git_github が読み、true なら gh の資格情報を先に試す (TKT-221)。setup.sh は Nix より
+    # 前にも走るので、jq を使わずに読める形 ({"enable":true} / {"enable":false}) にし、値によらず必ず書く。
+    {
+      ".local/state/dotfiles/git-via-gh.json".text =
+        builtins.toJSON { enable = cfg.gitViaGh.enable; } + "\n";
+    }
+
     # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
     # チケットと PR を、Claude Code の footer にクリックできるバッジとして並べる。
     #

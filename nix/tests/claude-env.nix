@@ -11,6 +11,8 @@
 #   - ~/.local/state/dotfiles/claude-env.json の中身 (true / false それぞれ)。
 #     nix/scripts/bootstrap-claude-env.sh がこれを ~/.claude/settings.json の env へ写す。
 #     CLAUDE_CODE_SHELL は option によらず profile の bash (<home>/.nix-profile/bin/bash)
+#   - ~/.local/state/dotfiles/git-via-gh.json の中身 (true / false それぞれ)。setup の取得の git_github
+#     (nix/scripts/) が jq を使わずに読むので、空白の無い {"enable":true} / {"enable":false} で、改行で終わる
 #   - home.packages に gh が入る (true の前提)
 #   - home.packages に bash が入る (CLAUDE_CODE_SHELL が指す profile の bin/bash の元)。
 #     programs.bash.enable を false にしても、programs.bash.package を null にしても評価で止まる
@@ -32,6 +34,7 @@ let
   configWith = claude: (homeWith claude [ ]).config;
 
   textOf = cfg: cfg.home.file.".local/state/dotfiles/claude-env.json".text;
+  viaGhOf = cfg: cfg.home.file.".local/state/dotfiles/git-via-gh.json".text;
 
   managed = [
     "commit.gpgsign"
@@ -111,6 +114,10 @@ let
     {
       name = "状態ファイルは改行で終わる";
       ok = lib.hasSuffix "\n" (textOf byDefault);
+    }
+    {
+      name = "git-via-gh.json は既定 (true) で {\"enable\":true}、false で {\"enable\":false}。改行で終わる";
+      ok = viaGhOf byDefault == "{\"enable\":true}\n" && viaGhOf disabled == "{\"enable\":false}\n";
     }
     {
       name = "home.packages に gh が入る";
