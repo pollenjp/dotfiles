@@ -261,6 +261,21 @@ branch の home を、ローカル flake の `dotfiles` 入力を `--override-in
 - 確かめの途中から、試験の接続は Windows の鍵ファイル（`IdentitiesOnly`）で認証し、1Password へ署名を求めるのは上の
   署名の 1 回だけにした（はじめは 1Password の鍵で認証していて、承認の要求を 90 回ほど出してしまった）
 
+#### 最後の build（500467f）での流し直し（2026-10-20 23:37〜23:40）
+
+上の表を流したのは 3e50a19 の build で、そのあとレビューの直しと、`ssh-add`・`flock` を PATH の system のものにする直しを
+入れた。最後の build で場面 1 と 3 を流し直した。試験の接続はすべて Windows の鍵ファイル（`IdentitiesOnly`）で認証し、
+1Password へは署名を求めていない（pane の確かめは `ssh-add -l` だけ）。
+
+| 場面 | 結果 |
+| --- | --- |
+| 1（port 22・値なし） | attach で server が固定名で起き、pane の `ssh-add -l` が鍵を返した。detach で dangling・rc=2。attach し直すと新しい接続へ張り替わり、同じ server（pid は変わらない）の pane で鍵を返した |
+| 3（一時の sshd・値あり） | 2 つの session と素の ssh の端末 C を開いた。1 つ目を detach すると見張りが 2 つ目の bridge（同じ PC の生きている一番古い接続）を借り、2 つ目も detach すると両方の固定名が C を指し、両方の pane の `ssh-add -l` が鍵を返した |
+| 見張り | 流している間に service は 63 回正常に終わり、失敗・起動の上限・not found の行は 0。service と同じ systemd の user の環境で `ssh-add` は `/run/current-system/sw/bin/ssh-add`（OpenSSH 10.5p1）、`flock` は `/run/current-system/sw/bin/flock`（util-linux 2.42.3）に解決され、`pjp-agent-link` の閉包に openssh と flock は無い |
+
+終わったあと main の home（世代 16。世代 11 と同じ store path）に戻し、試験のために足したもの（一時の sshd・試験用の
+Host のファイルと known_hosts・試験用の session・固定名と記録の場所・一時の clone）を全部消した。
+
 ## 7. 移行・運用手順
 
 ```sh
