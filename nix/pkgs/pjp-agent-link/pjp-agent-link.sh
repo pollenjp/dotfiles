@@ -46,14 +46,16 @@
 #   conn/<basename>   接続ごとの記録 (rc が書く。sock=・client=・opened= の 3 行。opened は UNIX 時刻の ns)。
 #                     名前は socket の basename (OpenSSH 10.1 からは s.<hash>.sshd.<乱数>)。watch が、socket の
 #                     消えたものを消す
-#   owner/<session>   固定名ごとの持ち主 (1 行。無い・空は「分からない」)
+#   owner/<session>   固定名ごとの持ち主。「値」と「張った先」の 2 行。無い・空・張った先が今の固定名の先と違う
+#                     (張り替えの途中で止まった) ものは「分からない」
 #   log               張り替えのたびに 1 行 (256 KiB を超えたら後ろの 1000 行にする)
 #   lock              張り替えの排他 (flock)
 #   tmp/              書きかけ (rename で入れ替える)
 #
 # 張り替えは、ssh-add で生死を見る間は lock を持たず、入れ替える直前に lock を取って「決めたときの先と持ち主の
 # まま」かを見てから、一時名の symlink を rename で入れ替える (固定名が消える瞬間を作らない)。変わっていたら
-# 決め直す。
+# 決め直す。持ち主は固定名を入れ替えたあとに書き、張った先も添える。途中で止まっても「新しい持ち主と古い先」の
+# 組は残らず、「分からない」になる (attach は上書きし、見張りは借りない)。
 #
 # ## stdout
 #
@@ -163,10 +165,14 @@ read_target() {
   readlink -- "$1" 2>/dev/null || true
 }
 
+# 固定名の持ち主。記録の「張った先」が今の固定名の先と違えば、分からない (空) として返す
 read_owner() {
-  local v=""
-  if [[ -f ${state}/owner/$1 ]]; then
-    IFS= read -r v <"${state}/owner/$1" || true
+  local v="" t="" f="${state}/owner/$1"
+  if [[ -f ${f} ]]; then
+    { IFS= read -r v && IFS= read -r t; } <"${f}" 2>/dev/null || true
+  fi
+  if [[ ${t} != "$(read_target "$(fixed_path "$1")")" ]]; then
+    v=""
   fi
   printf '%s' "${v}"
 }
@@ -183,9 +189,10 @@ log_line() {
 
 # 固定名の先と持ち主が決めたときのまま (exp_*) なら、new_* へ入れ替える。
 #   $1: session、$2・$3: 決めたときの先・持ち主、$4・$5: 新しい先・持ち主、$6: 由来 (log 用)
-#   0: 入れ替えた / 1: 決めたあとに変わっていた (入れ替えない) / 2: lock を取れない
+#   0: 入れ替えた / 1: 決めたあとに変わっていた (入れ替えない) / 2: lock を取れない / 3: 入れ替えに失敗した
+# 呼ぶ側は `swap … || rc=$?` の形で呼ぶので、中の set -e は効かない。失敗は 1 つずつ見て止める
 swap() {
-  local s=$1 exp_t=$2 exp_o=$3 new_t=$4 new_o=$5 why=$6 fixed
+  local s=$1 exp_t=$2 exp_o=$3 new_t=$4 new_o=$5 why=$6 fixed rc=0
   fixed=$(fixed_path "${s}")
   ensure_dirs
   (
@@ -193,14 +200,21 @@ swap() {
     if [[ $(read_target "${fixed}") != "${exp_t}" || $(read_owner "${s}") != "${exp_o}" ]]; then
       exit 1
     fi
-    printf '%s\n' "${new_o}" >"${state}/tmp/owner.${s}.$$"
-    mv -f -- "${state}/tmp/owner.${s}.$$" "${state}/owner/${s}"
     tmp="${ssh_dir}/.pjp-agent-link.${s}.$$"
     rm -f -- "${tmp}"
-    ln -s -- "${new_t}" "${tmp}"
-    mv -fT -- "${tmp}" "${fixed}"
+    ln -s -- "${new_t}" "${tmp}" || exit 3
+    if ! mv -fT -- "${tmp}" "${fixed}"; then
+      rm -f -- "${tmp}"
+      exit 3
+    fi
+    { printf '%s\n%s\n' "${new_o}" "${new_t}" >"${state}/tmp/owner.${s}.$$"; } || exit 3
+    mv -f -- "${state}/tmp/owner.${s}.$$" "${state}/owner/${s}" || exit 3
     log_line "${why} ${s}: ${exp_t:-(無し)} [${exp_o:-?}] -> ${new_t} [${new_o:-?}]"
-  ) 9>>"${state}/lock"
+  ) 9>>"${state}/lock" || rc=$?
+  if ((rc == 3)); then
+    log_line "${why} ${s}: 張り替えに失敗した (${exp_t:-(無し)} -> ${new_t})"
+  fi
+  return "${rc}"
 }
 
 # attach: 開いた session の固定名を決め直す。$1: session、$2・$3: 開いた接続の socket と値、$4: 由来 (log 用)
@@ -220,6 +234,7 @@ decide_attach() {
     fi
     rc=0
     swap "${s}" "${t}" "${o}" "${open_sock}" "${open_client}" "attach(${why})" || rc=$?
+    # 1 (決めたあとに変わっていた) なら決め直す。2・3 (lock を取れない・入れ替えに失敗した) は諦める
     if ((rc != 1)); then
       return 0
     fi
@@ -300,7 +315,7 @@ cmd_link() {
 }
 
 cmd_rc() {
-  local proto cookie xauth_bin sock client key
+  local proto cookie xauth_bin sock client key opened
   # stdout はセッションのデータに混ざるので捨てる
   exec >/dev/null
   # X11: ~/.ssh/rc があると sshd は xauth を呼ばないので、sshd(8) の SSHRC の例どおりに渡す。
@@ -326,7 +341,16 @@ cmd_rc() {
   client=$(normalize_client "${PJP_SSH_CLIENT-}")
   ensure_dirs
   key=${sock##*/}
-  printf 'sock=%s\nclient=%s\nopened=%s\n' "${sock}" "${client}" "$(date +%s%N)" >"${state}/tmp/conn.${key}.$$"
+  # ControlMaster で多重化した接続では、session ごとに rc が走る。同じ socket の記録があれば開いた時刻を引き継ぐ
+  # (引き継がないと、長生きの接続が一番新しく見える)
+  opened=""
+  if [[ -f ${state}/conn/${key} && $(record_field "${state}/conn/${key}" sock 2>/dev/null || true) == "${sock}" ]]; then
+    opened=$(record_field "${state}/conn/${key}" opened 2>/dev/null || true)
+  fi
+  if [[ ! ${opened} =~ ^[0-9]+$ ]]; then
+    opened=$(date +%s%N)
+  fi
+  printf 'sock=%s\nclient=%s\nopened=%s\n' "${sock}" "${client}" "${opened}" >"${state}/tmp/conn.${key}.$$"
   # 見張りは conn/ を見ているので、書きかけを見せないよう tmp/ から rename で入れる
   mv -f -- "${state}/tmp/conn.${key}.$$" "${state}/conn/${key}"
   log_line "rc ${key}: client=${client:-(届いていない)}"
@@ -348,11 +372,12 @@ records() {
   local f sock opened
   for f in "${state}"/conn/*; do
     [[ -f ${f} ]] || continue
-    sock=$(record_field "${f}" sock)
-    opened=$(record_field "${f}" opened)
+    # 見つけてから読むまでの間に、別の watch が消すことがある
+    sock=$(record_field "${f}" sock 2>/dev/null) || continue
+    opened=$(record_field "${f}" opened 2>/dev/null) || continue
     [[ -n ${sock} ]] || continue
     [[ ${opened} =~ ^[0-9]+$ ]] || opened=0
-    printf '%s\t%s\t%s\n' "${opened}" "${sock}" "$(record_field "${f}" client)"
+    printf '%s\t%s\t%s\n' "${opened}" "${sock}" "$(record_field "${f}" client 2>/dev/null || true)"
   done | sort -t $'\t' -k1,1n -k2,2
 }
 
@@ -361,7 +386,7 @@ cleanup_records() {
   local f sock
   for f in "${state}"/conn/*; do
     [[ -f ${f} ]] || continue
-    sock=$(record_field "${f}" sock)
+    sock=$(record_field "${f}" sock 2>/dev/null) || continue
     if [[ -z ${sock} || ! -S ${sock} ]]; then
       rm -f -- "${f}"
     fi
@@ -424,7 +449,7 @@ state_label() {
 }
 
 cmd_status() {
-  local fixed s t o found=0 opened sock client secs when
+  local fixed s t o found=0 opened sock client secs when herdr_bin
   echo "固定名:"
   for fixed in "${ssh_dir}/agent.sock" "${ssh_dir}"/agent.*.sock; do
     [[ -L ${fixed} ]] || continue
@@ -452,6 +477,16 @@ cmd_status() {
     echo "  (無い)"
   fi
   echo "張り替えの記録: ${state}/log"
+  # hr は ssh 先のログイン shell の command -v herdr で見つけた herdr を打つ。~/.local/bin などに包んでいない herdr
+  # (herdr.exe が版の違いで入れることを提案する) が先にあると、固定名は渡らない
+  herdr_bin=$(command -v herdr 2>/dev/null || true)
+  if [[ -z ${herdr_bin} ]]; then
+    echo "PATH の herdr: (無い)"
+  elif grep -q pjp-agent-link -- "${herdr_bin}" 2>/dev/null; then
+    echo "PATH の herdr: ${herdr_bin} (包んだもの)"
+  else
+    echo "PATH の herdr: ${herdr_bin} (包んでいない。server に固定名が渡らない)"
+  fi
 }
 
 cmd=${1-}

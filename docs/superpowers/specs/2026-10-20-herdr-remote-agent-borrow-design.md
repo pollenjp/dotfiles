@@ -167,7 +167,7 @@ herdr の native agent session restore で会話へ戻れる。
 | herdr を包む実行ファイル | `nix/pkgs/pjp-agent-link/herdr.sh` を `bin/herdr` に置き、`pkgs.herdr` の残り (補完・skill) を symlinkJoin で並べる (`nix/pkgs/pjp-agent-link/herdr.nix`) |
 | home の module | `nix/home/modules/agent-link.nix` (包んだ herdr と script を入れ、`~/.ssh/rc` と見張りの unit を置く) |
 | 固定名 | default は `~/.ssh/agent.sock`、named session は `~/.ssh/agent.<session>.sock` |
-| 記録の場所 | `~/.local/state/pjp-agent-link/` (0700)。`conn/<socket の basename>` (接続ごと)・`owner/<session>` (固定名ごとの持ち主)・`log` (張り替えの記録)・`lock`・`tmp/` |
+| 記録の場所 | `~/.local/state/pjp-agent-link/` (0700)。`conn/<socket の basename>` (接続ごと)・`owner/<session>` (固定名ごとの持ち主。「値」と「張った先」の 2 行)・`log` (張り替えの記録)・`lock`・`tmp/` |
 | 見張りの unit | `pjp-agent-link-watch.path` と `pjp-agent-link-watch.service` (Linux だけ) |
 | 手元の値 | `local` (`%u@%L` の形にならない値) |
 
@@ -176,7 +176,9 @@ herdr の native agent session restore で会話へ戻れる。
 - 接続の記録は 1 接続 1 ファイルで、中身は `sock=<パス>`・`client=<値>`・`opened=<UNIX 時刻>` の 3 行。名前は socket の
   basename (OpenSSH 10.1 からは `s.<hash>.sshd.<乱数>`)。`tmp/` に書いてから `conn/` へ rename する
   (見張りが書きかけを読まない。rename は 1 回の inotify の知らせになる)
-- 持ち主は 1 行のファイル。無い・空は「持ち主が分からない」(同じマシンとみなさない) として同じに扱う
+- 持ち主は「値」と「張った先」の 2 行のファイル。無い・空・張った先が今の固定名の先と違う (張り替えの途中で
+  止まった) ものは「持ち主が分からない」(同じマシンとみなさない) として同じに扱う (branch のレビューで足した)
+- 同じ socket の 2 回目の session (ControlMaster) の rc は、開いた時刻を引き継ぐ (branch のレビューで足した)
 
 ### 2. `PJP_SSH_CLIENT` の値の扱い
 
@@ -228,6 +230,8 @@ herdr の native agent session restore で会話へ戻れる。
 決め直しは、`ssh-add` で生死を見る間は lock を持たず、張り替える直前に lock (`flock -w 5 ~/.local/state/pjp-agent-link/lock`)
 を取って「決めたときの先と持ち主のままか」を見てから入れ替える。変わっていたら決め直す (3 回まで)。見張りと attach が
 同時に走っても、片方が古い見立てで上書きしない (別のマシンから開いた直後の固定名を、見張りが前の持ち主の接続へ戻さない)。
+固定名を入れ替えてから持ち主を書き、失敗は 1 つずつ止める。途中で止まっても「新しい持ち主と古い先」の組は残らない
+(branch のレビューで足した)。
 
 ### 6. 見張りの unit
 

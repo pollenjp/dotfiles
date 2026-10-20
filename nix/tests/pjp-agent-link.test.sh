@@ -15,7 +15,8 @@
 #   - attach (herdr を開いた接続) は、開いた session の固定名だけを決め直す。今の先が生きていて持ち主が
 #     開いた接続と同じ値なら変えず、死んでいる・持ち主が分からない・別の値・値が届いていないなら開いた接続へ
 #     向け、持ち主をその値にする。返事をしない先は 1 秒で見切る。何も無い HOME でも ~/.ssh と記録の場所を
-#     0700 で作って通る
+#     0700 で作って通る。持ち主の記録の「張った先」が今の先と違えば持ち主は分からない扱い。張り替えに失敗したら
+#     (~/.ssh に書けない) 先も持ち主も変えず、直れば次の attach で移る
 #   - PJP_SSH_CLIENT は、空・% を含む (展開されていない %u@%L)・制御文字を含む・local なら届いていない扱い
 #   - open の「開いた接続」: ssh の shell は自分の socket と値、ssh -a と SSH_AGENT_PID の shell は張り替えずに
 #     固定名だけ、herdr の pane は同じ session なら何もせず別の session なら pane の固定名の先と持ち主で張る、
@@ -23,23 +24,26 @@
 #     張り替えずに固定名を出す。session の名前が herdr の規則に外れたら何もしない
 #   - link (ssh-agent-link) は今の接続へ強制で向ける。session は引数・HERDR_SESSION・default の順。pane の中と
 #     張る先の無い shell では張らずに exit 1
-#   - rc (~/.ssh/rc) は stdout に何も書かず、forward された socket と値 (届いていなければ空) と開いた時刻を
-#     socket の basename の名前で記録する (/tmp/ssh-XXXXXX/agent.<pid> の形も)。forward の無い接続・
-#     SSH_AGENT_PID・ssh でない shell は記録しない。DISPLAY があれば cookie を xauth へ渡し (localhost:N は
-#     unix:N)、無ければ stdin を読まない。何も無い HOME でも記録の場所を 0700 で作る
+#   - rc (~/.ssh/rc) は stdout に何も書かず (xauth が stdout に書いても)、forward された socket と値 (届いていなければ
+#     空) と開いた時刻を socket の basename の名前で記録する (/tmp/ssh-XXXXXX/agent.<pid> の形も)。同じ socket の
+#     2 回目の session (ControlMaster) は開いた時刻を引き継ぐ。forward の無い接続・SSH_AGENT_PID・ssh でない shell は
+#     記録しない。DISPLAY があれば cookie を xauth へ渡し (localhost:N は unix:N)、無ければ閉じない stdin でも
+#     読まずに終わる。何も無い HOME でも記録の場所を 0700 で作る
 #   - watch は cc-page 0003 の場面 1 (同じ PC から 4 本・別の PC から 2 本、1〜11) を表のとおりに動かす: 先が
 #     生きていれば何もせず (覗くだけの接続は奪わない)、死んでいれば持ち主と同じ値の生きている一番古い接続を
-#     借り、別の値・届いていない値の接続は借りず、持ち主が空の固定名には借りない。借りても持ち主は変えない。
+#     借り (socket の名前の順ではなく開いた順)、別の値・届いていない値の接続は借りず、持ち主が空の固定名には
+#     (値の届いていない接続も) 借りない。借りても持ち主は変えない。
 #     返事をしない記録は 1 秒で見切る。死んだ socket の記録を消す。先を確かめている間に attach が張り替えたら
 #     上書きしない。先が手元の 1Password なら触らない。stdout に何も出さない
-#   - status は固定名の先・持ち主と、記録にある接続を出す
+#   - status は固定名の先・持ち主と、記録にある接続と、PATH の herdr が包んだものかを出す
 #   - herdr を包む実行ファイルは、引数をそのまま本物の herdr へ渡す。herdr (サブコマンドなし)・--session <名前>・
 #     --session=<名前>・session attach <名前>・remote-client-bridge [--idle-timeout-v1] では決め直して
 #     SSH_AUTH_SOCK をその session の固定名にし、herdr server では決め直さずに固定名にする。それ以外
-#     (status・server stop・pane・--remote・--version・--help・session attach help) では env も固定名も変えない。
-#     session は引数・HERDR_SESSION・default の順。bridge の stdin を読まず、stdout には本物の herdr の出力だけが
-#     出る。WSL の手元では env を変えない。pjp-agent-link が失敗しても・返事をしなくても (10 秒で打ち切る)、
-#     元の env で herdr を起こす
+#     (status・server stop・pane・--remote・--remote-keybindings・--version・--help・session attach help・値の無い
+#     --session) では env も固定名も変えない。session は引数・HERDR_SESSION・default の順。bridge の stdin を読まず、
+#     stdout には本物の herdr の出力だけが出る (pjp-agent-link が stdin を読もうとしても・stderr に書いても漏れない)。
+#     WSL の手元では env を変えない。pjp-agent-link が失敗しても・返事をしなくても (10 秒で打ち切る)、元の env で
+#     herdr を起こす
 #   - starship.toml の custom.pjp_ssh_client は sh で判定し、ssh で入った shell で PJP_SSH_CLIENT が空・% を含む
 #     とき、herdr の pane で固定名の持ち主が空・無いときだけ警告を出す (値がある・持ち主がある・local・手元の
 #     shell では出さない)。本物の starship でも同じに出る。判定で ssh-add を呼ばない
@@ -140,7 +144,7 @@ export PATH="${bin}:${PATH}"
 ssh_add_log="${work}/ssh-add.log"
 : >"${ssh_add_log}"
 
-# 偽の xauth。引数と stdin を FAKE_XAUTH_LOG に書き留める
+# 偽の xauth。引数と stdin を FAKE_XAUTH_LOG に書き留め、stdout にも書く (rc が stdout を捨てているかを見る)
 {
   printf '#!%s\n' "${BASH}"
   cat <<'EOF'
@@ -148,6 +152,7 @@ ssh_add_log="${work}/ssh-add.log"
   printf 'args: %s\n' "$*"
   cat
 } >>"${FAKE_XAUTH_LOG}"
+echo XAUTH-STDOUT
 EOF
 } >"${bin}/xauth"
 chmod +x "${bin}/xauth"
@@ -172,7 +177,7 @@ setmode() {
 }
 
 # 固定名を先と持ち主つきで置く (前の attach や watch が張った状態)。$1: session、$2: 先、$3: 持ち主 (省けば
-# 持ち主のファイルを置かない)
+# 持ち主のファイルを置かない)、$4: 持ち主の記録に書く張った先 (省けば $2。記録は「値」と「張った先」の 2 行)
 seed() {
   local fixed
   if [[ $1 == default ]]; then
@@ -183,7 +188,7 @@ seed() {
   ln -sfn "$2" "${fixed}"
   if [[ $# -ge 3 ]]; then
     mkdir -p "${H}/.local/state/pjp-agent-link/owner"
-    printf '%s\n' "$3" >"${H}/.local/state/pjp-agent-link/owner/$1"
+    printf '%s\n%s\n' "$3" "${4:-$2}" >"${H}/.local/state/pjp-agent-link/owner/$1"
   fi
 }
 
@@ -217,7 +222,7 @@ err() { cat "$1/err"; }
 link_of() { readlink "${H}/.ssh/$1" 2>/dev/null || echo "(無い)"; }
 owner_of() {
   if [[ -f ${H}/.local/state/pjp-agent-link/owner/$1 ]]; then
-    cat "${H}/.local/state/pjp-agent-link/owner/$1"
+    head -n 1 "${H}/.local/state/pjp-agent-link/owner/$1"
   else
     echo "(無い)"
   fi
@@ -360,6 +365,40 @@ $(owner_of s2) == "${PC}" && $(link_of agent.sock) == "${A}" ]]; then
   ok "session ごと: s2 の attach は agent.s2.sock だけを張り、agent.sock は触らない"
 else
   ng "session ごと" "rc=$(rc "${d}") out=$(out "${d}") s2=$(link_of agent.s2.sock) default=$(link_of agent.sock) err=$(err "${d}")"
+fi
+
+# 9b. 持ち主の記録の「張った先」が今の固定名の先と違えば、持ち主は分からないとして扱う
+newhome stale-owner
+A="${H}/.ssh/agent/s.t.sshd.stale-A"
+B="${H}/.ssh/agent/s.t.sshd.stale-B"
+mksock "${A}"
+mksock "${B}"
+seed default "${A}" "${PC}" "${H}/.ssh/agent/s.t.sshd.stale-OLD"
+d=$(agent attach-stale-owner "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" open attach default)
+if [[ $(rc "${d}") == 0 && $(link_of agent.sock) == "${B}" && $(owner_of default) == "${PC}" ]]; then
+  ok "持ち主の記録の先が今の先と違えば (張り替えの途中で止まった)、持ち主は分からないとして開いた接続へ移る"
+else
+  ng "持ち主の記録の先が違う" "rc=$(rc "${d}") link=$(link_of agent.sock) owner=$(owner_of default) err=$(err "${d}")"
+fi
+
+# 9c. 張り替えに失敗したら (~/.ssh に書けない)、先も持ち主も変えない。直れば次の attach で移る
+newhome swapfail
+A="${H}/.ssh/agent/s.t.sshd.swapfail-A"
+B="${H}/.ssh/agent/s.t.sshd.swapfail-B"
+mksock "${A}"
+mksock "${B}"
+seed default "${A}" "${OTHER}"
+chmod 500 "${H}/.ssh"
+d1=$(agent attach-swapfail-1 "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" open attach default)
+l1=$(link_of agent.sock)
+o1=$(owner_of default)
+chmod 700 "${H}/.ssh"
+d2=$(agent attach-swapfail-2 "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" open attach default)
+if [[ $(rc "${d1}") == 0 && $(out "${d1}") == "${H}/.ssh/agent.sock" && ${l1} == "${A}" && ${o1} == "${OTHER}" &&
+$(rc "${d2}") == 0 && $(link_of agent.sock) == "${B}" && $(owner_of default) == "${PC}" ]]; then
+  ok "張り替えに失敗したら先も持ち主も変えず (新しい持ち主と古い先の組を残さない)、直れば次の attach で移る"
+else
+  ng "張り替えの失敗" "1: rc=$(rc "${d1}") link=${l1} owner=${o1} / 2: rc=$(rc "${d2}") link=$(link_of agent.sock) owner=$(owner_of default) err=$(err "${d2}")"
 fi
 
 echo "== open の「開いた接続」"
@@ -545,6 +584,15 @@ else
   ng "rc の値が届いていない接続" "N: client=$(rec_field s.t.sshd.rc-N client) / W: client=$(rec_field s.t.sshd.rc-W client)"
 fi
 
+# 21b. 同じ socket の 2 回目の rc (ControlMaster で多重化した接続の 2 つ目の session) は開いた時刻を変えない
+o1=$(rec_field s.t.sshd.rc-A opened)
+d=$(agent rc-pc-again "${conn}" "SSH_AUTH_SOCK=${A}" "PJP_SSH_CLIENT=${PC}" rc)
+if [[ $(rc "${d}") == 0 && -n ${o1} && $(rec_field s.t.sshd.rc-A opened) == "${o1}" ]]; then
+  ok "rc: 同じ socket の 2 回目の session では、開いた時刻を引き継ぐ (多重化した古い接続が新しく見えない)"
+else
+  ng "rc の 2 回目の session" "1 回目=${o1} 2 回目=$(rec_field s.t.sshd.rc-A opened)"
+fi
+
 # 22. 記録しないもの (forward が無い・SSH_AGENT_PID・SSH_CONNECTION が無い)
 before=$(ls "$(state_of)/conn")
 d1=$(agent rc-noforward "${conn}" "PJP_SSH_CLIENT=${PC}" rc)
@@ -576,6 +624,16 @@ if [[ $(rc "${d}") == 0 && ! -s ${xauth_log} ]]; then
   ok "rc: DISPLAY が無ければ xauth を呼ばない (stdin も読まない)"
 else
   ng "rc の X11 なし" "xauth: $(cat "${xauth_log}")"
+fi
+
+# 23b. DISPLAY が無ければ stdin を読まない (読むと、閉じない stdin で固まる)
+t0=$(date +%s)
+d=$(agent_in <(sleep 5) rc-x11-block "${conn}" "SSH_AUTH_SOCK=${A}" rc)
+t1=$(date +%s)
+if [[ $(rc "${d}") == 0 ]] && ((t1 - t0 < 3)); then
+  ok "rc: DISPLAY が無ければ、閉じない stdin でも待たずに終わる ($((t1 - t0)) 秒)"
+else
+  ng "rc の stdin" "rc=$(rc "${d}") 秒=$((t1 - t0))"
 fi
 
 # 24. 何も無い HOME (~/.local も無い)
@@ -632,49 +690,50 @@ expect2() {
   fi
 }
 
-# 26. 場面 1 (cc-page 0003): 同じ PC から 4 本、別の PC から 2 本
+# 26. 場面 1 (cc-page 0003): 同じ PC から 4 本、別の PC から 2 本。socket の名前は開いた順と逆の並びにする
+#     (9A・8B・7C・6D・5E・4X)。名前の順で選ぶと 1-5 で B ではなく C を選んで落ちる
 newhome scene
 p="${H}/.ssh/agent/s.t.sshd.scene"
-open_conn "${p}-A" "${PC}"
-attach default "${p}-A" "${PC}"
-expect2 "場面 1-1: PC から hr default を開く (A)" "${p}-A" "(無い)"
-open_conn "${p}-B" "${PC}"
-attach s2 "${p}-B" "${PC}"
-expect2 "場面 1-2: PC から hr s2 を開く (B)。default は触らない" "${p}-A" "${p}-B"
-open_conn "${p}-C" "${PC}"
+open_conn "${p}-9A" "${PC}"
+attach default "${p}-9A" "${PC}"
+expect2 "場面 1-1: PC から hr default を開く (A)" "${p}-9A" "(無い)"
+open_conn "${p}-8B" "${PC}"
+attach s2 "${p}-8B" "${PC}"
+expect2 "場面 1-2: PC から hr s2 を開く (B)。default は触らない" "${p}-9A" "${p}-8B"
+open_conn "${p}-7C" "${PC}"
 watch scene-3 >/dev/null
-expect2 "場面 1-3: PC から素の ssh の端末 (C)。どちらの先も生きているので何もしない" "${p}-A" "${p}-B"
-open_conn "${p}-X" "${OTHER}"
+expect2 "場面 1-3: PC から素の ssh の端末 (C)。どちらの先も生きているので何もしない" "${p}-9A" "${p}-8B"
+open_conn "${p}-4X" "${OTHER}"
 watch scene-4 >/dev/null
-expect2 "場面 1-4: 別の PC から素の ssh (X)。何もしない" "${p}-A" "${p}-B"
-close_conn "${p}-A"
+expect2 "場面 1-4: 別の PC から素の ssh (X)。何もしない" "${p}-9A" "${p}-8B"
+close_conn "${p}-9A"
 watch scene-5 >/dev/null
-expect2 "場面 1-5: default を detach (A が閉じる)。PC の B・C のうち一番古い B を借りる" "${p}-B" "${p}-B"
-close_conn "${p}-B"
+expect2 "場面 1-5: default を detach (A が閉じる)。PC の B・C のうち一番古い B を借りる" "${p}-8B" "${p}-8B"
+close_conn "${p}-8B"
 watch scene-6 >/dev/null
-expect2 "場面 1-6: s2 を detach (B が閉じる)。PC の接続は C だけなので両方が C" "${p}-C" "${p}-C"
-open_conn "${p}-D" "${PC}"
-attach default "${p}-D" "${PC}"
-expect2 "場面 1-7: PC から hr default を開き直す (D)。C が生きていて同じ PC なので変えない" "${p}-C" "${p}-C"
-close_conn "${p}-C"
+expect2 "場面 1-6: s2 を detach (B が閉じる)。PC の接続は C だけなので両方が C" "${p}-7C" "${p}-7C"
+open_conn "${p}-6D" "${PC}"
+attach default "${p}-6D" "${PC}"
+expect2 "場面 1-7: PC から hr default を開き直す (D)。C が生きていて同じ PC なので変えない" "${p}-7C" "${p}-7C"
+close_conn "${p}-7C"
 watch scene-8 >/dev/null
-expect2 "場面 1-8: C の端末を閉じる。両方が D を借りる" "${p}-D" "${p}-D"
-close_conn "${p}-D"
+expect2 "場面 1-8: C の端末を閉じる。両方が D を借りる" "${p}-6D" "${p}-6D"
+close_conn "${p}-6D"
 watch scene-9 >/dev/null
-expect2 "場面 1-9: default を detach (D が閉じる)。X は値が違うので借りない (dangling)" "${p}-D" "${p}-D"
-open_conn "${p}-E" "${OTHER}"
-attach default "${p}-E" "${OTHER}"
-expect2 "場面 1-10: 別の PC から hr default を開く (E)。s2 は触らない" "${p}-E" "${p}-D"
-close_conn "${p}-E"
+expect2 "場面 1-9: default を detach (D が閉じる)。X は値が違うので借りない (dangling)" "${p}-6D" "${p}-6D"
+open_conn "${p}-5E" "${OTHER}"
+attach default "${p}-5E" "${OTHER}"
+expect2 "場面 1-10: 別の PC から hr default を開く (E)。s2 は触らない" "${p}-5E" "${p}-6D"
+close_conn "${p}-5E"
 watch scene-11 >/dev/null
-expect2 "場面 1-11: E が閉じる。default は同じ値の X を借り、s2 は持ち主が PC のままなので借りない" "${p}-X" "${p}-D"
+expect2 "場面 1-11: E が閉じる。default は同じ値の X を借り、s2 は持ち主が PC のままなので借りない" "${p}-4X" "${p}-6D"
 if [[ $(owner_of default) == "${OTHER}" && $(owner_of s2) == "${PC}" ]]; then
   ok "場面 1: 借りても持ち主は変わらない (default は 10 で別の PC、s2 は PC のまま)"
 else
   ng "場面 1 の持ち主" "default=$(owner_of default) s2=$(owner_of s2)"
 fi
 left=$(ls "$(state_of)/conn")
-if [[ ${left} == "s.t.sshd.scene-X" ]]; then
+if [[ ${left} == "s.t.sshd.scene-4X" ]]; then
   ok "watch は死んだ socket の記録を消す (残るのは生きている X だけ)"
 else
   ng "死んだ記録の掃除" "${left}"
@@ -707,9 +766,10 @@ newhome noowner
 p="${H}/.ssh/agent/s.t.sshd.noowner"
 seed default "${p}-A" ""
 open_conn "${p}-C" "${PC}"
+open_conn "${p}-N"
 watch noowner >/dev/null
 if [[ ${l1} == "${work}/h/noval/.ssh/agent/s.t.sshd.noval-A" && $(link_of agent.sock) == "${p}-A" ]]; then
-  ok "値が届いていない接続は借りず、持ち主が空の固定名には借りない"
+  ok "値が届いていない接続は借りず、持ち主が空の固定名には (値の届いていない接続も) 借りない"
 else
   ng "値が届いていない" "noval=${l1} noowner=$(link_of agent.sock)"
 fi
@@ -775,11 +835,25 @@ echo "== status"
 # 33. 固定名と記録を出す
 H="${work}/h/scene"
 d=$(agent status status)
-if [[ $(rc "${d}") == 0 && $(out "${d}") == *"${H}/.ssh/agent.sock -> ${H}/.ssh/agent/s.t.sshd.scene-X"* &&
-$(out "${d}") == *"${OTHER}"*"${H}/.ssh/agent/s.t.sshd.scene-X"* ]]; then
+if [[ $(rc "${d}") == 0 && $(out "${d}") == *"${H}/.ssh/agent.sock -> ${H}/.ssh/agent/s.t.sshd.scene-4X"* &&
+$(out "${d}") == *"${OTHER}"*"${H}/.ssh/agent/s.t.sshd.scene-4X"* ]]; then
   ok "status は固定名の先・持ち主と、記録にある接続を出す"
 else
   ng "status" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}")"
+fi
+
+# 33b. status は PATH の herdr が包んだものか (pjp-agent-link を呼ぶか) を出す
+mkdir -p "${work}/path-wrapped" "${work}/path-plain"
+printf '#!%s\nexec @agentLink@-like pjp-agent-link open attach\n' "${BASH}" >"${work}/path-wrapped/herdr"
+printf '#!%s\necho plain herdr\n' "${BASH}" >"${work}/path-plain/herdr"
+chmod +x "${work}/path-wrapped/herdr" "${work}/path-plain/herdr"
+d1=$(agent status-wrapped "PATH=${work}/path-wrapped:${PATH}" status)
+d2=$(agent status-plain "PATH=${work}/path-plain:${PATH}" status)
+if [[ $(out "${d1}") == *"${work}/path-wrapped/herdr (包んだもの)"* &&
+$(out "${d2}") == *"${work}/path-plain/herdr (包んでいない"* ]]; then
+  ok "status は PATH の herdr が包んだものかを出す (~/.local/bin などに包んでいない herdr があると気づける)"
+else
+  ng "status の herdr" "wrapped: $(out "${d1}" | grep herdr) / plain: $(out "${d2}" | grep herdr)"
 fi
 
 echo "== herdr を包む実行ファイル"
@@ -804,7 +878,10 @@ chmod +x "${work}/real/herdr"
 printf '#!%s\nexec bash %q "$@"\n' "${BASH}" "${agent_sh}" >"${work}/shim/agent-ok"
 printf '#!%s\necho /bogus\nexit 1\n' "${BASH}" >"${work}/shim/agent-fail"
 printf '#!%s\nsleep 30\necho /bogus\n' "${BASH}" >"${work}/shim/agent-hang"
-chmod +x "${work}/shim/agent-ok" "${work}/shim/agent-fail" "${work}/shim/agent-hang"
+# stdin を読み切り、stderr に書いてから本物の script を流すもの (包む実行ファイルが </dev/null と 2>/dev/null で
+# 守っていなければ、bridge の stdin を食い、stderr に漏れる)
+printf '#!%s\ncat >/dev/null\necho noise >&2\nexec bash %q "$@"\n' "${BASH}" "${agent_sh}" >"${work}/shim/agent-noisy"
+chmod +x "${work}/shim/agent-ok" "${work}/shim/agent-fail" "${work}/shim/agent-hang" "${work}/shim/agent-noisy"
 # herdr.sh の置き換え (herdr.nix が store のパスにするもの) を、偽物と手元の timeout にした写しを作る。
 # $1: 写しの名前、$2: pjp-agent-link の代わり
 make_wrapper() {
@@ -814,6 +891,7 @@ make_wrapper() {
 make_wrapper wrapper "${work}/shim/agent-ok"
 make_wrapper wrapper-fail "${work}/shim/agent-fail"
 make_wrapper wrapper-hang "${work}/shim/agent-hang"
+make_wrapper wrapper-noisy "${work}/shim/agent-noisy"
 
 # 包む実行ファイルを 1 回流す。引数は agent と同じ (先頭に写しの名前)。偽の herdr の書き留めは <置き場所>/herdr.log
 wrap() {
@@ -919,6 +997,9 @@ pane list
 --help
 session attach help
 session list
+--remote-keybindings server
+--session
+--session=
 EOF
 
 # 38. HERDR_SESSION (pane の中の env など)
@@ -943,6 +1024,18 @@ $(link_of agent.sock) == "${B}" ]]; then
   ok "bridge の stdin は本物の herdr が全部読み、stdout には本物の herdr の出力だけが出る (stderr も空)"
 else
   ng "bridge の stdin と stdout" "out=$(out "${d}") err=$(err "${d}") log=$(hlog "${d}")"
+fi
+
+# 39b. pjp-agent-link が stdin を読もうとしても・stderr に書いても、bridge の stdin と stderr には届かない
+newhome wrap-noisy
+B="${H}/.ssh/agent/s.t.sshd.wrap-noisy-B"
+mksock "${B}"
+d=$(wrap_in "${work}/ping" wrapper-noisy wrap-noisy "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" remote-client-bridge)
+if [[ $(rc "${d}") == 0 && $(out "${d}") == HERDR-OUT && -z $(err "${d}") && $(hlog "${d}") == *'stdin: PING'* &&
+$(link_of agent.sock) == "${B}" ]]; then
+  ok "pjp-agent-link には </dev/null と 2>/dev/null で呼ぶので、bridge の stdin を食わず stderr にも漏れない"
+else
+  ng "bridge の stdin と stderr の守り" "out=$(out "${d}") err=$(err "${d}") log=$(hlog "${d}")"
 fi
 
 # 40. WSL の手元

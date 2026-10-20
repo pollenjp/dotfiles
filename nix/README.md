@@ -1727,7 +1727,8 @@ Windows は `bootstrap-windows-ssh-config.sh` が置く `%USERPROFILE%\.ssh\conf
 
 **値が届いていないと、プロンプトに `⚠ PJP_SSH_CLIENT なし` が出る**（starship の `custom.pjp_ssh_client`）。ssh で入った
 shell では `PJP_SSH_CLIENT` が空のとき、herdr の pane ではその session の固定名の持ち主が空のとき（pane の env には
-server を起こした接続の値が残るので、記録を見る）。
+server を起こした接続の値が残るので、記録を見る）。この仕組みを入れる前に張られた固定名と、`herdr server` で起こしただけで
+まだ誰も開いていない session も持ち主が空なので、値の届く接続から 1 回開くまで出る。
 
 > ⚠️ 適用しても**すでに走っている herdr server には効かない**（固定名を持たずに起きている）。都合のよいときに
 > 1 回作り直す。pane のプロセスは終わる（Claude Code は herdr の agent session restore で会話へ戻れる）。
@@ -1751,11 +1752,15 @@ echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock (named session は ~/.ssh/agent
 ssh-add -l                   # 鍵が並ぶ
 ```
 
-- 張り替えのたびに `~/.local/state/pjp-agent-link/log` に 1 行残る（どの接続がいつ固定名を動かしたか）
+- 張り替えと接続の記録（rc）のたびに `~/.local/state/pjp-agent-link/log` に 1 行残る（どの接続がいつ固定名を動かしたか）
+- **ssh 先の PATH で、包んでいない herdr が先に見つかると固定名は渡らない。** herdr.exe は ssh 先の herdr と版が合わないとき
+  `~/.local/bin/herdr` へ入れることを提案する（既定は Yes。`~/.local/bin` は `~/.nix-profile/bin` より前）。断るか、入れて
+  しまったら `~/.local/bin/herdr` を消す。`pjp-agent-link status` の最後の行で、PATH の herdr が包んだものかを見られる
 - 見張りが動いているかは `systemctl --user status pjp-agent-link-watch.path`。何かで failed になっていたら
   `systemctl --user reset-failed pjp-agent-link-watch.path pjp-agent-link-watch.service` のあとで
   `systemctl --user start pjp-agent-link-watch.path`
-- `~/.ssh/rc` を置くと、sshd は xauth を自分では呼ばず（rc が渡す）、`/etc/ssh/sshrc` も走らせない。sftp・ForceCommand・
+- `~/.ssh/rc` を置くと、sshd は xauth を自分では呼ばず（rc が PATH の `xauth` へ渡す。X11 forwarding を使うホストでは
+  `xauth` を PATH に置く）、`/etc/ssh/sshrc` も走らせない。sftp・ForceCommand・
   `PermitUserRC no`・authorized_keys の `restrict` / `no-user-rc` の接続では rc が走らず、見張りはその接続を借りない。
   手で置いた `~/.ssh/rc` があると、switch が「would be clobbered」で止まる（中身を確かめて退避する）
 - 見張りは OpenSSH 10.1 より古いホスト（socket が `/tmp/ssh-*/`）と macOS では動かない（attach の張り替えだけが効く）

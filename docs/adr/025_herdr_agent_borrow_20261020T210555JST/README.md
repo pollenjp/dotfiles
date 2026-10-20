@@ -128,6 +128,10 @@ ssh で入った shell（herdr の外）で値が空なら、herdr の pane で�
 まま」かを見てから、一時名の symlink を rename で入れ替える（固定名が消える瞬間を作らない）。変わっていたら決め直す。
 見張りが、別のマシンから開き直された直後の固定名を、古い見立てで前の持ち主の接続へ戻さないため。
 
+持ち主は固定名を入れ替えたあとに書き、記録には張った先も添える（「値」と「張った先」の 2 行）。張った先が今の固定名の先と
+違う記録は「持ち主が分からない」として扱う。入れ替えの途中で失敗しても（書けない・時間切れで止められた）「新しい持ち主と
+古い先」の組は残らず、別のマシンの agent を同じマシンのものと取り違えない。
+
 ### I. shell の関数を消す
 
 fish・bash の `herdr` 関数と `ssh-agent-link` 関数は消す（同じことを shell ごとに 2 回書かない。関数を通らない hr の
@@ -148,6 +152,7 @@ fish・bash の `herdr` 関数と `ssh-agent-link` 関数は消す（同じこ�
 | `nix/files/starship.toml` | `[custom.pjp_ssh_client]` |
 | `nix/home/modules/claude.nix`・`nix/tests/claude-herdr-skill.nix` | skill は包む前の herdr から張る（コメントとテストを合わせた） |
 | `nix/tests/pjp-agent-link.test.sh`・`nix/tests/agent-link.nix` + `nix/flake.nix` | checks の `pjp-agent-link-test`・`agent-link-state` |
+| （branch のレビューで足したもの） | 張り替えの順と失敗の止め方・持ち主の記録の張った先・rc の開いた時刻の引き継ぎ・herdr.sh の端の引数・status の PATH の herdr。テストの足りなかった所（開いた順・stdin と stderr の守り・空の持ち主・rc の stdout）も足した |
 | `nix/tests/bootstrap-windows-ssh-config.test.sh` | 新しい `config` の中身と、前の版からの上書き |
 | `nix/README.md`・`win/README.md` | 運用手順 |
 | `docs/adr/008_…`・`022_…` | 冒頭の表に後続 ADR の行（本文はそのまま） |
@@ -197,6 +202,12 @@ fish・bash の `herdr` 関数と `ssh-agent-link` 関数は消す（同じこ�
 - user の systemd が止まっている間（linger の無いホストで最後の session が閉じたあと）は見張りも止まる。次に繋いだ
   接続の attach で直る
 - 削除した session の固定名と持ち主の記録は残る（使うプロセスが無いので害は無い。要らなければ消してよい）
+- **ssh 先の PATH で、包んでいない herdr が先に見つかると固定名は渡らない。** herdr.exe は remote の herdr と版が合わないとき、
+  `~/.local/bin/herdr` へ入れることを提案する（既定は Yes）。`~/.local/bin` は `~/.nix-profile/bin` より前にあるので、承認すると
+  hr の bridge は包んでいない herdr を打つ。`pjp-agent-link status` の最後の行で、PATH の herdr が包んだものかを見られる
+- `~/.ssh/rc` は X11 の cookie を PATH の `xauth` へ渡す（sshd の `XAuthLocation` は使えない）。X11 forwarding を使うホストで
+  `xauth` が PATH に無いと、X11 の認証が入らない（stderr に 1 行出る）。lavie は X11Forwarding no
+- `Host *` の `SetEnv` は、`AcceptEnv` の無いサーバー（GitHub など）にも `user@host` を送る（相手は捨てるが、届きはする）
 - 誰も繋いでいないあいだは、herdr の中から鍵は使えない（ADR 008 と同じ、意図した性質）
 
 ## 6. 検証 (Verification)

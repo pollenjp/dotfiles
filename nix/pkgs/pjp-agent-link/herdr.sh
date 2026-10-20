@@ -32,6 +32,7 @@ agent=@agentLink@
 timeout=@timeout@
 
 session=""
+session_given=0
 want_session=0
 passthru=0
 pos=()
@@ -43,15 +44,26 @@ for arg in "$@"; do
   fi
   case ${arg} in
     --) break ;;
-    --session) want_session=1 ;;
-    --session=*) session=${arg#--session=} ;;
-    -h | --help | -V | --version | --default-config | --skill | --remote | --remote=* | --machine | --machine=*)
+    --session)
+      want_session=1
+      session_given=1
+      ;;
+    --session=*)
+      session=${arg#--session=}
+      session_given=1
+      ;;
+    -h | --help | -V | --version | --default-config | --skill | --remote | --remote=* | --remote-keybindings | \
+      --remote-keybindings=* | --machine | --machine=*)
       passthru=1
       ;;
     -*) ;;
     *) pos+=("${arg}") ;;
   esac
 done
+# 値の無い --session (末尾の --session・--session=) は herdr がエラーにするので、何もしない
+if ((want_session)) || { ((session_given)) && [[ -z ${session} ]]; }; then
+  passthru=1
+fi
 
 mode=""
 if ((! passthru)); then
