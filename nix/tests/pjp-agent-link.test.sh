@@ -40,6 +40,9 @@
 #     session は引数・HERDR_SESSION・default の順。bridge の stdin を読まず、stdout には本物の herdr の出力だけが
 #     出る。WSL の手元では env を変えない。pjp-agent-link が失敗しても・返事をしなくても (10 秒で打ち切る)、
 #     元の env で herdr を起こす
+#   - starship.toml の custom.pjp_ssh_client は sh で判定し、ssh で入った shell で PJP_SSH_CLIENT が空・% を含む
+#     とき、herdr の pane で固定名の持ち主が空・無いときだけ警告を出す (値がある・持ち主がある・local・手元の
+#     shell では出さない)。本物の starship でも同じに出る。判定で ssh-add を呼ばない
 #
 # ## 作り
 #
@@ -57,6 +60,7 @@ here=$(
   pwd -P
 )
 pkgdir=$(realpath -- "${1:-${here}/../pkgs/pjp-agent-link}")
+starship_toml=$(realpath -- "${2:-${here}/../files/starship.toml}")
 agent_sh="${pkgdir}/pjp-agent-link.sh"
 wrapper_sh="${pkgdir}/herdr.sh"
 
@@ -963,6 +967,82 @@ $(hsock "${d2}") == "${B}" ]] && ((t1 - t0 < 20)); then
   ok "pjp-agent-link が失敗しても・返事をしなくても ($((t1 - t0)) 秒で打ち切る)、元の env で herdr を起こす"
 else
   ng "pjp-agent-link の失敗" "1: rc=$(rc "${d1}") sock=$(hsock "${d1}") / 2: rc=$(rc "${d2}") sock=$(hsock "${d2}") 秒=$((t1 - t0))"
+fi
+
+echo "== starship の PJP_SSH_CLIENT の警告"
+
+# starship.toml の custom.pjp_ssh_client の when と shell を取り出す
+python3 -I -c '
+import sys, tomllib
+with open(sys.argv[1], "rb") as f:
+    m = tomllib.load(f)["custom"]["pjp_ssh_client"]
+open(sys.argv[2], "w").write(m["when"])
+print(" ".join(m.get("shell", [])))
+' "${starship_toml}" "${work}/when.sh" >"${work}/when-shell"
+if [[ $(cat "${work}/when-shell") == sh ]]; then
+  ok "custom.pjp_ssh_client は sh で判定する (fish を起こさない)"
+else
+  ng "custom.pjp_ssh_client の shell" "$(cat "${work}/when-shell")"
+fi
+
+# when を流して、警告を出すか (0) 出さないか (1) を返す。引数は env に渡す VAR=値…
+shows() {
+  env -i HOME="${H}" PATH="${PATH}" FAKE_AGENT_MODES="${modes}" FAKE_SSH_ADD_LOG="${ssh_add_log}" "$@" \
+    sh "${work}/when.sh" </dev/null >/dev/null 2>&1
+}
+# 警告を出す・出さないの期待と結果を比べる。$1: 説明、$2: show / hide、残り: env に渡す VAR=値…
+expect_warn() {
+  local what=$1 want=$2 got=hide
+  shift 2
+  if shows "$@"; then
+    got=show
+  fi
+  if [[ ${got} == "${want}" ]]; then
+    ok "starship: ${what}"
+  else
+    ng "starship: ${what}" "want=${want} got=${got}"
+  fi
+}
+
+newhome starship
+seed default "${H}/.ssh/agent/s.t.sshd.starship-A"
+: >"${ssh_add_log}"
+expect_warn "ssh で入った shell で値が無ければ出す" show "${conn}"
+expect_warn "ssh で入った shell で値が展開されていない (%u@%L) なら出す" show "${conn}" 'PJP_SSH_CLIENT=%u@%L'
+expect_warn "ssh で入った shell で値があれば出さない" hide "${conn}" "PJP_SSH_CLIENT=${PC}"
+expect_warn "herdr の pane で固定名の持ち主の記録が無ければ出す" show "${conn}" "PJP_SSH_CLIENT=${PC}" "SSH_AUTH_SOCK=${H}/.ssh/agent.sock"
+seed default "${H}/.ssh/agent/s.t.sshd.starship-A" ""
+expect_warn "herdr の pane で固定名の持ち主が空なら出す (pane の env の値は見ない)" show "${conn}" "PJP_SSH_CLIENT=${PC}" "SSH_AUTH_SOCK=${H}/.ssh/agent.sock"
+seed default "${H}/.ssh/agent/s.t.sshd.starship-A" "${PC}"
+expect_warn "herdr の pane で固定名の持ち主があれば出さない (pane の env に値が無くても)" hide "${conn}" "SSH_AUTH_SOCK=${H}/.ssh/agent.sock"
+seed s2 "${H}/.ssh/agent/s.t.sshd.starship-B" ""
+expect_warn "session ごと: s2 の pane は s2 の持ち主を見る" show "SSH_AUTH_SOCK=${H}/.ssh/agent.s2.sock"
+seed default "${H}/.1password/agent.sock" local
+expect_warn "手元の 1Password から開いた pane (持ち主 local) では出さない" hide "SSH_AUTH_SOCK=${H}/.ssh/agent.sock"
+expect_warn "手元の shell では出さない" hide "SSH_AUTH_SOCK=${H}/.1password/agent.sock"
+expect_warn "WSL の手元の shell では出さない" hide
+
+# 本物の starship で読ませる (TOML の書き方と、format に出る文言)
+if command -v starship &>/dev/null; then
+  starship_out() {
+    env -i HOME="${H}" PATH="${PATH}" FAKE_AGENT_MODES="${modes}" FAKE_SSH_ADD_LOG="${ssh_add_log}" \
+      STARSHIP_CONFIG="${starship_toml}" STARSHIP_SHELL=bash STARSHIP_CACHE="${work}/starship-cache" "$@" \
+      starship module custom.pjp_ssh_client </dev/null 2>/dev/null
+  }
+  s1=$(starship_out "${conn}")
+  s2=$(starship_out "${conn}" "PJP_SSH_CLIENT=${PC}")
+  if [[ ${s1} == *"PJP_SSH_CLIENT なし"* && -z ${s2} ]]; then
+    ok "本物の starship でも、値の無い ssh の shell でだけ「PJP_SSH_CLIENT なし」を出す"
+  else
+    ng "本物の starship" "値なし: $(printf '%q' "${s1}") / 値あり: $(printf '%q' "${s2}")"
+  fi
+else
+  ng "本物の starship" "starship が見つからない"
+fi
+if [[ ! -s ${ssh_add_log} ]]; then
+  ok "starship: 判定で ssh-add を呼ばない"
+else
+  ng "starship が ssh-add を呼んだ" "$(cat "${ssh_add_log}")"
 fi
 
 echo

@@ -296,6 +296,14 @@
               system
               ;
           };
+          agent-link-state = import ./tests/agent-link.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 

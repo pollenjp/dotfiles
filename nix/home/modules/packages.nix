@@ -41,9 +41,9 @@
     # htop の l (開いているファイルの一覧) が呼ぶ
     lsof
 
-    # coding agent 向けの multiplexer。
-    # 設定は modules/files.nix -> files/herdr/config.toml
-    herdr
+    # coding agent 向けの multiplexer の herdr は modules/agent-link.nix が入れる (server に session ごとの
+    # 固定名の SSH_AUTH_SOCK を渡す実行ファイルで包んだもの。ADR 025)。設定は modules/files.nix ->
+    # files/herdr/config.toml
 
     # PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す。
     # 実体は nix/pkgs/pjp-pr-diff/。fish の abbr と bash の alias の gdp で呼ぶ

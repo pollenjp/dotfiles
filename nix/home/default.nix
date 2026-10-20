@@ -9,6 +9,7 @@
     ./modules/files.nix
     ./modules/git.nix
     ./modules/ssh.nix
+    ./modules/agent-link.nix
     ./modules/starship.nix
     ./modules/shell-common.nix
     ./modules/fish.nix
