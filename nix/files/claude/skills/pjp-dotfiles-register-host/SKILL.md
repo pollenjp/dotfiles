@@ -31,29 +31,31 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 | 関門 | 見せるもの |
 | --- | --- |
-| dotfiles-private の作業ツリーに書く前 | 下書きの全文と、登録で振る舞いが変わる所 (下の「確認の形」) |
-| `~/dotfiles/flake.nix` を書き換える前 | 差分 (pjp-dotfiles-local-flake-migrate の「確認の形」) |
+| dotfiles-private の作業ツリーに書く前 | 下の「確認の形 (登録)」 |
+| `~/dotfiles/flake.nix` を書き換える前 | 下の「確認の形 (merge のあと)」 |
 
-下書きは scratchpad に描く。dotfiles-private の作業ツリーには、確認の答えが来てから置く。
+下書きは scratchpad に描き、比べるのも scratchpad の写しで先にできる。dotfiles-private の作業ツリーには、確認の答えが来てから置く。
 
 ## どの会話が何をするか
 
 | 手順 | する会話 |
 | --- | --- |
-| 1 調べる・2 下書きの確認 | その PC の会話 (今の世代とローカル flake はその PC にしか無い。読むだけ) |
+| 1 調べる・2 下書きと確認 | その PC の会話 (今の世代とローカル flake はその PC にしか無い。読むだけ) |
 | 3 書く・4 比べる・5 PR | dotfiles-private の worktree の会話。今の会話が集約ハブ (`~/h`) や別の repo なら、pjp-herdr-other-repo の手順で dotfiles-private の子に、確かめた下書きと元にしたホストを渡して任せる |
 | 6 merge のあとのローカル flake | その PC の会話 (repo の外のユーザーのファイル) |
 
 ## 前提
 
 - `<p>` は ADR 025 以降の本体の `nix/scripts/private-host.sh` のフルパス。`bash <p> <コマンド>` で流す (Bash tool はシェルの変数を
-  次の呼び出しへ持ち越さない)。比べる (`compare`) ときの本体は、既定でこの script の repo の `nix/`
+  次の呼び出しへ持ち越さない)。`compare` の本体は、既定でこの script の repo の `nix/`
 - **比べる間、本体の checkout を動かさない** (pull・編集・別の作業の commit)。`path:` の入力は narHash で lock されるので、途中で
-  変わると比べ方がずれる。変わりうるなら `git -C <本体> archive HEAD nix | tar -x -C <scratchpad>/body` で写し、その
-  `<scratchpad>/body/nix/scripts/private-host.sh` を使う
+  変わると比べ方がずれる。動きうるなら、`git -C <本体> status` で commit していない変更が無いことを見てから
+  `git -C <本体> archive HEAD nix | tar -x -C <scratchpad>/body` で写し、その `<scratchpad>/body/nix/scripts/private-host.sh` を
+  `<p>` にする (draft・compare とも)。写しが効くのは private-host.sh だけ (local-flake-migrate.sh は git の履歴とローカル flake の本体を使う)
 - 作業場所・下書きは Claude の scratchpad に作る。`~/dotfiles` と dotfiles-private の main の clone (setup が取る場所) には書かない
 - 秘密 (API キー・トークン) を書かない (`~/.config/pjp/env` のもの)。dotfiles-private の `nix/` は誰でも読める `/nix/store` に入る
 - private の値 (hostname・Windows のユーザー名・option の値) を public の repo (dotfiles の文書・テスト・skill・PR の本文) に書かない
+- PR を出すなら、その会話のチケットに結ぶ (pjp-dev-tracker。dotfiles-private の repo の行)
 
 ## 手順
 
@@ -64,27 +66,34 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - **ホストの名前** (`<user>@<短い hostname>`): ファイル名になる。setup はこの名前を探すので、別の名前にしない
 - **この PC のホスト**: 「ある」なら登録済み。下の「既に登録した PC」へ
 - **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)
-- **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した): 元にするホストを決めずに、setup が選ぶホスト
-  (推測) と、登録簿で値の違う候補 (例: 署名の入る `pollenjp@laptop` と入らない `pollenjp@x86_64-linux`) を並べ、推奨と理由を
-  添えてユーザーに確かめる。手がかりは、前の世代 (`~/.local/state/nix/profiles/home-manager-<n>-link`) を `inspect` と同じ形で
-  評価して一致するか、今の世代の `home-files/.config/git/config` の署名 (`gpgSign`) など。深追いする前に聞いてよい
+- **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した。「lock を写しで張り直して評価した」と
+  出ていれば、本体が変わっているので一致しないのは想定どおり): 元にするホストを黙って決めない。
+  - 前の会話で決めた値 (チケットの決定・spec・PR) があれば、それを推奨の根拠にする。今の世代と違うなら、その違い (例: 署名が外れる) を確認で書く
+  - 手がかり: 今の世代 (`readlink -f ~/.local/state/nix/profiles/home-manager`) と前の世代
+    (`~/.local/state/nix/profiles/home-manager-<n>-link`) の `home-files/.config/git/config` の署名 (`gpgSign`)、`local` の値が当たって
+    いるか (cc-pages の port など)。登録簿で値の違う候補 (例: 署名の入る `pollenjp@laptop` と入らない `pollenjp@x86_64-linux`) を並べる
+  - 候補ごとに下書きを描いて比べ (手順 2)、ホストの問いと下書きの確認を 1 回にまとめてよい
 - **WSL**: Windows のユーザー名。下書きの `wsl.windowsUserName` と合うか
 - **local の行**: dotfiles の option の外の行 (`programs.*` など) は下書きに入らない
 
 ### 2. 下書きを描いて確かめる (その PC)
 
-`bash <p> draft --base <元のホスト> --out <scratchpad>/<名前>.nix`
-
-- 読む所: 値 (`mkHome` の引数と `modules`)・`# TODO:` の行 (値を書き出せなかった option)・頭のコメントの notes
-  (dotfiles の外の local の行。要るなら `modules` に足す、要らないなら消す。どちらかはユーザーに聞く)
-- 既定と同じ値を明示した行 (例: `gitViaGh.enable = true`) も描かれる。書いた意図はユーザーにしか分からないので消さない
-- 下の「確認の形 (下書き)」で出し、答えが来るまで次へ進まない
+1. `bash <p> draft --base <元のホスト> --out <scratchpad>/draft/<名前>.nix`
+2. 読む: 値 (`mkHome` の引数と `modules`)・`# TODO:` の行 (値を書き出せなかった option)・頭のコメントの notes (dotfiles の外の local の
+   行。要るなら `modules` に足す、要らないなら消す。どちらかはユーザーに聞く)。既定と同じ値を明示した行 (例: `gitViaGh.enable = true`)
+   も描かれる。書いた意図はユーザーにしか分からないので消さない
+3. 確認の前に比べる (書くのは scratchpad だけ): `<scratchpad>/preview/nix/hosts/<名前>.nix` に下書きを写し、
+   `bash <p> compare --base <元のホスト> --private <scratchpad>/preview`。読み方は手順 4 の表
+4. 初めての登録 (dotfiles-private の README に `nix/hosts/` が無い) なら、README に足す行と節の下書きも作る (何を置くか・`/nix/store` に
+   入ること・登録はこの skill で)
+5. 「確認の形 (登録)」で出し、答えが来るまで次へ進まない
 
 ### 3. dotfiles-private に書く (dotfiles-private の worktree)
 
-- dotfiles-private の main の checkout (setup が取る clone) には書かない。branch を切った worktree に書く (pjp-herdr-other-repo)
-- 確かめた下書きを `nix/hosts/<名前>.nix` に置く (頭のコメントは残してよい)
-- README.md に `nix/hosts/` の行と節が無ければ足す (何を置くか・`/nix/store` に入ること・登録はこの skill で)
+- setup が取る clone の main では branch を切らない・書かない (bootstrap-dotfiles-private は、未コミットの変更や upstream の無い branch では
+  取得を飛ばす)。pjp-herdr-other-repo の herdr の worktree か、herdr を使わない会話なら
+  `git -C <clone> worktree add <場所> -b <branch> origin/main`
+- 確かめた下書きを `nix/hosts/<名前>.nix` に置く (頭のコメントは残す。merge のあと、元にしたホストをそこから引く)。README も確かめた形で
 
 ### 4. 比べる (dotfiles-private の worktree)
 
@@ -107,50 +116,65 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 ### 6. merge のあと (その PC)
 
-1. clone を新しくする: `~/dotfiles/setup --steps private-fetch` (か `git -C <clone> pull --ff-only`)
-2. merge のあとの本体と clone で比べ直す: `bash <p> compare --base <元のホスト> --private <clone>` が 0
+1. clone を新しくする: `~/dotfiles/setup --steps private-fetch` (取得して fast-forward するだけで、switch しない。確認なしで流してよい)
+2. merge のあとの本体と clone で比べ直す: `bash <p> compare --base <元のホスト> --private <clone>` が 0。元のホストは、登録したファイルの
+   頭のコメント (「元にしたホスト: …」) にある
 3. ローカル flake を今の雛形へ移す: pjp-dotfiles-local-flake-migrate の手順 (prepare → 衝突 → compare)。prepare が dotfiles-private の
-   入力を足す (指し直す)
+   入力を足す (指し直す)。この時点の compare で、登録簿のホストが全部「同じ」で、この PC のホストが「dotfiles-private のホスト (…この PC の
+   ホスト)」と出ることを見る (移すこと自体は値を落としていない)
 4. `<作業場所>/new/flake.nix` で、登録したファイルへ移した値を `local` から外し、雛形の既定に戻す (例: `devTracker.enable = false`・
-   `notion.profile = null`・port の行はコメントに戻す)。外した値は、登録簿のホストを `--host` で当てたときにしか効かない
-5. migrate の compare は 1 になる: 登録簿のホストは外した値の分だけ違い、この PC のホストは「dotfiles-private のホスト (移した
-   flake だけ。この PC のホスト)」と出る (setup の選ぶホストが変わる)。この 2 つが出る違いの全部なら、確認の形で見せて承認を取り、
-   `apply --accept-changes`
-6. `~/dotfiles/setup --which-host` が `<名前><TAB>private` を出すことを確かめ、`~/dotfiles/setup --update` を流してよいかを聞く
+   `notion.profile = null`・port の行はコメントに戻す)。**既定と同じ値を明示した行 (`gitViaGh.enable = true` など) も外す** (登録した
+   ファイルに残っている。pjp-dotfiles-local-flake-migrate の「既定と同じ値をあえて書いた行は消さない」は、移すだけのときの決まり)。
+   手で足したホストも module も無ければ、外したあとの `new/flake.nix` は `<作業場所>/template.nix` と同じになる (`diff` で確かめられる)
+5. もう一度 compare: 1 になり、違いは外した値の分 (登録簿のホスト) と、この PC のホストが足されることだけ、を確かめる。apply の前に
+   `DOTFILES_LOCAL_DIR=<作業場所>/new bash <本体>/nix/scripts/setup.sh --which-host` が `<名前><TAB>private` を出すことも見る
+6. 「確認の形 (merge のあと)」で出して承認を取り、`apply --accept-changes`
+7. `~/dotfiles/setup --which-host` が `<名前><TAB>private` を出すことを確かめ、`~/dotfiles/setup --update` を流してよいかを聞く
    (`--host` は付けない。この PC で switch する)
 
 ## 既に登録した PC (値を直す)
 
-- `inspect` の「この PC のホスト: … (ある)」。元にするホストは今のそのホスト (`--base <名前>`)。ローカル flake がまだ clone の
-  `nix/` を読んでいなければ、手順 6 の 3〜4 を先にする
-- 直したい値を反映した下書きを作り、今のファイルとの差 (`diff -u`) を見せて確認を取る (手順 2 と同じ関門)
+- `inspect` の「この PC のホスト: … (ある)」。ローカル flake がまだ clone の `nix/` を読んでいなければ、手順 6 の 3〜7 を先にする
+- 元にするホストは今のそのホスト (`--base <名前>`)。直したい値を反映した下書きを作り、今のファイルとの差 (`diff -u`) を見せて確認を
+  取る (手順 2 と同じ関門)
 - `compare --base <名前> --private <worktree>` は直した値の分だけ違う (1)。今と同じなら何もしない
 
-## 確認の形 (下書き)
+## 確認の形 (登録)
 
 手順 3 の前に、この順で出す。
 
-1. 何をするか: dotfiles-private に `nix/hosts/<名前>.nix` を足す PR を出す。merge のあとローカル flake を移すまで、setup はまだ
-   そのホストを選ばない
-2. 元にしたホストと、そう決めた理由 (今の世代と一致した・一致しないので推測した、など)
-3. 下書きの全文
-4. 登録で変わる所・変わらない所: 署名 (`onePassword`)・Notion の宛先 (`notion.profile`)・Dev Tracker・cc-pages の port・WSL の値。
-   compare を流していれば、その結果
+1. 何をするか: dotfiles-private に `nix/hosts/<名前>.nix` (初めてなら README も) を足す PR を出す。merge のあとローカル flake を移すまで、
+   setup はまだそのホストを選ばない
+2. 元にしたホストと、そう決めた理由 (今の世代と一致した・前に決めた値・一致しないので推した、など)
+3. 下書きの全文 (と README の追記)
+4. compare の結果 (scratchpad の写しで比べた値)。登録で変わる所・変わらない所: 署名 (`onePassword`)・Notion の宛先 (`notion.profile`)・
+   Dev Tracker・cc-pages の port・WSL の値。2 段目のあとに `--host <登録簿のホスト>` で当てると、値は登録したファイルではなく雛形の
+   既定から来る (setup は警告するだけ) ことも書く
 5. notes (dotfiles の外の local の行) と `# TODO:` の行をどうするか
 6. 問い: 「この内容で dotfiles-private に登録してよいですか」(残る判断は、推奨と理由を添えて選択肢ごとに)
+
+## 確認の形 (merge のあと)
+
+pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
+
+- `--host` なしで当たるホストの中身は変わらない (手順 6-2 の compare が 0)。apply が「値が変わるので反映は setup --update」と出すのは
+  登録簿のホストの話で、`setup --update` は lock を張り直し、登録したホストへ切り替えるために流す
+- `local` から外した値と、外したあとに効く場面 (`--host` で登録簿のホストを当てたときだけ)
+- `DOTFILES_LOCAL_DIR=<作業場所>/new` の `--which-host` が `<名前><TAB>private` だったこと
 
 ## よくある誤り
 
 | やりがちなこと | どうするか |
 | --- | --- |
-| 確認の前に dotfiles-private の作業ツリーに書く | 下書きは scratchpad。確認の答えのあとで置く |
-| dotfiles-private の main の clone に書く・commit する | branch を切った worktree に書く |
+| 確認の前に dotfiles-private の作業ツリーに書く | 下書きと比べるのは scratchpad。確認の答えのあとで置く |
+| dotfiles-private の main の clone で branch を切る・書く | 別の worktree に書く |
 | 今の世代と一致するかで「中身が同じ」を決める | compare (同じ本体・同じ lock の旧い形と新しい形) で決める |
 | 下書きを手で一から書く | draft が描く (既定と同じ明示の値・WSL の値も) |
 | 登録の PR を出して終わる | merge のあとローカル flake を移すまで setup は選ばない。`--which-host` で確かめる |
 | 比べている間に本体を pull・編集する | 本体を写して使う |
 | ファイル名を好きな名前にする | `private-host.sh name` の名前 (setup がその名前を探す) |
-| 一致するホストが無いのに、推測のホストで黙って進める | 候補を並べてユーザーに確かめる (署名の有無などで値が変わる) |
+| 一致するホストが無いのに、推測のホストで黙って進める | 前に決めた値と候補を並べてユーザーに確かめる (署名の有無などで値が変わる) |
+| 移したあとも local に値を残す (既定と同じ明示の値も) | 登録したファイルが持つので外す。残すと 2 か所に同じ値が並び、片方だけ直してずれる |
 | private の値を dotfiles の PR の本文や文書に書く | private の値は dotfiles-private の中だけ |
 
 ## 関連
@@ -158,3 +182,4 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」・ADR 025
 - pjp-dotfiles-local-flake-migrate — 手順 6 の、ローカル flake を今の雛形へ移す側
 - pjp-herdr-other-repo — dotfiles-private の worktree を作る・子に任せる
+- pjp-dev-tracker — PR とチケットを結ぶ

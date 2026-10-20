@@ -401,7 +401,7 @@ draft.render {
 }'
 
 cmd_inspect() {
-  local flake_dir=${default_flake_dir} name system clone pin state rc=0 main hand lines l which gen matched="" f
+  local flake_dir=${default_flake_dir} name system clone pin state rc=0 main hand lines l which gen matched="" f reads=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --flake)
@@ -461,6 +461,7 @@ cmd_inspect() {
     if [[ -z ${pin} ]]; then
       echo "  dotfiles-private の入力: 無い (前の雛形。登録が merge されたら今の雛形へ移す)"
     elif [[ -d ${pin} && -d ${clone}/nix && $(cd -P -- "${pin}" && pwd) == "$(cd -P -- "${clone}/nix" && pwd)" ]]; then
+      reads=1
       printf '  dotfiles-private の入力: %s (clone の nix/ を読んでいる)\n' "${pin}"
     elif [[ ${pin} == */private-stub ]]; then
       printf '  dotfiles-private の入力: %s (本体の空の stub。clone の nix/ を読んでいない)\n' "${pin}"
@@ -521,8 +522,21 @@ cmd_inspect() {
       fi
     fi
   fi
-  echo "次: 元にするホストを決めて、下書きを描く:"
-  printf '  %s draft --base <ホスト> --flake %s\n' "${self}" "${flake_dir}"
+  if [[ -n ${name} && -f ${clone}/nix/hosts/${name}.nix ]]; then
+    printf '次: この PC は登録済み (%s)。\n' "${clone}/nix/hosts/${name}.nix"
+    if ((reads == 0)); then
+      echo "  ローカル flake が dotfiles-private の nix/ を読んでいないので、setup はまだこのホストを選ばない。今の雛形へ移す"
+      echo "  (pjp-dotfiles-register-host の手順 6):"
+      printf '    %s/local-flake-migrate.sh prepare --flake %s\n' "${script_dir}" "${flake_dir}"
+      echo "  値を直すなら、移したあとで今の値から下書きを描き、今のファイルとの差を見る:"
+    else
+      echo "  値を直すなら、今の値から下書きを描き、今のファイルとの差を見る:"
+    fi
+    printf '    %s draft --base %s --flake %s\n' "${self}" "${name}" "${flake_dir}"
+  else
+    echo "次: 元にするホストを決めて、下書きを描く:"
+    printf '  %s draft --base <ホスト> --flake %s\n' "${self}" "${flake_dir}"
+  fi
 }
 
 cmd_draft() {

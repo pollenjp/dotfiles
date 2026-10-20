@@ -428,6 +428,12 @@ else
   ng "inspect (ユーザーの flake)" "$(cat "${c}/nix-calls")"
 fi
 
+if grep -qF 'draft --base <ホスト>' "${c}/out" && ! grep -qF '登録済み' <<<"$(sed -n '/^次:/,$p' "${c}/out")"; then
+  ok "inspect: 登録していない PC には、次に下書きを描くコマンドを出す"
+else
+  ng "inspect (次: 登録していない)" "$(sed -n '/^次:/,$p' "${c}/out")"
+fi
+
 # 11. inspect: 今の世代と一致するホストが無い
 ln -sfn "${c}/store/gen-9" "${c}/home/.local/state/nix/profiles/home-manager"
 mkdir -p "${c}/store/gen-9"
@@ -436,6 +442,17 @@ if [[ $(rc "${c}") == 0 ]] && grep -qF '一致するホストはありません'
   ok "inspect: 今の世代と一致するホストが無ければ、そう出す"
 else
   ng "inspect (一致なし)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 11b. inspect: 登録済みの PC には、次に打つものとして値の直し方と、ローカル flake が読んでいなければ移し方を出す
+printf '{ mkHome, ... }: mkHome { username = "alice"; }\n' >"${c}/private/nix/hosts/alice@box.nix"
+run_nix "${c}" inspect --flake "${c}/local"
+next=$(sed -n '/^次:/,$p' "${c}/out")
+if [[ $(rc "${c}") == 0 && ${next} == *"登録済み"* ]] \
+  && [[ ${next} == *"draft --base alice@box"* && ${next} == *"local-flake-migrate.sh prepare"* ]]; then
+  ok "inspect: 登録済みの PC には、値の直し方 (draft --base <名前>) と、読んでいないローカル flake の移し方を出す"
+else
+  ng "inspect (次: 登録済み)" "rc=$(rc "${c}") ${next}"
 fi
 
 # 12. draft: --out に書く・在れば --force なしで 2・stdout・評価が落ちれば 3
