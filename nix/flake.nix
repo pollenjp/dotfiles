@@ -132,7 +132,7 @@
                 node ${./tests/claude-footer-links.test.mjs} ${./files/claude/footer-links.json}
                 touch $out
               '';
-          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
@@ -142,6 +142,8 @@
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
+          local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
             pkgs.runCommand "check-test-grep-q-test"

@@ -4,7 +4,10 @@
 # nix/scripts/setup.sh が最後に出すもの (「結果」の後の警告のまとめと、残りの手作業) を、
 # 使い捨ての checkout と偽の手順で確かめる。
 #
-#   bash nix/tests/setup-post-notes.test.sh [<setup.sh のパス>]
+#   bash nix/tests/setup-post-notes.test.sh [<nix/scripts のパス> | <setup.sh のパス>]
+#
+# nix/scripts のディレクトリを渡すと、雛形の版を見るケースのために、隣の local-flake-migrate.sh と
+# setup-local-flake.sh も使う (setup.sh だけを渡したときは、そのケースを飛ばす)。
 #
 # flake の checks (setup-post-notes-test) が Nix のサンドボックスで流す。
 #
@@ -29,6 +32,11 @@
 #     exec されたのでない実行は、外から渡された引き継ぎの変数を読まない (TKT-221)
 #   - origin が ssh の URL でない (https など) なら、gitViaGh のマシンでも gh を通さずに今までどおり git で取り、
 #     fetch に失敗しても SSH 鍵の案内を付けない
+#   - ローカル flake の「# 雛形の版:」の印が今の雛形と違えば (local-flake-migrate.sh check が 1)、手順が通ったときは
+#     残りの手作業で「前の雛形から作られています」と移し方 (local-flake-migrate.sh prepare と skill) を知らせる。
+#     印が同じなら出さない。local-flake を流したときは、setup-local-flake.sh の警告がまとめに載るので出さない
+#   - switch が落ちたときは (残りの手作業は出ない)、印が今と違えば、失敗の案内のあとに、本体で option が削除・
+#     改名されると旧い local のままでは評価が止まることと移し方を stderr に出す。印が同じなら出さない
 #
 # ## 作り
 #
@@ -46,7 +54,14 @@ here=$(
   cd -- "$(dirname "$0")" &>/dev/null || exit
   pwd -P
 )
-setup=${1:-${here}/../scripts/setup.sh}
+arg=${1:-${here}/../scripts}
+if [[ -d ${arg} ]]; then
+  scripts=${arg}
+  setup=${arg}/setup.sh
+else
+  scripts=""
+  setup=${arg}
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/setup-post-notes-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
@@ -67,7 +82,7 @@ ng() {
 # 要るコマンドだけを並べた PATH (git・gh・nix・home-manager は入れない)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env jq awk sed grep sort head tr cat dirname basename readlink uname id mktemp mkdir rm chmod; do
+for c in env jq awk sed grep sort head tr cat dirname basename readlink uname id mktemp mkdir rm chmod cksum; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -516,6 +531,107 @@ if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[本体の更�
   ok "ssh でない origin の fetch に失敗しても、SSH 鍵の案内は付けない"
 else
   ng "ssh でない origin の fetch の失敗" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
+fi
+
+# ---- ローカル flake の雛形の版 (setup.sh だけを渡したときは飛ばす) ----
+if [[ -n ${scripts} ]]; then
+  # ケースの checkout に local-flake-migrate.sh と本物の setup-local-flake.sh を写す (サンドボックスでは store から
+  # 写すので読み取り専用になる。偽の手順で上書きできるよう、書き込みの権限を足す)
+  with_migrate() {
+    cp "${scripts}/local-flake-migrate.sh" "${scripts}/setup-local-flake.sh" "$1/repo/nix/scripts/"
+    chmod u+w "$1/repo/nix/scripts/local-flake-migrate.sh" "$1/repo/nix/scripts/setup-local-flake.sh"
+  }
+  # 今の雛形の印
+  current_id() { "${BASH}" "$1/repo/nix/scripts/local-flake-migrate.sh" id; }
+  # 印 ($2) を持つローカル flake を置く (hostsWith と notion.profile も書き、ほかの案内を出させない)
+  local_with_marker() {
+    mkdir -p "$1/local"
+    printf '# 雛形の版: %s\n{\n  inputs.dotfiles.url = "path:%s/repo/nix";\n  # dotfiles.lib.hostsWith / dotfiles.claude.notion.profile\n}\n' \
+      "$2" "$1" >"$1/local/flake.nix"
+  }
+  # 何もせず 1 を返す偽の home-manager の bin
+  failing_hm_bin() {
+    local b="$1/failing-bin"
+    mkdir -p "${b}"
+    printf '#!%s\nexit 1\n' "${BASH}" >"${b}/home-manager"
+    printf '#!%s\nexit 0\n' "${BASH}" >"${b}/nix"
+    chmod +x "${b}/home-manager" "${b}/nix"
+    echo "${b}"
+  }
+
+  # 20. 手順が通り、ローカル flake の印が前の版 → 残りの手作業に「前の雛形から作られています」と移し方
+  c=$(new_case t20)
+  with_migrate "${c}"
+  local_with_marker "${c}" 0badf00d
+  fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
+  run "${c}" --steps bootstrap-a
+  if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" -F "flake.nix は前の雛形から作られています (雛形の版 0badf00d → $(current_id "${c}"))" \
+    && seen_after_post_notes "${c}" -F "local-flake-migrate.sh prepare --flake ${c}/local" \
+    && seen_after_post_notes "${c}" -F 'pjp-dotfiles-local-flake-migrate'; then
+    ok "印が前の版なら、残りの手作業で前の雛形から作られていることと移し方を知らせる"
+  else
+    ng "前の版の印 (残りの手作業)" "rc=$(rc "${c}") $(after_post_notes "${c}") $(cat "${c}/err")"
+  fi
+
+  # 21. 印が今と同じ → 出さない
+  c=$(new_case t21)
+  with_migrate "${c}"
+  local_with_marker "${c}" "$(current_id "${c}")"
+  fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
+  run "${c}" --steps bootstrap-a
+  if [[ $(rc "${c}") == 0 ]] && ! seen_after_post_notes "${c}" '前の雛形'; then
+    ok "印が今の雛形と同じなら、残りの手作業に出さない"
+  else
+    ng "同じ印 (残りの手作業)" "rc=$(rc "${c}") $(after_post_notes "${c}")"
+  fi
+
+  # 22. local-flake の手順を選んだ → 残りの手作業には出さない (setup-local-flake.sh の警告がまとめに載る)。
+  #     偽の setup-local-flake.sh は本物と同じく警告し、流れない heredoc を持つ (印はそこから決まる)
+  c=$(new_case t22)
+  with_migrate "${c}"
+  local_with_marker "${c}" 0badf00d
+  # shellcheck disable=SC2016 # 偽の手順の中に heredoc の原文をそのまま書く
+  fake_step "${c}" setup-local-flake.sh "$(warn_body 'flake.nix は前の雛形から作られています (雛形の版 0badf00d → 偽)。')"'
+if false; then
+  cat >"${flake_file}" <<EOS
+偽の雛形
+EOS
+fi'
+  run "${c}" --steps local-flake
+  if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[local-flake\] flake.nix は前の雛形から作られています' \
+    && ! seen_after_post_notes "${c}" '前の雛形'; then
+    ok "local-flake を流したときは、前の雛形の案内をまとめにだけ出す"
+  else
+    ng "local-flake を流したとき (前の雛形)" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
+  fi
+
+  # 23. switch が落ち、印が前の版 → 失敗の案内のあとに、option の削除・改名と移し方を stderr に出す
+  c=$(new_case t23)
+  with_migrate "${c}"
+  local_with_marker "${c}" 0badf00d
+  PATH_EXTRA=$(failing_hm_bin "${c}") run "${c}" --host testhost --steps switch
+  at_fail=$(grep -n '失敗した手順があります' "${c}/err" | head -1 | cut -d: -f1)
+  at_hint=$(grep -n 'は前の雛形から作られています' "${c}/err" | head -1 | cut -d: -f1)
+  if [[ $(rc "${c}") == 1 && -n ${at_fail} && -n ${at_hint} ]] && ((at_fail < at_hint)) \
+    && grep -q '削除・改名' "${c}/err" && grep -qF "local-flake-migrate.sh prepare --flake ${c}/local" "${c}/err" \
+    && grep -qF "${c}/repo/nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md" "${c}/err"; then
+    ok "switch が落ち、印が前の版なら、失敗の案内のあとに option の削除・改名と移し方 (repo の SKILL.md の場所も) を出す"
+  else
+    ng "switch が落ちたとき (前の版)" "rc=$(rc "${c}") $(cat "${c}/err")"
+  fi
+
+  # 24. switch が落ちても、印が今と同じなら出さない
+  c=$(new_case t24)
+  with_migrate "${c}"
+  local_with_marker "${c}" "$(current_id "${c}")"
+  PATH_EXTRA=$(failing_hm_bin "${c}") run "${c}" --host testhost --steps switch
+  if [[ $(rc "${c}") == 1 ]] && grep -q '失敗した手順があります' "${c}/err" && ! grep -q '前の雛形' "${c}/err"; then
+    ok "switch が落ちても、印が今の雛形と同じなら前の雛形の案内は出さない"
+  else
+    ng "switch が落ちたとき (同じ印)" "rc=$(rc "${c}") $(cat "${c}/err")"
+  fi
+else
+  echo "  (setup.sh だけを渡したので、ローカル flake の雛形の版のケースは飛ばす)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

@@ -1948,13 +1948,22 @@ post_notes() {
       note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
       note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
       note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
-      note '        手で足したホストが無ければ次で作り直して local に書く:'
-      note "          ${script_dir}/setup-local-flake.sh --force"
+      note '        直すなら値と手で足したホストを引き継いで今の雛形へ移す:'
+      note "          $(local_flake_migrate_cmd)"
+      note "        (手で足したホストが無ければ ${script_dir}/setup-local-flake.sh --force で作り直してもよい)"
     elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
       note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
       note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
       note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
     fi
+  fi
+  # 雛形の版の印が今の雛形と違えば、値を引き継いで移す道具を知らせる。local-flake を流したときは
+  # setup-local-flake.sh の同じ警告がまとめに載るので出さない (home-manager の warnings とは別の話なので、
+  # hm_warnings_read には関わらない)。
+  if ! is_selected local-flake && local_flake_stale; then
+    note "${flake_dir}/flake.nix は前の雛形から作られています (雛形の版 ${local_flake_state})。"
+    note "        値を引き継いで今の雛形へ移す: $(local_flake_migrate_cmd)"
+    note '        (Claude Code なら pjp-dotfiles-local-flake-migrate skill)'
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
@@ -2073,8 +2082,28 @@ print_warning_summary() {
   printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
 }
 
+# ローカル flake の雛形が、今の雛形より前の版か (local-flake-migrate.sh check が 1)。そうなら 0 を返し、
+# local_flake_state に「旧い印 → 今の印」を入れる。ローカル flake が無い・道具が無い・調べられない (check が 2)
+# ときは 1 (黙る)。check は git も nix も jq も使わないので、Nix を入れる前でも呼べる。
+local_flake_state=""
+local_flake_stale() {
+  local rc=0
+  [[ ${flake_dir} != "${nix_dir}" && -f ${script_dir}/local-flake-migrate.sh ]] || return 1
+  local_flake_state=$("${BASH}" "${script_dir}/local-flake-migrate.sh" check --flake "${flake_dir}" 2>/dev/null) || rc=$?
+  [[ ${rc} == 1 ]]
+}
+
+# 値を引き継いで今の雛形へ移すコマンド (案内に使う)
+local_flake_migrate_cmd() {
+  local cmd="${script_dir}/local-flake-migrate.sh prepare"
+  if [[ ${flake_dir} != "${HOME}/dotfiles" ]]; then
+    cmd+=" --flake ${flake_dir}"
+  fi
+  printf '%s' "${cmd}"
+}
+
 execute() {
-  local idxs=() states=() summary=() i n total failed=0
+  local idxs=() states=() summary=() i n total failed=0 failed_id=""
 
   while IFS= read -r i; do
     idxs+=("${i}")
@@ -2115,6 +2144,7 @@ execute() {
     else
       states[n]="fail"
       failed=1
+      failed_id=${step_ids[i]}
       # 手順には順序の依存がある。途中で失敗したら残りは走らせない。
       break
     fi
@@ -2140,6 +2170,17 @@ execute() {
   if [[ ${failed} == 1 ]]; then
     printf '\n%s失敗した手順があります。直してから同じ手順を選び直してください。%s\n' \
       "${c_red}" "${c_reset}" >&2
+    # 失敗すると残りの手作業 (post_notes) は出ないので、switch が旧い local の評価で落ちた見込みがあれば
+    # ここで移し方を知らせる (本体で option が削除・改名されると、旧い local のままでは評価が止まる)。
+    if [[ ${failed_id} == switch ]] && local_flake_stale; then
+      # switch が落ちていると新しい skill はまだ配られていないので、repo の SKILL.md の場所も出す
+      {
+        printf '  ローカル flake (%s/flake.nix) は前の雛形から作られています (雛形の版 %s)。\n' "${flake_dir}" "${local_flake_state}"
+        printf '  本体で option が削除・改名されていると、旧い local のままでは評価が止まります。\n'
+        printf '  値を引き継いで今の雛形へ移す: %s\n' "$(local_flake_migrate_cmd)"
+        printf '  (Claude Code なら %s/nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md の手順)\n' "${repo_dir}"
+      } >&2
+    fi
     return 1
   fi
 
