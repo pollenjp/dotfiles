@@ -317,10 +317,11 @@ find_base() {
   base_file="${tmp}/cand/${best_n}.nix"
 }
 
-# 差分の行数が小さい順に、候補を 3 つまで「版 (n 行)」で並べる
+# 差分の行数が小さい順に、候補を 3 つまで「版 (n 行・印 <印>)」で並べる (印が同じ版は雛形の中身が同じ)
 nearest_candidates() {
-  awk -F'\t' '$4 ~ /^[0-9]+$/ { print $4 "\t" NR "\t" $1 }' "${tmp}/candidates.tsv" \
-    | sort -t$'\t' -k1,1n -k2,2n | awk -F'\t' 'NR <= 3 { printf "%s%s (%s 行)", (NR > 1 ? " / " : ""), $3, $1 } END { print "" }'
+  awk -F'\t' '$4 ~ /^[0-9]+$/ { print $4 "\t" NR "\t" $1 "\t" $3 }' "${tmp}/candidates.tsv" \
+    | sort -t$'\t' -k1,1n -k2,2n \
+    | awk -F'\t' 'NR <= 3 { printf "%s%s (%s 行・印 %s)", (NR > 1 ? " / " : ""), $3, $1, $4 } END { print "" }'
 }
 
 # git merge-file --diff3 の出力のうち、片側が元の行の前後に足しただけの衝突を解く。$1: merge の出力、
