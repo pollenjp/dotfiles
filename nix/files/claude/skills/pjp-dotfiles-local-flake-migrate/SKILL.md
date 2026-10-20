@@ -49,7 +49,9 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 ## 手順
 
 1. `bash <m> status` — 「同じ版」なら移すものは無い。終わり。印が同じでも「dotfiles-private の入力: … → …」と出たら
-   (clone の `nix/` ができたのに本体の stub を指している、など)、prepare がその 1 行を指し直す
+   (clone の `nix/` ができたのに本体の stub を指している、など)、prepare がその 1 行を指し直す。移すものが無くても local を直して
+   確かめながら書きたいとき (pjp-dotfiles-register-host の手順 6 で、登録したファイルへ移した値を外す) は、`prepare --always` で
+   作業場所を作る
 2. `bash <m> prepare --out <scratchpad>/local-flake-migrate-<日時>` — 出力の「元の雛形」と「衝突」を読む
    - 元の雛形は、旧いファイルの「# 雛形の版:」の印の版 (印を入れる前の雛形なら、履歴で差分が最も小さい版)
    - 「近い版」が同じ行数で並んでも、印が同じなら雛形の中身が同じなので、選び直さなくてよい

@@ -127,7 +127,9 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
    頭のコメント (「元にしたホスト: …」) にある
 3. ローカル flake を今の雛形へ移す: pjp-dotfiles-local-flake-migrate の手順 (prepare → 衝突 → compare)。prepare が dotfiles-private の
    入力を足す (指し直す)。この時点の compare で、登録簿のホストが全部「同じ」で、この PC のホストが「dotfiles-private のホスト (…この PC の
-   ホスト)」と出ることを見る (移すこと自体は値を落としていない)
+   ホスト)」と出ることを見る (移すこと自体は値を落としていない)。prepare が「移すものはありません」と出したら (ローカル flake が既に今の
+   雛形で clone の `nix/` を読んでいる)、`prepare --always` で作業場所を作る (new/flake.nix は今のファイルと同じ)。その compare では、
+   この PC のホストは両側にあるので「同じ」と出る
 4. `<作業場所>/new/flake.nix` で、登録したファイルへ移した値を `local` から外し、雛形の既定に戻す (例: `devTracker.enable = false`・
    `notion.profile = null`・port の行はコメントに戻す)。**既定と同じ値を明示した行 (`gitViaGh.enable = true` など) も外す** (登録した
    ファイルに残っている。pjp-dotfiles-local-flake-migrate の「既定と同じ値をあえて書いた行は消さない」は、移すだけのときの決まり)。

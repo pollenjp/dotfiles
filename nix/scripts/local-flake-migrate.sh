@@ -49,10 +49,12 @@ usage() {
   local-flake-migrate.sh check [--flake <dir>]
       status の静かな版 (setup が使う)。同じなら何も出さず 0、違えば「旧い印 → 今の印」を出して 1。
       調べられなければ 2。git も nix も使わない
-  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>] [--base <rev>]
+  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>] [--base <rev>] [--always]
       作業場所 (--out。在るなら空であること。省けば mktemp -d) に、旧い flake の写し・元の雛形・
       今の雛形と、3-way merge で移した new/flake.nix を作る。元の雛形は印の版か、無ければ履歴で
-      旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる
+      旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる。移すものが無ければ
+      作業場所を作らないが、--always なら作る (new/flake.nix は旧いファイルと同じ。local を直して
+      compare・apply するため。dotfiles-private に登録したあとの仕上げなど)
   local-flake-migrate.sh compare <作業場所> [--baseline <dir>]
       旧い flake (--baseline を渡せばそのディレクトリの flake.nix) と new/flake.nix を同じ本体・同じ lock で
       評価し、全ホストの drvPath と、setup が拾うホストの並びを比べる。0 = 同じ、1 = 違う、
@@ -272,6 +274,7 @@ parse_flake_args() {
         base_given=$2
         shift
         ;;
+      --always) always=1 ;;
       *) die "知らない引数です: $1 (--help)" ;;
     esac
     shift
@@ -986,6 +989,7 @@ cmd_prepare() {
   local have want repoint=0
   out_dir=""
   base_given=""
+  always=0
   parse_flake_args loud "$@"
   need_history
   need_tmp
@@ -1039,7 +1043,10 @@ cmd_prepare() {
   fi
   if [[ ${base_id} == "${current}" ]] && ((repoint == 0)); then
     echo "  → 元の雛形が今の雛形と同じ版です。移すものはありません。"
-    return 0
+    if ((always == 0)); then
+      return 0
+    fi
+    echo "    --always なので作業場所を作ります (new/flake.nix は旧いファイルと同じ。local を直して compare・apply する)。"
   fi
 
   if [[ -n ${out_dir} ]]; then

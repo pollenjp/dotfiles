@@ -46,7 +46,8 @@
 #   - dotfiles-private の入力 (今の雛形が ${private_nix_dir} を持つとき): render は --private-dir で描き、省けば
 #     private-host.sh input-dir (clone の nix/。private-host.sh が無ければ <nix-dir>/private-stub)。status は印が同じでも
 #     入力が input-dir と違えば 1 で「指し直す」を出し、prepare は印が同じでもその 1 行を指し直す (入力の無い前の雛形
-#     からは入力の行を足す)。入力が input-dir と同じなら今どおり「移すものはありません」。compare は path: の入力ぜんぶの
+#     からは入力の行を足す)。入力が input-dir と同じなら今どおり「移すものはありません」(--always なら作業場所を作り、
+#     new/flake.nix は旧いファイルと同じ)。compare は path: の入力ぜんぶの
 #     hash を見て、lock に無い入力をまとめて nix flake update <名前>… で張り直す。移した flake だけにあるホストのうち、
 #     移した flake の入力の hosts/<名前>.nix があるものは「dotfiles-private のホスト」として違いに数えない。ただし
 #     この PC の名前 (private-host.sh name) のホストは、setup が --host なしで選ぶようになるので、そう出して 1
@@ -1133,6 +1134,20 @@ if [[ $(rc "${r}") == 0 ]] && grep -qxF "  inputs.dotfiles-private.url = \"path:
   ok "prepare: dotfiles-private の入力の無い前の雛形からは、入力の行を足す"
 else
   ng "prepare (入力の無い前の雛形)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") new=$(cat "${r}/w0/new/flake.nix" 2>/dev/null)"
+fi
+
+# 29b. prepare --always: 移すものが無くても (今の雛形で、入力も clone を指す) 作業場所を作り、new/flake.nix は旧いファイルと同じ
+#      (local を直して compare・apply するため。登録の仕上げ)
+private_flake "${r}" p1 "${pc}/nix"
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w-always0"
+rc_plain=$(rc "${r}")
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w-always" --always
+if [[ ${rc_plain} == 0 && ! -e ${r}/w-always0 && $(rc "${r}") == 0 ]] && grep -q '移すものはありません' "${r}/out" \
+  && grep -q -- '--always' "${r}/out" && cmp -s "${r}/local/flake.nix" "${r}/w-always/new/flake.nix" \
+  && [[ -f ${r}/w-always/prepare.env && -f ${r}/w-always/old/flake.nix ]]; then
+  ok "prepare --always: 移すものが無くても作業場所を作り、new/flake.nix は旧いファイルと同じ (無ければ作らない)"
+else
+  ng "prepare --always" "rc=${rc_plain}/$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/w-always" 2>/dev/null)"
 fi
 
 # 30. compare: path: の入力ぜんぶの hash を見て、lock に無い入力をまとめて張り直す
