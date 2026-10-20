@@ -138,16 +138,22 @@
 
 ## 6. 検証 (Verification)
 
-- `nix/tests/local-flake-migrate.test.sh` (64 件)・`nix/tests/setup-local-flake.test.sh` (9 件)・
-  `nix/tests/setup-post-notes.test.sh` (30 件) を手元と flake の checks (サンドボックス) で流して通った
+- `nix/tests/local-flake-migrate.test.sh` (75 件)・`nix/tests/setup-local-flake.test.sh` (9 件)・
+  `nix/tests/setup-post-notes.test.sh` (30 件) を手元と flake の checks (サンドボックス) で流して通った。
+  `nix flake check --no-eval-cache ./nix` (x86_64-linux) も通った
 - 描き方: 履歴の 24 版を render で描くと、別のやり方 (awk と sed) で描いたものと 1 バイトも違わなかった。
   今の版は、setup-local-flake.sh が実際に書く flake.nix と render --file の出力が同じ (テストで確かめる)
 - 実物 (この変更を作った PC の `~/dotfiles/flake.nix` の写し): prepare は元の雛形を 87922f9 (差分 8 行。870b317 も 8 行で同じ
-  中身) に決め、衝突 1 件 (`ccPages.port` の直後の videoOffer の節) を自動で解いて残り 0 件。compare は登録簿の
-  7 ホストの drvPath が全部同じ (41 秒)。`ccPages.port` を 7779 に変えると 7 ホストとも違い、
-  `ccPages.port: 7778 → 7779` だけが出た
-- skill: skill なしの subagent は確認を取らずに書き換え、drvPath を 1 ホストでしか比べなかった。skill を読ませた
-  subagent の結果は PR に書く
+  中身) に決め、衝突 1 件 (`ccPages.port` の直後の videoOffer の節) を自動で解いて残り 0 件。compare は `sandbox` を除く
+  登録簿の 6 ホストの drvPath が全部同じ (40 秒)。apply のあとの status は「同じ版」。`ccPages.port` を 7779 に変えると
+  全ホストで違い、`ccPages.port: 7778 → 7779` だけが出た。`notion.profile` を `"work"`・`null` にした写しも 6 ホストで同じ。
+  local に `pollenjp@wsl` とだけぶつかる値を足すと、そのホストだけが「両方で評価が落ちる」(0)、移した側だけ直すと
+  「旧い flake で評価が落ちる」で 3 と `conflicting definition values` の行が出た
+- skill: skill なしの subagent は確認を取らずに書き換え (「ファイルが明示的に頼まれていたので」)、drvPath を 1 ホスト
+  でしか比べなかった。skill を読ませた subagent は、同じ場面でも、本体で option を消した場面 (2 回) でも、apply の前で
+  差分・まとめ・退避を見せて止まり、後者は compare の 3 を受けて基準を作って比べ直した
+- branch のレビュー (別の reviewer): Critical 1 件 (compare が `sandbox` まで評価して、`notion.profile` が "personal"
+  以外のマシンで落ちる) と Important 2 件・Minor を受けて直した
 
 ## 7. 移行・運用手順
 
