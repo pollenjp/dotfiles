@@ -21,14 +21,17 @@
 # 読むのは hosts/ の .nix だけで、ほかのファイル (README.md など) は拾わない。
 { lib, mkHome }:
 
-# privateNix: dotfiles-private の nix/。path か、outPath を持つ attrset (flake = false の input)
+# privateNix: dotfiles-private の nix/。path か、outPath を持つ attrset (flake = false の input)。
+# path は文字列にせず path のまま辿る (文字列にすると store へ写すことになり、store に書かない評価
+# (`nix flake check --no-build`) では写されないまま読もうとして「path … is not valid」で落ちる)
 privateNix:
 let
-  dir = "${privateNix}/hosts";
+  root = if builtins.isAttrs privateNix then privateNix.outPath else privateNix;
+  dir = if builtins.isPath root then root + "/hosts" else "${root}/hosts";
   entries = if builtins.pathExists dir then builtins.readDir dir else { };
   files = lib.filterAttrs (file: type: type != "directory" && lib.hasSuffix ".nix" file) entries;
+  fileOf = file: if builtins.isPath dir then dir + "/${file}" else "${dir}/${file}";
 in
 lib.mapAttrs' (
-  file: _:
-  lib.nameValuePair (lib.removeSuffix ".nix" file) (import "${dir}/${file}" { inherit mkHome; })
+  file: _: lib.nameValuePair (lib.removeSuffix ".nix" file) (import (fileOf file) { inherit mkHome; })
 ) files

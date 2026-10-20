@@ -1,5 +1,8 @@
 # 登録の下書きを描く nix/lib/host-draft.nix (nix/scripts/private-host.sh draft が使う) を、評価時に確かめる (ADR 025)。
-# 描いた下書きを builtins.toFile で store に置いて import し直し、元のホストと drvPath を比べる (IFD は使わない)。
+# 描いた下書きが fixtures/host-draft/ の期待のファイルと 1 字も違わないことを見てから、そのファイルを import して
+# 元のホストと drvPath を比べる (描いたものを builtins.toFile で store に置いて import する形は、store に書かない評価
+# (CI の `nix flake check --no-build`) で「path … is not valid」になるので使わない)。元のホストの system は x86_64-linux に
+# 固定する (期待のファイルに system を書くため。どの system の checks でも評価だけはできる)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
@@ -12,8 +15,8 @@
 #   - collect は、既定が別の option から決まるもの (wsl.onePassword.windowsUserName) を集めない。改名した旧名
 #     (wsl.onePassword.enable) で書いた値は、新しい名前 (onePassword.enable) で集める
 #   - render は、wsl・onePassword・claude を mkHome の引数の組に (組の値が 1 つなら 1 行で)、ほかを modules に描き、
-#     頭のコメントに元にしたホストと notes を書く。決めた形と 1 字も違わない
-#   - 描いた下書きを import し直したホストは、元のホストと drvPath が同じ (WSL のホストも)。値を 1 つ変えると違う
+#     頭のコメントに元にしたホストと notes を書く。fixtures/host-draft/ の期待のファイルと 1 字も違わない (WSL のホストも)
+#   - 期待のファイル (= 描いた下書き) を import したホストは、元のホストと drvPath が同じ。値を 1 つ変えたホストとは違う
 #   - 字句にできない値 (関数) は、値を書かずに「# TODO: dotfiles.<path>」の行にする
 {
   lib,
@@ -25,53 +28,41 @@
 let
   draft = import ../lib/host-draft.nix { inherit lib; };
 
-  # 登録簿のホスト + ローカル flake の local (hostsWith が modules に前置するのと同じ形)
-  carol = mkHome {
-    username = "carol";
-    inherit system;
-    onePassword.enable = true;
-    modules = [
-      {
-        dotfiles.claude.devTracker.enable = true;
-        dotfiles.claude.notion.profile = "work";
-        dotfiles.ccPages.port = 7801;
-      }
-    ];
-  };
+  # 期待の下書き (fixtures/host-draft/<名前>.nix)。名前の @ は path の字句に書けないので文字列で足す
+  fixture = file: ./fixtures/host-draft + "/${file}";
+  # 元のホストの system。期待のファイルに書くので固定する (どの system の checks でも評価だけはできる)
+  hostSystem = "x86_64-linux";
+
+  # 登録簿のホスト + ローカル flake の local (hostsWith が modules に前置するのと同じ形)。port は local の値
+  carolWith =
+    port:
+    mkHome {
+      username = "carol";
+      system = hostSystem;
+      onePassword.enable = true;
+      modules = [
+        {
+          dotfiles.claude.devTracker.enable = true;
+          dotfiles.claude.notion.profile = "work";
+          dotfiles.ccPages.port = port;
+        }
+      ];
+    };
+  carol = carolWith 7801;
   carolValues = draft.collect carol.options.dotfiles;
   carolText = draft.render {
     name = "carol@box";
     username = "carol";
-    inherit system;
+    system = hostSystem;
     base = "carol@generic";
     values = carolValues;
   };
-  carolWant = ''
-    # この PC (carol@box) のホストの定義と値の全部 (dotfiles の ADR 025)。ホストの名前はファイル名から .nix を除いたもの。
-    # ローカル flake (~/dotfiles/flake.nix) の local はこのホストには当たらない。値を変えるときはこのファイルを直す。
-    # 下書きは dotfiles の nix/scripts/private-host.sh draft が描いた (元にしたホスト: carol@generic とローカル flake の local)。
-    { mkHome, ... }:
-    mkHome {
-      username = "carol";
-      system = "${system}";
-      onePassword.enable = true;
-      claude = {
-        devTracker.enable = true;
-        notion.profile = "work";
-      };
-      modules = [
-        {
-          dotfiles.ccPages.port = 7801;
-        }
-      ];
-    }
-  '';
-  reimport = text: import (builtins.toFile "draft.nix" text) { inherit mkHome; };
   drvOf = host: host.activationPackage.drvPath;
+  importFixture = file: import (fixture file) { inherit mkHome; };
 
   dave = mkHome {
     username = "dave";
-    inherit system;
+    system = hostSystem;
     wsl = {
       enable = true;
       windowsUserName = "dave";
@@ -84,7 +75,7 @@ let
   daveText = draft.render {
     name = "dave@box";
     username = "dave";
-    inherit system;
+    system = hostSystem;
     values = daveValues;
   };
 
@@ -151,20 +142,24 @@ let
         builtins.elem "onePassword.enable" erinPaths && !(builtins.elem "wsl.onePassword.enable" erinPaths);
     }
     {
-      name = "render は決めた形と 1 字も違わない";
-      ok = carolText == carolWant;
+      name = "render は期待のファイル (fixtures/host-draft/carol@box.nix) と 1 字も違わない";
+      ok = carolText == builtins.readFile (fixture "carol@box.nix");
     }
     {
-      name = "描いた下書きを import し直したホストは元のホストと drvPath が同じ";
-      ok = drvOf (reimport carolText) == drvOf carol;
+      name = "WSL のホストの render も期待のファイル (fixtures/host-draft/dave@box.nix) と 1 字も違わない";
+      ok = daveText == builtins.readFile (fixture "dave@box.nix");
     }
     {
-      name = "WSL のホストも、描いて import し直すと drvPath が同じ";
-      ok = drvOf (reimport daveText) == drvOf dave;
+      name = "描いた下書き (= 期待のファイル) を import したホストは元のホストと drvPath が同じ";
+      ok = drvOf (importFixture "carol@box.nix") == drvOf carol;
     }
     {
-      name = "値を 1 つ変えた下書きは drvPath が違う";
-      ok = drvOf (reimport (builtins.replaceStrings [ "7801" ] [ "7802" ] carolText)) != drvOf carol;
+      name = "WSL のホストも、描いた下書きを import すると drvPath が同じ";
+      ok = drvOf (importFixture "dave@box.nix") == drvOf dave;
+    }
+    {
+      name = "値を 1 つ変えたホスト (port 7802) とは drvPath が違う";
+      ok = drvOf (importFixture "carol@box.nix") != drvOf (carolWith 7802);
     }
     {
       name = "字句にできない値 (関数) は値を書かずに TODO の行にする";

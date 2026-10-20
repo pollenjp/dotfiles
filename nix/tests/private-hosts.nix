@@ -11,8 +11,9 @@
 #   - .nix でないファイル (README.md) はホストにしない
 #   - 各ホストは、ファイルが mkHome に渡した値 (username・mkHome の引数・modules) で組み立てられる
 #   - flake = false の input と同じ形 (outPath を持つ attrset) を渡しても同じホストができる
-#   - hosts/ が空なら { }
+#   - hosts/ に .nix が無いなら { }
 #   - hosts/ が無い (本体の stub。clone の無いマシンでローカル flake が指す先) なら { }
+#   - path を渡しても store へ写さずに読む (store に書かない評価 (CI の --no-build) でも落ちない)
 {
   lib,
   pkgs,
@@ -20,15 +21,10 @@
 }:
 
 let
+  # fixture は path のまま渡す (store へ写さない。CI の `nix flake check --no-build` は store に書かずに評価する)
   hosts = privateHosts ./fixtures/private-hosts;
-  # git は空のディレクトリを持てないので、hosts/ のディレクトリだけを残して写す
-  emptyHosts = privateHosts (
-    builtins.path {
-      name = "private-hosts-empty";
-      path = ./fixtures/private-hosts;
-      filter = _: type: type == "directory";
-    }
-  );
+  # .nix の無い hosts/ (git は空のディレクトリを持てないので README.md だけを置いてある)
+  emptyHosts = privateHosts ./fixtures/private-hosts-empty;
   stub = privateHosts ../private-stub;
   cfg = name: hosts.${name}.config;
 
@@ -60,7 +56,7 @@ let
         }) == builtins.attrNames hosts;
     }
     {
-      name = "hosts/ が空なら { }";
+      name = "hosts/ に .nix が無ければ { }";
       ok = emptyHosts == { };
     }
     {
