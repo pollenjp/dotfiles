@@ -23,6 +23,16 @@
 #     張り替えずに固定名を出す。session の名前が herdr の規則に外れたら何もしない
 #   - link (ssh-agent-link) は今の接続へ強制で向ける。session は引数・HERDR_SESSION・default の順。pane の中と
 #     張る先の無い shell では張らずに exit 1
+#   - rc (~/.ssh/rc) は stdout に何も書かず、forward された socket と値 (届いていなければ空) と開いた時刻を
+#     socket の basename の名前で記録する (/tmp/ssh-XXXXXX/agent.<pid> の形も)。forward の無い接続・
+#     SSH_AGENT_PID・ssh でない shell は記録しない。DISPLAY があれば cookie を xauth へ渡し (localhost:N は
+#     unix:N)、無ければ stdin を読まない。何も無い HOME でも記録の場所を 0700 で作る
+#   - watch は cc-page 0003 の場面 1 (同じ PC から 4 本・別の PC から 2 本、1〜11) を表のとおりに動かす: 先が
+#     生きていれば何もせず (覗くだけの接続は奪わない)、死んでいれば持ち主と同じ値の生きている一番古い接続を
+#     借り、別の値・届いていない値の接続は借りず、持ち主が空の固定名には借りない。借りても持ち主は変えない。
+#     返事をしない記録は 1 秒で見切る。死んだ socket の記録を消す。先を確かめている間に attach が張り替えたら
+#     上書きしない。先が手元の 1Password なら触らない。stdout に何も出さない
+#   - status は固定名の先・持ち主と、記録にある接続を出す
 #
 # ## 作り
 #
@@ -116,6 +126,20 @@ export PATH="${bin}:${PATH}"
 ssh_add_log="${work}/ssh-add.log"
 : >"${ssh_add_log}"
 
+# 偽の xauth。引数と stdin を FAKE_XAUTH_LOG に書き留める
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+{
+  printf 'args: %s\n' "$*"
+  cat
+} >>"${FAKE_XAUTH_LOG}"
+EOF
+} >"${bin}/xauth"
+chmod +x "${bin}/xauth"
+xauth_log="${work}/xauth.log"
+: >"${xauth_log}"
+
 # HOME を作り直して H に入れる。$1: 名前。~/.ssh/agent (sshd が socket を置く場所) まで作る
 newhome() {
   H="${work}/h/$1"
@@ -150,8 +174,8 @@ seed() {
 }
 
 # script を 1 回流す。$1: 置き場所の名前、続けて env に渡す VAR=値… と、script の引数。
-# env -i で、HOME と PATH と渡した変数だけにする。stdout・stderr・終了コードを <置き場所>/{out,err,rc} に書き、
-# 置き場所を返す
+# env -i で、HOME と PATH と渡した変数だけにする。stdin は agent_stdin (省けば /dev/null)。stdout・stderr・
+# 終了コードを <置き場所>/{out,err,rc} に書き、置き場所を返す
 agent() {
   local d="${work}/out/$1" envs=()
   shift
@@ -161,9 +185,16 @@ agent() {
   done
   mkdir -p "${d}"
   env -i HOME="${H}" PATH="${PATH}" FAKE_AGENT_MODES="${modes}" FAKE_SSH_ADD_LOG="${ssh_add_log}" \
-    "${envs[@]}" bash "${agent_sh}" "$@" >"${d}/out" 2>"${d}/err" </dev/null
+    FAKE_XAUTH_LOG="${xauth_log}" "${envs[@]}" bash "${agent_sh}" "$@" \
+    >"${d}/out" 2>"${d}/err" <"${agent_stdin:-/dev/null}"
   echo $? >"${d}/rc"
   printf '%s' "${d}"
+}
+# agent と同じで、stdin を $1 のファイルにする
+agent_in() {
+  local agent_stdin=$1
+  shift
+  agent "$@"
 }
 rc() { cat "$1/rc"; }
 out() { cat "$1/out"; }
@@ -458,6 +489,283 @@ ${l} == "${B}" ]]; then
   ok "pane の中と張る先の無い shell では張らずに exit 1 (理由を stderr に出す)"
 else
   ng "link を張らない shell" "1: rc=$(rc "${d1}") err=$(err "${d1}") / 2: rc=$(rc "${d2}") err=$(err "${d2}") / link=$(link_of agent.sock)"
+fi
+
+echo "== rc (~/.ssh/rc。接続を記録する)"
+
+state_of() { printf '%s' "${H}/.local/state/pjp-agent-link"; }
+# 記録のある key の値。$1: socket の basename、$2: key
+rec_field() {
+  local f k v
+  f="$(state_of)/conn/$1"
+  [[ -f ${f} ]] || return 0
+  while IFS='=' read -r k v; do
+    if [[ ${k} == "$2" ]]; then
+      printf '%s' "${v}"
+    fi
+  done <"${f}"
+}
+
+# 21. 記録を書く。stdout は空
+newhome rc
+A="${H}/.ssh/agent/s.t.sshd.rc-A"
+N="${H}/.ssh/agent/s.t.sshd.rc-N"
+W="${H}/.ssh/agent/s.t.sshd.rc-W"
+mksock "${A}"
+mksock "${N}"
+mksock "${W}"
+d1=$(agent rc-pc "${conn}" "SSH_AUTH_SOCK=${A}" "PJP_SSH_CLIENT=${PC}" rc)
+d2=$(agent rc-novalue "${conn}" "SSH_AUTH_SOCK=${N}" rc)
+d3=$(agent rc-weird "${conn}" "SSH_AUTH_SOCK=${W}" 'PJP_SSH_CLIENT=%u@%L' rc)
+opened=$(rec_field s.t.sshd.rc-A opened)
+if [[ $(rc "${d1}") == 0 && -z $(out "${d1}") && $(rec_field s.t.sshd.rc-A sock) == "${A}" &&
+$(rec_field s.t.sshd.rc-A client) == "${PC}" && ${opened} =~ ^[0-9]+$ ]]; then
+  ok "rc は socket と値と開いた時刻を記録し、stdout には何も書かない"
+else
+  ng "rc の記録" "rc=$(rc "${d1}") out=$(out "${d1}") sock=$(rec_field s.t.sshd.rc-A sock) client=$(rec_field s.t.sshd.rc-A client) opened=${opened} err=$(err "${d1}")"
+fi
+if [[ $(rc "${d2}") == 0 && $(rec_field s.t.sshd.rc-N sock) == "${N}" && -z $(rec_field s.t.sshd.rc-N client) &&
+$(rc "${d3}") == 0 && $(rec_field s.t.sshd.rc-W sock) == "${W}" && -z $(rec_field s.t.sshd.rc-W client) ]]; then
+  ok "rc: 値が届いていない・展開されていない接続も記録し、値は空にする"
+else
+  ng "rc の値が届いていない接続" "N: client=$(rec_field s.t.sshd.rc-N client) / W: client=$(rec_field s.t.sshd.rc-W client)"
+fi
+
+# 22. 記録しないもの (forward が無い・SSH_AGENT_PID・SSH_CONNECTION が無い)
+before=$(ls "$(state_of)/conn")
+d1=$(agent rc-noforward "${conn}" "PJP_SSH_CLIENT=${PC}" rc)
+L="${H}/.ssh/agent/s.t.agent.rc-L"
+mksock "${L}"
+d2=$(agent rc-agentpid "${conn}" "SSH_AUTH_SOCK=${L}" SSH_AGENT_PID=4242 rc)
+d3=$(agent rc-local "SSH_AUTH_SOCK=${L}" rc)
+if [[ $(rc "${d1}") == 0 && $(rc "${d2}") == 0 && $(rc "${d3}") == 0 && $(ls "$(state_of)/conn") == "${before}" ]]; then
+  ok "rc: forward の無い接続・SSH_AGENT_PID・ssh でない shell は記録しない"
+else
+  ng "rc が記録しないもの" "$(ls "$(state_of)/conn")"
+fi
+
+# 23. X11: DISPLAY と cookie を xauth へ渡す (sshd(8) の SSHRC の例どおり)
+printf 'MIT-MAGIC-COOKIE-1 c0ffee\n' >"${work}/cookie1"
+printf 'MIT-MAGIC-COOKIE-1 beef\n' >"${work}/cookie2"
+: >"${xauth_log}"
+d1=$(agent_in "${work}/cookie1" rc-x11-local "${conn}" "SSH_AUTH_SOCK=${A}" DISPLAY=localhost:10.0 rc)
+d2=$(agent_in "${work}/cookie2" rc-x11-host "${conn}" DISPLAY=host:3.0 rc)
+want=$'args: -q -\nadd unix:10.0 MIT-MAGIC-COOKIE-1 c0ffee\nargs: -q -\nadd host:3.0 MIT-MAGIC-COOKIE-1 beef'
+if [[ $(rc "${d1}") == 0 && -z $(out "${d1}") && $(rc "${d2}") == 0 && -z $(out "${d2}") && $(cat "${xauth_log}") == "${want}" ]]; then
+  ok "rc: DISPLAY があれば cookie を xauth へ渡し (localhost:N は unix:N)、stdout は空"
+else
+  ng "rc の X11" "xauth: $(cat "${xauth_log}") / out1=$(out "${d1}") out2=$(out "${d2}")"
+fi
+: >"${xauth_log}"
+d=$(agent rc-x11-none "${conn}" "SSH_AUTH_SOCK=${A}" rc)
+if [[ $(rc "${d}") == 0 && ! -s ${xauth_log} ]]; then
+  ok "rc: DISPLAY が無ければ xauth を呼ばない (stdin も読まない)"
+else
+  ng "rc の X11 なし" "xauth: $(cat "${xauth_log}")"
+fi
+
+# 24. 何も無い HOME (~/.local も無い)
+H="${work}/h/rc-empty"
+mkdir -p "${H}"
+A="${work}/sock/s.t.sshd.rc-empty-A"
+mksock "${A}"
+d=$(agent rc-empty "${conn}" "SSH_AUTH_SOCK=${A}" "PJP_SSH_CLIENT=${PC}" rc)
+if [[ $(rc "${d}") == 0 && $(rec_field s.t.sshd.rc-empty-A client) == "${PC}" && $(perm "$(state_of)") == 700 &&
+$(perm "$(state_of)/conn") == 700 ]]; then
+  ok "rc: 何も無い HOME でも記録の場所を 0700 で作って書く"
+else
+  ng "rc の何も無い HOME" "rc=$(rc "${d}") state=$(perm "$(state_of)") err=$(err "${d}")"
+fi
+
+# 25. OpenSSH 10.1 より前の形 (/tmp/ssh-XXXXXX/agent.<pid>)
+newhome rc-old
+O="${work}/tmpssh/ssh-AbCdEf/agent.4321"
+mksock "${O}"
+d=$(agent rc-old "${conn}" "SSH_AUTH_SOCK=${O}" "PJP_SSH_CLIENT=${PC}" rc)
+if [[ $(rc "${d}") == 0 && $(rec_field agent.4321 sock) == "${O}" ]]; then
+  ok "rc: /tmp/ssh-XXXXXX/agent.<pid> の形も socket の basename で記録する"
+else
+  ng "rc の古い形" "rc=$(rc "${d}") sock=$(rec_field agent.4321 sock) err=$(err "${d}")"
+fi
+
+echo "== watch (接続が増えた・減った)"
+
+# 接続を開く (socket を作って rc で記録する)。$1: socket のパス、$2: PJP_SSH_CLIENT (省けば送らない)
+open_conn() {
+  mksock "$1"
+  if [[ -n ${2:-} ]]; then
+    agent "rc-${1##*/}" "${conn}" "SSH_AUTH_SOCK=$1" "PJP_SSH_CLIENT=$2" rc >/dev/null
+  else
+    agent "rc-${1##*/}" "${conn}" "SSH_AUTH_SOCK=$1" rc >/dev/null
+  fi
+}
+close_conn() { rm -f "$1"; }
+# herdr を開く。$1: session、$2: 開いた接続の socket、$3: PJP_SSH_CLIENT
+attach() {
+  agent "attach-$1-${2##*/}" "${conn}" "SSH_AUTH_SOCK=$2" "PJP_SSH_CLIENT=$3" open attach "$1" >/dev/null
+}
+watch() {
+  agent "watch-$1" watch
+}
+# 2 つの固定名の先が期待どおりか。$1: 場面の説明、$2: default の先、$3: s2 の先
+expect2() {
+  local got
+  got="default=$(link_of agent.sock) s2=$(link_of agent.s2.sock)"
+  if [[ ${got} == "default=$2 s2=$3" ]]; then
+    ok "$1"
+  else
+    ng "$1" "got:  ${got}"$'\n'"want: default=$2 s2=$3"
+  fi
+}
+
+# 26. 場面 1 (cc-page 0003): 同じ PC から 4 本、別の PC から 2 本
+newhome scene
+p="${H}/.ssh/agent/s.t.sshd.scene"
+open_conn "${p}-A" "${PC}"
+attach default "${p}-A" "${PC}"
+expect2 "場面 1-1: PC から hr default を開く (A)" "${p}-A" "(無い)"
+open_conn "${p}-B" "${PC}"
+attach s2 "${p}-B" "${PC}"
+expect2 "場面 1-2: PC から hr s2 を開く (B)。default は触らない" "${p}-A" "${p}-B"
+open_conn "${p}-C" "${PC}"
+watch scene-3 >/dev/null
+expect2 "場面 1-3: PC から素の ssh の端末 (C)。どちらの先も生きているので何もしない" "${p}-A" "${p}-B"
+open_conn "${p}-X" "${OTHER}"
+watch scene-4 >/dev/null
+expect2 "場面 1-4: 別の PC から素の ssh (X)。何もしない" "${p}-A" "${p}-B"
+close_conn "${p}-A"
+watch scene-5 >/dev/null
+expect2 "場面 1-5: default を detach (A が閉じる)。PC の B・C のうち一番古い B を借りる" "${p}-B" "${p}-B"
+close_conn "${p}-B"
+watch scene-6 >/dev/null
+expect2 "場面 1-6: s2 を detach (B が閉じる)。PC の接続は C だけなので両方が C" "${p}-C" "${p}-C"
+open_conn "${p}-D" "${PC}"
+attach default "${p}-D" "${PC}"
+expect2 "場面 1-7: PC から hr default を開き直す (D)。C が生きていて同じ PC なので変えない" "${p}-C" "${p}-C"
+close_conn "${p}-C"
+watch scene-8 >/dev/null
+expect2 "場面 1-8: C の端末を閉じる。両方が D を借りる" "${p}-D" "${p}-D"
+close_conn "${p}-D"
+watch scene-9 >/dev/null
+expect2 "場面 1-9: default を detach (D が閉じる)。X は値が違うので借りない (dangling)" "${p}-D" "${p}-D"
+open_conn "${p}-E" "${OTHER}"
+attach default "${p}-E" "${OTHER}"
+expect2 "場面 1-10: 別の PC から hr default を開く (E)。s2 は触らない" "${p}-E" "${p}-D"
+close_conn "${p}-E"
+watch scene-11 >/dev/null
+expect2 "場面 1-11: E が閉じる。default は同じ値の X を借り、s2 は持ち主が PC のままなので借りない" "${p}-X" "${p}-D"
+if [[ $(owner_of default) == "${OTHER}" && $(owner_of s2) == "${PC}" ]]; then
+  ok "場面 1: 借りても持ち主は変わらない (default は 10 で別の PC、s2 は PC のまま)"
+else
+  ng "場面 1 の持ち主" "default=$(owner_of default) s2=$(owner_of s2)"
+fi
+left=$(ls "$(state_of)/conn")
+if [[ ${left} == "s.t.sshd.scene-X" ]]; then
+  ok "watch は死んだ socket の記録を消す (残るのは生きている X だけ)"
+else
+  ng "死んだ記録の掃除" "${left}"
+fi
+
+# 27. 覗くだけの接続
+newhome peek
+p="${H}/.ssh/agent/s.t.sshd.peek"
+open_conn "${p}-A" "${PC}"
+attach default "${p}-A" "${PC}"
+open_conn "${p}-P" "${PC}"
+watch peek-1 >/dev/null
+l1=$(link_of agent.sock)
+close_conn "${p}-P"
+watch peek-2 >/dev/null
+if [[ ${l1} == "${p}-A" && $(link_of agent.sock) == "${p}-A" ]]; then
+  ok "覗くだけの接続は、開いても閉じても固定名の先を変えない"
+else
+  ng "覗くだけの接続" "開いた後=${l1} 閉じた後=$(link_of agent.sock)"
+fi
+
+# 28. 値が届いていない接続は借りない / 持ち主が空の固定名は借りない
+newhome noval
+p="${H}/.ssh/agent/s.t.sshd.noval"
+seed default "${p}-A" "${PC}"
+open_conn "${p}-N"
+watch noval >/dev/null
+l1=$(link_of agent.sock)
+newhome noowner
+p="${H}/.ssh/agent/s.t.sshd.noowner"
+seed default "${p}-A" ""
+open_conn "${p}-C" "${PC}"
+watch noowner >/dev/null
+if [[ ${l1} == "${work}/h/noval/.ssh/agent/s.t.sshd.noval-A" && $(link_of agent.sock) == "${p}-A" ]]; then
+  ok "値が届いていない接続は借りず、持ち主が空の固定名には借りない"
+else
+  ng "値が届いていない" "noval=${l1} noowner=$(link_of agent.sock)"
+fi
+
+# 29. 返事をしない記録を飛ばす
+newhome hangrec
+p="${H}/.ssh/agent/s.t.sshd.hangrec"
+seed default "${p}-A" "${PC}"
+open_conn "${p}-H" "${PC}"
+setmode "${p}-H" hang
+open_conn "${p}-C" "${PC}"
+t0=$(date +%s)
+watch hangrec >/dev/null
+t1=$(date +%s)
+if [[ $(link_of agent.sock) == "${p}-C" ]] && ((t1 - t0 < 5)); then
+  ok "返事をしない記録 (古い方) を 1 秒で見切って、次に古い生きている接続を借りる ($((t1 - t0)) 秒)"
+else
+  ng "返事をしない記録" "link=$(link_of agent.sock) 秒=$((t1 - t0))"
+fi
+
+# 30. 決めている間に attach が張り替えたら上書きしない (見張りと attach が同時に走る)
+newhome race
+p="${H}/.ssh/agent/s.t.sshd.race"
+mksock "${p}-A" refuse
+seed default "${p}-A" "${PC}"
+open_conn "${p}-C" "${PC}"
+mksock "${p}-E"
+cat >"${work}/race-hook.sh" <<EOF
+ln -sfn "${p}-E" "${H}/.ssh/agent.sock"
+printf '%s\n' "${OTHER}" >"$(state_of)/owner/default"
+EOF
+d=$(agent race-watch FAKE_SSH_ADD_HOOK="${work}/race-hook.sh" FAKE_SSH_ADD_HOOK_MATCH=s.t.sshd.race-A watch)
+if [[ ! -e ${work}/race-hook.sh && $(link_of agent.sock) == "${p}-E" && $(owner_of default) == "${OTHER}" ]]; then
+  ok "watch が死んだ先を確かめている間に別のマシンから開き直されたら、前の持ち主の接続で上書きしない"
+else
+  ng "見張りと attach が同時" "hook=$([[ -e ${work}/race-hook.sh ]] && echo 残っている) link=$(link_of agent.sock) owner=$(owner_of default) err=$(err "${d}")"
+fi
+
+# 31. 1Password の先は触らない
+newhome opwatch
+p="${H}/.ssh/agent/s.t.sshd.opwatch"
+seed default "${H}/.1password/agent.sock" local
+open_conn "${p}-C" "${PC}"
+watch opwatch >/dev/null
+if [[ $(link_of agent.sock) == "${H}/.1password/agent.sock" ]]; then
+  ok "固定名が手元の 1Password を指していれば、socket が無くても watch は触らない"
+else
+  ng "1Password の先" "link=$(link_of agent.sock)"
+fi
+
+# 32. watch は stdout に何も出さない。何も無い HOME でも通る
+H="${work}/h/watch-empty"
+mkdir -p "${H}"
+d=$(agent watch-empty watch)
+if [[ $(rc "${d}") == 0 && -z $(out "${d}") && -z $(err "${d}") ]]; then
+  ok "watch は何も無い HOME でも通り、何も出さない"
+else
+  ng "watch の何も無い HOME" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}")"
+fi
+
+echo "== status"
+
+# 33. 固定名と記録を出す
+H="${work}/h/scene"
+d=$(agent status status)
+if [[ $(rc "${d}") == 0 && $(out "${d}") == *"${H}/.ssh/agent.sock -> ${H}/.ssh/agent/s.t.sshd.scene-X"* &&
+$(out "${d}") == *"${OTHER}"*"${H}/.ssh/agent/s.t.sshd.scene-X"* ]]; then
+  ok "status は固定名の先・持ち主と、記録にある接続を出す"
+else
+  ng "status" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}")"
 fi
 
 echo
