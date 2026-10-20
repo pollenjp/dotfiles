@@ -452,11 +452,16 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 | Windows 側 | 中身 | 出所 |
 | --- | --- | --- |
-| `%USERPROFILE%\.ssh\config` | `Include config.d/*.ssh_config` の 1 行と説明のコメント | script が置く |
+| `%USERPROFILE%\.ssh\config` | `Include config.d/*.ssh_config` の 1 行、その後ろの `Host *` の `SetEnv PJP_SSH_CLIENT=%u@%L`、説明のコメント | script が置く |
 | `%USERPROFILE%\.ssh\config.d\<名前>.ssh_config` | 接続先 | private な dotfiles-private の `ssh/` からコピー |
 | `%USERPROFILE%\.ssh\config.d\` のほかのファイル | マシン固有の接続先 | my-cloud の `ssh-config.sh` などが書く。script は触らない |
 
 - `config.d` はファイル名の順に読まれ、同じキーは先に読んだ値が効く (WSL と同じ)
+- `SetEnv PJP_SSH_CLIENT=%u@%L` は、ssh 先の herdr が「同じマシンから来た接続」を見分けるのにこの PC を名乗る
+  (`polle@pjp-raiden` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
+  [`nix/README.md`「forward された agent を固定名で見せる」](../nix/README.md#forward-された-agent-を固定名で見せる))。
+  ssh は最初に当たった `SetEnv` の行だけを使うので、`config.d` の `Host` に `SetEnv` を書いたら、そこにも
+  `PJP_SSH_CLIENT=%u@%L` を足す。前の版 (`SetEnv` の無い `config`) は、記録と同じ中身なら正本の更新として上書きされる
 - 置いたファイルは、中身の sha256 を WSL の `~/.local/state/dotfiles/windows-ssh-config.deployed.json` に覚える。
   正本が変われば上書きし、正本から消えれば消す
 - 旧経路が置いた `Include ~/dotfiles/ssh_config` の 1 行だけの `config` は、衝突にせず置き換える

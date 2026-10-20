@@ -223,6 +223,21 @@
               '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
+          # 包む前の script を、偽の ssh-add と python3 で bind した本物の unix socket で流す。flock は script が
+          # PATH から使う (Linux の system と同じ util-linux のもの)。starship.toml の警告も本物の starship で読ませる
+          pjp-agent-link-test =
+            pkgs.runCommand "pjp-agent-link-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.python3
+                  pkgs.util-linux
+                  pkgs.starship
+                ];
+              }
+              ''
+                bash ${./tests/pjp-agent-link.test.sh} ${./pkgs/pjp-agent-link} ${./files/starship.toml}
+                touch $out
+              '';
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
@@ -274,6 +289,14 @@
               ;
           };
           one-password-state = import ./tests/one-password.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          agent-link-state = import ./tests/agent-link.nix {
             inherit
               lib
               pkgs

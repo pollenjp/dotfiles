@@ -1,7 +1,9 @@
 # ssh まわり。次の 2 つを持つ。
 #
-#   1. ~/.ssh/config を生成する (Include の骨組みだけ)
+#   1. ~/.ssh/config を生成する (Include の骨組みと、このマシンを名乗る SetEnv だけ)
 #   2. WSL + 1Password のマシンに ~/.local/bin/{ssh,ssh-add} ラッパーを置く
+#
+# ssh 先で herdr の中から agent を使い続ける仕組み (~/.ssh/rc など) は modules/agent-link.nix。
 #
 # # 1. ~/.ssh/config
 #
@@ -65,6 +67,17 @@ in
     # ssh は同じキーワードについて **最初に得た値**を採るので、
     # config.d が Nix 生成分より優先される。マシン固有の上書きができる。
     includes = [ "config.d/*.ssh_config" ];
+
+    # ssh 先の herdr の固定名が「同じマシンから来た接続」を見分けるのに、このマシンを名乗る (ADR 025)。
+    # %u (手元のユーザー名) と %L (手元のホスト名) は OpenSSH 10.0 から展開される。それより古い ssh は
+    # `%u@%L` のまま送り、受け取った側は届いていないものとして扱う。受け取る側の sshd に
+    # AcceptEnv PJP_SSH_CLIENT が要る (無い sshd は捨てる)。
+    #
+    # Include の後ろの Host * に置く。ssh は最初に当たった SetEnv の行だけを使う (後ろの行は足されない)
+    # ので、config.d の Host に自分の SetEnv がある接続先では、そこに PJP_SSH_CLIENT=%u@%L を足さないと
+    # 届かない。WSL の ssh は Windows の ssh.exe へのラッパーで、ssh.exe は Windows 側の config を読む
+    # (bootstrap-windows-ssh-config.sh が同じ行を置く)。
+    settings."*".SetEnv.PJP_SSH_CLIENT = "%u@%L";
   };
 
   # WSL から Windows 側の ssh.exe / ssh-add.exe を呼ぶラッパー。

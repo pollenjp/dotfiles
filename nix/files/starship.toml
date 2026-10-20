@@ -58,3 +58,40 @@ format = '🕙[\[$time\]]($style)'
 [username]
 show_always = true
 format = '[$user]($style)'
+
+# ssh で入った shell と herdr の pane で、PJP_SSH_CLIENT が届いていないことを出す (TKT-224 / ADR 025)。
+# 届かないと、ssh 先の herdr の固定名は、同じマシンからの別の接続を借りられない (ssh 先の sshd に
+# AcceptEnv PJP_SSH_CLIENT が要る。手元の ssh の SetEnv は nix/home/modules/ssh.nix)。
+#
+#   herdr の pane (SSH_AUTH_SOCK が ~/.ssh/agent.sock・~/.ssh/agent.<session>.sock)
+#       その固定名の持ち主 (~/.local/state/pjp-agent-link/owner/<session>) が空・無いとき。pane の env には
+#       server を起こした接続の値が残っているので、env ではなく持ち主の記録を見る
+#   ssh で入った shell (SSH_CONNECTION がある)
+#       PJP_SSH_CLIENT が空か、% を含む (OpenSSH 10.0 より古い ssh は %u@%L を展開せずに送る) とき
+#
+# プロンプトのたびに走るので、sh で外のコマンドを呼ばずに判定する (ssh-add で agent に問い合わせない)。
+[custom.pjp_ssh_client]
+description = 'PJP_SSH_CLIENT が届いていない ssh の shell と herdr の pane で警告する'
+shell = ['sh']
+when = '''
+s=${SSH_AUTH_SOCK-}
+case $s in
+  "$HOME/.ssh/agent.sock") n=default ;;
+  "$HOME"/.ssh/agent.*.sock) n=${s#"$HOME/.ssh/agent."}; n=${n%.sock} ;;
+  *) n= ;;
+esac
+if [ -n "$n" ]; then
+  o=
+  f="$HOME/.local/state/pjp-agent-link/owner/$n"
+  if [ -r "$f" ]; then IFS= read -r o <"$f"; fi
+  [ -z "$o" ]
+else
+  [ -n "${SSH_CONNECTION-}" ] || exit 1
+  case ${PJP_SSH_CLIENT-} in
+    '' | *%*) exit 0 ;;
+  esac
+  exit 1
+fi
+'''
+format = '[⚠ PJP_SSH_CLIENT なし]($style) '
+style = 'bold yellow'

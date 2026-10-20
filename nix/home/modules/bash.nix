@@ -448,10 +448,11 @@ in
       # NOTE: 元のコードには ssh-add の存在確認が無く、ssh-add が無い環境では
       #       起動のたびにエラーが出ていた。ガードを追加している。
       #
-      # NOTE: SSH_AUTH_SOCK が固定名 ~/.ssh/agent.sock の shell (= ssh 先の
-      #       herdr の pane。すぐ下の herdr 関数を参照) では何もしない (ADR 008)。
+      # NOTE: SSH_AUTH_SOCK が herdr の session ごとの固定名 (~/.ssh/agent.sock・
+      #       ~/.ssh/agent.<session>.sock) の shell (= herdr の pane。固定名を渡すのは
+      #       herdr を包む実行ファイル。modules/agent-link.nix) では何もしない (ADR 008・025)。
       #       固定名が dangling なのは forward した接続が無いあいだだけで、次に
-      #       herdr を開けば戻る。ここでローカル agent を起こすと、その pane だけ
+      #       herdr を開くか同じマシンから繋げば戻る。ここでローカル agent を起こすと、その pane だけ
       #       別の鍵 (~/.ssh/id_ed25519) に固定され、固定名が戻っても元に戻らない。
       #       detach 中でもエージェントは herdr pane split で pane を作れるので、
       #       この経路は実際に踏む。
@@ -469,6 +470,7 @@ in
         SSH_AGENT_FILE="''${HOME}/.ssh-agent"
 
         if [[ "''${SSH_AUTH_SOCK:-}" != "''${HOME}/.ssh/agent.sock" ]] \
+          && [[ "''${SSH_AUTH_SOCK:-}" != "''${HOME}"/.ssh/agent.*.sock ]] \
           && [[ "''${SSH_AUTH_SOCK:-}" != "''${HOME}/.1password/agent.sock" ]] \
           && ! ssh-add -l >/dev/null 2>&1; then
           if test -f "''${SSH_AGENT_FILE}"; then
@@ -489,60 +491,6 @@ in
           fi
         fi
       fi
-
-      ##############################################################
-      # ssh 先で herdr を開くときだけ、forward された agent を固定名
-      # ~/.ssh/agent.sock 越しに見せる (ADR 008)。
-      #
-      # sshd が接続ごとに作る /tmp/ssh-XXXXXX/agent.<pid> は logout で消えるのに、
-      # herdr server は起動したときの env を抱えて常駐し、pane はそれを継ぐ。
-      # 実行中のプロセスの env は外から書き換えられないので、herdr には固定名を
-      # 渡しておき、開くたびにその指す先を今の接続の socket へ張り替える。
-      #
-      # 張り替えるのは herdr を開いた接続だけにする。ログインのたびに張り替えると、
-      # 覗くだけの 2 本目の ssh が固定名を奪い、閉じた時点で他の接続の shell まで
-      # agent を失う。herdr の外の shell は、自分の接続の socket をそのまま使う。
-      ##############################################################
-
-      # 固定名を、この shell の接続が forward してきた socket へ向ける。
-      # forward されていない shell (手元の WSL、ssh -a、herdr の pane) では何もしない。
-      #   - 固定名そのものを張ると自分自身を指す symlink (ELOOP) になるので除く
-      #   - SSH_AGENT_PID があるときの SSH_AUTH_SOCK は、上のフォールバックが起こした
-      #     (か読み込んだ) ローカル agent。ssh -a で入った shell がこれになる。
-      #     張ると forward された鍵が ~/.ssh/id_ed25519 にすり替わるので除く
-      #     (sshd の forward では SSH_AGENT_PID は入らない)
-      ssh-agent-link() {
-        local stable="''${HOME}/.ssh/agent.sock"
-        if [[ -S "''${SSH_AUTH_SOCK:-}" ]] \
-          && [[ "''${SSH_AUTH_SOCK}" != "''${stable}" ]] \
-          && [[ -z "''${SSH_AGENT_PID:-}" ]]; then
-          ln -sfn "''${SSH_AUTH_SOCK}" "''${stable}"
-        fi
-      }
-
-      # ssh 先 (SSH_CONNECTION は sshd が置く) では、herdr を必ず固定名つきで起動する。
-      # 固定名を渡すのはこのプロセスだけで、ログイン shell の SSH_AUTH_SOCK は変えない。
-      # forward の無い接続 (ssh -a) から server を起動するときも渡す。渡さないと、
-      # その server の pane は寿命が尽きるまで agent 無しになる。
-      # alias の h / hss / ha なども herdr を呼ぶので、全部ここを通る。
-      #
-      # 手元でも、SSH_AUTH_SOCK がこのマシンの 1Password (~/.1password/agent.sock) なら
-      # 固定名をそこへ張って渡す (ADR 022)。張らないと、手元で開いた herdr の pane が最後に
-      # ssh で開いた接続の転送を指したままになる。これで固定名は「最後に herdr を開いた場所」の
-      # 1Password を指す。1Password の socket は場所が決まっているので、まだ無くても張る
-      # (アプリが起動すれば生きる)。WSL の手元と pane の中 (SSH_AUTH_SOCK が固定名) はこの
-      # 分岐に当たらず、今までどおり何もしない。
-      herdr() {
-        if [[ -n "''${SSH_CONNECTION:-}" ]]; then
-          ssh-agent-link
-          SSH_AUTH_SOCK="''${HOME}/.ssh/agent.sock" command herdr "$@"
-        elif [[ "''${SSH_AUTH_SOCK:-}" == "''${HOME}/.1password/agent.sock" ]]; then
-          ln -sfn "''${HOME}/.1password/agent.sock" "''${HOME}/.ssh/agent.sock"
-          SSH_AUTH_SOCK="''${HOME}/.ssh/agent.sock" command herdr "$@"
-        else
-          command herdr "$@"
-        fi
-      }
 
       ##############################################################
       # マシンローカルの環境変数。home-manager の管理下には置かない。
