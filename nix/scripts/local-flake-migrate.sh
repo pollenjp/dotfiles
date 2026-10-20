@@ -235,6 +235,9 @@ parse_flake_args() {
     [[ ${mode} == quiet ]] || printf '!! ローカル flake がありません: %s\n' "${flake}" >&2
     exit 2
   fi
+  # 絶対パスにする (prepare.env に書き、apply はどこから流しても同じ所に書く)
+  flake_dir=$(cd -P -- "${flake_dir}" && pwd)
+  flake="${flake_dir}/flake.nix"
   local_nix=$(local_nix_dir "${flake}")
   if [[ -z ${local_nix} ]]; then
     [[ ${mode} == quiet ]] \
@@ -269,7 +272,7 @@ diff_lines() {
 #   base_lines  旧いファイルとの差分の行数
 # に入れる。印があるのに同じ版が無ければ marker_missing=1。描ける版が 1 つも無ければ 1
 find_base() {
-  local old=$1 nix_dir=$2 marker=$3 n=0 rev date subject f id lines label
+  local old=$1 nix_dir=$2 marker=$3 n=0 rev date subject f id lines label why
   local best_n="" best_lines="" best_rev="" best_label="" best_id="" mark_n="" mark_rev="" mark_label="" mark_id="" mark_lines=""
   need_tmp
   mkdir -p "${tmp}/cand"
@@ -284,8 +287,10 @@ find_base() {
       git -C "${repo_dir}" show "${rev}:${template_rel}" >"${f}" 2>/dev/null || continue
     fi
     label="${rev} ${date} ${subject}"
-    if ! id=$(template_id "${f}" 2>/dev/null) || ! template_render "${f}" "${nix_dir}" >"${tmp}/cand/${n}.nix" 2>/dev/null; then
-      printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "-" "描けない" "${subject}" >>"${tmp}/candidates.tsv"
+    : >"${tmp}/render.err"
+    if ! id=$(template_id "${f}" 2>/dev/null) || ! template_render "${f}" "${nix_dir}" >"${tmp}/cand/${n}.nix" 2>"${tmp}/render.err"; then
+      why=$(awk 'NR == 1 { sub(/^!! /, ""); print }' "${tmp}/render.err")
+      printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "-" "描けない" "${subject} (${why:-雛形の heredoc が見つからない})" >>"${tmp}/candidates.tsv"
       continue
     fi
     # find_base は呼び出し側の || の中で動くので set -e が効かない。比べられなかった版は飛ばす
@@ -391,12 +396,12 @@ resolve_conflicts() {
   ' "$1"
 }
 
-# key=value の行のファイルから値を読む (eval しない)。$1: ファイル、$2: 名前
+# key=value の行のファイルから値を読む (eval しない。値は最初の = より後ろ全部)。$1: ファイル、$2: 名前
 env_get() {
-  local k v
-  while IFS='=' read -r k v; do
-    if [[ ${k} == "$2" ]]; then
-      printf '%s\n' "${v}"
+  local line
+  while IFS= read -r line; do
+    if [[ ${line%%=*} == "$2" ]]; then
+      printf '%s\n' "${line#*=}"
       return 0
     fi
   done <"$1"
@@ -419,13 +424,30 @@ setup_hosts() {
 }
 
 # 全ホストの drvPath と警告を 1 行ずつ「drv<TAB>ホスト<TAB>drvPath」「warn<TAB>ホスト<TAB>警告」で出す式
-# (警告の改行は \n、タブは空白にする)
+# (警告の改行は \n、タブは空白にする)。ホストごとに tryEval で包み、評価が落ちるホストは「fail<TAB>ホスト」に
+# する (module の評価の誤りは throw なので拾える。1 ホストが落ちても、ほかのホストは比べられる)。
+# 検証専用の sandbox は比べない (setup も対象にしない。登録簿が持つ値と local がぶつかって落ちることがある)
 # shellcheck disable=SC2016 # Nix の式をそのまま書く
 summary_expr='hs: builtins.concatStringsSep "" (builtins.concatLists (map (n:
-  let h = builtins.getAttr n hs; in
-  [ ("drv\t" + n + "\t" + h.activationPackage.drvPath + "\n") ]
-  ++ map (w: "warn\t" + n + "\t" + builtins.replaceStrings [ "\n" "\t" ] [ "\\n" " " ] w + "\n") h.config.warnings
-) (builtins.attrNames hs)))'
+  let
+    h = builtins.getAttr n hs;
+    d = builtins.tryEval h.activationPackage.drvPath;
+    w = builtins.tryEval (builtins.deepSeq h.config.warnings h.config.warnings);
+  in
+  if d.success then
+    [ ("drv\t" + n + "\t" + d.value + "\n") ]
+    ++ (if w.success then map (x: "warn\t" + n + "\t" + builtins.replaceStrings [ "\n" "\t" ] [ "\\n" " " ] x + "\n") w.value else [ ])
+  else [ ("fail\t" + n + "\n") ]
+) (builtins.filter (n: n != "sandbox") (builtins.attrNames hs))))'
+
+# 1 ホストの drvPath を出す式 (tryEval で包まない。評価が落ちるホストの、原因のエラーを見るため)。$1: ホスト
+host_drv_expr() {
+  local h=$1
+  h=${h//\\/\\\\}
+  h=${h//\"/\\\"}
+  h=${h//\$\{/\\\$\{}
+  printf '%s' 'hs: (builtins.getAttr "'"${h}"'" hs).activationPackage.drvPath'
+}
 
 # 1 ホストの config.dotfiles を平らにして「パス<TAB>値の JSON」で 1 行ずつ出す式。$1: ホスト。
 # drv (outPath を持つもの) はたどらずに JSON (store のパス) にし、関数は "<function>" にする
@@ -452,18 +474,22 @@ lock_sync() {
   fi
 }
 
-# nix のエラーの出力から、最初の error: の行からの 20 行を字下げして出す (無ければ末尾の 20 行)
+# nix のエラーの出力から、原因の行を字下げして出す。nix は trace のあとの最後の error: の行に原因を書くので、
+# そこから 15 行まで (error: の行が無ければ末尾の 15 行) を出し、全文の場所を添える
 eval_error_excerpt() {
-  if grep -q '^error:' "$1"; then
-    awk '/^error:/ { f = 1 } f && n < 20 { print "    " $0; n++ }' "$1"
+  local at
+  at=$(awk '/^[[:space:]]*error:/ { n = NR } END { print n + 0 }' "$1")
+  if ((at > 0)); then
+    awk -v at="${at}" 'NR >= at && NR < at + 15 { print "    " $0 }' "$1"
   else
-    tail -n 20 "$1" | sed 's/^/    /'
+    tail -n 15 "$1" | sed 's/^/    /'
   fi
+  printf '    (全文: %s)\n' "$1"
 }
 
 cmd_compare() {
   local work="" baseline="" base_src nix_dir cur lines base_label new_sum base_sum base_is_old n_hosts=0 n_same=0 differ=0
-  local h hosts_base hosts_new
+  local h f flake_dir hosts_base hosts_new base_fail="" new_fail="" both_fail=""
   while [[ $# -gt 0 ]]; do
     case $1 in
       --baseline)
@@ -510,6 +536,17 @@ cmd_compare() {
     cp "${work}/old/flake.lock" "${work}/.eval/base/flake.lock"
   fi
   [[ ! -f ${work}/.eval/base/flake.lock ]] || cp "${work}/.eval/base/flake.lock" "${work}/.eval/new/flake.lock"
+  # ローカル flake の隣のファイル (flake.nix が import するものなど) も、両方の写しに置く。退避・一時ファイル・
+  # setup (setup.sh への symlink) は写さない
+  flake_dir=$(env_get "${work}/prepare.env" flake_dir) || die "prepare.env に flake_dir がありません: ${work}"
+  for f in "${flake_dir}"/* "${flake_dir}"/.[!.]*; do
+    [[ -e ${f} || -L ${f} ]] || continue
+    case ${f##*/} in
+      flake.nix | flake.lock | setup | flake.nix.bak-* | flake.lock.bak-* | .flake.nix.*) continue ;;
+    esac
+    cp -R -p "${f}" "${work}/.eval/base/"
+    cp -R -p "${f}" "${work}/.eval/new/"
+  done
   new_sum=$(cksum <"${work}/new/flake.nix")
   base_sum=$(cksum <"${base_src}/flake.nix")
 
@@ -547,29 +584,78 @@ cmd_compare() {
     exit 4
   fi
 
-  # ホストごとの drvPath を比べる
+  # ホストごとの drvPath を比べる (sandbox は式で外しているが、出力の側でも外す)
   awk -F'\t' '
-    FNR == NR { if ($1 == "drv") a[$2] = $3; next }
+    FNR == NR { if ($1 == "drv") a[$2] = $3; else if ($1 == "fail") a[$2] = "\001"; next }
     $1 == "drv" { b[$2] = $3 }
+    $1 == "fail" { b[$2] = "\001" }
     END {
-      for (h in a) print h "\t" (h in b ? (a[h] == b[h] ? "同じ" : "違う") : "旧い flake だけ")
-      for (h in b) if (!(h in a)) print h "\t移した flake だけ"
+      for (h in a) {
+        if (h == "sandbox") continue
+        if (!(h in b)) s = "旧い flake だけ"
+        else if (a[h] == "\001" && b[h] == "\001") s = "両方で評価が落ちる"
+        else if (a[h] == "\001") s = "旧い flake で評価が落ちる"
+        else if (b[h] == "\001") s = "移した flake で評価が落ちる"
+        else s = (a[h] == b[h] ? "同じ" : "違う")
+        print h "\t" s
+      }
+      for (h in b) if (h != "sandbox" && !(h in a)) print h "\t移した flake だけ"
     }
   ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/hosts.tsv"
   echo "  ホストごとの drvPath:"
   while IFS=$'\t' read -r h state; do
-    n_hosts=$((n_hosts + 1))
     printf '  %-30s %s\n' "${h}" "${state}"
-    if [[ ${state} == 同じ ]]; then
-      n_same=$((n_same + 1))
-    else
-      differ=1
-    fi
+    case ${state} in
+      "両方で評価が落ちる") both_fail+="${both_fail:+ }${h}" ;;
+      "旧い flake で評価が落ちる") base_fail+="${base_fail:+ }${h}" ;;
+      "移した flake で評価が落ちる") new_fail+="${new_fail:+ }${h}" ;;
+      "同じ")
+        n_hosts=$((n_hosts + 1))
+        n_same=$((n_same + 1))
+        ;;
+      *)
+        n_hosts=$((n_hosts + 1))
+        differ=1
+        ;;
+    esac
   done <"${tmp}/hosts.tsv"
+
+  # 片側でだけ評価が落ちるホストがあれば、そのうち 1 つを tryEval なしで評価し直して、原因のエラーを出す
+  if [[ -n ${base_fail} || (-z ${new_fail} && -n ${both_fail} && ${n_hosts} -eq 0) ]]; then
+    h=${base_fail:-${both_fail}}
+    h=${h%% *}
+    nix eval --raw "path:${work}/.eval/base#homeConfigurations" --apply "$(host_drv_expr "${h}")" \
+      >/dev/null 2>"${work}/.eval/base-host.err" || true
+    {
+      printf '!! 旧い flake (基準) は、今の本体 (%s) では次のホストを評価できません: %s\n' "${nix_dir}" "${base_fail:-${both_fail}}"
+      echo "   本体で option が削除・改名された・型が変わった、登録簿のホストが持つ値と local がぶつかる、などです。"
+      printf '   nix のエラー (%s):\n' "${h}"
+      eval_error_excerpt "${work}/.eval/base-host.err"
+      [[ -z ${new_fail} ]] || printf '   移した flake で評価が落ちるホストもあります: %s\n' "${new_fail}"
+      echo "   読み解き方と比べ直し方は pjp-dotfiles-local-flake-migrate skill の「旧い flake が評価できないとき」"
+      echo "   (旧い flake に評価が通るだけの直しを当てた基準を作り、--baseline で比べ直す)。"
+    } >&2
+    exit 3
+  fi
+  if [[ -n ${new_fail} ]]; then
+    h=${new_fail%% *}
+    nix eval --raw "path:${work}/.eval/new#homeConfigurations" --apply "$(host_drv_expr "${h}")" \
+      >/dev/null 2>"${work}/.eval/new-host.err" || true
+    {
+      printf '!! 移した flake は次のホストを評価できません (new/flake.nix を直してから compare し直す): %s\n' "${new_fail}"
+      printf '   nix のエラー (%s):\n' "${h}"
+      eval_error_excerpt "${work}/.eval/new-host.err"
+    } >&2
+    exit 4
+  fi
   if ((n_same == n_hosts)); then
     printf '  → drvPath: 全 %d ホストで同じ\n' "${n_hosts}"
   else
     printf '  → drvPath: %d ホストのうち %d ホストが違う\n' "${n_hosts}" "$((n_hosts - n_same))"
+  fi
+  if [[ -n ${both_fail} ]]; then
+    printf '  %s は、旧い flake でも移した flake でも評価が落ちるので比べていない\n' "${both_fail}"
+    echo "    (setup の対象のホストでなければ気にしなくてよい。対象なら、旧い local がそのホストで落ちている)"
   fi
 
   # 違うホストは、config.dotfiles の違いを出す。同じ違いのホストはまとめる (bash 3 でも動くよう、連想配列は使わない)
@@ -632,7 +718,8 @@ cmd_compare() {
   ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/warn.txt"
   if [[ -s ${tmp}/warn.txt ]]; then
     echo "  警告 (config.warnings):"
-    sed 's/^/    /' "${tmp}/warn.txt"
+    # 警告の中の改行 (式で \n にしたもの) は、改行して字下げする
+    awk '{ gsub(/\\n/, "\n      "); print "    " $0 }' "${tmp}/warn.txt"
   fi
 
   {
@@ -641,6 +728,7 @@ cmd_compare() {
     printf 'baseline_sum=%s\n' "${base_sum}"
     printf 'baseline_is_old=%s\n' "${base_is_old}"
     printf 'result=%s\n' "$( ((differ)) && echo differ || echo same)"
+    printf 'unverified=%s\n' "${both_fail}"
   } >"${work}/compare.result"
 
   if ((differ)); then
@@ -648,7 +736,11 @@ cmd_compare() {
     return 1
   fi
   if ((base_is_old)); then
-    echo "→ 値は全部引き継げています (home-manager の世代の中身は変わらない。switch は要らない)。"
+    if [[ -n ${both_fail} ]]; then
+      echo "→ 比べられたホストでは、値は全部引き継げています (世代の中身は変わらない。switch は要らない)。"
+    else
+      echo "→ 値は全部引き継げています (home-manager の世代の中身は変わらない。switch は要らない)。"
+    fi
   else
     echo "→ 基準と同じです。基準は旧い flake に直しを当てたものなので、apply には --accept-changes が要る。"
   fi
@@ -675,6 +767,7 @@ cmd_apply() {
   target="${flake_dir}/flake.nix"
   lock="${flake_dir}/flake.lock"
   [[ -f ${target} ]] || die "ローカル flake がありません: ${target}"
+  [[ -w ${target} && -w ${flake_dir} ]] || die "書き込めません: ${target} (ファイルかディレクトリに書き込みの権限が無い)"
   if ! cmp -s "${target}" "${work}/old/flake.nix" || [[ $(cksum <"${target}") != "$(env_get "${work}/prepare.env" old_sum)" ]]; then
     die "prepare のあとに ${target} が書き換わっています。prepare からやり直してください。"
   fi
@@ -698,11 +791,12 @@ cmd_apply() {
     bak_lock="${lock}.bak-${ts}"
     cp -p "${lock}" "${bak_lock}"
   fi
-  # 同じディレクトリの一時ファイルに書いてから置き換える (元の mode を引き継ぐ)
+  # 同じディレクトリの一時ファイルに書いてから置き換える (元の mode を引き継ぐ)。しくじったら一時ファイルを消す
   tmpf=$(mktemp "${flake_dir}/.flake.nix.XXXXXX")
-  cp -p "${target}" "${tmpf}"
-  cat "${work}/new/flake.nix" >"${tmpf}"
-  mv -f "${tmpf}" "${target}"
+  if ! { cp -p "${target}" "${tmpf}" && cat "${work}/new/flake.nix" >"${tmpf}" && mv -f "${tmpf}" "${target}"; }; then
+    rm -f "${tmpf}"
+    die "書き換えに失敗しました。${target} は元のままです (退避: ${bak_nix})。"
+  fi
 
   printf '==> 書き換えました: %s\n' "${target}"
   printf '  退避: %s\n' "${bak_nix}"
@@ -806,6 +900,11 @@ cmd_prepare() {
   if [[ -n ${out_dir} ]]; then
     if [[ -e ${out_dir} ]] && [[ ! -d ${out_dir} || -n $(ls -A "${out_dir}") ]]; then
       die "--out が空でないか、ディレクトリではありません: ${out_dir}"
+    fi
+    # 既にあるディレクトリは、自分のもので、ほかの利用者が書けないこと (共有の /tmp に先に作られた場所で、
+    # new/flake.nix や compare.result を差し替えられないように)
+    if [[ -d ${out_dir} ]] && { [[ ! -O ${out_dir} ]] || [[ -n $(find "${out_dir}" -maxdepth 0 \( -perm -0020 -o -perm -0002 \)) ]]; }; then
+      die "--out がほかの利用者のものか、ほかの利用者が書けるディレクトリです: ${out_dir} (mktemp -d で作るか、--out を省く)"
     fi
     mkdir -p "${out_dir}"
   else

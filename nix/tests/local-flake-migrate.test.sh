@@ -32,16 +32,23 @@
 #     別の checkout を指せば、そのパスで描いてそう出す。flake.lock が無くても進む。--out が空でなければ 2。
 #     --base で元の雛形を選び直せ (base_how=given)、描けない rev なら作業場所を作らずに 2
 #   - compare (偽の nix) は、基準 (old/ か --baseline) と new/ を評価用の写しで評価し (old/ は触らない)、全ホストの
-#     drvPath が同じなら 0 と「同じ」、値が違えば 1 と違うホスト・config.dotfiles の違い (同じ違いのホストはまとめる)、
-#     ホストの集合が違えば 1 と片側だけのホスト、setup が拾うホストの並び (一番上が既定) が違えば drvPath が同じでも 1。
-#     基準が評価できなければ 3、移した flake が評価できなければ 4 (どちらも前の compare.result を消す)、衝突の印が
-#     残っていれば nix を呼ばずに 2。警告は「移して消えた」と「移した flake にある」で出す。lock は本体の hash が
-#     無いときだけ nix flake update dotfiles で、lock が無ければ nix flake lock で、写しに作る。compare.result に
-#     new/flake.nix の cksum・基準・結果を書く
+#     drvPath が同じなら 0 と「同じ」、値が違えば 1 と違うホスト・config.dotfiles の違い (同じ違いのホストはまとめる。
+#     drvPath だけ違えば「config.dotfiles は同じ」、読めなければそう出して続ける)、ホストの集合が違えば 1 と片側だけの
+#     ホスト、setup が拾うホストの並び (一番上が既定) が違えば drvPath が同じでも 1。検証専用の sandbox は比べない。
+#     評価がまるごと落ちれば基準なら 3・移した flake なら 4 で、長い trace の最後の error: の行 (原因) と全文の場所を
+#     出す。1 ホストだけ片側で落ちれば、そのホストの名前と評価し直した原因の行を出して 3 か 4。両方で落ちるホストは
+#     比べずにそう出す (ほかが同じなら 0)。3 と 4 は前の compare.result を消す。衝突の印が残っていれば nix を呼ばずに
+#     2。警告は「移して消えた」と「移した flake にある」で出し、警告の中の改行は改行して字下げする。lock は本体の
+#     hash が無いときだけ nix flake update dotfiles で、lock が無ければ nix flake lock で、写しに作る。ローカル flake
+#     の隣のファイル (import するもの) も写しに置き、退避と setup は写さない。compare.result に new/flake.nix の
+#     cksum・基準・結果を書く
+#   - prepare は、既にある --out がほかの利用者の書けるディレクトリなら 2。相対パスの --flake は絶対パスにして
+#     prepare.env に書く
 #   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
 #     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
 #     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
-#     new/flake.nix を書き、flake.lock は変えず、戻すコマンド (cp -p) を出す。flake.lock が無ければ lock の分を飛ばす
+#     new/flake.nix を書き、flake.lock は変えず、戻すコマンド (cp -p) を出す。flake.lock が無ければ lock の分を飛ばす。
+#     書けない flake.nix なら、退避も一時ファイルも作らずに 2 で止まる
 
 set -u -o pipefail
 
@@ -488,15 +495,29 @@ else
   ng "prepare --base (無い rev)" "rc=$(rc "${r}") $(err "${r}")"
 fi
 
-# 13. prepare: --out が空でない → 2
+# 13. prepare: --out が空でない・ほかの利用者が書ける → 2
 mkdir -p "${r}/w13"
 touch "${r}/w13/何か"
 user_flake "${r}" v1
 run "${r}" prepare --flake "${r}/local" --out "${r}/w13"
-if [[ $(rc "${r}") == 2 ]] && grep -q '空でない' "${r}/err"; then
-  ok "prepare: --out が空でないディレクトリなら 2"
+rc_nonempty=$(rc "${r}")
+grep -q '空でない' "${r}/err" && nonempty_msg=1 || nonempty_msg=0
+mkdir -p "${r}/w13b"
+chmod 0777 "${r}/w13b"
+run "${r}" prepare --flake "${r}/local" --out "${r}/w13b"
+if [[ ${rc_nonempty} == 2 && ${nonempty_msg} == 1 && $(rc "${r}") == 2 ]] && grep -q 'ほかの利用者' "${r}/err" \
+  && [[ -z $(ls -A "${r}/w13b") ]]; then
+  ok "prepare: --out が空でない・ほかの利用者が書けるディレクトリなら 2"
 else
-  ng "prepare (空でない --out)" "rc=$(rc "${r}") $(err "${r}")"
+  ng "prepare (--out の確かめ)" "rc=${rc_nonempty} → $(rc "${r}") $(err "${r}")"
+fi
+
+# 13b. prepare: 相対パスの --flake は絶対パスにして prepare.env に書く (apply をどこから流しても同じ所に書く)
+(cd "${r}" && HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" prepare --flake local --out "${r}/w13c" >/dev/null 2>&1)
+if [[ $(env_of "${r}/w13c" flake_dir) == "$(cd -P "${r}/local" && pwd)" ]]; then
+  ok "prepare: 相対パスの --flake は絶対パスにして prepare.env に書く"
+else
+  ng "prepare (相対パスの --flake)" "$(cat "${r}/w13c/prepare.env" 2>/dev/null)"
 fi
 
 # 14. 衝突を自動で解く形と残す形 (小さな雛形の 2 版で 1 つずつ)。元の版 (commit) と今の版 (作業ツリー)、
@@ -540,6 +561,7 @@ merge_case 今が後ろに足した $'a\nb\nc' $'a\nb\nX\nc' $'a\nB\nc' $'a\nB\n
 merge_case 今が前に足した $'a\nb\nc' $'a\nX\nb\nc' $'a\nB\nc' $'a\nX\nB\nc'
 merge_case 手元が消した $'a\nb\nc' $'a\nb\nX\nc' $'a\nc' $'a\nX\nc'
 merge_case 手元が足し今が直した $'a\nb\nc' $'a\nb2\nc' $'a\nb\nY\nc' $'a\nb2\nY\nc'
+merge_case 手元が前に足し今が直した $'a\nb\nc' $'a\nb2\nc' $'a\nY\nb\nc' $'a\nY\nb2\nc'
 merge_case 両側が同じ所に足した $'a\nb\nc' $'a\nb\nX\nc' $'a\nb\nY\nc' 残す
 merge_case 両側が同じ行を直した $'a\nb\nc' $'a\nb2\nc' $'a\nB\nc' 残す
 
@@ -549,10 +571,16 @@ merge_case 両側が同じ行を直した $'a\nb\nc' $'a\nb2\nc' $'a\nB\nc' 残�
 #   nix flake lock path:<dir>            <dir>/flake.lock に sha256-FAKE を書く
 #   nix flake update dotfiles --flake path:<dir>   同じ
 #   nix eval --raw path:<dir>#homeConfigurations --apply <式>
-#     <dir>/flake.nix の「# FAKE_EVAL_ERROR: <文>」があれば stderr に error: <文> を出して 1。
-#     ホストは「# FAKE_HOSTS: a b」(既定 h1 h2)。式に config.dotfiles があれば、コメントでない
-#     「dotfiles.<パス> = <値>;」の行を「パス<TAB>値」で返す。無ければ、コメントでも空でもない行を並べ替えた cksum を
-#     drvPath にした「drv<TAB><host><TAB><drvPath>」と、「# FAKE_WARN: <文>」ごとの「warn<TAB><host><TAB><文>」を返す
+#     <dir>/flake.nix の「# FAKE_EVAL_ERROR: <文>」があれば、評価がまるごと落ちる (本物の nix のように、30 行ほどの
+#     trace のあとに「error: <文>」を出して 1)。ホストは「# FAKE_HOSTS: a b」(既定 h1 h2)、そのうち
+#     「# FAKE_FAIL_HOSTS: a」のホストは評価が落ちる (tryEval で拾う形)。式で分ける:
+#       config.dotfiles   コメントでない「dotfiles.<パス> = <値>;」の行を「パス<TAB>値」で返す。
+#                         「# FAKE_DOTFILES_ERROR」があれば落ちる
+#       tryEval           ホストごとに、コメントでも空でもない行を並べ替えた cksum を drvPath にした
+#                         「drv<TAB><host><TAB><drvPath>」か、落ちるホストなら「fail<TAB><host>」。
+#                         落ちないホストには「# FAKE_WARN: <文>」ごとの「warn<TAB><host><TAB><文>」も
+#       それ以外          getAttr "<host>" の 1 ホストの drvPath。落ちるホストなら、長い trace のあとに
+#                         「error: <FAKE_HOST_ERROR の文>」を出して 1
 fake_bin="${work}/fake-bin"
 mkdir -p "${fake_bin}"
 {
@@ -561,6 +589,15 @@ mkdir -p "${fake_bin}"
 printf '%s\n' "$*" >>"${FAKE_NIX_LOG:-/dev/null}"
 last=""
 for a in "$@"; do last=$a; done
+# 本物の nix のような長い trace のあとに、原因の error: の行と続きを出す
+long_error() {
+  local i
+  echo 'error:'
+  for ((i = 1; i <= 28; i++)); do
+    printf '       … while evaluating the trace line %d\n         at «none»:0:0:\n' "${i}"
+  done
+  printf '       error: %s\n       - In `<unknown-file>'"'"': 続きの行\n' "$1"
+}
 case $1 in
   hash)
     echo sha256-FAKE
@@ -575,24 +612,46 @@ case $1 in
     f="${d}/flake.nix"
     e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${f}")
     if [[ -n ${e} ]]; then
-      printf 'error: %s\n' "${e}" >&2
+      long_error "${e}" >&2
       exit 1
     fi
     hosts=$(sed -n 's/^# FAKE_HOSTS: //p' "${f}")
+    fails=" $(sed -n 's/^# FAKE_FAIL_HOSTS: //p' "${f}") "
+    sum=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "${f}" | sort | cksum)
     case $5 in
       *config.dotfiles*)
+        if grep -q '^# FAKE_DOTFILES_ERROR' "${f}"; then
+          echo 'error: config.dotfiles を読めない' >&2
+          exit 1
+        fi
         sed -n 's/^[[:space:]]*dotfiles\.\([A-Za-z0-9_.]*\)[[:space:]]*=[[:space:]]*\(.*\);[[:space:]]*$/\1\t\2/p' "${f}"
         ;;
-      *)
-        sum=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "${f}" | sort | cksum)
+      *tryEval*)
+        # flake.nix が隣のファイルを import するなら、そのファイルが評価の場所に無いと落ちる
+        if grep -q 'import ./extra.nix' "${f}" && [[ ! -f ${d}/extra.nix ]]; then
+          long_error "path '${d}/extra.nix' does not exist" >&2
+          exit 1
+        fi
         for h in ${hosts:-h1 h2}; do
-          printf 'drv\t%s\t/nix/store/%s-%s.drv\n' "${h}" "${sum%% *}" "${h}"
+          if [[ ${fails} == *" ${h} "* ]]; then
+            printf 'fail\t%s\n' "${h}"
+          else
+            printf 'drv\t%s\t/nix/store/%s-%s.drv\n' "${h}" "${sum%% *}" "${h}"
+          fi
         done
         while IFS= read -r w; do
           for h in ${hosts:-h1 h2}; do
-            printf 'warn\t%s\t%s\n' "${h}" "${w}"
+            [[ ${fails} == *" ${h} "* ]] || printf 'warn\t%s\t%s\n' "${h}" "${w}"
           done
         done < <(sed -n 's/^# FAKE_WARN: //p' "${f}")
+        ;;
+      *)
+        h=$(sed -n 's/.*getAttr "\([^"]*\)".*/\1/p' <<<"$5")
+        if [[ ${fails} == *" ${h} "* ]]; then
+          long_error "$(sed -n 's/^# FAKE_HOST_ERROR: //p' "${f}")" >&2
+          exit 1
+        fi
+        printf '/nix/store/%s-%s.drv' "${sum%% *}" "${h}"
         ;;
     esac
     ;;
@@ -694,8 +753,9 @@ r=$(compare_case c19 '# FAKE_EVAL_ERROR: The option `dotfiles.gone'"'"' does not
 sed -i '/^# FAKE_EVAL_ERROR: /d' "${r}/w/new/flake.nix"
 run_nix "${r}" compare "${r}/w"
 if [[ $(rc "${r}") == 3 ]] && grep -q '旧い flake (基準) は今の本体' "${r}/err" \
-  && grep -qF 'error: The option `dotfiles.gone'"'"' does not exist.' "${r}/err" && [[ ! -e ${r}/w/compare.result ]]; then
-  ok "compare: 基準が今の本体で評価できなければ 3 で、そう出してエラーの行を添える"
+  && grep -qF 'error: The option `dotfiles.gone'"'"' does not exist.' "${r}/err" && grep -qF '.eval/base.err' "${r}/err" \
+  && [[ ! -e ${r}/w/compare.result ]]; then
+  ok "compare: 基準が今の本体で評価できなければ 3 で、長い trace の最後の error: の行 (原因) と全文の場所を添える"
 else
   ng "compare (基準が評価できない)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
 fi
@@ -709,6 +769,86 @@ if [[ ${rc_fixed} == 0 && $(rc "${r}") == 4 ]] && grep -q '移した flake は�
   ok "compare: 直した基準なら比べられ、移した flake が評価できなければ 4 (前の compare.result は消す)"
 else
   ng "compare (移した flake が評価できない)" "fixed rc=${rc_fixed} rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 19b. 1 ホストだけ旧い flake で評価が落ちる (移した flake では通る) → 3 で、そのホストの名前と、そのホストを評価し
+#      直した原因の行を出す
+r=$(compare_case c19b '# FAKE_FAIL_HOSTS: h2
+# FAKE_HOST_ERROR: The option `dotfiles.claude.notion.profile'"'"' has conflicting definition values')
+sed -i '/^# FAKE_FAIL_HOSTS: /d' "${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 3 ]] && grep -qE '^ +h2 +旧い flake で評価が落ちる' "${r}/out" \
+  && grep -qF 'error: The option `dotfiles.claude.notion.profile'"'"' has conflicting definition values' "${r}/err" \
+  && grep -q 'h2' "${r}/err" && [[ ! -e ${r}/w/compare.result ]]; then
+  ok "compare: 1 ホストだけ旧い flake で落ちれば 3 で、そのホストと、評価し直した原因の行を出す"
+else
+  ng "compare (1 ホストだけ旧い側で落ちる)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 19c. 1 ホストだけ移した flake で評価が落ちる → 4
+r=$(compare_case c19c)
+printf '# FAKE_FAIL_HOSTS: h2\n# FAKE_HOST_ERROR: 移した側の誤り\n' >>"${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 4 ]] && grep -qE '^ +h2 +移した flake で評価が落ちる' "${r}/out" \
+  && grep -qF 'error: 移した側の誤り' "${r}/err" && [[ ! -e ${r}/w/compare.result ]]; then
+  ok "compare: 1 ホストだけ移した flake で落ちれば 4 で、そのホストと原因の行を出す"
+else
+  ng "compare (1 ホストだけ移した側で落ちる)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 19d. 両方で評価が落ちるホストは比べずに、そう出す (ほかのホストが同じなら 0)
+r=$(compare_case c19d '# FAKE_FAIL_HOSTS: h2')
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && grep -qE '^ +h2 +両方で評価が落ちる' "${r}/out" && grep -q '比べていない' "${r}/out" \
+  && [[ $(env_get_test "${r}/w/compare.result" result) == same ]]; then
+  ok "compare: 両方で評価が落ちるホストは比べずにそう出し、ほかが同じなら 0"
+else
+  ng "compare (両方で落ちる)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 19e. 検証専用の sandbox は比べない (setup も対象にしない。登録簿の値と local がぶつかって落ちることがある)
+r=$(compare_case c19e '# FAKE_HOSTS: h1 sandbox
+# FAKE_FAIL_HOSTS: sandbox')
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && ! grep -q 'sandbox' "${r}/out" && grep -q '全 1 ホストで同じ' "${r}/out"; then
+  ok "compare: 検証専用の sandbox は比べない"
+else
+  ng "compare (sandbox)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 19f. drvPath は違うが config.dotfiles は同じ → そう出す。config.dotfiles を読めなければ、そう出して続ける
+r=$(compare_case c19f)
+printf '      home.stateVersion = "移した側だけ";\n' >>"${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+same_dotfiles=$(grep -c 'config.dotfiles は同じ' "${r}/out")
+printf '# FAKE_DOTFILES_ERROR\n' >>"${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+if [[ ${same_dotfiles} -ge 1 && $(rc "${r}") == 1 ]] && grep -q 'config.dotfiles を読めませんでした' "${r}/out"; then
+  ok "compare: drvPath が違っても config.dotfiles が同じならそう出し、読めなければそう出して続ける"
+else
+  ng "compare (config.dotfiles の経路)" "same=${same_dotfiles} rc=$(rc "${r}") $(out "${r}")"
+fi
+
+# 19g. ローカル flake の隣のファイル (flake.nix が import するもの) も評価の写しに置く。退避や setup は写さない
+r=$(compare_case c19g '      extra = import ./extra.nix;')
+printf '{ }\n' >"${r}/local/extra.nix"
+touch "${r}/local/flake.nix.bak-20260101T000000"
+ln -s "${r}/nix/scripts/setup.sh" "${r}/local/setup"
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 && -f ${r}/w/.eval/base/extra.nix && -f ${r}/w/.eval/new/extra.nix ]] \
+  && [[ ! -e ${r}/w/.eval/new/flake.nix.bak-20260101T000000 && ! -L ${r}/w/.eval/new/setup ]]; then
+  ok "compare: ローカル flake の隣のファイルも評価の写しに置き、退避と setup は写さない"
+else
+  ng "compare (隣のファイル)" "rc=$(rc "${r}") $(err "${r}") $(ls -A "${r}/w/.eval/new" 2>/dev/null)"
+fi
+
+# 19h. 警告の改行 (\n) は、改行して字下げして出す
+r=$(compare_case c19h '# FAKE_WARN: 1 行目\n2 行目')
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && grep -qF '移した flake にある: 1 行目' "${r}/out" && grep -qE '^ +2 行目 \(2 ホスト\)$' "${r}/out"; then
+  ok "compare: 警告の中の改行は、改行して字下げして出す"
+else
+  ng "compare (警告の改行)" "rc=$(rc "${r}") $(out "${r}")"
 fi
 
 # 20. 衝突の印が残っている → 2 で止まり、nix を呼ばない
@@ -831,6 +971,19 @@ if [[ $(rc "${r}") == 0 && -z $(find "${r}/local" -maxdepth 1 -name 'flake.lock*
 else
   ng "apply (lock が無い)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/local")"
 fi
+
+# 26c. 書けない flake.nix → 退避も一時ファイルも作らずに止まる
+r=$(compare_case c26c)
+run_nix "${r}" compare "${r}/w"
+chmod 0444 "${r}/local/flake.nix"
+run "${r}" apply "${r}/w"
+if [[ $(rc "${r}") == 2 ]] && grep -q '書き込めません' "${r}/err" \
+  && [[ -z $(find "${r}/local" -maxdepth 1 \( -name '.flake.nix.*' -o -name '*.bak-*' \)) ]]; then
+  ok "apply: 書けない flake.nix なら、退避も一時ファイルも作らずに止まる"
+else
+  ng "apply (書けない flake.nix)" "rc=$(rc "${r}") $(err "${r}") $(ls -A "${r}/local")"
+fi
+chmod 0644 "${r}/local/flake.nix"
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)
 if [[ -z $(ls -A "${TMPDIR}") ]]; then
