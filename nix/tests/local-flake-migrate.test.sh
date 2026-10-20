@@ -28,7 +28,8 @@
 #   - 衝突は、片側が元の行の前後に足しただけ (今が後ろ・前に足し、手元が直した・消した / 手元が足し、今が直した)
 #     なら自動で解き、両側が同じ所に足した・同じ行を両側が直したなら diff3 の印のまま残して行番号を出す
 #   - prepare は、元と今が同じ版なら「移すものはありません」と出して作業場所を作らない。url が script の repo と
-#     別の checkout を指せば、そのパスで描いてそう出す。flake.lock が無くても進む。--out が空でなければ 2
+#     別の checkout を指せば、そのパスで描いてそう出す。flake.lock が無くても進む。--out が空でなければ 2。
+#     --base で元の雛形を選び直せ (base_how=given)、描けない rev なら作業場所を作らずに 2
 #   - compare (偽の nix) は、基準 (old/ か --baseline) と new/ を評価用の写しで評価し (old/ は触らない)、全ホストの
 #     drvPath が同じなら 0 と「同じ」、値が違えば 1 と違うホスト・config.dotfiles の違い (同じ違いのホストはまとめる)、
 #     ホストの集合が違えば 1 と片側だけのホスト、setup が拾うホストの並び (一番上が既定) が違えば drvPath が同じでも 1。
@@ -465,6 +466,22 @@ if [[ $(rc "${r}") == 0 ]] && grep -qF 'path:/elsewhere/nix' "${r}/w12/new/flake
   ok "prepare: url が別の checkout を指せばそのパスで描いてそう出し、lock が無くても進む"
 else
   ng "prepare (別のパス)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 12b. prepare --base: 元の版を選び直せる (base_how=given)。履歴に無い rev なら 2
+user_flake "${r}" v1
+run "${r}" prepare --flake "${r}/local" --out "${r}/w12b" --base "$(cat "${r}/rev-v2")"
+if [[ $(rc "${r}") == 0 && $(env_of "${r}/w12b" base_how) == given && $(env_of "${r}/w12b" base_rev) == "$(cat "${r}/rev-v2")" ]] \
+  && grep -q '選んだ版' "${r}/out"; then
+  ok "prepare --base: 元の雛形を選び直せる"
+else
+  ng "prepare --base" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+run "${r}" prepare --flake "${r}/local" --out "${r}/w12c" --base 0000000
+if [[ $(rc "${r}") == 2 && ! -e ${r}/w12c ]]; then
+  ok "prepare --base: 描けない rev なら 2 で、作業場所を作らない"
+else
+  ng "prepare --base (無い rev)" "rc=$(rc "${r}") $(err "${r}")"
 fi
 
 # 13. prepare: --out が空でない → 2

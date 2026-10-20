@@ -40,9 +40,10 @@ usage() {
   local-flake-migrate.sh check [--flake <dir>]
       status の静かな版 (setup が使う)。同じなら何も出さず 0、違えば「旧い印 → 今の印」を出して 1。
       調べられなければ 2。git も nix も使わない
-  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>]
+  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>] [--base <rev>]
       作業場所 (--out。在るなら空であること。省けば mktemp -d) に、旧い flake の写し・元の雛形・
-      今の雛形と、3-way merge で移した new/flake.nix を作る
+      今の雛形と、3-way merge で移した new/flake.nix を作る。元の雛形は印の版か、無ければ履歴で
+      旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる
   local-flake-migrate.sh compare <作業場所> [--baseline <dir>]
       旧い flake (--baseline を渡せばそのディレクトリの flake.nix) と new/flake.nix を同じ本体・同じ lock で
       評価し、全ホストの drvPath と、setup が拾うホストの並びを比べる。0 = 同じ、1 = 違う、
@@ -217,6 +218,11 @@ parse_flake_args() {
       --out)
         [[ $# -ge 2 ]] || die "--out にディレクトリを渡してください"
         out_dir=$2
+        shift
+        ;;
+      --base)
+        [[ $# -ge 2 ]] || die "--base に commit を渡してください"
+        base_given=$2
         shift
         ;;
       *) die "知らない引数です: $1 (--help)" ;;
@@ -742,8 +748,9 @@ cmd_status() {
 }
 
 cmd_prepare() {
-  local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines
+  local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines f
   out_dir=""
+  base_given=""
   parse_flake_args loud "$@"
   need_history
   need_tmp
@@ -751,6 +758,18 @@ cmd_prepare() {
   current=$(template_id "${current_file}") || die "今の雛形の heredoc が見つかりません: ${current_file}"
   marker=$(local_marker "${flake}")
   find_base "${flake}" "${local_nix}" "${marker}" || die "描ける雛形の版が履歴にありません。"
+  if [[ -n ${base_given} ]]; then
+    # 元の雛形を選び直す (近い版が僅差で中身が違うときなど、Claude やユーザーが決めた版)
+    f=$(rev_file "${base_given}")
+    template_render "${f}" "${local_nix}" >"${tmp}/given.nix" 2>/dev/null \
+      || die "--base ${base_given} の雛形を描けません。"
+    base_rev=$(git -C "${repo_dir}" log -1 --format=%h "${base_given}")
+    base_label="$(git -C "${repo_dir}" log -1 --format='%h %cs %s' "${base_given}")"
+    base_id=$(template_id "${f}")
+    base_how=given
+    base_lines=$(diff_lines "${flake}" "${tmp}/given.nix")
+    base_file="${tmp}/given.nix"
+  fi
 
   printf '==> ローカル flake: %s\n' "${flake}"
   printf '  本体 (inputs.dotfiles.url): %s\n' "${local_nix}"
@@ -762,6 +781,9 @@ cmd_prepare() {
   fi
   if [[ ${base_how} == marker ]]; then
     printf '  元の雛形: %s  (印 %s と同じ版)\n' "${base_label}" "${marker}"
+  elif [[ ${base_how} == given ]]; then
+    printf '  元の雛形: %s  (--base で選んだ版。旧いファイルとの差分 %s 行)\n' "${base_label}" "${base_lines}"
+    printf '    近い版: %s\n' "$(nearest_candidates)"
   else
     if [[ ${marker_missing} == 1 ]]; then
       printf '  印 %s の版は履歴にありません。差分の最も小さい版を元にします。\n' "${marker}"
