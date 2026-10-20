@@ -108,8 +108,8 @@ service が走っている間の知らせを見ないので、watch は始めと
 
 | 送る側 | 置き場所 | 値の例 |
 | --- | --- | --- |
-| Windows の ssh.exe（hr・WSL の `ssh`） | `%USERPROFILE%\.ssh\config`（`bootstrap-windows-ssh-config.sh`） | `polle@PJP-RAIDEN` |
-| Nix の home の ssh（Linux・macOS・WSL の `/usr/bin/ssh`） | `~/.ssh/config`（`programs.ssh.settings."*"`） | `pollenjp@pjp-raiden`（10.0 以上なら） |
+| Windows の ssh.exe（hr・WSL の `ssh`） | `%USERPROFILE%\.ssh\config`（`bootstrap-windows-ssh-config.sh`） | `polle@pjp-raiden`（実機の `ssh.exe -v` で確かめた） |
+| `~/.ssh/config` を読む Linux・macOS の ssh | `~/.ssh/config`（`programs.ssh.settings."*"`） | OpenSSH 10.0 以上なら `<ユーザー>@<ホスト>`（WSL の nix の OpenSSH 10.5 なら `pollenjp@pjp-raiden`）。WSL の `/usr/bin/ssh`（9.6p1）は `%u@%L` のまま送るので届いていない扱い |
 
 - 空・`%` を含む（10.0 より古い ssh は `%u@%L` のまま送る。みな同じ文字列になるので、そのままでは別のマシン同士が
   同じに見える）・制御文字を含む・`local` の値は、届いていないものとして扱う
@@ -189,6 +189,8 @@ fish・bash の `herdr` 関数と `ssh-agent-link` 関数は消す（同じこ�
 - `~/.ssh/rc` を置くと、sshd は xauth を自分では呼ばず（rc が渡す）、`/etc/ssh/sshrc` も走らせない。sftp・
   ForceCommand・`PermitUserRC no`・authorized_keys の `restrict` / `no-user-rc` の接続では rc が走らず、その接続は
   見張りに借りられない。手で置いた `~/.ssh/rc` があるマシンでは、switch が「would be clobbered」で止まる
+- 見張りの service は起動の上限を外してある（`StartLimitIntervalSec = 0`）。既定の上限（10 秒に 5 回）では、hr の attach
+  のように接続が続くと上限に当たり、path unit ごと failed になって見張りが止まった（lavie の実機で見つけた）
 - path unit が service を走らせている間に起きた変化は、watch の最後の比べから unit が見張りに戻るまでのごく短い間に
   起きたものだけ取りこぼす（次の接続か attach で直る）
 - OpenSSH 10.1 より古いホスト（socket が `/tmp/ssh-*/`）は見張らない。macOS は見張りが無い（attach の張り替えだけ）
@@ -210,11 +212,40 @@ nix の check（CI と同じ）:
 - `bootstrap-windows-ssh-config-test`・`claude-herdr-skill`・`nix flake check --all-systems --no-build`・
   `nix flake check --no-eval-cache`・shfmt・shellcheck・nixfmt・テストの先頭の「## 確かめること」・`check-test-grep-q.sh`
 
-lavie での実機の結果は「6.1」に書く。
+### 6.1 lavie での実機（2026-10-20）
 
-### 6.1 lavie での実機
+branch の home を、ローカル flake の `dotfiles` 入力を `--override-input` で一時の clone に替え、`--no-write-lock-file` で
+`pollenjp@laptop` に当てた（ローカル flake と lock は書き換えていない。終わったあと main の home に戻した）。値が届かない
+場面は lavie の sshd（port 22。`AcceptEnv` 無し）、値が届く場面はユーザー権限の一時の sshd（127.0.0.1:2224、
+`AcceptEnv PJP_SSH_CLIENT`）に、Windows の試験用の Host（ProxyJump）から入った。hr は Windows の `herdr.exe`
+（0.9.2-preview）で、試験用の session（`tkt224n`・`tkt224a`・`tkt224b`）だけを使った。
 
-（PR の確かめの結果をここに書く）
+| # | 場面 | 結果 |
+| --- | --- | --- |
+| 1 | hr で attach → detach → attach（port 22） | 1 回目の attach で server が `SSH_AUTH_SOCK=~/.ssh/agent.tkt224n.sock` で起き、固定名は bridge の接続を指した。detach で dangling になり、pane の `ssh-add -l` は rc=2。attach し直すと、同じ server のまま新しい接続へ張り替わり、pane の `ssh-add -l` が鍵を返した |
+| 2 | 同じ PC の 2 つの session の片方を閉じる | `tkt224a` を detach すると、見張りが同じ PC からの生きている一番古い接続（素の ssh の端末 C）を借りた。`tkt224b` は動かない |
+| 3 | 両方の session を閉じ、素の ssh の端末だけ | 両方の固定名が C を指した。detach したままの `tkt224a` の pane の `ssh-add -l` が鍵を返した |
+| 4 | 覗くだけの ssh を開いて閉じる | 固定名の先は変わらない |
+| 5 | 返事をしない socket（sshd-session を `kill -STOP`）を指す状態で attach | attach は bridge の記録の 1 秒後に見切って移った（hr の画面は 4 秒で出た）。見張りも 1.1 秒で見切って、ほかの固定名に生きている接続を借りた |
+| 6 | 別の値（`taro@LAPTOP-TEST`）の接続から開く | 開いた session の固定名だけが移り、持ち主も移った。ほかの session は動かない |
+| 7 | 別の値の接続だけが生きているときに先が死ぬ | 借りない（dangling） |
+| 8 | 値が届かない接続（port 22） | 持ち主は空のまま借りない。pane と ssh の shell のプロンプトに `⚠ PJP_SSH_CLIENT なし`（値が届く shell には出ない） |
+| 9 | lavie の前で開く | env を作って `pjp-agent-link open attach` で確かめた。1Password の socket が無くても `~/.1password/agent.sock` へ張り、持ち主は `local` |
+| 10 | WSL の手元 | この PC で build した package で、`open attach` は何も出さず、固定名も記録の場所も作らない |
+| 11 | 誰も繋いでいない | pane の `ssh-add -l` は rc=2（ローカルの鍵へ倒れない） |
+
+- cc-page 0003 の場面 1 の 7〜11 も通った: C が生きていれば開き直しても C のまま（7）、C を閉じると両方の固定名が
+  開き直した接続 D を借りる（8）、別のマシンから開いて閉じると、その session は同じ値の接続を借り、持ち主が PC の
+  session は借りない（10・11）。attach の途中で、dangling の固定名が確認用の短い接続を一瞬借り、bridge の接続へ移る
+  動きも見えた（cc-page 0002 の場面 2）
+- 署名: 何度も detach と attach を繰り返した `tkt224a`（server は作り直していない）の pane で `ssh-keygen -Y sign` を
+  1 回打ち、Windows の 1Password の承認 1 回で、`1pass SSH Key` の署名ができた（`ssh-keygen -Y check-novalidate` で Good）
+- 値: Windows の ssh.exe は `setting env PJP_SSH_CLIENT = "polle@pjp-raiden"` を送った（`ssh.exe -v`）。ホスト名は小文字
+- 見張りが止まる不具合を見つけて直した: 接続が続くと service が systemd の起動の上限（10 秒に 5 回）に当たり、
+  `unit-start-limit-hit` で path unit ごと failed になった。上限を外したあと、8 本続けて開いて閉じても止まらず、閉じた
+  接続の記録が消えることを確かめた
+- 確かめの途中から、試験の接続は Windows の鍵ファイル（`IdentitiesOnly`）で認証し、1Password へ署名を求めるのは上の
+  署名の 1 回だけにした（はじめは 1Password の鍵で認証していて、承認の要求を 90 回ほど出してしまった）
 
 ## 7. 移行・運用手順
 

@@ -458,7 +458,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 - `config.d` はファイル名の順に読まれ、同じキーは先に読んだ値が効く (WSL と同じ)
 - `SetEnv PJP_SSH_CLIENT=%u@%L` は、ssh 先の herdr が「同じマシンから来た接続」を見分けるのにこの PC を名乗る
-  (`polle@PJP-RAIDEN` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
+  (`polle@pjp-raiden` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
   [`nix/README.md`「forward された agent を固定名で見せる」](../nix/README.md#forward-された-agent-を固定名で見せる))。
   ssh は最初に当たった `SetEnv` の行だけを使うので、`config.d` の `Host` に `SetEnv` を書いたら、そこにも
   `PJP_SSH_CLIENT=%u@%L` を足す。前の版 (`SetEnv` の無い `config`) は、記録と同じ中身なら正本の更新として上書きされる

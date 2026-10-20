@@ -1716,8 +1716,9 @@ Windows は `bootstrap-windows-ssh-config.sh` が置く `%USERPROFILE%\.ssh\conf
 - **受け取る側の sshd に `AcceptEnv PJP_SSH_CLIENT` が要る**（無い sshd は捨てる）。NixOS のホストは nixos-config が
   入れる（TKT-255）。ほかの ssh サーバーは、下の警告を見て都度足す。届かない接続は借りない・借りられないだけで、
   attach し直せば鍵は使える
-- 値は ssh の実体ごとに違い、違う値は別のマシンとして扱う。**同じ PC でも、Windows の ssh.exe（hr の `herdr.exe` と、
-  WSL の `ssh`）は `polle@PJP-RAIDEN`、WSL の Linux の ssh（`USE_LINUX_SSH=1`）は別の値になる**（大文字小文字は揃えない）
+- 値は ssh の実体ごとに違い、違う値は別のマシンとして扱う（大文字小文字は揃えない）。**同じ PC でも、Windows の ssh.exe
+  （hr の `herdr.exe` と、WSL の `ssh`）は `polle@pjp-raiden`、WSL の Linux の ssh は別になる**（`/usr/bin/ssh` の 9.6p1 は
+  下のとおり届いていない扱い、nix の OpenSSH なら `pollenjp@pjp-raiden`）
 - `%u@%L` が展開されるのは OpenSSH 10.0 から。WSL の `/usr/bin/ssh`（9.6p1）など古い ssh は `%u@%L` のまま送るので、
   `%` を含む値は届いていないものとして扱う
 - ssh は最初に当たった `SetEnv` の行だけを使う。`config.d` の `Host` に自分の `SetEnv` がある接続先では、そこにも
@@ -1751,6 +1752,9 @@ ssh-add -l                   # 鍵が並ぶ
 ```
 
 - 張り替えのたびに `~/.local/state/pjp-agent-link/log` に 1 行残る（どの接続がいつ固定名を動かしたか）
+- 見張りが動いているかは `systemctl --user status pjp-agent-link-watch.path`。何かで failed になっていたら
+  `systemctl --user reset-failed pjp-agent-link-watch.path pjp-agent-link-watch.service` のあとで
+  `systemctl --user start pjp-agent-link-watch.path`
 - `~/.ssh/rc` を置くと、sshd は xauth を自分では呼ばず（rc が渡す）、`/etc/ssh/sshrc` も走らせない。sftp・ForceCommand・
   `PermitUserRC no`・authorized_keys の `restrict` / `no-user-rc` の接続では rc が走らず、見張りはその接続を借りない。
   手で置いた `~/.ssh/rc` があると、switch が「would be clobbered」で止まる（中身を確かめて退避する）
