@@ -21,6 +21,12 @@
 #
 #   flake.nix   本体を input として取り込み、homeConfigurations を再輸出する。
 #               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
+#               dotfiles-private の nix/ を 2 つ目の path: の入力 (inputs.dotfiles-private。flake = false) に取り、
+#               そこに登録した PC のホスト (nix/hosts/<user>@<hostname>.nix) を登録簿のホストに重ねる
+#               (local は当たらない。ADR 026)。指す先は private-host.sh input-dir が決める: clone の nix/ があれば
+#               そこ、無ければ本体の空の stub (nix/private-stub)。clone ができたら local-flake-migrate.sh prepare が
+#               指し直す。heredoc の展開は ${nix_dir}・${private_nix_dir}・${template_id} だけ (local-flake-migrate.sh が
+#               同じ展開を真似て描く。足すならあちらも)。
 #               雛形の local は dotfiles.claude.devTracker.enable = false を持つ
 #               (Notion Dev Tracker を使うマシンだけ true に直す)。
 #               dotfiles.claude.gitViaGh.enable は既定の true のままで、
@@ -267,6 +273,9 @@ fi
 if [[ ${write_flake} == 1 ]]; then
   template_id=$("${BASH}" "${migrate}" id "${script_dir}/setup-local-flake.sh") \
     || die "雛形の版の印を計算できません (${migrate} id)。"
+  # dotfiles-private の入力が指す先 (clone の nix/ か、無ければ本体の空の stub)。決め方は private-host.sh だけが持つ
+  private_nix_dir=$("${BASH}" "${script_dir}/private-host.sh" input-dir --nix-dir "${nix_dir}" 2>/dev/null) \
+    || private_nix_dir="${nix_dir}/private-stub"
   cat >"${flake_file}" <<EOS
 # ローカル専用の flake。setup-local-flake.sh が生成した。
 # **git 管理外**なので、ここに書いたことはこのマシンにしか無い。
@@ -287,11 +296,23 @@ if [[ ${write_flake} == 1 ]]; then
   #   nix flake update dotfiles --flake ~/dotfiles
   inputs.dotfiles.url = "path:${nix_dir}";
 
+  # dotfiles-private (private な repo) の nix/。この PC を登録したホストの定義と値
+  # (nix/hosts/<user>@<hostname>.nix。登録は pjp-dotfiles-register-host skill) を読む (ADR 026)。
+  # public な本体の input にはしない (public の lock に private の rev を残さない) ので、ここで取る。
+  # clone の nix/ が無かったマシンは本体の空の stub を指す。clone ができたら、値を引き継いで今の
+  # 雛形へ移すとき (local-flake-migrate.sh prepare) に指し直す。中身 (nix/ の下だけ) は誰でも読める
+  # /nix/store に入る。本体と同じく narHash で lock され、setup.sh が switch の前に張り直す。手で直すなら:
+  #   nix flake update dotfiles-private --flake ~/dotfiles
+  inputs.dotfiles-private.url = "path:${private_nix_dir}";
+  inputs.dotfiles-private.flake = false;
+
   outputs =
-    { dotfiles, ... }:
+    { dotfiles, dotfiles-private, ... }:
     let
       # このマシンだけの設定。登録簿 (hosts/default.nix) のホストにも、下で足した
       # ホストにも同じものが当たる。本体の option (nix/home/options.nix) をここで決める。
+      # dotfiles-private に登録したホスト (下の privateHosts) には当たらない (値はそのホストの
+      # ファイルにある。この PC を登録したら、ここに書いた値はこの PC のホストでは使われない)。
       #
       # 登録簿側が同じ option を既に定義していて差し替えたいときは、関数の形にして
       # mkForce を使う (同じ優先度の定義が 2 つあると conflicting definition values で落ちる):
@@ -337,6 +358,10 @@ if [[ ${write_flake} == 1 ]]; then
         # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
         # dotfiles.claude.videoOffer.autoStart.enable = true;
       };
+
+      # dotfiles-private に登録した PC のホスト (nix/hosts/<user>@<hostname>.nix のファイル名が名前)。
+      # local は当たらない。setup は --host が無ければ、この PC の名前のホストを選ぶ (ADR 026)。
+      privateHosts = dotfiles.lib.privateHosts dotfiles-private;
     in
     {
       # 本体の出力をそのまま引き継ぐ。日々の操作は ~/dotfiles だけ見ればよい。
@@ -347,14 +372,14 @@ if [[ ${write_flake} == 1 ]]; then
         lib
         ;
 
-      # 登録簿のホストに local を当てて引き継ぐ (dotfiles.homeConfigurations に
-      # local を足したもの)。
-      homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
+      # 登録簿のホストに local を当てて引き継ぎ (dotfiles.homeConfigurations に local を足したもの)、
+      # dotfiles-private に登録したホストを重ねる (同じ名前なら登録簿のものに勝つ)。
+      homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // {
         # このマシンだけのホストはここに足す (登録簿 hosts/default.nix は触らない)。
         #
-        # ここに足した名前は setup の **既定の対象ホスト** になる (登録簿からの
-        # 推測より優先する)。複数足したときは一番上のものが既定になるので、
-        # 切り替えたいときは行を入れ替える。
+        # ここに足した名前は setup の **既定の対象ホスト** になる (dotfiles-private に
+        # 登録したこの PC のホストと、登録簿からの推測より優先する)。複数足したときは
+        # 一番上のものが既定になるので、切り替えたいときは行を入れ替える。
         #
         # tmp = dotfiles.lib.mkHome {
         #   username = "pollenjp";
@@ -387,6 +412,12 @@ if [[ ${write_flake} == 1 ]]; then
 }
 EOS
   echo "  flake.nix: 書きました"
+  if [[ ${private_nix_dir} == "${nix_dir}/private-stub" ]]; then
+    echo "  dotfiles-private: clone の nix/ が無いので、本体の空の stub を指しました (${private_nix_dir})。"
+    echo "    clone ができたら ${migrate_cmd} で指し直す (pjp-dotfiles-register-host skill)。"
+  else
+    echo "  dotfiles-private: ${private_nix_dir} を読みます (この PC を登録したホストがあれば、setup が選ぶ)。"
+  fi
 fi
 
 link="${local_dir}/setup"

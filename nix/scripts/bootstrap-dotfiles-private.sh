@@ -16,6 +16,11 @@
 # しないのは、public な repo に private repo の rev を残さず、辞書を変えるたびにこの repo で
 # 指す先を進める commit を要らなくするため。
 #
+# 登録した PC のホストの定義と値 (nix/hosts/<user>@<hostname>.nix) も置く (ADR 026)。ローカル flake がその nix/ を
+# path: の入力で読むので、setup の「既存マシン更新」「新しいマシン適用」は、clone があればこの script を switch の
+# **前** にも流す (setup.sh の手順 private-fetch)。そのときは、同じ実行のこの手順 (order 50) を setup が飛ばす。
+# clone が無ければ、今までどおりこの手順 (switch のあと) が clone する。
+#
 # ## 何をするか
 #
 # clone の場所は上から順に決める (bootstrap-windows-google-ime.sh も同じ決め方で読む):
@@ -71,7 +76,7 @@ repo_url=${DOTFILES_PRIVATE_URL:-git@github.com:pollenjp/dotfiles-private.git}
 # git_github が取れなかったときの案内 (警告の続きの行に添える)
 git_github_hint=""
 
-resolve_dir() {
+private_dir() {
   local root
   if [[ -n ${DOTFILES_PRIVATE_DIR:-} ]]; then
     printf '%s' "${DOTFILES_PRIVATE_DIR%/}"
@@ -81,7 +86,7 @@ resolve_dir() {
     printf '%s/ghq/github.com/pollenjp/dotfiles-private' "${HOME}"
   fi
 }
-dir=$(resolve_dir)
+dir=$(private_dir)
 
 # 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
 # setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。

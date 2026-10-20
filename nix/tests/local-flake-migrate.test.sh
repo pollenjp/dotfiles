@@ -43,6 +43,14 @@
 #     hash が無いときだけ nix flake update dotfiles で、lock が無ければ nix flake lock で、写しに作る。ローカル flake
 #     の隣のファイル (import するもの) も写しに置き、退避と setup は写さない。compare.result に new/flake.nix の
 #     cksum・基準・結果を書く
+#   - dotfiles-private の入力 (今の雛形が ${private_nix_dir} を持つとき): render は --private-dir で描き、省けば
+#     private-host.sh input-dir (clone の nix/。private-host.sh が無ければ <nix-dir>/private-stub)。status は印が同じでも
+#     入力が input-dir と違えば 1 で「指し直す」を出し、prepare は印が同じでもその 1 行を指し直す (入力の無い前の雛形
+#     からは入力の行を足す)。入力が input-dir と同じなら今どおり「移すものはありません」(--always なら作業場所を作り、
+#     new/flake.nix は旧いファイルと同じ)。compare は path: の入力ぜんぶの
+#     hash を見て、lock に無い入力をまとめて nix flake update <名前>… で張り直す。移した flake だけにあるホストのうち、
+#     移した flake の入力の hosts/<名前>.nix があるものは「dotfiles-private のホスト」として違いに数えない。ただし
+#     この PC の名前 (private-host.sh name) のホストは、setup が --host なしで選ぶようになるので、そう出して 1
 #   - prepare は、既にある --out がほかの利用者の書けるディレクトリ・ローカル flake の中なら 2 (作業場所を残さない)。
 #     相対パスの --flake は絶対パスにして
 #     prepare.env に書く
@@ -120,7 +128,9 @@ new_repo() {
 run() {
   local r=$1
   shift
+  # dotfiles-private の clone は、渡さなければ無い場所にする (手元の本物の clone を見せない)
   HOME="${work}/githome" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    DOTFILES_PRIVATE_DIR="${DOTFILES_PRIVATE_DIR:-${work}/no-private}" \
     "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" "$@" >"${r}/out" 2>"${r}/err"
   echo $? >"${r}/rc"
 }
@@ -577,7 +587,7 @@ merge_case 両側が同じ行を直した $'a\nb\nc' $'a\nb2\nc' $'a\nB\nc' 残�
 
 # ---- compare (偽の nix) ----
 # 偽の nix は呼ばれた引数を FAKE_NIX_LOG に書く。
-#   nix hash path …                      sha256-FAKE を出す
+#   nix hash path … <dir>                sha256-FAKE を出す (<dir>/.fakehash があれば sha256-<その中身>)
 #   nix flake lock path:<dir>            <dir>/flake.lock に sha256-FAKE を書く
 #   nix flake update dotfiles --flake path:<dir>   同じ
 #   nix eval --raw path:<dir>#homeConfigurations --apply <式>
@@ -586,7 +596,8 @@ merge_case 両側が同じ行を直した $'a\nb\nc' $'a\nb2\nc' $'a\nB\nc' 残�
 #     「# FAKE_FAIL_HOSTS: a」のホストは評価が落ちる (tryEval で拾う形)。式で分ける:
 #       config.dotfiles   コメントでない「dotfiles.<パス> = <値>;」の行を「パス<TAB>値」で返す。
 #                         「# FAKE_DOTFILES_ERROR」があれば落ちる
-#       tryEval           ホストごとに、コメントでも空でもない行を並べ替えた cksum を drvPath にした
+#       tryEval           ホストごとに、コメントでも空でもない行 (dotfiles-private の入力の行は除く。その入力は
+#                         private のホストを足すだけで、ほかのホストを変えない) を並べ替えた cksum を drvPath にした
 #                         「drv<TAB><host><TAB><drvPath>」か、落ちるホストなら「fail<TAB><host>」。
 #                         落ちないホストには「# FAKE_WARN: <文>」ごとの「warn<TAB><host><TAB><文>」も
 #       それ以外          getAttr "<host>" の 1 ホストの drvPath。落ちるホストなら、長い trace のあとに
@@ -610,7 +621,11 @@ long_error() {
 }
 case $1 in
   hash)
-    echo sha256-FAKE
+    if [[ -f ${last}/.fakehash ]]; then
+      echo "sha256-$(cat "${last}/.fakehash")"
+    else
+      echo sha256-FAKE
+    fi
     ;;
   flake)
     d=${last#path:}
@@ -627,7 +642,7 @@ case $1 in
     fi
     hosts=$(sed -n 's/^# FAKE_HOSTS: //p' "${f}")
     fails=" $(sed -n 's/^# FAKE_FAIL_HOSTS: //p' "${f}") "
-    sum=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' "${f}" | sort | cksum)
+    sum=$(grep -v -e '^[[:space:]]*#' -e '^[[:space:]]*$' -e 'inputs\.dotfiles-private\.' "${f}" | sort | cksum)
     case $5 in
       *config.dotfiles*)
         if grep -q '^# FAKE_DOTFILES_ERROR' "${f}"; then
@@ -671,7 +686,14 @@ esac
 exit 0
 EOF
 } >"${fake_bin}/nix"
-chmod +x "${fake_bin}/nix"
+# 偽の uname (private-host.sh name が見る)。-n は FAKE_UNAME_N (既定 box)、ほかは Linux
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+if [[ ${1-} == -n ]]; then printf '%s\n' "${FAKE_UNAME_N:-box}"; else echo Linux; fi
+EOF
+} >"${fake_bin}/uname"
+chmod +x "${fake_bin}/nix" "${fake_bin}/uname"
 
 # $1: repo、残り: script の引数。偽の nix を PATH の先に置いて流す (呼び出しは <repo>/nix-calls)
 run_nix() {
@@ -1014,6 +1036,158 @@ else
   ng "apply (書けない flake.nix)" "rc=$(rc "${r}") $(err "${r}") $(ls -A "${r}/local")"
 fi
 chmod 0644 "${r}/local/flake.nix"
+
+# ---- dotfiles-private の入力 ----
+# 28. render: ${private_nix_dir} は --private-dir で描き、省けば private-host.sh input-dir、private-host.sh が無ければ
+#     <nix-dir>/private-stub
+r=$(new_repo p28)
+fake_slf "${r}/nix/scripts/setup-local-flake.sh" '  inputs.dotfiles-private.url = "path:${private_nix_dir}";'
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P
+r_given=$(out "${r}")
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N
+r_nohelper=$(out "${r}")
+cp "${dir}/private-host.sh" "${r}/nix/scripts/"
+mkdir -p "${work}/p28-clone/nix"
+DOTFILES_PRIVATE_DIR="${work}/p28-clone" run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N
+r_clone=$(out "${r}")
+if [[ ${r_given} == '  inputs.dotfiles-private.url = "path:/P";' &&
+  ${r_nohelper} == '  inputs.dotfiles-private.url = "path:/N/private-stub";' &&
+  ${r_clone} == "  inputs.dotfiles-private.url = \"path:${work}/p28-clone/nix\";" ]]; then
+  ok "render は \${private_nix_dir} を --private-dir で描き、省けば input-dir (private-host.sh が無ければ <nix-dir>/private-stub)"
+else
+  ng "render (\${private_nix_dir})" "given=${r_given} / なし=${r_nohelper} / clone=${r_clone} $(err "${r}")"
+fi
+
+# 29. 今の雛形が dotfiles-private の入力を持つとき。p0: 入力の無い前の版、p1 (今): 入力を足した版
+tmpl_p0='# 雛形の版: ${template_id}
+{
+  inputs.dotfiles.url = "path:${nix_dir}";
+  outputs =
+    { dotfiles, ... }:
+    {
+      homeConfigurations = dotfiles.lib.hostsWith [ ] // { };
+    };
+}'
+tmpl_p1='# 雛形の版: ${template_id}
+{
+  inputs.dotfiles.url = "path:${nix_dir}";
+  inputs.dotfiles-private.url = "path:${private_nix_dir}";
+  inputs.dotfiles-private.flake = false;
+  outputs =
+    { dotfiles, dotfiles-private, ... }:
+    {
+      homeConfigurations = dotfiles.lib.hostsWith [ ] // dotfiles.lib.privateHosts dotfiles-private // { };
+    };
+}'
+# p0・p1 を commit した repo (private-host.sh も置く) を作り、その場所を出す。各版の commit は <repo>/rev-p0 などに書く
+private_repo() {
+  local r
+  r=$(new_repo "$1")
+  cp "${dir}/private-host.sh" "${r}/nix/scripts/"
+  mkdir -p "${r}/nix/private-stub" "${r}/local"
+  fake_slf "${r}/nix/scripts/setup-local-flake.sh" "${tmpl_p0}"
+  tgit -C "${r}" add -A
+  tgit -C "${r}" commit -qm p0
+  tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-p0"
+  fake_slf "${r}/nix/scripts/setup-local-flake.sh" "${tmpl_p1}"
+  tgit -C "${r}" commit -qam p1
+  tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-p1"
+  echo "${r}"
+}
+# 版 ($2: p0・p1) を描いた flake.nix を <repo>/local に置く。dotfiles-private の入力は $3 (既定は本体の stub)
+private_flake() {
+  local r=$1
+  HOME="${work}/githome" DOTFILES_PRIVATE_DIR="${work}/no-private" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" \
+    render --rev "$(cat "${r}/rev-$2")" --nix-dir "${r}/nix" --private-dir "${3:-${r}/nix/private-stub}" >"${r}/local/flake.nix"
+  printf '{ "fake": "sha256-FAKE" }\n' >"${r}/local/flake.lock"
+}
+r=$(private_repo p29)
+pc="${work}/p29-clone"
+mkdir -p "${pc}/nix/hosts"
+private_flake "${r}" p1
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" status --flake "${r}/local"
+rc_same=$(rc "${r}")
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" status --flake "${r}/local"
+if [[ ${rc_same} == 0 && $(rc "${r}") == 1 ]] \
+  && grep -qF "dotfiles-private の入力: ${r}/nix/private-stub → ${pc}/nix" "${r}/out"; then
+  ok "status: 印が同じでも、dotfiles-private の入力が input-dir と違えば 1 で指し直しを出す (同じなら 0)"
+else
+  ng "status (dotfiles-private の入力)" "同じ=${rc_same} 違う=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w-same"
+rc_same=$(rc "${r}")
+grep -q '移すものはありません' "${r}/out" && same_msg=1 || same_msg=0
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w"
+changed=$(diff "${r}/local/flake.nix" "${r}/w/new/flake.nix" | grep -c '^[<>]')
+if [[ ${rc_same} == 0 && ${same_msg} == 1 && ! -e ${r}/w-same && $(rc "${r}") == 0 && ${changed} == 2 ]] \
+  && grep -qxF "  inputs.dotfiles-private.url = \"path:${pc}/nix\";" "${r}/w/new/flake.nix" \
+  && [[ $(env_of "${r}/w" private_dir) == "${pc}/nix" ]]; then
+  ok "prepare: 印が同じでも dotfiles-private の入力の 1 行だけを指し直す (入力が同じなら移すものは無い)"
+else
+  ng "prepare (dotfiles-private の入力の指し直し)" "同じ=${rc_same}/${same_msg} rc=$(rc "${r}") 変わった行=${changed} $(out "${r}") $(err "${r}")"
+fi
+private_flake "${r}" p0
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w0"
+if [[ $(rc "${r}") == 0 ]] && grep -qxF "  inputs.dotfiles-private.url = \"path:${pc}/nix\";" "${r}/w0/new/flake.nix" \
+  && grep -qxF '  inputs.dotfiles-private.flake = false;' "${r}/w0/new/flake.nix" \
+  && ! grep -q '^<<<<<<<' "${r}/w0/new/flake.nix"; then
+  ok "prepare: dotfiles-private の入力の無い前の雛形からは、入力の行を足す"
+else
+  ng "prepare (入力の無い前の雛形)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") new=$(cat "${r}/w0/new/flake.nix" 2>/dev/null)"
+fi
+
+# 29b. prepare --always: 移すものが無くても (今の雛形で、入力も clone を指す) 作業場所を作り、new/flake.nix は旧いファイルと同じ
+#      (local を直して compare・apply するため。登録の仕上げ)
+private_flake "${r}" p1 "${pc}/nix"
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w-always0"
+rc_plain=$(rc "${r}")
+DOTFILES_PRIVATE_DIR="${pc}" run "${r}" prepare --flake "${r}/local" --out "${r}/w-always" --always
+if [[ ${rc_plain} == 0 && ! -e ${r}/w-always0 && $(rc "${r}") == 0 ]] && grep -q '移すものはありません' "${r}/out" \
+  && grep -q -- '--always' "${r}/out" && cmp -s "${r}/local/flake.nix" "${r}/w-always/new/flake.nix" \
+  && [[ -f ${r}/w-always/prepare.env && -f ${r}/w-always/old/flake.nix ]]; then
+  ok "prepare --always: 移すものが無くても作業場所を作り、new/flake.nix は旧いファイルと同じ (無ければ作らない)"
+else
+  ng "prepare --always" "rc=${rc_plain}/$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/w-always" 2>/dev/null)"
+fi
+
+# 30. compare: path: の入力ぜんぶの hash を見て、lock に無い入力をまとめて張り直す
+printf 'PRIV1\n' >"${pc}/nix/.fakehash"
+run_nix "${r}" compare "${r}/w"
+calls=$(cat "${r}/nix-calls")
+if grep -qE '^flake update dotfiles-private --flake path:.*/\.eval/new$' <<<"${calls}" \
+  && ! grep -qE '^flake update .*/\.eval/base$' <<<"${calls}"; then
+  ok "compare: dotfiles-private の入力の hash だけが lock に無ければ、その入力だけを張り直す"
+else
+  ng "compare (dotfiles-private の lock)" "${calls}"
+fi
+printf '{ "nodes": {} }\n' >"${r}/w/old/flake.lock"
+run_nix "${r}" compare "${r}/w"
+if grep -qE '^flake update dotfiles dotfiles-private --flake path:.*/\.eval/base$' "${r}/nix-calls"; then
+  ok "compare: 本体と dotfiles-private の入力の両方が lock と合わなければ、まとめて張り直す"
+else
+  ng "compare (両方の lock)" "$(cat "${r}/nix-calls")"
+fi
+
+# 31. compare: 移した flake だけにある dotfiles-private のホストは違いに数えない。この PC のホストは 1
+printf '{ "fake": "sha256-FAKE" }\n' >"${r}/w/old/flake.lock"
+printf '{ mkHome, ... }: mkHome { }\n' >"${pc}/nix/hosts/bob@other.nix"
+printf '# FAKE_HOSTS: h1 h2 bob@other\n' >>"${r}/w/new/flake.nix"
+USER=alice FAKE_UNAME_N=box run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && grep -qE '^ +bob@other +dotfiles-private のホスト' "${r}/out" \
+  && grep -q '全 2 ホストで同じ' "${r}/out" && ! grep -q 'setup は --host なしで' "${r}/out"; then
+  ok "compare: 移した flake だけにある dotfiles-private のホスト (この PC でない) は違いに数えない"
+else
+  ng "compare (dotfiles-private のホスト)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+printf '{ mkHome, ... }: mkHome { }\n' >"${pc}/nix/hosts/alice@box.nix"
+sed -i 's/^# FAKE_HOSTS: .*/# FAKE_HOSTS: h1 h2 bob@other alice@box/' "${r}/w/new/flake.nix"
+USER=alice FAKE_UNAME_N=box run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 1 ]] && grep -qF 'setup は --host なしで alice@box' "${r}/out" \
+  && [[ $(env_get_test "${r}/w/compare.result" result) == differ ]]; then
+  ok "compare: この PC のホストが dotfiles-private から足されるなら、setup が選ぶようになると出して 1"
+else
+  ng "compare (この PC のホスト)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)
 if [[ -z $(ls -A "${TMPDIR}") ]]; then

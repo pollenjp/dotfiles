@@ -1,5 +1,10 @@
 # マシン登録簿。1 マシン 1 エントリで追加する。
 #
+# 実機 (その PC の値の全部を持つホスト) は、private な dotfiles-private の nix/hosts/<user>@<hostname>.nix に
+# 置く方向にした (ADR 026。登録は pjp-dotfiles-register-host skill)。ここには型 (<user>@<system>) と検証用の
+# sandbox を残す。今ある実機の行 (pollenjp@wsl・pollenjp@wsl-no-1password・pollenjp@laptop) は、実機が全部
+# dotfiles-private に移るまで (段階 3) 残す。
+#
 # home-manager は activate 時に $USER と home.username の不一致で中断するため、
 # username は環境変数から取らず明示的に書く。
 # (builtins.getEnv は --impure が必要になり `nix flake check` を壊す)

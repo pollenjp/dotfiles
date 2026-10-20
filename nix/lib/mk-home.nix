@@ -37,7 +37,8 @@
   #
   # 省略すれば既定 (devTracker と gitViaGh は true、videoOffer.autoStart は false。個々は home/options.nix)。
   # ローカル flake (~/dotfiles/flake.nix) の雛形は登録簿のホストにも当たる module で devTracker を
-  # false にしているので、そちら経由のマシンでは雛形側を見ること。
+  # false にしているので、そちら経由のマシンでは雛形側を見ること。dotfiles-private に登録したホスト
+  # (lib/private-hosts.nix) は素の mkHome で組むので、その module は当たらない (ファイルが値の全部を持つ)。
   claude ? { },
   modules ? [ ],
 }:

@@ -15,7 +15,15 @@
 # 雛形の各版は、git の履歴の setup-local-flake.sh から heredoc の原文 (開きの行
 # `  cat >"${flake_file}" <<EOS` の次の行から EOS の前の行まで) を抜き、bash の heredoc の展開を真似て描く。
 # 古い版の script は実行しない (古い版は DOTFILES_LOCAL_DIR を知らず、~/dotfiles に書きうる)。真似るのは
-# ${nix_dir}・${template_id} の置き換えと、\$ \` \\ を 1 文字にすることだけで、ほかの展開があれば描かずに止まる。
+# ${nix_dir}・${private_nix_dir}・${template_id} の置き換えと、\$ \` \\ を 1 文字にすることだけで、ほかの展開があれば
+# 描かずに止まる。
+#
+# ## dotfiles-private の入力
+#
+# 今の雛形は、dotfiles-private の clone の nix/ (無ければ本体の空の stub) を path: の入力に取る (${private_nix_dir}。
+# ADR 026)。どこを指すかは private-host.sh input-dir が決める。印が同じでも、入力がそこと違えば (stub のまま clone に
+# nix/ ができた、など) status は 1 にし、prepare はその行を指し直す。元の雛形は旧いファイルの入力の値で、今の雛形は
+# input-dir で描くので、3-way merge がその行だけを今の値にする。
 #
 # ## 雛形の版の印
 #
@@ -36,14 +44,17 @@ usage() {
 
 使い方:
   local-flake-migrate.sh status [--flake <dir>]
-      ローカル flake の雛形の版の印が、今の雛形と同じかを出す (同じなら 0、違う・印が無いなら 1)
+      ローカル flake の雛形の版の印が、今の雛形と同じかを出す (同じなら 0、違う・印が無いなら 1)。印が同じでも
+      dotfiles-private の入力が private-host.sh input-dir と違えば 1
   local-flake-migrate.sh check [--flake <dir>]
       status の静かな版 (setup が使う)。同じなら何も出さず 0、違えば「旧い印 → 今の印」を出して 1。
       調べられなければ 2。git も nix も使わない
-  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>] [--base <rev>]
+  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>] [--base <rev>] [--always]
       作業場所 (--out。在るなら空であること。省けば mktemp -d) に、旧い flake の写し・元の雛形・
       今の雛形と、3-way merge で移した new/flake.nix を作る。元の雛形は印の版か、無ければ履歴で
-      旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる
+      旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる。移すものが無ければ
+      作業場所を作らないが、--always なら作る (new/flake.nix は旧いファイルと同じ。local を直して
+      compare・apply するため。dotfiles-private に登録したあとの仕上げなど)
   local-flake-migrate.sh compare <作業場所> [--baseline <dir>]
       旧い flake (--baseline を渡せばそのディレクトリの flake.nix) と new/flake.nix を同じ本体・同じ lock で
       評価し、全ホストの drvPath と、setup が拾うホストの並びを比べる。0 = 同じ、1 = 違う、
@@ -53,8 +64,9 @@ usage() {
       退避してから new/flake.nix を書く。compare が同じでない・--baseline で比べたなら --accept-changes が要る
   local-flake-migrate.sh id [<setup-local-flake.sh のパス> | -]
       雛形の版の印 (8 桁の 16 進) を出す。省けばこの repo の setup-local-flake.sh、- なら stdin
-  local-flake-migrate.sh render (--rev <rev> | --file <パス>) --nix-dir <パス>
-      雛形の 1 版を描いて stdout に出す (--rev はこの repo の git の commit)
+  local-flake-migrate.sh render (--rev <rev> | --file <パス>) --nix-dir <パス> [--private-dir <パス>]
+      雛形の 1 版を描いて stdout に出す (--rev はこの repo の git の commit)。dotfiles-private の入力
+      (${private_nix_dir}) は --private-dir で描き、省けば private-host.sh input-dir --nix-dir <パス>
   local-flake-migrate.sh -h, --help
       これ
 
@@ -117,12 +129,13 @@ template_id() {
   printf '%08x\n' "${sum%% *}"
 }
 
-# 雛形の 1 版を描く。$1: setup-local-flake.sh のパス、$2: ${nix_dir} に入れるパス。
+# 雛形の 1 版を描く。$1: setup-local-flake.sh のパス、$2: ${nix_dir} に入れるパス、$3: ${private_nix_dir} に入れる
+# パス (dotfiles-private の入力。その展開の無い版では使わない)。
 # 引用しない heredoc の展開を真似る。描けない展開があれば、何も出さずに理由を stderr に出して 1
 template_render() {
   local id
   id=$(template_id "$1") || return 1
-  template_raw "$1" | NIX_DIR=$2 TEMPLATE_ID=${id} awk '
+  template_raw "$1" | NIX_DIR=$2 PRIVATE_NIX_DIR=${3:-} TEMPLATE_ID=${id} awk '
     function bad(why) {
       printf "!! 雛形に描けない展開があります (原文の %d 行目の %s): %s\n", NR, why, $0 > "/dev/stderr"
       failed = 1
@@ -141,6 +154,10 @@ template_render() {
         if (c == "`") bad("`")
         if (c == "$") {
           if (substr(line, i, 10) == "${nix_dir}") { out = out ENVIRON["NIX_DIR"]; i += 10; continue }
+          if (substr(line, i, 18) == "${private_nix_dir}") {
+            if (ENVIRON["PRIVATE_NIX_DIR"] == "") bad("${private_nix_dir} に入れるパスが無い")
+            out = out ENVIRON["PRIVATE_NIX_DIR"]; i += 18; continue
+          }
           if (substr(line, i, 14) == "${template_id}") { out = out ENVIRON["TEMPLATE_ID"]; i += 14; continue }
           nx = substr(line, i + 1, 1)
           if (nx ~ /[[A-Za-z0-9_{(@*#?$!-]/) bad("$" nx)
@@ -203,6 +220,37 @@ local_nix_dir() {
   ' "$1"
 }
 
+# flake.nix の dotfiles-private の入力 (inputs.dotfiles-private.url の path:) のパスを出す。無ければ何も出さない
+local_private_dir() {
+  awk '
+    match($0, /^[[:space:]]*inputs\.dotfiles-private\.url[[:space:]]*=[[:space:]]*"path:[^"]*"/) {
+      s = substr($0, RSTART, RLENGTH)
+      sub(/^[^"]*"path:/, "", s)
+      sub(/"$/, "", s)
+      print s
+      exit
+    }
+  ' "$1"
+}
+
+# 今の雛形が dotfiles-private の入力に書く場所 (private-host.sh input-dir。clone の nix/ が無ければ本体の stub)。
+# $1: 本体の nix (雛形の ${nix_dir})。private-host.sh が無ければ <本体の nix>/private-stub
+want_private_dir() {
+  local p=""
+  if [[ -f ${script_dir}/private-host.sh ]]; then
+    p=$("${BASH}" "${script_dir}/private-host.sh" input-dir --nix-dir "$1" 2>/dev/null) || p=""
+  fi
+  printf '%s\n' "${p:-$1/private-stub}"
+}
+
+# 雛形 ($1: setup-local-flake.sh のパス) が dotfiles-private の入力 (${private_nix_dir}) を持つか
+template_has_private() {
+  local raw
+  raw=$(template_raw "$1") || return 1
+  # shellcheck disable=SC2016 # 展開ではなく、原文の ${private_nix_dir} の文字を探す
+  [[ ${raw} == *'${private_nix_dir}'* ]]
+}
+
 # --flake を読む。flake_dir と flake (その flake.nix) を決め、ローカル flake でなければ 2 で止まる
 # (quiet なら何も出さない)。$1: quiet か loud、残り: 引数
 parse_flake_args() {
@@ -226,6 +274,7 @@ parse_flake_args() {
         base_given=$2
         shift
         ;;
+      --always) always=1 ;;
       *) die "知らない引数です: $1 (--help)" ;;
     esac
     shift
@@ -260,7 +309,8 @@ diff_lines() {
   grep -c '^[<>]' "${tmp}/diff" || true
 }
 
-# 元の雛形を決める。$1: 旧い flake.nix、$2: ${nix_dir} に入れるパス、$3: 旧いファイルの印 (無ければ空)。
+# 元の雛形を決める。$1: 旧い flake.nix、$2: ${nix_dir} に入れるパス、$3: 旧いファイルの印 (無ければ空)、
+# $4: ${private_nix_dir} に入れるパス (旧いファイルの dotfiles-private の入力。無ければ今の雛形が書く場所)。
 #
 # 履歴の各版 (作業ツリーに commit していない変更があればそれ → 新しい commit から古い commit の順) を描いて
 # ${tmp}/cand/<n>.nix に置き、一覧を ${tmp}/candidates.tsv (版・日付・印・差分の行数・題) に書く。決めた版を
@@ -272,7 +322,7 @@ diff_lines() {
 #   base_lines  旧いファイルとの差分の行数
 # に入れる。印があるのに同じ版が無ければ marker_missing=1。描ける版が 1 つも無ければ 1
 find_base() {
-  local old=$1 nix_dir=$2 marker=$3 n=0 rev date subject f id lines label why
+  local old=$1 nix_dir=$2 marker=$3 private=$4 n=0 rev date subject f id lines label why
   local best_n="" best_lines="" best_rev="" best_label="" best_id="" mark_n="" mark_rev="" mark_label="" mark_id="" mark_lines=""
   need_tmp
   mkdir -p "${tmp}/cand"
@@ -288,7 +338,7 @@ find_base() {
     fi
     label="${rev} ${date} ${subject}"
     : >"${tmp}/render.err"
-    if ! id=$(template_id "${f}" 2>/dev/null) || ! template_render "${f}" "${nix_dir}" >"${tmp}/cand/${n}.nix" 2>"${tmp}/render.err"; then
+    if ! id=$(template_id "${f}" 2>/dev/null) || ! template_render "${f}" "${nix_dir}" "${private}" >"${tmp}/cand/${n}.nix" 2>"${tmp}/render.err"; then
       why=$(awk 'NR == 1 { sub(/^!! /, ""); print }' "${tmp}/render.err")
       printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "-" "描けない" "${subject} (${why:-雛形の heredoc が見つからない})" >>"${tmp}/candidates.tsv"
       continue
@@ -464,14 +514,42 @@ dotfiles_expr() {
   in builtins.concatStringsSep "" (flat "" (builtins.getAttr "'"${h}"'" hs).config.dotfiles)'
 }
 
-# 評価用の写しの lock を本体に合わせる (setup.sh の sync_local_flake_lock と同じ考え)。$1: 写しのディレクトリ、
-# $2: 本体の今の narHash
+# flake.nix の path: の入力を「名前 パス」で 1 行ずつ出す (inputs.<名前>.url = "path:<パス>"; の形。本体と
+# dotfiles-private)
+path_inputs() {
+  sed -n 's|^[[:space:]]*inputs\.\([A-Za-z0-9_-]*\)\.url[[:space:]]*=[[:space:]]*"path:\([^"]*\)".*|\1 \2|p' "$1"
+}
+
+# 評価用の写しの lock を、写しの flake.nix の path: の入力ぜんぶに合わせる (setup.sh の sync_local_flake_lock と
+# 同じ考え)。$1: 写しのディレクトリ。lock が無ければ nix flake lock で作り、あれば実物の narHash が lock に無い入力を
+# まとめて nix flake update <名前>… で張り直す (合っている入力は触らない)。指す先の無い入力は nix のエラーに任せる
 lock_sync() {
-  if [[ ! -f $1/flake.lock ]]; then
-    nix flake lock "path:$1" >"$1.lock.log" 2>&1
-  elif ! grep -qF -- "$2" "$1/flake.lock"; then
-    nix flake update dotfiles --flake "path:$1" >"$1.lock.log" 2>&1
+  local d=$1 name path cur stale=()
+  : >"${d}.lock.log"
+  if [[ ! -f ${d}/flake.lock ]]; then
+    nix flake lock "path:${d}" >>"${d}.lock.log" 2>&1
+    return
   fi
+  while read -r name path; do
+    [[ -n ${name} && -d ${path} ]] || continue
+    cur=$(nix hash path --sri --type sha256 "${path}" 2>>"${d}.lock.log") || return 1
+    grep -qF -- "${cur}" "${d}/flake.lock" || stale+=("${name}")
+  done < <(path_inputs "${d}/flake.nix")
+  if ((${#stale[@]} > 0)); then
+    nix flake update "${stale[@]}" --flake "path:${d}" >>"${d}.lock.log" 2>&1
+  fi
+}
+
+# flake.nix ($1) の dotfiles-private の入力が読むホスト (指す先の hosts/*.nix のファイル名から .nix を除いたもの)
+private_hosts_of() {
+  local p f
+  p=$(local_private_dir "$1")
+  [[ -n ${p} && -d ${p}/hosts ]] || return 0
+  for f in "${p}"/hosts/*.nix; do
+    [[ -f ${f} ]] || continue
+    f=${f##*/}
+    printf '%s\n' "${f%.nix}"
+  done
 }
 
 # nix のエラーの出力から、原因の行を字下げして出す。nix は trace のあとの最後の error: の行に原因を書くので、
@@ -488,8 +566,9 @@ eval_error_excerpt() {
 }
 
 cmd_compare() {
-  local work="" baseline="" base_src nix_dir cur lines base_label new_sum base_sum base_is_old n_hosts=0 n_same=0 differ=0
+  local work="" baseline="" base_src nix_dir lines base_label new_sum base_sum base_is_old n_hosts=0 n_same=0 differ=0
   local h f flake_dir hosts_base hosts_new base_fail="" new_fail="" both_fail=""
+  local private_new private_base this_name="" this_added=0 other_diff=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --baseline)
@@ -555,10 +634,9 @@ cmd_compare() {
 
   printf '==> 比べる: %s と、移した flake (new/flake.nix)\n' "${base_label}"
   printf '  本体: %s\n' "${nix_dir}"
-  cur=$(nix hash path --sri --type sha256 "${nix_dir}") || die "本体の hash を出せません: ${nix_dir}"
   for side in base new; do
-    if ! lock_sync "${work}/.eval/${side}" "${cur}"; then
-      printf '!! 評価用の写し (%s) の lock を本体に合わせられません:\n' "${side}" >&2
+    if ! lock_sync "${work}/.eval/${side}"; then
+      printf '!! 評価用の写し (%s) の lock を、path: の入力 (本体・dotfiles-private) に合わせられません:\n' "${side}" >&2
       eval_error_excerpt "${work}/.eval/${side}.lock.log" >&2
       exit 2
     fi
@@ -606,8 +684,27 @@ cmd_compare() {
       for (h in b) if (h != "sandbox" && !(h in a)) print h "\t移した flake だけ"
     }
   ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/hosts.tsv"
+  # 移した flake だけにあるホストのうち、移した flake の dotfiles-private の入力が読むもの (hosts/<名前>.nix) は、
+  # 入力が足したホスト (指し直した・入力を足した) なので違いに数えない。ただし、この PC の名前のホストは setup が
+  # --host なしで選ぶようになる (対象のホストが変わる) ので、違いに数える
+  private_new=$'\n'$(private_hosts_of "${work}/.eval/new/flake.nix")$'\n'
+  private_base=$'\n'$(private_hosts_of "${work}/.eval/base/flake.nix")$'\n'
+  if [[ -f ${script_dir}/private-host.sh ]]; then
+    this_name=$("${BASH}" "${script_dir}/private-host.sh" name 2>/dev/null) || this_name=""
+  fi
   echo "  ホストごとの drvPath:"
   while IFS=$'\t' read -r h state; do
+    if [[ ${state} == "移した flake だけ" && ${private_new} == *$'\n'"${h}"$'\n'* ]]; then
+      if [[ ${h} == "${this_name}" && ${private_base} != *$'\n'"${h}"$'\n'* ]]; then
+        state="dotfiles-private のホスト (移した flake だけ。この PC のホスト)"
+        this_added=1
+        differ=1
+      else
+        state="dotfiles-private のホスト (移した flake だけ。比べない)"
+      fi
+      printf '  %-30s %s\n' "${h}" "${state}"
+      continue
+    fi
     printf '  %-30s %s\n' "${h}" "${state}"
     case ${state} in
       "両方で評価が落ちる") both_fail+="${both_fail:+ }${h}" ;;
@@ -620,6 +717,7 @@ cmd_compare() {
       *)
         n_hosts=$((n_hosts + 1))
         differ=1
+        other_diff=1
         ;;
     esac
   done <"${tmp}/hosts.tsv"
@@ -660,6 +758,11 @@ cmd_compare() {
   if [[ -n ${both_fail} ]]; then
     printf '  %s は、旧い flake でも移した flake でも評価が落ちるので比べていない\n' "${both_fail}"
     echo "    (setup の対象のホストでなければ気にしなくてよい。対象なら、旧い local がそのホストで落ちている)"
+  fi
+  if ((this_added)); then
+    printf '  この PC のホスト %s が dotfiles-private (%s/hosts/%s.nix) から足される。\n' \
+      "${this_name}" "$(local_private_dir "${work}/.eval/new/flake.nix")" "${this_name}"
+    printf '    移したあと、setup は --host なしで %s を選ぶ (値は local ではなく、そのファイルから来る)。\n' "${this_name}"
   fi
 
   # 違うホストは、config.dotfiles の違いを出す。同じ違いのホストはまとめる (bash 3 でも動くよう、連想配列は使わない)
@@ -745,7 +848,11 @@ cmd_compare() {
   } >"${work}/compare.result"
 
   if ((differ)); then
-    echo "→ 違いがあります (値が変わる)。意図した違いか確かめる。受け入れるなら apply に --accept-changes を付ける。"
+    if ((this_added && ! other_diff)) && [[ ${hosts_base} == "${hosts_new}" ]]; then
+      echo "→ 違いがあります (setup が --host なしで選ぶホストが ${this_name} になる)。意図した違いか確かめる。受け入れるなら apply に --accept-changes を付ける。"
+    else
+      echo "→ 違いがあります (値が変わる)。意図した違いか確かめる。受け入れるなら apply に --accept-changes を付ける。"
+    fi
     return 1
   fi
   if ((base_is_old)); then
@@ -840,19 +947,32 @@ cmd_check() {
 }
 
 cmd_status() {
-  local current marker
+  local current marker have want repoint=0
   parse_flake_args loud "$@"
   current=$(template_id "${repo_dir}/${template_rel}") || die "今の雛形の heredoc が見つかりません: ${repo_dir}/${template_rel}"
   marker=$(local_marker "${flake}")
+  have=$(local_private_dir "${flake}")
+  want=$(want_private_dir "${local_nix}")
+  if template_has_private "${repo_dir}/${template_rel}" && [[ ${have} != "${want}" ]]; then
+    repoint=1
+  fi
   printf '==> ローカル flake: %s\n' "${flake}"
   printf '  雛形の版の印: %s\n' "${marker:-なし}"
   printf '  今の雛形の版: %s  (%s)\n' "${current}" "${repo_dir}/${template_rel}"
+  if ((repoint)); then
+    printf '  dotfiles-private の入力: %s → %s (移すときに指し直す)\n' "${have:-無い}" "${want}"
+  fi
   if [[ ${marker} == "${current}" ]]; then
-    echo "  → 今の雛形と同じ版です。移すものはありません。"
-    return 0
+    if ((repoint == 0)); then
+      echo "  → 今の雛形と同じ版です。移すものはありません。"
+      return 0
+    fi
+    echo "  → 今の雛形と同じ版ですが、dotfiles-private の入力を指し直します。"
+    printf '  指し直すには: %s prepare --flake %s\n' "${self}" "${flake_dir}"
+    return 1
   fi
   need_history
-  find_base "${flake}" "${local_nix}" "${marker}" || die "描ける雛形の版が履歴にありません。"
+  find_base "${flake}" "${local_nix}" "${marker}" "${have:-${want}}" || die "描ける雛形の版が履歴にありません。"
   if [[ ${base_how} == marker ]]; then
     printf '  → 前の雛形から作られています。印の版: %s\n' "${base_label}"
   elif [[ -n ${marker} ]]; then
@@ -866,19 +986,28 @@ cmd_status() {
 
 cmd_prepare() {
   local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines f out_created=0
+  local have want repoint=0
   out_dir=""
   base_given=""
+  always=0
   parse_flake_args loud "$@"
   need_history
   need_tmp
   current_file="${repo_dir}/${template_rel}"
   current=$(template_id "${current_file}") || die "今の雛形の heredoc が見つかりません: ${current_file}"
   marker=$(local_marker "${flake}")
-  find_base "${flake}" "${local_nix}" "${marker}" || die "描ける雛形の版が履歴にありません。"
+  # dotfiles-private の入力: 元の雛形は旧いファイルの値 (無ければ今の値) で、今の雛形は今の値 (input-dir) で描く。
+  # 3-way merge がその行だけを今の値にする
+  have=$(local_private_dir "${flake}")
+  want=$(want_private_dir "${local_nix}")
+  if template_has_private "${current_file}" && [[ ${have} != "${want}" ]]; then
+    repoint=1
+  fi
+  find_base "${flake}" "${local_nix}" "${marker}" "${have:-${want}}" || die "描ける雛形の版が履歴にありません。"
   if [[ -n ${base_given} ]]; then
     # 元の雛形を選び直す (近い版が僅差で中身が違うときなど、Claude やユーザーが決めた版)
     f=$(rev_file "${base_given}")
-    template_render "${f}" "${local_nix}" >"${tmp}/given.nix" 2>/dev/null \
+    template_render "${f}" "${local_nix}" "${have:-${want}}" >"${tmp}/given.nix" 2>/dev/null \
       || die "--base ${base_given} の雛形を描けません。"
     base_rev=$(git -C "${repo_dir}" log -1 --format=%h "${base_given}")
     base_label="$(git -C "${repo_dir}" log -1 --format='%h %cs %s' "${base_given}")"
@@ -909,9 +1038,15 @@ cmd_prepare() {
     printf '    近い版: %s\n' "$(nearest_candidates)"
   fi
   printf '  今の雛形: 版 %s  (%s)\n' "${current}" "${current_file}"
-  if [[ ${base_id} == "${current}" ]]; then
+  if ((repoint)); then
+    printf '  dotfiles-private の入力: %s → %s (指し直す)\n' "${have:-無い}" "${want}"
+  fi
+  if [[ ${base_id} == "${current}" ]] && ((repoint == 0)); then
     echo "  → 元の雛形が今の雛形と同じ版です。移すものはありません。"
-    return 0
+    if ((always == 0)); then
+      return 0
+    fi
+    echo "    --always なので作業場所を作ります (new/flake.nix は旧いファイルと同じ。local を直して compare・apply する)。"
   fi
 
   if [[ -n ${out_dir} ]]; then
@@ -942,7 +1077,7 @@ cmd_prepare() {
     cp -p "${flake_dir}/flake.lock" "${out_dir}/old/flake.lock"
   fi
   cp "${base_file}" "${out_dir}/base.nix"
-  template_render "${current_file}" "${local_nix}" >"${out_dir}/template.nix"
+  template_render "${current_file}" "${local_nix}" "${want}" >"${out_dir}/template.nix"
   {
     printf '版\t日付\t印\t旧いファイルとの差分の行数\t題\n'
     cat "${tmp}/candidates.tsv"
@@ -962,6 +1097,7 @@ cmd_prepare() {
     printf 'flake_dir=%s\n' "${flake_dir}"
     printf 'old_sum=%s\n' "$(cksum <"${flake}")"
     printf 'nix_dir=%s\n' "${local_nix}"
+    printf 'private_dir=%s\n' "${want}"
     printf 'base_rev=%s\n' "${base_rev}"
     printf 'base_id=%s\n' "${base_id}"
     printf 'base_how=%s\n' "${base_how}"
@@ -1007,9 +1143,14 @@ cmd_id() {
 }
 
 cmd_render() {
-  local rev="" file="" nix_dir=""
+  local rev="" file="" nix_dir="" private=""
   while [[ $# -gt 0 ]]; do
     case $1 in
+      --private-dir)
+        [[ $# -ge 2 ]] || die "--private-dir にパスを渡してください"
+        private=$2
+        shift
+        ;;
       --rev)
         [[ $# -ge 2 ]] || die "--rev に commit を渡してください"
         rev=$2
@@ -1043,7 +1184,8 @@ cmd_render() {
     printf '!! 雛形の heredoc が見つかりません (開きの行が 1 つでないか、閉じの EOS が無い): %s\n' "${rev:-${file}}" >&2
     return 1
   fi
-  template_render "${file}" "${nix_dir}"
+  [[ -n ${private} ]] || private=$(want_private_dir "${nix_dir}")
+  template_render "${file}" "${nix_dir}" "${private}"
 }
 
 if [[ $# -eq 0 ]]; then

@@ -50,6 +50,15 @@
         import ./hosts {
           mkHome = args: mkHome (args // { modules = extraModules ++ (args.modules or [ ]); });
         };
+
+      # dotfiles-private の nix/ (ローカル flake の path: の入力。flake = false) の hosts/*.nix から、
+      # 登録した PC のホストを組み立てる (ADR 026)。本体は dotfiles-private を input に持たないので
+      # 自分では呼ばず、ローカル flake の雛形が
+      #
+      #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // dotfiles.lib.privateHosts dotfiles-private // { ... };
+      #
+      # と呼ぶ。素の mkHome で組むので local は当たらない (ファイルがその PC の値の全部を持つ)。
+      privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
     in
     {
       homeConfigurations = hostsWith [ ];
@@ -69,7 +78,8 @@
       #     };
       #
       # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
-      lib = { inherit mkHome hostsWith; };
+      # privateHosts は dotfiles-private に登録したホストを読む入口 (README「dotfiles-private に登録したホスト」)。
+      lib = { inherit mkHome hostsWith privateHosts; };
 
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
@@ -143,6 +153,10 @@
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
           local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          # scripts/ を丸ごと渡す (private_dir() を持つ bootstrap-*.sh と本文を比べる)
+          private-host-test = scriptTest "private-host" ./scripts;
+          # setup.sh と、その隣の private-host.sh を使う
+          setup-host-test = scriptTest "setup-host" ./scripts;
           setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
@@ -289,6 +303,15 @@
               ;
           };
           one-password-state = import ./tests/one-password.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
+          host-draft-state = import ./tests/host-draft.nix {
             inherit
               lib
               pkgs

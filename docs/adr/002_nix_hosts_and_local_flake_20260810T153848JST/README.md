@@ -7,7 +7,7 @@
 | 決定者 | pollenjp |
 | 関連 PR | [#29](https://github.com/pollenjp/dotfiles/pull/29) |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md) |
-| 後続 ADR | [007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（ローカル flake の雛形を `dotfiles.lib.hostsWith [ local ] // { … }` に変え、登録簿のホストにも「このマシンだけの設定」を当てられるようにした。本文 §2.B の `dotfiles.homeConfigurations // { … }` は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録簿に載せずにマシンを足す」） |
+| 後続 ADR | [007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（ローカル flake の雛形を `dotfiles.lib.hostsWith [ local ] // { … }` に変え、登録簿のホストにも「このマシンだけの設定」を当てられるようにした。本文 §2.B の `dotfiles.homeConfigurations // { … }` は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録簿に載せずにマシンを足す」）、[026_dotfiles_private_hosts](../026_dotfiles_private_hosts_20261020T215857JST/README.md)（実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が hostname で選ぶ。public の登録簿の実機の行は、実機が全部移るまで残す） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 
 前提 ADR で home-manager への移行そのものは決めた。この ADR はその上で残っていた
