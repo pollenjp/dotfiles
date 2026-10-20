@@ -119,6 +119,9 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 - **dotfiles-private は switch の前に取る**（手順 `private-fetch`。「既存マシン更新」と「新しいマシン適用」に入る）。clone があれば
   bootstrap-dotfiles-private.sh を流して fast-forward し、同じ実行の後ろの手順 bootstrap-dotfiles-private（order 50）は飛ばす。
   clone が無ければ何もせず、後ろの手順が今までどおり clone する。取れなくても止めない（手元の clone で評価する）
+- 自動で決めた対象ホスト（ローカル flake・dotfiles-private・推測）は、`private-fetch` と `local-flake` のあとで決め直す（この実行で作った
+  ローカル flake が clone を読む・この PC の登録が取得で来た・消えた、を同じ実行の switch に効かせる）。変われば「選び直した」と出す。
+  `--host` などで明示したホストは変えない
 
 ### E. 登録は skill `pjp-dotfiles-register-host` と `private-host.sh`
 
@@ -130,6 +133,10 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 | `draft --base <ホスト>` | 元のホスト（+ `local`）の `options.dotfiles` を歩き、option の既定（優先度 1500）より強い定義を持つ値を `mkHome` の引数（`wsl`・`onePassword`・`claude`）と `modules` に描く。既定と同じ値を明示した行も拾い、既定が別の option から決まる値と改名の旧名は拾わない。`local` の dotfiles の外の行は描かずに頭のコメントで知らせる |
 | `compare --base <ホスト> --private <作業ツリー>` | 旧い形（ローカル flake の写しの元のホスト。`local` が当たる）と新しい形（private の `<名前>`。`local` は当たらない）を、同じ本体・同じ lock で評価して drvPath を比べる。0 = 同じ（この登録で世代の中身は変わらない）、1 = 違う（`config.dotfiles` の違いを出す）、3 / 4 = 評価できない |
 
+- `draft` と `compare` が評価する本体は、どちらも既定でこの script の repo の `nix/`（ローカル flake が別の本体を指していても揃える）。
+  `compare` の違いは `options.dotfiles` を辿って出し、表に出ない option（改名の旧名）は出さない
+- merge のあと、ローカル flake が既に今の雛形で clone を読んでいる PC では `local-flake-migrate.sh prepare` が「移すものはありません」に
+  なるので、`prepare --always` で作業場所を作り、`local` から値を外したものを compare・apply（退避つき）で書く
 - 「中身が同じ」は、同じ本体・同じ lock での旧い形と新しい形の比べ方で決める。今の世代との一致では決めない（本体を進めると、skill を 1 つ
   足しただけでも全ホストの世代が変わる）。今の世代との一致は、元にするホストを見つけるため（`inspect`）と参考の表示にだけ使う
 - 評価はローカル flake の写しで行い、`~/dotfiles` と dotfiles-private には書かない（`draft` が書くのは `--out` だけ）
@@ -158,8 +165,8 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 | `nix/flake.nix` | `lib` に `privateHosts`。checks に `private-hosts-state`・`host-draft-state`・`private-host-test`・`setup-host-test` |
 | `nix/scripts/private-host.sh` | 新設（`name`・`dir`・`input-dir`・`inspect`・`draft`・`compare`） |
 | `nix/scripts/setup-local-flake.sh` | 雛形に `inputs.dotfiles-private` と `privateHosts` |
-| `nix/scripts/local-flake-migrate.sh` | `${private_nix_dir}` を描く。印が同じでも入力が違えば移す。lock は `path:` 入力ぜんぶ。compare は dotfiles-private のホストを区別する |
-| `nix/scripts/setup.sh` | ホストの決め方（3 番目に private）・`--which-host`・手順 `private-fetch`・lock の張り直し・知らせ |
+| `nix/scripts/local-flake-migrate.sh` | `${private_nix_dir}` を描く。印が同じでも入力が違えば移す。`prepare --always`。lock は `path:` 入力ぜんぶ。compare は dotfiles-private のホストを区別する |
+| `nix/scripts/setup.sh` | ホストの決め方（3 番目に private）と決め直し・`--which-host`・手順 `private-fetch`・lock の張り直し・知らせ |
 | `nix/scripts/bootstrap-dotfiles-private.sh` | `resolve_dir()` を `private_dir()` に改名（ほかの bootstrap と本文を揃える）。先頭のコメント |
 | `nix/files/claude/skills/pjp-dotfiles-register-host/SKILL.md` | 新設 |
 | `nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md` | dotfiles-private の入力の指し直しと、compare の読み方 |
@@ -202,9 +209,17 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 
 ## 6. 検証 (Verification)
 
-- テスト: `nix/tests/private-hosts.nix`（6 件）・`nix/tests/host-draft.nix`（9 件。描いた下書きを `builtins.toFile` で import し直し、
-  元のホストと drvPath が同じ・値を 1 つ変えると違う）・`nix/tests/private-host.test.sh`（18 件）・`nix/tests/setup-host.test.sh`（13 件）、
-  `setup-local-flake.test.sh`（11 件）・`local-flake-migrate.test.sh`（86 件）を手元と flake の checks（サンドボックス）で流して通った
+- テスト: `nix/tests/private-hosts.nix`（6 件）・`nix/tests/host-draft.nix`（10 件。描いた下書きが `fixtures/host-draft/` の期待の
+  ファイルと同じで、そのファイルを import したホストは元のホストと drvPath が同じ・値を 1 つ変えたホストとは違う）・
+  `nix/tests/private-host.test.sh`（21 件）・`nix/tests/setup-host.test.sh`（17 件）、`setup-local-flake.test.sh`（11 件）・
+  `local-flake-migrate.test.sh`（87 件）を手元と flake の checks（サンドボックス）で流して通った。`nix flake check --all-systems --no-build`
+  も通る（store に書かない評価で `builtins.toFile` や path を文字列にした store path を読むと「path … is not valid」で落ちるので、テストは
+  commit した fixture を読み、`privateHosts` は path を path のまま辿る）
+- skill: skill なしの subagent も、repo の spec・ADR・README を読んで dotfiles-private に書く前と `apply` の前で止まった（違反は無い）が、
+  操作が 50〜56 回、merge のあとの段を最初に伝えず、作業中に本体の checkout が変わるのに当たった。skill を読ませた subagent は 30〜46 回で、
+  最初に 2 段の流れを伝え、scratchpad の写しで先に比べ、前に決めた値 (spec) と今の世代の違い (署名が外れる) を 1 回の確認にまとめて止まった
+- branch のレビュー (別の reviewer): public の spec の例に実機の値が残っていた (Critical。作り物にして push の前に履歴から消した)・
+  対象ホストを起動時に 1 回だけ決めていた・手順 6 の行き止まり・隠しファイルの `.nix` を拾う・警告の案内の誤り、を直した
 - 実機（lavie）で、`~/dotfiles` の写しと scratchpad の偽の dotfiles-private で（本物には書かずに）:
   - `inspect` は 31 秒。`draft --base pollenjp@x86_64-linux` は `local` の 4 つの値だけを描いた
   - `compare --base pollenjp@x86_64-linux` は 0（旧い形と `pollenjp@lavie` の drvPath が同じ）
