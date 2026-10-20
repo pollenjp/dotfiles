@@ -7,26 +7,28 @@
 #   bash nix/tests/bootstrap-herdr-hub.test.sh [<nix/scripts のパス>]
 #
 # flake の checks (bootstrap-herdr-hub-test) が Nix のサンドボックスで流す。setup.sh の手順の並びも見るので、
-# nix/scripts を丸ごと渡す。使うのは bash・coreutils・grep だけ (本物の hub-init.sh は private な claude-skills に
-# あり、サンドボックスに無い)。
+# nix/scripts を丸ごと渡す。使うのは bash と coreutils・grep・sed・awk だけ (本物の hub-init.sh は private な
+# claude-skills にあり、サンドボックスに無い)。
 #
 # ## 確かめること
 #
-#   - ~/.claude/skills/pjp-herdr-hub が無い (claude-skills を取れないマシン・まだ張っていない) なら、何も作らずに
-#     0 で終わり、警告は出さない (setup の最後のまとめにも載せない)
+#   - ~/.claude/skills/pjp-herdr-hub が無く、claude-skills も使っていない (bootstrap-claude-skills.sh が控える clone が
+#     無い) マシンなら、何も作らずに 0 で終わり、警告は出さない (setup の最後のまとめにも載せない)
+#   - claude-skills の clone はあるのに pjp-herdr-hub が無い (clone が古い・skill の名前が変わった・消えた) か、
+#     pjp-herdr-hub のリンクが切れているなら、警告して 0 で終わる (~/h が作られなくなったことに気付けるように)
 #   - pjp-herdr-hub が張られていれば、その hub-init.sh を引数なしで (既定の ~/h に) 1 回打ち、出力を見せて 0 で終わる。
-#     警告は出さない
+#     警告は出さない。hub-init.sh に実行の bit が無くても打ち、stdin は渡さない
 #   - hub-init.sh が止まったら (終了コード 1。~/h が別の repo の中・雛形の外のものがある、など)、その出力を続きの行に
 #     した警告と、この手順だけを流し直すコマンド (--steps bootstrap-herdr-hub) を setup の最後のまとめにも残し、0 で
 #     終わる (setup の後ろの手順を止めない)。1 以外の終了コード (git の失敗など) でも同じ
-#   - pjp-herdr-hub はあるのに hub-init.sh が無ければ (claude-skills の側で名前や場所が変わった)、警告して 0 で終わる
+#   - pjp-herdr-hub はあるのに hub-init.sh が無ければ (skill の中で名前や場所が変わった)、警告して 0 で終わる
 #   - 知らない引数 (--dry-run・--check など) では hub-init.sh を打たずに終了コード 2 で終わる (書かないつもりの引数で
 #     書かない)
 #   - setup の手順の並び (setup.sh --list) で、claude-skills の skill を張る bootstrap-claude-skills より後に来る
 #
-# 偽の hub-init.sh は、引数と HOME を書き留め、決めた行を stdout・stderr に出して FAKE_RC で終わる。pjp-herdr-hub は、
-# setup と同じく claude-skills の clone の中の skill への symlink として張る。偽のコマンドの shebang は $BASH から作る
-# (サンドボックスに /usr/bin/env が無い)。
+# 偽の hub-init.sh は、引数・HOME・stdin から読めた 1 行を書き留め、決めた行を stdout・stderr に出して FAKE_RC で
+# 終わる。実行の bit は付けない (script は bit に頼らず bash で打つ)。pjp-herdr-hub は、setup と同じく claude-skills の
+# clone の中の skill への symlink として張る。script には、読めば中身の出る stdin を渡す。
 
 set -u -o pipefail
 
@@ -53,6 +55,9 @@ ng() {
   fi
 }
 
+# script に渡す stdin。hub-init.sh へ渡ってしまえば、偽物がこの 1 行を読む
+printf 'y\n' >"${work}/stdin"
+
 # $1: HOME。claude-skills の clone (<HOME>/clone) の中に skill pjp-herdr-hub を作り、~/.claude/skills へ symlink で張る
 # (hub-init.sh はまだ置かない)
 link_skill() {
@@ -60,22 +65,30 @@ link_skill() {
   ln -s "$1/clone/skills/pjp-herdr-hub" "$1/.claude/skills/pjp-herdr-hub"
 }
 
-# $1: HOME。張った pjp-herdr-hub に偽の hub-init.sh を置く。打たれるたびに引数と HOME を <HOME>/calls に 1 行足し、
-# stdout に「書いた: CLAUDE.md」、FAKE_ERR があれば stderr にそれを出して、FAKE_RC (既定 0) で終わる
+# $1: HOME。bootstrap-claude-skills.sh が控える clone の場所 (~/.local/state/dotfiles/claude-skills-dir) に
+# <HOME>/clone を書き、そこを git の clone にする (.git を作る)
+remember_clone() {
+  mkdir -p "$1/clone/.git" "$1/.local/state/dotfiles"
+  printf '%s\n' "$1/clone" >"$1/.local/state/dotfiles/claude-skills-dir"
+}
+
+# $1: HOME。張った pjp-herdr-hub に偽の hub-init.sh を置く (実行の bit は付けない)。打たれるたびに引数・HOME・stdin
+# から読めた 1 行を <HOME>/calls に 1 行で足し、stdout に「書いた: CLAUDE.md」、FAKE_ERR があれば stderr にそれを
+# 出して、FAKE_RC (既定 0) で終わる
 fake_hub_init() {
-  local f="$1/clone/skills/pjp-herdr-hub/scripts/hub-init.sh"
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
-printf 'args=[%s] home=%s\n' "$*" "${HOME}" >>"${HOME}/calls"
+line=""
+IFS= read -r line || true
+printf 'args=[%s] home=%s stdin=[%s]\n' "$*" "${HOME}" "${line}" >>"${HOME}/calls"
 echo "書いた: CLAUDE.md"
 if [[ -n ${FAKE_ERR-} ]]; then
   echo "${FAKE_ERR}" >&2
 fi
 exit "${FAKE_RC:-0}"
 EOF
-  } >"${f}"
-  chmod +x "${f}"
+  } >"$1/clone/skills/pjp-herdr-hub/scripts/hub-init.sh"
 }
 
 # $1: HOME、残り: script の引数。setup から走るときと同じく、まとめ用のファイル (空) を DOTFILES_SETUP_WARNINGS で
@@ -86,7 +99,7 @@ run() {
   mkdir -p "${h}"
   : >"${h}/warnings"
   env HOME="${h}" DOTFILES_SETUP_WARNINGS="${h}/warnings" "${BASH}" "${script}" "$@" \
-    >"${h}/stdout" 2>"${h}/stderr" </dev/null
+    >"${h}/stdout" 2>"${h}/stderr" <"${work}/stdin"
   echo $? >"${h}/rc"
 }
 
@@ -98,34 +111,55 @@ detail() {
 
 echo "== bootstrap-herdr-hub.sh: ${script}"
 
-# 1. pjp-herdr-hub が張られていない: 何も作らずに 0 で終わり、警告しない
+# 1. pjp-herdr-hub が無く、claude-skills も使っていない: 何も作らずに 0 で終わり、警告しない
 h="${work}/t1"
 run "${h}"
 if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings && ! -s ${h}/stderr && ! -e ${h}/h ]]; then
-  ok "pjp-herdr-hub が張られていなければ、何も作らずに 0 で終わり、警告しない"
+  ok "pjp-herdr-hub が無く claude-skills も使っていなければ、何も作らずに 0 で終わり、警告しない"
 else
-  ng "pjp-herdr-hub が無い" "$(detail "${h}")"
+  ng "claude-skills を使っていない" "$(detail "${h}")"
 fi
 
-# 2. 張られている: hub-init.sh を引数なしで 1 回打ち、出力を見せて 0 で終わる
+# 2. claude-skills の clone はあるのに pjp-herdr-hub が無い: 警告して 0 で終わる
 h="${work}/t2"
+remember_clone "${h}"
+run "${h}"
+if [[ $(rc "${h}") == 0 && -s ${h}/warnings && ! -e ${h}/h ]] && grep -q '^!! ' "${h}/stderr"; then
+  ok "claude-skills の clone はあるのに pjp-herdr-hub が無ければ、警告して 0 で終わる"
+else
+  ng "clone はあるのに pjp-herdr-hub が無い" "$(detail "${h}")"
+fi
+
+# 3. pjp-herdr-hub のリンクが切れている: 警告して 0 で終わる
+h="${work}/t3"
+mkdir -p "${h}/.claude/skills"
+ln -s "${h}/moved/skills/pjp-herdr-hub" "${h}/.claude/skills/pjp-herdr-hub"
+run "${h}"
+if [[ $(rc "${h}") == 0 && -s ${h}/warnings && ! -e ${h}/h ]] && grep -q '^!! ' "${h}/stderr"; then
+  ok "pjp-herdr-hub のリンクが切れていれば、警告して 0 で終わる"
+else
+  ng "リンクが切れている" "$(detail "${h}")"
+fi
+
+# 4. 張られている: hub-init.sh を (実行の bit が無くても) 引数なし・stdin なしで 1 回打ち、出力を見せて 0 で終わる
+h="${work}/t4"
 link_skill "${h}"
 fake_hub_init "${h}"
 run "${h}"
-if [[ $(rc "${h}") == 0 && $(cat "${h}/calls" 2>/dev/null) == "args=[] home=${h}" && ! -s ${h}/warnings ]] \
+if [[ $(rc "${h}") == 0 && $(cat "${h}/calls" 2>/dev/null) == "args=[] home=${h} stdin=[]" && ! -s ${h}/warnings ]] \
   && grep -qF '書いた: CLAUDE.md' "${h}/stdout"; then
-  ok "pjp-herdr-hub が張られていれば hub-init.sh を引数なしで 1 回打ち、出力を見せて 0 で終わる"
+  ok "pjp-herdr-hub が張られていれば hub-init.sh を引数も stdin も渡さずに 1 回打ち、出力を見せて 0 で終わる"
 else
   ng "hub-init.sh を打つ" "$(detail "${h}")"
 fi
 
-# 3. hub-init.sh が止まった (終了コード 1): 出力を続きの行にした警告と流し直し方をまとめにも残し、0 で終わる
-h="${work}/t3"
+# 5. hub-init.sh が止まった (終了コード 1): 出力を続きの行にした警告と流し直し方をまとめにも残し、0 で終わる
+h="${work}/t5"
 link_skill "${h}"
 fake_hub_init "${h}"
 err="hub-init.sh: ${h}/h は repo ${h} の中。ハブは repo の外に作る"
 FAKE_RC=1 FAKE_ERR=${err} run "${h}"
-if [[ $(rc "${h}") == 0 && $(cat "${h}/calls" 2>/dev/null) == "args=[] home=${h}" ]] \
+if [[ $(rc "${h}") == 0 && $(cat "${h}/calls" 2>/dev/null) == "args=[] home=${h} stdin=[]" ]] \
   && [[ $(head -n 1 "${h}/warnings") == [![:space:]]* ]] \
   && grep -qxF "   ${err}" "${h}/warnings" && grep -qxF '   書いた: CLAUDE.md' "${h}/warnings" \
   && grep -qF -- '--steps bootstrap-herdr-hub' "${h}/warnings" && grep -q '^!! ' "${h}/stderr"; then
@@ -134,8 +168,8 @@ else
   ng "hub-init.sh が止まった" "$(detail "${h}")"
 fi
 
-# 4. 1 以外の終了コード (git の失敗など) でも、警告して 0 で終わる
-h="${work}/t4"
+# 6. 1 以外の終了コード (git の失敗など) でも、警告して 0 で終わる
+h="${work}/t6"
 link_skill "${h}"
 fake_hub_init "${h}"
 FAKE_RC=128 FAKE_ERR='fatal: unable to auto-detect email address' run "${h}"
@@ -145,8 +179,8 @@ else
   ng "終了コード 128" "$(detail "${h}")"
 fi
 
-# 5. pjp-herdr-hub はあるのに hub-init.sh が無い: 警告して 0 で終わる
-h="${work}/t5"
+# 7. pjp-herdr-hub はあるのに hub-init.sh が無い: 警告して 0 で終わる
+h="${work}/t7"
 link_skill "${h}"
 run "${h}"
 if [[ $(rc "${h}") == 0 && -s ${h}/warnings && ! -e ${h}/h ]] && grep -q '^!! ' "${h}/stderr"; then
@@ -155,8 +189,8 @@ else
   ng "hub-init.sh が無い" "$(detail "${h}")"
 fi
 
-# 6. 知らない引数: hub-init.sh を打たずに終了コード 2 で終わる
-h="${work}/t6"
+# 8. 知らない引数: hub-init.sh を打たずに終了コード 2 で終わる
+h="${work}/t8"
 link_skill "${h}"
 fake_hub_init "${h}"
 run "${h}" --dry-run
@@ -166,7 +200,7 @@ else
   ng "知らない引数" "$(detail "${h}")"
 fi
 
-# 7. setup の手順の並び: bootstrap-claude-skills より後に来る。使い捨ての checkout に setup.sh と 2 つの bootstrap を写し、
+# 9. setup の手順の並び: bootstrap-claude-skills より後に来る。使い捨ての checkout に setup.sh と 2 つの bootstrap を写し、
 # 登録簿を置いて --list で並べる
 o="${work}/order"
 mkdir -p "${o}/repo/nix/scripts" "${o}/repo/nix/hosts" "${o}/home"

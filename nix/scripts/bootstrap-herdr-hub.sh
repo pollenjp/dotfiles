@@ -19,15 +19,18 @@
 # ## 何をするか
 #
 # ~/.claude/skills/pjp-herdr-hub/scripts/hub-init.sh を引数なしで (既定の ~/h に) 打つ。何を書くか・どこで止まるかは
-# hub-init.sh の --help (git init・決まりのファイルを写して commit・git config pjp.devtracker.repo)。
+# hub-init.sh の先頭のコメント (git init・決まりのファイルを写して commit・git config pjp.devtracker.repo)。
 #
 # ## 止まらない
 #
 # setup.sh は手順が 1 つ失敗すると残りを走らせないので、ここでは exit 1 しない。
 #
 #   pjp-herdr-hub が張られていない          claude-skills を取れないマシンでは、これが正常 (取れないことは
-#                                           bootstrap-claude-skills.sh が警告する)。1 行出して通す
-#   pjp-herdr-hub はあるが hub-init.sh が無い  claude-skills の側で名前か場所が変わった。警告して通す
+#                                           bootstrap-claude-skills.sh が警告する)。1 行出して通す。ただし
+#                                           claude-skills の clone がある (bootstrap-claude-skills.sh が控えた
+#                                           場所) か、リンクが切れているなら、clone が古いか skill の名前が
+#                                           変わった・消えたので、警告して通す
+#   pjp-herdr-hub はあるが hub-init.sh が無い  skill の中で名前か場所が変わった。警告して通す
 #   hub-init.sh が 0 以外で終わった          ~/h が別の repo の中・雛形の外のものがある (何も書かずに止まる)、
 #                                           git の commit に失敗した、など。出力ごと警告して通す
 #
@@ -40,6 +43,8 @@ set -eu -o pipefail
 
 skill_dir="${HOME}/.claude/skills/pjp-herdr-hub"
 hub_init="${skill_dir}/scripts/hub-init.sh"
+# bootstrap-claude-skills.sh が、最後にリンクを張った claude-skills の clone の場所を控えるファイル
+skills_state="${HOME}/.local/state/dotfiles/claude-skills-dir"
 
 usage() {
   cat <<'EOS'
@@ -73,6 +78,18 @@ summary_warn() {
   { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
+# claude-skills の clone (bootstrap-claude-skills.sh が控えた場所が git の clone なら、その場所)。無ければ何も出さない
+skills_clone() {
+  local dir=""
+  if [[ -r ${skills_state} ]]; then
+    IFS= read -r dir <"${skills_state}" || true
+  fi
+  dir=${dir%/}
+  if [[ -n ${dir} && -d ${dir}/.git ]]; then
+    printf '%s\n' "${dir}"
+  fi
+}
+
 # 引数は --help だけ。--dry-run などを渡されて、書かないつもりで書いてしまわないよう、ほかは断る
 if [[ $# -gt 0 ]]; then
   case $1 in
@@ -90,6 +107,14 @@ fi
 echo "==> herdr の集約ハブ (~/h)"
 
 if [[ ! -e ${skill_dir} ]]; then
+  # claude-skills を使っているマシン (clone があるか、リンクが残っている) で無いのは、clone が古いか、skill の名前が
+  # 変わった・消えたとき。黙って飛ばすと ~/h が作られなくなったことに気付けないので警告する
+  if [[ -L ${skill_dir} || -n $(skills_clone) ]]; then
+    warn "claude-skills を使っているマシンなのに、skill pjp-herdr-hub が ~/.claude/skills に無い (かリンクが切れている) ので、集約ハブ ~/h は作りません。" \
+      "clone が古い・まだ張っていないなら、bootstrap-claude-skills の警告を見て流し直す: ~/dotfiles/setup --steps bootstrap-claude-skills,bootstrap-herdr-hub" \
+      "claude-skills の側で skill の名前が変わった・消えたなら、nix/scripts/bootstrap-herdr-hub.sh を合わせて直してください。"
+    exit 0
+  fi
   echo "pjp-herdr-hub の skill が ~/.claude/skills に無いので飛ばします (claude-skills を取れないマシンでは、これで問題ありません)。"
   exit 0
 fi

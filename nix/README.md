@@ -2696,12 +2696,14 @@ claude-skills（private）の skill `pjp-herdr-hub` にある。ハブでの会�
 
 | 状況 | 挙動 |
 | --- | --- |
-| `pjp-herdr-hub` が張られていない（claude-skills を取れないマシン） | 1 行出して通す。警告はしない（取れないことは `bootstrap-claude-skills` が警告する） |
-| `pjp-herdr-hub` はあるのに `hub-init.sh` が無い | 警告して通す（claude-skills の側で名前か場所が変わったら、`bootstrap-herdr-hub.sh` を合わせる） |
+| `pjp-herdr-hub` が無く、claude-skills も使っていない（claude-skills を取れないマシン） | 1 行出して通す。警告はしない（取れないことは `bootstrap-claude-skills` が警告する） |
+| claude-skills の clone はあるのに `pjp-herdr-hub` が無い・リンクが切れている | 警告して通す（clone が古いか、claude-skills の側で skill の名前が変わった・消えた。黙ると `~/h` が作られなくなったことに気付けない） |
+| `pjp-herdr-hub` はあるのに `hub-init.sh` が無い | 警告して通す（skill の中で名前か場所が変わったら、`bootstrap-herdr-hub.sh` を合わせる） |
 | `hub-init.sh` が 0 以外で終わった | `hub-init.sh` の出力ごと警告し（最後の[警告のまとめ](#途中の警告のまとめ)にも載る）、`setup` は続ける。直してから上の `--steps` で流し直す |
 
-`hub-init.sh` が止まるのは、`~/h` が別の repo の中・remote を持つ repo・ハブの worktree のときと、まだハブでない `~/h` に
-雛形の外のものや中身の違う同じ名前のファイルがあるとき（どれも何も書かずに止まる）。ほかに、git の commit に失敗した
+clone があるかは、`bootstrap-claude-skills.sh` が控えた場所（`~/.local/state/dotfiles/claude-skills-dir`。
+[掃除の判定](#掃除の判定)）が git の clone かで見る。`hub-init.sh` が止まる条件（`~/h` が別の repo の中、まだハブでないのに
+雛形の外のものがある、など。止まるときは何も書かない）は `hub-init.sh` の先頭のコメントにある。git の commit に失敗した
 （名前とメールが無いなど）ときも 0 以外で終わる（ファイルは写したまま。直して流し直せば commit する）。
 
 ### 長い応答を読む web ビューア (cc-pages)
