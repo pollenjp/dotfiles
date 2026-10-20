@@ -153,6 +153,8 @@
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
           local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          # scripts/ を丸ごと渡す (private_dir() を持つ bootstrap-*.sh と本文を比べる)
+          private-host-test = scriptTest "private-host" ./scripts;
           setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =

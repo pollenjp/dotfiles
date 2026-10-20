@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# nix/scripts/private-host.sh (この PC を dotfiles-private に登録するときの名前・clone の場所・登録の下書きと比べ方) を、
+# 偽の uname・scutil・ghq・nix と使い捨ての HOME で確かめる。
+#
+#   bash nix/tests/private-host.test.sh [<nix/scripts のパス>]
+#
+# flake の checks (private-host-test) が Nix のサンドボックスで流す。
+#
+# ## 確かめること
+#
+#   - name は <user>@<短い hostname>。user は $USER (無ければ id -un)、hostname は uname -n の最初の . まで。macOS
+#     (uname -s が Darwin) は scutil --get LocalHostName を先に見て、scutil が無い・落ちる・空なら uname -n に戻る。
+#     英数字・. _ - の外の文字を含む名前は、理由を stderr に出して 1。nix も jq も無い PATH で動く
+#   - dir は $DOTFILES_PRIVATE_DIR (末尾の / を落とす) → $(ghq root)/github.com/pollenjp/dotfiles-private →
+#     ~/ghq/github.com/pollenjp/dotfiles-private
+#   - input-dir は clone の nix/ が directory ならそれ、無ければ本体の stub (<script の repo>/nix/private-stub か、
+#     --nix-dir <dir> の <dir>/private-stub)
+#   - private_dir() の本文が、clone を読む bootstrap-*.sh (dotfiles-private・ssh-config・windows-ssh-config・
+#     windows-google-ime) の private_dir() と 1 字も違わない (clone の場所の決め方を 1 つにする)
+#   - 引数が無い・知らないサブコマンドは usage を出して 2、-h は 0
+
+set -u -o pipefail
+
+here=$(
+  cd -- "$(dirname "$0")" &>/dev/null || exit
+  pwd -P
+)
+dir=${1:-${here}/../scripts}
+src=${dir}/private-host.sh
+work=$(mktemp -d "${TMPDIR:-/tmp}/private-host-test.XXXXXX")
+trap 'rm -rf "${work}"' EXIT
+
+if [[ ! -f ${src} ]]; then
+  echo "見つからない: ${src}" >&2
+  exit 1
+fi
+
+pass=0
+fail=0
+ok() {
+  pass=$((pass + 1))
+  echo "  ok   $1"
+}
+ng() {
+  fail=$((fail + 1))
+  echo "  FAIL $1"
+  if [[ -n ${2:-} ]]; then
+    echo "       ${2//$'\n'/$'\n'       }"
+  fi
+}
+
+# 要るコマンドだけを並べた PATH (nix・jq・ghq・scutil・hostname は入れない)
+sys_bin="${work}/sys-bin"
+mkdir -p "${sys_bin}"
+for c in env awk sed grep sort head tail tr cat dirname basename readlink mktemp mkdir rm cp chmod cmp diff cksum ln date; do
+  if ! p=$(command -v "${c}"); then
+    echo "見つからない: ${c}" >&2
+    exit 1
+  fi
+  ln -s "${p}" "${sys_bin}/${c}"
+done
+
+# 偽のコマンドを置いた bin。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)
+#   uname   -n は FAKE_UNAME_N (既定 box)、-s は FAKE_UNAME_S (既定 Linux)、-m は x86_64
+#   id      -un は FAKE_ID_UN (既定 nobody)
+fake_bin="${work}/fake-bin"
+mkdir -p "${fake_bin}"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+case ${1-} in
+  -n) printf '%s\n' "${FAKE_UNAME_N-box}" ;;
+  -m) printf '%s\n' x86_64 ;;
+  *) printf '%s\n' "${FAKE_UNAME_S:-Linux}" ;;
+esac
+EOF
+} >"${fake_bin}/uname"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+[[ ${1-} == -un ]] && printf '%s\n' "${FAKE_ID_UN:-nobody}"
+EOF
+} >"${fake_bin}/id"
+chmod +x "${fake_bin}/uname" "${fake_bin}/id"
+
+# scutil と ghq は、置くケースだけの bin に置く
+#   scutil  --get LocalHostName なら FAKE_SCUTIL を出して FAKE_SCUTIL_RC (既定 0) で終わる
+#   ghq     root なら FAKE_GHQ_ROOT を出す (空なら 1)
+extra_bin="${work}/extra-bin"
+mkdir -p "${extra_bin}"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+[[ $* == "--get LocalHostName" ]] && printf '%s\n' "${FAKE_SCUTIL-}"
+exit "${FAKE_SCUTIL_RC:-0}"
+EOF
+} >"${extra_bin}/scutil"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+[[ ${1-} == root && -n ${FAKE_GHQ_ROOT-} ]] || exit 1
+printf '%s\n' "${FAKE_GHQ_ROOT}"
+EOF
+} >"${extra_bin}/ghq"
+chmod +x "${extra_bin}/scutil" "${extra_bin}/ghq"
+
+# 1 ケースぶんの checkout と HOME を作り、その場所を出す。
+#   <ケース>/repo/nix/scripts/private-host.sh   写した script (script の 2 つ上が repo)
+#   <ケース>/home                               HOME
+new_case() {
+  local c="${work}/$1"
+  mkdir -p "${c}/repo/nix/scripts" "${c}/home"
+  cp "${src}" "${c}/repo/nix/scripts/private-host.sh"
+  echo "${c}"
+}
+
+# $1: ケース、残り: script の引数。stdout・stderr・終了コードを <ケース>/{out,err,rc} に残す。
+# 環境変数 (USER・FAKE_*・DOTFILES_PRIVATE_DIR・PATH_EXTRA) は呼び出し側で付ける
+run() {
+  local c=$1
+  shift
+  env -i HOME="${c}/home" ${USER+"USER=${USER}"} TMPDIR="${work}" \
+    PATH="${PATH_EXTRA:+${PATH_EXTRA}:}${fake_bin}:${sys_bin}" \
+    ${FAKE_UNAME_N+"FAKE_UNAME_N=${FAKE_UNAME_N}"} ${FAKE_UNAME_S+"FAKE_UNAME_S=${FAKE_UNAME_S}"} \
+    ${FAKE_ID_UN+"FAKE_ID_UN=${FAKE_ID_UN}"} ${FAKE_SCUTIL+"FAKE_SCUTIL=${FAKE_SCUTIL}"} \
+    ${FAKE_SCUTIL_RC+"FAKE_SCUTIL_RC=${FAKE_SCUTIL_RC}"} ${FAKE_GHQ_ROOT+"FAKE_GHQ_ROOT=${FAKE_GHQ_ROOT}"} \
+    ${DOTFILES_PRIVATE_DIR+"DOTFILES_PRIVATE_DIR=${DOTFILES_PRIVATE_DIR}"} \
+    "${BASH}" "${c}/repo/nix/scripts/private-host.sh" "$@" >"${c}/out" 2>"${c}/err"
+  echo $? >"${c}/rc"
+}
+rc() { cat "$1/rc"; }
+out() { cat "$1/out"; }
+err() { cat "$1/err"; }
+
+echo "== private-host.sh (${src})"
+
+# 1. name: uname -n の最初の . まで
+c=$(new_case n1)
+USER=alice FAKE_UNAME_N=box.example.test run "${c}" name
+if [[ $(rc "${c}") == 0 && $(out "${c}") == alice@box ]]; then
+  ok "name は <user>@<uname -n の最初の . まで> (nix も jq も無い PATH)"
+else
+  ng "name (Linux)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+fi
+
+# 2. name: macOS は scutil の LocalHostName を先に見る
+c=$(new_case n2)
+USER=alice FAKE_UNAME_S=Darwin FAKE_UNAME_N=mac.local FAKE_SCUTIL=Alices-Mac PATH_EXTRA=${extra_bin} run "${c}" name
+if [[ $(rc "${c}") == 0 && $(out "${c}") == alice@Alices-Mac ]]; then
+  ok "macOS は scutil --get LocalHostName を使う"
+else
+  ng "name (Darwin・scutil)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+fi
+
+# 3. name: macOS で scutil が無い・落ちる・空なら uname -n に戻る
+c=$(new_case n3)
+USER=alice FAKE_UNAME_S=Darwin FAKE_UNAME_N=mac.local run "${c}" name
+r1="$(rc "${c}") $(out "${c}")"
+USER=alice FAKE_UNAME_S=Darwin FAKE_UNAME_N=mac.local FAKE_SCUTIL=x FAKE_SCUTIL_RC=1 PATH_EXTRA=${extra_bin} run "${c}" name
+r2="$(rc "${c}") $(out "${c}")"
+USER=alice FAKE_UNAME_S=Darwin FAKE_UNAME_N=mac.local FAKE_SCUTIL='' PATH_EXTRA=${extra_bin} run "${c}" name
+r3="$(rc "${c}") $(out "${c}")"
+if [[ ${r1} == "0 alice@mac" && ${r2} == "0 alice@mac" && ${r3} == "0 alice@mac" ]]; then
+  ok "macOS で scutil が無い・落ちる・空なら uname -n の最初の . まで"
+else
+  ng "name (Darwin・scutil なし)" "無い: ${r1} / 落ちる: ${r2} / 空: ${r3}"
+fi
+
+# 4. name: $USER が無ければ id -un
+c=$(new_case n4)
+(
+  unset USER
+  FAKE_ID_UN=bob run "${c}" name
+)
+if [[ $(rc "${c}") == 0 && $(out "${c}") == bob@box ]]; then
+  ok "\$USER が無ければ id -un を使う"
+else
+  ng "name (id -un)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+fi
+
+# 5. name: 使えない文字を含む hostname は 1
+c=$(new_case n5)
+USER=alice FAKE_UNAME_N='my box' run "${c}" name
+r1="$(rc "${c}") $(out "${c}")"
+e1=$(err "${c}")
+USER=alice FAKE_UNAME_N='' run "${c}" name
+r2="$(rc "${c}") $(out "${c}")"
+if [[ ${r1} == "1 " && ${e1} == *"my box"* && ${r2} == "1 " ]]; then
+  ok "英数字・. _ - の外の文字を含む名前・空の hostname は、理由を出して 1"
+else
+  ng "name (使えない文字)" "空白: ${r1} (${e1}) / 空: ${r2}"
+fi
+
+# 6. dir: DOTFILES_PRIVATE_DIR → ghq root → ~/ghq
+c=$(new_case d1)
+DOTFILES_PRIVATE_DIR=/x/y/ FAKE_GHQ_ROOT=/g PATH_EXTRA=${extra_bin} run "${c}" dir
+r1=$(out "${c}")
+FAKE_GHQ_ROOT=/g PATH_EXTRA=${extra_bin} run "${c}" dir
+r2=$(out "${c}")
+FAKE_GHQ_ROOT='' PATH_EXTRA=${extra_bin} run "${c}" dir
+r3=$(out "${c}")
+if [[ ${r1} == /x/y && ${r2} == /g/github.com/pollenjp/dotfiles-private &&
+  ${r3} == "${c}/home/ghq/github.com/pollenjp/dotfiles-private" ]]; then
+  ok "dir は \$DOTFILES_PRIVATE_DIR → \$(ghq root)/github.com/pollenjp/dotfiles-private → ~/ghq/… の順"
+else
+  ng "dir" "env: ${r1} / ghq: ${r2} / 既定: ${r3}"
+fi
+
+# 7. input-dir: clone の nix/ があればそれ、無ければ本体の stub
+c=$(new_case i1)
+mkdir -p "${c}/private/nix"
+DOTFILES_PRIVATE_DIR="${c}/private" run "${c}" input-dir
+r1=$(out "${c}")
+DOTFILES_PRIVATE_DIR="${c}/nothing" run "${c}" input-dir
+r2=$(out "${c}")
+DOTFILES_PRIVATE_DIR="${c}/nothing" run "${c}" input-dir --nix-dir /n
+r3=$(out "${c}")
+if [[ ${r1} == "${c}/private/nix" && ${r2} == "${c}/repo/nix/private-stub" && ${r3} == /n/private-stub ]]; then
+  ok "input-dir は clone の nix/ が無ければ本体の stub (<repo>/nix/private-stub か --nix-dir の下)"
+else
+  ng "input-dir" "clone: ${r1} / stub: ${r2} / --nix-dir: ${r3}"
+fi
+
+# 8. private_dir() の本文が clone を読む bootstrap-*.sh と同じ
+body_of() {
+  awk '
+    /^private_dir\(\) \{/ { f = 1 }
+    f { print; if ($0 ~ /^\}$/) f = 0 }
+  ' "$1"
+}
+want=$(body_of "${src}")
+differ=""
+for f in bootstrap-dotfiles-private.sh bootstrap-ssh-config.sh bootstrap-windows-ssh-config.sh bootstrap-windows-google-ime.sh; do
+  if [[ ! -f ${dir}/${f} || $(body_of "${dir}/${f}") != "${want}" ]]; then
+    differ+=" ${f}"
+  fi
+done
+if [[ -n ${want} && -z ${differ} ]]; then
+  ok "private_dir() の本文が、clone を読む bootstrap-*.sh の private_dir() と 1 字も違わない"
+else
+  ng "private_dir() の本文" "違う・無い:${differ} (private-host.sh の本文: ${want:-無い})"
+fi
+
+# 9. 使い方
+c=$(new_case u1)
+run "${c}"
+r1=$(rc "${c}")
+run "${c}" nosuch
+r2=$(rc "${c}")
+run "${c}" -h
+r3=$(rc "${c}")
+if [[ ${r1} == 2 && ${r2} == 2 && ${r3} == 0 ]] && grep -q 'name' "${c}/out"; then
+  ok "引数が無い・知らないサブコマンドは 2、-h は usage を出して 0"
+else
+  ng "使い方" "なし=${r1} 知らない=${r2} -h=${r3} $(out "${c}")"
+fi
+
+echo "== ${pass} passed, ${fail} failed"
+[[ ${fail} == 0 ]]
