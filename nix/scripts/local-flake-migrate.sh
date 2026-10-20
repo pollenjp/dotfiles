@@ -288,7 +288,11 @@ find_base() {
       printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "-" "描けない" "${subject}" >>"${tmp}/candidates.tsv"
       continue
     fi
-    lines=$(diff_lines "${old}" "${tmp}/cand/${n}.nix")
+    # find_base は呼び出し側の || の中で動くので set -e が効かない。比べられなかった版は飛ばす
+    if ! lines=$(diff_lines "${old}" "${tmp}/cand/${n}.nix") || [[ ! ${lines} =~ ^[0-9]+$ ]]; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "${id}" "比べられない" "${subject}" >>"${tmp}/candidates.tsv"
+      continue
+    fi
     printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "${id}" "${lines}" "${subject}" >>"${tmp}/candidates.tsv"
     if [[ -n ${marker} && -z ${mark_n} && ${id} == "${marker}" ]]; then
       mark_n=${n} mark_rev=${rev} mark_label=${label} mark_id=${id} mark_lines=${lines}
