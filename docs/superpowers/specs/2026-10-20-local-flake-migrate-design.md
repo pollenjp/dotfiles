@@ -132,7 +132,7 @@ local-flake-migrate.sh render  (--rev <rev> | --file <path>) --nix-dir <path>
     行数が最小の版 (同数なら新しい方)
   - `candidates.tsv` — 履歴の各版 (commit・日付・印・旧いファイルとの差分の行数・題)
   - `new/flake.nix` — `git merge-file -p --diff3 -L 手元 -L 元の雛形 -L 今の雛形` の結果に、4 節の自動の解消を当てた
-    もの。`new/flake.lock` は `old/flake.lock` の写し
+    もの (lock は置かない。compare が評価用の写しで作る)
   - `prepare.env` — ローカル flake の場所・旧いファイルの cksum・本体のパス・元の版と決め方
   - 元の雛形と今の雛形が同じ版なら「移すものは無い」と出して 0 で終わる (作業場所は作らない)
   - 終わりに、元の版と決め方、衝突の数 (自動で解いたもの・残ったものと、残ったものの `new/flake.nix` の行番号)、
@@ -156,17 +156,21 @@ local-flake-migrate.sh render  (--rev <rev> | --file <path>) --nix-dir <path>
 ### 5. compare (値を引き継げたかの確かめ)
 
 1. 作業場所の `new/flake.nix` に diff3 の印 (`<<<<<<<`・`|||||||`・`=======`・`>>>>>>>` で始まる行) が残っていれば止まる
-2. 基準 (`old/`、`--baseline` を渡せばそのディレクトリ) と `new/` の lock を張り直す。本体の
-   `nix hash path --sri --type sha256 <本体の nix>` が lock に無ければ `nix flake update dotfiles --flake <dir>`、
-   lock が無ければ `nix flake lock --flake <dir>`
-3. それぞれを 1 回の `nix eval --raw path:<dir>#homeConfigurations --apply …` で評価し、ホストごとの
+2. 基準 (`old/`、`--baseline` を渡せばそのディレクトリ) と `new/` の flake.nix を、評価用の写し
+   (`<作業場所>/.eval/base`・`.eval/new`) に置き、lock は基準の lock (無ければ `old/flake.lock`) を写す。`old/` と
+   `new/` は触らない。写しの lock を張り直す: 本体の `nix hash path --sri --type sha256 <本体の nix>` が lock に
+   無ければ `nix flake update dotfiles --flake path:<写し>`、lock が無ければ `nix flake lock --flake path:<写し>`
+3. それぞれを 1 回の `nix eval --raw path:<写し>#homeConfigurations --apply …` で評価し、ホストごとの
    `activationPackage.drvPath` と `config.warnings` を TSV で受ける (jq を使わない)
 4. ホストの名前の集合と drvPath を比べて表にする。違うホストは、その `config.dotfiles` を平らにした
    「パス<TAB>値 (JSON)」で比べ、違う行を「旧い → 新しい」で出す (読めなければそう書いて続ける)。
    `config.dotfiles` が同じなのに drvPath が違えば、dotfiles の option の外 (足したホストの modules など) の違いと出す
-5. 警告は、基準だけにあるもの (移して消えた。改名を新しい名前へ移したときなど) と、移した flake にあるものを出す
-6. 結果を `compare.result` (`new/flake.nix` の cksum・基準のディレクトリと cksum・基準が `old/` か・同じか) に書く
-7. 終了コード: 0 = 全ホストが同じ、1 = 違うホストがある・ホストの集合が違う、2 = 使い方の誤りなど、
+5. setup がファイルの文字列から拾うホストの並び (setup.sh の `parse_hosts` と同じ sed。`sandbox` を除き、一番上が
+   setup の既定の対象ホスト) を比べる。違えば「違う」に数える (drvPath が全部同じでも、既定のホストが黙って変わるため)
+6. 警告は、基準だけにあるもの (移して消えた。改名を新しい名前へ移したときなど) と、移した flake にあるものを出す
+7. 結果を `compare.result` (`new/flake.nix` の cksum・基準のディレクトリと cksum・基準が `old/` か・同じか) に書く。
+   compare を始めるときに前の `compare.result` を消す (落ちた compare の前の結果で apply しない)
+8. 終了コード: 0 = 全ホストが同じ、1 = 違うホストがある・ホストの集合か並びが違う、2 = 使い方の誤りなど、
    3 = 基準が今の本体で評価できない、4 = 移した flake が評価できない
 
 ### 6. 旧い flake が今の本体で評価できないとき
@@ -268,6 +272,10 @@ local-flake-migrate.sh render  (--rev <rev> | --file <path>) --nix-dir <path>
 - setup の照合 (`check`) が 2 を返す・script が無いときは黙る
 - 失敗の案内は switch が失敗したときだけ出す
 - ADR を起こす (024)。ローカル flake の形 (印の行) と、それを前提にした移し方を決めるため
+- builder check の指摘 2 つを入れた: (1) compare は lock を張り直すので、`old/` を触らずに評価用の写しで評価する
+  (5 節の 2)。(2) setup は `~/dotfiles/flake.nix` の文字列から既定の対象ホスト (一番上に足したホスト) を拾うので、
+  drvPath が全部同じでも衝突の解き方でホストの並びが変わると既定が黙って変わる。compare でこの並びも比べる (5 節の 5)
+- prepare の `candidates.tsv` は 1 行目に見出しを置く。`new/` には lock を置かない
 
 ## 実装に任せること
 

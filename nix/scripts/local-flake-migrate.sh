@@ -384,6 +384,257 @@ env_get() {
   return 1
 }
 
+# ファイルの diff3 の衝突の印の行番号を、空白で区切って出す (無ければ何も出さない)
+conflict_lines() {
+  awk '/^(<<<<<<< |\|\|\|\|\|\|\| |>>>>>>> )/ || /^=======$/ { printf "%s%d", (n++ ? " " : ""), NR } END { if (n) print "" }' "$1"
+}
+
+# setup.sh がローカル flake の文字列から拾うホストを、上から順に空白で区切って出す。setup.sh の parse_hosts と
+# local_flake_hosts と同じ形 (行頭が # の行は拾わない・sandbox を除く・重複は最初だけ)。一番上が setup の既定の
+# 対象ホストになる
+setup_hosts() {
+  sed -n \
+    -e 's/^[[:space:]]*"\([^"]*\)"[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    -e 's/^[[:space:]]*\([A-Za-z_][A-Za-z0-9_-]*\)[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome.*/\1/p' \
+    "$1" | awk '$0 != "sandbox" && !seen[$0]++ { printf "%s%s", (n++ ? " " : ""), $0 } END { print "" }'
+}
+
+# 全ホストの drvPath と警告を 1 行ずつ「drv<TAB>ホスト<TAB>drvPath」「warn<TAB>ホスト<TAB>警告」で出す式
+# (警告の改行は \n、タブは空白にする)
+# shellcheck disable=SC2016 # Nix の式をそのまま書く
+summary_expr='hs: builtins.concatStringsSep "" (builtins.concatLists (map (n:
+  let h = builtins.getAttr n hs; in
+  [ ("drv\t" + n + "\t" + h.activationPackage.drvPath + "\n") ]
+  ++ map (w: "warn\t" + n + "\t" + builtins.replaceStrings [ "\n" "\t" ] [ "\\n" " " ] w + "\n") h.config.warnings
+) (builtins.attrNames hs)))'
+
+# 1 ホストの config.dotfiles を平らにして「パス<TAB>値の JSON」で 1 行ずつ出す式。$1: ホスト。
+# drv (outPath を持つもの) はたどらずに JSON (store のパス) にし、関数は "<function>" にする
+dotfiles_expr() {
+  local h=$1
+  h=${h//\\/\\\\}
+  h=${h//\"/\\\"}
+  h=${h//\$\{/\\\$\{}
+  printf '%s' 'hs: let
+    flat = p: v:
+      if builtins.isAttrs v && !(v ? outPath) then
+        builtins.concatLists (map (k: flat (if p == "" then k else p + "." + k) (builtins.getAttr k v)) (builtins.attrNames v))
+      else [ (p + "\t" + (if builtins.isFunction v then "\"<function>\"" else builtins.toJSON v) + "\n") ];
+  in builtins.concatStringsSep "" (flat "" (builtins.getAttr "'"${h}"'" hs).config.dotfiles)'
+}
+
+# 評価用の写しの lock を本体に合わせる (setup.sh の sync_local_flake_lock と同じ考え)。$1: 写しのディレクトリ、
+# $2: 本体の今の narHash
+lock_sync() {
+  if [[ ! -f $1/flake.lock ]]; then
+    nix flake lock "path:$1" >"$1.lock.log" 2>&1
+  elif ! grep -qF -- "$2" "$1/flake.lock"; then
+    nix flake update dotfiles --flake "path:$1" >"$1.lock.log" 2>&1
+  fi
+}
+
+# nix のエラーの出力から、最初の error: の行からの 20 行を字下げして出す (無ければ末尾の 20 行)
+eval_error_excerpt() {
+  if grep -q '^error:' "$1"; then
+    awk '/^error:/ { f = 1 } f && n < 20 { print "    " $0; n++ }' "$1"
+  else
+    tail -n 20 "$1" | sed 's/^/    /'
+  fi
+}
+
+cmd_compare() {
+  local work="" baseline="" base_src nix_dir cur lines base_label new_sum base_sum base_is_old n_hosts=0 n_same=0 differ=0
+  local h hosts_base hosts_new
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --baseline)
+        [[ $# -ge 2 ]] || die "--baseline にディレクトリを渡してください"
+        baseline=$2
+        shift
+        ;;
+      -*) die "compare の知らない引数です: $1 (--help)" ;;
+      *)
+        [[ -z ${work} ]] || die "compare に渡せる作業場所は 1 つだけです"
+        work=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n ${work} ]] || die "compare に prepare の作業場所を渡してください (--help)"
+  [[ -f ${work}/prepare.env && -f ${work}/new/flake.nix && -f ${work}/old/flake.nix ]] \
+    || die "prepare の作業場所ではありません: ${work}"
+  work=$(cd -P -- "${work}" && pwd)
+  rm -f "${work}/compare.result"
+  lines=$(conflict_lines "${work}/new/flake.nix")
+  [[ -z ${lines} ]] || die "new/flake.nix に衝突の印が残っています (${lines// /・} 行目)。解いてから compare してください。"
+  if [[ -n ${baseline} ]]; then
+    [[ -f ${baseline}/flake.nix ]] || die "--baseline のディレクトリに flake.nix がありません: ${baseline}"
+    base_src=$(cd -P -- "${baseline}" && pwd)
+    base_label="--baseline ${base_src}"
+  else
+    base_src="${work}/old"
+    base_label="旧い flake (old/)"
+  fi
+  [[ ${base_src} == "${work}/old" ]] && base_is_old=1 || base_is_old=0
+  command -v nix &>/dev/null || die "nix がありません。"
+  nix_dir=$(env_get "${work}/prepare.env" nix_dir) || die "prepare.env に nix_dir がありません: ${work}"
+  need_tmp
+
+  # 評価は写しで行う (old/ と new/ は触らない)。lock は基準の lock (無ければ old/ の lock) を両方に写す
+  rm -rf "${work}/.eval"
+  mkdir -p "${work}/.eval/base" "${work}/.eval/new"
+  cp "${base_src}/flake.nix" "${work}/.eval/base/flake.nix"
+  cp "${work}/new/flake.nix" "${work}/.eval/new/flake.nix"
+  if [[ -f ${base_src}/flake.lock ]]; then
+    cp "${base_src}/flake.lock" "${work}/.eval/base/flake.lock"
+  elif [[ -f ${work}/old/flake.lock ]]; then
+    cp "${work}/old/flake.lock" "${work}/.eval/base/flake.lock"
+  fi
+  [[ ! -f ${work}/.eval/base/flake.lock ]] || cp "${work}/.eval/base/flake.lock" "${work}/.eval/new/flake.lock"
+  new_sum=$(cksum <"${work}/new/flake.nix")
+  base_sum=$(cksum <"${base_src}/flake.nix")
+
+  printf '==> 比べる: %s と、移した flake (new/flake.nix)\n' "${base_label}"
+  printf '  本体: %s\n' "${nix_dir}"
+  cur=$(nix hash path --sri --type sha256 "${nix_dir}") || die "本体の hash を出せません: ${nix_dir}"
+  for side in base new; do
+    if ! lock_sync "${work}/.eval/${side}" "${cur}"; then
+      printf '!! 評価用の写し (%s) の lock を本体に合わせられません:\n' "${side}" >&2
+      eval_error_excerpt "${work}/.eval/${side}.lock.log" >&2
+      exit 2
+    fi
+  done
+
+  echo "  評価しています (1 回 20〜60 秒)…"
+  if ! nix eval --raw "path:${work}/.eval/base#homeConfigurations" --apply "${summary_expr}" \
+    >"${work}/.eval/base.tsv" 2>"${work}/.eval/base.err"; then
+    {
+      printf '!! 旧い flake (基準) は今の本体 (%s) で評価できません。\n' "${nix_dir}"
+      echo "   本体で option が削除・改名された、型が変わったなどで、旧い local が今の本体に合っていません。"
+      echo "   nix のエラー:"
+      eval_error_excerpt "${work}/.eval/base.err"
+      echo "   読み解き方と比べ直し方は pjp-dotfiles-local-flake-migrate skill の「旧い flake が評価できないとき」"
+      echo "   (旧い flake に評価が通るだけの直しを当てた基準を作り、--baseline で比べ直す)。"
+    } >&2
+    exit 3
+  fi
+  if ! nix eval --raw "path:${work}/.eval/new#homeConfigurations" --apply "${summary_expr}" \
+    >"${work}/.eval/new.tsv" 2>"${work}/.eval/new.err"; then
+    {
+      echo "!! 移した flake は評価できません (new/flake.nix を直してから compare し直す)。"
+      echo "   nix のエラー:"
+      eval_error_excerpt "${work}/.eval/new.err"
+    } >&2
+    exit 4
+  fi
+
+  # ホストごとの drvPath を比べる
+  awk -F'\t' '
+    FNR == NR { if ($1 == "drv") a[$2] = $3; next }
+    $1 == "drv" { b[$2] = $3 }
+    END {
+      for (h in a) print h "\t" (h in b ? (a[h] == b[h] ? "同じ" : "違う") : "旧い flake だけ")
+      for (h in b) if (!(h in a)) print h "\t移した flake だけ"
+    }
+  ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/hosts.tsv"
+  echo "  ホストごとの drvPath:"
+  while IFS=$'\t' read -r h state; do
+    n_hosts=$((n_hosts + 1))
+    printf '  %-30s %s\n' "${h}" "${state}"
+    if [[ ${state} == 同じ ]]; then
+      n_same=$((n_same + 1))
+    else
+      differ=1
+    fi
+  done <"${tmp}/hosts.tsv"
+  if ((n_same == n_hosts)); then
+    printf '  → drvPath: 全 %d ホストで同じ\n' "${n_hosts}"
+  else
+    printf '  → drvPath: %d ホストのうち %d ホストが違う\n' "${n_hosts}" "$((n_hosts - n_same))"
+  fi
+
+  # 違うホストは、config.dotfiles の違いを出す。同じ違いのホストはまとめる (bash 3 でも動くよう、連想配列は使わない)
+  local -a group_text=() group_hosts=()
+  local text i found
+  while IFS=$'\t' read -r h state; do
+    [[ ${state} == 違う ]] || continue
+    if nix eval --raw "path:${work}/.eval/base#homeConfigurations" --apply "$(dotfiles_expr "${h}")" \
+      >"${tmp}/d-base.tsv" 2>/dev/null \
+      && nix eval --raw "path:${work}/.eval/new#homeConfigurations" --apply "$(dotfiles_expr "${h}")" \
+        >"${tmp}/d-new.tsv" 2>/dev/null; then
+      text=$(
+        awk -F'\t' '
+          FNR == NR { a[$1] = $2; next }
+          { b[$1] = $2 }
+          END {
+            for (k in a) if (!(k in b)) print "    " k ": " a[k] " → (無い)"
+            for (k in b) if (!(k in a)) print "    " k ": (無い) → " b[k]; else if (a[k] != b[k]) print "    " k ": " a[k] " → " b[k]
+          }
+        ' "${tmp}/d-base.tsv" "${tmp}/d-new.tsv" | sort
+      )
+      [[ -n ${text} ]] || text="    (config.dotfiles は同じ。dotfiles の option の外 (足したホストの modules など) が違う)"
+    else
+      text="    (config.dotfiles を読めませんでした。評価に失敗した)"
+    fi
+    found=""
+    for i in "${!group_text[@]}"; do
+      if [[ ${group_text[i]} == "${text}" ]]; then
+        group_hosts[i]="${group_hosts[i]}, ${h}"
+        found=1
+        break
+      fi
+    done
+    if [[ -z ${found} ]]; then
+      group_text+=("${text}")
+      group_hosts+=("${h}")
+    fi
+  done <"${tmp}/hosts.tsv"
+  for i in "${!group_text[@]}"; do
+    printf '  config.dotfiles の違い (基準 → 移した。%s):\n' "${group_hosts[i]}"
+    printf '%s\n' "${group_text[i]}"
+  done
+
+  # setup が文字列から拾うホストの並び (一番上が既定の対象)
+  hosts_base=$(setup_hosts "${base_src}/flake.nix")
+  hosts_new=$(setup_hosts "${work}/new/flake.nix")
+  if [[ ${hosts_base} != "${hosts_new}" ]]; then
+    differ=1
+    printf '  setup が拾うホストの並び (一番上が既定の対象ホスト) が違う: 基準 [%s] → 移した [%s]\n' "${hosts_base}" "${hosts_new}"
+  fi
+
+  # 警告 (config.warnings) を、文ごとにホストの数で出す
+  awk -F'\t' '
+    FNR == NR { if ($1 == "warn") { a[$3]++ }; next }
+    $1 == "warn" { b[$3]++ }
+    END {
+      for (w in a) if (!(w in b)) print "移して消えた: " w " (" a[w] " ホスト)"
+      for (w in b) print "移した flake にある: " w " (" b[w] " ホスト)" ((w in a) ? "" : " (基準には無い)")
+    }
+  ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/warn.txt"
+  if [[ -s ${tmp}/warn.txt ]]; then
+    echo "  警告 (config.warnings):"
+    sed 's/^/    /' "${tmp}/warn.txt"
+  fi
+
+  {
+    printf 'new_sum=%s\n' "${new_sum}"
+    printf 'baseline_dir=%s\n' "${base_src}"
+    printf 'baseline_sum=%s\n' "${base_sum}"
+    printf 'baseline_is_old=%s\n' "${base_is_old}"
+    printf 'result=%s\n' "$( ((differ)) && echo differ || echo same)"
+  } >"${work}/compare.result"
+
+  if ((differ)); then
+    echo "→ 違いがあります (値が変わる)。意図した違いか確かめる。受け入れるなら apply に --accept-changes を付ける。"
+    return 1
+  fi
+  if ((base_is_old)); then
+    echo "→ 値は全部引き継げています (home-manager の世代の中身は変わらない。switch は要らない)。"
+  else
+    echo "→ 基準と同じです。基準は旧い flake に直しを当てたものなので、apply には --accept-changes が要る。"
+  fi
+}
+
 cmd_check() {
   local current marker
   parse_flake_args quiet "$@"
@@ -578,6 +829,7 @@ case ${cmd} in
   status) cmd_status "$@" ;;
   check) cmd_check "$@" ;;
   prepare) cmd_prepare "$@" ;;
+  compare) cmd_compare "$@" ;;
   id) cmd_id "$@" ;;
   render) cmd_render "$@" ;;
   -h | --help) usage ;;
