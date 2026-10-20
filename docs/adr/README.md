@@ -30,6 +30,7 @@
 | [021](./021_local_env_header_20261017T224146JST/README.md) | `~/.config/pjp/env` の頭に、受け取る環境変数の一覧を setup が書き直す欄として置き、欄の外は書き換えない | 2026-10-17 |
 | [022](./022_one_password_outside_wsl_20261018T105655JST/README.md) | 1Password のオプションを `dotfiles.wsl` の外へ出し、WSL でないマシンでは `ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで git の署名をする。herdr の固定名は手元で開いたときも 1Password へ張り替える | 2026-10-18 |
 | [023](./023_claude_video_offer_host_option_20261018T121637JST/README.md) | 解説動画を答えを待たずに作り始めるかを host option で切り替え、既定は作る前に聞く (値は claude-video-offer.json に置き、hook と skill が読む) | 2026-10-18 |
+| [024](./024_local_flake_template_migrate_20261020T120111JST/README.md) | ローカル flake の雛形に版の印を入れ、雛形が変わったら値を引き継いで 3-way merge で移し、全ホストの drvPath を比べて確かめる | 2026-10-20 |
 
 ## ディレクトリ名
 

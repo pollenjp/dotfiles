@@ -984,9 +984,8 @@ true の例だけ置いてある。聞かずに作り始めたいマシンだけ
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
-- 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。`setup-local-flake.sh` は
-  古い形（`hostsWith` が無い）を見つけると警告する。手で足したホストが無ければ
-  `--force` で作り直す。残すなら上の形に合わせて `local` と `hostsWith` を足す
+- 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。値を引き継いで今の雛形へ移すやり方は
+  [次の節](#雛形が新しくなったら)（`--force` で作り直すと、`local` に書いた値と手で足したホストが消える）
 - `windowsUserName` を `wsl.onePassword` の下に書いた古い形
   （`wsl.onePassword = { enable = true; windowsUserName = "…"; };`）も動く
   （`wsl.onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。ただし
@@ -1006,6 +1005,44 @@ true の例だけ置いてある。聞かずに作り始めたいマシンだけ
 
 生成される雛形にはこの例がコメントで入っている。`lib.mkHome` を公開しているのは
 このためで、引数は[登録簿](#マシン登録簿-hostsdefaultnix)と同じ。
+
+#### 雛形が新しくなったら
+
+`setup-local-flake.sh` は雛形の先頭のコメントに**雛形の版の印**（`# 雛形の版: <8 桁の 16 進>`）を書く。印は
+heredoc の原文（展開する前）の cksum で、雛形を直すと変わる（[ADR 024](../docs/adr/024_local_flake_template_migrate_20261020T120111JST/README.md)）。
+印が今の雛形と違うと（印の無い、印を入れる前の雛形も）、setup が知らせる。
+
+| いつ | どこに |
+| --- | --- |
+| `--update` などの手順が通ったとき | 残りの手作業 |
+| `--steps local-flake` を流したとき | `setup-local-flake.sh` の警告（最後の警告のまとめにも載る） |
+| switch が落ちたとき | 失敗の案内のあと（本体で option が削除・改名されると、旧い `local` のままでは評価が止まる） |
+
+値（`local` の option・手で足したホスト・手で書いた module）を引き継いで今の雛形へ移すのは
+[`local-flake-migrate.sh`](./scripts/local-flake-migrate.sh)。Claude Code に任せるなら
+`pjp-dotfiles-local-flake-migrate` skill（差分を見せて確認を取ってから書く）。
+
+```sh
+m=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/local-flake-migrate.sh
+$m status                    # 印が今の雛形と同じか
+$m prepare --out /tmp/lfm    # 元の雛形を決めて 3-way merge し、/tmp/lfm/new/flake.nix を作る
+$m compare /tmp/lfm          # 旧い flake と移した flake で、全ホストの drvPath を比べる
+diff -u ~/dotfiles/flake.nix /tmp/lfm/new/flake.nix
+$m apply /tmp/lfm            # flake.nix.bak-<日時> と flake.lock.bak-<日時> に退避してから書く
+```
+
+- 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
+- 元の雛形は印の版。印が無ければ `setup-local-flake.sh` の履歴の各版を描き（古い版の script は実行しない）、
+  旧いファイルとの差分が最も小さい版。`--base <rev>` で選び直せる
+- 片側が元の行の前後に足しただけの衝突（コメントを外した行の直後に雛形が節を足した、など）は自動で解く。
+  残った衝突は diff3 の印のまま `new/flake.nix` に残る
+- compare は評価用の写しで lock を張り直して評価する（1 回 20〜60 秒）。drvPath が全部同じなら home-manager の
+  世代の中身は変わらないので、switch は要らない。違えば `config.dotfiles` の違いを出す。setup が文字列から拾う
+  ホストの並び（一番上が既定の対象）も比べる
+- 旧い flake が今の本体で評価できないときは、compare が 3 で終わる。評価が通るだけの直しを当てた基準を作り、
+  `compare <作業場所> --baseline <dir>` で比べ直す
+- apply は、prepare のあとに `~/dotfiles/flake.nix` が書き換わった・衝突の印が残る・今の中身で compare を流して
+  いない、なら書かない。compare が同じでない（`--baseline` で比べたときも）なら `--accept-changes` が要る
 
 #### なぜリポジトリの中に置かないのか
 
