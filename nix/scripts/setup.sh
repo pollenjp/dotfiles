@@ -2307,6 +2307,28 @@ local_flake_migrate_cmd() {
 # (止めない。明示した方で当てる。ADR 025)。登録した PC で、nixos-config の README などに残る --host の手順で
 # 汎用のホストを当てると、値が登録したファイルではなく雛形の既定に戻るので、気づけるようにする。
 # 警告のまとめでは [対象ホスト] に載る。
+# 自動で決めた対象ホスト (ローカル flake・dotfiles-private・推測。決まっていないときも) を決め直す。$1: 直前の手順の名前。
+# private-fetch は clone にこの PC の登録を運んでくる (消す) ことがあり、local-flake はこの実行で clone を読むローカル flake を
+# 置くことがあるので、同じ実行の switch がそれを使うように (ADR 025)。--host・DOTFILES_HOST・メニューの h で選んだホストは
+# 変えない。変われば、そう出す (実行の前に出した「対象ホスト」と違うため)
+redetect_host() {
+  local before=${host} origin
+  case ${host_source} in
+    local | private | guess | "") ;;
+    *) return 0 ;;
+  esac
+  host=""
+  host_source=""
+  detect_host || true
+  [[ ${host} != "${before}" ]] || return 0
+  case $(host_origin) in
+    local) origin="${flake_dir}/flake.nix で定義" ;;
+    private) origin="dotfiles-private の ${private_clone}/nix/hosts/${host}.nix で定義" ;;
+    *) origin=$(host_source_label) ;;
+  esac
+  note "対象ホストを選び直した: ${before:-<未定>} → ${host:-<未定>}  (${1} のあと。${origin})"
+}
+
 warn_registered_host_differs() {
   local how
   case ${host_source} in
@@ -2319,9 +2341,16 @@ warn_registered_host_differs() {
     return 0
   fi
   warn_context host
-  warn "この PC は dotfiles-private に ${private_host_name} として登録されていますが、${how} で選んだ ${host} を当てます。" \
-    "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (と ~/dotfiles/flake.nix の local) から来ます。" \
-    "登録したホストで当てるなら ${how} を外す。"
+  if local_flake_reads_private; then
+    warn "この PC は dotfiles-private に ${private_host_name} として登録されていますが、${how} で選んだ ${host} を当てます。" \
+      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (と ~/dotfiles/flake.nix の local) から来ます。" \
+      "登録したホストで当てるなら ${how} を外す。"
+  else
+    # 読んでいないうちは、--host を外しても登録したホストにはならない (推測に落ちる)
+    warn "この PC は dotfiles-private に ${private_host_name} として登録されていますが、${how} で選んだ ${host} を当てます。" \
+      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (と ~/dotfiles/flake.nix の local) から来ます。" \
+      "ローカル flake が dotfiles-private の nix/ を読んでいない ($(private_input_state)) ので、登録したホストで当てるには今の雛形へ移す: $(local_flake_migrate_cmd)"
+  fi
   warn_context ""
 }
 
@@ -2365,6 +2394,10 @@ execute() {
     warn_context "step-${n}"
     if run_step "${step_ids[i]}"; then
       states[n]="ok"
+      # 対象ホストの判定を変える手順 (dotfiles-private の取得・ローカル flake を置く) のあとは、自動で決めたホストを決め直す
+      case ${step_ids[i]} in
+        private-fetch | local-flake) redetect_host "${step_labels[i]}" ;;
+      esac
     else
       states[n]="fail"
       failed=1

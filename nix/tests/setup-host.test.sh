@@ -28,6 +28,9 @@
 #     bootstrap-dotfiles-private がいつもどおり流れる
 #   - switch の前の lock の張り直しは path: の入力ぜんぶを見て、実物の hash が lock に無い入力だけをまとめて
 #     nix flake update <名前>… で張り直す (合っていれば張り直さない)。dotfiles-private の入力の指す先が無ければ警告する
+#   - 自動で決めた対象ホストは、private-fetch と local-flake のあとで決め直し、変われば「選び直した」と出す: この実行で
+#     作ったローカル flake が clone を読む・この PC の登録が取得で来た → 登録したホスト、選んでいた登録が取得で消えた → 推測。
+#     同じ実行の switch は決め直したホストで当てる
 #
 # ## 作り
 #
@@ -70,7 +73,7 @@ ng() {
 # 要るコマンドだけを並べた PATH (git・gh・nix・home-manager・ghq は入れない。uname は偽物)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env awk sed grep sort head tail tr cat dirname basename readlink id mktemp mkdir rm chmod cksum cmp ln; do
+for c in env awk sed grep sort head tail tr cat dirname basename readlink id mktemp mkdir rm cp mv chmod cksum cmp ln; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -89,13 +92,19 @@ EOF
 } >"${sys_bin}/uname"
 chmod +x "${sys_bin}/uname"
 
-# 偽の home-manager と nix を置いた bin を作り、その場所を出す。home-manager は何もせず 0 を返す。
+# 偽の home-manager と nix を置いた bin を作り、その場所を出す。home-manager は引数を <HOME>/hm-calls に書いて 0 を返す。
 # nix は引数を <HOME>/nix-calls に書き、`hash path <dir>` なら sha256-<dir/.fakehash の中身> (無ければ sha256-FAKE) を
 # 出す。ほかは何も出さずに 0 (eval の warnings は空)
 fake_hm_bin() {
   local b="$1/fake-bin"
   mkdir -p "${b}"
-  printf '#!%s\nexit 0\n' "${BASH}" >"${b}/home-manager"
+  {
+    printf '#!%s\n' "${BASH}"
+    cat <<'EOF'
+printf '%s\n' "$*" >>"${HOME}/hm-calls"
+exit 0
+EOF
+  } >"${b}/home-manager"
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
@@ -170,7 +179,7 @@ run() {
   env -i HOME="${c}/home" USER=alice TMPDIR="${c}/tmp" NO_COLOR=1 \
     PATH="${PATH_EXTRA:+${PATH_EXTRA}:}${sys_bin}" \
     DOTFILES_LOCAL_DIR="${c}/local" DOTFILES_PRIVATE_DIR="${DOTFILES_PRIVATE_DIR:-${c}/private}" \
-    ${DOTFILES_HOST+"DOTFILES_HOST=${DOTFILES_HOST}"} \
+    ${DOTFILES_HOST+"DOTFILES_HOST=${DOTFILES_HOST}"} ${DOTFILES_ALLOW_ANY_PATH+"DOTFILES_ALLOW_ANY_PATH=${DOTFILES_ALLOW_ANY_PATH}"} \
     "${BASH}" "${c}/repo/nix/scripts/setup.sh" "$@" >"${c}/out" 2>"${c}/err"
   echo $? >"${c}/rc"
 }
@@ -281,10 +290,21 @@ e_opt=$(err "${c}")
 s_opt=$(after_result "${c}")
 DOTFILES_HOST=alice@x86_64-linux run "${c}" --steps bootstrap-a
 e_env=$(err "${c}")
-if [[ ${r_opt} == 0 && ${e_opt} == *"alice@box"* && ${s_opt} == *"[対象ホスト]"*"alice@box"* && ${e_env} == *"alice@box"* ]]; then
+if [[ ${r_opt} == 0 && ${e_opt} == *"alice@box"* && ${s_opt} == *"[対象ホスト]"*"alice@box"* && ${e_env} == *"alice@box"* ]] \
+  && [[ ${e_opt} == *"--host を外す"* ]]; then
   ok "--host・DOTFILES_HOST で登録した名前と違うホストを選んだら警告する (まとめの [対象ホスト] にも)"
 else
   ng "登録と違うホストの警告" "rc=${r_opt} err=${e_opt} まとめ=${s_opt} env=${e_env}"
+fi
+# ローカル flake が clone を読んでいないなら、--host を外しても登録したホストにはならないので、移し方を案内する
+local_flake "${c}" "${c}/repo/nix/private-stub"
+run "${c}" --steps bootstrap-a --host alice@x86_64-linux
+e_stub=$(err "${c}")
+local_flake "${c}" "${c}/private/nix"
+if [[ ${e_stub} == *"alice@box"* && ${e_stub} == *"local-flake-migrate.sh prepare"* && ${e_stub} != *"--host を外す"* ]]; then
+  ok "ローカル flake が clone を読んでいなければ、--host を外す案内ではなく移し方を添える"
+else
+  ng "登録と違うホストの警告 (読んでいない)" "${e_stub}"
 fi
 run "${c}" --steps bootstrap-a --host alice@box
 e_same=$(err "${c}")
@@ -388,6 +408,61 @@ if grep -qF "dotfiles-private の入力が指す先がありません" "${c}/err
   ok "lock: dotfiles-private の入力の指す先が無ければ警告する"
 else
   ng "lock (指す先が無い)" "rc=$(rc "${c}") $(err "${c}")"
+fi
+
+# 10. 決め直し (A): ローカル flake をこの実行で作る (private-fetch → local-flake → switch)。作った flake は clone を読むので、
+#     同じ実行の switch は登録したホストで当たる
+c=$(new_case t10)
+cp "${dir}/setup-local-flake.sh" "${dir}/local-flake-migrate.sh" "${c}/repo/nix/scripts/"
+# 手順は直に実行されるので、shebang を $BASH にする (サンドボックスに /usr/bin/env が無い。印は heredoc から計算する)
+sed -i "1s|.*|#!${BASH}|" "${c}/repo/nix/scripts/setup-local-flake.sh"
+chmod +x "${c}/repo/nix/scripts/setup-local-flake.sh"
+fake_step "${c}" bootstrap-dotfiles-private.sh 'echo "取った"'
+b=$(fake_hm_bin "${c}")
+rm -rf "${c}/local"
+DOTFILES_ALLOW_ANY_PATH=1 PATH_EXTRA=${b} run "${c}" --steps private-fetch,local-flake,switch
+if [[ $(rc "${c}") == 0 ]] && grep -qxF "switch --flake ${c}/local#alice@box" "${c}/home/hm-calls" \
+  && grep -qF '対象ホストを選び直した: alice@x86_64-linux → alice@box' "${c}/out"; then
+  ok "決め直し: この実行で作ったローカル flake が clone を読めば、同じ実行の switch は登録したホストで当たる"
+else
+  ng "決め直し (ローカル flake を作る)" "rc=$(rc "${c}") hm=$(cat "${c}/home/hm-calls" 2>/dev/null) $(out "${c}") $(err "${c}")"
+fi
+
+# 11. 決め直し (B): ローカル flake は clone を読んでいて、この PC の登録が private-fetch で初めて来る
+c=$(new_case t11)
+mkdir -p "${c}/incoming"
+mv "${c}/private/nix/hosts/alice@box.nix" "${c}/incoming/"
+# shellcheck disable=SC2016 # 偽の手順の本文 (展開は偽の手順が走るときにする)
+fake_step "${c}" bootstrap-dotfiles-private.sh 'cp "$(dirname "${DOTFILES_PRIVATE_DIR}")/incoming/alice@box.nix" "${DOTFILES_PRIVATE_DIR}/nix/hosts/"'
+local_flake "${c}" "${c}/private/nix"
+b=$(fake_hm_bin "${c}")
+PATH_EXTRA=${b} run "${c}" --steps private-fetch,switch
+if [[ $(rc "${c}") == 0 ]] && grep -qxF "switch --flake ${c}/local#alice@box" "${c}/home/hm-calls" \
+  && grep -qF '対象ホストを選び直した: alice@x86_64-linux → alice@box' "${c}/out"; then
+  ok "決め直し: この PC の登録が private-fetch で来れば、同じ実行の switch は登録したホストで当たる"
+else
+  ng "決め直し (登録が来る)" "rc=$(rc "${c}") hm=$(cat "${c}/home/hm-calls" 2>/dev/null) $(out "${c}") $(err "${c}")"
+fi
+
+# 12. 決め直し (C): 選んでいた登録が取得で消える → 推測に戻る。--host で明示したホストは決め直さない
+c=$(new_case t12)
+# shellcheck disable=SC2016 # 偽の手順の本文
+fake_step "${c}" bootstrap-dotfiles-private.sh 'rm -f "${DOTFILES_PRIVATE_DIR}/nix/hosts/alice@box.nix"'
+local_flake "${c}" "${c}/private/nix"
+b=$(fake_hm_bin "${c}")
+PATH_EXTRA=${b} run "${c}" --steps private-fetch,switch
+r_gone=$(rc "${c}")
+hm_gone=$(cat "${c}/home/hm-calls" 2>/dev/null)
+o_gone=$(out "${c}")
+printf '{ mkHome, ... }:\nmkHome { username = "alice"; system = "x86_64-linux"; }\n' >"${c}/private/nix/hosts/alice@box.nix"
+: >"${c}/home/hm-calls"
+PATH_EXTRA=${b} run "${c}" --steps private-fetch,switch --host alice@wsl
+if [[ ${r_gone} == 0 && ${hm_gone} == "switch --flake ${c}/local#alice@x86_64-linux" &&
+  ${o_gone} == *"対象ホストを選び直した: alice@box → alice@x86_64-linux"* ]] \
+  && grep -qxF "switch --flake ${c}/local#alice@wsl" "${c}/home/hm-calls" && ! grep -qF '選び直した' "${c}/out"; then
+  ok "決め直し: 選んでいた登録が取得で消えれば推測に戻り、--host で明示したホストは決め直さない"
+else
+  ng "決め直し (消える・明示)" "rc=${r_gone} hm=${hm_gone} / --host: hm=$(cat "${c}/home/hm-calls") $(out "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
