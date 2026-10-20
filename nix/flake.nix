@@ -155,6 +155,8 @@
           local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
           # scripts/ を丸ごと渡す (private_dir() を持つ bootstrap-*.sh と本文を比べる)
           private-host-test = scriptTest "private-host" ./scripts;
+          # setup.sh と、その隣の private-host.sh を使う
+          setup-host-test = scriptTest "setup-host" ./scripts;
           setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
