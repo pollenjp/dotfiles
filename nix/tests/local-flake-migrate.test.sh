@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
+# 雛形の原文 (展開する前の ${nix_dir} など) を文字のまま書く所が多いので、ファイル全体で SC2016 を止める
+# shellcheck disable=SC2016
 #
 # nix/scripts/local-flake-migrate.sh (旧いローカル flake を、値を引き継いで今の雛形へ移す) を、使い捨ての
 # repo と偽の nix で確かめる。
@@ -61,7 +63,6 @@ fake_slf() {
     printf '# 偽の setup-local-flake.sh\n'
     printf '%s\n' "${3:-echo 前の処理}"
     printf 'if true; then\n'
-    # shellcheck disable=SC2016 # 展開しない文字列をそのまま書く
     printf '  cat >"${flake_file}" <<EOS\n'
     printf '%s\n' "$2"
     printf 'EOS\n'
@@ -94,7 +95,6 @@ echo "== local-flake-migrate.sh (${src})"
 
 # 1. render: 置き換える展開
 r=$(new_repo r1)
-# shellcheck disable=SC2016 # heredoc の原文 (展開する前) を書く
 fake_slf "${r}/nix/scripts/setup-local-flake.sh" '# 版: ${template_id}
   inputs.dotfiles.url = "path:${nix_dir}";
   # pwsh.exe -Command '"'"'\$env:USERNAME'"'"'
@@ -129,7 +129,7 @@ else
 fi
 
 # 2. render: 描けない展開
-# shellcheck disable=SC2016 # 展開しない文字列をそのまま並べる
+# shellcheck disable=SC1003 # 最後の 'x \' は、行末の \ を確かめる
 for body in 'x $HOME y' 'x ${other} y' 'x $(date) y' 'x $[1+1] y' 'x `date` y' 'x $1 y' 'x $@ y' 'x \'; do
   fake_slf "${r}/nix/scripts/setup-local-flake.sh" "${body}"
   run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N
@@ -175,10 +175,8 @@ fi
 printf '#!/usr/bin/env bash\necho 雛形が無い\n' >"${r}/none.sh"
 {
   cat "${r}/a.sh"
-  # shellcheck disable=SC2016 # 展開しない文字列をそのまま書く
   printf '  cat >"${flake_file}" <<EOS\nもう 1 つ\nEOS\n'
 } >"${r}/two.sh"
-# shellcheck disable=SC2016 # 展開しない文字列をそのまま書く
 printf '#!/usr/bin/env bash\n  cat >"${flake_file}" <<EOS\n閉じない\n' >"${r}/open.sh"
 for f in none two open; do
   run "${r}" id "${r}/${f}.sh"
