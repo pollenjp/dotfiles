@@ -80,7 +80,9 @@ herdr 0.9.1 で server を起こすのは `auto_detect_launch` と `ensure_remot
 | 接続が増えた・減った（見張り） | 死んでいる | 持ち主と同じ値の、生きている接続のうち一番古いものを借りる。無ければ dangling のまま |
 | 手で `ssh-agent-link` | 何でも | 今の session の固定名を今の接続へ強制で向ける |
 
-- 「生きている」は `ssh-add -l` が 1 秒以内に 0 か 1 を返すこと（回線断で返事をしない socket で固まらない）
+- 「生きている」は `ssh-add -l` が 1 秒以内に 0 か 1 を返すこと（回線断で返事をしない socket で固まらない）。`ssh-add` は
+  PATH の system のもの（ssh 先の OpenSSH）を使い、`USE_LINUX_SSH=1` を付ける（WSL の `ssh-add` のラッパーでも、
+  `SSH_AUTH_SOCK` を見る Linux の `ssh-add` に落ちる）
 - 「一番古い」は rc が記録した開いた時刻。attach の確認用の短い接続より、前からある接続を選ぶため
 - 値が届いていない接続は、どの接続とも同じマシンとみなさない（見張りが借りることも、借りられることもない）。
   attach の向け直しは値が空でも効く
@@ -124,7 +126,8 @@ ssh で入った shell（herdr の外）で値が空なら、herdr の pane で�
 
 ### H. 張り替えの排他
 
-決め直しは、`ssh-add` で生死を見る間は lock を持たず、入れ替える直前に `flock` を取って「決めたときの先と持ち主の
+決め直しは、`ssh-add` で生死を見る間は lock を持たず、入れ替える直前に `flock`（PATH の util-linux のもの。無いホストでは
+取らない。macOS は見張りが無いので、守っていた同時の書き込みが起きない）を取って「決めたときの先と持ち主の
 まま」かを見てから、一時名の symlink を rename で入れ替える（固定名が消える瞬間を作らない）。変わっていたら決め直す。
 見張りが、別のマシンから開き直された直後の固定名を、古い見立てで前の持ち主の接続へ戻さないため。
 
@@ -142,7 +145,7 @@ fish・bash の `herdr` 関数と `ssh-agent-link` 関数は消す（同じこ�
 
 | ファイル | 変更 |
 | --- | --- |
-| `nix/pkgs/pjp-agent-link/pjp-agent-link.sh`・`default.nix` | 向け先を決める script（`open`・`watch`・`link`・`rc`・`status`）と `ssh-agent-link` |
+| `nix/pkgs/pjp-agent-link/pjp-agent-link.sh`・`default.nix` | 向け先を決める script（`open`・`watch`・`link`・`rc`・`status`）と `ssh-agent-link`。runtimeInputs は coreutils だけで、`ssh-add` と `flock` は PATH の system のもの（openssh と flock を home の閉包に入れると、閉包の脆弱性スキャンが openssh の CVE と、名前の一致する別の製品の CVE を拾った。CI で実測） |
 | `nix/pkgs/pjp-agent-link/herdr.sh`・`herdr.nix` | herdr を包む実行ファイル。`bin/herdr` だけを替え、補完と skill は本物の herdr の symlink |
 | `nix/home/modules/agent-link.nix`（新設） | 包んだ herdr・`pjp-agent-link`・`~/.ssh/rc`・見張りの unit |
 | `nix/home/modules/packages.nix` | `herdr` を外した（agent-link.nix が入れる） |

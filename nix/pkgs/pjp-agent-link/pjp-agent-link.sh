@@ -62,7 +62,11 @@
 # open は SSH_AUTH_SOCK に入れるパスの 1 行だけを出す (包む実行ファイルが $(…) で受ける)。rc と watch は何も出さない
 # (rc の stdout はその ssh のセッションのデータで、1 byte でも書くと git over ssh・scp・herdr の通信を壊す)。
 #
-# nix/pkgs/pjp-agent-link/default.nix が writeShellApplication で PATH に置く (coreutils・openssh・flock)。
+# nix/pkgs/pjp-agent-link/default.nix が writeShellApplication で PATH に置く (runtimeInputs は coreutils だけ)。
+# ssh-add と flock は PATH の system のもの (ssh 先の OpenSSH と util-linux) を使う。home の閉包に openssh と flock を
+# 入れないため (入れると閉包の脆弱性スキャンの対象が増える)。生死を見る ssh-add には USE_LINUX_SSH=1 を付ける
+# (WSL の ssh-add のラッパーは、これで SSH_AUTH_SOCK を見る Linux の ssh-add に落ちる)。flock の無いホスト (macOS) では
+# lock を取らずに張り替える (macOS には見張りが無いので、守っていた「attach と見張りが同時に走る」ことが起きない)。
 # 単体でも bash pjp-agent-link.sh で動く (nix/tests/pjp-agent-link.test.sh がそうして流す)。
 
 set -euo pipefail
@@ -145,7 +149,7 @@ probe() {
     echo missing
     return 0
   fi
-  SSH_AUTH_SOCK=$1 timeout -k 1 1 ssh-add -l </dev/null >/dev/null 2>&1 || rc=$?
+  SSH_AUTH_SOCK=$1 USE_LINUX_SSH=1 timeout -k 1 1 ssh-add -l </dev/null >/dev/null 2>&1 || rc=$?
   case ${rc} in
     0) echo keys ;;
     1) echo empty ;;
@@ -196,7 +200,10 @@ swap() {
   fixed=$(fixed_path "${s}")
   ensure_dirs
   (
-    flock -w 5 9 || exit 2
+    # flock の無いホスト (macOS) では lock を取らない (先頭のコメント)
+    if command -v flock >/dev/null; then
+      flock -w 5 9 || exit 2
+    fi
     if [[ $(read_target "${fixed}") != "${exp_t}" || $(read_owner "${s}") != "${exp_o}" ]]; then
       exit 1
     fi

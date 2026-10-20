@@ -16,7 +16,8 @@
 #     開いた接続と同じ値なら変えず、死んでいる・持ち主が分からない・別の値・値が届いていないなら開いた接続へ
 #     向け、持ち主をその値にする。返事をしない先は 1 秒で見切る。何も無い HOME でも ~/.ssh と記録の場所を
 #     0700 で作って通る。持ち主の記録の「張った先」が今の先と違えば持ち主は分からない扱い。張り替えに失敗したら
-#     (~/.ssh に書けない) 先も持ち主も変えず、直れば次の attach で移る
+#     (~/.ssh に書けない) 先も持ち主も変えず、直れば次の attach で移る。生死は USE_LINUX_SSH=1 を付けて PATH の
+#     ssh-add に聞く。flock の無いホストでも (lock を取らずに) 張り替える
 #   - PJP_SSH_CLIENT は、空・% を含む (展開されていない %u@%L)・制御文字を含む・local なら届いていない扱い
 #   - open の「開いた接続」: ssh の shell は自分の socket と値、ssh -a と SSH_AGENT_PID の shell は張り替えずに
 #     固定名だけ、herdr の pane は同じ session なら何もせず別の session なら pane の固定名の先と持ち主で張る、
@@ -97,7 +98,7 @@ for cmd in python3 flock timeout; do
   fi
 done
 
-# 偽の ssh-add。問い合わせた socket を FAKE_SSH_ADD_LOG に書き留める。FAKE_SSH_ADD_HOOK の script があり、
+# 偽の ssh-add。問い合わせた socket と USE_LINUX_SSH を FAKE_SSH_ADD_LOG に書き留める。FAKE_SSH_ADD_HOOK の script があり、
 # 問い合わせた socket の basename が FAKE_SSH_ADD_HOOK_MATCH なら、1 回だけそれを流してから答える
 bin="${work}/bin"
 modes="${work}/modes"
@@ -106,7 +107,7 @@ mkdir -p "${bin}" "${modes}"
   printf '#!%s\n' "${BASH}"
   cat <<'EOF'
 s=${SSH_AUTH_SOCK-}
-printf '%s\n' "${s}" >>"${FAKE_SSH_ADD_LOG}"
+printf '%s USE_LINUX_SSH=%s\n' "${s}" "${USE_LINUX_SSH-}" >>"${FAKE_SSH_ADD_LOG}"
 if [[ -n ${FAKE_SSH_ADD_HOOK-} && -f ${FAKE_SSH_ADD_HOOK} && ${s##*/} == "${FAKE_SSH_ADD_HOOK_MATCH-}" ]]; then
   bash "${FAKE_SSH_ADD_HOOK}"
   rm -f "${FAKE_SSH_ADD_HOOK}"
@@ -399,6 +400,47 @@ $(rc "${d2}") == 0 && $(link_of agent.sock) == "${B}" && $(owner_of default) == 
   ok "張り替えに失敗したら先も持ち主も変えず (新しい持ち主と古い先の組を残さない)、直れば次の attach で移る"
 else
   ng "張り替えの失敗" "1: rc=$(rc "${d1}") link=${l1} owner=${o1} / 2: rc=$(rc "${d2}") link=$(link_of agent.sock) owner=$(owner_of default) err=$(err "${d2}")"
+fi
+
+# 9d. 生死は USE_LINUX_SSH=1 を付けて ssh-add に聞く (WSL の ssh-add のラッパーが PATH の先にあっても、
+#     SSH_AUTH_SOCK を見る Linux の ssh-add に落ちる)
+newhome usels
+A="${H}/.ssh/agent/s.t.sshd.usels-A"
+B="${H}/.ssh/agent/s.t.sshd.usels-B"
+mksock "${A}"
+mksock "${B}"
+seed default "${A}" "${PC}"
+: >"${ssh_add_log}"
+d=$(agent attach-usels "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" open attach default)
+if [[ $(rc "${d}") == 0 ]] && grep -qx "${A} USE_LINUX_SSH=1" "${ssh_add_log}"; then
+  ok "生死は USE_LINUX_SSH=1 を付けて ssh-add に聞く (WSL のラッパーでも Linux の ssh-add に落ちる)"
+else
+  ng "USE_LINUX_SSH" "rc=$(rc "${d}") log=$(cat "${ssh_add_log}")"
+fi
+
+# 9e. flock の無いホスト (macOS) でも、lock を取らずに張り替える。要るコマンドだけを symlink で並べた PATH で流す
+nolock_bin="${work}/nolock-bin"
+mkdir -p "${nolock_bin}"
+for c in readlink mkdir mv ln rm date stat tail sort ls timeout env cat cut head grep sleep basename; do
+  if ! p=$(command -v "${c}"); then
+    echo "見つからない: ${c}" >&2
+    exit 1
+  fi
+  ln -s "${p}" "${nolock_bin}/${c}"
+done
+ln -s "${bin}/ssh-add" "${nolock_bin}/ssh-add"
+ln -s "${BASH}" "${nolock_bin}/bash"
+newhome nolock
+A="${H}/.ssh/agent/s.t.sshd.nolock-A"
+B="${H}/.ssh/agent/s.t.sshd.nolock-B"
+mksock "${A}"
+mksock "${B}"
+seed default "${A}" "${OTHER}"
+d=$(agent attach-nolock "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" "PATH=${nolock_bin}" open attach default)
+if [[ $(rc "${d}") == 0 && $(link_of agent.sock) == "${B}" && $(owner_of default) == "${PC}" && -z $(err "${d}") ]]; then
+  ok "flock の無いホスト (macOS) でも、lock を取らずに張り替える"
+else
+  ng "flock の無いホスト" "rc=$(rc "${d}") link=$(link_of agent.sock) owner=$(owner_of default) err=$(err "${d}")"
 fi
 
 echo "== open の「開いた接続」"

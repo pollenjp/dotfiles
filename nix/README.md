@@ -1685,7 +1685,7 @@ sshd が接続ごとに作る agent の socket（OpenSSH 10.1 からは `~/.ssh/
 | 部品 | 役割 |
 | --- | --- |
 | `herdr`（`nix/pkgs/pjp-agent-link/herdr.sh` で包んだもの） | server を起こしうる呼び出し（`herdr`・`herdr session attach <名前>`・hr の `remote-client-bridge`・`herdr server`）で、`SSH_AUTH_SOCK` をその session の固定名にしてから本物の herdr を exec する。`herdr server` 以外では、その前に向け先を決め直す。`h` / `ha` / `hss` などの alias もここを通る |
-| `pjp-agent-link` | 向け先を決める script（`nix/pkgs/pjp-agent-link/pjp-agent-link.sh`）。決め方は下の表 |
+| `pjp-agent-link` | 向け先を決める script（`nix/pkgs/pjp-agent-link/pjp-agent-link.sh`）。決め方は下の表。`ssh-add` と `flock` は PATH の system のもの（ssh 先の OpenSSH と util-linux）を使う |
 | `~/.ssh/rc` | sshd が接続のたびに走らせる。forward された socket・`PJP_SSH_CLIENT`・開いた時刻を記録するだけ（張り替えない） |
 | `pjp-agent-link-watch.path`（systemd の user の unit。Linux だけ） | `~/.ssh/agent` と記録の場所に変化があると `pjp-agent-link watch` を起こす。接続が閉じたときに向け直せるのはこれだけ |
 | `ssh-agent-link`（コマンド） | 今の session（引数・`HERDR_SESSION`・default の順）の固定名を、この shell の接続へ強制で向ける逃げ道 |

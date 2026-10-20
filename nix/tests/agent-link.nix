@@ -21,6 +21,8 @@
 #   ビルド時 (このランナーの system だけ)
 #     - 包んだ herdr の bin/herdr は、本物の herdr と pjp-agent-link を store のパスで呼び、置き換えの印が残っていない
 #     - bin/herdr --version が本物の herdr の版を出す。bin/ssh-agent-link が pjp-agent-link link を呼ぶ
+#     - 包んだ herdr と pjp-agent-link の閉包に openssh と flock を入れない (ssh-add と flock は PATH の system のものを
+#       使う。入れると閉包の脆弱性スキャンの対象が増える)
 {
   lib,
   pkgs,
@@ -163,5 +165,17 @@ pkgs.runCommand "agent-link-state" { } ''
     exit 1
   fi
   echo "ok   bin/ssh-agent-link は pjp-agent-link link を呼ぶ"
+  if grep -E -- '-(openssh|flock)-[0-9]' ${
+    pkgs.closureInfo {
+      rootPaths = [
+        herdr
+        agentLink
+      ];
+    }
+  }/store-paths; then
+    echo "agent-link-state: 包んだ herdr か pjp-agent-link の閉包に openssh か flock が入っている (上の行)" >&2
+    exit 1
+  fi
+  echo "ok   包んだ herdr と pjp-agent-link の閉包に openssh と flock を入れない"
   touch $out
 ''

@@ -162,7 +162,7 @@ herdr の native agent session restore で会話へ戻れる。
 
 | もの | 名前・場所 |
 | --- | --- |
-| 向け先を決める script | `nix/pkgs/pjp-agent-link/pjp-agent-link.sh` (`pjp-agent-link`。writeShellApplication) |
+| 向け先を決める script | `nix/pkgs/pjp-agent-link/pjp-agent-link.sh` (`pjp-agent-link`。writeShellApplication。runtimeInputs は coreutils だけで、`ssh-add` と `flock` は PATH の system のもの。閉包の脆弱性スキャンの対象を増やさないため。CI で足した) |
 | 手で打つ逃げ道 | `ssh-agent-link` (同じ package の `bin/`。`pjp-agent-link link` を呼ぶ) |
 | herdr を包む実行ファイル | `nix/pkgs/pjp-agent-link/herdr.sh` を `bin/herdr` に置き、`pkgs.herdr` の残り (補完・skill) を symlinkJoin で並べる (`nix/pkgs/pjp-agent-link/herdr.nix`) |
 | home の module | `nix/home/modules/agent-link.nix` (包んだ herdr と script を入れ、`~/.ssh/rc` と見張りの unit を置く) |
@@ -227,7 +227,8 @@ herdr の native agent session restore で会話へ戻れる。
 
 ### 5. 張り替えの排他
 
-決め直しは、`ssh-add` で生死を見る間は lock を持たず、張り替える直前に lock (`flock -w 5 ~/.local/state/pjp-agent-link/lock`)
+決め直しは、`ssh-add` で生死を見る間は lock を持たず、張り替える直前に lock (`flock -w 5 ~/.local/state/pjp-agent-link/lock`。
+`flock` の無いホスト (macOS) では取らない。見張りが無いので、守っていた同時の書き込みが起きない)
 を取って「決めたときの先と持ち主のままか」を見てから入れ替える。変わっていたら決め直す (3 回まで)。見張りと attach が
 同時に走っても、片方が古い見立てで上書きしない (別のマシンから開いた直後の固定名を、見張りが前の持ち主の接続へ戻さない)。
 固定名を入れ替えてから持ち主を書き、失敗は 1 つずつ止める。途中で止まっても「新しい持ち主と古い先」の組は残らない

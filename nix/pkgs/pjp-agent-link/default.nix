@@ -4,27 +4,22 @@
 # herdr を包む実行ファイル (herdr.nix)・~/.ssh/rc・見張りの systemd の unit は、home/modules/agent-link.nix が
 # これを store のパスで呼ぶ。
 #
-# runtimeInputs の openssh は、生死を見る ssh-add を SSH_AUTH_SOCK を見る実体に揃えるため (WSL の PATH の ssh-add は
-# Windows の ssh-add.exe へのラッパーのことがある。ADR 004)。flock は張り替えの排他、coreutils は timeout・
-# readlink・mv -T・date・stat。
+# runtimeInputs は coreutils (timeout・readlink・mv -T・date・stat) だけ。ssh-add と flock は PATH の system のもの
+# (ssh 先の OpenSSH と util-linux) を使い、home の閉包に openssh と flock を入れない。入れると、閉包の脆弱性スキャン
+# (nix/scripts/closure-scan.sh) が openssh の CVE と、名前の一致する別の製品 (Flock というブラウザ) の CVE を拾う
+# (CI で実測)。WSL の ssh-add のラッパーと、flock の無いホストの扱いは pjp-agent-link.sh の先頭のコメント。
 {
   lib,
   symlinkJoin,
   writeShellApplication,
   writeShellScriptBin,
   coreutils,
-  openssh,
-  flock,
 }:
 
 let
   agentLink = writeShellApplication {
     name = "pjp-agent-link";
-    runtimeInputs = [
-      coreutils
-      openssh
-      flock
-    ];
+    runtimeInputs = [ coreutils ];
     text = builtins.readFile ./pjp-agent-link.sh;
   };
 
