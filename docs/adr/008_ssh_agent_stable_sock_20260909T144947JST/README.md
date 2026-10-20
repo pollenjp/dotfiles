@@ -9,6 +9,7 @@
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md)（決定 3「既存ツリーは一切変更しない」に従い、変更は `nix/` 側だけに閉じる）/ [004_nix_wsl_ssh_wrapper](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（WSL では `ssh-add` が Windows 側の実体になる。本 ADR の判定はその前提の上に乗る） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md#forward-された-agent-を固定名で見せる)（日常運用はこちら） |
 | 後続 ADR | [022_one_password_outside_wsl](../022_one_password_outside_wsl_20261018T105655JST/README.md)（手元で herdr を開いたときも、`SSH_AUTH_SOCK` がそのマシンの 1Password（`~/.1password/agent.sock`）なら固定名をそこへ張り替え、フォールバックも 1Password の socket では起こさないようにした。本文の「手元では何も変えない」は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「forward された agent を固定名で見せる」） |
+| 後続 ADR | [025_herdr_agent_borrow](../025_herdr_agent_borrow_20261020T210555JST/README.md)（固定名を herdr の session ごと（`~/.ssh/agent.<session>.sock`）にし、fish・bash の `herdr` / `ssh-agent-link` 関数を、herdr を包む実行ファイル（hr の `remote-client-bridge` も通る）と script `pjp-agent-link` へ移した。接続は `~/.ssh/rc` が記録し（張り替えない）、先が死んだ固定名は systemd の path unit が、`PJP_SSH_CLIENT` が同じ値の生きている接続から借りる。本文の「`herdr` 関数」「手で `ssh-agent-link` を打つ」は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「forward された agent を固定名で見せる」） |
 
 ---
 

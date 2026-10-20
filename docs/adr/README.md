@@ -31,6 +31,7 @@
 | [022](./022_one_password_outside_wsl_20261018T105655JST/README.md) | 1Password のオプションを `dotfiles.wsl` の外へ出し、WSL でないマシンでは `ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで git の署名をする。herdr の固定名は手元で開いたときも 1Password へ張り替える | 2026-10-18 |
 | [023](./023_claude_video_offer_host_option_20261018T121637JST/README.md) | 解説動画を答えを待たずに作り始めるかを host option で切り替え、既定は作る前に聞く (値は claude-video-offer.json に置き、hook と skill が読む) | 2026-10-18 |
 | [024](./024_local_flake_template_migrate_20261020T120111JST/README.md) | ローカル flake の雛形に版の印を入れ、雛形が変わったら値を引き継いで 3-way merge で移し、全ホストの drvPath を比べて確かめる | 2026-10-20 |
+| [025](./025_herdr_agent_borrow_20261020T210555JST/README.md) | herdr の固定名を session ごとに持ち、herdr を包んだ実行ファイル・`~/.ssh/rc`・見張りで、同じマシン (`PJP_SSH_CLIENT`) から来ている生きている接続を借りる | 2026-10-20 |
 
 ## ディレクトリ名
 
