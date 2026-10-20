@@ -50,6 +50,15 @@
         import ./hosts {
           mkHome = args: mkHome (args // { modules = extraModules ++ (args.modules or [ ]); });
         };
+
+      # dotfiles-private の nix/ (ローカル flake の path: の入力。flake = false) の hosts/*.nix から、
+      # 登録した PC のホストを組み立てる (ADR 025)。本体は dotfiles-private を input に持たないので
+      # 自分では呼ばず、ローカル flake の雛形が
+      #
+      #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // dotfiles.lib.privateHosts dotfiles-private // { ... };
+      #
+      # と呼ぶ。素の mkHome で組むので local は当たらない (ファイルがその PC の値の全部を持つ)。
+      privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
     in
     {
       homeConfigurations = hostsWith [ ];
@@ -69,7 +78,8 @@
       #     };
       #
       # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
-      lib = { inherit mkHome hostsWith; };
+      # privateHosts は dotfiles-private に登録したホストを読む入口 (README「dotfiles-private に登録したホスト」)。
+      lib = { inherit mkHome hostsWith privateHosts; };
 
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
@@ -281,6 +291,7 @@
               system
               ;
           };
+          private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
         }
       );
 
