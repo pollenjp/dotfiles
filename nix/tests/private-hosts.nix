@@ -8,7 +8,7 @@
 # ## 確かめること
 #
 #   - hosts/ の .nix ごとに 1 ホストができ、名前はファイル名から .nix を除いたもの (名前の @ もそのまま)
-#   - .nix でないファイル (README.md) はホストにしない
+#   - .nix でないファイル (README.md) と、名前が . で始まるファイル (エディタのロックなど) はホストにしない
 #   - 各ホストは、ファイルが mkHome に渡した値 (username・mkHome の引数・modules) で組み立てられる
 #   - flake = false の input と同じ形 (outPath を持つ attrset) を渡しても同じホストができる
 #   - hosts/ に .nix が無いなら { }
@@ -30,7 +30,7 @@ let
 
   cases = [
     {
-      name = "hosts/ の .nix ごとに 1 ホストができ、名前はファイル名から .nix を除いたもの (README.md は拾わない)";
+      name = "hosts/ の .nix ごとに 1 ホストができ、名前はファイル名から .nix を除いたもの (README.md と . で始まるファイルは拾わない)";
       ok =
         builtins.attrNames hosts == [
           "alice@one"

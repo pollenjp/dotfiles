@@ -18,7 +18,7 @@
 #
 # ファイルがその PC の値の全部を持つので、ローカル flake の local は当てない (素の mkHome を渡す)。
 # hosts/ が無い・空なら { } (clone の無いマシンは本体の空の stub (nix/private-stub) を指す)。
-# 読むのは hosts/ の .nix だけで、ほかのファイル (README.md など) は拾わない。
+# 読むのは hosts/ の .nix だけで、ほかのファイル (README.md など) と名前が . で始まるファイルは拾わない。
 { lib, mkHome }:
 
 # privateNix: dotfiles-private の nix/。path か、outPath を持つ attrset (flake = false の input)。
@@ -29,7 +29,10 @@ let
   root = if builtins.isAttrs privateNix then privateNix.outPath else privateNix;
   dir = if builtins.isPath root then root + "/hosts" else "${root}/hosts";
   entries = if builtins.pathExists dir then builtins.readDir dir else { };
-  files = lib.filterAttrs (file: type: type != "directory" && lib.hasSuffix ".nix" file) entries;
+  # 名前が . で始まるもの (エディタのロック `.#<名前>.nix`・一時ファイル) は拾わない (setup.sh の *.nix の glob とも揃う)
+  files = lib.filterAttrs (
+    file: type: type != "directory" && lib.hasSuffix ".nix" file && !(lib.hasPrefix "." file)
+  ) entries;
   fileOf = file: if builtins.isPath dir then dir + "/${file}" else "${dir}/${file}";
 in
 lib.mapAttrs' (
