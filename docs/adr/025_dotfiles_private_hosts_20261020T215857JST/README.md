@@ -25,7 +25,7 @@
 困っていたこと（ユーザーの言葉:「`~/dotfiles/setup --self-update --update` で更新することがおおく、host を指定し忘れてしまうことがおおい」
 「dotfiles という public な repository で管理しようとしているけど、これを dotfiles-private 側に移すにはどうするかの方が大事」）:
 
-- **`--host` の付け忘れ。** lavie（NixOS の実機）の世代は、登録簿の `pollenjp@laptop` ではなく推測の `pollenjp@x86_64-linux` で
+- **`--host` の付け忘れ。** lavie（NixOS の実機）の 2026-10-20 16:19 の世代は、登録簿の `pollenjp@laptop` ではなく推測の `pollenjp@x86_64-linux` で
   作られていた。nixos-config の README は「`--host` は省かない」と書くが、毎回覚えておく必要がある
 - **値が PC ごとの手書き。** `local` の値は各 PC の git 管理外のファイルにしか無く、雛形が変わるたびに PC ごとに移す（ADR 024）
 - **実機の情報が public にある。** public に載せたくない差分は `local` に書く決まりだが、そうすると上の手書きに戻る
@@ -217,7 +217,7 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
   commit した fixture を読み、`privateHosts` は path を path のまま辿る）
 - skill: skill なしの subagent も、repo の spec・ADR・README を読んで dotfiles-private に書く前と `apply` の前で止まった（違反は無い）が、
   操作が 50〜56 回、merge のあとの段を最初に伝えず、作業中に本体の checkout が変わるのに当たった。skill を読ませた subagent は 30〜46 回で、
-  最初に 2 段の流れを伝え、scratchpad の写しで先に比べ、前に決めた値 (spec) と今の世代の違い (署名が外れる) を 1 回の確認にまとめて止まった
+  最初に 2 段の流れを伝え、scratchpad の写しで先に比べ、前に決めた値 (spec) と今の世代の違いを 1 回の確認にまとめて止まった
 - branch のレビュー (別の reviewer): public の spec の例に実機の値が残っていた (Critical。作り物にして push の前に履歴から消した)・
   対象ホストを起動時に 1 回だけ決めていた・手順 6 の行き止まり・隠しファイルの `.nix` を拾う・警告の案内の誤り、を直した
 - 実機（lavie）で、`~/dotfiles` の写しと scratchpad の偽の dotfiles-private で（本物には書かずに）:
@@ -228,6 +228,9 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
     自動で解き、登録簿の 6 ホストは drvPath が同じ、`pollenjp@lavie` は「この PC のホスト」として 1（setup が選ぶホストが変わる）
   - lavie の home-manager の世代は、この変更の作業中に（この作業の外で）別の本体から switch されていて、main と今の `local` のどのホストとも
     一致しなかった。`inspect` はそのとき「一致するホストはありません」と出す（元にするホストは setup の推測か、ユーザーに確かめる）
+- lavie の登録の元は、ユーザーが git の署名ありに決め直したので `pollenjp@laptop` にした（2026-10-20 の 23 時台）。そのあと指揮役が lavie で
+  7d22ca4 の `nix/` の写しを使い、今の世代は 18:02 に setup で当てた `pollenjp@laptop` + 今の `local` の形と一致し、
+  `compare --base pollenjp@laptop` は 0、署名なしの下書き（`pollenjp@x86_64-linux` 元）との違いは `onePassword.enable` だけ、と確かめた
 
 ## 7. 移行・運用手順
 

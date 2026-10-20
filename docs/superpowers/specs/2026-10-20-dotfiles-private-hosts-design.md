@@ -4,7 +4,9 @@
   (集約ハブの会話のチケット。dotfiles と dotfiles-private の作業はそれぞれの子のチケットに束ねる)
 - 方針は 2026-10-20 にユーザーが承認した (段階 1)。この文書はその書き写しと、実装に要る細部
 - 承認のときにユーザーが決めたこと:
-  - lavie には git の署名 (1Password) を **入れない** (推奨は「入れる」だったが、ユーザーは入れないを選んだ)
+  - lavie には git の署名 (1Password) を **入れる** (元は登録簿の `pollenjp@laptop`)。承認のときの答えは「入れない」だったが、
+    「入れると Claude の commit も 1Password を通る」という誤った説明の上の答えだった (Claude のセッションの commit は
+    `bootstrap-claude-env.sh` がいつも無署名にする) ので、2026-10-20 の 23 時台に聞き直し、ユーザーが「入れる」を選び直した
   - 公開の登録簿から実機 (`pollenjp@wsl`・`pollenjp@laptop`) を消すのは **段階 3** (実機が全部 private に移ってから)
 - 関連: ADR 002 (登録簿とローカル flake)・ADR 015 / 016 (dotfiles-private を public の flake input にしない)・
   ADR 024 と TKT-228 (ローカル flake の雛形の版の印と移行)・ADR 022 (1Password を WSL の外でも使う)
@@ -23,8 +25,8 @@
 更新することがおおく、host を指定し忘れてしまうことがおおい」「いまは dotfiles という public な repository で管理しようと
 しているけど、これを dotfiles-private 側に移すにはどうするかの方が大事だと思う」):
 
-- **--host の付け忘れ。** lavie (NixOS の実機) の今の home-manager の世代は、`pollenjp@x86_64-linux` の
-  `activationPackage` の outPath と一致し、登録簿の `pollenjp@laptop` とは違った (2026-10-20 に `nix eval` で確かめた)。
+- **--host の付け忘れ。** lavie (NixOS の実機) の 2026-10-20 16:19 の home-manager の世代は、`pollenjp@x86_64-linux` の
+  `activationPackage` の outPath と一致し、登録簿の `pollenjp@laptop` とは違った (`nix eval` で確かめた)。
   ローカル flake がホストを持たず `DOTFILES_HOST` も無いので、setup が推測した。nixos-config の README は
   「`--host` は省かない」と書いているが、毎回覚えておく必要がある
 - **値が PC ごとの手書き。** `local` の値は各 PC の git 管理外のファイルにしか無く、雛形が変わるたびに PC ごとに移す
@@ -179,12 +181,14 @@ dotfiles-private/
 ### 6. lavie の登録 (dotfiles-private の PR)
 
 - ホストの名前は `pollenjp@lavie` (hostname は `lavie`)
-- 元は今の世代と一致した `pollenjp@x86_64-linux` (git の署名なし。ユーザーが「入れない」を選んだので `onePassword` は書かない)
+- 元は今の世代と一致した `pollenjp@laptop` (git の署名あり。下書きに `onePassword.enable = true` が入る)。初めは署名なしの
+  `pollenjp@x86_64-linux` を元にするとしていたが、ユーザーが署名ありに決め直した (冒頭の「ユーザーが決めたこと」)
 - 値は今の `~/dotfiles/flake.nix` の `local` から移す (4 行。本体の既定と同じ値も、今のファイルが明示しているので残す)。
   値そのものは dotfiles-private の PR に書く (この文書を public の repo に置くときに、値の列挙は外した)
-- 期待: dotfiles の子の branch の本体・同じ lock で評価した、旧い形 (`pollenjp@x86_64-linux` + 今の `local`) と
-  `pollenjp@lavie` の drvPath が同じ (この登録で中身は変わらない)。参考: lavie の今の世代は、2026-10-20 に main
-  (3cf54a3) で評価した `pollenjp@x86_64-linux` + 今の `local` の outPath と一致した
+- 期待: dotfiles の子の branch の本体・同じ lock で評価した、旧い形 (`pollenjp@laptop` + 今の `local`) と
+  `pollenjp@lavie` の drvPath が同じ (この登録で中身は変わらない)。参考: lavie の今の世代は、2026-10-20 18:02 に
+  ユーザーが setup で当てた `pollenjp@laptop` + 今の `local` の形と一致した (7d22ca4 の `nix/` の写しの `inspect`)。
+  同じ写しで `compare --base pollenjp@laptop` は 0、署名なしの下書き (`pollenjp@x86_64-linux` 元) との違いは `onePassword.enable` だけだった
 - 評価は dotfiles の子の worktree の本体と、この子の worktree の `nix/` を `--override-input` で指し、ローカル flake は
   scratchpad の写しで行う
 - dotfiles-private の README.md に `nix/hosts/` の行と節を足す (何を置くか・`/nix/store` に入ること・登録は skill で)
@@ -241,7 +245,7 @@ flake の checks に足す (作り物の private と hostname で。本物の値
    dotfiles-private の子が dotfiles の子の worktree の本体を `--override-input` で指して評価する
 7. **`--host` で public のホストを指したときは、setup が知らせるだけにする** (builder check の問い 2)。手順 6 で値を `local` から
    外すので、private に登録した PC で `--host pollenjp@laptop` (nixos-config の README・ADR 022 の手順) を付けて当てると、
-   値が雛形の既定に戻り、ユーザーが入れないと決めた署名も入る。ユーザーの普段の打ち方は `--host` なしなので、登録と違うホストを
+   `local` から登録へ移した値が雛形の既定に戻る (署名は登録にも入るので、違いはこれだけ)。ユーザーの普段の打ち方は `--host` なしなので、登録と違うホストを
    明示したときの知らせ (4.) で足りるとし、値を `local` に残すこと (雛形のままにならない) と、nixos-config の子をこの段階で
    立てること (範囲が広がる) はしない。dotfiles の README の記述はこの PR で直す
 8. **登録の skill は、会話の置き場所で手順を分ける** (builder check の問い 3)。1・2 (調べる・下書きの確認) と 6 (merge 後の
