@@ -43,6 +43,8 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
    以下の `<m>` はこのフルパス。`bash <m> <コマンド>` で流す (Bash tool はシェルの変数を次の呼び出しへ持ち越さない)
 3. 作業場所は Claude の scratchpad の中に作る (`--out`)。`~/dotfiles` の中には作らない
    (script の一時ファイルは `${TMPDIR:-/tmp}` に作り、終わると消す)
+4. `~/dotfiles/flake.lock` が古い・別のパスを指していても触らない。compare は写しで張り直して評価し、apply は lock を
+   変えない (setup が switch の前に張り直す)
 
 ## 手順
 
@@ -50,8 +52,9 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 2. `bash <m> prepare --out <scratchpad>/local-flake-migrate-<日時>` — 出力の「元の雛形」と「衝突」を読む
    - 元の雛形は、旧いファイルの「# 雛形の版:」の印の版 (印を入れる前の雛形なら、履歴で差分が最も小さい版)
    - 「近い版」が同じ行数で並んでも、印が同じなら雛形の中身が同じなので、選び直さなくてよい
-   - 印の違う版が僅差で並び、どちらを元にするかで結果が変わりそうなら、`candidates.tsv` と各版の `git show` を見て
-     決め、`--base <rev>` を付けて新しい作業場所で prepare し直す
+   - 印の違う版が僅差で並び、どちらを元にするかで結果が変わりそうなら、各版を
+     `bash <m> render --rev <rev> --nix-dir <本体>/nix` で描いて旧いファイルとの差を見て決め、`--base <rev>` を付けて
+     新しい作業場所で prepare し直す
 3. 残った衝突があれば、`<作業場所>/new/flake.nix` で解く (「衝突の解き方」)。`old/` は触らない
 4. `bash <m> compare <作業場所>` — 結果ごとの扱いは「compare の読み方」
 5. 「確認の形」でユーザーに見せ、書き換えてよいかを聞く。答えが来るまで次へ進まない
@@ -107,14 +110,16 @@ prepare は「片側が元の行の前後に足しただけ」の衝突 (コメ�
 2. 本体で何が起きたかを調べる: `git -C <本体> log -p -S'<option の名前>' -- nix/home nix/lib`、`docs/adr/`、
    `<作業場所>/base.nix` と `template.nix` の差
 3. 基準を作る: `old/flake.nix` を作業場所の外の新しいディレクトリへ写し、評価が通るだけの最小の直し
-   (削除された行を外す・新しい名前へ移す) だけを当てる。`old/` そのものは触らない (apply が「書き換わった」で止まる)
+   (削除された行を外す・新しい名前へ移す) だけを当てる。`old/` そのものは触らない (apply が「書き換わった」で止まる)。
+   flake.lock は写さなくてよい (compare が `old/` の lock を使う)
 4. new/flake.nix にも同じ直しが入っているかを見て、`bash <m> compare <作業場所> --baseline <基準>` で比べ直す。
    0 なら、書式の移し替えは値を変えていない
 5. 確認のときに、旧い flake が今の本体では評価できないこと、当てた直しとその意味 (その値はどうなるか) を書く。
    前の値は `old/flake.nix` に書いてあり、本体の既定は前の commit の `git show <rev>:nix/home/options.nix` で読める
    (旧い本体で旧い flake を評価し直すことはできない。path: の入力は narHash で lock されるため)。値が変わる・消える
-   ものは、どうするか (本体どおりにする・別の書き方で残す・本体を見直す) を推奨と理由を添えて聞く。基準が `old/` で
-   ないので、apply には `--accept-changes` が要り、反映には `~/dotfiles/setup --update` が要る
+   ものは、どうするか (本体どおりにする・別の書き方で残す・本体を見直す) を推奨と理由を添えて聞く。別の書き方は、
+   消えた option が前に何を作っていたか (前の commit の module) を読み、同じものを local に書く形を探す。基準が
+   `old/` でないので、apply には `--accept-changes` が要り、反映には `~/dotfiles/setup --update` が要る
 
 ## 確認の形
 
