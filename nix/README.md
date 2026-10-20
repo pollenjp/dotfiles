@@ -509,7 +509,8 @@ switch させるため（[後述](#dotfiles-private-に登録したホスト)）
 違うホストを選ぶと警告する（止めない。最後の警告のまとめの `[対象ホスト]` にも載る）。
 
 どのホストをどう決めたかは `--which-host` で見られる（`<ホスト><TAB><決め方>`。決め方は `--host`・`DOTFILES_HOST`・`local`・
-`private`・`guess`・`menu`）。
+`private`・`guess`・`menu`）。自動で決めたホストは、`private-fetch`（dotfiles-private の取得）と `local-flake` のあとで決め直す（この実行で
+作ったローカル flake・取ってきた登録を、同じ実行の switch に効かせる。変われば「対象ホストを選び直した」と出る）。
 
 自動化していないのは手順 0（マシンの登録）と
 手順 5（mise の `config.toml` 整理）だけ。手順 7 (`chsh`) は
@@ -1202,7 +1203,8 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
   （本体を進めると、skill を 1 つ足しただけでも世代が変わる）
 - merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、移した値を `local` から外す。
   移したあとの `local-flake-migrate.sh compare` は、この PC のホストが dotfiles-private から足されることを「違い」として出す
-  （setup の選ぶホストが変わるため。受け入れるなら `apply --accept-changes`）
+  （setup の選ぶホストが変わるため。受け入れるなら `apply --accept-changes`）。ローカル flake が既に今の雛形で clone を読んでいれば、
+  `prepare` は「移すものはありません」になるので、`prepare --always` で作業場所を作って `local` を直す
 
 #### 値を一時的に試す
 
