@@ -36,6 +36,10 @@
 #     残っていれば nix を呼ばずに 2。警告は「移して消えた」と「移した flake にある」で出す。lock は本体の hash が
 #     無いときだけ nix flake update dotfiles で、lock が無ければ nix flake lock で、写しに作る。compare.result に
 #     new/flake.nix の cksum・基準・結果を書く
+#   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
+#     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
+#     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
+#     new/flake.nix を書き、flake.lock は変えず、戻すコマンド (cp -p) を出す。flake.lock が無ければ lock の分を飛ばす
 
 set -u -o pipefail
 
@@ -715,6 +719,96 @@ if [[ $(rc "${r}") == 0 ]] && grep -q '^flake lock path:' "${r}/nix-calls"; then
   ok "compare: lock が無ければ nix flake lock で写しに作る"
 else
   ng "compare (lock が無い)" "rc=$(rc "${r}") $(cat "${r}/nix-calls") $(err "${r}")"
+fi
+
+# ---- apply ----
+# ローカル flake のディレクトリの中身 (退避を含む) を、名前と cksum で並べる
+dir_state() { (cd "$1" && for f in *; do printf '%s %s\n' "${f}" "$(cksum <"${f}")"; done); }
+
+# 23. prepare のあとに flake.nix を書き換えた → 止まり、何も変えない
+r=$(compare_case c23)
+run_nix "${r}" compare "${r}/w"
+printf '# 利用者があとから足した行\n' >>"${r}/local/flake.nix"
+before=$(dir_state "${r}/local")
+run "${r}" apply "${r}/w"
+if [[ $(rc "${r}") == 2 ]] && grep -q 'prepare のあとに' "${r}/err" && [[ $(dir_state "${r}/local") == "${before}" ]]; then
+  ok "apply: prepare のあとに flake.nix が書き換わっていれば止まり、何も変えない"
+else
+  ng "apply (書き換わった)" "rc=$(rc "${r}") $(err "${r}")"
+fi
+
+# 24. 衝突の印が残る・compare をしていない・compare のあとに直した → 止まる
+r=$(compare_case c24)
+before=$(dir_state "${r}/local")
+run "${r}" apply "${r}/w"
+rc_nocompare=$(rc "${r}")
+grep -q 'compare' "${r}/err" && nocompare_msg=1 || nocompare_msg=0
+run_nix "${r}" compare "${r}/w"
+printf '# compare のあとに直した\n' >>"${r}/w/new/flake.nix"
+run "${r}" apply "${r}/w"
+rc_stale=$(rc "${r}")
+grep -q 'compare のあとに' "${r}/err" && stale_msg=1 || stale_msg=0
+printf '<<<<<<< 手元\nx\n||||||| 元の雛形\ny\n=======\nz\n>>>>>>> 今の雛形\n' >>"${r}/w/new/flake.nix"
+run "${r}" apply "${r}/w"
+if [[ ${rc_nocompare} == 2 && ${nocompare_msg} == 1 && ${rc_stale} == 2 && ${stale_msg} == 1 && $(rc "${r}") == 2 ]] \
+  && grep -q '衝突の印' "${r}/err" && [[ $(dir_state "${r}/local") == "${before}" ]]; then
+  ok "apply: compare をしていない・compare のあとに直した・衝突の印が残る、なら止まって何も変えない"
+else
+  ng "apply (止まる 3 つ)" "compare なし rc=${rc_nocompare} 直した rc=${rc_stale} 印 rc=$(rc "${r}") $(err "${r}")"
+fi
+
+# 25. compare が違う・--baseline で比べた → --accept-changes が無ければ止まり、あれば書く
+r=$(compare_case c25)
+sed -i 's/dotfiles.ccPages.port = 7778;/dotfiles.ccPages.port = 7779;/' "${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+run "${r}" apply "${r}/w"
+rc_differ=$(rc "${r}")
+grep -q -- '--accept-changes' "${r}/err" && differ_msg=1 || differ_msg=0
+run "${r}" apply "${r}/w" --accept-changes
+if [[ ${rc_differ} == 2 && ${differ_msg} == 1 && $(rc "${r}") == 0 ]] && cmp -s "${r}/w/new/flake.nix" "${r}/local/flake.nix" \
+  && grep -q 'setup --update' "${r}/out"; then
+  ok "apply: compare が違えば --accept-changes が要り、付ければ書いて setup --update を案内する"
+else
+  ng "apply (違いを受け入れる)" "rc=${rc_differ} → $(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+r=$(compare_case c25b)
+mkdir -p "${r}/fixed"
+cp "${r}/w/old/flake.nix" "${r}/fixed/flake.nix"
+run_nix "${r}" compare "${r}/w" --baseline "${r}/fixed"
+run "${r}" apply "${r}/w"
+if [[ $(rc "${r}") == 2 ]] && grep -q -- '--accept-changes' "${r}/err"; then
+  ok "apply: --baseline で比べたなら、同じでも --accept-changes が要る"
+else
+  ng "apply (--baseline)" "rc=$(rc "${r}") $(err "${r}")"
+fi
+
+# 26. 書けたとき: 退避 2 つは元と同じ中身、flake.nix は new/flake.nix と同じ、flake.lock は変わらない、
+#     戻すコマンド (cp -p) を 2 つ出す。flake.lock が無ければ lock の退避と戻しを飛ばす
+r=$(compare_case c26)
+cp -p "${r}/local/flake.nix" "${r}/nix-before"
+cp -p "${r}/local/flake.lock" "${r}/lock-before"
+run_nix "${r}" compare "${r}/w"
+run "${r}" apply "${r}/w"
+bak_nix=$(find "${r}/local" -maxdepth 1 -name 'flake.nix.bak-*' | head -n 1)
+bak_lock=$(find "${r}/local" -maxdepth 1 -name 'flake.lock.bak-*' | head -n 1)
+if [[ $(rc "${r}") == 0 && -n ${bak_nix} && -n ${bak_lock} ]] && cmp -s "${bak_nix}" "${r}/nix-before" \
+  && cmp -s "${bak_lock}" "${r}/lock-before" && cmp -s "${r}/local/flake.nix" "${r}/w/new/flake.nix" \
+  && cmp -s "${r}/local/flake.lock" "${r}/lock-before" && [[ ${bak_nix##*.bak-} == "${bak_lock##*.bak-}" ]] \
+  && [[ ${bak_nix##*.bak-} =~ ^[0-9]{8}T[0-9]{6}$ ]] && [[ $(grep -c '^    cp -p ' "${r}/out") == 2 ]] \
+  && grep -qF "cp -p ${bak_nix} ${r}/local/flake.nix" "${r}/out" && grep -q 'switch は要りません' "${r}/out"; then
+  ok "apply: 退避 (flake.nix.bak-<日時>・flake.lock.bak-<日時>) を取ってから書き、戻すコマンドを出す"
+else
+  ng "apply (書けたとき)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/local")"
+fi
+r=$(compare_case c26b)
+rm -f "${r}/local/flake.lock" "${r}/w/old/flake.lock"
+run_nix "${r}" compare "${r}/w"
+run "${r}" apply "${r}/w"
+if [[ $(rc "${r}") == 0 && -z $(find "${r}/local" -maxdepth 1 -name 'flake.lock*') ]] \
+  && [[ $(grep -c '^    cp -p ' "${r}/out") == 1 ]]; then
+  ok "apply: flake.lock が無ければ、lock の退避と戻すコマンドを飛ばす"
+else
+  ng "apply (lock が無い)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/local")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

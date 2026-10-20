@@ -43,6 +43,13 @@ usage() {
   local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>]
       作業場所 (--out。在るなら空であること。省けば mktemp -d) に、旧い flake の写し・元の雛形・
       今の雛形と、3-way merge で移した new/flake.nix を作る
+  local-flake-migrate.sh compare <作業場所> [--baseline <dir>]
+      旧い flake (--baseline を渡せばそのディレクトリの flake.nix) と new/flake.nix を同じ本体・同じ lock で
+      評価し、全ホストの drvPath と、setup が拾うホストの並びを比べる。0 = 同じ、1 = 違う、
+      3 = 基準が今の本体で評価できない、4 = new/flake.nix が評価できない
+  local-flake-migrate.sh apply <作業場所> [--accept-changes]
+      compare を今の中身で流したことを確かめ、flake.nix.bak-<日時> (と flake.lock.bak-<日時>) に
+      退避してから new/flake.nix を書く。compare が同じでない・--baseline で比べたなら --accept-changes が要る
   local-flake-migrate.sh id [<setup-local-flake.sh のパス> | -]
       雛形の版の印 (8 桁の 16 進) を出す。省けばこの repo の setup-local-flake.sh、- なら stdin
   local-flake-migrate.sh render (--rev <rev> | --file <パス>) --nix-dir <パス>
@@ -635,6 +642,70 @@ cmd_compare() {
   fi
 }
 
+cmd_apply() {
+  local work="" accept=0 flake_dir target lock lines new_sum result base_is_old ts bak_nix bak_lock="" tmpf
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --accept-changes) accept=1 ;;
+      -*) die "apply の知らない引数です: $1 (--help)" ;;
+      *)
+        [[ -z ${work} ]] || die "apply に渡せる作業場所は 1 つだけです"
+        work=$1
+        ;;
+    esac
+    shift
+  done
+  [[ -n ${work} ]] || die "apply に prepare の作業場所を渡してください (--help)"
+  [[ -f ${work}/prepare.env && -f ${work}/new/flake.nix && -f ${work}/old/flake.nix ]] \
+    || die "prepare の作業場所ではありません: ${work}"
+  work=$(cd -P -- "${work}" && pwd)
+  flake_dir=$(env_get "${work}/prepare.env" flake_dir) || die "prepare.env に flake_dir がありません: ${work}"
+  target="${flake_dir}/flake.nix"
+  lock="${flake_dir}/flake.lock"
+  [[ -f ${target} ]] || die "ローカル flake がありません: ${target}"
+  if ! cmp -s "${target}" "${work}/old/flake.nix" || [[ $(cksum <"${target}") != "$(env_get "${work}/prepare.env" old_sum)" ]]; then
+    die "prepare のあとに ${target} が書き換わっています。prepare からやり直してください。"
+  fi
+  lines=$(conflict_lines "${work}/new/flake.nix")
+  [[ -z ${lines} ]] || die "new/flake.nix に衝突の印が残っています (${lines// /・} 行目)。解いて compare してから apply してください。"
+  [[ -f ${work}/compare.result ]] || die "compare を流していません。先に ${self} compare ${work} で確かめてください。"
+  new_sum=$(cksum <"${work}/new/flake.nix")
+  [[ ${new_sum} == "$(env_get "${work}/compare.result" new_sum)" ]] \
+    || die "compare のあとに new/flake.nix が変わっています。${self} compare ${work} で確かめ直してください。"
+  result=$(env_get "${work}/compare.result" result)
+  base_is_old=$(env_get "${work}/compare.result" baseline_is_old)
+  if [[ ${result} != same || ${base_is_old} != 1 ]] && ((accept == 0)); then
+    die "compare が旧い flake と同じでない (違いがある、または --baseline で比べた) ので、値が変わります。ユーザーが受け入れたなら --accept-changes を付けてください。"
+  fi
+
+  ts=$(date +%Y%m%dT%H%M%S)
+  bak_nix="${target}.bak-${ts}"
+  [[ ! -e ${bak_nix} ]] || die "退避の名前が既にあります: ${bak_nix} (1 秒おいてやり直す)"
+  cp -p "${target}" "${bak_nix}"
+  if [[ -f ${lock} ]]; then
+    bak_lock="${lock}.bak-${ts}"
+    cp -p "${lock}" "${bak_lock}"
+  fi
+  # 同じディレクトリの一時ファイルに書いてから置き換える (元の mode を引き継ぐ)
+  tmpf=$(mktemp "${flake_dir}/.flake.nix.XXXXXX")
+  cp -p "${target}" "${tmpf}"
+  cat "${work}/new/flake.nix" >"${tmpf}"
+  mv -f "${tmpf}" "${target}"
+
+  printf '==> 書き換えました: %s\n' "${target}"
+  printf '  退避: %s\n' "${bak_nix}"
+  [[ -z ${bak_lock} ]] || printf '        %s\n' "${bak_lock}"
+  echo "  戻すなら:"
+  printf '    cp -p %s %s\n' "${bak_nix}" "${target}"
+  [[ -z ${bak_lock} ]] || printf '    cp -p %s %s\n' "${bak_lock}" "${lock}"
+  if [[ ${result} == same && ${base_is_old} == 1 ]]; then
+    echo "  home-manager の世代の中身は変わらないので、switch は要りません (次の ~/dotfiles/setup --update でそのまま使われる)。"
+  else
+    echo "  値が変わるので、反映は ~/dotfiles/setup --update。"
+  fi
+  echo "  退避は、動いているのを確かめたら消してよい。"
+}
+
 cmd_check() {
   local current marker
   parse_flake_args quiet "$@"
@@ -830,6 +901,7 @@ case ${cmd} in
   check) cmd_check "$@" ;;
   prepare) cmd_prepare "$@" ;;
   compare) cmd_compare "$@" ;;
+  apply) cmd_apply "$@" ;;
   id) cmd_id "$@" ;;
   render) cmd_render "$@" ;;
   -h | --help) usage ;;
