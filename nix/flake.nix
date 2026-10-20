@@ -292,6 +292,14 @@
               ;
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
+          host-draft-state = import ./tests/host-draft.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 
