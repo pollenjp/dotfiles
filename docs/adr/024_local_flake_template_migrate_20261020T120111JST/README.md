@@ -138,7 +138,7 @@
 
 ## 6. 検証 (Verification)
 
-- `nix/tests/local-flake-migrate.test.sh` (75 件)・`nix/tests/setup-local-flake.test.sh` (9 件)・
+- `nix/tests/local-flake-migrate.test.sh` (78 件)・`nix/tests/setup-local-flake.test.sh` (9 件)・
   `nix/tests/setup-post-notes.test.sh` (30 件) を手元と flake の checks (サンドボックス) で流して通った。
   `nix flake check --no-eval-cache ./nix` (x86_64-linux) も通った
 - 描き方: 履歴の 24 版を render で描くと、別のやり方 (awk と sed) で描いたものと 1 バイトも違わなかった。

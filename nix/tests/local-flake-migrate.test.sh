@@ -38,17 +38,19 @@
 #     評価がまるごと落ちれば基準なら 3・移した flake なら 4 で、長い trace の最後の error: の行 (原因) と全文の場所を
 #     出す。1 ホストだけ片側で落ちれば、そのホストの名前と評価し直した原因の行を出して 3 か 4。両方で落ちるホストは
 #     比べずにそう出す (ほかが同じなら 0)。3 と 4 は前の compare.result を消す。衝突の印が残っていれば nix を呼ばずに
-#     2。警告は「移して消えた」と「移した flake にある」で出し、警告の中の改行は改行して字下げする。lock は本体の
+#     2。警告は「移して消えた」「一部のホストで消えた」「移した flake にある」で出し、警告の中の改行は改行して字下げ
+#     する (末尾の改行は落とす)。lock は本体の
 #     hash が無いときだけ nix flake update dotfiles で、lock が無ければ nix flake lock で、写しに作る。ローカル flake
 #     の隣のファイル (import するもの) も写しに置き、退避と setup は写さない。compare.result に new/flake.nix の
 #     cksum・基準・結果を書く
-#   - prepare は、既にある --out がほかの利用者の書けるディレクトリなら 2。相対パスの --flake は絶対パスにして
+#   - prepare は、既にある --out がほかの利用者の書けるディレクトリ・ローカル flake の中なら 2 (作業場所を残さない)。
+#     相対パスの --flake は絶対パスにして
 #     prepare.env に書く
 #   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
 #     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
 #     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
 #     new/flake.nix を書き、flake.lock は変えず、戻すコマンド (cp -p) を出す。flake.lock が無ければ lock の分を飛ばす。
-#     書けない flake.nix なら、退避も一時ファイルも作らずに 2 で止まる
+#     書けない flake.nix なら、退避も一時ファイルも作らずに 2 で止まる。compare で比べていないホストがあれば出す
 
 set -u -o pipefail
 
@@ -512,6 +514,14 @@ else
   ng "prepare (--out の確かめ)" "rc=${rc_nonempty} → $(rc "${r}") $(err "${r}")"
 fi
 
+# 13a. prepare: --out がローカル flake の中 → 2 (compare が隣のファイルとして作業場所を写してしまう)。作業場所を残さない
+run "${r}" prepare --flake "${r}/local" --out "${r}/local/w"
+if [[ $(rc "${r}") == 2 ]] && grep -q 'ローカル flake の中' "${r}/err" && [[ ! -e ${r}/local/w ]]; then
+  ok "prepare: --out がローカル flake の中なら 2 で、作業場所を残さない"
+else
+  ng "prepare (ローカル flake の中の --out)" "rc=$(rc "${r}") $(err "${r}") $(ls -A "${r}/local")"
+fi
+
 # 13b. prepare: 相対パスの --flake は絶対パスにして prepare.env に書く (apply をどこから流しても同じ所に書く)
 (cd "${r}" && HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" prepare --flake local --out "${r}/w13c" >/dev/null 2>&1)
 if [[ $(env_of "${r}/w13c" flake_dir) == "$(cd -P "${r}/local" && pwd)" ]]; then
@@ -639,8 +649,10 @@ case $1 in
             printf 'drv\t%s\t/nix/store/%s-%s.drv\n' "${h}" "${sum%% *}" "${h}"
           fi
         done
+        # 警告は「# FAKE_WARN_HOSTS: a」があればそのホストだけに出す
+        warn_hosts=$(sed -n 's/^# FAKE_WARN_HOSTS: //p' "${f}")
         while IFS= read -r w; do
-          for h in ${hosts:-h1 h2}; do
+          for h in ${warn_hosts:-${hosts:-h1 h2}}; do
             [[ ${fails} == *" ${h} "* ]] || printf 'warn\t%s\t%s\n' "${h}" "${w}"
           done
         done < <(sed -n 's/^# FAKE_WARN: //p' "${f}")
@@ -806,6 +818,14 @@ else
   ng "compare (両方で落ちる)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
 fi
 
+#      apply は、比べていないホストを出す
+run "${r}" apply "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && grep -q '比べていないホスト: h2' "${r}/out"; then
+  ok "apply: 両方で評価が落ちて比べていないホストを出す"
+else
+  ng "apply (比べていないホスト)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
 # 19e. 検証専用の sandbox は比べない (setup も対象にしない。登録簿の値と local がぶつかって落ちることがある)
 r=$(compare_case c19e '# FAKE_HOSTS: h1 sandbox
 # FAKE_FAIL_HOSTS: sandbox')
@@ -842,13 +862,23 @@ else
   ng "compare (隣のファイル)" "rc=$(rc "${r}") $(err "${r}") $(ls -A "${r}/w/.eval/new" 2>/dev/null)"
 fi
 
-# 19h. 警告の改行 (\n) は、改行して字下げして出す
-r=$(compare_case c19h '# FAKE_WARN: 1 行目\n2 行目')
+# 19h. 警告の改行 (\n) は、改行して字下げして出す。末尾の改行は落とす (ホストの数を同じ行に出す)
+r=$(compare_case c19h '# FAKE_WARN: 1 行目\n2 行目\n')
 run_nix "${r}" compare "${r}/w"
 if [[ $(rc "${r}") == 0 ]] && grep -qF '移した flake にある: 1 行目' "${r}/out" && grep -qE '^ +2 行目 \(2 ホスト\)$' "${r}/out"; then
-  ok "compare: 警告の中の改行は、改行して字下げして出す"
+  ok "compare: 警告の中の改行は改行して字下げして出し、末尾の改行は落とす"
 else
   ng "compare (警告の改行)" "rc=$(rc "${r}") $(out "${r}")"
+fi
+
+# 19i. 一部のホストでだけ消えた警告も出す
+r=$(compare_case c19i '# FAKE_WARN: 一部で消える警告')
+printf '# FAKE_WARN_HOSTS: h1\n' >>"${r}/w/new/flake.nix"
+run_nix "${r}" compare "${r}/w"
+if [[ $(rc "${r}") == 0 ]] && grep -qF '一部のホストで消えた: 一部で消える警告 (2 → 1 ホスト)' "${r}/out"; then
+  ok "compare: 一部のホストでだけ消えた警告も出す"
+else
+  ng "compare (一部で消えた警告)" "rc=$(rc "${r}") $(out "${r}")"
 fi
 
 # 20. 衝突の印が残っている → 2 で止まり、nix を呼ばない

@@ -544,8 +544,11 @@ cmd_compare() {
     case ${f##*/} in
       flake.nix | flake.lock | setup | flake.nix.bak-* | flake.lock.bak-* | .flake.nix.*) continue ;;
     esac
-    cp -R -p "${f}" "${work}/.eval/base/"
-    cp -R -p "${f}" "${work}/.eval/new/"
+    # 作業場所そのもの (ローカル flake の中に作った場合) は写さない
+    [[ $(cd -P -- "${f}" 2>/dev/null && pwd) != "${work}" ]] || continue
+    if ! { cp -R -p "${f}" "${work}/.eval/base/" && cp -R -p "${f}" "${work}/.eval/new/"; }; then
+      die "ローカル flake の隣のファイルを評価用の写しに置けません: ${f}"
+    fi
   done
   new_sum=$(cksum <"${work}/new/flake.nix")
   base_sum=$(cksum <"${base_src}/flake.nix")
@@ -565,8 +568,9 @@ cmd_compare() {
   if ! nix eval --raw "path:${work}/.eval/base#homeConfigurations" --apply "${summary_expr}" \
     >"${work}/.eval/base.tsv" 2>"${work}/.eval/base.err"; then
     {
-      printf '!! 旧い flake (基準) は今の本体 (%s) で評価できません。\n' "${nix_dir}"
-      echo "   本体で option が削除・改名された、型が変わったなどで、旧い local が今の本体に合っていません。"
+      printf '!! 旧い flake (基準) は今の本体 (%s) で評価できません (どのホストも評価する前に落ちた)。\n' "${nix_dir}"
+      echo "   下の nix のエラーを読む (構文の誤り・import するファイルが無い・取得の失敗、または本体の変更に"
+      echo "   旧い local が合っていない、など)。"
       echo "   nix のエラー:"
       eval_error_excerpt "${work}/.eval/base.err"
       echo "   読み解き方と比べ直し方は pjp-dotfiles-local-flake-migrate skill の「旧い flake が評価できないとき」"
@@ -707,13 +711,22 @@ cmd_compare() {
     printf '  setup が拾うホストの並び (一番上が既定の対象ホスト) が違う: 基準 [%s] → 移した [%s]\n' "${hosts_base}" "${hosts_new}"
   fi
 
-  # 警告 (config.warnings) を、文ごとにホストの数で出す
+  # 警告 (config.warnings) を、文ごとにホストの数で出す (文の末尾の改行は落とす)
   awk -F'\t' '
+    function trim(s) { sub(/(\\n)+$/, "", s); return s }
     FNR == NR { if ($1 == "warn") { a[$3]++ }; next }
     $1 == "warn" { b[$3]++ }
     END {
-      for (w in a) if (!(w in b)) print "移して消えた: " w " (" a[w] " ホスト)"
-      for (w in b) print "移した flake にある: " w " (" b[w] " ホスト)" ((w in a) ? "" : " (基準には無い)")
+      for (w in a) {
+        if (!(w in b)) print "移して消えた: " trim(w) " (" a[w] " ホスト)"
+        else if (b[w] < a[w]) print "一部のホストで消えた: " trim(w) " (" a[w] " → " b[w] " ホスト)"
+      }
+      for (w in b) {
+        note = ""
+        if (!(w in a)) note = " (基準には無い)"
+        else if (b[w] > a[w]) note = " (基準では " a[w] " ホスト)"
+        print "移した flake にある: " trim(w) " (" b[w] " ホスト)" note
+      }
     }
   ' "${work}/.eval/base.tsv" "${work}/.eval/new.tsv" | sort >"${tmp}/warn.txt"
   if [[ -s ${tmp}/warn.txt ]]; then
@@ -747,7 +760,7 @@ cmd_compare() {
 }
 
 cmd_apply() {
-  local work="" accept=0 flake_dir target lock lines new_sum result base_is_old ts bak_nix bak_lock="" tmpf
+  local work="" accept=0 flake_dir target lock lines new_sum result base_is_old unverified ts bak_nix bak_lock="" tmpf
   while [[ $# -gt 0 ]]; do
     case $1 in
       --accept-changes) accept=1 ;;
@@ -779,6 +792,7 @@ cmd_apply() {
     || die "compare のあとに new/flake.nix が変わっています。${self} compare ${work} で確かめ直してください。"
   result=$(env_get "${work}/compare.result" result)
   base_is_old=$(env_get "${work}/compare.result" baseline_is_old)
+  unverified=$(env_get "${work}/compare.result" unverified || true)
   if [[ ${result} != same || ${base_is_old} != 1 ]] && ((accept == 0)); then
     die "compare が旧い flake と同じでない (違いがある、または --baseline で比べた) ので、値が変わります。ユーザーが受け入れたなら --accept-changes を付けてください。"
   fi
@@ -804,6 +818,9 @@ cmd_apply() {
   echo "  戻すなら:"
   printf '    cp -p %s %s\n' "${bak_nix}" "${target}"
   [[ -z ${bak_lock} ]] || printf '    cp -p %s %s\n' "${bak_lock}" "${lock}"
+  if [[ -n ${unverified} ]]; then
+    printf '  比べていないホスト: %s (旧い flake でも移した flake でも評価が落ちた。setup の対象なら、移しても落ちる)\n' "${unverified}"
+  fi
   if [[ ${result} == same && ${base_is_old} == 1 ]]; then
     echo "  home-manager の世代の中身は変わらないので、switch は要りません (次の ~/dotfiles/setup --update でそのまま使われる)。"
   else
@@ -848,7 +865,7 @@ cmd_status() {
 }
 
 cmd_prepare() {
-  local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines f
+  local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines f out_created=0
   out_dir=""
   base_given=""
   parse_flake_args loud "$@"
@@ -906,11 +923,19 @@ cmd_prepare() {
     if [[ -d ${out_dir} ]] && { [[ ! -O ${out_dir} ]] || [[ -n $(find "${out_dir}" -maxdepth 0 \( -perm -0020 -o -perm -0002 \)) ]]; }; then
       die "--out がほかの利用者のものか、ほかの利用者が書けるディレクトリです: ${out_dir} (mktemp -d で作るか、--out を省く)"
     fi
+    [[ -e ${out_dir} ]] || out_created=1
     mkdir -p "${out_dir}"
   else
     out_dir=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate-work.XXXXXX")
   fi
   out_dir=$(cd -P -- "${out_dir}" && pwd)
+  # ローカル flake の中の作業場所は断る (compare が隣のファイルとして作業場所ごと写してしまう)
+  case "${out_dir}/" in
+    "${flake_dir}/"*)
+      [[ ${out_created} != 1 ]] || rmdir "${out_dir}" 2>/dev/null || true
+      die "--out がローカル flake の中です: ${out_dir} (ローカル flake の外、Claude の scratchpad などに作る)"
+      ;;
+  esac
   mkdir -p "${out_dir}/old" "${out_dir}/new"
   cp -p "${flake}" "${out_dir}/old/flake.nix"
   if [[ -f ${flake_dir}/flake.lock ]]; then

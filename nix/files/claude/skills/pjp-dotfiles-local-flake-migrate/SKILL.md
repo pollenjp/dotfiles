@@ -134,7 +134,7 @@ apply の前に、この順で出す。
 
 1. 何をするか: `~/dotfiles/flake.nix` を、元の雛形 (版と日付) から今の雛形の形へ移す
 2. 変わる中身のまとめ: 説明の書き換え・足された節・移った例・「# 雛形の版:」の行・値の変化 (無ければ「値は変わらない」)
-3. compare の結果 (例: 全 7 ホストで drvPath が同じ。home-manager の世代の中身は変わらないので、switch は要らない)
+3. compare の結果 (例: 全 6 ホストで drvPath が同じ。home-manager の世代の中身は変わらないので、switch は要らない)
 4. 差分: `diff -u ~/dotfiles/flake.nix <作業場所>/new/flake.nix` の全文。長ければ要点と、全文を読めるファイルのパス
 5. 退避と戻し方: apply が `~/dotfiles/flake.nix.bak-<日時>` と `flake.lock.bak-<日時>` を置き、戻すのは `cp -p` の 2 つ
 6. 問い: 「この内容で ~/dotfiles/flake.nix を書き換えてよいですか」(残っている判断があれば、選択肢ごと並べる)
