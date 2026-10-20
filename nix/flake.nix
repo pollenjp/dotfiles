@@ -132,7 +132,7 @@
                 node ${./tests/claude-footer-links.test.mjs} ${./files/claude/footer-links.json}
                 touch $out
               '';
-          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts/setup.sh;
+          setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
