@@ -2173,10 +2173,12 @@ execute() {
     # 失敗すると残りの手作業 (post_notes) は出ないので、switch が旧い local の評価で落ちた見込みがあれば
     # ここで移し方を知らせる (本体で option が削除・改名されると、旧い local のままでは評価が止まる)。
     if [[ ${failed_id} == switch ]] && local_flake_stale; then
+      # switch が落ちていると新しい skill はまだ配られていないので、repo の SKILL.md の場所も出す
       {
         printf '  ローカル flake (%s/flake.nix) は前の雛形から作られています (雛形の版 %s)。\n' "${flake_dir}" "${local_flake_state}"
         printf '  本体で option が削除・改名されていると、旧い local のままでは評価が止まります。\n'
-        printf '  値を引き継いで今の雛形へ移す: %s (Claude Code なら pjp-dotfiles-local-flake-migrate skill)\n' "$(local_flake_migrate_cmd)"
+        printf '  値を引き継いで今の雛形へ移す: %s\n' "$(local_flake_migrate_cmd)"
+        printf '  (Claude Code なら %s/nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md の手順)\n' "${repo_dir}"
       } >&2
     fi
     return 1

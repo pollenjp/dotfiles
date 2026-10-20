@@ -34,6 +34,7 @@
 #               先頭のコメントに「# 雛形の版: <印>」を置く。印は下の heredoc の原文 (展開する前) から
 #               local-flake-migrate.sh id が計算する値で、heredoc を直すと変わる。
 #   flake.lock  nix が生成する。
+#   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
 # ## 雛形が新しくなったら
 #
@@ -41,7 +42,6 @@
 # ホストが消える)。印が今の雛形と違えば (印の無い、印を入れる前の雛形も)、ここと setup.sh が知らせる。
 # 値を引き継いで今の雛形へ移すのは local-flake-migrate.sh (手順は nix/README.md「雛形が新しくなったら」。
 # Claude Code なら pjp-dotfiles-local-flake-migrate skill)。
-#   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
 # ## なぜ本体の git 管理下に置かないのか
 #

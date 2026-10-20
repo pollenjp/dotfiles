@@ -613,8 +613,9 @@ fi'
   at_fail=$(grep -n '失敗した手順があります' "${c}/err" | head -1 | cut -d: -f1)
   at_hint=$(grep -n 'は前の雛形から作られています' "${c}/err" | head -1 | cut -d: -f1)
   if [[ $(rc "${c}") == 1 && -n ${at_fail} && -n ${at_hint} ]] && ((at_fail < at_hint)) \
-    && grep -q '削除・改名' "${c}/err" && grep -qF "local-flake-migrate.sh prepare --flake ${c}/local" "${c}/err"; then
-    ok "switch が落ち、印が前の版なら、失敗の案内のあとに option の削除・改名と移し方を出す"
+    && grep -q '削除・改名' "${c}/err" && grep -qF "local-flake-migrate.sh prepare --flake ${c}/local" "${c}/err" \
+    && grep -qF "${c}/repo/nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md" "${c}/err"; then
+    ok "switch が落ち、印が前の版なら、失敗の案内のあとに option の削除・改名と移し方 (repo の SKILL.md の場所も) を出す"
   else
     ng "switch が落ちたとき (前の版)" "rc=$(rc "${c}") $(cat "${c}/err")"
   fi
