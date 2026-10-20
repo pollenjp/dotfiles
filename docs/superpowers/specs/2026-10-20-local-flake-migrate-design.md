@@ -276,6 +276,12 @@ local-flake-migrate.sh render  (--rev <rev> | --file <path>) --nix-dir <path>
   (5 節の 2)。(2) setup は `~/dotfiles/flake.nix` の文字列から既定の対象ホスト (一番上に足したホスト) を拾うので、
   drvPath が全部同じでも衝突の解き方でホストの並びが変わると既定が黙って変わる。compare でこの並びも比べる (5 節の 5)
 - prepare の `candidates.tsv` は 1 行目に見出しを置く。`new/` には lock を置かない
+- branch のレビューを受けて変えた: compare はホストごとに `tryEval` で包んで評価し、検証専用の `sandbox` を比べない
+  (登録簿の `sandbox` が `notion.profile = "personal"` を持つので、local の値が `null`・`"work"` のマシンでは全体の
+  評価が落ちていた)。片側でだけ落ちるホストは名前を出し、そのホストを評価し直した最後の `error:` の行 (原因) と
+  全文の場所を出して 3 か 4。両方で落ちるホストは比べずにそう出す。あわせて、相対パスの `--flake` を絶対パスにする・
+  書けない flake.nix は退避の前に止める・既にある `--out` は自分のもので他人が書けないこと・ローカル flake の隣の
+  ファイルも評価の写しに置く・switch が落ちたときの案内に repo の SKILL.md の場所を出す、を足した
 
 ## 実装に任せること
 

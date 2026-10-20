@@ -63,7 +63,7 @@
 | --- | --- |
 | `status` / `check` | 印が今の雛形と同じか (`check` は setup のための静かな版) |
 | `prepare` | 元の雛形を決め、手元・元の雛形・今の雛形を `git merge-file --diff3` で 3-way merge して作業場所に置く |
-| `compare` | 旧い flake と移した flake を同じ本体・同じ lock で評価し、全ホストの `activationPackage.drvPath` と、setup が拾うホストの並びを比べる |
+| `compare` | 旧い flake と移した flake を同じ本体・同じ lock で評価し、ホストごとの `activationPackage.drvPath` と、setup が拾うホストの並びを比べる (検証専用の `sandbox` は除く) |
 | `apply` | 退避 (`flake.nix.bak-<日時>`・`flake.lock.bak-<日時>`) を取ってから書く |
 
 - **元の雛形**は、印があればその版。無ければ setup-local-flake.sh の履歴の各版を描き、旧いファイルとの差分が最も
@@ -75,8 +75,13 @@
 - **確かめ方**は drvPath の一致。一致すれば home-manager の世代の中身が同じ (値を全部引き継げた) なので、switch も
   要らない。違えば、違うホストの `config.dotfiles` の差を「旧い → 新しい」で出す。drvPath に出ない「setup が
   文字列から拾うホストの並び」(一番上が既定の対象ホスト) も比べる
-- 旧い flake が今の本体で評価できないときは、compare がそう出して 3 で終わる。評価が通るだけの直しを当てた基準を
-  作り、`--baseline` で比べ直す
+- ホストごとに `tryEval` で包んで評価する (module の誤りは throw なので拾える)。一部のホストで落ちても、ほかの
+  ホストは比べる。両方で落ちるホストは比べずにそう出す。検証専用の `sandbox` は比べない (setup も対象にしない。
+  登録簿の `sandbox` は `claude.notion.profile = "personal"` を持つので、local の値が `null` や `"work"` だと
+  `sandbox` だけ定義がぶつかる)
+- 旧い flake でだけ評価が落ちるホストがあれば (本体で option が削除された・local が登録簿の値とぶつかる、など)、
+  compare はそのホストを `tryEval` なしで評価し直し、最後の `error:` の行 (原因) を出して 3 で終わる。評価が通る
+  だけの直しを当てた基準を作り、`--baseline` で比べ直す
 - apply は、prepare のあとに `~/dotfiles/flake.nix` が書き換わった・衝突の印が残る・今の中身で compare を流して
   いない、なら書かない。compare が同じでない (基準を直したときも) なら `--accept-changes` を要る
 
@@ -112,6 +117,7 @@
 | setup の中で自動で移す | git 管理外のユーザーのファイルなので、差分を見せて確認を取ってから書く。衝突や値の違いは人の判断が要る |
 | 雛形を heredoc から別のファイルへ出す | 履歴の各版を描くときに置き場所が 2 通りになる。今回の目的には要らない |
 | 1 ホストだけ評価して確かめる | local は登録簿の全ホストに当たる。全部を 1 回の評価でまとめて比べても 20〜60 秒 |
+| 全ホストを `tryEval` なしで 1 回に評価する (はじめの実装) | 1 ホストが落ちると全体が落ちる。`sandbox` が `notion.profile` を持つので、local の値が `"personal"` 以外のマシンでは必ず落ち、「本体で option が削除された」と違う原因を出していた (branch のレビューで見つかった) |
 
 ## 5. 影響 (Consequences)
 
@@ -149,11 +155,12 @@
 
 ```sh
 m=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/local-flake-migrate.sh
+w=$(mktemp -d)
 $m status
-$m prepare --out /tmp/lfm
-$m compare /tmp/lfm
-diff -u ~/dotfiles/flake.nix /tmp/lfm/new/flake.nix
-$m apply /tmp/lfm
+$m prepare --out "$w"
+$m compare "$w"
+diff -u ~/dotfiles/flake.nix "$w/new/flake.nix"
+$m apply "$w"
 ```
 
 Claude Code に任せるなら `pjp-dotfiles-local-flake-migrate` skill (差分を見せて確認を取ってから書く)。

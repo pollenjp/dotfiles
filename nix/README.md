@@ -1025,11 +1025,12 @@ heredoc の原文（展開する前）の cksum で、雛形を直すと変わ�
 
 ```sh
 m=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/local-flake-migrate.sh
+w=$(mktemp -d)               # 作業場所 (共有の /tmp に決まった名前で作らない)
 $m status                    # 印が今の雛形と同じか
-$m prepare --out /tmp/lfm    # 元の雛形を決めて 3-way merge し、/tmp/lfm/new/flake.nix を作る
-$m compare /tmp/lfm          # 旧い flake と移した flake で、全ホストの drvPath を比べる
-diff -u ~/dotfiles/flake.nix /tmp/lfm/new/flake.nix
-$m apply /tmp/lfm            # flake.nix.bak-<日時> と flake.lock.bak-<日時> に退避してから書く
+$m prepare --out "$w"        # 元の雛形を決めて 3-way merge し、$w/new/flake.nix を作る
+$m compare "$w"              # 旧い flake と移した flake で、全ホストの drvPath を比べる
+diff -u ~/dotfiles/flake.nix "$w/new/flake.nix"
+$m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時> に退避してから書く
 ```
 
 - 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
@@ -1039,8 +1040,11 @@ $m apply /tmp/lfm            # flake.nix.bak-<日時> と flake.lock.bak-<日時
   残った衝突は diff3 の印のまま `new/flake.nix` に残る
 - compare は評価用の写しで lock を張り直して評価する（1 回 20〜60 秒）。drvPath が全部同じなら home-manager の
   世代の中身は変わらないので、switch は要らない。違えば `config.dotfiles` の違いを出す。setup が文字列から拾う
-  ホストの並び（一番上が既定の対象）も比べる
-- 旧い flake が今の本体で評価できないときは、compare が 3 で終わる。評価が通るだけの直しを当てた基準を作り、
+  ホストの並び（一番上が既定の対象）も比べる。検証専用の `sandbox` は比べない（setup も対象にしない。登録簿が持つ
+  値と `local` がぶつかって落ちることがある）
+- ホストごとに評価するので、一部のホストで評価が落ちても、ほかのホストは比べる。両方で落ちるホストは比べずにそう
+  出す。旧い flake でだけ落ちるホストがある（本体で option が消えた・`local` が登録簿の値とぶつかる、など）なら
+  compare が 3 で終わり、そのホストを評価し直した原因のエラーを出す。評価が通るだけの直しを当てた基準を作り、
   `compare <作業場所> --baseline <dir>` で比べ直す
 - apply は、prepare のあとに `~/dotfiles/flake.nix` が書き換わった・衝突の印が残る・今の中身で compare を流して
   いない、なら書かない。compare が同じでない（`--baseline` で比べたときも）なら `--accept-changes` が要る
