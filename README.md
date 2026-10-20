@@ -14,6 +14,9 @@ ssh の接続先は private な [pollenjp/dotfiles-private](https://github.com/p
 `setup` が `~/.ssh/config.d/` へ張り、Windows の `%USERPROFILE%\.ssh` へはコピーする
 （[ADR 016](./docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)）。
 
+herdr の集約ハブ `~/h` は、private な claude-skills の skill `pjp-herdr-hub` の `hub-init.sh` を `setup` が打って作る
+（[`nix/README.md`](./nix/README.md#herdr-の集約ハブ-h)）。
+
 > 以前は `~/dotfiles` に clone して `./main.bash setup` で symlink を張る旧経路もあった
 > （Windows の Git Bash もこれを使っていた）。
 > [ADR 013](./docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md) で削除し、
