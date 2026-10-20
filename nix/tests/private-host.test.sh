@@ -361,7 +361,7 @@ register_case() {
 # FAKE_OUT: alice@x86_64-linux ${c}/store/gen-1
 # FAKE_OUT: alice@wsl ${c}/store/gen-2
 # FAKE_DRV: alice@x86_64-linux /nix/store/same.drv
-# FAKE_DOTFILES: ccPages.port 7778
+# FAKE_DOTFILES: ccPages.port 7801
 {
   inputs.dotfiles.url = "path:${c}/repo/nix";
   inputs.dotfiles-private.url = "path:${c}/repo/nix/private-stub";
@@ -507,7 +507,7 @@ fi
 c=$(register_case r13)
 sed -i "s|inputs.dotfiles.url = \"path:${c}/repo/nix\";|inputs.dotfiles.url = \"path:${c}/elsewhere/nix\";|" "${c}/local/flake.nix"
 mkdir -p "${c}/elsewhere/nix" "${c}/pw/nix/hosts"
-printf '# FAKE_DRV: /nix/store/same.drv\n# FAKE_OUT: %s/store/gen-1\n# FAKE_DOTFILES: ccPages.port 7778\n{ mkHome, ... }: mkHome { }\n' "${c}" \
+printf '# FAKE_DRV: /nix/store/same.drv\n# FAKE_OUT: %s/store/gen-1\n# FAKE_DOTFILES: ccPages.port 7801\n{ mkHome, ... }: mkHome { }\n' "${c}" \
   >"${c}/pw/nix/hosts/alice@box.nix"
 cp -p "${c}/local/flake.nix" "${c}/flake.before"
 cp -p "${c}/local/flake.lock" "${c}/lock.before"
@@ -527,7 +527,7 @@ else
 fi
 
 # 14. compare: 違う → 1 と config.dotfiles の違い。旧い形・新しい形が落ちる → 3・4。登録のファイルが無い → 2
-sed -i -e 's|^# FAKE_DRV: .*|# FAKE_DRV: /nix/store/other.drv|' -e 's|^# FAKE_DOTFILES: ccPages.port 7778|# FAKE_DOTFILES: ccPages.port 7779|' \
+sed -i -e 's|^# FAKE_DRV: .*|# FAKE_DRV: /nix/store/other.drv|' -e 's|^# FAKE_DOTFILES: ccPages.port 7801|# FAKE_DOTFILES: ccPages.port 7802|' \
   "${c}/pw/nix/hosts/alice@box.nix"
 run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local" --nix-dir "${c}/repo/nix"
 r_differ=$(rc "${c}")
@@ -542,7 +542,7 @@ r_old=$(rc "${c}")
 e_old=$(err "${c}")
 run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local" --name nobody@box
 r_missing=$(rc "${c}")
-if [[ ${r_differ} == 1 && ${o_differ} == *"ccPages.port: 7778 → 7779"* && ${r_new} == 4 && ${e_new} == *"新しい形の誤り"* &&
+if [[ ${r_differ} == 1 && ${o_differ} == *"ccPages.port: 7801 → 7802"* && ${r_new} == 4 && ${e_new} == *"新しい形の誤り"* &&
   ${r_old} == 3 && ${e_old} == *"旧い形の誤り"* && ${r_missing} == 2 ]]; then
   ok "compare: 違えば 1 と config.dotfiles の違い、新しい形が落ちれば 4、旧い形が落ちれば 3、登録のファイルが無ければ 2"
 else
