@@ -92,7 +92,8 @@ template_rel=nix/scripts/setup-local-flake.sh
 self="${script_dir}/local-flake-migrate.sh"
 default_flake_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
 
-# 一時ファイルの置き場は使うときに作る (check は mktemp も要らない)
+# 一時ファイルの置き場は使うときに作る (check は mktemp も要らない)。$(...) の中から初めて呼ぶと、作った場所が
+# 親に伝わらず消えずに残るので、使うコマンドの頭で (親のシェルで) 呼ぶ
 tmp=""
 trap '[[ -z ${tmp} ]] || rm -rf "${tmp}"' EXIT
 need_tmp() {
@@ -867,6 +868,8 @@ cmd_prepare() {
 cmd_id() {
   local file
   [[ $# -le 1 ]] || die "id に渡せるのはパス 1 つだけです (--help)"
+  # 一時ファイルの置き場は親で作る ($(...) の中で作ると、親の trap が消せない)
+  [[ ${1:-} != - ]] || need_tmp
   file=$(script_file "${1:-${repo_dir}/${template_rel}}")
   template_id "${file}" || {
     printf '!! 雛形の heredoc が見つかりません (開きの行が 1 つでないか、閉じの EOS が無い): %s\n' "${1:-${repo_dir}/${template_rel}}" >&2
@@ -900,6 +903,8 @@ cmd_render() {
   [[ -n ${rev} || -n ${file} ]] || die "render には --rev か --file が要ります (--help)"
   [[ -z ${rev} || -z ${file} ]] || die "render の --rev と --file はどちらか 1 つです"
   [[ -n ${nix_dir} ]] || die "render には --nix-dir が要ります (--help)"
+  # 一時ファイルの置き場は親で作る ($(...) の中で作ると、親の trap が消せない)
+  need_tmp
   if [[ -n ${rev} ]]; then
     file=$(rev_file "${rev}")
   else

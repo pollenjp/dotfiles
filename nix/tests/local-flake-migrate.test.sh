@@ -17,6 +17,7 @@
 #   - id は heredoc の原文から 8 桁の 16 進を出す。heredoc の中を変えると変わり、外を変えても変わらない。
 #     開きの行 (`  cat >"${flake_file}" <<EOS`) が 1 つでない・閉じの EOS が無い script は、id も render も 1
 #   - render --rev は、repo の履歴の setup-local-flake.sh の版を描く (古い版の script を実行しない)
+#   - どのコマンドも一時ファイルを TMPDIR に残さない (id - と render --rev も)
 #   - check は、ローカル flake の「# 雛形の版:」の印が今の雛形と同じなら何も出さず 0 (中身を利用者が書き換えて
 #     いても)、違えば「旧い印 → 今の印」(印が無ければ「印なし → 今の印」) を出して 1、inputs.dotfiles.url の
 #     path: が無い・flake.nix が無いなら 2。git も nix も無い PATH で動く
@@ -52,6 +53,9 @@ dir=${1:-${here}/../scripts}
 src=${dir}/local-flake-migrate.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
+# script の一時ファイルはここに作らせ、最後に残っていないかを見る
+export TMPDIR="${work}/tmpdir"
+mkdir -p "${TMPDIR}"
 
 if [[ ! -f ${src} ]]; then
   echo "見つからない: ${src}" >&2
@@ -826,6 +830,13 @@ if [[ $(rc "${r}") == 0 && -z $(find "${r}/local" -maxdepth 1 -name 'flake.lock*
   ok "apply: flake.lock が無ければ、lock の退避と戻すコマンドを飛ばす"
 else
   ng "apply (lock が無い)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(ls "${r}/local")"
+fi
+
+# 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)
+if [[ -z $(ls -A "${TMPDIR}") ]]; then
+  ok "一時ファイルを残さない"
+else
+  ng "一時ファイルが残っている" "$(ls -A "${TMPDIR}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
