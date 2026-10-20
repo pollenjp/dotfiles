@@ -33,12 +33,21 @@
 #     返事をしない記録は 1 秒で見切る。死んだ socket の記録を消す。先を確かめている間に attach が張り替えたら
 #     上書きしない。先が手元の 1Password なら触らない。stdout に何も出さない
 #   - status は固定名の先・持ち主と、記録にある接続を出す
+#   - herdr を包む実行ファイルは、引数をそのまま本物の herdr へ渡す。herdr (サブコマンドなし)・--session <名前>・
+#     --session=<名前>・session attach <名前>・remote-client-bridge [--idle-timeout-v1] では決め直して
+#     SSH_AUTH_SOCK をその session の固定名にし、herdr server では決め直さずに固定名にする。それ以外
+#     (status・server stop・pane・--remote・--version・--help・session attach help) では env も固定名も変えない。
+#     session は引数・HERDR_SESSION・default の順。bridge の stdin を読まず、stdout には本物の herdr の出力だけが
+#     出る。WSL の手元では env を変えない。pjp-agent-link が失敗しても・返事をしなくても (10 秒で打ち切る)、
+#     元の env で herdr を起こす
 #
 # ## 作り
 #
 # socket は python3 で bind して置く (listen しない。生死は偽の ssh-add が決める)。偽の ssh-add は SSH_AUTH_SOCK の
 # basename で ${FAKE_AGENT_MODES}/<basename> を引き、keys (exit 0)・empty (exit 1)・hang (返事をしない)・refuse
 # (exit 2) のふりをする。socket が無ければ exit 2。script は env -i で、HOME と PATH と渡した変数だけで流す。
+# herdr を包む実行ファイルは、herdr.sh の置き換え (本物の herdr・pjp-agent-link・timeout) を偽の herdr (argv・
+# SSH_AUTH_SOCK・読んだ stdin を書き留める) と包む前の script にした写しで流す。
 # unix socket のパスは 108 byte までなので、TMPDIR が長いときは /tmp に作業場所を作る。
 
 set -u -o pipefail
@@ -49,6 +58,7 @@ here=$(
 )
 pkgdir=$(realpath -- "${1:-${here}/../pkgs/pjp-agent-link}")
 agent_sh="${pkgdir}/pjp-agent-link.sh"
+wrapper_sh="${pkgdir}/herdr.sh"
 
 base=${TMPDIR:-/tmp}
 if ((${#base} > 40)); then
@@ -173,13 +183,13 @@ seed() {
   fi
 }
 
-# script を 1 回流す。$1: 置き場所の名前、続けて env に渡す VAR=値… と、script の引数。
+# script を 1 回流す。$1: 置き場所の名前、続けて env に渡す VAR=値… (名前=値 の形のもの) と、script の引数。
 # env -i で、HOME と PATH と渡した変数だけにする。stdin は agent_stdin (省けば /dev/null)。stdout・stderr・
 # 終了コードを <置き場所>/{out,err,rc} に書き、置き場所を返す
 agent() {
   local d="${work}/out/$1" envs=()
   shift
-  while [[ $# -gt 0 && $1 == *=* ]]; do
+  while [[ $# -gt 0 && $1 =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
     envs+=("$1")
     shift
   done
@@ -766,6 +776,193 @@ $(out "${d}") == *"${OTHER}"*"${H}/.ssh/agent/s.t.sshd.scene-X"* ]]; then
   ok "status は固定名の先・持ち主と、記録にある接続を出す"
 else
   ng "status" "rc=$(rc "${d}") out=$(out "${d}") err=$(err "${d}")"
+fi
+
+echo "== herdr を包む実行ファイル"
+
+# 本物の herdr の代わり。argv・SSH_AUTH_SOCK・読んだ stdin を FAKE_HERDR_LOG に書き、HERDR-OUT を出す
+mkdir -p "${work}/real" "${work}/shim"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+{
+  printf 'argv:'
+  printf ' [%s]' "$@"
+  printf '\n'
+  printf 'sock: %s\n' "${SSH_AUTH_SOCK-(無い)}"
+  printf 'stdin: %s\n' "$(cat)"
+} >"${FAKE_HERDR_LOG}"
+printf 'HERDR-OUT'
+EOF
+} >"${work}/real/herdr"
+chmod +x "${work}/real/herdr"
+# pjp-agent-link の代わり: 包む前の script をそのまま流すもの・失敗するもの・返事をしないもの
+printf '#!%s\nexec bash %q "$@"\n' "${BASH}" "${agent_sh}" >"${work}/shim/agent-ok"
+printf '#!%s\necho /bogus\nexit 1\n' "${BASH}" >"${work}/shim/agent-fail"
+printf '#!%s\nsleep 30\necho /bogus\n' "${BASH}" >"${work}/shim/agent-hang"
+chmod +x "${work}/shim/agent-ok" "${work}/shim/agent-fail" "${work}/shim/agent-hang"
+# herdr.sh の置き換え (herdr.nix が store のパスにするもの) を、偽物と手元の timeout にした写しを作る。
+# $1: 写しの名前、$2: pjp-agent-link の代わり
+make_wrapper() {
+  sed -e "s#@herdr@#${work}/real/herdr#g" -e "s#@agentLink@#$2#g" -e "s#@timeout@#$(command -v timeout)#g" \
+    "${wrapper_sh}" >"${work}/shim/$1"
+}
+make_wrapper wrapper "${work}/shim/agent-ok"
+make_wrapper wrapper-fail "${work}/shim/agent-fail"
+make_wrapper wrapper-hang "${work}/shim/agent-hang"
+
+# 包む実行ファイルを 1 回流す。引数は agent と同じ (先頭に写しの名前)。偽の herdr の書き留めは <置き場所>/herdr.log
+wrap() {
+  local w=$1 d="${work}/out/$2" envs=()
+  shift 2
+  while [[ $# -gt 0 && $1 =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+    envs+=("$1")
+    shift
+  done
+  mkdir -p "${d}"
+  env -i HOME="${H}" PATH="${PATH}" FAKE_AGENT_MODES="${modes}" FAKE_SSH_ADD_LOG="${ssh_add_log}" \
+    FAKE_HERDR_LOG="${d}/herdr.log" "${envs[@]}" bash "${work}/shim/${w}" "$@" \
+    >"${d}/out" 2>"${d}/err" <"${agent_stdin:-/dev/null}"
+  echo $? >"${d}/rc"
+  printf '%s' "${d}"
+}
+# wrap と同じで、stdin を $1 のファイルにする
+wrap_in() {
+  local agent_stdin=$1
+  shift
+  wrap "$@"
+}
+hlog() { cat "$1/herdr.log" 2>/dev/null; }
+hsock() { sed -n 's/^sock: //p' "$1/herdr.log" 2>/dev/null; }
+
+# 34. 引数はそのまま渡る (何もしない呼び出し)
+newhome wrap-args
+B="${H}/.ssh/agent/s.t.sshd.wrap-args-B"
+mksock "${B}"
+d=$(wrap wrapper wrap-args "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" pane split --cwd 'a b' -- --session x)
+if [[ $(rc "${d}") == 0 && $(out "${d}") == HERDR-OUT && $(hlog "${d}") == *'argv: [pane] [split] [--cwd] [a b] [--] [--session] [x]'* &&
+$(hsock "${d}") == "${B}" && $(link_of agent.sock) == "(無い)" ]]; then
+  ok "引数は空白入りも -- の後ろもそのまま渡り、何もしない呼び出しでは env も固定名も変えない"
+else
+  ng "引数の受け渡し" "rc=$(rc "${d}") out=$(out "${d}") log=$(hlog "${d}") err=$(err "${d}")"
+fi
+
+# 35. attach とみなす呼び出し
+i=0
+while IFS='|' read -r session_want args; do
+  i=$((i + 1))
+  newhome "wrap-attach-${i}"
+  B="${H}/.ssh/agent/s.t.sshd.wrap-attach${i}-B"
+  mksock "${B}"
+  read -r -a argv <<<"${args}"
+  d=$(wrap wrapper "wrap-attach-${i}" "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" "${argv[@]}")
+  if [[ ${session_want} == default ]]; then
+    f=agent.sock
+  else
+    f="agent.${session_want}.sock"
+  fi
+  if [[ $(rc "${d}") == 0 && $(hsock "${d}") == "${H}/.ssh/${f}" && $(link_of "${f}") == "${B}" &&
+  $(owner_of "${session_want}") == "${PC}" ]]; then
+    ok "attach とみなす: herdr ${args:-(サブコマンドなし)} は ${f} を開いた接続へ張り、SSH_AUTH_SOCK にする"
+  else
+    ng "attach とみなす: herdr ${args}" "rc=$(rc "${d}") sock=$(hsock "${d}") link=$(link_of "${f}") err=$(err "${d}")"
+  fi
+done <<'EOF'
+default|
+s2|--session s2
+s2|--session=s2
+s2|session attach s2
+default|remote-client-bridge
+default|remote-client-bridge --idle-timeout-v1
+s2|--session s2 remote-client-bridge
+s2|--session s2 remote-client-bridge --idle-timeout-v1
+EOF
+
+# 36. herdr server (起こすだけ) は決め直さずに固定名を渡す
+newhome wrap-start
+B="${H}/.ssh/agent/s.t.sshd.wrap-start-B"
+mksock "${B}"
+d=$(wrap wrapper wrap-start "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" server)
+if [[ $(rc "${d}") == 0 && $(hsock "${d}") == "${H}/.ssh/agent.sock" && $(link_of agent.sock) == "(無い)" ]]; then
+  ok "herdr server は決め直さずに SSH_AUTH_SOCK を固定名にする"
+else
+  ng "herdr server" "rc=$(rc "${d}") sock=$(hsock "${d}") link=$(link_of agent.sock) err=$(err "${d}")"
+fi
+
+# 37. 何もしない呼び出し
+i=0
+while IFS= read -r args; do
+  i=$((i + 1))
+  newhome "wrap-none-${i}"
+  B="${H}/.ssh/agent/s.t.sshd.wrap-none${i}-B"
+  mksock "${B}"
+  read -r -a argv <<<"${args}"
+  d=$(wrap wrapper "wrap-none-${i}" "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" "${argv[@]}")
+  if [[ $(rc "${d}") == 0 && $(hsock "${d}") == "${B}" && -z $(find "${H}/.ssh" -maxdepth 1 -name 'agent*.sock') ]]; then
+    ok "何もしない: herdr ${args} は env も固定名も変えない"
+  else
+    ng "何もしない: herdr ${args}" "rc=$(rc "${d}") sock=$(hsock "${d}") fixed=$(find "${H}/.ssh" -maxdepth 1 -name 'agent*.sock') err=$(err "${d}")"
+  fi
+done <<'EOF'
+status client --json
+--session s2 status server --json
+server stop
+server live-handoff --import-exe /x
+pane list
+--remote lavie.local
+--remote=lavie.local --session s2
+--version
+--help
+session attach help
+session list
+EOF
+
+# 38. HERDR_SESSION (pane の中の env など)
+newhome wrap-env
+B="${H}/.ssh/agent/s.t.sshd.wrap-env-B"
+mksock "${B}"
+d=$(wrap wrapper wrap-env "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" HERDR_SESSION=s7 remote-client-bridge)
+if [[ $(rc "${d}") == 0 && $(hsock "${d}") == "${H}/.ssh/agent.s7.sock" && $(link_of agent.s7.sock) == "${B}" ]]; then
+  ok "引数に session が無ければ HERDR_SESSION の session"
+else
+  ng "HERDR_SESSION" "rc=$(rc "${d}") sock=$(hsock "${d}") link=$(link_of agent.s7.sock) err=$(err "${d}")"
+fi
+
+# 39. bridge の stdin と stdout はそのまま (herdr の通信)
+newhome wrap-stdio
+B="${H}/.ssh/agent/s.t.sshd.wrap-stdio-B"
+mksock "${B}"
+printf 'PING' >"${work}/ping"
+d=$(wrap_in "${work}/ping" wrapper wrap-stdio "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" remote-client-bridge)
+if [[ $(rc "${d}") == 0 && $(out "${d}") == HERDR-OUT && -z $(err "${d}") && $(hlog "${d}") == *'stdin: PING'* &&
+$(link_of agent.sock) == "${B}" ]]; then
+  ok "bridge の stdin は本物の herdr が全部読み、stdout には本物の herdr の出力だけが出る (stderr も空)"
+else
+  ng "bridge の stdin と stdout" "out=$(out "${d}") err=$(err "${d}") log=$(hlog "${d}")"
+fi
+
+# 40. WSL の手元
+newhome wrap-wsl
+d=$(wrap wrapper wrap-wsl)
+if [[ $(rc "${d}") == 0 && $(hsock "${d}") == "(無い)" && -z $(find "${H}/.ssh" -maxdepth 1 -name 'agent*.sock') ]]; then
+  ok "WSL の手元では SSH_AUTH_SOCK を足さない"
+else
+  ng "WSL の手元" "rc=$(rc "${d}") sock=$(hsock "${d}")"
+fi
+
+# 41. pjp-agent-link が失敗しても・返事をしなくても herdr は起きる
+newhome wrap-fail
+B="${H}/.ssh/agent/s.t.sshd.wrap-fail-B"
+mksock "${B}"
+d1=$(wrap wrapper-fail wrap-fail "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" remote-client-bridge)
+t0=$(date +%s)
+d2=$(wrap wrapper-hang wrap-hang "${conn}" "SSH_AUTH_SOCK=${B}" "PJP_SSH_CLIENT=${PC}" remote-client-bridge)
+t1=$(date +%s)
+if [[ $(rc "${d1}") == 0 && $(hsock "${d1}") == "${B}" && $(out "${d1}") == HERDR-OUT && $(rc "${d2}") == 0 &&
+$(hsock "${d2}") == "${B}" ]] && ((t1 - t0 < 20)); then
+  ok "pjp-agent-link が失敗しても・返事をしなくても ($((t1 - t0)) 秒で打ち切る)、元の env で herdr を起こす"
+else
+  ng "pjp-agent-link の失敗" "1: rc=$(rc "${d1}") sock=$(hsock "${d1}") / 2: rc=$(rc "${d2}") sock=$(hsock "${d2}") 秒=$((t1 - t0))"
 fi
 
 echo
