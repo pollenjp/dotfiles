@@ -13,6 +13,9 @@
 #   - 新しく作る flake.nix の先頭に「# 雛形の版: <印>」があり、印は local-flake-migrate.sh id が heredoc の原文から
 #     出すものと同じ。作った flake.nix は local-flake-migrate.sh render --file の出力と 1 バイトも違わない
 #     (local-flake-migrate.sh が雛形の各版を描くやり方が、本物の heredoc の展開と合っている)。setup の symlink も張る
+#   - dotfiles-private の入力 (inputs.dotfiles-private.url の path: と flake = false) は、clone の nix/ が無ければ本体の
+#     stub (<本体>/nix/private-stub) を、あればその nix/ を指し、どちらを指したかを出す。どちらも render --file
+#     (同じ --private-dir) と 1 バイトも違わない
 #   - 既にあり、印が今の雛形と同じなら「既にあります」で、雛形の版の警告は出さない (中身は変えない)
 #   - 印が前の版・印の行が無いなら、「flake.nix は前の雛形から作られています」と、移し方
 #     (local-flake-migrate.sh prepare と pjp-dotfiles-local-flake-migrate skill) と、--force で値が消えることを
@@ -59,7 +62,7 @@ ng() {
 new_case() {
   local c="${work}/$1"
   mkdir -p "${c}/repo/nix/scripts" "${c}/home"
-  cp "${dir}/setup-local-flake.sh" "${dir}/local-flake-migrate.sh" "${c}/repo/nix/scripts/"
+  cp "${dir}/setup-local-flake.sh" "${dir}/local-flake-migrate.sh" "${dir}/private-host.sh" "${c}/repo/nix/scripts/"
   echo "${c}"
 }
 
@@ -67,8 +70,10 @@ new_case() {
 run() {
   local c=$1
   shift
+  # dotfiles-private の clone は、渡さなければ無い場所にする (手元の本物の clone を見せない)
   HOME="${c}/home" GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
     DOTFILES_LOCAL_DIR="${c}/local" DOTFILES_ALLOW_ANY_PATH=1 \
+    DOTFILES_PRIVATE_DIR="${DOTFILES_PRIVATE_DIR:-${c}/no-private}" \
     env ${DOTFILES_SETUP_WARNINGS+"DOTFILES_SETUP_WARNINGS=${DOTFILES_SETUP_WARNINGS}"} \
     "${BASH}" "${c}/repo/nix/scripts/setup-local-flake.sh" "$@" >"${c}/out" 2>"${c}/err"
   echo $? >"${c}/rc"
@@ -95,12 +100,36 @@ if [[ $(rc "${c}") == 0 && -n ${want_id} && $(marker_of "${c}/local/flake.nix") 
 else
   ng "印" "rc=$(rc "${c}") id=${want_id} file=$(marker_of "${c}/local/flake.nix" 2>/dev/null) $(err "${c}")"
 fi
-if migrate "${c}" render --file "${c}/repo/nix/scripts/setup-local-flake.sh" --nix-dir "${c}/repo/nix" >"${c}/rendered" \
+if migrate "${c}" render --file "${c}/repo/nix/scripts/setup-local-flake.sh" --nix-dir "${c}/repo/nix" \
+  --private-dir "${c}/repo/nix/private-stub" >"${c}/rendered" \
   && cmp -s "${c}/rendered" "${c}/local/flake.nix"; then
   ok "作った flake.nix は local-flake-migrate.sh render --file の出力と同じ (描き方が本物の heredoc と合う)"
 else
   ng "render と本物の heredoc が違う" "$(diff "${c}/rendered" "${c}/local/flake.nix" | head -20)"
 fi
+if grep -qxF "  inputs.dotfiles-private.url = \"path:${c}/repo/nix/private-stub\";" "${c}/local/flake.nix" \
+  && grep -qxF '  inputs.dotfiles-private.flake = false;' "${c}/local/flake.nix" \
+  && grep -qF "dotfiles-private: clone の nix/ が無いので、本体の空の stub を指しました (${c}/repo/nix/private-stub)" "${c}/out"; then
+  ok "clone の nix/ が無ければ、dotfiles-private の入力は本体の stub を指し、そう出す"
+else
+  ng "dotfiles-private の入力 (stub)" "$(grep -n 'dotfiles-private' "${c}/local/flake.nix") $(out "${c}")"
+fi
+
+# 1b. clone の nix/ があれば、dotfiles-private の入力はそこを指す (render --file と同じ)
+c=$(new_case t1b)
+mkdir -p "${c}/private/nix/hosts"
+DOTFILES_PRIVATE_DIR="${c}/private" run "${c}"
+if [[ $(rc "${c}") == 0 ]] \
+  && grep -qxF "  inputs.dotfiles-private.url = \"path:${c}/private/nix\";" "${c}/local/flake.nix" \
+  && grep -qF "dotfiles-private: ${c}/private/nix を読みます" "${c}/out" \
+  && migrate "${c}" render --file "${c}/repo/nix/scripts/setup-local-flake.sh" --nix-dir "${c}/repo/nix" \
+    --private-dir "${c}/private/nix" >"${c}/rendered" \
+  && cmp -s "${c}/rendered" "${c}/local/flake.nix"; then
+  ok "clone の nix/ があれば、dotfiles-private の入力はそこを指し、render --file と同じ"
+else
+  ng "dotfiles-private の入力 (clone)" "rc=$(rc "${c}") $(grep -n 'dotfiles-private' "${c}/local/flake.nix") $(out "${c}") $(err "${c}")"
+fi
+c="${work}/t1"
 if [[ -L ${c}/local/setup && $(readlink "${c}/local/setup") == "${c}/repo/nix/scripts/setup.sh" ]] \
   && grep -qF "${c}/repo/nix/scripts/local-flake-migrate.sh prepare" "${c}/local/flake.nix"; then
   ok "setup の symlink を張り、雛形の印の案内に local-flake-migrate.sh のパスを書く"
