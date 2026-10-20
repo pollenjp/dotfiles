@@ -594,6 +594,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
+| `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
@@ -689,6 +690,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
+| 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#powertoys-を入れる-winget)） |
 | 6.8.2 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
@@ -2662,6 +2664,47 @@ clone / pull はネットワークアクセスを伴うため `home.activation` 
 store 管理ではないので `~/.claude/skills/<名前>/` は**書き込める**。`nix-managed-guard.sh`
 も（`/nix/store` を指さないので）止めない。編集はそのまま効くが、実体は
 claude-skills の作業クローンなので **commit / push しないと他のマシンには届かない**。
+
+### herdr の集約ハブ (`~/h`)
+
+`~/h` は、herdr で子の Claude を回す集約（指揮役）の会話の受け口（ハブ）。コードを持たない git repo（remote なし）で、
+決まりのファイル（`CLAUDE.md`・`.claude/settings.json`・`.gitignore`）の雛形と、それを写す `hub-init.sh` は
+claude-skills（private）の skill `pjp-herdr-hub` にある。ハブでの会話の決まりも、その skill の側に書いてある。
+
+**`~/h` を作るのは `setup` の `bootstrap-herdr-hub.sh`。** claude-skills の skill を張る `bootstrap-claude-skills.sh` の後
+（`order: 60`。[前述](#bootstrap-の実行順)）に、`~/.claude/skills/pjp-herdr-hub/scripts/hub-init.sh` を引数なしで
+（既定の `~/h` に）打つ。
+
+```sh
+~/dotfiles/setup --steps bootstrap-herdr-hub                 # この手順だけ流す
+~/.claude/skills/pjp-herdr-hub/scripts/hub-init.sh --check   # 書かずに雛形との差を見る (差があれば終了コード 1)
+```
+
+- 「新しいマシン適用」と「既存マシン更新」の両方に入る。`hub-init.sh` は打ち直しても雛形との差だけを直す（差が無ければ
+  何もしない）ので、claude-skills の雛形が新しくなったときも `--update` で `~/h` に入る（同じ実行の中で、先に
+  `bootstrap-claude-skills.sh` が claude-skills を進める）
+- `~/h` の `CLAUDE.md` などを手で直しても、次の `--update` で雛形に戻る。直すなら claude-skills の雛形を直す
+- 作り済みの worktree（`~/.herdr/worktrees/h/…`）の `CLAUDE.md` などは直さない（`hub-init.sh` の決まり。雛形の変更は、
+  これから切る worktree から効く）
+- `hub-init.sh` も雛形も private な claude-skills の作業クローンにあるので、Nix（`home.activation`）では作らない
+  （[なぜ flake input にしないのか](#なぜ-flake-input-にしないのか)と同じ理由）
+
+#### 作れなくても止まらない
+
+`setup.sh` は手順が 1 つ失敗すると残りを走らせないので、ここでは止めない（止めると後ろの `bootstrap-windows-*` などまで
+巻き添えになる）。
+
+| 状況 | 挙動 |
+| --- | --- |
+| `pjp-herdr-hub` が無く、claude-skills も使っていない（claude-skills を取れないマシン） | 1 行出して通す。警告はしない（取れないことは `bootstrap-claude-skills` が警告する） |
+| claude-skills の clone はあるのに `pjp-herdr-hub` が無い・リンクが切れている | 警告して通す（clone が古いか、claude-skills の側で skill の名前が変わった・消えた。黙ると `~/h` が作られなくなったことに気付けない） |
+| `pjp-herdr-hub` はあるのに `hub-init.sh` が無い | 警告して通す（skill の中で名前か場所が変わったら、`bootstrap-herdr-hub.sh` を合わせる） |
+| `hub-init.sh` が 0 以外で終わった | `hub-init.sh` の出力ごと警告し（最後の[警告のまとめ](#途中の警告のまとめ)にも載る）、`setup` は続ける。直してから上の `--steps` で流し直す |
+
+clone があるかは、`bootstrap-claude-skills.sh` が控えた場所（`~/.local/state/dotfiles/claude-skills-dir`。
+[掃除の判定](#掃除の判定)）が git の clone かで見る。`hub-init.sh` が止まる条件（`~/h` が別の repo の中、まだハブでないのに
+雛形の外のものがある、など。止まるときは何も書かない）は `hub-init.sh` の先頭のコメントにある。git の commit に失敗した
+（名前とメールが無いなど）ときも 0 以外で終わる（ファイルは写したまま。直して流し直せば commit する）。
 
 ### 長い応答を読む web ビューア (cc-pages)
 
