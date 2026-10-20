@@ -2,7 +2,7 @@
 
 ローカル flake (`~/dotfiles/flake.nix`) の雛形は、dotfiles-private の clone の `nix/` を `path:` の入力
 (`inputs.dotfiles-private`) に取り、`nix/hosts/<user>@<hostname>.nix` に登録した PC のホストを読む
-（[ADR 025](../../docs/adr/README.md)・[`nix/README.md`](../README.md#dotfiles-private-に登録したホスト)）。
+（[ADR 025](../../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)・[`nix/README.md`](../README.md#dotfiles-private-に登録したホスト)）。
 
 雛形を書いたときに clone の `nix/` が無かったマシン（dotfiles-private を取れない会社の PC・clone する前の新しい PC）では、
 入力の行の形を変えずに、ここを指す。`hosts/` が無いので、`dotfiles.lib.privateHosts` は何も足さない。

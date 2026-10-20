@@ -34,6 +34,7 @@ dotfiles を Nix home-manager で宣言的に管理するためのディレク�
 | --- | --- | --- |
 | `~/ghq/github.com/pollenjp/dotfiles` | リポジトリ本体 | 管理下 |
 | `~/dotfiles` | ローカル専用の flake と `setup` への symlink | **管理外** |
+| `~/ghq/github.com/pollenjp/dotfiles-private` | private な片割れ（ssh の接続先・辞書・登録した PC のホスト `nix/hosts/`。`setup` が取る） | 管理下（private） |
 
 本体を ghq 配下に置くのは、`cdrepo` など ghq 前提の仕組みと置き場所を揃え、
 他のリポジトリと同じ規則で辿れるようにするため。一方で日々叩くパスは短く
@@ -76,10 +77,13 @@ ghq get git@github.com:pollenjp/dotfiles.git
 
 ```
 ~/dotfiles/
-├── flake.nix   本体を input として取り込み、homeConfigurations を再輸出する
+├── flake.nix   本体と dotfiles-private の nix/ を input として取り込み、homeConfigurations を再輸出する
 ├── flake.lock  nix が生成する
 └── setup -> .../nix/scripts/setup.sh
 ```
+
+dotfiles-private の `nix/` は、この PC を登録したホストを読むための 2 つ目の `path:` の入力（[後述](#dotfiles-private-に登録したホスト)）。
+clone の `nix/` がまだ無いマシンでは、本体の空の stub（`nix/private-stub`）を指す。
 
 以後はここから実行する。
 
@@ -397,12 +401,15 @@ error: NAR hash mismatch in input 'path:/home/pollenjp/ghq/.../nix?narHash=sha25
 判定は「実物の narHash が lock に入っているか」だけで、
 **合っているときは何もしない**（変わっていないのに lock を触ると、触ったのか判らなくなる）。
 `nix hash path` は本体のディレクトリで 0.07 秒程度なので毎回計算して構わない。
+`path:` の入力は本体（`dotfiles`）と dotfiles-private の `nix/`（`dotfiles-private`。[前述](#dotfiles-private-に登録したホスト)）の
+2 つで、合っていない入力だけをまとめて張り直す（dotfiles-private の `nix/` も、取得や手での編集で変わる）。
 
 手でやるなら input 名を指定する。張り直すと本体の新しい pin も推移的に伝わる
 （`Updated input 'dotfiles/nixpkgs'`）。
 
 ```sh
 nix flake update dotfiles --flake ~/dotfiles
+nix flake update dotfiles-private --flake ~/dotfiles   # dotfiles-private の nix/ を直した・取ったとき
 ```
 
 > `nix flake update --flake ~/dotfiles`（input 名なし）でも直るが、`~/dotfiles/flake.nix` に
@@ -447,9 +454,13 @@ nix flake update dotfiles --flake ~/dotfiles
 
 | 選択肢 | 実行される手順 |
 | --- | --- |
-| 新しいマシン適用 | 1 → 2 → 2.5 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
-| 既存マシン更新 | 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
+| 新しいマシン適用 | 1 → 2 → 2.4 → 2.5 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
+| 既存マシン更新 | 2.4 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
+
+2.4 `private-fetch` は dotfiles-private を **switch の前に** 取る（clone があれば取得して fast-forward する。clone が無ければ何もせず、
+switch のあとの `bootstrap-dotfiles-private` が clone する）。登録したホストの値を直して push したあと、`--update` 1 回でその値で
+switch させるため（[後述](#dotfiles-private-に登録したホスト)）。取れなくても止めない。
 
 「既存マシン更新」は `switch` に加えて `bootstrap-*` と `exe-exec-trace` を
 毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
@@ -481,20 +492,26 @@ nix flake update dotfiles --flake ~/dotfiles
 下の「実行される手順」にも出る）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
-対象ホストは自動判定する。順は次の 2 つで、違うものを使うなら `h` で選び直すか
+対象ホストは自動判定する。順は次の 3 つで、違うものを使うなら `h` で選び直すか
 `--host <名前>`（`DOTFILES_HOST` も同じ）。
 
 1. `~/dotfiles/flake.nix` が定義しているホスト（[登録簿を上書きする側](#登録簿に載せずにマシンを足す)）
-2. `$USER` と `uname` からの推測（WSL なら `<user>@wsl`、次に `<user>@<system>`）
+2. dotfiles-private に登録したこの PC のホスト（`nix/hosts/<user>@<短い hostname>.nix`。ローカル flake が clone の `nix/` を
+   読んでいるときだけ。[後述](#dotfiles-private-に登録したホスト)）
+3. `$USER` と `uname` からの推測（WSL なら `<user>@wsl`、次に `<user>@<system>`）
 
 1 を先に見るのは、あちらが登録簿を `//` で上書きするための場所だから。名前を
 書いた時点で「このマシンはこれ」という意思表示なので、推測より強く扱う。
-複数書いてあるときは**一番上**のものを採る（2 の候補と同名のものが下にあっても
-そちらへは行かない。既定を変えたいときは行を入れ替える）。2 へ落ちるのは、
-ローカル flake がホストを 1 つも定義していないときだけ。ローカル flake 由来の
-ときはヘッダに `(ローカル flake)` と出る。
+複数書いてあるときは**一番上**のものを採る（3 の候補と同名のものが下にあっても
+そちらへは行かない。既定を変えたいときは行を入れ替える）。2 はその PC の値の全部を持つホストなので、
+登録した PC では `--host` を付けなくてよい。3 へ落ちるのは 1 も 2 も無いときだけ。ローカル flake・dotfiles-private
+由来のときはヘッダに `(ローカル flake)`・`(dotfiles-private)` と出る。`--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と
+違うホストを選ぶと警告する（止めない。最後の警告のまとめの `[対象ホスト]` にも載る）。
 
-自動化していないのは手順 0（`hosts/default.nix` への追加）と
+どのホストをどう決めたかは `--which-host` で見られる（`<ホスト><TAB><決め方>`。決め方は `--host`・`DOTFILES_HOST`・`local`・
+`private`・`guess`・`menu`）。
+
+自動化していないのは手順 0（マシンの登録）と
 手順 5（mise の `config.toml` 整理）だけ。手順 7 (`chsh`) は
 「必要なら」なのでプリセットには入れていないが、カスタムから選べる。
 
@@ -505,6 +522,7 @@ nix flake update dotfiles --flake ~/dotfiles
 ~/dotfiles/setup --update                 # 「既存マシン更新」と同じ
 ~/dotfiles/setup --steps switch,bootstrap-mise
 ~/dotfiles/setup --list                   # 手順の id 一覧
+~/dotfiles/setup --which-host             # 対象ホストと決め方 (自動判定の結果) を見るだけ
 ~/dotfiles/setup --new-machine --dry-run  # 走るコマンドを見るだけ
 ~/dotfiles/setup --new-machine --backup   # 既存ファイルを退避してから置き換える
 ~/dotfiles/setup --self-update --update   # 本体を最新にしてから switch
@@ -592,7 +610,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-mise.sh` | 10 | `claude` を入れる |
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
-| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある) |
+| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
@@ -673,9 +691,10 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
-| 0 | `hosts/default.nix` にマシンを 1 エントリ追加 | — | WSL なら `wsl = { ... }` も（[後述](#マシン登録簿-hostsdefaultnix)） |
+| 0 | マシンを登録する | — | 実機は dotfiles-private に登録する（`pjp-dotfiles-register-host` skill。Claude Code が入ってから。[後述](#dotfiles-private-に登録したホスト)）。それまでは推測のホスト（`<user>@<system>` など）か、`~/dotfiles/flake.nix` に足したホストで当てる。型だけで足りるなら登録は要らない |
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
+| 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
@@ -808,7 +827,8 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
 `bootstrap-*` と `exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
-覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。
+覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。dotfiles-private に登録した PC では
+`--host` を付けない（setup が登録したホストを選ぶ。[後述](#dotfiles-private-に登録したホスト)）。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
 本体ごと最新にするなら `--self-update`（[前述](#本体を最新にする---self-update)）、
@@ -833,6 +853,11 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 ## マシン登録簿 (hosts/default.nix)
 
 1 エントリが 1 マシン。マシンごとの差は `mkHome` に渡す値で吸収する。
+
+> 実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に置く方向にした
+> （[後述](#dotfiles-private-に登録したホスト)・[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)）。
+> public のこの登録簿には型（`pollenjp@x86_64-linux` など）と検証用の `sandbox` を残す。今ある実機の行
+> （`pollenjp@wsl`・`pollenjp@wsl-no-1password`・`pollenjp@laptop`）は、実機が全部 private に移るまで（段階 3）残す。
 
 | 引数 | 既定 | 用途 |
 | --- | --- | --- |
@@ -921,7 +946,8 @@ outputs =
   {
     inherit (dotfiles) packages devShells formatter lib;
 
-    homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
+    # 雛形では privateHosts (dotfiles-private に登録したホスト) を間に挟む。後述
+    homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // {
       tmp = dotfiles.lib.mkHome {
         username = "pollenjp";
         system = "x86_64-linux";
@@ -956,10 +982,12 @@ outputs =
 home-manager switch --flake ~/dotfiles#tmp
 ```
 
-`dotfiles.lib.hostsWith [ local ] // { ... }` としているので、登録簿のホストも同じ場所から
+`dotfiles.lib.hostsWith [ local ] // privateHosts // { ... }` としているので、登録簿のホストも同じ場所から
 引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。`hostsWith` は登録簿の
 全ホストに引数の module を前置して組み立て直すもので、本体の `dotfiles.homeConfigurations`
-は `hostsWith [ ]` に等しい。
+は `hostsWith [ ]` に等しい。`privateHosts`（`dotfiles.lib.privateHosts dotfiles-private`）は dotfiles-private に登録した
+ホストで、`local` は当たらない（[後述](#dotfiles-private-に登録したホスト)）。重ね順は登録簿 → dotfiles-private →
+このマシンだけのホストで、後ろが勝つ。
 
 #### このマシンだけの設定 (`local`)
 
@@ -987,6 +1015,8 @@ true の例だけ置いてある。聞かずに作り始めたいマシンだけ
 
 - `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
   素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
+- `local` は dotfiles-private に登録したホストには当たらない（その PC の値は登録したファイルにある）。登録した PC では、
+  `local` の値は `--host` で登録簿のホストを当てたときにだけ効く（[後述](#dotfiles-private-に登録したホスト)）
 - 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。値を引き継いで今の雛形へ移すやり方は
   [次の節](#雛形が新しくなったら)（`--force` で作り直すと、`local` に書いた値と手で足したホストが消える）
 - `windowsUserName` を `wsl.onePassword` の下に書いた古い形
@@ -1036,6 +1066,9 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
 ```
 
 - 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
+- dotfiles-private の入力（[前述](#dotfiles-private-に登録したホスト)）も移す。今の雛形は clone の `nix/` があればそこを、無ければ本体の
+  stub を指すので、clone ができたあとは印が同じでも `status` が 1 になり、`prepare` がその 1 行を指し直す。移したあと、この PC を
+  登録したホストが dotfiles-private から足されるなら、`compare` はそれを違いとして出す（setup の選ぶホストが変わる）
 - 元の雛形は印の版。印が無ければ `setup-local-flake.sh` の履歴の各版を描き（古い版の script は実行しない）、
   旧いファイルとの差分が最も小さい版。`--base <rev>` で選び直せる
 - 片側が元の行の前後に足しただけの衝突（コメントを外した行の直後に雛形が節を足した、など）は自動で解く。
@@ -1081,6 +1114,101 @@ nix build --impure --expr '
   }).activationPackage' -o /tmp/hm
 /tmp/hm/activate
 ```
+
+### dotfiles-private に登録したホスト
+
+実機（その PC の値の全部を持つホスト）は、private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の
+`nix/hosts/<user>@<hostname>.nix` に 1 PC 1 ファイルで置ける（[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)）。
+登録した PC では、`~/dotfiles/setup --update` が `--host` なしでそのホストを選ぶ。値は git（private）に残るので、雛形が新しくなっても
+PC ごとに移さなくてよい。
+
+```
+dotfiles-private/
+└── nix/
+    └── hosts/
+        └── <user>@<hostname>.nix    ファイル名から .nix を除いたものがホストの名前
+```
+
+中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。今まで `local` に書いていた値も
+このファイルに書く（`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`）。
+
+```nix
+# 例 (値は作り物)
+{ mkHome, ... }:
+mkHome {
+  username = "alice";
+  system = "x86_64-linux";
+  claude = {
+    devTracker.enable = true;
+    notion.profile = "work";
+  };
+  modules = [
+    {
+      dotfiles.ccPages.port = 7801;
+    }
+  ];
+}
+```
+
+#### 読み方
+
+- ローカル flake の雛形が clone の `nix/` を 2 つ目の `path:` の入力（`inputs.dotfiles-private`。`flake = false`）に取り、
+  本体の `dotfiles.lib.privateHosts` が `hosts/*.nix` からホストを組み立てる。本体の flake は dotfiles-private を input に持たない
+  （public の lock に private の rev を残さない。ADR 015 / 016）
+- **`local` は当たらない。** 素の `mkHome` で組むので、ファイルがその PC の値の全部を持つ
+- 重ね順は登録簿 → dotfiles-private → `~/dotfiles/flake.nix` に足したホスト（後ろが勝つ）。登録簿と同じ名前なら dotfiles-private が勝つ
+- 読むのは `nix/` の下だけで、中身は誰でも読める `/nix/store` に入る（`ssh/` や辞書は入らない）。秘密（API キー・トークン）は置かない
+  （[`~/.config/pjp/env`](#マシンローカルの環境変数-configpjpenv)）
+- 雛形を書いたときに clone の `nix/` が無かったマシン（dotfiles-private を取れない会社の PC・clone する前の新しい PC）は、入力が本体の
+  空の stub（`nix/private-stub`）を指す。clone ができたら、[値を引き継いで今の雛形へ移す](#雛形が新しくなったら)ときに
+  clone の `nix/` へ指し直る（`local-flake-migrate.sh status` は、印が同じでも入力が違えば知らせる）
+- 本体と同じく narHash で lock される。setup は switch の前に、`path:` の入力のうち合っていないものをまとめて張り直す
+  （[後述](#ローカル-flake-の-lock-も張り直す)）
+
+#### setup が選ぶ
+
+この PC の名前は `<user>@<短い hostname>`（user は `$USER`、hostname は macOS なら `LocalHostName`、ほかは `uname -n` の最初の `.` まで）。
+clone に `nix/hosts/<その名前>.nix` があり、ローカル flake がその clone の `nix/` を読んでいれば、`--host` が無くてもそのホストを選ぶ
+（[決める順](#まとめて実行する)）。名前と clone の場所を決めるのは `nix/scripts/private-host.sh` だけ（`name`・`dir`）。
+
+```sh
+~/dotfiles/setup --which-host        # <user>@<hostname><TAB>private のように、選ぶホストと決め方を出す
+```
+
+| 起きていること | setup の知らせ |
+| --- | --- |
+| clone にこの PC のファイルがあるのに、ローカル flake が読んでいない（入力が無い・stub を指す） | 残りの手作業に、推測に落ちたことと直し方（`local-flake-migrate.sh prepare`） |
+| `--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と違うホストを選んだ | 警告（止めない。明示した方で当てる。値は登録したファイルではなく、そのホストの定義と `local` から来る） |
+| ローカル flake の dotfiles-private の入力の指す先が無い（clone を消した・動かした） | 警告（clone し直すか、指し直す） |
+
+「既存マシン更新」と「新しいマシン適用」は、dotfiles-private を switch の前に取る（手順 2.4 `private-fetch`）。値を直して push すれば、
+`--update` 1 回でその値で switch する。clone が無ければ何もせず、switch のあとの `bootstrap-dotfiles-private` が clone する。
+
+#### 登録する
+
+その PC で Claude Code に `pjp-dotfiles-register-host` skill を使わせる。調べる → 下書きの確認 → dotfiles-private の branch に書く →
+比べる → PR → merge 後にローカル flake を今の雛形へ移す、の順で、書く前に確認を取る。決まった処理は `nix/scripts/private-host.sh`:
+
+```sh
+p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
+bash $p inspect                                          # この PC・登録の有無・今の世代と一致するホスト (元にするホストの候補)
+bash $p draft --base <ホスト>                             # 元のホスト + local から nix/hosts/<名前>.nix の下書きを描く (stdout)
+bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形と登録したホストを同じ本体・同じ lock で評価し、drvPath を比べる
+```
+
+- `draft` は元のホストの `options.dotfiles` を歩き、option の既定より強い定義を持つ値を描く（既定と同じ値を明示した行も描く）。
+  `local` の dotfiles の外の行（`programs.git…` など）は描かず、下書きの頭のコメントで知らせる
+- `compare` が 0 なら、この登録で home-manager の世代の中身は変わらない。今の世代との一致は参考として出すだけ
+  （本体を進めると、skill を 1 つ足しただけでも世代が変わる）
+- merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、移した値を `local` から外す。
+  移したあとの `local-flake-migrate.sh compare` は、この PC のホストが dotfiles-private から足されることを「違い」として出す
+  （setup の選ぶホストが変わるため。受け入れるなら `apply --accept-changes`）
+
+#### 値を一時的に試す
+
+登録した PC では `local` が当たらないので、dotfiles-private の作業ツリーのファイルを直して `~/dotfiles/setup --update` する
+（`path:` の入力は commit していない変更も見える。git status に残るので戻し忘れにも気づける。ただし、そのまま `--update` すると
+`private-fetch` は未コミットの変更があるので取得を飛ばす）。
 
 ## 日常運用
 
@@ -1269,8 +1397,11 @@ NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されて�
 固定名の指す先の、同じ "Signing" の鍵で署名する。ラッパーは置かない。
 
 署名が入るのは `onePassword.enable = true` のマシンだけ。登録簿では `pollenjp@wsl` と `pollenjp@laptop`。
-lavie（`pollenjp@laptop`）の home は `--host pollenjp@laptop` で当てる。`--host` なしの `setup` は、
-ローカル flake がホストを定義していないと汎用の `pollenjp@x86_64-linux` を選び、署名が入らない。
+dotfiles-private に登録した PC は `--host` を付けない（setup が登録したホストを選び、署名を入れるかもそのファイルの `onePassword` で
+決まる。[前述](#dotfiles-private-に登録したホスト)）。登録していない PC の `--host` なしの `setup` は、ローカル flake がホストを定義して
+いないと汎用の `<user>@<system>` を選び、署名が入らない（署名の入る登録簿のホストを当てるなら `--host`）。登録した PC で
+`--host pollenjp@laptop` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、setup が警告する
+（[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の手順は、登録する前の記録）。
 
 `git log --show-signature` は `gpg.ssh.allowedSignersFile` が無いのでエラーになる（WSL も同じ）。
 署名されたかは `git cat-file -p HEAD` の `gpgsig` か、push したあとの GitHub の Verified で見る。
