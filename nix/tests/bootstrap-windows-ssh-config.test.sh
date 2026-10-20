@@ -16,6 +16,8 @@
 #   - 旧経路の Include の 1 行 (BOM・CRLF・空白・空行つき) は置き換える。ツールのファイルには触らない
 #   - 手書きの config・Windows で変えたファイルは衝突 (exit 1・触らない)。--force は退避して上書きする
 #   - 正本の更新は上書き、正本から消えたファイルは消す (Windows で変えていれば衝突、--force で退避して消す)
+#   - config は Include の後ろに Host * と SetEnv PJP_SSH_CLIENT=%u@%L を持つ。前の版 (SetEnv の無い config) を
+#     置いたままのマシンでは、正本の更新として上書きする
 #   - 同じ名前のファイルは、中身が同じなら記録だけ、違えば衝突。--dry-run は何も書かない
 #   - 衝突の 1 行目は、置いた記録があれば「前回ここへ置いた中身と違う」、無ければ置いた記録が無いと出す
 #   - 確かめ: 揃っている / Bad owner / 読まれないファイル / 旧 clone / 呼べない・無い・固まる / 区切りと大小の違い
@@ -55,6 +57,17 @@ ng() {
 
 # script が置く config の中身 (script 側と同じ文字列)
 config_want='# dotfiles の nix/scripts/bootstrap-windows-ssh-config.sh が置く (手で直すと次の setup で衝突になる)。
+# マシン固有の Host は config.d\ に <名前>.ssh_config として置く。
+# config.d はファイル名の順に読み、同じキーは先に読んだ値が効く。
+Include config.d/*.ssh_config
+
+# ssh 先の herdr が「同じマシンから来た接続」を見分けるのに、このマシンを名乗る (dotfiles の ADR 025)。
+# 受け取る側の sshd に AcceptEnv PJP_SSH_CLIENT が要る。ssh は最初に当たった SetEnv の行だけを使うので、
+# config.d の Host に SetEnv を書いたら、そこにも PJP_SSH_CLIENT=%u@%L を足す。
+Host *
+  SetEnv PJP_SSH_CLIENT=%u@%L'
+# 前の版の config の中身 (SetEnv の無いもの。TKT-224 より前に置いた config)
+config_before_setenv='# dotfiles の nix/scripts/bootstrap-windows-ssh-config.sh が置く (手で直すと次の setup で衝突になる)。
 # マシン固有の Host は config.d\ に <名前>.ssh_config として置く。
 # config.d はファイル名の順に読み、同じキーは先に読んだ値が効く。
 Include config.d/*.ssh_config'
@@ -298,6 +311,22 @@ if [[ $(rc "${c}") == 0 ]] && same_file "$(wssh "${c}")/config.d/a.ssh_config" "
   ok "正本が更新されたら上書きする"
 else
   ng "正本の更新" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 9b. 前の版の config (SetEnv の無いもの) を置いたマシンは、正本の更新として上書きする
+c2=$(new_case t9b "${state_on}")
+deploy "${c2}"
+printf '%s\n' "${config_before_setenv}" >"$(wssh "${c2}")/config"
+old_sha=$(sha256sum <"$(wssh "${c2}")/config" | cut -d' ' -f1)
+f2="${c2}/home/.local/state/dotfiles/windows-ssh-config.deployed.json"
+jq --arg v "${old_sha}" '.files.config = $v' "${f2}" >"${f2}.tmp" && mv "${f2}.tmp" "${f2}"
+run "${c2}" 0
+if [[ $(rc "${c2}") == 0 && $(cat "$(wssh "${c2}")/config") == "${config_want}" ]] \
+  && grep -q 'config: 上書き (正本が更新された)' "${c2}/out" \
+  && grep -q '^  SetEnv PJP_SSH_CLIENT=%u@%L$' "$(wssh "${c2}")/config"; then
+  ok "前の版の config (SetEnv の無いもの) は、正本の更新として Host * の SetEnv PJP_SSH_CLIENT=%u@%L つきに上書きする"
+else
+  ng "前の版の config の上書き" "rc=$(rc "${c2}") $(outerr "${c2}") config=$(cat "$(wssh "${c2}")/config")"
 fi
 
 # 10. Windows で変えたファイルは衝突。--force で退避して上書きする
