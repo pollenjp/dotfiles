@@ -277,8 +277,8 @@ fi
 #   nix eval --raw path:<d>#homeConfigurations --apply <式>
 #     <d>/flake.nix を F とする。F が dotfiles-private の入力を持ち「# FAKE_」の行を持たなければ (compare の新しい形)、
 #     式の getAttr "<h>" の <h> の、その入力の hosts/<h>.nix を F にする。F に「# FAKE_EVAL_ERROR: <文>」があれば落ちる。
-#       tryEval (inspect)        F の「# FAKE_OUT: <h> <outPath>」ごとに「out<TAB><h><TAB><outPath>」
-#       config.dotfiles          F の「# FAKE_DOTFILES: <パス> <値>」ごとに「<パス><TAB><値>」
+#       tryEval (inspect)        F の「# FAKE_OUT: <h> <outPath>」ごとに「out<TAB><h><TAB><outPath>」(options.dotfiles を含む式は下)
+#       options.dotfiles         F の「# FAKE_DOTFILES: <パス> <値>」ごとに「<パス><TAB><値>」
 #       drvPath (compare)        F の「# FAKE_DRV: [<h>] <drvPath>」と「# FAKE_OUT: [<h>] <outPath>」を 2 行で
 fake_nix_bin="${work}/fake-nix-bin"
 mkdir -p "${fake_nix_bin}"
@@ -305,6 +305,7 @@ case $1 in
       e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${PJP_FLAKE}/flake.nix")
       [[ -z ${e} ]] || fail_with "${e}" >&2
       printf 'DRAFT base=%s name=%s\n' "${PJP_BASE}" "${PJP_NAME}"
+      printf 'MAIN=%s\n' "$(sed -n 's|^ *inputs\.dotfiles\.url = "path:\([^"]*\)";|\1|p' "${PJP_FLAKE}/flake.nix")"
       cat "${PJP_NOTES}"
       exit 0
     fi
@@ -320,11 +321,11 @@ case $1 in
     e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${f}")
     [[ -z ${e} ]] || fail_with "${e}" >&2
     case ${expr} in
+      *options.dotfiles*)
+        sed -n 's/^# FAKE_DOTFILES: \([^ ]*\) \(.*\)$/\1\t\2/p' "${f}"
+        ;;
       *tryEval*)
         sed -n 's/^# FAKE_OUT: \([^ ]*\) \(.*\)$/out\t\1\t\2/p' "${f}"
-        ;;
-      *config.dotfiles*)
-        sed -n 's/^# FAKE_DOTFILES: \([^ ]*\) \(.*\)$/\1\t\2/p' "${f}"
         ;;
       *drvPath*)
         drv=$(sed -n -e "s/^# FAKE_DRV: ${h} //p" -e 's/^# FAKE_DRV: \([^ ]*\)$/\1/p' "${f}")
@@ -480,6 +481,19 @@ if [[ $(rc "${c}") == 0 ]] && grep -qF 'DRAFT base=alice@x86_64-linux name=carol
   ok "draft: --out が無ければ stdout に出し、--name で名前を変えられる"
 else
   ng "draft (stdout)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+# draft は compare と同じ本体で評価する: ローカル flake の写しの inputs.dotfiles.url を、既定で script の repo の nix/ に、
+# --nix-dir があればそこに書き換える (ローカル flake は別の本体を指していても)
+sed -i "s|path:${c}/repo/nix\";|path:${c}/elsewhere/nix\";|" "${c}/local/flake.nix"
+mkdir -p "${c}/elsewhere/nix" "${c}/other-main/nix"
+run_nix "${c}" draft --base alice@x86_64-linux --flake "${c}/local"
+m_default=$(sed -n 's/^MAIN=//p' "${c}/out")
+run_nix "${c}" draft --base alice@x86_64-linux --flake "${c}/local" --nix-dir "${c}/other-main/nix"
+m_given=$(sed -n 's/^MAIN=//p' "${c}/out")
+if [[ ${m_default} == "${c}/repo/nix" && ${m_given} == "${c}/other-main/nix" ]]; then
+  ok "draft: compare と同じ本体で評価する (既定は script の repo の nix/、--nix-dir で変えられる)"
+else
+  ng "draft (本体)" "既定=${m_default} --nix-dir=${m_given} $(err "${c}")"
 fi
 printf '# FAKE_EVAL_ERROR: attribute '"'"'nosuch'"'"' missing\n' >>"${c}/local/flake.nix"
 run_nix "${c}" draft --base nosuch --flake "${c}/local"

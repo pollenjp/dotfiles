@@ -47,7 +47,8 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 ## 前提
 
 - `<p>` は ADR 025 以降の本体の `nix/scripts/private-host.sh` のフルパス。`bash <p> <コマンド>` で流す (Bash tool はシェルの変数を
-  次の呼び出しへ持ち越さない)。`compare` の本体は、既定でこの script の repo の `nix/`
+  次の呼び出しへ持ち越さない)。`draft` と `compare` が評価する本体は、どちらも既定でこの script の repo の `nix/` (ローカル flake が
+  別の本体を指していても揃える)
 - **比べる間、本体の checkout を動かさない** (pull・編集・別の作業の commit)。`path:` の入力は narHash で lock されるので、途中で
   変わると比べ方がずれる。動きうるなら、`git -C <本体> status` で commit していない変更が無いことを見てから
   `git -C <本体> archive HEAD nix | tar -x -C <scratchpad>/body` で写し、その `<scratchpad>/body/nix/scripts/private-host.sh` を
@@ -68,11 +69,16 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)
 - **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した。「lock を写しで張り直して評価した」と
   出ていれば、本体が変わっているので一致しないのは想定どおり): 元にするホストを黙って決めない。
-  - 前の会話で決めた値 (チケットの決定・spec・PR) があれば、それを推奨の根拠にする。今の世代と違うなら、その違い (例: 署名が外れる) を確認で書く
+  - その PC について前に決めた値 (チケットの決定・登録の依頼・設計の spec。最初の登録は dotfiles の ADR 025 からリンクした spec) が
+    あれば、それを推奨の根拠にする。今の世代と違うなら、その違い (例: 署名が外れる) を確認で書く
   - 手がかり: 今の世代 (`readlink -f ~/.local/state/nix/profiles/home-manager`) と前の世代
     (`~/.local/state/nix/profiles/home-manager-<n>-link`) の `home-files/.config/git/config` の署名 (`gpgSign`)、`local` の値が当たって
-    いるか (cc-pages の port など)。登録簿で値の違う候補 (例: 署名の入る `pollenjp@laptop` と入らない `pollenjp@x86_64-linux`) を並べる
-  - 候補ごとに下書きを描いて比べ (手順 2)、ホストの問いと下書きの確認を 1 回にまとめてよい
+    いるか (cc-pages の port など)。登録簿で値の違う候補 (例: 署名の入る `pollenjp@laptop` と入らない `pollenjp@x86_64-linux`) を並べる。
+    今の世代がどの候補の形かを確かめるなら、compare の作業場所 (`--out`) の `old/` で候補の
+    `config.xdg.configFile."git/config".text` を `nix eval --raw` し、世代の `home-files/.config/git/config` と `diff` する
+  - 候補ごとに下書きを描いて比べ (手順 2。置き場所は `draft/<候補>/`・`preview/<候補>/` のように分ける)、ホストの問いと下書きの確認を
+    1 回にまとめてよい。推す候補が今の世代の形と違うなら、`compare --base <今の世代の形の候補> --private <推す候補の preview>` の
+    `config.dotfiles` の違いが「登録で今の世代から変わる値」になる
 - **WSL**: Windows のユーザー名。下書きの `wsl.windowsUserName` と合うか
 - **local の行**: dotfiles の option の外の行 (`programs.*` など) は下書きに入らない
 

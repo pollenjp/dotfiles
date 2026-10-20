@@ -51,8 +51,9 @@ usage() {
       この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録・ローカル flake (雛形の版・入力・手で
       足したホスト・local の行)・setup が --host なしで選ぶホスト・今の世代と outPath が一致するホスト
   private-host.sh draft --base <ホスト> [--flake <dir>] [--name <名前>] [--nix-dir <本体の nix>] [--out <ファイル> [--force]]
-      元にするホスト (+ local) から nix/hosts/<名前>.nix の下書きを描く。--out が無ければ stdout。在る --out は
-      --force が無いと書かない (2)。元のホストを評価できなければ 3
+      元にするホスト (+ local) から nix/hosts/<名前>.nix の下書きを描く。評価する本体は compare と同じ (--nix-dir。既定は
+      この script の repo の nix/)。--out が無ければ stdout。在る --out は --force が無いと書かない (2)。元のホストを
+      評価できなければ 3
   private-host.sh compare --base <ホスト> --private <dotfiles-private の作業ツリー> [--name <名前>] [--flake <dir>]
                           [--nix-dir <本体の nix>] [--out <作業場所>]
       旧い形 (ローカル flake の <ホスト>) と新しい形 (<作業ツリー>/nix/hosts/<名前>.nix) を同じ本体 (--nix-dir。既定は
@@ -365,15 +366,21 @@ drv_expr() {
   printf '%s' 'hs: let a = (builtins.getAttr "'"$1"'" hs).activationPackage; in a.drvPath + "\n" + a.outPath'
 }
 
-# 1 ホストの config.dotfiles を平らにして「パス<TAB>値の JSON」で 1 行ずつ出す式 (local-flake-migrate.sh と同じ)。
-# $1: ホスト (check_host 済み)
+# 1 ホストの dotfiles の option の値を「パス<TAB>値の JSON」で 1 行ずつ出す式。$1: ホスト (check_host 済み)。
+# config ではなく options.dotfiles を辿り、表に出ない option (visible = false。改名した旧名の alias。値は新しい名前の
+# option と同じ) は出さない (同じ違いが旧名と新しい名前の 2 行に出て読み違えるため)。関数は "<function>"、評価できない値は
+# "<評価できない>" にする
 dotfiles_expr() {
   printf '%s' 'hs: let
     flat = p: v:
-      if builtins.isAttrs v && !(v ? outPath) then
+      if builtins.isAttrs v && (v._type or "") == "option" then
+        (if (v.visible or true) == false then [ ] else
+          let r = builtins.tryEval (builtins.deepSeq v.value v.value); in
+          [ (p + "\t" + (if !r.success then "\"<評価できない>\"" else if builtins.isFunction r.value then "\"<function>\"" else builtins.toJSON r.value) + "\n") ])
+      else if builtins.isAttrs v then
         builtins.concatLists (map (k: flat (if p == "" then k else p + "." + k) (builtins.getAttr k v)) (builtins.attrNames v))
-      else [ (p + "\t" + (if builtins.isFunction v then "\"<function>\"" else builtins.toJSON v) + "\n") ];
-  in builtins.concatStringsSep "" (flat "" (builtins.getAttr "'"$1"'" hs).config.dotfiles)'
+      else [ ];
+  in builtins.concatStringsSep "" (flat "" (builtins.getAttr "'"$1"'" hs).options.dotfiles)'
 }
 
 # draft の式。値は env で渡す (PJP_FLAKE: 写しのディレクトリ、PJP_BASE: 元のホスト、PJP_NAME: この PC の名前、
@@ -540,7 +547,7 @@ cmd_inspect() {
 }
 
 cmd_draft() {
-  local flake_dir=${default_flake_dir} base="" name="" nd="" out="" force=0 text lines l
+  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} out="" force=0 text lines l
   while [[ $# -gt 0 ]]; do
     case $1 in
       --base | --flake | --name | --nix-dir | --out)
@@ -569,14 +576,14 @@ cmd_draft() {
   if [[ -n ${out} && -e ${out} && ${force} == 0 ]]; then
     die "--out が既にあります: ${out} (今の値と比べてから、上書きするなら --force)"
   fi
-  if [[ -n ${nd} ]]; then
-    nd=$(cd -P -- "${nd}" && pwd) || die "--nix-dir がありません: ${nd}"
-    check_path "${nd}"
-  fi
+  # compare と同じ本体で評価する (既定はこの script の repo の nix/)。ローカル flake が別の本体を指していても、写しの
+  # inputs.dotfiles.url をそこに書き換える (下書きと compare で評価する本体を揃える)
+  nd=$(cd -P -- "${nd}" && pwd) || die "--nix-dir がありません: ${nd}"
+  check_path "${nd}"
   need_nix
   need_tmp
   copy_flake "${flake_dir}" "${tmp}/cur"
-  [[ -z ${nd} ]] || set_main "${tmp}/cur/flake.nix" "${nd}"
+  set_main "${tmp}/cur/flake.nix" "${nd}"
   if ! lock_sync "${tmp}/cur"; then
     echo "!! ローカル flake の写しの lock を、path: の入力に合わせられません:" >&2
     eval_error_excerpt "${tmp}/cur.lock.log" >&2
