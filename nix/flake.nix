@@ -143,6 +143,7 @@
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
           local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
             pkgs.runCommand "check-test-grep-q-test"

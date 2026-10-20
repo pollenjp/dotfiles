@@ -31,7 +31,16 @@
 #               例だけ置く (7777 がほかと衝突するマシンだけ書く)。
 #               解説動画を答えを待たずに作り始めるか (dotfiles.claude.videoOffer.autoStart.enable) は
 #               本体の既定の false (作る前に聞く) のままで、コメントアウトした true の例だけ置く。
+#               先頭のコメントに「# 雛形の版: <印>」を置く。印は下の heredoc の原文 (展開する前) から
+#               local-flake-migrate.sh id が計算する値で、heredoc を直すと変わる。
 #   flake.lock  nix が生成する。
+#
+# ## 雛形が新しくなったら
+#
+# 既にある flake.nix は、雛形が変わっても触らない (--force は作り直すので、local に書いた値と手で足した
+# ホストが消える)。印が今の雛形と違えば (印の無い、印を入れる前の雛形も)、ここと setup.sh が知らせる。
+# 値を引き継いで今の雛形へ移すのは local-flake-migrate.sh (手順は nix/README.md「雛形が新しくなったら」。
+# Claude Code なら pjp-dotfiles-local-flake-migrate skill)。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
 # ## なぜ本体の git 管理下に置かないのか
@@ -213,18 +222,34 @@ fi
 
 mkdir -p "${local_dir}"
 
+# 雛形の版の印を計算し、照合する道具 (この script の隣)。印は heredoc の原文から計算する
+migrate="${script_dir}/local-flake-migrate.sh"
+migrate_cmd="${migrate} prepare"
+if [[ ${local_dir} != "${HOME}/dotfiles" ]]; then
+  migrate_cmd+=" --flake ${local_dir}"
+fi
+
 flake_file="${local_dir}/flake.nix"
 write_flake=1
 if [[ -f ${flake_file} && ${force} == 0 ]]; then
   write_flake=0
   if grep -qF "\"path:${nix_dir}\"" "${flake_file}"; then
     echo "  flake.nix: 既にあります (そのまま)"
-    # 雛形が変わっても既存のファイルには触らない。古い形のままだと、登録簿のホストに
-    # local (dotfiles.claude.devTracker.enable など) が当たらないので、知らせるだけ知らせる。
+    # 雛形が変わっても既存のファイルには触らない。印が今の雛形と違えば、値を引き継いで移す道具を知らせる
+    # (check は git も nix も使わない。調べられないとき (2) は黙る)。
+    stale_rc=0
+    stale=$("${BASH}" "${migrate}" check --flake "${local_dir}" 2>/dev/null) || stale_rc=$?
+    if [[ ${stale_rc} == 1 ]]; then
+      warn "flake.nix は前の雛形から作られています (雛形の版 ${stale})。" \
+        "値を引き継いで今の雛形へ移す: ${migrate_cmd} (Claude Code なら pjp-dotfiles-local-flake-migrate skill)" \
+        "--force は作り直すので、local に書いた値と手で足したホストが消えます。"
+    fi
+    # 古い形のままだと、登録簿のホストに local (dotfiles.claude.devTracker.enable など) が当たらないので、
+    # 何が困るかも知らせる。
     if ! grep -q 'hostsWith' "${flake_file}"; then
       warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。" \
         "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。" \
-        "手で足したホストが無ければ --force で作り直して local に書く。残すなら README「登録簿に載せずにマシンを足す」の形で local を足す。"
+        "直すなら ${migrate_cmd} で今の雛形へ移す (手で足したホストを引き継ぐ)。手で足したホストが無ければ --force で作り直してもよい。"
     fi
     if ! grep -q 'notion\.profile' "${flake_file}"; then
       warn "flake.nix の local に dotfiles.claude.notion.profile がありません。" \
@@ -240,9 +265,16 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
 fi
 
 if [[ ${write_flake} == 1 ]]; then
+  template_id=$("${BASH}" "${migrate}" id "${script_dir}/setup-local-flake.sh") \
+    || die "雛形の版の印を計算できません (${migrate} id)。"
   cat >"${flake_file}" <<EOS
 # ローカル専用の flake。setup-local-flake.sh が生成した。
 # **git 管理外**なので、ここに書いたことはこのマシンにしか無い。
+#
+# 雛形の版: ${template_id}
+#   雛形が新しくなると setup が知らせる。値を引き継いで今の雛形へ移すには
+#   (Claude Code なら pjp-dotfiles-local-flake-migrate skill):
+#     ${nix_dir}/scripts/local-flake-migrate.sh prepare
 #
 #   home-manager switch --flake ~/dotfiles#pollenjp@wsl
 #   ~/dotfiles/setup --update
