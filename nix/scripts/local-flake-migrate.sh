@@ -35,12 +35,23 @@ usage() {
 旧いローカル flake (~/dotfiles/flake.nix) を、値を引き継いで今の雛形へ移す。
 
 使い方:
+  local-flake-migrate.sh status [--flake <dir>]
+      ローカル flake の雛形の版の印が、今の雛形と同じかを出す (同じなら 0、違う・印が無いなら 1)
+  local-flake-migrate.sh check [--flake <dir>]
+      status の静かな版 (setup が使う)。同じなら何も出さず 0、違えば「旧い印 → 今の印」を出して 1。
+      調べられなければ 2。git も nix も使わない
+  local-flake-migrate.sh prepare [--flake <dir>] [--out <dir>]
+      作業場所 (--out。在るなら空であること。省けば mktemp -d) に、旧い flake の写し・元の雛形・
+      今の雛形と、3-way merge で移した new/flake.nix を作る
   local-flake-migrate.sh id [<setup-local-flake.sh のパス> | -]
       雛形の版の印 (8 桁の 16 進) を出す。省けばこの repo の setup-local-flake.sh、- なら stdin
   local-flake-migrate.sh render (--rev <rev> | --file <パス>) --nix-dir <パス>
       雛形の 1 版を描いて stdout に出す (--rev はこの repo の git の commit)
   local-flake-migrate.sh -h, --help
       これ
+
+  --flake の既定は ${DOTFILES_LOCAL_DIR:-~/dotfiles}。雛形の履歴と今の雛形は、この script が置かれた
+  repo の nix/scripts/setup-local-flake.sh から取る (今の雛形は作業ツリーのファイル)。
 EOS
 }
 
@@ -70,9 +81,15 @@ resolve_dir() {
 script_dir=$(resolve_dir "$0")
 repo_dir=$(dirname "$(dirname "${script_dir}")")
 template_rel=nix/scripts/setup-local-flake.sh
+self="${script_dir}/local-flake-migrate.sh"
+default_flake_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
 
-tmp=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate.XXXXXX")
-trap 'rm -rf "${tmp}"' EXIT
+# 一時ファイルの置き場は使うときに作る (check は mktemp も要らない)
+tmp=""
+trap '[[ -z ${tmp} ]] || rm -rf "${tmp}"' EXIT
+need_tmp() {
+  [[ -n ${tmp} ]] || tmp=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate.XXXXXX")
+}
 
 # heredoc の原文を出す。$1: setup-local-flake.sh のパス。開きの行がちょうど 1 つで、閉じの EOS もあるときだけ 0
 template_raw() {
@@ -133,6 +150,7 @@ template_render() {
 # render / id に渡す script を 1 つのファイルにする。$1: パスか -。出すのはファイルのパス
 script_file() {
   if [[ $1 == - ]]; then
+    need_tmp
     cat >"${tmp}/stdin.sh"
     printf '%s\n' "${tmp}/stdin.sh"
   else
@@ -143,10 +161,363 @@ script_file() {
 
 # この repo の、ある commit の setup-local-flake.sh をファイルに写して、そのパスを出す
 rev_file() {
-  local f="${tmp}/rev-$1.sh"
+  local f
+  need_tmp
+  f="${tmp}/rev-${1//\//_}.sh"
   git -C "${repo_dir}" show "$1:${template_rel}" >"${f}" 2>/dev/null \
     || die "この repo (${repo_dir}) の $1 に ${template_rel} がありません。"
   printf '%s\n' "${f}"
+}
+
+# flake.nix の「雛形の版」の印 (8 桁の 16 進) を出す。無ければ何も出さない
+local_marker() {
+  awk '
+    /^# 雛形の版: [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]([^0-9a-f]|$)/ {
+      sub(/^# 雛形の版: /, "")
+      print substr($0, 1, 8)
+      exit
+    }
+  ' "$1"
+}
+
+# flake.nix の inputs.dotfiles.url の path: のパスを出す (setup-local-flake.sh が書き、setup.sh の
+# sync_local_flake_lock が読む形)。無ければ何も出さない
+local_nix_dir() {
+  awk '
+    match($0, /^[[:space:]]*inputs\.dotfiles\.url[[:space:]]*=[[:space:]]*"path:[^"]*"/) {
+      s = substr($0, RSTART, RLENGTH)
+      sub(/^[^"]*"path:/, "", s)
+      sub(/"$/, "", s)
+      print s
+      exit
+    }
+  ' "$1"
+}
+
+# --flake を読む。flake_dir と flake (その flake.nix) を決め、ローカル flake でなければ 2 で止まる
+# (quiet なら何も出さない)。$1: quiet か loud、残り: 引数
+parse_flake_args() {
+  local mode=$1
+  shift
+  flake_dir=${default_flake_dir}
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --flake)
+        [[ $# -ge 2 ]] || die "--flake にディレクトリを渡してください"
+        flake_dir=$2
+        shift
+        ;;
+      --out)
+        [[ $# -ge 2 ]] || die "--out にディレクトリを渡してください"
+        out_dir=$2
+        shift
+        ;;
+      *) die "知らない引数です: $1 (--help)" ;;
+    esac
+    shift
+  done
+  flake="${flake_dir}/flake.nix"
+  if [[ ! -f ${flake} ]]; then
+    [[ ${mode} == quiet ]] || printf '!! ローカル flake がありません: %s\n' "${flake}" >&2
+    exit 2
+  fi
+  local_nix=$(local_nix_dir "${flake}")
+  if [[ -z ${local_nix} ]]; then
+    [[ ${mode} == quiet ]] \
+      || printf '!! %s に inputs.dotfiles.url = "path:…" がありません (setup-local-flake.sh が作ったローカル flake ではない)。\n' "${flake}" >&2
+    exit 2
+  fi
+}
+
+# この repo が git の作業ツリーで、雛形の履歴を引けることを確かめる
+need_history() {
+  git -C "${repo_dir}" rev-parse --git-dir &>/dev/null \
+    || die "この repo (${repo_dir}) は git の作業ツリーではないので、雛形の履歴を引けません。"
+}
+
+# 2 つのファイルの diff の行数 (< と > の行) を出す
+diff_lines() {
+  local rc=0
+  diff "$1" "$2" >"${tmp}/diff" || rc=$?
+  [[ ${rc} -le 1 ]] || die "diff に失敗しました: $1 $2"
+  grep -c '^[<>]' "${tmp}/diff" || true
+}
+
+# 元の雛形を決める。$1: 旧い flake.nix、$2: ${nix_dir} に入れるパス、$3: 旧いファイルの印 (無ければ空)。
+#
+# 履歴の各版 (作業ツリーに commit していない変更があればそれ → 新しい commit から古い commit の順) を描いて
+# ${tmp}/cand/<n>.nix に置き、一覧を ${tmp}/candidates.tsv (版・日付・印・差分の行数・題) に書く。決めた版を
+#   base_rev    版 (commit の短い名前か「作業ツリー」)
+#   base_label  版・日付・題
+#   base_file   描いた雛形
+#   base_id     その版の印
+#   base_how    marker (印と同じ版) か nearest (旧いファイルとの差分が最小の版。同数なら新しい方)
+#   base_lines  旧いファイルとの差分の行数
+# に入れる。印があるのに同じ版が無ければ marker_missing=1。描ける版が 1 つも無ければ 1
+find_base() {
+  local old=$1 nix_dir=$2 marker=$3 n=0 rev date subject f id lines label
+  local best_n="" best_lines="" best_rev="" best_label="" best_id="" mark_n="" mark_rev="" mark_label="" mark_id="" mark_lines=""
+  need_tmp
+  mkdir -p "${tmp}/cand"
+  : >"${tmp}/candidates.tsv"
+  marker_missing=0
+  while IFS=$'\t' read -r rev date subject; do
+    n=$((n + 1))
+    f="${tmp}/cand/${n}.sh"
+    if [[ ${rev} == 作業ツリー ]]; then
+      cp "${repo_dir}/${template_rel}" "${f}"
+    else
+      git -C "${repo_dir}" show "${rev}:${template_rel}" >"${f}" 2>/dev/null || continue
+    fi
+    label="${rev} ${date} ${subject}"
+    if ! id=$(template_id "${f}" 2>/dev/null) || ! template_render "${f}" "${nix_dir}" >"${tmp}/cand/${n}.nix" 2>/dev/null; then
+      printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "-" "描けない" "${subject}" >>"${tmp}/candidates.tsv"
+      continue
+    fi
+    lines=$(diff_lines "${old}" "${tmp}/cand/${n}.nix")
+    printf '%s\t%s\t%s\t%s\t%s\n' "${rev}" "${date}" "${id}" "${lines}" "${subject}" >>"${tmp}/candidates.tsv"
+    if [[ -n ${marker} && -z ${mark_n} && ${id} == "${marker}" ]]; then
+      mark_n=${n} mark_rev=${rev} mark_label=${label} mark_id=${id} mark_lines=${lines}
+    fi
+    if [[ -z ${best_n} ]] || ((lines < best_lines)); then
+      best_n=${n} best_lines=${lines} best_rev=${rev} best_label=${label} best_id=${id}
+    fi
+  done < <(
+    if ! git -C "${repo_dir}" diff --quiet HEAD -- "${template_rel}" 2>/dev/null; then
+      printf '作業ツリー\t-\t(commit していない変更)\n'
+    fi
+    git -C "${repo_dir}" log --format='%h%x09%cs%x09%s' -- "${template_rel}"
+  )
+  if [[ -n ${mark_n} ]]; then
+    base_rev=${mark_rev} base_label=${mark_label} base_id=${mark_id} base_how=marker base_lines=${mark_lines}
+    base_file="${tmp}/cand/${mark_n}.nix"
+    return 0
+  fi
+  [[ -n ${best_n} ]] || return 1
+  [[ -z ${marker} ]] || marker_missing=1
+  base_rev=${best_rev} base_label=${best_label} base_id=${best_id} base_how=nearest base_lines=${best_lines}
+  base_file="${tmp}/cand/${best_n}.nix"
+}
+
+# 差分の行数が小さい順に、候補を 3 つまで「版 (n 行)」で並べる
+nearest_candidates() {
+  awk -F'\t' '$4 ~ /^[0-9]+$/ { print $4 "\t" NR "\t" $1 }' "${tmp}/candidates.tsv" \
+    | sort -t$'\t' -k1,1n -k2,2n | awk -F'\t' 'NR <= 3 { printf "%s%s (%s 行)", (NR > 1 ? " / " : ""), $3, $1 } END { print "" }'
+}
+
+# git merge-file --diff3 の出力のうち、片側が元の行の前後に足しただけの衝突を解く。$1: merge の出力、
+# $2: 数を書くファイル (resolved=・remaining=・resolved_lines=・remaining_lines=。行番号は出力の行)。
+# 解いた結果を stdout に出す。解く形 (B は元の行、空でない):
+#   今 = B + X、手元は B で始まらず B で終わらない     → 手元 + X
+#   今 = X + B、手元は同じ                           → X + 手元
+#   手元 = B + Y・Y + B、今は B で始まらず B で終わらない → 今 + Y・Y + 今
+# 両側が B に足した・B の前後のどちらにも当たる・B が空、などは決めずに印のまま残す
+resolve_conflicts() {
+  STATS=$2 awk '
+    function emit(s) { print s; outn++ }
+    function has_prefix(a, na,   i) {
+      if (nb == 0 || na <= nb) return 0
+      for (i = 1; i <= nb; i++) if (a[i] != b[i]) return 0
+      return 1
+    }
+    function has_suffix(a, na,   i) {
+      if (nb == 0 || na <= nb) return 0
+      for (i = 1; i <= nb; i++) if (a[na - nb + i] != b[i]) return 0
+      return 1
+    }
+    function touches(a, na,   i) {
+      # a が B で始まるか B で終わるか (B と同じ長さでも)
+      if (nb == 0 || na < nb) return 0
+      for (i = 1; i <= nb; i++) if (a[i] != b[i]) break
+      if (i > nb) return 1
+      for (i = 1; i <= nb; i++) if (a[na - nb + i] != b[i]) return 0
+      return 1
+    }
+    function finish(   i, start, how, tp, ts, op, os) {
+      tp = has_prefix(t, nt); ts = has_suffix(t, nt); op = has_prefix(o, no); os = has_suffix(o, no)
+      how = ""
+      if (tp != ts && !touches(o, no)) how = tp ? "t_after" : "t_before"
+      else if (op != os && !touches(t, nt)) how = op ? "o_after" : "o_before"
+      start = outn + 1
+      if (how == "t_after") { for (i = 1; i <= no; i++) emit(o[i]); for (i = nb + 1; i <= nt; i++) emit(t[i]) }
+      else if (how == "t_before") { for (i = 1; i <= nt - nb; i++) emit(t[i]); for (i = 1; i <= no; i++) emit(o[i]) }
+      else if (how == "o_after") { for (i = 1; i <= nt; i++) emit(t[i]); for (i = nb + 1; i <= no; i++) emit(o[i]) }
+      else if (how == "o_before") { for (i = 1; i <= no - nb; i++) emit(o[i]); for (i = 1; i <= nt; i++) emit(t[i]) }
+      else {
+        emit(m_open)
+        for (i = 1; i <= no; i++) emit(o[i])
+        emit(m_base)
+        for (i = 1; i <= nb; i++) emit(b[i])
+        emit(m_sep)
+        for (i = 1; i <= nt; i++) emit(t[i])
+        emit(m_close)
+        remaining++
+        remaining_lines = remaining_lines (remaining_lines == "" ? "" : " ") start
+        return
+      }
+      resolved++
+      resolved_lines = resolved_lines (resolved_lines == "" ? "" : " ") (outn >= start ? start "-" outn : start)
+    }
+    st == 0 && /^<<<<<<< / { st = 1; m_open = $0; no = 0; nb = 0; nt = 0; next }
+    st == 1 && /^\|\|\|\|\|\|\| / { st = 2; m_base = $0; next }
+    st == 2 && /^=======$/ { st = 3; m_sep = $0; next }
+    st == 3 && /^>>>>>>> / { m_close = $0; finish(); st = 0; next }
+    st == 1 { o[++no] = $0; next }
+    st == 2 { b[++nb] = $0; next }
+    st == 3 { t[++nt] = $0; next }
+    { emit($0) }
+    END {
+      printf "resolved=%d\nremaining=%d\nresolved_lines=%s\nremaining_lines=%s\n", resolved, remaining, resolved_lines, remaining_lines > ENVIRON["STATS"]
+    }
+  ' "$1"
+}
+
+# key=value の行のファイルから値を読む (eval しない)。$1: ファイル、$2: 名前
+env_get() {
+  local k v
+  while IFS='=' read -r k v; do
+    if [[ ${k} == "$2" ]]; then
+      printf '%s\n' "${v}"
+      return 0
+    fi
+  done <"$1"
+  return 1
+}
+
+cmd_check() {
+  local current marker
+  parse_flake_args quiet "$@"
+  current=$(template_id "${repo_dir}/${template_rel}" 2>/dev/null) || exit 2
+  marker=$(local_marker "${flake}")
+  [[ ${marker} != "${current}" ]] || return 0
+  printf '%s → %s\n' "${marker:-印なし}" "${current}"
+  return 1
+}
+
+cmd_status() {
+  local current marker
+  parse_flake_args loud "$@"
+  current=$(template_id "${repo_dir}/${template_rel}") || die "今の雛形の heredoc が見つかりません: ${repo_dir}/${template_rel}"
+  marker=$(local_marker "${flake}")
+  printf '==> ローカル flake: %s\n' "${flake}"
+  printf '  雛形の版の印: %s\n' "${marker:-なし}"
+  printf '  今の雛形の版: %s  (%s)\n' "${current}" "${repo_dir}/${template_rel}"
+  if [[ ${marker} == "${current}" ]]; then
+    echo "  → 今の雛形と同じ版です。移すものはありません。"
+    return 0
+  fi
+  need_history
+  find_base "${flake}" "${local_nix}" "${marker}" || die "描ける雛形の版が履歴にありません。"
+  if [[ ${base_how} == marker ]]; then
+    printf '  → 前の雛形から作られています。印の版: %s\n' "${base_label}"
+  elif [[ -n ${marker} ]]; then
+    printf '  → 印 %s の版は履歴にありません。最も近い版: %s (差分 %s 行)\n' "${marker}" "${base_label}" "${base_lines}"
+  else
+    printf '  → 印がありません (印を入れる前の雛形から作られています)。最も近い版: %s (差分 %s 行)\n' "${base_label}" "${base_lines}"
+  fi
+  printf '  移すには: %s prepare --flake %s\n' "${self}" "${flake_dir}"
+  return 1
+}
+
+cmd_prepare() {
+  local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines
+  out_dir=""
+  parse_flake_args loud "$@"
+  need_history
+  need_tmp
+  current_file="${repo_dir}/${template_rel}"
+  current=$(template_id "${current_file}") || die "今の雛形の heredoc が見つかりません: ${current_file}"
+  marker=$(local_marker "${flake}")
+  find_base "${flake}" "${local_nix}" "${marker}" || die "描ける雛形の版が履歴にありません。"
+
+  printf '==> ローカル flake: %s\n' "${flake}"
+  printf '  本体 (inputs.dotfiles.url): %s\n' "${local_nix}"
+  if [[ ${local_nix} != "${repo_dir}/nix" ]]; then
+    printf '  雛形はこの script の repo (%s) のものを使います (ローカル flake が指す本体とは別の checkout)。\n' "${repo_dir}"
+  fi
+  if [[ $(git -C "${repo_dir}" rev-parse --is-shallow-repository 2>/dev/null) == true ]]; then
+    echo "  この repo は浅い clone なので、古い雛形の版が履歴に無いかもしれません。"
+  fi
+  if [[ ${base_how} == marker ]]; then
+    printf '  元の雛形: %s  (印 %s と同じ版)\n' "${base_label}" "${marker}"
+  else
+    if [[ ${marker_missing} == 1 ]]; then
+      printf '  印 %s の版は履歴にありません。差分の最も小さい版を元にします。\n' "${marker}"
+    fi
+    printf '  元の雛形: %s  (履歴で旧いファイルとの差分が最も小さい版。差分 %s 行)\n' "${base_label}" "${base_lines}"
+    printf '    近い版: %s\n' "$(nearest_candidates)"
+  fi
+  printf '  今の雛形: 版 %s  (%s)\n' "${current}" "${current_file}"
+  if [[ ${base_id} == "${current}" ]]; then
+    echo "  → 元の雛形が今の雛形と同じ版です。移すものはありません。"
+    return 0
+  fi
+
+  if [[ -n ${out_dir} ]]; then
+    if [[ -e ${out_dir} ]] && [[ ! -d ${out_dir} || -n $(ls -A "${out_dir}") ]]; then
+      die "--out が空でないか、ディレクトリではありません: ${out_dir}"
+    fi
+    mkdir -p "${out_dir}"
+  else
+    out_dir=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate-work.XXXXXX")
+  fi
+  out_dir=$(cd -P -- "${out_dir}" && pwd)
+  mkdir -p "${out_dir}/old" "${out_dir}/new"
+  cp -p "${flake}" "${out_dir}/old/flake.nix"
+  if [[ -f ${flake_dir}/flake.lock ]]; then
+    cp -p "${flake_dir}/flake.lock" "${out_dir}/old/flake.lock"
+  fi
+  cp "${base_file}" "${out_dir}/base.nix"
+  template_render "${current_file}" "${local_nix}" >"${out_dir}/template.nix"
+  {
+    printf '版\t日付\t印\t旧いファイルとの差分の行数\t題\n'
+    cat "${tmp}/candidates.tsv"
+  } >"${out_dir}/candidates.tsv"
+
+  git merge-file -p --diff3 -L 手元 -L 元の雛形 -L 今の雛形 \
+    "${out_dir}/old/flake.nix" "${out_dir}/base.nix" "${out_dir}/template.nix" >"${tmp}/merged" || rc=$?
+  [[ ${rc} -lt 128 ]] || die "git merge-file に失敗しました (終了コード ${rc})。"
+  conflicts=${rc}
+  resolve_conflicts "${tmp}/merged" "${tmp}/stats" >"${out_dir}/new/flake.nix"
+  resolved=$(env_get "${tmp}/stats" resolved)
+  remaining=$(env_get "${tmp}/stats" remaining)
+  resolved_lines=$(env_get "${tmp}/stats" resolved_lines)
+  remaining_lines=$(env_get "${tmp}/stats" remaining_lines)
+
+  {
+    printf 'flake_dir=%s\n' "${flake_dir}"
+    printf 'old_sum=%s\n' "$(cksum <"${flake}")"
+    printf 'nix_dir=%s\n' "${local_nix}"
+    printf 'base_rev=%s\n' "${base_rev}"
+    printf 'base_id=%s\n' "${base_id}"
+    printf 'base_how=%s\n' "${base_how}"
+    printf 'base_lines=%s\n' "${base_lines}"
+    printf 'template_id=%s\n' "${current}"
+    printf 'conflicts=%s\n' "${conflicts}"
+    printf 'resolved=%s\n' "${resolved}"
+    printf 'remaining=%s\n' "${remaining}"
+  } >"${out_dir}/prepare.env"
+
+  printf '  衝突: %s 件 (自動で解いた %s 件・残り %s 件)\n' "${conflicts}" "${resolved}" "${remaining}"
+  if [[ ${resolved} -gt 0 ]]; then
+    printf '    自動で解いた: new/flake.nix の %s 行目 (片側が元の行の前後に足しただけの衝突)\n' "${resolved_lines// /・}"
+  fi
+  if [[ ${remaining} -gt 0 ]]; then
+    printf '    残り: new/flake.nix の %s 行目から (<<<<<<< 手元 / ||||||| 元の雛形 / ======= / >>>>>>> 今の雛形)\n' "${remaining_lines// /・}"
+  fi
+  printf '==> 作業場所: %s\n' "${out_dir}"
+  echo "  old/flake.nix    旧いローカル flake の写し (このあと触らない)"
+  echo "  new/flake.nix    移した flake (残った衝突は diff3 の印のまま)"
+  echo "  base.nix         元の雛形"
+  echo "  template.nix     今の雛形"
+  echo "  candidates.tsv   履歴の各版と、旧いファイルとの差分の行数"
+  echo "次に打つもの:"
+  if [[ ${remaining} -gt 0 ]]; then
+    printf '  0. 残った衝突を %s/new/flake.nix で解く\n' "${out_dir}"
+  fi
+  printf '  1. %s compare %s\n' "${self}" "${out_dir}"
+  printf '  2. diff -u %s %s/new/flake.nix を見て、書き換えてよいかを決める\n' "${flake}" "${out_dir}"
+  printf '  3. %s apply %s\n' "${self}" "${out_dir}"
 }
 
 cmd_id() {
@@ -204,6 +575,9 @@ fi
 cmd=$1
 shift
 case ${cmd} in
+  status) cmd_status "$@" ;;
+  check) cmd_check "$@" ;;
+  prepare) cmd_prepare "$@" ;;
   id) cmd_id "$@" ;;
   render) cmd_render "$@" ;;
   -h | --help) usage ;;
