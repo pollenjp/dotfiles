@@ -8,7 +8,8 @@
 #
 #   評価時 (assert。CI の `nix flake check --all-systems --no-build` でも落ちる)
 #     - home.file に .claude/skills/herdr がある
-#     - 張る元が home.packages の herdr の中にある (skill と CLI の版が揃う)
+#     - 張る元が home.packages の herdr の中にある (skill と CLI の版が揃う)。home.packages の herdr は
+#       modules/agent-link.nix が包んだもの (ADR 025) なので、包む前 (passthru.unwrapped) の中を見る
 #   ビルド時 (このランナーの system だけ)
 #     - 張る元に SKILL.md がある
 #     - SKILL.md の name が herdr (Agent Skills の仕様で、name は親ディレクトリ名と一致させる)
@@ -29,10 +30,12 @@ let
   file = cfg.home.file.".claude/skills/herdr" or null;
   source = "${file.source}";
   herdr = lib.findFirst (p: lib.getName p == "herdr") null cfg.home.packages;
+  # 包んだもの (modules/agent-link.nix) なら包む前の herdr
+  unwrapped = herdr.unwrapped or herdr;
 in
 assert lib.assertMsg (file != null) "claude-herdr-skill: home.file に .claude/skills/herdr が無い";
 assert lib.assertMsg (herdr != null) "claude-herdr-skill: home.packages に herdr が無い";
-assert lib.assertMsg (lib.hasPrefix "${herdr}/" source)
+assert lib.assertMsg (lib.hasPrefix "${unwrapped}/" source)
   "claude-herdr-skill: 張る元が home.packages の herdr の中に無い (${source})";
 pkgs.runCommand "claude-herdr-skill" { } ''
   skill=${source}

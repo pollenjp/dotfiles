@@ -13,7 +13,8 @@
 #
 # 1Password を使う WSL のマシンでは、WSL の ssh は Windows の ssh.exe を呼ぶラッパーで
 # (ADR 004)、ssh.exe は Windows 側の %USERPROFILE%\.ssh\config を読む。そこにも WSL と同じ形
-# (config は Include の 1 行、接続先は config.d) を作る (docs/adr/016_ssh_config_from_dotfiles_private_*)。
+# (config は Include の 1 行とこのマシンを名乗る SetEnv、接続先は config.d) を作る
+# (docs/adr/016_ssh_config_from_dotfiles_private_*。SetEnv は docs/adr/025_*)。
 # 優先順位も WSL と同じく、config.d のファイル名の順になる。
 #
 # ## 何を読むか
@@ -131,13 +132,21 @@ private_dir() {
 }
 
 # Windows の config の中身。WSL の Nix 管理の ~/.ssh/config (home/modules/ssh.nix の
-# programs.ssh.includes) と同じ Include の 1 行に、持ち主を示すコメントを添える。
+# programs.ssh.includes と settings."*") と同じ Include の 1 行と、Include の後ろの Host * の SetEnv に、
+# 持ち主を示すコメントを添える。SetEnv は ssh 先の herdr の固定名が同じマシンからの接続を見分けるのに使う
+# (ADR 025。Windows の ssh.exe は OpenSSH_for_Windows 10.0p2 で、%u@%L を展開する)。
 config_body() {
   cat <<'EOF'
 # dotfiles の nix/scripts/bootstrap-windows-ssh-config.sh が置く (手で直すと次の setup で衝突になる)。
 # マシン固有の Host は config.d\ に <名前>.ssh_config として置く。
 # config.d はファイル名の順に読み、同じキーは先に読んだ値が効く。
 Include config.d/*.ssh_config
+
+# ssh 先の herdr が「同じマシンから来た接続」を見分けるのに、このマシンを名乗る (dotfiles の ADR 025)。
+# 受け取る側の sshd に AcceptEnv PJP_SSH_CLIENT が要る。ssh は最初に当たった SetEnv の行だけを使うので、
+# config.d の Host に SetEnv を書いたら、そこにも PJP_SSH_CLIENT=%u@%L を足す。
+Host *
+  SetEnv PJP_SSH_CLIENT=%u@%L
 EOF
 }
 

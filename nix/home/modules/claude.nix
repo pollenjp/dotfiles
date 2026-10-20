@@ -398,7 +398,7 @@ in
     # 入れるだけで、Claude Code はそこを探さない。使うものを 1 つずつ ~/.claude/skills/ へ
     # 張る (nixpkgs manual の installAgentSkills の節が勧める形)。
     #
-    # home.packages の herdr (modules/packages.nix) と同じ pkgs.herdr を指すので、skill の
+    # home.packages の herdr (modules/agent-link.nix が包んだもの) の中身と同じ pkgs.herdr を指すので、skill の
     # 版は CLI と揃い、flake.lock を上げれば一緒に上がる。公式の手順
     # (npx skills add herdrdev/herdr --skill herdr -g) は打った日の master を取り、
     # 宣言的でもないので使わない。名前は公式どおり herdr (pjp- は自作の印)。

@@ -1276,7 +1276,8 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
 | `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
-| `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みだけ) |
+| `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みと、このマシンを名乗る `SetEnv PJP_SSH_CLIENT`) |
+| `~/.ssh/rc` | `nix/home/modules/agent-link.nix` (生成。接続を記録する `pjp-agent-link rc` を呼ぶ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
@@ -1284,8 +1285,10 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
+| `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
+| `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
 
@@ -1549,13 +1552,17 @@ ssh-agent に触れずに取れる。
 
 ## ssh について
 
-`programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行だけ。
+`programs.ssh` で `~/.ssh/config` を**生成**しているが、中身は Include の 1 行と、このマシンを名乗る `SetEnv` だけ。
 
 ```
 Include config.d/*.ssh_config
+
+Host *
+  SetEnv PJP_SSH_CLIENT="%u@%L"
 ```
 
-（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する）
+（`ssh` は相対パスの `Include` を `~/.ssh/` 基準で解決する。`SetEnv` は ssh 先の herdr が「同じマシンから来た接続」を
+見分けるのに使う。[後述](#forward-された-agent-を固定名で見せる)）
 
 接続先の実体は private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の
 `ssh/*.ssh_config` にある（公開したくないので、この repo にも `/nix/store` にも置かない）。
@@ -1795,45 +1802,103 @@ pjp-who-is-asking --no-windows   # Windows 側を省く (記録の節は出す)
 ### forward された agent を固定名で見せる
 
 ssh 先で herdr を常駐させると、**ssh を張り直したときに中から agent が引けなくなる。**
-sshd が接続ごとに作る `/tmp/ssh-XXXXXX/agent.<pid>` は logout で消えるのに、herdr server は
-起動したときの env を抱えて常駐し、実行中のプロセスの env は外から書き換えられないため。
+sshd が接続ごとに作る agent の socket（OpenSSH 10.1 からは `~/.ssh/agent/s.<hash>.sshd.<乱数>`）は接続が閉じると
+消えるのに、herdr server は起動したときの env を抱えて常駐し、実行中のプロセスの env は外から書き換えられないため。
 
-そこで固定名 `~/.ssh/agent.sock` を挟み、**ssh 先で herdr を開くときだけ**、その接続が
-forward してきた socket へ張り替える。判断の経緯と安全性の根拠は
-[ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)。
+そこで herdr の **session ごとの固定名**（symlink）を挟み、server と pane には固定名を渡して、その先だけを生きている
+接続の socket へ向け直す。判断の経緯は [ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)
+（固定名）・[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)（手元の 1Password）・
+[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)（session ごと・hr・同じマシンの接続を借りる）。
 
-| 置き場所 (`bash.nix` / `fish.nix`) | 役割 |
+| session | 固定名 |
 | --- | --- |
-| `ssh-agent-link` 関数 | 固定名を、この shell の接続が forward してきた socket へ向ける |
-| `herdr` 関数 | ssh 先では `ssh-agent-link` を呼んでから、`SSH_AUTH_SOCK=~/.ssh/agent.sock` を付けて本物の herdr を起動する。手元でも `SSH_AUTH_SOCK` がそのマシンの 1Password（`~/.1password/agent.sock`）なら、固定名をそこへ張ってから同じく起動する。`h` / `ha` / `hss` などの alias もここを通る |
+| default | `~/.ssh/agent.sock` |
+| ほか（`s2` など） | `~/.ssh/agent.<session>.sock` |
+
+| 部品 | 役割 |
+| --- | --- |
+| `herdr`（`nix/pkgs/pjp-agent-link/herdr.sh` で包んだもの） | server を起こしうる呼び出し（`herdr`・`herdr session attach <名前>`・hr の `remote-client-bridge`・`herdr server`）で、`SSH_AUTH_SOCK` をその session の固定名にしてから本物の herdr を exec する。`herdr server` 以外では、その前に向け先を決め直す。`h` / `ha` / `hss` などの alias もここを通る |
+| `pjp-agent-link` | 向け先を決める script（`nix/pkgs/pjp-agent-link/pjp-agent-link.sh`）。決め方は下の表。`ssh-add` と `flock` は PATH の system のもの（ssh 先の OpenSSH と util-linux）を使う |
+| `~/.ssh/rc` | sshd が接続のたびに走らせる。forward された socket・`PJP_SSH_CLIENT`・開いた時刻を記録するだけ（張り替えない） |
+| `pjp-agent-link-watch.path`（systemd の user の unit。Linux だけ） | `~/.ssh/agent` と記録の場所に変化があると `pjp-agent-link watch` を起こす。接続が閉じたときに向け直せるのはこれだけ |
+| `ssh-agent-link`（コマンド） | 今の session（引数・`HERDR_SESSION`・default の順）の固定名を、この shell の接続へ強制で向ける逃げ道 |
 | init の `299_ssh_agent` ブロック | `SSH_AUTH_SOCK` が固定名の shell（herdr の pane）と、そのマシンの 1Password の shell では、ローカル agent へのフォールバックをしない |
 
-- 張り替えるのは herdr を開いた接続だけ。覗くだけの 2 本目の ssh は固定名に触れず、
-  herdr の外の shell は自分の接続の socket をそのまま使う
-- `ssh -a` で入った shell（フォールバックが起こしたローカル agent）からは張らない。`SSH_AGENT_PID` で見分ける
+| きっかけ | 固定名の今の先 | 決め方 |
+| --- | --- | --- |
+| herdr を開いた（attach） | 生きていて、持ち主が開いた接続と同じ値 | 変えない（切断前の接続を優先する） |
+| herdr を開いた（attach） | 死んでいる・持ち主が分からない・別の値 | 開いた接続へ向け、持ち主をその値にする |
+| 接続が増えた・減った（見張り） | 生きている | 何もしない（覗くだけの接続は奪わない） |
+| 接続が増えた・減った（見張り） | 死んでいる | 持ち主と同じ値の、生きている一番古い接続を借りる。無ければ dangling のまま |
+
+- attach は開いた session の固定名だけを動かし、見張りは全部の固定名を見直す。default と s2 がどちらも切断され、
+  同じ PC からの接続が 1 本だけ生きていれば、両方がそれを指す
+- 「生きている」は `ssh-add -l` が 1 秒以内に返事をすること（回線断で返事をしない socket で固まらない）
+- 持ち主は、固定名を張ったときの開いた接続の `PJP_SSH_CLIENT`（`~/.local/state/pjp-agent-link/owner/<session>`）。
+  この仕組みを入れる前に張られた固定名は、持ち主が分からないものとして扱う
 - 手元（`SSH_CONNECTION` が無い）で張り替えるのは、`SSH_AUTH_SOCK` がそのマシンの 1Password のときだけ
-  （NixOS の laptop。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
-  固定名は「最後に herdr を開いた場所」の 1Password を指す。ssh で入って開けば転送、lavie の前で開けば lavie。
-  1Password の socket は場所が決まっているので、アプリの起動前でも張る。**WSL の挙動は変わらない**
-- `hr`（`herdr --remote`）で attach したときに、関数が走って固定名が張り替わるかは確かめていない。
-  承認が思った画面に出ないときは、ssh で入って `h` で開き直す
+  （NixOS の laptop。ADR 022）。持ち主は `local` で、socket が無くても張る。**WSL の手元の挙動は変わらない**
+- `ssh -a` で入った shell・フォールバックのローカル agent（`SSH_AGENT_PID` がある）からは張らないが、ssh 先なら
+  server には固定名を渡す
 
-> ⚠️ 適用しても**すでに走っている herdr server には効かない**（古い env を抱えている）。
-> 一度 `herdr server stop` して、`ssh -A` で入り直してから `herdr` で開く。
+#### 同じマシンは `PJP_SSH_CLIENT` で見分ける
 
-herdr の中で鍵が引けなくなったら、detach して `herdr` で開き直す（固定名が今の接続へ向き直る）。
-手元（NixOS の laptop）で開き直すときは、新しい端末から開く。前からある端末の shell は、フォールバックが
-起こしたローカル ssh-agent を `SSH_AUTH_SOCK` に持っていることがあり、手元の分岐に当たらない。
-手元の端末から起動した古い server（固定名を持たない）は、`herdr server stop` してから開き直す。
+各マシンの ssh は `SetEnv PJP_SSH_CLIENT=%u@%L` で自分のユーザー名とホスト名を名乗る（Nix の `~/.ssh/config` と、
+Windows は `bootstrap-windows-ssh-config.sh` が置く `%USERPROFILE%\.ssh\config`）。
+
+- **受け取る側の sshd に `AcceptEnv PJP_SSH_CLIENT` が要る**（無い sshd は捨てる）。NixOS のホストは nixos-config が
+  入れる（TKT-255）。ほかの ssh サーバーは、下の警告を見て都度足す。届かない接続は借りない・借りられないだけで、
+  attach し直せば鍵は使える
+- 値は ssh の実体ごとに違い、違う値は別のマシンとして扱う（大文字小文字は揃えない）。**同じ PC でも、Windows の ssh.exe
+  （hr の `herdr.exe` と、WSL の `ssh`）は `polle@pjp-raiden`、WSL の Linux の ssh は別になる**（`/usr/bin/ssh` の 9.6p1 は
+  下のとおり届いていない扱い、nix の OpenSSH なら `pollenjp@pjp-raiden`）
+- `%u@%L` が展開されるのは OpenSSH 10.0 から。WSL の `/usr/bin/ssh`（9.6p1）など古い ssh は `%u@%L` のまま送るので、
+  `%` を含む値は届いていないものとして扱う
+- ssh は最初に当たった `SetEnv` の行だけを使う。`config.d` の `Host` に自分の `SetEnv` がある接続先では、そこにも
+  `PJP_SSH_CLIENT=%u@%L` を足す
+- 値は名乗るだけなので、なりすましは防げない（誤作動を防ぐ保険）
+
+**値が届いていないと、プロンプトに `⚠ PJP_SSH_CLIENT なし` が出る**（starship の `custom.pjp_ssh_client`）。ssh で入った
+shell では `PJP_SSH_CLIENT` が空のとき、herdr の pane ではその session の固定名の持ち主が空のとき（pane の env には
+server を起こした接続の値が残るので、記録を見る）。この仕組みを入れる前に張られた固定名と、`herdr server` で起こしただけで
+まだ誰も開いていない session も持ち主が空なので、値の届く接続から 1 回開くまで出る。
+
+> ⚠️ 適用しても**すでに走っている herdr server には効かない**（固定名を持たずに起きている）。都合のよいときに
+> 1 回作り直す。pane のプロセスは終わる（Claude Code は herdr の agent session restore で会話へ戻れる）。
+>
+> ```sh
+> herdr server stop             # default
+> herdr session stop s2         # named session ごとに
+> herdr.exe --remote lavie.local    # Windows の PowerShell から開き直す (包んだ herdr を通って server が起きる)
+> ```
+
+herdr の中で鍵が引けなくなったら、detach して開き直す（attach が今の接続へ向け直す）か、herdr の外の ssh の shell で
+`ssh-agent-link` を打つ。lavie の前で開き直すときは、新しい端末から開く（前からある端末の shell は、フォールバックが
+起こしたローカル ssh-agent を `SSH_AUTH_SOCK` に持っていることがあり、手元の分岐に当たらない）。
 
 確認は ssh 先で次のとおり。
 
 ```sh
-readlink ~/.ssh/agent.sock   # 今の接続の /tmp/ssh-XXXXXX/agent.<pid>
+pjp-agent-link status        # 固定名ごとの先・生死・持ち主と、記録にある接続
 # herdr の pane の中で
-echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock (展開済みのパス)
+echo "$SSH_AUTH_SOCK"        # ~/.ssh/agent.sock (named session は ~/.ssh/agent.<名前>.sock)
 ssh-add -l                   # 鍵が並ぶ
 ```
+
+- 張り替えと接続の記録（rc）のたびに `~/.local/state/pjp-agent-link/log` に 1 行残る（どの接続がいつ固定名を動かしたか）
+- **ssh 先の PATH で、包んでいない herdr が先に見つかると固定名は渡らない。** herdr.exe は ssh 先の herdr と版が合わないとき
+  `~/.local/bin/herdr` へ入れることを提案する（既定は Yes。`~/.local/bin` は `~/.nix-profile/bin` より前）。断るか、入れて
+  しまったら `~/.local/bin/herdr` を消す。`pjp-agent-link status` の最後の行で、PATH の herdr が包んだものかを見られる
+- 見張りが動いているかは `systemctl --user status pjp-agent-link-watch.path`。何かで failed になっていたら
+  `systemctl --user reset-failed pjp-agent-link-watch.path pjp-agent-link-watch.service` のあとで
+  `systemctl --user start pjp-agent-link-watch.path`
+- `~/.ssh/rc` を置くと、sshd は xauth を自分では呼ばず（rc が PATH の `xauth` へ渡す。X11 forwarding を使うホストでは
+  `xauth` を PATH に置く）、`/etc/ssh/sshrc` も走らせない。sftp・ForceCommand・
+  `PermitUserRC no`・authorized_keys の `restrict` / `no-user-rc` の接続では rc が走らず、見張りはその接続を借りない。
+  手で置いた `~/.ssh/rc` があると、switch が「would be clobbered」で止まる（中身を確かめて退避する）
+- 見張りは OpenSSH 10.1 より古いホスト（socket が `/tmp/ssh-*/`）と macOS では動かない（attach の張り替えだけが効く）
+- 削除した session の固定名と持ち主の記録は残る（害は無い。要らなければ `~/.ssh/agent.<名前>.sock` と
+  `~/.local/state/pjp-agent-link/owner/<名前>` を消してよい）
 
 ## fish
 

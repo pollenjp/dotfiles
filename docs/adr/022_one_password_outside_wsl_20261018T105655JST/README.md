@@ -8,6 +8,7 @@
 | 前提 ADR | [004_nix_wsl_ssh_wrapper](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（WSL の ssh / ssh-add のラッパー）、[008_ssh_agent_stable_sock](../008_ssh_agent_stable_sock_20260909T144947JST/README.md)（ssh 先で herdr を開くときだけ固定名 `~/.ssh/agent.sock` を張り替える） |
 | 関連 (外部) | nixos-config の ADR 009（lavie に 1Password を入れ、手元のセッションの `SSH_AUTH_SOCK` を `~/.1password/agent.sock` にする。ssh で入ったときは転送のまま）、TKT-205 |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（「マシン登録簿」「git について」「forward された agent を固定名で見せる」） |
+| 後続 ADR | [025_herdr_agent_borrow](../025_herdr_agent_borrow_20261020T210555JST/README.md)（`herdr` 関数の手元の分岐（`SSH_AUTH_SOCK` が 1Password なら固定名をそこへ張る）を、herdr を包む実行ファイルと `pjp-agent-link` へ移した。手元の 1Password は持ち主 `local` として同じ規則に載り、socket が無くても張る挙動は変わらない。固定名は session ごとになった。本文の「`herdr` 関数」は決定当時の記録としてそのまま残してある） |
 
 ---
 
