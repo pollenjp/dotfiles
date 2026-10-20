@@ -55,7 +55,13 @@ in
     };
 
     services.pjp-agent-link-watch = {
-      Unit.Description = "pjp-agent-link: 先が死んだ herdr の固定名に、同じマシンの生きている接続を借りる";
+      Unit = {
+        Description = "pjp-agent-link: 先が死んだ herdr の固定名に、同じマシンの生きている接続を借りる";
+        # 知らせのたびに起きる (hr の attach は確認用の短い接続を何本も張るので、数秒に 10 回を超える)。
+        # 既定の起動の上限 (10 秒に 5 回) に当たると、service も path unit も failed になって見張りが
+        # 止まる (lavie で実測。unit-start-limit-hit) ので、上限を外す。1 回は数十 ms で終わる
+        StartLimitIntervalSec = 0;
+      };
       Service = {
         Type = "oneshot";
         ExecStart = "${lib.getExe agentLink} watch";

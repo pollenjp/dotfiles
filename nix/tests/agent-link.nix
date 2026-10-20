@@ -12,7 +12,8 @@
 #     - home.packages に pjp-agent-link の package がある
 #     - ~/.ssh/rc は pjp-agent-link rc を exec し、stdout を /dev/null へ向ける
 #     - Linux では pjp-agent-link-watch の path unit が ~/.ssh/agent と記録の conn/ を PathChanged で見て、
-#       default.target で起き、service が oneshot で pjp-agent-link watch を打つ。darwin には unit を置かない
+#       default.target で起き、service が oneshot で pjp-agent-link watch を打つ。service は起動の上限を外す
+#       (StartLimitIntervalSec = 0。接続が続くと上限に当たって見張りが止まる)。darwin には unit を置かない
 #     - fish の functions と bash の initExtra に herdr・ssh-agent-link の関数が無い
 #     - 299_ssh_agent (フォールバック) が ~/.ssh/agent.<session>.sock の shell でも何もしない
 #       (bash は "${HOME}"/.ssh/agent.*.sock の pattern、fish は string match)
@@ -94,7 +95,7 @@ let
     {
       name =
         if isLinux then
-          "Linux: service は oneshot で pjp-agent-link watch を打つ"
+          "Linux: service は oneshot で pjp-agent-link watch を打ち、起動の上限を外す"
         else
           "darwin: 見張りの service を置かない";
       ok =
@@ -103,6 +104,7 @@ let
           && serviceUnit.Service.Type == "oneshot"
           && agentLink != null
           && serviceUnit.Service.ExecStart == [ "${lib.getExe agentLink} watch" ]
+          && (serviceUnit.Unit.StartLimitIntervalSec or null) == 0
         else
           serviceUnit == null;
     }
