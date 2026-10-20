@@ -2301,6 +2301,55 @@ home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置
 `.footerLinksRegexes` を丸ごと置き換える。このキーは dotfiles が持つので、手で足した項目も
 次の実行で消える。足したいなら `footer-links.json` に書く。
 
+### herdr の中の Claude Code にリンクを出させる
+
+herdr の pane の中では、シェルの init が `FORCE_HYPERLINK=1` を export する（TKT-270）。fish の
+`interactiveShellInit`（`home/modules/fish.nix`）と bash の `initExtra`（`home/modules/bash.nix`）にあり、
+`HERDR_ENV` が空でなく、`FORCE_HYPERLINK` がまだ無い shell でだけ立てる。
+
+#### なぜ要るのか
+
+Claude Code（2.1.303 で本体のコードを読んで確かめた）は、リンク（OSC 8）を出せる端末かを env で決める。
+
+1. `FORCE_HYPERLINK` があれば、その値で決める（`0` なら出さない）
+2. 無ければ `TERM_PROGRAM`（ghostty・kitty・iTerm.app・WezTerm・vscode など）・`WT_SESSION`・tmux 3.4 以上・
+   `VTE_VERSION`・`TERM` などで見分ける
+
+herdr の pane の env には `TERM=xterm-256color`（と `COLORTERM`）しか無く、どれにも当たらないので、出せない端末と
+判断される。herdr 自体は pane が出したリンクを外の端末へ通すので、この判断によらずリンクを出す本体の footer は
+押して開ける。一方、Claude Code の `Link` で描くもの（問いの上に footer の 2 行を出す mod のバッジなど）は判断に従い、
+「label の後ろに薄い URL」の形になって押せない（2 個目からは URL が途中で切れる）。`FORCE_HYPERLINK=1` を付けると、
+本体の footer と同じ label だけのリンクになる。
+
+#### 効き方
+
+- pane のシェルで立てるので、claude の起動の仕方（`c`・`claude`・`claude-<名前>`・`herdr agent start`）によらず効く。
+  `herdr agent start` も、pane の対話シェルのプロンプトに打ち込んで claude を起こす
+- 効くのは、switch のあとに開いた pane のシェルと、そこで起動した claude。前からある pane では、claude を終えて
+  `exec fish` でシェルを読み直してから起動し直す（claude だけ起動し直しても、親のシェルの env は前のまま）
+- 確認は herdr の pane で `printenv FORCE_HYPERLINK`（`1` が出る）。herdr の外の shell では何も出ない
+- 振る舞いは `nix/tests/herdr-hyperlink.nix` が確かめる（[テスト](#テスト)）
+
+#### 副作用
+
+pane のシェルの env なので、pane で打つほかのコマンドと、Claude の Bash tool で打つコマンド（claude の子）にも
+引き継がれる。
+
+- `FORCE_HYPERLINK` を読む CLI（npm の `supports-hyperlinks`・Rust の `supports-hyperlinks` crate を使うものなど）は、
+  出力が端末でなくても（パイプ・ファイル・Bash tool）リンクの制御文字を混ぜることがある。Bash tool の結果では ESC だけが
+  落ち、`]8;;<URL>\<label>]8;;\` の形の文字が残る
+- 1 回だけ止めるなら、そのコマンドに `FORCE_HYPERLINK=0` を付ける（fish も bash も `FORCE_HYPERLINK=0 <コマンド>`）
+- すでに `FORCE_HYPERLINK` がある shell では触らない。`FORCE_HYPERLINK=0` を付けて起こした herdr server の pane では立たない
+
+#### 置き場所で採らなかった案
+
+| 案 | 却下理由 |
+| --- | --- |
+| `settings.json` の `env`（`bootstrap-claude-env.sh`） | herdr の外で動く claude にも効き、herdr の中だけという条件を付けられない |
+| claude だけを包む fish の function | Bash tool で打つコマンドは結局引き継ぐので、副作用は減らない。`claude-<名前>` など別の起動経路を包み漏らす |
+| herdr の `config.toml` | herdr 0.9.1 に、pane の env を足す設定が無い |
+| `home.sessionVariables` | 条件を付けられず、herdr の外にも漏れる |
+
 ### Claude のセッションだけ git の設定を変える
 
 Claude のセッション（Bash tool）の git にだけ、次の 2 つを効かせる。自分の手元の
