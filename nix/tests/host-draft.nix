@@ -1,4 +1,4 @@
-# 登録の下書きを描く nix/lib/host-draft.nix (nix/scripts/private-host.sh draft が使う) を、評価時に確かめる (ADR 025)。
+# 登録の下書きを描く nix/lib/host-draft.nix (nix/scripts/private-host.sh draft が使う) を、評価時に確かめる (ADR 026)。
 # 描いた下書きが fixtures/host-draft/ の期待のファイルと 1 字も違わないことを見てから、そのファイルを import して
 # 元のホストと drvPath を比べる (描いたものを builtins.toFile で store に置いて import する形は、store に書かない評価
 # (CI の `nix flake check --no-build`) で「path … is not valid」になるので使わない)。元のホストの system は x86_64-linux に

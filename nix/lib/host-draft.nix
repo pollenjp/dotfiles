@@ -1,4 +1,4 @@
-# dotfiles-private の nix/hosts/<user>@<hostname>.nix の下書きを描く (ADR 025)。nix/scripts/private-host.sh draft が、
+# dotfiles-private の nix/hosts/<user>@<hostname>.nix の下書きを描く (ADR 026)。nix/scripts/private-host.sh draft が、
 # 元にするホスト (登録簿か手で足したホストに、ローカル flake の local が当たったもの) を評価して呼ぶ。
 #
 #   collect   元のホストの options.dotfiles から、既定でない定義を持つ option を [ { path; value; } ] で出す
@@ -125,7 +125,7 @@ in
     in
     lib.concatMapStrings (l: l + "\n") (
       [
-        "# この PC (${name}) のホストの定義と値の全部 (dotfiles の ADR 025)。ホストの名前はファイル名から .nix を除いたもの。"
+        "# この PC (${name}) のホストの定義と値の全部 (dotfiles の ADR 026)。ホストの名前はファイル名から .nix を除いたもの。"
         "# ローカル flake (~/dotfiles/flake.nix) の local はこのホストには当たらない。値を変えるときはこのファイルを直す。"
       ]
       ++ lib.optional (

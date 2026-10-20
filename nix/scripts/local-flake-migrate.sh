@@ -21,7 +21,7 @@
 # ## dotfiles-private の入力
 #
 # 今の雛形は、dotfiles-private の clone の nix/ (無ければ本体の空の stub) を path: の入力に取る (${private_nix_dir}。
-# ADR 025)。どこを指すかは private-host.sh input-dir が決める。印が同じでも、入力がそこと違えば (stub のまま clone に
+# ADR 026)。どこを指すかは private-host.sh input-dir が決める。印が同じでも、入力がそこと違えば (stub のまま clone に
 # nix/ ができた、など) status は 1 にし、prepare はその行を指し直す。元の雛形は旧いファイルの入力の値で、今の雛形は
 # input-dir で描くので、3-way merge がその行だけを今の値にする。
 #

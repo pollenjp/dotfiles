@@ -95,7 +95,7 @@ prepare は「片側が元の行の前後に足しただけ」の衝突 (コメ�
 | 2 | 使い方の誤り・衝突の印が残っている | 出力のとおり直す |
 
 - 比べるのは登録簿と手で足したホストのうち、検証専用の `sandbox` を除いたもの (setup も対象にしない)
-- 今の雛形は dotfiles-private の `nix/` を読む (ADR 025)。移した flake だけにある dotfiles-private のホストは「dotfiles-private のホスト
+- 今の雛形は dotfiles-private の `nix/` を読む (ADR 026)。移した flake だけにある dotfiles-private のホストは「dotfiles-private のホスト
   (移した flake だけ。比べない)」と出て、違いに数えない。ただし **この PC のホスト** (`<user>@<短い hostname>`) は、移したあと setup が
   `--host` なしで選ぶようになる (値はローカル flake の local ではなく、そのファイルから来る) ので、違いに数えて 1 になる。登録の仕上げなら
   意図どおり (pjp-dotfiles-register-host の手順 6)。そうでなければ、確認のときに「setup の選ぶホストが変わる」と書いて聞く

@@ -48,7 +48,7 @@ public の repo の flake input や submodule にはしない決まり (ADR 015 
 4. skill `pjp-dotfiles-register-host` が、今いる PC を dotfiles-private に登録する手順を Claude に教える
    (調べる → 下書きを見せて確かめる → private の branch に書く → 評価して比べる → PR → merge 後の片付け)
 5. この PC (lavie) を `pollenjp@lavie` として登録する (dotfiles-private の PR。4 の skill を通して作る)
-6. 決定を ADR 025 に残し、README などの文書を今の形に揃える
+6. 決定を ADR 026 に残し、README などの文書を今の形に揃える
 
 ## 非ゴール
 
@@ -196,11 +196,11 @@ dotfiles-private/
 
 ### 7. 文書
 
-- ADR 025 (`docs/adr/025_<slug>_<日時>/`): 決定 (private に置く・ローカル flake の input・hostname で選ぶ)、採らなかった案
+- ADR 026 (`docs/adr/026_<slug>_<日時>/`): 決定 (private に置く・ローカル flake の input・hostname で選ぶ)、採らなかった案
   (下の表)、段階 1〜3、`/nix/store` に入ること
 - nix/README.md: 登録簿の節・「登録簿に載せずにマシンを足す」・新規マシンの手順・setup のホストの決め方・dotfiles-private の節。
   lavie に `--host pollenjp@laptop` を付けて当てる記述は、private に登録した PC では `--host` を付けない形に直す
-  (ADR 022 の本文は記録なので直さず、ADR 025 に書く)。ADR 002 の「後続 ADR」に 025 を足す
+  (ADR 022 の本文は記録なので直さず、ADR 026 に書く)。ADR 002 の「後続 ADR」に 026 を足す
 - nixos-config の README の `--host pollenjp@laptop` は段階 3 で直す (この段階では setup の知らせで気づける。こちらの判断 7)
 - `nix/hosts/default.nix` の冒頭のコメント: 実機は dotfiles-private に置く方向で、段階 3 まで実機の行が残ることを書く
 
@@ -238,7 +238,8 @@ flake の checks に足す (作り物の private と hostname で。本物の値
    変わらない名前)。home-manager も `--flake` の `#` を省くと `$USER@$(hostname -s)` などを探すので、名前の付け方が揃う
 4. **名前の重なり。** private のホストの名前が public の登録簿と同じなら private が勝つ (段階 3 で実機を移すときの形)。
    setup の表示でどちらから来たかが分かれば足りる
-5. **ADR の番号は 025** (指揮役が割り当てた。open の PR に ADR を足すものは無い)
+5. **ADR の番号は 026** (指揮役は 025 を割り当てたが、同じころ別の会話の PR #144 (TKT-224。herdr --remote で ssh-agent を
+   借りる仕組み) も 025 を足していて、2026-10-21 に先に main へ merge された。main を取り込み、この PR の ADR を 026 にした)
 6. **「中身が同じ」は、同じ本体の版・同じ lock での旧い形と新しい形の比べ方で判定する** (builder check の問い 1)。
    今の世代は main で作られており、この PR で skill を足すだけで全ホストの世代が変わるので、今の世代との一致では判定できない。
    今の世代との一致は、元にするホストを見つけるため (手順 1) と参考の表示にだけ使う。lavie の登録 (6.) はこの段階に含め、

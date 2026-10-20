@@ -289,14 +289,14 @@ setup.sh は switch の前に clone を取得し、`<user>@<hostname>` のファ
   出た抜けを足す
 - [ ] **Step 4: commit**
 
-### Task 8: 文書 (ADR 025・README など)
+### Task 8: 文書 (ADR 026・README など)
 
 **Files:**
-- Create: `docs/adr/025_dotfiles_private_hosts_<JST の日時>/README.md`
+- Create: `docs/adr/026_dotfiles_private_hosts_<JST の日時>/README.md`
 - Modify: `docs/adr/README.md`・`docs/adr/002_*/README.md` (後続 ADR)・`nix/README.md`・`README.md`・`nix/hosts/default.nix`
   (先頭のコメント)・`nix/lib/mk-home.nix` (claude の説明の local の行)
 
-- [ ] **Step 1: ADR 025** — 背景・決定 (private に置く・ローカル flake の 2 つ目の path: 入力と stub・private に local を当てない・
+- [ ] **Step 1: ADR 026** — 背景・決定 (private に置く・ローカル flake の 2 つ目の path: 入力と stub・private に local を当てない・
   hostname で選ぶ・switch の前に取る・知らせ)・変更点・採らなかった案 (spec の A〜C と、入力を条件で消す・`mkDefault` の雛形・
   名前を env で持つ)・段階 1〜3・影響 (`/nix/store` に入ること・雛形の版が変わること)・検証
 - [ ] **Step 2: nix/README.md** — 置き場所・まとめて実行する (プリセットの表・決め方・`--which-host`)・新規マシンの手順 (0 と 2.4)・

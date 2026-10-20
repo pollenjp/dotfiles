@@ -1,4 +1,4 @@
-# dotfiles-private (private な repo) の nix/ から、登録した PC のホストを組み立てる (ADR 025)。
+# dotfiles-private (private な repo) の nix/ から、登録した PC のホストを組み立てる (ADR 026)。
 #
 # ローカル flake (~/dotfiles/flake.nix) の雛形が、dotfiles-private の clone の nix/ を path: の入力
 # (flake = false) に取り、`dotfiles.lib.privateHosts dotfiles-private` で呼ぶ。public な本体の input には

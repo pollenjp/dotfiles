@@ -856,7 +856,7 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 1 エントリが 1 マシン。マシンごとの差は `mkHome` に渡す値で吸収する。
 
 > 実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に置く方向にした
-> （[後述](#dotfiles-private-に登録したホスト)・[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)）。
+> （[後述](#dotfiles-private-に登録したホスト)・[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）。
 > public のこの登録簿には型（`pollenjp@x86_64-linux` など）と検証用の `sandbox` を残す。今ある実機の行
 > （`pollenjp@wsl`・`pollenjp@wsl-no-1password`・`pollenjp@laptop`）は、実機が全部 private に移るまで（段階 3）残す。
 
@@ -1119,7 +1119,7 @@ nix build --impure --expr '
 ### dotfiles-private に登録したホスト
 
 実機（その PC の値の全部を持つホスト）は、private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の
-`nix/hosts/<user>@<hostname>.nix` に 1 PC 1 ファイルで置ける（[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)）。
+`nix/hosts/<user>@<hostname>.nix` に 1 PC 1 ファイルで置ける（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）。
 登録した PC では、`~/dotfiles/setup --update` が `--host` なしでそのホストを選ぶ。値は git（private）に残るので、雛形が新しくなっても
 PC ごとに移さなくてよい。
 
@@ -1406,7 +1406,7 @@ dotfiles-private に登録した PC は `--host` を付けない（setup が登�
 決まる。[前述](#dotfiles-private-に登録したホスト)）。登録していない PC の `--host` なしの `setup` は、ローカル flake がホストを定義して
 いないと汎用の `<user>@<system>` を選び、署名が入らない（署名の入る登録簿のホストを当てるなら `--host`）。登録した PC で
 `--host pollenjp@laptop` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、setup が警告する
-（[ADR 025](../docs/adr/025_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の手順は、登録する前の記録）。
+（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の手順は、登録する前の記録）。
 
 `git log --show-signature` は `gpg.ssh.allowedSignersFile` が無いのでエラーになる（WSL も同じ）。
 署名されたかは `git cat-file -p HEAD` の `gpgsig` か、push したあとの GitHub の Verified で見る。

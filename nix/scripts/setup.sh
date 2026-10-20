@@ -28,7 +28,7 @@
 # - GitHub から取るところ (本体の更新の fetch と、bootstrap-*.sh の clone / 取得) は
 #   git_github を通す。dotfiles.claude.gitViaGh.enable のマシンでは gh の資格情報を先に
 #   試し、だめなら ssh で取り直す (TKT-221)。子の script も同じ形の git_github を持つ。
-# - 実機のホストは dotfiles-private の nix/hosts/<user>@<hostname>.nix に置ける (ADR 025)。この PC の名前と
+# - 実機のホストは dotfiles-private の nix/hosts/<user>@<hostname>.nix に置ける (ADR 026)。この PC の名前と
 #   clone の場所は private-host.sh が決め (ここは呼ぶだけ)、ローカル flake がその clone の nix/ を読んでいれば、
 #   --host が無くてもそのホストを選ぶ。clone は switch の前に取る (手順 private-fetch)。
 
@@ -557,7 +557,7 @@ apply_preset() {
       #                     パス外では exit 1 になり、後続まで巻き添えにする
       #   chsh              sudo が要る。README でも「必要なら」
       #
-      # private-fetch (dotfiles-private の取得) は switch の前に入れる (ADR 025)。登録したホストの値を
+      # private-fetch (dotfiles-private の取得) は switch の前に入れる (ADR 026)。登録したホストの値を
       # 直して push したあと、--update 1 回でその値で switch させるため。clone が無ければ何もしない。
       #
       # 外したいときは「カスタム」か --steps で選び直す。
@@ -633,7 +633,7 @@ local_flake_hosts() {
 # dotfiles-private のホスト   #
 ##############################
 
-# 実機のホストは dotfiles-private の nix/hosts/<user>@<短い hostname>.nix に置ける (ADR 025)。ローカル flake の
+# 実機のホストは dotfiles-private の nix/hosts/<user>@<短い hostname>.nix に置ける (ADR 026)。ローカル flake の
 # 雛形はその clone の nix/ を path: の入力 (inputs.dotfiles-private) に取り、dotfiles.lib.privateHosts で
 # 登録簿のホストに重ねる。clone の無かったマシンでは、同じ入力が本体の空の stub (nix/private-stub) を指す。
 #
@@ -768,7 +768,7 @@ is_wsl() {
 # 決まるので、既定を変えたいときは行を入れ替えるだけで済む。
 #
 # 2 はその PC の値の全部を持つホストなので、推測より強い。登録した PC では --host を付けなくてよい
-# (付け忘れて汎用のホストで当たるのを防ぐ。ADR 025)。3 へ落ちるのは 1 も 2 も無いときだけ。
+# (付け忘れて汎用のホストで当たるのを防ぐ。ADR 026)。3 へ落ちるのは 1 も 2 も無いときだけ。
 detect_host() {
   local user os arch system registered candidates=() cand first_local
   # 1. ローカル flake。先頭の行だけ取る (パイプの先に head を置かない)
@@ -1652,7 +1652,7 @@ step_script() {
   run "${path}" || return 1
 }
 
-# dotfiles-private を switch の前に取る (手順 private-fetch。ADR 025)。登録したホストの値を直して push したあと、
+# dotfiles-private を switch の前に取る (手順 private-fetch。ADR 026)。登録したホストの値を直して push したあと、
 # --update 1 回でその値で switch させるため。
 #
 # clone があるときだけ bootstrap-dotfiles-private.sh を流す (取得して fast-forward する。取れなくても警告して 0 で
@@ -1758,7 +1758,7 @@ warn_clobber() {
 # 両者は git worktree から実行したときにずれる (~/dotfiles は元の checkout を
 # 指したまま)。nix_dir で比べると毎回ずれて張り直し続けることになる。
 #
-# path: の入力は本体 (dotfiles) と dotfiles-private の nix/ (ADR 025) の 2 つ。どちらも見て、実物の narHash が
+# path: の入力は本体 (dotfiles) と dotfiles-private の nix/ (ADR 026) の 2 つ。どちらも見て、実物の narHash が
 # lock に無い入力だけをまとめて 1 回で張り直す (dotfiles-private の nix/ も、private-fetch で取ったり手で
 # 直したりすると変わる)。dotfiles-private の入力の指す先が無い (clone を消した・動かした) なら、評価が
 # 分かりにくいエラーで落ちる前に警告する。
@@ -2155,7 +2155,7 @@ post_notes() {
     note '        (Claude Code なら pjp-dotfiles-local-flake-migrate skill)'
   fi
   # dotfiles-private にこの PC のホストがあるのに、ローカル flake がその clone の nix/ を読んでいない (入力が無い・
-  # 本体の stub を指す)。そのホストは選べない (--host なしなら推測に落ちている。ADR 025)
+  # 本体の stub を指す)。そのホストは選べない (--host なしなら推測に落ちている。ADR 026)
   if [[ ${flake_dir} != "${nix_dir}" ]] && this_pc_in_private && ! local_flake_reads_private; then
     note "dotfiles-private に、この PC のホスト ${private_host_name} があります (${private_clone}/nix/hosts/${private_host_name}.nix)。"
     note "        ローカル flake (${flake_dir}/flake.nix) が dotfiles-private の nix/ を読んでいない ($(private_input_state)) ので、使っていません。"
@@ -2304,12 +2304,12 @@ local_flake_migrate_cmd() {
 }
 
 # --host・DOTFILES_HOST・メニューの h で、この PC を dotfiles-private に登録した名前と違うホストを選んだら警告する
-# (止めない。明示した方で当てる。ADR 025)。登録した PC で、nixos-config の README などに残る --host の手順で
+# (止めない。明示した方で当てる。ADR 026)。登録した PC で、nixos-config の README などに残る --host の手順で
 # 汎用のホストを当てると、値が登録したファイルではなく雛形の既定に戻るので、気づけるようにする。
 # 警告のまとめでは [対象ホスト] に載る。
 # 自動で決めた対象ホスト (ローカル flake・dotfiles-private・推測。決まっていないときも) を決め直す。$1: 直前の手順の名前。
 # private-fetch は clone にこの PC の登録を運んでくる (消す) ことがあり、local-flake はこの実行で clone を読むローカル flake を
-# 置くことがあるので、同じ実行の switch がそれを使うように (ADR 025)。--host・DOTFILES_HOST・メニューの h で選んだホストは
+# 置くことがあるので、同じ実行の switch がそれを使うように (ADR 026)。--host・DOTFILES_HOST・メニューの h で選んだホストは
 # 変えない。変われば、そう出す (実行の前に出した「対象ホスト」と違うため)
 redetect_host() {
   local before=${host} origin

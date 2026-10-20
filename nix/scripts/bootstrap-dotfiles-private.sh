@@ -16,7 +16,7 @@
 # しないのは、public な repo に private repo の rev を残さず、辞書を変えるたびにこの repo で
 # 指す先を進める commit を要らなくするため。
 #
-# 登録した PC のホストの定義と値 (nix/hosts/<user>@<hostname>.nix) も置く (ADR 025)。ローカル flake がその nix/ を
+# 登録した PC のホストの定義と値 (nix/hosts/<user>@<hostname>.nix) も置く (ADR 026)。ローカル flake がその nix/ を
 # path: の入力で読むので、setup の「既存マシン更新」「新しいマシン適用」は、clone があればこの script を switch の
 # **前** にも流す (setup.sh の手順 private-fetch)。そのときは、同じ実行のこの手順 (order 50) を setup が飛ばす。
 # clone が無ければ、今までどおりこの手順 (switch のあと) が clone する。

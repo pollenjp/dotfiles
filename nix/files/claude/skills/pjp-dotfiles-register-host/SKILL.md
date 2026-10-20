@@ -11,7 +11,7 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
 # pjp-dotfiles-register-host
 
 その PC のホストの定義と値の全部を、private な dotfiles-private の `nix/hosts/<user>@<短い hostname>.nix` に 1 PC 1 ファイルで
-置く (dotfiles の ADR 025)。ローカル flake の雛形がその clone の `nix/` を読み、setup は `--host` なしでそのホストを選ぶ。
+置く (dotfiles の ADR 026)。ローカル flake の雛形がその clone の `nix/` を読み、setup は `--host` なしでそのホストを選ぶ。
 ローカル flake の `local` はそのホストに当たらない (ファイルが値の全部を持つ)。
 
 決まった処理 (名前・調べる・下書き・比べる) は本体の `nix/scripts/private-host.sh` が持つ。この skill は手順・判断・確認の取り方を教える。
@@ -23,7 +23,7 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
 1. dotfiles-private に `nix/hosts/<名前>.nix` を足す PR (この登録で世代の中身が変わらないことを比べてから)
 2. PR の merge のあと、この PC の `~/dotfiles/flake.nix` を今の雛形へ移す (dotfiles-private の入力が clone の `nix/` を指す)
 
-dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privateHosts` がある) であることも要る。無ければ先に本体を新しくする。
+dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privateHosts` がある) であることも要る。無ければ先に本体を新しくする。
 
 ## 書く前に必ず確認を取る
 
@@ -46,7 +46,7 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 ## 前提
 
-- `<p>` は ADR 025 以降の本体の `nix/scripts/private-host.sh` のフルパス。`bash <p> <コマンド>` で流す (Bash tool はシェルの変数を
+- `<p>` は ADR 026 以降の本体の `nix/scripts/private-host.sh` のフルパス。`bash <p> <コマンド>` で流す (Bash tool はシェルの変数を
   次の呼び出しへ持ち越さない)。`draft` と `compare` が評価する本体は、どちらも既定でこの script の repo の `nix/` (ローカル flake が
   別の本体を指していても揃える)
 - **比べる間、本体の checkout を動かさない** (pull・編集・別の作業の commit)。`path:` の入力は narHash で lock されるので、途中で
@@ -69,7 +69,7 @@ dotfiles 本体が ADR 025 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)
 - **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した。「lock を写しで張り直して評価した」と
   出ていれば、本体が変わっているので一致しないのは想定どおり): 元にするホストを黙って決めない。
-  - その PC について前に決めた値 (チケットの決定・登録の依頼・設計の spec。最初の登録は dotfiles の ADR 025 からリンクした spec) が
+  - その PC について前に決めた値 (チケットの決定・登録の依頼・設計の spec。最初の登録は dotfiles の ADR 026 からリンクした spec) が
     あれば、それを推奨の根拠にする。今の世代と違うなら、その違い (例: 署名が外れる) を確認で書く
   - 手がかり: 今の世代 (`readlink -f ~/.local/state/nix/profiles/home-manager`) と前の世代
     (`~/.local/state/nix/profiles/home-manager-<n>-link`) の `home-files/.config/git/config` の署名 (`gpgSign`)、`local` の値が当たって
@@ -187,7 +187,7 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 
 ## 関連
 
-- dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」・ADR 025
+- dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」・ADR 026
 - pjp-dotfiles-local-flake-migrate — 手順 6 の、ローカル flake を今の雛形へ移す側
 - pjp-herdr-other-repo — dotfiles-private の worktree を作る・子に任せる
 - pjp-dev-tracker — PR とチケットを結ぶ

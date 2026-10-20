@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# この PC を dotfiles-private に登録するときの名前と、dotfiles-private の clone の場所を決める (ADR 025)。
+# この PC を dotfiles-private に登録するときの名前と、dotfiles-private の clone の場所を決める (ADR 026)。
 #
 # ## 何のために
 #

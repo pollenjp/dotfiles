@@ -52,7 +52,7 @@
         };
 
       # dotfiles-private の nix/ (ローカル flake の path: の入力。flake = false) の hosts/*.nix から、
-      # 登録した PC のホストを組み立てる (ADR 025)。本体は dotfiles-private を input に持たないので
+      # 登録した PC のホストを組み立てる (ADR 026)。本体は dotfiles-private を input に持たないので
       # 自分では呼ばず、ローカル flake の雛形が
       #
       #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // dotfiles.lib.privateHosts dotfiles-private // { ... };

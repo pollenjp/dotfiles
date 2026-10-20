@@ -23,7 +23,7 @@
 #               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
 #               dotfiles-private の nix/ を 2 つ目の path: の入力 (inputs.dotfiles-private。flake = false) に取り、
 #               そこに登録した PC のホスト (nix/hosts/<user>@<hostname>.nix) を登録簿のホストに重ねる
-#               (local は当たらない。ADR 025)。指す先は private-host.sh input-dir が決める: clone の nix/ があれば
+#               (local は当たらない。ADR 026)。指す先は private-host.sh input-dir が決める: clone の nix/ があれば
 #               そこ、無ければ本体の空の stub (nix/private-stub)。clone ができたら local-flake-migrate.sh prepare が
 #               指し直す。heredoc の展開は ${nix_dir}・${private_nix_dir}・${template_id} だけ (local-flake-migrate.sh が
 #               同じ展開を真似て描く。足すならあちらも)。
@@ -297,7 +297,7 @@ if [[ ${write_flake} == 1 ]]; then
   inputs.dotfiles.url = "path:${nix_dir}";
 
   # dotfiles-private (private な repo) の nix/。この PC を登録したホストの定義と値
-  # (nix/hosts/<user>@<hostname>.nix。登録は pjp-dotfiles-register-host skill) を読む (ADR 025)。
+  # (nix/hosts/<user>@<hostname>.nix。登録は pjp-dotfiles-register-host skill) を読む (ADR 026)。
   # public な本体の input にはしない (public の lock に private の rev を残さない) ので、ここで取る。
   # clone の nix/ が無かったマシンは本体の空の stub を指す。clone ができたら、値を引き継いで今の
   # 雛形へ移すとき (local-flake-migrate.sh prepare) に指し直す。中身 (nix/ の下だけ) は誰でも読める
@@ -360,7 +360,7 @@ if [[ ${write_flake} == 1 ]]; then
       };
 
       # dotfiles-private に登録した PC のホスト (nix/hosts/<user>@<hostname>.nix のファイル名が名前)。
-      # local は当たらない。setup は --host が無ければ、この PC の名前のホストを選ぶ (ADR 025)。
+      # local は当たらない。setup は --host が無ければ、この PC の名前のホストを選ぶ (ADR 026)。
       privateHosts = dotfiles.lib.privateHosts dotfiles-private;
     in
     {
