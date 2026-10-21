@@ -230,7 +230,7 @@ owner_of() {
 }
 perm() { stat -c %a "$1" 2>/dev/null || echo "(無い)"; }
 
-PC=polle@PJP-RAIDEN
+PC=alice@ALICE-PC
 OTHER=taro@LAPTOP-7QX2
 conn="SSH_CONNECTION=192.0.2.1 50000 192.0.2.2 22"
 
@@ -324,7 +324,7 @@ fi
 
 # 7. 展開されていない値・おかしな値は届いていない扱い
 i=0
-for v in '%u@%L' $'polle@PJP-RAIDEN\nx' 'local'; do
+for v in '%u@%L' $'alice@ALICE-PC\nx' 'local'; do
   i=$((i + 1))
   newhome "weird-${i}"
   A="${H}/.ssh/agent/s.t.sshd.weird${i}-A"
@@ -1033,8 +1033,8 @@ status client --json
 server stop
 server live-handoff --import-exe /x
 pane list
---remote lavie.local
---remote=lavie.local --session s2
+--remote box.local
+--remote=box.local --session s2
 --version
 --help
 session attach help

@@ -1,5 +1,6 @@
 # homeConfiguration を組み立てるヘルパ。
-# hosts/default.nix から 1 マシン 1 行で呼ぶ。
+# hosts/default.nix (型と sandbox)・dotfiles-private の nix/hosts/*.nix (lib/private-hosts.nix)・ローカル flake の tmp から、
+# 1 マシン 1 回呼ぶ。
 { inputs }:
 
 {
@@ -13,7 +14,7 @@
   #
   #   wsl = {
   #     enable = true;
-  #     windowsUserName = "polle";
+  #     windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (例は作り物)
   #     windowsFiles.enable = true;
   #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
   #   };
@@ -29,16 +30,15 @@
   onePassword ? { },
   # Claude Code まわりのマシン固有設定 (dotfiles.claude にそのまま入る)。
   #
-  #   claude.devTracker.enable = false;   # Notion Dev Tracker を使わないマシン
+  #   claude.devTracker.enable = true;    # Notion Dev Tracker を使うマシン (既定は使わない。ADR 027)
   #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git・fetch 系の abbr / alias・setup の取得を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
   #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
   #   claude.videoOffer.autoStart.enable = true;  # 設計・PR のときに解説動画の短尺を答えを待たずに作り始めるマシン (既定は先に聞く)
   #
-  # 省略すれば既定 (devTracker と gitViaGh は true、videoOffer.autoStart は false。個々は home/options.nix)。
-  # ローカル flake (~/dotfiles/flake.nix) の雛形は登録簿のホストにも当たる module で devTracker を
-  # false にしているので、そちら経由のマシンでは雛形側を見ること。dotfiles-private に登録したホスト
-  # (lib/private-hosts.nix) は素の mkHome で組むので、その module は当たらない (ファイルが値の全部を持つ)。
+  # 省略すれば既定 (gitViaGh は true、devTracker と videoOffer.autoStart は false。個々は home/options.nix)。
+  # dotfiles-private に登録したホスト (lib/private-hosts.nix) とローカル flake の tmp は、ここに渡す値でその PC の
+  # 値の全部を持つ (ADR 027)。前の雛形のローカル flake は、登録簿のホストに local の module を前置する (lib.hostsWith)。
   claude ? { },
   modules ? [ ],
 }:
