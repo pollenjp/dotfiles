@@ -707,8 +707,16 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 
 | PC | 流れ |
 | --- | --- |
-| dotfiles-private を読める | 1. `./nix/scripts/setup.sh --new-machine --host <型>` で 1 回当てる（Nix・gh・dotfiles-private の clone がそろう。clone は gh のログインか SSH 鍵が要るので、取れなかったら `gh auth login` のあと `~/dotfiles/setup --steps bootstrap-dotfiles-private --host <型>`）→ 2. Claude Code で `pjp-dotfiles-register-host` skill（dotfiles-private に登録する PR）→ 3. merge → 4. ローカル flake を今の雛形へ移す（dotfiles-private の入力を stub から clone の `nix/` へ指し直す。skill の最後の手順）→ 5. `~/dotfiles/setup --update`（`--host` なし。登録したホストが選ばれる） |
+| dotfiles-private を読める | 1. `./nix/scripts/setup.sh --new-machine --host <型>` で 1 回当てる（Nix と gh が入る）→ 2. `gh auth login` のあと `~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-dotfiles-private.sh` で dotfiles-private を clone する（1 で取れていれば要らない）→ 3. Claude Code で `pjp-dotfiles-register-host` skill（dotfiles-private に登録する PR。入れ直した PC のように登録済みなら飛ばす）→ 4. merge → 5. ローカル flake が clone の `nix/` を読む形にする（下の「指し直し」）→ 6. `~/dotfiles/setup --which-host` が `<user>@<hostname><TAB>private` を出すのを確かめ、`~/dotfiles/setup --update`（`--host` なし。登録したホストが選ばれる） |
 | dotfiles-private を読めない | 1. `./nix/scripts/setup.sh --steps local-flake` でローカル flake を置く → 2. `~/dotfiles/flake.nix` に `tmp` を足す（[後述](#登録簿に載せずにマシンを足す)。雛形のコメントの例を 1 段外して直す）→ 3. `~/dotfiles/setup --new-machine`（`tmp` が選ばれる） |
+
+**指し直し**（ローカル flake の dotfiles-private の入力を、本体の空の stub から clone の `nix/` へ）: 1 回目に置いたローカル flake は、
+clone がまだ無かったので stub を指している。setup はこれを自動では書き換えない（ユーザーのファイルなので）。
+
+| ローカル flake | 指し直し方 |
+| --- | --- |
+| 値を書き足していない雛形のまま（`tmp` もほかの行も足していない） | `~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh --force` で作り直す（今の雛形で、clone の `nix/` を読む。退避は取らない） |
+| 値を書き足したあと | `local-flake-migrate.sh` で値を引き継いで移す（[後述](#雛形が新しくなったら)。Claude Code なら `pjp-dotfiles-local-flake-migrate` skill。退避を取る） |
 
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |

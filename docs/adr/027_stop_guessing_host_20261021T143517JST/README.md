@@ -87,7 +87,7 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 
 | PC | 流れ |
 | --- | --- |
-| dotfiles-private を読める | `setup --new-machine --host <型>` で 1 回当てる（Nix・gh・clone がそろう）→ `pjp-dotfiles-register-host` で登録の PR → merge → ローカル flake を今の雛形へ移す（stub から clone へ指し直す）→ `setup --update`（`--host` なし） |
+| dotfiles-private を読める | `setup --new-machine --host <型>` で 1 回当てる → `gh auth login` のあと `bootstrap-dotfiles-private.sh` で clone → `pjp-dotfiles-register-host` で登録の PR → merge → ローカル flake の入力を stub から clone へ指し直す（値を書き足していない雛形なら `setup-local-flake.sh --force` で作り直す。書き足したあとなら `local-flake-migrate.sh` で移す）→ `setup --which-host` で確かめて `setup --update`（`--host` なし） |
 | 読めない | `setup --steps local-flake` でローカル flake を置き、`tmp` を書いてから setup を流す |
 
 元にするホストが段階 3 で公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた、まだ登録していない PC）は、段階 3 の前の本体を
