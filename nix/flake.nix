@@ -327,6 +327,14 @@
               system
               ;
           };
+          herdr-hyperlink-state = import ./tests/herdr-hyperlink.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 

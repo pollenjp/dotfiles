@@ -627,6 +627,23 @@ in
         end
       end
 
+      # herdr の pane の中では、リンク (OSC 8) を出せる端末だと FORCE_HYPERLINK=1 で伝える (TKT-270)。
+      #
+      # herdr は pane が出したリンクを外の端末へ通すが、pane の env には TERM=xterm-256color しか無い。
+      # Claude Code は FORCE_HYPERLINK・TERM_PROGRAM などの env でリンクを出せるかを決めるので、
+      # 出せない端末と判断し、Link で描くもの (問いの上に footer を出す mod のバッジなど) を
+      # 「label の後ろに薄い URL」の形にする (押して開けない。本体の footer はこの判断によらずリンクを出す)。
+      #
+      # pane のシェルで立てるので、claude の起動の仕方 (c・claude-<名前>・herdr agent start) によらず効く。
+      # その代わり pane で打つほかのコマンドと Claude の Bash tool のコマンドにも引き継がれ、FORCE_HYPERLINK を
+      # 読む CLI は出力がパイプでもリンクの制御文字を混ぜうる (1 回だけ止めるなら FORCE_HYPERLINK=0 を付ける)。
+      # すでに値がある shell (FORCE_HYPERLINK=0 で herdr を起こしたなど) では触らない。
+      # 採らなかった置き場所は nix/README.md「herdr の中の Claude Code にリンクを出させる」。
+      # bash.nix の initExtra にも同じブロックがある (herdr の pane のシェルを bash にしたとき用)。
+      if test -n "$HERDR_ENV"; and not set -q FORCE_HYPERLINK
+        set -gx FORCE_HYPERLINK 1
+      end
+
       # マシンローカルの環境変数。home-manager の管理下には置かない。
       # bash.nix の initExtra と同じファイルを同じ形式で読む
       # (形式と、home.sessionVariables を使わない理由はそちらのコメント)。
