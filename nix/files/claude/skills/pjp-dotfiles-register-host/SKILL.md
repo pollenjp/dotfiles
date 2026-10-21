@@ -15,7 +15,9 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
 ローカル flake の値はそのホストに当たらない (ファイルが値の全部を持つ。前の雛形の `local` も当たらない)。
 
 段階 3 (dotfiles の ADR 027) のあとは、setup は対象ホストを推測しない。公開の登録簿には型 (`<user>@<system>`) と `sandbox` しか無く、
-登録も `~/dotfiles/flake.nix` の `tmp` も無い PC では、setup は止まって選べる道を出す。登録の前の 1 回は `--host <型>` で当てる。
+登録も `~/dotfiles/flake.nix` の `tmp` も無い PC では、setup は止まって選べる道を出す。登録の前の 1 回は `--host <型>` で当てる
+(型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。WSL や 1Password を使う PC では、当て続けるとそれらが外れる
+(WSL の ssh のラッパー・署名・exe-exec-trace の unit など) ので、すぐ登録する)。
 
 決まった処理 (名前・調べる・下書き・比べる) は本体の `nix/scripts/private-host.sh` が持つ。この skill は手順・判断・確認の取り方を教える。
 
@@ -66,13 +68,17 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
   `--nix-dir` に渡す。merge のあとの比べ直し (手順 6 の 2) も同じ写しで行う
 
   ```sh
-  # 段階 3 で実機の行を消した commit の 1 つ前 (まだ実機の行がある)
-  rev=$(git -C <本体> log -1 --format=%H -S'"pollenjp@wsl" = mkHome' -- nix/hosts/default.nix)^
+  # 段階 3 を main に入れた merge の 1 つ目の親 (main の、段階 3 の直前。まだ実機の行がある)
+  rev=$(git -C <本体> log -1 --first-parent --diff-merges=first-parent --format=%H -S'"pollenjp@wsl" = mkHome' -- nix/hosts/default.nix)^1
   mkdir -p <scratchpad>/pre-stage3 && git -C <本体> archive "${rev}" nix | tar -x -C <scratchpad>/pre-stage3
   bash <p> draft --base pollenjp@wsl --nix-dir <scratchpad>/pre-stage3/nix --out <scratchpad>/draft/<名前>.nix
   ```
 
-  写しの本体は Dev Tracker の既定が今と違うことがある。下書きに `claude.devTracker.enable` があるか (使う PC なら true) を確かめる
+  (`--first-parent --diff-merges=first-parent` が要る。無いと merge の中の commit を引き、その 1 つ前は段階 3 の途中の版になる)
+
+  写しの本体は Dev Tracker の既定が true (今は false)。前の雛形の `local` が `devTracker.enable` を書いていれば下書きに出るが、書いて
+  いなかった PC (`local` の無いさらに前の雛形など) では下書きに出ず、登録すると黙って off になる。`grep -c 'タスク管理' ~/.claude/CLAUDE.md`
+  が 1 以上 (今 Dev Tracker を使っている) なら、下書きに `claude.devTracker.enable = true;` があるかを確かめ、無ければ足す
 
 ## 手順
 

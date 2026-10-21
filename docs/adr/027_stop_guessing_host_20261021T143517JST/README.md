@@ -50,7 +50,11 @@ WSL の上で流すと、推測が登録簿の `<user>@wsl` を選んで 4 件�
   この PC のファイルがある」（今ある・`private-fetch` で来うる）と「ローカル flake がその clone を読む」（今読む・`local-flake` がこの実行で
   置く）がそろいうるなら手順を流し、決まらなければ switch の頭で止める（取得で届いた登録を同じ実行で拾う）。そろいようがなければ
   （Nix が無い新しいマシン・clone が無い・その手順を選んでいない・登録してあるのにローカル flake が読んでいない）execute の前に止める
-  （Nix を入れてから・`preflight-unlink` が home-manager の symlink を外してから止めない）
+  （Nix を入れてから・`preflight-unlink` が home-manager の symlink を外してから止めない）。`preflight-unlink` を流す実行
+  （`--new-machine`）では、取得で来うるだけの登録は数えない（clone にこの PC のファイルが今あるときだけ進む）。`--dry-run` では取得・
+  ローカル flake の手順が流れないので、決め直しに頼る switch は ✖ にせず「決め直せない」と出す
+- 止める文の `--host <型>` には、型には WSL・1Password の署名・Dev Tracker などの PC の値が無いことを添える（それらを使う PC は
+  登録するか `tmp` に値を書く）
 - `--which-host` も決まらなければ同じ文で 1。`DOTFILES_HOST`（`~/.config/pjp/env`）は今までどおり効く
 
 ### B. ローカル flake の雛形から `local` を外す
@@ -87,7 +91,7 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 
 | PC | 流れ |
 | --- | --- |
-| dotfiles-private を読める | `setup --new-machine --host <型>` で 1 回当てる → `gh auth login` のあと `bootstrap-dotfiles-private.sh` で clone → `pjp-dotfiles-register-host` で登録の PR → merge → ローカル flake の入力を stub から clone へ指し直す（値を書き足していない雛形なら `setup-local-flake.sh --force` で作り直す。書き足したあとなら `local-flake-migrate.sh` で移す）→ `setup --which-host` で確かめて `setup --update`（`--host` なし） |
+| dotfiles-private を読める | `setup --new-machine --host <型>` で 1 回当てる → `gh auth login` のあと `bootstrap-dotfiles-private.sh` で clone → `pjp-dotfiles-register-host` で登録の PR → merge し、`setup --steps private-fetch` で手元の clone を新しくする → ローカル flake の入力を stub から clone へ指し直す（値を書き足していない雛形なら `setup-local-flake.sh --force` で作り直す。書き足したあとなら `local-flake-migrate.sh` で移す）→ `setup --which-host` で確かめて `setup --update`（`--host` なし） |
 | 読めない | `setup --steps local-flake` でローカル flake を置き、`tmp` を書いてから setup を流す |
 
 元にするホストが段階 3 で公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた、まだ登録していない PC）は、段階 3 の前の本体を
@@ -110,7 +114,11 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 
 - 止める時機の「決め直しで決まりうるか」は、ファイル（今ある・取得で来うる）とローカル flake（今読む・この実行で置く）の両方で見る
   （設計の 3 条件に「登録してあるのにローカル flake が読んでいない（`local-flake` で置けない）」を足した。登録した PC で前の雛形のまま
-  `--update` を打ったとき、取得も switch もせずにすぐ読ませ方を出す）
+  `--update` を打ったとき、取得も switch もせずにすぐ読ませ方を出す）。branch のレビューで、clone のある未登録の PC で `--new-machine`
+  を打つと `preflight-unlink` が symlink を外したあとに switch で止まると分かったので、`preflight-unlink` を流す実行では取得で来うる
+  だけの登録を数えないことにした
+- 前の雛形のローカル flake が新しい本体で評価できることは、`hosts-with-state`（前の雛形の `local` の既定を `hostsWith` で当てた型の
+  ホストが評価でき、drvPath が本体の同じホストと同じ）で見続ける
 - 作り物の WSL のホストは flake.nix の checks に直に書く（`home-wsl-example`）。tmp の例は fixture
   （`nix/tests/fixtures/local-flake-tmp/tmp.nix`）にし、雛形の本文と同じかを `setup-local-flake.test.sh` が、評価できて warnings が空なことを
   `local-flake-tmp-state` が見る
@@ -174,15 +182,20 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 ## 6. 検証 (Verification)
 
 - テスト（WSL の上で手元で流し、flake の checks でも Nix のサンドボックスで流した）:
-  - `setup-host.test.sh`（19 件）: 推測のケースを「決まらず止まる」に直し、WSL（`WSL_DISTRO_NAME`）でも `<user>@wsl` を選ばないこと、
-    execute の前に止まる場面（Nix が無い・clone が無い・決め直しの手順を選んでいない・登録してあるのに読んでいない）、決め直しで最初の
-    未定から拾う場面を足した。変更前の setup.sh は WSL の上で 13 passed, 4 failed（推測が `<user>@wsl` を選ぶ）
+  - `setup-host.test.sh`（22 件）: 推測のケースを「決まらず止まる」に直し、WSL（`WSL_DISTRO_NAME`）でも `<user>@wsl` を選ばないこと、
+    execute の前に止まる場面（Nix が無い・clone が無い・決め直しの手順を選んでいない・登録してあるのに読んでいない・`--new-machine` で
+    取得で来うるだけ）、決め直しで最初の未定から拾う場面、`--dry-run` の決め直し、最初から未定で取得しても来ないときに switch の頭で
+    止まる場面を足した。変更前の setup.sh は WSL の上で 13 passed, 4 failed（推測が `<user>@wsl` を選ぶ）
   - `setup-post-notes.test.sh`（29 件）・`setup-local-flake.test.sh`（13 件。`local` と `hostsWith` が無い・tmp の例が fixture と同じ・
     古い雛形の警告を出さない。変更前の雛形では新しい 3 件が落ちた）・`local-flake-migrate.test.sh`（89 件。ADR 026 の版から、`local` が
     既定のままなら衝突なく今の雛形と同じに、値があれば衝突として残る）・`private-host.test.sh`（22 件）
-  - `one-password.nix`（作り物の 4 通り）・`local-flake-tmp.nix`（tmp の例が `mkForce` なしで評価でき、warnings が空）・`claude-notion.nix`・
-    `claude-video-offer.nix`・`host-draft.nix`（既定の false に合わせた）
+  - `one-password.nix`（作り物の 4 通り）・`local-flake-tmp.nix`（tmp の例が `mkForce` なしで評価でき、warnings が空）・`hosts-with.nix`
+    （前の雛形の `local` を当てた型のホストが評価でき、drvPath が変わらない）・`claude-notion.nix`・`claude-video-offer.nix`・
+    `host-draft.nix`（既定の false に合わせた）
   - ほかの script のテストも手元で流して通った（道具の要る 3 本（shfmt・protobuf の python・包んだ git-gh）は、サンドボックスの checks で通った）
+- branch のレビュー（別の reviewer）: Critical 0・Important 1（上の `--new-machine` の止める時機。直した）・Minor 9（`--dry-run` の決め直し・
+  決まらずに止まったときの前の雛形の案内・止める文の型の注意・新しい PC の流れの clone の更新・skill の段階 3 の前の rev の引き方 など。
+  ほかの ADR の本文の移行手順に残る古いホストを除いて直した）
 - `nix flake check --all-systems --no-build ./nix` が通る。`nix flake check --no-eval-cache ./nix` で x86_64-linux の checks 68 本
   （`home-wsl-example` を含む）を build できた。sandbox の `config.warnings` は `[]`
 - lint（CI と同じ）: nixfmt・shfmt・shellcheck・テストの先頭の「## 確かめること」・`check-test-grep-q.sh`・`bootstrap-windows-files.sh --check`・
