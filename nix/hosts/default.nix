@@ -116,8 +116,12 @@
     username = "user";
     system = "x86_64-linux";
     homeDirectory = "/tmp/hm-sandbox";
-    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。選ばないと
+    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。Dev Tracker の既定は「使わない」
+    # なので、CI の「warnings が空」の確かめがその経路を通るよう明示する。宛先を選ばないと
     # home/modules/claude.nix が warnings を出し、CI の「warnings が空」で落ちる。
-    claude.notion.profile = "personal";
+    claude = {
+      devTracker.enable = true;
+      notion.profile = "personal";
+    };
   };
 }
