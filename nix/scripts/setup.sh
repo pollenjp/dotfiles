@@ -833,7 +833,8 @@ host_undecided() {
       else
         printf '   ローカル flake (%s) が dotfiles-private の nix/ を読んでいません (%s)。\n' "${flake_file}" "$(private_input_state)"
         printf '   読ませるには、値を引き継いで今の雛形へ移す: %s\n' "$(local_flake_migrate_cmd)"
-        printf '   (Claude Code なら pjp-dotfiles-local-flake-migrate skill)\n'
+        printf '   (Claude Code なら pjp-dotfiles-local-flake-migrate skill。値を書き足していない雛形なら %s --force で作り直してもよい)\n' \
+          "${script_dir}/setup-local-flake.sh"
       fi
       printf '   それまでの間に当てるなら、--host <型> を付ける (型: %s)\n' "${types:-登録簿にありません}"
       return 0
@@ -2176,6 +2177,7 @@ post_notes() {
     note '        読ませるには、値を引き継いで今の雛形へ移す (dotfiles-private の入力が clone の nix/ を指す):'
     note "          $(local_flake_migrate_cmd)"
     note '        (Claude Code なら pjp-dotfiles-register-host skill の最後の手順)'
+    note "        値を書き足していない雛形なら ${script_dir}/setup-local-flake.sh --force で作り直してもよい (退避は取らない)。"
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }

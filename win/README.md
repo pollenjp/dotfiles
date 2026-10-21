@@ -28,7 +28,8 @@ nix/scripts/bootstrap-windows-files.sh             # 配る部分だけ (この 
 nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 ```
 
-- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ (登録簿では `pollenjp@wsl`)
+- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ (dotfiles-private に登録したファイルか、
+  `~/dotfiles/flake.nix` に足したホストで書く。公開の登録簿の型には入らない)
 - 配り先の `/mnt/c/Users/<名前>` は `dotfiles.wsl.windowsUserName` で決まる
 - 配るのは setup を流した checkout の作業ツリー。commit していない変更も配られる
 - 置いたファイルをアプリが読み直すとは限らない。書き換えたときは manifest の `hint` が出る
@@ -458,7 +459,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 - `config.d` はファイル名の順に読まれ、同じキーは先に読んだ値が効く (WSL と同じ)
 - `SetEnv PJP_SSH_CLIENT=%u@%L` は、ssh 先の herdr が「同じマシンから来た接続」を見分けるのにこの PC を名乗る
-  (`polle@pjp-raiden` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
+  (`<Windows のユーザー名>@<PC の名前>` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
   [`nix/README.md`「forward された agent を固定名で見せる」](../nix/README.md#forward-された-agent-を固定名で見せる))。
   ssh は最初に当たった `SetEnv` の行だけを使うので、`config.d` の `Host` に `SetEnv` を書いたら、そこにも
   `PJP_SSH_CLIENT=%u@%L` を足す。前の版 (`SetEnv` の無い `config`) は、記録と同じ中身なら正本の更新として上書きされる

@@ -24,7 +24,7 @@ home-manager がビルドする「この世代の完成形」。中身は次の�
 **`activate` を実行する前に `home-files/` を覗ける**のが重要。「適用したら何が置かれるか」を `$HOME` に触れずに完全に確認できる。
 
 ```sh
-nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+nix build '.#homeConfigurations."pollenjp@x86_64-linux".activationPackage' -o /tmp/hm
 find /tmp/hm/home-files
 ```
 

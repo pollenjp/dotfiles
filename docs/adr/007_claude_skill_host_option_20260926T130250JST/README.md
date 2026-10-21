@@ -8,7 +8,7 @@
 | チケット | [TKT-21](https://app.notion.com/p/claude-host-option-1-pjp-dev-tracker-CLAUDE-md-skillOverrides-3e779149a66f81dfa42cdb52f3db2177) |
 | 前提 ADR | [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（マシン固有設定は option で明示する / ローカル flake の位置づけ） |
 | 運用手順 | [`nix/README.md`「Claude Code の skill を host ごとに止める」](../../../nix/README.md#claude-code-の-skill-を-host-ごとに止める) |
-| 後続 ADR | [023_claude_video_offer_host_option](../023_claude_video_offer_host_option_20261018T121637JST/README.md)（解説動画の option を足した作業で、`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、user の値より優先されると分かった。§2 B と §5 の「`/skills` で手で変えても次の update で戻る」は当たらない。運用手順の `nix/README.md` は直した。本文は決定当時の記録としてそのまま残してある） |
+| 後続 ADR | [023_claude_video_offer_host_option](../023_claude_video_offer_host_option_20261018T121637JST/README.md)（解説動画の option を足した作業で、`/skills` の切り替えは project の `.claude/settings.local.json` に保存され、user の値より優先されると分かった。§2 B と §5 の「`/skills` で手で変えても次の update で戻る」は当たらない。運用手順の `nix/README.md` は直した。本文は決定当時の記録としてそのまま残してある）、[027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（`dotfiles.claude.devTracker.enable` の既定を false にし（§2.A の「既定 true」を改める）、ローカル flake の雛形から `local` を外した（§2.C を改める）。Dev Tracker を使うマシンは、dotfiles-private に登録したファイルかローカル flake の `tmp` で true を書く。§7 の `local` を直す手順は今の雛形には当たらない。運用手順の `nix/README.md` は直した。本文は決定当時の記録としてそのまま残してある） |
 
 ---
 
@@ -56,6 +56,11 @@ ADR 002 で用意した **ローカル flake (`~/dotfiles/flake.nix`、git 管�
 
 ### A. 「このマシンで Dev Tracker を使うか」を host option にする
 
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 既定は false に改めた (使うマシンだけ true を書く。dotfiles-private に登録したファイル・ローカル flake の `tmp`・`sandbox`)。
+>   型のホストを `--host` で当てたマシンでは使わない
+
 `dotfiles.claude.devTracker.enable` (bool、既定 true) を `home/options.nix` に足す。
 `mkHome` は `wsl` と同じ形で `claude ? { }` を受け取り、`dotfiles.claude` に入れる。
 
@@ -90,6 +95,11 @@ ADR 002 で用意した **ローカル flake (`~/dotfiles/flake.nix`、git 管�
 settings.json 側からも読めるよう、enable = true でも明示して書く。
 
 ### C. ローカル flake は登録簿のホストにも当たる `local` を持ち、既定は false
+
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 雛形から `local` を外した (`dotfiles.homeConfigurations // privateHosts // { … }`)。PC の値は dotfiles-private の登録か、
+>   ローカル flake に足した `tmp` の `mkHome` の引数に書く。`lib.hostsWith` は前の雛形のローカル flake のために残してある
 
 本体の flake に `lib.hostsWith` を足す。登録簿の全ホストに引数の module を前置して
 組み立て直すもので、`homeConfigurations` 自体が `hostsWith [ ]` になる。
@@ -182,6 +192,13 @@ outputs = { dotfiles, ... }:
 | (既知) verify.sh 最後の `~~/dotfiles` 参照チェック | `grep -rn 'dotfiles/' files/` | **main でも同じ 10 件で落ちる**。`~/dotfiles` がローカル flake の正規の入口になった後に skill の文書が参照しているもので、この ADR の変更では増減していない。検査の見直しは別チケット |
 
 ## 7. 移行・運用手順
+
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 今の雛形には `local` が無く、本体の既定が false なので、下の「`local` の `devTracker.enable` を直す」手順は当たらない。
+>   Dev Tracker を使うマシンは、dotfiles-private に登録したファイルかローカル flake の `tmp` の `mkHome` に
+>   `claude.devTracker.enable = true;` を書いて `~/dotfiles/setup --update`。使わないマシンは何も書かない
+>   (`nix/README.md`「Claude Code の skill を host ごとに止める」)
 
 会社のマシン (Dev Tracker を使わない):
 

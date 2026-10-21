@@ -90,7 +90,7 @@ clone の `nix/` がまだ無いマシンでは、本体の空の stub（`nix/pr
 ```sh
 ~/dotfiles/setup                                  # メニュー
 ~/dotfiles/setup --update                         # 既存マシンの更新
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 > パスが違うと `setup-local-flake.sh` は止まる。意図して別の場所に置くなら
@@ -110,9 +110,8 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 > 旧経路側は壊れる。Nix 経路へ切り替えるマシンでのみ行うこと（手順 2 の
 > `preflight-unlink.sh` で symlink を外すのが前提）。
 
-`~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**と
-**このマシンだけの設定（`local`）**を書く場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。
-足さなくても、入口を 1 つに揃えるために常に置く。
+`~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**（`tmp` など。dotfiles-private を読めない PC の
+値を書く）を書く場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、入口を 1 つに揃えるために常に置く。
 
 ## Nix のインストール
 
@@ -217,7 +216,7 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 > `nix flake update` に `#<ホスト>` は付けられない。`--flake` は flake ref だけを取る。
 >
 > ```
-> error: unexpected fragment 'pollenjp@wsl' in flake reference '~/dotfiles#pollenjp@wsl'
+> error: unexpected fragment 'pollenjp@x86_64-linux' in flake reference '~/dotfiles#pollenjp@x86_64-linux'
 > ```
 
 #### 新しすぎる revision を pin しない (minimumReleaseAge 相当)
@@ -440,7 +439,7 @@ nix flake update dotfiles-private --flake ~/dotfiles   # dotfiles-private の ni
 ```
 
 ```
-  対象ホスト: pollenjp@wsl  (h で変更)
+  対象ホスト: <user>@<hostname>  (dotfiles-private / h で変更)
   既存ファイル: 退避しない  (b で変更)
 
   ↑/↓ 移動   Enter 決定   h ホスト変更   b 退避   q 中止
@@ -492,25 +491,39 @@ switch させるため（[後述](#dotfiles-private-に登録したホスト)）
 下の「実行される手順」にも出る）。
 カスタムでは `bootstrap` の行で Space を押すと配下がまとめて切り替わる。
 
-対象ホストは自動判定する。順は次の 3 つで、違うものを使うなら `h` で選び直すか
-`--host <名前>`（`DOTFILES_HOST` も同じ）。
+対象ホストは次の順で決める。違うものを使うなら `h` で選び直すか `--host <名前>`（`DOTFILES_HOST` も同じ）。
 
-1. `~/dotfiles/flake.nix` が定義しているホスト（[登録簿を上書きする側](#登録簿に載せずにマシンを足す)）
+1. `~/dotfiles/flake.nix` が定義しているホスト（`tmp` など。[登録簿を上書きする側](#登録簿に載せずにマシンを足す)）
 2. dotfiles-private に登録したこの PC のホスト（`nix/hosts/<user>@<短い hostname>.nix`。ローカル flake が clone の `nix/` を
    読んでいるときだけ。[後述](#dotfiles-private-に登録したホスト)）
-3. `$USER` と `uname` からの推測（WSL なら `<user>@wsl`、次に `<user>@<system>`）
 
-1 を先に見るのは、あちらが登録簿を `//` で上書きするための場所だから。名前を
-書いた時点で「このマシンはこれ」という意思表示なので、推測より強く扱う。
-複数書いてあるときは**一番上**のものを採る（3 の候補と同名のものが下にあっても
-そちらへは行かない。既定を変えたいときは行を入れ替える）。2 はその PC の値の全部を持つホストなので、
-登録した PC では `--host` を付けなくてよい。3 へ落ちるのは 1 も 2 も無いときだけ。ローカル flake・dotfiles-private
-由来のときはヘッダに `(ローカル flake)`・`(dotfiles-private)` と出る。`--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と
-違うホストを選ぶと警告する（止めない。最後の警告のまとめの `[対象ホスト]` にも載る）。
+1 を先に見るのは、あちらが登録簿を `//` で上書きするための場所だから。名前を書いた時点で「このマシンはこれ」という
+意思表示になる。複数書いてあるときは**一番上**のものを採る（既定を変えたいときは行を入れ替える）。2 はその PC の値の
+全部を持つホストなので、登録した PC では `--host` を付けなくてよい。ローカル flake・dotfiles-private 由来のときはヘッダに
+`(ローカル flake)`・`(dotfiles-private)` と出る。`--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と違うホストを選ぶと
+警告する（止めない。最後の警告のまとめの `[対象ホスト]` にも載る）。
+
+**どちらも無ければ推測せずに止まる**（終了コード 1。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
+前は `$USER` と `uname` から型のホストを推測していたが、登録した PC でもローカル flake が clone を読んでいないだけで型の
+ホストになり、git の署名などの値が黙って外れた。止めるときは選べる道を出す。
+
+| 選べる道 | 向く PC |
+| --- | --- |
+| この PC を dotfiles-private に登録する（Claude Code で `pjp-dotfiles-register-host` skill） | dotfiles-private を読める PC。登録の前の 1 回は 3 で当てる（[新しいマシン](#新規マシンの手順)） |
+| `~/dotfiles/flake.nix` に `tmp` を足す（[後述](#登録簿に載せずにマシンを足す)） | dotfiles-private を読めない PC。足したホストが既定の対象ホストになる |
+| `--host <型>` を付ける（型は登録簿の `<user>@<system>`。`sandbox` は出さない） | 登録の前の 1 回・試しに当てるとき |
+
+clone にこの PC のファイルがあるのにローカル flake が読んでいない（入力が無い・本体の stub を指す）ときは、先にそれと
+読ませ方（`local-flake-migrate.sh prepare` で今の雛形へ移す。ローカル flake がまだ無ければ `--steps local-flake`）を出す。
+
+止める時機は 2 つ。自動で決めたホストは `private-fetch`（dotfiles-private の取得）と `local-flake` のあとで決め直す
+（この実行で作ったローカル flake・取ってきた登録を、同じ実行の switch に効かせる。変われば「対象ホストを選び直した」と出る）
+ので、それで決まりうるときは手順を流し、決まらなければ switch の頭で止まる。決まりようがないとき（Nix が無い新しいマシン・
+clone が無い・その手順を選んでいない・登録してあるのにローカル flake が読んでいない）は、手順を 1 つも流さずに止まる
+（Nix を入れてから・`preflight-unlink` が symlink を外してから止まらないように）。
 
 どのホストをどう決めたかは `--which-host` で見られる（`<ホスト><TAB><決め方>`。決め方は `--host`・`DOTFILES_HOST`・`local`・
-`private`・`guess`・`menu`）。自動で決めたホストは、`private-fetch`（dotfiles-private の取得）と `local-flake` のあとで決め直す（この実行で
-作ったローカル flake・取ってきた登録を、同じ実行の switch に効かせる。変われば「対象ホストを選び直した」と出る）。
+`private`・`menu`。決まらなければ選べる道を出して 1）。
 
 自動化していないのは手順 0（マシンの登録）と
 手順 5（mise の `config.toml` 整理）だけ。手順 7 (`chsh`) は
@@ -690,9 +703,16 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 
 上から順に実行する。**2 と 4 と 6 と 7 は忘れやすいので注意**（前節のスクリプトを使えば漏れない）。
 
+新しい PC の対象ホストは、dotfiles-private を読めるかで決め方が分かれる（setup は推測しない。[前述](#まとめて実行する)）。
+
+| PC | 流れ |
+| --- | --- |
+| dotfiles-private を読める | 1. `./nix/scripts/setup.sh --new-machine --host <型>` で 1 回当てる（Nix・gh・dotfiles-private の clone がそろう。clone は gh のログインか SSH 鍵が要るので、取れなかったら `gh auth login` のあと `~/dotfiles/setup --steps bootstrap-dotfiles-private --host <型>`）→ 2. Claude Code で `pjp-dotfiles-register-host` skill（dotfiles-private に登録する PR）→ 3. merge → 4. ローカル flake を今の雛形へ移す（dotfiles-private の入力を stub から clone の `nix/` へ指し直す。skill の最後の手順）→ 5. `~/dotfiles/setup --update`（`--host` なし。登録したホストが選ばれる） |
+| dotfiles-private を読めない | 1. `./nix/scripts/setup.sh --steps local-flake` でローカル flake を置く → 2. `~/dotfiles/flake.nix` に `tmp` を足す（[後述](#登録簿に載せずにマシンを足す)。雛形のコメントの例を 1 段外して直す）→ 3. `~/dotfiles/setup --new-machine`（`tmp` が選ばれる） |
+
 | # | やること | `--steps` の id | 備考 |
 | --- | --- | --- | --- |
-| 0 | マシンを登録する | — | 実機は dotfiles-private に登録する（`pjp-dotfiles-register-host` skill。Claude Code が入ってから。[後述](#dotfiles-private-に登録したホスト)）。それまでは推測のホスト（`<user>@<system>` など）か、`~/dotfiles/flake.nix` に足したホストで当てる。型だけで足りるなら登録は要らない |
+| 0 | マシンを登録する | — | 実機は dotfiles-private に登録する（`pjp-dotfiles-register-host` skill。Claude Code が入ってから。[後述](#dotfiles-private-に登録したホスト)）。それまでは `--host <型>` か、`~/dotfiles/flake.nix` に足したホストで当てる（上の流れ）。型だけで足りるなら登録は要らないが、毎回 `--host <型>` を付けるか、`DOTFILES_HOST` に書く（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 1 | Nix を入れる（前節） | `nix-install` | |
 | 2 | `./nix/scripts/preflight-unlink.sh` | `preflight-unlink` | `main.bash setup` 済みのマシンのみ |
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
@@ -729,7 +749,7 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 profile へ入れるのは *初回の activate が成功した後* なので、1 回目は flake から直接実行する。
 
 ```sh
-nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>
 ```
 
 > ⚠️ `nix run home-manager -- ...` (レジストリ経由) は使わないこと。
@@ -737,7 +757,7 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
 > モジュールとバージョンがずれる。上の `~/dotfiles#home-manager` なら
 > lock と同じバージョンが使われる。
 
-`#` の後ろは `nix/hosts/default.nix` の登録名。
+`#` の後ろはホストの名前（登録簿の型・dotfiles-private に登録した名前・`~/dotfiles/flake.nix` に足した名前）。
 
 #### 2. mise の初期化 (手順 4)
 
@@ -823,13 +843,14 @@ chsh -s "$(command -v fish)"
 以後は短く書ける。
 
 ```sh
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
 `bootstrap-*` と `exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。dotfiles-private に登録した PC では
-`--host` を付けない（setup が登録したホストを選ぶ。[後述](#dotfiles-private-に登録したホスト)）。
+`--host` を付けない（setup が登録したホストを選ぶ。[後述](#dotfiles-private-に登録したホスト)）。登録していない PC では、
+`~/dotfiles/flake.nix` に足した `tmp` が選ばれる（どちらも無ければ止まる）。
 
 ただし**これは手元の checkout を適用するだけ**で、リモートの変更も依存の新しい版も取ってこない。
 本体ごと最新にするなら `--self-update`（[前述](#本体を最新にする---self-update)）、
@@ -853,12 +874,13 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 
 ## マシン登録簿 (hosts/default.nix)
 
-1 エントリが 1 マシン。マシンごとの差は `mkHome` に渡す値で吸収する。
+1 エントリが 1 ホスト。マシンごとの差は `mkHome` に渡す値で吸収する。
 
-> 実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に置く方向にした
-> （[後述](#dotfiles-private-に登録したホスト)・[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）。
-> public のこの登録簿には型（`pollenjp@x86_64-linux` など）と検証用の `sandbox` を残す。今ある実機の行
-> （`pollenjp@wsl`・`pollenjp@wsl-no-1password`・`pollenjp@laptop`）は、実機が全部 private に移るまで（段階 3）残す。
+> public のこの登録簿には、型（`pollenjp@x86_64-linux`・`pollenjp@aarch64-linux`・`pollenjp@aarch64-darwin`）と検証用の
+> `sandbox` だけを置く（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に
+> 登録し（[後述](#dotfiles-private-に登録したホスト)・[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）、
+> dotfiles-private を読めない PC は `~/dotfiles/flake.nix` にホストを足す（[後述](#登録簿に載せずにマシンを足す)）。下の `mkHome` の
+> 引数は、どちらで書くときも同じ。型は、どちらもまだ無い PC を `--host <型>` で 1 回当てるためのもの。
 
 | 引数 | 既定 | 用途 |
 | --- | --- | --- |
@@ -867,6 +889,8 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
 | `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
 | `onePassword` | `{ }` | `onePassword.enable = true` で 1Password を git の署名に使う（WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password。[git について](#git-について)） |
+| `claude` | `{ }` | Claude Code まわり（`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`。[足したホストに書く値](#足したホストに書く値)） |
+| `modules` | `[ ]` | `mkHome` の引数に無い option（`dotfiles.ccPages.port` など）と、home-manager の設定 |
 
 ### WSL 固有の設定は入れ子で渡す
 
@@ -877,7 +901,7 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 ```nix
 wsl = {
   enable = true;               # WSL か
-  windowsUserName = "polle";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
+  windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>。例は作り物)
   windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
   exeExecTrace.enable = true;  # WSL から起動された .exe を常時記録するか（後述）
 };
@@ -897,17 +921,9 @@ git の署名で見ると、組み合わせは次の 4 通り。
 `windowsFiles.enable` は 1Password と独立に選べる（`windowsUserName` は要る）。
 何をするかは[後述](#windows-側のファイルを配る)。
 
-登録簿では `pollenjp@wsl`（1Password 有り）と `pollenjp@wsl-no-1password`（無し）が
-WSL の 2 行に、`pollenjp@laptop`（NixOS の実機）が非 WSL / 1Password 有りに当たる。適用時に `#` の後ろで選ぶ。
-
-```sh
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
-home-manager switch --flake ~/dotfiles#pollenjp@wsl-no-1password
-```
-
-`setup.sh` の自動判定は WSL なら `<user>@wsl`（= 1Password あり）を選ぶ。
-1Password の無いマシンではメニューの `h` で選び直すか、
-`--host pollenjp@wsl-no-1password` を渡す。
+公開の登録簿には WSL の型が無い（型は `<user>@<system>` の 3 つ）。WSL の PC は、初回を `pollenjp@x86_64-linux` で当て、
+dotfiles-private に登録するとき（読めない PC は `~/dotfiles/flake.nix` に足すホスト）に `wsl` と `onePassword` の値を書く
+（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)。setup は推測しないので、WSL だからといって `<user>@wsl` を選ぶこともない）。
 
 > 1Password を使わないマシンで署名設定を書き出さないのは、`commit.gpgSign = true`
 > だけが残ると署名鍵が見つからず `git commit` そのものが失敗するため。
@@ -927,52 +943,44 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 - `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
 - `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
 
-`exeExecTrace` は 1Password の有無とは別に選べる（登録簿では `pollenjp@wsl` だけ true）。
+`exeExecTrace` は 1Password の有無とは別に選べる。公開の登録簿には WSL のホストが無いので、CI は WSL・1Password・
+`windowsFiles`・`exeExecTrace` を入れた作り物のホスト（flake の checks の `home-wsl-example`）を build して確かめる。
 
 ### 登録簿に載せずにマシンを足す
 
-一時的な環境など、`hosts/default.nix` を編集したくない・git で管理したくない場合は
-`~/dotfiles/flake.nix` に足す。[置き場所](#置き場所)で用意したものがそのまま使える。
+dotfiles-private を読めない PC（会社の PC など）や一時的な環境は、`hosts/default.nix` を編集せず `~/dotfiles/flake.nix` に
+ホストを足す（git 管理外）。[置き場所](#置き場所)で用意したものがそのまま使える。dotfiles-private を読める PC は、そちらに
+登録する（[後述](#dotfiles-private-に登録したホスト)）。**PC の値は、dotfiles-private の登録か、ここに足すホストの 1 か所にだけ書く**
+（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
 
 ```nix
 outputs =
-  { dotfiles, ... }:
+  { dotfiles, dotfiles-private, ... }:
   let
-    # このマシンだけの設定。登録簿のホストにも、下で足したホストにも当たる。
-    local = {
-      dotfiles.claude.devTracker.enable = false;
-      dotfiles.claude.notion.profile = null; # "personal" / "work"
-    };
+    privateHosts = dotfiles.lib.privateHosts dotfiles-private;
   in
   {
     inherit (dotfiles) packages devShells formatter lib;
 
-    # 雛形では privateHosts (dotfiles-private に登録したホスト) を間に挟む。後述
-    homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // {
+    homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
       tmp = dotfiles.lib.mkHome {
         username = "pollenjp";
         system = "x86_64-linux";
         wsl = {
           enable = true;
-          # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
-          # (1Password の op-ssh-sign のパスと、win/ の配り先)。登録簿の pollenjp@wsl は
-          # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
-          #   pwsh.exe -NoProfile -Command '$env:USERNAME'
-          windowsUserName = "polle";
+          windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (例は作り物)
+          windowsFiles.enable = true;
         };
         onePassword.enable = true;
-
-        # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
-        # 本体が既に定義している値を差し替えるには mkForce が要る
-        # (同じ優先度の定義が 2 つあると "conflicting definition values" で落ちる)。
+        claude = {
+          devTracker.enable = true;    # Notion Dev Tracker を使う (既定は使わない)
+          notion.profile = "work";
+        };
+        # mkHome の引数に無い option と、home-manager の設定
         modules = [
-          local
-          (
-            { lib, ... }:
-            {
-              programs.git.settings.user.email = lib.mkForce "tmp@example.com";
-            }
-          )
+          {
+            dotfiles.ccPages.port = 7778;
+          }
         ];
       };
     };
@@ -983,43 +991,32 @@ outputs =
 home-manager switch --flake ~/dotfiles#tmp
 ```
 
-`dotfiles.lib.hostsWith [ local ] // privateHosts // { ... }` としているので、登録簿のホストも同じ場所から
-引ける。`~/dotfiles#pollenjp@wsl` と `~/dotfiles#tmp` が並ぶ。`hostsWith` は登録簿の
-全ホストに引数の module を前置して組み立て直すもので、本体の `dotfiles.homeConfigurations`
-は `hostsWith [ ]` に等しい。`privateHosts`（`dotfiles.lib.privateHosts dotfiles-private`）は dotfiles-private に登録した
-ホストで、`local` は当たらない（[後述](#dotfiles-private-に登録したホスト)）。重ね順は登録簿 → dotfiles-private →
+`dotfiles.homeConfigurations // privateHosts // { ... }` としているので、登録簿のホスト（型と `sandbox`）も同じ場所から引ける。
+`~/dotfiles#pollenjp@x86_64-linux` と `~/dotfiles#tmp` が並ぶ。`privateHosts`（`dotfiles.lib.privateHosts dotfiles-private`）は
+dotfiles-private に登録したホスト（[後述](#dotfiles-private-に登録したホスト)）。重ね順は登録簿 → dotfiles-private →
 このマシンだけのホストで、後ろが勝つ。
 
-#### このマシンだけの設定 (`local`)
+#### 足したホストに書く値
 
-雛形の `local` は **`dotfiles.claude.devTracker.enable = false`** を持つ。本体の option の
-既定は true だが、`~/dotfiles` 経由のマシンは「使うところだけ true に直す」向きにしてある
-（何が変わるかは[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)）。
+値は `mkHome` の引数と `modules` に直に書く。dotfiles の option（`nix/home/options.nix`）は、option の既定より強いだけの
+普通の定義なので `mkForce` は要らない（登録簿の型も dotfiles-private のホストも、このホストには当たらない）。書かなかった
+option は本体の既定になる。本体の module が既に定義している home-manager の設定（`programs.git.settings.user.email` など）を
+差し替えるときだけ、`modules` の中で `lib.mkForce` が要る。雛形の `tmp` の例（コメント）に、よく使う値と説明が並んでいる。
 
-`dotfiles.claude.gitViaGh.enable` は既定の true（Claude の git と、fetch 系の abbr / alias は gh の資格情報で
-GitHub へ HTTPS で通す。`gh auth login` 済みが前提）のままで、雛形にはコメントアウトした false の例だけ
-置いてある。gh にログインしないマシンだけ外す
-（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・
-[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)）。
+| 値 | 既定 | 書くマシン |
+| --- | --- | --- |
+| `claude.devTracker.enable` | `false` | Notion Dev Tracker を使うマシン（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)） |
+| `claude.notion.profile` | `null` | Notion へ書く skill を使うマシン。`"personal"` / `"work"`（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)） |
+| `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
+| `claude.videoOffer.autoStart.enable` | `false` | 解説動画の短尺を聞かずに作り始めたいマシンだけ `true`（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)） |
+| `dotfiles.ccPages.port`（`modules`） | `null`（7777） | 7777 がほかと衝突するマシンだけ（[待ち受けの port を変える](#待ち受けの-port-を変える)） |
 
-Notion へ書く skill の既定の宛先 **`dotfiles.claude.notion.profile`** は `null`（選ぶまで、規則に当たらない repo と
-repo の外で skill が止まる）で、使うマシンでは `"personal"` / `"work"` を書く
-（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
-
-cc-pages のビューアの port **`dotfiles.ccPages.port`** は、書かなければ cc-pages の既定の 7777 で、
-雛形にはコメントアウトした例だけ置いてある。7777 がほかと衝突するマシンだけ書く
-（[待ち受けの port を変える](#待ち受けの-port-を変える)）。
-
-解説動画を答えを待たずに作り始めるか **`dotfiles.claude.videoOffer.autoStart.enable`** は本体の既定の false
-（作る前に「解説動画を作りますか？」と聞く。1 本ごとに token を大きく使うため）のままで、雛形にはコメントアウトした
-true の例だけ置いてある。聞かずに作り始めたいマシンだけ書く（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)）。
-
-- `local` は登録簿のホストの定義と同じ優先度で入る。option の既定値を変えるだけなら
-  素のまま書けるが、登録簿が既に定義している値を差し替えるには `mkForce` が要る
-- `local` は dotfiles-private に登録したホストには当たらない（その PC の値は登録したファイルにある）。登録した PC では、
-  `local` の値は `--host` で登録簿のホストを当てたときにだけ効く（[後述](#dotfiles-private-に登録したホスト)）
-- 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない。値を引き継いで今の雛形へ移すやり方は
-  [次の節](#雛形が新しくなったら)（`--force` で作り直すと、`local` に書いた値と手で足したホストが消える）
+- 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
+  当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
+  `local` は登録簿のホストと同じ優先度で入るので、本体が定義済みの値を差し替えるのに `mkForce` が要った。前の雛形のままの
+  `~/dotfiles/flake.nix` も評価はできる（本体は `hostsWith` を残している）が、`local` の値は型のホストにしか当たらない。
+  移し方は[次の節](#雛形が新しくなったら)
+- 雛形が変わっても、既にある `~/dotfiles/flake.nix` は触らない（`--force` で作り直すと、手で足したホストが消える）
 - `windowsUserName` を `wsl.onePassword` の下に書いた古い形
   （`wsl.onePassword = { enable = true; windowsUserName = "…"; };`）も動く
   （`wsl.onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。ただし
@@ -1032,10 +1029,9 @@ true の例だけ置いてある。聞かずに作り始めたいマシンだけ
 登録簿と `~/dotfiles/flake.nix` の両方から名前を拾うため。
 コメントアウトした雛形の例は拾わない。
 
-さらに、ここに足した名前は[**既定の対象ホスト**](#まとめて実行する)になる。登録簿からの
-推測（`<user>@wsl` など）より優先するので、`tmp` のように登録簿と揃っていない
-名前でも毎回 `h` や `--host` で選び直さなくてよい。複数足したときは一番上のものが
-既定になるので、切り替えたいときは行を入れ替える。
+さらに、ここに足した名前は[**既定の対象ホスト**](#まとめて実行する)になる（dotfiles-private に登録したこの PC のホストより
+優先する）。`tmp` のように登録簿と揃っていない名前でも毎回 `h` や `--host` で選び直さなくてよい。複数足したときは
+一番上のものが既定になるので、切り替えたいときは行を入れ替える。
 
 生成される雛形にはこの例がコメントで入っている。`lib.mkHome` を公開しているのは
 このためで、引数は[登録簿](#マシン登録簿-hostsdefaultnix)と同じ。
@@ -1052,7 +1048,7 @@ heredoc の原文（展開する前）の cksum で、雛形を直すと変わ�
 | `--steps local-flake` を流したとき | `setup-local-flake.sh` の警告（最後の警告のまとめにも載る） |
 | switch が落ちたとき | 失敗の案内のあと（本体で option が削除・改名されると、旧い `local` のままでは評価が止まる） |
 
-値（`local` の option・手で足したホスト・手で書いた module）を引き継いで今の雛形へ移すのは
+値（手で足したホスト・手で書いた module・前の雛形の `local` の option）を引き継いで今の雛形へ移すのは
 [`local-flake-migrate.sh`](./scripts/local-flake-migrate.sh)。Claude Code に任せるなら
 `pjp-dotfiles-local-flake-migrate` skill（差分を見せて確認を取ってから書く）。
 
@@ -1067,6 +1063,10 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
 ```
 
 - 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
+- `local` を持つ前の雛形から今の雛形（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）へ移すと、`local` の塊が消える。dotfiles-private に登録した PC
+  （登録の仕上げで `local` を雛形の既定に戻してある）は衝突なく移る。`local` に値が残っていれば、塊ごと衝突として残るので、
+  値を dotfiles-private の登録か足したホスト（`tmp`）へ移してから、雛形どおりに消す。移したあとは型のホストに `local` の値が
+  当たらなくなるので、compare は型のホストの違い（Notion の宛先など）を出す（setup の対象でなければ受け入れてよい）
 - dotfiles-private の入力（[前述](#dotfiles-private-に登録したホスト)）も移す。今の雛形は clone の `nix/` があればそこを、無ければ本体の
   stub を指すので、clone ができたあとは印が同じでも `status` が 1 になり、`prepare` がその 1 行を指し直す。移したあと、この PC を
   登録したホストが dotfiles-private から足されるなら、`compare` はそれを違いとして出す（setup の選ぶホストが変わる）
@@ -1076,8 +1076,8 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
   残った衝突は diff3 の印のまま `new/flake.nix` に残る
 - compare は評価用の写しで lock を張り直して評価する（1 回 20〜60 秒）。drvPath が全部同じなら home-manager の
   世代の中身は変わらないので、switch は要らない。違えば `config.dotfiles` の違いを出す。setup が文字列から拾う
-  ホストの並び（一番上が既定の対象）も比べる。検証専用の `sandbox` は比べない（setup も対象にしない。登録簿が持つ
-  値と `local` がぶつかって落ちることがある）
+  ホストの並び（一番上が既定の対象）も比べる。検証専用の `sandbox` は比べない（setup も対象にしない。前の雛形の
+  `local` は、登録簿の `sandbox` が持つ値とぶつかって落ちる）
 - ホストごとに評価するので、一部のホストで評価が落ちても、ほかのホストは比べる。両方で落ちるホストは比べずにそう
   出す。旧い flake でだけ落ちるホストがある（本体で option が消えた・`local` が登録簿の値とぶつかる、など）なら
   compare が 3 で終わり、そのホストを評価し直した原因のエラーを出す。評価が通るだけの直しを当てた基準を作り、
@@ -1130,8 +1130,9 @@ dotfiles-private/
         └── <user>@<hostname>.nix    ファイル名から .nix を除いたものがホストの名前
 ```
 
-中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。今まで `local` に書いていた値も
-このファイルに書く（`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`）。
+中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。その PC の値は全部
+このファイルに書く（`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`。前の雛形の `local` に
+書いていた値も）。Dev Tracker を使う PC は `claude.devTracker.enable = true` を書く（本体の既定は使わない）。
 
 ```nix
 # 例 (値は作り物)
@@ -1156,7 +1157,7 @@ mkHome {
 - ローカル flake の雛形が clone の `nix/` を 2 つ目の `path:` の入力（`inputs.dotfiles-private`。`flake = false`）に取り、
   本体の `dotfiles.lib.privateHosts` が `hosts/*.nix` からホストを組み立てる。本体の flake は dotfiles-private を input に持たない
   （public の lock に private の rev を残さない。ADR 015 / 016）
-- **`local` は当たらない。** 素の `mkHome` で組むので、ファイルがその PC の値の全部を持つ
+- **ローカル flake の値は当たらない。** 素の `mkHome` で組むので、ファイルがその PC の値の全部を持つ（前の雛形の `local` も当たらない）
 - 重ね順は登録簿 → dotfiles-private → `~/dotfiles/flake.nix` に足したホスト（後ろが勝つ）。登録簿と同じ名前なら dotfiles-private が勝つ
 - 読むのは `nix/` の下だけで、中身は誰でも読める `/nix/store` に入る（`ssh/` や辞書は入らない）。秘密（API キー・トークン）は置かない
   （[`~/.config/pjp/env`](#マシンローカルの環境変数-configpjpenv)）
@@ -1178,8 +1179,8 @@ clone に `nix/hosts/<その名前>.nix` があり、ローカル flake がそ�
 
 | 起きていること | setup の知らせ |
 | --- | --- |
-| clone にこの PC のファイルがあるのに、ローカル flake が読んでいない（入力が無い・stub を指す） | 残りの手作業に、推測に落ちたことと直し方（`local-flake-migrate.sh prepare`） |
-| `--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と違うホストを選んだ | 警告（止めない。明示した方で当てる。値は登録したファイルではなく、そのホストの定義と `local` から来る） |
+| clone にこの PC のファイルがあるのに、ローカル flake が読んでいない（入力が無い・stub を指す） | `--host` なしで switch を選べば、手順を流す前に止まって直し方（`local-flake-migrate.sh prepare`）とそれまでの当て方（`--host <型>`）を出す。止まらないとき（`--host` で当てた・switch を選ばない）は残りの手作業に直し方 |
+| `--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と違うホストを選んだ | 警告（止めない。明示した方で当てる。値は登録したファイルではなく、そのホストの定義（前の雛形なら `local` も）から来る） |
 | ローカル flake の dotfiles-private の入力の指す先が無い（clone を消した・動かした） | 警告（clone し直すか、指し直す） |
 
 「既存マシン更新」と「新しいマシン適用」は、dotfiles-private を switch の前に取る（手順 2.4 `private-fetch`）。値を直して push すれば、
@@ -1193,22 +1194,27 @@ clone に `nix/hosts/<その名前>.nix` があり、ローカル flake がそ�
 ```sh
 p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
 bash $p inspect                                          # この PC・登録の有無・今の世代と一致するホスト (元にするホストの候補)
-bash $p draft --base <ホスト>                             # 元のホスト + local から nix/hosts/<名前>.nix の下書きを描く (stdout)
+bash $p draft --base <ホスト>                             # 元のホスト (前の雛形なら + local) から nix/hosts/<名前>.nix の下書きを描く (stdout)
 bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形と登録したホストを同じ本体・同じ lock で評価し、drvPath を比べる
 ```
 
 - `draft` は元のホストの `options.dotfiles` を歩き、option の既定より強い定義を持つ値を描く（既定と同じ値を明示した行も描く）。
-  `local` の dotfiles の外の行（`programs.git…` など）は描かず、下書きの頭のコメントで知らせる
+  前の雛形の `local` の dotfiles の外の行（`programs.git…` など）は描かず、下書きの頭のコメントで知らせる
+- 型を元にする（新しい PC）と、下書きは `username`・`system` だけになる。WSL の値（`wsl`・`onePassword`）・Dev Tracker
+  （`claude.devTracker.enable = true`）など、その PC で要る値を足す（`compare` は足した分だけ違う）
+- 元にするホストが公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた PC。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）は、消す前の本体を
+  `git archive` で写して `--nix-dir` に渡し、draft・compare する（手順は `pjp-dotfiles-register-host` skill）
 - `compare` が 0 なら、この登録で home-manager の世代の中身は変わらない。今の世代との一致は参考として出すだけ
   （本体を進めると、skill を 1 つ足しただけでも世代が変わる）
-- merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、移した値を `local` から外す。
-  移したあとの `local-flake-migrate.sh compare` は、この PC のホストが dotfiles-private から足されることを「違い」として出す
-  （setup の選ぶホストが変わるため。受け入れるなら `apply --accept-changes`）。ローカル flake が既に今の雛形で clone を読んでいれば、
-  `prepare` は「移すものはありません」になるので、`prepare --always` で作業場所を作って `local` を直す
+- merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、登録したファイルへ移した値を
+  ローカル flake から外す（前の雛形の `local` の値・足していた `tmp`）。移したあとの `local-flake-migrate.sh compare` は、この PC の
+  ホストが dotfiles-private から足されることを「違い」として出す（setup の選ぶホストが変わるため。受け入れるなら
+  `apply --accept-changes`）。ローカル flake が既に今の雛形で clone を読んでいれば、`prepare` は「移すものはありません」になるので、
+  `prepare --always` で作業場所を作って直す
 
 #### 値を一時的に試す
 
-登録した PC では `local` が当たらないので、dotfiles-private の作業ツリーのファイルを直して `~/dotfiles/setup --update` する
+登録した PC ではローカル flake の値が当たらないので、dotfiles-private の作業ツリーのファイルを直して `~/dotfiles/setup --update` する
 （`path:` の入力は commit していない変更も見える。git status に残るので戻し忘れにも気づける。ただし、そのまま `--update` すると
 `private-fetch` は未コミットの変更があるので取得を飛ばす）。
 
@@ -1216,11 +1222,11 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
 
 ```sh
 # 何が配置されるかを $HOME に触れず確認する
-nix build ~/dotfiles#homeConfigurations.'"pollenjp@wsl"'.activationPackage -o /tmp/hm
+nix build ~/dotfiles#homeConfigurations.'"<ホスト>"'.activationPackage -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3   # home-files は symlink なので -L 必須
 
 # 適用 (既存ファイルは .bak へ退避。setup なら --backup=bak / メニューの b)
-home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
+home-manager switch --flake ~/dotfiles#<ホスト> -b bak
 
 # 世代一覧とロールバック
 home-manager generations
@@ -1260,7 +1266,8 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 - root を張っていない devShell や `nix build` の結果も消え、次に使うときは取り直し (手元でビルドするものは再ビルド) になる。残したい devShell は `nix develop --profile <パス>` で root を張っておく
 - mise は、使ったことのある設定ファイルのどれもが指していない版を消す。プロジェクトの `mise.toml` が固定している版は残る
 - WSL では、消しても `ext4.vhdx` は縮まない。C: の空きにするには、`wsl --shutdown` してから管理者の PowerShell で `Optimize-VHD -Path <ext4.vhdx> -Mode Full` を打つ
-- 止めたいマシンは、ローカル flake の `local` で `dotfiles.cleanup.enable = false;` にする
+- 止めたいマシンは、そのホストの `modules`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホスト）で
+  `dotfiles.cleanup.enable = false;` にする
 
 ## 管理対象のファイル
 
@@ -1334,7 +1341,8 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
 ```
 
-- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（登録簿では `pollenjp@wsl`）。
+- 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（dotfiles-private に登録したファイルか、
+  `~/dotfiles/flake.nix` に足したホストで書く）。
   それ以外は「このマシンは Windows 側へ配りません」と言って exit 0
 - 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
 - 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
@@ -1401,12 +1409,13 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されてきたエージェント、herdr の pane では
 固定名の指す先の、同じ "Signing" の鍵で署名する。ラッパーは置かない。
 
-署名が入るのは `onePassword.enable = true` のマシンだけ。登録簿では `pollenjp@wsl` と `pollenjp@laptop`。
-dotfiles-private に登録した PC は `--host` を付けない（setup が登録したホストを選び、署名を入れるかもそのファイルの `onePassword` で
-決まる。[前述](#dotfiles-private-に登録したホスト)）。登録していない PC の `--host` なしの `setup` は、ローカル flake がホストを定義して
-いないと汎用の `<user>@<system>` を選び、署名が入らない（署名の入る登録簿のホストを当てるなら `--host`）。登録した PC で
-`--host pollenjp@laptop` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、setup が警告する
-（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の手順は、登録する前の記録）。
+署名が入るのは `onePassword.enable = true` のマシンだけ（公開の登録簿の型には入らない。dotfiles-private に登録したファイルか、
+`~/dotfiles/flake.nix` に足したホストで書く）。dotfiles-private に登録した PC は `--host` を付けない（setup が登録したホストを選び、署名を
+入れるかもそのファイルの `onePassword` で決まる。[前述](#dotfiles-private-に登録したホスト)）。登録していない PC の `--host` なしの
+`setup` は、ローカル flake がホストを定義していなければ止まる（推測で汎用の `<user>@<system>` を選んで署名が外れることはない。
+[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。登録した PC で `--host <型>` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、
+setup が警告する（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の
+手順は、登録する前の記録で、そのホストは公開の登録簿から消した）。
 
 `git log --show-signature` は `gpg.ssh.allowedSignersFile` が無いのでエラーになる（WSL も同じ）。
 署名されたかは `git cat-file -p HEAD` の `gpgsig` か、push したあとの GitHub の Verified で見る。
@@ -1679,8 +1688,8 @@ Claude Code など）もダイアログ無しで鍵を使える。要求元が�
 
 #### 入れる
 
-登録簿の `pollenjp@wsl` は `exeExecTrace.enable = true`。ほかのマシンはローカル flake の
-`local` に `dotfiles.wsl.exeExecTrace.enable = true;` を書く。eBPF には root が要るので、
+使うマシンは、dotfiles-private に登録したファイルか `~/dotfiles/flake.nix` に足したホストで `wsl.exeExecTrace.enable = true`
+（`mkHome` の引数）を書く。eBPF には root が要るので、
 **switch だけでは動かない。** unit を `/etc/systemd/system` へ入れるのは setup の手順
 `exe-exec-trace` で、「既存マシン更新」（`--update`）の最後に走り、中で `sudo` を呼ぶ。
 **`sudo` を付けて打たないこと**（`HOME` が root のものになり、生成された unit を見失うので、
@@ -1850,8 +1859,8 @@ Windows は `bootstrap-windows-ssh-config.sh` が置く `%USERPROFILE%\.ssh\conf
   入れる（TKT-255）。ほかの ssh サーバーは、下の警告を見て都度足す。届かない接続は借りない・借りられないだけで、
   attach し直せば鍵は使える
 - 値は ssh の実体ごとに違い、違う値は別のマシンとして扱う（大文字小文字は揃えない）。**同じ PC でも、Windows の ssh.exe
-  （hr の `herdr.exe` と、WSL の `ssh`）は `polle@pjp-raiden`、WSL の Linux の ssh は別になる**（`/usr/bin/ssh` の 9.6p1 は
-  下のとおり届いていない扱い、nix の OpenSSH なら `pollenjp@pjp-raiden`）
+  （hr の `herdr.exe` と、WSL の `ssh`）は `<Windows のユーザー名>@<PC の名前>`、WSL の Linux の ssh は別になる**（`/usr/bin/ssh` の
+  9.6p1 は下のとおり届いていない扱い、nix の OpenSSH なら `<WSL のユーザー名>@<PC の名前>`）
 - `%u@%L` が展開されるのは OpenSSH 10.0 から。WSL の `/usr/bin/ssh`（9.6p1）など古い ssh は `%u@%L` のまま送るので、
   `%` を含む値は届いていないものとして扱う
 - ssh は最初に当たった `SetEnv` の行だけを使う。`config.d` の `Host` に自分の `SetEnv` がある接続先では、そこにも
@@ -1869,11 +1878,11 @@ server を起こした接続の値が残るので、記録を見る）。この�
 > ```sh
 > herdr server stop             # default
 > herdr session stop s2         # named session ごとに
-> herdr.exe --remote lavie.local    # Windows の PowerShell から開き直す (包んだ herdr を通って server が起きる)
+> herdr.exe --remote <ssh 先>.local   # Windows の PowerShell から開き直す (包んだ herdr を通って server が起きる)
 > ```
 
 herdr の中で鍵が引けなくなったら、detach して開き直す（attach が今の接続へ向け直す）か、herdr の外の ssh の shell で
-`ssh-agent-link` を打つ。lavie の前で開き直すときは、新しい端末から開く（前からある端末の shell は、フォールバックが
+`ssh-agent-link` を打つ。ssh 先の PC の前 (手元) で開き直すときは、新しい端末から開く（前からある端末の shell は、フォールバックが
 起こしたローカル ssh-agent を `SSH_AUTH_SOCK` に持っていることがあり、手元の分岐に当たらない）。
 
 確認は ssh 先で次のとおり。
@@ -2182,8 +2191,9 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 | false（既定）・ファイルが無い・壊れている | 「…解説動画を作るかを聞くこと」 | 作る前に聞く（短く作る / 詳しく作る / 今回は作らない / このセッションでは聞かない） |
 | true | 「…解説動画の短尺を裏で作り始めること」 | 答えを待たずに短尺を作り始め、作り始めてから「このまま作るか」を確かめる |
 
-- 使うマシンはローカル flake の `local` に `dotfiles.claude.videoOffer.autoStart.enable = true;` を書く。反映は
-  `home-manager switch`（`~/dotfiles/setup --update` でもよい）。settings.json は通らない
+- 使うマシンは、dotfiles-private に登録したファイルか `~/dotfiles/flake.nix` に足したホストの `mkHome` に
+  `claude.videoOffer.autoStart.enable = true;` を書く。反映は `home-manager switch`（`~/dotfiles/setup --update` でもよい）。
+  settings.json は通らない
 - `~/.claude/CLAUDE.md` の「解説動画を作るか聞く」の節は、値によらず同じ文（どちらにするかは skill が決める）
 - 名指しで頼んだ解説動画（`pjp-video-explainer-pictogram` / `pjp-video-explainer-dialogue`）は、値によらず作れる
 
@@ -2398,12 +2408,7 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 gh にログインしないマシンは option を false にすると、今までどおり ssh を通る。
 
 ```nix
-# ~/dotfiles/flake.nix の local（このマシンだけ）
-local = {
-  dotfiles.claude.gitViaGh.enable = false;
-};
-
-# または登録簿 hosts/default.nix の mkHome
+# dotfiles-private に登録したファイルか、~/dotfiles/flake.nix に足したホストの mkHome
 claude.gitViaGh.enable = false;
 ```
 
@@ -2580,7 +2585,7 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 
 使う skill はマシンごとに違う。例えば会社のマシンでは Notion Dev Tracker の
 `pjp-dev-tracker` を発火させたくない。その宣言は host option
-**`dotfiles.claude.devTracker.enable`**（既定 true）に置き、1 つの値から 2 つが決まる。
+**`dotfiles.claude.devTracker.enable`**（既定 false。使うマシンだけ true）に置き、1 つの値から 2 つが決まる。
 
 | 層 | enable = true | enable = false | 決める場所 |
 | --- | --- | --- | --- |
@@ -2593,12 +2598,11 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 
 #### 値の置き場
 
-- `~/dotfiles` 経由（通常）なら **ローカル flake の `local`** に書く。雛形は
-  `dotfiles.claude.devTracker.enable = false` を持つので、**Dev Tracker を使うマシンだけ
-  true に直す**（[前述](#このマシンだけの設定-local)）。会社のマシンのように public に
-  載せたくない差分を登録簿に書かずに済ませるための向き
-- 登録簿のホストを直接指すなら `hosts/default.nix` の `mkHome` に
-  `claude.devTracker.enable = false;`（`wsl` と同じ形の引数）
+- 本体の既定は false（使わない）。**Dev Tracker を使うマシンだけ** `mkHome` に `claude.devTracker.enable = true;` を書く:
+  dotfiles-private に登録したファイル、`~/dotfiles/flake.nix` に足したホスト（[前述](#足したホストに書く値)。雛形の `tmp` の例は
+  true を書く）。公開の登録簿では検証用の `sandbox` だけが true
+- 型のホスト（`--host <型>`）で当てたマシンでは使わない（前は既定が true で、ローカル flake の雛形の `local` が false を書いて
+  いた。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）
 
 #### 反映（冪等。更新時も毎回走る）
 
@@ -2655,9 +2659,9 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 | 置くもの | 場所 | 例 |
 | --- | --- | --- |
 | 共通の規則（repo → プロファイル） | `claude-skills` の `profiles.toml` の `[routes]` | `"<仕事の org>/*" = "work"` |
-| このマシンだけの規則（共通の規則より先に見る。例: 会社の PC で pollenjp の repo も work に書く） | ローカル flake の `local`（`dotfiles.claude.notion.routes`） | `{ "pollenjp/*" = "work"; }` |
-| 規則に当たらない repo と repo の外で使う既定 | ローカル flake の `local`（`dotfiles.claude.notion.profile`） | `"personal"` / `"work"` |
-| このマシンだけの差し替え | ローカル flake の `local`（`dotfiles.claude.notion.override`） | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
+| このマシンだけの規則（共通の規則より先に見る。例: 会社の PC で pollenjp の repo も work に書く） | そのホストの `mkHome` の `claude.notion.routes`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホスト） | `{ "pollenjp/*" = "work"; }` |
+| 規則に当たらない repo と repo の外で使う既定 | 同じく `claude.notion.profile` | `"personal"` / `"work"` |
+| このマシンだけの差し替え | 同じく `claude.notion.override` | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
 | repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
 | API キー（そのマシンでそのプロファイルを API キーで使うとき） | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
@@ -2671,7 +2675,7 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 `devTracker.linkFromRepo` は、`pjp-dev-tracker` が branch 名・PR・commit にチケットの ID と
 Notion の URL を書くかを決める真偽値（書かなければ `true`）。work のプロファイルは `false` にしている。
 Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
-このマシンだけ変えるなら `dotfiles.claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`。
+このマシンだけ変えるなら `claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`（`mkHome` の引数）。
 
 認証は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
 あればその API キー、無ければ workspace ごとの `ntn login` を使う。変数名はプロファイル名を大文字にし
@@ -2684,18 +2688,17 @@ Dev Tracker が個人の private ページの下にあり、チームの repo �
 
 #### 値の置き場
 
+dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホストの `mkHome` に書く。
+
 ```nix
-local = {
-  dotfiles.claude.notion.profile = "personal";  # 規則に当たらない repo と repo の外
+claude = {
+  notion.profile = "personal";  # 規則に当たらない repo と repo の外
   # このマシンだけの規則 (例: 会社の PC で pollenjp の repo も work に書く):
-  #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
+  #   notion.routes = { "pollenjp/*" = "work"; };
   # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
-  #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
+  #   notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
 };
 ```
-
-登録簿のホストを直接指すなら、`mkHome` に `claude.notion.profile = "personal";` を渡す
-（このマシンだけの規則は `claude.notion.routes = { … };`）。
 
 #### 反映
 
@@ -2706,13 +2709,13 @@ local = {
 JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profile":"personal","routes":{}}`。
 `routes` のコメントを外すと `"routes":{"pollenjp/*":"work"}` になる。
 
-- profile が `null`（雛形の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
+- profile が `null`（本体の既定）のマシンでは、規則に当たらない repo と repo の外で skill が「宛先が決まらない」と止まる。
   黙って別の workspace へ書かないため
 - `routes`（キーと値）と `override`（キー）の綴りは Nix では検査しない。skill が使うときに resolver が止める
 - `devTracker.enable = true` なのに profile が無いマシンでは、switch のときに警告が出る
   （`home/modules/claude.nix` の `warnings`）。ticket.sh が止まるのに気付けるように
 - 古い形の override（`override = { devTracker.linkFromRepo = …; };` のように、外側がキーの名前）が
-  ローカル flake に残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
+  残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
   書き直し方（`{ <プロファイル名> = { … }; }`）を出して止まるので、更新するときに書き直しておく
 
 #### 確認
@@ -2985,12 +2988,15 @@ systemctl --user status cc-pages               # daemon の状態
 
 #### 待ち受けの port を変える
 
-7777 がほかと衝突するマシンでは、ローカル flake の `local` で port を選ぶ
-（登録簿のホストなら、`mkHome` の `modules` に同じ 1 行を書く）。
+7777 がほかと衝突するマシンでは、そのホストの `mkHome` の `modules`（dotfiles-private に登録したファイルか、
+`~/dotfiles/flake.nix` に足したホスト）で port を選ぶ。
 
 ```nix
-# ~/dotfiles/flake.nix の local
-dotfiles.ccPages.port = 7778;
+modules = [
+  {
+    dotfiles.ccPages.port = 7778;
+  }
+];
 ```
 
 `~/dotfiles/setup --update`（switch だけでもよい）で効く。home-manager が `~/.config/cc-pages/config.toml` に
@@ -3138,7 +3144,7 @@ nix flake check                            # 現在の system 向けに評価 + 
 nix flake check --all-systems --no-build   # 全 system を評価のみ (CI 向け)
 
 # 配置されるファイルを事前に確認する
-nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+nix build '.#homeConfigurations."pollenjp@x86_64-linux".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なので -L が必須
 ```
 
