@@ -2142,11 +2142,12 @@ devShell に入り直す）。
 ./nix/scripts/check-claude-frontmatter.sh
 ```
 
-frontmatter が YAML として読めなくても、Claude Code はエラーを出さずに frontmatter を空として扱う（`description` の
-代わりに本文の最初の行が一覧に出て、いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が
-閉じる・素の値の「 #」から先がコメントとして消える、といった形では値が黙って変わる。script はこれらと、`name` と
-ディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前で落ちる（全部は script の先頭）。観点は
-`claude-skills` の `scripts/lint.sh` に揃えてある。
+frontmatter が YAML として読めなくても、Claude Code はエラーを出さない。1 行の値を引用符で包んで読み直し、それでも読めない
+形（素の複数行の値の途中の「: 」など）では frontmatter を空として扱う（`description` の代わりに本文の最初の行が一覧に出て、
+いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が閉じる・素の値の「 #」から先がコメント
+として消える、といった形では値が黙って変わる。script は読み直しに頼らず YAML として読めない形をどれも落とし、これらと、
+`name` とディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前でも落ちる（全部は script の先頭）。
+観点は `claude-skills` の `scripts/lint.sh` に揃えてある。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 

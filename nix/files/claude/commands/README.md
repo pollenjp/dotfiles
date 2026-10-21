@@ -36,7 +36,8 @@ argument-hint: <path>        # 省略可
 nix/files/claude/commands/pjp-git/sync.md   ->  /pjp-git:sync
 ```
 
-ディレクトリも配置対象なので、そのまま置けば動く。
+ディレクトリも配置対象なので、そのまま置けば動く。サブディレクトリに `README.md` を置くと、それも command
+（`/pjp-git:README`）になる。説明はこのファイル（直下の `README.md` は配置されない）に書く。
 
 追加したら（frontmatter を直したときも）、frontmatter を確かめてから適用する。
 

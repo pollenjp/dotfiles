@@ -52,8 +52,8 @@ description: >-
 ```
 
 複数行の `description` は `>-` の block scalar で書く。素の複数行の文字列（今ある skill はこの形）は、値に「: 」が
-入ると YAML として読めなくなり、「 #」から先はコメントとして黙って消える。frontmatter の中には `---` を書かない
-（Claude Code は値の途中の `---` でも、そこで frontmatter が終わったと読む）。
+入ると YAML として読めなくなり、「 #」から先（続きの行の頭の `#` も）はコメントとして黙って消える。frontmatter の中には
+`---` を書かない（Claude Code は値の途中の `---` でも、そこで frontmatter が終わったと読む）。
 
 `scripts/` `references/` `assets/` などの補助ファイルは同じディレクトリに置けば
 まとめて配置される（ディレクトリ単位で symlink するため）。
@@ -65,8 +65,9 @@ description: >-
 home-manager switch --flake ~/dotfiles#<host>
 ```
 
-frontmatter が YAML として読めなくても、Claude Code はエラーを出さずに frontmatter を空として扱う（`description` の
-代わりに本文の最初の行が一覧に出て、いつ使う skill かが Claude に伝わらない）。`check-claude-frontmatter.sh` は
+frontmatter が YAML として読めなくても、Claude Code はエラーを出さない（素の複数行の `description` が読めないと
+frontmatter を空として扱い、`description` の代わりに本文の最初の行が一覧に出て、いつ使う skill かが Claude に伝わらない）。
+`check-claude-frontmatter.sh` は
 CI の `lint` ジョブでも流れ、壊れた frontmatter・`name` とディレクトリ名の食い違い・`pjp-` で始まらない名前などで
 落ちる（何を見るかは script の先頭と `nix/README.md` の「frontmatter を確かめる」）。
 

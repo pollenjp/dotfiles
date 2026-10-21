@@ -193,8 +193,8 @@ jobs:
         run: nix develop ./nix --command ./nix/scripts/check-test-grep-q.sh
 
       # nix/files/claude/ の skill・agent・command の frontmatter (TKT-289)。YAML として読めなくても Claude Code はエラーを
-      # 出さずに frontmatter を空として扱い、description が一覧に出ない (いつ使うものかが Claude に伝わらない)。
-      # yq (mikefarah/yq) で YAML として読むので devShell で流す。
+      # 出さず、読み直せない形 (素の複数行の値の途中の「: 」など) では frontmatter を空として扱い、description が一覧に
+      # 出ない (いつ使うものかが Claude に伝わらない)。yq (mikefarah/yq) で YAML として読むので devShell で流す。
       - name: Claude Code の skill・agent・command の frontmatter
         run: nix develop ./nix --command ./nix/scripts/check-claude-frontmatter.sh
 
