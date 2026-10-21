@@ -196,8 +196,8 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 - branch のレビュー（別の reviewer）: Critical 0・Important 1（上の `--new-machine` の止める時機。直した）・Minor 9（`--dry-run` の決め直し・
   決まらずに止まったときの前の雛形の案内・止める文の型の注意・新しい PC の流れの clone の更新・skill の段階 3 の前の rev の引き方 など。
   ほかの ADR の本文の移行手順に残る古いホストを除いて直した）
-- `nix flake check --all-systems --no-build ./nix` が通る。`nix flake check --no-eval-cache ./nix` で x86_64-linux の checks 68 本
-  （`home-wsl-example` を含む）を build できた。sandbox の `config.warnings` は `[]`
+- `nix flake check --all-systems --no-build ./nix` が通る。`nix flake check --no-eval-cache ./nix` で x86_64-linux の checks 69 本
+  （`home-wsl-example`・`local-flake-tmp-state`・`hosts-with-state` を含む）を build できた（レビューの直しのあとにも流し直した）。sandbox の `config.warnings` は `[]`
 - lint（CI と同じ）: nixfmt・shfmt・shellcheck・テストの先頭の「## 確かめること」・`check-test-grep-q.sh`・`bootstrap-windows-files.sh --check`・
   `check-herdr-keys.sh`
 - 登録した WSL の PC の `~/dotfiles/flake.nix` の写しで、本体をこの branch にして（本物の `~/dotfiles` と dotfiles-private には書かずに）:
