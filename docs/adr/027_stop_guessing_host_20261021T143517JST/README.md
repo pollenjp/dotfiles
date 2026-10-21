@@ -173,7 +173,24 @@ homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
 
 ## 6. 検証 (Verification)
 
-VERIFICATION_PLACEHOLDER
+- テスト（WSL の上で手元で流し、flake の checks でも Nix のサンドボックスで流した）:
+  - `setup-host.test.sh`（19 件）: 推測のケースを「決まらず止まる」に直し、WSL（`WSL_DISTRO_NAME`）でも `<user>@wsl` を選ばないこと、
+    execute の前に止まる場面（Nix が無い・clone が無い・決め直しの手順を選んでいない・登録してあるのに読んでいない）、決め直しで最初の
+    未定から拾う場面を足した。変更前の setup.sh は WSL の上で 13 passed, 4 failed（推測が `<user>@wsl` を選ぶ）
+  - `setup-post-notes.test.sh`（29 件）・`setup-local-flake.test.sh`（13 件。`local` と `hostsWith` が無い・tmp の例が fixture と同じ・
+    古い雛形の警告を出さない。変更前の雛形では新しい 3 件が落ちた）・`local-flake-migrate.test.sh`（89 件。ADR 026 の版から、`local` が
+    既定のままなら衝突なく今の雛形と同じに、値があれば衝突として残る）・`private-host.test.sh`（22 件）
+  - `one-password.nix`（作り物の 4 通り）・`local-flake-tmp.nix`（tmp の例が `mkForce` なしで評価でき、warnings が空）・`claude-notion.nix`・
+    `claude-video-offer.nix`・`host-draft.nix`（既定の false に合わせた）
+  - ほかの script のテストも手元で流して通った（道具の要る 3 本（shfmt・protobuf の python・包んだ git-gh）は、サンドボックスの checks で通った）
+- `nix flake check --all-systems --no-build ./nix` が通る。`nix flake check --no-eval-cache ./nix` で x86_64-linux の checks 68 本
+  （`home-wsl-example` を含む）を build できた。sandbox の `config.warnings` は `[]`
+- lint（CI と同じ）: nixfmt・shfmt・shellcheck・テストの先頭の「## 確かめること」・`check-test-grep-q.sh`・`bootstrap-windows-files.sh --check`・
+  `check-herdr-keys.sh`
+- 登録した WSL の PC の `~/dotfiles/flake.nix` の写しで、本体をこの branch にして（本物の `~/dotfiles` と dotfiles-private には書かずに）:
+  - `setup.sh --which-host` は、移す前も移したあとも `<この PC><TAB>private`
+  - `local-flake-migrate.sh prepare` は ADR 026 の版（印が同じ版）を元に衝突 0 件。`compare` は全 5 ホスト（型 3 つと dotfiles-private の
+    2 つ）で drvPath が同じ（世代の中身は変わらない）。前の雛形（`hostsWith [ local ]`）の flake も新しい本体で評価できた
 
 ## 7. 移行・運用手順
 
