@@ -9,6 +9,7 @@
 | 関連 ADR | [002_nix_hosts_and_local_flake](../002_nix_hosts_and_local_flake_20260810T153848JST/README.md)（登録簿とローカル flake。この ADR は実機の置き場所を private へ足す）、[015](../015_win_google_ime_powertoys_20261011T234247JST/README.md)・[016](../016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)（dotfiles-private を public の flake input にしない）、[022_one_password_outside_wsl](../022_one_password_outside_wsl_20261018T105655JST/README.md)（lavie を `--host pollenjp@laptop` で当てる手順。登録した PC では使わない）、[024_local_flake_template_migrate](../024_local_flake_template_migrate_20261020T120111JST/README.md)（雛形の版の印と移し方。この ADR で雛形の版が変わる） |
 | 運用手順 | [`nix/README.md`「dotfiles-private に登録したホスト」](../../../nix/README.md#dotfiles-private-に登録したホスト) |
 | 設計 | [`docs/superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md`](../../superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md) |
+| 後続 ADR | [027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（§2.D の 4 番目の推測をやめ、どれにも当たらなければ止めて選べる道を出す。§2.F の段階 3 を行い、公開の登録簿から実機 3 つを外した。雛形から `local` を外し、Dev Tracker の既定を false にした。§7 の「移した値を `local` から外す」は、今の雛形では足していた `tmp` から外す話になる。本文は決定当時の記録としてそのまま残してある） |
 
 ---
 
@@ -106,6 +107,11 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 | 3 | dotfiles-private に登録したこの PC のホスト（`<user>@<短い hostname>`）。clone に `nix/hosts/<その名前>.nix` があり、ローカル flake の入力がその clone の `nix/` を指すときだけ |
 | 4 | `$USER` と `uname` からの推測 |
 
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 4 の推測はやめた。1〜3 のどれにも当たらなければ止まり、選べる道 (この PC を登録する・`~/dotfiles/flake.nix` に `tmp` を足す・
+>   `--host <型>`) を出す。決め直しのあとも決まらなければ switch の頭で止まる
+
 - この PC の名前は `private-host.sh name` だけが決める（setup と登録の skill で同じ名前になるように）。user は `$USER`、hostname は
   macOS ならネットワークで変わらない `LocalHostName`（`scutil`）、ほかは `uname -n` の最初の `.` まで（`hostname -s` と同じ）。
   bash と uname だけで動く（setup は Nix を入れる前にも判定する）
@@ -154,6 +160,11 @@ homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // { … }
 | 3 | 実機が全部 private に移ったら、public の登録簿から実機（`pollenjp@wsl`・`pollenjp@wsl-no-1password`・`pollenjp@laptop`）を消し、nixos-config の README の `--host pollenjp@laptop` を直す |
 
 段階 3 まで、public の登録簿の実機の行は 1 行も消さない。
+
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 段階 3 は ADR 027 で行った (公開の登録簿から `pollenjp@wsl`・`pollenjp@wsl-no-1password`・`pollenjp@laptop` を外した)。
+>   nixos-config の README の `--host pollenjp@laptop` は、別の repo の PR で直す
 
 ## 3. 変更点の詳細
 

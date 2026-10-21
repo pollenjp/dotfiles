@@ -24,6 +24,8 @@
 #     入力の状態 (stub)・手で足したホスト・local のコメントでない行 (dotfiles の外の行も)・setup が --host なしで選ぶ
 #     ホスト (setup.sh --which-host)・今の世代 (~/.local/state/nix/profiles/home-manager) と outPath が一致するホストを
 #     出し、一致しなければそう出す。ユーザーの flake.nix と flake.lock は変えない (評価は写しで行う)
+#   - 今の雛形の形 (local も手で足したホストも無い) の flake では、inspect は local が無いことと、setup が --host なしで
+#     選ぶホストが決まらない (setup は止まる) ことを出し、draft は notes なしで描く
 #   - draft (偽の nix) は、元にするホスト・この PC の名前・local の dotfiles の外の行 (notes) を渡して描いたものを、
 #     --out のファイルか stdout に出す。--out が在れば --force なしで 2 (変えない)、評価が落ちれば原因の行を出して 3
 #   - compare (偽の nix) は、旧い形 (ローカル flake の写しの <base>。inputs.dotfiles.url を --nix-dir に書き換える) と
@@ -501,6 +503,43 @@ if [[ $(rc "${c}") == 3 ]] && grep -qF "attribute 'nosuch' missing" "${c}/err"; 
   ok "draft: 評価が落ちれば、原因の行を出して 3"
 else
   ng "draft (評価が落ちる)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 12b. 今の雛形の形 (local も手で足したホストも無い) の flake: inspect は local が無いことと、setup の選ぶホストが決まらない
+#      (setup は止まる) ことを出す。draft は notes なしで描く
+c=$(register_case r12b)
+cat >"${c}/local/flake.nix" <<EOF
+# FAKE_OUT: alice@x86_64-linux ${c}/store/gen-1
+{
+  inputs.dotfiles.url = "path:${c}/repo/nix";
+  inputs.dotfiles-private.url = "path:${c}/repo/nix/private-stub";
+  inputs.dotfiles-private.flake = false;
+  outputs =
+    { dotfiles, dotfiles-private, ... }:
+    let
+      privateHosts = dotfiles.lib.privateHosts dotfiles-private;
+    in
+    {
+      homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
+        # tmp = dotfiles.lib.mkHome {
+        #   username = "alice";
+        # };
+      };
+    };
+}
+EOF
+run_nix "${c}" inspect --flake "${c}/local"
+inspect_new_rc=$(rc "${c}")
+inspect_new=$(out "${c}")
+run_nix "${c}" draft --base alice@x86_64-linux --flake "${c}/local"
+if [[ ${inspect_new_rc} == 0 && ${inspect_new} == *"local: 無い (今の雛形"* && ${inspect_new} == *"手で足したホスト: なし"* &&
+  ${inspect_new} == *"setup が --host なしで選ぶホスト: 決まらない (setup は止まる"* &&
+  ${inspect_new} == *"一致するホスト: alice@x86_64-linux"* && ${inspect_new} != *"local のコメントでない行"* ]] \
+  && [[ $(rc "${c}") == 0 ]] && grep -qF 'DRAFT base=alice@x86_64-linux name=alice@box' "${c}/out" \
+  && ! grep -qF 'option の外の行' "${c}/out"; then
+  ok "今の雛形の形の flake: inspect は local が無いことと setup の選ぶホストが決まらないことを出し、draft は notes なしで描く"
+else
+  ng "今の雛形の形の flake" "inspect: rc=${inspect_new_rc} ${inspect_new} / draft: rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
 fi
 
 # 13. compare: 同じ → 0。新しい形は同じ本体と <private>/nix を指し、旧い形の写しの url は --nix-dir

@@ -14,7 +14,9 @@
 #   - 鍵の選び方 (gpg.ssh.defaultKeyCommand) は WSL とそれ以外で同じ
 #   - 旧名 dotfiles.wsl.onePassword.enable も同じ設定になり、改名の警告が出る
 #   - WSL で windowsUserName が無いと assertion が落ちる
-#   - 登録簿: pollenjp@laptop と pollenjp@wsl は有効、pollenjp@wsl-no-1password は無効
+#   - 作り物の 4 通り (非 WSL・1Password 無し / 非 WSL・有り / WSL・無し / WSL・有り) で、onePassword.enable は有りの 2 つ
+#     だけ true。WSL で 1Password を使わないなら、署名の設定もラッパーも書き出さない (公開の登録簿には型と sandbox しか
+#     無いので、実機の組み合わせは作り物で見る。ADR 027)
 {
   lib,
   pkgs,
@@ -37,21 +39,23 @@ let
   hasWrappers = cfg: cfg.home.file ? ".local/bin/ssh" && cfg.home.file ? ".local/bin/ssh-add";
   hasNoSigning = cfg: !(ini cfg ? gpg) && !((ini cfg).commit or { } ? gpgSign);
 
-  opSshSignWsl = "/mnt/c/Users/polle/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
+  opSshSignWsl = "/mnt/c/Users/alice/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
 
+  # 作り物の 4 通り (非 WSL・1Password 無し / 非 WSL・有り / WSL・無し / WSL・有り)
   none = configWith { };
   native = configWith { onePassword.enable = true; };
+  wslNone = configWith { wsl.enable = true; };
   wsl = configWith {
     wsl = {
       enable = true;
-      windowsUserName = "polle";
+      windowsUserName = "alice";
     };
     onePassword.enable = true;
   };
   oldName = configWith {
     wsl = {
       enable = true;
-      windowsUserName = "polle";
+      windowsUserName = "alice";
       onePassword.enable = true;
     };
   };
@@ -64,8 +68,7 @@ let
         onePassword.enable = true;
       }).home.username;
 
-  hosts = import ../hosts { inherit mkHome; };
-  hostEnabled = name: hosts.${name}.config.dotfiles.onePassword.enable;
+  enabled = cfg: cfg.dotfiles.onePassword.enable;
 
   cases = [
     {
@@ -119,12 +122,12 @@ let
       ok = !wslNoName.success;
     }
     {
-      name = "登録簿の pollenjp@laptop と pollenjp@wsl は 1Password を使う";
-      ok = hostEnabled "pollenjp@laptop" && hostEnabled "pollenjp@wsl";
+      name = "作り物の 4 通りで、1Password を使うのは非 WSL・有りと WSL・有りだけ";
+      ok = !(enabled none) && enabled native && !(enabled wslNone) && enabled wsl;
     }
     {
-      name = "登録簿の pollenjp@wsl-no-1password は 1Password を使わない";
-      ok = !(hostEnabled "pollenjp@wsl-no-1password");
+      name = "WSL で 1Password を使わないなら、署名の設定もラッパーも書き出さない";
+      ok = hasNoSigning wslNone && !(wslNone.home.file ? ".local/bin/ssh");
     }
   ];
 

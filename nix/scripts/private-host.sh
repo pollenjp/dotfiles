@@ -23,12 +23,14 @@
 #
 # この PC を登録する手順 (skill pjp-dotfiles-register-host) のうち、決まった処理を持つ。判断と確認の取り方は skill。
 #
-#   inspect   この PC を調べる (名前・WSL・clone と登録・ローカル flake の local と手で足したホスト・setup が選ぶホスト・
-#             今の世代と outPath が一致するホスト = 元にするホストの候補)
-#   draft     元にするホスト (+ ローカル flake の local) の options.dotfiles から、nix/hosts/<名前>.nix の下書きを描く
-#             (nix/lib/host-draft.nix。dotfiles の option の外の local の行は、描かずに頭のコメントで知らせる)
-#   compare   旧い形 (ローカル flake の <元のホスト>。local が当たる) と新しい形 (dotfiles-private の <名前>。local は
-#             当たらない) を、同じ本体・同じ lock で評価して drvPath を比べる。同じなら、この登録で世代の中身は変わらない
+#   inspect   この PC を調べる (名前・WSL・clone と登録・ローカル flake の手で足したホストと local (前の雛形)・setup が
+#             選ぶホスト・今の世代と outPath が一致するホスト = 元にするホストの候補)
+#   draft     元にするホスト (ローカル flake で評価した値。前の雛形なら local も当たる) の options.dotfiles から、
+#             nix/hosts/<名前>.nix の下書きを描く (nix/lib/host-draft.nix。dotfiles の option の外の local の行は、描かずに
+#             頭のコメントで知らせる)
+#   compare   旧い形 (ローカル flake の <元のホスト>。前の雛形なら local が当たる) と新しい形 (dotfiles-private の <名前>。
+#             ローカル flake の値は当たらない) を、同じ本体・同じ lock で評価して drvPath を比べる。同じなら、この登録で
+#             世代の中身は変わらない
 #
 # 評価はローカル flake の写しで行い、ユーザーの ~/dotfiles (flake.nix と flake.lock) にも dotfiles-private にも書かない。
 
@@ -49,9 +51,10 @@ usage() {
       --nix-dir の既定はこの script の repo の nix/)
   private-host.sh inspect [--flake <dir>]
       この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録・ローカル flake (雛形の版・入力・手で
-      足したホスト・local の行)・setup が --host なしで選ぶホスト・今の世代と outPath が一致するホスト
+      足したホスト・前の雛形なら local の行)・setup が --host なしで選ぶホスト (決まらなければそう出す)・今の世代と
+      outPath が一致するホスト
   private-host.sh draft --base <ホスト> [--flake <dir>] [--name <名前>] [--nix-dir <本体の nix>] [--out <ファイル> [--force]]
-      元にするホスト (+ local) から nix/hosts/<名前>.nix の下書きを描く。評価する本体は compare と同じ (--nix-dir。既定は
+      元にするホスト (前の雛形なら + local) から nix/hosts/<名前>.nix の下書きを描く。評価する本体は compare と同じ (--nix-dir。既定は
       この script の repo の nix/)。--out が無ければ stdout。在る --out は --force が無いと書かない (2)。元のホストを
       評価できなければ 3
   private-host.sh compare --base <ホスト> --private <dotfiles-private の作業ツリー> [--name <名前>] [--flake <dir>]
@@ -186,7 +189,7 @@ check_path() {
   esac
 }
 
-# この PC の system (x86_64-linux など。setup.sh の推測と同じ決め方)
+# この PC の system (x86_64-linux など。uname から)
 this_system() {
   local os arch
   os=$(uname -s)
@@ -309,8 +312,13 @@ eval_error_excerpt() {
   printf '    (全文: %s)\n' "$1"
 }
 
+# ローカル flake ($1) に local (前の雛形の「このマシンだけの設定」) があるか。今の雛形には無い (ADR 027)
+has_local() {
+  grep -q '^[[:space:]]*local[[:space:]]*=' "$1"
+}
+
 # ローカル flake ($1) の local の中の、コメントでも空でもない行 (字下げを外して)。local は「local = …」の行から、
-# 同じ字下げの「};」の行まで (雛形の形。関数の形 local = { lib, ... }: { … }; でも同じ)
+# 同じ字下げの「};」の行まで (前の雛形の形。関数の形 local = { lib, ... }: { … }; でも同じ)。local が無ければ何も出さない
 local_lines() {
   awk '
     !inb && /^[[:space:]]*local[[:space:]]*=/ {
@@ -477,14 +485,18 @@ cmd_inspect() {
     fi
     hand=$(hand_hosts "${f}")
     printf '  手で足したホスト: %s\n' "${hand:-なし}"
-    echo "  local のコメントでない行:"
-    lines=$(local_lines "${f}")
-    if [[ -n ${lines} ]]; then
-      while IFS= read -r l; do
-        printf '    %s\n' "${l}"
-      done <<<"${lines}"
+    if has_local "${f}"; then
+      echo "  local のコメントでない行 (前の雛形):"
+      lines=$(local_lines "${f}")
+      if [[ -n ${lines} ]]; then
+        while IFS= read -r l; do
+          printf '    %s\n' "${l}"
+        done <<<"${lines}"
+      else
+        echo "    (無い)"
+      fi
     else
-      echo "    (無い。local が見つからない)"
+      echo "  local: 無い (今の雛形。値は手で足したホストか dotfiles-private の登録に書く)"
     fi
   fi
 
@@ -493,12 +505,14 @@ cmd_inspect() {
       case ${which#*$'\t'} in
         local) state='ローカル flake で定義' ;;
         private) state='dotfiles-private に登録したこの PC のホスト' ;;
-        guess) state='USER と uname からの推測' ;;
         *) state=${which#*$'\t'} ;;
       esac
       printf '==> setup が --host なしで選ぶホスト: %s (%s)\n' "${which%%$'\t'*}" "${state}"
+    elif [[ -n ${name} && -f ${clone}/nix/hosts/${name}.nix ]]; then
+      echo "==> setup が --host なしで選ぶホスト: 決まらない (setup は止まる。ローカル flake が clone の nix/ を読むまでは --host <型> で当てる)"
     else
-      echo "==> setup が --host なしで選ぶホスト: 決まらない"
+      echo "==> setup が --host なしで選ぶホスト: 決まらない (setup は止まる。推測はしない。登録するまでは --host <型> で当てる。"
+      echo "    型には WSL・1Password の署名・Dev Tracker などの PC の値が無い)"
     fi
   fi
 
@@ -517,8 +531,8 @@ cmd_inspect() {
         if [[ -n ${matched} ]]; then
           printf '  一致するホスト: %s\n' "${matched}"
         else
-          echo "  一致するホストはありません (本体が最後の switch から進んだ、など)。setup が選ぶホスト (上) を元にするか、"
-          echo "  ユーザーに確かめる"
+          echo "  一致するホストはありません (本体が最後の switch から進んだ、など)。setup が選ぶホスト (上。決まらなければ"
+          echo "  登録簿の型) を元にするか、ユーザーに確かめる"
         fi
         if ((lock_synced)); then
           echo "  (ローカル flake の lock が本体と合っていなかったので、写しで張り直して評価した。今の世代とは一致しにくい)"
@@ -614,7 +628,7 @@ cmd_draft() {
   mkdir -p "$(dirname -- "${out}")"
   printf '%s\n' "${text}" >"${out}"
   printf '==> 下書きを書きました: %s\n' "${out}"
-  printf '  元にしたホスト: %s (+ ローカル flake の local)\n' "${base}"
+  printf '  元にしたホスト: %s (ローカル flake で評価した値。前の雛形なら local も当たる)\n' "${base}"
   [[ -z ${lines} ]] || echo "  local に dotfiles の option の外の行があります (下書きの頭のコメント)。要るなら modules に足す"
 }
 
@@ -702,7 +716,7 @@ EOS
     fi
   done
 
-  printf '==> 比べる: 旧い形 %s (ローカル flake の写し。local が当たる) と、新しい形 %s (%s/hosts/%s.nix。local は当たらない)\n' \
+  printf '==> 比べる: 旧い形 %s (ローカル flake の写し。前の雛形なら local が当たる) と、新しい形 %s (%s/hosts/%s.nix。ローカル flake の値は当たらない)\n' \
     "${base}" "${name}" "${pnix}" "${name}"
   printf '  本体: %s\n' "${nd}"
   echo "  評価しています (1 回 20〜60 秒)…"
@@ -739,7 +753,7 @@ EOS
   fi
 
   if [[ ${old_drv} == "${new_drv}" ]]; then
-    echo "→ drvPath が同じ。この登録で home-manager の世代の中身は変わらない (local の値を全部写せている)。"
+    echo "→ drvPath が同じ。この登録で home-manager の世代の中身は変わらない (元のホストの値を全部写せている)。"
     return 0
   fi
   if nix eval --raw "path:${work}/old#homeConfigurations" --apply "$(dotfiles_expr "${base}")" >"${work}/d-old.tsv" 2>/dev/null \
@@ -754,7 +768,7 @@ EOS
         }
       ' "${work}/d-old.tsv" "${work}/d-new.tsv" | sort
     )
-    [[ -n ${diff_text} ]] || diff_text="    (config.dotfiles は同じ。dotfiles の option の外 (local の programs.* など) が違う)"
+    [[ -n ${diff_text} ]] || diff_text="    (config.dotfiles は同じ。dotfiles の option の外 (local や modules の programs.* など) が違う)"
   else
     diff_text="    (config.dotfiles を読めませんでした)"
   fi

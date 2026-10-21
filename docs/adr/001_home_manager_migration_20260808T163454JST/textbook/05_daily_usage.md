@@ -6,7 +6,7 @@
 
 ```sh
 # 設定を変えたら適用する
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 
 # 今どの世代にいるか / 過去の世代を見る
 home-manager generations
@@ -38,7 +38,7 @@ home-manager generations
 
 ```sh
 $EDITOR ~/ghq/github.com/pollenjp/dotfiles/nix/home/modules/packages.nix
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 パッケージ名は <https://search.nixos.org/packages> で調べる。
@@ -66,7 +66,7 @@ nix shell nixpkgs#hyperfine     # このシェルの間だけ使える
 
 ```sh
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/flake-lock-age.sh update
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 `update` は lock を書いたあと、**その lock で実際に入る閉包のスキャンを自動で差し込む**（[ADR 006](../../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。whitelist に無い findings があると失敗するので、switch の前に対応する（pin を動かすか、理由を書いて whitelist へ足すか）。`--no-scan` で飛ばせる。
@@ -136,7 +136,7 @@ nix flake check --all-systems --no-build
 # 配置されるファイルを確認する
 # home-files は store への symlink なので find に -L が必須。
 # 付けないと 1 件も出ず「配置物なし」に見えてしまう。
-nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+nix build '.#homeConfigurations."pollenjp@x86_64-linux".activationPackage' -o /tmp/hm
 find -L /tmp/hm/home-files -mindepth 1 -maxdepth 3
 
 # 使い捨て HOME で実際に試す
@@ -162,7 +162,7 @@ cd ~/ghq/github.com/pollenjp/dotfiles/nix && nix fmt
 | `Existing file ... .bak already exists` | 前回の退避が残っている。古い `.bak` を消す |
 | `path does not exist` (新規 `.nix` を足した直後) | **git flake は untracked ファイルを見ない。`git add` する** |
 | 入れたはずのツールが古いまま | mise のリストに残っている。`~/.config/mise/config.toml` から消す |
-| `$USER` と `home.username` の不一致で中断 | `hosts/default.nix` の username を実際のログイン名に合わせる |
+| `$USER` と `home.username` の不一致で中断 | そのホストの定義（dotfiles-private の `nix/hosts/` のファイルか `~/dotfiles/flake.nix` に足したホスト）の username を実際のログイン名に合わせる |
 
 <details><summary>なぜ git add しないと見えないのか</summary>
 

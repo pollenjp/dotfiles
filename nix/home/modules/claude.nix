@@ -218,10 +218,8 @@ in
   warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
     dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
     規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
-    ~/dotfiles/flake.nix の local に dotfiles.claude.notion.profile = "personal"; (か "work") を書いて
-    switch してください。local が無い古い雛形なら local-flake-migrate.sh prepare で今の雛形へ移し
-    (nix/README.md「雛形が新しくなったら」)、登録簿のホストを直接使っているなら mkHome に
-    claude.notion.profile を渡します
+    このホストの mkHome (dotfiles-private に登録したファイルか、~/dotfiles/flake.nix に足した tmp) に
+    claude.notion.profile = "personal"; (か "work") を書いて switch してください
     (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
   '';
 

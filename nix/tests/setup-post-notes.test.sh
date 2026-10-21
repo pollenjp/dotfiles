@@ -22,8 +22,8 @@
 #   - switch が ✔ なら、その設定の home-manager の warnings (config.warnings を nix eval で読む) も
 #     [switch] で載る。--dry-run では読まない。読めなければ黙って飛ばす
 #   - bootstrap-claude-env の gh の警告は、まとめにだけ出る (残りの手作業で出し直さない)
-#   - local-flake を流したとき・home-manager の warnings を読めたときは、古い雛形の案内を
-#     残りの手作業で出し直さない (どちらでもなければ今どおり出す)
+#   - ローカル flake に hostsWith・notion.profile の語が無くても (今の雛形は local を持たない。ADR 027)、残りの手作業に
+#     古い雛形の案内を出さない (前の雛形は「# 雛形の版:」の印で知らせる。下の雛形の版のケース)
 #   - 続きの行が長い警告は、頭と末尾 (直し方) を残して間を省く。空白だけの行は出さない
 #   - 警告を溜めた一時ファイルを残さない (--self-update で本体を更新して exec し直すときも)
 #   - gitViaGh のマシン (~/.local/state/dotfiles/git-via-gh.json の enable が true) では、origin が GitHub の
@@ -295,31 +295,17 @@ else
   ng "gh の警告" "rc=$(rc "${c}") $(out "${c}")"
 fi
 
-# 7. local-flake を流したときは、古い雛形の案内を残りの手作業で出し直さない
-#    (偽の setup-local-flake.sh が古い雛形の flake.nix を置き、本物と同じく警告する)
-old_flake='{ inputs.dotfiles.url = "path:/somewhere/nix"; outputs = { dotfiles, ... }: dotfiles; }'
+# 7. ローカル flake に hostsWith・notion.profile の語が無くても (今の雛形は local を持たない)、残りの手作業に古い雛形の
+#    案内を出さない (前の雛形は「# 雛形の版:」の印で知らせる。下の雛形の版のケース)
 c=$(new_case t7)
-fake_step "${c}" setup-local-flake.sh "mkdir -p \"\${DOTFILES_LOCAL_DIR}\"
-printf '%s\\n' '${old_flake}' >\"\${DOTFILES_LOCAL_DIR}/flake.nix\"
-$(warn_body 'flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。')"
-run "${c}" --steps local-flake
-if [[ $(rc "${c}") == 0 ]] && seen_after_result "${c}" '^⚠️  \[local-flake\] flake.nix が古い雛形のまま' \
-  && ! seen_after_post_notes "${c}" '古い雛形'; then
-  ok "local-flake を流したときは、古い雛形の案内をまとめにだけ出す"
-else
-  ng "local-flake を流したとき" "rc=$(rc "${c}") $(out "${c}")"
-fi
-
-# 8. local-flake を流さないときは、今どおり残りの手作業で古い雛形を知らせる
-c=$(new_case t8)
 mkdir -p "${c}/local"
-printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
+printf '%s\n' '{ inputs.dotfiles.url = "path:/somewhere/nix"; outputs = { dotfiles, ... }: dotfiles; }' >"${c}/local/flake.nix"
 fake_step "${c}" bootstrap-a.sh 'echo "a を流した"'
 run "${c}" --steps bootstrap-a
-if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" '古い雛形'; then
-  ok "local-flake を流さないときは、残りの手作業で古い雛形を知らせる"
+if [[ $(rc "${c}") == 0 ]] && ! seen_after_post_notes "${c}" '古い雛形' && ! seen_after_post_notes "${c}" 'notion.profile'; then
+  ok "hostsWith・notion.profile の語が無いローカル flake でも、残りの手作業に古い雛形の案内を出さない"
 else
-  ng "local-flake を流さないとき" "rc=$(rc "${c}") $(out "${c}")"
+  ng "hostsWith・notion.profile の無いローカル flake" "rc=$(rc "${c}") $(out "${c}")"
 fi
 
 # 9. switch が ✔ なら、その設定の home-manager の warnings (config.warnings) も [switch] で載る。
@@ -336,26 +322,27 @@ else
   ng "home-manager の warnings" "rc=$(rc "${c}") calls=$(cat "${c}/home/nix-calls" 2>/dev/null) $(out "${c}") $(cat "${c}/err")"
 fi
 
-# 10. home-manager の warnings を読めたときは、残りの手作業で古い雛形を出し直さない
-#     (notion.profile が未設定なら、あちらがまとめに載る。local の無い古い雛形でも同じ warning が出る)
+# 10. home-manager の warnings を読めたとき、残りの手作業に古い雛形の案内を出さない (notion.profile が未設定なら、
+#     その warning がまとめに載る)
+plain_flake='{ inputs.dotfiles.url = "path:/somewhere/nix"; outputs = { dotfiles, ... }: dotfiles; }'
 c=$(new_case t10)
 mkdir -p "${c}/local"
-printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
+printf '%s\n' "${plain_flake}" >"${c}/local/flake.nix"
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_OUT='' run "${c}" --host testhost --steps switch
 if [[ $(rc "${c}") == 0 ]] && grep -q 'config.warnings' "${c}/home/nix-calls" && ! seen_after_post_notes "${c}" '古い雛形'; then
-  ok "home-manager の warnings を読めたときは、残りの手作業で古い雛形を出し直さない"
+  ok "home-manager の warnings を読めたとき、残りの手作業に古い雛形の案内を出さない"
 else
   ng "warnings を読めたとき" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
 fi
 
-# 11. home-manager の warnings を読めない (nix eval が失敗する) ときは黙って飛ばし、
-#     残りの手作業は今どおり古い雛形を知らせる
+# 11. home-manager の warnings を読めない (nix eval が失敗する) ときは黙って飛ばし、残りの手作業にも古い雛形の
+#     案内を出さない
 c=$(new_case t11)
 mkdir -p "${c}/local"
-printf '%s\n' "${old_flake}" >"${c}/local/flake.nix"
+printf '%s\n' "${plain_flake}" >"${c}/local/flake.nix"
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_RC=1 run "${c}" --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && ! grep -q '途中で出た警告' "${c}/out" && seen_after_post_notes "${c}" '古い雛形'; then
-  ok "home-manager の warnings を読めなければ黙って飛ばし、残りの手作業で古い雛形を知らせる"
+if [[ $(rc "${c}") == 0 ]] && ! grep -q '途中で出た警告' "${c}/out" && ! seen_after_post_notes "${c}" '古い雛形'; then
+  ok "home-manager の warnings を読めなければ黙って飛ばし、残りの手作業にも古い雛形の案内を出さない"
 else
   ng "warnings を読めないとき" "rc=$(rc "${c}") $(out "${c}") $(cat "${c}/err")"
 fi
@@ -543,11 +530,10 @@ if [[ -n ${scripts} ]]; then
   }
   # 今の雛形の印
   current_id() { "${BASH}" "$1/repo/nix/scripts/local-flake-migrate.sh" id; }
-  # 印 ($2) を持つローカル flake を置く (hostsWith と notion.profile も書き、ほかの案内を出させない)
+  # 印 ($2) を持つローカル flake を置く
   local_with_marker() {
     mkdir -p "$1/local"
-    printf '# 雛形の版: %s\n{\n  inputs.dotfiles.url = "path:%s/repo/nix";\n  # dotfiles.lib.hostsWith / dotfiles.claude.notion.profile\n}\n' \
-      "$2" "$1" >"$1/local/flake.nix"
+    printf '# 雛形の版: %s\n{\n  inputs.dotfiles.url = "path:%s/repo/nix";\n}\n' "$2" "$1" >"$1/local/flake.nix"
   }
   # 何もせず 1 を返す偽の home-manager の bin
   failing_hm_bin() {

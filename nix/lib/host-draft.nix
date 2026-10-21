@@ -1,11 +1,12 @@
 # dotfiles-private の nix/hosts/<user>@<hostname>.nix の下書きを描く (ADR 026)。nix/scripts/private-host.sh draft が、
-# 元にするホスト (登録簿か手で足したホストに、ローカル flake の local が当たったもの) を評価して呼ぶ。
+# 元にするホスト (登録簿の型か手で足したホストを、ローカル flake で評価したもの。前の雛形なら local が当たっている) を
+# 評価して呼ぶ。
 #
 #   collect   元のホストの options.dotfiles から、既定でない定義を持つ option を [ { path; value; } ] で出す
 #   render    それを、mkHome を受け取って呼ぶ関数 (private-hosts.nix が読む形) のファイルの本文にする
 #
 # 「既定でない定義」は、option の既定 (優先度 1500 の mkOptionDefault) より強い定義があること。mkHome の引数・
-# 登録簿の modules・local のどこで書いたかは問わず、既定と同じ値を書いたもの (local の devTracker.enable = true
+# 登録簿の modules・local のどこで書いたかは問わず、既定と同じ値を書いたもの (local の gitViaGh.enable = true
 # など) も入る。既定が別の option から決まるもの (wsl.onePassword.windowsUserName) と、改名した旧名 (visible = false。
 # 値は新しい名前の option に入る) は入らない。dotfiles の option の外 (programs.git など) は見ないので、local にそういう
 # 行があれば private-host.sh draft が notes で知らせる。
@@ -126,11 +127,11 @@ in
     lib.concatMapStrings (l: l + "\n") (
       [
         "# この PC (${name}) のホストの定義と値の全部 (dotfiles の ADR 026)。ホストの名前はファイル名から .nix を除いたもの。"
-        "# ローカル flake (~/dotfiles/flake.nix) の local はこのホストには当たらない。値を変えるときはこのファイルを直す。"
+        "# ローカル flake (~/dotfiles/flake.nix) の値はこのホストには当たらない。値を変えるときはこのファイルを直す。"
       ]
       ++ lib.optional (
         base != null
-      ) "# 下書きは dotfiles の nix/scripts/private-host.sh draft が描いた (元にしたホスト: ${base} とローカル flake の local)。"
+      ) "# 下書きは dotfiles の nix/scripts/private-host.sh draft が描いた (元にしたホスト: ${base}。ローカル flake で評価した値)。"
       ++ map (n: "# ${n}") notes
       ++ [
         "{ mkHome, ... }:"

@@ -31,6 +31,8 @@
 # - 実機のホストは dotfiles-private の nix/hosts/<user>@<hostname>.nix に置ける (ADR 026)。この PC の名前と
 #   clone の場所は private-host.sh が決め (ここは呼ぶだけ)、ローカル flake がその clone の nix/ を読んでいれば、
 #   --host が無くてもそのホストを選ぶ。clone は switch の前に取る (手順 private-fetch)。
+# - 対象ホストは推測しない (ADR 027)。--host・ローカル flake のホスト・dotfiles-private のこの PC のホストのどれにも
+#   当たらなければ、選べる道を出して止まる (host_undecided)。
 
 set -eu -o pipefail
 
@@ -60,10 +62,9 @@ repo_dir=$(dirname "${nix_dir}")
 hosts_file="${nix_dir}/hosts/default.nix"
 
 # 実行に使う flake。ローカル flake (~/dotfiles) があればそちらを優先する。
-# 登録簿のホストはどちらからでも引けるが、ローカル flake 経由では雛形の local
-# (このマシンだけの設定。dotfiles.claude.devTracker.enable = false など) が乗る。
-# ローカル flake が無いマシンでは本体の flake に落ち、local は掛からない。
-# 詳細は setup-local-flake.sh の冒頭を参照。
+# 登録簿のホスト (型と sandbox) はどちらからでも引けるが、dotfiles-private に登録したホストと、
+# ローカル flake に足したホスト (tmp など) はローカル flake にしか無い。ローカル flake が無い
+# マシンでは本体の flake に落ちる。詳細は setup-local-flake.sh の冒頭を参照。
 local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
 if [[ -f ${local_dir}/flake.nix ]]; then
   flake_dir=${local_dir}
@@ -74,8 +75,8 @@ fi
 dry_run=0
 host=""
 # 対象ホストをどう決めたか: option (--host)・env (DOTFILES_HOST)・local (ローカル flake のホスト)・
-# private (dotfiles-private に登録したこの PC のホスト)・guess ($USER と uname からの推測)・menu (h で選んだ)。
-# 決まっていなければ空。--which-host の出力と、登録と違うホストを選んだときの警告に使う
+# private (dotfiles-private に登録したこの PC のホスト)・menu (h で選んだ)。決まっていなければ空 (推測はしない。
+# ADR 027)。--which-host の出力と、登録と違うホストを選んだときの警告に使う
 host_source=""
 mode=""
 steps_arg=""
@@ -138,22 +139,24 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
   setup.sh --list          手順の一覧を出す
   setup.sh --self-update   本体を git で最新にしてから続ける (下記)
   setup.sh --flake-update  「flake.lock を更新」を手順に足す (下記)
-  setup.sh --host <名前>   対象ホスト (既定は自動判定。下記)
+  setup.sh --host <名前>   対象ホスト (既定は下の順で決める。決まらなければ止まる)
   setup.sh --which-host    対象ホストと決め方 (タブ区切り) を出して終わる
   setup.sh --dry-run       実行せず、走るコマンドを表示するだけ
   setup.sh -h, --help      これ
 
 対象ホストの決め方 (--host / DOTFILES_HOST が無いとき):
-  1. ~/dotfiles/flake.nix が定義しているホスト (登録簿を上書きする側)
+  1. ~/dotfiles/flake.nix が定義しているホスト (tmp など。登録簿を上書きする側)
   2. dotfiles-private に登録したこの PC のホスト (nix/hosts/<user>@<短い hostname>.nix。
      ローカル flake の inputs.dotfiles-private がその clone の nix/ を指すときだけ)
-  3. $USER と uname からの推測 (<user>@wsl / <user>@<system>)
 
   1 を先に見るので、ローカル flake に足したホスト (tmp など) がそのまま既定に
   なる。複数書いてあるときは一番上のものを採る。2 は登録した PC の値の全部を
   持つホストで、登録した PC では --host を付けなくてよい (pjp-dotfiles-register-host
-  skill)。3 へ落ちるのはどちらも無いときだけ。--host / DOTFILES_HOST で登録と
-  違うホストを選ぶと、そのことを警告する (止めない)。
+  skill)。どちらも無ければ推測せずに止まり、選べる道 (この PC を dotfiles-private に
+  登録する・~/dotfiles/flake.nix に tmp を足す・--host <型> を付ける) を出す (ADR 027)。
+  手順 private-fetch・local-flake のあとで決まりうるときは、その手順のあとで決め直し、
+  決まらなければ switch の頭で止まる。--host / DOTFILES_HOST で登録と違うホストを
+  選ぶと、そのことを警告する (止めない)。
 
 dotfiles-private (private な repo) の取得:
   「既存マシン更新」と「新しいマシン適用」は、switch の前に clone を取得して
@@ -618,8 +621,8 @@ parse_hosts() {
 
 # ローカル flake (~/dotfiles/flake.nix) が定義しているホスト。
 #
-# あちらは `dotfiles.lib.hostsWith [ local ] // { ... }` (旧雛形は
-# `dotfiles.homeConfigurations // { ... }`) なので、ここに出る名前は
+# あちらは `dotfiles.homeConfigurations // privateHosts // { ... }` (前の雛形は
+# `dotfiles.lib.hostsWith [ local ] // ...`) なので、ここに出る名前は
 # **登録簿に無い、または登録簿を上書きしているホスト**である。
 # ローカル flake が無いマシン (本体の flake を直接指している) では空。
 local_flake_hosts() {
@@ -742,35 +745,28 @@ host_source_label() {
   esac
 }
 
-is_wsl() {
-  if [[ -n ${WSL_DISTRO_NAME:-} ]]; then
-    return 0
-  fi
-  grep -qi microsoft /proc/version 2>/dev/null
-}
-
-# 対象ホストを決めて host と host_source に入れる。決められなければ 1 を返して呼び元に選ばせる。
+# 対象ホストを決めて host と host_source に入れる。決められなければ 1 を返す (推測はしない。ADR 027)。
 #
-# 見る順は次の 3 つ。
+# 見る順は次の 2 つ。
 #
-#   1. ローカル flake (~/dotfiles/flake.nix) が定義しているホスト
+#   1. ローカル flake (~/dotfiles/flake.nix) が定義しているホスト (tmp など)
 #   2. dotfiles-private に登録したこの PC のホスト (nix/hosts/<user>@<短い hostname>.nix)。
 #      ローカル flake が clone の nix/ を読んでいるときだけ (読んでいないと flake にそのホストが無い)
-#   3. $USER と uname からの推測 (<user>@wsl / <user>@<system>)
 #
 # 1 を先に見るのは、あちらが登録簿を `//` で **上書き** するための場所だから。
 # そこに名前を書いた時点で「このマシンはこれで switch する」という意思表示に
-# なっているので、推測より強い情報として扱う。名前が登録簿と揃っていない
-# (`tmp` など) だけで既定から外れると、毎回 h か --host で選び直すことになる。
+# なっている。名前が登録簿と揃っていない (`tmp` など) だけで既定から外れると、
+# 毎回 h か --host で選び直すことになる。
 #
-# 複数書いてあるときは **ファイルで一番上** のものを採る。推測の候補
-# (`<user>@wsl` など) と同名のものが下にあってもそちらへは行かない。順番で
-# 決まるので、既定を変えたいときは行を入れ替えるだけで済む。
+# 複数書いてあるときは **ファイルで一番上** のものを採る。順番で決まるので、
+# 既定を変えたいときは行を入れ替えるだけで済む。
 #
-# 2 はその PC の値の全部を持つホストなので、推測より強い。登録した PC では --host を付けなくてよい
-# (付け忘れて汎用のホストで当たるのを防ぐ。ADR 026)。3 へ落ちるのは 1 も 2 も無いときだけ。
+# 2 はその PC の値の全部を持つホスト。登録した PC では --host を付けなくてよい (付け忘れて汎用のホストで
+# 当たるのを防ぐ。ADR 026)。どちらも無ければ決めない: 前は $USER と uname から推測していたが、推測で型の
+# ホストになると、登録した PC でも値 (git の署名など) が黙って外れる (ADR 027)。止めるのは呼び元
+# (host_may_resolve・host_undecided)。
 detect_host() {
-  local user os arch system registered candidates=() cand first_local
+  local first_local
   # 1. ローカル flake。先頭の行だけ取る (パイプの先に head を置かない)
   first_local=$(local_flake_hosts)
   first_local=${first_local%%$'\n'*}
@@ -786,55 +782,101 @@ detect_host() {
     host_source=private
     return 0
   fi
+  return 1
+}
 
-  # 3. $USER と uname からの推測。
-  user=${USER:-$(id -un)}
-  os=$(uname -s)
-  arch=$(uname -m)
-  case ${arch} in
-    x86_64 | amd64) arch=x86_64 ;;
-    arm64 | aarch64) arch=aarch64 ;;
-  esac
-  case ${os} in
-    Darwin) system="${arch}-darwin" ;;
-    *) system="${arch}-linux" ;;
-  esac
+# 型 (登録簿のホストから、検証専用の sandbox を除いたもの) を空白で区切って出す。止めるときの案内に使う
+type_hosts() {
+  local names nl=$'\n'
+  names=$(parse_hosts "${hosts_file}" | grep -vx 'sandbox' | awk '!seen[$0]++' || true)
+  printf '%s' "${names//${nl}/ }"
+}
 
-  if is_wsl; then
-    candidates+=("${user}@wsl")
+# 対象ホストが決まっていないとき、この実行の手順のあとの決め直し (redetect_host) で決まりうるか。
+#
+# 決まるのは、手順のあとに「clone にこの PC のファイルがある」と「ローカル flake がその clone の nix/ を読む」が
+# そろうときだけ (ローカル flake の手で足したホストは手順では増えない: setup-local-flake.sh は既にある flake.nix を
+# 書き換えず、新しく書く雛形の tmp はコメント)。
+#
+#   ファイル  今ある、か、private-fetch を選んでいて clone (.git) がある (取得で来うる)。ただし preflight-unlink を
+#             流す実行 (--new-machine) では、取得で来うるだけのものは数えない (今あるときだけ)
+#   読む      今読んでいる、か、local-flake を選んでいてローカル flake がまだ無い (この実行で clone を読む flake を置く)
+#
+# Nix が無い (新しいマシン) なら 1 (Nix を入れてから止めない)。clone が無ければ 1 (取得もローカル flake も登録を
+# 運んでこない)。preflight-unlink は home-manager 自身が張った symlink まで外すので、そのあとで switch が止まると
+# シェルの設定が消えたままになる。その実行では、決め直しで確かに決まるとき (ファイルが今ある) だけ先へ進める。
+# 決まりうるなら 0 で、止めるのは switch の頭 (ensure_host_registered)
+host_may_resolve() {
+  local file=0 reads=0
+  have nix || return 1
+  [[ -n ${private_clone} && -d ${private_clone} ]] || return 1
+  if this_pc_in_private; then
+    file=1
+  elif is_selected private-fetch && ! is_selected preflight-unlink && [[ -d ${private_clone}/.git ]]; then
+    file=1
   fi
-  candidates+=("${user}@${system}")
+  if local_flake_reads_private || { is_selected local-flake && [[ ! -f ${local_dir}/flake.nix ]]; }; then
+    reads=1
+  fi
+  [[ ${file} == 1 && ${reads} == 1 ]]
+}
 
-  registered=$(list_hosts)
-  for cand in "${candidates[@]}"; do
-    if grep -qxF -- "${cand}" <<<"${registered}"; then
-      host=${cand}
-      host_source=guess
+# 対象ホストが決まらないときの案内を stderr に出す (止めるのは呼び元)。ADR 027。
+#   clone にこの PC のファイルがあるのにローカル flake が読んでいない   読ませ方 (今の雛形へ移す・ローカル flake を置く) と、
+#                                                                    それまでの当て方 (--host <型>)
+#   そうでない                                                       選べる道 3 つ (登録する・tmp を足す・--host <型>)
+host_undecided() {
+  local types flake_file="${flake_dir}/flake.nix"
+  types=$(type_hosts)
+  {
+    if this_pc_in_private; then
+      printf '!! 対象ホストが決まりません (dotfiles-private にこの PC のホストがありますが、ローカル flake が読んでいません)。\n'
+      printf '   この PC のホスト: %s (%s/nix/hosts/%s.nix)\n' "${private_host_name}" "${private_clone}" "${private_host_name}"
+      if [[ ${flake_dir} == "${nix_dir}" ]]; then
+        printf '   ローカル flake がまだ無いので、置くとその clone の nix/ を読みます: --steps local-flake\n'
+      else
+        printf '   ローカル flake (%s) が dotfiles-private の nix/ を読んでいません (%s)。\n' "${flake_file}" "$(private_input_state)"
+        printf '   読ませるには、値を引き継いで今の雛形へ移す: %s\n' "$(local_flake_migrate_cmd)"
+        printf '   (Claude Code なら pjp-dotfiles-local-flake-migrate skill。値を書き足していない雛形なら %s --force で作り直してもよい)\n' \
+          "${script_dir}/setup-local-flake.sh"
+      fi
+      printf '   それまでの間に当てるなら、--host <型> を付ける (型: %s。型には WSL・1Password の署名・Dev Tracker などの PC の値が無い)\n' \
+        "${types:-登録簿にありません}"
       return 0
     fi
-  done
-  return 1
+    printf '!! 対象ホストが決まりません (--host が無く、ローカル flake にホストが無く、dotfiles-private にこの PC のホスト %s もありません)。\n' \
+      "${private_host_name:-(この PC の名前を決められない)}"
+    printf '   setup はホストを推測しません (ADR 027)。次のどれかで決めてください:\n'
+    printf '     1. この PC を dotfiles-private に登録する (Claude Code で pjp-dotfiles-register-host skill。登録の前の 1 回は 3 で当てる)\n'
+    if [[ ${flake_dir} == "${nix_dir}" ]]; then
+      printf '     2. ローカル flake を置き (--steps local-flake)、その flake.nix に tmp を足す (dotfiles-private を読めない PC。足したホストが既定の対象ホストになる)\n'
+    else
+      printf '     2. %s に tmp を足す (dotfiles-private を読めない PC。足したホストが既定の対象ホストになる。例は雛形のコメント)\n' "${flake_file}"
+    fi
+    printf '     3. --host <型> を付ける (型: %s)\n' "${types:-登録簿にありません}"
+    printf '        型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。それらを使う PC は 1 か 2 で値を書く\n'
+  } >&2
 }
 
 ensure_host_registered() {
   local names
   if [[ -z ${host} ]]; then
-    warn "対象ホストが決まっていません。--host <名前> で指定してください。"
-  else
-    names=$(list_hosts)
-    if grep -qxF -- "${host}" <<<"${names}"; then
-      return 0
-    fi
-    warn "${host} は登録されていません (手順 0)。"
-    warn "  登録簿:       ${hosts_file}"
-    if [[ ${flake_dir} != "${nix_dir}" ]]; then
-      warn "  ローカル追加: ${flake_dir}/flake.nix"
-      # dotfiles-private の clone にはあるのに、ローカル flake がその nix/ を読んでいない
-      if [[ -n ${private_clone} && -f ${private_clone}/nix/hosts/${host}.nix ]] && ! local_flake_reads_private; then
-        warn "  ${host} は dotfiles-private (${private_clone}/nix/hosts/${host}.nix) にありますが、ローカル flake が dotfiles-private の nix/ を読んでいません ($(private_input_state))。" \
-          "読ませるには、値を引き継いで今の雛形へ移す (dotfiles-private の入力が clone の nix/ を指す): $(local_flake_migrate_cmd)" \
-          "(Claude Code なら pjp-dotfiles-register-host skill の最後の手順か、pjp-dotfiles-local-flake-migrate skill)"
-      fi
+    host_undecided
+    return 1
+  fi
+  names=$(list_hosts)
+  if grep -qxF -- "${host}" <<<"${names}"; then
+    return 0
+  fi
+  warn "${host} は登録されていません (手順 0)。"
+  warn "  登録簿:       ${hosts_file}"
+  if [[ ${flake_dir} != "${nix_dir}" ]]; then
+    warn "  ローカル追加: ${flake_dir}/flake.nix"
+    # dotfiles-private の clone にはあるのに、ローカル flake がその nix/ を読んでいない
+    if [[ -n ${private_clone} && -f ${private_clone}/nix/hosts/${host}.nix ]] && ! local_flake_reads_private; then
+      warn "  ${host} は dotfiles-private (${private_clone}/nix/hosts/${host}.nix) にありますが、ローカル flake が dotfiles-private の nix/ を読んでいません ($(private_input_state))。" \
+        "読ませるには、値を引き継いで今の雛形へ移す (dotfiles-private の入力が clone の nix/ を指す): $(local_flake_migrate_cmd)" \
+        "(Claude Code なら pjp-dotfiles-register-host skill の最後の手順か、pjp-dotfiles-local-flake-migrate skill)"
     fi
   fi
   printf '   登録済み:\n' >&2
@@ -1030,7 +1072,7 @@ pull_repo() {
 rebuild_args=()
 build_rebuild_args() {
   rebuild_args=()
-  # 自動で決めたホスト (ローカル flake・dotfiles-private・推測) は渡さず、新しい setup.sh の判定に任せる。
+  # 自動で決めたホスト (ローカル flake・dotfiles-private) は渡さず、新しい setup.sh の判定に任せる。
   # 渡すと --host で明示したことになり、登録と違うホストの警告の出し方が変わる。DOTFILES_HOST は env で届く
   if [[ -n ${host} && (${host_source} == option || ${host_source} == menu) ]]; then
     rebuild_args+=(--host "${host}")
@@ -1176,7 +1218,7 @@ header() {
     printf '  対象ホスト: %s%s%s  %s(%sh で変更)%s\n' \
       "${c_green}" "${host}" "${c_reset}" "${c_dim}" "${origin}" "${c_reset}"
   else
-    printf '  対象ホスト: %s未判定%s  %s(h で選ぶ / 手順 0 が未了かも)%s\n' \
+    printf '  対象ホスト: %s決まっていません%s  %s(h で型を選ぶか、dotfiles-private に登録する・~/dotfiles/flake.nix に tmp を足す)%s\n' \
       "${c_red}" "${c_reset}" "${c_dim}" "${c_reset}"
   fi
   if [[ -n ${backup_ext} ]]; then
@@ -1840,6 +1882,13 @@ step_flake_update() {
 
 step_switch() {
   local hm_args=()
+  # --dry-run では dotfiles-private の取得・ローカル flake の手順が流れないので、それのあとで決め直すはずのホストは決まらない
+  # (execute の前の判定 host_may_resolve は、実行すれば決まりうると見ている)。ここで ✖ にせず、そう出して進む
+  if [[ -z ${host} && ${dry_run} == 1 ]]; then
+    note '(--dry-run なので dotfiles-private の取得・ローカル flake の手順は流れず、対象ホストを決め直せない。'
+    note ' 実行のときはそのあとで決め直し、決まらなければここで止まる)'
+    return 0
+  fi
   ensure_host_registered || return 1
   warn_untracked
   warn_clobber
@@ -1872,7 +1921,6 @@ step_switch() {
 # nix の出力を写すと進捗表示が消えるので、同じ設定の config.warnings を評価し直して取る
 # (eval cache が効けば 1 秒ほど)。1 件を 1 つの見出しにし、warning の 2 行目からは字下げして
 # 続きの行にする (まとめのファイルの形)。読めなければ黙って飛ばす。lock は書き換えない。
-hm_warnings_read=0
 hm_warnings_to_summary() {
   local out
   if [[ ${dry_run} == 1 || -z ${DOTFILES_SETUP_WARNINGS-} ]] || ! have nix; then
@@ -1884,7 +1932,6 @@ hm_warnings_to_summary() {
     2>/dev/null); then
     return 0
   fi
-  hm_warnings_read=1
   if [[ -n ${out} ]]; then
     { printf '%s\n' "${out}" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
   fi
@@ -2122,49 +2169,28 @@ post_notes() {
     note 'home-manager コマンドは新しいシェルから使える。今のシェルで使うなら:'
     note '  . ~/.nix-profile/etc/profile.d/nix.sh'
   fi
+  # 前の雛形かどうかは「# 雛形の版:」の印で見る (下)。前は hostsWith・notion.profile の語を grep していたが、今の
+  # 雛形はどちらも持たない (local を外した。ADR 027)。Notion の宛先が未設定なら、home-manager の warnings がまとめに載る
   if [[ ${flake_dir} == "${nix_dir}" ]]; then
     note 'ローカル flake が未設置です。一度だけ --steps local-flake を実行すると'
     note '        以後 ~/dotfiles/setup と ~/dotfiles#<ホスト> から扱えます。'
-  elif ! is_selected local-flake && [[ ${hm_warnings_read} != 1 ]]; then
-    # --update は local-flake の手順を走らせないので、雛形が新しくなったことを
-    # ここで知らせる (setup-local-flake.sh の警告と同じ)。次のときは出さない (二重になる)。
-    #   local-flake を流した   setup-local-flake.sh の同じ警告がまとめに載る
-    #   switch の後に home-manager の warnings を読めた
-    #                          notion.profile が未設定なら、その warning がまとめに載る
-    #                          (local の無い古い雛形でも同じ warning が出る)。ここの grep
-    #                          より正確 (mkHome で渡したときも見分ける)
-    if ! grep -q 'hostsWith' "${flake_dir}/flake.nix"; then
-      note "${flake_dir}/flake.nix は古い雛形です (dotfiles.lib.hostsWith / local が無い)。"
-      note '        local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、'
-      note '        規則に当たらない repo と repo の外で Notion へ書く skill は止まる。'
-      note '        直すなら値と手で足したホストを引き継いで今の雛形へ移す:'
-      note "          $(local_flake_migrate_cmd)"
-      note "        (手で足したホストが無ければ ${script_dir}/setup-local-flake.sh --force で作り直してもよい)"
-    elif ! grep -q 'notion\.profile' "${flake_dir}/flake.nix"; then
-      note "${flake_dir}/flake.nix の local に dotfiles.claude.notion.profile がありません。"
-      note '        規則に当たらない repo と repo の外で、Notion へ書く skill は宛先が決まらず止まる。'
-      note '        README「Notion の宛先を host ごとに選ぶ」の形で足す。'
-    fi
   fi
   # 雛形の版の印が今の雛形と違えば、値を引き継いで移す道具を知らせる。local-flake を流したときは
-  # setup-local-flake.sh の同じ警告がまとめに載るので出さない (home-manager の warnings とは別の話なので、
-  # hm_warnings_read には関わらない)。
+  # setup-local-flake.sh の同じ警告がまとめに載るので出さない。
   if ! is_selected local-flake && local_flake_stale; then
     note "${flake_dir}/flake.nix は前の雛形から作られています (雛形の版 ${local_flake_state})。"
     note "        値を引き継いで今の雛形へ移す: $(local_flake_migrate_cmd)"
     note '        (Claude Code なら pjp-dotfiles-local-flake-migrate skill)'
   fi
   # dotfiles-private にこの PC のホストがあるのに、ローカル flake がその clone の nix/ を読んでいない (入力が無い・
-  # 本体の stub を指す)。そのホストは選べない (--host なしなら推測に落ちている。ADR 026)
+  # 本体の stub を指す)。そのホストは選べない (--host なしでは決まらず、switch を選べば止まる。ADR 026・027)
   if [[ ${flake_dir} != "${nix_dir}" ]] && this_pc_in_private && ! local_flake_reads_private; then
     note "dotfiles-private に、この PC のホスト ${private_host_name} があります (${private_clone}/nix/hosts/${private_host_name}.nix)。"
     note "        ローカル flake (${flake_dir}/flake.nix) が dotfiles-private の nix/ を読んでいない ($(private_input_state)) ので、使っていません。"
-    if [[ ${host_source} == guess ]]; then
-      note "        対象ホストは推測の ${host} になりました。"
-    fi
     note '        読ませるには、値を引き継いで今の雛形へ移す (dotfiles-private の入力が clone の nix/ を指す):'
     note "          $(local_flake_migrate_cmd)"
     note '        (Claude Code なら pjp-dotfiles-register-host skill の最後の手順)'
+    note "        値を書き足していない雛形なら ${script_dir}/setup-local-flake.sh --force で作り直してもよい (退避は取らない)。"
   fi
   note "設定の検証: ${script_dir}/verify.sh"
 }
@@ -2303,18 +2329,14 @@ local_flake_migrate_cmd() {
   printf '%s' "${cmd}"
 }
 
-# --host・DOTFILES_HOST・メニューの h で、この PC を dotfiles-private に登録した名前と違うホストを選んだら警告する
-# (止めない。明示した方で当てる。ADR 026)。登録した PC で、nixos-config の README などに残る --host の手順で
-# 汎用のホストを当てると、値が登録したファイルではなく雛形の既定に戻るので、気づけるようにする。
-# 警告のまとめでは [対象ホスト] に載る。
-# 自動で決めた対象ホスト (ローカル flake・dotfiles-private・推測。決まっていないときも) を決め直す。$1: 直前の手順の名前。
+# 自動で決めた対象ホスト (ローカル flake・dotfiles-private。決まっていないときも) を決め直す。$1: 直前の手順の名前。
 # private-fetch は clone にこの PC の登録を運んでくる (消す) ことがあり、local-flake はこの実行で clone を読むローカル flake を
 # 置くことがあるので、同じ実行の switch がそれを使うように (ADR 026)。--host・DOTFILES_HOST・メニューの h で選んだホストは
 # 変えない。変われば、そう出す (実行の前に出した「対象ホスト」と違うため)
 redetect_host() {
   local before=${host} origin
   case ${host_source} in
-    local | private | guess | "") ;;
+    local | private | "") ;;
     *) return 0 ;;
   esac
   host=""
@@ -2326,9 +2348,13 @@ redetect_host() {
     private) origin="dotfiles-private の ${private_clone}/nix/hosts/${host}.nix で定義" ;;
     *) origin=$(host_source_label) ;;
   esac
-  note "対象ホストを選び直した: ${before:-<未定>} → ${host:-<未定>}  (${1} のあと。${origin})"
+  note "対象ホストを選び直した: ${before:-<未定>} → ${host:-<未定>}  (${1} のあと。${origin:-決まらなければ switch で止まる})"
 }
 
+# --host・DOTFILES_HOST・メニューの h で、この PC を dotfiles-private に登録した名前と違うホストを選んだら警告する
+# (止めない。明示した方で当てる。ADR 026)。登録した PC で、nixos-config の README などに残る --host の手順で
+# 汎用のホストを当てると、値が登録したファイルではなく、そのホストの定義 (型なら本体の既定) に戻るので、
+# 気づけるようにする。警告のまとめでは [対象ホスト] に載る。
 warn_registered_host_differs() {
   local how
   case ${host_source} in
@@ -2343,12 +2369,12 @@ warn_registered_host_differs() {
   warn_context host
   if local_flake_reads_private; then
     warn "この PC は dotfiles-private に ${private_host_name} として登録されていますが、${how} で選んだ ${host} を当てます。" \
-      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (と ~/dotfiles/flake.nix の local) から来ます。" \
+      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (前の雛形なら ~/dotfiles/flake.nix の local も) から来ます。" \
       "登録したホストで当てるなら ${how} を外す。"
   else
-    # 読んでいないうちは、--host を外しても登録したホストにはならない (推測に落ちる)
+    # 読んでいないうちは、--host を外しても登録したホストにはならない (決まらずに止まる)
     warn "この PC は dotfiles-private に ${private_host_name} として登録されていますが、${how} で選んだ ${host} を当てます。" \
-      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (と ~/dotfiles/flake.nix の local) から来ます。" \
+      "値は ${private_host_name} のファイル (${private_clone}/nix/hosts/${private_host_name}.nix) ではなく、${host} の定義 (前の雛形なら ~/dotfiles/flake.nix の local も) から来ます。" \
       "ローカル flake が dotfiles-private の nix/ を読んでいない ($(private_input_state)) ので、登録したホストで当てるには今の雛形へ移す: $(local_flake_migrate_cmd)"
   fi
   warn_context ""
@@ -2377,7 +2403,15 @@ execute() {
   case $(host_origin) in
     local) note "対象ホスト: ${host}  (${flake_dir}/flake.nix で定義)" ;;
     private) note "対象ホスト: ${host}  (dotfiles-private の ${private_clone}/nix/hosts/${host}.nix で定義)" ;;
-    *) note "対象ホスト: ${host:-<未定>}" ;;
+    *)
+      if [[ -n ${host} ]]; then
+        note "対象ホスト: ${host}"
+      elif is_selected switch; then
+        note "対象ホスト: <未定>  (dotfiles-private の取得・ローカル flake の手順のあとで決め直す。決まらなければ switch で止まる)"
+      else
+        note "対象ホスト: <未定>"
+      fi
+      ;;
   esac
   warn_registered_host_differs
   if is_selected switch; then
@@ -2429,7 +2463,8 @@ execute() {
       "${c_red}" "${c_reset}" >&2
     # 失敗すると残りの手作業 (post_notes) は出ないので、switch が旧い local の評価で落ちた見込みがあれば
     # ここで移し方を知らせる (本体で option が削除・改名されると、旧い local のままでは評価が止まる)。
-    if [[ ${failed_id} == switch ]] && local_flake_stale; then
+    # 対象ホストが決まらずに止まったとき (host が空) は、評価までいっていないので出さない (そちらの案内が出ている)
+    if [[ ${failed_id} == switch && -n ${host} ]] && local_flake_stale; then
       # switch が落ちていると新しい skill はまだ配られていないので、repo の SKILL.md の場所も出す
       {
         printf '  ローカル flake (%s/flake.nix) は前の雛形から作られています (雛形の版 %s)。\n' "${flake_dir}" "${local_flake_state}"
@@ -2546,10 +2581,10 @@ case ${mode} in
     exit 0
     ;;
   which-host)
-    # 対象ホストと決め方 (--host・DOTFILES_HOST・local・private・guess) をタブ区切りで出す。登録の skill の
-    # script とテストが、setup の判定をそのまま引くため
+    # 対象ホストと決め方 (--host・DOTFILES_HOST・local・private) をタブ区切りで出す。登録の skill の
+    # script とテストが、setup の判定をそのまま引くため。決まらなければ選べる道を出して 1 (推測はしない)
     if [[ -z ${host} ]]; then
-      printf '!! 対象ホストが決まりません (--host <名前> で指定する。登録済み: %s)。\n' "$(list_hosts | tr '\n' ' ')" >&2
+      host_undecided
       exit 1
     fi
     printf '%s\t%s\n' "${host}" "$(host_source_label)"
@@ -2588,10 +2623,17 @@ case ${mode} in
     ;;
 esac
 
-# switch を含むなら、何かを実行する前にホストを確定させる。
+# switch を含むなら、何かを実行する前にホストを確かめる。
 # Nix を入れ終わってから「そんなホストは無い」と言われるのは無駄が大きい。
-if is_selected switch && ! ensure_host_registered; then
-  exit 1
+# 決まっていないときは、この実行の手順 (dotfiles-private の取得・ローカル flake) のあとの決め直しで決まりうる
+# ときだけ先へ進み、switch の頭 (ensure_host_registered) で止める。決まりようがなければここで止める (ADR 027)
+if is_selected switch; then
+  if [[ -n ${host} ]]; then
+    ensure_host_registered || exit 1
+  elif ! host_may_resolve; then
+    host_undecided
+    exit 1
+  fi
 fi
 
 if ! execute; then

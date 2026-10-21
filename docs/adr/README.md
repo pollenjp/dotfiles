@@ -33,6 +33,7 @@
 | [024](./024_local_flake_template_migrate_20261020T120111JST/README.md) | ローカル flake の雛形に版の印を入れ、雛形が変わったら値を引き継いで 3-way merge で移し、全ホストの drvPath を比べて確かめる | 2026-10-20 |
 | [025](./025_herdr_agent_borrow_20261020T210555JST/README.md) | herdr の固定名を session ごとに持ち、herdr を包んだ実行ファイル・`~/.ssh/rc`・見張りで、同じマシン (`PJP_SSH_CLIENT`) から来ている生きている接続を借りる | 2026-10-20 |
 | [026](./026_dotfiles_private_hosts_20261020T215857JST/README.md) | 実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が `--host` なしで hostname から選ぶ (登録は skill と script) | 2026-10-20 |
+| [027](./027_stop_guessing_host_20261021T143517JST/README.md) | setup は対象ホストを推測せず (決まらなければ止めて選べる道を出す)、公開の登録簿から実機を外し、PC の値は dotfiles-private の登録かローカル flake の tmp の 1 か所にだけ書く (雛形から `local` を外し、Dev Tracker の既定を false に。段階 3) | 2026-10-21 |
 
 ## ディレクトリ名
 

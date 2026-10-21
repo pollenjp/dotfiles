@@ -7,7 +7,7 @@
 | 決定者 | pollenjp |
 | 関連 PR | [#29](https://github.com/pollenjp/dotfiles/pull/29) |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md) |
-| 後続 ADR | [007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（ローカル flake の雛形を `dotfiles.lib.hostsWith [ local ] // { … }` に変え、登録簿のホストにも「このマシンだけの設定」を当てられるようにした。本文 §2.B の `dotfiles.homeConfigurations // { … }` は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録簿に載せずにマシンを足す」）、[026_dotfiles_private_hosts](../026_dotfiles_private_hosts_20261020T215857JST/README.md)（実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が hostname で選ぶ。public の登録簿の実機の行は、実機が全部移るまで残す） |
+| 後続 ADR | [007_claude_skill_host_option](../007_claude_skill_host_option_20260926T130250JST/README.md)（ローカル flake の雛形を `dotfiles.lib.hostsWith [ local ] // { … }` に変え、登録簿のホストにも「このマシンだけの設定」を当てられるようにした。本文 §2.B の `dotfiles.homeConfigurations // { … }` は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録簿に載せずにマシンを足す」）、[026_dotfiles_private_hosts](../026_dotfiles_private_hosts_20261020T215857JST/README.md)（実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が hostname で選ぶ。public の登録簿の実機の行は、実機が全部移るまで残す）、[027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（ローカル flake の雛形から `local` を外し、`dotfiles.homeConfigurations // privateHosts // { … }` を重ねるだけにした。このマシンだけのホスト（`tmp`）の値は `mkHome` の引数に直に書く。公開の登録簿から実機（本文の例の `pollenjp@wsl` など）を外し、型と `sandbox` だけにした。§7 の `~/dotfiles#pollenjp@wsl` は `~/dotfiles#<ホスト>` に読み替える。本文は決定当時の記録としてそのまま残してある） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（日常運用はこちら） |
 
 前提 ADR で home-manager への移行そのものは決めた。この ADR はその上で残っていた
@@ -320,6 +320,11 @@ mv ~/dotfiles ~/ghq/github.com/pollenjp/dotfiles
 ```
 
 ### 日常
+
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - `pollenjp@wsl` は公開の登録簿から外した。直接打つなら `#` の後ろは `<ホスト>`（`~/dotfiles/setup --which-host` が出すもの。
+>   dotfiles-private に登録した名前か、`~/dotfiles/flake.nix` に足した名前）。下のコードは決定当時の記録としてそのまま残してある
 
 ```sh
 ~/dotfiles/setup --update                            # メニュー経由

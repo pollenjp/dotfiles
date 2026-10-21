@@ -11,8 +11,8 @@
 #   - claude-video-offer.json は {"autoStart": <option の値>} で、改行で終わる。hook (video-offer-nudge.sh) と
 #     claude-skills の pjp-video-explainer-offer がこれを読み、true のときだけ答えを待たずに作り始める
 #   - CLAUDE.md の「解説動画を作るか聞く」の節は option によらず同じで、いつもある (作るかを聞く文を持つ)
-#   - claude-skill-overrides.json は pjp-dev-tracker だけを持ち、解説動画の skill を隠さない。
-#     「タスク管理」の節は devTracker.enable のときだけ (main と同じ)
+#   - claude-skill-overrides.json は pjp-dev-tracker だけを持ち、解説動画の skill を隠さない。値は既定 (devTracker.enable が
+#     false) で "off"、true で "on"。「タスク管理」の節は devTracker.enable = true のときだけ
 {
   lib,
   pkgs,
@@ -37,6 +37,7 @@ let
 
   byDefault = configWith { };
   auto = configWith { videoOffer.autoStart.enable = true; };
+  tracker = configWith { devTracker.enable = true; };
   noTracker = configWith { devTracker.enable = false; };
 
   cases = [
@@ -69,16 +70,24 @@ let
       ok = builtins.all (c: heading "## 解説動画を作るか聞く" (md c) && lib.hasInfix "解説動画を作るかを聞く" (md c)) [
         byDefault
         auto
+        tracker
         noTracker
       ];
     }
     {
-      name = "claude-skill-overrides.json は pjp-dev-tracker だけで、解説動画の skill を隠さない";
-      ok = builtins.fromJSON (overrides byDefault) == { "pjp-dev-tracker" = "on"; };
+      name = "claude-skill-overrides.json は pjp-dev-tracker だけで、解説動画の skill を隠さない (既定は off、true で on)";
+      ok =
+        builtins.fromJSON (overrides byDefault) == {
+          "pjp-dev-tracker" = "off";
+        }
+        && builtins.fromJSON (overrides tracker) == { "pjp-dev-tracker" = "on"; };
     }
     {
-      name = "「タスク管理」の節は devTracker.enable のときだけ";
-      ok = heading "## タスク管理" (md byDefault) && !lib.hasInfix "## タスク管理" (md noTracker);
+      name = "「タスク管理」の節は devTracker.enable = true のときだけ (既定には無い)";
+      ok =
+        heading "## タスク管理" (md tracker)
+        && !lib.hasInfix "## タスク管理" (md byDefault)
+        && !lib.hasInfix "## タスク管理" (md noTracker);
     }
   ];
 

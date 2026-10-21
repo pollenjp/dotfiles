@@ -70,8 +70,8 @@ in
   options.dotfiles.claude = {
     devTracker.enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
-      example = false;
+      default = false;
+      example = true;
       description = ''
         このマシンで Notion Dev Tracker (pjp-dev-tracker skill) を使うか。
 
@@ -88,9 +88,11 @@ in
         そのため反映は 2 段で、`home-manager switch` だけでは skillOverrides に
         届かない。`~/dotfiles/setup --update` (bootstrap まで走る) で揃える。
 
-        ローカル flake の雛形 (scripts/setup-local-flake.sh) は false を書いて
-        いるので、`~/dotfiles` 経由のマシンは使うところだけ true にする。
-        登録簿 (hosts/default.nix) のホストを直接指すときはこの既定 (true)。
+        既定は false (使わない)。使うマシンだけ true を書く: dotfiles-private に
+        登録したホストのファイル、ローカル flake (~/dotfiles/flake.nix) に足した tmp
+        (雛形の例は true を書く)、検証用の sandbox。登録簿の型のホスト
+        (`<user>@<system>`) を `--host` で当てたマシンでは使わない
+        (docs/adr/027_*。前は既定が true で、ローカル flake の雛形の local が false を書いていた)。
       '';
     };
 
@@ -161,7 +163,8 @@ in
           出さないため。
 
           null (既定) のマシンでは、規則に当たらない repo と repo の外で skill が止まる
-          (黙って別の workspace へ書かないため)。ローカル flake の雛形も null を書く。
+          (黙って別の workspace へ書かないため)。devTracker.enable = true なのに null の
+          マシンでは、評価のたびに警告が出る (home/modules/claude.nix)。
 
           home/modules/claude.nix が ~/.local/state/dotfiles/claude-notion.json に
           書き出し、claude-skills の resolver がそれを読む。反映は home-manager switch
@@ -241,8 +244,8 @@ in
         この値によらず作れる。
 
         反映は home-manager switch (~/dotfiles/setup --update でもよい)。settings.json は
-        通らないので bootstrap は要らない。作り始める方にしたいマシンはローカル flake の
-        local で true にする。
+        通らないので bootstrap は要らない。作り始める方にしたいマシンは、dotfiles-private に
+        登録したホストのファイルか、ローカル flake の tmp で true にする。
       '';
     };
   };
@@ -260,8 +263,8 @@ in
       - mise: `mise prune --yes` と、mise の downloads/ に残った 7 日より古いアーカイブの削除
 
       どちらも systemd の user timer (darwin は launchd の agent) で動き、マシンを
-      止めていて逃した回は次の起動時に走る。止めたいマシンはローカル flake の
-      local で false にする。
+      止めていて逃した回は次の起動時に走る。止めたいマシンは、そのホストの modules
+      (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
     '';
   };
 
@@ -275,7 +278,8 @@ in
       待ち受ける port。bind 先は 127.0.0.1 のまま変えない (LAN には出さない)。
 
       null (既定) なら何も置かず、cc-pages の既定の 7777 で待ち受ける。7777 が
-      ほかと衝突するマシンだけ、ローカル flake の local で選ぶ。
+      ほかと衝突するマシンだけ、そのホストの modules (dotfiles-private に登録した
+      ファイルか、ローカル flake の tmp) で選ぶ。
 
       値を入れると home-manager が ~/.config/cc-pages/config.toml に
       `addr = "127.0.0.1:<port>"` を書く。daemon (`cc-pages serve`) も、skill が
@@ -298,14 +302,15 @@ in
       description = ''
         WSL 上で動作しているか。WSL 固有の分岐に使う。
 
-        hosts/default.nix では `wsl.enable = true;` のように指定する。
+        mkHome の引数で `wsl.enable = true;` のように指定する (dotfiles-private に
+        登録したファイルか、ローカル flake の tmp)。
       '';
     };
 
     windowsUserName = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      example = "polle";
+      example = "alice";
       description = ''
         ホスト側 Windows のユーザー名。`/mnt/c/Users/<名前>/...` の組み立てに使う。
         `wsl.enable = true` のときだけ意味を持つ。
@@ -316,7 +321,8 @@ in
         - `onePassword.windowsUserName` の既定値 (1Password の op-ssh-sign のパス)
 
         Linux 側のユーザー名 (home.username) とは別物なので、マシンごとに
-        hosts/default.nix で指定する。値は WSL 上で次を実行すると判る:
+        mkHome の引数で指定する (dotfiles-private に登録したファイルか、ローカル flake の
+        tmp)。値は WSL 上で次を実行すると判る:
 
             pwsh.exe -NoProfile -Command '$env:USERNAME'
 
@@ -387,7 +393,7 @@ in
         type = lib.types.nullOr lib.types.str;
         default = config.dotfiles.wsl.windowsUserName;
         defaultText = lib.literalExpression "config.dotfiles.wsl.windowsUserName";
-        example = "polle";
+        example = "alice";
         description = ''
           1Password の op-ssh-sign のパス (`/mnt/c/Users/<名前>/AppData/...`) に使う
           Windows ユーザー名。WSL で `onePassword.enable = true` のときだけ必要

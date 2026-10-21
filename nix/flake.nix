@@ -1,5 +1,5 @@
-# dotfiles の flake の入口。登録簿のマシンの homeConfigurations と、ローカル flake が呼ぶ lib (mkHome・hostsWith)・
-# checks・packages・apps・formatter・devShells を出す。
+# dotfiles の flake の入口。登録簿 (型と sandbox) の homeConfigurations と、ローカル flake が呼ぶ lib (mkHome・
+# privateHosts・前の雛形が呼ぶ hostsWith)・checks・packages・apps・formatter・devShells を出す。
 {
   description = "pollenjp dotfiles managed by Nix home-manager";
 
@@ -37,14 +37,14 @@
 
       # 登録簿 (hosts/default.nix) を、全ホスト共通の追加 module を挟んで組み立てる。
       #
-      # 本体は空で呼ぶ。ローカル flake (~/dotfiles/flake.nix) が「このマシンだけの
-      # 設定」を **登録簿のホストにも** 当てるための入口で、そちらの雛形は
+      # 本体は空で呼ぶ (homeConfigurations = hostsWith [ ])。前の雛形 (ADR 007〜026) のローカル flake
+      # (~/dotfiles/flake.nix) は、「このマシンだけの設定」(local) を **登録簿のホストにも** 当てるために
       #
       #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // { ... };
       #
-      # と呼ぶ (scripts/setup-local-flake.sh)。mkHome の modules に前置するので、
-      # 登録簿側の定義と同じ優先度になる。同じ option を両方が定義したら
-      # "conflicting definition values" で落ちるので、差し替えるなら mkForce を使う。
+      # と呼ぶ。今の雛形は local を持たず、dotfiles.homeConfigurations を重ねるだけ (ADR 027) だが、まだ移して
+      # いない PC が評価できるように残す (全 PC が今の雛形へ移ったら消せる)。mkHome の modules に前置するので、
+      # 登録簿側の定義と同じ優先度になる。同じ option を両方が定義したら "conflicting definition values" で落ちる。
       hostsWith =
         extraModules:
         import ./hosts {
@@ -55,9 +55,9 @@
       # 登録した PC のホストを組み立てる (ADR 026)。本体は dotfiles-private を input に持たないので
       # 自分では呼ばず、ローカル flake の雛形が
       #
-      #   homeConfigurations = dotfiles.lib.hostsWith [ local ] // dotfiles.lib.privateHosts dotfiles-private // { ... };
+      #   homeConfigurations = dotfiles.homeConfigurations // dotfiles.lib.privateHosts dotfiles-private // { ... };
       #
-      # と呼ぶ。素の mkHome で組むので local は当たらない (ファイルがその PC の値の全部を持つ)。
+      # と呼ぶ。素の mkHome で組む (ファイルがその PC の値の全部を持つ。前の雛形の local も当たらない)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
     in
     {
@@ -69,16 +69,16 @@
       # gitignore したホスト定義を置いても評価されない。代わりにリポジトリの外へ
       # 自分用の flake を置き、そこからこれを呼ぶ:
       #
-      #   inputs.dotfiles.url = "git+file:///home/pollenjp/dotfiles?dir=nix";
-      #   outputs = { dotfiles, ... }:
-      #     let local = { dotfiles.claude.devTracker.enable = false; }; in {
-      #       homeConfigurations = dotfiles.lib.hostsWith [ local ] // {
-      #         "tmp" = dotfiles.lib.mkHome { ...; modules = [ local ]; };
-      #       };
+      #   inputs.dotfiles.url = "path:<本体>/nix";
+      #   outputs = { dotfiles, ... }: {
+      #     homeConfigurations = dotfiles.homeConfigurations // {
+      #       tmp = dotfiles.lib.mkHome { username = "…"; system = "x86_64-linux"; claude.devTracker.enable = true; };
       #     };
+      #   };
       #
-      # 詳細は README 「登録簿に載せずにマシンを足す」を参照。
+      # 詳細は README 「登録簿に載せずにマシンを足す」を参照 (雛形は scripts/setup-local-flake.sh)。
       # privateHosts は dotfiles-private に登録したホストを読む入口 (README「dotfiles-private に登録したホスト」)。
+      # hostsWith は前の雛形が呼ぶので残している (上)。
       lib = { inherit mkHome hostsWith privateHosts; };
 
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
@@ -129,6 +129,24 @@
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
+        # 登録簿は型と sandbox だけ (実機は dotfiles-private。ADR 027) なので、WSL・1Password・windowsFiles・exeExecTrace を
+        # 入れた作り物のホストを build する (前は登録簿の実機が受け持っていた。ADR 012)。homeConfigurations には出さない
+        # (setup の一覧に出さない・--host で選ばせない)。macOS のランナーで x86_64-linux を build しないよう、
+        # x86_64-linux の checks にだけ置く
+        // lib.optionalAttrs (system == "x86_64-linux") {
+          home-wsl-example =
+            (mkHome {
+              username = "user";
+              system = "x86_64-linux";
+              wsl = {
+                enable = true;
+                windowsUserName = "user";
+                windowsFiles.enable = true;
+                exeExecTrace.enable = true;
+              };
+              onePassword.enable = true;
+            }).activationPackage;
+        }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
@@ -152,12 +170,36 @@
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
-          local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          # scripts/ と、前の雛形 (ADR 026 の版) の heredoc の原文 (fixtures/local-flake-migrate) を渡す (今の雛形へ移すケース)
+          local-flake-migrate-test =
+            pkgs.runCommand "local-flake-migrate-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/local-flake-migrate.test.sh} ${./scripts} ${./tests/fixtures/local-flake-migrate}
+                touch $out
+              '';
           # scripts/ を丸ごと渡す (private_dir() を持つ bootstrap-*.sh と本文を比べる)
           private-host-test = scriptTest "private-host" ./scripts;
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
-          setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
+          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)
+          setup-local-flake-test =
+            pkgs.runCommand "setup-local-flake-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix}
+                touch $out
+              '';
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
             pkgs.runCommand "check-test-grep-q-test"
@@ -311,6 +353,16 @@
               ;
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
+          local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
+          hosts-with-state = import ./tests/hosts-with.nix {
+            inherit
+              lib
+              pkgs
+              system
+              hostsWith
+              ;
+            inherit (self) homeConfigurations;
+          };
           host-draft-state = import ./tests/host-draft.nix {
             inherit
               lib
@@ -344,7 +396,7 @@
       # **初回の activate が成功した後**なので、1 回目は home-manager コマンドが
       # まだ存在しない。そこで flake から直接実行できるようにしておく:
       #
-      #   nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl
+      #   nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>
       #
       # `nix run home-manager` (レジストリ経由) ではなくこちらを使うこと。
       # レジストリ版は nixpkgs 同梱の別バージョンで、flake.lock で固定した

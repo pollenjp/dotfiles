@@ -10,8 +10,8 @@
 #
 # ## 確かめること
 #
-#   - collect は、mkHome の引数・modules (ローカル flake の local) で定義した dotfiles の option を、既定と同じ値
-#     (devTracker.enable = true) も含めて path の辞書順で集め、定義していない option は集めない
+#   - collect は、mkHome の引数・modules (前の雛形のローカル flake の local) で定義した dotfiles の option を、既定と
+#     同じ値を明示したもの (devTracker.enable = false) も含めて path の辞書順で集め、定義していない option は集めない
 #   - collect は、既定が別の option から決まるもの (wsl.onePassword.windowsUserName) を集めない。改名した旧名
 #     (wsl.onePassword.enable) で書いた値は、新しい名前 (onePassword.enable) で集める
 #   - render は、wsl・onePassword・claude を mkHome の引数の組に (組の値が 1 つなら 1 行で)、ほかを modules に描き、
@@ -33,7 +33,7 @@ let
   # 元のホストの system。期待のファイルに書くので固定する (どの system の checks でも評価だけはできる)
   hostSystem = "x86_64-linux";
 
-  # 登録簿のホスト + ローカル flake の local (hostsWith が modules に前置するのと同じ形)。port は local の値
+  # 登録簿のホスト + 前の雛形のローカル flake の local (hostsWith が modules に前置するのと同じ形)。port は local の値
   carolWith =
     port:
     mkHome {
@@ -110,7 +110,7 @@ let
 
   cases = [
     {
-      name = "collect は定義した option を既定と同じ値も含めて path の辞書順で集める";
+      name = "collect は定義した option を path の辞書順で集める";
       ok =
         map (v: lib.concatStringsSep "." v.path) carolValues == [
           "ccPages.port"
@@ -128,6 +128,17 @@ let
           "work"
           true
         ];
+    }
+    {
+      name = "collect は既定と同じ値を明示した option (devTracker.enable = false) も集める";
+      ok = builtins.elem {
+        path = [
+          "claude"
+          "devTracker"
+          "enable"
+        ];
+        value = false;
+      } daveValues;
     }
     {
       name = "collect は既定が別の option から決まる wsl.onePassword.windowsUserName を集めない";

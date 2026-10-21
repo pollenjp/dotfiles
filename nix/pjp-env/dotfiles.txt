@@ -1,4 +1,4 @@
-setup が対象にするホストを決めるための変数 (--host と同じ)。取り得る値: ~/dotfiles/flake.nix か nix/hosts/default.nix に載っているホスト名。
+setup が対象にするホストを決めるための変数 (--host と同じ)。取り得る値: ~/dotfiles/flake.nix に足したホスト・dotfiles-private に登録したホスト・nix/hosts/default.nix の型 (<user>@<system>) の名前。setup は推測しないので、登録もホストの追加もしない PC で型を毎回使うときに書く。
 DOTFILES_HOST=xxxxxx
 
 ローカル flake の置き場所を変えるための変数。取り得る値: ディレクトリのパス (既定は ~/dotfiles)。

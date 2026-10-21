@@ -37,10 +37,12 @@ flake の中で `self` と書くと、**`flake.nix` があるディレクトリ*
 ## 適用してみる
 
 ```sh
-home-manager switch --flake ~/dotfiles#pollenjp@wsl
+home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
-`#` の後ろは `hosts/default.nix` に登録した名前。
+`#` の後ろはホストの名前。この PC を dotfiles-private に登録した名前・`~/dotfiles/flake.nix` に足した名前・
+公開の登録簿 `hosts/default.nix` の型（`<user>@<system>`）のどれか。`~/dotfiles/setup --which-host` で、setup が選ぶものを見られる
+（setup は推測しないので、どれにも当たらなければ選べる道を出して止まる。[ADR 027](../../027_stop_guessing_host_20261021T143517JST/README.md)）。
 
 `~/dotfiles` はリポジトリ本体ではなく、そこを指すローカル専用の flake。
 本体は `~/ghq/github.com/pollenjp/dotfiles` に置く
@@ -48,26 +50,30 @@ home-manager switch --flake ~/dotfiles#pollenjp@wsl
 
 > ⚠️ **まだ一度も適用していないマシンでは `home-manager: command not found` になる。**
 > CLI が profile に入るのは初回の activate が成功した後なので、1 回目だけは
-> `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl` と書く。
+> `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>` と書く。
 > 詳しくは [04_migration.md](./04_migration.md)。
 
 ## よく触る 3 箇所
 
-### 1. マシンを増やす → `hosts/default.nix`
+### 1. マシンを増やす → dotfiles-private の `nix/hosts/`（か `~/dotfiles/flake.nix`）
 
 ```nix
-"pollenjp@wsl" = mkHome {
+# dotfiles-private の nix/hosts/<user>@<hostname>.nix (値は作り物)
+{ mkHome, ... }:
+mkHome {
   username = "pollenjp";
   system = "x86_64-linux";
   wsl = {
     enable = true;
-    windowsUserName = "polle";
+    windowsUserName = "alice";
   };
   onePassword.enable = true;
-};
+}
 ```
 
-1 マシン 1 エントリ。これだけ。
+1 マシン 1 ファイル。これだけ。実機の値は private な dotfiles-private に置き（[ADR 026](../../026_dotfiles_private_hosts_20261020T215857JST/README.md)・[ADR 027](../../027_stop_guessing_host_20261021T143517JST/README.md)）、
+public の `hosts/default.nix` には型（`<user>@<system>`）と検証用の `sandbox` だけを置く。dotfiles-private を読めない PC は、
+同じ形の `mkHome` を `~/dotfiles/flake.nix` に `tmp` として足す。登録は Claude Code の `pjp-dotfiles-register-host` skill が手伝う。
 
 WSL 固有の設定は入れ子で渡す。**親が有効なときだけ子が意味を持つ**という関係を
 そのまま構造にしてあるので、有効な組み合わせが構造から読める（非 WSL なら `wsl`
@@ -92,7 +98,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 **このコマンドを Nix の評価時に実行して自動取得することはできない。**
 Nix の評価は純粋で外部コマンドを呼べず、`--impure` を使うと `nix flake check` が
-動かなくなるため。だから `hosts/default.nix` に直接書く。
+動かなくなるため。だからホストの定義（dotfiles-private の `nix/hosts/` のファイルなど）に直接書く。
 
 WSL で `onePassword.enable = true` にしたのに未設定だと、パスを組み立てられないまま
 「署名しようとして鍵が見つからない」状態になるので、`assertions` で評価時に止まる。
@@ -199,7 +205,7 @@ nix eval .#homeConfigurations.sandbox.options.home.stateVersion.type.description
 
 ## 検証用の `sandbox`
 
-`hosts/default.nix` には実マシン以外に `sandbox` が登録してある。
+`hosts/default.nix` には型（`<user>@<system>`）のほかに `sandbox` が登録してある。
 
 ```nix
 sandbox = mkHome {

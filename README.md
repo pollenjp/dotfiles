@@ -16,7 +16,9 @@ ssh の接続先は private な [pollenjp/dotfiles-private](https://github.com/p
 
 実機のホストの定義と値も dotfiles-private の `nix/hosts/<user>@<hostname>.nix` に置き、登録した PC では `setup` が `--host` なしで
 そのホストを選ぶ（[ADR 026](./docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。登録は Claude Code の
-`pjp-dotfiles-register-host` skill）。
+`pjp-dotfiles-register-host` skill）。public の登録簿（`nix/hosts/default.nix`）には型（`<user>@<system>`）と検証用の `sandbox` だけを
+置き、dotfiles-private を読めない PC は `~/dotfiles/flake.nix` に足したホスト（`tmp`）に値を書く。どちらも無ければ `setup` は推測せずに
+止まり、選べる道を出す（[ADR 027](./docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
 
 herdr の集約ハブ `~/h` は、private な claude-skills の skill `pjp-herdr-hub` の `hub-init.sh` を `setup` が打って作る
 （[`nix/README.md`](./nix/README.md#herdr-の集約ハブ-h)）。

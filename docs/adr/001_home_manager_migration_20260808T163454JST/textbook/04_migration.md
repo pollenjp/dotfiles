@@ -40,7 +40,7 @@ systemd のないコンテナでは `--daemon` が失敗するので `--no-daemo
 
 ```sh
 cd ~/ghq/github.com/pollenjp/dotfiles/nix
-nix build '.#homeConfigurations."pollenjp@wsl".activationPackage' -o /tmp/hm
+nix build '.#homeConfigurations."pollenjp@x86_64-linux".activationPackage' -o /tmp/hm
 find /tmp/hm/home-files -mindepth 1 -maxdepth 3
 ```
 
@@ -74,8 +74,8 @@ home-manager は「自分が作ったもの以外は勝手に消さない」設�
 1 回目は flake から直接実行する。
 
 ```sh
-nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak --dry-run
-nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#pollenjp@wsl -b bak
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト> -b bak --dry-run
+nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト> -b bak
 ```
 
 <details><summary>なぜ 1 回目だけ書き方が違うのか</summary>
@@ -95,7 +95,7 @@ CLI を直接実行できるようにしてある。
 2 回目以降は `~/.nix-profile/bin/home-manager` が入るので短く書ける。
 
 ```sh
-home-manager switch --flake ~/dotfiles#pollenjp@wsl -b bak
+home-manager switch --flake ~/dotfiles#<ホスト> -b bak
 ```
 
 `-b bak` は既存ファイルを `<名前>.bak` に退避してから進める。

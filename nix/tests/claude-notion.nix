@@ -9,9 +9,9 @@
 #
 #   - 既定は {"override":{},"profile":null,"routes":{}}
 #   - 値を入れると、そのまま JSON に入る (キーの意味は claude-skills の resolver が持つ)
-#   - devTracker.enable (既定 true) で profile が null なら warnings が出る。routes や override
+#   - devTracker.enable = true で profile が null なら warnings が出る。routes や override
 #     だけあっても出る (profile が無いと、規則に当たらない repo と repo の外で止まるため)
-#   - profile があれば warnings は出ない。devTracker.enable = false なら profile が null でも出ない
+#   - profile があれば warnings は出ない。devTracker.enable が既定 (false) か false なら、profile が null でも出ない
 {
   lib,
   pkgs,
@@ -31,7 +31,10 @@ let
   warnsAboutProfile = cfg: builtins.any (lib.hasInfix "dotfiles.claude.notion.profile") cfg.warnings;
 
   byDefault = configWith { };
+  # Dev Tracker を使うマシン (profile は null のまま)
+  tracker = configWith { devTracker.enable = true; };
   filled = configWith {
+    devTracker.enable = true;
     notion = {
       profile = "personal";
       routes = {
@@ -45,13 +48,15 @@ let
     };
   };
 
-  # profile を選ばないまま、routes か override だけを入れたマシン
+  # Dev Tracker を使い、profile を選ばないまま、routes か override だけを入れたマシン
   onlyRoutes = configWith {
+    devTracker.enable = true;
     notion.routes = {
       "pollenjp/*" = "work";
     };
   };
   onlyOverride = configWith {
+    devTracker.enable = true;
     notion.override = {
       work = {
         devTracker.linkFromRepo = true;
@@ -90,8 +95,8 @@ let
         };
     }
     {
-      name = "profile が null なら warnings が出る";
-      ok = warnsAboutProfile byDefault;
+      name = "devTracker.enable = true で profile が null なら warnings が出る";
+      ok = warnsAboutProfile tracker;
     }
     {
       name = "profile があれば warnings は出ない";
@@ -104,6 +109,10 @@ let
     {
       name = "devTracker.enable = false なら、profile が null でも warnings は出ない";
       ok = !(warnsAboutProfile noTracker);
+    }
+    {
+      name = "既定 (devTracker.enable = false) では、profile が null でも warnings は出ない";
+      ok = !byDefault.dotfiles.claude.devTracker.enable && !(warnsAboutProfile byDefault);
     }
   ];
 

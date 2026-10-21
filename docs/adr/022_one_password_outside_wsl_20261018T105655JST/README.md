@@ -8,7 +8,7 @@
 | 前提 ADR | [004_nix_wsl_ssh_wrapper](../004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md)（WSL の ssh / ssh-add のラッパー）、[008_ssh_agent_stable_sock](../008_ssh_agent_stable_sock_20260909T144947JST/README.md)（ssh 先で herdr を開くときだけ固定名 `~/.ssh/agent.sock` を張り替える） |
 | 関連 (外部) | nixos-config の ADR 009（lavie に 1Password を入れ、手元のセッションの `SSH_AUTH_SOCK` を `~/.1password/agent.sock` にする。ssh で入ったときは転送のまま）、TKT-205 |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md)（「マシン登録簿」「git について」「forward された agent を固定名で見せる」） |
-| 後続 ADR | [025_herdr_agent_borrow](../025_herdr_agent_borrow_20261020T210555JST/README.md)（`herdr` 関数の手元の分岐（`SSH_AUTH_SOCK` が 1Password なら固定名をそこへ張る）を、herdr を包む実行ファイルと `pjp-agent-link` へ移した。手元の 1Password は持ち主 `local` として同じ規則に載り、socket が無くても張る挙動は変わらない。固定名は session ごとになった。本文の「`herdr` 関数」は決定当時の記録としてそのまま残してある） |
+| 後続 ADR | [025_herdr_agent_borrow](../025_herdr_agent_borrow_20261020T210555JST/README.md)（`herdr` 関数の手元の分岐（`SSH_AUTH_SOCK` が 1Password なら固定名をそこへ張る）を、herdr を包む実行ファイルと `pjp-agent-link` へ移した。手元の 1Password は持ち主 `local` として同じ規則に載り、socket が無くても張る挙動は変わらない。固定名は session ごとになった。本文の「`herdr` 関数」は決定当時の記録としてそのまま残してある）、[027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（公開の登録簿から `pollenjp@wsl`・`pollenjp@laptop` を外した。§5 の注意と §7 の `--host pollenjp@laptop` で当てる手順は、dotfiles-private に登録したホストを `--host` なしで当てる形になる。本文は決定当時の記録としてそのまま残してある） |
 
 ---
 
@@ -128,6 +128,13 @@ end
 - **lavie の home は `--host pollenjp@laptop` で当てる。** ローカル flake がホストを定義していないと、
   `--host` なしの `~/dotfiles/setup` は汎用の `pollenjp@x86_64-linux` を選び、git の署名が入らない
   （フォールバックの除外と herdr 関数は全ホストに入るので効く）
+
+  > **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+  >
+  > - 段階 3 のあとは、この PC を dotfiles-private に登録したホストを `--host` なしで当てる (`~/dotfiles/setup --update`)。
+  >   `pollenjp@laptop` は公開の登録簿から外したので、`--host pollenjp@laptop` は止まる。setup は推測もしない
+  >   (決まらなければ止めて選べる道を出す)
+
 - ローカル flake に旧名 `wsl.onePassword.enable` が残っていると、switch のたびに改名の警告が出る。
   `mkHome` の引数なら `onePassword.enable = true;`、module なら `dotfiles.onePassword.enable = true;` へ移す
 - 手元と ssh の両方から同時に attach していると、固定名は後から herdr を開いた方を指す（ADR 008 と同じ）
@@ -174,6 +181,11 @@ end
 - `hr` で attach したあとの固定名の指す先
 
 ## 7. 移行・運用手順
+
+> **注記 (2026-10-21、[ADR 027](../027_stop_guessing_host_20261021T143517JST/README.md))**
+>
+> - 段階 3 のあとは、登録したホストを `--host` なしで当てる (`~/dotfiles/setup --update`。署名は登録したファイルの
+>   `onePassword.enable` で入る)。下の `--host pollenjp@laptop` は登録する前・段階 3 の前の記録で、このホストは公開の登録簿から外した
 
 lavie（nixos-config の ADR 009 の switch・再起動・1Password のサインインと設定のあと）:
 
