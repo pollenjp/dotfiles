@@ -354,6 +354,15 @@
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
           local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
+          hosts-with-state = import ./tests/hosts-with.nix {
+            inherit
+              lib
+              pkgs
+              system
+              hostsWith
+              ;
+            inherit (self) homeConfigurations;
+          };
           host-draft-state = import ./tests/host-draft.nix {
             inherit
               lib
