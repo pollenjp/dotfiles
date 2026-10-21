@@ -21,8 +21,13 @@
 #     (local-flake-migrate.sh prepare・pjp-dotfiles-register-host) を出す。読んでいれば出さない
 #   - 対象ホストが決まらないまま switch を選び、この実行の手順のあとの決め直しで決まりようがなければ (Nix が無い・
 #     clone が無い・private-fetch も local-flake も選んでいない・clone にこの PC のファイルがあるのにローカル flake が
-#     読んでいない)、execute の前に 1 で止まり、手順を 1 つも流さない。読んでいないときは、移す案内
+#     読んでいない・preflight-unlink を流す --new-machine で、登録が取得で来うるだけ)、execute の前に 1 で止まり、手順を
+#     1 つも流さない (preflight-unlink が symlink を外してから止まらない)。読んでいないときは、移す案内
 #     (local-flake-migrate.sh prepare・pjp-dotfiles-local-flake-migrate) を出す
+#   - --dry-run では、決め直しに頼る実行 (取得・ローカル flake の手順が流れない) は switch で ✖ にせず、決め直せないことを
+#     出して 0
+#   - 最初から決まっておらず、取得しても登録が来ないときは、取得のあと switch の頭で止まる (home-manager を呼ばない)。
+#     そのとき、ローカル flake が前の雛形でも「前の雛形から作られています」の案内は出さない (評価までいっていない)
 #   - --host・DOTFILES_HOST で、この PC の登録した名前と違うホストを選んだら、警告する (警告のまとめの
 #     [対象ホスト] にも)。同じ名前・登録していない PC では出さない
 #   - --host <dotfiles-private のホスト> は、ローカル flake が読んでいれば登録済みとして通り、switch がそのホストを当てる。
@@ -215,7 +220,7 @@ stopped_with_paths() {
   local c=$1
   [[ $(rc "${c}") == 1 ]] && grep -qF '対象ホストが決まりません' "${c}/err" \
     && grep -qF 'pjp-dotfiles-register-host' "${c}/err" && grep -qF 'tmp を足す' "${c}/err" \
-    && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl)' "${c}/err"
+    && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl' "${c}/err"
 }
 # 登録してあるのに読んでいなくて止まったか: 終了コードが 1 で、stderr に移す案内と、それまでの --host <型> がある
 # (登録する・tmp を足す、は出さない)
@@ -223,7 +228,7 @@ stopped_unread() {
   local c=$1
   [[ $(rc "${c}") == 1 ]] && grep -qF '対象ホストが決まりません' "${c}/err" \
     && grep -qF 'local-flake-migrate.sh prepare' "${c}/err" && grep -qF 'pjp-dotfiles-local-flake-migrate' "${c}/err" \
-    && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl)' "${c}/err" \
+    && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl' "${c}/err" \
     && ! grep -qF 'pjp-dotfiles-register-host' "${c}/err" && ! grep -qF 'tmp を足す' "${c}/err"
 }
 # 手順を 1 つも流していないか (execute の前に止まった)
@@ -273,7 +278,7 @@ mv "${c}/alice@box.nix" "${c}/private/nix/hosts/alice@box.nix"
 rm -rf "${c}/local"
 run "${c}" --which-host
 [[ $(rc "${c}") == 1 && -z $(out "${c}") ]] && grep -qF -- '--steps local-flake' "${c}/err" \
-  && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl)' "${c}/err" || undecided+=" local なし"
+  && grep -qF -- '--host <型> を付ける (型: alice@x86_64-linux alice@wsl' "${c}/err" || undecided+=" local なし"
 if [[ -z ${undecided} ]]; then
   ok "--which-host: 入力が stub・入力が無い・別の clone を指す・この PC が未登録・WSL・ローカル flake が無いなら、推測せずに 1 で止まり、読ませ方か選べる道を出す"
 else
@@ -286,7 +291,7 @@ printf '{ mkHome }:\n{\n  bob = mkHome {\n    username = "bob";\n  };\n}\n' >"${
 local_flake "${c}" none
 run "${c}" --which-host
 if [[ $(rc "${c}") == 1 && -z $(out "${c}") ]] && grep -qF '対象ホストが決まりません' "${c}/err" \
-  && grep -qF -- '--host <型> を付ける (型: bob)' "${c}/err"; then
+  && grep -qF -- '--host <型> を付ける (型: bob' "${c}/err"; then
   ok "--which-host: 対象ホストが決まらなければ 1 で、stdout には何も出さず、型の名前を並べる"
 else
   ng "--which-host (決まらない)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
@@ -524,6 +529,49 @@ if [[ ${r_nonix} == ok && ${r_noclone} == ok && ${r_nostep} == ok && ! -e ${c}/h
   ok "止める: Nix が無い・clone が無い・private-fetch も local-flake も選んでいないなら、execute の前に止まる"
 else
   ng "止める (決まりようがない)" "Nix なし=${r_nonix} clone なし=${r_noclone} 手順なし=${r_nostep} 最後: $(out "${c}") $(err "${c}")"
+fi
+#   (e) --new-machine (preflight-unlink を流す): clone (.git) とそれを読むローカル flake はあるが未登録。取得で来うるだけなので
+#       execute の前に止まり、preflight-unlink を流さない (流すと home-manager の symlink を外してから switch で止まる)
+PATH_EXTRA=${b} run "${c}" --new-machine
+if stopped_with_paths "${c}" && before_execute "${c}" && ! grep -qF 'preflight-unlink' "${c}/out" \
+  && [[ ! -e ${c}/home/private-fetches && ! -e ${c}/home/hm-calls ]]; then
+  ok "止める: --new-machine で未登録 (取得で来うるだけ) なら、preflight-unlink を流す前に止まる"
+else
+  ng "止める (--new-machine)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 14. --dry-run: 決め直しに頼る実行 (登録は clone にあり、ローカル flake をこの実行で置く) は、switch で ✖ にせずに 0
+c=$(new_case t14)
+cp "${dir}/setup-local-flake.sh" "${dir}/local-flake-migrate.sh" "${c}/repo/nix/scripts/"
+sed -i "1s|.*|#!${BASH}|" "${c}/repo/nix/scripts/setup-local-flake.sh"
+chmod +x "${c}/repo/nix/scripts/setup-local-flake.sh"
+fake_step "${c}" bootstrap-dotfiles-private.sh 'echo "取った"'
+b=$(fake_hm_bin "${c}")
+rm -rf "${c}/local"
+DOTFILES_ALLOW_ANY_PATH=1 PATH_EXTRA=${b} run "${c}" --steps private-fetch,local-flake,switch --dry-run
+if [[ $(rc "${c}") == 0 ]] && grep -qF -- '--dry-run なので dotfiles-private の取得・ローカル flake の手順は流れず' "${c}/out" \
+  && [[ ! -e ${c}/home/hm-calls && ! -e ${c}/local/flake.nix ]]; then
+  ok "--dry-run: 決め直しに頼る実行は switch で ✖ にせず、決め直せないことを出して 0"
+else
+  ng "--dry-run (決め直し)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 15. 最初から決まらず、取得しても登録が来ない: 取得のあと switch の頭で止まる (home-manager を呼ばない)。ローカル flake の印が
+#     前の雛形でも「前の雛形から作られています」は出さない (評価までいっていない)
+c=$(new_case t15)
+cp "${dir}/setup-local-flake.sh" "${dir}/local-flake-migrate.sh" "${c}/repo/nix/scripts/"
+# shellcheck disable=SC2016 # 偽の手順の本文
+fake_step "${c}" bootstrap-dotfiles-private.sh 'echo x >>"${HOME}/private-fetches"'
+mv "${c}/private/nix/hosts/alice@box.nix" "${c}/alice@box.nix"
+local_flake "${c}" "${c}/private/nix"
+sed -i '1i # 雛形の版: 0badf00d' "${c}/local/flake.nix"
+b=$(fake_hm_bin "${c}")
+PATH_EXTRA=${b} run "${c}" --steps private-fetch,switch
+if stopped_with_paths "${c}" && ! before_execute "${c}" && [[ $(grep -c . "${c}/home/private-fetches" 2>/dev/null) == 1 ]] \
+  && [[ ! -e ${c}/home/hm-calls ]] && ! grep -qF '前の雛形から作られています' "${c}/err"; then
+  ok "最初から決まらず、取得しても登録が来なければ、取得のあと switch の頭で止まる (前の雛形の案内は出さない)"
+else
+  ng "決まらずに switch で止まる" "rc=$(rc "${c}") 取得=$(cat "${c}/home/private-fetches" 2>/dev/null) $(out "${c}") $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

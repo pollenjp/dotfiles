@@ -508,8 +508,11 @@ cmd_inspect() {
         *) state=${which#*$'\t'} ;;
       esac
       printf '==> setup が --host なしで選ぶホスト: %s (%s)\n' "${which%%$'\t'*}" "${state}"
+    elif [[ -n ${name} && -f ${clone}/nix/hosts/${name}.nix ]]; then
+      echo "==> setup が --host なしで選ぶホスト: 決まらない (setup は止まる。ローカル flake が clone の nix/ を読むまでは --host <型> で当てる)"
     else
-      echo "==> setup が --host なしで選ぶホスト: 決まらない (setup は止まる。推測はしない。登録するまでは --host <型> で当てる)"
+      echo "==> setup が --host なしで選ぶホスト: 決まらない (setup は止まる。推測はしない。登録するまでは --host <型> で当てる。"
+      echo "    型には WSL・1Password の署名・Dev Tracker などの PC の値が無い)"
     fi
   fi
 

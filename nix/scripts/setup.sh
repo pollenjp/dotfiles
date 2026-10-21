@@ -787,9 +787,9 @@ detect_host() {
 
 # 型 (登録簿のホストから、検証専用の sandbox を除いたもの) を空白で区切って出す。止めるときの案内に使う
 type_hosts() {
-  local names
+  local names nl=$'\n'
   names=$(parse_hosts "${hosts_file}" | grep -vx 'sandbox' | awk '!seen[$0]++' || true)
-  printf '%s' "${names//$'\n'/ }"
+  printf '%s' "${names//${nl}/ }"
 }
 
 # 対象ホストが決まっていないとき、この実行の手順のあとの決め直し (redetect_host) で決まりうるか。
@@ -798,17 +798,21 @@ type_hosts() {
 # そろうときだけ (ローカル flake の手で足したホストは手順では増えない: setup-local-flake.sh は既にある flake.nix を
 # 書き換えず、新しく書く雛形の tmp はコメント)。
 #
-#   ファイル  今ある、か、private-fetch を選んでいて clone (.git) がある (取得で来うる)
+#   ファイル  今ある、か、private-fetch を選んでいて clone (.git) がある (取得で来うる)。ただし preflight-unlink を
+#             流す実行 (--new-machine) では、取得で来うるだけのものは数えない (今あるときだけ)
 #   読む      今読んでいる、か、local-flake を選んでいてローカル flake がまだ無い (この実行で clone を読む flake を置く)
 #
 # Nix が無い (新しいマシン) なら 1 (Nix を入れてから止めない)。clone が無ければ 1 (取得もローカル flake も登録を
-# 運んでこない。Nix のある既存のマシンで --new-machine を打ったとき、preflight-unlink が home-manager の symlink を
-# 外してから switch で止まるのを避ける)。決まりうるなら 0 で、止めるのは switch の頭 (ensure_host_registered)
+# 運んでこない)。preflight-unlink は home-manager 自身が張った symlink まで外すので、そのあとで switch が止まると
+# シェルの設定が消えたままになる。その実行では、決め直しで確かに決まるとき (ファイルが今ある) だけ先へ進める。
+# 決まりうるなら 0 で、止めるのは switch の頭 (ensure_host_registered)
 host_may_resolve() {
   local file=0 reads=0
   have nix || return 1
   [[ -n ${private_clone} && -d ${private_clone} ]] || return 1
-  if this_pc_in_private || { is_selected private-fetch && [[ -d ${private_clone}/.git ]]; }; then
+  if this_pc_in_private; then
+    file=1
+  elif is_selected private-fetch && ! is_selected preflight-unlink && [[ -d ${private_clone}/.git ]]; then
     file=1
   fi
   if local_flake_reads_private || { is_selected local-flake && [[ ! -f ${local_dir}/flake.nix ]]; }; then
@@ -836,7 +840,8 @@ host_undecided() {
         printf '   (Claude Code なら pjp-dotfiles-local-flake-migrate skill。値を書き足していない雛形なら %s --force で作り直してもよい)\n' \
           "${script_dir}/setup-local-flake.sh"
       fi
-      printf '   それまでの間に当てるなら、--host <型> を付ける (型: %s)\n' "${types:-登録簿にありません}"
+      printf '   それまでの間に当てるなら、--host <型> を付ける (型: %s。型には WSL・1Password の署名・Dev Tracker などの PC の値が無い)\n' \
+        "${types:-登録簿にありません}"
       return 0
     fi
     printf '!! 対象ホストが決まりません (--host が無く、ローカル flake にホストが無く、dotfiles-private にこの PC のホスト %s もありません)。\n' \
@@ -849,6 +854,7 @@ host_undecided() {
       printf '     2. %s に tmp を足す (dotfiles-private を読めない PC。足したホストが既定の対象ホストになる。例は雛形のコメント)\n' "${flake_file}"
     fi
     printf '     3. --host <型> を付ける (型: %s)\n' "${types:-登録簿にありません}"
+    printf '        型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。それらを使う PC は 1 か 2 で値を書く\n'
   } >&2
 }
 
@@ -1876,6 +1882,13 @@ step_flake_update() {
 
 step_switch() {
   local hm_args=()
+  # --dry-run では dotfiles-private の取得・ローカル flake の手順が流れないので、それのあとで決め直すはずのホストは決まらない
+  # (execute の前の判定 host_may_resolve は、実行すれば決まりうると見ている)。ここで ✖ にせず、そう出して進む
+  if [[ -z ${host} && ${dry_run} == 1 ]]; then
+    note '(--dry-run なので dotfiles-private の取得・ローカル flake の手順は流れず、対象ホストを決め直せない。'
+    note ' 実行のときはそのあとで決め直し、決まらなければここで止まる)'
+    return 0
+  fi
   ensure_host_registered || return 1
   warn_untracked
   warn_clobber
@@ -2393,8 +2406,10 @@ execute() {
     *)
       if [[ -n ${host} ]]; then
         note "対象ホスト: ${host}"
-      else
+      elif is_selected switch; then
         note "対象ホスト: <未定>  (dotfiles-private の取得・ローカル flake の手順のあとで決め直す。決まらなければ switch で止まる)"
+      else
+        note "対象ホスト: <未定>"
       fi
       ;;
   esac
@@ -2448,7 +2463,8 @@ execute() {
       "${c_red}" "${c_reset}" >&2
     # 失敗すると残りの手作業 (post_notes) は出ないので、switch が旧い local の評価で落ちた見込みがあれば
     # ここで移し方を知らせる (本体で option が削除・改名されると、旧い local のままでは評価が止まる)。
-    if [[ ${failed_id} == switch ]] && local_flake_stale; then
+    # 対象ホストが決まらずに止まったとき (host が空) は、評価までいっていないので出さない (そちらの案内が出ている)
+    if [[ ${failed_id} == switch && -n ${host} ]] && local_flake_stale; then
       # switch が落ちていると新しい skill はまだ配られていないので、repo の SKILL.md の場所も出す
       {
         printf '  ローカル flake (%s/flake.nix) は前の雛形から作られています (雛形の版 %s)。\n' "${flake_dir}" "${local_flake_state}"
