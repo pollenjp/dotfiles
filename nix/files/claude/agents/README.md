@@ -32,9 +32,13 @@ model: sonnet                # 省略すると親から継承
 システムプロンプトをここに書く。
 ```
 
-追加したら適用する。
+追加したら（frontmatter を直したときも）、frontmatter を確かめてから適用する。
 
 ```sh
+# frontmatter を YAML として読み、name とファイル名の食い違い・pjp- で始まらない名前なども見る
+# (CI の lint ジョブも流す。yq が無ければ nix/ の devShell に入り直す。nix/README.md の「frontmatter を確かめる」)
+"$(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/check-claude-frontmatter.sh"
+
 # 新規ファイルなら git add する (~/dotfiles 経由の switch は path: なので
 # untracked でも入るが、CI は git 管理下しか見ないので commit 忘れはそこで出る)
 git -C "$(ghq root)/github.com/pollenjp/dotfiles" add nix/files/claude

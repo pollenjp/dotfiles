@@ -2125,12 +2125,28 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 `~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills`・パッケージ同梱
 （herdr）の 4 系統が同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
 配信物は増減するので一般名詞（`dataviz` `run` `init` など）は将来ぶつかる。
-`claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する
-（こちら側に相当する検査は無い）。
+こちら側は `check-claude-frontmatter.sh` が検査する（[次節](#frontmatter-を確かめる)）。
+`claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する。
 
 パッケージ同梱の skill（nixpkgs の `installAgentSkills` が `share/skills/` に入れるもの）は
 自作ではないので、upstream の名前のまま置く。張り方は `nix/files/claude/skills/README.md`
 の「パッケージ同梱の skill」。
+
+### frontmatter を確かめる
+
+skill・agent・command の frontmatter は、`nix/scripts/check-claude-frontmatter.sh` が yq で YAML として読んで確かめる
+（TKT-289）。CI の `lint` ジョブも流す。足したり frontmatter を直したりしたら、手元でも流す（yq が無ければ `nix/` の
+devShell に入り直す）。
+
+```sh
+./nix/scripts/check-claude-frontmatter.sh
+```
+
+frontmatter が YAML として読めなくても、Claude Code はエラーを出さずに frontmatter を空として扱う（`description` の
+代わりに本文の最初の行が一覧に出て、いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が
+閉じる・素の値の「 #」から先がコメントとして消える、といった形では値が黙って変わる。script はこれらと、`name` と
+ディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前で落ちる（全部は script の先頭）。観点は
+`claude-skills` の `scripts/lint.sh` に揃えてある。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
@@ -3120,7 +3136,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
