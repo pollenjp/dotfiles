@@ -6,9 +6,10 @@
 # nix/scripts/local-flake-migrate.sh (旧いローカル flake を、値を引き継いで今の雛形へ移す) を、使い捨ての
 # repo と偽の nix で確かめる。
 #
-#   bash nix/tests/local-flake-migrate.test.sh [<nix/scripts のパス>]
+#   bash nix/tests/local-flake-migrate.test.sh [<nix/scripts のパス> [<fixture のディレクトリ>]]
 #
-# flake の checks (local-flake-migrate-test) が Nix のサンドボックスで流す。
+# flake の checks (local-flake-migrate-test) が Nix のサンドボックスで流す。fixture の既定は
+# nix/tests/fixtures/local-flake-migrate (前の雛形の heredoc の原文。中身はそこの README.md)。
 #
 # ## 確かめること
 #
@@ -54,6 +55,9 @@
 #   - prepare は、既にある --out がほかの利用者の書けるディレクトリ・ローカル flake の中なら 2 (作業場所を残さない)。
 #     相対パスの --flake は絶対パスにして
 #     prepare.env に書く
+#   - 前の雛形 (ADR 026 の版。local を持つ) から今の本物の雛形 (ADR 027。local を持たない) へ prepare すると、local が雛形の
+#     既定のままなら衝突なく、移した flake は今の雛形を同じ本体・同じ dotfiles-private の入力で描いたものと 1 バイトも違わない。
+#     local に値を書いていれば (notion.profile = "work" など)、その値は黙って消えずに衝突として残る
 #   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
 #     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
 #     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
@@ -67,6 +71,7 @@ here=$(
   pwd -P
 )
 dir=${1:-${here}/../scripts}
+fixtures=${2:-${here}/fixtures/local-flake-migrate}
 src=${dir}/local-flake-migrate.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/local-flake-migrate-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
@@ -74,10 +79,12 @@ trap 'rm -rf "${work}"' EXIT
 export TMPDIR="${work}/tmpdir"
 mkdir -p "${TMPDIR}"
 
-if [[ ! -f ${src} ]]; then
-  echo "見つからない: ${src}" >&2
-  exit 1
-fi
+for f in "${src}" "${dir}/setup-local-flake.sh" "${fixtures}/template-adr026.txt"; do
+  if [[ ! -f ${f} ]]; then
+    echo "見つからない: ${f}" >&2
+    exit 1
+  fi
+done
 
 pass=0
 fail=0
@@ -1187,6 +1194,43 @@ if [[ $(rc "${r}") == 1 ]] && grep -qF 'setup は --host なしで alice@box' "$
   ok "compare: この PC のホストが dotfiles-private から足されるなら、setup が選ぶようになると出して 1"
 else
   ng "compare (この PC のホスト)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 32. 前の雛形 (ADR 026 の版。local を持つ) から今の本物の雛形 (local を持たない) へ。前の版は fixture の heredoc の原文で
+#     commit し、今の版は ${dir}/setup-local-flake.sh を commit する
+r=$(new_repo p32)
+cp "${dir}/private-host.sh" "${r}/nix/scripts/"
+mkdir -p "${r}/nix/private-stub" "${r}/local"
+fake_slf "${r}/nix/scripts/setup-local-flake.sh" "$(cat "${fixtures}/template-adr026.txt")"
+tgit -C "${r}" add -A
+tgit -C "${r}" commit -qm adr026
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-adr026"
+cp "${dir}/setup-local-flake.sh" "${r}/nix/scripts/setup-local-flake.sh"
+tgit -C "${r}" commit -qam stage3
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-stage3"
+# (A) local が雛形の既定のまま (dotfiles-private に登録して local から値を外した PC と同じ形)
+private_flake "${r}" adr026
+grep -qxF '      local = {' "${r}/local/flake.nix" && has_local=1 || has_local=0
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w"
+rc_a=$(rc "${r}")
+HOME="${work}/githome" DOTFILES_PRIVATE_DIR="${work}/no-private" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" \
+  render --rev "$(cat "${r}/rev-stage3")" --nix-dir "${r}/nix" --private-dir "${r}/nix/private-stub" >"${r}/stage3.nix"
+if [[ ${has_local} == 1 && ${rc_a} == 0 && $(env_of "${r}/w" conflicts) == 0 && $(env_of "${r}/w" base_how) == marker ]] \
+  && cmp -s "${r}/stage3.nix" "${r}/w/new/flake.nix" && ! grep -q 'hostsWith' "${r}/w/new/flake.nix"; then
+  ok "prepare: ADR 026 の版 (local が既定のまま) から今の雛形へ、衝突なく移り、今の雛形を描いたものと同じになる"
+else
+  ng "prepare (ADR 026 の版から)" "local=${has_local} rc=${rc_a} $(out "${r}") $(err "${r}") $(diff "${r}/stage3.nix" "${r}/w/new/flake.nix" 2>&1 | head -20)"
+fi
+# (B) local に値を書いた PC: 値は黙って消えず、衝突として残る
+sed -i 's|^        dotfiles.claude.notion.profile = null;$|        dotfiles.claude.notion.profile = "work";|' "${r}/local/flake.nix"
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w-value"
+conflict_body=$(awk '/^<<<<<<< /{ f = 1 } f { print } /^>>>>>>> /{ f = 0 }' "${r}/w-value/new/flake.nix" 2>/dev/null)
+if grep -qxF '        dotfiles.claude.notion.profile = "work";' "${r}/local/flake.nix" && [[ $(rc "${r}") == 0 ]] \
+  && [[ $(env_of "${r}/w-value" remaining) -ge 1 ]] \
+  && grep -qF 'dotfiles.claude.notion.profile = "work";' <<<"${conflict_body}"; then
+  ok "prepare: ADR 026 の版で local に値を書いていれば、その値は衝突として残る (黙って消えない)"
+else
+  ng "prepare (ADR 026 の版の local の値)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
 fi
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)

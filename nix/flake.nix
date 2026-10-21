@@ -170,7 +170,19 @@
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
-          local-flake-migrate-test = scriptTest "local-flake-migrate" ./scripts;
+          # scripts/ と、前の雛形 (ADR 026 の版) の heredoc の原文 (fixtures/local-flake-migrate) を渡す (今の雛形へ移すケース)
+          local-flake-migrate-test =
+            pkgs.runCommand "local-flake-migrate-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/local-flake-migrate.test.sh} ${./scripts} ${./tests/fixtures/local-flake-migrate}
+                touch $out
+              '';
           # scripts/ を丸ごと渡す (private_dir() を持つ bootstrap-*.sh と本文を比べる)
           private-host-test = scriptTest "private-host" ./scripts;
           # setup.sh と、その隣の private-host.sh を使う

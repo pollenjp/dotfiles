@@ -6,7 +6,7 @@
 # ## なぜ要るのか
 #
 # ~/dotfiles/flake.nix は setup-local-flake.sh が heredoc の雛形から 1 度だけ作る、git 管理外のファイル。
-# 雛形が新しくなっても既にあるファイルは古い形のまま残り、--force で作り直すと local に書いた値と手で足した
+# 雛形が新しくなっても既にあるファイルは古い形のまま残り、--force で作り直すと local (前の雛形) に書いた値と手で足した
 # ホストが消える。この script は、旧いファイルを作った元の雛形・今の雛形・旧いファイルの 3 つで 3-way merge し、
 # 旧い flake と移した flake を評価して値を引き継げたことを確かめてから書く。
 #
@@ -476,7 +476,8 @@ setup_hosts() {
 # 全ホストの drvPath と警告を 1 行ずつ「drv<TAB>ホスト<TAB>drvPath」「warn<TAB>ホスト<TAB>警告」で出す式
 # (警告の改行は \n、タブは空白にする)。ホストごとに tryEval で包み、評価が落ちるホストは「fail<TAB>ホスト」に
 # する (module の評価の誤りは throw なので拾える。1 ホストが落ちても、ほかのホストは比べられる)。
-# 検証専用の sandbox は比べない (setup も対象にしない。登録簿が持つ値と local がぶつかって落ちることがある)
+# 検証専用の sandbox は比べない (setup も対象にしない。前の雛形の local は、登録簿の sandbox が持つ値 (Dev Tracker・
+# Notion の宛先) と同じ優先度でぶつかり、旧い flake の側で評価が落ちる。今の雛形には local が無いが、移す元は前の雛形)
 # shellcheck disable=SC2016 # Nix の式をそのまま書く
 summary_expr='hs: builtins.concatStringsSep "" (builtins.concatLists (map (n:
   let
