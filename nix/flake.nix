@@ -175,7 +175,19 @@
           private-host-test = scriptTest "private-host" ./scripts;
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
-          setup-local-flake-test = scriptTest "setup-local-flake" ./scripts;
+          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)
+          setup-local-flake-test =
+            pkgs.runCommand "setup-local-flake-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix}
+                touch $out
+              '';
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
             pkgs.runCommand "check-test-grep-q-test"
@@ -329,6 +341,7 @@
               ;
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
+          local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
           host-draft-state = import ./tests/host-draft.nix {
             inherit
               lib

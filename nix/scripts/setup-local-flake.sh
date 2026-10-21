@@ -20,23 +20,20 @@
 # ## ~/dotfiles に置くもの
 #
 #   flake.nix   本体を input として取り込み、homeConfigurations を再輸出する。
-#               このマシンだけの設定 (local) と、このマシンだけのホストをここに書ける。
+#               このマシンだけのホスト (tmp など) をここに書ける。
 #               dotfiles-private の nix/ を 2 つ目の path: の入力 (inputs.dotfiles-private。flake = false) に取り、
-#               そこに登録した PC のホスト (nix/hosts/<user>@<hostname>.nix) を登録簿のホストに重ねる
-#               (local は当たらない。ADR 026)。指す先は private-host.sh input-dir が決める: clone の nix/ があれば
-#               そこ、無ければ本体の空の stub (nix/private-stub)。clone ができたら local-flake-migrate.sh prepare が
-#               指し直す。heredoc の展開は ${nix_dir}・${private_nix_dir}・${template_id} だけ (local-flake-migrate.sh が
-#               同じ展開を真似て描く。足すならあちらも)。
-#               雛形の local は dotfiles.claude.devTracker.enable = false を持つ
-#               (Notion Dev Tracker を使うマシンだけ true に直す)。
-#               dotfiles.claude.gitViaGh.enable は既定の true のままで、
-#               コメントアウトした false の例だけ置く (gh にログインしないマシンだけ外す)。
-#               Notion へ書く skill の既定の宛先 dotfiles.claude.notion.profile は null
-#               (選ぶまで、規則に当たらない repo と repo の外で止まる)。
-#               cc-pages の待ち受け port (dotfiles.ccPages.port) は、コメントアウトした
-#               例だけ置く (7777 がほかと衝突するマシンだけ書く)。
-#               解説動画を答えを待たずに作り始めるか (dotfiles.claude.videoOffer.autoStart.enable) は
-#               本体の既定の false (作る前に聞く) のままで、コメントアウトした true の例だけ置く。
+#               そこに登録した PC のホスト (nix/hosts/<user>@<hostname>.nix) を登録簿のホストに重ねる (ADR 026)。
+#               指す先は private-host.sh input-dir が決める: clone の nix/ があればそこ、無ければ本体の空の stub
+#               (nix/private-stub)。clone ができたら local-flake-migrate.sh prepare が指し直す。heredoc の展開は
+#               ${nix_dir}・${private_nix_dir}・${template_id} だけ (local-flake-migrate.sh が同じ展開を真似て描く。
+#               足すならあちらも)。
+#               雛形は、登録簿のホストに当てる「このマシンだけの設定」(前の雛形の local) を持たない (ADR 027)。
+#               PC の値は、dotfiles-private の登録 (登録した PC) か、ここに足す tmp (登録していない PC) の
+#               どちらか 1 か所にだけ書く。tmp の例 (コメント) は値を mkHome の引数と modules に直に書く
+#               (mkForce は要らない)。有効な行は WSL・1Password・Dev Tracker (true)・Notion の宛先で、
+#               gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port は、例の中の
+#               コメントに置く。例を直したら nix/tests/fixtures/local-flake-tmp/tmp.nix も同じに直す
+#               (setup-local-flake.test.sh が比べ、local-flake-tmp-state がそれを評価する)。
 #               先頭のコメントに「# 雛形の版: <印>」を置く。印は下の heredoc の原文 (展開する前) から
 #               local-flake-migrate.sh id が計算する値で、heredoc を直すと変わる。
 #   flake.lock  nix が生成する。
@@ -44,8 +41,8 @@
 #
 # ## 雛形が新しくなったら
 #
-# 既にある flake.nix は、雛形が変わっても触らない (--force は作り直すので、local に書いた値と手で足した
-# ホストが消える)。印が今の雛形と違えば (印の無い、印を入れる前の雛形も)、ここと setup.sh が知らせる。
+# 既にある flake.nix は、雛形が変わっても触らない (--force は作り直すので、手で足したホストと、前の雛形なら
+# local に書いた値が消える)。印が今の雛形と違えば (印の無い、印を入れる前の雛形も)、ここと setup.sh が知らせる。
 # 値を引き継いで今の雛形へ移すのは local-flake-migrate.sh (手順は nix/README.md「雛形が新しくなったら」。
 # Claude Code なら pjp-dotfiles-local-flake-migrate skill)。
 #
@@ -248,18 +245,7 @@ if [[ -f ${flake_file} && ${force} == 0 ]]; then
     if [[ ${stale_rc} == 1 ]]; then
       warn "flake.nix は前の雛形から作られています (雛形の版 ${stale})。" \
         "値を引き継いで今の雛形へ移す: ${migrate_cmd} (Claude Code なら pjp-dotfiles-local-flake-migrate skill)" \
-        "--force は作り直すので、local に書いた値と手で足したホストが消えます。"
-    fi
-    # 古い形のままだと、登録簿のホストに local (dotfiles.claude.devTracker.enable など) が当たらないので、
-    # 何が困るかも知らせる。
-    if ! grep -q 'hostsWith' "${flake_file}"; then
-      warn "flake.nix が古い雛形のままです (dotfiles.lib.hostsWith / local が無い)。" \
-        "local が無いと Notion の宛先の既定 (dotfiles.claude.notion.profile) を選べず、規則に当たらない repo と repo の外で Notion へ書く skill は止まる。" \
-        "直すなら ${migrate_cmd} で今の雛形へ移す (手で足したホストを引き継ぐ)。手で足したホストが無ければ --force で作り直してもよい。"
-    fi
-    if ! grep -q 'notion\.profile' "${flake_file}"; then
-      warn "flake.nix の local に dotfiles.claude.notion.profile がありません。" \
-        "規則に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) は宛先が決まらず止まります。README「Notion の宛先を host ごとに選ぶ」の形で local に足してください。"
+        "--force は作り直すので、手で足したホスト (前の雛形なら local に書いた値も) が消えます。"
     fi
   else
     # 指している先の行 (あれば) を続きの行にする
@@ -285,7 +271,7 @@ if [[ ${write_flake} == 1 ]]; then
 #   (Claude Code なら pjp-dotfiles-local-flake-migrate skill):
 #     ${nix_dir}/scripts/local-flake-migrate.sh prepare
 #
-#   home-manager switch --flake ~/dotfiles#pollenjp@wsl
+#   home-manager switch --flake ~/dotfiles#<ホスト>
 #   ~/dotfiles/setup --update
 {
   # path: は git を介さずそのまま複製するので commit していない変更も試せる。
@@ -309,58 +295,8 @@ if [[ ${write_flake} == 1 ]]; then
   outputs =
     { dotfiles, dotfiles-private, ... }:
     let
-      # このマシンだけの設定。登録簿 (hosts/default.nix) のホストにも、下で足した
-      # ホストにも同じものが当たる。本体の option (nix/home/options.nix) をここで決める。
-      # dotfiles-private に登録したホスト (下の privateHosts) には当たらない (値はそのホストの
-      # ファイルにある。この PC を登録したら、ここに書いた値はこの PC のホストでは使われない)。
-      #
-      # 登録簿側が同じ option を既に定義していて差し替えたいときは、関数の形にして
-      # mkForce を使う (同じ優先度の定義が 2 つあると conflicting definition values で落ちる):
-      #   local = { lib, ... }: { dotfiles.claude.devTracker.enable = lib.mkForce false; };
-      local = {
-        # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。
-        # 本体の既定は true だが、この雛形では false にしてある (使うマシンだけ
-        # true に直す)。CLAUDE.md の「タスク管理」の節と settings.json の
-        # skillOverrides の両方がこの値から決まる。
-        # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
-        dotfiles.claude.devTracker.enable = false;
-
-        # Claude のセッションの git と、fetch 系の abbr / alias (gf・gfp・gpul など) と、
-        # setup の取得 (bootstrap の clone / 取得と本体の更新) を、gh の資格情報で GitHub へ
-        # HTTPS で通すか (setup の取得は、gh で取れなければ ssh で取り直す)。
-        # 本体の既定は true で、gh auth login 済みが前提 (未ログインなら setup が警告する)。
-        # gh にログインしないマシンは false にすると、今までどおり ssh を通る。
-        # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
-        # dotfiles.claude.gitViaGh.enable = false;
-
-        # Notion へ書く skill (pjp-dev-tracker・pjp-notion-authoring など) の宛先。
-        # 宛先は作業中の repo で決まる: このマシンの routes → claude-skills の profiles.toml の
-        # [routes] → この profile (規則に当たらない repo と repo の外で使う既定)。
-        # 値は private の claude-skills (skills/pjp-notion-profile/profiles.toml) にあり、
-        # ここでは名前を選ぶ ("personal" / "work")。null のままだと、規則に当たらない所で skill は止まる。
-        # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
-        dotfiles.claude.notion.profile = null;
-        # このマシンだけ規則を足す・上書きする (例: 会社の PC で pollenjp の repo も work に書く)。
-        # 共通の [routes] より先に見る:
-        #   dotfiles.claude.notion.routes = { "pollenjp/*" = "work"; };
-        # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
-        #   dotfiles.claude.notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
-
-        # cc-pages (cc-page のページを見せるローカル web ビューア) が待ち受ける port。
-        # 書かなければ cc-pages の既定の 7777。7777 がほかと衝突するマシンだけ書く。
-        # 反映は ~/dotfiles/setup --update (switch だけでもよい。daemon は switch が再起動する)。
-        # dotfiles.ccPages.port = 7778;
-
-        # 設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏で作り始めるか
-        # (claude-skills の pjp-video-explainer-offer)。本体の既定は false で、作る前に「解説動画を
-        # 作りますか？」と聞き、選ばれたときだけ作る (1 本ごとに token を大きく使うため)。
-        # 聞かずに作り始めたいマシンだけ true にする。
-        # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
-        # dotfiles.claude.videoOffer.autoStart.enable = true;
-      };
-
-      # dotfiles-private に登録した PC のホスト (nix/hosts/<user>@<hostname>.nix のファイル名が名前)。
-      # local は当たらない。setup は --host が無ければ、この PC の名前のホストを選ぶ (ADR 026)。
+      # dotfiles-private に登録した PC のホスト (nix/hosts/<user>@<hostname>.nix のファイル名が名前)。そのファイルが
+      # その PC の値の全部を持つ。setup は --host が無ければ、この PC の名前のホストを選ぶ (ADR 026)。
       privateHosts = dotfiles.lib.privateHosts dotfiles-private;
     in
     {
@@ -372,39 +308,87 @@ if [[ ${write_flake} == 1 ]]; then
         lib
         ;
 
-      # 登録簿のホストに local を当てて引き継ぎ (dotfiles.homeConfigurations に local を足したもの)、
-      # dotfiles-private に登録したホストを重ねる (同じ名前なら登録簿のものに勝つ)。
-      homeConfigurations = dotfiles.lib.hostsWith [ local ] // privateHosts // {
-        # このマシンだけのホストはここに足す (登録簿 hosts/default.nix は触らない)。
+      # 登録簿のホスト (型と sandbox) に、dotfiles-private に登録したホストと、このマシンだけのホストを重ねる
+      # (後ろが勝つ)。PC の値は、dotfiles-private の登録 (登録した PC) か、下に足す tmp (登録していない PC) の
+      # どちらか 1 か所にだけ書く (ADR 027)。
+      homeConfigurations = dotfiles.homeConfigurations // privateHosts // {
+        # このマシンだけのホストはここに足す (登録簿 hosts/default.nix は触らない)。dotfiles-private を
+        # 読めない PC は、ここに tmp を足してその PC の値を書く。読める PC は dotfiles-private に登録する
+        # (pjp-dotfiles-register-host skill。登録の前の 1 回は ~/dotfiles/setup --host <型> で当てる)。
         #
-        # ここに足した名前は setup の **既定の対象ホスト** になる (dotfiles-private に
-        # 登録したこの PC のホストと、登録簿からの推測より優先する)。複数足したときは
-        # 一番上のものが既定になるので、切り替えたいときは行を入れ替える。
+        # ここに足した名前は setup の **既定の対象ホスト** になる (dotfiles-private に登録したこの PC の
+        # ホストより優先する)。複数足したときは一番上のものが既定になるので、切り替えたいときは行を入れ替える。
+        # どちらも無ければ、setup は推測せずに止まり、選べる道を出す。
+        #
+        # 値は mkHome の引数と modules に直に書く。option の既定より強いだけの普通の定義なので、mkForce は
+        # 要らない。書かなかった option は本体の既定 (nix/home/options.nix) になる。例を使うなら、行頭の
+        # 「# 」を 1 段外し、値をこのマシンのものに直す (例の値は作り物)。
         #
         # tmp = dotfiles.lib.mkHome {
         #   username = "pollenjp";
         #   system = "x86_64-linux";
+        #
+        #   # WSL のマシンだけ書く (書かなければ WSL でないマシン)。
         #   wsl = {
         #     enable = true;
-        #     # ホスト側 Windows のユーザー名。/mnt/c/Users/<名前>/... の組み立てに使う
-        #     # (1Password の op-ssh-sign のパスと、win/ の配り先)。登録簿の pollenjp@wsl は
-        #     # "polle" 固定なので、別の名前のマシンはここで足す。値はこのマシンで:
+        #     # ホスト側 Windows のユーザー名 (例は作り物)。/mnt/c/Users/<名前>/... の組み立てに使う
+        #     # (1Password の op-ssh-sign のパスと、win/ の配り先)。値はこのマシンで:
         #     #   pwsh.exe -NoProfile -Command '\$env:USERNAME'
-        #     windowsUserName = "polle";
+        #     windowsUserName = "alice";
+        #     # repo 直下の win/ を Windows 側へ配る (反映は ~/dotfiles/setup --update)。
+        #     windowsFiles.enable = true;
+        #     # WSL から起動された Windows の .exe を、起動元の祖先付きで journald に常時記録する (ADR 012)。
+        #     # unit を /etc へ入れるのは ~/dotfiles/setup --update の最後の手順 exe-exec-trace (中で sudo を呼ぶ)。
+        #     exeExecTrace.enable = true;
         #   };
         #   # 1Password で git の署名をする (WSL ならホスト側 Windows の 1Password)。
         #   onePassword.enable = true;
         #
-        #   # local はここにも渡す (hostsWith が当てるのは登録簿のホストだけ)。
-        #   # 本体が既に定義している値を差し替えるには mkForce が要る。
+        #   claude = {
+        #     # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。本体の既定は false で、
+        #     # 使うマシンだけ true にする。CLAUDE.md の「タスク管理」の節と settings.json の
+        #     # skillOverrides の両方がこの値から決まる。
+        #     # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
+        #     devTracker.enable = true;
+        #
+        #     # Notion へ書く skill (pjp-dev-tracker・pjp-notion-authoring など) の宛先。
+        #     # 宛先は作業中の repo で決まる: このマシンの routes → claude-skills の profiles.toml の
+        #     # [routes] → この profile (規則に当たらない repo と repo の外で使う既定)。
+        #     # 値は private の claude-skills (skills/pjp-notion-profile/profiles.toml) にあり、
+        #     # ここでは名前を選ぶ ("personal" / "work")。書かなければ null で、規則に当たらない所で
+        #     # skill は止まる (devTracker.enable = true なら、評価のたびに警告も出る)。
+        #     # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
+        #     notion.profile = "personal";
+        #     # このマシンだけ規則を足す・上書きする (例: 会社の PC で pollenjp の repo も work に書く)。
+        #     # 共通の [routes] より先に見る:
+        #     #   notion.routes = { "pollenjp/*" = "work"; };
+        #     # このマシンだけプロファイルの値を差し替える (外側はプロファイルの名前。null はキーを消す):
+        #     #   notion.override = { personal = { scanData = "https://app.notion.com/p/…"; }; };
+        #
+        #     # Claude のセッションの git と、fetch 系の abbr / alias (gf・gfp・gpul など) と、
+        #     # setup の取得 (bootstrap の clone / 取得と本体の更新) を、gh の資格情報で GitHub へ
+        #     # HTTPS で通すか (setup の取得は、gh で取れなければ ssh で取り直す)。
+        #     # 本体の既定は true で、gh auth login 済みが前提 (未ログインなら setup が警告する)。
+        #     # gh にログインしないマシンは false にすると、今までどおり ssh を通る。
+        #     # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
+        #     #   gitViaGh.enable = false;
+        #
+        #     # 設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏で作り始めるか
+        #     # (claude-skills の pjp-video-explainer-offer)。本体の既定は false で、作る前に「解説動画を
+        #     # 作りますか？」と聞き、選ばれたときだけ作る (1 本ごとに token を大きく使うため)。
+        #     # 聞かずに作り始めたいマシンだけ true にする。
+        #     # 反映は ~/dotfiles/setup --update (switch だけでもよい)。
+        #     #   videoOffer.autoStart.enable = true;
+        #   };
+        #
+        #   # mkHome の引数に無い option (本体の nix/home/options.nix) と home-manager の設定は、modules に書く。
         #   modules = [
-        #     local
-        #     (
-        #       { lib, ... }:
-        #       {
-        #         programs.git.settings.user.email = lib.mkForce "tmp@example.com";
-        #       }
-        #     )
+        #     {
+        #       # cc-pages (cc-page のページを見せるローカル web ビューア) が待ち受ける port。
+        #       # 書かなければ cc-pages の既定の 7777。7777 がほかと衝突するマシンだけ書く。
+        #       # 反映は ~/dotfiles/setup --update (switch だけでもよい。daemon は switch が再起動する)。
+        #       #   dotfiles.ccPages.port = 7778;
+        #     }
         #   ];
         # };
       };
