@@ -5,20 +5,23 @@
 #
 #   check-claude-frontmatter.sh [<nix のパス>]
 #
-# frontmatter が YAML として読めないと、Claude Code はエラーを出さずに frontmatter を空として扱う (skill は読み込まれるが、
-# description の代わりに本文の最初の行が一覧に出て、いつ使うものかが Claude に伝わらない)。読めても、値の途中の --- で
-# frontmatter が閉じる・素の値の「 #」から先がコメントとして消える・重複した key の前の値が捨てられる、といった形では
-# 値が黙って変わる。どれも Claude Code は何も言わないので、ここで落とす (TKT-289)。
+# frontmatter が YAML として読めなくても、Claude Code はエラーを出さない。1 行の値を引用符で包んで 1 回だけ読み直し、それでも
+# 読めない形 (素の複数行の値の途中の「: 」など) では frontmatter を空として扱う (skill は読み込まれるが、description の代わり
+# に本文の最初の行が一覧に出て、いつ使うものかが Claude に伝わらない)。読み直しは推測で直すものなので、ここでは YAML として
+# 読めない形をどれも落とす。読めても、値の途中の --- で frontmatter が閉じる・素の値の「 #」から先がコメントとして消える・
+# 重複した key の前の値が捨てられる、といった形では値が黙って変わる。どれも Claude Code は何も言わないので、ここで落とす
+# (TKT-289)。
 #
 # 見るのは <nix>/files/claude/ の下で、nix/home/modules/claude.nix が ~/.claude/ へ配置するもの:
 #
 #   skills/<名前>/SKILL.md   frontmatter・name がディレクトリ名と同じ・description
-#   agents/<名前>.md         frontmatter・name がファイル名と同じ・description
+#   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description (Claude Code はサブディレクトリの下も読む)
 #   commands/**/<名前>.md    frontmatter・description (呼び出し名はパスから決まるので、name は見ない)
 #
-# skills・agents・commands の直下の README.md は配置されないので見ない (commands のサブディレクトリの README.md は配置
-# されて command になるので見る)。名前 (skill はディレクトリ名、agent はファイル名、command はパスの先頭の要素。
-# commands/ns/foo.md の呼び出し名は /ns:foo) は pjp- で始める (nix/README.md の「命名」)。
+# README.md は見ない: skills・agents・commands の直下のものは配置されず、agents のサブディレクトリのものは Claude Code が
+# 文書として扱う (name の無いファイル)。commands のサブディレクトリの README.md は配置されて command になるので落とす。
+# 名前 (skill はディレクトリ名、agent はファイル名、command はパスの先頭の要素。commands/ns/foo.md の呼び出し名は /ns:foo)
+# は pjp- で始める (nix/README.md の「命名」)。
 #
 # frontmatter (1 行目の --- から、次の --- の行まで) は yq (mikefarah/yq) で YAML として読む。frontmatter が無い・中に
 # --- がある・YAML として読めない・key: value の並びでない・key が重複する・name と description が文字列でない・
@@ -118,6 +121,20 @@ frontmatter() {
   ' "$1"
 }
 
+# $1 から frontmatter を取り出せなかったわけを出す。見た目では 1 行目が --- なのに取り出せない形 (Claude Code は BOM を外し、
+# 1 行目の --- の後ろの空白と CRLF も受けて読む) は、そう言う (言わないと、どこを直すのか分からない)
+why_no_frontmatter() {
+  local first=
+  IFS= read -r first <"$1" || true
+  case ${first} in
+    $'\xef\xbb\xbf'*) echo "先頭に BOM があります。外してください" ;;
+    $'---\r') echo "改行が CRLF です。LF にしてください" ;;
+    ---[[:space:]]*) echo "1 行目の --- の後ろに空白があります。外してください" ;;
+    ---) echo "1 行目の --- を閉じる --- の行がありません" ;;
+    *) echo "1 行目を --- にし、次の --- の行で閉じてください" ;;
+  esac
+}
+
 # frontmatter ($2) に yq の式 ($1) を当てる。
 #
 # 先頭に --- の 1 行を足し、--header-preprocess を切って渡す。yq は既定で先頭の --- とコメントを読み飛ばすので、そのまま
@@ -139,11 +156,12 @@ check_prefix() {
 # $1: ファイル、$2: name に期待する値 (空なら name を見ない)、$3: その値の呼び名 (ディレクトリ名・ファイル名)
 check_md() {
   local file=$1 want_name=$2 want_what=$3
-  local label fm dash_line yaml_err root_type dup_keys desc_type desc dropped desc_chars name_type fm_name
+  local label fm dash_line yaml_err root_type dup_keys desc_type desc dropped desc_range desc_from desc_to hash_line
+  local desc_chars name_type fm_name
   label=$(label_of "${file}")
 
   if ! fm=$(frontmatter "${file}"); then
-    problems+=("${label}: YAML frontmatter がありません (1 行目を --- にし、次の --- の行で閉じる)")
+    problems+=("${label}: YAML frontmatter がありません ($(why_no_frontmatter "${file}"))")
     return 0
   fi
 
@@ -192,6 +210,22 @@ check_md() {
       if [[ -n ${dropped} ]]; then
         problems+=("${label}: description の「 #」から先 (${dropped}) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
       fi
+      # 続きの行の頭の # (字下げの後) もコメントの始まりで、その行が値から黙って消える。yq はこのコメントをどの node にも
+      # 付けないので、素の値の description の行から次の key の行の手前まで (最後の key なら frontmatter の終わりまで) を
+      # 本文で見る。0 桁目の # の行は値の外のコメント (# で始まる行の後ろに続きの行があれば、YAML として読めずに上で落ちる)
+      # shellcheck disable=SC2016 # yq の $l はシェルの展開ではない
+      desc_range=$(fm_yq '(.description | select(style == "") | line) as $l | [$l, ([.[] | key | line | select(. > $l)] | min)] | join(" ")' "${fm}")
+      if [[ -n ${desc_range} ]]; then
+        read -r desc_from desc_to <<<"${desc_range}"
+        # fm の n 行目はファイルの n + 1 行目 (yq の行は、先頭に足した --- の分でファイルの行と同じ)
+        hash_line=$(awk -v from="${desc_from}" -v to="${desc_to:-0}" '
+          NR + 1 > from && (to == 0 || NR + 1 < to) && /^[[:space:]]+#/ {
+            sub(/^[[:space:]]+/, ""); print NR + 1 " " $0; exit
+          }' <<<"${fm}")
+        if [[ -n ${hash_line} ]]; then
+          problems+=("${label}: description の続きの ${hash_line%% *} 行目 (${hash_line#* }) は # で始まるので、コメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
+        fi
+      fi
       # 文字で数える (yq の length はバイトを数え、bash の ${#…} も C ロケールではバイトを数える)
       desc_chars=$(fm_yq '.description | split("") | length' "${fm}")
       if ((desc_chars > 1024)); then
@@ -237,9 +271,16 @@ for entry in "${claude_dir}"/skills/*; do
   check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
 done
 
-# agents: <名前>.md
-for entry in "${claude_dir}"/agents/*.md; do
-  [[ -e ${entry} ]] || continue
+# $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す
+md_files_under() {
+  [[ -d $1 ]] || return 0
+  find "$1" -type f -name '*.md' | sort
+}
+
+# agents: **/<名前>.md。Claude Code はサブディレクトリの下も読み、name の無いファイルは agent の横に置いた文書として扱うので、
+# README.md はどの深さでも見ない
+mapfile -t agent_files < <(md_files_under "${claude_dir}/agents")
+for entry in "${agent_files[@]}"; do
   entry_name=$(basename "${entry}" .md)
   [[ ${entry_name} != README ]] || continue
   found=$((found + 1))
@@ -247,15 +288,19 @@ for entry in "${claude_dir}"/agents/*.md; do
   check_md "${entry}" "${entry_name}" "ファイル名"
 done
 
-# commands: **/<名前>.md。name は見ず、呼び出し名の頭になるパスの先頭の要素を見る
-command_files=()
-if [[ -d ${claude_dir}/commands ]]; then
-  mapfile -t command_files < <(find "${claude_dir}/commands" -type f -name '*.md' ! -path "${claude_dir}/commands/README.md" | sort)
-fi
+# commands: **/<名前>.md。name は見ず、呼び出し名の頭になるパスの先頭の要素を見る。直下の README.md は配置されないが、
+# サブディレクトリの README.md は配置されて command になる
+mapfile -t command_files < <(md_files_under "${claude_dir}/commands")
 for entry in "${command_files[@]}"; do
+  cmd_path=${entry#"${claude_dir}/commands/"}
+  [[ ${cmd_path} != README.md ]] || continue
   found=$((found + 1))
-  cmd_head=${entry#"${claude_dir}/commands/"}
-  cmd_head=${cmd_head%%/*}
+  if [[ $(basename "${cmd_path}") == README.md ]]; then
+    cmd_path=${cmd_path%.md}
+    problems+=("$(label_of "${entry}"): 配置されて command /${cmd_path//\//:} になります。説明なら commands の直下の README.md に書いてください")
+    continue
+  fi
+  cmd_head=${cmd_path%%/*}
   check_prefix "${cmd_head%.md}" "${entry}"
   check_md "${entry}" "" ""
 done
