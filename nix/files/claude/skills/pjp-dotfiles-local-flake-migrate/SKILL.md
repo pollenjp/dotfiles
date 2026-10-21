@@ -11,7 +11,7 @@ description: dotfiles のローカル flake (`~/dotfiles/flake.nix`) を、本�
 # pjp-dotfiles-local-flake-migrate
 
 `~/dotfiles/flake.nix` は setup-local-flake.sh が heredoc の雛形から 1 度だけ作る、**git 管理外**のファイル。
-雛形が新しくなっても古い形のまま残り、`--force` で作り直すと local に書いた値と手で足したホストが消える。
+雛形が新しくなっても古い形のまま残り、`--force` で作り直すと手で足したホスト (前の雛形なら local に書いた値も) が消える。
 
 決まった処理は本体の `nix/scripts/local-flake-migrate.sh` が持つ。元の雛形を履歴から引いて 3-way merge し、
 旧い flake と移した flake で全ホストの drvPath を比べ、退避してから書く。この skill は、手順と、script が決めない
@@ -49,9 +49,10 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 ## 手順
 
 1. `bash <m> status` — 「同じ版」なら移すものは無い。終わり。印が同じでも「dotfiles-private の入力: … → …」と出たら
-   (clone の `nix/` ができたのに本体の stub を指している、など)、prepare がその 1 行を指し直す。移すものが無くても local を直して
+   (clone の `nix/` ができたのに本体の stub を指している、など)、prepare がその 1 行を指し直す。移すものが無くても値を直して
    確かめながら書きたいとき (pjp-dotfiles-register-host の手順 6 で、登録したファイルへ移した値を外す) は、`prepare --always` で
-   作業場所を作る
+   作業場所を作る。値を書き足していない雛形 (新しい PC で 1 回目に置いたまま) を指し直すだけなら、`setup-local-flake.sh --force` で
+   作り直してもよい (下の「値を書き足していない雛形」)
 2. `bash <m> prepare --out <scratchpad>/local-flake-migrate-<日時>` — 出力の「元の雛形」と「衝突」を読む
    - 元の雛形は、旧いファイルの「# 雛形の版:」の印の版 (印を入れる前の雛形なら、履歴で差分が最も小さい版)
    - 「近い版」が同じ行数で並んでも、印が同じなら雛形の中身が同じなので、選び直さなくてよい
@@ -65,6 +66,43 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 7. apply が出す退避の場所と戻すコマンドをユーザーに伝える。compare が「同じ」なら switch は要らない。
    値の違いを受け入れたとき・旧い flake で switch が落ちていたときは、反映に `~/dotfiles/setup --update` が要る
    (流してよいかはユーザーに聞く)
+
+## 値を書き足していない雛形
+
+新しい PC で 1 回目に置いたままの `~/dotfiles/flake.nix` (`tmp` もほかの行も足しておらず、`local` がある前の雛形なら `local` が
+雛形の既定のまま) は、移す値が無い。dotfiles-private の入力を stub から clone の `nix/` へ指し直すだけなら、
+`<本体>/nix/scripts/setup-local-flake.sh --force` で今の雛形から作り直してよい (nixos-config の README の、入れ直した直後の手順と同じ)。
+
+- 作り直す前に、`bash <m> render --file <本体>/nix/scripts/setup-local-flake.sh --nix-dir <本体>/nix` で今の雛形を描き、今のファイルとの
+  `diff` を見せて、値の行が無いことをユーザーと確かめる (退避は取らない)。値の行があれば、作り直さずに下の手順 (prepare から) で移す
+- 確認を取ってから書くのは prepare → apply と同じ (「書き換える前に、必ず差分を見せて確認を取る」)
+- 作り直したら `~/dotfiles/setup --which-host` で、登録したホスト (`<名前><TAB>private`) が選ばれることを確かめる
+
+## 段階 3 の雛形へ移すとき (local の塊が消える)
+
+dotfiles の ADR 027 (段階 3) で、雛形は「このマシンだけの設定」(`local`) を持たなくなった
+(`homeConfigurations = dotfiles.homeConfigurations // privateHosts // { … }`)。元の雛形が `local` を持つ版 (ADR 007〜026) なら:
+
+| 手元の `local` | prepare の結果 | すること |
+| --- | --- | --- |
+| 雛形の既定のまま (登録の仕上げで値を外した PC など) | 衝突なく、`local` の塊が消える | compare して確認へ |
+| 値がある (`notion.profile = "work"` など) | 塊ごと衝突として残る (黙って消えない) | 値の行き先を決めてから、衝突は今の雛形の側 (`local` の無い形) を採る |
+
+値の行き先は、推奨と理由を添えてユーザーに聞く。
+
+- **dotfiles-private を読める PC**: 登録する (pjp-dotfiles-register-host)。登録したファイルに値を書く。既に登録してあれば、そのファイルに
+  同じ値があるかを確かめる (無ければ登録を直す)
+- **読めない PC**: `tmp` (このマシンだけのホスト) の `mkHome` へ移す。`dotfiles.claude.X` は `claude.X`、`dotfiles.wsl.X` は `wsl.X`、
+  `dotfiles.onePassword.X` は `onePassword.X`、ほかの `dotfiles.*` と dotfiles の外の行 (`programs.*`) は `modules` へ。雛形の `tmp` の例
+  (コメント) に形がある。`tmp` が無かった PC で足すと、setup の既定の対象ホストが `tmp` になる (compare の「setup が拾うホストの並び」が
+  変わって 1。意図した違い)
+
+compare の読み方 (この移し方で出るもの):
+
+- 型のホスト (登録簿の `<user>@<system>`) は `local` が当たらなくなるので、`local` に値があった PC では「違う」と出る (`config.dotfiles の
+  違い` に、その値が `→ 既定` で並ぶ)。値を登録か `tmp` へ移したなら、setup の対象でない型の違いは受け入れてよい (`--accept-changes`)
+- 本体の Dev Tracker の既定は false になった。`local` の `devTracker.enable = false` は既定と同じなので、型のホストの drvPath は変わらない
+- 段階 3 の前の setup は推測していた。移したら `~/dotfiles/setup --which-host` で対象ホストを確かめる (決まらなければ止まって選べる道を出す)
 
 ## 衝突の解き方
 
@@ -81,6 +119,7 @@ prepare は「片側が元の行の前後に足しただけ」の衝突 (コメ�
 - 既定と同じ値をあえて書いた行 (例: `dotfiles.claude.gitViaGh.enable = true;`) は消さない。書いた意図はユーザーに
   しか分からない。気づいたら確認のときに一言添える。ただし、登録の仕上げ (pjp-dotfiles-register-host の手順 6) で、dotfiles-private に
   登録したファイルへ移した値を `local` から外すときは、既定と同じ明示の行も外す (登録したファイルが持つ)
+- 雛形が `local` の塊ごと消した (段階 3) なら、上の「段階 3 の雛形へ移すとき」で値の行き先を決めてから、今の雛形の側を採る
 - 「# 雛形の版:」の行は今の雛形のものにする (setup が次から知らせなくなる)
 - 手で足したホストの並びを変えない (一番上が setup の既定の対象ホスト。compare も並びを比べる)
 
@@ -97,10 +136,10 @@ prepare は「片側が元の行の前後に足しただけ」の衝突 (コメ�
 - 比べるのは登録簿と手で足したホストのうち、検証専用の `sandbox` を除いたもの (setup も対象にしない)
 - 今の雛形は dotfiles-private の `nix/` を読む (ADR 026)。移した flake だけにある dotfiles-private のホストは「dotfiles-private のホスト
   (移した flake だけ。比べない)」と出て、違いに数えない。ただし **この PC のホスト** (`<user>@<短い hostname>`) は、移したあと setup が
-  `--host` なしで選ぶようになる (値はローカル flake の local ではなく、そのファイルから来る) ので、違いに数えて 1 になる。登録の仕上げなら
+  `--host` なしで選ぶようになる (値はローカル flake ではなく、そのファイルから来る) ので、違いに数えて 1 になる。登録の仕上げなら
   意図どおり (pjp-dotfiles-register-host の手順 6)。そうでなければ、確認のときに「setup の選ぶホストが変わる」と書いて聞く
 - 旧い flake でも移した flake でも評価が落ちるホストは、比べずに「両方で評価が落ちる」と出る (ほかが同じなら 0)。
-  setup の対象のホスト (`~/dotfiles/flake.nix` で一番上に足したホストか、`<user>@wsl` などの推測) でなければ気に
+  setup の対象のホスト (`~/dotfiles/flake.nix` で一番上に足したホストか、dotfiles-private のこの PC のホスト) でなければ気に
   しなくてよい。対象なら、旧い local がそのホストで落ちているので、確認のときに書く
 
 ### 違いが出たとき (1)
@@ -159,7 +198,8 @@ apply が出す `cp -p` の 2 つ (`flake.nix.bak-<日時>` と `flake.lock.bak-
 | やりがちなこと | どうするか |
 | --- | --- |
 | 「直して」と頼まれたので、確認を取らずに書く | 差分を見せて確認を取ってから apply |
-| `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える。prepare から移す |
+| 値を書き足した flake を `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える (退避も無い)。prepare から移す。値の無い雛形のときだけ作り直してよい |
+| 段階 3 の雛形へ移すとき、`local` の衝突を今の雛形の側で解いて値を捨てる | 値の行き先 (登録か `tmp`) を決めて移してから、今の雛形の側を採る |
 | 1 ホストだけ評価して確かめた気になる | local は全ホストに当たる。compare が全ホストと並びを見る |
 | 退避を作業場所に置く | ユーザーが見つけられない。apply が `~/dotfiles` に置く |
 | 雛形の各版を perl や sed で自前に描く | prepare が描く (古い版の script を実行しない) |
