@@ -192,6 +192,12 @@ jobs:
       - name: テストの判定の grep -q (パイプで受けない)
         run: nix develop ./nix --command ./nix/scripts/check-test-grep-q.sh
 
+      # nix/files/claude/ の skill・agent・command の frontmatter (TKT-289)。YAML として読めなくても Claude Code はエラーを
+      # 出さず、読み直せない形 (素の複数行の値の途中の「: 」など) では frontmatter を空として扱い、description が一覧に
+      # 出ない (いつ使うものかが Claude に伝わらない)。yq (mikefarah/yq) で YAML として読むので devShell で流す。
+      - name: Claude Code の skill・agent・command の frontmatter
+        run: nix develop ./nix --command ./nix/scripts/check-claude-frontmatter.sh
+
       # win/manifest.toml の検証 (ADR 010)。home-manager の評価は manifest を読まない
       # (ローカル flake からは repo 直下が見えない) ので、flake check では誤りが見つからない。
       # nix-instantiate だけで動くので devShell は要らない。

@@ -213,6 +213,13 @@
                 bash ${./tests/check-test-grep-q.test.sh} ${./scripts/check-test-grep-q.sh}
                 touch $out
               '';
+          # check-claude-frontmatter.sh は frontmatter を yq (mikefarah/yq) で YAML として読むので、yq-go を足して流す
+          check-claude-frontmatter-test =
+            pkgs.runCommand "check-claude-frontmatter-test" { nativeBuildInputs = [ pkgs.yq-go ]; }
+              ''
+                bash ${./tests/check-claude-frontmatter.test.sh} ${./scripts/check-claude-frontmatter.sh}
+                touch $out
+              '';
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
@@ -507,6 +514,8 @@
               pkgs.nixfmt
               # check-test-grep-q.sh が shfmt の構文木を jq で読む
               pkgs.jq
+              # check-claude-frontmatter.sh が skill などの frontmatter を YAML として読む
+              pkgs.yq-go
               home-manager.packages.${system}.default
             ];
           };

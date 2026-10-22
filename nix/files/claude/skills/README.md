@@ -24,7 +24,8 @@ prefix が無いと、`/skills` の一覧やセッション冒頭の skill 一�
 「今ぶつかっていないこと」を確認しても将来ぶつかる（`dataviz` `run` `init` など、
 一般名詞は取られていくと思っておく）。prefix を付けておけば衝突しない。
 
-`claude-skills`（private）側も同じ規約。あちらは `scripts/lint.sh` が検査する。
+こちらは `nix/scripts/check-claude-frontmatter.sh`（下の「skill の追加」）が検査する。
+`claude-skills`（private）側も同じ規約で、あちらは `scripts/lint.sh` が検査する。
 
 > agent / command も同じ名前空間の問題を持つので、足すときは `pjp-` を付ける。
 > command は `/pjp-<名前>` で呼ぶことになる。
@@ -40,8 +41,9 @@ nix/files/claude/skills/pjp-<名前>/SKILL.md
 ```markdown
 ---
 name: pjp-my-skill
-description: いつ使うかを書く。Claude はここを読んで起動を判断するので、
-             「何をするか」より「どういう時に使うか」を具体的に書く
+description: >-
+  いつ使うかを書く。Claude はここを読んで起動を判断するので、
+  「何をするか」より「どういう時に使うか」を具体的に書く
 ---
 
 # pjp-my-skill
@@ -49,14 +51,25 @@ description: いつ使うかを書く。Claude はここを読んで起動を判
 本文。手順や規約をここに書く。
 ```
 
+複数行の `description` は `>-` の block scalar で書く。素の複数行の文字列（今ある skill はこの形）は、値に「: 」が
+入ると YAML として読めなくなり、「 #」から先（続きの行の頭の `#` も）はコメントとして黙って消える。frontmatter の中には
+`---` を書かない（Claude Code は値の途中の `---` でも、そこで frontmatter が終わったと読む）。
+
 `scripts/` `references/` `assets/` などの補助ファイルは同じディレクトリに置けば
 まとめて配置される（ディレクトリ単位で symlink するため）。
 
-追加したら適用する。
+追加したら（frontmatter を直したときも）、frontmatter を確かめてから適用する。
 
 ```sh
+./nix/scripts/check-claude-frontmatter.sh   # repo の root で。yq が無ければ nix/ の devShell に入り直す
 home-manager switch --flake ~/dotfiles#<host>
 ```
+
+frontmatter が YAML として読めなくても、Claude Code はエラーを出さない（素の複数行の `description` が読めないと
+frontmatter を空として扱い、`description` の代わりに本文の最初の行が一覧に出て、いつ使う skill かが Claude に伝わらない）。
+`check-claude-frontmatter.sh` は
+CI の `lint` ジョブでも流れ、壊れた frontmatter・`name` とディレクトリ名の食い違い・`pjp-` で始まらない名前などで
+落ちる（何を見るかは script の先頭と `nix/README.md` の「frontmatter を確かめる」）。
 
 ## script が外部ツールを要求するとき
 

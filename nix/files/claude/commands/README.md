@@ -36,11 +36,16 @@ argument-hint: <path>        # 省略可
 nix/files/claude/commands/pjp-git/sync.md   ->  /pjp-git:sync
 ```
 
-ディレクトリも配置対象なので、そのまま置けば動く。
+ディレクトリも配置対象なので、そのまま置けば動く。サブディレクトリに `README.md` を置くと、それも command
+（`/pjp-git:README`）になる。説明はこのファイル（直下の `README.md` は配置されない）に書く。
 
-追加したら適用する。
+追加したら（frontmatter を直したときも）、frontmatter を確かめてから適用する。
 
 ```sh
+# frontmatter を YAML として読み、パスの先頭 (/pjp-git:sync の pjp-git) が pjp- で始まるかも見る
+# (CI の lint ジョブも流す。yq が無ければ nix/ の devShell に入り直す。nix/README.md の「frontmatter を確かめる」)
+"$(ghq root)/github.com/pollenjp/dotfiles/nix/scripts/check-claude-frontmatter.sh"
+
 # 新規ファイルなら git add する (~/dotfiles 経由の switch は path: なので
 # untracked でも入るが、CI は git 管理下しか見ないので commit 忘れはそこで出る)
 git -C "$(ghq root)/github.com/pollenjp/dotfiles" add nix/files/claude
