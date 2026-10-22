@@ -26,10 +26,11 @@
 #
 # frontmatter (1 行目の --- から、次の --- の行まで) は yq (mikefarah/yq) で YAML として読む。frontmatter が無い・中に
 # --- がある・YAML として読めない・key: value の並びでない・key が重複する・name と description が文字列でない・
-# description が無い (空白だけも)・素の値の description の「 #」から先や # で始まる行がコメントとして消える・name が
-# ディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない・agent のファイル名が別の
-# サブディレクトリのものと同じ、のどれでも落とす。description が 1024 文字を超えるものは、注意を出すが落とさない。観点は
-# claude-skills (private) の scripts/lint.sh の frontmatter の検査に揃えてある。片方の観点を変えたら、もう片方も見る。
+# description が無い (空白だけも。値が key の行の # から先のコメントになって空なら、そう言う)・素の値の description の
+# 「 #」から先や # で始まる行がコメントとして消える・name がディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・
+# 名前が pjp- で始まらない・agent のファイル名が別のサブディレクトリのものと同じ、のどれでも落とす。description が
+# 1024 文字を超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の
+# 検査に揃えてある。片方の観点を変えたら、もう片方も見る。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -173,8 +174,8 @@ check_prefix() {
 # $4: frontmatter が無いときに添える文 (省いてよい)
 check_md() {
   local file=$1 want_name=$2 want_what=$3 no_fm_hint=${4:-}
-  local label fm dash_line yaml_err root_type dup_keys desc_type desc dropped desc_range desc_from desc_to hash_line
-  local desc_chars name_type fm_name
+  local label fm dash_line yaml_err root_type dup_keys desc_type desc key_comment dropped desc_range desc_from desc_to
+  local hash_line desc_chars name_type fm_name
   label=$(label_of "${file}")
 
   if ! fm=$(frontmatter "${file}"); then
@@ -219,7 +220,15 @@ check_md() {
     desc=$(fm_yq '.description // ""' "${fm}")
     # 空白だけも無いのと同じ (Claude Code も trim して読む)
     if [[ -z ${desc//[[:space:]]/} ]]; then
-      problems+=("${label}: description がありません。Claude はここを読んで、いつ使うかを決めます")
+      # 値を # から書くと (description: #dev …)、key の行の # から先がコメントになり、値は空になる。yq はこのコメントを
+      # key の line_comment に付けるので、それがあれば「無い」ではなく、そう言う (書いたはずの値が無いと言われても、
+      # どこを直すのか分からない)
+      key_comment=$(fm_yq '.description | key | line_comment' "${fm}")
+      if [[ -n ${key_comment} ]]; then
+        problems+=("${label}: description の値が空です。key の行の # から先はコメントとして読まれます。値を書くなら # で始めず (または引用符で囲み)、コメントなら 0 桁目の行に書いてください")
+      else
+        problems+=("${label}: description がありません。Claude はここを読んで、いつ使うかを決めます")
+      fi
     else
       # 素の値 (引用符も block scalar も無い) の「 #」から先は YAML のコメントで、値から黙って消える。1 行の値と、複数行の
       # 最後の行 (yq は値の line_comment に付ける) と、値を key の次の行から書くときの key の行 (key の line_comment に

@@ -26,7 +26,8 @@
 #     - 素の値の description の「 #」から先や # で始まる行がコメントとして消える (1 行の値・複数行の最後の行・値を key の
 #       次の行から書いたときの key の行・# で始まる続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から
 #       書いたときの、値の前の # の行)。値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めないと言う
-#     - description が無い・空白だけ・frontmatter がコメントだけ (name も無い)
+#     - description が無い・空白だけ・frontmatter がコメントだけ (name も無い)。値が key の行の # から先のコメントになって
+#       空なら、そう言う
 #     - name がディレクトリ名 (agent はファイル名。サブディレクトリでも) と違う・小文字ケバブケースでない。名前 (skill は
 #       ディレクトリ名、agent はファイル名、command はパスの先頭の要素) が pjp- で始まらない。agent のファイル名が別の
 #       サブディレクトリのものと同じ (2 つ目を出す)
@@ -452,13 +453,33 @@ put "${cl}/skills/pjp-comment/SKILL.md" <<'EOF'
 # コメントだけで、key が 1 つも無い
 ---
 EOF
+# 値を # から書くと、key の行の # から先がコメントになって値が空になる (yq は key の line_comment に付ける)。
+# 後ろに key が続いても同じ
+put "${cl}/skills/pjp-hash-only/SKILL.md" <<'EOF'
+---
+name: pjp-hash-only
+description: #dev チャンネルに投稿するとき
+---
+EOF
+put "${cl}/agents/pjp-hash.md" <<'EOF'
+---
+name: pjp-hash
+description: # いつ委譲するかを書くつもりだった
+model: sonnet
+---
+EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 4 ]] \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-missing/SKILL.md: description がありません' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-blank/SKILL.md: description がありません' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-comment/SKILL.md: description がありません' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-comment/SKILL.md: name がありません'; then
-  ok "description が無い・空白だけ・コメントだけの frontmatter (name も無い) を出して exit 1"
+# どちらの文が出たかを取り違えないよう、行全体で比べる
+missing_said='description がありません。Claude はここを読んで、いつ使うかを決めます'
+hash_said='description の値が空です。key の行の # から先はコメントとして読まれます。値を書くなら # で始めず (または引用符で囲み)、コメントなら 0 桁目の行に書いてください'
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 6 ]] \
+  && seen_err "${c}" -x -F "   nix/files/claude/skills/pjp-missing/SKILL.md: ${missing_said}" \
+  && seen_err "${c}" -x -F "   nix/files/claude/skills/pjp-blank/SKILL.md: ${missing_said}" \
+  && seen_err "${c}" -x -F "   nix/files/claude/skills/pjp-comment/SKILL.md: ${missing_said}" \
+  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-comment/SKILL.md: name がありません' \
+  && seen_err "${c}" -x -F "   nix/files/claude/skills/pjp-hash-only/SKILL.md: ${hash_said}" \
+  && seen_err "${c}" -x -F "   nix/files/claude/agents/pjp-hash.md: ${hash_said}"; then
+  ok "description が無い・空白だけ・コメントだけの frontmatter (name も無い)・値が key の行のコメントになって空 (そう言う) を出して exit 1"
 else
   ng "無い description と name" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
