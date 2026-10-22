@@ -289,6 +289,7 @@ strip_shared() {
   d=$(cd -P -- "$1" && pwd)
   check_path "${d}"
   p=$(input_path "${d}/flake.nix" dotfiles-private)
+  [[ -n ${p} && -d ${p} ]] || die "dotfiles-private の入力の指す先がありません: ${p:-(入力が無い)} (${d}/flake.nix)"
   mkdir -p "${d}-private"
   for f in "${p}"/* "${p}"/.[!.]*; do
     [[ -e ${f} || -L ${f} ]] || continue
