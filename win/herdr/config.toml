@@ -1,8 +1,9 @@
 # herdr (https://herdr.dev) の Windows 側の設定。dotfiles の win/herdr/config.toml から
 # %APPDATA%\herdr\config.toml へ配る (WSL で ~/dotfiles/setup --update。win/README.md)。
 #
-# [keys] と onboarding は WSL 側 (nix/files/herdr/config.toml) と同じに保つ。キーごとの意図は
-# そちらのコメントにある。CI が 2 つを比べ、違えば落ちる (nix/scripts/check-herdr-keys.sh)。
+# [keys]・onboarding・[ui.sidebar] は WSL 側 (nix/files/herdr/config.toml) と同じに保つ。キーや
+# sidebar の行ごとの意図はそちらのコメントにある。CI が 2 つを比べ、違えば落ちる
+# (nix/scripts/check-herdr-keys.sh)。
 #
 # WSL 側との違いは 2 つ。[terminal] を書かない (WSL 側の default_shell = "fish" は Windows に
 # 無い。空のままなら、Windows の herdr は PATH の pwsh.exe (PowerShell 7) を使い、無ければ
@@ -10,6 +11,8 @@
 #
 # 反映: 配った後、herdr の中で prefix + shift + r (外からなら PowerShell で hreload =
 # herdr server reload-config)。有効なキー名は `herdr --default-config` で出る。
+# hr (herdr --remote) で attach している画面は、PowerShell の hreload (Windows の herdr server に
+# 届く) では読み直さない。その画面の中で prefix + shift + r を押す。
 
 # 初回のオンボーディングを出さない。未設定だと完了時に herdr がこのファイルへ
 # onboarding = false を書き戻し、次の setup --update で衝突として止まる。
@@ -38,3 +41,12 @@ detach = ["prefix+q", "prefix+d"]
 cycle_pane_next = ["prefix+tab", "prefix+o"]
 open_notification_target = "prefix+shift+o"
 new_worktree = ["prefix+shift+g", "prefix+shift+c"]
+
+[ui.sidebar.spaces]
+# 2 行目の先頭に、子の workspace の親 ($parent) を出す。中身は WSL 側と同じ。
+# hr (herdr --remote) で WSL や Linux の herdr に attach したときも、sidebar は Windows の herdr が
+# このファイルで描く (つないだ先の設定は読まない) ので、こちらにも要る。
+rows = [
+  ["state_icon", "workspace"],
+  [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
+]
