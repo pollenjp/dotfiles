@@ -11,17 +11,18 @@
 #
 # ## 確かめること
 #
-#   - 通る形: 素の複数行の description (今の skill の書き方。後ろの 0 桁目のコメントと、次の key より後ろの字下げした
+#   - 通る形: 素の複数行の description (今の skill の書き方。後ろの 0 桁目のコメントと、すぐ次の key より後ろの字下げした
 #     コメントは値の外)・>- と | の block scalar (# で始まる行も値)・引用符で囲んだ値 (「: 」と「 #」を含んでよく、後ろの
 #     コメントは見ない)・alias・ほかの key。skill・agent (サブディレクトリも)・command (サブディレクトリの名前空間も) を
 #     数え、見た個数を出して exit 0。skills・agents・commands の直下の README.md・agents のサブディレクトリの README.md
 #     (Claude Code は name の無いファイルを文書として扱う)・skill のディレクトリの SKILL.md でないファイルは見ない
+#   - 全角スペースの後ろの # は値に入るので、素の値の続きの行の頭にあっても通る (UTF-8 の locale でも)
 #   - 落とす形。どれも、ファイルのパスと理由を 1 行ずつ全部出して exit 1:
 #     - YAML として読めない (素の値の途中の「: 」)。skill・agent・command のどれでも。エラーの行番号はファイルの行
 #     - frontmatter の中の --- (値の途中でも。行番号はファイルの行)・key: value の並びでない・key の重複
 #     - description と name が文字列でない (列・日付)
-#     - 素の値の description の「 #」から先がコメントとして消える (1 行の値・複数行の最後の行・# で始まる続きの行。
-#       続きの行は、後ろに key があっても)
+#     - 素の値の description の「 #」から先や # で始まる行がコメントとして消える (1 行の値・複数行の最後の行・# で始まる
+#       続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から書いたときの、値の前の # の行)
 #     - description が無い・空白だけ・frontmatter がコメントだけ (name も無い)
 #     - name がディレクトリ名 (agent はファイル名。サブディレクトリでも) と違う・小文字ケバブケースでない。名前 (skill は
 #       ディレクトリ名、agent はファイル名、command はパスの先頭の要素) が pjp- で始まらない
@@ -114,6 +115,7 @@ c=$(dirname "${n}")
 printf '%s\n' '# skill の README (frontmatter は無い)' >"${cl}/skills/README.md"
 printf '%s\n' '# agent の README' >"${cl}/agents/README.md"
 printf '%s\n' '# command の README' >"${cl}/commands/README.md"
+# description の後ろに key が 2 つあっても、# で始まる行を見るのはすぐ次の key (metadata) の手前まで
 put "${cl}/skills/pjp-plain/SKILL.md" <<'EOF'
 ---
 name: pjp-plain
@@ -124,6 +126,7 @@ description: 素の複数行の description。今の skill はこの形で書い
 metadata:
   # 次の key より後ろの字下げしたコメントも、description の外
   owner: pjp
+allowed-tools: Read
 ---
 
 # pjp-plain
@@ -319,7 +322,8 @@ description: 委譲するときに読む。
   最後の行の Slack の #dev から先も消える
 ---
 EOF
-# 続きの行の頭の # (字下げの後) もコメントの始まりで、行ごと消える。yq はこのコメントをどの node にも付けない
+# 続きの行の頭の # (字下げの後) もコメントの始まりで、行ごと消える。yq はこのコメントを、位置で変わる node
+# (description の key・次の key・値) に字下げを落として付けるので、0 桁目のコメントと見分けられない
 put "${cl}/skills/pjp-y/SKILL.md" <<'EOF'
 ---
 name: pjp-y
@@ -334,15 +338,55 @@ description: 呼ぶときに読む。
 argument-hint: <path>
 ---
 EOF
+# 字下げの後のタブも YAML の空白なので、その後ろの # からコメントになる
+tab=$'\t'
+put "${cl}/skills/pjp-tab/SKILL.md" <<EOF
+---
+name: pjp-tab
+description: 委譲するときに読む。
+  ${tab}#dev タブの後ろの行も消える
+---
+EOF
+# 値を key の次の行から書くと、値の前の # の行も消える (値は後ろの行だけになる)
+put "${cl}/commands/pjp-d.md" <<'EOF'
+---
+description:
+  #dev で始めた最初の行も消える
+  続きの行だけが値になる
+argument-hint: <path>
+---
+EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 4 ]] \
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 6 ]] \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-x/SKILL.md: description の「 #」から先 (#12 で壊れた形を直すとき) がコメントとして捨てられています' \
   && seen_err "${c}" -F '   nix/files/claude/agents/pjp-a.md: description の「 #」から先 (#dev から先も消える) がコメントとして捨てられています' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-y/SKILL.md: description の続きの 4 行目 (#dev チャンネルなど) は # で始まるので、コメントとして捨てられています' \
-  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-c.md: description の続きの 3 行目 (#12 で足した続きの行も消える) は # で始まるので、コメントとして捨てられています'; then
-  ok "素の値の description の「 #」から先が消える形は、1 行の値・複数行の最後の行・# で始まる続きの行 (後ろに key があっても) のどれでも、消える部分を添えて exit 1"
+  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-y/SKILL.md: description の # で始まる行 (4 行目: #dev チャンネルなど) がコメントとして捨てられています' \
+  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-c.md: description の # で始まる行 (3 行目: #12 で足した続きの行も消える) がコメントとして捨てられています' \
+  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-tab/SKILL.md: description の # で始まる行 (4 行目: #dev タブの後ろの行も消える) がコメントとして捨てられています' \
+  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-d.md: description の # で始まる行 (3 行目: #dev で始めた最初の行も消える) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲み、コメントなら 0 桁目から書いてください'; then
+  ok "素の値の description の「 #」から先や # で始まる行が消える形は、1 行の値・複数行の最後の行・# で始まる続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から書いたときの値の前の # の行のどれでも、消える部分を添えて exit 1"
 else
-  ng "「 #」から先" "rc=$(rc "${c}") err=$(err "${c}")"
+  ng "「 #」から先と # で始まる行" "rc=$(rc "${c}") err=$(err "${c}")"
+fi
+
+# 5b. 全角スペース (U+3000) は YAML の空白ではないので、その後ろの # はコメントにならず値に入る。[[:space:]] は UTF-8 の
+#     locale で全角スペースにも当たるので、C.UTF-8 で流す (Nix のサンドボックスは C ロケールで、そのままでは当たらない)
+n=$(new_nix t5b)
+cl=${n}/files/claude
+c=$(dirname "${n}")
+zenkaku=$'\xe3\x80\x80'
+put "${cl}/skills/pjp-zenkaku/SKILL.md" <<EOF
+---
+name: pjp-zenkaku
+description: Slack に投稿するときに使う。
+  ${zenkaku}#dev チャンネルも、全角スペースの後ろなら値に入る
+---
+EOF
+LC_ALL=C.UTF-8 run "${n}"
+if [[ $(rc "${c}") == 0 && ! -s ${c}/err ]] && seen_out "${c}" -F '1 個'; then
+  ok "素の値の続きの行の頭でも、全角スペースの後ろの # は値に入るので、UTF-8 の locale でも通る"
+else
+  ng "全角スペースの後ろの #" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
 fi
 
 # 6. description が無い・空白だけ・frontmatter がコメントだけ (name も無い)

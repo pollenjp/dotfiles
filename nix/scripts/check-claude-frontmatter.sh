@@ -25,10 +25,10 @@
 #
 # frontmatter (1 行目の --- から、次の --- の行まで) は yq (mikefarah/yq) で YAML として読む。frontmatter が無い・中に
 # --- がある・YAML として読めない・key: value の並びでない・key が重複する・name と description が文字列でない・
-# description が無い (空白だけも)・素の値の description の「 #」から先がコメントとして消える・name がディレクトリ名
-# (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない、のどれでも落とす。description が 1024 文字を
-# 超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の検査に
-# 揃えてある。片方の観点を変えたら、もう片方も見る。
+# description が無い (空白だけも)・素の値の description の「 #」から先や # で始まる行がコメントとして消える・name が
+# ディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない、のどれでも落とす。description が
+# 1024 文字を超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の
+# 検査に揃えてある。片方の観点を変えたら、もう片方も見る。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -210,20 +210,25 @@ check_md() {
       if [[ -n ${dropped} ]]; then
         problems+=("${label}: description の「 #」から先 (${dropped}) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
       fi
-      # 続きの行の頭の # (字下げの後) もコメントの始まりで、その行が値から黙って消える。yq はこのコメントをどの node にも
-      # 付けないので、素の値の description の行から次の key の行の手前まで (最後の key なら frontmatter の終わりまで) を
-      # 本文で見る。0 桁目の # の行は値の外のコメント (# で始まる行の後ろに続きの行があれば、YAML として読めずに上で落ちる)
+      # 行の頭の # (字下げの後) もコメントの始まりで、その行が値から黙って消える。yq はこのコメントを、位置で変わる node
+      # (最後の key なら description の key の foot_comment、次の key の手前なら次の key の head_comment、値を key の次の
+      # 行から書いたときの値の前なら値の head_comment) に字下げを落として付け、0 桁目のコメントと見分けられない
+      # (yq-go 4.53.3)。そこで description の key の行の次から、次の key の行の手前 (最後の key なら frontmatter の
+      # 終わり) までを本文で見る (値を key の次の行から書くときの、値の前の行も入る)。0 桁目の # の行は値の外のコメント
+      # なので見ない。# の行の後ろに続きの行があれば、YAML として読めずに上で落ちる。
+      # 字下げは [ \t] で見る。YAML の空白は半角スペースとタブだけで、[[:space:]] は UTF-8 の locale では全角スペースにも
+      # 当たる (全角スペースの後ろの # は値に入る)
       # shellcheck disable=SC2016 # yq の $l はシェルの展開ではない
-      desc_range=$(fm_yq '(.description | select(style == "") | line) as $l | [$l, ([.[] | key | line | select(. > $l)] | min)] | join(" ")' "${fm}")
+      desc_range=$(fm_yq '(.description | select(style == "") | key | line) as $l | [$l, ([.[] | key | line | select(. > $l)] | min)] | join(" ")' "${fm}")
       if [[ -n ${desc_range} ]]; then
         read -r desc_from desc_to <<<"${desc_range}"
         # fm の n 行目はファイルの n + 1 行目 (yq の行は、先頭に足した --- の分でファイルの行と同じ)
         hash_line=$(awk -v from="${desc_from}" -v to="${desc_to:-0}" '
-          NR + 1 > from && (to == 0 || NR + 1 < to) && /^[[:space:]]+#/ {
-            sub(/^[[:space:]]+/, ""); print NR + 1 " " $0; exit
+          NR + 1 > from && (to == 0 || NR + 1 < to) && /^[ \t]+#/ {
+            sub(/^[ \t]+/, ""); print NR + 1 " " $0; exit
           }' <<<"${fm}")
         if [[ -n ${hash_line} ]]; then
-          problems+=("${label}: description の続きの ${hash_line%% *} 行目 (${hash_line#* }) は # で始まるので、コメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
+          problems+=("${label}: description の # で始まる行 (${hash_line%% *} 行目: ${hash_line#* }) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲み、コメントなら 0 桁目から書いてください")
         fi
       fi
       # 文字で数える (yq の length はバイトを数え、bash の ${#…} も C ロケールではバイトを数える)
