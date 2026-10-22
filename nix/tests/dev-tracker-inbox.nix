@@ -14,9 +14,12 @@
 #     - ExecStart は store の bash で ~/.claude/skills/pjp-dev-tracker/scripts/ticket.sh inbox を打つ (実行の bit に頼らない)
 #     - ticket.sh とハブ (~/h) が無ければ条件不成立で飛ばす (ConditionPathExists・ConditionPathIsDirectory)。cwd はハブ
 #     - 落ちたら 30 秒おいて起こし直すが、終了コード 2 (設定の誤り・inbox の無い古い ticket.sh) では起こし直さない。
-#       10 分に 5 回起こしたら諦める。止めるときの SIGTERM は本体にだけ送る (KillMode=mixed)
-#     - PATH に ~/bin (ntn)・home-manager の profile (herdr・git)・nix の profile (devShell へ入り直す nix)・/usr/bin を
-#       この順で渡し、PYTHONUNBUFFERED=1 で python のログを溜めずに journal へ出させる
+#       10 分に 5 回起こしたら諦める。止めるときの SIGTERM は本体にだけ送り (KillMode=mixed)、今の見回りを終えるまで
+#       5 分待つ (TimeoutStopSec)
+#     - PATH に ~/bin (ntn)・home-manager の profile (herdr・git)・nixpkgs の python3 (3.11 以上)・nix の profile
+#       (devShell へ入り直す nix)・/usr/bin をこの順で渡し (python3 は system のものより前)、PYTHONUNBUFFERED=1 で
+#       python のログを溜めずに journal へ出させる
+#     - Linux でないマシンで true にすると、常駐しないことを warnings で知らせる (Linux では warnings を出さない)
 #   ビルド時 (Linux だけ。unit ファイルは Linux でしか作られない)
 #     - unit ファイルの [Unit]・[Service] に上の値が出る (%h が %% に化けない・Environment が 1 行ずつになる)
 {
@@ -62,6 +65,7 @@ let
     "%h/bin"
     "%h/.local/bin"
     "${enabled.home.profileDirectory}/bin"
+    "${pkgs.python3}/bin"
     "/nix/var/nix/profiles/default/bin"
     "/run/current-system/sw/bin"
     "/usr/local/bin"
@@ -107,11 +111,20 @@ let
         && unit.Unit.StartLimitBurst == 5;
     }
     {
-      name = "止めるときの SIGTERM は本体にだけ送る (KillMode=mixed)";
-      ok = unit != null && unit.Service.KillMode == "mixed";
+      name = "止めるときの SIGTERM は本体にだけ送り、今の見回りを終えるまで 5 分待つ";
+      ok = unit != null && unit.Service.KillMode == "mixed" && unit.Service.TimeoutStopSec == "5min";
     }
     {
-      name = "PATH に ~/bin・home-manager の profile・nix の profile・/usr/bin を渡し、python のログを溜めさせない";
+      name =
+        if isLinux then "Linux では warnings を出さない" else "Linux でないマシンで true にすると、常駐しないことを warnings で知らせる";
+      ok =
+        let
+          warned = lib.any (w: lib.hasInfix "devTracker.inbox.enable" w) enabled.warnings;
+        in
+        if isLinux then !warned else warned;
+    }
+    {
+      name = "PATH に ~/bin・home-manager の profile・nixpkgs の python3・nix の profile・/usr/bin を渡し、python のログを溜めさせない";
       ok =
         unit != null
         &&
@@ -140,6 +153,7 @@ pkgs.runCommand "dev-tracker-inbox-state" { } (
       'Environment=PYTHONUNBUFFERED=1' \
       'RestartPreventExitStatus=2' \
       'KillMode=mixed' \
+      'TimeoutStopSec=5min' \
       'WantedBy=default.target'; do
       if ! grep -qxF -- "$line" "$unit"; then
         echo "dev-tracker-inbox-state: unit ファイルに次の行が無い: $line" >&2

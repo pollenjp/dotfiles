@@ -1309,6 +1309,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
+| `~/.config/systemd/user/pjp-dev-tracker-inbox.service` | `nix/home/modules/dev-tracker-inbox.nix` (生成。`dotfiles.claude.devTracker.inbox.enable` のマシンだけ。本体の `ticket.sh` は claude-skills にある。[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -2997,7 +2998,7 @@ Claude）の入力欄へ、端末で打った発言として届く。外出先�
 | 段 | すること | 決める場所 |
 | --- | --- | --- |
 | `switch` | `~/.config/systemd/user/pjp-dev-tracker-inbox.service`（`~/.claude/skills/pjp-dev-tracker/scripts/ticket.sh inbox` を cwd `~/h` で常駐させる）を置き、起こす | `home/modules/dev-tracker-inbox.nix` |
-| bootstrap | claude-skills を進めた後に `reset-failed` して `restart` する（止まっていれば起こし、動いていれば新しいコードで上げ直す）。3 秒のうちに止まったら journal の末尾を添えて警告する | `scripts/bootstrap-dev-tracker-inbox.sh` |
+| bootstrap | claude-skills を進めた後に `reset-failed` して `restart` する（止まっていれば起こし、動いていれば新しいコードで上げ直す）。3 秒のうちに止まったら journal の末尾を、起動の条件が揃わなければ無いものを添えて警告する | `scripts/bootstrap-dev-tracker-inbox.sh` |
 
 claude-skills を進めても unit ファイルは変わらないので、`switch` だけでは見回り役は再起動しない（動いていれば古いコードの
 まま）。`--update` では `switch` が claude-skills の更新より先に走るので、起こし直しは bootstrap（`order: 70`）が受け持つ。
@@ -3017,8 +3018,10 @@ claude = {
 };
 ```
 
-同じ Dev Tracker を見るホストのどれでも動かすと、herdr に会話の無いチケットへの返事（「会話が止まっています」）を、そのチケットの
-会話を持たない別のホストもしてしまう。そのため `devTracker.enable` とは別の option にしてある。
+見回り役は自分のマシンに worktree の無いチケットを読まないので、同じ Dev Tracker を複数のホストで見回っても、互いの会話の
+チケットには書かない。それでも `devTracker.enable` とは別の option にしてあるのは、プロファイルにユーザーの Notion の id
+（claude-skills の `profiles.toml` の `user.id`。今は personal にだけある）が無いホストでは終了コード 2 で止まったままになり、
+ハブの会話を回さないホストでは 30 秒ごとに Notion を引くだけになるため。
 
 #### 状態を確かめる
 
@@ -3031,8 +3034,8 @@ systemctl --user show pjp-dev-tracker-inbox -p ActiveEnterTimestamp -p NRestarts
 
 | 状況 | 挙動 |
 | --- | --- |
-| `ticket.sh`（claude-skills）か `~/h` が無い | 条件不成立としてスキップする（failed で残らない。`bootstrap-dev-tracker-inbox` は 1 行出すだけ） |
-| 終了コード 2（ユーザーの Notion の id が無いなど設定の誤り、`inbox` の無い古い `ticket.sh`） | failed のまま再起動しない。`bootstrap-dev-tracker-inbox` は journal の末尾を添えて警告する。直してから上の `--steps` で起こし直す |
+| `ticket.sh`（claude-skills）か `~/h` が無い | 条件不成立としてスキップする（failed で残らない）。使うと決めたホストなので、`bootstrap-dev-tracker-inbox` がどちらが無いかと直し方を警告する |
+| 終了コード 2（ユーザーの Notion の id が無いなど設定の誤り、`inbox` の無い古い `ticket.sh`） | failed のまま再起動しない。`bootstrap-dev-tracker-inbox` は今回の起動の journal の末尾を添えて警告する。直してから上の `--steps` で起こし直す。failed の間は user の systemd が degraded になり、`switch` のたびに「The user systemd session is degraded」とこの unit が出る |
 | 2 以外で落ちた | 30 秒おいて起こし直す。10 分に 5 回起こしたら諦めて failed になる（上の `--steps` で数え直して起こす） |
 | 1 回の見回りの失敗（ntn・herdr の一時的な失敗） | 本体が journal に出して次の見回りへ進む（終わらない） |
 

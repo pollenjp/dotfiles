@@ -111,18 +111,19 @@ in
         ユーザーが書いたものをその会話の入力欄へ打つ。コメントの拾い方・届け方は claude-skills の側。
 
         既定は false。herdr でハブの会話を回すホストだけ true を書く (dotfiles-private に登録した
-        ファイルか、ローカル flake の tmp)。同じ Dev Tracker を見るホストのどれでも動かすと、
-        herdr に会話の無いチケットへの返事 (「会話が止まっています」) を、そのチケットの会話を
-        持たない別のホストもしてしまう。
+        ファイルか、ローカル flake の tmp)。見回り役は自分のマシンに worktree の無いチケットを
+        読まないので、複数のホストで動かしても互いの会話のチケットには書かない。ただ、プロファイルに
+        ユーザーの Notion の id (claude-skills の profiles.toml の user.id) が無いホストでは終了コード 2 で
+        止まったままになり、ハブの会話を回さないホストでは Notion を引くだけになる。
 
         - 反映は `~/dotfiles/setup --update`。switch が unit を置いて起こし、bootstrap
           (nix/scripts/bootstrap-dev-tracker-inbox.sh) が claude-skills を進めた後に起こし直す
           (claude-skills の更新では unit ファイルが変わらず、switch だけでは再起動しない)
         - claude-skills を取れない (ticket.sh が無い)・ハブ `~/h` がまだ無いマシンでは、
-          条件不成立としてスキップする (failed で残らない)
+          条件不成立としてスキップする (failed で残らない。bootstrap が無い方と直し方を警告する)
         - 設定の誤り (ユーザーの Notion の id が無いなど) と inbox の無い古い ticket.sh は、
           終了コード 2 で止まったまま、再起動を繰り返さない
-        - Linux だけ (macOS には launchd の agent を置いていない)
+        - Linux だけ (macOS には launchd の agent を置いていない。true を書くと評価のたびに警告が出る)
 
         状態は `systemctl --user status pjp-dev-tracker-inbox`、ログは
         `journalctl --user -u pjp-dev-tracker-inbox`。
