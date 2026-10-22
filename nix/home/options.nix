@@ -9,6 +9,7 @@
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
+#   dotfiles.claude.devTracker.inbox.enable      チケットのコメントをハブ (~/h) の会話へ届ける見回り役を常駐させるか
 #   dotfiles.claude.gitViaGh.enable              Claude の git・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
@@ -94,6 +95,39 @@ in
         (雛形の例は true を書く)、検証用の sandbox。登録簿の型のホスト
         (`<user>@<system>`) を `--host` で当てたマシンでは使わない
         (docs/adr/027_*。前は既定が true で、ローカル flake の雛形の local が false を書いていた)。
+      '';
+    };
+
+    devTracker.inbox.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Dev Tracker のチケットに書いたコメントを、ハブ (`~/h`) の会話へ届ける見回り役
+        (claude-skills の pjp-dev-tracker の `ticket.sh inbox`) を、systemd の user service
+        `pjp-dev-tracker-inbox` で常駐させるか (home/modules/dev-tracker-inbox.nix)。
+        `devTracker.enable = true` のときだけ使える (false のマシンで true にすると評価時に止まる)。
+
+        見回り役は、herdr で動いているハブの会話のチケットのページへのコメントを 30 秒ごとに読み、
+        ユーザーが書いたものをその会話の入力欄へ打つ。コメントの拾い方・届け方は claude-skills の側。
+
+        既定は false。herdr でハブの会話を回すホストだけ true を書く (dotfiles-private に登録した
+        ファイルか、ローカル flake の tmp)。見回り役は自分のマシンに worktree の無いチケットを
+        読まないので、複数のホストで動かしても互いの会話のチケットには書かない。ただ、プロファイルに
+        ユーザーの Notion の id (claude-skills の profiles.toml の user.id) が無いホストでは終了コード 2 で
+        止まったままになり、ハブの会話を回さないホストでは Notion を引くだけになる。
+
+        - 反映は `~/dotfiles/setup --update`。switch が unit を置いて起こし、bootstrap
+          (nix/scripts/bootstrap-dev-tracker-inbox.sh) が claude-skills を進めた後に起こし直す
+          (claude-skills の更新では unit ファイルが変わらず、switch だけでは再起動しない)
+        - claude-skills を取れない (ticket.sh が無い)・ハブ `~/h` がまだ無いマシンでは、
+          条件不成立としてスキップする (failed で残らない。bootstrap が無い方と直し方を警告する)
+        - 設定の誤り (ユーザーの Notion の id が無いなど) と inbox の無い古い ticket.sh は、
+          終了コード 2 で止まったまま、再起動を繰り返さない
+        - Linux だけ (macOS には launchd の agent を置いていない。true を書くと評価のたびに警告が出る)
+
+        状態は `systemctl --user status pjp-dev-tracker-inbox`、ログは
+        `journalctl --user -u pjp-dev-tracker-inbox`。
       '';
     };
 

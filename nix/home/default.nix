@@ -16,6 +16,7 @@
     ./modules/bash.nix
     ./modules/claude.nix
     ./modules/cc-pages.nix
+    ./modules/dev-tracker-inbox.nix
     ./modules/windows-files.nix
     ./modules/exe-exec-trace.nix
     ./modules/cleanup.nix

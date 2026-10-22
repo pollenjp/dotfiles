@@ -630,6 +630,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
+| `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
 | `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜99 と exe-exec-trace は、直して流し直すまで走らない） |
@@ -1308,6 +1309,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
+| `~/.config/systemd/user/pjp-dev-tracker-inbox.service` | `nix/home/modules/dev-tracker-inbox.nix` (生成。`dotfiles.claude.devTracker.inbox.enable` のマシンだけ。本体の `ticket.sh` は claude-skills にある。[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -3021,6 +3023,84 @@ clone があるかは、`bootstrap-claude-skills.sh` が控えた場所（`~/.lo
 [掃除の判定](#掃除の判定)）が git の clone かで見る。`hub-init.sh` が止まる条件（`~/h` が別の repo の中、まだハブでないのに
 雛形の外のものがある、など。止まるときは何も書かない）は `hub-init.sh` の先頭のコメントにある。git の commit に失敗した
 （名前とメールが無いなど）ときも 0 以外で終わる（ファイルは写したまま。直して流し直せば commit する）。
+
+### チケットのコメントをハブの会話へ届ける見回り役 (`pjp-dev-tracker-inbox`)
+
+Dev Tracker のハブのチケットのページにコメントを書くと、そのチケットの会話（herdr の pane で動く `~/h` の worktree の
+Claude）の入力欄へ、端末で打った発言として届く。外出先のスマホから回答待ちのチケットに答える、並行に動く会話を Notion で
+見て指示を出す、といった使い方のためのもの（TKT-302）。見回り役の本体は claude-skills（private）の `pjp-dev-tracker` の
+`ticket.sh inbox` で、30 秒ごとにコメントを読んで `herdr agent prompt` で打つ。どのコメントを拾うか・会話の側でどう扱うかは、
+その skill の側に書いてある。
+
+ここで受け持つのは常駐だけで、systemd の user service `pjp-dev-tracker-inbox` にする（Linux だけ）。
+
+| 段 | すること | 決める場所 |
+| --- | --- | --- |
+| `switch` | `~/.config/systemd/user/pjp-dev-tracker-inbox.service`（`~/.claude/skills/pjp-dev-tracker/scripts/ticket.sh inbox` を cwd `~/h` で常駐させる）を置き、起こす | `home/modules/dev-tracker-inbox.nix` |
+| bootstrap | claude-skills を進めた後に `reset-failed` して `restart` する（止まっていれば起こし、動いていれば新しいコードで上げ直す）。3 秒のうちに止まったら journal の末尾を、起動の条件が揃わなければ無いものを添えて警告する | `scripts/bootstrap-dev-tracker-inbox.sh` |
+
+claude-skills を進めても unit ファイルは変わらないので、`switch` だけでは見回り役は再起動しない（動いていれば古いコードの
+まま）。`--update` では `switch` が claude-skills の更新より先に走るので、起こし直しは bootstrap（`order: 70`）が受け持つ。
+
+#### 使うホストだけ有効にする
+
+既定では置かない。herdr でハブの会話を回すホストの `mkHome`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に
+足した tmp）で有効にし、`~/dotfiles/setup --update` で効かせる。`devTracker.enable` が false のホストで true にすると評価で止まる。
+
+```nix
+claude = {
+  devTracker = {
+    enable = true;
+    inbox.enable = true;
+  };
+  notion.profile = "personal";
+};
+```
+
+見回り役は自分のマシンに worktree の無いチケットを読まないので、同じ Dev Tracker を複数のホストで見回っても、互いの会話の
+チケットには書かない。それでも `devTracker.enable` とは別の option にしてあるのは、プロファイルにユーザーの Notion の id
+（claude-skills の `profiles.toml` の `user.id`。今は personal にだけある）が無いホストでは終了コード 2 で止まったままになり、
+ハブの会話を回さないホストでは 30 秒ごとに Notion を引くだけになるため。
+
+#### 状態を確かめる
+
+```sh
+systemctl --user status pjp-dev-tracker-inbox             # active (running) か
+journalctl --user -u pjp-dev-tracker-inbox -f             # 見回りのログ (何もしなかった見回りは出さない)
+systemctl --user show pjp-dev-tracker-inbox -p ActiveEnterTimestamp -p NRestarts   # いつから動いているか・落ちて起こし直した回数
+~/dotfiles/setup --steps bootstrap-dev-tracker-inbox      # 起こし直す (claude-skills を手で pull した後・設定を直した後)
+```
+
+| 状況 | 挙動 |
+| --- | --- |
+| `ticket.sh`（claude-skills）か `~/h` が無い | 条件不成立としてスキップする（failed で残らない）。使うと決めたホストなので、`bootstrap-dev-tracker-inbox` がどちらが無いかと直し方を警告する |
+| 終了コード 2（ユーザーの Notion の id が無いなど設定の誤り、`inbox` の無い古い `ticket.sh`） | failed のまま再起動しない。`bootstrap-dev-tracker-inbox` は今回の起動の journal の末尾を添えて警告する。直してから上の `--steps` で起こし直す。failed の間は user の systemd が degraded になり、`switch` のたびに「The user systemd session is degraded」とこの unit が出る |
+| 2 以外で落ちた | 30 秒おいて起こし直す。10 分に 5 回起こしたら諦めて failed になる（上の `--steps` で数え直して起こす） |
+| 1 回の見回りの失敗（ntn・herdr の一時的な失敗） | 本体が journal に出して次の見回りへ進む（終わらない） |
+
+claude-skills の `inbox` が入る前に dotfiles を switch しても、`ticket.sh` が知らないサブコマンドを終了コード 2 で断るので、
+再起動を繰り返さずに止まって待つ。claude-skills が進んだ後の `--update` で bootstrap が起こす。
+
+Notion の API キーは `ticket.sh` が自分で `~/.config/pjp/env` から読む（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)）。
+unit の環境変数では渡さないので、キーを足した・替えたときに unit は直さなくてよい（動いている見回り役に読み直させるなら
+`systemctl --user restart pjp-dev-tracker-inbox`）。
+
+#### SSH を全部切っても止まらない（linger は要らない）
+
+このユーザーは linger しない（`loginctl show-user` の `Linger=no`）が、herdr の server が動いている間は見回り役も止まらない。
+logind は `KillUserProcesses=no` なので、SSH を切っても server の残る login session は closing のまま残り、その session が
+user manager（`user@<uid>.service`）とその上の user service を生かす。2026-10-21 に GCP の VM で、SSH が 1 本も無い
+10 時間あまり（12:51〜23:35 UTC）の間、同じ形の常駐の `cc-pages.service` が止まらなかったのを journal で確かめた（TKT-306）。
+
+```sh
+loginctl list-sessions                         # herdr の server の session が closing で残っている
+systemctl --user show pjp-dev-tracker-inbox -p ActiveEnterTimestamp -p NRestarts
+                                               # SSH で入り直したとき、切る前と同じ時刻なら、切っている間も動いていた
+```
+
+止まるのは herdr の server が落ちて SSH も 1 本も無いときだけで、その間は届ける先の会話も無い。次に SSH で入ると user manager と
+ともに上がり、止まっていた間のコメントも拾う。マシンの再起動の後、ログインする前から返事（「会話が止まっています」）まで
+させたいときだけ `sudo loginctl enable-linger "$USER"` を打つ（今は要らない）。
 
 ### 長い応答を読む web ビューア (cc-pages)
 
