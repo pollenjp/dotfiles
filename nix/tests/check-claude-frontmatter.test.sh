@@ -28,9 +28,13 @@
 #       書いたときの、値の前の # の行)。値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めないと言う
 #     - description が無い・空白だけ・frontmatter がコメントだけ (name も無い)
 #     - name がディレクトリ名 (agent はファイル名。サブディレクトリでも) と違う・小文字ケバブケースでない。名前 (skill は
-#       ディレクトリ名、agent はファイル名、command はパスの先頭の要素) が pjp- で始まらない
-#     - frontmatter が無い・閉じていない (見た目では 1 行目が --- の、BOM・CRLF・--- の後ろの空白は、そう言う)・skills の
-#       直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの README.md (配置されて command になると言う)
+#       ディレクトリ名、agent はファイル名、command はパスの先頭の要素) が pjp- で始まらない。agent のファイル名が別の
+#       サブディレクトリのものと同じ (2 つ目を出す)
+#     - frontmatter が無い・閉じていない (見た目では 1 行目が --- の、BOM・CRLF・--- の後ろの空白は、そう言う。重なれば
+#       全部言い、--- の後ろが文字なら空白のせいにしない)・skills の直下のファイル・SKILL.md の無いディレクトリ・command の
+#       サブディレクトリの README.md (配置されて command になると言う)。frontmatter の無い agent には、説明の文書なら
+#       README.md という名前にするよう添える (skill には添えない)
+#   - agents・commands の symlink は辿って、リンク先の中身を見る (出すのはリンクのパス)
 #   - description が 1024 文字を超えると、注意を出すが落とさない。数えるのは文字で、バイトではない (日本語の 1024 文字は
 #     出さない)
 #   - 引数を省けば、script の隣の nix/ を見る。ファイルは nix/ から書く
@@ -506,6 +510,19 @@ name: helper
 description: いつ委譲するか
 ---
 EOF
+# 別のサブディレクトリに同じファイル名 (= name) を置くと、Claude Code はどちらか一方しか読まないので、2 つ目を出す
+put "${cl}/agents/pjp-x/pjp-dup.md" <<'EOF'
+---
+name: pjp-dup
+description: 1 つ目
+---
+EOF
+put "${cl}/agents/pjp-y/pjp-dup.md" <<'EOF'
+---
+name: pjp-dup
+description: 2 つ目
+---
+EOF
 put "${cl}/commands/baz.md" <<'EOF'
 ---
 description: いつ呼ぶか
@@ -522,7 +539,8 @@ description: 呼び出し名は /pjp-ns:sub (通る)
 ---
 EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 9 ]] \
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 10 ]] \
+  && seen_err "${c}" -F "   nix/files/claude/agents/pjp-y/pjp-dup.md: nix/files/claude/agents/pjp-x/pjp-dup.md と同じ名前です。Claude Code はどちらか一方しか読みません" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-x/SKILL.md: name が 'pjp-y' ですが、ディレクトリ名 'pjp-x' と同じにしてください" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-Up/SKILL.md: name 'pjp-Up' は小文字ケバブケースにしてください" \
   && seen_err "${c}" -F "   nix/files/claude/skills/foo: 名前 'foo' は 'pjp-' で始めてください" \
@@ -532,14 +550,15 @@ if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 9 ]] \
   && seen_err "${c}" -F "   nix/files/claude/agents/pjp-team/helper.md: 名前 'helper' は 'pjp-' で始めてください" \
   && seen_err "${c}" -F "   nix/files/claude/commands/baz.md: 名前 'baz' は 'pjp-' で始めてください" \
   && seen_err "${c}" -F "   nix/files/claude/commands/ns/pjp-sub.md: 名前 'ns' は 'pjp-' で始めてください"; then
-  ok "name の食い違い (ディレクトリ名・ファイル名。agent はサブディレクトリでも)・ケバブケースでない name・pjp- で始まらない名前 (command はパスの先頭) を出して exit 1"
+  ok "name の食い違い (ディレクトリ名・ファイル名。agent はサブディレクトリでも)・ケバブケースでない name・pjp- で始まらない名前 (command はパスの先頭)・別のサブディレクトリと同じファイル名の agent (2 つ目) を出して exit 1"
 else
   ng "名前" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
 
 # 8. frontmatter が無い・閉じていない・skills の直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの
 #    README.md (直下の README.md と違って配置され、command になる)。見た目では 1 行目が --- なのに取り出せない形
-#    (BOM・CRLF・--- の後ろの空白。Claude Code は読める) は、そう言う
+#    (BOM・CRLF・--- の後ろの空白。Claude Code は読める) は、そう言う。わけが重なれば全部言う。frontmatter の無い agent
+#    (Claude Code は agent の横に置いた文書として扱う) には、frontmatter を足す前に README.md という名前を勧める
 n=$(new_nix t8)
 cl=${n}/files/claude
 c=$(dirname "${n}")
@@ -553,10 +572,22 @@ description: 閉じていない
 
 # 本文
 EOF
-mkdir -p "${cl}/skills/pjp-bom" "${cl}/skills/pjp-crlf" "${cl}/skills/pjp-space"
+mkdir -p "${cl}/skills/pjp-bom" "${cl}/skills/pjp-crlf" "${cl}/skills/pjp-space" "${cl}/skills/pjp-bom-crlf"
 printf '\xef\xbb\xbf---\nname: pjp-bom\ndescription: 先頭に BOM がある\n---\n' >"${cl}/skills/pjp-bom/SKILL.md"
 printf -- '---\r\nname: pjp-crlf\r\ndescription: 改行が CRLF\r\n---\r\n' >"${cl}/skills/pjp-crlf/SKILL.md"
 printf -- '--- \nname: pjp-space\ndescription: 1 行目の --- の後ろに空白がある\n---\n' >"${cl}/skills/pjp-space/SKILL.md"
+# Windows のエディタは BOM と CRLF を一緒に付けることがある
+printf '\xef\xbb\xbf---\r\nname: pjp-bom-crlf\r\ndescription: BOM と CRLF\r\n---\r\n' >"${cl}/skills/pjp-bom-crlf/SKILL.md"
+# --- の後ろが空白でなく文字なら、空白のせいにしない (Claude Code も --- の後ろの文字は受けない)
+put "${cl}/skills/pjp-title/SKILL.md" <<'EOF'
+--- title
+name: pjp-title
+description: 1 行目の --- の後ろに文字がある
+---
+EOF
+put "${cl}/agents/pjp-team/pjp-notes.md" <<'EOF'
+# チームのメモ (説明のつもり)
+EOF
 put "${cl}/skills/pjp-file.md" <<'EOF'
 ---
 name: pjp-file
@@ -570,18 +601,48 @@ put "${cl}/commands/pjp-ns/README.md" <<'EOF'
 # 名前空間の説明のつもり
 EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 8 ]] \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-nofm/SKILL.md: YAML frontmatter がありません (1 行目を --- にし、次の --- の行で閉じてください)' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-open/SKILL.md: YAML frontmatter がありません (1 行目の --- を閉じる --- の行がありません)' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-bom/SKILL.md: YAML frontmatter がありません (先頭に BOM があります' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-crlf/SKILL.md: YAML frontmatter がありません (改行が CRLF です' \
-  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-space/SKILL.md: YAML frontmatter がありません (1 行目の --- の後ろに空白があります' \
+# 取り出せないわけは、括弧の中に余計なわけや README.md の勧め (agent だけ) が混ざらないよう、行全体で比べる
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 11 ]] \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-nofm/SKILL.md: YAML frontmatter がありません (1 行目を --- にし、次の --- の行で閉じてください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-open/SKILL.md: YAML frontmatter がありません (1 行目の --- を閉じる --- の行がありません)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-bom/SKILL.md: YAML frontmatter がありません (先頭に BOM があります。外してください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-crlf/SKILL.md: YAML frontmatter がありません (改行が CRLF です。LF にしてください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-space/SKILL.md: YAML frontmatter がありません (1 行目の --- の後ろに空白があります。外してください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-bom-crlf/SKILL.md: YAML frontmatter がありません (先頭に BOM があります。外してください。改行が CRLF です。LF にしてください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/skills/pjp-title/SKILL.md: YAML frontmatter がありません (1 行目を --- にし、次の --- の行で閉じてください)' \
+  && seen_err "${c}" -x -F '   nix/files/claude/agents/pjp-team/pjp-notes.md: YAML frontmatter がありません (1 行目を --- にし、次の --- の行で閉じてください)。説明の文書なら README.md という名前にしてください' \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-file.md: skills の直下にはディレクトリだけを置いてください' \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-empty: SKILL.md がありません' \
   && seen_err "${c}" -F '   nix/files/claude/commands/pjp-ns/README.md: 配置されて command /pjp-ns:README になります'; then
-  ok "frontmatter が無い・閉じていない・BOM・CRLF・--- の後ろの空白 (理由を添える)・skills の直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの README.md (command になると言う) を出して exit 1"
+  ok "frontmatter が無い・閉じていない・BOM・CRLF・--- の後ろの空白 (わけを添え、重なれば全部言い、--- の後ろが文字なら空白のせいにしない)・frontmatter の無い agent (README.md という名前を勧める)・skills の直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの README.md (command になると言う) を出して exit 1"
 else
   ng "置き方" "rc=$(rc "${c}") err=$(err "${c}")"
+fi
+
+# 8b. agents・commands の symlink も、辿った先の中身を見る (出すのはリンクのパス)
+n=$(new_nix t8b)
+cl=${n}/files/claude
+c=$(dirname "${n}")
+put "${cl}/linked/agent.md" <<'EOF'
+---
+name: pjp-alink
+description: 委譲するとき: リンク先の YAML が壊れている
+---
+EOF
+put "${cl}/linked/command.md" <<'EOF'
+---
+argument-hint: <path>
+---
+EOF
+ln -s ../linked/agent.md "${cl}/agents/pjp-alink.md"
+ln -s ../linked/command.md "${cl}/commands/pjp-clink.md"
+run "${n}"
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 2 ]] \
+  && seen_err "${c}" -F '   nix/files/claude/agents/pjp-alink.md: frontmatter を YAML として読めません' \
+  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-clink.md: description がありません'; then
+  ok "agents・commands の symlink も、辿った先の中身を見る (出すのはリンクのパス)"
+else
+  ng "symlink" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
 
 # 9. description が 1024 文字を超えると注意を出すが、落とさない。数えるのは文字 (日本語の 1024 文字は 3072 バイト)

@@ -21,6 +21,14 @@
 nix/files/claude/agents/pjp-<名前>.md
 ```
 
+サブディレクトリに分けて置いてもよい。Claude Code は agents の下をサブディレクトリまで読み、呼び名はパスでなく `name` で
+決まる（サブディレクトリはディレクトリごと `~/.claude/agents/` へ配置される）。
+
+- 別のサブディレクトリに同じファイル名を置かない。`name` が重なり、Claude Code はどちらか一方しか読まない
+  （`check-claude-frontmatter.sh` が落とす）
+- 説明の文書は `README.md` という名前にする。Claude Code は frontmatter の無い `.md` を文書として扱うが、
+  `check-claude-frontmatter.sh` は `README.md` のほかは agent として見る
+
 ```markdown
 ---
 name: pjp-my-agent

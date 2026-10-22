@@ -15,20 +15,21 @@
 # 見るのは <nix>/files/claude/ の下で、nix/home/modules/claude.nix が ~/.claude/ へ配置するもの:
 #
 #   skills/<名前>/SKILL.md   frontmatter・name がディレクトリ名と同じ・description
-#   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description (Claude Code はサブディレクトリの下も読む)
+#   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description・別のサブディレクトリに同じファイル名が無い
+#                            (Claude Code はサブディレクトリの下も読む)
 #   commands/**/<名前>.md    frontmatter・description (呼び出し名はパスから決まるので、name は見ない)
 #
-# README.md は見ない: skills・agents・commands の直下のものは配置されず、agents のサブディレクトリのものは Claude Code が
-# 文書として扱う (name の無いファイル)。commands のサブディレクトリの README.md は配置されて command になるので落とす。
-# 名前 (skill はディレクトリ名、agent はファイル名、command はパスの先頭の要素。commands/ns/foo.md の呼び出し名は /ns:foo)
-# は pjp- で始める (nix/README.md の「命名」)。
+# agents・commands の symlink は辿って、リンク先の中身を見る。README.md は見ない: skills・agents・commands の直下のものは
+# 配置されず、agents のサブディレクトリのものは Claude Code が文書として扱う (name の無いファイル)。commands の
+# サブディレクトリの README.md は配置されて command になるので落とす。名前 (skill はディレクトリ名、agent はファイル名、
+# command はパスの先頭の要素。commands/ns/foo.md の呼び出し名は /ns:foo) は pjp- で始める (nix/README.md の「命名」)。
 #
 # frontmatter (1 行目の --- から、次の --- の行まで) は yq (mikefarah/yq) で YAML として読む。frontmatter が無い・中に
 # --- がある・YAML として読めない・key: value の並びでない・key が重複する・name と description が文字列でない・
 # description が無い (空白だけも)・素の値の description の「 #」から先や # で始まる行がコメントとして消える・name が
-# ディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない、のどれでも落とす。description が
-# 1024 文字を超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の
-# 検査に揃えてある。片方の観点を変えたら、もう片方も見る。
+# ディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない・agent のファイル名が別の
+# サブディレクトリのものと同じ、のどれでも落とす。description が 1024 文字を超えるものは、注意を出すが落とさない。観点は
+# claude-skills (private) の scripts/lint.sh の frontmatter の検査に揃えてある。片方の観点を変えたら、もう片方も見る。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -122,17 +123,31 @@ frontmatter() {
 }
 
 # $1 から frontmatter を取り出せなかったわけを出す。見た目では 1 行目が --- なのに取り出せない形 (Claude Code は BOM を外し、
-# 1 行目の --- の後ろの空白と CRLF も受けて読む) は、そう言う (言わないと、どこを直すのか分からない)
+# 1 行目の --- の後ろの空白と CRLF も受けて読む) は、そう言う (言わないと、どこを直すのか分からない)。わけが重なれば全部
+# 言う (Windows のエディタは BOM と CRLF を一緒に付けることがある)。--- の後ろが空白でなく文字なら、空白のせいにしない
 why_no_frontmatter() {
-  local first=
+  local first='' joined='' reason
+  local reasons=()
   IFS= read -r first <"$1" || true
-  case ${first} in
-    $'\xef\xbb\xbf'*) echo "先頭に BOM があります。外してください" ;;
-    $'---\r') echo "改行が CRLF です。LF にしてください" ;;
-    ---[[:space:]]*) echo "1 行目の --- の後ろに空白があります。外してください" ;;
-    ---) echo "1 行目の --- を閉じる --- の行がありません" ;;
-    *) echo "1 行目を --- にし、次の --- の行で閉じてください" ;;
-  esac
+  if [[ ${first} == $'\xef\xbb\xbf'* ]]; then
+    reasons+=("先頭に BOM があります。外してください")
+    first=${first#$'\xef\xbb\xbf'}
+  fi
+  if [[ ${first} == *$'\r' ]]; then
+    reasons+=("改行が CRLF です。LF にしてください")
+    first=${first%$'\r'}
+  fi
+  if [[ ${first} =~ ^---[[:space:]]+$ ]]; then
+    reasons+=("1 行目の --- の後ろに空白があります。外してください")
+  elif [[ ${first} != --- ]]; then
+    reasons+=("1 行目を --- にし、次の --- の行で閉じてください")
+  elif ((${#reasons[@]} == 0)); then
+    reasons+=("1 行目の --- を閉じる --- の行がありません")
+  fi
+  for reason in "${reasons[@]}"; do
+    joined+=${joined:+。}${reason}
+  done
+  printf '%s\n' "${joined}"
 }
 
 # frontmatter ($2) に yq の式 ($1) を当てる。
@@ -153,15 +168,16 @@ check_prefix() {
   fi
 }
 
-# $1: ファイル、$2: name に期待する値 (空なら name を見ない)、$3: その値の呼び名 (ディレクトリ名・ファイル名)
+# $1: ファイル、$2: name に期待する値 (空なら name を見ない)、$3: その値の呼び名 (ディレクトリ名・ファイル名)、
+# $4: frontmatter が無いときに添える文 (省いてよい)
 check_md() {
-  local file=$1 want_name=$2 want_what=$3
+  local file=$1 want_name=$2 want_what=$3 no_fm_hint=${4:-}
   local label fm dash_line yaml_err root_type dup_keys desc_type desc dropped desc_range desc_from desc_to hash_line
   local desc_chars name_type fm_name
   label=$(label_of "${file}")
 
   if ! fm=$(frontmatter "${file}"); then
-    problems+=("${label}: YAML frontmatter がありません ($(why_no_frontmatter "${file}"))")
+    problems+=("${label}: YAML frontmatter がありません ($(why_no_frontmatter "${file}"))${no_fm_hint:+。${no_fm_hint}}")
     return 0
   fi
 
@@ -278,21 +294,31 @@ for entry in "${claude_dir}"/skills/*; do
   check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
 done
 
-# $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す
+# $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す。symlink は辿って、リンク先の
+# 中身を見る (出すのはリンクのパス)
 md_files_under() {
   [[ -d $1 ]] || return 0
-  find "$1" -type f -name '*.md' | sort
+  find -L "$1" -type f -name '*.md' | sort
 }
 
-# agents: **/<名前>.md。Claude Code はサブディレクトリの下も読み、name の無いファイルは agent の横に置いた文書として扱うので、
-# README.md はどの深さでも見ない
+# agents: **/<名前>.md。Claude Code はサブディレクトリの下も読み、name の無いファイル (frontmatter の無いファイルも) は
+# agent の横に置いた文書として扱うので、README.md はどの深さでも見ない。frontmatter の無い agent には、frontmatter を
+# 足す前に README.md という名前を勧める。name はファイル名と同じにするので、別のサブディレクトリに同じファイル名を置くと
+# name が重なる。Claude Code はどちらか一方しか読まない (どちらを読むかはファイルシステムの読む順で決まる。docs の
+# sub-agents) ので、2 つ目で落とす
+declare -A agent_paths=()
 mapfile -t agent_files < <(md_files_under "${claude_dir}/agents")
 for entry in "${agent_files[@]}"; do
   entry_name=$(basename "${entry}" .md)
   [[ ${entry_name} != README ]] || continue
   found=$((found + 1))
+  if [[ -n ${agent_paths[${entry_name}]:-} ]]; then
+    problems+=("$(label_of "${entry}"): $(label_of "${agent_paths[${entry_name}]}") と同じ名前です。Claude Code はどちらか一方しか読みません")
+  else
+    agent_paths[${entry_name}]=${entry}
+  fi
   check_prefix "${entry_name}" "${entry}"
-  check_md "${entry}" "${entry_name}" "ファイル名"
+  check_md "${entry}" "${entry_name}" "ファイル名" "説明の文書なら README.md という名前にしてください"
 done
 
 # commands: **/<名前>.md。name は見ず、呼び出し名の頭になるパスの先頭の要素を見る。直下の README.md は配置されないが、
