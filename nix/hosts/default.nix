@@ -21,6 +21,8 @@
 #                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = true で
 #                   Notion Dev Tracker (pjp-dev-tracker) を使うマシンにする (既定は使わない。ADR 027)。
+#                   claude.devTracker.inbox.enable = true で、チケットのコメントをハブ (~/h) の会話へ届ける
+#                   見回り役 (ticket.sh inbox) を systemd の user service で常駐させる (Linux。既定は置かない)。
 #                   claude.gitViaGh.enable = false で、Claude の git・fetch 系の abbr / alias・
 #                   setup の取得を gh の資格情報 (HTTPS) ではなく ssh で GitHub へ通すマシンにする
 #                   (既定は gh。gh auth login が前提)。

@@ -257,6 +257,8 @@
           bootstrap-claude-skills-test = scriptTest "bootstrap-claude-skills" ./scripts/bootstrap-claude-skills.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
+          # setup.sh の手順の並び (bootstrap-claude-skills・bootstrap-herdr-hub の後) も見るので、scripts/ を丸ごと渡す
+          bootstrap-dev-tracker-inbox-test = scriptTest "bootstrap-dev-tracker-inbox" ./scripts;
           bootstrap-ssh-config-test = scriptTest "bootstrap-ssh-config" ./scripts/bootstrap-ssh-config.sh;
           bootstrap-windows-ssh-config-test = scriptTest "bootstrap-windows-ssh-config" ./scripts/bootstrap-windows-ssh-config.sh;
           bootstrap-windows-powertoys-test = scriptTest "bootstrap-windows-powertoys" ./scripts/bootstrap-windows-powertoys.sh;
@@ -344,6 +346,14 @@
               ;
           };
           cc-pages-state = import ./tests/cc-pages.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          dev-tracker-inbox-state = import ./tests/dev-tracker-inbox.nix {
             inherit
               lib
               pkgs
