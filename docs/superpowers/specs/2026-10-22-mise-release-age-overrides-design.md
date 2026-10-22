@@ -145,6 +145,7 @@
 - テストは今の時刻を `BOOTSTRAP_MISE_NOW` (UNIX 秒) で差し替える (`bootstrap-windows-ssh-config.sh` の
   `BOOTSTRAP_SSH_CHECK_TIMEOUT` と同じ名前の付け方)
 - `nix/shared/` から拾うファイルは `nix/hosts/` と同じ決まり (`.nix` で終わり、`.` で始まらない、ディレクトリでない)。
-  名前の順に、ホストのファイルの `modules` より前に足す (list は shared の項目が先)
+  名前の順に、ホストのファイルの `modules` より前に足す。list の項目の順は module system が決める (後ろの module の
+  定義が先に来る) ので、bootstrap-mise.sh は順に依らない (いちばん新しい上限を選び、出すときは from の順に並べる)
 - 一覧の写し (`nix/README.md` の「足したホストに書く値」の表) には足さない (登録した PC は `nix/shared/` に書き、
   足したホスト (`tmp`) は `modules` に書けばよいので、mise の節に書く)

@@ -20,6 +20,7 @@
     ./modules/windows-files.nix
     ./modules/exe-exec-trace.nix
     ./modules/cleanup.nix
+    ./modules/mise-release-age.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。

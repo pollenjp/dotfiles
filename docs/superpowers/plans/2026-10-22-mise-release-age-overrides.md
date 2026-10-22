@@ -18,7 +18,7 @@
 - 「上書き中」 = from の日 ≤ 今日 ≤ 上限の日 + 既定の日数。いちばん新しい上限を書き、無ければ既定を書く。claude は 今日 ≤ 上限の日 + min(1, 既定の日数) のあいだ上限、ほかは `min(1, 既定の日数)d`
 - 読めないとき (状態ファイルが無い・形が違う・jq が無い) は警告して `9d` を書き、claude は `1d`。setup は止めない
 - bootstrap-mise.sh は setup が shebang で直に流すので bash 3.2 でも動く書き方 (mapfile・連想配列を使わない)
-- `nix/shared/` のファイルの拾い方は `nix/hosts/` と同じ (`.nix` で終わる・`.` で始まらない・ディレクトリでない)。名前の順に、ホストの `modules` より前
+- `nix/shared/` のファイルの拾い方は `nix/hosts/` と同じ (`.nix` で終わる・`.` で始まらない・ディレクトリでない)。名前の順に、ホストの `modules` より前 (list の項目の順は module system が決めるので、順には依らない)
 - shfmt (2 空白・`binary_next_line`・`case_indent`)・shellcheck・nixfmt。テストの先頭に check の名前と「## 確かめること」。判定の `grep -q` をパイプの先に置かない。`./nix` を読む前に新しいファイルを `git add`
 - commit は日本語の `<種類>(<範囲>): … (TKT-323)` と箇条書きの本文、末尾に `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`
 - 並行の PR #154 (TKT-312。options.nix・flake.nix・home/default.nix・README を触る) とぶつからない位置に足す: options の一覧は `sshAgentNotice` の行の後、option は `cleanup.enable` の後、module の import は `cleanup.nix` の後、flake の state の check は `cc-pages-state` の後
@@ -27,7 +27,7 @@
 
 - 日付の境目が UTC と JST でずれる時刻 (UTC 15:00〜24:00): JST の日で判定する (Task 2 の 00:30 JST のケース)
 - 暦に無い日 (`2026-02-30`)・閏年 (`2024-02-29` は通す、`2025-02-29` は止める): 評価で止まる (Task 1)
-- 上書きの list が shared とホストの両方にある: 両方がつながり、shared が先 (Task 3)
+- 上書きの list が shared とホストの両方にある: 両方がつながる。順は module system が決める (後ろの module が先) ので、bootstrap は順に依らず、出すときは from の順 (Task 2・3)
 - `nix/shared/` の無い clone・stub・`.` で始まるファイルと README: 評価が通り、拾わない (Task 3)
 - 状態ファイルが無い・壊れている古い世代: 守りを緩めず `9d` を書き、setup を止めない (Task 2)
 
@@ -48,7 +48,7 @@
 - [ ] **Step 1: テストを書く** — `nix/tests/mise-release-age.nix` (形は `nix/tests/claude-video-offer.nix`。`configWith = modules: (mkHome { username = "tester"; inherit system modules; }).config`)。ケース:
   - 既定: `minimumReleaseAge == "9d"`・`releaseAgeOverrides == [ ]`・JSON が `{ minimumReleaseAge = "9d"; releaseAgeOverrides = [ ]; }` で改行で終わる
   - `{ from = "2026-10-22"; }` だけの項目は JSON で `{ from = "2026-10-22"; zeroDays = 1; reason = ""; }`
-  - 2 つの module の list がつながる (書いた順)、`minimumReleaseAge = "14d"` が JSON に入る
+  - 2 つの module の list がつながる (両方が入る。順は module system が決めるので見ない)、`minimumReleaseAge = "14d"` が JSON に入る
   - 止まる (`!(builtins.tryEval (builtins.deepSeq v true)).success`): from `"2026-1-2"`・`"2026-02-30"`・`"2025-02-29"`・`"2026-13-01"`、zeroDays `0`、minimumReleaseAge `"1w"`・`"9"`、知らない欄 `until`。`"2024-02-29"` は通る
 - [ ] **Step 2: 落ちるのを見る** — `git add -N nix/tests/mise-release-age.nix` してから `nix build --no-link -L './nix#checks.x86_64-linux.mise-release-age-state'` (flake に載せる行も先に足す)。option が無いので評価で落ちる
 - [ ] **Step 3: 実装** — options.nix の `let` に `isCalendarDate` (`builtins.match` と `lib.toIntBase10`、閏年は 4・100・400) と `lib.mkOptionType { name = "calendarDate"; description = "暦にある日付 (YYYY-MM-DD)"; check = …; merge = lib.mergeEqualOption; }`。`zeroDays` は `lib.types.ints.positive`。module は項目を `{ inherit (x) from zeroDays reason; }` に写して `builtins.toJSON … + "\n"`
@@ -104,7 +104,7 @@
 - Consumes: Task 1 の option
 - Produces: `privateHosts privateNix` の形は今のまま (ホストの名前 → homeConfiguration)。各ホストの `modules` は `<shared の module の path (名前の順)> ++ <ホストのファイルの modules>`
 
-- [ ] **Step 1: テストを書く** — 足すケース: alice@one と bob@two の両方に shared の項目が入る / alice@one の list は `[ shared の項目, alice の項目 ]` の順 / shared の README.md と `.hidden.nix` は拾わない (拾えば throw) / `nix/shared/` の無い clone (`private-hosts-no-shared`) のホストは評価が通り list は `[ ]` / outPath の形でも shared が当たる
+- [ ] **Step 1: テストを書く** — 足すケース: alice@one と bob@two の両方に shared の項目が入る / alice@one の list は shared の項目と alice の項目の 2 つ (順は見ない) / shared の README.md と `.hidden.nix` は拾わない (拾えば throw) / `nix/shared/` の無い clone (`private-hosts-no-shared`) のホストは評価が通り list は `[ ]` / outPath の形でも shared が当たる
 - [ ] **Step 2: 落ちるのを見る** — `nix build --no-link -L './nix#checks.x86_64-linux.private-hosts-state'`
 - [ ] **Step 3: 実装** — `nixFilesIn = dir: …` (今の hosts の filter を関数にし、ファイル名 → path を返す)。`sharedModules = builtins.attrValues (nixFilesIn (sub "shared"))`。`mkHomeShared = args: mkHome (args // { modules = sharedModules ++ (args.modules or [ ]); })` を各ホストへ渡す
 - [ ] **Step 4: 通るのを見る** — 同じ build と `nix flake check ./nix --no-build`

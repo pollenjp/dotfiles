@@ -362,6 +362,14 @@
               system
               ;
           };
+          mise-release-age-state = import ./tests/mise-release-age.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           dev-tracker-inbox-state = import ./tests/dev-tracker-inbox.nix {
             inherit
               lib

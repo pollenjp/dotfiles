@@ -16,7 +16,9 @@
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
-#   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
+#   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
+#   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
+#   dotfiles.cleanup.enable                     使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
@@ -31,6 +33,45 @@
 let
   # JSON にそのまま書き出せる値 (dotfiles.claude.notion.override 用)
   jsonValue = (pkgs.formats.json { }).type;
+
+  # 暦にある日付 (YYYY-MM-DD。dotfiles.mise.releaseAgeOverrides の from 用)。形だけでなく、2026-02-30 のような
+  # 無い日も止める (nix/scripts/bootstrap-mise.sh の jq は、無い日を黙って翌月へ繰り越すため)
+  calendarDate = lib.mkOptionType {
+    name = "calendarDate";
+    description = "暦にある日付 (YYYY-MM-DD)";
+    descriptionClass = "noun";
+    check =
+      v:
+      let
+        m = builtins.match "([0-9]{4})-([0-9]{2})-([0-9]{2})" v;
+        num = i: lib.toIntBase10 (builtins.elemAt m i);
+        year = num 0;
+        month = num 1;
+        day = num 2;
+        leap = lib.mod year 4 == 0 && (lib.mod year 100 != 0 || lib.mod year 400 == 0);
+        lengths = [
+          31
+          (if leap then 29 else 28)
+          31
+          30
+          31
+          30
+          31
+          31
+          30
+          31
+          30
+          31
+        ];
+      in
+      builtins.isString v
+      && m != null
+      && month >= 1
+      && month <= 12
+      && day >= 1
+      && day <= builtins.elemAt lengths (month - 1);
+    merge = lib.mergeEqualOption;
+  };
 in
 {
   # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう
@@ -322,6 +363,84 @@ in
       止めていて逃した回は次の起動時に走る。止めたいマシンは、そのホストの modules
       (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
     '';
+  };
+
+  options.dotfiles.mise = {
+    minimumReleaseAge = lib.mkOption {
+      type = lib.types.strMatching "[0-9]+d";
+      default = "9d";
+      example = "14d";
+      description = ''
+        mise が入れる版の遅延。公開からこれだけ経っていない版は取らない (npm / pnpm の minimumReleaseAge と同じく、
+        出たばかりの版を掴まないため)。日の単位 (`<数>d`) だけを受け付ける (下の上書きが終わる日を日で数えるため)。
+
+        nix/scripts/bootstrap-mise.sh が `~/dotfiles/setup --update` のたびに、`~/.config/mise/config.toml` の
+        `[settings] minimum_release_age` へ書く (下の releaseAgeOverrides の上書き中は、その上限の日時を書く)。
+        claude だけは 1d に縮めて入れる (この値の方が短ければこの値)。
+
+        値は `~/.local/state/dotfiles/mise-release-age.json` (home/modules/mise-release-age.nix) に落ち、
+        bootstrap-mise.sh が読む。config.toml は mise が実行時に書き換えるので Nix では置かない。反映は
+        `~/dotfiles/setup --update` で、`home-manager switch` だけでは config.toml に届かない。
+      '';
+    };
+
+    releaseAgeOverrides = lib.mkOption {
+      type = lib.types.listOf (
+        lib.types.submodule {
+          options = {
+            from = lib.mkOption {
+              type = calendarDate;
+              example = "2026-10-22";
+              description = "上書きを始める日 (Asia/Tokyo)。この日は遅延 0d と同じに新しい版を取る。";
+            };
+            zeroDays = lib.mkOption {
+              type = lib.types.ints.positive;
+              default = 1;
+              example = 3;
+              description = ''
+                遅延 0d を続ける日数 (from の日を含む)。取る版の上限は from + zeroDays − 1 の日の終わり。
+              '';
+            };
+            reason = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              example = "脆弱性の修正版を入れる";
+              description = "setup の出力と警告に出す理由。";
+            };
+          };
+        }
+      );
+      default = [ ];
+      example = lib.literalExpression ''
+        [
+          {
+            from = "2026-10-22";
+            zeroDays = 3;
+            reason = "脆弱性の修正版を入れる";
+          }
+        ]
+      '';
+      description = ''
+        期間を区切って minimumReleaseAge を緩める上書きの list。項目は「from の日から zeroDays 日 (from の日を含む)
+        のうちに出た版まで取る」と読む: その zeroDays 日は遅延 0d と同じに新しい版を取り、その後は取る版の上限を
+        据え置いたまま遅延が 1 日ずつ伸び、上限 + minimumReleaseAge を過ぎると上書きが無いときと同じに戻る
+        (終わった項目。zeroDays = 3・既定 9d なら、from の 11 日後の終わりで終わる)。
+
+        日付は Asia/Tokyo で読む。今日の日付は Nix の評価では読めないので、終わったかどうかは
+        nix/scripts/bootstrap-mise.sh が `~/dotfiles/setup --update` のたびに決める:
+
+        - from が今日より先の項目と、終わった項目は写さない
+        - 残った項目のうち上限がいちばん新しいものを `minimum_release_age` に書く
+          (`2026-10-24T23:59:59+09:00` の形)。残りが無ければ minimumReleaseAge を書く
+        - 上書きのあいだは setup の出力に 1 行出す。入っている tool は上げない (新しい版は `mise up` で入れる)
+        - claude も、上限の方が 1d より新しい版を取るあいだは上限で入れる
+        - 終わった項目が残っていれば setup の警告のまとめに出す (写さないので害は無い。書いた所から消す)
+
+        登録した全 PC に効かせるなら dotfiles-private の `nix/shared/*.nix` (lib/private-hosts.nix が登録した
+        全ホストに足す)、1 台だけならそのホストのファイル (ローカル flake の tmp なら modules) に書く。list は
+        書いた所どうしでつながる。書き方は nix/README.md の「遅延 (minimum_release_age) を期間付きで緩める」。
+      '';
+    };
   };
 
   options.dotfiles.ccPages.port = lib.mkOption {
