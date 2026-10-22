@@ -1980,24 +1980,41 @@ bash では元々発火していなかった）。
 
 ## 証明書の束を OS の信頼ストアに寄せる
 
-自前の証明書の束を持つツールにも OS の信頼ストア（`/etc/ssl/certs/ca-certificates.crt`）を読ませるため、
-Linux のホストでは次の 4 つを session の環境変数に入れる（`nix/home/modules/os-ca-bundle.nix`。
+自前の証明書の束を持つツール（nixpkgs の python の certifi・uv・venv の requests・gcloud）にも OS の信頼ストア
+（`/etc/ssl/certs/ca-certificates.crt`）を読ませるため、Linux のホストでは `NIX_SSL_CERT_FILE`・`SSL_CERT_FILE`・
+`REQUESTS_CA_BUNDLE`・`CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` を session の環境変数に入れる
+（`nix/home/modules/os-ca-bundle.nix`。どのツールがどれを読むかは、その先頭のコメント。
 [ADR 028](../docs/adr/028_os_ca_bundle_env_20261022T180804JST/README.md)）。OS の束から危ない CA を外せば、
 これらのツールも揃って拒否するようになる。
 
-| 変数 | 読むもの |
-| --- | --- |
-| `NIX_SSL_CERT_FILE` | nixpkgs の python の certifi（変数があればその束を返す） |
-| `SSL_CERT_FILE` | uv（既定は中に持つ webpki-roots）。OpenSSL・Go も読むが、もともと同じファイルを読んでいる |
-| `REQUESTS_CA_BUNDLE` | venv に入れた PyPI の requests（PyPI の certifi の束） |
-| `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` | gcloud（SDK の中の certifi の束。設定の `core/custom_ca_certs_file` より先に効く） |
-
-- 入れるのは、Linux で、束のファイルがあり、その変数に値が無い（空を含む）ときだけ。束の無いホストで入れると
-  nix 自身も含めて TLS が通らなくなり、すでにある値（社内の CA を足した束など）を上書きすると壊すため
+- 入れるのは、Linux で束のファイルがあるときだけ（無いホストで入れると、nix 自身も含めて TLS が通らなくなる）
+- すでに束を指している変数があれば、残りをそれに揃える（`SSL_CERT_FILE`、無ければ `NIX_SSL_CERT_FILE` の値。
+  どちらも無ければ OS の束）。値がある変数は書き換えない。空の変数は値が無いものとして扱う
 - bash は login の shell（`~/.profile`）で、fish はすべての fish（`config.fish`）で入る。login でない bash は、
   開いた親（fish など）から継ぐ
+- このマシンだけ別の束に向けたいときは、ホストの module で `home.sessionVariables.SSL_CERT_FILE` を書く
+  （dotfiles-private の `nix/hosts/` のファイルか `~/dotfiles/flake.nix` の tmp の `modules`）。残りの 3 つもそれに揃う。
+  コマンド 1 回だけなら、4 つとも同じ値で打つ（nixpkgs の OpenSSL は `NIX_SSL_CERT_FILE` を `SSL_CERT_FILE` より
+  先に読むので、`SSL_CERT_FILE` だけを変えても python の標準の https・git などには届かない）
+
+### 効かないところ・副作用
+
 - shell を通らずに起動するもの（systemd の user service・デスクトップのランチャーから直に開くアプリ）には入らない
-- このマシンだけ別の束に向けたいときは、`~/.config/pjp/env` に書く（対話の shell で上書きされる）
+- **cacert を含む devShell（nixpkgs の python の devShell など）の中では、`NIX_SSL_CERT_FILE` が nixpkgs の cacert の
+  束に戻る。** cacert の setup hook が立て、`nix develop` は derivation の値を残す（呼び出し元の値を残すのは
+  `SSL_CERT_FILE` だけ）。その中の nixpkgs の certifi と OpenSSL（python の標準の https など）は OS の束を読まない。
+  直すなら、その repo の devShell の `shellHook` で向け直す
+
+  ```sh
+  [ -f /etc/ssl/certs/ca-certificates.crt ] && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+  ```
+
+- **`REQUESTS_CA_BUNDLE` は、アプリが requests の `Session` に置いた `verify`（私設 CA の束・`False`）より先に効く。**
+  1 回ごとに `verify=` を渡す呼び方は変わらない。`Session` の `verify` で自己署名の機器などに繋ぐ script は検証に
+  失敗するようになるので、`REQUESTS_CA_BUNDLE= <コマンド>`（空）で打つ。requests は空を無いものとして扱い、
+  `Session` の `verify` に戻る
+- `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` は、gcloud の設定（`gcloud config set core/custom_ca_certs_file`）より先に効く。
+  設定で別の束を指しているホストは、同じパスをホストの module の `home.sessionVariables` にも書く
 
 ### 反映
 
@@ -2009,7 +2026,12 @@ home-manager の `hm-session-vars` は 1 つの session で 1 回しか読まな
 | どこで | 入れ方 |
 | --- | --- |
 | 端末・ssh | 開き直す（ssh を張り直す・ログインし直す） |
-| herdr の pane | pane は server の env を継ぐので、server を立て直す。1 つの pane だけなら `exec env -u __HM_SESS_VARS_SOURCED fish -l` |
+| herdr の pane | pane は server の env を継ぐ。server を止め、新しい login（ssh を張り直した shell・`herdr.exe --remote <ssh 先>`）から開き直す（前からある shell から起こすと、古い env を継いで入らない）。pane のプロセスは終わる（Claude Code は herdr の agent session restore で会話へ戻れる）。1 つの pane だけなら `exec env -u __HM_SESS_VARS_SOURCED fish -l` |
+
+```sh
+herdr server stop             # default
+herdr session stop s2         # named session ごとに
+```
 
 > ⚠️ **OS の束が直っていないホストでは、自前の束が先に直ったツールがむしろ通すようになる。**
 > 2026-10 の eMudhra の侵害では、PyPI の certifi 2026.10.19 がもう該当のルートを外していて、それを入れた venv は
@@ -2019,7 +2041,7 @@ home-manager の `hm-session-vars` は 1 つの session で 1 回しか読まな
 ### 確かめる
 
 ```sh
-echo $SSL_CERT_FILE   # /etc/ssl/certs/ca-certificates.crt (fish でも bash でも)
+printenv SSL_CERT_FILE   # /etc/ssl/certs/ca-certificates.crt (fish でも bash でも。herdr の pane でも見る)
 
 # 2026-10 の eMudhra の侵害のテスト用ホスト。OS の束が直っていれば、どれも証明書のエラーになる
 curl -sS -o /dev/null https://dv-g3b-emudhra.we-have-a-problem.com/

@@ -44,10 +44,10 @@ WSL の Ubuntu と GCP の VM でも、OS の束を直すだけでこれらが�
 
 ```sh
 if [ -f /etc/ssl/certs/ca-certificates.crt ]; then
-  export NIX_SSL_CERT_FILE="${NIX_SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
-  export SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
-  export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}"
-  export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+  export SSL_CERT_FILE="${SSL_CERT_FILE:-${NIX_SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}"
+  export NIX_SSL_CERT_FILE="${NIX_SSL_CERT_FILE:-$SSL_CERT_FILE}"
+  export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"
+  export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-$SSL_CERT_FILE}"
 fi
 ```
 
@@ -55,19 +55,26 @@ fi
   直した `hm-session-vars.fish` をすべての fish で読む。1 か所に書けば両方に届く
 - 次の事件でも、OS の束を直せば (NixOS は nixos-config、Ubuntu は ca-certificates) これらのツールも揃って直る
 
-### B. 束が無いホストでは入れず、すでにある値は触らない
+### B. 束が無いホストでは入れず、すでに束を指している変数があればそれに揃える
 
 - **束が無ければ何もしない。** 無いホスト (ca-certificates を入れていないコンテナ・パスの違う Fedora 系) で
   入れると、`NIX_SSL_CERT_FILE` を読む nix 自身も含めて TLS が通らなくなる
-- **すでに値がある (空でない) 変数は触らない。** OS や管理者が別の束 (社内の CA を足したものなど) を
-  指しているとき、壊さない
-- どちらも Nix の installer が置く profile の script (`nix-daemon.sh`) が `NIX_SSL_CERT_FILE` にしていることと同じ
-  (「Allow users to override the NIX_SSL_CERT_FILE」・束があるパスを順に探す)
+- **すでに束を指している変数があれば、残りをそれに揃える。** 揃える先は `SSL_CERT_FILE`、無ければ
+  `NIX_SSL_CERT_FILE` の値で、どちらも無ければ OS の束。値がある (空でない) 変数は書き換えない。OS や管理者が
+  別の束 (社内の CA を足したものなど) を指しているとき、壊さず、ツールごとに違う束を読むこともないようにする
+  - `SSL_CERT_FILE` を先に見るのは、Ubuntu などでは Nix の installer の profile の script (`nix-daemon.sh`) が
+    `NIX_SSL_CERT_FILE` を自動で OS の束に立てるため。`SSL_CERT_FILE` の方が、人が選んだ値であることが多い
+  - 揃えずに「すでにある値は残し、無いものは OS の束」とすると、`SSL_CERT_FILE` だけがある NixOS で
+    `NIX_SSL_CERT_FILE` が OS の束になる。nixpkgs の OpenSSL は `NIX_SSL_CERT_FILE` を先に読むので、残したはずの
+    `SSL_CERT_FILE` が python の標準の https・git などに届かなくなる (PR のレビューで見つかり、この形に直した)
+- 束が無ければ何もしない・値があれば触らない点は、Nix の installer の `nix-daemon.sh` が `NIX_SSL_CERT_FILE` に
+  していることと同じ (「Allow users to override the NIX_SSL_CERT_FILE」・束があるパスを順に探す)
 
 ### C. option にしない
 
 host option で on/off を選べるようにはしない。今 off にしたいホストが無く、束の無いホストは B で避けられる。
-1 台だけ別の束に向けたいときは `~/.config/pjp/env` に書けば、対話の shell で上書きされる。
+1 台だけ別の束に向けたいときは、ホストの module で `home.sessionVariables.SSL_CERT_FILE` を書けば、
+`hm-session-vars.sh` のこの if より前で export され、残りの 3 つもそれに揃う (B)。
 
 ### D. 方針の承認のあとに、こちらで決めたこと
 
@@ -78,6 +85,8 @@ host option で on/off を選べるようにはしない。今 off にしたい�
 | `home.sessionVariablesExtra` が home-manager の internal な option であること | 使う | 書き足した行は `hm-session-vars.sh` にそのまま入り、babelfish が fish に直す (ビルドして確かめた)。home-manager 自身も `targets.genericLinux` で使っている |
 | 束を探すパスを Nix の installer のように増やすか | `/etc/ssl/certs/ca-certificates.crt` だけ | 使っているホスト (NixOS・Ubuntu) はどれもこのパス。ほかの distro は B で何もしない側に倒れる |
 | systemd の user の environment.d (`systemd.user.sessionVariables`) にも入れるか | 入れない | `KEY=VALUE` しか書けず、B の条件を書けない |
+| `REQUESTS_CA_BUNDLE` が requests の `Session` の `verify` より先に効くこと (5 の注意) | 承認どおり入れ、副作用と 1 回だけ外す打ち方 (`REQUESTS_CA_BUNDLE= <コマンド>`) を README に書く | 古い certifi の venv が OS の束に従う効き目が大きい (今回も certifi 2026.06.17 の venv は通した)。副作用は検証に失敗する側に倒れ、黙って検証を外すことはない。外すかどうかは PR でユーザーに聞く |
+| 空の変数の扱い | 4 つとも値が無いものとして扱う (`${X:-…}`) | 空の `SSL_CERT_FILE` は OpenSSL の束の読み込みを壊す。変数ごとに扱いを変えると分かりにくい |
 | ADR の番号 | 028 | open の PR (#153) は ADR を足していない。#152 は merge 済みで ADR なし |
 
 ## 3. 変更点の詳細
@@ -88,7 +97,7 @@ host option で on/off を選べるようにはしない。今 off にしたい�
 | `nix/home/default.nix` | `os-ca-bundle.nix` を import |
 | `nix/tests/os-ca-bundle.nix` | 新規。評価時に if の形 (Linux) と無いこと (darwin) を、ビルド時に生成した `hm-session-vars.sh` / `.fish` を bash と fish で読んだ値を確かめる |
 | `nix/flake.nix` | checks に `os-ca-bundle-state` |
-| `nix/README.md` | 節「証明書の束を OS の信頼ストアに寄せる」(効き方・反映・確かめ方) |
+| `nix/README.md` | 節「証明書の束を OS の信頼ストアに寄せる」(効き方・効かないところと副作用・反映・確かめ方) |
 | `docs/adr/README.md` | 一覧に 028 |
 
 ## 4. 検討した代替案
@@ -100,6 +109,8 @@ host option で on/off を選べるようにはしない。今 off にしたい�
 | repo ごとの `mise.toml` の `[env]`・devShell に書く | repo ごとに書き漏れる。repo の外で打つ global のツールに効かない |
 | nixos-config (NixOS の `environment.variables`) に書く | NixOS のホストにしか効かない。WSL の Ubuntu・GCP の VM が漏れる |
 | `home.sessionVariables` に値だけ書く | 条件を書けない。束の無いホストで TLS を全部落とし、すでにある値を上書きする |
+| すでにある値は残し、無いものは OS の束にする (この PR の最初の形) | B。`SSL_CERT_FILE` だけがある NixOS で、nixpkgs の OpenSSL が OS の束を読むようになる |
+| `REQUESTS_CA_BUNDLE` を入れない | 古い certifi を入れた venv の requests が直らない。副作用は 1 回だけ外せる (D) |
 | fish.nix と bash.nix に別々に書く | 同じ条件を 2 か所に持つ。`hm-session-vars` の「session で 1 回」とも揃わない |
 | host option で on/off | C |
 
@@ -107,7 +118,8 @@ host option で on/off を選べるようにはしない。今 off にしたい�
 
 良くなること。
 
-- OS の束を直せば、nixpkgs の python の requests・uv・gcloud・venv の requests も揃って従う
+- OS の束を直せば、nixpkgs の python の requests・uv・gcloud・venv の requests も揃って従う (cacert を含む devShell の
+  中は除く。下の注意)
 - もともと OS の束を読むもの (OpenSSL・Go・nix 自身) は、同じファイルを指すだけで変わらない
 
 注意が必要なこと。
@@ -117,6 +129,13 @@ host option で on/off を選べるようにはしない。今 off にしたい�
   `REQUESTS_CA_BUNDLE` で直っていない OS の束に向けると通す。OS の束を先に (遅くとも同時に) 直す
 - **反映は新しい login から。** `hm-session-vars` は 1 つの session で 1 回しか読まない (`__HM_SESS_VARS_SOURCED` を
   子へ継ぐ)。switch の前から続く process (herdr の server など) の下で開いた shell には入らない
+- **cacert を含む devShell の中では、`NIX_SSL_CERT_FILE` が nixpkgs の cacert の束に戻る。** cacert の setup hook が
+  立て、`nix develop` は derivation の値を残す (呼び出し元の値を残すのは `SSL_CERT_FILE` だけ)。nixpkgs の python の
+  certifi が cacert を propagate するので、python の devShell はこれに当たる。その中の nixpkgs の certifi と OpenSSL
+  (python の標準の https など) は OS の束を読まない。repo ごとに `shellHook` で向け直す (README)
+- **`REQUESTS_CA_BUNDLE` は、アプリが requests の `Session` に置いた `verify` (私設 CA の束・`False`) より先に効く。**
+  そういう script は検証に失敗するようになる。`REQUESTS_CA_BUNDLE= <コマンド>` (空) で打てば `Session` の値に戻る
+- `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` は、gcloud の設定の `core/custom_ca_certs_file` より先に効く
 - shell を通らずに起動するもの (systemd の user service・デスクトップのランチャーから直に開くアプリ) には入らない
 - この 4 つを読まないツールは、自前の束のまま (OS の束に寄せたいものが見つかったら、この module に足す)
 
@@ -127,9 +146,10 @@ host option で on/off を選べるようにはしない。今 off にしたい�
 | 確認 | 方法 | 結果 |
 | --- | --- | --- |
 | 生成した設定 | `homeConfigurations."pollenjp@x86_64-linux".activationPackage` を build し、`hm-session-vars.sh` と `config.fish` が読む `hm-session-vars.fish` を見る | 両方に 4 つの if がある (fish は `if [ -f … ]` と `set -gx … (test -n "$X" && echo "$X" \|\| echo …)`) |
-| 新しく開いた shell | build した `config.fish`・`.profile`・`.bash_profile`・`.bashrc` を偽の HOME に置き、`__HM_SESS_VARS_SOURCED` を外した env で開く | fish (login・login でない)・bash (login)・fish から開いた bash の 4 通りとも 4 つが入る。`__HM_SESS_VARS_SOURCED=1` を継いだ fish には入らない。`SSL_CERT_FILE=/opt/corp.pem` があれば、それは残る |
+| 新しく開いた shell | build した `config.fish`・`.profile`・`.bash_profile`・`.bashrc` を偽の HOME に置き、`__HM_SESS_VARS_SOURCED` を外した env で開く | fish (login・login でない)・bash (login)・fish から開いた bash の 4 通りとも 4 つが入る。`__HM_SESS_VARS_SOURCED=1` を継いだ fish には入らない。`SSL_CERT_FILE=/opt/corp.pem` があれば、4 つともそれに揃う |
 | テスト用ホスト | 変数なしと、上の新しい login の fish の env とで繋ぐ | 下の表 |
-| テスト | `nix/tests/os-ca-bundle.nix` (checks の `os-ca-bundle-state`) | 評価時 5 件・ビルド時 8 件 (bash と fish × 束がある・無い・値がある・空)。module の import を外すと評価で落ち、期待値をずらすとビルドで落ちることを先に確かめた。darwin と aarch64-linux の check も評価が通る |
+| テスト | `nix/tests/os-ca-bundle.nix` (checks の `os-ca-bundle-state`) | 評価時 5 件・ビルド時 14 件 (bash と fish × 束がある・無い・`SSL_CERT_FILE` がある・`NIX_SSL_CERT_FILE` だけある・両方ある・空・空白を含む。子の `printenv` で見る)。最初の形で、module の import を外すと評価で落ち、期待値をずらすとビルドで落ちることを確かめた。darwin と aarch64-linux の check も評価が通る |
+| PR のレビューで見つかったこと | 通信なしの python と使い捨ての flake で確かめた | nixpkgs の python の `ssl.create_default_context()` は、`SSL_CERT_FILE` に 1 枚の束・`NIX_SSL_CERT_FILE` なしで 1 個、`NIX_SSL_CERT_FILE` に OS の束を足すと 172 個の CA を読む (B)。requests 2.34.2 は `REQUESTS_CA_BUNDLE` があると `Session.verify` (私設の束・`False`) より env の値を使い、空にすると `Session.verify` に戻る。cacert を含む devShell の中では、呼び出し元に 4 つがあっても `NIX_SSL_CERT_FILE` が nixpkgs の cacert 3.126 の束になり、python の urllib がテスト用ホストに 200 で繋がる (requests は拒否) |
 
 テスト用ホスト `https://dv-g3b-emudhra.we-have-a-problem.com/` への接続:
 
@@ -155,8 +175,8 @@ curl -sS -o /dev/null https://dv-g3b-emudhra.we-have-a-problem.com/
 ```
 
 そのあと、新しい login (ssh を張り直す・ログインし直す) から開いた shell で確かめる。herdr の pane に入れるには
-server を立て直す (手順は README の節)。
+server を止めて、新しい login から開き直す (手順は README の節)。
 
 ```sh
-echo $SSL_CERT_FILE     # /etc/ssl/certs/ca-certificates.crt
+printenv SSL_CERT_FILE   # /etc/ssl/certs/ca-certificates.crt
 ```

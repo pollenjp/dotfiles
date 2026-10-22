@@ -21,16 +21,20 @@
 #   - OS の束があるときだけ入れる。無いホスト (ca-certificates を入れていないコンテナ・Fedora 系) で入れると、
 #     nix 自身を含めて TLS が通らなくなる。Nix の installer が置く profile の script も、NIX_SSL_CERT_FILE を
 #     束があるときだけ立てる
-#   - すでに値がある (空でない) 変数は触らない。OS や管理者が別の束 (社内の CA を足したものなど) を指して
-#     いるときに、壊さないため
+#   - すでに束を指している変数があれば、残りをそれに揃える (SSL_CERT_FILE、無ければ NIX_SSL_CERT_FILE の値。
+#     どちらも無ければ OS の束)。値がある (空でない) 変数は書き換えない。OS や管理者が別の束 (社内の CA を
+#     足したものなど) を指しているときに壊さず、ツールごとに違う束を読むこともないようにするため。
+#     nixpkgs の OpenSSL は NIX_SSL_CERT_FILE を SSL_CERT_FILE より先に読むので、SSL_CERT_FILE を残して
+#     NIX_SSL_CERT_FILE だけ OS の束にすると、残したつもりの SSL_CERT_FILE が nixpkgs の OpenSSL に届かない
 #
 # home.sessionVariables には条件を書けないので、hm-session-vars.sh の末尾 (home.sessionVariablesExtra) に shell の
 # if として書く。bash は ~/.profile (login の shell) がこれを読み、fish は config.fish (すべての fish) が、babelfish で
-# fish に直したもの (hm-session-vars.fish) を読む。
+# fish に直したもの (hm-session-vars.fish) を読む。ホストの module の home.sessionVariables は同じファイルの
+# この前で export されるので、そこに書いた SSL_CERT_FILE には残りが揃う。
 #
 # hm-session-vars は 1 つの session で 1 回しか読まない (__HM_SESS_VARS_SOURCED を子へ継ぐ)。switch の前から
-# 続いている process (herdr の server など) の下で開いた shell には入らない。反映のしかたは nix/README.md の
-# 「証明書の束を OS の信頼ストアに寄せる」。
+# 続いている process (herdr の server など) の下で開いた shell には入らない。反映のしかた・効かないところ
+# (cacert を含む devShell の中など)・副作用は nix/README.md の「証明書の束を OS の信頼ストアに寄せる」。
 { lib, pkgs, ... }:
 
 let
@@ -39,10 +43,10 @@ in
 {
   home.sessionVariablesExtra = lib.mkIf pkgs.stdenv.hostPlatform.isLinux ''
     if [ -f ${bundle} ]; then
-      export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-${bundle}}"
-      export SSL_CERT_FILE="''${SSL_CERT_FILE:-${bundle}}"
-      export REQUESTS_CA_BUNDLE="''${REQUESTS_CA_BUNDLE:-${bundle}}"
-      export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="''${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-${bundle}}"
+      export SSL_CERT_FILE="''${SSL_CERT_FILE:-''${NIX_SSL_CERT_FILE:-${bundle}}}"
+      export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-$SSL_CERT_FILE}"
+      export REQUESTS_CA_BUNDLE="''${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"
+      export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="''${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-$SSL_CERT_FILE}"
     fi
   '';
 }
