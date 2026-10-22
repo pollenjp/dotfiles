@@ -2196,6 +2196,7 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
+| `~/.local/state/dotfiles/claude-ssh-agent-notice.json` | `dotfiles.claude.sshAgentNotice.extraCommands` から生成 | ファイル（中で ssh を打つ道具の一覧。[後述](#1password-の-ssh-承認を知らせるフック)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -2351,6 +2352,41 @@ writing-plans と finishing を条件つきにしているのは、計画だけ�
 script の中で見る（`"if": "Skill(…)"` は Claude Code 2.1.299 で発火しなかった）。登録は上と同じ
 `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PostToolUse` に 1 件（`Skill`）足す。
 
+#### 1Password の SSH 承認を知らせるフック
+
+`nix/files/claude/hooks/ssh-agent-notice.sh`。Claude が SSH agent（1Password）を使うコマンドを Bash で打つ前に、
+「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせ、断られたら打ち直さずに選択肢の問いを出させる。
+herdr の中の agent は手元の PC から転送された接続のもので（[前述](#forward-された-agent-を固定名で見せる)）、
+1Password の承認の画面にはどの pane が頼んだかが出ないため（経緯は
+[ADR 029](../docs/adr/029_claude_ssh_agent_notice_20261022T194758JST/README.md)）。判断は script がするので token を使わない。
+
+| いつ | すること |
+| --- | --- |
+| 打つ前（PreToolUse） | 一覧に当たれば、会話の画面に「🔑 1Password の承認が出るかも (<種類>): <コマンドの頭> — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: …)」を出す（WSL で `SSH_AUTH_SOCK` が空なら「Windows の 1Password が出す」）。herdr の pane なら、herdr の通知（どこから・頭・接続の 3 行、音つき）も出す。同じ pane からの通知は 10 分に 1 回。コマンドは止めない |
+| 断られたあと（PostToolUse・PostToolUseFailure） | 出力に agent の断り・agent との通信が切れた・agent に届かない（git の署名で口が無い・口の先が無いときの鍵の認証の失敗）があれば、Claude に「同じコマンドを打ち直さない。何をとどこからを書いてから、① 直し方（承認する・接続し直す・1Password を起動するなど）で打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く。herdr の通知（理由ごとの title）も出す |
+
+| 種類 | 打つ前に当てるもの |
+| --- | --- |
+| ssh の接続 | `ssh`・`scp`・`sftp`・`ssh-copy-id`・`sshfs`・`mosh`・`autossh`、`rsync` の `<host>:`、`nixos-rebuild` の `--target-host`・`--build-host`、`nix-copy-closure`、`nix` の `ssh://`、git の clone・fetch・pull・push・ls-remote で相手の URL が ssh |
+| 署名 | git の commit・merge・rebase・cherry-pick・revert・am・pull・commit-tree・tag・`push --signed` で署名するとき（git に実効の設定を聞く。Claude の会話は[無署名](#commit-を無署名にする)なので、素の `git commit` は当たらない）・`ssh-keygen -Y sign`・`ssh-add -T` |
+| 設定の一覧 | host option **`dotfiles.claude.sshAgentNotice.extraCommands`** の項目 |
+
+- コマンドの文字は、引用符・heredoc の本文・コメントを外して単純コマンドに分けて見る（commit のメッセージに ssh と
+  書いても当たらない）。包むコマンド（`timeout`・`sudo`・`env`・`nix develop -c` など）は外し、`bash -c` などに文字列で
+  渡したものは読み直す。script の中・関数・alias・変数に入れたコマンドは見えない（断られれば、あとの問いで受ける）
+- 中で ssh を打つ道具は、使う PC のホストの値（dotfiles-private に登録したファイルか `~/dotfiles/flake.nix` の tmp）の
+  `mkHome` に `claude.sshAgentNotice.extraCommands = [ "nix run .#vm" ];` と書く。項目は語を空白で区切った glob で、
+  1 語目をコマンドの頭の語に、残りを引数の中に順に当てる（`nix run -L .#vm -- ip` にも当たる）。home-manager が
+  `~/.local/state/dotfiles/claude-ssh-agent-notice.json` に置き、hook が読む（反映は `~/dotfiles/setup --update`）
+- 断りの文言は、行の終わりが文言のときだけ当てる（OpenSSH の行の終わりの `\r` は外して見る）。成功した Bash
+  （`2>&1 | tail` で終了コードが隠れたもの）では、行の頭も ssh・git が出す形に固定する。grep・cat・diff の結果に出た
+  文言では当てない
+- 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
+  しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`
+  に 1 件ずつ（`Bash`）足す。0 以外で終わった Bash には PostToolUse が来ず、PostToolUseFailure だけが来る
+  （Claude Code 2.1.306 で確かめた）
+
 ### statusLine
 
 Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
@@ -2495,6 +2531,9 @@ tag も同じダイアログで止まるので併せて落とす。
 
 > ⚠️ branch protection の "Require signed commits" が有効な repo では、Claude が作った
 > commit は push で弾かれる。Claude が rebase / amend した既存 commit の署名も落ちる。
+
+Claude の commit では 1Password の承認の画面は出ないので、[1Password の SSH 承認を知らせるフック](#1password-の-ssh-承認を知らせるフック)
+も素の `git commit` には当たらない（`-S` や `git -c commit.gpgsign=true` で署名するときだけ当たる）。
 
 #### GitHub へは gh の資格情報（HTTPS）で通す
 

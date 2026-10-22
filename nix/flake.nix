@@ -223,6 +223,7 @@
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
+          ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           pjp-google-ime-unittest =
             pkgs.runCommand "pjp-google-ime-unittest"
@@ -336,6 +337,14 @@
               ;
           };
           claude-video-offer-state = import ./tests/claude-video-offer.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-ssh-agent-notice-state = import ./tests/claude-ssh-agent-notice.nix {
             inherit
               lib
               pkgs
