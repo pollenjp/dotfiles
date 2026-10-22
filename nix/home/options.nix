@@ -18,6 +18,8 @@
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
+#   dotfiles.osCaBundle.enable                   自前の証明書の束を持つツールを、環境変数で OS の信頼ストアに寄せるか (Linux)
+#   dotfiles.osCaBundle.requestsCaBundle.enable  そのうち REQUESTS_CA_BUNDLE も入れるか
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
 # 平坦に並べていたときの「どの組み合わせが有効なのか判らない」を避けるため。
@@ -349,6 +351,43 @@ in
       - port を変える前に作ったページのリンク (http://localhost:<前の port>/…) は開けなくなる。
         ページそのものは残るので、リンクの port を今の値に書き換えれば開ける
     '';
+  };
+
+  options.dotfiles.osCaBundle = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        自前の証明書の束を持つツール (nixpkgs の python の certifi・uv・venv の requests・gcloud) にも
+        OS の信頼ストア (/etc/ssl/certs/ca-certificates.crt) を読ませる環境変数 (NIX_SSL_CERT_FILE・
+        SSL_CERT_FILE・REQUESTS_CA_BUNDLE・CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE) を、session に入れるか
+        (home/modules/os-ca-bundle.nix。ADR 028)。入るのは Linux のホストで束があるときだけ (macOS では
+        何もしない)。
+
+        false にすると 4 つとも入れない。入れたくないホストだけ、そのホストの modules
+        (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
+
+        反映は `~/dotfiles/setup --update` のあと、新しい login から開いた shell から (反映の前から
+        続いている process の下の shell には入らない。nix/README.md の「証明書の束を OS の信頼ストアに寄せる」)。
+      '';
+    };
+
+    requestsCaBundle.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        `enable = true` のとき、REQUESTS_CA_BUNDLE も入れるか。false にすると、残りの 3 つ
+        (NIX_SSL_CERT_FILE・SSL_CERT_FILE・CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE) だけを入れる。
+        `enable = false` なら意味を持たない (4 つとも入れない)。
+
+        requests は REQUESTS_CA_BUNDLE を、アプリが Session に置いた verify (私設 CA の束・False) より
+        先に使う。Session の verify で自己署名の機器などに繋ぐ script をよく動かすホストは false にする
+        (コマンド 1 回だけなら `REQUESTS_CA_BUNDLE= <コマンド>` と空で打てば足りる)。false にすると、
+        venv に入れた PyPI の requests は certifi の束を読むまま残る。
+      '';
+    };
   };
 
   options.dotfiles.wsl = {

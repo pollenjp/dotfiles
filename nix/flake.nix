@@ -413,6 +413,14 @@
               system
               ;
           };
+          os-ca-bundle-state = import ./tests/os-ca-bundle.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
         }
       );
 

@@ -34,6 +34,7 @@
 | [025](./025_herdr_agent_borrow_20261020T210555JST/README.md) | herdr の固定名を session ごとに持ち、herdr を包んだ実行ファイル・`~/.ssh/rc`・見張りで、同じマシン (`PJP_SSH_CLIENT`) から来ている生きている接続を借りる | 2026-10-20 |
 | [026](./026_dotfiles_private_hosts_20261020T215857JST/README.md) | 実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が `--host` なしで hostname から選ぶ (登録は skill と script) | 2026-10-20 |
 | [027](./027_stop_guessing_host_20261021T143517JST/README.md) | setup は対象ホストを推測せず (決まらなければ止めて選べる道を出す)、公開の登録簿から実機を外し、PC の値は dotfiles-private の登録かローカル flake の tmp の 1 か所にだけ書く (雛形から `local` を外し、Dev Tracker の既定を false に。段階 3) | 2026-10-21 |
+| [028](./028_os_ca_bundle_env_20261022T180804JST/README.md) | 自前の証明書の束を持つツール (nixpkgs の python の certifi・uv・venv の requests・gcloud) を、4 つの環境変数で OS の信頼ストアに寄せる。Linux の全ホストで束があるときだけ入れ、すでに束を指す変数があれば残りをそれに揃える (`hm-session-vars` の末尾)。入れる変数はホストの option で選べる (4 つ・`REQUESTS_CA_BUNDLE` 以外の 3 つ・入れない) | 2026-10-22 |
 | [029](./029_claude_ssh_agent_notice_20261022T194758JST/README.md) | Claude の作業が SSH agent (1Password) を使う前に hook で知らせ (どこから・何を・承認の画面が出る接続)、断られたら打ち直さずに選択肢の問いを出させる (skill にしない。git は署名するときだけ当てる) | 2026-10-22 |
 
 ## ディレクトリ名
