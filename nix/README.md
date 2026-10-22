@@ -1343,7 +1343,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --dry-run  # 判定だけ見る
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
-./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと sidebar の行が WSL と Windows で同じか（CI の lint でも走る）
+./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、配った割り当てを Keyboard Manager に読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
@@ -3137,7 +3137,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドが WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 

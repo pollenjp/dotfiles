@@ -227,20 +227,22 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 ## herdr
 
 `herdr/config.toml` は Windows の herdr (WinGet の `Herdr.Herdr.Preview`) の設定で、
-`%APPDATA%\herdr\config.toml` へ配る。キーバインドと sidebar の行は WSL の herdr
-(`nix/files/herdr/config.toml`) と同じにしてあり、キーや行ごとの意図はそちらのコメントにある。
+`%APPDATA%\herdr\config.toml` へ配る。キーバインドと `[ui]` (sidebar の幅と行・toast) は WSL の herdr
+(`nix/files/herdr/config.toml`) と同じにしてあり、キーや値ごとの意図はそちらのコメントにある。
 
-- `[keys]`・`onboarding`・`[ui.sidebar]` は WSL 側と同じに保つ。CI の lint が 2 つを比べ、違えば落ちる。
+- `[keys]`・`onboarding`・`[ui]` は WSL 側と同じに保つ。CI の lint が 2 つを比べ、違えば落ちる。
   手元でも確かめられる:
 
   ```sh
   nix/scripts/check-herdr-keys.sh   # 「WSL と Windows で同じ (キー 13 個)」と出れば揃っている
   ```
 
-- `[ui.sidebar]` を揃えるのは、`hr` (`herdr --remote`) で WSL や Linux の herdr に attach したときも、
-  sidebar を描くのは Windows の herdr で、このファイルを読むため (つないだ先の設定は読まない)。
+- `[ui]` を揃えるのは、`hr` (`herdr --remote`) で WSL や Linux の herdr に attach したときも、
+  sidebar や toast を描くのは Windows の herdr で、このファイルを読むため (つないだ先の設定は読まない)。
   sidebar の workspace の 2 行目の先頭に、子の workspace の親 (`$parent`。claude-skills の
-  `ws-mark.sh` が置く token) を出している ([TKT-305](https://app.notion.com/p/herdr-sidebar-workspace-2-token-parent-nix-files-herdr-config-toml-ui-s-40179149a66f81d6a4f0ce9cd5a296df))
+  `ws-mark.sh` が置く token) を出している ([TKT-305](https://app.notion.com/p/herdr-sidebar-workspace-2-token-parent-nix-files-herdr-config-toml-ui-s-40179149a66f81d6a4f0ce9cd5a296df))。
+  sidebar の幅は 40 桁で、右端の縦線をドラッグすると 80 桁まで広げられる。今見ていない tab の agent が
+  終わった・入力を待っているときは、herdr の画面の中に toast を出す ([TKT-319](https://app.notion.com/p/herdr-sidebar-sidebar_width-40-sidebar_max_width-80-toast-delivery-herdr-WSL--40179149a66f81efb793f4bb6ad39c73))
 
 - WSL 側との違いは 2 つ。`[terminal]` を書かない (WSL 側の `default_shell = "fish"` は
   Windows に無い。空のままなら、Windows の herdr は PATH の `pwsh.exe` (PowerShell 7) を使い、
@@ -248,7 +250,9 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
   `[update] version_check = false` で新しい版の通知を止める ([herdr を入れる](#herdr-を入れる-winget))
 - 配った後は、herdr の中で prefix + shift + r (外からなら PowerShell で `hreload`) で読み直す。
   `hr` で attach している画面は PowerShell の `hreload` (Windows の herdr server に届く) では
-  読み直さないので、その画面の中で prefix + shift + r を押す
+  読み直さないので、その画面の中で prefix + shift + r を押す。縦線のドラッグで決めた sidebar の幅は
+  `%LOCALAPPDATA%\herdr\client-shell\` に残り、読み直しても変わらない。縦線をダブルクリックすると
+  設定の幅 (`sidebar_width`) に戻る
 - 書いたキー名が Windows の herdr で通るかは、`HERDR_CONFIG_PATH` で場所を差し替えて確かめる
   (本物の設定には触れない):
 

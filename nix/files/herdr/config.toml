@@ -13,9 +13,9 @@
 # 有効なキー名・既定値は `herdr --default-config` で全部出せる。
 # 起動中なら prefix + ? で今効いているバインドが一覧できる。
 #
-# Windows 側の herdr にも、同じ [keys]・onboarding・[ui.sidebar] を win/herdr/config.toml で
-# 配っている ([terminal] だけ持たない)。キーや sidebar の行を変えたら両方を直す。CI が 2 つを
-# 比べ、違えば落ちる (nix/scripts/check-herdr-keys.sh)。
+# Windows 側の herdr にも、同じ [keys]・onboarding・[ui] (sidebar の幅と行・toast) を
+# win/herdr/config.toml で配っている ([terminal] だけ持たない)。キーや [ui] を変えたら両方を直す。
+# CI が 2 つを比べ、違えば落ちる (nix/scripts/check-herdr-keys.sh)。
 
 # 初回起動時のオンボーディングを出さない。
 #
@@ -190,6 +190,26 @@ new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 #   zellij space  (swap layout) herdr に layout の概念が無い
 
 ##############################################################################
+# sidebar の幅
+##############################################################################
+
+[ui]
+# sidebar の幅 (桁)。herdr は既定の幅 sidebar_width を sidebar_min_width〜sidebar_max_width に
+# 収めて使う。既定は 26 と 18〜36 で、sidebar_width だけを上げても 36 で止まる。workspace の名前の
+# 印 (🌳[N]TKT-n …) や 2 行目の親 (↑ TKT-n) で既定の幅では切れやすいので、既定を 40、上限を 80 に
+# 上げる (下限は既定の 18 のまま)。`herdr --default-config` にある「workspace の名前で自動で広がる」は
+# 0.9.1 には無い。
+#
+# 操作中は sidebar の右端の縦線をマウスでドラッグして幅を変えられ、sidebar_max_width で止まる。
+# ドラッグした幅は client の手元 (~/.local/state/herdr/client-shell/) に残り、herdr を起こし直しても
+# reload (prefix + shift + r) しても戻らない。縦線をダブルクリックすると sidebar_width に戻る。
+#
+# 幅は client の設定で、Windows から hr (herdr --remote) で attach した画面では win/herdr/config.toml の
+# 値が効く。同じ値をそちらにも書いてある。
+sidebar_width = 40
+sidebar_max_width = 80
+
+##############################################################################
 # sidebar の workspace の行
 ##############################################################################
 
@@ -220,3 +240,16 @@ rows = [
   ["state_icon", "workspace"],
   [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
 ]
+
+##############################################################################
+# 知らせ (toast)
+##############################################################################
+
+[ui.toast]
+# 今見ていない tab の agent が終わった・入力を待っている (needs attention) とき、herdr の画面の
+# 中 (既定で右下) に toast を出す。herdr の既定は "off" (出さない)。ほかに "terminal" (外の端末に
+# デスクトップ通知を頼む) と "system" (OS の通知に出す) がある。
+#
+# 出すかどうかは画面を描く client の設定で決まる。Windows から hr で attach した画面では
+# win/herdr/config.toml の値が効くので、同じ値をそちらにも書いてある。
+delivery = "herdr"

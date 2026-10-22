@@ -215,9 +215,9 @@ jobs:
       - name: win/windows-terminal/
         run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-terminal.sh --check
 
-      # herdr のキーバインドと sidebar の行を WSL (nix/files/herdr/config.toml) と Windows
+      # herdr のキーバインドと [ui] (sidebar の幅と行・toast) を WSL (nix/files/herdr/config.toml) と Windows
       # (win/herdr/config.toml) でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
-      - name: herdr のキーバインドと sidebar の行 (WSL と Windows)
+      - name: herdr のキーバインドと [ui] (WSL と Windows)
         run: ./nix/scripts/check-herdr-keys.sh
 
   # 閉包を SBOM 化して OSV / GHSA / NVD と照合する (ADR 006)。
