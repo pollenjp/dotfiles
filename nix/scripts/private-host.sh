@@ -23,8 +23,8 @@
 #
 # この PC を登録する手順 (skill pjp-dotfiles-register-host) のうち、決まった処理を持つ。判断と確認の取り方は skill。
 #
-#   inspect   この PC を調べる (名前・WSL・clone と登録・ローカル flake の手で足したホストと local (前の雛形)・setup が
-#             選ぶホスト・今の世代と outPath が一致するホスト = 元にするホストの候補)
+#   inspect   この PC を調べる (名前・WSL・clone と登録と shared/ の module・ローカル flake の手で足したホストと local
+#             (前の雛形)・setup が選ぶホスト・今の世代と outPath が一致するホスト = 元にするホストの候補)
 #   draft     元にするホスト (ローカル flake で評価した値。前の雛形なら local も当たる) の options.dotfiles から、
 #             nix/hosts/<名前>.nix の下書きを描く (nix/lib/host-draft.nix。dotfiles の option の外の local の行は、描かずに
 #             頭のコメントで知らせる)
@@ -32,7 +32,14 @@
 #             ローカル flake の値は当たらない) を、同じ本体・同じ lock で評価して drvPath を比べる。同じなら、この登録で
 #             世代の中身は変わらない
 #
-# 評価はローカル flake の写しで行い、ユーザーの ~/dotfiles (flake.nix と flake.lock) にも dotfiles-private にも書かない。
+# dotfiles-private の nix/shared/*.nix (登録した全ホストに足す module。ADR 030) は、ホストのファイルの外の値なので、登録の
+# 判定から外す。compare は shared/ に module があれば新しい形を shared/ を外しても評価し、それが旧い形と同じなら
+# 「同じ (shared/ の値だけ違う)」として 0 を返し、shared/ が足す値は別に出す。元のホストが dotfiles-private に登録した
+# ホスト (値を直すとき) なら、その元のホストにもローカル flake の読む shared/ が当たっているので、draft と compare の
+# 旧い形は shared/ を外して評価する (下書きに shared/ の値を描かない・ホストのファイルどうしで比べる)。
+#
+# 評価はローカル flake の写しで行い、ユーザーの ~/dotfiles (flake.nix と flake.lock) にも dotfiles-private にも書かない
+# (shared/ を外すのも、dotfiles-private の nix/ の写しで行う)。
 
 set -eu -o pipefail
 
@@ -50,18 +57,22 @@ usage() {
       ローカル flake の雛形が dotfiles-private の入力に書く場所を出す (clone の nix/ が無ければ <本体の nix>/private-stub。
       --nix-dir の既定はこの script の repo の nix/)
   private-host.sh inspect [--flake <dir>]
-      この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録・ローカル flake (雛形の版・入力・手で
-      足したホスト・前の雛形なら local の行)・setup が --host なしで選ぶホスト (決まらなければそう出す)・今の世代と
-      outPath が一致するホスト
+      この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録と shared/ の module (登録した全ホストに
+      足す)・ローカル flake (雛形の版・入力・手で足したホスト・前の雛形なら local の行)・setup が --host なしで選ぶ
+      ホスト (決まらなければそう出す)・今の世代と outPath が一致するホスト
   private-host.sh draft --base <ホスト> [--flake <dir>] [--name <名前>] [--nix-dir <本体の nix>] [--out <ファイル> [--force]]
       元にするホスト (前の雛形なら + local) から nix/hosts/<名前>.nix の下書きを描く。評価する本体は compare と同じ (--nix-dir。既定は
-      この script の repo の nix/)。--out が無ければ stdout。在る --out は --force が無いと書かない (2)。元のホストを
-      評価できなければ 3
+      この script の repo の nix/)。元のホストが dotfiles-private に登録したホストなら、ローカル flake の読む shared/ を
+      外して描く (shared/ の値はホストのファイルに書かない)。--out が無ければ stdout。在る --out は --force が無いと
+      書かない (2)。元のホストを評価できなければ 3
   private-host.sh compare --base <ホスト> --private <dotfiles-private の作業ツリー> [--name <名前>] [--flake <dir>]
                           [--nix-dir <本体の nix>] [--out <作業場所>]
       旧い形 (ローカル flake の <ホスト>) と新しい形 (<作業ツリー>/nix/hosts/<名前>.nix) を同じ本体 (--nix-dir。既定は
-      この script の repo の nix/)・同じ lock で評価し、drvPath を比べる。0 = 同じ、1 = 違う (config.dotfiles の違いを
-      出す)、2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形が評価できない
+      この script の repo の nix/)・同じ lock で評価し、drvPath を比べる。<作業ツリー>/nix/shared/ に module があれば、
+      新しい形を shared/ を外しても評価し、ホストのファイルの違いと shared/ が足す値を分けて出す (元のホストが
+      dotfiles-private に登録したホストなら、旧い形からもローカル flake の読む shared/ を外す)。
+      0 = 同じ (shared/ を外すと同じ = shared/ の値だけ違うときも)、1 = 違う (config.dotfiles の違いを出す)、
+      2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形 (shared/ を足した形) が評価できない
   private-host.sh -h, --help
       これ
 
@@ -245,17 +256,59 @@ input_path() {
   printf '%s' "${p%%$'\n'*}"
 }
 
-# flake.nix ($1) の inputs.dotfiles.url を path:<$2> に書き換える (比べるための写しで、本体を揃える)
-set_main() {
-  awk -v nd="$2" '
-    !done && /^[[:space:]]*inputs\.dotfiles\.url[[:space:]]*=[[:space:]]*"path:[^"]*"/ {
+# flake.nix ($1) の inputs.<$2>.url を path:<$3> に書き換える ($2 は dotfiles か dotfiles-private。比べるための写しで、
+# 本体を揃える・shared/ を外した dotfiles-private の写しを指す)
+set_input() {
+  awk -v name="$2" -v dir="$3" '
+    !done && $0 ~ ("^[[:space:]]*inputs\\." name "\\.url[[:space:]]*=[[:space:]]*\"path:[^\"]*\"") {
       match($0, /^[[:space:]]*/)
-      print substr($0, 1, RLENGTH) "inputs.dotfiles.url = \"path:" nd "\";"
+      print substr($0, 1, RLENGTH) "inputs." name ".url = \"path:" dir "\";"
       done = 1
       next
     }
     { print }
   ' "$1" >"$1.new" && mv "$1.new" "$1"
+}
+
+# dotfiles-private の nix/ ($1) の shared/ の module (privateHosts が拾うもの: .nix で終わり、. で始まらないファイル)。
+# 「, 」でつなぐ
+shared_modules() {
+  local f out=""
+  for f in "$1"/shared/*.nix; do
+    [[ -f ${f} ]] || continue
+    f=${f##*/}
+    out+="${out:+, }${f}"
+  done
+  printf '%s' "${out}"
+}
+
+# flake の写し ($1) の dotfiles-private の入力から shared/ を外す: 入力の nix/ を shared/ だけ除いて <$1>-private に写し、
+# 入力をそこへ指し直す (lock は呼ぶ側が lock_sync で張り直す)。dotfiles-private には書かない
+strip_shared() {
+  local d p f
+  d=$(cd -P -- "$1" && pwd)
+  check_path "${d}"
+  p=$(input_path "${d}/flake.nix" dotfiles-private)
+  mkdir -p "${d}-private"
+  for f in "${p}"/* "${p}"/.[!.]*; do
+    [[ -e ${f} || -L ${f} ]] || continue
+    [[ ${f##*/} != shared ]] || continue
+    cp -R -p "${f}" "${d}-private/" || die "dotfiles-private の nix/ を写せません: ${f}"
+  done
+  set_input "${d}/flake.nix" dotfiles-private "${d}-private"
+}
+
+# flake の写し ($1) で、元のホスト $2 が dotfiles-private の入力に登録したホスト (hosts/$2.nix) で、その shared/ に
+# module があれば、shared/ を外し (strip_shared)、外した module を「, 」でつないで出す。元のホストに当たっている shared/ を、
+# 下書きと compare の旧い形から外すため。どちらでもなければ何もしない
+strip_base_shared() {
+  local p mods
+  p=$(input_path "$1/flake.nix" dotfiles-private)
+  [[ -n ${p} && -f ${p}/hosts/$2.nix ]] || return 0
+  mods=$(shared_modules "${p}")
+  [[ -n ${mods} ]] || return 0
+  strip_shared "$1"
+  printf '%s' "${mods}"
 }
 
 # ローカル flake ($1) の flake.nix・flake.lock と隣のファイル (flake.nix が import するもの) を $2 に写す。
@@ -457,6 +510,8 @@ cmd_inspect() {
   fi
   hand=$(clone_hosts "${clone}")
   printf '  登録してあるホスト: %s\n' "${hand:-なし}"
+  hand=$(shared_modules "${clone}/nix")
+  printf '  shared/ (登録した全ホストに足す module): %s\n' "${hand:-なし}"
 
   printf '==> ローカル flake: %s\n' "${f}"
   if [[ ! -f ${f} ]]; then
@@ -561,7 +616,7 @@ cmd_inspect() {
 }
 
 cmd_draft() {
-  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} out="" force=0 text lines l
+  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} out="" force=0 text lines l base_shared note=""
   while [[ $# -gt 0 ]]; do
     case $1 in
       --base | --flake | --name | --nix-dir | --out)
@@ -597,7 +652,13 @@ cmd_draft() {
   need_nix
   need_tmp
   copy_flake "${flake_dir}" "${tmp}/cur"
-  set_main "${tmp}/cur/flake.nix" "${nd}"
+  set_input "${tmp}/cur/flake.nix" dotfiles "${nd}"
+  # 元のホストが dotfiles-private に登録したホスト (値を直すとき) なら、元のホストに当たっている shared/ を外して描く
+  # (shared/ の値は登録した全ホストに足すので、ホストのファイルに書くと 2 重になる)
+  base_shared=$(strip_base_shared "${tmp}/cur" "${base}") || exit 2
+  if [[ -n ${base_shared} ]]; then
+    note="元のホスト ${base} は dotfiles-private に登録したホストなので、shared/ (${base_shared}) を外して描いた (shared/ の値は登録した全ホストに足すので、ホストのファイルには書かない)"
+  fi
   if ! lock_sync "${tmp}/cur"; then
     echo "!! ローカル flake の写しの lock を、path: の入力に合わせられません:" >&2
     eval_error_excerpt "${tmp}/cur.lock.log" >&2
@@ -623,6 +684,7 @@ cmd_draft() {
   fi
   if [[ -z ${out} ]]; then
     printf '%s\n' "${text}"
+    [[ -z ${note} ]] || printf '==> %s\n' "${note}" >&2
     return 0
   fi
   mkdir -p "$(dirname -- "${out}")"
@@ -630,11 +692,60 @@ cmd_draft() {
   printf '==> 下書きを書きました: %s\n' "${out}"
   printf '  元にしたホスト: %s (ローカル flake で評価した値。前の雛形なら local も当たる)\n' "${base}"
   [[ -z ${lines} ]] || echo "  local に dotfiles の option の外の行があります (下書きの頭のコメント)。要るなら modules に足す"
+  [[ -z ${note} ]] || printf '  %s\n' "${note}"
+}
+
+# dotfiles-private の nix/ ($3) のホストだけを出す flake を $1 に書く (compare の新しい形。本体は $2)
+private_flake() {
+  mkdir -p "$1"
+  cat >"$1/flake.nix" <<EOS
+# private-host.sh compare が作った、dotfiles-private の nix/ のホストだけを出す flake (比べるための写し)
+{
+  inputs.dotfiles.url = "path:$2";
+  inputs.dotfiles-private.url = "path:$3";
+  inputs.dotfiles-private.flake = false;
+  outputs =
+    { dotfiles, dotfiles-private, ... }:
+    {
+      homeConfigurations = dotfiles.lib.privateHosts dotfiles-private;
+    };
+}
+EOS
+}
+
+# flake の写し ($1) のホスト ($2) の dotfiles の option の値を、<$1>.dotfiles.tsv に「パス<TAB>値の JSON」で書く。
+# 書いてあれば評価し直さない (1 つの形を 2 つの違いで使う)。読めなければ 1
+dotfiles_tsv() {
+  [[ ! -f $1.dotfiles.tsv ]] || return 0
+  nix eval --raw "path:$1#homeConfigurations" --apply "$(dotfiles_expr "$2")" >"$1.dotfiles.tsv.part" 2>/dev/null \
+    && mv "$1.dotfiles.tsv.part" "$1.dotfiles.tsv"
+}
+
+# 2 つの形の config.dotfiles の違いを「    パス: 前 → 後」で 1 行ずつ出す ($1・$2: 前の形の flake の写しとホスト、
+# $3・$4: 後の形。$5: 違いが無いときに出す行)
+dotfiles_diff() {
+  local text
+  if ! dotfiles_tsv "$1" "$2" || ! dotfiles_tsv "$3" "$4"; then
+    echo "    (config.dotfiles を読めませんでした)"
+    return 0
+  fi
+  text=$(
+    awk -F'\t' '
+      FILENAME == ARGV[1] { a[$1] = $2; next }
+      { b[$1] = $2 }
+      END {
+        for (k in a) if (!(k in b)) print "    " k ": " a[k] " → (無い)"
+        for (k in b) if (!(k in a)) print "    " k ": (無い) → " b[k]; else if (a[k] != b[k]) print "    " k ": " a[k] " → " b[k]
+      }
+    ' "$1.dotfiles.tsv" "$3.dotfiles.tsv" | sort
+  )
+  printf '%s\n' "${text:-$5}"
 }
 
 cmd_compare() {
-  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} private="" out="" pnix work res
-  local old_drv old_out new_drv new_out gen diff_text
+  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} private="" out="" pnix work res side rc
+  local old_drv old_out new_drv new_out bare_drv="" gen shared base_shared sides=(old new)
+  local same_outside="    (config.dotfiles は同じ。dotfiles の option の外 (local や modules の programs.* など) が違う)"
   while [[ $# -gt 0 ]]; do
     case $1 in
       --base | --private | --name | --flake | --nix-dir | --out)
@@ -688,26 +799,22 @@ cmd_compare() {
     work="${tmp}/compare"
   fi
 
-  # 旧い形: ローカル flake の写しの本体を --nix-dir に揃える。新しい形: privateHosts だけを出す flake
+  # 旧い形: ローカル flake の写しの本体を --nix-dir に揃える。元のホストが dotfiles-private に登録したホストなら、ローカル
+  # flake の読む shared/ を外す (ホストのファイルどうしで比べる)。新しい形: privateHosts だけを出す flake。shared/ に module が
+  # あれば、shared/ を外した新しい形 (new-noshared) も作る
   copy_flake "${flake_dir}" "${work}/old"
-  set_main "${work}/old/flake.nix" "${nd}"
-  mkdir -p "${work}/new"
-  cat >"${work}/new/flake.nix" <<EOS
-# private-host.sh compare が作った、dotfiles-private の nix/ のホストだけを出す flake (比べるための写し)
-{
-  inputs.dotfiles.url = "path:${nd}";
-  inputs.dotfiles-private.url = "path:${pnix}";
-  inputs.dotfiles-private.flake = false;
-  outputs =
-    { dotfiles, dotfiles-private, ... }:
-    {
-      homeConfigurations = dotfiles.lib.privateHosts dotfiles-private;
-    };
-}
-EOS
-  for side in old new; do
-    if [[ ${side} == new && -f ${work}/old/flake.lock ]]; then
-      cp "${work}/old/flake.lock" "${work}/new/flake.lock"
+  set_input "${work}/old/flake.nix" dotfiles "${nd}"
+  base_shared=$(strip_base_shared "${work}/old" "${base}") || exit 2
+  private_flake "${work}/new" "${nd}" "${pnix}"
+  shared=$(shared_modules "${pnix}")
+  if [[ -n ${shared} ]]; then
+    private_flake "${work}/new-noshared" "${nd}" "${pnix}"
+    strip_shared "${work}/new-noshared"
+    sides+=(new-noshared)
+  fi
+  for side in "${sides[@]}"; do
+    if [[ ${side} != old && -f ${work}/old/flake.lock ]]; then
+      cp "${work}/old/flake.lock" "${work}/${side}/flake.lock"
     fi
     if ! lock_sync "${work}/${side}"; then
       printf '!! 比べるための写し (%s) の lock を、path: の入力に合わせられません:\n' "${side}" >&2
@@ -719,6 +826,14 @@ EOS
   printf '==> 比べる: 旧い形 %s (ローカル flake の写し。前の雛形なら local が当たる) と、新しい形 %s (%s/hosts/%s.nix。ローカル flake の値は当たらない)\n' \
     "${base}" "${name}" "${pnix}" "${name}"
   printf '  本体: %s\n' "${nd}"
+  if [[ -n ${shared} ]]; then
+    printf '  shared/ の module: %s (%s/shared。登録した全ホストに足す値で、ホストのファイルの外。shared/ を外した新しい形とも比べ、分けて出す)\n' \
+      "${shared}" "${pnix}"
+  fi
+  if [[ -n ${base_shared} ]]; then
+    printf '  旧い形 %s は dotfiles-private に登録したホストなので、ローカル flake が読む shared/ (%s) を外して評価する (ホストのファイルどうしで比べる)\n' \
+      "${base}" "${base_shared}"
+  fi
   echo "  評価しています (1 回 20〜60 秒)…"
   if ! res=$(nix eval --raw "path:${work}/old#homeConfigurations" --apply "$(drv_expr "${base}")" 2>"${work}/old.err"); then
     {
@@ -731,15 +846,20 @@ EOS
   old_out=${res#*$'\n'}
   if ! res=$(nix eval --raw "path:${work}/new#homeConfigurations" --apply "$(drv_expr "${name}")" 2>"${work}/new.err"); then
     {
-      printf '!! 新しい形 (%s/hosts/%s.nix) を評価できません (ファイルの誤りを直して比べ直す):\n' "${pnix}" "${name}"
+      printf '!! 新しい形 (%s/hosts/%s.nix。shared/ があれば足した形) を評価できません (ファイルの誤りを直して比べ直す):\n' "${pnix}" "${name}"
       eval_error_excerpt "${work}/new.err"
     } >&2
     exit 4
   fi
   new_drv=${res%%$'\n'*}
   new_out=${res#*$'\n'}
+  if [[ -n ${shared} ]] \
+    && res=$(nix eval --raw "path:${work}/new-noshared#homeConfigurations" --apply "$(drv_expr "${name}")" 2>"${work}/new-noshared.err"); then
+    bare_drv=${res%%$'\n'*}
+  fi
   printf '  旧い形 %s: %s\n' "${base}" "${old_drv}"
   printf '  新しい形 %s: %s\n' "${name}" "${new_drv}"
+  [[ -z ${shared} ]] || printf '  新しい形 %s (shared/ を外す): %s\n' "${name}" "${bare_drv:-評価できない}"
 
   gen=$(current_generation) || gen=""
   if [[ -z ${gen} ]]; then
@@ -748,6 +868,8 @@ EOS
     printf '  参考: 今の世代 (%s) は旧い形と一致する\n' "${gen}"
   elif [[ ${gen} == "${new_out}" ]]; then
     printf '  参考: 今の世代 (%s) は新しい形と一致する\n' "${gen}"
+  elif [[ -n ${base_shared} ]]; then
+    printf '  参考: 今の世代 (%s) はどちらとも一致しない (旧い形は shared/ を外して評価した。判定には使わない)\n' "${gen}"
   else
     printf '  参考: 今の世代 (%s) はどちらとも一致しない (本体が最後の switch から進んだ、など。判定には使わない)\n' "${gen}"
   fi
@@ -756,24 +878,26 @@ EOS
     echo "→ drvPath が同じ。この登録で home-manager の世代の中身は変わらない (元のホストの値を全部写せている)。"
     return 0
   fi
-  if nix eval --raw "path:${work}/old#homeConfigurations" --apply "$(dotfiles_expr "${base}")" >"${work}/d-old.tsv" 2>/dev/null \
-    && nix eval --raw "path:${work}/new#homeConfigurations" --apply "$(dotfiles_expr "${name}")" >"${work}/d-new.tsv" 2>/dev/null; then
-    diff_text=$(
-      awk -F'\t' '
-        FNR == NR { a[$1] = $2; next }
-        { b[$1] = $2 }
-        END {
-          for (k in a) if (!(k in b)) print "    " k ": " a[k] " → (無い)"
-          for (k in b) if (!(k in a)) print "    " k ": (無い) → " b[k]; else if (a[k] != b[k]) print "    " k ": " a[k] " → " b[k]
-        }
-      ' "${work}/d-old.tsv" "${work}/d-new.tsv" | sort
-    )
-    [[ -n ${diff_text} ]] || diff_text="    (config.dotfiles は同じ。dotfiles の option の外 (local や modules の programs.* など) が違う)"
-  else
-    diff_text="    (config.dotfiles を読めませんでした)"
+  if [[ -n ${bare_drv} ]]; then
+    if [[ ${old_drv} == "${bare_drv}" ]]; then
+      rc=0
+      echo "→ 同じ (shared/ の値だけ違う)。shared/ を外すと drvPath が同じで、ホストのファイルは元のホストの値を全部写せている。"
+    else
+      rc=1
+      echo "→ 違う (shared/ を外しても drvPath が違う。この登録でホストの値が変わる)。config.dotfiles の違い (旧い → shared/ を外した新しい形):"
+      dotfiles_diff "${work}/old" "${base}" "${work}/new-noshared" "${name}" "${same_outside}"
+    fi
+    echo "  shared/ が足す値 (登録した全ホストに当たる。config.dotfiles の、shared/ を外した新しい形 → 新しい形):"
+    dotfiles_diff "${work}/new-noshared" "${name}" "${work}/new" "${name}" \
+      "    (config.dotfiles は同じ。shared/ は dotfiles の option の外 (programs.* など) を変えている)"
+    return "${rc}"
+  fi
+  if [[ -n ${shared} ]]; then
+    echo "  shared/ を外した新しい形を評価できない (ホストのファイルが shared/ に頼っている、など)。shared/ を含めて比べる:"
+    eval_error_excerpt "${work}/new-noshared.err"
   fi
   echo "→ drvPath が違う (この登録で値が変わる)。config.dotfiles の違い (旧い → 新しい):"
-  printf '%s\n' "${diff_text}"
+  dotfiles_diff "${work}/old" "${base}" "${work}/new" "${name}" "${same_outside}"
   return 1
 }
 

@@ -32,6 +32,13 @@
 #     新しい形 (dotfiles.lib.privateHosts だけの flake の <名前>。同じ本体と <private>/nix を指す) の drvPath が同じなら 0、
 #     違えば 1 と config.dotfiles の違い、旧い形が落ちれば 3、新しい形が落ちれば 4、<private>/nix/hosts/<名前>.nix が
 #     無ければ 2。今の世代との一致は参考に出す。ユーザーの flake.nix と flake.lock は変えない
+#   - <private>/nix/shared/ に module (.nix で終わり . で始まらないファイル) があれば、compare は新しい形を shared/ を外しても
+#     評価する。外した形が旧い形と同じなら 0 (同じ。shared/ の値だけ違う)、違えば 1 で、ホストのファイルの違い (旧い →
+#     shared/ を外した新しい形) と shared/ が足す値 (shared/ を外した新しい形 → 新しい形) を分けて出す。shared/ を足した形が
+#     落ちれば 4、外した形だけが落ちれば原因を出して shared/ を含めた形で比べる (1)
+#   - 元のホストが、ローカル flake の読む dotfiles-private に登録したホストなら、compare は旧い形から、draft は元のホストから
+#     その shared/ を外して評価する (shared/ の値をホストのファイルの違いに出さない・下書きに描かない)。clone には書かない。
+#     inspect は clone の shared/ の module を出す
 
 set -u -o pipefail
 
@@ -275,12 +282,18 @@ fi
 #   nix hash path … <dir>              sha256-FAKE を出す
 #   nix flake lock / update … path:<d> <d>/flake.lock に sha256-FAKE を書く
 #   nix eval --raw --impure --expr …   (draft) PJP_FLAKE の flake.nix に「# FAKE_EVAL_ERROR: <文>」があれば落ちる。
-#                                      無ければ「DRAFT base=<PJP_BASE> name=<PJP_NAME>」と PJP_NOTES の中身を出す
+#                                      無ければ「DRAFT base=<PJP_BASE> name=<PJP_NAME>」と PJP_NOTES の中身を出す。flake.nix に
+#                                      「# FAKE_」の行が無く、dotfiles-private の入力に hosts/<PJP_BASE>.nix があれば (元のホストが
+#                                      登録したホスト)、そのファイルと入力の shared/*.nix の FAKE_DOTFILES を「VALUE <パス> <値>」
+#                                      で出す (draft が描く値。shared/ が当たっていれば、その値も描かれる)
 #   nix eval --raw path:<d>#homeConfigurations --apply <式>
-#     <d>/flake.nix を F とする。F が dotfiles-private の入力を持ち「# FAKE_」の行を持たなければ (compare の新しい形)、
-#     式の getAttr "<h>" の <h> の、その入力の hosts/<h>.nix を F にする。F に「# FAKE_EVAL_ERROR: <文>」があれば落ちる。
+#     <d>/flake.nix を F とする。F が dotfiles-private の入力を持ち「# FAKE_」の行を持たなければ (compare の新しい形・
+#     登録したホストの旧い形)、式の getAttr "<h>" の <h> の、その入力の hosts/<h>.nix を F にし、入力の shared/*.nix
+#     (shared/ の module) を当てる: shared/ の「# FAKE_EVAL_ERROR: <文>」で落ち、drvPath と outPath の後ろに +shared を
+#     付け、FAKE_DOTFILES の後ろに shared/ の FAKE_DOTFILES を足す (同じパスなら後ろの shared/ が勝つ)。shared/ が
+#     当たらないのに F に「# FAKE_NEEDS_SHARED: <文>」があれば落ちる。F に「# FAKE_EVAL_ERROR: <文>」があれば落ちる。
 #       tryEval (inspect)        F の「# FAKE_OUT: <h> <outPath>」ごとに「out<TAB><h><TAB><outPath>」(options.dotfiles を含む式は下)
-#       options.dotfiles         F の「# FAKE_DOTFILES: <パス> <値>」ごとに「<パス><TAB><値>」
+#       options.dotfiles         F (と shared/) の「# FAKE_DOTFILES: <パス> <値>」ごとに「<パス><TAB><値>」
 #       drvPath (compare)        F の「# FAKE_DRV: [<h>] <drvPath>」と「# FAKE_OUT: [<h>] <outPath>」を 2 行で
 fake_nix_bin="${work}/fake-nix-bin"
 mkdir -p "${fake_nix_bin}"
@@ -308,6 +321,12 @@ case $1 in
       [[ -z ${e} ]] || fail_with "${e}" >&2
       printf 'DRAFT base=%s name=%s\n' "${PJP_BASE}" "${PJP_NAME}"
       printf 'MAIN=%s\n' "$(sed -n 's|^ *inputs\.dotfiles\.url = "path:\([^"]*\)";|\1|p' "${PJP_FLAKE}/flake.nix")"
+      p=$(sed -n 's|.*inputs\.dotfiles-private\.url = "path:\([^"]*\)".*|\1|p' "${PJP_FLAKE}/flake.nix")
+      if [[ -n ${p} && -f ${p}/hosts/${PJP_BASE}.nix ]] && ! grep -q '^# FAKE_' "${PJP_FLAKE}/flake.nix"; then
+        for s in "${p}/hosts/${PJP_BASE}.nix" "${p}"/shared/*.nix; do
+          [[ ! -f ${s} ]] || sed -n 's/^# FAKE_DOTFILES: \([^ ]*\) \(.*\)$/VALUE \1 \2/p' "${s}"
+        done
+      fi
       cat "${PJP_NOTES}"
       exit 0
     fi
@@ -317,14 +336,24 @@ case $1 in
     expr=$5
     h=$(sed -n 's/.*getAttr "\([^"]*\)".*/\1/p' <<<"${expr}")
     p=$(sed -n 's|.*inputs\.dotfiles-private\.url = "path:\([^"]*\)".*|\1|p' "${f}")
+    shared=()
     if [[ -n ${p} && -n ${h} ]] && ! grep -q '^# FAKE_' "${f}"; then
       f="${p}/hosts/${h}.nix"
+      for s in "${p}"/shared/*.nix; do
+        [[ ! -f ${s} ]] || shared+=("${s}")
+      done
     fi
-    e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${f}")
+    e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${f}" ${shared[@]+"${shared[@]}"})
     [[ -z ${e} ]] || fail_with "${e}" >&2
+    if ((${#shared[@]} == 0)); then
+      e=$(sed -n 's/^# FAKE_NEEDS_SHARED: //p' "${f}")
+      [[ -z ${e} ]] || fail_with "${e}" >&2
+    fi
+    plus=""
+    ((${#shared[@]} == 0)) || plus=+shared
     case ${expr} in
       *options.dotfiles*)
-        sed -n 's/^# FAKE_DOTFILES: \([^ ]*\) \(.*\)$/\1\t\2/p' "${f}"
+        sed -n 's/^# FAKE_DOTFILES: \([^ ]*\) \(.*\)$/\1\t\2/p' "${f}" ${shared[@]+"${shared[@]}"}
         ;;
       *tryEval*)
         sed -n 's/^# FAKE_OUT: \([^ ]*\) \(.*\)$/out\t\1\t\2/p' "${f}"
@@ -332,7 +361,7 @@ case $1 in
       *drvPath*)
         drv=$(sed -n -e "s/^# FAKE_DRV: ${h} //p" -e 's/^# FAKE_DRV: \([^ ]*\)$/\1/p' "${f}")
         o=$(sed -n -e "s/^# FAKE_OUT: ${h} //p" -e 's/^# FAKE_OUT: \([^ ]*\)$/\1/p' "${f}")
-        printf '%s\n%s' "${drv}" "${o}"
+        printf '%s\n%s' "${drv}${plus}" "${o}${plus}"
         ;;
     esac
     ;;
@@ -586,6 +615,133 @@ if [[ ${r_differ} == 1 && ${o_differ} == *"ccPages.port: 7801 → 7802"* && ${r_
   ok "compare: 違えば 1 と config.dotfiles の違い、新しい形が落ちれば 4、旧い形が落ちれば 3、登録のファイルが無ければ 2"
 else
   ng "compare (違う・落ちる)" "違う=${r_differ} (${o_differ}) 新=${r_new} (${e_new}) 旧=${r_old} (${e_old}) 無い=${r_missing}"
+fi
+
+# shared/ のある登録の場面を 1 つ作り、その場所を出す (register_case に足す)。
+#   <ケース>/local/flake.nix         旧い形の答えに mise.releaseAgeOverrides [] を足す
+#   <ケース>/pw/nix/hosts/alice@box.nix   旧い形と同じ drvPath・値の登録 (mise.releaseAgeOverrides は [])
+#   <ケース>/pw/nix/shared/          release-age.nix (mise.releaseAgeOverrides に「全ホスト」の項目を足す module) と、module に
+#                                    数えない README.md・.#lock.nix
+shared_case() {
+  local c
+  c=$(register_case "$1")
+  {
+    echo '# FAKE_DOTFILES: mise.releaseAgeOverrides []'
+    cat "${c}/local/flake.nix"
+  } >"${c}/local/flake.nix.new"
+  mv "${c}/local/flake.nix.new" "${c}/local/flake.nix"
+  mkdir -p "${c}/pw/nix/hosts" "${c}/pw/nix/shared"
+  printf '# FAKE_DRV: /nix/store/same.drv\n# FAKE_OUT: %s/store/gen-1\n# FAKE_DOTFILES: ccPages.port 7801\n# FAKE_DOTFILES: mise.releaseAgeOverrides []\n{ mkHome, ... }: mkHome { }\n' \
+    "${c}" >"${c}/pw/nix/hosts/alice@box.nix"
+  printf '# FAKE_DOTFILES: mise.releaseAgeOverrides [{"reason":"全ホスト"}]\n{ }\n' >"${c}/pw/nix/shared/release-age.nix"
+  printf 'shared/ の説明\n' >"${c}/pw/nix/shared/README.md"
+  printf '{ }\n' >"${c}/pw/nix/shared/.#lock.nix"
+  echo "${c}"
+}
+
+# 15. compare: shared/ に module があれば、新しい形を shared/ を外しても評価する。外した形が旧い形と同じなら 0 (同じ。shared/ の値
+#     だけ違う) とし、shared/ が足す値を別に出す。README.md と . で始まるファイルは module に数えない
+c=$(shared_case r15)
+run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local"
+r_only=$(rc "${c}")
+o_only=$(out "${c}")
+if [[ ${r_only} == 0 && ${o_only} == *"同じ (shared/ の値だけ違う)"* && ${o_only} == *"shared/ の module: release-age.nix ("* &&
+  ${o_only} == *'mise.releaseAgeOverrides: [] → [{"reason":"全ホスト"}]'* && ${o_only} != *ccPages.port* ]]; then
+  ok "compare: shared/ を外した新しい形が旧い形と同じなら 0 (同じ。shared/ の値だけ違う) とし、shared/ が足す値を別に出す"
+else
+  ng "compare (shared/ の値だけ違う)" "rc=${r_only} ${o_only} $(err "${c}")"
+fi
+
+# 16. compare: shared/ を外しても旧い形と違えば 1。違いは、ホストのファイルの分 (旧い → shared/ を外した新しい形) と shared/ が
+#     足す値 (shared/ を外した新しい形 → 新しい形) に分けて出す
+sed -i -e 's|^# FAKE_DRV: .*|# FAKE_DRV: /nix/store/other.drv|' -e 's|ccPages.port 7801|ccPages.port 7802|' \
+  "${c}/pw/nix/hosts/alice@box.nix"
+run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local"
+r_split=$(rc "${c}")
+host_part=$(sed -n '/^→/,/shared\/ が足す値/p' "${c}/out")
+shared_part=$(sed -n '/shared\/ が足す値/,$p' "${c}/out")
+if [[ ${r_split} == 1 && ${host_part} == *"ccPages.port: 7801 → 7802"* && ${host_part} != *releaseAgeOverrides* &&
+  ${shared_part} == *'mise.releaseAgeOverrides: [] → [{"reason":"全ホスト"}]'* && ${shared_part} != *ccPages.port* ]]; then
+  ok "compare: shared/ を外しても違えば 1。ホストのファイルの違いと、shared/ が足す値を分けて出す"
+else
+  ng "compare (shared/ を外しても違う)" "rc=${r_split} $(out "${c}") $(err "${c}")"
+fi
+
+# 17. compare: shared/ を足した新しい形が落ちれば 4 (list でない option を shared/ とホストのファイルの両方に書いた、など)。shared/ を
+#     外した形だけが落ちれば (ホストのファイルが shared/ に頼っている)、原因の行を出し、shared/ を含めた形で比べる
+c=$(shared_case r17)
+printf '# FAKE_EVAL_ERROR: shared/ とホストのファイルの定義がぶつかる\n' >>"${c}/pw/nix/shared/release-age.nix"
+run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local"
+r_conflict=$(rc "${c}")
+e_conflict=$(err "${c}")
+sed -i '/FAKE_EVAL_ERROR/d' "${c}/pw/nix/shared/release-age.nix"
+printf '# FAKE_NEEDS_SHARED: shared/ の option が無い\n' >>"${c}/pw/nix/hosts/alice@box.nix"
+run_nix "${c}" compare --base alice@x86_64-linux --private "${c}/pw" --flake "${c}/local"
+r_needs=$(rc "${c}")
+o_needs=$(out "${c}")
+if [[ ${r_conflict} == 4 && ${e_conflict} == *"定義がぶつかる"* && ${r_needs} == 1 &&
+  ${o_needs} == *"shared/ を外した新しい形を評価できない"* && ${o_needs} == *"shared/ の option が無い"* &&
+  ${o_needs} == *'mise.releaseAgeOverrides: [] → [{"reason":"全ホスト"}]'* ]]; then
+  ok "compare: shared/ を足した形が落ちれば 4。shared/ を外した形だけが落ちれば、原因を出して shared/ を含めた形で比べる"
+else
+  ng "compare (shared/ の形が落ちる)" "衝突=${r_conflict} (${e_conflict}) 外すと落ちる=${r_needs} (${o_needs} $(err "${c}"))"
+fi
+
+# 18. 元のホストが dotfiles-private に登録したホスト (登録した値を直すとき。ローカル flake が clone の nix/ を読み、clone の shared/ が
+#     元のホストに当たっている): compare は旧い形からも shared/ を外し、ホストのファイルどうしの違いだけを出す。draft は shared/ を
+#     外して描く (shared/ の値をホストのファイルに書かない)。どちらも clone には書かない。inspect は clone の shared/ の module を出す
+c=$(register_case r18)
+mkdir -p "${c}/private/nix/shared" "${c}/pw/nix/hosts" "${c}/pw/nix/shared"
+printf '# FAKE_DRV: /nix/store/box.drv\n# FAKE_OUT: %s/store/gen-1\n# FAKE_DOTFILES: ccPages.port 7801\n# FAKE_DOTFILES: mise.releaseAgeOverrides []\n{ mkHome, ... }: mkHome { }\n' \
+  "${c}" >"${c}/private/nix/hosts/alice@box.nix"
+printf '# FAKE_DOTFILES: mise.releaseAgeOverrides [{"reason":"全ホスト"}]\n{ }\n' >"${c}/private/nix/shared/release-age.nix"
+printf 'shared/ の説明\n' >"${c}/private/nix/shared/README.md"
+cat >"${c}/local/flake.nix" <<EOF
+{
+  inputs.dotfiles.url = "path:${c}/repo/nix";
+  inputs.dotfiles-private.url = "path:${c}/private/nix";
+  inputs.dotfiles-private.flake = false;
+  outputs =
+    { dotfiles, dotfiles-private, ... }:
+    {
+      homeConfigurations = dotfiles.homeConfigurations // dotfiles.lib.privateHosts dotfiles-private;
+    };
+}
+EOF
+# 作業ツリー: ccPages.port だけを直した alice@box と、clone と同じ shared/
+sed -e 's|box\.drv|box2.drv|' -e 's|ccPages.port 7801|ccPages.port 7802|' "${c}/private/nix/hosts/alice@box.nix" \
+  >"${c}/pw/nix/hosts/alice@box.nix"
+cp "${c}/private/nix/shared/release-age.nix" "${c}/pw/nix/shared/"
+cp -R "${c}/private/nix" "${c}/clone.before"
+run_nix "${c}" compare --base alice@box --private "${c}/pw" --flake "${c}/local"
+r_reg=$(rc "${c}")
+o_reg=$(out "${c}")
+host_part=$(sed -n '/^→/,/shared\/ が足す値/p' "${c}/out")
+if [[ ${r_reg} == 1 && ${o_reg} == *"shared/ (release-age.nix) を外して評価する"* &&
+  ${host_part} == *"ccPages.port: 7801 → 7802"* && ${host_part} != *releaseAgeOverrides* ]]; then
+  ok "compare: 元のホストが登録したホストなら、旧い形からも clone の shared/ を外し、ホストのファイルどうしの違いだけを出す"
+else
+  ng "compare (元のホストが登録したホスト)" "rc=${r_reg} ${o_reg} $(err "${c}")"
+fi
+run_nix "${c}" draft --base alice@box --flake "${c}/local"
+d_rc=$(rc "${c}")
+d_out=$(out "${c}")
+if [[ ${d_rc} == 0 && ${d_out} == *"VALUE ccPages.port 7801"* && ${d_out} == *"VALUE mise.releaseAgeOverrides []"* &&
+  ${d_out} != *'"全ホスト"'* ]] && grep -qF 'shared/ (release-age.nix) を外して描いた' "${c}/err"; then
+  ok "draft: 元のホストが登録したホストなら、clone の shared/ を外して描く (shared/ の値をホストのファイルに書かない)"
+else
+  ng "draft (元のホストが登録したホスト)" "rc=${d_rc} ${d_out} $(err "${c}")"
+fi
+run_nix "${c}" inspect --flake "${c}/local"
+if [[ $(rc "${c}") == 0 ]] && grep -qxF '  shared/ (登録した全ホストに足す module): release-age.nix' "${c}/out"; then
+  ok "inspect: clone の shared/ の module (README.md は数えない) を出す"
+else
+  ng "inspect (shared/)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+if diff -r "${c}/clone.before" "${c}/private/nix" >/dev/null; then
+  ok "compare・draft・inspect: shared/ を外すのは写しで、clone (dotfiles-private) には書かない"
+else
+  ng "clone が変わった" "$(diff -r "${c}/clone.before" "${c}/private/nix")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
