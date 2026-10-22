@@ -15,20 +15,22 @@
 # 見るのは <nix>/files/claude/ の下で、nix/home/modules/claude.nix が ~/.claude/ へ配置するもの:
 #
 #   skills/<名前>/SKILL.md   frontmatter・name がディレクトリ名と同じ・description
-#   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description (Claude Code はサブディレクトリの下も読む)
+#   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description・別のサブディレクトリに同じファイル名が無い
+#                            (Claude Code はサブディレクトリの下も読む)
 #   commands/**/<名前>.md    frontmatter・description (呼び出し名はパスから決まるので、name は見ない)
 #
-# README.md は見ない: skills・agents・commands の直下のものは配置されず、agents のサブディレクトリのものは Claude Code が
-# 文書として扱う (name の無いファイル)。commands のサブディレクトリの README.md は配置されて command になるので落とす。
-# 名前 (skill はディレクトリ名、agent はファイル名、command はパスの先頭の要素。commands/ns/foo.md の呼び出し名は /ns:foo)
-# は pjp- で始める (nix/README.md の「命名」)。
+# agents・commands の symlink は辿って、リンク先の中身を見る。README.md は見ない: skills・agents・commands の直下のものは
+# 配置されず、agents のサブディレクトリのものは Claude Code が文書として扱う (name の無いファイル)。commands の
+# サブディレクトリの README.md は配置されて command になるので落とす。名前 (skill はディレクトリ名、agent はファイル名、
+# command はパスの先頭の要素。commands/ns/foo.md の呼び出し名は /ns:foo) は pjp- で始める (nix/README.md の「命名」)。
 #
 # frontmatter (1 行目の --- から、次の --- の行まで) は yq (mikefarah/yq) で YAML として読む。frontmatter が無い・中に
 # --- がある・YAML として読めない・key: value の並びでない・key が重複する・name と description が文字列でない・
-# description が無い (空白だけも)・素の値の description の「 #」から先がコメントとして消える・name がディレクトリ名
-# (ファイル名) と違う・小文字ケバブケースでない・名前が pjp- で始まらない、のどれでも落とす。description が 1024 文字を
-# 超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の検査に
-# 揃えてある。片方の観点を変えたら、もう片方も見る。
+# description が無い (空白だけも。値が key の行の # から先のコメントになって空なら、そう言う)・素の値の description の
+# 「 #」から先や # で始まる行がコメントとして消える・name がディレクトリ名 (ファイル名) と違う・小文字ケバブケースでない・
+# 名前が pjp- で始まらない・agent のファイル名が別のサブディレクトリのものと同じ、のどれでも落とす。description が
+# 1024 文字を超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の
+# 検査に揃えてある。片方の観点を変えたら、もう片方も見る。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -122,17 +124,32 @@ frontmatter() {
 }
 
 # $1 から frontmatter を取り出せなかったわけを出す。見た目では 1 行目が --- なのに取り出せない形 (Claude Code は BOM を外し、
-# 1 行目の --- の後ろの空白と CRLF も受けて読む) は、そう言う (言わないと、どこを直すのか分からない)
+# 1 行目の --- の後ろの空白と CRLF も受けて読む) は、そう言う (言わないと、どこを直すのか分からない)。1 行目のわけが重なれば
+# 全部言う (Windows のエディタは BOM と CRLF を一緒に付けることがある)。--- の後ろが空白でなく文字なら、空白のせいにしない。
+# 閉じる --- の行が無いことは、1 行目のわけが無いときだけ言う
 why_no_frontmatter() {
-  local first=
+  local first='' joined='' reason
+  local reasons=()
   IFS= read -r first <"$1" || true
-  case ${first} in
-    $'\xef\xbb\xbf'*) echo "先頭に BOM があります。外してください" ;;
-    $'---\r') echo "改行が CRLF です。LF にしてください" ;;
-    ---[[:space:]]*) echo "1 行目の --- の後ろに空白があります。外してください" ;;
-    ---) echo "1 行目の --- を閉じる --- の行がありません" ;;
-    *) echo "1 行目を --- にし、次の --- の行で閉じてください" ;;
-  esac
+  if [[ ${first} == $'\xef\xbb\xbf'* ]]; then
+    reasons+=("先頭に BOM があります。外してください")
+    first=${first#$'\xef\xbb\xbf'}
+  fi
+  if [[ ${first} == *$'\r' ]]; then
+    reasons+=("改行が CRLF です。LF にしてください")
+    first=${first%$'\r'}
+  fi
+  if [[ ${first} =~ ^---[[:space:]]+$ ]]; then
+    reasons+=("1 行目の --- の後ろに空白があります。外してください")
+  elif [[ ${first} != --- ]]; then
+    reasons+=("1 行目を --- にし、次の --- の行で閉じてください")
+  elif ((${#reasons[@]} == 0)); then
+    reasons+=("1 行目の --- を閉じる --- の行がありません")
+  fi
+  for reason in "${reasons[@]}"; do
+    joined+=${joined:+。}${reason}
+  done
+  printf '%s\n' "${joined}"
 }
 
 # frontmatter ($2) に yq の式 ($1) を当てる。
@@ -153,15 +170,16 @@ check_prefix() {
   fi
 }
 
-# $1: ファイル、$2: name に期待する値 (空なら name を見ない)、$3: その値の呼び名 (ディレクトリ名・ファイル名)
+# $1: ファイル、$2: name に期待する値 (空なら name を見ない)、$3: その値の呼び名 (ディレクトリ名・ファイル名)、
+# $4: frontmatter が無いときに添える文 (省いてよい)
 check_md() {
-  local file=$1 want_name=$2 want_what=$3
-  local label fm dash_line yaml_err root_type dup_keys desc_type desc dropped desc_range desc_from desc_to hash_line
-  local desc_chars name_type fm_name
+  local file=$1 want_name=$2 want_what=$3 no_fm_hint=${4:-}
+  local label fm dash_line yaml_err root_type dup_keys desc_type desc key_comment dropped desc_range desc_from desc_to
+  local hash_line desc_chars name_type fm_name
   label=$(label_of "${file}")
 
   if ! fm=$(frontmatter "${file}"); then
-    problems+=("${label}: YAML frontmatter がありません ($(why_no_frontmatter "${file}"))")
+    problems+=("${label}: YAML frontmatter がありません ($(why_no_frontmatter "${file}"))${no_fm_hint:+。${no_fm_hint}}")
     return 0
   fi
 
@@ -202,28 +220,43 @@ check_md() {
     desc=$(fm_yq '.description // ""' "${fm}")
     # 空白だけも無いのと同じ (Claude Code も trim して読む)
     if [[ -z ${desc//[[:space:]]/} ]]; then
-      problems+=("${label}: description がありません。Claude はここを読んで、いつ使うかを決めます")
+      # 値を # から書くと (description: #dev …)、key の行の # から先がコメントになり、値は空になる。yq はこのコメントを
+      # key の line_comment に付けるので、それがあれば「無い」ではなく、そう言う (書いたはずの値が無いと言われても、
+      # どこを直すのか分からない)
+      key_comment=$(fm_yq '.description | key | line_comment' "${fm}")
+      if [[ -n ${key_comment} ]]; then
+        problems+=("${label}: description の値が空です。key の行の # から先はコメントとして読まれます。値を書くなら # で始めず (または引用符で囲み)、コメントなら 0 桁目の行に書いてください")
+      else
+        problems+=("${label}: description がありません。Claude はここを読んで、いつ使うかを決めます")
+      fi
     else
       # 素の値 (引用符も block scalar も無い) の「 #」から先は YAML のコメントで、値から黙って消える。1 行の値と、複数行の
-      # 最後の行で起きる (途中の行なら YAML として読めずに上で落ちる)
-      dropped=$(fm_yq '.description | select(style == "") | line_comment' "${fm}")
+      # 最後の行 (yq は値の line_comment に付ける) と、値を key の次の行から書くときの key の行 (key の line_comment に
+      # 付ける) で起きる (途中の行なら YAML として読めずに上で落ちる)
+      dropped=$(fm_yq '.description | select(style == "") | [(key | line_comment), line_comment] | map(select(. != "")) | join(" ")' "${fm}")
       if [[ -n ${dropped} ]]; then
         problems+=("${label}: description の「 #」から先 (${dropped}) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
       fi
-      # 続きの行の頭の # (字下げの後) もコメントの始まりで、その行が値から黙って消える。yq はこのコメントをどの node にも
-      # 付けないので、素の値の description の行から次の key の行の手前まで (最後の key なら frontmatter の終わりまで) を
-      # 本文で見る。0 桁目の # の行は値の外のコメント (# で始まる行の後ろに続きの行があれば、YAML として読めずに上で落ちる)
+      # 行の頭の # (字下げの後) もコメントの始まりで、その行が値から黙って消える。yq はこのコメントを、位置で変わる node
+      # (最後の key なら description の key の foot_comment、次の key の手前なら次の key の head_comment、値を key の次の
+      # 行から書いたときの値の前なら値の head_comment) に字下げを落として付け、0 桁目のコメントと見分けられない
+      # (yq-go 4.53.3)。そこで description の key の行の次から、次の key の行の手前 (最後の key なら frontmatter の
+      # 終わり) までを本文で見る (値を key の次の行から書くときの、値の前の行も入る)。0 桁目の # の行は値の外のコメント
+      # なので見ない。値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めずに上で落ちる (値の前の # の行は、
+      # 後ろに値が続いても読める)。
+      # 字下げは [ \t] で見る。YAML の空白は半角スペースとタブだけで、[[:space:]] は UTF-8 の locale では全角スペースにも
+      # 当たる (全角スペースの後ろの # は値に入る)
       # shellcheck disable=SC2016 # yq の $l はシェルの展開ではない
-      desc_range=$(fm_yq '(.description | select(style == "") | line) as $l | [$l, ([.[] | key | line | select(. > $l)] | min)] | join(" ")' "${fm}")
+      desc_range=$(fm_yq '(.description | select(style == "") | key | line) as $l | [$l, ([.[] | key | line | select(. > $l)] | min)] | join(" ")' "${fm}")
       if [[ -n ${desc_range} ]]; then
         read -r desc_from desc_to <<<"${desc_range}"
         # fm の n 行目はファイルの n + 1 行目 (yq の行は、先頭に足した --- の分でファイルの行と同じ)
         hash_line=$(awk -v from="${desc_from}" -v to="${desc_to:-0}" '
-          NR + 1 > from && (to == 0 || NR + 1 < to) && /^[[:space:]]+#/ {
-            sub(/^[[:space:]]+/, ""); print NR + 1 " " $0; exit
+          NR + 1 > from && (to == 0 || NR + 1 < to) && /^[ \t]+#/ {
+            sub(/^[ \t]+/, ""); print NR + 1 " " $0; exit
           }' <<<"${fm}")
         if [[ -n ${hash_line} ]]; then
-          problems+=("${label}: description の続きの ${hash_line%% *} 行目 (${hash_line#* }) は # で始まるので、コメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
+          problems+=("${label}: description の # で始まる行 (${hash_line%% *} 行目: ${hash_line#* }) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲み、コメントなら 0 桁目から書いてください")
         fi
       fi
       # 文字で数える (yq の length はバイトを数え、bash の ${#…} も C ロケールではバイトを数える)
@@ -271,21 +304,31 @@ for entry in "${claude_dir}"/skills/*; do
   check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
 done
 
-# $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す
+# $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す。symlink は辿って、リンク先の
+# 中身を見る (出すのはリンクのパス)
 md_files_under() {
   [[ -d $1 ]] || return 0
-  find "$1" -type f -name '*.md' | sort
+  find -L "$1" -type f -name '*.md' | sort
 }
 
-# agents: **/<名前>.md。Claude Code はサブディレクトリの下も読み、name の無いファイルは agent の横に置いた文書として扱うので、
-# README.md はどの深さでも見ない
+# agents: **/<名前>.md。Claude Code はサブディレクトリの下も読み、name の無いファイル (frontmatter の無いファイルも) は
+# agent の横に置いた文書として扱うので、README.md はどの深さでも見ない。frontmatter の無い agent には、frontmatter を
+# 足す前に README.md という名前を勧める。name はファイル名と同じにするので、別のサブディレクトリに同じファイル名を置くと
+# name が重なる。Claude Code はどちらか一方しか読まない (どちらを読むかはファイルシステムの読む順で決まる。docs の
+# sub-agents) ので、2 つ目で落とす
+declare -A agent_paths=()
 mapfile -t agent_files < <(md_files_under "${claude_dir}/agents")
 for entry in "${agent_files[@]}"; do
   entry_name=$(basename "${entry}" .md)
   [[ ${entry_name} != README ]] || continue
   found=$((found + 1))
+  if [[ -n ${agent_paths[${entry_name}]:-} ]]; then
+    problems+=("$(label_of "${entry}"): $(label_of "${agent_paths[${entry_name}]}") と同じ名前です。Claude Code はどちらか一方しか読みません")
+  else
+    agent_paths[${entry_name}]=${entry}
+  fi
   check_prefix "${entry_name}" "${entry}"
-  check_md "${entry}" "${entry_name}" "ファイル名"
+  check_md "${entry}" "${entry_name}" "ファイル名" "説明の文書なら README.md という名前にしてください"
 done
 
 # commands: **/<名前>.md。name は見ず、呼び出し名の頭になるパスの先頭の要素を見る。直下の README.md は配置されないが、
