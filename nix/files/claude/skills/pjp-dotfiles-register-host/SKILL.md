@@ -14,6 +14,10 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
 置く (dotfiles の ADR 026)。ローカル flake の雛形がその clone の `nix/` を読み、setup は `--host` なしでそのホストを選ぶ。
 ローカル flake の値はそのホストに当たらない (ファイルが値の全部を持つ。前の雛形の `local` も当たらない)。
 
+dotfiles-private の `nix/shared/*.nix` (登録した全ホストに足す module。mise の遅延の上書きなど。dotfiles の ADR 030) は、ホストの
+ファイルの外の値。登録するとこの PC にも当たるが、ホストのファイルには書かない。`draft` と `compare` は shared/ を外して扱い、
+shared/ が足す値は compare が別に出す (dotfiles の ADR 031)。
+
 段階 3 (dotfiles の ADR 027) のあとは、setup は対象ホストを推測しない。公開の登録簿には型 (`<user>@<system>`) と `sandbox` しか無く、
 登録も `~/dotfiles/flake.nix` の `tmp` も無い PC では、setup は止まって選べる道を出す。登録の前の 1 回は `--host <型>` で当てる
 (型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。WSL や 1Password を使う PC では、当て続けるとそれらが外れる
@@ -88,6 +92,8 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 - **ホストの名前** (`<user>@<短い hostname>`): ファイル名になる。setup はこの名前を探すので、別の名前にしない
 - **この PC のホスト**: 「ある」なら登録済み。下の「既に登録した PC」へ
+- **shared/ (登録した全ホストに足す module)**: 登録すると、ホストのファイルの値に加えてこの値が当たる。確認で書く (手順 4 の
+  compare が「shared/ が足す値」として出す)
 - **setup が --host なしで選ぶホスト**: 登録していない PC では「決まらない (setup は止まる)」か、`~/dotfiles/flake.nix` に足した `tmp`
 - **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)。新しい PC で 1 回目を型で当てたなら、その型
 - **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した。「lock を写しで張り直して評価した」と
@@ -114,8 +120,10 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 2. 読む: 値 (`mkHome` の引数と `modules`)・`# TODO:` の行 (値を書き出せなかった option)・頭のコメントの notes (dotfiles の外の local の
    行。要るなら `modules` に足す、要らないなら消す。どちらかはユーザーに聞く)。既定と同じ値を明示した行 (例: `gitViaGh.enable = true`)
    も描かれる。書いた意図はユーザーにしか分からないので消さない
-3. 確認の前に比べる (書くのは scratchpad だけ): `<scratchpad>/preview/nix/hosts/<名前>.nix` に下書きを写し、
-   `bash <p> compare --base <元のホスト> --private <scratchpad>/preview`。読み方は手順 4 の表
+3. 確認の前に比べる (書くのは scratchpad だけ): `<scratchpad>/preview/nix/hosts/<名前>.nix` に下書きを写す。inspect の「shared/」に
+   module があれば、clone の `nix/shared/` も写す (`mkdir -p <scratchpad>/preview/nix/shared && cp -R <clone>/nix/shared/. <scratchpad>/preview/nix/shared/`。
+   登録すると当たる値を compare に出させる。clone は読むだけ)。`bash <p> compare --base <元のホスト> --private <scratchpad>/preview`。
+   読み方は手順 4 の表
 4. 初めての登録 (dotfiles-private の README に `nix/hosts/` が無い) なら、README に足す行と節の下書きも作る (何を置くか・`/nix/store` に
    入ること・登録はこの skill で)
 5. 型を元にしたとき (新しい PC) は、下の「型を元にする登録」で値を足してから確認に進む
@@ -151,24 +159,32 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 | 終了コード | 意味 | すること |
 | --- | --- | --- |
 | 0 | 旧い形 (元のホスト。前の雛形なら + local) と登録したホストの drvPath が同じ | この登録で世代の中身は変わらない。次へ |
-| 1 | 違う | 出力の `config.dotfiles の違い (旧い → 新しい)` を読む。下書きの誤りなら直して比べ直す。ユーザーが値を変えると決めた違い (型を元にして値を足した、など) なら、PR の本文にそう書く |
+| 0 (「同じ (shared/ の値だけ違う)」) | shared/ を外すと同じ。ホストのファイルは元のホストの値を全部写せている | 次へ。出力の「shared/ が足す値」は登録でこの PC に増える値なので、確認と PR の本文に書く。下書きには足さない |
+| 1 | 違う (shared/ があれば、shared/ を外しても違う) | 出力の `config.dotfiles の違い` (shared/ があれば「旧い → shared/ を外した新しい形」。shared/ が足す値は別に出る) を読む。下書きの誤りなら直して比べ直す。ユーザーが値を変えると決めた違い (型を元にして値を足した、など) なら、PR の本文にそう書く |
 | 2 | 使い方の誤り・登録のファイルが無い | 出力のとおり直す |
 | 3 | 旧い形が評価できない | 今の local が今の本体と合わない (option の削除など)。pjp-dotfiles-local-flake-migrate の「旧い flake が評価できないとき」 |
-| 4 | 登録したホストが評価できない | ファイルの誤り (構文・option の名前)。直して比べ直す |
+| 4 | 登録したホスト (shared/ を足した形) が評価できない | ファイルの誤り (構文・option の名前)、または list でない option を shared/ とホストのファイルの両方に書いた (片方を `lib.mkDefault` にするか、ホストのファイルから外す)。直して比べ直す |
 
 「中身が同じ」は今の世代との一致では決めない (本体を進めると、skill を 1 つ足しただけでも世代が変わる)。出力の「参考: 今の世代 …」は参考。
+
+- shared/ の値は、登録した全ホストに足す値でホストのファイルの外にある。compare は作業ツリーの `nix/shared/` に module があれば
+  新しい形を shared/ を外しても評価し、ホストのファイルの違いと「shared/ が足す値」を分けて出す
+- 「shared/ を外した新しい形を評価できない」と出たら、ホストのファイルが shared/ に頼っている (shared/ の module が宣言した option を
+  使う、など)。そのときの違いは shared/ の値を含めて比べたものなので、shared/ が足す値を除いて読む
+- 元のホストが登録したホスト (値を直すとき) なら、旧い形からもローカル flake の読む shared/ を外す (出力の「旧い形 … は
+  dotfiles-private に登録したホストなので」の行)。違いはホストのファイルどうしだけになる
 
 ### 5. commit・push・PR (dotfiles-private の worktree)
 
 `nix/hosts/<名前>.nix` (と README) を commit して PR を出す。merge はユーザー。PR の本文に元にしたホストと compare の結果
-(drvPath が同じ) を書く。
+(drvPath が同じ。「同じ (shared/ の値だけ違う)」なら、そう書いて shared/ が足す値を並べる) を書く。
 
 ### 6. merge のあと (その PC)
 
 1. clone を新しくする: `~/dotfiles/setup --steps private-fetch` (取得して fast-forward するだけで、switch しない。確認なしで流してよい)
-2. merge のあとの本体と clone で比べ直す: `bash <p> compare --base <元のホスト> --private <clone>` が 0 (型を元にして値を足したなら、
-   足した分だけ 1)。元のホストは、登録したファイルの頭のコメント (「元にしたホスト: …」) にある。段階 3 で消えたホストなら、
-   「前提」の写しの本体を `--nix-dir` に渡す
+2. merge のあとの本体と clone で比べ直す: `bash <p> compare --base <元のホスト> --private <clone>` が 0 (「同じ (shared/ の値だけ
+   違う)」も 0。型を元にして値を足したなら、足した分だけ 1)。元のホストは、登録したファイルの頭のコメント (「元にしたホスト: …」)
+   にある。段階 3 で消えたホストなら、「前提」の写しの本体を `--nix-dir` に渡す
 3. ローカル flake が clone の `nix/` を読む形にする (dotfiles-private の入力を stub から clone へ指し直す)。道は 2 つ:
    - **値を書き足していない雛形** (新しい PC で 1 回目に置いたまま。`tmp` もほかの行も足していない): `<本体>/nix/scripts/setup-local-flake.sh --force`
      で作り直す (今の雛形で clone の `nix/` を読む。退避は取らないので、`diff` で値が無いことを見せて確認を取ってから。nixos-config の
@@ -195,8 +211,10 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - `inspect` の「この PC のホスト: … (ある)」。ローカル flake がまだ clone の `nix/` を読んでいなければ、手順 6 の 3〜7 を先にする
   (入れ直した PC など、登録済みで値を書き足していない雛形なら、手順 6 の 3 の `setup-local-flake.sh --force`)
 - 元にするホストは今のそのホスト (`--base <名前>`)。直したい値を反映した下書きを作り、今のファイルとの差 (`diff -u`) を見せて確認を
-  取る (手順 2 と同じ関門)
-- `compare --base <名前> --private <worktree>` は直した値の分だけ違う (1)。今と同じなら何もしない
+  取る (手順 2 と同じ関門)。draft は、元のホストに当たっている clone の shared/ を外して描く (「shared/ (…) を外して描いた」と
+  出る)。shared/ の値は下書きに出ないので、今のファイルとの差にも出ない
+- `compare --base <名前> --private <worktree>` は直した値の分だけ違う (1)。旧い形からも shared/ を外すので、違いはホストのファイル
+  どうしだけ (shared/ が足す値は別に出る)。今と同じなら何もしない
 
 ## 確認の形 (登録)
 
@@ -207,8 +225,10 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 2. 元にしたホストと、そう決めた理由 (今の世代と一致した・前に決めた値・一致しないので推した、など)
 3. 下書きの全文 (と README の追記)
 4. compare の結果 (scratchpad の写しで比べた値)。登録で変わる所・変わらない所: 署名 (`onePassword`)・Notion の宛先 (`notion.profile`)・
-   Dev Tracker・cc-pages の port・WSL の値。型を元にして足した値は、変わる所として並べる。2 段目のあとに `--host <型>` で当てると、値は
-   登録したファイルではなく本体の既定から来る (Dev Tracker も off。setup は警告するだけ) ことも書く
+   Dev Tracker・cc-pages の port・WSL の値。型を元にして足した値は、変わる所として並べる。shared/ が足す値 (compare の
+   「shared/ が足す値」) も、登録でこの PC に当たる値として並べる (登録した全 PC に効く値で、ホストのファイルには書かない)。
+   2 段目のあとに `--host <型>` で当てると、値は登録したファイルではなく本体の既定から来る (Dev Tracker も off。shared/ の値も
+   当たらない。setup は警告するだけ) ことも書く
 5. notes (前の雛形の `local` の、dotfiles の外の行) と `# TODO:` の行をどうするか
 6. 問い: 「この内容で dotfiles-private に登録してよいですか」(残る判断は、推奨と理由を添えて選択肢ごとに)
 
@@ -216,8 +236,9 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 
-- `--host` なしで当たるホストの中身は変わらない (手順 6-2 の compare が 0)。apply が「値が変わるので反映は setup --update」と出すのは
-  登録簿のホストの話で、`setup --update` は lock を張り直し、登録したホストへ切り替えるために流す
+- `--host` なしで当たるホストの中身は変わらない (手順 6-2 の compare が 0)。「同じ (shared/ の値だけ違う)」だったなら、shared/ が足す値の
+  分だけ変わる (その値を並べる)。apply が「値が変わるので反映は setup --update」と出すのは登録簿のホストの話で、`setup --update` は lock を
+  張り直し、登録したホストへ切り替えるために流す
 - ローカル flake から外した値 (前の雛形の `local`・`tmp`) と、外したあとに効く場面 (前の雛形の `local` は、`--host <型>` で当てたときだけ。
   `tmp` は消すので効かない)。`setup-local-flake.sh --force` で作り直すなら、作り直す前と後の差分 (stub → clone の 1 行と、雛形の版の印)
 - `DOTFILES_LOCAL_DIR=<作業場所>/new` の `--which-host` が `<名前><TAB>private` だったこと
@@ -239,11 +260,13 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 型を元にした下書きをそのまま登録する | 型には PC の値が無い (WSL・署名・Dev Tracker など)。要る値を聞いて足す |
 | 段階 3 で消えたホストを、今の本体で draft・compare する | 評価できない (3)。消す前の本体を写して `--nix-dir` に渡す (「前提」) |
 | 値を書き足した flake を `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える (退避も無い)。値があれば local-flake-migrate.sh で移す |
+| shared/ の値の違いを下書きの誤りと読み、下書きに書き写す | shared/ は登録した全ホストに足す値。compare は外して比べ、「shared/ が足す値」として別に出す。ホストのファイルに書くと 2 重になる (list はつながって項目が 2 つになる) |
 | private の値を dotfiles の PR の本文や文書に書く | private の値は dotfiles-private の中だけ |
 
 ## 関連
 
-- dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」「新規マシンの手順」・ADR 026・ADR 027
+- dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」「新規マシンの手順」・ADR 026・ADR 027・ADR 030 (`nix/shared/`)・
+  ADR 031 (登録の compare と draft の shared/ の扱い)
 - pjp-dotfiles-local-flake-migrate — 手順 6 の、ローカル flake を今の雛形へ移す側
 - pjp-herdr-other-repo — dotfiles-private の worktree を作る・子に任せる
 - pjp-dev-tracker — PR とチケットを結ぶ
