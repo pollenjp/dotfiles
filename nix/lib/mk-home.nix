@@ -41,6 +41,8 @@
   # 省略すれば既定 (gitViaGh は true、devTracker (inbox も) と videoOffer.autoStart は false。個々は home/options.nix)。
   # dotfiles-private に登録したホスト (lib/private-hosts.nix) とローカル flake の tmp は、ここに渡す値でその PC の
   # 値の全部を持つ (ADR 027)。前の雛形のローカル flake は、登録簿のホストに local の module を前置する (lib.hostsWith)。
+  # dotfiles-private に登録したホストには、dotfiles-private の nix/shared/*.nix の module も modules の前に足される
+  # (登録した全 PC に効かせる値。mise の遅延の上書きなど)。
   claude ? { },
   modules ? [ ],
 }:

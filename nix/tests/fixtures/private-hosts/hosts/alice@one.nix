@@ -4,5 +4,16 @@ mkHome {
   username = "alice";
   system = "x86_64-linux";
   claude.notion.profile = "work";
-  modules = [ { dotfiles.ccPages.port = 7801; } ];
+  modules = [
+    {
+      dotfiles.ccPages.port = 7801;
+      # このホストだけの上書き (shared/ の list とつながる)
+      dotfiles.mise.releaseAgeOverrides = [
+        {
+          from = "2026-11-01";
+          reason = "alice だけ";
+        }
+      ];
+    }
+  ];
 }
