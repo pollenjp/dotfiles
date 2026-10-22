@@ -107,7 +107,7 @@ fi
 | option の名前と形 | `dotfiles.osCaBundle.enable` と `dotfiles.osCaBundle.requestsCaBundle.enable` (bool 2 つ、既定 true)。書くのは `modules` (`mkHome` の引数には足さない) | repo の option は入れ子の bool で、enum の option は無い。`mkHome` の引数は組 (`wsl`・`onePassword`・`claude`) だけで、ほかの option (`dotfiles.cleanup.enable`・`dotfiles.ccPages.port`) は `modules` に書く |
 | ローカル flake の雛形 (tmp の例のコメント) に足すか | 足さない。README の「足したホストに書く値」と options.nix の説明に書く | 雛形は本文から版の印を計算するので、コメントを 1 行足すだけで全マシンに「前の雛形から作られています」が出る |
 | 空の変数の扱い | 4 つとも値が無いものとして扱う (`${X:-…}`) | 空の `SSL_CERT_FILE` は OpenSSL の束の読み込みを壊す。変数ごとに扱いを変えると分かりにくい |
-| ADR の番号 | 028 | open の PR (#153) は ADR を足していない。#152 は merge 済みで ADR なし |
+| ADR の番号 | 028 | 書き始めたとき、open の PR (#153) は ADR を足しておらず、#152 は merge 済みで ADR なしだった。あとから main に入った #155 (TKT-317) は 029 を使い、重ならない |
 
 ## 3. 変更点の詳細
 
