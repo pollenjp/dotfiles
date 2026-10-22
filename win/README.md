@@ -7,7 +7,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | --- | --- | --- |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
-| `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドは WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
+| `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -227,21 +227,28 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 ## herdr
 
 `herdr/config.toml` は Windows の herdr (WinGet の `Herdr.Herdr.Preview`) の設定で、
-`%APPDATA%\herdr\config.toml` へ配る。キーバインドは WSL の herdr
-(`nix/files/herdr/config.toml`) と同じにしてあり、キーごとの意図はそちらのコメントにある。
+`%APPDATA%\herdr\config.toml` へ配る。キーバインドと sidebar の行は WSL の herdr
+(`nix/files/herdr/config.toml`) と同じにしてあり、キーや行ごとの意図はそちらのコメントにある。
 
-- `[keys]` と `onboarding` は WSL 側と同じに保つ。CI の lint が 2 つを比べ、違えば落ちる。
+- `[keys]`・`onboarding`・`[ui.sidebar]` は WSL 側と同じに保つ。CI の lint が 2 つを比べ、違えば落ちる。
   手元でも確かめられる:
 
   ```sh
-  nix/scripts/check-herdr-keys.sh   # 「WSL と Windows で同じ (13 個)」と出れば揃っている
+  nix/scripts/check-herdr-keys.sh   # 「WSL と Windows で同じ (キー 13 個)」と出れば揃っている
   ```
+
+- `[ui.sidebar]` を揃えるのは、`hr` (`herdr --remote`) で WSL や Linux の herdr に attach したときも、
+  sidebar を描くのは Windows の herdr で、このファイルを読むため (つないだ先の設定は読まない)。
+  sidebar の workspace の 2 行目の先頭に、子の workspace の親 (`$parent`。claude-skills の
+  `ws-mark.sh` が置く token) を出している ([TKT-305](https://app.notion.com/p/herdr-sidebar-workspace-2-token-parent-nix-files-herdr-config-toml-ui-s-40179149a66f81d6a4f0ce9cd5a296df))
 
 - WSL 側との違いは 2 つ。`[terminal]` を書かない (WSL 側の `default_shell = "fish"` は
   Windows に無い。空のままなら、Windows の herdr は PATH の `pwsh.exe` (PowerShell 7) を使い、
   無ければ `powershell.exe` (5.1) を使う。pwsh 7 なら上の alias も pane の中で使える)。
   `[update] version_check = false` で新しい版の通知を止める ([herdr を入れる](#herdr-を入れる-winget))
-- 配った後は、herdr の中で prefix + shift + r (外からなら PowerShell で `hreload`) で読み直す
+- 配った後は、herdr の中で prefix + shift + r (外からなら PowerShell で `hreload`) で読み直す。
+  `hr` で attach している画面は PowerShell の `hreload` (Windows の herdr server に届く) では
+  読み直さないので、その画面の中で prefix + shift + r を押す
 - 書いたキー名が Windows の herdr で通るかは、`HERDR_CONFIG_PATH` で場所を差し替えて確かめる
   (本物の設定には触れない):
 

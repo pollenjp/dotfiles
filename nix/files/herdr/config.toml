@@ -13,9 +13,9 @@
 # 有効なキー名・既定値は `herdr --default-config` で全部出せる。
 # 起動中なら prefix + ? で今効いているバインドが一覧できる。
 #
-# Windows 側の herdr にも、同じ [keys] と onboarding を win/herdr/config.toml で配っている
-# ([terminal] だけ持たない)。キーを変えたら両方を直す。CI が 2 つを比べ、違えば落ちる
-# (nix/scripts/check-herdr-keys.sh)。
+# Windows 側の herdr にも、同じ [keys]・onboarding・[ui.sidebar] を win/herdr/config.toml で
+# 配っている ([terminal] だけ持たない)。キーや sidebar の行を変えたら両方を直す。CI が 2 つを
+# 比べ、違えば落ちる (nix/scripts/check-herdr-keys.sh)。
 
 # 初回起動時のオンボーディングを出さない。
 #
@@ -188,3 +188,35 @@ new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 #   zellij Ctrl+b (tmux mode) prefix は 1 つしか持てない。ctrl+k に寄せた
 #   zellij Ctrl+t (tab mode)  herdr にモードは無く prefix+ の直打ちで完結する
 #   zellij space  (swap layout) herdr に layout の概念が無い
+
+##############################################################################
+# sidebar の workspace の行
+##############################################################################
+
+[ui.sidebar.spaces]
+# 2 行目の先頭に、子の workspace の親を出す ($parent)。herdr の既定は
+#   rows = [["state_icon", "workspace"], ["branch", "git_status"]]
+# で、$parent を足したほかは既定のまま。
+#
+# $parent は workspace の metadata の token parent。claude-skills の
+# pjp-herdr-other-repo の ws-mark.sh が、子の workspace に
+#   herdr workspace report-metadata <子> --source pjp.ws-mark --token parent='↑ TKT-n'
+# で置く。値は ↑ と親のチケットの ID (親の名前は 🌳[N]TKT-n … なので、ID で親の行と照らせる)。
+# 名前がチケットの ID で始まらない親なら、ID の代わりに親の名前の土台が入る。
+#
+# token の無い workspace (親・ほかの workspace) では $parent が行から落ちる。区切りの
+# " · " は残った token の間にしか入らないので、2 行目は今までどおり branch から始まる。
+#
+# repo の本体の workspace が開いていると、その repo の worktree の workspace は本体の下に
+# 字下げして並び、字下げした行には branch と git_status が出ない。herdr worktree create / open で
+# 作った子は本体の workspace も開くので、ふつうはこの形で、子の 2 行目は親だけになる。
+#
+# 色は catppuccin (herdr の既定のテーマ) の緑で、子の 🌱 に合わせた。fg は #RGB / #RRGGBB
+# しか書けない (テーマの色の名前は使えない) ので、テーマを変えたらここも見直す。
+#
+# Windows から herdr --remote (hr) で attach したときは、Windows の herdr が自分の設定
+# (win/herdr/config.toml) で sidebar を描く。同じ rows をそちらにも書いてある。
+rows = [
+  ["state_icon", "workspace"],
+  [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
+]
