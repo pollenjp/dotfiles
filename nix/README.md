@@ -1020,6 +1020,8 @@ option は本体の既定になる。本体の module が既に定義してい�
 | `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
 | `claude.videoOffer.autoStart.enable` | `false` | 解説動画の短尺を聞かずに作り始めたいマシンだけ `true`（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)） |
 | `dotfiles.ccPages.port`（`modules`） | `null`（7777） | 7777 がほかと衝突するマシンだけ（[待ち受けの port を変える](#待ち受けの-port-を変える)） |
+| `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
+| `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -1997,6 +1999,23 @@ bash では元々発火していなかった）。
   コマンド 1 回だけなら、4 つとも同じ値で打つ（nixpkgs の OpenSSL は `NIX_SSL_CERT_FILE` を `SSL_CERT_FILE` より
   先に読むので、`SSL_CERT_FILE` だけを変えても python の標準の https・git などには届かない）
 
+### 入れる変数を選ぶ
+
+ホストの module（dotfiles-private の `nix/hosts/` のファイルか `~/dotfiles/flake.nix` の tmp の `modules`）で、
+`dotfiles.osCaBundle`（`nix/home/options.nix`）に書いて選ぶ。
+
+| 書くもの | 入る変数 |
+| --- | --- |
+| （書かない） | 4 つとも（既定） |
+| `dotfiles.osCaBundle.requestsCaBundle.enable = false;` | `REQUESTS_CA_BUNDLE` 以外の 3 つ |
+| `dotfiles.osCaBundle.enable = false;` | 入れない（`requestsCaBundle.enable` は意味を持たない） |
+
+```nix
+modules = [
+  { dotfiles.osCaBundle.requestsCaBundle.enable = false; }
+];
+```
+
 ### 効かないところ・副作用
 
 - shell を通らずに起動するもの（systemd の user service・デスクトップのランチャーから直に開くアプリ）には入らない
@@ -2012,7 +2031,8 @@ bash では元々発火していなかった）。
 - **`REQUESTS_CA_BUNDLE` は、アプリが requests の `Session` に置いた `verify`（私設 CA の束・`False`）より先に効く。**
   1 回ごとに `verify=` を渡す呼び方は変わらない。`Session` の `verify` で自己署名の機器などに繋ぐ script は検証に
   失敗するようになるので、`REQUESTS_CA_BUNDLE= <コマンド>`（空）で打つ。requests は空を無いものとして扱い、
-  `Session` の `verify` に戻る
+  `Session` の `verify` に戻る。そういう script をよく動かすホストは、`REQUESTS_CA_BUNDLE` だけを外す
+  （[入れる変数を選ぶ](#入れる変数を選ぶ)）
 - `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` は、gcloud の設定（`gcloud config set core/custom_ca_certs_file`）より先に効く。
   設定で別の束を指しているホストは、同じパスをホストの module の `home.sessionVariables` にも書く
 

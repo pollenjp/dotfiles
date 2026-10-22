@@ -32,21 +32,42 @@
 # fish に直したもの (hm-session-vars.fish) を読む。ホストの module の home.sessionVariables は同じファイルの
 # この前で export されるので、そこに書いた SSL_CERT_FILE には残りが揃う。
 #
+# ## 入れる変数を選ぶ (home/options.nix の dotfiles.osCaBundle)
+#
+#   enable = true・requestsCaBundle.enable = true (既定)   4 つとも入れる
+#   enable = true・requestsCaBundle.enable = false          REQUESTS_CA_BUNDLE 以外の 3 つを入れる
+#   enable = false                                          入れない
+#
+# REQUESTS_CA_BUNDLE だけを外せるのは、requests がこれをアプリが Session に置いた verify より先に使い、
+# それに頼る script を動かすホストがありうるため。
+#
 # hm-session-vars は 1 つの session で 1 回しか読まない (__HM_SESS_VARS_SOURCED を子へ継ぐ)。switch の前から
 # 続いている process (herdr の server など) の下で開いた shell には入らない。反映のしかた・効かないところ
 # (cacert を含む devShell の中など)・副作用は nix/README.md の「証明書の束を OS の信頼ストアに寄せる」。
-{ lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
+  cfg = config.dotfiles.osCaBundle;
   bundle = "/etc/ssl/certs/ca-certificates.crt";
+
+  # if の中で export する行。SSL_CERT_FILE を先に決め、残りをそれに揃える
+  exports = [
+    ''export SSL_CERT_FILE="''${SSL_CERT_FILE:-''${NIX_SSL_CERT_FILE:-${bundle}}}"''
+    ''export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-$SSL_CERT_FILE}"''
+  ]
+  ++ lib.optional cfg.requestsCaBundle.enable ''export REQUESTS_CA_BUNDLE="''${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"''
+  ++ [
+    ''export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="''${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-$SSL_CERT_FILE}"''
+  ];
 in
 {
-  home.sessionVariablesExtra = lib.mkIf pkgs.stdenv.hostPlatform.isLinux ''
+  home.sessionVariablesExtra = lib.mkIf (pkgs.stdenv.hostPlatform.isLinux && cfg.enable) ''
     if [ -f ${bundle} ]; then
-      export SSL_CERT_FILE="''${SSL_CERT_FILE:-''${NIX_SSL_CERT_FILE:-${bundle}}}"
-      export NIX_SSL_CERT_FILE="''${NIX_SSL_CERT_FILE:-$SSL_CERT_FILE}"
-      export REQUESTS_CA_BUNDLE="''${REQUESTS_CA_BUNDLE:-$SSL_CERT_FILE}"
-      export CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE="''${CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE:-$SSL_CERT_FILE}"
-    fi
+    ${lib.concatMapStrings (l: "  ${l}\n") exports}fi
   '';
 }
