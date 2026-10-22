@@ -29,6 +29,11 @@
 # 読み直す (3 段まで)。cd と git -C は、その後ろの git を見る場所に効かせる。script の中・関数・alias・変数に
 # 入れたコマンドは見えない (断られたら、失敗のあとの指示で受ける)。
 #
+# herdr の pane (HERDR_ENV=1) では、herdr の通知 (--sound request) でも知らせる。body は「どこから」(workspace の
+# 名前・pane の ID・agent の名前)・コマンドの頭・承認の画面の接続の 3 行。同じ pane からは 600 秒に 1 回まで
+# (commit のたびに鳴らさない。印は ${XDG_STATE_HOME:-~/.local/state}/pjp-ssh-agent-notice/ の時刻で、出せた通知
+# だけを数える)。会話の画面の 1 行は毎回出す。herdr は timeout 2 で呼び、落ちても黙って進む。
+#
 # 承認の画面の接続 (conn_desc) は、SSH_AUTH_SOCK (コマンドの頭の SSH_AUTH_SOCK= が勝つ) の symlink の先を見る。
 # sshd が転送した agent (s.*.sshd.*) なら、pjp-agent-link の記録 (~/.local/state/pjp-agent-link/conn/) の時刻と
 # PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは見ず、ファイル
@@ -855,6 +860,73 @@ clip() {
   jq -rn --arg s "$1" '$s | if length > 80 then .[0:79] + "…" else . end'
 }
 
+# --- herdr の通知と、どこから
+
+herdr_ready() {
+  [[ ${HERDR_ENV:-} == 1 ]] && command -v herdr &>/dev/null
+}
+
+# herdr_call <引数>…: 返事をしない herdr で Bash を待たせないよう、timeout があれば 2 秒で切る
+herdr_call() {
+  if command -v timeout &>/dev/null; then
+    timeout 2 herdr "$@" </dev/null 2>/dev/null
+  else
+    herdr "$@" </dev/null 2>/dev/null
+  fi
+}
+
+# herdr_notify <title> <body>: 音つきで知らせる。出せたら 0
+herdr_notify() {
+  herdr_ready || return 1
+  herdr_call notification show "$1" --body "$2" --sound request >/dev/null
+}
+
+# where_desc: 「どこから」(workspace の名前・pane の ID・agent の名前・subagent) を where に、workspace の名前を
+# ws_label に入れる (呼び出し元で使うので $( ) で呼ばない)
+where_desc() {
+  local agent_name="" agent_type part
+  local -a parts=()
+  where=""
+  ws_label=""
+  if herdr_ready; then
+    if [[ -n ${HERDR_WORKSPACE_ID:-} ]]; then
+      ws_label=$(herdr_call workspace get "${HERDR_WORKSPACE_ID}" | jq -r '.result.workspace.label // empty' 2>/dev/null)
+    fi
+    if [[ -n ${HERDR_PANE_ID:-} ]]; then
+      agent_name=$(herdr_call agent get "${HERDR_PANE_ID}" | jq -r '.result.agent.name // empty' 2>/dev/null)
+    fi
+    [[ -z ${ws_label} ]] || parts+=("workspace「${ws_label}」")
+    [[ -z ${HERDR_PANE_ID:-} ]] || parts+=("pane ${HERDR_PANE_ID}")
+    [[ -z ${agent_name} ]] || parts+=("agent ${agent_name}")
+  fi
+  agent_type=$(field '.agent_type')
+  [[ -z $(field '.agent_id') ]] || parts+=("subagent ${agent_type:-?}")
+  for part in "${parts[@]}"; do
+    where+=${where:+・}${part}
+  done
+  [[ -n ${where} ]] || where="herdr の外の会話"
+}
+
+# 同じ pane からの herdr の通知は 600 秒に 1 回。印は出せた通知の時刻
+stamp_path() {
+  local key="${HERDR_SESSION:-default}-${HERDR_PANE_ID:-}"
+  printf '%s/pjp-ssh-agent-notice/notified-%s' "${XDG_STATE_HOME:-${HOME}/.local/state}" "${key//[^A-Za-z0-9_-]/_}"
+}
+
+notify_due() {
+  local f
+  f=$(stamp_path)
+  [[ -e ${f} ]] || return 0
+  (($(date +%s) - $(mtime "${f}") >= 600))
+}
+
+touch_stamp() {
+  local f
+  f=$(stamp_path)
+  mkdir -p "${f%/*}" 2>/dev/null && touch "${f}" 2>/dev/null
+  return 0
+}
+
 # --- 打つ前
 
 before() {
@@ -867,6 +939,11 @@ before() {
   conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
   head=$(clip "${hit_head}")
   jq -cn --arg m "🔑 1Password の承認が出るかも (${hit_kind}): ${head} — ${conn}" '{systemMessage: $m}' || true
+  if herdr_ready && notify_due; then
+    where_desc
+    herdr_notify "🔑 1Password の承認が出るかも" "${where}"$'\n'"${head}"$'\n'"${conn}" && touch_stamp
+  fi
+  return 0
 }
 
 case ${event} in

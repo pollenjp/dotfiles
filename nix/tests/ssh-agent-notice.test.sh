@@ -7,8 +7,8 @@
 #
 # flake の checks (ssh-agent-notice-test) が Nix のサンドボックスで流す。使うのは bash・jq・git・coreutils と
 # stdenv の awk だけ。HOME・XDG_STATE_HOME は使い捨ての dir に向け、git の設定は GIT_CONFIG_GLOBAL と
-# GIT_CONFIG_COUNT で場面ごとに渡す。時刻は TZ=UTC0 で比べる。手元 (Claude の会話の中) で流しても同じになるよう、
-# 始めに GIT_CONFIG_*・HERDR_*・SSH_AUTH_SOCK を外す。
+# GIT_CONFIG_COUNT で場面ごとに渡す。herdr は呼ばれた引数を書き留める偽物で代える。時刻は TZ=UTC0 で比べる。
+# 手元 (Claude の会話の中) で流しても同じになるよう、始めに GIT_CONFIG_*・HERDR_*・SSH_AUTH_SOCK を外す。
 #
 # ## 確かめること
 #
@@ -22,6 +22,10 @@
 #   - 知らせる文は「🔑 … (<種類>): <頭> — 承認の画面は <接続>」の 1 行の JSON だけで、頭は包むコマンドを外して 80 文字で切る
 #   - 承認の画面の接続は、pjp-agent-link の記録の時刻と値・記録が無ければファイルの時刻・より新しい接続・手元の agent・
 #     先が無い・SSH_AUTH_SOCK が無い、の形で出し、コマンドの頭の SSH_AUTH_SOCK= が env より勝つ
+#   - herdr の pane で当たれば、herdr の通知 (どこから・頭・接続の 3 行、--sound request) も出す。どこからは
+#     workspace の名前・pane の ID・agent の名前 (無ければ pane まで)。同じ pane からは 10 分に 1 回で、別の pane は
+#     間を置かない。herdr が落ちても会話の 1 行は出し、落ちた通知は間引きに数えない
+#   - herdr の外と、当たらないコマンドでは herdr を呼ばない
 #   - Bash 以外・壊れた入力・空の入力・jq が無いときは黙り、いつも exit 0
 
 set -u -o pipefail
@@ -245,6 +249,109 @@ expect_notice "先の無い口は、出ないと言う" \
 expect_notice "コマンドの頭の SSH_AUTH_SOCK= が env より勝つ" \
   "${title} (ssh の接続): ssh h — 承認の画面はこのマシンの agent (~/.1password/agent.sock) が出す" \
   "SSH_AUTH_SOCK=${HOME}/.1password/agent.sock ssh h" "${work}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.dead.sock"
+
+# --- herdr の通知
+# 偽の herdr: 呼ばれた引数を JSON の配列で log に足し、workspace get・agent get には決まった値を返す。
+# FAKE_HERDR_RC で終了コード、FAKE_AGENT で agent の名前 (null なら名前なし) を変える
+fakebin="${work}/bin"
+hlog="${work}/herdr.log"
+mkdir -p "${fakebin}"
+cat >"${fakebin}/herdr" <<EOF
+#!${BASH}
+jq -cn '\$ARGS.positional' --args -- "\$@" >>"${hlog}"
+case "\$1 \$2" in
+  "workspace get") jq -cn '{result: {workspace: {label: "🌱 dotfiles: x"}}}' ;;
+  "agent get") jq -cn --arg n "\${FAKE_AGENT:-dot-x}" '{result: {agent: {name: (if \$n == "null" then null else \$n end)}}}' ;;
+  *) echo '{"result":{"shown":true}}' ;;
+esac
+exit "\${FAKE_HERDR_RC:-0}"
+EOF
+chmod +x "${fakebin}/herdr"
+: >"${hlog}"
+# in_herdr <pane> [NAME=VALUE…]: herdr の pane の env (と偽の herdr を先にした PATH) を並べる
+in_herdr() {
+  local pane=$1
+  shift
+  printf '%s\n' HERDR_ENV=1 "HERDR_PANE_ID=${pane}" HERDR_WORKSPACE_ID=w9 HERDR_SESSION=s2 "PATH=${fakebin}:${PATH}" "$@"
+}
+notified() {
+  jq -s '[.[] | select(.[0] == "notification")] | length' "${hlog}"
+}
+calls() {
+  jq -s 'length' "${hlog}"
+}
+mapfile -t hp1 < <(in_herdr w9:p1)
+pre 'timeout 5 ssh h true' "${work}" "${hp1[@]}"
+want_body=$'workspace「🌱 dotfiles: x」・pane w9:p1・agent dot-x\nssh h true\n承認の画面は出ない (SSH_AUTH_SOCK が無い)'
+if noticed && [[ $(notified) == 1 ]] \
+  && [[ $(jq -sc '[.[] | select(.[0] == "notification")][0]' "${hlog}") == "$(jq -cn --arg b "${want_body}" '["notification", "show", "🔑 1Password の承認が出るかも", "--body", $b, "--sound", "request"]')" ]]; then
+  ok "当たれば herdr に「どこから・頭・接続」の通知を音つきで出す"
+else
+  ng "当たれば herdr に「どこから・頭・接続」の通知を音つきで出す" "$(detail) log=$(cat "${hlog}")"
+fi
+
+pre 'ssh h true' "${work}" "${hp1[@]}"
+if noticed && [[ $(notified) == 1 ]]; then
+  ok "同じ pane から 10 分の間は、通知を出さず会話の 1 行だけ出す"
+else
+  ng "同じ pane から 10 分の間は、通知を出さず会話の 1 行だけ出す" "$(detail) log=$(cat "${hlog}")"
+fi
+
+for f in "${XDG_STATE_HOME}"/pjp-ssh-agent-notice/*; do
+  touch -d "@$(($(date +%s) - 601))" "${f}"
+done
+pre 'ssh h true' "${work}" "${hp1[@]}"
+if noticed && [[ $(notified) == 2 ]]; then
+  ok "前の通知から 10 分を過ぎれば、また出す"
+else
+  ng "前の通知から 10 分を過ぎれば、また出す" "$(detail) log=$(cat "${hlog}")"
+fi
+
+mapfile -t hp2 < <(in_herdr w9:p2)
+pre 'ssh h true' "${work}" "${hp2[@]}"
+if noticed && [[ $(notified) == 3 ]]; then
+  ok "別の pane からは、間を置かずに出す"
+else
+  ng "別の pane からは、間を置かずに出す" "$(detail) log=$(cat "${hlog}")"
+fi
+
+mapfile -t hp3 < <(in_herdr w9:p3 FAKE_AGENT=null)
+pre 'ssh h true' "${work}" "${hp3[@]}"
+if [[ $(jq -sr '[.[] | select(.[0] == "notification")][-1][4]' "${hlog}") == "workspace「🌱 dotfiles: x」・pane w9:p3"$'\n'* ]]; then
+  ok "agent に名前が無ければ、どこからは pane の ID まで"
+else
+  ng "agent に名前が無ければ、どこからは pane の ID まで" "log=$(cat "${hlog}")"
+fi
+
+n0=$(calls)
+pre 'ssh h true' "${work}" "PATH=${fakebin}:${PATH}"
+if noticed && [[ $(calls) == "${n0}" ]]; then
+  ok "herdr の外 (HERDR_ENV が無い) では herdr を呼ばず、会話の 1 行だけ出す"
+else
+  ng "herdr の外 (HERDR_ENV が無い) では herdr を呼ばず、会話の 1 行だけ出す" "$(detail) log=$(cat "${hlog}")"
+fi
+
+n0=$(calls)
+pre 'ls -la' "${work}" "${hp2[@]}"
+s1=$(silent && echo yes)
+pre 'git status' "${work}" "${hp2[@]}"
+if [[ ${s1} == yes ]] && silent && [[ $(calls) == "${n0}" ]]; then
+  ok "当たらないコマンドでは herdr を呼ばない"
+else
+  ng "当たらないコマンドでは herdr を呼ばない" "s1=${s1} $(detail) log=$(cat "${hlog}")"
+fi
+
+mapfile -t hp4 < <(in_herdr w9:p4 FAKE_HERDR_RC=1)
+pre 'ssh h true' "${work}" "${hp4[@]}"
+s1=$(noticed && echo yes)
+n0=$(notified)
+mapfile -t hp4 < <(in_herdr w9:p4)
+pre 'ssh h true' "${work}" "${hp4[@]}"
+if [[ ${s1} == yes ]] && noticed && [[ $(notified) == $((n0 + 1)) ]]; then
+  ok "herdr が落ちても会話の 1 行は出て exit 0。落ちた通知は間引きに数えない"
+else
+  ng "herdr が落ちても会話の 1 行は出て exit 0。落ちた通知は間引きに数えない" "s1=${s1} $(detail) log=$(cat "${hlog}")"
+fi
 
 # --- 黙るもの
 run_raw() {
