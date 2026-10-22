@@ -205,8 +205,9 @@ check_md() {
       problems+=("${label}: description がありません。Claude はここを読んで、いつ使うかを決めます")
     else
       # 素の値 (引用符も block scalar も無い) の「 #」から先は YAML のコメントで、値から黙って消える。1 行の値と、複数行の
-      # 最後の行で起きる (途中の行なら YAML として読めずに上で落ちる)
-      dropped=$(fm_yq '.description | select(style == "") | line_comment' "${fm}")
+      # 最後の行 (yq は値の line_comment に付ける) と、値を key の次の行から書くときの key の行 (key の line_comment に
+      # 付ける) で起きる (途中の行なら YAML として読めずに上で落ちる)
+      dropped=$(fm_yq '.description | select(style == "") | [(key | line_comment), line_comment] | map(select(. != "")) | join(" ")' "${fm}")
       if [[ -n ${dropped} ]]; then
         problems+=("${label}: description の「 #」から先 (${dropped}) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲んでください")
       fi
@@ -215,7 +216,8 @@ check_md() {
       # 行から書いたときの値の前なら値の head_comment) に字下げを落として付け、0 桁目のコメントと見分けられない
       # (yq-go 4.53.3)。そこで description の key の行の次から、次の key の行の手前 (最後の key なら frontmatter の
       # 終わり) までを本文で見る (値を key の次の行から書くときの、値の前の行も入る)。0 桁目の # の行は値の外のコメント
-      # なので見ない。# の行の後ろに続きの行があれば、YAML として読めずに上で落ちる。
+      # なので見ない。値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めずに上で落ちる (値の前の # の行は、
+      # 後ろに値が続いても読める)。
       # 字下げは [ \t] で見る。YAML の空白は半角スペースとタブだけで、[[:space:]] は UTF-8 の locale では全角スペースにも
       # 当たる (全角スペースの後ろの # は値に入る)
       # shellcheck disable=SC2016 # yq の $l はシェルの展開ではない

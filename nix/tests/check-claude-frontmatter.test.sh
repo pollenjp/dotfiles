@@ -7,7 +7,8 @@
 #   bash nix/tests/check-claude-frontmatter.test.sh [<script のパス>]
 #
 # flake の checks (check-claude-frontmatter-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・grep と、
-# script が使う yq (mikefarah/yq)。サンドボックスの外で流すときは yq を PATH に用意する (nix/ の devShell にある)。
+# script が使う yq (mikefarah/yq)。全角スペースのケースは C.UTF-8 の locale で流す (nixpkgs の glibc が持つ)。サンドボックスの
+# 外で流すときは yq を PATH に用意する (nix/ の devShell にある)。
 #
 # ## 確かめること
 #
@@ -16,13 +17,15 @@
 #     コメントは見ない)・alias・ほかの key。skill・agent (サブディレクトリも)・command (サブディレクトリの名前空間も) を
 #     数え、見た個数を出して exit 0。skills・agents・commands の直下の README.md・agents のサブディレクトリの README.md
 #     (Claude Code は name の無いファイルを文書として扱う)・skill のディレクトリの SKILL.md でないファイルは見ない
-#   - 全角スペースの後ろの # は値に入るので、素の値の続きの行の頭にあっても通る (UTF-8 の locale でも)
+#   - 全角スペースの後ろの # は値に入るので、素の値の続きの行の頭にあっても通る (UTF-8 の locale でも)。値の前の 0 桁目の
+#     コメント (エラーの文の助言どおりに直した形) と、引用符で囲んだ複数行の値の # で始まる行も通る
 #   - 落とす形。どれも、ファイルのパスと理由を 1 行ずつ全部出して exit 1:
 #     - YAML として読めない (素の値の途中の「: 」)。skill・agent・command のどれでも。エラーの行番号はファイルの行
 #     - frontmatter の中の --- (値の途中でも。行番号はファイルの行)・key: value の並びでない・key の重複
 #     - description と name が文字列でない (列・日付)
-#     - 素の値の description の「 #」から先や # で始まる行がコメントとして消える (1 行の値・複数行の最後の行・# で始まる
-#       続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から書いたときの、値の前の # の行)
+#     - 素の値の description の「 #」から先や # で始まる行がコメントとして消える (1 行の値・複数行の最後の行・値を key の
+#       次の行から書いたときの key の行・# で始まる続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から
+#       書いたときの、値の前の # の行)。値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めないと言う
 #     - description が無い・空白だけ・frontmatter がコメントだけ (name も無い)
 #     - name がディレクトリ名 (agent はファイル名。サブディレクトリでも) と違う・小文字ケバブケースでない。名前 (skill は
 #       ディレクトリ名、agent はファイル名、command はパスの先頭の要素) が pjp- で始まらない
@@ -356,21 +359,41 @@ description:
 argument-hint: <path>
 ---
 EOF
+# 値を key の次の行から書くと、key の行の「 #」から先も消える (yq は値ではなく key の line_comment に付ける)
+put "${cl}/commands/pjp-e.md" <<'EOF'
+---
+description: #dev チャンネルに投稿するとき
+  続きの行だけが値になる
+argument-hint: <path>
+---
+EOF
+# 値の途中の # の行 (後ろにまだ続きの行がある) は、YAML として読めない
+put "${cl}/skills/pjp-mid/SKILL.md" <<'EOF'
+---
+name: pjp-mid
+description: 委譲するときに読む。
+  #dev の行の後ろに
+  続きの行があると YAML として読めない
+---
+EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 6 ]] \
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 8 ]] \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-x/SKILL.md: description の「 #」から先 (#12 で壊れた形を直すとき) がコメントとして捨てられています' \
   && seen_err "${c}" -F '   nix/files/claude/agents/pjp-a.md: description の「 #」から先 (#dev から先も消える) がコメントとして捨てられています' \
+  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-e.md: description の「 #」から先 (#dev チャンネルに投稿するとき) がコメントとして捨てられています' \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-y/SKILL.md: description の # で始まる行 (4 行目: #dev チャンネルなど) がコメントとして捨てられています' \
   && seen_err "${c}" -F '   nix/files/claude/commands/pjp-c.md: description の # で始まる行 (3 行目: #12 で足した続きの行も消える) がコメントとして捨てられています' \
   && seen_err "${c}" -F '   nix/files/claude/skills/pjp-tab/SKILL.md: description の # で始まる行 (4 行目: #dev タブの後ろの行も消える) がコメントとして捨てられています' \
-  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-d.md: description の # で始まる行 (3 行目: #dev で始めた最初の行も消える) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲み、コメントなら 0 桁目から書いてください'; then
-  ok "素の値の description の「 #」から先や # で始まる行が消える形は、1 行の値・複数行の最後の行・# で始まる続きの行 (後ろに key があっても・タブの後ろでも)・値を key の次の行から書いたときの値の前の # の行のどれでも、消える部分を添えて exit 1"
+  && seen_err "${c}" -F '   nix/files/claude/commands/pjp-d.md: description の # で始まる行 (3 行目: #dev で始めた最初の行も消える) がコメントとして捨てられています。値に含めるなら >- の block scalar にするか引用符で囲み、コメントなら 0 桁目から書いてください' \
+  && seen_err "${c}" -F '   nix/files/claude/skills/pjp-mid/SKILL.md: frontmatter を YAML として読めません'; then
+  ok "素の値の description の「 #」から先や # で始まる行が消える形は、1 行の値・複数行の最後の行・値を次の行から書いたときの key の行・# で始まる続きの行 (後ろに key があっても・タブの後ろでも)・値の前の # の行のどれでも、消える部分を添えて exit 1 (値の途中の # の行は YAML として読めないと言う)"
 else
   ng "「 #」から先と # で始まる行" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
 
-# 5b. 全角スペース (U+3000) は YAML の空白ではないので、その後ろの # はコメントにならず値に入る。[[:space:]] は UTF-8 の
-#     locale で全角スペースにも当たるので、C.UTF-8 で流す (Nix のサンドボックスは C ロケールで、そのままでは当たらない)
+# 5b. 値に入る # と、値の外のコメントは通る。全角スペース (U+3000) は YAML の空白ではないので、その後ろの # はコメントに
+#     ならず値に入る。[[:space:]] は UTF-8 の locale で全角スペースにも当たるので、C.UTF-8 で流す (Nix のサンドボックスは
+#     C ロケールで、そのままでは当たらない)
 n=$(new_nix t5b)
 cl=${n}/files/claude
 c=$(dirname "${n}")
@@ -382,11 +405,27 @@ description: Slack に投稿するときに使う。
   ${zenkaku}#dev チャンネルも、全角スペースの後ろなら値に入る
 ---
 EOF
+# エラーの文の助言どおり、値の前のコメントを 0 桁目に移した形
+put "${cl}/commands/pjp-c.md" <<'EOF'
+---
+description:
+# 0 桁目のコメントは値の外で、値は後ろの行だけになる
+  呼ぶときに読む
+argument-hint: <path>
+---
+EOF
+put "${cl}/agents/pjp-a.md" <<'EOF'
+---
+name: pjp-a
+description: "委譲するときに読む。
+  #12 のように続きの行の頭の # も、引用符の中なら値に入る"
+---
+EOF
 LC_ALL=C.UTF-8 run "${n}"
-if [[ $(rc "${c}") == 0 && ! -s ${c}/err ]] && seen_out "${c}" -F '1 個'; then
-  ok "素の値の続きの行の頭でも、全角スペースの後ろの # は値に入るので、UTF-8 の locale でも通る"
+if [[ $(rc "${c}") == 0 && ! -s ${c}/err ]] && seen_out "${c}" -F '3 個'; then
+  ok "全角スペースの後ろの # (UTF-8 の locale でも)・引用符の中の # で始まる行・値の前の 0 桁目のコメント (エラーの文の助言どおりの形) は通る"
 else
-  ng "全角スペースの後ろの #" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+  ng "値に入る # と値の外のコメント" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
 fi
 
 # 6. description が無い・空白だけ・frontmatter がコメントだけ (name も無い)
