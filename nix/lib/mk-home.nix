@@ -35,6 +35,7 @@
   #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
   #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
   #   claude.videoOffer.autoStart.enable = true;  # 設計・PR のときに解説動画の短尺を答えを待たずに作り始めるマシン (既定は先に聞く)
+  #   claude.sshAgentNotice.extraCommands = [ "nix run .#vm" ];  # 中で ssh を打つ道具も、打つ前に 1Password の承認を知らせる
   #
   # 省略すれば既定 (gitViaGh は true、devTracker と videoOffer.autoStart は false。個々は home/options.nix)。
   # dotfiles-private に登録したホスト (lib/private-hosts.nix) とローカル flake の tmp は、ここに渡す値でその PC の

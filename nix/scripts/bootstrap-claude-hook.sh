@@ -21,6 +21,12 @@
 #   PostToolUse  Skill                           run-through-nudge.sh
 #                superpowers の 4 つの skill を読んだ直後に、確認を挟まずに PR まで
 #                走り切るよう念を押す (ADR 019)
+#   PreToolUse   Bash                            ssh-agent-notice.sh
+#   PostToolUse  Bash                            ssh-agent-notice.sh
+#   PostToolUseFailure  Bash                     ssh-agent-notice.sh
+#                SSH agent (1Password) を使うコマンドを打つ前に知らせ、断られたら打ち直さずに
+#                選択肢の問いを出させる (ADR 029)。0 以外で終わった Bash は PostToolUseFailure に
+#                だけ来るので、Post は 2 つとも登録する
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
 
@@ -31,13 +37,14 @@ hooks_dir="${HOME}/.claude/hooks"
 guard="${hooks_dir}/nix-managed-guard.sh"
 nudge="${hooks_dir}/video-offer-nudge.sh"
 run_through="${hooks_dir}/run-through-nudge.sh"
+ssh_notice="${hooks_dir}/ssh-agent-notice.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}" "${run_through}"; do
+for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -84,6 +91,9 @@ register PreToolUse "Edit|Write|NotebookEdit|Bash" "" "${guard}"
 register PostToolUse "Bash" "Bash(gh pr create *)" "${nudge}"
 register PostToolUse "Write" "" "${nudge}"
 register PostToolUse "Skill" "" "${run_through}"
+register PreToolUse "Bash" "" "${ssh_notice}"
+register PostToolUse "Bash" "" "${ssh_notice}"
+register PostToolUseFailure "Bash" "" "${ssh_notice}"
 
 if [[ ${changed} == 1 ]]; then
   echo
