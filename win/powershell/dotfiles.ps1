@@ -31,8 +31,9 @@ function hr { herdr --remote @args }
 
 # Claude Code。WSL の fish の abbr と bash の alias の c と同じ中身にそろえる。
 # Remote Control を有効にし、権限の確認を飛ばし、effort を max、モデルを Opus 5.5 に固定して
-# claude.exe を起動する。--remote-control を末尾に置かない理由は fish.nix の同じ節に書いてある。
-function c { claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5 @args }
+# claude.exe を起動する。末尾の --remote-control に = で空の値を渡す理由は、fish.nix の同じ節に
+# 書いてある。
+function c { claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control= @args }
 
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-OpenSSH.ps1 (win/README.md の「OpenSSH」)。-Check なら確かめるだけ。
