@@ -19,6 +19,10 @@
 #                nix の ssh:// / ssh-ng://・git の clone / fetch / pull / push / ls-remote で相手の URL が ssh
 #   署名         git の commit など (commit・merge・rebase・cherry-pick・revert・am・pull・commit-tree) と tag と
 #                push --signed で、署名するとき・ssh-keygen -Y sign・ssh-add -T
+#   設定の一覧   中で ssh を打つ道具 (infra-v2 の nix run .#vm など)。host option
+#                dotfiles.claude.sshAgentNotice.extraCommands の項目で、home-manager が
+#                ~/.local/state/dotfiles/claude-ssh-agent-notice.json に置く。項目は語を空白で区切った glob で、
+#                1 語目を頭の語に、残りを引数の中に順に当てる
 #
 # git が署名するかは、hook の中で git に実効の設定を聞いて決める。dotfiles は Claude の会話にだけ
 # commit.gpgsign=false を env で入れているので (claude.nix の gitConfigBase)、素の git commit は当たらない。hook の
@@ -63,7 +67,8 @@
 # ## 黙る場面
 #
 #   - Bash 以外の tool・一覧に当たらないコマンド。コマンドの文字に ssh・scp・sftp・mosh・rsync・nixos-rebuild・
-#     nix-copy-closure・git のどれも無ければ、読まずに抜ける (この hook は Bash のたびに走る)
+#     nix-copy-closure・git と、設定の一覧の項目の 1 語目のどれも無ければ、読まずに抜ける (この hook は Bash の
+#     たびに走る)
 #   - 断りの無い出力。agent の口が生きているときの鍵の認証の失敗 (鍵が相手に無いだけ)
 #   - 想定外の入力・jq が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
 #
@@ -90,6 +95,7 @@ event=$(field '.hook_event_name')
 cmd=$(field '.tool_input.command')
 cwd=$(field '.cwd')
 [[ -n ${cwd} && -d ${cwd} ]] || cwd=${PWD}
+extra_cmds=()
 
 # コマンドの文字を単純コマンドに分ける awk。1 行に 1 つ、語を US (\037) で区切って出す (語の中の改行・タブは空白)。
 #
@@ -597,12 +603,47 @@ match_simple() {
       ;;
     git) kind=$(git_kind "${dir}" "${w[@]:1}") ;;
   esac
+  if [[ -z ${kind} ]] && extra_match "${w[@]}"; then
+    kind="設定の一覧"
+  fi
   [[ -n ${kind} ]] || return 1
 
   hit_kind=${kind}
   hit_head=${w[*]}
   hit_sock=${sock}
   return 0
+}
+
+# load_extras: 一覧に足した道具 (dotfiles.claude.sshAgentNotice.extraCommands。home-manager が置く JSON) を
+# extra_cmds に読む。無い・壊れている → 空 (組み込みの一覧だけ)
+load_extras() {
+  local f="${HOME}/.local/state/dotfiles/claude-ssh-agent-notice.json" line
+  extra_cmds=()
+  [[ -f ${f} ]] || return 0
+  while IFS= read -r line; do
+    [[ -z ${line} ]] || extra_cmds+=("${line}")
+  done < <(jq -r '.extraCommands[]? | strings' "${f}" 2>/dev/null)
+}
+
+# extra_match <語>…: 一覧の項目に当たるか。項目は語を空白で区切った glob で、1 語目を頭の語 (そのままか basename) に、
+# 残りを引数の中に順に当てる (間に別の語があってよい。"nix run .#vm" は nix run -L .#vm -- ip にも当たる)
+extra_match() {
+  local entry x k
+  local -a pat
+  for entry in "${extra_cmds[@]}"; do
+    read -r -a pat <<<"${entry}"
+    ((${#pat[@]} > 0)) || continue
+    # shellcheck disable=SC2053 # 項目の語は glob として比べる
+    [[ $1 == ${pat[0]} || ${1##*/} == ${pat[0]} ]] || continue
+    k=1
+    for x in "${@:2}"; do
+      ((k < ${#pat[@]})) || break
+      # shellcheck disable=SC2053 # 項目の語は glob として比べる
+      [[ ${x} == ${pat[k]} ]] && k=$((k + 1))
+    done
+    ((k == ${#pat[@]})) && return 0
+  done
+  return 1
 }
 
 # join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -) なら今の dir
@@ -953,8 +994,20 @@ touch_stamp() {
 # --- 打つ前
 
 before() {
-  local prefilter='ssh|scp|sftp|mosh|rsync|nixos-rebuild|nix-copy-closure|git' conn head
-  [[ -n ${cmd} && ${cmd} =~ ${prefilter} ]] || return 0
+  local prefilter='ssh|scp|sftp|mosh|rsync|nixos-rebuild|nix-copy-closure|git' conn head entry need=0
+  local -a first
+  [[ -n ${cmd} ]] || return 0
+  # 安く抜ける前段。一覧の項目の 1 語目もコマンドの文字にあれば読む (glob の文字を含む 1 語目は、いつも読む)
+  load_extras
+  for entry in "${extra_cmds[@]}"; do
+    read -r -a first <<<"${entry}"
+    case ${first[0]-} in
+      '') ;;
+      *[*?[]*) need=1 ;;
+      *) [[ ${cmd} != *"${first[0]}"* ]] || need=1 ;;
+    esac
+  done
+  ((need)) || [[ ${cmd} =~ ${prefilter} ]] || return 0
   hit_kind=""
   hit_head=""
   hit_sock=""

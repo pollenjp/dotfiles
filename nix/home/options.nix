@@ -14,6 +14,7 @@
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
+#   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
@@ -246,6 +247,27 @@ in
         反映は home-manager switch (~/dotfiles/setup --update でもよい)。settings.json は
         通らないので bootstrap は要らない。作り始める方にしたいマシンは、dotfiles-private に
         登録したホストのファイルか、ローカル flake の tmp で true にする。
+      '';
+    };
+
+    sshAgentNotice.extraCommands = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "nix run .#vm" ];
+      description = ''
+        中で ssh を打つ道具のうち、Claude Code が Bash で打つ前に「🔑 1Password の承認が出るかも」と
+        知らせるもの (hook の files/claude/hooks/ssh-agent-notice.sh。docs/adr/029_claude_ssh_agent_notice_*)。
+        ssh・scp・rsync・nixos-rebuild --target-host・git の署名などは hook が自分で見つけるので、ここには
+        コマンドの文字に ssh が出ない道具 (infra-v2 の nix run .#vm など) だけを書く。
+
+        項目は語を空白で区切った文字列で、1 語目をコマンドの頭の語 (そのままか basename) に、残りの語を
+        引数の中に順に当てる (間に別の語があってよい。"nix run .#vm" は nix run -L .#vm -- ip にも当たる)。
+        各語は bash の glob として比べる ("*/deploy.sh" など)。書いていない道具でも、agent に断られれば
+        hook がそのあとで選択肢の問いを出させる。
+
+        値は `~/.local/state/dotfiles/claude-ssh-agent-notice.json` (`{"extraCommands": [...]}`) に落ち
+        (home/modules/claude.nix)、hook が読む。反映は home-manager switch (~/dotfiles/setup --update でもよい)。
+        使う PC のホストの値 (dotfiles-private に登録したファイルか、ローカル flake の tmp) に書く。
       '';
     };
   };

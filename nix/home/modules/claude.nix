@@ -8,6 +8,8 @@
 #                                        CLAUDE.md の末尾に連結する (下記)
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
+#   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
+#                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。下記)
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
@@ -375,6 +377,25 @@ in
         source = claudeRoot + "/hooks/run-through-nudge.sh";
         executable = true;
       };
+    }
+
+    # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。SSH agent (1Password) を使うコマンドを
+    # 打つ前に、会話の画面と herdr の通知で「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせ、
+    # 断られたら打ち直さずに選択肢の問いを出すよう Claude に指示を足す (ADR 029)。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    #
+    # 中で ssh を打つ道具 (sshAgentNotice.extraCommands) は claude-ssh-agent-notice.json に置き、hook が読む。
+    # 空でも必ず書く (hook は無いときも組み込みの一覧で動く)。
+    {
+      ".claude/hooks/ssh-agent-notice.sh" = {
+        source = claudeRoot + "/hooks/ssh-agent-notice.sh";
+        executable = true;
+      };
+      ".local/state/dotfiles/claude-ssh-agent-notice.json".text =
+        builtins.toJSON {
+          inherit (cfg.sshAgentNotice) extraCommands;
+        }
+        + "\n";
     }
 
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが

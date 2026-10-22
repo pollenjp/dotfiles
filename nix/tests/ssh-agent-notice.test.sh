@@ -19,6 +19,8 @@
 #   - git は署名するときだけ当てる (env の commit.gpgsign=false は外れ・global の true と -c と -S は当たり・
 #     --no-gpg-sign と rebase --abort は外れ・tag は作るときだけ)
 #   - git の相手が ssh の remote (cd と -C の先も・clone の URL も) なら当て、insteadOf で https になれば外す
+#   - 一覧に足した道具 (claude-ssh-agent-notice.json の extraCommands) は、1 語目を頭の語に、残りを引数に順に (間に
+#     別の語があってよい) glob で当てる。JSON が壊れていても組み込みの一覧は効く
 #   - 知らせる文は「🔑 … (<種類>): <頭> — 承認の画面は <接続>」の 1 行の JSON だけで、頭は包むコマンドを外して 80 文字で切る
 #   - 承認の画面の接続は、pjp-agent-link の記録の時刻と値・記録が無ければファイルの時刻・より新しい接続・手元の agent・
 #     先が無い・SSH_AUTH_SOCK が無い、の形で出し、コマンドの頭の SSH_AUTH_SOCK= が env より勝つ
@@ -48,11 +50,10 @@ script=${1:-${here}/../files/claude/hooks/ssh-agent-notice.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/ssh-agent-notice-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
-while IFS= read -r v; do
-  case ${v} in
-    GIT_CONFIG_* | HERDR_* | SSH_AUTH_SOCK) unset "${v}" ;;
-  esac
-done < <(compgen -e)
+# compgen は readline の無い bash (Nix のサンドボックスの bash) に無いので、名前の頭で引く形を使う
+for v in ${!GIT_CONFIG_@} ${!HERDR_@} SSH_AUTH_SOCK; do
+  unset "${v}"
+done
 export HOME="${work}/home" XDG_STATE_HOME="${work}/state" TZ=UTC0 GIT_CONFIG_NOSYSTEM=1
 export GIT_CONFIG_GLOBAL="${work}/empty.gitconfig"
 mkdir -p "${HOME}" "${XDG_STATE_HOME}"
@@ -208,6 +209,22 @@ expect_miss 'git clone https://example.invalid/x.git'
 expect_miss 'git push' "${work}/httpsrepo"
 expect_miss 'git push' "${work}/sshrepo" GIT_CONFIG_COUNT=1 \
   GIT_CONFIG_KEY_0=url.https://example.invalid/.insteadOf GIT_CONFIG_VALUE_0=git@example.invalid:
+
+# --- 一覧に足した道具 (dotfiles.claude.sshAgentNotice.extraCommands が置く JSON)
+extras="${HOME}/.local/state/dotfiles/claude-ssh-agent-notice.json"
+mkdir -p "${extras%/*}"
+jq -cn '{extraCommands: ["nix run .#vm", "*/deploy.sh"]}' >"${extras}"
+expect_hit "設定の一覧" 'nix run .#vm -- create a'
+expect_hit "設定の一覧" 'nix run -L .#vm -- ip a'
+expect_hit "設定の一覧" './scripts/deploy.sh x'
+expect_hit "設定の一覧" 'cd infra && nix run .#vm -- deploy a'
+expect_miss 'nix run .#vm-test'
+expect_miss 'nix build .#vm'
+expect_miss 'echo nix run .#vm'
+printf '{"extraCommands": ' >"${extras}"
+expect_hit "ssh の接続" 'ssh h true'
+expect_miss 'nix run .#vm -- create a'
+rm -f "${extras}"
 
 # --- 知らせる文: 頭は包むコマンドを外し、80 文字で切る
 long="ssh h $(printf 'x%.0s' {1..100})"
