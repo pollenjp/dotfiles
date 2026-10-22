@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Claude Code の hook。Bash で SSH agent (1Password) を使うコマンドを打つ前に知らせる (ADR 029)。
+# Claude Code の hook。Bash で SSH agent (1Password) を使うコマンドを打つ前に知らせ、断られたら打ち直さずに
+# 選択肢の問いを出させる (ADR 029)。
 #
 # herdr の中の SSH_AUTH_SOCK は手元の PC から SSH の接続で転送された agent を指し (ADR 025)、1Password の承認の
 # 画面は手元の PC に出るが、どの pane のどの Claude が頼んだかは出ない。ユーザーは出どころの分からない依頼を
 # 断るので、打つ前に「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせる。判断は script がするので
-# token を使わない。
+# token を使わない (Claude に文を足すのは、断られたときだけ)。
 #
 # ## 打つ前 (PreToolUse・matcher Bash)
 #
@@ -39,15 +40,37 @@
 # PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは見ず、ファイル
 # があるかで見る (sshd は接続を閉じると socket を消す)。
 #
+# ## 断られたあと (PostToolUse・PostToolUseFailure・matcher Bash)
+#
+# 0 以外で終わった Bash には PostToolUse が来ず、PostToolUseFailure が来る (入力の error に出力が入る。Claude Code
+# 2.1.306 で確かめた)。出力に次の文言があれば、Claude に指示を足し (additionalContext)、会話の画面に 1 行と、herdr の
+# 通知 (理由ごとの title。間引かない) を出す。文言は偽の agent と使い捨ての sshd で ssh・scp・git から集めた。
+#
+#   断られた       agent refused operation (ssh の sign_and_send_pubkey: … と、git の署名の Couldn't sign message …)
+#   通信が切れた   communication with agent failed (同じ形)
+#   届かない       git の署名の Couldn't get agent socket・Couldn't load public key …/.git_signing_key_tmp…、
+#                  鍵の認証の失敗 (Permission denied (publickey)) で agent の口の先が無いとき
+#
+# 失敗した Bash は部分一致で見る。成功した Bash (2>&1 | tail で終了コードが隠れたもの) は、ssh・git が出す形の行
+# (行の頭が sign_and_send_pubkey: などで、行の終わりが文言) だけを見る。成功した grep・cat の結果に出た文言で
+# 当てないため。
+#
+# 指示は「同じコマンドを打ち直さない。何を (コマンドの頭) とどこから (workspace・pane・agent) を書いてから、
+# ① 承認する (届かないなら接続し直す) ので打ち直す (推奨) ② 飛ばして進める ③ 止める の問いを出す」。herdr の
+# 指揮役の子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace の名前が 🌱 で始まれば言い切る)。
+# subagent の中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
+#
 # ## 黙る場面
 #
 #   - Bash 以外の tool・一覧に当たらないコマンド。コマンドの文字に ssh・scp・sftp・mosh・rsync・nixos-rebuild・
 #     nix-copy-closure・git のどれも無ければ、読まずに抜ける (この hook は Bash のたびに走る)
+#   - 断りの無い出力。agent の口が生きているときの鍵の認証の失敗 (鍵が相手に無いだけ)
 #   - 想定外の入力・jq が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
 #
 # ## 登録
 #
-# scripts/bootstrap-claude-hook.sh が settings.json の hooks.PreToolUse に 1 件 (matcher Bash) 足す。
+# scripts/bootstrap-claude-hook.sh が settings.json の hooks の PreToolUse・PostToolUse・PostToolUseFailure に
+# 1 件ずつ (matcher Bash) 足す。
 
 set -u -o pipefail
 
@@ -946,7 +969,108 @@ before() {
   return 0
 }
 
+# --- 断られたあと
+
+# agent_alive <sock>: agent の口の先があるか
+agent_alive() {
+  [[ -n $1 && -e $1 ]]
+}
+
+# refusal_reason <event> <出力>: 断りの理由を出す (refused・broken・unreachable と、鍵の認証の失敗の publickey)。
+# 無ければ 1。失敗した Bash は部分一致で、成功した Bash は行の頭に固定した形で見る (成功した grep・cat の結果に
+# 出た文言で当てない。2>&1 | tail で終了コードが隠れても、ssh・git の行はそのまま行の頭に出る)
+refusal_reason() {
+  local lead="^(sign_and_send_pubkey: |Couldn't sign |Signing |error: )"
+  if [[ $1 == PostToolUseFailure ]]; then
+    case $2 in
+      *"agent refused operation"*) echo refused ;;
+      *"communication with agent failed"*) echo broken ;;
+      *"Couldn't get agent socket"* | *"Couldn't load public key "*".git_signing_key_tmp"*) echo unreachable ;;
+      *"Permission denied ("*publickey*) echo publickey ;;
+      *) return 1 ;;
+    esac
+  elif grep -Eq "${lead}.*agent refused operation\\??\$" <<<"$2"; then
+    echo refused
+  elif grep -Eq "${lead}.*communication with agent failed\\??\$" <<<"$2"; then
+    echo broken
+  elif grep -Eq "^error: Couldn't (get agent socket|load public key .*\\.git_signing_key_tmp)" <<<"$2"; then
+    echo unreachable
+  elif grep -Eq '^([^ ]+: )?Permission denied \([^)]*publickey[^)]*\)\.?$' <<<"$2"; then
+    echo publickey
+  else
+    return 1
+  fi
+}
+
+after() {
+  local text reason head conn title desc first rule
+  local reconnect='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す'
+  text=$(jq -r '[.error, .tool_response.stdout, .tool_response.stderr] | map(strings) | join("\n")' <<<"${input}" 2>/dev/null) || return 0
+  case ${text} in
+    *agent* | *publickey* | *git_signing_key*) ;;
+    *) return 0 ;;
+  esac
+  reason=$(refusal_reason "${event}" "${text}") || return 0
+
+  hit_kind=""
+  hit_head=""
+  hit_sock=""
+  if [[ -n ${cmd} ]] && match_command "${cwd}" 0 "${cmd}"; then
+    head=${hit_head}
+  else
+    head=${cmd%%$'\n'*}
+  fi
+  # 鍵の認証の失敗は、agent の口の先が無いときだけ agent に届かないとみなす (口が生きていれば、鍵が相手に無いだけ)
+  if [[ ${reason} == publickey ]]; then
+    agent_alive "${hit_sock:-${SSH_AUTH_SOCK:-}}" && return 0
+    reason=unreachable
+  fi
+  head=$(clip "${head}")
+  conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
+
+  case ${reason} in
+    refused)
+      title="🔑 1Password に断られた"
+      desc='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
+      first='1Password を開いて承認するので、打ち直す'
+      ;;
+    broken)
+      title="🔑 SSH agent との通信が切れた"
+      desc='agent との通信が切れた (agent を貸している SSH の接続が閉じたか、途切れた)'
+      first=${reconnect}
+      ;;
+    *)
+      title="🔑 SSH agent に届かない"
+      desc='agent に届かない (SSH_AUTH_SOCK の先が無い。agent を貸す SSH の接続が無い)'
+      first=${reconnect}
+      ;;
+  esac
+
+  where_desc
+  local ctx="[ssh-agent] 直前の Bash は SSH agent (1Password) を使えずに失敗した: ${desc}。"$'\n'
+  ctx+="同じコマンドを打ち直さない (承認されないまま同じ失敗を繰り返す)。"$'\n'
+  if [[ -n $(field '.agent_id') ]]; then
+    ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、失敗したこと (何を: ${head} の接続先や署名する対象。"
+    ctx+="どこから: ${where}。${conn}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"
+  else
+    if [[ ${ws_label} == 🌱* ]]; then
+      rule='この pane は herdr の指揮役の子 (workspace の名前が 🌱 で始まる) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+    else
+      rule='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
+    fi
+    ctx+="1. 何を (${head} の接続先や署名する対象) と、どこから (${where}) を書く。${conn}。"$'\n'
+    ctx+="2. 選択肢の問いを出す: ① ${first} (推奨) ② この手順を飛ばして進める ③ ここで止める。① が選ばれたら、同じコマンドを 1 回だけ打ち直す。"$'\n'
+    ctx+=${rule}
+  fi
+
+  jq -cn --arg m "${title}: ${head} — ${conn}" --arg ev "${event}" --arg c "${ctx}" \
+    '{systemMessage: $m, hookSpecificOutput: {hookEventName: $ev, additionalContext: $c}}' || true
+  herdr_notify "${title}" "${where}"$'\n'"${head}"$'\n'"${conn}" || true
+  return 0
+}
+
 case ${event} in
   PreToolUse) before ;;
+  PostToolUse | PostToolUseFailure) after ;;
 esac
 exit 0
