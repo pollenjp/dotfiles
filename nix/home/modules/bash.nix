@@ -210,10 +210,10 @@ in
       #########################
       # Claude Code
       #########################
-      # 何をするか・--remote-control を末尾に置かない理由・以前の c (c-func) のことは
+      # 何をするか・末尾の --remote-control に = で空の値を渡す理由・以前の c (c-func) のことは
       # fish.nix の同じ節に書いてある。
       # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function の 3 つをそろえる。
-      c = "claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5";
+      c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
     };
 
     initExtra = ''

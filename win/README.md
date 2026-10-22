@@ -191,7 +191,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `hreload` | `herdr server reload-config` |
 | `hsvstop` | `herdr server stop` |
 | `hr` | `herdr --remote` (`hr <ssh-target>`。SSH 越しに別のマシンの herdr server へ attach する) |
-| `c` | `claude --remote-control --dangerously-skip-permissions --effort max --model claude-opus-5-5` (Claude Code。Remote Control を有効にして起動する) |
+| `c` | `claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=` (Claude Code。Remote Control を有効にして起動する。末尾の `=` は、後ろに続く語をセッションの名前として取らせないため) |
 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr.Preview`) で、WSL の herdr とは
 別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (この PC では WinGet の
