@@ -36,7 +36,8 @@
 # 判定から外す。compare は shared/ に module があれば新しい形を shared/ を外しても評価し、それが旧い形と同じなら
 # 「同じ (shared/ の値だけ違う)」として 0 を返し、shared/ が足す値は別に出す。元のホストが dotfiles-private に登録した
 # ホスト (値を直すとき) なら、その元のホストにもローカル flake の読む shared/ が当たっているので、draft と compare の
-# 旧い形は shared/ を外して評価する (下書きに shared/ の値を描かない・ホストのファイルどうしで比べる)。
+# 旧い形は shared/ を外して評価する (下書きに shared/ の値を描かない・ホストのファイルどうしで比べる)。このとき compare は、
+# clone と作業ツリーの shared/ が同じかをファイルで比べて出す (同じなら、shared/ の値はこの登録で動かない)。
 #
 # 評価はローカル flake の写しで行い、ユーザーの ~/dotfiles (flake.nix と flake.lock) にも dotfiles-private にも書かない
 # (shared/ を外すのも、dotfiles-private の nix/ の写しで行う)。
@@ -70,7 +71,8 @@ usage() {
       旧い形 (ローカル flake の <ホスト>) と新しい形 (<作業ツリー>/nix/hosts/<名前>.nix) を同じ本体 (--nix-dir。既定は
       この script の repo の nix/)・同じ lock で評価し、drvPath を比べる。<作業ツリー>/nix/shared/ に module があれば、
       新しい形を shared/ を外しても評価し、ホストのファイルの違いと shared/ が足す値を分けて出す (元のホストが
-      dotfiles-private に登録したホストなら、旧い形からもローカル flake の読む shared/ を外す)。
+      dotfiles-private に登録したホストなら、旧い形からもローカル flake の読む shared/ を外し、clone と作業ツリーの
+      shared/ が同じかを出す)。--out は作業ツリーの nix/・ローカル flake・その dotfiles-private の nix/ の外に置く。
       0 = 同じ (shared/ を外すと同じ = shared/ の値だけ違うときも)、1 = 違う (config.dotfiles の違いを出す)、
       2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形 (shared/ を足した形) が評価できない
   private-host.sh -h, --help
@@ -198,6 +200,16 @@ check_path() {
   case $1 in
     *[\"\\\$]*) die "パスに \"・\\・\$ を含むものは扱えません: $1" ;;
   esac
+}
+
+# まだ無いかもしれないパス ($1) の絶対パス。在る祖先を cd -P で解き、無い部分を後ろに足す (作らずに置き場所を確かめるため)
+abs_path() {
+  local p=$1 rest=""
+  while [[ ! -d ${p} ]]; do
+    rest="/${p##*/}${rest}"
+    p=$(dirname -- "${p}")
+  done
+  printf '%s%s' "$(cd -P -- "${p}" && pwd)" "${rest}"
 }
 
 # この PC の system (x86_64-linux など。uname から)
@@ -679,6 +691,10 @@ cmd_draft() {
     PJP_DRAFT_LIB="${nix_dir}/lib/host-draft.nix" nix eval --raw --impure --expr "${draft_expr}" 2>"${tmp}/draft.err"); then
     {
       printf '!! 元にするホスト %s を、ローカル flake (%s) の写しで評価できません:\n' "${base}" "${flake_dir}"
+      if [[ -n ${base_shared} ]]; then
+        printf '   (dotfiles-private に登録したホストなので、shared/ (%s) を外して評価した。ホストのファイルが shared/ に頼っていないか確かめる)\n' \
+          "${base_shared}"
+      fi
       eval_error_excerpt "${tmp}/draft.err"
     } >&2
     exit 3
@@ -744,8 +760,8 @@ dotfiles_diff() {
 }
 
 cmd_compare() {
-  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} private="" out="" pnix work res side rc
-  local old_drv old_out new_drv new_out bare_drv="" gen shared base_shared sides=(old new)
+  local flake_dir=${default_flake_dir} base="" name="" nd=${nix_dir} private="" out="" pnix old_pin work res side rc
+  local old_drv old_out new_drv new_out bare_drv="" host_drv host_side moved gen shared base_shared sides=(old new)
   local same_outside="    (config.dotfiles は同じ。dotfiles の option の外 (local や modules の programs.* など) が違う)"
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -786,15 +802,27 @@ cmd_compare() {
   check_path "${nd}"
   check_path "${pnix}"
   need_nix
+  # ローカル flake の dotfiles-private の入力 (登録した PC なら clone の nix/)
+  old_pin=$(input_path "${flake_dir}/flake.nix" dotfiles-private)
+  if [[ -n ${old_pin} && -d ${old_pin} ]]; then
+    old_pin=$(cd -P -- "${old_pin}" && pwd)
+  fi
   if [[ -n ${out} ]]; then
     if [[ -e ${out} ]] && [[ ! -d ${out} || -n $(ls -A "${out}") ]]; then
       die "--out が空でないか、ディレクトリではありません: ${out}"
     fi
-    mkdir -p "${out}"
-    work=$(cd -P -- "${out}" && pwd)
+    # 作る前に置き場所を確かめる (ローカル flake・dotfiles-private の nix/ の中に作らない)
+    work=$(abs_path "${out}")
     case "${work}/" in
       "$(cd -P -- "${flake_dir}" && pwd)/"*) die "--out がローカル flake の中です: ${work} (外に作る)" ;;
+      "${pnix}/"*) die "--out が dotfiles-private の作業ツリーの nix/ の中です: ${work} (外に作る)" ;;
     esac
+    if [[ -d ${old_pin} ]]; then
+      case "${work}/" in
+        "${old_pin}/"*) die "--out がローカル flake の読む dotfiles-private の nix/ の中です: ${work} (外に作る)" ;;
+      esac
+    fi
+    mkdir -p "${work}"
   else
     need_tmp
     work="${tmp}/compare"
@@ -839,6 +867,10 @@ cmd_compare() {
   if ! res=$(nix eval --raw "path:${work}/old#homeConfigurations" --apply "$(drv_expr "${base}")" 2>"${work}/old.err"); then
     {
       printf '!! 旧い形 (ローカル flake の %s) を評価できません:\n' "${base}"
+      if [[ -n ${base_shared} ]]; then
+        printf '   (dotfiles-private に登録したホストなので、shared/ (%s) を外して評価した。ホストのファイルが shared/ に頼っていないか確かめる)\n' \
+          "${base_shared}"
+      fi
       eval_error_excerpt "${work}/old.err"
     } >&2
     exit 3
@@ -875,31 +907,68 @@ cmd_compare() {
     printf '  参考: 今の世代 (%s) はどちらとも一致しない (本体が最後の switch から進んだ、など。判定には使わない)\n' "${gen}"
   fi
 
-  if [[ ${old_drv} == "${new_drv}" ]]; then
+  # 元のホストが登録したホストなら旧い形は shared/ を外してあるので、drvPath が同じでも、clone の shared/ の分は下で見る
+  if [[ -z ${base_shared} && ${old_drv} == "${new_drv}" ]]; then
     echo "→ drvPath が同じ。この登録で home-manager の世代の中身は変わらない (元のホストの値を全部写せている)。"
     return 0
   fi
-  if [[ -n ${bare_drv} ]]; then
-    if [[ ${old_drv} == "${bare_drv}" ]]; then
-      rc=0
-      echo "→ 同じ (shared/ の値だけ違う)。shared/ を外すと drvPath が同じで、ホストのファイルは元のホストの値を全部写せている。"
-    else
-      rc=1
-      echo "→ 違う (shared/ を外しても drvPath が違う。この登録でホストの値が変わる)。config.dotfiles の違い (旧い → shared/ を外した新しい形):"
-      dotfiles_diff "${work}/old" "${base}" "${work}/new-noshared" "${name}" "${same_outside}"
-    fi
-    echo "  shared/ が足す値 (登録した全ホストに当たる。config.dotfiles の、shared/ を外した新しい形 → 新しい形):"
-    dotfiles_diff "${work}/new-noshared" "${name}" "${work}/new" "${name}" \
-      "    (config.dotfiles は同じ。shared/ は dotfiles の option の外 (programs.* など) を変えている)"
-    return "${rc}"
-  fi
-  if [[ -n ${shared} ]]; then
+  if [[ -n ${shared} && -z ${bare_drv} ]]; then
     echo "  shared/ を外した新しい形を評価できない (ホストのファイルが shared/ に頼っている、など)。shared/ を含めて比べる:"
     eval_error_excerpt "${work}/new-noshared.err"
   fi
-  echo "→ drvPath が違う (この登録で値が変わる)。config.dotfiles の違い (旧い → 新しい):"
-  dotfiles_diff "${work}/old" "${base}" "${work}/new" "${name}" "${same_outside}"
-  return 1
+  if [[ -z ${base_shared} && -z ${bare_drv} ]]; then
+    echo "→ drvPath が違う (この登録で値が変わる)。config.dotfiles の違い (旧い → 新しい):"
+    dotfiles_diff "${work}/old" "${base}" "${work}/new" "${name}" "${same_outside}"
+    return 1
+  fi
+
+  # ホストのファイルどうしで比べる: 旧い形 (登録したホストなら clone の shared/ を外した形) と、新しい形から shared/ を外した形
+  # (作業ツリーに shared/ が無い・外した形を評価できないなら、新しい形そのもの)
+  host_drv=${bare_drv:-${new_drv}}
+  host_side=new
+  [[ -z ${bare_drv} ]] || host_side=new-noshared
+  # 元のホストが登録したホストなら、旧い形にも clone の shared/ が当たっていた。clone と作業ツリーの shared/ が同じかで、この登録で
+  # shared/ の値が動くかが決まる (同じなら、作業ツリーの shared/ の値は登録で増える値ではない)
+  moved=0
+  if [[ -n ${base_shared} ]] && ! diff -r "${old_pin}/shared" "${pnix}/shared" >/dev/null 2>&1; then
+    moved=1
+  fi
+  if [[ ${old_drv} == "${host_drv}" ]]; then
+    if [[ -n ${base_shared} && ${moved} == 0 ]]; then
+      echo "→ drvPath が同じ (ホストのファイルの値が同じで、shared/ も clone と作業ツリーで同じ)。この登録で home-manager の世代の中身は変わらない。"
+      return 0
+    fi
+    rc=0
+    echo "→ 同じ (shared/ の値だけ違う)。shared/ を外すと drvPath が同じで、ホストのファイルは元のホストの値を全部写せている。"
+  else
+    rc=1
+    if [[ -n ${bare_drv} ]]; then
+      echo "→ 違う (shared/ を外しても drvPath が違う。この登録でホストの値が変わる)。config.dotfiles の違い (旧い → shared/ を外した新しい形):"
+    else
+      echo "→ 違う (ホストのファイルの値が違う。この登録で値が変わる)。config.dotfiles の違い (旧い → 新しい):"
+    fi
+    dotfiles_diff "${work}/old" "${base}" "${work}/${host_side}" "${name}" "${same_outside}"
+  fi
+  if [[ -n ${base_shared} ]]; then
+    if [[ ${moved} == 0 ]]; then
+      echo "  shared/ は clone と作業ツリーで同じ (元のホストにも当たっている。この登録で shared/ の値は変わらない)"
+      return "${rc}"
+    fi
+    printf '  clone と作業ツリーの shared/ が違う (clone: %s/shared。merge のあと clone を取ると、その違いの分も世代が変わりうる)\n' "${old_pin}"
+  fi
+  [[ -n ${bare_drv} ]] || return "${rc}"
+  if [[ -n ${base_shared} ]]; then
+    echo "  作業ツリーの shared/ が足す値 (config.dotfiles の、shared/ を外した新しい形 → 新しい形):"
+  else
+    echo "  shared/ が足す値 (登録でこの PC に増える。登録した全ホストに当たる。config.dotfiles の、shared/ を外した新しい形 → 新しい形):"
+  fi
+  if [[ ${new_drv} == "${bare_drv}" ]]; then
+    echo "    (shared/ はこのホストの値を変えない)"
+  else
+    dotfiles_diff "${work}/new-noshared" "${name}" "${work}/new" "${name}" \
+      "    (config.dotfiles は同じ。shared/ は dotfiles の option の外 (programs.* など) を変えている)"
+  fi
+  return "${rc}"
 }
 
 if [[ $# -eq 0 ]]; then
