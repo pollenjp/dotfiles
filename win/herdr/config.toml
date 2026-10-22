@@ -1,8 +1,8 @@
 # herdr (https://herdr.dev) の Windows 側の設定。dotfiles の win/herdr/config.toml から
 # %APPDATA%\herdr\config.toml へ配る (WSL で ~/dotfiles/setup --update。win/README.md)。
 #
-# [keys]・onboarding・[ui.sidebar] は WSL 側 (nix/files/herdr/config.toml) と同じに保つ。キーや
-# sidebar の行ごとの意図はそちらのコメントにある。CI が 2 つを比べ、違えば落ちる
+# [keys]・onboarding・[ui] (sidebar の幅と行・toast) は WSL 側 (nix/files/herdr/config.toml) と
+# 同じに保つ。キーや [ui] の値ごとの意図はそちらのコメントにある。CI が 2 つを比べ、違えば落ちる
 # (nix/scripts/check-herdr-keys.sh)。
 #
 # WSL 側との違いは 2 つ。[terminal] を書かない (WSL 側の default_shell = "fish" は Windows に
@@ -42,6 +42,13 @@ cycle_pane_next = ["prefix+tab", "prefix+o"]
 open_notification_target = "prefix+shift+o"
 new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 
+[ui]
+# sidebar の幅。値は WSL 側と同じ。sidebar_max_width は縦線のドラッグで広げられる上限。ドラッグした
+# 幅は %LOCALAPPDATA%\herdr\client-shell\ に残って reload では戻らず、縦線のダブルクリックで
+# sidebar_width に戻る。hr で attach した画面の幅も、このファイルの値で決まる。
+sidebar_width = 40
+sidebar_max_width = 80
+
 [ui.sidebar.spaces]
 # 2 行目の先頭に、子の workspace の親 ($parent) を出す。中身は WSL 側と同じ。
 # hr (herdr --remote) で WSL や Linux の herdr に attach したときも、sidebar は Windows の herdr が
@@ -50,3 +57,8 @@ rows = [
   ["state_icon", "workspace"],
   [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
 ]
+
+[ui.toast]
+# 今見ていない tab の agent が終わった・入力を待っているとき、herdr の画面の中に toast を出す
+# (既定は "off")。値は WSL 側と同じ。hr で attach した画面に出すかも、このファイルの値で決まる。
+delivery = "herdr"
