@@ -1978,6 +1978,54 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
 
+## 証明書の束を OS の信頼ストアに寄せる
+
+自前の証明書の束を持つツールにも OS の信頼ストア（`/etc/ssl/certs/ca-certificates.crt`）を読ませるため、
+Linux のホストでは次の 4 つを session の環境変数に入れる（`nix/home/modules/os-ca-bundle.nix`。
+[ADR 028](../docs/adr/028_os_ca_bundle_env_20261022T180804JST/README.md)）。OS の束から危ない CA を外せば、
+これらのツールも揃って拒否するようになる。
+
+| 変数 | 読むもの |
+| --- | --- |
+| `NIX_SSL_CERT_FILE` | nixpkgs の python の certifi（変数があればその束を返す） |
+| `SSL_CERT_FILE` | uv（既定は中に持つ webpki-roots）。OpenSSL・Go も読むが、もともと同じファイルを読んでいる |
+| `REQUESTS_CA_BUNDLE` | venv に入れた PyPI の requests（PyPI の certifi の束） |
+| `CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` | gcloud（SDK の中の certifi の束。設定の `core/custom_ca_certs_file` より先に効く） |
+
+- 入れるのは、Linux で、束のファイルがあり、その変数に値が無い（空を含む）ときだけ。束の無いホストで入れると
+  nix 自身も含めて TLS が通らなくなり、すでにある値（社内の CA を足した束など）を上書きすると壊すため
+- bash は login の shell（`~/.profile`）で、fish はすべての fish（`config.fish`）で入る。login でない bash は、
+  開いた親（fish など）から継ぐ
+- shell を通らずに起動するもの（systemd の user service・デスクトップのランチャーから直に開くアプリ）には入らない
+- このマシンだけ別の束に向けたいときは、`~/.config/pjp/env` に書く（対話の shell で上書きされる）
+
+### 反映
+
+`~/dotfiles/setup --update` のあと、**新しい login から開いた shell** に入る。
+
+home-manager の `hm-session-vars` は 1 つの session で 1 回しか読まない（読んだ印の `__HM_SESS_VARS_SOURCED` を
+子へ継ぐ）。反映の前から続いている process の下で開いた shell は、印を継いでいるので読み直さない。
+
+| どこで | 入れ方 |
+| --- | --- |
+| 端末・ssh | 開き直す（ssh を張り直す・ログインし直す） |
+| herdr の pane | pane は server の env を継ぐので、server を立て直す。1 つの pane だけなら `exec env -u __HM_SESS_VARS_SOURCED fish -l` |
+
+> ⚠️ **OS の束が直っていないホストでは、自前の束が先に直ったツールがむしろ通すようになる。**
+> 2026-10 の eMudhra の侵害では、PyPI の certifi 2026.10.19 がもう該当のルートを外していて、それを入れた venv は
+> 変数が無くても拒否する。`REQUESTS_CA_BUNDLE` で直っていない OS の束に向けると通す。反映の前に、そのホストの
+> OS の束が直っているかを下の `curl` で確かめる。
+
+### 確かめる
+
+```sh
+echo $SSL_CERT_FILE   # /etc/ssl/certs/ca-certificates.crt (fish でも bash でも)
+
+# 2026-10 の eMudhra の侵害のテスト用ホスト。OS の束が直っていれば、どれも証明書のエラーになる
+curl -sS -o /dev/null https://dv-g3b-emudhra.we-have-a-problem.com/
+echo idna | uv pip compile - --index-url https://dv-g3b-emudhra.we-have-a-problem.com/simple --no-config
+```
+
 ## マシンローカルの環境変数 (`~/.config/pjp/env`)
 
 そのマシンでしか使わない API キーのように、**tracked にできない環境変数**の置き場。

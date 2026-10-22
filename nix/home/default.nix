@@ -12,6 +12,7 @@
     ./modules/agent-link.nix
     ./modules/starship.nix
     ./modules/shell-common.nix
+    ./modules/os-ca-bundle.nix
     ./modules/fish.nix
     ./modules/bash.nix
     ./modules/claude.nix
