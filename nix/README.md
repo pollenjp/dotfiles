@@ -1181,6 +1181,9 @@ mkHome {
   決める）。list でない option に両方で違う値を書くと評価が止まるので、片方を `lib.mkDefault` にする。拾い方は `hosts/` と同じ
   （`.nix` で終わり、`.` で始まらないファイル）。`shared/` が無ければ何も足さない。`~/dotfiles/flake.nix` に足したホスト（`tmp`）と
   登録簿の型には足さない
+- **`shared/` に書く option は、全 PC の本体が持つものだけにする。** `--update` は dotfiles-private を取るが本体は進めない
+  （`--self-update` は別）ので、本体の新しい option を `shared/` に書くと、本体が古い PC の switch が「option が無い」で止まる
+  （ホストのファイルと違って全 PC に効く）。新しい option なら本体を先に merge し、各 PC で `--self-update --update` してから書く
 - 重ね順は登録簿 → dotfiles-private → `~/dotfiles/flake.nix` に足したホスト（後ろが勝つ）。登録簿と同じ名前なら dotfiles-private が勝つ
 - 読むのは `nix/` の下だけで、中身は誰でも読める `/nix/store` に入る（`ssh/` や辞書は入らない）。秘密（API キー・トークン）は置かない
   （[`~/.config/pjp/env`](#マシンローカルの環境変数-configpjpenv)）
@@ -3281,7 +3284,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 項目は「from の日から zeroDays 日（from の日を含む）のうちに出た版まで取る」と読む。取る版の上限（from + zeroDays − 1 の
 日の終わり）を書くので、その日までは遅延 0d と同じに新しい版を取り、その後は上限を据え置いたまま遅延が 1 日ずつ伸びる。
-上限 + 既定の遅延を過ぎると、上書きが無いときと同じに戻る。日付は Asia/Tokyo で読む（時刻帯が UTC のマシンでも同じ日に切り替わる）。
+上限 + 既定の遅延を過ぎると、上書きが無いときと同じに戻る（その後の `--update` で既定を書き直す）。日付は Asia/Tokyo で読む
+（時刻帯が UTC のマシンでも同じ日に切り替わる）。
 
 | 日（既定 9d） | `zeroDays = 1` | `zeroDays = 3` |
 | --- | --- | --- |
@@ -3292,8 +3296,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 | 11/2 の終わり | | 上書きが終わる |
 
 登録した全 PC に効かせるなら、dotfiles-private の `nix/shared/` に module を置く（[dotfiles-private に登録したホスト](#dotfiles-private-に登録したホスト)）。
-1 台だけなら、そのホストのファイル（`nix/hosts/<ホスト>.nix`。ローカル flake の `tmp` なら `modules`）に同じ形で書く。
-list は書いた所どうしでつながる。
+1 台だけなら、そのホストの `modules`（dotfiles-private の `nix/hosts/<ホスト>.nix` か、ローカル flake の `tmp`。`mkHome` の
+引数ではない）に同じ形で書く。list は書いた所どうしでつながる。
 
 ```nix
 # dotfiles-private の nix/shared/mise-release-age.nix (例)
@@ -3317,7 +3321,7 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
   入っている tool は上げないので、新しい版は `mise up`（tool を絞るなら `mise up uv`）で入れる
 
   ```
-  ==> mise の遅延を上書き中 (理由: …): 2026-10-24 の終わりまでに出た版を取り、2026-11-02 の終わりで既定の 9d に戻る。…
+  ==> mise の遅延を上書き中 (理由: …): 2026-10-24 の終わりまでに出た版を取る。2026-11-02 の終わりで上書きが終わり、その後の setup --update で既定の 9d に戻す。…
   ```
 
 - `claude` も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる

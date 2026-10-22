@@ -103,8 +103,8 @@ shape_jq='
 #   setting  minimum_release_age に書く値 (上書き中なら上限の日時、無ければ既定)
 #   claude   claude を入れるときの MISE_MINIMUM_RELEASE_AGE (下の claude の節)
 #   age      既定 (minimumReleaseAge)
-#   use      上限を書く項目 (無ければ null)。ended (終わった)・pending (まだ) は from の順に並べる
-#            (list の順は home-manager の module system が決めるので頼らない)
+#   use      上限を書く項目 (無ければ null)。ended (終わった)・pending (まだ) は from・zeroDays・reason の順に並べる
+#            (list の順は home-manager の module system が決めるので頼らない。上限が同じ項目のどれを出すかも決まる)
 #
 # 日付は 1970-01-01 からの日数にして比べる (day・date)。今日は Asia/Tokyo の日で、夏時間が無いので
 # UNIX 秒に 9 時間を足して日に割る (tzdata の無い環境でも同じ日になる)。claude は 1d に縮める
@@ -126,7 +126,7 @@ plan_jq='
           end: ($capDay + $age | date),
           state: (if $today < $from then "pending" elif $today > $capDay + $age then "ended" else "active" end)
         }
-    ] | sort_by(.from, .zeroDays)) as $items
+    ] | sort_by(.from, .zeroDays, .reason)) as $items
   | ($items | map(select(.state == "active")) | max_by(.capDay)) as $use
   | {
       setting: (if $use then $use.cap else .minimumReleaseAge end),
@@ -177,7 +177,7 @@ mise settings set fetch_remote_versions_timeout 14d
 if [[ -n ${decided} ]]; then
   age=$(jq -r '.age' <<<"${decided}")
   if IFS=$'\t' read -r cap_day end reason < <(jq -r '.use // empty | [.cap[0:10], .end, .reason] | @tsv' <<<"${decided}"); then
-    echo "==> mise の遅延を上書き中${reason:+ (理由: ${reason})}: ${cap_day} の終わりまでに出た版を取り、${end} の終わりで既定の ${age} に戻る。入っている tool の新しい版は mise up で入れられる (setup は上げない)"
+    echo "==> mise の遅延を上書き中${reason:+ (理由: ${reason})}: ${cap_day} の終わりまでに出た版を取る。${end} の終わりで上書きが終わり、その後の setup --update で既定の ${age} に戻す。入っている tool の新しい版は mise up で入れられる (setup は上げない)"
   fi
   while IFS=$'\t' read -r from zero reason; do
     echo "  まだ始まっていない上書き: ${from} から 0d を ${zero} 日${reason:+ (理由: ${reason})}"
@@ -189,7 +189,7 @@ if [[ -n ${decided} ]]; then
   if [[ ${#ended[@]} -gt 0 ]]; then
     warn "mise の遅延の上書き (dotfiles.mise.releaseAgeOverrides) に、終わった項目が残っています (写していません):" \
       "${ended[@]/#/  }" \
-      "書いた所 (dotfiles-private の nix/shared/*.nix・nix/hosts/<ホスト>.nix か、ローカル flake の tmp の modules) から消してください。" \
+      "書いた所 (dotfiles-private の nix/shared/*.nix か、ホストの modules (nix/hosts/<ホスト>.nix・ローカル flake の tmp)) から消してください。" \
       "消し忘れても害はありません (終わった項目は写さない)。"
   fi
 fi

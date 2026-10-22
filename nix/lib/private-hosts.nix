@@ -20,7 +20,8 @@
 # ファイルがその PC の値の全部を持つので、ローカル flake の local は当てない (素の mkHome を渡す)。ただし shared/ の
 # module は、各ホストのファイルが mkHome に渡す modules の前に足す (名前の順)。脆弱性への対応のように、登録した全 PC に
 # 効かせたい値を 1 か所に書くため。shared/ とホストのファイルの両方に書いた list の option はつながる (順は module
-# system が決める)。list でない option を両方に書くと、優先度を付けない限り評価が止まる。
+# system が決める)。list でない option に両方で違う値を書くと、優先度を付けない限り評価が止まる。shared/ に書く
+# option は全 PC の本体が持つものだけにする (本体が古い PC では option が無く、その PC の評価が止まる)。
 #
 # hosts/ が無い・空なら { } (clone の無いマシンは本体の空の stub (nix/private-stub) を指す)。shared/ が無ければ何も足さない。
 # 読むのは hosts/ と shared/ の .nix だけで、ほかのファイル (README.md など) と名前が . で始まるファイルは拾わない。

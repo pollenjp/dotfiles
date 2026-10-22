@@ -20,10 +20,10 @@
 #   - 終わった項目 (今日 > 上限の日 + 既定の日数) は写さず、from・zeroDays・理由・終わった日と消す場所を警告する。
 #     setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、まとめ用のファイルにも同じ行を残す
 #   - 上書き中が複数なら、上限がいちばん新しい項目を書く。終わった項目は、上書き中の項目と並んでも (それだけを) 警告する
-#   - 状態ファイルが無い・形が違う (暦に無い from・日の単位でない minimumReleaseAge) ときは、警告して 9d を書き、
-#     claude は 1d で入れる。exit 0 (setup を止めない)
-#   - ほかの settings (lockfile・fetch_remote_versions_timeout) と言語ランタイム (usage・go・node) は、今までどおり
-#     遅延の env なしで打つ。minimum_release_age は 1 回だけ書く
+#   - 状態ファイルが無い・形が違う (暦に無い from・日の単位でない minimumReleaseAge)・jq が無いときは、警告して 9d を
+#     書き、claude は 1d で入れる。exit 0 (setup を止めない)
+#   - どのケースでも、ほかの settings (lockfile・fetch_remote_versions_timeout) と言語ランタイム (usage・go・node) は、
+#     今までどおり遅延の env なしで打つ。minimum_release_age は 1 回だけ書く
 #
 # 偽の mise は、受けた env の MISE_MINIMUM_RELEASE_AGE と引数を「<env>|<引数>」の形で $HOME/mise.log に 1 行ずつ残す。
 # 今の時刻は BOOTSTRAP_MISE_NOW (UNIX 秒) で渡す。偽の mise の shebang は $BASH から作る (Nix のサンドボックスには
@@ -84,30 +84,31 @@ EOF
   echo "${h}"
 }
 
-# $1: HOME、$2: 今 (ISO 8601 の UTC)。setup から走るときと同じく、警告のまとめ用のファイルを渡す
+# $1: HOME、$2: 今 (ISO 8601 の UTC)、$3: 偽の mise の後ろに続ける PATH (省けば今の PATH)。
+# setup から走るときと同じく、警告のまとめ用のファイルを渡す
 run() {
-  local h=$1
-  env -u MISE_MINIMUM_RELEASE_AGE HOME="${h}" XDG_CONFIG_HOME="${h}/.config" PATH="${h}/bin:${PATH}" \
-    BOOTSTRAP_MISE_NOW="$(at "$2")" DOTFILES_SETUP_WARNINGS="${h}/warnings" \
+  local h=$1 now
+  now=$(at "$2")
+  env -u MISE_MINIMUM_RELEASE_AGE HOME="${h}" XDG_CONFIG_HOME="${h}/.config" PATH="${h}/bin:${3:-${PATH}}" \
+    BOOTSTRAP_MISE_NOW="${now}" DOTFILES_SETUP_WARNINGS="${h}/warnings" \
     "${BASH}" "${script}" >"${h}/out" 2>"${h}/err"
   echo $? >"${h}/rc"
 }
 
+# jq だけを持たない PATH。script が使うコマンドを symlink で並べる (PATH から jq のあるディレクトリを抜く形にしないのは、
+# Nix の profile や GitHub の runner では jq が coreutils と同じディレクトリにあって抜けないため)
+nojq_bin="${work}/nojq-bin"
+mkdir -p "${nojq_bin}"
+for c in cat head date; do
+  if ! p=$(command -v "${c}"); then
+    echo "見つからない: ${c}" >&2
+    exit 1
+  fi
+  ln -s "${p}" "${nojq_bin}/${c}"
+done
+
 # 偽の mise が受けた行と、出力
 detail() { printf 'rc=%s\n--- mise.log\n%s\n--- out\n%s\n--- err\n%s' "$(cat "$1/rc")" "$(cat "$1/mise.log")" "$(cat "$1/out")" "$(cat "$1/err")"; }
-
-# minimum_release_age に $3 を 1 回だけ書き、claude を env $4 で入れ、exit 0 か。$1: ケースの名前、$2: HOME
-expect_ages() {
-  local name=$1 h=$2 setting=$3 claude=$4 n
-  n=$(grep -c -- '|settings set minimum_release_age ' "${h}/mise.log")
-  if [[ $(cat "${h}/rc") == 0 && ${n} == 1 ]] \
-    && grep -Fxq -- "|settings set minimum_release_age ${setting}" "${h}/mise.log" \
-    && grep -Fxq -- "${claude}|use -g claude@latest" "${h}/mise.log"; then
-    ok "${name}"
-  else
-    ng "${name}" "$(detail "${h}")"
-  fi
-}
 
 # ほかの settings と言語ランタイムは、遅延の env なしで打つ
 others_plain() {
@@ -116,6 +117,21 @@ others_plain() {
     '|use -g aqua:jdx/usage' '|use -g go' '|use -g node@24'; do
     grep -Fxq -- "${line}" "$1/mise.log" || return 1
   done
+}
+
+# minimum_release_age に $3 を 1 回だけ書き、claude を env $4 で入れ、ほかは env なしで打ち、exit 0 か。
+# $1: ケースの名前、$2: HOME
+expect_ages() {
+  local name=$1 h=$2 setting=$3 claude=$4 n
+  n=$(grep -c -- '|settings set minimum_release_age ' "${h}/mise.log")
+  if [[ $(cat "${h}/rc") == 0 && ${n} == 1 ]] \
+    && grep -Fxq -- "|settings set minimum_release_age ${setting}" "${h}/mise.log" \
+    && grep -Fxq -- "${claude}|use -g claude@latest" "${h}/mise.log" \
+    && others_plain "${h}"; then
+    ok "${name}"
+  else
+    ng "${name}" "$(detail "${h}")"
+  fi
 }
 
 # 警告が無い (stderr に「!! 」の行が無く、まとめ用のファイルも空)
@@ -131,8 +147,8 @@ echo "== bootstrap-mise.sh: ${script}"
 h=$(new_home none-9d "$(state 9d)")
 run "${h}" 2026-10-22T03:00:00Z
 expect_ages "上書きが無ければ minimum_release_age に 9d を書き、claude は 1d で入れる" "${h}" 9d 1d
-if others_plain "${h}" && no_warning "${h}" && ! grep -Fq '上書き中' "${h}/out"; then
-  ok "上書きが無ければ、ほかの settings と言語ランタイムは env なしで打ち、上書きの行も警告も出さない"
+if no_warning "${h}" && ! grep -Fq '上書き中' "${h}/out"; then
+  ok "上書きが無ければ、上書きの行も警告も出さない"
 else
   ng "上書きが無いときのほかの行" "$(detail "${h}")"
 fi
@@ -151,8 +167,8 @@ run "${h}" 2026-10-22T03:00:00Z
 expect_ages "from の日 (JST 10/22 12:00) は上限 ${cap} を書き、claude も上限で入れる" "${h}" "${cap}" "${cap}"
 line=$(grep -F '上書き中' "${h}/out")
 if [[ ${line} == *修正版を入れる* && ${line} == *2026-10-24* && ${line} == *2026-11-02* && ${line} == *'mise up'* ]] \
-  && others_plain "${h}" && no_warning "${h}"; then
-  ok "上書き中は 1 行に理由・上限の日・終わる日・mise up の案内を出し、ほかの行は env なしで打つ"
+  && no_warning "${h}"; then
+  ok "上書き中は 1 行に理由・上限の日・終わる日・mise up の案内を出す"
 else
   ng "上書き中の行" "$(detail "${h}")"
 fi
@@ -231,6 +247,15 @@ if grep -Fq 'mise-release-age.json' "${h}/warnings" && grep -Fq 'switch' "${h}/w
   ok "状態ファイルが無いことを、switch を促して警告する"
 else
   ng "状態ファイルが無いときの警告" "$(detail "${h}")"
+fi
+
+h=$(new_home no-jq "$(state 9d "${item_a}")")
+run "${h}" 2026-10-22T03:00:00Z "${nojq_bin}"
+expect_ages "jq が無ければ (上書き中の項目があっても) 9d を書き、claude は 1d で入れる (exit 0)" "${h}" 9d 1d
+if grep -Fq 'jq' "${h}/warnings"; then
+  ok "jq が無いことを警告する"
+else
+  ng "jq が無いときの警告" "$(detail "${h}")"
 fi
 
 for bad in "$(state 9d '{"from":"2026-02-30","zeroDays":1,"reason":""}')" "$(state 1w)"; do

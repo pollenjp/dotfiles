@@ -18,7 +18,7 @@
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
 #   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
-#   dotfiles.cleanup.enable                     使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
+#   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #
 # 親が false なら子は意味を持たない、という関係がそのまま階層になっている。
@@ -437,8 +437,9 @@ in
         - 終わった項目が残っていれば setup の警告のまとめに出す (写さないので害は無い。書いた所から消す)
 
         登録した全 PC に効かせるなら dotfiles-private の `nix/shared/*.nix` (lib/private-hosts.nix が登録した
-        全ホストに足す)、1 台だけならそのホストのファイル (ローカル flake の tmp なら modules) に書く。list は
-        書いた所どうしでつながる。書き方は nix/README.md の「遅延 (minimum_release_age) を期間付きで緩める」。
+        全ホストに足す)、1 台だけならそのホストの modules (dotfiles-private の `nix/hosts/<ホスト>.nix` か、
+        ローカル flake の tmp。mkHome の引数ではない) に書く。list は書いた所どうしでつながる。書き方は
+        nix/README.md の「遅延 (minimum_release_age) を期間付きで緩める」。
       '';
     };
   };
