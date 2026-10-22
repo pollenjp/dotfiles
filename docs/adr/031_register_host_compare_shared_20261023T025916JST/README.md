@@ -73,7 +73,7 @@ compare --base <元のホスト> --private <作業ツリー>
 | --- | --- |
 | `nix/scripts/private-host.sh` | compare (`shared/` を外した形・判定・違いを分けて出す)・draft と compare の旧い形 (元のホストが登録したホストなら `shared/` を外す)・inspect (`shared/` の module)・`--help` |
 | `nix/tests/private-host.test.sh` | 偽の nix に `shared/` の扱い (drvPath に `+shared`・`FAKE_DOTFILES` を足す・`FAKE_NEEDS_SHARED`) を足し、ケースを足した |
-| `nix/files/claude/skills/pjp-dotfiles-register-host/SKILL.md` | compare の結果の読み方の表・inspect の読み方・確認の形・PR の本文・値を直すとき・よくある誤り |
+| `nix/files/claude/skills/pjp-dotfiles-register-host/SKILL.md` | compare の結果の読み方の表・inspect の読み方・確認の前の preview に clone の `nix/shared/` も写す (手順 2.3。登録すると当たる値を確認の時点で出させる)・確認の形・PR の本文・値を直すとき・よくある誤り |
 | `nix/README.md` | 「登録する」の `shared/` の注意 |
 | ADR 026・030 | 冒頭の表に、この ADR への後続 ADR の行を足した。026 の §7 のコマンドの注記を今の形にした |
 
@@ -112,6 +112,10 @@ compare --base <元のホスト> --private <作業ツリー>
     `shared/` を外した形の drvPath が一致し、`shared/` が足す値は `mise.releaseAgeOverrides: [] → [{…}]` だった
   - clone を読むローカル flake で、登録したホスト (`ccPages.port = 7801`) を元にした draft は `shared/` の値を描かなかった。port を 7802 に
     直した作業ツリーとの compare は 1 で、ホストのファイルの違いは `ccPages.port: 7801 → 7802` だけだった。clone は変わらなかった
+- skill の読み方を subagent で確かめた。今までの skill と出力では、作業ツリーの compare が `shared/` の値だけで 1 になると表に当てはまる
+  行が無く、skill の外から出どころを推してユーザーへの問いを足した (preview には `hosts/` しか無いので、確認の時点の compare は 0 だった)。
+  直した skill と新しい出力では、preview に `shared/` も写し、「同じ (shared/ の値だけ違う)」を 0 と読んで下書きを直さず、`shared/` が足す値を
+  確認に並べた
 
 ## 7. 移行・運用手順
 
