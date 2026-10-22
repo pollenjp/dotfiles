@@ -1223,7 +1223,7 @@ clone に `nix/hosts/<その名前>.nix` があり、ローカル flake がそ�
 p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
 bash $p inspect                                          # この PC・登録の有無・今の世代と一致するホスト (元にするホストの候補)
 bash $p draft --base <ホスト>                             # 元のホスト (前の雛形なら + local) から nix/hosts/<名前>.nix の下書きを描く (stdout)
-bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形と登録したホストを同じ本体・同じ lock で評価し、drvPath を比べる
+bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形と登録したホストを同じ本体・同じ lock で評価し、drvPath を比べる (shared/ を外しても比べる)
 ```
 
 - `draft` は元のホストの `options.dotfiles` を歩き、option の既定より強い定義を持つ値を描く（既定と同じ値を明示した行も描く）。
@@ -1232,10 +1232,16 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
   （`claude.devTracker.enable = true`）など、その PC で要る値を足す（`compare` は足した分だけ違う）
 - 元にするホストが公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた PC。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）は、消す前の本体を
   `git archive` で写して `--nix-dir` に渡し、draft・compare する（手順は `pjp-dotfiles-register-host` skill）
-- `compare` が 0 なら、この登録で home-manager の世代の中身は変わらない。今の世代との一致は参考として出すだけ
-  （本体を進めると、skill を 1 つ足しただけでも世代が変わる）
-- dotfiles-private の `nix/shared/` に module があると、新しい形（登録したホスト）にだけ当たるので、`compare` はその値を違いとして
-  出す（1 を返す。`mise.releaseAgeOverrides: [] → [{…}]` など）。違いが `shared/` の値だけなら、登録で増えるのはその値だけ
+- `compare` が 0 なら、ホストのファイルは元のホストの値を全部写せている（drvPath が同じなら、この登録で home-manager の世代の中身は
+  変わらない。`shared/` の値だけ違うときも 0 で、世代は `shared/` の値の分だけ変わる。下の項目）。今の世代との一致は参考として
+  出すだけ（本体を進めると、skill を 1 つ足しただけでも世代が変わる）
+- dotfiles-private の `nix/shared/` の値は、登録した全ホストに足す値で、ホストのファイルの外にある（[ADR 031](../docs/adr/031_register_host_compare_shared_20261023T025916JST/README.md)）。
+  作業ツリーの `nix/shared/` に module があると、`compare` は新しい形を `shared/` を外しても評価し、それが旧い形と同じなら
+  「同じ (shared/ の値だけ違う)」で 0 を返す。`shared/` が足す値（`mise.releaseAgeOverrides: [] → [{…}]` など。登録で増える値）は、
+  ホストのファイルの違いと分けて出す。`shared/` を足した形が評価できなければ 4（list でない option を両方に書いた、など）
+- 元のホストが dotfiles-private に登録したホスト（値を直すとき）なら、そのホストにもローカル flake の読む `shared/` が当たっているので、
+  `draft` と `compare` の旧い形は `shared/` を外して評価する（下書きに `shared/` の値を描かない。違いはホストのファイルどうし）。
+  外すのは dotfiles-private の `nix/` の写しで、clone には書かない
 - merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、登録したファイルへ移した値を
   ローカル flake から外す（前の雛形の `local` の値・足していた `tmp`）。移したあとの `local-flake-migrate.sh compare` は、この PC の
   ホストが dotfiles-private から足されることを「違い」として出す（setup の選ぶホストが変わるため。受け入れるなら

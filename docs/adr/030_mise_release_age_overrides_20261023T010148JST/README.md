@@ -9,6 +9,7 @@
 | 関連 ADR | [005_nix_flake_lock_min_release_age](../005_nix_flake_lock_min_release_age_20260813T184522JST/README.md)（flake.lock の 7 日。この ADR の対象外）、[026_dotfiles_private_hosts](../026_dotfiles_private_hosts_20261020T215857JST/README.md)（dotfiles-private の `nix/hosts/`。この ADR が `nix/shared/` を足す）、[023_claude_video_offer_host_option](../023_claude_video_offer_host_option_20261018T121637JST/README.md)（option の値を `~/.local/state/dotfiles/` の JSON に置き、script が読む形。この ADR も同じ形を使う） |
 | 運用手順 | [`nix/README.md`「遅延 (minimum_release_age) を期間付きで緩める」](../../../nix/README.md#遅延-minimum_release_age-を期間付きで緩める) |
 | 設計 | [`docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md`](../../superpowers/specs/2026-10-22-mise-release-age-overrides-design.md) |
+| 後続 ADR | [031_register_host_compare_shared](../031_register_host_compare_shared_20261023T025916JST/README.md)（§5 の「`private-host.sh compare` は、`nix/shared/` の値を新しい形にだけ当たる違いとして出す」を改め、compare は `nix/shared/` を外した新しい形とも比べ、`shared/` の値だけの違いなら 0 にして `shared/` が足す値を別に出すようにした。元のホストが登録したホストなら、draft と compare の旧い形からも `shared/` を外す。本文は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録する」） |
 
 ---
 
