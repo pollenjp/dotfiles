@@ -935,7 +935,7 @@ cmd_compare() {
   fi
   if [[ ${old_drv} == "${host_drv}" ]]; then
     if [[ -n ${base_shared} && ${moved} == 0 ]]; then
-      echo "→ drvPath が同じ (ホストのファイルの値が同じで、shared/ も clone と作業ツリーで同じ)。この登録で home-manager の世代の中身は変わらない。"
+      echo "→ 同じ。shared/ を外すと drvPath が同じ (ホストのファイルの値が同じ) で、shared/ も clone と作業ツリーで同じ。この登録で home-manager の世代の中身は変わらない。"
       return 0
     fi
     rc=0
