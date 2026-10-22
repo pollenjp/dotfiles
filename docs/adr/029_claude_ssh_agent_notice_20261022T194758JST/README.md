@@ -72,12 +72,17 @@ git が署名するかは、hook の中で git に実効の設定 (`commit.gpgsi
 `SSH_AUTH_SOCK` の symlink の先が sshd の転送した agent なら、「`<月/日 時:分>` に `<PJP_SSH_CLIENT>` から入った
 接続の端末に出る」と出す (pjp-agent-link の記録の時刻と値。無ければ socket の時刻)。同じ dir により新しい接続が
 あれば添える (今日の取り違えに気づける)。手元の 1Password の口ならその path、先が無ければ「出ない」と出す。
+`SSH_AUTH_SOCK` が空なら、WSL では「Windows の 1Password が出す (要求元は「Windows Terminal」としか出ない)」
+(WSL の `ssh` は Windows の `ssh.exe` へのラッパー)、ほかでは「どこに出るかは分からない」と出す (ssh の設定の
+`IdentityAgent` で agent を使うことがある)。
 
 ### E. herdr の通知は同じ pane から 10 分に 1 回
 
 `HERDR_ENV=1` なら `herdr notification show` を `--sound request` で出す。body は「どこから (workspace の名前・
 pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane からは 600 秒に 1 回 (commit を続けても鳴らし続け
-ない)。会話の画面の 1 行は毎回出す。断られたときの通知は間引かない。
+ない)。会話の画面の 1 行は毎回出す。断られたときの通知は間引かない。herdr は 2 秒で切って呼び (`timeout` の無い
+マシンでは裏で流して見張る)、落ちた・返事をしないときは、その回の残りと続く 60 秒は呼ばない (返事をしない herdr で
+Bash を毎回待たせない)。
 
 ### F. 断りの見分け方
 
@@ -87,18 +92,21 @@ pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane 
 | --- | --- |
 | 断られた | `agent refused operation` (ssh・scp は `sign_and_send_pubkey: …` の行、git の署名は `Couldn't sign message (signer): …?` の行) |
 | 通信が切れた | `communication with agent failed` (同じ形) |
-| 届かない | git の署名の `Couldn't get agent socket`・`Couldn't load public key …/.git_signing_key_tmp…`、鍵の認証の失敗 (`Permission denied (publickey)`) で agent の口の先が無いとき (ssh は口が無いと何も言わない) |
+| 届かない | git の署名の `Couldn't get agent socket`・`Couldn't load public key …/.git_signing_key_tmp…`、鍵の認証の失敗 (`Permission denied (publickey)`) で agent の口があってその先が無いとき (ssh は口が無いと何も言わない。口が空なら agent を使っていないので当てない) |
 
-失敗した Bash は部分一致で見る。成功した Bash は、ssh・git が出す形の行 (行の頭と終わりを固定) だけを見る。
-`2>&1 | tail` で終了コードが隠れた断りは拾い、成功した grep・cat の結果に出た文言では当てない。
+OpenSSH は自分のエラー行を `\r\n` で終え、Claude Code は tool の出力の `\r` を残すので、`\r` を外してから見る
+(git は ssh-keygen の出力の `\r` を `?` に変えて出す)。どれも行の終わりが文言のときだけ当てる (ssh・git の行は文言で
+終わり、diff・コード・文書の行はそうでない)。成功した Bash は行の頭も ssh・git の出す形に固定する。`2>&1 | tail` で
+終了コードが隠れた断りは拾い、成功した grep・cat の結果や、失敗した diff・cat に出た文言では当てない。
 
 ### G. Claude に足す文
 
 「同じコマンドを打ち直さない。何を (コマンドの頭) と、どこから (workspace・pane・agent) を書いてから、
-① 1Password を開いて承認するので打ち直す (推奨。通信が切れた・届かないなら『このマシンへ接続し直す』)
-② この手順を飛ばして進める ③ ここで止める の問いを出す」。herdr の指揮役の子は AskUserQuestion を使わず、
-問いを書いてターンを終える (workspace の名前が 🌱 で始まれば、子だと言い切る)。subagent の中では問いを出させず、
-報告に書いて終えさせる。
+① 直し方 (推奨) ② この手順を飛ばして進める ③ ここで止める の問いを出す」。① は、断られたら「1Password を開いて
+承認する」、通信が切れた・届かないなら agent の口の種類ごと (転送された接続 → このマシンへ接続し直す、手元の口 →
+1Password を起動してロックを解除する、WSL で空 → Windows の 1Password を起動する、空 → SSH_AUTH_SOCK を設定する)。
+herdr の指揮役の子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace の名前が 🌱 で始まれば、子だと
+言い切る)。subagent の中では問いを出させず、報告に書いて終えさせる。
 
 ### H. 方針の承認のあとに、こちらで決めたこと
 
@@ -108,7 +116,9 @@ pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane 
 | ssh の remote への git を当てるか | 当てる (insteadOf を解いた URL で見る) | GitHub は https なので当たらないが、ほかの ssh の remote は agent を使う |
 | script を 2 本に分けるか | 1 本にし、event で分ける | 接続の見せ方・どこからの引き方・通知を共にする |
 | 断られたときの通知を間引くか | 間引かない | 毎回、人の手が要る |
-| agent に届かないときも問いを出すか | 出す (1 つ目の選択肢は「接続し直す」) | 08:59 の口のように、接続が閉じると同じ形で止まる |
+| agent に届かないときも問いを出すか | 出す (1 つ目の選択肢は口の種類ごとの直し方) | 08:59 の口のように、接続が閉じると同じ形で止まる。手元の 1Password や WSL では直し方が違う |
+| 失敗した Bash の断りを部分一致で見るか | 見ない (行の終わりに固定する) | 最終レビューで、失敗した diff・cat で誤って当たる (Claude が止まり、音が鳴る) と指摘された |
+| 長いコマンドを読むか | 64 KB まで (gawk・mawk が無ければ 16 KB) | macOS の awk は長さの二乗で遅く、80 KB で十数秒かかった (最終レビュー)。この hook は Bash のたびに走る |
 | subagent の中で問いを出させるか | 出させず報告に書かせる | subagent はユーザーに聞けない |
 | `SSH_AUTH_SOCK=<path>` を頭に付けたコマンド | その path を接続として見せる | 指揮役が子に「この口で commit して」と渡す形がある |
 | ADR の番号 | 029 | 028 は open の TKT-312 が使っている |
@@ -136,7 +146,7 @@ pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane 
 | git の commit をいつも当てる (設計の一覧どおり) | H の 1 行目 |
 | コマンドの文字を正規表現で探すだけにする | commit のメッセージや heredoc の本文に ssh と書くたびに当たる。この repo の作業がまさにそう |
 | shfmt で構文木にして読む | 全マシンの hook の実行時に shfmt が要る (今は devShell にしか無い) |
-| 断りを成功した Bash でも部分一致で見る | この hook の文書やテストを cat・grep するたびに当たる |
+| 断りを部分一致で見る (計画の段階では、失敗した Bash だけそうしていた) | この hook の文書やテストを cat・grep・diff するたびに当たる。失敗した diff・cat でも当たり、Claude が止まって音が鳴る (最終レビュー) |
 | herdr の通知を毎回鳴らす | commit や ssh を続けるたびに鳴る |
 
 ## 5. 影響 (Consequences)
@@ -152,8 +162,11 @@ pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane 
 
 - **当たるのはコマンドの文字に出るものだけ。** script の中・関数・alias・変数に入れたコマンドは見えない (断られ
   れば F・G で受ける)。読み方は近似で、bash を解釈しているわけではない (`"…"` の中の `$( )` の閉じ括弧は引用符を
-  見ずに数える、など)
-- hook は Bash のたびに走る (当たらないコマンドは数十 ms で抜ける)
+  見ずに数える、`cd` が `bash -c '…'`・`( … )` の外まで効く、`(( x << 2 ))` を heredoc と読む、など)。64 KB を
+  超えるコマンドは読まない
+- hook は Bash のたびに走る (当たらないコマンドは数十 ms で抜ける)。jq を 1 回に 5 回ほど起動するので、4 MB の
+  出力を返した Bash の PostToolUse には 1 秒ほどかかる
+- push の相手は fetch の URL で見る (`pushurl`・`pushInsteadOf` を使う repo では見逃す)
 - 承認の画面が出るかは分からないので、「出るかも」と知らせる。1Password が承認を覚えている間は出ない
 - herdr の通知の body は 3 行。herdr の画面での見え方は、送れたこと (`shown: true`) までしか確かめていない
 - 効くのは merge のあと `~/dotfiles/setup --update` (switch と hook の登録) をしてから。動いている Claude Code は
@@ -166,6 +179,10 @@ pane・agent の名前)」・コマンドの頭・接続の 3 行。同じ pane 
 - Claude Code 2.1.306 の hook の入出力 (B の表) を、使い捨ての `--settings` の `claude -p` で記録した
 - 断りの文言 (F の表) を、python の偽の agent と 127.0.0.1 の使い捨ての sshd で ssh・scp・git から集めた
 - この worktree の script を、合成した入力で lavie の herdr の pane から流し、通知が出ることを確かめた
+- 偽の agent と使い捨ての sshd を立てたまま、この hook を `--settings` で付けた `claude -p` に
+  `ssh … 2>&1 | tail -3` を打たせ、`\r` の付いた実物の ssh の出力でも、PostToolUse から Claude に指示が届くことを確かめた
+- 別の文脈のレビュアー (opus) に branch 全体を見てもらい、指摘 (`\r`・WSL・失敗の部分一致・返事をしない herdr・
+  `flock FILE -c`・`SSH_AUTH_SOCK=~/…`・長いコマンド) をテストで落ちることを確かめてから直した
 
 ## 7. 移行・運用手順
 

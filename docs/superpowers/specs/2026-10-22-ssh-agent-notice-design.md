@@ -114,9 +114,11 @@ git は 1Password で署名するが、Claude の commit は無署名で、承�
   `nix-shell` の `--run`・`--command`、`eval`、`su`・`runuser`・`script`・`flock` の `-c`
 - `cd <dir>`・`pushd <dir>` は、同じコマンドの後ろの git を流す場所に効かせる。`git -C <dir>` も効かせる
 - 見えないもの: script の中・関数・alias・変数に入れたコマンド。これらは hook 2 が受ける
-- `SSH_AUTH_SOCK=<path>` を頭に付けた単純コマンドは、その path を接続として見せる (§6)
+- `SSH_AUTH_SOCK=<path>` を頭に付けた単純コマンドは、その path (頭の `~`・`$HOME` は置き換える) を接続として見せる (§6)
 - 安く抜ける: コマンドの文字に `ssh`・`scp`・`sftp`・`mosh`・`rsync`・`nixos-rebuild`・`git` と、一覧の項目の頭の語の
   どれも無ければ、読まずに抜ける
+- 読むのは 64 KB まで (gawk・mawk が無いマシンでは 16 KB)。それより長いコマンドは読まずに抜ける。macOS の awk
+  (onetrue-awk) は 1 文字ずつ読むと長さの二乗で遅くなる (レビューで 80 KB に十数秒)。awk は gawk・mawk を先に使う
 
 ### 6. 承認の画面が出る接続
 
@@ -127,7 +129,9 @@ git は 1Password で署名するが、Claude の commit は無署名で、承�
 | `s.*.sshd.*` (sshd が転送した agent。OpenSSH 10.1 から) | 「`<月/日 時:分>` に `<PJP_SSH_CLIENT>` から入った接続の端末」。時刻と値は pjp-agent-link の記録 (`~/.local/state/pjp-agent-link/conn/<basename>` の `opened`・`client`) から、無ければ socket の時刻 |
 | 同じ dir に、それより新しい `s.*.sshd.*` がある | 「(より新しい接続: `<月/日 時:分>` `<値>`)」を添える。いちばん新しいもの 1 つ |
 | それ以外 (手元の 1Password の `~/.1password/agent.sock` など) | 「このマシンの agent (`<path>`)」 |
-| 先が無い・`SSH_AUTH_SOCK` が空 | 「出ない (agent の口の先が無い)」。そのまま打てば hook 2 が受ける |
+| 先が無い | 「出ない (agent の口の先が無い)」。そのまま打てば hook 2 が受ける |
+| `SSH_AUTH_SOCK` が空で WSL (`WSL_DISTRO_NAME` がある) | 「Windows の 1Password が出す (要求元は「Windows Terminal」としか出ない)」。WSL の `ssh` は Windows の `ssh.exe` へのラッパー |
+| `SSH_AUTH_SOCK` が空 (ほか) | 「どこに出るかは分からない (SSH_AUTH_SOCK が空)」。ssh の設定の `IdentityAgent` で agent を使うことがあるので、出ないとは言わない |
 
 socket かどうかは見ず、ファイルがあるかで見る (sshd は接続を閉じると socket を消す。テストで本物の socket を作らずに済む)。
 
@@ -142,7 +146,8 @@ socket かどうかは見ず、ファイルがあるかで見る (sshd は接続
 
 - `HERDR_ENV=1` で `herdr` が PATH にあるときだけ。`herdr workspace get "$HERDR_WORKSPACE_ID"` の `label` と、
   `herdr agent get "$HERDR_PANE_ID"` の `name` (無ければ pane の ID) で「どこから」を作る
-- 呼ぶたびに `timeout 2` を付ける (無いマシンでは付けずに呼ぶ)。失敗しても黙って進む
+- 呼ぶたびに 2 秒で切る (`timeout 2`。無いマシン (macOS) では裏で流して見張る)。落ちた・返事をしないときは、その回の
+  残りと続く 60 秒は herdr を呼ばない (印は同じ dir の `herdr-down`)。返事をしない herdr で Bash を毎回待たせない
 - hook 1: title「🔑 1Password の承認が出るかも」、body は「どこから」・コマンドの頭・接続の 3 行、`--sound request`。
   同じ pane (`HERDR_SESSION` と `HERDR_PANE_ID` の組) からは 600 秒に 1 回まで。印は
   `${XDG_STATE_HOME:-~/.local/state}/pjp-ssh-agent-notice/notified-<組>` の時刻
@@ -151,16 +156,21 @@ socket かどうかは見ず、ファイルがあるかで見る (sshd は接続
 
 ### 9. 断りの見分け方 (hook 2)
 
-`error`・`tool_response.stdout`・`tool_response.stderr` を行に分け、行の頭か終わりに固定した形で見る
-(grep の結果 `file:line:…` や、ファイルの中の文字列・JSON の中の `\n` つきの文字列では当たらないように)。
-偽の agent (鍵を見せて署名を断る・接続を切る) と使い捨ての sshd で、ssh・scp・git の実際の文言を集めて決めた。
+`error`・`tool_response.stdout`・`tool_response.stderr` を行に分け、行の終わりが文言のときだけ当てる (ssh・git の行は
+文言で終わり、diff・コード・文書の行はそうでない)。成功した Bash (`2>&1 | tail` で終了コードが隠れたもの) は、行の頭も
+ssh・git の出す形 (`sign_and_send_pubkey:`・`Couldn't sign`・`Signing`・`error:`) に固定する (成功した grep・cat の
+結果では当てない)。偽の agent (鍵を見せて署名を断る・接続を切る) と使い捨ての sshd で、ssh・scp・git の実際の文言を
+集めて決めた。
+
+OpenSSH は自分のエラー行を `\r\n` で終え、Claude Code は tool の出力の `\r` を残す (2.1.306 で確かめた) ので、`\r` を
+外してから見る。git は ssh-keygen の出力の `\r` を `?` に変えて出す (見本の行の終わりの `?` はこれ)。
 
 | 理由 | 当てる行 | 出どころ |
 | --- | --- | --- |
 | 断られた | 行の終わりが `agent refused operation` (`?` が付いてもよい) | ssh・scp: `sign_and_send_pubkey: signing failed for ED25519 "…" from agent: agent refused operation`。git の署名: `Couldn't sign message (signer): agent refused operation?` |
 | 通信が切れた | 行の終わりが `communication with agent failed` (`?` が付いてもよい) | 同じ形で、agent の接続が途中で切れたとき |
-| agent に届かない | `error: Couldn't get agent socket` で始まる行・`error: Couldn't load public key …/.git_signing_key_tmp…` で始まる行 | git の署名で、agent の口が無いとき (鍵を `ssh-add -L` から引く設定では後者) |
-| agent に届かない | `Permission denied (…publickey…).` で終わる行があり、hook の `SSH_AUTH_SOCK` の先が無い | ssh は agent の口が無いと何も言わずに鍵の認証で落ちる |
+| agent に届かない | 行の終わりが `Couldn't get agent socket` の行 (成功した Bash は `error: ` で始まる行)・`error: Couldn't load public key …/.git_signing_key_tmp…: ` で始まる行 (終わりが決まらないので、git がいつも付ける頭で固定する) | git の署名で、agent の口が無いとき (鍵を `ssh-add -L` から引く設定では後者) |
+| agent に届かない | `Permission denied (…publickey…).` で終わる行があり、`SSH_AUTH_SOCK` が空でなく、その先が無い | ssh は agent の口が無いと何も言わずに鍵の認証で落ちる。口が生きていれば鍵が相手に無いだけ、空なら agent を使っていない (WSL の ssh.exe など) |
 
 ### 10. Claude に足す文 (hook 2)
 
@@ -173,8 +183,17 @@ socket かどうかは見ず、ファイルがあるかで見る (sshd は接続
 <herdr の子の決まり>
 ```
 
-- 理由ごとの 1 つ目: 断られた → 「1Password を開いて承認するので、打ち直す」。通信が切れた・届かない →
-  「手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す」
+- 理由の説明: 断られた → 「1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password が
+  ロック中だった)」、通信が切れた → 「agent との通信が切れた (agent への接続が途中で閉じた)」、届かない → 「agent に
+  届かない (SSH_AUTH_SOCK の先に agent がいない)」
+- 1 つ目: 断られた → 「1Password を開いて承認するので、打ち直す」。通信が切れた・届かないなら、agent の口の種類ごと:
+
+  | 口 | 1 つ目 |
+  | --- | --- |
+  | sshd が転送した agent (`s.*.sshd.*`。先が無くても) | 手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す |
+  | ほかの口 (手元の 1Password など) | 1Password を起動してロックを解除するので、打ち直す |
+  | 空で WSL | Windows の 1Password を起動してロックを解除するので、打ち直す |
+  | 空 | agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す |
 - herdr の子の決まり: 「herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いて
   ターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く」。workspace の名前が 🌱 で始まるときは、
   その pane が子であることも添える
@@ -213,8 +232,13 @@ socket かどうかは見ず、ファイルがあるかで見る (sshd は接続
   ほかの ssh の remote は agent を使う
 - script は 1 本にし、3 つの event に登録する (接続・どこから・通知の部品を共にする)
 - hook 2 の herdr の通知は間引かない (断られたのは毎回知らせる価値がある)
-- 断りの文言は行の頭か終わりに固定して見る (この hook の文書やテストを cat・grep しただけで当たらないように)
-- agent に届かないとき (`Couldn't get agent socket` など) も hook 2 で受け、1 つ目の選択肢を「接続し直す」にする
+- 断りの文言は行の終わりに固定して見る。成功した Bash は行の頭も固定する (この hook の文書やテストを cat・grep・diff
+  しただけで当たらないように)。計画の段階で一度「失敗した Bash は部分一致」にしたが、最終レビューで、失敗した diff や
+  cat で誤って当たる (Claude が止まって音が鳴る) と指摘され、行の終わりに戻した
+- agent に届かないとき (`Couldn't get agent socket` など) も hook 2 で受け、1 つ目の選択肢を口の種類ごとの直し方にする
+- 最終レビュー (別の文脈のレビュアー) の指摘で直したもの: OpenSSH の行の終わりの `\r`、WSL と空の `SSH_AUTH_SOCK` の
+  見せ方と選択肢、返事をしない herdr (2 秒で切り、60 秒は呼ばない。`timeout` の無いマシンでも)、`flock FILE -c`、
+  頭の `SSH_AUTH_SOCK=~/…`、長いコマンドの読み方 (上限と、heredoc を 1 回の index で飛ばす)
 - subagent の中では問いを出させず、報告に書いて終えさせる (subagent はユーザーに聞けない)
 - `SSH_AUTH_SOCK=<path>` を頭に付けたコマンドは、その path を接続として見せる
 - socket かどうかは見ず、ファイルがあるかで見る (§6)

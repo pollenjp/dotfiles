@@ -32,17 +32,21 @@
 # 書いても当たらない)。$( )・` `・<( ) の中は別の単純コマンドとして見る。頭の VAR=値・包むコマンド (env・sudo・
 # timeout・xargs・nix develop -c など)・予約語は外し、bash -c・eval・nix-shell --run などに文字列で渡したものは
 # 読み直す (3 段まで)。cd と git -C は、その後ろの git を見る場所に効かせる。script の中・関数・alias・変数に
-# 入れたコマンドは見えない (断られたら、失敗のあとの指示で受ける)。
+# 入れたコマンドは見えない (断られたら、失敗のあとの指示で受ける)。読むのは 64 KB (gawk・mawk の無いマシンでは
+# 16 KB) までで、それより長いコマンドは読まずに抜ける (macOS の awk は長いコマンドで十数秒かかる)。
 #
 # herdr の pane (HERDR_ENV=1) では、herdr の通知 (--sound request) でも知らせる。body は「どこから」(workspace の
 # 名前・pane の ID・agent の名前)・コマンドの頭・承認の画面の接続の 3 行。同じ pane からは 600 秒に 1 回まで
 # (commit のたびに鳴らさない。印は ${XDG_STATE_HOME:-~/.local/state}/pjp-ssh-agent-notice/ の時刻で、出せた通知
-# だけを数える)。会話の画面の 1 行は毎回出す。herdr は timeout 2 で呼び、落ちても黙って進む。
+# だけを数える)。会話の画面の 1 行は毎回出す。herdr は 2 秒で切って呼び (timeout の無いマシンでは裏で流して見張る)、
+# 落ちた・返事をしないときは、その回の残りと続く 60 秒は呼ばない (印は同じ dir の herdr-down)。
 #
-# 承認の画面の接続 (conn_desc) は、SSH_AUTH_SOCK (コマンドの頭の SSH_AUTH_SOCK= が勝つ) の symlink の先を見る。
-# sshd が転送した agent (s.*.sshd.*) なら、pjp-agent-link の記録 (~/.local/state/pjp-agent-link/conn/) の時刻と
-# PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは見ず、ファイル
-# があるかで見る (sshd は接続を閉じると socket を消す)。
+# 承認の画面の接続 (conn_desc) は、SSH_AUTH_SOCK (コマンドの頭の SSH_AUTH_SOCK= が勝つ。~ と $HOME は置き換える) の
+# symlink の先を見る。sshd が転送した agent (s.*.sshd.*) なら、pjp-agent-link の記録 (~/.local/state/pjp-agent-link/
+# conn/) の時刻と PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは
+# 見ず、ファイルがあるかで見る (sshd は接続を閉じると socket を消す)。空なら、WSL では Windows の 1Password が出すと
+# 言い (WSL の ssh は Windows の ssh.exe へのラッパーで、要求元は「Windows Terminal」としか出ない)、ほかでは分から
+# ないと言う (ssh の設定の IdentityAgent で agent を使うことがある)。
 #
 # ## 断られたあと (PostToolUse・PostToolUseFailure・matcher Bash)
 #
@@ -53,23 +57,27 @@
 #   断られた       agent refused operation (ssh の sign_and_send_pubkey: … と、git の署名の Couldn't sign message …)
 #   通信が切れた   communication with agent failed (同じ形)
 #   届かない       git の署名の Couldn't get agent socket・Couldn't load public key …/.git_signing_key_tmp…、
-#                  鍵の認証の失敗 (Permission denied (publickey)) で agent の口の先が無いとき
+#                  鍵の認証の失敗 (Permission denied (publickey)) で agent の口があってその先が無いとき
 #
-# 失敗した Bash は部分一致で見る。成功した Bash (2>&1 | tail で終了コードが隠れたもの) は、ssh・git が出す形の行
-# (行の頭が sign_and_send_pubkey: などで、行の終わりが文言) だけを見る。成功した grep・cat の結果に出た文言で
-# 当てないため。
+# OpenSSH は自分のエラー行を \r\n で終え、Claude Code は tool の出力の \r を残すので、\r を外してから見る (git は
+# ssh-keygen の出力の \r を ? に変えて出す。見本の行の終わりの ? はこれ)。どちらも行の終わりが文言のときだけ当てる
+# (ssh・git の行は文言で終わり、diff・コード・文書の行はそうでない)。成功した Bash (2>&1 | tail で終了コードが
+# 隠れたもの) は、行の頭も ssh・git の出す形 (sign_and_send_pubkey: など) に固定する。成功した grep・cat の結果に
+# 出た文言で当てないため。
 #
 # 指示は「同じコマンドを打ち直さない。何を (コマンドの頭) とどこから (workspace・pane・agent) を書いてから、
-# ① 承認する (届かないなら接続し直す) ので打ち直す (推奨) ② 飛ばして進める ③ 止める の問いを出す」。herdr の
-# 指揮役の子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace の名前が 🌱 で始まれば言い切る)。
-# subagent の中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
+# ① 直し方 (推奨) ② 飛ばして進める ③ 止める の問いを出す」。① は、断られたら「1Password を開いて承認する」、通信が
+# 切れた・届かないなら agent の口の種類ごと (転送された接続なら「このマシンへ接続し直す」、手元の口なら「1Password を
+# 起動してロックを解除する」、WSL で空なら Windows の 1Password、空なら SSH_AUTH_SOCK を設定する)。herdr の指揮役の
+# 子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace の名前が 🌱 で始まれば言い切る)。subagent の
+# 中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
 #
 # ## 黙る場面
 #
 #   - Bash 以外の tool・一覧に当たらないコマンド。コマンドの文字に ssh・scp・sftp・mosh・rsync・nixos-rebuild・
 #     nix-copy-closure・git と、設定の一覧の項目の 1 語目のどれも無ければ、読まずに抜ける (この hook は Bash の
 #     たびに走る)
-#   - 断りの無い出力。agent の口が生きているときの鍵の認証の失敗 (鍵が相手に無いだけ)
+#   - 断りの無い出力。口が生きている・空のときの鍵の認証の失敗 (鍵が相手に無いだけ・agent を使っていない)
 #   - 想定外の入力・jq が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
 #
 # ## 登録
@@ -198,7 +206,24 @@ function pop(   k, mark) {
   depth--
 }
 
-function lex(s,   n, i, c, c2, d, j, k, q, rest, line, eol, pos, delim, strip) {
+# heredoc の本文を飛ばした先 (終わりの印の行の次) を返す。<<- でなければ印の行を 1 回の index で探す (1 行ずつ
+# substr で切り出すと、長い heredoc で二乗になる)
+function heredoc_end(s, pos, n, delim, strip,   k, rest, eol, line) {
+  if (!strip) {
+    k = index("\n" substr(s, pos) "\n", "\n" delim "\n")
+    return (k > 0) ? pos + k + length(delim) : n + 1
+  }
+  while (pos <= n) {
+    rest = substr(s, pos)
+    eol = index(rest, "\n")
+    if (eol > 0) { line = substr(rest, 1, eol - 1); pos += eol } else { line = rest; pos = n + 1 }
+    sub(/^\t+/, "", line)
+    if (line == delim) break
+  }
+  return pos
+}
+
+function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip) {
   n = length(s)
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
@@ -209,9 +234,10 @@ function lex(s,   n, i, c, c2, d, j, k, q, rest, line, eol, pos, delim, strip) {
       continue
     }
     if (c == "'") {
-      rest = substr(s, i + 1)
-      k = index(rest, "'")
-      if (k == 0) { add_char(rest); i = n } else { add_char(substr(rest, 1, k - 1)); i += k }
+      # 残りを substr で切り出すと、引用符の多い長いコマンドで二乗になる
+      for (j = i + 1; j <= n && substr(s, j, 1) != "'"; j++) ;
+      add_char(substr(s, i + 1, j - i - 1))
+      i = j
       continue
     }
     if (c == "\"") {
@@ -316,15 +342,7 @@ function lex(s,   n, i, c, c2, d, j, k, q, rest, line, eol, pos, delim, strip) {
       flush_cmd()
       if (nh > 0) {
         pos = i + 1
-        for (k = 1; k <= nh; k++) {
-          while (pos <= n) {
-            rest = substr(s, pos)
-            eol = index(rest, "\n")
-            if (eol > 0) { line = substr(rest, 1, eol - 1); pos += eol } else { line = rest; pos = n + 1 }
-            if (hs[k]) sub(/^\t+/, "", line)
-            if (line == hd[k]) break
-          }
-        }
+        for (k = 1; k <= nh; k++) pos = heredoc_end(s, pos, n, hd[k], hs[k])
         nh = 0
         i = pos - 1
       }
@@ -341,8 +359,23 @@ function lex(s,   n, i, c, c2, d, j, k, q, rest, line, eol, pos, delim, strip) {
 }
 AWK
 
+# lexer に使う awk と、読むコマンドの長さの上限。gawk・mawk は長い文字列の substr が速いので先に使う。ほかの awk
+# (macOS の onetrue-awk) は 1 文字ずつ読むと長さの二乗で遅くなる (80 KB で十数秒) ので、上限を小さくする。上限を
+# 超えるコマンドは読まない (この hook は Bash のたびに走るので、待たせない方を採る。断られれば後で受ける)
+pick_awk() {
+  [[ -z ${awk_bin} ]] || return 0
+  if awk_bin=$(command -v gawk) || awk_bin=$(command -v mawk); then
+    lex_limit=65536
+  else
+    awk_bin="awk"
+    lex_limit=16384
+  fi
+}
+awk_bin=""
+lex_limit=0
+
 split_commands() {
-  printf '%s' "$1" | LC_ALL=C awk "${lexer}"
+  printf '%s' "$1" | LC_ALL=C "${awk_bin}" "${lexer}"
 }
 
 # match_command <dir> <段> <コマンドの文字列>
@@ -352,6 +385,8 @@ match_command() {
   local dir=$1 depth=$2 line
   local -a w
   ((depth <= 3)) || return 1
+  pick_awk
+  ((${#3} <= lex_limit)) || return 1
   while IFS= read -r line; do
     IFS=$'\037' read -r -a w <<<"${line}"
     ((${#w[@]} > 0)) || continue
@@ -402,7 +437,7 @@ match_simple() {
   # 頭の VAR=値 (SSH_AUTH_SOCK は接続として覚える) と予約語
   while ((${#w[@]} > 0)); do
     case ${w[0]} in
-      SSH_AUTH_SOCK=*) sock=${w[0]#*=} ;;
+      SSH_AUTH_SOCK=*) sock=$(expand_home "${w[0]#*=}") ;;
       '!' | '{' | '}' | if | then | else | elif | do | while | until) ;;
       for | case | select | function | 'fi' | 'done' | 'esac' | '[[' | '[') return 1 ;;
       *=*) [[ ${w[0]%%=*} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || break ;;
@@ -425,7 +460,7 @@ match_simple() {
           case ${w[0]} in
             -u | --unset | -C | --chdir | -S | --split-string) w=("${w[@]:2}") ;;
             SSH_AUTH_SOCK=*)
-              sock=${w[0]#*=}
+              sock=$(expand_home "${w[0]#*=}")
               w=("${w[@]:1}")
               ;;
             -* | *=*) w=("${w[@]:1}") ;;
@@ -482,15 +517,12 @@ match_simple() {
         return
         ;;
       flock)
+        # -c は lock のファイルの後ろにも置ける (flock FILE -c CMD)
         for ((i = 1; i < ${#w[@]}; i++)); do
-          case ${w[i]} in
-            -c | --command)
-              rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
-              return
-              ;;
-            -*) ;;
-            *) break ;;
-          esac
+          if [[ ${w[i]} == -c || ${w[i]} == --command ]]; then
+            rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
+            return
+          fi
         done
         w=("${w[@]:1}")
         skip_opts '-w|-E|--timeout|--conflict-exit-code'
@@ -646,10 +678,9 @@ extra_match() {
   return 1
 }
 
-# join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -) なら今の dir
-join_dir() {
-  local d=$2
-  # 語は展開していないので、頭の $HOME・~ をここで置き換える
+# expand_home <path>: 頭の ~・$HOME・${HOME} を置き換える (コマンドの語は展開していないので)
+expand_home() {
+  local d=$1
   # shellcheck disable=SC2016 # $HOME を文字のまま探す
   case ${d} in
     '${HOME}'*) d=${HOME}${d#'${HOME}'} ;;
@@ -657,8 +688,18 @@ join_dir() {
   esac
   # shellcheck disable=SC2088 # ~ を文字のまま探す
   case ${d} in
-    '' | '~') printf '%s' "${HOME}" ;;
-    '~/'*) printf '%s' "${HOME}/${d#'~/'}" ;;
+    '~') d=${HOME} ;;
+    '~/'*) d=${HOME}/${d#'~/'} ;;
+  esac
+  printf '%s' "${d}"
+}
+
+# join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -) なら今の dir
+join_dir() {
+  local d
+  d=$(expand_home "$2")
+  case ${d} in
+    '') printf '%s' "${HOME}" ;;
     -) printf '%s' "$1" ;;
     /*) printf '%s' "${d}" ;;
     *) printf '%s' "$1/${d}" ;;
@@ -887,7 +928,13 @@ conn_client() {
 conn_desc() {
   local sock=$1 target t tgt_t best_t=0 newer="" f client
   if [[ -z ${sock} ]]; then
-    printf '承認の画面は出ない (SSH_AUTH_SOCK が無い)'
+    # WSL の ssh は Windows の ssh.exe へのラッパーで、SSH_AUTH_SOCK を使わない (nix/README「WSL の .exe の起動を
+    # 常時記録する」)。ほかのマシンでも ssh の設定の IdentityAgent で agent を使うことがあるので、出ないとは言わない
+    if [[ -n ${WSL_DISTRO_NAME:-} ]]; then
+      printf '承認の画面は Windows の 1Password が出す (要求元は「Windows Terminal」としか出ない)'
+    else
+      printf '承認の画面がどこに出るかは分からない (SSH_AUTH_SOCK が空)'
+    fi
     return
   fi
   target=$(readlink -f -- "${sock}" 2>/dev/null) || target=""
@@ -926,38 +973,85 @@ clip() {
 
 # --- herdr の通知と、どこから
 
-herdr_ready() {
-  [[ ${HERDR_ENV:-} == 1 ]] && command -v herdr &>/dev/null
+herdr_down_path() {
+  printf '%s/pjp-ssh-agent-notice/herdr-down' "${XDG_STATE_HOME:-${HOME}/.local/state}"
 }
 
-# herdr_call <引数>…: 返事をしない herdr で Bash を待たせないよう、timeout があれば 2 秒で切る
+# herdr_ready: herdr の pane で herdr があり、この回と直近 60 秒に呼べなかったことが無い
+herdr_ready() {
+  local f
+  ((herdr_failed == 0)) || return 1
+  [[ ${HERDR_ENV:-} == 1 ]] || return 1
+  command -v herdr &>/dev/null || return 1
+  f=$(herdr_down_path)
+  [[ ! -e ${f} ]] || (($(date +%s) - $(mtime "${f}") >= 60))
+}
+herdr_failed=0
+
+# herdr_down: 落ちた・返事をしない herdr を、この回の残りと続く 60 秒は呼ばない (Bash を毎回待たせない)
+herdr_down() {
+  local f
+  herdr_failed=1
+  f=$(herdr_down_path)
+  mkdir -p "${f%/*}" 2>/dev/null && touch "${f}" 2>/dev/null
+  return 0
+}
+
+# herdr_call <引数>…: 2 秒で切って呼ぶ。timeout の無いマシン (macOS) では裏で流して見張る
 herdr_call() {
+  local f pid i rc
   if command -v timeout &>/dev/null; then
     timeout 2 herdr "$@" </dev/null 2>/dev/null
-  else
-    herdr "$@" </dev/null 2>/dev/null
+    return
   fi
+  f=$(mktemp "${TMPDIR:-/tmp}/ssh-agent-notice.XXXXXX") || return 1
+  herdr "$@" </dev/null >"${f}" 2>/dev/null &
+  pid=$!
+  for ((i = 0; i < 20; i++)); do
+    kill -0 "${pid}" 2>/dev/null || break
+    sleep 0.1
+  done
+  if kill -0 "${pid}" 2>/dev/null; then
+    kill "${pid}" 2>/dev/null
+    rm -f "${f}"
+    return 124
+  fi
+  wait "${pid}"
+  rc=$?
+  cat "${f}"
+  rm -f "${f}"
+  return "${rc}"
 }
 
 # herdr_notify <title> <body>: 音つきで知らせる。出せたら 0
 herdr_notify() {
   herdr_ready || return 1
-  herdr_call notification show "$1" --body "$2" --sound request >/dev/null
+  herdr_call notification show "$1" --body "$2" --sound request >/dev/null && return 0
+  herdr_down
+  return 1
 }
 
 # where_desc: 「どこから」(workspace の名前・pane の ID・agent の名前・subagent) を where に、workspace の名前を
 # ws_label に入れる (呼び出し元で使うので $( ) で呼ばない)
 where_desc() {
-  local agent_name="" agent_type part
+  local agent_name="" agent_type part got
   local -a parts=()
   where=""
   ws_label=""
-  if herdr_ready; then
-    if [[ -n ${HERDR_WORKSPACE_ID:-} ]]; then
-      ws_label=$(herdr_call workspace get "${HERDR_WORKSPACE_ID}" | jq -r '.result.workspace.label // empty' 2>/dev/null)
+  if [[ ${HERDR_ENV:-} == 1 ]]; then
+    if [[ -n ${HERDR_WORKSPACE_ID:-} ]] && herdr_ready; then
+      if got=$(herdr_call workspace get "${HERDR_WORKSPACE_ID}"); then
+        ws_label=$(jq -r '.result.workspace.label // empty' <<<"${got}" 2>/dev/null)
+      else
+        herdr_down
+      fi
     fi
-    if [[ -n ${HERDR_PANE_ID:-} ]]; then
-      agent_name=$(herdr_call agent get "${HERDR_PANE_ID}" | jq -r '.result.agent.name // empty' 2>/dev/null)
+    if [[ -n ${HERDR_PANE_ID:-} ]] && herdr_ready; then
+      if got=$(herdr_call agent get "${HERDR_PANE_ID}"); then
+        agent_name=$(jq -r '.result.agent.name // empty' <<<"${got}" 2>/dev/null)
+      else
+        herdr_down
+      fi
     fi
     [[ -z ${ws_label} ]] || parts+=("workspace「${ws_label}」")
     [[ -z ${HERDR_PANE_ID:-} ]] || parts+=("pane ${HERDR_PANE_ID}")
@@ -1024,45 +1118,66 @@ before() {
 
 # --- 断られたあと
 
-# agent_alive <sock>: agent の口の先があるか
-agent_alive() {
-  [[ -n $1 && -e $1 ]]
+# agent_kind <sock>: agent の口の種類。forwarded (sshd が転送した s.*.sshd.*。先が無くても)・local (ほかの口)・
+# windows (WSL で SSH_AUTH_SOCK が空。ssh は Windows の ssh.exe)・none (空)
+agent_kind() {
+  local target
+  if [[ -z $1 ]]; then
+    if [[ -n ${WSL_DISTRO_NAME:-} ]]; then
+      echo windows
+    else
+      echo none
+    fi
+    return
+  fi
+  target=$(readlink -f -- "$1" 2>/dev/null) || target=""
+  case ${target:-$1} in
+    */s.*.sshd.*) echo forwarded ;;
+    *) echo local ;;
+  esac
 }
 
-# refusal_reason <event> <出力>: 断りの理由を出す (refused・broken・unreachable と、鍵の認証の失敗の publickey)。
-# 無ければ 1。失敗した Bash は部分一致で、成功した Bash は行の頭に固定した形で見る (成功した grep・cat の結果に
-# 出た文言で当てない。2>&1 | tail で終了コードが隠れても、ssh・git の行はそのまま行の頭に出る)
+# refusal_reason <event> <出力 (\r を外したもの)>: 断りの理由を出す (refused・broken・unreachable と、鍵の認証の
+# 失敗の publickey)。無ければ 1。どちらも行の終わりが文言のときだけ当てる (ssh・git の行は文言で終わり、diff・
+# コード・文書の行はそうでない)。終わりの決まらない git の鍵の読み込みの失敗は、git がいつも付ける行の頭の
+# error: で固定する。成功した Bash は、ssh・git の出す行の頭も固定する (成功した grep・cat の結果に出た文言で
+# 当てない。2>&1 | tail で終了コードが隠れても、ssh・git の行はそのまま出る)
 refusal_reason() {
-  local lead="^(sign_and_send_pubkey: |Couldn't sign |Signing |error: )"
+  local i lead="^(sign_and_send_pubkey: |Couldn't sign |Signing |error: ).*"
+  local -a pat reasons=(refused broken unreachable publickey)
   if [[ $1 == PostToolUseFailure ]]; then
-    case $2 in
-      *"agent refused operation"*) echo refused ;;
-      *"communication with agent failed"*) echo broken ;;
-      *"Couldn't get agent socket"* | *"Couldn't load public key "*".git_signing_key_tmp"*) echo unreachable ;;
-      *"Permission denied ("*publickey*) echo publickey ;;
-      *) return 1 ;;
-    esac
-  elif grep -Eq "${lead}.*agent refused operation\\??\$" <<<"$2"; then
-    echo refused
-  elif grep -Eq "${lead}.*communication with agent failed\\??\$" <<<"$2"; then
-    echo broken
-  elif grep -Eq "^error: Couldn't (get agent socket|load public key .*\\.git_signing_key_tmp)" <<<"$2"; then
-    echo unreachable
-  elif grep -Eq '^([^ ]+: )?Permission denied \([^)]*publickey[^)]*\)\.?$' <<<"$2"; then
-    echo publickey
+    pat=(
+      'agent refused operation\??$'
+      'communication with agent failed\??$'
+      "Couldn't get agent socket\\??\$|^error: Couldn't load public key [^ ]*\\.git_signing_key_tmp[^ ]*: "
+      'Permission denied \([^)]*publickey[^)]*\)\.?$'
+    )
   else
-    return 1
+    pat=(
+      "${lead}agent refused operation\\??\$"
+      "${lead}communication with agent failed\\??\$"
+      "^error: Couldn't (get agent socket\\??\$|load public key [^ ]*\\.git_signing_key_tmp)"
+      '^([^ ]+: )?Permission denied \([^)]*publickey[^)]*\)\.?$'
+    )
   fi
+  for i in 0 1 2 3; do
+    if grep -Eq "${pat[i]}" <<<"$2"; then
+      echo "${reasons[i]}"
+      return 0
+    fi
+  done
+  return 1
 }
 
 after() {
-  local text reason head conn title desc first rule
-  local reconnect='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す'
+  local text reason head conn title desc first rule sock
   text=$(jq -r '[.error, .tool_response.stdout, .tool_response.stderr] | map(strings) | join("\n")' <<<"${input}" 2>/dev/null) || return 0
   case ${text} in
     *agent* | *publickey* | *git_signing_key*) ;;
     *) return 0 ;;
   esac
+  # OpenSSH は自分のエラー行を \r\n で終え、Claude Code は tool の出力の \r を残す
+  text=${text//$'\r'/}
   reason=$(refusal_reason "${event}" "${text}") || return 0
 
   hit_kind=""
@@ -1073,31 +1188,41 @@ after() {
   else
     head=${cmd%%$'\n'*}
   fi
-  # 鍵の認証の失敗は、agent の口の先が無いときだけ agent に届かないとみなす (口が生きていれば、鍵が相手に無いだけ)
+  sock=${hit_sock:-${SSH_AUTH_SOCK:-}}
+  # 鍵の認証の失敗は、agent の口があって、その先が無いときだけ agent に届かないとみなす。口が生きていれば鍵が相手に
+  # 無いだけで、空なら agent を使っていない (WSL の ssh.exe など)
   if [[ ${reason} == publickey ]]; then
-    agent_alive "${hit_sock:-${SSH_AUTH_SOCK:-}}" && return 0
+    [[ -n ${sock} && ! -e ${sock} ]] || return 0
     reason=unreachable
   fi
   head=$(clip "${head}")
-  conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
+  conn=$(conn_desc "${sock}")
 
   case ${reason} in
     refused)
       title="🔑 1Password に断られた"
       desc='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
-      first='1Password を開いて承認するので、打ち直す'
       ;;
     broken)
       title="🔑 SSH agent との通信が切れた"
-      desc='agent との通信が切れた (agent を貸している SSH の接続が閉じたか、途切れた)'
-      first=${reconnect}
+      desc='agent との通信が切れた (agent への接続が途中で閉じた)'
       ;;
     *)
       title="🔑 SSH agent に届かない"
-      desc='agent に届かない (SSH_AUTH_SOCK の先が無い。agent を貸す SSH の接続が無い)'
-      first=${reconnect}
+      desc='agent に届かない (SSH_AUTH_SOCK の先に agent がいない)'
       ;;
   esac
+  # 1 つ目の選択肢: 断られたら承認する。通信が切れた・届かないなら、agent の口の種類ごとの直し方
+  if [[ ${reason} == refused ]]; then
+    first='1Password を開いて承認するので、打ち直す'
+  else
+    case $(agent_kind "${sock}") in
+      forwarded) first='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す' ;;
+      local) first='1Password を起動してロックを解除するので、打ち直す' ;;
+      windows) first='Windows の 1Password を起動してロックを解除するので、打ち直す' ;;
+      *) first='agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す' ;;
+    esac
+  fi
 
   where_desc
   local ctx="[ssh-agent] 直前の Bash は SSH agent (1Password) を使えずに失敗した: ${desc}。"$'\n'

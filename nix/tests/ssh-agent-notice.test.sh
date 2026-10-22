@@ -14,8 +14,10 @@
 #
 #   打つ前 (PreToolUse):
 #   - ssh・scp・rsync の <host>:・nixos-rebuild の --target-host・nix の ssh://・ssh-keygen -Y sign・ssh-add -T を、
-#     包むコマンド (timeout・sudo・env・bash -c・nix develop -c)・$( )・<( )・for の中でも当て、種類を添えて知らせる
-#   - 引用符の中・heredoc の本文・コメント・grep や echo の引数・ssh -G・command -v ssh・ローカルの rsync には当てない
+#     包むコマンド (timeout・sudo・env・bash -c・nix develop -c・flock FILE -c)・$( )・<( )・"…" の中の $( )・for の中・
+#     heredoc (<<-  も) の後ろでも当て、種類を添えて知らせる
+#   - 引用符の中・heredoc の本文・コメント・grep や echo の引数・ssh -G・command -v ssh・ローカルの rsync には当てない。
+#     64 KB を超えるコマンドは読まずに抜ける
 #   - git は署名するときだけ当てる (env の commit.gpgsign=false は外れ・global の true と -c と -S は当たり・
 #     --no-gpg-sign と rebase --abort は外れ・tag は作るときだけ)
 #   - git の相手が ssh の remote (cd と -C の先も・clone の URL も) なら当て、insteadOf で https になれば外す
@@ -23,19 +25,25 @@
 #     別の語があってよい) glob で当てる。JSON が壊れていても組み込みの一覧は効く
 #   - 知らせる文は「🔑 … (<種類>): <頭> — 承認の画面は <接続>」の 1 行の JSON だけで、頭は包むコマンドを外して 80 文字で切る
 #   - 承認の画面の接続は、pjp-agent-link の記録の時刻と値・記録が無ければファイルの時刻・より新しい接続・手元の agent・
-#     先が無い・SSH_AUTH_SOCK が無い、の形で出し、コマンドの頭の SSH_AUTH_SOCK= が env より勝つ
+#     先が無い・SSH_AUTH_SOCK が空 (分からない)・WSL で空 (Windows の 1Password) の形で出す。コマンドの頭の
+#     SSH_AUTH_SOCK= (~ と $HOME は置き換える) が env より勝つ
 #   - herdr の pane で当たれば、herdr の通知 (どこから・頭・接続の 3 行、--sound request) も出す。どこからは
 #     workspace の名前・pane の ID・agent の名前 (無ければ pane まで)。同じ pane からは 10 分に 1 回で、別の pane は
-#     間を置かない。herdr が落ちても会話の 1 行は出し、落ちた通知は間引きに数えない
+#     間を置かない
+#   - herdr が落ちる・返事をしない (2 秒で切る。timeout の無いマシンでも) ときも会話の 1 行は出して exit 0。その回の
+#     残りと続く 60 秒は herdr を呼ばず、落ちた通知は間引きに数えない
 #   - herdr の外と、当たらないコマンドでは herdr を呼ばない
 #
 #   断られたあと (PostToolUse・PostToolUseFailure):
-#   - 失敗した Bash の出力に、agent の断り (ssh・git の署名)・agent との通信が切れた・agent に届かない (git の署名・
-#     口の先が無いときの鍵の認証の失敗) があれば、理由ごとの指示 (打ち直さない・何をとどこからを書く・3 つの選択肢・
-#     herdr の子の決まり) を additionalContext で足し、会話の 1 行と herdr の通知 (理由ごとの title。間引かない) も出す。
-#     hookEventName は入力の event に合わせる
+#   - Bash の出力 (OpenSSH の行の終わりの \r を外して見る) に、agent の断り (ssh・git の署名)・agent との通信が
+#     切れた・agent に届かない (git の署名・口の先が無いときの鍵の認証の失敗) があれば、理由ごとの指示 (打ち直さない・
+#     何をとどこからを書く・3 つの選択肢・herdr の子の決まり) を additionalContext で足し、会話の 1 行と herdr の通知
+#     (理由ごとの title。間引かない) も出す。hookEventName は入力の event に合わせる
+#   - 1 つ目の選択肢は、断られたら承認、通信が切れた・届かないなら agent の口の種類 (転送された接続・手元の agent・
+#     WSL の Windows の 1Password・空) ごとの直し方
 #   - 🌱 の workspace では子の決まりを言い切り、subagent の中では問いを出させず報告に書かせる
-#   - 成功した Bash は行の頭から断りがあるときだけ当て、grep の結果や行の途中の文言では黙る。口が生きているときの
+#   - 失敗した Bash は行の終わりが文言のとき、成功した Bash はさらに ssh・git の出す行の頭のときだけ当て、diff・cat・
+#     grep の結果や行の途中の文言、行をまたいだ Permission denied と publickey では黙る。口が生きている・空のときの
 #     鍵の認証の失敗・断りの無い失敗・Bash 以外でも黙る
 #
 #   - Bash 以外・壊れた入力・空の入力・jq が無いときは黙り、いつも exit 0
@@ -101,6 +109,8 @@ detail() {
 }
 
 title='🔑 1Password の承認が出るかも'
+# SSH_AUTH_SOCK が空 (WSL でない) ときの接続の文
+none_conn='承認の画面がどこに出るかは分からない (SSH_AUTH_SOCK が空)'
 
 # expect_hit <種類> <コマンド> [<cwd>] [NAME=VALUE…]
 expect_hit() {
@@ -159,6 +169,9 @@ expect_hit "ssh の接続" 'nixos-rebuild switch --flake .#x --target-host root@
 expect_hit "ssh の接続" 'nix copy --to ssh://h .#x'
 expect_hit "署名" 'ssh-keygen -Y sign -f k -n git f'
 expect_hit "署名" 'ssh-add -T k.pub'
+expect_hit "ssh の接続" 'flock /tmp/lock -c "ssh h true"'
+expect_hit "ssh の接続" $'cat <<EOF >x\nbody\nEOF\nssh h true'
+expect_hit "ssh の接続" $'cat <<-EOF >x\n\tbody\n\tEOF\nssh h true'
 
 # --- 当てないもの
 expect_miss 'ls -la'
@@ -175,6 +188,15 @@ expect_miss '# ssh h'
 expect_miss 'rsync -a a/ b/'
 expect_miss 'rsync -a rsync://h/m d/'
 expect_miss 'nixos-rebuild build --flake .#x'
+expect_miss $'cat <<-EOF >x\n\tssh h true\n\tEOF\necho done'
+expect_miss $'cat <<EOF >x\nssh h true\nEOF'
+# 64 KB を超えるコマンドは読まずに抜ける (macOS の awk では読むのに数十秒かかる)
+pre "cat <<'EOF' >x"$'\n'"$(printf 'filler line with git push and more text here%.0s\n' {1..1500})"$'\nEOF\nssh h true'
+if silent; then
+  ok "64 KB を超えるコマンドは読まずに抜ける"
+else
+  ng "64 KB を超えるコマンドは読まずに抜ける" "$(detail)"
+fi
 
 # --- git の署名
 signing="${work}/signing.gitconfig"
@@ -229,9 +251,12 @@ rm -f "${extras}"
 # --- 知らせる文: 頭は包むコマンドを外し、80 文字で切る
 long="ssh h $(printf 'x%.0s' {1..100})"
 expect_notice "頭は包むコマンドを外したもの" \
-  "${title} (ssh の接続): ssh h true — 承認の画面は出ない (SSH_AUTH_SOCK が無い)" 'timeout 5 ssh h true'
+  "${title} (ssh の接続): ssh h true — ${none_conn}" 'timeout 5 ssh h true'
 expect_notice "頭は 80 文字で切る" \
-  "${title} (ssh の接続): ${long:0:79}… — 承認の画面は出ない (SSH_AUTH_SOCK が無い)" "${long}"
+  "${title} (ssh の接続): ${long:0:79}… — ${none_conn}" "${long}"
+expect_notice "WSL で SSH_AUTH_SOCK が空なら、Windows の 1Password が出すと言う (ssh は ssh.exe へのラッパー)" \
+  "${title} (ssh の接続): ssh h — 承認の画面は Windows の 1Password が出す (要求元は「Windows Terminal」としか出ない)" \
+  'ssh h' "${work}" WSL_DISTRO_NAME=Ubuntu
 
 # --- 承認の画面の接続
 agent="${HOME}/.ssh/agent"
@@ -276,16 +301,25 @@ expect_notice "先の無い口は、出ないと言う" \
 expect_notice "コマンドの頭の SSH_AUTH_SOCK= が env より勝つ" \
   "${title} (ssh の接続): ssh h — 承認の画面はこのマシンの agent (~/.1password/agent.sock) が出す" \
   "SSH_AUTH_SOCK=${HOME}/.1password/agent.sock ssh h" "${work}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.dead.sock"
+expect_notice "コマンドの頭の SSH_AUTH_SOCK= の ~ を置き換える" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)" \
+  'SSH_AUTH_SOCK=~/.ssh/agent.a.sock ssh h'
+# shellcheck disable=SC2016 # hook に渡すコマンドの文字 ($HOME は hook が置き換える)
+expect_notice "コマンドの頭の SSH_AUTH_SOCK= の \$HOME を置き換える" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)" \
+  'SSH_AUTH_SOCK=$HOME/.ssh/agent.a.sock ssh h'
 
 # --- herdr の通知
 # 偽の herdr: 呼ばれた引数を JSON の配列で log に足し、workspace get・agent get には決まった値を返す。
-# FAKE_HERDR_RC で終了コード、FAKE_LABEL で workspace の名前、FAKE_AGENT で agent の名前 (null なら名前なし) を変える
+# FAKE_HERDR_RC で終了コード、FAKE_LABEL で workspace の名前、FAKE_AGENT で agent の名前 (null なら名前なし)、
+# FAKE_HERDR_SLEEP で返事をするまでの秒を変える
 fakebin="${work}/bin"
 hlog="${work}/herdr.log"
 mkdir -p "${fakebin}"
 cat >"${fakebin}/herdr" <<EOF
 #!${BASH}
 jq -cn '\$ARGS.positional' --args -- "\$@" >>"${hlog}"
+[[ -z \${FAKE_HERDR_SLEEP:-} ]] || sleep "\${FAKE_HERDR_SLEEP}"
 case "\$1 \$2" in
   "workspace get") jq -cn --arg l "\${FAKE_LABEL:-🌱 dotfiles: x}" '{result: {workspace: {label: \$l}}}' ;;
   "agent get") jq -cn --arg n "\${FAKE_AGENT:-dot-x}" '{result: {agent: {name: (if \$n == "null" then null else \$n end)}}}' ;;
@@ -307,9 +341,21 @@ notified() {
 calls() {
   jq -s 'length' "${hlog}"
 }
+# age_stamps: 印 (通知の間引き・herdr が落ちたこと) を 601 秒前にする
+age_stamps() {
+  local f
+  for f in "${XDG_STATE_HOME}"/pjp-ssh-agent-notice/*; do
+    [[ -e ${f} ]] && touch -d "@$(($(date +%s) - 601))" "${f}"
+  done
+  return 0
+}
+# ms_since <date +%s%N の値>: そこからの ms
+ms_since() {
+  echo $((($(date +%s%N) - $1) / 1000000))
+}
 mapfile -t hp1 < <(in_herdr w9:p1)
 pre 'timeout 5 ssh h true' "${work}" "${hp1[@]}"
-want_body=$'workspace「🌱 dotfiles: x」・pane w9:p1・agent dot-x\nssh h true\n承認の画面は出ない (SSH_AUTH_SOCK が無い)'
+want_body="workspace「🌱 dotfiles: x」・pane w9:p1・agent dot-x"$'\n'"ssh h true"$'\n'"${none_conn}"
 if noticed && [[ $(notified) == 1 ]] \
   && [[ $(jq -sc '[.[] | select(.[0] == "notification")][0]' "${hlog}") == "$(jq -cn --arg b "${want_body}" '["notification", "show", "🔑 1Password の承認が出るかも", "--body", $b, "--sound", "request"]')" ]]; then
   ok "当たれば herdr に「どこから・頭・接続」の通知を音つきで出す"
@@ -324,9 +370,7 @@ else
   ng "同じ pane から 10 分の間は、通知を出さず会話の 1 行だけ出す" "$(detail) log=$(cat "${hlog}")"
 fi
 
-for f in "${XDG_STATE_HOME}"/pjp-ssh-agent-notice/*; do
-  touch -d "@$(($(date +%s) - 601))" "${f}"
-done
+age_stamps
 pre 'ssh h true' "${work}" "${hp1[@]}"
 if noticed && [[ $(notified) == 2 ]]; then
   ok "前の通知から 10 分を過ぎれば、また出す"
@@ -369,38 +413,92 @@ else
 fi
 
 mapfile -t hp4 < <(in_herdr w9:p4 FAKE_HERDR_RC=1)
+n0=$(calls)
 pre 'ssh h true' "${work}" "${hp4[@]}"
 s1=$(noticed && echo yes)
-n0=$(notified)
+n1=$(calls)
 mapfile -t hp4 < <(in_herdr w9:p4)
 pre 'ssh h true' "${work}" "${hp4[@]}"
-if [[ ${s1} == yes ]] && noticed && [[ $(notified) == $((n0 + 1)) ]]; then
-  ok "herdr が落ちても会話の 1 行は出て exit 0。落ちた通知は間引きに数えない"
+if [[ ${s1} == yes && ${n1} == $((n0 + 1)) ]] && noticed && [[ $(calls) == "${n1}" ]]; then
+  ok "herdr が落ちても会話の 1 行は出て exit 0。その回の残りと、続く 60 秒は herdr を呼ばない"
 else
-  ng "herdr が落ちても会話の 1 行は出て exit 0。落ちた通知は間引きに数えない" "s1=${s1} $(detail) log=$(cat "${hlog}")"
+  ng "herdr が落ちても会話の 1 行は出て exit 0。その回の残りと、続く 60 秒は herdr を呼ばない" "s1=${s1} n0=${n0} n1=${n1} $(detail) log=$(cat "${hlog}")"
 fi
+age_stamps
+n0=$(notified)
+pre 'ssh h true' "${work}" "${hp4[@]}"
+if noticed && [[ $(notified) == $((n0 + 1)) ]]; then
+  ok "60 秒を過ぎれば herdr をまた呼ぶ (落ちた通知は間引きに数えない)"
+else
+  ng "60 秒を過ぎれば herdr をまた呼ぶ (落ちた通知は間引きに数えない)" "n0=${n0} $(detail) log=$(cat "${hlog}")"
+fi
+
+mapfile -t hp7 < <(in_herdr w9:p7 FAKE_HERDR_SLEEP=5)
+t0=$(date +%s%N)
+pre 'ssh h true' "${work}" "${hp7[@]}"
+e1=$(ms_since "${t0}")
+s1=$(noticed && echo yes)
+n1=$(calls)
+t0=$(date +%s%N)
+pre 'ssh h true' "${work}" "${hp7[@]}"
+e2=$(ms_since "${t0}")
+if [[ ${s1} == yes ]] && ((e1 < 4000 && e2 < 2000)) && noticed && [[ $(calls) == "${n1}" ]]; then
+  ok "返事をしない herdr は 2 秒で切り、続く 60 秒は呼ばない"
+else
+  ng "返事をしない herdr は 2 秒で切り、続く 60 秒は呼ばない" "e1=${e1}ms e2=${e2}ms s1=${s1} $(detail)"
+fi
+
+# timeout の無いマシン (macOS) を、timeout を置かない PATH で作る
+farm="${work}/farm"
+mkdir -p "${farm}"
+for c in bash env jq git awk gawk mawk cat date stat readlink touch mkdir rm mktemp sleep grep; do
+  p=$(command -v "${c}") && ln -sf "${p}" "${farm}/${c}"
+done
+ln -sf "${fakebin}/herdr" "${farm}/herdr"
+age_stamps
+mapfile -t hp8 < <(in_herdr w9:p8 FAKE_HERDR_SLEEP=5 "PATH=${farm}")
+t0=$(date +%s%N)
+pre 'ssh h true' "${work}" "${hp8[@]}"
+e1=$(ms_since "${t0}")
+if [[ ! -e ${farm}/timeout ]] && noticed && ((e1 < 4000)); then
+  ok "timeout の無いマシンでも、返事をしない herdr を 2 秒で切る"
+else
+  ng "timeout の無いマシンでも、返事をしない herdr を 2 秒で切る" "e1=${e1}ms $(detail)"
+fi
+age_stamps
 
 echo "== ssh-agent-notice.sh: 断られたあと (PostToolUse・PostToolUseFailure)"
 
-# 偽の agent と使い捨ての sshd で集めた文言 (spec §9)。この file を cat しても行の頭に来ないよう、変数に入れて使う
+# 偽の agent と使い捨ての sshd で集めた文言 (spec §9)。この file を cat しても行の頭に来ないよう、変数に入れて使う。
+# OpenSSH は自分のエラー行を \r\n で終える (Claude Code は tool の出力の \r を残す)。git は ssh-keygen の出力の \r を
+# ? に変えて出す
 key_comment='"1pass SSH Key (test)"'
-ssh_refused="sign_and_send_pubkey: signing failed for ED25519 ${key_comment} from agent: agent refused operation"
-ssh_broken="sign_and_send_pubkey: signing failed for ED25519 ${key_comment} from agent: communication with agent failed"
+ssh_refused="sign_and_send_pubkey: signing failed for ED25519 ${key_comment} from agent: agent refused operation"$'\r'
+ssh_broken="sign_and_send_pubkey: signing failed for ED25519 ${key_comment} from agent: communication with agent failed"$'\r'
 git_refused=$'error: Signing file /tmp/.git_signing_buffer_tmpAB\nCouldn\'t sign message (signer): agent refused operation?\nSigning /tmp/.git_signing_buffer_tmpAB failed: agent refused operation?\n\nfatal: failed to write commit object'
 git_nosock=$'error: Couldn\'t get agent socket?\n\nfatal: failed to write commit object'
 git_nokey=$'error: Couldn\'t load public key /tmp/.git_signing_key_tmpQ1: No such file or directory?\n\nfatal: failed to write commit object'
-denied='u@h: Permission denied (publickey).'
+denied=$'u@h: Permission denied (publickey).\r'
 
-# Claude に足す文の部品 (spec §10・計画の Task 3 の表から写したもの)
+# Claude に足す文の部品 (spec §10 から写したもの)
 desc_refused='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
-desc_broken='agent との通信が切れた (agent を貸している SSH の接続が閉じたか、途切れた)'
-desc_unreachable='agent に届かない (SSH_AUTH_SOCK の先が無い。agent を貸す SSH の接続が無い)'
+desc_broken='agent との通信が切れた (agent への接続が途中で閉じた)'
+desc_unreachable='agent に届かない (SSH_AUTH_SOCK の先に agent がいない)'
 first_refused='1Password を開いて承認するので、打ち直す'
 first_reconnect='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す'
+first_local='1Password を起動してロックを解除するので、打ち直す'
+first_windows='Windows の 1Password を起動してロックを解除するので、打ち直す'
+first_none='agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す'
 child_default='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
 child_sprout='この pane は herdr の指揮役の子 (workspace の名前が 🌱 で始まる) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
-no_sock='承認の画面は出ない (SSH_AUTH_SOCK が無い)'
 outside='herdr の外の会話'
+# 接続の文 (fwd_sock は「承認の画面の接続」の節で作った、記録のある転送された agent と、より新しい接続のある口)
+fwd_sock="${HOME}/.ssh/agent.a.sock"
+fwd_conn='承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)'
+local_sock="${HOME}/.1password/agent.sock"
+local_conn='承認の画面はこのマシンの agent (~/.1password/agent.sock) が出す'
+dead_conn='承認の画面は出ない (agent の口 ~/.ssh/agent.dead.sock の先が無い)'
+windows_conn='承認の画面は Windows の 1Password が出す (要求元は「Windows Terminal」としか出ない)'
 
 # want_ctx <説明> <1 つ目> <頭> <どこから> <接続> <子の決まり>
 want_ctx() {
@@ -468,40 +566,56 @@ expect_quiet() {
 }
 
 expect_told "ssh が断られたら、打ち直さずに 3 つの選択肢を出させる" PostToolUseFailure \
-  "🔑 1Password に断られた: ssh h true — ${no_sock}" \
-  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${outside}" "${no_sock}" "${child_default}")" \
-  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}"$'\n'"${denied}"
+  "🔑 1Password に断られた: ssh h true — ${fwd_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${outside}" "${fwd_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}"$'\n'"${denied}" "SSH_AUTH_SOCK=${fwd_sock}"
 expect_told "git の署名が断られても同じ" PostToolUseFailure \
-  "🔑 1Password に断られた: git commit -S -m x — ${no_sock}" \
-  "$(want_ctx "${desc_refused}" "${first_refused}" "git commit -S -m x" "${outside}" "${no_sock}" "${child_default}")" \
+  "🔑 1Password に断られた: git commit -S -m x — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "git commit -S -m x" "${outside}" "${none_conn}" "${child_default}")" \
   'git commit -S -m x' "Exit code 128"$'\n'"${git_refused}"
-expect_told "agent との通信が切れたら、接続し直す選択肢にする" PostToolUseFailure \
-  "🔑 SSH agent との通信が切れた: ssh h true — ${no_sock}" \
-  "$(want_ctx "${desc_broken}" "${first_reconnect}" "ssh h true" "${outside}" "${no_sock}" "${child_default}")" \
-  'ssh h true' "Exit code 255"$'\n'"${ssh_broken}"$'\n'"${denied}"
-expect_told "git の署名で agent の口が無ければ、届かない" PostToolUseFailure \
-  "🔑 SSH agent に届かない: git commit -S -m x — ${no_sock}" \
-  "$(want_ctx "${desc_unreachable}" "${first_reconnect}" "git commit -S -m x" "${outside}" "${no_sock}" "${child_default}")" \
+expect_told "転送された agent との通信が切れたら、接続し直す選択肢にする" PostToolUseFailure \
+  "🔑 SSH agent との通信が切れた: ssh h true — ${fwd_conn}" \
+  "$(want_ctx "${desc_broken}" "${first_reconnect}" "ssh h true" "${outside}" "${fwd_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_broken}"$'\n'"${denied}" "SSH_AUTH_SOCK=${fwd_sock}"
+expect_told "手元の agent との通信が切れたら、1Password を起動する選択肢にする" PostToolUseFailure \
+  "🔑 SSH agent との通信が切れた: ssh h true — ${local_conn}" \
+  "$(want_ctx "${desc_broken}" "${first_local}" "ssh h true" "${outside}" "${local_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_broken}"$'\n'"${denied}" "SSH_AUTH_SOCK=${local_sock}"
+expect_told "git の署名で agent の口が無ければ (SSH_AUTH_SOCK が空)、届かない" PostToolUseFailure \
+  "🔑 SSH agent に届かない: git commit -S -m x — ${none_conn}" \
+  "$(want_ctx "${desc_unreachable}" "${first_none}" "git commit -S -m x" "${outside}" "${none_conn}" "${child_default}")" \
   'git commit -S -m x' "Exit code 128"$'\n'"${git_nosock}"
-expect_told "鍵を ssh-add -L から引けずに署名に落ちても、届かない" PostToolUseFailure \
-  "🔑 SSH agent に届かない: git tag -s v1 -m v1 — ${no_sock}" \
-  "$(want_ctx "${desc_unreachable}" "${first_reconnect}" "git tag -s v1 -m v1" "${outside}" "${no_sock}" "${child_default}")" \
-  'git tag -s v1 -m v1' "Exit code 128"$'\n'"${git_nokey}"
-dead_conn='承認の画面は出ない (agent の口 ~/.ssh/agent.dead.sock の先が無い)'
+expect_told "WSL で鍵を ssh-add -L から引けずに署名に落ちたら、Windows の 1Password を起動する選択肢にする" PostToolUseFailure \
+  "🔑 SSH agent に届かない: git tag -s v1 -m v1 — ${windows_conn}" \
+  "$(want_ctx "${desc_unreachable}" "${first_windows}" "git tag -s v1 -m v1" "${outside}" "${windows_conn}" "${child_default}")" \
+  'git tag -s v1 -m v1' "Exit code 128"$'\n'"${git_nokey}" WSL_DISTRO_NAME=Ubuntu
 expect_told "鍵の認証の失敗は、agent の口の先が無いときだけ届かないとみなす" PostToolUseFailure \
   "🔑 SSH agent に届かない: ssh h true — ${dead_conn}" \
   "$(want_ctx "${desc_unreachable}" "${first_reconnect}" "ssh h true" "${outside}" "${dead_conn}" "${child_default}")" \
   'ssh h true' "Exit code 255"$'\n'"${denied}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.dead.sock"
 expect_quiet "agent の口が生きているときの鍵の認証の失敗では黙る" PostToolUseFailure \
-  'ssh h true' "Exit code 255"$'\n'"${denied}" "SSH_AUTH_SOCK=${HOME}/.1password/agent.sock"
-expect_told "成功した Bash (2>&1 | tail で終了コードが隠れた) でも、行の頭から断りがあれば当てる" PostToolUse \
-  "🔑 1Password に断られた: ssh h true — ${no_sock}" \
-  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${outside}" "${no_sock}" "${child_default}")" \
-  'ssh h true 2>&1 | tail -3' "${ssh_refused}"$'\n'"${denied}"
+  'ssh h true' "Exit code 255"$'\n'"${denied}" "SSH_AUTH_SOCK=${local_sock}"
+expect_quiet "SSH_AUTH_SOCK が空のときの鍵の認証の失敗では黙る (WSL の ssh.exe など。たいてい相手に鍵が無いだけ)" PostToolUseFailure \
+  'ssh h true' "Exit code 255"$'\n'"${denied}"
+expect_told "成功した Bash (2>&1 | tail で終了コードが隠れた) でも、ssh の出す形の行 (\\r で終わる) があれば当てる" PostToolUse \
+  "🔑 1Password に断られた: ssh h true — ${fwd_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${outside}" "${fwd_conn}" "${child_default}")" \
+  'ssh h true 2>&1 | tail -3' "${ssh_refused}"$'\n'"${denied}" "SSH_AUTH_SOCK=${fwd_sock}"
 expect_quiet "成功した grep の結果 (file:行: の後ろの断り) では黙る" PostToolUse \
   'grep -rn signing nix/' "nix/x.sh:12:${ssh_refused}"
 expect_quiet "成功した Bash の行の途中の断りでは黙る" PostToolUse \
-  'cat notes.md' "- ${ssh_refused} が出たら"$'\n'"  echo \"${git_nosock%%$'\n'*}\""
+  'cat notes.md' "- ${ssh_refused%$'\r'} が出たら"$'\n'"  echo \"${git_nosock%%$'\n'*}\""
+phrase=${ssh_refused%$'\r'}
+phrase=${phrase##*: }
+expect_quiet "失敗した diff の、行の途中の断りでは黙る" PostToolUseFailure 'git diff --exit-code' \
+  "Exit code 1"$'\n'"-      *\"${phrase}\"*) echo refused ;;"$'\n'"+      *\"${phrase}\"*) echo r ;;"
+expect_quiet "失敗した diff の、見本を変数に入れた行の鍵の読み込みの失敗では黙る" PostToolUseFailure 'git diff --exit-code' \
+  "Exit code 1"$'\n'"+git_nokey=\$'${git_nokey%%$'\n'*}'"
+expect_quiet "失敗した cat の、文書の表の中の断りでは黙る" PostToolUseFailure 'cat docs/x.md missing.md' \
+  "Exit code 1"$'\n'"| 断られた | \`${git_nosock%%$'\n'*}\` (git) |"$'\n'"cat: missing.md: No such file or directory"
+expect_quiet "失敗した出力の、行をまたいだ Permission denied と publickey では黙る" PostToolUseFailure 'cp a b' \
+  $'Exit code 1\ncp: cannot open \'a\': Permission denied (os error 13)\n/home/u/.ssh/id_ed25519.publickey' \
+  "SSH_AUTH_SOCK=${HOME}/.ssh/agent.dead.sock"
 expect_quiet "断りの無い失敗では黙る" PostToolUseFailure 'ssh h true' $'Exit code 1\nssh: connect to host h port 22: Connection refused'
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${ssh_refused}"
 sed -i 's/"tool_name":"Bash"/"tool_name":"Write"/' "${work}/in"
@@ -514,26 +628,26 @@ mapfile -t hp5 < <(in_herdr w9:p5)
 n0=$(notified)
 where5='workspace「🌱 dotfiles: x」・pane w9:p5・agent dot-x'
 expect_told "🌱 の workspace の子には、AskUserQuestion を使わず問いを書いて終えるよう言い切る" PostToolUseFailure \
-  "🔑 1Password に断られた: ssh h true — ${no_sock}" \
-  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${where5}" "${no_sock}" "${child_sprout}")" \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" "${where5}" "${none_conn}" "${child_sprout}")" \
   'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp5[@]}"
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp5[@]}"
 if [[ $(notified) == $((n0 + 2)) ]] \
-  && [[ $(jq -sc '[.[] | select(.[0] == "notification")][-1]' "${hlog}") == "$(jq -cn --arg b "${where5}"$'\n'"ssh h true"$'\n'"${no_sock}" '["notification", "show", "🔑 1Password に断られた", "--body", $b, "--sound", "request"]')" ]]; then
+  && [[ $(jq -sc '[.[] | select(.[0] == "notification")][-1]' "${hlog}") == "$(jq -cn --arg b "${where5}"$'\n'"ssh h true"$'\n'"${none_conn}" '["notification", "show", "🔑 1Password に断られた", "--body", $b, "--sound", "request"]')" ]]; then
   ok "断られたことは herdr にも理由ごとの title で知らせ、続けても間引かない"
 else
   ng "断られたことは herdr にも理由ごとの title で知らせ、続けても間引かない" "n0=${n0} log=$(cat "${hlog}")"
 fi
 mapfile -t hp6 < <(in_herdr w9:p6 FAKE_LABEL="dotfiles: x")
 expect_told "🌱 でない workspace では、子の決まりを条件つきで書く" PostToolUseFailure \
-  "🔑 1Password に断られた: ssh h true — ${no_sock}" \
-  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「dotfiles: x」・pane w9:p6・agent dot-x' "${no_sock}" "${child_default}")" \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「dotfiles: x」・pane w9:p6・agent dot-x' "${none_conn}" "${child_default}")" \
   'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp6[@]}"
 
 extra_json='{"agent_id": "agent-1", "agent_type": "general-purpose"}'
 expect_told "subagent の中では問いを出させず、報告に書いて終えさせる" PostToolUseFailure \
-  "🔑 1Password に断られた: ssh h true — ${no_sock}" \
-  "$(want_sub_ctx "${desc_refused}" "ssh h true" "${where5}・subagent general-purpose" "${no_sock}")" \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_sub_ctx "${desc_refused}" "ssh h true" "${where5}・subagent general-purpose" "${none_conn}")" \
   'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp5[@]}"
 extra_json='{}'
 

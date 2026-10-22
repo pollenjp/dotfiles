@@ -2272,8 +2272,8 @@ herdr の中の agent は手元の PC から転送された接続のもので（
 
 | いつ | すること |
 | --- | --- |
-| 打つ前（PreToolUse） | 一覧に当たれば、会話の画面に「🔑 1Password の承認が出るかも (<種類>): <コマンドの頭> — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: …)」を出す。herdr の pane なら、herdr の通知（どこから・頭・接続の 3 行、音つき）も出す。同じ pane からの通知は 10 分に 1 回。コマンドは止めない |
-| 断られたあと（PostToolUse・PostToolUseFailure） | 出力に agent の断り・agent との通信が切れた・agent に届かない（git の署名で口が無い・口の先が無いときの鍵の認証の失敗）があれば、Claude に「同じコマンドを打ち直さない。何をとどこからを書いてから、① 承認する（届かないなら接続し直す）ので打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く。herdr の通知（理由ごとの title）も出す |
+| 打つ前（PreToolUse） | 一覧に当たれば、会話の画面に「🔑 1Password の承認が出るかも (<種類>): <コマンドの頭> — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: …)」を出す（WSL で `SSH_AUTH_SOCK` が空なら「Windows の 1Password が出す」）。herdr の pane なら、herdr の通知（どこから・頭・接続の 3 行、音つき）も出す。同じ pane からの通知は 10 分に 1 回。コマンドは止めない |
+| 断られたあと（PostToolUse・PostToolUseFailure） | 出力に agent の断り・agent との通信が切れた・agent に届かない（git の署名で口が無い・口の先が無いときの鍵の認証の失敗）があれば、Claude に「同じコマンドを打ち直さない。何をとどこからを書いてから、① 直し方（承認する・接続し直す・1Password を起動するなど）で打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く。herdr の通知（理由ごとの title）も出す |
 
 | 種類 | 打つ前に当てるもの |
 | --- | --- |
@@ -2288,8 +2288,11 @@ herdr の中の agent は手元の PC から転送された接続のもので（
   `mkHome` に `claude.sshAgentNotice.extraCommands = [ "nix run .#vm" ];` と書く。項目は語を空白で区切った glob で、
   1 語目をコマンドの頭の語に、残りを引数の中に順に当てる（`nix run -L .#vm -- ip` にも当たる）。home-manager が
   `~/.local/state/dotfiles/claude-ssh-agent-notice.json` に置き、hook が読む（反映は `~/dotfiles/setup --update`）
-- 断りの文言は、成功した Bash（`2>&1 | tail` で終了コードが隠れたもの）では ssh・git が出す形の行だけを見る。成功した
-  grep・cat の結果に出た文言では当てない
+- 断りの文言は、行の終わりが文言のときだけ当てる（OpenSSH の行の終わりの `\r` は外して見る）。成功した Bash
+  （`2>&1 | tail` で終了コードが隠れたもの）では、行の頭も ssh・git が出す形に固定する。grep・cat・diff の結果に出た
+  文言では当てない
+- 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
+  しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`
   に 1 件ずつ（`Bash`）足す。0 以外で終わった Bash には PostToolUse が来ず、PostToolUseFailure だけが来る
   （Claude Code 2.1.306 で確かめた）
