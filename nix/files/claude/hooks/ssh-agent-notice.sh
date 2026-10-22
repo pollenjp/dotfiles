@@ -1,0 +1,875 @@
+#!/usr/bin/env bash
+# shellcheck shell=bash
+#
+# Claude Code の hook。Bash で SSH agent (1Password) を使うコマンドを打つ前に知らせる (ADR 029)。
+#
+# herdr の中の SSH_AUTH_SOCK は手元の PC から SSH の接続で転送された agent を指し (ADR 025)、1Password の承認の
+# 画面は手元の PC に出るが、どの pane のどの Claude が頼んだかは出ない。ユーザーは出どころの分からない依頼を
+# 断るので、打つ前に「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせる。判断は script がするので
+# token を使わない。
+#
+# ## 打つ前 (PreToolUse・matcher Bash)
+#
+# コマンドの文字を単純コマンドに分け (split_commands)、次に当たれば、会話の画面に 1 行出す (systemMessage。
+# Claude には渡らない)。コマンドは止めない (permissionDecision は出さない)。
+#
+#   ssh の接続   ssh・scp・sftp・ssh-copy-id・sshfs・mosh・autossh (ssh の -G・-V・-O・-Q は繋がないので外す)・
+#                rsync の <host>:<path>・nixos-rebuild の --target-host / --build-host・nix-copy-closure・
+#                nix の ssh:// / ssh-ng://・git の clone / fetch / pull / push / ls-remote で相手の URL が ssh
+#   署名         git の commit など (commit・merge・rebase・cherry-pick・revert・am・pull・commit-tree) と tag と
+#                push --signed で、署名するとき・ssh-keygen -Y sign・ssh-add -T
+#
+# git が署名するかは、hook の中で git に実効の設定を聞いて決める。dotfiles は Claude の会話にだけ
+# commit.gpgsign=false を env で入れているので (claude.nix の gitConfigBase)、素の git commit は当たらない。hook の
+# env は Claude の会話と同じなので、会話の Bash と同じ答えになる。コマンドの git -c と -C も渡す。
+#
+# 読み方: 引用符と \ を外して語にし、heredoc の本文とコメントは捨てる (commit のメッセージや heredoc の本文に ssh と
+# 書いても当たらない)。$( )・` `・<( ) の中は別の単純コマンドとして見る。頭の VAR=値・包むコマンド (env・sudo・
+# timeout・xargs・nix develop -c など)・予約語は外し、bash -c・eval・nix-shell --run などに文字列で渡したものは
+# 読み直す (3 段まで)。cd と git -C は、その後ろの git を見る場所に効かせる。script の中・関数・alias・変数に
+# 入れたコマンドは見えない (断られたら、失敗のあとの指示で受ける)。
+#
+# 承認の画面の接続 (conn_desc) は、SSH_AUTH_SOCK (コマンドの頭の SSH_AUTH_SOCK= が勝つ) の symlink の先を見る。
+# sshd が転送した agent (s.*.sshd.*) なら、pjp-agent-link の記録 (~/.local/state/pjp-agent-link/conn/) の時刻と
+# PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは見ず、ファイル
+# があるかで見る (sshd は接続を閉じると socket を消す)。
+#
+# ## 黙る場面
+#
+#   - Bash 以外の tool・一覧に当たらないコマンド。コマンドの文字に ssh・scp・sftp・mosh・rsync・nixos-rebuild・
+#     nix-copy-closure・git のどれも無ければ、読まずに抜ける (この hook は Bash のたびに走る)
+#   - 想定外の入力・jq が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
+#
+# ## 登録
+#
+# scripts/bootstrap-claude-hook.sh が settings.json の hooks.PreToolUse に 1 件 (matcher Bash) 足す。
+
+set -u -o pipefail
+
+# 黙って抜ける場合も、先に stdin を読み切る (書き手の Claude Code を待たせない)
+input=$(cat) || exit 0
+
+command -v jq &>/dev/null || exit 0
+
+# 入力の 1 項目を取り出す。無い・壊れている → 空文字
+field() {
+  jq -r "$1 // empty" <<<"${input}" 2>/dev/null || true
+}
+
+[[ $(field '.tool_name') == Bash ]] || exit 0
+
+event=$(field '.hook_event_name')
+cmd=$(field '.tool_input.command')
+cwd=$(field '.cwd')
+[[ -n ${cwd} && -d ${cwd} ]] || cwd=${PWD}
+
+# コマンドの文字を単純コマンドに分ける awk。1 行に 1 つ、語を US (\037) で区切って出す (語の中の改行・タブは空白)。
+#
+#   - '…'・"…"・$'…'・\ を外して語にする。${…}・$((…)) は語のまま
+#   - ; & | 改行 ( ) で分ける。[[ … ]] の中の ( ) | < > は分けない
+#   - $( )・` `・<( )・>( ) の中は別の単純コマンドとして出し、外の語は「$(…)」に置き換えて続ける。"…" の中の
+#     $( )・` ` は、外を読み終えてから読む (閉じ括弧は引用符を見ずに数える)
+#   - リダイレクトの先 (> f・2>&1 の 1 など) と here-string の語は捨てる。heredoc は終わりの印までの本文を捨てる
+#   - 語の頭の # から行末まではコメント
+read -r -d '' lexer <<'AWK' || true
+BEGIN { US = "\037" }
+{ src = (NR == 1) ? $0 : src "\n" $0 }
+END {
+  lex(src)
+  flush_cmd()
+  # "…" の中の $( )・` ` は、外を読み終えてから別のコマンドとして読む (読む間に増えた分も)
+  for (qi = 1; qi <= nq; qi++) {
+    depth = 0
+    nh = 0
+    lex(queue[qi])
+    flush_cmd()
+  }
+}
+
+# "…" の中の $( ) か ` ` を後で読む列に足し、語には印を置く。閉じる位置 (s の中の添字) を返す
+function defer(s, i, n, kind,   j, q, e) {
+  if (kind == "bt") {
+    for (j = i + 1; j <= n; j++) {
+      e = substr(s, j, 1)
+      if (e == "\\") { j++; continue }
+      if (e == "`") break
+    }
+    queue[++nq] = substr(s, i + 1, j - i - 1)
+    word = word "`…`"
+    return j
+  }
+  q = 0
+  for (j = i + 1; j <= n; j++) {
+    e = substr(s, j, 1)
+    if (e == "(") q++
+    else if (e == ")") { q--; if (q == 0) break }
+  }
+  queue[++nq] = substr(s, i + 2, j - i - 2)
+  word = word "$(…)"
+  return j
+}
+
+function add_char(ch) { word = word ch; inword = 1 }
+
+function flush_word() {
+  if (inword) {
+    if (skip) {
+      skip = 0
+    } else {
+      if (word == "[[") inbr = 1
+      if (word == "]]") inbr = 0
+      gsub(/[\n\t]/, " ", word)
+      words[++nw] = word
+    }
+  }
+  word = ""
+  inword = 0
+}
+
+function flush_cmd(   k, line) {
+  flush_word()
+  if (nw > 0) {
+    line = words[1]
+    for (k = 2; k <= nw; k++) line = line US words[k]
+    print line
+  }
+  nw = 0
+  skip = 0
+  inbr = 0
+}
+
+# $( )・` `・<( ) の中に入る。外の語を退避し、中を別の単純コマンドとして読む
+function push(kind,   k) {
+  depth++
+  stype[depth] = kind
+  sn[depth] = nw
+  for (k = 1; k <= nw; k++) sw[depth, k] = words[k]
+  sword[depth] = word
+  sinbr[depth] = inbr
+  inbr = 0
+  nw = 0
+  word = ""
+  inword = 0
+  skip = 0
+}
+
+function pop(   k, mark) {
+  flush_cmd()
+  mark = (stype[depth] == "proc") ? "<(…)" : (stype[depth] == "bt") ? "`…`" : "$(…)"
+  nw = sn[depth]
+  for (k = 1; k <= nw; k++) words[k] = sw[depth, k]
+  word = sword[depth] mark
+  inword = 1
+  inbr = sinbr[depth]
+  depth--
+}
+
+function lex(s,   n, i, c, c2, d, j, k, q, rest, line, eol, pos, delim, strip) {
+  n = length(s)
+  for (i = 1; i <= n; i++) {
+    c = substr(s, i, 1)
+    if (c == "\\") {
+      c2 = substr(s, i + 1, 1)
+      if (c2 != "\n") add_char(c2)
+      i++
+      continue
+    }
+    if (c == "'") {
+      rest = substr(s, i + 1)
+      k = index(rest, "'")
+      if (k == 0) { add_char(rest); i = n } else { add_char(substr(rest, 1, k - 1)); i += k }
+      continue
+    }
+    if (c == "\"") {
+      inword = 1
+      for (i++; i <= n; i++) {
+        d = substr(s, i, 1)
+        if (d == "\\") {
+          c2 = substr(s, i + 1, 1)
+          if (c2 == "\"" || c2 == "\\" || c2 == "$" || c2 == "`") { word = word c2; i++; continue }
+          if (c2 == "\n") { i++; continue }
+          word = word d
+          continue
+        }
+        if (d == "\"") break
+        if (d == "$" && substr(s, i + 1, 1) == "(" && substr(s, i + 2, 1) != "(") { i = defer(s, i, n, "sub"); continue }
+        if (d == "`") { i = defer(s, i, n, "bt"); continue }
+        word = word d
+      }
+      continue
+    }
+    if (c == "$") {
+      c2 = substr(s, i + 1, 1)
+      if (c2 == "'") {
+        inword = 1
+        for (i += 2; i <= n; i++) {
+          d = substr(s, i, 1)
+          if (d == "\\") { word = word substr(s, i + 1, 1); i++; continue }
+          if (d == "'") break
+          word = word d
+        }
+        continue
+      }
+      if (c2 == "(" && substr(s, i + 2, 1) != "(") { push("sub"); i++; continue }
+      if (c2 == "(" || c2 == "{") {
+        # $((…)) と ${…} は、対になる閉じ括弧までを語のまま足す
+        q = 0
+        for (j = i + 1; j <= n; j++) {
+          d = substr(s, j, 1)
+          if (d == c2) q++
+          else if ((c2 == "(" && d == ")") || (c2 == "{" && d == "}")) { q--; if (q == 0) break }
+        }
+        add_char(substr(s, i, j - i + 1))
+        i = j
+        continue
+      }
+      add_char(c)
+      continue
+    }
+    if (inbr && (c == "(" || c == ")" || c == "|" || c == "<" || c == ">" || c == "&")) { add_char(c); continue }
+    if (c == "`") {
+      if (depth > 0 && stype[depth] == "bt") pop(); else push("bt")
+      continue
+    }
+    if (c == "(") { flush_cmd(); push("paren"); continue }
+    if (c == ")") {
+      if (depth > 0 && stype[depth] != "paren" && stype[depth] != "bt") pop()
+      else { flush_cmd(); if (depth > 0 && stype[depth] == "paren") depth-- }
+      continue
+    }
+    if (c == ";" || c == "|") { flush_cmd(); continue }
+    if (c == "&") {
+      if (substr(s, i + 1, 1) == ">") {
+        flush_word()
+        i++
+        if (substr(s, i + 1, 1) == ">") i++
+        skip = 1
+      } else {
+        flush_cmd()
+      }
+      continue
+    }
+    if (c == "<" || c == ">") {
+      # 2> の 2 は fd なので語にしない
+      if (inword && word ~ /^[0-9]+$/) { word = ""; inword = 0 } else flush_word()
+      c2 = substr(s, i + 1, 1)
+      if (c2 == "(") { push("proc"); i++; continue }
+      if (c == "<" && c2 == "<") {
+        if (substr(s, i + 2, 1) == "<") { i += 2; skip = 1; continue }
+        # heredoc: 終わりの印を覚え、次の改行の後ろで本文を捨てる
+        i += 2
+        strip = 0
+        if (substr(s, i, 1) == "-") { strip = 1; i++ }
+        while (substr(s, i, 1) == " " || substr(s, i, 1) == "\t") i++
+        delim = ""
+        for (; i <= n; i++) {
+          d = substr(s, i, 1)
+          if (d ~ /[ \t\n;&|<>()]/) break
+          if (d == "'" || d == "\"" || d == "\\") continue
+          delim = delim d
+        }
+        i--
+        nh++
+        hd[nh] = delim
+        hs[nh] = strip
+        continue
+      }
+      while (substr(s, i + 1, 1) ~ /[>&|]/) i++
+      skip = 1
+      continue
+    }
+    if (c == "\n") {
+      flush_cmd()
+      if (nh > 0) {
+        pos = i + 1
+        for (k = 1; k <= nh; k++) {
+          while (pos <= n) {
+            rest = substr(s, pos)
+            eol = index(rest, "\n")
+            if (eol > 0) { line = substr(rest, 1, eol - 1); pos += eol } else { line = rest; pos = n + 1 }
+            if (hs[k]) sub(/^\t+/, "", line)
+            if (line == hd[k]) break
+          }
+        }
+        nh = 0
+        i = pos - 1
+      }
+      continue
+    }
+    if (c == " " || c == "\t") { flush_word(); continue }
+    if (c == "#" && !inword) {
+      k = index(substr(s, i), "\n")
+      if (k == 0) i = n; else i += k - 2
+      continue
+    }
+    add_char(c)
+  }
+}
+AWK
+
+split_commands() {
+  printf '%s' "$1" | LC_ALL=C awk "${lexer}"
+}
+
+# match_command <dir> <段> <コマンドの文字列>
+#   単純コマンドを順に見て、最初に当たったもので hit_kind (種類)・hit_head (包むコマンドを外した語)・
+#   hit_sock (頭の SSH_AUTH_SOCK= の値) を埋めて 0 を返す。当たらなければ 1。cd は後ろの単純コマンドの dir に効かせる
+match_command() {
+  local dir=$1 depth=$2 line
+  local -a w
+  ((depth <= 3)) || return 1
+  while IFS= read -r line; do
+    IFS=$'\037' read -r -a w <<<"${line}"
+    ((${#w[@]} > 0)) || continue
+    next_dir=""
+    if match_simple "${dir}" "${depth}" "${w[@]}"; then
+      return 0
+    fi
+    [[ -z ${next_dir} ]] || dir=${next_dir}
+  done < <(split_commands "$3")
+  return 1
+}
+
+# skip_opts <値を取るオプション (| で区切る)>: 呼び出し元の w の頭のオプションを外す (値を取るものは値も)
+skip_opts() {
+  local takes="|$1|"
+  while ((${#w[@]} > 0)); do
+    case ${w[0]} in
+      --)
+        w=("${w[@]:1}")
+        return
+        ;;
+      -?*)
+        if [[ ${takes} == *"|${w[0]}|"* ]]; then
+          w=("${w[@]:2}")
+        else
+          w=("${w[@]:1}")
+        fi
+        ;;
+      *) return ;;
+    esac
+  done
+}
+
+# rematch <dir> <段> <sock> <文字列>: 文字列を読み直す (bash -c など)。当たって sock が無ければ外の sock を使う
+rematch() {
+  match_command "$1" "$(($2 + 1))" "$4" || return 1
+  [[ -n ${hit_sock} ]] || hit_sock=$3
+  return 0
+}
+
+# match_simple <dir> <段> <語>…: 単純コマンドを 1 つ見る (match_command の説明)
+match_simple() {
+  local dir=$1 depth=$2
+  shift 2
+  local -a w=("$@")
+  local sock="" base kind="" a i guard=0
+
+  # 頭の VAR=値 (SSH_AUTH_SOCK は接続として覚える) と予約語
+  while ((${#w[@]} > 0)); do
+    case ${w[0]} in
+      SSH_AUTH_SOCK=*) sock=${w[0]#*=} ;;
+      '!' | '{' | '}' | if | then | else | elif | do | while | until) ;;
+      for | case | select | function | 'fi' | 'done' | 'esac' | '[[' | '[') return 1 ;;
+      *=*) [[ ${w[0]%%=*} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || break ;;
+      *) break ;;
+    esac
+    w=("${w[@]:1}")
+  done
+
+  # 包むコマンドを外す。中に文字列で渡すものは読み直す
+  while ((${#w[@]} > 0 && guard++ < 16)); do
+    case ${w[0]##*/} in
+      cd | pushd)
+        next_dir=$(join_dir "${dir}" "${w[${#w[@]} - 1]}")
+        ((${#w[@]} > 1)) || next_dir=${HOME}
+        return 1
+        ;;
+      env)
+        w=("${w[@]:1}")
+        while ((${#w[@]} > 0)); do
+          case ${w[0]} in
+            -u | --unset | -C | --chdir | -S | --split-string) w=("${w[@]:2}") ;;
+            SSH_AUTH_SOCK=*)
+              sock=${w[0]#*=}
+              w=("${w[@]:1}")
+              ;;
+            -* | *=*) w=("${w[@]:1}") ;;
+            *) break ;;
+          esac
+        done
+        ;;
+      sudo | doas)
+        w=("${w[@]:1}")
+        skip_opts '-u|-g|-h|-p|-C|-D|-r|-t|-U|-T|-R'
+        ;;
+      exec)
+        w=("${w[@]:1}")
+        skip_opts '-a'
+        ;;
+      command | builtin)
+        [[ ${w[1]-} == -v || ${w[1]-} == -V ]] && return 1
+        w=("${w[@]:1}")
+        skip_opts ''
+        ;;
+      nohup | setsid | unbuffer | chronic | time)
+        w=("${w[@]:1}")
+        skip_opts ''
+        ;;
+      nice)
+        w=("${w[@]:1}")
+        skip_opts '-n|--adjustment'
+        ;;
+      ionice)
+        w=("${w[@]:1}")
+        skip_opts '-c|-n|--class|--classdata'
+        ;;
+      stdbuf)
+        w=("${w[@]:1}")
+        skip_opts '-i|-o|-e|--input|--output|--error'
+        ;;
+      timeout)
+        w=("${w[@]:1}")
+        skip_opts '-s|-k|--signal|--kill-after'
+        w=("${w[@]:1}")
+        ;;
+      xargs)
+        w=("${w[@]:1}")
+        skip_opts '-I|-n|-P|-L|-d|-E|-s|-a|--max-args|--max-procs|--max-lines|--delimiter|--eof|--max-chars|--arg-file'
+        ;;
+      sshpass)
+        w=("${w[@]:1}")
+        skip_opts '-p|-f|-d|-P'
+        ;;
+      watch)
+        w=("${w[@]:1}")
+        skip_opts '-n|--interval|-q|--equexit'
+        rematch "${dir}" "${depth}" "${sock}" "${w[*]}"
+        return
+        ;;
+      flock)
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          case ${w[i]} in
+            -c | --command)
+              rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
+              return
+              ;;
+            -*) ;;
+            *) break ;;
+          esac
+        done
+        w=("${w[@]:1}")
+        skip_opts '-w|-E|--timeout|--conflict-exit-code'
+        w=("${w[@]:1}")
+        ;;
+      bash | sh | zsh | dash | ksh | fish)
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          case ${w[i]} in
+            -o | +o | -O | +O) i=$((i + 1)) ;;
+            -*)
+              if [[ ${w[i]} =~ ^-[A-Za-z]*c[A-Za-z]*$ ]]; then
+                rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
+                return
+              fi
+              ;;
+            *) return 1 ;;
+          esac
+        done
+        return 1
+        ;;
+      eval)
+        rematch "${dir}" "${depth}" "${sock}" "${w[*]:1}"
+        return
+        ;;
+      su | runuser | script)
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          case ${w[i]} in
+            -c | --command)
+              rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
+              return
+              ;;
+            --command=*)
+              rematch "${dir}" "${depth}" "${sock}" "${w[i]#*=}"
+              return
+              ;;
+          esac
+        done
+        return 1
+        ;;
+      nix-shell)
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          if [[ ${w[i]} == --run || ${w[i]} == --command ]]; then
+            rematch "${dir}" "${depth}" "${sock}" "${w[i + 1]-}"
+            return
+          fi
+        done
+        break
+        ;;
+      nix)
+        if [[ ${w[1]-} == develop || ${w[1]-} == shell ]]; then
+          for ((i = 2; i < ${#w[@]}; i++)); do
+            if [[ ${w[i]} == -c || ${w[i]} == --command ]]; then
+              w=("${w[@]:i+1}")
+              continue 2
+            fi
+          done
+        fi
+        break
+        ;;
+      *) break ;;
+    esac
+  done
+  ((${#w[@]} > 0)) || return 1
+
+  base=${w[0]##*/}
+  case ${base} in
+    ssh)
+      for ((i = 1; i < ${#w[@]}; i++)); do
+        a=${w[i]}
+        [[ ${a} == -* ]] || break
+        # -G・-V (束ねた形も)・-O・-Q は繋がない
+        [[ ${a} =~ ^-[46AaCfGgKkMNnqsTtVvXxYy]*[GV] || ${a} == -O* || ${a} == -Q* ]] && return 1
+        # 値を次の語に取るオプション
+        [[ ${a} =~ ^-[46AaCfGgKkMNnqsTtVvXxYy]*[BbcDEeFIiJLlmopRSWw]$ ]] && i=$((i + 1))
+      done
+      kind="ssh の接続"
+      ;;
+    scp | sftp | ssh-copy-id | sshfs | mosh | autossh) kind="ssh の接続" ;;
+    rsync)
+      for a in "${w[@]:1}"; do
+        [[ ${a} == -* || ${a} == *::* || ${a} == rsync://* ]] && continue
+        if [[ ${a} =~ ^[^/:]+: ]]; then
+          kind="ssh の接続"
+          break
+        fi
+      done
+      ;;
+    ssh-add)
+      for a in "${w[@]:1}"; do
+        [[ ${a} == -T ]] && kind="署名"
+      done
+      ;;
+    ssh-keygen)
+      for ((i = 1; i < ${#w[@]}; i++)); do
+        [[ ${w[i]} == -Ysign || (${w[i]} == -Y && ${w[i + 1]-} == sign) ]] && kind="署名"
+      done
+      ;;
+    nixos-rebuild | nixos-rebuild-ng)
+      for a in "${w[@]:1}"; do
+        case ${a} in
+          --target-host | --target-host=* | --build-host | --build-host=*) kind="ssh の接続" ;;
+        esac
+      done
+      ;;
+    nix-copy-closure) kind="ssh の接続" ;;
+    nix | nix-*)
+      for a in "${w[@]:1}"; do
+        [[ ${a} == *ssh://* || ${a} == *ssh-ng://* ]] && kind="ssh の接続"
+      done
+      ;;
+    git) kind=$(git_kind "${dir}" "${w[@]:1}") ;;
+  esac
+  [[ -n ${kind} ]] || return 1
+
+  hit_kind=${kind}
+  hit_head=${w[*]}
+  hit_sock=${sock}
+  return 0
+}
+
+# join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -) なら今の dir
+join_dir() {
+  local d=$2
+  # 語は展開していないので、頭の $HOME・~ をここで置き換える
+  # shellcheck disable=SC2016 # $HOME を文字のまま探す
+  case ${d} in
+    '${HOME}'*) d=${HOME}${d#'${HOME}'} ;;
+    '$HOME'*) d=${HOME}${d#'$HOME'} ;;
+  esac
+  # shellcheck disable=SC2088 # ~ を文字のまま探す
+  case ${d} in
+    '' | '~') printf '%s' "${HOME}" ;;
+    '~/'*) printf '%s' "${HOME}/${d#'~/'}" ;;
+    -) printf '%s' "$1" ;;
+    /*) printf '%s' "${d}" ;;
+    *) printf '%s' "$1/${d}" ;;
+  esac
+}
+
+# git_in <git の引数>…: git_kind が決めた dir と git の前のオプションで git を流す (エラーは捨てる)
+git_in() {
+  git -C "${gdir}" "${gopts[@]}" "$@" 2>/dev/null </dev/null
+}
+
+# git_kind <dir> <git の後ろの語>…: 署名するなら「署名」、相手が ssh の remote なら「ssh の接続」を出す
+git_kind() {
+  local gdir=$1 sub=""
+  shift
+  local -a gopts=() a=("$@")
+  [[ -d ${gdir} ]] || gdir=${cwd}
+  while ((${#a[@]} > 0)); do
+    case ${a[0]} in
+      -C | -c | --git-dir | --work-tree | --namespace)
+        gopts+=("${a[0]}" "${a[1]-}")
+        a=("${a[@]:2}")
+        ;;
+      --git-dir=* | --work-tree=* | --namespace=*)
+        gopts+=("${a[0]}")
+        a=("${a[@]:1}")
+        ;;
+      --version | -v | --help | -h | --exec-path | --html-path | --man-path | --info-path | --list-cmds=*) return 0 ;;
+      -*) a=("${a[@]:1}") ;;
+      *)
+        sub=${a[0]}
+        a=("${a[@]:1}")
+        break
+        ;;
+    esac
+  done
+  case ${sub} in
+    commit | merge | rebase | cherry-pick | revert | am | pull | commit-tree)
+      if commit_signs "${a[@]}"; then
+        echo "署名"
+      elif [[ ${sub} == pull ]] && remote_is_ssh pull "${a[@]}"; then
+        echo "ssh の接続"
+      fi
+      ;;
+    tag) tag_signs "${a[@]}" && echo "署名" ;;
+    push)
+      if push_signs "${a[@]}"; then
+        echo "署名"
+      elif remote_is_ssh push "${a[@]}"; then
+        echo "ssh の接続"
+      fi
+      ;;
+    fetch | ls-remote | clone) remote_is_ssh "${sub}" "${a[@]}" && echo "ssh の接続" ;;
+    remote) [[ ${a[0]-} == update ]] && all_remotes_ssh && echo "ssh の接続" ;;
+  esac
+  return 0
+}
+
+# commit_signs <語>…: commit などが署名するか。-S・--gpg-sign が先、無ければ実効の commit.gpgsign
+commit_signs() {
+  local a sign=""
+  for a in "$@"; do
+    case ${a} in
+      --abort | --quit | --dry-run | --show-current-patch | --edit-todo | -h | --help) return 1 ;;
+      -S* | --gpg-sign | --gpg-sign=*) sign=1 ;;
+      --no-gpg-sign) sign=0 ;;
+    esac
+  done
+  if [[ -z ${sign} ]]; then
+    sign=0
+    [[ $(git_in config --type=bool --get commit.gpgsign) == true ]] && sign=1
+  fi
+  [[ ${sign} == 1 ]]
+}
+
+# tag_signs <語>…: tag を作り、署名するか。一覧・削除・検証は作らない
+tag_signs() {
+  local a sign="" annotate=0 create=0
+  for a in "$@"; do
+    case ${a} in
+      -l | --list | -d | --delete | -v | --verify | --contains | --no-contains | --merged | --no-merged | --points-at | -n* | --column* | --sort* | --format* | -h | --help) return 1 ;;
+      -s | --sign | -u | -u?* | --local-user | --local-user=*) sign=1 ;;
+      --no-sign) sign=0 ;;
+      -a | --annotate | -m | -m?* | --message | --message=* | -F | -F?* | --file | --file=*) annotate=1 ;;
+      -*) ;;
+      *) create=1 ;;
+    esac
+  done
+  ((create)) || return 1
+  if [[ -z ${sign} ]]; then
+    sign=0
+    if [[ $(git_in config --type=bool --get tag.gpgsign) == true ]]; then
+      sign=1
+    elif ((annotate)) && [[ $(git_in config --type=bool --get tag.forcesignannotated) == true ]]; then
+      sign=1
+    fi
+  fi
+  [[ ${sign} == 1 ]]
+}
+
+# push_signs <語>…: push の証明書 (--signed・push.gpgsign) に署名するか
+push_signs() {
+  local a sign="" v
+  for a in "$@"; do
+    case ${a} in
+      --signed | --signed=true | --signed=yes | --signed=if-asked) sign=1 ;;
+      --no-signed | --signed=false | --signed=no) sign=0 ;;
+    esac
+  done
+  if [[ -z ${sign} ]]; then
+    v=$(git_in config --get push.gpgsign)
+    case ${v,,} in
+      true | yes | on | 1 | if-asked) sign=1 ;;
+      *) sign=0 ;;
+    esac
+  fi
+  [[ ${sign} == 1 ]]
+}
+
+# remote_is_ssh <サブコマンド> <語>…: 相手の URL (insteadOf を解いたもの) が ssh か。--all は全部の remote を見る
+remote_is_ssh() {
+  local sub=$1 takes repo="" all=0 i url
+  shift
+  local -a a=("$@")
+  case ${sub} in
+    clone) takes='|-o|-b|-c|-j|-u|--origin|--branch|--config|--jobs|--upload-pack|--depth|--shallow-since|--shallow-exclude|--reference|--reference-if-able|--separate-git-dir|--template|--filter|--bundle-uri|--server-option|' ;;
+    push) takes='|-o|--push-option|--receive-pack|--exec|' ;;
+    ls-remote) takes='|-o|--server-option|--upload-pack|--sort|' ;;
+    *) takes='|-o|-j|-s|-X|--server-option|--jobs|--depth|--deepen|--shallow-since|--shallow-exclude|--refmap|--negotiation-tip|--filter|--upload-pack|--strategy|--strategy-option|--recurse-submodules-default|' ;;
+  esac
+  for ((i = 0; i < ${#a[@]}; i++)); do
+    case ${a[i]} in
+      --all | --multiple) [[ ${sub} == push ]] || all=1 ;;
+      --repo=*) repo=${a[i]#*=} ;;
+      --repo)
+        repo=${a[i + 1]-}
+        i=$((i + 1))
+        ;;
+      -*) [[ ${takes} == *"|${a[i]}|"* ]] && i=$((i + 1)) ;;
+      *) [[ -n ${repo} ]] || repo=${a[i]} ;;
+    esac
+  done
+  if ((all)); then
+    all_remotes_ssh
+    return
+  fi
+  if [[ -n ${repo} ]]; then
+    url=$(git_in ls-remote --get-url "${repo}")
+    [[ -n ${url} ]] || url=${repo}
+  else
+    [[ ${sub} != clone ]] || return 1
+    url=$(git_in ls-remote --get-url)
+  fi
+  is_ssh_url "${url}"
+}
+
+all_remotes_ssh() {
+  local r
+  while IFS= read -r r; do
+    [[ -n ${r} ]] || continue
+    is_ssh_url "$(git_in ls-remote --get-url "${r}")" && return 0
+  done < <(git_in remote)
+  return 1
+}
+
+# is_ssh_url <URL>: ssh:// か、scp の形 (<host>:<path>) か
+is_ssh_url() {
+  case $1 in
+    ssh://* | git+ssh://* | ssh+git://*) return 0 ;;
+    *://* | /* | ./* | ../* | '~'* | '') return 1 ;;
+  esac
+  [[ $1 =~ ^[^/:]+: ]]
+}
+
+# --- 承認の画面の接続
+
+# record_field <file> <key>: pjp-agent-link の記録 (key=value の行) から 1 つ読む
+record_field() {
+  local k v
+  [[ -f $1 ]] || return 1
+  while IFS='=' read -r k v; do
+    if [[ ${k} == "$2" ]]; then
+      printf '%s' "${v}"
+      return 0
+    fi
+  done <"$1"
+  return 1
+}
+
+agent_record() {
+  printf '%s' "${HOME}/.local/state/pjp-agent-link/conn/${1##*/}"
+}
+
+mtime() {
+  stat -c %Y -- "$1" 2>/dev/null || stat -f %m -- "$1" 2>/dev/null || echo 0
+}
+
+fmt_time() {
+  date -d "@$1" '+%m/%d %H:%M' 2>/dev/null || date -r "$1" '+%m/%d %H:%M' 2>/dev/null
+}
+
+tilde() {
+  printf '%s' "${1/#"${HOME}"/\~}"
+}
+
+# conn_epoch <socket>: 接続が入った時刻 (UNIX 秒)。記録の opened (ns)、無ければファイルの時刻
+conn_epoch() {
+  local opened
+  opened=$(record_field "$(agent_record "$1")" opened) || opened=""
+  if [[ ${opened} =~ ^[0-9]{10,}$ ]]; then
+    printf '%s' "${opened:0:${#opened}-9}"
+  else
+    mtime "$1"
+  fi
+}
+
+# conn_client <socket>: 記録の PJP_SSH_CLIENT の値 (無い・% が残る値は出さない)
+conn_client() {
+  local c
+  c=$(record_field "$(agent_record "$1")" client) || return 0
+  [[ -n ${c} && ${c} != *%* ]] && printf '%s' "${c}"
+  return 0
+}
+
+# conn_desc <SSH_AUTH_SOCK の値>: 「承認の画面は…」の文 (日本語と英数字の間にだけ空白を置くので、文ごと返す)
+conn_desc() {
+  local sock=$1 target t tgt_t best_t=0 newer="" f client
+  if [[ -z ${sock} ]]; then
+    printf '承認の画面は出ない (SSH_AUTH_SOCK が無い)'
+    return
+  fi
+  target=$(readlink -f -- "${sock}" 2>/dev/null) || target=""
+  [[ -n ${target} ]] || target=${sock}
+  if [[ ! -e ${target} ]]; then
+    printf '承認の画面は出ない (agent の口 %s の先が無い)' "$(tilde "${sock}")"
+    return
+  fi
+  case ${target##*/} in
+    s.*.sshd.*) ;;
+    *)
+      printf '承認の画面はこのマシンの agent (%s) が出す' "$(tilde "${target}")"
+      return
+      ;;
+  esac
+  tgt_t=$(conn_epoch "${target}")
+  client=$(conn_client "${target}")
+  printf '承認の画面は %s に%s入った接続の端末に出る' "$(fmt_time "${tgt_t}")" "${client:+ ${client} から}"
+  for f in "${target%/*}"/s.*.sshd.*; do
+    [[ -e ${f} && ${f} != "${target}" ]] || continue
+    t=$(conn_epoch "${f}")
+    ((t > tgt_t && t > best_t)) || continue
+    best_t=${t}
+    newer=${f}
+  done
+  if [[ -n ${newer} ]]; then
+    client=$(conn_client "${newer}")
+    printf ' (より新しい接続: %s%s)' "$(fmt_time "${best_t}")" "${client:+ ${client}}"
+  fi
+}
+
+# clip <文字列>: 80 文字で切る (jq で切るので、文字の途中で切らない)
+clip() {
+  jq -rn --arg s "$1" '$s | if length > 80 then .[0:79] + "…" else . end'
+}
+
+# --- 打つ前
+
+before() {
+  local prefilter='ssh|scp|sftp|mosh|rsync|nixos-rebuild|nix-copy-closure|git' conn head
+  [[ -n ${cmd} && ${cmd} =~ ${prefilter} ]] || return 0
+  hit_kind=""
+  hit_head=""
+  hit_sock=""
+  match_command "${cwd}" 0 "${cmd}" || return 0
+  conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
+  head=$(clip "${hit_head}")
+  jq -cn --arg m "🔑 1Password の承認が出るかも (${hit_kind}): ${head} — ${conn}" '{systemMessage: $m}' || true
+}
+
+case ${event} in
+  PreToolUse) before ;;
+esac
+exit 0
