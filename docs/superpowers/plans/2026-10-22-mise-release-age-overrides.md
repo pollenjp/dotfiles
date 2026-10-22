@@ -87,7 +87,7 @@
 
   どのケースも `lockfile true`・`fetch_remote_versions_timeout 14d`・`use -g go`・`use -g node@24`・`use -g aqua:jdx/usage` は今までどおり env なしで打つ
 - [ ] **Step 2: 落ちるのを見る** — `bash nix/tests/bootstrap-mise.test.sh` (今の script は 9d 直書きで、上書きのケースが FAIL)
-- [ ] **Step 3: 実装** — `warn` / `summary_warn` は `bootstrap-claude-env.sh` と同じ本文。jq の program 1 つで `{setting, claude, use, ended, pending}` を作る (`def day: strptime("%Y-%m-%d") | mktime / 86400 | floor;`・`$today = (($now + 32400) / 86400 | floor)`)。形の検査は別の `jq -e` (from は往復して同じ日付か)。上書き中の 1 行は `==> 上書き中: …`、終わった項目は 1 つの `warn` (見出し・項目ごとの行・消す場所の行)
+- [ ] **Step 3: 実装** — `warn` / `summary_warn` は `bootstrap-claude-env.sh` と同じ本文。jq の program 1 つで `{setting, claude, use, ended, pending}` を作る (`def day: strptime("%Y-%m-%d") | mktime / 86400 | floor;`・`$today = (($now + 32400) / 86400 | floor)`)。形の検査は別の `jq -e` (from は往復して同じ日付か)。ended と pending は from の順に並べる。上書き中の 1 行は `==> mise の遅延を上書き中 …`、終わった項目は 1 つの `warn` (見出し・項目ごとの行・消す場所の行)
 - [ ] **Step 4: 通るのを見る** — テストが全部 ok。`shfmt -d`・`shellcheck` が通り、`bash nix/tests/warn-helpers.test.sh` が bootstrap-mise.sh も見て通る
 - [ ] **Step 5: commit** — `feat(nix): bootstrap-mise.sh が上書きの上限を今日の日付 (Asia/Tokyo) から決めて mise に書く (TKT-323)`
 
