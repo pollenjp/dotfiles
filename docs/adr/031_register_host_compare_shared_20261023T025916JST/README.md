@@ -33,24 +33,38 @@
 | 比べた結果 | 終了コード | 出すもの |
 | --- | --- | --- |
 | 旧い形 = 新しい形 | 0 | 今までどおり「drvPath が同じ」 |
-| 旧い形 = `shared/` を外した新しい形 | 0 | 「同じ (shared/ の値だけ違う)」と、`shared/` が足す値 (`shared/` を外した形 → 新しい形の `config.dotfiles` の違い) |
+| 旧い形 = `shared/` を外した新しい形 | 0 | 「同じ (shared/ の値だけ違う)」と、`shared/` が足す値 (`shared/` を外した形 → 新しい形の `config.dotfiles` の違い。`shared/` がこのホストの値を変えなければそう出す) |
 | どちらとも違う | 1 | ホストのファイルの違い (旧い → `shared/` を外した形) と、`shared/` が足す値を分けて |
 | `shared/` を足した新しい形が評価できない | 4 | 原因の行 (list でない option を `shared/` とホストのファイルの両方に書いた、など) |
 | `shared/` を外した形だけが評価できない | 1 | 原因の行を出し、`shared/` を含めた形で比べる (ホストのファイルが `shared/` に頼っている) |
 
+(元のホストが型・`tmp` のとき。登録したホストのときは B)
+
 - `shared/` を外した形は、作業ツリーの `nix/` を `shared/` だけ除いて写し、その写しを `dotfiles-private` の入力にした flake で評価する。
   lock は今までの写しと同じく張り直す
 - 終了コードは増やさない。登録の判定は「ホストのファイルが元のホストの値を全部写せているか」で、`shared/` は全ホストに足す値で
-  ホストのファイルの外にあるため。`shared/` の値は登録でこの PC に増える値として、確認と PR の本文に書く (skill)
+  ホストのファイルの外にあるため。元のホストが型・`tmp` なら、`shared/` の値は登録でこの PC に増える値として、確認と PR の本文に書く (skill)
+- `shared/` が無ければ、今までと同じ評価・同じ出力
 
-### B. 元のホストが登録したホストなら、draft と compare の旧い形から `shared/` を外す
+### B. 元のホストが登録したホストなら、draft と compare の旧い形から `shared/` を外し、clone と作業ツリーの `shared/` を比べる
 
 元のホストが、ローカル flake の読む dotfiles-private に登録したホスト (`hosts/<元のホスト>.nix` がある) で、その `shared/` に module が
-あれば、ローカル flake の写しの `dotfiles-private` の入力を、`shared/` を除いた写しへ指し直してから評価する。
+あれば、ローカル flake の写しの `dotfiles-private` の入力を、`shared/` を除いた写しへ指し直してから評価する (値を直すとき・merge のあとに
+clone と比べ直すとき)。
 
-- draft は `shared/` の値を描かない (ホストのファイルの値だけ)。外したら 1 行で知らせる
-- compare は、ホストのファイルどうしで比べる。clone の `shared/` と作業ツリーの `shared/` が違っても (clone が古い、など) 判定に出ない
+- draft は `shared/` の値を描かない (ホストのファイルの値だけ)。外したら 1 行で知らせる。外した元のホストが評価できなければ 3 で、外したことを出す
+- compare は、ホストのファイルどうしで比べる。この PC には clone の `shared/` がもう当たっているので、作業ツリーの `shared/` の値は
+  「登録で増える値」ではない。代わりに、clone と作業ツリーの `shared/` が同じかを `diff -r` で比べて出す
+
+| ホストのファイル | clone と作業ツリーの `shared/` | 終了コード | 出すもの |
+| --- | --- | --- | --- |
+| 同じ | 同じ | 0 | 「drvPath が同じ (… shared/ も clone と作業ツリーで同じ)。この登録で世代の中身は変わらない」(変更前と同じ判定) |
+| 違う | 同じ | 1 | ホストのファイルの違いと、「shared/ は clone と作業ツリーで同じ」の 1 行 |
+| 同じ | 違う | 0 | 「同じ (shared/ の値だけ違う)」と、「clone と作業ツリーの shared/ が違う」・作業ツリーの `shared/` が足す値 |
+| 違う | 違う | 1 | ホストのファイルの違いと、上と同じ `shared/` の段 |
+
 - 登録簿の型と `tmp` には `shared/` が当たらないので、外さない (外しても値は同じだが、写しと lock の張り直しが増える)
+- `--out` は、作業ツリーの `nix/` と、ローカル flake の読む dotfiles-private の `nix/` の中に作らない (作る前に 2 で止める。clone に書かない)
 
 ### C. inspect は clone の `shared/` の module を出す
 
@@ -62,17 +76,22 @@ compare --base <元のホスト> --private <作業ツリー>
   新しい形    作業ツリーの nix/ の <名前>           (shared/ を足した形。評価できなければ 4)
   外した形    作業ツリーの nix/ から shared/ を除いた写しの <名前>   (shared/ に module があるときだけ)
 
-  旧い形 = 新しい形 → 0
-  旧い形 = 外した形 → 0「同じ (shared/ の値だけ違う)」+ shared/ が足す値 (外した形 → 新しい形)
-  それ以外          → 1  ホストのファイルの違い (旧い形 → 外した形) + shared/ が足す値
+  元のホストが型・tmp:
+    旧い形 = 新しい形 → 0
+    旧い形 = 外した形 → 0「同じ (shared/ の値だけ違う)」+ shared/ が足す値 (外した形 → 新しい形。登録で増える)
+    それ以外          → 1  ホストのファイルの違い (旧い形 → 外した形) + shared/ が足す値
+  元のホストが登録したホスト (旧い形から clone の shared/ を外す):
+    旧い形 = 外した形 → ホストのファイルが同じ。clone と作業ツリーの shared/ が同じなら 0「世代の中身は変わらない」
+    それ以外          → 1  ホストのファイルの違い (旧い形 → 外した形)
+    どちらも、shared/ が同じか (diff -r) を出し、違えば作業ツリーの shared/ が足す値を並べる
 ```
 
 ## 3. 変更点の詳細
 
 | ファイル | 変更 |
 | --- | --- |
-| `nix/scripts/private-host.sh` | compare (`shared/` を外した形・判定・違いを分けて出す)・draft と compare の旧い形 (元のホストが登録したホストなら `shared/` を外す)・inspect (`shared/` の module)・`--help` |
-| `nix/tests/private-host.test.sh` | 偽の nix に `shared/` の扱い (drvPath に `+shared`・`FAKE_DOTFILES` を足す・`FAKE_NEEDS_SHARED`) を足し、ケースを足した |
+| `nix/scripts/private-host.sh` | compare (`shared/` を外した形・判定・違いを分けて出す・clone と作業ツリーの `shared/` の比べ・`--out` の置き場所)・draft と compare の旧い形 (元のホストが登録したホストなら `shared/` を外す)・inspect (`shared/` の module)・`--help` |
+| `nix/tests/private-host.test.sh` | 偽の nix に `shared/` の扱い (drvPath に `+shared`・`FAKE_DOTFILES` を足す・`FAKE_NEEDS_SHARED`・`FAKE_SHARED_NOOP`) を足し、ケースを足した |
 | `nix/files/claude/skills/pjp-dotfiles-register-host/SKILL.md` | compare の結果の読み方の表・inspect の読み方・確認の前の preview に clone の `nix/shared/` も写す (手順 2.3。登録すると当たる値を確認の時点で出させる)・確認の形・PR の本文・値を直すとき・よくある誤り |
 | `nix/README.md` | 「登録する」の `shared/` の注意 |
 | ADR 026・030 | 冒頭の表に、この ADR への後続 ADR の行を足した。026 の §7 のコマンドの注記を今の形にした |
@@ -86,6 +105,8 @@ compare --base <元のホスト> --private <作業ツリー>
 | 旧い形にも `shared/` を当ててから比べる | ローカル flake の写しの `homeConfigurations` を組み替えることになり大きい (ADR 030 で採らなかった理由と同じ)。登録簿の型と `tmp` に `shared/` が当たらないのが正しい形 |
 | `lib.privateHosts` に `shared/` を外す引数を足す | public の本体の lib の形が増える。写しの入力を差し替えれば lib を変えずに済み、偽の nix のテストでも見分けられる |
 | 旧い形はそのままにし、違いを option の名前で `shared/` の分とホストの分に分ける | 登録済みの PC で clone の `shared/` と作業ツリーの `shared/` が違うと、ホストのファイルが同じでも 1 になる。draft の 2 重書きも残る |
+| 登録したホストを元にしたとき、旧い形を `shared/` を外さずにも評価し、まず旧い形と新しい形の drvPath を比べる | 世代の違いを評価で確かめられるが、評価が 1〜2 回増える (1 回 20〜60 秒)。clone と作業ツリーの `shared/` が同じなら、ホストのファイルの比べと合わせて同じ結論になる |
+| 登録したホストを元にしたときも、作業ツリーの `shared/` の値を「登録で増える値」として並べる (最初の実装) | この PC には clone の `shared/` がもう当たっているので誤り。何も変えていなくても「shared/ の値だけ違う」と出て、変更前の「drvPath が同じ」より後退する (レビューの指摘) |
 
 ## 5. 影響 (Consequences)
 
@@ -97,16 +118,23 @@ compare --base <元のホスト> --private <作業ツリー>
 ### 注意が必要なこと
 
 - `shared/` に module があると、compare の評価が 1 回増える (`shared/` を外した形。1 回 20〜60 秒)。違うときは `config.dotfiles` の評価も増える
-- 0 でも、`shared/` の値の分だけ世代の中身は変わる (「同じ (shared/ の値だけ違う)」)。確認と PR の本文には、`shared/` が足す値を書く
+- 0 でも、「同じ (shared/ の値だけ違う)」なら `shared/` の値の分だけ世代の中身は変わる。元のホストが型・`tmp` なら、確認と PR の本文には
+  `shared/` が足す値を書く
+- clone と作業ツリーの `shared/` の比べはファイルの比べで、評価はしない。README のような説明のファイルだけが違っても「違う」と出る
+  (「世代が変わりうる」と出す)
 - ホストのファイルが `shared/` に頼っている (`shared/` の module が宣言した option を使う、など) と、`shared/` を外した形は評価できない。
-  そのときは見分けずに比べる。元のホストが登録したホストなら、旧い形も評価できない (3)
+  そのときは見分けずに比べる。元のホストが登録したホストなら、旧い形も評価できない (3。`shared/` を外したことを出す)
 - 元のホストが登録したホストかは、ローカル flake の読む dotfiles-private に `hosts/<元のホスト>.nix` があるかで見る。ローカル flake に
   同じ名前のホストを手で足していると (後ろが勝つ)、当たっていない `shared/` を外すことになるが、値は変わらない
 
 ## 6. 検証 (Verification)
 
-- `nix/tests/private-host.test.sh` (`private-host-test`。29 件)。偽の nix で、`shared/` の値だけ違う (0)・ホストの値も違う (1。分けて出す)・
-  `shared/` との衝突 (4)・`shared/` を外すと落ちる (1)・登録したホストを元にした compare と draft・inspect・clone に書かないことを見る
+- `nix/tests/private-host.test.sh` (`private-host-test`。34 件)。偽の nix で、`shared/` の値だけ違う (0)・ホストの値も違う (1。分けて出す)・
+  `shared/` がこのホストを変えない・`shared/` との衝突 (4)・`shared/` を外すと落ちる (1)・型が元なら外さない・登録したホストを元にした
+  compare (ホストのファイルと `shared/` の同じ・違うの組み合わせ、clone との比べ直し) と draft・`shared/` に頼るホスト (3)・`--out` の置き場所・
+  inspect・clone に書かないことを見る。`shared/` が無ければ `shared/` の行を出さないことも見る
+- branch 全体を別の reviewer (subagent) に見てもらい、登録したホストを元にしたときに `shared/` の値を「増える値」と出す後退 (§4 の最後の行) と、
+  Minor 5 件 (`shared/` がホストを変えないときの文言・`--out` の置き場所・3 の原因の表示・skill の読み方・テストの抜け) を直した
 - 本物の Nix で、scratchpad に作った dotfiles-private とローカル flake に draft・compare を流した (この commit の本体を `git archive` で写した)
   - 型 `pollenjp@x86_64-linux` から描いた下書きと `shared/` (mise の上書き 1 項目): compare は 0「同じ (shared/ の値だけ違う)」。旧い形と
     `shared/` を外した形の drvPath が一致し、`shared/` が足す値は `mise.releaseAgeOverrides: [] → [{…}]` だった
@@ -119,7 +147,8 @@ compare --base <元のホスト> --private <作業ツリー>
 
 ## 7. 移行・運用手順
 
-本体を新しくする (`~/dotfiles/setup --self-update`) だけで効く。登録の手順は skill `pjp-dotfiles-register-host` のまま:
+本体を新しくする (`~/dotfiles/setup --self-update --update`。script は本体の checkout から使い、skill は switch で配る) だけで効く。
+登録の手順は skill `pjp-dotfiles-register-host` のまま:
 
 ```sh
 p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh

@@ -1237,11 +1237,13 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
   出すだけ（本体を進めると、skill を 1 つ足しただけでも世代が変わる）
 - dotfiles-private の `nix/shared/` の値は、登録した全ホストに足す値で、ホストのファイルの外にある（[ADR 031](../docs/adr/031_register_host_compare_shared_20261023T025916JST/README.md)）。
   作業ツリーの `nix/shared/` に module があると、`compare` は新しい形を `shared/` を外しても評価し、それが旧い形と同じなら
-  「同じ (shared/ の値だけ違う)」で 0 を返す。`shared/` が足す値（`mise.releaseAgeOverrides: [] → [{…}]` など。登録で増える値）は、
-  ホストのファイルの違いと分けて出す。`shared/` を足した形が評価できなければ 4（list でない option を両方に書いた、など）
-- 元のホストが dotfiles-private に登録したホスト（値を直すとき）なら、そのホストにもローカル flake の読む `shared/` が当たっているので、
-  `draft` と `compare` の旧い形は `shared/` を外して評価する（下書きに `shared/` の値を描かない。違いはホストのファイルどうし）。
-  外すのは dotfiles-private の `nix/` の写しで、clone には書かない
+  「同じ (shared/ の値だけ違う)」で 0 を返す。`shared/` が足す値（`mise.releaseAgeOverrides: [] → [{…}]` など。元のホストが型・`tmp`
+  なら、登録で増える値）は、ホストのファイルの違いと分けて出す。`shared/` を足した形が評価できなければ 4（list でない option を
+  両方に書いた、など）
+- 元のホストが dotfiles-private に登録したホスト（値を直す・merge のあとに clone と比べ直す）なら、そのホストにもローカル flake の読む
+  `shared/` が当たっているので、`draft` と `compare` の旧い形は `shared/` を外して評価する（下書きに `shared/` の値を描かない。違いは
+  ホストのファイルどうし）。`compare` は clone と作業ツリーの `shared/` が同じかをファイルで比べて出す（同じでホストのファイルも同じ
+  なら、0 で「世代の中身は変わらない」）。外すのは dotfiles-private の `nix/` の写しで、clone には書かない
 - merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、登録したファイルへ移した値を
   ローカル flake から外す（前の雛形の `local` の値・足していた `tmp`）。移したあとの `local-flake-migrate.sh compare` は、この PC の
   ホストが dotfiles-private から足されることを「違い」として出す（setup の選ぶホストが変わるため。受け入れるなら

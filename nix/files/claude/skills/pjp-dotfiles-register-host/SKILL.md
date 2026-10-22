@@ -159,20 +159,24 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 | 終了コード | 意味 | すること |
 | --- | --- | --- |
 | 0 | 旧い形 (元のホスト。前の雛形なら + local) と登録したホストの drvPath が同じ | この登録で世代の中身は変わらない。次へ |
-| 0 (「同じ (shared/ の値だけ違う)」) | shared/ を外すと同じ。ホストのファイルは元のホストの値を全部写せている | 次へ。出力の「shared/ が足す値」は登録でこの PC に増える値なので、確認と PR の本文に書く。下書きには足さない |
-| 1 | 違う (shared/ があれば、shared/ を外しても違う) | 出力の `config.dotfiles の違い` (shared/ があれば「旧い → shared/ を外した新しい形」。shared/ が足す値は別に出る) を読む。下書きの誤りなら直して比べ直す。ユーザーが値を変えると決めた違い (型を元にして値を足した、など) なら、PR の本文にそう書く |
+| 0 (「同じ (shared/ の値だけ違う)」) | shared/ を外すと同じ。ホストのファイルは元のホストの値を全部写せている | 次へ。元のホストが型・`tmp` なら、出力の「shared/ が足す値」は登録でこの PC に増える値なので、確認と PR の本文に書く。下書きには足さない |
+| 1 | 違う (shared/ があれば、shared/ を外しても違う) | 出力の `config.dotfiles の違い` (shared/ があれば「旧い → shared/ を外した新しい形」。shared/ の値は別に出る) を読む。下書きの誤りなら直して比べ直す。ユーザーが値を変えると決めた違い (型を元にして値を足した、など) なら、PR の本文にそう書く |
 | 2 | 使い方の誤り・登録のファイルが無い | 出力のとおり直す |
-| 3 | 旧い形が評価できない | 今の local が今の本体と合わない (option の削除など)。pjp-dotfiles-local-flake-migrate の「旧い flake が評価できないとき」 |
+| 3 | 旧い形が評価できない | 今の local が今の本体と合わない (option の削除など)。pjp-dotfiles-local-flake-migrate の「旧い flake が評価できないとき」。「shared/ (…) を外して評価した」と出ていれば、元の登録したホストのファイルが shared/ に頼っている (shared/ の module が宣言した option を使う、など) |
 | 4 | 登録したホスト (shared/ を足した形) が評価できない | ファイルの誤り (構文・option の名前)、または list でない option を shared/ とホストのファイルの両方に書いた (片方を `lib.mkDefault` にするか、ホストのファイルから外す)。直して比べ直す |
 
 「中身が同じ」は今の世代との一致では決めない (本体を進めると、skill を 1 つ足しただけでも世代が変わる)。出力の「参考: 今の世代 …」は参考。
 
 - shared/ の値は、登録した全ホストに足す値でホストのファイルの外にある。compare は作業ツリーの `nix/shared/` に module があれば
-  新しい形を shared/ を外しても評価し、ホストのファイルの違いと「shared/ が足す値」を分けて出す
+  新しい形を shared/ を外しても評価し、ホストのファイルの違いと shared/ の値を分けて出す
 - 「shared/ を外した新しい形を評価できない」と出たら、ホストのファイルが shared/ に頼っている (shared/ の module が宣言した option を
-  使う、など)。そのときの違いは shared/ の値を含めて比べたものなので、shared/ が足す値を除いて読む
-- 元のホストが登録したホスト (値を直すとき) なら、旧い形からもローカル flake の読む shared/ を外す (出力の「旧い形 … は
-  dotfiles-private に登録したホストなので」の行)。違いはホストのファイルどうしだけになる
+  使う、など)。そのときの違いは shared/ の値を含めて比べたものなので、冒頭の「shared/ の module: …」の行のファイルが足す値を除いて読む
+- 元のホストが登録したホスト (値を直す・merge のあとに clone と比べ直す) なら、旧い形からもローカル flake の読む clone の shared/ を
+  外し (出力の「旧い形 … は dotfiles-private に登録したホストなので」の行)、ホストのファイルどうしで比べる。この PC には clone の
+  shared/ がもう当たっているので、shared/ の値は「増える値」ではない。compare は clone と作業ツリーの shared/ が同じかを出す:
+  - 同じ: ホストのファイルも同じなら 0 で「世代の中身は変わらない」。違えば 1 で、違いの下に「shared/ は clone と作業ツリーで同じ」
+  - 違う (clone が古い・作業ツリーの branch が古い、など): 「clone と作業ツリーの shared/ が違う」と作業ツリーの shared/ の値が出る。
+    merge のあと clone を取ると、その違いの分も変わりうる。PR の本文には「この PR の差ではない」と添えて書く
 
 ### 5. commit・push・PR (dotfiles-private の worktree)
 
@@ -214,7 +218,7 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
   取る (手順 2 と同じ関門)。draft は、元のホストに当たっている clone の shared/ を外して描く (「shared/ (…) を外して描いた」と
   出る)。shared/ の値は下書きに出ないので、今のファイルとの差にも出ない
 - `compare --base <名前> --private <worktree>` は直した値の分だけ違う (1)。旧い形からも shared/ を外すので、違いはホストのファイル
-  どうしだけ (shared/ が足す値は別に出る)。今と同じなら何もしない
+  どうしだけ。shared/ は clone と作業ツリーで同じかが 1 行で出る (手順 4 の表の下)。今と同じなら何もしない
 
 ## 確認の形 (登録)
 
@@ -260,7 +264,8 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 型を元にした下書きをそのまま登録する | 型には PC の値が無い (WSL・署名・Dev Tracker など)。要る値を聞いて足す |
 | 段階 3 で消えたホストを、今の本体で draft・compare する | 評価できない (3)。消す前の本体を写して `--nix-dir` に渡す (「前提」) |
 | 値を書き足した flake を `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える (退避も無い)。値があれば local-flake-migrate.sh で移す |
-| shared/ の値の違いを下書きの誤りと読み、下書きに書き写す | shared/ は登録した全ホストに足す値。compare は外して比べ、「shared/ が足す値」として別に出す。ホストのファイルに書くと 2 重になる (list はつながって項目が 2 つになる) |
+| shared/ の値の違いを下書きの誤りと読み、下書きに書き写す | shared/ は登録した全ホストに足す値。compare は外して比べ、別に出す。ホストのファイルに書くと 2 重になる (list はつながって項目が 2 つになる) |
+| 登録したホストを元にした compare の shared/ の値を「登録で増える値」と伝える | この PC には clone の shared/ がもう当たっている。増えるのは、clone と作業ツリーの shared/ が違うと出たときの、その違いだけ |
 | private の値を dotfiles の PR の本文や文書に書く | private の値は dotfiles-private の中だけ |
 
 ## 関連
