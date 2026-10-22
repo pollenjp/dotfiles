@@ -58,7 +58,7 @@
       #   homeConfigurations = dotfiles.homeConfigurations // dotfiles.lib.privateHosts dotfiles-private // { ... };
       #
       # と呼ぶ。素の mkHome で組む (ファイルがその PC の値の全部を持つ。前の雛形の local も当たらない)。
-      # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (TKT-323)。
+      # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (ADR 030)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
     in
     {

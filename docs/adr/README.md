@@ -35,6 +35,7 @@
 | [026](./026_dotfiles_private_hosts_20261020T215857JST/README.md) | 実機のホストの定義と値を dotfiles-private の `nix/hosts/` に置き、ローカル flake が 2 つ目の `path:` 入力で読み、setup が `--host` なしで hostname から選ぶ (登録は skill と script) | 2026-10-20 |
 | [027](./027_stop_guessing_host_20261021T143517JST/README.md) | setup は対象ホストを推測せず (決まらなければ止めて選べる道を出す)、公開の登録簿から実機を外し、PC の値は dotfiles-private の登録かローカル flake の tmp の 1 か所にだけ書く (雛形から `local` を外し、Dev Tracker の既定を false に。段階 3) | 2026-10-21 |
 | [029](./029_claude_ssh_agent_notice_20261022T194758JST/README.md) | Claude の作業が SSH agent (1Password) を使う前に hook で知らせ (どこから・何を・承認の画面が出る接続)、断られたら打ち直さずに選択肢の問いを出させる (skill にしない。git は署名するときだけ当てる) | 2026-10-22 |
+| [030](./030_mise_release_age_overrides_20261023T010148JST/README.md) | mise の遅延を option で決め、期間付きの上書き (この日までに出た版を取る上限) を dotfiles-private の `nix/shared/` の list で持ち、setup が今日 (Asia/Tokyo) と比べて上限の日時を mise に写す (`nix/shared/*.nix` は登録した全ホストに足す) | 2026-10-23 |
 
 ## ディレクトリ名
 

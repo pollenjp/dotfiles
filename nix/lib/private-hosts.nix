@@ -5,7 +5,7 @@
 # しない (ADR 015 / 016) ので、本体の flake はこれを自分では呼ばない。
 #
 #   nix/hosts/<user>@<hostname>.nix   1 実機 1 ファイル。ホストの名前はファイル名から .nix を除いたもの
-#   nix/shared/*.nix                  登録した全ホストに足す home-manager の module (mise の遅延の上書きなど。TKT-323)
+#   nix/shared/*.nix                  登録した全ホストに足す home-manager の module (mise の遅延の上書きなど。ADR 030)
 #
 # hosts/ の各ファイルは、登録簿 (hosts/default.nix) の 1 エントリと同じく mkHome を受け取って呼ぶ関数:
 #

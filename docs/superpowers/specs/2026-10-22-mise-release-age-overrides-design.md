@@ -5,7 +5,8 @@
 - 方針は 2026-10-22 にユーザーが承認した (集約ハブの会話 TKT-320)。この文書はその書き写しと、実装で決めた細部
   (最後の「実装で決めた細部」)
 - dotfiles-private の最初の項目 (`nix/shared/mise-release-age.nix`) と README は、同じ日に dotfiles-private の PR で足す
-  (この PR の option と privateHosts の読み方に従う)
+  (この PR の option と privateHosts の読み方に従う。TKT-324)
+- 決定の記録は ADR 030
 
 ## 何のためか
 

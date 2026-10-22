@@ -3268,7 +3268,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ### 遅延 (minimum_release_age) を期間付きで緩める
 
 `bootstrap-mise.sh` は `setup --update` のたびに、`config.toml` の `minimum_release_age` に遅延を書く。値は option で決める
-（[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)。TKT-323）。`flake.lock` の 7 日
+（[ADR 030](../docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の 7 日
 （[前述](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)）とは別の口で、こちらは mise だけに効く。
 
 | option | 既定 | 中身 |

@@ -31,7 +31,7 @@
 #   言語ランタイム (go/node)   -> mise (このスクリプト)
 #   プロジェクト毎のツール固定 -> mise (各リポジトリの mise.toml)
 #
-# ## 遅延 (minimum_release_age) と、期間を区切った上書き
+# ## 遅延 (minimum_release_age) と、期間を区切った上書き (ADR 030)
 #
 # 遅延は dotfiles.mise.minimumReleaseAge (既定 9d)、期間を区切って緩める上書きは
 # dotfiles.mise.releaseAgeOverrides (nix/home/options.nix)。home-manager が置く

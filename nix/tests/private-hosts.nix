@@ -1,6 +1,6 @@
 # 本体の lib.privateHosts (nix/lib/private-hosts.nix) が、dotfiles-private の nix/ (ローカル flake の path: の入力) の
 # hosts/*.nix からホストを組み立て、shared/*.nix の module を全ホストに足すことを、作り物の nix/ (fixtures/private-hosts)
-# で評価時に確かめる (ADR 026・TKT-323)。
+# で評価時に確かめる (ADR 026・030)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。

@@ -10,6 +10,7 @@
 | 運用手順 | [`nix/README.md`「dotfiles-private に登録したホスト」](../../../nix/README.md#dotfiles-private-に登録したホスト) |
 | 設計 | [`docs/superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md`](../../superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md) |
 | 後続 ADR | [027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（§2.D の 4 番目の推測をやめ、どれにも当たらなければ止めて選べる道を出す。§2.F の段階 3 を行い、公開の登録簿から実機 3 つを外した。雛形から `local` を外し、Dev Tracker の既定を false にした。§7 の「移した値を `local` から外す」は、今の雛形では足していた `tmp` から外す話になる。本文は決定当時の記録としてそのまま残してある） |
+| 後続 ADR | [030_mise_release_age_overrides](../030_mise_release_age_overrides_20261023T010148JST/README.md)（dotfiles-private の `nix/shared/*.nix`（home-manager の module）を、登録した全ホストの `modules` の前に足すようにした。§2.B の「各ファイルを `{ mkHome = <素の mkHome>; }` で呼ぶ」は、今は shared/ の module を足す mkHome を渡す（ローカル flake の `local` が当たらないのは同じ）。本文は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「dotfiles-private に登録したホスト」） |
 
 ---
 
