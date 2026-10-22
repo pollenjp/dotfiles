@@ -58,6 +58,7 @@
       #   homeConfigurations = dotfiles.homeConfigurations // dotfiles.lib.privateHosts dotfiles-private // { ... };
       #
       # と呼ぶ。素の mkHome で組む (ファイルがその PC の値の全部を持つ。前の雛形の local も当たらない)。
+      # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (ADR 030)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
     in
     {
@@ -256,6 +257,7 @@
           bootstrap-dotfiles-private-test = scriptTest "bootstrap-dotfiles-private" ./scripts/bootstrap-dotfiles-private.sh;
           bootstrap-cc-pages-test = scriptTest "bootstrap-cc-pages" ./scripts/bootstrap-cc-pages.sh;
           bootstrap-claude-skills-test = scriptTest "bootstrap-claude-skills" ./scripts/bootstrap-claude-skills.sh;
+          bootstrap-mise-test = scriptTest "bootstrap-mise" ./scripts/bootstrap-mise.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
           # setup.sh の手順の並び (bootstrap-claude-skills・bootstrap-herdr-hub の後) も見るので、scripts/ を丸ごと渡す
@@ -355,6 +357,14 @@
               ;
           };
           cc-pages-state = import ./tests/cc-pages.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          mise-release-age-state = import ./tests/mise-release-age.nix {
             inherit
               lib
               pkgs

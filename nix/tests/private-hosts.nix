@@ -1,5 +1,6 @@
 # 本体の lib.privateHosts (nix/lib/private-hosts.nix) が、dotfiles-private の nix/ (ローカル flake の path: の入力) の
-# hosts/*.nix からホストを組み立てることを、作り物の hosts/ (fixtures/private-hosts) で評価時に確かめる (ADR 026)。
+# hosts/*.nix からホストを組み立て、shared/*.nix の module を全ホストに足すことを、作り物の nix/ (fixtures/private-hosts)
+# で評価時に確かめる (ADR 026・030)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
@@ -14,6 +15,10 @@
 #   - hosts/ に .nix が無いなら { }
 #   - hosts/ が無い (本体の stub。clone の無いマシンでローカル flake が指す先) なら { }
 #   - path を渡しても store へ写さずに読む (store に書かない評価 (CI の --no-build) でも落ちない)
+#   - shared/ の .nix (home-manager の module) は、登録した全ホストに足される (mise の遅延の上書きの list)
+#   - ホストのファイルの modules に書いた list は、shared/ の list とつながる (順は module system が決めるので見ない)
+#   - shared/ の .nix でないファイル (README.md) と、名前が . で始まるファイル (読めば throw する作り物) は拾わない
+#   - shared/ の無い clone のホストも評価が通り、何も足さない。outPath の形で渡しても shared/ が当たる
 {
   lib,
   pkgs,
@@ -26,7 +31,11 @@ let
   # .nix の無い hosts/ (git は空のディレクトリを持てないので README.md だけを置いてある)
   emptyHosts = privateHosts ./fixtures/private-hosts-empty;
   stub = privateHosts ../private-stub;
+  # hosts/ はあるが shared/ が無い
+  noShared = privateHosts ./fixtures/private-hosts-no-shared;
   cfg = name: hosts.${name}.config;
+  # 上書きの list の reason (どの module から来た項目か)
+  reasons = c: map (o: o.reason) c.dotfiles.mise.releaseAgeOverrides;
 
   cases = [
     {
@@ -62,6 +71,36 @@ let
     {
       name = "hosts/ が無い (本体の stub) なら { }";
       ok = stub == { };
+    }
+    {
+      name = "shared/ の .nix は登録した全ホストに足される (bob@two の上書きは shared/ の項目だけ)";
+      ok = reasons (cfg "bob@two") == [ "全ホスト" ];
+    }
+    {
+      name = "ホストのファイルの modules に書いた list は、shared/ の list とつながる (alice@one は 2 つ。順は見ない)";
+      ok =
+        let
+          r = reasons (cfg "alice@one");
+        in
+        builtins.length r == 2 && builtins.elem "全ホスト" r && builtins.elem "alice だけ" r;
+    }
+    {
+      name = "shared/ の README.md と . で始まるファイル (読めば throw する) は拾わない";
+      ok = (builtins.tryEval (builtins.deepSeq (reasons (cfg "bob@two")) true)).success;
+    }
+    {
+      name = "shared/ の無い clone のホストも評価が通り、上書きは空のリスト";
+      ok =
+        builtins.attrNames noShared == [ "carol@three" ]
+        && noShared."carol@three".config.dotfiles.mise.releaseAgeOverrides == [ ];
+    }
+    {
+      name = "flake = false の input の形 (outPath を持つ attrset) でも shared/ が当たる";
+      ok =
+        reasons
+          (privateHosts {
+            outPath = ./fixtures/private-hosts;
+          })."bob@two".config == [ "全ホスト" ];
     }
   ];
 

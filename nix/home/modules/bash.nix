@@ -149,7 +149,7 @@ in
       #########################
       m = "mise";
       mr = "mise run";
-      # settings.minimum_release_age (bootstrap-mise.sh が 9d を入れる) を、この 1 回の
+      # settings.minimum_release_age (bootstrap-mise.sh が dotfiles.mise の値 (既定 9d) を入れる) を、この 1 回の
       # 実行だけ 0d / 1d にする。公開 9 日未満の版が要るときの逃げ道
       # (`mise0 use -g claude@latest` など。bootstrap-mise.sh も claude は mise1 と同じ
       # 1d で入れる)。config.toml は書き換えないので、次の素の `mise` では遅延が効いたまま。

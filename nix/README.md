@@ -309,6 +309,9 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 その commit では CI の `lock-age` が落ちるが、**それは意図どおり**。通したいときは
 `workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
 
+mise で入れるもの（言語ランタイム・`claude`・各 repo の `mise.toml` のツール）の遅延は別の口で、期間を区切って
+緩められる（[遅延を期間付きで緩める](#遅延-minimum_release_age-を期間付きで緩める)）。
+
 #### 閉包のスキャンと pin↔先端の差分 (遅延の補完)
 
 上の遅延は「未発覚の侵害を誰かが先に踏む時間」を稼ぐ一方、**発覚済みの侵害
@@ -780,7 +783,8 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>
 ファイルなので store に置けない）。そのため `home-manager switch` だけでは作られず、
 **新規マシンでは go / node が入らないまま**になる。このスクリプトで初期化する。
 
-冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。
+冪等なので何度実行してもよい。詳細は後述の「mise との役割分担」を参照。遅延（`minimum_release_age`）は
+option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_release_age-を期間付きで緩める)）。
 
 `claude` もここで入る。グローバルな CLI なので役割分担どおりなら Nix 側だが、
 例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。
@@ -1139,8 +1143,10 @@ PC ごとに移さなくてよい。
 ```
 dotfiles-private/
 └── nix/
-    └── hosts/
-        └── <user>@<hostname>.nix    ファイル名から .nix を除いたものがホストの名前
+    ├── hosts/
+    │   └── <user>@<hostname>.nix    ファイル名から .nix を除いたものがホストの名前
+    └── shared/
+        └── <名前>.nix               登録した全ホストに足す home-manager の module (無くてよい)
 ```
 
 中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。その PC の値は全部
@@ -1171,6 +1177,15 @@ mkHome {
   本体の `dotfiles.lib.privateHosts` が `hosts/*.nix` からホストを組み立てる。本体の flake は dotfiles-private を input に持たない
   （public の lock に private の rev を残さない。ADR 015 / 016）
 - **ローカル flake の値は当たらない。** 素の `mkHome` で組むので、ファイルがその PC の値の全部を持つ（前の雛形の `local` も当たらない）
+- **`shared/*.nix` は登録した全ホストに足す。** home-manager の module（`{ dotfiles.… = …; }` の形）を、各ホストのファイルが
+  `mkHome` に渡す `modules` の前に足す（ファイル名の順）。脆弱性への対応（[mise の遅延の上書き](#遅延-minimum_release_age-を期間付きで緩める)）
+  のように、登録した全 PC に効かせたい値を 1 か所に書くため。list の option はホストのファイルの値とつながる（順は module system が
+  決める）。list でない option に両方で違う値を書くと評価が止まるので、片方を `lib.mkDefault` にする。拾い方は `hosts/` と同じ
+  （`.nix` で終わり、`.` で始まらないファイル）。`shared/` が無ければ何も足さない。`~/dotfiles/flake.nix` に足したホスト（`tmp`）と
+  登録簿の型には足さない
+- **`shared/` に書く option は、全 PC の本体が持つものだけにする。** `--update` は dotfiles-private を取るが本体は進めない
+  （`--self-update` は別）ので、本体の新しい option を `shared/` に書くと、本体が古い PC の switch が「option が無い」で止まる
+  （ホストのファイルと違って全 PC に効く）。新しい option なら本体を先に merge し、各 PC で `--self-update --update` してから書く
 - 重ね順は登録簿 → dotfiles-private → `~/dotfiles/flake.nix` に足したホスト（後ろが勝つ）。登録簿と同じ名前なら dotfiles-private が勝つ
 - 読むのは `nix/` の下だけで、中身は誰でも読める `/nix/store` に入る（`ssh/` や辞書は入らない）。秘密（API キー・トークン）は置かない
   （[`~/.config/pjp/env`](#マシンローカルの環境変数-configpjpenv)）
@@ -1219,6 +1234,8 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
   `git archive` で写して `--nix-dir` に渡し、draft・compare する（手順は `pjp-dotfiles-register-host` skill）
 - `compare` が 0 なら、この登録で home-manager の世代の中身は変わらない。今の世代との一致は参考として出すだけ
   （本体を進めると、skill を 1 つ足しただけでも世代が変わる）
+- dotfiles-private の `nix/shared/` に module があると、新しい形（登録したホスト）にだけ当たるので、`compare` はその値を違いとして
+  出す（1 を返す。`mise.releaseAgeOverrides: [] → [{…}]` など）。違いが `shared/` の値だけなら、登録で増えるのはその値だけ
 - merge のあと、ローカル flake を今の雛形へ移し（dotfiles-private の入力が clone の `nix/` を指す）、登録したファイルへ移した値を
   ローカル flake から外す（前の雛形の `local` の値・足していた `tmp`）。移したあとの `local-flake-migrate.sh compare` は、この PC の
   ホストが dotfiles-private から足されることを「違い」として出す（setup の選ぶホストが変わるため。受け入れるなら
@@ -1308,6 +1325,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
+| `~/.local/state/dotfiles/mise-release-age.json` | `nix/home/modules/mise-release-age.nix` (生成。`dotfiles.mise.*` の値。`bootstrap-mise.sh` が読んで `~/.config/mise/config.toml` に書く。[後述](#遅延-minimum_release_age-を期間付きで緩める)) |
 | `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
@@ -3292,15 +3310,16 @@ Nix 管理でも動作自体に問題はない。
 それでも mise に置いているのは **リリース頻度が `flake.lock` の更新周期に合わない**ため。
 nixpkgs pin にすると、版は `flake.lock` を上げるまで動かない。
 
-遅延も `claude` だけ settings の `minimum_release_age = 9d` ではなく **1d** に縮めて
+遅延も `claude` だけ settings の `minimum_release_age`（既定の 9d）ではなく **1d** に縮めて
 `latest` を入れている（`bootstrap-mise.sh` の
 `MISE_MINIMUM_RELEASE_AGE=1d mise use -g claude@latest`。下の `mise1` と同じ）。
 `claude` は新しい版をこまめに使いたいことが多いが、ほぼ毎日出るので 9d を課すと手元の版が
 常に 9 日ぶん遅れるため。1d でも公開から 1 日経っていない版は取らないので、
-[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。
+[「先端は取らない」方針](#依存-flakelock-の更新)の線は残る。遅延を期間付きで緩めている間、上書きの上限の方が
+新しい版を取るなら `claude` も上限で入れる（[後述](#遅延-minimum_release_age-を期間付きで緩める)）。
 
 遅延をその 1 回だけ変える alias / abbr を bash・fish の両方に置いている。
-`config.toml` は書き換えないので、以後の素の `mise` は 9d のまま。
+`config.toml` は書き換えないので、以後の素の `mise` は settings の遅延（既定の 9d か、上書きの上限）のまま。
 
 | 名前 | 短縮形 | 中身 | 使いどころ |
 | --- | --- | --- | --- |
@@ -3324,7 +3343,8 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 
 `[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と
 言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
-触るので冪等で、既存の `[tools]` も壊さない。
+触るので冪等で、既存の `[tools]` も壊さない。`minimum_release_age` は option の値（既定の 9d か、期間付きの
+上書きの上限。[後述](#遅延-minimum_release_age-を期間付きで緩める)）を書く。
 
 > ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
 > `home-manager switch` は hermetic に保つ方針。
@@ -3334,6 +3354,72 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 > だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
 > `setup.sh` は `[tools]` に残っている名前を実行後の「残りの手作業」に並べる
 > （片付いていれば何も出さない）。
+
+### 遅延 (minimum_release_age) を期間付きで緩める
+
+`bootstrap-mise.sh` は `setup --update` のたびに、`config.toml` の `minimum_release_age` に遅延を書く。値は option で決める
+（[ADR 030](../docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の 7 日
+（[前述](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)）とは別の口で、こちらは mise だけに効く。
+
+| option | 既定 | 中身 |
+| --- | --- | --- |
+| `dotfiles.mise.minimumReleaseAge` | `"9d"` | 遅延。日の単位（`<数>d`）だけ |
+| `dotfiles.mise.releaseAgeOverrides` | `[ ]` | 期間を区切って遅延を緩める上書きの list。項目は `from`（必須。`YYYY-MM-DD`）・`zeroDays`（既定 1）・`reason`（既定 `""`） |
+
+脆弱性の修正版を出た日に入れたいときのように、しばらく遅延を緩めたいときに上書きを足す。手で
+`mise settings set minimum_release_age 0d` としても次の `--update` で既定に戻るが、上書きは option なので戻らない。
+上書きのあいだは別の repo の `mise install`・`mise up` も新しい版を取る。1 回だけ外すなら、今までどおり
+`mise0` / `mise1`（[前述](#claude-だけ-mise-に置いている理由)の表）でよい。入れた版は、上書きが終わって遅延が戻っても
+古い版へは戻らない（mise 2026.8.6 で実測）。
+
+項目は「from の日から zeroDays 日（from の日を含む）のうちに出た版まで取る」と読む。取る版の上限（from + zeroDays − 1 の
+日の終わり）を書くので、その日までは遅延 0d と同じに新しい版を取り、その後は上限を据え置いたまま遅延が 1 日ずつ伸びる。
+上限 + 既定の遅延を過ぎると、上書きが無いときと同じに戻る（その後の `--update` で既定を書き直す）。日付は Asia/Tokyo で読む
+（時刻帯が UTC のマシンでも同じ日に切り替わる）。
+
+| 日（既定 9d） | `zeroDays = 1` | `zeroDays = 3` |
+| --- | --- | --- |
+| 10/22（from） | 0d | 0d |
+| 10/24 | 約 2d | 0d |
+| 10/27 | 約 5d | 約 3d |
+| 10/31 の終わり | 上書きが終わる | 約 7d |
+| 11/2 の終わり | | 上書きが終わる |
+
+登録した全 PC に効かせるなら、dotfiles-private の `nix/shared/` に module を置く（[dotfiles-private に登録したホスト](#dotfiles-private-に登録したホスト)）。
+1 台だけなら、そのホストの `modules`（dotfiles-private の `nix/hosts/<ホスト>.nix` か、ローカル flake の `tmp`。`mkHome` の
+引数ではない）に同じ形で書く。list は書いた所どうしでつながる。
+
+```nix
+# dotfiles-private の nix/shared/mise-release-age.nix (例)
+{
+  dotfiles.mise.releaseAgeOverrides = [
+    {
+      from = "2026-10-22";
+      zeroDays = 3;
+      reason = "脆弱性の修正版を入れる";
+    }
+  ];
+}
+```
+
+option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json` に置き（`home/modules/mise-release-age.nix`）、
+`bootstrap-mise.sh` が今日の日付と比べて書く値を決める（home-manager の評価は今日の日付を読めないため）。反映は
+`~/dotfiles/setup --update`（switch だけでは `config.toml` に届かない）。
+
+- from が今日より先の項目は写さない（`まだ始まっていない上書き: …` の行が出る）
+- 上書き中の項目のうち、上限がいちばん新しいものの上限（`2026-10-24T23:59:59+09:00` の形）を書き、1 行で知らせる。
+  入っている tool は上げないので、新しい版は `mise up`（tool を絞るなら `mise up uv`）で入れる
+
+  ```
+  ==> mise の遅延を上書き中 (理由: …): 2026-10-24 の終わりまでに出た版を取る。2026-11-02 の終わりで上書きが終わり、その後の setup --update で既定の 9d に戻す。…
+  ```
+
+- `claude` も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる
+- 終わった項目は写さず、[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-mise]` で出す。書いた所から PR で消す
+  （消し忘れても害は無い）
+- 毎日流す timer は無い。`--update` を打たない日が続いても mise には上限が残るだけで、ずれるのは新しい版を取らない側
+  （守りは緩まない）。次の `--update` で既定に戻る
+- 状態ファイルが無い（switch の前の世代）・壊れているときは、警告して 9d を書く
 
 ## CI
 
