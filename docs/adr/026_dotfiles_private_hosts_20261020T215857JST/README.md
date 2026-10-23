@@ -11,6 +11,7 @@
 | 設計 | [`docs/superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md`](../../superpowers/specs/2026-10-20-dotfiles-private-hosts-design.md) |
 | 後続 ADR | [027_stop_guessing_host](../027_stop_guessing_host_20261021T143517JST/README.md)（§2.D の 4 番目の推測をやめ、どれにも当たらなければ止めて選べる道を出す。§2.F の段階 3 を行い、公開の登録簿から実機 3 つを外した。雛形から `local` を外し、Dev Tracker の既定を false にした。§7 の「移した値を `local` から外す」は、今の雛形では足していた `tmp` から外す話になる。本文は決定当時の記録としてそのまま残してある） |
 | 後続 ADR | [030_mise_release_age_overrides](../030_mise_release_age_overrides_20261023T010148JST/README.md)（dotfiles-private の `nix/shared/*.nix`（home-manager の module）を、登録した全ホストの `modules` の前に足すようにした。§2.B の「各ファイルを `{ mkHome = <素の mkHome>; }` で呼ぶ」は、今は shared/ の module を足す mkHome を渡す（ローカル flake の `local` が当たらないのは同じ）。本文は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「dotfiles-private に登録したホスト」） |
+| 後続 ADR | [031_register_host_compare_shared](../031_register_host_compare_shared_20261023T025916JST/README.md)（§2.E の `compare` は、dotfiles-private の `nix/shared/` に module があれば `shared/` を外した新しい形とも比べ、`shared/` の値だけの違いなら 0 にして `shared/` が足す値を別に出す。元のホストが登録したホストなら、`draft` と `compare` の旧い形からも `shared/` を外す。§7 のコマンドの注記は今の形にした。ほかの本文は決定当時の記録としてそのまま残してある。現行の形は `nix/README.md`「登録する」） |
 
 ---
 
@@ -253,7 +254,7 @@ branch に書く → 比べる → PR → merge 後にローカル flake を今�
 p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
 bash $p inspect                                   # 元にするホストを見つける (一致するホスト)
 bash $p draft --base <ホスト>                      # 下書き (stdout)。dotfiles-private の作業ツリーの nix/hosts/<名前>.nix に置く
-bash $p compare --base <ホスト> --private <作業ツリー>   # 0 なら、この登録で世代の中身は変わらない
+bash $p compare --base <ホスト> --private <作業ツリー>   # 0 なら、ホストのファイルは元のホストの値を全部写せている (shared/ の値だけ違うときも 0。ADR 031)
 ```
 
 merge のあと、`~/dotfiles/flake.nix` を今の雛形へ移す（`local-flake-migrate.sh prepare`。dotfiles-private の入力が clone の `nix/` を指す）。
