@@ -398,6 +398,17 @@ in
         + "\n";
     }
 
+    # PreToolUse フック (matcher Bash)。public な repo へ、ほかの repo の issue・PR・commit への参照を書く
+    # git push と gh pr create などを打つ前に止め、どこか・どう直すかを Claude に返す (ADR 033。参照先の
+    # timeline に付く跡は消せない)。option は持たない (マシンごとに変える値が無い)。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/xref-guard.sh" = {
+        source = claudeRoot + "/hooks/xref-guard.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #

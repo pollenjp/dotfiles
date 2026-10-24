@@ -118,11 +118,12 @@ silent() {
   [[ ! -s ${work}/stdout && $(cat "${work}/rc") == 0 ]]
 }
 # 止めたか: exit 0・1 行の JSON・PreToolUse の deny と理由だけ
+denied_shape='[["hookSpecificOutput"],["hookEventName","permissionDecision","permissionDecisionReason"],"PreToolUse","deny"]'
 denied() {
-  [[ $(cat "${work}/rc") == 0 ]] \
-    && [[ $(wc -l <"${work}/stdout") == 1 ]] \
-    && [[ $(jq -c '[keys, (.hookSpecificOutput | keys), .hookSpecificOutput.hookEventName, .hookSpecificOutput.permissionDecision]' "${work}/stdout" 2>/dev/null) \
-      == '[["hookSpecificOutput"],["hookEventName","permissionDecision","permissionDecisionReason"],"PreToolUse","deny"]' ]]
+  local got
+  got=$(jq -c '[keys, (.hookSpecificOutput | keys), .hookSpecificOutput.hookEventName, .hookSpecificOutput.permissionDecision]' \
+    "${work}/stdout" 2>/dev/null)
+  [[ $(cat "${work}/rc") == 0 && $(wc -l <"${work}/stdout") == 1 && ${got} == "${denied_shape}" ]]
 }
 reason() {
   jq -r '.hookSpecificOutput.permissionDecisionReason // empty' "${work}/stdout" 2>/dev/null
@@ -186,6 +187,7 @@ ref='NixOS/nixpkgs#577218'
 echo "== xref-guard.sh: gh のタイトルと本文"
 
 heredoc_body() {
+  # shellcheck disable=SC2016 # Bash に打たせるコマンドの文字そのもの ($( ) は hook が読む)
   printf 'gh pr create --title "x" --body "$(cat <<'"'"'EOF'"'"'\n%s\nEOF\n)"' "$1"
 }
 
@@ -201,7 +203,9 @@ fi
 expect_allow "$(heredoc_body '- `'"${ref}"'` を待つ')"
 expect_allow "$(heredoc_body $'```\n'"${ref}"$'\n```')"
 expect_allow "$(heredoc_body $'~~~sh\n'"${ref}"$'\n~~~')"
+# shellcheck disable=SC2016 # 本文の Markdown の backquote そのもの
 expect_allow "$(heredoc_body $'``a `'"${ref}"'` b``')"
+# shellcheck disable=SC2016 # 本文の Markdown の backquote そのもの
 expect_deny "$(heredoc_body '[`x`](https://github.com/NixOS/nixpkgs/pull/577218)')"
 expect_deny "$(heredoc_body "これは${ref}を待つ")"
 expect_deny "$(heredoc_body $'1) 先に\n2) '"${ref}"' を待つ')"
@@ -449,6 +453,20 @@ for i in $(seq 1 25); do
   commit_in "${r}" "fix: acme/open#${i}"
 done
 expect_reason "21 件目からは件数だけ書く" "git push" "${r}" "- ほか 5 件"
+
+echo "== xref-guard.sh: 長いコマンド"
+
+# 64 KB (Nix のサンドボックスの stdenv には gawk がある) を超えるコマンドは中を読まず、参照か git … push があれば止める
+long=$(printf 'あいうえおかきくけこ%.0s' $(seq 1 2500))
+expect_reason "長いコマンドに参照があれば、ファイルにするよう返して止める" \
+  "gh pr create --title x --body '${long} ${ref}'" "${repo}" "コマンドが長すぎて" "${ref}" "--body-file"
+expect_reason "長いコマンドに git … push があれば止める" "cat >/dev/null <<'EOF'
+${long}
+EOF
+git push" "${repo}" "コマンドが長すぎて" "git push は別のコマンドで打つ"
+expect_allow "gh pr create --title x --body '${long}'"
+expect_allow "PJP_ALLOW_XREF=1 gh pr create --title x --body '${long} ${ref}'"
+expect_allow_after_gh "gh pr create --title x --body '${long} ${ref}'" "${repo}" FAKE_GH_DEFAULT=pollenjp/secret
 
 echo "== xref-guard.sh: 黙るとき"
 

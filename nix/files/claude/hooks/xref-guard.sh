@@ -559,6 +559,12 @@ split_commands() {
   printf '%s' "$1" | LC_ALL=C "${awk_bin}" "${lexer}"
 }
 
+# byte_len <文字列>: バイト数 (awk は LC_ALL=C でバイトを読むので、読む長さもバイトで比べる)
+byte_len() {
+  LC_ALL=C
+  printf '%s' "${#1}"
+}
+
 # expand_home <path>: 頭の ~・$HOME・${HOME} を置き換える (コマンドの語は展開していないので)
 expand_home() {
   local d=$1
@@ -665,7 +671,7 @@ visibility() {
     vis_why="gh が見つからない"
   else
     [[ -z ${target} ]] || args+=("${target}")
-    args+=(--json nameWithOwner,visibility)
+    args+=(--json "nameWithOwner,visibility")
     errf=$(mktemp "${TMPDIR:-/tmp}/xref-guard.XXXXXX") || errf=/dev/null
     out=$(run_in "${dir}" gh "${args[@]}" 2>"${errf}")
     rc=$?
@@ -1368,7 +1374,7 @@ scan_command() {
   local -a rec
   ((depth <= 3)) || return 0
   pick_awk
-  ((${#3} <= lex_limit)) || return 0
+  (($(byte_len "$3") <= lex_limit)) || return 0
   last_out=""
   last_known=0
   while IFS=$'\037' read -r -d $'\036' -a rec; do
@@ -1384,16 +1390,57 @@ scan_command() {
   done < <(split_commands "$3")
 }
 
+# --- 長いコマンド
+
+# long_command <KB>: 読む長さを超えたコマンドは中を読まず、文字のどこかに参照か git … push があれば止める (dir の repo が
+# private・internal なら通す)。本文をファイルにして --body-file で渡すか、コマンドを分ければ、中を読んで確かめられる
+long_kb=0
+long_command() {
+  local name desc push_re='(^|[^[:alnum:]_.-])git[[:space:]]+([^;&|]*[[:space:]])?push([[:space:]]|$)'
+  [[ ${cmd} == *PJP_ALLOW_XREF=1* ]] && return 0
+  long_kb=$1
+  job_texts=()
+  mapfile -t job_own < <(remote_slugs "${cwd}")
+  add_text "コマンドの" "" true plain long "${cmd}"
+  check_texts "コマンドの文字" "${cwd}" "" "${job_own[0]-}"
+  ((${#sections[@]} == 0)) || return 0
+  [[ ${cmd} =~ ${push_re} ]] || return 0
+  visibility "${cwd}" ""
+  case ${vis} in
+    PRIVATE | INTERNAL) return 0 ;;
+  esac
+  name=${vis_name:-${job_own[0]:-この dir の repo}}
+  if [[ ${vis} == PUBLIC ]]; then
+    desc="public な repo"
+  else
+    desc="公開範囲を確かめられない: ${vis_why}"
+  fi
+  sections+=("git push → ${name} (${desc}):"$'\n'"- 押す commit の message を確かめられない")
+}
+
 # --- 止める
 
 emit() {
   local msg s
-  msg="[xref-guard] ほかの repo の issue・PR・commit への参照を書こうとしているので止めた。GitHub は参照先の timeline に跡を残し、"
-  msg+="付いた跡は本文を直しても force push で commit を外しても消えない。"
+  if ((long_kb)); then
+    msg="[xref-guard] コマンドが長すぎて (${long_kb} KB。中を読むのは $((lex_limit / 1024)) KB まで) 中を読めず、"
+    msg+="ほかの repo への参照か git push があるので止めた。"
+  else
+    msg="[xref-guard] ほかの repo の issue・PR・commit への参照を書こうとしているので止めた。"
+  fi
+  msg+="GitHub は参照先の timeline に跡を残し、付いた跡は本文を直しても force push で commit を外しても消えない。"
   for s in "${sections[@]}"; do
     msg+=$'\n\n'"${s}"
   done
   msg+=$'\n\n'"直し方:"
+  if ((long_kb)); then
+    msg+=$'\n'"- PR・issue の本文はファイルに書いて --body-file で渡し、git push は別のコマンドで打つ (短いコマンドなら、中を読んで"
+    msg+="本文と押す commit の参照を確かめる)"
+  fi
+  if [[ " ${fixes[*]} " == *" long "* ]]; then
+    msg+=$'\n'"- 参照は、commit の message とタイトルからは消し (「nixpkgs の PR 577218」のように言葉で書く)、本文とコメントでは"
+    msg+=" backquote で囲む"
+  fi
   if [[ " ${fixes[*]} " == *" commit "* ]]; then
     msg+=$'\n'"- commit の message からは参照を消し、「nixpkgs の PR 577218」のように # も URL も使わずに書く (commit の message は"
     msg+=" Markdown ではないので、backquote で囲んでも跡が付く)。参照は PR の本文に backquote で囲んで書く"
@@ -1412,6 +1459,12 @@ emit() {
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}' || true
 }
 
-scan_command "${cwd}" 0 "${cmd}"
+pick_awk
+cmd_bytes=$(byte_len "${cmd}")
+if ((cmd_bytes > lex_limit)); then
+  long_command "$(((cmd_bytes + 1023) / 1024))"
+else
+  scan_command "${cwd}" 0 "${cmd}"
+fi
 ((${#sections[@]} == 0)) || emit
 exit 0
