@@ -31,15 +31,16 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
 
 ## flake-update の中で起きること
 
-1. `flake-lock-age.sh update ./nix` — **公開から 7 日以上経った** revision へ pin
-   （ADR 005 の遅延。素の `nix flake update` は使わない）
+1. `flake-lock-age.sh update ./nix` — **公開から猶予の日数（`nix/release-age.nix`。既定 7）以上経った**
+   revision へ pin（ADR 005 の遅延。期間付きの例外があればその分だけ新しい pin。ADR 032。素の `nix flake update` は
+   使わない）
 2. **その完了時に `closure-scan` が自動で挟まる**（ADR 006）。本体には whitelist が
    あるので `scan` モード = **ゲート**として働く
 3. `sync_local_flake_lock` — `~/dotfiles` 側の lock を張り直す
 4. `switch`
 
-日数を変えるなら `DOTFILES_MIN_RELEASE_AGE_DAYS=N`（setup.sh が
-`FLAKE_MIN_RELEASE_AGE_DAYS` へ橋渡しする）。
+普段の日数は `nix/release-age.nix` の `minimumReleaseAgeDays`。その場だけ変えるなら
+`DOTFILES_MIN_RELEASE_AGE_DAYS=N`（setup.sh が `FLAKE_MIN_RELEASE_AGE_DAYS` へ橋渡しする）。
 
 ## ⚠️ ゲートが落ちたときの状態
 
@@ -103,7 +104,8 @@ vulnix / Grype はパッケージ名から CPE を引くので、**同名の別�
 
 - **pin を動かして直るか** — `flake-lock-age.sh resolve` が選ぶ先で修正版に届くか。
   pin と先端の版差分は `closure-head-diff.sh`
-- **修正が下限日数より新しい側にしか無いか** — あるなら「遅延を外すか」の話になる
+- **修正が下限日数より新しい側にしか無いか** — あるなら「期間付きの例外を足すか（`nix/release-age.nix`。
+  全体・一部 nixpkgs・一部 upstream。`nix/README.md`「猶予の日数と例外」）・遅延を外すか」の話になる
 - **到達性** — ワークステーションで実際に踏む経路があるか。閉包内のどこに居るかは
   `sbom.csv`
 
@@ -112,14 +114,17 @@ vulnix / Grype はパッケージ名から CPE を引くので、**同名の別�
 対応は 2 つしかない（ADR 006 §7、`closure-scan.sh` のエラーメッセージも同じ）。
 
 1. **pin を動かす** — `flake-lock-age.sh resolve` / `update`。修正が下限より新しい側に
-   しか無いなら `--min-age-days N` を下げる判断まで含む
+   しか無いなら、`nix/release-age.nix` に期間付きの例外を足すか、`--min-age-days N` を下げる判断まで含む。
+   例外は全体（nixpkgs 全体を日付まで）・一部 nixpkgs（その package だけを日付までの nixpkgs から）・一部 upstream
+   （nixpkgs に修正版がまだ無い package を upstream の配布物から）。一部の例外は、ほかの package から使われない
+   アプリだけ（ライブラリは全体）
 2. **意図して受け入れる** — `closure-scan.sh baseline` で whitelist へ追記し、comment に
    理由を書いて commit
 
 > ⚠️ **どちらも、実行する前にユーザーへ持っていく。**
 > whitelist は ADR 006 が明言しているとおり「安全と確認した」印ではなく**増分検知の
 > 基準線**で、追記は**リスク受容の意思表示**。`--min-age-days` を下げるのは ADR 005 の
-> 遅延を意図して外す判断。どちらも人間が決めること。
+> 遅延を意図して外す判断で、例外を足すのはそれを日付と範囲で区切って外す判断。どれも人間が決めること。
 
 ### Claude がやること
 
@@ -140,6 +145,7 @@ vulnix / Grype はパッケージ名から CPE を引くので、**同名の別�
 
 - `closure-scan.sh baseline`（whitelist への追記）
 - `--min-age-days` を下げた `update`
+- `nix/release-age.nix` への例外の追加
 - `--no-scan`
 - `flake.lock` を手で戻す / `git checkout` で捨てる（更新を無かったことにするのも判断）
 
@@ -181,6 +187,7 @@ git -C "$(ghq root)/github.com/pollenjp/dotfiles" add nix/flake.lock nix/vulnxsc
 
 - `nix/README.md` 「依存 (flake.lock) の更新」「閉包のスキャンと pin↔先端の差分」— 日常運用
 - ADR 005 — 新しすぎる revision を pin しない（遅延）の決定
+- ADR 032 — 猶予の日数を `nix/release-age.nix` の設定値にし、期間付きの例外（全体・一部）を書けるようにした決定
 - ADR 006 — 閉包の SBOM 化 + OSV / GHSA 照合の決定。whitelist の性格、初期 67 件、
   誤マッチ 8 件、CI のジョブ構成
 - `pjp-nix-flake` skill — **他の** repo に flake を用意する / lock を更新する側

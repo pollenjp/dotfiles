@@ -38,6 +38,7 @@
 | [029](./029_claude_ssh_agent_notice_20261022T194758JST/README.md) | Claude の作業が SSH agent (1Password) を使う前に hook で知らせ (どこから・何を・承認の画面が出る接続)、断られたら打ち直さずに選択肢の問いを出させる (skill にしない。git は署名するときだけ当てる) | 2026-10-22 |
 | [030](./030_mise_release_age_overrides_20261023T010148JST/README.md) | mise の遅延を option で決め、期間付きの上書き (この日までに出た版を取る上限) を dotfiles-private の `nix/shared/` の list で持ち、setup が今日 (Asia/Tokyo) と比べて上限の日時を mise に写す (`nix/shared/*.nix` は登録した全ホストに足す) | 2026-10-23 |
 | [031](./031_register_host_compare_shared_20261023T025916JST/README.md) | PC の登録の `private-host.sh compare` は、dotfiles-private の `nix/shared/` を外した新しい形とも比べ、`shared/` の値だけの違いなら 0 にして `shared/` が足す値を別に出す。元のホストが登録したホストなら、draft と compare の旧い形からも `shared/` を外し、clone と作業ツリーの `shared/` が同じかを出す | 2026-10-23 |
+| [032](./032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md) | nixpkgs の猶予の日数を `nix/release-age.nix` の設定値にし、セキュリティパッチのための期間付きの例外 (全体・一部 nixpkgs・一部 upstream) を同じファイルに理由とともに持つ。全体は flake-lock-age.sh が pin を日付まで進め、一部は home の pkgs の overlay (ほかの package から使われないアプリだけ) で当てる。消し時は pin の日時と版で決め、setup の警告のまとめと CI の annotation に出す (CI は落とさない)。最初の例外は mise 2026.10.17 (release の musl 版) | 2026-10-24 |
 
 ## ディレクトリ名
 

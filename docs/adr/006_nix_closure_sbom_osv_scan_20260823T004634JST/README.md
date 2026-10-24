@@ -7,6 +7,7 @@
 | 決定者 | pollenjp |
 | 前提 ADR | [005_nix_flake_lock_min_release_age](../005_nix_flake_lock_min_release_age_20260813T184522JST/README.md)（delay pin。本 ADR はその遅延が新しく作るリスクを塞ぐ） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md#閉包のスキャンと-pin先端の差分-遅延の補完)（日常運用はこちら） |
+| 後続 ADR | [032_nixpkgs_release_age_exceptions](../032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)（対応の 1 つ目「pin を動かす」に、`nix/release-age.nix` の期間付きの例外 (全体・一部) を足した。**§7 の運用手順は現行の形に更新済み。**本文の 2 択の記述は決定当時の記録としてそのまま残してある） |
 
 ---
 
@@ -294,7 +295,8 @@ dotfiles 本体の `update` はこの PR では実行していない（pin が�
 CI のゲート（`closure-scan` ジョブ）が落ちたら:
 
 1. **pin を動かして直るか見る** — `flake-lock-age.sh resolve / update`。修正が
-   下限日数より新しい側にしか無いなら、`--min-age-days` を下げて先端から入れる
+   下限日数より新しい側にしか無いなら、`nix/release-age.nix` に期間付きの例外
+   (全体・一部。ADR 032) を足すか、`--min-age-days` を下げて先端から入れる
    判断まで含む（ADR 005 の「遅延を外す」）
 2. **意図して受け入れる** — `baseline` で追記し、comment に理由を書いて commit
 
