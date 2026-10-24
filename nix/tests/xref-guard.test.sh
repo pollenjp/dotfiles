@@ -25,6 +25,26 @@
 #     PUBLIC と、gh が落ちたときは止める
 #   - PJP_ALLOW_XREF=1 (頭と env の引数) は通し、ほかの値は通さない。包むコマンド (timeout・bash -c) の中も見る
 #   - echo・grep の引数・引用符の中の gh、gh pr view・list は見ない
+#   - repo を渡していない gh は、gh repo set-default の repo (gh-resolved の base と owner/repo) があればそれだけを同じ repo
+#     とみなし、無ければ dir の remote の repo を全部同じ repo とみなす
+#
+#   git push:
+#   - 押す commit の message の参照は backquote の中も数え、commit・行・参照・公開範囲・直し方を返す。remote-tracking ref
+#     にある commit (fork の upstream のものも) は数えない。21 件目からは件数だけ書く
+#   - 押す ref は refspec の左 (HEAD:x・+feat:feat・sha・tag v1)・--all・--tags・HEAD。解けない ref ($( )・変数・同じコマンドで
+#     作る branch) は HEAD。押す先は引数の名前と URL・remote.pushDefault・pushurl。git -C・cd (解けない行き先は今の dir)・
+#     timeout・env・bash -c・git gh の中も見る
+#   - 削除・--dry-run・--help・手元の path への push・git stash push・git log --grep push は見ない。PRIVATE の push 先は通し、
+#     github.com でない host は止める
+#   - 同じコマンドで push より前に作る commit (-m・-am・--message=・-F <file>・-F - の heredoc・$(cat <<EOF)) の message も
+#     数える。PJP_ALLOW_XREF=1 を付けた commit は数えない。--amend は書き換える前の HEAD を数えず、--no-edit なら今の
+#     HEAD の message を数える
+#
+#   読み方:
+#   - 同じコマンドの前の方で書いたファイル (cat <<EOF > f・echo … > f・printf … > f・tee f) は、書いた中身を読む (古い
+#     中身を読まない)。-c も script のファイルも無い shell (bash <<EOF・bash -s・cat … | bash) は stdin を読み直す
+#   - 64 KB を超えるコマンドは中を読まず、参照か git … push があれば止めてファイルにするよう返し、無ければ黙る (dir の repo
+#     が private なら通す)。git の多い 110 KB のコマンドも 5 秒より前に返す
 #
 #   - Bash 以外・壊れた入力・空の入力は黙り、いつも exit 0。止める出力は permissionDecision が deny の 1 行の JSON だけ
 
@@ -77,7 +97,7 @@ exit 1
 EOF
 chmod +x "${work}/bin/gh"
 export PATH="${work}/bin:${PATH}"
-export FAKE_GH_VIS="pollenjp/dotfiles=PUBLIC pollenjp/secret=PRIVATE acme/inner=INTERNAL acme/open=PUBLIC"
+export FAKE_GH_VIS="pollenjp/dotfiles=PUBLIC pollenjp/secret=PRIVATE acme/inner=INTERNAL acme/open=PUBLIC pollenjp/fork=PUBLIC"
 export FAKE_GH_DEFAULT=pollenjp/dotfiles
 
 # 作業する repo (origin は public な pollenjp/dotfiles。push はしない)
@@ -454,6 +474,88 @@ for i in $(seq 1 25); do
 done
 expect_reason "21 件目からは件数だけ書く" "git push" "${r}" "- ほか 5 件"
 
+echo "== xref-guard.sh: 解けない ref と dir・同じコマンドで書くファイル・stdin の script・amend・set-default"
+
+r=$(new_repo q1)
+commit_in "${r}" "feat: ok"
+commit_in "${r}" "fix: ${ref}"
+# 押す ref を解けない (同じコマンドで作る branch・$( )・変数) ときは HEAD を見る
+# shellcheck disable=SC2016 # Bash に打たせるコマンドの文字そのもの
+expect_deny 'git push -u origin "$(git branch --show-current)"' "${r}"
+# shellcheck disable=SC2016 # 同上
+expect_deny 'BRANCH=feat; git push -u origin "$BRANCH"' "${r}"
+expect_deny "git switch -c feat/new && git push -u origin feat/new" "${r}"
+# cd・-C の先を解けないときは、今の dir のまま見る
+# shellcheck disable=SC2016 # 同上
+expect_deny 'cd "$(git rev-parse --show-toplevel)" && git push' "${r}"
+# shellcheck disable=SC2016 # 同上
+expect_deny 'git -C "$(pwd)" push' "${r}"
+# shellcheck disable=SC2016 # 同上
+expect_deny 'cd "$PROJECT_DIR" && git push' "${r}"
+# stdin で shell に渡した script も読む (script のファイルを渡した shell の stdin は読まない)
+expect_deny "bash <<'EOF'
+git push -u origin feat
+EOF" "${r}"
+expect_deny "bash -s <<'EOF'
+git push
+EOF" "${r}"
+expect_deny "cat <<'EOF' | bash
+git push
+EOF" "${r}"
+expect_allow "bash ./deploy.sh <<'EOF'
+git push
+EOF" "${r}"
+# amend と push を 1 つのコマンドで打つ: 書き換える前の HEAD は数えず、新しい message を数える
+expect_allow "git commit --amend -m 'fix: x (nixpkgs の PR 577218)' && git push --force-with-lease" "${r}"
+expect_deny "git commit --amend -m 'fix: x ${ref}' && git push -f" "${r}"
+git -C "${r}" update-ref refs/remotes/origin/feat HEAD
+expect_allow "git push -f" "${r}"
+expect_reason "--no-edit の amend は、push 済みの HEAD の message も数える (新しい commit になる)" \
+  "git commit --amend --no-edit && git push -f" "${r}" "これから作る commit (git commit) の 1 行目: ${ref}"
+
+# 同じコマンドで書いたファイル: 書いた中身を読む (前からあるファイルの古い中身を読まない)
+r=$(new_repo q2)
+commit_in "${r}" "feat: ok"
+printf 'ok\n' >"${r}/body.md"
+expect_deny "cat > body.md <<'EOF'
+- waits for ${ref}
+EOF
+gh pr create --title x --body-file body.md" "${r}"
+expect_deny "cat <<'EOF' >${work}/new-body.md
+${ref}
+EOF
+gh pr create --title x -F ${work}/new-body.md" "${r}"
+expect_deny "printf '%s\\n' '${ref}' > body.md && gh pr create -t x -F body.md" "${r}"
+expect_deny "echo '${ref}' > body.md; gh pr create -t x -F body.md" "${r}"
+expect_deny "tee body.md >/dev/null <<'EOF'
+${ref}
+EOF
+gh pr create -t x -F body.md" "${r}"
+printf '%s\n' "${ref}" >"${r}/stale.md"
+expect_allow "cat > stale.md <<'EOF'
+nixpkgs の PR 577218 を待つ
+EOF
+gh pr create -t x -F stale.md" "${r}"
+expect_deny "cat > msg.txt <<'EOF'
+fix: x
+
+see ${ref}
+EOF
+git commit -F msg.txt && git push" "${r}"
+
+# fork の clone: gh repo set-default が書く remote.<名前>.gh-resolved があれば、その repo だけを同じ repo とみなす
+r=$(new_repo q3 https://github.com/pollenjp/fork.git)
+git -C "${r}" remote add upstream https://github.com/acme/open.git
+expect_allow "gh pr create --title x --body 'Ports acme/open#5'" "${r}"
+git -C "${r}" config remote.origin.gh-resolved base
+expect_reason "set-default の repo (base) だけを同じ repo とみなす" "gh pr create --title x --body 'Ports acme/open#5'" "${r}" \
+  "gh pr create → pollenjp/fork (public な repo):" "acme/open#5"
+expect_allow "gh pr create --title x --body 'pollenjp/fork#1'" "${r}"
+git -C "${r}" config remote.origin.gh-resolved acme/open
+expect_allow "gh pr create --title x --body 'Ports acme/open#5'" "${r}"
+expect_reason "set-default の repo (owner/repo) だけを同じ repo とみなす" "gh pr create --title x --body 'pollenjp/fork#1'" "${r}" \
+  "gh pr create → acme/open (public な repo):"
+
 echo "== xref-guard.sh: 長いコマンド"
 
 # 64 KB (Nix のサンドボックスの stdenv には gawk がある) を超えるコマンドは中を読まず、参照か git … push があれば止める
@@ -467,6 +569,19 @@ git push" "${repo}" "コマンドが長すぎて" "git push は別のコマン�
 expect_allow "gh pr create --title x --body '${long}'"
 expect_allow "PJP_ALLOW_XREF=1 gh pr create --title x --body '${long} ${ref}'"
 expect_allow_after_gh "gh pr create --title x --body '${long} ${ref}'" "${repo}" FAKE_GH_DEFAULT=pollenjp/secret
+# git の多い長い文書 (push は無い) でも待たせない (改行をまたいで push を探すと、長さの二乗で遅くなる)
+gitdoc=$(printf 'git status と git log を流す (%s)\n' $(seq 1 3000))
+start=${EPOCHREALTIME/./}
+pre "cat > notes.md <<'EOF'
+${gitdoc}
+EOF
+gh pr view 1"
+ms=$(((${EPOCHREALTIME/./} - start) / 1000))
+if silent && [[ $(gh_calls) == 0 ]] && ((ms < 5000)); then
+  ok "git の多い 110 KB のコマンド (push は無い) も、黙って 5 秒より前に返す (${ms} ms)"
+else
+  ng "git の多い 110 KB のコマンド (push は無い) も、黙って 5 秒より前に返す (${ms} ms)" "$(detail)"
+fi
 
 echo "== xref-guard.sh: 黙るとき"
 

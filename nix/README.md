@@ -2494,14 +2494,16 @@ pjp-dev-tracker の「repo に書くもの」）。判断は script がするの
 
 | コマンド | 見るもの | 数える参照 |
 | --- | --- | --- |
-| `git push`（`git -C … push` も） | 押す commit（どの remote-tracking ref からも辿れないもの。新しい方から 1000 個）と、同じコマンドで push より前に作る commit（`git commit -m`・`-F`）の message | backquote の中も |
+| `git push`（`git -C … push` も） | 押す commit（どの remote-tracking ref からも辿れないもの。新しい方から 1000 個。同じコマンドの `--amend` で書き換える HEAD は数えない）と、同じコマンドで push より前に作る commit（`git commit -m`・`-F`）の message | backquote の中も |
 | `gh pr create`・`edit`、`gh issue create`・`edit` | タイトル | backquote の中も |
 | 同上と `gh pr comment`・`review`、`gh issue comment` | 本文・コメント（`--body`・`--body-file`。`"$(cat <<'EOF' … EOF)"` は heredoc の本文を読む） | code block と inline code の外だけ |
 | `gh pr merge` | merge の commit の件名・本文 | backquote の中も |
 
 - 止めるのは public な repo と、公開範囲を確かめられない repo（gh が無い・未ログイン・github.com でない host）だけ。公開範囲は
   参照が見つかったときだけ `gh repo view` で引く（10 秒で切る。控えは持たない）。同じ repo の参照と `#番号`、手元の path への
-  push は見ない
+  push は見ない。repo を渡していない gh の「同じ repo」は、`gh repo set-default` の repo（無ければ dir の remote の repo を全部）
+- 同じコマンドの前の方で書いたファイル（`cat <<EOF > body.md`・`tee body.md`）は、後ろの `--body-file`・`git commit -F` で
+  書いた中身を読む。`bash <<EOF`・`cat … | bash` に渡した script も読む
 - 意図して参照するときは、**ユーザーが明示したときだけ**、コマンドの頭に `PJP_ALLOW_XREF=1` を付けて打つ（`env` の引数・
   `bash -c` の中にも効く。止めたときに返す文にも「自分の判断では付けない」と書いてある）
 - コマンドの文字の読み方は[前述](#1password-の-ssh-承認を知らせるフック)の hook と同じく近似で、script の中・関数・alias・

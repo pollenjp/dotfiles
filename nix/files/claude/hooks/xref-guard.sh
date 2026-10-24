@@ -11,13 +11,23 @@
 #
 # ## 止めるもの (PreToolUse・matcher Bash)
 #
+#   git push (git -C … push・git gh push も)
+#       押す commit の message。押す ref (refspec の左・--all・--mirror・--tags・remote.<名前>.push・HEAD。解けない ref は
+#       HEAD) から辿れて、どの remote-tracking ref からも辿れない commit を、新しい方から 1000 個まで見る。同じコマンドで
+#       push より前に作る commit (git commit -m・-F) の message も数える (hook が走る時点では、その commit はまだ無い)。
+#       --amend の commit は、書き換える前の HEAD を数えず、新しい message (変えないなら今の HEAD の message) を数える。
+#       commit の message は Markdown ではないので、backquote の中も数える。削除・--dry-run・手元の path への push は見ない
 #   gh pr create・edit・comment・review・merge、gh issue create・edit・comment
 #       タイトル (-t・--title) と merge の commit の件名・本文 (gh pr merge の --subject・--body) は backquote の中も
 #       数え、本文・コメント (-b・--body・-F・--body-file) は code block (``` か ~~~ の囲み) と inline code の外だけを数える
+#   読む長さ (下の「読み方」) を超えたコマンド
+#       中を読まずに、文字のどこかに参照か git … push があれば止め、本文をファイルにするかコマンドを分けるよう返す
+#       (dir の repo が private・internal なら通す)
 #
 # 拾う形は claude-skills の ticket.sh pr (pjp-dev-tracker の ticket.py の XREF_RES と strip_code) と同じ: owner/repo#番号・
-# owner/repo@sha (7〜40 桁)・github.com の issues・pull・discussions・commit の URL。同じ repo (-R・引数の PR の URL・
-# GH_REPO の repo。どれも無ければ dir の remote の repo を全部) と #番号 は数えない。
+# owner/repo@sha (7〜40 桁)・github.com の issues・pull・discussions・commit の URL。同じ repo と #番号 は数えない。同じ
+# repo は、push なら push 先 (insteadOf を解いた push の URL) の repo、gh なら -R・引数の PR の URL・GH_REPO の repo、どれも
+# 無ければ gh repo set-default の repo (remote.<名前>.gh-resolved)、それも無ければ dir の remote の repo を全部。
 #
 # 参照が見つかったときだけ、gh repo view で公開範囲を引く (10 秒で切る。控えは持たない: private から public に変えた
 # 直後に古い値で通さない)。PRIVATE・INTERNAL は通し、PUBLIC と、引けないもの (gh が無い・未ログイン・時間切れ・
@@ -31,17 +41,21 @@
 # コマンドの文字を awk で単純コマンドに分ける (split_commands)。元は ssh-agent-notice.sh の lexer で、次を変えた。
 #
 #   - heredoc の本文・here-string・< file を、その単純コマンドの stdin として残す。パイプでつながっているかも残す
-#     (gh … -F - の本文に、そのコマンドの heredoc か、パイプの前の cat <<EOF・echo を使う)
-#   - 語の中の改行を残す (本文の code block の判定に要る)。1 つの単純コマンドは「<P|-> US <stdin> US <語> US …」の
-#     1 レコード (US は \037、レコードの終わりは \036。stdin は H<本文>・F<path>・空)
+#     (gh … -F - の本文に、そのコマンドの heredoc か、パイプの前の cat <<EOF・echo を使う。-c も script のファイルも
+#     無い shell (bash <<EOF・cat … | bash) は stdin を読み直す)
+#   - > f・>> f・&> f の書き先を残す。前の方の cat <<EOF > f・echo … > f・tee f で書いたファイルは、後ろの --body-file・
+#     git commit -F で、書いた中身を読む (hook が走る時点では、まだ無いか古い中身のまま)
+#   - 語の中の改行を残す (本文の code block の判定に要る)。1 つの単純コマンドは「<P|-> US <stdin> US <書き先> US <語> US …」
+#     の 1 レコード (US は \037、レコードの終わりは \036。stdin は H<本文>・F<path>・空)
 #   - $( )・<( ) の閉じ括弧は、引用符・heredoc の本文・コメントを見て探す (本文の「1)」で閉じない)
 #   - $( ) を値に置き換える: $(cat <<EOF … EOF) は heredoc の本文、$(cat <file>)・$(< <file>) はファイルの中身
 #     (印 \002<path>\003 を bash の側で読む)、ほかは中の文字のまま。中は別の単純コマンドとしても読む
 #   - (( … )) を飛ばす (<< を heredoc と読まない)
 #
 # 頭の VAR=値・包むコマンド (env・sudo・timeout・nohup・nix develop -c など)・予約語は外し、bash -c・eval などに文字列で
-# 渡したものは読み直す (3 段まで)。cd は後ろの単純コマンドの dir に効かせる。代入だけの単純コマンド (BODY=…・export
-# BODY=…) は覚えておき、値がちょうど "$BODY" の語に入れる。script の中・関数・alias に入れたコマンドは見えない。
+# 渡したものは読み直す (3 段まで)。cd と git -C は後ろの単純コマンドの dir に効かせる (行き先を解けない $( )・変数なら
+# 今の dir のまま)。代入だけの単純コマンド (BODY=…・export BODY=…) は覚えておき、値がちょうど "$BODY" の語に入れる。
+# script の中・関数・alias に入れたコマンドは見えない。
 # 読むのは 64 KB (gawk・mawk の無いマシンでは 16 KB) まで (macOS の awk は長いコマンドで遅い。ssh-agent-notice.sh と同じ)。
 #
 # ## 黙る場面
@@ -77,7 +91,8 @@ cwd=$(field '.cwd')
 #
 #   - '…'・"…"・$'…'・\ を外して語にする。${…}・$((…)) は語のまま
 #   - ; & | 改行 ( ) で分ける。[[ … ]] の中の ( ) | < > は分けない
-#   - リダイレクトの先 (> f・2>&1 の 1 など) は捨て、< f は stdin の F、here-string は stdin の H にする。heredoc は
+#   - リダイレクトの先は、< f を stdin の F、> f・>> f・>| f・&> f (stdout) を書き先にし、ほか (2> f・2>&1 の 1 など) は
+#     捨てる。here-string は stdin の H にする。heredoc は
 #     終わりの印までの本文を stdin の H にする
 #   - 語の頭の # から行末まではコメント
 read -r -d '' lexer <<'AWK' || true
@@ -94,7 +109,7 @@ END {
     flush_cmd(0)
   }
   for (k = 1; k <= ncmd; k++) {
-    printf "%s%s%s", cpipe[k], US, cstdin[k]
+    printf "%s%s%s%s%s", cpipe[k], US, cstdin[k], US, coutf[k]
     if (cnw[k] > 0) printf "%s%s", US, cwords[k]
     printf "%s", RSEP
   }
@@ -111,6 +126,9 @@ function flush_word() {
       skip = 0
     } else if (skip == 3) {
       cur_stdin = "H" word "\n"
+      skip = 0
+    } else if (skip == 4) {
+      cur_outf = word
       skip = 0
     } else {
       if (word == "[[") inbr = 1
@@ -134,12 +152,14 @@ function flush_cmd(pipe,   k, line, stored) {
     cnw[ncmd] = nw
     cpipe[ncmd] = pipein ? "P" : "-"
     cstdin[ncmd] = cur_stdin
+    coutf[ncmd] = cur_outf
     stored = 1
   }
   nw = 0
   skip = 0
   inbr = 0
   cur_stdin = ""
+  cur_outf = ""
   own_hd = 0
   # a |<改行> b のように、空のコマンドではパイプを切らない
   if (stored || pipe) pipein = pipe
@@ -339,7 +359,7 @@ function ansi_c(s, p,   n, j, d, e) {
   return j
 }
 
-function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip) {
+function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip, fd) {
   n = length(s)
   for (i = 1; i <= n; i++) {
     c = substr(s, i, 1)
@@ -409,10 +429,11 @@ function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip) {
     }
     if (c == "&") {
       if (substr(s, i + 1, 1) == ">") {
+        # &> f・&>> f は stdout の書き先
         flush_word()
         i++
         if (substr(s, i + 1, 1) == ">") i++
-        skip = 1
+        skip = 4
         continue
       }
       if (substr(s, i + 1, 1) == "&") i++
@@ -421,7 +442,8 @@ function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip) {
     }
     if (c == "<" || c == ">") {
       # 2> の 2 は fd なので語にしない
-      if (inword && word ~ /^[0-9]+$/) { word = ""; inword = 0 } else flush_word()
+      fd = ""
+      if (inword && word ~ /^[0-9]+$/) { fd = word; word = ""; inword = 0 } else flush_word()
       c2 = substr(s, i + 1, 1)
       if (c2 == "(") { i = subst(s, i + 1, c); continue }
       if (c == "<" && c2 == "<") {
@@ -446,8 +468,10 @@ function lex(s,   n, i, c, c2, d, j, k, q, pos, delim, strip) {
         own_hd = 1
         continue
       }
-      # < f は stdin のファイル。<& <> と > の先は捨てる
-      skip = (c == "<" && c2 != "&" && c2 != ">") ? 2 : 1
+      # < f は stdin のファイル、> f・>> f・>| f は stdout の書き先 (書いた中身を後ろの --body-file・-F で読む)。
+      # <& <> >& と 2> などの先は捨てる
+      if (c == "<") skip = (c2 != "&" && c2 != ">") ? 2 : 1
+      else skip = (c2 != "&" && (fd == "" || fd == "1")) ? 4 : 1
       while (substr(s, i + 1, 1) ~ /[>&|]/) i++
       continue
     }
@@ -581,24 +605,55 @@ expand_home() {
   printf '%s' "${d}"
 }
 
-# join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -) なら今の dir
+# join_dir <今の dir> <cd の引数>: cd の行き先。分からない (cd -・$( )・変数) なら今の dir (前の代入は入れる)
 join_dir() {
   local d
-  d=$(expand_home "$2")
+  expand_value "$1" "$2"
+  d=$(expand_home "${expanded}")
   case ${d} in
     '') printf '%s' "${HOME}" ;;
-    -) printf '%s' "$1" ;;
+    - | *'$'* | *'`'* | *$'\002'*) printf '%s' "$1" ;;
     /*) printf '%s' "${d}" ;;
     *) printf '%s' "$1/${d}" ;;
   esac
 }
 
-# read_file <dir> <path>: ふつうのファイルなら頭の 1 MB を file_text に入れて 0 を返す (/dev/zero などで待たない)
-read_file() {
+# abs_path <dir> <path>: dir から見た path (/./ と // は詰める)
+abs_path() {
   local p
   p=$(expand_home "$2")
   [[ ${p} == /* ]] || p="$1/${p}"
+  while [[ ${p} == *'/./'* || ${p} == *'//'* ]]; do
+    p=${p//\/.\//\/}
+    p=${p//\/\//\/}
+  done
+  printf '%s' "${p}"
+}
+
+# remember_write <dir> <path> <中身が分かるか (1|0)> <中身>: 同じコマンドの前の方で書いたファイルを覚える (hook が走る
+# 時点では、まだ書かれていないか、古い中身のまま)
+declare -A written=()
+remember_write() {
+  local p
+  p=$(abs_path "$1" "$2")
+  if (($3)); then
+    written[${p}]="K$4"
+  else
+    written[${p}]="U"
+  fi
+}
+
+# read_file <dir> <path>: ふつうのファイルなら頭の 1 MB を file_text に入れて 0 を返す (/dev/zero などで待たない)。同じ
+# コマンドの前の方で書いたファイルは、書いた中身 (分からなければ 1)
+read_file() {
+  local p
+  p=$(abs_path "$1" "$2")
   file_text=""
+  if [[ -n ${written[${p}]+x} ]]; then
+    [[ ${written[${p}]} == K* ]] || return 1
+    file_text=${written[${p}]:1}
+    return 0
+  fi
   [[ -f ${p} && -r ${p} ]] || return 1
   file_text=$(head -c 1048576 -- "${p}" 2>/dev/null) || return 1
 }
@@ -782,6 +837,31 @@ gh_target() {
   target="${host,,}/${v}"
 }
 
+# gh_default <dir>: gh repo set-default が書く remote.<名前>.gh-resolved (その remote なら base、remote に無い repo なら
+# owner/repo) があれば、その repo を同じ repo (job_own) と公開範囲を引く repo (target) にする。fork の clone で、fork の中に
+# 出す PR から upstream への参照を見逃さない
+gh_default() {
+  local key val name u
+  while read -r key val; do
+    name=${key#remote.}
+    name=${name%.gh-resolved}
+    u=$(git -C "$1" remote get-url "${name}" 2>/dev/null </dev/null) || u=""
+    if [[ ${val} == base ]]; then
+      url_parse "${u}" || continue
+      job_own=("${url_slug}")
+      target="${url_host}/${url_slug}"
+    elif [[ ${val} == */* ]]; then
+      url_parse "${u}" || url_host=github.com
+      job_own=("${val}")
+      target="${url_host}/${val}"
+    else
+      continue
+    fi
+    return 0
+  done < <(git -C "$1" config --get-regexp '^remote\..*\.gh-resolved$' 2>/dev/null </dev/null)
+  return 0
+}
+
 # gh_cmd <dir> <gh の後ろの語>…: gh pr|issue … のタイトルと本文を調べる (呼び出し元の simple の in_text・in_known・
 # env_repo・env_host を使う)
 gh_cmd() {
@@ -895,8 +975,11 @@ gh_cmd() {
   elif [[ -n ${env_repo} ]]; then
     gh_target "${env_repo}"
   else
-    mapfile -t job_own < <(remote_slugs "${dir}")
-    hint=${job_own[0]-}
+    gh_default "${dir}"
+    if ((${#job_own[@]} == 0)); then
+      mapfile -t job_own < <(remote_slugs "${dir}")
+      hint=${job_own[0]-}
+    fi
   fi
 
   if ((title_set)); then
@@ -970,8 +1053,9 @@ git_cmd() {
 # commit_msg <dir> <git commit の後ろの語>…: -m・--message (重ねたものは空行でつなぐ)・-F・--file の message を
 # pending_msgs に足す。hook が走る時点では、その commit はまだ無いので、後ろの push で数える
 pending_msgs=()
+amend_head=0
 commit_msg() {
-  local dir=$1 x v c i k msg="" have=0
+  local dir=$1 x v c i k msg="" have=0 amend=0 m
   shift
   local -a a=("$@")
   # add_msg <-m の値か、-F の file (- は stdin)>
@@ -994,6 +1078,7 @@ commit_msg() {
     x=${a[i]}
     case ${x} in
       --) break ;;
+      --amend) amend=1 ;;
       --message=*) add_msg m "${x#*=}" ;;
       --file=*) add_msg F "${x#*=}" ;;
       --message | --file | --reuse-message | --reedit-message | --template | --author | --date | --fixup | --squash | --trailer)
@@ -1017,6 +1102,15 @@ commit_msg() {
         ;;
     esac
   done
+  # amend は HEAD を書き換える: 後ろの push では書き換える前の HEAD を数えない。message を変えない amend も新しい commit
+  # になる (push すると跡がまた付く) ので、今の HEAD の message を数える
+  if ((amend)); then
+    amend_head=1
+    if ((! have)) && m=$(git -C "${dir}" log -1 --format=%B HEAD 2>/dev/null </dev/null); then
+      msg=${m}
+      have=1
+    fi
+  fi
   ((have)) && pending_msgs+=("${msg}")
   return 0
 }
@@ -1024,9 +1118,9 @@ commit_msg() {
 # push_job <dir> <git push の後ろの語>…: 押す commit (押す ref から辿れて、どの remote-tracking ref からも辿れないもの。
 # 新しい方から 1000 個) と pending_msgs の message を調べる (呼び出し元の git_cmd の gopts を使う)
 push_job() {
-  local dir=$1 x remote="" repo_opt="" all=0 mirror=0 tags=0 i k c src r cur url m
+  local dir=$1 x remote="" repo_opt="" all=0 mirror=0 tags=0 i k c src r cur url m head
   shift
-  local -a a=("$@") pos=() specs=() revs=()
+  local -a a=("$@") pos=() specs=() revs=() kept=()
   for ((i = 0; i < ${#a[@]}; i++)); do
     x=${a[i]}
     case ${x} in
@@ -1099,10 +1193,28 @@ push_job() {
     [[ -n ${src} ]] || continue
     if [[ ${src} == *'*'* ]]; then
       revs+=("--glob=${src}")
-    elif r=$(git_in rev-parse --verify -q "${src}^{commit}"); then
+      continue
+    fi
+    expand_value "${dir}" "${src}"
+    if r=$(git_in rev-parse --verify -q "${expanded}^{commit}"); then
+      revs+=("${r}")
+    elif r=$(git_in rev-parse --verify -q 'HEAD^{commit}'); then
+      # 解けない ref (同じコマンドで作る branch・$( )・変数) は、HEAD から作るものとみなす
       revs+=("${r}")
     fi
   done
+  # 同じコマンドの amend で書き換える HEAD は数えず、その親から辿る (新しい message は pending_msgs で数える)
+  if ((amend_head)) && head=$(git_in rev-parse --verify -q 'HEAD^{commit}'); then
+    kept=()
+    for r in "${revs[@]}"; do
+      if [[ ${r} == "${head}" ]]; then
+        mapfile -t -O "${#kept[@]}" kept < <(git_in rev-parse 'HEAD^@')
+      else
+        kept+=("${r}")
+      fi
+    done
+    revs=("${kept[@]}")
+  fi
 
   job_texts=()
   job_own=("${url_slug}")
@@ -1155,11 +1267,11 @@ rescan() {
   inh_host=${s_host}
 }
 
-# simple <dir> <段> <P|-> <stdin> <語>…: 単純コマンドを 1 つ見る。cd なら next_dir に行き先を入れ、出力 (パイプの先の
-# stdin) が分かれば out_text・out_known に入れる
+# simple <dir> <段> <P|-> <stdin> <stdout の書き先> <語>…: 単純コマンドを 1 つ見る。cd なら next_dir に行き先を入れ、
+# 出力 (パイプの先の stdin・> f の中身) が分かれば out_text・out_known に入れる
 simple() {
-  local dir=$1 depth=$2 pipe=$3 stdin=$4
-  shift 4
+  local dir=$1 depth=$2 pipe=$3 stdin=$4 outf=$5 a
+  shift 5
   local -a w=("$@") assigns=()
   local allow=${inh_allow} env_repo=${inh_repo} env_host=${inh_host} in_text="" in_known=0 i guard=0
   case ${stdin} in
@@ -1302,6 +1414,8 @@ simple() {
             *) return 0 ;;
           esac
         done
+        # -c も script のファイルも無い shell (bash <<EOF・bash -s・cat … | bash) は stdin を読む
+        ((in_known)) && rescan "${dir}" "${depth}" "${in_text}"
         return 0
         ;;
       eval)
@@ -1364,7 +1478,15 @@ simple() {
       out_text=${w[*]:1}
       out_known=1
       ;;
+    tee)
+      out_text=${in_text}
+      out_known=${in_known}
+      for a in "${w[@]:1}"; do
+        [[ ${a} == -* ]] || remember_write "${dir}" "${a}" "${in_known}" "${in_text}"
+      done
+      ;;
   esac
+  [[ -z ${outf} ]] || remember_write "${dir}" "${outf}" "${out_known}" "${out_text}"
   return 0
 }
 
@@ -1381,8 +1503,8 @@ scan_command() {
     next_dir=""
     out_text=""
     out_known=0
-    if ((${#rec[@]} > 2)); then
-      simple "${dir}" "${depth}" "${rec[0]}" "${rec[1]}" "${rec[@]:2}"
+    if ((${#rec[@]} > 3)); then
+      simple "${dir}" "${depth}" "${rec[0]}" "${rec[1]}" "${rec[2]}" "${rec[@]:3}"
     fi
     [[ -z ${next_dir} ]] || dir=${next_dir}
     last_out=${out_text}
@@ -1396,7 +1518,9 @@ scan_command() {
 # private・internal なら通す)。本文をファイルにして --body-file で渡すか、コマンドを分ければ、中を読んで確かめられる
 long_kb=0
 long_command() {
-  local name desc push_re='(^|[^[:alnum:]_.-])git[[:space:]]+([^;&|]*[[:space:]])?push([[:space:]]|$)'
+  # git … push は 1 行の中だけで探す (改行をまたぐと、git の多い長い文書で長さの二乗の時間がかかる)
+  local name desc nl=$'\n' push_re
+  push_re="(^|[^[:alnum:]_.-])git[[:space:]]+([^;&|${nl}]*[[:space:]])?push([[:space:]]|\$)"
   [[ ${cmd} == *PJP_ALLOW_XREF=1* ]] && return 0
   long_kb=$1
   job_texts=()

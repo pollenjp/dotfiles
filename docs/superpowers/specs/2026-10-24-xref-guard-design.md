@@ -90,9 +90,10 @@
   (Oniguruma。lookbehind と `\k<名前>` が使える) で当てる。
 - Markdown の code を外すのは `ticket.py` の `strip_code` と同じ (閉じない backquote は空行を越えない)。行の番号を
   保つよう、外した inline code の中の改行は残す。
-- 同じ repo は、push なら push 先の repo、gh なら `-R`・引数の URL・`GH_REPO` の repo。どれも無い gh は、その dir の
-  remote の repo を全部同じ repo とみなす (fork の clone で upstream への PR を出す形を止めない)。名前は大文字小文字を
-  区別しない。
+- 同じ repo は、push なら push 先の repo、gh なら `-R`・引数の URL・`GH_REPO` の repo。どれも無い gh は、
+  `gh repo set-default` が書く `remote.<名前>.gh-resolved` (その remote なら `base`、remote に無い repo なら `owner/repo`) の
+  repo、それも無ければ dir の remote の repo を全部同じ repo とみなす (fork の clone で upstream への PR を出す形を止めず、
+  fork の中に出す PR から upstream への参照は止める)。名前は大文字小文字を区別しない。
 - 承認した設計の 5 つに、`gh issue edit` (タイトルと本文)・`gh pr review` (本文)・`gh pr merge` (merge の commit の
   message) を足した。どれも同じ跡を付ける。
 
@@ -101,13 +102,16 @@
 - 押す ref から辿れて、どの remote-tracking ref (`refs/remotes/*`) からも辿れない commit (`git log <ref>… --not --remotes`)。
   新しい方から 1000 個まで。fork で upstream の commit を押しても、upstream の remote-tracking ref にあれば数えない。
 - 押す ref: refspec の左 (`+`・`tag <名前>`・glob も)。refspec が無ければ `remote.<名前>.push`、それも無ければ `HEAD`。
+  解けない ref (`"$(git branch --show-current)"`・`"$BRANCH"`・同じコマンドで作る branch) は `HEAD` とみなす。
   `--all`・`--branches` は全 branch、`--mirror` (と `remote.<名前>.mirror`) は全 ref、`--tags` は全 tag。削除
   (`:<ref>`・`--delete`) と `--dry-run` は何も送らないので見ない。
 - 押す先: 引数の remote (名前か URL)・`--repo`、無ければ `branch.<今>.pushRemote` → `remote.pushDefault` →
   `branch.<今>.remote` → `origin`。URL は `git remote get-url --push` (insteadOf を解いたもの)。手元の path・`file://`
   は GitHub に届かないので見ない。
 - 同じコマンドの中で push より前に `git commit -m …` (`-F <file>`・`-F -` と heredoc も) があれば、その message も
-  数える (hook が走る時点では、その commit はまだ無い)。
+  数える (hook が走る時点では、その commit はまだ無い)。`--amend` なら、後ろの push は書き換える前の HEAD を数えずに
+  その親から辿り、message を変えない amend (`--no-edit`) は今の HEAD の message を数える (新しい commit になり、push すると
+  跡がまた付く)。
 
 ### 5. gh のタイトルと本文
 
@@ -117,6 +121,9 @@
   値がちょうど `$BODY`・`${BODY}` のときに置き換える。ほかの `$( )` は中の文字のまま数える (中に参照の文字があれば拾う)。
 - `--body-file -` は、そのコマンドの heredoc・here-string・`< file`、パイプの前の `cat <<EOF`・`cat <file>`・
   `echo`・`printf` を本文とみなす。読めないファイルは、語の文字のまま数える。
+- 同じコマンドの前の方で書いたファイル (`cat <<EOF > f`・`echo … > f`・`printf … > f`・`tee f`) は、`--body-file`・
+  `git commit -F` で書いた中身を読む (hook が走る時点では、まだ無いか古い中身のまま)。中身の分からない書き方 (ほかの
+  コマンドの `> f`) なら読まない。
 
 ### 6. 公開範囲
 
@@ -134,10 +141,12 @@
   引用符・heredoc の本文・コメントを見て探す (本文の `1)` で閉じない)。`$( )` を値に置き換える (上の 5)。パイプで
   つながっているかを残す。`(( … ))` を飛ばす。
 - 包むコマンド (`env`・`sudo`・`timeout`・`nohup`・`nix develop -c` など)・`bash -c`・`eval`・`cd`・`git -C` の
-  扱いは `ssh-agent-notice.sh` と同じ。
+  扱いは `ssh-agent-notice.sh` と同じ。`cd`・`git -C` の行き先を解けない (`$( )`・変数) なら今の dir のまま見る。`-c` も
+  script のファイルも無い shell (`bash <<EOF`・`bash -s`・`cat … | bash`) は stdin を読み直す。
 - 読むのは 64 KB (gawk・mawk の無いマシンでは 16 KB) まで (バイトで数える。awk はバイトで読む)。それより長いコマンドは、
   コマンドの文字のどこかに参照か `git … push` があれば止め、本文をファイルにして `--body-file` で渡すか、コマンドを分けるよう
-  返す。公開範囲は dir の repo で引き、private・internal なら通す (長いコマンドの `-R` は読まない)。
+  返す。公開範囲は dir の repo で引き、private・internal なら通す (長いコマンドの `-R` は読まない)。`git … push` は 1 行の
+  中だけで探す (改行をまたぐと、git の多い長い文書で長さの二乗の時間がかかる)。
 
 ### 8. 黙って通すとき
 

@@ -53,14 +53,16 @@ commit の URL。同じ repo の参照と `#番号` は数えない。
 
 ### C. 押す commit は、どの remote-tracking ref からも辿れないもの
 
-押す ref (refspec の左・`--all`・`--mirror`・`--tags`・`remote.<名前>.push`・`HEAD`) から辿れて、`refs/remotes/*` の
-どれからも辿れない commit を、新しい方から 1000 個まで見る (`git log <ref>… --not --remotes`)。ネットワークに出ずに決まり、
-fork で upstream の commit を押しても upstream の ref にあれば数えない。削除と `--dry-run` は見ない。
+押す ref (refspec の左・`--all`・`--mirror`・`--tags`・`remote.<名前>.push`・`HEAD`。解けない ref は `HEAD`) から辿れて、
+`refs/remotes/*` のどれからも辿れない commit を、新しい方から 1000 個まで見る (`git log <ref>… --not --remotes`)。ネットワークに
+出ずに決まり、fork で upstream の commit を押しても upstream の ref にあれば数えない。削除と `--dry-run` は見ない。同じコマンドの
+`git commit --amend` は、書き換える前の HEAD を数えずにその親から辿り、新しい message (変えないなら今の HEAD の message) を数える。
 
 ### D. 公開範囲は、参照が見つかったときだけ gh で引く
 
 `gh repo view <host>/<owner>/<repo> --json nameWithOwner,visibility` (push は push 先の URL の repo、gh は `-R`・引数の
-PR の URL・`GH_REPO` の repo、どれも無ければ dir で `gh repo view`) を 10 秒で切って引く。`PRIVATE`・`INTERNAL` は通し、
+PR の URL・`GH_REPO` の repo、`gh repo set-default` の repo (`remote.<名前>.gh-resolved`)、どれも無ければ dir で
+`gh repo view`) を 10 秒で切って引く。`PRIVATE`・`INTERNAL` は通し、
 `PUBLIC` と引けないもの (gh が無い・未ログイン・時間切れ・github.com でない host) は止める。控えは持たない。手元の path・
 `file://` への push は見ない。
 
@@ -74,7 +76,9 @@ PR の URL・`GH_REPO` の repo、どれも無ければ dir で `gh repo view`) 
 ADR 029 の lexer は heredoc の本文と `$( )` の中を捨てるが、この hook は PR の本文 (Claude は `--body "$(cat <<'EOF' … EOF)"` で
 渡す) を読む。lexer を写して変えた: heredoc の本文・here-string・`< file` を stdin として残す、語の中の改行を残す、`$( )` の
 閉じ括弧を引用符・heredoc の本文・コメントを見て探す (本文の `1)` で閉じない)、`$(cat <<EOF …)`・`$(cat <file>)` を値に置き換える、
-パイプを残す (`-F -` の本文)。前の代入 (`BODY=…`) は、値がちょうど `"$BODY"` の語に入れる。
+パイプを残す (`-F -` の本文)、`> f` の書き先を残す (同じコマンドで書いたファイルを `--body-file`・`git commit -F` で読む)。
+前の代入 (`BODY=…`) は、値がちょうど `"$BODY"` の語に入れる。`cd`・`git -C` の行き先を解けなければ今の dir のまま見て、`-c` も
+script のファイルも無い shell (`bash <<EOF`・`cat … | bash`) は stdin を読み直す。
 
 ### G. 方針の承認のあとに、こちらで決めたこと
 
@@ -86,8 +90,11 @@ ADR 029 の lexer は heredoc の本文と `$( )` の中を捨てるが、この
 | 同じコマンドの `git commit -m … && git push` | push より前の commit の message も数える | hook が走る時点では、その commit はまだ無い |
 | 押す commit の数 | 新しい方から 1000 個 | 初めての push で履歴が全部数えられても待たせない (1000 個で 1.2 秒) |
 | 公開範囲の控え | 持たない | 引くのは参照が見つかったときだけ。private から public に変えた直後に古い値で通さない (`ticket.py` と同じ) |
-| repo を渡していない gh の「同じ repo」 | dir の remote の repo を全部 | fork の clone で upstream への PR を出すとき、upstream の参照で止めない |
-| 長いコマンド | 64 KB (gawk・mawk が無ければ 16 KB) を超えたら中を読まず、文字のどこかに参照か `git … push` があれば止め、本文をファイルにするかコマンドを分けるよう返す (dir の repo が private なら通す) | 黙って通すと抜け道になる。上限は ADR 029 と同じ (macOS の awk は長さの二乗で遅い) |
+| repo を渡していない gh の「同じ repo」 | `gh repo set-default` の repo (`remote.<名前>.gh-resolved`)、無ければ dir の remote の repo を全部 | fork の clone で upstream への PR を出すとき、upstream の参照で止めない。set-default を fork にして fork の中に出す PR では、upstream への参照を止める (最終レビュー) |
+| 解けない ref・dir (`"$(git branch --show-current)"`・`"$BRANCH"`・`cd "$(git rev-parse --show-toplevel)"`) | ref は `HEAD`、dir は今の dir | 黙って通すと抜け道になる。branch 名の打ち間違いなら git の側も失敗する (最終レビュー) |
+| 同じコマンドで書いたファイル・stdin の script | 書いた中身を読む・読み直す | `cat > body.md <<EOF … && gh pr create -F body.md` は、hook の時点でファイルが無いか古い。`bash -c` を避ける環境では `bash <<EOF` が出やすい (最終レビュー) |
+| 同じコマンドの `git commit --amend … && git push -f` | 書き換える前の HEAD を数えない | 止めたときに勧める直し方を 1 つのコマンドで打つと、また同じ commit で止まって Claude が迷う (最終レビュー) |
+| 長いコマンド | 64 KB (gawk・mawk が無ければ 16 KB。バイトで数える) を超えたら中を読まず、文字のどこかに参照か `git … push` (1 行の中) があれば止め、本文をファイルにするかコマンドを分けるよう返す (dir の repo が private なら通す) | 黙って通すと抜け道になる。上限は ADR 029 と同じ (macOS の awk は長さの二乗で遅い)。`git … push` を改行をまたいで探すと、git の多い 113 KB の文書で 7.8 秒かかった (最終レビュー) |
 | 返す文 | どこか (commit・行・参照・前後の文字) と直し方を 20 件まで | Claude がそのまま直せる。commit は「nixpkgs の PR 577218」の形、本文は backquote |
 | ADR の番号 | 033 | open な PR に ADR を足すものは無かった |
 
@@ -96,7 +103,7 @@ ADR 029 の lexer は heredoc の本文と `$( )` の中を捨てるが、この
 | ファイル | 変更 |
 | --- | --- |
 | `nix/files/claude/hooks/xref-guard.sh` | 新規。lexer・包むコマンドを外す・git push と gh の読み方・参照の判定 (jq)・公開範囲・返す文 |
-| `nix/tests/xref-guard.test.sh` | 新規。偽の gh と使い捨ての repo で、止める・通す・返す文 (151 件) |
+| `nix/tests/xref-guard.test.sh` | 新規。偽の gh と使い捨ての repo で、止める・通す・返す文 (178 件) |
 | `nix/home/modules/claude.nix` | hook を `~/.claude/hooks/xref-guard.sh` に置く |
 | `nix/tests/claude-xref-guard.nix` | 新規。hook の置き方を評価時に確かめる |
 | `nix/scripts/bootstrap-claude-hook.sh`・`nix/tests/bootstrap-claude-hook.test.sh` | PreToolUse・Bash の 1 件の登録 |
@@ -126,9 +133,12 @@ ADR 029 の lexer は heredoc の本文と `$( )` の中を捨てるが、この
 
 ### 注意が必要なこと
 
-- **見えるのはコマンドの文字と、その場で読めるもの (repo の commit・本文のファイル) だけ。** script の中・関数・alias・変数に
-  入れたコマンド、`gh api` で書くコメント、`gh pr create --fill` (commit から本文を作る)、`--body-file -` に読めない stdin を
-  渡したものは見えない。読み方は近似で、bash を解釈しているわけではない (ADR 029 と同じ限り)
+- **見えるのはコマンドの文字と、その場で読めるもの (repo の commit・本文のファイル・同じコマンドで書いたファイル) だけ。**
+  script の中・関数・alias・変数に入れたコマンド、`gh api` で書くコメント、`gh pr create --fill` (commit から本文を作る)、
+  `--body-file -` に読めない stdin を渡したもの、`gh pr new`・`gh issue new` (create の別名)・`gh pr -R x create` の書き順、
+  `read -d '' BODY <<EOF`・`printf -v BODY` の変数、`direnv exec`・`mise exec` で包んだもの、`gh repo create --push` は見えない。
+  読み方は近似で、bash を解釈しているわけではない (ADR 029 と同じ限り)
+- CRLF の本文では、空行をまたいだ backquote を inline code と見なして参照を隠すことがある (`ticket.py` は隠さない)
 - 押す commit は remote-tracking ref で決める。fetch していない remote の commit (ほかのマシンが push したもの) を手元で
   持っていれば数える (止めすぎる側に倒れる)
 - 公開範囲を引けない (gh が未ログイン・github.com でない host・ssh のホスト別名の remote) と、参照があれば止める。通すなら
@@ -144,7 +154,11 @@ ADR 029 の lexer は heredoc の本文と `$( )` の中を捨てるが、この
 - 使い捨ての `--settings` で hook を付けた `claude -p` (Claude Code 2.1.310・bypassPermissions) に、参照のある commit の
   `git push` と本文に参照のある `gh pr create` を打たせ、どちらも打たれず、理由が Claude に届くことを確かめた (push 先も
   参照先も GitHub に無い repo にし、hook の中の gh は偽物にした)
-- 手元の時間: 参照の無い push は 30 ms、`push` と `gh` を含まないコマンドは 4 ms、60 KB の PR の本文は gawk で 0.5 秒
+- 手元の時間: 参照の無い push は 30 ms、`push` と `gh` を含まないコマンドは 4 ms (入力の JSON の cwd などに `gh` の文字が
+  あると、jq で読んでから抜けるので 11 ms ほど)、60 KB の PR の本文は gawk で 0.5 秒、git の多い 110 KB のコマンドは 0.7 秒
+- 別の文脈のレビュアー (opus) に branch 全体を見てもらい (ランダムな入力 3700 件で exit 0 と出力の形、`ticket.py` の判定との
+  突き合わせ 4000 件で不一致 0)、指摘 (解けない ref・dir、同じコマンドで書くファイル、stdin の script、amend と push、長いコマンドの
+  正規表現の遅さ、fork の set-default、文書の古さ) をテストで落ちることを確かめてから直した
 
 ## 7. 移行・運用手順
 
