@@ -1,7 +1,10 @@
 # homeConfiguration を組み立てるヘルパ。
 # hosts/default.nix (型と sandbox)・dotfiles-private の nix/hosts/*.nix (lib/private-hosts.nix)・ローカル flake の tmp から、
 # 1 マシン 1 回呼ぶ。
-{ inputs }:
+#
+# home の pkgs には、nixpkgs の猶予の例外 (release-age.nix の一部の例外) の overlay を当て、消し時の警告を
+# home-manager の warnings に出す (releaseAge は flake.nix が lib/release-age.nix を inputs で呼んだもの。ADR 032)。
+{ inputs, releaseAge }:
 
 {
   username,
@@ -47,14 +50,20 @@
   modules ? [ ],
 }:
 
-inputs.home-manager.lib.homeManagerConfiguration {
+let
+  exceptions = releaseAge system;
   pkgs = inputs.nixpkgs.legacyPackages.${system};
+in
+inputs.home-manager.lib.homeManagerConfiguration {
+  # 効いている一部の例外が無ければ、素の pkgs のまま (普段の評価を変えない)
+  pkgs = if exceptions.replaced == [ ] then pkgs else pkgs.appendOverlays exceptions.overlays;
   extraSpecialArgs = { inherit inputs; };
   modules = [
     ../home
     {
       home = { inherit username homeDirectory; };
       dotfiles = { inherit wsl claude onePassword; };
+      inherit (exceptions) warnings;
     }
   ]
   ++ modules;

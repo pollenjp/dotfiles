@@ -18,10 +18,19 @@
 #   - 警告はどれも「nixpkgs の例外」で始まる (CI がこの文だけを落とさずに annotation にする)
 #   - 書き誤りは評価で止まる: 知らない欄 (上の段と項目)・暦に無い日付・空の reason・負の日数・入れ子の名前・pkgs に
 #     無い名前・一部の例外に同じ package が 2 回・upstream の package のファイルが無い・その版と version が違う
+#   - 差し替えた package を使っているほかの package は、例外の有無で home.packages の drvPath を比べると見つかる
+#     (hello を差し替えると、hello を呼ぶ uses-hello が見つかり、jq は見つからない)
+#   - 実の設定 (nix/release-age.nix) で: 設定が評価でき、差し替えた名前は home の pkgs で overlay の package になり、
+#     home.packages のほかの package はそれを使っていない (一部の例外は、ほかの package から使われないアプリだけ)。
+#     home の warnings の「nixpkgs の例外」の文は lib が出したものと同じ
 {
   lib,
   pkgs,
   system,
+  # flake の inputs・mkHome・releaseAge (lib/release-age.nix を flake の inputs で呼んだもの)
+  inputs,
+  mkHome,
+  releaseAge,
 }:
 
 let
@@ -117,6 +126,49 @@ let
         x = "20261022000000";
       }) settings
     );
+
+  # 同じ添字どうしで比べ、差し替えた名前でないのに drvPath が違う package (差し替えたものを使っている) の名前
+  usedBy =
+    replaced: withList: withoutList:
+    if builtins.length withList != builtins.length withoutList then
+      [ "(home.packages の数が違う)" ]
+    else
+      map (p: lib.getName p.fst) (
+        builtins.filter (
+          p: !(builtins.elem (lib.getName p.fst) replaced) && p.fst.drvPath != p.snd.drvPath
+        ) (lib.zipLists withList withoutList)
+      );
+  sample = p: [
+    p.hello
+    (p.writeShellScriptBin "uses-hello" "${p.hello}/bin/hello")
+    p.jq
+  ];
+  helloReplaced = pkgs.appendOverlays [
+    (_: prev: { hello = prev.hello.overrideAttrs { version = "99.0"; }; })
+  ];
+
+  # 実の設定と home。例外を当てない home は、mk-home.nix に何もしない releaseAge を渡して組む
+  real = releaseAge system;
+  home = mkHome {
+    username = "tester";
+    inherit system;
+  };
+  homeWithout =
+    import ../lib/mk-home.nix
+      {
+        inherit inputs;
+        releaseAge = _: {
+          settings = { };
+          replaced = [ ];
+          overlays = [ ];
+          warnings = [ ];
+        };
+      }
+      {
+        username = "tester";
+        inherit system;
+      };
+  used = usedBy real.replaced home.config.home.packages homeWithout.config.home.packages;
 
   cases = [
     {
@@ -245,6 +297,28 @@ let
       ok =
         bad { exceptions.fromUpstream = [ (upstreamItem "jo" "1.9") ]; }
         && bad { exceptions.fromUpstream = [ (upstreamItem "hello" "98.0") ]; };
+    }
+    {
+      name = "差し替えた package (hello) を使っている package (uses-hello) は見つかり、使っていない jq は見つからない";
+      ok = usedBy [ "hello" ] (sample helloReplaced) (sample pkgs) == [ "uses-hello" ];
+    }
+    {
+      name = "実の設定 (nix/release-age.nix) が評価できる";
+      ok = builtins.isInt real.settings.minimumReleaseAgeDays;
+    }
+    {
+      name = "実の設定で差し替えた名前 (${toString real.replaced}) は、home の pkgs で overlay の package になっている";
+      ok = builtins.all (n: home.pkgs.${n}.drvPath != homeWithout.pkgs.${n}.drvPath) real.replaced;
+    }
+    {
+      name =
+        "実の設定で差し替えた package を、home.packages のほかの package は使っていない"
+        + lib.optionalString (used != [ ]) " (使っている: ${lib.concatStringsSep ", " used})";
+      ok = used == [ ];
+    }
+    {
+      name = "home の warnings の「nixpkgs の例外」の文は、lib が出したものと同じ";
+      ok = builtins.filter (lib.hasPrefix "nixpkgs の例外") home.config.warnings == real.warnings;
     }
   ];
 
