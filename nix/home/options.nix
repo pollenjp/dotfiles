@@ -36,44 +36,9 @@ let
   # JSON にそのまま書き出せる値 (dotfiles.claude.notion.override 用)
   jsonValue = (pkgs.formats.json { }).type;
 
-  # 暦にある日付 (YYYY-MM-DD。dotfiles.mise.releaseAgeOverrides の from 用)。形だけでなく、2026-02-30 のような
-  # 無い日も止める (nix/scripts/bootstrap-mise.sh の jq は、無い日を黙って翌月へ繰り越すため)
-  calendarDate = lib.mkOptionType {
-    name = "calendarDate";
-    description = "暦にある日付 (YYYY-MM-DD)";
-    descriptionClass = "noun";
-    check =
-      v:
-      let
-        m = builtins.match "([0-9]{4})-([0-9]{2})-([0-9]{2})" v;
-        num = i: lib.toIntBase10 (builtins.elemAt m i);
-        year = num 0;
-        month = num 1;
-        day = num 2;
-        leap = lib.mod year 4 == 0 && (lib.mod year 100 != 0 || lib.mod year 400 == 0);
-        lengths = [
-          31
-          (if leap then 29 else 28)
-          31
-          30
-          31
-          30
-          31
-          31
-          30
-          31
-          30
-          31
-        ];
-      in
-      builtins.isString v
-      && m != null
-      && month >= 1
-      && month <= 12
-      && day >= 1
-      && day <= builtins.elemAt lengths (month - 1);
-    merge = lib.mergeEqualOption;
-  };
+  # 暦にある日付 (YYYY-MM-DD。dotfiles.mise.releaseAgeOverrides の from 用)。nixpkgs の猶予の例外の date
+  # (lib/release-age.nix) と共用する
+  calendarDate = import ../lib/calendar-date.nix { inherit lib; };
 in
 {
   # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう

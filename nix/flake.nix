@@ -431,6 +431,7 @@
               system
               ;
           };
+          release-age-state = import ./tests/release-age.nix { inherit lib pkgs system; };
         }
       );
 
