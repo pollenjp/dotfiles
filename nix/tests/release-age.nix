@@ -144,7 +144,12 @@ let
     p.jq
   ];
   helloReplaced = pkgs.appendOverlays [
-    (_: prev: { hello = prev.hello.overrideAttrs { version = "99.0"; }; })
+    # 版を変えると src を変えていない警告が出るので、install の後に何もしない 1 行を足して drv だけを変える
+    (_: prev: {
+      hello = prev.hello.overrideAttrs (old: {
+        postInstall = (old.postInstall or "") + "\n: release-age-state";
+      });
+    })
   ];
 
   # 実の設定と home。例外を当てない home は、mk-home.nix に何もしない releaseAge を渡して組む
