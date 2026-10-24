@@ -27,6 +27,9 @@
 #                SSH agent (1Password) を使うコマンドを打つ前に知らせ、断られたら打ち直さずに
 #                選択肢の問いを出させる (ADR 029)。0 以外で終わった Bash は PostToolUseFailure に
 #                だけ来るので、Post は 2 つとも登録する
+#   PreToolUse   Bash                            xref-guard.sh
+#                public な repo へ、ほかの repo への参照を書く git push・gh pr create などを止め、
+#                どこか・どう直すかを返す (ADR 033)
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
 
@@ -38,13 +41,14 @@ guard="${hooks_dir}/nix-managed-guard.sh"
 nudge="${hooks_dir}/video-offer-nudge.sh"
 run_through="${hooks_dir}/run-through-nudge.sh"
 ssh_notice="${hooks_dir}/ssh-agent-notice.sh"
+xref_guard="${hooks_dir}/xref-guard.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}"; do
+for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -94,6 +98,7 @@ register PostToolUse "Skill" "" "${run_through}"
 register PreToolUse "Bash" "" "${ssh_notice}"
 register PostToolUse "Bash" "" "${ssh_notice}"
 register PostToolUseFailure "Bash" "" "${ssh_notice}"
+register PreToolUse "Bash" "" "${xref_guard}"
 
 if [[ ${changed} == 1 ]]; then
   echo
