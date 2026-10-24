@@ -533,6 +533,12 @@ def report($own):
       ($hits[0:20][] | line_of(.t; .f)),
       (if ($hits | length) > 20 then "- ほか \(($hits | length) - 20) 件" else empty end)
     end;
+# git log --format='%H%x1f%B%x1e' の出力 → commit ごとの文
+def log_texts:
+  split("\u001e")[] | ltrimstr("\n") | index("\u001f") as $i | select($i != null)
+  | .[0:$i] as $sha | .[$i + 1:] as $msg
+  | {head: "commit \($sha[0:7])「\($msg | split("\n")[0] | clip(40))」の", suffix: "", numbered: true, mode: "plain",
+     fix: "commit", text: $msg};
 JQ
 
 # lexer に使う awk と、読むコマンドの長さの上限 (ssh-agent-notice.sh と同じ)。gawk・mawk は長い文字列の substr が速い
@@ -910,8 +916,198 @@ gh_cmd() {
 
 # --- git
 
+# git_in <git の引数>…: push_job・commit_msg の dir と git の前のオプションで git を流す (エラーは捨てる)
+git_in() {
+  git -C "${dir}" "${gopts[@]}" "$@" 2>/dev/null </dev/null
+}
+
+# git_cmd <dir> <git の後ろの語>…: git push と、push より前に作る commit (git commit -m・-F) を見る (呼び出し元の
+# simple の allow・in_text・in_known を使う)
 git_cmd() {
+  local gdir=$1 sub=""
+  shift
+  local -a gopts=() a=("$@")
+  while ((${#a[@]} > 0)); do
+    case ${a[0]} in
+      -C)
+        gdir=$(join_dir "${gdir}" "${a[1]-}")
+        a=("${a[@]:2}")
+        ;;
+      -c | --git-dir | --work-tree | --namespace | --config-env)
+        gopts+=("${a[0]}" "${a[1]-}")
+        a=("${a[@]:2}")
+        ;;
+      --git-dir=* | --work-tree=* | --namespace=* | --config-env=*)
+        gopts+=("${a[0]}")
+        a=("${a[@]:1}")
+        ;;
+      -*) a=("${a[@]:1}") ;;
+      *)
+        sub=${a[0]}
+        a=("${a[@]:1}")
+        break
+        ;;
+    esac
+  done
+  # git gh <コマンド> (GitHub へ gh の資格情報で通す dotfiles の git-gh) は、後ろの語を git の語として読む
+  if [[ ${sub} == gh ]]; then
+    sub=${a[0]-}
+    a=("${a[@]:1}")
+  fi
+  ((allow)) && return 0
+  case ${sub} in
+    push) push_job "${gdir}" "${a[@]}" ;;
+    commit) commit_msg "${gdir}" "${a[@]}" ;;
+  esac
+}
+
+# commit_msg <dir> <git commit の後ろの語>…: -m・--message (重ねたものは空行でつなぐ)・-F・--file の message を
+# pending_msgs に足す。hook が走る時点では、その commit はまだ無いので、後ろの push で数える
+pending_msgs=()
+commit_msg() {
+  local dir=$1 x v c i k msg="" have=0
+  shift
+  local -a a=("$@")
+  # add_msg <-m の値か、-F の file (- は stdin)>
+  add_msg() {
+    if [[ $1 == m ]]; then
+      expand_value "${dir}" "$2"
+      msg+=${msg:+$'\n\n'}${expanded}
+      have=1
+    elif [[ $2 == - ]]; then
+      if ((in_known)); then
+        msg+=${msg:+$'\n\n'}${in_text}
+        have=1
+      fi
+    elif read_file "${dir}" "$2"; then
+      msg+=${msg:+$'\n\n'}${file_text}
+      have=1
+    fi
+  }
+  for ((i = 0; i < ${#a[@]}; i++)); do
+    x=${a[i]}
+    case ${x} in
+      --) break ;;
+      --message=*) add_msg m "${x#*=}" ;;
+      --file=*) add_msg F "${x#*=}" ;;
+      --message | --file | --reuse-message | --reedit-message | --template | --author | --date | --fixup | --squash | --trailer)
+        [[ ${x} == --message ]] && add_msg m "${a[i + 1]-}"
+        [[ ${x} == --file ]] && add_msg F "${a[i + 1]-}"
+        i=$((i + 1))
+        ;;
+      -[!-]*)
+        # 束ねた短いオプション (-am x・-mx)。値を取るもの (m・F・c・C・t) が来たら、残りの文字か次の語が値
+        for ((k = 1; k < ${#x}; k++)); do
+          c=${x:k:1}
+          [[ mFcCt == *"${c}"* ]] || continue
+          v=${x:k+1}
+          if [[ -z ${v} ]]; then
+            v=${a[i + 1]-}
+            i=$((i + 1))
+          fi
+          [[ ${c} == m || ${c} == F ]] && add_msg "${c}" "${v}"
+          break
+        done
+        ;;
+    esac
+  done
+  ((have)) && pending_msgs+=("${msg}")
   return 0
+}
+
+# push_job <dir> <git push の後ろの語>…: 押す commit (押す ref から辿れて、どの remote-tracking ref からも辿れないもの。
+# 新しい方から 1000 個) と pending_msgs の message を調べる (呼び出し元の git_cmd の gopts を使う)
+push_job() {
+  local dir=$1 x remote="" repo_opt="" all=0 mirror=0 tags=0 i k c src r cur url m
+  shift
+  local -a a=("$@") pos=() specs=() revs=()
+  for ((i = 0; i < ${#a[@]}; i++)); do
+    x=${a[i]}
+    case ${x} in
+      --)
+        pos+=("${a[@]:i+1}")
+        break
+        ;;
+      # 削除・--dry-run は commit を送らない
+      -h | --help | -n | --dry-run | -d | --delete) return 0 ;;
+      --all | --branches) all=1 ;;
+      --mirror) mirror=1 ;;
+      --tags) tags=1 ;;
+      --repo=*) repo_opt=${x#*=} ;;
+      --repo | -o | --push-option | --receive-pack | --exec)
+        [[ ${x} == --repo ]] && repo_opt=${a[i + 1]-}
+        i=$((i + 1))
+        ;;
+      --*) ;;
+      -*)
+        # 束ねた短いオプション (-fu など)。-o は値を取る
+        for ((k = 1; k < ${#x}; k++)); do
+          c=${x:k:1}
+          [[ ${c} == n || ${c} == d ]] && return 0
+          if [[ ${c} == o ]]; then
+            ((k + 1 < ${#x})) || i=$((i + 1))
+            break
+          fi
+        done
+        ;;
+      *) pos+=("${x}") ;;
+    esac
+  done
+
+  # 押す先: 引数・--repo、無ければ branch.<今>.pushRemote → remote.pushDefault → branch.<今>.remote → origin
+  remote=${pos[0]:-${repo_opt}}
+  cur=$(git_in symbolic-ref -q --short HEAD) || cur=""
+  if [[ -z ${remote} ]]; then
+    [[ -z ${cur} ]] || remote=$(git_in config --get "branch.${cur}.pushRemote")
+    [[ -n ${remote} ]] || remote=$(git_in config --get remote.pushDefault)
+    [[ -n ${remote} || -z ${cur} ]] || remote=$(git_in config --get "branch.${cur}.remote")
+    [[ -n ${remote} ]] || remote=origin
+  fi
+  if [[ ${remote} != */* && -n $(git_in config --get "remote.${remote}.url") ]]; then
+    url=$(git_in remote get-url --push "${remote}")
+  else
+    url=$(git_in ls-remote --get-url "${remote}")
+  fi
+  # 手元の path・file:// は GitHub に届かないので見ない
+  url_parse "${url:-${remote}}" || return 0
+
+  # 押す ref: refspec の左 (+・tag <名前>・glob も)。無ければ remote.<名前>.push、それも無ければ HEAD
+  specs=("${pos[@]:1}")
+  if ((mirror)) || [[ $(git_in config --type=bool --get "remote.${remote}.mirror") == true ]]; then
+    revs+=(--all)
+  fi
+  ((all)) && revs+=(--branches)
+  ((tags)) && revs+=(--tags)
+  if ((${#specs[@]} == 0 && ${#revs[@]} == 0)); then
+    mapfile -t specs < <(git_in config --get-all "remote.${remote}.push")
+    ((${#specs[@]} > 0)) || specs=(HEAD)
+  fi
+  for ((k = 0; k < ${#specs[@]}; k++)); do
+    src=${specs[k]#+}
+    if [[ ${src} == tag ]]; then
+      src="refs/tags/${specs[k + 1]-}"
+      k=$((k + 1))
+    fi
+    [[ ${src} != ^* ]] || continue
+    src=${src%%:*}
+    [[ -n ${src} ]] || continue
+    if [[ ${src} == *'*'* ]]; then
+      revs+=("--glob=${src}")
+    elif r=$(git_in rev-parse --verify -q "${src}^{commit}"); then
+      revs+=("${r}")
+    fi
+  done
+
+  job_texts=()
+  job_own=("${url_slug}")
+  if ((${#revs[@]} > 0)); then
+    mapfile -t job_texts < <(git_in log --no-color --format='%H%x1f%B%x1e' --max-count=1000 "${revs[@]}" --not --remotes -- \
+      | jq -R -s -c "${refs_lib}"' log_texts' 2>/dev/null)
+  fi
+  for m in "${pending_msgs[@]}"; do
+    add_text "これから作る commit (git commit) の" "" true plain commit "${m}"
+  done
+  check_texts "git push" "${dir}" "${url_host}/${url_slug}" "${url_slug}"
 }
 
 # --- 単純コマンドを見る
@@ -1200,9 +1396,9 @@ emit() {
   msg+=$'\n\n'"直し方:"
   if [[ " ${fixes[*]} " == *" commit "* ]]; then
     msg+=$'\n'"- commit の message からは参照を消し、「nixpkgs の PR 577218」のように # も URL も使わずに書く (commit の message は"
-    msg+="Markdown ではないので、backquote で囲んでも跡が付く)。参照は PR の本文に backquote で囲んで書く"
+    msg+=" Markdown ではないので、backquote で囲んでも跡が付く)。参照は PR の本文に backquote で囲んで書く"
     msg+=$'\n'"- 直前の commit なら git commit --amend、前の commit なら git rebase で message を書き換えてから push し直す"
-    msg+="(同じコマンドで作る commit なら、-m の文を直す)"
+    msg+=" (同じコマンドで作る commit なら、-m の文を直す)"
   fi
   if [[ " ${fixes[*]} " == *" title "* ]]; then
     msg+=$'\n'"- タイトルからは消す (merge の commit の件名・本文も。backquote で囲んでも、merge の commit の message に写って"

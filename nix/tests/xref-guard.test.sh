@@ -330,6 +330,126 @@ expect_deny "timeout 60 gh pr create --title '${ref}' --body y"
 expect_deny "bash -c \"gh pr create --title '${ref}' --body y\""
 expect_deny "cd sub && gh pr create --title '${ref}' --body y"
 
+echo "== xref-guard.sh: git push"
+
+# new_repo <名前> [<origin の URL>]: init の commit を origin/main に置き、branch feat に移った repo を作る
+new_repo() {
+  local r="${work}/$1"
+  git init -q -b main "${r}"
+  git -C "${r}" remote add origin "${2:-https://github.com/pollenjp/dotfiles.git}"
+  git -C "${r}" commit -q --allow-empty -m "init"
+  git -C "${r}" update-ref refs/remotes/origin/main HEAD
+  git -C "${r}" switch -q -c feat
+  printf '%s' "${r}"
+}
+# commit_in <repo> <message>
+commit_in() {
+  git -C "$1" commit -q --allow-empty -m "$2"
+}
+
+r=$(new_repo p1)
+commit_in "${r}" "feat: ok"
+commit_in "${r}" $'feat: x\n\nmise は nixpkgs (NixOS/nixpkgs#577218) を待つ'
+sha=$(git -C "${r}" rev-parse --short=7 HEAD)
+expect_reason "押す commit の参照: commit・行・参照・公開範囲・直し方を返す" "git push -u origin feat" "${r}" \
+  "git push → pollenjp/dotfiles (public な repo):" "commit ${sha}「feat: x」の 3 行目: ${ref}" \
+  "「nixpkgs の PR 577218」" "commit の message は Markdown ではないので、backquote で囲んでも跡が付く" \
+  "push し直す (同じコマンドで作る commit なら" "git commit --amend" "PJP_ALLOW_XREF=1"
+if [[ $(cat "${work}/gh.log") == "repo view github.com/pollenjp/dotfiles --json nameWithOwner,visibility" ]]; then
+  ok "push 先の repo を github.com を付けて引く"
+else
+  ng "push 先の repo を github.com を付けて引く" "$(detail)"
+fi
+for cmd in "git push" "git push origin" "git push origin HEAD" "git push origin HEAD:refs/heads/x" "git push origin +feat:feat" \
+  "git push origin $(git -C "${r}" rev-parse HEAD):refs/heads/x" "git push --force-with-lease origin feat" "git push -fu origin feat" \
+  "git -c push.default=current push" "git -C ${r} push" "cd ${r} && git push" "timeout 60 git push" "env FOO=1 git push" \
+  "bash -c 'git push origin feat'" "git push --all origin" "git push https://github.com/pollenjp/dotfiles.git feat" \
+  "git gh push"; do
+  expect_deny "${cmd}" "${r}"
+done
+pre "git -C ${r} push" "${work}"
+if denied; then ok "git -C の先の repo を見る (cwd は repo の外)"; else ng "git -C の先の repo を見る (cwd は repo の外)" "$(detail)"; fi
+for cmd in "git push origin main" "git push origin :feat" "git push origin --delete feat" "git push -d origin feat" \
+  "git push --dry-run" "git push -n origin feat" "git push --help" "PJP_ALLOW_XREF=1 git push" \
+  "git stash push -m x" "git log --grep push" "echo git push" "git push ../bare.git feat" "git push /tmp/bare.git feat"; do
+  expect_allow "${cmd}" "${r}"
+done
+git -C "${r}" tag v1 HEAD
+expect_deny "git push origin tag v1" "${r}"
+expect_deny "git push origin --tags" "${r}"
+
+r=$(new_repo p2)
+commit_in "${r}" "fix: x (\`${ref}\`)"
+expect_deny "git push" "${r}"
+git -C "${r}" reset -q --hard origin/main
+for body in "https://github.com/NixOS/nixpkgs/pull/577218" "NixOS/nixpkgs@abcdef1234" "https://github.com/acme/inner/issues/1"; do
+  commit_in "${r}" "fix: ${body}"
+  expect_deny "git push" "${r}"
+  git -C "${r}" reset -q --hard HEAD~1
+done
+git -C "${r}" reset -q --hard origin/main
+commit_in "${r}" $'fix: same repo\n\nCloses #12 (pollenjp/dotfiles#3, PollenJP/Dotfiles#4)'
+expect_allow "git push" "${r}"
+git -C "${r}" update-ref refs/remotes/origin/feat HEAD
+commit_in "${r}" "fix: ${ref}"
+git -C "${r}" update-ref refs/remotes/origin/feat HEAD
+expect_allow "git push" "${r}"
+
+# fork の clone: upstream の remote-tracking ref にある commit は数えない
+r=$(new_repo p3)
+git -C "${r}" remote add upstream https://github.com/NixOS/nixpkgs.git
+commit_in "${r}" "upstream: fix ${ref}"
+git -C "${r}" update-ref refs/remotes/upstream/master HEAD
+commit_in "${r}" "feat: mine"
+expect_allow "git push origin feat" "${r}"
+
+# 押す先: remote.pushDefault・pushurl・手元の path・private・github.com でない host
+r=$(new_repo p4)
+commit_in "${r}" "fix: ${ref}"
+git -C "${r}" remote add inner https://github.com/acme/inner.git
+git -C "${r}" config remote.pushDefault inner
+expect_allow_after_gh "git push" "${r}"
+git -C "${r}" config --unset remote.pushDefault
+git -C "${r}" config remote.origin.pushurl https://github.com/pollenjp/secret.git
+expect_allow_after_gh "git push origin feat" "${r}"
+git -C "${r}" config --unset remote.origin.pushurl
+git -C "${r}" remote add backup "${work}/backup.git"
+expect_allow "git push backup feat" "${r}"
+git -C "${r}" remote set-url origin git@github.com:pollenjp/secret.git
+expect_allow_after_gh "git push origin feat" "${r}"
+git -C "${r}" remote set-url origin https://gitlab.com/pollenjp/dotfiles.git
+expect_reason "github.com でない host は公開範囲を確かめられないので止める" "git push origin feat" "${r}" \
+  "git push → pollenjp/dotfiles (公開範囲を確かめられない: gh: "
+
+# 同じコマンドで push より前に作る commit の message
+r=$(new_repo p5)
+commit_in "${r}" "feat: ok"
+expect_reason "git commit -m の message も数える" "git commit -q --allow-empty -m 'fix: x ${ref}' && git push" "${r}" \
+  "これから作る commit (git commit) の 1 行目: ${ref}"
+expect_deny "git commit -am 'fix: x' -m 'see ${ref}' && git push origin feat" "${r}"
+expect_deny "git commit --message='${ref}'; git push" "${r}"
+expect_deny "git commit -m \"\$(cat <<'EOF'
+fix: x
+
+see ${ref}
+EOF
+)\" && git push" "${r}"
+expect_deny "git commit -F - <<'EOF' && git push
+${ref}
+EOF" "${r}"
+printf 'fix: x\n\n%s\n' "${ref}" >"${r}/msg.txt"
+expect_deny "git commit -F msg.txt && git push" "${r}"
+expect_allow "git commit -m 'fix: ok' && git push" "${r}"
+expect_allow "git commit -m 'fix: ${ref}'" "${r}"
+expect_allow "PJP_ALLOW_XREF=1 git commit -m 'fix: ${ref}' && git push" "${r}"
+
+# 見つけた参照は 20 件まで並べ、残りは件数だけ
+r=$(new_repo p6)
+for i in $(seq 1 25); do
+  commit_in "${r}" "fix: acme/open#${i}"
+done
+expect_reason "21 件目からは件数だけ書く" "git push" "${r}" "- ほか 5 件"
+
 echo "== xref-guard.sh: 黙るとき"
 
 for in in '' 'not json' '{"tool_name":"Write","tool_input":{"file_path":"/tmp/x","content":"gh pr create --title NixOS/nixpkgs#1"}}'; do
