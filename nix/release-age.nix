@@ -35,7 +35,15 @@
     #    version 以上になったら何もしなくなる。
     #
     #   { package = "mise"; version = "2026.10.17"; reason = "CVE-…: nixpkgs#… を待つ間"; }
-    fromUpstream = [ ];
+    fromUpstream = [
+      {
+        package = "mise";
+        version = "2026.10.17";
+        reason =
+          "eMudhra の中間 CA の侵害 (CVE-2026-111943) の修正版。nixpkgs の mise は 2026.10.3 までで、"
+          + "NixOS/nixpkgs#577218 (mise: 2026.10.3 -> 2026.10.17) を待つ間の一時しのぎ (2026-10-24 に足した)";
+      }
+    ];
   };
 
   # 一部の例外 (2・3) は overlay で当てるので、使えるのは「ほかの package から使われないアプリ」で、top-level の名前
