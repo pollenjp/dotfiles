@@ -29,6 +29,27 @@
 # であって公開時刻ではなく、Hydra の遅れ (実測で 1〜2 日) の分だけ古い側に出る。
 # つまり判定は公開日数より **緩い**。先端へ飛んだ事故を捕まえるには十分。
 #
+# ## 猶予の日数と例外 (release-age.nix。ADR 032)
+#
+# 日数と、期間付きの例外は設定のファイル (dotfiles では nix/release-age.nix) に書く。
+# 設定は `--config` か、この script の隣の `../release-age.nix` (dotfiles のチェック
+# アウトから叩いたとき)。どちらも無ければ (nix run で他の repo から呼んだとき) 7 日で、
+# 例外は無い。日数は `--min-age-days` > `FLAKE_MIN_RELEASE_AGE_DAYS` > 設定 > 7。
+#
+# - **全体** (`exceptions.all`): date の日 (Asia/Tokyo) の終わりが猶予より新しければ、
+#   nixpkgs (nixpkgs-unstable を追う input。nixpkgs-exceptions を除く) をその日の終わり
+#   までの公開から選ぶ。ほかの github input は猶予のまま。check はその日の終わりまでの
+#   pin を通す
+# - **一部 (nixpkgs から)** (`exceptions.fromNixpkgs`): input の nixpkgs-exceptions を、
+#   項目の最も新しい date の日の終わりまでの公開にする。それが nixpkgs (普段の pin) より
+#   新しくなければ nixpkgs と同じ rev (取ってくるものを増やさない)。check は、その日の
+#   終わりまでの pin と、nixpkgs と同じ rev を通す
+# - **一部 (upstream から)** (`exceptions.fromUpstream`): flake.lock に関わらないので
+#   ここでは読まない (home の overlay だけ。nix/lib/release-age.nix)
+#
+# 例外がもう何もしていないか (消し時) は、home の評価 (nix/lib/release-age.nix) が
+# 警告に出す。ここは選ぶときの状態 (効いている・何もしない) を表示するだけ。
+#
 # ## 使い方
 #
 #   flake-lock-age.sh resolve [<flake ディレクトリ>...]  選ぶ revision を出すだけ
@@ -41,8 +62,12 @@
 # 位置に置くことで作っている。whitelist のある flake ではゲート (新規 findings
 # で失敗)、無い flake (初回の lock など) では表示だけ。--no-scan で飛ばせる。
 #
-# `flake.lock` がまだ無い flake でも resolve / update は通る (input の一覧を
-# flake.nix の `inputs` から読む)。**最初の lock も update で作ること。** 先に
+# `resolve` / `update` は、`--input <名前>` (くり返せる) でその input だけを選ぶ。
+# 例外を足したときに普段の pin を動かさずに済む。
+#
+# input の一覧は flake.nix の `inputs` から読み、lock にあればその locked を使う。
+# lock に無い input (flake.nix に足したばかり・flake.lock がまだ無い) も先端ではなく
+# 決まりどおりに選ぶ。**最初の lock も update で作ること。** 先に
 # `nix flake lock` を打つと一度先端へ pin されるので、遅延が最初から外れた lock を
 # commit することになる。`check` は「今 pin されているもの」を測るので lock が要る。
 #
@@ -52,14 +77,16 @@
 #
 #   nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
 #
-# 日数は `--min-age-days N` か環境変数 `FLAKE_MIN_RELEASE_AGE_DAYS` で変える
-# (既定 7)。0 で遅延なし。緊急で CVE 修正を先端から入れたいときは 0 で `update` し、
-# `check` の CI が赤くなるのは意図どおりとして扱う (nix/README.md 「遅延を外す」)。
+# 緊急で CVE 修正を先端から入れたいときは、まず例外を考える。それでも全体を先端へ
+# 上げるなら --min-age-days 0 で `update` し、`check` の CI が赤くなるのは意図どおり
+# として扱う (nix/README.md 「遅延を外す」)。
+#
+# 今の時刻は FLAKE_LOCK_AGE_NOW (UNIX 秒) で差し替えられる (テスト用)。
 #
 # ## 依存
 #
 # bash 3.2 / coreutils / curl / nix。**jq は使わない** (jq は Nix が入れるものな
-# ので初回 switch 前には無い)。JSON は nix 自身に読ませる。
+# ので初回 switch 前には無い)。JSON と設定は nix 自身に読ませる。
 
 set -eu -o pipefail
 
@@ -76,6 +103,10 @@ releases_url="https://releases.nixos.org/nixpkgs"
 # ListObjectsV2 を直接引く。releases.nixos.org の索引は JS で描画されるので
 # HTML からは公開の一覧が辿れない。
 bucket_url="https://nix-releases.s3.amazonaws.com"
+
+# 一部 (nixpkgs から) の例外の package を取る nixpkgs の input (nix/flake.nix)。
+# 普段の pin は input の nixpkgs。
+exceptions_input=nixpkgs-exceptions
 
 # 遡って公開時刻を調べる最大件数。1 件ごとに HEAD が 1 本飛ぶ。
 # 公開は 1〜3 日おきなので 40 件で 2〜3 か月分に届く。
@@ -133,15 +164,19 @@ usage() {
   check    今の flake.lock が下限日数を満たすか検査する (CI 用)
 
 オプション:
-  --min-age-days N  下限日数 (既定 7 / 環境変数 FLAKE_MIN_RELEASE_AGE_DAYS)
+  --config FILE     猶予の日数と例外の設定 (既定: この script の隣の ../release-age.nix
+                    があればそれ。無ければ 7 日で例外なし)
+  --min-age-days N  下限日数 (環境変数 FLAKE_MIN_RELEASE_AGE_DAYS より、設定より先に効く)
+  --input NAME      resolve / update でその input だけを選ぶ (くり返せる)
   --no-scan         update 後の閉包スキャン (closure-scan) を飛ばす
   -h, --help        この使い方を出す
 
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
 無ければカレントディレクトリを対象にする。複数渡せば順に処理する。
 
-flake.lock がまだ無い flake でも resolve / update は通る (最初の lock も update で
-作る)。先に nix flake lock を打つと一度先端へ pin されるので使わないこと。
+flake.lock がまだ無い flake・lock に無い input でも resolve / update は通る
+(最初の lock も update で作る)。先に nix flake lock を打つと一度先端へ pin
+されるので使わないこと。
 EOS
 }
 
@@ -149,21 +184,40 @@ EOS
 # 引数   #
 ##########
 
-# 空文字も既定へ落とす。CI は workflow_dispatch 以外で空を渡してくる。
-min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS:-7}
 cmd=""
 flake_dirs=()
 no_scan=0
+config=""
+cli_days=""
+only_inputs=()
 
 while [[ $# -gt 0 ]]; do
   case $1 in
+    --config)
+      [[ $# -ge 2 ]] || die '--config には設定のファイルが要ります。'
+      config=$2
+      shift 2
+      ;;
+    --config=*)
+      config=${1#*=}
+      shift
+      ;;
     --min-age-days)
       [[ $# -ge 2 ]] || die '--min-age-days には日数が要ります。'
-      min_age_days=$2
+      cli_days=$2
       shift 2
       ;;
     --min-age-days=*)
-      min_age_days=${1#*=}
+      cli_days=${1#*=}
+      shift
+      ;;
+    --input)
+      [[ $# -ge 2 ]] || die '--input には input の名前が要ります。'
+      only_inputs+=("$2")
+      shift 2
+      ;;
+    --input=*)
+      only_inputs+=("${1#*=}")
       shift
       ;;
     --no-scan)
@@ -194,15 +248,6 @@ if [[ -z ${cmd} ]]; then
   usage >&2
   exit 2
 fi
-
-case ${min_age_days} in
-  '') min_age_days=7 ;;
-  *[!0-9]*)
-    die "下限日数は 0 以上の整数で指定すること (受け取った値: ${min_age_days})"
-    ;;
-esac
-# 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
-min_age_days=$((10#${min_age_days}))
 
 # 省略時の既定。チェックアウトから直接叩く形 (dotfiles) と、store から nix run で
 # 呼ぶ形の両方を通すため、script の隣に flake があるかで分ける。目印は flake.nix。
@@ -270,99 +315,218 @@ age_days() {
   printf '%s\n' "$((($1 - $2) / 86400))"
 }
 
+# 今 (UNIX 秒)。テストは FLAKE_LOCK_AGE_NOW で差し替える。
+now_epoch() {
+  if [[ -n ${FLAKE_LOCK_AGE_NOW:-} ]]; then
+    printf '%s\n' "${FLAKE_LOCK_AGE_NOW}"
+  else
+    date -u +%s
+  fi
+}
+
+# YYYY-MM-DD の日 (Asia/Tokyo) の終わり (23:59:59 +09:00。夏時間は無い) の UNIX 秒を day_end へ入れる。
+# 形が違えば止める。暦の計算は bash の算術でする (GNU と BSD の date の違いに寄らない)。
+# 2026-02-30 のような無い日の確かめは、nix/lib/release-age.nix (flake の check) がする。
+# 返り値ではなくグローバルへ置くのは、die でここから抜けたいため。$(...) で呼ぶと
+# subshell になって exit が効かない。
+day_end=""
+day_end_of() {
+  local y m d era yoe mp doy doe days
+  if [[ ! $1 =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
+    die "設定 (${config}) の date が YYYY-MM-DD ではありません: $1"
+  fi
+  y=$((10#${BASH_REMATCH[1]}))
+  m=$((10#${BASH_REMATCH[2]}))
+  d=$((10#${BASH_REMATCH[3]}))
+  # 1970-01-01 からの日数 (days from civil。3 月始まりの年で数える)
+  if ((m <= 2)); then
+    y=$((y - 1))
+  fi
+  era=$((y / 400))
+  yoe=$((y - era * 400))
+  mp=$(((m + 9) % 12))
+  doy=$(((153 * mp + 2) / 5 + d - 1))
+  doe=$((yoe * 365 + yoe / 4 - yoe / 100 + doy))
+  days=$((era * 146097 + doe - 719468))
+  day_end=$((days * 86400 + 86400 - 1 - 9 * 3600))
+}
+
+##########
+# 設定   #
+##########
+
+# 設定の中身を 1 行 1 件で出す。区切りはタブ。空の欄は - にする (read の区切りのタブは
+# 空の欄を飛ばして詰めるため)。欄の型は nix/lib/release-age.nix が確かめるので、
+# ここは無い欄を - にして読むだけ。
+#
+#   days    <日数>
+#   all     <date> <reason>
+#   nixpkgs <date> <packages (空白区切り)> <reason>
+settings_rows() {
+  nix eval --raw --impure --expr "
+    let
+      s = import \"$1\";
+      e = s.exceptions or { };
+      cell = v:
+        let t = builtins.replaceStrings [ \"\t\" \"\n\" ] [ \" \" \" \" ] (toString v);
+        in if t == \"\" then \"-\" else t;
+      row = cols: builtins.concatStringsSep \"\t\" (map cell cols);
+    in
+    builtins.concatStringsSep \"\n\" (
+      [ (row [ \"days\" (s.minimumReleaseAgeDays or \"\") ]) ]
+      ++ map (i: row [ \"all\" (i.date or \"\") (i.reason or \"\") ]) (e.all or [ ])
+      ++ map (i: row [
+        \"nixpkgs\"
+        (i.date or \"\")
+        (builtins.concatStringsSep \" \" (i.packages or [ ]))
+        (i.reason or \"\")
+      ]) (e.fromNixpkgs or [ ])
+    )
+  "
+}
+
+settings_days=""
+# 全体の例外 (date・その日の終わりの UNIX 秒・reason) と、一部 (nixpkgs から) の例外 (同じく + packages)
+all_dates=()
+all_ends=()
+all_reasons=()
+part_dates=()
+part_ends=()
+part_packages=()
+part_reasons=()
+
+read_settings() {
+  local rows kind a b c
+  if [[ -z ${config} ]]; then
+    [[ -f "${script_dir}/../release-age.nix" ]] || return 0
+    config="${script_dir}/../release-age.nix"
+  fi
+  [[ -f ${config} ]] || die "設定のファイルがありません: ${config}"
+  # import は絶対パスしか受けない
+  config="$(
+    cd -- "$(dirname "${config}")" &>/dev/null
+    pwd -P
+  )/$(basename "${config}")"
+  rows=$(settings_rows "${config}") || die "設定を読めませんでした: ${config}"
+  while IFS=$'\t' read -r kind a b c; do
+    case ${kind} in
+      days)
+        if [[ ${a} != - ]]; then
+          settings_days=${a}
+        fi
+        ;;
+      all)
+        day_end_of "${a}"
+        all_dates+=("${a}")
+        all_ends+=("${day_end}")
+        all_reasons+=("${b}")
+        ;;
+      nixpkgs)
+        day_end_of "${a}"
+        part_dates+=("${a}")
+        part_ends+=("${day_end}")
+        part_packages+=("${b}")
+        part_reasons+=("${c}")
+        ;;
+    esac
+  done <<<"${rows}"
+}
+
+read_settings
+
+# 日数の出どころ: --min-age-days > FLAKE_MIN_RELEASE_AGE_DAYS (空は無いのと同じ。CI は
+# workflow_dispatch 以外で空を渡してくる) > 設定 > 7。
+if [[ -n ${cli_days} ]]; then
+  min_age_days=${cli_days}
+  days_from=--min-age-days
+elif [[ -n ${FLAKE_MIN_RELEASE_AGE_DAYS:-} ]]; then
+  min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS}
+  days_from=FLAKE_MIN_RELEASE_AGE_DAYS
+elif [[ -n ${settings_days} ]]; then
+  min_age_days=${settings_days}
+  days_from="設定 $(basename "${config}")"
+else
+  min_age_days=7
+  days_from=既定
+fi
+
+case ${min_age_days} in
+  '' | *[!0-9]*)
+    die "下限日数は 0 以上の整数で指定すること (${days_from} の値: ${min_age_days})"
+    ;;
+esac
+# 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
+min_age_days=$((10#${min_age_days}))
+
 ################
 # input の一覧 #
 ################
 
-# root の直下 input を 1 行 1 件で出す。区切りはタブ。
+# root の直下 input を 1 行 1 件で出す。区切りはタブで、空の欄は - (settings_rows と同じわけ)。
 #
-#   <名前> <type> <owner> <repo> <lastModified> <original.ref>
+#   <名前> <type> <owner> <repo> <lastModified> <rev> <original.ref>
 #
-# 今 pin されている rev は出さない。update は新しい rev を自分で決めるし、
-# check は lastModified しか見ないので誰も使わない。
+# $2 が 1 なら、名前は flake.nix の inputs から取り、lock にあればその locked を、無ければ
+# flake.nix の url を使う (resolve / update。lock に無い input も先端を掴ませない)。0 なら
+# lock だけを読む (check。今 pin されているものを測る)。lastModified は lock に無ければ 0。
 #
 # follows で他の input を指しているものは自分の locked ノードを持たない
-# (root.inputs の値が文字列ではなく配列になる) ので落とす。
-lock_inputs() {
-  nix eval --raw --impure --expr "
-    let
-      lock = builtins.fromJSON (builtins.readFile \"$1\");
-      root = lock.nodes.\${lock.root};
-      names = builtins.filter (n: builtins.isString root.inputs.\${n})
-        (builtins.attrNames (root.inputs or { }));
-      line = n:
-        let
-          node = lock.nodes.\${root.inputs.\${n}};
-          l = node.locked or { };
-          o = node.original or { };
-        in
-        builtins.concatStringsSep \"\t\" [
-          n
-          (l.type or \"\")
-          (l.owner or \"\")
-          (l.repo or \"\")
-          (toString (l.lastModified or 0))
-          (o.ref or \"\")
-        ];
-    in
-    builtins.concatStringsSep \"\n\" (map line names)
-  "
-}
-
-# lock がまだ無い flake 用。同じ形の行を flake.nix の `inputs` から作る。
-#
-# lastModified は常に 0 を置く。pin がまだ無いので測るものが無い。この行を使うのは
-# resolve / update だけで、lastModified を見る check は lock を要求する。
+# (root.inputs の値が文字列ではなく配列になる) ので落とす。flake.nix にしか無い
+# follows だけの input は、type を follows にして下の classify_input で対象外へ落とす。
 #
 # url の文字列は builtins.parseFlakeRef に解かせる。github:owner/repo/ref?dir=...
 # の細部を自前で切ると必ずずれるし、nix が実際に解くのと同じ結果が要る。
-#
 # flake の評価ではなく flake.nix の import なので、input の取得は起きず、
 # flake.nix が git に追加されていなくても読める (追加は update の nix 側で要る)。
 # `outputs` は関数だが遅延評価なので触らなければ問題にならない。
-flake_nix_inputs() {
+input_rows() {
+  local dir=$1 with_nix=$2 nix_bool=false
+  if [[ ${with_nix} == 1 ]]; then
+    nix_bool=true
+  fi
   nix eval --raw --impure --expr "
     let
-      flake = import \"$1\";
-      inputs = flake.inputs or { };
-      line = n:
+      lockPath = \"${dir}/flake.lock\";
+      lock = if builtins.pathExists lockPath then builtins.fromJSON (builtins.readFile lockPath) else null;
+      root = if lock == null then { } else lock.nodes.\${lock.root}.inputs or { };
+      specs = if ${nix_bool} then (import \"${dir}/flake.nix\").inputs or { } else root;
+      cell = v: if v == \"\" then \"-\" else v;
+      row = cols: builtins.concatStringsSep \"\t\" (map cell cols);
+      fromLock = n:
         let
-          spec = inputs.\${n};
+          node = lock.nodes.\${root.\${n}};
+          l = node.locked or { };
+          o = node.original or { };
+        in
+        row [ n (l.type or \"\") (l.owner or \"\") (l.repo or \"\") (toString (l.lastModified or 0)) (l.rev or \"\") (o.ref or \"\") ];
+      fromNix = n:
+        let
+          spec = specs.\${n};
           # 文字列と url は flake ref として解く。どちらでもなければ type などを
-          # 直に書いた形と見る。follows だけの input は自分の revision を持たない
-          # ので、type を follows にして下の classify_input で対象外へ落とす。
+          # 直に書いた形と見る。
           r =
             if builtins.isString spec then builtins.parseFlakeRef spec
             else if spec ? url then builtins.parseFlakeRef spec.url
             else if spec ? type then spec
             else { type = if spec ? follows then \"follows\" else \"\"; };
         in
-        builtins.concatStringsSep \"\t\" [
-          n
-          (r.type or \"\")
-          (r.owner or \"\")
-          (r.repo or \"\")
-          \"0\"
-          (r.ref or \"\")
-        ];
+        row [ n (r.type or \"\") (r.owner or \"\") (r.repo or \"\") \"0\" \"\" (r.ref or \"\") ];
+      line = n:
+        if root ? \${n} then (if builtins.isString root.\${n} then fromLock n else null)
+        else fromNix n;
     in
-    builtins.concatStringsSep \"\n\" (map line (builtins.attrNames inputs))
+    builtins.concatStringsSep \"\n\" (builtins.filter (x: x != null) (map line (builtins.attrNames specs)))
   "
 }
 
-# lock_inputs を呼んで、読めなかったときにその場で止める。
-# `< <(...)` で while へ流すと nix 側の失敗を取りこぼす (while は 0 で終わる)
-# ので、一度変数へ受けてから流す。
-read_lock_inputs() {
-  local rows
-  rows=$(lock_inputs "$1") || die "flake.lock を読めませんでした: $1"
-  printf '%s\n' "${rows}"
-}
-
-read_flake_nix_inputs() {
-  local rows
-  rows=$(flake_nix_inputs "$1") || die "flake.nix の inputs を読めませんでした: $1"
-  printf '%s\n' "${rows}"
+# 読んだ行の - を空へ戻す (変数の名前を渡す)。
+undash() {
+  local v
+  for v in "$@"; do
+    if [[ ${!v} == - ]]; then
+      printf -v "${v}" '%s' ''
+    fi
+  done
 }
 
 # flake ディレクトリを検算して **絶対パス** を出す。絶対にするのは
@@ -378,17 +542,14 @@ abs_flake_dir() {
   )
 }
 
-# resolve / update が使う入口。lock があればその locked から、無ければ flake.nix
-# から読む。lock が無い状態で止めないのは、そこで `nix flake lock` を打たせると
-# 一度先端へ pin されてしまうため。最初の lock も update で作れる。
+# input_rows を呼んで、読めなかったときにその場で止める。
+# `< <(...)` で while へ流すと nix 側の失敗を取りこぼす (while は 0 で終わる)
+# ので、一度変数へ受けてから流す。
 read_inputs() {
-  local dir=$1 abs
-  abs=$(abs_flake_dir "${dir}") || return 1
-  if [[ -f ${abs}/flake.lock ]]; then
-    read_lock_inputs "${abs}/flake.lock"
-  else
-    read_flake_nix_inputs "${abs}/flake.nix"
-  fi
+  local abs rows
+  abs=$(abs_flake_dir "$1") || return 1
+  rows=$(input_rows "${abs}" "$2") || die "flake の input を読めませんでした: $1"
+  printf '%s\n' "${rows}"
 }
 
 # input 1 件の測り方を決めて input_kind へ入れる (channel / commit / skip)。
@@ -474,44 +635,61 @@ release_published_epoch() {
   http_date_to_epoch "${lm}"
 }
 
-# cutoff 以前に公開された最新のチャンネル公開を選ぶ。
-#
-#   pick_nixpkgs_release <cutoff> <系列>...
-#
-# 系列は **古い順** に並べて渡す。見つかったら picked_release / picked_epoch /
-# picked_rev を埋める。見つからなければ 1 を返す。
-picked_release=""
-picked_epoch=""
-picked_rev=""
+# 公開の一覧 (古い順) と、調べた公開時刻・rev (同じ添字。まだ調べていなければ空、
+# 公開時刻が取れなかったものは -)。1 回の実行で 1 度だけ読み、選ぶたびに使い回す
+# (nixpkgs と nixpkgs-exceptions、複数の flake を続けて選んでも同じ HEAD を投げない)。
+# 公開の新旧は添字で比べる。
+releases=()
+release_epochs=()
+release_revs=()
+releases_loaded=0
+
+load_series() {
+  local list rel
+  list=$(list_series "$1") || die "チャンネル公開の一覧を取れませんでした ($1)。"
+  while IFS= read -r rel; do
+    [[ -n ${rel} ]] || continue
+    releases+=("${rel}")
+    release_epochs+=("")
+    release_revs+=("")
+  done <<<"${list}"
+}
+
+# 系列が分岐した直後は新しい系列に十分古い公開が無いので、1 つ前の系列も先に読む。
+load_releases() {
+  local series prev
+  [[ ${releases_loaded} -eq 0 ]] || return 0
+  series=$(series_of "$(current_release)")
+  [[ ${series} != pre ]] || die "チャンネル ${channel} の現在の公開名が取れませんでした。"
+  if prev=$(previous_series "${series}"); then
+    load_series "${prev}"
+  fi
+  load_series "${series}"
+  [[ ${#releases[@]} -gt 0 ]] || die "チャンネル公開の一覧が空でした (${series})。"
+  releases_loaded=1
+}
+
+# cutoff 以前に公開された最新の公開の添字を picked へ入れる。見つからなければ 1 を返す。
+picked=""
 # 走査上限に当たって打ち切ったか。見つからなかった理由を分けて報告するため。
 hit_candidate_cap=0
-pick_nixpkgs_release() {
-  local cutoff=$1 series rel epoch i seen=0
-  local releases=()
-  shift
+pick_release() {
+  local cutoff=$1 i seen=0
+  load_releases
   hit_candidate_cap=0
-  for series in "$@"; do
-    while IFS= read -r rel; do
-      [[ -n ${rel} ]] || continue
-      releases+=("${rel}")
-    done < <(list_series "${series}")
-  done
-  if [[ ${#releases[@]} -eq 0 ]]; then
-    die "チャンネル公開の一覧が空でした ($*)。"
-  fi
   # 新しい側から順に見て、最初に cutoff を満たしたものを採る。
   for ((i = ${#releases[@]} - 1; i >= 0; i--)); do
-    rel=${releases[i]}
     seen=$((seen + 1))
     if [[ ${seen} -gt ${max_candidates} ]]; then
       hit_candidate_cap=1
       break
     fi
-    epoch=$(release_published_epoch "${rel}") || continue
-    if [[ ${epoch} -le ${cutoff} ]]; then
-      picked_release=${rel}
-      picked_epoch=${epoch}
-      picked_rev=$(curl -fsS "${releases_url}/${rel}/git-revision" | tr -d '\r\n')
+    if [[ -z ${release_epochs[i]} ]]; then
+      release_epochs[i]=$(release_published_epoch "${releases[i]}") || release_epochs[i]=-
+    fi
+    [[ ${release_epochs[i]} != - ]] || continue
+    if [[ ${release_epochs[i]} -le ${cutoff} ]]; then
+      picked=${i}
       return 0
     fi
   done
@@ -520,27 +698,41 @@ pick_nixpkgs_release() {
 
 die_not_found() {
   if [[ ${hit_candidate_cap} -eq 1 ]]; then
-    die "${min_age_days} 日以上前のチャンネル公開に、新しい側から ${max_candidates} 件
+    die "$1 以前のチャンネル公開に、新しい側から ${max_candidates} 件
 遡っても届きませんでした。日数の設定が大きすぎます (公開は 1〜3 日おき)。"
   fi
-  die "${min_age_days} 日以上前のチャンネル公開が見つかりませんでした。"
+  die "$1 以前のチャンネル公開が見つかりませんでした。"
 }
 
-# 選ぶ公開は cutoff だけで決まる。複数の flake を続けて処理するとき、同じ
-# HEAD を何度も投げないよう 1 度だけ解決する。
-nixpkgs_resolved=0
-resolve_nixpkgs_once() {
-  local cutoff=$1 series prev
-  [[ ${nixpkgs_resolved} -eq 0 ]] || return 0
-  series=$(series_of "$(current_release)")
-  [[ ${series} != pre ]] || die "チャンネル ${channel} の現在の公開名が取れませんでした。"
-  if ! pick_nixpkgs_release "${cutoff}" "${series}"; then
-    # 系列が分岐した直後。1 つ前の系列まで広げてもう一度探す。
-    prev=$(previous_series "${series}") || die_not_found
-    note "${series} に ${min_age_days} 日以上前の公開が無いので ${prev} も見ます。"
-    pick_nixpkgs_release "${cutoff}" "${prev}" "${series}" || die_not_found
+# 添字の公開の rev を found_rev へ入れる (git-revision の本文。release_revs に貯める)。
+found_rev=""
+release_rev_at() {
+  local i=$1
+  if [[ -z ${release_revs[i]} ]]; then
+    release_revs[i]=$(curl -fsS "${releases_url}/${releases[i]}/git-revision" | tr -d '\r\n') \
+      || die "${releases[i]} の git-revision を取れませんでした。"
   fi
-  nixpkgs_resolved=1
+  found_rev=${release_revs[i]}
+}
+
+# rev の公開を名前 (末尾は rev の頭 12 桁) で探し、添字を found_index へ入れる。無ければ空。
+found_index=""
+release_index_of_rev() {
+  local short=${1:0:12} i
+  load_releases
+  found_index=""
+  for ((i = ${#releases[@]} - 1; i >= 0; i--)); do
+    if [[ ${releases[i]} == *".${short}" ]]; then
+      found_index=${i}
+      return 0
+    fi
+  done
+}
+
+# 表示用: 添字の公開の「名前 / 公開 YYYY-MM-DD (n 日前)」
+release_label() {
+  printf '%s / 公開 %s (%s 日前)' "${releases[$1]}" \
+    "$(epoch_to_day "${release_epochs[$1]}")" "$(age_days "$2" "${release_epochs[$1]}")"
 }
 
 #####################
@@ -607,43 +799,138 @@ lock_path_of() {
   printf '%s/flake.lock\n' "${abs}"
 }
 
+# --input で選んだか (指定が無ければ全部)。
+selected() {
+  local n
+  [[ -n ${only_inputs[*]+x} ]] || return 0
+  for n in "${only_inputs[@]}"; do
+    if [[ ${n} == "$1" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # resolve_dir が埋める。update はこれをそのまま --override-input へ渡す。
 # URL の owner/repo は読んだ側 (flake.lock の locked、無ければ flake.nix の inputs)
 # から取る。追跡先を勝手に変えないため。
 resolved_names=()
 resolved_urls=()
 
+# 選んだ input を resolved_* へ足す。
+resolved() {
+  resolved_names+=("$1")
+  resolved_urls+=("github:$2/$3/$4")
+}
+
+# nixpkgs-exceptions を選ぶ。$1: 比べる相手 (普段の pin) の公開の添字 (分からなければ空)、
+# $2: その rev、$3: 今、残り: input の owner と repo。
+resolve_exceptions_input() {
+  local ref_index=$1 ref_rev=$2 now=$3 owner=$4 repo=$5 i end x_index="" x_end=""
+  local states=()
+  # 項目ごとに、その日の終わりまでの最新の公開が普段の pin より新しいか
+  for ((i = 0; i < ${#part_dates[@]}; i++)); do
+    end=${part_ends[i]}
+    if [[ ${end} -gt ${now} ]]; then
+      end=${now}
+    fi
+    if pick_release "${end}" && [[ -z ${ref_index} || ${picked} -gt ${ref_index} ]]; then
+      states+=("効いている")
+      if [[ -z ${x_index} || ${picked} -gt ${x_index} ]]; then
+        x_index=${picked}
+        x_end=${part_dates[i]}
+      fi
+    else
+      states+=("何もしない (その日の終わりまでの公開が普段の pin より新しくない。消してよい)")
+    fi
+  done
+  if [[ -n ${x_index} ]]; then
+    release_rev_at "${x_index}"
+    resolved "${exceptions_input}" "${owner}" "${repo}" "${found_rev}"
+    printf '  %-14s %s\n' "${exceptions_input}" "${found_rev}"
+    detail "$(release_label "${x_index}" "${now}") / 一部の例外の ${x_end} の終わりまで"
+  else
+    resolved "${exceptions_input}" "${owner}" "${repo}" "${ref_rev}"
+    printf '  %-14s %s\n' "${exceptions_input}" "${ref_rev}"
+    detail "nixpkgs と同じ rev (効いている一部の例外が無い)"
+  fi
+  for ((i = 0; i < ${#part_dates[@]}; i++)); do
+    note "例外 (一部・nixpkgs から) ${part_packages[i]} ${part_dates[i]}: ${states[i]} (理由: ${part_reasons[i]})"
+  done
+}
+
 resolve_dir() {
-  local dir=$1 now cutoff rows
-  local name type owner repo lastmod ref
+  local dir=$1 now base cutoff rows i n found
+  local name type owner repo lastmod rev ref
+  local main_index="" main_rev="" lock_main_rev="" exc_owner="" exc_repo="" any_channel=0
   # die は $(...) の中では subshell を抜けるだけなので、呼び側で失敗を見る。
-  rows=$(read_inputs "${dir}") || return 1
-  now=$(date -u +%s)
-  cutoff=$((now - min_age_days * 86400))
+  rows=$(read_inputs "${dir}" 1) || return 1
+  now=$(now_epoch)
+  base=$((now - min_age_days * 86400))
+
+  # 全体の例外: date の日の終わりが猶予より新しければ、nixpkgs の上限をそこまで上げる
+  # (今より先へは上げない)。
+  cutoff=${base}
+  for ((i = 0; i < ${#all_dates[@]}; i++)); do
+    if [[ ${all_ends[i]} -gt ${cutoff} ]]; then
+      cutoff=${all_ends[i]}
+    fi
+  done
+  if [[ ${cutoff} -gt ${now} ]]; then
+    cutoff=${now}
+  fi
 
   resolved_names=()
   resolved_urls=()
 
-  printf '%s==> %s (下限 %s 日)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${c_reset}"
+  printf '%s==> %s (下限 %s 日。%s)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${days_from}" "${c_reset}"
   if [[ ! -f ${dir}/flake.lock ]]; then
     note 'flake.lock がまだ無いので flake.nix の inputs から決めます。'
   fi
 
-  while IFS=$'\t' read -r name type owner repo lastmod ref; do
+  # --input に渡した名前が、この flake にあるか
+  if [[ -n ${only_inputs[*]+x} ]]; then
+    for n in "${only_inputs[@]}"; do
+      found=0
+      while IFS=$'\t' read -r name _; do
+        if [[ ${name} == "${n}" ]]; then
+          found=1
+        fi
+      done <<<"${rows}"
+      [[ ${found} -eq 1 ]] || die "input '${n}' が ${dir} の flake にありません (--input)。"
+    done
+  fi
+
+  while IFS=$'\t' read -r name type owner repo lastmod rev ref; do
     [[ -n ${name} ]] || continue
+    undash type owner repo rev ref
+    if [[ ${name} == nixpkgs ]]; then
+      lock_main_rev=${rev}
+    fi
+    selected "${name}" || continue
     classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
     case ${input_kind} in
       channel)
-        resolve_nixpkgs_once "${cutoff}"
-        resolved_names+=("${name}")
-        resolved_urls+=("github:${owner}/${repo}/${picked_rev}")
-        printf '  %-14s %s\n' "${name}" "${picked_rev}"
-        detail "${picked_release} / 公開 $(epoch_to_day "${picked_epoch}") ($(age_days "${now}" "${picked_epoch}") 日前)"
+        if [[ ${name} == "${exceptions_input}" ]]; then
+          # 普段の pin が決まってから選ぶ (下)
+          exc_owner=${owner}
+          exc_repo=${repo}
+          continue
+        fi
+        any_channel=1
+        pick_release "${cutoff}" || die_not_found "$(epoch_to_day "${cutoff}")"
+        release_rev_at "${picked}"
+        resolved "${name}" "${owner}" "${repo}" "${found_rev}"
+        if [[ ${name} == nixpkgs ]]; then
+          main_index=${picked}
+          main_rev=${found_rev}
+        fi
+        printf '  %-14s %s\n' "${name}" "${found_rev}"
+        detail "$(release_label "${picked}" "${now}")"
         ;;
       commit)
-        pick_github_commit "${name}" "${owner}" "${repo}" "${ref}" "${cutoff}"
-        resolved_names+=("${name}")
-        resolved_urls+=("github:${owner}/${repo}/${gh_rev}")
+        pick_github_commit "${name}" "${owner}" "${repo}" "${ref}" "${base}"
+        resolved "${name}" "${owner}" "${repo}" "${gh_rev}"
         printf '  %-14s %s\n' "${name}" "${gh_rev}"
         if [[ -n ${gh_epoch} ]]; then
           detail "${owner}/${repo}${ref:+ (${ref})} / commit $(epoch_to_day "${gh_epoch}") ($(age_days "${now}" "${gh_epoch}") 日前)"
@@ -657,6 +944,30 @@ resolve_dir() {
         ;;
     esac
   done <<<"${rows}"
+
+  if [[ ${any_channel} -eq 1 ]]; then
+    for ((i = 0; i < ${#all_dates[@]}; i++)); do
+      if [[ ${all_ends[i]} -gt ${base} ]]; then
+        note "例外 (全体) ${all_dates[i]}: 効いている。nixpkgs を ${all_dates[i]} の終わりまでの公開から選ぶ (理由: ${all_reasons[i]})"
+      else
+        note "例外 (全体) ${all_dates[i]}: 何もしない (猶予 ${min_age_days} 日の方が新しい。消してよい) (理由: ${all_reasons[i]})"
+      fi
+    done
+  fi
+
+  # 一部 (nixpkgs から) の例外の pin。比べる相手は、今選んだ nixpkgs か、選んでいなければ lock の nixpkgs
+  if [[ -n ${exc_owner} ]]; then
+    if [[ -z ${main_rev} ]]; then
+      [[ -n ${lock_main_rev} ]] || die "${exceptions_input} を選ぶには nixpkgs の pin が要ります。nixpkgs も一緒に選ぶこと。"
+      main_rev=${lock_main_rev}
+      release_index_of_rev "${main_rev}"
+      main_index=${found_index}
+      if [[ -z ${main_index} ]]; then
+        note "lock の nixpkgs (${main_rev}) がチャンネルの公開に見つからないので、一部の例外の公開と比べずに選びます。"
+      fi
+    fi
+    resolve_exceptions_input "${main_index}" "${main_rev}" "${now}" "${exc_owner}" "${exc_repo}"
+  fi
 
   if [[ -z ${resolved_names[*]+x} ]]; then
     warn "${dir}: 遅延の対象になる input がありませんでした。"
@@ -742,34 +1053,72 @@ cmd_update() {
   return "${failed}"
 }
 
+# 猶予を満たさない pin を、例外が通すか。通すなら、そのわけを allowed_by へ入れる。
+# $1: input の名前、$2: lastModified、$3: rev、$4: nixpkgs の rev。
+allowed_by=""
+allowed() {
+  local name=$1 lastmod=$2 rev=$3 main_rev=$4 i
+  allowed_by=""
+  if [[ ${name} == "${exceptions_input}" ]]; then
+    if [[ -n ${rev} && ${rev} == "${main_rev}" ]]; then
+      allowed_by="nixpkgs と同じ rev"
+      return 0
+    fi
+    for ((i = 0; i < ${#part_dates[@]}; i++)); do
+      if [[ ${lastmod} -le ${part_ends[i]} ]]; then
+        allowed_by="例外 (一部・nixpkgs から) ${part_dates[i]}"
+        return 0
+      fi
+    done
+    return 1
+  fi
+  for ((i = 0; i < ${#all_dates[@]}; i++)); do
+    if [[ ${lastmod} -le ${all_ends[i]} ]]; then
+      allowed_by="例外 (全体) ${all_dates[i]}"
+      return 0
+    fi
+  done
+  return 1
+}
+
 cmd_check() {
-  local dir lock rows now name type owner repo lastmod ref age failed=0 checked
-  now=$(date -u +%s)
+  local dir rows now name type owner repo lastmod rev ref age failed=0 checked main_rev
+  now=$(now_epoch)
   for dir in "${flake_dirs[@]}"; do
-    lock=$(lock_path_of "${dir}")
-    rows=$(read_lock_inputs "${lock}")
+    lock_path_of "${dir}" >/dev/null
+    rows=$(read_inputs "${dir}" 0)
     checked=0
-    printf '%s==> %s の pin の古さ (下限 %s 日)%s\n' \
-      "${c_cyan}" "${dir}" "${min_age_days}" "${c_reset}"
+    main_rev=""
+    while IFS=$'\t' read -r name _ _ _ _ rev _; do
+      if [[ ${name} == nixpkgs ]]; then
+        main_rev=${rev}
+      fi
+    done <<<"${rows}"
+    printf '%s==> %s の pin の古さ (下限 %s 日。%s)%s\n' \
+      "${c_cyan}" "${dir}" "${min_age_days}" "${days_from}" "${c_reset}"
     if [[ ${min_age_days} -eq 0 ]]; then
       note '下限 0 なので常に通ります。'
     fi
-    while IFS=$'\t' read -r name type owner repo lastmod ref; do
+    while IFS=$'\t' read -r name type owner repo lastmod rev ref; do
       [[ -n ${name} ]] || continue
+      undash type owner repo rev ref
       classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
       [[ ${input_kind} != skip ]] || continue
       checked=$((checked + 1))
       if [[ -z ${lastmod} || ${lastmod} == 0 ]]; then
-        die "${lock} から ${name} の lastModified が読めませんでした。"
+        die "${dir}/flake.lock から ${name} の lastModified が読めませんでした。"
       fi
       age=$(age_days "${now}" "${lastmod}")
-      if [[ ${age} -lt ${min_age_days} ]]; then
+      if [[ ${age} -ge ${min_age_days} ]]; then
+        printf '  %-14s %s (%s 日前)  OK\n' \
+          "${name}" "$(epoch_to_day "${lastmod}")" "${age}"
+      elif [[ ${input_kind} == channel ]] && allowed "${name}" "${lastmod}" "${rev}" "${main_rev}"; then
+        printf '  %-14s %s (%s 日前)  OK (%s)\n' \
+          "${name}" "$(epoch_to_day "${lastmod}")" "${age}" "${allowed_by}"
+      else
         printf '  %-14s %s (%s 日前)  %sNG%s\n' \
           "${name}" "$(epoch_to_day "${lastmod}")" "${age}" "${c_red}" "${c_reset}"
         failed=1
-      else
-        printf '  %-14s %s (%s 日前)  OK\n' \
-          "${name}" "$(epoch_to_day "${lastmod}")" "${age}"
       fi
     done <<<"${rows}"
     if [[ ${checked} -eq 0 ]]; then
@@ -779,8 +1128,9 @@ cmd_check() {
   if [[ ${failed} -eq 1 ]]; then
     die "先端に近すぎる pin があります。
 flake-lock-age.sh update で ${min_age_days} 日以上前の revision へ下げ直すこと。
-意図して先端を入れた (緊急の CVE 修正など) 場合は、この失敗は意図どおりなので、
-そのまま記録として残すか下限を下げて再実行する。"
+セキュリティパッチのために新しい pin が要るなら、release-age.nix に例外を足す
+(nix/README.md「猶予の例外」)。意図して先端を入れた (緊急の CVE 修正など) 場合は、
+この失敗は意図どおりなので、そのまま記録として残すか下限を下げて再実行する。"
   fi
 }
 

@@ -163,6 +163,12 @@
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
+          # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
+          # (store は使わない。テストの nix の包みが --store dummy:// を付ける)
+          flake-lock-age-test = pkgs.runCommand "flake-lock-age-test" { nativeBuildInputs = [ pkgs.nix ]; } ''
+            bash ${./tests/flake-lock-age.test.sh} ${./scripts/flake-lock-age.sh}
+            touch $out
+          '';
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           # これも scripts/ を丸ごと渡す (git_github() を持つ script を全部見る)
