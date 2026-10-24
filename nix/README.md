@@ -351,7 +351,11 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 - `nixpkgs-exceptions` は、効いている一部 (nixpkgs から) の項目が無いあいだは `nixpkgs` と同じ revision にしておく
   （`flake-lock-age.sh` がそう選ぶ）。評価もそのあいだはこの input を読まないので、普段の道は重くならない
 - 書き誤り（知らない欄・暦に無い日付・空の `reason`・入れ子の名前・pkgs に無い名前・同じ package を 2 回・
-  `pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check` も落ちる）
+  `pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check` も落ちる）。
+  今日（Asia/Tokyo）より先の `date` は `flake-lock-age.sh` が止める（打ち間違いだと、その日まで猶予が外れたまま
+  先端を取り続け、`check` も通ってしまうため。CI の `lock-age` も落ちる）
+- `--input <名前>` を付けても、lock に無い github の input（flake.nix に足したばかりのもの）は一緒に選ぶ
+  （`nix flake update` は lock に無い input を先端で足すため）
 
 **消し時。** 例外は要らなくなると何もしなくなり、home の評価が `nixpkgs の例外 …` で始まる警告を出す。setup は switch の後に
 [警告のまとめ](#途中の警告のまとめ)へ写し、CI の `check` ジョブは落とさずに annotation で出す。自動では消さないので、PR で消す

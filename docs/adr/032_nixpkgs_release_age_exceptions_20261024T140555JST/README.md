@@ -113,7 +113,10 @@ CI の `lock-age` が赤くなる。ユーザーの言葉では次のとおり�
 
 - 設定は `--config FILE` か、script の隣の `../release-age.nix`。`nix run` で他の repo から呼んだときは、今までどおり 7 日で例外なし
 - 日数は `--min-age-days` > `FLAKE_MIN_RELEASE_AGE_DAYS` > 設定 > 7 (どれが効いたかを見出しの行に出す)
-- `--input NAME` で、その input だけを選ぶ。lock に無い input は flake.nix から読み、先端を掴まない
+- `--input NAME` で、その input だけを選ぶ。lock に無い input は flake.nix から読み、先端を掴まない (lock に無い github の
+  input は、`--input` に無くても一緒に選ぶ。`nix flake update` が lock に無い input を先端で足すため)
+- 今日 (Asia/Tokyo) より先の `date` は、`check` でも `update` でも止める。date は下限なので、打ち間違いの先の日付だと、その日まで
+  猶予が外れたまま先端を取り続け、`check` も通り、消し時の警告も出ない
 - 日付の日の終わりは bash の算術で UNIX 秒にする (GNU と BSD の date の違いに寄らない)。今の時刻は `FLAKE_LOCK_AGE_NOW` で差し替えられる
 
 ## 3. 変更点の詳細

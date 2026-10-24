@@ -21,11 +21,13 @@
 #     それ、そうでなければ nixpkgs と同じ rev
 #   - --input nixpkgs-exceptions だけなら、nix flake update に渡す名前と override はそれだけ。比べる相手は lock の
 #     nixpkgs (公開の名前の末尾 12 桁で見つける)。lock にも flake.nix にも無い名前を --input に渡すと止まる
-#   - lock に無い input (flake.nix にだけある nixpkgs-exceptions) も、先端ではなく決まりどおりに選ぶ
+#   - lock に無い input (flake.nix にだけある nixpkgs-exceptions) も、先端ではなく決まりどおりに選ぶ。--input に
+#     無くても一緒に選ぶ (nix flake update は lock に無い input を先端で足すため)
 #   - check: 猶予を満たさない nixpkgs は NG (終了コード 1)。全体の例外の date の日の終わりまでの nixpkgs は OK とわけを
 #     出す。nixpkgs-exceptions は nixpkgs と同じ rev なら OK、一部の例外の date の日の終わりまでなら OK、どちらでもなく
 #     新しければ NG
-#   - 設定の date が YYYY-MM-DD でなければ止まる
+#   - 設定の date が YYYY-MM-DD でなければ止まる。今日 (Asia/Tokyo) より先の date も止まる (打ち間違いで猶予が
+#     外れたままになるため。check も update も)
 #
 # 偽の curl は、公開の表 (releases.tsv) と commit の表 (commits.tsv) を 1 行ずつ「名前<TAB>UNIX 秒<TAB>rev」で読む。
 # 今の時刻は FLAKE_LOCK_AGE_NOW (UNIX 秒) で渡す。偽のコマンドの shebang は $BASH から作る (Nix のサンドボックスには
@@ -401,6 +403,15 @@ else
   ng "flake.nix にだけある nixpkgs-exceptions も、決まりどおり (lock の nixpkgs と同じ rev) に選ぶ" "$(detail "${r}")"
 fi
 
+r="${work}/r-missing-other"
+run_in "${r}" --config "${cfg}" --input nixpkgs --no-scan update "${d_missing}"
+if [[ $(cat "${r}/rc") == 0 ]] && picked "${r}" nixpkgs 3 && picked "${r}" nixpkgs-exceptions 3 \
+  && ! seen 'home-manager' "${r}/nix.log"; then
+  ok "lock に無い nixpkgs-exceptions は、--input に無くても一緒に (nixpkgs と同じ rev で) 選ぶ"
+else
+  ng "lock に無い nixpkgs-exceptions は、--input に無くても一緒に (nixpkgs と同じ rev で) 選ぶ" "$(detail "${r}")"
+fi
+
 echo "== check"
 
 young=$(at 2026-10-22T03:00:00Z) # 2 日前
@@ -455,6 +466,33 @@ if [[ $(cat "${r}/rc") != 0 ]] && seen '2026-10-1' "${r}/stderr"; then
   ok "設定の date が YYYY-MM-DD でなければ止まる"
 else
   ng "設定の date が YYYY-MM-DD でなければ止まる" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2062-01-01"; reason = "先の日付"; } ]; }'
+r="${work}/r-future-check"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen '2062-01-01' "${r}/stderr"; then
+  ok "今日より先の date は止まる (check)"
+else
+  ng "今日より先の date は止まる (check)" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.fromNixpkgs = [ { packages = [ "hello" ]; date = "2026-10-26"; reason = "あさって"; } ]; }'
+r="${work}/r-future-update"
+run_in "${r}" --config "${cfg}" --no-scan update "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen '2026-10-26' "${r}/stderr" && [[ ! -s ${r}/nix.log ]]; then
+  ok "今日より先の date は止まる (update。nix flake update を打たない)"
+else
+  ng "今日より先の date は止まる (update。nix flake update を打たない)" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-24"; reason = "今日"; } ]; }'
+r="${work}/r-today"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") == 0 ]]; then
+  ok "今日 (Asia/Tokyo) の date は通る"
+else
+  ng "今日 (Asia/Tokyo) の date は通る" "$(detail "${r}")"
 fi
 
 echo

@@ -162,7 +162,11 @@ binary で足すか (公開 3 日で、7 日の猶予を外す) への答えは�
   - `nixpkgs-exceptions` を上の決まりで選ぶ。
   - `--input NAME` で、その input だけを選ぶ (くり返せる)。lock に無い input は flake.nix から読む (新しい input を足しても先端を掴まない)。
 - check: 猶予を満たさない pin も、全体の例外の date の日の終わりまでの nixpkgs、一部の例外の date の日の終わりまでの
-  `nixpkgs-exceptions`、普段の pin と同じ rev の `nixpkgs-exceptions` は通す。例外の項目ごとに、効いているか・何もしていないかを出す。
+  `nixpkgs-exceptions`、普段の pin と同じ rev の `nixpkgs-exceptions` は通し、どの例外で通したかを pin の行に出す
+  (`OK (例外 (全体) <date>)`)。例外の項目ごとの消し時は home の評価の警告が出す (script で同じ判定を持たない)。
+  update / resolve は、選ぶときの項目ごとの状態 (効いている・何もしない) を出す。
+- 今日 (Asia/Tokyo) より先の date は止める (打ち間違いで、その日まで猶予が外れたままになるため。check も update も)。
+- `--input` を付けても、lock に無い github の input は一緒に選ぶ (nix flake update が lock に無い input を先端で足すため)。
 - 日付の日の終わりは、bash の算術で日付から UNIX 秒にする (GNU と BSD の date の違いに寄らない)。今の時刻は `FLAKE_LOCK_AGE_NOW`
   (UNIX 秒) で差し替えられる (テスト用)。
 

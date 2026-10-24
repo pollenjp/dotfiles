@@ -23,6 +23,7 @@
 #   - 実の設定 (nix/release-age.nix) で: 設定が評価でき、差し替えた名前は home の pkgs で overlay の package になり、
 #     home.packages のほかの package はそれを使っていない (一部の例外は、ほかの package から使われないアプリだけ)。
 #     home の warnings の「nixpkgs の例外」の文は lib が出したものと同じ
+#   - 消し時の警告が出ていても、warnings を見るほかの check (local-flake-tmp-state) は落ちない (CI は落とさない)
 {
   lib,
   pkgs,
@@ -175,6 +176,17 @@ let
       };
   used = usedBy real.replaced home.config.home.packages homeWithout.config.home.packages;
 
+  # 消し時の警告が出ている home。warnings を空と決め打ちする check が無いかを見る
+  mkHomeExpired = import ../lib/mk-home.nix {
+    inherit inputs;
+    releaseAge = _: {
+      settings = { };
+      replaced = [ ];
+      overlays = [ ];
+      warnings = [ "nixpkgs の例外 (全体) 2026-09-01 は、もう何もしていない (release-age-state の作り物)" ];
+    };
+  };
+
   cases = [
     {
       name = "例外が無ければ overlay も警告も無く、猶予は既定の 7 日 (nixpkgs-exceptions を読まない)";
@@ -320,6 +332,16 @@ let
         "実の設定で差し替えた package を、home.packages のほかの package は使っていない"
         + lib.optionalString (used != [ ]) " (使っている: ${lib.concatStringsSep ", " used})";
       ok = used == [ ];
+    }
+    {
+      name = "消し時の警告が出ていても、warnings を見るほかの check (local-flake-tmp-state) は落ちない";
+      ok =
+        (builtins.tryEval
+          (import ./local-flake-tmp.nix {
+            inherit lib pkgs;
+            mkHome = mkHomeExpired;
+          }).drvPath
+        ).success;
     }
     {
       name = "home の warnings の「nixpkgs の例外」の文は、lib が出したものと同じ";

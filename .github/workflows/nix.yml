@@ -145,7 +145,7 @@ jobs:
 
       - name: pin が下限日数を満たすか
         env:
-          # workflow_dispatch 以外では空になり、script 側の既定 (7) が効く。
+          # workflow_dispatch 以外では空になり、script が nix/release-age.nix の値 (既定 7) を読む。
           FLAKE_MIN_RELEASE_AGE_DAYS: ${{ inputs.min_release_age_days }}
         run: |
           ./nix/scripts/flake-lock-age.sh check \

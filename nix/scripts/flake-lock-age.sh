@@ -49,6 +49,8 @@
 #
 # 例外がもう何もしていないか (消し時) は、home の評価 (nix/lib/release-age.nix) が
 # 警告に出す。ここは選ぶときの状態 (効いている・何もしない) を表示するだけ。
+# date が今日 (Asia/Tokyo) より先なら止める (打ち間違いで、その日まで猶予が外れたまま
+# 先端を取り続け、check も通ってしまうため)。
 #
 # ## 使い方
 #
@@ -63,7 +65,8 @@
 # で失敗)、無い flake (初回の lock など) では表示だけ。--no-scan で飛ばせる。
 #
 # `resolve` / `update` は、`--input <名前>` (くり返せる) でその input だけを選ぶ。
-# 例外を足したときに普段の pin を動かさずに済む。
+# 例外を足したときに普段の pin を動かさずに済む。ただし lock に無い github の input は、
+# --input に無くても一緒に選ぶ (nix flake update は lock に無い input を先端で足すため)。
 #
 # input の一覧は flake.nix の `inputs` から読み、lock にあればその locked を使う。
 # lock に無い input (flake.nix に足したばかり・flake.lock がまだ無い) も先端ではなく
@@ -385,6 +388,18 @@ settings_rows() {
   "
 }
 
+# date は「その日までの公開を使う」下限なので、今日 (Asia/Tokyo) より先の日付は打ち間違いと見て止める
+# (先の日付だと、その日まで猶予が外れたまま先端を取り続け、check も通り、消し時の警告も出ない)。
+# 今日の日の終わりは今から 24 時間より先にはならないので、それを越えれば先の日付。day_end_of の後に呼ぶ。
+not_ahead() {
+  local now
+  now=$(now_epoch)
+  if [[ ${day_end} -gt $((now + 86400)) ]]; then
+    die "設定 (${config}) の date $1 は今日 ($(epoch_to_day "$((now + 9 * 3600))") Asia/Tokyo) より先の日付です。
+date はその日の終わりまでの公開を使う下限なので、先の日付だとその日まで猶予が外れたままになる。打ち間違いを直すこと。"
+  fi
+}
+
 settings_days=""
 # 全体の例外 (date・その日の終わりの UNIX 秒・reason) と、一部 (nixpkgs から) の例外 (同じく + packages)
 all_dates=()
@@ -417,12 +432,14 @@ read_settings() {
         ;;
       all)
         day_end_of "${a}"
+        not_ahead "${a}"
         all_dates+=("${a}")
         all_ends+=("${day_end}")
         all_reasons+=("${b}")
         ;;
       nixpkgs)
         day_end_of "${a}"
+        not_ahead "${a}"
         part_dates+=("${a}")
         part_ends+=("${day_end}")
         part_packages+=("${b}")
@@ -907,7 +924,11 @@ resolve_dir() {
     if [[ ${name} == nixpkgs ]]; then
       lock_main_rev=${rev}
     fi
-    selected "${name}" || continue
+    if ! selected "${name}"; then
+      # lock に無い input は、--input に無くても nix flake update が lock に足す (先端で)。決まりどおりに選んでおく
+      [[ ${lastmod} == 0 && ${type} == github ]] || continue
+      note "${name} は lock に無いので、--input に無くても一緒に選びます。"
+    fi
     classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
     case ${input_kind} in
       channel)
