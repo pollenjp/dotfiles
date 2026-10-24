@@ -6,7 +6,7 @@
 | 日付 | 2026-08-13 (JST) |
 | 決定者 | pollenjp |
 | 前提 ADR | [001_home_manager_migration](../001_home_manager_migration_20260808T163454JST/README.md)（`nix flake update` を更新手段として据えた ADR。本 ADR はその更新手段を差し替える） |
-| 後続 ADR | [006_nix_closure_sbom_osv_scan](../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)（この遅延が新しく作る「発覚済みの侵害バージョンを固定し続ける」リスクを、閉包スキャンと pin↔先端の差分照合で塞ぐ。本 ADR の決定はそのまま） |
+| 後続 ADR | [006_nix_closure_sbom_osv_scan](../006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)（この遅延が新しく作る「発覚済みの侵害バージョンを固定し続ける」リスクを、閉包スキャンと pin↔先端の差分照合で塞ぐ。本 ADR の決定はそのまま）、[032_nixpkgs_release_age_exceptions](../032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)（日数を `nix/release-age.nix` の設定値にし (`--min-age-days` と環境変数はその場だけの上書きとして残す)、期間付きの例外 (全体・一部) を足した。**§7 の運用手順は現行の形に更新済み。**本文の「日数は `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS` で変えられる」は決定当時の記録としてそのまま残してある） |
 | 運用手順 | [`nix/README.md`](../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)（日常運用はこちら） |
 
 ---
@@ -264,12 +264,13 @@ $ nix flake check --all-systems --no-build ./nix
 ./nix/scripts/flake-lock-age.sh check \
   ./nix ./nix/files/claude/skills/pjp-drawio ./nix/files/claude/skills/pjp-plantuml
 
-# 日数を変える / 遅延を外す
+# その場だけ日数を変える / 遅延を外す (普段の日数は nix/release-age.nix。ADR 032)
 ./nix/scripts/flake-lock-age.sh --min-age-days 14 update
 ./nix/scripts/flake-lock-age.sh --min-age-days 0  update
 ```
 
-遅延を外した commit は CI の `lock-age` が落ちる。通したいときは
+セキュリティパッチのために新しい pin が要るなら、先に `nix/release-age.nix` の期間付きの例外 (全体・一部) を考える
+(ADR 032)。例外の分は CI の `lock-age` も通す。遅延を外した commit は CI の `lock-age` が落ちる。通したいときは
 `workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
 
 他のリポジトリからは flake の app として呼ぶ（チェックアウトは要らない）。

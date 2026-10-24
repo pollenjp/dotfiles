@@ -13,7 +13,8 @@
 #     Dev Tracker (true)・Notion の宛先 ("personal")
 #   - 例の中でコメントのままの行 (gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port) は、
 #     本体の既定のまま
-#   - 例のままなら config.warnings は空 (Dev Tracker を使い、宛先も選んでいる)
+#   - 例のままなら config.warnings は空 (Dev Tracker を使い、宛先も選んでいる)。ただし nixpkgs の猶予の例外の消し時
+#     (「nixpkgs の例外」で始まる文。lib/release-age.nix) は数えない (例外が何もしなくなっても CI は落とさない。ADR 032)
 {
   lib,
   pkgs,
@@ -53,8 +54,8 @@ let
         && d.ccPages.port == null;
     }
     {
-      name = "例のままなら config.warnings は空";
-      ok = cfg.warnings == [ ];
+      name = "例のままなら config.warnings は空 (nixpkgs の例外の消し時は数えない)";
+      ok = builtins.filter (w: !lib.hasPrefix "nixpkgs の例外" w) cfg.warnings == [ ];
     }
   ];
 

@@ -11,6 +11,11 @@
       # 必ず follows で揃える
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    # nixpkgs の猶予の一部 (nixpkgs から) の例外 (release-age.nix の exceptions.fromNixpkgs) の package を取る
+    # nixpkgs (ADR 032)。pin は flake-lock-age.sh が決める: 効いている項目があれば、その最も新しい date の日の
+    # 終わりまでの公開、無ければ nixpkgs と同じ revision (取ってくるものを増やさない)。lib/release-age.nix は、
+    # 消し時を過ぎていない項目があるときだけこれを読む。
+    nixpkgs-exceptions.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
   };
 
   outputs =
@@ -33,7 +38,10 @@
       ];
       forAllSystems = lib.genAttrs systems;
 
-      mkHome = import ./lib/mk-home.nix { inherit inputs; };
+      # nixpkgs の猶予の例外 (release-age.nix) を、system ごとの overlay と消し時の警告にしたもの (ADR 032)。
+      # mkHome が home の pkgs に当てる。
+      releaseAge = import ./lib/release-age.nix { inherit lib inputs; };
+      mkHome = import ./lib/mk-home.nix { inherit inputs releaseAge; };
 
       # 登録簿 (hosts/default.nix) を、全ホスト共通の追加 module を挟んで組み立てる。
       #
@@ -163,6 +171,12 @@
               '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
+          # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
+          # (store は使わない。テストの nix の包みが --store dummy:// を付ける)
+          flake-lock-age-test = pkgs.runCommand "flake-lock-age-test" { nativeBuildInputs = [ pkgs.nix ]; } ''
+            bash ${./tests/flake-lock-age.test.sh} ${./scripts/flake-lock-age.sh}
+            touch $out
+          '';
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           # これも scripts/ を丸ごと渡す (git_github() を持つ script を全部見る)
@@ -429,6 +443,16 @@
               pkgs
               mkHome
               system
+              ;
+          };
+          release-age-state = import ./tests/release-age.nix {
+            inherit
+              lib
+              pkgs
+              system
+              inputs
+              mkHome
+              releaseAge
               ;
           };
         }

@@ -15,10 +15,11 @@ on:
   workflow_dispatch:
     inputs:
       # lock-age ジョブの下限日数を一時的に下げるための逃げ道。
-      # 緊急で先端の CVE 修正を入れた commit を通したいときに 0 で再実行する。
-      # 空なら script の既定 (7 日) を使う。
+      # 緊急で先端の CVE 修正を入れた commit を通したいときに 0 で再実行する
+      # (修正が一部の package だけなら、先に nix/release-age.nix の例外を考える)。
+      # 空なら nix/release-age.nix の minimumReleaseAgeDays (既定 7 日) を使う。
       min_release_age_days:
-        description: "flake.lock の pin の下限日数 (空なら既定の 7)"
+        description: "flake.lock の pin の下限日数 (空なら nix/release-age.nix の値)"
         required: false
         type: string
   # closure-scan の定期実行 (main で走る)。advisory (OSV / GHSA) は pin より後から
@@ -103,19 +104,29 @@ jobs:
           HOME=/tmp/hm-sandbox USER=user /tmp/hm/activate
           HOME=/tmp/hm-sandbox USER=user /tmp/hm/activate
 
+      # nixpkgs の猶予の例外 (nix/release-age.nix) の消し時など、「nixpkgs の例外」で始まる warning は落とさず、
+      # annotation で知らせる (ADR 032。例外は何もしなくなっても害は無く、消すのは PR)。ほかの warning が 1 つでも
+      # あれば落ちる。annotation の本文は % と改行を %25・%0D・%0A にする (GitHub の workflow command の決まり)。
       - name: warnings が空であることを確認
         if: matrix.os == 'ubuntu-latest'
         run: |
           warnings=$(nix eval --json \
             './nix#homeConfigurations.sandbox.config.warnings')
           echo "warnings: ${warnings}"
-          test "${warnings}" = "[]"
+          jq -r '.[] | select(startswith("nixpkgs の例外"))
+            | "::warning title=nixpkgs の例外::" + (gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A"))' \
+            <<<"${warnings}"
+          others=$(jq -c 'map(select(startswith("nixpkgs の例外") | not))' <<<"${warnings}")
+          test "${others}" = "[]"
 
   # flake.lock が「先端」へ飛んでいないことを確認する。
   #
   # flake.nix は nixpkgs-unstable を追ったままで、遅延は flake-lock-age.sh が
   # lock に書く pin でしか表現されていない。つまり素で `nix flake update` を
   # 叩くと遅延は黙って外れる。それに気付くための番人がこのジョブ。
+  #
+  # 下限日数と例外は nix/release-age.nix から読む (script の隣の設定。ADR 032)。
+  # 承認済みの例外 (全体・一部 nixpkgs) の date までの pin はここで通る。
   #
   # 対象はリポジトリ内の flake **すべて**。本体だけ見ていると、skill 側の
   # flake が先端に張り付いたままになる。flake を足したらここへも足すこと。
@@ -134,7 +145,7 @@ jobs:
 
       - name: pin が下限日数を満たすか
         env:
-          # workflow_dispatch 以外では空になり、script 側の既定 (7) が効く。
+          # workflow_dispatch 以外では空になり、script が nix/release-age.nix の値 (既定 7) を読む。
           FLAKE_MIN_RELEASE_AGE_DAYS: ${{ inputs.min_release_age_days }}
         run: |
           ./nix/scripts/flake-lock-age.sh check \

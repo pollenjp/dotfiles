@@ -73,7 +73,7 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 
 `flake.lock` が書き換わる。**変更をコミットして他のマシンで pull すれば、全マシンのバージョンが揃う。**
 
-**素の `nix flake update` は使わない。** 上げ先は追跡先の先端ではなく、**公開から 7 日以上経った revision** に限っている（npm / pnpm の `minimumReleaseAge` に相当する遅延）。素の `nix flake update` は先端を取るのでこの遅延が黙って外れ、CI の `lock-age` ジョブが落ちる。
+**素の `nix flake update` は使わない。** 上げ先は追跡先の先端ではなく、**公開から猶予の日数（既定 7 日）以上経った revision** に限っている（npm / pnpm の `minimumReleaseAge` に相当する遅延）。素の `nix flake update` は先端を取るのでこの遅延が黙って外れ、CI の `lock-age` ジョブが落ちる。
 
 選ばれる revision を見るだけなら `resolve`、今の `flake.lock` を検査するなら `check`。
 
@@ -82,7 +82,7 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 ./nix/scripts/flake-lock-age.sh check
 ```
 
-日数は `--min-age-days N` で変える（`0` で遅延なし）。`setup` 経由なら `DOTFILES_MIN_RELEASE_AGE_DAYS`。理由と外し方は [`nix/README.md`](../../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)。
+普段の日数は `nix/release-age.nix` の `minimumReleaseAgeDays`。その場だけ変えるなら `--min-age-days N`（`0` で遅延なし。`setup` 経由なら `DOTFILES_MIN_RELEASE_AGE_DAYS`）。セキュリティパッチが猶予より新しい側にしか無いときは、同じファイルに期間付きの例外（全体・一部）を足す（[ADR 032](../../032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)）。理由と外し方は [`nix/README.md`](../../../../nix/README.md#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)。
 
 この遅延は**本体の `nix/` だけの話ではない**。リポジトリ内の flake（skill 側のものを含む）は全部同じ扱いで、CI の `lock-age` ジョブがまとめて検査している。
 

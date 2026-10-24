@@ -190,9 +190,10 @@ dotfiles-private (private な repo) の取得:
   追跡されているファイルを書き換えるので、動作を確認したら commit する。
   未 commit のままだと --self-update / u は本体を更新しなくなる。
 
-  取るのは先端ではなく **公開から 7 日以上経った revision**。出たばかりのものを
-  掴まないための遅延で、npm / pnpm の minimumReleaseAge に相当する。日数は
-  DOTFILES_MIN_RELEASE_AGE_DAYS で変える (0 で遅延なし = 先端)。
+  取るのは先端ではなく **公開から猶予の日数 (既定 7) 以上経った revision**。出たばかりの
+  ものを掴まないための遅延で、npm / pnpm の minimumReleaseAge に相当する。普段の日数と
+  期間付きの例外は nix/release-age.nix に書く。その場だけ変えるなら
+  DOTFILES_MIN_RELEASE_AGE_DAYS (0 で遅延なし = 先端)。
 
 メニューの操作:
   ↑/↓ (j/k) 移動   Space 選択の切替   Enter 決定/実行   q 戻る/中止
@@ -205,8 +206,8 @@ dotfiles-private (private な repo) の取得:
   DOTFILES_PRIVATE_DIR dotfiles-private の clone の場所 (既定: $(ghq root)/github.com/pollenjp/dotfiles-private)
   DOTFILES_BACKUP_EXT  --backup=<拡張子> と同じ。空文字なら --no-backup と同じ
   DOTFILES_MIN_RELEASE_AGE_DAYS
-                       flake.lock に入れる revision の下限日数 (既定 7)。
-                       0 で遅延なし = 先端を取る
+                       flake.lock に入れる revision の下限日数 (既定は nix/release-age.nix
+                       の minimumReleaseAgeDays)。0 で遅延なし = 先端を取る
   NIX_INSTALLER_ARGS   Determinate Systems インストーラへの引数 (既定: install)
                        systemd の無いコンテナでは "install linux --init none"
   NO_COLOR             色を付けない
@@ -413,7 +414,7 @@ add_step local-flake \
   step 0
 
 add_step flake-update \
-  'flake.lock を更新 (7 日以上前の revision へ)' \
+  'flake.lock を更新 (猶予の日数より前の revision へ)' \
   'nixpkgs / home-manager を上げる。先端は取らない。既定では入らない (f / --flake-update)。' \
   step 0
 
@@ -1863,7 +1864,7 @@ step_flake_update() {
     note '(nix はまだ無い。--dry-run なのでコマンドを見せるだけ)'
   fi
   # 素の `nix flake update` ではなく flake-lock-age.sh を通す。あちらは
-  # 「公開から一定日数が経った revision」だけを選ぶ (既定 7 日)。
+  # 「公開から一定日数が経った revision」だけを選ぶ (日数と例外は nix/release-age.nix。既定 7 日)。
   # ゼロデイ対策として、出たばかりのものを掴まないための遅延を入れている。
   # 遅延を外したいときは DOTFILES_MIN_RELEASE_AGE_DAYS=0 を付ける。
   # 詳細は nix/scripts/flake-lock-age.sh の冒頭と README を参照。

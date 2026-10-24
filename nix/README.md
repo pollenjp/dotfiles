@@ -221,9 +221,10 @@ dirty でも switch には新しい lock が入る（`path:` はディレクト�
 
 #### 新しすぎる revision を pin しない (minimumReleaseAge 相当)
 
-上げ先は追跡先の**先端ではなく、公開から 7 日以上経った revision**。
+上げ先は追跡先の**先端ではなく、公開から猶予の日数 (既定 7 日) 以上経った revision**。
 出たばかりのものを掴まないための遅延で、npm / pnpm の `minimumReleaseAge` に相当する。
-決めているのは [`scripts/flake-lock-age.sh`](./scripts/flake-lock-age.sh)。
+決めているのは [`scripts/flake-lock-age.sh`](./scripts/flake-lock-age.sh)。日数と、期間付きの例外は
+[`release-age.nix`](./release-age.nix) に書く（[後述](#猶予の日数と例外-release-agenix)）。
 
 ```sh
 ./nix/scripts/flake-lock-age.sh resolve   # 選ぶ revision を見るだけ
@@ -278,14 +279,19 @@ revision を pin しない」と同義**になる。日数の下限はここで�
 | その他の GitHub input（`home-manager` など） | 追跡先の commit 時刻（GitHub API の `until=`） | これらにはチャンネルが無い |
 | `follows` / `path:` などの input | 対象外 | 自分の revision を持たない |
 
-日数は `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS` で変える。`setup.sh` 経由の
-ときは `DOTFILES_MIN_RELEASE_AGE_DAYS`（一族の名前を保つため、あちらが橋渡しする）。
+普段の日数は `release-age.nix` の `minimumReleaseAgeDays`。その場だけ変えるなら `--min-age-days N` か
+`FLAKE_MIN_RELEASE_AGE_DAYS`（`setup.sh` 経由のときは `DOTFILES_MIN_RELEASE_AGE_DAYS`。一族の名前を保つため、
+あちらが橋渡しする）。効く順は `--min-age-days` > 環境変数 > `release-age.nix` > 7 で、どれが効いたかは
+`==> ./nix (下限 7 日。設定 release-age.nix)` の行に出る。
 
 ```sh
 ./nix/scripts/flake-lock-age.sh --min-age-days 14 update
 ./nix/scripts/flake-lock-age.sh --min-age-days 0  update  # 遅延なし = 先端
 DOTFILES_MIN_RELEASE_AGE_DAYS=0 ~/dotfiles/setup --steps flake-update
 ```
+
+設定は、`--config FILE` を渡さなければ script の隣の `../release-age.nix`（dotfiles の `nix/release-age.nix`）を
+読む。`nix run` で他のリポジトリから呼んだときは隣に無いので、今までどおり 7 日で例外は無い。
 
 **遅延を伸ばすほど、既知 CVE が未修正のまま残る期間も伸びる**（ブラウザ / curl /
 openssl のような日常的に踏むものはこちら側のリスクが大きい）。7 日はその折り返し点として
@@ -303,9 +309,70 @@ CI の `lock-age` ジョブ（`flake-lock-age.sh check`）で、下限より新�
 判定に使う `flake.lock` の `lastModified` は **commit 時刻**でチャンネル公開時刻ではないので、
 Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。先端への事故を捕まえる用途には足りる。
 
+##### 猶予の日数と例外 (`release-age.nix`)
+
+セキュリティパッチが猶予より新しい側にしか無いときは、理由を書いた**期間付きの例外**を
+[`release-age.nix`](./release-age.nix) に足す（[ADR 032](../docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)・
+[設計](../docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く。
+`date` は「この日（Asia/Tokyo）の終わりまでの公開を使う」と読む。
+
+| 例外 | 欄 | 何をするか |
+| --- | --- | --- |
+| 全体 | `exceptions.all`: `date`・`reason` | `flake-lock-age.sh` が `nixpkgs` を `date` の日の終わりまでの公開から選ぶ（猶予より新しいときだけ。`home-manager` などほかの input は猶予のまま）。`check` もその日の終わりまでの pin を通す |
+| 一部 (nixpkgs から) | `exceptions.fromNixpkgs`: `packages`・`date`・`reason` | `packages` だけを input の `nixpkgs-exceptions`（`date` の日の終わりまでの公開）から取る。ほかは普段の pin のまま |
+| 一部 (upstream から) | `exceptions.fromUpstream`: `package`・`version`・`reason` | `package` を upstream の配布物から取る（nixpkgs のどの公開にも修正版がまだ無いとき）。中身は `pkgs/upstream/<package>.nix` |
+
+```nix
+# nix/release-age.nix (例。値は作り物)
+{
+  minimumReleaseAgeDays = 7;
+  exceptions = {
+    all = [ { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-22 の公開に入った"; } ];
+    fromNixpkgs = [ { packages = [ "foo" ]; date = "2026-10-23"; reason = "CVE-…: foo 1.2.3 の修正"; } ];
+    fromUpstream = [ { package = "mise"; version = "2026.10.17"; reason = "CVE-…: nixpkgs#… を待つ間"; } ];
+  };
+}
+```
+
+足したあとの手順:
+
+| 例外 | 手順 |
+| --- | --- |
+| 全体 | `./nix/scripts/flake-lock-age.sh update`（閉包のスキャンも挟まる）→ `nix/flake.lock` と `release-age.nix` を commit。CI の `lock-age` は例外の分だけ新しい pin を通す |
+| 一部 (nixpkgs から) | `./nix/scripts/flake-lock-age.sh update --input nixpkgs-exceptions`（普段の pin は動かさない。全部を上げてよければ素の `update`）→ commit |
+| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。実例は `pkgs/upstream/mise.nix`）→ commit。`flake.lock` は変わらない |
+
+- **一部の例外（nixpkgs から・upstream から）に書けるのは、ほかの package から使われないアプリだけ**で、top-level の名前
+  （`pkgs.<名前>`）に限る。home の pkgs に overlay で当てるので、`programs.<名前>` や `home.packages` を書き換えずに
+  差し替わる（mise なら `programs.mise` の既定の package）。ライブラリ（openssl・nss・cacert・`python3Packages.certifi`
+  など）を差し替えると、依存側が組み直されて binary cache が外れ、新旧の pin の版が混ざる。これらは**全体**で扱う。
+  flake の check（`release-age-state`）が、例外を当てた home と当てない home の `home.packages` の drvPath を比べ、
+  差し替えた package をほかの package が使っていたら名前を出して落ちる
+- `nixpkgs-exceptions` は、効いている一部 (nixpkgs から) の項目が無いあいだは `nixpkgs` と同じ revision にしておく
+  （`flake-lock-age.sh` がそう選ぶ）。評価もそのあいだはこの input を読まないので、普段の道は重くならない
+- 書き誤り（知らない欄・暦に無い日付・空の `reason`・入れ子の名前・pkgs に無い名前・同じ package を 2 回・
+  `pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check` も落ちる）。
+  今日（Asia/Tokyo）より先の `date` は `flake-lock-age.sh` が止める（打ち間違いだと、その日まで猶予が外れたまま
+  先端を取り続け、`check` も通ってしまうため。CI の `lock-age` も落ちる）
+- `--input <名前>` を付けても、lock に無い github の input（flake.nix に足したばかりのもの）は一緒に選ぶ
+  （`nix flake update` は lock に無い input を先端で足すため）
+
+**消し時。** 例外は要らなくなると何もしなくなり、home の評価が `nixpkgs の例外 …` で始まる警告を出す。setup は switch の後に
+[警告のまとめ](#途中の警告のまとめ)へ写し、CI の `check` ジョブは落とさずに annotation で出す。自動では消さないので、PR で消す
+（消し忘れても害は無い）。判定は今日の日付ではなく pin の日時と package の版で決める（home-manager の評価は今日の日付を読めない）。
+
+| 例外 | 何もしなくなる（消し時） |
+| --- | --- |
+| 全体・一部 (nixpkgs から) | 普段の pin（`nixpkgs`）の commit の日時が、`date` の日の終わりを越えた（おおよそ `date` + 猶予の日数のあとの `update` で） |
+| 一部 (nixpkgs から) で `nixpkgs-exceptions` がまだ普段の pin より新しくない | 「まだ何もしていない」と出る。`update --input nixpkgs-exceptions` で選び直す |
+| 一部 (upstream から) | 普段の pin の nixpkgs のその package の版が、`version` 以上になった。その system の配布物が無いときも nixpkgs のままで、その旨が出る |
+
+commit の日時は公開の日時より古い側に出るので、公開で選ぶ `update` より消し時の判定は少し遅れる（早めに言うことは無い）。
+
 ##### 遅延を外す
 
-緊急の CVE 修正を先端から入れたいときは `--min-age-days 0` で `update` する。
+緊急の CVE 修正を先端から入れたいときは、まず[猶予の例外](#猶予の日数と例外-release-agenix)を考える（全体・一部を
+日付で区切れて、CI の `lock-age` も通る）。それでも全体を先端へ上げるなら `--min-age-days 0` で `update` する。
 その commit では CI の `lock-age` が落ちるが、**それは意図どおり**。通したいときは
 `workflow_dispatch` の `min_release_age_days` に `0` を入れて再実行する。
 
@@ -347,7 +414,8 @@ CI の `closure-scan` ジョブが PR / push に加えて**毎日の定期実行
 落ちたときの対応は 2 択。
 
 1. **pin を動かして直るか見る** — `flake-lock-age.sh resolve / update`。修正が
-   下限より新しい側にしか無いなら、[遅延を外す](#遅延を外す)判断まで含む
+   下限より新しい側にしか無いなら、[猶予の例外](#猶予の日数と例外-release-agenix)を足す（全体・一部）か
+   [遅延を外す](#遅延を外す)判断まで含む
 2. **意図して受け入れる** — `baseline` で whitelist へ追記し、comment に理由を
    書いてから commit する
 
@@ -3366,8 +3434,10 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ### 遅延 (minimum_release_age) を期間付きで緩める
 
 `bootstrap-mise.sh` は `setup --update` のたびに、`config.toml` の `minimum_release_age` に遅延を書く。値は option で決める
-（[ADR 030](../docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の 7 日
-（[前述](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)）とは別の口で、こちらは mise だけに効く。
+（[ADR 030](../docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の猶予
+（[前述](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)）とは別の口で、こちらは mise が入れるツールだけに効く。
+mise 本体は nixpkgs から入るので、その版を急いで上げるのはこちらではなく [nixpkgs の猶予の例外](#猶予の日数と例外-release-agenix)
+（2026-10 の mise 2026.10.17 は一部 (upstream から) の例外で入れている）。
 
 | option | 既定 | 中身 |
 | --- | --- | --- |
@@ -3437,9 +3507,9 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
 
 | ジョブ | 表示名 | ランナー | いつ | 内容 |
 | --- | --- | --- | --- | --- |
-| `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か |
+| `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か（nixpkgs の例外の消し時の警告は落とさず annotation。[前述](#猶予の日数と例外-release-agenix)） |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
-| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。[前述](#依存-flakelock-の更新)） |
+| `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。日数と例外は `release-age.nix`。[前述](#依存-flakelock-の更新)） |
 | `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
