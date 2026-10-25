@@ -20,7 +20,7 @@
 #    構成は他ユーザーに見せたくないので、store に入れてはいけない。
 #    パーミッションで隠すこともできない (store のファイルは 444)。
 # 2. 実体は private な dotfiles-private (別の repo) の `ssh/` にあり、
-#    そもそも flake から読めない (docs/adr/016_ssh_config_from_dotfiles_private_*)。
+#    そもそも flake から読めない (dotfiles-private の docs/adr/016_ssh_config_from_dotfiles_private_*)。
 #
 # そこでここでは **Include の骨組みだけ**を生成し、中身は
 # `scripts/bootstrap-ssh-config.sh` が `~/.ssh/config.d/` へ symlink する。

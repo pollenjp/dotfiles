@@ -15,7 +15,7 @@
 # profile を見つけたとき・設定画面で保存したとき)。PC ごとに違う profile の一覧 (WSL の profile の GUID
 # は distro の登録 ID から作られる) も入るので、win/ からファイルごと配る (bootstrap-windows-files.sh) と
 # 書き換わるたびに衝突し、PC の間でも共有できない。そこで dotfiles が持つキーだけを managed.json に書き、
-# そのキーだけを settings.json へ書き足す (docs/adr/018_win_terminal_settings_keys_*)。
+# そのキーだけを settings.json へ書き足す (dotfiles-private の docs/adr/018_win_terminal_settings_keys_*)。
 # profiles.defaults に書けば全 profile に効く。
 #
 # ## 何を読むか

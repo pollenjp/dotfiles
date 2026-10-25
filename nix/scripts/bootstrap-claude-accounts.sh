@@ -13,7 +13,7 @@
 #
 # Claude Code のログインを個人と会社のアカウントで分けたい。分けたいのはログインだけで、
 # CLAUDE.md・skill・フック・設定・履歴と memory はどちらで起動しても同じものを使う
-# (docs/adr/009_claude_account_config_dirs_*)。
+# (dotfiles-private の docs/adr/009_claude_account_config_dirs_*)。
 #
 # CLAUDE_CONFIG_DIR を付けると Claude Code はそれらを全部その dir から読むので、dir の中身を
 # ~/.claude への symlink にし、ログインのファイルだけを実体で持たせる。

@@ -161,7 +161,7 @@ local の値が登録簿のホストの持つ値とぶつかる (`conflicting de
 
 1. 出力の nix のエラー (落ちたホストを評価し直した、最後の `error:` の行から。全文は出力にある `.eval/*.err`) から
    option の名前を拾う
-2. 本体で何が起きたかを調べる: `git -C <本体> log -p -S'<option の名前>' -- nix/home nix/lib`、`docs/adr/`、
+2. 本体で何が起きたかを調べる: `git -C <本体> log -p -S'<option の名前>' -- nix/home nix/lib`、dotfiles-private の `docs/adr/`、
    `<作業場所>/base.nix` と `template.nix` の差
 3. 基準を作る: `old/flake.nix` を作業場所の外の新しいディレクトリへ写し、評価が通るだけの最小の直し
    (削除された行を外す・新しい名前へ移す) だけを当てる。`old/` そのものは触らない (apply が「書き換わった」で止まる)。

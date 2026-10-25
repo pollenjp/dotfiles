@@ -12,7 +12,7 @@
 #
 # ssh の接続先 (ホスト名・ユーザー名・踏み台の構成) は公開したくないので、public なこの
 # repo にも /nix/store にも置かず、private な dotfiles-private の ssh/ に置く
-# (docs/adr/016_ssh_config_from_dotfiles_private_*)。Nix (home/modules/ssh.nix) が生成する
+# (dotfiles-private の docs/adr/016_ssh_config_from_dotfiles_private_*)。Nix (home/modules/ssh.nix) が生成する
 # ~/.ssh/config は Include の骨組みだけなので、ここで config.d/ へ張れば効く:
 #
 #     Include config.d/*.ssh_config

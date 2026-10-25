@@ -16,7 +16,7 @@
 #
 # Google 日本語入力の設定 (config1.db) と辞書 (user_dictionary.db) は protobuf のバイナリで、
 # 保存のたびに時刻が入る。repo にはテキストだけを置き、setup のたびに組み立てて配る
-# (docs/adr/015_win_google_ime_powertoys_*)。
+# (dotfiles-private の docs/adr/015_win_google_ime_powertoys_*)。
 #
 # ## 何を読むか
 #
@@ -192,7 +192,7 @@ ime_dir="${windows_home}/AppData/LocalLow/Google/Google Japanese Input"
 if [[ ! -d ${ime_dir} ]]; then
   # 置き先は、Google 日本語入力が初めて起動したときに作る。入れただけでまだ使っていないマシン
   # (新しいマシンの 1 回目の setup) では無いので、変換サーバーの exe で「入っている」を見分けて案内する
-  # (docs/adr/017_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
+  # (dotfiles-private の docs/adr/017_win_apps_winget_*)。置き先を先に作って置くことはしない (Google 日本語入力が作るときの
   # 権限と揃わないおそれがある)。Program Files は Windows のホーム (/mnt/c/Users/<名前>) と同じドライブにある
   windows_root=${windows_home%/Users/*}
   for d in "${windows_root}/Program Files" "${windows_root}/Program Files (x86)"; do

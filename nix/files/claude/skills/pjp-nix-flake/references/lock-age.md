@@ -4,7 +4,7 @@
 npm / pnpm の `minimumReleaseAge` に相当する。
 
 決定の記録は dotfiles の
-[ADR 005](https://github.com/pollenjp/dotfiles/tree/main/docs/adr/005_nix_flake_lock_min_release_age_20260813T184522JST)。
+[ADR 005](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/005_nix_flake_lock_min_release_age_20260813T184522JST)。
 ここは**他のリポジトリへ入れるときに要る分だけ**を書く。
 
 ## なぜ設定ではなく script なのか

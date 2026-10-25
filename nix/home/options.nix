@@ -102,7 +102,7 @@ in
         登録したホストのファイル、ローカル flake (~/dotfiles/flake.nix) に足した tmp
         (雛形の例は true を書く)、検証用の sandbox。登録簿の型のホスト
         (`<user>@<system>`) を `--host` で当てたマシンでは使わない
-        (docs/adr/027_*。前は既定が true で、ローカル flake の雛形の local が false を書いていた)。
+        (dotfiles-private の docs/adr/027_*。前は既定が true で、ローカル flake の雛形の local が false を書いていた)。
       '';
     };
 
@@ -271,7 +271,7 @@ in
         設計を出したとき・PR を作ったときに、解説動画の短尺を答えを待たずに裏の subagent で
         作り始めるか (claude-skills の pjp-video-explainer-offer)。false (既定) なら、作る前に
         「解説動画を作りますか？」と聞き、選ばれたときだけ作る。1 本ごとにコンテキストを大きく
-        使うので、既定は聞く方にしている (docs/adr/023_claude_video_offer_host_option_*)。
+        使うので、既定は聞く方にしている (dotfiles-private の docs/adr/023_claude_video_offer_host_option_*)。
 
         値は `~/.local/state/dotfiles/claude-video-offer.json` (`{"autoStart": <bool>}`) に落ち
         (home/modules/claude.nix)、次の 2 つが読む:
@@ -298,7 +298,7 @@ in
       example = [ "nix run .#vm" ];
       description = ''
         中で ssh を打つ道具のうち、Claude Code が Bash で打つ前に「🔑 1Password の承認が出るかも」と
-        知らせるもの (hook の files/claude/hooks/ssh-agent-notice.sh。docs/adr/029_claude_ssh_agent_notice_*)。
+        知らせるもの (hook の files/claude/hooks/ssh-agent-notice.sh。dotfiles-private の docs/adr/029_claude_ssh_agent_notice_*)。
         ssh・scp・rsync・nixos-rebuild --target-host・git の署名などは hook が自分で見つけるので、ここには
         コマンドの文字に ssh が出ない道具 (infra-v2 の nix run .#vm など) だけを書く。
 
@@ -524,12 +524,12 @@ in
         組み立てる `pjp-google-ime` を PATH に入れるだけで (home/modules/windows-files.nix)、
         `win/` を読んで /mnt/c へコピーするのは nix/scripts/bootstrap-windows-files.sh、
         Google 日本語入力の設定を組み立てて置くのは nix/scripts/bootstrap-windows-google-ime.sh
-        (docs/adr/015_win_google_ime_powertoys_*)。`~/dotfiles/setup --update`
+        (dotfiles-private の docs/adr/015_win_google_ime_powertoys_*)。`~/dotfiles/setup --update`
         (bootstrap まで走る) で揃う。
 
         `win/` を home-manager で読まないのは、ローカル flake が本体を
         `path:<repo>/nix` で読むので、その評価から repo 直下が見えないため
-        (docs/adr/010_win_files_from_wsl_*)。
+        (dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
       '';
     };
 

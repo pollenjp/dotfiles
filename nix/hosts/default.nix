@@ -42,7 +42,7 @@
 #   wsl = { enable = true; windowsUserName = "…"; }; onePassword.enable = true;  WSL / 1Password 有り (op-ssh-sign-wsl.exe)
 #
 # wsl.windowsFiles.enable = true で、repo 直下の win/ を Windows 側へ配るマシンになる
-# (windowsUserName が要る。docs/adr/010_win_files_from_wsl_*)。
+# (windowsUserName が要る。dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
 { mkHome }:
 
 {

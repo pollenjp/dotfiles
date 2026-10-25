@@ -1,7 +1,7 @@
 # win/
 
 Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しにコピーして配る
-(経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
+(経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -367,7 +367,7 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 ## OpenSSH
 
 WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼んで 1Password の agent に
-つなぐ ([ADR 004](../docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
+つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 `openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.0.0.0`) の 1 か所だけに書く。
 
@@ -458,7 +458,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 1Password を使う WSL のマシンでは、WSL の `ssh` は Windows の `ssh.exe` を呼ぶ ([OpenSSH](#openssh))。
 `ssh.exe` が読むのは Windows 側の `%USERPROFILE%\.ssh\config` なので、そこにも WSL と同じ形を置く
-(経緯は [ADR 016](../docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md))。
+(経緯は [ADR 016](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md))。
 `manifest.toml` では配らず、`nix/scripts/bootstrap-windows-ssh-config.sh` (order 91) が
 `setup --update` のたびにコピーする。
 
@@ -470,7 +470,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 - `config.d` はファイル名の順に読まれ、同じキーは先に読んだ値が効く (WSL と同じ)
 - `SetEnv PJP_SSH_CLIENT=%u@%L` は、ssh 先の herdr が「同じマシンから来た接続」を見分けるのにこの PC を名乗る
-  (`<Windows のユーザー名>@<PC の名前>` のような値。[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
+  (`<Windows のユーザー名>@<PC の名前>` のような値。[ADR 025](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)・
   [`nix/README.md`「forward された agent を固定名で見せる」](../nix/README.md#forward-された-agent-を固定名で見せる))。
   ssh は最初に当たった `SetEnv` の行だけを使うので、`config.d` の `Host` に `SetEnv` を書いたら、そこにも
   `PJP_SSH_CLIENT=%u@%L` を足す。前の版 (`SetEnv` の無い `config`) は、記録と同じ中身なら正本の更新として上書きされる
@@ -541,7 +541,7 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
 
 PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToysUserSetup-…exe`。管理者は要らない) で入れる。
 版は固定せず、winget pin も足さない。PowerToys は自分で新しい版を知らせる
-([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
+([ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
 
 | 打つもの | すること |
 | --- | --- |
@@ -558,7 +558,7 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
 - 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動する
 - 入れたばかりのマシンでは、PowerToys の設定画面を一度開くまで、Keyboard Manager は配った割り当てを読まない。
   エンジンが読む `settings.json` (有効なプロファイルの名前) を作るのは設定画面だけで、作っても読み直しはしないため
-  ([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md) §1 の 7)。91 はこれを見分けて、
+  ([ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md) §1 の 7)。91 はこれを見分けて、
   記録せずに「設定画面を一度開いてから流し直す」よう案内するので、開いてから `setup --update`
   (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。そのときに 91 が読み直させる
 
@@ -579,7 +579,7 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
 `google-japanese-input/` は Google 日本語入力の設定とキー設定のテキストで、manifest では配らない。
 Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに時刻が入るので、
 `nix/scripts/bootstrap-windows-google-ime.sh` (order 98) がテキストから組み立てて配る
-([ADR 015](../docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)、
+([ADR 015](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)、
 [TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b))。
 
 | ファイル | 中身 |
@@ -653,7 +653,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 Google 日本語入力は winget の `Google.JapaneseIME` (machine スコープの MSI。入れる・上げるときは Windows のデスクトップに
 UAC の確認が出る) で入れ、版を `google-japanese-input/Install-GoogleJapaneseInput.ps1` の `-Version` の既定値の
 1 か所で固定する。設定 (`config.txtpb`) を読み書きできると確かめた版に留めるため
-([ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
+([ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f))。
 
 | 打つもの | すること |
 | --- | --- |
@@ -762,7 +762,7 @@ pjp-google-ime digest --kind config <config1.db>                # 比べるた�
 `manifest.toml` では配らず、`nix/scripts/bootstrap-windows-terminal.sh` (order 99) が `setup --update` のたびに、
 そのキーだけを Store 版の `settings.json`
 (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json`) へ書き足す
-(経緯は [ADR 018](../docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef))。
+(経緯は [ADR 018](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef))。
 
 `settings.json` をファイルごと配らないのは、Windows Terminal 自身も書き換えるから (新しい WSL の distro などの
 profile を見つけたとき・設定画面で保存したとき)。PC ごとに違う profile の一覧も入っている (WSL の profile の

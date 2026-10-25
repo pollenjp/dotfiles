@@ -12,7 +12,7 @@
 # ## 何のために
 #
 # 公開したくない設定 (ssh の接続先と、Google 日本語入力のユーザー辞書) を、public なこの repo と分けて
-# private repo に置く (docs/adr/015_win_google_ime_powertoys_*・docs/adr/016_ssh_config_from_dotfiles_private_*)。flake input や submodule に
+# private repo に置く (dotfiles-private の docs/adr/015_win_google_ime_powertoys_*・docs/adr/016_ssh_config_from_dotfiles_private_*)。flake input や submodule に
 # しないのは、public な repo に private repo の rev を残さず、辞書を変えるたびにこの repo で
 # 指す先を進める commit を要らなくするため。
 #

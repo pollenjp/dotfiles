@@ -1,4 +1,4 @@
-# win/manifest.toml から、Windows 側へ配る計画を作る (docs/adr/010_win_files_from_wsl_*)。
+# win/manifest.toml から、Windows 側へ配る計画を作る (dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
 #
 # 呼ぶのは nix/scripts/bootstrap-windows-files.sh だけで、flake (home-manager) からは
 # 呼ばない。ローカル flake は本体を path:<repo>/nix で読むので、その評価からは repo 直下の

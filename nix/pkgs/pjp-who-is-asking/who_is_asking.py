@@ -15,12 +15,12 @@ agent の応答を待って止まっているので、Linux 側には comm=ssh.e
 
 wsl.exe や cmd.exe を踏み台にした要求も、対を繰り返したどると元の呼び出し元まで届く。
 親が先に終了した要求は、Linux 側の祖先がセッションの /init で途切れる (env を手掛かりに出す)。
-経緯は docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
+経緯は dotfiles-private の docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
 
 ただし、ダイアログに気付いた時点で要求元が既に終わっていることがある (Claude Code の GitHub SSH の
 確かめは 3 秒で kill されるが、ダイアログは約 60 秒残る)。そのため、exe-exec-trace が journald に
 残した直近 (既定 180 秒) の記録からも木を出し、いま動いている木より先に出す。
-経緯は docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md。
+経緯は dotfiles-private の docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md。
 """
 
 import argparse

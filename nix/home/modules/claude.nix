@@ -75,7 +75,7 @@
 #
 # リンクを home.file で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
 # settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
-# docs/adr/009_claude_account_config_dirs_* を参照。
+# dotfiles-private の docs/adr/009_claude_account_config_dirs_* を参照。
 #
 # アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
 # ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
@@ -405,6 +405,17 @@ in
     {
       ".claude/hooks/xref-guard.sh" = {
         source = claudeRoot + "/hooks/xref-guard.sh";
+        executable = true;
+      };
+    }
+
+    # PreToolUse フック (matcher Write|Edit|MultiEdit|NotebookEdit)。public な dotfiles の docs/ に書こうとしたら止め、
+    # 設計の文書の置き場 (private な dotfiles-private の docs/) を Claude に返す (dotfiles-private の ADR 035。決まりの
+    # 正本は repo の直下の CLAUDE.md)。止める repo の表は hook の中に持つので option は無い。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/docs-guard.sh" = {
+        source = claudeRoot + "/hooks/docs-guard.sh";
         executable = true;
       };
     }
