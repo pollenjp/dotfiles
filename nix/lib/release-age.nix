@@ -17,7 +17,8 @@
   # legacyPackages.<system> だけを読む
   inputs,
   settings ? import ../release-age.nix,
-  # 一部 (upstream から) の package の置き場所。<package>.nix を、普段の pin の pkgs の callPackage で呼ぶ
+  # 一部 (upstream から) の package の置き場所。<package>.nix を、版と platforms を見るときは普段の pin の pkgs の
+  # callPackage で、差し替える package は overlay を当てた先の pkgs の callPackage で呼ぶ (下の overlay)
   upstreamDir ? ../pkgs/upstream,
 }:
 
@@ -108,7 +109,12 @@ let
       nixVersion = lib.getVersion pkgs.${i.package};
     in
     {
-      inherit i drv nixVersion;
+      inherit
+        i
+        file
+        drv
+        nixVersion
+        ;
       exists = builtins.pathExists file;
       newer = lib.versionOlder nixVersion i.version;
       available = lib.meta.availableOn pkgs.stdenv.hostPlatform drv;
@@ -181,12 +187,20 @@ let
     ) (builtins.filter (u: u.newer && !u.available) upstream);
 
   replaced = nixpkgsReplaced ++ map (u: u.i.package) upstreamOn;
+  # upstream の package は、overlay を当てた先の pkgs (final) の callPackage で組む。home-manager は home の
+  # nixpkgs.config (unfree の許可。modules/packages.nix) で nixpkgs を import し直してから overlay を当てるので、
+  # unfree の package もその許可で評価される。上の drv は普段の pin の素の pkgs のもので、版と platforms を
+  # 見るだけ (unfree でも drvPath を読まなければ止まらない)。<package>.nix は差し替える package 自身を引数に取れない
+  # (final のそれは自分なので、無限に再帰する)。一部 (nixpkgs から) の package は nixpkgs-exceptions の素の pkgs の
+  # ものなので、unfree なら評価で止まる
   overlay =
-    _final: _prev:
+    final: _prev:
     lib.genAttrs nixpkgsReplaced (
       n: pkgsX.${n} or (throw "nixpkgs の例外: ${n} が input の nixpkgs-exceptions に無い")
     )
-    // lib.listToAttrs (map (u: lib.nameValuePair u.i.package u.drv) upstreamOn);
+    // lib.listToAttrs (
+      map (u: lib.nameValuePair u.i.package (final.callPackage u.file { })) upstreamOn
+    );
 in
 # 型の誤りは値を読むまで出ないので、先に全部を読む
 builtins.deepSeq cfg (

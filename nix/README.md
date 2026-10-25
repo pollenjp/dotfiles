@@ -340,7 +340,7 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 | --- | --- |
 | 全体 | `./nix/scripts/flake-lock-age.sh update`（閉包のスキャンも挟まる）→ `nix/flake.lock` と `release-age.nix` を commit。CI の `lock-age` は例外の分だけ新しい pin を通す |
 | 一部 (nixpkgs から) | `./nix/scripts/flake-lock-age.sh update --input nixpkgs-exceptions`（普段の pin は動かさない。全部を上げてよければ素の `update`）→ commit |
-| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。実例は `pkgs/upstream/mise.nix`）→ commit。`flake.lock` は変わらない |
+| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。実例は `pkgs/upstream/mise.nix`・`pkgs/upstream/cursor-cli.nix`）→ commit。`flake.lock` は変わらない |
 
 - **一部の例外（nixpkgs から・upstream から）に書けるのは、ほかの package から使われないアプリだけ**で、top-level の名前
   （`pkgs.<名前>`）に限る。home の pkgs に overlay で当てるので、`programs.<名前>` や `home.packages` を書き換えずに
@@ -348,6 +348,10 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
   など）を差し替えると、依存側が組み直されて binary cache が外れ、新旧の pin の版が混ざる。これらは**全体**で扱う。
   flake の check（`release-age-state`）が、例外を当てた home と当てない home の `home.packages` の drvPath を比べ、
   差し替えた package をほかの package が使っていたら名前を出して落ちる
+- **一部の例外で unfree の package を差し替えるなら、upstream から。** upstream の package は overlay を当てた先の home の pkgs
+  （home-manager が home の `nixpkgs.config` で import し直したもの）で組むので、`nixpkgs.config.allowUnfreePackages`
+  （`home/modules/packages.nix` など）に名前があれば評価できる（実例は `pkgs/upstream/cursor-cli.nix`）。一部 (nixpkgs から)
+  の package は `nixpkgs-exceptions` の素の pkgs から取るので、unfree だと評価で止まる
 - `nixpkgs-exceptions` は、効いている一部 (nixpkgs から) の項目が無いあいだは `nixpkgs` と同じ revision にしておく
   （`flake-lock-age.sh` がそう選ぶ）。評価もそのあいだはこの input を読まないので、普段の道は重くならない
 - 書き誤り（知らない欄・暦に無い日付・空の `reason`・入れ子の名前・pkgs に無い名前・同じ package を 2 回・

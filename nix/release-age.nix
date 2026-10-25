@@ -43,6 +43,16 @@
           "eMudhra の中間 CA の侵害 (CVE-2026-111943) の修正版。nixpkgs の mise は 2026.10.3 までで、"
           + "NixOS/nixpkgs#577218 (mise: 2026.10.3 -> 2026.10.17) を待つ間の一時しのぎ (2026-10-24 に足した)";
       }
+      {
+        package = "cursor-cli";
+        version = "0-unstable-2026-10-22";
+        reason =
+          "eMudhra の中間 CA の侵害 (CVE-2026-111943) の対応。cursor-cli は同梱の node (自前の証明書の束を持つ) で TLS を張るので、"
+          + "node の修正 (22.23.4・24.22.1・26.12.1。2026-10-21 公開) より後に出た upstream の最新 2026.10.22-27dcf5f を入れる "
+          + "(同梱の node が修正の入った版かは、nix/pkgs/upstream/cursor-cli.nix の install の後の check が見る)。nixpkgs の "
+          + "cursor-cli は master でも 0-unstable-2026-10-01 まで (NixOS/nixpkgs#574219 の 0-unstable-2026-10-14 も review 待ち) で、"
+          + "nixpkgs が追いつくまでの一時しのぎ (2026-10-25 に足した)";
+      }
     ];
   };
 

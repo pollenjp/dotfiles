@@ -15,6 +15,8 @@
 #     の警告 (このとき nixpkgs-exceptions を読まない)
 #   - 一部 (upstream から): nixpkgs の版が version より古ければ upstream の package に差し替える。nixpkgs の版が
 #     version 以上なら「もう何もしていない」の警告 (nixpkgs の版を出す)、その system の配布物が無ければその旨の警告
+#   - 一部 (upstream から) の package は、overlay を当てた先の pkgs で組む: unfree の package は、当てた先の pkgs の
+#     config が許せば (home-manager が home の nixpkgs.config で import し直した pkgs と同じ形) 評価でき、許さなければ止まる
 #   - 警告はどれも「nixpkgs の例外」で始まる (CI がこの文だけを落とさずに annotation にする)
 #   - 書き誤りは評価で止まる: 知らない欄 (上の段と項目)・暦に無い日付・空の reason・負の日数・入れ子の名前・pkgs に
 #     無い名前・一部の例外に同じ package が 2 回・upstream の package のファイルが無い・その版と version が違う
@@ -117,6 +119,18 @@ let
   upstreamNoAsset = run (untouched "20261020000000") {
     exceptions.fromUpstream = [ (upstreamItem "tree" "99.0") ];
   };
+  upstreamUnfree = run (untouched "20261020000000") {
+    exceptions.fromUpstream = [ (upstreamItem "cowsay" "99.0") ];
+  };
+  # overlay を、names の unfree を許す config で import し直した nixpkgs に当てる (home-manager が home の
+  # nixpkgs.config と pkgs.overlays で nixpkgs を import し直すのと同じ形)
+  appliedAllowing =
+    names: r:
+    import pkgs.path {
+      inherit system;
+      config.allowUnfreePackages = names;
+      inherit (r) overlays;
+    };
 
   # 書き誤りのケースは、どれも評価が先へ進む pin で流す
   bad =
@@ -268,6 +282,15 @@ let
           "配布物が無い"
           system
         ];
+    }
+    {
+      name = "一部 (upstream から): unfree の package は、当てた先の pkgs の config が許せば評価でき、許さなければ止まる";
+      ok =
+        upstreamUnfree.replaced == [ "cowsay" ]
+        && upstreamUnfree.warnings == [ ]
+        && (appliedAllowing [ "cowsay" ] upstreamUnfree).cowsay.version == "99.0"
+        && (builtins.tryEval (appliedAllowing [ "cowsay" ] upstreamUnfree).cowsay.drvPath).success
+        && !(builtins.tryEval (applied upstreamUnfree).cowsay.drvPath).success;
     }
     {
       name = "警告はどれも「nixpkgs の例外」で始まる";
