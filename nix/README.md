@@ -800,7 +800,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
-| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（[後述](#cursor-agent-も-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める） |
@@ -855,7 +855,8 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>
 option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_release_age-を期間付きで緩める)）。
 
 `claude` もここで入る。グローバルな CLI なので役割分担どおりなら Nix 側だが、
-例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。
+例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。Cursor の CLI（`cursor-agent`）も同じ理由でここで入る
+（[理由と入れ方](#cursor-agent-も-mise-に置いている理由)）。
 
 #### 2.1 Claude Code の公式プラグイン (手順 4.1)
 
@@ -3405,6 +3406,7 @@ Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions
 | 言語ランタイム (go / node) | mise |
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
 | `claude` | mise（この表の例外。[理由](#claude-だけ-mise-に置いている理由)） |
+| `cursor-agent`（Cursor の CLI） | mise（この表の例外。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)） |
 
 ### `claude` だけ mise に置いている理由
 
@@ -3521,12 +3523,38 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
   ==> mise の遅延を上書き中 (理由: …): 2026-10-24 の終わりまでに出た版を取る。2026-11-02 の終わりで上書きが終わり、その後の setup --update で既定の 9d に戻す。…
   ```
 
-- `claude` も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる
+- `claude`（と `cursor-agent`）も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる
 - 終わった項目は写さず、[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-mise]` で出す。書いた所から PR で消す
   （消し忘れても害は無い）
 - 毎日流す timer は無い。`--update` を打たない日が続いても mise には上限が残るだけで、ずれるのは新しい版を取らない側
   （守りは緩まない）。次の `--update` で既定に戻る
 - 状態ファイルが無い（switch の前の世代）・壊れているときは、警告して 9d を書く
+
+### `cursor-agent` も mise に置いている理由
+
+Cursor の CLI（mise の registry の名前は `cursor-agent`、別名 `cursor-cli`）も、`claude` と同じ理由（リリースの頻度が
+`flake.lock` の更新の周期に合わない）で mise に置き、同じ遅延（1d。上書き中は上限）で入れる。中身は Cursor が
+`downloads.cursor.com` で配る配布物（公式のインストーラが入れるものと同じ）で、registry の http backend が取る。
+
+| どこで | 何を |
+| --- | --- |
+| `files/mise/conf.d/cursor-agent.toml`（`home/modules/files.nix` が `~/.config/mise/conf.d/` に置く） | 宣言。registry から変えるのは `bin_path` と `postinstall` だけ（何をなぜ変えるかはファイルの先頭） |
+| `scripts/bootstrap-mise.sh` | `mise install cursor-agent`（まだ入っていないときだけ入れる）と `mise upgrade cursor-agent`（遅延を過ぎた新しい版があれば上げる） |
+
+- **`mise use -g cursor-agent` は打たない。** `config.toml` の宣言は conf.d より強く、まるごと置き換わる。`bin_path` が
+  registry の `dist-package` に戻り、配布物に同梱の `rg` と `node` が PATH の先頭に並ぶ（`rg` は Nix の ripgrep より先に
+  来る）。打ってしまったら `config.toml` の `[tools]` から消す（setup の「残りの手作業」にも出る）
+- **新しい版はすぐには入らない。** mise が知る版は最新の 1 つだけ（Cursor は版の一覧を出さず、mise は公式の
+  インストーラから今の版を読む）で、版の日付は日までなので、遅延はその日の終わりから数える（1d なら 10/22 の版は
+  10/23 の終わりから）。それまでは、まだ入っていなければ install が落ちて[警告のまとめ](#途中の警告のまとめ)に出て、
+  入っていれば upgrade は入っている版のまま終わる。Cursor はおおむね 1〜3 日おきに出すので、上がるのは出る間が
+  空いたときになりやすい
+- すぐ入れたいときは版を指す: `mise install cursor-agent@<版>`（版を指すと遅延を見ない。版は install が落ちたときの
+  mise のエラーに出る）。宣言は `latest` なので、入っている版のうち一番新しいものが使われる
+- hash の固定は無い（Cursor は checksum を出しておらず、global の tool は `mise lock --global` を打たないと lockfile にも
+  残らない）。信頼の置き場所は `downloads.cursor.com` の TLS
+- コマンドは `cursor-agent` だけ（公式のインストーラが張る `agent` は無い）。公式のインストーラで入れたことがある PC は
+  `~/.local/bin/{agent,cursor-agent}` と `~/.local/share/cursor-agent` を消す（PATH では mise の方が先に来るが、紛らわしい）
 
 ## CI
 

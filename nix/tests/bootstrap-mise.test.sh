@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# nix/scripts/bootstrap-mise.sh が mise の遅延 (minimum_release_age) と claude を入れるときの遅延を、状態ファイル
-# (~/.local/state/dotfiles/mise-release-age.json) と今の時刻から決めて書くことを、使い捨ての HOME と偽の mise で確かめる。
+# nix/scripts/bootstrap-mise.sh が mise の遅延 (minimum_release_age) と claude・cursor-agent を入れるときの遅延を、状態
+# ファイル (~/.local/state/dotfiles/mise-release-age.json) と今の時刻から決めて書くことと、cursor-agent の入れ方を、
+# 使い捨ての HOME と偽の mise で確かめる。
 #
 #   bash nix/tests/bootstrap-mise.test.sh [<bootstrap-mise.sh のパス>]
 #
@@ -24,8 +25,15 @@
 #     書き、claude は 1d で入れる。exit 0 (setup を止めない)
 #   - どのケースでも、ほかの settings (lockfile・fetch_remote_versions_timeout) と言語ランタイム (usage・go・node) は、
 #     今までどおり遅延の env なしで打つ。minimum_release_age は 1 回だけ書く
+#   - どのケースでも、cursor-agent は claude と同じ遅延の env で mise install cursor-agent と mise upgrade cursor-agent を
+#     この順に打ち、mise use -g では書かない (宣言は conf.d の cursor-agent.toml)。通れば警告しない
+#   - conf.d の宣言 (~/.config/mise/conf.d/cursor-agent.toml) が無ければ cursor-agent を打たず、switch を促して警告する
+#     (claude は入れる。exit 0)
+#   - install が落ちたら upgrade を打たず、待つか版を指して入れる (mise install cursor-agent@<版>) 案内を警告して最後まで
+#     流れる。upgrade が落ちたら警告して最後まで流れる。どちらも exit 0 (後ろの bootstrap を止めない)
 #
 # 偽の mise は、受けた env の MISE_MINIMUM_RELEASE_AGE と引数を「<env>|<引数>」の形で $HOME/mise.log に 1 行ずつ残す。
+# FAKE_MISE_FAIL に引数の並び (例: install cursor-agent) を渡すと、その呼び出しだけ exit 1 で落ちる。
 # 今の時刻は BOOTSTRAP_MISE_NOW (UNIX 秒) で渡す。偽の mise の shebang は $BASH から作る (Nix のサンドボックスには
 # /usr/bin/env が無い)。
 
@@ -63,17 +71,23 @@ state() {
   jq -cn --arg age "${age}" '{minimumReleaseAge: $age, releaseAgeOverrides: ($ARGS.positional | map(fromjson))}' --args "$@"
 }
 
-# 1 ケースぶんの HOME を作る。$1: 名前、$2: 状態ファイルの中身 (空なら作らない)
+# 1 ケースぶんの HOME を作る。$1: 名前、$2: 状態ファイルの中身 (空なら作らない)、$3: noconf なら cursor-agent の
+# conf.d の宣言を置かない
 new_home() {
   local h="${work}/$1"
-  mkdir -p "${h}/bin" "${h}/.config/mise" "${h}/.local/state/dotfiles"
+  mkdir -p "${h}/bin" "${h}/.config/mise/conf.d" "${h}/.local/state/dotfiles"
   : >"${h}/.config/mise/config.toml"
+  if [[ ${3-} != noconf ]]; then : >"${h}/.config/mise/conf.d/cursor-agent.toml"; fi
   : >"${h}/mise.log"
   if [[ -n $2 ]]; then printf '%s\n' "$2" >"${h}/.local/state/dotfiles/mise-release-age.json"; fi
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
 printf '%s|%s\n' "${MISE_MINIMUM_RELEASE_AGE-}" "$*" >>"${HOME}/mise.log"
+if [[ -n ${FAKE_MISE_FAIL-} && $* == "${FAKE_MISE_FAIL}" ]]; then
+  echo "偽の mise の失敗: $*" >&2
+  exit 1
+fi
 if [[ $1 == config && $2 == ls ]]; then
   echo '{}'
 fi
@@ -85,12 +99,12 @@ EOF
 }
 
 # $1: HOME、$2: 今 (ISO 8601 の UTC)、$3: 偽の mise の後ろに続ける PATH (省けば今の PATH)。
-# setup から走るときと同じく、警告のまとめ用のファイルを渡す
+# setup から走るときと同じく、警告のまとめ用のファイルを渡す。呼ぶ側の FAKE_MISE_FAIL は偽の mise へ渡す
 run() {
   local h=$1 now
   now=$(at "$2")
   env -u MISE_MINIMUM_RELEASE_AGE HOME="${h}" XDG_CONFIG_HOME="${h}/.config" PATH="${h}/bin:${3:-${PATH}}" \
-    BOOTSTRAP_MISE_NOW="${now}" DOTFILES_SETUP_WARNINGS="${h}/warnings" \
+    BOOTSTRAP_MISE_NOW="${now}" DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_MISE_FAIL="${FAKE_MISE_FAIL-}" \
     "${BASH}" "${script}" >"${h}/out" 2>"${h}/err"
   echo $? >"${h}/rc"
 }
@@ -119,7 +133,15 @@ others_plain() {
   done
 }
 
-# minimum_release_age に $3 を 1 回だけ書き、claude を env $4 で入れ、ほかは env なしで打ち、exit 0 か。
+# cursor-agent を env $2 で install・upgrade の順に打ち、mise use -g では書かないか。$1: HOME
+cursor_lines() {
+  local i u
+  i=$(grep -nFx -- "$2|install cursor-agent" "$1/mise.log" | cut -d: -f1)
+  u=$(grep -nFx -- "$2|upgrade cursor-agent" "$1/mise.log" | cut -d: -f1)
+  [[ -n ${i} && -n ${u} && ${i} -lt ${u} ]] && ! grep -Fq -- 'use -g cursor-agent' "$1/mise.log"
+}
+
+# minimum_release_age に $3 を 1 回だけ書き、claude と cursor-agent を env $4 で入れ、ほかは env なしで打ち、exit 0 か。
 # $1: ケースの名前、$2: HOME
 expect_ages() {
   local name=$1 h=$2 setting=$3 claude=$4 n
@@ -127,6 +149,7 @@ expect_ages() {
   if [[ $(cat "${h}/rc") == 0 && ${n} == 1 ]] \
     && grep -Fxq -- "|settings set minimum_release_age ${setting}" "${h}/mise.log" \
     && grep -Fxq -- "${claude}|use -g claude@latest" "${h}/mise.log" \
+    && cursor_lines "${h}" "${claude}" \
     && others_plain "${h}"; then
     ok "${name}"
   else
@@ -268,6 +291,37 @@ for bad in "$(state 9d '{"from":"2026-02-30","zeroDays":1,"reason":""}')" "$(sta
     ng "形の違う状態ファイルの警告 (${bad})" "$(detail "${h}")"
   fi
 done
+
+# 8. cursor-agent
+h=$(new_home cursor-noconf "$(state 9d)" noconf)
+run "${h}" 2026-10-22T03:00:00Z
+if [[ $(cat "${h}/rc") == 0 ]] && ! grep -Fq -- 'cursor-agent' "${h}/mise.log" \
+  && grep -Fxq -- '1d|use -g claude@latest' "${h}/mise.log" \
+  && grep -Fq 'conf.d/cursor-agent.toml' "${h}/warnings" && grep -Fq 'switch' "${h}/warnings"; then
+  ok "conf.d の宣言が無ければ cursor-agent を打たず、switch を促して警告する (claude は入れる。exit 0)"
+else
+  ng "conf.d の宣言が無いとき" "$(detail "${h}")"$'\n--- warnings\n'"$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+h=$(new_home cursor-install-fails "$(state 9d)")
+FAKE_MISE_FAIL='install cursor-agent' run "${h}" 2026-10-22T03:00:00Z
+if [[ $(cat "${h}/rc") == 0 ]] && grep -Fxq -- '1d|install cursor-agent' "${h}/mise.log" \
+  && ! grep -Fq -- 'upgrade cursor-agent' "${h}/mise.log" \
+  && grep -Fq '入れられませんでした' "${h}/warnings" && grep -Fq 'mise install cursor-agent@' "${h}/warnings" \
+  && grep -Fq '完了しました' "${h}/out"; then
+  ok "install が落ちたら upgrade を打たず、待つか版を指して入れる案内を警告して最後まで流れる (exit 0)"
+else
+  ng "install が落ちたとき" "$(detail "${h}")"$'\n--- warnings\n'"$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+h=$(new_home cursor-upgrade-fails "$(state 9d)")
+FAKE_MISE_FAIL='upgrade cursor-agent' run "${h}" 2026-10-22T03:00:00Z
+if [[ $(cat "${h}/rc") == 0 ]] && grep -Fxq -- '1d|upgrade cursor-agent' "${h}/mise.log" \
+  && grep -Fq '上げられませんでした' "${h}/warnings" && grep -Fq '完了しました' "${h}/out"; then
+  ok "upgrade が落ちたら警告して最後まで流れる (exit 0)"
+else
+  ng "upgrade が落ちたとき" "$(detail "${h}")"$'\n--- warnings\n'"$(cat "${h}/warnings" 2>/dev/null)"
+fi
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

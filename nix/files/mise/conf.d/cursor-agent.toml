@@ -1,0 +1,22 @@
+# mise の global の conf.d に置く、cursor-agent (Cursor の CLI) の宣言。nix/home/modules/files.nix が
+# ~/.config/mise/conf.d/cursor-agent.toml に置き、入れるのと上げるのは nix/scripts/bootstrap-mise.sh がする
+# (~/dotfiles/setup --update のたび。mise の遅延と、claude と同じく mise に置く理由もそちら)。
+#
+# cursor-agent は mise の registry にある (別名 cursor-cli)。http backend で downloads.cursor.com の配布物
+# (公式のインストーラが入れるものと同じ) を取り、版は公式のインストーラ (cursor.com/install) から読む。ここには
+# registry と変えたいところだけを書き、ほかは registry の値をそのまま使う (mise を上げれば registry の直しも入る)。
+#
+#   bin_path・postinstall  registry は配布物の dist-package/ を丸ごと PATH に載せ、そこには同梱の rg と node もある。
+#                          mise activate は PATH の先頭に足すので、Nix の ripgrep (packages.nix) より同梱の rg が
+#                          先に来る。bin/ に cursor-agent だけを張り、bin/ だけを PATH に載せる (launcher の
+#                          cursor-agent は symlink を辿り、隣の node で動く)。when = "always" は、もう入っている版にも
+#                          mise install・mise use のたびに張り直すため
+#
+# config.toml ではなくここに置くのは、mise use -g に option を渡すと registry の値 (url・version_regex など) まで
+# config.toml に書き写され、以後 registry が直っても書き写した値が勝つため (mise 2026.10.17 で確かめた)。
+# config.toml の宣言はここより強く、まるごと置き換わるので、mise use -g cursor-agent は打たない (bin_path が
+# registry の dist-package に戻る)。
+[tools.cursor-agent]
+version = "latest"
+bin_path = "bin"
+postinstall = { run = 'mkdir -p "$MISE_TOOL_INSTALL_PATH/bin" && ln -sfn ../dist-package/cursor-agent "$MISE_TOOL_INSTALL_PATH/bin/cursor-agent"', when = "always" }
