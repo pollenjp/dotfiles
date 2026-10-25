@@ -3551,6 +3551,12 @@ Cursor の CLI（mise の registry の名前は `cursor-agent`、別名 `cursor-
   空いたときになりやすい
 - すぐ入れたいときは版を指す: `mise install cursor-agent@<版>`（版を指すと遅延を見ない。版は install が落ちたときの
   mise のエラーに出る）。宣言は `latest` なので、入っている版のうち一番新しいものが使われる
+- **switch の前に開いた shell は、古い mise のまま動く**（`mise activate` は mise のパスを焼き込む）。mise を上げた更新の
+  直後は、そういう shell では cursor-agent が見えず、古い mise の registry に無いと警告が出る。shell を開き直す（herdr の
+  pane は server から開き直す）。宣言の `postinstall` を文字列で書いているのは、古い mise でも conf.d を読めるようにするため
+  （理由はファイルの先頭）
+- `command -v cursor-agent` が見つからず、入っている版に `bin/` が無いとき（`postinstall` なしで入った版）は、
+  `mise install --force cursor-agent` で入れ直す
 - hash の固定は無い（Cursor は checksum を出しておらず、global の tool は `mise lock --global` を打たないと lockfile にも
   残らない）。信頼の置き場所は `downloads.cursor.com` の TLS
 - コマンドは `cursor-agent` だけ（公式のインストーラが張る `agent` は無い）。公式のインストーラで入れたことがある PC は

@@ -9,8 +9,15 @@
 #   bin_path・postinstall  registry は配布物の dist-package/ を丸ごと PATH に載せ、そこには同梱の rg と node もある。
 #                          mise activate は PATH の先頭に足すので、Nix の ripgrep (packages.nix) より同梱の rg が
 #                          先に来る。bin/ に cursor-agent だけを張り、bin/ だけを PATH に載せる (launcher の
-#                          cursor-agent は symlink を辿り、隣の node で動く)。when = "always" は、もう入っている版にも
-#                          mise install・mise use のたびに張り直すため
+#                          cursor-agent は symlink を辿り、隣の node で動く)。postinstall は版を入れたとき
+#                          (install・upgrade) に走る。入っている版に bin/ が無ければ (postinstall なしで入った版)、
+#                          mise install --force cursor-agent で入れ直す
+#
+# postinstall は文字列で書く (表の形 { run = …, when = "always" } は mise 2026.10.0 から)。それより前の mise は表の形を
+# 読めず、conf.d の 1 つが読めないと mise 全体 (node・go・claude も) が止まる。dotfiles の mise は 2026.10.17
+# (nix/release-age.nix の例外) だが、switch の前に開いた shell は古い mise のまま動く (mise activate は mise の
+# パスを焼き込む) ので、更新の直後にそこで止まった (2026.8.6 で確かめた)。文字列なら古い mise も読め、cursor-agent が
+# registry に無いと警告するだけで、ほかの tool は動く。flake の check (mise-cursor-agent-state) が文字列かを見る
 #
 # config.toml ではなくここに置くのは、mise use -g に option を渡すと registry の値 (url・version_regex など) まで
 # config.toml に書き写され、以後 registry が直っても書き写した値が勝つため (mise 2026.10.17 で確かめた)。
@@ -19,4 +26,4 @@
 [tools.cursor-agent]
 version = "latest"
 bin_path = "bin"
-postinstall = { run = 'mkdir -p "$MISE_TOOL_INSTALL_PATH/bin" && ln -sfn ../dist-package/cursor-agent "$MISE_TOOL_INSTALL_PATH/bin/cursor-agent"', when = "always" }
+postinstall = 'mkdir -p "$MISE_TOOL_INSTALL_PATH/bin" && ln -sfn ../dist-package/cursor-agent "$MISE_TOOL_INSTALL_PATH/bin/cursor-agent"'

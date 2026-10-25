@@ -395,6 +395,14 @@
               system
               ;
           };
+          mise-cursor-agent-state = import ./tests/mise-cursor-agent.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           dev-tracker-inbox-state = import ./tests/dev-tracker-inbox.nix {
             inherit
               lib
