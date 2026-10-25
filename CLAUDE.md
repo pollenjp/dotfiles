@@ -17,7 +17,7 @@
   取れなければ書かずにユーザーに伝える (この repo には置かない)
 - 文書の PR は dotfiles-private に出し、この repo の PR より先か同時に merge する
 - 指揮役から依頼を受けた子の会話でも、dotfiles-private への文書の commit・PR はこの作業の一部として自分でやる
-  (指揮役に聞かない。報告には書く)
+  (書くかどうかは指揮役に聞かない。ADR の番号は指揮役に聞く。報告には書く)
 - コードのコメントや README の「ADR NNN」は、dotfiles-private の `docs/adr/` の ADR を指す
 - この repo の `docs/` に書こうとすると hook (`nix/files/claude/hooks/docs-guard.sh`) が止め、CI の `lint` も `docs/` が
   あれば落ちる。Bash で書いて回り込まない
