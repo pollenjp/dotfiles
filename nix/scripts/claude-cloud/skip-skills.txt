@@ -1,0 +1,17 @@
+# cloud の VM では張らない skill (bootstrap-claude-cloud.sh が読む)。1 行 1 名前。「#」から行末と空行は読まない。
+#
+# cloud に無いもの (手元の常駐サービス・道具・そのマシンの ~/dotfiles) を前提にする skill を並べる。dotfiles は public
+# なので、ここに書くのは名前がすでに public なものだけにする (private な claude-skills の名前は書かない)。
+# mod を兼ねる skill (dir に .claude-plugin/plugin.json がある) は、ここに書かなくても張らない。
+
+# 手元の cc-pages の daemon に書く。長い答えで自動で起動するので、cloud では空振りする
+pjp-cc-page
+
+# herdr が無い
+pjp-herdr-hub
+pjp-herdr-other-repo
+
+# そのマシンの ~/dotfiles (setup・switch・ローカル flake・ホストの登録) を扱う
+pjp-dotfiles-update
+pjp-dotfiles-register-host
+pjp-dotfiles-local-flake-migrate
