@@ -39,6 +39,7 @@
 | [030](./030_mise_release_age_overrides_20261023T010148JST/README.md) | mise の遅延を option で決め、期間付きの上書き (この日までに出た版を取る上限) を dotfiles-private の `nix/shared/` の list で持ち、setup が今日 (Asia/Tokyo) と比べて上限の日時を mise に写す (`nix/shared/*.nix` は登録した全ホストに足す) | 2026-10-23 |
 | [031](./031_register_host_compare_shared_20261023T025916JST/README.md) | PC の登録の `private-host.sh compare` は、dotfiles-private の `nix/shared/` を外した新しい形とも比べ、`shared/` の値だけの違いなら 0 にして `shared/` が足す値を別に出す。元のホストが登録したホストなら、draft と compare の旧い形からも `shared/` を外し、clone と作業ツリーの `shared/` が同じかを出す | 2026-10-23 |
 | [032](./032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md) | nixpkgs の猶予の日数を `nix/release-age.nix` の設定値にし、セキュリティパッチのための期間付きの例外 (全体・一部 nixpkgs・一部 upstream) を同じファイルに理由とともに持つ。全体は flake-lock-age.sh が pin を日付まで進め、一部は home の pkgs の overlay (ほかの package から使われないアプリだけ) で当てる。消し時は pin の日時と版で決め、setup の警告のまとめと CI の annotation に出す (CI は落とさない)。最初の例外は mise 2026.10.17 (release の musl 版) | 2026-10-24 |
+| [033](./033_claude_xref_guard_20261024T223152JST/README.md) | public な repo へ、ほかの repo への参照 (`owner/repo#番号`・PR や issue の URL など) を書く Claude の git push・gh pr create などを、打つ前に PreToolUse の hook で止めて直し方を返す。commit の message とタイトルは backquote の中も数え、本文とコメントは code の外だけを数える。公開範囲は参照が見つかったときだけ gh で引き、意図して参照するときはユーザーが明示して頭に `PJP_ALLOW_XREF=1` を付ける | 2026-10-24 |
 
 ## ディレクトリ名
 

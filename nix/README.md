@@ -803,7 +803,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS は[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
@@ -2482,6 +2482,35 @@ herdr の中の agent は手元の PC から転送された接続のもので（
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`
   に 1 件ずつ（`Bash`）足す。0 以外で終わった Bash には PostToolUse が来ず、PostToolUseFailure だけが来る
   （Claude Code 2.1.306 で確かめた）
+
+#### ほかの repo への参照で push・PR を止めるフック
+
+`PreToolUse` フック（`nix/files/claude/hooks/xref-guard.sh`）。Claude が public な repo に、ほかの repo の issue・PR・commit への
+参照（`owner/repo#番号`・`owner/repo@sha`・github.com の issues・pull・discussions・commit の URL）を書こうとしているとき、
+`git push` と `gh pr create` などを打つ前に止め（`permissionDecision` の deny）、どの commit・どの行か・どう直すかを返す。
+GitHub は参照先の timeline に「mentioned this」「referenced」の跡を残し、付いた跡は本文を直しても force push で commit を外しても
+消えないため（経緯は [ADR 033](../docs/adr/033_claude_xref_guard_20261024T223152JST/README.md)。決まりは claude-skills の
+pjp-dev-tracker の「repo に書くもの」）。判断は script がするので token を使わない。
+
+| コマンド | 見るもの | 数える参照 |
+| --- | --- | --- |
+| `git push`（`git -C … push` も） | 押す commit（どの remote-tracking ref からも辿れないもの。新しい方から 1000 個。同じコマンドの `--amend` で書き換える HEAD は数えない）と、同じコマンドで push より前に作る commit（`git commit -m`・`-F`）の message | backquote の中も |
+| `gh pr create`・`edit`、`gh issue create`・`edit` | タイトル | backquote の中も |
+| 同上と `gh pr comment`・`review`、`gh issue comment` | 本文・コメント（`--body`・`--body-file`。`"$(cat <<'EOF' … EOF)"` は heredoc の本文を読む） | code block と inline code の外だけ |
+| `gh pr merge` | merge の commit の件名・本文 | backquote の中も |
+
+- 止めるのは public な repo と、公開範囲を確かめられない repo（gh が無い・未ログイン・github.com でない host）だけ。公開範囲は
+  参照が見つかったときだけ `gh repo view` で引く（10 秒で切る。控えは持たない）。同じ repo の参照と `#番号`、手元の path への
+  push は見ない。repo を渡していない gh の「同じ repo」は、`gh repo set-default` の repo（無ければ dir の remote の repo を全部）
+- 同じコマンドの前の方で書いたファイル（`cat <<EOF > body.md`・`tee body.md`）は、後ろの `--body-file`・`git commit -F` で
+  書いた中身を読む。`bash <<EOF`・`cat … | bash` に渡した script も読む
+- 意図して参照するときは、**ユーザーが明示したときだけ**、コマンドの頭に `PJP_ALLOW_XREF=1` を付けて打つ（`env` の引数・
+  `bash -c` の中にも効く。止めたときに返す文にも「自分の判断では付けない」と書いてある）
+- コマンドの文字の読み方は[前述](#1password-の-ssh-承認を知らせるフック)の hook と同じく近似で、script の中・関数・alias・
+  変数に入れたコマンド、`gh api` で書くコメント、`gh pr create --fill` は見えない。64 KB（gawk・mawk の無いマシンでは 16 KB）を
+  超えるコマンドは中を読まず、参照か `git … push` があれば止めて、本文をファイルにするかコマンドを分けるよう返す
+- ユーザーが手で打つ push・PR は止めない（git の pre-push hook は使わない）
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Bash`）足す
 
 ### statusLine
 
