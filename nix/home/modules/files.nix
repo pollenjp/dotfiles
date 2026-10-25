@@ -41,6 +41,12 @@
     # init.vim は ~/.vim/common.vim を source する (複製時に書き換え済み)
     "nvim/init.vim".source = ../../files/nvim/init.vim;
 
+    # mise の cursor-agent (Cursor の CLI) の宣言。mise は global の conf.d を config.toml より先に読む。
+    # config.toml は mise 自身が書き換えるので Nix では置かない (modules/shell-common.nix の programs.mise) が、
+    # conf.d は mise が書かない。何を変えているか・なぜ conf.d かはファイルの先頭のコメント。
+    # 入れるのと上げるのは scripts/bootstrap-mise.sh
+    "mise/conf.d/cursor-agent.toml".source = ../../files/mise/conf.d/cursor-agent.toml;
+
     # tss() から `tmux -f` で指定される設定。
     # 元は ~/dotfiles/tmux/home.tmux.conf を source-file していたが
     # ~/.tmux.conf を見るように書き換えてある。

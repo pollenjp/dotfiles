@@ -27,7 +27,7 @@
 #
 # ## 役割分担
 #
-#   グローバルな CLI ツール    -> Nix (nix/home/modules/packages.nix)
+#   グローバルな CLI ツール    -> Nix (nix/home/modules/packages.nix。例外は下の claude と cursor-agent)
 #   言語ランタイム (go/node)   -> mise (このスクリプト)
 #   プロジェクト毎のツール固定 -> mise (各リポジトリの mise.toml)
 #
@@ -101,7 +101,7 @@ shape_jq='
 # 書く値を決める (冒頭の「遅延と、期間を区切った上書き」の表)。出すもの:
 #
 #   setting  minimum_release_age に書く値 (上書き中なら上限の日時、無ければ既定)
-#   claude   claude を入れるときの MISE_MINIMUM_RELEASE_AGE (下の claude の節)
+#   claude   claude (と cursor-agent) を入れるときの MISE_MINIMUM_RELEASE_AGE (下の claude の節)
 #   age      既定 (minimumReleaseAge)
 #   use      上限を書く項目 (無ければ null)。ended (終わった)・pending (まだ) は from・zeroDays・reason の順に並べる
 #            (list の順は home-manager の module system が決めるので頼らない。上限が同じ項目のどれを出すかも決まる)
@@ -196,7 +196,7 @@ fi
 
 echo "==> 言語ランタイム"
 # CLI ツール (bat/eza/fd/ripgrep/fzf/jq/...) は Nix が管理するので入れない。
-# ここに書くのはプロジェクト毎の切り替えが必要なものだけ (例外は下の claude)。
+# ここに書くのはプロジェクト毎の切り替えが必要なものだけ (例外は下の claude と cursor-agent)。
 # 短縮名 `usage` は registry に 3 つの backend を持つ
 # (aqua:jdx/usage / asdf:mise-plugins/mise-usage / cargo:usage-cli)。
 # 短縮名のままだとどれが選ばれるかを mise に委ねることになるので、
@@ -237,6 +237,29 @@ echo "==> claude (役割分担の例外)"
 # 「自動で上がってほしい」を成立させるため。省くと --update を何度回しても
 # 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
 MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise use -g claude@latest
+
+echo "==> cursor-agent (Cursor の CLI。役割分担の例外)"
+# claude と同じ理由 (リリースの頻度が flake.lock の更新の周期に合わない) で mise に置き、同じ遅延 (claude_age) で入れる。
+# 何を入れるか (mise の registry の cursor-agent と、そこから変えたところ) は ~/.config/mise/conf.d/cursor-agent.toml
+# (nix/files/mise/conf.d/cursor-agent.toml) に書いてあり、ここは入れて上げるだけ。mise use -g は使わない
+# (config.toml に書くと、conf.d の宣言がまるごと隠れる)。
+#
+# install はまだ入っていないときだけ入れ (入っていれば何もしない)、upgrade は遅延を過ぎた新しい版があれば上げる。
+# mise が知る版は最新の 1 つだけ (Cursor は版の一覧を出さず、mise は公式のインストーラから今の版を読む) で、版の日付は
+# 日までなので、遅延はその日の終わりから数える (1d なら 10/22 の版は 10/23 の終わりから)。それまでは取れる版が無く、
+# install は落ち、upgrade は mise の警告だけを出して入っている版のまま終わる。ここで止めると後ろの bootstrap が
+# 走らないので、落ちたら警告して続ける。
+cursor_conf="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/conf.d/cursor-agent.toml"
+if [[ ! -e ${cursor_conf} ]]; then
+  warn "cursor-agent (Cursor の CLI) の宣言がありません: ${cursor_conf}" \
+    "先に home-manager switch してください (~/dotfiles/setup --update なら続けて流れます)。cursor-agent は入れません。"
+elif ! MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise install cursor-agent; then
+  warn "cursor-agent (Cursor の CLI) を入れられませんでした (上の mise のエラー)。" \
+    "mise が知る版は最新の 1 つだけなので、それが遅延 (${claude_age}) を過ぎるまでは取れる版がありません。" \
+    "過ぎたあとの ~/dotfiles/setup --update で入ります。すぐ入れるなら mise install cursor-agent@<版> (エラーに出ている版)。"
+elif ! MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise upgrade cursor-agent; then
+  warn "cursor-agent (Cursor の CLI) を上げられませんでした (上の mise のエラー)。入っている版のままです。"
+fi
 
 echo
 echo "完了しました。現在のグローバル設定:"
