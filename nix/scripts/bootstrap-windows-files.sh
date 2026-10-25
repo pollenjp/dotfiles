@@ -12,7 +12,7 @@
 # ## 何のために
 #
 # Windows 側のアプリ (Orca など) の設定を dotfiles で管理する
-# (docs/adr/010_win_files_from_wsl_*)。WSL から /mnt/c 越しに書くので、
+# (dotfiles-private の docs/adr/010_win_files_from_wsl_*)。WSL から /mnt/c 越しに書くので、
 # Windows 側に clone は要らない。
 #
 # ## 何を読むか

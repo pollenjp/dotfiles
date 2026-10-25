@@ -14,7 +14,7 @@
 # 1Password を使う WSL のマシンでは、WSL の ssh は Windows の ssh.exe を呼ぶラッパーで
 # (ADR 004)、ssh.exe は Windows 側の %USERPROFILE%\.ssh\config を読む。そこにも WSL と同じ形
 # (config は Include の 1 行とこのマシンを名乗る SetEnv、接続先は config.d) を作る
-# (docs/adr/016_ssh_config_from_dotfiles_private_*。SetEnv は docs/adr/025_*)。
+# (dotfiles-private の docs/adr/016_ssh_config_from_dotfiles_private_*。SetEnv は dotfiles-private の docs/adr/025_*)。
 # 優先順位も WSL と同じく、config.d のファイル名の順になる。
 #
 # ## 何を読むか

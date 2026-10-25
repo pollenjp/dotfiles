@@ -137,7 +137,7 @@ fi
 skill の script が環境変数を読み、それを「そのマシンで常に効かせる意味がある」（API キー・置き場所・
 マシンごとの切り替え）なら、skill のディレクトリに `pjp-env.txt` を置く。`setup --update` の
 `bootstrap-local-env` が `~/.claude/skills/*/pjp-env.txt` を集め、`~/.config/pjp/env` の頭の欄に
-`# ---- skill: <名前> ----` の節として並べる（[ADR 021](../../../../docs/adr/021_local_env_header_20261017T224146JST/README.md)、
+`# ---- skill: <名前> ----` の節として並べる（[ADR 021](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/021_local_env_header_20261017T224146JST/README.md)、
 [`nix/README.md`「一覧の欄」](../../../README.md#一覧の欄-adr-021)）。
 
 ```

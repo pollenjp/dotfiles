@@ -1,5 +1,5 @@
 """Google 日本語入力の設定 (config1.db) とユーザー辞書 (user_dictionary.db) を、repo のテキストと
-行き来させる (docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)。
+行き来させる (dotfiles-private の docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)。
 
 Windows には触らない。読み書きするのは渡されたパスのファイルだけで、Windows 側へ置くのと
 変換サーバーを落とすのは nix/scripts/bootstrap-windows-google-ime.sh がやる。

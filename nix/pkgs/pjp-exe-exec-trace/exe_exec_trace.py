@@ -14,7 +14,7 @@ systemd の unit (dotfiles-exe-exec-trace.service) は --json で動かし、記
 
     journalctl -u dotfiles-exe-exec-trace -o cat | pjp-exe-exec-trace --pretty
 
-経緯は docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
+経緯は dotfiles-private の docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md。
 """
 
 import argparse

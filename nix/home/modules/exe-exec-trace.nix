@@ -54,7 +54,7 @@ let
   unit = pkgs.writeText "dotfiles-exe-exec-trace.service" ''
     [Unit]
     Description=dotfiles: WSL から起動された Windows の .exe を祖先付きで記録する (eBPF)
-    Documentation=https://github.com/pollenjp/dotfiles/blob/main/docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md
+    Documentation=https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md
     ConditionVirtualization=wsl
     RequiresMountsFor=/nix/store
     StartLimitIntervalSec=10min

@@ -3,7 +3,7 @@
 dotfiles を Nix home-manager で宣言的に管理するためのディレクトリ。
 
 設定ファイルの実体は `nix/files/` にある。repo 直下にあった旧経路 (`main.bash setup`) から
-複製して始めたもので、旧経路は [ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)
+複製して始めたもので、旧経路は [ADR 013](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)
 で削除した。以下で「移植元」「複製元」として挙げる旧経路のファイルは、git の履歴
 (`git show 4a54c96:shell/250_alias.sh` など) で読める。
 
@@ -312,8 +312,8 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 ##### 猶予の日数と例外 (`release-age.nix`)
 
 セキュリティパッチが猶予より新しい側にしか無いときは、理由を書いた**期間付きの例外**を
-[`release-age.nix`](./release-age.nix) に足す（[ADR 032](../docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)・
-[設計](../docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く。
+[`release-age.nix`](./release-age.nix) に足す（[ADR 032](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)・
+[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く。
 `date` は「この日（Asia/Tokyo）の終わりまでの公開を使う」と読む。
 
 | 例外 | 欄 | 何をするか |
@@ -384,7 +384,7 @@ mise で入れるもの（言語ランタイム・`claude`・各 repo の `mise.
 上の遅延は「未発覚の侵害を誰かが先に踏む時間」を稼ぐ一方、**発覚済みの侵害
 バージョンを下限日数のあいだ固定し続ける**というリスクを新しく作る。それを塞ぐ
 道具が 2 つある（なぜこの組み合わせなのかは
-[ADR 006](../docs/adr/006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。
+[ADR 006](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/006_nix_closure_sbom_osv_scan_20260823T004634JST/README.md)）。
 
 **[`closure-scan.sh`](./scripts/closure-scan.sh)** — 実際に入る閉包をビルドして
 SBOM 化し、vulnxscan（OSV + Grype + vulnix）で照合する。サプライチェーン侵害の
@@ -574,7 +574,7 @@ switch させるため（[後述](#dotfiles-private-に登録したホスト)）
 `(ローカル flake)`・`(dotfiles-private)` と出る。`--host`・`DOTFILES_HOST`・`h` で、この PC を登録した名前と違うホストを選ぶと
 警告する（止めない。最後の警告のまとめの `[対象ホスト]` にも載る）。
 
-**どちらも無ければ推測せずに止まる**（終了コード 1。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
+**どちらも無ければ推測せずに止まる**（終了コード 1。[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
 前は `$USER` と `uname` から型のホストを推測していたが、登録した PC でもローカル flake が clone を読んでいないだけで型の
 ホストになり、git の署名などの値が黙って外れた。止めるときは選べる道を出す。
 
@@ -961,8 +961,8 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 1 エントリが 1 ホスト。マシンごとの差は `mkHome` に渡す値で吸収する。
 
 > public のこの登録簿には、型（`pollenjp@x86_64-linux`・`pollenjp@aarch64-linux`・`pollenjp@aarch64-darwin`）と検証用の
-> `sandbox` だけを置く（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に
-> 登録し（[後述](#dotfiles-private-に登録したホスト)・[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）、
+> `sandbox` だけを置く（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。実機（その PC の値の全部を持つホスト）は dotfiles-private の `nix/hosts/` に
+> 登録し（[後述](#dotfiles-private-に登録したホスト)・[ADR 026](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）、
 > dotfiles-private を読めない PC は `~/dotfiles/flake.nix` にホストを足す（[後述](#登録簿に載せずにマシンを足す)）。下の `mkHome` の
 > 引数は、どちらで書くときも同じ。型は、どちらもまだ無い PC を `--host <型>` で 1 回当てるためのもの。
 
@@ -992,7 +992,7 @@ wsl = {
 onePassword.enable = true;     # 1Password で git の署名をするか（WSL ならホスト側 Windows の 1Password）
 ```
 
-`onePassword` は `wsl` の外に置く（WSL でないマシンでも使うため。[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
+`onePassword` は `wsl` の外に置く（WSL でないマシンでも使うため。[ADR 022](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
 git の署名で見ると、組み合わせは次の 4 通り。
 
 | マシン | 指定 | git の署名 |
@@ -1007,7 +1007,7 @@ git の署名で見ると、組み合わせは次の 4 通り。
 
 公開の登録簿には WSL の型が無い（型は `<user>@<system>` の 3 つ）。WSL の PC は、初回を `pollenjp@x86_64-linux` で当て、
 dotfiles-private に登録するとき（読めない PC は `~/dotfiles/flake.nix` に足すホスト）に `wsl` と `onePassword` の値を書く
-（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)。setup は推測しないので、WSL だからといって `<user>@wsl` を選ぶこともない）。
+（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)。setup は推測しないので、WSL だからといって `<user>@wsl` を選ぶこともない）。
 
 > 1Password を使わないマシンで署名設定を書き出さないのは、`commit.gpgSign = true`
 > だけが残ると署名鍵が見つからず `git commit` そのものが失敗するため。
@@ -1035,7 +1035,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 dotfiles-private を読めない PC（会社の PC など）や一時的な環境は、`hosts/default.nix` を編集せず `~/dotfiles/flake.nix` に
 ホストを足す（git 管理外）。[置き場所](#置き場所)で用意したものがそのまま使える。dotfiles-private を読める PC は、そちらに
 登録する（[後述](#dotfiles-private-に登録したホスト)）。**PC の値は、dotfiles-private の登録か、ここに足すホストの 1 か所にだけ書く**
-（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
+（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
 
 ```nix
 outputs =
@@ -1107,7 +1107,7 @@ option は本体の既定になる。本体の module が既に定義してい�
   （`wsl.onePassword = { enable = true; windowsUserName = "…"; };`）も動く
   （`wsl.onePassword.windowsUserName` の既定が `wsl.windowsUserName` のため）。ただし
   `wsl.onePassword.enable` は `onePassword.enable` へ改名したので、switch のたびに改名の警告が出る。
-  `onePassword.enable = true;` を `wsl` の外へ移す（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
+  `onePassword.enable = true;` を `wsl` の外へ移す（[ADR 022](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。
   `windowsFiles.enable` を足すときは配り先にも名前が要るので、上の形のように
   `wsl.windowsUserName` へ移す
 
@@ -1125,7 +1125,7 @@ option は本体の既定になる。本体の module が既に定義してい�
 #### 雛形が新しくなったら
 
 `setup-local-flake.sh` は雛形の先頭のコメントに**雛形の版の印**（`# 雛形の版: <8 桁の 16 進>`）を書く。印は
-heredoc の原文（展開する前）の cksum で、雛形を直すと変わる（[ADR 024](../docs/adr/024_local_flake_template_migrate_20261020T120111JST/README.md)）。
+heredoc の原文（展開する前）の cksum で、雛形を直すと変わる（[ADR 024](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/024_local_flake_template_migrate_20261020T120111JST/README.md)）。
 印が今の雛形と違うと（印の無い、印を入れる前の雛形も）、setup が知らせる。
 
 | いつ | どこに |
@@ -1149,7 +1149,7 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
 ```
 
 - 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
-- `local` を持つ前の雛形から今の雛形（[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）へ移すと、`local` の塊が消える。dotfiles-private に登録した PC
+- `local` を持つ前の雛形から今の雛形（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）へ移すと、`local` の塊が消える。dotfiles-private に登録した PC
   （登録の仕上げで `local` を雛形の既定に戻してある）は衝突なく移る。`local` に値が残っていれば、塊ごと衝突として残るので、
   値を dotfiles-private の登録か足したホスト（`tmp`）へ移してから、雛形どおりに消す。移したあとは型のホストに `local` の値が
   当たらなくなるので、compare は型のホストの違い（Notion の宛先など）を出す（setup の対象でなければ受け入れてよい）
@@ -1205,7 +1205,7 @@ nix build --impure --expr '
 ### dotfiles-private に登録したホスト
 
 実機（その PC の値の全部を持つホスト）は、private な [pollenjp/dotfiles-private](https://github.com/pollenjp/dotfiles-private) の
-`nix/hosts/<user>@<hostname>.nix` に 1 PC 1 ファイルで置ける（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）。
+`nix/hosts/<user>@<hostname>.nix` に 1 PC 1 ファイルで置ける（[ADR 026](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)）。
 登録した PC では、`~/dotfiles/setup --update` が `--host` なしでそのホストを選ぶ。値は git（private）に残るので、雛形が新しくなっても
 PC ごとに移さなくてよい。
 
@@ -1299,12 +1299,12 @@ bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形�
   前の雛形の `local` の dotfiles の外の行（`programs.git…` など）は描かず、下書きの頭のコメントで知らせる
 - 型を元にする（新しい PC）と、下書きは `username`・`system` だけになる。WSL の値（`wsl`・`onePassword`）・Dev Tracker
   （`claude.devTracker.enable = true`）など、その PC で要る値を足す（`compare` は足した分だけ違う）
-- 元にするホストが公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた PC。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）は、消す前の本体を
+- 元にするホストが公開の登録簿から消えた PC（`pollenjp@wsl` などで当てていた PC。[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）は、消す前の本体を
   `git archive` で写して `--nix-dir` に渡し、draft・compare する（手順は `pjp-dotfiles-register-host` skill）
 - `compare` が 0 なら、ホストのファイルは元のホストの値を全部写せている（drvPath が同じなら、この登録で home-manager の世代の中身は
   変わらない。`shared/` の値だけ違うときも 0 で、世代は `shared/` の値の分だけ変わる。下の項目）。今の世代との一致は参考として
   出すだけ（本体を進めると、skill を 1 つ足しただけでも世代が変わる）
-- dotfiles-private の `nix/shared/` の値は、登録した全ホストに足す値で、ホストのファイルの外にある（[ADR 031](../docs/adr/031_register_host_compare_shared_20261023T025916JST/README.md)）。
+- dotfiles-private の `nix/shared/` の値は、登録した全ホストに足す値で、ホストのファイルの外にある（[ADR 031](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/031_register_host_compare_shared_20261023T025916JST/README.md)）。
   作業ツリーの `nix/shared/` に module があると、`compare` は新しい形を `shared/` を外しても評価し、それが旧い形と同じなら
   「同じ (shared/ の値だけ違う)」で 0 を返す。`shared/` が足す値（`mise.releaseAgeOverrides: [] → [{…}]` など。元のホストが型・`tmp`
   なら、登録で増える値）は、ホストのファイルの違いと分けて出す。`shared/` を足した形が評価できなければ 4（list でない option を
@@ -1468,12 +1468,12 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   `bootstrap-windows-google-ime-install.sh` (order 95) が、配った `Install-PowerToys.ps1`・
   `Install-GoogleJapaneseInput.ps1` を `pwsh.exe` で呼び、入っていなければ winget で入れる。Google 日本語入力は
   版を固定し、ずれは ⚠ で知らせるだけ (上げるのは手で打つ。UAC の確認が出る)。PowerToys は版を固定しない
-  （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](../docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
+  （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
 - Google 日本語入力の設定 (`win/google-japanese-input/`) は manifest では配らない。protobuf のバイナリで
   保存のたびに時刻が入るので、`bootstrap-windows-google-ime.sh` (order 98) が `pjp-google-ime` で
   組み立て、時刻を除いた中身で比べて配り、変換サーバーを落として読み直させる。辞書は private な
   dotfiles-private (`bootstrap-dotfiles-private.sh`) から取る（[`win/README.md`](../win/README.md#google-日本語入力)、
-  [ADR 015](../docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)）
+  [ADR 015](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)）
   - 衝突で出すのは、設定は diff、辞書は辞書ごとの行の数だけ (辞書の語は setup の出力に出さない。
     語の diff は自分の端末で `--dry-run --show-words`)
   - 変換サーバーを落とせなかったら落とし直しの印を残し、次の回が置くものが無くても落とし直す
@@ -1482,9 +1482,9 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   Windows Terminal 自身も書き換え (新しい profile を見つけたとき・設定画面で保存したとき)、PC ごとに違う profile の
   一覧も入るので、`bootstrap-windows-terminal.sh` (order 99) が持つキーだけを書き足し、キーごとに前回書いた値
   (`~/.local/state/dotfiles/windows-terminal.applied.json`) と比べて衝突を見る（[`win/README.md`](../win/README.md#windows-terminal)、
-  [ADR 018](../docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)）
+  [ADR 018](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)）
 
-経緯は [ADR 010](../docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
+経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
 ## git について
 
@@ -1513,7 +1513,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 > [ssh ラッパー](#wsl-では-ssh-自体を-windows-側に差し替える)が行う。
 
 **WSL でないマシンでは、`ssh-keygen` が `SSH_AUTH_SOCK` のエージェントで署名する**
-（[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。ssh と同じ経路なので、
+（[ADR 022](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)）。ssh と同じ経路なので、
 手元ではそのマシンの 1Password（`SSH_AUTH_SOCK` を `~/.1password/agent.sock` へ向けるのは system の側。
 NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されてきたエージェント、herdr の pane では
 固定名の指す先の、同じ "Signing" の鍵で署名する。ラッパーは置かない。
@@ -1522,8 +1522,8 @@ NixOS の laptop は nixos-config の ADR 009）、ssh 先では転送されて�
 `~/dotfiles/flake.nix` に足したホストで書く）。dotfiles-private に登録した PC は `--host` を付けない（setup が登録したホストを選び、署名を
 入れるかもそのファイルの `onePassword` で決まる。[前述](#dotfiles-private-に登録したホスト)）。登録していない PC の `--host` なしの
 `setup` は、ローカル flake がホストを定義していなければ止まる（推測で汎用の `<user>@<system>` を選んで署名が外れることはない。
-[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。登録した PC で `--host <型>` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、
-setup が警告する（[ADR 026](../docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の
+[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。登録した PC で `--host <型>` などを付けると、値は登録したファイルではなくそのホストの定義から来るので、
+setup が警告する（[ADR 026](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/026_dotfiles_private_hosts_20261020T215857JST/README.md)。ADR 022 の `--host pollenjp@laptop` の
 手順は、登録する前の記録で、そのホストは公開の登録簿から消した）。
 
 `git log --show-signature` は `gpg.ssh.allowedSignersFile` が無いのでエラーになる（WSL も同じ）。
@@ -1724,9 +1724,9 @@ Windows 側（`%USERPROFILE%\.ssh`）へは `bootstrap-windows-ssh-config.sh`（
 
 > 設計の経緯（中身を Nix で配らない理由、退避を `--backup` に一本化した理由、
 > `config.d` へ移す案を棄却した実測）は
-> [ADR 003](../docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
+> [ADR 003](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/003_nix_ssh_config_20260810T210714JST/README.md) を参照。
 > 接続先を `.ssh` submodule から dotfiles-private へ移し、Windows へも配るようにした経緯は
-> [ADR 016](../docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)。
+> [ADR 016](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md)。
 
 ### WSL では ssh 自体を Windows 側に差し替える
 
@@ -1779,7 +1779,7 @@ USE_LINUX_SSH=1 ssh <ホスト名>
 > `~/.local/bin/ssh` を指しているか確認するとよい。
 
 Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移さず、旧経路と一緒に削除した
-（[ADR 013](../docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)）。
+（[ADR 013](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/013_remove_legacy_tree_20261007T015646JST/README.md)）。
 
 ### WSL の .exe の起動を常時記録する
 
@@ -1788,7 +1788,7 @@ Windows (Git for Windows) 用の `bin/ssh-*-git-for-win.sh` は移さず、旧�
 タブ（`wsl.exe`）単位で効くので、一度承認すると同じタブのどのプロセス（herdr の別ペインや
 Claude Code など）もダイアログ無しで鍵を使える。要求元が分かるのは Linux 側で `.exe` の
 起動を見たときだけなので、そのための道具を 2 つ置く（経緯は
-[ADR 012](../docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md)）。
+[ADR 012](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/012_wsl_exe_exec_trace_service_20260930T153253JST/README.md)）。
 
 | 道具 | 置かれるマシン | 使いどころ |
 | --- | --- | --- |
@@ -1875,7 +1875,7 @@ ADR 012 の検証で、agent を使わない `ssh.exe` を git から起動し�
 いま動いている要求元を Windows と Linux をまたいだ木で出す。
 要求元はダイアログに気付く前に終わっていることが多いので（Claude Code の GitHub SSH の確かめは
 3 秒で kill されるが、ダイアログは約 60 秒残る）、たいていは記録の節に答えがある
-（[ADR 020](../docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md)）。
+（[ADR 020](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/020_who_is_asking_recent_journal_20261017T110906JST/README.md)）。
 
 ```sh
 pjp-who-is-asking                # 直近 3 分の記録と、いま動いている木 (Windows 側は powershell.exe で 1〜2 秒)
@@ -1924,9 +1924,9 @@ sshd が接続ごとに作る agent の socket（OpenSSH 10.1 からは `~/.ssh/
 消えるのに、herdr server は起動したときの env を抱えて常駐し、実行中のプロセスの env は外から書き換えられないため。
 
 そこで herdr の **session ごとの固定名**（symlink）を挟み、server と pane には固定名を渡して、その先だけを生きている
-接続の socket へ向け直す。判断の経緯は [ADR 008](../docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)
-（固定名）・[ADR 022](../docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)（手元の 1Password）・
-[ADR 025](../docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)（session ごと・hr・同じマシンの接続を借りる）。
+接続の socket へ向け直す。判断の経緯は [ADR 008](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/008_ssh_agent_stable_sock_20260909T144947JST/README.md)
+（固定名）・[ADR 022](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/022_one_password_outside_wsl_20261018T105655JST/README.md)（手元の 1Password）・
+[ADR 025](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/025_herdr_agent_borrow_20261020T210555JST/README.md)（session ごと・hr・同じマシンの接続を借りる）。
 
 | session | 固定名 |
 | --- | --- |
@@ -2083,7 +2083,7 @@ bash では元々発火していなかった）。
 （`/etc/ssl/certs/ca-certificates.crt`）を読ませるため、Linux のホストでは `NIX_SSL_CERT_FILE`・`SSL_CERT_FILE`・
 `REQUESTS_CA_BUNDLE`・`CLOUDSDK_CORE_CUSTOM_CA_CERTS_FILE` を session の環境変数に入れる
 （`nix/home/modules/os-ca-bundle.nix`。どのツールがどれを読むかは、その先頭のコメント。
-[ADR 028](../docs/adr/028_os_ca_bundle_env_20261022T180804JST/README.md)）。OS の束から危ない CA を外せば、
+[ADR 028](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/028_os_ca_bundle_env_20261022T180804JST/README.md)）。OS の束から危ない CA を外せば、
 これらのツールも揃って拒否するようになる。
 
 - 入れるのは、Linux で束のファイルがあるときだけ（無いホストで入れると、nix 自身も含めて TLS が通らなくなる）
@@ -2228,7 +2228,7 @@ env の値を上書きできるようにするためなので、順序を入れ�
 ### 一覧の欄 (ADR 021)
 
 ファイルの頭に、dotfiles と skill が受け取る環境変数の一覧を、印で囲んだ欄として置く
-（[ADR 021](../docs/adr/021_local_env_header_20261017T224146JST/README.md)）。値を書くときに開くファイルで、
+（[ADR 021](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/021_local_env_header_20261017T224146JST/README.md)）。値を書くときに開くファイルで、
 書ける変数とその意味が読めるようにするため。
 
 ```
@@ -2399,7 +2399,7 @@ PR を作った瞬間に、「`pjp-video-explainer-offer` skill を読み、条�
 
 聞くか、答えを待たずに作り始めるかは、host option **`dotfiles.claude.videoOffer.autoStart.enable`**（既定 false）で
 選ぶ。home-manager が値を `~/.local/state/dotfiles/claude-video-offer.json`（`{"autoStart":false}`）に置き、
-このフックと skill が読む（[ADR 023](../docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)）。
+このフックと skill が読む（[ADR 023](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/023_claude_video_offer_host_option_20261018T121637JST/README.md)）。
 
 | `autoStart` | フックが差し込む文 | skill の動き |
 | --- | --- | --- |
@@ -2434,7 +2434,7 @@ user の `settings.json`（`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`）の
 読み込んだ直後に、「確認を挟まずに PR まで走り切る」と Claude の文脈へ 1 文を差し込む。
 何をするかの正本は `~/.claude/CLAUDE.md` の「方針を承認したら PR まで走り切る」節で、hook は
 問いを出させる skill の文面の隣でそれを思い出させるだけ（経緯は
-[ADR 019](../docs/adr/019_claude_run_through_after_approval_20261016T150008JST/README.md)）。
+[ADR 019](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/019_claude_run_through_after_approval_20261016T150008JST/README.md)）。
 
 | 読んだ skill | 差し込む文の要旨 |
 | --- | --- |
@@ -2455,7 +2455,7 @@ script の中で見る（`"if": "Skill(…)"` は Claude Code 2.1.299 で発火�
 「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせ、断られたら打ち直さずに選択肢の問いを出させる。
 herdr の中の agent は手元の PC から転送された接続のもので（[前述](#forward-された-agent-を固定名で見せる)）、
 1Password の承認の画面にはどの pane が頼んだかが出ないため（経緯は
-[ADR 029](../docs/adr/029_claude_ssh_agent_notice_20261022T194758JST/README.md)）。判断は script がするので token を使わない。
+[ADR 029](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/029_claude_ssh_agent_notice_20261022T194758JST/README.md)）。判断は script がするので token を使わない。
 
 | いつ | すること |
 | --- | --- |
@@ -2490,7 +2490,7 @@ herdr の中の agent は手元の PC から転送された接続のもので（
 参照（`owner/repo#番号`・`owner/repo@sha`・github.com の issues・pull・discussions・commit の URL）を書こうとしているとき、
 `git push` と `gh pr create` などを打つ前に止め（`permissionDecision` の deny）、どの commit・どの行か・どう直すかを返す。
 GitHub は参照先の timeline に「mentioned this」「referenced」の跡を残し、付いた跡は本文を直しても force push で commit を外しても
-消えないため（経緯は [ADR 033](../docs/adr/033_claude_xref_guard_20261024T223152JST/README.md)。決まりは claude-skills の
+消えないため（経緯は [ADR 033](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/033_claude_xref_guard_20261024T223152JST/README.md)。決まりは claude-skills の
 pjp-dev-tracker の「repo に書くもの」）。判断は script がするので token を使わない。
 
 | コマンド | 見るもの | 数える参照 |
@@ -2900,7 +2900,7 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
   dotfiles-private に登録したファイル、`~/dotfiles/flake.nix` に足したホスト（[前述](#足したホストに書く値)。雛形の `tmp` の例は
   true を書く）。公開の登録簿では検証用の `sandbox` だけが true
 - 型のホスト（`--host <型>`）で当てたマシンでは使わない（前は既定が true で、ローカル flake の雛形の `local` が false を書いて
-  いた。[ADR 027](../docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）
+  いた。[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）
 
 #### 反映（冪等。更新時も毎回走る）
 
@@ -2944,7 +2944,7 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | `home.activation` で settings.json を書く | Claude Code 所有のファイルを switch が書くことになり、「Nix 管理か否か」の線が崩れる |
 | CLAUDE.md を 1 ファイルのまま Nix でマーカー間を切り抜く | Nix の `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
 
-経緯は [ADR 007](../docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
+経緯は [ADR 007](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
 
 ### Notion の宛先を host ごとに選ぶ
 
@@ -3027,7 +3027,7 @@ cat ~/.local/state/dotfiles/claude-notion.json
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
 ```
 
-経緯は [ADR 011](../docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](../docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
+経緯は [ADR 011](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
 
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 
@@ -3129,7 +3129,7 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
   これを外してから `~/.claude` へ入れる）
 
 経緯と、採らなかった案（`~/.claude` をリンクにする、3 つの dir に一式を配る、など）は
-[ADR 009](../docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
+[ADR 009](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
 
 ### private な skill 置き場 (claude-skills)
 
@@ -3481,7 +3481,7 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ### 遅延 (minimum_release_age) を期間付きで緩める
 
 `bootstrap-mise.sh` は `setup --update` のたびに、`config.toml` の `minimum_release_age` に遅延を書く。値は option で決める
-（[ADR 030](../docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](../docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の猶予
+（[ADR 030](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/030_mise_release_age_overrides_20261023T010148JST/README.md)・[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-22-mise-release-age-overrides-design.md)）。`flake.lock` の猶予
 （[前述](#新しすぎる-revision-を-pin-しない-minimumreleaseage-相当)）とは別の口で、こちらは mise が入れるツールだけに効く。
 mise 本体は nixpkgs から入るので、その版を急いで上げるのはこちらではなく [nixpkgs の猶予の例外](#猶予の日数と例外-release-agenix)
 （2026-10 の mise 2026.10.17 は一部 (upstream から) の例外で入れている）。

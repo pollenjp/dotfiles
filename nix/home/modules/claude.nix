@@ -75,7 +75,7 @@
 #
 # リンクを home.file で張らないのは、store を経由する 2 段のリンクになり、Claude Code が
 # settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
-# docs/adr/009_claude_account_config_dirs_* を参照。
+# dotfiles-private の docs/adr/009_claude_account_config_dirs_* を参照。
 #
 # アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
 # ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
