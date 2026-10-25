@@ -45,6 +45,13 @@
     # 固定名の SSH_AUTH_SOCK を渡す実行ファイルで包んだもの。ADR 025)。設定は modules/files.nix ->
     # files/herdr/config.toml
 
+    # Cursor の coding agent の CLI。コマンドは cursor-agent だけ (公式のインストーラが張る agent は置かれない)。
+    # 中身は Cursor が downloads.cursor.com で配るバイナリを、nixpkgs が URL と hash で固定したもの
+    # (unfree。下の allowUnfreePackages で許す)。版は flake.lock の pin で決まるので、公式のインストーラで
+    # 入れたもの (自動で更新される) より遅れる。公式のインストーラで入れた ~/.local/bin/cursor-agent が
+    # 残っていると、PATH で先に来るそちらが使われる (~/.local/bin は modules/shell-common.nix の sessionPath が前に置く)
+    cursor-cli
+
     # PR 全体の差分から変更ファイルを fzf で選び、選んだファイルだけの git diff を出す。
     # 実体は nix/pkgs/pjp-pr-diff/。fish の abbr と bash の alias の gdp で呼ぶ
     (callPackage ../../pkgs/pjp-pr-diff { })
@@ -71,4 +78,8 @@
     vim
     neovim
   ];
+
+  # unfree の package は名前を挙げたものだけを許す。allowUnfreePackages は module ごとの list が足し合わされる
+  # (allowUnfreePredicate は 2 か所に書くと片方が黙って消える) ので、unfree の package を入れる module が自分の分を書く
+  nixpkgs.config.allowUnfreePackages = [ "cursor-cli" ];
 }
