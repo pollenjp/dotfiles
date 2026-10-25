@@ -6,6 +6,10 @@
 #   files/claude/CLAUDE.dev-tracker.md   CLAUDE.md の「タスク管理」の節。
 #                                        dotfiles.claude.devTracker.enable のマシンでだけ
 #                                        CLAUDE.md の末尾に連結する (下記)
+#
+#   CLAUDE.md の最初の「## 」の行より前 (Nix 管理の話) は、手元だけの冒頭。Claude Code on the web (cloud)
+#   の VM では scripts/claude-cloud/bootstrap-claude-cloud.sh がそこを cloud の冒頭に差し替え、最初の「## 」
+#   から後ろを写す (ADR 034)。手元と cloud の両方に効かせたい指示は「## 」の節に書く
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
 #   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
