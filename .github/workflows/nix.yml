@@ -6,11 +6,14 @@ on:
     paths:
       - "nix/**"
       - "win/**"
+      # docs/ は置かない (lint の「docs/ を置かない」が落とす)。docs/ だけを足す PR でもその step が走るように入れる
+      - "docs/**"
       - ".github/workflows/nix.yml"
   pull_request:
     paths:
       - "nix/**"
       - "win/**"
+      - "docs/**"
       - ".github/workflows/nix.yml"
   workflow_dispatch:
     inputs:
