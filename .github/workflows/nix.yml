@@ -209,6 +209,18 @@ jobs:
       - name: Claude Code の skill・agent・command の frontmatter
         run: nix develop ./nix --command ./nix/scripts/check-claude-frontmatter.sh
 
+      # 設計の文書 (spec・実装計画・ADR など) は、この repo (public) ではなく private な dotfiles-private の docs/ に
+      # 置く (CLAUDE.md)。push した時点で公開されるので、止める役は CLAUDE.md と hook (nix/files/claude/hooks/
+      # docs-guard.sh) で、ここは抜けたものを main に入れないための網。bash だけで動くので devShell は要らない。
+      - name: docs/ を置かない (設計の文書は dotfiles-private)
+        run: |
+          files=$(git ls-files -- docs)
+          if [[ -n ${files} ]]; then
+            echo "::error::docs/ は置かない。設計の文書 (spec・実装計画・ADR など) は private な dotfiles-private の docs/ に書く (CLAUDE.md)"
+            printf '%s\n' "${files}"
+            exit 1
+          fi
+
       # win/manifest.toml の検証 (ADR 010)。home-manager の評価は manifest を読まない
       # (ローカル flake からは repo 直下が見えない) ので、flake check では誤りが見つからない。
       # nix-instantiate だけで動くので devShell は要らない。
