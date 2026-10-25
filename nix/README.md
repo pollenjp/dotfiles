@@ -3406,6 +3406,77 @@ unit は `ConditionFileIsExecutable=%h/bin/cc-pages` でバイナリの有無を
 flake input にしない理由も claude-skills と同じ（[前述](#なぜ-flake-input-にしないのか)）。
 gitViaGh のマシンで gh の資格情報を先に試すのも同じ（[setup の取得も gh で先に試す](#setup-の取得も-gh-で先に試す)）。
 
+### Claude Code on the web (cloud) で使う
+
+cloud の session は毎回新しい VM で動き、ここまでの `~/.claude/`（home-manager が配るもの・bootstrap が `settings.json` に
+書くもの）は届かない（[ADR 034](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/034_claude_cloud_bootstrap_20261025T134343JST/README.md)）。専用の cloud 環境の
+setup script から `nix/scripts/claude-cloud/bootstrap-claude-cloud.sh` を呼び、VM の `~/.claude/` に組み立てる。
+`nix/scripts/claude-cloud/` には cloud でしか読まないものだけを置く（`setup` は `nix/scripts/` の直下の `bootstrap-*.sh` だけを
+手順にするので、手元では走らない）。
+
+| 組み立てるもの | 中身 |
+| --- | --- |
+| `~/.claude/skills/` など | dotfiles の `nix/files/claude/` と claude-skills の中身への symlink（手元と同じ単位）。mod を兼ねる skill・`claude-cloud/skip-skills.txt` の skill・（`--dev-tracker` でなければ）`pjp-dev-tracker` は張らない |
+| `~/.claude/CLAUDE.md` | 共通の `CLAUDE.md` の最初の `## ` の行より前を `claude-cloud/CLAUDE.cloud.md` に差し替えたもの（`--dev-tracker` なら「タスク管理」の節も足す） |
+| `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
+| `~/.local/state/dotfiles/claude-notion.json` | `profile` は `--notion-profile` の値 |
+
+git の設定と `settings.json` の `env` には触らない（cloud の git の proxy と commit の署名を壊すため）。plugin は claude.ai で
+有効にすると同期される。
+
+#### 環境を作る
+
+claude.ai/code の環境の設定（[手順](https://code.claude.com/docs/en/cloud-environments#configure-your-environment)）で:
+
+1. 専用の環境を作る（Default の環境には Repositories の欄が無い）
+2. **Repositories** に `pollenjp/dotfiles` と `pollenjp/claude-skills` を足す（setup script が private な repo を読むのに要る）。
+   dotfiles の設計の文書も書くなら `pollenjp/dotfiles-private` も足す（置き場は dotfiles-private の `docs/`。直下の `CLAUDE.md`）
+3. **Network access** の Allowed domains に `ntn.dev`（ntn の install script）・`api.notion.com`・`developers.notion.com`（ntn が
+   Notion-Version を決めるのに OpenAPI を取る）を足す。既定の一覧を含めるチェックは付けたまま
+4. Notion の token を渡す（下の表）
+5. **Setup script** に次を書く
+
+```bash
+#!/bin/bash
+curl -fsSL https://ntn.dev | bash || true
+bash dotfiles/nix/scripts/claude-cloud/bootstrap-claude-cloud.sh --notion-profile personal || true
+```
+
+| token の渡し方 | 設定 |
+| --- | --- |
+| Network secret（勧める） | host `api.notion.com`・Bearer・値に token。加えて環境変数に `PJP_NOTION_TOKEN_PERSONAL=proxy-injected`（resolver に API キーで認証させるための中身の無い値。本物は proxy が VM の外で付ける） |
+| 環境変数 | `PJP_NOTION_TOKEN_PERSONAL=ntn_…`（その環境を使う人と、VM で動く全コマンドから読める） |
+
+`--dev-tracker` は token を渡してから setup script に足す（token の無い環境で、作業のたびにチケットを切りに行って失敗しないように）。
+
+#### 確かめる
+
+新しい session で:
+
+- `/context` の Memory files に `/root/.claude/CLAUDE.md` が出る
+- skill の一覧に `pjp-` で始まるものが出る
+- token を渡したなら `~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check` が通る
+- hook が効く（public な repo に、ほかの repo の参照を書いた commit を push しようとすると xref-guard が止める）。VM の
+  `settings.json` に書いた hook が効くかはまだ確かめていないので、効かなければ ADR 034 に書き足す
+
+#### 制約
+
+- setup script は環境の snapshot を作るときにしか走らない（setup script か Allowed domains を変えたとき・約 7 日ごと）。その
+  あとに claude-skills に足した skill は、SessionStart の hook が張る
+- 環境変数を変えても、動いている session には VM が戻る（起動し直す）まで届かない
+- 1 つの環境で `api.notion.com` に付けられる Network secret は 1 つ（proxy は host で付ける）。personal と work は環境を分ける
+- cloud の GitHub proxy は GraphQL を断る。pjp-dev-tracker の `gh pr view`・`gh pr list`・`gh pr edit` を使う機能は落ちる
+- xref-guard（[前述](#ほかの-repo-への参照で-pushpr-を止めるフック)）は公開範囲を `gh repo view`（GraphQL）で引くので、cloud では
+  引けない。引けないときは止める側に倒れるので、ほかの repo の参照を書いた commit の push は private な repo でも止まる（参照の
+  無い push は gh を呼ばないので止まらない）。通すなら、ユーザーが明示して頭に `PJP_ALLOW_XREF=1` を付ける
+- dotfiles の devShell に入るには、`home-manager` の入力を git で取るよう差し替える（proxy は session に付いていない repo の
+  archive を、public でも断る。nixpkgs だけを入力に持つ flake はそのまま入れる）
+
+```sh
+nix develop ./nix --no-write-lock-file --override-input home-manager \
+  "git+https://github.com/nix-community/home-manager?rev=$(jq -r '.nodes["home-manager"].locked.rev' nix/flake.lock)&shallow=1"
+```
+
 ### 管理しないもの
 
 `settings.json`（権限の「常に許可」などで書き換わる）、`skills/manifest.json` と

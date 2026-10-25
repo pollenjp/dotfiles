@@ -215,6 +215,14 @@
                 bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix}
                 touch $out
               '';
+          # script と一緒に読む cloud の冒頭・skip の一覧 (scripts/claude-cloud/ を丸ごと) と、本物の共通の CLAUDE.md・
+          # hook・skill (files/claude/) を渡す。テストが使い捨ての dotfiles の checkout に写して流す
+          bootstrap-claude-cloud-test =
+            pkgs.runCommand "bootstrap-claude-cloud-test" { nativeBuildInputs = [ pkgs.jq ]; }
+              ''
+                bash ${./tests/bootstrap-claude-cloud.test.sh} ${./scripts/claude-cloud} ${./files/claude}
+                touch $out
+              '';
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
           check-test-grep-q-test =
             pkgs.runCommand "check-test-grep-q-test"
