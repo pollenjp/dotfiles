@@ -803,7 +803,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（[後述](#cursor-agent-も-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS は[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
@@ -2512,6 +2512,22 @@ pjp-dev-tracker の「repo に書くもの」）。判断は script がするの
   超えるコマンドは中を読まず、参照か `git … push` があれば止めて、本文をファイルにするかコマンドを分けるよう返す
 - ユーザーが手で打つ push・PR は止めない（git の pre-push hook は使わない）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Bash`）足す
+
+#### 設計の文書を public な repo の docs/ に書かせないフック
+
+`PreToolUse` フック（`nix/files/claude/hooks/docs-guard.sh`）。この repo は public なので、設計の文書（spec・実装計画・ADR・
+textbook・図）は private な dotfiles-private の `docs/` に置く（決まりは repo の直下の [`CLAUDE.md`](../CLAUDE.md)、経緯は
+dotfiles-private の [ADR 035](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/035_dotfiles_docs_private_20261025T150115JST/README.md)）。
+Claude が `Write`・`Edit`・`MultiEdit`・`NotebookEdit` でこの repo（worktree も）の直下の `docs/` に書こうとしたら止め
+（`permissionDecision` の deny）、書き先（dotfiles-private の `docs/` の同じ相対パス）と、手元・cloud での取り方を返す。
+
+- 止める repo は hook の中の表で決める（今は `pollenjp/dotfiles` → `pollenjp/dotfiles-private` の 1 行）。origin の URL の
+  `owner/repo` で当てるので、worktree・cloud の clone でも効く。公開範囲は gh で引かない（表に無い public な repo の `docs/` は
+  止めない）。ほかの repo にも効かせるなら、表に足す
+- 下の階層の `docs/`（`nix/pkgs/<道具>/docs/` など）は止めない
+- Bash で書くもの（`cat > docs/…`）は見ない。抜けたものは CI の `lint` ジョブの「docs/ を置かない」が落とす
+- 通す口は無い。public に置く文書が要るようになったら、表と CI の step を直す
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Write|Edit|MultiEdit|NotebookEdit`）足す
 
 ### statusLine
 

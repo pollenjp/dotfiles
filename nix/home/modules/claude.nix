@@ -409,6 +409,17 @@ in
       };
     }
 
+    # PreToolUse フック (matcher Write|Edit|MultiEdit|NotebookEdit)。public な dotfiles の docs/ に書こうとしたら止め、
+    # 設計の文書の置き場 (private な dotfiles-private の docs/) を Claude に返す (dotfiles-private の ADR 035。決まりの
+    # 正本は repo の直下の CLAUDE.md)。止める repo の表は hook の中に持つので option は無い。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/docs-guard.sh" = {
+        source = claudeRoot + "/hooks/docs-guard.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #

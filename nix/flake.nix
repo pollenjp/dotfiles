@@ -240,6 +240,7 @@
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
+          docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           pjp-google-ime-unittest =
             pkgs.runCommand "pjp-google-ime-unittest"
@@ -372,6 +373,14 @@
               ;
           };
           claude-xref-guard-state = import ./tests/claude-xref-guard.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-docs-guard-state = import ./tests/claude-docs-guard.nix {
             inherit
               lib
               pkgs
