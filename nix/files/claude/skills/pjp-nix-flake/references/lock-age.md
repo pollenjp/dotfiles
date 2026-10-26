@@ -7,7 +7,8 @@ npm / pnpm の `minimumReleaseAge` に相当する。
 [ADR 005](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/005_nix_flake_lock_min_release_age_20260813T184522JST)
 (猶予)・[ADR 032](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST)
 (日数の設定と例外)・[ADR 037](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/037_release_age_beside_flake_20261027T001056JST)
-(ほかの repo の flake の隣の設定)。ここは**他のリポジトリへ入れるときに要る分だけ**を書く。
+(ほかの repo の flake の隣の設定)・[ADR 038](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/038_release_age_timestamp_20261027T084524JST)
+(date の時差つきの時刻)。ここは**他のリポジトリへ入れるときに要る分だけ**を書く。
 
 ## なぜ設定ではなく script なのか
 
@@ -121,17 +122,22 @@ CI の `check` が落ちるが、**それは意図どおり**。記録として�
 {
   # 普段の猶予 (日)。書かなければ 7
   minimumReleaseAgeDays = 7;
-  # 全体: nixpkgs の pin を、date の日 (Asia/Tokyo) の終わりまでの公開から選ぶ (猶予より新しいときだけ)
+  # 全体: nixpkgs の pin を、date までの公開から選ぶ (猶予より新しいときだけ)
   exceptions.all = [
     { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-23 の公開に入った"; }
+    # 時刻で区切るなら、時差を書く: { date = "2026-10-23T18:20:00+09:00"; reason = "…"; }
   ];
 }
 ```
 
 - `exceptions.all` が新しくするのは nixpkgs（`nixpkgs-unstable` を追う input）だけ。ほかの github input は猶予のまま
-- `date` は修正の入った公開の日（Asia/Tokyo）。その日の終わりまでの公開から選ぶので、前の日だと修正の前の版になる。
-  `resolve`・`update` の `公開 YYYY-MM-DD` は UTC の日付で、UTC の 15 時以降の公開は Asia/Tokyo では翌日になる。
-  `check` は、その日の終わりまでの pin を `OK (例外 (全体) <date>)` で通す
+- `date` の書き方は 2 つ: `"YYYY-MM-DD"`（その日（Asia/Tokyo）の終わりまでの公開）か、時差を書いた RFC 3339 の timestamp
+  （`"2026-10-23T18:20:00+09:00"`・`"2026-10-23T09:20:00Z"`。その時刻までの公開）。時差の無い timestamp は、どちらの時間か
+  決まらないので止まる
+- 写す元は `resolve`・`update` の `公開 2026-10-23 18:20:00 JST (09:20:00 UTC)` の行（UTC の日付が違えば
+  `公開 2026-10-24 02:00:00 JST (2026-10-23 17:00:00 UTC)` のように日付から出る）。JST の日付か、時刻に `+09:00` を付けたものを写す。前の日・前の時刻だと修正の前の版になる。
+  `check` の `commit …` は lock の commit の時刻（公開より前）なので、写す元にしない
+- `check` は、`date` までの pin を `OK (例外 (全体) <date>)` で通す
 - `reason` には、なぜ要るか（CVE・直した版）を書く。これが repo に残る記録になる
 - `fromNixpkgs`・`fromUpstream` は書かない。dotfiles の home の overlay が input `nixpkgs-exceptions` と組んで当てる欄で、
   その input の無い flake の設定に書くと `flake-lock-age` が止める（何もしないため）。一部の package だけを新しくする仕組みは
@@ -151,8 +157,8 @@ CI の `check` が落ちるが、**それは意図どおり**。記録として�
 ### 確かめと消し時
 
 - 書き誤りは、どの flake を選ぶ・確かめるより前に、まとめて出して止まる: 知らない欄・欄の型・無い欄・空の `reason`・
-  YYYY-MM-DD でない `date`・暦に無い `date`・今日（Asia/Tokyo）より先の `date`（先の日付だと、その日まで猶予が外れた
-  まま先端を取り続け、`check` も通ってしまう）
+  2 つの書き方のどちらでもない `date`・時差の無い timestamp・時刻や時差の誤り・暦に無い `date`・今日（Asia/Tokyo）より
+  先の日付と今より先の timestamp（先の値だと、その時まで猶予が外れたまま先端を取り続け、`check` も通ってしまう）
 - 消し時は、おおよそ `date` + 猶予の日数のあと（普段の決まりで選んでも、`date` の公開より新しくなる）。`update`・
   `check` の出力に `例外 (全体) <date>: 何もしない (猶予 N 日の方が新しい。消してよい)` と出たら、PR で項目を消す
   （消し忘れても害は無い）

@@ -324,12 +324,22 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 [`release-age.nix`](./release-age.nix) に足す（[ADR 032](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)・
 [設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く
 （他のリポジトリは、その flake の隣に書く。[後述](#ほかのリポジトリの猶予と例外)）。
-`date` は「この日（Asia/Tokyo）の終わりまでの公開を使う」と読む。
+`date` は「その時までの公開を使う」と読み、2 つの書き方がある
+（[ADR 038](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/038_release_age_timestamp_20261027T084524JST/README.md)）。
+
+| `date` の書き方 | どこまでの公開を使うか |
+| --- | --- |
+| `"2026-10-23"`（`YYYY-MM-DD`） | その日（Asia/Tokyo）の終わり（23:59:59 +09:00）まで |
+| `"2026-10-23T18:20:00+09:00"`・`"2026-10-23T09:20:00Z"`（時差を書いた RFC 3339 の timestamp。時差は `Z`・`+HH:MM`・`-HH:MM`） | その時刻まで。時差の無い timestamp（`"2026-10-23T18:20:00"`）は、どちらの時間か決まらないので止まる |
+
+`flake-lock-age.sh` の `resolve`・`update` は公開の時刻を `公開 2026-10-23 18:20:00 JST (09:20:00 UTC)` の形で出す
+（UTC の日付が違えば `公開 2026-10-24 02:00:00 JST (2026-10-23 17:00:00 UTC)` のように日付から）。JST の日付か、時刻に `+09:00` を付けたものを、そのまま
+`date` に写せる。`check` が出すのは `commit …` の時刻（lock の `lastModified`。公開より前）なので、写す元にしない。
 
 | 例外 | 欄 | 何をするか |
 | --- | --- | --- |
-| 全体 | `exceptions.all`: `date`・`reason` | `flake-lock-age.sh` が `nixpkgs` を `date` の日の終わりまでの公開から選ぶ（猶予より新しいときだけ。`home-manager` などほかの input は猶予のまま）。`check` もその日の終わりまでの pin を通す |
-| 一部 (nixpkgs から) | `exceptions.fromNixpkgs`: `packages`・`date`・`reason` | `packages` だけを input の `nixpkgs-exceptions`（`date` の日の終わりまでの公開）から取る。ほかは普段の pin のまま |
+| 全体 | `exceptions.all`: `date`・`reason` | `flake-lock-age.sh` が `nixpkgs` を `date` までの公開から選ぶ（猶予より新しいときだけ。`home-manager` などほかの input は猶予のまま）。`check` も `date` までの pin を通す |
+| 一部 (nixpkgs から) | `exceptions.fromNixpkgs`: `packages`・`date`・`reason` | `packages` だけを input の `nixpkgs-exceptions`（`date` までの公開）から取る。ほかは普段の pin のまま |
 | 一部 (upstream から) | `exceptions.fromUpstream`: `package`・`version`・`reason` | `package` を upstream の配布物から取る（nixpkgs のどの公開にも修正版がまだ無いとき）。中身は `pkgs/upstream/<package>.nix` |
 
 ```nix
@@ -338,7 +348,7 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
   minimumReleaseAgeDays = 7;
   exceptions = {
     all = [ { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-22 の公開に入った"; } ];
-    fromNixpkgs = [ { packages = [ "foo" ]; date = "2026-10-23"; reason = "CVE-…: foo 1.2.3 の修正"; } ];
+    fromNixpkgs = [ { packages = [ "foo" ]; date = "2026-10-23T18:20:00+09:00"; reason = "CVE-…: foo 1.2.3 の修正"; } ];
     fromUpstream = [ { package = "mise"; version = "2026.10.17"; reason = "CVE-…: nixpkgs#… を待つ間"; } ];
   };
 }
@@ -360,11 +370,12 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
   差し替えた package をほかの package が使っていたら名前を出して落ちる
 - `nixpkgs-exceptions` は、効いている一部 (nixpkgs から) の項目が無いあいだは `nixpkgs` と同じ revision にしておく
   （`flake-lock-age.sh` がそう選ぶ）。評価もそのあいだはこの input を読まないので、普段の道は重くならない
-- 書き誤り（知らない欄・暦に無い日付・空の `reason`・入れ子の名前・pkgs に無い名前・同じ package を 2 回・
-  `pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check` も落ちる）。
-  `flake-lock-age.sh` も、どのリポジトリの設定でも、欄の形（知らない欄・型・無い欄・空の `reason`）と `date`（形・暦・
-  今日（Asia/Tokyo）より先）を確かめ、全部をまとめて出して、どの flake を選ぶ・確かめるより前に止まる（CI の `lock-age` も
-  落ちる）。先の `date` を止めるのは、打ち間違いだと、その日まで猶予が外れたまま先端を取り続け、`check` も通ってしまうため
+- 書き誤り（知らない欄・暦に無い日付・時差の無い timestamp・時刻や時差の誤り・空の `reason`・入れ子の名前・pkgs に無い名前・
+  同じ package を 2 回・`pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check`
+  も落ちる）。`flake-lock-age.sh` も、どのリポジトリの設定でも、欄の形（知らない欄・型・無い欄・空の `reason`）と `date`（形・
+  時差・時刻・暦・今日（Asia/Tokyo）より先の日付・今より先の timestamp）を確かめ、全部をまとめて出して、どの flake を選ぶ・
+  確かめるより前に止まる（CI の `lock-age` も落ちる）。先の `date` を止めるのは、打ち間違いだと、その時まで猶予が外れたまま
+  先端を取り続け、`check` も通ってしまうため
 - `--input <名前>` を付けても、lock に無い github の input（flake.nix に足したばかりのもの）は一緒に選ぶ
   （`nix flake update` は lock に無い input を先端で足すため）
 
@@ -374,7 +385,7 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 
 | 例外 | 何もしなくなる（消し時） |
 | --- | --- |
-| 全体・一部 (nixpkgs から) | 普段の pin（`nixpkgs`）の commit の日時が、`date` の日の終わりを越えた（おおよそ `date` + 猶予の日数のあとの `update` で） |
+| 全体・一部 (nixpkgs から) | 普段の pin（`nixpkgs`）の commit の日時が、`date`（日付ならその日の終わり、timestamp ならその時刻）を越えた（おおよそ `date` + 猶予の日数のあとの `update` で） |
 | 一部 (nixpkgs から) で `nixpkgs-exceptions` がまだ普段の pin より新しくない | 「まだ何もしていない」と出る。`update --input nixpkgs-exceptions` で選び直す |
 | 一部 (upstream から) | 普段の pin の nixpkgs のその package の版が、`version` 以上になった。その system の配布物が無いときも nixpkgs のままで、その旨が出る |
 
@@ -404,9 +415,9 @@ commit の日時は公開の日時より古い側に出るので、公開で選�
 - 書けるのは `minimumReleaseAgeDays` と `exceptions.all`。一部の例外（`fromNixpkgs`・`fromUpstream`）は dotfiles の home の
   overlay が input `nixpkgs-exceptions` と組んで当てる欄なので、その input の無い flake の設定に書くと `flake-lock-age` が
   止める（何もしないのに、効いているつもりの記録が残るため）
-- `date` には、入れたい修正の入った公開の日（Asia/Tokyo）を書く（その日の終わりまでの公開から選ぶ。`resolve`・`update` の
-  `公開 YYYY-MM-DD` は UTC の日付なので、UTC の 15 時以降の公開は Asia/Tokyo では翌日）。足したら `update` で
-  選び直し（ほかの github input は猶予どおりに選び直す）、`flake.lock` と `release-age.nix` を commit する
+- `date` には、入れたい修正の入った公開を、`resolve`・`update` の `公開 … JST (… UTC)` の行から写す。JST の日付
+  （`"2026-10-23"`。その日の終わりまで）か、時刻に時差を付けたもの（`"2026-10-23T18:20:00+09:00"`。その時刻まで）。足したら
+  `update` で選び直し（ほかの github input は猶予どおりに選び直す）、`flake.lock` と `release-age.nix` を commit する
 - 消し時は、おおよそ `date` + 猶予の日数のあと。`update`・`check`（CI の出力）に `例外 (全体) <date>: 何もしない (… 消してよい)`
   と出たら、PR で項目を消す
 - 書き誤りは上と同じく `flake-lock-age` が止める。手順の細部（CI・新しいリポジトリへの入れ方）は `pjp-nix-flake` skill の

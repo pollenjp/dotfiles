@@ -24,6 +24,11 @@
 #   - 全体の例外: date の日 (Asia/Tokyo) の終わりが猶予より新しければ、その日の終わりまでの最新の公開を nixpkgs に選ぶ
 #     (14:59:59 UTC の公開は入り、15:00:00 UTC は入らない)。猶予より古い date は何もしない (その旨の行)。ほかの
 #     github input (home-manager) は猶予のまま
+#   - 時差つきの timestamp の date: その時刻までの最新の公開を選ぶ (+09:00・Z・-05:00 のどれで書いても同じ時刻。
+#     1 秒の境目も)。一部の例外 (nixpkgs-exceptions) も同じ。効いている行に、その時刻を JST と UTC で出す。check は
+#     その時刻までの pin を通し、1 秒でも新しければ NG
+#   - 時刻の出し方: resolve の「公開」と github の input の「commit」、check の「commit」(lock の commit の時刻) に、
+#     「YYYY-MM-DD HH:MM:SS JST (HH:MM:SS UTC)」を出す。UTC の日付が JST と違えば UTC も日付から出す
 #   - nixpkgs-exceptions: 一部の例外が無ければ nixpkgs と同じ rev。date の日の終わりまでの公開が nixpkgs より新しければ
 #     それ、そうでなければ nixpkgs と同じ rev
 #   - --input nixpkgs-exceptions だけなら、nix flake update に渡す名前と override はそれだけ。比べる相手は lock の
@@ -33,8 +38,9 @@
 #   - check: 猶予を満たさない nixpkgs は NG (終了コード 1)。全体の例外の date の日の終わりまでの nixpkgs は OK とわけを
 #     出す。nixpkgs-exceptions は nixpkgs と同じ rev なら OK、一部の例外の date の日の終わりまでなら OK、どちらでもなく
 #     新しければ NG。何もしなくなった全体の例外には「何もしない (… 消してよい)」の行を出す
-#   - 設定の date が YYYY-MM-DD でなければ止まる。今日 (Asia/Tokyo) より先の date も止まる (打ち間違いで猶予が
-#     外れたままになるため。check も update も)。暦に無い date も止まる
+#   - 設定の date が YYYY-MM-DD でも時差つきの timestamp でもなければ止まる。今日 (Asia/Tokyo) より先の date も止まる
+#     (打ち間違いで猶予が外れたままになるため。check も update も)。暦に無い date も止まる。時差の無い timestamp・
+#     時刻や時差の誤り・今より先の timestamp も止まる (今ちょうどは通る)
 #   - 設定の書き誤り: 知らない欄 (どの深さでも)・欄の型 (日数が整数でない・list でない・項目が attrset でない)・無い欄・
 #     空の reason を、まとめて出して止まる。後ろの flake の設定に誤りがあれば、前の flake も更新しない
 #
@@ -552,6 +558,85 @@ else
   ng "何もしなくなった全体の例外に、check も「何もしない (… 消してよい)」の行を出す" "$(detail "${r}")"
 fi
 
+echo "== 時差つきの timestamp"
+
+# 公開 6 は 2026-10-21T14:59:59Z、公開 7 は 2026-10-21T15:00:00Z (= 2026-10-22T00:00:00+09:00)
+for c in '2026-10-21T23:59:59+09:00 6' '2026-10-21T14:59:59Z 6' '2026-10-21T09:59:59-05:00 6' '2026-10-22T00:00:00+09:00 7'; do
+  ts=${c% *}
+  k=${c##* }
+  settings "${cfg}" "{ exceptions.all = [ { date = \"${ts}\"; reason = \"時刻の理由\"; } ]; }"
+  r="${work}/r-ts-${ts//[:+]/_}"
+  run_in "${r}" --config "${cfg}" --no-scan update "${d}"
+  if [[ $(cat "${r}/rc") == 0 ]] && picked "${r}" nixpkgs "${k}"; then
+    ok "全体の例外の date ${ts} は、その時刻までの最新の公開 (${k}) を選ぶ"
+  else
+    ng "全体の例外の date ${ts} は、その時刻までの最新の公開 (${k}) を選ぶ" "$(detail "${r}")"
+  fi
+done
+if seen '例外 (全体) 2026-10-22T00:00:00+09:00: 効いている。nixpkgs を 2026-10-22 00:00:00 JST (2026-10-21 15:00:00 UTC) まで' "${r}/stdout"; then
+  ok "効いている timestamp の例外の行に、その時刻を JST と UTC で出す"
+else
+  ng "効いている timestamp の例外の行に、その時刻を JST と UTC で出す" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.fromNixpkgs = [ { packages = [ "hello" ]; date = "2026-10-22T00:00:00+09:00"; reason = "一部の理由"; } ]; }'
+r="${work}/r-ts-part"
+run_in "${r}" --config "${cfg}" --no-scan update "${d}"
+if [[ $(cat "${r}/rc") == 0 ]] && picked "${r}" nixpkgs 3 && picked "${r}" nixpkgs-exceptions 7; then
+  ok "一部の例外の timestamp も、その時刻までの公開を nixpkgs-exceptions に選ぶ"
+else
+  ng "一部の例外の timestamp も、その時刻までの公開を nixpkgs-exceptions に選ぶ" "$(detail "${r}")"
+fi
+
+# d_young の nixpkgs の lastModified は 2026-10-22T03:00:00Z (= 12:00:00+09:00)
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-22T12:00:00+09:00"; reason = "時刻の理由"; } ]; }'
+r="${work}/r-ts-check"
+run_in "${r}" --config "${cfg}" check "${d_young}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen 'OK (例外 (全体) 2026-10-22T12:00:00+09:00)' "${r}/stdout"; then
+  ok "check は、timestamp の例外の時刻までの pin を通す"
+else
+  ng "check は、timestamp の例外の時刻までの pin を通す" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-22T11:59:59+09:00"; reason = "時刻の理由"; } ]; }'
+r="${work}/r-ts-check-ng"
+run_in "${r}" --config "${cfg}" check "${d_young}"
+if [[ $(cat "${r}/rc") == 1 ]] && seen 'NG' "${r}/stdout"; then
+  ok "check は、timestamp の例外の時刻より 1 秒でも新しい pin を NG にする"
+else
+  ng "check は、timestamp の例外の時刻より 1 秒でも新しい pin を NG にする" "$(detail "${r}")"
+fi
+
+echo "== 時刻の出し方"
+
+settings "${cfg}" '{ }'
+r="${work}/r-label"
+run_in "${r}" --config "${cfg}" resolve "${d}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen '公開 2026-10-16 21:00:00 JST (12:00:00 UTC)' "${r}/stdout" \
+  && seen 'commit 2026-10-16 09:00:00 JST (00:00:00 UTC)' "${r}/stdout"; then
+  ok "resolve の nixpkgs の「公開」と github の input の「commit」に、時刻を JST と UTC で出す"
+else
+  ng "resolve の nixpkgs の「公開」と github の input の「commit」に、時刻を JST と UTC で出す" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-22"; reason = "日またぎ"; } ]; }'
+r="${work}/r-label-cross"
+run_in "${r}" --config "${cfg}" resolve "${d}"
+if seen '公開 2026-10-22 00:00:00 JST (2026-10-21 15:00:00 UTC)' "${r}/stdout"; then
+  ok "UTC の日付が JST と違えば、UTC も日付から出す"
+else
+  ng "UTC の日付が JST と違えば、UTC も日付から出す" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ }'
+r="${work}/r-label-check"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen 'commit 2026-10-17 09:00:00 JST (00:00:00 UTC)' "${r}/stdout"; then
+  ok "check の時刻は lock の commit の時刻と分かる形 (commit) で、JST と UTC で出す"
+else
+  ng "check の時刻は lock の commit の時刻と分かる形 (commit) で、JST と UTC で出す" "$(detail "${r}")"
+fi
+
 echo "== ほかの repo (script の隣に設定が無い)"
 
 d_other=$(new_plain_flake other "$(lock "$(nixpkgs_node 7 "${young}")")")
@@ -648,6 +733,45 @@ if [[ $(cat "${r}/rc") == 0 ]]; then
   ok "今日 (Asia/Tokyo) の date は通る"
 else
   ng "今日 (Asia/Tokyo) の date は通る" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-21T12:00:00"; reason = "時差が無い"; } ]; }'
+r="${work}/r-ts-nozone"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'exceptions.all の 1 件目の date 2026-10-21T12:00:00 に時差が無い' "${r}/stderr"; then
+  ok "時差の無い timestamp は止まる"
+else
+  ng "時差の無い timestamp は止まる" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-21T24:00:00+09:00"; reason = "時刻の誤り"; } { date = "2026-10-21T12:00:00+09:60"; reason = "時差の誤り"; } { date = "2026-02-30T12:00:00Z"; reason = "暦に無い"; } ]; }'
+r="${work}/r-ts-range"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen '1 件目の date 2026-10-21T24:00:00+09:00 は時刻か時差が正しくない' "${r}/stderr" \
+  && seen '2 件目の date 2026-10-21T12:00:00+09:60 は時刻か時差が正しくない' "${r}/stderr" \
+  && seen '3 件目の date 2026-02-30T12:00:00Z は暦に無い日付' "${r}/stderr"; then
+  ok "timestamp の時刻・時差の誤りと、暦に無い日付は止まる"
+else
+  ng "timestamp の時刻・時差の誤りと、暦に無い日付は止まる" "$(detail "${r}")"
+fi
+
+# 今は 2026-10-24T03:00:00Z (= 12:00:00+09:00)
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-24T12:00:01+09:00"; reason = "先の時刻"; } ]; }'
+r="${work}/r-ts-future"
+run_in "${r}" --config "${cfg}" --no-scan update "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'date 2026-10-24T12:00:01+09:00 は今' "${r}/stderr" && [[ ! -s ${r}/nix.log ]]; then
+  ok "今より先の timestamp は止まる (nix flake update を打たない)"
+else
+  ng "今より先の timestamp は止まる (nix flake update を打たない)" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-24T03:00:00Z"; reason = "今"; } ]; }'
+r="${work}/r-ts-now"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") == 0 ]]; then
+  ok "今ちょうどの timestamp は通る"
+else
+  ng "今ちょうどの timestamp は通る" "$(detail "${r}")"
 fi
 
 settings "${cfg}" '{ exceptions.all = [ { date = "2026-02-30"; reason = "暦に無い"; } ]; }'
