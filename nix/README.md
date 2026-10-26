@@ -2510,6 +2510,10 @@ herdr の中の agent は手元の PC から転送された接続のもので（
 - 断りの文言は、行の終わりが文言のときだけ当てる（OpenSSH の行の終わりの `\r` は外して見る）。成功した Bash
   （`2>&1 | tail` で終了コードが隠れたもの）では、行の頭も ssh・git が出す形に固定する。grep・cat・diff の結果に出た
   文言では当てない
+- herdr の指揮役の子かどうかは、pane の workspace の印で見る（`herdr workspace get`）。claude-skills の
+  pjp-herdr-other-repo の `ws-mark.sh` が付ける印のどれか（親を示す token `parent`・親子の印の token `kin` の 🌱・
+  前の形の名前の先頭の 🌱）があれば子だと言い切り、無ければ条件つきで書く（経緯は
+  [ADR 036](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/036_ssh_agent_notice_child_tokens_20261026T184721JST/README.md)）
 - 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
   しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`
