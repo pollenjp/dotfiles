@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Claude Code のセッションにだけ渡す env (git の設定と、Bash tool の shell) を ~/.claude/settings.json へ登録する。
-# 冪等。`setup.sh --update` でも毎回走る。
+# Claude Code のセッションにだけ渡す env (git の設定と、Bash tool の shell と、plugin を https で取る印) を
+# ~/.claude/settings.json へ登録する。冪等。`setup.sh --update` でも毎回走る。
 #
 # ## 何のために
 #
@@ -15,6 +15,10 @@
 #    ssh は WSL の ssh.exe (1Password の agent) を通るので、interop が外れると
 #    Exec format error で落ち、通っても承認ダイアログで止まる。gh は HTTPS の API なので
 #    どちらにも依らない。false のマシンは今までどおり ssh を通る。
+#    plugin の marketplace と plugin も https で取らせる (CLAUDE_CODE_PLUGIN_PREFER_HTTPS。同じ option)。
+#    Claude Code はそれらを GitHub から git で取る前に ssh -T git@github.com で鍵が通るかを確かめ、
+#    その ssh が ssh.exe を通って承認ダイアログを出す (plugin の自動更新で会話ごとに 1 回)。clone と fetch は
+#    上の git の設定で https と gh の token を通るので、確認だけを飛ばす。取れる repo (private も) は変わらない。
 # 3. Bash tool を bash で動かす (CLAUDE_CODE_SHELL。いつも。TKT-192)。
 #    指定が無いと Claude Code は、$SHELL が bash / zsh でなければ (ログインシェルの fish)
 #    zsh を先に探して使う。Claude が書く script やテストは bash なので、Bash tool もそろえる。
@@ -79,7 +83,8 @@
 #     したとき HTTPS の組が消えるのはこのため
 #   - それ以外の組は順序を保って残し、その後ろに gitConfig を足す
 #   - 番号は 0 から振り直す (番号に穴があると git はその手前までしか読まない)
-#   - managedVars (と vars) の名前はいったん外し、vars を足す。vars から外した名前は消える
+#   - managedVars (と vars) の名前はいったん外し、vars を足す。vars から外した名前は消える。
+#     gitViaGh.enable を false にしたとき CLAUDE_CODE_PLUGIN_PREFER_HTTPS が消えるのはこのため
 #
 # 冪等 (既に同じなら何もしない)。gitConfig が gh を credential helper に使うなら、
 # 次のときに警告する。env は書く (option が正で、止めると setup の残りが走らないため)。
@@ -262,6 +267,9 @@ else
 fi
 if [[ -n ${shell} ]]; then
   echo "              Bash tool の shell を ${shell} にする env (CLAUDE_CODE_SHELL)"
+fi
+if [[ -n $(jq -r '.vars.CLAUDE_CODE_PLUGIN_PREFER_HTTPS // empty' "${generated}") ]]; then
+  echo "              plugin の marketplace と plugin を https で取る env (CLAUDE_CODE_PLUGIN_PREFER_HTTPS)"
 fi
 echo
 echo "--- ${settings} の env ---"

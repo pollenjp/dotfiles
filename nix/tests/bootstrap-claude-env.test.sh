@@ -12,8 +12,9 @@
 #
 #   - option の true / false どおりに env の GIT_CONFIG_* を書き直す。true → false で
 #     HTTPS の組が消え、管理しない組は順序ごと残り、再実行では変わらない
-#   - 状態ファイルの vars (Bash tool の shell の CLAUDE_CODE_SHELL) を env に書き、古い値は
-#     置き換える。managedVars にあって vars に無い名前は env から消す
+#   - 状態ファイルの vars (Bash tool の shell の CLAUDE_CODE_SHELL と、true のときの
+#     CLAUDE_CODE_PLUGIN_PREFER_HTTPS) を env に書き、古い値は置き換える。managedVars にあって
+#     vars に無い名前は env から消す (true → false で CLAUDE_CODE_PLUGIN_PREFER_HTTPS が消える)
 #   - vars を持たない古い状態ファイル (switch 前) では、GIT_CONFIG_* だけ書き、env の
 #     CLAUDE_CODE_SHELL には触れずに switch を促す
 #   - CLAUDE_CODE_SHELL のパスが実行できなければ警告する (書くのは止めない)
@@ -58,15 +59,17 @@ managed='["commit.gpgsign","tag.gpgsign","url.https://github.com/.insteadOf","cr
 base_pairs='[{"k":"commit.gpgsign","v":"false"},{"k":"tag.gpgsign","v":"false"}]'
 gh_pairs='[{"k":"url.https://github.com/.insteadOf","v":"git@github.com:"},{"k":"url.https://github.com/.insteadOf","v":"ssh://git@github.com/"},{"k":"credential.https://github.com.helper","v":"!gh auth git-credential"}]'
 all_pairs=$(jq -cn --argjson b "${base_pairs}" --argjson g "${gh_pairs}" '$b + $g')
-managed_vars='["CLAUDE_CODE_SHELL"]'
+managed_vars='["CLAUDE_CODE_SHELL","CLAUDE_CODE_PLUGIN_PREFER_HTTPS"]'
 # Bash tool の shell。実行できる bash なら何でもよいので、このテストを流している bash を指す
 shell_vars=$(jq -cn --arg s "${BASH}" '{CLAUDE_CODE_SHELL: $s}')
+# true のときの vars (plugin の marketplace と plugin を https で取る印を足す)
+gh_vars=$(jq -cn --argjson v "${shell_vars}" '$v + {CLAUDE_CODE_PLUGIN_PREFER_HTTPS: "1"}')
 # $1: gitConfig の組、$2: vars → 状態ファイル
 state_of() {
   jq -cn --argjson m "${managed}" --argjson p "$1" --argjson mv "${managed_vars}" --argjson v "$2" \
     '{managed: $m, gitConfig: $p, managedVars: $mv, vars: $v}'
 }
-state_true=$(state_of "${all_pairs}" "${shell_vars}")
+state_true=$(state_of "${all_pairs}" "${gh_vars}")
 state_false=$(state_of "${base_pairs}" "${shell_vars}")
 # vars を持たない古い形 (CLAUDE_CODE_SHELL を足す前の世代が置いたもの)
 state_old=$(jq -cn --argjson m "${managed}" --argjson p "${all_pairs}" '{managed: $m, gitConfig: $p}')
@@ -416,6 +419,31 @@ if [[ $(rc "${h}") == 1 && $(jq -cS . "${h}/.claude/settings.json") == "${before
   ok "managedVars が名前の配列でなければ exit 1 で止まり、変更しない"
 else
   ng "managedVars が名前の配列でなければ exit 1" "rc=$(rc "${h}") err=$(cat "${h}/err")"
+fi
+
+# 29. true: vars の CLAUDE_CODE_PLUGIN_PREFER_HTTPS を env に "1" で書き、その env を登録したと出す
+h=$(new_home t29 "{\"env\":${env_current}}" "${state_true}")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(env_value "${h}" CLAUDE_CODE_PLUGIN_PREFER_HTTPS) == 1 ]] \
+  && grep -q 'https で取る env (CLAUDE_CODE_PLUGIN_PREFER_HTTPS)' "${h}/out"; then
+  ok "true なら CLAUDE_CODE_PLUGIN_PREFER_HTTPS を env に 1 で書き、登録したと出す"
+else
+  ng "true なら CLAUDE_CODE_PLUGIN_PREFER_HTTPS を env に書く" "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json") out=$(cat "${h}/out")"
+fi
+
+# 30. true → false: CLAUDE_CODE_PLUGIN_PREFER_HTTPS は env から消え、CLAUDE_CODE_SHELL と管理しないキー (FOO) は残る。
+#     false では登録したとも出さない
+init=$(jq -cn --argjson e "${env_current}" '{env: ($e + {FOO: "bar"})}')
+h=$(new_home t30 "${init}" "${state_true}")
+run "${h}"
+printf '%s\n' "${state_false}" >"${h}/.local/state/dotfiles/claude-env.json"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(jq -r '.env | has("CLAUDE_CODE_PLUGIN_PREFER_HTTPS")' "${h}/.claude/settings.json") == false ]] \
+  && [[ $(env_value "${h}" CLAUDE_CODE_SHELL) == "${BASH}" && $(env_value "${h}" FOO) == bar ]] \
+  && ! grep -q 'CLAUDE_CODE_PLUGIN_PREFER_HTTPS' "${h}/out"; then
+  ok "true → false で CLAUDE_CODE_PLUGIN_PREFER_HTTPS が env から消え、CLAUDE_CODE_SHELL と FOO は残る"
+else
+  ng "true → false で CLAUDE_CODE_PLUGIN_PREFER_HTTPS が消える" "rc=$(rc "${h}") env=$(jq -c '.env' "${h}/.claude/settings.json") out=$(cat "${h}/out")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

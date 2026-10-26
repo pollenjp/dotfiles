@@ -35,7 +35,7 @@
   #
   #   claude.devTracker.enable = true;    # Notion Dev Tracker を使うマシン (既定は使わない。ADR 027)
   #   claude.devTracker.inbox.enable = true;  # チケットのコメントをハブの会話へ届ける見回り役を常駐させるマシン (Linux。既定は置かない)
-  #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git・fetch 系の abbr / alias・setup の取得を ssh で通す)
+  #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git と plugin の取得・fetch 系の abbr / alias・setup の取得を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
   #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
   #   claude.videoOffer.autoStart.enable = true;  # 設計・PR のときに解説動画の短尺を答えを待たずに作り始めるマシン (既定は先に聞く)

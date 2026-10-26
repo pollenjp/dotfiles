@@ -10,7 +10,9 @@
 #   - 既定は true
 #   - ~/.local/state/dotfiles/claude-env.json の中身 (true / false それぞれ)。
 #     nix/scripts/bootstrap-claude-env.sh がこれを ~/.claude/settings.json の env へ写す。
-#     CLAUDE_CODE_SHELL は option によらず profile の bash (<home>/.nix-profile/bin/bash)
+#     CLAUDE_CODE_SHELL は option によらず profile の bash (<home>/.nix-profile/bin/bash)。
+#     CLAUDE_CODE_PLUGIN_PREFER_HTTPS は true のときだけ vars に "1" で入り、managedVars には
+#     どちらでも載る (false にしたとき bootstrap が env から消す)
 #   - ~/.local/state/dotfiles/git-via-gh.json の中身 (true / false それぞれ)。setup の取得の git_github
 #     (nix/scripts/) が jq を使わずに読むので、空白の無い {"enable":true} / {"enable":false} で、改行で終わる
 #   - home.packages に gh が入る (true の前提)
@@ -68,13 +70,20 @@ let
   ];
 
   # Bash tool の shell。mkHome の既定の home (/home/<名前>、darwin は /Users/<名前>) の profile の bash
-  managedVars = [ "CLAUDE_CODE_SHELL" ];
+  managedVars = [
+    "CLAUDE_CODE_SHELL"
+    "CLAUDE_CODE_PLUGIN_PREFER_HTTPS"
+  ];
   vars = {
     CLAUDE_CODE_SHELL =
       if lib.hasSuffix "darwin" system then
         "/Users/tester/.nix-profile/bin/bash"
       else
         "/home/tester/.nix-profile/bin/bash";
+  };
+  # true のときだけ足す (plugin の marketplace と plugin を https で取る)
+  varsGh = vars // {
+    CLAUDE_CODE_PLUGIN_PREFER_HTTPS = "1";
   };
 
   byDefault = configWith { };
@@ -96,15 +105,16 @@ let
       ok = byDefault.dotfiles.claude.gitViaGh.enable;
     }
     {
-      name = "既定 (true) の状態ファイルは無署名の 2 組と HTTPS の 3 組で、管理キーは 4 つ。CLAUDE_CODE_SHELL は profile の bash";
+      name = "既定 (true) の状態ファイルは無署名の 2 組と HTTPS の 3 組で、管理キーは 4 つ。CLAUDE_CODE_SHELL は profile の bash、CLAUDE_CODE_PLUGIN_PREFER_HTTPS は 1";
       ok =
         builtins.fromJSON (textOf byDefault) == {
-          inherit managed managedVars vars;
+          inherit managed managedVars;
           gitConfig = base ++ gh;
+          vars = varsGh;
         };
     }
     {
-      name = "false の状態ファイルは無署名の 2 組だけで、管理キーは 4 つのまま。CLAUDE_CODE_SHELL は変わらない";
+      name = "false の状態ファイルは無署名の 2 組だけで、管理キーは 4 つのまま。CLAUDE_CODE_SHELL は変わらず、CLAUDE_CODE_PLUGIN_PREFER_HTTPS は vars に無い (managedVars には残る)";
       ok =
         builtins.fromJSON (textOf disabled) == {
           inherit managed managedVars vars;
