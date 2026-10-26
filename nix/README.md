@@ -805,7 +805,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
-| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS は[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
+| 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS・plugin を https で取るのは[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
@@ -2664,6 +2664,9 @@ Claude のセッション（Bash tool）の git にだけ、次の 2 つを効�
 - **commit を無署名にする**（いつも）
 - **GitHub へは gh の資格情報（HTTPS）で通す**（host option `dotfiles.claude.gitViaGh.enable`、既定 true）
 
+同じ option で、Claude Code が plugin の marketplace と plugin を取る前に打つ ssh の確認（1Password の承認が出る）も
+止める（[plugin の marketplace と plugin も https で取る](#plugin-の-marketplace-と-plugin-も-https-で取る)）。
+
 #### commit を無署名にする
 
 このマシンの git は 1Password の `op-ssh-sign` で署名する（[前述](#git-について)）。
@@ -2715,6 +2718,36 @@ claude.gitViaGh.enable = false;
 > 'workflow' scope`）。`gh auth refresh -h github.com -s workflow` で足す。
 > scope は自動では足さない（token の権限を広げるかは人が決める）。
 
+#### plugin の marketplace と plugin も https で取る
+
+gitViaGh のマシンでは、`settings.json` の `env` に `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` も入れる
+（Claude Code の公式の env。[docs の Environment variables](https://code.claude.com/docs/en/env-vars)）。
+
+Claude Code は、source が GitHub（`owner/repo` の形）の marketplace と plugin を git で取る前に、
+`ssh -T -o BatchMode=yes -o ConnectTimeout=2 -o StrictHostKeyChecking=yes git@github.com` で鍵が通るかを確かめ、
+通れば ssh の URL で、通らなければ https の URL で取る。plugin の自動更新は会話ごとに 1 回、最初の発言から
+最大 10 分のどこかで走り、自動更新が on の GitHub の marketplace を取り直すたびにこの確認を打つ。WSL ではその ssh が
+`~/.local/bin/ssh` から `ssh.exe` を通るので、1Password の承認が出る（確認は 3 秒で打ち切られる）。
+
+clone と fetch そのものは、上の git の設定ですでに https と gh の token を通っている（`settings.json` の `env` は
+Claude Code 自身が打つ git にも届く）。git を通らない確認だけが ssh を直に打つので、`insteadOf` が効かない。
+この env があると確認を飛ばし、最初から https の URL で取る。marketplace の追加・更新と、plugin の install・update の
+どれにも効く。
+
+- 消えるのは確認（と 1Password の承認）だけで、取れる repo は変わらない。private な repo も、gh の credential helper が
+  token を渡すので https で取れる
+- https で取れなくても ssh には切り替えない。前提（gh があり、ログイン済み）は上の git の設定と同じで、欠けていれば
+  bootstrap が警告する
+- helper が gh なのは gitViaGh のマシンだけなので、同じ option に結ぶ。false のマシンでは `env` から消え、
+  今までどおり ssh で確かめ、鍵が通れば ssh で取る
+
+Claude Code 2.1.310 で、偽の ssh と偽の gh を PATH の先頭に置き、一時の `CLAUDE_CONFIG_DIR` で `claude plugin marketplace`
+を流して確かめた。env なしの add と update は確認を 1 回ずつ打ち、この env があると（シェルの env でも `settings.json` の
+`env` でも）1 回も打たなかった。private な repo の add では、`settings.json` の `env` に置いた gh の helper が呼ばれて
+clone まで進み、helper を外すと `fatal: unable to get password from user` で clone できなかった（どちらも ssh は呼ばれない）。
+
+起動し直した Claude Code から効く（実行中の会話は、自動更新がまだなら 1 回出ることがある）。
+
 #### 登録（冪等。更新時も毎回走る）
 
 ```sh
@@ -2742,13 +2775,16 @@ Nix では置けない（[skill の host option](#claude-code-の-skill-を-host
     { "k": "url.https://github.com/.insteadOf", "v": "ssh://git@github.com/" },
     { "k": "credential.https://github.com.helper", "v": "!gh auth git-credential" }
   ],
-  "managedVars": ["CLAUDE_CODE_SHELL"],
-  "vars": { "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash" }
+  "managedVars": ["CLAUDE_CODE_SHELL", "CLAUDE_CODE_PLUGIN_PREFER_HTTPS"],
+  "vars": {
+    "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash",
+    "CLAUDE_CODE_PLUGIN_PREFER_HTTPS": "1"
+  }
 }
 ```
 
-gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`managed` は option の値に
-よらず 4 つのまま。`managedVars` と `vars` は [Bash tool の shell](#claude-code-の-bash-tool-を-bash-で動かす)
+gitViaGh が false なら `gitConfig` は無署名の 2 組だけになり、`vars` から `CLAUDE_CODE_PLUGIN_PREFER_HTTPS` が消える。
+`managed` と `managedVars` は option の値によらず同じ。`CLAUDE_CODE_SHELL` は [Bash tool の shell](#claude-code-の-bash-tool-を-bash-で動かす)
 の分で、option によらない。settings.json にはこう入る（true のとき）。
 
 ```json
@@ -2764,7 +2800,8 @@ gitViaGh が false なら `gitConfig` は無署名の 2 組だけになる。`ma
   "GIT_CONFIG_VALUE_3": "ssh://git@github.com/",
   "GIT_CONFIG_KEY_4": "credential.https://github.com.helper",
   "GIT_CONFIG_VALUE_4": "!gh auth git-credential",
-  "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash"
+  "CLAUDE_CODE_SHELL": "/home/pollenjp/.nix-profile/bin/bash",
+  "CLAUDE_CODE_PLUGIN_PREFER_HTTPS": "1"
 }
 ```
 
@@ -2784,7 +2821,8 @@ Claude Code 自身も条件によって同じ仕組みで `credential.interactiv
 いったん全部外してから `gitConfig` を足し直すので、option を false にすると HTTPS の
 3 組が消える。無関係な `GIT_CONFIG_*` の組は順序を保って残し、番号だけ 0 から振り直す
 （番号に穴があると git はその手前までしか読まない）。`managedVars`（と `vars`）の名前も
-いったん外してから `vars` を足すので、`vars` から外した名前は消える。生成ファイルが無ければ
+いったん外してから `vars` を足すので、`vars` から外した名前は消える（option を false にすると
+`CLAUDE_CODE_PLUGIN_PREFER_HTTPS` が消える）。生成ファイルが無ければ
 （この形を置く世代へまだ switch していなければ）警告して飛ばす。`managedVars` と `vars` が
 無ければ（`CLAUDE_CODE_SHELL` を足す前の世代）、`GIT_CONFIG_*` だけを書き、switch を促す警告を出す。
 
@@ -3483,7 +3521,7 @@ nix develop ./nix --no-write-lock-file --override-input home-manager \
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL`・`CLAUDE_CODE_PLUGIN_PREFER_HTTPS` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 
 ## mise との役割分担
 

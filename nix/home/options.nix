@@ -10,7 +10,7 @@
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.devTracker.inbox.enable      チケットのコメントをハブ (~/h) の会話へ届ける見回り役を常駐させるか
-#   dotfiles.claude.gitViaGh.enable              Claude の git・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
+#   dotfiles.claude.gitViaGh.enable              Claude の git と plugin の取得・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
@@ -155,6 +155,14 @@ in
           fetch と push の両方で、GitHub の ssh の URL を https に読み替える
         - `credential.https://github.com.helper = !gh auth git-credential`。
           資格情報は gh の token から取る
+
+        この env は Claude Code 自身が打つ git (plugin の marketplace と plugin の clone・fetch) にも届くので、
+        そちらも https と gh の token で取る。加えて env に `CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1` を入れる。
+        Claude Code は source が GitHub の marketplace と plugin を取る前に `ssh -T git@github.com` で鍵が
+        通るかを確かめ (plugin の自動更新では会話ごとに 1 回、最初の発言から最大 10 分のどこか)、WSL では
+        その ssh が 1Password の承認を出す。この env があると確認を飛ばして最初から https の URL で取るので、
+        承認が出なくなる。取れる repo (private も) は変わらない (https で取れなくても ssh には切り替えない)。
+        false なら env から消え、今までどおり ssh で確かめ、鍵が通れば ssh で取る。
 
         自分のターミナルでは、素の git は変わらない。変わるのは fish の abbr と bash の alias の
         fetch 系 (gf・gfp・gpul・gpull・gcl と、gpr などの git_* の関数) で、同じ組を -c で付ける

@@ -22,8 +22,10 @@
 #   3. ~/.local/state/dotfiles/claude-notion.json を書く (Notion の宛先の resolver が読む。profile は --notion-profile)
 #   4. cloud で意味のある hook を ~/.claude/hooks/ へ張り、~/.claude/settings.json に登録する (下の「hook」)
 #
-# git の設定と settings.json の env (GIT_CONFIG_*・CLAUDE_CODE_SHELL) には触らない。cloud の git は GitHub proxy への
-# 書き換えと commit の署名を GIT_CONFIG_* と ~/.gitconfig で設定していて、上書きすると壊れる。
+# git の設定と settings.json の env (GIT_CONFIG_*・CLAUDE_CODE_SHELL・CLAUDE_CODE_PLUGIN_PREFER_HTTPS) には触らない。
+# cloud の git は GitHub proxy への書き換えと commit の署名を GIT_CONFIG_* と ~/.gitconfig で設定していて、上書きすると
+# 壊れる。CLAUDE_CODE_PLUGIN_PREFER_HTTPS は要らない (cloud の session には CLAUDE_CODE_REMOTE があり、Claude Code は
+# それでも plugin を取る前の ssh の確認を飛ばして https で取る)。
 #
 # ## 張らない skill
 #
