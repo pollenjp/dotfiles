@@ -69,8 +69,8 @@
 # ① 直し方 (推奨) ② 飛ばして進める ③ 止める の問いを出す」。① は、断られたら「1Password を開いて承認する」、通信が
 # 切れた・届かないなら agent の口の種類ごと (転送された接続なら「このマシンへ接続し直す」、手元の口なら「1Password を
 # 起動してロックを解除する」、WSL で空なら Windows の 1Password、空なら SSH_AUTH_SOCK を設定する)。herdr の指揮役の
-# 子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace の名前が 🌱 で始まれば言い切る)。subagent の
-# 中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
+# 子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace に子の印があれば言い切る。印は child_mark)。
+# subagent の中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
 #
 # ## 黙る場面
 #
@@ -1031,17 +1031,33 @@ herdr_notify() {
   return 1
 }
 
+# child_mark <workspace get の JSON>: workspace に herdr の指揮役の子の印があれば 0 (ADR 036)。印は claude-skills の
+# pjp-herdr-other-repo の ws-mark.sh が付けるもので、どれか 1 つで子とみる:
+#   token parent  子に置く親 (↑ TKT-n)。名前に印を付けていたころの ws-mark.sh も置く
+#   token kin     親子の印。子は 🌱、子かつ親は 🌱🌳 (親だけの 🌳 は子でない)
+#   名前の先頭の 🌱  ws-mark.sh が名前に印を付けていたころの形 (token は herdr の server を立て直すと消え、名前は残る)
+child_mark() {
+  jq -e '.result.workspace
+    | ((.tokens.parent // "") != "")
+      or ((.tokens.kin // "") | startswith("🌱"))
+      or ((.label // "") | startswith("🌱"))' <<<"$1" &>/dev/null
+}
+
 # where_desc: 「どこから」(workspace の名前・pane の ID・agent の名前・subagent) を where に、workspace の名前を
-# ws_label に入れる (呼び出し元で使うので $( ) で呼ばない)
+# ws_label に、子の印 (child_mark) があれば ws_child に 1 を入れる (呼び出し元で使うので $( ) で呼ばない)
 where_desc() {
   local agent_name="" agent_type part got
   local -a parts=()
   where=""
   ws_label=""
+  ws_child=0
   if [[ ${HERDR_ENV:-} == 1 ]]; then
     if [[ -n ${HERDR_WORKSPACE_ID:-} ]] && herdr_ready; then
       if got=$(herdr_call workspace get "${HERDR_WORKSPACE_ID}"); then
         ws_label=$(jq -r '.result.workspace.label // empty' <<<"${got}" 2>/dev/null)
+        if child_mark "${got}"; then
+          ws_child=1
+        fi
       else
         herdr_down
       fi
@@ -1231,8 +1247,8 @@ after() {
     ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、失敗したこと (何を: ${head} の接続先や署名する対象。"
     ctx+="どこから: ${where}。${conn}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"
   else
-    if [[ ${ws_label} == 🌱* ]]; then
-      rule='この pane は herdr の指揮役の子 (workspace の名前が 🌱 で始まる) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+    if ((ws_child)); then
+      rule='この pane は herdr の指揮役の子 (workspace に子の印 🌱 か、親を示す ↑ がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
     else
       rule='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
     fi

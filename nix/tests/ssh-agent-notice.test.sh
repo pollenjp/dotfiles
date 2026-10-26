@@ -41,7 +41,8 @@
 #     (理由ごとの title。間引かない) も出す。hookEventName は入力の event に合わせる
 #   - 1 つ目の選択肢は、断られたら承認、通信が切れた・届かないなら agent の口の種類 (転送された接続・手元の agent・
 #     WSL の Windows の 1Password・空) ごとの直し方
-#   - 🌱 の workspace では子の決まりを言い切り、subagent の中では問いを出させず報告に書かせる
+#   - 子の印 (token parent・token kin の 🌱・名前の先頭の 🌱) のある workspace では子の決まりを言い切り、親だけの印
+#     (kin の 🌳) や印の無い workspace では条件つきで書く。subagent の中では問いを出させず報告に書かせる
 #   - 失敗した Bash は行の終わりが文言のとき、成功した Bash はさらに ssh・git の出す行の頭のときだけ当て、diff・cat・
 #     grep の結果や行の途中の文言、行をまたいだ Permission denied と publickey では黙る。口が生きている・空のときの
 #     鍵の認証の失敗・断りの無い失敗・Bash 以外でも黙る
@@ -311,8 +312,8 @@ expect_notice "コマンドの頭の SSH_AUTH_SOCK= の \$HOME を置き換え�
 
 # --- herdr の通知
 # 偽の herdr: 呼ばれた引数を JSON の配列で log に足し、workspace get・agent get には決まった値を返す。
-# FAKE_HERDR_RC で終了コード、FAKE_LABEL で workspace の名前、FAKE_AGENT で agent の名前 (null なら名前なし)、
-# FAKE_HERDR_SLEEP で返事をするまでの秒を変える
+# FAKE_HERDR_RC で終了コード、FAKE_LABEL で workspace の名前、FAKE_PARENT・FAKE_KIN で workspace の token parent・kin
+# (空なら置かない)、FAKE_AGENT で agent の名前 (null なら名前なし)、FAKE_HERDR_SLEEP で返事をするまでの秒を変える
 fakebin="${work}/bin"
 hlog="${work}/herdr.log"
 mkdir -p "${fakebin}"
@@ -321,7 +322,10 @@ cat >"${fakebin}/herdr" <<EOF
 jq -cn '\$ARGS.positional' --args -- "\$@" >>"${hlog}"
 [[ -z \${FAKE_HERDR_SLEEP:-} ]] || sleep "\${FAKE_HERDR_SLEEP}"
 case "\$1 \$2" in
-  "workspace get") jq -cn --arg l "\${FAKE_LABEL:-🌱 dotfiles: x}" '{result: {workspace: {label: \$l}}}' ;;
+  "workspace get")
+    jq -cn --arg l "\${FAKE_LABEL:-🌱 dotfiles: x}" --arg p "\${FAKE_PARENT:-}" --arg k "\${FAKE_KIN:-}" \
+      '{result: {workspace: {label: \$l, tokens: ({parent: \$p, kin: \$k} | with_entries(select(.value != "")))}}}'
+    ;;
   "agent get") jq -cn --arg n "\${FAKE_AGENT:-dot-x}" '{result: {agent: {name: (if \$n == "null" then null else \$n end)}}}' ;;
   *) echo '{"result":{"shown":true}}' ;;
 esac
@@ -490,7 +494,7 @@ first_local='1Password を起動してロックを解除するので、打ち直
 first_windows='Windows の 1Password を起動してロックを解除するので、打ち直す'
 first_none='agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す'
 child_default='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
-child_sprout='この pane は herdr の指揮役の子 (workspace の名前が 🌱 で始まる) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+child_sprout='この pane は herdr の指揮役の子 (workspace に子の印 🌱 か、親を示す ↑ がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
 outside='herdr の外の会話'
 # 接続の文 (fwd_sock は「承認の画面の接続」の節で作った、記録のある転送された agent と、より新しい接続のある口)
 fwd_sock="${HOME}/.ssh/agent.a.sock"
@@ -643,6 +647,24 @@ expect_told "🌱 でない workspace では、子の決まりを条件つきで
   "🔑 1Password に断られた: ssh h true — ${none_conn}" \
   "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「dotfiles: x」・pane w9:p6・agent dot-x' "${none_conn}" "${child_default}")" \
   'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp6[@]}"
+# 子の印は token でも見る (ws-mark.sh が名前に印を付けなくなった後の形)。親だけの印 (kin の 🌳) は子でない
+mapfile -t hp7 < <(in_herdr w9:p7 FAKE_LABEL="dotfiles: x" FAKE_PARENT="↑ TKT-n")
+expect_told "名前に 🌱 が無くても、token parent のある workspace の子には言い切る" PostToolUseFailure \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「dotfiles: x」・pane w9:p7・agent dot-x' "${none_conn}" "${child_sprout}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp7[@]}"
+for kin in 🌱 🌱🌳; do
+  mapfile -t hp8 < <(in_herdr w9:p8 FAKE_LABEL="dotfiles: x" FAKE_KIN="${kin}")
+  expect_told "名前に 🌱 が無くても、token kin が ${kin} の workspace の子には言い切る" PostToolUseFailure \
+    "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+    "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「dotfiles: x」・pane w9:p8・agent dot-x' "${none_conn}" "${child_sprout}")" \
+    'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp8[@]}"
+done
+mapfile -t hp9 < <(in_herdr w9:p9 FAKE_LABEL="TKT-n 親の会話" FAKE_KIN="🌳")
+expect_told "token kin が 🌳 だけ (親) で parent の無い workspace では、子の決まりを条件つきで書く" PostToolUseFailure \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「TKT-n 親の会話」・pane w9:p9・agent dot-x' "${none_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp9[@]}"
 
 extra_json='{"agent_id": "agent-1", "agent_type": "general-purpose"}'
 expect_told "subagent の中では問いを出させず、報告に書いて終えさせる" PostToolUseFailure \
