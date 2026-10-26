@@ -50,13 +50,13 @@ sidebar_width = 40
 sidebar_max_width = 80
 
 [ui.sidebar.spaces]
-# 1 行目の名前の前に見張り中の印 ($watch。👀) を、2 行目の先頭に子の workspace の親 ($parent) を
-# 出す。中身は WSL 側と同じ。
+# 1 行目の名前の前に親子の印 ($kin。🌳・🌱・🌱🌳) を、2 行目の先頭に子の数・動いている子・見張り中の
+# 印 ($stat。[2]🔄👀 など) と子の workspace の親 ($parent) を出す。中身は WSL 側と同じ。
 # hr (herdr --remote) で WSL や Linux の herdr に attach したときも、sidebar は Windows の herdr が
 # このファイルで描く (つないだ先の設定は読まない) ので、こちらにも要る。
 rows = [
-  ["state_icon", "$watch", "workspace"],
-  [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
+  ["state_icon", "$kin", "workspace"],
+  ["$stat", { token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
 ]
 
 [ui.toast]

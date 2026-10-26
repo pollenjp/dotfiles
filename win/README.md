@@ -241,8 +241,9 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
   sidebar や toast を描くのは Windows の herdr で、このファイルを読むため (つないだ先の設定は読まない)。
   sidebar の workspace の 2 行目の先頭に、子の workspace の親 (`$parent`。claude-skills の
   `ws-mark.sh` が置く token) を出している ([TKT-305](https://app.notion.com/p/herdr-sidebar-workspace-2-token-parent-nix-files-herdr-config-toml-ui-s-40179149a66f81d6a4f0ce9cd5a296df))。
-  1 行目の名前の前には、見張り中 (claude がターンを終えて裏の shell を待っているだけの間) の印
-  (`$watch`。値は 👀 で、同じ `ws-mark.sh` が置く token) を出している。
+  1 行目の名前の前には親子の印 (`$kin`。🌳・🌱・🌱🌳) を、2 行目の親の前には子の数・動いている子・
+  見張り中 (claude がターンを終えて裏の shell を待っているだけの間) の印 (`$stat`。`[2]🔄👀` など) を
+  出している。どちらも同じ `ws-mark.sh` が置く token。
   sidebar の幅は 40 桁で、右端の縦線をドラッグすると 80 桁まで広げられる。今見ていない tab の agent が
   終わった・入力を待っているときは、herdr の画面の中に toast を出す ([TKT-319](https://app.notion.com/p/herdr-sidebar-sidebar_width-40-sidebar_max_width-80-toast-delivery-herdr-WSL--40179149a66f81efb793f4bb6ad39c73))
 

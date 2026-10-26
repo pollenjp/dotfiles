@@ -195,8 +195,8 @@ new_worktree = ["prefix+shift+g", "prefix+shift+c"]
 
 [ui]
 # sidebar の幅 (桁)。herdr は既定の幅 sidebar_width を sidebar_min_width〜sidebar_max_width に
-# 収めて使う。既定は 26 と 18〜36 で、sidebar_width だけを上げても 36 で止まる。workspace の名前の
-# 印 (🌳[N]TKT-n …) や 2 行目の親 (↑ TKT-n) で既定の幅では切れやすいので、既定を 40、上限を 80 に
+# 収めて使う。既定は 26 と 18〜36 で、sidebar_width だけを上げても 36 で止まる。名前の前の親子の
+# 印 (🌳 · など) や 2 行目の [N]🔄👀・親 (↑ TKT-n) で既定の幅では切れやすいので、既定を 40、上限を 80 に
 # 上げる (下限は既定の 18 のまま)。`herdr --default-config` にある「workspace の名前で自動で広がる」は
 # 0.9.1 には無い。
 #
@@ -214,47 +214,70 @@ sidebar_max_width = 80
 ##############################################################################
 
 [ui.sidebar.spaces]
-# 1 行目の名前の前に見張り中の印を出し ($watch)、2 行目の先頭に子の workspace の親を出す
-# ($parent)。herdr の既定は
+# 1 行目の名前の前に親子の印を出し ($kin)、2 行目の先頭に子の数・動いている子・見張り中の印 ($stat)
+# と、子の workspace の親 ($parent) を出す。herdr の既定は
 #   rows = [["state_icon", "workspace"], ["branch", "git_status"]]
-# で、$watch と $parent を足したほかは既定のまま。
+# で、$kin・$stat・$parent を足したほかは既定のまま。
 #
-# $parent は workspace の metadata の token parent。claude-skills の
-# pjp-herdr-other-repo の ws-mark.sh が、子の workspace に
-#   herdr workspace report-metadata <子> --source pjp.ws-mark --token parent='↑ TKT-n'
-# で置く。値は ↑ と親のチケットの ID (親の名前は 🌳[N]TKT-n … なので、ID で親の行と照らせる)。
-# 名前がチケットの ID で始まらない親なら、ID の代わりに親の名前の土台が入る。
+# 3 つとも workspace の metadata の token で、claude-skills の pjp-herdr-other-repo の ws-mark.sh が
+#   herdr workspace report-metadata <workspace> --source pjp.ws-mark --token kin=🌳
+# のように置き、要らなくなると外す。token の名前は ws-mark.sh との約束。値は次のとおり。
+#   kin     親は 🌳、子は 🌱、子かつ親は 🌱🌳。どれでもなければ置かない
+#   stat    親は [N] (今いる子の数) で、動いている子がいれば 🔄、自分か子が見張り中なら 👀 を空白なしで
+#           続ける ([2]🔄👀 など)。親でない workspace は見張り中なら 👀 だけ。どれも無ければ置かない
+#   parent  子に置く ↑ と親のチケットの ID (↑ TKT-n)。親の名前は TKT-n … なので、ID で親の行と照らせる。
+#           名前がチケットの ID で始まらない親なら、ID の代わりに親の名前が入る
+# 見張り中は、claude がターンを終え (herdr の状態が idle か done)、裏で走らせた shell (Bash の
+# run_in_background・Monitor) が済むのを待っているだけの間。裏の subagent を待つ間は herdr の状態が
+# working のままなので、見張り中に数えない (親の 🔄 に数える)。
 #
-# token の無い workspace (親・ほかの workspace) では $parent が行から落ちる。区切りの
-# " · " は残った token の間にしか入らないので、2 行目は今までどおり branch から始まる。
+# 前は ws-mark.sh が印を workspace の名前に付けていた (親は 🌳[N]🔄TKT-n …、子は 🌱 …) が、名前に触れず、
+# 印の付け外しを token の 1 つの作りに揃えるため、全部 token にしてここで並べる形に替えた。見張り中の
+# 👀 も、前は別の token watch を 1 行目の名前の前に出していた ($watch) が、stat に畳んだ。[N]・🔄・👀 を
+# 別の token にすると、herdr が間に「 · 」を挟んで「[2] · 🔄 · 👀」になるため。
+#
+# 見え方 (herdr 0.9.1・sidebar_width = 40 で写したもの。agent のいない workspace の state_icon は点 (·))。
+#    · h
+#      main
+#      └─ · 🌳 · TKT-n 親の会話
+#           [2]🔄👀
+#    · dotfiles
+#      👀 · main
+#      └─ · 🌱🌳 · dotfiles: 子の作業
+#           [1] · ↑ TKT-n
+#    · claude-skills
+#      main
+#      └─ · 🌱 · claude-skills: 子の作業
+#           👀 · ↑ TKT-n
 #
 # repo の本体の workspace が開いていると、その repo の worktree の workspace は本体の下に
-# 字下げして並び、字下げした行には branch と git_status が出ない。herdr worktree create / open で
-# 作った子は本体の workspace も開くので、ふつうはこの形で、子の 2 行目は親だけになる。
+# 字下げして並び (上の └─)、字下げした行には branch と git_status が出ない。herdr worktree create /
+# open で作った子は本体の workspace も開くので、ふつうはこの形で、子の 2 行目は $stat と親だけになる。
 #
-# 色は catppuccin (herdr の既定のテーマ) の緑で、子の 🌱 に合わせた。fg は #RGB / #RRGGBB
+# token の無い workspace では $kin・$stat・$parent が行から落ちる。区切りの「 · 」は残った値の間に
+# しか入らないので、印の無い workspace は herdr の既定と同じ形 (「● 名前」と、branch から始まる
+# 2 行目) になる。
+#
+# 1 行目の印と名前の間にも「 · 」が入り (「● 🌳 · 名前」)、herdr の設定では消せない (0.9.1 の docs の
+# 「Sidebar row layouts」。区切りを変える設定は tab bar の右端の tab_bar_right_separator だけ)。$kin は
+# state_icon の後ろに置く。前に置くと「🌳 · ● 名前」になり、agent のいない workspace では state_icon も
+# 点 (·) なので「🌳 · · 名前」と点が 2 つ並ぶ。
+#
+# 名前に使える幅は、sidebar_width = 40 なら、印の無い行で 34 桁、字下げした worktree の行で 29 桁
+# (切れた名前の … を含む)。1 行目の印は 🌳・🌱 (2 桁) か 🌱🌳 (4 桁) と「 · 」(3 桁) を使うので、
+# そこから 5 桁か 7 桁減る。[N]・🔄・👀 は 2 行目に出るので、名前の幅を使わない。
+#
+# token は展開した sidebar の Space の行にだけ出る。Agents の段・goto (prefix+g) の一覧・端末の
+# title・畳んだ sidebar には出ないので、そこでは名前に親子の印が付かない。
+#
+# $parent の色は catppuccin (herdr の既定のテーマ) の緑で、子の 🌱 に合わせた。fg は #RGB / #RRGGBB
 # しか書けない (テーマの色の名前は使えない) ので、テーマを変えたらここも見直す。
-#
-# $watch は workspace の metadata の token watch で、値は 👀。$parent と同じ ws-mark.sh が、
-# 見張り中の claude がいる workspace に
-#   herdr workspace report-metadata <workspace> --source pjp.ws-mark --token watch=👀
-# で置き、見張りが終わると外す。子が見張り中なら、その親の workspace にも置く。見張り中は、
-# claude がターンを終え (herdr の状態が idle か done)、裏で走らせた shell (Bash の
-# run_in_background・Monitor) が済むのを待っているだけの間。裏の subagent を待つ間は herdr の
-# 状態が working のままなので、見張り中に数えない。
-#
-# $watch は state_icon の後ろに置く。見張り中は「● 👀 · 名前」になり、token が無ければ今までどおり
-# 「● 名前」で、空きはできない。state_icon の前に置くと「👀 · ● 名前」になり、agent のいない
-# workspace では state_icon も点 (·) なので「👀 · · 名前」と点が 2 つ並ぶ。
-#
-# 👀 (2 桁) と、herdr が値の間に挟む " · " (3 桁) で 5 桁使うので、👀 が出ている間は名前に
-# 使える幅が 5 桁減る (sidebar_width = 40 なら 34 桁 → 29 桁。切れた名前の … を含む)。
 #
 # Windows から herdr --remote (hr) で attach したときは、Windows の herdr が自分の設定
 # (win/herdr/config.toml) で sidebar を描く。同じ rows をそちらにも書いてある。
 rows = [
-  ["state_icon", "$watch", "workspace"],
-  [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
+  ["state_icon", "$kin", "workspace"],
+  ["$stat", { token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
 ]
 
 ##############################################################################
