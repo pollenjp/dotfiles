@@ -130,6 +130,7 @@ CI の `check` が落ちるが、**それは意図どおり**。記録として�
 
 - `exceptions.all` が新しくするのは nixpkgs（`nixpkgs-unstable` を追う input）だけ。ほかの github input は猶予のまま
 - `date` は修正の入った公開の日（Asia/Tokyo）。その日の終わりまでの公開から選ぶので、前の日だと修正の前の版になる。
+  `resolve`・`update` の `公開 YYYY-MM-DD` は UTC の日付で、UTC の 15 時以降の公開は Asia/Tokyo では翌日になる。
   `check` は、その日の終わりまでの pin を `OK (例外 (全体) <date>)` で通す
 - `reason` には、なぜ要るか（CVE・直した版）を書く。これが repo に残る記録になる
 - `fromNixpkgs`・`fromUpstream` は書かない。dotfiles の home の overlay が input `nixpkgs-exceptions` と組んで当てる欄で、

@@ -404,7 +404,8 @@ commit の日時は公開の日時より古い側に出るので、公開で選�
 - 書けるのは `minimumReleaseAgeDays` と `exceptions.all`。一部の例外（`fromNixpkgs`・`fromUpstream`）は dotfiles の home の
   overlay が input `nixpkgs-exceptions` と組んで当てる欄なので、その input の無い flake の設定に書くと `flake-lock-age` が
   止める（何もしないのに、効いているつもりの記録が残るため）
-- `date` には、入れたい修正の入った公開の日（Asia/Tokyo）を書く（その日の終わりまでの公開から選ぶ）。足したら `update` で
+- `date` には、入れたい修正の入った公開の日（Asia/Tokyo）を書く（その日の終わりまでの公開から選ぶ。`resolve`・`update` の
+  `公開 YYYY-MM-DD` は UTC の日付なので、UTC の 15 時以降の公開は Asia/Tokyo では翌日）。足したら `update` で
   選び直し（ほかの github input は猶予どおりに選び直す）、`flake.lock` と `release-age.nix` を commit する
 - 消し時は、おおよそ `date` + 猶予の日数のあと。`update`・`check`（CI の出力）に `例外 (全体) <date>: 何もしない (… 消してよい)`
   と出たら、PR で項目を消す
