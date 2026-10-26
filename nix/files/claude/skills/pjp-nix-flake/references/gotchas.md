@@ -16,10 +16,18 @@ shellHook = ''
 ```
 
 - **自動発火しない。** mise は `cd` した時点で env を張り替えるが、`nix develop` は
-  明示的に入る必要がある。同じ体験が欲しければ direnv
-  （`echo 'use flake' > .envrc && direnv allow`）。ただし global gitignore が
-  `.envrc` を無視している場合、リポジトリ側の `.gitignore` に `!.envrc` を書かないと
-  git から見えず、flake からも見えなくなる
+  明示的に入る必要がある。同じ体験が欲しければ direnv（dotfiles の home-manager が
+  nix-direnv と一緒に入れる。`nix/home/modules/direnv.nix`）で、
+  `echo 'use flake' > .envrc && direnv allow`。1 つの flake に devShell を並べ、ディレクトリ
+  ごとに `use flake ../..#ch01` のように選ぶこともできる。nix-direnv が devShell を `.direnv/`
+  に cache して GC root も張るので、入るたびに評価し直さず、GC でも消えない。
+  `flake.nix`・`flake.lock` 以外の、flake.nix から読むファイルを変えたら `direnv reload`
+  （か `.envrc` に `watch_file <ファイル>`）
+- **秘密の値は `.envrc` に書かない。** dotfiles の global gitignore は `.envrc` を無視しない
+  （repo に置いて共有するため。`!.envrc` は要らない）。秘密は global gitignore が無視する
+  `.env` に置き、`.envrc` から `dotenv_if_exists` で読む（`.env` が無ければ何もしない。
+  `nix develop` で入るときは上の shellHook で読む）。commit しない手元だけの `.envrc` は、
+  その repo の `.git/info/exclude` に書く。`.direnv/` は global gitignore が無視する
 - **`redact = true` 相当は無い。** あれは mise 自身の出力から値を伏せる機能で、
   シェルに入った後の環境変数はどちらにせよ素で見える
 - 相対パスで読むので、**プロジェクトルートで `nix develop` すること**

@@ -1370,7 +1370,7 @@ systemctl --user start nix-gc.service mise-prune.service     # 今すぐ走ら�
 darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` / `org.nix-community.home.mise-prune`) で動く。
 
 - 14 日より古い世代へは、ロールバックできなくなる
-- root を張っていない devShell や `nix build` の結果も消え、次に使うときは取り直し (手元でビルドするものは再ビルド) になる。残したい devShell は `nix develop --profile <パス>` で root を張っておく
+- root を張っていない devShell や `nix build` の結果も消え、次に使うときは取り直し (手元でビルドするものは再ビルド) になる。残したい devShell は `nix develop --profile <パス>` で root を張っておく。direnv の `use flake` で入る devShell は、nix-direnv が root を張るので残る ([後述](#direnv))
 - mise は、使ったことのある設定ファイルのどれもが指していない版を消す。プロジェクトの `mise.toml` が固定している版は残る
 - WSL では、消しても `ext4.vhdx` は縮まない。C: の空きにするには、`wsl --shutdown` してから管理者の PowerShell で `Optimize-VHD -Path <ext4.vhdx> -Mode Full` を打つ
 - 止めたいマシンは、そのホストの `modules`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホスト）で
@@ -1393,6 +1393,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みと、このマシンを名乗る `SetEnv PJP_SSH_CLIENT`) |
 | `~/.ssh/rc` | `nix/home/modules/agent-link.nix` (生成。接続を記録する `pjp-agent-link rc` を呼ぶ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
+| `~/.config/direnv/direnv.toml`・`~/.config/direnv/lib/hm-nix-direnv.sh` | `nix/home/modules/direnv.nix` (生成。lib は nix-direnv の direnvrc。[後述](#direnv)) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
@@ -2076,6 +2077,37 @@ curl + tar で bash-completion 2.11 を落として `~/.bashrc` にローダ行�
 `025_mingw` と `205_go_path` の cygpath 分岐（Windows は対象外）、`.bash/02_asdf.sh`
 （asdf は使われていない）、`050_common` の `bindkey -v`（zsh 専用のガード付きで
 bash では元々発火していなかった）。
+
+## direnv
+
+ディレクトリに入ると、そこの `.envrc` が書く環境をシェルに読み込み、出ると戻す（`nix/home/modules/direnv.nix` の
+`programs.direnv`）。hook は fish の `interactiveShellInit` と bash の `initExtra` の、mise の hook より後ろに入る。
+`.envrc` の `use flake` は nix-direnv が受け持つ。
+
+```sh
+# 1 つの flake に devShell を並べ、ディレクトリごとに選ぶ例
+# (repo の直下の flake.nix が devShells.<system>.ch01 を持つとき)
+echo 'use flake ../..#ch01' > chapters/ch01/.envrc
+echo 'dotenv_if_exists' >> chapters/ch01/.envrc   # 秘密の値は隣の .env に置いて読む (無ければ何もしない)
+cd chapters/ch01   # direnv: error … .envrc is blocked. Run `direnv allow` to approve its content
+direnv allow       # 中身を確かめてから許す。.envrc を書き換えると、また止められる
+```
+
+- 評価した devShell は `.envrc` のディレクトリの `.direnv/` に cache し、`flake.nix`・`flake.lock`（と `devshell.toml`）が
+  変わるまで評価し直さない。flake.nix から読む別のファイルを変えたときは `direnv reload` を打つか、`.envrc` に
+  `watch_file <ファイル>` を足す
+- devShell と flake の inputs には `.direnv/` から GC root が張られ、週 1 回の GC（[前述](#使わなくなったデータの定期削除)）でも
+  消えない。要らなくなったら `.direnv/` を消せば root も外れる
+- 読み込むたびの `direnv: export +AR +AS … ~PATH`（devShell では数十個の変数が 1 行に並ぶ）は出さない（`direnv.toml` の
+  `hide_env_diff`）。`direnv: loading …` と、止められたときのエラーは出る。初めての評価・ビルドが 5 秒を超えると
+  `… is taking a while to execute. Use CTRL-C to give up.` が出る（`warn_timeout` は既定のまま）
+- mise の hook と並べて動く。devShell が mise の global のツールと同じコマンド（`node` など）を持つときは、
+  そのディレクトリの中では devShell の方が先に引かれ、出ると mise の方に戻る
+- `.envrc` は global gitignore で無視しないので、repo に置いて共有できる（その repo の `.gitignore` に `!.envrc` は要らない）。
+  秘密の値は `.envrc` に書かず、global gitignore が無視する `.env` に置いて、`.envrc` から `dotenv_if_exists` で読む
+  （`.env` が無ければ何もしない。書き換えると読み直す）。commit しない手元だけの `.envrc` は、その repo の
+  `.git/info/exclude` に書く
+- `.direnv/` は global gitignore に入る
 
 ## 証明書の束を OS の信頼ストアに寄せる
 
