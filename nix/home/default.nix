@@ -15,6 +15,7 @@
     ./modules/os-ca-bundle.nix
     ./modules/fish.nix
     ./modules/bash.nix
+    ./modules/direnv.nix
     ./modules/claude.nix
     ./modules/cc-pages.nix
     ./modules/dev-tracker-inbox.nix

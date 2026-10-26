@@ -15,7 +15,8 @@
 # home-manager の世代しか消さず、~/.nix-profile の世代が古い package を握ったまま残る。
 #
 # root を張っていない devShell や `nix build` の結果も消えるので、次に使うときは
-# 取り直し (手元でビルドするものは再ビルド) になる。
+# 取り直し (手元でビルドするものは再ビルド) になる。direnv の `use flake` で読んだ devShell は、
+# nix-direnv が .direnv/ から root を張るので残る (modules/direnv.nix)。
 #
 # # mise: mise-prune
 #

@@ -60,6 +60,7 @@
     #   delta / git-lfs -> modules/git.nix
     #   fish -> modules/fish.nix
     #   mise -> modules/fish.nix (programs.mise)
+    #   direnv / nix-direnv -> modules/direnv.nix
     #
     # .gitconfig が pager = delta を要求しているのに git-delta が
     # どの管理下にも無かった問題は modules/git.nix で解消している。
