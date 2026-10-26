@@ -214,9 +214,10 @@ sidebar_max_width = 80
 ##############################################################################
 
 [ui.sidebar.spaces]
-# 2 行目の先頭に、子の workspace の親を出す ($parent)。herdr の既定は
+# 1 行目の名前の前に見張り中の印を出し ($watch)、2 行目の先頭に子の workspace の親を出す
+# ($parent)。herdr の既定は
 #   rows = [["state_icon", "workspace"], ["branch", "git_status"]]
-# で、$parent を足したほかは既定のまま。
+# で、$watch と $parent を足したほかは既定のまま。
 #
 # $parent は workspace の metadata の token parent。claude-skills の
 # pjp-herdr-other-repo の ws-mark.sh が、子の workspace に
@@ -234,10 +235,25 @@ sidebar_max_width = 80
 # 色は catppuccin (herdr の既定のテーマ) の緑で、子の 🌱 に合わせた。fg は #RGB / #RRGGBB
 # しか書けない (テーマの色の名前は使えない) ので、テーマを変えたらここも見直す。
 #
+# $watch は workspace の metadata の token watch で、値は 👀。$parent と同じ ws-mark.sh が、
+# 見張り中の claude がいる workspace に
+#   herdr workspace report-metadata <workspace> --source pjp.ws-mark --token watch=👀
+# で置き、見張りが終わると外す。子が見張り中なら、その親の workspace にも置く。見張り中は、
+# claude がターンを終え (herdr の状態が idle か done)、裏で走らせた shell (Bash の
+# run_in_background・Monitor) が済むのを待っているだけの間。裏の subagent を待つ間は herdr の
+# 状態が working のままなので、見張り中に数えない。
+#
+# $watch は state_icon の後ろに置く。見張り中は「● 👀 · 名前」になり、token が無ければ今までどおり
+# 「● 名前」で、空きはできない。state_icon の前に置くと「👀 · ● 名前」になり、agent のいない
+# workspace では state_icon も点 (·) なので「👀 · · 名前」と点が 2 つ並ぶ。
+#
+# 👀 (2 桁) と、herdr が値の間に挟む " · " (3 桁) で 5 桁使うので、👀 が出ている間は名前に
+# 使える幅が 5 桁減る (sidebar_width = 40 なら 34 桁 → 29 桁。切れた名前の … を含む)。
+#
 # Windows から herdr --remote (hr) で attach したときは、Windows の herdr が自分の設定
 # (win/herdr/config.toml) で sidebar を描く。同じ rows をそちらにも書いてある。
 rows = [
-  ["state_icon", "workspace"],
+  ["state_icon", "$watch", "workspace"],
   [{ token = "$parent", fg = "#a6e3a1" }, "branch", "git_status"],
 ]
 
