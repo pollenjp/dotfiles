@@ -264,7 +264,8 @@ nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
 
 引数を省いたときの対象は、チェックアウトから直接叩けば `nix/`、`nix run` で
 呼べばカレントディレクトリ。他リポジトリへの入れ方は `pjp-nix-flake` skill の
-`references/lock-age.md`。
+`references/lock-age.md`。他リポジトリの猶予の日数と例外は、その flake の隣の `release-age.nix` に書ける
+（[後述](#ほかのリポジトリの猶予と例外)）。
 
 Nix にはパッケージ単位のバージョン解決が無い。入るものは `flake.lock` が指す
 nixpkgs ツリー 1 点で決まるので、**「新しすぎるパッケージを避ける」は「新しすぎる
@@ -282,7 +283,8 @@ revision を pin しない」と同義**になる。日数の下限はここで�
 普段の日数は `release-age.nix` の `minimumReleaseAgeDays`。その場だけ変えるなら `--min-age-days N` か
 `FLAKE_MIN_RELEASE_AGE_DAYS`（`setup.sh` 経由のときは `DOTFILES_MIN_RELEASE_AGE_DAYS`。一族の名前を保つため、
 あちらが橋渡しする）。効く順は `--min-age-days` > 環境変数 > `release-age.nix` > 7 で、どれが効いたかは
-`==> ./nix (下限 7 日。設定 release-age.nix)` の行に出る。
+`==> ./nix (下限 7 日。設定 release-age.nix (flake の隣))` の行に出る（日数を替えたときは
+`(下限 0 日。--min-age-days。設定 release-age.nix (flake の隣))` のように、日数の出どころと設定を並べる）。
 
 ```sh
 ./nix/scripts/flake-lock-age.sh --min-age-days 14 update
@@ -290,8 +292,15 @@ revision を pin しない」と同義**になる。日数の下限はここで�
 DOTFILES_MIN_RELEASE_AGE_DAYS=0 ~/dotfiles/setup --steps flake-update
 ```
 
-設定は、`--config FILE` を渡さなければ script の隣の `../release-age.nix`（dotfiles の `nix/release-age.nix`）を
-読む。`nix run` で他のリポジトリから呼んだときは隣に無いので、今までどおり 7 日で例外は無い。
+設定は flake ごとに次の順で探し、最初に見つかった 1 つだけを読む
+（[ADR 037](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/037_release_age_beside_flake_20261027T001056JST/README.md)）。
+
+| 順 | 設定 | 見出しの行 |
+| --- | --- | --- |
+| 1 | `--config FILE`（渡した全部の flake に効く） | `設定 <FILE> (--config)` |
+| 2 | 対象の flake の隣の `release-age.nix`（dotfiles の `nix/` なら `nix/release-age.nix`。他のリポジトリはここに書く。`nix run` で呼んでも読む） | `設定 release-age.nix (flake の隣)` |
+| 3 | script の隣の `../release-age.nix`（チェックアウトから叩いたときの dotfiles の `nix/release-age.nix`。隣に設定の無い skill の flake などは、これを借りる） | `設定 <パス> (script の隣)` |
+| 4 | どれも無い（7 日で、例外は無い） | `設定なし` |
 
 **遅延を伸ばすほど、既知 CVE が未修正のまま残る期間も伸びる**（ブラウザ / curl /
 openssl のような日常的に踏むものはこちら側のリスクが大きい）。7 日はその折り返し点として
@@ -313,7 +322,8 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 
 セキュリティパッチが猶予より新しい側にしか無いときは、理由を書いた**期間付きの例外**を
 [`release-age.nix`](./release-age.nix) に足す（[ADR 032](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST/README.md)・
-[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く。
+[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-24-nixpkgs-release-age-exceptions-design.md)）。例外は dotfiles 全体（登録した全 PC と CI）に効く
+（他のリポジトリは、その flake の隣に書く。[後述](#ほかのリポジトリの猶予と例外)）。
 `date` は「この日（Asia/Tokyo）の終わりまでの公開を使う」と読む。
 
 | 例外 | 欄 | 何をするか |
@@ -352,8 +362,9 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
   （`flake-lock-age.sh` がそう選ぶ）。評価もそのあいだはこの input を読まないので、普段の道は重くならない
 - 書き誤り（知らない欄・暦に無い日付・空の `reason`・入れ子の名前・pkgs に無い名前・同じ package を 2 回・
   `pkgs/upstream/<package>.nix` が無い・その版と `version` が違う）は、home の評価で止まる（CI の `check` も落ちる）。
-  今日（Asia/Tokyo）より先の `date` は `flake-lock-age.sh` が止める（打ち間違いだと、その日まで猶予が外れたまま
-  先端を取り続け、`check` も通ってしまうため。CI の `lock-age` も落ちる）
+  `flake-lock-age.sh` も、どのリポジトリの設定でも、欄の形（知らない欄・型・無い欄・空の `reason`）と `date`（形・暦・
+  今日（Asia/Tokyo）より先）を確かめ、全部をまとめて出して、どの flake を選ぶ・確かめるより前に止まる（CI の `lock-age` も
+  落ちる）。先の `date` を止めるのは、打ち間違いだと、その日まで猶予が外れたまま先端を取り続け、`check` も通ってしまうため
 - `--input <名前>` を付けても、lock に無い github の input（flake.nix に足したばかりのもの）は一緒に選ぶ
   （`nix flake update` は lock に無い input を先端で足すため）
 
@@ -368,6 +379,37 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 | 一部 (upstream から) | 普段の pin の nixpkgs のその package の版が、`version` 以上になった。その system の配布物が無いときも nixpkgs のままで、その旨が出る |
 
 commit の日時は公開の日時より古い側に出るので、公開で選ぶ `update` より消し時の判定は少し遅れる（早めに言うことは無い）。
+
+`flake-lock-age.sh` も、何もしなくなった全体の例外に `例外 (全体) <date>: 何もしない (猶予 N 日の方が新しい。消してよい)` の行を
+出す（`resolve`・`update` と `check`。こちらは今日と猶予の日数で決める）。home の評価の無い他のリポジトリでは、これが消し時の
+知らせになる。
+
+##### ほかのリポジトリの猶予と例外
+
+他のリポジトリ（`nix run` で `flake-lock-age` を呼ぶもの）も、**flake の隣（`flake.nix` と同じディレクトリ）に
+`release-age.nix` を置けば**、猶予の日数と全体の例外を書ける（[ADR 037](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/037_release_age_beside_flake_20261027T001056JST/README.md)）。
+`resolve`・`update`・`check` のどれも読むので、CI の手順（`nix run … -- check`）は変えなくてよい。例外が理由とともに
+リポジトリに残り、`--min-age-days` を付けずに `update` を打っても、猶予の決まりで直しの前の版へ戻さない。
+
+```nix
+# <flake のディレクトリ>/release-age.nix (例。値は作り物)
+{
+  minimumReleaseAgeDays = 7; # 普段の猶予 (日)。書かなければ 7
+  exceptions.all = [
+    { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-23 の公開に入った"; }
+  ];
+}
+```
+
+- 書けるのは `minimumReleaseAgeDays` と `exceptions.all`。一部の例外（`fromNixpkgs`・`fromUpstream`）は dotfiles の home の
+  overlay が input `nixpkgs-exceptions` と組んで当てる欄なので、その input の無い flake の設定に書くと `flake-lock-age` が
+  止める（何もしないのに、効いているつもりの記録が残るため）
+- `date` には、入れたい修正の入った公開の日（Asia/Tokyo）を書く（その日の終わりまでの公開から選ぶ）。足したら `update` で
+  選び直し（ほかの github input は猶予どおりに選び直す）、`flake.lock` と `release-age.nix` を commit する
+- 消し時は、おおよそ `date` + 猶予の日数のあと。`update`・`check`（CI の出力）に `例外 (全体) <date>: 何もしない (… 消してよい)`
+  と出たら、PR で項目を消す
+- 書き誤りは上と同じく `flake-lock-age` が止める。手順の細部（CI・新しいリポジトリへの入れ方）は `pjp-nix-flake` skill の
+  `references/lock-age.md`
 
 ##### 遅延を外す
 

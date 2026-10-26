@@ -4,7 +4,8 @@
 #   nix/scripts/flake-lock-age.sh   update・check (CI の lock-age も) の日数と、日付の例外の pin
 #   nix/lib/release-age.nix         home の pkgs に当てる overlay と、消し時の警告 (setup の警告のまとめ・CI の annotation)
 #
-# 欄の型は nix/lib/release-age.nix が確かめる (知らない欄・暦に無い日付・空の reason は評価で止まる)。
+# 欄の型は nix/lib/release-age.nix と flake-lock-age.sh が確かめる (知らない欄・暦に無い日付・空の reason は止まる)。
+# ほかの repo も、その flake の隣に同じ形の release-age.nix を置ける (書けるのは minimumReleaseAgeDays と exceptions.all)。
 {
   # 普段の猶予 (日)。pin は、nixpkgs はチャンネルの公開から、ほかの github input は commit から、この日数たった
   # revision にする。その場だけ変えるなら flake-lock-age.sh の --min-age-days か FLAKE_MIN_RELEASE_AGE_DAYS

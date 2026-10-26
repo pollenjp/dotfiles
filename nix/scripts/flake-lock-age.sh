@@ -29,12 +29,20 @@
 # であって公開時刻ではなく、Hydra の遅れ (実測で 1〜2 日) の分だけ古い側に出る。
 # つまり判定は公開日数より **緩い**。先端へ飛んだ事故を捕まえるには十分。
 #
-# ## 猶予の日数と例外 (release-age.nix。ADR 032)
+# ## 猶予の日数と例外 (release-age.nix。ADR 032・037)
 #
-# 日数と、期間付きの例外は設定のファイル (dotfiles では nix/release-age.nix) に書く。
-# 設定は `--config` か、この script の隣の `../release-age.nix` (dotfiles のチェック
-# アウトから叩いたとき)。どちらも無ければ (nix run で他の repo から呼んだとき) 7 日で、
-# 例外は無い。日数は `--min-age-days` > `FLAKE_MIN_RELEASE_AGE_DAYS` > 設定 > 7。
+# 日数と、期間付きの例外は設定のファイル release-age.nix に書く (dotfiles では nix/release-age.nix)。
+# 設定は flake ごとに次の順で探し、最初に見つかった 1 つだけを読む。どれが効いたかは見出しの行
+# (`==> <flake> (下限 N 日。設定 <パス> (<どこから>))`。無ければ「設定なし」) に出す。
+#
+#   1. `--config FILE` (渡した全部の flake に効く)
+#   2. 対象の flake の隣の `release-age.nix` (`<flake>/release-age.nix`)。ほかの repo はここに書く
+#      (nix run で呼んでも読む)
+#   3. この script の隣の `../release-age.nix` (dotfiles のチェックアウトから叩いたときの dotfiles の
+#      設定。隣に設定の無い flake (dotfiles の skill の flake など) は、これを借りる)
+#   4. どれも無ければ 7 日で、例外は無い
+#
+# 日数は `--min-age-days` > `FLAKE_MIN_RELEASE_AGE_DAYS` > 設定 > 7。
 #
 # - **全体** (`exceptions.all`): date の日 (Asia/Tokyo) の終わりが猶予より新しければ、
 #   nixpkgs (nixpkgs-unstable を追う input。nixpkgs-exceptions を除く) をその日の終わり
@@ -45,12 +53,21 @@
 #   新しくなければ nixpkgs と同じ rev (取ってくるものを増やさない)。check は、その日の
 #   終わりまでの pin と、nixpkgs と同じ rev を通す
 # - **一部 (upstream から)** (`exceptions.fromUpstream`): flake.lock に関わらないので
-#   ここでは読まない (home の overlay だけ。nix/lib/release-age.nix)
+#   ここでは使わない (home の overlay だけ。nix/lib/release-age.nix)
+#
+# ほかの repo で効くのは、日数と全体の例外。一部の例外 (2 つ) は dotfiles の home の overlay が
+# input nixpkgs-exceptions と組んで当てる欄なので、その input の無い flake の設定 (1・2) に書くと
+# 止める (何もしないのに、効いているつもりの記録が残るため)。3 を借りる flake では読み飛ばす。
+#
+# 設定の書き誤りは、どの flake を選ぶ・確かめるより前に、全部の flake の設定を確かめて、まとめて
+# 出して止める: 知らない欄・欄の型・無い欄・空の reason・YYYY-MM-DD でない date・暦に無い date・
+# 今日 (Asia/Tokyo) より先の date (打ち間違いで、その日まで猶予が外れたまま先端を取り続け、check も
+# 通ってしまうため)。package の名前が nixpkgs にあるかなど、home にかかわる確かめは home の評価
+# (nix/lib/release-age.nix) がする。
 #
 # 例外がもう何もしていないか (消し時) は、home の評価 (nix/lib/release-age.nix) が
-# 警告に出す。ここは選ぶときの状態 (効いている・何もしない) を表示するだけ。
-# date が今日 (Asia/Tokyo) より先なら止める (打ち間違いで、その日まで猶予が外れたまま
-# 先端を取り続け、check も通ってしまうため)。
+# 警告に出す。ここは全体の例外の状態 (効いている・何もしない) を表示するだけ (check は何も
+# しないものだけ。home の評価の無いほかの repo では、これが消し時の知らせになる)。
 #
 # ## 使い方
 #
@@ -167,15 +184,19 @@ usage() {
   check    今の flake.lock が下限日数を満たすか検査する (CI 用)
 
 オプション:
-  --config FILE     猶予の日数と例外の設定 (既定: この script の隣の ../release-age.nix
-                    があればそれ。無ければ 7 日で例外なし)
+  --config FILE     猶予の日数と例外の設定。渡した全部の flake に効く (既定は flake ごとに、
+                    その flake の隣の release-age.nix、無ければこの script の隣の
+                    ../release-age.nix。どちらも無ければ 7 日で例外なし)
   --min-age-days N  下限日数 (環境変数 FLAKE_MIN_RELEASE_AGE_DAYS より、設定より先に効く)
   --input NAME      resolve / update でその input だけを選ぶ (くり返せる)
   --no-scan         update 後の閉包スキャン (closure-scan) を飛ばす
   -h, --help        この使い方を出す
 
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
-無ければカレントディレクトリを対象にする。複数渡せば順に処理する。
+無ければカレントディレクトリを対象にする。複数渡せば順に処理する (設定も flake ごとに探す)。
+
+ほかの repo の猶予と例外は、flake.nix の隣の release-age.nix に書く (nix run で呼んでも
+読む。書けるのは minimumReleaseAgeDays と exceptions.all)。
 
 flake.lock がまだ無い flake・lock に無い input でも resolve / update は通る
 (最初の lock も update で作る)。先に nix flake lock を打つと一度先端へ pin
@@ -190,7 +211,7 @@ EOS
 cmd=""
 flake_dirs=()
 no_scan=0
-config=""
+cli_config=""
 cli_days=""
 only_inputs=()
 
@@ -198,11 +219,11 @@ while [[ $# -gt 0 ]]; do
   case $1 in
     --config)
       [[ $# -ge 2 ]] || die '--config には設定のファイルが要ります。'
-      config=$2
+      cli_config=$2
       shift 2
       ;;
     --config=*)
-      config=${1#*=}
+      cli_config=${1#*=}
       shift
       ;;
     --min-age-days)
@@ -328,19 +349,40 @@ now_epoch() {
 }
 
 # YYYY-MM-DD の日 (Asia/Tokyo) の終わり (23:59:59 +09:00。夏時間は無い) の UNIX 秒を day_end へ入れる。
-# 形が違えば止める。暦の計算は bash の算術でする (GNU と BSD の date の違いに寄らない)。
-# 2026-02-30 のような無い日の確かめは、nix/lib/release-age.nix (flake の check) がする。
-# 返り値ではなくグローバルへ置くのは、die でここから抜けたいため。$(...) で呼ぶと
-# subshell になって exit が効かない。
+# 暦の計算は bash の算術でする (GNU と BSD の date の違いに寄らない)。形が違う・暦に無い・今日 (Asia/Tokyo) より
+# 先なら、わけ (「は …」) を date_error へ入れて 1 を返す。返り値ではなくグローバルへ置くのは、$(...) で呼ぶと
+# subshell になって配列などへ足せないため。
+#
+# 今日より先の日付を誤りにするのは、date が「その日までの公開を使う」下限で、打ち間違いの先の日付だと、その日まで
+# 猶予が外れたまま先端を取り続け、check も通り、消し時の警告も出ないため。今日の日の終わりは今から 24 時間より先には
+# ならないので、それを越えれば先の日付。
 day_end=""
+date_error=""
 day_end_of() {
-  local y m d era yoe mp doy doe days
+  local y m d dim era yoe mp doy doe days now
   if [[ ! $1 =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
-    die "設定 (${config}) の date が YYYY-MM-DD ではありません: $1"
+    date_error="は YYYY-MM-DD ではない"
+    return 1
   fi
   y=$((10#${BASH_REMATCH[1]}))
   m=$((10#${BASH_REMATCH[2]}))
   d=$((10#${BASH_REMATCH[3]}))
+  case ${m} in
+    1 | 3 | 5 | 7 | 8 | 10 | 12) dim=31 ;;
+    4 | 6 | 9 | 11) dim=30 ;;
+    2)
+      if ((y % 4 == 0 && (y % 100 != 0 || y % 400 == 0))); then
+        dim=29
+      else
+        dim=28
+      fi
+      ;;
+    *) dim=0 ;;
+  esac
+  if ((d < 1 || d > dim)); then
+    date_error="は暦に無い日付"
+    return 1
+  fi
   # 1970-01-01 からの日数 (days from civil。3 月始まりの年で数える)
   if ((m <= 2)); then
     y=$((y - 1))
@@ -352,54 +394,111 @@ day_end_of() {
   doe=$((yoe * 365 + yoe / 4 - yoe / 100 + doy))
   days=$((era * 146097 + doe - 719468))
   day_end=$((days * 86400 + 86400 - 1 - 9 * 3600))
+  now=$(now_epoch)
+  if [[ ${day_end} -gt $((now + 86400)) ]]; then
+    date_error="は今日 ($(epoch_to_day "$((now + 9 * 3600))") Asia/Tokyo) より先 (先の日付だと、その日まで猶予が外れたままになる)"
+    return 1
+  fi
 }
 
 ##########
 # 設定   #
 ##########
 
-# 設定の中身を 1 行 1 件で出す。区切りはタブ。空の欄は - にする (read の区切りのタブは
-# 空の欄を飛ばして詰めるため)。欄の型は nix/lib/release-age.nix が確かめるので、
-# ここは無い欄を - にして読むだけ。
+# 設定を確かめて 1 行 1 件の表にする nix の式。設定のパスは環境変数 FLAKE_LOCK_AGE_CONFIG で渡す (式を '…' で
+# 書けるようにするため。nix eval --expr は --argstr で式を呼ばない)。区切りはタブで、空の欄は - にする (read の
+# 区切りのタブは空の欄を飛ばして詰めるため)。
 #
-#   days    <日数>
-#   all     <date> <reason>
-#   nixpkgs <date> <packages (空白区切り)> <reason>
-settings_rows() {
-  nix eval --raw --impure --expr "
+#   error    <書き誤りの文>
+#   days     <日数>
+#   all      <何件目> <date> <reason>
+#   nixpkgs  <何件目> <date> <packages (空白区切り)> <reason>
+#   upstream <何件目> <package> <version> <reason>
+#
+# 欄の形はここで確かめる (どの repo の設定にも効く。nixpkgs の lib は無いので builtins だけで)。形の正しくない項目は
+# error の行だけにする (値を読むと throw しうるため)。date の形・暦・今日との比べは parse_settings がする。欄と型は
+# nix/lib/release-age.nix (dotfiles の home の評価) と同じに保つ。あちらは package の名前が nixpkgs にあるかなど、
+# home にかかわることも確かめる。
+# shellcheck disable=SC2016 # Nix の式をそのまま書く (${…} は Nix の差し込み)
+settings_expr='
+let
+  s = import (builtins.getEnv "FLAKE_LOCK_AGE_CONFIG");
+  join = builtins.concatStringsSep;
+  cell = v:
+    let t = builtins.replaceStrings [ "\t" "\n" ] [ " " " " ] (toString v);
+    in if t == "" then "-" else t;
+  row = cols: join "\t" (map cell cols);
+  err = msg: row [ "error" msg ];
+  unknown = names: set: builtins.filter (n: !(builtins.elem n names)) (builtins.attrNames set);
+  str = v: builtins.isString v && v != "";
+  # 項目の欄: 正しいか (ok) と、誤りのときに「<欄> は」に続ける文 (want)
+  fields = {
+    date = { ok = str; want = "\"YYYY-MM-DD\" の文字列にする"; };
+    reason = { ok = str; want = "空でない文字列にする (なぜ要るかを書く)"; };
+    packages = { ok = v: builtins.isList v && v != [ ] && builtins.all str v; want = "空でない文字列の、空でない list にする"; };
+    package = { ok = str; want = "空でない文字列にする"; };
+    version = { ok = str; want = "空でない文字列にする"; };
+  };
+  # 例外の種類: 項目の欄 (どれも要る) と、表の行
+  kinds = {
+    all = { names = [ "date" "reason" ]; out = n: i: [ "all" n i.date i.reason ]; };
+    fromNixpkgs = { names = [ "packages" "date" "reason" ]; out = n: i: [ "nixpkgs" n i.date (join " " i.packages) i.reason ]; };
+    fromUpstream = { names = [ "package" "version" "reason" ]; out = n: i: [ "upstream" n i.package i.version i.reason ]; };
+  };
+  itemErrors = where: names: i:
+    if !builtins.isAttrs i then [ "${where}は attrset にする" ]
+    else
+      map (n: "${where}に知らない欄 ${n} がある (書けるのは ${join "・" names})") (unknown names i)
+      ++ map (n: "${where}に ${n} が無い") (builtins.filter (n: !(builtins.hasAttr n i)) names)
+      ++ map (n: "${where}の ${n} は${fields.${n}.want}") (
+        builtins.filter (n: builtins.hasAttr n i && !(fields.${n}.ok (builtins.getAttr n i))) names
+      );
+  e = s.exceptions or { };
+  listRows = k:
     let
-      s = import \"$1\";
-      e = s.exceptions or { };
-      cell = v:
-        let t = builtins.replaceStrings [ \"\t\" \"\n\" ] [ \" \" \" \" ] (toString v);
-        in if t == \"\" then \"-\" else t;
-      row = cols: builtins.concatStringsSep \"\t\" (map cell cols);
+      v = e.${k} or [ ];
+      kind = kinds.${k};
+      item = n:
+        let
+          i = builtins.elemAt v n;
+          errors = itemErrors "exceptions.${k} の ${toString (n + 1)} 件目" kind.names i;
+        in
+        if errors == [ ] then [ (row (kind.out (n + 1) i)) ] else map err errors;
     in
-    builtins.concatStringsSep \"\n\" (
-      [ (row [ \"days\" (s.minimumReleaseAgeDays or \"\") ]) ]
-      ++ map (i: row [ \"all\" (i.date or \"\") (i.reason or \"\") ]) (e.all or [ ])
-      ++ map (i: row [
-        \"nixpkgs\"
-        (i.date or \"\")
-        (builtins.concatStringsSep \" \" (i.packages or [ ]))
-        (i.reason or \"\")
-      ]) (e.fromNixpkgs or [ ])
+    if !builtins.isList v then [ (err "exceptions.${k} は list にする") ]
+    else builtins.concatLists (builtins.genList item (builtins.length v));
+  top = [ "minimumReleaseAgeDays" "exceptions" ];
+  days = s.minimumReleaseAgeDays or null;
+in
+join "\n" (
+  if !builtins.isAttrs s then [ (err "設定は attrset ({ … }) にする") ]
+  else
+    map (n: err "知らない欄 ${n} がある (書けるのは ${join "・" top})") (unknown top s)
+    ++ (
+      if days == null then [ ]
+      else if builtins.isInt days && days >= 0 then [ (row [ "days" days ]) ]
+      else [ (err "minimumReleaseAgeDays は 0 以上の整数にする") ]
     )
-  "
-}
+    ++ (
+      if !builtins.isAttrs e then [ (err "exceptions は attrset にする") ]
+      else
+        map (n: err "exceptions に知らない欄 ${n} がある (書けるのは ${join "・" (builtins.attrNames kinds)})") (
+          unknown (builtins.attrNames kinds) e
+        )
+        ++ builtins.concatMap listRows (builtins.attrNames kinds)
+    )
+)
+'
 
-# date は「その日までの公開を使う」下限なので、今日 (Asia/Tokyo) より先の日付は打ち間違いと見て止める
-# (先の日付だと、その日まで猶予が外れたまま先端を取り続け、check も通り、消し時の警告も出ない)。
-# 今日の日の終わりは今から 24 時間より先にはならないので、それを越えれば先の日付。day_end_of の後に呼ぶ。
-not_ahead() {
-  local now
-  now=$(now_epoch)
-  if [[ ${day_end} -gt $((now + 86400)) ]]; then
-    die "設定 (${config}) の date $1 は今日 ($(epoch_to_day "$((now + 9 * 3600))") Asia/Tokyo) より先の日付です。
-date はその日の終わりまでの公開を使う下限なので、先の日付だとその日まで猶予が外れたままになる。打ち間違いを直すこと。"
-  fi
-}
+# 読んだ設定の表を、設定のパスごとに貯める (同じ設定を借りる flake が続いても評価し直さない)。
+cached_configs=()
+cached_texts=()
 
+# 今の flake の設定。use_settings が flake ごとに置き直す。
+config=""       # 設定のファイル (絶対パス)。無ければ空
+config_label="" # 見出しの行に出す「設定 <パス> (<どこから>)」か「設定なし」
+config_own=0    # 1 なら、その flake の設定 (--config・flake の隣)。0 は script の隣の設定を借りるか、設定なし
+settings_text=""
 settings_days=""
 # 全体の例外 (date・その日の終わりの UNIX 秒・reason) と、一部 (nixpkgs から) の例外 (同じく + packages)
 all_dates=()
@@ -409,71 +508,180 @@ part_dates=()
 part_ends=()
 part_packages=()
 part_reasons=()
+min_age_days=""
+setting_desc="" # 見出しの行の括弧の中 (下限の日数の後ろ)
 
-read_settings() {
-  local rows kind a b c
-  if [[ -z ${config} ]]; then
-    [[ -f "${script_dir}/../release-age.nix" ]] || return 0
-    config="${script_dir}/../release-age.nix"
-  fi
-  [[ -f ${config} ]] || die "設定のファイルがありません: ${config}"
-  # import は絶対パスしか受けない
-  config="$(
-    cd -- "$(dirname "${config}")" &>/dev/null
+# 絶対パスにする (import は絶対パスしか受けない)。$1 は在るファイル
+abs_file() {
+  printf '%s/%s\n' "$(
+    cd -- "$(dirname -- "$1")" &>/dev/null
     pwd -P
-  )/$(basename "${config}")"
-  rows=$(settings_rows "${config}") || die "設定を読めませんでした: ${config}"
-  while IFS=$'\t' read -r kind a b c; do
-    case ${kind} in
-      days)
-        if [[ ${a} != - ]]; then
-          settings_days=${a}
-        fi
-        ;;
-      all)
-        day_end_of "${a}"
-        not_ahead "${a}"
-        all_dates+=("${a}")
-        all_ends+=("${day_end}")
-        all_reasons+=("${b}")
-        ;;
-      nixpkgs)
-        day_end_of "${a}"
-        not_ahead "${a}"
-        part_dates+=("${a}")
-        part_ends+=("${day_end}")
-        part_packages+=("${b}")
-        part_reasons+=("${c}")
-        ;;
-    esac
-  done <<<"${rows}"
+  )" "$(basename -- "$1")"
 }
 
-read_settings
-
-# 日数の出どころ: --min-age-days > FLAKE_MIN_RELEASE_AGE_DAYS (空は無いのと同じ。CI は
-# workflow_dispatch 以外で空を渡してくる) > 設定 > 7。
-if [[ -n ${cli_days} ]]; then
-  min_age_days=${cli_days}
-  days_from=--min-age-days
-elif [[ -n ${FLAKE_MIN_RELEASE_AGE_DAYS:-} ]]; then
-  min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS}
-  days_from=FLAKE_MIN_RELEASE_AGE_DAYS
-elif [[ -n ${settings_days} ]]; then
-  min_age_days=${settings_days}
-  days_from="設定 $(basename "${config}")"
-else
-  min_age_days=7
-  days_from=既定
+# --config の設定 (渡した全部の flake に効く) と、この script の隣の設定 (dotfiles のチェックアウトから叩いたときの
+# nix/release-age.nix。nix run で呼んだときは無い)
+cli_config_abs=""
+if [[ -n ${cli_config} ]]; then
+  [[ -f ${cli_config} ]] || die "設定のファイルがありません: ${cli_config}"
+  cli_config_abs=$(abs_file "${cli_config}")
+fi
+script_config=""
+if [[ -f "${script_dir}/../release-age.nix" ]]; then
+  script_config=$(abs_file "${script_dir}/../release-age.nix")
 fi
 
-case ${min_age_days} in
-  '' | *[!0-9]*)
-    die "下限日数は 0 以上の整数で指定すること (${days_from} の値: ${min_age_days})"
-    ;;
-esac
-# 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
-min_age_days=$((10#${min_age_days}))
+# 対象の flake の設定を決める: --config > flake の隣の release-age.nix > script の隣 > 無し。
+config_for() {
+  local dir=$1
+  config_own=1
+  if [[ -n ${cli_config_abs} ]]; then
+    config=${cli_config_abs}
+    config_label="設定 ${cli_config} (--config)"
+  elif [[ -f ${dir}/release-age.nix ]]; then
+    config=$(abs_file "${dir}/release-age.nix")
+    config_label="設定 release-age.nix (flake の隣)"
+  else
+    config_own=0
+    config=${script_config}
+    if [[ -n ${config} ]]; then
+      config_label="設定 ${config} (script の隣)"
+    else
+      config_label=設定なし
+    fi
+  fi
+}
+
+# config の表を settings_text へ入れる (設定が無ければ空)。
+load_settings_text() {
+  local i
+  settings_text=""
+  [[ -n ${config} ]] || return 0
+  for ((i = 0; i < ${#cached_configs[@]}; i++)); do
+    if [[ ${cached_configs[i]} == "${config}" ]]; then
+      settings_text=${cached_texts[i]}
+      return 0
+    fi
+  done
+  settings_text=$(FLAKE_LOCK_AGE_CONFIG=${config} nix eval --raw --impure --expr "${settings_expr}") \
+    || die "設定を読めませんでした: ${config}"
+  cached_configs+=("${config}")
+  cached_texts+=("${settings_text}")
+}
+
+# flake.nix の inputs に nixpkgs-exceptions があるか。$1: flake のディレクトリ
+has_exceptions_input() {
+  local abs found
+  abs=$(abs_file "$1/flake.nix")
+  found=$(nix eval --raw --impure --expr "
+    if (import \"${abs}\").inputs or { } ? ${exceptions_input} then \"1\" else \"0\"
+  ") || die "flake の input を読めませんでした: $1"
+  [[ ${found} == 1 ]]
+}
+
+# settings_text を読んで日数と例外を置く。書き誤りは、まとめて出して止まる: 表の error の行、date の形・暦・今日との
+# 比べ、その flake では何もしない一部の例外。$1: 対象の flake
+#
+# 一部の例外 (fromNixpkgs・fromUpstream) は、dotfiles の home の overlay が input nixpkgs-exceptions と組んで package を
+# 差し替える欄。その input の無い flake の設定 (--config・flake の隣) に書いても何もしないので止める (効いているつもりの
+# 例外が記録に残らないように)。script の隣の設定 (dotfiles) を借りる flake (dotfiles の skill の flake など) では読み飛ばす。
+parse_settings() {
+  local dir=$1 kind a b c d i partial_hint=""
+  local problems=() partial=()
+  settings_days=""
+  all_dates=()
+  all_ends=()
+  all_reasons=()
+  part_dates=()
+  part_ends=()
+  part_packages=()
+  part_reasons=()
+  while IFS=$'\t' read -r kind a b c d; do
+    case ${kind} in
+      error) problems+=("${a}") ;;
+      days) settings_days=${a} ;;
+      all)
+        if day_end_of "${b}"; then
+          all_dates+=("${b}")
+          all_ends+=("${day_end}")
+          all_reasons+=("${c}")
+        else
+          problems+=("exceptions.all の ${a} 件目の date ${b} ${date_error}")
+        fi
+        ;;
+      nixpkgs)
+        if day_end_of "${b}"; then
+          part_dates+=("${b}")
+          part_ends+=("${day_end}")
+          part_packages+=("${c}")
+          part_reasons+=("${d}")
+        else
+          problems+=("exceptions.fromNixpkgs の ${a} 件目の date ${b} ${date_error}")
+        fi
+        partial+=("exceptions.fromNixpkgs の ${a} 件目 (${c} ${b})")
+        ;;
+      upstream)
+        partial+=("exceptions.fromUpstream の ${a} 件目 (${b} ${c})")
+        ;;
+    esac
+  done <<<"${settings_text}"
+  if [[ ${config_own} -eq 1 && -n ${partial[*]+x} && -f ${dir}/flake.nix ]] && ! has_exceptions_input "${dir}"; then
+    for ((i = 0; i < ${#partial[@]}; i++)); do
+      problems+=("${partial[i]}: input ${exceptions_input} の無いこの flake では何もしない")
+    done
+    partial_hint="
+一部の例外 (fromNixpkgs・fromUpstream) は、dotfiles の home の overlay が input ${exceptions_input} と組んで
+package を差し替える欄。ほかの repo では、nixpkgs ごと新しくする exceptions.all を使う。"
+  fi
+  if [[ -n ${problems[*]+x} ]]; then
+    die "設定 ${config} の書き誤り:
+$(printf '  - %s\n' "${problems[@]}")${partial_hint}
+直すまで、どの flake の pin も選ばない・確かめない。"
+  fi
+}
+
+# 効く日数 (min_age_days) と、見出しの行の括弧の中 (setting_desc) を決める。日数の出どころ: --min-age-days >
+# FLAKE_MIN_RELEASE_AGE_DAYS (空は無いのと同じ。CI は workflow_dispatch 以外で空を渡してくる) > 設定 > 7。
+apply_days() {
+  local from
+  if [[ -n ${cli_days} ]]; then
+    min_age_days=${cli_days}
+    from=--min-age-days
+  elif [[ -n ${FLAKE_MIN_RELEASE_AGE_DAYS:-} ]]; then
+    min_age_days=${FLAKE_MIN_RELEASE_AGE_DAYS}
+    from=FLAKE_MIN_RELEASE_AGE_DAYS
+  elif [[ -n ${settings_days} ]]; then
+    min_age_days=${settings_days}
+    from=""
+  else
+    min_age_days=7
+    from=既定
+  fi
+  case ${min_age_days} in
+    '' | *[!0-9]*)
+      die "下限日数は 0 以上の整数で指定すること (${from:-${config}} の値: ${min_age_days})"
+      ;;
+  esac
+  # 先頭 0 を 8 進数と解釈させない (10# を付けられない箇所で算術に使うため)。
+  min_age_days=$((10#${min_age_days}))
+  # 日数が設定から来たときは、設定の名前だけで足りる
+  setting_desc=${from:+${from}。}${config_label}
+}
+
+# 対象の flake の設定を決め、読んで確かめ、日数を決める。$1: 対象の flake
+use_settings() {
+  config_for "$1"
+  load_settings_text
+  parse_settings "$1"
+  apply_days
+}
+
+# 何かを選ぶ・書く前に、全部の flake の設定を確かめる (書き誤りがあれば、どの flake も更新しない)。flake.nix の無い
+# ディレクトリは飛ばす (選ぶ・確かめるところで今までどおり止まる)。
+for flake_dir in "${flake_dirs[@]}"; do
+  [[ -f ${flake_dir}/flake.nix ]] || continue
+  use_settings "${flake_dir}"
+done
 
 ################
 # input の一覧 #
@@ -840,6 +1048,18 @@ resolved() {
   resolved_urls+=("github:$2/$3/$4")
 }
 
+# 全体の例外の状態の行を出す。$1: 猶予の上限 (今 − 日数)、$2: 1 なら何もしない例外 (消し時) の行だけ
+note_all_exceptions() {
+  local base=$1 idle_only=$2 i
+  for ((i = 0; i < ${#all_dates[@]}; i++)); do
+    if [[ ${all_ends[i]} -le ${base} ]]; then
+      note "例外 (全体) ${all_dates[i]}: 何もしない (猶予 ${min_age_days} 日の方が新しい。消してよい) (理由: ${all_reasons[i]})"
+    elif [[ ${idle_only} -eq 0 ]]; then
+      note "例外 (全体) ${all_dates[i]}: 効いている。nixpkgs を ${all_dates[i]} の終わりまでの公開から選ぶ (理由: ${all_reasons[i]})"
+    fi
+  done
+}
+
 # nixpkgs-exceptions を選ぶ。$1: 比べる相手 (普段の pin) の公開の添字 (分からなければ空)、
 # $2: その rev、$3: 今、残り: input の owner と repo。
 resolve_exceptions_input() {
@@ -900,7 +1120,7 @@ resolve_dir() {
   resolved_names=()
   resolved_urls=()
 
-  printf '%s==> %s (下限 %s 日。%s)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${days_from}" "${c_reset}"
+  printf '%s==> %s (下限 %s 日。%s)%s\n' "${c_cyan}" "${dir}" "${min_age_days}" "${setting_desc}" "${c_reset}"
   if [[ ! -f ${dir}/flake.lock ]]; then
     note 'flake.lock がまだ無いので flake.nix の inputs から決めます。'
   fi
@@ -967,13 +1187,7 @@ resolve_dir() {
   done <<<"${rows}"
 
   if [[ ${any_channel} -eq 1 ]]; then
-    for ((i = 0; i < ${#all_dates[@]}; i++)); do
-      if [[ ${all_ends[i]} -gt ${base} ]]; then
-        note "例外 (全体) ${all_dates[i]}: 効いている。nixpkgs を ${all_dates[i]} の終わりまでの公開から選ぶ (理由: ${all_reasons[i]})"
-      else
-        note "例外 (全体) ${all_dates[i]}: 何もしない (猶予 ${min_age_days} 日の方が新しい。消してよい) (理由: ${all_reasons[i]})"
-      fi
-    done
+    note_all_exceptions "${base}" 0
   fi
 
   # 一部 (nixpkgs から) の例外の pin。比べる相手は、今選んだ nixpkgs か、選んでいなければ lock の nixpkgs
@@ -999,6 +1213,7 @@ resolve_dir() {
 cmd_resolve() {
   local dir failed=0
   for dir in "${flake_dirs[@]}"; do
+    use_settings "${dir}"
     resolve_dir "${dir}" || failed=1
   done
   return "${failed}"
@@ -1046,6 +1261,7 @@ auto_scan() {
 cmd_update() {
   local dir i args failed=0
   for dir in "${flake_dirs[@]}"; do
+    use_settings "${dir}"
     # 1 つ落ちても残りは更新する (複数の flake をまとめて上げる用)。
     resolve_dir "${dir}" || {
       failed=1
@@ -1103,12 +1319,14 @@ allowed() {
 }
 
 cmd_check() {
-  local dir rows now name type owner repo lastmod rev ref age failed=0 checked main_rev
+  local dir rows now name type owner repo lastmod rev ref age failed=0 checked main_rev any_channel
   now=$(now_epoch)
   for dir in "${flake_dirs[@]}"; do
+    use_settings "${dir}"
     lock_path_of "${dir}" >/dev/null
     rows=$(read_inputs "${dir}" 0)
     checked=0
+    any_channel=0
     main_rev=""
     while IFS=$'\t' read -r name _ _ _ _ rev _; do
       if [[ ${name} == nixpkgs ]]; then
@@ -1116,7 +1334,7 @@ cmd_check() {
       fi
     done <<<"${rows}"
     printf '%s==> %s の pin の古さ (下限 %s 日。%s)%s\n' \
-      "${c_cyan}" "${dir}" "${min_age_days}" "${days_from}" "${c_reset}"
+      "${c_cyan}" "${dir}" "${min_age_days}" "${setting_desc}" "${c_reset}"
     if [[ ${min_age_days} -eq 0 ]]; then
       note '下限 0 なので常に通ります。'
     fi
@@ -1126,6 +1344,9 @@ cmd_check() {
       classify_input "${name}" "${type}" "${owner}" "${repo}" "${ref}"
       [[ ${input_kind} != skip ]] || continue
       checked=$((checked + 1))
+      if [[ ${input_kind} == channel ]]; then
+        any_channel=1
+      fi
       if [[ -z ${lastmod} || ${lastmod} == 0 ]]; then
         die "${dir}/flake.lock から ${name} の lastModified が読めませんでした。"
       fi
@@ -1145,12 +1366,16 @@ cmd_check() {
     if [[ ${checked} -eq 0 ]]; then
       warn "${dir}: 判定できる input がありませんでした (github 以外か follows だけ)。"
     fi
+    # 消し時は、ほかの repo では CI の出力にしか出せない (dotfiles は home の評価も警告する) ので、ここでも出す
+    if [[ ${any_channel} -eq 1 ]]; then
+      note_all_exceptions "$((now - min_age_days * 86400))" 1
+    fi
   done
   if [[ ${failed} -eq 1 ]]; then
     die "先端に近すぎる pin があります。
-flake-lock-age.sh update で ${min_age_days} 日以上前の revision へ下げ直すこと。
-セキュリティパッチのために新しい pin が要るなら、release-age.nix に例外を足す
-(nix/README.md「猶予の例外」)。意図して先端を入れた (緊急の CVE 修正など) 場合は、
+flake-lock-age.sh update で、下限日数 (見出しの行) 以上前の revision へ下げ直すこと。
+セキュリティパッチのために新しい pin が要るなら、flake の隣の release-age.nix に期間付きの例外を足す
+(dotfiles の nix/README.md「猶予の日数と例外」)。意図して先端を入れた (緊急の CVE 修正など) 場合は、
 この失敗は意図どおりなので、そのまま記録として残すか下限を下げて再実行する。"
   fi
 }
