@@ -93,15 +93,18 @@ in
 
     # 複製元: .gitignore_global (main.bash は ~/.config/git/ignore へ symlink していた)
     #
-    # NOTE: .envrc を無視している。将来 direnv を導入する場合は、
-    #       リポジトリ側の .gitignore に "!.envrc" を書かないと Git から見えず、
-    #       flake からも見えなくなる。
+    # NOTE: .envrc (direnv。modules/direnv.nix) は無視しない。repo に置いて共有する .envrc
+    #       (`use flake` など) を、その repo の .gitignore に "!.envrc" を書かずに commit できる。
+    #       秘密の値は .envrc に書かず、ここで無視している .env に置いて、.envrc から
+    #       `dotenv_if_exists` で読む (direnv の stdlib。.env が無ければ何もしない)。
+    #       commit しない手元だけの .envrc は、その repo の .git/info/exclude に書く。
+    #
+    # .direnv/ (nix-direnv の cache と GC root) は modules/direnv.nix の enableGitIntegration が足す。
     ignores = [
       ".DS_Store"
       ".env"
       ".env.*"
       "!.env.*.txt"
-      ".envrc"
       ".python-version"
       ".ruby-version"
       ".secrets/"
