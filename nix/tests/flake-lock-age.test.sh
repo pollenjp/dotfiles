@@ -13,7 +13,14 @@
 # ## 確かめること
 #
 #   - 猶予の日数: 設定の minimumReleaseAgeDays (10) で選ぶ。FLAKE_MIN_RELEASE_AGE_DAYS が設定に、--min-age-days が
-#     環境変数に勝つ。設定が無ければ 7。--config が無ければ script の隣の ../release-age.nix を読む
+#     環境変数に勝つ。設定が無ければ 7 (見出しの行に「既定。設定なし」)。--config も flake の隣の設定も無ければ、
+#     script の隣の ../release-age.nix を読む (見出しの行に「(script の隣)」)
+#   - 設定の置き場所: --config が無ければ、対象の flake の隣の release-age.nix を読む (見出しの行に「(flake の隣)」)。
+#     flake の隣が script の隣に、--config が flake の隣に勝つ。複数の flake は、それぞれの隣の設定で選ぶ
+#   - ほかの repo (script の隣に設定が無い): flake の隣の全体の例外で、猶予を満たさない nixpkgs の pin を check が通し、
+#     update もその日の終わりまでの公開を選ぶ (直しの前の版へ戻さない。ほかの github input は猶予のまま)
+#   - 一部の例外: input nixpkgs-exceptions の無い flake の隣の設定に fromNixpkgs・fromUpstream があれば止まる
+#     (nix flake update を打たない)。input のある flake の隣の設定と、script の隣の設定を借りる flake では止まらない
 #   - 全体の例外: date の日 (Asia/Tokyo) の終わりが猶予より新しければ、その日の終わりまでの最新の公開を nixpkgs に選ぶ
 #     (14:59:59 UTC の公開は入り、15:00:00 UTC は入らない)。猶予より古い date は何もしない (その旨の行)。ほかの
 #     github input (home-manager) は猶予のまま
@@ -25,9 +32,11 @@
 #     無くても一緒に選ぶ (nix flake update は lock に無い input を先端で足すため)
 #   - check: 猶予を満たさない nixpkgs は NG (終了コード 1)。全体の例外の date の日の終わりまでの nixpkgs は OK とわけを
 #     出す。nixpkgs-exceptions は nixpkgs と同じ rev なら OK、一部の例外の date の日の終わりまでなら OK、どちらでもなく
-#     新しければ NG
+#     新しければ NG。何もしなくなった全体の例外には「何もしない (… 消してよい)」の行を出す
 #   - 設定の date が YYYY-MM-DD でなければ止まる。今日 (Asia/Tokyo) より先の date も止まる (打ち間違いで猶予が
-#     外れたままになるため。check も update も)
+#     外れたままになるため。check も update も)。暦に無い date も止まる
+#   - 設定の書き誤り: 知らない欄 (どの深さでも)・欄の型 (日数が整数でない・list でない・項目が attrset でない)・無い欄・
+#     空の reason を、まとめて出して止まる。後ろの flake の設定に誤りがあれば、前の flake も更新しない
 #
 # 偽の curl は、公開の表 (releases.tsv) と commit の表 (commits.tsv) を 1 行ずつ「名前<TAB>UNIX 秒<TAB>rev」で読む。
 # 今の時刻は FLAKE_LOCK_AGE_NOW (UNIX 秒) で渡す。偽のコマンドの shebang は $BASH から作る (Nix のサンドボックスには
@@ -206,6 +215,26 @@ EOF
   echo "${d}"
 }
 
+# input nixpkgs-exceptions を持たない flake (ほかの repo・dotfiles の skill の flake の形)。$1: 名前、$2: flake.lock の中身
+new_plain_flake() {
+  local d="${work}/$1"
+  mkdir -p "${d}"
+  cat >"${d}/flake.nix" <<'EOF'
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    home-manager = {
+      url = "github:nix-community/home-manager";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+  };
+  outputs = _: { };
+}
+EOF
+  printf '%s\n' "$2" >"${d}/flake.lock"
+  echo "${d}"
+}
+
 # flake.lock の node。$1: owner、$2: repo、$3: rev、$4: lastModified、$5: ref (省けば無し)
 node() {
   local original
@@ -245,6 +274,16 @@ detail() { printf 'rc=%s\n--- nix.log\n%s\n--- stdout\n%s\n--- stderr\n%s' "$(ca
 seen() { grep -Fq -- "$1" "$2"; }
 # update が nixpkgs (と nixpkgs-exceptions) に選んだ rev を override に渡したか。$1: 結果、$2: input、$3: 公開の番号
 picked() { seen "--override-input $2 github:NixOS/nixpkgs/$(rev "$3")" "$1/nix.log"; }
+# picked の flake を分けて見る版 (複数の flake を渡したとき)。$1: 結果、$2: flake、$3: input、$4: 公開の番号
+picked_in() {
+  local line
+  while IFS= read -r line; do
+    if [[ ${line} == *"--flake $2 "* && ${line} == *"--override-input $3 github:NixOS/nixpkgs/$(rev "$4")"* ]]; then
+      return 0
+    fi
+  done <"$1/nix.log"
+  return 1
+}
 
 old_lock=$(lock "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")" "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")")
 cfg="${work}/release-age.nix"
@@ -277,12 +316,13 @@ else
   ng "--min-age-days (3) が環境変数に勝つ" "$(detail "${r}")"
 fi
 
-# 設定の無い置き場所 (script の隣に ../release-age.nix が無い) へ写して流す
+# 設定の無い置き場所 (script の隣に ../release-age.nix が無い。nix run で呼んだときの形) へ写して流す
 mkdir -p "${work}/bare/scripts"
-cp "${script}" "${work}/bare/scripts/flake-lock-age.sh"
+bare="${work}/bare/scripts/flake-lock-age.sh"
+cp "${script}" "${bare}"
 r="${work}/r-days-default"
-run_script="${work}/bare/scripts/flake-lock-age.sh" run_in "${r}" --no-scan update "${d}"
-if seen '下限 7 日' "${r}/stdout" && picked "${r}" nixpkgs 3; then
+run_script="${bare}" run_in "${r}" --no-scan update "${d}"
+if seen '下限 7 日。既定。設定なし' "${r}/stdout" && picked "${r}" nixpkgs 3; then
   ok "設定が無ければ 7 日"
 else
   ng "設定が無ければ 7 日" "$(detail "${r}")"
@@ -291,12 +331,58 @@ fi
 mkdir -p "${work}/beside/nix/scripts"
 cp "${script}" "${work}/beside/nix/scripts/flake-lock-age.sh"
 settings "${work}/beside/nix/release-age.nix" '{ minimumReleaseAgeDays = 10; }'
+beside_cfg="$(
+  cd -- "${work}/beside/nix" || exit
+  pwd -P
+)/release-age.nix"
 r="${work}/r-days-beside"
 run_script="${work}/beside/nix/scripts/flake-lock-age.sh" run_in "${r}" --no-scan update "${d}"
-if seen '下限 10 日' "${r}/stdout" && picked "${r}" nixpkgs 2; then
-  ok "--config が無ければ script の隣の ../release-age.nix を読む"
+if seen "下限 10 日。設定 ${beside_cfg} (script の隣)" "${r}/stdout" && picked "${r}" nixpkgs 2; then
+  ok "--config も flake の隣の設定も無ければ、script の隣の ../release-age.nix を読む"
 else
-  ng "--config が無ければ script の隣の ../release-age.nix を読む" "$(detail "${r}")"
+  ng "--config も flake の隣の設定も無ければ、script の隣の ../release-age.nix を読む" "$(detail "${r}")"
+fi
+
+echo "== 設定の置き場所"
+
+# 隣に 5 日の設定を置いた flake。script の隣の設定 (beside) と --config (cfg) は 10 日
+d_own=$(new_flake own "${old_lock}")
+settings "${d_own}/release-age.nix" '{ minimumReleaseAgeDays = 5; }'
+settings "${cfg}" '{ minimumReleaseAgeDays = 10; }'
+
+r="${work}/r-own"
+run_script="${bare}" run_in "${r}" --no-scan update "${d_own}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen '下限 5 日。設定 release-age.nix (flake の隣)' "${r}/stdout" \
+  && picked "${r}" nixpkgs 4; then
+  ok "--config が無ければ、対象の flake の隣の release-age.nix を読む"
+else
+  ng "--config が無ければ、対象の flake の隣の release-age.nix を読む" "$(detail "${r}")"
+fi
+
+r="${work}/r-own-beside"
+run_script="${work}/beside/nix/scripts/flake-lock-age.sh" run_in "${r}" --no-scan update "${d_own}"
+if seen '下限 5 日。設定 release-age.nix (flake の隣)' "${r}/stdout" && picked "${r}" nixpkgs 4; then
+  ok "flake の隣の設定が、script の隣の設定に勝つ"
+else
+  ng "flake の隣の設定が、script の隣の設定に勝つ" "$(detail "${r}")"
+fi
+
+r="${work}/r-own-config"
+run_script="${bare}" run_in "${r}" --config "${cfg}" --no-scan update "${d_own}"
+if seen "下限 10 日。設定 ${cfg} (--config)" "${r}/stdout" && picked "${r}" nixpkgs 2; then
+  ok "--config が、flake の隣の設定に勝つ"
+else
+  ng "--config が、flake の隣の設定に勝つ" "$(detail "${r}")"
+fi
+
+d_two=$(new_flake two "${old_lock}")
+r="${work}/r-own-two"
+run_script="${bare}" run_in "${r}" --no-scan update "${d_own}" "${d_two}"
+if [[ $(cat "${r}/rc") == 0 ]] && picked_in "${r}" "${d_own}" nixpkgs 4 && picked_in "${r}" "${d_two}" nixpkgs 3 \
+  && seen "==> ${d_two} (下限 7 日。既定。設定なし)" "${r}/stdout"; then
+  ok "複数の flake は、それぞれの隣の設定で選ぶ (隣に無い flake は 7 日)"
+else
+  ng "複数の flake は、それぞれの隣の設定で選ぶ (隣に無い flake は 7 日)" "$(detail "${r}")"
 fi
 
 echo "== 全体の例外"
@@ -457,6 +543,75 @@ else
   ng "一部の例外が無く、nixpkgs と違う新しい nixpkgs-exceptions は NG" "$(detail "${r}")"
 fi
 
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-15"; reason = "古い理由"; } ]; }'
+r="${work}/r-check-idle"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen '例外 (全体) 2026-10-15: 何もしない' "${r}/stdout"; then
+  ok "何もしなくなった全体の例外に、check も「何もしない (… 消してよい)」の行を出す"
+else
+  ng "何もしなくなった全体の例外に、check も「何もしない (… 消してよい)」の行を出す" "$(detail "${r}")"
+fi
+
+echo "== ほかの repo (script の隣に設定が無い)"
+
+d_other=$(new_plain_flake other "$(lock "$(nixpkgs_node 7 "${young}")")")
+settings "${d_other}/release-age.nix" '{ exceptions.all = [ { date = "2026-10-22"; reason = "openssl の修正"; } ]; }'
+r="${work}/r-other-check"
+run_script="${bare}" run_in "${r}" check "${d_other}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen 'OK (例外 (全体) 2026-10-22)' "${r}/stdout" \
+  && seen '設定 release-age.nix (flake の隣)' "${r}/stdout"; then
+  ok "flake の隣の全体の例外で、猶予を満たさない nixpkgs の pin を check が通す"
+else
+  ng "flake の隣の全体の例外で、猶予を満たさない nixpkgs の pin を check が通す" "$(detail "${r}")"
+fi
+
+r="${work}/r-other-update"
+run_script="${bare}" run_in "${r}" --no-scan update "${d_other}"
+if [[ $(cat "${r}/rc") == 0 ]] && picked "${r}" nixpkgs 7 \
+  && seen "--override-input home-manager github:nix-community/home-manager/$(hm 2)" "${r}/nix.log"; then
+  ok "update も flake の隣の全体の例外で選ぶ (直しの前の版へ戻さない。ほかの github input は猶予のまま)"
+else
+  ng "update も flake の隣の全体の例外で選ぶ (直しの前の版へ戻さない。ほかの github input は猶予のまま)" "$(detail "${r}")"
+fi
+
+echo "== 一部の例外の置き場所"
+
+d_plain=$(new_plain_flake plain "$(lock "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")")")
+settings "${d_plain}/release-age.nix" '{
+  exceptions.fromNixpkgs = [ { packages = [ "hello" ]; date = "2026-10-22"; reason = "一部の理由"; } ];
+  exceptions.fromUpstream = [ { package = "mise"; version = "2026.10.17"; reason = "upstream の理由"; } ];
+}'
+r="${work}/r-partial-plain"
+run_script="${bare}" run_in "${r}" --no-scan update "${d_plain}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'exceptions.fromNixpkgs の 1 件目 (hello' "${r}/stderr" \
+  && seen 'exceptions.fromUpstream の 1 件目 (mise' "${r}/stderr" && [[ ! -s ${r}/nix.log ]]; then
+  ok "input nixpkgs-exceptions の無い flake の隣の設定に、一部の例外 (nixpkgs から・upstream から) があれば止まる"
+else
+  ng "input nixpkgs-exceptions の無い flake の隣の設定に、一部の例外 (nixpkgs から・upstream から) があれば止まる" "$(detail "${r}")"
+fi
+
+d_dotlike=$(new_flake dotlike "${old_lock}")
+settings "${d_dotlike}/release-age.nix" '{ exceptions.fromUpstream = [ { package = "mise"; version = "2026.10.17"; reason = "upstream の理由"; } ]; }'
+r="${work}/r-partial-dotlike"
+run_script="${bare}" run_in "${r}" check "${d_dotlike}"
+if [[ $(cat "${r}/rc") == 0 ]]; then
+  ok "input nixpkgs-exceptions のある flake (dotfiles の nix/ の形) の隣の設定には、一部の例外を書ける"
+else
+  ng "input nixpkgs-exceptions のある flake (dotfiles の nix/ の形) の隣の設定には、一部の例外を書ける" "$(detail "${r}")"
+fi
+
+mkdir -p "${work}/dotfiles/nix/scripts"
+cp "${script}" "${work}/dotfiles/nix/scripts/flake-lock-age.sh"
+settings "${work}/dotfiles/nix/release-age.nix" '{ exceptions.fromUpstream = [ { package = "mise"; version = "2026.10.17"; reason = "upstream の理由"; } ]; }'
+d_skill=$(new_plain_flake skill "$(lock "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")")")
+r="${work}/r-partial-borrow"
+run_script="${work}/dotfiles/nix/scripts/flake-lock-age.sh" run_in "${r}" check "${d_skill}"
+if [[ $(cat "${r}/rc") == 0 ]] && seen '(script の隣)' "${r}/stdout"; then
+  ok "script の隣の設定 (dotfiles) を借りる flake (skill の flake の形) では、一部の例外を読み飛ばす"
+else
+  ng "script の隣の設定 (dotfiles) を借りる flake (skill の flake の形) では、一部の例外を読み飛ばす" "$(detail "${r}")"
+fi
+
 echo "== 設定の誤り"
 
 settings "${cfg}" '{ exceptions.all = [ { date = "2026-10-1"; reason = "形の違う日付"; } ]; }'
@@ -493,6 +648,58 @@ if [[ $(cat "${r}/rc") == 0 ]]; then
   ok "今日 (Asia/Tokyo) の date は通る"
 else
   ng "今日 (Asia/Tokyo) の date は通る" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { date = "2026-02-30"; reason = "暦に無い"; } ]; }'
+r="${work}/r-calendar"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'exceptions.all の 1 件目の date 2026-02-30 は暦に無い日付' "${r}/stderr"; then
+  ok "暦に無い date は止まる"
+else
+  ng "暦に無い date は止まる" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ minimumReleaseAge = 6; exceptions.al = [ ]; exceptions.all = [ { date = "2026-10-21"; reason = "理由"; note = "x"; } ]; }'
+r="${work}/r-unknown"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen '知らない欄 minimumReleaseAge がある' "${r}/stderr" \
+  && seen 'exceptions に知らない欄 al がある' "${r}/stderr" \
+  && seen 'exceptions.all の 1 件目に知らない欄 note がある' "${r}/stderr"; then
+  ok "知らない欄 (どの深さでも) を、まとめて出して止まる"
+else
+  ng "知らない欄 (どの深さでも) を、まとめて出して止まる" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ minimumReleaseAgeDays = "6"; exceptions.all = { date = "2026-10-21"; reason = "理由"; }; exceptions.fromNixpkgs = [ "hello" ]; }'
+r="${work}/r-types"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'minimumReleaseAgeDays は 0 以上の整数にする' "${r}/stderr" \
+  && seen 'exceptions.all は list にする' "${r}/stderr" \
+  && seen 'exceptions.fromNixpkgs の 1 件目は attrset にする' "${r}/stderr"; then
+  ok "欄の型の誤り (日数が整数でない・list でない・項目が attrset でない) で止まる"
+else
+  ng "欄の型の誤り (日数が整数でない・list でない・項目が attrset でない) で止まる" "$(detail "${r}")"
+fi
+
+settings "${cfg}" '{ exceptions.all = [ { reason = "date が無い"; } { date = "2026-10-21"; reason = ""; } ]; }'
+r="${work}/r-fields"
+run_in "${r}" --config "${cfg}" check "${d}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen 'exceptions.all の 1 件目に date が無い' "${r}/stderr" \
+  && seen 'exceptions.all の 2 件目の reason は' "${r}/stderr"; then
+  ok "無い欄と空の reason で止まる"
+else
+  ng "無い欄と空の reason で止まる" "$(detail "${r}")"
+fi
+
+d_first=$(new_flake first "${old_lock}")
+d_second=$(new_flake second "${old_lock}")
+settings "${d_second}/release-age.nix" '{ exceptions.all = [ { date = "2026-02-30"; reason = "暦に無い"; } ]; }'
+r="${work}/r-bad-later"
+run_script="${bare}" run_in "${r}" --no-scan update "${d_first}" "${d_second}"
+if [[ $(cat "${r}/rc") != 0 ]] && seen '2026-02-30' "${r}/stderr" && [[ ! -s ${r}/nix.log ]]; then
+  ok "後ろの flake の設定に誤りがあれば、前の flake も更新しない"
+else
+  ng "後ろの flake の設定に誤りがあれば、前の flake も更新しない" "$(detail "${r}")"
 fi
 
 echo

@@ -4,8 +4,10 @@
 npm / pnpm の `minimumReleaseAge` に相当する。
 
 決定の記録は dotfiles の
-[ADR 005](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/005_nix_flake_lock_min_release_age_20260813T184522JST)。
-ここは**他のリポジトリへ入れるときに要る分だけ**を書く。
+[ADR 005](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/005_nix_flake_lock_min_release_age_20260813T184522JST)
+(猶予)・[ADR 032](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/032_nixpkgs_release_age_exceptions_20261024T140555JST)
+(日数の設定と例外)・[ADR 037](https://github.com/pollenjp/dotfiles-private/tree/main/docs/adr/037_release_age_beside_flake_20261027T001056JST)
+(ほかの repo の flake の隣の設定)。ここは**他のリポジトリへ入れるときに要る分だけ**を書く。
 
 ## なぜ設定ではなく script なのか
 
@@ -84,6 +86,9 @@ nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check ./nix ./tools
 
 ## 日数を変える / 遅延を外す
 
+普段の日数を repo で決めるなら、flake の隣の `release-age.nix` の `minimumReleaseAgeDays`
+（下の「猶予の例外を書く」）。その場だけ変えるなら:
+
 ```sh
 nix run "${FLA}" -- --min-age-days 14 update
 nix run "${FLA}" -- --min-age-days 0  update   # 遅延なし = 先端
@@ -91,8 +96,66 @@ nix run "${FLA}" -- --min-age-days 0  update   # 遅延なし = 先端
 
 環境変数 `FLAKE_MIN_RELEASE_AGE_DAYS` でも同じ（CI から渡すときはこちら）。
 
-緊急の CVE 修正を先端から入れたときは CI の `check` が落ちるが、**それは意図どおり**。
-記録として残すか、下限を下げて再実行する。
+緊急の CVE 修正を入れたいときは、まず期間付きの例外を書く（下）。それでも先端から入れたときは
+CI の `check` が落ちるが、**それは意図どおり**。記録として残すか、下限を下げて再実行する。
+
+## 猶予の例外を書く (release-age.nix)
+
+セキュリティパッチ（openssl など）が猶予より新しい公開にしか無いときは、その repo の flake の隣
+（`flake.nix` と同じディレクトリ）に `release-age.nix` を置き、理由と日付つきの例外を書く。
+`flake-lock-age` は flake ごとに次の順で設定を探し、最初に見つかった 1 つだけを読む。
+
+| 順 | 設定 |
+| --- | --- |
+| 1 | `--config FILE` |
+| 2 | 対象の flake の隣の `release-age.nix`（**ほかの repo はここ**。`nix run` で呼んでも読む） |
+| 3 | script の隣の `../release-age.nix`（dotfiles のチェックアウトから叩いたときの dotfiles の設定） |
+| 4 | どれも無ければ 7 日で、例外は無い |
+
+どれが効いたかは見出しの行に出る（`==> . (下限 7 日。設定 release-age.nix (flake の隣))`。無ければ `設定なし`）。
+
+### 書ける欄
+
+```nix
+# <flake のディレクトリ>/release-age.nix
+{
+  # 普段の猶予 (日)。書かなければ 7
+  minimumReleaseAgeDays = 7;
+  # 全体: nixpkgs の pin を、date の日 (Asia/Tokyo) の終わりまでの公開から選ぶ (猶予より新しいときだけ)
+  exceptions.all = [
+    { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-23 の公開に入った"; }
+  ];
+}
+```
+
+- `exceptions.all` が新しくするのは nixpkgs（`nixpkgs-unstable` を追う input）だけ。ほかの github input は猶予のまま
+- `date` は修正の入った公開の日（Asia/Tokyo）。その日の終わりまでの公開から選ぶので、前の日だと修正の前の版になる。
+  `resolve`・`update` の `公開 YYYY-MM-DD` は UTC の日付で、UTC の 15 時以降の公開は Asia/Tokyo では翌日になる。
+  `check` は、その日の終わりまでの pin を `OK (例外 (全体) <date>)` で通す
+- `reason` には、なぜ要るか（CVE・直した版）を書く。これが repo に残る記録になる
+- `fromNixpkgs`・`fromUpstream` は書かない。dotfiles の home の overlay が input `nixpkgs-exceptions` と組んで当てる欄で、
+  その input の無い flake の設定に書くと `flake-lock-age` が止める（何もしないため）。一部の package だけを新しくする仕組みは
+  ほかの repo には無いので、nixpkgs ごと新しくする `exceptions.all` を使う
+
+### 手順
+
+1. `release-age.nix` を flake の隣に書き、`git add` する
+2. `nix run "${FLA}" -- update` で選び直す（nixpkgs は例外の日付まで、ほかの input は猶予どおり。閉包のスキャンも挟まる）。
+   `--min-age-days` で上げた pin も、ここで例外の決まりに乗り直す
+3. `flake.lock` と `release-age.nix` を commit する
+4. **CI は変えなくてよい。** `nix run … -- check` が flake の隣の設定を読み、例外の分だけ新しい pin を通す
+
+`--min-age-days` で上げたまま例外を書かずにおくと、CI の `check` は pin が猶予を越えるまで落ち、`--min-age-days` を
+付けずに `update` を打つと、猶予の決まりで選び直して直しの前の版へ戻しうる。
+
+### 確かめと消し時
+
+- 書き誤りは、どの flake を選ぶ・確かめるより前に、まとめて出して止まる: 知らない欄・欄の型・無い欄・空の `reason`・
+  YYYY-MM-DD でない `date`・暦に無い `date`・今日（Asia/Tokyo）より先の `date`（先の日付だと、その日まで猶予が外れた
+  まま先端を取り続け、`check` も通ってしまう）
+- 消し時は、おおよそ `date` + 猶予の日数のあと（普段の決まりで選んでも、`date` の公開より新しくなる）。`update`・
+  `check` の出力に `例外 (全体) <date>: 何もしない (猶予 N 日の方が新しい。消してよい)` と出たら、PR で項目を消す
+  （消し忘れても害は無い）
 
 ## 効かない範囲・限界
 

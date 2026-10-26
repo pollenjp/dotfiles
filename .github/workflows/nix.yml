@@ -128,7 +128,8 @@ jobs:
   # lock に書く pin でしか表現されていない。つまり素で `nix flake update` を
   # 叩くと遅延は黙って外れる。それに気付くための番人がこのジョブ。
   #
-  # 下限日数と例外は nix/release-age.nix から読む (script の隣の設定。ADR 032)。
+  # 下限日数と例外は nix/release-age.nix から読む (./nix は flake の隣の設定として、skill の flake は
+  # 隣に設定が無いので script の隣の設定として。ADR 032・037)。
   # 承認済みの例外 (全体・一部 nixpkgs) の date までの pin はここで通る。
   #
   # 対象はリポジトリ内の flake **すべて**。本体だけ見ていると、skill 側の

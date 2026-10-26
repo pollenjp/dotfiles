@@ -8,8 +8,10 @@ description: repo や script が手元に無い外部ツールを要求すると
   **`nix flake update` で版を上げる・`flake.lock` を更新する**ときに読む。
   flake / mise / system の選択順、`flake.nix` の骨組み、script から devShell へ
   自動で入り直すパターン、`flake.lock` を必ず commit する理由、**出たばかりの
-  revision を pin しない遅延 (minimumReleaseAge 相当)**、`.env` の読み込みや
-  git 追跡まわりのハマりどころを含む。
+  revision を pin しない遅延 (minimumReleaseAge 相当)** と、セキュリティパッチ
+  (openssl など) のために猶予より新しい nixpkgs を入れる期間付きの例外
+  (flake の隣の `release-age.nix`。CI の lock-age が猶予で落ちるときも)、
+  `.env` の読み込みや git 追跡まわりのハマりどころを含む。
 ---
 
 # pjp-nix-flake
@@ -124,11 +126,40 @@ commit 時刻）が、それは script 側が `flake.lock` を読んで判断す
 - run: nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- check
 ```
 
-日数は `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS` で変える。緊急の CVE 修正を
-先端から入れたいときは `0`。**遅延を伸ばすほど既知 CVE が未修正のまま残る期間も
-伸びる**ので、長くすれば安全になる種類の数字ではない。
+日数をその場だけ変えるなら `--min-age-days N` か `FLAKE_MIN_RELEASE_AGE_DAYS`。
+**遅延を伸ばすほど既知 CVE が未修正のまま残る期間も伸びる**ので、長くすれば安全に
+なる種類の数字ではない。
 
-根拠・新規リポジトリへの入れ方・効かない範囲 → `references/lock-age.md`
+### 猶予の例外 (release-age.nix)
+
+セキュリティパッチが猶予 (7 日) より新しい公開にしか無いときは、`--min-age-days` で
+上げたままにせず、**flake の隣 (`flake.nix` と同じディレクトリ) の `release-age.nix` に、
+理由と日付つきの例外を書く。** `flake-lock-age` は `nix run` で呼んでもそこを読むので、
+CI の `check` は手順を変えずに通り、例外が記録として残る (書かずに `update` すると、
+7 日の決まりで直しの前の版へ戻りうる)。
+
+```nix
+# release-age.nix (flake.nix の隣)
+{
+  exceptions.all = [
+    { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-23 の公開に入った"; }
+  ];
+}
+```
+
+```sh
+nix run "${FLA}" -- update   # nixpkgs を date の日 (Asia/Tokyo) の終わりまでの公開から選び直す
+git add release-age.nix flake.lock
+```
+
+- 書けるのは `minimumReleaseAgeDays` (普段の日数) と `exceptions.all` だけ。`fromNixpkgs`・
+  `fromUpstream` は dotfiles の home 専用の欄で、書くと止まる
+- `date` は修正の入った公開の日 (Asia/Tokyo。`resolve` の「公開」の日付は UTC なので、ずれることがある)。
+  今日より先・暦に無い日付・空の `reason`・知らない欄は止まる
+- 消し時は `date` + 猶予の日数のあと。`update`・`check` の出力に `何もしない (… 消してよい)`
+  と出たら PR で消す
+
+根拠・新規リポジトリへの入れ方・例外の細部・効かない範囲 → `references/lock-age.md`
 
 ## `flake.lock` は必ず commit する
 
@@ -185,5 +216,5 @@ claude-skills の `skills/README.md`（作業クローン側）を参照。
 `.env` の読み込み、git 追跡まわりの罠、差分ビルドが無いこと、mise からの移行
 → `references/gotchas.md`
 
-pin の遅延の根拠、新規リポジトリへの入れ方、効かない範囲
+pin の遅延の根拠、新規リポジトリへの入れ方、猶予の例外 (release-age.nix)、効かない範囲
 → `references/lock-age.md`
