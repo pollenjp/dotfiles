@@ -48,8 +48,9 @@
 #
 #   settings.json  : Claude Code が書き換える (権限の「常に許可」など)。
 #                    store 管理にすると書けなくなる。ここにしか書けないもの
-#                    (フック / statusLine の登録、git の設定と Bash tool の shell を渡す env、
-#                    skill を隠す skillOverrides、footer のリンクの footerLinksRegexes)
+#                    (フック / statusLine の登録、git の設定・Bash tool の shell・plugin を
+#                    https で取る印を渡す env、skill を隠す skillOverrides、footer のリンクの
+#                    footerLinksRegexes)
 #                    は scripts/bootstrap-claude-*.sh がマシンごとに注入する。
 #                    skillOverrides・env・footerLinksRegexes は望む値を
 #                    ~/.local/state/dotfiles/claude-skill-overrides.json /
@@ -276,7 +277,7 @@ in
     }
 
     # Claude のセッションに渡す env (settings.json の env)。git の設定 (GIT_CONFIG_*) と、
-    # Bash tool の shell (CLAUDE_CODE_SHELL)。
+    # Bash tool の shell (CLAUDE_CODE_SHELL) と、plugin を https で取る印 (CLAUDE_CODE_PLUGIN_PREFER_HTTPS)。
     #
     # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
     # nix/scripts/bootstrap-claude-env.sh が写す。
@@ -290,14 +291,30 @@ in
     #   managedVars  bootstrap が面倒を見る env の名前 (GIT_CONFIG_* 以外)。vars に無い名前は
     #                env から消す。managed と同じく、使わなくなった名前もここからは外さない
     #   vars         入れる env (名前 → 値)
+    #
+    # CLAUDE_CODE_PLUGIN_PREFER_HTTPS は gitViaGh.enable のときだけ vars に入れる (managedVars には
+    # いつも載せ、false にしたとき env から消えるようにする)。Claude Code は source が GitHub
+    # (owner/repo の形) の marketplace と plugin を git で取る前に、ssh -T git@github.com で鍵が通るかを
+    # 確かめる (plugin の自動更新では会話ごとに 1 回、最初の発言から最大 10 分のどこか)。WSL ではその ssh が
+    # ssh.exe を通るので、1Password の承認が出る。clone と fetch は gitConfigGh (insteadOf と gh の helper) で
+    # すでに https と gh の token を通っている (settings.json の env は Claude Code 自身が打つ git にも届く)。
+    # git を通らない確認だけが ssh を直に打つ。この env があると確認を飛ばして最初から https の URL で取るので、
+    # 取れる repo (private も) は変わらず、承認だけが出なくなる。https で取れなくても ssh には切り替えない。
+    # helper が gh なのは gitViaGh.enable のときだけなので、同じ option に結ぶ
     {
       ".local/state/dotfiles/claude-env.json".text =
         builtins.toJSON {
           managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
           gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
-          managedVars = [ "CLAUDE_CODE_SHELL" ];
+          managedVars = [
+            "CLAUDE_CODE_SHELL"
+            "CLAUDE_CODE_PLUGIN_PREFER_HTTPS"
+          ];
           vars = {
             CLAUDE_CODE_SHELL = claudeShell;
+          }
+          // lib.optionalAttrs cfg.gitViaGh.enable {
+            CLAUDE_CODE_PLUGIN_PREFER_HTTPS = "1";
           };
         }
         + "\n";
