@@ -29,7 +29,7 @@
 # であって公開時刻ではなく、Hydra の遅れ (実測で 1〜2 日) の分だけ古い側に出る。
 # つまり判定は公開日数より **緩い**。先端へ飛んだ事故を捕まえるには十分。
 #
-# ## 猶予の日数と例外 (release-age.nix。ADR 032・037)
+# ## 猶予の日数と例外 (release-age.nix。ADR 032・037・038)
 #
 # 日数と、期間付きの例外は設定のファイル release-age.nix に書く (dotfiles では nix/release-age.nix)。
 # 設定は flake ごとに次の順で探し、最初に見つかった 1 つだけを読む。どれが効いたかは見出しの行
@@ -44,14 +44,21 @@
 #
 # 日数は `--min-age-days` > `FLAKE_MIN_RELEASE_AGE_DAYS` > 設定 > 7。
 #
-# - **全体** (`exceptions.all`): date の日 (Asia/Tokyo) の終わりが猶予より新しければ、
-#   nixpkgs (nixpkgs-unstable を追う input。nixpkgs-exceptions を除く) をその日の終わり
-#   までの公開から選ぶ。ほかの github input は猶予のまま。check はその日の終わりまでの
-#   pin を通す
+# 例外の date は 2 つの書き方で、どちらも「その時までの公開を使う」と読む (ADR 038)。
+#
+#   "YYYY-MM-DD"                 その日 (Asia/Tokyo) の終わり (23:59:59 +09:00) まで
+#   "YYYY-MM-DDTHH:MM:SS+09:00"  時差を書いた RFC 3339 の timestamp (時差は Z・+HH:MM・-HH:MM)。その時刻まで
+#
+# 出力の「公開」(resolve・update) と「commit」は「YYYY-MM-DD HH:MM:SS JST (HH:MM:SS UTC)」で出すので、JST の日付か、
+# 時刻に +09:00 を付けたものを、そのまま date に写せる (check が出すのは lock の commit の時刻で、公開の時刻ではない)。
+#
+# - **全体** (`exceptions.all`): date が猶予より新しければ、nixpkgs (nixpkgs-unstable を追う input。
+#   nixpkgs-exceptions を除く) を date までの公開から選ぶ。ほかの github input は猶予のまま。check は
+#   date までの pin を通す
 # - **一部 (nixpkgs から)** (`exceptions.fromNixpkgs`): input の nixpkgs-exceptions を、
-#   項目の最も新しい date の日の終わりまでの公開にする。それが nixpkgs (普段の pin) より
-#   新しくなければ nixpkgs と同じ rev (取ってくるものを増やさない)。check は、その日の
-#   終わりまでの pin と、nixpkgs と同じ rev を通す
+#   項目の最も新しい date までの公開にする。それが nixpkgs (普段の pin) より新しくなければ
+#   nixpkgs と同じ rev (取ってくるものを増やさない)。check は、date までの pin と、nixpkgs と
+#   同じ rev を通す
 # - **一部 (upstream から)** (`exceptions.fromUpstream`): flake.lock に関わらないので
 #   ここでは使わない (home の overlay だけ。nix/lib/release-age.nix)
 #
@@ -60,10 +67,10 @@
 # 止める (何もしないのに、効いているつもりの記録が残るため)。3 を借りる flake では読み飛ばす。
 #
 # 設定の書き誤りは、どの flake を選ぶ・確かめるより前に、全部の flake の設定を確かめて、まとめて
-# 出して止める: 知らない欄・欄の型・無い欄・空の reason・YYYY-MM-DD でない date・暦に無い date・
-# 今日 (Asia/Tokyo) より先の date (打ち間違いで、その日まで猶予が外れたまま先端を取り続け、check も
-# 通ってしまうため)。package の名前が nixpkgs にあるかなど、home にかかわる確かめは home の評価
-# (nix/lib/release-age.nix) がする。
+# 出して止める: 知らない欄・欄の型・無い欄・空の reason・2 つの書き方のどちらでもない date・時差の無い
+# timestamp・時刻や時差の誤り・暦に無い date・今日 (Asia/Tokyo) より先の日付と今より先の timestamp
+# (打ち間違いで、その時まで猶予が外れたまま先端を取り続け、check も通ってしまうため)。package の名前が
+# nixpkgs にあるかなど、home にかかわる確かめは home の評価 (nix/lib/release-age.nix) がする。
 #
 # 例外がもう何もしていないか (消し時) は、home の評価 (nix/lib/release-age.nix) が
 # 警告に出す。ここは全体の例外の状態 (効いている・何もしない) を表示するだけ (check は何も
@@ -318,6 +325,27 @@ epoch_to_iso() {
   esac
 }
 
+# epoch -> 「YYYY-MM-DD HH:MM:SS」(UTC)
+epoch_to_datetime() {
+  case ${date_flavor} in
+    gnu) date -u -d "@$1" '+%Y-%m-%d %H:%M:%S' ;;
+    bsd) date -u -r "$1" '+%Y-%m-%d %H:%M:%S' ;;
+  esac
+}
+
+# 出力の時刻: epoch -> 「YYYY-MM-DD HH:MM:SS JST (HH:MM:SS UTC)」。UTC の日付が JST と違えば、UTC も日付から書く。
+# 例外の date には、JST の日付をそのまま (YYYY-MM-DD) か、この時刻を時差つきで (YYYY-MM-DDTHH:MM:SS+09:00) 写せる。
+# JST は UTC を 9 時間進めて書く (夏時間は無い。TZ のデータベースに寄らない)。
+time_label() {
+  local jst utc
+  jst=$(epoch_to_datetime "$(($1 + 9 * 3600))")
+  utc=$(epoch_to_datetime "$1")
+  if [[ ${jst%% *} == "${utc%% *}" ]]; then
+    utc=${utc#* }
+  fi
+  printf '%s JST (%s UTC)\n' "${jst}" "${utc}"
+}
+
 # HTTP の Last-Modified ("Mon, 25 May 2026 20:47:05 GMT") -> epoch。
 # 月名を英語で読ませるため LC_ALL=C を固定する。
 http_date_to_epoch() {
@@ -348,20 +376,39 @@ now_epoch() {
   fi
 }
 
-# YYYY-MM-DD の日 (Asia/Tokyo) の終わり (23:59:59 +09:00。夏時間は無い) の UNIX 秒を day_end へ入れる。
-# 暦の計算は bash の算術でする (GNU と BSD の date の違いに寄らない)。形が違う・暦に無い・今日 (Asia/Tokyo) より
-# 先なら、わけ (「は …」) を date_error へ入れて 1 を返す。返り値ではなくグローバルへ置くのは、$(...) で呼ぶと
-# subshell になって配列などへ足せないため。
+# 設定の date の境目の UNIX 秒を bound へ、出力での言い方を bound_text へ入れる。書き方は 2 つ:
 #
-# 今日より先の日付を誤りにするのは、date が「その日までの公開を使う」下限で、打ち間違いの先の日付だと、その日まで
-# 猶予が外れたまま先端を取り続け、check も通り、消し時の警告も出ないため。今日の日の終わりは今から 24 時間より先には
-# ならないので、それを越えれば先の日付。
-day_end=""
+#   YYYY-MM-DD                 その日 (Asia/Tokyo) の終わり (23:59:59 +09:00。夏時間は無い)。「YYYY-MM-DD の終わり (Asia/Tokyo)」
+#   YYYY-MM-DDTHH:MM:SS+09:00  時差を書いた RFC 3339 の timestamp (時差は Z・+HH:MM・-HH:MM)。その時刻。time_label の形
+#
+# 暦の計算は bash の算術でする (GNU と BSD の date の違いに寄らない)。形が違う・時差が無い・時刻か時差が正しくない・
+# 暦に無い・今 (日付なら今日 (Asia/Tokyo)) より先なら、わけ (「は …」「に …」) を date_error へ入れて 1 を返す。
+# 返り値ではなくグローバルへ置くのは、$(...) で呼ぶと subshell になって配列などへ足せないため。書き方と時刻は
+# nix/lib/release-age-date.nix (dotfiles の home の評価) と同じに保つ。
+#
+# 先の日付・時刻を誤りにするのは、date が「その時までの公開を使う」下限で、打ち間違いの先の値だと、その時まで猶予が
+# 外れたまま先端を取り続け、check も通り、消し時の警告も出ないため。今日の日の終わりは今から 24 時間より先には
+# ならないので、日付はそれを越えれば先の日付。
+bound=""
+bound_text=""
 date_error=""
-day_end_of() {
-  local y m d dim era yoe mp doy doe days now
-  if [[ ! $1 =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
-    date_error="は YYYY-MM-DD ではない"
+bound_of() {
+  local y m d hh="" mi=0 ss=0 sign="" oh=0 om=0 dim era yoe mp doy doe days now
+  local timestamp='^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(Z|([+-])([0-9]{2}):([0-9]{2}))$'
+  if [[ $1 =~ ^([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
+    :
+  elif [[ $1 =~ ${timestamp} ]]; then
+    hh=$((10#${BASH_REMATCH[4]}))
+    mi=$((10#${BASH_REMATCH[5]}))
+    ss=$((10#${BASH_REMATCH[6]}))
+    sign=${BASH_REMATCH[8]}
+    oh=$((10#${BASH_REMATCH[9]:-0}))
+    om=$((10#${BASH_REMATCH[10]:-0}))
+  elif [[ $1 =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(:[0-9]{2})?$ ]]; then
+    date_error="に時差が無い (末尾に +09:00 か Z を付ける。どちらの時間か決まらないため)"
+    return 1
+  else
+    date_error="は YYYY-MM-DD か、時差つきの YYYY-MM-DDTHH:MM:SS+09:00 (…Z) ではない"
     return 1
   fi
   y=$((10#${BASH_REMATCH[1]}))
@@ -383,6 +430,10 @@ day_end_of() {
     date_error="は暦に無い日付"
     return 1
   fi
+  if ((hh > 23 || mi > 59 || ss > 59 || oh > 23 || om > 59)); then
+    date_error="は時刻か時差が正しくない"
+    return 1
+  fi
   # 1970-01-01 からの日数 (days from civil。3 月始まりの年で数える)
   if ((m <= 2)); then
     y=$((y - 1))
@@ -393,10 +444,25 @@ day_end_of() {
   doy=$(((153 * mp + 2) / 5 + d - 1))
   doe=$((yoe * 365 + yoe / 4 - yoe / 100 + doy))
   days=$((era * 146097 + doe - 719468))
-  day_end=$((days * 86400 + 86400 - 1 - 9 * 3600))
   now=$(now_epoch)
-  if [[ ${day_end} -gt $((now + 86400)) ]]; then
-    date_error="は今日 ($(epoch_to_day "$((now + 9 * 3600))") Asia/Tokyo) より先 (先の日付だと、その日まで猶予が外れたままになる)"
+  if [[ -z ${hh} ]]; then
+    bound=$((days * 86400 + 86400 - 1 - 9 * 3600))
+    bound_text="$1 の終わり (Asia/Tokyo)"
+    if [[ ${bound} -gt $((now + 86400)) ]]; then
+      date_error="は今日 ($(epoch_to_day "$((now + 9 * 3600))") Asia/Tokyo) より先 (先の日付だと、その日まで猶予が外れたままになる)"
+      return 1
+    fi
+    return 0
+  fi
+  bound=$((days * 86400 + hh * 3600 + mi * 60 + ss))
+  if [[ ${sign} == + ]]; then
+    bound=$((bound - oh * 3600 - om * 60))
+  else
+    bound=$((bound + oh * 3600 + om * 60))
+  fi
+  bound_text=$(time_label "${bound}")
+  if [[ ${bound} -gt ${now} ]]; then
+    date_error="は今 ($(time_label "${now}")) より先 (先の時刻だと、その時刻まで猶予が外れたままになる)"
     return 1
   fi
 }
@@ -433,7 +499,7 @@ let
   str = v: builtins.isString v && v != "";
   # 項目の欄: 正しいか (ok) と、誤りのときに「<欄> は」に続ける文 (want)
   fields = {
-    date = { ok = str; want = "\"YYYY-MM-DD\" の文字列にする"; };
+    date = { ok = str; want = "\"YYYY-MM-DD\" か、時差つきの \"YYYY-MM-DDTHH:MM:SS+09:00\" の文字列にする"; };
     reason = { ok = str; want = "空でない文字列にする (なぜ要るかを書く)"; };
     packages = { ok = v: builtins.isList v && v != [ ] && builtins.all str v; want = "空でない文字列の、空でない list にする"; };
     package = { ok = str; want = "空でない文字列にする"; };
@@ -500,14 +566,16 @@ config_label="" # 見出しの行に出す「設定 <パス> (<どこから>)」
 config_own=0    # 1 なら、その flake の設定 (--config・flake の隣)。0 は script の隣の設定を借りるか、設定なし
 settings_text=""
 settings_days=""
-# 全体の例外 (date・その日の終わりの UNIX 秒・reason) と、一部 (nixpkgs から) の例外 (同じく + packages)
+# 全体の例外 (date・その境目の UNIX 秒・出力での言い方 (bound_text)・reason) と、一部 (nixpkgs から) の例外 (同じく + packages)
 all_dates=()
 all_ends=()
 all_reasons=()
+all_uptos=()
 part_dates=()
 part_ends=()
 part_packages=()
 part_reasons=()
+part_uptos=()
 min_age_days=""
 setting_desc="" # 見出しの行の括弧の中 (下限の日数の後ろ)
 
@@ -592,29 +660,33 @@ parse_settings() {
   all_dates=()
   all_ends=()
   all_reasons=()
+  all_uptos=()
   part_dates=()
   part_ends=()
   part_packages=()
   part_reasons=()
+  part_uptos=()
   while IFS=$'\t' read -r kind a b c d; do
     case ${kind} in
       error) problems+=("${a}") ;;
       days) settings_days=${a} ;;
       all)
-        if day_end_of "${b}"; then
+        if bound_of "${b}"; then
           all_dates+=("${b}")
-          all_ends+=("${day_end}")
+          all_ends+=("${bound}")
           all_reasons+=("${c}")
+          all_uptos+=("${bound_text}")
         else
           problems+=("exceptions.all の ${a} 件目の date ${b} ${date_error}")
         fi
         ;;
       nixpkgs)
-        if day_end_of "${b}"; then
+        if bound_of "${b}"; then
           part_dates+=("${b}")
-          part_ends+=("${day_end}")
+          part_ends+=("${bound}")
           part_packages+=("${c}")
           part_reasons+=("${d}")
+          part_uptos+=("${bound_text}")
         else
           problems+=("exceptions.fromNixpkgs の ${a} 件目の date ${b} ${date_error}")
         fi
@@ -954,10 +1026,10 @@ release_index_of_rev() {
   done
 }
 
-# 表示用: 添字の公開の「名前 / 公開 YYYY-MM-DD (n 日前)」
+# 表示用: 添字の公開の「名前 / 公開 YYYY-MM-DD HH:MM:SS JST (HH:MM:SS UTC) / n 日前」
 release_label() {
-  printf '%s / 公開 %s (%s 日前)' "${releases[$1]}" \
-    "$(epoch_to_day "${release_epochs[$1]}")" "$(age_days "$2" "${release_epochs[$1]}")"
+  printf '%s / 公開 %s / %s 日前' "${releases[$1]}" \
+    "$(time_label "${release_epochs[$1]}")" "$(age_days "$2" "${release_epochs[$1]}")"
 }
 
 #####################
@@ -1055,7 +1127,7 @@ note_all_exceptions() {
     if [[ ${all_ends[i]} -le ${base} ]]; then
       note "例外 (全体) ${all_dates[i]}: 何もしない (猶予 ${min_age_days} 日の方が新しい。消してよい) (理由: ${all_reasons[i]})"
     elif [[ ${idle_only} -eq 0 ]]; then
-      note "例外 (全体) ${all_dates[i]}: 効いている。nixpkgs を ${all_dates[i]} の終わりまでの公開から選ぶ (理由: ${all_reasons[i]})"
+      note "例外 (全体) ${all_dates[i]}: 効いている。nixpkgs を ${all_uptos[i]} までの公開から選ぶ (理由: ${all_reasons[i]})"
     fi
   done
 }
@@ -1063,9 +1135,9 @@ note_all_exceptions() {
 # nixpkgs-exceptions を選ぶ。$1: 比べる相手 (普段の pin) の公開の添字 (分からなければ空)、
 # $2: その rev、$3: 今、残り: input の owner と repo。
 resolve_exceptions_input() {
-  local ref_index=$1 ref_rev=$2 now=$3 owner=$4 repo=$5 i end x_index="" x_end=""
+  local ref_index=$1 ref_rev=$2 now=$3 owner=$4 repo=$5 i end x_index="" x_upto=""
   local states=()
-  # 項目ごとに、その日の終わりまでの最新の公開が普段の pin より新しいか
+  # 項目ごとに、date (日付ならその日の終わり) までの最新の公開が普段の pin より新しいか
   for ((i = 0; i < ${#part_dates[@]}; i++)); do
     end=${part_ends[i]}
     if [[ ${end} -gt ${now} ]]; then
@@ -1075,17 +1147,17 @@ resolve_exceptions_input() {
       states+=("効いている")
       if [[ -z ${x_index} || ${picked} -gt ${x_index} ]]; then
         x_index=${picked}
-        x_end=${part_dates[i]}
+        x_upto=${part_uptos[i]}
       fi
     else
-      states+=("何もしない (その日の終わりまでの公開が普段の pin より新しくない。消してよい)")
+      states+=("何もしない (${part_uptos[i]} までの公開が普段の pin より新しくない。消してよい)")
     fi
   done
   if [[ -n ${x_index} ]]; then
     release_rev_at "${x_index}"
     resolved "${exceptions_input}" "${owner}" "${repo}" "${found_rev}"
     printf '  %-14s %s\n' "${exceptions_input}" "${found_rev}"
-    detail "$(release_label "${x_index}" "${now}") / 一部の例外の ${x_end} の終わりまで"
+    detail "$(release_label "${x_index}" "${now}") / 一部の例外の ${x_upto} まで"
   else
     resolved "${exceptions_input}" "${owner}" "${repo}" "${ref_rev}"
     printf '  %-14s %s\n' "${exceptions_input}" "${ref_rev}"
@@ -1174,7 +1246,7 @@ resolve_dir() {
         resolved "${name}" "${owner}" "${repo}" "${gh_rev}"
         printf '  %-14s %s\n' "${name}" "${gh_rev}"
         if [[ -n ${gh_epoch} ]]; then
-          detail "${owner}/${repo}${ref:+ (${ref})} / commit $(epoch_to_day "${gh_epoch}") ($(age_days "${now}" "${gh_epoch}") 日前)"
+          detail "${owner}/${repo}${ref:+ (${ref})} / commit $(time_label "${gh_epoch}") / $(age_days "${now}" "${gh_epoch}") 日前"
         fi
         ;;
       skip)
@@ -1352,14 +1424,14 @@ cmd_check() {
       fi
       age=$(age_days "${now}" "${lastmod}")
       if [[ ${age} -ge ${min_age_days} ]]; then
-        printf '  %-14s %s (%s 日前)  OK\n' \
-          "${name}" "$(epoch_to_day "${lastmod}")" "${age}"
+        printf '  %-14s commit %s / %s 日前  OK\n' \
+          "${name}" "$(time_label "${lastmod}")" "${age}"
       elif [[ ${input_kind} == channel ]] && allowed "${name}" "${lastmod}" "${rev}" "${main_rev}"; then
-        printf '  %-14s %s (%s 日前)  OK (%s)\n' \
-          "${name}" "$(epoch_to_day "${lastmod}")" "${age}" "${allowed_by}"
+        printf '  %-14s commit %s / %s 日前  OK (%s)\n' \
+          "${name}" "$(time_label "${lastmod}")" "${age}" "${allowed_by}"
       else
-        printf '  %-14s %s (%s 日前)  %sNG%s\n' \
-          "${name}" "$(epoch_to_day "${lastmod}")" "${age}" "${c_red}" "${c_reset}"
+        printf '  %-14s commit %s / %s 日前  %sNG%s\n' \
+          "${name}" "$(time_label "${lastmod}")" "${age}" "${c_red}" "${c_reset}"
         failed=1
       fi
     done <<<"${rows}"

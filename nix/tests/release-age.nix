@@ -10,6 +10,9 @@
 #   - 例外が無ければ overlay も警告も無く、猶予の既定は 7 日。このとき input の nixpkgs-exceptions を読まない
 #   - 日付は Asia/Tokyo の日の終わりで読む: 全体の例外の date = 2026-10-23 は、普段の pin の commit が
 #     2026-10-23 14:59:59 UTC までなら効いていて、15:00:00 UTC からは「もう何もしていない」の警告になる
+#   - 時差つきの timestamp の date は、その時刻で読む: 2026-10-24T08:00:00+09:00・2026-10-23T23:00:00Z・
+#     2026-10-23T18:00:00-05:00 (同じ時刻で、日をまたぐ) は、普段の pin の commit がその時刻までなら効いていて、1 秒あと
+#     からは「もう何もしていない」の警告になる。一部 (nixpkgs から) も同じ
 #   - 一部 (nixpkgs から): 例外の pin が普段の pin より新しく、普段の pin が date を越えていなければ、package を例外の
 #     pin から取る。例外の pin が新しくなければ「まだ何もしていない」、普段の pin が date を越えたら「もう何もしていない」
 #     の警告 (このとき nixpkgs-exceptions を読まない)
@@ -17,7 +20,8 @@
 #     version 以上なら「もう何もしていない」の警告 (nixpkgs の版を出す)、その system の配布物が無ければその旨の警告
 #   - 警告はどれも「nixpkgs の例外」で始まる (CI がこの文だけを落とさずに annotation にする)
 #   - 書き誤りは評価で止まる: 知らない欄 (上の段と項目)・暦に無い日付・空の reason・負の日数・入れ子の名前・pkgs に
-#     無い名前・一部の例外に同じ package が 2 回・upstream の package のファイルが無い・その版と version が違う
+#     無い名前・一部の例外に同じ package が 2 回・upstream の package のファイルが無い・その版と version が違う・
+#     時差の無い timestamp・timestamp の時刻や時差の誤り・暦に無い日付の timestamp
 #   - 差し替えた package を使っているほかの package は、例外の有無で home.packages の drvPath を比べると見つかる
 #     (hello を差し替えると、hello を呼ぶ uses-hello が見つかり、jq は見つからない)
 #   - 実の設定 (nix/release-age.nix) で: 設定が評価でき、差し替えた名前は home の pkgs で overlay の package になり、
@@ -96,6 +100,13 @@ let
     inherit package version;
     reason = "一部 upstream の理由";
   };
+
+  # 同じ時刻 (2026-10-23 23:00:00 UTC) を、時差を替えて書いた全体の例外
+  timestampItems = map (date: allItem // { inherit date; }) [
+    "2026-10-24T08:00:00+09:00"
+    "2026-10-23T23:00:00Z"
+    "2026-10-23T18:00:00-05:00"
+  ];
 
   none = run (untouched "20261023000000") { };
   allBefore = run (untouched "20261023145959") { exceptions.all = [ allItem ]; };
@@ -216,6 +227,30 @@ let
       ];
     }
     {
+      name = "全体: 時差つきの timestamp (+09:00・Z・-05:00 で同じ時刻) は、普段の pin の commit がその時刻までなら警告は無く、1 秒あとからは消すよう警告する";
+      ok = builtins.all (
+        i:
+        (run (untouched "20261023230000") { exceptions.all = [ i ]; }).warnings == [ ]
+        && warnsOnce (run (untouched "20261023230001") { exceptions.all = [ i ]; }) [
+          "もう何もしていない"
+          "exceptions.all"
+          i.date
+        ]
+      ) timestampItems;
+    }
+    {
+      name = "一部 (nixpkgs から): timestamp の date も、普段の pin の commit がその時刻を越えたら「もう何もしていない」";
+      ok =
+        warnsOnce
+          (run (untouched "20261023230001") {
+            exceptions.fromNixpkgs = [ (nixpkgsItem // { date = "2026-10-24T08:00:00+09:00"; }) ];
+          })
+          [
+            "もう何もしていない"
+            "exceptions.fromNixpkgs"
+          ];
+    }
+    {
       name = "一部 (nixpkgs から): 例外の pin が新しく date を越えていなければ、package を例外の pin から取る";
       ok =
         nixpkgsOn.replaced == [ "hello" ]
@@ -293,6 +328,14 @@ let
         bad { exceptions.all = [ (allItem // { date = "2026-02-30"; }) ]; }
         && bad { exceptions.all = [ (allItem // { reason = ""; }) ]; }
         && bad { minimumReleaseAgeDays = -1; };
+    }
+    {
+      name = "時差の無い timestamp・時刻の誤り (24:00:00)・時差の誤り (+09:60)・暦に無い日付の timestamp は評価で止まる";
+      ok =
+        bad { exceptions.all = [ (allItem // { date = "2026-10-23T12:00:00"; }) ]; }
+        && bad { exceptions.all = [ (allItem // { date = "2026-10-23T24:00:00+09:00"; }) ]; }
+        && bad { exceptions.all = [ (allItem // { date = "2026-10-23T12:00:00+09:60"; }) ]; }
+        && bad { exceptions.all = [ (allItem // { date = "2026-02-30T12:00:00Z"; }) ]; };
     }
     {
       name = "一部の例外に、入れ子の名前 (python3Packages.certifi) と pkgs に無い名前は書けない";

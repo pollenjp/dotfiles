@@ -148,14 +148,16 @@ CI の `check` は手順を変えずに通り、例外が記録として残る (
 ```
 
 ```sh
-nix run "${FLA}" -- update   # nixpkgs を date の日 (Asia/Tokyo) の終わりまでの公開から選び直す
+nix run "${FLA}" -- update   # nixpkgs を date までの公開から選び直す
 git add release-age.nix flake.lock
 ```
 
 - 書けるのは `minimumReleaseAgeDays` (普段の日数) と `exceptions.all` だけ。`fromNixpkgs`・
   `fromUpstream` は dotfiles の home 専用の欄で、書くと止まる
-- `date` は修正の入った公開の日 (Asia/Tokyo。`resolve` の「公開」の日付は UTC なので、ずれることがある)。
-  今日より先・暦に無い日付・空の `reason`・知らない欄は止まる
+- `date` は `"YYYY-MM-DD"` (その日 Asia/Tokyo の終わりまで) か、時差を書いた timestamp
+  (`"2026-10-23T18:20:00+09:00"`・`"…Z"`。その時刻まで)。`resolve`・`update` の
+  `公開 … JST (… UTC)` の行から、JST の日付か、時刻に `+09:00` を付けて写す
+- 時差の無い timestamp・今より先・暦に無い日付・空の `reason`・知らない欄は止まる
 - 消し時は `date` + 猶予の日数のあと。`update`・`check` の出力に `何もしない (… 消してよい)`
   と出たら PR で消す
 
