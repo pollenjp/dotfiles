@@ -15,7 +15,8 @@
 #   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
 #                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
-#                                     (settings.json の footerLinksRegexes に写す値。下記)
+#                                     (settings.json の footerLinksRegexes に写す値。cc-page の規則の
+#                                     port を dotfiles.ccPages.port で埋める。下記)
 #   files/claude/skills/<name>/ -> ~/.claude/skills/<name>  (ディレクトリ単位)
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
@@ -329,13 +330,21 @@ in
     }
 
     # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
-    # チケットと PR を、Claude Code の footer にクリックできるバッジとして並べる。
+    # チケット・PR と cc-page のページを、Claude Code の footer にクリックできるバッジとして並べる。
     #
     # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
-    # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず、
-    # files/claude/footer-links.json をそのまま置く (マシンごとに変える理由がまだ無い)。
+    # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず files/claude/footer-links.json に
+    # 書き、cc-page の規則の @ccPagesPort@ だけをこのマシンの cc-pages の port で埋める。規則の url は
+    # 固定の origin (port を含む) で書くしかなく、port は dotfiles.ccPages.port でマシンごとに変わるため
+    # (null なら cc-pages の既定の 7777。home/modules/cc-pages.nix は config.toml を置かない)。
     {
-      ".local/state/dotfiles/claude-footer-links.json".source = claudeRoot + "/footer-links.json";
+      ".local/state/dotfiles/claude-footer-links.json".text =
+        let
+          port = if config.dotfiles.ccPages.port == null then 7777 else config.dotfiles.ccPages.port;
+        in
+        builtins.replaceStrings [ "@ccPagesPort@" ] [ (toString port) ] (
+          builtins.readFile (claudeRoot + "/footer-links.json")
+        );
     }
 
     # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。

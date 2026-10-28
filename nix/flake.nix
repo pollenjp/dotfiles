@@ -162,13 +162,23 @@
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
-          # 同じ RegExp で確かめられる node で流す
+          # 同じ RegExp で確かめられる node で流す。cc-page の規則は port を home の設定で埋めるので、
+          # home から作った JSON を、既定の port (7777) と 7780 の 2 通りで渡す
           claude-footer-links-test =
-            pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; }
-              ''
-                node ${./tests/claude-footer-links.test.mjs} ${./files/claude/footer-links.json}
-                touch $out
-              '';
+            let
+              generated =
+                modules:
+                pkgs.writeText "claude-footer-links.json"
+                  (mkHome {
+                    username = "tester";
+                    inherit system modules;
+                  }).config.home.file.".local/state/dotfiles/claude-footer-links.json".text;
+            in
+            pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
+              node ${./tests/claude-footer-links.test.mjs} ${generated [ ]} 7777
+              node ${./tests/claude-footer-links.test.mjs} ${generated [ { dotfiles.ccPages.port = 7780; } ]} 7780
+              touch $out
+            '';
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
@@ -333,6 +343,14 @@
         }
         // {
           claude-env-state = import ./tests/claude-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-footer-links-state = import ./tests/claude-footer-links.nix {
             inherit
               lib
               pkgs

@@ -443,6 +443,9 @@ in
         「既にファイルがある」で止まる。退けてから switch する
       - port を変える前に作ったページのリンク (http://localhost:<前の port>/…) は開けなくなる。
         ページそのものは残るので、リンクの port を今の値に書き換えれば開ける
+      - Claude Code の footer の cc-page のバッジ (home/modules/claude.nix が作る
+        ~/.local/state/dotfiles/claude-footer-links.json) も、この port のページだけを拾う。
+        settings.json へ写すのは scripts/bootstrap-claude-footer-links.sh (setup --update で走る)
     '';
   };
 

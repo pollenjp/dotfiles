@@ -49,6 +49,9 @@
 # port を変えても unit ファイルが同じだと、switch (sd-switch) は daemon を再起動せず、
 # 前の port で動き続ける。X-Restart-Triggers に config.toml の store path を書いて、
 # config.toml が変われば unit ファイルも変わるようにしている。
+#
+# この port は home/modules/claude.nix も読み、Claude Code の footer の cc-page のバッジの規則
+# (~/.local/state/dotfiles/claude-footer-links.json) に埋める (null なら同じく 7777)。
 { config, lib, ... }:
 
 let

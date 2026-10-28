@@ -1,24 +1,25 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Claude Code の footer に会話のチケットと PR のリンクを出す設定 (footerLinksRegexes) を ~/.claude/settings.json へ登録する。
-# 冪等。`setup.sh --update` でも毎回走る。
+# Claude Code の footer に会話のチケットと PR と cc-page のリンクを出す設定 (footerLinksRegexes) を
+# ~/.claude/settings.json へ登録する。冪等。`setup.sh --update` でも毎回走る。
 #
 # ## 何のために
 #
-# 会話の中で触れた Dev Tracker のチケット (TKT-n / WRK-TKT-n) と GitHub の PR を、
+# 会話の中で触れた Dev Tracker のチケット (TKT-n / WRK-TKT-n) と GitHub の PR、cc-page のページを、
 # プロンプト下の footer にクリックできるバッジとして並べる。Claude Code の
 # footerLinksRegexes (2.1.176〜) が、turn の出力 (tool の結果と Claude の応答の文章) に
 # 当たった正規表現からバッジを作る。並ぶのは今の branch の PR バッジ込みで最大 5 個で、
 # 新しいものが先頭に入り、6 個目が来ると一番古いものが落ちる。ユーザーが打った文は拾わない。
 #
 # 正規表現そのものと、なぜその形なのかは nix/README.md の
-# 「footer に会話のチケットと PR のリンクを出す」を参照。
+# 「footer に会話のチケットと PR と cc-page のリンクを出す」を参照。
 #
 # ## 何を読むか
 #
 # home-manager が置く ~/.local/state/dotfiles/claude-footer-links.json
-# (中身は nix/files/claude/footer-links.json。footerLinksRegexes の配列そのもの)。
+# (footerLinksRegexes の配列そのもの。中身は nix/files/claude/footer-links.json の cc-page の規則の
+# @ccPagesPort@ を、このマシンの cc-pages の port で埋めたもの。home/modules/claude.nix が作る)。
 #
 # 無ければ、この形を置く世代へまだ switch していないということなので、
 # 警告して exit 0 する (setup.sh は手順が 1 つ失敗すると残りを走らせないため)。
