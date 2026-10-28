@@ -861,7 +861,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS・plugin を https で取るのは[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
-| 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-のリンクを出す)） |
+| 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR と cc-page のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-と-cc-page-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
@@ -2645,13 +2645,13 @@ shell prompt（starship）が既に出しているもの（時刻・`user@host`�
 > 在るマシンでは、初回の switch が `would be clobbered` で止まる。
 > 先に消す（または `-b` を付けて退避する）こと。
 
-### footer に会話のチケットと PR のリンクを出す
+### footer に会話のチケットと PR と cc-page のリンクを出す
 
-会話の中で触れた Dev Tracker のチケット（`TKT-n` / `WRK-TKT-n`）と GitHub の PR を、
+会話の中で触れた Dev Tracker のチケット（`TKT-n` / `WRK-TKT-n`）と GitHub の PR、cc-page のページを、
 プロンプト下の footer にクリックできるバッジとして並べる。
 
 ```
-⏵⏵ bypass permissions on (shift+tab to cycle) · TKT-12 · dotfiles#34 · claude-skills#5 · TKT-9
+⏵⏵ bypass permissions on (shift+tab to cycle) · TKT-12 · 📄0003 · dotfiles#34 · claude-skills#5 · TKT-9
 ```
 
 Claude Code の `footerLinksRegexes`（2.1.176〜）を使う。turn の終わりに、その turn の
@@ -2662,27 +2662,46 @@ Claude Code の `footerLinksRegexes`（2.1.176〜）を使う。turn の終わ�
 - ユーザーが打った文は拾わない。Claude が応答で同じリンクに触れれば拾う
 - `/clear` で消え、resume すると transcript の末尾から作り直す
 - `settings.json` を書き換えると、実行中の session にも次の turn から効く
+- 問いの上に footer の 2 行を出す mod も、同じ `footerLinksRegexes` を本体と同じ決まりで読む。
+  規則を足せば、問いの上にも同じバッジが出る
 
 | 項目 | 拾うもの | バッジ |
 | --- | --- | --- |
 | チケット | ID と `https://app.notion.com/p/…` が同じ行に並ぶもの（`ticket.sh` の書き込み系の出力 `TKT-n: …  URL`、応答の `TKT-n: URL` や `[TKT-n](URL)`） | `TKT-12` |
 | PR | `https://github.com/<owner>/<repo>/pull/<番号>`。`ticket.sh list` の行（空白 2 つ + `TKT-n` で始まる）に載るものは外す | `dotfiles#34` |
+| cc-page | `http://localhost:<port>/p/<セッション>/<番号>-<題>`（`cc-pages new` の出力の JSON の `url`、応答の `→ URL` の行、`[…](URL)`）。`<port>` はこのマシンの cc-pages の port。セッションの top（`/p/<セッション>/`）・ほかの port・`%XX` に符号化された URL は拾わない | `📄0003` |
 
 値は `nix/files/claude/footer-links.json`。この形にしている理由:
 
 - チケットの URL はタイトルの英数字の部分と 32 桁の id でできていて、`TKT-n` を含まない。
   label に ID を出すため、ID と URL が同じ行に並ぶ形を拾う。間に別の ID を挟んだ URL とは組ませない
 - url の `{名前}` に差し込む値は `encodeURIComponent` されるので、URL を丸ごと 1 つの
-  placeholder で差し込めない。owner・repo・番号や、Notion の page の部分を別々に取って組み直す
+  placeholder で差し込めない。owner・repo・番号や、Notion の page の部分、cc-page のセッションと
+  ページを別々に取って組み直す
 - 会話の始めに打つ `ticket.sh list` には、他のチケットの PR が載る。素朴に拾うと関係の無い PR が
   毎回 footer に居座るので、否定の後読みで外している
+- 本体も mod も、url の型紙の `{…}` を `x` にして読んだ origin（scheme・host・port）と違う url は捨てるので、
+  cc-page の port は型紙に書くしかない。port はマシンごとに `dotfiles.ccPages.port`
+  （[待ち受けの port を変える](#待ち受けの-port-を変える)）で変わるので、`footer-links.json` には
+  `@ccPagesPort@` と書き、home-manager がこのマシンの port（`null` なら cc-pages の既定の 7777）で埋めて
+  `~/.local/state/dotfiles/claude-footer-links.json` を作る（`home/modules/claude.nix`）
+- cc-page の題には日本語が入る。cc-pages の題の部分は文字と数字と `-` だけ（英字は小文字）なので、
+  ASCII では英小文字・数字・`-` のほか（JSON の `"`、Markdown の `)`・`]`、空白、`/`・`#` など）で止め、
+  ASCII の外では一般句読点（`…`・`“”` など）と和文・全角の句読点・括弧・空白で止める。Claude Code は
+  `u` フラグなしで RegExp を作るので、`\p{L}` は使えない
+- `%XX` に符号化された cc-page の URL（ブラウザのアドレス欄の写しなど）は、拾うと `encodeURIComponent` で
+  二重に符号化されて開けない。後ろに `%` か題の文字が続くときは、途中で切った一致も作らずに拾わない
+- cc-page の url は、末尾に `/` を付けたページの正規の形にする（cc-pages は `/` の無い形を 301 でここへ
+  送る）。本文の URL に `/` があっても無くても、同じバッジにまとまる
 - `footerLinksRegexes` は user / flag / managed の settings からしか読まれない。repo の
   `.claude/settings.json` に置いても効かない
 
 > ⚠️ tool の出力に出たリンクは何でも拾う。PR の URL を多く含む docs を読むと、5 枠がそれで
-> 埋まる。作業中のチケットは `ticket.sh` を打つたびに出力に出るので、すぐ先頭へ戻る。
+> 埋まる。前のチケットを `ticket.sh show` で読むと、そこに載る PR と cc-page も拾う。作業中のチケットは
+> `ticket.sh` を打つたびに出力に出るので、すぐ先頭へ戻る。
 
-正規表現の当たり方は `nix/tests/claude-footer-links.test.mjs` が確かめる（[テスト](#テスト)）。
+正規表現の当たり方は `nix/tests/claude-footer-links.test.mjs` が、port を埋めた状態ファイルの中身は
+`nix/tests/claude-footer-links.nix` が確かめる（[テスト](#テスト)）。
 Dev Tracker の ID の prefix を増やしたら（新しい workspace）、`footer-links.json` とテストの両方に足す。
 
 #### 登録（冪等。更新時も毎回走る）
@@ -2692,9 +2711,12 @@ Dev Tracker の ID の prefix を増やしたら（新しい workspace）、`foo
 ```
 
 statusLine と同じ事情で、値は `settings.json` にしか書けない。skill-overrides と同じく、
-home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値を置き、このコマンドが
-`.footerLinksRegexes` を丸ごと置き換える。このキーは dotfiles が持つので、手で足した項目も
+home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値（cc-page の規則の port を埋めたもの）を
+置き、このコマンドが `.footerLinksRegexes` を丸ごと置き換える。このキーは dotfiles が持つので、手で足した項目も
 次の実行で消える。足したいなら `footer-links.json` に書く。
+
+`dotfiles.ccPages.port` を変えたら、switch で状態ファイルの cc-page の規則が新しい port になり、このコマンドが
+`settings.json` へ写す（`~/dotfiles/setup --update` なら続けて走る）。写すまで、footer は前の port のページを拾う。
 
 ### herdr の中の Claude Code にリンクを出させる
 
@@ -3515,6 +3537,9 @@ bind 先の `127.0.0.1` は変えない（LAN には出さない）。
 - port を変える前に作ったページのリンク（`http://localhost:7777/…`）は開けなくなる。ページそのものは
   `~/.local/share/cc-pages` に残っている
 - いまの URL は `bootstrap-cc-pages.sh --status` の「ビューア」に出る（config.toml の `addr` から組む）
+- Claude Code の footer の cc-page のバッジも、この port のページだけを拾う
+  （[footer に会話のチケットと PR と cc-page のリンクを出す](#footer-に会話のチケットと-pr-と-cc-page-のリンクを出す)）。
+  `--update` なら規則も続けて新しい port になる。switch だけのときは `bootstrap-claude-footer-links.sh` を打つ
 
 #### 取得できないマシンでも止まらない
 

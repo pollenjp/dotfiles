@@ -10,5 +10,11 @@
     "pattern": "(?<!\\n {2}(?:WRK-)?TKT-\\d+ [^\\n]*)https://github\\.com/(?<owner>[A-Za-z0-9_.-]+)/(?<repo>[A-Za-z0-9_.-]+)/pull/(?<num>\\d+)",
     "url": "https://github.com/{owner}/{repo}/pull/{num}",
     "label": "{repo}#{num}"
+  },
+  {
+    "type": "regex",
+    "pattern": "http://localhost:@ccPagesPort@/p/(?<session>\\d{8}-[0-9A-Za-z-]+)/(?<page>(?<num>\\d{4,})(?:-(?:[-0-9a-z]|[^\\x00-\\x7f\\u2000-\\u206f\\u3000-\\u3004\\u3008-\\u303f\\u30fb\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uff65])+)?)(?![-0-9a-z%]|[^\\x00-\\x7f\\u2000-\\u206f\\u3000-\\u3004\\u3008-\\u303f\\u30fb\\uff01-\\uff0f\\uff1a-\\uff20\\uff3b-\\uff40\\uff5b-\\uff65])",
+    "url": "http://localhost:@ccPagesPort@/p/{session}/{page}/",
+    "label": "📄{num}"
   }
 ]
