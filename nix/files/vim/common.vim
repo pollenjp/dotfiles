@@ -59,7 +59,7 @@ hi SpecialKey ctermfg=59
 set hlsearch
 nnoremap <F3> :noh<CR>  " ハイライトを消す
 "############################################################
-set clipboard+=unnamedplus  "こいつを追加したらビジュアルモードでの選択からのヤンクが上手く行かなくなった
+" unnamedplus は付けない (dd・x も clipboard へ送るため)。yank だけを送る設定は ~/.vim/clipboard.vim (vim だけ)
 set tags=tags;  "親ディレクトリを再帰的にサーチ
 set display=lastline
 set showmatch
