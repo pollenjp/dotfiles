@@ -6,6 +6,7 @@
   imports = [
     ./options.nix
     ./modules/packages.nix
+    ./modules/python.nix
     ./modules/files.nix
     ./modules/git.nix
     ./modules/ssh.nix

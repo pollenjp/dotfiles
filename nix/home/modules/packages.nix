@@ -4,6 +4,7 @@
 #   - グローバルな CLI ツール   -> Nix (このファイル)
 #   - プロジェクト毎のツール固定 -> mise (mise.toml)
 #   - 言語ランタイム (node/go)  -> mise (プロジェクト毎の切替が必要なため)
+#   - python3                  -> Nix (modules/python.nix。プロジェクトで切り替えず、道具の前提として使うため)
 { pkgs, ... }:
 
 {

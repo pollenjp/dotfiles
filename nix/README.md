@@ -919,7 +919,7 @@ option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_rel
 ```
 
 公式 marketplace（`anthropics/claude-plugins-official`）を登録し、
-`superpowers` / `frontend-design` / `playwright` を導入する。
+`superpowers` / `frontend-design` / `playwright` / `claude-security` を導入する。
 足したいプラグインはスクリプト冒頭の `plugins` 配列に書く。
 
 **なぜ他の `bootstrap-claude-*.sh` のように jq で `settings.json` を書かないのか。**
@@ -937,6 +937,27 @@ option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_rel
 失敗すると残りを走らせないので、ここで落とすと後続の bootstrap が巻き添えになるため。
 marketplace の clone は SSH（`git@github.com:`）で行われるので GitHub の鍵が要る。
 鍵が無くて失敗した場合も同じく exit 0 で流す。
+
+入れられないプラグインがあっても止めず、警告して残りを入れる（exit 0。警告は[まとめ](#途中の警告のまとめ)にも出る）。
+手元の marketplace の一覧が古いと、足したばかりのプラグインは `Plugin "…" not found in marketplace` で入らない。
+`claude plugin marketplace update claude-plugins-official` で一覧を新しくしてから、
+`~/dotfiles/setup --steps bootstrap-claude-plugins` で入れ直す。`claude-personal` / `claude-work` の dir で
+`bootstrap-claude-accounts` が同じ警告を出したら、update に `CLAUDE_CONFIG_DIR=~/.claude-<名前>` を付け、
+`--steps bootstrap-claude-accounts` で入れ直す。
+
+**Claude Security（`claude-security`、beta）。** `/claude-security` で、頼んだときだけ repo か diff を多数の agent で
+調べ、パッチ案を作る（自動では当てない。[docs](https://code.claude.com/docs/en/claude-security)）。前提は次のとおり。
+
+| 前提 | この dotfiles での扱い |
+| --- | --- |
+| PATH の `python3`（3.9 以上・標準ライブラリだけ） | nixpkgs の `python3` を入れる（[後述](#python3-と-uv)）。無い・古いと `/claude-security` のメニューが警告を出し、スキャンも修正も動かない |
+| dynamic workflows | 有料プランか API が要る。Pro のアカウントは `/config` の Dynamic workflows を on にする（dotfiles では設定しない） |
+| git | `programs.git`（`home/modules/git.nix`）が入れる |
+
+- `git push`・`gh pr create` の後に、スキャンを勧める案内がユーザーにだけ出る（plugin のデータの dir、つまりアカウントごとに
+  5 回まで。subagent の中では出ない）。止めるなら `CLAUDE_SECURITY_SCAN_TIP=off`
+- スキャンの結果は repo の `CLAUDE-SECURITY-<時刻>/` に書かれる（中に自前の `.gitignore` を置く）
+- hook は外へ通信しない（metrics は Claude Code に渡す JSON を標準出力に出すだけ）
 
 > ⚠️ `claude` は `bootstrap-mise.sh` が入れるので、**このスクリプトはその後に走る必要がある**。
 > 実行順は `bootstrap-mise.sh` の `order: 10` と、こちらの `order: 20` で決めている
@@ -1448,6 +1469,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.ssh/rc` | `nix/home/modules/agent-link.nix` (生成。接続を記録する `pjp-agent-link rc` を呼ぶ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
 | `~/.config/direnv/direnv.toml`・`~/.config/direnv/lib/hm-nix-direnv.sh` | `nix/home/modules/direnv.nix` (生成。lib は nix-direnv の direnvrc。[後述](#direnv)) |
+| `~/.config/uv/uv.toml` | `nix/home/modules/python.nix` (生成。`programs.uv` の settings。uv 本体は入れない。[後述](#python3-と-uv)) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
@@ -3647,6 +3669,7 @@ Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
 | `claude` | mise（この表の例外。[理由](#claude-だけ-mise-に置いている理由)） |
 | `cursor-agent`（Cursor の CLI） | mise（この表の例外。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)） |
+| `python3` | Nix（`home/modules/python.nix`。言語ランタイムだが、プロジェクトで切り替えず道具の前提として使う。[後述](#python3-と-uv)） |
 
 ### `claude` だけ mise に置いている理由
 
@@ -3795,6 +3818,51 @@ Cursor の CLI（mise の registry の名前は `cursor-agent`、別名 `cursor-
   残らない）。信頼の置き場所は `downloads.cursor.com` の TLS
 - コマンドは `cursor-agent` だけ（公式のインストーラが張る `agent` は無い）。公式のインストーラで入れたことがある PC は
   `~/.local/bin/{agent,cursor-agent}` と `~/.local/share/cursor-agent` を消す（PATH では mise の方が先に来るが、紛らわしい）
+
+### python3 と uv
+
+nixpkgs の `python3` を `home.packages` に入れ（`home/modules/python.nix`）、uv には自分で入れた python だけを使わせる
+（`~/.config/uv/uv.toml` の `python-preference = "only-managed"`。home-manager の `programs.uv` で置き、uv 本体は入れない）
+（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-10-28-claude-security-plugin-design.md)）。
+
+**なぜ Nix で入れるのか。** Claude Security のプラグイン（[前述](#21-claude-code-の公式プラグイン-手順-41)）が PATH の
+`python3`（3.9 以上）を要る。OS の `python3` は版がマシンごとに違い、無い OS もある。
+[ADR 001](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/001_home_manager_migration_20260808T163454JST/README.md)
+の決定 6 の「言語ランタイムは mise」は、プロジェクトごとに版を切り替えるもの（go / node）の話。`python3` はプロジェクトで
+切り替えず道具の前提として使うので、グローバルな CLI と同じく Nix に置く。プロジェクトで版を決めて使う python は、
+今までどおり uv か mise で入れる。
+
+**替わるもの。** `~/.nix-profile/bin` は PATH で `/usr/bin` より前に来るので、すべてのシェルと Claude の Bash tool の
+`python3`・`python`・`pydoc` が nixpkgs のもの（今の lock では 3.14）になる。
+
+- OS のコマンドは `/usr/bin/python3` を直に指すので替わらない
+- apt の `python3-*`（yaml・requests など）は、nixpkgs の python からは見えない。要る script は `/usr/bin/python3` を
+  直に指すか、uv で env を作る
+- `#!/usr/bin/env python3` の script は手元では 3.14 で動く。版の古い環境でも動かす script は、その版でも確かめる
+- claude-skills の script（`ticket.sh` など）が、python3 が 3.11 未満のときに `nix develop` へ入り直すのも要らなくなる
+
+**uv を only-managed にする理由。** uv は、自分で入れた python が無いと PATH の `python3` で venv を作る。`python3` が
+Nix のものになると、venv が `/nix/store` の python に結び付き、nixpkgs を上げて古い python が GC されると動かなくなる。
+環境変数（`UV_PYTHON_PREFERENCE`）でなく `uv.toml` に書くのは、switch の後の次の uv から効く（hm-session-vars は
+switch の前から続く process の下のシェルに届かない）ことと、プロジェクトの `[tool.uv]` が別の値を選べる（環境変数は
+プロジェクトの設定より強く、user の `uv.toml` は弱い）ため。
+
+uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
+
+| 操作 | only-managed での振る舞い |
+| --- | --- |
+| `uv sync`・`uv run`（プロジェクト） | system / Nix の python で作った既存の `.venv` を消し、uv の python で作り直す（`--verbose` に `does not meet the Python preference` と出る）。lock の依存は入れ直すが、手で `uv pip install` したものは消える |
+| `uv pip`・activate した env | 既存の env をそのまま使う |
+| `uv venv`・新しいプロジェクト | uv の python で作る。版を決めていない（`requires-python` が下限だけで、`.python-version` が無い）と、その uv が知る最新の python（uv 0.13.0 なら 3.15、0.11.3 なら 3.14）を落とす |
+| `uv python find` | system / Nix の python で作った `.venv` は選ばない（ほかに無ければエラー） |
+
+- 版を決めるなら、プロジェクトに `.python-version` を置く（`uv python pin 3.13`）。プロジェクトの外の既定は
+  `uv python pin --global 3.13`（`~/.config/uv/.python-version` に書く。`uv.toml` は 1 ファイルの symlink なので、隣に書ける）
+- uv が落とす python は、汎用の Linux 向けの動的リンクのバイナリ。NixOS では nix-ld が要る（lavie は nixos-config で
+  有効にしてある。mise の prebuilt のため）
+
+**反映。** `~/dotfiles/setup --update` の switch の直後から、今のシェルでも `python3` が替わる（`~/.nix-profile/bin` は
+もう PATH にある。bash で前に `python3` を打っていれば `hash -r`）。`uv.toml` は次の uv から効く。
 
 ## CI
 
