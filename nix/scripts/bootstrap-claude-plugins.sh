@@ -31,7 +31,8 @@
 # ## 何をするか
 #
 #   1. 公式 marketplace (anthropics/claude-plugins-official) を登録する
-#   2. 下の plugins を install する (enabledPlugins も CLI が立てる)
+#   2. 下の plugins を install する (enabledPlugins も CLI が立てる)。入れられない plugin があっても
+#      警告して残りを入れ、exit 0 する (setup.sh は手順が 1 つ失敗すると残りを走らせないため)
 #
 # 冪等。既に在れば「already installed」と出て exit 0 する。
 # 版は上げない (plugin update は呼ばない)。「先端は取らない」方針に合わせ、
@@ -51,6 +52,9 @@ plugins=(
   superpowers
   frontend-design
   playwright
+  # 前提の python3 (3.9 以上) は home/modules/python.nix が入れる。Pro のアカウントは dynamic workflows を
+  # /config で on にする (nix/README.md「2.1 Claude Code の公式プラグイン」)
+  claude-security
 )
 
 # 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
@@ -111,7 +115,14 @@ fi
 echo
 echo "==> plugins"
 for p in "${plugins[@]}"; do
-  "${claude}" plugin install "${p}@${marketplace}" -y
+  # 手元の marketplace の一覧が古いと、足したばかりの plugin は「not found in marketplace」で入らない。
+  # 入れ直し方を添えて、残りの plugin と後続の手順へ進む
+  if ! "${claude}" plugin install "${p}@${marketplace}" -y; then
+    warn "plugin を入れられませんでした: ${p}@${marketplace}" \
+      "「not found in marketplace」なら手元の一覧が古いので、" \
+      "  claude plugin marketplace update ${marketplace}" \
+      "で新しくしてから ~/dotfiles/setup --steps bootstrap-claude-plugins で入れ直してください。"
+  fi
 done
 
 echo
