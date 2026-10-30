@@ -450,6 +450,17 @@ in
       };
     }
 
+    # PostToolUse・PostToolUseFailure フック (matcher Bash)。gh pr create が assignee を指定せずに PR を作ったら、
+    # gh の認証ユーザーを Assignees に付けて確かめるよう Claude に念を押す (ADR 039)。決まりの正本は同じ dotfiles の
+    # skill pjp-gh-pr-create で、settings.json の skillOverrides でその skill を止めたマシンでは黙る (option は無い)。
+    # 登録は上と同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/pr-assignee-nudge.sh" = {
+        source = claudeRoot + "/hooks/pr-assignee-nudge.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #

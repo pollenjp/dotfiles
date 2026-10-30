@@ -259,6 +259,7 @@
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
+          pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           pjp-google-ime-unittest =
             pkgs.runCommand "pjp-google-ime-unittest"
@@ -408,6 +409,14 @@
               ;
           };
           claude-docs-guard-state = import ./tests/claude-docs-guard.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-pr-assignee-nudge-state = import ./tests/claude-pr-assignee-nudge.nix {
             inherit
               lib
               pkgs

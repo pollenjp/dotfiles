@@ -857,7 +857,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（[後述](#cursor-agent-も-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS・plugin を https で取るのは[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
@@ -2640,6 +2640,33 @@ Claude が `Write`・`Edit`・`MultiEdit`・`NotebookEdit` でこの repo（work
 - Bash で書くもの（`cat > docs/…`）は見ない。抜けたものは CI の `lint` ジョブの「docs/ を置かない」が落とす
 - 通す口は無い。public に置く文書が要るようになったら、表と CI の step を直す
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Write|Edit|MultiEdit|NotebookEdit`）足す
+
+#### PR に gh の認証ユーザーを assignee で付けさせるフック
+
+Claude が PR を作るたびに、gh で認証しているユーザー（`@me`。アカウントは gh の認証で決まる）を Assignees に付ける（ユーザーの
+既定）。決まりと付け方・確かめ方の正本は、同じ dotfiles の skill `pjp-gh-pr-create`（`nix/files/claude/skills/pjp-gh-pr-create/`）
+で、`gh pr create` に `--assignee @me` を足し、`gh pr view` で付いたかを確かめさせる（経緯は dotfiles-private の
+[ADR 039](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/039_claude_pr_assignee_20261030T172236JST/README.md)）。
+
+skill が読まれなかったときの念押しが `PostToolUse`・`PostToolUseFailure` フック（`nix/files/claude/hooks/pr-assignee-nudge.sh`）。
+`gh pr create` の後に Claude の文脈へ 1 文を差し込む。PR はもう出来ているので止めない。
+
+| 知らせる場面 | 条件 | 差し込む文の要旨 |
+| --- | --- | --- |
+| 指定なし | `gh pr create` が PR を作った（出力に PR の URL がある）のに、assignee の指定（`--assignee`・`-a`。`--assignee=…`・`-a=…`・`-da` のように束ねたものも）が無い | `gh pr edit <URL> --add-assignee @me` で付け、`gh pr view` で確かめる |
+| 作ったあとで落ちた | 出力に gh の `pull request update failed` がある（PR は出来ていて、assignee などを付ける段で落ちた） | 作り直さず、`gh pr view` で確かめ、空なら `gh pr edit` で付ける（指定があっても知らせる） |
+
+- 既存の PR を返しただけ（`a pull request for branch … already exists`）・PR の URL が無い（`--web` など）では黙る。subagent の
+  中でも知らせる（subagent も PR を出す）
+- コマンドは近似で読む。heredoc の本文と引用符の中を外し、`;`・`&`・`|`・改行で分けて、`gh pr create` の後ろの語を見る（本文や
+  タイトルに `--assignee` と書いても指定と数えない）。引用符の中にだけ `gh pr create` があるとき（`bash -c '…'`）は、引用符の
+  中を読み直す
+- 付けたくないマシンでは、user の `settings.json` の `skillOverrides` で `pjp-gh-pr-create` を `off` か `user-invocable-only` に
+  する（skill が呼べなくなり、hook も黙る。dotfiles はこの key を書かない）
+- cloud（[後述](#claude-code-on-the-web-cloud-で使う)）には張らない。cloud の GitHub proxy は GraphQL を断るので、`gh pr create` が
+  PR を作れない。skill はほかの skill と同じく張る
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PostToolUse`・`PostToolUseFailure` に 1 件ずつ（`Bash` +
+  `if: "Bash(gh pr create *)"`）足す。`gh pr create` の後ろにつないだコマンドが落ちると、Bash は PostToolUseFailure にだけ来る
 
 ### statusLine
 
