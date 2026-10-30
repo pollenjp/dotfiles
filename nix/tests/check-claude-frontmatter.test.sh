@@ -213,7 +213,8 @@ else
   ng "通る形" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
 fi
 
-# 2. YAML として読めない (素の値の途中の「: 」)。skill・agent・command のどれでも、エラーの行番号はファイルの行
+# 2. YAML として読めない (素の値の途中の「: 」)。skill・agent・command のどれでも、エラーの行番号はファイルの行。
+#    行番号の書き方は yq の版で違う (yq-go 4.53.3 は「line 4, column 23」、4.54.1 は「at L4.C23」) ので、どちらも受ける
 n=$(new_nix t2)
 cl=${n}/files/claude
 c=$(dirname "${n}")
@@ -237,9 +238,9 @@ description: 呼ぶとき: 値の途中に「: 」がある
 EOF
 run "${n}"
 if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 3 ]] \
-  && seen_err "${c}" -E '^   nix/files/claude/skills/pjp-x/SKILL\.md: frontmatter を YAML として読めません \(.*line 4, ' \
-  && seen_err "${c}" -E '^   nix/files/claude/agents/pjp-a\.md: frontmatter を YAML として読めません \(.*line 3, ' \
-  && seen_err "${c}" -E '^   nix/files/claude/commands/pjp-c\.md: frontmatter を YAML として読めません \(.*line 2, '; then
+  && seen_err "${c}" -E '^   nix/files/claude/skills/pjp-x/SKILL\.md: frontmatter を YAML として読めません \(.*(line 4, |at L4\.C)' \
+  && seen_err "${c}" -E '^   nix/files/claude/agents/pjp-a\.md: frontmatter を YAML として読めません \(.*(line 3, |at L3\.C)' \
+  && seen_err "${c}" -E '^   nix/files/claude/commands/pjp-c\.md: frontmatter を YAML として読めません \(.*(line 2, |at L2\.C)'; then
   ok "YAML として読めない frontmatter は、skill・agent・command のどれでもファイルの行番号付きで出して exit 1"
 else
   ng "YAML として読めない" "rc=$(rc "${c}") err=$(err "${c}")"
