@@ -33,6 +33,11 @@
 #   PreToolUse   Write|Edit|MultiEdit|NotebookEdit  docs-guard.sh
 #                public な dotfiles の docs/ に書こうとしたら止め、設計の文書の置き場
 #                (dotfiles-private の docs/) を返す (ADR 035)
+#   PostToolUse         Bash (if "Bash(gh pr create *)")  pr-assignee-nudge.sh
+#   PostToolUseFailure  Bash (if "Bash(gh pr create *)")  pr-assignee-nudge.sh
+#                gh pr create が assignee を指定せずに PR を作ったら、gh の認証ユーザーを Assignees に
+#                付けて確かめるよう念を押す (ADR 039)。gh pr create の後ろにつないだコマンドが落ちると
+#                PostToolUseFailure にだけ来るので、2 つとも登録する
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
 
@@ -46,13 +51,14 @@ run_through="${hooks_dir}/run-through-nudge.sh"
 ssh_notice="${hooks_dir}/ssh-agent-notice.sh"
 xref_guard="${hooks_dir}/xref-guard.sh"
 docs_guard="${hooks_dir}/docs-guard.sh"
+assignee_nudge="${hooks_dir}/pr-assignee-nudge.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}"; do
+for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}" "${assignee_nudge}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -104,6 +110,8 @@ register PostToolUse "Bash" "" "${ssh_notice}"
 register PostToolUseFailure "Bash" "" "${ssh_notice}"
 register PreToolUse "Bash" "" "${xref_guard}"
 register PreToolUse "Write|Edit|MultiEdit|NotebookEdit" "" "${docs_guard}"
+register PostToolUse "Bash" "Bash(gh pr create *)" "${assignee_nudge}"
+register PostToolUseFailure "Bash" "Bash(gh pr create *)" "${assignee_nudge}"
 
 if [[ ${changed} == 1 ]]; then
   echo

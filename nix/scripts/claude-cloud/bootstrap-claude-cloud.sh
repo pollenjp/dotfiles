@@ -50,7 +50,8 @@
 #   PreToolUse   Write|Edit|MultiEdit|NotebookEdit  docs-guard.sh
 #   SessionStart startup|resume                  この script (--quiet と、今回と同じ option)
 #
-# nix-managed-guard.sh (cloud には Nix 管理のパスが無い) と ssh-agent-notice.sh (1Password の SSH agent が無い) は入れない。
+# nix-managed-guard.sh (cloud には Nix 管理のパスが無い)・ssh-agent-notice.sh (1Password の SSH agent が無い)・
+# pr-assignee-nudge.sh (GitHub proxy が GraphQL を断るので、gh pr create が PR を作れない) は入れない。
 # コマンドは「bash <パス>」にする。手元は home-manager が実行権限を付けた store の写しを登録するが、cloud の symlink は
 # checkout を指し、git の上で実行権限の無い hook (xref-guard.sh) もあるため。
 #
