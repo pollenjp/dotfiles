@@ -276,7 +276,7 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 ### herdr を入れる (winget)
 
 Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管理者は要らない) で入れ、
-版を `herdr/Install-Herdr.ps1` の `-Version` の既定値 (今は `0.9.2-preview.2026-09-29-8e78f929d8f0`)
+版を `herdr/Install-Herdr.ps1` の `-Version` の既定値 (今は `0.9.4-preview.2026-10-14-fbd2ae23927f`)
 の 1 か所で固定する。winget に安定版のパッケージは無いので preview になる。
 
 | 打つもの | すること |
