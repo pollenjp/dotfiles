@@ -498,7 +498,7 @@ pin で組めなければ、次の順に退いて、最初に組めたもので�
 | --- | --- | --- |
 | 1 | 対象 flake の pin | いつも |
 | 2 | dotfiles の pin | 対象と違う pin のときだけ。チェックアウトから叩けば script の隣の `nix/flake.lock`、`nix run` の app なら app を組んだときの `nix/flake.lock` |
-| 3 | 対象の `flake.lock` の git の履歴にある前の pin | first-parent（merge された pin）を新しい順に 3 つまで。dotfiles 自身のスキャン（CI・setup の `flake-update`）は 2 が対象と同じ pin になるので、ここで前の pin へ退く |
+| 3 | 対象の `flake.lock` の git の履歴にある前の pin | first-parent（merge された pin）を新しい順に 3 つまで（読めない `flake.lock` も 1 つと数える）。dotfiles 自身のスキャン（CI・setup の `flake-update`）は 2 が対象と同じ pin になるので、ここで前の pin へ退く |
 
 2 と 3 も遅延を守って入れた pin（今の pin と同じか古い）なので、どこから取っても
 スキャナの遅延は守られる。nixpkgs で sbomnix の依存が壊れた pin（2026-10 の
@@ -507,7 +507,8 @@ typepy 2.0.0 で sqliteschema が組めなかった）でも、スキャンそ�
 
 - 1 で組めず退いたら、警告を出す（stderr と setup の警告のまとめ。CI では annotation）
 - どの sbomnix をどの pin から取ったかは、毎回成果物の `scanner.txt` に残る（CI は
-  summary に貼る）。退いたなら、組めなかった pin とわけ（最初に組めなかった derivation）も
+  summary に貼る）。退いたなら、組めなかった pin とわけ（最初に組めなかった derivation か、
+  2・3 の `flake.lock` を nix で読めなかったわけ）も
 - CI の `closure-scan` は 3 のために履歴を全部取る（`fetch-depth: 0`）。浅い clone では
   前の pin をたどれない
 - どれでも組めなければ、試した pin とわけを並べて止まる。組める版の sbomnix を PATH に
