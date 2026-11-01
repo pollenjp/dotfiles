@@ -155,10 +155,10 @@ why_no_frontmatter() {
 # frontmatter ($2) に yq の式 ($1) を当てる。
 #
 # 先頭に --- の 1 行を足し、--header-preprocess を切って渡す。yq は既定で先頭の --- とコメントを読み飛ばすので、そのまま
-# ではエラーの行番号がファイルの行とずれる。これで scanner のエラー (mapping values are not allowed など) はファイルの
-# 行を指す。parser のエラー (did not find expected key など) は yq が行を 0 から数えるので 1 行前を指す (yq-go 4.53.3)。
-# 見分ける目印が無いので、そのまま出す。alias は explode で解いてから式を当てる (Claude Code は alias を値に解くが、yq は
-# 解かないと alias の type を空で返す)。
+# ではエラーの行番号がファイルの行とずれる。これで scanner のエラー (mapping values are not allowed など) も parser の
+# エラー (did not find expected key など) も、ファイルの行を指す (yq-go 4.54.1 は「at L4.C23」の形で出す。4.53.3 は
+# 「line 4, column 23」の形で、parser のエラーは行を 0 から数えて 1 行前を指した)。yq のエラーの文は、そのまま出す。
+# alias は explode で解いてから式を当てる (Claude Code は alias を値に解くが、yq は解かないと alias の type を空で返す)。
 fm_yq() {
   yq --header-preprocess=false "explode(.) | $1" - <<<$'---\n'"$2"
 }
