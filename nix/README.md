@@ -1788,6 +1788,8 @@ pjp-ghq-pull --root /tmp/x    # ghq の root の代わりに /tmp/x の下を出
 2. `fetch --prune origin`（gitViaGh なら `git gh fetch --prune origin`）。確認が要る repo でも先に流す
 3. 既定 branch（`origin/HEAD` の指す branch。無ければ `origin/main`、`origin/master` の順。`git remote set-head` は
    打たない）と、その upstream で ahead / behind を数える
+   upstream が origin の branch でない（fork で `upstream/main` を追うなど）ときは、fetch していない remote と比べて
+   「最新」と言わないよう、確認待ちにする
 4. behind = 0 なら「最新」で終える（未 push の commit・変更・別の branch があっても問わない）
 5. 既定 branch にいて、追跡中のファイルに変更が無く（未追跡のファイルは数えない）、ahead = 0 なら
    `merge --ff-only` で進める（結果は `git pull --ff-only --prune` と同じで、通信は fetch の 1 回だけ）
@@ -1797,11 +1799,11 @@ pjp-ghq-pull --root /tmp/x    # ghq の root の代わりに /tmp/x の下を出
 
 | 理由 | 選べること |
 | --- | --- |
-| 作業途中・既定 branch か upstream が無い | s 何もしない |
+| 作業途中・既定 branch か upstream が無い・upstream が origin でない | s 何もしない |
 | fetch の失敗（時間切れ・認証など） | s 何もしない / t もう一度 |
 | 既定 branch でない（別の branch・detached） | s / u checkout せずに既定 branch だけ進める / c 既定 branch に切り替えて進める（変更が無いときだけ。detached なら、HEAD の commit がどれかの branch にあるときだけ） |
 | 追跡中のファイルに変更がある | s / f そのまま fast-forward を試す（重なるファイルがあれば git が止め、変更は残る） |
-| 分岐している（merge commit が要る） | s / m merge commit を作る / r rebase する（衝突したら中断して元に戻す） |
+| 分岐している（merge commit が要る） | s / m merge commit を作る / r rebase する（途中で止まったら中断して元に戻す） |
 
 実行中の画面:
 
@@ -1811,6 +1813,12 @@ pjp-ghq-pull --root /tmp/x    # ghq の root の代わりに /tmp/x の下を出
   （`git status -sb` と、既定 branch と upstream の log。fetch の失敗は stderr も）
 - 答えると、その repo の続きを作業の列に積み、すぐ次の問いへ移る。答えを流す前に判定をやり直し、問いの後に repo が
   変わっていれば（変更を足したなど）流さずに問い直す
+- 今の問いの repo は ▶ の行で目立たせる。問いが替わってから 1 秒は、repo の形を変える答え（u・c・f・m・r）を受けず、
+  受けなかったと知らせる（答えると次の問い = 別の repo が同じ所に出るので、二度押しや押しっぱなしの 2 打目が別の repo の
+  merge などにならないように）。押しっぱなしの間は待ちが延びる。s・t・d はすぐ効く
+- m・r が途中で止まったら `--abort` で元に戻す。未解決のファイルがあれば「衝突」、無ければ（commit の署名の失敗・hook
+  など）「衝突ではない」として stderr を添え、分けて出す。`--abort` も失敗したら「元に戻せなかった」と repo のパスを
+  出す（手で直す）
 - q（Ctrl-C も）で終えると、確認待ちとまだ始めていない repo は「何もしない」になる。動いている git は止めずに、
   終わるのを待ってから閉じる（git を途中で止めると `index.lock` や途中の merge が残るため。通信は時間切れで終わる）。
   その repo の次の git（fetch の後の fast-forward など）は起こさず、「やめたので途中で止めた」にする

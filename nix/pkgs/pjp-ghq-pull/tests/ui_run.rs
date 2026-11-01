@@ -8,6 +8,7 @@
 //! - 確認待ちの欄に、今の問いの理由と選べること ([s] 何もしない など)。d で詳細 (git status -sb など) が出る
 //! - 全部が終われば「完了」、q の後は「やめます」を出す
 //! - 80 × 24 の端末でも、どの理由の問いも、理由の全文と選べること全部 ([d] 詳細も) と知らせが見える
+//! - 今の問いの repo の名前を目立たせ、答えを受けなかったときは知らせを出す
 //! - 狭い端末でも panic しない
 
 mod common;
@@ -150,6 +151,12 @@ fn every_choice_is_visible_at_80x24() {
             vec![Skip, Retry],
         ),
         (Reason::Busy(Busy::IndexLock), vec![Skip]),
+        (
+            Reason::UpstreamNotOrigin {
+                upstream: "upstream/main".into(),
+            },
+            vec![Skip],
+        ),
     ];
     for (reason, choices) in cases {
         let run = ask_one(reason.clone(), choices.clone());
@@ -175,4 +182,21 @@ fn notices_are_visible_at_80() {
     let mut run = Run::new(vec!["github.com/a/x".into()]);
     run.on_msg(Msg::Done(0, Outcome::UpToDate { ahead: 0 }));
     assert!(shows(&draw(&run, 80, 24), "Enter か q で閉じる"));
+}
+
+#[test]
+fn current_repo_is_marked_and_refusal_is_shown() {
+    let t0 = std::time::Instant::now();
+    let mut run = ask_one(
+        Reason::Dirty { behind: 1 },
+        vec![Choice::Skip, Choice::TryFf],
+    );
+    let buf = draw(&run, 80, 24);
+    assert!(shows(&buf, "▶ github.com/pollenjp/dotfiles-private"));
+    run.on_key_at(
+        KeyEvent::new(KeyCode::Char('f'), KeyModifiers::NONE),
+        t0 + std::time::Duration::from_millis(10),
+    );
+    let buf = draw(&run, 80, 24);
+    assert!(shows(&buf, "受けなかった"));
 }

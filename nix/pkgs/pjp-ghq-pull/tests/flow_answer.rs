@@ -9,13 +9,15 @@
 //! - c は既定 branch に切り替えてから判定をやり直す (fast-forward なら「切り替えて」と分かる結果、分岐なら分岐の問い)
 //! - f は変更を残したまま fast-forward を試す (重なるファイルがあれば git が止め、変更も HEAD も残る)
 //! - m は merge commit を作り、r は手元の commit を upstream の上に載せ直す。衝突したら中断して元に戻す
+//! - 衝突でない理由 (commit の署名の失敗など) で止まったときは、衝突と分けて「衝突ではない」と出し、元に戻す
+//! - --abort が失敗して元に戻せなかったときは「元に戻せなかった」と repo のパスを出し、「元に戻した」とは言わない
 //! - 安全のための決まり: autostash (merge.autoStash) で stash しない・rebase.updateRefs でほかの branch を動かさない
 //! - 問いの後に repo が変わっていれば (変更を足したなど)、答えを流さずに判定をやり直した結果を返す
 //! - 既定 branch が別の worktree で checkout されているときの u と c は、git が断って失敗になり、何も動かない
 
 mod common;
 
-use common::{Repo, Sandbox};
+use common::{Repo, Sandbox, real_git};
 use pjp_ghq_pull::flow::{self, Choice, How, Outcome, Question, Reason};
 use pjp_ghq_pull::git::Git;
 use pjp_ghq_pull::repo;
@@ -412,4 +414,106 @@ fn branch_only_fails_when_default_branch_in_other_worktree() {
         Outcome::Failed { .. }
     ));
     assert_eq!(rev(&sb, &r, "refs/heads/main"), main);
+}
+
+/// commit の署名を、必ず失敗する gpg で求める (1Password の承認を断ったときと同じく、衝突でない理由で止まる)
+fn signing_fails(sb: &Sandbox, r: &Repo) {
+    sb.git(&r.work, &["config", "commit.gpgSign", "true"]);
+    sb.git(&r.work, &["config", "gpg.program", "false"]);
+}
+
+/// git <op> --abort だけが失敗する偽の git を、runner の PATH の先頭に置く
+fn abort_fails(sb: &Sandbox, op: &str) {
+    sb.fake_bin(
+        "git",
+        &format!(
+            "case \" $* \" in *\" {op} --abort \"*) echo 'fatal: {op} --abort failed (test)' >&2; exit 1 ;; esac\nexec '{}' \"$@\"",
+            real_git().display()
+        ),
+    );
+}
+
+fn failed(outcome: Outcome) -> (String, String, bool) {
+    match outcome {
+        Outcome::Failed {
+            what,
+            stderr,
+            conflict,
+        } => (what, stderr, conflict),
+        other => panic!("失敗ではない: {other:?}"),
+    }
+}
+
+#[test]
+fn merge_signing_failure_is_not_conflict() {
+    let sb = Sandbox::new("a-merge-sign");
+    let r = diverged(&sb, "r");
+    signing_fails(&sb, &r);
+    let git = sb.plain();
+    let before = sb.head(&r.work);
+    let q = ask(&git, &r);
+    let (what, stderr, conflict) = failed(answer(&git, &r, &q, Choice::Merge));
+    assert!(!conflict);
+    assert!(what.contains("衝突ではない"), "{what}");
+    assert!(what.contains("元に戻した"), "{what}");
+    assert!(!stderr.trim().is_empty());
+    assert_eq!(repo::busy(&git, &r.work), None);
+    assert_eq!(sb.head(&r.work), before);
+}
+
+#[test]
+fn rebase_signing_failure_is_not_conflict() {
+    let sb = Sandbox::new("a-rebase-sign");
+    let r = diverged(&sb, "r");
+    signing_fails(&sb, &r);
+    let git = sb.plain();
+    let before = sb.head(&r.work);
+    let q = ask(&git, &r);
+    let (what, _, conflict) = failed(answer(&git, &r, &q, Choice::Rebase));
+    assert!(!conflict);
+    assert!(what.contains("衝突ではない"), "{what}");
+    assert_eq!(repo::busy(&git, &r.work), None);
+    assert_eq!(sb.head(&r.work), before);
+}
+
+#[test]
+fn merge_conflict_says_conflict() {
+    let sb = Sandbox::new("a-merge-conflict-word");
+    let r = conflicting(&sb, "r");
+    let git = sb.plain();
+    let q = ask(&git, &r);
+    let (what, _, conflict) = failed(answer(&git, &r, &q, Choice::Merge));
+    assert!(conflict);
+    assert!(what.contains("衝突"), "{what}");
+    assert!(what.contains("元に戻した"), "{what}");
+}
+
+#[test]
+fn merge_abort_failure_is_reported_with_path() {
+    let sb = Sandbox::new("a-merge-abort-fail");
+    let r = conflicting(&sb, "r");
+    abort_fails(&sb, "merge");
+    let git = sb.plain();
+    let q = ask(&git, &r);
+    let (what, stderr, conflict) = failed(answer(&git, &r, &q, Choice::Merge));
+    assert!(conflict);
+    assert!(what.contains("元に戻せなかった"), "{what}");
+    assert!(!what.contains("元に戻した"), "{what}");
+    assert!(what.contains(r.work.to_str().unwrap()), "{what}");
+    assert!(stderr.contains("merge --abort failed"), "{stderr}");
+    assert_eq!(repo::busy(&git, &r.work), Some(repo::Busy::Merge));
+}
+
+#[test]
+fn rebase_abort_failure_is_reported_with_path() {
+    let sb = Sandbox::new("a-rebase-abort-fail");
+    let r = conflicting(&sb, "r");
+    abort_fails(&sb, "rebase");
+    let git = sb.plain();
+    let q = ask(&git, &r);
+    let (what, _, conflict) = failed(answer(&git, &r, &q, Choice::Rebase));
+    assert!(conflict);
+    assert!(what.contains("元に戻せなかった"), "{what}");
+    assert!(what.contains(r.work.to_str().unwrap()), "{what}");
+    assert_eq!(repo::busy(&git, &r.work), Some(repo::Busy::Rebase));
 }

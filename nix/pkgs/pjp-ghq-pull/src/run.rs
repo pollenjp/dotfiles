@@ -5,6 +5,12 @@
 //! (一覧を見ている間に打ったキーで merge などを流さないため)。答えると、その repo の続きを作業の列に積み、次の問いへ移る。
 //! q・Ctrl-C は、確認待ちとまだ始めていない repo を「スキップ」にし、動いている git が終わるのを待ってから閉じる
 //! (git を途中で止めると index.lock や途中の merge が残るため。通信は時間切れで必ず終わる)。
+//!
+//! 今の問いが替わってから ANSWER_GUARD の間は、repo の形を変える答え (u・c・f・m・r) を受けず、知らせを出す。答えると
+//! すぐ次の問い (別の repo) が同じ所に出るので、二度押しや押しっぱなしの 2 打目が別の repo の merge などにならないように
+//! するため。受けなかったキーが続く間は (押しっぱなしの繰り返し) 待ちを延ばす。s・t・d はすぐ効く (repo の形を変えない)。
+
+use std::time::{Duration, Instant};
 
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
@@ -45,7 +51,14 @@ pub struct Run {
     focus: Focus,
     show_detail: bool,
     quitting: bool,
+    notice: Option<String>,
+    /// 今の問いの repo の番号と、それが今の問いになった時刻 (repo の形を変える答えを受けなかったときは、その時刻)
+    shown: Option<usize>,
+    shown_at: Option<Instant>,
 }
+
+/// 今の問いが替わってから、repo の形を変える答えを受けない間
+pub const ANSWER_GUARD: Duration = Duration::from_secs(1);
 
 impl Run {
     pub fn new(labels: Vec<String>) -> Run {
@@ -59,6 +72,23 @@ impl Run {
             focus: Focus::Questions,
             show_detail: false,
             quitting: false,
+            notice: None,
+            shown: None,
+            shown_at: None,
+        }
+    }
+
+    /// 確認待ちの欄に出す知らせ (答えを受けなかったわけ)
+    pub fn notice(&self) -> Option<&str> {
+        self.notice.as_deref()
+    }
+
+    /// 今の問いが替わっていたら、替わった時刻を覚える
+    fn note_current(&mut self, now: Instant) {
+        let current = self.current_question().map(|(id, _)| id);
+        if current != self.shown {
+            self.shown = current;
+            self.shown_at = Some(now);
         }
     }
 
@@ -135,6 +165,16 @@ impl Run {
     }
 
     pub fn on_msg(&mut self, msg: Msg) -> Vec<Effect> {
+        self.on_msg_at(msg, Instant::now())
+    }
+
+    pub fn on_msg_at(&mut self, msg: Msg, now: Instant) -> Vec<Effect> {
+        let effects = self.apply_msg(msg);
+        self.note_current(now);
+        effects
+    }
+
+    fn apply_msg(&mut self, msg: Msg) -> Vec<Effect> {
         match msg {
             Msg::Phase(id, phase) => {
                 if !matches!(self.statuses[id], Status::Final(_)) {
@@ -166,6 +206,18 @@ impl Run {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        self.on_key_at(key, Instant::now())
+    }
+
+    pub fn on_key_at(&mut self, key: KeyEvent, now: Instant) -> Vec<Effect> {
+        self.note_current(now);
+        self.notice = None;
+        let effects = self.apply_key(key, now);
+        self.note_current(now);
+        effects
+    }
+
+    fn apply_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Effect> {
         let ctrl_c =
             key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c');
         if ctrl_c || key.code == KeyCode::Char('q') {
@@ -186,7 +238,7 @@ impl Run {
             KeyCode::Char('d') if self.focus == Focus::Questions => {
                 self.show_detail = !self.show_detail;
             }
-            KeyCode::Char(c) if self.focus == Focus::Questions => return self.answer(c),
+            KeyCode::Char(c) if self.focus == Focus::Questions => return self.answer(c, now),
             _ => {}
         }
         Vec::new()
@@ -211,13 +263,25 @@ impl Run {
         vec![Effect::Drain]
     }
 
-    fn answer(&mut self, key: char) -> Vec<Effect> {
+    fn answer(&mut self, key: char, now: Instant) -> Vec<Effect> {
         let Some((id, q)) = self.current_question() else {
             return Vec::new();
         };
         let Some(choice) = q.choices.iter().copied().find(|c| c.key() == key) else {
             return Vec::new();
         };
+        let fresh = self
+            .shown_at
+            .is_some_and(|t| now.saturating_duration_since(t) < ANSWER_GUARD);
+        if choice.changes_repo() && fresh {
+            // 押しっぱなしの繰り返しが続く間は待ちを延ばす
+            self.shown_at = Some(now);
+            // repo の名前は、確認待ちの欄の ▶ の行に出している (80 桁に収める)
+            self.notice = Some(format!(
+                "問いが替わったばかりなので {key} を受けなかった。▶ の repo を確かめて押し直す"
+            ));
+            return Vec::new();
+        }
         let q = q.clone();
         self.waiting.remove(self.q_cursor);
         self.q_cursor = self.q_cursor.min(self.waiting.len().saturating_sub(1));

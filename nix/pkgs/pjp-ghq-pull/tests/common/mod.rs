@@ -57,6 +57,9 @@ impl Sandbox {
                 gitconfig.into_os_string(),
             ),
             (OsString::from("GIT_CONFIG_NOSYSTEM"), OsString::from("1")),
+            // 呼んだ側の env の設定 (Claude のセッションの commit.gpgsign=false など) も効かせない
+            (OsString::from("GIT_CONFIG_COUNT"), OsString::from("0")),
+            (OsString::from("GIT_CONFIG_PARAMETERS"), OsString::new()),
         ];
         Sandbox { root, env }
     }
@@ -239,4 +242,15 @@ pub fn fg_of(buf: &ratatui::buffer::Buffer, text: &str) -> Option<ratatui::style
         }
     }
     None
+}
+
+/// PATH の本物の git (bin に偽の git を置くテストが、そこから本物へ渡すため)
+pub fn real_git() -> PathBuf {
+    std::env::var_os("PATH")
+        .and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|dir| dir.join("git"))
+                .find(|p| p.is_file())
+        })
+        .expect("PATH に git が無い")
 }

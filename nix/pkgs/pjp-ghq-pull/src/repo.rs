@@ -93,6 +93,12 @@ pub fn head_on_some_branch(git: &Git, dir: &Path) -> bool {
     out.success && !out.stdout.trim().is_empty()
 }
 
+/// 未解決 (衝突) のファイルがあるか
+pub fn has_unmerged(git: &Git, dir: &Path) -> bool {
+    let out = git.run(dir, &["ls-files", "--unmerged"]);
+    out.success && !out.stdout.trim().is_empty()
+}
+
 pub fn has_origin(git: &Git, dir: &Path) -> bool {
     git.run(dir, &["remote", "get-url", "origin"]).success
 }

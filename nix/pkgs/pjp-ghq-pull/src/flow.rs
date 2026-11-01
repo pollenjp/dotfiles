@@ -18,6 +18,10 @@ use crate::repo::{self, Busy, Head};
 pub enum Reason {
     Busy(Busy),
     NoUpstream,
+    /// 既定 branch の upstream が origin の remote-tracking branch でない (fetch したのは origin だけなので比べられない)
+    UpstreamNotOrigin {
+        upstream: String,
+    },
     FetchFailed {
         timed_out: bool,
         stderr: String,
@@ -118,6 +122,9 @@ impl Reason {
             Reason::Busy(Busy::CherryPick) => "cherry-pick の途中".into(),
             Reason::Busy(Busy::Revert) => "revert の途中".into(),
             Reason::NoUpstream => "既定 branch か upstream が無い".into(),
+            Reason::UpstreamNotOrigin { upstream } => {
+                format!("upstream が origin でない ({upstream})")
+            }
             Reason::FetchFailed {
                 timed_out: true, ..
             } => "fetch が時間切れ".into(),
@@ -144,6 +151,11 @@ impl Reason {
 }
 
 impl Choice {
+    /// repo の形 (branch・作業ツリー) を変える答えか (u・c・f・m・r)。s と t (fetch をやり直す) は変えない
+    pub fn changes_repo(self) -> bool {
+        !matches!(self, Choice::Skip | Choice::Retry)
+    }
+
     pub fn key(self) -> char {
         match self {
             Choice::Skip => 's',
@@ -220,6 +232,13 @@ fn decide(git: &Git, dir: &Path, phase: &dyn Fn(Phase)) -> Outcome {
             None,
         );
     };
+    // fetch したのは origin だけなので、ほかの remote (fork の upstream など) や手元の branch とは比べない
+    if !up.starts_with("refs/remotes/origin/") {
+        let reason = Reason::UpstreamNotOrigin {
+            upstream: repo::short_ref(&up).to_string(),
+        };
+        return ask(git, dir, reason, vec![Choice::Skip], Some(branch), Some(up));
+    }
     let Some((ahead, behind)) = repo::ahead_behind(git, dir, &branch, &up) else {
         return ask(
             git,
@@ -435,8 +454,7 @@ fn act(git: &Git, dir: &Path, t: &Target, choice: Choice, phase: &dyn Fn(Phase))
             if out.success {
                 updated(How::Merged)
             } else if repo::busy(git, dir) == Some(Busy::Merge) {
-                git.run(dir, &["merge", "--abort"]);
-                failed("merge で衝突したので元に戻した".into(), out.stderr, true)
+                stopped_midway(git, dir, "merge", out.stderr)
             } else {
                 failed("merge できなかった".into(), out.stderr, false)
             }
@@ -446,13 +464,41 @@ fn act(git: &Git, dir: &Path, t: &Target, choice: Choice, phase: &dyn Fn(Phase))
             if out.success {
                 updated(How::Rebased)
             } else if repo::busy(git, dir) == Some(Busy::Rebase) {
-                git.run(dir, &["rebase", "--abort"]);
-                failed("rebase で衝突したので元に戻した".into(), out.stderr, true)
+                stopped_midway(git, dir, "rebase", out.stderr)
             } else {
                 failed("rebase できなかった".into(), out.stderr, false)
             }
         }
         Choice::Skip | Choice::Retry => unreachable!("answer が先に扱う"),
+    }
+}
+
+/// merge・rebase が途中で止まったとき (op は "merge" か "rebase")。未解決のファイルがあれば衝突、無ければ衝突でない
+/// 失敗 (commit の署名の失敗・hook など) と分け、--abort で元に戻す。戻せなければ「元に戻した」とは言わず、手で直す
+/// repo のパスを出す
+fn stopped_midway(git: &Git, dir: &Path, op: &str, mut stderr: String) -> Outcome {
+    let conflict = repo::has_unmerged(git, dir);
+    let abort = git.run(dir, &[op, "--abort"]);
+    let restored = abort.success && repo::busy(git, dir).is_none();
+    if !abort.success {
+        stderr.push_str(&abort.stderr);
+    }
+    let what = match (conflict, restored) {
+        (true, true) => format!("{op} で衝突したので元に戻した"),
+        (true, false) => format!(
+            "{op} で衝突し、元に戻せなかった (手で直す: {})",
+            dir.display()
+        ),
+        (false, true) => format!("{op} できなかった (衝突ではない。元に戻した)"),
+        (false, false) => format!(
+            "{op} できず (衝突ではない)、元に戻せなかった (手で直す: {})",
+            dir.display()
+        ),
+    };
+    Outcome::Failed {
+        what,
+        stderr,
+        conflict,
     }
 }
 

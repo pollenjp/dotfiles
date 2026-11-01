@@ -7,7 +7,7 @@
 //! - 取り込む commit が無ければ問わずに「最新」(未 push の commit・変更・別の branch があっても)
 //! - 既定 branch にいて、変更が無く、分岐していなければ問わずに fast-forward する (未追跡のファイルだけなら変更に数えない)
 //! - 確認待ちの理由と選べること: 既定 branch でない (detached も。c は変更が無いときだけ)・変更あり・分岐・
-//!   upstream が無い・origin が無い・作業途中 (rebase の途中・index.lock)・fetch の失敗。問う repo の HEAD は動かさない。
+//!   upstream が無い・upstream が origin でない (fetch していない remote と比べて「最新」と言わない)・origin が無い・作業途中 (rebase の途中・index.lock)・fetch の失敗。問う repo の HEAD は動かさない。
 //!   detached HEAD の commit がどの branch にも無ければ c を出さない (切り替えると commit が置き去りになる)
 //! - 作業途中と origin の無い repo は fetch しない
 //! - git の work tree の直下でない entry (外側の repo の中の dir・bare の repo) は、外側の repo を触らずにスキップする
@@ -357,4 +357,31 @@ fn bare_repo_is_skipped() {
     );
     let outcome = start(&sb.plain(), &bare);
     assert!(matches!(outcome, Outcome::Skipped { .. }), "{outcome:?}");
+}
+
+#[test]
+fn upstream_not_origin_asks() {
+    let sb = Sandbox::new("s-upstream-remote");
+    let r = sb.repo("r");
+    sb.git(
+        &r.work,
+        &["remote", "add", "upstream", r.remote.to_str().unwrap()],
+    );
+    sb.git(&r.work, &["fetch", "-q", "upstream"]);
+    sb.git(
+        &r.work,
+        &["branch", "-q", "--set-upstream-to=upstream/main", "main"],
+    );
+    sb.commit(&r.seed, "b.txt", "b\n", "b");
+    sb.push(&r.seed);
+    let head = sb.head(&r.work);
+    let q = question(start(&sb.plain(), &r.work));
+    assert_eq!(
+        q.reason,
+        Reason::UpstreamNotOrigin {
+            upstream: "upstream/main".into()
+        }
+    );
+    assert_eq!(q.choices, vec![Choice::Skip]);
+    assert_eq!(sb.head(&r.work), head);
 }

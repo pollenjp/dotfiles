@@ -130,10 +130,11 @@ pub fn draw_run(frame: &mut Frame, run: &Run, route: &str) {
         Some((_, q)) if run.show_detail() => q.detail.lines().take(DETAIL_ROWS).count(),
         _ => 0,
     };
-    // 確認待ちの欄の行: 問いの一覧・空行・今の問いの理由・選べること (1 行に 1 つ)・[d]・詳細
+    // 確認待ちの欄の行: 問いの一覧・空行・今の問いの repo・理由・選べること (1 行に 1 つ)・[d]・知らせ・詳細
+    let notice = usize::from(run.notice().is_some());
     let q_rows = match question {
         None => 1,
-        Some((_, q)) => ids.len().min(QUESTION_ROWS) + 2 + q.choices.len() + 1 + detail,
+        Some((_, q)) => ids.len().min(QUESTION_ROWS) + 3 + q.choices.len() + 1 + notice + detail,
     };
     let [head, body, questions, foot] = Layout::vertical([
         Constraint::Length(1),
@@ -211,8 +212,13 @@ pub fn draw_run(frame: &mut Frame, run: &Run, route: &str) {
             Span::styled(reason, Style::new().fg(Color::Yellow)),
         ]));
     }
-    if let Some((_, q)) = question {
+    if let Some((id, q)) = question {
         lines.push(Line::raw(""));
+        // 答えると次の問い (別の repo) が同じ所に出るので、どの repo の問いかを目立たせる
+        lines.push(Line::styled(
+            format!("▶ {}", run.labels()[id]),
+            Style::new().add_modifier(Modifier::BOLD | Modifier::REVERSED),
+        ));
         lines.push(Line::styled(
             q.reason.label(),
             Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
@@ -229,6 +235,12 @@ pub fn draw_run(frame: &mut Frame, run: &Run, route: &str) {
             Span::styled("[d]", Style::new().fg(Color::Cyan)),
             Span::raw(" 詳細"),
         ]));
+        if let Some(notice) = run.notice() {
+            lines.push(Line::styled(
+                notice.to_string(),
+                Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ));
+        }
         if run.show_detail() {
             lines.extend(
                 q.detail
