@@ -531,7 +531,7 @@ whitelist_pairs() {
 scan_gate=1
 
 run_scan() {
-  local wl_args=()
+  local wl_args=() header
   if [[ -f ${whitelist} ]]; then
     wl_args=(--whitelist "${whitelist}")
   elif [[ ${scan_gate} -eq 1 ]]; then
@@ -575,7 +575,10 @@ report を使う。)"
   fi
   if [[ -n ${wl_args[*]+x} ]]; then
     # whitelist 列が無い = whitelist が読まれていない (列不足などで黙って無視される)。
-    head -n 1 "${out_dir}/vulns.csv" | grep -q '"whitelist"' \
+    # 1 行目を変数に読んでから比べる (パイプの先の grep -q が合った時点で抜けると、
+    # head が SIGPIPE で落ち、pipefail で「列が無い」に見えることがあるため)。
+    IFS= read -r header <"${out_dir}/vulns.csv" || header=""
+    [[ ${header} == *'"whitelist"'* ]] \
       || die "vulns.csv に whitelist 列がありません。whitelist が読めていない可能性:
 ${whitelist}"
     csv_pairs "${out_dir}/vulns.csv" new | sort -u >"${out_dir}/new-findings.txt"
@@ -639,7 +642,7 @@ cmd_report() {
 }
 
 cmd_baseline() {
-  local today n added=0 id pkg pair
+  local today n added=0 id pkg pair existing
   # 初回はここで作る (run_scan は whitelist を要求する)。
   if [[ ! -f ${whitelist} ]]; then
     printf '"vuln_id","package","comment"\n' >"${whitelist}"
@@ -649,15 +652,19 @@ cmd_baseline() {
   today=$(date -u +%Y-%m-%d)
   # 既存の行と重複させない。既存の vuln_id は正規表現だが、ここでは文字列として
   # 同一の行を弾ければ十分 (regex で既に緩く受けている行があるなら scan の段階で
-  # whitelist 済みになっていて new-findings に出てこない)。
+  # whitelist 済みになっていて new-findings に出てこない)。既存の組は変数に取って
+  # から比べ、足した組も足していく (パイプの先に grep -q を置くと、合った時点で抜けた
+  # grep に awk が SIGPIPE で落ち、pipefail で「無い」に見えて二重に足すことがあるため)。
+  existing=$(whitelist_pairs "${whitelist}")
   while IFS=$'\t' read -r id pkg; do
     [[ -n ${id} ]] || continue
     pair=$(printf '%s\t%s' "${id}" "${pkg}")
-    if whitelist_pairs "${whitelist}" | grep -Fxq "${pair}"; then
+    if grep -Fxq -- "${pair}" <<<"${existing}"; then
       continue
     fi
     printf '"%s","%s","baseline (%s): この時点の既知として受け入れ。理由は棚卸しで追記"\n' \
       "${id}" "${pkg}" "${today}" >>"${whitelist}"
+    existing+=$'\n'"${pair}"
     added=$((added + 1))
   done <"${out_dir}/new-findings.txt"
   report_paths

@@ -25,10 +25,13 @@
 #   - どれでも組めなければ、試した pin とわけを並べて止まる (終了コード 1)。git の repo の外なら前の pin を
 #     さかのぼっていないことを、履歴の浅い clone なら fetch-depth: 0 を添える。dotfiles の pin が対象と同じなら
 #     二度組まない
+#   - findings の照合: vulns.csv の whitelist の列が False の組だけを new-findings.txt に出して門で落ち、列が無ければ
+#     止まる。baseline は whitelist に無い組だけを 1 行ずつ足す (同じ組を二重に足さない)
 #
 # 偽の nix build は、組めてよい pin の rev を FAKE_SBOMNIX_OK のファイルから 1 行ずつ読み、試した pin を FAKE_NIX_LOG へ
-# 「sbomnix <rev>」の行で残す。偽の sbomnix と vulnxscan は、呼ばれた自分のパスを FAKE_RUN_LOG へ残す。偽のコマンドの
-# shebang は $BASH から作る (Nix のサンドボックスには /usr/bin/env が無い)。
+# 「sbomnix <rev>」の行で残す。偽の sbomnix と vulnxscan は、呼ばれた自分のパスを FAKE_RUN_LOG へ残す。偽の vulnxscan は
+# FAKE_VULNS の csv を findings として書く (無ければ findings なし)。偽のコマンドの shebang は $BASH から作る (Nix の
+# サンドボックスには /usr/bin/env が無い)。
 
 set -u -o pipefail
 
@@ -72,7 +75,7 @@ mkdir -p "${HOME}"
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 # 外から効く値は、ケースごとに渡すものだけにする
-unset GITHUB_ACTIONS DOTFILES_SETUP_WARNINGS CLOSURE_SCAN_DOTFILES_FLAKE_LOCK
+unset GITHUB_ACTIONS DOTFILES_SETUP_WARNINGS CLOSURE_SCAN_DOTFILES_FLAKE_LOCK FAKE_VULNS
 
 # 偽の sbomnix と vulnxscan。偽の nix build が store のパスへ写す
 tools="${work}/tools"
@@ -100,7 +103,17 @@ EOF
   printf '#!%s\n' "${BASH}"
   cat <<'EOF'
 printf '%s\n' "$0" >>"${FAKE_RUN_LOG:?}"
-echo "(偽の vulnxscan: findings なし)"
+echo "(偽の vulnxscan)"
+# FAKE_VULNS があれば、その csv を -o の先へ写す (無ければ findings なしで csv を書かない)
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    -o)
+      if [[ -n ${FAKE_VULNS-} ]]; then cp "${FAKE_VULNS}" "$2"; fi
+      shift 2
+      ;;
+    *) shift ;;
+  esac
+done
 EOF
 } >"${tools}/vulnxscan"
 chmod +x "${tools}/sbomnix" "${tools}/vulnxscan"
@@ -241,16 +254,17 @@ new_case() {
   printf '%s\n' "${d}"
 }
 
-# closure-scan.sh scan を流す。$1: ケースのディレクトリ、$2: 流す script、残り: script の引数の前に足すもの (flake の場所)。
-# 出力は <ケース>/stdout・stderr・rc、成果物は <ケース>/out
-scan() {
-  local d=$1 s=$2
-  shift 2
+# closure-scan.sh の動作 $1 (scan・baseline) を流す。$2: ケースのディレクトリ、$3: 流す script、残り: script の引数の
+# 後ろに足すもの (flake の場所)。出力は <ケース>/stdout・stderr・rc、成果物は <ケース>/out
+run_cmd() {
+  local sub=$1 d=$2 s=$3
+  shift 3
   FAKE_NIX_LOG="${d}/nix.log" FAKE_RUN_LOG="${d}/run.log" FAKE_SBOMNIX_OK="${d}/ok.txt" \
-    bash "${s}" scan --attr packages.x86_64-linux.fake --out-dir "${d}/out" "$@" \
+    bash "${s}" "${sub}" --attr packages.x86_64-linux.fake --out-dir "${d}/out" "$@" \
     >"${d}/stdout" 2>"${d}/stderr" </dev/null
   echo "$?" >"${d}/rc"
 }
+scan() { run_cmd scan "$@"; }
 
 # 試した pin の rev を、試した順に 1 行ずつ出す
 tried() { sed -n 's/^sbomnix //p' "$1/nix.log"; }
@@ -425,6 +439,44 @@ if grep -q 'fetch-depth: 0' "${d}/stderr"; then
   ok "履歴の浅い clone なら fetch-depth: 0 を添える"
 else
   ng "履歴の浅い clone なら fetch-depth: 0 を添える" "$(cat "${d}/stderr")"
+fi
+
+echo "findings の照合 (whitelist の列・baseline)"
+vulns_header='"vuln_id","url","package","version","whitelist","whitelist_comment"'
+d=$(new_case gate 1)
+new_flake "${d}/flake" 1
+printf '%s\n' "${vulns_header}" '"CVE-0001","u","pkga","1","False",""' '"CVE-0002","u","pkgb","1","True","ok"' \
+  >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" scan "${d}" "${app}" "${d}/flake"
+if [[ $(cat "${d}/rc") == 1 && $(cat "${d}/out/new-findings.txt") == $'CVE-0001\tpkga' ]]; then
+  ok "whitelist の列が False の findings だけを new-findings.txt に出し、門で落ちる"
+else
+  ng "whitelist の列が False の findings だけを new-findings.txt に出し、門で落ちる" \
+    "rc=$(cat "${d}/rc") new-findings=$(cat "${d}/out/new-findings.txt" 2>&1)"
+fi
+
+d=$(new_case nocol 1)
+new_flake "${d}/flake" 1
+printf '%s\n' '"vuln_id","url","package","version"' '"CVE-0001","u","pkga","1"' >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" scan "${d}" "${app}" "${d}/flake"
+if [[ $(cat "${d}/rc") == 1 ]] && grep -q 'vulns.csv に whitelist 列がありません' "${d}/stderr"; then
+  ok "vulns.csv に whitelist の列が無ければ止まる"
+else
+  ng "vulns.csv に whitelist の列が無ければ止まる" "rc=$(cat "${d}/rc") $(cat "${d}/stderr")"
+fi
+
+d=$(new_case baseline 1)
+new_flake "${d}/flake" 1
+printf '"CVE-0001","pkga","前から受け入れていた"\n' >>"${d}/flake/vulnxscan-whitelist.csv"
+printf '%s\n' "${vulns_header}" '"CVE-0001","u","pkga","1","False",""' '"CVE-0003","u","pkgc","1","False",""' \
+  '"CVE-0003","u","pkgc","2","False",""' >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" run_cmd baseline "${d}" "${app}" "${d}/flake"
+wl="${d}/flake/vulnxscan-whitelist.csv"
+if [[ $(cat "${d}/rc") == 0 && $(grep -c '^"CVE-0001","pkga",' "${wl}") == 1 && $(grep -c '^"CVE-0003","pkgc",' "${wl}") == 1 ]]; then
+  ok "baseline は whitelist に無い組だけを 1 行ずつ足す (同じ組を二重に足さない)"
+else
+  ng "baseline は whitelist に無い組だけを 1 行ずつ足す (同じ組を二重に足さない)" "rc=$(cat "${d}/rc")
+$(cat "${wl}")"
 fi
 
 echo
