@@ -280,6 +280,8 @@ jobs:
         run: ./nix/scripts/closure-scan.sh scan --out-dir ./closure-scan-out
 
       # findings で落ちた実行でも、何が出たかは summary と artifact で読めるようにする。
+      # report.txt は closure-scan.sh が vulns.csv から作る findings の表 (whitelist に無いものと、
+      # 受け入れた件数。0 件なら「なし」)。
       - name: レポートを summary へ
         if: always()
         run: |
@@ -287,7 +289,7 @@ jobs:
             echo "## closure-scan (whitelist 適用後の findings)"
             echo '```'
             cat ./closure-scan-out/report.txt 2>/dev/null \
-              || echo "(report.txt なし: スキャンより前の段階で失敗)"
+              || echo "(report.txt なし: findings の表を書く前に失敗。「閉包を SBOM 化してスキャン」のログを見る)"
             echo '```'
             # どの sbomnix で照らしたか (対象の pin で組めず退いたなら、組めなかった pin も)
             echo "### スキャナ (sbomnix)"

@@ -30,11 +30,19 @@
 #     二度組まない
 #   - findings の照合: vulns.csv の whitelist の列が False の組だけを new-findings.txt に出して門で落ち、列が無ければ
 #     止まる。baseline は whitelist に無い組だけを 1 行ずつ足す (同じ組を二重に足さない)
+#   - findings の表: vulnxscan が表を stderr に出す形 (sbomnix 1.8.0) でも stdout に出す形でも、report.txt には vulns.csv
+#     から作った表 (whitelist に無い findings と、受け入れた件数) だけを書き、vulnxscan のログや表を混ぜない。同じ表を
+#     stdout にも出す (門の「上の表」)
+#   - findings が 0 件 (vulns.csv が書かれない) なら、report.txt に「findings: なし」と書く。whitelist で全部受け入れたなら、
+#     whitelist に無い findings を「なし」と書き、受け入れた件数を添える
+#   - --out-dir を使い回しても、前の実行の vulns.csv を読まない (findings が 0 件の実行で「なし」と出す)
+#   - whitelist を当てない report では、全部の findings を表にする。同じ組の版ちがいは行を分け、組の数と行の数を出す
 #
 # 偽の nix build は、組めてよい pin の rev を FAKE_SBOMNIX_OK のファイルから 1 行ずつ読み、試した pin を FAKE_NIX_LOG へ
 # 「sbomnix <rev>」の行で残す。偽の sbomnix と vulnxscan は、呼ばれた自分のパスを FAKE_RUN_LOG へ残す。偽の vulnxscan は
-# FAKE_VULNS の csv を findings として書く (無ければ findings なし)。偽のコマンドの shebang は $BASH から作る (Nix の
-# サンドボックスには /usr/bin/env が無い)。
+# FAKE_VULNS の csv を findings として書き (無ければ findings なし)、FAKE_CONSOLE のファイルの中身 (本物のログと表) を
+# FAKE_CONSOLE_TO (stdout か stderr) へ出す。偽のコマンドの shebang は $BASH から作る (Nix のサンドボックスには
+# /usr/bin/env が無い)。
 
 set -u -o pipefail
 
@@ -78,7 +86,7 @@ mkdir -p "${HOME}"
 export GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.com
 export GIT_COMMITTER_NAME=test GIT_COMMITTER_EMAIL=test@example.com
 # 外から効く値は、ケースごとに渡すものだけにする
-unset GITHUB_ACTIONS DOTFILES_SETUP_WARNINGS CLOSURE_SCAN_DOTFILES_FLAKE_LOCK FAKE_VULNS
+unset GITHUB_ACTIONS DOTFILES_SETUP_WARNINGS CLOSURE_SCAN_DOTFILES_FLAKE_LOCK FAKE_VULNS FAKE_CONSOLE FAKE_CONSOLE_TO
 
 # 偽の sbomnix と vulnxscan。偽の nix build が store のパスへ写す
 tools="${work}/tools"
@@ -107,6 +115,14 @@ EOF
   cat <<'EOF'
 printf '%s\n' "$0" >>"${FAKE_RUN_LOG:?}"
 echo "(偽の vulnxscan)"
+# FAKE_CONSOLE があれば、その中身 (本物のログと表) を FAKE_CONSOLE_TO (stdout か stderr) へ出す
+if [[ -n ${FAKE_CONSOLE-} ]]; then
+  if [[ ${FAKE_CONSOLE_TO-} == stdout ]]; then
+    cat "${FAKE_CONSOLE}"
+  else
+    cat "${FAKE_CONSOLE}" >&2
+  fi
+fi
 # FAKE_VULNS があれば、その csv を -o の先へ写す (無ければ findings なしで csv を書かない)
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -559,6 +575,124 @@ if [[ $(cat "${d}/rc") == 0 && $(grep -c '^"CVE-0001","pkga",' "${wl}") == 1 && 
 else
   ng "baseline は whitelist に無い組だけを 1 行ずつ足す (同じ組を二重に足さない)" "rc=$(cat "${d}/rc")
 $(cat "${wl}")"
+fi
+
+echo "findings の表 (report.txt)"
+# sbomnix 1.8.0 の vulns.csv の形 (列と値の書き方は CI の artifact と同じ)。whitelist に無い 2 件と、受け入れた 1 件
+v18_header='"vuln_id","url","package","version_local","severity","grype","osv","vulnix","sum","sortcol","whitelist","whitelist_comment"'
+v18_brotli='"CVE-2026-111497","https://nvd.nist.gov/vuln/detail/CVE-2026-111497","brotli","1.2.0","9.8","0","0","1","1","2026A0000111497","False",""'
+v18_glib='"CVE-2026-58016","https://nvd.nist.gov/vuln/detail/CVE-2026-58016","glib","2.88.3","7.5","1","0","1","2","2026A0000058016","False",""'
+v18_fish='"CVE-2007-1397","https://nvd.nist.gov/vuln/detail/CVE-2007-1397","fish","4.0.2","","0","0","1","1","2007A0000001397","True","CPE の誤マッチ"'
+# 本物の vulnxscan が出すログと表 (sbomnix 1.8.0 では、表も INFO のログとして stderr に出る)
+console=$(printf '%s\n' \
+  "INFO     CVE-2026-85091 for 'zlib' is patched with: ['/nix/store/00000000000000000000000000000000-cve-2026-85091.patch']" \
+  'INFO     Console report' \
+  '' \
+  'Potential vulnerabilities impacting version_local: ' \
+  '' \
+  '| vuln_id         | url                                              | package   | version_local   |  severity  |  grype  |  osv  |  vulnix  |  sum  |' \
+  '|-----------------+--------------------------------------------------+-----------+-----------------+------------+---------+-------+----------+-------|' \
+  '| CVE-2026-111497 | https://nvd.nist.gov/vuln/detail/CVE-2026-111497 | brotli    | 1.2.0           |    9.8     |    0    |   0   |    1     |   1   |' \
+  '| CVE-2026-58016  | https://nvd.nist.gov/vuln/detail/CVE-2026-58016  | glib      | 2.88.3          |    7.5     |    1    |   0   |    1     |   2   |' \
+  '' \
+  '' \
+  'INFO     Wrote: vulns.csv')
+table_brotli='| CVE-2026-111497 | brotli  | 1.2.0   | 9.8      | vulnix        | https://nvd.nist.gov/vuln/detail/CVE-2026-111497 |'
+expected_report=$(printf '%s\n' \
+  'whitelist に無い findings: 2 件' \
+  '' \
+  '| vuln_id         | package | version | severity | scanner       | url                                              |' \
+  '|-----------------+---------+---------+----------+---------------+--------------------------------------------------|' \
+  "${table_brotli}" \
+  '| CVE-2026-58016  | glib    | 2.88.3  | 7.5      | grype, vulnix | https://nvd.nist.gov/vuln/detail/CVE-2026-58016  |' \
+  '' \
+  'whitelist で受け入れた findings: 1 件 (一覧は vulns.csv)')
+for to in stderr stdout; do
+  d=$(new_case "table-${to}" 1)
+  new_flake "${d}/flake" 1
+  printf '%s\n' "${v18_header}" "${v18_brotli}" "${v18_glib}" "${v18_fish}" >"${d}/vulns.csv"
+  printf '%s\n' "${console}" >"${d}/console.txt"
+  FAKE_VULNS="${d}/vulns.csv" FAKE_CONSOLE="${d}/console.txt" FAKE_CONSOLE_TO=${to} scan "${d}" "${app}" "${d}/flake"
+  if [[ $(cat "${d}/rc") == 1 && $(cat "${d}/out/report.txt" 2>&1) == "${expected_report}" ]]; then
+    ok "vulnxscan が表を ${to} に出しても、report.txt には vulns.csv から作った表だけを書く"
+  else
+    ng "vulnxscan が表を ${to} に出しても、report.txt には vulns.csv から作った表だけを書く" "rc=$(cat "${d}/rc")
+report.txt:
+$(cat "${d}/out/report.txt" 2>&1)
+期待:
+${expected_report}"
+  fi
+  if grep -qxF "${table_brotli}" "${d}/stdout"; then
+    ok "vulnxscan が表を ${to} に出しても、同じ表を stdout に出す (門の「上の表」)"
+  else
+    ng "vulnxscan が表を ${to} に出しても、同じ表を stdout に出す (門の「上の表」)" "$(cat "${d}/stdout")"
+  fi
+done
+
+no_findings='findings: なし (vulnxscan は vulns.csv を書かなかった)'
+d=$(new_case table-none 1)
+new_flake "${d}/flake" 1
+scan "${d}" "${app}" "${d}/flake"
+if [[ $(cat "${d}/rc") == 0 && $(cat "${d}/out/report.txt" 2>&1) == "${no_findings}" ]]; then
+  ok "findings が 0 件 (vulns.csv が書かれない) なら、report.txt に「findings: なし」と書く"
+else
+  ng "findings が 0 件 (vulns.csv が書かれない) なら、report.txt に「findings: なし」と書く" "rc=$(cat "${d}/rc")
+report.txt:
+$(cat "${d}/out/report.txt" 2>&1)"
+fi
+
+d=$(new_case table-accepted 1)
+new_flake "${d}/flake" 1
+printf '%s\n' "${v18_header}" "${v18_fish}" >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" scan "${d}" "${app}" "${d}/flake"
+expected=$(printf '%s\n' 'whitelist に無い findings: なし' '' 'whitelist で受け入れた findings: 1 件 (一覧は vulns.csv)')
+if [[ $(cat "${d}/rc") == 0 && $(cat "${d}/out/report.txt" 2>&1) == "${expected}" ]]; then
+  ok "whitelist で全部受け入れたなら、whitelist に無い findings を「なし」と書き、受け入れた件数を添える"
+else
+  ng "whitelist で全部受け入れたなら、whitelist に無い findings を「なし」と書き、受け入れた件数を添える" "rc=$(cat "${d}/rc")
+report.txt:
+$(cat "${d}/out/report.txt" 2>&1)"
+fi
+
+d=$(new_case table-reuse 1)
+new_flake "${d}/flake" 1
+printf '%s\n' "${v18_header}" "${v18_brotli}" >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" scan "${d}" "${app}" "${d}/flake"
+first_rc=$(cat "${d}/rc")
+# 同じ --out-dir で、findings なし (偽の vulnxscan は vulns.csv を書かない) をもう 1 回
+scan "${d}" "${app}" "${d}/flake"
+if [[ ${first_rc} == 1 && $(cat "${d}/rc") == 0 && $(cat "${d}/out/report.txt" 2>&1) == "${no_findings}" ]] \
+  && [[ -f ${d}/out/new-findings.txt && ! -s ${d}/out/new-findings.txt ]]; then
+  ok "--out-dir を使い回しても、前の実行の vulns.csv を読まない"
+else
+  ng "--out-dir を使い回しても、前の実行の vulns.csv を読まない" "rc=${first_rc} → $(cat "${d}/rc")
+new-findings.txt: $(cat "${d}/out/new-findings.txt" 2>&1)
+report.txt:
+$(cat "${d}/out/report.txt" 2>&1)"
+fi
+
+d=$(new_case table-nowl 1)
+new_flake "${d}/flake" 1
+rm "${d}/flake/vulnxscan-whitelist.csv"
+printf '%s\n' '"vuln_id","url","package","version_local","severity","grype","osv","vulnix","sum","sortcol"' \
+  '"CVE-0003","u3","pkgc","2","","0","1","0","1","x"' '"CVE-0003","u3","pkgc","1","","0","1","0","1","x"' \
+  >"${d}/vulns.csv"
+FAKE_VULNS="${d}/vulns.csv" run_cmd report "${d}" "${app}" "${d}/flake"
+expected=$(printf '%s\n' \
+  'findings: 1 件 (版ごとに 2 行。whitelist は当てていない)' \
+  '' \
+  '| vuln_id  | package | version | severity | scanner | url |' \
+  '|----------+---------+---------+----------+---------+-----|' \
+  '| CVE-0003 | pkgc    | 2       |          | osv     | u3  |' \
+  '| CVE-0003 | pkgc    | 1       |          | osv     | u3  |')
+if [[ $(cat "${d}/rc") == 0 && $(cat "${d}/out/report.txt" 2>&1) == "${expected}" ]]; then
+  ok "whitelist を当てない report では全部の findings を表にし、版ちがいの行も組の数と行の数で出す"
+else
+  ng "whitelist を当てない report では全部の findings を表にし、版ちがいの行も組の数と行の数で出す" "rc=$(cat "${d}/rc")
+report.txt:
+$(cat "${d}/out/report.txt" 2>&1)
+期待:
+${expected}"
 fi
 
 echo

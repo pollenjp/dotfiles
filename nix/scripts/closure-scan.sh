@@ -23,8 +23,9 @@
 # 2. 対象の閉包をビルドする (binary cache があれば実体はダウンロード)
 # 3. sbomnix で SBOM (CycloneDX / SPDX / csv) を書き出す
 #    (vulnxscan も内部で SBOM を作るが保存しないので、成果物として別に残す)
-# 4. vulnxscan で runtime 閉包をスキャンし、whitelist に無い findings があれば
-#    終了コード 1 で落ちる (CI のゲート)
+# 4. vulnxscan で runtime 閉包をスキャンし、findings の表 (whitelist に無いもの) を
+#    vulns.csv から作って出す (report.txt にも残す。CI は summary に貼る)
+# 5. whitelist に無い findings があれば終了コード 1 で落ちる (CI のゲート)
 #
 # whitelist は「安全と確認した」印ではなく **増分検知の基準線**。閉包には既知
 # CVE が常に数十件あるので、全 findings で落とすとゲートは初日から赤いままに
@@ -565,6 +566,121 @@ csv_pairs() {
   ' "$1"
 }
 
+# vulns.csv ($1) から findings の表 (report.txt の中身) を出す。whitelist の列があれば、それが False の行
+# (whitelist に無い findings。門と同じ判定) を表にし、受け入れた findings は件数だけを添える (一覧は vulns.csv)。
+# 列が無ければ (whitelist を当てない report) 全部の行を表にする。件数は門 (new-findings.txt) と同じく vuln_id と
+# package の組で数え、同じ組の版ちがいで行が増えたら行の数も添える。列は名前で引く (vulnxscan の版で並びや
+# 有無が変わる。版の列は version_local、古い形は version)。
+report_table() {
+  awk -F'","' '
+    function field(c, v) {
+      if (!(c in col)) return ""
+      v = $(col[c])
+      gsub(/"/, "", v)
+      return v
+    }
+    BEGIN {
+      split("vuln_id package version severity scanner url", head, " ")
+      split("grype osv vulnix", scanner_name, " ")
+      for (j = 1; j <= 6; j++) {
+        cell[0, j] = head[j]
+        w[j] = length(head[j])
+      }
+    }
+    NR == 1 {
+      for (i = 1; i <= NF; i++) {
+        f = $i
+        gsub(/"/, "", f)
+        col[f] = i
+      }
+      version = ("version_local" in col) ? "version_local" : "version"
+      has_wl = ("whitelist" in col)
+      next
+    }
+    $0 == "" { next }
+    {
+      id = field("vuln_id")
+      pkg = field("package")
+      if (has_wl && field("whitelist") != "False") {
+        if (!((id, pkg) in accepted)) {
+          accepted[id, pkg] = 1
+          n_accepted++
+        }
+        next
+      }
+      if (!((id, pkg) in pairs)) {
+        pairs[id, pkg] = 1
+        n_pairs++
+      }
+      # 照らしたスキャナの列 (1 か 0) のうち、見つけたものを並べる
+      scanners = ""
+      for (k = 1; k <= 3; k++) {
+        v = field(scanner_name[k])
+        if (v + 0 > 0 || v == "True") scanners = scanners (scanners == "" ? "" : ", ") scanner_name[k]
+      }
+      n_rows++
+      cell[n_rows, 1] = id
+      cell[n_rows, 2] = pkg
+      cell[n_rows, 3] = field(version)
+      cell[n_rows, 4] = field("severity")
+      cell[n_rows, 5] = scanners
+      cell[n_rows, 6] = field("url")
+      for (j = 1; j <= 6; j++) {
+        if (length(cell[n_rows, j]) > w[j]) w[j] = length(cell[n_rows, j])
+      }
+    }
+    END {
+      label = has_wl ? "whitelist に無い findings" : "findings"
+      notes = ""
+      if (n_rows > n_pairs) notes = "版ごとに " n_rows " 行"
+      if (!has_wl) notes = notes (notes == "" ? "" : "。") "whitelist は当てていない"
+      if (n_pairs > 0) {
+        printf "%s: %d 件", label, n_pairs
+      } else {
+        printf "%s: なし", label
+      }
+      if (notes != "") printf " (%s)", notes
+      printf "\n"
+      if (n_rows > 0) {
+        sep = "|"
+        for (j = 1; j <= 6; j++) {
+          dashes = ""
+          for (k = 0; k < w[j] + 2; k++) dashes = dashes "-"
+          sep = sep dashes (j < 6 ? "+" : "|")
+        }
+        printf "\n"
+        for (r = 0; r <= n_rows; r++) {
+          line = "|"
+          for (j = 1; j <= 6; j++) line = line sprintf(" %-" w[j] "s |", cell[r, j])
+          print line
+          if (r == 0) print sep
+        }
+      }
+      if (has_wl) {
+        printf "\n"
+        if (n_accepted > 0) {
+          printf "whitelist で受け入れた findings: %d 件 (一覧は vulns.csv)\n", n_accepted
+        } else {
+          print "whitelist で受け入れた findings: なし"
+        }
+      }
+    }
+  ' "$1"
+}
+
+# findings の表を report.txt に書き、stdout にも出す (CI は summary に貼る)。vulnxscan も表を出すが、版によって
+# stdout にも stderr (ログ) にも出る (sbomnix 1.8.0・1.9.0 は INFO のログとして stderr) ので拾わず、vulns.csv から
+# 作る。vulns.csv が無ければ (findings が 1 件も無いと vulnxscan は書かない)「なし」と書く。
+write_report() {
+  step "findings の表 (vulns.csv から作り、report.txt に書く)"
+  if [[ -f ${out_dir}/vulns.csv ]]; then
+    report_table "${out_dir}/vulns.csv" >"${out_dir}/report.txt"
+  else
+    printf 'findings: なし (vulnxscan は vulns.csv を書かなかった)\n' >"${out_dir}/report.txt"
+  fi
+  cat "${out_dir}/report.txt"
+}
+
 # whitelist csv の既存 (vuln_id, package) を同じ形で出す (baseline の重複防止用)。
 whitelist_pairs() {
   awk -F'","' '
@@ -584,6 +700,9 @@ scan_gate=1
 
 run_scan() {
   local wl_args=() header
+  # 前の実行の findings と表を消す。--out-dir を使い回すと、vulns.csv を書かない実行 (findings が 0 件) が
+  # 前の vulns.csv を読んでしまう。途中で落ちた実行に、前の表を残さないためでもある。
+  rm -f "${out_dir}/vulns.csv" "${out_dir}/report.txt" "${out_dir}/new-findings.txt"
   if [[ -f ${whitelist} ]]; then
     wl_args=(--whitelist "${whitelist}")
   elif [[ ${scan_gate} -eq 1 ]]; then
@@ -615,14 +734,13 @@ report を使う。)"
   else
     step "vulnxscan (OSV + Grype + vulnix)"
   fi
-  # 表は stdout、ログは stderr。表を report.txt に残して CI の summary に使う。
-  vulnxscan "${target}" -o "${out_dir}/vulns.csv" ${wl_args[@]+"${wl_args[@]}"} \
-    | tee "${out_dir}/report.txt"
+  # 出力はそのまま流す。report.txt の表は、vulnxscan の出力からではなく vulns.csv から作る (write_report)。
+  vulnxscan "${target}" -o "${out_dir}/vulns.csv" ${wl_args[@]+"${wl_args[@]}"}
 
   # findings が 1 件も無いと csv 自体が書かれない。
   if [[ ! -f ${out_dir}/vulns.csv ]]; then
-    note "findings なし (vulns.csv は書かれませんでした)。"
     : >"${out_dir}/new-findings.txt"
+    write_report
     return 0
   fi
   if [[ -n ${wl_args[*]+x} ]]; then
@@ -637,13 +755,14 @@ ${whitelist}"
   else
     csv_pairs "${out_dir}/vulns.csv" all | sort -u >"${out_dir}/new-findings.txt"
   fi
+  write_report
 }
 
 report_paths() {
   note "成果物: ${out_dir}"
   note "  sbom.cdx.json / sbom.spdx.json / sbom.csv (SBOM)"
   note "  vulns.csv (findings 全件。whitelist があれば判定の列つき)"
-  note "  report.txt (表示された表)"
+  note "  report.txt (上に出した findings の表。vulns.csv から作る。CI は summary に貼る)"
   note "  new-findings.txt (whitelist に無い findings。whitelist が無ければ全件)"
   note "  scanner.txt (照らした sbomnix と、どの pin から取ったか)"
 }
