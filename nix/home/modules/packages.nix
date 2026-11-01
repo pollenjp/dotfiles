@@ -56,6 +56,10 @@
     # 使う。option によらず入れる
     (callPackage ../../pkgs/git-gh { })
 
+    # ghq の repo を org・repo 単位の木で選び、既定 branch を fetch と fast-forward で最新にする TUI (Rust)。
+    # 実体は nix/pkgs/pjp-ghq-pull/。gitViaGh.enable のマシンでは fetch を上の git gh で打つ
+    (callPackage ../../pkgs/pjp-ghq-pull { })
+
     # 以下は対応する programs.* モジュールが入れるのでここには書かない:
     #   starship -> modules/starship.nix
     #   delta / git-lfs -> modules/git.nix

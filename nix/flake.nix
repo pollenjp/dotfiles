@@ -114,6 +114,7 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
           googleIme = pkgs.callPackage ./pkgs/pjp-google-ime { };
+          ghqPull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
           unittest =
             name:
             pkgs.runCommand "${name}-unittest" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -327,6 +328,25 @@
               '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
+          # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
+          # crate で流す (buildPhase を差し替え、test と install はしない)。指摘は system によらないので Linux だけ
+          pjp-ghq-pull-lint = ghqPull.overrideAttrs (old: {
+            pname = "pjp-ghq-pull-lint";
+            nativeBuildInputs = old.nativeBuildInputs ++ [
+              pkgs.clippy
+              pkgs.rustfmt
+            ];
+            buildPhase = ''
+              runHook preBuild
+              cargo fmt --check
+              cargo clippy --all-targets --offline -- -D warnings
+              runHook postBuild
+            '';
+            doCheck = false;
+            installPhase = ''
+              touch $out
+            '';
+          });
           # 包む前の script を、偽の ssh-add と python3 で bind した本物の unix socket で流す。flock は script が
           # PATH から使う (Linux の system と同じ util-linux のもの)。starship.toml の警告も本物の starship で読ませる
           pjp-agent-link-test =
@@ -344,6 +364,9 @@
               '';
         }
         // {
+          # pjp-ghq-pull の package そのもの。build の中で cargo test を流す (何を確かめるかは
+          # pkgs/pjp-ghq-pull/tests/*.rs の先頭)。macOS (aarch64-darwin) でも build と test を通すので全 system
+          pjp-ghq-pull-test = ghqPull;
           claude-env-state = import ./tests/claude-env.nix {
             inherit
               lib
@@ -592,6 +615,12 @@
           # GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)。
           # home には modules/packages.nix が入れる。checks の git-gh-test もこれを流す。
           git-gh = pkgs.callPackage ./pkgs/git-gh { };
+
+          # ghq の repo を選び、既定 branch を fetch と fast-forward で最新にする TUI (Rust)。
+          # home には modules/packages.nix が入れる。switch せずに試すなら、一時の ghq root を指して:
+          #
+          #   nix run ./nix#pjp-ghq-pull -- --root <一時の ghq root>
+          pjp-ghq-pull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
         }
         # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
         # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:
@@ -640,6 +669,23 @@
               # check-claude-frontmatter.sh が skill などの frontmatter を YAML として読む
               pkgs.yq-go
               home-manager.packages.${system}.default
+            ];
+          };
+
+          # pjp-ghq-pull (pkgs/pjp-ghq-pull。Rust) を直すときの道具。rustc は C の linker で link するので
+          # mkShellNoCC ではなく mkShell。default には足さない (CI の lint が入る default の devShell を重くしない)。
+          # nix/pkgs/pjp-ghq-pull の中で:
+          #
+          #   nix develop ../..#pjp-ghq-pull --command cargo test
+          pjp-ghq-pull = pkgs.mkShell {
+            packages = [
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.clippy
+              pkgs.rustfmt
+              # テストが bare の remote と clone を作る git と、repo の一覧を読む ghq
+              pkgs.git
+              pkgs.ghq
             ];
           };
         }
