@@ -256,8 +256,12 @@ fi
 # スキャンそのものを落とさないための退き先。dotfiles 自身のスキャン (CI と setup の
 # flake-update) では 2 が対象と同じ pin になるので、3 で前の pin へ退く (CI は履歴を全部
 # 取る)。1 から取れなければ警告し、どこから取ったかは毎回 scanner.txt に残す。ADR 040。
+#
+# 2 と 3 の flake.lock を nix eval で読めなければ、黙って飛ばさず、わけを組めなかった pin に
+# 並べて次へ進む (退いたときの警告と、止まるときの文に出る)。
 
-# 前の pin をいくつまで組むか (同じ pin は数えない) と、履歴の commit をいくつまで見るか。
+# 前の pin をいくつまで試すか (同じ pin は数えず、読めなかった flake.lock は 1 つと数える) と、
+# 履歴の commit をいくつまで見るか。
 history_max_tries=3
 history_max_commits=50
 
@@ -266,7 +270,8 @@ sbomnix_failures=() # 組めなかった pin の行 (「見出し ref (わけ)�
 sbomnix_tried=" "   # 組んだ pin の鍵 (nixpkgs の narHash)。同じ pin を二度組まない
 
 # CLOSURE_SCAN_LOCK の flake.lock から、root の input nixpkgs の locked を「narHash<TAB>flake ref」
-# で出す (読めなければ空)。narHash は同じ pin かを比べる鍵、ref は nix build に渡す形。
+# で出す (nixpkgs の pin が無ければ空。JSON として読めなければ nix eval が落ちる)。narHash は同じ
+# pin かを比べる鍵、ref は nix build に渡す形。
 # flakeRefToString の無い古い nix では、github の形だけを組み立てる。
 # shellcheck disable=SC2016 # Nix の式をそのまま書く (${…} は Nix の差し込み)
 lock_nixpkgs_expr='
@@ -282,10 +287,44 @@ in
 if l ? narHash && ref != "" then "${l.narHash}\t${ref}" else ""
 '
 
-# flake.lock のファイルの nixpkgs の pin を「narHash<TAB>flake ref」で出す (無い・読めなければ空)。
-lock_nixpkgs() {
+# nix eval のログ ($1) から、読めなかったわけを 1 行で出す。最後の error: の行 (いちばん内側のわけ。頭の
+# error: は外す)、無ければ終了コード ($2)。
+eval_failure_reason() {
+  local line
+  line=$(awk '
+    /^[[:space:]]*error:[[:space:]]*[^[:space:]]/ { l = $0 }
+    END {
+      sub(/^[[:space:]]*error:[[:space:]]*/, "", l)
+      print l
+    }
+  ' "$1")
+  if [[ -n ${line} ]]; then
+    printf '%s' "${line:0:200}"
+    return 0
+  fi
+  printf 'nix eval の終了コード %s' "$2"
+}
+
+# flake.lock のファイル ($1。絶対パス) の nixpkgs の pin を、lock_row に「narHash<TAB>flake ref」で入れる
+# (ファイルか pin が無ければ空)。nix eval で読めなければ、わけを lock_error に入れて 1 を返す。$(…) で
+# 呼ばずにグローバルへ置くのは、pin とわけを分けて受け取るため。
+lock_row=""
+lock_error=""
+read_lock_nixpkgs() {
+  local eval_log rc=0
+  lock_row=""
+  lock_error=""
   [[ -f $1 ]] || return 0
-  CLOSURE_SCAN_LOCK=$1 nix eval --raw --impure --expr "${lock_nixpkgs_expr}" </dev/null 2>/dev/null || true
+  eval_log=$(mktemp "${out_dir}/lock-eval.XXXXXX")
+  lock_row=$(CLOSURE_SCAN_LOCK=$1 nix eval --raw --impure --expr "${lock_nixpkgs_expr}" </dev/null 2>"${eval_log}") \
+    || rc=$?
+  if [[ ${rc} -ne 0 ]]; then
+    lock_row=""
+    lock_error=$(eval_failure_reason "${eval_log}" "${rc}")
+    rm -f "${eval_log}"
+    return 1
+  fi
+  rm -f "${eval_log}"
 }
 
 # GitHub Actions の中なら、実行の画面の先頭に出る警告 (workflow command) を出す。本文の % と
@@ -389,7 +428,7 @@ use_sbomnix() {
 # sbomnix と vulnxscan を用意する。PATH にあればそれ、無ければ上の順に pin から組む。どれでも
 # 組めなければ、試した pin とわけを並べて止まる。
 ensure_sbomnix() {
-  local row key ref dotfiles_lock="" history_note="" c blob short lock_copy tries=0 seen=" " f message
+  local key ref dotfiles_lock="" history_note="" c blob short label lock_copy tries=0 seen=" " f message
   local path_sbomnix version
   if path_sbomnix=$(command -v sbomnix) && command -v vulnxscan &>/dev/null; then
     version=$(sbomnix --version 2>/dev/null </dev/null) || version=""
@@ -401,10 +440,11 @@ ensure_sbomnix() {
   command -v nix &>/dev/null \
     || die "sbomnix / vulnxscan が見つかりません (nix があれば nixpkgs の pin から組みます)。"
 
-  # 1. 対象の pin
-  row=$(lock_nixpkgs "${flake_dir}/flake.lock")
-  key=${row%%$'\t'*}
-  ref=${row#*$'\t'}
+  # 1. 対象の pin。flake.lock を読めなくても --inputs-from で組む (読めないなら、組むときに nix が
+  #    わけを出して落ちる)。読めた pin は、2 と 3 で同じ pin を二度組まないための鍵にする
+  read_lock_nixpkgs "${flake_dir}/flake.lock" || true
+  key=${lock_row%%$'\t'*}
+  ref=${lock_row#*$'\t'}
   if build_sbomnix "対象の pin" "${key}" "${ref:-${flake_dir} の nixpkgs}" \
     --inputs-from "${flake_dir}" 'nixpkgs#sbomnix'; then
     use_sbomnix "対象の pin" "${ref:-${flake_dir} の nixpkgs}"
@@ -418,13 +458,16 @@ ensure_sbomnix() {
     dotfiles_lock=${CLOSURE_SCAN_DOTFILES_FLAKE_LOCK-}
   fi
   if [[ -n ${dotfiles_lock} ]]; then
-    row=$(lock_nixpkgs "${dotfiles_lock}")
-    key=${row%%$'\t'*}
-    ref=${row#*$'\t'}
-    if [[ -n ${row} && ${sbomnix_tried} != *" ${key} "* ]] \
-      && build_sbomnix "dotfiles の pin" "${key}" "${ref}" "${ref}#sbomnix"; then
-      use_sbomnix "dotfiles の pin" "${ref}"
-      return 0
+    if ! read_lock_nixpkgs "${dotfiles_lock}"; then
+      sbomnix_failures+=("dotfiles の pin ${dotfiles_lock} (flake.lock を読めない: ${lock_error})")
+    else
+      key=${lock_row%%$'\t'*}
+      ref=${lock_row#*$'\t'}
+      if [[ -n ${lock_row} && ${sbomnix_tried} != *" ${key} "* ]] \
+        && build_sbomnix "dotfiles の pin" "${key}" "${ref}" "${ref}#sbomnix"; then
+        use_sbomnix "dotfiles の pin" "${ref}"
+        return 0
+      fi
     fi
   fi
 
@@ -440,14 +483,20 @@ ensure_sbomnix() {
       [[ ${seen} != *" ${blob} "* ]] || continue
       seen+="${blob} "
       git -C "${flake_dir}" cat-file blob "${blob}" >"${lock_copy}" </dev/null || continue
-      row=$(lock_nixpkgs "${lock_copy}")
-      key=${row%%$'\t'*}
-      ref=${row#*$'\t'}
-      [[ -n ${row} && ${sbomnix_tried} != *" ${key} "* ]] || continue
-      tries=$((tries + 1))
       short=$(git -C "${flake_dir}" rev-parse --short "${c}" </dev/null)
-      if build_sbomnix "対象の前の pin (commit ${short} の flake.lock)" "${key}" "${ref}" "${ref}#sbomnix"; then
-        use_sbomnix "対象の前の pin (commit ${short} の flake.lock)" "${ref}"
+      label="対象の前の pin (commit ${short} の flake.lock)"
+      # 読めない lock も 1 つと数える (nix が読めないわけがどの lock でも同じなら、並べすぎないため)
+      if ! read_lock_nixpkgs "${lock_copy}"; then
+        tries=$((tries + 1))
+        sbomnix_failures+=("${label} (flake.lock を読めない: ${lock_error})")
+        continue
+      fi
+      key=${lock_row%%$'\t'*}
+      ref=${lock_row#*$'\t'}
+      [[ -n ${lock_row} && ${sbomnix_tried} != *" ${key} "* ]] || continue
+      tries=$((tries + 1))
+      if build_sbomnix "${label}" "${key}" "${ref}" "${ref}#sbomnix"; then
+        use_sbomnix "${label}" "${ref}"
         return 0
       fi
     done < <(git -C "${flake_dir}" log --first-parent --format=%H -n "${history_max_commits}" -- flake.lock 2>/dev/null)
@@ -478,6 +527,9 @@ if [[ -z ${out_dir} ]]; then
   out_dir=$(mktemp -d)
 fi
 mkdir -p "${out_dir}"
+# 絶対パスにする。前の pin の flake.lock をここへ写して nix の式 (builtins.readFile) で読むが、readFile は
+# 相対パスを受けない ("string './…' doesn't represent an absolute path")。CI は --out-dir に相対パスを渡す。
+out_dir=$(cd -- "${out_dir}" && pwd -P) || die "--out-dir のディレクトリに入れません: ${out_dir}"
 
 # vulnxscan の csv は全フィールドが quote される (pandas の QUOTE_ALL)。
 # `","` で切って残った quote を剥ぐ。フィールドに `","` を含む値は入らない前提

@@ -20,8 +20,11 @@
 #     scanner.txt には組めなかった pin と、そのわけ (最初に組めなかった derivation の名前) も残す
 #   - dotfiles 自身のスキャン (script の隣の flake が対象) では、dotfiles の pin を対象と同じ pin として二度組まず、
 #     git の履歴の前の pin へ退く。前の pin は first-parent でたどる (merge した branch の途中の pin は試さない)
+#   - --out-dir を相対パスで渡しても (CI の形)、前の pin の flake.lock を読んで退き、成果物は cwd から見たその場所に書く
 #   - lock を書き換えたまま (update の直後・commit の前) なら、HEAD の pin へ退く
 #   - 前の pin は新しい順に 3 つまで試す (同じ pin は数えない)
+#   - 前の pin・dotfiles の pin の flake.lock を読めなければ (nix eval が落ちる)、黙って飛ばさず、組めなかった pin に
+#     わけ (nix の error) を並べて次の pin へ進む。読めなかった前の pin も 3 つまでの数に入れる
 #   - どれでも組めなければ、試した pin とわけを並べて止まる (終了コード 1)。git の repo の外なら前の pin を
 #     さかのぼっていないことを、履歴の浅い clone なら fetch-depth: 0 を添える。dotfiles の pin が対象と同じなら
 #     二度組まない
@@ -240,6 +243,12 @@ commit_lock() {
   git -C "$1" commit -qam "pin $2"
 }
 
+# repo ($1) の nix/flake.lock を、衝突の印が残って JSON として読めない lock にして commit する ($2 で中身を変える)
+commit_broken_lock() {
+  printf '<<<<<<< HEAD\n%s\n=======\n>>>>>>> other\n' "$2" >"$1/nix/flake.lock"
+  git -C "$1" commit -qam "broken lock $2"
+}
+
 # ケースのディレクトリ ($1 の名前) を作り、組めてよい pin (k を 2 つ目からの引数に) を書く
 new_case() {
   local d="${work}/cases/$1" k
@@ -265,6 +274,19 @@ run_cmd() {
   echo "$?" >"${d}/rc"
 }
 scan() { run_cmd scan "$@"; }
+
+# scan と同じだが、ケースのディレクトリから流し、--out-dir を相対パス (./out) で渡す (CI の形)
+scan_relative() {
+  local d=$1 s=$2
+  shift 2
+  (
+    cd -- "${d}" || exit
+    FAKE_NIX_LOG="${d}/nix.log" FAKE_RUN_LOG="${d}/run.log" FAKE_SBOMNIX_OK="${d}/ok.txt" \
+      bash "${s}" scan --attr packages.x86_64-linux.fake --out-dir ./out "$@" \
+      >"${d}/stdout" 2>"${d}/stderr" </dev/null
+  )
+  echo "$?" >"${d}/rc"
+}
 
 # 試した pin の rev を、試した順に 1 行ずつ出す
 tried() { sed -n 's/^sbomnix //p' "$1/nix.log"; }
@@ -376,6 +398,20 @@ else
   ng "scanner.txt の出どころを、前の pin の commit で出す" "$(cat "${d}/out/scanner.txt" 2>&1)"
 fi
 
+echo "--out-dir を相対パスで渡す (CI の形)"
+d=$(new_case relative 1)
+repo="${d}/repo"
+new_repo "${repo}" 1
+c1=$(git -C "${repo}" rev-parse --short HEAD)
+commit_lock "${repo}" 2
+scan_relative "${d}" "${repo}/nix/scripts/closure-scan.sh"
+check_rc_tried "相対の --out-dir でも、前の pin の flake.lock を読んで組む" "${d}" 0 "$(expect_tried 2 1)"
+if grep -q "^出どころ: 対象の前の pin (commit ${c1} の flake.lock) " "${d}/out/scanner.txt"; then
+  ok "相対の --out-dir は、cwd から見たその場所に成果物を書く"
+else
+  ng "相対の --out-dir は、cwd から見たその場所に成果物を書く" "$(cat "${d}/out/scanner.txt" "${d}/stderr" 2>&1)"
+fi
+
 echo "lock を書き換えたまま (commit の前)"
 d=$(new_case dirty 1)
 repo="${d}/repo"
@@ -403,6 +439,40 @@ commit_lock "${repo}" 8
 scan "${d}" "${repo}/nix/scripts/closure-scan.sh"
 check_rc_tried "対象の pin のあと、前の pin を新しい順に 3 つまで組む (同じ pin は数えない)" "${d}" 1 "$(expect_tried 8 7 6 5)"
 
+echo "前の pin の flake.lock を読めない"
+d=$(new_case unreadable 1)
+repo="${d}/repo"
+new_repo "${repo}" 1
+commit_broken_lock "${repo}" a
+cb=$(git -C "${repo}" rev-parse --short HEAD)
+commit_lock "${repo}" 2
+scan "${d}" "${repo}/nix/scripts/closure-scan.sh"
+check_rc_tried "読めない前の pin を飛ばし、その前の pin を組む" "${d}" 0 "$(expect_tried 2 1)"
+unreadable="組めなかった pin: 対象の前の pin (commit ${cb} の flake.lock) (flake.lock を読めない: "
+if line=$(grep -F "   ${unreadable}" "${d}/stderr") && [[ ${line} == *'parse error'* ]] \
+  && grep -qF "${unreadable}" "${d}/out/scanner.txt"; then
+  ok "読めなかった前の pin を、nix のわけと一緒に警告と scanner.txt に出す"
+else
+  ng "読めなかった前の pin を、nix のわけと一緒に警告と scanner.txt に出す" "$(cat "${d}/stderr" "${d}/out/scanner.txt" 2>&1)"
+fi
+
+d=$(new_case unreadable-max 1)
+repo="${d}/repo"
+# 新しい順に 2 (今の pin) → 読めない lock 3 つ → 1。読めない lock も 1 つずつ数え、1 は試さない
+new_repo "${repo}" 1
+commit_broken_lock "${repo}" a
+commit_broken_lock "${repo}" b
+commit_broken_lock "${repo}" c
+commit_lock "${repo}" 2
+scan "${d}" "${repo}/nix/scripts/closure-scan.sh"
+check_rc_tried "読めない前の pin も 3 つまでの数に入れ、その前の pin は組まない" "${d}" 1 "$(expect_tried 2)"
+if [[ $(grep -c '^  対象の前の pin (commit [0-9a-f]* の flake.lock) (flake.lock を読めない: .*parse error' "${d}/stderr") == 3 ]] \
+  && grep -q '3 つまで試しました' "${d}/stderr"; then
+  ok "止まるときも、読めなかった前の pin をわけと一緒に並べる"
+else
+  ng "止まるときも、読めなかった前の pin をわけと一緒に並べる" "$(cat "${d}/stderr")"
+fi
+
 echo "どれでも組めない"
 d=$(new_case none)
 new_flake "${d}/flake" 2
@@ -427,6 +497,18 @@ new_flake "${d}/flake" 2
 lock 2 >"${d}/dotfiles-flake.lock"
 CLOSURE_SCAN_DOTFILES_FLAKE_LOCK="${d}/dotfiles-flake.lock" scan "${d}" "${app}" "${d}/flake"
 check_rc_tried "dotfiles の pin が対象と同じなら二度組まない" "${d}" 1 "$(expect_tried 2)"
+
+d=$(new_case dotfiles-unreadable)
+new_flake "${d}/flake" 2
+printf '<<<<<<< HEAD\n' >"${d}/dotfiles-flake.lock"
+CLOSURE_SCAN_DOTFILES_FLAKE_LOCK="${d}/dotfiles-flake.lock" scan "${d}" "${app}" "${d}/flake"
+check_rc_tried "dotfiles の pin の flake.lock を読めなければ、それを組まずに止まる" "${d}" 1 "$(expect_tried 2)"
+if line=$(grep -F "  dotfiles の pin ${d}/dotfiles-flake.lock (flake.lock を読めない: " "${d}/stderr") \
+  && [[ ${line} == *'parse error'* ]]; then
+  ok "dotfiles の pin の flake.lock を読めなければ、nix のわけを並べる"
+else
+  ng "dotfiles の pin の flake.lock を読めなければ、nix のわけを並べる" "$(cat "${d}/stderr")"
+fi
 
 d=$(new_case shallow 1)
 repo="${d}/repo"
