@@ -18,10 +18,12 @@
 #
 # ## 何をするか
 #
-# 1. 対象の閉包をビルドする (binary cache があれば実体はダウンロード)
-# 2. sbomnix で SBOM (CycloneDX / SPDX / csv) を書き出す
+# 1. sbomnix (vulnxscan を同梱) を用意する (PATH に無ければ nixpkgs の pin から組む。
+#    下の「依存」と「sbomnix (vulnxscan) の用意」の節)
+# 2. 対象の閉包をビルドする (binary cache があれば実体はダウンロード)
+# 3. sbomnix で SBOM (CycloneDX / SPDX / csv) を書き出す
 #    (vulnxscan も内部で SBOM を作るが保存しないので、成果物として別に残す)
-# 3. vulnxscan で runtime 閉包をスキャンし、whitelist に無い findings があれば
+# 4. vulnxscan で runtime 閉包をスキャンし、whitelist に無い findings があれば
 #    終了コード 1 で落ちる (CI のゲート)
 #
 # whitelist は「安全と確認した」印ではなく **増分検知の基準線**。閉包には既知
@@ -50,9 +52,11 @@
 #
 # ## 依存
 #
-# nix / coreutils / awk。sbomnix (vulnxscan を同梱) が PATH に無ければ、対象
-# flake の **pin された nixpkgs** から `nix shell --inputs-from` で入り直す。
-# スキャナ自身の版も flake.lock と同じ遅延ポリシーに従わせるための形。
+# nix / coreutils / awk (git は前の pin をさかのぼるときだけ)。sbomnix (vulnxscan を
+# 同梱) が PATH に無ければ、対象 flake の **pin された nixpkgs** から組む。スキャナ
+# 自身の版も flake.lock と同じ遅延ポリシーに従わせるための形。対象の pin で組めな
+# ければ、dotfiles の pin、対象の flake.lock の git の履歴にある前の pin の順に退く
+# (どれも遅延を守って入れた pin。退いたら警告する)。
 
 set -eu -o pipefail
 
@@ -124,6 +128,11 @@ usage() {
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
 無ければカレントディレクトリを対象にする。
 
+sbomnix (vulnxscan 同梱) が PATH に無ければ、対象の pin → dotfiles の pin →
+対象の flake.lock の git の履歴にある前の pin (新しい順に 3 つまで) の順に組み、
+最初に組めたもので照らす。対象の pin でなければ警告する。どれで照らしたかは
+成果物の scanner.txt に残す。
+
 whitelist は「安全と確認した」印ではなく増分検知の基準線。列は
 "vuln_id","package","comment" で、vuln_id は正規表現 (完全一致)、package は
 完全一致。詳細は ADR 006。
@@ -133,9 +142,6 @@ EOS
 ##########
 # 引数   #
 ##########
-
-# sbomnix が無いときに同じ引数で入り直すため、解釈前に取っておく。
-orig_args=("$@")
 
 cmd=""
 flake_dir=""
@@ -205,6 +211,16 @@ flake_dir=$(
 
 [[ -n ${whitelist} ]] || whitelist="${flake_dir}/vulnxscan-whitelist.csv"
 
+# この script の隣の flake (dotfiles 本体。チェックアウトから叩いたときだけある)。
+# 既定の属性と、sbomnix の退き先 (dotfiles の pin) に使う。
+sibling=""
+if [[ -f "${script_dir}/../flake.nix" ]]; then
+  sibling=$(
+    cd -- "${script_dir}/.." &>/dev/null
+    pwd -P
+  )
+fi
+
 # 対象属性の既定。dotfiles 本体 (この script の隣の flake) なら home 閉包、
 # それ以外なら devShell。「lock が入れる、これから実行するもの」に合わせる。
 # 明示指定かどうかは report の挙動に効くので覚えておく (既定属性が無い flake を
@@ -212,13 +228,6 @@ flake_dir=$(
 attr_defaulted=0
 if [[ -z ${attr} ]]; then
   attr_defaulted=1
-  sibling=""
-  if [[ -f "${script_dir}/../flake.nix" ]]; then
-    sibling=$(
-      cd -- "${script_dir}/.." &>/dev/null
-      pwd -P
-    )
-  fi
   if [[ -n ${sibling} && ${flake_dir} == "${sibling}" ]]; then
     attr="homeConfigurations.sandbox.activationPackage"
   else
@@ -232,17 +241,234 @@ fi
 # sbomnix (vulnxscan) の用意   #
 ################################
 
-# PATH に無ければ、対象 flake の pin された nixpkgs から取って入り直す。
-# 印 (CLOSURE_SCAN_REEXEC) は無限ループ防止 (pjp-nix-flake skill の再入パターン)。
-if ! command -v vulnxscan &>/dev/null || ! command -v sbomnix &>/dev/null; then
-  if [[ -z ${CLOSURE_SCAN_REEXEC:-} ]] && command -v nix &>/dev/null; then
-    export CLOSURE_SCAN_REEXEC=1
-    step "sbomnix が無いので pin された nixpkgs から入り直します"
-    exec nix shell --inputs-from "${flake_dir}" 'nixpkgs#sbomnix' \
-      --command "$0" "${orig_args[@]}"
+# sbomnix (vulnxscan を同梱) が PATH に無ければ、nixpkgs の pin から組んで PATH の先頭に
+# 足す (ensure_sbomnix。run_scan の始めに呼ぶ)。試す pin の順は:
+#
+#   1. 対象の pin。スキャナの版も、対象と同じ遅延の決まり (flake-lock-age.sh) に従わせる
+#   2. dotfiles の pin。対象と違う pin のときだけ。チェックアウトから叩けばこの script の
+#      隣の flake.lock、store の app (nix run …#closure-scan) なら flake.nix が store へ
+#      写して渡す flake.lock (CLOSURE_SCAN_DOTFILES_FLAKE_LOCK にそのパス)
+#   3. 対象の flake.lock の git の履歴にある前の pin。first-parent (merge された pin だけ)
+#      を新しい順に、history_max_tries 個まで
+#
+# 2 と 3 も遅延を守って入れた pin (今の pin と同じか古い) なので、どれから取ってもスキャナ
+# の遅延は守られる。nixpkgs で sbomnix の依存が壊れた pin でも (2026-10 の typepy 2.0.0)、
+# スキャンそのものを落とさないための退き先。dotfiles 自身のスキャン (CI と setup の
+# flake-update) では 2 が対象と同じ pin になるので、3 で前の pin へ退く (CI は履歴を全部
+# 取る)。1 から取れなければ警告し、どこから取ったかは毎回 scanner.txt に残す。ADR 040。
+
+# 前の pin をいくつまで組むか (同じ pin は数えない) と、履歴の commit をいくつまで見るか。
+history_max_tries=3
+history_max_commits=50
+
+sbomnix_store=""    # 組めた sbomnix の store のパス
+sbomnix_failures=() # 組めなかった pin の行 (「見出し ref (わけ)」)
+sbomnix_tried=" "   # 組んだ pin の鍵 (nixpkgs の narHash)。同じ pin を二度組まない
+
+# CLOSURE_SCAN_LOCK の flake.lock から、root の input nixpkgs の locked を「narHash<TAB>flake ref」
+# で出す (読めなければ空)。narHash は同じ pin かを比べる鍵、ref は nix build に渡す形。
+# flakeRefToString の無い古い nix では、github の形だけを組み立てる。
+# shellcheck disable=SC2016 # Nix の式をそのまま書く (${…} は Nix の差し込み)
+lock_nixpkgs_expr='
+let
+  lock = builtins.fromJSON (builtins.readFile (builtins.getEnv "CLOSURE_SCAN_LOCK"));
+  node = lock.nodes.${lock.root}.inputs.nixpkgs or null;
+  l = if builtins.isString node then lock.nodes.${node}.locked or { } else { };
+  ref =
+    if builtins ? flakeRefToString then builtins.flakeRefToString l
+    else if (l.type or "") == "github" then "github:${l.owner}/${l.repo}/${l.rev}"
+    else "";
+in
+if l ? narHash && ref != "" then "${l.narHash}\t${ref}" else ""
+'
+
+# flake.lock のファイルの nixpkgs の pin を「narHash<TAB>flake ref」で出す (無い・読めなければ空)。
+lock_nixpkgs() {
+  [[ -f $1 ]] || return 0
+  CLOSURE_SCAN_LOCK=$1 nix eval --raw --impure --expr "${lock_nixpkgs_expr}" </dev/null 2>/dev/null || true
+}
+
+# GitHub Actions の中なら、実行の画面の先頭に出る警告 (workflow command) を出す。本文の % と
+# 改行は、GitHub の決まりどおりに書き換える。
+annotate_warning() {
+  local m=$1
+  [[ ${GITHUB_ACTIONS-} == true ]] || return 0
+  m=${m//'%'/'%25'}
+  m=${m//$'\r'/'%0D'}
+  m=${m//$'\n'/'%0A'}
+  printf '::warning title=closure-scan::%s\n' "${m}"
+}
+
+# nix build のログ ($1) から、組めなかったわけを 1 行で出す。最初に組めなかった derivation
+# の名前、無ければ最初の error: の行、それも無ければ終了コード ($2)。
+build_failure_reason() {
+  local log=$1 rc=$2 drv line
+  drv=$(grep -o -m 1 -E "(Cannot build|builder for) '[^']*\.drv'" "${log}") || drv=""
+  if [[ -n ${drv} ]]; then
+    drv=${drv#*\'}
+    drv=${drv%\'}
+    drv=${drv##*/}
+    drv=${drv#*-}
+    printf '%s を組めない' "${drv%.drv}"
+    return 0
   fi
-  die "sbomnix / vulnxscan が見つかりません (nix があれば自動で入り直します)。"
-fi
+  line=$(grep -m 1 '^error:' "${log}") || line=""
+  if [[ -n ${line} ]]; then
+    printf '%s' "${line:0:200}"
+    return 0
+  fi
+  printf 'nix build の終了コード %s' "${rc}"
+}
+
+# sbomnix を 1 つの pin から組む。$1: 見出し、$2: pin の鍵 (空なら控えない)、$3: pin の ref
+# (出す文のため)、残り: nix build の installable の引数。組めたら sbomnix_store を入れて 0、
+# 組めなければ sbomnix_failures に足して 1。成果物のディレクトリに out-link (GC root) を張る
+# ので、スキャンの途中で GC に消されない。nix の出力はその場に流し、わけを拾うために控える。
+build_sbomnix() {
+  local label=$1 key=$2 ref=$3 log captured rc=0
+  shift 3
+  if [[ -n ${key} ]]; then
+    sbomnix_tried+="${key} "
+  fi
+  log=$(mktemp "${out_dir}/sbomnix-build.XXXXXX")
+  step "sbomnix を組む (${label}): nix build $*"
+  captured=$({ nix build --print-out-paths -o "${out_dir}/sbomnix" "$@" 2>&1 1>&3 | tee "${log}" >&2; } 3>&1 </dev/null) \
+    || rc=$?
+  captured=${captured%%$'\n'*}
+  if [[ ${rc} -eq 0 && -x ${captured}/bin/sbomnix && -x ${captured}/bin/vulnxscan ]]; then
+    sbomnix_store=${captured}
+    rm -f "${log}"
+    return 0
+  fi
+  if [[ ${rc} -eq 0 ]]; then
+    sbomnix_failures+=("${label} ${ref} (組めたが bin/sbomnix か bin/vulnxscan が無い: ${captured})")
+  else
+    sbomnix_failures+=("${label} ${ref} ($(build_failure_reason "${log}" "${rc}"))")
+  fi
+  rm -f "${log}"
+  return 1
+}
+
+# scanner.txt に、照らす sbomnix と出どころ、組めなかった pin を書く。$1: 1 行目 (sbomnix)、
+# $2: 出どころの行 (空なら書かない)。
+write_scanner() {
+  local f
+  {
+    printf '%s\n' "$1"
+    if [[ -n $2 ]]; then
+      printf '出どころ: %s\n' "$2"
+    fi
+    for f in ${sbomnix_failures[@]+"${sbomnix_failures[@]}"}; do
+      printf '組めなかった pin: %s\n' "${f}"
+    done
+  } >"${out_dir}/scanner.txt"
+}
+
+# 組めた sbomnix を PATH の先頭に足し、scanner.txt に残す。対象の pin でなければ警告する。
+# $1: 見出し、$2: pin の ref。
+use_sbomnix() {
+  local label=$1 ref=$2 sbomnix_name f lines=()
+  sbomnix_name=${sbomnix_store##*/}
+  sbomnix_name=${sbomnix_name#*-}
+  PATH="${sbomnix_store}/bin:${PATH}"
+  write_scanner "${sbomnix_name} (${sbomnix_store})" "${label} ${ref}"
+  if [[ ${label} == "対象の pin" ]]; then
+    note "sbomnix: ${sbomnix_name} (対象の pin)"
+    return 0
+  fi
+  lines=("sbomnix を対象の pin で組めなかったので、${label} の ${sbomnix_name} で照らします。"
+    "取った pin: ${ref}")
+  for f in ${sbomnix_failures[@]+"${sbomnix_failures[@]}"}; do
+    lines+=("組めなかった pin: ${f}")
+  done
+  lines+=("findings の判定は変わりません。対象の pin で組めるようになれば (nixpkgs の直しが入った pin へ上げれば)、退かずに済みます。")
+  warn "${lines[@]}"
+  annotate_warning "$(printf '%s\n' "${lines[@]}")"
+}
+
+# sbomnix と vulnxscan を用意する。PATH にあればそれ、無ければ上の順に pin から組む。どれでも
+# 組めなければ、試した pin とわけを並べて止まる。
+ensure_sbomnix() {
+  local row key ref dotfiles_lock="" history_note="" c blob short lock_copy tries=0 seen=" " f message
+  local path_sbomnix version
+  if path_sbomnix=$(command -v sbomnix) && command -v vulnxscan &>/dev/null; then
+    version=$(sbomnix --version 2>/dev/null </dev/null) || version=""
+    version=${version%%$'\n'*}
+    write_scanner "sbomnix${version:+-${version}} (${path_sbomnix})" "PATH"
+    note "sbomnix: PATH の ${path_sbomnix}"
+    return 0
+  fi
+  command -v nix &>/dev/null \
+    || die "sbomnix / vulnxscan が見つかりません (nix があれば nixpkgs の pin から組みます)。"
+
+  # 1. 対象の pin
+  row=$(lock_nixpkgs "${flake_dir}/flake.lock")
+  key=${row%%$'\t'*}
+  ref=${row#*$'\t'}
+  if build_sbomnix "対象の pin" "${key}" "${ref:-${flake_dir} の nixpkgs}" \
+    --inputs-from "${flake_dir}" 'nixpkgs#sbomnix'; then
+    use_sbomnix "対象の pin" "${ref:-${flake_dir} の nixpkgs}"
+    return 0
+  fi
+
+  # 2. dotfiles の pin (対象と同じ pin なら組まない)
+  if [[ -n ${sibling} ]]; then
+    dotfiles_lock="${sibling}/flake.lock"
+  else
+    dotfiles_lock=${CLOSURE_SCAN_DOTFILES_FLAKE_LOCK-}
+  fi
+  if [[ -n ${dotfiles_lock} ]]; then
+    row=$(lock_nixpkgs "${dotfiles_lock}")
+    key=${row%%$'\t'*}
+    ref=${row#*$'\t'}
+    if [[ -n ${row} && ${sbomnix_tried} != *" ${key} "* ]] \
+      && build_sbomnix "dotfiles の pin" "${key}" "${ref}" "${ref}#sbomnix"; then
+      use_sbomnix "dotfiles の pin" "${ref}"
+      return 0
+    fi
+  fi
+
+  # 3. 対象の flake.lock の git の履歴にある前の pin
+  if ! command -v git &>/dev/null \
+    || ! git -C "${flake_dir}" rev-parse --is-inside-work-tree &>/dev/null; then
+    history_note="対象は git の repo の中に無いので、前の pin はさかのぼっていません。"
+  else
+    lock_copy="${out_dir}/history-flake.lock"
+    while read -r c; do
+      [[ ${tries} -lt ${history_max_tries} ]] || break
+      blob=$(git -C "${flake_dir}" rev-parse --verify --quiet "${c}:./flake.lock" </dev/null) || continue
+      [[ ${seen} != *" ${blob} "* ]] || continue
+      seen+="${blob} "
+      git -C "${flake_dir}" cat-file blob "${blob}" >"${lock_copy}" </dev/null || continue
+      row=$(lock_nixpkgs "${lock_copy}")
+      key=${row%%$'\t'*}
+      ref=${row#*$'\t'}
+      [[ -n ${row} && ${sbomnix_tried} != *" ${key} "* ]] || continue
+      tries=$((tries + 1))
+      short=$(git -C "${flake_dir}" rev-parse --short "${c}" </dev/null)
+      if build_sbomnix "対象の前の pin (commit ${short} の flake.lock)" "${key}" "${ref}" "${ref}#sbomnix"; then
+        use_sbomnix "対象の前の pin (commit ${short} の flake.lock)" "${ref}"
+        return 0
+      fi
+    done < <(git -C "${flake_dir}" log --first-parent --format=%H -n "${history_max_commits}" -- flake.lock 2>/dev/null)
+    if [[ ${tries} -ge ${history_max_tries} ]]; then
+      history_note="前の pin は新しい順に ${history_max_tries} つまで試しました。"
+    elif [[ $(git -C "${flake_dir}" rev-parse --is-shallow-repository 2>/dev/null) == true ]]; then
+      history_note="clone の履歴が浅い (shallow) ので、前の pin をさかのぼれませんでした。CI なら actions/checkout に fetch-depth: 0 を渡す。"
+    else
+      history_note="対象の flake.lock の git の履歴に、ほかの pin はありませんでした。"
+    fi
+  fi
+
+  write_scanner "(sbomnix を組めなかった)" ""
+  message="sbomnix を組めませんでした。試した pin:"
+  for f in ${sbomnix_failures[@]+"${sbomnix_failures[@]}"}; do
+    message+=$'\n'"  ${f}"
+  done
+  message+=$'\n'"${history_note}"
+  message+=$'\n'"組める版の sbomnix (vulnxscan 同梱) を PATH に置けば、それで照らします。"
+  die "${message}"
+}
 
 ##########
 # 共通   #
@@ -305,7 +531,7 @@ whitelist_pairs() {
 scan_gate=1
 
 run_scan() {
-  local wl_args=()
+  local wl_args=() header
   if [[ -f ${whitelist} ]]; then
     wl_args=(--whitelist "${whitelist}")
   elif [[ ${scan_gate} -eq 1 ]]; then
@@ -317,6 +543,9 @@ report を使う。)"
   else
     note "whitelist が無いので全 findings を表示します。"
   fi
+
+  # 閉包のビルド (長い) より先に用意する。組めなければ閉包を組まずに止まる。
+  ensure_sbomnix
 
   step "nix build ${flake_dir}#${attr}"
   nix build "${flake_dir}#${attr}" -o "${out_dir}/closure"
@@ -346,7 +575,10 @@ report を使う。)"
   fi
   if [[ -n ${wl_args[*]+x} ]]; then
     # whitelist 列が無い = whitelist が読まれていない (列不足などで黙って無視される)。
-    head -n 1 "${out_dir}/vulns.csv" | grep -q '"whitelist"' \
+    # 1 行目を変数に読んでから比べる (パイプの先の grep -q が合った時点で抜けると、
+    # head が SIGPIPE で落ち、pipefail で「列が無い」に見えることがあるため)。
+    IFS= read -r header <"${out_dir}/vulns.csv" || header=""
+    [[ ${header} == *'"whitelist"'* ]] \
       || die "vulns.csv に whitelist 列がありません。whitelist が読めていない可能性:
 ${whitelist}"
     csv_pairs "${out_dir}/vulns.csv" new | sort -u >"${out_dir}/new-findings.txt"
@@ -361,6 +593,7 @@ report_paths() {
   note "  vulns.csv (findings 全件。whitelist があれば判定の列つき)"
   note "  report.txt (表示された表)"
   note "  new-findings.txt (whitelist に無い findings。whitelist が無ければ全件)"
+  note "  scanner.txt (照らした sbomnix と、どの pin から取ったか)"
 }
 
 cmd_scan() {
@@ -409,7 +642,7 @@ cmd_report() {
 }
 
 cmd_baseline() {
-  local today n added=0 id pkg pair
+  local today n added=0 id pkg pair existing
   # 初回はここで作る (run_scan は whitelist を要求する)。
   if [[ ! -f ${whitelist} ]]; then
     printf '"vuln_id","package","comment"\n' >"${whitelist}"
@@ -419,15 +652,19 @@ cmd_baseline() {
   today=$(date -u +%Y-%m-%d)
   # 既存の行と重複させない。既存の vuln_id は正規表現だが、ここでは文字列として
   # 同一の行を弾ければ十分 (regex で既に緩く受けている行があるなら scan の段階で
-  # whitelist 済みになっていて new-findings に出てこない)。
+  # whitelist 済みになっていて new-findings に出てこない)。既存の組は変数に取って
+  # から比べ、足した組も足していく (パイプの先に grep -q を置くと、合った時点で抜けた
+  # grep に awk が SIGPIPE で落ち、pipefail で「無い」に見えて二重に足すことがあるため)。
+  existing=$(whitelist_pairs "${whitelist}")
   while IFS=$'\t' read -r id pkg; do
     [[ -n ${id} ]] || continue
     pair=$(printf '%s\t%s' "${id}" "${pkg}")
-    if whitelist_pairs "${whitelist}" | grep -Fxq "${pair}"; then
+    if grep -Fxq -- "${pair}" <<<"${existing}"; then
       continue
     fi
     printf '"%s","%s","baseline (%s): この時点の既知として受け入れ。理由は棚卸しで追記"\n' \
       "${id}" "${pkg}" "${today}" >>"${whitelist}"
+    existing+=$'\n'"${pair}"
     added=$((added + 1))
   done <"${out_dir}/new-findings.txt"
   report_paths

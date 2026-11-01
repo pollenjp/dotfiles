@@ -491,8 +491,27 @@ advisory より先に nixpkgs 側の対応（bump / revert / `knownVulnerabiliti
 ```
 
 sbomnix（vulnxscan 同梱）が PATH に無ければ、script が**対象 flake の pin された
-nixpkgs** から `nix shell --inputs-from` で自動で入り直す。スキャナ自身の版も
-同じ遅延ポリシーに従わせるための形。
+nixpkgs** から組む。スキャナ自身の版も同じ遅延ポリシーに従わせるための形。対象の
+pin で組めなければ、次の順に退いて、最初に組めたもので照らす（[ADR 040](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/040_closure_scan_sbomnix_fallback_20261102T021114JST/README.md)）。
+
+| 順 | 組む pin | 試すとき |
+| --- | --- | --- |
+| 1 | 対象 flake の pin | いつも |
+| 2 | dotfiles の pin | 対象と違う pin のときだけ。チェックアウトから叩けば script の隣の `nix/flake.lock`、`nix run` の app なら app を組んだときの `nix/flake.lock` |
+| 3 | 対象の `flake.lock` の git の履歴にある前の pin | first-parent（merge された pin）を新しい順に 3 つまで。dotfiles 自身のスキャン（CI・setup の `flake-update`）は 2 が対象と同じ pin になるので、ここで前の pin へ退く |
+
+2 と 3 も遅延を守って入れた pin（今の pin と同じか古い）なので、どこから取っても
+スキャナの遅延は守られる。nixpkgs で sbomnix の依存が壊れた pin（2026-10 の
+typepy 2.0.0 で sqliteschema が組めなかった）でも、スキャンそのものを落とさない
+ための退き先で、findings の判定は変わらない。
+
+- 1 で組めず退いたら、警告を出す（stderr と setup の警告のまとめ。CI では annotation）
+- どの sbomnix をどの pin から取ったかは、毎回成果物の `scanner.txt` に残る（CI は
+  summary に貼る）。退いたなら、組めなかった pin とわけ（最初に組めなかった derivation）も
+- CI の `closure-scan` は 3 のために履歴を全部取る（`fetch-depth: 0`）。浅い clone では
+  前の pin をたどれない
+- どれでも組めなければ、試した pin とわけを並べて止まる。組める版の sbomnix を PATH に
+  置けば、それで照らす（PATH にあれば組まない）
 
 dotfiles 本体の既定対象 `homeConfigurations.sandbox` は、パッケージ集合が
 全ホスト共通（ホスト差は設定側にしか無い）なので x86_64-linux の代表として使う。
@@ -4011,7 +4030,7 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。日数と例外は `release-age.nix`。[前述](#依存-flakelock-の更新)） |
 | `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
-| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。[前述](#依存-flakelock-の更新)） |
+| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。sbomnix を前の pin から組めるよう履歴を全部取り、どの pin から取ったかを summary に出す。[前述](#閉包のスキャンと-pin先端の差分-遅延の補完)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
 `aarch64-linux` はランナーが無いので**評価のみ**（`--all-systems --no-build`）。

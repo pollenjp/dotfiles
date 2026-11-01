@@ -113,6 +113,11 @@ nix run "${FLA}" -- check     # 今の flake.lock を検査 (CI 用)
 特に効く）。`--no-scan` で飛ばせる。理由と whitelist の作り方は
 `references/lock-age.md`。
 
+スキャナ（sbomnix）は、その flake の pin から組む。pin で組めなければ（nixpkgs で
+sbomnix の依存が壊れた時期）、dotfiles の pin、その flake の `flake.lock` の git の
+履歴にある前の pin の順に退いて照らし、警告を出す（どれも遅延を守った pin。findings
+の判定は変わらない）。前の pin の sbomnix を PATH に置く回り道は要らない。
+
 対象は root の直下 input **すべて**。1 つでも先端に張り付いていれば意味がない。
 input ごとに測り方が変わる（nixpkgs はチャンネル公開時刻、その他の GitHub input は
 commit 時刻）が、それは script 側が `flake.lock` を読んで判断する。

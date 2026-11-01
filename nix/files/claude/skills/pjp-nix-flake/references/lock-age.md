@@ -64,6 +64,15 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
    なぜスキャンするのかは dotfiles の ADR 006（遅延は「発覚済みの侵害バージョンを
    固定し続ける」リスクを新しく作るので、advisory との照合で塞ぐ）
 
+   スキャナの sbomnix も、その lock の pin から組む（スキャナにも同じ遅延を効かせる）。
+   pin で組めなければ、dotfiles の pin（`nix run` の app を組んだときの dotfiles の
+   `flake.lock`）、その repo の `flake.lock` の git の履歴にある前の pin（first-parent
+   を新しい順に 3 つまで）の順に退き、警告を出して照らす。どれも遅延を守った pin なので
+   スキャナの遅延は守られ、findings の判定も変わらない。どの pin から取ったかは成果物の
+   `scanner.txt` に残る。CI で流すなら checkout を `fetch-depth: 0` にする（浅い clone
+   では前の pin をたどれない）。どれでも組めなければ、試した pin とわけを並べて止まる
+   （組める版の sbomnix を PATH に置けば、それで照らす）。dotfiles の ADR 040
+
 3. **CI に番人を置く。** これが無いと、素の `nix flake update` を 1 回叩いた時点で
    遅延が黙って外れる
 
