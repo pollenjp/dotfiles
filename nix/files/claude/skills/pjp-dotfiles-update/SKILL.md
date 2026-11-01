@@ -70,7 +70,8 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
 スキャナの用意で落ちている（ADR 040）。新しい pin でも、git の履歴の前の pin（新しい順に 3 つ
 まで）でも sbomnix を組めなかった。ゲートの判定に届いていないので、下の 2 択の話ではない。
 
-- 並んだ pin とわけ（最初に組めなかった derivation）を出す
+- 並んだ pin とわけ（最初に組めなかった derivation か、`flake.lock を読めない: …` の nix のエラー）を出す。
+  前の pin がどれも「読めない」なら、pin ではなく script か nix の側の問題なので、そのわけを添えて報告する
 - 組める版の sbomnix を PATH に置けば、それで照らす（PATH にあれば組まない）。遅延を守った pin
   （前に入れた `flake.lock` の nixpkgs の rev）から取り、どの rev から取ったかを報告に書く
 
