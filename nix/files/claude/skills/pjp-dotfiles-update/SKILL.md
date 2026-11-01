@@ -35,7 +35,10 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
    revision へ pin（ADR 005 の遅延。期間付きの例外があればその分だけ新しい pin。ADR 032。素の `nix flake update` は
    使わない）
 2. **その完了時に `closure-scan` が自動で挟まる**（ADR 006）。本体には whitelist が
-   あるので `scan` モード = **ゲート**として働く
+   あるので `scan` モード = **ゲート**として働く。スキャナの sbomnix は新しい pin から
+   組み、組めなければ（nixpkgs で sbomnix の依存が壊れた時期）git の履歴の前の pin
+   （HEAD の `nix/flake.lock` など）へ退いて照らし、警告のまとめに出す（ADR 040。findings
+   の判定は変わらない）
 3. `sync_local_flake_lock` — `~/dotfiles` 側の lock を張り直す
 4. `switch`
 
@@ -61,6 +64,23 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
 下限日数のあいだ固定し続ける」という遅延固有のリスクを塞ぐために入れたもので
 （ADR 006）、飛ばすと遅延だけが残る。
 
+## スキャナ (sbomnix) を組めずに止まったとき
+
+`closure-scan` が「sbomnix を組めませんでした。試した pin:」で止まったら、findings ではなく
+スキャナの用意で落ちている（ADR 040）。新しい pin でも、git の履歴の前の pin（新しい順に 3 つ
+まで）でも sbomnix を組めなかった。ゲートの判定に届いていないので、下の 2 択の話ではない。
+
+- 並んだ pin とわけ（最初に組めなかった derivation）を出す
+- 組める版の sbomnix を PATH に置けば、それで照らす（PATH にあれば組まない）。遅延を守った pin
+  （前に入れた `flake.lock` の nixpkgs の rev）から取り、どの rev から取ったかを報告に書く
+
+  ```sh
+  nix shell 'github:NixOS/nixpkgs/<前に入れた rev>#sbomnix' --command ~/dotfiles/setup --flake-update --update
+  ```
+
+退いて照らせたとき（「sbomnix を対象の pin で組めなかったので、…で照らします」の警告が出て、
+ゲートまで届いたとき）は、ふだんどおり findings を読む。
+
 ## findings を読む
 
 `closure-scan` は成果物のディレクトリを出力に出す。**既定は `mktemp -d` なので毎回
@@ -71,6 +91,7 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
   new-findings.txt   <- whitelist に無い findings ("vuln_id<TAB>package")
   vulns.csv          <- 全件。whitelist / whitelist_comment 列つき
   report.txt         <- 表示された表 (CI の summary もこれ)
+  scanner.txt        <- 照らした sbomnix と、どの pin から取ったか (退いたなら組めなかった pin も)
   sbom.csv / sbom.cdx.json / sbom.spdx.json
 ```
 

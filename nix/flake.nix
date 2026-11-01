@@ -188,6 +188,21 @@
             bash ${./tests/flake-lock-age.test.sh} ${./scripts/flake-lock-age.sh}
             touch $out
           '';
+          # sbomnix の退き先を選ぶ順を確かめる。flake.lock を本物の nix eval で読み (上と同じく store は使わない)、
+          # 前の pin を本物の git の履歴からたどるので、nix・git・jq (偽の nix build が lock を読む) を足して流す
+          closure-scan-test =
+            pkgs.runCommand "closure-scan-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.nix
+                  pkgs.git
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${./tests/closure-scan.test.sh} ${./scripts/closure-scan.sh}
+                touch $out
+              '';
           # script 1 本ではなく scripts/ を丸ごと渡す (warn() を持つ script を全部見る)
           warn-helpers-test = scriptTest "warn-helpers" ./scripts;
           # これも scripts/ を丸ごと渡す (git_github() を持つ script を全部見る)
@@ -571,8 +586,12 @@
           #   nix run 'github:pollenjp/dotfiles?dir=nix#closure-scan' -- report
           #
           # sbomnix は焼き込まない。スキャナの版は「対象 flake の pin された
-          # nixpkgs」から取る決めなので、script 側の nix shell --inputs-from に
+          # nixpkgs」から取る決めなので、script 側の nix build --inputs-from に
           # 任せる (焼き込むと dotfiles の pin が他リポジトリにも効いてしまう)。
+          # 渡すのは、対象の pin で sbomnix を組めないときの退き先 (dotfiles の pin)
+          # にする flake.lock だけ。チェックアウトから叩けば script の隣の flake.lock を
+          # 読むので、store の app のときだけ要る。store へ写すのは flake.lock の
+          # ファイル 1 つで、repo の source は参照しない (ADR 040)。
           closure-scan = pkgs.writeShellApplication {
             name = "closure-scan";
             runtimeInputs = [
@@ -580,6 +599,7 @@
               pkgs.gnugrep
               pkgs.gawk
             ];
+            runtimeEnv.CLOSURE_SCAN_DOTFILES_FLAKE_LOCK = "${./flake.lock}";
             text = builtins.readFile ./scripts/closure-scan.sh;
           };
 
