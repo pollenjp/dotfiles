@@ -68,19 +68,20 @@
           # 持っている GitHub リポジトリ側から固める。
           drawio-mcp = pkgs.buildNpmPackage (finalAttrs: {
             pname = "drawio-mcp";
-            version = "1.5.0";
+            version = "1.10.0";
 
             src = pkgs.fetchFromGitHub {
               owner = "jgraph";
               repo = "drawio-mcp";
               # タグが打たれていないので rev で固定する。
-              # mcp-tool-server/package.json の version が 1.5.0 のコミット。
-              rev = "14b318b19cc37b159f841227b9d11fbd18ce18ea";
-              hash = "sha256-n0UvgeDAYc8f8VneVa7/vjGNiHHSLTSvx3OZEijEc3c=";
+              # mcp-tool-server/package.json の version が 1.10.0 のコミット。
+              # release-age-exception: until=2026-11-02 ids=GHSA-27r3-jxmh-p828,GHSA-mrhx-c7xc-m3w5 fixed=bea4c7b4c19f
+              rev = "bea4c7b4c19fe65c8256c72e5b939b3ac87236bd";
+              hash = "sha256-gCPat5nCcZVh3LTfFTtiP6tNysRWIKJ6/Jc0muUjvCM=";
             };
             sourceRoot = "${finalAttrs.src.name}/mcp-tool-server";
 
-            npmDepsHash = "sha256-FACQmYYrzxyyeamwWCmgTU5D85HfCpkPg2q3TXIiyvM=";
+            npmDepsHash = "sha256-8/pXR0oxdqDZ/ovtMihrFCoizreXnuzmM5AFGOta46M=";
 
             # build script は無い (npm run build を試みると落ちる)。
             dontNpmBuild = true;
