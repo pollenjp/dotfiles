@@ -1,0 +1,13 @@
+[package]
+name = "pjp-ghq-pull"
+version = "0.1.0"
+edition = "2024"
+# nixpkgs (nix/flake.lock) の rustc に合わせる
+rust-version = "1.98"
+description = "ghq の repo を選び、既定 branch を fetch と fast-forward で最新にする TUI"
+publish = false
+
+# 版は公開から 7 日以上経ったものに限る (Cargo.lock も。nix/pkgs/pjp-ghq-pull/default.nix の冒頭)
+[dependencies]
+libc = "0.2.191"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }

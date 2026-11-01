@@ -1476,6 +1476,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
+| `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
@@ -1744,6 +1745,105 @@ ssh-agent に触れずに取れる。
 - 状態ファイルは switch で置かれるので、option を変えた直後の `setup --update` では switch の後の手順から効く。
   本体の更新は switch より前に走るので、前の世代の値で動く
 - `git gh clone` で取っても origin の URL は ssh の形のまま残る。option を false にしても、その clone は ssh で取れる
+
+### ghq の repo をまとめて最新にする (pjp-ghq-pull)
+
+`pjp-ghq-pull` は、ghq の repo を org（`host/owner`）・repo 単位の木で選び、選んだ repo の既定 branch を
+`fetch --prune` と fast-forward で最新にする TUI（実体は `nix/pkgs/pjp-ghq-pull/`。Rust。全ホストの PATH に入る）。
+そのまま進められない repo は確認待ちに回し、答えを待つ間もほかの repo は並列（既定 8 本）で進める。端末で起こす
+（端末でなければ何もせずに止まる）。
+
+```sh
+pjp-ghq-pull                  # 選ぶ画面を開く
+pjp-ghq-pull -j 4             # 並列を 4 本にする
+pjp-ghq-pull --no-via-gh      # この回だけ fetch を素の git (ssh) で打つ (--via-gh はその逆)
+pjp-ghq-pull --timeout 300    # fetch の時間切れを 300 秒にする (既定 120)
+pjp-ghq-pull --root /tmp/x    # ghq の root の代わりに /tmp/x の下を出す (GHQ_ROOT=/tmp/x で ghq を呼ぶ)
+```
+
+選ぶ画面のキー:
+
+| キー | すること |
+| --- | --- |
+| Space | カーソルの行を on/off。org の行は、下の repo が全部 on なら全部 off、でなければ全部 on |
+| a / n | 全選択 / 全解除（絞り込み中は絞り込んだ repo だけ） |
+| ← / → | org を畳む / 開く |
+| / | 絞り込む（repo の相対パスに含むか。大文字小文字は区別しない。Enter で確定、Esc で消す） |
+| Enter | 選んだ repo で始める |
+| q / Esc | 何もせずにやめる |
+
+- org の印は、下の repo が全部 on なら `[x]`、一部なら `[-]`、全部 off なら `[ ]`
+- repo の行の右に今の branch を出す。既定 branch でない branch は黄、追跡中のファイルに変更がある repo には赤の
+  「変更あり」（手元だけを見る。通信しない）。外したい repo は Enter の前に外す
+- 上の行に経路（`git gh (gitViaGh)` か `git`）と選んだ数
+- Enter で選んだ組を `$XDG_STATE_HOME/pjp-ghq-pull/deselected`（無ければ `~/.local/state/pjp-ghq-pull/deselected`）に
+  残し、次に開いたときの初期値にする（外していた repo の絶対パスを 1 行 1 つ）。新しく `ghq get` した repo は on で出る。
+  読めないときは全部 on で始める
+
+1 つの repo の流れ:
+
+1. git の work tree の直下でない entry（bare の repo など。ghq の hg などの repo は初めから出さない）は、何もせずに
+   スキップ。作業途中（rebase・merge・cherry-pick・revert の途中か、`index.lock` がある = ほかの git が動いている）・
+   origin が無い repo は、fetch せずに確認待ち
+2. `fetch --prune origin`（gitViaGh なら `git gh fetch --prune origin`）。確認が要る repo でも先に流す
+3. 既定 branch（`origin/HEAD` の指す branch。無ければ `origin/main`、`origin/master` の順。`git remote set-head` は
+   打たない）と、その upstream で ahead / behind を数える
+4. behind = 0 なら「最新」で終える（未 push の commit・変更・別の branch があっても問わない）
+5. 既定 branch にいて、追跡中のファイルに変更が無く（未追跡のファイルは数えない）、ahead = 0 なら
+   `merge --ff-only` で進める（結果は `git pull --ff-only --prune` と同じで、通信は fetch の 1 回だけ）
+6. それ以外は確認待ち
+
+確認待ちの理由と選べること（理由が重なったら上から先のものを問う）:
+
+| 理由 | 選べること |
+| --- | --- |
+| 作業途中・既定 branch か upstream が無い | s 何もしない |
+| fetch の失敗（時間切れ・認証など） | s 何もしない / t もう一度 |
+| 既定 branch でない（別の branch・detached） | s / u checkout せずに既定 branch だけ進める / c 既定 branch に切り替えて進める（変更が無いときだけ。detached なら、HEAD の commit がどれかの branch にあるときだけ） |
+| 追跡中のファイルに変更がある | s / f そのまま fast-forward を試す（重なるファイルがあれば git が止め、変更は残る） |
+| 分岐している（merge commit が要る） | s / m merge commit を作る / r rebase する（衝突したら中断して元に戻す） |
+
+実行中の画面:
+
+- 上に「完了 n/m」と「確認待ち k」、中に repo ごとの状態（待ち・fetch 中・更新 +N・最新・確認待ち・スキップ・失敗）、
+  下に確認待ちの欄（来た順）
+- 答えのキー（s t u c f m r）は、確認待ちの欄にいるときだけ効く（Tab で一覧と行き来する）。d で詳細
+  （`git status -sb` と、既定 branch と upstream の log。fetch の失敗は stderr も）
+- 答えると、その repo の続きを作業の列に積み、すぐ次の問いへ移る。答えを流す前に判定をやり直し、問いの後に repo が
+  変わっていれば（変更を足したなど）流さずに問い直す
+- q（Ctrl-C も）で終えると、確認待ちとまだ始めていない repo は「何もしない」になる。動いている git は止めずに、
+  終わるのを待ってから閉じる（git を途中で止めると `index.lock` や途中の merge が残るため。通信は時間切れで終わる）。
+  その repo の次の git（fetch の後の fast-forward など）は起こさず、「やめたので途中で止めた」にする
+- 閉じると、更新・最新・スキップ・失敗の一覧を端末（stdout）に残す。失敗には git の stderr の最後の 3 行を添える。
+  失敗があれば終了コード 1
+
+gitViaGh（`dotfiles.claude.gitViaGh.enable`。[前述](#fetch-系を-gh-の資格情報で通す-git-gh)）:
+
+- `~/.local/state/dotfiles/git-via-gh.json` の `enable` が `true` なら、fetch を `git gh` で打つ。merge・rebase・
+  checkout は通信しないので、経路によらず素の git で打つ
+- on なのに `git-gh` か `gh` が無い・gh が github.com にログインしていないときは、画面を開く前に止まって
+  `gh auth login` を案内する。ssh へは黙って倒さない（WSL では repo の数だけ 1Password の承認が出かねないため）。
+  `--via-gh` / `--no-via-gh` でその回だけ上書きできる
+
+安全のための決まり:
+
+- push・stash（`merge.autoStash` の設定があっても）・reset・branch の削除はしない。選んでいない repo と、既定 branch
+  以外の branch（問いで選んだときを除く。`rebase.updateRefs` の設定があっても）は触らない
+- git は端末から切り離して（新しい session・stdin なし・`GIT_TERMINAL_PROMPT=0`）呼び、パスワードの入力待ちを失敗に
+  する。`core.sshCommand` などのユーザーの設定はそのまま効く
+- 1 つの repo に git を 2 本同時に流さない。merge commit を作るのは m を選んだときだけ（commit の署名の設定があれば
+  1Password の承認が出るので、m と r には時間切れを付けない）
+
+対象の外: push・submodule・LFS・ghq の外の repo（herdr の worktree など）・端末の無い所（cron・Claude の Bash）・
+Windows のネイティブ（WSL と macOS は対象）。
+
+**試すときは `~/ghq` に向けない**（fetch と merge で checkout が変わる）。一時ディレクトリに bare の remote と clone を
+作り、`--root` でその ghq root を指す。テストは `nix/pkgs/pjp-ghq-pull/tests/`（何を確かめるかは各ファイルの先頭）に
+あり、flake の checks の `pjp-ghq-pull-test`（package の build の中の `cargo test`。全 system）と `pjp-ghq-pull-lint`
+（`cargo fmt --check`・`cargo clippy --all-targets -- -D warnings`。Linux だけ）が流す。直すときの道具は
+`nix/pkgs/pjp-ghq-pull` の中で `nix develop ../..#pjp-ghq-pull`（cargo・rustc・clippy・rustfmt・git・ghq）。
+crate の版は公開から 7 日以上経ったものに限る（cargo には猶予の設定が無いので、`Cargo.lock` を作り直したら
+crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で下げる）。
 
 ## ssh について
 
@@ -3942,7 +4042,7 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
 
 ### テスト
 
-置き場所は次の 3 つで、どれも flake の `checks` に載せる。CI の `check` ジョブの `nix flake check` が毎回通す。
+置き場所は次の 4 つで、どれも flake の `checks` に載せる。CI の `check` ジョブの `nix flake check` が毎回通す。
 
 - `nix/tests/<名前>.test.sh`・`<名前>.test.mjs`: bash・node で流すテスト。bootstrap や hook などの script の
   振る舞いや、設定ファイルの中身を確かめる（Linux だけ）
@@ -3950,6 +4050,9 @@ find -L /tmp/hm/home-files -mindepth 1     # ★ home-files は symlink なの�
   全 system で流れ、`--all-systems --no-build` でも落ちる（外れた項目の名前がエラーに出る）。ビルドして
   確かめる項目は、そのランナーの system だけ
 - `nix/pkgs/<道具>/test_*.py`: `nix/pkgs/` の道具の unittest（ADR 012。Linux だけ）
+- `nix/pkgs/pjp-ghq-pull/tests/*.rs`: Rust の pjp-ghq-pull のテスト。package の build の中の `cargo test` が流す
+  （`pjp-ghq-pull-test`。全 system）。先頭の `//!` に「## 確かめること」を書くが、`check-test-headers.sh` は `*.rs` を
+  読まない
 
 何を確かめるかはここに写さず、各テストの先頭のコメント（unittest は module の docstring）の
 「## 確かめること」にだけ書く。全部のテストの「## 確かめること」は、これで並べて読める:
