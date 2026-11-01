@@ -20,6 +20,7 @@
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
+#   dotfiles.ntn.keyring                         ntn (Notion CLI) の config.json の keyring (null なら触らない。false で token を auth.json に置く)
 #   dotfiles.osCaBundle.enable                   自前の証明書の束を持つツールを、環境変数で OS の信頼ストアに寄せるか (Linux)
 #   dotfiles.osCaBundle.requestsCaBundle.enable  そのうち REQUESTS_CA_BUNDLE も入れるか
 #
@@ -446,6 +447,32 @@ in
       - Claude Code の footer の cc-page のバッジ (home/modules/claude.nix が作る
         ~/.local/state/dotfiles/claude-footer-links.json) も、この port のページだけを拾う。
         settings.json へ写すのは scripts/bootstrap-claude-footer-links.sh (setup --update で走る)
+    '';
+  };
+
+  options.dotfiles.ntn.keyring = lib.mkOption {
+    type = lib.types.nullOr lib.types.bool;
+    default = null;
+    example = false;
+    description = ''
+      ntn (Notion CLI) が `ntn login` の token を OS の keychain に置くか (ntn の config.json の `keyring`)。
+      keychain の無い・続かないマシン (SSH で入る Linux の VM など) では `ntn login` が keychain のエラーで
+      落ちるので、false にして token を ntn の config directory の `auth.json` に置く。
+
+      - null (既定): config.json に触らない (false から null に戻しても、書いた keyring は残る。
+        keychain に戻すなら true)
+      - false: config.json に `"keyring": false` を書く (token は config directory の `auth.json`)
+      - true: config.json に `"keyring": true` を書く (OS の keychain に戻すとき)
+
+      config.json は ntn が自分で書き換える (`ntn login` が既定の workspace を書く) ので、Nix では置かない
+      (store の読み取り専用の symlink にすると ntn が書けずに落ちる)。値は `~/.local/state/dotfiles/ntn.json`
+      (home/modules/ntn.nix) に落ち、nix/scripts/bootstrap-ntn.sh が `~/dotfiles/setup --update` のたびに
+      config.json の `keyring` だけを merge する (無ければ ntn が作るのと同じ形で作る)。反映は
+      `~/dotfiles/setup --update` で、`home-manager switch` だけでは config.json に届かない。
+      ntn では環境変数 `NOTION_KEYRING` が config.json より強いが、dotfiles はそれを入れない。
+
+      使うマシンのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp。mkHome の
+      引数ではない) に書く。書き方は nix/README.md の「ntn (Notion CLI) の token をファイルに置く (keyring)」。
     '';
   };
 

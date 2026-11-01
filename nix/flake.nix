@@ -310,6 +310,7 @@
           bootstrap-claude-skills-test = scriptTest "bootstrap-claude-skills" ./scripts/bootstrap-claude-skills.sh;
           bootstrap-claude-plugins-test = scriptTest "bootstrap-claude-plugins" ./scripts/bootstrap-claude-plugins.sh;
           bootstrap-mise-test = scriptTest "bootstrap-mise" ./scripts/bootstrap-mise.sh;
+          bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
           # setup.sh の手順の並び (bootstrap-claude-skills・bootstrap-herdr-hub の後) も見るので、scripts/ を丸ごと渡す
@@ -471,6 +472,14 @@
               ;
           };
           mise-release-age-state = import ./tests/mise-release-age.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          ntn-state = import ./tests/ntn.nix {
             inherit
               lib
               pkgs

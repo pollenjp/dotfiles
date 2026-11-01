@@ -1191,6 +1191,7 @@ option は本体の既定になる。本体の module が既に定義してい�
 | `dotfiles.ccPages.port`（`modules`） | `null`（7777） | 7777 がほかと衝突するマシンだけ（[待ち受けの port を変える](#待ち受けの-port-を変える)） |
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
+| `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -1501,6 +1502,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.local/state/dotfiles/mise-release-age.json` | `nix/home/modules/mise-release-age.nix` (生成。`dotfiles.mise.*` の値。`bootstrap-mise.sh` が読んで `~/.config/mise/config.toml` に書く。[後述](#遅延-minimum_release_age-を期間付きで緩める)) |
+| `~/.local/state/dotfiles/ntn.json` | `nix/home/modules/ntn.nix` (生成。`dotfiles.ntn.keyring` の値。`bootstrap-ntn.sh` が読んで ntn の `config.json` の `keyring` に書く。[後述](#ntn-notion-cli-の-token-をファイルに置く-keyring)) |
 | `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
@@ -2518,6 +2520,71 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
   devShell・テストが自分で張る変数は載せない。ここに書くと困る変数（`NOTION_API_TOKEN` など）は「ここには書かない」の
   行でだけ触れる
 - skill の文言は skill と一緒に届く。claude-skills の断片を直して push すれば、各 PC の次の `setup --update` で欄に出る
+
+## ntn (Notion CLI) の token をファイルに置く (keyring)
+
+ntn は `ntn login` の token を OS の keychain に置く。keychain の無い・続かないマシン（SSH で入る Linux の VM など）では
+`ntn login` が keychain のエラーで落ちるので、ntn の `config.json` に `"keyring": false` を書き、token を ntn の
+config directory の `auth.json` に置かせる。どのマシンで切るかを host option `dotfiles.ntn.keyring`（`nix/home/options.nix`）で選ぶ
+（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-01-ntn-keyring-design.md)）。
+
+| 値 | ntn の `config.json` |
+| --- | --- |
+| `null`（既定） | 触らない（`false` から `null` に戻しても、書いた `keyring` は残る。keychain に戻すなら `true`） |
+| `false` | `"keyring": false` を書く（token は config directory の `auth.json`。秘密のファイルとして扱う） |
+| `true` | `"keyring": true` を書く（OS の keychain に戻すとき） |
+
+使うマシンのホストの `modules`（dotfiles-private の `nix/hosts/<ホスト>.nix` か、`~/dotfiles/flake.nix` の tmp。`mkHome` の
+引数ではない）に書く。
+
+```nix
+modules = [
+  { dotfiles.ntn.keyring = false; }
+];
+```
+
+### ntn の config.json への反映
+
+`config.json` は ntn が自分で書き換える（`ntn login` が既定の workspace を書く）ので、Nix では置かない（store の読み取り専用の
+symlink にすると、ntn が `Failed to write config.json` で落ちる）。`switch` が値を `~/.local/state/dotfiles/ntn.json` に置き
+（`home/modules/ntn.nix`）、`~/dotfiles/setup --update` の `bootstrap-ntn.sh` が `config.json` の `keyring` だけを merge する。
+**`switch` だけでは `config.json` に届かない。**
+
+- `config.json` があれば `keyring` だけを書き換え（無ければ足し）、ほかのキー（既定の workspace など）は残す。同じ値なら
+  書かない。書き換えるときは同じディレクトリの一時ファイルから `mv` で置き換え、元の mode を保つ
+- 無ければ、ntn が空の場所に作るのと同じ形 `{"version": "1", "defaultWorkspaceIds": {}, "keyring": <値>}` で作る
+  （ディレクトリも。mode は ntn と同じく umask どおり）。ntn は `version` の無い `config.json` を読めない
+  （`{"keyring": false}` だけだと `Failed to parse config.json`）。ntn がまだ入っていなくても作る
+- `null` なら何もしない
+- 次のときは書き換えずに警告し、setup は止めない（[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-ntn]` で出る）:
+  jq が無い、状態ファイルが無い（switch の前の世代）・形が違う、`NOTION_HOME` がディレクトリでない、`config.json` が
+  JSON の object として読めない・symlink（`mv` で置き換えると symlink が消えるため）、書けない
+- `version`（文字列）の無い `config.json` は、`keyring` を書いたうえで「ntn はこの形を読めない」と警告する（`version` は足さない）
+
+ntn は打つたびに `config.json` を読むので、動いている herdr・Claude Code・見回り役の service
+（[`pjp-dev-tracker-inbox`](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)）の下の ntn にも、次に打ったときから
+効く。ntn では環境変数 `NOTION_KEYRING` が `config.json` より強いが、dotfiles は入れない（switch の前から続く process の下の
+shell と、`PATH` しか受け取らない見回り役の service には届かないため）。
+
+### ntn の config directory の場所
+
+`bootstrap-ntn.sh` は ntn と同じ規則で決める（Linux の ntn 0.23.25 で確かめた。公式の文書は 4 つの場所の順だけを書く）。
+`ntn doctor` の `Config` の行が、ntn の使っている場所を出す。
+
+1. `NOTION_HOME`（空でなければ）。ディレクトリでなければ ntn も止まるので、作らずに警告する
+2. `$XDG_CONFIG_HOME/notion`（`XDG_CONFIG_HOME` が空でなく、ディレクトリのとき）
+3. `~/.config/notion`（`~/.config` がディレクトリのとき。`~/.notion/config.json` があっても見ない）
+4. `~/.notion`
+
+### ntn の keyring を確かめる
+
+```sh
+cat ~/.local/state/dotfiles/ntn.json   # {"keyring":false}
+ntn doctor                             # Config の行が config directory
+cat ~/.config/notion/config.json       # "keyring": false (場所は ntn doctor の Config の行)
+```
+
+`keyring` を切り替えると token の置き場所が変わる。切り替えたあと `ntn doctor` で token が見つからなければ、`ntn login` し直す。
 
 ## Claude Code
 
