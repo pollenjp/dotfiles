@@ -57,9 +57,14 @@
 #
 # ## PATH
 #
-# systemd の user manager の PATH は /usr/bin などだけで、ticket.sh が使う ntn (~/bin)・herdr と git
-# (home-manager の profile) が無い。ログインシェルと同じ順に並べて渡す。herdr は HERDR_* の無い環境でも既定の
-# socket で server に届く。
+# systemd の user manager の PATH は /usr/bin などだけで、ticket.sh が使う ntn・herdr・git (home-manager の profile。
+# ntn は nix/pkgs/ntn) が無い。home-manager の profile を先頭に、ログインシェルの PATH の残りと同じ順で並べて渡す。
+# herdr は HERDR_* の無い環境でも既定の socket で server に届く。
+#
+# ログインシェルで profile より前に来る ~/bin・~/.local/bin (home.sessionPath) は渡さない。ntn の install script
+# (curl) で前に入れた ntn がどちらかに残っていると、Nix で版を固定した ntn を隠すため (setup の
+# bootstrap-path-shadow.sh が警告する)。見回り役が起こすもの (ntn・herdr・git、Notion の宛先を決めるときの gh と、
+# ticket.sh の python3・nix) は、どれも下の Nix の profile か nixpkgs にある。
 #
 # python3 は nixpkgs のもの (3.11 以上。home の閉包にもともとある) を、system のものより前に置く。system の python3 が
 # 古い (tomllib が無い) と、ticket.sh は claude-skills の devShell へ nix develop で入り直し、起こすたびに devShell を
@@ -124,8 +129,6 @@ in
         # 上の「PATH」。/run/current-system/sw/bin は NixOS の system の profile
         "PATH=${
           lib.concatStringsSep ":" [
-            "%h/bin"
-            "%h/.local/bin"
             "${config.home.profileDirectory}/bin"
             "${pkgs.python3}/bin"
             "/nix/var/nix/profiles/default/bin"

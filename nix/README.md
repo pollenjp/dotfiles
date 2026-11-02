@@ -900,6 +900,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
+| 6.13 | `./nix/scripts/bootstrap-path-shadow.sh` | `bootstrap-path-shadow` | PATH で Nix の ntn より先に来る、Nix のものでない ntn（前に install script で入れたもの）を警告する。消さない（[後述](#前に手で入れた-ntn-と-setup-の警告)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
@@ -1502,6 +1503,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
+| `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
@@ -3843,6 +3845,9 @@ curl -fsSL https://ntn.dev | bash || true
 bash dotfiles/nix/scripts/claude-cloud/bootstrap-claude-cloud.sh --notion-profile personal || true
 ```
 
+手元では ntn を Nix で版を固定して入れる（[後述](#ntn-notion-cli-を-nix-で入れる)）が、cloud の VM は home-manager を通らないので、
+ntn は 1 行目の install script で入れる（版はその時の最新）。
+
 | token の渡し方 | 設定 |
 | --- | --- |
 | Network secret（勧める） | host `api.notion.com`・Bearer・値に token。加えて環境変数に `PJP_NOTION_TOKEN_PERSONAL=proxy-injected`（resolver に API キーで認証させるための中身の無い値。本物は proxy が VM の外で付ける） |
@@ -4089,6 +4094,94 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 
 **反映。** `~/dotfiles/setup --update` の switch の直後から、今のシェルでも `python3` が替わる（`~/.nix-profile/bin` は
 もう PATH にある。bash で前に `python3` を打っていれば `hash -r`）。`uv.toml` は次の uv から効く。
+
+## ntn (Notion CLI) を Nix で入れる
+
+Notion の CLI `ntn` は nixpkgs に無いので、公式の配布物（`https://ntn.dev/releases/v<版>/ntn-<target>.tar.gz`。Linux は
+musl の静的な binary、macOS は署名済みの binary）を、版と system ごとの sha256（隣の `.sha256` の値）で固定して入れる
+（`pkgs/ntn/`。形は `pkgs/upstream/mise.nix` と同じ）。`home/modules/packages.nix` が全ホストに入れ、bash・fish・zsh の
+補完も入る。pjp-dev-tracker など Notion へ書く skill と、見回り役（[前述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)）が使う。
+token の置き場（keychain かファイルか）は[前述](#ntn-notion-cli-の-token-をファイルに置く-keyring)。switch せずに試すなら:
+
+```sh
+nix run ./nix#ntn -- --version
+```
+
+### `ntn update` では上がらない
+
+store の binary は書き換えられないので、端末で `ntn update` を打つと `error: Cannot write to /nix/store/…/bin/ntn` で
+失敗する。続けて出る `curl … | NTN_INSTALL_DIR="$HOME/.local/bin" bash` の案内には従わない（版を固定しない ntn が
+`~/.local/bin` に入り、PATH で Nix の ntn より先に来る。[下](#前に手で入れた-ntn-と-setup-の警告)の警告が出る）。上流が新しい版を
+出すと、端末で打った ntn が `notice: A new version of ntn is available` と `ntn update` を勧めてくるが、Nix の ntn は dotfiles で
+上げる。
+
+依存の更新は、derivation の印（`pkgs/ntn/default.nix` の `version` のすぐ上の `# release-source:` の行）を読んで ntn も確かめ、
+公開から 7 日（`release-age.nix` の `minimumReleaseAgeDays`）たった版を、いつもの更新の PR で上げる（`version` と 3 つの
+`sha256` を、それぞれの `.sha256` と照らしてから書く）。印の行は、依存の更新が読む形なので文字列を変えない。
+
+| 印の欄 | 意味 |
+| --- | --- |
+| `latest=` | 最新の版を出す URL（`v0.23.25` の形） |
+| `url=` | tar の URL の形。`{version}`・`{target}` は derivation の `version` と、system ごとの塊の `target` |
+| `sha256=` | sha256 の在りか（`{url}.sha256`） |
+| `series=major` | 0.x でも minor 上げ（0.23 → 0.24）を取る |
+
+印が使えないとき・急ぐときは、手で上げる:
+
+1. 最新の版と、その公開日時を見る。公開から 7 日（`release-age.nix` の `minimumReleaseAgeDays`）たった版にする
+
+   ```sh
+   curl -fsSL https://ntn.dev/latest.txt          # v0.23.25 の形
+   curl -fsSI https://ntn.dev/releases/v<版>/ntn-x86_64-unknown-linux-musl.tar.gz | grep -i '^last-modified'
+   ```
+
+2. 3 つの target の tar を落として各 `.sha256` と照らし（CI は aarch64-linux を build しないので、ここで 3 つとも確かめる）、
+   `pkgs/ntn/default.nix` の `version` と 3 つの `sha256`（`.sha256` の値）を替える
+
+   ```sh
+   cd "$(mktemp -d)"
+   for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin; do
+     curl -fsSLO "https://ntn.dev/releases/v<版>/ntn-${t}.tar.gz"
+     curl -fsSLO "https://ntn.dev/releases/v<版>/ntn-${t}.tar.gz.sha256"
+     sha256sum -c "ntn-${t}.tar.gz.sha256" && cat "ntn-${t}.tar.gz.sha256"   # macOS は shasum -a 256 -c
+   done
+   ```
+
+3. build して、install の後の `ntn --version` が版と合うことを見る（check の `ntn-test`。CI は x86_64-linux と
+   aarch64-darwin で build する）
+
+   ```sh
+   nix build --no-link -L ./nix#checks.x86_64-linux.ntn-test
+   ```
+
+4. PR を出し、merge の後に各マシンで `~/dotfiles/setup --update`
+
+### 前に手で入れた ntn と setup の警告
+
+`curl -fsSL https://ntn.dev | bash` で入れた ntn は、PATH にある `~/.local/bin` か `~/bin` に残る。どちらも PATH で
+`~/.nix-profile/bin` より前に来る（`home.sessionPath`）ので、そのままでは Nix の ntn が隠れる。setup の手順
+`bootstrap-path-shadow` が、PATH で Nix の ntn より先に Nix のものでない ntn があれば警告し、消すコマンドを出す
+（ユーザーのファイルなので消さない。警告のまとめにも載る）。
+
+```text
+!! PATH で、Nix の ntn より先に Nix のものでない ntn があります (今のシェルではそちらが使われ、dotfiles が Nix で入れた版は使われません)。
+   先に来るもの: /home/<user>/bin/ntn
+   Nix の ntn:   /home/<user>/.nix-profile/bin/ntn
+   setup は消しません。要らなければ消す (新しいシェルから Nix の ntn が使われる):
+     rm /home/<user>/bin/ntn
+   npm や mise などの道具で入れたものなら、その道具で外す。
+```
+
+消すと、新しいシェルから Nix の ntn が使われる（今の bash で前に `ntn` を打っていれば `hash -r`）。Nix の ntn がまだ PATH に
+無いシェル（switch の前から開いているものなど）で流したときは、別の見出しで、Nix の ntn が PATH にあることを `type -a ntn` で
+確かめてから消すよう出す。見回り役は `~/bin`・`~/.local/bin` を PATH に入れないので、消す前から Nix の ntn を使う。Nix で
+入れるようにした CLI を前にほかの方法で入れていたことがあれば、`scripts/bootstrap-path-shadow.sh` の `commands` に足すと
+同じ警告が出る。
+
+### claude.ai/code の環境
+
+cloud の VM は home-manager を通らないので、ntn は環境の setup script の install script で入れる（[前述](#環境を作る)。
+版は固定されず、その時の最新）。
 
 ## CI
 

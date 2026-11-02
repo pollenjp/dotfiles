@@ -277,6 +277,7 @@
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
+          bootstrap-path-shadow-test = scriptTest "bootstrap-path-shadow" ./scripts/bootstrap-path-shadow.sh;
           pjp-google-ime-unittest =
             pkgs.runCommand "pjp-google-ime-unittest"
               {
@@ -383,6 +384,9 @@
           # pjp-ghq-pull の package そのもの。build の中で cargo test を流す (何を確かめるかは
           # pkgs/pjp-ghq-pull/tests/*.rs の先頭)。macOS (aarch64-darwin) でも build と test を通すので全 system
           pjp-ghq-pull-test = ghqPull;
+          # ntn (pkgs/ntn) の package そのもの。build の installCheck が `ntn --version` を版と照らす。配布物は system
+          # ごとに違うので、macOS (aarch64-darwin) でも build する (全 system)
+          ntn-test = pkgs.callPackage ./pkgs/ntn { };
           claude-env-state = import ./tests/claude-env.nix {
             inherit
               lib
@@ -650,6 +654,12 @@
           #
           #   nix run ./nix#pjp-ghq-pull -- --root <一時の ghq root>
           pjp-ghq-pull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
+
+          # Notion の CLI (ntn)。nixpkgs に無いので、公式の配布物を版と sha256 で固定する (pkgs/ntn)。
+          # home には modules/packages.nix が入れる。switch せずに試すなら:
+          #
+          #   nix run ./nix#ntn -- --version
+          ntn = pkgs.callPackage ./pkgs/ntn { };
         }
         # WSL の .exe の起動を記録する道具 (ADR 012)。bcc も WSL も Linux にしか無い。
         # home には home/modules/exe-exec-trace.nix が入れる。単体で試すなら:

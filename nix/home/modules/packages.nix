@@ -60,6 +60,12 @@
     # 実体は nix/pkgs/pjp-ghq-pull/。gitViaGh.enable のマシンでは fetch を上の git gh で打つ
     (callPackage ../../pkgs/pjp-ghq-pull { })
 
+    # Notion の CLI (ntn)。nixpkgs に無いので、公式の配布物を版と sha256 で固定して入れる (実体は nix/pkgs/ntn/)。
+    # pjp-dev-tracker など Notion へ書く skill と、見回り役 (modules/dev-tracker-inbox.nix) が使う。`ntn update` では
+    # 上がらない (store は書き換えられない)。版の上げ方は README の「ntn (Notion CLI) を Nix で入れる」。
+    # 前に install script (curl) で入れた ntn が PATH で先に来ると、setup の bootstrap-path-shadow が警告する
+    (callPackage ../../pkgs/ntn { })
+
     # 以下は対応する programs.* モジュールが入れるのでここには書かない:
     #   starship -> modules/starship.nix
     #   delta / git-lfs -> modules/git.nix

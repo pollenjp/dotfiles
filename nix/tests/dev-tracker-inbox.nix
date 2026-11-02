@@ -16,9 +16,10 @@
 #     - 落ちたら 30 秒おいて起こし直すが、終了コード 2 (設定の誤り・inbox の無い古い ticket.sh) では起こし直さない。
 #       10 分に 5 回起こしたら諦める。止めるときの SIGTERM は本体にだけ送り (KillMode=mixed)、今の見回りを終えるまで
 #       5 分待つ (TimeoutStopSec)
-#     - PATH に ~/bin (ntn)・home-manager の profile (herdr・git)・nixpkgs の python3 (3.11 以上)・nix の profile
+#     - PATH に home-manager の profile (ntn・herdr・git)・nixpkgs の python3 (3.11 以上)・nix の profile
 #       (devShell へ入り直す nix)・/usr/bin をこの順で渡し (python3 は system のものより前)、PYTHONUNBUFFERED=1 で
-#       python のログを溜めずに journal へ出させる
+#       python のログを溜めずに journal へ出させる。~/bin・~/.local/bin は渡さない (前に install script で入れた ntn が
+#       Nix の ntn を隠さないように)
 #     - Linux でないマシンで true にすると、常駐しないことを warnings で知らせる (Linux では warnings を出さない)
 #   ビルド時 (Linux だけ。unit ファイルは Linux でしか作られない)
 #     - unit ファイルの [Unit]・[Service] に上の値が出る (%h が %% に化けない・Environment が 1 行ずつになる)
@@ -62,8 +63,6 @@ let
   one = v: lib.toList v;
   envOf = u: one (u.Service.Environment or [ ]);
   path = lib.concatStringsSep ":" [
-    "%h/bin"
-    "%h/.local/bin"
     "${enabled.home.profileDirectory}/bin"
     "${pkgs.python3}/bin"
     "/nix/var/nix/profiles/default/bin"
@@ -124,7 +123,7 @@ let
         if isLinux then !warned else warned;
     }
     {
-      name = "PATH に ~/bin・home-manager の profile・nixpkgs の python3・nix の profile・/usr/bin を渡し、python のログを溜めさせない";
+      name = "PATH に home-manager の profile・nixpkgs の python3・nix の profile・/usr/bin を渡し (~/bin・~/.local/bin は渡さない)、python のログを溜めさせない";
       ok =
         unit != null
         &&
