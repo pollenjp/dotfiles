@@ -4113,7 +4113,20 @@ store の binary は書き換えられないので、端末で `ntn update` を�
 失敗する。続けて出る `curl … | NTN_INSTALL_DIR="$HOME/.local/bin" bash` の案内には従わない（版を固定しない ntn が
 `~/.local/bin` に入り、PATH で Nix の ntn より先に来る。[下](#前に手で入れた-ntn-と-setup-の警告)の警告が出る）。上流が新しい版を
 出すと、端末で打った ntn が `notice: A new version of ntn is available` と `ntn update` を勧めてくるが、Nix の ntn は dotfiles で
-上げる:
+上げる。
+
+依存の更新は、derivation の印（`pkgs/ntn/default.nix` の `version` のすぐ上の `# release-source:` の行）を読んで ntn も確かめ、
+公開から 7 日（`release-age.nix` の `minimumReleaseAgeDays`）たった版を、いつもの更新の PR で上げる（`version` と 3 つの
+`sha256` を、それぞれの `.sha256` と照らしてから書く）。印の行は、依存の更新が読む形なので文字列を変えない。
+
+| 印の欄 | 意味 |
+| --- | --- |
+| `latest=` | 最新の版を出す URL（`v0.23.25` の形） |
+| `url=` | tar の URL の形。`{version}`・`{target}` は derivation の `version` と、system ごとの塊の `target` |
+| `sha256=` | sha256 の在りか（`{url}.sha256`） |
+| `series=major` | 0.x でも minor 上げ（0.23 → 0.24）を取る |
+
+印が使えないとき・急ぐときは、手で上げる:
 
 1. 最新の版と、その公開日時を見る。公開から 7 日（`release-age.nix` の `minimumReleaseAgeDays`）たった版にする
 
@@ -4123,7 +4136,7 @@ store の binary は書き換えられないので、端末で `ntn update` を�
    ```
 
 2. 3 つの target の tar を落として各 `.sha256` と照らし（CI は aarch64-linux を build しないので、ここで 3 つとも確かめる）、
-   `pkgs/ntn/default.nix` の `version`・3 つの `sha256`（`.sha256` の値）・冒頭のコメントの公開日時を替える
+   `pkgs/ntn/default.nix` の `version` と 3 つの `sha256`（`.sha256` の値）を替える
 
    ```sh
    cd "$(mktemp -d)"
@@ -4142,9 +4155,6 @@ store の binary は書き換えられないので、端末で `ntn update` を�
    ```
 
 4. PR を出し、merge の後に各マシンで `~/dotfiles/setup --update`
-
-依存の更新（pjp-dep-update）は、直書きの derivation のうち `fetchFromGitHub` のものだけを拾う（ntn の配布元は GitHub で
-ない）ので、ntn はこの手順で上げる。
 
 ### 前に手で入れた ntn と setup の警告
 

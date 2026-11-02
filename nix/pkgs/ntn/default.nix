@@ -8,11 +8,12 @@
 # 補完 (bash / fish / zsh) は、install した ntn に `ntn completions <shell>` で出させる。clap の動的な補完で、TAB の
 # たびに埋め込んだ $out/bin/ntn を呼ぶ。
 #
-# `ntn update` では上がらない (store の binary は書き換えられない)。版を上げるときは version と 3 つの sha256 を
-# 替える。公開から 7 日 (nix/release-age.nix の minimumReleaseAgeDays) たった版にする。手順は nix/README.md の
+# `ntn update` では上がらない (store の binary は書き換えられない)。版は依存の更新が上げる: version のすぐ上の
+# `# release-source:` の行 (印) を読んで、公開から 7 日 (nix/release-age.nix の minimumReleaseAgeDays) たった版を選び、
+# いつもの更新の PR で version と 3 つの sha256 を、それぞれの .sha256 と照らしてから書く。印の {version}・{target} は
+# この derivation の version と、system ごとの塊の target。series=major は、0.x でも minor 上げ (0.23 → 0.24) を取る印。
+# 印の行は文字列を変えない (依存の更新が読む形)。印が使えないとき・急ぐときに手で上げる手順は nix/README.md の
 # 「ntn (Notion CLI) を Nix で入れる」。
-#
-# 今の版 0.23.25 は 2026-10-22 00:05:54 UTC に出た (tar の Last-Modified。版を上げたら、この行も替える)。
 {
   lib,
   stdenvNoCC,
@@ -21,6 +22,7 @@
 }:
 
 let
+  # release-source: latest=https://ntn.dev/latest.txt url=https://ntn.dev/releases/v{version}/ntn-{target}.tar.gz sha256={url}.sha256 series=major
   version = "0.23.25";
   # system → 配布物の target と、その .sha256 の値 (https://ntn.dev/releases/v<version>/ntn-<target>.tar.gz.sha256)
   assets = {
