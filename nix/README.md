@@ -2537,7 +2537,7 @@ config directory の `auth.json` に置かせる。どのマシンで切るか�
 | 値 | ntn の `config.json` |
 | --- | --- |
 | `null`（既定） | 触らない（`false` から `null` に戻しても、書いた `keyring` は残る。keychain に戻すなら `true`） |
-| `false` | `"keyring": false` を書く（token は config directory の `auth.json`。秘密のファイルとして扱う） |
+| `false` | `"keyring": false` を書く（token は config directory の `auth.json`。秘密のファイルとして扱い、config directory を 700・`auth.json` を 600 にそろえる。[後述](#ntn-の-config-directory-と-authjson-の-mode)） |
 | `true` | `"keyring": true` を書く（OS の keychain に戻すとき） |
 
 使うマシンのホストの `modules`（dotfiles-private の `nix/hosts/<ホスト>.nix` か、`~/dotfiles/flake.nix` の tmp。`mkHome` の
@@ -2559,18 +2559,38 @@ symlink にすると、ntn が `Failed to write config.json` で落ちる）。`
 - `config.json` があれば `keyring` だけを書き換え（無ければ足し）、ほかのキー（既定の workspace など）は残す。同じ値なら
   書かない。書き換えるときは同じディレクトリの一時ファイルから `mv` で置き換え、元の mode を保つ
 - 無ければ、ntn が空の場所に作るのと同じ形 `{"version": "1", "defaultWorkspaceIds": {}, "keyring": <値>}` で作る
-  （ディレクトリも。mode は ntn と同じく umask どおり）。ntn は `version` の無い `config.json` を読めない
+  （ディレクトリも。`config.json` の mode は ntn と同じく umask どおり。ディレクトリは `false` なら 700、`true` なら
+  umask どおり）。ntn は `version` の無い `config.json` を読めない
   （`{"keyring": false}` だけだと `Failed to parse config.json`）。ntn がまだ入っていなくても作る
 - `null` なら何もしない
 - 次のときは書き換えずに警告し、setup は止めない（[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-ntn]` で出る）:
   jq が無い、状態ファイルが無い（switch の前の世代）・形が違う、`NOTION_HOME` がディレクトリでない、`config.json` が
-  JSON の object として読めない・symlink（`mv` で置き換えると symlink が消えるため）、書けない
+  JSON の object として読めない・symlink（`mv` で置き換えると symlink が消えるため）、書けない、`false` で config directory に
+  触ると危ない（[後述](#ntn-の-config-directory-と-authjson-の-mode)）
 - `version`（文字列）の無い `config.json` は、`keyring` を書いたうえで「ntn はこの形を読めない」と警告する（`version` は足さない）
 
 ntn は打つたびに `config.json` を読むので、動いている herdr・Claude Code・見回り役の service
 （[`pjp-dev-tracker-inbox`](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)）の下の ntn にも、次に打ったときから
 効く。ntn では環境変数 `NOTION_KEYRING` が `config.json` より強いが、dotfiles は入れない（switch の前から続く process の下の
 shell と、`PATH` しか受け取らない見回り役の service には届かないため）。
+
+### ntn の config directory と auth.json の mode
+
+`false` では token が `auth.json` に平文で入る。ntn はディレクトリもファイルも umask どおりに作る（umask 002 なら
+775・664）ので、`bootstrap-ntn.sh` は `false` のときだけ、`config.json` より先にほかのユーザーが読めないようにそろえる。
+
+- config directory は、作るなら 700 で作り、あれば 700 にそろえる。ディレクトリが 700 なら、ntn が login し直して
+  `auth.json` を 664 で作り直しても、ほかのユーザーは読めない
+- `auth.json` があれば 600 にそろえる（無ければ作らない）。ほかのファイル（`config.json`・`cache.json` など）の mode は
+  変えない（秘密は `auth.json` だけで、ディレクトリが 700 なら中身は読まれない。作る `config.json` も umask どおり）
+- 違うときだけ chmod し、直したら `そろえました: <パス> の mode を 775 から 700 に` のように 1 行出す。比べるのは
+  権限の 3 桁（rwx）だけ（GNU の chmod はディレクトリの setgid を残すので、特殊な桁までは比べない）
+- config directory が symlink・持ち主が自分でない・700 にできないときは、mode も `config.json` も変えずに警告する
+  （token を置く場所の安全を確かめられないため。`NOTION_HOME` の末尾の `/` は外してから symlink かを見る）。
+  ディレクトリでないもの（普通のファイル）なら、`config.json` を作れずに警告する
+- `auth.json` が symlink・普通のファイルでない・600 にできないときは、`auth.json` だけ変えずに警告し、`keyring` はそろえる
+- `true`・`null` では mode に触らない（`true` の token は OS の keychain にあり、config directory に秘密が無い。`null` は
+  ntn の設定に触らない）
 
 ### ntn の config directory の場所
 
@@ -2588,6 +2608,7 @@ shell と、`PATH` しか受け取らない見回り役の service には届か�
 cat ~/.local/state/dotfiles/ntn.json   # {"keyring":false}
 ntn doctor                             # Config の行が config directory
 cat ~/.config/notion/config.json       # "keyring": false (場所は ntn doctor の Config の行)
+ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drwx------ と -rw-------
 ```
 
 `keyring` を切り替えると token の置き場所が変わる。切り替えたあと `ntn doctor` で token が見つからなければ、`ntn login` し直す。
