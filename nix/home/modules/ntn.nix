@@ -1,6 +1,6 @@
 # ntn (Notion CLI) の config.json の keyring (dotfiles.ntn.keyring) を ~/.local/state/dotfiles/ntn.json に置く。
 # nix/scripts/bootstrap-ntn.sh が `~/dotfiles/setup --update` のたびに読み、ntn の config.json の keyring だけを
-# この値にそろえる (null なら触らない)。
+# この値にそろえる (null なら触らない。false なら token を置く config directory を 700・auth.json を 600 にもそろえる)。
 #
 # config.json を Nix で置かないのは、ntn が自分で書き換えるファイルだから (`ntn login` が既定の workspace を書く。
 # store の読み取り専用の symlink にすると ntn が書けずに落ちる)。home.activation で書かない理由は bootstrap-ntn.sh の冒頭。

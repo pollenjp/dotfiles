@@ -461,7 +461,8 @@ in
 
       - null (既定): config.json に触らない (false から null に戻しても、書いた keyring は残る。
         keychain に戻すなら true)
-      - false: config.json に `"keyring": false` を書く (token は config directory の `auth.json`)
+      - false: config.json に `"keyring": false` を書く (token は config directory の `auth.json`。
+        config directory を 700・`auth.json` を 600 にもそろえる)
       - true: config.json に `"keyring": true` を書く (OS の keychain に戻すとき)
 
       config.json は ntn が自分で書き換える (`ntn login` が既定の workspace を書く) ので、Nix では置かない

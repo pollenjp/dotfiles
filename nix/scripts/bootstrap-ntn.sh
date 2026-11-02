@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# ntn (Notion CLI) の config.json の keyring を host option (dotfiles.ntn.keyring) の値にそろえる。
-# 冪等。`setup.sh --update` でも毎回走る。
+# ntn (Notion CLI) の config.json の keyring を host option (dotfiles.ntn.keyring) の値にそろえる。keyring: false なら、
+# token を置く config directory を 700・auth.json を 600 にもそろえる。冪等。`setup.sh --update` でも毎回走る。
 #
 # ## 何のために
 #
@@ -22,16 +22,20 @@
 #
 # ## 何をするか
 #
-#   - keyring が null なら何もしない (config.json に触らない)
+#   - keyring が null なら何もしない (config.json にも、config directory と auth.json の mode にも触らない)
+#   - keyring が false なら、config.json より先に config directory と auth.json の mode をそろえる (下の「config
+#     directory と auth.json の mode」)
 #   - config.json があれば keyring だけを書き換え (無ければ足し)、ほかのキー (既定の workspace など) は残す。
 #     同じ値なら書かない。書くときは同じディレクトリの一時ファイルから mv で置き換え、元の mode を保つ
 #   - 無ければ、ntn が空の場所に作るのと同じ形 {"version": "1", "defaultWorkspaceIds": {}, "keyring": <値>} で作る
-#     (ディレクトリも。mode は ntn と同じく umask どおり)。ntn は version の無い config.json を読めない
+#     (ディレクトリも。config.json の mode は ntn と同じく umask どおり。ディレクトリは keyring: false なら 700、
+#     true なら umask どおり)。ntn は version の無い config.json を読めない
 #     ({"keyring": false} だけだと Failed to parse config.json)。ntn が入っていなくても作る (あとで入れて
 #     ntn login したときから token をファイルに置くため)
 #   - 次のときは書き換えずに警告し、exit 0 で終わる (setup を止めない): jq が無い、状態ファイルが無い・形が違う、
-#     NOTION_HOME がディレクトリでない、config.json が JSON の object として読めない・symlink、書けない。
-#     symlink を書き換えないのは、mv で置き換えると張った symlink が消えるため
+#     NOTION_HOME がディレクトリでない、config.json が JSON の object として読めない・symlink、書けない、
+#     keyring: false で config directory に触ると危ない (下の「config directory と auth.json の mode」)。
+#     config.json の symlink を書き換えないのは、mv で置き換えると張った symlink が消えるため
 #   - version (文字列) の無い config.json は、keyring を書いたうえで ntn が読めないと警告する (version は足さない。
 #     書くのは keyring だけ)
 #
@@ -46,6 +50,28 @@
 #   2. $XDG_CONFIG_HOME/notion (XDG_CONFIG_HOME が空でなく、ディレクトリのとき)
 #   3. ~/.config/notion (~/.config がディレクトリのとき。~/.notion/config.json があっても見ない)
 #   4. ~/.notion
+#
+# NOTION_HOME の末尾の / は外して使う (付いたままだと [[ -L ]] が symlink の先をたどり、symlink を見落とす)。
+#
+# ## config directory と auth.json の mode
+#
+# keyring: false では token が config directory の auth.json に平文で入る。ntn はディレクトリもファイルも umask
+# どおりに作る (umask 002 なら 775・664) ので、keyring: false のときだけ、ほかのユーザーが読めないようにそろえる:
+#
+#   - config directory は、作るなら 700 で作り、あれば 700 にそろえる。ディレクトリが 700 なら、ntn が login し直して
+#     auth.json を 664 で作り直しても、ほかのユーザーは読めない
+#   - auth.json があれば 600 にそろえる (無ければ作らない)。ほかのファイル (config.json・cache.json など) の mode は
+#     変えない。秘密は auth.json だけで、ディレクトリが 700 なら中身は読まれない (作る config.json も umask どおり)
+#   - 違うときだけ chmod し、直したら「そろえました: <パス> の mode を 775 から 700 に」のように 1 行出す。
+#     比べるのは権限の 3 桁 (rwx) だけ。GNU の chmod は数字の mode でディレクトリの setgid を残す (2775 は 2700 に
+#     なる) ので、特殊な桁まで比べると毎回そろえ直すことになる
+#   - config directory が symlink・持ち主が自分でない・700 にできないときは、token を置く場所の安全を確かめられない
+#     ので、mode も config.json も変えずに警告して exit 0 する (config.json が symlink のときと同じ作法)。ディレクトリ
+#     でないもの (普通のファイル) なら、config.json を作るところで作れずに警告して終わる
+#   - auth.json が symlink・普通のファイルでない・600 にできないときは、auth.json だけ変えずに警告し、keyring は
+#     そろえる (ディレクトリは 700 にそろえ終えている)。持ち主が自分でない auth.json は chmod が落ちるので、こちらに入る
+#   - keyring が true・null なら mode に触らない。true の token は OS の keychain にあり、config directory に秘密が
+#     無い。null は ntn の設定に触らない約束
 #
 # ## なぜ Nix でやらないのか
 #
@@ -111,7 +137,11 @@ if [[ -n ${NOTION_HOME-} ]]; then
       "ntn の config.json には触りません。"
     exit 0
   fi
+  # 末尾の / を外す (付いたままだと、下で symlink かを見るとき [[ -L ]] が symlink の先をたどってしまう)。/ は残す
   config_dir=${NOTION_HOME}
+  while [[ ${config_dir} == */ && ${config_dir} != / ]]; do
+    config_dir=${config_dir%/}
+  done
 elif [[ -n ${XDG_CONFIG_HOME-} && -d ${XDG_CONFIG_HOME} ]]; then
   config_dir="${XDG_CONFIG_HOME}/notion"
 elif [[ -d ${HOME}/.config ]]; then
@@ -120,6 +150,62 @@ else
   config_dir="${HOME}/.notion"
 fi
 config="${config_dir}/config.json"
+
+# 権限の桁 (rwx の 8 進 3 桁) を出す。setgid などの特殊な桁は除く (冒頭の「config directory と auth.json の mode」)。
+# GNU の stat か、macOS の stat
+perm_bits() {
+  local m
+  m=$(stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1") || return 1
+  m="00${m}"
+  printf '%s\n' "${m: -3}"
+}
+
+# keyring: false なら token を置くディレクトリなので、ほかのユーザーが読めないようにそろえる
+# (冒頭の「config directory と auth.json の mode」)。無ければ下で 700 で作る。ディレクトリでないもの
+# (普通のファイル) があれば、下で作れずに警告して終わる
+if [[ ${value} == false ]]; then
+  if [[ -L ${config_dir} ]]; then
+    warn "ntn の config directory が symlink なので触りません: ${config_dir} -> $(readlink "${config_dir}")" \
+      "keyring: false では token (auth.json) をここに置きます。先がほかのユーザーから読めないかを確かめられないので、mode も config.json も変えません。" \
+      "symlink をやめて普通のディレクトリにしてから、~/dotfiles/setup --update を流し直してください。"
+    exit 0
+  fi
+  if [[ -d ${config_dir} ]]; then
+    if [[ ! -O ${config_dir} ]]; then
+      warn "ntn の config directory の持ち主が自分ではないので触りません: ${config_dir}" \
+        "keyring: false では token (auth.json) をここに置きます。ほかのユーザーのディレクトリなので、mode も config.json も変えません。" \
+        "自分のディレクトリにしてから、~/dotfiles/setup --update を流し直してください。"
+      exit 0
+    fi
+    perm=$(perm_bits "${config_dir}") || perm="(読めない)"
+    if [[ ${perm} != 700 ]]; then
+      if ! chmod 700 "${config_dir}"; then
+        warn "ntn の config directory を 700 にできませんでした (上のエラー): ${config_dir}" \
+          "keyring: false の token (auth.json) をほかのユーザーが読めるかもしれないので、config.json も変えません。"
+        exit 0
+      fi
+      echo "そろえました: ${config_dir} の mode を ${perm} から 700 に"
+    fi
+
+    auth="${config_dir}/auth.json"
+    if [[ -L ${auth} ]]; then
+      warn "ntn の auth.json が symlink なので mode を変えません: ${auth} -> $(readlink "${auth}")" \
+        "token のファイルなので、先のファイルをほかのユーザーが読めないことを確かめてください。"
+    elif [[ -e ${auth} && ! -f ${auth} ]]; then
+      warn "ntn の auth.json が普通のファイルではないので mode を変えません: ${auth}"
+    elif [[ -f ${auth} ]]; then
+      perm=$(perm_bits "${auth}") || perm="(読めない)"
+      if [[ ${perm} != 600 ]]; then
+        if chmod 600 "${auth}"; then
+          echo "そろえました: ${auth} の mode を ${perm} から 600 に"
+        else
+          warn "ntn の auth.json を 600 にできませんでした (上のエラー): ${auth}" \
+            "config directory は 700 なので、ほかのユーザーからは読めません。"
+        fi
+      fi
+    fi
+  fi
+fi
 
 tmp=""
 # 落ちたときに config.json の隣へ中間ファイルを残さない。
@@ -148,7 +234,13 @@ if [[ -L ${config} ]]; then
 fi
 
 if [[ ! -e ${config} ]]; then
-  mkdir -p "${config_dir}" || give_up
+  # keyring: false なら token を置くディレクトリなので 700 で作る (あれば上でそろえてある)。true は ntn と同じく umask どおり
+  if [[ ${value} == false ]]; then
+    # shellcheck disable=SC2174 # 700 にするのは一番深い config directory だけでよい (親は ~/.config などの今あるもの)
+    mkdir -p -m 700 "${config_dir}" || give_up
+  else
+    mkdir -p "${config_dir}" || give_up
+  fi
   tmp=$(mktemp "${config}.XXXXXX") || give_up
   # mktemp は 0600 で作る。ntn が作るときと同じく umask どおりにする
   mask=$(umask)
