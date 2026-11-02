@@ -91,7 +91,7 @@ dotfiles 本体の依存を上げて switch まで通す手順。落ちる場所
 成果物: /tmp/tmp.XXXXXXXX
   new-findings.txt   <- whitelist に無い findings ("vuln_id<TAB>package")
   vulns.csv          <- 全件。whitelist / whitelist_comment 列つき
-  report.txt         <- 表示された表 (CI の summary もこれ)
+  report.txt         <- 上に出した findings の表 (whitelist に無いものと受け入れた件数。vulns.csv から作る。CI の summary もこれ)
   scanner.txt        <- 照らした sbomnix と、どの pin から取ったか (退いたなら組めなかった pin も)
   sbom.csv / sbom.cdx.json / sbom.spdx.json
 ```

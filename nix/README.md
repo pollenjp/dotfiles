@@ -453,6 +453,10 @@ CI の `closure-scan` ジョブが PR / push に加えて**毎日の定期実行
 ./nix/scripts/closure-scan.sh baseline   # 今の findings を whitelist へ追記して受け入れ
 ```
 
+どれも照らしたあとに findings の表（whitelist に無いもの。受け入れたものは件数だけ）を出し、成果物の
+`report.txt` に残す（CI は summary に貼る）。表は `vulns.csv` から作る（vulnxscan も表を出すが、版によって
+stdout にも stderr のログにも出るので拾わない）。findings が 0 件なら「なし」と書く。
+
 回るタイミングは 3 つ。
 
 | いつ | 形 |
@@ -4098,7 +4102,7 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。日数と例外は `release-age.nix`。[前述](#依存-flakelock-の更新)） |
 | `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
-| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。sbomnix を前の pin から組めるよう履歴を全部取り、どの pin から取ったかを summary に出す。[前述](#閉包のスキャンと-pin先端の差分-遅延の補完)） |
+| `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。findings の表（`report.txt`）を summary に出す。sbomnix を前の pin から組めるよう履歴を全部取り、どの pin から取ったかも summary に出す。[前述](#閉包のスキャンと-pin先端の差分-遅延の補完)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
 `aarch64-linux` はランナーが無いので**評価のみ**（`--all-systems --no-build`）。
