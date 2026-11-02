@@ -11,8 +11,18 @@
 # ## 確かめること
 #
 #   - config.json が無ければ、ntn が作るのと同じ形 {"version":"1","defaultWorkspaceIds":{},"keyring":<値>} で作る
-#     (ディレクトリも)。mode は umask どおり (umask 022 で 0644・0755、002 で 0664・0775)。ntn は呼ばない
-#     (入っていなくても作る)
+#     (ディレクトリも)。config.json の mode は umask どおり (umask 022 で 0644、002 で 0664)。ディレクトリは
+#     keyring: false なら umask によらず 0700、true なら umask どおり (022 で 0755)。ntn は呼ばない (入っていなくても作る)
+#   - keyring: false なら、ある config directory を 0700 に、auth.json があれば 0600 にそろえ、直したものごとに
+#     「そろえました」を 1 行出す (警告なし。config.json は書かず、mode も変えない)。もう 0700・0600 なら chmod を
+#     呼ばない。比べるのは rwx の 3 桁だけ (setgid のディレクトリも、2 回目は chmod を呼ばない。setgid を立てられない
+#     所 (setgid の chmod を断る Nix のサンドボックス) では飛ばす)。auth.json が無ければ作らない。keyring が true・null
+#     なら、緩い mode でも触らない (chmod を呼ばない)
+#   - keyring: false で config directory が触ると危ない (symlink (NOTION_HOME の末尾に / があっても)・持ち主が自分で
+#     ない・chmod が落ちる) なら、mode も config.json も変えずに警告して exit 0。持ち主の場合は / を NOTION_HOME に
+#     して見る (chmod と mktemp は偽物にして、呼ばないことを確かめる。root で流すときは飛ばす)
+#   - keyring: false で auth.json が触ると危ない (symlink・普通のファイルでない・chmod が落ちる) なら、auth.json だけ
+#     変えずに警告し、config directory は 0700 にそろえ、keyring もそろえる
 #   - config.json があれば keyring だけを書き換え (無ければ足し)、ほかのキーは残し、元の mode (0640・読み取り専用の
 #     0444) を保つ。同じ値なら書かない (中身も inode も変わらない)
 #   - keyring が null なら何もしない (config.json もディレクトリも作らない。あるものは変えない)
@@ -61,10 +71,11 @@ mkdir -p "${fake_bin}"
 printf '#!%s\ntouch %q\nexit 1\n' "${BASH}" "${work}/ntn-called" >"${fake_bin}/ntn"
 chmod +x "${fake_bin}/ntn"
 
-# 呼ばれると落ちる偽のコマンドを $1 のディレクトリに置く ($2: コマンドの名前)。PATH の先頭に足して、書けないときを作る
+# 呼ばれると印 ($1/<コマンドの名前>-called) を残して落ちる偽のコマンドを $1 のディレクトリに置く ($2: コマンドの名前)。
+# PATH の先頭に足して、書けないときを作る・呼ばないことを確かめる
 fake_fail() {
   mkdir -p "$1"
-  printf '#!%s\necho "%s: 落ちるように置いた偽物" >&2\nexit 1\n' "${BASH}" "$2" >"$1/$2"
+  printf '#!%s\ntouch %q\necho "%s: 落ちるように置いた偽物" >&2\nexit 1\n' "${BASH}" "$1/$2-called" "$2" >"$1/$2"
   chmod +x "$1/$2"
 }
 
@@ -120,20 +131,20 @@ if [[ $(rc "${h1}") == 0 && -f ${f1} ]] && same "$(cat "${f1}")" "${created_fals
 else
   ng "config.json が無ければ ntn と同じ形で作る" "$(log "${h1}") ntn-called=$([[ -e ${work}/ntn-called ]] && echo yes || echo no)"
 fi
-if [[ -f ${f1} ]] && mode_is "${f1}" 644 && mode_is "${h1}/.config/notion" 755; then
-  ok "新しいファイルとディレクトリの mode は umask どおり (umask 022 で 0644・0755)"
+if [[ -f ${f1} ]] && mode_is "${f1}" 644 && mode_is "${h1}/.config/notion" 700; then
+  ok "keyring: false なら新しいディレクトリは 0700、config.json は umask どおり (umask 022 で 0644)"
 else
-  ng "新しいファイルとディレクトリの mode は umask どおり (umask 022)" "$(ls -ld "${h1}/.config/notion" "${f1}" 2>&1)"
+  ng "keyring: false なら新しいディレクトリは 0700、config.json は umask どおり (umask 022)" "$(ls -ld "${h1}/.config/notion" "${f1}" 2>&1)"
 fi
 
-# 1b. umask 002 (対象のホストの umask) なら 0664・0775
+# 1b. umask 002 (対象のホストの umask) でも、keyring: false の新しいディレクトリは 0700 (config.json は 0664)
 h=$(new_home t1b '{"keyring":false}')
 f1b="${h}/.config/notion/config.json"
 run_umask=002 run "${h}"
-if [[ $(rc "${h}") == 0 && -f ${f1b} ]] && mode_is "${f1b}" 664 && mode_is "${h}/.config/notion" 775; then
-  ok "umask 002 なら新しいファイルとディレクトリは 0664・0775"
+if [[ $(rc "${h}") == 0 && -f ${f1b} ]] && mode_is "${f1b}" 664 && mode_is "${h}/.config/notion" 700; then
+  ok "umask 002 でも keyring: false の新しいディレクトリは 0700 (config.json は umask どおり 0664)"
 else
-  ng "umask 002 なら新しいファイルとディレクトリは 0664・0775" "$(log "${h}") $(ls -ld "${h}/.config/notion" "${f1b}" 2>&1)"
+  ng "umask 002 でも keyring: false の新しいディレクトリは 0700 (config.json は 0664)" "$(log "${h}") $(ls -ld "${h}/.config/notion" "${f1b}" 2>&1)"
 fi
 
 # 2. 冪等: もう一度流しても中身も inode も変わらず、警告も出さない
@@ -151,13 +162,18 @@ else
   ng "同じ値なら書かない" "1 で config.json ができていない"
 fi
 
-# 3. keyring = true でも同じ形で作る
+# 3. keyring = true でも同じ形で作る。ディレクトリも config.json も umask どおり (0700 にしない)
 h=$(new_home t3 '{"keyring":true}')
 run "${h}"
 if [[ $(rc "${h}") == 0 ]] && same "$(cat "${h}/.config/notion/config.json" 2>/dev/null)" "${created_true}" && quiet "${h}"; then
   ok "keyring = true なら keyring が true の形で作る"
 else
   ng "keyring = true なら keyring が true の形で作る" "$(log "${h}")"
+fi
+if mode_is "${h}/.config/notion" 755 && mode_is "${h}/.config/notion/config.json" 644; then
+  ok "keyring = true なら新しいディレクトリも config.json も umask どおり (umask 022 で 0755・0644)"
+else
+  ng "keyring = true なら新しいディレクトリも config.json も umask どおり (umask 022)" "$(ls -ld "${h}/.config/notion" "${h}/.config/notion/config.json" 2>&1)"
 fi
 
 # 4. merge: keyring だけを書き換え、ほかのキーと mode (0640。mktemp の 0600 と見分ける) は残す。警告は出さない
@@ -216,13 +232,18 @@ h=$(new_home t6b '{"keyring":null}')
 f6="${h}/.config/notion/config.json"
 mkdir -p "${h}/.config/notion"
 printf '%s\n' '{"version":"1","defaultWorkspaceIds":{},"keyring":true}' >"${f6}"
+printf '%s\n' '{"token":"secret"}' >"${h}/.config/notion/auth.json"
+chmod 775 "${h}/.config/notion"
+chmod 664 "${h}/.config/notion/auth.json"
 before=$(cat "${f6}")
 ino=$(inode "${f6}")
 run "${h}"
-if [[ $(rc "${h}") == 0 && $(cat "${f6}") == "${before}" && $(inode "${f6}") == "${ino}" ]] && quiet "${h}"; then
-  ok "keyring が null なら、ある config.json も変えない"
+if [[ $(rc "${h}") == 0 && $(cat "${f6}") == "${before}" && $(inode "${f6}") == "${ino}" ]] && quiet "${h}" \
+  && mode_is "${h}/.config/notion" 775 && mode_is "${h}/.config/notion/auth.json" 664; then
+  ok "keyring が null なら、ある config.json も、緩い config directory と auth.json の mode も変えない"
 else
-  ng "keyring が null なら、ある config.json も変えない" "$(log "${h}")"
+  ng "keyring が null なら、ある config.json も、緩い config directory と auth.json の mode も変えない" \
+    "$(log "${h}") $(ls -ld "${h}/.config/notion" "${h}/.config/notion/auth.json" 2>&1)"
 fi
 
 # 7. 状態ファイルが無い: 警告して exit 0、何も作らない
@@ -438,6 +459,209 @@ if [[ $(rc "${h}") == 0 && ! -e ${h}/.config/notion ]] && warned "${h}" && grep 
   ok "jq が無ければ警告して飛ばす (exit 0、何も作らない)"
 else
   ng "jq が無ければ警告して飛ばす" "$(log "${h}")"
+fi
+
+# 17. keyring: false で、ある config directory と auth.json が緩い (ntn login のあと、umask 002 のまま):
+#     directory を 0700、auth.json を 0600 にそろえ、直したものごとに 1 行出す。警告は出さない。
+#     config.json は書かず、mode も変えない (keyring はそろっている)
+h=$(new_home t17 '{"keyring":false}')
+d17="${h}/.config/notion"
+mkdir -p "${d17}"
+printf '%s\n' "${created_false}" >"${d17}/config.json"
+printf '%s\n' '{"token":"secret"}' >"${d17}/auth.json"
+chmod 775 "${d17}"
+chmod 664 "${d17}/config.json" "${d17}/auth.json"
+ino=$(inode "${d17}/config.json")
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && mode_is "${d17}" 700 && mode_is "${d17}/auth.json" 600 && quiet "${h}" \
+  && grep -qF "${d17} の mode を 775 から 700 に" "${h}/out" \
+  && grep -qF "${d17}/auth.json の mode を 664 から 600 に" "${h}/out"; then
+  ok "keyring: false なら、緩い config directory を 0700、auth.json を 0600 にそろえ、それぞれ 1 行出す (警告なし)"
+else
+  ng "keyring: false なら、緩い config directory を 0700、auth.json を 0600 にそろえる" \
+    "$(log "${h}") $(ls -ld "${d17}" "${d17}/auth.json" 2>&1)"
+fi
+if [[ $(inode "${d17}/config.json") == "${ino}" ]] && mode_is "${d17}/config.json" 664 && grep -q 'そろっています' "${h}/out"; then
+  ok "mode をそろえても、そろっている config.json は書かず、mode も変えない"
+else
+  ng "mode をそろえても、そろっている config.json は書かず、mode も変えない" "$(log "${h}") $(ls -l "${d17}/config.json")"
+fi
+
+# 18. もう 0700・0600 なら何もしない: chmod を呼ばず (呼ぶと落ちる偽物を置く)、そろえましたも出さない
+h=$(new_home t18 '{"keyring":false}')
+d18="${h}/.config/notion"
+mkdir -p "${d18}"
+printf '%s\n' "${created_false}" >"${d18}/config.json"
+printf '%s\n' '{"token":"secret"}' >"${d18}/auth.json"
+chmod 700 "${d18}"
+chmod 600 "${d18}/auth.json"
+fake_fail "${h}/fail-bin" chmod
+run "${h}" PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fail-bin/chmod-called ]] && mode_is "${d18}" 700 && mode_is "${d18}/auth.json" 600 \
+  && ! grep -q 'そろえました' "${h}/out" && grep -q 'そろっています' "${h}/out" && quiet "${h}"; then
+  ok "もう 0700・0600 なら chmod を呼ばず、そろえましたも出さない (警告なし)"
+else
+  ng "もう 0700・0600 なら chmod を呼ばない" "$(log "${h}") chmod-called=$([[ -e ${h}/fail-bin/chmod-called ]] && echo yes || echo no)"
+fi
+
+# 18b. setgid のディレクトリ (2775): 比べるのは rwx の 3 桁だけ。1 回目に 700 にそろえたあとは、GNU の chmod が
+#      setgid を残しても (2700)、2 回目は chmod を呼ばない (毎回「そろえました」を出さない)
+h=$(new_home t18b '{"keyring":false}')
+d18b="${h}/.config/notion"
+mkdir -p "${d18b}"
+printf '%s\n' "${created_false}" >"${d18b}/config.json"
+chmod 2775 "${d18b}" 2>/dev/null
+if [[ -z $(find "${d18b}" -prune -perm -2000) ]]; then
+  echo "  skip setgid のディレクトリ (ここでは setgid を立てられない。Nix のサンドボックスは setgid の chmod を断る)"
+else
+  run "${h}"
+  if [[ $(rc "${h}") == 0 && -n $(find "${d18b}" -prune -perm -0700 ! -perm /0077) ]] \
+    && grep -qF "${d18b} の mode を 775 から 700 に" "${h}/out" && quiet "${h}"; then
+    ok "setgid のディレクトリ (2775) も rwx を 700 にそろえる (setgid の桁は比べない)"
+  else
+    ng "setgid のディレクトリ (2775) も rwx を 700 にそろえる" "$(log "${h}") $(ls -ld "${d18b}")"
+  fi
+  fake_fail "${h}/fail-bin" chmod
+  run "${h}" PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+  if [[ $(rc "${h}") == 0 && ! -e ${h}/fail-bin/chmod-called ]] && ! grep -q 'そろえました' "${h}/out" && quiet "${h}"; then
+    ok "setgid が残ったディレクトリ (2700) でも、2 回目は chmod を呼ばない"
+  else
+    ng "setgid が残ったディレクトリ (2700) でも、2 回目は chmod を呼ばない" "$(log "${h}") $(ls -ld "${d18b}")"
+  fi
+fi
+
+# 19. auth.json が無い (まだ ntn login していない): directory だけ 0700 にそろえ、auth.json は作らない。
+#     config.json が無ければ作る (mode は umask どおり)
+h=$(new_home t19 '{"keyring":false}')
+d19="${h}/.config/notion"
+mkdir -p "${d19}"
+chmod 755 "${d19}"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${d19}/auth.json ]] && mode_is "${d19}" 700 && grep -qF "${d19} の mode を 755 から 700 に" "${h}/out" \
+  && ! grep -q 'auth.json の mode' "${h}/out" && same "$(cat "${d19}/config.json" 2>/dev/null)" "${created_false}" \
+  && mode_is "${d19}/config.json" 644 && quiet "${h}"; then
+  ok "auth.json が無ければ、directory だけ 0700 にそろえ、auth.json は作らない (config.json は umask どおりで作る)"
+else
+  ng "auth.json が無ければ、directory だけ 0700 にそろえ、auth.json は作らない" "$(log "${h}") $(ls -la "${d19}" 2>&1)"
+fi
+
+# 20. keyring: true なら、緩い config directory と auth.json の mode に触らない (chmod を呼ばない)
+h=$(new_home t20 '{"keyring":true}')
+d20="${h}/.config/notion"
+mkdir -p "${d20}"
+printf '%s\n' "${created_true}" >"${d20}/config.json"
+printf '%s\n' '{"token":"secret"}' >"${d20}/auth.json"
+chmod 775 "${d20}"
+chmod 664 "${d20}/auth.json"
+fake_fail "${h}/fail-bin" chmod
+run "${h}" PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fail-bin/chmod-called ]] && mode_is "${d20}" 775 && mode_is "${d20}/auth.json" 664 \
+  && quiet "${h}"; then
+  ok "keyring: true なら、緩い config directory と auth.json の mode に触らない"
+else
+  ng "keyring: true なら、緩い config directory と auth.json の mode に触らない" "$(log "${h}") $(ls -ld "${d20}" "${d20}/auth.json" 2>&1)"
+fi
+
+# 21. keyring: false で config directory が触ると危ない: mode も config.json も変えずに警告して exit 0
+# a・b. symlink (先は緩いディレクトリで、keyring が true の config.json と緩い auth.json がある)。
+#       a は ~/.config/notion が symlink、b は NOTION_HOME が symlink で末尾に / がある
+for kind in config-link notion-home-slash; do
+  h=$(new_home "t21-${kind}" '{"keyring":false}')
+  real="${h}/real-notion"
+  mkdir -p "${real}"
+  printf '%s\n' "${created_true}" >"${real}/config.json"
+  printf '%s\n' '{"token":"secret"}' >"${real}/auth.json"
+  chmod 775 "${real}"
+  chmod 664 "${real}/auth.json"
+  ino=$(inode "${real}/config.json")
+  if [[ ${kind} == config-link ]]; then
+    ln -s "${real}" "${h}/.config/notion"
+    run "${h}"
+  else
+    ln -s "${real}" "${h}/nh"
+    run "${h}" NOTION_HOME="${h}/nh/"
+  fi
+  if [[ $(rc "${h}") == 0 && $(inode "${real}/config.json") == "${ino}" ]] && same "$(cat "${real}/config.json")" "${created_true}" \
+    && mode_is "${real}" 775 && mode_is "${real}/auth.json" 664 && warned "${h}" && grep -q 'symlink' "${h}/warnings"; then
+    ok "config directory が symlink なら (${kind})、mode も config.json も変えずに警告する"
+  else
+    ng "config directory が symlink なら (${kind})、mode も config.json も変えずに警告する" \
+      "$(log "${h}") $(ls -ld "${real}" "${real}/auth.json" 2>&1) file=$(cat "${real}/config.json")"
+  fi
+done
+# c. 持ち主が自分でない: / (root の持ち物) を NOTION_HOME にする。chmod と mktemp は呼ぶと落ちる偽物にして、
+#    / に何も書こうとしないことを確かめる。root で流すと / が自分の持ち物になるので飛ばす
+if [[ ${EUID} == 0 ]]; then
+  echo "  skip config directory の持ち主が自分でないとき (root で流しているので、自分の持ち物でないディレクトリを用意できない)"
+else
+  h=$(new_home t21-owner '{"keyring":false}')
+  fake_fail "${h}/fail-bin" chmod
+  fake_fail "${h}/fail-bin" mktemp
+  run "${h}" NOTION_HOME=/ PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+  if [[ $(rc "${h}") == 0 && ! -e ${h}/fail-bin/chmod-called && ! -e ${h}/fail-bin/mktemp-called ]] \
+    && warned "${h}" && grep -q '持ち主' "${h}/warnings"; then
+    ok "config directory の持ち主が自分でなければ、chmod も config.json の書き換えもせずに警告する"
+  else
+    ng "config directory の持ち主が自分でなければ、chmod も config.json の書き換えもせずに警告する" \
+      "$(log "${h}") chmod-called=$([[ -e ${h}/fail-bin/chmod-called ]] && echo yes || echo no) mktemp-called=$([[ -e ${h}/fail-bin/mktemp-called ]] && echo yes || echo no)"
+  fi
+fi
+# d. chmod が落ちる (読み取り専用のファイルシステムなど): 警告して exit 0。keyring の手順まで進まない
+h=$(new_home t21-chmod '{"keyring":false}')
+d21="${h}/.config/notion"
+mkdir -p "${d21}"
+printf '%s\n' "${created_false}" >"${d21}/config.json"
+chmod 775 "${d21}"
+fake_fail "${h}/fail-bin" chmod
+run "${h}" PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+if [[ $(rc "${h}") == 0 ]] && mode_is "${d21}" 775 && warned "${h}" && grep -qF "${d21}" "${h}/warnings" \
+  && ! grep -q 'そろっています' "${h}/out"; then
+  ok "config directory を 0700 にできなければ、警告して exit 0 (config.json の手順まで進まない)"
+else
+  ng "config directory を 0700 にできなければ、警告して exit 0" "$(log "${h}")"
+fi
+
+# 22. keyring: false で auth.json が触ると危ない: auth.json だけ変えずに警告し、directory は 0700 に、keyring もそろえる
+# a. auth.json が symlink (先は緩いファイル)。b. auth.json がディレクトリ
+for kind in link dir; do
+  h=$(new_home "t22-${kind}" '{"keyring":false}')
+  d22="${h}/.config/notion"
+  mkdir -p "${d22}"
+  printf '%s\n' "${created_true}" >"${d22}/config.json"
+  chmod 775 "${d22}"
+  if [[ ${kind} == link ]]; then
+    target="${h}/real-auth.json"
+    printf '%s\n' '{"token":"secret"}' >"${target}"
+    ln -s "${target}" "${d22}/auth.json"
+  else
+    target="${d22}/auth.json"
+    mkdir "${target}"
+  fi
+  chmod 664 "${target}"
+  run "${h}"
+  if [[ $(rc "${h}") == 0 ]] && mode_is "${target}" 664 && mode_is "${d22}" 700 && same "$(cat "${d22}/config.json")" "${created_false}" \
+    && warned "${h}" && grep -q 'auth.json' "${h}/warnings" && grep -q '書きました' "${h}/out"; then
+    ok "auth.json が ${kind} なら auth.json だけ変えずに警告し、directory は 0700 に、keyring もそろえる"
+  else
+    ng "auth.json が ${kind} なら auth.json だけ変えずに警告し、directory は 0700 に、keyring もそろえる" \
+      "$(log "${h}") $(ls -ld "${d22}" "${target}" 2>&1) file=$(cat "${d22}/config.json")"
+  fi
+done
+# c. auth.json を chmod できない (directory はもう 0700): auth.json だけ変えずに警告し、keyring の手順まで進む
+h=$(new_home t22-chmod '{"keyring":false}')
+d22="${h}/.config/notion"
+mkdir -p "${d22}"
+printf '%s\n' "${created_false}" >"${d22}/config.json"
+printf '%s\n' '{"token":"secret"}' >"${d22}/auth.json"
+chmod 700 "${d22}"
+chmod 664 "${d22}/auth.json"
+fake_fail "${h}/fail-bin" chmod
+run "${h}" PATH="${h}/fail-bin:${fake_bin}:${PATH}"
+if [[ $(rc "${h}") == 0 ]] && mode_is "${d22}/auth.json" 664 && warned "${h}" && grep -q 'auth.json' "${h}/warnings" \
+  && grep -q 'そろっています' "${h}/out"; then
+  ok "auth.json を 0600 にできなければ、auth.json だけ変えずに警告し、keyring の手順まで進む"
+else
+  ng "auth.json を 0600 にできなければ、auth.json だけ変えずに警告し、keyring の手順まで進む" "$(log "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
