@@ -777,6 +777,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
+| `bootstrap-claude-skill-overrides.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill の `SKILL.md`（pack の割り当て）と入口の skill（`pjp-pack-<pack>`）を読む（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
@@ -884,7 +885,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS・plugin を https で取るのは[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
-| 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill を host option どおりに on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
+| 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill の見え方を `settings.json` の `skillOverrides` に書く。host option どおりの on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)）と、pack の skill を名前だけ・claude.ai から同期された skill を Claude の一覧から外す（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。6.5 の後に走る |
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR と cc-page のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-と-cc-page-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
@@ -2665,6 +2666,8 @@ frontmatter が YAML として読めなくても、Claude Code はエラーを�
 いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が閉じる・素の値の「 #」から先がコメント
 として消える、といった形では値が黙って変わる。script は読み直しに頼らず YAML として読めない形をどれも落とし、これらと、
 `name` とディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前でも落ちる（全部は script の先頭）。
+skill の `metadata` も見る（map であること・`pjp-pack` が pack の名前のどれかで、`bootstrap-claude-skill-overrides.sh` の
+読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
 観点は `claude-skills` の `scripts/lint.sh` に揃えてある。
 
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
@@ -3339,11 +3342,12 @@ env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` �
 - **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
   あり得る。`setup --update` なら bootstrap まで走るので揃う
 - 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。user の settings.json の
-  この key は option が正で、手で書き換えても次の update で戻る
+  この key は option が正で、手で書き換えても次の update で戻る。同じ script が書くほかの key（pack の skill・
+  claude.ai から同期された skill）は[次節](#skill-の一覧を枠に収める-pack-と同期された-skill)
 - `/skills` での切り替えは、その project の `.claude/settings.local.json` に保存され、user の
   settings.json より優先される（公式 docs `skills` の「Override skill visibility from settings」）。
   update では戻らない
-- 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して exit 0
+- 生成 JSON が無い（option を持つ世代へまだ switch していない）ときは警告して、この key の分だけ飛ばす
 - 実行中の Claude Code には効かない。新しい session で `/skills` を見ると状態が判る
 
 #### 確認
@@ -3366,6 +3370,56 @@ grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 | CLAUDE.md を 1 ファイルのまま Nix でマーカー間を切り抜く | Nix の `builtins.match` は複数行の切り抜きが書きづらく、節を編集したとき黙って壊れうる |
 
 経緯は [ADR 007](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/007_claude_skill_host_option_20260926T130250JST/README.md)。
+
+### skill の一覧を枠に収める (pack と同期された skill)
+
+Claude Code は、使える skill の名前と説明の一覧を毎ターン context に入れる。一覧は context の 1% の枠に収められ、
+あふれると呼ばれた回数の少ない skill から説明が落ちる（名前は残る）。説明が落ちた skill は、Claude が呼ぶきっかけを失う。
+そこで、どの会話でも要る skill（常駐）と話題ごとの入口の skill（`pjp-pack-<pack>`）だけを説明つきで見せ、話題ごとの
+skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrides.sh` が `~/.claude/settings.json` の
+`skillOverrides` に書く（[前節](#claude-code-の-skill-を-host-ごとに止める)の host option の key と同じ script）。
+
+| 書く key | 値 | 何を読んで決めるか |
+| --- | --- | --- |
+| pack の skill | `"name-only"`（一覧に名前だけ。Skill tool で名前を指せば呼べる） | `~/.claude/skills/*/SKILL.md` の frontmatter の `metadata` の `pjp-pack` と、その pack の入口 `~/.claude/skills/pjp-pack-<pack>/SKILL.md` |
+| claude.ai から同期された skill（`anthropic-skills:<名前>`） | `"user-invocable-only"`（Claude の一覧から消え、ユーザーは `/` から呼べる） | `~/.claude/skills/synced/*/` と、`claude-<名前>` のアカウントの `~/.claude-<名前>/skills/synced/*/` の skill のディレクトリ |
+
+- pack の割り当ては、各 skill の `SKILL.md` に書く（`metadata:` の下の `pjp-pack: <pack>`。書き方は
+  `nix/files/claude/skills/README.md`）。割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
+- 入口の無い pack の skill は名前だけにしない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れない
+  マシン・入口がまだ無い版）なら 1 行出すだけ、ほかの pack の入口はあるのにその pack の入口だけ無いなら警告する
+- claude.ai から同期された skill は plugin ではなく、Claude Code が `~/.claude/skills/synced/<bucket>/` に同期する skill。
+  `enabledPlugins` の `"anthropic-skills@synced": false` では切れない（Claude Code 2.1.316 で確かめた）。名前は同期された
+  ディレクトリから読むので、新しいマシンでは Claude Code を一度起こして同期させた後の `setup --update` から効く
+- plugin の skill（superpowers など）には `skillOverrides` が効かない（`/skills` で locked by plugin）ので書かない。
+  mod を兼ねる skill（`.claude-plugin/plugin.json` がある）も同じ
+- 起動中の session には届かない（一覧は session の始めに送られる）。新しい session か `/compact` の後から効く
+
+#### 書いた key の控えと戻し
+
+書いた key と値は `~/.local/state/dotfiles/claude-skill-overrides.applied.json` に控え、流すたびに今の値と比べて決める。
+
+| `settings.json` の今の値 | 書きたい値がある | 書きたい値が無くなった（入口が消えた・pack から外れた・同期された skill が消えた） |
+| --- | --- | --- |
+| 無い | 書く | — |
+| 書きたい値と同じ | 控える（前から手で書いてあった同じ値も控え、あとで戻すことがある） | — |
+| 控えた値と同じ | 書きたい値に書き換える | 消す（既定の見え方に戻る） |
+| それ以外（手で書いた値） | 触らない（stdout に知らせる） | 触らない |
+
+- 見え方を手で変えるなら、key を消すのではなく別の値（`"on"` など）を書く。消すと次の update で書き直す
+- project ごとに変えるなら、その project の `.claude/settings.json`（`/skills` の切り替えは `.claude/settings.local.json`）に
+  書く。user の `settings.json` より強い
+- 起動のときだけ変えるなら `claude --settings '{"skillOverrides":{"pjp-plantuml":"on"}}'`（skill ごとに user の値より勝つ）
+
+#### 確認
+
+```sh
+jq .skillOverrides ~/.claude/settings.json                       # 書いた値
+jq .keys ~/.local/state/dotfiles/claude-skill-overrides.applied.json   # この script が書いた key
+~/dotfiles/setup --steps bootstrap-claude-skill-overrides        # この手順だけ流し直す
+```
+
+経緯と、Claude Code で確かめた振る舞いは dotfiles-private の `docs/superpowers/specs/2026-11-03-skill-listing-packs-design.md`。
 
 ### Notion の宛先を host ごとに選ぶ
 
@@ -3843,6 +3897,7 @@ setup script から `nix/scripts/claude-cloud/bootstrap-claude-cloud.sh` を呼�
 | `~/.claude/skills/` など | dotfiles の `nix/files/claude/` と claude-skills の中身への symlink（手元と同じ単位）。mod を兼ねる skill・`claude-cloud/skip-skills.txt` の skill・（`--dev-tracker` でなければ）`pjp-dev-tracker` は張らない |
 | `~/.claude/CLAUDE.md` | 共通の `CLAUDE.md` の最初の `## ` の行より前を `claude-cloud/CLAUDE.cloud.md` に差し替えたもの（`--dev-tracker` なら「タスク管理」の節も足す） |
 | `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
+| `settings.json` の `skillOverrides` | pack の skill を `name-only`、claude.ai から同期された skill を `user-invocable-only` にする（手元と同じ `nix/scripts/bootstrap-claude-skill-overrides.sh` を `--no-host-option` で流す。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `profile` は `--notion-profile` の値 |
 
 git の設定と `settings.json` の `env` には触らない（cloud の git の proxy と commit の署名を壊すため）。plugin は claude.ai で
@@ -3890,6 +3945,9 @@ ntn は 1 行目の install script で入れる（版はその時の最新）。
 
 - setup script は環境の snapshot を作るときにしか走らない（setup script か Allowed domains を変えたとき・約 7 日ごと）。その
   あとに claude-skills に足した skill は、SessionStart の hook が張る
+- claude.ai から同期された skill は、Claude Code が session を起こすときに同期するので、setup script の時点では名前が読めず
+  `skillOverrides` に書けない。SessionStart の hook が流し直したときに書くが、その session の一覧に間に合うかは確かめていない
+  （間に合わなければ、cloud では同期された skill が説明つきのまま一覧に載る）
 - 環境変数を変えても、動いている session には VM が戻る（起動し直す）まで届かない
 - 1 つの環境で `api.notion.com` に付けられる Network secret は 1 つ（proxy は host で付ける）。personal と work は環境を分ける
 - cloud の GitHub proxy は GraphQL を断る。pjp-dev-tracker の `gh pr view`・`gh pr list`・`gh pr edit` を使う機能は落ちる
@@ -3911,6 +3969,7 @@ Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
 `GIT_CONFIG_*` と `CLAUDE_CODE_SHELL`・`CLAUDE_CODE_PLUGIN_PREFER_HTTPS` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`skillOverrides` の pack の skill と claude.ai から同期された skill の key は、控えと比べて書き・戻す（手で書いた値は残す。[前述](#書いた-key-の控えと戻し)）。
 
 ## mise との役割分担
 
