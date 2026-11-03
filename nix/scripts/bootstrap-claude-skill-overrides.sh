@@ -60,6 +60,9 @@
 #     マシン・入口がまだ無い版) なら 1 行出すだけにし、ほかの pack の入口はあるなら、その pack の分を警告する
 #   - 入口の skill 自身・mod を兼ねる skill (.claude-plugin/plugin.json がある。plugin の skill には skillOverrides が効かない)
 #     に pjp-pack があれば、警告して名前だけにしない。pjp-pack の値が pack の名前として読めないときも同じ
+#   - frontmatter に disable-model-invocation: true がある skill は、pack に入っていても名前だけにしない (入口の目録には
+#     載るが、Claude が自分では呼ばない作りのまま残す。user の設定をその作りと食い違わせない)。前に書いた name-only は
+#     上の「書きたくなくなった key」として戻す
 #   - host option の key と同じ名前の skill は、host option の値だけを書く
 #   - settings.json のほかのキーと、ここで決めない skillOverrides の key はそのまま。同じ内容なら書き直さない
 #
@@ -131,6 +134,8 @@ record_file="${state_dir}/claude-skill-overrides.applied.json"
 # pack の名前 (入口のディレクトリ名 pjp-pack-<pack> の後ろ)・同期された skill とアカウントの名前として受けるもの
 pack_re='^[a-z0-9]+(-[a-z0-9]+)*$'
 plain_re='^[A-Za-z0-9._-]+$'
+# frontmatter の disable-model-invocation の真 (YAML の true の書き方)
+true_re='^(true|True|TRUE)$'
 
 # --quiet でなければ stdout に出す
 note() {
@@ -181,6 +186,25 @@ skill_pack() {
       v = substr($0, RLENGTH + 1)
       if (v !~ /^pjp-pack:/) next
       sub(/^pjp-pack:[ \t]*/, "", v)
+      sub(/[ \t]+#.*$/, "", v)
+      sub(/[ \t]+$/, "", v)
+      if (v ~ /^".*"$/ || v ~ ("^" q ".*" q "$")) v = substr(v, 2, length(v) - 2)
+      print v
+      exit
+    }
+  ' "$1"
+}
+
+# fm_top_value <SKILL.md> <key>: frontmatter の 0 桁目の <key> の 1 行の値を出す (無ければ何も出さない)。値の後ろの
+# 「 #」から先はコメントとして外し、引用符で囲んであれば外す。読み方の決まりは skill_pack と同じ
+fm_top_value() {
+  awk -v key="$2" -v q="'" '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[ \t]*$/) exit; next }
+    /^---[ \t]*$/ { exit }
+    index($0, key ":") == 1 {
+      v = substr($0, length(key) + 2)
+      sub(/^[ \t]+/, "", v)
       sub(/[ \t]+#.*$/, "", v)
       sub(/[ \t]+$/, "", v)
       if (v ~ /^".*"$/ || v ~ ("^" q ".*" q "$")) v = substr(v, 2, length(v) - 2)
@@ -259,6 +283,10 @@ for f in "${skills_dir}"/*/SKILL.md; do
   if [[ -f ${skill_dir}/.claude-plugin/plugin.json ]]; then
     warn "mod を兼ねる skill ${skill} に metadata の pjp-pack があります (${pack})。" \
       "plugin として読まれ skillOverrides が効かないので、名前だけにはしません。"
+    continue
+  fi
+  # Claude が自分では呼ばない作りの skill (入口の目録には載る) は、そのまま残す。知らせない (決めた形なので)
+  if [[ $(fm_top_value "${f}" disable-model-invocation) =~ ${true_re} ]]; then
     continue
   fi
   pack_rows+="${skill}"$'\t'"${pack}"$'\n'

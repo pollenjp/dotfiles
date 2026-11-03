@@ -24,6 +24,8 @@
 #   - claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/ と、claude-accounts.json のアカウントの
 #     ~/.claude-<アカウント>/skills/synced/*/<名前>/) を anthropic-skills:<名前> の user-invocable-only にする。重なりは 1 つ
 #   - host option の key と同じ名前の pack の skill は、host option の値だけを書き、控えない
+#   - frontmatter に disable-model-invocation: true (引用符・後ろのコメントも) がある pack の skill は名前だけにせず、前に
+#     書いて控えた name-only は戻す。false なら名前だけにする
 #   - 書きたくなくなった key (入口が消えた・同期された skill が消えた) は、今の値が控えと同じなら消し、手で変えていれば
 #     残す。どちらも控えから外す
 #   - 書く前からあった別の値と、書いた後に手で変えた値には触らず、控えず、stdout に知らせる。書く前から同じ値があれば控え、
@@ -317,6 +319,48 @@ if [[ $(rc "${h}") == 0 ]] && same "$(overrides "${h}")" '{"pjp-dev-tracker":"on
   ok "host option の key と同じ名前の skill は、host option の値だけを書く"
 else
   ng "host option の key が勝つ" "$(detail "${h}")"
+fi
+
+# 7b. disable-model-invocation: true の pack の skill は名前だけにせず、前に書いて控えた name-only は戻す
+h=$(new_home t7b)
+host_file "${h}" '{}'
+settings_file "${h}" '{"skillOverrides":{"pjp-manual":"name-only"}}'
+printf '{"version":1,"keys":{"pjp-manual":"name-only"}}\n' \
+  >"${h}/.local/state/dotfiles/claude-skill-overrides.applied.json"
+entry "${h}" browser
+raw_skill "${h}" pjp-manual <<'EOF'
+---
+name: pjp-manual
+description: x
+disable-model-invocation: true
+metadata:
+  pjp-pack: browser
+---
+EOF
+raw_skill "${h}" pjp-manual-quoted <<'EOF'
+---
+name: pjp-manual-quoted
+description: x
+disable-model-invocation: "true"  # 手で呼ぶだけ
+metadata:
+  pjp-pack: browser
+---
+EOF
+raw_skill "${h}" pjp-auto <<'EOF'
+---
+name: pjp-auto
+description: x
+disable-model-invocation: false
+metadata:
+  pjp-pack: browser
+---
+EOF
+run "${h}"
+if [[ $(rc "${h}") == 0 && -z $(err "${h}") ]] && same "$(overrides "${h}")" '{"pjp-auto":"name-only"}' \
+  && same "$(recorded "${h}")" '{"pjp-auto":"name-only"}'; then
+  ok "disable-model-invocation: true の pack の skill は名前だけにせず、前に書いた name-only を戻す (false なら書く)"
+else
+  ng "disable-model-invocation" "$(detail "${h}")"
 fi
 
 # 8. 戻す: 入口が消えた pack の skill・消えた同期された skill は、控えと同じなら消し、手で変えていれば残す

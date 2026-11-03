@@ -3388,6 +3388,8 @@ skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrid
   `nix/files/claude/skills/README.md`）。割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
 - 入口の無い pack の skill は名前だけにしない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れない
   マシン・入口がまだ無い版）なら 1 行出すだけ、ほかの pack の入口はあるのにその pack の入口だけ無いなら警告する
+- frontmatter に `disable-model-invocation: true` がある skill も名前だけにしない（入口の目録には載るが、Claude が自分では
+  呼ばない作りのまま残す）。前に書いた `name-only` は戻す
 - claude.ai から同期された skill は plugin ではなく、Claude Code が `~/.claude/skills/synced/<bucket>/` に同期する skill。
   `enabledPlugins` の `"anthropic-skills@synced": false` では切れない（Claude Code 2.1.316 で確かめた）。名前は同期された
   ディレクトリから読むので、新しいマシンでは Claude Code を一度起こして同期させた後の `setup --update` から効く
