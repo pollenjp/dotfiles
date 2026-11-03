@@ -35,6 +35,10 @@
 #       1 行目のわけが重なれば全部言い、--- の後ろが文字なら空白のせいにしない)・skills の直下のファイル・SKILL.md の無い
 #       ディレクトリ・command のサブディレクトリの README.md (配置されて command になると言う)。frontmatter の無い agent には、
 #       説明の文書なら README.md という名前にするよう添える (skill・command には添えない)
+#   - skill の metadata: pjp-pack が pack の名前 (diagram・machine など) なら通り、pjp-pack の無い metadata・空の
+#     metadata: も通る。metadata が map でない・pjp-pack が文字列でない・pack の名前でない・flow の形
+#     (metadata: {pjp-pack: …})・block scalar の値・入口の skill (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata
+#     は見ない。YAML として読めない skill には、metadata の理由を重ねない
 #   - agents・commands の symlink (ファイルもディレクトリも) は辿って、リンク先の中身を見る (出すのはリンクのパス)
 #   - description が 1024 文字を超えると、注意を出すが落とさない。数えるのは文字で、バイトではない (日本語の 1024 文字は
 #     出さない)
@@ -575,6 +579,118 @@ if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 10 ]] \
   ok "name の食い違い (ディレクトリ名・ファイル名。agent はサブディレクトリでも)・ケバブケースでない name・pjp- で始まらない名前 (command はパスの先頭)・別のサブディレクトリと同じファイル名の agent (2 つ目) を出して exit 1"
 else
   ng "名前" "rc=$(rc "${c}") err=$(err "${c}")"
+fi
+
+# 7b. skill の metadata (pack の割り当て)
+n=$(new_nix t7b)
+cl=${n}/files/claude
+c=$(dirname "${n}")
+put "${cl}/skills/pjp-pack-ok/SKILL.md" <<'EOF'
+---
+name: pjp-pack-ok
+description: 入口ではない名前 (pjp-pack-ok は pack の入口の形だが、pjp-pack を持たないので通る)
+metadata:
+  owner: pjp
+---
+EOF
+put "${cl}/skills/pjp-diagram/SKILL.md" <<'EOF'
+---
+name: pjp-diagram
+description: 図の pack
+metadata:
+  pjp-pack: diagram
+---
+EOF
+put "${cl}/skills/pjp-machine/SKILL.md" <<'EOF'
+---
+name: pjp-machine
+description: マシンの pack (引用符と後ろのコメントは通る)
+metadata:
+  # pack の割り当て
+  pjp-pack: "machine"  # マシン
+---
+EOF
+put "${cl}/skills/pjp-empty/SKILL.md" <<'EOF'
+---
+name: pjp-empty
+description: 空の metadata は無いのと同じ
+metadata:
+---
+EOF
+put "${cl}/agents/pjp-agent.md" <<'EOF'
+---
+name: pjp-agent
+description: agent の metadata は見ない
+metadata: [x]
+---
+EOF
+put "${cl}/skills/pjp-seq/SKILL.md" <<'EOF'
+---
+name: pjp-seq
+description: metadata が列
+metadata: [diagram]
+---
+EOF
+put "${cl}/skills/pjp-num/SKILL.md" <<'EOF'
+---
+name: pjp-num
+description: pjp-pack が文字列でない
+metadata:
+  pjp-pack: [diagram]
+---
+EOF
+put "${cl}/skills/pjp-unknown/SKILL.md" <<'EOF'
+---
+name: pjp-unknown
+description: pack の名前でない
+metadata:
+  pjp-pack: diagrams
+---
+EOF
+put "${cl}/skills/pjp-flow/SKILL.md" <<'EOF'
+---
+name: pjp-flow
+description: flow の形
+metadata: {pjp-pack: diagram}
+---
+EOF
+put "${cl}/skills/pjp-block/SKILL.md" <<'EOF'
+---
+name: pjp-block
+description: block scalar の値
+metadata:
+  pjp-pack: |
+    diagram
+---
+EOF
+put "${cl}/skills/pjp-pack-diagram/SKILL.md" <<'EOF'
+---
+name: pjp-pack-diagram
+description: 入口の skill
+metadata:
+  pjp-pack: diagram
+---
+EOF
+put "${cl}/skills/pjp-broken/SKILL.md" <<'EOF'
+---
+name: pjp-broken
+description: 読めない: 値の途中の「: 」
+metadata:
+  pjp-pack: diagrams
+---
+EOF
+run "${n}"
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 7 ]] \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-seq/SKILL.md: metadata は key: value の map にしてください (!!seq)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser のどれか)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-flow/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-pack-diagram/SKILL.md: 入口の skill は常駐なので、metadata の pjp-pack を書かないでください" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-broken/SKILL.md: frontmatter を YAML として読めません"; then
+  ok "skill の metadata の pjp-pack は pack の名前を通し、map でない・文字列でない・pack の名前でない・bootstrap の読めない形・入口の skill の pjp-pack を出して exit 1 (agent は見ない)"
+else
+  ng "skill の metadata" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
 
 # 8. frontmatter が無い・閉じていない・skills の直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの

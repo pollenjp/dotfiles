@@ -6,6 +6,8 @@ description: dotfiles の依存 (`nix/flake.lock`) を更新して home-manager 
   切り分けと、pin を動かすか whitelist へ受け入れるかの 2 択の扱い**を含む。findings の
   リスク受容と遅延を外す判断は必ずユーザーに持っていく。**他の** repo に flake を用意する /
   lock を更新する話は pjp-nix-flake skill の側。
+metadata:
+  pjp-pack: machine
 ---
 
 # pjp-dotfiles-update

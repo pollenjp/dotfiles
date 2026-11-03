@@ -71,6 +71,32 @@ frontmatter を空として扱い、`description` の代わりに本文の最初
 CI の `lint` ジョブでも流れ、壊れた frontmatter・`name` とディレクトリ名の食い違い・`pjp-` で始まらない名前などで
 落ちる（何を見るかは script の先頭と `nix/README.md` の「frontmatter を確かめる」）。
 
+## pack に入れる (`metadata` の `pjp-pack`)
+
+話題に入ったときだけ使う skill は、話題ごとの組（pack）に入れる。pack の skill は Claude の skill の一覧で名前だけになり
+（`setup --update` の `bootstrap-claude-skill-overrides` が `~/.claude/settings.json` の `skillOverrides` に `"name-only"` を
+書く）、その pack の入口の skill（`pjp-pack-<pack>`。`claude-skills` にある目録）を読んだ Claude が、名前を指して呼ぶ。
+一覧の枠（context の 1%）を、どの会話でも要る skill に残すため（`nix/README.md` の「skill の一覧を枠に収める」）。
+
+```markdown
+---
+name: pjp-plantuml
+description: >-
+  PlantUML で図を描く・直す・書き出すときに使う。…
+metadata:
+  pjp-pack: diagram
+---
+```
+
+- pack は `diagram`（図）・`video`（動画）・`notion`（Notion）・`machine`（マシン）・`repo`（repo の手入れ）・
+  `browser`（ブラウザ）。入口は `claude-skills` の `skills/pjp-pack-<pack>/`
+- 書く形は上の 1 通り（`metadata:` の下に字下げした `pjp-pack: <pack>` の 1 行）。bootstrap は yq の無いマシンでも動くよう、
+  この形だけを読む。`check-claude-frontmatter.sh` が、ほかの形と pack の名前でない値を落とす
+- どの会話でも要る skill と、入口を通らずに効く必要がある skill（依存を入れる前に読む `pjp-dep-release-age`、PR を作る前に
+  読む `pjp-gh-pr-create` など）には書かない
+- pack に skill を足したら、入口の目録（`claude-skills` の `pjp-pack-<pack>`）にも載せる
+- pack を足すなら、`claude-skills` の入口と `scripts/lint.sh`、この repo の `check-claude-frontmatter.sh` の `packs` を一緒に直す
+
 ## script が外部ツールを要求するとき
 
 `scripts/` に置く script が手元に無いツールを要求する場合、用意する手段は

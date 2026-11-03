@@ -5,6 +5,8 @@ description: PlantUML で図を描く・直す・書き出すときに使う。`
   頼まれたとき、`plantuml/` ディレクトリを用意するとき、図を SVG / PNG へ出力するときに読む。
   Nix flake での実行環境（PlantUML 本体・java・graphviz・日本語フォント）、ファイル構成と
   出力先、白背景などの規約を含む
+metadata:
+  pjp-pack: diagram
 ---
 
 # pjp-plantuml
