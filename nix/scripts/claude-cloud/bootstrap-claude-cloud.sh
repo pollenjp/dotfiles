@@ -21,6 +21,12 @@
 #      冒頭) を、この dir の CLAUDE.cloud.md に差し替える。--dev-tracker なら「タスク管理」の節を末尾に足す
 #   3. ~/.local/state/dotfiles/claude-notion.json を書く (Notion の宛先の resolver が読む。profile は --notion-profile)
 #   4. cloud で意味のある hook を ~/.claude/hooks/ へ張り、~/.claude/settings.json に登録する (下の「hook」)
+#   5. ~/.claude/settings.json の skillOverrides に、pack の skill の name-only と、claude.ai から同期された skill の
+#      user-invocable-only を書く。手元の setup と同じ nix/scripts/bootstrap-claude-skill-overrides.sh を
+#      --no-host-option で流す (host option を置く home-manager は cloud に無い。pjp-dev-tracker は張るかどうかで決める)
+#
+# 同期された skill (anthropic-skills:<名前>) は、Claude Code が session を起こすときに ~/.claude/skills/synced/ へ同期する。
+# setup script の時点ではまだ無いので、名前を読めるのは SessionStart で流し直したときから (下の「hook」)。
 #
 # git の設定と settings.json の env (GIT_CONFIG_*・CLAUDE_CODE_SHELL・CLAUDE_CODE_PLUGIN_PREFER_HTTPS) には触らない。
 # cloud の git は GitHub proxy への書き換えと commit の署名を GIT_CONFIG_* と ~/.gitconfig で設定していて、上書きすると
@@ -63,8 +69,11 @@
 #
 # 次のときは何も書かずに exit 1。警告だけなら exit 0 (setup script を止めない)。
 #
-#   - jq が無い・読むファイル (共通の CLAUDE.md など) が無い・共通の CLAUDE.md に「## 」の行が無い・知らない引数
+#   - jq が無い・読むファイル (共通の CLAUDE.md・bootstrap-claude-skill-overrides.sh など) が無い・共通の CLAUDE.md に
+#     「## 」の行が無い・知らない引数
 #   - ~/.claude/CLAUDE.md が /nix/store を指す symlink (home-manager のマシン。手元で誤って流したとき)
+#
+# skillOverrides を書けなかったとき (settings.json が壊れている、など) は、警告して exit 0 (ほかは済んでいる)。
 
 set -eu -o pipefail
 
@@ -156,6 +165,7 @@ else
 fi
 files="${dotfiles_dir}/nix/files/claude"
 cloud="${dotfiles_dir}/nix/scripts/claude-cloud"
+overrides="${dotfiles_dir}/nix/scripts/bootstrap-claude-skill-overrides.sh"
 
 claude_skills_want=${claude_skills_arg:-${CLAUDE_SKILLS_DIR:-$(dirname -- "${dotfiles_dir}")/claude-skills}}
 claude_skills_dir=""
@@ -168,7 +178,7 @@ fi
 command -v jq &>/dev/null || die "jq が見つかりません"
 # cloud で意味のある hook (上の「hook」)
 hooks=(xref-guard run-through-nudge video-offer-nudge docs-guard)
-inputs=("${files}/CLAUDE.md" "${files}/CLAUDE.dev-tracker.md" "${cloud}/CLAUDE.cloud.md" "${cloud}/skip-skills.txt")
+inputs=("${files}/CLAUDE.md" "${files}/CLAUDE.dev-tracker.md" "${cloud}/CLAUDE.cloud.md" "${cloud}/skip-skills.txt" "${overrides}")
 for hook in "${hooks[@]}"; do
   inputs+=("${files}/hooks/${hook}.sh")
 done
@@ -395,4 +405,16 @@ elif jq -e --argjson new "${new_settings}" '. == $new' <<<"${current}" &>/dev/nu
   : # 登録済み
 elif printf '%s\n' "${new_settings}" | write_if_changed "${settings}"; then
   note "登録しました: ${settings} の hooks"
+fi
+
+# ---- skillOverrides ----
+
+# pack の skill を name-only に、claude.ai から同期された skill を user-invocable-only にする (上の「何をするか」の 5)。
+# 書けなくても (settings.json が壊れている、など) ほかは済んでいるので、警告だけにして setup script を止めない
+overrides_args=(--no-host-option)
+if [[ ${quiet} == 1 ]]; then
+  overrides_args+=(--quiet)
+fi
+if ! bash "${overrides}" "${overrides_args[@]}"; then
+  warn "${settings} の skillOverrides を書けませんでした (上のエラー)" "直してから流し直してください。"
 fi

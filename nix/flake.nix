@@ -242,11 +242,13 @@
                 touch $out
               '';
           # script と一緒に読む cloud の冒頭・skip の一覧 (scripts/claude-cloud/ を丸ごと) と、本物の共通の CLAUDE.md・
-          # hook・skill (files/claude/) を渡す。テストが使い捨ての dotfiles の checkout に写して流す
+          # hook・skill (files/claude/) と、cloud でも流す skillOverrides の script を渡す。テストが使い捨ての dotfiles の
+          # checkout に写して流す
           bootstrap-claude-cloud-test =
             pkgs.runCommand "bootstrap-claude-cloud-test" { nativeBuildInputs = [ pkgs.jq ]; }
               ''
-                bash ${./tests/bootstrap-claude-cloud.test.sh} ${./scripts/claude-cloud} ${./files/claude}
+                bash ${./tests/bootstrap-claude-cloud.test.sh} ${./scripts/claude-cloud} ${./files/claude} \
+                  ${./scripts/bootstrap-claude-skill-overrides.sh}
                 touch $out
               '';
           # check-test-grep-q.sh は shfmt の構文木を jq で読むので、shfmt を足して流す
@@ -309,6 +311,8 @@
           bootstrap-dotfiles-private-test = scriptTest "bootstrap-dotfiles-private" ./scripts/bootstrap-dotfiles-private.sh;
           bootstrap-cc-pages-test = scriptTest "bootstrap-cc-pages" ./scripts/bootstrap-cc-pages.sh;
           bootstrap-claude-skills-test = scriptTest "bootstrap-claude-skills" ./scripts/bootstrap-claude-skills.sh;
+          # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
+          bootstrap-claude-skill-overrides-test = scriptTest "bootstrap-claude-skill-overrides" ./scripts;
           bootstrap-claude-plugins-test = scriptTest "bootstrap-claude-plugins" ./scripts/bootstrap-claude-plugins.sh;
           bootstrap-mise-test = scriptTest "bootstrap-mise" ./scripts/bootstrap-mise.sh;
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
