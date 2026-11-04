@@ -773,7 +773,11 @@ GUID は、distro を登録したときの ID から作られる)。
 
 | キー | 値 | 何のため |
 | --- | --- | --- |
-| `profiles.defaults.bellSound` | `C:\Windows\Media\Windows Information Bar.wav` | BEL で鳴る音を、既定のエラー音 (SystemHand。この PC では `Windows Foreground.wav` で 2.1 秒) から 0.1 秒の短い音に替える。`bellStyle` は既定の `audible` のまま |
+| `profiles.defaults.bellSound` | `["C:\\Windows\\Media\\Windows Information Bar.wav"]` (1 要素の配列) | BEL で鳴る音を、既定のエラー音 (SystemHand。この PC では `Windows Foreground.wav` で 2.1 秒) から 0.1 秒の短い音に替える。`bellStyle` は既定の `audible` のまま |
+
+`bellSound` を配列で持つのは、Windows Terminal が保存するときの形に揃えるため。Windows Terminal は読むときは文字列も
+配列も受けるが、`settings.json` を保存するときは、音が 1 つでも配列で書く。script は値を形も含めて比べる (文字列と
+1 要素の配列は別の値) ので、文字列で持つと、音が同じでも Windows Terminal の次の保存の後で衝突して止まる。
 
 | 打つもの | すること |
 | --- | --- |
@@ -786,6 +790,7 @@ GUID は、distro を登録したときの ID から作られる)。
 - 書くのは `managed.json` に書いたキーだけで、ほかのキーには触らない。`profiles.defaults` に書けば全 profile に効く
 - `managed.json` は `settings.json` と同じ形で書く。object を辿った先の、object でない値 1 つが、持つキー 1 つ。
   配列 (`actions`・`keybindings` など) は中を見ず、丸ごと 1 つの値として持つ
+- 値は Windows Terminal が保存するときの形で書く (`bellSound` の配列など)。形が違うと、次の保存の後で衝突する
 - `profiles.list` (profile の一覧) は持てない (`--check` が落ちる)。PC ごとに違うため
 - 形は `jq --indent 4` の出力に揃える。`--import` が書き直したときの差分を、値の変更だけにするため (`--check` が見る)
 - Windows Terminal は `settings.json` を見張っていて、書いたらその場で読み直す
@@ -826,13 +831,17 @@ commit しない。この repo は public で、Windows に付いてくる音は
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-terminal.sh --force
 ```
 
+中身が同じで形だけが違う (`"…"` と `["…"]` など) ときは、Windows Terminal が保存するときの形の方を残す。Windows 側が
+その形なら 1、`managed.json` がその形なら 2 で解く。逆にすると、次の保存でまた衝突する。
+
 `settings.json` の `profiles` が配列の古い形のときは、`profiles.defaults` へ書けないので ⚠ で知らせて止まる。
 設定画面で何か 1 つ変えて保存すると、Windows Terminal が object の形 (`defaults` と `list`) で書き直す。
 
 ### キーを足す
 
-1. Windows Terminal の設定画面で値を決める (その場で効く)
-2. `settings.json` の同じ場所の値を、同じ形で `managed.json` に写す
+1. Windows Terminal の設定画面で値を決めて保存する (その場で効く)
+2. `settings.json` の同じ場所の値を、同じ形で `managed.json` に写す。`settings.json` を手で書いた値は、Windows Terminal が
+   次に保存するまで手で書いた形のままなので、設定画面で保存した後の形を写す
 3. `nix/scripts/bootstrap-windows-terminal.sh --check` で検証し、`--dry-run` で「揃っています」と出るのを見る
    (設定画面で入れた値と同じなので、記録だけが作られる)
 4. commit して `~/dotfiles/setup --update`
