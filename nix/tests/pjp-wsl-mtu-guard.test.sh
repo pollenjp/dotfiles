@@ -12,6 +12,7 @@
 #
 #   - 起動したときに interface の MTU が上限を超えていれば上限まで下げ、「eth0 mtu 1392 -> 1350」の 1 行を出す。
 #     ip monitor link が終わったら (エラーのときだけ終わる)、それを stderr に出して 1 で終わる (systemd が起こし直す)
+#   - ip monitor link を先に起こしてから 1 回目を下げる (監視を始める前の変化を取りこぼさない)
 #   - 上限ちょうど・上限より小さい MTU には触らない (上げもしない)
 #   - ip monitor link のイベントのたびに見直し、上限を超えていれば下げる。1 回の変化に ip monitor は 2 行を出すが、
 #     下げるのは 1 回だけ
@@ -19,15 +20,18 @@
 #   - ip link set が失敗しても止まらず、次のイベントで下げ直す
 #   - イベントが来なくても、見直す秒数ごとに見直して下げる (監視を始める前の変化を取りこぼしても直る)。見直す秒数が
 #     過ぎる前に ip monitor が終われば、イベントの無い変化は見ない
-#   - 引数が足りない・上限が数でない・見直す秒数が正の数でないときは、ip を呼ばずに使い方を stderr に出して 2 で終わる。
-#     --help は使い方を stdout に出して 0
+#   - 引数が足りない・多い・上限が 1280〜1500 の数でない (0 で始まる値は 8 進と読まれるので受けない)・見直す秒数が
+#     1 以上の整数でないときは、ip を呼ばずに使い方を stderr に出して 2 で終わる。--help は使い方を stdout に出して 0
 #
 # ## 作り
 #
 # 偽の ip は状態のディレクトリ (FAKE_IP_DIR) で動く。<dir>/mtu が今の MTU (無ければ interface が無い)。
-#   ip -o link show dev eth0       本物と同じ形の 1 行を出す (<dir>/shown に印を付ける)。interface が無ければ 1
+#   ip -o link show dev eth0       本物と同じ形の 1 行を出し、MTU を読んだ後に <dir>/shown に印を付ける。interface が
+#                                  無ければ 1。ip monitor link が起きる (<dir>/monitoring の印が付く) まで 5 秒待ち、
+#                                  起きないまま読んだら <dir>/calls に show-before-monitor と書く
 #   ip link set dev eth0 mtu <値>  <dir>/calls に書き、FAKE_IP_SET_FAIL があれば 2、無ければ <dir>/mtu を値にする
-#   ip monitor link                <dir>/calls に書き、<dir>/events を 1 行ずつ流してから 0 で終わる:
+#   ip monitor link                <dir>/calls に書いて <dir>/monitoring に印を付け、<dir>/events を 1 行ずつ流してから
+#                                  0 で終わる:
 #                                    mtu <値>     MTU を変え、本物と同じ 2 行のイベントを出す
 #                                    quiet <値>   イベントを出さずに MTU を変える
 #                                    sleep <秒>   待つ
@@ -68,12 +72,20 @@ link_line() {
 }
 case "$*" in
   "-o link show dev eth0")
-    : >"${d}/shown"
+    for _ in $(seq 100); do
+      [[ ! -e ${d}/monitoring ]] || break
+      sleep 0.05
+    done
+    [[ -e ${d}/monitoring ]] || echo 'show-before-monitor' >>"${d}/calls"
     if [[ ! -r ${d}/mtu ]]; then
+      : >"${d}/shown"
       echo 'Device "eth0" does not exist.' >&2
       exit 1
     fi
-    link_line "$(<"${d}/mtu")"
+    # 読んでから印を付ける (wait-shown の後に変えた MTU は、この呼び出しには見えない)
+    m=$(<"${d}/mtu")
+    : >"${d}/shown"
+    link_line "${m}"
     ;;
   "link set dev eth0 mtu "*)
     printf '%s\n' "$*" >>"${d}/calls"
@@ -85,6 +97,7 @@ case "$*" in
     ;;
   "monitor link")
     printf '%s\n' "$*" >>"${d}/calls"
+    : >"${d}/monitoring"
     [[ -r ${d}/events ]] || exit 0
     while read -r op v; do
       case ${op} in
@@ -155,6 +168,11 @@ if [[ $(out "${c}") == 'eth0 mtu 1392 -> 1350' && $(sets "${c}") == 1 && $(cat "
 else
   ng "起動時に下げる" "$(show "${c}")"
 fi
+if grep -qx 'monitor link' "${c}/calls" && ! grep -q 'show-before-monitor' "${c}/calls"; then
+  ok "ip monitor link を先に起こしてから 1 回目を下げる"
+else
+  ng "ip monitor を先に起こす" "$(show "${c}")"
+fi
 
 for m in 1350 1280; do
   c=$(new_case keep-${m} "${m}")
@@ -191,8 +209,8 @@ else
   ng "下げられなくても続ける" "$(show "${c}")"
 fi
 
-c=$(new_case recheck 1350 wait-shown 'quiet 1392' 'sleep 1')
-run "${c}" eth0 1350 0.2
+c=$(new_case recheck 1350 wait-shown 'quiet 1392' 'sleep 2.5')
+run "${c}" eth0 1350 1
 if [[ $(out "${c}") == 'eth0 mtu 1392 -> 1350' && $(cat "${c}/mtu") == 1350 ]]; then
   ok "イベントが来なくても、見直す秒数ごとに見直して下げる"
 else
@@ -208,7 +226,7 @@ else
 fi
 
 i=0
-for args in '' 'eth0' 'eth0 13x0' 'eth0 1350 x' 'eth0 1350 0' 'eth0 1350 30 extra'; do
+for args in '' 'eth0' 'eth0 13x0' 'eth0 01350' 'eth0 1279' 'eth0 1501' 'eth0 1350 x' 'eth0 1350 0' 'eth0 1350 0.5' 'eth0 1350 30 extra'; do
   i=$((i + 1))
   c=$(new_case usage-${i} 1392)
   # shellcheck disable=SC2086 # 空白で引数に割る
