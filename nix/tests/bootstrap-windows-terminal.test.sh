@@ -30,6 +30,9 @@
 #   - 退避は新しい方から 10 回分だけ残す。壊れた記録では止まる。引数の組み合わせの誤りは exit 2
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、exit 0 で続ける警告を続きの行ごと
 #     setup の最後のまとめ用のファイルにも残す
+#   - Windows Terminal が保存で文字列を 1 要素の配列へ書き直すと、文字列の managed.json とは衝突する (形も比べる)。
+#     managed.json を配列にすると、settings.json が配列の PC は書かずに記録だけ配列に直し、settings.json が文字列の
+#     ままの PC は配列で書き換える。どちらも、その後に Windows Terminal が保存しても衝突しない
 #
 # ## 偽の checkout
 #
@@ -122,6 +125,11 @@ managed_bell() {
   jq -n --indent 4 --arg v "$1" '{profiles: {defaults: {bellSound: $v}}}'
 }
 
+# managed.json (jq --indent 4 の形)。$1: 音のパス。bellSound を 1 要素の配列で持つ (Windows Terminal が保存する形)
+managed_bell_array() {
+  jq -n --indent 4 --arg v "$1" '{profiles: {defaults: {bellSound: [$v]}}}'
+}
+
 # 1 ケースぶんを作る。$1: 名前。managed.json は bellSound=${sound}、settings.json は base_settings
 new_case() {
   local c="${work}/$1"
@@ -155,6 +163,11 @@ bell() { val "$1" '.profiles.defaults.bellSound'; }
 # settings.json を写しておき、後で同じバイト列かを比べる
 snap() { cp "$(settings "$1")" "$1/before"; }
 untouched() { cmp -s "$1/before" "$(settings "$1")"; }
+# Windows Terminal の保存のまね: 文字列の bellSound を 1 要素の配列へ書き直す (配列はそのまま)。$1: ケース
+wt_save() {
+  jq --indent 4 '.profiles.defaults.bellSound |= (if type == "string" then [.] else . end)' "$(settings "$1")" >"$1/tmp" \
+    && mv "$1/tmp" "$(settings "$1")"
+}
 
 # $1: ケース、残り: script の引数。環境変数は呼び出し側で付ける
 run() {
@@ -541,6 +554,64 @@ if [[ $(rc "${c}") == 0 && $(head -n 1 "${c}/warnings" 2>/dev/null) == "Windows 
   ok "setup から走るときは、警告を続きの行ごとまとめ用のファイルにも残す"
 else
   ng "まとめ用の警告" "rc=$(rc "${c}") warnings=$(cat "${c}/warnings" 2>/dev/null)"
+fi
+
+# 27. Windows Terminal が文字列を配列へ書き直した PC (記録は文字列、settings.json は配列)
+want_array=$(jq -cn --arg v "${sound}" '[$v]')
+c=$(new_case t27)
+run "${c}"
+wt_save "${c}"
+snap "${c}"
+run "${c}"
+if [[ $(rc "${c}") == 1 ]] && untouched "${c}" \
+  && grep -qF '!! 衝突: profiles.defaults.bellSound は Windows 側で変わっています' "${c}/err" \
+  && grep -qF "Windows 側:   ${want_array}" "${c}/err" \
+  && grep -qF "managed.json: ${want}" "${c}/err"; then
+  ok "Windows Terminal が書き直した 1 要素の配列は、文字列の managed.json と衝突する (形も比べる)"
+else
+  ng "配列と文字列の managed.json" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+# managed.json を配列にすると same: settings.json を書かず (退避も増やさず)、記録だけ配列に直す
+managed_bell_array "${sound}" >"$(managed "${c}")"
+backups_before=$(backups "${c}")
+run "${c}"
+recorded=$(jq -c '.keys["[\"profiles\",\"defaults\",\"bellSound\"]"]' "$(record "${c}")" 2>/dev/null)
+if [[ $(rc "${c}") == 0 && ${recorded} == "${want_array}" && $(backups "${c}") == "${backups_before}" ]] \
+  && has "${c}" '揃っています (持つキー 1 件)' && untouched "${c}"; then
+  ok "managed.json を配列にすると、settings.json が配列の PC は書かずに記録だけ配列に直す"
+else
+  ng "記録は文字列、settings.json は配列" "rc=$(rc "${c}") recorded=${recorded} backups=$(backups "${c}") $(outerr "${c}")"
+fi
+wt_save "${c}"
+snap "${c}"
+run "${c}"
+if [[ $(rc "${c}") == 0 ]] && has "${c}" '揃っています (持つキー 1 件)' && untouched "${c}"; then
+  ok "記録を配列に直した後は、Windows Terminal が保存しても衝突しない"
+else
+  ng "記録を配列に直した後の保存" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# 28. script が文字列で書いたままの PC (記録も settings.json も文字列)
+c=$(new_case t28)
+run "${c}"
+managed_bell_array "${sound}" >"$(managed "${c}")"
+backups_before=$(backups "${c}")
+run "${c}"
+recorded=$(jq -c '.keys["[\"profiles\",\"defaults\",\"bellSound\"]"]' "$(record "${c}")" 2>/dev/null)
+if [[ $(rc "${c}") == 0 && $(bell "${c}") == "${want_array}" && ${recorded} == "${want_array}" ]] \
+  && [[ $(backups "${c}") == $((backups_before + 1)) ]] \
+  && has "${c}" 'profiles.defaults.bellSound: 書き換える (managed.json が更新された)'; then
+  ok "managed.json を配列にすると、settings.json が文字列のままの PC は配列で書き換える"
+else
+  ng "記録も settings.json も文字列" "rc=$(rc "${c}") bell=$(bell "${c}") recorded=${recorded} backups=$(backups "${c}") $(outerr "${c}")"
+fi
+wt_save "${c}"
+snap "${c}"
+run "${c}"
+if [[ $(rc "${c}") == 0 ]] && has "${c}" '揃っています (持つキー 1 件)' && untouched "${c}"; then
+  ok "配列で書き換えた後は、Windows Terminal が保存しても衝突しない"
+else
+  ng "配列で書き換えた後の保存" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
