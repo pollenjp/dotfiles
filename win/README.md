@@ -516,10 +516,11 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   CRLF で、どちらも末尾に改行が無い。エディタで同じ内容を保存し直してもバイト列が変わらず、衝突に
   ならない。`.gitattributes` (改行を変えない) と `.editorconfig` (末尾に改行を足さない・CRLF) で守っている
 - 配ったあと、続く `nix/scripts/bootstrap-windows-powertoys.sh` (order 91) が、PowerToys が入っていなければ先に入れ
-  ([PowerToys を入れる](#powertoys-を入れる-winget))、名前付きイベント
+  ([PowerToys を入れる](#powertoys-を入れる-winget))、Keyboard Manager と自動起動がオフならオンにして
+  ([Keyboard Manager と自動起動をオンにする](#keyboard-manager-と自動起動をオンにする))、名前付きイベント
   `PowerToys_KeyboardManager_Event_Settings` を `powershell.exe` から送って読み直させる (エンジンは
   ファイルを見張っていない)。`default.json` の sha256 が前回読み直させたときと同じなら何もしない。
-  PowerToys が動いていなければ、起動したときに読む
+  Keyboard Manager がオンで PowerToys が動いていなければ、起動したときに読む
 - エンジンが読むのは、同じディレクトリの `settings.json` が指す有効なプロファイル (`activeConfiguration`) の JSON。
   `settings.json` が無い (PowerToys の設定画面をまだ開いていない) ときと、プロファイルが `default` でないときは、
   送っても起動し直しても `default.json` は読まれない。91 は送る前にこれを確かめ、読まれないときは送らず記録もせずに
@@ -540,6 +541,40 @@ IME のキー設定の F13 ([Google 日本語入力](#google-日本語入力)) �
   `nix/scripts/bootstrap-windows-files.sh --force` で上書きしてよい (取り込むより、repo もほかのマシンも
   変えずに済む)
 
+### Keyboard Manager と自動起動をオンにする
+
+Keyboard Manager は PowerToys の既定でオフで、オフだとエンジンが起動しないので、割り当てを配っても効かない。自動起動も、
+入れたばかりのマシンではオフで、サインインしても PowerToys が動かない
+([ADR 041](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/041_win_powertoys_enable_km_20261105T092803JST/README.md))。91 は全体の設定
+`%LOCALAPPDATA%\Microsoft\PowerToys\settings.json` の `enabled["Keyboard Manager"]` と `startup` を毎回見る。
+
+- 両方 `true` なら何もしない (止めない・書かない)
+- どちらかが `true` でなければ、PowerToys を止める → 両方を `true` にする → 起動する → 確かめる。PowerToys の本体は、
+  このファイルを起動したときに読み、動いている間に書いても効かないため。PowerToys は数秒止まり、設定画面を開いていれば閉じる
+- 手で Keyboard Manager か自動起動をオフにしていても、次の `setup --update` でオンに戻す。動いていなくても起動する
+- ほかのモジュールとほかの項目の値は変えない。ファイルが無ければ、2 つだけのファイルを作って起動する (PowerToys は無い項目を
+  既定値で読み、設定画面が起動したときに全部書く)
+- 止めるのはトレイのウィンドウ (`PToyTrayIconWindow`) への `WM_CLOSE` で、終わらなければ強制で止める。見るのは今のセッションの
+  プロセスだけ。起動は `Start-Process` で、setup が終わっても残る。Keyboard Manager のエンジンが動くのを 30 秒まで待ち、設定を読み直し、自動起動のタスク
+  (タスク スケジューラの `\PowerToys\Autorun for <ユーザー>`) があるかも見る
+
+できないときは警告して (setup の最後のまとめにも残す)、後ろの手順へ進む。Keyboard Manager がオフのままなら、記録も
+イベントも触らず、「読み直し済み」とも出さない。書いた後に起動や確認でつまずいたら印 (`~/.local/state/dotfiles/powertoys-enable.pending`)
+を残し、次の `setup --update` は両方 `true` でも起動と確認をやり直す (動いていれば起動し直さない)。
+
+| 起きたこと | 91 がすること |
+| --- | --- |
+| 設定が `run_elevated: true` | 止めない・書かない (起動すると UAC の確認が出るため) |
+| 止められない (今のセッションの PowerToys が管理者で動いている) | 書かない |
+| `powershell.exe` が失敗する | 書かない。止める途中で切れたかもしれないので、動いていなければ起動する |
+| 設定が読めない (JSON でない・空) | 止めない・書かない |
+| 書けない | 元の設定のまま起動する |
+| 起動できない | 設定には書いてあるので、スタートメニューから起動するよう出す |
+| エンジンが動かない・起動の後にオフへ戻っている・タスクが無い | 手で確かめる手順を出す |
+
+手でオンにするときは、PowerToys の設定画面で「入出力」→「Keyboard Manager」と、「全般」→「起動時に実行」(Run at startup) を
+オンにしてから、`setup --update` (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。
+
 ### PowerToys を入れる (winget)
 
 PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToysUserSetup-…exe`。管理者は要らない) で入れる。
@@ -550,18 +585,20 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
 | --- | --- |
 | `Install-PowerToys -Check` (PowerShell) | 入っているかを出すだけ。入っていれば終了コード 0、入っていなければ 3 |
 | `Install-PowerToys` (PowerShell) | 入っていなければ入れる (`-IfMissing` を付けても同じ) |
-| `nix/scripts/bootstrap-windows-powertoys.sh` (WSL) | `setup --update` でも毎回走る。読み直させる前に `-Check` を流し、入っていなければ `-IfMissing` で入れる |
+| `nix/scripts/bootstrap-windows-powertoys.sh` (WSL) | `setup --update` でも毎回走る。先に `-Check` を流し、入っていなければ `-IfMissing` で入れる |
 
 - 入っているかは、`PowerToys.exe` が `%LOCALAPPDATA%\PowerToys\` (user スコープ) か `C:\Program Files\PowerToys\`
   (machine スコープ) にあるかで見る。この PC は user スコープ
-- 入れられなかったら (ネットワーク・winget の失敗)、⚠ で囲んで知らせ、そのまま `default.json` の読み直しへ進む
+- 入れられなかったら (ネットワーク・winget の失敗)、⚠ で囲んで知らせ、そのまま次へ進む
   (setup は止めない)。次の `setup --update` でも、もう一度入れにいく
-- setup が待つ上限は、`-Check` が 60 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、そのまま読み直しへ進む
+- setup が待つ上限は、`-Check` が 60 秒、`-IfMissing` が 600 秒。時間切れになったらそう出して、そのまま次へ進む
   (どちらでも setup は止めない)
-- 入れた直後は PowerToys が動いていないことがある。スタートメニューから起動する
-- 入れたばかりのマシンでは、PowerToys の設定画面を一度開くまで、Keyboard Manager は配った割り当てを読まない。
+- 入れた直後に PowerToys が動いていなくても、91 が Keyboard Manager と自動起動をオンにするときに起動する
+- 入れたばかりのマシンでは、PowerToys の設定画面が一度開くまで、Keyboard Manager は配った割り当てを読まない。
   エンジンが読む `settings.json` (有効なプロファイルの名前) を作るのは設定画面だけで、作っても読み直しはしないため
-  ([ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md) §1 の 7)。91 はこれを見分けて、
+  ([ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md) §1 の 7)。設定画面は最初の起動で開くので、
+  91 は入れた直後 (止める前) と起動した直後に、`settings.json` が読めるようになるのを 30 秒まで待つ。エンジンはこのファイルが無い間に
+  起動すると何も読まないので、待つときは記録を消す (`default.json` が同じでも、できた後に必ず読み直させる)。できれば読み直させ、できなければ
   記録せずに「設定画面を一度開いてから流し直す」よう案内するので、開いてから `setup --update`
   (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。そのときに 91 が読み直させる
 
@@ -689,8 +726,9 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
    (入力方式が別なら切り替えてから)
 3. 2 で打ったら、もう一度 `~/dotfiles/setup --update` を流す。`bootstrap-windows-google-ime.sh` が設定と辞書を置く
 
-PowerToys の割り当ては、これとは別に、91 が Keyboard Manager の設定 (`settings.json`) がまだ無いと出したら、設定画面を一度開いてから
-91 を流し直すと効く ([PowerToys を入れる](#powertoys-を入れる-winget))。
+PowerToys の割り当ては、これとは別に、91 が Keyboard Manager と自動起動をオンにして PowerToys を起動し直す
+([Keyboard Manager と自動起動をオンにする](#keyboard-manager-と自動起動をオンにする))。Keyboard Manager の設定 (`settings.json`) が
+まだ無いと出たら、設定画面を一度開いてから 91 を流し直すと効く ([PowerToys を入れる](#powertoys-を入れる-winget))。
 
 新しいマシンで通しては、まだ確かめていない (ADR 017 §6)。98 が衝突を出したら (初回の起動で `config1.db` ができていると、
 置いた記録が無いので衝突になる)、`--import` (Windows 側を残す。[Google 日本語入力](#google-日本語入力)) か
