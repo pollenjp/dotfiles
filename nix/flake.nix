@@ -139,8 +139,8 @@
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
-        # 登録簿は型と sandbox だけ (実機は dotfiles-private。ADR 027) なので、WSL・1Password・windowsFiles・exeExecTrace を
-        # 入れた作り物のホストを build する (前は登録簿の実機が受け持っていた。ADR 012)。homeConfigurations には出さない
+        # 登録簿は型と sandbox だけ (実機は dotfiles-private。ADR 027) なので、WSL・1Password・windowsFiles・exeExecTrace・
+        # mtuGuard を入れた作り物のホストを build する (前は登録簿の実機が受け持っていた。ADR 012)。homeConfigurations には出さない
         # (setup の一覧に出さない・--host で選ばせない)。macOS のランナーで x86_64-linux を build しないよう、
         # x86_64-linux の checks にだけ置く
         // lib.optionalAttrs (system == "x86_64-linux") {
@@ -153,6 +153,7 @@
                 windowsUserName = "user";
                 windowsFiles.enable = true;
                 exeExecTrace.enable = true;
+                mtuGuard.enable = true;
               };
               onePassword.enable = true;
             }).activationPackage;
@@ -161,6 +162,15 @@
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
           pjp-wsl-mtu-guard-test = scriptTest "pjp-wsl-mtu-guard" ./pkgs/pjp-wsl-mtu-guard/pjp-wsl-mtu-guard.sh;
+          # 見張りは iproute2 (Linux だけ) を使うので、unit を作る評価も Linux でだけ確かめる
+          wsl-mtu-guard-state = import ./tests/wsl-mtu-guard.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
