@@ -160,6 +160,7 @@
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
           pjp-who-is-asking-unittest = unittest "pjp-who-is-asking";
+          pjp-wsl-mtu-guard-test = scriptTest "pjp-wsl-mtu-guard" ./pkgs/pjp-wsl-mtu-guard/pjp-wsl-mtu-guard.sh;
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
@@ -669,10 +670,16 @@
         #
         # Google 日本語入力の設定とテキストを行き来させる道具 (ADR 015) も、WSL のマシンでしか使わない。
         # home には home/modules/windows-files.nix が入れる。CI の lint は nix shell ./nix#pjp-google-ime で借りる。
+        #
+        # WSL の eth0 の MTU を上限まで下げ続ける見張りは iproute2 を使う (Linux だけ)。PATH には置かず、
+        # home/modules/wsl-mtu-guard.nix が system の unit の ExecStart にする。単体で試すなら (root が要る):
+        #
+        #   sudo "$(nix build --no-link --print-out-paths ./nix#pjp-wsl-mtu-guard)/bin/pjp-wsl-mtu-guard" eth0 1350
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
+          pjp-wsl-mtu-guard = pkgs.callPackage ./pkgs/pjp-wsl-mtu-guard { };
         }
       );
 
