@@ -138,6 +138,7 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 | --- | --- |
 | `wsl = { enable = true; windowsUserName = "<inspect の値>"; };` | WSL の PC (inspect の「WSL: はい」)。Windows のユーザー名は inspect が出す |
 | `wsl.windowsFiles.enable = true;`・`wsl.exeExecTrace.enable = true;` | WSL の PC で、win/ を Windows へ配る・.exe の起動を記録する (ADR 010・012。exeExecTrace は setup が sudo を呼ぶ) か聞く |
+| `wsl.mtuGuard.enable = true;` | WSL の PC で、VPN をつないでいる間に小さい通信は通るのに大きな送信 (Claude Code の API など) だけが止まる (PMTU ブラックホール) か聞く。eth0 の MTU を上限 (`wsl.mtuGuard.maxMtu`。既定 1350) まで下げ続ける。setup が sudo を呼ぶ |
 | `onePassword.enable = true;` | 1Password で git の署名をする PC か聞く (WSL なら Windows 側の 1Password。`windowsUserName` が要る) |
 | `claude.devTracker.enable = true;` | Notion Dev Tracker を使う PC (本体の既定は使わない)。使うなら `claude.notion.profile` も |
 | `claude.notion.profile = "personal";` など | Notion へ書く skill を使う PC (`"personal"` / `"work"`) |

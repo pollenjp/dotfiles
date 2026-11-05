@@ -20,6 +20,7 @@
   #     windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (例は作り物)
   #     windowsFiles.enable = true;
   #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
+  #     mtuGuard.enable = true;       # eth0 の MTU を上限 (mtuGuard.maxMtu。既定 1350) まで下げ続ける (setup の手順が要る)
   #   };
   #
   # 省略すれば非 WSL マシン。個々の既定値は home/options.nix を参照。
