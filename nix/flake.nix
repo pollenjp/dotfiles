@@ -239,6 +239,7 @@
           private-host-test = scriptTest "private-host" ./scripts;
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
+          setup-system-units-test = scriptTest "setup-system-units" ./scripts;
           # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)
           setup-local-flake-test =
             pkgs.runCommand "setup-local-flake-test"
