@@ -22,6 +22,7 @@
     ./modules/dev-tracker-inbox.nix
     ./modules/windows-files.nix
     ./modules/exe-exec-trace.nix
+    ./modules/wsl-mtu-guard.nix
     ./modules/cleanup.nix
     ./modules/mise-release-age.nix
     ./modules/ntn.nix

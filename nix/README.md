@@ -603,25 +603,26 @@ nix flake update dotfiles-private --flake ~/dotfiles   # dotfiles-private の ni
 | 選択肢 | 実行される手順 |
 | --- | --- |
 | 新しいマシン適用 | 1 → 2 → 2.4 → 2.5 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
-| 既存マシン更新 | 2.4 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 8（**冪等な手順は全部走る**。下記） |
+| 既存マシン更新 | 2.4 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 7.5 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 2.4 `private-fetch` は dotfiles-private を **switch の前に** 取る（clone があれば取得して fast-forward する。clone が無ければ何もせず、
 switch のあとの `bootstrap-dotfiles-private` が clone する）。登録したホストの値を直して push したあと、`--update` 1 回でその値で
 switch させるため（[後述](#dotfiles-private-に登録したホスト)）。取れなくても止めない。
 
-「既存マシン更新」は `switch` に加えて `bootstrap-*` と `exe-exec-trace` を
+「既存マシン更新」は `switch` に加えて `bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` を
 毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
 繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
 並べるしかなくなる。時間が気になるとき・一部だけ走らせたいときは「カスタム」か
 `--steps` で選び直す。
 
-8 `exe-exec-trace` は中で `sudo` を呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・
+7.5 `wsl-mtu-guard` と 8 `exe-exec-trace` は中で `sudo` を呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・
 止まっているのを起こすときだけで、揃っていれば（option が無効なマシンも）呼ばない。
 `sudo` がパスワードを訊けないとき（パスワード無しで通らず、端末も無い。Claude の Bash
 ツールから打ったときなど）は失敗にせず飛ばし、最後の「残りの手作業」がずれを知らせる
-（[後述](#wsl-の-exe-の起動を常時記録する)）。
+（[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)・[後述](#wsl-の-exe-の起動を常時記録する)）。
+setup は失敗した手順で止まるので、7.5 を 8 より前に置いている（トレーサが起動に失敗しても、MTU の見張りは入れ替わる）。
 
 入っていないのは、冪等でないか更新時には有害な手順。
 
@@ -780,15 +781,15 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
-| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
-| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜99 と exe-exec-trace は、直して流し直すまで走らない） |
+| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜99 と wsl-mtu-guard・exe-exec-trace は、直して流し直すまで走らない） |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` (99) と exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
-| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。衝突で exit 1 しても、99 より前の bootstrap は済んでいる (後ろの exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` (99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。衝突で exit 1 しても、99 より前の bootstrap は済んでいる (後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -902,6 +903,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 6.13 | `./nix/scripts/bootstrap-path-shadow.sh` | `bootstrap-path-shadow` | PATH で Nix の ntn より先に来る、Nix のものでない ntn（前に install script で入れたもの）を警告する。消さない（[後述](#前に手で入れた-ntn-と-setup-の警告)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
+| 7.5 | WSL の eth0 の MTU を上限まで下げ続ける system の unit を入れる | `wsl-mtu-guard` | `wsl.mtuGuard.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)） |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
 
 #### 1. 初回のブートストラップ (手順 3)
@@ -1031,7 +1033,7 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`bootstrap-*` と `exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。dotfiles-private に登録した PC では
 `--host` を付けない（setup が登録したホストを選ぶ。[後述](#dotfiles-private-に登録したホスト)）。登録していない PC では、
 `~/dotfiles/flake.nix` に足した `tmp` が選ばれる（どちらも無ければ止まる）。
@@ -1088,6 +1090,7 @@ wsl = {
   windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>。例は作り物)
   windowsFiles.enable = true;  # repo 直下の win/ を Windows 側へ配るか（後述）
   exeExecTrace.enable = true;  # WSL から起動された .exe を常時記録するか（後述）
+  mtuGuard.enable = true;      # eth0 の MTU を上限（mtuGuard.maxMtu。既定 1350）まで下げ続けるか（後述）
 };
 onePassword.enable = true;     # 1Password で git の署名をするか（WSL ならホスト側 Windows の 1Password）
 ```
@@ -1126,9 +1129,10 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 - `wsl.windowsFiles.enable` が true なのに `wsl.enable` が false
 - `wsl.windowsFiles.enable` が true なのに `wsl.windowsUserName` が無い
 - `wsl.exeExecTrace.enable` が true なのに `wsl.enable` が false
+- `wsl.mtuGuard.enable` が true なのに `wsl.enable` が false
 
-`exeExecTrace` は 1Password の有無とは別に選べる。公開の登録簿には WSL のホストが無いので、CI は WSL・1Password・
-`windowsFiles`・`exeExecTrace` を入れた作り物のホスト（flake の checks の `home-wsl-example`）を build して確かめる。
+`exeExecTrace`・`mtuGuard` は 1Password の有無とは別に選べる。公開の登録簿には WSL のホストが無いので、CI は WSL・1Password・
+`windowsFiles`・`exeExecTrace`・`mtuGuard` を入れた作り物のホスト（flake の checks の `home-wsl-example`）を build して確かめる。
 
 ### 登録簿に載せずにマシンを足す
 
@@ -1506,6 +1510,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
+| `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` | `nix/home/modules/wsl-mtu-guard.nix` (生成。`wsl.mtuGuard.enable` のマシンだけ。`/etc` へは setup の手順が入れる。[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.local/state/dotfiles/mise-release-age.json` | `nix/home/modules/mise-release-age.nix` (生成。`dotfiles.mise.*` の値。`bootstrap-mise.sh` が読んで `~/.config/mise/config.toml` に書く。[後述](#遅延-minimum_release_age-を期間付きで緩める)) |
 | `~/.local/state/dotfiles/ntn.json` | `nix/home/modules/ntn.nix` (生成。`dotfiles.ntn.keyring` の値。`bootstrap-ntn.sh` が読んで ntn の `config.json` の `keyring` に書く。[後述](#ntn-notion-cli-の-token-をファイルに置く-keyring)) |
@@ -1562,7 +1567,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 - 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
 - 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
   sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（setup はこの手順で止まり、後ろの
-  91〜99 の bootstrap と exe-exec-trace、最後の「残りの手作業」は流し直すまで走らない）。
+  91〜99 の bootstrap と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は流し直すまで走らない）。
   取り込むか `--force` で解く（[`win/README.md`](../win/README.md#衝突したら)）
 - 書き換えたファイルには manifest の `hint` を出す。Orca は置いたファイルを監視しないので、
   設定画面の「ディスクから再読み込み」が要る
@@ -2231,6 +2236,78 @@ ssh-add -l                   # 鍵が並ぶ
 - 見張りは OpenSSH 10.1 より古いホスト（socket が `/tmp/ssh-*/`）と macOS では動かない（attach の張り替えだけが効く）
 - 削除した session の固定名と持ち主の記録は残る（害は無い。要らなければ `~/.ssh/agent.<名前>.sock` と
   `~/.local/state/pjp-agent-link/owner/<名前>` を消してよい）
+
+## WSL の eth0 の MTU を上限まで下げ続ける
+
+VPN のトンネルの実効 MTU が WSL の eth0 の MTU より小さく、トンネルの奥から返る ICMP（Fragmentation Needed）が
+WSL（NAT モード）まで届かないと、実効 MTU を超える大きさのパケットが黙って捨てられ続ける（PMTU ブラックホール）。
+ping や小さい GET は通るので、**つながっているのに大きな送信だけが止まる**（本文が数十 KB ある Claude Code の API の
+リクエストは、応答しないまま時間切れになる）。WSL はホスト側のネットワークが変わるたびに（VPN の接続・切断など）
+eth0 の MTU を設定し直すので、`/etc/wsl.conf` の `[boot]` の `command` のように起動時に 1 回下げるだけでは足りない
+（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-05-wsl-mtu-guard-design.md)）。
+
+`wsl.mtuGuard.enable` のマシンには、eth0 の MTU を上限（`wsl.mtuGuard.maxMtu`。既定 1350）まで下げ続ける見張り
+（`nix/pkgs/pjp-wsl-mtu-guard/`）を root の systemd の unit `dotfiles-wsl-mtu-guard` で置く。
+
+- 起動したときに 1 回と、`ip monitor link` のイベントのたびに、eth0 の MTU が上限を超えていたら上限まで下げる
+  （イベントが来なくても 30 秒ごとに見直す）。**上げはしない。** VPN を使っていないときも上限のまま（パケットが少し
+  小さくなるだけ）
+- 下げたときだけ、journal に `eth0 mtu 1392 -> 1350` の形で残す
+- 既定の 1350 は、実効 MTU が 1382 のトンネルで測った上限に 32 バイトの余裕を持たせた値。トンネルの実効 MTU が
+  もっと小さい回線では下げる（下限は IPv6 の最小の MTU の 1280）
+
+### 入れる
+
+使うマシンは、dotfiles-private に登録したファイルか `~/dotfiles/flake.nix` に足したホストで `wsl.mtuGuard.enable = true`
+（`mkHome` の引数の `wsl` の中）を書く。MTU を変えるには root が要るので、**switch だけでは動かない。** unit を
+`/etc/systemd/system` へ入れるのは setup の手順 `wsl-mtu-guard` で、「既存マシン更新」（`--update`）で走り、中で `sudo` を
+呼ぶ（入れ方は [WSL の .exe の起動を常時記録する](#wsl-の-exe-の起動を常時記録する) の `exe-exec-trace` と同じ。
+**`sudo` を付けて打たないこと**）。
+
+```sh
+~/dotfiles/setup --update   # unit ファイルを生成し、/etc へ入れて起こす (中で sudo を呼ぶ)
+systemctl status dotfiles-wsl-mtu-guard
+```
+
+- パスワード無しで `sudo` できないマシンで、端末の無いところ（Claude の Bash ツールなど）から打つと、手順は入れずに
+  飛ばし、最後の「残りの手作業」に「unit がまだ入っていない」と出る。そのときは端末から
+  `~/dotfiles/setup --steps wsl-mtu-guard` を打つ
+- unit の `ExecStart` は store の固定パス（root がユーザーの書き換えられるパスを実行しないため）。手順は unit の store
+  パスへ GC root（`/nix/var/nix/gcroots/dotfiles-wsl-mtu-guard`）を張るので、`nix-collect-garbage` で動いている見張りが
+  消えることはない
+- 見張りの `ip monitor` が落ちたら、systemd が 5 秒おいて起こし直す（諦めない）
+
+### 上限を変える
+
+`wsl.mtuGuard.maxMtu = 1300;` のように書いて `--update` を打つ。unit の中身が変わるので、手順が入れ替えて起こし直し、
+eth0 はすぐ新しい上限まで下がる。**上限を上げたときは、見張りは上げないので手で上げる。**
+
+```sh
+sudo ip link set dev eth0 mtu <新しい上限>
+```
+
+### 読む
+
+```sh
+journalctl -u dotfiles-wsl-mtu-guard              # 下げた記録 (eth0 mtu 1392 -> 1350)
+ip link show eth0                                  # 今の MTU
+```
+
+### 外す
+
+`wsl.mtuGuard.enable` を false にして `--update` を打つ。手順が、生成された unit が無いので、入っている unit を止めて
+消す（GC root も消す）。eth0 の MTU はそのまま残る（戻すなら `sudo ip link set dev eth0 mtu <値>`。次に WSL の
+ネットワークが変わったときも、WSL が設定し直す）。
+
+### 気を付けること
+
+- **VPN をつないでいる間に見張りが止まっていると、WSL の中の Claude Code 自身が応答しなくなる。** MTU を手で上げて
+  試すのは、見張りが動いているときだけにする。固まったら、Windows の PowerShell から
+  `wsl -d <ディストロ> -u root -- ip link set dev eth0 mtu 1350` で戻せる
+- 前に手で入れた見張り（別の名前の unit）や `/etc/wsl.conf` の boot command は、setup は触らない。dotfiles の見張りが
+  enabled・active になってから手で消す（2 つが同時に動いても、どちらも下げるだけなので害は無い）
+- WSL を mirrored モード（`networkingMode=mirrored`）にするのも一つの手だが、Docker と `localhost` の挙動が変わるので
+  ここでは使っていない
 
 ## fish
 

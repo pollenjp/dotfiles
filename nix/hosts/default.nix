@@ -16,7 +16,10 @@
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
 #                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
 #                   祖先付きで journald に常時記録する (ADR 012。unit を /etc へ入れるのは
-#                   `~/dotfiles/setup --update` の最後の手順 exe-exec-trace。中で sudo を呼ぶ)
+#                   `~/dotfiles/setup --update` の最後の手順 exe-exec-trace。中で sudo を呼ぶ)。
+#                   wsl.mtuGuard.enable = true で、eth0 の MTU を上限 (wsl.mtuGuard.maxMtu。既定 1350) まで
+#                   下げ続ける見張りを置く (VPN の PMTU ブラックホールを避ける。unit を /etc へ入れるのは
+#                   `~/dotfiles/setup --update` の手順 wsl-mtu-guard。中で sudo を呼ぶ)
 #   onePassword     onePassword.enable = true で 1Password を git の署名に使う (ADR 022)。
 #                   WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password
 #   claude          Claude Code のマシン固有設定。claude.devTracker.enable = true で

@@ -59,8 +59,8 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 
 Windows 側でファイルが変わっていた (アプリの設定画面で変えた、など) と、上書きせずに
 diff を出して止まる。`setup --update` はこの手順 (order 90) で失敗して止まる。前の手順は済んで
-いるが、後ろの bootstrap (91〜99) と exe-exec-trace、最後の「残りの手作業」は、直して流し直す
-まで走らない。
+いるが、後ろの bootstrap (91〜99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して
+流し直すまで走らない。
 
 ```sh
 # Windows 側の変更を残す: win/ へ取り込んで流し直す (中身が揃うので記録だけ更新される)
@@ -675,7 +675,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 
   戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
 - 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
-  済んでいるが、後ろの [Windows Terminal](#windows-terminal) の手順 (order 99) と exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
+  済んでいるが、後ろの [Windows Terminal](#windows-terminal) の手順 (order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
   など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
 - `--import` で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
@@ -857,7 +857,7 @@ commit しない。この repo は public で、Windows に付いてくる音は
 
 `managed.json` が持つキーを設定画面で変えていた (か、既定に戻していた) と、触らずに両方の値を出して止まる。
 書いた記録が無いのに違う値が先にある (初めて書くマシンで、手で設定してあった) ときも同じで、「書いた記録が無く」と
-出る。`setup --update` はこの手順 (order 99) で止まり、後ろの exe-exec-trace と最後の「残りの手作業」は、
+出る。`setup --update` はこの手順 (order 99) で止まり、後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、
 解いて流し直すまで走らない。衝突しないキーは書いてある。どちらかで解く。
 
 1. Windows 側の値を残す: `--import` で `managed.json` へ取り込み、`git diff` を見て commit して push する。

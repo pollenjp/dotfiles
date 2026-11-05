@@ -453,6 +453,11 @@ add_step chsh \
   '手順 7。/etc/shells への追記に sudo が要る。必要なときだけ。' \
   step 0
 
+add_step wsl-mtu-guard \
+  'WSL の eth0 の MTU を上限まで下げ続ける system の unit' \
+  'dotfiles.wsl.mtuGuard の unit を /etc へ入れる / 外す。「既存マシン更新」にも入る。sudo は揃っていないときだけ呼ぶ。exe-exec-trace より前に走る。' \
+  step 0
+
 add_step exe-exec-trace \
   'WSL の .exe の起動を常時記録する system の unit' \
   'dotfiles.wsl.exeExecTrace.enable の unit を /etc へ入れる / 外す (ADR 012)。「既存マシン更新」にも入る。sudo は揃っていないときだけ呼ぶ。' \
@@ -543,10 +548,12 @@ apply_preset() {
       # 「何が増えたか」を人間が覚えている必要があった。
       #
       # exe-exec-trace も同じ理由で入れる (TKT-72。ADR 012 の追記)。入れないと、
-      # トレーサを更新するたびに --steps exe-exec-trace を打ち直すことになる。中で sudo を
+      # トレーサを更新するたびに --steps exe-exec-trace を打ち直すことになる。wsl-mtu-guard
+      # (eth0 の MTU の見張り) も同じ。どちらも中で sudo を
       # 呼ぶが、呼ぶのは unit を入れる・入れ替える・消す・止まっているのを起こすときだけで、
       # 揃っていれば (option が無効なマシンも) sudo を呼ばない。sudo がパスワードを訊けない
-      # ときは飛ばし、ずれは post_notes が知らせる。
+      # ときは飛ばし、ずれは post_notes が知らせる。手順は表の並び (wsl-mtu-guard が先) で
+      # 走るので、トレーサが起動に失敗して setup が止まっても、見張りは入れ替わっている。
       #
       # 入れていないのは、冪等でないか ここでは有害なもの:
       #
@@ -569,7 +576,7 @@ apply_preset() {
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
-      ids+=(exe-exec-trace)
+      ids+=(wsl-mtu-guard exe-exec-trace)
       ;;
     *) die "unknown preset: $1" ;;
   esac
@@ -1963,33 +1970,39 @@ step_chsh() {
   run chsh -s "${fish_path}" || return 1
 }
 
-# 手順 exe-exec-trace が扱うもの。home/modules/exe-exec-trace.nix と揃える。
+# 手順 wsl-mtu-guard と exe-exec-trace が扱う system の unit。名前は home/modules/wsl-mtu-guard.nix・
+# home/modules/exe-exec-trace.nix と揃える。
+wsl_mtu_guard_unit=dotfiles-wsl-mtu-guard.service
 exe_exec_trace_unit=dotfiles-exe-exec-trace.service
-exe_exec_trace_gcroot=/nix/var/nix/gcroots/dotfiles-exe-exec-trace
 
-# home-manager が生成した unit (option が false なら無い) と、入れ先
-exe_exec_trace_src() { printf '%s' "${HOME}/.local/share/dotfiles/systemd/${exe_exec_trace_unit}"; }
-exe_exec_trace_dst() { printf '%s' "/etc/systemd/system/${exe_exec_trace_unit}"; }
+# /etc・/nix/var・/run の前に付ける。テスト (nix/tests/setup-system-units.test.sh) が使い捨ての場所を指すための
+# もので、ふだんは空。
+system_root=${DOTFILES_SYSTEM_ROOT:-}
+
+# home-manager が生成した unit (option が false なら無い) と、入れ先と、GC root。$1: unit
+system_unit_src() { printf '%s' "${HOME}/.local/share/dotfiles/systemd/$1"; }
+system_unit_dst() { printf '%s' "${system_root}/etc/systemd/system/$1"; }
+system_unit_gcroot() { printf '%s' "${system_root}/nix/var/nix/gcroots/${1%.service}"; }
 
 # systemd が PID 1 として動いているか。WSL は systemd を有効にしていなくても systemctl
 # コマンド自体はあるので、コマンドの有無では判らない (sd_booted と同じ見方)。
-systemd_running() { [[ -d /run/systemd/system ]]; }
+systemd_running() { [[ -d ${system_root}/run/systemd/system ]]; }
 
 # sudo がパスワード無しで通るか、パスワードを訊ける (端末がある) か。どちらでもないのに
 # sudo を呼ぶとその場で失敗し、setup はそこで止まって残りの手作業も出さなくなる
 # (Claude の Bash ツールから --update を打ったときなど)。訊けなければ飛ばすと言って偽を
 # 返す。揃っていないことは post_notes が知らせる。--dry-run では打つコマンドを見せたいので
-# 確かめない。
-exe_exec_trace_can_sudo() {
+# 確かめない。$1: 手順の id、$2: unit
+system_unit_can_sudo() {
   if [[ ${dry_run} == 1 ]] || sudo -n true 2>/dev/null || [[ -t 0 ]]; then
     return 0
   fi
-  note "sudo がパスワードを訊けない (パスワード無しで通らず、端末も無い) ので、${exe_exec_trace_unit} を揃えずに飛ばします。端末から --steps exe-exec-trace を打つ。"
+  note "sudo がパスワードを訊けない (パスワード無しで通らず、端末も無い) ので、$2 を揃えずに飛ばします。端末から --steps $1 を打つ。"
   return 1
 }
 
-# dotfiles.wsl.exeExecTrace.enable の system の unit を、home-manager が生成したものに揃える
-# (ADR 012)。
+# home-manager が生成した system の unit を /etc/systemd/system へ入れて、生成したものに揃える
+# (手順 wsl-mtu-guard・exe-exec-trace。ADR 012)。
 #
 # home-manager は system の unit を置けないので、生成された unit ファイルを sudo で
 # /etc/systemd/system へ複製する。ExecStart は store の固定パスなので、unit の store パスへ
@@ -1997,10 +2010,13 @@ exe_exec_trace_can_sudo() {
 # 生成されていない) なら、入っている unit を止めて消す。
 #
 # 「既存マシン更新」で毎回走るので、sudo は揃っていないときだけ呼ぶ。
-step_exe_exec_trace() {
-  local src dst real
-  src=$(exe_exec_trace_src)
-  dst=$(exe_exec_trace_dst)
+# $1: 手順の id、$2: unit、残り: 起こしたあとに出す行 (1 つが 1 行。--dry-run では出さない)
+step_system_unit() {
+  local id=$1 unit=$2 src dst gcroot real line
+  shift 2
+  src=$(system_unit_src "${unit}")
+  dst=$(system_unit_dst "${unit}")
+  gcroot=$(system_unit_gcroot "${unit}")
   # sudo を付けて打つと HOME が root のものになり、生成された unit を見失って
   # 「option が無効」と取り違え、入っている unit を消してしまう
   if [[ ${EUID} -eq 0 ]]; then
@@ -2009,7 +2025,7 @@ step_exe_exec_trace() {
   fi
   # systemd より先に見る。option が無効なマシン (macOS を含む) に、更新のたびに
   # systemd の案内を出さないため
-  if [[ ! -e ${src} && ! -e ${dst} && ! -L ${exe_exec_trace_gcroot} ]]; then
+  if [[ ! -e ${src} && ! -e ${dst} && ! -L ${gcroot} ]]; then
     note '生成された unit が無く (option が無効か、まだ switch していない)、入ってもいないので何もしない。'
     return 0
   fi
@@ -2018,60 +2034,76 @@ step_exe_exec_trace() {
     return 0
   fi
   if [[ ! -e ${src} ]]; then
-    note "生成された unit が無い (option が無効か、まだ switch していない) ので、${exe_exec_trace_unit} を止めて消します。"
-    exe_exec_trace_can_sudo || return 0
+    note "生成された unit が無い (option が無効か、まだ switch していない) ので、${unit} を止めて消します。"
+    system_unit_can_sudo "${id}" "${unit}" || return 0
     if [[ -e ${dst} ]]; then
-      run sudo systemctl disable --now "${exe_exec_trace_unit}" || return 1
+      run sudo systemctl disable --now "${unit}" || return 1
     fi
-    run sudo rm -f "${dst}" "${exe_exec_trace_gcroot}" || return 1
+    run sudo rm -f "${dst}" "${gcroot}" || return 1
     run sudo systemctl daemon-reload || return 1
     return 0
   fi
   # home-manager が置いた symlink を store の実体まで辿る (GC root はこれに張る)
   real=$(readlink -f "${src}") || return 1
-  if cmp -s "${real}" "${dst}" && [[ $(readlink "${exe_exec_trace_gcroot}" 2>/dev/null || true) == "${real}" ]]; then
-    if systemctl is-enabled --quiet "${exe_exec_trace_unit}" && systemctl is-active --quiet "${exe_exec_trace_unit}"; then
-      note "${exe_exec_trace_unit} は最新で、動いています。"
+  if cmp -s "${real}" "${dst}" && [[ $(readlink "${gcroot}" 2>/dev/null || true) == "${real}" ]]; then
+    if systemctl is-enabled --quiet "${unit}" && systemctl is-active --quiet "${unit}"; then
+      note "${unit} は最新で、動いています。"
       return 0
     fi
-    note "${exe_exec_trace_unit} は最新ですが、止まっているので起こします。"
-    exe_exec_trace_can_sudo || return 0
+    note "${unit} は最新ですが、止まっているので起こします。"
+    system_unit_can_sudo "${id}" "${unit}" || return 0
   else
-    exe_exec_trace_can_sudo || return 0
+    system_unit_can_sudo "${id}" "${unit}" || return 0
     run sudo install -m 0644 "${real}" "${dst}" || return 1
-    run sudo ln -sfn "${real}" "${exe_exec_trace_gcroot}" || return 1
+    run sudo ln -sfn "${real}" "${gcroot}" || return 1
     run sudo systemctl daemon-reload || return 1
   fi
-  run sudo systemctl enable "${exe_exec_trace_unit}" || return 1
-  # unit は Type=notify なので、restart はトレーサが BPF を読み込み終えるまで待ち
-  # (数秒かかる)、読み込みに失敗すれば restart が失敗する
-  if ! run sudo systemctl restart "${exe_exec_trace_unit}"; then
-    warn "${exe_exec_trace_unit} を起動できませんでした: sudo journalctl -u ${exe_exec_trace_unit} -n 30"
+  run sudo systemctl enable "${unit}" || return 1
+  if ! run sudo systemctl restart "${unit}"; then
+    warn "${unit} を起動できませんでした: sudo journalctl -u ${unit} -n 30"
     return 1
   fi
   [[ ${dry_run} == 1 ]] && return 0
-  note "${exe_exec_trace_unit} が記録を始めた。読むとき:"
-  note "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | pjp-exe-exec-trace --pretty"
+  for line in "$@"; do
+    note "${line}"
+  done
+}
+
+# dotfiles.wsl.mtuGuard の見張りの unit を揃える。unit は Type=exec なので、restart は見張りを
+# exec できたところで返る (store の見張りが無ければ restart が失敗する)
+step_wsl_mtu_guard() {
+  step_system_unit wsl-mtu-guard "${wsl_mtu_guard_unit}" \
+    "${wsl_mtu_guard_unit} が eth0 の MTU を見張り始めた。下げた記録: journalctl -u ${wsl_mtu_guard_unit%.service}"
+}
+
+# dotfiles.wsl.exeExecTrace のトレーサの unit を揃える。unit は Type=notify なので、restart は
+# トレーサが BPF を読み込み終えるまで待ち (数秒かかる)、読み込みに失敗すれば restart が失敗する
+step_exe_exec_trace() {
+  step_system_unit exe-exec-trace "${exe_exec_trace_unit}" \
+    "${exe_exec_trace_unit} が記録を始めた。読むとき:" \
+    "  journalctl -u ${exe_exec_trace_unit%.service} -o cat | pjp-exe-exec-trace --pretty"
 }
 
 # 生成された unit と入っている unit のずれ。揃っていれば何も出さない。
 # post_notes の案内にだけ使う (手順を選ばなかったときと、sudo を訊けずに飛ばしたとき)。
-exe_exec_trace_drift() {
-  local src dst
-  src=$(exe_exec_trace_src)
-  dst=$(exe_exec_trace_dst)
+# $1: unit、$2: 入っている unit が古くなるわけ、$3: GC root が無いと消されうるもの
+system_unit_drift() {
+  local unit=$1 src dst gcroot
+  src=$(system_unit_src "${unit}")
+  dst=$(system_unit_dst "${unit}")
+  gcroot=$(system_unit_gcroot "${unit}")
   systemd_running || return 0
   if [[ -e ${src} ]]; then
     if [[ ! -e ${dst} ]]; then
       echo 'unit がまだ入っていない'
     elif ! cmp -s "${src}" "${dst}"; then
-      echo '入っている unit が古い (トレーサを更新した)'
-    elif [[ ! -L ${exe_exec_trace_gcroot} ]]; then
-      echo 'GC root が無い (nix-collect-garbage でトレーサが消されうる)'
-    elif ! systemctl is-active --quiet "${exe_exec_trace_unit}"; then
-      echo "入っているが動いていない (理由は sudo journalctl -u ${exe_exec_trace_unit} -n 30)"
+      echo "入っている unit が古い ($2)"
+    elif [[ ! -L ${gcroot} ]]; then
+      echo "GC root が無い (nix-collect-garbage で$3が消されうる)"
+    elif ! systemctl is-active --quiet "${unit}"; then
+      echo "入っているが動いていない (理由は sudo journalctl -u ${unit} -n 30)"
     fi
-  elif [[ -e ${dst} || -L ${exe_exec_trace_gcroot} ]]; then
+  elif [[ -e ${dst} || -L ${gcroot} ]]; then
     echo 'option を false にしたが unit か GC root が残っている'
   fi
 }
@@ -2085,6 +2117,7 @@ run_step() {
     flake-update) step_flake_update ;;
     switch) step_switch ;;
     chsh) step_chsh ;;
+    wsl-mtu-guard) step_wsl_mtu_guard ;;
     exe-exec-trace) step_exe_exec_trace ;;
     bootstrap-dotfiles-private)
       if [[ ${private_prefetched} == 1 ]]; then
@@ -2151,7 +2184,12 @@ post_notes() {
     note '手順 7: ログインシェルを変えるなら --steps chsh (sudo が要る)。'
   fi
   # 手順を選んでいても、sudo がパスワードを訊けずに飛ばしていればずれが残っている
-  drift=$(exe_exec_trace_drift || true)
+  drift=$(system_unit_drift "${wsl_mtu_guard_unit}" '上限の値か見張りが変わった' '見張り' || true)
+  if [[ -n ${drift} ]]; then
+    note "eth0 の MTU を見張る system の unit: ${drift}。"
+    note '        --steps wsl-mtu-guard で揃える (中で sudo を呼ぶ)。'
+  fi
+  drift=$(system_unit_drift "${exe_exec_trace_unit}" 'トレーサを更新した' 'トレーサ' || true)
   if [[ -n ${drift} ]]; then
     note ".exe の起動を記録する system の unit: ${drift}。"
     note '        --steps exe-exec-trace で揃える (中で sudo を呼ぶ。ADR 012)。'

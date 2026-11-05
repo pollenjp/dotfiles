@@ -8,6 +8,8 @@
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
+#   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
+#   dotfiles.wsl.mtuGuard.maxMtu                 その上限 (既定 1350。1280〜1500)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.devTracker.inbox.enable      チケットのコメントをハブ (~/h) の会話へ届ける見回り役を常駐させるか
 #   dotfiles.claude.gitViaGh.enable              Claude の git と plugin の取得・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
@@ -604,6 +606,55 @@ in
         承認ダイアログが出ている間に要求元をたどる `pjp-who-is-asking` は、この option に
         よらず `wsl.enable` のマシンの PATH に入る (root が要らないため)。
       '';
+    };
+
+    mtuGuard = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        example = true;
+        description = ''
+          WSL の eth0 の MTU が上限 (`maxMtu`) を超えるたびに、上限まで下げる見張りを置くか。
+          `wsl.enable = true` のときだけ使える (false のマシンで true にすると評価時に止まる)。
+
+          VPN のトンネルの実効 MTU が eth0 の MTU より小さく、トンネルの奥から返る ICMP
+          (Fragmentation Needed) が WSL (NAT) まで届かないと、実効 MTU を超える大きさのパケットが
+          黙って捨てられ続ける (PMTU ブラックホール)。小さい通信は通るので、つながっているのに大きな
+          送信 (Claude Code の API のリクエストなど) だけが止まる。WSL はホスト側のネットワークが
+          変わるたびに (VPN の接続・切断など) eth0 の MTU を設定し直すので、`/etc/wsl.conf` の
+          boot command のように起動時に 1 回下げるだけでは足りない。
+
+          true のとき home/modules/wsl-mtu-guard.nix が unit ファイル
+          `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` を生成する。ExecStart は
+          store の固定パスの見張り (pkgs/pjp-wsl-mtu-guard) で、起動したときに 1 回と、eth0 のリンクの
+          変化のたびに下げる。上げはしないので、VPN を使っていないときも上限のまま (パケットが少し
+          小さくなるだけ)。
+
+          MTU を変えるには root が要るので、switch だけでは動かない。unit を /etc/systemd/system へ
+          入れるのは setup の手順 wsl-mtu-guard (中で sudo を呼ぶ) で、`~/dotfiles/setup --update` で走る
+          (sudo がパスワードを訊けずに飛ばしたら、setup の最後に知らせる)。false に戻して --update を
+          打つと、入っている unit を止めて消す。
+
+          下げた記録は journald に残る:
+
+              journalctl -u dotfiles-wsl-mtu-guard
+        '';
+      };
+
+      maxMtu = lib.mkOption {
+        type = lib.types.ints.between 1280 1500;
+        default = 1350;
+        example = 1300;
+        description = ''
+          見張りが保つ eth0 の MTU の上限。`mtuGuard.enable = true` のときだけ意味を持つ。
+          下限は IPv6 の最小の MTU (1280)。
+
+          既定の 1350 は、実効 MTU が 1382 のトンネルで測った上限に 32 バイトの余裕を持たせた値。
+          トンネルの実効 MTU がもっと小さい回線では下げる。値を変えて `~/dotfiles/setup --update` を
+          打つと、setup の手順が unit を入れ替えて起こし直す。見張りは上げないので、上げたときは
+          `sudo ip link set dev eth0 mtu <値>` も打つ。
+        '';
+      };
     };
 
     # enable は dotfiles.onePassword.enable へ出した (上の imports の改名)。
