@@ -1,0 +1,22 @@
+{
+  "custom-layouts": [
+    {
+      "uuid": "{67070A77-52EC-4EC3-9F63-DF5E58CD4400}",
+      "name": "4k-43inch",
+      "type": "canvas",
+      "info": {
+        "ref-width": 1920,
+        "ref-height": 1032,
+        "zones": [
+          {
+            "X": 100,
+            "Y": 100,
+            "width": 768,
+            "height": 412
+          }
+        ],
+        "sensitivity-radius": 20
+      }
+    }
+  ]
+}

@@ -783,7 +783,8 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
-| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 95〜99 と wsl-mtu-guard・exe-exec-trace は、直して流し直すまで走らない） |
+| `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 92〜99 と wsl-mtu-guard・exe-exec-trace は、直して流し直すまで走らない） |
+| `bootstrap-windows-fancyzones.sh` | 92 | `bootstrap-windows-powertoys.sh` (91) が PowerToys を入れた後に、`win/powertoys/fancyzones/managed.json` のキーだけを FancyZones の `settings.json` へ書く。91 は Keyboard Manager が使えないと早く抜けるので、別の script にしてある (exit 1 にしない) |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
@@ -894,7 +895,8 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、Keyboard Manager と自動起動がオフならオンにして起動し直し、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#keyboard-manager-と自動起動をオンにする)） |
-| 6.8.2 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
+| 6.8.2 | `./nix/scripts/bootstrap-windows-fancyzones.sh` | `bootstrap-windows-fancyzones` | FancyZones の `settings.json` に、dotfiles が持つキー (Windows スナップのオーバーライドなど) だけを書く。設定画面で変えていても戻す（[`win/README.md`](../win/README.md#fancyzones)） |
+| 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
@@ -1537,6 +1539,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | --- | --- | --- |
 | `switch` | 配り先と on / off を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト）。`windowsFiles.enable` のホストでは `pjp-google-ime` も PATH に入れる | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName`） |
 | bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
+| bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書く | `scripts/bootstrap-windows-fancyzones.sh` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
 | bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 
@@ -1556,6 +1559,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
+./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書く部分だけ（--dry-run / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
@@ -1581,6 +1585,11 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   版を固定し、ずれは ⚠ で知らせるだけ (上げるのは手で打つ。UAC の確認が出る)。PowerToys は版を固定せず、91 が
   Keyboard Manager と自動起動がオフならオンにして起動し直す
   （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
+- FancyZones のカスタムレイアウトは manifest で配り、設定は持つキー (`win/powertoys/fancyzones/managed.json`) だけを
+  `bootstrap-windows-fancyzones.sh` (order 92) が `settings.json` へ書く。`settings.json` は PowerToys が全部のキーを書くのでファイルごとは配らず、
+  設定画面で変えていても dotfiles の値へ戻す (衝突で止めない)。FancyZones は `LastWriteTime` の変更しか見ていないので、`mv` の後に `touch` して
+  読み直させる（[`win/README.md`](../win/README.md#fancyzones)、
+  [ADR 042](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/042_win_powertoys_fancyzones_20261106T100504JST/README.md)）
 - Google 日本語入力の設定 (`win/google-japanese-input/`) は manifest では配らない。protobuf のバイナリで
   保存のたびに時刻が入るので、`bootstrap-windows-google-ime.sh` (order 98) が `pjp-google-ime` で
   組み立て、時刻を除いた中身で比べて配り、変換サーバーを落として読み直させる。辞書は private な

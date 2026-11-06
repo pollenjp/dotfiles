@@ -12,6 +12,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
+| `powertoys/fancyzones/custom-layouts.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\custom-layouts.json` | FancyZones のエディターの「カスタム」に登録したレイアウト ([後述](#fancyzones)) |
+| `powertoys/fancyzones/managed.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\settings.json` の一部のキー | FancyZones の設定のうち、dotfiles が持つキーだけ (今は「Windows スナップのオーバーライド」)。manifest では配らず、`bootstrap-windows-fancyzones.sh` が書く ([後述](#fancyzones)) |
 | `powertoys/Install-PowerToys.ps1` | `%USERPROFILE%\.config\powershell\Install-PowerToys.ps1` | Windows の PowerToys が入っていなければ winget で入れる。PowerShell の `Install-PowerToys` から呼ぶ ([後述](#powertoys-を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
@@ -574,6 +576,77 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 
 手でオンにするときは、PowerToys の設定画面で「入出力」→「Keyboard Manager」と、「全般」→「起動時に実行」(Run at startup) を
 オンにしてから、`setup --update` (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。
+
+### FancyZones
+
+`powertoys/fancyzones/` は PowerToys の FancyZones の設定で、`windowsFiles` が有効なマシン全部に同じものを配る。PC ごとの切り替えは
+無い ([ADR 042](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/042_win_powertoys_fancyzones_20261106T100504JST/README.md))。
+
+| ファイル | 中身 | 配り方 |
+| --- | --- | --- |
+| `custom-layouts.json` | エディターの「カスタム」に登録したレイアウト (今は `4k-43inch`)。uuid・名前・座標だけ | manifest (order 90) |
+| `managed.json` | `settings.json` のうち dotfiles が持つキーだけを、同じ形で書いたもの。今は「Windows スナップのオーバーライド」(`fancyzones_overrideSnapHotkeys`) を `true` | `nix/scripts/bootstrap-windows-fancyzones.sh` (order 92) |
+
+持たないもの:
+
+| ファイル | わけ |
+| --- | --- |
+| `applied-layouts.json` | どのモニターにどのレイアウトをあてたか。モニターのシリアルが入り、PC ごとに違う (この repo は public)。レイアウトをあてるのは、そのマシンのエディターで行う |
+| `layout-hotkeys.json`・`layout-templates.json`・`default-layouts.json` | 今は空か既定のまま |
+| `settings.json` のほかのキー | 持ちたくなったら `managed.json` に足す ([キーを足す](#fancyzones-のキーを足す)) |
+
+#### カスタムレイアウト
+
+- **エディターが書いたバイト列のまま置く。** CRLF で末尾に改行が無い。エディターは閉じるたびに 5 つのファイルを書き直すが、中身が
+  同じならバイト列も同じなので、開いて閉じただけでは衝突しない。`.gitattributes` (改行を変えない) と `.editorconfig` で守っている
+- エディターでレイアウトを直すと、次の `setup --update` が衝突で止まる ([衝突したら](#衝突したら))。残すなら取り込んで commit する:
+
+  ```sh
+  cp '/mnt/c/Users/<名前>/AppData/Local/Microsoft/PowerToys/FancyZones/custom-layouts.json' win/powertoys/fancyzones/
+  nix/scripts/bootstrap-windows-files.sh   # 「同じです」になり、記録だけが更新される
+  git add win/powertoys/fancyzones/custom-layouts.json && git commit
+  ```
+
+- 初めて配るマシンでエディターを開いたことがあると、`custom-layouts.json` が既にあるので衝突する (「置いた記録が無く」と出る)。
+  diff を見て、そのマシンのレイアウトが要らなければ `nix/scripts/bootstrap-windows-files.sh --force` で上書きする。要るなら、片方のマシンの
+  エディターで両方のレイアウトを作ってから取り込む
+- 置いたファイルの読まれ方。エディターは起動するたびに読むので、開けば新しいレイアウトが出る。動いている FancyZones は
+  `bootstrap-windows-files.sh` の置き換え (`mv`) に気づかない (`LastWriteTime` の変更しか見ていない)。今あてているレイアウトを直したときは、
+  エディターを開いて閉じるか、WSL で `touch` すると読み直す。PowerToys を起動し直しても読む
+
+#### 持つキー
+
+`bootstrap-windows-fancyzones.sh` は `managed.json` のキーを `settings.json` と比べ、値が違えばそのキーだけを書く。
+
+| 打つもの | すること |
+| --- | --- |
+| `nix/scripts/bootstrap-windows-fancyzones.sh` | 値が違えば書く (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-fancyzones.sh --dry-run` | 判定だけ見る |
+| `nix/scripts/bootstrap-windows-fancyzones.sh --check` | `managed.json` と `custom-layouts.json` の検証だけ |
+
+- **設定画面で手で変えていても、次の `setup --update` で dotfiles の値へ戻す。** 戻したことを 1 行出し、衝突では止めない。別の値にしたいなら
+  `managed.json` を直して commit する。Windows Terminal と違い、記録・`--import`・退避は持たない (PowerToys は `settings.json` に全部のキーを書くので、
+  Terminal の判定のままだと初回に既定の `false` と衝突する)
+- 値が同じなら書かない (`LastWriteTime` も変えない)
+- ほかのキーの値・キーの順・1 行で末尾に改行なしの形は変えない
+- 隣に書いて `mv` した後に `touch` する。FancyZones は `LastWriteTime` の変更しか見ていないので、`mv` だけでは気づかない。読みかけを見せないよう、
+  その場には書かない。FancyZones はその場で読み直し、PowerToys は起動し直さない
+- `settings.json` が無ければ、持つキーと `name`・`version` だけのファイルを作る。FancyZones は無いキーを今の値のまま読み、設定画面は既定値で読んで、
+  開いたときに全部のキーを書く (持つキーの値はそのまま)。FancyZones は `name` が無いとエラーのダイアログを出す
+- `managed.json` から消したキーは、`settings.json` からは消さない。最後の値が残り、以後は戻さない
+- 読めない (JSON でない)・書けないときは、警告して書かずに進む (exit 0)。設定画面が書いている途中に当たっても読めるよう、5 回まで読む
+- FancyZones がオフ (全体の `settings.json` の `enabled.FancyZones` が `false`) のマシンでは、設定が効かないので警告する (setup の最後のまとめにも残す)。
+  自動でオンにはしない。オンにするのは PowerToys の設定画面の「ウィンドウとレイアウト」→「FancyZones」。FancyZones は既定でオンなので、キーやファイルが無ければ警告しない。読めないときは、確かめられないと警告する
+- 設定画面を開いたまま流すと、設定画面が前の値を持ったままになることがある (確かめていない)。そのまま何かを変えて前の値へ戻っても、次の `setup --update` で戻す
+- 効いているかは、Win + 矢印キーで窓がゾーンの間を動くかで確かめる
+
+#### FancyZones のキーを足す
+
+1. PowerToys の設定画面で値を決める (その場で `settings.json` に書かれる)
+2. `settings.json` の `properties` の同じキーを、同じ形 (`{"value": …}`) で `managed.json` に写す。script は直さない。object を辿った先の、object でない値 1 つが
+   持つキー 1 つなので、ホットキーのように値が object のキーは、持ちたい項目だけを書いてよい
+3. `nix/scripts/bootstrap-windows-fancyzones.sh --check` で検証し、`--dry-run` で「揃っています」と出るのを見る
+4. commit して `~/dotfiles/setup --update`
 
 ### PowerToys を入れる (winget)
 
