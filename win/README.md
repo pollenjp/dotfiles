@@ -622,7 +622,7 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 | --- | --- |
 | `nix/scripts/bootstrap-windows-fancyzones.sh` | 値が違えば書く (`setup --update` でも毎回走る) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --dry-run` | 判定だけ見る |
-| `nix/scripts/bootstrap-windows-fancyzones.sh --check` | `managed.json` と `custom-layouts.json` の検証だけ |
+| `nix/scripts/bootstrap-windows-fancyzones.sh --check` | `managed.json` と `custom-layouts.json` の検証だけ (CI の lint でも走る) |
 
 - **設定画面で手で変えていても、次の `setup --update` で dotfiles の値へ戻す。** 戻したことを 1 行出し、衝突では止めない。別の値にしたいなら
   `managed.json` を直して commit する。Windows Terminal と違い、記録・`--import`・退避は持たない (PowerToys は `settings.json` に全部のキーを書くので、
