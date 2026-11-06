@@ -584,7 +584,7 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 
 | ファイル | 中身 | 配り方 |
 | --- | --- | --- |
-| `custom-layouts.json` | エディターの「カスタム」に登録したレイアウト (今は `4k-43inch`)。uuid・名前・座標だけ | manifest (order 90) |
+| `custom-layouts.json` | エディターの「カスタム」に登録したレイアウト (今は `4k-43inch` と `1080p`)。uuid・名前・座標だけ | manifest (order 90) |
 | `managed.json` | `settings.json` のうち dotfiles が持つキーだけを、同じ形で書いたもの。今は「Windows スナップのオーバーライド」(`fancyzones_overrideSnapHotkeys`) を `true` | `nix/scripts/bootstrap-windows-fancyzones.sh` (order 92) |
 
 持たないもの:

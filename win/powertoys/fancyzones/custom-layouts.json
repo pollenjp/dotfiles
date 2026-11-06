@@ -5,14 +5,86 @@
       "name": "4k-43inch",
       "type": "canvas",
       "info": {
+        "ref-width": 2560,
+        "ref-height": 1392,
+        "zones": [
+          {
+            "X": 0,
+            "Y": 54,
+            "width": 1846,
+            "height": 1234
+          },
+          {
+            "X": 0,
+            "Y": 297,
+            "width": 1374,
+            "height": 1055
+          },
+          {
+            "X": 329,
+            "Y": 54,
+            "width": 1412,
+            "height": 1338
+          },
+          {
+            "X": 946,
+            "Y": 54,
+            "width": 1583,
+            "height": 1098
+          },
+          {
+            "X": 1058,
+            "Y": 363,
+            "width": 1463,
+            "height": 973
+          },
+          {
+            "X": 1147,
+            "Y": 261,
+            "width": 1413,
+            "height": 982
+          },
+          {
+            "X": 145,
+            "Y": 0,
+            "width": 2258,
+            "height": 1202
+          }
+        ],
+        "sensitivity-radius": 20
+      }
+    },
+    {
+      "uuid": "{E389FFDC-3BDD-48CB-B448-0672774C5997}",
+      "name": "1080p",
+      "type": "canvas",
+      "info": {
         "ref-width": 1920,
         "ref-height": 1032,
         "zones": [
           {
-            "X": 100,
-            "Y": 100,
-            "width": 768,
-            "height": 412
+            "X": 0,
+            "Y": 29,
+            "width": 1505,
+            "height": 878
+          },
+          {
+            "X": 454,
+            "Y": 0,
+            "width": 1466,
+            "height": 805
+          },
+          {
+            "X": 0,
+            "Y": 159,
+            "width": 1573,
+            "height": 873
+          },
+          {
+            "X": 454,
+            "Y": 87,
+            "width": 1466,
+            "height": 910
           }
         ],
         "sensitivity-radius": 20
