@@ -242,6 +242,11 @@ jobs:
       - name: win/windows-terminal/
         run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-terminal.sh --check
 
+      # win/powertoys/fancyzones/ の検証 (ADR 042)。flake からは win/ が見えないので、上と同じく
+      # checkout の上で流す。jq は flake が固定している nixpkgs から借りる。
+      - name: win/powertoys/fancyzones/
+        run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-fancyzones.sh --check
+
       # herdr のキーバインドと [ui] (sidebar の幅と行・toast) を WSL (nix/files/herdr/config.toml) と Windows
       # (win/herdr/config.toml) でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
       - name: herdr のキーバインドと [ui] (WSL と Windows)
