@@ -6,6 +6,8 @@ description: D3.js / Observable Plot でデータのグラフや独自の可視�
   ページでズーム・ドラッグ・ブラシできる図を作るときに読む。Nix flake での実行環境（Node・d3・Plot・
   linkedom・resvg・日本語フォント）、chart module の書き方、ファイル構成と出力先、白背景などの規約、
   DOM の無い Node で踏む罠を含む
+metadata:
+  pjp-pack: diagram
 ---
 
 # pjp-d3js

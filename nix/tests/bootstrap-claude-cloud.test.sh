@@ -3,11 +3,13 @@
 #
 # nix/scripts/claude-cloud/bootstrap-claude-cloud.sh の振る舞いを、使い捨ての HOME で確かめる。
 #
-#   bash nix/tests/bootstrap-claude-cloud.test.sh [<nix/scripts/claude-cloud のパス> [<nix/files/claude のパス>]]
+#   bash nix/tests/bootstrap-claude-cloud.test.sh [<nix/scripts/claude-cloud のパス> [<nix/files/claude のパス>
+#     [<nix/scripts/bootstrap-claude-skill-overrides.sh のパス>]]]
 #
-# flake の checks (bootstrap-claude-cloud-test) が Nix のサンドボックスで流す。使うのは bash・jq・coreutils だけ。
-# script は自分の在る checkout を dotfiles とみなすので、渡された 2 つを使い捨ての checkout (空白を含む「dot files」)
-# の nix/ の下へ写し、そこの script を流す。共通の CLAUDE.md・hook・skill は本物を使い、claude-skills は偽物を作る。
+# flake の checks (bootstrap-claude-cloud-test) が Nix のサンドボックスで流す。使うのは bash・jq・coreutils・awk だけ。
+# script は自分の在る checkout を dotfiles とみなすので、渡された 3 つを使い捨ての checkout (空白を含む「dot files」)
+# の nix/ の下へ写し、そこの script を流す。共通の CLAUDE.md・hook・skill と、skillOverrides を書く script は本物を使い、
+# claude-skills は偽物を作る。
 #
 # ## 確かめること
 #
@@ -32,6 +34,11 @@
 #   - SessionStart に自分を --quiet と同じ option で 1 件だけ登録し、option を変えて流し直すと置き換える。手で足した hook と
 #     ほかのキーは残し、同じ option なら settings.json を書き直さない
 #   - settings.json が壊れていれば触らずに警告し、ほかは進めて 0 で終わる
+#   - settings.json の skillOverrides に、入口 (pjp-pack-<pack>) のある pack の skill (dotfiles の pjp-plantuml など) の
+#     name-only と、claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/) の anthropic-skills:<名前> の
+#     user-invocable-only を書く。張らない skill (skip-skills.txt の pjp-dotfiles-update) と常駐の skill には書かず、
+#     host option のファイル (cloud に無い) の警告は出さない。--quiet ならこの分も stdout に出さない
+#   - nix/scripts/bootstrap-claude-skill-overrides.sh が無ければ、何も書かずに 1 で終わる
 
 set -u -o pipefail
 
@@ -41,6 +48,7 @@ here=$(
 )
 cloud_src=${1:-${here}/../scripts/claude-cloud}
 files_src=${2:-${here}/../files/claude}
+overrides_src=${3:-${here}/../scripts/bootstrap-claude-skill-overrides.sh}
 work=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-claude-cloud-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
@@ -63,6 +71,7 @@ new_dotfiles() {
   mkdir -p "$1/nix/scripts" "$1/nix/files"
   cp -R "${cloud_src}" "$1/nix/scripts/claude-cloud"
   cp -R "${files_src}" "$1/nix/files/claude"
+  cp "${overrides_src}" "$1/nix/scripts/bootstrap-claude-skill-overrides.sh"
   chmod -R u+w "$1"
 }
 
@@ -437,6 +446,53 @@ if [[ $(rc_of t16) == 0 ]] \
   ok "settings.json が壊れていれば触らずに警告し、skill と CLAUDE.md は書いて 0 で終わる"
 else
   ng "settings.json が壊れていれば触らずに警告し、skill と CLAUDE.md は書いて 0 で終わる" "rc=$(rc_of t16) $(err_of t16)"
+fi
+
+# ---- skillOverrides ----
+
+# 17. 入口のある pack の skill を name-only に、同期された skill を user-invocable-only にする。張らない skill と常駐の
+# skill には書かず、host option の警告は出さない。--quiet なら stdout に何も出さない
+sk_pack="${work}/pack-skills"
+new_skills "${sk_pack}" pjp-fake-one pjp-pack-diagram
+h=$(case_home t17)
+mkdir -p "${h}/.claude/skills/synced/b1/pdf"
+printf -- '---\nname: pdf\ndescription: x\n---\n' >"${h}/.claude/skills/synced/b1/pdf/SKILL.md"
+run_case t17 --claude-skills "${sk_pack}"
+settings="${h}/.claude/settings.json"
+if [[ $(rc_of t17) == 0 ]] \
+  && [[ $(jq -r '.skillOverrides["pjp-plantuml"]' "${settings}") == name-only ]] \
+  && [[ $(jq -r '.skillOverrides["pjp-d3js"]' "${settings}") == name-only ]] \
+  && [[ $(jq -r '.skillOverrides["anthropic-skills:pdf"]' "${settings}") == user-invocable-only ]] \
+  && [[ $(jq '.skillOverrides | has("pjp-dotfiles-update") or has("pjp-nix-flake") or has("pjp-pack-diagram")' "${settings}") == false ]] \
+  && ! grep -q -F '生成ファイル' "${work}/t17/err"; then
+  ok "入口のある pack の skill を name-only に、同期された skill を user-invocable-only にし、張らない skill・常駐の skill には書かない"
+else
+  ng "skillOverrides を書く" "rc=$(rc_of t17) $(jq -c '.skillOverrides' "${settings}" 2>&1) $(err_of t17)"
+fi
+jq '.skillOverrides["anthropic-skills:pdf"] = "on"' "${settings}" >"${work}/t17-settings.json"
+cp "${work}/t17-settings.json" "${settings}"
+rm -rf "${h}/.claude/skills/synced/b1/pdf"
+run_case t17 --quiet --claude-skills "${sk_pack}"
+if [[ $(rc_of t17) == 0 && ! -s ${work}/t17/out ]] \
+  && [[ $(jq -r '.skillOverrides["anthropic-skills:pdf"]' "${settings}") == on ]] \
+  && [[ $(jq -r '.skillOverrides["pjp-plantuml"]' "${settings}") == name-only ]]; then
+  ok "--quiet なら skillOverrides の分も stdout に出さない (手で書いた値は残す)"
+else
+  ng "--quiet の skillOverrides" "rc=$(rc_of t17) out=$(cat "${work}/t17/out") $(jq -c '.skillOverrides' "${settings}" 2>&1)"
+fi
+
+# 18. bootstrap-claude-skill-overrides.sh が無い → 何も書かずに 1
+dot2="${work}/dot-no-overrides"
+new_dotfiles "${dot2}"
+rm -f "${dot2}/nix/scripts/bootstrap-claude-skill-overrides.sh"
+h=$(case_home t18)
+run_script="${dot2}/nix/scripts/claude-cloud/bootstrap-claude-cloud.sh"
+run_case t18 --claude-skills "${sk}"
+run_script=${script}
+if [[ $(rc_of t18) == 1 ]] && grep -q -F 'bootstrap-claude-skill-overrides.sh' "${work}/t18/err" && untouched "${h}"; then
+  ok "bootstrap-claude-skill-overrides.sh が無ければ、何も書かずに 1 で終わる"
+else
+  ng "bootstrap-claude-skill-overrides.sh が無い" "rc=$(rc_of t18) $(err_of t18) $(find "${h}" 2>&1)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

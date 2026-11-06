@@ -5,6 +5,8 @@ description: draw.io / diagrams.net で図を描く・直す・書き出すと�
   頼まれたとき、`drawio/` ディレクトリを用意するとき、図を SVG / PNG へ出力するときに読む。
   Nix flake での実行環境（drawio 本体・仮想ディスプレイ・日本語フォント）、ファイル構成と
   出力先、白背景などの規約、headless 特有のハマりどころを含む
+metadata:
+  pjp-pack: diagram
 ---
 
 # pjp-drawio

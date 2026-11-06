@@ -6,6 +6,8 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
   この PC のホスト … があります」「この PC は dotfiles-private に … として登録されていますが」と知らせたとき、登録の PR が merge
   されて ~/dotfiles/flake.nix を仕上げるとき、新しい PC を登録するときに読む。ローカル flake を今の雛形へ移すだけの話は
   pjp-dotfiles-local-flake-migrate の側。
+metadata:
+  pjp-pack: machine
 ---
 
 # pjp-dotfiles-register-host

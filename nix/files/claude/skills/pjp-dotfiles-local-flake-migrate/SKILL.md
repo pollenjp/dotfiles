@@ -6,6 +6,8 @@ description: dotfiles のローカル flake (`~/dotfiles/flake.nix`) を、本�
   「flake.nix は前の雛形から作られています」と知らせたとき、本体を更新したら `~/dotfiles` 経由の switch が
   「option が無い・削除された」で落ちるようになったとき、`setup-local-flake.sh --force` で作り直したくなったとき
   (作り直すと値が消える) に読む。flake.lock を上げて switch する話は pjp-dotfiles-update の側。
+metadata:
+  pjp-pack: machine
 ---
 
 # pjp-dotfiles-local-flake-migrate

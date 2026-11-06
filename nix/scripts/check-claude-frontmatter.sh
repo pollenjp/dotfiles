@@ -14,7 +14,7 @@
 #
 # 見るのは <nix>/files/claude/ の下で、nix/home/modules/claude.nix が ~/.claude/ へ配置するもの:
 #
-#   skills/<名前>/SKILL.md   frontmatter・name がディレクトリ名と同じ・description
+#   skills/<名前>/SKILL.md   frontmatter・name がディレクトリ名と同じ・description・metadata (下)
 #   agents/**/<名前>.md      frontmatter・name がファイル名と同じ・description・別のサブディレクトリに同じファイル名が無い
 #                            (Claude Code はサブディレクトリの下も読む)
 #   commands/**/<名前>.md    frontmatter・description (呼び出し名はパスから決まるので、name は見ない)
@@ -31,6 +31,12 @@
 # 名前が pjp- で始まらない・agent のファイル名が別のサブディレクトリのものと同じ、のどれでも落とす。description が
 # 1024 文字を超えるものは、注意を出すが落とさない。観点は claude-skills (private) の scripts/lint.sh の frontmatter の
 # 検査に揃えてある。片方の観点を変えたら、もう片方も見る。
+#
+# skill の metadata (Claude Code は中身を読まない、自分の道具のための欄) も見る。pjp-pack は pack の割り当てで、
+# bootstrap-claude-skill-overrides.sh が読んで、その pack の skill を一覧で名前だけにする (nix/README.md「skill の一覧を
+# 枠に収める」)。metadata が map でない・pjp-pack が文字列でない・pack の名前 (下の packs) のどれでもない・bootstrap の
+# 読む形 (「metadata:」の下に字下げした「pjp-pack: <pack>」の 1 行) でない・入口の skill (pjp-pack-<pack>。常駐) に
+# pjp-pack がある、のどれでも落とす。入口が在るかは見ない (入口は claude-skills にある)。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -107,6 +113,10 @@ base=$(basename "${nix_dir}")
 
 problems=()
 notes=()
+
+# skill の metadata の pjp-pack に書ける pack の名前。入口の skill (pjp-pack-<pack>) は claude-skills にある。pack を足すなら、
+# ここと claude-skills の入口・scripts/lint.sh を一緒に直す
+packs=(diagram video notion machine repo browser)
 
 # $1: ファイルかディレクトリ。nix/ から書いた名前を出す (CI の出力を短くする)
 label_of() {
@@ -284,6 +294,50 @@ check_md() {
   fi
 }
 
+# $1: skill の SKILL.md、$2: skill の名前 (ディレクトリ名)。frontmatter の metadata を見る (先頭の「skill の metadata」)。
+# frontmatter が無い・中に --- がある・YAML の map として読めないときは、check_md が落とすので何も言わない
+check_skill_metadata() {
+  local file=$1 skill_name=$2 label fm meta_type pack_type pack known
+  label=$(label_of "${file}")
+  fm=$(frontmatter "${file}") || return 0
+  [[ -z $(awk 'index($0, "---") { print; exit }' <<<"${fm}") ]] || return 0
+  [[ $(fm_yq 'type' "${fm}" 2>/dev/null) == '!!map' ]] || return 0
+
+  meta_type=$(fm_yq '.metadata | type' "${fm}")
+  case ${meta_type} in
+    '!!null') return 0 ;; # 無い (空の metadata: も)
+    '!!map') ;;
+    *)
+      problems+=("${label}: metadata は key: value の map にしてください (${meta_type})")
+      return 0
+      ;;
+  esac
+  pack_type=$(fm_yq '.metadata["pjp-pack"] | type' "${fm}")
+  [[ ${pack_type} != '!!null' ]] || return 0
+  if [[ ${skill_name} == pjp-pack-* ]]; then
+    problems+=("${label}: 入口の skill は常駐なので、metadata の pjp-pack を書かないでください")
+    return 0
+  fi
+  if [[ ${pack_type} != '!!str' ]]; then
+    problems+=("${label}: metadata の pjp-pack が文字列ではありません (${pack_type})")
+    return 0
+  fi
+  # bootstrap-claude-skill-overrides.sh は yq の無いマシンでも動くよう、決まった形だけを awk で読む (読めない形の skill は
+  # 黙って説明つきのまま残る)。flow の形 (metadata: {pjp-pack: …}) と block scalar (pjp-pack: |) はここで落とす
+  if [[ $(fm_yq '.metadata | style' "${fm}") == flow ]] \
+    || [[ $(fm_yq '.metadata["pjp-pack"] | style' "${fm}") =~ ^(literal|folded)$ ]]; then
+    problems+=("${label}: metadata の pjp-pack は「metadata:」の下に字下げして「pjp-pack: <pack>」の 1 行で書いてください (bootstrap-claude-skill-overrides.sh はこの形だけを読みます)")
+    return 0
+  fi
+  pack=$(fm_yq '.metadata["pjp-pack"]' "${fm}")
+  for known in "${packs[@]}"; do
+    if [[ ${pack} == "${known}" ]]; then
+      return 0
+    fi
+  done
+  problems+=("${label}: metadata の pjp-pack '${pack}' は pack の名前ではありません (${packs[*]} のどれか)。pack を足すなら、この script の packs と claude-skills の入口 (pjp-pack-<pack>) を一緒に足してください")
+}
+
 found=0
 
 # skills: <名前>/SKILL.md。直下には skill のディレクトリ (と README.md) だけを置く
@@ -302,6 +356,7 @@ for entry in "${claude_dir}"/skills/*; do
     continue
   fi
   check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
+  check_skill_metadata "${entry}/SKILL.md" "${entry_name}"
 done
 
 # $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す。symlink は辿って、リンク先の
