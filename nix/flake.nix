@@ -348,6 +348,7 @@
           bootstrap-windows-google-ime-install-test = scriptTest "bootstrap-windows-google-ime-install" ./scripts/bootstrap-windows-google-ime-install.sh;
           bootstrap-windows-files-test = scriptTest "bootstrap-windows-files" ./scripts/bootstrap-windows-files.sh;
           bootstrap-windows-terminal-test = scriptTest "bootstrap-windows-terminal" ./scripts/bootstrap-windows-terminal.sh;
+          bootstrap-windows-international-test = scriptTest "bootstrap-windows-international" ./scripts/bootstrap-windows-international.sh;
           # repo の dotfiles.txt も渡し、警告なしに欄へ入ることを確かめる
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
             bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}

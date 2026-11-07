@@ -19,6 +19,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
+| `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 
 ## 配る
 
@@ -748,7 +749,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 
   戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
 - 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
-  済んでいるが、後ろの [Windows Terminal](#windows-terminal) の手順 (order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
+  済んでいるが、後ろの [日付と時刻の形式](#日付と時刻の形式)・[Windows Terminal](#windows-terminal) の手順 (どちらも order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
   など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
 - `--import` で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
@@ -956,3 +957,79 @@ commit しない。この repo は public で、Windows に付いてくる音は
 3. `nix/scripts/bootstrap-windows-terminal.sh --check` で検証し、`--dry-run` で「揃っています」と出るのを見る
    (設定画面で入れた値と同じなので、記録だけが作られる)
 4. commit して `~/dotfiles/setup --update`
+
+## 日付と時刻の形式
+
+`international/managed.json` は、Windows の日付と時刻の形式 (設定の「時刻と言語」→「言語と地域」の地域設定の形式) のうち、
+dotfiles が持つ値だけを書いたもの。キーはユーザーごとのレジストリ `HKCU\Control Panel\International` の値の名前。
+`manifest.toml` では配らず、`nix/scripts/bootstrap-windows-international.sh` (order 99) が `setup --update` のたびに、`pwsh.exe` で
+SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
+([設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-windows-international-format-design.md))。
+
+| 名前 | 値 | 形式 | 出る形 |
+| --- | --- | --- | --- |
+| `sShortDate` | `yyyy-MM-dd` | 短い日付 | `2026-11-07` (タスクバーの時計の日付・エクスプローラーの更新日時) |
+| `sTimeFormat` | `HH:mm:ss` | 長い時刻 | `09:40:05`・`14:40:05` |
+| `sShortTime` | `HH:mm` | 短い時刻 | `09:40`・`14:40` (タスクバーの時計・エクスプローラーの更新日時) |
+
+- 地域 (en-US など) そのものと、持たない値 (長い日付・通貨・小数点・週の始まりなど) は変えない
+- レジストリを直には書かない。Microsoft の文書のとおり SetLocaleInfoW で書き、WM_SETTINGCHANGE を送る。開いているアプリ
+  (タスクバーの時計など) はその場で読み直し、サインアウトは要らない (2026-11-07 に en-US の PC で、書いた直後にタスクバーの
+  時計が `10:06 PM` / `11/7/2026` から `22:06` / `2026-11-07` になった)
+- 古いアプリ向けの付随の値 (`sDate`・`iDate`・`iTime`・`iTLZero`) は、SetLocaleInfoW が形式に合わせて書き直す
+  (`-`・`2`・`1`・`1`。この 3 つの形式を既定に持つ sv-SE の既定と同じ)。dotfiles では持たない
+- 形式の書き方は Microsoft の文書の [日付](https://learn.microsoft.com/en-us/windows/win32/intl/day--month--year--and-era-format-pictures)・
+  [時刻](https://learn.microsoft.com/en-us/windows/win32/intl/hour--minute--and-second-format-pictures) の format picture。
+  形は `jq --indent 4` の出力に揃える (`--import` が書き直したときの差分を値だけにするため。`--check` が見る)
+
+| 打つもの | すること |
+| --- | --- |
+| `nix/scripts/bootstrap-windows-international.sh` | 書く (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-international.sh --dry-run` | 判定だけ見る (Windows の値は読む) |
+| `nix/scripts/bootstrap-windows-international.sh --import` | 設定画面で変えた値を `managed.json` へ取り込む ([衝突したら](#日付と時刻の形式が衝突したら)) |
+| `nix/scripts/bootstrap-windows-international.sh --force` | 衝突でも `managed.json` の値で書く |
+| `nix/scripts/bootstrap-windows-international.sh --check` | `managed.json` の検証だけ (CI の lint でも走る) |
+
+値ごとに、Windows の今の値を `managed.json`・前回書いた値 (`~/.local/state/dotfiles/windows-international.applied.json`)・
+地域の既定と比べる。Windows Terminal の判定に「記録が無く、地域の既定のまま」の行を足したもので、初めて書くマシンでも
+手で変えていなければ止まらない。
+
+| Windows の今の値 | すること |
+| --- | --- |
+| `managed.json` と同じ | 何もしない (記録が無ければ記録だけする) |
+| 前回書いた値と同じ | 書く (`managed.json` を変えた) |
+| 記録が無く、地域の既定と同じ | 書く (初めて書くマシンで、手で変えていない) |
+| それ以外 | 衝突。書かずに止まる ([衝突したら](#日付と時刻の形式が衝突したら)) |
+
+- 書くときは、衝突でない値を全部、表の順 (`sShortDate`・`sTimeFormat`・`sShortTime`) に書き直してから読み戻して比べる。書けない・
+  読み戻すと違う値は ⚠ で知らせて止まる (exit 1)。記録は書けた値だけ
+- グループポリシーで止められている値 (Win32 のエラー 1260) は、流し直しても書けず dotfiles では直せないので、⚠ で知らせて
+  飛ばす (setup は止めない。毎回同じ警告が出る)
+- `managed.json` から消した値は、Windows では戻さない (記録からだけ消す)
+- `pwsh.exe` が無い・WSL の interop が落ちていて読めないときは、⚠ で知らせて書かずに進む
+
+### 日付と時刻の形式が衝突したら
+
+`managed.json` が持つ値を設定画面で変えていた (か、地域を変えて新しい地域の既定に戻った) と、触らずに Windows 側・
+`managed.json`・前回書いた値・地域の既定を出して止まる。書いた記録が無いのに、地域の既定とも違う値が先にある (初めて書く
+マシンで、手で設定してあった) ときも同じで、「書いた記録が無く」と出る。`setup --update` はこの手順 (order 99) で止まり、
+後ろの [Windows Terminal](#windows-terminal) の手順・wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、解いて流し直す
+まで走らない。衝突しない値は書いてある。どちらかで解く。
+
+1. Windows 側の値を残す: `--import` で `managed.json` へ取り込み、`git diff` を見て commit して push する。
+   `managed.json` に commit していない変更があると、取り込みは何も書かずに止まる
+2. `managed.json` の値で書く: `--force`
+
+```sh
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-international.sh --import
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-international.sh --force
+```
+
+### 形式の値を足す
+
+持てる名前は script の表 (`table`) にあるものだけ (今は上の 3 つ)。長い日付 (`sLongDate`) などを持つときは:
+
+1. `nix/scripts/bootstrap-windows-international.sh` の `table` に、名前と LCType (winnls.h の `LOCALE_*` の値) を 1 行足す。
+   書く順も表の順
+2. `managed.json` に同じ名前で値を書き、`--check` で検証して `--dry-run` で判定を見る
+3. commit して `~/dotfiles/setup --update`
