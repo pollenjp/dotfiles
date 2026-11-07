@@ -171,6 +171,15 @@
               system
               ;
           };
+          pjp-wsl-xdg-open-test = scriptTest "pjp-wsl-xdg-open" ./pkgs/pjp-wsl-xdg-open/pjp-wsl-xdg-open.sh;
+          wsl-xdg-open-state = import ./tests/wsl-xdg-open.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
@@ -691,11 +700,17 @@
         # home/modules/wsl-mtu-guard.nix が system の unit の ExecStart にする。単体で試すなら (root が要る):
         #
         #   sudo "$(nix build --no-link --print-out-paths ./nix#pjp-wsl-mtu-guard)/bin/pjp-wsl-mtu-guard" eth0 1350
+        #
+        # WSL の xdg-open も WSL のマシンでしか使わない。home には home/modules/wsl-xdg-open.nix が入れる。
+        # 単体で試すなら:
+        #
+        #   nix run ./nix#pjp-wsl-xdg-open -- <URL かファイルのパス>
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
           pjp-wsl-mtu-guard = pkgs.callPackage ./pkgs/pjp-wsl-mtu-guard { };
+          pjp-wsl-xdg-open = pkgs.callPackage ./pkgs/pjp-wsl-xdg-open { };
         }
       );
 

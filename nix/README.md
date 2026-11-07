@@ -1507,6 +1507,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `xdg-open` (PATH) | `nix/pkgs/pjp-wsl-xdg-open/` (WSL のマシンだけ。[後述](#wsl-の-xdg-open)) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
@@ -2318,6 +2319,53 @@ ip link show eth0                                  # 今の MTU
   enabled・active になってから手で消す（2 つが同時に動いても、どちらも下げるだけなので害は無い）
 - WSL を mirrored モード（`networkingMode=mirrored`）にするのも一つの手だが、Docker と `localhost` の挙動が変わるので
   ここでは使っていない
+
+## WSL の xdg-open
+
+`wsl.enable` のマシンの PATH に、URL とファイルを Windows の既定のアプリで開く `xdg-open`（`nix/pkgs/pjp-wsl-xdg-open/`）を
+置く。root は要らないので option は無く、WSL でないマシンには入らない。
+
+Linux 版の herdr は、pane のリンクの Ctrl+クリックで `xdg-open` を呼ぶ（WSL かどうかを見ない。
+[herdr の中の Claude Code にリンクを出させる](#herdr-の中の-claude-code-にリンクを出させる)）。WSL の Ubuntu には `xdg-open` が
+入っていないので、無いと開かず、画面にも何も出ない（`~/.config/herdr/herdr-client.log` に `failed to open pane URL` が残るだけ）。
+PATH に入るので、`gh browse` など `xdg-open` を呼ぶほかの CLI もこれを使う。
+
+| 渡すもの | すること | 終了コード |
+| --- | --- | --- |
+| `http://`・`https://` の URL | 既定のブラウザで開く。空白・`"`・制御文字・ASCII の外の文字は `%XX` にする | 0 |
+| あるファイル・ディレクトリ | `wslpath -w` で変換して、既定のアプリで開く | 0 |
+| `file:///…`・`file://localhost/…` | `%XX` を戻して、上のファイルと同じに開く（`#`・`?` の後ろは外す） | 0 |
+| 無いファイル | 開かない | 2 |
+| Windows が実行するファイル（`.exe`・`.bat`・`.js`・`.ps1`・`.lnk` など） | 開かない。実行したいなら直に打つ | 4 |
+| ほかの scheme（`mailto:`・`ms-msdt:` など）・ほかのホストの `file://` | 開かない | 4 |
+
+終了コードの意味は xdg-utils の `xdg-open` と同じ（ほかに 1 は引数の誤り、3 は `rundll32.exe` が無いとき）。
+
+Windows へは `rundll32.exe url.dll,FileProtocolHandler` で渡す。シェルを通らないので、URL の `&` で切れず、`%` も展開されない。
+渡した先の ShellExecute は `xdg-open` より広く、実行ファイルをそのまま起動し、`ms-msdt:` のような scheme を別のアプリへ渡す。
+サーバーから受け取った URL を開く CLI からも呼ばれるので、上の表の「開かない」ものは渡さない。
+
+### 反映
+
+`~/dotfiles/setup --update` で入る。herdr は Ctrl+クリックのたびに PATH から `xdg-open` を引くので、起こし直さなくてよい
+（herdr を起こしたシェルの PATH に `~/.nix-profile/bin` があること）。
+
+### 確かめる
+
+```sh
+command -v xdg-open                 # ~/.nix-profile/bin/xdg-open
+xdg-open 'https://example.com/?a=1&b=2'   # 既定のブラウザのタブが開く (アドレス欄の & の後ろが残る)
+grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # herdr の Ctrl+クリックが開けなかった記録
+```
+
+### 気を付けること
+
+- 開けたかどうかは `rundll32.exe` の終了コードでは分からない。0 で終わっても開いたとは限らない
+- interop が外れていると（`Exec format error`）`rundll32.exe` を起こせず、4 で終わる
+- `url.dll` の入口には ANSI 版しかないので、ファイルの名前に Windows の ANSI のコードページに無い文字があると開けない
+  （コードページが 65001 の PC では当たらない）。URL は `%XX` にしてから渡すので当たらない
+- apt の `xdg-utils` を入れても、`~/.nix-profile/bin` が `/usr/bin` より先なのでこちらが当たる。Linux のアプリで開きたいなら
+  `/usr/bin/xdg-open` を直に打つ
 
 ## fish
 
