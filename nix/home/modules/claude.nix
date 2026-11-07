@@ -372,6 +372,19 @@ in
         + "\n";
     }
 
+    # 解説動画の書き出しの資源の上限の割合 (videoRender.limitPercent。ADR 043)。
+    #
+    # claude-video-offer.json と同じく、claude-skills の動画の雛形の入口 tools/limit.sh に option の値を
+    # 渡す置き場。limit.sh は limitPercent の割合で systemd の user slice pjp-video.slice に CPU とメモリの
+    # 上限を付け、書き出しをその中で流す。ファイルが無い・読めないときは 70 で縛る。既定のままでも必ず書く。
+    {
+      ".local/state/dotfiles/claude-video-limits.json".text =
+        builtins.toJSON {
+          inherit (cfg.videoRender) limitPercent;
+        }
+        + "\n";
+    }
+
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
     #
     # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
