@@ -11,6 +11,8 @@
 #     - wsl.enable と onePassword.enable が両方 true のマシンの home.packages に op (mainProgram) の package が 1 つ入る
 #     - WSL だけ・1Password だけ・どちらも無しのマシンには入らない
 #     - claude-op-reason.json は、入るマシンで {"enable":true}、ほかで {"enable":false}。どちらも改行で終わる
+#     - Claude の hook (op-reason-guard.sh) は、入らないマシンにも repo の script から実行できるファイルとして置かれる
+#       (hook は claude-op-reason.json を読んで黙る)
 #   ビルド時 (このランナーの system だけ)
 #     - 入るマシンの profile の bin/op と bin/pjp-op-log は、この package のもの
 #     - 入らないマシンの profile に bin/op は無い
@@ -48,6 +50,7 @@ let
   isOp = p: (p.meta.mainProgram or null) == "op";
   opOf = cfg: builtins.filter isOp cfg.home.packages;
   state = cfg: cfg.home.file.".local/state/dotfiles/claude-op-reason.json".text;
+  hook = cfg: cfg.home.file.".claude/hooks/op-reason-guard.sh";
 
   cases = [
     {
@@ -73,6 +76,19 @@ let
     {
       name = "claude-op-reason.json は改行で終わる";
       ok = lib.hasSuffix "\n" (state wslOp) && lib.hasSuffix "\n" (state plain);
+    }
+    {
+      name = "hook は入るマシンにも入らないマシンにも、repo の script から実行できるファイルとして置かれる";
+      ok =
+        lib.all
+          (
+            cfg:
+            (hook cfg).executable && "${(hook cfg).source}" == "${../files/claude/hooks/op-reason-guard.sh}"
+          )
+          [
+            wslOp
+            plain
+          ];
     }
   ];
 

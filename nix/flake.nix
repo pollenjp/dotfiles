@@ -339,6 +339,7 @@
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
+          op-reason-guard-test = scriptTest "op-reason-guard" ./files/claude/hooks/op-reason-guard.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
