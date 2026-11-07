@@ -461,7 +461,7 @@
               system
               ;
           };
-          claude-video-limits-state = import ./tests/claude-video-limits.nix {
+          claude-heavy-jobs-state = import ./tests/claude-heavy-jobs.nix {
             inherit
               lib
               pkgs

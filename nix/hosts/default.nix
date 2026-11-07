@@ -33,9 +33,9 @@
 #                   claude.notion.routes で、このマシンだけの宛先の規則 (origin の owner/repo → プロファイル) を足せる。
 #                   claude.videoOffer.autoStart.enable = true で、設計・PR のときに解説動画の短尺を答えを
 #                   待たずに作り始めるマシンにする (既定は作る前に聞く。token を大きく使うため。ADR 023)。
-#                   claude.videoRender.limitPercent で、解説動画の書き出しが使ってよい CPU とメモリの、マシン
-#                   全体に対する割合 (%) を決める (既定 70。claude-skills の動画の雛形が systemd の user slice に
-#                   上限を付け、会話をまたいだ合計に効かせる。ADR 043)。
+#                   claude.heavyJobs.limitPercent で、重い処理 (動画の書き出し・推論など) が使ってよい CPU と
+#                   メモリの、マシン全体に対する割合 (%) を決める (既定 70。claude-skills の skill pjp-heavy-jobs が
+#                   systemd の user slice に上限を付け、会話をまたいだ合計に効かせる。ADR 043)。
 #   modules         mkHome の引数に無い option (home/options.nix の dotfiles.ccPages.port など) と、
 #                   home-manager の設定
 #

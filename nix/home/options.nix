@@ -17,7 +17,7 @@
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
-#   dotfiles.claude.videoRender.limitPercent     解説動画の書き出しが使ってよい CPU とメモリの、マシン全体に対する割合 (既定 70)
+#   dotfiles.claude.heavyJobs.limitPercent       重い処理 (動画の書き出し・推論など) が使ってよい CPU とメモリの、マシン全体に対する割合 (既定 70)
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
 #   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
@@ -304,31 +304,34 @@ in
       '';
     };
 
-    videoRender.limitPercent = lib.mkOption {
+    heavyJobs.limitPercent = lib.mkOption {
       type = lib.types.ints.between 1 100;
       default = 70;
       example = 40;
       description = ''
-        解説動画の書き出し (VOICEVOX の合成・ffmpeg・Chromium の撮影) が使ってよい CPU とメモリの上限を、
-        このマシン全体に対する割合 (%) で決める。claude-skills の動画の雛形 (pjp-video-explainer-pictogram /
-        dialogue) の入口 tools/limit.sh が、書き出しを systemd の user slice pjp-video.slice に入れ、slice に
-        上限を付ける。上限は slice の中の合計に効くので、別々の会話が同時に書き出しても、合わせて上限の内に
-        収まる (dotfiles-private の docs/adr/043_claude_video_render_limit_host_option_*)。
+        重い処理が使ってよい CPU とメモリの上限を、このマシン全体に対する割合 (%) で決める。claude-skills の
+        skill pjp-heavy-jobs の scripts/limit.sh が、包んだコマンドを systemd の user slice pjp-heavy.slice に
+        入れ、slice に上限を付ける。上限は slice の中の合計に効くので、別々の会話が同時に重い処理を流しても、
+        合わせて上限の内に収まる (dotfiles-private の docs/adr/043_claude_heavy_jobs_limit_host_option_*)。
+
+        重い処理は、数分以上 CPU を使い切るか GB 単位でメモリを取る処理 (動画の書き出し・エンコード、コマや
+        画像をまとめて読む処理、whisper などの推論、重い処理を並べて流すとき)。どれを包むかは pjp-heavy-jobs の
+        SKILL.md が決め、動画の雛形の render-all.sh などは自分で包む。縛るのは limit.sh で包んだ処理だけ。
 
         割合は次のように効く:
 
-        - CPU: CPUQuota = 割合 × nproc (systemd の CPUQuota は CPU 1 つを 100% と数える)。nproc は書き出すたびに
+        - CPU: CPUQuota = 割合 × nproc (systemd の CPUQuota は CPU 1 つを 100% と数える)。nproc は包むたびに
           数える。WSL の nproc は、既定では Windows の論理 CPU の全部なので、PC 全体に対する割合になる
         - メモリ: MemoryMax=<割合>%。systemd は kernel から見えるメモリに対して割合を取る。WSL では VM の
           メモリに対してで、VM のメモリは既定で Windows の半分ほど (40 なら PC 全体の約 20%)
-        - swap: 書き出しには使わせない (MemorySwapMax=0)
+        - swap: 重い処理には使わせない (MemorySwapMax=0)
 
-        値は `~/.local/state/dotfiles/claude-video-limits.json` (`{"limitPercent": <値>}`) に落ち
-        (home/modules/claude.nix)、tools/limit.sh が書き出すたびに読む。ファイルが無い・読めないときは
+        値は `~/.local/state/dotfiles/claude-heavy-jobs.json` (`{"limitPercent": <値>}`) に落ち
+        (home/modules/claude.nix)、limit.sh が包むたびに読む。ファイルが無い・読めないときは
         70 で縛る。cgroup v2 の cpu・memory が systemd の user manager に委譲されていないマシンでは、
-        その分の上限は付かない (tools/limit.sh が警告を 1 行出し、CPU は nice で流す)。
+        その分の上限は付かない (limit.sh が警告を 1 行出し、CPU は nice で流す)。
 
-        反映は home-manager switch (~/dotfiles/setup --update でもよい)。上限は次に書き出すときに付け直す。
+        反映は home-manager switch (~/dotfiles/setup --update でもよい)。上限は次に包むときに付け直す。
         割合を変えたいマシンは、dotfiles-private に登録したホストのファイルか、ローカル flake の tmp に書く。
       '';
     };
