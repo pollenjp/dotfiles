@@ -242,6 +242,11 @@ jobs:
       - name: win/windows-terminal/
         run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-terminal.sh --check
 
+      # win/international/managed.json (Windows の日付と時刻の形式) の検証。flake からは win/ が見えないので、
+      # 上と同じく checkout の上で流す。jq は flake が固定している nixpkgs から借りる。
+      - name: win/international/
+        run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-international.sh --check
+
       # win/powertoys/fancyzones/ の検証 (ADR 042)。flake からは win/ が見えないので、上と同じく
       # checkout の上で流す。jq は flake が固定している nixpkgs から借りる。
       - name: win/powertoys/fancyzones/
