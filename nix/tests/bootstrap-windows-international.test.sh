@@ -40,7 +40,7 @@
 # script は自分のいる checkout の win/international/managed.json を読むので、ケースごとに <ケース>/repo/nix/scripts/ へ
 # 写して流す。要るコマンドだけを symlink で並べた PATH で流し、本物の pwsh.exe と Windows には触らない。出力は
 # <ケース>/stdout と <ケース>/stderr に残し、grep には直にファイルを渡す (パイプの grep -q は、pipefail の下で
-# SIGPIPE を拾って落ちることがある。TKT-155)。
+# SIGPIPE を拾って落ちることがある。CI の nix/scripts/check-test-grep-q.sh が見る)。
 #
 # 偽の pwsh.exe (<HOME>/bin/pwsh.exe) は、-EncodedCommand の中身を UTF-16LE として読み戻し、先頭の $Mode と
 # $InputJson を取り出して、<HOME>/fake-windows.json に持たせた Windows の状態から本物と同じ形の JSON を CRLF で返す。
