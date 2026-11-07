@@ -18,6 +18,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
+| `port-forward/Start-PortForward.ps1` | `%USERPROFILE%\.config\powershell\Start-PortForward.ps1` | ssh の Host と port の組を選んで port forwarding を張る。PowerShell 7 の `pf` から呼ぶ ([後述](#port-forwarding-pf)) |
+| (dotfiles-private の `ssh/port-forward.toml`) | `%USERPROFILE%\.config\port-forward\hosts.json` | `pf` が出す port の組 (共有の組)。manifest では配らず、`bootstrap-windows-port-forward.sh` が JSON にして置く ([後述](#port-forwarding-pf)) |
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 
@@ -504,6 +506,138 @@ Windows で `config` や dotfiles のファイルを直していたら、触ら�
 
 判定だけ見るなら `--dry-run` を付ける。
 
+## port forwarding (pf)
+
+PowerShell 7 で `pf` を打つと、ssh の Host と port の組を選んで、`ssh -NT -o ExitOnForwardFailure=yes -L … <Host>` を
+いまの PowerShell の中で張る ([設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-pf-port-forward-design.md))。
+画面は PowerShell だけで描く (fzf も PowerShell Gallery のモジュールも入れない)。Windows PowerShell 5.1 では動かない (5.1 にも
+`dotfiles.ps1` を読ませていれば、`pf` を打つと版が違うと出て止まる)。WSL・Linux の版は無い。
+
+```text
+pf  Host を選ぶ  › web
+───────────────────────────────────────
+> web-prod        前回: 3000 15432
+  web-staging
+───────────────────────────────────────
+↑↓ 選ぶ  Enter 決める  Esc やめる  (文字を打つと絞り込む)
+```
+
+```text
+pf  web-prod
+───────────────────────────────────────
+> [x] 3000  → localhost:3000  front
+  [ ] 8080  → localhost:8080  api       使用中
+  [x] 15432 → db:5432         postgres  この PC
+  ssh の設定でも張る: 6000
+───────────────────────────────────────
+
+Space 切り替え  a 足す  e 直す  d 消す  Enter つなぐ  Esc 戻る
+```
+
+| 打つもの | すること |
+| --- | --- |
+| `pf` | Host を選ぶ画面から始める |
+| `pf <Host>` | ssh の設定の Host と同じ名前 (大文字小文字は問わない) なら、port を選ぶ画面から始める (Esc でやめる)。違えば、その文字列で絞り込んで Host を選ぶ画面を開く (語を並べた `pf web prod` は空白でつないで絞り込む) |
+
+- Host の一覧は `%USERPROFILE%\.ssh\config` と、そこから `Include` するファイル (`config.d\` など) の `Host` から作る。
+  ワイルドカード (`*`・`?`・`!`) を含む名前は出さない。最近つないだ Host を上に出し、前回つないだ port を添える
+- Host を選ぶ画面は、文字を打つと絞り込む (空白で区切った語が、どれも名前に含まれる Host だけ)。Backspace で 1 字消し、
+  Ctrl+U で空にする。↑↓ (Ctrl+P・Ctrl+N) で選び、Enter で決め、Esc・Ctrl+C でやめる
+- port を選ぶ画面は、前回つないだ組にチェックを付けて開く (初めての Host では全部)
+  - 「使用中」は、手元でもう待ち受けている port。チェックしたまま Enter を押すと、つながずに知らせる
+  - 「この PC」は、その PC で足した・直した組 (共有の組に無い・共有の組と中身が違う)
+  - 「ssh の設定でも張る」は、その Host の ssh の設定にある `LocalForward`・`DynamicForward` (`ssh -G <Host>` で読む)。ssh は
+    設定の転送も一緒に張るので、その port が使用中のとき・同じ port にチェックがあるときも、つながずに知らせる
+  - Windows が予約した port の範囲 (Hyper-V・WSL・Docker が取る。`netsh interface ipv4 show excludedportrange protocol=tcp` で
+    見る) は「使用中」と出ない。そこに入る port は、ssh が bind の誤りで落ちる
+- つなぐと、打つコマンドを 1 行出してから、いまの PowerShell の中で ssh を動かす。タブの名前を `pf: <Host>` にし、Ctrl+C で
+  止めたら戻す。ssh が自分で終わったとき (つながらない・切れた) は、終了コードを 1 行出す。張った転送の一覧・ほかの窓からの
+  止め方・切れたときのつなぎ直しは無い
+
+| キー (port を選ぶ画面) | すること |
+| --- | --- |
+| ↑ ↓ | 選ぶ |
+| Space | チェックを切り替える |
+| a | 組を足す (下の書き方で打って Enter。Esc でやめる。足した組にはチェックが付く) |
+| e | 選んだ組を直す (今の書き方が入って開く) |
+| d | 選んだ組を消す (共有の組は、その PC でだけ隠す) |
+| Enter | チェックした組でつなぐ |
+| Esc | Host を選ぶ画面へ戻る (`pf <Host>` で始めたならやめる) |
+| Ctrl+C | やめる |
+
+### 組の書き方
+
+`ssh -L` と同じ形に、空白を空けてメモを続ける。pf の画面で足す・直すときも、dotfiles-private のファイルも同じ書き方。
+
+| 書くもの | 手元 | つなぎ先 (向こうのマシンから見た名前) |
+| --- | --- | --- |
+| `3000` | 3000 | `localhost:3000` |
+| `13000:3000` | 13000 | `localhost:3000` |
+| `15432:db:5432 postgres` | 15432 | `db:5432` (メモは `postgres`) |
+
+- port は 1〜65535。つなぎ先の IPv6 は `[::1]` のように囲む。bind_address (`127.0.0.1:3000:…`) と Unix ソケットは書けない
+- 1 つの Host の中で、手元の port は重ねない (ssh は同じ手元の port を 2 つ張れない)。pf は組を手元の port で見分ける
+
+### 組の置き場所
+
+| ファイル | 中身 | 書くもの |
+| --- | --- | --- |
+| dotfiles-private の `ssh/port-forward.toml` | 共有の組の正本 (`[hosts]` の下に `<Host 名> = ["3000", …]`) | 手で書いて commit・push する |
+| `%USERPROFILE%\.config\port-forward\hosts.json` | 共有の組 (正本を JSON にしたもの) | `setup --update` の `bootstrap-windows-port-forward.sh` (order 99)。pf は書かない |
+| `%USERPROFILE%\.config\port-forward\local.json` | その PC で足した・直した・隠した組と、前回つないだ port・最近つないだ Host | pf |
+
+- 共有の組を足す・直すときは、dotfiles-private の `ssh/port-forward.toml` を直して `--check` で確かめ、commit・push して、
+  各 Windows の PC の WSL で `~/dotfiles/setup --update` を流す。Host 名は ssh の設定と同じ綴りで書き、`.` を含むときは
+  `"…"` で囲む (囲まないと TOML の入れ子の表になり、止まる):
+
+  ```sh
+  ~/dotfiles/nix/scripts/bootstrap-windows-port-forward.sh --check   # 正本の書き方を確かめるだけ (Windows には触らない)
+  ```
+
+- pf の画面で足した組は local.json に残り、dotfiles-private へは書き戻さない (共有したくなったら正本に書く)
+- 共有の組を画面で直す・消すと、その PC でだけ上書きする・隠す。共有と同じ中身に直す・隠した port を a で足し直すと、共有の組に戻る
+- pf は組を変えるたびに local.json を読み直してから書く (別の窓で開いた pf の変更を消さない)。local.json が読めないときは、
+  上書きせずに止まる (直すか消してから打ち直す)。hosts.json が読めないときは、注意を 1 行出して共有の組なしで開く
+
+| 打つもの (WSL) | すること |
+| --- | --- |
+| `nix/scripts/bootstrap-windows-port-forward.sh` | 写す (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-port-forward.sh --dry-run` | 判定だけ見る |
+| `nix/scripts/bootstrap-windows-port-forward.sh --force` | 衝突でも、元を `hosts.json.dotfiles-bak-<日時>` に退避して上書きする |
+| `nix/scripts/bootstrap-windows-port-forward.sh --check` | 正本の検証だけ (Windows の側も記録も見ない) |
+
+- 写すのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ。dotfiles-private が無い・正本が無いマシンでは何もしない
+  (置いてある hosts.json も消さない)
+- 正本に書き方の誤り・手元の port の重なりがあると、何も書かずに誤りを全部並べて止まる (exit 1)
+- 置いた中身の sha256 を `~/.local/state/dotfiles/windows-port-forward.deployed.json` に覚える。hosts.json を Windows で書き換えて
+  いた (か、置く前からあった) ら、触らずに diff を出して止まる (衝突)。Windows 側の中身を正本へ取り込んで commit・push するか、`--force` で解く
+- 止まると (exit 1)、setup はこの手順 (order 99) で止まり、後ろの [Windows Terminal](#windows-terminal) の手順・wsl-mtu-guard・
+  exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない
+
+### Start-PortForward.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 書き方の解釈・ssh の設定の読み取り・重ね方・キーの読み分け・描いた行・ファイルの読み書きは
+  `port-forward/Start-PortForward.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない
+  (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/port-forward/Start-PortForward.Tests.ps1
+  ```
+
+- 画面は Linux の pwsh でも動かして見られる。`-HomeDir` で `.ssh/config` と `.config/port-forward/` を探す家を、`-Ssh` で動かす
+  ssh を差し替え、tmux の中で起こして `send-keys` と `capture-pane` で見る。偽の ssh は、受けた引数を出して待つ script でよい
+  (`-G` を受けたら、設定の転送を `localforward 6000 [localhost]:6000` の形で出す):
+
+  ```sh
+  tmux new-session -d -s pf -x 100 -y 20 \
+    "pwsh -NoProfile -File win/port-forward/Start-PortForward.ps1 -HomeDir /tmp/pf-home -Ssh /tmp/pf-home/fake-ssh"
+  ```
+
+- Windows で見るのは、Windows Terminal での崩れ (全角の幅・色・`›` や日本語が `?` にならないか)・タブの名前・Ctrl+C で止めたあとの
+  戻り。画面は `[Console]::Write` で描き、その間だけ `[Console]::OutputEncoding` を UTF-8 にしている (console のコードページの
+  ままだと、en-US の 437・ja-JP の 932 に無い文字が `?` になる。Linux の pwsh のテストでは見えない)
+
 ## PowerToys
 
 `powertoys/keyboard-manager/` は PowerToys の Keyboard Manager の割り当てで、manifest で配る。
@@ -749,7 +883,7 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 
   戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
 - 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
-  済んでいるが、後ろの [日付と時刻の形式](#日付と時刻の形式)・[Windows Terminal](#windows-terminal) の手順 (どちらも order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
+  済んでいるが、後ろの [日付と時刻の形式](#日付と時刻の形式)・[port forwarding の組](#port-forwarding-pf)・[Windows Terminal](#windows-terminal) の手順 (どれも order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
   など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
 - `--import` で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
@@ -1013,8 +1147,8 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
 `managed.json` が持つ値を設定画面で変えていた (か、地域を変えて新しい地域の既定に戻った) と、触らずに Windows 側・
 `managed.json`・前回書いた値・地域の既定を出して止まる。書いた記録が無いのに、地域の既定とも違う値が先にある (初めて書く
 マシンで、手で設定してあった) ときも同じで、「書いた記録が無く」と出る。`setup --update` はこの手順 (order 99) で止まり、
-後ろの [Windows Terminal](#windows-terminal) の手順・wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、解いて流し直す
-まで走らない。衝突しない値は書いてある。どちらかで解く。
+後ろの [port forwarding の組](#port-forwarding-pf)・[Windows Terminal](#windows-terminal) の手順・wsl-mtu-guard・exe-exec-trace と最後の
+「残りの手作業」は、解いて流し直すまで走らない。衝突しない値は書いてある。どちらかで解く。
 
 1. Windows 側の値を残す: `--import` で `managed.json` へ取り込み、`git diff` を見て commit して push する。
    `managed.json` に commit していない変更があると、取り込みは何も書かずに止まる
