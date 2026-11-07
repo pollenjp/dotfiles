@@ -1507,6 +1507,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
+| `xdg-open` (PATH) | `nix/pkgs/pjp-wsl-xdg-open/` (WSL のマシンだけ。[後述](#wsl-の-xdg-open)) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
@@ -2319,6 +2320,58 @@ ip link show eth0                                  # 今の MTU
 - WSL を mirrored モード（`networkingMode=mirrored`）にするのも一つの手だが、Docker と `localhost` の挙動が変わるので
   ここでは使っていない
 
+## WSL の xdg-open
+
+`wsl.enable` のマシンの PATH に、URL とファイルを Windows の既定のアプリで開く `xdg-open`（`nix/pkgs/pjp-wsl-xdg-open/`）を
+置く（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-wsl-xdg-open-design.md)）。
+root は要らないので option は無く、WSL でないマシンには入らない。
+
+Linux 版の herdr は、pane のリンクの Ctrl+クリックで `xdg-open` を呼ぶ（WSL かどうかを見ない。
+[herdr の中の Claude Code にリンクを出させる](#herdr-の中の-claude-code-にリンクを出させる)）。WSL の Ubuntu には `xdg-open` が
+入っていないので、無いと開かず、画面にも何も出ない（`~/.config/herdr/herdr-client.log` に `failed to open pane URL` が残るだけ）。
+PATH に入るので、`gh browse` など `xdg-open` を呼ぶほかの CLI もこれを使う。
+
+| 渡すもの | すること | 終了コード |
+| --- | --- | --- |
+| `http://`・`https://` の URL | 既定のブラウザで開く。空白・`"`・制御文字・ASCII の外の文字は `%XX` にする | 0 |
+| あるファイル・ディレクトリ | `wslpath -w` で変換して、既定のアプリで開く | 0 |
+| `file:///…`・`file://localhost/…` | `%XX` を戻して、上のファイルと同じに開く（`#`・`?` の後ろは外す） | 0 |
+| 無いファイル | 開かない | 2 |
+| Windows が実行するファイル（`.exe`・`.bat`・`.js`・`.ps1`・`.py`・`.lnk` など。網羅ではない） | 開かない。実行したいなら直に打つ | 4 |
+| 末尾が `.` か空白の名前・途中のディレクトリの末尾が `.` のパス | 開かない（Windows では別のファイルを指す） | 4 |
+| ほかの scheme（`mailto:`・`ms-msdt:` など）・ほかのホストの `file://` | 開かない | 4 |
+
+終了コードの意味は xdg-utils の `xdg-open` と同じ（ほかに 1 は引数の誤り、3 は `rundll32.exe` が無いとき）。
+
+Windows へは `rundll32.exe url.dll,FileProtocolHandler` で渡す。シェルを通らないので、URL の `&` で切れず、`%` も展開されない。
+渡した先の ShellExecute は `xdg-open` より広く、実行ファイルをそのまま起動し、`ms-msdt:` のような scheme を別のアプリへ渡す。
+サーバーから受け取った URL を開く CLI からも呼ばれるので、上の表の「開かない」ものは渡さない。
+
+### 反映
+
+`~/dotfiles/setup --self-update --update` で入る（本体の checkout を最新にしてから switch する。[前述](#本体を最新にする---self-update)）。
+herdr は Ctrl+クリックのたびに PATH から `xdg-open` を引くので、起こし直さなくてよい（herdr を起こしたシェルの PATH に
+`~/.nix-profile/bin` があること）。
+
+### 確かめる
+
+```sh
+command -v xdg-open                 # ~/.nix-profile/bin/xdg-open
+xdg-open 'https://example.com/?a=1&b=2'   # 既定のブラウザのタブが開く (アドレス欄の & の後ろが残る)
+grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # herdr が xdg-open を起動できなかった記録
+```
+
+### 気を付けること
+
+- 開けたかどうかは `rundll32.exe` の終了コードでは分からない。0 で終わっても開いたとは限らない
+- interop が外れていると（`Exec format error`）`rundll32.exe` を起こせず、4 で終わる
+- herdr は起動した `xdg-open` の stdout・stderr を捨て、終了コードも記録しない（log に残るのは起動できなかったときだけ）。
+  Ctrl+クリックで開かないときは、シェルで `xdg-open <URL>` を打つと理由が出る
+- `url.dll` の入口には ANSI 版しかないので、ファイルの名前に Windows の ANSI のコードページに無い文字があると開けない
+  （コードページが 65001 の PC では当たらない）。URL は `%XX` にしてから渡すので当たらない
+- apt の `xdg-utils` を入れても、`~/.nix-profile/bin` が `/usr/bin` より先なのでこちらが当たる。Linux のアプリで開きたいなら
+  `/usr/bin/xdg-open` を直に打つ
+
 ## fish
 
 `.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。
@@ -3087,17 +3140,22 @@ herdr の pane の中では、シェルの init が `FORCE_HYPERLINK=1` を expo
 
 #### なぜ要るのか
 
-Claude Code（2.1.303 で本体のコードを読んで確かめた）は、リンク（OSC 8）を出せる端末かを env で決める。
+herdr（0.9.5）は `ui.mouse_capture = true`（既定。dotfiles も変えていない）の間、pane が出したリンク（OSC 8）を外の端末へ
+渡さず、自分で持って Ctrl+クリックを受ける。開けるのは `http://`・`https://` の OSC 8 のリンクと、画面に出ている同じ形の文字で、
+Linux 版は `xdg-open` で開く（WSL は [WSL の xdg-open](#wsl-の-xdg-open)）。`false` にすると OSC 8 を外の端末へ通すが、
+herdr のマウスの操作（タブのクリック・分割の線のドラッグなど）が使えなくなる。
+
+つまり label だけのリンクは、pane の中のアプリが OSC 8 で出さないと開けない。Claude Code（2.1.318 で本体のコードを読んで
+確かめた）は、リンクを出せる端末かを env で決める。
 
 1. `FORCE_HYPERLINK` があれば、その値で決める（`0` なら出さない）
 2. 無ければ `TERM_PROGRAM`（ghostty・kitty・iTerm.app・WezTerm・vscode など）・`WT_SESSION`・tmux 3.4 以上・
    `VTE_VERSION`・`TERM` などで見分ける
 
-herdr の pane の env には `TERM=xterm-256color`（と `COLORTERM`）しか無く、どれにも当たらないので、出せない端末と
-判断される。herdr 自体は pane が出したリンクを外の端末へ通すので、この判断によらずリンクを出す本体の footer は
-押して開ける。一方、Claude Code の `Link` で描くもの（問いの上に footer の 2 行を出す mod のバッジなど）は判断に従い、
-「label の後ろに薄い URL」の形になって押せない（2 個目からは URL が途中で切れる）。`FORCE_HYPERLINK=1` を付けると、
-本体の footer と同じ label だけのリンクになる。
+herdr の pane の env は `TERM_PROGRAM=herdr`・`TERM=xterm-256color`（と `COLORTERM`）で、どれにも当たらないので、出せない
+端末と判断される。この判断によらずリンクを出す本体の footer は Ctrl+クリックで開ける。一方、Claude Code の `Link` で描くもの
+（問いの上に footer の 2 行を出す mod のバッジなど）は判断に従い、「label の後ろに薄い URL」の形になる。label を押しても開かず、
+2 個目からは URL が途中で切れる。`FORCE_HYPERLINK=1` を付けると、本体の footer と同じ label だけのリンクになる。
 
 #### 効き方
 
