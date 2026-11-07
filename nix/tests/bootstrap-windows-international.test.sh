@@ -15,18 +15,20 @@
 #   - --check は managed.json だけを見る (pwsh.exe を呼ばない)。知らない名前・文字列でない値・空・長すぎる値・
 #     制御文字・object でない・ファイルが無い・jq --indent 4 の形でない、のどれでも止まる。引数の組み合わせの誤りは exit 2
 #   - 配らないマシン・windows-files.json が無いときは、pwsh.exe を呼ばずに飛ばす
-#   - pwsh.exe が無い・失敗する・時間切れ・決めた形の JSON を返さないときは、warn で知らせて何も書かずに exit 0
+#   - pwsh.exe が無い・失敗する・時間切れ・決めた形の JSON を返さないときは、warn で知らせて何も書かずに exit 0。
+#     pwsh.exe のエラーは平文で出す (CLIXML でも色のエスケープ付きでもない)
 #   - 初めて書くマシン (記録が無く、今の値が地域の既定) では 3 つとも表の順に書き、WM_SETTINGCHANGE を送り、記録する。
-#     pwsh.exe には -NoProfile -NonInteractive -EncodedCommand で、ASCII だけの UTF-16LE を渡す
+#     pwsh.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で、ASCII だけの UTF-16LE を渡す
 #   - 揃っていれば読むだけで書かない (記録も変えない)。Windows がもう持つ値なら、書かずに記録だけする
-#   - managed.json を変えたら (Windows が前回書いた値のまま) 書き換え、変わった値だけを出す
+#   - managed.json を変えたら (Windows が前回書いた値のまま)、衝突でない値を全部表の順に書き直し、変わった値だけを出す
 #   - 記録が無く地域の既定とも違う値・前回書いた値から変わった値・地域の既定に戻った値は、衝突として触らず、
 #     値と解き方を出して exit 1。衝突しない値は書く。--force なら書く
 #   - --dry-run は読むだけで、Windows も記録も変えない (衝突があれば exit 1)
-#   - --import は衝突した値を managed.json へ取り込み (jq --indent 4 の形)、Windows には書かない。managed.json に
-#     commit していない変更があるとき・git の checkout でないときは止まる
-#   - 書けない値 (グループポリシーなど)・書いても読み戻すと違う値・書く途中の pwsh.exe の失敗は、⚠ で出して exit 1。
-#     記録は書けた値だけ。WM_SETTINGCHANGE を送れないときは warn で知らせて exit 0
+#   - --import は衝突した値を managed.json へ取り込み (jq --indent 4 の形)、Windows には書かない。衝突が無ければ何も
+#     取り込まない。managed.json に commit していない変更があるとき・git の checkout でないときは止まる
+#   - 書けない値・書いても読み戻すと違う値・書く途中の pwsh.exe の失敗は、⚠ で出して exit 1。書く行にもそう出し、
+#     記録は書けた値だけ。グループポリシーで止められている値 (1260) は、流し直しても書けないので warn で知らせて
+#     exit 0。WM_SETTINGCHANGE を送れないときも warn で知らせて exit 0
 #   - 日本語や ' を含む形式も、そのまま届いて読み戻せる
 #   - managed.json から消した値は、Windows では戻さず、記録からだけ消す。壊れた記録では止まる。持つ値が無ければ
 #     pwsh.exe を呼ばない
@@ -116,8 +118,17 @@ args=("$@")
 enc=${args[-1]}
 unset 'args[-1]'
 printf '%s\n' "${args[*]}" >>"${HOME}/pwsh-args"
+# エラーの出し方は本物に合わせる: -EncodedCommand で起動すると、-OutputFormat Text が無ければ CLIXML、あれば
+# 色のエスケープの付いた平文 (2026-11-07 にこの PC の pwsh 7.6.9 で確かめた)
+emit_err() {
+  if [[ " ${args[*]} " == *" -OutputFormat Text "* ]]; then
+    printf '\e[31;1m%s\e[0m\n' "$1" >&2
+  else
+    printf '#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">_x001B_[31;1m%s_x001B_[0m_x000D__x000A_</S></Objs>' "$1" >&2
+  fi
+}
 if [[ -n ${FAKE_PWSH_RC-} ]]; then
-  printf '%s\n' "${FAKE_PWSH_ERR-}" >&2
+  emit_err "${FAKE_PWSH_ERR-}"
   exit "${FAKE_PWSH_RC}"
 fi
 # ASCII の UTF-16LE か (奇数番目の byte が 0x80 より小さく、偶数番目が 0。byte の数は偶数)
@@ -143,7 +154,7 @@ while IFS= read -r line; do
 done <<<"${code}"
 printf '%s\n' "${mode}" >>"${HOME}/pwsh-modes"
 if [[ ${mode} == write && -n ${FAKE_PWSH_WRITE_RC-} ]]; then
-  echo "write failed" >&2
+  emit_err "write failed"
   exit "${FAKE_PWSH_WRITE_RC}"
 fi
 if [[ -n ${FAKE_PWSH_RAW-} ]]; then
@@ -351,8 +362,9 @@ fi
 c=$(new_case t4)
 FAKE_PWSH_RC=1 FAKE_PWSH_ERR='Add-Type: boom' run "${c}"
 if [[ $(rc "${c}") == 0 ]] && has "${c}" '!! pwsh.exe で Windows の日付と時刻の形式を読めませんでした (終了コード 1' \
-  && has "${c}" 'Add-Type: boom' && [[ ! -e $(record "${c}") ]]; then
-  ok "pwsh.exe が失敗したら、その出力を添えて warn で知らせる (exit 0)"
+  && has "${c}" 'Add-Type: boom' && ! has "${c}" 'CLIXML' && ! grep -q $'\e' "${c}/stdout" "${c}/stderr" \
+  && [[ ! -e $(record "${c}") ]]; then
+  ok "pwsh.exe が失敗したら、その出力を平文 (CLIXML でも色のエスケープ付きでもない) で添えて warn で知らせる (exit 0)"
 else
   ng "pwsh.exe が失敗するとき" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
@@ -390,8 +402,9 @@ if [[ $(rc "${c}") == 0 ]] && all_want "${c}" && [[ ${recorded} == "${want}" && 
 else
   ng "初めて書く" "rc=$(rc "${c}") modes=$(modes "${c}") writes=${writes} recorded=${recorded} $(outerr "${c}")"
 fi
-if [[ ! -e ${c}/home/bad-encoding ]] && [[ $(sort -u "${c}/home/pwsh-args") == '-NoProfile -NonInteractive -EncodedCommand' ]]; then
-  ok "pwsh.exe には -NoProfile -NonInteractive -EncodedCommand で、ASCII だけの UTF-16LE を渡す"
+if [[ ! -e ${c}/home/bad-encoding ]] \
+  && [[ $(sort -u "${c}/home/pwsh-args") == '-NoProfile -NonInteractive -OutputFormat Text -EncodedCommand' ]]; then
+  ok "pwsh.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で、ASCII だけの UTF-16LE を渡す"
 else
   ng "pwsh.exe の引数と中身" "bad-encoding=$([[ -e ${c}/home/bad-encoding ]] && echo yes) args=$(cat "${c}/home/pwsh-args")"
 fi
@@ -422,10 +435,12 @@ c=$(new_case t9)
 run "${c}"
 managed_json sShortDate=yyyy-MM-dd sTimeFormat=HH:mm:ss sShortTime=H:mm >"$(managed "${c}")"
 run "${c}"
+writes=$(tr '\n' ',' <"${c}/home/writes" 2>/dev/null)
 if [[ $(rc "${c}") == 0 && $(win "${c}" sShortTime) == H:mm && $(rec "${c}" sShortTime) == H:mm ]] \
   && has "${c}" 'sShortTime: "HH:mm" → "H:mm" (managed.json が更新された)' \
-  && ! grep -qF 'sShortDate:' "${c}/stdout"; then
-  ok "managed.json を変えたら書き換え、変わった値だけを出す"
+  && ! grep -qF 'sShortDate:' "${c}/stdout" \
+  && [[ ${writes} == sShortDate,sTimeFormat,sShortTime,sShortDate,sTimeFormat,sShortTime, ]]; then
+  ok "managed.json を変えたら、衝突でない値を全部表の順に書き直し、変わった値だけを出す"
 else
   ng "managed.json の更新" "rc=$(rc "${c}") win=$(win "${c}" sShortTime) $(outerr "${c}")"
 fi
@@ -512,6 +527,16 @@ if [[ $(rc "${c}") == 0 && $(jq -r '.sShortDate' "$(managed "${c}")") == yyyy/MM
 else
   ng "--import" "rc=$(rc "${c}") modes=$(modes "${c}") $(outerr "${c}")"
 fi
+c=$(new_case t15-noconflict)
+git_init "${c}"
+cp "$(managed "${c}")" "${c}/managed-before"
+run "${c}" --import
+if [[ $(rc "${c}") == 0 && $(modes "${c}") == read, ]] && has "${c}" '取り込むものはありません' \
+  && has "${c}" 'managed.json の値で Windows へ書く値が 3 件あります' && cmp -s "${c}/managed-before" "$(managed "${c}")"; then
+  ok "--import は衝突が無ければ何も取り込まず、書く値の数を出す"
+else
+  ng "--import (衝突が無い)" "rc=$(rc "${c}") modes=$(modes "${c}") $(outerr "${c}")"
+fi
 c=$(new_case t15-dirty)
 set_win "${c}" sShortDate 'yyyy/MM/dd'
 git_init "${c}"
@@ -537,23 +562,41 @@ fi
 # t16. 書く途中で pwsh.exe が失敗する: ⚠ で出して exit 1。記録しない
 c=$(new_case t16)
 FAKE_PWSH_WRITE_RC=1 run "${c}"
-if [[ $(rc "${c}") == 1 ]] && has "${c}" '書く途中で pwsh.exe が失敗しました' && has "${c}" 'write failed' \
+if [[ $(rc "${c}") == 1 ]] && has "${c}" '書く途中で pwsh.exe が失敗しました (終了コード 1)。どの値が書けたかは分からないので、記録していません' \
+  && has "${c}" 'write failed' && ! has "${c}" 'CLIXML' && ! has "${c}" '次の値は書けませんでした' \
+  && has "${c}" 'sShortDate: "M/d/yyyy" → "yyyy-MM-dd" (初めて書く。今の値は地域の既定) … 書けたか分かりません' \
   && [[ ! -e $(record "${c}") ]]; then
-  ok "書く途中で pwsh.exe が失敗したら ⚠ で出して exit 1 (記録しない)"
+  ok "書く途中で pwsh.exe が失敗したら ⚠ で出して exit 1 (記録せず、書く行には書けたか分からないと出す)"
 else
   ng "書く途中の失敗" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
-# t17. グループポリシーで書けない値: ⚠ で出して exit 1。記録は書けた値だけ
+# t17. 書けない値 (グループポリシーでない): ⚠ で出して exit 1。記録は書けた値だけ
 c=$(new_case t17)
-fake_edit "${c}" '.deny = {sShortTime: 1260}'
+fake_edit "${c}" '.deny = {sShortTime: 87}'
 run "${c}"
 if [[ $(rc "${c}") == 1 && $(win "${c}" sShortTime) == 'h:mm tt' && $(rec "${c}" sShortTime) == '(無い)' ]] \
   && [[ $(rec "${c}" sShortDate) == yyyy-MM-dd ]] \
-  && has "${c}" 'sShortTime: 書けませんでした (Win32 のエラー 1260。グループポリシーで止められています)'; then
-  ok "書けない値は ⚠ で出して exit 1、記録は書けた値だけ"
+  && has "${c}" '次の値は書けませんでした (書けた値は記録してあります):' \
+  && has "${c}" 'sShortTime: 書けませんでした (Win32 のエラー 87)' \
+  && has "${c}" 'sShortTime: "h:mm tt" → "HH:mm" (初めて書く。今の値は地域の既定) … 書けませんでした' \
+  && ! grep -qF 'sShortDate: "M/d/yyyy" → "yyyy-MM-dd" (初めて書く。今の値は地域の既定) …' "${c}/stdout"; then
+  ok "書けない値は ⚠ で出して exit 1、記録は書けた値だけ (書く行にも書けなかったと出す)"
 else
   ng "書けない値" "rc=$(rc "${c}") $(outerr "${c}")"
+fi
+
+# t17b. グループポリシーで止められている値 (1260): 流し直しても書けないので、warn で知らせて exit 0
+c=$(new_case t17b)
+fake_edit "${c}" '.deny = {sShortTime: 1260}'
+run "${c}"
+if [[ $(rc "${c}") == 0 && $(win "${c}" sShortTime) == 'h:mm tt' && $(rec "${c}" sShortTime) == '(無い)' ]] \
+  && [[ $(rec "${c}" sShortDate) == yyyy-MM-dd ]] \
+  && has "${c}" '!! 次の値は、この PC ではグループポリシーで止められていて書けません (Win32 のエラー 1260): sShortTime' \
+  && has "${c}" 'sShortTime: "h:mm tt" → "HH:mm" (初めて書く。今の値は地域の既定) … グループポリシーで止められていて書けません'; then
+  ok "グループポリシーで止められている値は warn で知らせて exit 0 (setup を止めない)"
+else
+  ng "グループポリシー" "rc=$(rc "${c}") $(outerr "${c}")"
 fi
 
 # t18. 書いても読み戻すと変わっていない値
@@ -561,7 +604,8 @@ c=$(new_case t18)
 fake_edit "${c}" '.stuck = ["sShortDate"]'
 run "${c}"
 if [[ $(rc "${c}") == 1 && $(rec "${c}" sShortDate) == '(無い)' && $(rec "${c}" sShortTime) == HH:mm ]] \
-  && has "${c}" 'sShortDate: 書いた後に読み戻すと "M/d/yyyy" で、managed.json の "yyyy-MM-dd" と違います'; then
+  && has "${c}" 'sShortDate: 書いた後に読み戻すと "M/d/yyyy" で、managed.json の "yyyy-MM-dd" と違います' \
+  && has "${c}" 'sShortDate: "M/d/yyyy" → "yyyy-MM-dd" (初めて書く。今の値は地域の既定) … 書けませんでした'; then
   ok "読み戻すと違う値は ⚠ で出して exit 1、記録しない"
 else
   ng "読み戻すと違う値" "rc=$(rc "${c}") $(outerr "${c}")"

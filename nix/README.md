@@ -903,7 +903,8 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
-| 6.11.2 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
+| 6.11.2 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
+| 6.11.3 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 6.13 | `./nix/scripts/bootstrap-path-shadow.sh` | `bootstrap-path-shadow` | PATH で Nix の ntn より先に来る、Nix のものでない ntn（前に install script で入れたもの）を警告する。消さない（[後述](#前に手で入れた-ntn-と-setup-の警告)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -1544,6 +1545,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
 | bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書く | `scripts/bootstrap-windows-fancyzones.sh` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
+| bootstrap (日付と時刻の形式) | `win/international/managed.json` の値を、値ごとに前回書いた値・地域の既定と比べて、ユーザーのレジストリ (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く | `scripts/bootstrap-windows-international.sh` |
 | bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
@@ -1565,6 +1567,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書く部分だけ（--dry-run / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
+./nix/scripts/bootstrap-windows-international.sh    # Windows の日付と時刻の形式に持つ値だけを書く部分だけ（--dry-run / --import / --force / --check）
 ./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
 ```
 
@@ -4428,7 +4431,7 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か（nixpkgs の例外の消し時の警告は落とさず annotation。[前述](#猶予の日数と例外-release-agenix)） |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。日数と例外は `release-age.nix`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → `win/powertoys/fancyzones/` の検証 (`managed.json` と `custom-layouts.json`) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → `win/windows-terminal/managed.json` と `win/international/managed.json` の検証 → `win/powertoys/fancyzones/` の検証 (`managed.json` と `custom-layouts.json`) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。findings の表（`report.txt`）を summary に出す。sbomnix を前の pin から組めるよう履歴を全部取り、どの pin から取ったかも summary に出す。[前述](#閉包のスキャンと-pin先端の差分-遅延の補完)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 

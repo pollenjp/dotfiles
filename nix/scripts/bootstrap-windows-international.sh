@@ -43,9 +43,11 @@
 #
 # 書くときは、衝突でない値を全部、pwsh.exe で表の順に SetLocaleInfoW で書き (同じ値も書き直す。ある値を書くと
 # Windows が別の値を書き直す作りでも、持つ値に揃えて終わるよう)、WM_SETTINGCHANGE を送り、読み戻して比べる。
-# 書けない (SetLocaleInfoW が失敗する) か、読み戻した値が managed.json と違えば ⚠ の枠で出して exit 1。記録は
-# 書けた値だけ。WM_SETTINGCHANGE を送れないときは warn で知らせて進む (値は書けている)。managed.json から消した
-# 値は、Windows 側では戻さない (記録からだけ消す。bootstrap-windows-terminal.sh と同じ)。
+# 書けない (SetLocaleInfoW が失敗する) か、読み戻した値が managed.json と違えば ⚠ の枠で出して exit 1。ただし
+# グループポリシーで止められている値 (ERROR_ACCESS_DISABLED_BY_POLICY = 1260) は、流し直しても書けず dotfiles では
+# 直せないので、warn で知らせて飛ばす (exit 0)。記録は書けた値だけ。WM_SETTINGCHANGE を送れないときも warn で
+# 知らせて進む (値は書けている)。managed.json から消した値は、Windows 側では戻さない (記録からだけ消す。
+# bootstrap-windows-terminal.sh と同じ)。
 #
 # 書かずに exit 0 で飛ばすのは、pwsh.exe が無いときと、読めない (WSL の interop が落ちている・JSON が返らない)
 # とき。どちらも warn で知らせる。衝突は、値ごとに Windows 側・managed.json・前回書いた値・地域の既定を出し、
@@ -294,9 +296,11 @@ encode_ps() {
 # $InputJson ([{"name","lctype"}]。write なら各要素に "value" と "write" も) の 2 行を足して渡す。返りは 1 行の JSON:
 #   {"locale":"en-US","values":[{"name","current","default"}],"failed":[{"name","error"}],"broadcast":null か {"ok","error"}}
 # write は、"write" が真の値を並びの順に SetLocaleInfoW で書き (失敗は Win32 のエラーを failed へ)、1 つでも書けたら
-# WM_SETTINGCHANGE を送る (broadcast)。どちらの mode も最後に全部の値を読み直して返す。今の値は GetLocaleInfoEx に
-# LOCALE_NAME_USER_DEFAULT (NULL) を渡して読む。pwsh は string の引数に渡した $null を空文字列 (invariant の地域) に
-# するので、[NullString]::Value で渡す。地域の既定は LCType に LOCALE_NOUSEROVERRIDE (0x80000000) を足して読む。
+# WM_SETTINGCHANGE を送る (broadcast)。どちらの mode も最後に全部の値を読み直して返す。
+# Win32 の関数は C# の包み (Get・Set・Broadcast) から呼ぶ。エラーの番号を呼んだ直後に取るため (PowerShell の次の文で
+# 取ると、間に PowerShell 自身の呼び出しが挟まって上書きされうる) と、今の値を読む GetLocaleInfoEx に
+# LOCALE_NAME_USER_DEFAULT (NULL) を渡すため (PowerShell は string の引数に渡した $null を空文字列 = invariant の地域に
+# する)。地域の既定は LCType に LOCALE_NOUSEROVERRIDE (0x80000000) を足して読む。
 IFS= read -r -d '' ps_body <<'EOS' || true
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -304,19 +308,34 @@ if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 Add-Type -Namespace DotfilesIntl -Name Nls -MemberDefinition @'
 [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-public static extern int GetLocaleInfoEx(string lpLocaleName, uint LCType, System.Text.StringBuilder lpLCData, int cchData);
+static extern int GetLocaleInfoEx(string lpLocaleName, uint LCType, System.Text.StringBuilder lpLCData, int cchData);
 [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-public static extern bool SetLocaleInfoW(uint Locale, uint LCType, string lpLCData);
+static extern bool SetLocaleInfoW(uint Locale, uint LCType, string lpLCData);
 [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
-'@
-function Get-Nls([uint32]$LCType) {
-  $buf = [System.Text.StringBuilder]::new(128)
-  if ([DotfilesIntl.Nls]::GetLocaleInfoEx([NullString]::Value, $LCType, $buf, $buf.Capacity) -eq 0) {
-    throw ('GetLocaleInfoEx(0x{0:X}) failed: Win32 error {1}' -f $LCType, [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+// Reads with LOCALE_NAME_USER_DEFAULT (NULL).
+public static string Get(uint lctype) {
+  System.Text.StringBuilder buf = new System.Text.StringBuilder(128);
+  if (GetLocaleInfoEx(null, lctype, buf, buf.Capacity) == 0) {
+    throw new Exception("GetLocaleInfoEx(0x" + lctype.ToString("X") + ") failed: Win32 error " + Marshal.GetLastWin32Error());
   }
-  $buf.ToString()
+  return buf.ToString();
 }
+// Locale = LOCALE_USER_DEFAULT (0x0400). The W version ignores it. Returns 0, or the Win32 error (-1 if unknown).
+public static int Set(uint lctype, string value) {
+  if (SetLocaleInfoW(0x0400, lctype, value)) { return 0; }
+  int e = Marshal.GetLastWin32Error();
+  return e != 0 ? e : -1;
+}
+// WM_SETTINGCHANGE (0x001A) to HWND_BROADCAST (0xFFFF), lParam "intl", SMTO_ABORTIFHUNG (0x0002), 5000 ms.
+// Returns 0, or the Win32 error (-1 if unknown).
+public static int Broadcast() {
+  UIntPtr res;
+  if (SendMessageTimeoutW(new IntPtr(0xFFFF), 0x001A, UIntPtr.Zero, "intl", 0x0002, 5000, out res) != IntPtr.Zero) { return 0; }
+  int e = Marshal.GetLastWin32Error();
+  return e != 0 ? e : -1;
+}
+'@
 $entries = @(ConvertFrom-Json -InputObject $InputJson)
 $failed = @()
 $broadcast = $null
@@ -324,37 +343,30 @@ if ($Mode -eq 'write') {
   $wrote = 0
   foreach ($e in $entries) {
     if (-not $e.write) { continue }
-    # Locale = LOCALE_USER_DEFAULT (0x0400). The W version ignores it.
-    if ([DotfilesIntl.Nls]::SetLocaleInfoW(0x0400, [uint32]$e.lctype, [string]$e.value)) {
-      $wrote++
-    } else {
-      $failed += [ordered]@{ name = $e.name; error = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
-    }
+    $err = [DotfilesIntl.Nls]::Set([uint32]$e.lctype, [string]$e.value)
+    if ($err -eq 0) { $wrote++ } else { $failed += [ordered]@{ name = $e.name; error = $err } }
   }
   if ($wrote -gt 0) {
-    # WM_SETTINGCHANGE (0x001A) to HWND_BROADCAST (0xFFFF), lParam "intl", SMTO_ABORTIFHUNG (0x0002), 5000 ms
-    $res = [UIntPtr]::Zero
-    $ok = [DotfilesIntl.Nls]::SendMessageTimeoutW([IntPtr]0xFFFF, 0x001A, [UIntPtr]::Zero, 'intl', 0x0002, 5000, [ref]$res) -ne [IntPtr]::Zero
-    $code = 0
-    if (-not $ok) { $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
-    $broadcast = [ordered]@{ ok = $ok; error = $code }
+    $err = [DotfilesIntl.Nls]::Broadcast()
+    $broadcast = [ordered]@{ ok = ($err -eq 0); error = $err }
   }
 }
 $values = @(foreach ($e in $entries) {
     [ordered]@{
       name = $e.name
-      current = Get-Nls ([uint32]$e.lctype)
-      default = Get-Nls ([uint32]$e.lctype + [uint32]2147483648)
+      current = [DotfilesIntl.Nls]::Get([uint32]$e.lctype)
+      default = [DotfilesIntl.Nls]::Get([uint32]$e.lctype + [uint32]2147483648)
     }
   })
 # LOCALE_SNAME (0x5C) is the name of the locale (en-US).
-[ordered]@{ locale = Get-Nls 0x5C; values = $values; failed = $failed; broadcast = $broadcast } |
+[ordered]@{ locale = [DotfilesIntl.Nls]::Get(0x5C); values = $values; failed = $failed; broadcast = $broadcast } |
   ConvertTo-Json -Compress -Depth 4 -EscapeHandling EscapeNonAscii
 EOS
 
 # pwsh.exe で PowerShell のコードを流す。$1: read か write、$2: 入力の JSON。
-# stdout (CR を落とす) を ps_out に、stderr (CR を落とす) を ps_err に、終了コード (時間切れは 124) を ps_rc に入れる。
-# 値は jq -a で ASCII にし (日本語は \uXXXX)、PowerShell の '' の文字列に入れる (中の ' は '' に)。
+# stdout (CR を落とす) を ps_out に、stderr (CR と色のエスケープを落とす) を ps_err に、終了コード (時間切れは 124) を
+# ps_rc に入れる。値は jq -a で ASCII にし (日本語は \uXXXX)、PowerShell の '' の文字列に入れる (中の ' は '' に)。
+# -OutputFormat Text は、-EncodedCommand で起動した pwsh がエラーを CLIXML (XML の塊) で出さず、平文で出すため。
 run_ps() {
   local input quoted enc
   input=$(jq -c -a . <<<"$2")
@@ -364,9 +376,10 @@ run_ps() {
     exit 1
   fi
   ps_rc=0
-  ps_out=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -EncodedCommand "${enc}" </dev/null 2>"${ps_err_file}") || ps_rc=$?
+  ps_out=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand "${enc}" </dev/null 2>"${ps_err_file}") \
+    || ps_rc=$?
   ps_out=${ps_out//$'\r'/}
-  ps_err=$(tr -d '\r' <"${ps_err_file}")
+  ps_err=$(tr -d '\r' <"${ps_err_file}" | sed 's/\x1b\[[0-9;?]*[A-Za-z]//g')
 }
 
 # 記録に値を書く (書いた値か、もう同じだった値)。$1: 名前、$2: 値
@@ -457,7 +470,10 @@ report_conflict() {
   } >&2
 }
 
-log=()
+# 書く値の出力の行は、書いた結果を見てから組み立てる (log_keys と log_base を並べ、書けなかった値には mark の印を足す)
+log_keys=()
+log_base=()
+declare -A mark=()
 conflicts=()
 imports=()
 pending=()
@@ -496,7 +512,8 @@ while IFS= read -r entry; do
       esac
       write_names+=("${key}")
       need_write=1
-      log+=("  ${pre}${key}: $(jq -r '"\(.cur | tojson) → \(.want | tojson)"' <<<"${entry}") (${label})")
+      log_keys+=("${key}")
+      log_base+=("  ${pre}${key}: $(jq -r '"\(.cur | tojson) → \(.want | tojson)"' <<<"${entry}") (${label})")
       ;;
     conflict)
       conflicts+=("${key}")
@@ -510,8 +527,14 @@ while IFS= read -r entry; do
 done <<<"$(jq -c '.[]' <<<"${plan}")"
 
 # 書く。衝突でない値を全部、表の順に書き直す (同じ値も。ある値を書くと Windows が別の値を書き直す作りでも、
-# 持つ値に揃えて終わるよう)。書いた値は読み戻して比べ、揃った値だけを記録する
+# 持つ値に揃えて終わるよう)。書いた値は読み戻して比べ、揃った値だけを記録する。
+#   failures      書けなかった値の行 (⚠ の枠に出して exit 1)
+#   crash         書く途中で pwsh.exe が失敗したときの、⚠ の枠の行 (どの値が書けたか分からないので、記録しない)
+#   policy_keys   グループポリシーで止められている値 (ERROR_ACCESS_DISABLED_BY_POLICY = 1260)。流し直しても書けず、
+#                 dotfiles では直せないので、warn で知らせて setup は止めない
 failures=()
+crash=()
+policy_keys=()
 broadcast_note=""
 if ((need_write && ! dry_run)); then
   names_json=$(printf '%s\n' "${write_names[@]}" | jq -R . | jq -c -s .)
@@ -519,26 +542,31 @@ if ((need_write && ! dry_run)); then
     'map({name, lctype, value: .want, write: (.name | IN($w[]))})' <<<"${plan}")
   run_ps write "${write_input}"
   if ((ps_rc != 0)) || ! jq -e '(.values | type) == "array" and (.failed | type) == "array"' <<<"${ps_out}" >/dev/null 2>&1; then
-    failures+=("書く途中で pwsh.exe が失敗しました (終了コード ${ps_rc})。どの値が書けたかは分からないので、記録していません。")
+    crash+=("書く途中で pwsh.exe が失敗しました (終了コード ${ps_rc})。どの値が書けたかは分からないので、記録していません:")
     if [[ -n ${ps_err} ]]; then
-      failures+=("${ps_err}")
+      crash+=("  ${ps_err//$'\n'/$'\n'  }")
     fi
-    failures+=("もう一度流すと、読み直して判定します。")
+    crash+=("もう一度流すと、読み直して判定します。")
+    for key in "${log_keys[@]}"; do
+      mark[${key}]="書けたか分かりません"
+    done
   else
     for key in "${write_names[@]}"; do
       want=$(jq -r --arg n "${key}" '.[] | select(.name == $n) | .want' <<<"${plan}")
       err=$(jq -r --arg n "${key}" '.failed[] | select(.name == $n) | .error' <<<"${ps_out}")
-      if [[ -n ${err} ]]; then
-        hint=""
-        if [[ ${err} == 1260 ]]; then
-          hint="。グループポリシーで止められています"
-        fi
-        failures+=("${key}: 書けませんでした (Win32 のエラー ${err}${hint})")
+      if [[ ${err} == 1260 ]]; then
+        policy_keys+=("${key}")
+        mark[${key}]="グループポリシーで止められていて書けません"
+        continue
+      elif [[ -n ${err} ]]; then
+        failures+=("${key}: 書けませんでした (Win32 のエラー ${err})")
+        mark[${key}]="書けませんでした"
         continue
       fi
       got=$(jq -r --arg n "${key}" '.values[] | select(.name == $n) | .current' <<<"${ps_out}")
       if [[ ${got} != "${want}" ]]; then
         failures+=("${key}: 書いた後に読み戻すと $(jq -rn --arg v "${got}" '$v | tojson') で、managed.json の $(jq -rn --arg v "${want}" '$v | tojson') と違います")
+        mark[${key}]="書けませんでした"
         continue
       fi
       remember "${key}" "${want}"
@@ -592,20 +620,32 @@ if ((do_import)); then
   exit 0
 fi
 
-if ((${#log[@]} == 0 && ${#conflicts[@]} == 0 && ${#failures[@]} == 0)); then
+if ((${#log_keys[@]} == 0 && ${#conflicts[@]} == 0)); then
   echo "Windows の日付と時刻の形式は揃っています (持つ値 ${count} 件${locale:+。地域 ${locale}})。"
   exit 0
 fi
 
-if ((${#log[@]} > 0)); then
+if ((${#log_keys[@]} > 0)); then
   echo "==> ${pre}Windows の日付と時刻の形式 (地域 ${locale})"
-  printf '%s\n' "${log[@]}"
+  for i in "${!log_keys[@]}"; do
+    line=${log_base[i]}
+    if [[ -n ${mark[${log_keys[i]}]-} ]]; then
+      line+=" … ${mark[${log_keys[i]}]}"
+    fi
+    printf '%s\n' "${line}"
+  done
   if [[ -n ${broadcast_note} ]]; then
     echo "${broadcast_note}"
   fi
 fi
 
-if ((${#conflicts[@]} == 0 && ${#failures[@]} == 0)); then
+if ((${#policy_keys[@]} > 0)); then
+  warn "次の値は、この PC ではグループポリシーで止められていて書けません (Win32 のエラー 1260): ${policy_keys[*]}" \
+    "変えられるのは組織の管理者だけなので、この値は飛ばします (setup は止めません。次の setup でも同じ警告が出ます)。" \
+    "この PC で持たないなら、managed.json からその値を消す (ほかの PC にも効く) しかありません。"
+fi
+
+if ((${#conflicts[@]} == 0 && ${#failures[@]} == 0 && ${#crash[@]} == 0)); then
   exit 0
 fi
 
@@ -627,11 +667,14 @@ rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━�
   if ((${#failures[@]} > 0)); then
     printf '%s⚠️  次の値は書けませんでした (書けた値は記録してあります):%s\n' "${c_warn}" "${c_reset}"
     for line in "${failures[@]}"; do
-      while IFS= read -r l; do
-        printf '%s⚠️    %s%s\n' "${c_warn}" "${l}" "${c_reset}"
-      done <<<"${line}"
+      printf '%s⚠️    %s%s\n' "${c_warn}" "${line}" "${c_reset}"
     done
   fi
+  for line in "${crash[@]}"; do
+    while IFS= read -r l; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${l}" "${c_reset}"
+    done <<<"${line}"
+  done
   printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
 } >&2
 exit 1
