@@ -23,6 +23,7 @@
 #   - http・https のほかの scheme (ms-msdt: や search-ms: のように、Windows では別のアプリを動かすものがある)
 #   - ほかのホストの file:// (Windows が SMB で読みに行く)
 #   - Windows が実行するファイル (open_path の一覧。網羅ではない。実行したいなら直に打つ)
+#   - 末尾が . か空白の名前と、途中のディレクトリの末尾が . のパス (Windows のパスの正規化で別のファイルを指す)
 #
 # 終了コードは xdg-utils の xdg-open と同じ意味にする。
 
@@ -43,11 +44,12 @@ usage() {
 EOS
 }
 
-# <終了コード> <文>
+# <終了コード> <文>。文に入る引数はサーバーから受け取った URL かもしれないので、制御文字 (端末のエスケープ) をそのまま出さない
 die() {
-  local code=$1
+  local code=$1 message
   shift
-  printf 'xdg-open: %s\n' "$*" >&2
+  message=$*
+  printf 'xdg-open: %s\n' "${message//[[:cntrl:]]/?}" >&2
   exit "${code}"
 }
 
@@ -75,18 +77,23 @@ encode_url() {
 # あるファイル・ディレクトリを開く
 open_path() {
   local resolved windows_path
-  # 絶対パスにする (wslpath -w は相対パスを相対のまま返す)。下の判定は symlink の先の名前で決める
-  resolved=$(readlink -f -- "$1")
+  # 絶対パスにする (wslpath -w は相対パスを相対のまま返す)。下の判定は symlink の先の名前で決める。
+  # x は、$(…) に名前の末尾の改行を落とさせないためのもの
+  resolved=$(readlink -f -- "$1" && printf x) || die 4 "パスを解決できませんでした: $1"
+  resolved=${resolved%$'\nx'}
   case ${resolved} in
-    *. | *' ')
+    *. | *' ' | *./*)
       die 4 "末尾が . か空白の名前は、Windows では別のファイルを指すので開きません: ${resolved}"
       ;;
   esac
   if [[ ! -d ${resolved} ]]; then
-    # Windows の既定の PATHEXT と、ShellExecute が起動・導入・登録するほかの主なもの
+    # Windows の既定の PATHEXT と、ShellExecute が起動・導入・登録するほかの主なもの。最後の行は、入れたアプリ
+    # (Python のランチャー・Git for Windows など) がある PC で実行されるもの
     case ${resolved,,} in
       *.com | *.exe | *.bat | *.cmd | *.vbs | *.vbe | *.js | *.jse | *.wsf | *.wsh | *.msc | *.cpl | \
-        *.scr | *.pif | *.msi | *.msp | *.ps1 | *.hta | *.jar | *.reg | *.lnk | *.url | *.scf | *.appref-ms | *.application)
+        *.scr | *.pif | *.msi | *.msp | *.msu | *.ps1 | *.hta | *.jar | *.reg | *.lnk | *.url | *.scf | \
+        *.appref-ms | *.application | *.chm | *.diagcab | *.xbap | *.settingcontent-ms | *.theme | *.themepack | *.deskthemepack | \
+        *.sh | *.py | *.pyw | *.pyz | *.pl | *.rb)
         die 4 "Windows が実行するファイルなので開きません: ${resolved}"
         ;;
     esac
@@ -97,7 +104,7 @@ open_path() {
 
 # file:///<パス> と file://localhost/<パス> をファイルとして開く
 open_file_url() {
-  local rest=${1:7} path
+  local rest=${1:7} path='' byte
   case ${rest,,} in
     /*) ;;
     localhost/*) rest=${rest:9} ;;
@@ -105,9 +112,20 @@ open_file_url() {
   esac
   rest=${rest%%#*}
   rest=${rest%%\?*}
-  # %XX を戻す。\ は文字のまま (printf に読ませない)
-  rest=${rest//\\/\\\\}
-  printf -v path '%b' "${rest//%/\\x}"
+  # %XX を戻す。%XX の形でない % は文字のまま読む (パスを encode せずに file:// を組み立てる CLI がある)
+  while [[ ${rest} == *%* ]]; do
+    path+=${rest%%\%*}
+    rest=${rest#*\%}
+    if [[ ${rest} =~ ^[0-9A-Fa-f]{2} ]]; then
+      [[ ${BASH_REMATCH[0]} != 00 ]] || die 4 "%00 を含む file:// は開きません: $1"
+      printf -v byte '%b' "\\x${BASH_REMATCH[0]}"
+      path+=${byte}
+      rest=${rest:2}
+    else
+      path+=%
+    fi
+  done
+  path+=${rest}
   [[ -e ${path} ]] || die 2 "ファイルがありません: ${path}"
   open_path "${path}"
 }

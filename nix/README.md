@@ -2323,7 +2323,8 @@ ip link show eth0                                  # 今の MTU
 ## WSL の xdg-open
 
 `wsl.enable` のマシンの PATH に、URL とファイルを Windows の既定のアプリで開く `xdg-open`（`nix/pkgs/pjp-wsl-xdg-open/`）を
-置く。root は要らないので option は無く、WSL でないマシンには入らない。
+置く（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-wsl-xdg-open-design.md)）。
+root は要らないので option は無く、WSL でないマシンには入らない。
 
 Linux 版の herdr は、pane のリンクの Ctrl+クリックで `xdg-open` を呼ぶ（WSL かどうかを見ない。
 [herdr の中の Claude Code にリンクを出させる](#herdr-の中の-claude-code-にリンクを出させる)）。WSL の Ubuntu には `xdg-open` が
@@ -2336,7 +2337,8 @@ PATH に入るので、`gh browse` など `xdg-open` を呼ぶほかの CLI も�
 | あるファイル・ディレクトリ | `wslpath -w` で変換して、既定のアプリで開く | 0 |
 | `file:///…`・`file://localhost/…` | `%XX` を戻して、上のファイルと同じに開く（`#`・`?` の後ろは外す） | 0 |
 | 無いファイル | 開かない | 2 |
-| Windows が実行するファイル（`.exe`・`.bat`・`.js`・`.ps1`・`.lnk` など） | 開かない。実行したいなら直に打つ | 4 |
+| Windows が実行するファイル（`.exe`・`.bat`・`.js`・`.ps1`・`.py`・`.lnk` など。網羅ではない） | 開かない。実行したいなら直に打つ | 4 |
+| 末尾が `.` か空白の名前・途中のディレクトリの末尾が `.` のパス | 開かない（Windows では別のファイルを指す） | 4 |
 | ほかの scheme（`mailto:`・`ms-msdt:` など）・ほかのホストの `file://` | 開かない | 4 |
 
 終了コードの意味は xdg-utils の `xdg-open` と同じ（ほかに 1 は引数の誤り、3 は `rundll32.exe` が無いとき）。
@@ -2355,13 +2357,15 @@ Windows へは `rundll32.exe url.dll,FileProtocolHandler` で渡す。シェル�
 ```sh
 command -v xdg-open                 # ~/.nix-profile/bin/xdg-open
 xdg-open 'https://example.com/?a=1&b=2'   # 既定のブラウザのタブが開く (アドレス欄の & の後ろが残る)
-grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # herdr の Ctrl+クリックが開けなかった記録
+grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # herdr が xdg-open を起動できなかった記録
 ```
 
 ### 気を付けること
 
 - 開けたかどうかは `rundll32.exe` の終了コードでは分からない。0 で終わっても開いたとは限らない
 - interop が外れていると（`Exec format error`）`rundll32.exe` を起こせず、4 で終わる
+- herdr は起動した `xdg-open` の stdout・stderr を捨て、終了コードも記録しない（log に残るのは起動できなかったときだけ）。
+  Ctrl+クリックで開かないときは、シェルで `xdg-open <URL>` を打つと理由が出る
 - `url.dll` の入口には ANSI 版しかないので、ファイルの名前に Windows の ANSI のコードページに無い文字があると開けない
   （コードページが 65001 の PC では当たらない）。URL は `%XX` にしてから渡すので当たらない
 - apt の `xdg-utils` を入れても、`~/.nix-profile/bin` が `/usr/bin` より先なのでこちらが当たる。Linux のアプリで開きたいなら
@@ -3136,7 +3140,7 @@ herdr の pane の中では、シェルの init が `FORCE_HYPERLINK=1` を expo
 #### なぜ要るのか
 
 herdr（0.9.5）は `ui.mouse_capture = true`（既定。dotfiles も変えていない）の間、pane が出したリンク（OSC 8）を外の端末へ
-渡さず、自分で持って Ctrl+クリックを受ける。開けるのは OSC 8 のリンクと、画面に出ている `http://`・`https://` の文字で、
+渡さず、自分で持って Ctrl+クリックを受ける。開けるのは `http://`・`https://` の OSC 8 のリンクと、画面に出ている同じ形の文字で、
 Linux 版は `xdg-open` で開く（WSL は [WSL の xdg-open](#wsl-の-xdg-open)）。`false` にすると OSC 8 を外の端末へ通すが、
 herdr のマウスの操作（タブのクリック・分割の線のドラッグなど）が使えなくなる。
 
