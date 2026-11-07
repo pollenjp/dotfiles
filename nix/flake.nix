@@ -181,7 +181,8 @@
               ;
           };
           # WSL の op の launcher (pkgs/pjp-op/launcher.ps1) を、Linux の pwsh と偽の op で流す。窓と通知は Windows でだけ
-          # 出すので、ここでは出さない (どちらも skipped と書く)
+          # 出すので、ここでは出さない (どちらも skipped と書く)。package が build のときに作った base64 も渡し、op が
+          # -EncodedCommand で渡すのと同じものでも流す
           pjp-op-launcher-test =
             pkgs.runCommand "pjp-op-launcher-test"
               {
@@ -191,7 +192,8 @@
                 ];
               }
               ''
-                bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1}
+                bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1} \
+                  ${(pkgs.callPackage ./pkgs/pjp-op { }).launcherB64}
                 touch $out
               '';
           # WSL の op (pkgs/pjp-op/op.sh) を、偽の powershell.exe・op.exe・wslpath・herdr で流す。lock に flock (util-linux) を使う
@@ -575,6 +577,14 @@
               system
               ;
           };
+          op-reason-state = import ./tests/op-reason.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
           local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
           hosts-with-state = import ./tests/hosts-with.nix {
@@ -747,12 +757,18 @@
         # 単体で試すなら:
         #
         #   nix run ./nix#pjp-wsl-xdg-open -- <URL かファイルのパス>
+        #
+        # WSL の op (1Password CLI の wrapper) と pjp-op-log も WSL のマシンでしか使わない。home には home/modules/op-reason.nix が
+        # 入れる。単体で試すなら (承認の画面が出る):
+        #
+        #   nix run ./nix#pjp-op -- --reason "<なぜ呼ぶか>" whoami
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
           pjp-wsl-mtu-guard = pkgs.callPackage ./pkgs/pjp-wsl-mtu-guard { };
           pjp-wsl-xdg-open = pkgs.callPackage ./pkgs/pjp-wsl-xdg-open { };
+          pjp-op = pkgs.callPackage ./pkgs/pjp-op { };
         }
       );
 

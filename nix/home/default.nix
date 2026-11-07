@@ -24,6 +24,7 @@
     ./modules/exe-exec-trace.nix
     ./modules/wsl-mtu-guard.nix
     ./modules/wsl-xdg-open.nix
+    ./modules/op-reason.nix
     ./modules/cleanup.nix
     ./modules/mise-release-age.nix
     ./modules/ntn.nix
