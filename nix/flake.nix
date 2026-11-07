@@ -210,6 +210,23 @@
                 bash ${./tests/pjp-op.test.sh} ${./pkgs/pjp-op/op.sh}
                 touch $out
               '';
+          # op.sh から本物の launcher (Linux の pwsh) までを偽の op で端から端まで通す (op.sh と launcher の取り決めのずれを見る)
+          pjp-op-e2e-test =
+            pkgs.runCommand "pjp-op-e2e-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.powershell
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-e2e.test.sh} ${./pkgs/pjp-op/op.sh} ${
+                  (pkgs.callPackage ./pkgs/pjp-op { }).launcher
+                }
+                touch $out
+              '';
           # op の記録を表で見る pjp-op-log (pkgs/pjp-op/pjp-op-log.sh) を作り物の記録で流す。表を揃えるのに column (util-linux) を使う
           pjp-op-log-test =
             pkgs.runCommand "pjp-op-log-test"

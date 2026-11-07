@@ -29,18 +29,24 @@
 #       OP_BIOMETRIC_UNLOCK_ENABLED/w を足し、OP_BIOMETRIC_UNLOCK_ENABLED=false で起こす。ログの kind は service-account
 #     - OP_CONNECT_HOST と OP_CONNECT_TOKEN が両方あれば同じく service (kind は connect)。片方だけなら desktop
 #     - token はログに書かない
-#   伏せる: password=… の値・--session と --secret-key の値は、ログの args と窓のコマンドで *** にする (op にはそのまま渡す)
+#   伏せる: password=… の値・--session と --secret-key の値は、ログの args と窓のコマンドで *** にする (op にはそのまま渡す)。
+#     -- の後ろ (op run の子のコマンド) は、コマンドの名前と値の無い flag のほかを *** にする
+#   引数が長すぎる (base64 で 28000 字を超える) なら 2 で断り、powershell を呼ばない (ログに refused (too-long))
 #   結果: 0 → approved、拒否の文言 → denied、時間切れの文言 → timeout、ほか → failed、status が無い → launcher-failed。
-#     start と end は同じ id で、end の seconds は 0 以上の整数
+#     文言は op の「[ERROR] …」の行だけに当てる (子のコマンドの「Connection timed out」は failed)。start と end は同じ id で、
+#     end の seconds は 0 以上の整数
 #   呼び手: proc の祖先に claude があれば claude (pid も)、無ければ human。herdr の workspace の label と pane、git の repo と
 #     branch、CLAUDE_CODE_SESSION_ID を start と end の session に書く
 #   lock: ほかの呼び出しが lock を持ったまま上限を超えたら 75 で終わり、待った秒と待たせている呼び出しの理由を出し、
-#     powershell を呼ばない (ログに refused (lock-timeout))
-#   共有の承認の見張り: WSL の直の op.exe whoami が通れば op.exe signout で消し、ログに shared-approval、通知を出す
+#     powershell を呼ばない (ログに refused (lock-timeout))。lock を待つ間に TERM を受けたら 143 で終わり、refused (interrupted)
+#   パイプ: op の出力を別の op に渡す (op … | op …) と、どちらの lock の順でも止まらずに渡る (後ろの op が stdin を先に読み切る)
+#   共有の承認の見張り: WSL の直の op.exe whoami が通れば op.exe signout --all で消し、ログに shared-approval、通知を出す
 #     (powershell の notify と herdr)。通らなければ signout を打たない
 #   op.exe・powershell.exe が無ければ 127 (ログに refused)
 #   TERM を受けたら end に interrupted を書いて 143 で終わる
-#   ログが 1 MiB を超えたら log.1.jsonl へ回す。呼び出しの後に run/ の下 (status・stderr の写し) を残さない
+#   stdin が閉じていても、stderr に余計な文を出さない
+#   ログが 1 MiB を超えたら log.1.jsonl へ回す。呼び出しの後に run/ と一時の置き場 (status・stderr の写し) を残さず、
+#   1 時間より古い置き場 (SIGKILL で残ったもの) を片付ける
 #
 # ## 作り
 #
@@ -143,18 +149,19 @@ fake "${op_exe}" <<'EOF'
 d=${FAKE_DIR}
 case ${1-} in
   whoami)
-    echo whoami >>"${d}/op.direct"
+    echo "$*" >>"${d}/op.direct"
     [[ -e ${d}/shared ]] && exit 0
     exit 1
     ;;
   signout)
-    echo signout >>"${d}/op.direct"
+    echo "$*" >>"${d}/op.direct"
     rm -f "${d}/shared"
     exit 0
     ;;
 esac
 printf "%s\0" "$@" >"${d}/op.args"
 if [[ -n ${FAKE_SLEEP:-} ]]; then sleep "${FAKE_SLEEP}"; fi
+printf "%s" "${FAKE_OUT:-}"
 cat
 printf "%s\n" "${FAKE_STDERR:-fake-err}" >&2
 exit "${FAKE_RC:-0}"
@@ -417,6 +424,8 @@ export FAKE_STDERR="[ERROR] 2026/11/08 00:00:00 authorization timeout"
 check_result timeout "時間切れの文言"
 export FAKE_STDERR="[ERROR] 2026/11/08 00:00:00 \"a\" isn't an item"
 check_result failed "ほかの失敗"
+export FAKE_STDERR="curl: (28) Connection timed out after 1000 ms"
+check_result failed "子のコマンドの「Connection timed out」"
 unset FAKE_RC FAKE_STDERR
 export FAKE_PS_NO_STATUS=1
 check_result launcher-failed "launcher が status を書かない"
@@ -489,17 +498,17 @@ for _ in $(seq 50); do
   [[ -z ${notify_mode} ]] || break
   sleep 0.1
 done
-if grep -qx signout "${FAKE_DIR}/op.direct" && [[ $(last_field shared-approval '.when') == start &&
+if grep -qx 'signout --all' "${FAKE_DIR}/op.direct" && [[ $(last_field shared-approval '.when') == start &&
 $(last_field shared-approval '.cleared') == true && $(last_field end '.watch.start') == cleared &&
 -n ${notify_mode} && -s ${FAKE_DIR}/herdr.notify ]]; then
-  ok "直の whoami が通れば signout で消し、ログ・powershell の notify・herdr の通知で知らせる"
+  ok "直の whoami が通れば signout --all で消し、ログ・powershell の notify・herdr の通知で知らせる"
 else
-  ng "直の whoami が通れば signout で消し、ログ・powershell の notify・herdr の通知で知らせる" \
+  ng "直の whoami が通れば signout --all で消し、ログ・powershell の notify・herdr の通知で知らせる" \
     "direct=$(tr '\n' ' ' <"${FAKE_DIR}/op.direct" 2>&1) notify=${notify_mode} herdr=$(cat "${FAKE_DIR}/herdr.notify" 2>&1) files=$(ls "${FAKE_DIR}") log=$(cat "${log}")"
 fi
 reset
 run_op noshared --reason "見張りを見る" item get a
-if ! grep -qx signout "${FAKE_DIR}/op.direct" 2>/dev/null && [[ $(grep -c whoami "${FAKE_DIR}/op.direct") == 2 &&
+if ! grep -q '^signout' "${FAKE_DIR}/op.direct" 2>/dev/null && [[ $(grep -c whoami "${FAKE_DIR}/op.direct") == 2 &&
 $(last_field end '.watch.start') == none && $(last_field end '.watch.end') == none ]]; then
   ok "直の whoami が通らなければ signout を打たない (始まりと終わりに 1 回ずつ見る)"
 else
@@ -559,6 +568,89 @@ if [[ -z $(ls -A "${XDG_STATE_HOME}/pjp-op/run" 2>/dev/null) ]]; then
   ok "呼び出しの後に run/ の下を残さない"
 else
   ng "呼び出しの後に run/ の下を残さない" "$(ls -lR "${XDG_STATE_HOME}/pjp-op/run")"
+fi
+
+echo "== 伏せる (-- の後ろ)・長すぎる引数"
+reset
+run_op runmask --reason "子のコマンド" run -- curl -s -H "Authorization: Bearer tok-RUN" https://example.com/?k=v
+if [[ $(last_field start '.args | join(" ")') == 'run -- curl -s -H *** ***' ]] && ! grep -q 'tok-RUN' "${log}"; then
+  ok "-- の後ろは、コマンドの名前と値の無い flag のほかを *** にする"
+else
+  ng "-- の後ろは、コマンドの名前と値の無い flag のほかを *** にする" "$(last_field start '.args')"
+fi
+reset
+big=$(printf 'x%.0s' $(seq 25000))
+run_op toolong --reason "長い" item create "notesPlain=${big}"
+if [[ ${rc} == 2 && $(ps_count) == 0 && $(last_field refused '.why') == too-long && $(<"${work}/toolong.err") == *長すぎます* ]]; then
+  ok "引数が長すぎれば 2 で断り、powershell を呼ばない"
+else
+  ng "引数が長すぎれば 2 で断り、powershell を呼ばない" "rc=${rc} ps=$(ps_count) err=$(cat "${work}/toolong.err")"
+fi
+
+echo "== lock を待つ間に止める・パイプ"
+reset
+mkdir -p "${XDG_STATE_HOME}/pjp-op"
+flock "${XDG_STATE_HOME}/pjp-op/lock" sleep 3 &
+holder=$!
+sleep 0.3
+PJP_OP_LOCK_WAIT=10 "${BASH}" "${script}" --reason "待つ間に止める" item get a </dev/null >/dev/null 2>"${work}/lockterm.err" &
+pid=$!
+sleep 0.7
+kill -TERM "${pid}"
+rc=0
+wait "${pid}" || rc=$?
+if [[ ${rc} == 143 && $(last_field refused '.why') == interrupted && $(ps_count) == 0 ]]; then
+  ok "lock を待つ間に TERM を受けたら 143 で終わり、refused (interrupted) を書く"
+else
+  ng "lock を待つ間に TERM を受けたら 143 で終わり、refused (interrupted) を書く" "rc=${rc} log=$(cat "${log}" 2>&1)"
+fi
+wait "${holder}" 2>/dev/null
+pipe_ok=1
+for i in 1 2 3 4; do
+  reset
+  out=$(
+    export FAKE_OUT="from-A-${i}" PJP_OP_LOCK_WAIT=8
+    { "${BASH}" "${script}" --reason "送る" item list </dev/null 2>/dev/null || echo "A-rc=$?" >&2; } \
+      | { FAKE_OUT="" "${BASH}" "${script}" --reason "受ける" item get - 2>/dev/null || echo "B-rc=$?" >&2; }
+  ) 2>"${work}/pipe.err"
+  if [[ ${out} != "from-A-${i}" || -s ${work}/pipe.err ]]; then
+    pipe_ok=0
+    pipe_detail="round ${i}: out=${out} err=$(cat "${work}/pipe.err")"
+  fi
+done
+if ((pipe_ok)); then
+  ok "op … | op … は lock の順によらず止まらずに渡る (4 回)"
+else
+  ng "op … | op … は lock の順によらず止まらずに渡る (4 回)" "${pipe_detail}"
+fi
+
+echo "== stdin が閉じている・残りの片付け"
+reset
+"${BASH}" "${script}" --reason "閉じた stdin" item get a <&- >/dev/null 2>"${work}/closed.err"
+if [[ $(<"${work}/closed.err") == fake-err ]]; then
+  ok "stdin が閉じていても、stderr に余計な文を出さない"
+else
+  ng "stdin が閉じていても、stderr に余計な文を出さない" "$(cat "${work}/closed.err")"
+fi
+reset
+mkdir -p "${XDG_STATE_HOME}/pjp-op/run/old-call" "${XDG_STATE_HOME}/pjp-op/tmp/old-call"
+touch -d '2 hours ago' "${XDG_STATE_HOME}/pjp-op/run/old-call" "${XDG_STATE_HOME}/pjp-op/tmp/old-call"
+(unset XDG_RUNTIME_DIR && "${BASH}" "${script}" --reason "片付け" item get a </dev/null >/dev/null 2>&1)
+if [[ ! -e ${XDG_STATE_HOME}/pjp-op/run/old-call && ! -e ${XDG_STATE_HOME}/pjp-op/tmp/old-call &&
+  -z $(ls -A "${XDG_STATE_HOME}/pjp-op/run" 2>/dev/null) && -z $(ls -A "${XDG_STATE_HOME}/pjp-op/tmp" 2>/dev/null) ]]; then
+  ok "1 時間より古い置き場を片付け、自分の置き場も残さない"
+else
+  ng "1 時間より古い置き場を片付け、自分の置き場も残さない" "$(ls -lR "${XDG_STATE_HOME}/pjp-op" 2>&1)"
+fi
+reset
+export XDG_RUNTIME_DIR=${work}/runtime
+mkdir -p "${XDG_RUNTIME_DIR}"
+run_op runtime --reason "tmpfs" item get a
+unset XDG_RUNTIME_DIR
+if [[ ${rc} == 0 && -d ${work}/runtime/pjp-op && -z $(ls -A "${work}/runtime/pjp-op") ]]; then
+  ok "XDG_RUNTIME_DIR があれば一時の置き場をそこに作り、終わったら消す"
+else
+  ng "XDG_RUNTIME_DIR があれば一時の置き場をそこに作り、終わったら消す" "rc=${rc} $(ls -lR "${work}/runtime" 2>&1)"
 fi
 
 echo

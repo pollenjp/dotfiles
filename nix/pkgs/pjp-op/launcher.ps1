@@ -17,8 +17,8 @@
 #   ui       desktop and notify only: title, lines ([label, value]...), footer, others, toast (texts)
 #
 # Modes:
-#   desktop  show the window and the toast, run op.exe, then close this process's CLI session (whoami, then signout
-#            only when signed in: whoami does not prompt without a session)
+#   desktop  show the window and the toast, run op.exe, then close this process's CLI sessions (whoami, then
+#            signout --all only when signed in: whoami does not prompt without a session)
 #   help     calls that need no reason (--version, --help): run op.exe without the window, then close the session if any
 #   service  service account or Connect token (the desktop app is not involved): run op.exe only
 #   notify   show the toast only
@@ -98,8 +98,8 @@ function Invoke-Quiet([string]$exe, [string]$argLine) {
   return @{ code = $proc.ExitCode; err = $err.Result }
 }
 
-# Close the CLI session of this process: whoami first (it does not prompt without a session), signout only when
-# signed in.
+# Close the CLI sessions of this process: whoami first (it does not prompt without a session), then signout --all only
+# when signed in (plain signout closes only the most recently used account).
 function Close-Session([string]$op) {
   try {
     $who = Invoke-Quiet $op 'whoami'
@@ -107,7 +107,7 @@ function Close-Session([string]$op) {
       $script:status.signout = 'not-signed-in'
       return
     }
-    $out = Invoke-Quiet $op 'signout'
+    $out = Invoke-Quiet $op 'signout --all'
     if ($out.code -eq 0) { $script:status.signout = 'ok' }
     else { $script:status.signout = 'failed: exit ' + $out.code + ': ' + (Get-Short $out.err 120) }
   } catch {

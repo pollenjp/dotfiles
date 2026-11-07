@@ -11,15 +11,18 @@
 # ## 確かめること
 #
 #   打つ前 (PreToolUse)
-#     - op.exe を直に起こすコマンドは止める (deny)。パスつき・大文字・timeout や env で包んだもの・cd の後・bash -c の中・
-#       パイプの先・$( ) の中も。返す文に op --reason と、呼ぶ回数を減らす例がある
+#     - op.exe を直に起こすコマンドは止める (deny)。パスつき (\ の Windows のパスも)・大文字・timeout や env で包んだもの・
+#       cd の後・bash -c の中・パイプの先・$( ) の中・powershell (pwsh) の -Command・-c の中・cmd の /c の中も。返す文に
+#       op --reason と、呼ぶ回数を減らす例と、Bash の timeout を長くする勧めと、止めたコマンドがある
 #     - op.exe の文字があっても起こさないものは止めない: grep の引数・commit のメッセージ・heredoc の本文・command -v・ls の
 #       引数・コメント。op --reason … (wrapper) と、承認の要らない op.exe の whoami・signout・--version・--help も止めない
 #     - claude-op-reason.json が無い・enable が false のマシンでは何も止めない
 #   拒否・時間切れのあと (PostToolUse・PostToolUseFailure)
 #     - この会話の end が denied なら、打ち直さない指示と ①②③ の問い・時刻・理由・コマンド・どこからを additionalContext に、
 #       1 行を systemMessage に出す。hookEventName は入力の event
-#     - timeout なら時間切れの文
+#     - timeout なら時間切れの文、interrupted (承認を待つ間に止められた) なら止められた文と Bash の timeout の勧め
+#     - この会話の refused が lock-timeout (ほかの op の承認待ちが終わらない)・interrupted (それを待つ間に止められた) でも
+#       問いを出させる。refused のほかの why (no-reason など) では何も出さない
 #     - ほかの会話の end・approved・failed では何も出さない。同じ end は 2 回目に出さない (見た印)
 #     - subagent (入力に agent_id) では、問いを出させず報告に書かせる
 #     - herdr の workspace に子の印 (token parent) があれば、AskUserQuestion を使わずに問いを書くと言い切る
@@ -108,7 +111,8 @@ echo "== 打つ前"
 # shellcheck disable=SC2016 # $( ) の中の op.exe を確かめる (展開しない)
 for c in 'op.exe vault list' '/mnt/c/x/op.exe item get a' 'OP.EXE item get a' 'timeout 30 op.exe item get a' \
   'env A=1 op.exe read op://v/i/f' 'cd x && op.exe item get a' "bash -c 'op.exe item list'" \
-  'echo x | op.exe item create -' 'v=$(op.exe read op://v/i/f)'; do
+  'echo x | op.exe item create -' 'v=$(op.exe read op://v/i/f)' 'powershell.exe -NoProfile -Command "op.exe item list"' \
+  "pwsh -c 'op.exe item list'" 'cmd.exe /c op.exe item list' "'C:\\x\\op.exe' item get a"; do
   pre "${c}"
   if denied; then
     ok "止める: ${c}"
@@ -119,10 +123,10 @@ done
 pre 'op.exe vault list'
 why=$(jq -r '.hookSpecificOutput.permissionDecisionReason // empty' "${work}/stdout")
 if [[ ${why} == *'op --reason'* && ${why} == *'vault list --format json'* && ${why} == *呼ぶ回数を減らす* &&
-  ${why} == *"(止めたもの: op.exe vault list)"* ]]; then
-  ok "返す文に op --reason と、呼ぶ回数を減らす例と、止めたコマンドがある"
+  ${why} == *600000* && ${why} == *"(止めたもの: op.exe vault list)"* ]]; then
+  ok "返す文に op --reason と、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある"
 else
-  ng "返す文に op --reason と、呼ぶ回数を減らす例と、止めたコマンドがある" "${why}"
+  ng "返す文に op --reason と、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある" "${why}"
 fi
 for c in 'grep -rn op.exe nix/' 'git commit -m "op.exe を直す"' $'cat <<\'EOF\'\nop.exe item get a\nEOF' \
   'command -v op.exe' 'ls /mnt/c/x/op.exe' 'echo hi # op.exe item get a' 'op --reason "x" item get a' \
@@ -203,6 +207,38 @@ for case in "s2 denied" "s1 approved" "s1 failed"; do
     ng "何も出さない: session ${s} の ${r}" "$(detail)"
   fi
 done
+reset_log
+put_call i s1 interrupted 3500
+post PostToolUseFailure
+if [[ $(context) == *止められた* && $(context) == *600000* && $(context) == *拒否してもらう* ]]; then
+  ok "interrupted なら止められた文と、Bash の timeout を長くして打ち直す選択肢"
+else
+  ng "interrupted なら止められた文と、Bash の timeout を長くして打ち直す選択肢" "$(detail)"
+fi
+# put_refused <session> <why> <epoch>: refused を記録に足す
+put_refused() {
+  jq -cn --arg s "$1" --arg why "$2" --argjson e "$3" \
+    '{v: 1, id: "r", event: "refused", time: "2026-11-08T10:12:00+09:00", epoch: $e, session: $s, why: $why,
+      caller: {type: "claude", herdr: null}, reason: "待たされる", args: ["item", "get", "b"]}' >>"${log}"
+}
+for case in "lock-timeout:承認待ちが終わらず" "interrupted:承認待ちを待つ間に止められた"; do
+  reset_log
+  put_refused s1 "${case%%:*}" 3600
+  post PostToolUseFailure
+  if [[ $(context) == *"${case#*:}"* && $(context) == *"op item get b"* && $(context) == *"herdr の外の会話"* ]]; then
+    ok "refused の ${case%%:*} でも問いを出させる"
+  else
+    ng "refused の ${case%%:*} でも問いを出させる" "$(detail)"
+  fi
+done
+reset_log
+put_refused s1 no-reason 3700
+post PostToolUseFailure
+if silent; then
+  ok "refused の no-reason では何も出さない"
+else
+  ng "refused の no-reason では何も出さない" "$(detail)"
+fi
 reset_log
 put_call d s1 denied 4000
 post PostToolUse agent-1

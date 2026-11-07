@@ -15,7 +15,8 @@
 #     - --since 2h は 61 分前も出し、--all は 1 世代前の log.1.jsonl の分も出す
 #   行
 #     - start と end を 1 行にまとめ、結果 (許可・拒否・時間切れ・成功)・秒を出す。service account は「成功 (SA)」
-#     - end の無い start は「実行中か中断」、refused は「断った (理由なし)」、shared-approval は「共有の承認を消した」
+#     - end の無い start は「実行中か中断」、refused は「断った (理由なし)」・「断った (始める前に止められた)」、shared-approval は
+#       「共有の承認を消した」。窓を出せなかった desktop の呼び出しは結果に「(窓なし)」を添える
 #     - 呼び手は Claude / 人 と herdr の label・pane、理由は日本語のまま、コマンドは op から始める
 #     - 時刻は今日なら HH:MM:SS、ほかの日は MM/DD HH:MM:SS。JSON でない行は読み飛ばす
 #   --json は呼び出しごとに 1 行の JSON (start に end を重ねたもの) を出す
@@ -74,6 +75,9 @@ human='{type: "human", claude_pid: null, herdr: null, cwd: "/w", repo: null, bra
   echo 'not json'
   rec "{v: 1, id: \"d\", event: \"refused\", epoch: (\$now - 200), why: \"no-reason\", caller: ${claude}, reason: \"\", args: [\"item\", \"get\", \"y\"]}"
   rec '{v: 1, id: "e", event: "shared-approval", epoch: ($now - 100), when: "end", cleared: true}'
+  rec "{v: 1, id: \"h\", event: \"start\", epoch: (\$now - 60), kind: \"desktop\", caller: ${human}, reason: \"窓が出ない\", args: [\"whoami\"]}"
+  rec '{v: 1, id: "h", event: "end", epoch: ($now - 55), result: "approved", exit: 0, seconds: 5, window: "failed: no WPF"}'
+  rec "{v: 1, id: \"k\", event: \"refused\", epoch: (\$now - 50), why: \"interrupted\", caller: ${human}, reason: \"止めた2\", args: [\"read\", \"x\"]}"
   rec "{v: 1, id: \"g\", event: \"start\", epoch: (\$now - 120), kind: \"service-account\", caller: ${human}, reason: \"CI\", args: [\"read\", \"op://v/i/f\"]}"
   rec '{v: 1, id: "g", event: "end", epoch: ($now - 119), result: "ok", exit: 0, seconds: 1}'
 } >"${dir}/log.jsonl"
@@ -137,6 +141,11 @@ if [[ $(row default 止めた) == *実行中か中断* && $(row default "op item
 else
   ng "end の無い start は「実行中か中断」、refused・shared-approval も行にする" "$(cat "${work}/default.out")"
 fi
+if [[ $(row default 窓が出ない) == *"許可 (窓なし)"* && $(row default 止めた2) == *"断った (始める前に止められた)"* ]]; then
+  ok "窓を出せなかった呼び出しに (窓なし)、始める前に止められた refused に名前を出す"
+else
+  ng "窓を出せなかった呼び出しに (窓なし)、始める前に止められた refused に名前を出す" "$(cat "${work}/default.out")"
+fi
 if [[ $(row all 昨日の理由) == "01/14 "* ]]; then
   ok "ほかの日の時刻は MM/DD HH:MM:SS"
 else
@@ -145,7 +154,7 @@ fi
 
 echo "== --json"
 run json --json
-if [[ ${rc} == 0 && $(jq -s 'length' "${work}/json.out" 2>/dev/null) == 5 &&
+if [[ ${rc} == 0 && $(jq -s 'length' "${work}/json.out" 2>/dev/null) == 7 &&
 $(jq -r 'select(.id == "a") | .end.result' "${work}/json.out" 2>/dev/null) == approved ]]; then
   ok "--json は呼び出しごとに 1 行 (start に end を重ねる)"
 else

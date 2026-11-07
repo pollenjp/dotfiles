@@ -22,7 +22,7 @@
 #   本番と同じ起動の式 (-EncodedCommand の command.b64 が env の PJP_OP_SCRIPT から本体を読む) でも、引数・stdin・stderr・
 #   終了コードが同じに通り、PJP_OP_SCRIPT を op に継がせない
 #   承認を閉じる
-#     - desktop は op の後に whoami を打ち、承認があったときだけ signout を打つ (status の signout は ok か not-signed-in)
+#     - desktop は op の後に whoami を打ち、承認があったときだけ signout --all を打つ (status の signout は ok か not-signed-in)
 #     - whoami と signout の stdout・stderr は、launcher の stdout・stderr に出さない
 #     - help も同じく whoami で確かめてから閉じ、service は whoami も signout も打たない (status の signout は skipped)
 #   service は呼び手の OP_SERVICE_ACCOUNT_TOKEN を op にそのまま継がせる
@@ -232,11 +232,11 @@ fi
 echo "== 承認を閉じる"
 export FAKE_WHOAMI_RC=0
 run closes "$(payload desktop "${fake_op}" item get x)"
-if [[ $(calls) == 3 ]] && expect_args 1 item get x && expect_args 2 whoami && expect_args 3 signout \
+if [[ $(calls) == 3 ]] && expect_args 1 item get x && expect_args 2 whoami && expect_args 3 signout --all \
   && [[ $(status_field '.signout') == ok ]]; then
-  ok "desktop は op の後に whoami を打ち、承認があれば signout を打つ"
+  ok "desktop は op の後に whoami を打ち、承認があれば signout --all を打つ"
 else
-  ng "desktop は op の後に whoami を打ち、承認があれば signout を打つ" "calls=$(calls) status=$(cat "${work}/status.json" 2>&1)"
+  ng "desktop は op の後に whoami を打ち、承認があれば signout --all を打つ" "calls=$(calls) status=$(cat "${work}/status.json" 2>&1)"
 fi
 if ! grep -q SIGNOUT "${work}/closes.out" "${work}/closes.err"; then
   ok "whoami と signout の stdout・stderr は launcher の stdout・stderr に出さない"
@@ -253,7 +253,7 @@ else
 fi
 export FAKE_WHOAMI_RC=0
 run help "$(payload help "${fake_op}" --version)"
-if [[ $(calls) == 3 ]] && expect_args 1 --version && expect_args 2 whoami && expect_args 3 signout \
+if [[ $(calls) == 3 ]] && expect_args 1 --version && expect_args 2 whoami && expect_args 3 signout --all \
   && [[ $(status_field '.window') == skipped && $(status_field '.toast') == skipped ]]; then
   ok "help も whoami で確かめてから閉じ、窓と通知は出さない"
 else

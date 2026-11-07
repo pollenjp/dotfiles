@@ -15,18 +15,25 @@
 # 読み方は ssh-agent-notice.sh と同じ。lexer (awk)・pick_awk・split_commands・skip_opts はそのまま写し、match_simple の
 # 「頭の VAR=値と予約語」と「包むコマンドを外す」(env・sudo・exec・command・nohup・nice・timeout・xargs・watch・flock・
 # bash -c・eval・su・nix-shell・nix develop -c など) を、ssh の判定を除いて op_simple に写した (直すときは両方を直す)。
-# 引用符・heredoc の本文・コメントの中の op.exe では止めない (commit のメッセージや grep の引数)。頭の語の basename を
-# 小文字にして op.exe と比べる。script の中・関数・変数に入れた op.exe は見えない (窓の無い承認の画面は拒否する決まりと、
-# op の共有の承認の見張りで守る)。
+# op_simple は、それに powershell・pwsh の -Command・-c と cmd の /c・/k の後ろの読み直しを足し、basename を / と \ の
+# どちらでも切り、小文字にして比べる。引用符・heredoc の本文・コメントの中の op.exe では止めない (commit のメッセージや
+# grep の引数)。script の中・関数・変数に入れた op.exe は見えない (窓の無い承認の画面は拒否する決まりと、op の共有の承認の
+# 見張りで守る)。止める文では、op を打つ Bash の timeout を長くするよう促す (承認を待つ間に既定の 2 分で止められると、
+# 窓が消えて承認の画面だけが残る。op.sh の「止められたとき」)。
 #
-# ## 拒否・時間切れのあと (PostToolUse・PostToolUseFailure・matcher Bash)
+# ## 拒否・時間切れ・止められたあと (PostToolUse・PostToolUseFailure・matcher Bash)
 #
 # op の記録 (${XDG_STATE_HOME:-~/.local/state}/pjp-op/log.jsonl と log.1.jsonl) に、この会話 (入力の session_id。op は
-# CLAUDE_CODE_SESSION_ID を書く) の end で result が denied か timeout のものが、まだ見ていないものとしてあれば、Claude に
-# 「同じ op を打ち直さず、選択肢の問いを出す」指示を足し (additionalContext)、会話の画面に 1 行出す (systemMessage)。
+# CLAUDE_CODE_SESSION_ID を書く) の次のものが、まだ見ていないものとしてあれば、Claude に「同じ op を打ち直さず、選択肢の
+# 問いを出す」指示を足し (additionalContext)、会話の画面に 1 行出す (systemMessage)。
+#
+#   end の result が denied (拒否)・timeout (時間切れ)・interrupted (承認を待つ間に止められた)
+#   refused の why が lock-timeout (ほかの op の承認待ちが終わらない)・interrupted (それを待つ間に止められた)
+#
 # 続けて承認の画面が出ると慣れで許可しやすくなり、「窓の無い承認は拒否」の決まりが弱まるため。op は op の stderr を変えない
 # ので、文言ではなく記録で見る。見た印は同じ dir の hook-seen/<session> (見た end の epoch の最大)。記録が印より古ければ
-# 読まない。herdr の指揮役の子と subagent の決まりは ssh-agent-notice.sh と同じ (子の印は workspace の token と名前)。
+# 読まない。7 日より古い印は消す。herdr の指揮役の子と subagent の決まりは ssh-agent-notice.sh と同じ (子の印は workspace の
+# token と名前)。
 #
 # ## 黙る場面
 #
@@ -392,7 +399,8 @@ op_simple() {
 
   # 包むコマンドを外す。中に文字列で渡すものは読み直す
   while ((${#w[@]} > 0 && guard++ < 16)); do
-    case ${w[0]##*/} in
+    base=${w[0]##*[/\\]}
+    case ${base,,} in
       cd | pushd) return 1 ;;
       env)
         w=("${w[@]:1}")
@@ -503,6 +511,29 @@ op_simple() {
         done
         break
         ;;
+      powershell | powershell.exe | pwsh | pwsh.exe)
+        # -Command・-c の後ろは、残りの語を 1 つのコマンドとして読み直す
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          case ${w[i],,} in
+            -c | -command)
+              rematch "${depth}" "${w[*]:i+1}"
+              return
+              ;;
+          esac
+        done
+        return 1
+        ;;
+      cmd | cmd.exe)
+        for ((i = 1; i < ${#w[@]}; i++)); do
+          case ${w[i],,} in
+            /c | /k)
+              rematch "${depth}" "${w[*]:i+1}"
+              return
+              ;;
+          esac
+        done
+        return 1
+        ;;
       nix)
         if [[ ${w[1]-} == develop || ${w[1]-} == shell ]]; then
           for ((i = 2; i < ${#w[@]}; i++)); do
@@ -519,7 +550,7 @@ op_simple() {
   done
   ((${#w[@]} > 0)) || return 1
 
-  base=${w[0]##*/}
+  base=${w[0]##*[/\\]}
   [[ ${base,,} == op.exe ]] || return 1
   # 承認の要らないもの (承認が無ければ whoami も画面を出さない)
   case ${w[1]-} in
@@ -538,7 +569,9 @@ before() {
   reason+='承認を呼び出しごとの powershell に閉じ、承認の画面と一緒に呼び手と理由を窓に出して記録する)。'
   reason+='理由はユーザーが承認の画面の横で読むので、何のために何を読む・書くかを 1 文で書く。'
   reason+='承認は呼び出しごとに出るので、呼ぶ回数を減らす (例: vault get を 11 回打たず vault list --format json を 1 回にする。'
-  reason+='複数の項目は item list --format json や op inject でまとめて読む)。op.exe の whoami・signout・--version・--help は打ってよい。'
+  reason+='複数の項目は item list --format json や op inject でまとめて読む)。'
+  reason+='op を打つ Bash は timeout を長く (600000) する (承認を待つ間に既定の 2 分で止められると、窓が消えて承認の画面だけが残る)。'
+  reason+='op.exe の whoami・signout・--version・--help は打ってよい。'
   reason+=" (止めたもの: ${hit_head:0:200})"
   jq -cn --arg r "${reason}" \
     '{hookSpecificOutput: {hookEventName: "PreToolUse", permissionDecision: "deny", permissionDecisionReason: $r}}' || true
@@ -558,7 +591,7 @@ child_mark() {
 }
 
 after() {
-  local session dir log seen_file seen=0 got hit result when reason command where ctx title desc first rule
+  local session dir log seen_file seen=0 got hit kind when reason command where ctx title desc first rule
   local -a files=()
   session=$(field '.session_id')
   [[ -n ${session} ]] || return 0
@@ -576,15 +609,23 @@ after() {
   got=$(jq -cnR --arg s "${session}" --argjson seen "${seen}" '
     [inputs | fromjson? | objects] as $recs
     | ($recs | map(select(.event == "start" and (.id | type) == "string")) | map({key: .id, value: .}) | from_entries) as $starts
-    | [$recs[] | select(.event == "end" and .session == $s and ((.epoch // 0) > $seen))] as $ends
-    | {max: ([$ends[].epoch] + [$seen] | max),
-       hit: ([$ends[] | select(.result == "denied" or .result == "timeout")] | last
-         | if . == null then null else . + {start: ($starts[.id] // {})} end)}' "${files[@]}" 2>/dev/null) || return 0
-  mkdir -p "${seen_file%/*}" 2>/dev/null && jq -r '.max' <<<"${got}" >"${seen_file}" 2>/dev/null
+    | [$recs[] | select((.event == "end" or .event == "refused") and .session == $s and ((.epoch // 0) > $seen))] as $mine
+    | {max: ([$mine[].epoch] + [$seen] | max),
+       hit: ([$mine[]
+           | select((.event == "end" and (.result == "denied" or .result == "timeout" or .result == "interrupted"))
+             or (.event == "refused" and (.why == "lock-timeout" or .why == "interrupted")))] | last
+         | if . == null then null
+           elif .event == "end" then . + {kind: .result, start: ($starts[.id] // {})}
+           else . + {kind: ("refused-" + .why), start: {reason: .reason, args: .args, caller: .caller}} end)}' \
+    "${files[@]}" 2>/dev/null) || return 0
+  if mkdir -p "${seen_file%/*}" 2>/dev/null; then
+    jq -r '.max' <<<"${got}" >"${seen_file}" 2>/dev/null
+    find "${seen_file%/*}" -type f -mtime +7 -delete 2>/dev/null
+  fi
   hit=$(jq -c '.hit // empty' <<<"${got}")
   [[ -n ${hit} ]] || return 0
 
-  result=$(jq -r '.result' <<<"${hit}")
+  kind=$(jq -r '.kind' <<<"${hit}")
   when=$(jq -r '(.time // "")[11:19]' <<<"${hit}")
   reason=$(jq -r '.start.reason // ""' <<<"${hit}")
   command=$(jq -r '"op " + ((.start.args // []) | join(" "))' <<<"${hit}")
@@ -592,15 +633,33 @@ after() {
     | if . == null then "herdr の外の会話"
       else "workspace「" + ((.label // "") | if . == "" then "?" else . end) + "」・pane " + (.pane // "?") end' <<<"${hit}")
 
-  if [[ ${result} == denied ]]; then
-    title="🔑 op の承認が拒否された"
-    desc="1Password の承認が拒否された"
-    first="承認の画面と窓を見て許可するので、1 回だけ打ち直す"
-  else
-    title="⏱ op の承認が時間切れになった"
-    desc="1Password の承認の画面に応えないまま時間切れになった"
-    first="承認の画面が出たら許可するので、1 回だけ打ち直す"
-  fi
+  case ${kind} in
+    denied)
+      title="🔑 op の承認が拒否された"
+      desc="1Password の承認が拒否された"
+      first="承認の画面と窓を見て許可するので、1 回だけ打ち直す"
+      ;;
+    timeout)
+      title="⏱ op の承認が時間切れになった"
+      desc="1Password の承認の画面に応えないまま時間切れになった"
+      first="承認の画面が出たら許可するので、1 回だけ打ち直す"
+      ;;
+    interrupted)
+      title="⏹ op が承認を待つ間に止められた"
+      desc="承認を待つ間に止められた (Bash の時間切れか Ctrl+C)。窓は消え、1Password の承認の画面だけが残っているかもしれない (残っていたら拒否してもらう。許可すると閉じられない承認になり、1Password をロックして消すことになる)"
+      first="op を打つ Bash の timeout を 600000 にして、1 回だけ打ち直す"
+      ;;
+    refused-lock-timeout)
+      title="⏳ ほかの op の承認待ちが終わらなかった"
+      desc="ほかの op の承認待ちが終わらず、打たずに断られた"
+      first="前の承認の画面に応えてもらってから、1 回だけ打ち直す"
+      ;;
+    *)
+      title="⏹ op がほかの op の承認待ちを待つ間に止められた"
+      desc="ほかの op の承認待ちを待つ間に止められた (Bash の時間切れか Ctrl+C)"
+      first="op を打つ Bash の timeout を 600000 にして、1 回だけ打ち直す"
+      ;;
+  esac
   ctx="[op] 直前の Bash の op は、${desc} (${when}・理由「${reason}」・${command})。"
   ctx+="同じ op を打ち直さない (打ち直すと承認の画面がまた出て、慣れで許可しやすくなる)。"$'\n'
   if [[ -n $(field '.agent_id') ]]; then

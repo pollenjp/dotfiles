@@ -10,6 +10,7 @@
 # 1 行にまとめ、時刻の順に並べる。end の無い start (止められた・まだ終わっていない) は「実行中か中断」。
 #
 # 列は 時刻・結果・秒・呼び手・理由・コマンド。表では理由とコマンドを切り、--json は切らずに 1 呼び出し 1 行の JSON で出す。
+# 結果には、service account・Connect・help の呼び出しと、窓を出せなかった desktop の呼び出し (窓なし) の印を添える。
 # 期間は始まった時刻で見る。PJP_OP_LOG_NOW (UNIX 秒) で今の時刻を変えられる (テスト用)。
 # 終了コード: 0 (記録が無いときも)・2 = 使い方の誤り
 
@@ -130,11 +131,13 @@ fi
     def result_label: {approved: "許可", ok: "成功", denied: "拒否", timeout: "時間切れ", failed: "失敗",
       "launcher-failed": "失敗 (launcher)", interrupted: "中断"};
     def why_label: {"no-reason": "理由なし", "lock-timeout": "承認待ちが終わらない", "no-op-exe": "op.exe が無い",
-      "no-powershell": "powershell.exe が無い", "no-wslpath": "wslpath が無い", "no-launcher": "launcher が無い"};
+      "no-powershell": "powershell.exe が無い", "no-wslpath": "wslpath が無い", "no-launcher": "launcher が無い",
+      "too-long": "引数が長すぎる", interrupted: "始める前に止められた"};
+    def window_note: if ((.end.window // "") | startswith("failed")) then " (窓なし)" else "" end;
     def command: "op " + ((.args // []) | join(" ")) | cut(60);
     if .event == "start" then
       [when,
-       (if .end == null then "実行中か中断" else ((result_label[.end.result] // .end.result) + kind_note) end),
+       (if .end == null then "実行中か中断" else ((result_label[.end.result] // .end.result) + kind_note + window_note) end),
        (.end.seconds | cell), (who | cell), ((.reason // "") | cut(48) | cell), command]
     elif .event == "refused" then
       [when, "断った (" + (why_label[.why] // .why) + ")", "-", (who | cell), ((.reason // "") | cut(48) | cell), command]

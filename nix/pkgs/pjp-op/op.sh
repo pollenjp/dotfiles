@@ -34,8 +34,24 @@
 #
 # ## 終了コード
 #
-#   op の終了コード・2 = 理由が無い・空・75 = ほかの op の承認待ちが上限を超えた・127 = op.exe・powershell.exe・wslpath・
-#   launcher が無い・129/130/143 = HUP/INT/TERM で止めた (launcher は止めない。承認はそちらが閉じる)
+#   op の終了コード・2 = 理由が無い・空・引数が長すぎる・75 = ほかの op の承認待ちが上限を超えた・127 = op.exe・
+#   powershell.exe・wslpath・launcher が無い・129/130/143 = HUP/INT/TERM で止められた
+#
+# ## 止められたとき
+#
+# Claude の Bash の時間切れや端末の Ctrl+C は、wrapper と一緒に powershell.exe の relay も止め、Windows 側の powershell
+# (launcher) も終わる。op が承認を待っていれば、窓は消えて 1Password の承認の画面だけが残る (窓の無い画面なので拒否する)。
+# 許可してしまうと、その承認は終わった powershell に付いたまま閉じられず (WSL の op.exe signout では消えない)、1Password の
+# 10 分の期限まで残るので、1Password をロックして消す。lock も離れるので、次の呼び出しの窓に「ほかにも op.exe が動いています」が
+# 出る。止められる機会を減らすため、lock を待つ上限は Claude の Bash の既定の時間切れ (120 秒) より短い 90 秒にし、Claude の
+# hook (files/claude/hooks/op-reason-guard.sh) は op を打つ Bash の timeout を長くするよう促す。止められた呼び出しは、start の
+# 後なら end に interrupted、前 (lock を待つ間など) なら refused (interrupted) を書く (SIGKILL では書けない)。
+#
+# ## stdin
+#
+# 呼び手の stdin はそのまま op.exe に渡す。ただし前段が同じ op の wrapper のパイプ (op … | op …) なら、lock を取る前に stdin を
+# 読み切って一時のファイルから渡す。lock を取ってから読むと、受け手が lock を持ったまま送り手の出力を待ち、送り手は lock を待って
+# 止まる。ほかのパイプ (ssh のように閉じないものもある) と socket (Claude の Bash の stdin) は読み切らない。
 #
 # ## ログ
 #
@@ -48,7 +64,7 @@
 #                       Nix の包みが入れる (pkgs/pjp-op/default.nix)
 #   PJP_OP_EXE          op.exe (既定は PATH の op.exe)
 #   PJP_OP_POWERSHELL   powershell.exe
-#   PJP_OP_LOCK_WAIT    lock を待つ秒 (既定 180)
+#   PJP_OP_LOCK_WAIT    lock を待つ秒 (既定 90)
 #   PJP_OP_PROC         祖先をたどる proc の根 (既定 /proc)。PJP_OP_PROC_START はたどり始める pid (既定 $$)
 
 set -u -o pipefail
@@ -58,11 +74,13 @@ state_dir=${XDG_STATE_HOME:-${HOME}/.local/state}/pjp-op
 log_file=${state_dir}/log.jsonl
 current_file=${state_dir}/current.json
 log_max=1048576
-lock_wait=${PJP_OP_LOCK_WAIT:-180}
+# lock を待つ上限 (秒)。Claude の Bash の既定の時間切れ (120 秒) より短くし、止められる前に 75 で断る
+lock_wait=${PJP_OP_LOCK_WAIT:-90}
 ps_cmd=${PJP_OP_POWERSHELL:-powershell.exe}
-# op の stderr の文言 (大文字小文字は問わない)。どちらも当たらない 0 以外は failed
-deny_pattern='authorization prompt dismissed'
-timeout_pattern='authorization timeout|timed out'
+# op の stderr の文言 (大文字小文字は問わない)。op は「[ERROR] <日時> <文>」の行で出す (op run の子のコマンドの
+# 「Connection timed out」などに当てない)。どちらも当たらない 0 以外は failed
+deny_pattern='^\[ERROR\] .*authorization prompt dismissed'
+timeout_pattern='^\[ERROR\] .*authoriz.*(timeout|timed out)'
 
 say() {
   local line
@@ -158,17 +176,31 @@ is_help() {
 }
 
 # mask_args <引数>…: ログ・窓・通知に出す形を masked に入れる。--session と --secret-key の値、- で始まらない name=value の
-# 値 (op item create の password=… など) を *** にする。op:// の参照はそのまま
+# 値 (op item create の password=… など) を *** にする。op:// の参照はそのまま。-- の後ろ (op run の子のコマンド) は、
+# コマンドの名前と値の無い flag だけを見せる (-H "Authorization: Bearer …" のような値を出さない)
 mask_args() {
-  local a next=0
+  local a next=0 after=0 first=1
   masked=()
   for a in "$@"; do
+    if ((after)); then
+      if ((first)) || [[ ${a} =~ ^-[A-Za-z0-9-]+$ ]]; then
+        masked+=("${a}")
+      else
+        masked+=('***')
+      fi
+      first=0
+      continue
+    fi
     if ((next)); then
       masked+=('***')
       next=0
       continue
     fi
     case ${a} in
+      --)
+        masked+=("${a}")
+        after=1
+        ;;
       --session | --secret-key)
         masked+=("${a}")
         next=1
@@ -284,23 +316,33 @@ id="$(date '+%Y%m%dT%H%M%S')-$$-${RANDOM}"
 
 # --- ログ
 
+# log_append <JSON の 1 行>: 記録に足す。回すのと足すのを log.lock で 1 つずつにする (lock の外で書く refused と重なっても、
+# 回した直後の行を失わない)
 log_append() {
   mkdir -p "${state_dir}" 2>/dev/null || return 0
-  if [[ -f ${log_file} ]] && (($(stat -c %s "${log_file}" 2>/dev/null || echo 0) >= log_max)); then
-    mv -f "${log_file}" "${state_dir}/log.1.jsonl" 2>/dev/null
-  fi
-  printf '%s\n' "$1" >>"${log_file}" 2>/dev/null || true
+  {
+    flock -w 5 9 || true
+    if [[ -f ${log_file} ]] && (($(stat -c %s "${log_file}" 2>/dev/null || echo 0) >= log_max)); then
+      mv -f "${log_file}" "${state_dir}/log.1.jsonl" 2>/dev/null
+    fi
+    printf '%s\n' "$1" >>"${log_file}" 2>/dev/null || true
+  } 9>>"${state_dir}/log.lock"
 }
 
-# refuse <why> <終了コード> <stderr の行>…: 断りをログに書き、stderr に出して終わる
+# log_refused <why>: 断りを記録に書く
+log_refused() {
+  now
+  log_append "$(jq -cn --arg id "${id}" --arg time "${now_iso}" --argjson epoch "${now_epoch}" --argjson session "${session_json}" \
+    --arg why "$1" --argjson caller "${caller_json}" --arg reason "$(clip "${reason}" 500)" --argjson args "${masked_json}" \
+    '{v: 1, id: $id, event: "refused", time: $time, epoch: $epoch, session: $session, why: $why, caller: $caller,
+      reason: $reason, args: $args}')"
+}
+
+# refuse <why> <終了コード> <stderr の行>…: 断りを記録に書き、stderr に出して終わる
 refuse() {
   local why=$1 code=$2
   shift 2
-  now
-  log_append "$(jq -cn --arg id "${id}" --arg time "${now_iso}" --argjson epoch "${now_epoch}" --argjson session "${session_json}" \
-    --arg why "${why}" --argjson caller "${caller_json}" --arg reason "$(clip "${reason}" 500)" --argjson args "${masked_json}" \
-    '{v: 1, id: $id, event: "refused", time: $time, epoch: $epoch, session: $session, why: $why, caller: $caller,
-      reason: $reason, args: $args}')"
+  log_refused "${why}"
   say "$@"
   exit "${code}"
 }
@@ -357,9 +399,87 @@ wslenv_plus() {
   printf '%s' "${value}"
 }
 
+# 引数は payload (env の PJP_OP_PAYLOAD) に 1 つずつ UTF-8 の base64 で載る。Windows の env の値は 32767 字までなので、
+# 載らない長さは先に断る (launcher-failed にしない)
+b64_len() {
+  local LC_ALL=C
+  printf '%s' $((4 * ((${#1} + 2) / 3)))
+}
+args_b64_len=0
+for a in "${args[@]}"; do
+  args_b64_len=$((args_b64_len + $(b64_len "${a}")))
+done
+if ((args_b64_len > 28000)); then
+  refuse too-long 2 "op の引数が長すぎます (base64 で ${args_b64_len} 字。Windows の環境変数に載るのは 32767 字まで)。" \
+    "長い値は op の --template やファイル (op document create <パス> など) で渡してください。"
+fi
+
+# --- 一時の置き場と、止められたとき
+
+# 呼び出しの間だけ置くもの。status は Windows から書くので state の dir (\\wsl.localhost から届く) に、op の stderr の写し・
+# stdin の写し・FIFO は、あれば tmpfs の XDG_RUNTIME_DIR に置く (秘密を disk に残さない)
+run_dir=${state_dir}/run/${id}
+if [[ -n ${XDG_RUNTIME_DIR:-} && -d ${XDG_RUNTIME_DIR} && -w ${XDG_RUNTIME_DIR} ]]; then
+  tmp_root=${XDG_RUNTIME_DIR}/pjp-op
+else
+  tmp_root=${state_dir}/tmp
+fi
+tmp_dir=${tmp_root}/${id}
+wrote_current=0
+started=""
+# shellcheck disable=SC2329 # trap から呼ぶ
+cleanup() {
+  rm -rf "${run_dir}" "${tmp_dir}" 2>/dev/null
+  if ((wrote_current)); then
+    rm -f "${current_file}" 2>/dev/null
+  fi
+}
+trap cleanup EXIT
+
+# 止められたら記録に書いて終わる (上の「止められたとき」)。start の後は end に interrupted、前は refused (interrupted)
+# shellcheck disable=SC2329 # trap から呼ぶ
+on_signal() {
+  trap - INT TERM HUP
+  if [[ -n ${started} ]]; then
+    write_end interrupted "$1"
+  else
+    log_refused interrupted
+  fi
+  exit "$1"
+}
+trap 'on_signal 130' INT
+trap 'on_signal 143' TERM
+trap 'on_signal 129' HUP
+
+mkdir -p "${state_dir}" "${run_dir}" "${tmp_dir}" && chmod 700 "${state_dir}" "${tmp_root}" 2>/dev/null
+
+# upstream_is_op: stdin が、同じ op の wrapper (この script) が書いているパイプなら 0。書き手は /proc の fd 1 が同じパイプの
+# プロセスで、bash が読む script (cmdline の 2 つ目) がこの script と同じもの
+upstream_is_op() {
+  local pipe hit pid arg me
+  [[ -p /dev/stdin ]] || return 1
+  pipe=$(readlink /proc/self/fd/0 2>/dev/null) || return 1
+  [[ ${pipe} == pipe:\[*\] ]] || return 1
+  me=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null) || return 1
+  while IFS= read -r hit; do
+    pid=${hit#/proc/}
+    pid=${pid%%/*}
+    [[ ${pid} != "$$" ]] || continue
+    arg=$(tr '\0' '\n' <"/proc/${pid}/cmdline" 2>/dev/null | sed -n 2p)
+    if [[ -n ${arg} && $(readlink -f "${arg}" 2>/dev/null) == "${me}" ]]; then
+      return 0
+    fi
+  done < <(find /proc/[0-9]*/fd -maxdepth 1 -name 1 -lname "${pipe}" 2>/dev/null)
+  return 1
+}
+in_file=""
+if upstream_is_op; then
+  in_file=${tmp_dir}/stdin
+  cat >"${in_file}"
+fi
+
 # --- lock
 
-mkdir -p "${state_dir}" && chmod 700 "${state_dir}" 2>/dev/null
 exec {lock_fd}>>"${state_dir}/lock"
 if ! flock -n "${lock_fd}"; then
   if [[ -t 2 ]]; then
@@ -373,17 +493,8 @@ if ! flock -n "${lock_fd}"; then
   fi
 fi
 
-run_dir=${state_dir}/run/${id}
-wrote_current=0
-started=""
-# shellcheck disable=SC2329 # trap から呼ぶ
-cleanup() {
-  rm -rf "${run_dir}" 2>/dev/null
-  if ((wrote_current)); then
-    rm -f "${current_file}" 2>/dev/null
-  fi
-}
-trap cleanup EXIT
+# 前に SIGKILL などで止められた呼び出しの置き場を片付ける (1 時間より古いもの。lock を待つ呼び出しのものは新しい)
+find "${state_dir}/run" "${tmp_root}" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
 
 if [[ ${mode} == help ]]; then
   current_reason="(理由なし: help)"
@@ -417,10 +528,10 @@ notify_shared() {
   [[ $1 == start ]] || when_desc="op を打った後"
   if [[ $2 == true ]]; then
     title="共有の 1Password CLI の承認を消しました"
-    body="WSL のどの pane からも使える承認が残っていたので、op signout で消しました (${when_desc})。窓の出ていない承認の画面を許可したか、道具が op.exe を直に打ったのかもしれません。"
+    body="WSL のどの pane からも使える承認が残っていたので、op.exe signout --all で消しました (${when_desc})。窓の出ていない承認の画面を許可したか、道具が op.exe を直に打ったのかもしれません。"
   else
     title="共有の 1Password CLI の承認を消せませんでした"
-    body="WSL のどの pane からも使える承認が残っています (${when_desc})。WSL で op.exe signout を打つか、1Password をロックしてください。"
+    body="WSL のどの pane からも使える承認が残っています (${when_desc})。WSL で op.exe signout --all を打つか、1Password をロックしてください。"
   fi
   payload=$(jq -cn -a --arg t "${title}" --arg b "${body}" --arg time "$(date '+%H:%M:%S')" \
     '{mode: "notify", ui: {title: $t, lines: [["時刻", $time], ["内容", $b]], toast: [$t, $b]}}')
@@ -440,7 +551,7 @@ watch_shared() {
     watch_result=none
     return
   fi
-  if watch_run signout && ! watch_run whoami; then
+  if watch_run signout --all && ! watch_run whoami; then
     cleared=true
   fi
   now
@@ -488,26 +599,11 @@ write_end() {
       watch: {start: (if $ws == "" then null else $ws end), end: (if $we == "" then null else $we end)}}')"
 }
 
-# 止められたら end に interrupted を書いて終わる。launcher は止めない (op が承認を待っていれば、終わった後に launcher が
-# 承認を閉じる。lock の fd を継いでいるので、それまで次の呼び出しは待つ)
-# shellcheck disable=SC2329 # trap から呼ぶ
-on_signal() {
-  trap - INT TERM HUP
-  if [[ -n ${started} ]]; then
-    write_end interrupted "$1"
-  fi
-  exit "$1"
-}
-trap 'on_signal 130' INT
-trap 'on_signal 143' TERM
-trap 'on_signal 129' HUP
-
 # --- launcher
 
-mkdir -p "${run_dir}"
 status_file=${run_dir}/status.json
-err_copy=${run_dir}/stderr
-err_fifo=${run_dir}/stderr.fifo
+err_copy=${tmp_dir}/stderr
+err_fifo=${tmp_dir}/stderr.fifo
 mkfifo "${err_fifo}"
 status_win=$(wslpath -w "${status_file}")
 op_win=$(wslpath -w "${op_exe}")
@@ -544,9 +640,13 @@ payload=$(jq -cn -a --arg mode "${mode}" --arg op "${op_win}" --arg status "${st
   '{mode: $mode, op: $op, status: $status, args64: $ARGS.positional} + (if $ui == null then {} else {ui: $ui} end)' \
   --args -- "${args64[@]}")
 
-# 裏で起こすコマンドの stdin は /dev/null になるので、呼び手の stdin を別の fd に写して渡す (exec に 2>/dev/null を付けると、
-# それもシェル全体に効いて以後の stderr が消える)
-exec {in_fd}<&0 || exec {in_fd}</dev/null
+# 裏で起こすコマンドの stdin は /dev/null になるので、呼び手の stdin (か、読み切った写し) を別の fd に写して渡す。stdin が
+# 閉じていると exec が stderr に出すので、{ } の中で捨てる (exec に直に 2>/dev/null を付けると、シェル全体の stderr が消える)
+if [[ -n ${in_file} ]]; then
+  exec {in_fd}<"${in_file}"
+else
+  { exec {in_fd}<&0; } 2>/dev/null || exec {in_fd}</dev/null
+fi
 tee -a "${err_copy}" <"${err_fifo}" >&2 {lock_fd}>&- &
 tee_pid=$!
 case ${kind} in

@@ -885,7 +885,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（[後述](#cursor-agent-も-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
-| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し） |
+| 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し・`op.exe` の直打ちを止める） |
 | 6.1 | `./nix/scripts/bootstrap-claude-statusline.sh` | `bootstrap-claude-statusline` | Claude Code の statusLine 登録 |
 | 6.2 | `./nix/scripts/bootstrap-claude-env.sh` | `bootstrap-claude-env` | Claude のセッションに渡す env の登録（git の無署名・GitHub へは gh の HTTPS・plugin を https で取るのは[後述](#claude-のセッションだけ-git-の設定を変える)、Bash tool を bash で動かすのは[後述](#claude-code-の-bash-tool-を-bash-で動かす)） |
 | 6.3 | `./nix/scripts/bootstrap-claude-skill-overrides.sh` | `bootstrap-claude-skill-overrides` | Claude Code の skill の見え方を `settings.json` の `skillOverrides` に書く。host option どおりの on / off（[後述](#claude-code-の-skill-を-host-ごとに止める)）と、pack の skill を名前だけ・claude.ai から同期された skill を Claude の一覧から外す（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。6.5 の後に走る |
@@ -2402,15 +2402,20 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 | すること | 中身 |
 | --- | --- |
 | 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。op の引数のどこに置いてもよく、`--` より後ろは op の引数）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ |
-| 呼び出しごとの powershell | 呼び出しのたびに新しい `powershell.exe`（Windows PowerShell 5.1）を起こし、その子として `op.exe` を起こす。承認はこの powershell に付き、終わると同じ powershell の中で閉じる（`op whoami` で確かめ、承認があれば `op signout`） |
+| 呼び出しごとの powershell | 呼び出しのたびに新しい `powershell.exe`（Windows PowerShell 5.1）を起こし、その子として `op.exe` を起こす。承認はこの powershell に付き、終わると同じ powershell の中で閉じる（`op whoami` で確かめ、承認があれば `op signout --all`） |
 | 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。最前面だが focus は奪わず、許可は求めない（決めるのは 1Password の画面だけ）。op が終われば閉じる |
 | 通知 | 窓と同じ中身を Windows の通知にも出す（補助。出せなければ黙って飛ばす） |
 | 記録 | `~/.local/state/pjp-op/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` の値と `name=value` の値は `***` に伏せる。1 MiB を超えたら `log.1.jsonl` へ回す |
-| 1 つずつ | 呼び出しを flock で 1 つずつにし、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 180 秒で終わらなければ、待っている側は 75 で断る（待たせている呼び出しの呼び手と理由を出す） |
-| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout` で消し、記録と通知（Windows・herdr）で知らせる |
+| 1 つずつ | 呼び出しを flock で 1 つずつにし、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒で終わらなければ、待っている側は 75 で断る（待たせている呼び出しの呼び手と理由を出す。90 秒は Claude の Bash の既定の時間切れ 120 秒より短くしてある） |
+| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
 
 op の stdout（`op document get` の binary も）・stderr・終了コードは変えない。引数は空白・引用符・`&`・`%`・`^`・日本語を含んでも
-そのまま届く（launcher が Windows の規則で command line を組む）。
+そのまま届く（launcher が Windows の規則で command line を組む）。引数は環境変数に載せて渡すので、合わせて base64 で 28000 字を
+超えると 2 で断る（長い値は `--template` やファイルで渡す）。
+
+stdin はそのまま `op.exe` に渡す。ただし op の出力を別の op に渡すパイプ（`op --reason … item list --format json | op --reason …
+item get -`）では、後ろの op が lock を取る前に stdin を読み切ってから渡す（前の op が終わるまで待つ）。lock を取ってから読むと、
+後ろの op が lock を持ったまま前の op を待ち、前の op は lock を待って止まるため。
 
 ### service account・Connect の token
 
@@ -2436,8 +2441,10 @@ pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンド�
 - **窓が出ていない 1Password CLI の承認の画面は拒否する。** 窓の無い画面は `op` を通らずに `op.exe` を直に打ったもの（道具の中
   など）で、許可すると WSL のどの pane からも使える承認ができる。窓に「ほかにも op.exe が動いています」と出たときも、どれの承認か
   分からなければ拒否する
-- **うっかり許可したら、WSL で `op.exe signout` を打つ**（`op` を通さずに直に。WSL 全体の承認が消える）。次に `op` を打ったときの
-  見張りも消す
+- **うっかり許可したら、WSL で `op.exe signout --all` を打つ**（`op` を通さずに直に。WSL 全体の承認が消える）。次に `op` を
+  打ったときの見張りも消す
+- **`op` を止めた後（Claude の Bash の時間切れ・Ctrl+C）に窓の無い承認の画面が残ったら、拒否する。** 止めると Windows 側の
+  powershell も終わり、窓が消える（下の「気を付けること」）。許可してしまったら、1Password をロックして消す
 
 ### 反映
 
@@ -2456,9 +2463,12 @@ op.exe whoami                          # WSL の直の op.exe は account is not
 
 ### 気を付けること
 
-- Claude Code の Bash の時間切れや Ctrl+C で `op` を止めても、launcher（powershell）は止めない。op が承認を待っていれば、終わった後に
-  launcher が承認を閉じる（それまで次の `op` は待つ）。launcher ごと強く殺すと閉じられないことがあり、その承認は 1Password の
-  10 分の期限で切れる
+- Claude Code の Bash の時間切れや端末の Ctrl+C で `op` を止めると、`powershell.exe` の relay も止まり、Windows 側の powershell
+  （launcher）も終わる。op が承認を待っていれば、窓は消えて 1Password の承認の画面だけが残る（窓の無い画面なので拒否する）。
+  許可してしまうと、その承認は終わった powershell に付いたまま閉じられず（WSL の `op.exe signout --all` では消えない）、1Password の
+  10 分の期限まで残るので、1Password をロックして消す。lock も離れるので、次の `op` の窓に「ほかにも op.exe が動いています」と出る。
+  止められる機会を減らすため、Claude の hook は op を打つ Bash の timeout を長く（600000）するよう促す。止められた呼び出しは
+  `pjp-op-log` に「中断」か「断った (始める前に止められた)」で残る
 - 道具の中で `op.exe` を直に打つものは止めない（Claude の hook はコマンドの文字だけを見る）。上の「窓が出ていない承認は拒否」と
   見張りで守る。Windows 側から service account の token で `op.exe` を起こす道具は承認の画面を出さないので、関わらない
 - 承認の画面の名前は、挟む powershell にしても「wslhost」と出る（1Password が決める）。誰が呼んだかは窓と記録で見る
@@ -3133,11 +3143,12 @@ skill が読まれなかったときの念押しが `PostToolUse`・`PostToolUse
 
 | いつ | すること |
 | --- | --- |
-| 打つ前（PreToolUse） | `op.exe` を直に起こすコマンドを止め（deny）、`op --reason "<なぜ op を呼ぶか>" …` で打ち直すよう返す。承認は呼び出しごとに出るので、呼ぶ回数を減らす書き方（`vault get` を 11 回打たず `vault list --format json` を 1 回にするなど）も促す。承認の要らない `whoami`・`signout`・`--version`・`--help` は止めない |
-| 拒否・時間切れのあと（PostToolUse・PostToolUseFailure） | `op` の記録に、この会話（`session_id`）の承認の拒否・時間切れがあれば、Claude に「同じ op を打ち直さない。何を・なぜ・どこからを書いてから、① 許可するので 1 回だけ打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。続けて承認の画面が出ると、慣れで許可しやすくなるため。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く |
+| 打つ前（PreToolUse） | `op.exe` を直に起こすコマンドを止め（deny）、`op --reason "<なぜ op を呼ぶか>" …` で打ち直すよう返す。承認は呼び出しごとに出るので、呼ぶ回数を減らす書き方（`vault get` を 11 回打たず `vault list --format json` を 1 回にするなど）と、op を打つ Bash の timeout を長く（600000）することも促す。承認の要らない `whoami`・`signout`・`--version`・`--help` は止めない |
+| 拒否・時間切れ・止められたあと（PostToolUse・PostToolUseFailure） | `op` の記録に、この会話（`session_id`）の承認の拒否・時間切れ・承認を待つ間に止められた（end の `interrupted`）・ほかの op の承認待ちが終わらない（refused の `lock-timeout`）・それを待つ間に止められた（refused の `interrupted`）があれば、Claude に「同じ op を打ち直さない。何を・なぜ・どこからを書いてから、① 直し方（許可する・Bash の timeout を長くするなど）で 1 回だけ打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。続けて承認の画面が出ると、慣れで許可しやすくなるため。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く |
 
 - コマンドの読み方は ssh-agent-notice.sh と同じ（引用符・heredoc の本文・コメントの中の `op.exe` では止めない。包むコマンドを外し、
-  `bash -c` などに文字列で渡したものは読み直す）。script の中・関数・変数に入れた `op.exe` は見えない
+  `bash -c` などに文字列で渡したものは読み直す）。それに `powershell`・`pwsh` の `-Command`・`-c` と `cmd` の `/c` の中も読み、
+  `C:\…\op.exe` のような `\` のパスも見る。script の中・関数・変数に入れた `op.exe` は見えない
 - 拒否・時間切れは op の stderr の文言ではなく、`op` の記録（`end` の `result`）で見る（`op` は op の stderr を変えない）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure` に
   1 件ずつ（`Bash`）足す
