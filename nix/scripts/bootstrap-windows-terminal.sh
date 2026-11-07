@@ -7,8 +7,8 @@
 #
 # ^ setup.sh が読む実行順。ほかの bootstrap が置くものは使わない。衝突で exit 1 すると setup は
 #   ここで止まるので、Windows の bootstrap (90〜98) の後ろに置く (止まっても、走らずに残るのは
-#   後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」だけ)。同じ 99 の bootstrap-windows-international.sh は、
-#   同じ値は辞書順なので先に走る。仕組みは nix/README.md「bootstrap の実行順」。
+#   後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」だけ)。同じ 99 の bootstrap-windows-international.sh・
+#   bootstrap-windows-port-forward.sh は、同じ値は辞書順なので先に走る。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
 #

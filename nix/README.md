@@ -776,7 +776,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-mise.sh` | 10 | `claude` を入れる |
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
-| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
+| `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98)・`bootstrap-windows-port-forward.sh` (99) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-claude-skill-overrides.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill の `SKILL.md`（pack の割り当て）と入口の skill（`pjp-pack-<pack>`）を読む（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
@@ -790,9 +790,10 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-terminal.sh` (どちらも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
-| `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
-| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。同じ 99 の `bootstrap-windows-international.sh` の後に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-port-forward.sh` | 99 | dotfiles-private（50）の `ssh/port-forward.toml` (ssh の Host 名ごとの port forwarding の組) を JSON にして、Windows の `%USERPROFILE%\.config\port-forward\hosts.json` へ置く (PowerShell 7 の `pf` が読む)。ほかの bootstrap が置くものは使わない。同じ 99 は辞書順で、`bootstrap-windows-international.sh` の後・`bootstrap-windows-terminal.sh` の前に走る。正本の誤りや衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。同じ 99 の `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh` の後に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -904,7 +905,8 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
-| 6.11.3 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
+| 6.11.3 | `./nix/scripts/bootstrap-windows-port-forward.sh` | `bootstrap-windows-port-forward` | dotfiles-private の `ssh/port-forward.toml` (ssh の Host 名ごとの port forwarding の組) を JSON にして Windows に置く。PowerShell 7 の `pf` が読む。正本が無いマシンでは何もしない（[`win/README.md`](../win/README.md#port-forwarding-pf)） |
+| 6.11.4 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 6.13 | `./nix/scripts/bootstrap-path-shadow.sh` | `bootstrap-path-shadow` | PATH で Nix の ntn より先に来る、Nix のものでない ntn（前に install script で入れたもの）を警告する。消さない（[後述](#前に手で入れた-ntn-と-setup-の警告)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -1546,6 +1548,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書く | `scripts/bootstrap-windows-fancyzones.sh` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
 | bootstrap (日付と時刻の形式) | `win/international/managed.json` の値を、値ごとに前回書いた値・地域の既定と比べて、ユーザーのレジストリ (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く | `scripts/bootstrap-windows-international.sh` |
+| bootstrap (port forwarding の組) | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、前回置いた中身と比べて `%USERPROFILE%\.config\port-forward\hosts.json` へ置く | `scripts/bootstrap-windows-port-forward.sh` |
 | bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
@@ -1568,6 +1571,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ./nix/scripts/bootstrap-windows-international.sh    # Windows の日付と時刻の形式に持つ値だけを書く部分だけ（--dry-run / --import / --force / --check）
+./nix/scripts/bootstrap-windows-port-forward.sh    # dotfiles-private の port forwarding の組を Windows の hosts.json へ写す部分だけ（--dry-run / --force / --check）
 ./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
 ```
 
@@ -1616,6 +1620,12 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   (`~/.local/state/dotfiles/windows-international.applied.json`) と比べて衝突を見るのは Windows Terminal と同じで、記録が無く
   地域の既定のままなら黙って書く（[`win/README.md`](../win/README.md#日付と時刻の形式)、
   [設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-windows-international-format-design.md)）
+- PowerShell 7 の `pf` (`win/port-forward/Start-PortForward.ps1`。manifest で配る) が出す port forwarding の組は、dotfiles-private の
+  `ssh/port-forward.toml` が正本。`bootstrap-windows-port-forward.sh` (order 99。international の後・Windows Terminal の前) が
+  `nix-instantiate` の `builtins.fromTOML` で読み、書き方と手元の port の重なりを確かめてから JSON にして
+  `%USERPROFILE%\.config\port-forward\hosts.json` へ置く。前回置いた中身 (`~/.local/state/dotfiles/windows-port-forward.deployed.json`
+  の sha256) と比べて衝突を見るのは ssh の設定の手順と同じ。その PC で足した組は pf が同じ場所の `local.json` に持ち、この手順は触らない
+  （[`win/README.md`](../win/README.md#port-forwarding-pf)、[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-pf-port-forward-design.md)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 

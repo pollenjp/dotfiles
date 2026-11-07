@@ -6,9 +6,10 @@
 # order: 99
 #
 # ^ setup.sh が読む実行順。ほかの bootstrap が置くものは使わない。衝突で exit 1 すると setup は
-#   ここで止まるので、Windows の bootstrap の後ろに置く。bootstrap-windows-terminal.sh と同じ 99 で、同じ値は
-#   辞書順なのでこちらが先に走る (止まると、後ろの bootstrap-windows-terminal.sh・wsl-mtu-guard・exe-exec-trace と
-#   最後の「残りの手作業」は走らない)。仕組みは nix/README.md「bootstrap の実行順」。
+#   ここで止まるので、Windows の bootstrap の後ろに置く。bootstrap-windows-port-forward.sh・bootstrap-windows-terminal.sh と
+#   同じ 99 で、同じ値は辞書順なのでこちらが先に走る (止まると、後ろの bootstrap-windows-port-forward.sh・
+#   bootstrap-windows-terminal.sh・wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は走らない)。仕組みは
+#   nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
 #

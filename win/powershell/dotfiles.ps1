@@ -54,3 +54,8 @@ function Install-GoogleJapaneseInput { & "$HOME\.config\powershell\Install-Googl
 # 中身は同じ場所へ配る Install-PowerToys.ps1 (win/README.md の「PowerToys を入れる」)。-Check なら確かめるだけ。
 # 版は固定しない (PowerToys が自分で新しい版を知らせる)。
 function Install-PowerToys { & "$HOME\.config\powershell\Install-PowerToys.ps1" @args }
+
+# ssh の Host と port の組を選んで、port forwarding (ssh -NT -L …) をいまの PowerShell の中で張る。
+# 中身は同じ場所へ配る Start-PortForward.ps1 (win/README.md の「port forwarding (pf)」)。PowerShell 7 だけで動く。
+# pf <Host> で Host を選ぶ画面を飛ばす。張った後は Ctrl+C で止める。WSL・Linux の版は無い。
+function pf { & "$HOME\.config\powershell\Start-PortForward.ps1" @args }
