@@ -790,8 +790,9 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (揃えはしない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` (99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
-| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。衝突で exit 1 しても、99 より前の bootstrap は済んでいる (後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-terminal.sh` (どちらも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-terminal.sh` | 99 | `win/windows-terminal/managed.json` のキーだけを、Windows Terminal の `settings.json` へ書き足す。ほかの bootstrap が置くものは使わない。同じ 99 の `bootstrap-windows-international.sh` の後に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの wsl-mtu-guard・exe-exec-trace と最後の「残りの手作業」は、直して流し直すまで走らない) |
 
 > ⚠️ `order:` は**説明の 1 行目より後ろ**に書くこと。先頭に置くとメニューの説明として
 > 拾われてしまう。
@@ -1606,6 +1607,12 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   一覧も入るので、`bootstrap-windows-terminal.sh` (order 99) が持つキーだけを書き足し、キーごとに前回書いた値
   (`~/.local/state/dotfiles/windows-terminal.applied.json`) と比べて衝突を見る（[`win/README.md`](../win/README.md#windows-terminal)、
   [ADR 018](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/018_win_terminal_settings_keys_20261016T105116JST/README.md)）
+- Windows の日付と時刻の形式 (`win/international/managed.json`) はファイルでなく、ユーザーのレジストリ
+  (`HKCU\Control Panel\International`) の値。`bootstrap-windows-international.sh` (order 99。Windows Terminal より先) が `pwsh.exe` で
+  SetLocaleInfoW を呼んで持つ値だけを書き、WM_SETTINGCHANGE (`"intl"`) を送る。前回書いた値
+  (`~/.local/state/dotfiles/windows-international.applied.json`) と比べて衝突を見るのは Windows Terminal と同じで、記録が無く
+  地域の既定のままなら黙って書く（[`win/README.md`](../win/README.md#日付と時刻の形式)、
+  [設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-windows-international-format-design.md)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
