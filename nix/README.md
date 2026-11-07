@@ -3135,17 +3135,22 @@ herdr の pane の中では、シェルの init が `FORCE_HYPERLINK=1` を expo
 
 #### なぜ要るのか
 
-Claude Code（2.1.303 で本体のコードを読んで確かめた）は、リンク（OSC 8）を出せる端末かを env で決める。
+herdr（0.9.5）は `ui.mouse_capture = true`（既定。dotfiles も変えていない）の間、pane が出したリンク（OSC 8）を外の端末へ
+渡さず、自分で持って Ctrl+クリックを受ける。開けるのは OSC 8 のリンクと、画面に出ている `http://`・`https://` の文字で、
+Linux 版は `xdg-open` で開く（WSL は [WSL の xdg-open](#wsl-の-xdg-open)）。`false` にすると OSC 8 を外の端末へ通すが、
+herdr のマウスの操作（タブのクリック・分割の線のドラッグなど）が使えなくなる。
+
+つまり label だけのリンクは、pane の中のアプリが OSC 8 で出さないと開けない。Claude Code（2.1.318 で本体のコードを読んで
+確かめた）は、リンクを出せる端末かを env で決める。
 
 1. `FORCE_HYPERLINK` があれば、その値で決める（`0` なら出さない）
 2. 無ければ `TERM_PROGRAM`（ghostty・kitty・iTerm.app・WezTerm・vscode など）・`WT_SESSION`・tmux 3.4 以上・
    `VTE_VERSION`・`TERM` などで見分ける
 
-herdr の pane の env には `TERM=xterm-256color`（と `COLORTERM`）しか無く、どれにも当たらないので、出せない端末と
-判断される。herdr 自体は pane が出したリンクを外の端末へ通すので、この判断によらずリンクを出す本体の footer は
-押して開ける。一方、Claude Code の `Link` で描くもの（問いの上に footer の 2 行を出す mod のバッジなど）は判断に従い、
-「label の後ろに薄い URL」の形になって押せない（2 個目からは URL が途中で切れる）。`FORCE_HYPERLINK=1` を付けると、
-本体の footer と同じ label だけのリンクになる。
+herdr の pane の env は `TERM_PROGRAM=herdr`・`TERM=xterm-256color`（と `COLORTERM`）で、どれにも当たらないので、出せない
+端末と判断される。この判断によらずリンクを出す本体の footer は Ctrl+クリックで開ける。一方、Claude Code の `Link` で描くもの
+（問いの上に footer の 2 行を出す mod のバッジなど）は判断に従い、「label の後ろに薄い URL」の形になる。label を押しても開かず、
+2 個目からは URL が途中で切れる。`FORCE_HYPERLINK=1` を付けると、本体の footer と同じ label だけのリンクになる。
 
 #### 効き方
 

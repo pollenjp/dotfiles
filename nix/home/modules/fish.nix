@@ -632,10 +632,12 @@ in
 
       # herdr の pane の中では、リンク (OSC 8) を出せる端末だと FORCE_HYPERLINK=1 で伝える (TKT-270)。
       #
-      # herdr は pane が出したリンクを外の端末へ通すが、pane の env には TERM=xterm-256color しか無い。
-      # Claude Code は FORCE_HYPERLINK・TERM_PROGRAM などの env でリンクを出せるかを決めるので、
-      # 出せない端末と判断し、Link で描くもの (問いの上に footer を出す mod のバッジなど) を
-      # 「label の後ろに薄い URL」の形にする (押して開けない。本体の footer はこの判断によらずリンクを出す)。
+      # herdr は ui.mouse_capture が true (既定) の間、pane が出したリンクを外の端末へ渡さず、自分で持って
+      # Ctrl+クリックを受ける。label だけのリンクは、pane のアプリが OSC 8 で出さないと開く先が分からない。
+      # pane の env は TERM_PROGRAM=herdr・TERM=xterm-256color で、Claude Code は FORCE_HYPERLINK・TERM_PROGRAM
+      # などの env でリンクを出せるかを決めるので、出せない端末と判断し、Link で描くもの (問いの上に footer を出す mod の
+      # バッジなど) を「label の後ろに薄い URL」の形にする (label を押しても開かない。本体の footer はこの判断によらず
+      # リンクを出す)。
       #
       # pane のシェルで立てるので、claude の起動の仕方 (c・claude-<名前>・herdr agent start) によらず効く。
       # その代わり pane で打つほかのコマンドと Claude の Bash tool のコマンドにも引き継がれ、FORCE_HYPERLINK を
