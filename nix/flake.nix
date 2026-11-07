@@ -461,6 +461,14 @@
               system
               ;
           };
+          claude-video-limits-state = import ./tests/claude-video-limits.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           claude-ssh-agent-notice-state = import ./tests/claude-ssh-agent-notice.nix {
             inherit
               lib
