@@ -208,6 +208,19 @@
                 bash ${./tests/pjp-op.test.sh} ${./pkgs/pjp-op/op.sh}
                 touch $out
               '';
+          # op の記録を表で見る pjp-op-log (pkgs/pjp-op/pjp-op-log.sh) を作り物の記録で流す。表を揃えるのに column (util-linux) を使う
+          pjp-op-log-test =
+            pkgs.runCommand "pjp-op-log-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-log.test.sh} ${./pkgs/pjp-op/pjp-op-log.sh}
+                touch $out
+              '';
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
