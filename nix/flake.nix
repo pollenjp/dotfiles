@@ -180,6 +180,20 @@
               system
               ;
           };
+          # WSL の op の launcher (pkgs/pjp-op/launcher.ps1) を、Linux の pwsh と偽の op で流す。窓と通知は Windows でだけ
+          # 出すので、ここでは出さない (どちらも skipped と書く)
+          pjp-op-launcher-test =
+            pkgs.runCommand "pjp-op-launcher-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.powershell
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1}
+                touch $out
+              '';
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
