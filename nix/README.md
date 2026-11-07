@@ -2407,7 +2407,7 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 | 通知 | 窓と同じ中身を Windows の通知にも出す（補助。出せなければ黙って飛ばす） |
 | 記録 | `~/.local/state/pjp-op/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` の値と `name=value` の値は `***` に伏せる。1 MiB を超えたら `log.1.jsonl` へ回す |
 | 1 つずつ | 呼び出しを flock で 1 つずつにし、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒で終わらなければ、待っている側は 75 で断る（待たせている呼び出しの呼び手と理由を出す。90 秒は Claude の Bash の既定の時間切れ 120 秒より短くしてある） |
-| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
+| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる。`whoami` は承認を求めないので、1Password がロック中でも画面は出ない |
 
 op の stdout（`op document get` の binary も）・stderr・終了コードは変えない。引数は空白・引用符・`&`・`%`・`^`・日本語を含んでも
 そのまま届く（launcher が Windows の規則で command line を組む）。引数は環境変数に載せて渡すので、合わせて base64 で 28000 字を
@@ -2454,15 +2454,21 @@ pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンド�
 ### 確かめる
 
 ```sh
-command -v op                          # ~/.nix-profile/bin/op
-op --version                           # 理由なしで通る (承認の画面は出ない)
-op --reason "動くかを確かめる" whoami  # 窓と承認の画面が出る。許可すると自分のアカウントが出る
-pjp-op-log                             # 上の呼び出しが「許可」で残る
-op.exe whoami                          # WSL の直の op.exe は account is not signed in のまま (承認が漏れていない)
+command -v op                              # ~/.nix-profile/bin/op
+op --version                               # 理由なしで通る (承認の画面は出ない)
+op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。60 秒以内に許可すると vault の一覧が出る
+pjp-op-log                                 # 上の呼び出しが「許可」で残る
+op.exe whoami                              # WSL の直の op.exe は account is not signed in のまま (承認が漏れていない)
 ```
+
+確かめに `op --reason … whoami` は使えない。`whoami` は承認を求めず、呼び出しごとの powershell には承認が無いので、窓だけが
+出て `account is not signed in` で終わる。
 
 ### 気を付けること
 
+- 1Password の承認の画面は、出てから約 60 秒で時間切れになる。op は `[ERROR] <日時> authorization timeout` を出して 1 で終わり、
+  記録は「時間切れ」になる。拒否すると `[ERROR] <日時> authorization prompt dismissed, please try again` で「拒否」になる
+  （wrapper はこの 2 つの文言で見分ける。op 2.41.1 で確かめた）。1Password がロック中なら、同じ画面から Windows Hello で解く
 - Claude Code の Bash の時間切れや端末の Ctrl+C で `op` を止めると、`powershell.exe` の relay も止まり、Windows 側の powershell
   （launcher）も終わる。op が承認を待っていれば、窓は消えて 1Password の承認の画面だけが残る（窓の無い画面なので拒否する）。
   許可してしまうと、その承認は終わった powershell に付いたまま閉じられず（WSL の `op.exe signout --all` では消えない）、1Password の
