@@ -115,7 +115,7 @@ payload() {
     enc+=("$(printf '%s' "${a}" | base64 -w0)")
   done
   jq -cn --arg mode "${mode}" --arg op "${op}" --arg status "${work}/status.json" \
-    '{mode: $mode, op: $op, status: $status, args64: $ARGS.positional}' --args "${enc[@]}"
+    '{mode: $mode, op: $op, status: $status, args64: $ARGS.positional}' --args -- "${enc[@]}"
 }
 
 # run <名前> <payload> [encoded]: launcher を流す。stdin は stdin_file (無ければ /dev/null)。

@@ -194,6 +194,20 @@
                 bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1}
                 touch $out
               '';
+          # WSL の op (pkgs/pjp-op/op.sh) を、偽の powershell.exe・op.exe・wslpath・herdr で流す。lock に flock (util-linux) を使う
+          pjp-op-test =
+            pkgs.runCommand "pjp-op-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op.test.sh} ${./pkgs/pjp-op/op.sh}
+                touch $out
+              '';
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
