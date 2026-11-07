@@ -18,10 +18,11 @@
 #   理由なしで通るもの (--version・--help・-h・help・引数なし・-- より前の --help) は、窓の無い help の mode で powershell を通す
 #   通すもの
 #     - stdin の binary は op にそのまま届いて stdout に出る。stderr は op の出したものだけ。終了コードは op の終了コード
-#     - powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <launcher> で起こす
+#     - powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <起動の式> で起こし、
+#       launcher の本体は env の PJP_OP_SCRIPT で渡す
 #   desktop
 #     - payload の mode は desktop、op は op.exe の Windows のパス、args64 は op の引数
-#     - WSLENV は呼び手の WSLENV に PJP_OP_PAYLOAD を足したもので、token は渡さない (env からも外す)
+#     - WSLENV は呼び手の WSLENV に PJP_OP_SCRIPT と PJP_OP_PAYLOAD を足したもので、token は渡さない (env からも外す)
 #     - 窓の行に 時刻・呼び手・場所・理由・コマンド、footer に「この窓が出ていない」
 #   service account・Connect
 #     - OP_SERVICE_ACCOUNT_TOKEN があれば service の mode で窓は無く、WSLENV に OP_SERVICE_ACCOUNT_TOKEN/w と
@@ -119,6 +120,7 @@ printf "%s\n" "$@" >"${d}/ps.${n}.argv"
 printf "%s" "${PJP_OP_PAYLOAD-}" >"${d}/ps.${n}.payload"
 {
   echo "WSLENV=${WSLENV-<unset>}"
+  echo "SCRIPT=${PJP_OP_SCRIPT-<unset>}"
   echo "SA=${OP_SERVICE_ACCOUNT_TOKEN-<unset>}"
   echo "BIO=${OP_BIOMETRIC_UNLOCK_ENABLED-<unset>}"
   echo "CH=${OP_CONNECT_HOST-<unset>}"
@@ -167,8 +169,10 @@ case "$1 $2" in
 esac
 EOF
 
-printf 'TEST-LAUNCHER-B64' >"${work}/launcher.b64"
-export PJP_OP_LAUNCHER=${work}/launcher.b64
+mkdir -p "${work}/launcher"
+printf 'TEST-COMMAND-B64' >"${work}/launcher/command.b64"
+printf 'TEST-SCRIPT-B64' >"${work}/launcher/script.b64"
+export PJP_OP_LAUNCHER=${work}/launcher
 
 # 偽の proc の木: 1000 (bash) → 999 (<comm>) → 500 (fish) → 1
 make_proc() {
@@ -315,10 +319,11 @@ if [[ ${rc} == 3 ]]; then
 else
   ng "終了コードは op の終了コード" "rc=${rc}"
 fi
-if [[ $(<"${FAKE_DIR}/ps.1.argv") == $'-NoProfile\n-NonInteractive\n-ExecutionPolicy\nBypass\n-OutputFormat\nText\n-EncodedCommand\nTEST-LAUNCHER-B64' ]]; then
-  ok "powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <launcher> で起こす"
+if [[ $(<"${FAKE_DIR}/ps.1.argv") == $'-NoProfile\n-NonInteractive\n-ExecutionPolicy\nBypass\n-OutputFormat\nText\n-EncodedCommand\nTEST-COMMAND-B64' ]] \
+  && grep -qx 'SCRIPT=TEST-SCRIPT-B64' <<<"$(env_of)"; then
+  ok "powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <起動の式> で起こし、本体は PJP_OP_SCRIPT で渡す"
 else
-  ng "powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <launcher> で起こす" "$(cat "${FAKE_DIR}/ps.1.argv")"
+  ng "powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <起動の式> で起こし、本体は PJP_OP_SCRIPT で渡す" "$(cat "${FAKE_DIR}/ps.1.argv") $(env_of)"
 fi
 
 echo "== desktop"
@@ -333,11 +338,11 @@ if [[ $(payload_field '.mode') == desktop && $(payload_field '.op') == 'C:\fake'
 else
   ng "payload の mode は desktop、op は Windows のパス、args64 は op の引数" "$(payload_of)"
 fi
-if grep -qx 'WSLENV=WT_SESSION:WT_PROFILE_ID:PJP_OP_PAYLOAD' <<<"$(env_of)" && grep -qx 'SA=<unset>' <<<"$(env_of)" \
+if grep -qx 'WSLENV=WT_SESSION:WT_PROFILE_ID:PJP_OP_SCRIPT:PJP_OP_PAYLOAD' <<<"$(env_of)" && grep -qx 'SA=<unset>' <<<"$(env_of)" \
   && grep -qx 'CH=<unset>' <<<"$(env_of)"; then
-  ok "WSLENV は呼び手の値に PJP_OP_PAYLOAD を足したもので、token と Connect の env は渡さない"
+  ok "WSLENV は呼び手の値に PJP_OP_SCRIPT と PJP_OP_PAYLOAD を足したもので、token と Connect の env は渡さない"
 else
-  ng "WSLENV は呼び手の値に PJP_OP_PAYLOAD を足したもので、token と Connect の env は渡さない" "$(env_of)"
+  ng "WSLENV は呼び手の値に PJP_OP_SCRIPT と PJP_OP_PAYLOAD を足したもので、token と Connect の env は渡さない" "$(env_of)"
 fi
 labels=$(payload_field '[.ui.lines[][0]] | join(",")')
 if [[ ${labels} == 時刻,呼び手,場所,理由,コマンド && $(payload_field '.ui.lines[] | select(.[0] == "理由") | .[1]') == 設定を読む &&
@@ -354,7 +359,7 @@ export OP_SERVICE_ACCOUNT_TOKEN=tok-SECRET
 run_op sa --reason "CI で読む" vault list
 unset OP_SERVICE_ACCOUNT_TOKEN
 if [[ ${rc} == 0 && $(payload_field '.mode') == service && $(payload_field '.ui') == null ]] \
-  && grep -qx 'WSLENV=PJP_OP_PAYLOAD:OP_SERVICE_ACCOUNT_TOKEN/w:OP_BIOMETRIC_UNLOCK_ENABLED/w' <<<"$(env_of)" \
+  && grep -qx 'WSLENV=PJP_OP_SCRIPT:PJP_OP_PAYLOAD:OP_SERVICE_ACCOUNT_TOKEN/w:OP_BIOMETRIC_UNLOCK_ENABLED/w' <<<"$(env_of)" \
   && grep -qx 'SA=tok-SECRET' <<<"$(env_of)" && grep -qx 'BIO=false' <<<"$(env_of)" \
   && [[ $(last_field start '.kind') == service-account ]]; then
   ok "service account は service の mode・token と OP_BIOMETRIC_UNLOCK_ENABLED=false を /w で渡す・kind は service-account"
@@ -366,7 +371,7 @@ export OP_CONNECT_HOST=https://connect.example OP_CONNECT_TOKEN=ctok-SECRET
 run_op connect --reason "Connect で読む" item get a
 unset OP_CONNECT_HOST OP_CONNECT_TOKEN
 if [[ $(payload_field '.mode') == service && $(last_field start '.kind') == connect ]] \
-  && grep -qx 'WSLENV=PJP_OP_PAYLOAD:OP_CONNECT_HOST/w:OP_CONNECT_TOKEN/w:OP_BIOMETRIC_UNLOCK_ENABLED/w' <<<"$(env_of)"; then
+  && grep -qx 'WSLENV=PJP_OP_SCRIPT:PJP_OP_PAYLOAD:OP_CONNECT_HOST/w:OP_CONNECT_TOKEN/w:OP_BIOMETRIC_UNLOCK_ENABLED/w' <<<"$(env_of)"; then
   ok "Connect の 2 つが揃えば service (kind は connect)"
 else
   ng "Connect の 2 つが揃えば service (kind は connect)" "$(env_of) $(payload_of)"

@@ -1,10 +1,12 @@
-﻿# pjp-op launcher. The WSL `op` wrapper (nix/pkgs/pjp-op/op.sh) starts a fresh Windows PowerShell 5.1 for each call
-# and passes this script with -EncodedCommand. The 1Password CLI approval of the desktop app is bound to the process
+﻿# pjp-op launcher. The WSL `op` wrapper (nix/pkgs/pjp-op/op.sh) starts a fresh Windows PowerShell 5.1 for each call.
+# A short bootstrap passed with -EncodedCommand reads this script from $env:PJP_OP_SCRIPT (base64 of UTF-8) and runs it in
+# the same scope (pkgs/pjp-op/default.nix): this script itself as -EncodedCommand would exceed the 32767-character
+# command line of Windows. The 1Password CLI approval of the desktop app is bound to the process
 # that starts op.exe, so binding it to this short-lived process keeps one approval from reaching later calls or other
 # panes (the approval would otherwise be bound to the wsl.exe that every pane shares).
 #
-# ASCII only: the build encodes this file as UTF-16LE base64 and fails on any other character. Every Japanese text
-# (the window, the toast) comes from the payload, which op.sh builds.
+# ASCII only: the build fails on any other character. Every Japanese text (the window, the toast) comes from the
+# payload, which op.sh builds.
 #
 # Input: $env:PJP_OP_PAYLOAD (JSON), removed from the environment before op.exe starts.
 #   mode     desktop | help | service | notify
@@ -24,7 +26,7 @@
 # op.exe inherits stdin, stdout and stderr of this process as they are (ProcessStartInfo without redirection, so no
 # PowerShell pipeline touches the bytes). CreateNoWindow must stay false: with true the child gets no stdin.
 # This script writes nothing to stdout or stderr except one "pjp-op: ..." line when it cannot start op.exe.
-# The caller must start powershell.exe with -OutputFormat Text, and the first line below must stay first, or
+# The bootstrap sets $ProgressPreference before anything else (the first line below repeats it for the tests), or
 # PowerShell writes CLIXML progress records to stderr.
 #
 # Exit code: op's exit code. 127 when op.exe is missing, 1 for other failures before op.exe starts. notify exits 0.

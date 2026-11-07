@@ -181,8 +181,8 @@
               ;
           };
           # WSL の op の launcher (pkgs/pjp-op/launcher.ps1) を、Linux の pwsh と偽の op で流す。窓と通知は Windows でだけ
-          # 出すので、ここでは出さない (どちらも skipped と書く)。package が build のときに作った base64 も渡し、op が
-          # -EncodedCommand で渡すのと同じものでも流す
+          # 出すので、ここでは出さない (どちらも skipped と書く)。package が build のときに作った launcher の dir も渡し、op と
+          # 同じ起動の式 (-EncodedCommand が env の本体を読む) でも流す
           pjp-op-launcher-test =
             pkgs.runCommand "pjp-op-launcher-test"
               {
@@ -193,7 +193,7 @@
               }
               ''
                 bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1} \
-                  ${(pkgs.callPackage ./pkgs/pjp-op { }).launcherB64}
+                  ${(pkgs.callPackage ./pkgs/pjp-op { }).launcher}
                 touch $out
               '';
           # WSL の op (pkgs/pjp-op/op.sh) を、偽の powershell.exe・op.exe・wslpath・herdr で流す。lock に flock (util-linux) を使う

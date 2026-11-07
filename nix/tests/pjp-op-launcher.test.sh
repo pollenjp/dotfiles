@@ -3,11 +3,12 @@
 #
 # nix/pkgs/pjp-op/launcher.ps1 (WSL の op が呼び出しごとに起こす powershell の中身) を、Linux の pwsh と偽の op で確かめる。
 #
-#   bash nix/tests/pjp-op-launcher.test.sh [<launcher.ps1 のパス> [<base64 にした launcher のパス>]]
+#   bash nix/tests/pjp-op-launcher.test.sh [<launcher.ps1 のパス> [<package の launcher の dir>]]
 #
 # flake の checks (pjp-op-launcher-test) が Nix のサンドボックスで流す。pwsh (nixpkgs の powershell) と jq が要る。
 # 本物の Windows PowerShell 5.1・op.exe・窓・通知は使わない (Linux の launcher は窓と通知を出さずに skipped と書く)。
-# 2 つ目の引数を省くと、base64 は pwsh で作る (package は build のときに作ったものを渡す)。
+# 2 つ目の引数は package が build のときに作る dir (script.b64 と command.b64。pkgs/pjp-op/default.nix)。省くと、本番と同じ
+# 起動の式で流す確かめを飛ばす (flake の check は渡す)。
 #
 # ## 確かめること
 #
@@ -18,7 +19,8 @@
 #     - stderr は op の出したものだけ (CLIXML・進捗の文を混ぜない)
 #     - 終了コードは op の終了コード
 #     - payload の env (PJP_OP_PAYLOAD) を op に継がせない
-#   -EncodedCommand で渡しても、引数・stdin・stderr・終了コードが同じに通る (本物の呼び方)
+#   本番と同じ起動の式 (-EncodedCommand の command.b64 が env の PJP_OP_SCRIPT から本体を読む) でも、引数・stdin・stderr・
+#   終了コードが同じに通り、PJP_OP_SCRIPT を op に継がせない
 #   承認を閉じる
 #     - desktop は op の後に whoami を打ち、承認があったときだけ signout を打つ (status の signout は ok か not-signed-in)
 #     - whoami と signout の stdout・stderr は、launcher の stdout・stderr に出さない
@@ -43,7 +45,7 @@ here=$(
   pwd -P
 )
 launcher=${1:-${here}/../pkgs/pjp-op/launcher.ps1}
-launcher_b64_file=${2:-}
+launcher_dir=${2:-}
 work=$(mktemp -d "${TMPDIR:-/tmp}/pjp-op-launcher-test.XXXXXX")
 work=$(cd "${work}" && pwd -P)
 trap 'rm -rf "${work}"' EXIT
@@ -80,6 +82,7 @@ echo "${n}" >"${d}/n"
 printf '%s\0' "$@" >"${d}/call.${n}"
 {
   if [[ -n ${PJP_OP_PAYLOAD+x} ]]; then echo "payload=present"; else echo "payload=absent"; fi
+  if [[ -n ${PJP_OP_SCRIPT+x} ]]; then echo "script=present"; else echo "script=absent"; fi
   echo "sa=${OP_SERVICE_ACCOUNT_TOKEN-<unset>}"
 } >"${d}/env.${n}"
 case ${1-} in
@@ -97,13 +100,11 @@ EOF
 } >"${fake_op}"
 chmod +x "${fake_op}"
 
-if [[ -n ${launcher_b64_file} ]]; then
-  launcher_b64=$(<"${launcher_b64_file}")
-else
-  # -Command は後ろの引数を $args に渡さないので、パスは env で渡す (ReadAllText は先頭の BOM を外して読む)
-  # shellcheck disable=SC2016 # $env:… は pwsh が読む
-  launcher_b64=$(LAUNCHER_PATH=${launcher} pwsh -NoProfile -NonInteractive -Command \
-    '[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes([IO.File]::ReadAllText($env:LAUNCHER_PATH)))')
+launcher_command=""
+launcher_script=""
+if [[ -n ${launcher_dir} ]]; then
+  launcher_command=$(<"${launcher_dir}/command.b64")
+  launcher_script=$(<"${launcher_dir}/script.b64")
 fi
 
 # payload <mode> <op のパス> <引数>…: payload の JSON (args64 は引数ごとの UTF-8 の base64)
@@ -125,8 +126,9 @@ run() {
   rm -f "${fake_dir}"/n "${fake_dir}"/call.* "${fake_dir}"/env.* "${work}/status.json"
   rc=0
   if [[ ${how} == encoded ]]; then
-    PJP_OP_PAYLOAD=${json} pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text \
-      -EncodedCommand "${launcher_b64}" <"${stdin_file:-/dev/null}" >"${work}/${name}.out" 2>"${work}/${name}.err" || rc=$?
+    PJP_OP_SCRIPT=${launcher_script} PJP_OP_PAYLOAD=${json} pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass \
+      -OutputFormat Text -EncodedCommand "${launcher_command}" \
+      <"${stdin_file:-/dev/null}" >"${work}/${name}.out" 2>"${work}/${name}.err" || rc=$?
   else
     PJP_OP_PAYLOAD=${json} pwsh -NoProfile -NonInteractive -OutputFormat Text -File "${launcher}" \
       <"${stdin_file:-/dev/null}" >"${work}/${name}.out" 2>"${work}/${name}.err" || rc=$?
@@ -204,18 +206,27 @@ else
   ng "Linux では窓と通知を出さず、status に started と op の終了コードを書く" "$(cat "${work}/status.json" 2>&1)"
 fi
 
-echo "== -EncodedCommand で渡す"
-stdin_file=${in_bin}
-export FAKE_RC=7
-run encoded "$(payload desktop "${fake_op}" "${tricky[@]}")" encoded
-unset FAKE_RC
-stdin_file=""
-if expect_args 1 "${tricky[@]}" && cmp -s "${in_bin}" "${work}/encoded.out" \
-  && [[ $(<"${work}/encoded.err") == "FAKE-ERR 日本語" && ${rc} == 7 ]]; then
-  ok "-EncodedCommand でも引数・stdin・stderr・終了コードが同じに通る"
+echo "== 本番と同じ起動の式で流す"
+if [[ -z ${launcher_dir} ]]; then
+  echo "  skip 2 つ目の引数 (package の launcher の dir) が無いので飛ばす"
 else
-  ng "-EncodedCommand でも引数・stdin・stderr・終了コードが同じに通る" \
-    "rc=${rc} args=$(call_args 1 | tr '\0' '|') err=$(head -c 400 "${work}/encoded.err")"
+  stdin_file=${in_bin}
+  export FAKE_RC=7
+  run encoded "$(payload desktop "${fake_op}" "${tricky[@]}")" encoded
+  unset FAKE_RC
+  stdin_file=""
+  if expect_args 1 "${tricky[@]}" && cmp -s "${in_bin}" "${work}/encoded.out" \
+    && [[ $(<"${work}/encoded.err") == "FAKE-ERR 日本語" && ${rc} == 7 ]]; then
+    ok "起動の式でも引数・stdin・stderr・終了コードが同じに通る"
+  else
+    ng "起動の式でも引数・stdin・stderr・終了コードが同じに通る" \
+      "rc=${rc} args=$(call_args 1 | tr '\0' '|') err=$(head -c 400 "${work}/encoded.err")"
+  fi
+  if grep -qx "script=absent" "${fake_dir}/env.1" && grep -qx "payload=absent" "${fake_dir}/env.1"; then
+    ok "起動の式は PJP_OP_SCRIPT と PJP_OP_PAYLOAD を op に継がせない"
+  else
+    ng "起動の式は PJP_OP_SCRIPT と PJP_OP_PAYLOAD を op に継がせない" "$(cat "${fake_dir}/env.1" 2>&1)"
+  fi
 fi
 
 echo "== 承認を閉じる"

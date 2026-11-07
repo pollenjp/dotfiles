@@ -23,8 +23,9 @@
 #   4. lock (flock。上限 PJP_OP_LOCK_WAIT 秒、既定 180) を取り、窓と 1Password の画面を 1 対 1 にする
 #   5. 共有の承認の見張り: WSL から直に op.exe whoami を打ち、通れば (どの pane からも使える承認がある) op.exe signout で
 #      消して知らせる。承認が無いときの whoami は画面を出さない
-#   6. ログに start を書き、payload を組んで powershell.exe -EncodedCommand <launcher> を起こす。stdin・stdout は継ぎ、
-#      stderr は op のものをそのまま流しながら写しを取る (結果の見分けにだけ使い、ログには書かない)
+#   6. ログに start を書き、payload を組んで powershell.exe -EncodedCommand <起動の式> を起こす (launcher の本体は env の
+#      PJP_OP_SCRIPT で渡す。本体を -EncodedCommand にすると Windows の command line の上限 32767 字を超える)。stdin・stdout は
+#      継ぎ、stderr は op のものをそのまま流しながら写しを取る (結果の見分けにだけ使い、ログには書かない)
 #   7. launcher の status と op の終了コード・stderr の写しから結果を決め、もう一度見張り、ログに end を書く
 #   8. op の終了コードで終わる
 #
@@ -43,7 +44,8 @@
 #
 # ## テストのための口 (nix/tests/pjp-op.test.sh)
 #
-#   PJP_OP_LAUNCHER     launcher を UTF-16LE の base64 にしたファイル (Nix の包みが入れる)
+#   PJP_OP_LAUNCHER     launcher の dir。script.b64 (本体の UTF-8 の base64) と command.b64 (起動の式の UTF-16LE の base64)。
+#                       Nix の包みが入れる (pkgs/pjp-op/default.nix)
 #   PJP_OP_EXE          op.exe (既定は PATH の op.exe)
 #   PJP_OP_POWERSHELL   powershell.exe
 #   PJP_OP_LOCK_WAIT    lock を待つ秒 (既定 180)
@@ -339,11 +341,11 @@ fi
 if ! command -v wslpath &>/dev/null; then
   refuse no-wslpath 127 "wslpath が見つかりません (WSL の外では使えません)。"
 fi
-if [[ ! -s ${PJP_OP_LAUNCHER:-} ]]; then
+if [[ ! -s ${PJP_OP_LAUNCHER:-}/command.b64 || ! -s ${PJP_OP_LAUNCHER:-}/script.b64 ]]; then
   refuse no-launcher 127 "launcher (PJP_OP_LAUNCHER) が見つかりません (dotfiles の pjp-op の包みの誤り)。"
 fi
-launcher_b64=$(<"${PJP_OP_LAUNCHER}")
-ps_args=(-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand "${launcher_b64}")
+launcher_script=$(<"${PJP_OP_LAUNCHER}/script.b64")
+ps_args=(-NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand "$(<"${PJP_OP_LAUNCHER}/command.b64")")
 
 # wslenv_plus <項目>…: 呼び手の WSLENV の後ろに項目を足した値 (末尾の : は外す)
 wslenv_plus() {
@@ -423,7 +425,7 @@ notify_shared() {
   payload=$(jq -cn -a --arg t "${title}" --arg b "${body}" --arg time "$(date '+%H:%M:%S')" \
     '{mode: "notify", ui: {title: $t, lines: [["時刻", $time], ["内容", $b]], toast: [$t, $b]}}')
   (
-    WSLENV=$(wslenv_plus PJP_OP_PAYLOAD) PJP_OP_PAYLOAD=${payload} \
+    WSLENV=$(wslenv_plus PJP_OP_SCRIPT PJP_OP_PAYLOAD) PJP_OP_SCRIPT=${launcher_script} PJP_OP_PAYLOAD=${payload} \
       "${ps_cmd}" "${ps_args[@]}" </dev/null >/dev/null 2>&1 {lock_fd}>&- &
   )
   if [[ ${HERDR_ENV:-} == 1 ]] && command -v herdr &>/dev/null; then
@@ -549,18 +551,18 @@ tee -a "${err_copy}" <"${err_fifo}" >&2 {lock_fd}>&- &
 tee_pid=$!
 case ${kind} in
   service-account)
-    env OP_BIOMETRIC_UNLOCK_ENABLED=false PJP_OP_PAYLOAD="${payload}" \
-      WSLENV="$(wslenv_plus PJP_OP_PAYLOAD OP_SERVICE_ACCOUNT_TOKEN/w OP_BIOMETRIC_UNLOCK_ENABLED/w)" \
+    env OP_BIOMETRIC_UNLOCK_ENABLED=false PJP_OP_SCRIPT="${launcher_script}" PJP_OP_PAYLOAD="${payload}" \
+      WSLENV="$(wslenv_plus PJP_OP_SCRIPT PJP_OP_PAYLOAD OP_SERVICE_ACCOUNT_TOKEN/w OP_BIOMETRIC_UNLOCK_ENABLED/w)" \
       "${ps_cmd}" "${ps_args[@]}" <&"${in_fd}" 2>"${err_fifo}" &
     ;;
   connect)
-    env -u OP_SERVICE_ACCOUNT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED=false PJP_OP_PAYLOAD="${payload}" \
-      WSLENV="$(wslenv_plus PJP_OP_PAYLOAD OP_CONNECT_HOST/w OP_CONNECT_TOKEN/w OP_BIOMETRIC_UNLOCK_ENABLED/w)" \
+    env -u OP_SERVICE_ACCOUNT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED=false PJP_OP_SCRIPT="${launcher_script}" PJP_OP_PAYLOAD="${payload}" \
+      WSLENV="$(wslenv_plus PJP_OP_SCRIPT PJP_OP_PAYLOAD OP_CONNECT_HOST/w OP_CONNECT_TOKEN/w OP_BIOMETRIC_UNLOCK_ENABLED/w)" \
       "${ps_cmd}" "${ps_args[@]}" <&"${in_fd}" 2>"${err_fifo}" &
     ;;
   *)
-    env -u OP_SERVICE_ACCOUNT_TOKEN -u OP_CONNECT_HOST -u OP_CONNECT_TOKEN PJP_OP_PAYLOAD="${payload}" \
-      WSLENV="$(wslenv_plus PJP_OP_PAYLOAD)" \
+    env -u OP_SERVICE_ACCOUNT_TOKEN -u OP_CONNECT_HOST -u OP_CONNECT_TOKEN PJP_OP_SCRIPT="${launcher_script}" PJP_OP_PAYLOAD="${payload}" \
+      WSLENV="$(wslenv_plus PJP_OP_SCRIPT PJP_OP_PAYLOAD)" \
       "${ps_cmd}" "${ps_args[@]}" <&"${in_fd}" 2>"${err_fifo}" &
     ;;
 esac
