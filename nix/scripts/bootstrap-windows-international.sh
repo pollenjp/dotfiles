@@ -215,5 +215,423 @@ if ((check)); then
   exit 0
 fi
 
-echo "まだ書けません (--check だけ)。" >&2
+if [[ ! -r ${state_file} ]]; then
+  warn "配り先の設定がありません: ${state_file}" \
+    "dotfiles.wsl.windowsFiles を持つ世代へ先に home-manager switch してください。" \
+    "この手順は飛ばします。"
+  exit 0
+fi
+if ! jq -e 'type == "object"' "${state_file}" >/dev/null 2>&1; then
+  echo "${state_file} が JSON の object ではありません。" >&2
+  exit 1
+fi
+if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
+  echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
+  exit 0
+fi
+
+validate_managed || exit 1
+count=$(jq 'length' "${managed_file}")
+
+if [[ -e ${record_file} ]]; then
+  if ! jq -e 'type == "object" and (.values | type == "object")' "${record_file}" >/dev/null 2>&1; then
+    echo "!! ${record_file} が壊れています (values を持つ JSON の object ではありません)。" >&2
+    echo "   消してから流し直すと、managed.json とも地域の既定とも違う値は衝突として扱われます" >&2
+    echo "   (値を確かめて、--import で取り込むか --force)。" >&2
+    exit 1
+  fi
+  records=$(jq -c . "${record_file}")
+else
+  records='{"version":1,"values":{}}'
+fi
+
+if ((count > 0)) && ! command -v pwsh.exe &>/dev/null; then
+  warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" \
+    "Windows の日付と時刻の形式を確かめられないので、この手順は飛ばします。"
+  exit 0
+fi
+
+# 取り込みは managed.json を Windows の値で書き換える。commit していない変更 (未追跡も) があると痕跡なく
+# 消えるので、何も書かずに止まる。git が無い・checkout の外で確かめられないときも止まる側に倒す
+# (bootstrap-windows-terminal.sh と同じ)。
+if ((do_import)); then
+  if ! changes=$(git --no-optional-locks -C "${repo_dir}" status --porcelain --untracked-files=normal -- "${managed_rel}" 2>&1); then
+    {
+      echo "!! ${managed_rel} に commit していない変更が無いかを確かめられません (git が無いか、git の checkout ではない):"
+      printf '%s\n' "${changes}" | sed 's/^/   /'
+      echo "   --import は managed.json を書き換え、commit していない変更を消しうるので、止めます。"
+    } >&2
+    exit 1
+  fi
+  if [[ -n ${changes} ]]; then
+    {
+      echo "!! ${managed_rel} に commit していない変更があります。--import は managed.json を書き換えるので、先に commit するか、変更を戻してから流し直してください。"
+      printf '%s\n' "${changes}" | sed 's/^/   /'
+    } >&2
+    exit 1
+  fi
+fi
+
+tmp_file=""
+ps_err_file=$(mktemp "${TMPDIR:-/tmp}/bootstrap-windows-international.XXXXXX")
+trap 'rm -f "${ps_err_file}"; if [[ -n ${tmp_file} ]]; then rm -f "${tmp_file}"; fi' EXIT
+
+# PowerShell のコードを、pwsh.exe の -EncodedCommand に渡す形 (UTF-16LE の base64) にする。ASCII だけを受け、
+# ASCII の外の文字があれば 1 を返す (ASCII なら UTF-16LE は 1 byte ごとに 0 を足すだけになる)
+encode_ps() {
+  local LC_ALL=C hex bytes
+  if [[ $1 == *[![:ascii:]]* ]]; then
+    return 1
+  fi
+  hex=$(printf '%s' "$1" | od -An -v -tx1)
+  read -r -d '' -a bytes <<<"${hex}" || true
+  # 書式は \xHH の並びだけで、% を含まない
+  # shellcheck disable=SC2059
+  printf "$(printf '\\x%s\\x00' "${bytes[@]}")" | base64 -w0
+}
+
+# pwsh.exe で流す PowerShell のコード (ASCII だけで書く)。run_ps が先頭に $Mode ('read' か 'write') と
+# $InputJson ([{"name","lctype"}]。write なら各要素に "value" と "write" も) の 2 行を足して渡す。返りは 1 行の JSON:
+#   {"locale":"en-US","values":[{"name","current","default"}],"failed":[{"name","error"}],"broadcast":null か {"ok","error"}}
+# write は、"write" が真の値を並びの順に SetLocaleInfoW で書き (失敗は Win32 のエラーを failed へ)、1 つでも書けたら
+# WM_SETTINGCHANGE を送る (broadcast)。どちらの mode も最後に全部の値を読み直して返す。今の値は GetLocaleInfoEx に
+# LOCALE_NAME_USER_DEFAULT (NULL) を渡して読む。pwsh は string の引数に渡した $null を空文字列 (invariant の地域) に
+# するので、[NullString]::Value で渡す。地域の既定は LCType に LOCALE_NOUSEROVERRIDE (0x80000000) を足して読む。
+IFS= read -r -d '' ps_body <<'EOS' || true
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+if ($PSStyle) { $PSStyle.OutputRendering = 'PlainText' }
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
+Add-Type -Namespace DotfilesIntl -Name Nls -MemberDefinition @'
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern int GetLocaleInfoEx(string lpLocaleName, uint LCType, System.Text.StringBuilder lpLCData, int cchData);
+[DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern bool SetLocaleInfoW(uint Locale, uint LCType, string lpLCData);
+[DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+public static extern IntPtr SendMessageTimeoutW(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint fuFlags, uint uTimeout, out UIntPtr lpdwResult);
+'@
+function Get-Nls([uint32]$LCType) {
+  $buf = [System.Text.StringBuilder]::new(128)
+  if ([DotfilesIntl.Nls]::GetLocaleInfoEx([NullString]::Value, $LCType, $buf, $buf.Capacity) -eq 0) {
+    throw ('GetLocaleInfoEx(0x{0:X}) failed: Win32 error {1}' -f $LCType, [Runtime.InteropServices.Marshal]::GetLastWin32Error())
+  }
+  $buf.ToString()
+}
+$entries = @(ConvertFrom-Json -InputObject $InputJson)
+$failed = @()
+$broadcast = $null
+if ($Mode -eq 'write') {
+  $wrote = 0
+  foreach ($e in $entries) {
+    if (-not $e.write) { continue }
+    # Locale = LOCALE_USER_DEFAULT (0x0400). The W version ignores it.
+    if ([DotfilesIntl.Nls]::SetLocaleInfoW(0x0400, [uint32]$e.lctype, [string]$e.value)) {
+      $wrote++
+    } else {
+      $failed += [ordered]@{ name = $e.name; error = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+    }
+  }
+  if ($wrote -gt 0) {
+    # WM_SETTINGCHANGE (0x001A) to HWND_BROADCAST (0xFFFF), lParam "intl", SMTO_ABORTIFHUNG (0x0002), 5000 ms
+    $res = [UIntPtr]::Zero
+    $ok = [DotfilesIntl.Nls]::SendMessageTimeoutW([IntPtr]0xFFFF, 0x001A, [UIntPtr]::Zero, 'intl', 0x0002, 5000, [ref]$res) -ne [IntPtr]::Zero
+    $code = 0
+    if (-not $ok) { $code = [Runtime.InteropServices.Marshal]::GetLastWin32Error() }
+    $broadcast = [ordered]@{ ok = $ok; error = $code }
+  }
+}
+$values = @(foreach ($e in $entries) {
+    [ordered]@{
+      name = $e.name
+      current = Get-Nls ([uint32]$e.lctype)
+      default = Get-Nls ([uint32]$e.lctype + [uint32]2147483648)
+    }
+  })
+# LOCALE_SNAME (0x5C) is the name of the locale (en-US).
+[ordered]@{ locale = Get-Nls 0x5C; values = $values; failed = $failed; broadcast = $broadcast } |
+  ConvertTo-Json -Compress -Depth 4 -EscapeHandling EscapeNonAscii
+EOS
+
+# pwsh.exe で PowerShell のコードを流す。$1: read か write、$2: 入力の JSON。
+# stdout (CR を落とす) を ps_out に、stderr (CR を落とす) を ps_err に、終了コード (時間切れは 124) を ps_rc に入れる。
+# 値は jq -a で ASCII にし (日本語は \uXXXX)、PowerShell の '' の文字列に入れる (中の ' は '' に)。
+run_ps() {
+  local input quoted enc
+  input=$(jq -c -a . <<<"$2")
+  quoted=${input//\'/\'\'}
+  if ! enc=$(encode_ps "\$Mode = '$1'"$'\n'"\$InputJson = '${quoted}'"$'\n'"${ps_body}"); then
+    echo "!! pwsh.exe に渡すコードに ASCII の外の文字があります (script の誤り)。" >&2
+    exit 1
+  fi
+  ps_rc=0
+  ps_out=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -EncodedCommand "${enc}" </dev/null 2>"${ps_err_file}") || ps_rc=$?
+  ps_out=${ps_out//$'\r'/}
+  ps_err=$(tr -d '\r' <"${ps_err_file}")
+}
+
+# 記録に値を書く (書いた値か、もう同じだった値)。$1: 名前、$2: 値
+remember() {
+  records=$(jq -c --arg n "$1" --arg v "$2" '.values[$n] = $v' <<<"${records}")
+}
+
+# 置き先と同じディレクトリの一時ファイルに書いてから mv する。$1 = 置き先、残り = 中身を出すコマンド
+# (bootstrap-windows-terminal.sh と同じ。落ちたら set -e で止まり、一時ファイルは trap が消す)
+place() {
+  local dst=$1
+  shift
+  tmp_file=$(mktemp "${dst}.dotfiles-tmp.XXXXXX")
+  "$@" >"${tmp_file}"
+  mv -f -- "${tmp_file}" "${dst}"
+  tmp_file=""
+}
+
+locale=""
+plan='[]'
+if ((count > 0)); then
+  read_input=$(jq -c --slurpfile managed "${managed_file}" \
+    'map(select(.name as $n | $managed[0] | has($n)) | {name, lctype})' <<<"${table}")
+  run_ps read "${read_input}"
+  if ((ps_rc != 0)); then
+    if ((ps_rc == 124)); then
+      headline="pwsh.exe が 60 秒たっても終わりませんでした (時間切れ。WSL の interop が止まっているかもしれません)。"
+    else
+      headline="pwsh.exe で Windows の日付と時刻の形式を読めませんでした (終了コード ${ps_rc}。WSL の interop が落ちているかもしれません):"
+    fi
+    warn "${headline}" ${ps_err:+"${ps_err}"} "この手順は飛ばします。"
+    exit 0
+  fi
+  # 返りは、頼んだ名前の全部に今の値と地域の既定 (文字列) があり、地域の名前を持つ JSON
+  if ! jq -e --argjson input "${read_input}" '
+      (.locale | type) == "string"
+      and ([.values[]? | select((.name | type) == "string" and (.current | type) == "string" and (.default | type) == "string")
+        | .name] | sort) == ([$input[].name] | sort)' <<<"${ps_out}" >/dev/null 2>&1; then
+    warn "pwsh.exe の返りが、決めた形の JSON ではありません:" ${ps_out:+"${ps_out}"} ${ps_err:+"${ps_err}"} "この手順は飛ばします。"
+    exit 0
+  fi
+  locale=$(jq -r '.locale' <<<"${ps_out}")
+
+  # 計画: 持つ値ごとに 1 つ (表の順)。action は same / update / add / conflict
+  plan=$(jq -c -n \
+    --argjson table "${table}" \
+    --slurpfile managed "${managed_file}" \
+    --argjson win "${ps_out}" \
+    --argjson records "${records}" '
+    $managed[0] as $m
+    | [$table[]
+      | select(.name as $n | $m | has($n))
+      | .name as $n
+      | ($win.values[] | select(.name == $n)) as $w
+      | {
+          name: $n,
+          lctype,
+          want: $m[$n],
+          cur: $w.current,
+          def: $w.default,
+          has_rec: ($records.values | has($n)),
+          rec: $records.values[$n]
+        }
+      | .action = (
+          if .cur == .want then "same"
+          elif .has_rec and .cur == .rec then "update"
+          elif (.has_rec | not) and .cur == .def then "add"
+          else "conflict" end)]')
+fi
+
+# 衝突した値の、Windows 側・managed.json・前回書いた値・地域の既定を出す ($1 = 計画の 1 つ)
+report_conflict() {
+  local e=$1 key
+  key=$(jq -r '.name' <<<"${e}")
+  {
+    if jq -e '.has_rec | not' <<<"${e}" >/dev/null; then
+      echo "!! 衝突: ${key} は、書いた記録が無く、地域 (${locale}) の既定とも違います (この script が書く前に、設定画面で変えた・手で設定してあった)。"
+    elif jq -e '.cur == .def' <<<"${e}" >/dev/null; then
+      echo "!! 衝突: ${key} は、前回書いた値から地域 (${locale}) の既定に戻っています (地域を変えた・設定画面で既定に戻した、など)。"
+    else
+      echo "!! 衝突: ${key} は Windows 側で変わっています (前回書いた値と違う。設定画面で変えた、など)。"
+    fi
+    jq -r '
+      "   Windows 側:    \(.cur | tojson)",
+      "   managed.json:  \(.want | tojson)",
+      (if .has_rec then "   前回書いた値:  \(.rec | tojson)" else empty end),
+      "   地域の既定:    \(.def | tojson)"' <<<"${e}"
+  } >&2
+}
+
+log=()
+conflicts=()
+imports=()
+pending=()
+write_names=()
+need_write=0
+pre=""
+if ((dry_run)); then
+  pre="[dry-run] "
+fi
+
+while IFS= read -r entry; do
+  if [[ -z ${entry} ]]; then
+    continue
+  fi
+  action=$(jq -r '.action' <<<"${entry}")
+  key=$(jq -r '.name' <<<"${entry}")
+  if [[ ${action} == conflict ]] && ((force)); then
+    action=force
+  fi
+  case ${action} in
+    same)
+      write_names+=("${key}")
+      if ((! dry_run)) && ! jq -e '.has_rec and .rec == .want' <<<"${entry}" >/dev/null; then
+        remember "${key}" "$(jq -r '.want' <<<"${entry}")"
+      fi
+      ;;
+    add | update | force)
+      if ((do_import)); then
+        pending+=("${key}")
+        continue
+      fi
+      case ${action} in
+        add) label="初めて書く。今の値は地域の既定" ;;
+        update) label="managed.json が更新された" ;;
+        force) label="--force" ;;
+      esac
+      write_names+=("${key}")
+      need_write=1
+      log+=("  ${pre}${key}: $(jq -r '"\(.cur | tojson) → \(.want | tojson)"' <<<"${entry}") (${label})")
+      ;;
+    conflict)
+      conflicts+=("${key}")
+      if ((do_import)); then
+        imports+=("${entry}")
+      else
+        report_conflict "${entry}"
+      fi
+      ;;
+  esac
+done <<<"$(jq -c '.[]' <<<"${plan}")"
+
+# 書く。衝突でない値を全部、表の順に書き直す (同じ値も。ある値を書くと Windows が別の値を書き直す作りでも、
+# 持つ値に揃えて終わるよう)。書いた値は読み戻して比べ、揃った値だけを記録する
+failures=()
+broadcast_note=""
+if ((need_write && ! dry_run)); then
+  names_json=$(printf '%s\n' "${write_names[@]}" | jq -R . | jq -c -s .)
+  write_input=$(jq -c --argjson w "${names_json}" \
+    'map({name, lctype, value: .want, write: (.name | IN($w[]))})' <<<"${plan}")
+  run_ps write "${write_input}"
+  if ((ps_rc != 0)) || ! jq -e '(.values | type) == "array" and (.failed | type) == "array"' <<<"${ps_out}" >/dev/null 2>&1; then
+    failures+=("書く途中で pwsh.exe が失敗しました (終了コード ${ps_rc})。どの値が書けたかは分からないので、記録していません。")
+    if [[ -n ${ps_err} ]]; then
+      failures+=("${ps_err}")
+    fi
+    failures+=("もう一度流すと、読み直して判定します。")
+  else
+    for key in "${write_names[@]}"; do
+      want=$(jq -r --arg n "${key}" '.[] | select(.name == $n) | .want' <<<"${plan}")
+      err=$(jq -r --arg n "${key}" '.failed[] | select(.name == $n) | .error' <<<"${ps_out}")
+      if [[ -n ${err} ]]; then
+        hint=""
+        if [[ ${err} == 1260 ]]; then
+          hint="。グループポリシーで止められています"
+        fi
+        failures+=("${key}: 書けませんでした (Win32 のエラー ${err}${hint})")
+        continue
+      fi
+      got=$(jq -r --arg n "${key}" '.values[] | select(.name == $n) | .current' <<<"${ps_out}")
+      if [[ ${got} != "${want}" ]]; then
+        failures+=("${key}: 書いた後に読み戻すと $(jq -rn --arg v "${got}" '$v | tojson') で、managed.json の $(jq -rn --arg v "${want}" '$v | tojson') と違います")
+        continue
+      fi
+      remember "${key}" "${want}"
+    done
+    if jq -e '.broadcast.ok == true' <<<"${ps_out}" >/dev/null; then
+      broadcast_note="  WM_SETTINGCHANGE (intl) を送りました。開いているアプリ (タスクバーの時計など) は、その場で読み直します。"
+    elif jq -e '.broadcast != null' <<<"${ps_out}" >/dev/null; then
+      warn "WM_SETTINGCHANGE を送れませんでした (Win32 のエラー $(jq -r '.broadcast.error' <<<"${ps_out}"))。値は書けています。" \
+        "開いているアプリ (タスクバーの時計など) には、サインアウトしてサインインし直すと効きます。"
+    fi
+  fi
+fi
+
+if ((do_import && ${#imports[@]} > 0)); then
+  imp=$(printf '%s\n' "${imports[@]}" | jq -c -s '.')
+  # jq の $imp は jq の変数 (place 越しなので、shellcheck には jq の引数と分からない)
+  # shellcheck disable=SC2016
+  place "${managed_file}" jq --indent 4 --argjson imp "${imp}" 'reduce $imp[] as $e (.; .[$e.name] = $e.cur)' "${managed_file}"
+  records=$(jq -c --argjson imp "${imp}" 'reduce $imp[] as $e (.; .values[$e.name] = $e.cur)' <<<"${records}")
+fi
+
+# 記録を書く (変わったときだけ。--dry-run では書かない)。managed.json から消した値は記録からも消す。
+# 記録が無く、書くものも無いときは作らない
+if ((! dry_run)); then
+  records=$(jq -c --slurpfile managed "${managed_file}" \
+    '.values |= with_entries(select(.key as $k | $managed[0] | has($k)))' <<<"${records}")
+  new_records=$(jq -S '.version = 1' <<<"${records}")
+  old_records=""
+  if [[ -f ${record_file} ]]; then
+    old_records=$(jq -S . "${record_file}")
+  fi
+  if [[ ${new_records} != "${old_records}" ]] && { [[ -f ${record_file} ]] || jq -e '.values != {}' <<<"${records}" >/dev/null; }; then
+    mkdir -p "${state_dir}"
+    place "${record_file}" printf '%s\n' "${new_records}"
+  fi
+fi
+
+if ((do_import)); then
+  if ((${#imports[@]} == 0)); then
+    echo "取り込むものはありません (衝突している値がありません)。"
+  else
+    echo "==> Windows の値を ${managed_rel} へ取り込みました"
+    printf '  %s\n' "${conflicts[@]}"
+    echo "git -C ${repo_dir} diff -- ${managed_rel} で見て commit してください。"
+  fi
+  if ((${#pending[@]} > 0)); then
+    echo "managed.json の値で Windows へ書く値が ${#pending[@]} 件あります (取り込みでは書きません):"
+    printf '  %s\n' "${pending[@]}"
+    echo "引数なしで流し直すと書きます: ${script_dir}/bootstrap-windows-international.sh"
+  fi
+  exit 0
+fi
+
+if ((${#log[@]} == 0 && ${#conflicts[@]} == 0 && ${#failures[@]} == 0)); then
+  echo "Windows の日付と時刻の形式は揃っています (持つ値 ${count} 件${locale:+。地域 ${locale}})。"
+  exit 0
+fi
+
+if ((${#log[@]} > 0)); then
+  echo "==> ${pre}Windows の日付と時刻の形式 (地域 ${locale})"
+  printf '%s\n' "${log[@]}"
+  if [[ -n ${broadcast_note} ]]; then
+    echo "${broadcast_note}"
+  fi
+fi
+
+if ((${#conflicts[@]} == 0 && ${#failures[@]} == 0)); then
+  exit 0
+fi
+
+rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
+{
+  printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+  printf '%s⚠️  Windows の日付と時刻の形式に、手で直すことがあります%s\n' "${c_warn}" "${c_reset}"
+  if ((${#conflicts[@]} > 0)); then
+    printf '%s⚠️  Windows 側で変わっていた (か、書く前から手で設定してあった) ので、次の値には触っていません (値は上):%s\n' "${c_warn}" "${c_reset}"
+    for key in "${conflicts[@]}"; do
+      printf '%s⚠️    %s%s\n' "${c_warn}" "${key}" "${c_reset}"
+    done
+    printf '%s⚠️  解き方 (どちらか):%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️    1. Windows 側の値を残す: managed.json へ取り込み、commit して push する%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️       %s/bootstrap-windows-international.sh --import%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
+    printf '%s⚠️    2. managed.json の値で書く:%s\n' "${c_warn}" "${c_reset}"
+    printf '%s⚠️       %s/bootstrap-windows-international.sh --force%s\n' "${c_warn}" "${script_dir}" "${c_reset}"
+  fi
+  if ((${#failures[@]} > 0)); then
+    printf '%s⚠️  次の値は書けませんでした (書けた値は記録してあります):%s\n' "${c_warn}" "${c_reset}"
+    for line in "${failures[@]}"; do
+      while IFS= read -r l; do
+        printf '%s⚠️    %s%s\n' "${c_warn}" "${l}" "${c_reset}"
+      done <<<"${line}"
+    done
+  fi
+  printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+} >&2
 exit 1
