@@ -54,3 +54,8 @@ hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定�
 src = "powertoys/Install-PowerToys.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-PowerToys.ps1"
 hint = "PowerShell で Install-PowerToys -Check を打つと、入っているかが分かる (setup --update でも確かめ、入っていなければ入れる)"
+
+[[files]]
+src = "port-forward/Start-PortForward.ps1"
+dst = "%USERPROFILE%/.config/powershell/Start-PortForward.ps1"
+hint = "PowerShell 7 で pf を打つ (dotfiles.ps1 の pf から呼ぶ。開いている PowerShell は . $PROFILE で読み直す)。共有の port の組は bootstrap-windows-port-forward.sh が置く"
