@@ -2349,8 +2349,9 @@ Windows へは `rundll32.exe url.dll,FileProtocolHandler` で渡す。シェル�
 
 ### 反映
 
-`~/dotfiles/setup --update` で入る。herdr は Ctrl+クリックのたびに PATH から `xdg-open` を引くので、起こし直さなくてよい
-（herdr を起こしたシェルの PATH に `~/.nix-profile/bin` があること）。
+`~/dotfiles/setup --self-update --update` で入る（本体の checkout を最新にしてから switch する。[前述](#本体を最新にする---self-update)）。
+herdr は Ctrl+クリックのたびに PATH から `xdg-open` を引くので、起こし直さなくてよい（herdr を起こしたシェルの PATH に
+`~/.nix-profile/bin` があること）。
 
 ### 確かめる
 
