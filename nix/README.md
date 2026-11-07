@@ -1510,6 +1510,8 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `xdg-open` (PATH) | `nix/pkgs/pjp-wsl-xdg-open/` (WSL のマシンだけ。[後述](#wsl-の-xdg-open)) |
+| `op`・`pjp-op-log` (PATH) | `nix/pkgs/pjp-op/` (WSL + 1Password のマシンだけ。[後述](#wsl-の-op-を理由つきで呼ぶ-1password-cli)) |
+| `~/.local/state/dotfiles/claude-op-reason.json` | `nix/home/modules/op-reason.nix` (生成。上の `op` があるマシンか。Claude の hook が読む。[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
@@ -2382,6 +2384,86 @@ grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # 
 - apt の `xdg-utils` を入れても、`~/.nix-profile/bin` が `/usr/bin` より先なのでこちらが当たる。Linux のアプリで開きたいなら
   `/usr/bin/xdg-open` を直に打つ
 
+## WSL の op を理由つきで呼ぶ (1Password CLI)
+
+WSL で 1Password を使うマシン（`wsl.enable` と `onePassword.enable` が両方 true。[ssh の wrapper](#wsl-では-ssh-自体を-windows-側に差し替える)
+と同じ）の PATH に、呼ぶ理由を必須にした `op`（`nix/pkgs/pjp-op/`）と、その記録を見る `pjp-op-log` を置く
+（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)）。option は無い。
+
+```sh
+op --reason "<なぜ op を呼ぶか>" <op の引数…>
+op --reason "infra-v2 の VM を作るのに Proxmox の API の token を読む" read "op://Private/proxmox/token"
+```
+
+WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直の親に付く。WSL のどの pane から打っても親は同じ `wsl.exe`
+（herdr の server の `WSL_INTEROP`）なので、1 回の許可が後の呼び出しにも、ほかの pane（Claude の作業も）にも効き、承認の画面が
+出なくなる。承認の画面はどの呼び出しでも「Allow wslhost」としか出ず、誰が何のために呼んだかも分からない。`op` はこれを次のように閉じる。
+
+| すること | 中身 |
+| --- | --- |
+| 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。op の引数のどこに置いてもよく、`--` より後ろは op の引数）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ |
+| 呼び出しごとの powershell | 呼び出しのたびに新しい `powershell.exe`（Windows PowerShell 5.1）を起こし、その子として `op.exe` を起こす。承認はこの powershell に付き、終わると同じ powershell の中で閉じる（`op whoami` で確かめ、承認があれば `op signout`） |
+| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。最前面だが focus は奪わず、許可は求めない（決めるのは 1Password の画面だけ）。op が終われば閉じる |
+| 通知 | 窓と同じ中身を Windows の通知にも出す（補助。出せなければ黙って飛ばす） |
+| 記録 | `~/.local/state/pjp-op/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` の値と `name=value` の値は `***` に伏せる。1 MiB を超えたら `log.1.jsonl` へ回す |
+| 1 つずつ | 呼び出しを flock で 1 つずつにし、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 180 秒で終わらなければ、待っている側は 75 で断る（待たせている呼び出しの呼び手と理由を出す） |
+| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout` で消し、記録と通知（Windows・herdr）で知らせる |
+
+op の stdout（`op document get` の binary も）・stderr・終了コードは変えない。引数は空白・引用符・`&`・`%`・`^`・日本語を含んでも
+そのまま届く（launcher が Windows の規則で command line を組む）。
+
+### service account・Connect の token
+
+呼び手の環境に `OP_SERVICE_ACCOUNT_TOKEN`（か `OP_CONNECT_HOST` と `OP_CONNECT_TOKEN` の両方）があれば、デスクトップアプリの承認を
+使わない呼び出しとして扱う。token はその 1 回の Windows のプロセスにだけ渡し（`WSLENV` の `/w`）、`OP_BIOMETRIC_UNLOCK_ENABLED=false`
+を付けて、token が効かなくてもデスクトップアプリに落ちないようにする。承認の画面が出ないので、窓・通知・承認の閉じ方は省く。
+理由は必須のまま、記録には service account（Connect）で動いたことを残す。
+
+### 記録を見る (`pjp-op-log`)
+
+```sh
+pjp-op-log               # 直近 1 時間
+pjp-op-log --since 1d    # 期間を広げる (s・m・h・d)
+pjp-op-log --all         # 残っている記録を全部
+pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンドを切らない)
+```
+
+列は 時刻・結果（許可・拒否・時間切れ・失敗・成功・中断）・秒・呼び手・理由・コマンド。終わっていない（止められた）呼び出しは
+「実行中か中断」、断った呼び出しと共有の承認を消したことも行に出る。
+
+### 守る決まり
+
+- **窓が出ていない 1Password CLI の承認の画面は拒否する。** 窓の無い画面は `op` を通らずに `op.exe` を直に打ったもの（道具の中
+  など）で、許可すると WSL のどの pane からも使える承認ができる。窓に「ほかにも op.exe が動いています」と出たときも、どれの承認か
+  分からなければ拒否する
+- **うっかり許可したら、WSL で `op.exe signout` を打つ**（`op` を通さずに直に。WSL 全体の承認が消える）。次に `op` を打ったときの
+  見張りも消す
+
+### 反映
+
+`~/dotfiles/setup --self-update --update` で入る。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）
+の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。
+
+### 確かめる
+
+```sh
+command -v op                          # ~/.nix-profile/bin/op
+op --version                           # 理由なしで通る (承認の画面は出ない)
+op --reason "動くかを確かめる" whoami  # 窓と承認の画面が出る。許可すると自分のアカウントが出る
+pjp-op-log                             # 上の呼び出しが「許可」で残る
+op.exe whoami                          # WSL の直の op.exe は account is not signed in のまま (承認が漏れていない)
+```
+
+### 気を付けること
+
+- Claude Code の Bash の時間切れや Ctrl+C で `op` を止めても、launcher（powershell）は止めない。op が承認を待っていれば、終わった後に
+  launcher が承認を閉じる（それまで次の `op` は待つ）。launcher ごと強く殺すと閉じられないことがあり、その承認は 1Password の
+  10 分の期限で切れる
+- 道具の中で `op.exe` を直に打つものは止めない（Claude の hook はコマンドの文字だけを見る）。上の「窓が出ていない承認は拒否」と
+  見張りで守る。Windows 側から service account の token で `op.exe` を起こす道具は承認の画面を出さないので、関わらない
+- 承認の画面の名前は、挟む powershell にしても「wslhost」と出る（1Password が決める）。誰が呼んだかは窓と記録で見る
+- 見張りの `op.exe whoami` は 1 回およそ 1 秒かかる（1 回の呼び出しで 2 回）
+
 ## fish
 
 `.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。
@@ -3042,6 +3124,23 @@ skill が読まれなかったときの念押しが `PostToolUse`・`PostToolUse
   PR を作れない。skill はほかの skill と同じく張る
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PostToolUse`・`PostToolUseFailure` に 1 件ずつ（`Bash` +
   `if: "Bash(gh pr create *)"`）足す。`gh pr create` の後ろにつないだコマンドが落ちると、Bash は PostToolUseFailure にだけ来る
+
+#### op.exe の直打ちを止め、承認の拒否のあとは問いを出させるフック
+
+`nix/files/claude/hooks/op-reason-guard.sh`。WSL の `op`（[前述](#wsl-の-op-を理由つきで呼ぶ-1password-cli)）を Claude の作業に使わせる。
+どのマシンにも置き、`op` の無いマシン（`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が false。
+`home/modules/op-reason.nix` が書く）では黙る。
+
+| いつ | すること |
+| --- | --- |
+| 打つ前（PreToolUse） | `op.exe` を直に起こすコマンドを止め（deny）、`op --reason "<なぜ op を呼ぶか>" …` で打ち直すよう返す。承認は呼び出しごとに出るので、呼ぶ回数を減らす書き方（`vault get` を 11 回打たず `vault list --format json` を 1 回にするなど）も促す。承認の要らない `whoami`・`signout`・`--version`・`--help` は止めない |
+| 拒否・時間切れのあと（PostToolUse・PostToolUseFailure） | `op` の記録に、この会話（`session_id`）の承認の拒否・時間切れがあれば、Claude に「同じ op を打ち直さない。何を・なぜ・どこからを書いてから、① 許可するので 1 回だけ打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。続けて承認の画面が出ると、慣れで許可しやすくなるため。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く |
+
+- コマンドの読み方は ssh-agent-notice.sh と同じ（引用符・heredoc の本文・コメントの中の `op.exe` では止めない。包むコマンドを外し、
+  `bash -c` などに文字列で渡したものは読み直す）。script の中・関数・変数に入れた `op.exe` は見えない
+- 拒否・時間切れは op の stderr の文言ではなく、`op` の記録（`end` の `result`）で見る（`op` は op の stderr を変えない）
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure` に
+  1 件ずつ（`Bash`）足す
 
 ### statusLine
 
