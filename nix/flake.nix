@@ -309,7 +309,9 @@
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
           setup-system-units-test = scriptTest "setup-system-units" ./scripts;
-          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)
+          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)。
+          # --initial が差し込む初期用のホスト initial の塊 (fixtures/local-flake-initial/initial.nix) も同じく渡す
+          # (評価は local-flake-initial-state)
           setup-local-flake-test =
             pkgs.runCommand "setup-local-flake-test"
               {
@@ -319,7 +321,8 @@
                 ];
               }
               ''
-                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix}
+                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix} \
+                  ${./tests/fixtures/local-flake-initial/initial.nix}
                 touch $out
               '';
           # script と一緒に読む cloud の冒頭・skip の一覧 (scripts/claude-cloud/ を丸ごと) と、本物の共通の CLAUDE.md・
