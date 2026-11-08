@@ -34,7 +34,9 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 ```
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ (dotfiles-private に登録したファイルか、
-  `~/dotfiles/flake.nix` に足したホストで書く。公開の登録簿の型には入らない)
+  `~/dotfiles/flake.nix` に足したホストで書く。公開の登録簿の型には入らない)。SSH 鍵も gh のログインもまだの新しい
+  WSL の PC は、`setup-local-flake.sh --initial` が書く初期用のホスト `initial` が有効にするので、1 回目の setup から配って
+  Windows のアプリも入れる ([`nix/README.md`「新しい WSL の PC」](../nix/README.md#新しい-wsl-の-pc))
 - 配り先の `/mnt/c/Users/<名前>` は `dotfiles.wsl.windowsUserName` で決まる
 - 配るのは setup を流した checkout の作業ツリー。commit していない変更も配られる
 - 置いたファイルをアプリが読み直すとは限らない。書き換えたときは manifest の `hint` が出る
@@ -137,6 +139,18 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
   「消してよい」と出す)。このファイルは manifest に無いので Windows へは配らない
 - 猶予がたった新しい版がある間は、別の理由で ps1 や script を直す PR も赤くなる (merge は止まらない)。
   どれか 1 つを変えた PR でも、3 つの job が走る
+
+## PowerShell のテスト
+
+`win/*/*.Tests.ps1` (`Install-OpenSSH.Tests.ps1`・`Install-Herdr.Tests.ps1` など) は、`*.ps1` の副作用の無い関数を確かめる。
+Linux の pwsh で流すので Windows には触らない。CI の `lint` ([`.github/workflows/nix.yml`](../.github/workflows/nix.yml)) が、
+flake が固定している nixpkgs の pwsh で全部を流す (`Start-PortForward.Tests.ps1` は PATH の ssh を引くので、nixpkgs の
+openssh も渡す)。手元で同じことをするには、repo の root で:
+
+```sh
+nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh --command bash -c '
+  rc=0; for t in win/*/*.Tests.ps1; do pwsh -NoProfile -NonInteractive -File "$t" || rc=1; done; exit "$rc"'
+```
 
 ## Orca の keybindings.json
 
@@ -381,9 +395,10 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-OpenSSH -Check` (PowerShell) | 差を出すだけ。管理者は要らない。揃っていれば終了コード 0、差があれば 1 |
+| `Install-OpenSSH -Check` (PowerShell) | 差を出すだけ。管理者は要らない。揃っていれば終了コード 0、入っていなければ 3、ほかの差があれば 1 |
+| `Install-OpenSSH -IfMissing` (PowerShell) | 入っていなければ固定した版を入れる (UAC が 1 回出る)。ssh-agent を止めて無効にし、pin も足す。入っていれば `-Check` と同じ。入れたあとは、1Password の鍵が見えなくても成功にする (新しい PC ではまだ 1Password を入れていない) |
 | `Install-OpenSSH` (PowerShell) | 揃える。直すことがあるときだけ UAC が 1 回出る |
-| `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る。`-Check` を流し、差があれば ⚠ で囲んで知らせる (揃えはしない) |
+| `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る (order 96)。`-Check` を流し、入っていなければ `-IfMissing` で入れ (UAC が出る。待つのは 600 秒まで)、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
 | `nix/scripts/check-winget-version.sh openssh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
 
@@ -398,8 +413,12 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 3. `winget pin add` で `winget upgrade --all` から外す (名指しの `winget upgrade --id …` は通る)
 4. 読み直して、版・ssh-agent・pin と、`ssh-add -l` で 1Password の鍵が見えるかを確かめる
 
-- 入れ替えるときに `ssh.exe` などが動いていると、閉じるよう出して止まる (`-Force` で進む)。
-  使用中のファイルは再起動まで置き換わらないことがある
+- 入れ替える (上げる・下げる) ときに `ssh.exe` などが動いていると、閉じるよう出して止まる (`-Force` で進む)。
+  使用中のファイルは再起動まで置き換わらないことがある。入っていない PC に入れるときは、置き換えるファイルが無いので見ない
+  (Windows の機能の OpenSSH (`System32\OpenSSH`) の `ssh.exe` が動いていても入れられる)
+- 新しい PC では、`setup --new-machine` (96) が入れるところまでする。1Password の SSH agent はまだ無いので、鍵は
+  1Password を入れて SSH agent を有効にしてから `Install-OpenSSH -Check` で確かめる (Windows の ssh-agent サービスは、
+  入れたときに止めて無効にしてある)。流れは [`nix/README.md`「新しい WSL の PC」](../nix/README.md#新しい-wsl-の-pc)
 - 終わったら WSL で `ssh.exe -V` と `ssh-add -l` を確かめる。鍵が見えなければ、1Password をトレイから
   終了して起動し直す
 - 版を変える・新しい版を見送るときは、次の「OpenSSH の新しい版が出たとき」の手順で
@@ -460,6 +479,8 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/openssh/Install-OpenSSH.Tests.ps1
   ```
 
+- `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
+  `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる
 
 ## ssh の設定

@@ -113,6 +113,9 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 `~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**（`tmp` など。dotfiles-private を読めない PC の
 値を書く）を書く場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、入口を 1 つに揃えるために常に置く。
 
+SSH 鍵 (1Password) も gh のログインもまだの新しい WSL の PC は、`--initial` を付けて初期用のホスト `initial` も書く
+（Windows のユーザー名は自動で引く。[後述](#新しい-wsl-の-pc)）。
+
 ## Nix のインストール
 
 ```sh
@@ -662,6 +665,7 @@ setup は失敗した手順で止まるので、7.5 を 8 より前に置いて�
 | この PC を dotfiles-private に登録する（Claude Code で `pjp-dotfiles-register-host` skill） | dotfiles-private を読める PC。登録の前の 1 回は 3 で当てる（[新しいマシン](#新規マシンの手順)） |
 | `~/dotfiles/flake.nix` に `tmp` を足す（[後述](#登録簿に載せずにマシンを足す)） | dotfiles-private を読めない PC。足したホストが既定の対象ホストになる |
 | `--host <型>` を付ける（型は登録簿の `<user>@<system>`。`sandbox` は出さない） | 登録の前の 1 回・試しに当てるとき。型には WSL・1Password の署名・Dev Tracker などの PC の値が無いので、それらを使う PC で当て続けると外れる |
+| `setup-local-flake.sh --initial` で初期用のホスト `initial` を書く（[後述](#新しい-wsl-の-pc)） | SSH 鍵も gh のログインもまだの、新しい WSL の PC。1 回目から Windows のアプリまで入る。登録したら外す |
 
 clone にこの PC のファイルがあるのにローカル flake が読んでいない（入力が無い・本体の stub を指す）ときは、先にそれと
 読ませ方（`local-flake-migrate.sh prepare` で今の雛形へ移す。ローカル flake がまだ無ければ `--steps local-flake`）を出す。
@@ -864,7 +868,8 @@ evaluation warning として 1 度出るもの。`dotfiles.claude.notion.profile
 
 | PC | 流れ |
 | --- | --- |
-| dotfiles-private を読める | 1. `./nix/scripts/setup.sh --new-machine --host <型>` で 1 回当てる（Nix と gh が入る）→ 2. `gh auth login` のあと `~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-dotfiles-private.sh` で dotfiles-private を clone する（1 で取れていれば要らない）→ 3. Claude Code で `pjp-dotfiles-register-host` skill（dotfiles-private に登録する PR。入れ直した PC のように登録済みなら飛ばす）→ 4. merge し、`~/dotfiles/setup --steps private-fetch` で手元の clone を新しくする（登録したファイルが clone に来る）→ 5. ローカル flake が clone の `nix/` を読む形にする（下の「指し直し」）→ 6. `~/dotfiles/setup --which-host` が `<user>@<hostname><TAB>private` を出すのを確かめ、`~/dotfiles/setup --update`（`--host` なし。登録したホストが選ばれる） |
+| 新しい WSL の PC（SSH 鍵も gh のログインもまだ） | [下の「新しい WSL の PC」](#新しい-wsl-の-pc)。`setup-local-flake.sh --initial` で初期用のホスト `initial` を書き、1 回目から Windows のアプリまで入れる → 鍵と gh のあとで dotfiles-private に登録し、`setup-local-flake.sh --force` で `initial` を外す |
+| dotfiles-private を読める（ほか） | 1. `./nix/scripts/setup.sh --new-machine --host <型>` で 1 回当てる（Nix と gh が入る）→ 2. `gh auth login` のあと `~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-dotfiles-private.sh` で dotfiles-private を clone する（1 で取れていれば要らない）→ 3. Claude Code で `pjp-dotfiles-register-host` skill（dotfiles-private に登録する PR。入れ直した PC のように登録済みなら飛ばす）→ 4. merge し、`~/dotfiles/setup --steps private-fetch` で手元の clone を新しくする（登録したファイルが clone に来る）→ 5. ローカル flake が clone の `nix/` を読む形にする（下の「指し直し」）→ 6. `~/dotfiles/setup --which-host` が `<user>@<hostname><TAB>private` を出すのを確かめ、`~/dotfiles/setup --update`（`--host` なし。登録したホストが選ばれる） |
 | dotfiles-private を読めない | 1. `./nix/scripts/setup.sh --steps local-flake` でローカル flake を置く → 2. `~/dotfiles/flake.nix` に `tmp` を足す（[後述](#登録簿に載せずにマシンを足す)。雛形のコメントの例を 1 段外して直す）→ 3. `~/dotfiles/setup --new-machine`（`tmp` が選ばれる） |
 
 **指し直し**（ローカル flake の dotfiles-private の入力を、本体の空の stub から clone の `nix/` へ）: 1 回目に置いたローカル flake は、
@@ -873,6 +878,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | ローカル flake | 指し直し方 |
 | --- | --- |
 | 値を書き足していない雛形のまま（`tmp` もほかの行も足していない） | `~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh --force` で作り直す（今の雛形で、clone の `nix/` を読む。退避は取らない） |
+| 初期用のホスト `initial` だけを足した雛形（`--initial` で書いたまま） | 同じく `setup-local-flake.sh --force` で作り直す（`initial` も外れる。[下](#新しい-wsl-の-pc)） |
 | 値を書き足したあと | `local-flake-migrate.sh` で値を引き継いで移す（[後述](#雛形が新しくなったら)。Claude Code なら `pjp-dotfiles-local-flake-migrate` skill。退避を取る） |
 
 | # | やること | `--steps` の id | 備考 |
@@ -912,6 +918,48 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
 | 7.5 | WSL の eth0 の MTU を上限まで下げ続ける system の unit を入れる | `wsl-mtu-guard` | `wsl.mtuGuard.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)） |
 | 8 | WSL の `.exe` の起動を常時記録する system の unit を入れる | `exe-exec-trace` | `wsl.exeExecTrace.enable = true` のマシンだけ入れる（ほかのマシンでは何もしない）。中で `sudo` を呼ぶ（[後述](#wsl-の-exe-の起動を常時記録する)） |
+
+#### 新しい WSL の PC
+
+Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh のログインも無い。そのうちに Windows のアプリ
+(PowerToys・Google 日本語入力・herdr・OpenSSH) まで入れられるよう、ローカル flake に初期用のホスト `initial` を書いて当てる。
+`initial` は dotfiles-private に登録するまでの踏み台で、登録したら外す (登録しない PC は [`tmp`](#登録簿に載せずにマシンを足す) を使う。
+[ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
+
+前提: Windows に PowerShell 7 (`winget install --id Microsoft.PowerShell --exact --source winget`) と WSL を入れてある。
+
+```sh
+# 1. SSH 鍵も gh のログインも無いうちに
+mkdir -p ~/ghq/github.com/pollenjp
+git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dotfiles
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh --initial   # Windows のユーザー名は自動で引く
+~/dotfiles/setup --new-machine     # Nix → switch (initial) → win/ を配り、Windows のアプリを固定した版で入れる
+
+# 2. 手で: 1Password を入れて SSH agent を有効にし、gh auth login
+
+# 3. 登録して、initial を外す
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-dotfiles-private.sh   # gh の資格情報で clone する
+#    Claude Code で pjp-dotfiles-register-host (元にするホストは initial) → PR を merge
+~/dotfiles/setup --steps private-fetch
+~/ghq/github.com/pollenjp/dotfiles/nix/scripts/setup-local-flake.sh --force     # initial を外し、clone の nix/ を読む雛形にする
+~/dotfiles/setup --which-host        # <user>@<hostname><TAB>private
+~/dotfiles/setup --update
+```
+
+- `initial` に書くのは `username`・`system`・`wsl.enable`・`wsl.windowsUserName`・`wsl.windowsFiles.enable` だけ。1Password
+  (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
+- Windows のユーザー名は `private-host.sh windows-user` (`$env:USERNAME`) で引き、`/mnt/c/Users/<名前>` があるかを確かめる。
+  ユーザーのフォルダの名前を変えた PC では、止まって候補を出すので、`--windows-user <フォルダの名前>` で渡す
+- 既に `~/dotfiles/flake.nix` があるとき: `initial` があれば触らない。今の雛形のまま (手を入れていない) なら差し込む。
+  手を入れてあれば書かずに止まり、手で足す塊を出す (`--force --initial` で作り直すと、手で足した値は消える)
+- 雛形の本文は変えずに、描いたあとで `tmp` の例の後ろに `initial` の塊を差し込む。雛形の版の印は変わらない
+- `setup --new-machine` の途中で UAC の確認が出る (Google 日本語入力と OpenSSH で 1 回ずつ。herdr の依存の VCRedist が無い PC
+  ではもう 1 回)。最後の「残りの手作業」に出た手順 (PowerToys の設定画面を開く・日本語入力を一度使う・Windows Terminal を
+  一度起動する) のあと、`~/dotfiles/setup --update` を流し直す
+- 対象ホストが `initial` の間は、setup が残りの手作業に次の段 (上の 2・3) を出す。clone にこの PC のファイルが来たのに
+  `initial` を選んでいれば、外し方 (`--force`) を出す (ローカル flake のホストは、登録したホストより先に選ばれる)
+- 初回の setup では、private な repo (claude-skills・dotfiles-private・cc-pages) は取れずに警告が出る (鍵も gh のログインも
+  無いため。止まらない)。`gh auth login` のあとの `--update` で取れる
 
 #### 1. 初回のブートストラップ (手順 3)
 
@@ -1147,6 +1195,9 @@ dotfiles-private を読めない PC（会社の PC など）や一時的な環�
 ホストを足す（git 管理外）。[置き場所](#置き場所)で用意したものがそのまま使える。dotfiles-private を読める PC は、そちらに
 登録する（[後述](#dotfiles-private-に登録したホスト)）。**PC の値は、dotfiles-private の登録か、ここに足すホストの 1 か所にだけ書く**
 （[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
+
+`setup-local-flake.sh --initial` が書く初期用のホスト `initial` も、ここに足すホストの 1 つ。新しい WSL の PC を登録するまでの
+踏み台で、値は WSL と windowsFiles だけ（[前述](#新しい-wsl-の-pc)）。登録しない PC は、値の全部を `tmp` に書く。
 
 ```nix
 outputs =
@@ -4610,7 +4661,7 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 | `check` | flake check (x86_64-linux) | ubuntu-latest | push / PR | 全 system の評価 → x86_64-linux のビルド（home と、`checks` に載せたテスト。[後述](#テスト)）→ sandbox への activate と冪等性 → `warnings` が空か（nixpkgs の例外の消し時の警告は落とさず annotation。[前述](#猶予の日数と例外-release-agenix)） |
 | `check` | flake check (aarch64-darwin) | macos-latest | push / PR | aarch64-darwin のビルド |
 | `lock-age` | flake.lock の遅延ポリシー | ubuntu-latest | push / PR | 本体と skill（`pjp-d3js` / `pjp-drawio` / `pjp-plantuml`）の `flake.lock` の pin が下限日数を満たすか（`flake-lock-age.sh check`。日数と例外は `release-age.nix`。[前述](#依存-flakelock-の更新)） |
-| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → `win/windows-terminal/managed.json` と `win/international/managed.json` の検証 → `win/powertoys/fancyzones/` の検証 (`managed.json` と `custom-layouts.json`) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
+| `lint` | lint | ubuntu-latest | push / PR | `nixfmt --check` / `shfmt -d` / `shellcheck` → テストの先頭に「## 確かめること」があるか（`check-test-headers.sh`。[後述](#テスト)）→ テストの判定で `grep -q` をパイプの先に置いていないか（`check-test-grep-q.sh`。[後述](#テスト)）→ Claude Code の skill・agent・command の frontmatter（`check-claude-frontmatter.sh`。[前述](#frontmatter-を確かめる)）→ `win/manifest.toml` の検証 → `win/google-japanese-input/` のテキストの検証 (`config.txtpb` と `keymap.tsv`。辞書は private repo にあり、ランナーに無い) → `win/windows-terminal/managed.json` と `win/international/managed.json` の検証 → `win/powertoys/fancyzones/` の検証 (`managed.json` と `custom-layouts.json`) → win/ の PowerShell のテスト (`win/*/*.Tests.ps1`。nixpkgs の pwsh と openssh で流す。[`win/README.md`](../win/README.md#powershell-のテスト)) → herdr のキーバインドと `[ui]` が WSL と Windows で同じか |
 | `closure-scan` | 閉包の脆弱性スキャン | ubuntu-latest | push / PR / 毎朝 | 閉包を SBOM にして OSV / GHSA / NVD と照合し、whitelist に無い findings があれば落ちる（`closure-scan.sh scan`。findings の表（`report.txt`）を summary に出す。sbomnix を前の pin から組めるよう履歴を全部取り、どの pin から取ったかも summary に出す。[前述](#閉包のスキャンと-pin先端の差分-遅延の補完)） |
 | `head-diff` | pin と先端の閉包差分 | ubuntu-latest | PR | `nix/flake.lock` が動いた PR だけ、pin と先端で閉包を組んで版の差を summary に出す（`closure-head-diff.sh`）。差があっても落とさない |
 
