@@ -19,7 +19,9 @@
 #     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
 #   - -Check が 3 (入っていない) でこちらの出力なら、UAC の確認が出ると先に出してから -IfMissing で入れる (偽の timeout が
 #     上限を記録し、-Check は 120 秒・-IfMissing は 600 秒)。入ったら 1 行と鍵の確かめ方。時間切れ (124)・失敗なら ⚠ で
-#     囲んで入れ直し方を出し、まとめにも残す。こちらの出力でなければ -IfMissing を打たず、手で打つコマンドを出す。どれも exit 0
+#     囲んで入れ直し方を出し、まとめにも残す (時間切れなら、UAC の確認が残っていれば先に押すか閉じる (1618) とも出す)。
+#     こちらの出力でなければ -IfMissing を打たず、手で打つコマンドを出す。どれも exit 0
+#   - --help は、入っていなければ入れることを書く (「何も変えない」とは書かない)
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -389,9 +391,10 @@ fi
 # 18. 入れている間に 600 秒たった (timeout の 124): ⚠ で囲んで入れ直し方を出し、まとめにも残す。exit 0
 h=$(new_home t18 "${state_on}" 1)
 DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '600 秒' && seen "${h}" -F 'Install-OpenSSH -IfMissing' \
-  && [[ $(warn_lines "${h}") -ge 2 ]] && grep -qF 'OpenSSH を入れ終わりませんでした' "${h}/warnings"; then
-  ok "入れている間に 600 秒たったら、⚠ で囲んで入れ直し方を出し、まとめにも残す"
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '600 秒待っても終わらない。UAC の確認が出たままかもしれません' \
+  && seen "${h}" -F '1618' && seen "${h}" -F 'Install-OpenSSH -IfMissing' \
+  && [[ $(warn_lines "${h}") -ge 2 ]] && grep -qF 'Windows に OpenSSH を入れられませんでした (600 秒待っても終わらない' "${h}/warnings"; then
+  ok "入れている間に 600 秒たったら、⚠ で囲んで UAC の確認の片付け方 (1618) と入れ直し方を出し、まとめにも残す"
 else
   ng "入れる (時間切れ)" "rc=$(rc "${h}") $(outerr "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
@@ -414,6 +417,15 @@ if [[ $(rc "${h}") == 0 && $(grep -c . "${h}/pwsh-calls") == 1 ]] && ! called "$
   ok "-Check が 3 でもこちらの出力が無ければ、-IfMissing を打たずに手で打つコマンドを出す"
 else
   ng "3 でもこちらの出力が無い" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
+fi
+
+# 21. --help: 入っていなければ入れることを書く (「何も変えない」とは書かない)
+h=$(new_home t21 "${state_on}" 1)
+run "${h}" 0 --help
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '入っていなければ入れる' && ! seen "${h}" -F '何も変えない'; then
+  ok "--help は、入っていなければ入れることを書く"
+else
+  ng "--help" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

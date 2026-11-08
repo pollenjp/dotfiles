@@ -149,9 +149,17 @@ function Get-OpenSshCheckMessage {
     param($State)
     switch (Get-OpenSshExitCode -State $State) {
         0 { '揃っている' }
-        3 { '⚠️ OpenSSH が入っていない → Install-OpenSSH で入れる (UAC が 1 回出る) ⚠️' }
+        3 { '⚠️ OpenSSH が入っていない → Install-OpenSSH -IfMissing で入れる (UAC が 1 回出る) ⚠️' }
         default { '⚠️ 固定した版と揃っていない → Install-OpenSSH で揃える (差があれば UAC が 1 回出る) ⚠️' }
     }
+}
+
+# -IfMissing で入れたあとの締めの 1 行 ($Code は Get-OpenSshExitCode)。入れ直しも -IfMissing で打たせる
+# (付けないで打つと、入れたあと 1Password の鍵が見えないのを失敗と数える。新しい PC ではまだ 1Password が無い)
+function Get-OpenSshIfMissingMessage {
+    param([int]$Code)
+    if ($Code -eq 0) { return '入れた' }
+    '入れられなかった。上の出力を確かめ、Install-OpenSSH -IfMissing を打ち直す (UAC で「いいえ」を押したなら、打ち直して「はい」を押す)'
 }
 
 # ---------------------------------------------------------------------------
@@ -364,11 +372,9 @@ function Invoke-InstallOpenSsh {
     }
     # -IfMissing (新しい PC) の成否は版・ssh-agent・pin で決める。1Password をまだ入れていないので鍵は数えない
     if ($IfMissing) {
-        if ((Get-OpenSshExitCode -State $after) -eq 0) {
-            Write-Host '入れた'
-            return 0
-        }
-        Write-Host '入れられなかった。上の出力を確かめ、Install-OpenSSH を打ち直す (UAC で「いいえ」を押したなら、打ち直して「はい」を押す)'
+        $code = Get-OpenSshExitCode -State $after
+        Write-Host (Get-OpenSshIfMissingMessage -Code $code)
+        if ($code -eq 0) { return 0 }
         return 1
     }
     if (($after.Plan -eq 'none') -and $after.AgentDisabled -and $after.Pinned -and ($null -ne $keys)) {

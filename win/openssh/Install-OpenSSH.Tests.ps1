@@ -161,9 +161,16 @@ Test-Case '下げるときは見る' 'True' { Test-OpenSshNeedsIdle -Plan 'downg
 Test-Case '揃っていれば見ない' 'False' { Test-OpenSshNeedsIdle -Plan 'none' }
 
 # Get-OpenSshCheckMessage: -Check の締めの 1 行
-Test-Case '-Check の締め: 入っていなければ、入れるコマンドと UAC を出し、⚠️ で始まる' 'True True True' {
+Test-Case '-Check の締め: 入っていなければ、-IfMissing で入れるコマンドと UAC を出し、⚠️ で始まる' 'True True True' {
     $m = Get-OpenSshCheckMessage -State $missing
-    "$($m.StartsWith('⚠️')) $($m.Contains('入っていない → Install-OpenSSH で入れる')) $($m.Contains('UAC'))"
+    "$($m.StartsWith('⚠️')) $($m.Contains('入っていない → Install-OpenSSH -IfMissing で入れる')) $($m.Contains('UAC'))"
+}
+
+# Get-OpenSshIfMissingMessage: -IfMissing で入れたあとの締めの 1 行。入れ直しも -IfMissing で打たせる
+# (付けないで打つと、入れたあと 1Password の鍵が見えないのを失敗と数える)
+Test-Case '-IfMissing の締め: 入れたら「入れた」' '入れた' { Get-OpenSshIfMissingMessage -Code 0 }
+Test-Case '-IfMissing の締め: 入れられなければ -IfMissing で打ち直させる' 'True' {
+    (Get-OpenSshIfMissingMessage -Code 1).Contains('Install-OpenSSH -IfMissing を打ち直す')
 }
 Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃っている' { Get-OpenSshCheckMessage -State $inSync }
 Test-Case '-Check の締め: ずれていれば「揃っていない」' 'True' { (Get-OpenSshCheckMessage -State $drift).Contains('固定した版と揃っていない') }

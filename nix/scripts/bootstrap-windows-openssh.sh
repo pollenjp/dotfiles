@@ -42,7 +42,7 @@ usage() {
 Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) が、dotfiles で固定した版に揃っているかを確かめる。
 
 使い方:
-  bootstrap-windows-openssh.sh            揃っているかを確かめる (何も変えない。差があれば ⚠ で知らせる)
+  bootstrap-windows-openssh.sh            確かめる (入っていなければ入れる。UAC が 1 回出る。差があれば ⚠ で知らせ、揃えはしない)
   bootstrap-windows-openssh.sh --apply    揃える (差があれば Windows に UAC が 1 回出る)
 EOS
 }
@@ -208,15 +208,20 @@ if ((rc == 3)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
     echo "  1Password の鍵は、1Password の SSH agent を有効にしてから PowerShell の Install-OpenSSH -Check で確かめる"
     exit 0
   fi
-  if ((rc == 124)); then
-    title="Windows の OpenSSH を入れ終わりませんでした (UAC の確認を押さないまま 600 秒たった)"
-  else
-    title="Windows の OpenSSH を入れられませんでした (終了コード ${rc})"
-  fi
-  warn_box "${title}" "${out}" \
-    "入れ直すには次のどちらかを打つ (Windows に UAC が 1 回出ます):" \
-    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh" \
+  retry=(
+    "入れ直すには次のどちらかを打つ (Windows に UAC が 1 回出ます):"
+    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh"
     "  PowerShell: Install-OpenSSH -IfMissing"
+  )
+  if ((rc == 124)); then
+    # 時間切れは、UAC の確認を押していないとは限らない (ダウンロードが遅いだけのこともある)。UAC の確認が残ったまま
+    # 打ち直すと、別のインストールが進行中 (1618) で落ちる (bootstrap-windows-google-ime-install.sh と同じ)
+    warn_box "Windows に OpenSSH を入れられませんでした (600 秒待っても終わらない。UAC の確認が出たままかもしれません)" "${out}" \
+      "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから打ち直してください (残ったまま打ち直すと、別のインストールが進行中 (1618) で落ちます)" \
+      "${retry[@]}"
+    exit 0
+  fi
+  warn_box "Windows に OpenSSH を入れられませんでした (終了コード ${rc})" "${out}" "${retry[@]}"
   exit 0
 fi
 if ((rc == 1)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
