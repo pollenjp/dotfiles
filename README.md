@@ -23,6 +23,9 @@ ssh の接続先は private な [pollenjp/dotfiles-private](https://github.com/p
 `pjp-dotfiles-register-host` skill）。public の登録簿（`nix/hosts/default.nix`）には型（`<user>@<system>`）と検証用の `sandbox` だけを
 置き、dotfiles-private を読めない PC は `~/dotfiles/flake.nix` に足したホスト（`tmp`）に値を書く。どちらも無ければ `setup` は推測せずに
 止まり、選べる道を出す（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
+SSH 鍵も gh のログインもまだの新しい WSL の PC は、`setup-local-flake.sh --initial` で `~/dotfiles/flake.nix` に初期用のホスト
+（`initial`）を書いて当て、Windows のアプリまで入れてから登録し、登録したら外す（[ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md)・
+[`nix/README.md`](./nix/README.md#新しい-wsl-の-pc)）。
 登録した全 PC に効かせる値（mise の遅延を期間付きで緩める上書きなど）は、dotfiles-private の `nix/shared/*.nix` に置く
 （[`nix/README.md`](./nix/README.md#dotfiles-private-に登録したホスト)）。
 

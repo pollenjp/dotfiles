@@ -2,7 +2,8 @@
 # shellcheck shell=bash
 #
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) が、dotfiles で固定した版に揃っているかを確かめる。
-# 冪等。`setup.sh --update` でも毎回走り、揃っていなければ ⚠ で囲んで知らせる (揃えはしない)。
+# 冪等。`setup.sh --update` でも毎回走り、入っていなければ固定した版を入れ (UAC が出る)、入っていて揃っていなければ
+# ⚠ で囲んで知らせる (揃えはしない)。
 #
 # order: 96
 #
@@ -25,8 +26,11 @@
 # 2. pwsh.exe で Install-OpenSSH.ps1 -Check を流す (管理者は要らない。何も変えない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。
-#    どちらも exit 0 (setup を止めない。揃えるのは人が決める)。⚠ の見出しと揃えるコマンドは、
-#    setup の最後の「警告のまとめ」にも残す (summary_warn)
+#    3 (入っていない) なら Install-OpenSSH.ps1 -IfMissing で入れる (新しい PC。その場にいて UAC を押せるはず。
+#    入れるときに ssh-agent サービスも止めて無効にし、winget pin を足す)。UAC の確認が出ることを先に出す。
+#    入れたら 1 行と、1Password の鍵の確かめ方を出す。時間切れ・失敗なら ⚠ で囲んで入れ直し方を出す。
+#    どれも exit 0 (setup を止めない。ずれているときに揃えるのは人が決める)。待つ上限は -Check が 120 秒、
+#    -IfMissing が 600 秒。⚠ の見出しと直し方は、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。差があれば Windows のデスクトップに
 # UAC が 1 回出る。setup から --apply では流さない (UAC を押すまで止まり、動いている ssh も巻き込むため)。
@@ -38,7 +42,7 @@ usage() {
 Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) が、dotfiles で固定した版に揃っているかを確かめる。
 
 使い方:
-  bootstrap-windows-openssh.sh            揃っているかを確かめる (何も変えない。差があれば ⚠ で知らせる)
+  bootstrap-windows-openssh.sh            確かめる (入っていなければ入れる。UAC が 1 回出る。差があれば ⚠ で知らせ、揃えはしない)
   bootstrap-windows-openssh.sh --apply    揃える (差があれば Windows に UAC が 1 回出る)
 EOS
 }
@@ -132,18 +136,44 @@ fi
 # 呼ぶ前に $LASTEXITCODE を 2 にしておく。スクリプトが exit まで届かずに終わる (構文の誤りなど) と、
 # exit $LASTEXITCODE が中で打った外部コマンドの値 (winget の 0 など) を返し、成功に見えてしまうため。
 quoted=${win_script//\'/\'\'}
-mode=" -Check"
-if ((apply)); then
-  mode=""
-fi
-# shellcheck disable=SC2016
-command="[Console]::OutputEncoding = [Text.Encoding]::UTF8; \$global:LASTEXITCODE = 2; & '${quoted}'${mode}; exit \$LASTEXITCODE"
+# $1: Install-OpenSSH.ps1 に付ける引数 (" -Check"・" -IfMissing"・"")
+pwsh_command() {
+  # shellcheck disable=SC2016
+  printf '%s' "[Console]::OutputEncoding = [Text.Encoding]::UTF8; \$global:LASTEXITCODE = 2; & '${quoted}'$1; exit \$LASTEXITCODE"
+}
+
+# CRLF と、PowerShell が付けうる色のエスケープを落とす (枠の色はこちらで付ける)
+clean() {
+  local esc=$'\e'
+  printf '%s\n' "$1" | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g"
+}
+
+# ⚠ で囲んで出し、見出しと直し方を setup の最後のまとめにも残す。$1: 見出し、$2: 中身 (字下げして出す。空なら出さない)、
+# 残り: 直し方 (1 つが 1 行)
+warn_box() {
+  local title=$1 body=$2 line rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
+  shift 2
+  {
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+    printf '%s⚠️  %s%s\n' "${c_warn}" "${title}" "${c_reset}"
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+    if [[ -n ${body} ]]; then
+      printf '%s\n' "${body}" | sed 's/^/    /'
+    fi
+    for line in "$@"; do
+      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
+    done
+    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
+  } >&2
+  # setup の最後のまとめには、見出しと直し方だけを残す (状態の表は、その場の枠に出ている)
+  summary_warn "${title}" "$@"
+}
 
 if ((apply)); then
   # 手で流す前提なので、進み具合をそのまま見せる (UAC を押すまで待つので timeout は付けない)
   echo "+ pwsh.exe -NoProfile -ExecutionPolicy Bypass -Command \"& '${win_script}'\""
   rc=0
-  pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${command}" </dev/null | tr -d '\r' || rc=$?
+  pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command "")" </dev/null | tr -d '\r' || rc=$?
   if ((rc == 0)); then
     echo "揃いました。"
     exit 0
@@ -155,10 +185,8 @@ fi
 # WSL の interop を通る。落ちていると Exec format error などで失敗する。
 # winget show (ネットワーク) を挟むので、少し長めに待つ。
 rc=0
-out=$(timeout 120 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "${command}" </dev/null 2>&1) || rc=$?
-# CRLF と、PowerShell が付けうる色のエスケープを落とす (枠の色はこちらで付ける)
-esc=$'\e'
-out=$(printf '%s\n' "${out}" | tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g")
+out=$(timeout 120 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -Check")" </dev/null 2>&1) || rc=$?
+out=$(clean "${out}")
 
 # 差があるときの出力には、状態の表の見出し (パッケージ名) が必ず入る。
 # 終了コードが 1 でも見出しが無ければ、スクリプトが動いていない (差とは扱わない)。
@@ -168,27 +196,41 @@ if ((rc == 0)); then
   grep '^※' <<<"${out}" | sed 's/^/  /' || true
   exit 0
 fi
-if ((rc == 1)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
-  rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
-  title="Windows の OpenSSH が、dotfiles で固定した版と揃っていません"
-  fix=(
-    "揃えるには次のどちらかを打つ (差があれば Windows に UAC が 1 回出ます):"
-    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh --apply"
-    "  PowerShell: Install-OpenSSH"
+# 入っていない (新しい PC): -IfMissing で入れる。UAC の確認が出るので、先にそう出す
+if ((rc == 3)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
+  echo "Windows に OpenSSH (Microsoft.OpenSSH.Preview) が入っていないので、winget で固定した版を入れます (Install-OpenSSH.ps1 -IfMissing)。"
+  echo "Windows のデスクトップに UAC の確認が出ます。出たら「はい」を押してください (待つのは 600 秒まで)。"
+  rc=0
+  out=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
+  out=$(clean "${out}")
+  if ((rc == 0)); then
+    echo "Windows の OpenSSH を入れました (固定した版。ssh-agent サービスは停止・無効、winget pin あり)。"
+    echo "  1Password の鍵は、1Password の SSH agent を有効にしてから PowerShell の Install-OpenSSH -Check で確かめる"
+    exit 0
+  fi
+  retry=(
+    "入れ直すには次のどちらかを打つ (Windows に UAC が 1 回出ます):"
+    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh"
+    "  PowerShell: Install-OpenSSH -IfMissing"
   )
-  {
-    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-    printf '%s⚠️  %s%s\n' "${c_warn}" "${title}" "${c_reset}"
-    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-    # PowerShell の締めの 1 行 (⚠️ … 揃っていない → Install-OpenSSH …) は、下の揃えるコマンドと重なるので落とす
-    printf '%s\n' "${out}" | grep -v '^⚠️ 固定した版と揃っていない' | sed 's/^/    /'
-    for line in "${fix[@]}"; do
-      printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
-    done
-    printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-  } >&2
-  # setup の最後のまとめには、見出しと揃えるコマンドだけを残す (状態の表は、その場の枠に出ている)
-  summary_warn "${title}" "${fix[@]}"
+  if ((rc == 124)); then
+    # 時間切れは、UAC の確認を押していないとは限らない (ダウンロードが遅いだけのこともある)。UAC の確認が残ったまま
+    # 打ち直すと、別のインストールが進行中 (1618) で落ちる (bootstrap-windows-google-ime-install.sh と同じ)
+    warn_box "Windows に OpenSSH を入れられませんでした (600 秒待っても終わらない。UAC の確認が出たままかもしれません)" "${out}" \
+      "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから打ち直してください (残ったまま打ち直すと、別のインストールが進行中 (1618) で落ちます)" \
+      "${retry[@]}"
+    exit 0
+  fi
+  warn_box "Windows に OpenSSH を入れられませんでした (終了コード ${rc})" "${out}" "${retry[@]}"
+  exit 0
+fi
+if ((rc == 1)) && grep -qF 'Microsoft.OpenSSH.Preview' <<<"${out}"; then
+  # PowerShell の締めの 1 行 (⚠️ … 揃っていない → Install-OpenSSH …) は、下の揃えるコマンドと重なるので落とす
+  warn_box "Windows の OpenSSH が、dotfiles で固定した版と揃っていません" \
+    "$(printf '%s\n' "${out}" | grep -v '^⚠️ 固定した版と揃っていない')" \
+    "揃えるには次のどちらかを打つ (差があれば Windows に UAC が 1 回出ます):" \
+    "  WSL:        ${script_dir}/bootstrap-windows-openssh.sh --apply" \
+    "  PowerShell: Install-OpenSSH"
   exit 0
 fi
 # pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする

@@ -157,6 +157,11 @@
               };
               onePassword.enable = true;
             }).activationPackage;
+          # setup-local-flake.sh --initial がローカル flake に差し込む初期用のホスト initial (SSH 鍵も gh のログインもまだの、
+          # 新しい WSL の PC) を、差し込む塊と同じ fixture で build する (評価の確かめは local-flake-initial-state)
+          home-wsl-initial-example =
+            (import ./tests/fixtures/local-flake-initial/initial.nix { dotfiles.lib = { inherit mkHome; }; })
+            .initial.activationPackage;
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
@@ -309,7 +314,9 @@
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
           setup-system-units-test = scriptTest "setup-system-units" ./scripts;
-          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)
+          # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)。
+          # --initial が差し込む初期用のホスト initial の塊 (fixtures/local-flake-initial/initial.nix) も同じく渡す
+          # (評価は local-flake-initial-state)
           setup-local-flake-test =
             pkgs.runCommand "setup-local-flake-test"
               {
@@ -319,7 +326,8 @@
                 ];
               }
               ''
-                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix}
+                bash ${./tests/setup-local-flake.test.sh} ${./scripts} ${./tests/fixtures/local-flake-tmp/tmp.nix} \
+                  ${./tests/fixtures/local-flake-initial/initial.nix}
                 touch $out
               '';
           # script と一緒に読む cloud の冒頭・skip の一覧 (scripts/claude-cloud/ を丸ごと) と、本物の共通の CLAUDE.md・
@@ -614,6 +622,7 @@
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
           local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
+          local-flake-initial-state = import ./tests/local-flake-initial.nix { inherit lib pkgs mkHome; };
           hosts-with-state = import ./tests/hosts-with.nix {
             inherit
               lib

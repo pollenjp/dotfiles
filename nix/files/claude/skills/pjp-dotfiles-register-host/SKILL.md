@@ -97,7 +97,9 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - **shared/ (登録した全ホストに足す module)**: 登録すると、ホストのファイルの値に加えてこの値が当たる。確認で書く (手順 4 の
   compare が「shared/ が足す値」として出す)
 - **setup が --host なしで選ぶホスト**: 登録していない PC では「決まらない (setup は止まる)」か、`~/dotfiles/flake.nix` に足した `tmp`
-- **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)。新しい PC で 1 回目を型で当てたなら、その型
+  か、`setup-local-flake.sh --initial` が書いた初期用のホスト `initial` (新しい WSL の PC)
+- **一致するホスト**: 今の世代と outPath が一致したホスト。これを元にする (`--base`)。新しい PC で 1 回目を型で当てたなら、その型。
+  新しい WSL の PC を `--initial` で当てたなら `initial`
 - **一致するホストが無い** (本体が最後の switch から進んだ・別の本体で switch した。「lock を写しで張り直して評価した」と
   出ていれば、本体が変わっているので一致しないのは想定どおり): 元にするホストを黙って決めない。
   - その PC について前に決めた値 (チケットの決定・登録の依頼・設計の spec。最初の登録は dotfiles の ADR 026 からリンクした spec) が
@@ -128,7 +130,8 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
    読み方は手順 4 の表
 4. 初めての登録 (dotfiles-private の README に `nix/hosts/` が無い) なら、README に足す行と節の下書きも作る (何を置くか・`/nix/store` に
    入ること・登録はこの skill で)
-5. 型を元にしたとき (新しい PC) は、下の「型を元にする登録」で値を足してから確認に進む
+5. 型を元にしたとき (新しい PC) は、下の「型を元にする登録」で、`initial` を元にしたとき (新しい WSL の PC) は、下の「initial を元に
+   する登録」で値を足してから確認に進む
 6. 「確認の形 (登録)」で出し、答えが来るまで次へ進まない
 
 #### 型を元にする登録 (新しい PC)
@@ -147,6 +150,14 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 ほかの値 (`gitViaGh`・`notion.routes`・`videoOffer.autoStart`・`modules` の `dotfiles.ccPages.port` など) は、ユーザーが望んだときだけ。
 例と説明は dotfiles の雛形 (`setup-local-flake.sh`) の `tmp` の例にある。
+
+#### initial を元にする登録 (新しい WSL の PC)
+
+初期用のホスト `initial` (`setup-local-flake.sh --initial` が書く。dotfiles の `nix/README.md`「新しい WSL の PC」) は、SSH 鍵も gh の
+ログインもまだの段で Windows のアプリを入れるための踏み台で、値は `username`・`system`・`wsl.enable`・`wsl.windowsUserName`・
+`wsl.windowsFiles.enable` だけ。下書きにはこれらが出るので、残りを上の「型を元にする登録」の表から足す (`wsl.exeExecTrace`・
+`wsl.mtuGuard`・`onePassword`・Dev Tracker・Notion の宛先)。この段では 1Password の SSH agent を有効にしてあるはずなので、
+`onePassword.enable = true;` を推奨に挙げる。足した分だけ compare は 1 になる (それで正しい)。
 
 ### 3. dotfiles-private に書く (dotfiles-private の worktree)
 
@@ -193,9 +204,10 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
    違う)」も 0。型を元にして値を足したなら、足した分だけ 1)。元のホストは、登録したファイルの頭のコメント (「元にしたホスト: …」)
    にある。段階 3 で消えたホストなら、「前提」の写しの本体を `--nix-dir` に渡す
 3. ローカル flake が clone の `nix/` を読む形にする (dotfiles-private の入力を stub から clone へ指し直す)。道は 2 つ:
-   - **値を書き足していない雛形** (新しい PC で 1 回目に置いたまま。`tmp` もほかの行も足していない): `<本体>/nix/scripts/setup-local-flake.sh --force`
-     で作り直す (今の雛形で clone の `nix/` を読む。退避は取らないので、`diff` で値が無いことを見せて確認を取ってから。nixos-config の
-     README の入れ直しの手順と同じ)。作り直したら 7 へ
+   - **値を書き足していない雛形** (新しい PC で 1 回目に置いたまま。`tmp` もほかの行も足していない。`--initial` が書いた `initial`
+     だけを足した雛形も): `<本体>/nix/scripts/setup-local-flake.sh --force`
+     で作り直す (今の雛形で clone の `nix/` を読む。`initial` も外れる。退避は取らないので、`diff` で値が無いこと (`initial` なら、その
+     塊だけが違うこと) を見せて確認を取ってから。nixos-config の README の入れ直しの手順と同じ)。作り直したら 7 へ
    - **値を書き足したあと** (前の雛形の `local` に値がある・`tmp` を足した): pjp-dotfiles-local-flake-migrate の手順 (prepare → 衝突 →
      compare)。prepare が dotfiles-private の入力を足す (指し直す)。この時点の compare で、登録簿のホストが全部「同じ」で、この PC の
      ホストが「dotfiles-private のホスト (…この PC のホスト)」と出ることを見る (移すこと自体は値を落としていない。前の雛形から今の雛形へ
@@ -264,6 +276,7 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 一致するホストが無いのに、setup が選ぶホストや型で黙って進める | 前に決めた値と候補を並べてユーザーに確かめる (署名の有無などで値が変わる) |
 | 移したあとも local に値を残す (既定と同じ明示の値も) | 登録したファイルが持つので外す。残すと 2 か所に同じ値が並び、片方だけ直してずれる |
 | 登録したのに `tmp` を残す | `tmp` が登録したホストより先に選ばれる (ローカル flake のホストが先)。外す |
+| 登録したのに `initial` を残す | `tmp` と同じく、登録したホストより先に選ばれる (setup が外し方を出す)。`setup-local-flake.sh --force` で作り直して外す |
 | 型を元にした下書きをそのまま登録する | 型には PC の値が無い (WSL・署名・Dev Tracker など)。要る値を聞いて足す |
 | 段階 3 で消えたホストを、今の本体で draft・compare する | 評価できない (3)。消す前の本体を写して `--nix-dir` に渡す (「前提」) |
 | 値を書き足した flake を `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える (退避も無い)。値があれば local-flake-migrate.sh で移す |

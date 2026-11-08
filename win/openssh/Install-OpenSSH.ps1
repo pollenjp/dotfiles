@@ -19,7 +19,12 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 固定する版。winget show --id Microsoft.OpenSSH.Preview --versions に出る値。版を変えるときはここの既定値を変える。
 
 .PARAMETER Check
-今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1。
+今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、入っていなければ 3、ほかの差があれば 1。
+
+.PARAMETER IfMissing
+入っていなければ固定した版を入れ (UAC が 1 回出る)、ssh-agent を止めて無効にし、winget pin を足す。入っていれば -Check と
+同じ (何も変えない)。新しい PC で setup (bootstrap-windows-openssh.sh) が呼ぶ。入れたあとの成否は版・ssh-agent・pin で決め、
+1Password の鍵が ssh-add -l で見えるかは数えない (新しい PC では 1Password をまだ入れていない)。
 
 .PARAMETER Force
 ssh.exe などが動いていても入れ替える (使用中のファイルは再起動まで置き換わらないことがある)。
@@ -31,6 +36,7 @@ ssh.exe などが動いていても入れ替える (使用中のファイルは�
 param(
     [string]$Version = '10.0.0.0',
     [switch]$Check,
+    [switch]$IfMissing,
     [switch]$Force,
     [string]$LogPath
 )
@@ -120,6 +126,40 @@ function Format-OpenSshState {
     if ($State.Inbox) {
         [pscustomobject]@{ Text = '※ Windows の機能の OpenSSH (System32\OpenSSH) も入っている。PATH では Program Files が先なので使われないが、ssh-agent サービスの名前がぶつかる'; Warn = $false }
     }
+}
+
+# -Check の終了コード。入っていなければ 3、版・ssh-agent・pin が揃っていれば 0、ほかは 1
+# (Install-GoogleJapaneseInput.ps1 の Get-GoogleImeExitCode と同じ形)
+function Get-OpenSshExitCode {
+    param($State)
+    if ($State.Plan -eq 'install') { return 3 }
+    if (($State.Plan -eq 'none') -and $State.AgentDisabled -and $State.Pinned) { return 0 }
+    1
+}
+
+# 動いている ssh.exe などを見てから進むか。置き換えるファイルがあるとき (上げる・下げる) だけ見る。入れるときは
+# 置き換えるファイルが無い (Windows の機能の OpenSSH (System32\OpenSSH) の ssh.exe が動いていても入れられる)
+function Test-OpenSshNeedsIdle {
+    param([string]$Plan)
+    @('upgrade', 'downgrade') -contains $Plan
+}
+
+# -Check の締めの 1 行。揃っていれば「揃っている」、ほかは ⚠️ で囲んで直し方を出す
+function Get-OpenSshCheckMessage {
+    param($State)
+    switch (Get-OpenSshExitCode -State $State) {
+        0 { '揃っている' }
+        3 { '⚠️ OpenSSH が入っていない → Install-OpenSSH -IfMissing で入れる (UAC が 1 回出る) ⚠️' }
+        default { '⚠️ 固定した版と揃っていない → Install-OpenSSH で揃える (差があれば UAC が 1 回出る) ⚠️' }
+    }
+}
+
+# -IfMissing で入れたあとの締めの 1 行 ($Code は Get-OpenSshExitCode)。入れ直しも -IfMissing で打たせる
+# (付けないで打つと、入れたあと 1Password の鍵が見えないのを失敗と数える。新しい PC ではまだ 1Password が無い)
+function Get-OpenSshIfMissingMessage {
+    param([int]$Code)
+    if ($Code -eq 0) { return '入れた' }
+    '入れられなかった。上の出力を確かめ、Install-OpenSSH -IfMissing を打ち直す (UAC で「いいえ」を押したなら、打ち直して「はい」を押す)'
 }
 
 # ---------------------------------------------------------------------------
@@ -255,7 +295,7 @@ function Get-AgentKeyCount {
 }
 
 function Invoke-InstallOpenSsh {
-    param([string]$Version, [switch]$Check, [switch]$Force, [string]$LogPath)
+    param([string]$Version, [switch]$Check, [switch]$IfMissing, [switch]$Force, [string]$LogPath)
     $packageId = 'Microsoft.OpenSSH.Preview'
     $installDir = Join-Path $env:ProgramFiles 'OpenSSH'
     $target = [version]$Version
@@ -278,21 +318,19 @@ function Invoke-InstallOpenSsh {
 
     $state = Get-OpenSshState -PackageId $packageId -InstallDir $installDir -Target $target
     Write-OpenSshState -State $state -Target $target -InstallDir $installDir
-    $inSync = ($state.Plan -eq 'none') -and $state.AgentDisabled -and $state.Pinned
-    if ($Check) {
-        if ($inSync) {
-            Write-Host '揃っている'
-            return 0
-        }
-        Write-Host '⚠️ 固定した版と揃っていない → Install-OpenSSH で揃える (差があれば UAC が 1 回出る) ⚠️' -ForegroundColor Yellow
-        return 1
+    $code = Get-OpenSshExitCode -State $state
+    # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
+    if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
+        $message = Get-OpenSshCheckMessage -State $state
+        if ($code -eq 0) { Write-Host $message } else { Write-Host $message -ForegroundColor Yellow }
+        return $code
     }
-    if ($inSync) {
+    if ($code -eq 0) {
         Write-Host '揃っている。何もしない'
         return 0
     }
 
-    if ($state.Plan -ne 'none') {
+    if (Test-OpenSshNeedsIdle -Plan $state.Plan) {
         # @() で包む。関数が返す空の配列は呼び出し側で $null にほどけ、StrictMode では
         # $null.Count が例外になる (2026-10-06 の本番で、ssh.exe が 0 本のときにここで止まった)
         $busy = @(Get-BusyOpenSshProcess)
@@ -325,10 +363,19 @@ function Invoke-InstallOpenSsh {
     $after = Get-OpenSshState -PackageId $packageId -InstallDir $installDir -Target $target
     Write-OpenSshState -State $after -Target $target -InstallDir $installDir
     $keys = Get-AgentKeyCount -SshAddExe (Join-Path $installDir 'ssh-add.exe')
-    if ($null -eq $keys) {
-        Write-Host '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる'
-    } else {
+    if ($null -ne $keys) {
         Write-Host "  ssh-add -l      : 鍵 $keys 本"
+    } elseif ($IfMissing) {
+        Write-Host '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる'
+    } else {
+        Write-Host '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる'
+    }
+    # -IfMissing (新しい PC) の成否は版・ssh-agent・pin で決める。1Password をまだ入れていないので鍵は数えない
+    if ($IfMissing) {
+        $code = Get-OpenSshExitCode -State $after
+        Write-Host (Get-OpenSshIfMissingMessage -Code $code)
+        if ($code -eq 0) { return 0 }
+        return 1
     }
     if (($after.Plan -eq 'none') -and $after.AgentDisabled -and $after.Pinned -and ($null -ne $keys)) {
         Write-Host '揃った'
@@ -347,7 +394,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        exit (Invoke-InstallOpenSsh -Version $Version -Check:$Check -Force:$Force -LogPath $LogPath)
+        exit (Invoke-InstallOpenSsh -Version $Version -Check:$Check -IfMissing:$IfMissing -Force:$Force -LogPath $LogPath)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

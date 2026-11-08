@@ -252,6 +252,22 @@ jobs:
       - name: win/powertoys/fancyzones/
         run: nix shell --inputs-from ./nix nixpkgs#jq --command ./nix/scripts/bootstrap-windows-fancyzones.sh --check
 
+      # win/ の PowerShell の副作用の無い関数のテスト (win/*/*.Tests.ps1。Install-OpenSSH・Install-Herdr など)。
+      # Linux の pwsh で流すので Windows には触らない。flake からは win/ が見えないので、上と同じく checkout の上で
+      # 流す。pwsh と ssh は flake が固定している nixpkgs から借りる (Start-PortForward のテストは PATH の ssh を引く。
+      # ランナーの ssh に頼らない)。1 本が落ちても残りを流し、最後にまとめて落とす
+      - name: win/ の PowerShell のテスト
+        run: |
+          nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh --command bash -c '
+            set -uo pipefail
+            rc=0
+            for t in win/*/*.Tests.ps1; do
+              echo "== ${t}"
+              pwsh -NoProfile -NonInteractive -File "${t}" || rc=1
+            done
+            exit "${rc}"
+          '
+
       # herdr のキーバインドと [ui] (sidebar の幅と行・toast) を WSL (nix/files/herdr/config.toml) と Windows
       # (win/herdr/config.toml) でそろえる。win/ は flake からは見えないので、上と同じく checkout の上で比べる。
       - name: herdr のキーバインドと [ui] (WSL と Windows)

@@ -39,6 +39,26 @@
 #   flake.lock  nix が生成する。
 #   setup       setup.sh への symlink。更新は `~/dotfiles/setup --update`。
 #
+# ## 初期用のホスト initial (--initial)
+#
+# SSH 鍵 (1Password) も gh のログインもまだ無い新しい WSL の PC で、Windows のアプリまで入れるための踏み台。
+# --initial を付けると、雛形を描いたあとで、tmp の例の終わり (「        # };」の行) の後ろに次の塊を差し込む
+# (雛形の heredoc は変えない。変えると雛形の版の印が変わり、全 PC に移す知らせが出るため。ADR 024)。
+#
+#   initial = dotfiles.lib.mkHome {
+#     username = "<$USER>";  system = "<private-host.sh system>";
+#     wsl = { enable = true; windowsUserName = "<private-host.sh windows-user か --windows-user>"; windowsFiles.enable = true; };
+#   };
+#
+# setup はローカル flake の一番上のホストを既定の対象ホストにするので、initial で当たる。dotfiles-private に登録して merge
+# したら、--force で作り直して外す (initial のほかに手で足した値の無い雛形なので、作り直せば clone の nix/ を読む形になる)。
+#
+#   - flake.nix が無い・--force: 描いて差し込む。initial が既にある: 触らない。今の雛形のまま (local-flake-migrate.sh render と
+#     1 バイトも違わない): 差し込んで書き直す。それ以外 (手を入れた): 書かずに 1 で、手で足す塊を出す
+#   - 書く前に確かめる: Windows のユーザー名が引ける (WSL でなければ private-host.sh が止める)・<Windows のユーザーの
+#     フォルダの親 (DOTFILES_WINDOWS_USERS_DIR。既定 /mnt/c/Users)>/<名前> がある・名前を Nix の文字列にそのまま書ける
+#     (" \ $ と制御文字が無い)。pwsh.exe (PowerShell 7) が無ければ警告する (setup の Windows の手順が pwsh.exe で流すため)
+#
 # ## 雛形が新しくなったら
 #
 # 既にある flake.nix は、雛形が変わっても触らない (--force は作り直すので、手で足したホストと、前の雛形なら
@@ -75,6 +95,8 @@ set -eu -o pipefail
 repo_path_suffix="github.com/pollenjp/dotfiles"
 local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
 force=0
+initial=0
+initial_windows_user=""
 
 usage() {
   cat <<'EOS'
@@ -83,17 +105,30 @@ usage() {
 使い方:
   setup-local-flake.sh           用意する (既にあれば触らない)
   setup-local-flake.sh --force   flake.nix を作り直す
+  setup-local-flake.sh --initial [--windows-user <名前>]
+                                 初期用のホスト initial を書く (SSH 鍵も gh のログインもまだの、新しい WSL の PC)。
+                                 Windows のユーザー名は引く (--windows-user で渡せる)。--force と一緒なら作り直して書く
   setup-local-flake.sh -h        これ
 
 環境変数:
-  DOTFILES_LOCAL_DIR        ローカル flake の場所 (既定: ~/dotfiles)
-  DOTFILES_ALLOW_ANY_PATH   1 なら ghq のパス確認を警告だけにする
+  DOTFILES_LOCAL_DIR          ローカル flake の場所 (既定: ~/dotfiles)
+  DOTFILES_ALLOW_ANY_PATH     1 なら ghq のパス確認を警告だけにする
+  DOTFILES_WINDOWS_USERS_DIR  Windows のユーザーのフォルダの親 (既定: /mnt/c/Users。テスト用)
 EOS
 }
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     --force) force=1 ;;
+    --initial) initial=1 ;;
+    --windows-user)
+      if [[ $# -lt 2 || -z $2 ]]; then
+        echo "--windows-user に Windows のユーザー名を渡してください  (--help)" >&2
+        exit 1
+      fi
+      initial_windows_user=$2
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -127,6 +162,126 @@ summary_warn() {
 die() {
   printf '!! %s\n' "$*" >&2
   exit 1
+}
+
+if [[ -n ${initial_windows_user} && ${initial} == 0 ]]; then
+  die "--windows-user は --initial と一緒に使います。"
+fi
+
+# Nix の文字列 ("…") にそのまま書けるか (" \ $ と制御文字が無い)
+nix_string_ok() {
+  [[ $1 != *[\"\\\$]* && ! $1 =~ [[:cntrl:]] ]]
+}
+
+# 初期用のホスト initial に書く値 (initial_username・initial_system・initial_windows_user) を決めて確かめる (--initial)。
+# 決まらなければ理由を出して exit 1 (ローカル flake には何も書かない)。pwsh.exe が無ければ警告だけする
+initial_values() {
+  local users_dir d n cand=""
+  initial_username=${USER:-$(id -un 2>/dev/null || true)}
+  initial_system=$("${BASH}" "${script_dir}/private-host.sh" system) \
+    || die "この PC の system を決められません (${script_dir}/private-host.sh system)。"
+  if [[ -n ${initial_windows_user} ]]; then
+    # 名前を渡されたときも、WSL でなければ止める (Windows の区画を /mnt/c に mount した Linux に WSL の値を書かない)
+    if ! "${BASH}" "${script_dir}/private-host.sh" is-wsl; then
+      printf '!! 初期用のホスト initial は、新しい WSL の PC 用です。WSL でない PC は、--host <型> か ~/dotfiles/flake.nix の tmp で当てる (nix/README.md「新規マシンの手順」)。\n' >&2
+      exit 1
+    fi
+  else
+    if ! initial_windows_user=$("${BASH}" "${script_dir}/private-host.sh" windows-user); then
+      {
+        printf '!! Windows のユーザー名を引けないので、初期用のホスト initial を書けません (わけは上)。\n'
+        printf '   WSL の PC なら、名前を渡して打ち直す: %s --initial --windows-user <名前>\n' "${script_dir}/setup-local-flake.sh"
+        printf '   WSL でない PC は、--host <型> か ~/dotfiles/flake.nix の tmp で当てる (nix/README.md「新規マシンの手順」)。\n'
+      } >&2
+      exit 1
+    fi
+  fi
+  if [[ -z ${initial_username} ]] || ! nix_string_ok "${initial_username}"; then
+    die "この PC のユーザー名 (${initial_username:-空}) を、Nix の文字列に書けません (\" \\ \$ と制御文字は書けない)。"
+  fi
+  if ! nix_string_ok "${initial_windows_user}"; then
+    die "Windows のユーザー名 (${initial_windows_user}) に、Nix の文字列に書けない文字 (\" \\ \$ と制御文字) があります。"
+  fi
+  users_dir=${DOTFILES_WINDOWS_USERS_DIR:-/mnt/c/Users}
+  if [[ ! -d ${users_dir}/${initial_windows_user} ]]; then
+    for d in "${users_dir}"/*/; do
+      [[ -d ${d} ]] || continue
+      n=${d%/}
+      n=${n##*/}
+      case ${n} in
+        Public | Default | "Default User" | "All Users") continue ;;
+      esac
+      cand+="${cand:+, }${n}"
+    done
+    {
+      printf '!! %s がありません (Windows のユーザー名 %s)。初期用のホスト initial を書けません。\n' \
+        "${users_dir}/${initial_windows_user}" "${initial_windows_user}"
+      printf '   %s の中: %s\n' "${users_dir}" "${cand:-(見当たりません)}"
+      printf '   ユーザーのフォルダの名前が違うなら、フォルダの名前を渡して打ち直す: %s --initial --windows-user <フォルダの名前>\n' \
+        "${script_dir}/setup-local-flake.sh"
+    } >&2
+    exit 1
+  fi
+  if ! command -v pwsh.exe &>/dev/null; then
+    warn "pwsh.exe (PowerShell 7) が見つかりません。setup の Windows の手順 (bootstrap-windows-*) は pwsh.exe で流すので、先に Windows で入れてください:" \
+      "winget install --id Microsoft.PowerShell --exact --source winget"
+  fi
+}
+
+# 初期用のホスト initial の塊 (先頭の空行・コメント 3 行・mkHome)。字下げは 8 桁 (雛形の homeConfigurations の中)
+initial_block() {
+  cat <<EOB
+
+        # 初期用のホスト (setup-local-flake.sh --initial が書いた)。SSH 鍵 (1Password) も gh のログインもまだ無い
+        # 新しい WSL の PC で、win/ を配り、Windows のアプリを winget で入れる。dotfiles-private に登録して merge したら、
+        # setup-local-flake.sh --force で作り直して外す (nix/README.md「新しい WSL の PC」)。
+        initial = dotfiles.lib.mkHome {
+          username = "${initial_username}";
+          system = "${initial_system}";
+          wsl = {
+            enable = true;
+            windowsUserName = "${initial_windows_user}";
+            windowsFiles.enable = true;
+          };
+        };
+EOB
+}
+
+# ローカル flake ($1) に initial のホストがあるか (コメントでない「initial = …mkHome」の行。setup.sh の parse_hosts と同じ見方)
+has_initial_host() {
+  grep -qE '^[[:space:]]*initial[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome' "$1"
+}
+
+# ローカル flake ($1) の initial の塊の windowsUserName の値 (読めなければ空)
+initial_windows_user_of() {
+  awk '
+    /^[[:space:]]*initial[[:space:]]*=[[:space:]]*[A-Za-z0-9_.]*mkHome/ { f = 1 }
+    f && /^[[:space:]]*windowsUserName[[:space:]]*=/ {
+      v = $0
+      sub(/^[^"]*"/, "", v)
+      sub(/";[[:space:]]*$/, "", v)
+      print v
+      exit
+    }
+  ' "$1"
+}
+
+# $1 (描いたばかりの雛形) の tmp の例の終わり (「        # };」の行) の後ろに、initial の塊を差し込む。
+# 目印がちょうど 1 行でなければ 1 (書き換えない)
+insert_initial_block() {
+  local f=$1 n
+  n=$(grep -cxF '        # };' "${f}") || n=0
+  [[ ${n} == 1 ]] || return 1
+  initial_block >"${f}.block"
+  awk -v blockfile="${f}.block" '
+    { print }
+    $0 == "        # };" {
+      while ((getline line < blockfile) > 0) print line
+      close(blockfile)
+    }
+  ' "${f}" >"${f}.new"
+  rm -f "${f}.block"
+  mv "${f}.new" "${f}"
 }
 
 # $0 が symlink (~/dotfiles/setup など) 経由でも実体の場所を返す。
@@ -223,6 +378,16 @@ if git -C "${local_dir}" rev-parse --is-inside-work-tree &>/dev/null; then
   die "${local_dir} は git の作業ツリーです。ローカル flake は git 管理外に置きます。"
 fi
 
+# 初期用のホスト initial の値は、ローカル flake に触る前に決めて確かめる (決まらなければ何も書かずに止まる)。
+# initial が既にあれば (--force なし)、値を引きも確かめもしない (冪等。interop の不調で 2 回目が落ちないように)
+if [[ ${initial} == 1 ]]; then
+  if [[ ${force} == 0 && -f ${local_dir}/flake.nix ]] && has_initial_host "${local_dir}/flake.nix"; then
+    :
+  else
+    initial_values
+  fi
+fi
+
 mkdir -p "${local_dir}"
 
 # 雛形の版の印を計算し、照合する道具 (この script の隣)。印は heredoc の原文から計算する
@@ -232,9 +397,37 @@ if [[ ${local_dir} != "${HOME}/dotfiles" ]]; then
   migrate_cmd+=" --flake ${local_dir}"
 fi
 
+# dotfiles-private の入力が指す先 (clone の nix/ か、無ければ本体の空の stub)。決め方は private-host.sh だけが持つ
+private_nix_dir=$("${BASH}" "${script_dir}/private-host.sh" input-dir --nix-dir "${nix_dir}" 2>/dev/null) \
+  || private_nix_dir="${nix_dir}/private-stub"
+
 flake_file="${local_dir}/flake.nix"
 write_flake=1
-if [[ -f ${flake_file} && ${force} == 0 ]]; then
+if [[ -f ${flake_file} && ${force} == 0 && ${initial} == 1 ]]; then
+  # 初期用のホスト initial を書く: 既にあれば触らない。今の雛形のまま (手を入れていない) なら差し込んで書き直す
+  write_flake=0
+  if has_initial_host "${flake_file}"; then
+    echo "  flake.nix: 初期用のホスト initial は既にあります (そのまま)"
+    # 渡された --windows-user が今の値と違えば、使っていないことと変え方を出す
+    current_user=$(initial_windows_user_of "${flake_file}")
+    if [[ -n ${initial_windows_user} && ${initial_windows_user} != "${current_user}" ]]; then
+      echo "    --windows-user ${initial_windows_user} は使っていません (今の initial の Windows のユーザー名: ${current_user:-読めない})。"
+      echo "    変えるなら作り直す (手で足した値は消える): ${script_dir}/setup-local-flake.sh --force --initial --windows-user ${initial_windows_user}"
+    fi
+  elif "${BASH}" "${migrate}" render --file "${script_dir}/setup-local-flake.sh" --nix-dir "${nix_dir}" \
+    --private-dir "${private_nix_dir}" 2>/dev/null | cmp -s - "${flake_file}"; then
+    echo "  flake.nix: 今の雛形のままなので、初期用のホスト initial を差し込みます"
+    write_flake=1
+  else
+    {
+      printf '!! %s に手を入れてあるので (今の雛形のままではない)、初期用のホスト initial を書き込みません。\n' "${flake_file}"
+      printf '   homeConfigurations の中 (tmp の例の後ろ) に、次の塊を手で足す:\n'
+      initial_block
+      printf '\n   作り直してよい (手で足した値は消える) なら: %s --force --initial\n' "${script_dir}/setup-local-flake.sh"
+    } >&2
+    exit 1
+  fi
+elif [[ -f ${flake_file} && ${force} == 0 ]]; then
   write_flake=0
   if grep -qF "\"path:${nix_dir}\"" "${flake_file}"; then
     echo "  flake.nix: 既にあります (そのまま)"
@@ -259,9 +452,12 @@ fi
 if [[ ${write_flake} == 1 ]]; then
   template_id=$("${BASH}" "${migrate}" id "${script_dir}/setup-local-flake.sh") \
     || die "雛形の版の印を計算できません (${migrate} id)。"
-  # dotfiles-private の入力が指す先 (clone の nix/ か、無ければ本体の空の stub)。決め方は private-host.sh だけが持つ
-  private_nix_dir=$("${BASH}" "${script_dir}/private-host.sh" input-dir --nix-dir "${nix_dir}" 2>/dev/null) \
-    || private_nix_dir="${nix_dir}/private-stub"
+  # initial を差し込むときは、雛形を隣の一時ファイルに描いて差し込んでから置き換える (差し込めなければ元のファイルを残す)。
+  # 開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
+  real_flake_file=${flake_file}
+  if [[ ${initial} == 1 ]]; then
+    flake_file="${local_dir}/.flake.nix.initial-$$"
+  fi
   cat >"${flake_file}" <<EOS
 # ローカル専用の flake。setup-local-flake.sh が生成した。
 # **git 管理外**なので、ここに書いたことはこのマシンにしか無い。
@@ -395,10 +591,26 @@ if [[ ${write_flake} == 1 ]]; then
     };
 }
 EOS
+  if [[ ${initial} == 1 ]]; then
+    if ! insert_initial_block "${flake_file}"; then
+      rm -f "${flake_file}"
+      die "雛形に、初期用のホスト initial を差し込む目印 (tmp の例の終わりの「        # };」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
+    fi
+    mv "${flake_file}" "${real_flake_file}"
+  fi
+  flake_file=${real_flake_file}
   echo "  flake.nix: 書きました"
+  if [[ ${initial} == 1 ]]; then
+    echo "  初期用のホスト initial を書きました (Windows のユーザー名: ${initial_windows_user})"
+  fi
   if [[ ${private_nix_dir} == "${nix_dir}/private-stub" ]]; then
     echo "  dotfiles-private: clone の nix/ が無いので、本体の空の stub を指しました (${private_nix_dir})。"
-    echo "    clone ができたら ${migrate_cmd} で指し直す (pjp-dotfiles-register-host skill)。"
+    if [[ ${initial} == 1 ]]; then
+      # local-flake-migrate.sh prepare は initial を手で足したホストとして残す (残すと登録したホストが選ばれない)
+      echo "    この PC を登録して merge したら、${script_dir}/setup-local-flake.sh --force で作り直す (initial も外れ、clone の nix/ を読む)。"
+    else
+      echo "    clone ができたら ${migrate_cmd} で指し直す (pjp-dotfiles-register-host skill)。"
+    fi
   else
     echo "  dotfiles-private: ${private_nix_dir} を読みます (この PC を登録したホストがあれば、setup が選ぶ)。"
   fi
@@ -425,3 +637,8 @@ echo "完了しました。以後はここから実行できます:"
 echo "  ~/dotfiles/setup            メニュー"
 echo "  ~/dotfiles/setup --update   既存マシンの更新"
 echo "  home-manager switch --flake ~/dotfiles#<ホスト>"
+if [[ ${initial} == 1 ]]; then
+  echo
+  echo "次は Nix を入れて、初期用のホスト initial で当てる (Windows のアプリも入る):"
+  echo "  ~/dotfiles/setup --new-machine"
+fi
