@@ -1082,7 +1082,7 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
 | `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
 | `onePassword` | `{ }` | `onePassword.enable = true` で 1Password を git の署名に使う（WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password。[git について](#git-について)） |
-| `claude` | `{ }` | Claude Code まわり（`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`。[足したホストに書く値](#足したホストに書く値)） |
+| `claude` | `{ }` | Claude Code まわり（`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`・`heavyJobs.limitPercent`。[足したホストに書く値](#足したホストに書く値)） |
 | `modules` | `[ ]` | `mkHome` の引数に無い option（`dotfiles.ccPages.port` など）と、home-manager の設定 |
 
 ### WSL 固有の設定は入れ子で渡す
@@ -1204,6 +1204,7 @@ option は本体の既定になる。本体の module が既に定義してい�
 | `claude.notion.profile` | `null` | Notion へ書く skill を使うマシン。`"personal"` / `"work"`（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)） |
 | `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
 | `claude.videoOffer.autoStart.enable` | `false` | 解説動画の短尺を聞かずに作り始めたいマシンだけ `true`（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)） |
+| `claude.heavyJobs.limitPercent` | `70` | 重い処理（動画の書き出し・推論など）に使わせる CPU とメモリの割合（整数 1〜100）を変えたいマシン（[重い処理の資源の上限を host ごとに決める](#重い処理の資源の上限を-host-ごとに決める)） |
 | `dotfiles.ccPages.port`（`modules`） | `null`（7777） | 7777 がほかと衝突するマシンだけ（[待ち受けの port を変える](#待ち受けの-port-を変える)） |
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
@@ -2882,6 +2883,7 @@ ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drw
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
 | `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
+| `~/.local/state/dotfiles/claude-heavy-jobs.json` | `dotfiles.claude.heavyJobs.limitPercent` から生成 | ファイル（重い処理の資源の上限の割合。[後述](#重い処理の資源の上限を-host-ごとに決める)） |
 | `~/.local/state/dotfiles/claude-ssh-agent-notice.json` | `dotfiles.claude.sshAgentNotice.extraCommands` から生成 | ファイル（中で ssh を打つ道具の一覧。[後述](#1password-の-ssh-承認を知らせるフック)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
@@ -3786,6 +3788,53 @@ cat ~/.local/state/dotfiles/claude-notion.json
 ```
 
 経緯は [ADR 011](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
+
+### 重い処理の資源の上限を host ごとに決める
+
+重い処理（数分以上 CPU を使い切るか、GB 単位でメモリを取る処理。動画の書き出し・エンコード、コマや画像をまとめて読む処理、
+whisper などの推論、重い処理を並べて流すとき）は、`claude-skills` の skill `pjp-heavy-jobs` の `scripts/limit.sh` で包んで流す。
+limit.sh は包んだコマンドを systemd の user slice `pjp-heavy.slice` に入れ、slice に CPU とメモリの上限を付ける。上限は slice の
+中の合計に効くので、別々の会話（herdr の pane ごとの会話とその subagent）が同時に重い処理を流しても、合わせて上限の内に収まる。
+どれを包むかはその skill の `SKILL.md` が決める（動画の雛形の `render-all.sh` などは自分で包む）。縛るのは包んだ処理だけ。
+
+上限の割合は host option **`dotfiles.claude.heavyJobs.limitPercent`**（整数 1〜100、既定 70）で決める。home-manager が値を
+`~/.local/state/dotfiles/claude-heavy-jobs.json`（`{"limitPercent":70}`）に置き、limit.sh が包むたびに読む
+（[ADR 043](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/043_claude_heavy_jobs_limit_host_option_20261107T222147JST/README.md)）。
+
+| 縛るもの | 上限 |
+| --- | --- |
+| CPU | `CPUQuota` = 割合 × `nproc`（systemd は CPU 1 つを 100% と数える）。WSL の `nproc` は、既定では Windows の論理 CPU の全部 |
+| メモリ | `MemoryMax=<割合>%`（kernel から見えるメモリに対して）。WSL では VM のメモリに対してで、VM のメモリは既定で Windows の半分ほど（40 なら PC 全体の約 20%） |
+| swap | 使わせない（`MemorySwapMax=0`） |
+
+#### 値の置き場
+
+dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホストの `mkHome` に書く。書かなければ 70。
+
+```nix
+claude = {
+  heavyJobs.limitPercent = 40;  # 重い処理に使わせるのを、マシン全体の 40% までにする
+};
+```
+
+#### 反映と確認
+
+反映は `home-manager switch`（`~/dotfiles/setup --update` でもよい）。上限は、次に包むときに limit.sh が付け直す
+（`systemctl --user set-property --runtime`。再起動で消えるが、包むたびに付ける）。skill の link
+（`~/.claude/skills/pjp-heavy-jobs`）は、`setup --update` の手順 `bootstrap-claude-skills` が張る。
+
+- ファイルが無い・読めないマシン（この option より前の dotfiles など）では、limit.sh は 70 で縛る
+- `claude-skills` を取れないマシンには limit.sh が無いので、上限は付かない
+- cgroup v2 の `cpu`・`memory` が systemd の user manager に委譲されていないマシンでは、その分の上限は付かない
+  （limit.sh が警告を 1 行出し、CPU は `nice` で流す）。systemd 251 以前（Ubuntu 22.04 の 249 など）の user manager は
+  `memory` だけを委譲する
+
+```sh
+cat ~/.local/state/dotfiles/claude-heavy-jobs.json   # {"limitPercent":70}
+stat -fc %T /sys/fs/cgroup                            # cgroup2fs なら cgroup v2
+cat /sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service/cgroup.controllers   # cpu と memory があれば両方に効く
+systemctl --user show pjp-heavy.slice -p CPUQuotaPerSecUSec -p MemoryMax   # 包んで流した後に、付いた上限
+```
 
 ### Claude Code のアカウントを分ける (claude-personal / claude-work)
 

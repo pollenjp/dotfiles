@@ -373,6 +373,19 @@ in
         + "\n";
     }
 
+    # 重い処理の資源の上限の割合 (heavyJobs.limitPercent。ADR 043)。
+    #
+    # claude-video-offer.json と同じく、claude-skills に option の値を渡す置き場。skill pjp-heavy-jobs の
+    # scripts/limit.sh が limitPercent の割合で systemd の user slice pjp-heavy.slice に CPU とメモリの
+    # 上限を付け、包んだ重い処理をその中で流す。ファイルが無い・読めないときは 70 で縛る。既定のままでも必ず書く。
+    {
+      ".local/state/dotfiles/claude-heavy-jobs.json".text =
+        builtins.toJSON {
+          inherit (cfg.heavyJobs) limitPercent;
+        }
+        + "\n";
+    }
+
     # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
     #
     # フックの **登録** は ~/.claude/settings.json に書く必要があるが、

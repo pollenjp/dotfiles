@@ -11,8 +11,8 @@
 #   - tmp の例は、雛形に local が無くても mkForce なしで評価でき、activationPackage の drvPath が出る
 #   - 例の有効な行の値が config に入る: WSL (windowsUserName・windowsFiles・exeExecTrace)・1Password・
 #     Dev Tracker (true)・Notion の宛先 ("personal")
-#   - 例の中でコメントのままの行 (gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port) は、
-#     本体の既定のまま
+#   - 例の中でコメントのままの行 (gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port) と、
+#     例に無い重い処理の資源の上限の割合 (heavyJobs.limitPercent) は、本体の既定のまま
 #   - 例のままなら config.warnings は空 (Dev Tracker を使い、宛先も選んでいる)。ただし nixpkgs の猶予の例外の消し時
 #     (「nixpkgs の例外」で始まる文。lib/release-age.nix) は数えない (例外が何もしなくなっても CI は落とさない。ADR 032)
 {
@@ -25,6 +25,7 @@ let
   tmp = (import ./fixtures/local-flake-tmp/tmp.nix { dotfiles.lib = { inherit mkHome; }; }).tmp;
   cfg = tmp.config;
   d = cfg.dotfiles;
+  limits = builtins.fromJSON cfg.home.file.".local/state/dotfiles/claude-heavy-jobs.json".text;
 
   cases = [
     {
@@ -52,6 +53,10 @@ let
         && d.claude.notion.override == { }
         && !d.claude.videoOffer.autoStart.enable
         && d.ccPages.port == null;
+    }
+    {
+      name = "例に無い heavyJobs.limitPercent は本体の既定の 70 で、claude-heavy-jobs.json も 70";
+      ok = d.claude.heavyJobs.limitPercent == 70 && limits == { limitPercent = 70; };
     }
     {
       name = "例のままなら config.warnings は空 (nixpkgs の例外の消し時は数えない)";
