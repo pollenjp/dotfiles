@@ -42,6 +42,11 @@
 #     決まっていなくても execute の前には止まらず、この実行で作ったローカル flake が clone を読む・この PC の登録が取得で
 #     来た → 同じ実行の switch は登録したホストで当てる。選んでいた登録が取得で消えた → switch で止まり (home-manager を
 #     呼ばない)、選べる道を出す。--host で明示したホストは決め直さない
+#   - ローカル flake に初期用のホスト initial (setup-local-flake.sh --initial が書く) があれば、--which-host は
+#     initial<TAB>local。対象が initial なら、残りの手作業に次の段 (1Password と gh・dotfiles-private の取得・登録・
+#     --force で外す) を出す。clone にこの PC のファイルがあれば、代わりに外し方 (setup-local-flake.sh --force) を出し、
+#     「読んでいない」の案内 (local-flake-migrate.sh prepare) と次の段は出さない
+#   - 対象ホストが決まらないときの選べる道に、新しい WSL の PC の setup-local-flake.sh --initial を出す
 #
 # ## 作り
 #
@@ -572,6 +577,55 @@ if stopped_with_paths "${c}" && ! before_execute "${c}" && [[ $(grep -c . "${c}/
   ok "最初から決まらず、取得しても登録が来なければ、取得のあと switch の頭で止まる (前の雛形の案内は出さない)"
 else
   ng "決まらずに switch で止まる" "rc=$(rc "${c}") 取得=$(cat "${c}/home/private-fetches" 2>/dev/null) $(out "${c}") $(err "${c}")"
+fi
+
+# 16. ローカル flake の初期用のホスト initial: --which-host は initial<TAB>local
+initial_line='      initial = dotfiles.lib.mkHome { username = "alice"; };'
+c=$(new_case t16)
+local_flake "${c}" "${c}/repo/nix/private-stub" "${initial_line}"
+run "${c}" --which-host
+if [[ $(rc "${c}") == 0 && $(out "${c}") == "initial"$'\t'"local" ]]; then
+  ok "--which-host: ローカル flake の初期用のホスト initial は initial<TAB>local"
+else
+  ng "--which-host (initial)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+fi
+
+# 17. 対象が initial で、この PC が未登録: 残りの手作業に次の段を出す
+c=$(new_case t17)
+mv "${c}/private/nix/hosts/alice@box.nix" "${c}/alice@box.nix"
+local_flake "${c}" "${c}/repo/nix/private-stub" "${initial_line}"
+run "${c}" --steps bootstrap-a
+if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" -F '初期用のホスト initial で当てています' \
+  && seen_after_post_notes "${c}" -F 'bootstrap-dotfiles-private.sh' \
+  && seen_after_post_notes "${c}" -F 'pjp-dotfiles-register-host' \
+  && seen_after_post_notes "${c}" -F 'setup-local-flake.sh --force'; then
+  ok "残りの手作業: 対象が initial なら、次の段 (取得・登録・--force で外す) を出す"
+else
+  ng "残りの手作業 (initial・未登録)" "rc=$(rc "${c}") $(after_post_notes "${c}")"
+fi
+
+# 18. 対象が initial で、clone にこの PC のファイルがある: 外し方を出し、「読んでいない」の案内と次の段は出さない
+c=$(new_case t18)
+local_flake "${c}" "${c}/repo/nix/private-stub" "${initial_line}"
+run "${c}" --steps bootstrap-a
+if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" -F 'initial を外し' \
+  && seen_after_post_notes "${c}" -F 'setup-local-flake.sh --force' \
+  && ! seen_after_post_notes "${c}" -F 'local-flake-migrate.sh prepare' \
+  && ! seen_after_post_notes "${c}" -F '初期用のホスト initial で当てています'; then
+  ok "残りの手作業: 対象が initial で clone にこの PC のファイルがあれば、外し方 (--force) だけを出す"
+else
+  ng "残りの手作業 (initial・登録済み)" "rc=$(rc "${c}") $(after_post_notes "${c}")"
+fi
+
+# 19. 対象ホストが決まらないときの選べる道に、setup-local-flake.sh --initial を出す
+c=$(new_case t19)
+mv "${c}/private/nix/hosts/alice@box.nix" "${c}/alice@box.nix"
+local_flake "${c}" "${c}/repo/nix/private-stub"
+run "${c}" --which-host
+if [[ $(rc "${c}") == 1 ]] && grep -qF 'setup-local-flake.sh --initial' "${c}/err"; then
+  ok "決まらないときの選べる道に、新しい WSL の PC の setup-local-flake.sh --initial を出す"
+else
+  ng "選べる道 (--initial)" "rc=$(rc "${c}") $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

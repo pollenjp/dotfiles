@@ -150,7 +150,9 @@ README.md 「適用 > 新規マシンの手順」を対話的に実行する。
      ローカル flake の inputs.dotfiles-private がその clone の nix/ を指すときだけ)
 
   1 を先に見るので、ローカル flake に足したホスト (tmp など) がそのまま既定に
-  なる。複数書いてあるときは一番上のものを採る。2 は登録した PC の値の全部を
+  なる。複数書いてあるときは一番上のものを採る。SSH 鍵も gh のログインもまだの新しい
+  WSL の PC は、setup-local-flake.sh --initial で初期用のホスト initial を 1 に書き、
+  登録して merge したら setup-local-flake.sh --force で外す。2 は登録した PC の値の全部を
   持つホストで、登録した PC では --host を付けなくてよい (pjp-dotfiles-register-host
   skill)。どちらも無ければ推測せずに止まり、選べる道 (この PC を dotfiles-private に
   登録する・~/dotfiles/flake.nix に tmp を足す・--host <型> を付ける) を出す (ADR 027)。
@@ -863,6 +865,8 @@ host_undecided() {
     fi
     printf '     3. --host <型> を付ける (型: %s)\n' "${types:-登録簿にありません}"
     printf '        型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。それらを使う PC は 1 か 2 で値を書く\n'
+    printf '     4. 新しい WSL の PC で、SSH 鍵も gh のログインもまだなら %s/setup-local-flake.sh --initial (初期用のホスト initial をローカル flake に書く)\n' \
+      "${script_dir}"
   } >&2
 }
 
@@ -2185,7 +2189,7 @@ mise_extra_tools() {
 # 結果の直後に出すので、ここでも出すと二重になる (bootstrap-claude-env.sh の gh の警告を
 # 以前ここで判定し直していたのも、まとめに寄せた。TKT-146)。
 post_notes() {
-  local extra own drift
+  local extra own drift initial_selected=0
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)
@@ -2239,9 +2243,27 @@ post_notes() {
     note "        値を引き継いで今の雛形へ移す: $(local_flake_migrate_cmd)"
     note '        (Claude Code なら pjp-dotfiles-local-flake-migrate skill)'
   fi
+  # 初期用のホスト initial (setup-local-flake.sh --initial がローカル flake に書く) で当てている。登録までの踏み台なので、
+  # 次の段を出す。clone にこの PC のファイルが来ていれば、initial を外す (ローカル flake のホストは登録したホストより先に
+  # 選ばれるので、外すまで登録したホストを選ばない)。initial のほかに手で足した値の無い雛形なので、--force で作り直せば
+  # clone の nix/ を読む形になる (下の「読んでいない」の案内の代わり)
+  if [[ ${host} == initial && $(host_origin) == local ]]; then
+    initial_selected=1
+    if this_pc_in_private; then
+      note "dotfiles-private にこの PC のホスト ${private_host_name} があるのに、ローカル flake の初期用のホスト initial を選んでいます。"
+      note "        initial を外し、clone の nix/ を読む雛形に作り直す: ${script_dir}/setup-local-flake.sh --force"
+      note '        (initial のほかに手で足した値があれば、先に登録へ移す。--force は退避を取らない)'
+    else
+      note '初期用のホスト initial で当てています (SSH 鍵も gh のログインもまだの段)。次は:'
+      note '        1. 1Password を入れて SSH agent を有効にし、gh auth login'
+      note "        2. dotfiles-private を取る: ${script_dir}/bootstrap-dotfiles-private.sh"
+      note '        3. この PC を dotfiles-private に登録する (Claude Code で pjp-dotfiles-register-host。元にするホストは initial)'
+      note "        4. merge したら --steps private-fetch のあと ${script_dir}/setup-local-flake.sh --force で initial を外す"
+    fi
+  fi
   # dotfiles-private にこの PC のホストがあるのに、ローカル flake がその clone の nix/ を読んでいない (入力が無い・
   # 本体の stub を指す)。そのホストは選べない (--host なしでは決まらず、switch を選べば止まる。ADR 026・027)
-  if [[ ${flake_dir} != "${nix_dir}" ]] && this_pc_in_private && ! local_flake_reads_private; then
+  if [[ ${initial_selected} == 0 && ${flake_dir} != "${nix_dir}" ]] && this_pc_in_private && ! local_flake_reads_private; then
     note "dotfiles-private に、この PC のホスト ${private_host_name} があります (${private_clone}/nix/hosts/${private_host_name}.nix)。"
     note "        ローカル flake (${flake_dir}/flake.nix) が dotfiles-private の nix/ を読んでいない ($(private_input_state)) ので、使っていません。"
     note '        読ませるには、値を引き継いで今の雛形へ移す (dotfiles-private の入力が clone の nix/ を指す):'
