@@ -2138,18 +2138,34 @@ run_step() {
 # 実行   #
 ##########
 
-# ~/.config/mise/config.toml の [tools] に残っている go / node / usage 以外の名前。
+# bootstrap-mise.sh が mise use -g で ~/.config/mise/config.toml の [tools] に書く名前 (版は除く)。
+# 空白 1 つで区切って 1 行に出す (ヘッダの空白の続き・行末の空白は詰める)。
 #
-# 手順 5 (旧経路が書いた分を手で整理する) の案内を出すかどうかにだけ使う。
+# order と同じく、script 自身のヘッダ (冒頭 40 行の `# mise-tools: <名前> …`) から読む。setup.sh 側に一覧を
+# 持つと、bootstrap-mise.sh が書くものを変えたときに直し漏れ、setup が自分で書いた名前を手順 5 で「手で消す」と
+# 出してしまう。ヘッダと mise use -g の行が合っているかは nix/tests/bootstrap-mise.test.sh が見る。
+mise_own_tools() {
+  local f="${script_dir}/bootstrap-mise.sh"
+  [[ -f ${f} ]] || return 0
+  awk 'NR > 40 { exit } sub(/^#[[:space:]]*mise-tools:/, "") { $1 = $1; print; exit }' "${f}"
+}
+
+# ~/.config/mise/config.toml の [tools] に残っている名前のうち、setup が書かないもの (mise_own_tools 以外)。
+#
+# 手順 5 (旧経路や前の setup が書いた分を手で整理する) の案内を出すかどうかにだけ使う。
 # bootstrap-mise は「既存マシン更新」で毎回走るようになったので、無条件に案内すると
-# 片付いた後も毎回出ることになる。
+# 片付いた後も毎回出ることになる。setup が書く名前は、消しても次の --update で書き戻すので数えない。
 #
 # 見るのは [tools] だけで、次の見出し ([settings] など) で抜ける。`[tools.<名前>]`
 # 形式は見ない (案内が出なくなるだけで、判定を誤って余計なことは言わない)。
 mise_extra_tools() {
   local f="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml"
   [[ -f ${f} ]] || return 0
-  awk '
+  awk -v own="$(mise_own_tools)" '
+    BEGIN {
+      n = split(own, names, /[[:space:]]+/)
+      for (i = 1; i <= n; i++) { keep[names[i]] = 1 }
+    }
     /^[[:space:]]*\[/ { in_tools = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*$/); next }
     !in_tools         { next }
     /^[[:space:]]*#/  { next }
@@ -2158,7 +2174,7 @@ mise_extra_tools() {
       key = $0
       sub(/[[:space:]]*=.*$/, "", key)
       gsub(/[[:space:]"]/, "", key)
-      if (key != "go" && key != "node" && key != "usage") { print key }
+      if (!(key in keep)) { print key }
     }
   ' "${f}"
 }
@@ -2169,15 +2185,17 @@ mise_extra_tools() {
 # 結果の直後に出すので、ここでも出すと二重になる (bootstrap-claude-env.sh の gh の警告を
 # 以前ここで判定し直していたのも、まとめに寄せた。TKT-146)。
 post_notes() {
-  local extra drift
+  local extra own drift
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)
     if [[ -n ${extra} ]]; then
-      note '手順 5: ~/.config/mise/config.toml の [tools] に go / node / usage 以外が残っている:'
+      own=$(mise_own_tools || true)
+      note '手順 5: ~/.config/mise/config.toml の [tools] に、setup が書かない名前が残っている:'
       note "          $(printf '%s' "${extra}" | tr '\n' ' ')"
-      note '        手で消す。残っていると mise の shim が PATH の先頭に居座り'
-      note '        Nix 側のツールが使われない。'
+      note "        手で消す (setup が書くのは ${own// /・} だけ)。"
+      note '        残っていると mise の shim が PATH の先頭に居座り、'
+      note '        Nix 側にもある道具は Nix 側が使われない。'
     fi
   fi
   if ! is_selected chsh; then
