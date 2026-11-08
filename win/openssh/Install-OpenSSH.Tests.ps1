@@ -138,6 +138,36 @@ Test-Case 'winget に新しい版があれば ※ で知らせる (ずれでは�
     Format-OpenSshState -State $newer -Target '10.0.0.0' -InstallDir $dir | Where-Object { $_.Text -like '※*' } | ForEach-Object Text
 }
 
+# Get-OpenSshExitCode: -Check の終了コード。入っていなければ 3、版・ssh-agent・pin が揃えば 0、ほかは 1
+$missing = [pscustomobject]@{
+    Installed = $null; Plan = 'install'; AgentStatus = $null; AgentStartType = $null
+    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $true
+}
+$unpinned = [pscustomobject]@{
+    Installed = [version]'10.0.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
+    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $false
+}
+Test-Case '入っていなければ 3' 3 { Get-OpenSshExitCode -State $missing }
+Test-Case '版・ssh-agent・pin が揃えば 0' 0 { Get-OpenSshExitCode -State $inSync }
+Test-Case 'pin が無ければ 1' 1 { Get-OpenSshExitCode -State $unpinned }
+Test-Case 'ssh-agent が自動・実行中に戻っていれば 1' 1 { Get-OpenSshExitCode -State $agentBack }
+Test-Case '古ければ 1' 1 { Get-OpenSshExitCode -State $drift }
+
+# Test-OpenSshNeedsIdle: 動いている ssh.exe などを見るのは、ファイルを置き換える (上げる・下げる) ときだけ。
+# 入れるときは置き換えるファイルが無い (Windows の機能の OpenSSH の ssh.exe が動いていても入れられる)
+Test-Case '入れる (install) ときは見ない' 'False' { Test-OpenSshNeedsIdle -Plan 'install' }
+Test-Case '上げるときは見る' 'True' { Test-OpenSshNeedsIdle -Plan 'upgrade' }
+Test-Case '下げるときは見る' 'True' { Test-OpenSshNeedsIdle -Plan 'downgrade' }
+Test-Case '揃っていれば見ない' 'False' { Test-OpenSshNeedsIdle -Plan 'none' }
+
+# Get-OpenSshCheckMessage: -Check の締めの 1 行
+Test-Case '-Check の締め: 入っていなければ、入れるコマンドと UAC を出し、⚠️ で始まる' 'True True True' {
+    $m = Get-OpenSshCheckMessage -State $missing
+    "$($m.StartsWith('⚠️')) $($m.Contains('入っていない → Install-OpenSSH で入れる')) $($m.Contains('UAC'))"
+}
+Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃っている' { Get-OpenSshCheckMessage -State $inSync }
+Test-Case '-Check の締め: ずれていれば「揃っていない」' 'True' { (Get-OpenSshCheckMessage -State $drift).Contains('固定した版と揃っていない') }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)
