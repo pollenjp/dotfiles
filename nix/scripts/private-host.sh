@@ -9,6 +9,8 @@
 # ローカル flake (~/dotfiles/flake.nix) の雛形がその nix/ を path: の入力に取り、setup.sh は --host が無ければ
 # この PC の名前のファイルのホストを選ぶ。名前と clone の場所の決め方は、この script だけが持つ
 # (setup.sh・setup-local-flake.sh・local-flake-migrate.sh はこれを呼ぶ。登録の skill pjp-dotfiles-register-host も)。
+# この PC の system と、WSL のホスト側 Windows のユーザー名の引き方も、この script だけが持つ (inspect と draft が使い、
+# setup-local-flake.sh --initial が初期用のホスト initial を書くときに system・windows-user で呼ぶ)。
 #
 #   名前        <user>@<短い hostname>。user は $USER (無ければ id -un)。hostname は macOS ならネットワークで変わらない
 #               LocalHostName (scutil)、ほかは uname -n の最初の . まで (hostname -s と同じ)。英数字と . _ - だけ
@@ -16,8 +18,15 @@
 #               ~/ghq/github.com/pollenjp/dotfiles-private (bootstrap-dotfiles-private.sh などの private_dir() と同じ)
 #   入力の先    clone の nix/ が directory ならそれ、無ければ本体の空の stub (nix/private-stub)。雛形は clone の無い
 #               マシンでも入力の行の形を変えずに書く
+#   system      uname から <arch>-linux・<arch>-darwin (x86_64・aarch64)
+#   Windows のユーザー名
+#               WSL (WSL_DISTRO_NAME があるか、/proc/version に microsoft がある) のときだけ、pwsh.exe → powershell.exe の
+#               $env:USERNAME (出力の文字コードを UTF-8 にしてから引く。日本語の名前が CP932 で化けないように)。CR と末尾の
+#               空白を落とす。/mnt/c/Users/<名前> にあるかは呼ぶ側が確かめる。テストは DOTFILES_PROC_VERSION で
+#               /proc/version の場所を差し替える (ふだんは空)
 #
-# name・dir・input-dir は bash と uname だけで動く (setup.sh は Nix を入れる前にも呼ぶ。macOS の bash 3.2 でも動く書き方)。
+# name・dir・input-dir・system・windows-user は bash と uname (windows-user は WSL の interop) だけで動く (setup.sh と
+# setup-local-flake.sh は Nix を入れる前にも呼ぶ。macOS の bash 3.2 でも動く書き方)。
 #
 # ## 登録の決まった処理 (inspect・draft・compare)
 #
@@ -57,6 +66,10 @@ usage() {
   private-host.sh input-dir [--nix-dir <本体の nix>]
       ローカル flake の雛形が dotfiles-private の入力に書く場所を出す (clone の nix/ が無ければ <本体の nix>/private-stub。
       --nix-dir の既定はこの script の repo の nix/)
+  private-host.sh system
+      この PC の system (x86_64-linux・aarch64-linux・aarch64-darwin など) を出す
+  private-host.sh windows-user
+      WSL のホスト側 Windows のユーザー名 (pwsh.exe → powershell.exe の $env:USERNAME) を出す。WSL でない・引けないなら 1
   private-host.sh inspect [--flake <dir>]
       この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録と shared/ の module (登録した全ホストに
       足す)・ローカル flake (雛形の版・入力・手で足したホスト・前の雛形なら local の行)・setup が --host なしで選ぶ
@@ -227,19 +240,25 @@ this_system() {
   esac
 }
 
+# WSL か。WSL_DISTRO_NAME があるか、/proc/version に microsoft がある。テストは DOTFILES_PROC_VERSION で /proc/version の
+# 場所を差し替える (WSL の上でテストを流しても、手元の /proc/version を見ないように)
 is_wsl() {
-  [[ -n ${WSL_DISTRO_NAME:-} ]] || grep -qi microsoft /proc/version 2>/dev/null
+  [[ -n ${WSL_DISTRO_NAME:-} ]] || grep -qi microsoft "${DOTFILES_PROC_VERSION:-/proc/version}" 2>/dev/null
 }
 
-# WSL のホスト側 Windows のユーザー名 (mkHome の wsl.windowsUserName)。調べられなければ 1
+# WSL のホスト側 Windows のユーザー名 (mkHome の wsl.windowsUserName)。調べられなければ 1。
+# 出力の文字コードを UTF-8 にしてから引く (既定のままだと、日本語の名前が CP932 で届いて化ける)。CR と末尾の空白を落とす
 windows_user() {
   local exe u
   for exe in pwsh.exe powershell.exe; do
     command -v "${exe}" &>/dev/null || continue
     # shellcheck disable=SC2016 # PowerShell の変数をそのまま渡す
-    u=$("${exe}" -NoProfile -Command '$env:USERNAME' 2>/dev/null </dev/null) || continue
+    u=$("${exe}" -NoProfile -Command '[Console]::OutputEncoding = [Text.Encoding]::UTF8; $env:USERNAME' 2>/dev/null </dev/null) || continue
     u=${u//$'\r'/}
     u=${u%%$'\n'*}
+    while [[ ${u} == *[[:space:]] ]]; do
+      u=${u%[[:space:]]}
+    done
     if [[ -n ${u} ]]; then
       printf '%s' "${u}"
       return 0
@@ -988,6 +1007,24 @@ case ${cmd} in
     echo
     ;;
   input-dir) cmd_input_dir "$@" ;;
+  system)
+    [[ $# -eq 0 ]] || die "system は引数を取りません"
+    this_system
+    echo
+    ;;
+  windows-user)
+    [[ $# -eq 0 ]] || die "windows-user は引数を取りません"
+    if ! is_wsl; then
+      printf '!! WSL ではありません (WSL_DISTRO_NAME が無く、/proc/version に microsoft がありません)。\n' >&2
+      exit 1
+    fi
+    if ! windows_user; then
+      # shellcheck disable=SC2016 # 文面の $env:USERNAME は PowerShell の変数の名前
+      printf '!! Windows のユーザー名を引けません (pwsh.exe・powershell.exe の $env:USERNAME が返りませんでした。WSL の interop が落ちていないか確かめる)。\n' >&2
+      exit 1
+    fi
+    echo
+    ;;
   inspect) cmd_inspect "$@" ;;
   draft) cmd_draft "$@" ;;
   compare) cmd_compare "$@" ;;

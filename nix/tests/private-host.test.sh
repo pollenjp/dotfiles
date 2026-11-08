@@ -19,6 +19,11 @@
 #     --nix-dir <dir> の <dir>/private-stub)
 #   - private_dir() の本文が、clone を読む bootstrap-*.sh (dotfiles-private・ssh-config・windows-ssh-config・
 #     windows-google-ime) の private_dir() と 1 字も違わない (clone の場所の決め方を 1 つにする)
+#   - system は uname から <arch>-linux・<arch>-darwin を出す (x86_64・aarch64。macOS の arm64 は aarch64)。引数を付けると 2
+#   - windows-user は、WSL (WSL_DISTRO_NAME があるか、DOTFILES_PROC_VERSION (既定 /proc/version) に microsoft がある) なら、
+#     pwsh.exe → powershell.exe の順に $env:USERNAME を引き、CR と末尾の空白を落として出す (日本語と途中の空白はそのまま。
+#     出力の文字コードを UTF-8 にしてから引く)。pwsh.exe が無い・落ちたら powershell.exe に移る。WSL でない (pwsh.exe を
+#     呼ばない)・どちらでも引けないなら、理由を stderr に出して 1
 #   - 引数が無い・知らないサブコマンドは usage を出して 2、-h は 0
 #   - inspect (偽の nix) は、この PC の名前・clone と登録の有無・登録してあるホスト・ローカル flake の dotfiles-private の
 #     入力の状態 (stub)・手で足したホスト・local のコメントでない行 (dotfiles の外の行も)・setup が --host なしで選ぶ
@@ -87,7 +92,7 @@ for c in env awk sed grep sort head tail tr cat dirname basename readlink mktemp
 done
 
 # 偽のコマンドを置いた bin。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)
-#   uname   -n は FAKE_UNAME_N (既定 box)、-s は FAKE_UNAME_S (既定 Linux)、-m は x86_64
+#   uname   -n は FAKE_UNAME_N (既定 box)、-s は FAKE_UNAME_S (既定 Linux)、-m は FAKE_UNAME_M (既定 x86_64)
 #   id      -un は FAKE_ID_UN (既定 nobody)
 fake_bin="${work}/fake-bin"
 mkdir -p "${fake_bin}"
@@ -96,7 +101,7 @@ mkdir -p "${fake_bin}"
   cat <<'EOF'
 case ${1-} in
   -n) printf '%s\n' "${FAKE_UNAME_N-box}" ;;
-  -m) printf '%s\n' x86_64 ;;
+  -m) printf '%s\n' "${FAKE_UNAME_M:-x86_64}" ;;
   *) printf '%s\n' "${FAKE_UNAME_S:-Linux}" ;;
 esac
 EOF
@@ -130,6 +135,32 @@ EOF
 } >"${extra_bin}/ghq"
 chmod +x "${extra_bin}/scutil" "${extra_bin}/ghq"
 
+# 偽の pwsh.exe と powershell.exe は、windows-user のケースだけ PATH_EXTRA で足す (本物の pwsh.exe は PATH に入れない)
+#   pwsh.exe        引数を <HOME>/pwsh-args に書き、FAKE_PWSH_USER を CRLF で出して FAKE_PWSH_RC (既定 0) で終わる
+#   powershell.exe  引数を <HOME>/powershell-args に書き、FAKE_PS_USER を CRLF で出して FAKE_PS_RC (既定 0) で終わる
+#   win_bin は両方、win_ps_bin は powershell.exe だけ
+win_bin="${work}/win-bin"
+win_ps_bin="${work}/win-ps-bin"
+mkdir -p "${win_bin}" "${win_ps_bin}"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+printf '%s\n' "$*" >>"${HOME}/pwsh-args"
+[[ -z ${FAKE_PWSH_USER-} ]] || printf '%s\r\n' "${FAKE_PWSH_USER}"
+exit "${FAKE_PWSH_RC:-0}"
+EOF
+} >"${win_bin}/pwsh.exe"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+printf '%s\n' "$*" >>"${HOME}/powershell-args"
+[[ -z ${FAKE_PS_USER-} ]] || printf '%s\r\n' "${FAKE_PS_USER}"
+exit "${FAKE_PS_RC:-0}"
+EOF
+} >"${win_bin}/powershell.exe"
+chmod +x "${win_bin}/pwsh.exe" "${win_bin}/powershell.exe"
+cp -p "${win_bin}/powershell.exe" "${win_ps_bin}/powershell.exe"
+
 # 1 ケースぶんの checkout と HOME を作り、その場所を出す。
 #   <ケース>/repo/nix/scripts/private-host.sh   写した script (script の 2 つ上が repo)
 #   <ケース>/home                               HOME
@@ -141,13 +172,17 @@ new_case() {
 }
 
 # $1: ケース、残り: script の引数。stdout・stderr・終了コードを <ケース>/{out,err,rc} に残す。
-# 環境変数 (USER・FAKE_*・DOTFILES_PRIVATE_DIR・PATH_EXTRA) は呼び出し側で付ける
+# 環境変数 (USER・FAKE_*・WSL_DISTRO_NAME・DOTFILES_PROC_VERSION・DOTFILES_PRIVATE_DIR・PATH_EXTRA) は呼び出し側で付ける
 run() {
   local c=$1
   shift
   env -i HOME="${c}/home" ${USER+"USER=${USER}"} TMPDIR="${work}" \
     PATH="${PATH_EXTRA:+${PATH_EXTRA}:}${fake_bin}:${sys_bin}" \
     ${FAKE_UNAME_N+"FAKE_UNAME_N=${FAKE_UNAME_N}"} ${FAKE_UNAME_S+"FAKE_UNAME_S=${FAKE_UNAME_S}"} \
+    ${FAKE_UNAME_M+"FAKE_UNAME_M=${FAKE_UNAME_M}"} ${WSL_DISTRO_NAME+"WSL_DISTRO_NAME=${WSL_DISTRO_NAME}"} \
+    ${DOTFILES_PROC_VERSION+"DOTFILES_PROC_VERSION=${DOTFILES_PROC_VERSION}"} \
+    ${FAKE_PWSH_USER+"FAKE_PWSH_USER=${FAKE_PWSH_USER}"} ${FAKE_PWSH_RC+"FAKE_PWSH_RC=${FAKE_PWSH_RC}"} \
+    ${FAKE_PS_USER+"FAKE_PS_USER=${FAKE_PS_USER}"} ${FAKE_PS_RC+"FAKE_PS_RC=${FAKE_PS_RC}"} \
     ${FAKE_ID_UN+"FAKE_ID_UN=${FAKE_ID_UN}"} ${FAKE_SCUTIL+"FAKE_SCUTIL=${FAKE_SCUTIL}"} \
     ${FAKE_SCUTIL_RC+"FAKE_SCUTIL_RC=${FAKE_SCUTIL_RC}"} ${FAKE_GHQ_ROOT+"FAKE_GHQ_ROOT=${FAKE_GHQ_ROOT}"} \
     ${DOTFILES_PRIVATE_DIR+"DOTFILES_PRIVATE_DIR=${DOTFILES_PRIVATE_DIR}"} \
@@ -280,6 +315,78 @@ if [[ ${r1} == 2 && ${r2} == 2 && ${r3} == 0 ]] && grep -q 'name' "${c}/out"; th
   ok "引数が無い・知らないサブコマンドは 2、-h は usage を出して 0"
 else
   ng "使い方" "なし=${r1} 知らない=${r2} -h=${r3} $(out "${c}")"
+fi
+
+# 9a. system: uname から <arch>-<os>。引数を付けると 2
+c=$(new_case s1)
+run "${c}" system
+r1="$(rc "${c}") $(out "${c}")"
+FAKE_UNAME_M=aarch64 run "${c}" system
+r2="$(rc "${c}") $(out "${c}")"
+FAKE_UNAME_S=Darwin FAKE_UNAME_M=arm64 run "${c}" system
+r3="$(rc "${c}") $(out "${c}")"
+run "${c}" system extra
+r4=$(rc "${c}")
+if [[ ${r1} == "0 x86_64-linux" && ${r2} == "0 aarch64-linux" && ${r3} == "0 aarch64-darwin" && ${r4} == 2 ]]; then
+  ok "system は uname から x86_64-linux・aarch64-linux・aarch64-darwin を出し、引数を付けると 2"
+else
+  ng "system" "x86_64: ${r1} / aarch64: ${r2} / Darwin arm64: ${r3} / 引数: ${r4}"
+fi
+
+# 9b. windows-user: WSL なら pwsh.exe の $env:USERNAME を、CR を落として出す。出力の文字コードを UTF-8 にしてから引く
+c=$(new_case w1)
+WSL_DISTRO_NAME=Ubuntu FAKE_PWSH_USER=alice PATH_EXTRA=${win_bin} run "${c}" windows-user
+if [[ $(rc "${c}") == 0 && $(out "${c}") == alice ]] && grep -qF 'OutputEncoding' "${c}/home/pwsh-args"; then
+  ok "windows-user は WSL なら pwsh.exe の \$env:USERNAME を、CR を落として出す (出力を UTF-8 にしてから引く)"
+else
+  ng "windows-user (pwsh.exe)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}") args=$(cat "${c}/home/pwsh-args" 2>/dev/null)"
+fi
+
+# 9c. windows-user: pwsh.exe が無い・落ちたら powershell.exe。末尾の空白も落とす
+c=$(new_case w2)
+WSL_DISTRO_NAME=Ubuntu FAKE_PS_USER='bob  ' PATH_EXTRA=${win_ps_bin} run "${c}" windows-user
+r1="$(rc "${c}") [$(out "${c}")]"
+WSL_DISTRO_NAME=Ubuntu FAKE_PWSH_RC=1 FAKE_PS_USER=carol PATH_EXTRA=${win_bin} run "${c}" windows-user
+r2="$(rc "${c}") [$(out "${c}")]"
+if [[ ${r1} == "0 [bob]" && ${r2} == "0 [carol]" ]]; then
+  ok "windows-user は pwsh.exe が無い・落ちたら powershell.exe に移り、末尾の空白も落とす"
+else
+  ng "windows-user (powershell.exe)" "pwsh.exe 無し: ${r1} / pwsh.exe が落ちる: ${r2}"
+fi
+
+# 9d. windows-user: 日本語と途中の空白はそのまま
+c=$(new_case w3)
+WSL_DISTRO_NAME=Ubuntu FAKE_PWSH_USER='山田 太郎' PATH_EXTRA=${win_bin} run "${c}" windows-user
+if [[ $(rc "${c}") == 0 && $(out "${c}") == '山田 太郎' ]]; then
+  ok "windows-user は日本語と途中の空白をそのまま出す"
+else
+  ng "windows-user (日本語)" "rc=$(rc "${c}") out=[$(out "${c}")]"
+fi
+
+# 9e. windows-user: どちらでも引けなければ 1
+c=$(new_case w4)
+WSL_DISTRO_NAME=Ubuntu run "${c}" windows-user
+if [[ $(rc "${c}") == 1 && -z $(out "${c}") ]] && grep -qF 'Windows のユーザー名を引けません' "${c}/err"; then
+  ok "windows-user は pwsh.exe でも powershell.exe でも引けなければ、理由を出して 1"
+else
+  ng "windows-user (引けない)" "rc=$(rc "${c}") out=$(out "${c}") err=$(err "${c}")"
+fi
+
+# 9f. windows-user: WSL でなければ pwsh.exe を呼ばずに 1。/proc/version (DOTFILES_PROC_VERSION) の microsoft でも WSL と見る
+c=$(new_case w5)
+printf 'Linux version 6.8.0-generic (buildd@example) #1 SMP\n' >"${c}/proc-version-linux"
+printf 'Linux version 6.6.87.2-microsoft-standard-WSL2 (root@example) #1 SMP\n' >"${c}/proc-version-wsl"
+DOTFILES_PROC_VERSION="${c}/proc-version-linux" FAKE_PWSH_USER=alice PATH_EXTRA=${win_bin} run "${c}" windows-user
+r1="$(rc "${c}") [$(out "${c}")]"
+e1=$(err "${c}")
+called1=0
+[[ ! -s ${c}/home/pwsh-args ]] || called1=1
+DOTFILES_PROC_VERSION="${c}/proc-version-wsl" FAKE_PWSH_USER=alice PATH_EXTRA=${win_bin} run "${c}" windows-user
+r2="$(rc "${c}") [$(out "${c}")]"
+if [[ ${r1} == "1 []" && ${e1} == *'WSL ではありません'* && ${called1} == 0 && ${r2} == "0 [alice]" ]]; then
+  ok "windows-user は WSL でなければ pwsh.exe を呼ばずに 1。/proc/version の microsoft でも WSL と見る"
+else
+  ng "windows-user (WSL でない)" "Linux: ${r1} (${e1}) pwsh.exe を呼んだ=${called1} / WSL の /proc/version: ${r2}"
 fi
 
 # ---- inspect・draft・compare (偽の nix) ----
