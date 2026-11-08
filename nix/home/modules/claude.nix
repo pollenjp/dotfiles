@@ -14,6 +14,7 @@
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
 #   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
 #                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
+#   (op-reason-guard.sh が読む ~/.local/state/dotfiles/claude-op-reason.json は home/modules/op-reason.nix が書く)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。cc-page の規則の
 #                                     port を dotfiles.ccPages.port で埋める。下記)
@@ -457,6 +458,18 @@ in
     {
       ".claude/hooks/pr-assignee-nudge.sh" = {
         source = claudeRoot + "/hooks/pr-assignee-nudge.sh";
+        executable = true;
+      };
+    }
+
+    # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/pjp-op。理由が必須の 1Password CLI の
+    # wrapper) を守る: op.exe の直打ちを止めて op --reason … に直させ、op の記録にこの会話の承認の拒否・時間切れがあれば、
+    # 打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
+    # (claude-op-reason.json の enable が false。home/modules/op-reason.nix が書く) では黙る。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/op-reason-guard.sh" = {
+        source = claudeRoot + "/hooks/op-reason-guard.sh";
         executable = true;
       };
     }

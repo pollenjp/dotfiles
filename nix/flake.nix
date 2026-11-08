@@ -180,6 +180,66 @@
               system
               ;
           };
+          # WSL の op の launcher (pkgs/pjp-op/launcher.ps1) を、Linux の pwsh と偽の op で流す。窓と通知は Windows でだけ
+          # 出すので、ここでは出さない (どちらも skipped と書く)。package が build のときに作った launcher の dir も渡し、op と
+          # 同じ起動の式 (-EncodedCommand が env の本体を読む) でも流す
+          pjp-op-launcher-test =
+            pkgs.runCommand "pjp-op-launcher-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.powershell
+                  pkgs.jq
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1} \
+                  ${(pkgs.callPackage ./pkgs/pjp-op { }).launcher}
+                touch $out
+              '';
+          # WSL の op (pkgs/pjp-op/op.sh) を、偽の powershell.exe・op.exe・wslpath・herdr で流す。lock に flock (util-linux) を使う
+          pjp-op-test =
+            pkgs.runCommand "pjp-op-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op.test.sh} ${./pkgs/pjp-op/op.sh}
+                touch $out
+              '';
+          # op.sh から本物の launcher (Linux の pwsh) までを偽の op で端から端まで通す (op.sh と launcher の取り決めのずれを見る)
+          pjp-op-e2e-test =
+            pkgs.runCommand "pjp-op-e2e-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.powershell
+                  pkgs.jq
+                  pkgs.git
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-e2e.test.sh} ${./pkgs/pjp-op/op.sh} ${
+                  (pkgs.callPackage ./pkgs/pjp-op { }).launcher
+                }
+                touch $out
+              '';
+          # op の記録を表で見る pjp-op-log (pkgs/pjp-op/pjp-op-log.sh) を作り物の記録で流す。表を揃えるのに column (util-linux) を使う
+          pjp-op-log-test =
+            pkgs.runCommand "pjp-op-log-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.util-linux
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-log.test.sh} ${./pkgs/pjp-op/pjp-op-log.sh}
+                touch $out
+              '';
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
@@ -296,6 +356,7 @@
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
+          op-reason-guard-test = scriptTest "op-reason-guard" ./files/claude/hooks/op-reason-guard.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
@@ -535,6 +596,14 @@
               system
               ;
           };
+          op-reason-state = import ./tests/op-reason.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
           local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
           hosts-with-state = import ./tests/hosts-with.nix {
@@ -707,12 +776,18 @@
         # 単体で試すなら:
         #
         #   nix run ./nix#pjp-wsl-xdg-open -- <URL かファイルのパス>
+        #
+        # WSL の op (1Password CLI の wrapper) と pjp-op-log も WSL のマシンでしか使わない。home には home/modules/op-reason.nix が
+        # 入れる。単体で試すなら (承認の画面が出る):
+        #
+        #   nix run ./nix#pjp-op -- --reason "<なぜ呼ぶか>" whoami
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
           pjp-wsl-mtu-guard = pkgs.callPackage ./pkgs/pjp-wsl-mtu-guard { };
           pjp-wsl-xdg-open = pkgs.callPackage ./pkgs/pjp-wsl-xdg-open { };
+          pjp-op = pkgs.callPackage ./pkgs/pjp-op { };
         }
       );
 
