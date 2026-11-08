@@ -7,7 +7,8 @@
 #   bash nix/tests/setup-post-notes.test.sh [<nix/scripts のパス> | <setup.sh のパス>]
 #
 # nix/scripts のディレクトリを渡すと、雛形の版を見るケースのために、隣の local-flake-migrate.sh と
-# setup-local-flake.sh も使う (setup.sh だけを渡したときは、そのケースを飛ばす)。
+# setup-local-flake.sh も使い、mise の [tools] の残りを見るケースのために bootstrap-mise.sh も使う
+# (setup.sh だけを渡したときは、それらのケースを飛ばす)。
 #
 # flake の checks (setup-post-notes-test) が Nix のサンドボックスで流す。
 #
@@ -37,6 +38,10 @@
 #     印が同じなら出さない。local-flake を流したときは、setup-local-flake.sh の警告がまとめに載るので出さない
 #   - switch が落ちたときは (残りの手作業は出ない)、印が今と違えば、失敗の案内のあとに、本体で option が削除・
 #     改名されると旧い local のままでは評価が止まることと移し方を stderr に出す。印が同じなら出さない
+#   - 手順 5 (mise の [tools] の整理): 本物の bootstrap-mise.sh を偽の mise で流し、それが書いた形の
+#     ~/.config/mise/config.toml なら、残りの手作業に手順 5 を出さない (setup が書いた名前を手で消すよう言わない)
+#   - bootstrap-mise.sh が書かない名前 (前の setup と旧経路が書いた短縮名の usage・Nix に移した gh) が [tools] に
+#     残っていれば、手順 5 にその名前だけを並べ、setup が書く名前 (偽の mise に書かせた名前) を添える
 #
 # ## 作り
 #
@@ -46,7 +51,8 @@
 # DOTFILES_SETUP_WARNINGS のファイルへ書く。shebang は $BASH から作る (サンドボックスに
 # /usr/bin/env が無い)。PATH は要るコマンドだけを symlink で並べる (手元で流しても、本物の
 # git・gh・nix を見せない)。switch の手順は、偽の home-manager (何もせず 0 を返す) と偽の nix
-# (nix eval ならケースごとの warnings を返す) で流す。
+# (nix eval ならケースごとの warnings を返す) で流す。手順 5 のケースは、本物の bootstrap-mise.sh を写し、
+# 偽の mise (mise use -g の名前を本物と同じ形で config.toml の [tools] に書く) で流す。
 
 set -u -o pipefail
 
@@ -82,7 +88,7 @@ ng() {
 # 要るコマンドだけを並べた PATH (git・gh・nix・home-manager は入れない)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env jq awk sed grep sort head tr cat dirname basename readlink uname id mktemp mkdir rm chmod cksum; do
+for c in env jq awk sed grep sort head tr cat dirname basename readlink uname id mktemp mkdir rm chmod cksum date; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -618,6 +624,83 @@ fi'
   fi
 else
   echo "  (setup.sh だけを渡したので、ローカル flake の雛形の版のケースは飛ばす)"
+fi
+
+# ---- 手順 5: mise の [tools] の残り (setup.sh だけを渡したときは飛ばす) ----
+if [[ -n ${scripts} ]]; then
+  # ケースの checkout に本物の bootstrap-mise.sh を写す (サンドボックスでは store から写すので読み取り専用になり、
+  # /usr/bin/env も無いので、書き込みの権限を足して shebang を $BASH にする)。HOME には、警告を出させないよう
+  # mise の遅延の状態ファイルと cursor-agent の conf.d の宣言を置く。config.toml は [tools] を最後の表にし、
+  # $2 (bootstrap-mise.sh より前からある [tools] の行) を入れておく
+  with_mise() {
+    local s="$1/repo/nix/scripts/bootstrap-mise.sh"
+    cp "${scripts}/bootstrap-mise.sh" "${s}"
+    chmod u+w "${s}"
+    sed -i "1s|.*|#!${BASH}|" "${s}"
+    chmod +x "${s}"
+    mkdir -p "$1/home/.config/mise/conf.d" "$1/home/.local/state/dotfiles"
+    : >"$1/home/.config/mise/conf.d/cursor-agent.toml"
+    printf '%s\n' '{"minimumReleaseAge":"9d","releaseAgeOverrides":[]}' >"$1/home/.local/state/dotfiles/mise-release-age.json"
+    printf '[settings]\nlockfile = true\n\n[tools]\n%s' "$2" >"$1/home/.config/mise/config.toml"
+  }
+  # 偽の mise を置いた bin を作り、その場所を出す。mise use -g <名前>[@<版>] だけ、本物と同じ形で config.toml の
+  # [tools] (最後の表) の末尾に書き (名前に : か / があれば "" で囲む。版を省くか latest なら "latest")、書いた名前を
+  # <HOME>/mise-wrote に 1 行ずつ残す。ほかの呼び出し (settings set・install・upgrade・config ls) は何もせず 0 を返す
+  fake_mise_bin() {
+    local b="$1/mise-bin"
+    mkdir -p "${b}"
+    {
+      printf '#!%s\n' "${BASH}"
+      cat <<'EOF'
+if [[ $1 == use && $2 == -g ]]; then
+  name=${3%%@*}
+  ver=latest
+  if [[ $3 == *@* ]]; then ver=${3#*@}; fi
+  key=${name}
+  if [[ ${name} == *[:/]* ]]; then key="\"${name}\""; fi
+  printf '%s = "%s"\n' "${key}" "${ver}" >>"${HOME}/.config/mise/config.toml"
+  printf '%s\n' "${name}" >>"${HOME}/mise-wrote"
+fi
+exit 0
+EOF
+    } >"${b}/mise"
+    chmod +x "${b}/mise"
+    echo "${b}"
+  }
+  # 残りの手作業の手順 5 の案内 (見出しの行から 4 行)
+  step5() { grep -A4 -F '手順 5:' "$1/out"; }
+  mise_detail() { printf 'rc=%s\n--- 書いた名前\n%s\n--- config.toml\n%s\n--- 残りの手作業\n%s\n--- err\n%s' "$(rc "$1")" "$(cat "$1/home/mise-wrote" 2>/dev/null)" "$(cat "$1/home/.config/mise/config.toml")" "$(after_post_notes "$1")" "$(cat "$1/err")"; }
+
+  # 25. bootstrap-mise.sh が書いた形の config.toml なら、手順 5 を出さない
+  c=$(new_case t25)
+  with_mise "${c}" ''
+  PATH_EXTRA=$(fake_mise_bin "${c}") run "${c}" --steps bootstrap-mise
+  if [[ $(rc "${c}") == 0 && -s ${c}/home/mise-wrote ]] && grep -q '^==> 残りの手作業' "${c}/out" \
+    && ! seen_after_post_notes "${c}" '手順 5'; then
+    ok "bootstrap-mise.sh が書いた形の config.toml なら、手順 5 (mise の [tools] の整理) を出さない"
+  else
+    ng "bootstrap-mise.sh が書いた形の config.toml" "$(mise_detail "${c}")"
+  fi
+
+  # 26. bootstrap-mise.sh が書かない名前 (前の setup と旧経路が書いた短縮名の usage・Nix に移した gh) が残っていれば、
+  #     手順 5 にその名前だけを並べ、setup が書く名前 (偽の mise に書かせた名前) を添える
+  c=$(new_case t26)
+  with_mise "${c}" $'usage = "latest"\ngh = "latest"\n'
+  PATH_EXTRA=$(fake_mise_bin "${c}") run "${c}" --steps bootstrap-mise
+  block=$(step5 "${c}")
+  kept=$(sed -n '3,$p' <<<"${block}")
+  missing=""
+  while IFS= read -r name; do
+    grep -qwF -- "${name}" <<<"${kept}" || missing+=" ${name}"
+  done < <(cat "${c}/home/mise-wrote" 2>/dev/null)
+  if [[ $(rc "${c}") == 0 && -s ${c}/home/mise-wrote && -z ${missing} ]] \
+    && [[ $(sed -n '2p' <<<"${block}") =~ ^[[:space:]]+usage\ gh[[:space:]]*$ ]]; then
+    ok "bootstrap-mise.sh が書かない名前 (短縮名の usage・gh) だけを手順 5 に並べ、setup が書く名前を添える"
+  else
+    ng "bootstrap-mise.sh が書かない名前 (添えていない名前:${missing:- なし})" "$(mise_detail "${c}")"
+  fi
+else
+  echo "  (setup.sh だけを渡したので、mise の [tools] の残りのケースは飛ばす)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

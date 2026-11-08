@@ -4305,19 +4305,23 @@ mise 自身のコマンドで行う（config.toml は mise のスキーマであ
 ./nix/scripts/bootstrap-mise.sh
 ```
 
-`[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と
-言語ランタイム（`go` / `node` / `usage`）を入れる。`mise settings set` は該当キーだけを
-触るので冪等で、既存の `[tools]` も壊さない。`minimum_release_age` は option の値（既定の 9d か、期間付きの
-上書きの上限。[後述](#遅延-minimum_release_age-を期間付きで緩める)）を書く。
+`[settings]`（`minimum_release_age` / `lockfile` / `fetch_remote_versions_timeout`）と、`[tools]` に
+言語ランタイム（`go` / `node`）・mise の補完に要る `usage`（`aqua:jdx/usage`）・`claude`（[前述](#claude-だけ-mise-に置いている理由)）を
+入れる。`mise settings set` は該当キーだけを触るので冪等で、既存の `[tools]` も壊さない。`minimum_release_age` は
+option の値（既定の 9d か、期間付きの上書きの上限。[後述](#遅延-minimum_release_age-を期間付きで緩める)）を書く。
 
 > ネットワークアクセスとインストールを伴うため `home.activation` には入れていない。
 > `home-manager switch` は hermetic に保つ方針。
 
-> ⚠️ **既存マシンでは、既に書き込まれた 16 エントリが自動では消えない。**
-> マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`go` / `node` / `usage`
-> だけ残すこと。消さないと mise の shim が PATH 先頭にいるため Nix 側のツールが使われない。
-> `setup.sh` は `[tools]` に残っている名前を実行後の「残りの手作業」に並べる
-> （片付いていれば何も出さない）。
+> ⚠️ **既存マシンでは、旧経路（`main.bash` のシェル設定）が書き込んだ 16 エントリが自動では消えない。**
+> マシン毎に一度だけ `~/.config/mise/config.toml` を手で編集し、`[tools]` には `bootstrap-mise.sh` が書く名前
+> （今は `aqua:jdx/usage` / `go` / `node` / `claude`）だけを残すこと。消さないと mise の shim が PATH 先頭にいるため
+> Nix 側のツールが使われない。旧経路と前の `setup` が書いた短縮名の `usage` も消す（今は `aqua:jdx/usage` を書く。
+> 同じ道具で、短縮名だと backend を mise が選ぶ）。
+> `setup.sh` は、`[tools]` に残っている名前のうち `bootstrap-mise.sh` が書かないものを、実行後の「残りの手作業」に
+> 手順 5 として並べる（片付いていれば何も出さない）。書く名前は `bootstrap-mise.sh` のヘッダの `# mise-tools:` から読む
+> （[実行順の `# order:`](#bootstrap-の実行順) と同じく、`setup.sh` 側に一覧を持たない）。`bootstrap-mise.sh` の
+> `mise use -g` を足す・変えるときはヘッダも直す（`nix/tests/bootstrap-mise.test.sh` が突き合わせる）。
 
 ### 遅延 (minimum_release_age) を期間付きで緩める
 

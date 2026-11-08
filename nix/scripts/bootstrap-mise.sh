@@ -10,6 +10,14 @@
 #   bootstrap-claude-plugins.sh が claude を要求し、その claude を入れるのは
 #   ここなので、辞書順 (bootstrap-mise は最後尾) より前に出す必要がある。
 #
+# mise-tools: aqua:jdx/usage go node claude
+#
+# ^ setup.sh が読む、この script が mise use -g で config.toml の [tools] に書く名前 (版は除く)。
+#   setup の「残りの手作業」の手順 5 は、[tools] のうちこれ以外の名前 (前の setup や旧経路が書いた
+#   もの・Nix に移した道具など) を、手で消すものとして並べる。下の mise use -g を足す・変える・消す
+#   ときは、ここも直す (nix/tests/bootstrap-mise.test.sh が突き合わせる)。cursor-agent は [tools] に
+#   書かない (conf.d の宣言を使う。下の cursor-agent の節) ので並べない。
+#
 # ## なぜ Nix で管理しないのか
 #
 # このファイルは mise 自身が実行時に書き換える (mise use --pin など)。

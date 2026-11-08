@@ -31,6 +31,9 @@
 #     (claude は入れる。exit 0)
 #   - install が落ちたら upgrade を打たず、待つか版を指して入れる (mise install cursor-agent@<版>) 案内を警告して最後まで
 #     流れる。upgrade が落ちたら警告して最後まで流れる。どちらも exit 0 (後ろの bootstrap を止めない)
+#   - ヘッダの `# mise-tools:` (setup.sh が読み、残りの手作業の手順 5 で「setup が書く名前」として数えない) に、
+#     mise use -g で ~/.config/mise/config.toml の [tools] に書く名前 (版を除く) を過不足なく並べている。足りないと
+#     手順 5 が setup の書いた名前を手で消すよう出し、余ると setup が書かなくなった名前の残りを見逃す
 #
 # 偽の mise は、受けた env の MISE_MINIMUM_RELEASE_AGE と引数を「<env>|<引数>」の形で $HOME/mise.log に 1 行ずつ残す。
 # FAKE_MISE_FAIL に引数の並び (例: install cursor-agent) を渡すと、その呼び出しだけ exit 1 で落ちる。
@@ -321,6 +324,18 @@ if [[ $(cat "${h}/rc") == 0 ]] && grep -Fxq -- '1d|upgrade cursor-agent' "${h}/m
   ok "upgrade が落ちたら警告して最後まで流れる (exit 0)"
 else
   ng "upgrade が落ちたとき" "$(detail "${h}")"$'\n--- warnings\n'"$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 9. ヘッダの `# mise-tools:` と、mise use -g で [tools] に書く名前 (版を除く) が同じ。ヘッダは setup.sh が読む
+#    (script と setup.sh の間の取り決め) ので、ここで書く名前と突き合わせる
+h=$(new_home mise-tools "$(state 9d)")
+run "${h}" 2026-10-22T03:00:00Z
+declared=$(sed -n 's/^#[[:space:]]*mise-tools:[[:space:]]*//p' "${script}" | tr -s '[:space:]' '\n' | sort)
+written=$(sed -n 's/^[^|]*|use -g \([^@]*\).*$/\1/p' "${h}/mise.log" | sort)
+if [[ $(cat "${h}/rc") == 0 && -n ${written} && ${declared} == "${written}" ]]; then
+  ok "ヘッダの mise-tools: に、mise use -g で [tools] に書く名前 (版を除く) を過不足なく並べている"
+else
+  ng "ヘッダの mise-tools: (ヘッダ: ${declared//$'\n'/ } / 書いた名前: ${written//$'\n'/ })" "$(detail "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
