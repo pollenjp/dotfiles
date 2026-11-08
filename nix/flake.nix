@@ -157,6 +157,11 @@
               };
               onePassword.enable = true;
             }).activationPackage;
+          # setup-local-flake.sh --initial がローカル flake に差し込む初期用のホスト initial (SSH 鍵も gh のログインもまだの、
+          # 新しい WSL の PC) を、差し込む塊と同じ fixture で build する (評価の確かめは local-flake-initial-state)
+          home-wsl-initial-example =
+            (import ./tests/fixtures/local-flake-initial/initial.nix { dotfiles.lib = { inherit mkHome; }; })
+            .initial.activationPackage;
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
@@ -617,6 +622,7 @@
           };
           private-hosts-state = import ./tests/private-hosts.nix { inherit lib pkgs privateHosts; };
           local-flake-tmp-state = import ./tests/local-flake-tmp.nix { inherit lib pkgs mkHome; };
+          local-flake-initial-state = import ./tests/local-flake-initial.nix { inherit lib pkgs mkHome; };
           hosts-with-state = import ./tests/hosts-with.nix {
             inherit
               lib
