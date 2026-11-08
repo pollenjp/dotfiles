@@ -70,6 +70,8 @@ usage() {
       この PC の system (x86_64-linux・aarch64-linux・aarch64-darwin など) を出す
   private-host.sh windows-user
       WSL のホスト側 Windows のユーザー名 (pwsh.exe → powershell.exe の $env:USERNAME) を出す。WSL でない・引けないなら 1
+  private-host.sh is-wsl
+      WSL なら何も出さずに 0、WSL でなければ理由を出して 1
   private-host.sh inspect [--flake <dir>]
       この PC を調べる: 名前・system・WSL (Windows のユーザー名)・clone と登録と shared/ の module (登録した全ホストに
       足す)・ローカル flake (雛形の版・入力・手で足したホスト・前の雛形なら local の行)・setup が --host なしで選ぶ
@@ -256,6 +258,8 @@ windows_user() {
     u=$("${exe}" -NoProfile -Command '[Console]::OutputEncoding = [Text.Encoding]::UTF8; $env:USERNAME' 2>/dev/null </dev/null) || continue
     u=${u//$'\r'/}
     u=${u%%$'\n'*}
+    # 出力の文字コードに BOM が付いていたら落とす ([Text.Encoding]::UTF8 は BOM 付き。付けるかどうかは PowerShell の版による)
+    u=${u#$'\xef\xbb\xbf'}
     while [[ ${u} == *[[:space:]] ]]; do
       u=${u%[[:space:]]}
     done
@@ -1011,6 +1015,13 @@ case ${cmd} in
     [[ $# -eq 0 ]] || die "system は引数を取りません"
     this_system
     echo
+    ;;
+  is-wsl)
+    [[ $# -eq 0 ]] || die "is-wsl は引数を取りません"
+    if ! is_wsl; then
+      printf '!! WSL ではありません (WSL_DISTRO_NAME が無く、/proc/version に microsoft がありません)。\n' >&2
+      exit 1
+    fi
     ;;
   windows-user)
     [[ $# -eq 0 ]] || die "windows-user は引数を取りません"

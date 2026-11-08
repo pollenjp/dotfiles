@@ -23,7 +23,8 @@
 #   - windows-user は、WSL (WSL_DISTRO_NAME があるか、DOTFILES_PROC_VERSION (既定 /proc/version) に microsoft がある) なら、
 #     pwsh.exe → powershell.exe の順に $env:USERNAME を引き、CR と末尾の空白を落として出す (日本語と途中の空白はそのまま。
 #     出力の文字コードを UTF-8 にしてから引く)。pwsh.exe が無い・落ちたら powershell.exe に移る。WSL でない (pwsh.exe を
-#     呼ばない)・どちらでも引けないなら、理由を stderr に出して 1
+#     呼ばない)・どちらでも引けないなら、理由を stderr に出して 1。頭の UTF-8 の BOM も落とす
+#   - is-wsl は WSL なら何も出さずに 0、WSL でなければ理由を stderr に出して 1
 #   - 引数が無い・知らないサブコマンドは usage を出して 2、-h は 0
 #   - inspect (偽の nix) は、この PC の名前・clone と登録の有無・登録してあるホスト・ローカル flake の dotfiles-private の
 #     入力の状態 (stub)・手で足したホスト・local のコメントでない行 (dotfiles の外の行も)・setup が --host なしで選ぶ
@@ -387,6 +388,28 @@ if [[ ${r1} == "1 []" && ${e1} == *'WSL ではありません'* && ${called1} ==
   ok "windows-user は WSL でなければ pwsh.exe を呼ばずに 1。/proc/version の microsoft でも WSL と見る"
 else
   ng "windows-user (WSL でない)" "Linux: ${r1} (${e1}) pwsh.exe を呼んだ=${called1} / WSL の /proc/version: ${r2}"
+fi
+
+# 9g. is-wsl: WSL なら 0、WSL でなければ理由を出して 1
+c=$(new_case w6)
+printf 'Linux version 6.8.0-generic (buildd@example) #1 SMP\n' >"${c}/proc-version-linux"
+WSL_DISTRO_NAME=Ubuntu run "${c}" is-wsl
+r1="$(rc "${c}") [$(out "${c}")]"
+DOTFILES_PROC_VERSION="${c}/proc-version-linux" run "${c}" is-wsl
+r2=$(rc "${c}")
+if [[ ${r1} == "0 []" && ${r2} == 1 ]] && grep -qF 'WSL ではありません' "${c}/err"; then
+  ok "is-wsl は WSL なら何も出さずに 0、WSL でなければ理由を出して 1"
+else
+  ng "is-wsl" "WSL: ${r1} / WSL でない: ${r2} $(err "${c}")"
+fi
+
+# 9h. windows-user: 頭の UTF-8 の BOM を落とす (powershell.exe の出力に付いても)
+c=$(new_case w7)
+WSL_DISTRO_NAME=Ubuntu FAKE_PS_USER=$'\xef\xbb\xbfbob' PATH_EXTRA=${win_ps_bin} run "${c}" windows-user
+if [[ $(rc "${c}") == 0 && $(out "${c}") == bob ]]; then
+  ok "windows-user は頭の UTF-8 の BOM を落とす"
+else
+  ng "windows-user (BOM)" "rc=$(rc "${c}") out=$(out "${c}" | od -An -c | head -2)"
 fi
 
 # ---- inspect・draft・compare (偽の nix) ----

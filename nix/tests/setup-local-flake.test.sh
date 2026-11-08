@@ -34,8 +34,12 @@
 #     コメント・mkHome) を差し込む。塊は fixture の initial と同じ (username は $USER、system は uname、Windows のユーザー名は
 #     偽の pwsh.exe が返す値)。差し込んだ所を除くと render --file と 1 バイトも違わない (雛形の版の印も変えない)。出力に
 #     Windows のユーザー名と、次に打つ ~/dotfiles/setup --new-machine を出す
-#   - --windows-user <名前> は名前を引かずに使い (pwsh.exe を呼ばない)、--initial なしでは 1
-#   - initial が既にあれば「既にあります」で中身を変えない。今の雛形のまま (clone の nix/ を指す雛形も) なら差し込む。
+#   - --initial で本体の stub を指したときは、clone を読ませる道に、登録して merge したら --force で作り直す (initial も外れる)
+#     を出す (local-flake-migrate.sh prepare は出さない。prepare は initial を残すため)
+#   - --windows-user <名前> は名前を引かずに使い (pwsh.exe を呼ばない)、--initial なしでは 1。WSL でなければ 1
+#   - initial が既にあれば「既にあります」で中身を変えず、値を引きも確かめもしない (pwsh.exe が別の名前を返しても 0)。
+#     --windows-user が今の値と違えば、使っていないことと --force --initial --windows-user での変え方を出す。
+#     今の雛形のまま (clone の nix/ を指す雛形も) なら差し込む。
 #     手を入れた flake.nix には書かずに 1 で、手で足す塊と --force --initial を出す。--force --initial は作り直して差し込む
 #   - WSL でない・Windows のユーザー名を引けない・<DOTFILES_WINDOWS_USERS_DIR (既定 /mnt/c/Users)>/<名前> が無い
 #     (候補を出す。Public などは出さない)・名前に " \ $ がある、なら書かずに 1 (flake.nix を作らない)
@@ -393,8 +397,9 @@ if migrate "${c}" render --file "${c}/repo/nix/scripts/setup-local-flake.sh" --n
 else
   ng "--initial の雛形" "$(diff "${c}/rendered" "${c}/stripped" | head -20)"
 fi
-if grep -qF 'alice' "${c}/out" && grep -qF -- '/dotfiles/setup --new-machine' "${c}/out"; then
-  ok "--initial: Windows のユーザー名と、次に打つ ~/dotfiles/setup --new-machine を出す"
+if grep -qF 'alice' "${c}/out" && grep -qF -- '/dotfiles/setup --new-machine' "${c}/out" \
+  && grep -qF 'setup-local-flake.sh --force で作り直す' "${c}/out" && ! grep -qF 'local-flake-migrate.sh prepare' "${c}/out"; then
+  ok "--initial: Windows のユーザー名と次に打つ --new-machine、clone を読ませるのは登録して merge したあとの --force と出す"
 else
   ng "--initial の出力" "$(out "${c}")"
 fi
@@ -530,6 +535,32 @@ if [[ $(rc "${c}") == 0 ]] && grep -qxF '            windowsUserName = "山田 �
   ok "--initial: 日本語と空白を含む名前もそのまま書く"
 else
   ng "--initial (日本語)" "rc=$(rc "${c}") $(err "${c}")"
+fi
+
+# 21. initial が既にある: 値を引きも確かめもせず (pwsh.exe が別の名前を返しても) 0 で変えない。--windows-user が違えば、変え方を出す
+c=$(new_initial_case i12)
+run_initial "${c}" --initial
+cp -p "${c}/local/flake.nix" "${c}/before.nix"
+FAKE_PWSH_USER=dave run_initial "${c}" --initial
+r1=$(rc "${c}")
+o1=$(out "${c}")
+run_initial "${c}" --initial --windows-user carol
+if [[ ${r1} == 0 && ${o1} == *'初期用のホスト initial は既にあります'* && $(rc "${c}") == 0 ]] \
+  && cmp -s "${c}/before.nix" "${c}/local/flake.nix" \
+  && grep -qF -- '--force --initial --windows-user carol' "${c}/out"; then
+  ok "--initial: initial が既にあれば値を引きも確かめもせず 0。--windows-user が違えば、使っていないことと変え方を出す"
+else
+  ng "--initial (既にある・値の確かめ)" "1 回目=${r1} (${o1}) / --windows-user: rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 22. --windows-user でも WSL でなければ 1 (/mnt/c/Users/<名前> があっても)
+c=$(new_initial_case i13)
+mkdir -p "${c}/Users/carol"
+NOT_WSL=1 run_initial "${c}" --initial --windows-user carol
+if [[ $(rc "${c}") == 1 && ! -e ${c}/local/flake.nix ]] && grep -qF 'WSL ではありません' "${c}/err"; then
+  ok "--initial --windows-user: WSL でなければ、フォルダがあっても書かずに 1"
+else
+  ng "--windows-user (WSL でない)" "rc=$(rc "${c}") $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
