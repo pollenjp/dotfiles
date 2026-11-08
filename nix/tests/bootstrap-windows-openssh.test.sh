@@ -17,6 +17,9 @@
 #   - --apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
 #     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
+#   - -Check が 3 (入っていない) でこちらの出力なら、UAC の確認が出ると先に出してから -IfMissing で入れる (偽の timeout が
+#     上限を記録し、-Check は 120 秒・-IfMissing は 600 秒)。入ったら 1 行と鍵の確かめ方。時間切れ (124)・失敗なら ⚠ で
+#     囲んで入れ直し方を出し、まとめにも残す。こちらの出力でなければ -IfMissing を打たず、手で打つコマンドを出す。どれも exit 0
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -60,7 +63,7 @@ check_out='OpenSSH (winget の Microsoft.OpenSSH.Preview、C:\Program Files\Open
 # 要るコマンドだけを並べた PATH (pwsh.exe と wslpath は入れない)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env jq grep sed tr cat head tail od mkdir mktemp mv rm dirname basename chmod timeout; do
+for c in env jq grep sed tr cat head tail od mkdir mktemp mv rm dirname basename chmod timeout cp wc; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -82,17 +85,38 @@ new_home() {
     mkdir -p "${h}/win/.config/powershell"
     printf '# Install-OpenSSH.ps1\n' >"${h}/win/.config/powershell/Install-OpenSSH.ps1"
   fi
-  # 偽の pwsh.exe。引数を記録し、FAKE_PWSH_OUT を行ごとに CRLF で出して FAKE_PWSH_RC で終わる
+  # 偽の pwsh.exe。引数を記録し、FAKE_PWSH_OUT を行ごとに CRLF で出して FAKE_PWSH_RC で終わる。
+  # 2 回目からは、FAKE_PWSH_RC2 があれば FAKE_PWSH_OUT2 と FAKE_PWSH_RC2 を使う (-Check のあとの -IfMissing)。
+  # -IfMissing で呼ばれたら、その時点の stdout (<HOME>/out) を <HOME>/out-at-ifmissing に写す (先に出した案内を見るため)
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
 printf '%s\n' "$*" >>"${HOME}/pwsh-calls"
-if [[ -n ${FAKE_PWSH_OUT-} ]]; then
-  while IFS= read -r l; do printf '%s\r\n' "${l}"; done <<<"${FAKE_PWSH_OUT}"
+case $* in
+  *-IfMissing*) cp "${HOME}/out" "${HOME}/out-at-ifmissing" 2>/dev/null ;;
+esac
+out=${FAKE_PWSH_OUT-}
+rc=${FAKE_PWSH_RC:-0}
+if [[ -n ${FAKE_PWSH_RC2-} && $(wc -l <"${HOME}/pwsh-calls") -ge 2 ]]; then
+  out=${FAKE_PWSH_OUT2-}
+  rc=${FAKE_PWSH_RC2}
 fi
-exit "${FAKE_PWSH_RC:-0}"
+if [[ -n ${out} ]]; then
+  while IFS= read -r l; do printf '%s\r\n' "${l}"; done <<<"${out}"
+fi
+exit "${rc}"
 EOF
   } >"${h}/bin/pwsh.exe"
+  # 偽の timeout。上限 (秒) を <HOME>/timeout-calls に記録して、残りをそのまま流す
+  {
+    printf '#!%s\n' "${BASH}"
+    cat <<'EOF'
+printf '%s\n' "$1" >>"${HOME}/timeout-calls"
+shift
+exec "$@"
+EOF
+  } >"${h}/bin/timeout"
+  chmod +x "${h}/bin/timeout"
   # 偽の wslpath。-w <パス> を C:\fake\<ファイル名> にする
   {
     printf '#!%s\n' "${BASH}"
@@ -340,6 +364,56 @@ if [[ $(rc "${h}") == 2 ]] && ! pwsh_called "${h}"; then
   ok "知らない引数は exit 2"
 else
   ng "知らない引数" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 17. 入っていない (-Check が 3): UAC の確認が出ると先に出してから -IfMissing で入れる。入ったら 1 行と鍵の確かめ方
+missing_out='OpenSSH (winget の Microsoft.OpenSSH.Preview、C:\Program Files\OpenSSH)
+  入っている版    : 入っていない
+⚠ 固定した版      : 10.0.0.0 → 入れる
+  winget の最新版 : 10.0.0.0
+  ssh-agent       : サービス無し → そのまま
+⚠ winget pin      : 無し → 足す
+⚠️ OpenSSH が入っていない → Install-OpenSSH で入れる (UAC が 1 回出る) ⚠️'
+h=$(new_home t17 "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2='入れた' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(grep -c . "${h}/pwsh-calls") == 2 ]] && called "${h}" -F -- '-IfMissing' \
+  && grep -qF 'UAC の確認が出ます' "${h}/out-at-ifmissing" \
+  && [[ $(tr '\n' ' ' <"${h}/timeout-calls") == "120 600 " ]] \
+  && seen "${h}" -F 'OpenSSH を入れました' && seen "${h}" -F 'Install-OpenSSH -Check' \
+  && [[ $(warn_lines "${h}") == 0 ]]; then
+  ok "入っていなければ、UAC の確認を先に出してから -IfMissing (600 秒) で入れ、入ったら 1 行と鍵の確かめ方を出す"
+else
+  ng "入れる (-IfMissing)" "rc=$(rc "${h}") calls=$(calls "${h}") timeout=$(cat "${h}/timeout-calls" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 18. 入れている間に 600 秒たった (timeout の 124): ⚠ で囲んで入れ直し方を出し、まとめにも残す。exit 0
+h=$(new_home t18 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=124 FAKE_PWSH_OUT2='' run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '600 秒' && seen "${h}" -F 'Install-OpenSSH -IfMissing' \
+  && [[ $(warn_lines "${h}") -ge 2 ]] && grep -qF 'OpenSSH を入れ終わりませんでした' "${h}/warnings"; then
+  ok "入れている間に 600 秒たったら、⚠ で囲んで入れ直し方を出し、まとめにも残す"
+else
+  ng "入れる (時間切れ)" "rc=$(rc "${h}") $(outerr "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 19. 入れられなかった (-IfMissing が 1): ⚠ で囲んで、出力と入れ直し方を出す。exit 0
+h=$(new_home t19 "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='winget が失敗した (終了コード 0x8A150011)' run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'OpenSSH を入れられませんでした' \
+  && seen "${h}" -F 'winget が失敗した (終了コード 0x8A150011)' && seen "${h}" -F 'Install-OpenSSH -IfMissing'; then
+  ok "入れられなければ、⚠ で囲んで出力と入れ直し方を出す (exit 0)"
+else
+  ng "入れる (失敗)" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 20. -Check が 3 でも、こちらの出力が無い: -IfMissing を打たず、手で打つコマンドを出す
+h=$(new_home t20 "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT='The term is not recognized as a name of a cmdlet' run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(grep -c . "${h}/pwsh-calls") == 1 ]] && ! called "${h}" -F -- '-IfMissing' \
+  && seen "${h}" -F 'Install-OpenSSH -Check'; then
+  ok "-Check が 3 でもこちらの出力が無ければ、-IfMissing を打たずに手で打つコマンドを出す"
+else
+  ng "3 でもこちらの出力が無い" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
