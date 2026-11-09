@@ -3,7 +3,8 @@
 `scripts/drawio-export.sh` は以下をすべて織り込んである。**素で `drawio` を叩くときの
 ためのメモ**であり、スクリプト経由なら気にしなくてよい。
 
-以下は nixpkgs の drawio 30.2.6 で確認した内容。
+以下は nixpkgs の drawio 30.2.6 で確認した内容（「sandbox」の節と、xvfb-run の
+`--error-file` をファイルへ向けたときの注意は 32.4.1 で確かめた）。
 
 ## 仮想ディスプレイが要る（SVG でも）
 
@@ -40,6 +41,14 @@ _XSERVTransMakeAllCOTSServerListeners: failed to create listener for unix
 xvfb-run --auto-display --auth-file="${tmp}/Xauthority" --error-file=/dev/stderr drawio ...
 ```
 
+ただし **stderr をファイルへ向けているとき（`>log 2>&1`）は `/dev/stderr` を渡さない。**
+xvfb-run はコマンドが終わったあと `xauth remove … >"$ERRORFILE"` で開き直すので、log が
+切り詰められ、drawio の出力（落ちた理由）まで消える。症状は同じく「何も出力せず exit 1」。
+`scripts/drawio-export.sh` は出力を log に取ってノイズを落とすので、`--error-file` には別の
+一時ファイルを渡し、失敗したときに drawio の出力と並べて出す（Xvfb が立たないときは、
+xvfb-run が後始末の前に抜けるので、Xvfb の出力もそのファイルに残る）。端末に出すだけなら
+`/dev/stderr` でよい。
+
 nixpkgs の `drawio-headless` を使っていないのはこれが理由。あれは `xvfb-run` を
 内側に抱えていて外せないので、WSLg では常に失敗する。
 
@@ -63,11 +72,77 @@ Error: input file/directory not found
 `scripts/drawio-export.sh` は付けないままにしてある。古い drawio を使う環境で上記の
 エラーに当たったら、まずこのフラグを疑う。
 
-`--no-sandbox` は当時から混ざらない（root で動かすときだけ必要）。
+`--no-sandbox` は当時から混ざらない（root で動かすときと、下の「sandbox」のマシンで要る）。
 
 ```
 FATAL:electron_main_delegate.cc:312] Running as root without --no-sandbox is not supported.
 ```
+
+## sandbox（一般ユーザが user namespace を使えないマシン）
+
+2026-11-09 に drawio 32.4.1（Electron 44.7.2）・Ubuntu 24.04（kernel 7.0）で確かめた。
+
+一般ユーザで書き出すと、起動の直後に落ちる（終了コード 133 = SIGTRAP）。
+
+```
+FATAL:sandbox/linux/suid/client/setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found, but is not configured correctly. Rather than run without sandboxing I'm aborting now. You need to make sure that /nix/store/…-electron-44.7.2/libexec/electron/chrome-sandbox is owned by root and has mode 4755.
+```
+
+原因:
+
+1. Chromium（Electron）は、一般ユーザでは unprivileged user namespace で sandbox を立てる
+2. それが使えないと、setuid root の helper（`chrome-sandbox`）へ落ちる。nixpkgs の electron は
+   `CHROME_DEVEL_SANDBOX` に store の `chrome-sandbox` を渡しているが、store には setuid の
+   ファイルを置けないので、helper も使えない
+3. どちらも使えないので、Chromium は sandbox 無しで動くのを断って落ちる
+
+user namespace を使えないのは、kernel の設定がこうなっているマシン。
+
+| 設定 | 値 | |
+| --- | --- | --- |
+| `kernel.apparmor_restrict_unprivileged_userns` | `1` | Ubuntu 23.10 以降の既定。どの AppArmor の profile にも入っていないプロセスが作った user namespace から、capability を外す（作ることはできる）。store の drawio はどの profile にも入らない |
+| `kernel.unprivileged_userns_clone` | `0` | Debian の kernel の設定。一般ユーザに作らせない |
+| `user.max_user_namespaces` | `0` | 作れる数の上限が 0 |
+
+確かめ方:
+
+```sh
+sysctl kernel.apparmor_restrict_unprivileged_userns   # 1 なら当たる
+unshare -Ur true   # 当たるマシンでは unshare: write failed /proc/self/uid_map: Operation not permitted
+```
+
+### `scripts/drawio-export.sh` の動き
+
+- 上の表の設定のどれかに当たれば、drawio に `--no-sandbox` を付け、stderr に「注意:」で始まる
+  2 行（当たった設定と、読ませてよい `.drawio`）を出す。root のときも付ける（注意は出さない）
+- どれにも当たらなければ付けない（今までどおり sandbox の中で動く）
+- 表に無い理由（コンテナの seccomp など）で sandbox が立たないときは付けず、上の FATAL を出して止まる
+- AppArmor の profile で electron に `userns` を許したマシンでも、
+  `kernel.apparmor_restrict_unprivileged_userns` が 1 なら付ける（profile までは読まない）
+
+### 安全の面
+
+sandbox は、Chromium の子プロセス（図の中身を読んで描く renderer など）が乗っ取られても、
+ファイルやほかのプロセスに手を出せないようにする仕組み。外すと、renderer の脆弱性を突く図を
+読ませたとき、乗っ取ったコードがユーザの権限のまま動く（`~/.ssh` やトークンを読める）。
+図の中身（HTML のラベル・埋め込んだ画像や SVG・フォント）は、どれも renderer が読む。
+
+- **sandbox の無い drawio に読ませるのは、自分たちで書いた `.drawio` だけにする**
+  （この skill の使い方。Claude とユーザが repo の中で書いた図）
+- 外から受け取った `.drawio`（ダウンロードしたもの・人から渡されたもの）は、そのマシンでは
+  書き出さない。sandbox が立つマシンか、使い捨ての VM・コンテナの中で書き出す
+- drawio を素で叩いて `--no-sandbox` を付けるときも同じ
+
+### sandbox を残したまま通すには（どれも root が要る）
+
+この skill は、マシンの設定を変えない。直すなら、マシンの持ち主が次のどれかを選ぶ
+（Chromium の文書 <https://chromium.googlesource.com/chromium/src/+/main/docs/security/apparmor-userns-restrictions.md>）。
+
+- electron に `userns` を許す AppArmor の profile を置く（守りを緩めるのはそのプログラムだけ）。
+  今の script は profile を読まないので、置いても `--no-sandbox` を付ける。置いたら script も直す
+- `sysctl kernel.apparmor_restrict_unprivileged_userns=0` で止めるのをやめる（マシン全体の守りが下がる）
+- setuid root の `chrome-sandbox` を store の外に置いて使う（nixpkgs の electron の wrapper は
+  `CHROME_DEVEL_SANDBOX` を store のものに書き換えるので、外から渡してもそのままでは効かない）
 
 ## `--svg-theme light` を付ける
 

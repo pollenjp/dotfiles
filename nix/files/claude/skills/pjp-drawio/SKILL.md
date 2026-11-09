@@ -51,6 +51,18 @@ drawio/
 **図を作ったら PNG でも書き出して目で確認する。** XML を読んだだけでは重なりや
 はみ出しに気付けない。
 
+## sandbox を外すマシン
+
+一般ユーザが user namespace を使えないマシン（AppArmor で止めている Ubuntu 23.10 以降の
+既定など）では、drawio（Electron）の sandbox が立たず、そのままでは起動の直後に落ちる。
+script はそのときだけ `--no-sandbox` を付け、stderr に「注意:」で始まる 2 行を出す
+（root のときも付ける。どちらでもないマシンでは付けない）。
+
+- sandbox の無い drawio に読ませるのは、**自分たちで書いた `.drawio` だけ**にする。
+  外から受け取った `.drawio`（ダウンロードしたもの・人から渡されたもの）は、そのマシンでは書き出さない
+- 理由・確かめ方・sandbox を残したまま通す方法（どれも root が要る）は
+  `references/troubleshooting.md` の「sandbox」
+
 ## 規約
 
 - **白背景。** SVG は書き出したあとルート直下へ白い矩形を差し込んでいる
@@ -111,7 +123,7 @@ git add flake.lock
 
 ## その他
 
-- headless 特有のハマりどころ、無視してよいエラー出力 → `references/troubleshooting.md`
+- headless 特有のハマりどころ、無視してよいエラー出力、sandbox → `references/troubleshooting.md`
 - 旧 `mise.toml` 構成からの移行 → `references/from-mise.md`
 - 公式 MCP サーバ（図をエディタで開く）→ `references/mcp.md`。**任意で、書き出しには
   要らない。** 入れるなら設定はプロジェクトの `.mcp.json` に置く（`claude mcp add` で
