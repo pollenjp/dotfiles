@@ -329,11 +329,22 @@ fi
 # 10. 入っていないので入れようとしたが失敗: ⚠ で囲んで知らせる。setup は止めない
 h=$(new_home t10 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='herdr-app を入れられなかった: https://releases.herdr.dev/app/latest.json を落とせない (curl.exe の終了コード 6)' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '入れられませんでした' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '入れきれませんでした' \
   && seen "${h}" -F 'curl.exe の終了コード 6' && seen "${h}" -F -- 'bootstrap-windows-herdr-app.sh --apply'; then
   ok "入れられなければ ⚠ で囲んで知らせて exit 0"
 else
   ng "入れられない" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") $(outerr "${h}")"
+fi
+
+# 10b. app は入ったが core だけ入らなかった (-IfMissing が 1): 「入れきれなかった」の枠で、何が入らなかったかを出す
+h=$(new_home t10b "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="herdr-app 0.1.14 を ${app} に置いた
+herdr-core を入れられなかった: 落とした zip に conpty\conpty.dll が無い (tar.exe の終了コード 1)" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" 'herdr-core を入れきれませんでした (終了コード 1)' \
+  && seen "${h}" -F 'herdr-core を入れられなかった' && seen "${h}" -F 'herdr-app 0.1.14 を'; then
+  ok "app は入って core だけ入らなかったときも、何が入らなかったかを ⚠ の枠で出す"
+else
+  ng "core だけ入らなかった" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 # 11. -Check が 3 でも、こちらの出力が無い: 入れには行かず、手で打つコマンドを出す
@@ -412,7 +423,7 @@ fi
 h=$(new_home t18 "${state_on}" 1)
 DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 \
   FAKE_PWSH_OUT2='herdr-app を入れられなかった: sha256 が違う' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に herdr-app を入れられませんでした (終了コード 1)' ]] \
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に herdr-app と herdr-core を入れきれませんでした (終了コード 1)' ]] \
   && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-herdr-app\.sh --apply$' "${h}/warnings"; then
   ok "入れられなければ、⚠ の見出しと揃えるコマンドをまとめ用に残す"
 else

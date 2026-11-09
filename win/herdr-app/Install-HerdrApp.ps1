@@ -22,6 +22,7 @@ herdr-app は winget に無く、公式の入れ方は irm https://releases.herd
 公式と違えるところ: HERDR_RELEASES_URL・HC_VERSION・HC_INSTALL_DIR は読まない (テストと版の選び方のためのもの)。
 core を入れられなかったときは、app は入れたまま終了コード 1 で知らせる (公式は「app が開いたときに勧める」と出して終わる)。
 PATH の行は %VAR% を展開してから置き場所と比べる (公式は展開しないので、%VAR% で書いた行があると二重に足す)。
+curl.exe は、つながらない・転送が止まったときに打ち切る (公式は待ち続ける)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
@@ -296,13 +297,27 @@ function Format-HerdrAppKept {
 function Format-HerdrAppBusy {
     param([object[]]$Processes, [string]$CoreDir)
     $list = @($Processes)
-    $core = @($list | Where-Object { Test-HerdrAppProcessPath -Path $_.Path -Dirs @($CoreDir) })
+    # パスが読めないものは名前で分ける (Test-HerdrAppBusyEntry と同じ)
+    $core = @($list | Where-Object {
+            if ($_.Path) { Test-HerdrAppProcessPath -Path $_.Path -Dirs @($CoreDir) } else { $_.Name -in @('herdr-core.exe', 'hc.exe') }
+        })
     "herdr-app か herdr-core が動いている ($($list.Count) 個) ので、何も外していない。止めてから打ち直す:"
     if ($core.Count -lt $list.Count) { '  app: 窓を閉じる' }
     if ($core.Count -gt 0) {
         "  core: & '$($CoreDir.TrimEnd('\'))\herdr-core.exe' server stop を打つ (core の中の terminal と、そこで動いているものも終わる)"
     }
-    foreach ($p in $list) { "  $($p.Id)  $($p.Path)  $($p.CommandLine)" }
+    foreach ($p in $list) {
+        $path = if ($p.Path) { $p.Path } else { "$($p.Name) (パスが読めないので名前で数えた。管理者で動いているなど)" }
+        "  $($p.Id)  $path  $($p.CommandLine)"
+    }
+}
+
+# 動いているプロセスに数えるか。実行ファイルのパスが読めれば置き場所の下か、読めなければ (管理者で動いている、など)
+# 名前が herdr-app・herdr-core・hc か (大文字小文字を区別しない)。OpenConsole.exe は Windows Terminal も持つので名前では数えない
+function Test-HerdrAppBusyEntry {
+    param([string]$Path, [string]$Name, [string[]]$Dirs)
+    if ($Path) { return (Test-HerdrAppProcessPath -Path $Path -Dirs $Dirs) }
+    $Name -in @('herdr-app.exe', 'herdr-core.exe', 'hc.exe')
 }
 
 # ---------------------------------------------------------------------------
@@ -471,25 +486,38 @@ function Write-HerdrAppState {
     }
 }
 
-# 置き場所の下から起動して動いているプロセス (app・core・core の conpty の OpenConsole.exe)。コマンドラインも添える
+# 置き場所の下から起動して動いているプロセス (app・core・core の conpty の OpenConsole.exe) と、実行ファイルのパスが
+# 読めない herdr-app・herdr-core・hc。Win32_Process で見る (Process.Path は、32 bit の PowerShell から見た 64 bit の
+# プロセスや、管理者で動くプロセスでは読めない)。読めなければ例外 (何も外さずに止まる)
 function Get-HerdrAppBusyProcess {
     param([string[]]$Dirs)
-    foreach ($p in @(Get-Process -ErrorAction SilentlyContinue)) {
-        $path = $null
-        try { $path = $p.Path } catch { $path = $null }
-        if (Test-HerdrAppProcessPath -Path $path -Dirs $Dirs) {
-            $commandLine = $null
-            try { $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)" -ErrorAction Stop).CommandLine } catch { $commandLine = $null }
-            [pscustomobject]@{ Id = $p.Id; Path = $path; CommandLine = $commandLine }
+    foreach ($p in @(Get-CimInstance Win32_Process -ErrorAction Stop)) {
+        if (Test-HerdrAppBusyEntry -Path $p.ExecutablePath -Name $p.Name -Dirs $Dirs) {
+            [pscustomobject]@{ Id = $p.ProcessId; Name = $p.Name; Path = $p.ExecutablePath; CommandLine = $p.CommandLine }
         }
     }
 }
 
-# ファイルかディレクトリを消す。消せなければ理由を出して $false
+# ファイルかディレクトリを中身ごと消す。リンク (junction・symlink) はリンクだけを消し、先はたどらない
+# (Remove-Item -Recurse がリンクの先をたどるかは PowerShell の版で違い、古い版は先の中身まで消す。公式の置き場所の外を
+# 消さないよう、たどらないことをここで決める)。読み取り専用のファイルも消す
+function Remove-HerdrAppTree {
+    param([IO.FileSystemInfo]$Item)
+    $isLink = [bool]($Item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if (($Item -is [IO.DirectoryInfo]) -and -not $isLink) {
+        foreach ($child in @($Item.EnumerateFileSystemInfos())) { Remove-HerdrAppTree -Item $child }
+    }
+    if ($Item.Attributes -band [IO.FileAttributes]::ReadOnly) {
+        $Item.Attributes = $Item.Attributes -band (-bnot [IO.FileAttributes]::ReadOnly)
+    }
+    $Item.Delete()
+}
+
+# ファイルかディレクトリを消す (リンクの先はたどらない)。消せなければ理由を出して $false
 function Remove-HerdrAppItem {
     param([string]$Path)
     try {
-        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        Remove-HerdrAppTree -Item (Get-Item -LiteralPath $Path -Force -ErrorAction Stop)
         $true
     } catch {
         Write-Host "  $($_.Exception.Message)"
@@ -508,10 +536,11 @@ function Get-HerdrAppDownloadBlocker {
     $null
 }
 
-# 公式と同じく curl.exe で落とす。落とせなければ例外
+# 公式と同じく curl.exe で落とす。落とせなければ例外。公式と違い、つながらない (30 秒)・転送が止まった (60 秒のあいだ
+# 1 KB/s を下回る) ときは打ち切る (setup の中で、bootstrap の打ち切りの 600 秒まで止まらないよう)
 function Save-HerdrAppDownload {
     param([string]$Url, [string]$OutFile)
-    $result = Invoke-HerdrAppNative -FilePath 'curl.exe' -Arguments @('-fsSL', $Url, '-o', $OutFile)
+    $result = Invoke-HerdrAppNative -FilePath 'curl.exe' -Arguments @('-fsSL', '--connect-timeout', '30', '--speed-limit', '1024', '--speed-time', '60', $Url, '-o', $OutFile)
     if ($result.ExitCode -ne 0) { throw "$Url を落とせない (curl.exe の終了コード $($result.ExitCode)) $($result.Lines -join ' ')" }
 }
 
@@ -640,6 +669,7 @@ function Invoke-UninstallHerdrApp {
     $left = @(Get-HerdrAppUninstallPlan -State $after -AppDir $Locations.AppDir -CoreDir $Locations.CoreDir -Menu $Locations.Menu)
     if (($left.Count -eq 0) -and -not $failed) {
         Write-Host '外した'
+        Write-Host '※ dotfiles が管理する間は、次の setup --update が入れ直す (winget に移るときは win/README.md の「winget に載ったら」の順で)'
         return 0
     }
     foreach ($step in $left) {
@@ -702,13 +732,16 @@ function Invoke-InstallHerdrApp {
     if ($state.LnkKind -ne 'ours') { New-HerdrAppShortcut -Path $locations.Menu -Exe "$($locations.AppDir)\herdr-app.exe" }
     if (-not $state.AppPathListed) { Add-HerdrAppUserPath -Dir $locations.AppDir -Flag 'HERDR_INSTALLING' }
     if ($needCore) {
+        $coreInstalled = $false
         try {
             $null = Install-HerdrCorePackage -CoreDir $locations.CoreDir -Releases $releases -Target $target -Tar $tar
-            Add-HerdrAppUserPath -Dir $locations.CoreDir -Flag 'HC_INSTALLING'
+            $coreInstalled = $true
         } catch {
             Write-Host "herdr-core を入れられなかった: $($_.Exception.Message)" -ForegroundColor Yellow
             Write-Host 'Install-HerdrApp を打ち直す (app を開いたときにも、app が core を入れるよう勧める)'
         }
+        # PATH に足すのは入れられたときだけ (足すときの失敗は、入れられなかったことと分けて出す)
+        if ($coreInstalled) { Add-HerdrAppUserPath -Dir $locations.CoreDir -Flag 'HC_INSTALLING' }
     } elseif ($state.CoreExe -and -not $state.CorePathListed) {
         Add-HerdrAppUserPath -Dir $locations.CoreDir -Flag 'HC_INSTALLING'
     }

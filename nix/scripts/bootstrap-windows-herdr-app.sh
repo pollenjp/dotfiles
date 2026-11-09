@@ -216,7 +216,9 @@ if ((rc == 3 && header)); then
     echo "Windows に herdr-app を入れました。スタートメニューの Herdr から開けます。"
     exit 0
   fi
-  warn_frame "Windows に herdr-app を入れられませんでした (終了コード ${rc})" "${captured}"
+  # app は入ったが core だけ入らなかったとき (終了コード 1) もここに来るので、「入れきれなかった」と出す (枠の中の出力が何を
+  # 入れられなかったかを言う)
+  warn_frame "Windows に herdr-app と herdr-core を入れきれませんでした (終了コード ${rc})" "${captured}"
   exit 0
 fi
 # pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする

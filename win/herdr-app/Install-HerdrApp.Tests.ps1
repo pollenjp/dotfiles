@@ -82,7 +82,7 @@ Test-Case 'releases の前方一致 (releases.herdr.dev.example) には付けな
 # Test-HerdrAppPathEntry / Test-HerdrAppPathListed: PATH の要素が置き場所を指すか
 Test-Case '同じ置き場所なら合う' 'True' { Test-HerdrAppPathEntry -Entry $App -Dir $App }
 Test-Case '末尾の \・前後の空白・引用符・大文字小文字の違いは合う' 'True' { Test-HerdrAppPathEntry -Entry " `"$($App.ToUpper())\`" " -Dir $App }
-Test-Case '%VAR% を展開してから比べる' 'True' { $env:TKT540_HERDR_APP_TEST = 'C:\Users\u\AppData\Local'; Test-HerdrAppPathEntry -Entry '%TKT540_HERDR_APP_TEST%\Programs\herdr-app' -Dir $App }
+Test-Case '%VAR% を展開してから比べる' 'True' { $env:HERDR_APP_TEST_LOCALAPPDATA = 'C:\Users\u\AppData\Local'; Test-HerdrAppPathEntry -Entry '%HERDR_APP_TEST_LOCALAPPDATA%\Programs\herdr-app' -Dir $App }
 Test-Case '前方一致 (herdr-app2) は合わない' 'False' { Test-HerdrAppPathEntry -Entry "$($App)2" -Dir $App }
 Test-Case '空の要素は合わない' 'False' { Test-HerdrAppPathEntry -Entry '' -Dir $App }
 Test-Case 'どこかの要素が合えば listed' 'True' { Test-HerdrAppPathListed -Raw "C:\A;;$App\;C:\B" -Dir $App }
@@ -99,7 +99,7 @@ Test-Case '既にあれば変えない (書き違いでも)' "C:\A;$($App.ToUppe
 Test-Case '置き場所の要素だけを外す' 'C:\A;C:\B' { Get-PathValueWithoutEntry -Raw "C:\A;$App;C:\B" -Dirs @($App) }
 Test-Case '2 つの置き場所をまとめて外す' 'C:\A' { Get-PathValueWithoutEntry -Raw "C:\A;$App;$Core\" -Dirs @($App, $Core) }
 Test-Case '%VAR% の行・空の要素・末尾の ; は残す' '%USERPROFILE%\bin;;C:\B;' { Get-PathValueWithoutEntry -Raw "%USERPROFILE%\bin;;$App;C:\B;" -Dirs @($App) }
-Test-Case '%VAR% で書いた置き場所の行も外す' 'C:\A' { $env:TKT540_HERDR_APP_TEST = 'C:\Users\u\AppData\Local'; Get-PathValueWithoutEntry -Raw 'C:\A;%TKT540_HERDR_APP_TEST%\Programs\herdr-app' -Dirs @($App) }
+Test-Case '%VAR% で書いた置き場所の行も外す' 'C:\A' { $env:HERDR_APP_TEST_LOCALAPPDATA = 'C:\Users\u\AppData\Local'; Get-PathValueWithoutEntry -Raw 'C:\A;%HERDR_APP_TEST_LOCALAPPDATA%\Programs\herdr-app' -Dirs @($App) }
 Test-Case '置き場所だけの PATH は空になる' '' { Get-PathValueWithoutEntry -Raw $App -Dirs @($App) }
 Test-Case '無ければ変えない' 'C:\A;C:\B' { Get-PathValueWithoutEntry -Raw 'C:\A;C:\B' -Dirs @($App, $Core) }
 
@@ -224,8 +224,10 @@ Test-Case '別の場所を指す lnk と、公式と違う置き場所の core �
 Test-Case '残すものが無ければ何も出さない' '' { @(Format-HerdrAppKept -State (New-State) -Locations $loc -Exists $nothing) -join '|' }
 
 # Format-HerdrAppBusy: 動いているプロセスと止め方
-$appProc = [pscustomobject]@{ Id = 1001; Path = $AppExe; CommandLine = "`"$AppExe`"" }
-$coreProc = [pscustomobject]@{ Id = 1002; Path = "$Core\herdr-core.exe"; CommandLine = 'herdr-core.exe server' }
+$appProc = [pscustomobject]@{ Id = 1001; Name = 'herdr-app.exe'; Path = $AppExe; CommandLine = "`"$AppExe`"" }
+$coreProc = [pscustomobject]@{ Id = 1002; Name = 'herdr-core.exe'; Path = "$Core\herdr-core.exe"; CommandLine = 'herdr-core.exe server' }
+# 管理者で動いているなどで、実行ファイルのパスが読めない core
+$hiddenCore = [pscustomobject]@{ Id = 1003; Name = 'herdr-core.exe'; Path = $null; CommandLine = $null }
 Test-Case 'app と core が動いていれば、両方の止め方と PID を出す' @(
     'herdr-app か herdr-core が動いている (2 個) ので、何も外していない。止めてから打ち直す:'
     '  app: 窓を閉じる'
@@ -235,6 +237,20 @@ Test-Case 'app と core が動いていれば、両方の止め方と PID を出
 ) { Format-HerdrAppBusy -Processes @($appProc, $coreProc) -CoreDir $Core }
 Test-Case 'app だけなら core の止め方は出さない' 0 { @(Format-HerdrAppBusy -Processes @($appProc) -CoreDir $Core | Where-Object { $_ -like '*server stop*' }).Count }
 Test-Case 'core だけなら app の止め方は出さない' 0 { @(Format-HerdrAppBusy -Processes @($coreProc) -CoreDir $Core | Where-Object { $_ -like '*窓を閉じる*' }).Count }
+Test-Case 'パスが読めない herdr-core.exe は core として止め方を出し、読めないと添える' @(
+    'herdr-app か herdr-core が動いている (1 個) ので、何も外していない。止めてから打ち直す:'
+    "  core: & '$Core\herdr-core.exe' server stop を打つ (core の中の terminal と、そこで動いているものも終わる)"
+    '  1003  herdr-core.exe (パスが読めないので名前で数えた。管理者で動いているなど)  '
+) { Format-HerdrAppBusy -Processes @($hiddenCore) -CoreDir $Core }
+
+# Test-HerdrAppBusyEntry: 動いているプロセスに数えるか (パスが読めなければ名前で)
+Test-Case 'パスが置き場所の下なら数える' 'True' { Test-HerdrAppBusyEntry -Path "$Core\conpty\x64\OpenConsole.exe" -Name 'OpenConsole.exe' -Dirs $watch }
+Test-Case 'パスがほかの場所なら、名前が herdr-core.exe でも数えない (winget など)' 'False' { Test-HerdrAppBusyEntry -Path $winget -Name 'herdr-core.exe' -Dirs $watch }
+Test-Case 'パスが読めない herdr-core.exe は数える' 'True' { Test-HerdrAppBusyEntry -Path $null -Name 'herdr-core.exe' -Dirs $watch }
+Test-Case 'パスが読めない HERDR-APP.EXE も数える (大文字小文字を区別しない)' 'True' { Test-HerdrAppBusyEntry -Path '' -Name 'HERDR-APP.EXE' -Dirs $watch }
+Test-Case 'パスが読めない hc.exe も数える' 'True' { Test-HerdrAppBusyEntry -Path $null -Name 'hc.exe' -Dirs $watch }
+Test-Case 'パスが読めない OpenConsole.exe は数えない (Windows Terminal も持つ)' 'False' { Test-HerdrAppBusyEntry -Path $null -Name 'OpenConsole.exe' -Dirs $watch }
+Test-Case 'パスが読めないほかのプロセスは数えない' 'False' { Test-HerdrAppBusyEntry -Path $null -Name 'pwsh.exe' -Dirs $watch }
 
 # Get-HerdrAppExeVersion: 実行ファイルに --version を打って版を読む。壊れた・終わらないものでも止まらない
 $tmpBin = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-app-tests-bin-$PID"
@@ -251,6 +267,24 @@ Test-Case '終わらなければ打ち切って空 (窓を開く版の app に�
 Test-Case '起動できない (壊れた・0 バイト) なら空' '' { Get-HerdrAppExeVersion -Exe $brokenExe -Name 'herdr-app' }
 Test-Case '無ければ空' '' { Get-HerdrAppExeVersion -Exe (Join-Path $tmpBin 'missing') -Name 'herdr-app' }
 Remove-Item -LiteralPath $tmpBin -Recurse -Force
+
+# Remove-HerdrAppItem / Remove-HerdrAppTree: 中身ごと消すが、リンクの先はたどらない (Remove-Item -Recurse がたどるかは
+# PowerShell の版で違う)。Linux の .NET でも symlink は ReparsePoint として見えるので、ここで確かめられる
+$tree = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-app-tests-tree-$PID"
+$outside = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-app-tests-outside-$PID"
+New-Item -ItemType Directory -Force (Join-Path $tree 'conpty/x64'), $outside | Out-Null
+Set-Content -LiteralPath (Join-Path $tree 'conpty/x64/OpenConsole.exe') -Value 'x'
+Set-Content -LiteralPath (Join-Path $outside 'keep.txt') -Value 'keep'
+$readonly = Join-Path $tree 'readonly.txt'
+Set-Content -LiteralPath $readonly -Value 'r'
+(Get-Item -LiteralPath $readonly).Attributes = 'ReadOnly'
+New-Item -ItemType SymbolicLink -Path (Join-Path $tree 'dirlink') -Target $outside | Out-Null
+New-Item -ItemType SymbolicLink -Path (Join-Path $tree 'filelink') -Target (Join-Path $outside 'keep.txt') | Out-Null
+Test-Case '中身 (読み取り専用のファイルも) ごと消せば True' 'True' { Remove-HerdrAppItem -Path $tree }
+Test-Case '消したディレクトリは残らない' 'False' { Test-Path -LiteralPath $tree }
+Test-Case 'リンクの先 (置き場所の外) は消さない' 'True' { Test-Path -LiteralPath (Join-Path $outside 'keep.txt') }
+Test-Case '無いものは消せずに False (理由を出す)' 'False' { Remove-HerdrAppItem -Path $tree 6>$null }
+Remove-Item -LiteralPath $outside -Recurse -Force
 
 # 本体の入口: Linux の pwsh には $env:LOCALAPPDATA が無く、本体の最初で例外になる。
 # それでも終了コード 2 で止まり、成功 (0) に見せない

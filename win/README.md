@@ -419,6 +419,8 @@ script で入れる。どちらも WSL の herdr・winget の herdr とは別の
 - `-Check` は版を出すが比べず、ネットワークも使わない。公式と違う置き場所 (winget など) の core は ⚠ にせず、※ で添えて触らない
 - 入れられなかったら (ネットワーク・x64 でない PC)、⚠ で囲んで知らせ、そのまま次へ進む (setup は止めない)。core だけ入れられなかった
   ときは、app は入れたまま終了コード 1 になる (次の `setup --update` で ⚠ が出るので、`Install-HerdrApp` で足す)
+- 落とすのは公式と同じく `curl.exe` だが、つながらない (30 秒)・転送が止まった (60 秒のあいだ 1 KB/s を下回る) ときは打ち切る
+  (公式は待ち続ける。setup が止まったままにならないよう)
 - 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
 - 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない
 
@@ -447,18 +449,26 @@ core も同じ generation の新しい版に上げる (動いているファイ�
 - app か core が動いていると (置き場所の下の exe から起動したプロセス。core の conpty の `OpenConsole.exe` も数える)、何も外さずに
   PID とコマンドラインを出して終了コード 1 で止まる。app の窓を閉じ、出てくる `herdr-core.exe server stop` を打ってから打ち直す。
   core を止めると、その中の terminal と、そこで動いているもの (agent など) も終わるので、止めるのは人
+- 動いているかは `Win32_Process` の実行ファイルのパスで見る。パスが読めないプロセス (管理者で動いている、など) は、名前が
+  `herdr-app.exe`・`herdr-core.exe`・`hc.exe` なら動いているものに数える (公式と違う置き場所のものでも止まる。止めてから打ち直す)
 - 一度でも開いた app は、窓を閉じても core が裏で動き続ける (terminal を残すため)。外す前に `server stop` が要る
+- 消すときはリンク (junction・symlink) の先をたどらない (リンクだけを消す)。公式の置き場所の外は消さない
 - PATH は外した行のほかは変えない。ただし入れるときに、前からあった末尾の `;` は落ちている (公式と同じ足し方)
 - 外したものと残したものを出し、読み直して外しきれたかを確かめる (残っていれば終了コード 1)
+- dotfiles が管理する間は、外した後の `setup --update` が入れ直す (bootstrap は app が無ければ入れる)。入れ直させたくないとき
+  (winget に移るなど) は、次の「winget に載ったら」の順で進める
 
 ### winget に載ったら
 
 herdr-app が winget に載ったら、dotfiles の管理を winget の形 ([herdr を入れる](#herdr-を入れる-winget) と同じ) に移せる。
 
-1. app の窓を閉じ、`herdr-core.exe server stop` を打つ (core の中の terminal も終わる)
-2. `Install-HerdrApp -Uninstall` で外す (設定は残るので、winget で入れた app がそのまま読む)
-3. winget で入れる。dotfiles では `Install-HerdrApp.ps1` を winget の形 (`-Version`・pin・`-Check`) に書き換えて bootstrap も合わせ、
-   CI の `herdr-app-installers` と `herdr-app/upstream-installers.txt` を外して `winget-versions` に足す
+1. dotfiles を winget の形に替える PR を merge する。`Install-HerdrApp.ps1` を winget の形 (`-Version`・pin・`-Check`) に書き換えて
+   bootstrap も合わせ、CI の `herdr-app-installers` と `herdr-app/upstream-installers.txt` を外して `winget-versions` に足す。替えた
+   script には、公式の置き場所の残りを見つけたら ⚠ で外し方を出させると、外し忘れた PC に気付ける
+2. 各 PC で、dotfiles を pull する前に、app の窓を閉じて `herdr-core.exe server stop` を打ち (core の中の terminal も終わる)、今の
+   `Install-HerdrApp -Uninstall` で外す (設定は残るので、winget で入れた app がそのまま読む)
+3. pull して `setup --update` を流す (winget で入る)。2 と 3 の間に、pull せずに `setup --update` を流さない (今の bootstrap が公式の
+   置き場所に入れ直す)
 
 移る前に確かめること:
 
@@ -491,6 +501,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する。Windows PowerShell 5.1 でも動かす (sha256 は `Get-FileHash` を使わず、
   公式と同じく .NET で求める)
 - 遠くの script を流さない (`irm`・`iex`・`Invoke-Expression` を使わない)
+- 消すのは `Remove-HerdrAppTree` で (リンクの先をたどらない)。`Remove-Item -Recurse` がリンクをたどるかは PowerShell の版で違う
 - 副作用の無い関数 (manifest の読み方・PATH の足し引き・状態の表・外す計画) と、Windows に触る関数を偽物に替えた流れは
   `herdr-app/Install-HerdrApp.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので
   配られない):
