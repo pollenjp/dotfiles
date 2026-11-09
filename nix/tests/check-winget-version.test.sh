@@ -633,7 +633,8 @@ fi
 # 10. パッケージごと winget-pkgs に無い (404。Microsoft.OpenSSH.Beta は 2025-04 に丸ごと外された): exit 1
 d=$(new_case t10 10.0.0.0 -)
 FAKE_GH_CONTENTS="${not_found}" FAKE_GH_CONTENTS_ERR='gh: Not Found (HTTP 404)' FAKE_GH_CONTENTS_RC=1 run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*Microsoft\.OpenSSH\.Preview'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*Microsoft\.OpenSSH\.Preview' \
+  && seen "${d}" -F '(manifests/m/Microsoft/OpenSSH/Preview が無い)'; then
   ok "パッケージが winget-pkgs に無ければ (404) exit 1"
 else
   ng "パッケージが無い" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -909,6 +910,15 @@ else
   ng "herdr: GitHub の最新の行" "$(outerr "${d}")"
 fi
 
+# h1b. 固定した版より古い winget の版は並べず、数だけを出す (版は上げるたびに溜まる)
+d=$(new_case h1b "${h_pin}" -)
+FAKE_GH_CONTENTS=$(contents_json 0.9.4 "${h_pin}" Preview) FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && seen_out "${d}" -xF '  winget の版   : 0.9.5 (ほかに古い版が 1 個)'; then
+  ok "herdr: 固定した版より古い winget の版は並べず、数だけを出す"
+else
+  ng "herdr: 古い版の出し方" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
 # h2. 固定した版より新しい安定版が winget にあり、GitHub に出て 10 日: exit 0 で待つ。出た日は tag の v の後ろが
 #     同じ release から取る
 at10=$(ago 10)
@@ -1012,8 +1022,9 @@ fi
 # h7b. 版のディレクトリが無く、Preview のディレクトリだけが残っている: Herdr.Herdr が winget-pkgs に無いとして exit 1
 d=$(new_case h7b "${h_pin}" -)
 FAKE_GH_CONTENTS=$(contents_json Preview) FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '^⚠ Herdr\.Herdr が winget-pkgs に無い'; then
-  ok "herdr: Preview のディレクトリしか無ければ、Herdr.Herdr が winget-pkgs に無いとして exit 1"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '^⚠ Herdr\.Herdr が winget-pkgs に無い' \
+  && seen "${d}" -F '(manifests/h/Herdr/Herdr に版のディレクトリが無い)'; then
+  ok "herdr: Preview のディレクトリしか無ければ、版のディレクトリが無いとして exit 1"
 else
   ng "herdr: Preview のディレクトリだけ" "rc=$(rc "${d}") $(outerr "${d}")"
 fi

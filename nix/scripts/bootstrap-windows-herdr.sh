@@ -217,7 +217,8 @@ if ((apply)); then
     echo "揃いました。"
     exit 0
   fi
-  echo "!! 揃いませんでした (終了コード ${rc})。上の出力を確かめてください。" >&2
+  # Herdr.Herdr.Preview が残っていると、Herdr.Herdr が揃っていても 1 になる (Install-Herdr は Preview を外さない)
+  echo "!! 揃いませんでした (終了コード ${rc})。上の出力を確かめてください (Herdr.Herdr.Preview が残っているときは、出力の手順で外す)。" >&2
   exit 1
 fi
 
@@ -244,11 +245,12 @@ if ((rc == 0)); then
 fi
 if ((rc == 1 && header)); then
   read_verdict "${captured}"
-  # 残っているのが Herdr.Herdr.Preview だけなら、見出しも直し方も Preview を外すことにする (Install-Herdr では直らない)
+  # 残っているのが Herdr.Herdr.Preview だけなら、見出しも直し方も Preview を外すことにする (Install-Herdr では直らない)。
+  # 差もあれば Preview を外す手順を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
   if ((needs_preview && ! needs_sync)); then
     warn_frame "${preview_title}" "${captured}" "${fix_preview[@]}"
   elif ((needs_preview)); then
-    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_sync[@]}" "${fix_preview[@]}"
+    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_preview[@]}" "${fix_sync[@]}"
   else
     warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_sync[@]}"
   fi

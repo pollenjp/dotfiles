@@ -109,7 +109,7 @@ preview_out="herdr (winget の Herdr.Herdr、${pkg})
 ※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)
 $(preview_verdict '')"
 
-# Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている)
+# Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている。締めの行は Preview を先に出す)
 preview_drift_out="herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : ${v}
   固定した版      : ${v} → そのまま
@@ -117,18 +117,18 @@ preview_drift_out="herdr (winget の Herdr.Herdr、${pkg})
 ⚠ winget pin      : 無し → 足す
   PATH の herdr   : winget のもの
 ⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
-⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️
-$(preview_verdict '')"
+$(preview_verdict '')
+⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️"
 
-# Install-Herdr.ps1 -Check の出力 (Herdr.Herdr が入っておらず、Herdr.Herdr.Preview だけがある。Preview から移る前の PC)
+# Install-Herdr.ps1 -Check の出力 (Herdr.Herdr が入っておらず、Herdr.Herdr.Preview だけがある。Preview から移る前の PC)。
+# 入る前は、PATH で Preview の herdr が引かれても ⚠ にせず、「Preview を外せば直る」とも出さない
 preview_only_out="herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : 入っていない
 ⚠ 固定した版      : ${v} → 入れる
   winget の最新版 : ${v}
 ⚠ winget pin      : 無し → 足す
-⚠ PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
-⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
-※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)
+  PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
+⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから外す
 ⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️
 $(preview_verdict 'Herdr.Herdr を入れてから、')"
 
@@ -400,8 +400,8 @@ fi
 # 13. --apply が失敗: exit 1 (手で流すものなので失敗を返す)
 h=$(new_home t13 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="herdr.exe などが動いていて置き換えられない" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした'; then
-  ok "--apply が失敗したら exit 1"
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした' && seen "${h}" -F 'Herdr.Herdr.Preview が残っているときは'; then
+  ok "--apply が失敗したら exit 1 (Preview が残っているときは、出力の手順で外すと添える)"
 else
   ng "--apply 失敗" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
@@ -489,17 +489,20 @@ else
   ng "Preview だけが残っている" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
 
-# 22. 版・pin・PATH の差もあり、Preview も残っている (-Check が 1): 見出しは揃っていないことにし、揃えるコマンドと
-#     Preview を外す手順を両方出す
+# 22. 版・pin・PATH の差もあり、Preview も残っている (-Check が 1): 見出しは揃っていないことにし、Preview を外す手順と
+#     揃えるコマンドを両方出す。Preview を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
 h=$(new_home t22 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_drift_out}" run "${h}" 0
+n_preview=$(grep -n -m 1 -F 'Herdr.Herdr.Preview を外すには' "${h}/err" | cut -d: -f1)
+n_sync=$(grep -n -m 1 -F '揃えるには' "${h}/err" | cut -d: -f1)
 if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '⚠️  Windows の herdr が、dotfiles で固定した版と揃っていません' \
   && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' \
   && seen "${h}" -F 'winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe' \
-  && ! seen "${h}" '前の herdr (Herdr.Herdr.Preview) が残っています'; then
-  ok "差があって Preview も残っていれば、揃えるコマンドと Preview を外す手順を両方出す"
+  && ! seen "${h}" '前の herdr (Herdr.Herdr.Preview) が残っています' \
+  && [[ -n ${n_preview} && -n ${n_sync} && ${n_preview} -lt ${n_sync} ]]; then
+  ok "差があって Preview も残っていれば、Preview を外す手順を先に、揃えるコマンドを後に出す"
 else
-  ng "差と Preview" "rc=$(rc "${h}") $(outerr "${h}")"
+  ng "差と Preview" "rc=$(rc "${h}") n_preview=${n_preview} n_sync=${n_sync} $(outerr "${h}")"
 fi
 
 # 23. setup から走るとき、Preview だけが残っていれば、見出しと Preview を外す手順をまとめ用に残す (揃えるコマンドは残さない)
@@ -540,8 +543,9 @@ h=$(new_home t25 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${preview_only_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${install_failed_preview_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入れられませんでした' && seen "${h}" -F '0x8A150014' \
   && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" -F 'winget uninstall' \
-  && ! seen "${h}" -F 'winget pin remove' && ! seen "${h}" '入れました'; then
-  ok "Herdr.Herdr を入れられなければ、入れられなかったと知らせ、Preview を外す手順は出さない"
+  && ! seen "${h}" -F 'winget pin remove' && ! seen "${h}" '入れました' \
+  && ! seen "${h}" -F '外せば直る' && ! seen "${h}" '→ 外す$'; then
+  ok "Herdr.Herdr を入れられなければ、入れられなかったと知らせ、Preview を外す手順も外せと読める行も出さない"
 else
   ng "入れられず Preview が残る" "rc=$(rc "${h}") $(outerr "${h}")"
 fi

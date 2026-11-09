@@ -374,8 +374,10 @@ wait_note() {
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-winget-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
 
-# winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない
+# winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない。
+# gone_why は、パッケージが無いと知らせるときに添える、無いと読んだわけ
 gone=0
+gone_why="${manifest_dir} が無い"
 versions=""
 odd=""
 if ! gh api "${contents_api}" >"${tmp}/contents.json" 2>"${tmp}/contents.err"; then
@@ -385,6 +387,8 @@ if ! gh api "${contents_api}" >"${tmp}/contents.json" 2>"${tmp}/contents.err"; t
   fi
   gone=1
 else
+  # ディレクトリはある (中に版のディレクトリが無ければ、パッケージが無いのと同じ)
+  gone_why="${manifest_dir} に版のディレクトリが無い"
   if ! names=$(jq -r 'if type == "array" then .[] | select(.type == "dir") | .name else error("ディレクトリの一覧ではない") end' \
     "${tmp}/contents.json" 2>/dev/null); then
     cannot_check "winget-pkgs の応答が読めませんでした (ディレクトリの一覧ではない):" \
@@ -406,7 +410,7 @@ echo "${title} (winget の ${package_id})"
 echo "  固定した版    : ${pinned} (${ps1_label} の -Version の既定値)"
 
 if ((gone)); then
-  echo "⚠ ${package_id} が winget-pkgs に無い (${manifest_dir} が無い)。winget で入れられない"
+  echo "⚠ ${package_id} が winget-pkgs に無い (${gone_why})。winget で入れられない"
   echo "    winget search ${search_word} で今のパッケージ ID を探し、${ps1_label} の \$packageId を直す"
   findings+=("${package_id} が winget-pkgs に無い")
   annotate error "${findings[-1]}"

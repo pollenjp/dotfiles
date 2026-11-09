@@ -161,6 +161,12 @@ Test-Case 'winget show が失敗して一覧が空なら、一覧では止めな
 Test-Case '入れ替えるのに herdr が動いていれば busy' 'busy' { Get-HerdrApplyBlocker -Plan change -Versions $versions -Target $V -BusyCount 2 }
 Test-Case '入れるだけなら動いている数は見ない' '' { Get-HerdrApplyBlocker -Plan install -Versions $versions -Target $V -BusyCount 2 }
 Test-Case 'pin を足すだけなら止めない' '' { Get-HerdrApplyBlocker -Plan none -Versions @() -Target 'x' -BusyCount 3 }
+# Preview が残っている間は入れ替えない。winget が Preview を Herdr.Herdr として数え、uninstall --id Herdr.Herdr が
+# どちらに当たるかが定まらない (レビューの I2)。入れる・pin を足すだけなら止めない
+Test-Case '入れ替えるのに Preview が残っていれば preview' 'preview' { Get-HerdrApplyBlocker -Plan change -Versions $versions -Target $V -BusyCount 0 -PreviewExists $true }
+Test-Case '入れ替えるのに Preview が残っていて herdr も動いていれば、Preview を先に言う' 'preview' { Get-HerdrApplyBlocker -Plan change -Versions $versions -Target $V -BusyCount 2 -PreviewExists $true }
+Test-Case '入れるだけなら、Preview が残っていても止めない (並べて入れる)' '' { Get-HerdrApplyBlocker -Plan install -Versions $versions -Target $V -BusyCount 0 -PreviewExists $true }
+Test-Case 'pin を足すだけなら、Preview が残っていても止めない' '' { Get-HerdrApplyBlocker -Plan none -Versions $versions -Target $V -BusyCount 0 -PreviewExists $true }
 
 # Format-HerdrState: 状態の表の行
 function Get-Rows { param($State) @(Format-HerdrState -State $State -Target $V -PackageId $Id -PackageDir $Pkg -PreviewId $PreviewId) }
@@ -172,7 +178,10 @@ Test-Case 'Preview が残っているだけなら、ほかの行は ⚠ にし�
 Test-Case 'PATH で Preview の herdr が先なら、その場所を ⚠ で出す' "⚠ PATH の herdr   : $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" { (Get-Rows (New-State $previewOnPath))[5].Text }
 Test-Case 'PATH で Preview の herdr が先なら、Preview を外せば直ると ※ で添える' '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)' { (Get-Rows (New-State $previewOnPath))[-1].Text }
 Test-Case 'PATH で Preview の herdr が先でも、「PATH から外す」とは言わない' 0 { @((Get-Rows (New-State $previewOnPath)) | Where-Object { $_.Text -like '*PATH から外す*' }).Count }
-Test-Case 'Herdr.Herdr が入っていなくて Preview だけがあるときも、Preview の行を出す' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す' { (Get-Rows (New-State $previewOnly))[6].Text }
+# Herdr.Herdr が入っていない間は、Preview を外せと読める行を出さない (入れる前に外すと herdr が無くなる。レビューの I1)
+Test-Case 'Herdr.Herdr が入っていなくて Preview だけがあるときは、Preview の行を「入れてから外す」にする' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから外す' { (Get-Rows (New-State $previewOnly))[6].Text }
+Test-Case 'Herdr.Herdr が入っていなければ、PATH で Preview の herdr が引かれても ⚠ にしない' "  PATH の herdr   : $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" { (Get-Rows (New-State $previewOnly))[5].Text }
+Test-Case 'Herdr.Herdr が入っていなければ、「Preview を外せば直る」の ※ は出さない (表の 7 行だけ)' 7 { (Get-Rows (New-State $previewOnly)).Count }
 Test-Case '揃っているときの版の行' "  固定した版      : $V → そのまま" { (Get-Rows (New-State))[2].Text }
 Test-Case 'pin が無ければ ⚠' '⚠ winget pin      : 無し → 足す' { (Get-Rows (New-State @{ Pinned = $false }))[4].Text }
 Test-Case '入っていなければ「入っていない」' '  入っている版    : 入っていない' { (Get-Rows (New-State $missing))[1].Text }
@@ -222,7 +231,7 @@ Test-Case '揃っていれば締めの行は出さない' '' { Get-Verdict (New-
 Test-Case '入っていなければ、Install-Herdr で入れると出す' '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️' { Get-Verdict (New-State $missing) }
 Test-Case '版・pin・PATH の差があれば、Install-Herdr で揃えると出す' '⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️' { Get-Verdict (New-State @{ Pinned = $false }) }
 Test-Case 'Preview が残っていれば、外す手順を出す' "⚠️ Herdr.Herdr.Preview が残っている → 次の手順で外す (Install-Herdr は外さない) ⚠️`n$previewSteps" { Get-Verdict (New-State $previewOnPath) }
-Test-Case '差があって Preview も残っていれば、揃えることを先に出す' "⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️`n⚠️ Herdr.Herdr.Preview が残っている → 次の手順で外す (Install-Herdr は外さない) ⚠️`n$previewSteps" { Get-Verdict (New-State ($previewLeft + @{ Pinned = $false })) }
+Test-Case '差があって Preview も残っていれば、Preview を外すことを先に出す (入れ替えは Preview を外してから)' "⚠️ Herdr.Herdr.Preview が残っている → 次の手順で外す (Install-Herdr は外さない) ⚠️`n$previewSteps`n⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️" { Get-Verdict (New-State ($previewLeft + @{ Pinned = $false })) }
 Test-Case 'Herdr.Herdr が入っていなければ、入れてから Preview を外すと出す' "⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️`n⚠️ Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから、次の手順で外す (Install-Herdr は外さない) ⚠️`n$previewSteps" { Get-Verdict (New-State $previewOnly) }
 
 # Get-HerdrInstalledVersion: 起動できない herdr.exe (壊れた・0 バイト) でも例外で止まらず、版は空 (レビューの M2)
@@ -306,6 +315,9 @@ Test-Case '並べて入れた後は、Herdr.Herdr は揃ったと出し、Previe
 Test-Case '揃えるとき、残っているのが Preview だけなら winget を打たずに 1 で止まる' '1 []' { $r = Invoke-Flow -States @($previewState) -ExeExists -PinListed; "$($r.Code) [$($r.Calls)]" }
 Test-Case '残っているのが Preview だけなら、Herdr.Herdr は揃っていると出し、外す手順を出す' $true { $r = Invoke-Flow -States @($previewState) -ExeExists -PinListed; ($r.Text -like "*$Id は揃っている*") -and ($r.Text -like "*winget pin remove --id $PreviewId --exact*") }
 Test-Case '揃えるとき、pin が無くて Preview も残っていれば、pin だけ足して Preview を外す手順を出す' '1 [pin list pin add] True' { $r = Invoke-Flow -States @((New-State ($previewOnPath + @{ Pinned = $false })), $previewState) -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like "*winget uninstall --product-code $PreviewProductCode*")" }
+$changeWithPreview = New-State ($previewOnPath + @{ Installed = $Older; Plan = 'change'; Direction = 'up' })
+Test-Case '入れ替えが要るのに Preview が残っていれば、winget を 1 つも打たずに止まる' '1 []' { $r = Invoke-Flow -States @($changeWithPreview) -ExeExists -PinListed; "$($r.Code) [$($r.Calls)]" }
+Test-Case '入れ替えが要るのに Preview が残っていれば、先に Preview を外すよう手順を出す' $true { $r = Invoke-Flow -States @($changeWithPreview) -ExeExists -PinListed; ($r.Text -like "*先に $PreviewId を外*") -and ($r.Text -like "*winget uninstall --product-code $PreviewProductCode*") }
 Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
 
 if ($script:Failures -gt 0) {

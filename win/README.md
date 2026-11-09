@@ -320,6 +320,7 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
   herdr.exe を置き換えられないので、何も変えずに止まる。herdr の外の PowerShell
   (Windows Terminal など) で `hsvstop` を打ち、`--remote` の窓も閉じてから打ち直す。
   スクリプトが server を止めないのは、herdr の pane の中で打つと自分ごと消えるため
+- 前の `Herdr.Herdr.Preview` が残っている間も、入れ替えずに止まる (下の「[Herdr.Herdr.Preview から移る](#herdrherdrpreview-から移る)」)
 - `herdr update` は打たない。herdr 自身の installer が
   `%USERPROFILE%\.herdr\packages\standalone\releases\<版>-<target>` に別に入れ、そのディレクトリを
   ユーザーの PATH の先頭に足すので、winget の herdr が引かれなくなる。新しい版の通知は
@@ -347,6 +348,10 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 - `Herdr.Herdr` を並べて入れると、winget は Preview を `Herdr.Herdr` として数える (`winget list` の Preview の行の Id が
   `Herdr.Herdr` になり、`winget list --id Herdr.Herdr.Preview --exact` では見つからない。winget v1.29.380)。
   そこで Preview は、winget が Preview の「アプリ」の項目 (ARP) に書いた product code で外す
+- Preview が残っている間は、`Install-Herdr` (`--apply`) は版の入れ替えをせずに止まり、先に Preview を外すよう手順を出す
+  (`winget uninstall --id Herdr.Herdr` が、`Herdr.Herdr` として数えられた Preview に当たりうるため)。新しい版に上げる前に
+  Preview を外す。入れる・pin を足すだけなら、Preview が残っていても進む
+- `Herdr.Herdr` が入る前は、`-Check` は Preview を外せとは言わない (「入れてから外す」と出す)。入れる前に外すと herdr が無くなる
 - 設定 (`%APPDATA%\herdr`) は置き場所によらないので、移った後もそのまま読まれる
 
 外すのは、herdr の pane が消えてもよいときにする (Windows の herdr server を止めるため。スクリプトが外さないのも
@@ -354,11 +359,13 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 
 1. herdr の外の PowerShell (Windows Terminal など) で `hsvstop` を打ち、`herdr --remote` の窓も閉じる
 2. `winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe` を打つ
-   (Windows の設定の「アプリ」から herdr (Preview) をアンインストールするのと同じ。winget が Preview の置き場所を
-   ユーザーの PATH から消す)
+   (Windows の設定の「アプリ」から herdr (Preview) をアンインストールするのと同じ。Preview の ARP に
+   `InstallDirectoryAddedToPath` があるので、winget が置き場所をユーザーの PATH からも消すはず。4 で確かめる)
 3. 続けて `winget pin remove --id Herdr.Herdr.Preview --exact` で Preview の pin を外す (Preview を外す前に打つと、
    `Herdr.Herdr` として数えられた Preview の行に当たりうる)
-4. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になることを確かめる
+4. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になること (「PATH の herdr」が
+   winget のもの) と、`winget pin list` から Preview の行が消えたことを確かめる。違えばこの手順と Install-Herdr.ps1 の
+   締めの行を直す (2026-11 の時点で、2 と 3 はまだ実機で流していない)
 
 ### herdr の新しい版が出たとき
 
@@ -388,7 +395,8 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
    `Install-Herdr.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
 4. merge したら、各マシンで `setup --update` を流す (差が ⚠ で出る)。herdr の外の PowerShell
    (Windows Terminal など) で `hsvstop` を打ち、`herdr --remote` の窓も閉じてから、`Install-Herdr` か
-   `bootstrap-windows-herdr.sh --apply` で揃える
+   `bootstrap-windows-herdr.sh --apply` で揃える。`Herdr.Herdr.Preview` が残っている PC では入れ替えずに止まるので、
+   先に Preview を外す
 5. 揃えた後の `-Check` が「揃っている」になり、herdr を起動して設定が読める (キーが効く) ことを確かめる
 
 見送るとき (2 や 5 で合わないと分かったとき):
