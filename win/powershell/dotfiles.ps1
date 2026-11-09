@@ -59,3 +59,8 @@ function Install-PowerToys { & "$HOME\.config\powershell\Install-PowerToys.ps1" 
 # 中身は同じ場所へ配る Start-PortForward.ps1 (win/README.md の「port forwarding (pf)」)。PowerShell 7 だけで動く。
 # pf <Host> で Host を選ぶ画面を飛ばす。張った後は Ctrl+C で止める。WSL・Linux の版は無い。
 function pf { & "$HOME\.config\powershell\Start-PortForward.ps1" @args }
+
+# Windows の type-clipboard (クリップボードの文字を選んだ窓へキー入力として打ち込む自作のアプリ) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-TypeClipboard.ps1 (win/README.md の「type-clipboard」)。-Check なら確かめるだけ。
+# GitHub の Release から落とし、SHA-256 が合うときだけ置く。入れ替えが要るときは、先に type-clipboard の窓を閉じる (動いていると止まる)。
+function Install-TypeClipboard { & "$HOME\.config\powershell\Install-TypeClipboard.ps1" @args }

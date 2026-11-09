@@ -54,3 +54,8 @@ hint = "PowerShell で Install-PowerToys -Check を打つと、入っている�
 src = "port-forward/Start-PortForward.ps1"
 dst = "%USERPROFILE%/.config/powershell/Start-PortForward.ps1"
 hint = "PowerShell 7 で pf を打つ (dotfiles.ps1 の pf から呼ぶ。開いている PowerShell は . $PROFILE で読み直す)。共有の port の組は bootstrap-windows-port-forward.sh が置く"
+
+[[files]]
+src = "type-clipboard/Install-TypeClipboard.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-TypeClipboard.ps1"
+hint = "PowerShell で Install-TypeClipboard -Check を打つと、固定した版との差が分かる (setup --update が入れて確かめるのは dotfiles.wsl.windowsFiles.typeClipboard.enable = true のマシンだけ。ほかのマシンでも Install-TypeClipboard で入れられる)"
