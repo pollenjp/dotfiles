@@ -10,6 +10,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
+| `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、公式の install.ps1 と同じ置き場所・手順で入れる・外す。PowerShell の `Install-HerdrApp` から呼ぶ ([後述](#herdr-app)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
 | `powertoys/fancyzones/custom-layouts.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\custom-layouts.json` の中のレイアウト | FancyZones のエディターの「カスタム」に登録したレイアウト。manifest では配らず、`bootstrap-windows-fancyzones.sh` が uuid ごとに足す (PC にだけあるレイアウトには触らない。[後述](#fancyzones)) |
@@ -385,6 +386,120 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
   ```
 
 - winget やプロセスに触る部分は、実機で `-Check` と本番を打って確かめる
+
+## herdr-app
+
+herdr-app は herdr の desktop app (窓の中に、herdr-core (`hc`) の terminal と agent を並べる)。winget には無く、公式の入れ方は
+PowerShell の `irm https://releases.herdr.dev/app/install.ps1 | iex` だけなので、`herdr-app/Install-HerdrApp.ps1` が公式の install.ps1
+(app と、それが呼ぶ core の install.ps1) と同じ置き場所・同じ手順を自分で踏む (遠くの script は流さない)。herdr-core も、無ければ同じ
+script で入れる。どちらも WSL の herdr・winget の herdr とは別のもの
+([ADR 048](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/048_win_herdr_app_official_layout_20261109T230034JST/README.md))。
+
+### herdr-app を入れる
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-HerdrApp -Check` (PowerShell) | 入っているかを出すだけ。揃っていれば終了コード 0、欠けているものがあれば 1、app が入っていなければ 3 |
+| `Install-HerdrApp` (PowerShell) | 欠けているものだけを足す (app・`Herdr.lnk`・PATH の行・core) |
+| `Install-HerdrApp -Uninstall` (PowerShell) | 外す ([後述](#herdr-app-を外す)) |
+| `nix/scripts/bootstrap-windows-herdr-app.sh` (WSL) | `setup --update` でも毎回走る。app が入っていなければ入れ (`-IfMissing`)、欠けているものがあれば ⚠ で囲んで知らせる (足しはしない) |
+| `nix/scripts/bootstrap-windows-herdr-app.sh --apply` (WSL) | WSL から欠けているものを足す |
+| `nix/scripts/check-herdr-app-installers.sh` (WSL・CI) | 公式の install.ps1 が、写したときから変わっていないかを確かめる ([後述](#公式の-installps1-が変わったとき)) |
+
+置くもの (公式の install.ps1 と同じ。管理者は要らず、アプリと機能 (ARP) には載らない):
+
+| 物 | 置き場所 |
+| --- | --- |
+| app | `%LOCALAPPDATA%\Programs\herdr-app` (`herdr-app.exe`・`herdr-app.svg`・`LICENSE`・`THIRD-PARTY-NOTICES`)。`releases.herdr.dev/app/latest.json` の windows-x86_64 の tar.gz を落とし、sha256 を確かめて `System32\tar.exe` で展開する |
+| スタートメニュー | `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Herdr.lnk` (`herdr-app.exe` を指し、作業ディレクトリは `%USERPROFILE%`) |
+| ユーザーの PATH | app と core の置き場所を末尾に足す (`HKCU\Environment` の生の値に足す。値の型と、ほかの行の `%VAR%` の書き方はそのまま) |
+| core | `%LOCALAPPDATA%\Programs\herdr-core` (`herdr-core.exe`・`conpty\`・`THIRD-PARTY-NOTICES\`。`hc` が無ければ `hc.exe` を hard link で作る)。公式の置き場所にも PATH にも `herdr-core.exe` が無いときだけ、`core/latest.json` の zip を同じ手順で入れる |
+
+- 版は固定しない。入れるのは、そのときの `latest.json` の版
+- `-Check` は版を出すが比べず、ネットワークも使わない。公式と違う置き場所 (winget など) の core は ⚠ にせず、※ で添えて触らない
+- 入れられなかったら (ネットワーク・x64 でない PC)、⚠ で囲んで知らせ、そのまま次へ進む (setup は止めない)。core だけ入れられなかった
+  ときは、app は入れたまま終了コード 1 になる (次の `setup --update` で ⚠ が出るので、`Install-HerdrApp` で足す)
+- 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
+- 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない
+
+### app は自分で上がる
+
+release の app は、開いて少し後と 1 時間ごとに `releases.herdr.dev/app/latest.json` を見て、新しい版を置き場所の隣に落とし
+(`herdr-app.download` で展開して `herdr-app.new` と `herdr-app.new.json` にする)、再起動か終了のときにフォルダごと差し替える
+(`herdr-app` → `herdr-app.old`、`herdr-app.new` → `herdr-app`)。止める設定は無い。app を上げた後の初回の起動で `hc update` を流し、
+core も同じ generation の新しい版に上げる (動いているファイルを `<名前>.old-…` へ rename して差し替え、terminal は動いたまま)。
+
+- dotfiles で版を固定しても効くのは最初に入れる版だけなので、固定しない。版の見張りもしない (`-Check` は入っているかだけ)
+- `hc update` が断るのは、置き場所が Homebrew・Nix・mise のものか、書き込めないときだけ。winget の置き場所は断らないので、winget の
+  `Herdr.HerdrCore` で入れた core も app が上書きし、winget の記録とずれる。core は dotfiles が公式の置き場所に入れる
+
+### herdr-app を外す
+
+`Install-HerdrApp -Uninstall` で、公式の置き場所に置いたものだけを外す。setup からは打たない (人が打つときだけ)。
+
+| 外すもの | 残すもの |
+| --- | --- |
+| `%LOCALAPPDATA%\Programs\herdr-app` と、自己更新の途中の `herdr-app.old`・`herdr-app.new`・`herdr-app.new.json`・`herdr-app.download` | 設定と mod (`~/.config/herdr-app`) |
+| `Herdr.lnk` (app を指しているときだけ) | core の状態 (`%LOCALAPPDATA%\herdr-core`) と設定 (`%APPDATA%\herdr-core`) |
+| ユーザーの PATH の app と core の行 | 別の場所を指す `Herdr.lnk`・公式と違う置き場所 (winget など) の core |
+| `%LOCALAPPDATA%\Programs\herdr-core` を丸ごと (`hc.exe`・`conpty\`・`hc update` の残りも) | |
+
+- app か core が動いていると (置き場所の下の exe から起動したプロセス。core の conpty の `OpenConsole.exe` も数える)、何も外さずに
+  PID とコマンドラインを出して終了コード 1 で止まる。app の窓を閉じ、出てくる `herdr-core.exe server stop` を打ってから打ち直す。
+  core を止めると、その中の terminal と、そこで動いているもの (agent など) も終わるので、止めるのは人
+- 一度でも開いた app は、窓を閉じても core が裏で動き続ける (terminal を残すため)。外す前に `server stop` が要る
+- PATH は外した行のほかは変えない。ただし入れるときに、前からあった末尾の `;` は落ちている (公式と同じ足し方)
+- 外したものと残したものを出し、読み直して外しきれたかを確かめる (残っていれば終了コード 1)
+
+### winget に載ったら
+
+herdr-app が winget に載ったら、dotfiles の管理を winget の形 ([herdr を入れる](#herdr-を入れる-winget) と同じ) に移せる。
+
+1. app の窓を閉じ、`herdr-core.exe server stop` を打つ (core の中の terminal も終わる)
+2. `Install-HerdrApp -Uninstall` で外す (設定は残るので、winget で入れた app がそのまま読む)
+3. winget で入れる。dotfiles では `Install-HerdrApp.ps1` を winget の形 (`-Version`・pin・`-Check`) に書き換えて bootstrap も合わせ、
+   CI の `herdr-app-installers` と `herdr-app/upstream-installers.txt` を外して `winget-versions` に足す
+
+移る前に確かめること:
+
+- winget のパッケージが portable (zip) か installer か、置き場所はどこか
+- 自分で上がる app と winget の記録のずれ。app は置き場所の隣に `.new` を作ってフォルダごと差し替えるので、winget の portable の
+  置き場所でも中身が替わり、`winget list` の版と中身がずれる (`winget pin` では止まらない)。core も、`hc update` が winget の置き場所を
+  断らずに上書きする
+- core まで winget (`Herdr.HerdrCore`) に替えるかは、上のずれを見てから決める
+
+### 公式の install.ps1 が変わったとき
+
+`Install-HerdrApp.ps1` は公式の install.ps1 を流さずに同じ手順を踏むので、公式が置くもの・置き場所・手順を変えると、入れるもの・外すものが
+黙ってずれる。そこで `herdr-app/upstream-installers.txt` に、写した中身の sha256 を書いておく。GitHub Actions の `herdr-app-installers`
+([`.github/workflows/herdr-app-installers.yml`](../.github/workflows/herdr-app-installers.yml)) が週 1 回 (月曜の朝) と、
+`win/herdr-app/` などを変える PR で公式の install.ps1 を落として比べ、変わっていれば落ちて知らせる (落とせなかったときも落ちる)。
+
+```sh
+nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = 変わった、2 = 確かめられなかった
+```
+
+変わったら:
+
+1. 落ちた実行の summary で、変わった URL と差分を読む所を見る (`upstream-installers.txt` の 3 列目。app は `herdrdev/herdr-app`、core は
+   `herdrdev/herdr-core` の `distribution/install.ps1` の履歴。配る中身は、その repo の default branch のファイルと同じ)
+2. 置くもの・外すもの・置き場所・手順の変化を `Install-HerdrApp.ps1` に合わせ (`-Uninstall` が外すものと、この節の表も)、テストを流す
+3. `upstream-installers.txt` の sha256 を今の値にする (合わせることが無くても書き換える。読んだ印)。PR で `herdr-app-installers` が通るのを見る
+
+### Install-HerdrApp.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する。Windows PowerShell 5.1 でも動かす (sha256 は `Get-FileHash` を使わず、
+  公式と同じく .NET で求める)
+- 遠くの script を流さない (`irm`・`iex`・`Invoke-Expression` を使わない)
+- 副作用の無い関数 (manifest の読み方・PATH の足し引き・状態の表・外す計画) と、Windows に触る関数を偽物に替えた流れは
+  `herdr-app/Install-HerdrApp.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので
+  配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/herdr-app/Install-HerdrApp.Tests.ps1
+  ```
+
+- ダウンロード・レジストリ・ショートカット・プロセスに触る部分は、実機で `-Check`・本番・`-Uninstall` を打って確かめる
 
 ## OpenSSH
 

@@ -797,6 +797,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
+| `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core が公式の置き場所に入っているかを確かめる (app が入っていなければ入れる。欠けているものは ⚠ で知らせるだけ。exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -912,6 +913,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
+| 6.10.1 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core が入っているかを確かめる（無ければ公式の install.ps1 と同じ置き場所・手順で入れる。版は見ない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
@@ -926,7 +928,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 #### 新しい WSL の PC
 
 Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh のログインも無い。そのうちに Windows のアプリ
-(PowerToys・Google 日本語入力・herdr・OpenSSH) まで入れられるよう、ローカル flake に初期用のホスト `initial` を書いて当てる。
+(PowerToys・Google 日本語入力・herdr・herdr-app・OpenSSH) まで入れられるよう、ローカル flake に初期用のホスト `initial` を書いて当てる。
 `initial` は dotfiles-private に登録するまでの踏み台で、登録したら外す (登録しない PC は [`tmp`](#登録簿に載せずにマシンを足す) を使う。
 [ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
 
@@ -1633,6 +1635,8 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
+./nix/scripts/bootstrap-windows-herdr-app.sh        # herdr-app と herdr-core が入っているかを確かめる部分だけ（無ければ入れる。--apply で欠けたものを足す）
+./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足す部分だけ（--dry-run / --force / --import <名前> / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
@@ -1662,6 +1666,10 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   版を固定し、ずれは ⚠ で知らせるだけ (上げるのは手で打つ。UAC の確認が出る)。PowerToys は版を固定せず、91 が
   Keyboard Manager と自動起動がオフならオンにして起動し直す
   （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
+- herdr-app (herdr の desktop app) と herdr-core は winget に無いので、`bootstrap-windows-herdr-app.sh` (order 97) が、配った
+  `Install-HerdrApp.ps1` を `pwsh.exe` で呼び、app が入っていなければ公式の install.ps1 と同じ置き場所・手順で入れる (遠くの script は
+  流さない)。版は固定せず (app が自分で上げる)、入っているかだけを見る。外すのは人が PowerShell で `Install-HerdrApp -Uninstall` を打つときだけ
+  （[`win/README.md`](../win/README.md#herdr-app)、[ADR 048](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/048_win_herdr_app_official_layout_20261109T230034JST/README.md)）
 - FancyZones の設定は持つキー (`win/powertoys/fancyzones/managed.json`) だけを、カスタムレイアウト (`custom-layouts.json`) はレイアウトごとに、
   `bootstrap-windows-fancyzones.sh` (order 92) が書く。どちらも manifest では配らない。`settings.json` は PowerToys が全部のキーを書くので
   ファイルごとは配らず、設定画面で変えていても dotfiles の値へ戻す (衝突で止めない)。`custom-layouts.json` は PC のエディターで作ったレイアウトも
@@ -4722,7 +4730,9 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 
 Windows の winget で固定した版 (OpenSSH・herdr・Google 日本語入力) が winget の最新に追いついているかは、別の
 workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめる (`check-winget-version.sh`。
-[`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。
+[`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。winget に無い herdr-app を入れる `Install-HerdrApp.ps1` が写した
+公式の install.ps1 が変わっていないかは、別の workflow `.github/workflows/herdr-app-installers.yml` が週 1 回と PR で確かめる
+(`check-herdr-app-installers.sh`。[`win/README.md`](../win/README.md#公式の-installps1-が変わったとき))。
 
 ## 検証
 
