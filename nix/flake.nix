@@ -368,6 +368,7 @@
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
+          pjp-drawio-export-test = scriptTest "pjp-drawio-export" ./files/claude/skills/pjp-drawio/scripts/drawio-export.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           bootstrap-path-shadow-test = scriptTest "bootstrap-path-shadow" ./scripts/bootstrap-path-shadow.sh;
           pjp-google-ime-unittest =

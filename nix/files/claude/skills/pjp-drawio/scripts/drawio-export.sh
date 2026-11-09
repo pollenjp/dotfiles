@@ -263,8 +263,54 @@ args=(
   --disable-update
 )
 [[ -z ${scale} ]] || args+=(--scale "${scale}")
-# root で動かす場合だけ必要 (コンテナや CI)。付けられるフラグは最小限にする。
-[[ $(id -u) -ne 0 ]] || args+=(--no-sandbox)
+
+# 一般ユーザが user namespace を使えないマシンか。使えないなら、その理由
+# (kernel の設定の名前と値) を出して 0 を返す。
+#
+# Chromium (Electron) は、一般ユーザでは user namespace で sandbox を立てる。
+# それが使えないと setuid root の helper (chrome-sandbox) へ落ちるが、nixpkgs の
+# electron は CHROME_DEVEL_SANDBOX に store の chrome-sandbox を渡していて、store には
+# setuid のファイルを置けない。そのため、こうしたマシンでは drawio が起動の直後に
+#   FATAL:setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found,
+#   but is not configured correctly. ...
+# で落ちる (終了コード 133 = SIGTRAP)。sandbox を残したまま通すには root が要る
+# (references/troubleshooting.md の「sandbox」)。
+#
+# 見る設定 (/proc/sys からのパス = 止めている値):
+#   kernel/apparmor_restrict_unprivileged_userns = 1
+#       AppArmor が、どの profile にも入っていないプロセスの user namespace から
+#       capability を外す (Ubuntu 23.10 以降の既定)。store の drawio はどの profile にも入らない
+#   kernel/unprivileged_userns_clone = 0   一般ユーザに作らせない (Debian の kernel)
+#   user/max_user_namespaces = 0           作れる数の上限が 0
+#
+# テストは DRAWIO_SKILL_PROC_SYS で /proc/sys の場所を差し替える (流すマシンの設定を見ないように)。
+userns_unavailable() {
+  local proc_sys=${DRAWIO_SKILL_PROC_SYS:-/proc/sys} entry key value
+  for entry in \
+    kernel/apparmor_restrict_unprivileged_userns=1 \
+    kernel/unprivileged_userns_clone=0 \
+    user/max_user_namespaces=0; do
+    key=${entry%=*}
+    [[ -r ${proc_sys}/${key} ]] || continue
+    value=$(<"${proc_sys}/${key}")
+    if [[ ${value} == "${entry#*=}" ]]; then
+      echo "${key//\//.} = ${value}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# root では Chromium が sandbox を断るので要る (コンテナや CI)。一般ユーザでも、
+# user namespace を使えないマシンでは sandbox が立たないので付け、そのことを出す。
+# どちらでもなければ付けない (付けられるフラグは最小限にする)。
+if [[ $(id -u) -eq 0 ]]; then
+  args+=(--no-sandbox)
+elif userns_reason=$(userns_unavailable); then
+  echo "注意: ${userns_reason} で一般ユーザは user namespace を使えず、Electron の sandbox が立たないので、--no-sandbox で書き出します。" >&2
+  echo "      sandbox の無い drawio に読ませるのは、自分たちで書いた .drawio だけにしてください (pjp-drawio の references/troubleshooting.md の「sandbox」)。" >&2
+  args+=(--no-sandbox)
+fi
 
 log="${tmp_dir}/drawio.log"
 count=0
