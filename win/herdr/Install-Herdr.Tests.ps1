@@ -206,12 +206,17 @@ Test-Case 'PATH で別の herdr が先なら、外すディレクトリを ※ �
 Test-Case 'winget の置き場所が PATH に無ければ、足し直し方を ※ で添える' '※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id Herdr.Herdr の後に Install-Herdr で入れ直す' { (Get-Rows (New-State @{ PathKind = 'none'; PathResolved = $null }))[6].Text }
 Test-Case '入っていないときは PATH の ※ を出さない' 6 { (Get-Rows (New-State $missing)).Count }
 
-# Format-HerdrVerdict: 締めの行。bootstrap-windows-herdr.sh がこの文言で枠の見出しと直し方を決める
-function Get-Verdict { param($State) (@(Format-HerdrVerdict -State $State -PackageId $Id -PreviewId $PreviewId) | ForEach-Object { "$_" }) -join "`n" }
+# Format-HerdrVerdict: 締めの行。bootstrap-windows-herdr.sh がこの文言で枠の見出しと直し方を決める。
+# Preview は product code で外す (Herdr.Herdr を並べて入れると、winget は Preview を Herdr.Herdr として数え、
+# winget list --id Herdr.Herdr.Preview --exact では見つからなくなる。2026-11-09 に実機で確かめた)。
+# pin は Preview を外した後に外す (先に打つと、Herdr.Herdr に結ばれた Preview の行に当たりうる)
+$PreviewProductCode = 'Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+function Get-Verdict { param($State) (@(Format-HerdrVerdict -State $State -PackageId $Id -PreviewId $PreviewId -PreviewProductCode $PreviewProductCode) | ForEach-Object { "$_" }) -join "`n" }
 $previewSteps = @(
     '⚠️   1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる'
-    '⚠️   2. winget pin remove --id Herdr.Herdr.Preview と winget uninstall --id Herdr.Herdr.Preview を打つ'
-    '⚠️   3. 新しい PowerShell から herdr を起動し直す'
+    '⚠️   2. winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ'
+    '⚠️   3. winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)'
+    '⚠️   4. 新しい PowerShell から herdr を起動し直す'
 ) -join "`n"
 Test-Case '揃っていれば締めの行は出さない' '' { Get-Verdict (New-State) }
 Test-Case '入っていなければ、Install-Herdr で入れると出す' '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️' { Get-Verdict (New-State $missing) }
@@ -295,12 +300,12 @@ Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出�
 # Herdr.Herdr.Preview が残っているとき。Preview は外さず (pin remove も uninstall も打たない)、外す手順を出す
 $previewState = New-State $previewOnPath
 Test-Case '-Check は Preview が残っていれば 1 で、winget は打たない' '1 []' { $r = Invoke-Flow -States @($previewState) -Check -ExeExists; "$($r.Code) [$($r.Calls)]" }
-Test-Case '-Check は Preview が残っていれば、外す手順を出し、揃っているとは言わない' $true { $r = Invoke-Flow -States @($previewState) -Check -ExeExists; ($r.Text -like "*winget uninstall --id $PreviewId*") -and ($r.Text -notlike '*揃っている*') }
+Test-Case '-Check は Preview が残っていれば、外す手順を出し、揃っているとは言わない' $true { $r = Invoke-Flow -States @($previewState) -Check -ExeExists; ($r.Text -like "*winget uninstall --product-code $PreviewProductCode*") -and ($r.Text -notlike '*揃っている*') }
 Test-Case '-IfMissing は Preview が残っていても、Herdr.Herdr が無ければ並べて入れて pin を足す' '1 [install pin list pin add]' { $r = Invoke-Flow -States @((New-State $previewOnly), $previewState) -IfMissing; "$($r.Code) [$($r.Calls)]" }
-Test-Case '並べて入れた後は、Herdr.Herdr は揃ったと出し、Preview を外す手順を出す (Install-Herdr で揃えるとは言わない)' $true { $r = Invoke-Flow -States @((New-State $previewOnly), $previewState) -IfMissing; ($r.Text -like "*$Id は揃った*") -and ($r.Text -like "*winget uninstall --id $PreviewId*") -and ($r.Text -notlike '*Install-Herdr で揃える*') }
+Test-Case '並べて入れた後は、Herdr.Herdr は揃ったと出し、Preview を外す手順を出す (Install-Herdr で揃えるとは言わない)' $true { $r = Invoke-Flow -States @((New-State $previewOnly), $previewState) -IfMissing; ($r.Text -like "*$Id は揃った*") -and ($r.Text -like "*winget uninstall --product-code $PreviewProductCode*") -and ($r.Text -notlike '*Install-Herdr で揃える*') }
 Test-Case '揃えるとき、残っているのが Preview だけなら winget を打たずに 1 で止まる' '1 []' { $r = Invoke-Flow -States @($previewState) -ExeExists -PinListed; "$($r.Code) [$($r.Calls)]" }
-Test-Case '残っているのが Preview だけなら、Herdr.Herdr は揃っていると出し、外す手順を出す' $true { $r = Invoke-Flow -States @($previewState) -ExeExists -PinListed; ($r.Text -like "*$Id は揃っている*") -and ($r.Text -like "*winget pin remove --id $PreviewId*") }
-Test-Case '揃えるとき、pin が無くて Preview も残っていれば、pin だけ足して Preview を外す手順を出す' '1 [pin list pin add] True' { $r = Invoke-Flow -States @((New-State ($previewOnPath + @{ Pinned = $false })), $previewState) -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like "*winget uninstall --id $PreviewId*")" }
+Test-Case '残っているのが Preview だけなら、Herdr.Herdr は揃っていると出し、外す手順を出す' $true { $r = Invoke-Flow -States @($previewState) -ExeExists -PinListed; ($r.Text -like "*$Id は揃っている*") -and ($r.Text -like "*winget pin remove --id $PreviewId --exact*") }
+Test-Case '揃えるとき、pin が無くて Preview も残っていれば、pin だけ足して Preview を外す手順を出す' '1 [pin list pin add] True' { $r = Invoke-Flow -States @((New-State ($previewOnPath + @{ Pinned = $false })), $previewState) -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like "*winget uninstall --product-code $PreviewProductCode*")" }
 Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
 
 if ($script:Failures -gt 0) {

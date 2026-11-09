@@ -158,12 +158,16 @@ fix_sync=(
   "  WSL:        ${script_dir}/bootstrap-windows-herdr.sh --apply"
   "  PowerShell: Install-Herdr"
 )
-# 直し方。前に入れていた Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)
+# 直し方。前に入れていた Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)。
+# Preview は product code で外す。Herdr.Herdr を並べて入れると、winget は Preview を Herdr.Herdr として数え、
+# --id Herdr.Herdr.Preview --exact では見つからなくなる。pin は Preview を外した後に外す (Install-Herdr.ps1 の
+# Format-HerdrVerdict の上のコメント)
 fix_preview=(
   "Herdr.Herdr.Preview を外すには (setup は外さない。herdr server を止めると pane が消えるので、時期を選んで打つ):"
   "  1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる"
-  "  2. PowerShell で winget pin remove --id Herdr.Herdr.Preview と winget uninstall --id Herdr.Herdr.Preview を打つ"
-  "  3. 新しい PowerShell から herdr を起動し直す"
+  "  2. PowerShell で winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ"
+  "  3. 続けて winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)"
+  "  4. 新しい PowerShell から herdr を起動し直す"
 )
 preview_title="Windows に前の herdr (Herdr.Herdr.Preview) が残っています"
 

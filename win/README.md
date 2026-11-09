@@ -343,16 +343,22 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 
 - どちらのパッケージも置き場所をユーザーの PATH に足すので、両方ある間は PATH で先の方の herdr が引かれる。
   後から入れた `Herdr.Herdr` は後ろに足されるので、Preview の herdr が引かれる (`-Check` の「PATH の herdr」が ⚠ になり、
-  「Preview を外せば直る」と ※ の行に出る)
+  「Preview を外せば直る」と ※ の行に出る。2026-11-09 にこの PC で確かめた)
+- `Herdr.Herdr` を並べて入れると、winget は Preview を `Herdr.Herdr` として数える (`winget list` の Preview の行の Id が
+  `Herdr.Herdr` になり、`winget list --id Herdr.Herdr.Preview --exact` では見つからない。winget v1.29.380)。
+  そこで Preview は、winget が Preview の「アプリ」の項目 (ARP) に書いた product code で外す
 - 設定 (`%APPDATA%\herdr`) は置き場所によらないので、移った後もそのまま読まれる
 
 外すのは、herdr の pane が消えてもよいときにする (Windows の herdr server を止めるため。スクリプトが外さないのも
 そのため):
 
 1. herdr の外の PowerShell (Windows Terminal など) で `hsvstop` を打ち、`herdr --remote` の窓も閉じる
-2. `winget pin remove --id Herdr.Herdr.Preview` と `winget uninstall --id Herdr.Herdr.Preview` を打つ
-   (winget が Preview の置き場所をユーザーの PATH から消す)
-3. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になることを確かめる
+2. `winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe` を打つ
+   (Windows の設定の「アプリ」から herdr (Preview) をアンインストールするのと同じ。winget が Preview の置き場所を
+   ユーザーの PATH から消す)
+3. 続けて `winget pin remove --id Herdr.Herdr.Preview --exact` で Preview の pin を外す (Preview を外す前に打つと、
+   `Herdr.Herdr` として数えられた Preview の行に当たりうる)
+4. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になることを確かめる
 
 ### herdr の新しい版が出たとき
 

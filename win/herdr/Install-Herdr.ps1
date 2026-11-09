@@ -235,9 +235,12 @@ function Format-HerdrState {
 # 締めの行 (-Check の最後と、揃えた後の最後)。揃っていれば何も返さない。直すことごとに ⚠️ で始まる行を返す。
 # bootstrap-windows-herdr.sh は ⚠️ で始まる行を枠の本文から落とし、「→ Install-Herdr で入れる」
 # 「→ Install-Herdr で揃える」「<Preview の ID> が残っている」の文言で枠の見出しと直し方を決める
-# (文言を変えるときは向こうも直す)。Preview を外すのは、Herdr.Herdr が入った後にする
+# (文言を変えるときは向こうも直す)。Preview を外すのは、Herdr.Herdr が入った後にする。
+# Preview は product code (ARP の UninstallString と同じ) で外す。Herdr.Herdr を並べて入れると、winget は
+# Preview を Herdr.Herdr として数え、--id Herdr.Herdr.Preview --exact では見つからなくなる (2026-11-09、winget
+# v1.29.380 で確かめた)。pin は Preview を外した後に外す (先に打つと、Herdr.Herdr に結ばれた Preview の行に当たりうる)
 function Format-HerdrVerdict {
-    param($State, [string]$PackageId, [string]$PreviewId)
+    param($State, [string]$PackageId, [string]$PreviewId, [string]$PreviewProductCode)
     $code = Get-HerdrExitCode -State $State
     if ($code -eq 3) {
         '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️'
@@ -248,8 +251,9 @@ function Format-HerdrVerdict {
         $first = if ($code -eq 3) { "$PackageId を入れてから、" } else { '' }
         "⚠️ $PreviewId が残っている → ${first}次の手順で外す (Install-Herdr は外さない) ⚠️"
         '⚠️   1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる'
-        "⚠️   2. winget pin remove --id $PreviewId と winget uninstall --id $PreviewId を打つ"
-        '⚠️   3. 新しい PowerShell から herdr を起動し直す'
+        "⚠️   2. winget uninstall --product-code $PreviewProductCode を打つ"
+        "⚠️   3. winget pin remove --id $PreviewId --exact を打つ (Preview の pin を外す)"
+        '⚠️   4. 新しい PowerShell から herdr を起動し直す'
     }
 }
 
@@ -337,8 +341,8 @@ function Write-HerdrState {
 
 # 締めの行 (直すこと) を黄色で出す。揃っていれば何も出さない
 function Write-HerdrVerdict {
-    param($State, [string]$PackageId, [string]$PreviewId)
-    foreach ($line in (Format-HerdrVerdict -State $State -PackageId $PackageId -PreviewId $PreviewId)) {
+    param($State, [string]$PackageId, [string]$PreviewId, [string]$PreviewProductCode)
+    foreach ($line in (Format-HerdrVerdict -State $State -PackageId $PackageId -PreviewId $PreviewId -PreviewProductCode $PreviewProductCode)) {
         Write-Host $line -ForegroundColor Yellow
     }
 }
@@ -348,9 +352,11 @@ function Invoke-InstallHerdr {
     $packageId = 'Herdr.Herdr'
     # portable の置き場所は <Id>_<ソースの識別子>。winget のソースから入れると、どのマシンでも同じ名前になる
     $packageDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr_Microsoft.Winget.Source_8wekyb3d8bbwe'
-    # 前に入れていた preview のパッケージ。置き場所が別なので並べて入れられる。残っていれば外す手順を出す (外さない)
+    # 前に入れていた preview のパッケージ。置き場所が別なので並べて入れられる。残っていれば外す手順を出す (外さない)。
+    # 置き場所の名前は、winget が ARP に書く product code と同じ
     $previewId = 'Herdr.Herdr.Preview'
-    $previewDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+    $previewProductCode = 'Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+    $previewDir = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\$previewProductCode"
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
@@ -364,7 +370,7 @@ function Invoke-InstallHerdr {
     # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
     if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
         if ($code -eq 0) { Write-Host '揃っている' }
-        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId
+        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId -PreviewProductCode $previewProductCode
         return $code
     }
     if ($code -eq 0) {
@@ -374,7 +380,7 @@ function Invoke-InstallHerdr {
     # Install-Herdr で直す差が無く、残っているのは Herdr.Herdr.Preview だけ。Preview は外さない
     if (-not (Test-HerdrDrift -State $state)) {
         Write-Host "$packageId は揃っている。何もしない"
-        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId
+        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId -PreviewProductCode $previewProductCode
         return 1
     }
 
@@ -445,7 +451,7 @@ function Invoke-InstallHerdr {
     }
     # Herdr.Herdr は揃い、残っているのは Herdr.Herdr.Preview だけ (Preview を残したまま並べて入れたとき)
     if (-not (Test-HerdrDrift -State $after)) { Write-Host "$packageId は揃った" }
-    Write-HerdrVerdict -State $after -PackageId $packageId -PreviewId $previewId
+    Write-HerdrVerdict -State $after -PackageId $packageId -PreviewId $previewId -PreviewProductCode $previewProductCode
     return 1
 }
 

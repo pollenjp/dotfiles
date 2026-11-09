@@ -93,8 +93,9 @@ preview_verdict() {
   printf '%s\n' \
     "⚠️ Herdr.Herdr.Preview が残っている → $1次の手順で外す (Install-Herdr は外さない) ⚠️" \
     '⚠️   1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる' \
-    '⚠️   2. winget pin remove --id Herdr.Herdr.Preview と winget uninstall --id Herdr.Herdr.Preview を打つ' \
-    '⚠️   3. 新しい PowerShell から herdr を起動し直す'
+    '⚠️   2. winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ' \
+    '⚠️   3. winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)' \
+    '⚠️   4. 新しい PowerShell から herdr を起動し直す'
 }
 
 # Install-Herdr.ps1 -Check の出力 (Herdr.Herdr は揃っていて、Herdr.Herdr.Preview が残り、PATH でも先に引かれる)
@@ -479,8 +480,9 @@ FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" -F '⚠️  Windows に前の herdr (Herdr.Herdr.Preview) が残っています' \
   && seen "${h}" -F '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す' \
   && seen "${h}" -F '⚠️    1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる' \
-  && seen "${h}" -F 'winget pin remove --id Herdr.Herdr.Preview' && seen "${h}" -F 'winget uninstall --id Herdr.Herdr.Preview' \
-  && seen "${h}" -F '新しい PowerShell から herdr を起動し直す' \
+  && seen "${h}" -F '⚠️    2. PowerShell で winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ' \
+  && seen "${h}" -F '⚠️    3. 続けて winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)' \
+  && seen "${h}" -F '⚠️    4. 新しい PowerShell から herdr を起動し直す' \
   && ! seen "${h}" -F -- '--apply' && ! seen "${h}" '揃っていません' && ! seen "${h}" -F 'Install-Herdr は外さない'; then
   ok "Preview だけが残っていれば、⚠ の枠の見出しと直し方を Preview を外す手順にする (揃えるコマンドは出さない)"
 else
@@ -492,7 +494,8 @@ fi
 h=$(new_home t22 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_drift_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '⚠️  Windows の herdr が、dotfiles で固定した版と揃っていません' \
-  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && seen "${h}" -F 'winget uninstall --id Herdr.Herdr.Preview' \
+  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' \
+  && seen "${h}" -F 'winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe' \
   && ! seen "${h}" '前の herdr (Herdr.Herdr.Preview) が残っています'; then
   ok "差があって Preview も残っていれば、揃えるコマンドと Preview を外す手順を両方出す"
 else
@@ -503,7 +506,8 @@ fi
 h=$(new_home t23 "${state_on}" 1)
 DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に前の herdr (Herdr.Herdr.Preview) が残っています' ]] \
-  && grep -qE '^[[:space:]]+2\. PowerShell で winget pin remove --id Herdr\.Herdr\.Preview と winget uninstall --id Herdr\.Herdr\.Preview を打つ$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+2\. PowerShell で winget uninstall --product-code Herdr\.Herdr\.Preview_Microsoft\.Winget\.Source_8wekyb3d8bbwe を打つ$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+3\. 続けて winget pin remove --id Herdr\.Herdr\.Preview --exact を打つ \(Preview の pin を外す\)$' "${h}/warnings" \
   && ! grep -qF -- '--apply' "${h}/warnings" && ! grep -qF '前の Preview    :' "${h}/warnings"; then
   ok "setup から走るとき、Preview だけが残っていれば、見出しと Preview を外す手順をまとめ用に残す"
 else
@@ -517,7 +521,8 @@ DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${preview_
   FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${installed_preview_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 2 ]] && called_last "${h}" -- '-IfMissing' && seen "${h}" '入れました' \
   && seen "${h}" -F '⚠️  Windows に前の herdr (Herdr.Herdr.Preview) が残っています' \
-  && seen "${h}" -F 'winget uninstall --id Herdr.Herdr.Preview' && ! seen "${h}" '入れられませんでした' \
+  && seen "${h}" -F 'winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe' \
+  && ! seen "${h}" '入れられませんでした' \
   && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に前の herdr (Herdr.Herdr.Preview) が残っています' ]]; then
   ok "Preview が残っていても並べて入れ、入ったら Preview を外す手順を ⚠ で囲んで出す"
 else
@@ -534,8 +539,8 @@ fi
 h=$(new_home t25 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${preview_only_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${install_failed_preview_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入れられませんでした' && seen "${h}" -F '0x8A150014' \
-  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" -F 'winget uninstall --id Herdr.Herdr.Preview' \
-  && ! seen "${h}" '入れました'; then
+  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" -F 'winget uninstall' \
+  && ! seen "${h}" -F 'winget pin remove' && ! seen "${h}" '入れました'; then
   ok "Herdr.Herdr を入れられなければ、入れられなかったと知らせ、Preview を外す手順は出さない"
 else
   ng "入れられず Preview が残る" "rc=$(rc "${h}") $(outerr "${h}")"
