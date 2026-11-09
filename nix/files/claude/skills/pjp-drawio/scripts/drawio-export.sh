@@ -181,14 +181,25 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 export XDG_CONFIG_HOME="${tmp_dir}/config"
 mkdir -p "${XDG_CONFIG_HOME}"
 
+# xvfb-run の --error-file (Xvfb の出力) の置き場所。drawio の出力とは分ける。
+xvfb_log="${tmp_dir}/xvfb.log"
+
 run_drawio() {
   if ((use_xvfb)); then
     # --error-file を渡さないと Xvfb 側の失敗が /dev/null に消えて、
     # 「何も出ないのに exit 1」になる。--auth-file は既定が ./.Xauthority で
     # カレントを汚すので一時ディレクトリへ逃がす。
+    #
+    # --error-file に /dev/stderr は渡さない。下の変換は stderr を通常のファイル
+    # (log) へ向けているので、/dev/stderr は log を開き直すことになる。xvfb-run は
+    # コマンドが終わったあと `xauth remove … >"$ERRORFILE"` で開き直すので、log が
+    # drawio の出力ごと切り詰められ、drawio が落ちた理由が消える (Xvfb が先に書いた
+    # 行も、drawio の出力に上書きされる)。別のファイルなら drawio の出力は log に
+    # 残る。Xvfb が立たないときは xvfb-run が後始末の前に抜けるので、Xvfb の出力も
+    # このファイルに残る。
     xvfb-run --auto-display \
       --auth-file="${tmp_dir}/Xauthority" \
-      --error-file=/dev/stderr \
+      --error-file="${xvfb_log}" \
       drawio "$@"
   else
     drawio "$@"
@@ -266,6 +277,8 @@ for input in "${inputs[@]}"; do
   output="${out_dir}/${base}.${format}"
 
   echo "==> ${output}"
+  # 前の図の Xvfb の出力を持ち越さない (xvfb-run によっては追記する)
+  : >"${xvfb_log}"
   if run_drawio "${args[@]}" --output "${output}" "${input}" >"${log}" 2>&1; then
     if ((keep_noise)); then
       cat "${log}"
@@ -273,8 +286,9 @@ for input in "${inputs[@]}"; do
       grep -viE "${noise}" "${log}" || true
     fi
   else
-    # 失敗したときはノイズも含めて全部見せる (原因がそこに混ざっている)
-    cat "${log}" >&2
+    # 失敗したときはノイズも含めて全部見せる (原因がそこに混ざっている)。
+    # Xvfb が立たなかったときは、その出力も xvfb_log に残っている
+    cat "${log}" "${xvfb_log}" >&2
     die "drawio が失敗しました: ${input}"
   fi
 
