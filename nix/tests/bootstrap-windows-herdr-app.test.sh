@@ -13,8 +13,9 @@
 #
 #   - 配らないマシン・Install-HerdrApp.ps1 が無いときは pwsh.exe を呼ばずに飛ばす
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
-#   - -Check が 0 なら 1 行だけ (※ の行は添える)。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す (足しはしない)
-#   - -Check が 3 (app が入っていない) なら -IfMissing で入れる。入れられなければ ⚠ で囲んで知らせる
+#   - -Check が 0 なら 1 行だけ (※ の行は添える)
+#   - -Check が 1 (揃っていない) か 3 (app が入っていない) なら -IfMissing で揃える。揃えば ⚠ を出さず、揃いきらなければ
+#     (固定より新しい版が入っている・入れられない) ⚠ で囲んだ注意・状態・揃えるコマンドを出す
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - -Uninstall はどの場合も打たない (外すのは人が打つときだけ)
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
@@ -52,51 +53,84 @@ ng() {
 
 app='C:\Users\u\AppData\Local\Programs\herdr-app'
 core='C:\Users\u\AppData\Local\Programs\herdr-core'
-header='herdr-app (公式の install.ps1 と同じ置き場所。版は app が自分で上げる)'
-core_header='herdr-core (無ければ入れる。上げるのは app)'
+feed='C:\Users\u\AppData\Local\dotfiles\herdr-releases'
+feed_url='file:///C:/Users/u/AppData/Local/dotfiles/herdr-releases'
+header='herdr-app (公式と同じ置き場所。版は dotfiles が決める: 0.1.12)'
+core_header='herdr-core (無ければ入れる。版は dotfiles が決めた 0.1.17 以上)'
+feed_header='更新の取得元 (HERDR_RELEASES_URL。app と core は、ここに載った版にだけ上がる)'
+sig='Valid (CN=herdr, O=herdr。発行元 Microsoft ID Verified CS AOC CA 04)'
 
 # Install-HerdrApp.ps1 -Check の出力 (揃っているとき)
 check_out="${header}
   置き場所         : ${app}
-  入っている版     : 0.1.14
+  入っている版     : 0.1.12 (固定した版)
+  署名             : ${sig}
   スタートメニュー : Herdr.lnk
   ユーザーの PATH  : あり
 ${core_header}
   置き場所         : ${core}
-  入っている版     : 0.1.19
+  入っている版     : 0.1.17 (固定した版 0.1.17 以上)
+  署名             : ${sig}
   ユーザーの PATH  : あり
-入っている"
+${feed_header}
+  フィード         : ${feed} (app 0.1.12・core 0.1.17)
+  環境変数         : ${feed_url}
+入っている (固定した版・フィード・環境変数も揃っている)"
 
-# Install-HerdrApp.ps1 -Check の出力 (Herdr.lnk だけ無いとき)
+# Install-HerdrApp.ps1 -Check の出力 (フィードが固定と違うとき。固定した版を上げる PR を merge した後など)
 partial_out="${header}
   置き場所         : ${app}
-  入っている版     : 0.1.14
-⚠ スタートメニュー : Herdr.lnk が無い → 作る
+  入っている版     : 0.1.12 (固定した版)
+  署名             : ${sig}
+  スタートメニュー : Herdr.lnk
   ユーザーの PATH  : あり
 ${core_header}
   置き場所         : ${core}
-  入っている版     : 0.1.19
+  入っている版     : 0.1.17 (固定した版 0.1.17 以上)
+  署名             : ${sig}
   ユーザーの PATH  : あり
-⚠️ herdr-app に欠けているものがある → Install-HerdrApp で足す ⚠️"
+${feed_header}
+⚠ フィード         : ${feed} (無い・固定と違う: app\latest.json) → 書く
+  環境変数         : ${feed_url}
+⚠️ herdr-app に揃っていないものがある → Install-HerdrApp で揃える ⚠️"
+
+# Install-HerdrApp.ps1 -IfMissing がフィードを書き直したときの出力
+synced_out="フィード ${feed} を固定どおりに書いた (app 0.1.12・core 0.1.17)
+
+${check_out%$'\n'*}
+揃った"
+
+# Install-HerdrApp.ps1 -IfMissing の出力 (固定より新しい app が入っていて、揃いきらないとき)
+newer_out="${header}
+  置き場所         : ${app}
+⚠ 入っている版     : 0.1.14 (固定した版 0.1.12 より新しい。下げはしない)
+  署名             : ${sig}
+※ 入っている app は固定した版より新しい。取得元の変数を置く前に上がったか、変数が効いていない (公式から上がった)。dotfiles は下げない。
+⚠️ まだ揃っていないものがある (上の ⚠ の行) ⚠️"
 
 # Install-HerdrApp.ps1 -Check の出力 (app が入っていないとき)
 missing_out="${header}
-⚠ 置き場所         : ${app} → 入っていない (入れる)
+⚠ 置き場所         : ${app} → 入っていない (0.1.12 を入れる)
   スタートメニュー : Herdr.lnk が無い
   ユーザーの PATH  : 無し
 ${core_header}
-⚠ 置き場所         : ${core} → 入っていない (入れる)
+⚠ 置き場所         : ${core} → 入っていない (0.1.17 を入れる)
+${feed_header}
+  フィード         : ${feed} (無い・固定と違う: app\latest.json・core\latest.json・core\0.1.17\manifest.json)
+  環境変数         : 無し (公式の releases.herdr.dev から上がる)
 ⚠️ herdr-app が入っていない → Install-HerdrApp で入れる ⚠️"
 
 # Install-HerdrApp.ps1 -IfMissing が入れ終えたときの出力
 installed_out="${missing_out%$'\n'*}
-herdr-app 0.1.14 を落とす: https://releases.herdr.dev/app/0.1.14/herdr-app-windows-x86_64.tar.gz
-herdr-app 0.1.14 を ${app} に置いた
+フィード ${feed} を固定どおりに書いた (app 0.1.12・core 0.1.17)
+ユーザーの環境変数 HERDR_RELEASES_URL を ${feed_url} にした (このあと開く app と core から効く。開いている app は閉じて開き直す)
+herdr-app 0.1.12 を落とす: https://releases.herdr.dev/app/0.1.12/herdr-app-windows-x86_64.tar.gz
+herdr-app 0.1.12 を ${app} に置いた (署名と sha256 を確かめた)
 スタートメニューに C:\Users\u\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Herdr.lnk を作った
 ユーザーの PATH に ${app} を足した (新しく開くシェルから効く)
-herdr-core 0.1.19 を落とす: https://releases.herdr.dev/core/0.1.19/herdr-core-windows-x86_64.zip
+herdr-core 0.1.17 を落とす: https://releases.herdr.dev/core/0.1.17/herdr-core-windows-x86_64.zip
 hc.exe を herdr-core.exe への hard link で作った
-herdr-core 0.1.19 を ${core} に置いた
+herdr-core 0.1.17 を ${core} に置いた (署名と sha256 を確かめた)
 ユーザーの PATH に ${core} を足した (新しく開くシェルから効く)
 
 ${check_out%$'\n'*}
@@ -263,7 +297,7 @@ fi
 # 6. 揃っている (-Check が 0): 1 行だけで ⚠ は出さない。pwsh.exe は -NoProfile と -Check で、配った場所を渡す
 h=$(new_home t6 "${state_on}" 1)
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '入っています' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
   && called "${h}" -- '-NoProfile' && called "${h}" -- '-Check' \
   && called "${h}" -F 'C:\fake\Install-HerdrApp.ps1' && [[ $(ncalls "${h}") == 1 ]]; then
   ok "揃っていれば 1 行だけ出して exit 0 (pwsh.exe は -NoProfile -Check、配った場所を渡す)"
@@ -279,18 +313,28 @@ else
   ng "\$LASTEXITCODE を先に 2 にしていない" "calls=$(calls "${h}")"
 fi
 
-# 7. 欠けているものがある (-Check が 1): ⚠ で上下を囲み、状態と揃えるコマンドを出す。足しはしない。setup は止めない
+# 7. 揃っていない (-Check が 1。フィードが古い): -IfMissing で揃える。揃えば ⚠ は出さない
 h=$(new_home t7 "${state_on}" 1)
-FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '欠けているものがあります' \
-  && seen "${h}" -F '⚠ スタートメニュー : Herdr.lnk が無い → 作る' \
-  && seen "${h}" -F -- 'bootstrap-windows-herdr-app.sh --apply' && seen "${h}" -F 'PowerShell: Install-HerdrApp' \
-  && [[ $(ncalls "${h}") == 1 ]]; then
-  ok "欠けているものがあれば ⚠ で囲んだ注意と状態と揃えるコマンドを出して exit 0 (足しはしない)"
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${synced_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && seen "${h}" '揃えました' \
+  && seen "${h}" -F '固定どおりに書いた' && called_last "${h}" -- '-IfMissing' && ! called_last "${h}" -- '-Check'; then
+  ok "揃っていなければ -IfMissing で揃え、揃えば ⚠ を出さずに exit 0"
 else
-  ng "欠けているものがある" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") calls=$(calls "${h}") $(outerr "${h}")"
+  ng "揃っていない → 揃える" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
-if ! seen "${h}" -F '欠けているものがある → Install-HerdrApp'; then
+
+# 7b. 揃いきらない (固定より新しい app が入っていて -IfMissing も 1): ⚠ で上下を囲み、状態と揃えるコマンドを出す
+h=$(new_home t7b "${state_on}" 1)
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${newer_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '揃っていません (終了コード 1)' \
+  && seen "${h}" -F '0.1.14 (固定した版 0.1.12 より新しい。下げはしない)' && seen "${h}" -F '※ 入っている app は固定した版より新しい' \
+  && seen "${h}" -F -- 'bootstrap-windows-herdr-app.sh --apply' && seen "${h}" -F 'PowerShell: Install-HerdrApp' \
+  && [[ $(ncalls "${h}") == 2 ]]; then
+  ok "揃いきらなければ ⚠ で囲んだ注意と状態と揃えるコマンドを出して exit 0"
+else
+  ng "揃いきらない" "rc=$(rc "${h}") warn_lines=$(warn_lines "${h}") calls=$(calls "${h}") $(outerr "${h}")"
+fi
+if ! seen "${h}" -F 'まだ揃っていないものがある (上の ⚠ の行)'; then
   ok "PowerShell の締めの 1 行は、枠の揃えるコマンドと重なるので出さない"
 else
   ng "締めの 1 行が重なっている" "$(outerr "${h}")"
@@ -320,7 +364,7 @@ fi
 h=$(new_home t9 "${state_on}" 1)
 FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 && $(ncalls "${h}") == 2 ]] && seen "${h}" '入れました' \
-  && seen "${h}" -F 'herdr-core 0.1.19 を' && called_last "${h}" -- '-IfMissing' && ! called_last "${h}" -- '-Check'; then
+  && seen "${h}" -F 'herdr-core 0.1.17 を' && called_last "${h}" -- '-IfMissing' && ! called_last "${h}" -- '-Check'; then
   ok "app が入っていなければ -IfMissing で入れて exit 0"
 else
   ng "入っていない → 入れる" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
@@ -328,7 +372,7 @@ fi
 
 # 10. 入っていないので入れようとしたが失敗: ⚠ で囲んで知らせる。setup は止めない
 h=$(new_home t10 "${state_on}" 1)
-FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='herdr-app を入れられなかった: https://releases.herdr.dev/app/latest.json を落とせない (curl.exe の終了コード 6)' run "${h}" 0
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2='herdr-app を入れられなかった: https://releases.herdr.dev/app/0.1.12/herdr-app-windows-x86_64.tar.gz?src=install を落とせない (curl.exe の終了コード 6)' run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" '入れきれませんでした' \
   && seen "${h}" -F 'curl.exe の終了コード 6' && seen "${h}" -F -- 'bootstrap-windows-herdr-app.sh --apply'; then
   ok "入れられなければ ⚠ で囲んで知らせて exit 0"
@@ -338,10 +382,10 @@ fi
 
 # 10b. app は入ったが core だけ入らなかった (-IfMissing が 1): 「入れきれなかった」の枠で、何が入らなかったかを出す
 h=$(new_home t10b "${state_on}" 1)
-FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="herdr-app 0.1.14 を ${app} に置いた
-herdr-core を入れられなかった: 落とした zip に conpty\conpty.dll が無い (tar.exe の終了コード 1)" run "${h}" 0
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="herdr-app 0.1.12 を ${app} に置いた (署名と sha256 を確かめた)
+herdr-core を入れられなかった: 落とした herdr-core.exe の署名が Valid でない (NotSigned)。入れない" run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 ]] && seen "${h}" 'herdr-core を入れきれませんでした (終了コード 1)' \
-  && seen "${h}" -F 'herdr-core を入れられなかった' && seen "${h}" -F 'herdr-app 0.1.14 を'; then
+  && seen "${h}" -F 'herdr-core を入れられなかった' && seen "${h}" -F 'herdr-app 0.1.12 を'; then
   ok "app は入って core だけ入らなかったときも、何が入らなかったかを ⚠ の枠で出す"
 else
   ng "core だけ入らなかった" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -381,7 +425,7 @@ fi
 h=$(new_home t14 "${state_on}" 1)
 note='※ herdr-core は公式と違う置き場所にある (winget など)。dotfiles は入れず、-Uninstall も触らない'
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out%$'\n'*}"$'\n'"${note}"$'\n入っている' run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '入っています' \
+if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
   && seen "${h}" -F "${note}"; then
   ok "揃っていても、※ の行は出す"
 else
@@ -390,7 +434,7 @@ fi
 
 # 15. pwsh.exe の出力に色のエスケープが混ざっていても、取り除いてから枠に入れる
 h=$(new_home t15 "${state_on}" 1)
-FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${header}"$'\n\e[33m⚠ スタートメニュー : Herdr.lnk が無い → 作る\e[0m' run "${h}" 0
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${header}"$'\n\e[33m⚠ スタートメニュー : Herdr.lnk が無い → 作る\e[0m' run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && ! seen "${h}" $'\e' && seen "${h}" -F '⚠ スタートメニュー : Herdr.lnk が無い → 作る'; then
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
@@ -406,17 +450,17 @@ else
   ng "知らない引数" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# 17. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 欠けているものがあれば、⚠ の見出しと揃えるコマンドを
+# 17. setup から走るとき (DOTFILES_SETUP_WARNINGS がある): 揃いきらなければ、⚠ の見出しと揃えるコマンドを
 #     まとめ用に残す (状態の表は残さない。その場の ⚠ の枠には出ている)
 h=$(new_home t17 "${state_on}" 1)
-DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" run "${h}" 0
-if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の herdr-app に欠けているものがあります' ]] \
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${newer_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の herdr-app が揃っていません (終了コード 1)' ]] \
   && grep -qE '^[[:space:]]+WSL: .*/bootstrap-windows-herdr-app\.sh --apply$' "${h}/warnings" \
   && grep -qE '^[[:space:]]+PowerShell: Install-HerdrApp$' "${h}/warnings" \
-  && ! grep -q 'スタートメニュー' "${h}/warnings"; then
-  ok "setup から走るとき、欠けているものがあれば ⚠ の見出しと揃えるコマンドをまとめ用に残す"
+  && ! grep -q '入っている版' "${h}/warnings"; then
+  ok "setup から走るとき、揃いきらなければ ⚠ の見出しと揃えるコマンドをまとめ用に残す"
 else
-  ng "欠けたものをまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+  ng "揃いきらないものをまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
 # 18. 入れられなかったときも、⚠ の見出し (終了コードつき) と揃えるコマンドを残す
@@ -430,16 +474,19 @@ else
   ng "入れられないときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
-# 19. 揃っている・入れられたときは、まとめ用には何も残さない
+# 19. 揃っている・入れられた・揃えられたときは、まとめ用には何も残さない
 h=$(new_home t19 "${state_on}" 1)
 DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" FAKE_PWSH_RC2=0 \
   FAKE_PWSH_OUT2="${installed_out}" run "${h}" 0
 h2=$(new_home t19b "${state_on}" 1)
 DOTFILES_SETUP_WARNINGS="${h2}/warnings" FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}" run "${h2}" 0
-if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings && $(rc "${h2}") == 0 && ! -s ${h2}/warnings ]]; then
-  ok "揃っている・入れられたときは、まとめ用には何も残さない"
+h3=$(new_home t19c "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h3}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${partial_out}" FAKE_PWSH_RC2=0 \
+  FAKE_PWSH_OUT2="${synced_out}" run "${h3}" 0
+if [[ $(rc "${h}") == 0 && ! -s ${h}/warnings && $(rc "${h2}") == 0 && ! -s ${h2}/warnings && $(rc "${h3}") == 0 && ! -s ${h3}/warnings ]]; then
+  ok "揃っている・入れられた・揃えられたときは、まとめ用には何も残さない"
 else
-  ng "警告が無いのにまとめ用に残した" "$(cat "${h}/warnings" "${h2}/warnings" 2>/dev/null)"
+  ng "警告が無いのにまとめ用に残した" "$(cat "${h}/warnings" "${h2}/warnings" "${h3}/warnings" 2>/dev/null)"
 fi
 
 # 20. pwsh.exe が無いときも、見出しと手で打つコマンドをまとめ用に残す

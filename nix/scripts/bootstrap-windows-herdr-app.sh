@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows の herdr-app と herdr-core が、公式の install.ps1 と同じ置き場所に入っているかを確かめる。
-# 冪等。`setup.sh --update` でも毎回走る。app が入っていなければ Install-HerdrApp.ps1 で入れ、欠けているものが
-# あれば ⚠ で囲んで知らせる (足しはしない)。版は見ない (app が自分で上げる)。
+# Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える。
+# 冪等。`setup.sh --update` でも毎回走る。揃っていなければ Install-HerdrApp.ps1 で揃え (入れる・上げる・フィードと
+# 環境変数を書く。下げはしない)、揃いきらなければ ⚠ で囲んで知らせる。
 #
 # order: 97
 #
@@ -15,9 +15,10 @@
 # ## 何のために
 #
 # herdr-app (herdr の desktop app) は winget に無く、公式の入れ方は install.ps1 を irm で落として流すだけ。
-# dotfiles では win/herdr-app/Install-HerdrApp.ps1 が、公式と同じ置き場所・手順を自分で踏む (win/README.md の
-# 「herdr-app」)。新しいマシンでは入れるところまでし、入っているマシンでは欠けたもの (スタートメニューの
-# Herdr.lnk・PATH の行・herdr-core) を見せる。
+# dotfiles では win/herdr-app/Install-HerdrApp.ps1 が、公式と同じ置き場所に、dotfiles が固定した版を入れる。
+# app と core は自分で上がるので、取得元 (HERDR_RELEASES_URL) を固定した版だけを載せた手元のフィードに向ける
+# (win/README.md の「herdr-app」)。固定した版を上げる PR を merge したら、ここでフィードを書き直すと、app が
+# 1 時間以内にその版へ上がる。新しいマシンでは入れるところまでする。
 #
 # ## 何をするか
 #
@@ -25,23 +26,24 @@
 #    <windowsHome>/.config/powershell/Install-HerdrApp.ps1 が無いときも飛ばす
 # 2. pwsh.exe で Install-HerdrApp.ps1 -Check を流す (何も変えない。ネットワークも使わない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
-# 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。3 (app が入って
-#    いない) なら Install-HerdrApp.ps1 -IfMissing で入れる (入っていないなら app も動いていないので、何も
-#    巻き込まない)。どれも exit 0 (setup を止めない)。⚠ の見出しと揃えるコマンドは、setup の最後の
-#    「警告のまとめ」にも残す (summary_warn)
+# 3. 終了コード 0 なら 1 行だけ出す。1 (揃っていない) か 3 (app が入っていない) なら Install-HerdrApp.ps1
+#    -IfMissing で揃える (入れる・固定より古ければ上げる・フィードと環境変数を書く。下げはしない。動いている app も
+#    公式と同じく置き場所の rename で入れ替わり、core は terminal を残したまま差し替わる)。揃いきらなければ (固定より
+#    新しい版が入っている・入れられない、など) ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。どれも exit 0
+#    (setup を止めない)。⚠ の見出しと揃えるコマンドは、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
-# --apply を付けて手で流すと、-Check を付けずに流して揃える (欠けているものだけを足す)。
+# --apply を付けて手で流すと、-Check を付けずに流して揃える (setup が揃えるのと同じ)。
 # -Uninstall (外す) は打たない。外すのは、人が PowerShell で Install-HerdrApp -Uninstall を打つときだけ。
 
 set -eu -o pipefail
 
 usage() {
   cat <<'EOS'
-Windows の herdr-app と herdr-core が、公式の install.ps1 と同じ置き場所に入っているかを確かめる。
+Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える。
 
 使い方:
-  bootstrap-windows-herdr-app.sh            確かめる (app が入っていなければ入れる。欠けているものがあれば ⚠ で知らせる)
-  bootstrap-windows-herdr-app.sh --apply    揃える (欠けているものだけを足す)
+  bootstrap-windows-herdr-app.sh            確かめて、揃っていなければ揃える (揃いきらなければ ⚠ で知らせる)
+  bootstrap-windows-herdr-app.sh --apply    揃える (確かめずに流す)
 
 外すときは Windows の PowerShell で Install-HerdrApp -Uninstall を打つ (win/README.md の「herdr-app を外す」)。
 EOS
@@ -150,7 +152,7 @@ clean() {
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
   local line fix=(
-    "揃えるには次のどちらかを打つ (欠けているものだけを足す):"
+    "揃えるには次のどちらかを打つ (下げはしないので、固定より新しい版は固定が追いつくのを待つ):"
     "  WSL:        ${script_dir}/bootstrap-windows-herdr-app.sh --apply"
     "  PowerShell: Install-HerdrApp"
   )
@@ -183,7 +185,7 @@ if ((apply)); then
 fi
 
 # WSL の interop を通る。落ちていると Exec format error などで失敗する。-Check はネットワークを使わないが、
-# app と core に --version を聞く (それぞれ 10 秒で打ち切る) ので、少し長めに待つ。
+# app と core に --version を聞き (それぞれ 10 秒で打ち切る)、署名を確かめるので、少し長めに待つ。
 # 出力を入れる変数は out にしない (nix の build の中のテストでは out が export されている)
 rc=0
 captured=$(timeout 60 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -Check")" </dev/null 2>&1) || rc=$?
@@ -197,28 +199,38 @@ if grep -q '^herdr-app (' <<<"${captured}"; then
 fi
 
 if ((rc == 0)); then
-  echo "Windows の herdr-app と herdr-core は入っています (版は app が自分で上げる)。"
+  echo "Windows の herdr-app と herdr-core は、固定した版と取得元 (手元のフィード) に揃っています。"
   # 公式と違う置き場所の core などの ※ の行は、揃っていても見せる (ずれではないので枠には入れない)
   grep '^※' <<<"${captured}" | sed 's/^/  /' || true
   exit 0
 fi
-if ((rc == 1 && header)); then
-  warn_frame "Windows の herdr-app に欠けているものがあります" "${captured}"
-  exit 0
-fi
-if ((rc == 3 && header)); then
-  echo "Windows に herdr-app が入っていないので、公式と同じ置き場所・手順で入れます (Install-HerdrApp.ps1 -IfMissing。600 秒まで待ちます)。"
+if (((rc == 1 || rc == 3) && header)); then
+  missing=0
+  if ((rc == 3)); then
+    missing=1
+    echo "Windows に herdr-app が入っていないので、固定した版を公式と同じ置き場所に入れます (Install-HerdrApp.ps1 -IfMissing。600 秒まで待ちます)。"
+  else
+    echo "Windows の herdr-app が固定どおりでないので、揃えます (Install-HerdrApp.ps1 -IfMissing。下げはしない。600 秒まで待ちます)。"
+  fi
   rc=0
   captured=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
   captured=$(printf '%s\n' "${captured}" | clean)
   if ((rc == 0)); then
     printf '%s\n' "${captured}" | sed 's/^/  /'
-    echo "Windows に herdr-app を入れました。スタートメニューの Herdr から開けます。"
+    if ((missing)); then
+      echo "Windows に herdr-app を入れました。スタートメニューの Herdr から開けます。"
+    else
+      echo "Windows の herdr-app を揃えました。開いている app は、閉じて開き直すと取得元の変更が効きます。"
+    fi
     exit 0
   fi
-  # app は入ったが core だけ入らなかったとき (終了コード 1) もここに来るので、「入れきれなかった」と出す (枠の中の出力が何を
-  # 入れられなかったかを言う)
-  warn_frame "Windows に herdr-app と herdr-core を入れきれませんでした (終了コード ${rc})" "${captured}"
+  # app は入ったが core だけ入らなかったとき・固定より新しい版が入っているとき (終了コード 1) もここに来るので、
+  # 「揃えきれなかった」と出す (枠の中の出力が、何が揃わなかったかを言う)
+  if ((missing)); then
+    warn_frame "Windows に herdr-app と herdr-core を入れきれませんでした (終了コード ${rc})" "${captured}"
+  else
+    warn_frame "Windows の herdr-app が揃っていません (終了コード ${rc})" "${captured}"
+  fi
   exit 0
 fi
 # pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする

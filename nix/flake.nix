@@ -296,6 +296,7 @@
           bootstrap-windows-openssh-test = scriptTest "bootstrap-windows-openssh" ./scripts/bootstrap-windows-openssh.sh;
           check-winget-version-test = scriptTest "check-winget-version" ./scripts/check-winget-version.sh;
           check-herdr-app-installers-test = scriptTest "check-herdr-app-installers" ./scripts/check-herdr-app-installers.sh;
+          check-herdr-app-version-test = scriptTest "check-herdr-app-version" ./scripts/check-herdr-app-version.sh;
           check-test-headers-test = scriptTest "check-test-headers" ./scripts/check-test-headers.sh;
           # scripts/ と、前の雛形 (ADR 026 の版) の heredoc の原文 (fixtures/local-flake-migrate) を渡す (今の雛形へ移すケース)
           local-flake-migrate-test =

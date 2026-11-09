@@ -1,24 +1,29 @@
 name: herdr-app-installers
 
-# Windows の herdr-app と herdr-core を入れる win/herdr-app/Install-HerdrApp.ps1 は、公式の install.ps1 (app と core) を
-# 流さずに、同じ置き場所・手順を自分で踏む。公式が置くもの・置き場所・手順を変えると、入れるもの・外すもの (-Uninstall)
-# が黙ってずれるので、週 1 回ここで公式の install.ps1 を落とし、写したときの sha256 (win/herdr-app/upstream-installers.txt)
-# と比べる。変わっていれば落ちて知らせる (差分を読む所を ::error の行と summary に出す)。落とせなかったときも落ちる。
-# 落ちた定期実行の通知は、winget-versions と同じく workflow を作った人に届く。合わせ方は win/README.md の
-# 「公式の install.ps1 が変わったとき」。
+# Windows の herdr-app と herdr-core を入れる win/herdr-app/Install-HerdrApp.ps1 を、週 1 回ここで確かめる。job は 2 つ:
 #
-# curl と sha256sum は GitHub の ubuntu のランナーに入っているので、Nix は要らない。
+# - installers: Install-HerdrApp.ps1 は公式の install.ps1 (app と core) を流さずに、同じ置き場所・手順を自分で踏む。公式が
+#   置くもの・置き場所・手順を変えると、入れるもの・外すもの (-Uninstall) が黙ってずれるので、公式の install.ps1 を落とし、
+#   写したときの sha256 (win/herdr-app/upstream-installers.txt) と比べる。合わせ方は win/README.md の「公式の install.ps1 が変わったとき」
+# - version: 版は dotfiles が固定する (Install-HerdrApp.ps1 の -AppVersion などの既定値)。固定した版の成果物を落とし直して
+#   sha256 が変わっていないか (公開の後で差し替えられていないか) を見て、公開から 7 日たった新しい版があれば知らせる
+#   (その版のソースが取得元の変数 HERDR_RELEASES_URL を読むかも添える)。上げ方は win/README.md の「固定した版を上げる」
+#
+# どちらも、知らせることがあれば落ちる (::error の行と summary に出す)。落とせなかったときも落ちる。落ちた定期実行の通知は、
+# winget-versions と同じく workflow を作った人に届く。curl・sha256sum・jq・gh は GitHub の ubuntu のランナーに入っているので、
+# Nix は要らない。
 
 on:
   # 月曜の朝 (JST 7:41)。winget-versions (7:23) とずらす。毎時 0 分は混んで遅れたり飛ばされたりする
   # (週 1 回なので、1 回飛ぶと 2 週間空く)
   schedule:
     - cron: "41 22 * * 0"
-  # 記録・Install-HerdrApp.ps1・script を変える PR で、記録が今の公式の中身と合うかを確かめる
+  # 記録・Install-HerdrApp.ps1 (固定した版)・script を変える PR で、記録と固定した版が今の公式と合うかを確かめる
   pull_request:
     paths:
       - "win/herdr-app/**"
       - "nix/scripts/check-herdr-app-installers.sh"
+      - "nix/scripts/check-herdr-app-version.sh"
       - ".github/workflows/herdr-app-installers.yml"
   workflow_dispatch:
 
@@ -30,7 +35,7 @@ permissions:
   contents: read
 
 jobs:
-  check:
+  installers:
     name: 公式の install.ps1 と記録
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -52,4 +57,30 @@ jobs:
             grep -v '^::' report.txt 2>/dev/null || echo "(report.txt なし: 比べる前に失敗)"
             echo '```'
             echo "手順: [win/README.md の「公式の install.ps1 が変わったとき」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/win/README.md#公式の-installps1-が変わったとき)"
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  version:
+    name: 固定した版と新しい版
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # shell: bash を書くと pipefail が付く。既定の bash -e のままだと tee の 0 が残り、落ちない
+      - name: 比べる
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./nix/scripts/check-herdr-app-version.sh 2>&1 | tee report.txt
+
+      # 落ちた実行でも、何が出たかを summary で読めるようにする (::error の行は実行の画面の先頭に出る)
+      - name: レポートを summary へ
+        if: always()
+        run: |
+          {
+            echo "## herdr-app の固定した版"
+            echo '```'
+            grep -v '^::' report.txt 2>/dev/null || echo "(report.txt なし: 比べる前に失敗)"
+            echo '```'
+            echo "手順: [win/README.md の「固定した版を上げる」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/win/README.md#固定した版を上げる)"
           } >>"$GITHUB_STEP_SUMMARY"
