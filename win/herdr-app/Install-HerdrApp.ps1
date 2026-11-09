@@ -14,17 +14,21 @@ win/herdr-app/upstream-installers.txt。公式が変わると週 1 回の CI が
 版は dotfiles が決める (下の -AppVersion・-CoreVersion の既定値と sha256。公開から 7 日たった版を PR で上げる):
 
 - 入れる: 固定した版を公式の版つき URL (releases.herdr.dev/app/<版>/…) から落とし、dotfiles の sha256 と、exe の Authenticode
-  (Valid で、発行先が CN=herdr, O=herdr、発行元が Microsoft ID Verified CS の CA) を確かめてから置く
+  (Valid で、発行先が CN=herdr, O=herdr, L=Wilmington, S=Delaware, C=US、発行元が Microsoft ID Verified CS の CA) を確かめてから
+  置く。入っている exe の署名が合わなければ、版によらず入れ直す (合わない exe は動かさない)
 - 上がる先: release の app は 1 時間ごとに自分で新しい版を落とし、再起動か終了のときに差し替え、core も hc update で上げる
   (止める設定は無い)。どちらも取得元を環境変数 HERDR_RELEASES_URL から読むので、%LOCALAPPDATA%\dotfiles\herdr-releases に
   固定した版だけを載せたフィード (app/latest.json・core/latest.json・core/<版>/manifest.json。sha256 は dotfiles の値) を書き、
   ユーザーの環境変数を file:/// の URL でそこへ向ける。app と core はフィードに載った版にだけ上がり、sha256 が合わなければ断る。
   フィードに install.ps1 は置かない (app の「core を入れ直す」は失敗し、core は dotfiles が入れる)
+- 受け取った更新: 変数を置く前に開いた app は、公式から落とした版を置き場所の隣 (.new と受け取りの .new.json) に待たせ、閉じるか
+  開き直すときに差し替える (変数も署名も見ない)。揃えるときは、固定した版で署名の合うもの、のほかは消す
 - HERDR_RELEASES_URL は、公式の install.ps1 が「(tests)」と書くテスト用の変数で、将来読まれなくなりうる。そうなると app は
   公式の最新へ上がるので、-Check が「入っている版が固定と違う」で知らせる。版を上げる前には、新しい版のソースがこの変数を
   読むかを CI が確かめる
 
-管理者は要らず、アプリと機能 (ARP) には載らない。下げはしない (入っている版が固定より新しければ、⚠ で知らせるだけ)。
+管理者は要らず、アプリと機能 (ARP) には載らない。下げはしない (入っている版が固定より新しいか版が読めず、署名は合うなら、
+⚠ で知らせるだけ)。
 
 公式と違えるところ: 版は latest.json ではなく固定した版で、sha256 は dotfiles の値。exe の署名を見る。HERDR_RELEASES_URL は
 フィードに向ける (HC_VERSION・HC_INSTALL_DIR は読まない)。core を入れられなかったときは、app は入れたまま終了コード 1 で
@@ -33,12 +37,13 @@ win/herdr-app/upstream-installers.txt。公式が変わると週 1 回の CI が
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
 .PARAMETER Check
-今の状態と固定どおりかを出すだけで、何も変えない。揃っていれば終了コード 0、揃っていないものがあれば 1、app が入っていなければ 3。
+今の状態と固定どおりかを出すだけで、何も変えない (署名の合わない exe には --version も打たない)。揃っていれば終了コード 0、
+揃っていないものがあれば 1、app が入っていなければ 3、確かめられない (引数や固定した版の書き方の誤り・思わぬ例外) なら 2。
 
 .PARAMETER IfMissing
 付けなくても同じ (揃える)。setup --update の bootstrap-windows-herdr-app.sh が、herdr と同じ形で呼ぶために受け取る。
-揃えるときは、入っていなければ入れ、固定より古ければ上げ (下げない)、足りない Herdr.lnk・PATH の行を足し、フィードと環境変数を
-固定どおりに書く。
+揃えるときは、フィードと環境変数を固定どおりに書き、公式から受け取った更新を消し、入っていなければ入れ、固定より古いか署名が
+合わなければ入れ直し (下げない)、足りない Herdr.lnk・PATH の行を足す。
 
 .PARAMETER Uninstall
 置いたもの (app と、その自己更新が隣に作るもの・Herdr.lnk・PATH の 2 行・core の置き場所・フィード・環境変数) を外す。設定
@@ -83,14 +88,15 @@ function Get-HerdrAppArchitecture {
     $Architecture
 }
 
-# 固定した版と sha256 の書き方が正しいか。誤りがあれば理由、無ければ $null (フィードの JSON にそのまま書くので、形を絞る)
+# 固定した版と sha256 の書き方が正しいか。誤りがあれば理由、無ければ $null (フィードの JSON にそのまま書くので、形を絞る。
+# \A・\z と [0-9] にするのは、$ が末尾の改行の前でも合い、\d が全角などの数字にも合うため)
 function Test-HerdrAppPins {
     param($Pins)
     foreach ($name in @('AppVersion', 'CoreVersion')) {
-        if ("$($Pins.$name)" -notmatch '^\d+\.\d+\.\d+$') { return "$name が版の形 (例 0.1.12) でない: $($Pins.$name)" }
+        if ("$($Pins.$name)" -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+\z') { return "$name が版の形 (例 0.1.12) でない: $($Pins.$name)" }
     }
     foreach ($name in @('AppSha256', 'CoreSha256')) {
-        if ("$($Pins.$name)" -cnotmatch '^[0-9a-f]{64}$') { return "$name が 64 桁の小文字の hex でない: $($Pins.$name)" }
+        if ("$($Pins.$name)" -cnotmatch '\A[0-9a-f]{64}\z') { return "$name が 64 桁の小文字の hex でない: $($Pins.$name)" }
     }
     if ($Pins.CoreGeneration -lt 1) { return "CoreGeneration が 1 以上でない: $($Pins.CoreGeneration)" }
     $null
@@ -163,31 +169,44 @@ function Compare-HerdrAppVersion {
     [Math]::Sign($va.CompareTo($vb))
 }
 
-# 識別名 (CN=herdr, O=herdr, …) から 1 つの値を拾う。無ければ $null
-function Get-HerdrAppDnValue {
-    param([string]$Dn, [string]$Key)
-    foreach ($part in ("$Dn" -split ',')) {
-        $pair = $part.Trim() -split '=', 2
-        if (($pair.Count -eq 2) -and ($pair[0].Trim() -ieq $Key)) { return $pair[1].Trim() }
-    }
-    $null
-}
+# herdr の exe の署名の発行先 (2026-11-10 に app 0.1.12〜0.1.14・core 0.1.17〜0.1.19 で見たもの)。変わったら入れずに止まる
+# (win/README.md の「固定した版を上げる」)
+$HerdrAppPublisher = 'CN=herdr, O=herdr, L=Wilmington, S=Delaware, C=US'
 
 # exe の署名 (Status・Subject・Issuer) が herdr の正しい署名か。違えば理由、合えば $null。証明書は版ごとに替わる (期間は 3 日)
-# ので指紋ではなく、発行先 (CN=herdr, O=herdr) と発行元 (Microsoft ID Verified CS の CA。Azure Artifact Signing) で照らす
+# ので指紋ではなく、発行先の全体 (上の値) と、発行元の形 (Microsoft ID Verified CS <3 字> CA <2 桁>。Azure Artifact Signing の
+# 中間 CA。番号は版によって 03・04) で照らす。名前の一部だけを見ると、CN の重なり (CN=herdr, CN=evil) や、所在地の違う
+# 同じ名前の組織の証明書を通してしまう
 function Test-HerdrAppSignature {
     param($Signature)
     if ($null -eq $Signature) { return '署名を確かめられない (Get-AuthenticodeSignature が使えない)' }
     if ("$($Signature.Status)" -ne 'Valid') { return "署名が Valid でない ($($Signature.Status))" }
-    $cn = Get-HerdrAppDnValue -Dn $Signature.Subject -Key 'CN'
-    $o = Get-HerdrAppDnValue -Dn $Signature.Subject -Key 'O'
-    if (($cn -cne 'herdr') -or ($o -cne 'herdr')) { return "発行先が herdr でない ($($Signature.Subject))" }
-    $issuerCn = "$(Get-HerdrAppDnValue -Dn $Signature.Issuer -Key 'CN')"
-    $issuerO = Get-HerdrAppDnValue -Dn $Signature.Issuer -Key 'O'
-    if (-not $issuerCn.StartsWith('Microsoft ID Verified CS ', [StringComparison]::Ordinal) -or ($issuerO -cne 'Microsoft Corporation')) {
+    if ("$($Signature.Subject)" -cne $HerdrAppPublisher) { return "発行先が herdr ($HerdrAppPublisher) でない ($($Signature.Subject))" }
+    if ("$($Signature.Issuer)" -cnotmatch '\ACN=Microsoft ID Verified CS [A-Z]{3} CA [0-9]{2}, O=Microsoft Corporation, C=US\z') {
         return "発行元が Microsoft ID Verified CS の CA でない ($($Signature.Issuer))"
     }
     $null
+}
+
+# 署名を読めて、しかも合わないか (読めないだけなら $false)。合わない exe は動かさず (--version も打たない)、版によらず入れ直す
+function Test-HerdrAppSignatureRejected {
+    param($Signature)
+    ($null -ne $Signature) -and [bool](Test-HerdrAppSignature -Signature $Signature)
+}
+
+# 自己更新の受け取り (<置き場所>.new.json。{"version":"0.1.13"}) の版。読めなければ $null
+function Get-HerdrAppStagedVersion {
+    param([string]$Text)
+    if (-not $Text) { return $null }
+    try {
+        $json = $Text | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return $null
+    }
+    if ($null -eq $json) { return $null }
+    $prop = $json.PSObject.Properties['version']
+    if (($null -eq $prop) -or ($prop.Value -isnot [string])) { return $null }
+    $prop.Value
 }
 
 # PATH の 1 つの要素が置き場所を指すか。前後の空白と " を落とし、%VAR% を展開し、末尾の \ を落としてから、
@@ -229,11 +248,12 @@ function Get-PathValueWithoutEntry {
     @($kept) -join ';'
 }
 
-# <名前> --version の出力 ("herdr-app 0.1.14"・"hc 0.1.19") から版を拾う。無ければ $null
+# <名前> --version の出力 ("herdr-app 0.1.14"・"hc 0.1.19") から版を拾う。v 付き・後ろに続きのある形
+# ("herdr-app v0.1.20 (abc123)") も版だけを拾う。無ければ $null
 function Get-HerdrAppVersionFromOutput {
     param([string[]]$Lines, [string]$Name)
     foreach ($line in $Lines) {
-        if ("$line" -match ('^\s*' + [regex]::Escape($Name) + '\s+(\S+)\s*$')) { return $Matches[1] }
+        if ("$line" -match ('^\s*' + [regex]::Escape($Name) + '\s+v?([0-9]+\.[0-9]+\.[0-9]+)(?![0-9.])')) { return $Matches[1] }
     }
     $null
 }
@@ -244,6 +264,14 @@ function Get-HerdrAppInstallPaths {
     param([string]$AppDir)
     $dir = $AppDir.TrimEnd('\')
     @($dir, "$dir.old", "$dir.new", "$dir.new.json", "$dir.download")
+}
+
+# 自己更新が受け取って待たせているもの (.new と受け取りの .new.json と、落とす途中の .download)。app は起動のときと終わる
+# ときに、受け取りの版が動いている版より新しければ .new を置き場所と差し替える (取得元の変数も署名も見ない)
+function Get-HerdrAppStagedPaths {
+    param([string]$AppDir)
+    $dir = $AppDir.TrimEnd('\')
+    @("$dir.new", "$dir.new.json", "$dir.download")
 }
 
 # 動いているかを見るディレクトリ (app の置き場所と隣のディレクトリ、core の置き場所)
@@ -301,28 +329,38 @@ function Resolve-HerdrAppOnPath {
     $null
 }
 
-# 揃えるときにすること。App・Core は install (無い) / upgrade (固定より古い・版が読めない) / repair (署名が合わない) /
-# newer (固定より新しい。下げない) / none、Core はほかに elsewhere (公式と違う置き場所。触らない)。ほかは足す・書くか
+# 揃えるときにすること。App・Core は install (無い) / repair (署名が合わない。版によらない: 版は確かめていない exe が名乗る
+# もので、herdr の署名の無い exe は下げない理由 (新しい版が書いた設定を守る) に当たらない) / upgrade (固定より古い) /
+# newer (固定より新しい。下げない) / unknown (署名は合うか読めないが、版が読めない。新しい版かもしれないので入れ替えない) /
+# none、Core はほかに elsewhere (公式と違う置き場所。触らない)。Staged は、受け取った更新 (.new) が固定した版で herdr の
+# 署名を持つもの、のほかなら消すか。ほかは足す・書くか
 function Get-HerdrAppInstallPlan {
     param($State, $Pins)
     $app = 'none'
     if (-not $State.AppExe) { $app = 'install' }
+    elseif (Test-HerdrAppSignatureRejected -Signature $State.AppSignature) { $app = 'repair' }
     else {
         $cmp = Compare-HerdrAppVersion -A $State.AppVersion -B $Pins.AppVersion
-        if (($null -eq $cmp) -or ($cmp -lt 0)) { $app = 'upgrade' }
+        if ($null -eq $cmp) { $app = 'unknown' }
+        elseif ($cmp -lt 0) { $app = 'upgrade' }
         elseif ($cmp -gt 0) { $app = 'newer' }
-        elseif (($null -ne $State.AppSignature) -and (Test-HerdrAppSignature -Signature $State.AppSignature)) { $app = 'repair' }
     }
     $core = 'none'
     if ($State.CoreExe) {
-        $cmp = Compare-HerdrAppVersion -A $State.CoreVersion -B $Pins.CoreVersion
-        if (($null -eq $cmp) -or ($cmp -lt 0)) { $core = 'upgrade' }
-        elseif (($cmp -eq 0) -and ($null -ne $State.CoreSignature) -and (Test-HerdrAppSignature -Signature $State.CoreSignature)) { $core = 'repair' }
+        if (Test-HerdrAppSignatureRejected -Signature $State.CoreSignature) { $core = 'repair' }
+        else {
+            $cmp = Compare-HerdrAppVersion -A $State.CoreVersion -B $Pins.CoreVersion
+            if ($null -eq $cmp) { $core = 'unknown' }
+            elseif ($cmp -lt 0) { $core = 'upgrade' }
+        }
     } elseif ($State.CoreElsewhere) { $core = 'elsewhere' }
     else { $core = 'install' }
+    $staged = @(@($State.StagedPaths) | Where-Object { $_ -and -not $_.EndsWith('.download', [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+    $stagedOk = ($State.StagedVersion -ceq $Pins.AppVersion) -and -not (Test-HerdrAppSignature -Signature $State.StagedSignature)
     [pscustomobject]@{
         App      = $app
         Core     = $core
+        Staged   = ($staged -and -not $stagedOk)
         Lnk      = ($State.LnkKind -ne 'ours')
         AppPath  = (-not $State.AppPathListed)
         CorePath = ($State.CoreExe -and -not $State.CorePathListed)
@@ -336,13 +374,15 @@ function Get-HerdrAppProblems {
     param($State, $Pins)
     if (-not $State.AppExe) { return @('app') }
     $plan = Get-HerdrAppInstallPlan -State $State -Pins $Pins
-    if ($plan.App -in @('upgrade', 'newer')) { 'app-version' }
-    # repair は署名が合わないとき。none でも署名を確かめられなければ (Get-AuthenticodeSignature が使えない) 揃っていないとする
-    if (($plan.App -eq 'repair') -or (($plan.App -eq 'none') -and (Test-HerdrAppSignature -Signature $State.AppSignature))) { 'app-signature' }
+    if ($plan.App -in @('upgrade', 'newer', 'unknown')) { 'app-version' }
+    # 署名が合わない (repair) ときも、確かめられない (Get-AuthenticodeSignature が使えない) ときも揃っていないとする
+    if (Test-HerdrAppSignature -Signature $State.AppSignature) { 'app-signature' }
+    if ($plan.Staged) { 'staged' }
     if ($plan.Lnk) { 'lnk' }
     if ($plan.AppPath) { 'app-path' }
     if ($plan.Core -in @('install', 'upgrade')) { 'core' }
-    if (($plan.Core -eq 'repair') -or (($plan.Core -eq 'none') -and (Test-HerdrAppSignature -Signature $State.CoreSignature))) { 'core-signature' }
+    if ($plan.Core -eq 'unknown') { 'core-version' }
+    if ($State.CoreExe -and (Test-HerdrAppSignature -Signature $State.CoreSignature)) { 'core-signature' }
     if ($plan.CorePath) { 'core-path' }
     if ($plan.Feed) { 'feed' }
     if ($plan.Env) { 'env' }
@@ -363,6 +403,7 @@ function New-HerdrAppRow {
         'Dir' { '置き場所        ' }
         'Version' { '入っている版    ' }
         'Signature' { '署名            ' }
+        'Staged' { '受け取った更新  ' }
         'Menu' { 'スタートメニュー' }
         'Feed' { 'フィード        ' }
         'Env' { '環境変数        ' }
@@ -377,7 +418,8 @@ function Format-HerdrAppSignatureText {
     param($Signature)
     $reason = Test-HerdrAppSignature -Signature $Signature
     if ($reason) { return $reason }
-    "Valid (CN=herdr, O=herdr。発行元 $(Get-HerdrAppDnValue -Dn $Signature.Issuer -Key 'CN'))"
+    $issuer = if ("$($Signature.Issuer)" -cmatch '\ACN=([^,]+),') { $Matches[1] } else { $Signature.Issuer }
+    "Valid (CN=herdr, O=herdr。発行元 $issuer)"
 }
 
 # 状態の表の行 (Text と、直すことがあるかの Warn)。直すことがある行だけ先頭に ⚠ を付け、ほかは 2 字下げる。
@@ -393,17 +435,21 @@ function Format-HerdrAppState {
     } else {
         New-HerdrAppRow -Key 'Dir' -Value $AppDir -Warn $false
         switch ($plan.App) {
-            'upgrade' {
-                $have = if ($State.AppVersion) { $State.AppVersion } else { '不明 (herdr-app.exe --version が読めない)' }
-                New-HerdrAppRow -Key 'Version' -Value "$have → $($Pins.AppVersion) に上げる" -Warn $true
-            }
+            'upgrade' { New-HerdrAppRow -Key 'Version' -Value "$($State.AppVersion) → $($Pins.AppVersion) に上げる" -Warn $true }
             'newer' { New-HerdrAppRow -Key 'Version' -Value "$($State.AppVersion) (固定した版 $($Pins.AppVersion) より新しい。下げはしない)" -Warn $true }
+            'unknown' { New-HerdrAppRow -Key 'Version' -Value '不明 (herdr-app.exe --version が読めない。入れ替えない)' -Warn $true }
+            'repair' { New-HerdrAppRow -Key 'Version' -Value '確かめていない (署名の合わない exe は動かさない)' -Warn $false }
             default { New-HerdrAppRow -Key 'Version' -Value "$($State.AppVersion) (固定した版)" -Warn $false }
         }
         $sigText = Format-HerdrAppSignatureText -Signature $State.AppSignature
         $sigBad = [bool](Test-HerdrAppSignature -Signature $State.AppSignature)
         if ($plan.App -eq 'repair') { $sigText += " → $($Pins.AppVersion) を入れ直す" }
         New-HerdrAppRow -Key 'Signature' -Value $sigText -Warn $sigBad
+    }
+    if ($plan.Staged) {
+        $staged = if ($State.StagedVersion) { $State.StagedVersion } else { '不明 (受け取りが読めない)' }
+        $why = if ($State.StagedVersion -cne $Pins.AppVersion) { '固定した版でない' } else { Test-HerdrAppSignature -Signature $State.StagedSignature }
+        New-HerdrAppRow -Key 'Staged' -Value "$staged ($why。app を閉じるか開き直すと、これに差し替わる) → 消す" -Warn $true
     }
     switch ($State.LnkKind) {
         'ours' { New-HerdrAppRow -Key 'Menu' -Value 'Herdr.lnk' -Warn $false }
@@ -423,11 +469,11 @@ function Format-HerdrAppState {
     [pscustomobject]@{ Text = "herdr-core (無ければ入れる。版は dotfiles が決めた $($Pins.CoreVersion) 以上)"; Warn = $false }
     if ($State.CoreExe) {
         New-HerdrAppRow -Key 'Dir' -Value $CoreDir -Warn $false
-        if ($plan.Core -eq 'upgrade') {
-            $have = if ($State.CoreVersion) { $State.CoreVersion } else { '不明 (herdr-core.exe --version が読めない)' }
-            New-HerdrAppRow -Key 'Version' -Value "$have → $($Pins.CoreVersion) に上げる" -Warn $true
-        } else {
-            New-HerdrAppRow -Key 'Version' -Value "$($State.CoreVersion) (固定した版 $($Pins.CoreVersion) 以上)" -Warn $false
+        switch ($plan.Core) {
+            'upgrade' { New-HerdrAppRow -Key 'Version' -Value "$($State.CoreVersion) → $($Pins.CoreVersion) に上げる" -Warn $true }
+            'unknown' { New-HerdrAppRow -Key 'Version' -Value '不明 (herdr-core.exe --version が読めない。入れ替えない)' -Warn $true }
+            'repair' { New-HerdrAppRow -Key 'Version' -Value '確かめていない (署名の合わない exe は動かさない)' -Warn $false }
+            default { New-HerdrAppRow -Key 'Version' -Value "$($State.CoreVersion) (固定した版 $($Pins.CoreVersion) 以上)" -Warn $false }
         }
         $sigText = Format-HerdrAppSignatureText -Signature $State.CoreSignature
         if ($plan.Core -eq 'repair') { $sigText += " → $($Pins.CoreVersion) を入れ直す" }
@@ -456,7 +502,13 @@ function Format-HerdrAppState {
     }
 
     if ($plan.App -eq 'newer') {
-        [pscustomobject]@{ Text = '※ 入っている app は固定した版より新しい。取得元の変数を置く前に上がったか、変数が効いていない (公式から上がった)。dotfiles は下げない。固定した版が追いつくのを待つか (7 日たった版を CI が知らせる)、Install-HerdrApp -Uninstall の後に入れ直す'; Warn = $false }
+        [pscustomobject]@{ Text = '※ 入っている app は固定した版より新しい (署名は herdr のもの)。取得元の変数を置く前に上がったか、変数が効いていない (公式から上がった)。dotfiles は下げない。固定した版が追いつくのを待つか (7 日たった版を CI が知らせる)、Install-HerdrApp -Uninstall の後に入れ直す'; Warn = $false }
+    }
+    if (($plan.App -eq 'unknown') -or ($plan.Core -eq 'unknown')) {
+        [pscustomobject]@{ Text = '※ 版が読めない exe は、新しい版かもしれないので入れ替えない (下げないため)。直すなら、app の窓を閉じて herdr-core.exe server stop を打ち、Install-HerdrApp -Uninstall の後に入れ直す'; Warn = $false }
+    }
+    if ($plan.Staged) {
+        [pscustomobject]@{ Text = '※ 受け取った更新は、取得元の変数を置く前に開いた app が公式から落としたもの (変数が効いていなければ、置いた後でも)。揃えると消すので、消してから app を閉じて開き直す (消す前に閉じると差し替わる)'; Warn = $false }
     }
     if ((-not $State.CoreExe) -and $State.CoreElsewhere) {
         [pscustomobject]@{ Text = '※ herdr-core は公式と違う置き場所にある (winget など)。dotfiles は入れず、-Uninstall も触らない'; Warn = $false }
@@ -665,14 +717,25 @@ function Remove-HerdrAppEnvValue {
     Remove-Item -LiteralPath 'Env:HERDR_RELEASES_URL' -ErrorAction SilentlyContinue
 }
 
-# フィードのファイルが固定どおりか。無い・中身が違うファイル (フィードからの相対パス) を返す。揃っていれば空
+# フィードのファイルが固定どおりか。無い・中身が違うファイルと、固定に無いファイル (前の版の manifest など) を、フィードからの
+# 相対パス (区切りは \) で返す。揃っていれば空。中身はバイトで比べる (BOM や CRLF が付いても違うとする)
 function Get-HerdrAppFeedDiff {
     param([string]$FeedDir, $Pins, [string]$Releases)
-    foreach ($file in @(Get-HerdrAppFeedFiles -Pins $Pins -Releases $Releases)) {
+    $expected = @(Get-HerdrAppFeedFiles -Pins $Pins -Releases $Releases)
+    $utf8 = New-Object Text.UTF8Encoding $false
+    foreach ($file in $expected) {
         $path = Join-Path $FeedDir $file.Path
-        $text = $null
-        if (Test-Path -LiteralPath $path -PathType Leaf) { $text = [IO.File]::ReadAllText($path) }
-        if ($text -cne $file.Text) { $file.Path }
+        $have = $null
+        if (Test-Path -LiteralPath $path -PathType Leaf) { $have = [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) }
+        if ($have -cne [Convert]::ToBase64String($utf8.GetBytes($file.Text))) { $file.Path }
+    }
+    if (-not (Test-Path -LiteralPath $FeedDir -PathType Container)) { return }
+    $root = (Get-Item -LiteralPath $FeedDir -Force).FullName.TrimEnd('\', '/')
+    $names = @($expected | ForEach-Object { $_.Path })
+    foreach ($item in @(Get-ChildItem -LiteralPath $FeedDir -Recurse -File -Force)) {
+        # Linux の pwsh (テスト) では区切りが / になるので \ にそろえる
+        $rel = $item.FullName.Substring($root.Length + 1).Replace('/', '\')
+        if ($rel -notin $names) { $rel }
     }
 }
 
@@ -738,18 +801,27 @@ function Get-HerdrAppState {
         $found = Resolve-HerdrAppOnPath -PathValue (Get-HerdrAppMachineUserPath) -Name 'herdr-core.exe' -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
         if ($found -and -not (Test-HerdrAppProcessPath -Path $found -Dirs @($Locations.CoreDir))) { $elsewhere = $found }
     }
+    # 署名を先に見て、合わない exe には --version を打たない (確かめていない exe を動かさない)
+    $appSig = if ($appExe) { Get-HerdrAppSignature -Path $appExePath } else { $null }
+    $coreSig = if ($coreExe) { Get-HerdrAppSignature -Path $coreExePath } else { $null }
+    $appDir = $Locations.AppDir.TrimEnd('\')
+    $stagedExe = "$appDir.new\herdr-app.exe"
+    $receipt = "$appDir.new.json"
     [pscustomobject]@{
         AppExe          = $appExe
-        AppVersion      = $(if ($appExe) { Get-HerdrAppExeVersion -Exe $appExePath -Name 'herdr-app' } else { $null })
-        AppSignature    = $(if ($appExe) { Get-HerdrAppSignature -Path $appExePath } else { $null })
+        AppVersion      = $(if ($appExe -and -not (Test-HerdrAppSignatureRejected -Signature $appSig)) { Get-HerdrAppExeVersion -Exe $appExePath -Name 'herdr-app' } else { $null })
+        AppSignature    = $appSig
         AppPathsPresent = @(Get-HerdrAppInstallPaths -AppDir $Locations.AppDir | Where-Object { Test-Path -LiteralPath $_ })
+        StagedPaths     = @(Get-HerdrAppStagedPaths -AppDir $Locations.AppDir | Where-Object { Test-Path -LiteralPath $_ })
+        StagedVersion   = $(if (Test-Path -LiteralPath $receipt -PathType Leaf) { Get-HerdrAppStagedVersion -Text ([IO.File]::ReadAllText($receipt)) } else { $null })
+        StagedSignature = $(if (Test-Path -LiteralPath $stagedExe -PathType Leaf) { Get-HerdrAppSignature -Path $stagedExe } else { $null })
         LnkKind         = Get-HerdrAppLnkKind -Exists ($null -ne $lnkTarget) -Target $lnkTarget -Exe $appExePath
         LnkTarget       = $lnkTarget
         AppPathListed   = Test-HerdrAppPathListed -Raw $raw -Dir $Locations.AppDir
         CoreExe         = $coreExe
         CoreDirExists   = Test-Path -LiteralPath $Locations.CoreDir -PathType Container
-        CoreVersion     = $(if ($coreExe) { Get-HerdrAppExeVersion -Exe $coreExePath -Name 'hc' } else { $null })
-        CoreSignature   = $(if ($coreExe) { Get-HerdrAppSignature -Path $coreExePath } else { $null })
+        CoreVersion     = $(if ($coreExe -and -not (Test-HerdrAppSignatureRejected -Signature $coreSig)) { Get-HerdrAppExeVersion -Exe $coreExePath -Name 'hc' } else { $null })
+        CoreSignature   = $coreSig
         CorePathListed  = Test-HerdrAppPathListed -Raw $raw -Dir $Locations.CoreDir
         CoreElsewhere   = $elsewhere
         FeedDirExists   = Test-Path -LiteralPath $Locations.FeedDir -PathType Container
@@ -883,9 +955,10 @@ function Install-HerdrAppPackage {
 
 # core を固定した版で入れる: 版つき URL の zip を落とす → dotfiles の sha256 → System32\tar.exe で展開 → conpty と署名と版を
 # 確かめる → 無ければ置き、hc が無ければ hc.exe を hard link で作る。あれば公式と同じく herdr-core.exe update --from で
-# 差し替える (terminal は動いたまま)
+# 差し替える (terminal は動いたまま)。-Repair (入っている core の署名が合わない) では、入っている exe を動かさない
+# (update --from も server stop も打たない)。動いていれば止めてもらい、止まっていれば置き場所を消してから置き直す
 function Install-HerdrCorePackage {
-    param($Pins, [string]$CoreDir, [string]$Releases, [string]$Tar)
+    param($Pins, [string]$CoreDir, [string]$Releases, [string]$Tar, [switch]$Repair)
     $tmp = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-core-$PID"
     New-Item -ItemType Directory -Force $tmp | Out-Null
     try {
@@ -904,6 +977,14 @@ function Install-HerdrCorePackage {
         }
         $new = Join-Path $unpacked 'herdr-core.exe'
         Assert-HerdrAppExe -Exe $new -Name 'hc' -Version $Pins.CoreVersion
+        if ($Repair) {
+            $busy = @(Get-HerdrAppBusyProcess -Dirs @($CoreDir))
+            if ($busy.Count -gt 0) {
+                throw "署名の合わない herdr-core が動いている ($(@($busy | ForEach-Object { "PID $($_.Id)" }) -join '・'))。それを動かさないよう server stop は使わず、タスク マネージャーなどで止めてから Install-HerdrApp を打ち直す (core の中の terminal も終わる)"
+            }
+            if (-not (Remove-HerdrAppItem -Path $CoreDir)) { throw "署名の合わない herdr-core の置き場所 $CoreDir を消せない" }
+            Write-Host "署名の合わない herdr-core の置き場所 $CoreDir を消した"
+        }
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
             $update = Invoke-HerdrAppNative -FilePath $exe -Arguments @('update', '--from', $new)
             if ($update.ExitCode -ne 0) { throw "herdr-core.exe update --from が失敗した (終了コード $($update.ExitCode)) $($update.Lines -join ' ')" }
@@ -1021,6 +1102,17 @@ function Invoke-InstallHerdrApp {
     $plan = Get-HerdrAppInstallPlan -State $state -Pins $Pins
     if ($plan.Feed) { Sync-HerdrAppFeed -FeedDir $locations.FeedDir -Pins $Pins -Releases $releases }
     if ($plan.Env) { Set-HerdrAppEnvValue -Value $state.FeedUrl }
+    # 今のプロセスにはいつも置く (このあと打つ herdr-core.exe update が立て直す core が受け継ぐ。WSL から起こした pwsh.exe には、
+    # ユーザーの環境変数を置いた後でも無いことがある)
+    $env:HERDR_RELEASES_URL = $state.FeedUrl
+    # 公式から受け取った更新を消す (固定した版を入れても、残っていれば app を閉じるか開き直すと差し替わる)
+    if ($plan.Staged) {
+        foreach ($path in @($state.StagedPaths)) {
+            if (Remove-HerdrAppItem -Path $path) { Write-Host "受け取っていた更新 $path を消した" }
+            else { Write-Host "受け取っていた更新 $path を消せなかった" -ForegroundColor Yellow }
+        }
+        Write-Host '開いている app は、すぐ閉じて開き直す (取得元の変数を置く前に開いた app は、また公式から受け取りうる)'
+    }
 
     $getApp = $plan.App -in @('install', 'upgrade', 'repair')
     $getCore = $plan.Core -in @('install', 'upgrade', 'repair')
@@ -1047,7 +1139,7 @@ function Invoke-InstallHerdrApp {
     if ($getCore) {
         $coreInstalled = $false
         try {
-            Install-HerdrCorePackage -Pins $Pins -CoreDir $locations.CoreDir -Releases $releases -Tar $tar
+            Install-HerdrCorePackage -Pins $Pins -CoreDir $locations.CoreDir -Releases $releases -Tar $tar -Repair:($plan.Core -eq 'repair')
             $coreInstalled = $true
         } catch {
             Write-Host "herdr-core を入れられなかった: $($_.Exception.Message)" -ForegroundColor Yellow

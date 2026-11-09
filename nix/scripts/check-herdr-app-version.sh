@@ -20,9 +20,11 @@
 #    core の generation が固定した値と同じか、app の core_min が固定した core の版以下か (exit 1)
 # 3. 固定した版より新しい版 (GitHub の tag vX.Y.Z を並べ、版つきの成果物が releases.herdr.dev にあるもの) のうち、公開
 #    (成果物の Last-Modified) から猶予の 7 日がたったもの。あれば、いちばん新しいものを知らせる (exit 1)。その版の
-#    sha256 (と app なら core_min) と、その版のソースが HERDR_RELEASES_URL を読むか (app は src/update.rs、core は
-#    crates/herdr-core/src/releases.rs) を添える。読まない版に上げると、取得元をフィードに替えられない (公式から上がる)。
-#    猶予の中の版だけなら、※ の行で知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)
+#    sha256 (と app なら core_min、core なら generation。固定と違えば、app と一緒に上げると出す) と、その版のソースが
+#    HERDR_RELEASES_URL を読むか (app は src/update.rs、core は crates/herdr-core/src/releases.rs) と、固定した版からの
+#    差分の URL を添える。読まない版に上げると、取得元をフィードに替えられない (公式から上がる)。文字があるかしか見ない
+#    ので、上げる前に差分を読む。猶予の中の版だけなら、※ の行で知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)。
+#    成果物が無い (404) 版は数えず、HEAD のほかの失敗 (5xx・403・つながらない・Last-Modified が無い) は確かめられない (exit 2)
 #
 # 署名 (Authenticode) はここでは見ない。Linux の信頼の束に Microsoft のコード署名の root が無いので、Windows の
 # Install-HerdrApp.ps1 が入れる前と -Check で見る。
@@ -161,25 +163,32 @@ fetch() {
   curl -fsSL --max-time 300 -o "$2" "$1" </dev/null
 }
 
-# 成果物が公開された時刻 (Last-Modified。UNIX 秒)。成果物が無い (この版に Windows の成果物が無い) か読めなければ 1
+# 成果物が公開された時刻 (Last-Modified。UNIX 秒) を出す。戻り値: 0 = 出した、3 = 成果物が無い (404。この版に Windows の
+# 成果物が無い)、1 = 確かめられない (ほかの HTTP の状態・つながらない・Last-Modified が無いか読めない)。-f を付けずに状態を
+# 見て、404 のほかの失敗を「無い」として黙って飛ばさない。-L で redirect の先まで見て、最後の応答を読む
 published_at() {
-  local headers line lm=''
-  headers=$(curl -fsSI --max-time 60 "$1" </dev/null) || return 1
+  local headers line status='' lm=''
+  headers=$(curl -sSIL --max-time 60 "$1" </dev/null) || return 1
   while IFS= read -r line; do
     line=${line%$'\r'}
-    if [[ ${line,,} == last-modified:* ]]; then
+    if [[ ${line} =~ ^HTTP/[0-9.]+\ ([0-9]{3}) ]]; then
+      status=${BASH_REMATCH[1]}
+      lm=''
+    elif [[ ${line,,} == last-modified:* ]]; then
       lm=${line#*:}
       lm=${lm# }
-      break
     fi
   done <<<"${headers}"
-  [[ -n ${lm} ]] || return 1
-  date -d "${lm}" +%s
+  if [[ ${status} == 404 ]]; then
+    return 3
+  fi
+  [[ ${status} == 200 && -n ${lm} ]] || return 1
+  date -d "${lm}" +%s 2>/dev/null || return 1
 }
 
-# GitHub の repo の、版の形の tag (vX.Y.Z) の版 (v を外し、古い順)。$1: repo
+# GitHub の repo の、版の形の tag (vX.Y.Z) の版 (v を外し、古い順)。$1: repo。--paginate で全部読む (並び順は決まっていない)
 tag_versions() {
-  gh api "repos/$1/tags?per_page=100" --jq '.[].name' </dev/null >"${tmp}/tags" || return 1
+  gh api --paginate "repos/$1/tags?per_page=100" --jq '.[].name' </dev/null >"${tmp}/tags" || return 1
   sed -n 's/^v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$/\1/p' "${tmp}/tags" | sort -V
 }
 
@@ -239,7 +248,7 @@ check_one() {
   fi
 
   # 3. 固定した版より新しい版のうち、猶予がたったもの
-  local versions v t age ripe='' ripe_age='' ripe_at='' waiting='' listed_versions=()
+  local versions v t rc age ripe='' ripe_age='' ripe_at='' waiting='' unread=0 listed_versions=()
   if ! versions=$(tag_versions "${repo}"); then
     trouble "GitHub の ${repo} の tag を読めない (gh api repos/${repo}/tags)"
     return 0
@@ -247,8 +256,17 @@ check_one() {
   mapfile -t listed_versions <<<"${versions}"
   for v in "${listed_versions[@]}"; do
     newer_than "${v}" "${pinned}" || continue
+    rc=0
+    t=$(published_at "$(artifact_url "${kind}" "${v}")") || rc=$?
     # 版つきの成果物が無い版 (Windows の成果物を出さなかった版) は数えない
-    t=$(published_at "$(artifact_url "${kind}" "${v}")") || continue
+    if ((rc == 3)); then
+      continue
+    fi
+    if ((rc != 0)); then
+      trouble "${kind} ${v} の成果物の公開日 (HEAD の Last-Modified) を読めない: $(artifact_url "${kind}" "${v}")"
+      unread=1
+      continue
+    fi
     age=$(((now - t) / 86400))
     if ((age >= grace_days)); then
       ripe=${v}
@@ -259,13 +277,18 @@ check_one() {
     fi
   done
   if [[ -n ${ripe} ]]; then
-    local ripe_manifest="${tmp}/${kind}-ripe.json" ripe_sha='' extra='' reads
+    local ripe_manifest="${tmp}/${kind}-ripe.json" ripe_sha='' extra='' reads ripe_generation
     if fetch "${releases}/${kind}/${ripe}/manifest.json" "${ripe_manifest}"; then
       ripe_sha=$(jq -r '.targets["windows-x86_64"].sha256 // ""' "${ripe_manifest}" 2>/dev/null) || ripe_sha=''
       if [[ ${kind} == app ]]; then
         extra="・core_min $(jq -r '.core_min // "?"' "${ripe_manifest}" 2>/dev/null || echo '?')"
       else
-        extra="・generation $(jq -r '.generation // "?"' "${ripe_manifest}" 2>/dev/null || echo '?')"
+        ripe_generation=$(jq -r '.generation // "?"' "${ripe_manifest}" 2>/dev/null) || ripe_generation='?'
+        extra="・generation ${ripe_generation}"
+        if [[ ${ripe_generation} != "${core_generation}" ]]; then
+          # update --from は generation を見ないので、core だけを上げると app と話せない core が入る
+          extra+=" (固定した ${core_generation} と違う。app はこの generation の core と話せる版と一緒に上げる。CHANGELOG で確かめる)"
+        fi
       fi
     fi
     reads=0
@@ -276,14 +299,14 @@ check_one() {
       1) feed_note="ソース (${src_file}) が HERDR_RELEASES_URL を読まない。上げると取得元をフィードに替えられない (公式から上がる) ので、上げない" ;;
       *) feed_note="ソース (${src_file}) が HERDR_RELEASES_URL を読むかを確かめられなかった (上げる前に確かめる)" ;;
     esac
-    report "${kind} の新しい版 ${ripe} が公開から ${ripe_age} 日たった (公開 ${ripe_at}・猶予 ${grace_days} 日)。sha256 ${ripe_sha:-不明}${extra}。${feed_note}。上げ方は win/README.md の「固定した版を上げる」"
+    report "${kind} の新しい版 ${ripe} が公開から ${ripe_age} 日たった (公開 ${ripe_at}・猶予 ${grace_days} 日)。sha256 ${ripe_sha:-不明}${extra}。${feed_note}。差分 (${src_file} も読む): https://github.com/${repo}/compare/v${pinned}...v${ripe}。上げ方は win/README.md の「固定した版を上げる」"
   fi
   if [[ -n ${waiting} ]]; then
     local note="${kind} の新しい版 ${waiting%、} は猶予の中 (固定した版 ${pinned})"
     echo "  ※ ${note}"
     annotate notice "${note}"
   fi
-  if [[ -z ${ripe} && -z ${waiting} ]]; then
+  if [[ -z ${ripe} && -z ${waiting} ]] && ((! unread)); then
     echo "新しい版は無い: ${kind} ${pinned} が最新"
   fi
 }

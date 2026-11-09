@@ -402,8 +402,8 @@ app と core は自分で新しい版に上がる。上がる先を dotfiles が
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-HerdrApp -Check` (PowerShell) | 今の状態と固定どおりかを出すだけ。揃っていれば終了コード 0、揃っていないものがあれば 1、app が入っていなければ 3 |
-| `Install-HerdrApp` (PowerShell) | 揃える: 入っていなければ入れ、固定より古ければ上げ (下げはしない)、足りない `Herdr.lnk`・PATH の行を足し、フィードと環境変数を固定どおりに書く (`-IfMissing` を付けても同じ) |
+| `Install-HerdrApp -Check` (PowerShell) | 今の状態と固定どおりかを出すだけ。揃っていれば終了コード 0、揃っていないものがあれば 1、app が入っていなければ 3、確かめられない (引数や固定した版の書き方の誤り・思わぬ例外) なら 2 |
+| `Install-HerdrApp` (PowerShell) | 揃える: フィードと環境変数を固定どおりに書き、公式から受け取った更新を消し、入っていなければ入れ、固定より古いか署名が合わなければ入れ直し (下げはしない)、足りない `Herdr.lnk`・PATH の行を足す (`-IfMissing` を付けても同じ) |
 | `Install-HerdrApp -Uninstall` (PowerShell) | 外す ([後述](#herdr-app-を外す)) |
 | `nix/scripts/bootstrap-windows-herdr-app.sh` (WSL) | `setup --update` でも毎回走る。揃っていなければ `-IfMissing` で揃え、揃いきらなければ (固定より新しい版が入っている・入れられない) ⚠ で囲んで知らせる |
 | `nix/scripts/bootstrap-windows-herdr-app.sh --apply` (WSL) | WSL から揃える |
@@ -424,11 +424,17 @@ app と core は自分で新しい版に上がる。上がる先を dotfiles が
 | フィード | `%LOCALAPPDATA%\dotfiles\herdr-releases` (`app\latest.json`・`core\latest.json`・`core\<版>\manifest.json`)。固定した版だけを載せる ([後述](#更新の取得元をフィードに替える)) |
 | 環境変数 | ユーザーの環境変数 `HERDR_RELEASES_URL` = フィードを指す `file:///…` の URL |
 
-- 入れる前に、exe の Authenticode を `Get-AuthenticodeSignature` で見る。Valid で、発行先が `CN=herdr, O=herdr`、発行元が
-  `Microsoft ID Verified CS` の CA (Azure Artifact Signing) でなければ入れない。証明書は版ごとに替わる (期間は 3 日) ので、指紋ではなく
-  発行先と発行元で照らす。`-Check` も、入っている exe の署名を見る
+- 入れる前に、exe の Authenticode を `Get-AuthenticodeSignature` で見る。Valid で、発行先が全体で
+  `CN=herdr, O=herdr, L=Wilmington, S=Delaware, C=US`、発行元が `CN=Microsoft ID Verified CS <3 字> CA <2 桁>, O=Microsoft Corporation, C=US`
+  (Azure Artifact Signing の中間 CA。版によって `AOC CA 03`・`04`) でなければ入れない。証明書は版ごとに替わる (期間は 3 日) ので、指紋では
+  なく発行先と発行元で照らす。`-Check` も、入っている exe の署名を見る
+- 入っている exe の署名が合わなければ、版によらず固定した版を入れ直す (版は確かめていない exe が名乗るものなので)。合わない exe は動かさない
+  (`--version` も打たない)。core は動いていれば止めてもらう (`server stop` も合わない exe なので打たず、タスク マネージャーなどで止める)
+- 発行先が変わって入れられないと出たら (herdr の所在地が変わったなど)、herdr の告知で確かめてから `Install-HerdrApp.ps1` の
+  `$HerdrAppPublisher` を書き換える PR を出す (CI は署名を見ないので、Windows で入れるときに初めて気付く)
 - 入っている版が固定より新しいときは下げない (設定を古い版で読ませないため)。`-Check` が ⚠ で知らせるので、固定した版が追いつくのを
-  待つか、`Install-HerdrApp -Uninstall` の後に入れ直す。取得元の変数を置く前に上がったか、変数が効いていない (公式から上がった) ときに起きる
+  待つか、`Install-HerdrApp -Uninstall` の後に入れ直す。取得元の変数を置く前に上がったか、変数が効いていない (公式から上がった) ときに起きる。
+  署名は合うが版が読めない (`--version` の形が変わった・終わらない) ときも、新しい版かもしれないので入れ替えず ⚠ で知らせる
 - `-Check` はネットワークを使わない。公式と違う置き場所 (winget など) の core は ⚠ にせず、※ で添えて触らない
 - 入れられなかったら (ネットワーク・署名や sha256 が合わない・x64 でない PC)、⚠ で囲んで知らせ、そのまま次へ進む (setup は止めない)。
   core だけ入れられなかったときは、app は入れたまま終了コード 1 になる (次の `setup --update` でもう一度入れにいく)
@@ -453,6 +459,11 @@ app も core (`hc update`) も、取得元の manifest にある sha256 しか�
   sha256 は dotfiles の値。app と core はフィードに載った版にだけ上がり、sha256 が合わなければ断る (実機で確かめた)
 - フィードに `install.ps1` は置かない。app の「core を入れ直す」(取得元の `core/install.ps1` を流す) は失敗し、core は dotfiles が入れる
 - 環境変数は、置いた後に開いた app と core からしか効かない。開いている app は、閉じて開き直す (置く前に開いた app は、公式から上がりうる)
+- 置く前に開いた app が公式から落とした版を待たせていると (`herdr-app.new` と受け取りの `herdr-app.new.json`)、固定した版を入れた後でも、
+  閉じるか開き直すときに差し替わる (app は、受け取りの版が動いている版より新しければ、変数も署名も見ずに差し替える)。`Install-HerdrApp`
+  (setup) は、固定した版で署名の合うもの、のほかの受け取りを消し、`-Check` は「受け取った更新」の行の ⚠ で知らせる。消してから app を
+  閉じて開き直す (消す前に閉じると差し替わる。開いたままだと、また公式から受け取りうる)
+- ユーザーが自分で `HERDR_RELEASES_URL` を置いていても、揃えるときにフィードの URL に替える (前の値は状態の表に出る。`-Uninstall` では戻らない)
 - `HERDR_RELEASES_URL` は、公式の install.ps1 が「(tests)」と書くテスト用の変数で、将来読まれなくなりうる。読まれなくなると app は公式の
   最新へ上がるので、次の `setup --update` の `-Check` が「入っている版が固定より新しい」で知らせる。版を上げる前には、新しい版のソース
   (app は `src/update.rs`、core は `crates/herdr-core/src/releases.rs`) がこの変数を読むかを CI が確かめる
@@ -463,7 +474,8 @@ app も core (`hc update`) も、取得元の manifest にある sha256 しか�
 GitHub Actions の `herdr-app-installers` ([`.github/workflows/herdr-app-installers.yml`](../.github/workflows/herdr-app-installers.yml)) の
 `version` の job が、週 1 回 (月曜の朝) と、`win/herdr-app/` などを変える PR で `check-herdr-app-version.sh` を流す。固定した版より新しい版
 (GitHub の tag で並べ、Windows の成果物が `releases.herdr.dev` にあるもの) のうち、公開 (成果物の Last-Modified) から 7 日たったものが
-あれば落ちて知らせる。7 日の間は落ちず、版と残りの日数を notice と summary に出す。
+あれば落ちて知らせる。7 日の間は落ちず、版と残りの日数を notice と summary に出す。新しい版の公開日を読めない (HEAD が 404 のほかで失敗する・
+Last-Modified が無い) ときは、飛ばさずに「確かめられなかった」で落ちる (404 の版は Windows の成果物が無い版として数えない)。
 
 ```sh
 nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった (gh のログインが要る)
@@ -472,11 +484,14 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
 上げるとき:
 
 1. 落ちた実行の summary で、新しい版と sha256 (app なら core_min、core なら generation) と、その版のソースが `HERDR_RELEASES_URL` を読むかを見る。
-   読まないと出たら上げない (取得元をフィードに替えられない)
+   読まないと出たら上げない (取得元をフィードに替えられない)。CI は文字があるかしか見ないので、summary の差分の URL で、取得元を決めるソース
+   (app は `src/update.rs`、core は `crates/herdr-core/src/releases.rs`) の差分も読む (テストのときだけ読むように移っていないか)
 2. CHANGELOG (`herdrdev/herdr-app`・`herdrdev/herdr-core` の `CHANGELOG.md`) で、設定・置き場所・更新の仕組みに触る変更が無いかを見る
-3. `herdr-app/Install-HerdrApp.ps1` の既定値 (`-AppVersion`・`-AppSha256`、`-CoreVersion`・`-CoreSha256`・`-CoreGeneration`) と、この節の
-   「今は」を新しい版にする。core は app の core_min 以上にする。`Install-HerdrApp.Tests.ps1` を流して PR を出す (CI の `version` の job が、
-   書いた版の成果物と manifest が合うかを確かめる)
+3. `herdr-app/Install-HerdrApp.ps1` の既定値 (`-AppVersion`・`-AppSha256`、`-CoreVersion`・`-CoreSha256`・`-CoreGeneration`) と、
+   「[herdr-app を入れる](#herdr-app-を入れる)」の「今は」を新しい版にする。core は app の core_min 以上にする。core の generation が固定と
+   違うと出たら、app を、その generation の core と話せる版と一緒に上げる (`update --from` は generation を見ないので、core だけを上げると
+   app と話せない core が入る)。`Install-HerdrApp.Tests.ps1` を流して PR を出す (CI の `version` の job が、書いた版の成果物と manifest が
+   合うかを確かめる)
 4. merge したら、各マシンで `setup --update` を流す。フィードが新しい版に書き換わり、`-IfMissing` が app と core を上げる (署名と sha256 を
    確かめてから。動いている app は置き場所の rename で入れ替わり、再起動で新しい版になる)。開いている app も、1 時間以内にフィードの版へ上がる
 5. `-Check` が「揃っている」になり、app が起動することを確かめる
@@ -499,7 +514,7 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
 | `%LOCALAPPDATA%\Programs\herdr-app` と、自己更新の途中の `herdr-app.old`・`herdr-app.new`・`herdr-app.new.json`・`herdr-app.download` | 設定と mod (`~/.config/herdr-app`) |
 | `Herdr.lnk` (app を指しているときだけ) | core の状態 (`%LOCALAPPDATA%\herdr-core`) と設定 (`%APPDATA%\herdr-core`) |
 | ユーザーの PATH の app と core の行 | 別の場所を指す `Herdr.lnk`・公式と違う置き場所 (winget など) の core |
-| `%LOCALAPPDATA%\Programs\herdr-core` を丸ごと (`hc.exe`・`conpty\`・`hc update` の残りも) | フィードを指していない `HERDR_RELEASES_URL` |
+| `%LOCALAPPDATA%\Programs\herdr-core` を丸ごと (`hc.exe`・`conpty\`・`hc update` の残りも) | フィードを指していない `HERDR_RELEASES_URL` (揃えるときにフィードの URL に替えているので、残るのは後から自分で置き直したときだけ) |
 | フィード (`%LOCALAPPDATA%\dotfiles\herdr-releases`) と、フィードを指す `HERDR_RELEASES_URL` | `%LOCALAPPDATA%\dotfiles` のほかのファイル |
 
 - app か core が動いていると (置き場所の下の exe から起動したプロセス。core の conpty の `OpenConsole.exe` も数える)、何も外さずに
@@ -559,6 +574,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
   公式と同じく .NET で求める。PowerShell 7 から起こした 5.1 では `Get-AuthenticodeSignature` のモジュールを読めないので、`$PSHOME` から
   読み直す)
 - 遠くの script を流さない (`irm`・`iex`・`Invoke-Expression` を使わない)
+- 署名の合わない exe は動かさない (`--version`・`update --from`・`server stop` を打たない)。署名は先に見る
 - 消すのは `Remove-HerdrAppTree` で (リンクの先をたどらない)。`Remove-Item -Recurse` がリンクをたどるかは PowerShell の版で違う
 - 副作用の無い関数 (固定した版の書き方・フィードの中身・署名の照らし方・揃えるときの計画・PATH の足し引き・状態の表・外す計画) と、Windows に
   触る関数を偽物に替えた流れは `herdr-app/Install-HerdrApp.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない

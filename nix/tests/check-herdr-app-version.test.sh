@@ -16,7 +16,10 @@
 #     core より新しいときは exit 1 で、何が違うかを出す
 #   - 固定した版より新しい版が猶予 (7 日) の中なら ※ の行で知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)
 #   - 猶予がたった新しい版があれば exit 1 で、いちばん新しい版と、その sha256・core_min と、ソースが HERDR_RELEASES_URL を
-#     読むか (読まなければ上げないこと) を出す。Windows の成果物が無い版は数えない
+#     読むか (読まなければ上げないこと) と、固定した版からの差分の URL を出す。core の generation が固定と違えば、app と一緒に
+#     上げると出す。Windows の成果物が無い (HEAD が 404) 版は数えない。redirect の先の Last-Modified を読む
+#   - 新しい版の HEAD が 404 のほか (5xx など) か、Last-Modified が無ければ、黙って飛ばさずに exit 2
+#   - tag は gh api --paginate で全部読む
 #   - GitHub Actions の中なら、知らせることを ::error の行にも出す
 #   - 落とせない・gh が失敗する・ps1 が読めない (版や sha256 の形でない) ときは exit 2。知らないことがあれば 1 を優先する
 #   - 知らない引数は exit 2、-h は使い方を出して exit 0。curl に stdin を渡さない
@@ -84,7 +87,8 @@ new_case() {
   printf 'v0.1.17\nv0.1.16\n' >"${d}/gh/herdrdev/herdr-core/tags"
   write_ps1 "${d}" "$(sha_of 'app 0.1.12')" "$(sha_of 'core 0.1.17')" 1
   # 偽の curl。引数を記録し、stdin を読み切って curl-stdin に足す (script が </dev/null を付けていれば空)。
-  # -I なら <URL のホストとパス>.headers を出し、-o なら <URL のホストとパス> を写す。無ければ 22 (curl -f の HTTP エラー)
+  # -sSIL (HEAD) なら <URL のホストとパス>.headers を出し、無ければ 404 の見出しを出す (-f が無いので終了コードは 0)。
+  # -o なら <URL のホストとパス> を写し、無ければ 22 (curl -f の HTTP エラー)
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
@@ -100,7 +104,7 @@ while (($#)); do
     --max-time)
       shift 2
       ;;
-    -fsSI) head=1; shift ;;
+    -sSIL) head=1; shift ;;
     -*) shift ;;
     *)
       url=$1
@@ -110,22 +114,28 @@ while (($#)); do
 done
 src="${FAKE_DIR}/web/${url#https://}"
 if ((head)); then
-  [[ -f ${src}.headers ]] || exit 22
-  cat "${src}.headers"
+  if [[ -f ${src}.headers ]]; then
+    cat "${src}.headers"
+  else
+    printf 'HTTP/2 404\r\ncontent-length: 0\r\n\r\n'
+  fi
   exit 0
 fi
 [[ -f ${src} ]] || exit 22
 cp "${src}" "${dest}"
 EOF
   } >"${d}/bin/curl"
-  # 偽の gh。gh api <endpoint> --jq <式> の endpoint で、tag の一覧か、ソースの中身 (base64) を返す。
+  # 偽の gh。gh api [--paginate] <endpoint> --jq <式> の endpoint で、tag の一覧か、ソースの中身 (base64) を返す。
   # FAKE_GH_FAIL があれば失敗する
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
 printf '%s\n' "$*" >>"${FAKE_DIR}/gh-calls"
 [[ -z ${FAKE_GH_FAIL-} ]] || exit 1
-endpoint=$2
+endpoint=''
+for a in "$@"; do
+  case ${a} in repos/*) endpoint=${a} ;; esac
+done
 case ${endpoint} in
   repos/*/tags\?*)
     repo=${endpoint#repos/}
@@ -271,8 +281,9 @@ printf 'v0.1.13\nv0.1.14\n' >>"${d}/gh/herdrdev/herdr-app/tags"
 put_source "${d}" herdrdev/herdr-app 0.1.13 src/update.rs 'fn releases() -> String { std::env::var("HERDR_RELEASES_URL").unwrap_or_else(|_| "https://releases.herdr.dev".into()) }'
 run "${d}"
 if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app の新しい版 0.1.13 が公開から 15 日たった (公開 2026-11-04・猶予 7 日)。sha256 $(sha_of 'app 0.1.13')・core_min 0.1.11。ソース (src/update.rs) は HERDR_RELEASES_URL を読む" \
-  && seen "${d}" -F '※ app の新しい版 0.1.14'; then
-  ok "猶予がたった版があれば exit 1 で、版・sha256・core_min・ソースが変数を読むことを出す (猶予の中の版は ※)"
+  && seen "${d}" -F '差分 (src/update.rs も読む): https://github.com/herdrdev/herdr-app/compare/v0.1.12...v0.1.13' \
+  && seen "${d}" -F '※ app の新しい版 0.1.14' && grep -q -- '--paginate repos/herdrdev/herdr-app/tags' "${d}/gh-calls"; then
+  ok "猶予がたった版があれば exit 1 で、版・sha256・core_min・ソースが変数を読むこと・差分の URL を出す (猶予の中の版は ※。tag は --paginate で読む)"
 else
   ng "猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
@@ -298,6 +309,50 @@ if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F '新しい版は無い: core 0.1.17
   ok "版つきの成果物が無い版 (Windows の成果物を出さなかった版) は数えない"
 else
   ng "成果物の無い版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 7b. 猶予がたった core の generation が固定と違えば、app と一緒に上げると出す
+d=$(new_case c7b)
+put_release "${d}" core 0.1.18 "${old_date}" '"generation": 2'
+printf 'v0.1.18\n' >>"${d}/gh/herdrdev/herdr-core/tags"
+put_source "${d}" herdrdev/herdr-core 0.1.18 crates/herdr-core/src/releases.rs 'std::env::var("HERDR_RELEASES_URL")'
+run "${d}"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '・generation 2 (固定した 1 と違う。app はこの generation の core と話せる版と一緒に上げる。CHANGELOG で確かめる)'; then
+  ok "猶予がたった core の generation が固定と違えば、app と一緒に上げると出す"
+else
+  ng "generation が変わる" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 7c. redirect の先の Last-Modified を読む
+d=$(new_case c7c)
+put_release "${d}" app 0.1.13 "${old_date}" '"core_min": "0.1.11"'
+printf 'HTTP/2 301\r\nlocation: https://%s/x\r\n\r\nHTTP/2 200\r\nlast-modified: %s\r\n\r\n' "${rel}" "${old_date}" >"${d}/web/${rel}/app/0.1.13/herdr-app-windows-x86_64.tar.gz.headers"
+printf 'v0.1.13\n' >>"${d}/gh/herdrdev/herdr-app/tags"
+put_source "${d}" herdrdev/herdr-app 0.1.13 src/update.rs 'std::env::var("HERDR_RELEASES_URL")'
+run "${d}"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F 'app の新しい版 0.1.13 が公開から 15 日たった'; then
+  ok "redirect の先の応答の Last-Modified で公開日を読む"
+else
+  ng "redirect" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 7d. 新しい版の HEAD が 404 のほかで失敗する・Last-Modified が無い: 黙って飛ばさずに exit 2
+d=$(new_case c7d)
+put_release "${d}" app 0.1.13 "${old_date}" '"core_min": "0.1.11"'
+printf 'HTTP/2 503\r\n\r\n' >"${d}/web/${rel}/app/0.1.13/herdr-app-windows-x86_64.tar.gz.headers"
+printf 'v0.1.13\n' >>"${d}/gh/herdrdev/herdr-app/tags"
+run "${d}"
+d2=$(new_case c7e)
+put_release "${d2}" core 0.1.18 "${old_date}" '"generation": 1'
+printf 'HTTP/2 200\r\ncontent-length: 1\r\n\r\n' >"${d2}/web/${rel}/core/0.1.18/herdr-core-windows-x86_64.zip.headers"
+printf 'v0.1.18\n' >>"${d2}/gh/herdrdev/herdr-core/tags"
+run "${d2}"
+if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 ]] \
+  && seen "${d}" -F 'app 0.1.13 の成果物の公開日 (HEAD の Last-Modified) を読めない' && ! seen "${d}" -F '新しい版は無い: app' \
+  && seen "${d2}" -F 'core 0.1.18 の成果物の公開日 (HEAD の Last-Modified) を読めない'; then
+  ok "新しい版の HEAD が 404 のほか (503) か Last-Modified が無ければ、飛ばさずに exit 2"
+else
+  ng "HEAD の失敗" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
 fi
 
 # 8. 確かめられない: 固定した版を落とせない・gh が失敗する・ps1 が読めない
