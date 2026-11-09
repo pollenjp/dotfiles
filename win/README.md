@@ -1260,13 +1260,17 @@ type-clipboard はクリップボードの文字を、選んだ窓へキー入�
    「不明」)。固定した版でなければ、固定した版の `type-clipboard.exe` を Release
    (`https://github.com/pollenjp/type-clipboard/releases/download/v<版>/type-clipboard.exe`) から置き場所の中に別の名前で落とす
 2. 落とした物の SHA-256 が表の値と合うときだけ、置き場所の exe と入れ替える。合わない・落とせないときは、落とした物を消して
-   何も変えずに止まる (入っている版はそのまま)
+   何も変えずに止まる (入っている版はそのまま)。入れ替えは、PowerShell 7 では 1 回の rename (置き先が動いている exe なら何も
+   変えずに落ちる)。Windows PowerShell 5.1 では古い exe を消してから名前を変えるので、その間で落ちると exe が消える (そう出る。
+   打ち直せば入る)
 3. スタートメニューのショートカットが無い・ほかを指していれば作り直す
 4. 読み直して、版とショートカットを確かめる
 
 - 入れ替えが要るときに置き場所の type-clipboard.exe が動いていると、何も変えずに止まって PID を出す (管理者として動いていて
   パスが読めないものも、置き場所のものかもしれないので数える)。スクリプトは type-clipboard を止めない (打っている途中かも
   しれない)。窓を閉じてから打ち直す
+- 止められた実行 (setup の時間切れなど) が置き場所に残した途中の物 (`type-clipboard.exe.download-<PID>`) は、次に入れるときに
+  10 分より古ければ消す
 - Invoke-WebRequest で落とすので、置いた exe に Mark of the Web (`Zone.Identifier`) は付かず、起こしても SmartScreen の警告は
   出ない (中身は SHA-256 で確かめてある)
 - PowerShell 7 でも Windows PowerShell 5.1 でも動く。SHA-256 は .NET で出す (PowerShell 7 から起こした 5.1 は PSModulePath を

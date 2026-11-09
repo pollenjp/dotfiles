@@ -142,7 +142,10 @@ function Format-TypeClipboardState {
         'change' { "入れ替える$direction" }
         default { 'そのまま' }
     }
-    $installedText = if ($State.Plan -eq 'install') { '入っていない' } elseif ($State.Installed) { $State.Installed } else { '不明 (SHA-256 が表のどの版とも合わない)' }
+    $installedText = if ($State.Plan -eq 'install') { '入っていない' }
+    elseif ($State.Installed) { $State.Installed }
+    elseif (-not $State.Hash) { '不明 (exe を読めない)' }
+    else { '不明 (SHA-256 が表のどの版とも合わない)' }
     $shortcutText = switch ($State.ShortcutKind) {
         'ok' { 'あり' }
         'missing' { '無し → 作る' }
@@ -202,10 +205,17 @@ function Invoke-TypeClipboardDownload {
     Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
 }
 
-# 落とした物を置き場所の exe にする (同じディレクトリの中なので名前を変えるだけ)。置けなければ例外
+# 落とした物を置き場所の exe にする (同じディレクトリの中なので名前を変えるだけ)。置けなければ例外。
+# PowerShell 7 (.NET) の File.Move の上書きは 1 回の rename で置き換え (Windows では MoveFileEx の REPLACE_EXISTING)、
+# 置き先が動いている exe なら置き先を消さずに落ちる。Windows PowerShell 5.1 (.NET Framework) の File.Move は上書きできず、
+# Move-Item -Force は置き先を消してから名前を変えるので、その間で落ちると exe が無くなる (呼ぶ側が確かめて知らせる)
 function Move-TypeClipboardFile {
     param([string]$Source, [string]$Destination)
-    Move-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+    if ($PSVersionTable.PSVersion.Major -ge 6) {
+        [IO.File]::Move($Source, $Destination, $true)
+    } else {
+        Move-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+    }
 }
 
 # ショートカットが指す先。読めなければ空 (WScript.Shell の COM。Windows だけ)
@@ -250,13 +260,15 @@ function Get-TypeClipboardBusyProcess {
 function Get-TypeClipboardState {
     param([string]$Exe, [string]$Shortcut, [string]$InstallDir, [string]$Target, $Releases)
     $exists = Test-Path -LiteralPath $Exe -PathType Leaf
-    $installed = $null
-    if ($exists) { $installed = Find-TypeClipboardVersion -Releases $Releases -Hash (Get-TypeClipboardFileHash -Path $Exe) }
+    $hash = $null
+    if ($exists) { $hash = Get-TypeClipboardFileHash -Path $Exe }
+    $installed = Find-TypeClipboardVersion -Releases $Releases -Hash $hash
     $linkExists = Test-Path -LiteralPath $Shortcut -PathType Leaf
     $linkTarget = $null
     if ($linkExists) { $linkTarget = Get-TypeClipboardShortcutTarget -Path $Shortcut }
     [pscustomobject]@{
         Exists         = $exists
+        Hash           = $hash
         Installed      = $installed
         Plan           = Get-TypeClipboardPlan -Exists $exists -Installed $installed -Target $Target
         Direction      = Get-TypeClipboardDirection -Installed $installed -Target $Target
@@ -283,18 +295,29 @@ function Save-TypeClipboardExe {
         New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
         $created = $true
     }
+    # 止められた前の実行 (setup の時間切れなど) が残した途中の物を消す。同時に走っている実行の物は消さないよう、
+    # 10 分より古いものだけ
+    $leaf = Split-Path -Leaf $Exe
+    Get-ChildItem -LiteralPath $InstallDir -Filter "$leaf.download-*" -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-10) } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
     # 置き場所と同じディレクトリに落とし、確かめてから名前を変える (途中で落ちても壊れた exe を残さない)
     $download = "$Exe.download-$PID"
+    $existed = Test-Path -LiteralPath $Exe -PathType Leaf
     try {
         Write-Host "落とす: $Url"
         try {
             Invoke-TypeClipboardDownload -Url $Url -OutFile $download
         } catch {
             Write-Host "落とせなかった: $($_.Exception.Message)"
-            Write-Host '何も変えていない。ネットワークを確かめて打ち直す'
+            Write-Host '何も変えていない。ネットワークと、上の URL (Release の版と exe の名前) を確かめて打ち直す'
             return $false
         }
         $actual = Get-TypeClipboardFileHash -Path $download
+        if (-not $actual) {
+            Write-Host '落とした物を読めなかった (何も変えていない)。打ち直す'
+            return $false
+        }
         if (-not (Test-TypeClipboardHashMatch -Expected $Expected -Actual $actual)) {
             Write-Host 'SHA-256 が固定した値と合わないので置かない (何も変えていない)'
             Write-Host "  固定した値 : $Expected"
@@ -306,7 +329,12 @@ function Save-TypeClipboardExe {
             Move-TypeClipboardFile -Source $download -Destination $Exe
         } catch {
             Write-Host "置けなかった: $($_.Exception.Message)"
-            Write-Host 'type-clipboard が動いていれば、窓を閉じてから打ち直す (何も変えていない)'
+            if ($existed -and -not (Test-Path -LiteralPath $Exe -PathType Leaf)) {
+                # Windows PowerShell 5.1 の Move-Item -Force が、古い exe を消した後で落ちたとき
+                Write-Host '入っていた exe は消えた。Install-TypeClipboard を打ち直せば入る (setup --update でも入る)'
+            } else {
+                Write-Host 'type-clipboard が動いていれば、窓を閉じてから打ち直す (何も変えていない)'
+            }
             return $false
         }
         Write-Host "置いた: $Exe"
@@ -328,6 +356,10 @@ function Invoke-InstallTypeClipboard {
     }
     if (-not $InstallDir) { $InstallDir = Join-Path $env:LOCALAPPDATA 'Programs\type-clipboard' }
     if (-not $ShortcutDir) { $ShortcutDir = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs' }
+    # 相対パスで渡されても、今の場所 (PowerShell の location) から解いた絶対パスにする。
+    # [IO.File] などの .NET はプロセスの作業ディレクトリで解くので、相対のまま渡すと別の所を見る
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $ShortcutDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($ShortcutDir)
     $exe = Join-Path $InstallDir 'type-clipboard.exe'
     $shortcut = Join-Path $ShortcutDir 'type-clipboard.lnk'
 

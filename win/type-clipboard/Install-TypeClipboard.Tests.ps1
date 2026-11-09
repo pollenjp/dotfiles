@@ -124,13 +124,13 @@ Test-Case 'パスが読めなければ (管理者で動いているなど) 念�
 function New-State {
     param([hashtable]$Change = @{})
     $s = [ordered]@{
-        Exists = $true; Installed = $V; Plan = 'none'; Direction = 'same'
+        Exists = $true; Hash = $HashV; Installed = $V; Plan = 'none'; Direction = 'same'
         ShortcutKind = 'ok'; ShortcutTarget = $Exe; BusyCount = 0
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
 }
-$missing = @{ Exists = $false; Installed = $null; Plan = 'install'; Direction = 'unknown'; ShortcutKind = 'missing'; ShortcutTarget = $null }
+$missing = @{ Exists = $false; Hash = $null; Installed = $null; Plan = 'install'; Direction = 'unknown'; ShortcutKind = 'missing'; ShortcutTarget = $null }
 $old = @{ Installed = $Older; Plan = 'change'; Direction = 'up' }
 
 # Get-TypeClipboardExitCode: 終了コード
@@ -160,7 +160,8 @@ Test-Case 'ショートカットが無ければ「作る」で ⚠' '⚠ スタ�
 Test-Case '古い版から上げるとき' "⚠ 固定した版       : $V → 入れ替える (上げる)" { (Get-Rows (New-State $old))[2].Text }
 Test-Case '古い版は名前で出す' "  入っている版     : $Older" { (Get-Rows (New-State $old))[1].Text }
 Test-Case '新しい版から下げるとき' "⚠ 固定した版       : $V → 入れ替える (下げる)" { (Get-Rows (New-State @{ Installed = $Newer; Plan = 'change'; Direction = 'down' }))[2].Text }
-Test-Case '表のどの版でもない exe のとき' '  入っている版     : 不明 (SHA-256 が表のどの版とも合わない)' { (Get-Rows (New-State @{ Installed = $null; Plan = 'change'; Direction = 'unknown' }))[1].Text }
+Test-Case '表のどの版でもない exe のとき' '  入っている版     : 不明 (SHA-256 が表のどの版とも合わない)' { (Get-Rows (New-State @{ Hash = $HashOld.Replace('a', 'b'); Installed = $null; Plan = 'change'; Direction = 'unknown' }))[1].Text }
+Test-Case '置き場所の exe が読めないときは、表と合わないとは言わない' '  入っている版     : 不明 (exe を読めない)' { (Get-Rows (New-State @{ Hash = $null; Installed = $null; Plan = 'change'; Direction = 'unknown' }))[1].Text }
 Test-Case '表のどの版でもない exe は「入れ替える」(向きは出さない)' "⚠ 固定した版       : $V → 入れ替える" { (Get-Rows (New-State @{ Installed = $null; Plan = 'change'; Direction = 'unknown' }))[2].Text }
 Test-Case 'ショートカットがほかを指していれば、その先を ⚠ で出す' '⚠ スタートメニュー : C:\Users\u\Downloads\type-clipboard.exe を指している → 作り直す' { (Get-Rows (New-State @{ ShortcutKind = 'other'; ShortcutTarget = 'C:\Users\u\Downloads\type-clipboard.exe' }))[3].Text }
 Test-Case 'ショートカットの中身が読めなければ、そう出す' '⚠ スタートメニュー : 中身が読めない → 作り直す' { (Get-Rows (New-State @{ ShortcutKind = 'other'; ShortcutTarget = '' }))[3].Text }
@@ -210,11 +211,13 @@ $FlowLnk = Join-Path $FlowShortcutDir 'type-clipboard.lnk'
 
 # 表は作り物の exe の値にする (本物の値で落とせる exe はテストに無い)
 function Get-TypeClipboardReleases { [ordered]@{ '0.0.9' = $HashOld; '0.1.0' = $HashV } }
-# 落とす: 頼まれた URL を記録し、$script:Serve の中身を書く ($script:DownloadError があれば例外)
+# 落とす: 頼まれた URL を記録し、$script:Serve の中身を書く ($script:DownloadError があれば例外。$script:Serve が
+# $null なら何も書かない = 落とした物が読めない)
 function Invoke-TypeClipboardDownload {
     param([string]$Url, [string]$OutFile)
     $script:Downloads.Add($Url)
     if ($script:DownloadError) { throw $script:DownloadError }
+    if ($null -eq $script:Serve) { return }
     [IO.File]::WriteAllBytes($OutFile, $script:Serve)
 }
 # ショートカット: 指す先を文字で書く・読む (本物は WScript.Shell の COM)
@@ -229,23 +232,35 @@ function Get-TypeClipboardBusyProcess { param([string]$InstallDir) @($script:Bus
 
 # 1 回ぶんの流れを走らせ、落とした URL・画面の行・終了コードと、終わった後の置き場所を返す。
 #   -Have: 置き場所にある exe の中身 ($null なら無い)。-Link: ショートカットが指す先 ($null なら無い)
-#   -Serve: 落とすと返る中身。-Busy: 動いている数。-DownloadError: 落とすと出る例外の文
+#   -Serve: 落とすと返る中身 (-ServeNothing なら何も書かない)。-Busy: 動いている数。-DownloadError: 落とすと出る例外の文
+#   -KeepDir: 置き場所を前から作っておき、ほかのファイル keep.txt を置く
+#   -Stale・-Fresh: 前の実行が残した途中の物 (1 時間前・今) を置き場所に置く
 function Invoke-Flow {
     param(
         [byte[]]$Have, $Link, [byte[]]$Serve = $BytesV, [int]$Busy = 0, [string]$DownloadError = '',
-        [string]$Version = $V, [switch]$Check, [switch]$IfMissing
+        [string]$Version = $V, [switch]$Check, [switch]$IfMissing,
+        [switch]$ServeNothing, [switch]$KeepDir, [switch]$Stale, [switch]$Fresh
     )
     Remove-Item -LiteralPath $FlowInstallDir, $FlowShortcutDir -Recurse -Force -ErrorAction SilentlyContinue
-    if ($null -ne $Have) {
+    if (($null -ne $Have) -or $KeepDir -or $Stale -or $Fresh) {
         New-Item -ItemType Directory -Force -Path $FlowInstallDir | Out-Null
+    }
+    if ($null -ne $Have) {
         [IO.File]::WriteAllBytes($FlowExe, $Have)
     }
+    if ($KeepDir) { [IO.File]::WriteAllText((Join-Path $FlowInstallDir 'keep.txt'), 'keep') }
+    if ($Stale) {
+        $staleFile = Join-Path $FlowInstallDir 'type-clipboard.exe.download-99999'
+        [IO.File]::WriteAllText($staleFile, 'stale')
+        (Get-Item -LiteralPath $staleFile).LastWriteTime = (Get-Date).AddHours(-1)
+    }
+    if ($Fresh) { [IO.File]::WriteAllText((Join-Path $FlowInstallDir 'type-clipboard.exe.download-88888'), 'fresh') }
     if ($null -ne $Link) {
         New-Item -ItemType Directory -Force -Path $FlowShortcutDir | Out-Null
         [IO.File]::WriteAllText($FlowLnk, $Link)
     }
     $script:Downloads = [System.Collections.Generic.List[string]]::new()
-    $script:Serve = $Serve
+    $script:Serve = if ($ServeNothing) { $null } else { $Serve }
     $script:DownloadError = $DownloadError
     $script:ShortcutWrites = 0
     $script:Busy = @()
@@ -264,6 +279,8 @@ function Invoke-Flow {
         DirExists = (Test-Path -LiteralPath $FlowInstallDir)
         Leftover  = ($leftover -join ' ')
         LinkWrites = $script:ShortcutWrites
+        # パイプラインに出たもの (Write-Host の行を除く) の数。終了コードの 1 つだけのはず
+        Outputs   = @($out | Where-Object { $_ -isnot [System.Management.Automation.InformationRecord] }).Count
     }
 }
 
@@ -305,10 +322,63 @@ Test-Case 'SHA-256 が合わなければ、落とした物を残さない' '' { 
 Test-Case 'SHA-256 が合わなければ、固定した値と落とした物の値を出す' $true { $r = Invoke-Flow -Serve $BytesBad; ($r.Text -like "*$HashV*") -and ($r.Text -like "*$(Get-TestSha256 $BytesBad)*") -and ($r.Text -like '*置かない*') }
 Test-Case 'SHA-256 が合わなければ、入っていないときも置かず、置き場所も残さない' '1 none False' { $r = Invoke-Flow -Serve $BytesBad; "$($r.Code) $($r.ExeHash) $($r.DirExists)" }
 
+# 前からある置き場所 (中にほかのファイル) は、入れられなくても消さない (消すのは、この実行で作った置き場所だけ)
+Test-Case '前からある置き場所は、落とせなくても消さない (中のほかのファイルも)' '1 True keep.txt' { $r = Invoke-Flow -KeepDir -DownloadError 'timeout'; "$($r.Code) $($r.DirExists) $($r.Leftover)" }
+Test-Case '前からある置き場所は、SHA-256 が合わなくても消さない' '1 True keep.txt' { $r = Invoke-Flow -KeepDir -Serve $BytesBad; "$($r.Code) $($r.DirExists) $($r.Leftover)" }
+
+# 落とした物が読めない・Release に無い (404) ときは、そのわけを出す
+Test-Case '落とした物が読めなければ、Release の差し替えや表の誤りとは言わない' $true { $r = Invoke-Flow -ServeNothing; ($r.Code -eq 1) -and ($r.Text -like '*落とした物を読めなかった*') -and ($r.Text -notlike '*差し替えられた*') -and ($r.Leftover -eq '') }
+Test-Case '落とせないときは、ネットワークだけでなく URL (Release の版と exe の名前) も確かめるよう出す' $true { $r = Invoke-Flow -DownloadError 'Response status code does not indicate success: 404 (Not Found).'; ($r.Text -like '*404 (Not Found)*') -and ($r.Text -like '*上の URL (Release の版と exe の名前)*') }
+
+# 止められた前の実行が残した途中の物は、古ければ消す (同時に走っている実行の物は残す)
+Test-Case '前の実行が残した古い途中の物は消し、新しいものは残す' '0 type-clipboard.exe.download-88888' { $r = Invoke-Flow -Stale -Fresh -IfMissing; "$($r.Code) $($r.Leftover)" }
+
+# パイプラインに出すのは終了コードの 1 つだけ (本体の exit (…) に配列を渡さない)
+Test-Case 'どの流れでも、パイプラインに出すのは終了コードの 1 つだけ' '1 1 1 1 1 1' {
+    @((Invoke-Flow -Check).Outputs, (Invoke-Flow -IfMissing).Outputs, (Invoke-Flow -Have $BytesOld -Link $FlowExe).Outputs,
+        (Invoke-Flow -Have $BytesOld -Link $FlowExe -Busy 1).Outputs, (Invoke-Flow -DownloadError 'x').Outputs, (Invoke-Flow -Serve $BytesBad).Outputs)
+}
+
+# 置き場所を相対パスで渡しても、今の場所 (PowerShell の location) から解く ([IO.File] はプロセスの作業ディレクトリで解くため)
+Test-Case '置き場所を相対パスで渡しても、今の場所から解いて入れ、ショートカットは絶対パスを指す' $true {
+    $rel = Join-Path $work 'rel'
+    Remove-Item -LiteralPath $rel -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Force -Path $rel | Out-Null
+    $script:Downloads = [System.Collections.Generic.List[string]]::new()
+    $script:Serve = $BytesV
+    $script:DownloadError = ''
+    $script:ShortcutWrites = 0
+    $script:Busy = @()
+    Push-Location -LiteralPath $rel
+    try {
+        $out = @(Invoke-InstallTypeClipboard -Version $V -IfMissing -InstallDir 'Programs/type-clipboard' -ShortcutDir 'StartMenu' 6>&1)
+    } finally {
+        Pop-Location
+    }
+    $relExe = Join-Path $rel 'Programs/type-clipboard/type-clipboard.exe'
+    $code = @($out | Where-Object { $_ -is [int] })[-1]
+    ($code -eq 0) -and ((Get-TestSha256 ([IO.File]::ReadAllBytes($relExe))) -eq $HashV) -and ([IO.File]::ReadAllText((Join-Path $rel 'StartMenu/type-clipboard.lnk')) -eq $relExe)
+}
+
+# ショートカットだけ作れなかったとき: exe は置き、わけを出して 1 (読み直した表でスタートメニューが ⚠)
+function New-TypeClipboardShortcut { param([string]$Path, [string]$Target) $script:ShortcutWrites++; throw 'Exception from HRESULT: 0x80070005 (E_ACCESSDENIED)' }
+Test-Case 'ショートカットだけ作れなければ、exe は置いて 1 を返し、わけを出す' $true { $r = Invoke-Flow -IfMissing; ($r.Code -eq 1) -and ($r.ExeHash -eq $HashV) -and ($r.Text -like '*ショートカットを置けなかった: *E_ACCESSDENIED*') -and ($r.Text -like '*⚠ スタートメニュー : 無し → 作る*') }
+# 偽物を元に戻す
+function New-TypeClipboardShortcut {
+    param([string]$Path, [string]$Target)
+    $script:ShortcutWrites++
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $Path) | Out-Null
+    [IO.File]::WriteAllText($Path, $Target)
+}
+
 # 置き換えが落ちたとき (落とした後に起動された、など): 落とした物を残さずに止まる
 function Move-TypeClipboardFile { param([string]$Source, [string]$Destination) throw 'The process cannot access the file because it is being used by another process.' }
 Test-Case '置き換えが落ちたら 1 で、古い版はそのまま' "1 $HashOld" { $r = Invoke-Flow -Have $BytesOld -Link $FlowExe; "$($r.Code) $($r.ExeHash)" }
 Test-Case '置き換えが落ちたら、落とした物を残さず、閉じ方を出す' $true { $r = Invoke-Flow -Have $BytesOld -Link $FlowExe; ($r.Leftover -eq '') -and ($r.Text -like '*being used by another process*') -and ($r.Text -like '*窓を閉じて*') }
+
+# 置き換えの途中 (古い exe を消した後) で落ちたとき (5.1 の Move-Item -Force は置き先を消してから名前を変える): 消えたと出す
+function Move-TypeClipboardFile { param([string]$Source, [string]$Destination) Remove-Item -LiteralPath $Destination -Force; throw 'The process cannot access the file because it is being used by another process.' }
+Test-Case '古い exe を消したあとで置き換えが落ちたら、消えたことと入れ直し方を出す (何も変えていないとは言わない)' $true { $r = Invoke-Flow -Have $BytesOld -Link $FlowExe; ($r.Code -eq 1) -and ($r.ExeHash -eq 'none') -and ($r.Text -like '*消えた*') -and ($r.Text -notlike '*何も変えていない*') -and ($r.Leftover -eq '') }
 
 # 表に無い版
 Test-Case '表に無い版を渡すと、何も見ずに 2' '2 []' { $r = Invoke-Flow -Version '9.9.9'; "$($r.Code) [$($r.Downloads)]" }
