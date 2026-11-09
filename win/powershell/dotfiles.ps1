@@ -40,9 +40,10 @@ function c { claude --dangerously-skip-permissions --effort max --model claude-o
 # @args で引数をそのまま渡す (-Check / -Version / -Force もスクリプトの引数として効く)。
 function Install-OpenSSH { & "$HOME\.config\powershell\Install-OpenSSH.ps1" @args }
 
-# Windows の herdr (winget の Herdr.Herdr.Preview) を、dotfiles で固定した版に揃える。
+# Windows の herdr (winget の Herdr.Herdr) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-Herdr.ps1 (win/README.md の「herdr を入れる」)。-Check なら確かめるだけ。
 # 入れ替えが要るときは、先に herdr の外の PowerShell で hsvstop を打つ (動いていると止まる)。
+# 前に入れていた Herdr.Herdr.Preview が残っていれば、-Check が外す手順を出す (Install-Herdr は外さない)。
 function Install-Herdr { & "$HOME\.config\powershell\Install-Herdr.ps1" @args }
 
 # Windows の Google 日本語入力 (winget の Google.JapaneseIME) を、dotfiles で固定した版に揃える。

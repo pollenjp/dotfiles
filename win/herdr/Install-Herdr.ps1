@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-Windows の herdr (winget の Herdr.Herdr.Preview) を、決めた版に揃える。
+Windows の herdr (winget の Herdr.Herdr) を、決めた版に揃える。
 
 .DESCRIPTION
 dotfiles の win/herdr/Install-Herdr.ps1 を %USERPROFILE%\.config\powershell\ へ配り、
@@ -13,20 +13,26 @@ herdr が動いていれば、何も変えずに止める。server は止めな�
 herdr update (herdr 自身の更新) は %USERPROFILE%\.herdr に別に入れてユーザーの PATH の先頭に足し、
 winget の管理から外れる。そこで PATH で先に引かれる herdr が winget のものかも確かめる。
 
+前は preview のパッケージ Herdr.Herdr.Preview で入れていた (winget に安定版が無かった)。置き場所が別なので、
+Preview が残っていても Herdr.Herdr を並べて入れる。Preview の置き場所に herdr.exe が残っていれば、差として
+知らせて外す手順を添える。Preview は外さない (動いている herdr server を止めることになり、pane が消える
+ので、時期は人が選ぶ)。
+
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
 .PARAMETER Version
-固定する版。winget show --id Herdr.Herdr.Preview --versions に出る値。版を変えるときはここの既定値を変える。
+固定する版。winget show --id Herdr.Herdr --versions に出る値。版を変えるときはここの既定値を変える。
 
 .PARAMETER Check
-今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1、入っていなければ 3。
+今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1
+(Herdr.Herdr.Preview が残っているときも)、入っていなければ 3。
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す。入っていれば -Check と同じで、入れ替えはしない (setup --update が使う)。
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '0.9.4-preview.2026-10-14-fbd2ae23927f',
+    [string]$Version = '0.9.5',
     [switch]$Check,
     [switch]$IfMissing
 )
@@ -124,22 +130,32 @@ function Resolve-HerdrOnPath {
     $null
 }
 
-# PATH で引かれる herdr.exe が winget の置き場所のものか。'winget' / 'other' / 'none'
+# PATH で引かれる herdr.exe がどこのものか。'winget' (Herdr.Herdr の置き場所) / 'preview'
+# (Herdr.Herdr.Preview の置き場所) / 'other' / 'none'
 function Get-HerdrPathKind {
-    param([string]$Resolved, [string]$PackageDir)
+    param([string]$Resolved, [string]$PackageDir, [string]$PreviewDir)
     if (-not $Resolved) { return 'none' }
     $cut = $Resolved.LastIndexOf('\')
     if ($cut -lt 0) { return 'other' }
+    $dir = $Resolved.Substring(0, $cut)
     # -eq は大文字小文字を区別しない (Windows のパスと同じ)
-    if ($Resolved.Substring(0, $cut) -eq $PackageDir.TrimEnd('\')) { return 'winget' }
+    if ($dir -eq $PackageDir.TrimEnd('\')) { return 'winget' }
+    if ($PreviewDir -and ($dir -eq $PreviewDir.TrimEnd('\'))) { return 'preview' }
     'other'
 }
 
-# 終了コード。入っていなければ 3、版・pin・PATH が揃っていれば 0、ほかは 1
+# Install-Herdr で直せる差 (版・pin・PATH) があるか。PATH で Herdr.Herdr.Preview の herdr が先に
+# 引かれるのは、Preview を外せば直る (Install-Herdr では直らない) ので数えない
+function Test-HerdrDrift {
+    param($State)
+    ($State.Plan -ne 'none') -or (-not $State.Pinned) -or ($State.PathKind -in @('other', 'none'))
+}
+
+# 終了コード。入っていなければ 3、版・pin・PATH が揃っていて Herdr.Herdr.Preview も残っていなければ 0、ほかは 1
 function Get-HerdrExitCode {
     param($State)
     if ($State.Plan -eq 'install') { return 3 }
-    if (($State.Plan -eq 'none') -and $State.Pinned -and ($State.PathKind -eq 'winget')) { return 0 }
+    if ((-not (Test-HerdrDrift -State $State)) -and ($State.PathKind -eq 'winget') -and (-not $State.PreviewExists)) { return 0 }
     1
 }
 
@@ -157,7 +173,7 @@ function Get-HerdrApplyBlocker {
 # 状態の表の行 (Text と、直すことがあるかの Warn)。直すことがある行だけ先頭に ⚠ を付け、
 # ほかは 2 字下げる。ずれではないこと (新しい版がある・動いている herdr がある) は ※ で添える
 function Format-HerdrState {
-    param($State, [string]$Target, [string]$PackageDir)
+    param($State, [string]$Target, [string]$PackageId, [string]$PackageDir, [string]$PreviewId)
     $direction = if ($State.Direction -eq 'up') { ' (上げる)' } elseif ($State.Direction -eq 'down') { ' (下げる)' } else { '' }
     $planText = switch ($State.Plan) {
         'install' { '入れる' }
@@ -169,19 +185,24 @@ function Format-HerdrState {
     $pinText = if ($State.Pinned) { 'あり' } else { '無し → 足す' }
     $pathText = switch ($State.PathKind) {
         'winget' { 'winget のもの' }
+        'preview' { "$($State.PathResolved) ($PreviewId のもの)" }
         'other' { "$($State.PathResolved) (winget のものではない)" }
         default { '見つからない' }
     }
     # 入っていないときに PATH に無いのは当たり前なので、⚠ にしない
-    $pathWarn = ($State.PathKind -eq 'other') -or (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install'))
+    $pathWarn = ($State.PathKind -in @('other', 'preview')) -or (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install'))
     $rows = @(
-        @{ Text = "herdr (winget の Herdr.Herdr.Preview、$PackageDir)"; Warn = $false; Indent = $false }
+        @{ Text = "herdr (winget の $PackageId、$PackageDir)"; Warn = $false; Indent = $false }
         @{ Text = "入っている版    : $installedText"; Warn = $false; Indent = $true }
         @{ Text = "固定した版      : $Target → $planText"; Warn = ($State.Plan -ne 'none'); Indent = $true }
         @{ Text = "winget の最新版 : $latestText"; Warn = $false; Indent = $true }
         @{ Text = "winget pin      : $pinText"; Warn = (-not $State.Pinned); Indent = $true }
         @{ Text = "PATH の herdr   : $pathText"; Warn = $pathWarn; Indent = $true }
     )
+    # 前に入れていた preview のパッケージ。残っていなければ行を出さない (移り終えた PC で毎回出さない)
+    if ($State.PreviewExists) {
+        $rows += @{ Text = "前の Preview    : $PreviewId が残っている → 外す"; Warn = $true; Indent = $true }
+    }
     foreach ($row in $rows) {
         $prefix = if (-not $row.Indent) { '' } elseif ($row.Warn) { '⚠ ' } else { '  ' }
         [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
@@ -201,11 +222,34 @@ function Format-HerdrState {
         $cut = $State.PathResolved.LastIndexOf('\')
         $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
         [pscustomobject]@{ Text = "※ PATH のずれは Install-Herdr では直らない。$dir をユーザーの PATH から外す (win/README.md の「herdr を入れる」)"; Warn = $false }
+    } elseif ($State.PathKind -eq 'preview') {
+        [pscustomobject]@{ Text = "※ PATH で先に引かれる herdr は $PreviewId のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)"; Warn = $false }
     } elseif (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install')) {
-        [pscustomobject]@{ Text = '※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id Herdr.Herdr.Preview の後に Install-Herdr で入れ直す'; Warn = $false }
+        [pscustomobject]@{ Text = "※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id $PackageId の後に Install-Herdr で入れ直す"; Warn = $false }
     }
     if (($State.Plan -eq 'change') -and ($State.BusyCount -gt 0)) {
         [pscustomobject]@{ Text = "※ herdr.exe などが $($State.BusyCount) 個動いている。入れ替えるには、herdr の外の PowerShell で hsvstop を打ち、herdr --remote の窓も閉じる"; Warn = $false }
+    }
+}
+
+# 締めの行 (-Check の最後と、揃えた後の最後)。揃っていれば何も返さない。直すことごとに ⚠️ で始まる行を返す。
+# bootstrap-windows-herdr.sh は ⚠️ で始まる行を枠の本文から落とし、「→ Install-Herdr で入れる」
+# 「→ Install-Herdr で揃える」「<Preview の ID> が残っている」の文言で枠の見出しと直し方を決める
+# (文言を変えるときは向こうも直す)。Preview を外すのは、Herdr.Herdr が入った後にする
+function Format-HerdrVerdict {
+    param($State, [string]$PackageId, [string]$PreviewId)
+    $code = Get-HerdrExitCode -State $State
+    if ($code -eq 3) {
+        '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️'
+    } elseif (Test-HerdrDrift -State $State) {
+        '⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️'
+    }
+    if ($State.PreviewExists) {
+        $first = if ($code -eq 3) { "$PackageId を入れてから、" } else { '' }
+        "⚠️ $PreviewId が残っている → ${first}次の手順で外す (Install-Herdr は外さない) ⚠️"
+        '⚠️   1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる'
+        "⚠️   2. winget pin remove --id $PreviewId と winget uninstall --id $PreviewId を打つ"
+        '⚠️   3. 新しい PowerShell から herdr を起動し直す'
     }
 }
 
@@ -254,11 +298,13 @@ function Get-HerdrBusyProcess {
 
 # 今の状態を読む (何も変えない。管理者は要らない)
 function Get-HerdrState {
-    param([string]$PackageId, [string]$PackageDir, [string]$Target)
+    param([string]$PackageId, [string]$PackageDir, [string]$PreviewDir, [string]$Target)
     $exe = Join-Path $PackageDir 'herdr.exe'
     $exists = Test-Path -LiteralPath $exe -PathType Leaf
     $installed = $null
     if ($exists) { $installed = Get-HerdrInstalledVersion -Exe $exe }
+    # Herdr.Herdr.Preview は、置き場所に herdr.exe があれば残っているとみなす (winget list より速く、ネットワークも要らない)
+    $previewExists = Test-Path -LiteralPath (Join-Path $PreviewDir 'herdr.exe') -PathType Leaf
     $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
     $show = Invoke-Winget -Arguments @('show', '--id', $PackageId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
     # @() で包む。関数が返す空の配列は呼び出し側で $null にほどける (Install-OpenSSH.ps1 で踏んだ)
@@ -267,54 +313,69 @@ function Get-HerdrState {
     if ($versions.Count -gt 0) { $latest = $versions[0] }
     $resolved = Resolve-HerdrOnPath -PathValue (Get-HerdrPathValue) -Name 'herdr.exe' -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
     [pscustomobject]@{
-        Exists       = $exists
-        Installed    = $installed
-        Plan         = Get-HerdrPlan -Exists $exists -Installed $installed -Target $Target
-        Direction    = Get-HerdrDirection -Versions $versions -Installed $installed -Target $Target
-        Pinned       = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
-        Versions     = $versions
-        Latest       = $latest
-        PathResolved = $resolved
-        PathKind     = Get-HerdrPathKind -Resolved $resolved -PackageDir $PackageDir
-        BusyCount    = @(Get-HerdrBusyProcess -PackageDir $PackageDir).Count
+        Exists        = $exists
+        Installed     = $installed
+        Plan          = Get-HerdrPlan -Exists $exists -Installed $installed -Target $Target
+        Direction     = Get-HerdrDirection -Versions $versions -Installed $installed -Target $Target
+        Pinned        = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
+        Versions      = $versions
+        Latest        = $latest
+        PathResolved  = $resolved
+        PathKind      = Get-HerdrPathKind -Resolved $resolved -PackageDir $PackageDir -PreviewDir $PreviewDir
+        BusyCount     = @(Get-HerdrBusyProcess -PackageDir $PackageDir).Count
+        PreviewExists = $previewExists
     }
 }
 
 # 状態の表を出す。直すことがある行 (⚠) は黄色にする
 function Write-HerdrState {
-    param($State, [string]$Target, [string]$PackageDir)
-    foreach ($row in (Format-HerdrState -State $State -Target $Target -PackageDir $PackageDir)) {
+    param($State, [string]$Target, [string]$PackageId, [string]$PackageDir, [string]$PreviewId)
+    foreach ($row in (Format-HerdrState -State $State -Target $Target -PackageId $PackageId -PackageDir $PackageDir -PreviewId $PreviewId)) {
         if ($row.Warn) { Write-Host $row.Text -ForegroundColor Yellow } else { Write-Host $row.Text }
+    }
+}
+
+# 締めの行 (直すこと) を黄色で出す。揃っていれば何も出さない
+function Write-HerdrVerdict {
+    param($State, [string]$PackageId, [string]$PreviewId)
+    foreach ($line in (Format-HerdrVerdict -State $State -PackageId $PackageId -PreviewId $PreviewId)) {
+        Write-Host $line -ForegroundColor Yellow
     }
 }
 
 function Invoke-InstallHerdr {
     param([string]$Version, [switch]$Check, [switch]$IfMissing)
-    $packageId = 'Herdr.Herdr.Preview'
+    $packageId = 'Herdr.Herdr'
     # portable の置き場所は <Id>_<ソースの識別子>。winget のソースから入れると、どのマシンでも同じ名前になる
-    $packageDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+    $packageDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr_Microsoft.Winget.Source_8wekyb3d8bbwe'
+    # 前に入れていた preview のパッケージ。置き場所が別なので並べて入れられる。残っていれば外す手順を出す (外さない)
+    $previewId = 'Herdr.Herdr.Preview'
+    $previewDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
         Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
         return 2
     }
 
-    $state = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -Target $Version
-    Write-HerdrState -State $state -Target $Version -PackageDir $packageDir
+    $state = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -PreviewDir $previewDir -Target $Version
+    Write-HerdrState -State $state -Target $Version -PackageId $packageId -PackageDir $packageDir -PreviewId $previewId
     $code = Get-HerdrExitCode -State $state
 
     # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
     if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
-        switch ($code) {
-            0 { Write-Host '揃っている' }
-            3 { Write-Host '⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️' -ForegroundColor Yellow }
-            default { Write-Host '⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️' -ForegroundColor Yellow }
-        }
+        if ($code -eq 0) { Write-Host '揃っている' }
+        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId
         return $code
     }
     if ($code -eq 0) {
         Write-Host '揃っている。何もしない'
         return 0
+    }
+    # Install-Herdr で直す差が無く、残っているのは Herdr.Herdr.Preview だけ。Preview は外さない
+    if (-not (Test-HerdrDrift -State $state)) {
+        Write-Host "$packageId は揃っている。何もしない"
+        Write-HerdrVerdict -State $state -PackageId $packageId -PreviewId $previewId
+        return 1
     }
 
     $blocker = Get-HerdrApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version -BusyCount $state.BusyCount
@@ -373,8 +434,8 @@ function Invoke-InstallHerdr {
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -Target $Version
-    Write-HerdrState -State $after -Target $Version -PackageDir $packageDir
+    $after = Get-HerdrState -PackageId $packageId -PackageDir $packageDir -PreviewDir $previewDir -Target $Version
+    Write-HerdrState -State $after -Target $Version -PackageId $packageId -PackageDir $packageDir -PreviewId $previewId
     if ($after.PathKind -eq 'other') {
         Write-Host 'PATH で先に引かれる herdr は、herdr update で入ったもの。外し方は win/README.md の「herdr を入れる」'
     }
@@ -382,6 +443,9 @@ function Invoke-InstallHerdr {
         Write-Host '揃った'
         return 0
     }
+    # Herdr.Herdr は揃い、残っているのは Herdr.Herdr.Preview だけ (Preview を残したまま並べて入れたとき)
+    if (-not (Test-HerdrDrift -State $after)) { Write-Host "$packageId は揃った" }
+    Write-HerdrVerdict -State $after -PackageId $packageId -PreviewId $previewId
     return 1
 }
 
