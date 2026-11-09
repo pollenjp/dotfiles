@@ -100,7 +100,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | 名前 | 固定した版 (`-Version` の既定値) と見送りの一覧 | 出た日 (猶予を数える起点) | 手順 |
 | --- | --- | --- | --- |
 | `openssh` | `openssh/Install-OpenSSH.ps1`・`openssh/skipped-versions.txt` | GitHub の release (`PowerShell/Win32-OpenSSH`) が出た日 | [OpenSSH の新しい版が出たとき](#openssh-の新しい版が出たとき) |
-| `herdr` | `herdr/Install-Herdr.ps1`・`herdr/skipped-versions.txt` | GitHub の preview の release (`herdrdev/herdr`) が出た日 | [herdr の新しい版が出たとき](#herdr-の新しい版が出たとき) |
+| `herdr` | `herdr/Install-Herdr.ps1`・`herdr/skipped-versions.txt` | GitHub の安定版の release (`herdrdev/herdr` の `vX.Y.Z`) が出た日 | [herdr の新しい版が出たとき](#herdr-の新しい版が出たとき) |
 | `google-japanese-input` | `google-japanese-input/Install-GoogleJapaneseInput.ps1`・`google-japanese-input/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い) | [Google 日本語入力の新しい版が出たとき](#google-日本語入力の新しい版が出たとき) |
 
 - 確かめるのは `nix/scripts/check-winget-version.sh <名前>`。ps1 から固定した版とパッケージ ID (`$packageId`) を読み、
@@ -212,7 +212,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `hr` | `herdr --remote` (`hr <ssh-target>`。SSH 越しに別のマシンの herdr server へ attach する) |
 | `c` | `claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=` (Claude Code。Remote Control を有効にして起動する。末尾の `=` は、後ろに続く語をセッションの名前として取らせないため) |
 
-叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr.Preview`) で、WSL の herdr とは
+叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr`) で、WSL の herdr とは
 別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (この PC では WinGet の
 `Anthropic.ClaudeCode`) を叩く。`claude.exe` は dotfiles からは入れていない。
 
@@ -245,7 +245,7 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 
 ## herdr
 
-`herdr/config.toml` は Windows の herdr (WinGet の `Herdr.Herdr.Preview`) の設定で、
+`herdr/config.toml` は Windows の herdr (WinGet の `Herdr.Herdr`) の設定で、
 `%APPDATA%\herdr\config.toml` へ配る。キーバインドと `[ui]` (sidebar の幅と行・toast) は WSL の herdr
 (`nix/files/herdr/config.toml`) と同じにしてあり、キーや値ごとの意図はそちらのコメントにある。
 
@@ -294,17 +294,18 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 
 ### herdr を入れる (winget)
 
-Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管理者は要らない) で入れ、
-版を `herdr/Install-Herdr.ps1` の `-Version` の既定値 (今は `0.9.4-preview.2026-10-14-fbd2ae23927f`)
-の 1 か所で固定する。winget に安定版のパッケージは無いので preview になる。
+Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。管理者は要らない) で入れ、
+版を `herdr/Install-Herdr.ps1` の `-Version` の既定値 (今は `0.9.5`) の 1 か所で固定する。
+2026-11 までは winget に安定版のパッケージが無く、preview の `Herdr.Herdr.Preview` で入れていた
+(移る手順は下の「[Herdr.Herdr.Preview から移る](#herdrherdrpreview-から移る)」)。
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Herdr -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
-| `Install-Herdr` (PowerShell) | 揃える (入れる・入れ替える・pin を足す) |
-| `nix/scripts/bootstrap-windows-herdr.sh` (WSL) | `setup --update` でも毎回走る。入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない) |
+| `Install-Herdr -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1 (`Herdr.Herdr.Preview` が残っているときも)、入っていなければ 3 |
+| `Install-Herdr` (PowerShell) | 揃える (入れる・入れ替える・pin を足す)。`Herdr.Herdr.Preview` は外さない |
+| `nix/scripts/bootstrap-windows-herdr.sh` (WSL) | `setup --update` でも毎回走る。入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない)。`Herdr.Herdr.Preview` が残っていれば、外す手順を ⚠ で囲んで知らせる |
 | `nix/scripts/bootstrap-windows-herdr.sh --apply` (WSL) | WSL から揃える |
-| `nix/scripts/check-winget-version.sh herdr` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい preview が GitHub に出て 30 日たつと落ちて知らせる ([後述](#herdr-の新しい版が出たとき)) |
+| `nix/scripts/check-winget-version.sh herdr` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい安定版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#herdr-の新しい版が出たとき)) |
 
 揃えるときにすること:
 
@@ -328,36 +329,55 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
   `Install-Herdr` は PATH を直さない
 - 入れ替えの途中で `winget install` が落ちると、herdr が入っていない状態で止まることがある
   (取得は先に確かめてあるので稀)。そのときは `Install-Herdr` を打ち直す (`setup --update` でも入る)
-- 版を変える・新しい版を見送るときは、次の「herdr の新しい版が出たとき」の手順で。新しい preview が出たかは、
+- 版を変える・新しい版を見送るときは、次の「herdr の新しい版が出たとき」の手順で。新しい安定版が出たかは、
   `winget-versions` の notice か、`-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
   Windows に UAC が出る
 
+#### Herdr.Herdr.Preview から移る
+
+前に `Herdr.Herdr.Preview` で入れていた PC では、`setup --update` (`-IfMissing`) が `Herdr.Herdr` を並べて入れる。
+portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\Herdr.Herdr_…` と
+`…\Herdr.Herdr.Preview_…`) ので、動いている Preview の herdr server には触らない。Preview は外さず、残っている間は
+`-Check` と `setup --update` が ⚠ で知らせ、外す手順を添える (`-Check` の終了コードは 1)。
+
+- どちらのパッケージも置き場所をユーザーの PATH に足すので、両方ある間は PATH で先の方の herdr が引かれる。
+  後から入れた `Herdr.Herdr` は後ろに足されるので、Preview の herdr が引かれる (`-Check` の「PATH の herdr」が ⚠ になり、
+  「Preview を外せば直る」と ※ の行に出る)
+- 設定 (`%APPDATA%\herdr`) は置き場所によらないので、移った後もそのまま読まれる
+
+外すのは、herdr の pane が消えてもよいときにする (Windows の herdr server を止めるため。スクリプトが外さないのも
+そのため):
+
+1. herdr の外の PowerShell (Windows Terminal など) で `hsvstop` を打ち、`herdr --remote` の窓も閉じる
+2. `winget pin remove --id Herdr.Herdr.Preview` と `winget uninstall --id Herdr.Herdr.Preview` を打つ
+   (winget が Preview の置き場所をユーザーの PATH から消す)
+3. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になることを確かめる
+
 ### herdr の新しい版が出たとき
 
-固定した版より新しい preview が GitHub に出て 30 日たつと、GitHub Actions の `winget-versions` の
+固定した版より新しい安定版が GitHub に出て 30 日たつと、GitHub Actions の `winget-versions` の
 `Windows の herdr` の job が落ちて知らせる ([TKT-156](https://app.notion.com/p/herdr-Google-windows-openssh-1-3fa79149a66f81ee8d2bd07a0769cab0))。
 猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
 
-- 出た日は、GitHub の preview の build の release (prerelease) から取る。winget の版
-  (`0.9.2-preview.2026-09-29-8e78f929d8f0`) の `-preview.` の後ろと、tag (`preview-2026-09-29-8e78f929d8f0`) の
-  `preview-` の後ろで突き合わせる。版の中の日付はビルドの日なので使わない
-- preview は週に何度か出るので、固定した版より新しい preview が 1 つ出た日から 30 日の猶予が始まり
-  (後から出た preview では数え直さない)、ほぼ毎月上げることになる。見送っても、その次に出た preview の日から数える
-- GitHub と比べるのは preview だけ。安定版 (`v0.9.5` など) にも Windows の zip が付くが、winget には安定版の
-  パッケージが無い (2026-10 の時点)。安定版のパッケージができたかは、この job では見ていない
-  (`winget search herdr` で分かる。できたら、preview から移るかを決める)
-- winget の最新より後に出た preview が 30 日たっても winget に無いと落ちる。preview が別の ID へ移ったか、winget に
-  載らなくなったかもしれないので、`winget search herdr` で確かめる。winget の bot は preview をたまに飛ばすが、
-  後の preview が載れば落ちない。前か後かは出た時刻で決める (同じ日の build を hash の並びで比べない)
-- GitHub の直近 100 件の release に preview が 1 つも無いと、猶予を置かずに落ちる (preview の出し方が変わったか、
-  止まった)
+- 出た日は、GitHub の安定版の release (tag が `v0.9.5` のような `vX.Y.Z` で、prerelease でないもの) から取る。
+  winget の版 (`0.9.5`) と、tag の `v` の後ろで突き合わせる
+- 安定版は 1〜2 週に 1 回ほど出る (2026-09〜10)。固定した版より新しい安定版が 1 つ出た日から 30 日の猶予が始まる
+  (後から出た安定版では数え直さない)。見送っても、その次に出た安定版の日から数える
+- GitHub と比べるのは安定版だけ。preview の build (tag が `preview-<日付>-<hash>` の prerelease) は数えない。
+  winget では別のパッケージ `Herdr.Herdr.Preview` に載るもので、dotfiles は 2026-11 に安定版の `Herdr.Herdr` へ移った
+  (移る手順は「[Herdr.Herdr.Preview から移る](#herdrherdrpreview-から移る)」)
+- winget-pkgs の `manifests/h/Herdr/Herdr` には、版と並んで `Herdr.Herdr.Preview` のディレクトリ (`Preview`) がある。
+  版ではないので、版の形でないディレクトリには数えない
+- winget の最新より新しい安定版が 30 日たっても winget に無いと落ちる。winget に載らなくなったか、別の ID へ
+  移ったかもしれないので、`winget search herdr` で確かめる
+- GitHub の直近 100 件の release に安定版が 1 つも無いと、猶予を置かずに落ちる (出し方が変わったか、止まった)
 
 上げるとき:
 
 1. 落ちた実行の summary で、新しい版と release notes の URL を見る (猶予の中に上げるなら、notice に出た版)
-2. release notes の「View changes」(前の安定版からの差分) で、設定のキー・PATH・portable の置き場所・
-   `herdr update` に触る変更が無いかを見る
+2. release notes (Added・Changed・Fixed。hotfix の版は元の版の notes も) で、設定のキー・PATH・portable の
+   置き場所・`herdr update` に触る変更が無いかを見る
 3. `herdr/Install-Herdr.ps1` の `-Version` の既定値と、「herdr を入れる (winget)」の「今は」を新しい版にし、
    `Install-Herdr.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
 4. merge したら、各マシンで `setup --update` を流す (差が ⚠ で出る)。herdr の外の PowerShell
@@ -367,9 +387,8 @@ Windows の herdr は winget の `Herdr.Herdr.Preview` (portable の zip。管�
 
 見送るとき (2 や 5 で合わないと分かったとき):
 
-- `herdr/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版は winget の版の形
-  (`<semver>-preview.<日付>-<hash>`) で書く。winget に無い preview (job が `<日付>-<hash>` だけを出したもの) は、
-  `<日付>-<hash>` だけを書く
+- `herdr/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版は winget の版の形 (`0.9.6` のような
+  `X.Y.Z`) で書く。winget にまだ無い安定版 (job が GitHub にだけあると出したもの) も同じ形で書ける
 - 5 で分かったなら、`-Version` の既定値も前の版に戻し、`Install-Herdr` で揃え直す (下げるのもできる)
 - `-Check` の ※ の行は見送っても出続ける (winget に新しい版があるのは事実なので)
 
