@@ -1,0 +1,55 @@
+name: herdr-app-installers
+
+# Windows の herdr-app と herdr-core を入れる win/herdr-app/Install-HerdrApp.ps1 は、公式の install.ps1 (app と core) を
+# 流さずに、同じ置き場所・手順を自分で踏む。公式が置くもの・置き場所・手順を変えると、入れるもの・外すもの (-Uninstall)
+# が黙ってずれるので、週 1 回ここで公式の install.ps1 を落とし、写したときの sha256 (win/herdr-app/upstream-installers.txt)
+# と比べる。変わっていれば落ちて知らせる (差分を読む所を ::error の行と summary に出す)。落とせなかったときも落ちる。
+# 落ちた定期実行の通知は、winget-versions と同じく workflow を作った人に届く。合わせ方は win/README.md の
+# 「公式の install.ps1 が変わったとき」。
+#
+# curl と sha256sum は GitHub の ubuntu のランナーに入っているので、Nix は要らない。
+
+on:
+  # 月曜の朝 (JST 7:41)。winget-versions (7:23) とずらす。毎時 0 分は混んで遅れたり飛ばされたりする
+  # (週 1 回なので、1 回飛ぶと 2 週間空く)
+  schedule:
+    - cron: "41 22 * * 0"
+  # 記録・Install-HerdrApp.ps1・script を変える PR で、記録が今の公式の中身と合うかを確かめる
+  pull_request:
+    paths:
+      - "win/herdr-app/**"
+      - "nix/scripts/check-herdr-app-installers.sh"
+      - ".github/workflows/herdr-app-installers.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: 公式の install.ps1 と記録
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # shell: bash を書くと pipefail が付く。既定の bash -e のままだと tee の 0 が残り、落ちない
+      - name: 比べる
+        shell: bash
+        run: ./nix/scripts/check-herdr-app-installers.sh 2>&1 | tee report.txt
+
+      # 落ちた実行でも、何が出たかを summary で読めるようにする (::error の行は実行の画面の先頭に出る)
+      - name: レポートを summary へ
+        if: always()
+        run: |
+          {
+            echo "## herdr-app の公式の install.ps1"
+            echo '```'
+            grep -v '^::' report.txt 2>/dev/null || echo "(report.txt なし: 比べる前に失敗)"
+            echo '```'
+            echo "手順: [win/README.md の「公式の install.ps1 が変わったとき」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/win/README.md#公式の-installps1-が変わったとき)"
+          } >>"$GITHUB_STEP_SUMMARY"
