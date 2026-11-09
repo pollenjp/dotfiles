@@ -113,6 +113,9 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 `~/dotfiles/flake.nix` は git 管理外なので、**このマシンにだけ要るホスト**（`tmp` など。dotfiles-private を読めない PC の
 値を書く）を書く場所にもなる（[後述](#登録簿に載せずにマシンを足す)）。足さなくても、入口を 1 つに揃えるために常に置く。
 
+WSL の PC で雛形を描くと（初回・`--force`・`--initial`）、`tmp` の例（コメント）の `windowsUserName` に、この PC の Windows の
+ユーザー名が入る（[後述](#足したホストに書く値)）。引けなければ止めずに作り物の名前のまま書き、そのことを 1 行出す。
+
 SSH 鍵 (1Password) も gh のログインもまだの新しい WSL の PC は、`--initial` を付けて初期用のホスト `initial` も書く
 （Windows のユーザー名は自動で引く。[後述](#新しい-wsl-の-pc)）。
 
@@ -950,9 +953,11 @@ git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dot
   (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
 - Windows のユーザー名は `private-host.sh windows-user` (`$env:USERNAME`) で引き、`/mnt/c/Users/<名前>` があるかを確かめる。
   ユーザーのフォルダの名前を変えた PC では、止まって候補を出すので、`--windows-user <フォルダの名前>` で渡す
-- 既に `~/dotfiles/flake.nix` があるとき: `initial` があれば触らない。今の雛形のまま (手を入れていない) なら差し込む。
-  手を入れてあれば書かずに止まり、手で足す塊を出す (`--force --initial` で作り直すと、手で足した値は消える)
-- 雛形の本文は変えずに、描いたあとで `tmp` の例の後ろに `initial` の塊を差し込む。雛形の版の印は変わらない
+- 既に `~/dotfiles/flake.nix` があるとき: `initial` があれば触らない。今の雛形のまま (手を入れていない。`tmp` の例の
+  Windows のユーザー名の違いは、手を入れたと見ない) なら差し込む。手を入れてあれば書かずに止まり、手で足す塊を出す
+  (`--force --initial` で作り直すと、手で足した値は消える)
+- 雛形の本文は変えずに、描いたあとで `tmp` の例の後ろに `initial` の塊を差し込む。`tmp` の例 (コメント) の `windowsUserName`
+  にも同じ名前を入れる。雛形の版の印は変わらない
 - `setup --new-machine` の途中で UAC の確認が出る (Google 日本語入力と OpenSSH で 1 回ずつ。herdr の依存の VCRedist が無い PC
   ではもう 1 回)。最後の「残りの手作業」に出た手順 (PowerToys の設定画面を開く・日本語入力を一度使う・Windows Terminal を
   一度起動する) のあと、`~/dotfiles/setup --update` を流し直す
@@ -1248,6 +1253,10 @@ dotfiles-private に登録したホスト（[後述](#dotfiles-private-に登録
 普通の定義なので `mkForce` は要らない（登録簿の型も dotfiles-private のホストも、このホストには当たらない）。書かなかった
 option は本体の既定になる。本体の module が既に定義している home-manager の設定（`programs.git.settings.user.email` など）を
 差し替えるときだけ、`modules` の中で `lib.mkForce` が要る。雛形の `tmp` の例（コメント）に、よく使う値と説明が並んでいる。
+WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC の Windows のユーザー名が入っている（ほかの値は作り物）。
+`setup-local-flake.sh` が描くとき（初回・`--force`・`--initial`）に、`--initial` と同じく `private-host.sh windows-user` で引き、
+`/mnt/c/Users/<名前>` があって Nix の文字列に書ける名前だけを入れる（`--initial` なら `initial` と同じ名前）。行はコメントのままで、
+雛形の版の印も変わらない。
 
 | 値 | 既定 | 書くマシン |
 | --- | --- | --- |
@@ -1324,6 +1333,9 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
   旧いファイルとの差分が最も小さい版。`--base <rev>` で選び直せる
 - 片側が元の行の前後に足しただけの衝突（コメントを外した行の直後に雛形が節を足した、など）は自動で解く。
   残った衝突は diff3 の印のまま `new/flake.nix` に残る
+- WSL の PC で描いた雛形の `tmp` の例の `windowsUserName`（その PC の名前）は、`prepare` が元の雛形と今の雛形の例にも同じ名前を
+  入れてから merge するので、今の雛形がその辺りを直しても衝突にならずに残る（`base.nix`・`template.nix` にも入る）。例が元の雛形の
+  作り物の名前のままなら入れず、今の雛形の作り物の名前になる
 - compare は評価用の写しで lock を張り直して評価する（1 回 20〜60 秒）。drvPath が全部同じなら home-manager の
   世代の中身は変わらないので、switch は要らない。違えば `config.dotfiles` の違いを出す。setup が文字列から拾う
   ホストの並び（一番上が既定の対象）も比べる。検証専用の `sandbox` は比べない（setup も対象にしない。前の雛形の
