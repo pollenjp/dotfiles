@@ -33,7 +33,8 @@
 #               (mkForce は要らない)。有効な行は WSL・1Password・Dev Tracker (true)・Notion の宛先で、
 #               gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port は、例の中の
 #               コメントに置く。例を直したら nix/tests/fixtures/local-flake-tmp/tmp.nix も同じに直す
-#               (setup-local-flake.test.sh が比べ、local-flake-tmp-state がそれを評価する)。
+#               (setup-local-flake.test.sh が比べ、local-flake-tmp-state がそれを評価する)。WSL の PC で描くと、
+#               例の windowsUserName にはその PC の名前が入る (下の「tmp の例の Windows のユーザー名」)。
 #               先頭のコメントに「# 雛形の版: <印>」を置く。印は下の heredoc の原文 (展開する前) から
 #               local-flake-migrate.sh id が計算する値で、heredoc を直すと変わる。
 #   flake.lock  nix が生成する。
@@ -53,11 +54,26 @@
 # setup はローカル flake の一番上のホストを既定の対象ホストにするので、initial で当たる。dotfiles-private に登録して merge
 # したら、--force で作り直して外す (initial のほかに手で足した値の無い雛形なので、作り直せば clone の nix/ を読む形になる)。
 #
-#   - flake.nix が無い・--force: 描いて差し込む。initial が既にある: 触らない。今の雛形のまま (local-flake-migrate.sh render と
-#     1 バイトも違わない): 差し込んで書き直す。それ以外 (手を入れた): 書かずに 1 で、手で足す塊を出す
+#   - flake.nix が無い・--force: 描いて差し込む。initial が既にある: 触らない。今の雛形のまま (local-flake-migrate.sh render と、
+#     tmp の例の Windows のユーザー名のほかは 1 バイトも違わない): 差し込んで書き直す。それ以外 (手を入れた): 書かずに 1 で、
+#     手で足す塊を出す
 #   - 書く前に確かめる: Windows のユーザー名が引ける (WSL でなければ private-host.sh が止める)・<Windows のユーザーの
 #     フォルダの親 (DOTFILES_WINDOWS_USERS_DIR。既定 /mnt/c/Users)>/<名前> がある・名前を Nix の文字列にそのまま書ける
 #     (" \ $ と制御文字が無い)。pwsh.exe (PowerShell 7) が無ければ警告する (setup の Windows の手順が pwsh.exe で流すため)
+#
+# ## tmp の例の Windows のユーザー名
+#
+# 雛形を描くとき (flake.nix が無い・--force・--initial) は、WSL の PC なら、描いたあとで tmp の例 (コメント) の
+# windowsUserName の行 (「        #     windowsUserName = "alice";」) の名前を、その PC の Windows のユーザー名に置き換える。
+# 行はコメントのまま (行頭の # は外さない)。雛形の heredoc は変えない (initial の塊と同じく、雛形の版の印を変えないため)。
+#
+#   - 名前の引き方と確かめ方は initial と同じ (private-host.sh windows-user・<DOTFILES_WINDOWS_USERS_DIR>/<名前> がある・
+#     Nix の文字列に書ける)。--initial のときは initial に書く名前 (--windows-user で渡した名前も) をそのまま使い、引き直さない
+#   - 決まらなくても止めない (例は作り物の名前のまま)。WSL の PC で決まらなければ (interop の不調・フォルダが無い など)、
+#     わけを 1 行出す (例はコメントなので、setup の警告のまとめには載せない)。WSL でない PC では何も言わない
+#   - 名前の入った例は、手を入れたと見ない: --initial が今の雛形のままかを見るときは、同じ名前を入れて描いたものと比べる
+#     (local-flake-migrate.sh render --windows-user)。local-flake-migrate.sh prepare は、手元の例の名前を元の雛形と今の
+#     雛形にも入れてから 3-way merge する。行の形は local-flake-migrate.sh も同じものを見る (直すならあちらも)
 #
 # ## 雛形が新しくなったら
 #
@@ -94,6 +110,7 @@ set -eu -o pipefail
 
 repo_path_suffix="github.com/pollenjp/dotfiles"
 local_dir=${DOTFILES_LOCAL_DIR:-${HOME}/dotfiles}
+users_dir=${DOTFILES_WINDOWS_USERS_DIR:-/mnt/c/Users}
 force=0
 initial=0
 initial_windows_user=""
@@ -109,6 +126,9 @@ usage() {
                                  初期用のホスト initial を書く (SSH 鍵も gh のログインもまだの、新しい WSL の PC)。
                                  Windows のユーザー名は引く (--windows-user で渡せる)。--force と一緒なら作り直して書く
   setup-local-flake.sh -h        これ
+
+  flake.nix を描くとき、WSL の PC なら、tmp の例 (コメント) の windowsUserName に Windows のユーザー名を入れる
+  (--initial なら initial と同じ名前。引けなければ作り物の名前のまま)。
 
 環境変数:
   DOTFILES_LOCAL_DIR          ローカル flake の場所 (既定: ~/dotfiles)
@@ -176,7 +196,7 @@ nix_string_ok() {
 # 初期用のホスト initial に書く値 (initial_username・initial_system・initial_windows_user) を決めて確かめる (--initial)。
 # 決まらなければ理由を出して exit 1 (ローカル flake には何も書かない)。pwsh.exe が無ければ警告だけする
 initial_values() {
-  local users_dir d n cand=""
+  local d n cand=""
   initial_username=${USER:-$(id -un 2>/dev/null || true)}
   initial_system=$("${BASH}" "${script_dir}/private-host.sh" system) \
     || die "この PC の system を決められません (${script_dir}/private-host.sh system)。"
@@ -202,7 +222,6 @@ initial_values() {
   if ! nix_string_ok "${initial_windows_user}"; then
     die "Windows のユーザー名 (${initial_windows_user}) に、Nix の文字列に書けない文字 (\" \\ \$ と制御文字) があります。"
   fi
-  users_dir=${DOTFILES_WINDOWS_USERS_DIR:-/mnt/c/Users}
   if [[ ! -d ${users_dir}/${initial_windows_user} ]]; then
     for d in "${users_dir}"/*/; do
       [[ -d ${d} ]] || continue
@@ -282,6 +301,71 @@ insert_initial_block() {
   ' "${f}" >"${f}.new"
   rm -f "${f}.block"
   mv "${f}.new" "${f}"
+}
+
+# 雛形の tmp の例の、Windows のユーザー名の行 (「        #     windowsUserName = "<名前>";」。コメント)。雛形の heredoc の中に
+# ちょうど 1 行あり、initial の塊の windowsUserName (字下げが違い、# が無い) には当たらない。local-flake-migrate.sh
+# (render --windows-user・prepare) も同じ形の行を見る (直すならあちらも)。
+#
+# $1 の tmp の例の Windows のユーザー名を出す。その行がちょうど 1 行でなければ 1
+example_windows_user_of() {
+  awk '
+    /^        #     windowsUserName = "[^"]*";$/ {
+      n++
+      v = $0
+      sub(/^[^"]*"/, "", v)
+      sub(/";$/, "", v)
+    }
+    END {
+      if (n != 1) exit 1
+      print v
+    }
+  ' "$1"
+}
+
+# $1 (描いたばかりの雛形) の tmp の例の Windows のユーザー名を $2 にする (行はコメントのまま)。その行がちょうど 1 行で
+# なければ 1 (書き換えない)
+set_example_windows_user() {
+  local f=$1
+  example_windows_user_of "${f}" >/dev/null || return 1
+  NAME=$2 awk '
+    /^        #     windowsUserName = "[^"]*";$/ { print "        #     windowsUserName = \"" ENVIRON["NAME"] "\";"; next }
+    { print }
+  ' "${f}" >"${f}.example"
+  mv "${f}.example" "${f}"
+}
+
+# 雛形の tmp の例に入れる Windows のユーザー名を example_windows_user に決める (雛形を描くとき)。--initial なら initial に書く
+# 名前をそのまま使う (引き直さない)。ほかは WSL の PC のときだけ、initial と同じ引き方・確かめ方で決める。決まらなければ空に
+# し、WSL の PC ならわけを example_user_note に入れる (止めない。例は作り物の名前のまま)。WSL でなければ何も入れない
+example_user_values() {
+  local u
+  example_windows_user=""
+  example_user_note=""
+  if [[ ${initial} == 1 ]]; then
+    example_windows_user=${initial_windows_user}
+    return 0
+  fi
+  "${BASH}" "${script_dir}/private-host.sh" is-wsl 2>/dev/null || return 0
+  if ! u=$("${BASH}" "${script_dir}/private-host.sh" windows-user 2>/dev/null); then
+    # shellcheck disable=SC2016 # 文面の $env:USERNAME は PowerShell の変数の名前
+    example_user_note='Windows のユーザー名を引けない。pwsh.exe・powershell.exe の $env:USERNAME が返らない。WSL の interop を確かめる'
+  elif ! nix_string_ok "${u}"; then
+    example_user_note="Windows のユーザー名に、Nix の文字列に書けない文字 (\" \\ \$ と制御文字) がある"
+  elif [[ ! -d ${users_dir}/${u} ]]; then
+    example_user_note="Windows のユーザー名 ${u} のフォルダ ${users_dir}/${u} が無い"
+  else
+    example_windows_user=${u}
+  fi
+}
+
+# 既にある flake.nix ($1) が今の雛形のまま (手を入れていない) か。local-flake-migrate.sh render と 1 バイトも違わなければ 0。
+# tmp の例の Windows のユーザー名 (WSL の PC で描くと入る) は違ってよい (同じ名前を入れて描いたものと比べる)
+template_as_is() {
+  local name
+  name=$(example_windows_user_of "$1") || name=""
+  "${BASH}" "${migrate}" render --file "${script_dir}/setup-local-flake.sh" --nix-dir "${nix_dir}" \
+    --private-dir "${private_nix_dir}" ${name:+--windows-user "${name}"} 2>/dev/null | cmp -s - "$1"
 }
 
 # $0 が symlink (~/dotfiles/setup など) 経由でも実体の場所を返す。
@@ -414,8 +498,7 @@ if [[ -f ${flake_file} && ${force} == 0 && ${initial} == 1 ]]; then
       echo "    --windows-user ${initial_windows_user} は使っていません (今の initial の Windows のユーザー名: ${current_user:-読めない})。"
       echo "    変えるなら作り直す (手で足した値は消える): ${script_dir}/setup-local-flake.sh --force --initial --windows-user ${initial_windows_user}"
     fi
-  elif "${BASH}" "${migrate}" render --file "${script_dir}/setup-local-flake.sh" --nix-dir "${nix_dir}" \
-    --private-dir "${private_nix_dir}" 2>/dev/null | cmp -s - "${flake_file}"; then
+  elif template_as_is "${flake_file}"; then
     echo "  flake.nix: 今の雛形のままなので、初期用のホスト initial を差し込みます"
     write_flake=1
   else
@@ -452,12 +535,11 @@ fi
 if [[ ${write_flake} == 1 ]]; then
   template_id=$("${BASH}" "${migrate}" id "${script_dir}/setup-local-flake.sh") \
     || die "雛形の版の印を計算できません (${migrate} id)。"
-  # initial を差し込むときは、雛形を隣の一時ファイルに描いて差し込んでから置き換える (差し込めなければ元のファイルを残す)。
-  # 開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
+  example_user_values
+  # 雛形は隣の一時ファイルに描き、initial の塊と tmp の例の Windows のユーザー名を入れてから置き換える (差し込めなければ
+  # 元のファイルを残す)。開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
   real_flake_file=${flake_file}
-  if [[ ${initial} == 1 ]]; then
-    flake_file="${local_dir}/.flake.nix.initial-$$"
-  fi
+  flake_file="${local_dir}/.flake.nix.new-$$"
   cat >"${flake_file}" <<EOS
 # ローカル専用の flake。setup-local-flake.sh が生成した。
 # **git 管理外**なので、ここに書いたことはこのマシンにしか無い。
@@ -591,17 +673,24 @@ if [[ ${write_flake} == 1 ]]; then
     };
 }
 EOS
-  if [[ ${initial} == 1 ]]; then
-    if ! insert_initial_block "${flake_file}"; then
-      rm -f "${flake_file}"
-      die "雛形に、初期用のホスト initial を差し込む目印 (tmp の例の終わりの「        # };」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
-    fi
-    mv "${flake_file}" "${real_flake_file}"
+  if [[ ${initial} == 1 ]] && ! insert_initial_block "${flake_file}"; then
+    rm -f "${flake_file}"
+    die "雛形に、初期用のホスト initial を差し込む目印 (tmp の例の終わりの「        # };」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
   fi
+  if [[ -n ${example_windows_user} ]] && ! set_example_windows_user "${flake_file}" "${example_windows_user}"; then
+    example_windows_user=""
+    example_user_note="雛形の tmp の例に windowsUserName の行がちょうど 1 行ではない。setup-local-flake.sh の置き換え方を直す"
+  fi
+  mv "${flake_file}" "${real_flake_file}"
   flake_file=${real_flake_file}
   echo "  flake.nix: 書きました"
   if [[ ${initial} == 1 ]]; then
     echo "  初期用のホスト initial を書きました (Windows のユーザー名: ${initial_windows_user})"
+  fi
+  if [[ -n ${example_windows_user} ]]; then
+    echo "  tmp の例 (コメント) の windowsUserName に ${example_windows_user} を入れました"
+  elif [[ -n ${example_user_note} ]]; then
+    echo "  tmp の例 (コメント) の windowsUserName は作り物の名前のままです (${example_user_note})"
   fi
   if [[ ${private_nix_dir} == "${nix_dir}/private-stub" ]]; then
     echo "  dotfiles-private: clone の nix/ が無いので、本体の空の stub を指しました (${private_nix_dir})。"
