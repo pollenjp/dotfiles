@@ -41,11 +41,6 @@ dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/editorSettings.json"
 hint = "Keyboard Manager のエディタを開いていたら、閉じて開き直す"
 
 [[files]]
-src = "powertoys/fancyzones/custom-layouts.json"
-dst = "%LOCALAPPDATA%/Microsoft/PowerToys/FancyZones/custom-layouts.json"
-hint = "FancyZones のエディターは起動するたびに読む。動いている FancyZones は置き換えに気づかないので、今あてているレイアウトを直したときは、エディターを開いて閉じるか、WSL でこのファイルを touch すると読み直す (win/README.md の FancyZones)"
-
-[[files]]
 src = "google-japanese-input/Install-GoogleJapaneseInput.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-GoogleJapaneseInput.ps1"
 hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。ずれていても上げず、⚠ で知らせるだけ。入れる・上げるときは UAC の確認が出る)"
