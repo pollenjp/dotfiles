@@ -32,7 +32,8 @@
 # 雛形の版の印は変わらない)。render --windows-user はその形を描く。prepare は、手元の例の名前が元の雛形の例と違えば
 # (setup-local-flake.sh が入れた・手で直した)、元の雛形と今の雛形の例にも同じ名前を入れてから 3-way merge する (その行の
 # 隣を今の雛形が直しても衝突にしない)。同じなら (作り物の名前のまま) 入れず、今の雛形の作り物の名前になる。status と check は
-# 印と入力しか見ないので、名前の入った例でも変わらない。行の形は setup-local-flake.sh と同じものを見る (直すならあちらも)。
+# 印と入力しか見ないので、名前の入った例でも変わらない。行の形は setup-local-flake.sh と同じものを見る (直すならあちらも。
+# 行そのものの形を変えるときは、下の example_user_of)。
 #
 # ## 雛形の版の印
 #
@@ -265,7 +266,9 @@ template_has_private() {
 }
 
 # tmp の例の Windows のユーザー名の行 (「        #     windowsUserName = "<名前>";」。コメント)。setup-local-flake.sh が WSL の
-# PC で名前を入れる行と同じ形 (直すならあちらも)。$1 のその行の名前を出す。その行がちょうど 1 行でなければ 1
+# PC で名前を入れる行と同じ形 (直すならあちらも)。雛形でこの行そのものの形 (字下げ・後ろのコメントなど) を変えるときは、前の形の
+# 行も読めるようにする (読めないと、WSL の PC で名前の入った旧いファイルを prepare すると、その行が衝突として残る)。
+# $1 のその行の名前を出す。その行がちょうど 1 行でなければ 1
 example_user_of() {
   awk '
     /^        #     windowsUserName = "[^"]*";$/ {
@@ -286,10 +289,13 @@ example_user_of() {
 example_user_set() {
   local f=$1
   example_user_of "${f}" >/dev/null || return 1
-  NAME=$2 awk '
+  if ! NAME=$2 awk '
     /^        #     windowsUserName = "[^"]*";$/ { print "        #     windowsUserName = \"" ENVIRON["NAME"] "\";"; next }
     { print }
-  ' "${f}" >"${f}.example" || return 1
+  ' "${f}" >"${f}.example"; then
+    rm -f "${f}.example"
+    return 1
+  fi
   mv "${f}.example" "${f}"
 }
 
@@ -1100,8 +1106,9 @@ cmd_prepare() {
   template_render "${current_file}" "${local_nix}" "${want}" >"${tmp}/template.nix"
   # tmp の例の Windows のユーザー名: 旧いファイルの例の名前が元の雛形と違えば (setup-local-flake.sh が WSL の PC で入れた・
   # 手で直した)、元の雛形と今の雛形にも入れて merge する (その行の隣を今の雛形が直しても衝突にしない)。同じ (作り物の名前の
-  # まま) なら入れず、今の雛形の作り物の名前になる。どれかにその行がちょうど 1 行無ければ入れない (ふつうの 3-way merge)
-  if old_user=$(example_user_of "${flake}") && base_user=$(example_user_of "${base_file}") \
+  # まま) なら入れず、今の雛形の作り物の名前になる。入れるのは setup-local-flake.sh が書ける名前 (空でなく、Nix の文字列に
+  # 書ける) だけ。どれかにその行がちょうど 1 行無い・書けない名前なら入れない (ふつうの 3-way merge)
+  if old_user=$(example_user_of "${flake}") && windows_user_ok "${old_user}" && base_user=$(example_user_of "${base_file}") \
     && example_user_of "${tmp}/template.nix" >/dev/null && [[ ${old_user} != "${base_user}" ]]; then
     carry_user=${old_user}
     printf '  tmp の例の Windows のユーザー名: %s (旧いファイルの値。元の雛形と今の雛形にも入れて merge する)\n' "${carry_user}"

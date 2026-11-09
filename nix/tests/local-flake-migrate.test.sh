@@ -61,8 +61,8 @@
 #   - tmp の例の Windows のユーザー名 (本物の雛形): render --windows-user はその行だけを名前にして描き、Nix の文字列に書けない
 #     名前・空は 2、その行の無い版は 1。prepare は、手元の例の名前が元の雛形と違えば (WSL の PC で描いた)、元の雛形と今の雛形の
 #     例にも入れて merge し、今の雛形が例の行のすぐ上を直しても衝突なく、今の雛形を同じ名前で描いたものと同じにする。元の雛形の
-#     作り物の名前のままなら (前の雛形の例の名前が今と違っても) 入れず、今の雛形の作り物の名前になる。check と status は名前の
-#     入った例でも印だけで決める
+#     作り物の名前のままなら (前の雛形の例の名前が今と違っても) 入れず、今の雛形の作り物の名前になる。書けない名前 (空) も
+#     入れない (ふつうの 3-way merge のまま)。check と status は名前の入った例でも印だけで決める
 #   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
 #     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
 #     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
@@ -1308,6 +1308,17 @@ if [[ $(rc "${r}") == 0 && $(env_of "${r}/w" conflicts) == 0 && $(env_of "${r}/w
   ok "prepare: 名前の入った例は、元の雛形と今の雛形にも入れて merge する (例の行の隣を今の雛形が直しても衝突にしない)"
 else
   ng "prepare (名前の入った例)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(diff "${r}/want.nix" "${r}/w/new/flake.nix" 2>&1 | head -20)"
+fi
+#     書けない名前 (空にした) は入れず、ふつうの 3-way merge のまま (そう出さない。隣を直した今の雛形とは衝突として残る)
+lfm_render "${r}" "$(cat "${r}/rev-a")" | sed 's/^        #     windowsUserName = "[^"]*";$/        #     windowsUserName = "";/' \
+  >"${r}/local/flake.nix"
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w-empty"
+if grep -qxF '        #     windowsUserName = "";' "${r}/local/flake.nix" && [[ $(rc "${r}") == 0 ]] \
+  && ! grep -qF 'tmp の例の Windows のユーザー名' "${r}/out" && [[ $(env_of "${r}/w-empty" remaining) == 1 ]] \
+  && ! grep -qF 'windowsUserName = "";' "${r}/w-empty/base.nix" && ! grep -qF 'windowsUserName = "";' "${r}/w-empty/template.nix"; then
+  ok "prepare: 書けない名前 (空) は元の雛形と今の雛形に入れず、ふつうの 3-way merge のまま (そうとは出さない)"
+else
+  ng "prepare (空の名前)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
 fi
 #     check と status は、名前の入った例でも印だけで決める (今の雛形と同じ印なら 0)
 lfm_render "${r}" "$(cat "${r}/rev-b")" --windows-user carol >"${r}/local/flake.nix"

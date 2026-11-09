@@ -51,8 +51,11 @@
 #     ある) なら、止めずに作り物の名前のまま書き、わけを 1 行出す (stderr の警告と DOTFILES_SETUP_WARNINGS には出さない)。
 #     WSL でない PC では pwsh.exe を呼ばず、何も言わない。既にある flake.nix を触らないときも pwsh.exe を呼ばない
 #   - --initial は、tmp の例にも initial と同じ名前 (--windows-user の名前も) を入れ、引き直さない。差し込んだ所を除くと
-#     render --file --windows-user <その名前> と 1 バイトも違わない。名前の入った例 (WSL の PC で描いたまま) は手を入れたと
-#     見ず、initial を差し込む (例の名前は initial の名前になる)。名前の入った例に別の手を入れたものには書かずに 1
+#     render --file --windows-user <その名前> と 1 バイトも違わない。名前の入った例 (WSL の PC で描いたまま。日本語と空白を
+#     含む名前も) は手を入れたと見ず、initial を差し込む (例の名前は initial の名前になる)。名前の入った例に別の手を入れた
+#     ものには書かずに 1
+#   - 雛形は一時ファイル (.flake.nix.new-<pid>) に描いてから、既にある flake.nix へ書き写す: --force (--initial も) でも
+#     mode (0600) と symlink (先のファイルを書き換える) はそのまま。描いたあとに一時ファイルを残さない
 #   - WSL の PC のケース (--initial も) は、本物の pwsh.exe を見せないよう、要るコマンドだけを並べた PATH と env -i で流す。
 #     ほかのケースは WSL でない PC として流す (WSL_DISTRO_NAME を外し、/proc/version は WSL でない中身。WSL の上でテストを
 #     流しても、本物の pwsh.exe を呼ばない)
@@ -134,6 +137,8 @@ render_case() {
     --private-dir "${c}/repo/nix/private-stub" "$@"
 }
 marker_of() { sed -n 's/^# 雛形の版: \([0-9a-f]*\).*/\1/p' "$1"; }
+# そのケースのローカル flake の隣に残った一時ファイル (.flake.nix.new-<pid> とその .block・.new・.example) を出す
+leftovers() { find "$1/local" -maxdepth 1 -name '.flake.nix.*' -print; }
 # 雛形の tmp の例 (「        # tmp = dotfiles.lib.mkHome {」から次の「        # };」まで) のコメントを 1 段外して出す
 tmp_example() {
   awk '
@@ -604,8 +609,9 @@ if [[ $(rc "${c}") == 0 && $(marker_of "${c}/local/flake.nix") == "${want_id}" ]
   && ! grep -qF 'windowsUserName = "alice";' "${c}/local/flake.nix" && ! grep -q '^        initial = ' "${c}/local/flake.nix" \
   && cmp -s "${c}/rendered" "${c}/local/flake.nix" \
   && grep -qF 'tmp の例 (コメント) の windowsUserName に carol を入れました' "${c}/out" \
-  && ! grep -qF 'windowsUserName' "${c}/err" && ! grep -qF 'windowsUserName' "${c}/warnings"; then
-  ok "WSL の PC で描くと、tmp の例の windowsUserName (コメント) に引いた名前を入れる (render --windows-user と同じ・印は同じ)"
+  && ! grep -qF 'windowsUserName' "${c}/err" && ! grep -qF 'windowsUserName' "${c}/warnings" \
+  && [[ -z $(leftovers "${c}") ]]; then
+  ok "WSL の PC で描くと、tmp の例の windowsUserName (コメント) に引いた名前を入れる (render --windows-user と同じ・印は同じ・一時ファイルを残さない)"
 else
   ng "tmp の例の名前 (新しく作る)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cat "${c}/render-err") $(diff "${c}/rendered" "${c}/local/flake.nix" | head -20)"
 fi
@@ -681,17 +687,20 @@ else
   ng "tmp の例の名前 (WSL でない)" "rc=$(rc "${c}") calls=$(cat "${c}/home/pwsh-calls" 2>/dev/null) $(out "${c}") $(err "${c}")"
 fi
 
-# 27. 名前の入った例 (WSL の PC で描いたまま) は手を入れたと見ず、--initial が initial を差し込む (例は initial の名前になる)
+# 27. 名前の入った例 (WSL の PC で描いたまま。日本語と空白を含む名前も) は手を入れたと見ず、--initial が initial を差し込む
+#     (例は initial の名前になる)。一時ファイルを残さない
 c=$(new_win_case w7)
-mkdir -p "${c}/Users/carol"
-FAKE_PWSH_USER=carol run_win "${c}"
+mkdir -p "${c}/Users/山田 太郎"
+FAKE_PWSH_USER='山田 太郎' run_win "${c}"
+example_before=$(grep -c '^        #     windowsUserName = "山田 太郎";$' "${c}/local/flake.nix")
 run_win "${c}" --initial
 render_case "${c}" >"${c}/rendered" 2>"${c}/render-err"
 strip_initial "${c}/local/flake.nix" >"${c}/stripped"
-if [[ $(rc "${c}") == 0 ]] && grep -qF '今の雛形のままなので' "${c}/out" \
+if [[ ${example_before} == 1 && $(rc "${c}") == 0 ]] && grep -qF '今の雛形のままなので' "${c}/out" \
   && [[ $(initial_block "${c}/local/flake.nix") == "$(fixture_initial "${initial_fixture}")" ]] \
-  && grep -qxF '        #     windowsUserName = "alice";' "${c}/local/flake.nix" && cmp -s "${c}/rendered" "${c}/stripped"; then
-  ok "--initial: 名前の入った例 (WSL の PC で描いたまま) は手を入れたと見ず、initial を差し込む (例は initial の名前)"
+  && grep -qxF '        #     windowsUserName = "alice";' "${c}/local/flake.nix" && cmp -s "${c}/rendered" "${c}/stripped" \
+  && [[ -z $(leftovers "${c}") ]]; then
+  ok "--initial: 名前の入った例 (WSL の PC で描いたまま・日本語と空白の名前も) は手を入れたと見ず、initial を差し込む (例は initial の名前)"
 else
   ng "--initial (名前の入った例)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(diff "${c}/rendered" "${c}/stripped" | head -20)"
 fi
@@ -706,6 +715,36 @@ if [[ $(rc "${c}") == 1 ]] && cmp -s "${c}/before.nix" "${c}/local/flake.nix" &&
   ok "--initial: 名前の入った例のほかに手を入れた flake.nix には、書かずに 1"
 else
   ng "--initial (名前の入った例 + 手を入れた)" "rc=$(rc "${c}") $(err "${c}")"
+fi
+
+# 28. 雛形は一時ファイルに描いてから、既にある flake.nix へ書き写す: --force でも、mode (0600) と symlink (先のファイルを
+#     書き換える) はそのまま。--force --initial も同じ。一時ファイルを残さない
+c=$(new_case f1)
+run "${c}"
+chmod 600 "${c}/local/flake.nix"
+run "${c}" --force
+render_case "${c}" >"${c}/rendered" 2>"${c}/render-err"
+if [[ $(rc "${c}") == 0 && -n $(find "${c}/local/flake.nix" -maxdepth 0 -perm 600) ]] \
+  && cmp -s "${c}/rendered" "${c}/local/flake.nix" && [[ -z $(leftovers "${c}") ]]; then
+  ok "--force: 既にある flake.nix に書き写す (mode 0600 はそのまま・一時ファイルを残さない)"
+else
+  ng "--force (mode)" "rc=$(rc "${c}") $(ls -l "${c}/local" 2>&1) $(err "${c}")"
+fi
+c=$(new_win_case f2)
+run "${c}"
+mkdir -p "${c}/kept"
+mv "${c}/local/flake.nix" "${c}/kept/flake.nix"
+ln -s "${c}/kept/flake.nix" "${c}/local/flake.nix"
+printf '# 手で足した行\n' >>"${c}/kept/flake.nix"
+run_win "${c}" --force --initial
+strip_initial "${c}/kept/flake.nix" >"${c}/stripped"
+render_case "${c}" >"${c}/rendered" 2>"${c}/render-err"
+if [[ $(rc "${c}") == 0 && -L ${c}/local/flake.nix && $(readlink "${c}/local/flake.nix") == "${c}/kept/flake.nix" ]] \
+  && cmp -s "${c}/rendered" "${c}/stripped" && grep -q '^        initial = ' "${c}/kept/flake.nix" \
+  && [[ -z $(leftovers "${c}") ]]; then
+  ok "--force --initial: symlink の flake.nix は symlink のまま、先のファイルを書き換える (一時ファイルを残さない)"
+else
+  ng "--force --initial (symlink)" "rc=$(rc "${c}") $(ls -l "${c}/local" 2>&1) $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

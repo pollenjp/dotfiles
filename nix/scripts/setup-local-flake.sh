@@ -69,8 +69,9 @@
 #
 #   - 名前の引き方と確かめ方は initial と同じ (private-host.sh windows-user・<DOTFILES_WINDOWS_USERS_DIR>/<名前> がある・
 #     Nix の文字列に書ける)。--initial のときは initial に書く名前 (--windows-user で渡した名前も) をそのまま使い、引き直さない
-#   - 決まらなくても止めない (例は作り物の名前のまま)。WSL の PC で決まらなければ (interop の不調・フォルダが無い など)、
-#     わけを 1 行出す (例はコメントなので、setup の警告のまとめには載せない)。WSL でない PC では何も言わない
+#   - --initial でなければ、決まらなくても止めない (例は作り物の名前のまま)。WSL の PC で決まらなければ (interop の不調・
+#     フォルダが無い など)、わけを 1 行出す (例はコメントなので、setup の警告のまとめには載せない)。WSL でない PC では何も
+#     言わない。--initial は今までどおり、initial に書く名前が決まらなければ何も書かずに止まる
 #   - 名前の入った例は、手を入れたと見ない: --initial が今の雛形のままかを見るときは、同じ名前を入れて描いたものと比べる
 #     (local-flake-migrate.sh render --windows-user)。local-flake-migrate.sh prepare は、手元の例の名前を元の雛形と今の
 #     雛形にも入れてから 3-way merge する。行の形は local-flake-migrate.sh も同じものを見る (直すならあちらも)
@@ -128,7 +129,7 @@ usage() {
   setup-local-flake.sh -h        これ
 
   flake.nix を描くとき、WSL の PC なら、tmp の例 (コメント) の windowsUserName に Windows のユーザー名を入れる
-  (--initial なら initial と同じ名前。引けなければ作り物の名前のまま)。
+  (--initial なら initial と同じ名前)。--initial でなければ、引けなくても止めずに作り物の名前のまま書く。
 
 環境変数:
   DOTFILES_LOCAL_DIR          ローカル flake の場所 (既定: ~/dotfiles)
@@ -286,26 +287,29 @@ initial_windows_user_of() {
 }
 
 # $1 (描いたばかりの雛形) の tmp の例の終わり (「        # };」の行) の後ろに、initial の塊を差し込む。
-# 目印がちょうど 1 行でなければ 1 (書き換えない)
+# 目印がちょうど 1 行でなければ 1 (書き換えない)。条件の中で呼ぶ (set -e が効かない) ので、書けなければ自分で 1 を返す
 insert_initial_block() {
   local f=$1 n
   n=$(grep -cxF '        # };' "${f}") || n=0
   [[ ${n} == 1 ]] || return 1
-  initial_block >"${f}.block"
-  awk -v blockfile="${f}.block" '
+  if ! initial_block >"${f}.block" || ! awk -v blockfile="${f}.block" '
     { print }
     $0 == "        # };" {
       while ((getline line < blockfile) > 0) print line
       close(blockfile)
     }
-  ' "${f}" >"${f}.new"
+  ' "${f}" >"${f}.new"; then
+    rm -f "${f}.block" "${f}.new"
+    return 1
+  fi
   rm -f "${f}.block"
   mv "${f}.new" "${f}"
 }
 
 # 雛形の tmp の例の、Windows のユーザー名の行 (「        #     windowsUserName = "<名前>";」。コメント)。雛形の heredoc の中に
 # ちょうど 1 行あり、initial の塊の windowsUserName (字下げが違い、# が無い) には当たらない。local-flake-migrate.sh
-# (render --windows-user・prepare) も同じ形の行を見る (直すならあちらも)。
+# (render --windows-user・prepare) も同じ形の行を見る (直すならあちらも。この行そのものの形を変えるときは、あちらの
+# example_user_of のコメント)。
 #
 # $1 の tmp の例の Windows のユーザー名を出す。その行がちょうど 1 行でなければ 1
 example_windows_user_of() {
@@ -324,14 +328,17 @@ example_windows_user_of() {
 }
 
 # $1 (描いたばかりの雛形) の tmp の例の Windows のユーザー名を $2 にする (行はコメントのまま)。その行がちょうど 1 行で
-# なければ 1 (書き換えない)
+# なければ 1 (書き換えない)。条件の中で呼ぶ (set -e が効かない) ので、書けなければ自分で 1 を返す
 set_example_windows_user() {
   local f=$1
   example_windows_user_of "${f}" >/dev/null || return 1
-  NAME=$2 awk '
+  if ! NAME=$2 awk '
     /^        #     windowsUserName = "[^"]*";$/ { print "        #     windowsUserName = \"" ENVIRON["NAME"] "\";"; next }
     { print }
-  ' "${f}" >"${f}.example"
+  ' "${f}" >"${f}.example"; then
+    rm -f "${f}.example"
+    return 1
+  fi
   mv "${f}.example" "${f}"
 }
 
@@ -536,10 +543,13 @@ if [[ ${write_flake} == 1 ]]; then
   template_id=$("${BASH}" "${migrate}" id "${script_dir}/setup-local-flake.sh") \
     || die "雛形の版の印を計算できません (${migrate} id)。"
   example_user_values
-  # 雛形は隣の一時ファイルに描き、initial の塊と tmp の例の Windows のユーザー名を入れてから置き換える (差し込めなければ
-  # 元のファイルを残す)。開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
+  # 雛形は隣の一時ファイルに描き、initial の塊と tmp の例の Windows のユーザー名を入れてから、flake.nix へ書き写す (差し込め
+  # なければ元のファイルを残す。書き写すので、既にある flake.nix の mode と symlink はそのまま)。一時ファイルは、止まったときも
+  # 終わるときに消す。開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
+  draw_tmp="${local_dir}/.flake.nix.new-$$"
+  trap 'rm -f "${draw_tmp}" "${draw_tmp}.block" "${draw_tmp}.new" "${draw_tmp}.example"' EXIT
   real_flake_file=${flake_file}
-  flake_file="${local_dir}/.flake.nix.new-$$"
+  flake_file=${draw_tmp}
   cat >"${flake_file}" <<EOS
 # ローカル専用の flake。setup-local-flake.sh が生成した。
 # **git 管理外**なので、ここに書いたことはこのマシンにしか無い。
@@ -674,14 +684,14 @@ if [[ ${write_flake} == 1 ]]; then
 }
 EOS
   if [[ ${initial} == 1 ]] && ! insert_initial_block "${flake_file}"; then
-    rm -f "${flake_file}"
     die "雛形に、初期用のホスト initial を差し込む目印 (tmp の例の終わりの「        # };」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
   fi
   if [[ -n ${example_windows_user} ]] && ! set_example_windows_user "${flake_file}" "${example_windows_user}"; then
     example_windows_user=""
     example_user_note="雛形の tmp の例に windowsUserName の行がちょうど 1 行ではない。setup-local-flake.sh の置き換え方を直す"
   fi
-  mv "${flake_file}" "${real_flake_file}"
+  cat "${flake_file}" >"${real_flake_file}"
+  rm -f "${flake_file}"
   flake_file=${real_flake_file}
   echo "  flake.nix: 書きました"
   if [[ ${initial} == 1 ]]; then
