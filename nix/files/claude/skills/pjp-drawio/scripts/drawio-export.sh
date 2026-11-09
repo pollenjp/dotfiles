@@ -181,14 +181,25 @@ trap 'rm -rf "${tmp_dir}"' EXIT
 export XDG_CONFIG_HOME="${tmp_dir}/config"
 mkdir -p "${XDG_CONFIG_HOME}"
 
+# xvfb-run の --error-file (Xvfb の出力) の置き場所。drawio の出力とは分ける。
+xvfb_log="${tmp_dir}/xvfb.log"
+
 run_drawio() {
   if ((use_xvfb)); then
     # --error-file を渡さないと Xvfb 側の失敗が /dev/null に消えて、
     # 「何も出ないのに exit 1」になる。--auth-file は既定が ./.Xauthority で
     # カレントを汚すので一時ディレクトリへ逃がす。
+    #
+    # --error-file に /dev/stderr は渡さない。下の変換は stderr を通常のファイル
+    # (log) へ向けているので、/dev/stderr は log を開き直すことになる。xvfb-run は
+    # コマンドが終わったあと `xauth remove … >"$ERRORFILE"` で開き直すので、log が
+    # drawio の出力ごと切り詰められ、drawio が落ちた理由が消える (Xvfb が先に書いた
+    # 行も、drawio の出力に上書きされる)。別のファイルなら drawio の出力は log に
+    # 残る。Xvfb が立たないときは xvfb-run が後始末の前に抜けるので、Xvfb の出力も
+    # このファイルに残る。
     xvfb-run --auto-display \
       --auth-file="${tmp_dir}/Xauthority" \
-      --error-file=/dev/stderr \
+      --error-file="${xvfb_log}" \
       drawio "$@"
   else
     drawio "$@"
@@ -252,8 +263,54 @@ args=(
   --disable-update
 )
 [[ -z ${scale} ]] || args+=(--scale "${scale}")
-# root で動かす場合だけ必要 (コンテナや CI)。付けられるフラグは最小限にする。
-[[ $(id -u) -ne 0 ]] || args+=(--no-sandbox)
+
+# 一般ユーザが user namespace を使えないマシンか。使えないなら、その理由
+# (kernel の設定の名前と値) を出して 0 を返す。
+#
+# Chromium (Electron) は、一般ユーザでは user namespace で sandbox を立てる。
+# それが使えないと setuid root の helper (chrome-sandbox) へ落ちるが、nixpkgs の
+# electron は CHROME_DEVEL_SANDBOX に store の chrome-sandbox を渡していて、store には
+# setuid のファイルを置けない。そのため、こうしたマシンでは drawio が起動の直後に
+#   FATAL:setuid_sandbox_host.cc:166] The SUID sandbox helper binary was found,
+#   but is not configured correctly. ...
+# で落ちる (終了コード 133 = SIGTRAP)。sandbox を残したまま通すには root が要る
+# (references/troubleshooting.md の「sandbox」)。
+#
+# 見る設定 (/proc/sys からのパス = 止めている値):
+#   kernel/apparmor_restrict_unprivileged_userns = 1
+#       AppArmor が、どの profile にも入っていないプロセスの user namespace から
+#       capability を外す (Ubuntu 23.10 以降の既定)。store の drawio はどの profile にも入らない
+#   kernel/unprivileged_userns_clone = 0   一般ユーザに作らせない (Debian の kernel)
+#   user/max_user_namespaces = 0           作れる数の上限が 0
+#
+# テストは DRAWIO_SKILL_PROC_SYS で /proc/sys の場所を差し替える (流すマシンの設定を見ないように)。
+userns_unavailable() {
+  local proc_sys=${DRAWIO_SKILL_PROC_SYS:-/proc/sys} entry key value
+  for entry in \
+    kernel/apparmor_restrict_unprivileged_userns=1 \
+    kernel/unprivileged_userns_clone=0 \
+    user/max_user_namespaces=0; do
+    key=${entry%=*}
+    [[ -r ${proc_sys}/${key} ]] || continue
+    value=$(<"${proc_sys}/${key}")
+    if [[ ${value} == "${entry#*=}" ]]; then
+      echo "${key//\//.} = ${value}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# root では Chromium が sandbox を断るので要る (コンテナや CI)。一般ユーザでも、
+# user namespace を使えないマシンでは sandbox が立たないので付け、そのことを出す。
+# どちらでもなければ付けない (付けられるフラグは最小限にする)。
+if [[ $(id -u) -eq 0 ]]; then
+  args+=(--no-sandbox)
+elif userns_reason=$(userns_unavailable); then
+  echo "注意: ${userns_reason} で一般ユーザは user namespace を使えず、Electron の sandbox が立たないので、--no-sandbox で書き出します。" >&2
+  echo "      sandbox の無い drawio に読ませるのは、自分たちで書いた .drawio だけにしてください (pjp-drawio の references/troubleshooting.md の「sandbox」)。" >&2
+  args+=(--no-sandbox)
+fi
 
 log="${tmp_dir}/drawio.log"
 count=0
@@ -266,6 +323,8 @@ for input in "${inputs[@]}"; do
   output="${out_dir}/${base}.${format}"
 
   echo "==> ${output}"
+  # 前の図の Xvfb の出力を持ち越さない (xvfb-run によっては追記する)
+  : >"${xvfb_log}"
   if run_drawio "${args[@]}" --output "${output}" "${input}" >"${log}" 2>&1; then
     if ((keep_noise)); then
       cat "${log}"
@@ -273,8 +332,9 @@ for input in "${inputs[@]}"; do
       grep -viE "${noise}" "${log}" || true
     fi
   else
-    # 失敗したときはノイズも含めて全部見せる (原因がそこに混ざっている)
-    cat "${log}" >&2
+    # 失敗したときはノイズも含めて全部見せる (原因がそこに混ざっている)。
+    # Xvfb が立たなかったときは、その出力も xvfb_log に残っている
+    cat "${log}" "${xvfb_log}" >&2
     die "drawio が失敗しました: ${input}"
   fi
 
