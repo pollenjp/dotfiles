@@ -29,21 +29,21 @@
 #   - 猶予の日数は CHECK_WINGET_VERSION_GRACE_DAYS で変えられる
 #   - GitHub Actions の中では、落ちるときに ::error の行を、猶予の中の版には ::notice の行を出す
 #
-#   herdr (出た日は GitHub の preview の release):
-#   - Install-Herdr.ps1 の形 (版は <semver>-preview.<日付>-<hash>、$packageId は関数の中) から読み、
-#     winget-pkgs の manifests/h/Herdr/Herdr/Preview と herdrdev/herdr の release を見る。
-#     固定した版が herdr の版の形でなければ、gh を呼ばずに exit 2
-#   - 版は数として比べる (0.10.0-preview… は 0.9.4-preview… より新しい)。その形でないディレクトリは exit 1
-#   - 出た日は、版の -preview. の後ろと tag の preview- の後ろが同じ release が出た日 (版の中の日付ではない)。
-#     合う preview が無い新しい版は待たずに exit 1
-#   - GitHub と比べるのは preview (prerelease) だけ。winget に無い安定版 (vX.Y.Z) と、winget の最新より
-#     前に出た preview と、winget にある preview は数えない。winget の最新より後に出た preview が 30 日たっても
-#     載らなければ exit 1。前か後かは出た時刻で決める (同じ日の build を hash の並びで決めない)。winget の最新に
-#     合う release が無いときだけ、鍵 (<日付>-<hash>) の並びで決める
-#   - 最新の preview の tag が preview-<日付>-<hash> の形でない・取った release に preview が無い、は猶予を置かずに exit 1
-#   - 見送りの一覧の版も herdr の版の形で読む (<日付>-<hash> だけも書ける)。GitHub の preview とも、固定した版より
-#     古い (消してよい) かも、-preview. の後ろで照らす
-#   - 固定した版より古い winget の版は並べず、数だけを出す。GitHub Actions の ::error の行の題は Windows の herdr
+#   herdr (出た日は GitHub の安定版の release):
+#   - Install-Herdr.ps1 の形 (版は X.Y.Z、$packageId は関数の中で、後ろに $previewId もある) から読み、
+#     winget-pkgs の manifests/h/Herdr/Herdr と herdrdev/herdr の release を見る。
+#     固定した版が herdr の版の形でなければ (前の preview の形も)、gh を呼ばずに exit 2
+#   - winget-pkgs の Preview のディレクトリ (別のパッケージ Herdr.Herdr.Preview) は版として読まない。
+#     ほかの版の形でないディレクトリは exit 1。Preview のディレクトリしか無ければ、パッケージが無いとして exit 1
+#   - 版は数として比べる (0.10.0 は 0.9.5 より新しい)
+#   - 出た日は、tag の v の後ろが版と同じ安定版の release が出た日。合う release が無い新しい版は待たずに exit 1
+#   - GitHub と比べるのは安定版 (tag が vX.Y.Z で prerelease でない release) だけ。preview の build と、winget の
+#     最新より古い安定版は数えない。winget の最新より新しい安定版が 30 日たっても載らなければ exit 1
+#   - GitHub の最新は、安定版の版を v の付かない形で出す (GitHub の最新 : 0.9.5 (v0.9.5、…)。claude-skills の
+#     pjp-dep-update がこの鍵を winget の版と突き合わせる)
+#   - 最新の安定版の tag が vX.Y.Z の形でない・取った release に安定版が無い、は猶予を置かずに exit 1
+#   - 見送りの一覧の版も X.Y.Z の形で読む (前の preview の形・<日付>-<hash> だけの行は exit 2)
+#   - GitHub Actions の ::error の行の題は Windows の herdr
 #
 #   Google 日本語入力 (出た日は winget-pkgs に載った日):
 #   - winget-pkgs の manifests/g/Google/JapaneseIME を見る (.validation のファイルは版として数えない)。
@@ -139,7 +139,7 @@ pkg=openssh
 manifest_dir_of() {
   case $1 in
     openssh) echo manifests/m/Microsoft/OpenSSH/Preview ;;
-    herdr) echo manifests/h/Herdr/Herdr/Preview ;;
+    herdr) echo manifests/h/Herdr/Herdr ;;
     google-japanese-input) echo manifests/g/Google/JapaneseIME ;;
   esac
 }
@@ -229,7 +229,8 @@ releases_json() {
 
 # herdrdev/herdr の releases (新しい順)。引数は「tag|公開日時」。tag が preview- で始まるものは preview の
 # build で、GitHub では prerelease (3 つめに |pre を足すと、ほかの tag でも prerelease にする)。安定版 (v0.9.5
-# など) は prerelease ではない。どちらにも Windows の zip が付く (本物は v0.8.2 から)
+# など) は prerelease ではない。どちらにも Windows の zip が付く (本物は v0.8.2 から)。winget の Herdr.Herdr に
+# 載るのは安定版、Herdr.Herdr.Preview に載るのは preview の build
 herdr_releases_json() {
   local e tag at pre
   for e in "$@"; do
@@ -346,10 +347,11 @@ write_openssh_ps1() {
   } >"$1"
 }
 
-# Install-Herdr.ps1 の形 ($packageId より前に、引数に $PackageId を取る関数がある)。引数は write_openssh_ps1 と同じ
+# Install-Herdr.ps1 の形 ($packageId より前に、引数に $PackageId を取る関数がある。$packageId の後ろに、前の
+# パッケージの $previewId もある)。引数は write_openssh_ps1 と同じ
 write_herdr_ps1() {
   {
-    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の herdr (winget の Herdr.Herdr.Preview) を、決めた版に揃える。\n#>\n'
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の herdr (winget の Herdr.Herdr) を、決めた版に揃える。\n#>\n'
     printf '[CmdletBinding()]\nparam(\n'
     if [[ -n $2 ]]; then
       printf "    [string]\$Version = '%s',\n" "$2"
@@ -364,7 +366,9 @@ write_herdr_ps1() {
       printf "    \$packageId = '%s'\n" "$3"
     fi
     # shellcheck disable=SC2016
-    printf '    $packageDir = Join-Path $env:LOCALAPPDATA '"'"'Microsoft\\WinGet\\Packages\\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'"'"'\n}\n'
+    printf '    $packageDir = Join-Path $env:LOCALAPPDATA '"'"'Microsoft\\WinGet\\Packages\\Herdr.Herdr_Microsoft.Winget.Source_8wekyb3d8bbwe'"'"'\n'
+    # shellcheck disable=SC2016
+    printf "    \$previewId = 'Herdr.Herdr.Preview'\n}\n"
   } >"$1"
 }
 
@@ -397,7 +401,7 @@ new_case() {
   printf '%s\n' "${pkg}" >"${d}/pkg"
   case ${pkg} in
     openssh) write_openssh_ps1 "${d}/Install-OpenSSH.ps1" "$2" "${id:-Microsoft.OpenSSH.Preview}" ;;
-    herdr) write_herdr_ps1 "${d}/Install-Herdr.ps1" "$2" "${id:-Herdr.Herdr.Preview}" ;;
+    herdr) write_herdr_ps1 "${d}/Install-Herdr.ps1" "$2" "${id:-Herdr.Herdr}" ;;
     google-japanese-input) write_gime_ps1 "${d}/Install-GoogleJapaneseInput.ps1" "$2" "${id:-Google.JapaneseIME}" ;;
   esac
   if [[ $3 != - ]]; then
@@ -866,77 +870,62 @@ done
 echo "-- herdr"
 pkg=herdr
 
-# 今の winget-pkgs と GitHub (2026-10-16)。winget の版は文字列の順で返る。GitHub には winget に無い安定版
-# (v0.9.x) と、winget に載らなかった preview (2026-09-21-0ff0f27e2226) もあり、並びは出た順とは限らない
-h_pin=0.9.2-preview.2026-09-29-8e78f929d8f0
-h_latest=0.9.4-preview.2026-10-14-fbd2ae23927f
-herdr_winget_now=$(contents_json 0.9.1-preview.2026-09-28-80c0c07250d2 0.9.1-preview.2026-09-29-9dc3a1df2b56 \
-  "${h_pin}" 0.9.3-preview.2026-10-12-6d697e1e75ff "${h_latest}")
+# 今の winget-pkgs と GitHub (2026-11-09)。winget-pkgs の manifests/h/Herdr/Herdr には、版 (0.9.5) と並んで
+# 別のパッケージ Herdr.Herdr.Preview のディレクトリ (Preview) がある。GitHub には安定版 (vX.Y.Z) と preview の
+# build (preview-<日付>-<hash>。prerelease) が混ざって並ぶ。安定版で winget にあるのは 0.9.5 だけ
+h_pin=0.9.5
+herdr_winget_now=$(contents_json "${h_pin}" Preview)
 h_rel_now=(
   'v0.9.5|2026-10-14T16:07:28Z'
   'preview-2026-10-14-fbd2ae23927f|2026-10-14T15:43:51Z'
   'v0.9.4|2026-10-13T15:41:22Z'
   'preview-2026-10-12-6d697e1e75ff|2026-10-12T13:48:36Z'
   'v0.9.3|2026-09-29T19:29:23Z'
-  'v0.9.2|2026-09-29T13:19:42Z'
-  'preview-2026-09-29-9dc3a1df2b56|2026-09-29T12:12:58Z'
-  'preview-2026-09-29-8e78f929d8f0|2026-09-29T18:54:39Z'
-  'preview-2026-09-28-80c0c07250d2|2026-09-28T13:48:10Z'
-  'preview-2026-09-21-0ff0f27e2226|2026-09-20T21:50:59Z'
 )
 herdr_releases_now=$(herdr_releases_json "${h_rel_now[@]}")
-# 版の中の日付 (2020-01-01) と GitHub に出た日をわざと離した、固定した版より新しい preview。出た日を
-# 版の中の日付から取ると、何年も前に出たことになってすぐ落ちる
-h_next=0.9.3-preview.2020-01-01-6d697e1e75ff
-h_next_tag=preview-2020-01-01-6d697e1e75ff
-herdr_winget_next=$(contents_json "${h_pin}" "${h_next}")
-# 固定した版の preview。鍵 (2026-09-29-…) は h_next の鍵 (2020-01-01-…) より新しく並ぶが、winget に
-# あるので、GitHub と比べるときに winget に無い版として数えてはいけない。数えてしまうと猶予を過ぎて
-# 落ちるよう、40 日前に出たことにする
-h_pin_rel="preview-2026-09-29-8e78f929d8f0|$(ago 40)"
-# winget の最新 (h_latest) の preview が 40 日前に出たことにした並び。GitHub にだけある preview は、それより
-# 後 (31 日前・10 日前) に出たことにする (GitHub と比べるとき、winget の最新より後に出たかで決めるため。
-# 実際の公開日時と混ぜると、日がたつと前後が変わる)
-h_rel_aged=("preview-2026-10-14-fbd2ae23927f|$(ago 40)" "v0.9.5|$(ago 39)")
+# 固定した版より新しい安定版 0.9.6 が winget に載った後。出た日は、テストごとに v0.9.6 の release の日時で決める
+herdr_winget_next=$(contents_json "${h_pin}" 0.9.6 Preview)
+# 固定した版 (winget の最新) の release を 40 日前に出たことにした 1 件。GitHub にだけある版は、それより後に出たことにする
+h_pin_rel="v0.9.5|$(ago 40)"
 
-# h1. 固定した版が winget の最新: exit 0。Install-Herdr.ps1 の形 ($packageId は関数の中) から読み、
-#     manifests/h/Herdr/Herdr/Preview と herdrdev/herdr の release を見る。winget に無い安定版 (v0.9.5 は
-#     いちばん新しい preview より後に出た) と、winget に載らなかった古い preview は数えない
-d=$(new_case h1 "${h_latest}" -)
-FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" -F '0ff0f27e2226' \
-  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/h/Herdr/Herdr/Preview' \
+# h1. 固定した版が winget の最新: exit 0。Install-Herdr.ps1 の形 ($packageId は関数の中で、後ろに $previewId もある)
+#     から読み、manifests/h/Herdr/Herdr と herdrdev/herdr の release を見る。Preview のディレクトリは版として読まず、
+#     preview の build と、winget に無い古い安定版 (v0.9.4) は数えない
+d=$(new_case h1 "${h_pin}" -)
+FAKE_GH_CONTENTS="${herdr_winget_now}" \
+  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-11-01-0123456789ab|$(ago 8)" "${h_rel_now[@]}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" -F '版の形でない' && ! seen "${d}" -F '0123456789ab' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/h/Herdr/Herdr' \
   && called "${d}" -F 'api repos/herdrdev/herdr/releases'; then
-  ok "herdr: 固定した版が最新なら exit 0 (安定版と、winget の最新より古い preview は数えない)"
+  ok "herdr: 固定した版が最新なら exit 0 (Preview のディレクトリ・preview の build・winget に無い古い安定版は数えない)"
 else
   ng "herdr: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
-# 固定した版より古い winget の版は並べず、数だけを出す (preview は週に何度も増える)
-if seen_out "${d}" -F 'ほかに古い版が 4 個' && ! seen_out "${d}" -F '0.9.1-preview'; then
-  ok "herdr: 固定した版より古い winget の版は並べず、数だけを出す"
+# GitHub の最新は、安定版の release の版 (tag の v を除いたもの) で出す。pjp-dep-update (claude-skills) の
+# winget.py が、この行の鍵を winget の版と突き合わせて出た日を読む
+if seen_out "${d}" -E '^  GitHub の最新 : 0\.9\.5 \(v0\.9\.5、出て [0-9]+ 日\)$'; then
+  ok "herdr: GitHub の最新は、安定版の release の版を v の付かない形で出す (GitHub の最新 : 0.9.5 (v0.9.5、…))"
 else
-  ng "herdr: 古い版の出し方" "$(outerr "${d}")"
+  ng "herdr: GitHub の最新の行" "$(outerr "${d}")"
 fi
 
-# h2. 固定した版より新しい版が winget にあり、その preview が GitHub に出て 10 日: exit 0 で待つ。
-#     出た日は、版の -preview. の後ろと tag の preview- の後ろが同じ release から取る
+# h2. 固定した版より新しい安定版が winget にあり、GitHub に出て 10 日: exit 0 で待つ。出た日は tag の v の後ろが
+#     同じ release から取る
 at10=$(ago 10)
 d=$(new_case h2 "${h_pin}" -)
-FAKE_GH_CONTENTS="${herdr_winget_next}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "${h_next_tag}|${at10}" "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' \
-  && seen "${d}" "0\\.9\\.3-preview\\.2020-01-01-6d697e1e75ff.*${at10:0:10}.*あと 20 日"; then
-  ok "herdr: 新しい版の出た日は tag の合う preview の release から取り、10 日なら exit 0 で待つ"
+FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|${at10}" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" "0\\.9\\.6.*${at10:0:10}.*あと 20 日" \
+  && seen_out "${d}" -E '^  GitHub の最新 : 0\.9\.6 \(v0\.9\.6、出て 10 日\)$'; then
+  ok "herdr: 新しい版の出た日は tag の合う安定版の release から取り、10 日なら exit 0 で待つ"
 else
   ng "herdr: 猶予の中" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # h3. 同じ版が GitHub に出て 31 日: exit 1。版・release notes の URL・見送りの一覧の場所を出す
 d=$(new_case h3 "${h_pin}" -)
-FAKE_GH_CONTENTS="${herdr_winget_next}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "${h_next_tag}|$(ago 31)" "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*0\.9\.3-preview\.2020-01-01-6d697e1e75ff' \
-  && seen "${d}" -F "https://github.com/herdrdev/herdr/releases/tag/${h_next_tag}" \
+FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|$(ago 31)" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '^⚠ 固定した版 0\.9\.5 より新しい版が winget にある: 0\.9\.6 (' \
+  && seen "${d}" -F 'https://github.com/herdrdev/herdr/releases/tag/v0.9.6' \
   && seen "${d}" -F 'skipped-versions.txt'; then
   ok "herdr: 新しい版が GitHub に出て 31 日なら exit 1 で、release notes の URL と見送りの一覧の場所を出す"
 else
@@ -946,194 +935,149 @@ fi
 # h3b. GitHub Actions の中では、::error の行の題を Windows の herdr にする (どのパッケージで落ちたかが分かる)
 d=$(new_case h3b "${h_pin}" -)
 GITHUB_ACTIONS_FOR_TEST=true FAKE_GH_CONTENTS="${herdr_winget_next}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "${h_next_tag}|$(ago 31)" "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen_out "${d}" '^::error title=Windows の herdr::.*0\.9\.3-preview'; then
+  FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|$(ago 31)" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen_out "${d}" '^::error title=Windows の herdr::.*0\.9\.6'; then
   ok "herdr: GitHub Actions の中では、::error の行の題を Windows の herdr にする"
 else
   ng "herdr: ::error の題" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h4. 版は数として比べる: 0.10.0-preview… は 0.9.4-preview… より新しい (文字列の順では前に来る)
-d=$(new_case h4 "${h_latest}" -)
-releases=$(herdr_releases_json "preview-2026-11-02-0123456789ab|$(ago 31)" 'preview-2026-10-14-fbd2ae23927f|2026-10-14T15:43:51Z')
-FAKE_GH_CONTENTS=$(contents_json 0.10.0-preview.2026-11-02-0123456789ab "${h_latest}") FAKE_GH_RELEASES="${releases}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*0\.10\.0-preview\.2026-11-02-0123456789ab'; then
-  ok "herdr: 版は数として比べる (0.10.0-preview… は 0.9.4-preview… より新しい)"
+# h4. 版は数として比べる: 0.10.0 は 0.9.5 より新しい (文字列の順では前に来る)
+d=$(new_case h4 "${h_pin}" -)
+contents=$(contents_json 0.10.0 "${h_pin}" Preview)
+releases=$(herdr_releases_json "v0.10.0|$(ago 31)" "${h_pin_rel}")
+FAKE_GH_CONTENTS="${contents}" FAKE_GH_RELEASES="${releases}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*0\.10\.0'; then
+  ok "herdr: 版は数として比べる (0.10.0 は 0.9.5 より新しい)"
 else
   ng "herdr: 版の比べ方" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h5. winget の最新より新しい preview が GitHub にあって winget に無い: 31 日なら exit 1 (パッケージ ID の
+# h5. winget の最新より新しい安定版が GitHub にあって winget に無い: 31 日なら exit 1 (パッケージ ID の
 #     移動などを捕まえる)、10 日ならまだ待つ
-d=$(new_case h5 "${h_latest}" -)
-FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-10-20-0123456789ab|$(ago 31)" "${h_rel_aged[@]}") run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*2026-10-20-0123456789ab.*Herdr\.Herdr\.Preview'; then
-  ok "herdr: winget の最新より新しい preview が GitHub に出て 31 日たっても winget に無ければ exit 1"
+d=$(new_case h5 "${h_pin}" -)
+FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|$(ago 31)" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '^⚠ GitHub の 0\.9\.6 が winget の Herdr\.Herdr に無い' \
+  && seen "${d}" -F 'winget search herdr'; then
+  ok "herdr: winget の最新より新しい安定版が GitHub に出て 31 日たっても winget に無ければ exit 1"
 else
-  ng "herdr: GitHub にだけある preview (31 日)" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: GitHub にだけある安定版 (31 日)" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
-d=$(new_case h5b "${h_latest}" -)
-FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-10-20-0123456789ab|${at10}" "${h_rel_aged[@]}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '2026-10-20-0123456789ab.*あと 20 日'; then
-  ok "herdr: GitHub にだけある preview も、出て 10 日なら exit 0 で待つ"
+d=$(new_case h5b "${h_pin}" -)
+FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|${at10}" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" '0\.9\.6.*Herdr\.Herdr にまだ無い.*あと 20 日'; then
+  ok "herdr: GitHub にだけある安定版も、出て 10 日なら exit 0 で待つ"
 else
-  ng "herdr: GitHub にだけある preview (10 日)" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: GitHub にだけある安定版 (10 日)" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
-# h5c. 見送りの一覧の版は、-preview. の後ろで GitHub の preview と照らす (winget に無い preview も、
-#      その後ろが同じ版を書けば落とさない)
-d=$(new_case h5c "${h_latest}" '0.9.5-preview.2026-10-20-0123456789ab winget に載らなかった build')
-FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-10-20-0123456789ab|$(ago 31)" "${h_rel_aged[@]}") run "${d}" 0
+
+# h5c. 見送った安定版は、GitHub にあって winget に無くても落とさない
+d=$(new_case h5c "${h_pin}" '0.9.6 Windows で pane が開かない')
+FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|$(ago 31)" "${h_pin_rel}") run "${d}" 0
 if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠'; then
-  ok "herdr: 見送りの一覧の版は -preview. の後ろで GitHub の preview と照らす"
+  ok "herdr: 見送った安定版は、GitHub にあって winget に無くても落とさない"
 else
-  ng "herdr: GitHub にだけある preview を見送った" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: GitHub にだけある安定版を見送った" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h5d. 同じ日の build の前後は、hash の並びではなく出た時刻で決める。winget の最新より 6 時間早く出て、
-#      winget に載らなかった build (hash は ffff… で、鍵の並びでは後ろに来る) は数えない
-d=$(new_case h5d 0.9.4-preview.2026-10-14-1111111111aa -)
-releases=$(herdr_releases_json "preview-2026-10-14-1111111111aa|$(ago 40)" "preview-2026-10-14-ffffffffffff|$(ago_earlier 40)")
-FAKE_GH_CONTENTS=$(contents_json 0.9.4-preview.2026-10-14-1111111111aa) FAKE_GH_RELEASES="${releases}" run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" -F 'ffffffffffff'; then
-  ok "herdr: winget の最新より前に出た同じ日の build は、hash の並びにかかわらず数えない"
-else
-  ng "herdr: 同じ日の前の build" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h5e. 逆に、winget の最新より 6 時間後に出て winget に無い build は、hash の並びが前でも数える
-d=$(new_case h5e 0.9.4-preview.2026-10-14-ffffffffffff -)
-releases=$(herdr_releases_json "preview-2026-10-14-1111111111aa|$(ago 40)" "preview-2026-10-14-ffffffffffff|$(ago_earlier 40)")
-FAKE_GH_CONTENTS=$(contents_json 0.9.4-preview.2026-10-14-ffffffffffff) FAKE_GH_RELEASES="${releases}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*2026-10-14-1111111111aa'; then
-  ok "herdr: winget の最新より後に出た同じ日の build は、hash の並びが前でも数える"
-else
-  ng "herdr: 同じ日の後の build" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h5i. winget の最新に合う release が GitHub に無いときは、鍵 (<日付>-<hash>) の並びで比べる: winget に無い
-#      新しい鍵の preview が 31 日たったら exit 1
-d=$(new_case h5i "${h_pin}" -)
-releases=$(herdr_releases_json "preview-2026-10-20-0123456789ab|$(ago 31)")
-FAKE_GH_CONTENTS=$(contents_json "${h_pin}") FAKE_GH_RELEASES="${releases}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*2026-10-20-0123456789ab.*Herdr\.Herdr\.Preview'; then
-  ok "herdr: winget の最新に合う release が無ければ鍵で比べ、winget に無い新しい preview は 31 日で exit 1"
-else
-  ng "herdr: 鍵で比べる (知らせる)" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h5j. 鍵で比べるときも、winget にある preview は数えない (鍵 2026-09-29-… は、winget の最新の鍵 2020-01-01-…
-#      より新しく並ぶ)
-d=$(new_case h5j "${h_next}" -)
-FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES=$(herdr_releases_json "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠'; then
-  ok "herdr: 鍵で比べるときも、winget にある preview は数えない"
-else
-  ng "herdr: 鍵で比べる (winget にある)" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h5f. winget に無い preview は、見送りの一覧に -preview. の後ろ (<日付>-<hash>) だけを書いても見送れる
-d=$(new_case h5f "${h_latest}" '2026-10-20-0123456789ab winget に載らなかった build')
+# h5d. preview の build (prerelease) は、winget の Herdr.Herdr に載らないので、40 日たっても数えない
+d=$(new_case h5d "${h_pin}" -)
 FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-10-20-0123456789ab|$(ago 31)" "${h_rel_aged[@]}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" '消して'; then
-  ok "herdr: 見送りの一覧には <日付>-<hash> だけの行も書ける"
+  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-11-01-0123456789ab|$(ago 35)" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" -F '0123456789ab'; then
+  ok "herdr: preview の build は、GitHub に出て 35 日たっても数えない"
 else
-  ng "herdr: <日付>-<hash> だけの見送り" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: preview の build を数えた" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h5g. winget の版の形で書いた見送りも、<日付>-<hash> の行も、固定した版より古いかは <日付>-<hash> で決める。
-#      semver の所を小さく書いた新しい build を「消してよい」と言わず、固定した版より前の build には言う
-d=$(new_case h5g "${h_latest}" $'0.0.1-preview.2026-10-20-0123456789ab winget に載らなかった build\n2026-09-01-0123456789ab 前に見送った build')
+# h6. いちばん新しい安定版 (prerelease でない release) の tag が vX.Y.Z の形でない: 猶予を置かずに exit 1
+d=$(new_case h6 "${h_pin}" -)
 FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "preview-2026-10-20-0123456789ab|$(ago 31)" "${h_rel_aged[@]}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && ! seen "${d}" '2026-10-20-0123456789ab.*消して' \
-  && seen "${d}" '2026-09-01-0123456789ab.*消して'; then
-  ok "herdr: 見送りの一覧の行が固定した版より古いかは、<日付>-<hash> で決める"
-else
-  ng "herdr: 消してよいの判定" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h5h. winget にある新しい版も、<日付>-<hash> だけの行で見送れる
-d=$(new_case h5h "${h_pin}" '2020-01-01-6d697e1e75ff Windows で pane が開かない')
-FAKE_GH_CONTENTS="${herdr_winget_next}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "${h_next_tag}|$(ago 40)" "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows で pane が開かない'; then
-  ok "herdr: winget にある新しい版も、<日付>-<hash> だけの行で見送れる"
-else
-  ng "herdr: winget にある版を <日付>-<hash> で見送る" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
-
-# h6. いちばん新しい preview (prerelease) の tag が preview-<日付>-<hash> の形でない: 猶予を置かずに exit 1
-d=$(new_case h6 "${h_latest}" -)
-FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "nightly-2026-10-15|$(ago 1)|pre" "${h_rel_now[@]}") run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*nightly-2026-10-15'; then
-  ok "herdr: いちばん新しい preview の tag が preview-<日付>-<hash> の形でなければ exit 1"
+  FAKE_GH_RELEASES=$(herdr_releases_json "herdr-1.0.0|$(ago 1)" "${h_rel_now[@]}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ GitHub の最新 release herdr-1\.0\.0 の tag が v<X\.Y\.Z> の形でない'; then
+  ok "herdr: いちばん新しい安定版の tag が vX.Y.Z の形でなければ exit 1"
 else
   ng "herdr: tag の形" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h7. herdr の版の形でないディレクトリ (安定版の形の 0.9.5) がある: exit 1
-d=$(new_case h7 "${h_latest}" -)
-contents=$(contents_json 0.9.1-preview.2026-09-28-80c0c07250d2 0.9.5 "${h_latest}")
-FAKE_GH_CONTENTS="${contents}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*版の形でない.*0\.9\.5'; then
-  ok "herdr: herdr の版の形でないディレクトリ (0.9.5) があれば exit 1"
+# h7. herdr の版の形でないディレクトリ (0.9.6-rc1) がある: exit 1。Preview のディレクトリは出さない
+d=$(new_case h7 "${h_pin}" -)
+FAKE_GH_CONTENTS=$(contents_json "${h_pin}" 0.9.6-rc1 Preview) FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*版の形でない.*0\.9\.6-rc1' && ! seen "${d}" '版の形でない.*Preview'; then
+  ok "herdr: 版の形でないディレクトリ (0.9.6-rc1) があれば exit 1 (Preview のディレクトリは数えない)"
 else
   ng "herdr: 版の形でないディレクトリ" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
+# h7b. 版のディレクトリが無く、Preview のディレクトリだけが残っている: Herdr.Herdr が winget-pkgs に無いとして exit 1
+d=$(new_case h7b "${h_pin}" -)
+FAKE_GH_CONTENTS=$(contents_json Preview) FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '^⚠ Herdr\.Herdr が winget-pkgs に無い'; then
+  ok "herdr: Preview のディレクトリしか無ければ、Herdr.Herdr が winget-pkgs に無いとして exit 1"
+else
+  ng "herdr: Preview のディレクトリだけ" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
 # h8. 新しい版を見送った: exit 0 で、見送った理由を出す
-d=$(new_case h8 "${h_pin}" "${h_next} Windows で pane が開かない (TKT-999)")
-FAKE_GH_CONTENTS="${herdr_winget_next}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json "${h_next_tag}|$(ago 40)" "${h_pin_rel}") run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows で pane が開かない (TKT-999)'; then
+d=$(new_case h8 "${h_pin}" '0.9.6 Windows で pane が開かない (TKT-999)')
+FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES=$(herdr_releases_json "v0.9.6|$(ago 40)" "${h_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F '0.9.6 は見送った (Windows で pane が開かない (TKT-999))'; then
   ok "herdr: 新しい版が見送りの一覧にあれば exit 0 で、見送った理由を出す"
 else
   ng "herdr: 見送った" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h9. 見送りの一覧の版も herdr の版の形で読む (0.9.3 だけでは、どの preview かが決まらない): exit 2
-d=$(new_case h9 "${h_pin}" '0.9.3 Windows で pane が開かない')
-FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F 'skipped-versions.txt'; then
-  ok "herdr: 見送りの一覧の版が herdr の版の形でなければ exit 2"
-else
-  ng "herdr: 見送りの一覧の版の形" "rc=$(rc "${d}") $(outerr "${d}")"
-fi
+# h9. 見送りの一覧の版も herdr の版の形 (X.Y.Z) で読む。前の preview の形・<日付>-<hash> だけの行は exit 2
+i=0
+for line in '0.9.6-preview.2026-11-01-0123456789ab Windows で pane が開かない' '2026-11-01-0123456789ab winget に載らなかった build'; do
+  i=$((i + 1))
+  d=$(new_case "h9-${i}" "${h_pin}" "${line}")
+  FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
+  if [[ $(rc "${d}") == 2 ]] && seen "${d}" -F 'skipped-versions.txt' && seen "${d}" -F '例: 0.9.5'; then
+    ok "herdr: 見送りの一覧の版が X.Y.Z の形でなければ exit 2 (${line%% *})"
+  else
+    ng "herdr: 見送りの一覧の版の形 (${line%% *})" "rc=$(rc "${d}") $(outerr "${d}")"
+  fi
+done
 
-# h10. 固定した版が herdr の版の形でない (安定版の形の 0.9.5): gh を呼ばずに exit 2
-d=$(new_case h10 0.9.5 -)
+# h10. 固定した版が herdr の版の形でない (前の preview の形): gh を呼ばずに exit 2
+d=$(new_case h10 0.9.4-preview.2026-10-14-fbd2ae23927f -)
 FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
-if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}" && seen "${d}" -F '0.9.5'; then
-  ok "herdr: 固定した版が herdr の版の形でなければ、gh を呼ばずに exit 2"
+if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}" && seen "${d}" -F '0.9.4-preview.2026-10-14-fbd2ae23927f'; then
+  ok "herdr: 固定した版が herdr の版の形 (X.Y.Z) でなければ、gh を呼ばずに exit 2"
 else
   ng "herdr: 固定した版の形" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-# h11. 取った release に preview が 1 つも無い (preview の出し方が変わった・止まった): 応答が読めないのでは
-#      なく、付け方が変わったという知らせなので、猶予を置かずに exit 1
-d=$(new_case h11 "${h_latest}" -)
-FAKE_GH_CONTENTS="${herdr_winget_now}" \
-  FAKE_GH_RELEASES=$(herdr_releases_json 'v0.9.5|2026-10-14T16:07:28Z' 'v0.9.4|2026-10-13T15:41:22Z') run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*preview が無い' && ! seen "${d}" -F '一覧ではない'; then
-  ok "herdr: 取った release に preview が無ければ、一覧が読めないとは言わずに exit 1"
+# h11. 取った release に安定版が 1 つも無い (出し方が変わった・止まった): 応答が読めないのではなく、付け方が
+#      変わったという知らせなので、猶予を置かずに exit 1
+d=$(new_case h11 "${h_pin}" -)
+FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES=$(herdr_releases_json \
+  'preview-2026-10-14-fbd2ae23927f|2026-10-14T15:43:51Z' 'preview-2026-10-12-6d697e1e75ff|2026-10-12T13:48:36Z') run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*安定版 (prerelease でない release) が無い' && ! seen "${d}" -F '一覧ではない'; then
+  ok "herdr: 取った release に安定版が無ければ、一覧が読めないとは言わずに exit 1"
 else
-  ng "herdr: preview が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: 安定版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# h12. winget にある新しい版に合う preview が GitHub に無い: 出た日が分からないので待たずに exit 1 で、
+# h12. winget にある新しい版に合う安定版が GitHub に無い: 出た日が分からないので待たずに exit 1 で、
 #      release の一覧の URL を代わりに出す
 d=$(new_case h12 "${h_pin}" -)
 FAKE_GH_CONTENTS="${herdr_winget_next}" FAKE_GH_RELEASES=$(herdr_releases_json "${h_pin_rel}") run "${d}" 0
 if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠.*出た日が分からない' \
-  && seen "${d}" '0\.9\.3-preview\.2020-01-01-6d697e1e75ff.*https://github\.com/herdrdev/herdr/releases$'; then
-  ok "herdr: 新しい版に合う preview が GitHub に無ければ、待たずに exit 1 で release の一覧の URL を出す"
+  && seen "${d}" '0\.9\.6 の release notes: https://github\.com/herdrdev/herdr/releases$'; then
+  ok "herdr: 新しい版に合う安定版が GitHub に無ければ、待たずに exit 1 で release の一覧の URL を出す"
 else
-  ng "herdr: 合う preview が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "herdr: 合う安定版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# h13. 固定した版以下の見送りが残っている: 落とさず、消してよいと出す
+d=$(new_case h13 "${h_pin}" '0.9.4 試した時期の Windows Terminal と合わない')
+FAKE_GH_CONTENTS="${herdr_winget_now}" FAKE_GH_RELEASES="${herdr_releases_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" '0\.9\.4.*消して'; then
+  ok "herdr: 固定した版以下の見送りは落とさず、消してよいと出す"
+else
+  ng "herdr: 古い見送り" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 echo "-- google-japanese-input"
@@ -1260,7 +1204,7 @@ mkdir -p "${repo}/nix/scripts"
 cp "${script}" "${repo}/nix/scripts/check-winget-version.sh"
 for spec in \
   'openssh|win/openssh|10.0.0.0|10.1.0.0' \
-  "herdr|win/herdr|${h_latest}|0.9.5-preview.2026-10-20-0123456789ab" \
+  "herdr|win/herdr|${h_pin}|0.9.6" \
   'google-japanese-input|win/google-japanese-input|3.34.6260.0|3.35.6300.0'; do
   IFS='|' read -r pkg dir pinned newer <<<"${spec}"
   d=$(new_case "n3-${pkg}" "${pinned}" "${newer} 試したら設定が読めなかった")
@@ -1268,7 +1212,7 @@ for spec in \
   cp "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt" "${repo}/${dir}/"
   case ${pkg} in
     openssh) releases=${releases_now} ;;
-    herdr) releases=$(herdr_releases_json 'preview-2026-10-14-fbd2ae23927f|2026-10-14T15:43:51Z') ;;
+    herdr) releases=$(herdr_releases_json 'v0.9.5|2026-10-14T16:07:28Z') ;;
     *) releases='' ;;
   esac
   contents=$(contents_json "${pinned}" "${newer}")
