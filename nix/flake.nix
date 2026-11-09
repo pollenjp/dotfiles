@@ -139,8 +139,8 @@
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
         )
-        # 登録簿は型と sandbox だけ (実機は dotfiles-private。ADR 027) なので、WSL・1Password・windowsFiles・exeExecTrace・
-        # mtuGuard を入れた作り物のホストを build する (前は登録簿の実機が受け持っていた。ADR 012)。homeConfigurations には出さない
+        # 登録簿は型と sandbox だけ (実機は dotfiles-private。ADR 027) なので、WSL・1Password・windowsFiles (typeClipboard も)・
+        # exeExecTrace・mtuGuard を入れた作り物のホストを build する (前は登録簿の実機が受け持っていた。ADR 012)。homeConfigurations には出さない
         # (setup の一覧に出さない・--host で選ばせない)。macOS のランナーで x86_64-linux を build しないよう、
         # x86_64-linux の checks にだけ置く
         // lib.optionalAttrs (system == "x86_64-linux") {
@@ -152,6 +152,7 @@
                 enable = true;
                 windowsUserName = "user";
                 windowsFiles.enable = true;
+                windowsFiles.typeClipboard.enable = true;
                 exeExecTrace.enable = true;
                 mtuGuard.enable = true;
               };
@@ -421,6 +422,7 @@
           bootstrap-windows-terminal-test = scriptTest "bootstrap-windows-terminal" ./scripts/bootstrap-windows-terminal.sh;
           bootstrap-windows-international-test = scriptTest "bootstrap-windows-international" ./scripts/bootstrap-windows-international.sh;
           bootstrap-windows-port-forward-test = scriptTest "bootstrap-windows-port-forward" ./scripts/bootstrap-windows-port-forward.sh;
+          bootstrap-windows-type-clipboard-test = scriptTest "bootstrap-windows-type-clipboard" ./scripts/bootstrap-windows-type-clipboard.sh;
           # repo の dotfiles.txt も渡し、警告なしに欄へ入ることを確かめる
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
             bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}
@@ -623,6 +625,14 @@
               ;
           };
           op-reason-state = import ./tests/op-reason.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          windows-files-state = import ./tests/windows-files.nix {
             inherit
               lib
               pkgs
