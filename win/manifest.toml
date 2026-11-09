@@ -31,6 +31,11 @@ dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
 hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
 
 [[files]]
+src = "herdr-app/Install-HerdrApp.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-HerdrApp.ps1"
+hint = "PowerShell で Install-HerdrApp -Check を打つと、herdr-app と herdr-core が入っているかが分かる (setup --update でも確かめ、app が入っていなければ入れる)。外すのは Install-HerdrApp -Uninstall"
+
+[[files]]
 src = "powertoys/keyboard-manager/default.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/default.json"
 hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager と自動起動をオンにして (オフなら PowerToys を起動し直す)、読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (Keyboard Manager がオンで PowerToys が動いていなければ、起動したときに読む。ただし PowerToys の設定画面を一度開いて settings.json ができるまでは読まれず、bootstrap-windows-powertoys.sh が案内する)"

@@ -45,6 +45,11 @@ function Install-OpenSSH { & "$HOME\.config\powershell\Install-OpenSSH.ps1" @arg
 # 入れ替えが要るときは、先に herdr の外の PowerShell で hsvstop を打つ (動いていると止まる)。
 function Install-Herdr { & "$HOME\.config\powershell\Install-Herdr.ps1" @args }
 
+# Windows の herdr-app (herdr の desktop app) と herdr-core を、公式の install.ps1 と同じ置き場所・手順で入れる。
+# 中身は同じ場所へ配る Install-HerdrApp.ps1 (win/README.md の「herdr-app」)。-Check なら入っているかを確かめるだけ。
+# 版は固定しない (app が自分で上げる)。-Uninstall で外す (設定は残す。app と core を止めてから打つ)。
+function Install-HerdrApp { & "$HOME\.config\powershell\Install-HerdrApp.ps1" @args }
+
 # Windows の Google 日本語入力 (winget の Google.JapaneseIME) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-GoogleJapaneseInput.ps1 (win/README.md の「Google 日本語入力を入れる」)。-Check なら確かめるだけ。
 # 入れる・上げるときは Windows に UAC の確認が出る。上げる前に、日本語入力を使っているアプリをできるだけ閉じる。
