@@ -10,24 +10,27 @@
 #
 # ## 確かめること
 #
-#   - PreToolUse の 5 件 (ガード / Bash の ssh-agent-notice / Bash の xref-guard / Write・Edit・MultiEdit・NotebookEdit の
-#     docs-guard / Bash の op-reason-guard)、PostToolUse の 6 件 (Bash + if / Write / Skill / Bash の ssh-agent-notice /
-#     Bash + if の pr-assignee-nudge / Bash の op-reason-guard)、PostToolUseFailure の 3 件 (Bash の ssh-agent-notice /
-#     Bash + if の pr-assignee-nudge / Bash の op-reason-guard) を登録する
+#   - PreToolUse の 7 件 (ガード / Bash の ssh-agent-notice / Bash の xref-guard / Write・Edit・MultiEdit・NotebookEdit の
+#     docs-guard / Bash の op-reason-guard / Bash と mcp__.*[Gg]ist.* の gist-guard)、PostToolUse の 6 件 (Bash + if / Write /
+#     Skill / Bash の ssh-agent-notice / Bash + if の pr-assignee-nudge / Bash の op-reason-guard)、PostToolUseFailure の 3 件
+#     (Bash の ssh-agent-notice / Bash + if の pr-assignee-nudge / Bash の op-reason-guard) を登録する
 #   - 2 回目は何も変えない (setup --update のたびに流れる)
 #   - 他の道具の hook (matcher Skill のものも) と settings.json の他のキーを残す
 #   - 古い形 (ガードだけ登録済み) には残りを足し、ガードは足さない
-#   - 6 つ前の形 (ガードと解説動画の 2 件が登録済み) には Skill の 1 件・ssh-agent-notice の 3 件・xref-guard の 1 件・
-#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す
-#   - 5 つ前の形 (ガード・解説動画の 2 件・Skill の 1 件が登録済み) には ssh-agent-notice の 3 件・xref-guard の 1 件・
-#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す
-#   - 4 つ前の形 (ssh-agent-notice の 3 件まで登録済み) には xref-guard の 1 件・docs-guard の 1 件・pr-assignee-nudge の
-#     2 件・op-reason-guard の 3 件だけを足す
-#   - 3 つ前の形 (xref-guard まで登録済み) には docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す
-#   - 2 つ前の形 (docs-guard まで登録済み) には pr-assignee-nudge の 2 件と op-reason-guard の 3 件だけを足す
-#   - 1 つ前の形 (pr-assignee-nudge まで登録済み) には op-reason-guard の 3 件だけを足す。前の形の登録は、どの形でも
-#     event ごとの先頭にそのまま残す
-#   - hook が配置されていない (op-reason-guard.sh だけが無いときも)・settings.json が壊れているときは
+#   - 7 つ前の形 (ガードと解説動画の 2 件が登録済み) には Skill の 1 件・ssh-agent-notice の 3 件・xref-guard の 1 件・
+#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す
+#   - 6 つ前の形 (ガード・解説動画の 2 件・Skill の 1 件が登録済み) には ssh-agent-notice の 3 件・xref-guard の 1 件・
+#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す
+#   - 5 つ前の形 (ssh-agent-notice の 3 件まで登録済み) には xref-guard の 1 件・docs-guard の 1 件・pr-assignee-nudge の
+#     2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す
+#   - 4 つ前の形 (xref-guard まで登録済み) には docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・
+#     gist-guard の 2 件だけを足す
+#   - 3 つ前の形 (docs-guard まで登録済み) には pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを
+#     足す
+#   - 2 つ前の形 (pr-assignee-nudge まで登録済み) には op-reason-guard の 3 件と gist-guard の 2 件だけを足す
+#   - 1 つ前の形 (op-reason-guard まで登録済み) には gist-guard の 2 件だけを足す。前の形の登録は、どの形でも event ごとの
+#     先頭にそのまま残す
+#   - hook が配置されていない (gist-guard.sh だけが無いときも)・settings.json が壊れているときは
 #     止まり、ファイルを変えない
 
 set -u -o pipefail
@@ -55,13 +58,13 @@ ng() {
 }
 
 # new_home <名前> <settings.json の中身 (空なら作らない)> <置く hook>
-#   置く hook: yes = 8 つとも / old = op-reason-guard.sh の無い 1 つ前の世代 / no = 置かない
+#   置く hook: yes = 9 つとも / old = gist-guard.sh の無い 1 つ前の世代 / no = 置かない
 new_home() {
   local h="${work}/$1" hooks=()
   mkdir -p "${h}/.claude/hooks"
   case $3 in
-    yes) hooks=(nix-managed-guard.sh video-offer-nudge.sh run-through-nudge.sh ssh-agent-notice.sh xref-guard.sh docs-guard.sh pr-assignee-nudge.sh op-reason-guard.sh) ;;
-    old) hooks=(nix-managed-guard.sh video-offer-nudge.sh run-through-nudge.sh ssh-agent-notice.sh xref-guard.sh docs-guard.sh pr-assignee-nudge.sh) ;;
+    yes) hooks=(nix-managed-guard.sh video-offer-nudge.sh run-through-nudge.sh ssh-agent-notice.sh xref-guard.sh docs-guard.sh pr-assignee-nudge.sh op-reason-guard.sh gist-guard.sh) ;;
+    old) hooks=(nix-managed-guard.sh video-offer-nudge.sh run-through-nudge.sh ssh-agent-notice.sh xref-guard.sh docs-guard.sh pr-assignee-nudge.sh op-reason-guard.sh) ;;
   esac
   for f in "${hooks[@]}"; do
     printf '#!/bin/sh\n' >"${h}/.claude/hooks/${f}"
@@ -114,6 +117,15 @@ op_registered() {
     [[ $(jq --arg ev "${ev}" --arg c "$2" '[.hooks[$ev] // [] | .[] | select(.matcher == "Bash") | .hooks[] | select(.command == $c and (has("if") | not))] | length' "$1") == 1 ]] || return 1
   done
 }
+# gist_registered <settings.json> <gist-guard.sh のパス>: gist-guard の 2 件 (PreToolUse の Bash と mcp__.*[Gg]ist.*・
+# if なし) だけがあるか
+gist_registered() {
+  local m
+  [[ $(jq --arg c "$2" '[.hooks[] | .[] | .hooks[] | select(.command == $c)] | length' "$1") == 2 ]] || return 1
+  for m in Bash 'mcp__.*[Gg]ist.*'; do
+    [[ $(jq --arg m "${m}" --arg c "$2" '[.hooks.PreToolUse // [] | .[] | select(.matcher == $m) | .hooks[] | select(.command == $c and (has("if") | not))] | length' "$1") == 1 ]] || return 1
+  done
+}
 # kept <settings.json> <前の settings.json>: 前の形の登録が、event ごとの先頭にそのまま残っているか
 kept() {
   jq -e --slurpfile before "$2" '
@@ -122,7 +134,7 @@ kept() {
   ' "$1" >/dev/null
 }
 
-# 1. 空の settings.json → 14 件登録 (PreToolUse の 5 件・PostToolUse の 6 件・PostToolUseFailure の 3 件)
+# 1. 空の settings.json → 16 件登録 (PreToolUse の 7 件・PostToolUse の 6 件・PostToolUseFailure の 3 件)
 h=$(new_home t1 '{}' yes)
 run "${h}"
 nudge="${h}/.claude/hooks/video-offer-nudge.sh"
@@ -138,10 +150,11 @@ if [[ $(cat "${h}/rc") == 0 ]] \
   && docs_registered "${h}/.claude/settings.json" "${h}/.claude/hooks/docs-guard.sh" \
   && assignee_registered "${h}/.claude/settings.json" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
   && op_registered "${h}/.claude/settings.json" "${h}/.claude/hooks/op-reason-guard.sh" \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${h}/.claude/settings.json") == 14 ]]; then
-  ok "空の settings.json に、PreToolUse の 5 件・PostToolUse の 6 件・PostToolUseFailure の 3 件を登録する"
+  && gist_registered "${h}/.claude/settings.json" "${h}/.claude/hooks/gist-guard.sh" \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${h}/.claude/settings.json") == 16 ]]; then
+  ok "空の settings.json に、PreToolUse の 7 件・PostToolUse の 6 件・PostToolUseFailure の 3 件を登録する"
 else
-  ng "空の settings.json に、PreToolUse の 5 件・PostToolUse の 6 件・PostToolUseFailure の 3 件を登録する" "rc=$(cat "${h}/rc") $(cat "${h}/.claude/settings.json" 2>/dev/null) $(cat "${h}/err")"
+  ng "空の settings.json に、PreToolUse の 7 件・PostToolUse の 6 件・PostToolUseFailure の 3 件を登録する" "rc=$(cat "${h}/rc") $(cat "${h}/.claude/settings.json" 2>/dev/null) $(cat "${h}/err")"
 fi
 
 # 2. 2 回目は何も変えない
@@ -175,7 +188,7 @@ jq -n --arg c "${h}/.claude/hooks/nix-managed-guard.sh" \
   >"${h}/.claude/settings.json"
 run "${h}"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '.hooks.PreToolUse | length' "${h}/.claude/settings.json") == 5 ]] \
+  && [[ $(jq '.hooks.PreToolUse | length' "${h}/.claude/settings.json") == 7 ]] \
   && [[ $(jq '.hooks.PostToolUse | length' "${h}/.claude/settings.json") == 6 ]] \
   && [[ $(jq '.hooks.PostToolUseFailure | length' "${h}/.claude/settings.json") == 3 ]]; then
   ok "ガードだけ登録済みなら残りを足し、ガードは足さない"
@@ -183,8 +196,8 @@ else
   ng "ガードだけ登録済みなら残りを足し、ガードは足さない" "$(cat "${h}/.claude/settings.json")"
 fi
 
-# 4b. ガードと解説動画の 2 件が登録済み (6 つ前の形) → Skill の 1 件・ssh-agent-notice の 3 件・xref-guard の 1 件・
-#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけ足す
+# 4b. ガードと解説動画の 2 件が登録済み (7 つ前の形) → Skill の 1 件・ssh-agent-notice の 3 件・xref-guard の 1 件・
+#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけ足す
 h=$(new_home t4b '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   '{hooks: {
@@ -197,7 +210,7 @@ jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/ho
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '.hooks.PreToolUse | length' "${s}") == 5 ]] \
+  && [[ $(jq '.hooks.PreToolUse | length' "${s}") == 7 ]] \
   && [[ $(jq '.hooks.PostToolUse | length' "${s}") == 6 ]] \
   && [[ $(jq '[.hooks.PostToolUse[] | select(.matcher == "Bash")] | length' "${s}") == 4 ]] \
   && [[ $(jq '[.hooks.PostToolUse[] | select(.matcher == "Write")] | length' "${s}") == 1 ]] \
@@ -206,14 +219,15 @@ if [[ $(cat "${h}/rc") == 0 ]] \
   && xref_registered "${s}" "${h}/.claude/hooks/xref-guard.sh" \
   && docs_registered "${s}" "${h}/.claude/hooks/docs-guard.sh" \
   && assignee_registered "${s}" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
-  && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh"; then
-  ok "ガードと解説動画が登録済みなら Skill の 1 件・ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す"
+  && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh"; then
+  ok "ガードと解説動画が登録済みなら Skill の 1 件・ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す"
 else
-  ng "ガードと解説動画が登録済みなら Skill の 1 件・ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "ガードと解説動画が登録済みなら Skill の 1 件・ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
-# 4c. ガード・解説動画の 2 件・Skill の 1 件が登録済み (5 つ前の形) → ssh-agent-notice の 3 件・xref-guard の 1 件・
-#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけ足す
+# 4c. ガード・解説動画の 2 件・Skill の 1 件が登録済み (6 つ前の形) → ssh-agent-notice の 3 件・xref-guard の 1 件・
+#     docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけ足す
 h=$(new_home t4c '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   --arg r "${h}/.claude/hooks/run-through-nudge.sh" \
@@ -229,20 +243,21 @@ cp "${h}/.claude/settings.json" "${work}/t4c-before.json"
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 14 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
   && notice_registered "${s}" "${h}/.claude/hooks/ssh-agent-notice.sh" \
   && xref_registered "${s}" "${h}/.claude/hooks/xref-guard.sh" \
   && docs_registered "${s}" "${h}/.claude/hooks/docs-guard.sh" \
   && assignee_registered "${s}" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
   && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
   && kept "${s}" "${work}/t4c-before.json"; then
-  ok "ガード・解説動画・Skill が登録済みなら ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す"
+  ok "ガード・解説動画・Skill が登録済みなら ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す"
 else
-  ng "ガード・解説動画・Skill が登録済みなら ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "ガード・解説動画・Skill が登録済みなら ssh-agent-notice の 3 件・xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
-# 4d. ssh-agent-notice の 3 件まで登録済み (4 つ前の形) → xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・
-#     op-reason-guard の 3 件だけ足し、前の 7 件は変えない
+# 4d. ssh-agent-notice の 3 件まで登録済み (5 つ前の形) → xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・
+#     op-reason-guard の 3 件・gist-guard の 2 件だけ足し、前の 7 件は変えない
 h=$(new_home t4d '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   --arg r "${h}/.claude/hooks/run-through-nudge.sh" --arg a "${h}/.claude/hooks/ssh-agent-notice.sh" \
@@ -263,19 +278,20 @@ cp "${h}/.claude/settings.json" "${work}/t4d-before.json"
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 14 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
   && xref_registered "${s}" "${h}/.claude/hooks/xref-guard.sh" \
   && docs_registered "${s}" "${h}/.claude/hooks/docs-guard.sh" \
   && assignee_registered "${s}" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
   && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
   && kept "${s}" "${work}/t4d-before.json"; then
-  ok "ssh-agent-notice まで登録済みなら xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す"
+  ok "ssh-agent-notice まで登録済みなら xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す"
 else
-  ng "ssh-agent-notice まで登録済みなら xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "ssh-agent-notice まで登録済みなら xref-guard と docs-guard の 1 件ずつ・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
-# 4e. xref-guard まで登録済み (3 つ前の形) → docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけ足し、
-#     前の 8 件は変えない
+# 4e. xref-guard まで登録済み (4 つ前の形) → docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・
+#     gist-guard の 2 件だけ足し、前の 8 件は変えない
 h=$(new_home t4e '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   --arg r "${h}/.claude/hooks/run-through-nudge.sh" --arg a "${h}/.claude/hooks/ssh-agent-notice.sh" \
@@ -298,17 +314,19 @@ cp "${h}/.claude/settings.json" "${work}/t4e-before.json"
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 14 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
   && docs_registered "${s}" "${h}/.claude/hooks/docs-guard.sh" \
   && assignee_registered "${s}" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
   && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
   && kept "${s}" "${work}/t4e-before.json"; then
-  ok "xref-guard まで登録済みなら docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す"
+  ok "xref-guard まで登録済みなら docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す"
 else
-  ng "xref-guard まで登録済みなら docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "xref-guard まで登録済みなら docs-guard の 1 件・pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
-# 4f. docs-guard まで登録済み (2 つ前の形) → pr-assignee-nudge の 2 件と op-reason-guard の 3 件だけ足し、前の 9 件は変えない
+# 4f. docs-guard まで登録済み (3 つ前の形) → pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけ
+#     足し、前の 9 件は変えない
 h=$(new_home t4f '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   --arg r "${h}/.claude/hooks/run-through-nudge.sh" --arg a "${h}/.claude/hooks/ssh-agent-notice.sh" \
@@ -332,16 +350,18 @@ cp "${h}/.claude/settings.json" "${work}/t4f-before.json"
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 14 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
   && assignee_registered "${s}" "${h}/.claude/hooks/pr-assignee-nudge.sh" \
   && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
   && kept "${s}" "${work}/t4f-before.json"; then
-  ok "docs-guard まで登録済みなら pr-assignee-nudge の 2 件と op-reason-guard の 3 件だけを足す"
+  ok "docs-guard まで登録済みなら pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す"
 else
-  ng "docs-guard まで登録済みなら pr-assignee-nudge の 2 件と op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "docs-guard まで登録済みなら pr-assignee-nudge の 2 件・op-reason-guard の 3 件・gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
-# 4g. pr-assignee-nudge まで登録済み (1 つ前の形) → op-reason-guard の 3 件だけ足し、前の 11 件は変えない
+# 4g. pr-assignee-nudge まで登録済み (2 つ前の形) → op-reason-guard の 3 件と gist-guard の 2 件だけ足し、前の 11 件は
+#     変えない
 h=$(new_home t4g '' yes)
 jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
   --arg r "${h}/.claude/hooks/run-through-nudge.sh" --arg a "${h}/.claude/hooks/ssh-agent-notice.sh" \
@@ -370,12 +390,53 @@ cp "${h}/.claude/settings.json" "${work}/t4g-before.json"
 run "${h}"
 s="${h}/.claude/settings.json"
 if [[ $(cat "${h}/rc") == 0 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 14 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
   && op_registered "${s}" "${h}/.claude/hooks/op-reason-guard.sh" \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
   && kept "${s}" "${work}/t4g-before.json"; then
-  ok "pr-assignee-nudge まで登録済みなら op-reason-guard の 3 件だけを足す"
+  ok "pr-assignee-nudge まで登録済みなら op-reason-guard の 3 件と gist-guard の 2 件だけを足す"
 else
-  ng "pr-assignee-nudge まで登録済みなら op-reason-guard の 3 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+  ng "pr-assignee-nudge まで登録済みなら op-reason-guard の 3 件と gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
+fi
+
+# 4h. op-reason-guard まで登録済み (1 つ前の形) → gist-guard の 2 件だけ足し、前の 14 件は変えない
+h=$(new_home t4h '' yes)
+jq -n --arg g "${h}/.claude/hooks/nix-managed-guard.sh" --arg n "${h}/.claude/hooks/video-offer-nudge.sh" \
+  --arg r "${h}/.claude/hooks/run-through-nudge.sh" --arg a "${h}/.claude/hooks/ssh-agent-notice.sh" \
+  --arg x "${h}/.claude/hooks/xref-guard.sh" --arg d "${h}/.claude/hooks/docs-guard.sh" \
+  --arg p "${h}/.claude/hooks/pr-assignee-nudge.sh" --arg o "${h}/.claude/hooks/op-reason-guard.sh" \
+  '{hooks: {
+    PreToolUse: [
+      {matcher: "Edit|Write|NotebookEdit|Bash", hooks: [{type: "command", command: $g}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $a}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $x}]},
+      {matcher: "Write|Edit|MultiEdit|NotebookEdit", hooks: [{type: "command", command: $d}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $o}]}
+    ],
+    PostToolUse: [
+      {matcher: "Bash", hooks: [{type: "command", command: $n, "if": "Bash(gh pr create *)"}]},
+      {matcher: "Write", hooks: [{type: "command", command: $n}]},
+      {matcher: "Skill", hooks: [{type: "command", command: $r}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $a}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $p, "if": "Bash(gh pr create *)"}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $o}]}
+    ],
+    PostToolUseFailure: [
+      {matcher: "Bash", hooks: [{type: "command", command: $a}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $p, "if": "Bash(gh pr create *)"}]},
+      {matcher: "Bash", hooks: [{type: "command", command: $o}]}
+    ]
+  }}' >"${h}/.claude/settings.json"
+cp "${h}/.claude/settings.json" "${work}/t4h-before.json"
+run "${h}"
+s="${h}/.claude/settings.json"
+if [[ $(cat "${h}/rc") == 0 ]] \
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${s}") == 16 ]] \
+  && gist_registered "${s}" "${h}/.claude/hooks/gist-guard.sh" \
+  && kept "${s}" "${work}/t4h-before.json"; then
+  ok "op-reason-guard まで登録済みなら gist-guard の 2 件だけを足す"
+else
+  ng "op-reason-guard まで登録済みなら gist-guard の 2 件だけを足す" "rc=$(cat "${h}/rc") $(cat "${s}")"
 fi
 
 # 5. hook が配置されていない → 止まり、settings.json を変えない
@@ -387,14 +448,14 @@ else
   ng "hook が無ければ止まり、switch を促す" "rc=$(cat "${h}/rc") err=$(cat "${h}/err")"
 fi
 
-# 5b. op-reason-guard.sh だけが配置されていない (1 つ前の世代の switch) → 止まり、settings.json を変えない
+# 5b. gist-guard.sh だけが配置されていない (1 つ前の世代の switch) → 止まり、settings.json を変えない
 h=$(new_home t5b '{}' old)
 run "${h}"
 if [[ $(cat "${h}/rc") != 0 ]] && [[ $(cat "${h}/.claude/settings.json") == '{}' ]] \
-  && grep -q 'op-reason-guard.sh' "${h}/err" && grep -q 'home-manager switch' "${h}/err"; then
-  ok "op-reason-guard.sh だけが無くても止まり、switch を促す"
+  && grep -q 'gist-guard.sh' "${h}/err" && grep -q 'home-manager switch' "${h}/err"; then
+  ok "gist-guard.sh だけが無くても止まり、switch を促す"
 else
-  ng "op-reason-guard.sh だけが無くても止まり、switch を促す" "rc=$(cat "${h}/rc") err=$(cat "${h}/err")"
+  ng "gist-guard.sh だけが無くても止まり、switch を促す" "rc=$(cat "${h}/rc") err=$(cat "${h}/err")"
 fi
 
 # 6. settings.json が壊れている → 止まり、ファイルを変えない

@@ -487,6 +487,17 @@ in
       };
     }
 
+    # PreToolUse フック (matcher Bash と mcp__.*[Gg]ist.*)。gist やペースト共有のサービス (0x0.st・termbin など) へ上げる
+    # コマンドと、gist を作る・書き換える MCP の tool を、打つ前にいつも止める (ADR 047。確かめずに外へ上げると private な
+    # 中身も公開される)。通す口は作らず、上げたいときはユーザーが ! で自分で打つ。option は持たない (止めるサービスの
+    # 一覧は hook の中に持つ)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/gist-guard.sh" = {
+        source = claudeRoot + "/hooks/gist-guard.sh";
+        executable = true;
+      };
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
     #

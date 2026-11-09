@@ -366,6 +366,7 @@
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
           op-reason-guard-test = scriptTest "op-reason-guard" ./files/claude/hooks/op-reason-guard.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
+          gist-guard-test = scriptTest "gist-guard" ./files/claude/hooks/gist-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
           pjp-drawio-export-test = scriptTest "pjp-drawio-export" ./files/claude/skills/pjp-drawio/scripts/drawio-export.sh;
@@ -550,6 +551,14 @@
               ;
           };
           claude-xref-guard-state = import ./tests/claude-xref-guard.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-gist-guard-state = import ./tests/claude-gist-guard.nix {
             inherit
               lib
               pkgs
