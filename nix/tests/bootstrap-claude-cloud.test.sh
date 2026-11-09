@@ -29,8 +29,9 @@
 #   - --quiet は stdout に何も出さない
 #   - ~/.claude/CLAUDE.md が /nix/store を指す symlink (home-manager のマシン)・共通の CLAUDE.md に「## 」の行が無い・
 #     知らない引数のときは、何も書かずに 1 で終わる。--help は 0
-#   - xref-guard・run-through-nudge・video-offer-nudge・docs-guard を ~/.claude/hooks/ へ張り、settings.json に
-#     「bash <パス>」で 5 件登録する。nix-managed-guard・ssh-agent-notice は張らない
+#   - xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を ~/.claude/hooks/ へ張り、settings.json に
+#     「bash <パス>」で 7 件登録する (gist-guard は PreToolUse の Bash と mcp__.*[Gg]ist.* の 2 件)。nix-managed-guard・
+#     ssh-agent-notice は張らない
 #   - SessionStart に自分を --quiet と同じ option で 1 件だけ登録し、option を変えて流し直すと置き換える。手で足した hook と
 #     ほかのキーは残し、同じ option なら settings.json を書き直さない
 #   - settings.json が壊れていれば触らずに警告し、ほかは進めて 0 で終わる
@@ -380,7 +381,7 @@ hook_cmd() {
   printf 'bash %q' "$1/.claude/hooks/$2.sh"
 }
 
-# 13. 4 つの hook を張って登録し、SessionStart に自分を --quiet で登録する
+# 13. 5 つの hook を張って登録し、SessionStart に自分を --quiet で登録する
 h=$(case_home t13)
 run_case t13 --notion-profile personal
 settings="${h}/.claude/settings.json"
@@ -389,21 +390,24 @@ if [[ $(rc_of t13) == 0 ]] \
   && link_to "${h}/.claude/hooks/run-through-nudge.sh" "${dot_p}/nix/files/claude/hooks/run-through-nudge.sh" \
   && link_to "${h}/.claude/hooks/video-offer-nudge.sh" "${dot_p}/nix/files/claude/hooks/video-offer-nudge.sh" \
   && link_to "${h}/.claude/hooks/docs-guard.sh" "${dot_p}/nix/files/claude/hooks/docs-guard.sh" \
+  && link_to "${h}/.claude/hooks/gist-guard.sh" "${dot_p}/nix/files/claude/hooks/gist-guard.sh" \
   && [[ ! -e ${h}/.claude/hooks/nix-managed-guard.sh && ! -e ${h}/.claude/hooks/ssh-agent-notice.sh ]]; then
-  ok "xref-guard・run-through-nudge・video-offer-nudge・docs-guard を張り、nix-managed-guard・ssh-agent-notice は張らない"
+  ok "xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を張り、nix-managed-guard・ssh-agent-notice は張らない"
 else
-  ng "xref-guard・run-through-nudge・video-offer-nudge・docs-guard を張り、nix-managed-guard・ssh-agent-notice は張らない" "rc=$(rc_of t13) $(ls -la "${h}/.claude/hooks" 2>&1) $(err_of t13)"
+  ng "xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を張り、nix-managed-guard・ssh-agent-notice は張らない" "rc=$(rc_of t13) $(ls -la "${h}/.claude/hooks" 2>&1) $(err_of t13)"
 fi
 if [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" xref-guard)") == 1 ]] \
   && [[ $(hook_count "${settings}" PostToolUse Skill '' "$(hook_cmd "${h}" run-through-nudge)") == 1 ]] \
   && [[ $(hook_count "${settings}" PostToolUse Bash 'Bash(gh pr create *)' "$(hook_cmd "${h}" video-offer-nudge)") == 1 ]] \
   && [[ $(hook_count "${settings}" PostToolUse Write '' "$(hook_cmd "${h}" video-offer-nudge)") == 1 ]] \
   && [[ $(hook_count "${settings}" PreToolUse 'Write|Edit|MultiEdit|NotebookEdit' '' "$(hook_cmd "${h}" docs-guard)") == 1 ]] \
+  && [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" gist-guard)") == 1 ]] \
+  && [[ $(hook_count "${settings}" PreToolUse 'mcp__.*[Gg]ist.*' '' "$(hook_cmd "${h}" gist-guard)") == 1 ]] \
   && [[ $(hook_count "${settings}" SessionStart 'startup|resume' '' "${self_cmd} --quiet --notion-profile personal") == 1 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${settings}") == 6 ]]; then
-  ok "settings.json に 5 件の hook と、SessionStart の自分の 1 件を登録する"
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${settings}") == 8 ]]; then
+  ok "settings.json に 7 件の hook と、SessionStart の自分の 1 件を登録する"
 else
-  ng "settings.json に 5 件の hook と、SessionStart の自分の 1 件を登録する" "$(cat "${settings}" 2>&1)"
+  ng "settings.json に 7 件の hook と、SessionStart の自分の 1 件を登録する" "$(cat "${settings}" 2>&1)"
 fi
 
 # 14. 同じ option で流し直す → settings.json を書き直さない

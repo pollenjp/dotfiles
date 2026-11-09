@@ -54,6 +54,8 @@
 #   PostToolUse  Bash (if "Bash(gh pr create *)")  video-offer-nudge.sh
 #   PostToolUse  Write                           video-offer-nudge.sh
 #   PreToolUse   Write|Edit|MultiEdit|NotebookEdit  docs-guard.sh
+#   PreToolUse   Bash                            gist-guard.sh
+#   PreToolUse   mcp__.*[Gg]ist.*                gist-guard.sh
 #   SessionStart startup|resume                  この script (--quiet と、今回と同じ option)
 #
 # nix-managed-guard.sh (cloud には Nix 管理のパスが無い)・ssh-agent-notice.sh (1Password の SSH agent が無い)・
@@ -177,7 +179,7 @@ fi
 
 command -v jq &>/dev/null || die "jq が見つかりません"
 # cloud で意味のある hook (上の「hook」)
-hooks=(xref-guard run-through-nudge video-offer-nudge docs-guard)
+hooks=(xref-guard run-through-nudge video-offer-nudge docs-guard gist-guard)
 inputs=("${files}/CLAUDE.md" "${files}/CLAUDE.dev-tracker.md" "${cloud}/CLAUDE.cloud.md" "${cloud}/skip-skills.txt" "${overrides}")
 for hook in "${hooks[@]}"; do
   inputs+=("${files}/hooks/${hook}.sh")
@@ -363,8 +365,8 @@ if [[ -n ${dotfiles_arg} ]]; then
   session_cmd+=" --dotfiles $(printf %q "${dotfiles_dir}")"
 fi
 
-# settings.json に足す。4 件は同じ組 (event・matcher・if・command) が在れば足さない。SessionStart は自分の登録
-# (コマンドが $self で始まるもの) を外してから今の 1 件を末尾に足す
+# settings.json に足す。SessionStart のほかは、同じ組 (event・matcher・if・command) が在れば足さない。SessionStart は
+# 自分の登録 (コマンドが $self で始まるもの) を外してから今の 1 件を末尾に足す
 # shellcheck disable=SC2016 # jq の式の $ は jq の変数
 hooks_filter='
   def add_hook($ev; $m; $cond; $c):
@@ -380,6 +382,8 @@ hooks_filter='
   | add_hook("PostToolUse"; "Bash"; "Bash(gh pr create *)"; $nudge)
   | add_hook("PostToolUse"; "Write"; ""; $nudge)
   | add_hook("PreToolUse"; "Write|Edit|MultiEdit|NotebookEdit"; ""; $docs_guard)
+  | add_hook("PreToolUse"; "Bash"; ""; $gist_guard)
+  | add_hook("PreToolUse"; "mcp__.*[Gg]ist.*"; ""; $gist_guard)
   | .hooks.SessionStart = (
       [(.hooks.SessionStart // [])[]
         | .hooks = [(.hooks // [])[] | select((.command // "") | mine | not)]
@@ -396,6 +400,7 @@ if ! jq -e 'type == "object"' <<<"${current}" &>/dev/null \
   || ! new_settings=$(
     jq --arg xref "$(hook_cmd xref-guard)" --arg run_through "$(hook_cmd run-through-nudge)" \
       --arg nudge "$(hook_cmd video-offer-nudge)" --arg docs_guard "$(hook_cmd docs-guard)" \
+      --arg gist_guard "$(hook_cmd gist-guard)" \
       --arg self "${self_cmd}" --arg session "${session_cmd}" \
       "${hooks_filter}" <<<"${current}" 2>/dev/null
   ); then

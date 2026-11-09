@@ -3238,6 +3238,39 @@ skill が読まれなかったときの念押しが `PostToolUse`・`PostToolUse
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure` に
   1 件ずつ（`Bash`）足す
 
+#### gist やペースト共有のサービスへ上げさせないフック
+
+`PreToolUse` フック（`nix/files/claude/hooks/gist-guard.sh`）。Claude が gist やペースト共有のサービス（0x0.st・transfer.sh・
+termbin など）へ上げるコマンドと、gist を作る・書き換える MCP の tool を、打つ前に**いつも**止め（`permissionDecision` の deny）、
+わけとどうするかを返す。確かめずに外へ上げると private な中身も公開され、secret gist も URL を知る人には読めるため（経緯は
+dotfiles-private の [ADR 047](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/047_claude_gist_guard_20261109T222451JST/README.md)）。
+判断は script がするので token を使わない。
+
+| 止めるもの | 止めないもの |
+| --- | --- |
+| `gh gist create`・`new`・`edit`・`rename` と知らない subcommand（`hub gist create`、GitLab の `glab snippet create` も） | `gh gist list`・`view`・`clone`・`delete`、`--help` |
+| `gh api`・`curl`・`wget`・HTTPie での gists の API への書き込み（POST・PATCH・PUT。GHES の `/api/v3/gists` も） | GET・HEAD・DELETE |
+| push の先（pushurl と insteadOf を解いた URL。同じコマンドの `git remote add`・`set-url` も）が gist の `git push` | gist でない repo への push、gist の clone・fetch、`--dry-run` |
+| ペースト共有のサービスへの送信（curl の `-d`・`-F`・`-T`、wget の `--post-file`、nc・socat・telnet の宛先、`> /dev/tcp/…`）と専用のコマンド（`pastebinit`・`wgetpaste`・`fpaste`・`gist`・`haste` など） | そのサービスからのダウンロード、専用のコマンドの `--help` |
+| python・node などの `-c`・`-e`・stdin・同じコマンドで書いた script にある、gist の API・ペースト共有のサービスの URL と `create_gist` など | URL の path にサービスの名前があるだけのもの（`https://example.com/0x0.st`） |
+| MCP の tool のうち、名前に gist と書き込みの語を含むもの（GitHub の MCP の `create_gist`・`update_gist`） | `get_gist`・`list_gists`・`delete_gist` |
+
+- 通す口は無い（xref-guard の `PJP_ALLOW_XREF=1` のような印は作らない。Claude が自分で付けられてしまうため）。上げたいときは、
+  ユーザーが自分で `! gh gist create <file>` のように `!` を付けて打つ。`!` で打つコマンドには PreToolUse の hook が走らない
+  （Claude Code 2.1.319 で確かめた）。止めたときに返す文は、回り込まない（別のコマンド・別のサービス・script のファイルに書いて
+  流す、をしない）こと・ユーザーに `!` で打ってもらうこと・Notion に載せたい HTML は Notion の HTML ブロック（`.html` を File
+  Upload で上げ、`embed.file_upload` に付ける）で直接載せることを Claude に伝える
+- ペースト共有のサービスは、host が hook の中の一覧（`paste_hosts`。0x0.st・transfer.sh・temp.sh・catbox.moe・pastebin.com・
+  paste.rs・dpaste・sprunge.us・termbin.com・rentry など 26）の domain かその sub-domain なら止める。増やすときは一覧に足す
+- コマンドの読み方は xref-guard と同じ lexer（`/dev/tcp/…` への書き込みを拾うよう足した）で、包むコマンド・`bash -c`・`eval`・
+  `ssh <host> <コマンド>`・`find -exec` の中と、同じコマンドで書いた script（`bash up.sh`・`source`）も読む。commit の message・
+  grep の引数・heredoc の本文に書いただけでは止めない。script のファイルの中（同じコマンドで書いたものを除く）・関数・alias・
+  組み立てた URL・短縮 URL・一覧に無いサービスは見えない（手癖を止めるためのもので、回り込みを全部は塞げない）。64 KB（gawk・
+  mawk の無いマシンでは 16 KB）を超えるコマンドは中を読まず、上げる形の文字があれば止めてコマンドを分けるよう返す
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 2 件（`Bash` と `mcp__.*[Gg]ist.*`）足す。
+  MCP の tool の名前は `mcp__<server>__<tool>` なので、gist を名前に含む tool でだけ hook が走る。cloud
+  （[後述](#claude-code-on-the-web-cloud-で使う)）にも張る
+
 ### statusLine
 
 Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
@@ -4295,7 +4328,7 @@ setup script から `nix/scripts/claude-cloud/bootstrap-claude-cloud.sh` を呼�
 | --- | --- |
 | `~/.claude/skills/` など | dotfiles の `nix/files/claude/` と claude-skills の中身への symlink（手元と同じ単位）。mod を兼ねる skill・`claude-cloud/skip-skills.txt` の skill・（`--dev-tracker` でなければ）`pjp-dev-tracker` は張らない |
 | `~/.claude/CLAUDE.md` | 共通の `CLAUDE.md` の最初の `## ` の行より前を `claude-cloud/CLAUDE.cloud.md` に差し替えたもの（`--dev-tracker` なら「タスク管理」の節も足す） |
-| `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
+| `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
 | `settings.json` の `skillOverrides` | pack の skill を `name-only`、claude.ai から同期された skill を `user-invocable-only` にする（手元と同じ `nix/scripts/bootstrap-claude-skill-overrides.sh` を `--no-host-option` で流す。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `profile` は `--notion-profile` の値 |
 
