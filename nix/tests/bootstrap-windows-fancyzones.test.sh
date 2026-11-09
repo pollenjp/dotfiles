@@ -35,12 +35,38 @@
 #   - managed.json に誤りがあるときは、setup では警告して書かずに exit 0。jq が無いときも setup では exit 0 (--check は exit 1)
 #   - 引数の誤りは exit 2。script に実行ビットがある (setup.sh は -x でない bootstrap を流さずに止まる)
 #
+# カスタムレイアウト (custom-layouts.json):
+#
+#   - repo のレイアウトを uuid で PC のファイルと突き合わせ、PC に無ければ末尾に足す。PC にだけあるレイアウト・
+#     applied-layouts.json には触らず、どの場合も exit 0。PowerToys の形 (字下げ 2・CRLF・末尾に改行なし) で書き、隣に書いて
+#     mv した後に touch する。書き換える前のファイルを退避し (新しい方から 10 回分)、足したものを記録する。足したことと、
+#     PC にだけあるレイアウトに触らないことを出す
+#   - 次の回は揃っていると出し、書かない。PC が repo と同じなら、キーの順・字下げ・改行が違っても書かずに記録だけする
+#   - PC が記録と同じ (前に足したまま) なら、repo の更新として同じ位置で書き換える
+#   - PC のエディターで直されていた・足す前から違う中身があった・PC から消えていたら、書き換えず (足し直さず) に警告し
+#     (まとめにも残す)、--force と、PC の名前での --import を出す。違いの diff はその場にだけ出す。記録は変えない
+#   - --force は直されたものを repo の中身へ戻し、消えていたものを足し直す。--dry-run は何も書かず (退避も記録もしない)、
+#     同じ判定を出す
+#   - PC にファイルが無ければ (ディレクトリも無くても)、記録によらず repo のレイアウトだけで作る
+#   - repo から消したレイアウトは PC から消さず、記録からだけ消す
+#   - PC のファイルを読めない (5 回読む。読めるようになれば進む)・記録が壊れている・repo のファイルに誤りがあるときは、
+#     書かずに警告する。書けない・退避できない・touch できないときも警告する。どれも settings.json の手順を止めず、
+#     managed.json の誤りもレイアウトを止めない
+#   - 書き直しても、PC にだけあるレイアウトの名前のエスケープ (\u…) と custom-layouts のほかのキーの中身は変わらない
+#   - --import <名前> は、PC のレイアウトを repo のファイルへ PowerToys の形で写す (同じ uuid は同じ位置で置き換え、無ければ末尾に
+#     足す。PC のファイル・settings.json・記録には書かない)。--import=<名前> と、繰り返しも受ける。repo と同じなら書かない。
+#     PC に無い名前・PC に 2 つある名前・repo の別の uuid と同じ名前・repo に置けない形・commit していない変更・git の
+#     checkout でない・配り先の設定が無いときは、何も書かずに exit 1。名前が無い・--force・--dry-run・--check と一緒は exit 2
+#   - --check は custom-layouts.json の誤り (uuid の形・name・type・info・object でない要素・uuid と name の重なり) と、
+#     PowerToys の形でないこと (LF・末尾の改行・字下げ 4) を exit 1 にする。通れば持つキーとレイアウトの数を出す
+#
 # ## 偽の checkout
 #
 # script は自分のいる checkout の win/powertoys/fancyzones/ を読むので、ケースごとに <ケース>/repo/nix/scripts/ へ写して流す。
 # Windows のホームに見立てるのは <ケース>/win。script は .exe を呼ばないが、要るコマンドだけを symlink で並べた PATH で流す
 # (足りないコマンドに気づけるように)。mv・touch・sleep は偽物で、呼ばれた順を fs-calls に残し、sleep は待たない。
 # 偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
+# --import のケースは、偽の checkout を git の repo にして commit してから流す。
 
 set -u -o pipefail
 
@@ -73,7 +99,7 @@ real_touch=$(command -v touch)
 sys_bin="${work}/sys-bin"
 sys_bin_nojq="${work}/sys-bin-nojq"
 mkdir -p "${sys_bin}" "${sys_bin_nojq}"
-for c in jq cat mkdir rm dirname sed grep; do
+for c in jq cat mkdir rm dirname sed grep cp mktemp date diff git; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -117,7 +143,8 @@ new_home() {
   mkdir -p "${h}/.local/state/dotfiles" "${h}/bin" "${h}/win" "${h}/repo/nix/scripts" "${h}/repo/win/powertoys/fancyzones"
   cp "${script}" "${h}/repo/nix/scripts/bootstrap-windows-fancyzones.sh"
   printf '%s\n' "${managed_default}" >"$(managed_json "${h}")"
-  printf '{"custom-layouts":[]}' >"$(layouts_json "${h}")"
+  # レイアウトの無い custom-layouts.json (PowerToys の形)
+  printf '{\r\n  "custom-layouts": []\r\n}' >"$(layouts_json "${h}")"
   if [[ -n $2 ]]; then
     printf '%s\n' "${2//@WIN@/${h}/win}" >"${h}/.local/state/dotfiles/windows-files.json"
   fi
@@ -659,8 +686,8 @@ fi
 # 20. --check: state を見ずに確かめる
 h=$(new_home t20 "")
 run "${h}" --check
-if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'win/powertoys/fancyzones/: OK (持つキー 1 件)'; then
-  ok "--check は state が無くても確かめ、持つキーの数を出す"
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'win/powertoys/fancyzones/: OK (持つキー 1 件・カスタムレイアウト 0 件)'; then
+  ok "--check は state が無くても確かめ、持つキーとレイアウトの数を出す"
 else
   ng "--check" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
@@ -689,7 +716,7 @@ for body in 'not json' '{}' '{"custom-layouts":{}}'; do
   h=$(new_home "t20c-${i}" "")
   printf '%s' "${body}" >"$(layouts_json "${h}")"
   run "${h}" --check
-  if [[ $(rc "${h}") == 1 ]] && grep -q 'custom-layouts.json が' "${h}/err"; then
+  if [[ $(rc "${h}") == 1 ]] && grep -q 'custom-layouts.json に誤りがあります' "${h}/err"; then
     ok "--check: 誤った custom-layouts.json (${body}) は exit 1"
   else
     ng "--check の custom-layouts.json (${body})" "rc=$(rc "${h}") $(outerr "${h}")"
@@ -726,6 +753,691 @@ if [[ -x ${script} ]]; then
   ok "script に実行ビットがある (setup.sh は実行できない bootstrap で止まる)"
 else
   ng "script に実行ビットが無い" "$(ls -l "${script}")"
+fi
+
+# ---- カスタムレイアウト (custom-layouts.json) ----
+
+# レイアウト。この PC と pjp-raiden の custom-layouts.json の形から、ゾーンを減らして写した (canvas と grid)
+lay_a='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-43inch","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234},{"X":0,"Y":297,"width":1374,"height":1055}],"sensitivity-radius":20}}'
+# 4k-43inch を PC のエディターで直したもの (2 つ目のゾーンを動かした)
+lay_a_edited='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-43inch","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234},{"X":10,"Y":297,"width":1374,"height":1055}],"sensitivity-radius":20}}'
+# 4k-43inch の前の版 (repo が後でゾーンを足した)
+lay_a_old='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-43inch","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234}],"sensitivity-radius":20}}'
+# 4k-43inch を PC で名前ごと変えたもの
+lay_a_renamed='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-renamed","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234}],"sensitivity-radius":20}}'
+lay_b='{"uuid":"{E389FFDC-3BDD-48CB-B448-0672774C5997}","name":"1080p","type":"canvas","info":{"ref-width":1920,"ref-height":1032,"zones":[{"X":0,"Y":29,"width":1505,"height":878}],"sensitivity-radius":20}}'
+# PC にだけあるもの (この PC のエディターで作った)
+lay_p1='{"uuid":"{2CAEB420-AB4C-4F3F-9226-1A98F049EDBF}","name":"Custom layout 1","type":"canvas","info":{"ref-width":1536,"ref-height":912,"zones":[{"X":0,"Y":0,"width":768,"height":912}],"sensitivity-radius":20}}'
+lay_p2='{"uuid":"{BACEC35B-E024-41AD-8237-5E21D4C4E7F5}","name":"Custom layout 2","type":"grid","info":{"rows":1,"columns":2,"rows-percentage":[10000],"columns-percentage":[5000,5000],"cell-child-map":[[0,1]],"show-spacing":true,"spacing":16,"sensitivity-radius":20}}'
+# --import の誤りのケース: PC に同じ名前がもう 1 つ・repo の 1080p と同じ名前で別の uuid・uuid が小文字
+lay_p1_dup='{"uuid":"{3D3D3D3D-0000-0000-0000-000000000001}","name":"Custom layout 1","type":"canvas","info":{"ref-width":1536,"ref-height":912,"zones":[],"sensitivity-radius":20}}'
+lay_b_other='{"uuid":"{3D3D3D3D-0000-0000-0000-000000000002}","name":"1080p","type":"canvas","info":{"ref-width":1920,"ref-height":1032,"zones":[],"sensitivity-radius":20}}'
+lay_low='{"uuid":"{3d3d3d3d-0000-0000-0000-000000000003}","name":"low","type":"canvas","info":{"ref-width":1920,"ref-height":1032,"zones":[],"sensitivity-radius":20}}'
+# 小さいレイアウトと、それだけを持つ custom-layouts.json の PowerToys の形のバイト列 (手で書いた)
+lay_t='{"uuid":"{11111111-2222-3333-4444-555555555555}","name":"t","type":"canvas","info":{"ref-width":10,"ref-height":20,"zones":[],"sensitivity-radius":20}}'
+want_t=$'{\r\n  "custom-layouts": [\r\n    {\r\n      "uuid": "{11111111-2222-3333-4444-555555555555}",\r\n      "name": "t",\r\n      "type": "canvas",\r\n      "info": {\r\n        "ref-width": 10,\r\n        "ref-height": 20,\r\n        "zones": [],\r\n        "sensitivity-radius": 20\r\n      }\r\n    }\r\n  ]\r\n}'
+
+pcl_json() { echo "$(fz_dir "$1")/custom-layouts.json"; }
+record_json() { echo "$1/.local/state/dotfiles/windows-fancyzones.applied.json"; }
+backup_root() { echo "$1/.local/state/dotfiles/windows-fancyzones/backup"; }
+# PowerToys の形 (字下げ 2・CRLF・末尾に改行なし) の custom-layouts.json の中身を出す。引数はレイアウト。
+# この形は、この PC と pjp-raiden の custom-layouts.json (エディターが書いたもの) のバイト列と同じだった
+pt_layouts() {
+  local body
+  body=$(jq -n --indent 2 '{"custom-layouts": $ARGS.positional}' --jsonargs "$@")
+  printf '%s' "${body//$'\n'/$'\r\n'}"
+}
+put_pcl() {
+  mkdir -p "$(fz_dir "$1")"
+  printf '%s' "$2" >"$(pcl_json "$1")"
+}
+put_repo_layouts() { printf '%s' "$2" >"$(layouts_json "$1")"; }
+# 記録を置く。$1: HOME、残り: 前に足したレイアウト
+put_record() {
+  local h=$1
+  shift
+  jq -n '{version: 1, layouts: ($ARGS.positional | map({key: .uuid, value: .}) | from_entries)}' --jsonargs "$@" >"$(record_json "${h}")"
+}
+# キーの順と形によらない 1 行: custom-layouts の並び / 期待する並び / 記録の中身 / 期待する記録の中身
+pcl_list() { jq -c -S '.["custom-layouts"]' "$1" 2>/dev/null; }
+want_list() { jq -n -c -S '$ARGS.positional' --jsonargs "$@"; }
+rec_layouts() { jq -c -S '.layouts' "$1" 2>/dev/null; }
+want_rec() { jq -n -c -S '$ARGS.positional | map({key: .uuid, value: .}) | from_entries' --jsonargs "$@"; }
+# ファイルの中身が $2 とバイト列まで同じか (末尾の改行も比べる)
+file_is() {
+  local have
+  have=$(
+    cat "$1" 2>/dev/null
+    printf x
+  )
+  [[ ${have} == "$2x" ]]
+}
+# PowerToys の形か (字下げ 2 で整えて CRLF にし、末尾の改行を外したものと同じ)
+pt_form() {
+  local body
+  body=$(jq --indent 2 . "$1" 2>/dev/null) || return 1
+  file_is "$1" "${body//$'\n'/$'\r\n'}"
+}
+# 退避の数と、いちばん新しい退避のディレクトリ (名前の順の最後。末尾に /)
+nbackups() {
+  local n=0 d
+  for d in "$(backup_root "$1")"/*/; do
+    if [[ -d ${d} ]]; then
+      n=$((n + 1))
+    fi
+  done
+  echo "${n}"
+}
+newest_backup() {
+  local last="" d
+  for d in "$(backup_root "$1")"/*/; do
+    if [[ -d ${d} ]]; then
+      last=${d}
+    fi
+  done
+  echo "${last}"
+}
+# stderr が警告の形 (!! の行と、3 つの空白で始まる続きの行) だけか (jq・mv などの素のエラーを混ぜていないか)
+err_only_warnings() { ! grep -qvE '^(!! |   )' "$1/err"; }
+
+# 30. この PC (PF5XF47R) の形: PC にだけあるレイアウトが 2 つある。repo の 2 つを末尾に足し、PC のものと applied-layouts.json には
+#     触らない。PowerToys の形で書き、mv の後に touch する。書き換える前のファイルを退避し、記録を書く。警告は出さない
+h=$(new_home t30 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_p2}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+printf 'keep' >"$(fz_dir "${h}")/applied-layouts.json"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+pcl=$(pcl_json "${h}")
+if [[ $(rc "${h}") == 0 && $(pcl_list "${pcl}") == "$(want_list "${lay_p1}" "${lay_p2}" "${lay_a}" "${lay_b}")" ]] && pt_form "${pcl}" \
+  && [[ $(fs_calls "${h}") == "mv ${pcl},touch ${pcl},mv $(record_json "${h}")," && ! -e ${pcl}.dotfiles-tmp ]] && recent_mtime "${pcl}" \
+  && [[ $(cat "$(fz_dir "${h}")/applied-layouts.json") == keep ]] \
+  && [[ $(nbackups "${h}") == 1 ]] && file_is "$(newest_backup "${h}")custom-layouts.json" "${before_pcl}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && seen "${h}" -F '4k-43inch: 足す' && seen "${h}" -F '1080p: 足す' \
+  && seen "${h}" -F 'PC にだけあるレイアウトには触りません: Custom layout 1、Custom layout 2' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "レイアウト: PC に無いものを末尾に足し、PC にだけあるものに触らず、PowerToys の形で書いて touch し、退避と記録を残す"
+else
+  ng "レイアウトを足す" "rc=$(rc "${h}") calls=$(fs_calls "${h}") list=$(pcl_list "${pcl}") backups=$(nbackups "${h}") $(outerr "${h}")"
+fi
+
+# 31. 次の回: 揃っているので書かない (LastWriteTime も変えない)。PC にだけあるものの数も出す
+touch -d '2020-01-01 00:00:00' "${pcl}"
+before_mtime=$(stat -c %Y "${pcl}")
+: >"${h}/fs-calls"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/fs-calls && $(stat -c %Y "${pcl}") == "${before_mtime}" && $(nbackups "${h}") == 1 ]] \
+  && seen "${h}" -F 'FancyZones のカスタムレイアウトは揃っています (dotfiles のもの 2 件。PC にだけあるもの 2 件には触りません)。' \
+  && [[ ! -s ${h}/err ]]; then
+  ok "レイアウト: 揃っていれば書かず、LastWriteTime も変えない"
+else
+  ng "レイアウトが揃っている" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 32. pjp-raiden の形: PC が repo と同じ中身 (キーの順・字下げ・改行が違う)。書かずに記録だけする
+h=$(new_home t32 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+pc_body=$(jq -c '{"custom-layouts": [.[] | {info, type, name, uuid}]}' <<<"[${lay_a},${lay_b}]")$'\n'
+put_pcl "${h}" "${pc_body}"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(fs_calls "${h}") == "mv $(record_json "${h}")," && $(nbackups "${h}") == 0 ]] && file_is "$(pcl_json "${h}")" "${pc_body}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && seen "${h}" -F 'FancyZones のカスタムレイアウトは揃っています (dotfiles のもの 2 件)。'; then
+  ok "レイアウト: PC が repo と同じ中身なら (キーの順・字下げ・改行が違っても) 書かずに記録だけする"
+else
+  ng "記録だけする" "rc=$(rc "${h}") calls=$(fs_calls "${h}") rec=$(rec_layouts "$(record_json "${h}")") $(outerr "${h}")"
+fi
+
+# 33. repo の更新: PC が記録と同じ (前に足したまま) なら、同じ位置で書き換える。同じものは書き換えの行に出さない
+h=$(new_home t33 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_a_old}" "${lay_b}")"
+put_record "${h}" "${lay_a_old}" "${lay_b}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(pcl_json "${h}")") == "$(want_list "${lay_p1}" "${lay_a}" "${lay_b}")" ]] && pt_form "$(pcl_json "${h}")" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && file_is "$(newest_backup "${h}")custom-layouts.json" "${before_pcl}" \
+  && seen "${h}" -F '4k-43inch: 書き換える (repo が更新された)' && ! seen "${h}" -F '1080p:' && [[ ! -s ${h}/warnings ]]; then
+  ok "レイアウト: PC が記録と同じなら、repo の更新として同じ位置で書き換える"
+else
+  ng "repo の更新" "rc=$(rc "${h}") list=$(pcl_list "$(pcl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 34. PC のエディターで直した (記録と違う): 書き換えずに警告し (まとめにも残す)、--force と --import を出す。diff はその場にだけ
+#     出す。記録は変えない
+h=$(new_home t34 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}" "${lay_b}" "${lay_p1}")"
+put_record "${h}" "${lay_a}" "${lay_b}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && grep -qF '4k-43inch: PC のエディターで直されています' "${h}/err" && grep -qF '4k-43inch: PC のエディターで直されています' "${h}/warnings" \
+  && grep -qF 'bootstrap-windows-fancyzones.sh --force' "${h}/err" && grep -qF -- "bootstrap-windows-fancyzones.sh --import '4k-43inch'" "${h}/err" \
+  && grep -qF -- '--- 4k-43inch (PC)' "${h}/err" && grep -qF -- '+++ 4k-43inch (repo)' "${h}/err" && grep -qF '"X": 10' "${h}/err" \
+  && ! grep -qF -- '--- 4k-43inch' "${h}/warnings" && ! grep -qF '1080p' "${h}/warnings"; then
+  ok "レイアウト: PC で直されていたら書き換えずに警告し、--force・--import と diff を出す (diff はまとめに入れない)"
+else
+  ng "PC で直した" "rc=$(rc "${h}") calls=$(fs_calls "${h}") warnings=$(warnings "${h}") $(outerr "${h}")"
+fi
+
+# 35. 足す前から PC にあり、中身が違う (記録が無い。PC で名前も変えた): 書き換えずに警告し、PC の名前で --import を出す。記録は作らない
+h=$(new_home t35 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a_renamed}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(record_json "${h}") ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && grep -qF '4k-43inch: dotfiles が足す前から PC にあり、repo と中身が違います' "${h}/warnings" \
+  && grep -qF 'PC での名前は「4k-renamed」' "${h}/err" && grep -qF -- "--import '4k-renamed'" "${h}/err"; then
+  ok "レイアウト: 足す前から PC に違う中身があれば書き換えずに警告し、PC の名前で --import を出す"
+else
+  ng "足す前から違う" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 36. PC から消えている (記録はある): 足し直さずに警告する。--import は出さない (PC に無いので取り込めない)。記録は変えない
+h=$(new_home t36 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_b}" "${lay_p1}")"
+put_record "${h}" "${lay_a}" "${lay_b}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && grep -qF '4k-43inch: PC から消えています' "${h}/warnings" && grep -qF 'bootstrap-windows-fancyzones.sh --force' "${h}/err" \
+  && ! grep -qF -- '--import' "${h}/err"; then
+  ok "レイアウト: PC から消えていたら足し直さずに警告し、--import は出さない"
+else
+  ng "PC から消えた" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 37. --force: 直されたものを repo の中身へ戻し (同じ位置)、消えていたものを足し直す。書き換える前を退避し、記録する
+h=$(new_home t37 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_a_edited}")"
+put_record "${h}" "${lay_a}" "${lay_b}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" --force
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(pcl_json "${h}")") == "$(want_list "${lay_p1}" "${lay_a}" "${lay_b}")" ]] && pt_form "$(pcl_json "${h}")" \
+  && file_is "$(newest_backup "${h}")custom-layouts.json" "${before_pcl}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]] \
+  && seen "${h}" -F '4k-43inch: 書き換える (--force)' && seen "${h}" -F '1080p: 足し直す (--force。PC に無かった)' \
+  && [[ ! -s ${h}/warnings ]]; then
+  ok "レイアウト: --force は直されたものを戻し、消えていたものを足し直す (退避して記録する)"
+else
+  ng "--force" "rc=$(rc "${h}") list=$(pcl_list "$(pcl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 38. PC にファイルが無い: 記録があっても (PowerToys の設定を消した後など)、repo のレイアウトだけで作る (PowerToys の形のバイト列)。
+#     退避するものは無い
+h=$(new_home t38 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_t}")"
+put_record "${h}" "${lay_t}"
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(pcl_json "${h}")" "${want_t}" \
+  && [[ $(fs_calls "${h}") == "mv $(pcl_json "${h}"),touch $(pcl_json "${h}")," && $(nbackups "${h}") == 0 ]] \
+  && seen "${h}" -F 't: 足す' && seen "${h}" -F 'custom-layouts.json が無いので作る' && [[ ! -s ${h}/err ]]; then
+  ok "レイアウト: PC にファイルが無ければ、記録によらず repo のレイアウトだけで作る"
+else
+  ng "ファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 38b. FancyZones のディレクトリも無い: settings.json と一緒に作る
+h=$(new_home t38b "${state_on}")
+put_repo_layouts "${h}" "$(pt_layouts "${lay_t}")"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(cat "$(fz_json "${h}")") == "${created}" ]] && file_is "$(pcl_json "${h}")" "${want_t}"; then
+  ok "レイアウト: FancyZones のディレクトリが無ければ、settings.json と一緒に作る"
+else
+  ng "ディレクトリが無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 39. --dry-run: 何も書かない (退避も記録もしない)。足すものと、PC にだけあるものに触らないことを出す
+h=$(new_home t39 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_p2}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(record_json "${h}") && ! -e $(backup_root "${h}") ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && seen "${h}" -F '[dry-run] 4k-43inch: 足す' && seen "${h}" -F '[dry-run] 1080p: 足す' \
+  && seen "${h}" -F 'PC にだけあるレイアウトには触りません: Custom layout 1、Custom layout 2'; then
+  ok "レイアウト: --dry-run は何も書かず、足すものと PC にだけあるものに触らないことを出す"
+else
+  ng "レイアウトの --dry-run" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 39b. --dry-run --force も書かない。--force の判定を出す
+h=$(new_home t39b "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}")"
+put_record "${h}" "${lay_a}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+run "${h}" --dry-run --force
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(backup_root "${h}") ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && seen "${h}" -F '[dry-run] 4k-43inch: 書き換える (--force)'; then
+  ok "レイアウト: --dry-run --force は書かずに --force の判定を出す"
+else
+  ng "--dry-run --force" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 39c. --dry-run でファイルもディレクトリも無い: 作らない
+h=$(new_home t39c "${state_on}")
+put_repo_layouts "${h}" "$(pt_layouts "${lay_t}")"
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e $(fz_dir "${h}") && ! -e ${h}/fs-calls ]] && seen "${h}" -F '[dry-run] t: 足す'; then
+  ok "レイアウト: --dry-run はファイルもディレクトリも作らない"
+else
+  ng "--dry-run で作らない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 39d. --dry-run は、揃っていて記録だけするときも記録を書かない
+h=$(new_home t39d "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(record_json "${h}") ]] && seen "${h}" -F 'カスタムレイアウトは揃っています'; then
+  ok "レイアウト: --dry-run は、揃っていて記録だけするときも記録を書かない"
+else
+  ng "--dry-run で記録しない" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 40. repo から消したレイアウト: PC からは消さず、記録からだけ消す
+h=$(new_home t40 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_a}" "${lay_b}")"
+put_record "${h}" "${lay_p1}" "${lay_a}" "${lay_b}"
+before_pcl=$(cat "$(pcl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(fs_calls "${h}") == "mv $(record_json "${h}")," ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}" "${lay_b}")" ]]; then
+  ok "レイアウト: repo から消したものは PC から消さず、記録からだけ消す"
+else
+  ng "repo から消した" "rc=$(rc "${h}") calls=$(fs_calls "${h}") rec=$(rec_layouts "$(record_json "${h}")") $(outerr "${h}")"
+fi
+
+# 40b. repo のレイアウトを全部消した: PC のファイルは読まずに (読めなくても)、記録を空にする
+h=$(new_home t40b "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_pcl "${h}" 'not json'
+put_record "${h}" "${lay_a}"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(rec_layouts "$(record_json "${h}")") == '{}' && $(nsleep "${h}") == 0 && ! -s ${h}/err ]] \
+  && [[ $(cat "$(pcl_json "${h}")") == 'not json' ]]; then
+  ok "レイアウト: repo にレイアウトが無ければ PC のファイルを読まず、記録を空にする"
+else
+  ng "repo のレイアウトが無い" "rc=$(rc "${h}") sleep=$(nsleep "${h}") $(outerr "${h}")"
+fi
+
+# 41. PC のファイルを読めない: 5 回読んでから警告し、書かない (記録も)。settings.json の手順は進む
+for t in "broken:not json" "empty:" 'notarray:{"custom-layouts":{}}' "array:[1]"; do
+  name=${t%%:*}
+  body=${t#*:}
+  h=$(new_home "t41-${name}" "${state_on}")
+  put_fz "${h}" "$(fz_settings false)"
+  put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+  put_pcl "${h}" "${body}"
+  DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  if [[ $(rc "${h}") == 0 && $(cat "$(pcl_json "${h}")") == "${body}" && $(nsleep "${h}") == 5 && ! -e $(record_json "${h}") ]] \
+    && [[ $(cat "$(fz_json "${h}")") == "$(fz_settings true)" ]] \
+    && grep -q 'custom-layouts.json を読めない' "${h}/err" && grep -q 'custom-layouts.json を読めない' "${h}/warnings"; then
+    ok "レイアウト: PC のファイルが読めなければ (${name}) 5 回読んでから警告し、書かない (settings.json は書く)"
+  else
+    ng "PC のファイルが読めない (${name})" "rc=$(rc "${h}") sleep=$(nsleep "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 41b. 書いている途中に当たっても、読めるようになれば足す
+h=$(new_home t41b "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" '{"custom-layouts":[{"uu'
+FAKE_SLEEP_PATH=$(pcl_json "${h}") FAKE_SLEEP_AT=2 FAKE_SLEEP_WRITE=$(pt_layouts "${lay_p1}") run "${h}"
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(pcl_json "${h}")") == "$(want_list "${lay_p1}" "${lay_a}")" && $(nsleep "${h}") == 2 ]] \
+  && ! seen "${h}" '読めない'; then
+  ok "レイアウト: 書いている途中に当たっても、読めるようになれば足す"
+else
+  ng "レイアウトの書いている途中" "rc=$(rc "${h}") sleep=$(nsleep "${h}") $(outerr "${h}")"
+fi
+
+# 42. 記録が壊れている: レイアウトは書かずに警告する (記録もそのまま)。settings.json の手順は進む
+i=0
+for body in 'not json' '{"version":1,"layouts":[]}'; do
+  i=$((i + 1))
+  h=$(new_home "t42-${i}" "${state_on}")
+  put_fz "${h}" "$(fz_settings false)"
+  put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+  put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+  before_pcl=$(cat "$(pcl_json "${h}")")
+  printf '%s' "${body}" >"$(record_json "${h}")"
+  DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  if [[ $(rc "${h}") == 0 && $(cat "$(record_json "${h}")") == "${body}" && $(cat "$(fz_json "${h}")") == "$(fz_settings true)" ]] \
+    && file_is "$(pcl_json "${h}")" "${before_pcl}" && grep -q '記録が壊れている' "${h}/warnings"; then
+    ok "レイアウト: 記録が壊れていれば (${i}) 書かずに警告する (settings.json は書く)"
+  else
+    ng "記録が壊れている (${i})" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 43. repo の custom-layouts.json に誤りがある (uuid が重なる): レイアウトは書かずに警告する。settings.json の手順は進む
+h=$(new_home t43 "${state_on}")
+put_fz "${h}" "$(fz_settings false)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_a_old}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(cat "$(fz_json "${h}")") == "$(fz_settings true)" ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && grep -q 'custom-layouts.json に誤りがある' "${h}/warnings" && grep -qF 'uuid が重なっています' "${h}/warnings"; then
+  ok "レイアウト: repo の custom-layouts.json に誤りがあれば書かずに警告する (settings.json は書く)"
+else
+  ng "repo の誤り" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 44. managed.json に誤りがあっても、レイアウトは足す
+h=$(new_home t44 "${state_on}")
+put_fz "${h}" "$(fz_settings false)"
+printf '%s' 'not json' >"$(managed_json "${h}")"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(pcl_json "${h}")") == "$(want_list "${lay_p1}" "${lay_a}")" && $(cat "$(fz_json "${h}")") == "$(fz_settings false)" ]] \
+  && grep -q 'managed.json に誤りがある' "${h}/warnings"; then
+  ok "レイアウト: managed.json に誤りがあっても、レイアウトは足す"
+else
+  ng "managed.json の誤りとレイアウト" "rc=$(rc "${h}") list=$(pcl_list "$(pcl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 45. 書けない (mv できない・一時ファイルを作れない・退避できない): 元のまま警告して exit 0。一時ファイルを残さず、素のエラーを
+#     混ぜない。記録に足さない
+for t in mv tmpdir backup; do
+  h=$(new_home "t45-${t}" "${state_on}")
+  put_fz "${h}" "$(fz_settings true)"
+  put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+  put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+  before_pcl=$(cat "$(pcl_json "${h}")")
+  want_calls=""
+  msg='custom-layouts.json に書けない'
+  case ${t} in
+    mv) want_calls="mv $(pcl_json "${h}")," ;;
+    tmpdir) mkdir "$(pcl_json "${h}").dotfiles-tmp" ;;
+    backup)
+      mkdir -p "$(dirname "$(backup_root "${h}")")"
+      printf 'file' >"$(backup_root "${h}")"
+      msg='退避できない'
+      ;;
+  esac
+  if [[ ${t} == mv ]]; then
+    FAKE_MV_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  else
+    DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  fi
+  if [[ $(rc "${h}") == 0 && $(fs_calls "${h}") == "${want_calls}" && ! -f $(pcl_json "${h}").dotfiles-tmp && ! -e $(record_json "${h}") ]] \
+    && file_is "$(pcl_json "${h}")" "${before_pcl}" && grep -q "${msg}" "${h}/warnings" && err_only_warnings "${h}"; then
+    ok "レイアウト: 書けなければ (${t}) 元のまま警告して exit 0 (素のエラーを混ぜず、記録に足さない)"
+  else
+    ng "レイアウトが書けない (${t})" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 45b. touch できない: 書いたうえで、読み直させられなかったと警告する (記録は書く)
+h=$(new_home t45b "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+FAKE_TOUCH_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(pcl_json "${h}")") == "$(want_list "${lay_p1}" "${lay_a}")" ]] \
+  && [[ $(rec_layouts "$(record_json "${h}")") == "$(want_rec "${lay_a}")" ]] \
+  && grep -q 'custom-layouts.json に書きましたが' "${h}/warnings" && err_only_warnings "${h}"; then
+  ok "レイアウト: touch できなければ、書いたうえで読み直させられなかったと警告する"
+else
+  ng "レイアウトの touch できない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 45c. 一時ディレクトリを作れない (TMPDIR が無い): レイアウトは書かずに警告して exit 0。settings.json の手順は進む
+h=$(new_home t45c "${state_on}")
+put_fz "${h}" "$(fz_settings false)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+TMPDIR=${h}/no-such-dir DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(cat "$(fz_json "${h}")") == "$(fz_settings true)" ]] && file_is "$(pcl_json "${h}")" "${before_pcl}" \
+  && grep -q '一時ディレクトリを作れない' "${h}/warnings" && err_only_warnings "${h}"; then
+  ok "レイアウト: 一時ディレクトリを作れなければ、書かずに警告して exit 0 (settings.json は書く)"
+else
+  ng "一時ディレクトリを作れない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 46. 退避は新しい方から 10 回分だけ残す
+h=$(new_home t46 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+for i in 00 01 02 03 04 05 06 07 08 09 10 11; do
+  mkdir -p "$(backup_root "${h}")/20200101T0000${i}Z-1"
+done
+run "${h}"
+broot=$(backup_root "${h}")
+if [[ $(rc "${h}") == 0 && $(nbackups "${h}") == 10 && ! -e ${broot}/20200101T000002Z-1 && -d ${broot}/20200101T000003Z-1 ]] \
+  && file_is "$(newest_backup "${h}")custom-layouts.json" "$(pt_layouts "${lay_p1}")"; then
+  ok "レイアウト: 退避は新しい方から 10 回分だけ残す"
+else
+  ng "退避の数" "rc=$(rc "${h}") n=$(nbackups "${h}") $(outerr "${h}")"
+fi
+
+# 47. 書き直しても、PC にだけあるレイアウトの名前のエスケープと、custom-layouts のほかのキーの中身は変わらない
+h=$(new_home t47 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+put_pcl "${h}" $'{\r\n  "custom-layouts": [\r\n    {\r\n      "uuid": "{2CAEB420-AB4C-4F3F-9226-1A98F049EDBF}",\r\n      "name": "\\u7E26\\u0026\\u6A2A",\r\n      "type": "canvas",\r\n      "info": {\r\n        "ref-width": 1536,\r\n        "ref-height": 912,\r\n        "zones": [],\r\n        "sensitivity-radius": 20\r\n      }\r\n    }\r\n  ],\r\n  "x-extra": {\r\n    "k": 1\r\n  }\r\n}'
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(jq -r '[.["custom-layouts"][].name] | join(",")' "$(pcl_json "${h}")") == '縦&横,4k-43inch' ]] \
+  && [[ $(jq -c '.["x-extra"]' "$(pcl_json "${h}")") == '{"k":1}' ]] && seen "${h}" -F 'PC にだけあるレイアウトには触りません: 縦&横'; then
+  ok "レイアウト: 書き直しても、名前のエスケープとほかのキーの中身は変わらない"
+else
+  ng "エスケープとほかのキー" "rc=$(rc "${h}") $(cat "$(pcl_json "${h}")") $(outerr "${h}")"
+fi
+
+# --import のケースの checkout: repo のレイアウトは 4k-43inch・1080p で commit 済み。settings.json は false (書かないことを見る)
+import_home() {
+  local h
+  h=$(new_home "$1" "${state_on}")
+  put_fz "${h}" "$(fz_settings false)"
+  put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+  git -c init.defaultBranch=main -C "${h}/repo" init -q >/dev/null 2>&1
+  git -C "${h}/repo" add -A >/dev/null 2>&1
+  git -C "${h}/repo" -c user.name=test -c user.email=test@example.com commit -q -m init >/dev/null 2>&1
+  echo "${h}"
+}
+# repo の custom-layouts.json が commit した中身のままか
+repo_clean() { git -C "$1/repo" diff --quiet; }
+# script が出す checkout のパス (script は自分の場所を pwd -P で引く)
+repo_phys() { (cd "$1/repo" && pwd -P); }
+
+# 48. --import: PC で直したレイアウトを、repo の同じ uuid の位置へ PowerToys の形で写す。PC のファイル・settings.json・記録には
+#     書かない。git diff と commit を促す
+h=$(import_home t48)
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}" "${lay_p1}")"
+before_pcl=$(cat "$(pcl_json "${h}")")
+run "${h}" --import 4k-43inch
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(layouts_json "${h}")") == "$(want_list "${lay_a_edited}" "${lay_b}")" ]] && pt_form "$(layouts_json "${h}")" \
+  && file_is "$(pcl_json "${h}")" "${before_pcl}" && [[ $(cat "$(fz_json "${h}")") == "$(fz_settings false)" && ! -e $(record_json "${h}") ]] \
+  && [[ $(fs_calls "${h}") == "mv $(repo_phys "${h}")/win/powertoys/fancyzones/custom-layouts.json," ]] \
+  && seen "${h}" -F "git -C $(repo_phys "${h}") diff"; then
+  ok "--import: PC で直したレイアウトを repo の同じ位置へ写し、PC のファイル・settings.json・記録には書かない"
+else
+  ng "--import" "rc=$(rc "${h}") calls=$(fs_calls "${h}") list=$(pcl_list "$(layouts_json "${h}")") $(outerr "${h}")"
+fi
+
+# 48b. --import: repo に無いレイアウト (PC で作った) は末尾に足す。--import=<名前> と繰り返しも受ける
+h=$(import_home t48b)
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}" "${lay_p1}")"
+run "${h}" --import='Custom layout 1' --import 4k-43inch
+if [[ $(rc "${h}") == 0 && $(pcl_list "$(layouts_json "${h}")") == "$(want_list "${lay_a_edited}" "${lay_b}" "${lay_p1}")" ]] && pt_form "$(layouts_json "${h}")"; then
+  ok "--import: repo に無いものは末尾に足し、--import=<名前> と繰り返しも受ける"
+else
+  ng "--import で足す" "rc=$(rc "${h}") list=$(pcl_list "$(layouts_json "${h}")") $(outerr "${h}")"
+fi
+
+# 48c. --import: repo と同じなら書かない
+h=$(import_home t48c)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+run "${h}" --import 4k-43inch
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls ]] && repo_clean "${h}" && seen "${h}" '取り込むものはありません'; then
+  ok "--import: repo と同じなら書かない"
+else
+  ng "--import で同じ" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 48d. --import の誤り: 何も書かずに exit 1 (PC に無い名前・PC に 2 つある名前・repo の別の uuid と同じ名前・repo に置けない形)
+for t in missing dup samename bad; do
+  h=$(import_home "t48d-${t}")
+  case ${t} in
+    missing)
+      put_pcl "${h}" "$(pt_layouts "${lay_p1}")"
+      arg=nope
+      msg='PC に「nope」というカスタムレイアウトがありません (PC にあるもの: Custom layout 1)'
+      ;;
+    dup)
+      put_pcl "${h}" "$(pt_layouts "${lay_p1}" "${lay_p1_dup}")"
+      arg='Custom layout 1'
+      msg='PC に「Custom layout 1」というカスタムレイアウトが 2 つあります'
+      ;;
+    samename)
+      put_pcl "${h}" "$(pt_layouts "${lay_b_other}")"
+      arg=1080p
+      msg='repo に、同じ名前「1080p」の別のレイアウトがあります'
+      ;;
+    bad)
+      put_pcl "${h}" "$(pt_layouts "${lay_low}")"
+      arg=low
+      msg='「low」は repo に置けない形です'
+      ;;
+  esac
+  run "${h}" --import "${arg}"
+  if [[ $(rc "${h}") == 1 && ! -e ${h}/fs-calls ]] && repo_clean "${h}" && grep -qF "${msg}" "${h}/err"; then
+    ok "--import: ${t} は何も書かずに exit 1"
+  else
+    ng "--import の誤り (${t})" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 48e. --import: commit していない変更がある・git の checkout でない・配り先の設定が無い: 何も書かずに exit 1
+h=$(import_home t48e-dirty)
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}")"
+printf ' ' >>"$(layouts_json "${h}")"
+dirty=$(
+  cat "$(layouts_json "${h}")"
+  printf x
+)
+run "${h}" --import 4k-43inch
+if [[ $(rc "${h}") == 1 && ! -e ${h}/fs-calls ]] && file_is "$(layouts_json "${h}")" "${dirty%x}" && grep -qF 'commit していない変更' "${h}/err"; then
+  ok "--import: commit していない変更があれば、何も書かずに exit 1"
+else
+  ng "--import の commit していない変更" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+h=$(new_home t48e-nogit "${state_on}")
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}")"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+before_repo=$(cat "$(layouts_json "${h}")")
+GIT_CEILING_DIRECTORIES=${h} run "${h}" --import 4k-43inch
+if [[ $(rc "${h}") == 1 && ! -e ${h}/fs-calls ]] && file_is "$(layouts_json "${h}")" "${before_repo}" && grep -qF '確かめられません' "${h}/err"; then
+  ok "--import: git の checkout でなければ、何も書かずに exit 1"
+else
+  ng "--import で git の checkout でない" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+h=$(new_home t48e-nostate "")
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}")"
+run "${h}" --import 4k-43inch
+if [[ $(rc "${h}") == 1 && ! -e ${h}/fs-calls ]] && grep -qF '配り先の設定がありません' "${h}/err"; then
+  ok "--import: 配り先の設定が無ければ exit 1"
+else
+  ng "--import で配り先の設定が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 48f. --import の引数の誤り: exit 2 (名前が無い・空・--force・--dry-run・--check と一緒)。jq が無ければ exit 1
+h=$(import_home t48f)
+put_pcl "${h}" "$(pt_layouts "${lay_a_edited}")"
+bad_rcs=""
+for args in "--import" "--import=" "--import 4k-43inch --force" "--import 4k-43inch --dry-run" "--check --import 4k-43inch"; do
+  read -ra argv <<<"${args}"
+  run "${h}" "${argv[@]}"
+  if [[ $(rc "${h}") != 2 ]]; then
+    bad_rcs+=" [${args}]=$(rc "${h}")"
+  fi
+done
+RUN_NO_JQ=1 run "${h}" --import 4k-43inch
+rc_nojq=$(rc "${h}")
+if [[ -z ${bad_rcs} && ${rc_nojq} == 1 && ! -e ${h}/fs-calls ]] && repo_clean "${h}"; then
+  ok "--import: 引数の誤りは exit 2、jq が無ければ exit 1 (どれも書かない)"
+else
+  ng "--import の引数" "bad=${bad_rcs} nojq=${rc_nojq} $(outerr "${h}")"
+fi
+
+# 49. --check: レイアウトの誤りは exit 1 (uuid が小文字・波括弧が無い・無い、name が空、type が無い、info が object でない、
+#     object でない要素、uuid の重なり、name の重なり)
+bad_layout() { jq -c "$1" <<<"${lay_a}"; }
+i=0
+for body in \
+  "$(pt_layouts "$(bad_layout '.uuid |= ascii_downcase')")" \
+  "$(pt_layouts "$(bad_layout '.uuid = "67070A77-52EC-4EC3-9F63-DF5E58CD4400"')")" \
+  "$(pt_layouts "$(bad_layout 'del(.uuid)')")" \
+  "$(pt_layouts "$(bad_layout '.name = ""')")" \
+  "$(pt_layouts "$(bad_layout 'del(.type)')")" \
+  "$(pt_layouts "$(bad_layout '.info = []')")" \
+  "$(pt_layouts '1')" \
+  "$(pt_layouts "${lay_a}" "${lay_a_old}")" \
+  "$(pt_layouts "${lay_a}" "$(bad_layout '.uuid = "{00000000-0000-0000-0000-000000000009}"')")"; do
+  i=$((i + 1))
+  h=$(new_home "t49-${i}" "")
+  put_repo_layouts "${h}" "${body}"
+  run "${h}" --check
+  if [[ $(rc "${h}") == 1 ]] && grep -q 'custom-layouts.json に誤りがあります' "${h}/err"; then
+    ok "--check: 誤ったレイアウト (${i}) は exit 1"
+  else
+    ng "--check のレイアウトの誤り (${i})" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 49b. --check: PowerToys の形でない (LF・末尾の改行・字下げ 4) は exit 1。PowerToys の形なら、持つキーとレイアウトの数を出して通す
+for t in lf trailing indent4; do
+  case ${t} in
+    lf) body=$(jq -n --indent 2 --argjson a "${lay_a}" '{"custom-layouts": [$a]}') ;;
+    trailing) body="$(pt_layouts "${lay_a}")"$'\r\n' ;;
+    indent4)
+      body=$(jq -n --indent 4 --argjson a "${lay_a}" '{"custom-layouts": [$a]}')
+      body=${body//$'\n'/$'\r\n'}
+      ;;
+  esac
+  h=$(new_home "t49b-${t}" "")
+  put_repo_layouts "${h}" "${body}"
+  run "${h}" --check
+  if [[ $(rc "${h}") == 1 ]] && grep -q 'PowerToys の書く形と違います' "${h}/err"; then
+    ok "--check: PowerToys の形でない (${t}) は exit 1"
+  else
+    ng "--check の形 (${t})" "rc=$(rc "${h}") $(outerr "${h}")"
+  fi
+done
+h=$(new_home t49b-ok "")
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+run "${h}" --check
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'win/powertoys/fancyzones/: OK (持つキー 1 件・カスタムレイアウト 2 件)'; then
+  ok "--check: PowerToys の形のレイアウトは通し、数を出す"
+else
+  ng "--check のレイアウトの数" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

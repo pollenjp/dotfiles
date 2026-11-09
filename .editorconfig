@@ -17,7 +17,7 @@ insert_final_newline = false
 [win/powertoys/keyboard-manager/editorSettings.json] # 改行は CRLF (PowerToys の新しいエディタが書く形)
 end_of_line = crlf
 
-[win/powertoys/fancyzones/custom-layouts.json] # 改行は CRLF (FancyZones のエディターが書く形)
+[win/powertoys/fancyzones/custom-layouts.json] # 改行は CRLF (FancyZones のエディターが書く形。--import もこの形で書き、--check が見る)
 end_of_line = crlf
 
 [win/powertoys/fancyzones/managed.json] # 手で書くファイル (PowerToys が書くものではない。配らない)
