@@ -25,6 +25,16 @@
 # nix/ ができた、など) status は 1 にし、prepare はその行を指し直す。元の雛形は旧いファイルの入力の値で、今の雛形は
 # input-dir で描くので、3-way merge がその行だけを今の値にする。
 #
+# ## tmp の例の Windows のユーザー名
+#
+# setup-local-flake.sh は WSL の PC で雛形を描くと、tmp の例 (コメント) の windowsUserName の行
+# (「        #     windowsUserName = "<名前>";」) の名前を、その PC の Windows のユーザー名に置き換える (heredoc は変えないので、
+# 雛形の版の印は変わらない)。render --windows-user はその形を描く。prepare は、手元の例の名前が元の雛形の例と違えば
+# (setup-local-flake.sh が入れた・手で直した)、元の雛形と今の雛形の例にも同じ名前を入れてから 3-way merge する (その行の
+# 隣を今の雛形が直しても衝突にしない)。同じなら (作り物の名前のまま) 入れず、今の雛形の作り物の名前になる。status と check は
+# 印と入力しか見ないので、名前の入った例でも変わらない。行の形は setup-local-flake.sh と同じものを見る (直すならあちらも。
+# 行そのものの形を変えるときは、下の example_user_of)。
+#
 # ## 雛形の版の印
 #
 # 雛形の先頭のコメントに「# 雛形の版: <8 桁の 16 進>」を置く。値は heredoc の原文 (展開する前) の POSIX cksum の
@@ -54,7 +64,8 @@ usage() {
       今の雛形と、3-way merge で移した new/flake.nix を作る。元の雛形は印の版か、無ければ履歴で
       旧いファイルとの差分が最も小さい版。--base でこの repo の commit を選び直せる。移すものが無ければ
       作業場所を作らないが、--always なら作る (new/flake.nix は旧いファイルと同じ。local を直して
-      compare・apply するため。dotfiles-private に登録したあとの仕上げなど)
+      compare・apply するため。dotfiles-private に登録したあとの仕上げなど)。旧いファイルの tmp の例の
+      Windows のユーザー名が元の雛形と違えば、元の雛形と今の雛形にもその名前を入れて merge する
   local-flake-migrate.sh compare <作業場所> [--baseline <dir>]
       旧い flake (--baseline を渡せばそのディレクトリの flake.nix) と new/flake.nix を同じ本体・同じ lock で
       評価し、全ホストの drvPath と、setup が拾うホストの並びを比べる。0 = 同じ、1 = 違う、
@@ -65,8 +76,11 @@ usage() {
   local-flake-migrate.sh id [<setup-local-flake.sh のパス> | -]
       雛形の版の印 (8 桁の 16 進) を出す。省けばこの repo の setup-local-flake.sh、- なら stdin
   local-flake-migrate.sh render (--rev <rev> | --file <パス>) --nix-dir <パス> [--private-dir <パス>]
+                                [--windows-user <名前>]
       雛形の 1 版を描いて stdout に出す (--rev はこの repo の git の commit)。dotfiles-private の入力
-      (${private_nix_dir}) は --private-dir で描き、省けば private-host.sh input-dir --nix-dir <パス>
+      (${private_nix_dir}) は --private-dir で描き、省けば private-host.sh input-dir --nix-dir <パス>。
+      --windows-user なら、tmp の例 (コメント) の Windows のユーザー名をその名前にして描く (setup-local-flake.sh が
+      WSL の PC で描く形。その行が無い版は 1)
   local-flake-migrate.sh -h, --help
       これ
 
@@ -249,6 +263,45 @@ template_has_private() {
   raw=$(template_raw "$1") || return 1
   # shellcheck disable=SC2016 # 展開ではなく、原文の ${private_nix_dir} の文字を探す
   [[ ${raw} == *'${private_nix_dir}'* ]]
+}
+
+# tmp の例の Windows のユーザー名の行 (「        #     windowsUserName = "<名前>";」。コメント)。setup-local-flake.sh が WSL の
+# PC で名前を入れる行と同じ形 (直すならあちらも)。雛形でこの行そのものの形 (字下げ・後ろのコメントなど) を変えるときは、前の形の
+# 行も読めるようにする (読めないと、WSL の PC で名前の入った旧いファイルを prepare すると、その行が衝突として残る)。
+# $1 のその行の名前を出す。その行がちょうど 1 行でなければ 1
+example_user_of() {
+  awk '
+    /^        #     windowsUserName = "[^"]*";$/ {
+      n++
+      v = $0
+      sub(/^[^"]*"/, "", v)
+      sub(/";$/, "", v)
+    }
+    END {
+      if (n != 1) exit 1
+      print v
+    }
+  ' "$1"
+}
+
+# $1 の tmp の例の Windows のユーザー名を $2 にする (行はコメントのまま。ファイルを書き換える)。その行がちょうど 1 行で
+# なければ 1 (書き換えない)
+example_user_set() {
+  local f=$1
+  example_user_of "${f}" >/dev/null || return 1
+  if ! NAME=$2 awk '
+    /^        #     windowsUserName = "[^"]*";$/ { print "        #     windowsUserName = \"" ENVIRON["NAME"] "\";"; next }
+    { print }
+  ' "${f}" >"${f}.example"; then
+    rm -f "${f}.example"
+    return 1
+  fi
+  mv "${f}.example" "${f}"
+}
+
+# Windows のユーザー名 ($1) を Nix の文字列にそのまま書けるか (空でなく、" \ $ と制御文字が無い。setup-local-flake.sh と同じ)
+windows_user_ok() {
+  [[ -n $1 && $1 != *[\"\\\$]* && ! $1 =~ [[:cntrl:]] ]]
 }
 
 # --flake を読む。flake_dir と flake (その flake.nix) を決め、ローカル flake でなければ 2 で止まる
@@ -987,7 +1040,7 @@ cmd_status() {
 
 cmd_prepare() {
   local current_file current marker conflicts=0 rc=0 resolved remaining resolved_lines remaining_lines f out_created=0
-  local have want repoint=0
+  local have want repoint=0 old_user base_user carry_user=""
   out_dir=""
   base_given=""
   always=0
@@ -1050,6 +1103,17 @@ cmd_prepare() {
     echo "    --always なので作業場所を作ります (new/flake.nix は旧いファイルと同じ。local を直して compare・apply する)。"
   fi
 
+  template_render "${current_file}" "${local_nix}" "${want}" >"${tmp}/template.nix"
+  # tmp の例の Windows のユーザー名: 旧いファイルの例の名前が元の雛形と違えば (setup-local-flake.sh が WSL の PC で入れた・
+  # 手で直した)、元の雛形と今の雛形にも入れて merge する (その行の隣を今の雛形が直しても衝突にしない)。同じ (作り物の名前の
+  # まま) なら入れず、今の雛形の作り物の名前になる。入れるのは setup-local-flake.sh が書ける名前 (空でなく、Nix の文字列に
+  # 書ける) だけ。どれかにその行がちょうど 1 行無い・書けない名前なら入れない (ふつうの 3-way merge)
+  if old_user=$(example_user_of "${flake}") && windows_user_ok "${old_user}" && base_user=$(example_user_of "${base_file}") \
+    && example_user_of "${tmp}/template.nix" >/dev/null && [[ ${old_user} != "${base_user}" ]]; then
+    carry_user=${old_user}
+    printf '  tmp の例の Windows のユーザー名: %s (旧いファイルの値。元の雛形と今の雛形にも入れて merge する)\n' "${carry_user}"
+  fi
+
   if [[ -n ${out_dir} ]]; then
     if [[ -e ${out_dir} ]] && [[ ! -d ${out_dir} || -n $(ls -A "${out_dir}") ]]; then
       die "--out が空でないか、ディレクトリではありません: ${out_dir}"
@@ -1078,7 +1142,11 @@ cmd_prepare() {
     cp -p "${flake_dir}/flake.lock" "${out_dir}/old/flake.lock"
   fi
   cp "${base_file}" "${out_dir}/base.nix"
-  template_render "${current_file}" "${local_nix}" "${want}" >"${out_dir}/template.nix"
+  cp "${tmp}/template.nix" "${out_dir}/template.nix"
+  if [[ -n ${carry_user} ]]; then
+    example_user_set "${out_dir}/base.nix" "${carry_user}"
+    example_user_set "${out_dir}/template.nix" "${carry_user}"
+  fi
   {
     printf '版\t日付\t印\t旧いファイルとの差分の行数\t題\n'
     cat "${tmp}/candidates.tsv"
@@ -1144,12 +1212,18 @@ cmd_id() {
 }
 
 cmd_render() {
-  local rev="" file="" nix_dir="" private=""
+  local rev="" file="" nix_dir="" private="" user="" user_given=0
   while [[ $# -gt 0 ]]; do
     case $1 in
       --private-dir)
         [[ $# -ge 2 ]] || die "--private-dir にパスを渡してください"
         private=$2
+        shift
+        ;;
+      --windows-user)
+        [[ $# -ge 2 ]] || die "--windows-user に Windows のユーザー名を渡してください"
+        user=$2
+        user_given=1
         shift
         ;;
       --rev)
@@ -1174,6 +1248,9 @@ cmd_render() {
   [[ -n ${rev} || -n ${file} ]] || die "render には --rev か --file が要ります (--help)"
   [[ -z ${rev} || -z ${file} ]] || die "render の --rev と --file はどちらか 1 つです"
   [[ -n ${nix_dir} ]] || die "render には --nix-dir が要ります (--help)"
+  if [[ ${user_given} == 1 ]] && ! windows_user_ok "${user}"; then
+    die "--windows-user の名前は、Nix の文字列に書けるもの (空でなく、\" \\ \$ と制御文字が無い) にしてください"
+  fi
   # 一時ファイルの置き場は親で作る ($(...) の中で作ると、親の trap が消せない)
   need_tmp
   if [[ -n ${rev} ]]; then
@@ -1186,7 +1263,17 @@ cmd_render() {
     return 1
   fi
   [[ -n ${private} ]] || private=$(want_private_dir "${nix_dir}")
-  template_render "${file}" "${nix_dir}" "${private}"
+  if [[ ${user_given} == 0 ]]; then
+    template_render "${file}" "${nix_dir}" "${private}"
+    return
+  fi
+  # tmp の例の Windows のユーザー名を入れて描く (setup-local-flake.sh が WSL の PC で描く形)
+  template_render "${file}" "${nix_dir}" "${private}" >"${tmp}/render.nix" || return 1
+  if ! example_user_set "${tmp}/render.nix" "${user}"; then
+    printf '!! 雛形の tmp の例に、Windows のユーザー名の行 (windowsUserName) がちょうど 1 行ありません: %s\n' "${rev:-${file}}" >&2
+    return 1
+  fi
+  cat "${tmp}/render.nix"
 }
 
 if [[ $# -eq 0 ]]; then

@@ -53,7 +53,8 @@
 # setup.sh と private-host.sh を使い捨ての checkout (<ケース>/repo/nix/scripts/) に写し、登録簿 (alice@x86_64-linux・
 # alice@wsl・sandbox) と偽の bootstrap-*.sh を置く。ローカル flake (<ケース>/local/flake.nix) はテストが書く (setup.sh は文字列
 # から読むだけ)。dotfiles-private の clone は <ケース>/private (DOTFILES_PRIVATE_DIR)。偽の uname は -n で box を返すので、
-# この PC の名前は alice@box。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
+# この PC の名前は alice@box。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。/proc/version は WSL でない中身
+# (DOTFILES_PROC_VERSION) にし、WSL かは WSL_DISTRO_NAME だけで決まるようにする (WSL の上でテストを流しても同じ結果になる)。
 
 set -u -o pipefail
 
@@ -71,6 +72,9 @@ for f in setup.sh private-host.sh; do
     exit 1
   fi
 done
+# WSL でない /proc/version の中身 (private-host.sh の DOTFILES_PROC_VERSION に渡す。WSL の上でテストを流しても、WSL かは
+# WSL_DISTRO_NAME だけで決まるようにする。setup-local-flake.sh が雛形を描くときに Windows のユーザー名を引きに行かない)
+printf 'Linux version 6.8.0-generic (buildd@example) #1 SMP\n' >"${work}/proc-version-linux"
 
 pass=0
 fail=0
@@ -197,7 +201,7 @@ run() {
     PATH="${PATH_EXTRA:+${PATH_EXTRA}:}${sys_bin}" \
     DOTFILES_LOCAL_DIR="${c}/local" DOTFILES_PRIVATE_DIR="${DOTFILES_PRIVATE_DIR:-${c}/private}" \
     ${DOTFILES_HOST+"DOTFILES_HOST=${DOTFILES_HOST}"} ${DOTFILES_ALLOW_ANY_PATH+"DOTFILES_ALLOW_ANY_PATH=${DOTFILES_ALLOW_ANY_PATH}"} \
-    ${WSL_DISTRO_NAME+"WSL_DISTRO_NAME=${WSL_DISTRO_NAME}"} \
+    DOTFILES_PROC_VERSION="${work}/proc-version-linux" ${WSL_DISTRO_NAME+"WSL_DISTRO_NAME=${WSL_DISTRO_NAME}"} \
     "${BASH}" "${c}/repo/nix/scripts/setup.sh" "$@" >"${c}/out" 2>"${c}/err"
   echo $? >"${c}/rc"
 }

@@ -58,6 +58,9 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 2. `bash <m> prepare --out <scratchpad>/local-flake-migrate-<日時>` — 出力の「元の雛形」と「衝突」を読む
    - 元の雛形は、旧いファイルの「# 雛形の版:」の印の版 (印を入れる前の雛形なら、履歴で差分が最も小さい版)
    - 「近い版」が同じ行数で並んでも、印が同じなら雛形の中身が同じなので、選び直さなくてよい
+   - 「tmp の例の Windows のユーザー名: <名前>」と出たら、旧いファイルの tmp の例 (コメント) の `windowsUserName` にあった名前
+     (WSL の PC で setup-local-flake.sh が入れたもの) を、元の雛形と今の雛形にも入れて merge した (`base.nix`・`template.nix` にも
+     入っている)。コメントの行で値ではないので、確認の形で値の違いとして並べなくてよい
    - 印の違う版が僅差で並び、どちらを元にするかで結果が変わりそうなら、各版を
      `bash <m> render --rev <rev> --nix-dir <本体>/nix` で描いて旧いファイルとの差を見て決め、`--base <rev>` を付けて
      新しい作業場所で prepare し直す
@@ -77,6 +80,9 @@ skill を読まずに同じ移行をさせた subagent は、こう言って確�
 
 - 作り直す前に、`bash <m> render --file <本体>/nix/scripts/setup-local-flake.sh --nix-dir <本体>/nix` で今の雛形を描き、今のファイルとの
   `diff` を見せて、値の行が無いことをユーザーと確かめる (退避は取らない)。値の行があれば、作り直さずに下の手順 (prepare から) で移す
+- WSL の PC で描いた雛形は、tmp の例 (コメント) の `windowsUserName` の行にその PC の Windows のユーザー名が入っている
+  (setup-local-flake.sh が入れる。値ではない)。render に `--windows-user <その名前>` を足して描けば、その行は差に出ない。
+  作り直すと、setup-local-flake.sh が引き直した名前が入る
 - 確認を取ってから書くのは prepare → apply と同じ (「書き換える前に、必ず差分を見せて確認を取る」)
 - 作り直したら `~/dotfiles/setup --which-host` で、登録したホスト (`<名前><TAB>private`) が選ばれることを確かめる
 

@@ -207,7 +207,8 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
    - **値を書き足していない雛形** (新しい PC で 1 回目に置いたまま。`tmp` もほかの行も足していない。`--initial` が書いた `initial`
      だけを足した雛形も): `<本体>/nix/scripts/setup-local-flake.sh --force`
      で作り直す (今の雛形で clone の `nix/` を読む。`initial` も外れる。退避は取らないので、`diff` で値が無いこと (`initial` なら、その
-     塊だけが違うこと) を見せて確認を取ってから。nixos-config の README の入れ直しの手順と同じ)。作り直したら 7 へ
+     塊だけが違うこと。WSL の PC で描いた雛形の tmp の例 (コメント) の `windowsUserName` の名前は値ではない) を見せて確認を取ってから。
+     nixos-config の README の入れ直しの手順と同じ)。作り直したら 7 へ
    - **値を書き足したあと** (前の雛形の `local` に値がある・`tmp` を足した): pjp-dotfiles-local-flake-migrate の手順 (prepare → 衝突 →
      compare)。prepare が dotfiles-private の入力を足す (指し直す)。この時点の compare で、登録簿のホストが全部「同じ」で、この PC の
      ホストが「dotfiles-private のホスト (…この PC のホスト)」と出ることを見る (移すこと自体は値を落としていない。前の雛形から今の雛形へ
@@ -259,7 +260,8 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
   分だけ変わる (その値を並べる)。apply が「値が変わるので反映は setup --update」と出すのは登録簿のホストの話で、`setup --update` は lock を
   張り直し、登録したホストへ切り替えるために流す
 - ローカル flake から外した値 (前の雛形の `local`・`tmp`) と、外したあとに効く場面 (前の雛形の `local` は、`--host <型>` で当てたときだけ。
-  `tmp` は消すので効かない)。`setup-local-flake.sh --force` で作り直すなら、作り直す前と後の差分 (stub → clone の 1 行と、雛形の版の印)
+  `tmp` は消すので効かない)。`setup-local-flake.sh --force` で作り直すなら、作り直す前と後の差分 (stub → clone の 1 行と、雛形の版の印。
+  WSL の PC なら tmp の例 (コメント) の `windowsUserName` の行も変わりうる。作り直すと、setup-local-flake.sh が引いた名前が入る)
 - `DOTFILES_LOCAL_DIR=<作業場所>/new` の `--which-host` が `<名前><TAB>private` だったこと
 
 ## よくある誤り

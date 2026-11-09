@@ -58,6 +58,11 @@
 #   - 前の雛形 (ADR 026 の版。local を持つ) から今の本物の雛形 (ADR 027。local を持たない) へ prepare すると、local が雛形の
 #     既定のままなら衝突なく、移した flake は今の雛形を同じ本体・同じ dotfiles-private の入力で描いたものと 1 バイトも違わない。
 #     local に値を書いていれば (notion.profile = "work" など)、その値は黙って消えずに衝突として残る
+#   - tmp の例の Windows のユーザー名 (本物の雛形): render --windows-user はその行だけを名前にして描き、Nix の文字列に書けない
+#     名前・空は 2、その行の無い版は 1。prepare は、手元の例の名前が元の雛形と違えば (WSL の PC で描いた)、元の雛形と今の雛形の
+#     例にも入れて merge し、今の雛形が例の行のすぐ上を直しても衝突なく、今の雛形を同じ名前で描いたものと同じにする。元の雛形の
+#     作り物の名前のままなら (前の雛形の例の名前が今と違っても) 入れず、今の雛形の作り物の名前になる。書けない名前 (空) も
+#     入れない (ふつうの 3-way merge のまま)。check と status は名前の入った例でも印だけで決める
 #   - apply は、prepare のあとに flake.nix が書き換わった・衝突の印が残る・compare をしていない・compare のあとに
 #     new/flake.nix を直した、なら 2 で止まって何も変えない。compare が違う・--baseline で比べたなら --accept-changes
 #     が要る。書けたときは flake.nix.bak-<日時>・flake.lock.bak-<同じ日時> (元と同じ中身) を置いてから
@@ -1231,6 +1236,124 @@ if grep -qxF '        dotfiles.claude.notion.profile = "work";' "${r}/local/flak
   ok "prepare: ADR 026 の版で local に値を書いていれば、その値は衝突として残る (黙って消えない)"
 else
   ng "prepare (ADR 026 の版の local の値)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# ---- tmp の例の Windows のユーザー名 (setup-local-flake.sh が WSL の PC で入れる) ----
+
+# 本物の雛形の repo の、ある版を描く (dotfiles-private の入力は本体の stub)。$1: repo、$2: rev、残り: render に足す引数
+lfm_render() {
+  local r=$1 rev=$2
+  shift 2
+  HOME="${work}/githome" DOTFILES_PRIVATE_DIR="${work}/no-private" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" \
+    render --rev "${rev}" --nix-dir "${r}/nix" --private-dir "${r}/nix/private-stub" "$@"
+}
+
+# 33. render --windows-user: 本物の雛形を、tmp の例 (コメント) の Windows のユーザー名の行だけその名前にして描く。
+#     Nix の文字列に書けない名前・空は 2、その行が無い版は何も出さずに 1
+r=$(new_repo r33)
+cp "${dir}/setup-local-flake.sh" "${dir}/private-host.sh" "${r}/nix/scripts/"
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P
+cp "${r}/out" "${r}/plain.nix"
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P --windows-user '山田 太郎'
+diff "${r}/plain.nix" "${r}/out" >"${r}/user.diff"
+if [[ $(rc "${r}") == 0 && $(grep -c '^[<>]' "${r}/user.diff") == 2 ]] \
+  && grep -qx '<         #     windowsUserName = "[^"]*";' "${r}/user.diff" \
+  && grep -qxF '>         #     windowsUserName = "山田 太郎";' "${r}/user.diff"; then
+  ok "render --windows-user: tmp の例 (コメント) の Windows のユーザー名の行だけを、その名前にして描く"
+else
+  ng "render --windows-user" "rc=$(rc "${r}") $(err "${r}") $(cat "${r}/user.diff")"
+fi
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P --windows-user 'a"b'
+rc_quote=$(rc "${r}")
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P --windows-user ''
+rc_empty=$(rc "${r}")
+fake_slf "${r}/nix/scripts/no-example.sh" '# 版: ${template_id}
+  inputs.dotfiles.url = "path:${nix_dir}";'
+run "${r}" render --file "${r}/nix/scripts/no-example.sh" --nix-dir /N --windows-user carol
+if [[ ${rc_quote} == 2 && ${rc_empty} == 2 && $(rc "${r}") == 1 && -z $(out "${r}") ]] \
+  && grep -qF 'ちょうど 1 行ありません' "${r}/err"; then
+  ok "render --windows-user: Nix の文字列に書けない名前・空は 2、例の行が無い版は何も出さずに 1"
+else
+  ng "render --windows-user (断る)" "quote=${rc_quote} empty=${rc_empty} no-example=$(rc "${r}") $(err "${r}")"
+fi
+
+# 34. prepare: 名前の入った例 (WSL の PC で描いた) は、元の雛形と今の雛形の例にもその名前を入れて merge する。今の雛形が例の
+#     行のすぐ上の行を直しても衝突にならず、移した flake は今の雛形を同じ名前で描いたものと 1 バイトも違わない
+r=$(new_repo r34)
+cp "${dir}/private-host.sh" "${r}/nix/scripts/"
+# 写しは書き換えるので、リダイレクトで作る (Nix のサンドボックスでは ${dir} が store の読み取り専用のファイルで、cp の写しも
+# 読み取り専用になる)
+cat "${dir}/setup-local-flake.sh" >"${r}/nix/scripts/setup-local-flake.sh"
+mkdir -p "${r}/nix/private-stub" "${r}/local"
+tgit -C "${r}" add -A
+tgit -C "${r}" commit -qm a
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-a"
+# 今の版: 例の windowsUserName の行の、すぐ上の行 (説明のコメント) の末尾に足す
+awk '{ l[NR] = $0 } /^        #     windowsUserName = "[^"]*";$/ { t = NR - 1 } END { for (i = 1; i <= NR; i++) print l[i] (i == t ? " (直した)" : "") }' \
+  "${dir}/setup-local-flake.sh" >"${r}/nix/scripts/setup-local-flake.sh"
+tgit -C "${r}" commit -qam b
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-b"
+if [[ $(id_of "${r}") == "$(HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" id "${dir}/setup-local-flake.sh")" ]]; then
+  ng "prepare (名前の入った例) の前提: 今の版の雛形を直せていない (印が元の版と同じ)"
+fi
+lfm_render "${r}" "$(cat "${r}/rev-a")" --windows-user carol >"${r}/local/flake.nix"
+printf '{ "fake": "sha256-FAKE" }\n' >"${r}/local/flake.lock"
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w"
+lfm_render "${r}" "$(cat "${r}/rev-b")" --windows-user carol >"${r}/want.nix"
+if [[ $(rc "${r}") == 0 && $(env_of "${r}/w" conflicts) == 0 && $(env_of "${r}/w" base_how) == marker ]] \
+  && grep -qF '(直した)' "${r}/w/new/flake.nix" && cmp -s "${r}/want.nix" "${r}/w/new/flake.nix" \
+  && grep -qxF '        #     windowsUserName = "carol";' "${r}/w/base.nix" \
+  && grep -qxF '        #     windowsUserName = "carol";' "${r}/w/template.nix" \
+  && grep -qF 'tmp の例の Windows のユーザー名: carol' "${r}/out"; then
+  ok "prepare: 名前の入った例は、元の雛形と今の雛形にも入れて merge する (例の行の隣を今の雛形が直しても衝突にしない)"
+else
+  ng "prepare (名前の入った例)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(diff "${r}/want.nix" "${r}/w/new/flake.nix" 2>&1 | head -20)"
+fi
+#     書けない名前 (空にした) は入れず、ふつうの 3-way merge のまま (そう出さない。隣を直した今の雛形とは衝突として残る)
+lfm_render "${r}" "$(cat "${r}/rev-a")" | sed 's/^        #     windowsUserName = "[^"]*";$/        #     windowsUserName = "";/' \
+  >"${r}/local/flake.nix"
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w-empty"
+if grep -qxF '        #     windowsUserName = "";' "${r}/local/flake.nix" && [[ $(rc "${r}") == 0 ]] \
+  && ! grep -qF 'tmp の例の Windows のユーザー名' "${r}/out" && [[ $(env_of "${r}/w-empty" remaining) == 1 ]] \
+  && ! grep -qF 'windowsUserName = "";' "${r}/w-empty/base.nix" && ! grep -qF 'windowsUserName = "";' "${r}/w-empty/template.nix"; then
+  ok "prepare: 書けない名前 (空) は元の雛形と今の雛形に入れず、ふつうの 3-way merge のまま (そうとは出さない)"
+else
+  ng "prepare (空の名前)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+#     check と status は、名前の入った例でも印だけで決める (今の雛形と同じ印なら 0)
+lfm_render "${r}" "$(cat "${r}/rev-b")" --windows-user carol >"${r}/local/flake.nix"
+run "${r}" check --flake "${r}/local"
+rc_check=$(rc "${r}")
+out_check=$(out "${r}")
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" status --flake "${r}/local"
+if [[ ${rc_check} == 0 && -z ${out_check} && $(rc "${r}") == 0 ]] && grep -q '同じ版' "${r}/out"; then
+  ok "check と status: 名前の入った例でも、印が今の雛形と同じなら 0"
+else
+  ng "check と status (名前の入った例)" "check=${rc_check} ${out_check} status=$(rc "${r}") $(out "${r}") $(err "${r}")"
+fi
+
+# 35. prepare: 例が元の雛形の作り物の名前のまま (前の雛形の例の名前が今と違っても) なら入れず、今の雛形の作り物の名前になる
+r=$(new_repo r35)
+cp "${dir}/private-host.sh" "${r}/nix/scripts/"
+mkdir -p "${r}/nix/private-stub" "${r}/local"
+sed 's/^        #     windowsUserName = "[^"]*";$/        #     windowsUserName = "olduser";/' \
+  "${dir}/setup-local-flake.sh" >"${r}/nix/scripts/setup-local-flake.sh"
+tgit -C "${r}" add -A
+tgit -C "${r}" commit -qm old
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-old"
+cp "${dir}/setup-local-flake.sh" "${r}/nix/scripts/setup-local-flake.sh"
+tgit -C "${r}" commit -qam now
+tgit -C "${r}" rev-parse --short HEAD >"${r}/rev-now"
+lfm_render "${r}" "$(cat "${r}/rev-old")" >"${r}/local/flake.nix"
+printf '{ "fake": "sha256-FAKE" }\n' >"${r}/local/flake.lock"
+DOTFILES_PRIVATE_DIR="${work}/no-private" run "${r}" prepare --flake "${r}/local" --out "${r}/w"
+lfm_render "${r}" "$(cat "${r}/rev-now")" >"${r}/want.nix"
+if grep -qxF '        #     windowsUserName = "olduser";' "${r}/local/flake.nix" \
+  && [[ $(rc "${r}") == 0 && $(env_of "${r}/w" conflicts) == 0 ]] && cmp -s "${r}/want.nix" "${r}/w/new/flake.nix" \
+  && ! grep -qF 'olduser' "${r}/w/template.nix" && ! grep -qF 'tmp の例の Windows のユーザー名' "${r}/out"; then
+  ok "prepare: 例が元の雛形の作り物の名前のままなら入れず、今の雛形の作り物の名前になる"
+else
+  ng "prepare (作り物の名前のまま)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(diff "${r}/want.nix" "${r}/w/new/flake.nix" 2>&1 | head -20)"
 fi
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)
