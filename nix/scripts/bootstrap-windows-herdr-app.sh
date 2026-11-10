@@ -23,7 +23,8 @@
 # ## 何をするか
 #
 # 1. ~/.local/state/dotfiles/windows-files.json (home-manager が置く) を読み、配らないマシンなら飛ばす。
-#    <windowsHome>/.config/powershell/Install-HerdrApp.ps1 が無いときも飛ばす
+#    <windowsHome>/.config/powershell/Install-HerdrApp.ps1 か、その隣の herdr-releases.json (固定した版。manifest が
+#    nix/pkgs/herdr-core/releases.json を配る) が無いときも飛ばす
 # 2. pwsh.exe で Install-HerdrApp.ps1 -Check を流す (何も変えない。ネットワークも使わない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。1 (揃っていない) か 3 (app が入っていない) なら Install-HerdrApp.ps1
@@ -122,6 +123,13 @@ windows_home=$(jq -r '.windowsHome // ""' "${state_file}")
 deployed="${windows_home}/.config/powershell/Install-HerdrApp.ps1"
 if [[ -z ${windows_home} || ! -f ${deployed} ]]; then
   echo "Install-HerdrApp.ps1 がまだ配られていません (${deployed})。この手順は飛ばします。"
+  exit 0
+fi
+releases="${windows_home}/.config/powershell/herdr-releases.json"
+if [[ ! -f ${releases} ]]; then
+  # 配る手順 (bootstrap-windows-files.sh) でこのファイルだけ衝突した、など。-Check は 2 を返すので、呼ばずに飛ばす
+  warn "Install-HerdrApp.ps1 が読む固定した版 (herdr-releases.json) がまだ配られていません (${releases})。この手順は飛ばします。" \
+    "nix/scripts/bootstrap-windows-files.sh で配ってから流し直してください。"
   exit 0
 fi
 

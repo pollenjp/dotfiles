@@ -93,7 +93,13 @@ let
         ]
       ) (builtins.attrNames f);
       base = f.base or "win";
-      baseDir = if base == "nix" then "${dirOf winDir}/nix" else winDir;
+      # winDir の末尾に / があっても、隣の nix/ を指す (dirOf "/r/win/" は "/r/win" になるので落としてから)
+      trimmedWinDir =
+        if builtins.match ".*/" winDir != null then
+          builtins.substring 0 (builtins.stringLength winDir - 1) winDir
+        else
+          winDir;
+      baseDir = if base == "nix" then "${dirOf trimmedWinDir}/nix" else winDir;
       srcPath = /. + "${baseDir}/${f.src}";
       m = builtins.match "(%[A-Z]+%)/(.*)" f.dst;
       root = builtins.elemAt m 0;

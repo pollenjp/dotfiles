@@ -1272,6 +1272,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 | `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
+| `dotfiles.herdrCore.enable`（`modules`） | Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -4725,12 +4726,14 @@ Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`]
 - 版は Windows の herdr-core と同じ (同じ `releases.json`。Windows へは manifest の `base = "nix"` で `herdr-releases.json` として配る)。
   同じ版なら、Windows の herdr-app・hc が machine としてつなぐときに、写し直しを聞かれない
 - `herdr-core` と `hc` を home.packages に入れ、`~/.local/bin/herdr-core`・`~/.local/bin/hc` も同じ binary へのリンクにする
-  ([下](#非対話の-ssh-から見つかるか))。前に `hc machine add --install` などで写したものは、リンクに置き換わる (force)。古い写しが残ると、
-  PATH で `~/.local/bin` が nix の profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる
+  ([下](#非対話の-ssh-から見つかるか))。前に `hc machine add --install` などで写したものは、リンクに置き換わる (force。home-manager は
+  中身が同じふつうのファイルを置き換えないので、リンクを張る前に activation が消す)。古い写しが残ると、PATH で `~/.local/bin` が nix の
+  profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる。同じ版の写しでも、store の外の書けるファイルのままだと、そこから
+  打つ `hc update` が nix のものとして断られず、公式の最新へ上がる (Linux には取得元のフィードが無い)
 - switch せずに試すなら:
 
   ```sh
-  nix run ./nix#herdr-core -- --version   # hc 0.1.17
+  nix run ./nix#herdr-core -- --version   # hc <固定した版>
   ```
 
 ### 非対話の SSH から見つかるか
@@ -4749,7 +4752,7 @@ remote の探し先の 1 つ目 (`command -v herdr-core`) は、非対話の SSH
 - store の core は、`hc update` が「nix のもの」として断る (`… belongs to nix`・`update it in your Nix configuration`)。実行ファイルの実体
   (`~/.local/bin` のリンクもたどる) が `/nix/store/` の下にあるため (herdr-core の `crates/herdr-core/src/client.rs` の `manager_of`)
 - dotfiles が入れたホストへ、ほかの machine から `hc machine update` (と herdr-app の machine の更新) を打たない。`~/.local/bin/herdr-core` を
-  落とした binary に置き換える (次の switch でリンクに戻る)
+  落とした binary に置き換える (次の switch が、同じ版でもリンクに戻す)
 - 版は `pkgs/herdr-core/releases.json` を上げる PR で、Windows と一緒に上げる ([`win/README.md`](../win/README.md#固定した版を上げる))。merge の後に
   各マシンで `~/dotfiles/setup --update` (Linux は home-manager の switch で、Windows は bootstrap が揃える)。上げた版と古い版の machine が
   混ざると、つなぐときに写し直しを聞かれる (too old to talk to) ので、続けて上げる
@@ -4759,6 +4762,15 @@ remote の探し先の 1 つ目 (`command -v herdr-core`) は、非対話の SSH
 dotfiles の home-manager を当てない Linux のホストへは、Windows の herdr-app・hc が machine を足すときに入れる (`~/.local/bin/herdr-core`)。
 Windows のフィード (`HERDR_RELEASES_URL`) の core の manifest には Linux (x86_64・aarch64) の target も載せているので、同じ版のその target の
 build を公式から落とし、固定した sha256 で確かめる (Linux の hc が同じフィードを読んで、sha256 が合わなければ断ることを確かめた)。
+Linux の hc から別の CPU の Linux (x86_64 と aarch64) へ入れるときは、Linux に取得元のフィードが無いので、公式の版つきの manifest の sha256 を
+使う (版は同じでも、dotfiles が固定した値は通らない)。macOS へは入れない (フィードに macOS の target を載せていない)。
+
+### 成果物を落とせないとき
+
+Linux の switch は、herdr-core の成果物を releases.herdr.dev から落とす (cache.nixos.org には無い)。その store path を持っていないホストでは、
+落とせない・sha256 が合わない (公開の後で差し替えられた) と switch が丸ごと落ちる。急いで setup を通すなら、そのホストで
+`dotfiles.herdrCore.enable = false` にする (表は[前述](#足したホストに書く値)。差し替えの扱いは
+[`win/README.md`「固定した版の成果物が変わったとき」](../win/README.md#固定した版の成果物が変わったとき))。
 
 ## CI
 

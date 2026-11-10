@@ -11,7 +11,8 @@
 #
 # ## 確かめること
 #
-#   - 配らないマシン・Install-HerdrApp.ps1 が無いときは pwsh.exe を呼ばずに飛ばす
+#   - 配らないマシン・Install-HerdrApp.ps1 が無いときは pwsh.exe を呼ばずに飛ばす。固定した版 (herdr-releases.json) が無い
+#     ときも呼ばずに、配り方を添えた警告を出して飛ばす
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ (※ の行は添える)
 #   - -Check が 1 (揃っていない) か 3 (app が入っていない) なら -IfMissing で揃える。揃えば ⚠ を出さず、揃いきらなければ
@@ -149,7 +150,7 @@ done
 
 # 1 ケースぶんの HOME を作る。
 #   $1: 名前、$2: windows-files.json の中身 (空なら作らない。@WIN@ は配り先に置き換える)
-#   $3: 1 なら Install-HerdrApp.ps1 を配った状態にする
+#   $3: 1 なら Install-HerdrApp.ps1 と herdr-releases.json を配った状態にする (2 なら Install-HerdrApp.ps1 だけ)
 # 配り先 (Windows のホームに見立てる) は <HOME>/win。
 new_home() {
   local h="${work}/$1"
@@ -157,9 +158,12 @@ new_home() {
   if [[ -n $2 ]]; then
     printf '%s\n' "${2//@WIN@/${h}/win}" >"${h}/.local/state/dotfiles/windows-files.json"
   fi
-  if [[ $3 == 1 ]]; then
+  if [[ $3 == 1 || $3 == 2 ]]; then
     mkdir -p "${h}/win/.config/powershell"
     printf '# Install-HerdrApp.ps1\n' >"${h}/win/.config/powershell/Install-HerdrApp.ps1"
+  fi
+  if [[ $3 == 1 ]]; then
+    printf '{}\n' >"${h}/win/.config/powershell/herdr-releases.json"
   fi
   # 偽の pwsh.exe。引数を記録し、出力を行ごとに CRLF で出して終わる。
   # -IfMissing の呼び出しは FAKE_PWSH_OUT2 / FAKE_PWSH_RC2、ほかは FAKE_PWSH_OUT / FAKE_PWSH_RC を使う
@@ -274,6 +278,16 @@ if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" 'まだ配ら�
   ok "Install-HerdrApp.ps1 が配られていなければ飛ばす"
 else
   ng "Install-HerdrApp.ps1 が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 3b. 固定した版 (herdr-releases.json) が配られていない: pwsh.exe を呼ばず、配り方を添えた警告を出して飛ばす
+h=$(new_home t3b "${state_on}" 2)
+run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" -F 'herdr-releases.json) がまだ配られていません' \
+  && seen "${h}" -F 'bootstrap-windows-files.sh で配ってから'; then
+  ok "固定した版 (herdr-releases.json) が配られていなければ、pwsh.exe を呼ばずに警告を出して飛ばす"
+else
+  ng "herdr-releases.json が無い" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 # 4. pwsh.exe が無い: 手で打つコマンドを出して exit 0

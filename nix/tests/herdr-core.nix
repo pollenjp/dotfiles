@@ -11,11 +11,13 @@
 #   - releases.json の形: app と core の版は X.Y.Z、generation は 1 以上の整数、sha256 は app の windows-x86_64 と、core の
 #     linux-aarch64・linux-x86_64・windows-x86_64 の 4 つで、どれも 64 桁の小文字の hex (Install-HerdrApp.ps1 と CI も読む)
 #   - Linux では既定で入る: home.packages に releases.json の core の版の herdr-core があり、~/.local/bin/herdr-core と hc が
-#     その bin/herdr-core へのリンクで、前からあるファイルを置き換える (force)
+#     その bin/herdr-core へのリンクで、前からあるファイルを置き換える (force)。リンクを張る前 (writeBoundary の後・linkGeneration
+#     の前) に、前に写したふつうのファイルを消す activation がある (中身が同じだと home-manager は置き換えないため)
 #   - Linux の package は、その system の公式の版つき URL (core/<版>/herdr-core-linux-<arch>.tar.gz) を、releases.json の
 #     sha256 で落とす
 #   - enable = false なら、package もリンクも置かない
-#   - macOS では既定で入らない。enable = true にすると assertion で評価が止まる (公式の Linux 版しか入れない)
+#   - macOS では既定で入らない。enable = true にすると assertion で評価が止まる (公式の Linux 版しか入れない)。module の
+#     assertion は Linux でだけ通り、message は Linux のホストだけと言う
 {
   lib,
   pkgs,
@@ -43,6 +45,13 @@ let
   byDefault = configWith [ ];
   disabled = configWith [ { dotfiles.herdrCore.enable = false; } ];
 
+  # module を直に読んだときの assertion (home-manager は落ちた assertion があると config を読む時点で throw するので、ここで見る)
+  moduleAssertions =
+    (import ../home/modules/herdr-core.nix {
+      config.dotfiles.herdrCore.enable = true;
+      inherit lib pkgs;
+    }).config.content.assertions;
+
   shapeCases = [
     {
       name = "releases.json の app と core の版は X.Y.Z";
@@ -51,6 +60,12 @@ let
     {
       name = "releases.json の core の generation は 1 以上の整数";
       ok = builtins.isInt releases.core.generation && releases.core.generation >= 1;
+    }
+    {
+      name = "module の assertion は Linux でだけ通り、message は Linux のホストだけと言う";
+      ok = builtins.all (
+        a: a.assertion == isLinux && lib.hasInfix "Linux のホストだけ" a.message
+      ) moduleAssertions;
     }
     {
       name = "releases.json の sha256 は app の windows-x86_64 と core の 3 つの target で、どれも 64 桁の小文字の hex";
@@ -91,6 +106,18 @@ let
         ok = isLink byDefault "herdr-core" && isLink byDefault "hc";
       }
       {
+        name = "リンクを張る前に、前に写したふつうのファイルを消す activation がある (writeBoundary の後・linkGeneration の前)";
+        ok =
+          let
+            a = byDefault.home.activation.herdrCoreLinks or null;
+          in
+          a != null
+          && a.after == [ "writeBoundary" ]
+          && a.before == [ "linkGeneration" ]
+          && lib.hasInfix ''run rm -f "$f"'' a.data
+          && lib.hasInfix "! -L $f" a.data;
+      }
+      {
         name = "package は、この system の公式の版つき URL を releases.json の sha256 で落とす";
         ok =
           pkg.src.urls == [
@@ -99,8 +126,12 @@ let
           && pkg.src.outputHash == releases.core.sha256.${target};
       }
       {
-        name = "enable = false なら、package もリンクも置かない";
-        ok = herdrCores disabled == [ ] && link disabled "herdr-core" == null && link disabled "hc" == null;
+        name = "enable = false なら、package もリンクも、消す activation も置かない";
+        ok =
+          herdrCores disabled == [ ]
+          && link disabled "herdr-core" == null
+          && link disabled "hc" == null
+          && !(disabled.home.activation ? herdrCoreLinks);
       }
     ];
 

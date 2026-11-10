@@ -11,8 +11,11 @@
 #   (single-user の Nix は ~/.profile にしか足さず、home-manager の ~/.bashrc は先頭で非対話を返す) でも、remote の探し先の
 #   2 つ目で見つかるように。multi-user の Nix の Ubuntu (この形の WSL) は、installer が /etc/bash.bashrc の先頭に足した行を
 #   SSH の bash が読むので、1 つ目 (command -v) で profile のものが見つかる
-# - 前に `hc machine add --install` などで写した ~/.local/bin/herdr-core・hc は、リンクに置き換える (force)。古い写しが残ると、
-#   PATH で ~/.local/bin が nix の profile より先に来て (home.sessionPath)、対話の hc が古い版になる
+# - 前に `hc machine add --install` などで写した ~/.local/bin/herdr-core・hc は、リンクに置き換える (force と、リンクの前に消す
+#   activation)。古い写しが残ると、PATH で ~/.local/bin が nix の profile より先に来て (home.sessionPath)、対話の hc が古い版になる。
+#   home-manager は、置き先がふつうのファイルで中身が同じなら (同じ版を写したもの) force でも置き換えないので、linkGeneration の前に
+#   消す。残すと store の外の書けるファイルになり、そこから打つ hc update は nix のものとして断られず、Linux には取得元のフィードが
+#   無いので公式の最新へ上がる
 # - store の core は `hc update` が「nix のもの」として断る (実行ファイルの実体が /nix/store/ の下)。dotfiles が入れたホストへは
 #   `hc machine update` を打たない (~/.local/bin/herdr-core を落とした binary に置き換え、次の switch でリンクに戻る)。版は
 #   releases.json を上げる PR で、Windows と一緒に上げる
@@ -47,5 +50,15 @@ in
       source = bin;
       force = true;
     };
+
+    # 前に写した ~/.local/bin/herdr-core・hc (ふつうのファイル) を、リンクを張る前に消す (上の冒頭のコメント)
+    home.activation.herdrCoreLinks = lib.hm.dag.entryBetween [ "linkGeneration" ] [ "writeBoundary" ] ''
+      for f in "$HOME/.local/bin/herdr-core" "$HOME/.local/bin/hc"; do
+        if [[ -e $f && ! -L $f ]]; then
+          verboseEcho "herdr-core: 前に写した $f を消す (nix のものへのリンクにする)"
+          run rm -f "$f"
+        fi
+      done
+    '';
   };
 }

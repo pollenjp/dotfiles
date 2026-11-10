@@ -487,11 +487,12 @@ herdr-app の machine (SSH でつなぐ先) は、その machine の herdr-core 
 | Linux (dotfiles の home-manager) | `home/modules/herdr-core.nix` が、既定で全部の Linux のホストに `herdr-core`・`hc` を入れ、`~/.local/bin/herdr-core`・`hc` も同じ binary へのリンクにする ([`nix/README.md`「herdr-core (hc) を Nix で入れる」](../nix/README.md#herdr-core-hc-を-nix-で入れる)) |
 | Windows | `Install-HerdrApp.ps1` が公式と同じ置き場所に入れる (remote が探す場所と同じ) |
 | dotfiles を当てない Linux | herdr-app・hc が machine を足すときに `~/.local/bin/herdr-core` に入れる。取得元はフィードで、同じ版の Linux の build を固定した sha256 で確かめる |
+| macOS | 対象外。フィードに macOS の target を載せていないので、Windows の herdr-app・hc から Mac に core を入れようとすると断られる (Mac には自分で入れる) |
 
 - 版はどれも `nix/pkgs/herdr-core/releases.json` の core の版。同じ版なら、machine を足す・つなぐときに写し直しを聞かれない (古いと too old to talk to
   で写し直しを聞かれる)
 - dotfiles が入れたホストへは `hc machine update` (と herdr-app の machine の更新) を打たない。Linux では `~/.local/bin/herdr-core` を落とした binary に
-  置き換え (次の switch でリンクに戻る)、Windows では固定した版より新しい版を入れうる。版は下の手順で、Windows と Linux を同じ PR で上げる
+  置き換え (次の switch が、同じ版でもリンクに戻す)、Windows では固定した版より新しい版を入れうる。版は下の手順で、Windows と Linux を同じ PR で上げる
 - Linux の store の core は、`hc update` が「nix のもの」として断る (`update it in your Nix configuration`)
 
 ### 固定した版を上げる
@@ -532,6 +533,9 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
 - `Install-HerdrApp` は sha256 が合わない成果物を入れないので、新しいマシンにはその版を入れられなくなる。入っているマシンはそのまま
 - 固定した値を今の値に書き換えない (差し替えられた中身を受け入れることになる)。herdr の repo の issue・release notes で差し替えのわけを
   確かめ、分からなければ、ほかの版 (前の版か、7 日たった次の版) に固定を移す
+- core の Linux の成果物が差し替えられると、その store path をまだ持っていない Linux のホストは switch が落ちる (持っているホストは
+  そのまま)。急いで setup を通すなら、そのホストで `dotfiles.herdrCore.enable = false` にする
+  ([`nix/README.md`「herdr-core (hc) を Nix で入れる」](../nix/README.md#herdr-core-hc-を-nix-で入れる))
 
 ### herdr-app を外す
 
@@ -556,6 +560,8 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
 - 外したものと残したものを出し、読み直して外しきれたかを確かめる (残っていれば終了コード 1)
 - dotfiles が管理する間は、外した後の `setup --update` が入れ直す (bootstrap は app が無ければ入れる)。入れ直させたくないとき
   (winget に移るなど) は、次の「winget に載ったら」の順で進める
+- `Install-HerdrApp` は隣の固定した版のファイル (`herdr-releases.json`) を読むので、それが無いと `-Uninstall` も終了コード 2 で止まる。配り直すか
+  (`setup --update`)、repo の `nix/pkgs/herdr-core/releases.json` を `-ReleasesFile <Windows のパス>` で渡せば外せる
 
 ### winget に載ったら
 

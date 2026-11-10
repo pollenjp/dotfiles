@@ -83,7 +83,8 @@ function Get-HerdrAppArchitecture {
 $HerdrAppCoreTargets = @('linux-aarch64', 'linux-x86_64', 'windows-x86_64')
 
 # 固定した版のファイル (herdr-releases.json) の中身を、流れが使う形 (AppVersion・AppSha256・CoreVersion・CoreGeneration・
-# CoreSha256 (Windows)・CoreTargets (target → sha256)) にする。書き方の誤りは Test-HerdrAppPins が見る。JSON でなければ例外
+# CoreTargets (target → sha256。Windows の core は CoreTargets['windows-x86_64'])) にする。書き方の誤りは Test-HerdrAppPins が
+# 見る。JSON でなければ例外
 function ConvertFrom-HerdrAppReleases {
     param([string]$Text)
     $json = $Text | ConvertFrom-Json -ErrorAction Stop
@@ -104,7 +105,6 @@ function ConvertFrom-HerdrAppReleases {
         AppSha256      = & $get (& $get $app 'sha256') 'windows-x86_64'
         CoreVersion    = & $get $core 'version'
         CoreGeneration = & $get $core 'generation'
-        CoreSha256     = $targets['windows-x86_64']
         CoreTargets    = $targets
     }
 }
@@ -1001,7 +1001,7 @@ function Install-HerdrCorePackage {
         $exe = Join-Path $CoreDir 'herdr-core.exe'
         $src = if (Test-Path -LiteralPath $exe) { 'update' } else { 'install' }
         Save-HerdrAppDownload -Url (Get-HerdrAppDownloadUrl -Url $url -Releases $Releases -Src $src) -OutFile $archive
-        Assert-HerdrAppSha256 -Path $archive -Expected $Pins.CoreSha256
+        Assert-HerdrAppSha256 -Path $archive -Expected $Pins.CoreTargets['windows-x86_64']
         $unpacked = Join-Path $tmp 'hc'
         New-Item -ItemType Directory -Force $unpacked | Out-Null
         $unzip = Invoke-HerdrAppNative -FilePath $Tar -Arguments @('-xf', $archive, '-C', $unpacked)
@@ -1208,6 +1208,8 @@ if ($MyInvocation.InvocationName -ne '.') {
             Write-Host "固定した版のファイル $file が無い (setup --update で配る。repo では nix/pkgs/herdr-core/releases.json)" -ForegroundColor Red
             exit 2
         }
+        # 相対パスは PowerShell の今の場所で解く (.NET の ReadAllText はプロセスの作業ディレクトリで解くので、cd の後にずれる)
+        $file = Convert-Path -LiteralPath $file
         $pins = ConvertFrom-HerdrAppReleases -Text ([IO.File]::ReadAllText($file))
         exit (Invoke-InstallHerdrApp -Check:$Check -IfMissing:$IfMissing -Uninstall:$Uninstall -Pins $pins)
     } catch {
