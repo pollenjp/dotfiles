@@ -44,17 +44,26 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
 ## 新しいリポジトリへ入れる
 
 1. `flake.nix` は**追跡先を指したままにする**（`nixpkgs-unstable` など）。
-   revision の直書きはしない。pin は `flake.lock` にだけ置く
+   revision の直書きはしない。pin は `flake.lock` にだけ置く。道具だけの devShell なら、
+   flake だけのディレクトリ（例: `nix/`）に置く（SKILL.md の「flake を置く場所」）
 2. lock は最初の 1 本目からこちらで作る。素の `nix flake update` / `nix flake lock`
    は使わない
 
    ```sh
-   git add flake.nix   # flake は git の追跡済みファイルしか見ない
-   nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
+   git add nix/flake.nix   # commit する。素のパスで読む nix (repo の root の flake など) は git の追跡済みファイルしか見ない
+   nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update nix
    ```
 
    **`flake.lock` がまだ無くてもこれで作られる。** 先に `nix flake lock` を打っては
-   いけない（一度先端へ pin される）。更新するときも同じコマンド
+   いけない（一度先端へ pin される）。更新するときも同じコマンド。新しく作った
+   `flake.lock` は、git の作業ツリーの中なら update が `git add --intent-to-add` まで済ませる
+   （commit は自分で）
+
+   `update` は `nix flake update` を、`flake.nix` と `flake.lock` だけを写した一時ディレクトリで
+   打ち、出来た `flake.lock` を戻す（`nix flake update` が読むのはこの 2 つだけ）。flake の
+   ディレクトリを素のパスで渡すと、git の repo の中では repo 全体が `/nix/store` へ写るため。
+   相対パスの input（`path:./x`・`git+file:./x` など）を持つ flake だけは、写した先から辿れない
+   ので、その場で update する（repo が写る）
 
    `update` は完了時に、その lock で実際に入る閉包のスキャン（`closure-scan`、
    OSV / GHSA / NVD 照合）を自動で差し込む。whitelist
@@ -62,7 +71,10 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
    **表に目を通してからツールを実行する**こと（そのための差し込み）。ゲート化
    したければ `closure-scan baseline` で基準線を作る。`--no-scan` で飛ばせる。
    なぜスキャンするのかは dotfiles の ADR 006（遅延は「発覚済みの侵害バージョンを
-   固定し続ける」リスクを新しく作るので、advisory との照合で塞ぐ）
+   固定し続ける」リスクを新しく作るので、advisory との照合で塞ぐ）。スキャンは flake を
+   評価するので一時ディレクトリの写しでは足りず、flake のディレクトリを読む。flake だけの
+   ディレクトリ（下にディレクトリを持たない）は `path:` で読むので repo は写らない。下に
+   ディレクトリを持つ flake は素のパスで読む（git の repo の中なら、ここで repo が写る）
 
    スキャナの sbomnix も、その lock の pin から組む（スキャナにも同じ遅延を効かせる）。
    pin で組めなければ、dotfiles の pin（`nix run` の app を組んだときの dotfiles の

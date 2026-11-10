@@ -246,6 +246,13 @@ lock を作る・上げる入口はここしか無いので、「新しい pin �
 ではゲートとして働き、新規 findings があると失敗する（lock 自体は更新済み）。
 whitelist の無い flake（初回の lock など）では表示だけ。`--no-scan` で飛ばせる。
 
+`update` は `nix flake update` を、`flake.nix` と `flake.lock` だけを写した一時ディレクトリで打ち、出来た
+`flake.lock` を戻す（`nix flake update` が読むのはこの 2 つだけ）。flake のディレクトリを素のパスで渡すと、
+git の repo の中では nix が repo 全体（追跡しているファイル。commit していない変更も）を `/nix/store` へ写し、
+作業ツリーが変わるたびに写しが増えるため。相対パスの input（`path:./x` など）を持つ flake だけは、写した先から
+辿れないのでその場で update する。新しく作った lock は、git の作業ツリーの中なら `git add --intent-to-add` する
+（nix がその場で作るときと同じ。追跡していない lock は素のパスで読む nix に見えず、先端で作り直される）。
+
 `flake.lock` がまだ無い flake でも `resolve` / `update` は通る（input の一覧を
 `flake.nix` の `inputs` から読む）。**flake を新しく足したときの 1 本目の lock も
 `update` で作ること。** 先に `nix flake lock` を打つと一度先端へ pin されるので、
@@ -475,6 +482,10 @@ stdout にも stderr のログにも出るので拾わない）。findings が 0
 対象の属性は flake で変わる。dotfiles 本体は home 閉包
 （`homeConfigurations.sandbox`）、それ以外の flake は `devShells.<system>.default`
 （「これから実行するツール」は devShell に入っているものなので）。`--attr` で変えられる。
+
+flake だけのディレクトリ（下にディレクトリを持たない）は `path:` で読む（git の repo の中でも、repo を
+`/nix/store` へ写さない）。下にディレクトリを持つ flake（本体の `nix/`・skill のディレクトリ・repo の root）は
+素のパスで読む（`path:` は git を見ずにディレクトリの中身を全部写すので、書き出しや `.git` まで写さないため）。
 
 落ちたときの対応は 2 択。
 

@@ -46,9 +46,10 @@ git diff --stat out/            # 出力が変わっていないか確認する
 `PLANTUML_VERSION` のような明示の指定は無くなる。
 
 ```sh
-cd ~/dotfiles/nix/files/claude/skills/pjp-plantuml
-nix flake update
-git add flake.lock              # store は read-only なので lock は必ず commit する
+cd ~/ghq/github.com/pollenjp/dotfiles   # 本体のチェックアウト (~/dotfiles はローカル flake の置き場所)
+# 素の nix flake update は使わない (遅延が外れ、git の repo 全体を /nix/store へ写す)
+./nix/scripts/flake-lock-age.sh update nix/files/claude/skills/pjp-plantuml
+git add nix/files/claude/skills/pjp-plantuml/flake.lock   # store は read-only なので lock は必ず commit する
 ```
 
 nixpkgs より新しい版がどうしても要る場合だけ、`flake.nix` の中で上書きする。
@@ -78,13 +79,16 @@ hash は `nix store prefetch-file <url>` で取る。
 
 ```sh
 cp ~/.claude/skills/pjp-plantuml/flake.nix plantuml/
-git add plantuml/flake.nix   # flake は git の追跡済みファイルしか見ない
+git add plantuml/flake.nix   # 素のパスで読む nix (update の後のスキャンなど) は git の追跡済みファイルしか見ない
 nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update ./plantuml
 git add plantuml/flake.lock
 ```
 
-以降は `nix develop ./plantuml --command plantuml ...` や
-`nix run ./plantuml#plantuml -- ...` が使える。スクリプトそのものを CI で使いたい
+以降は `nix develop path:./plantuml --command plantuml ...` や
+`nix run path:./plantuml#plantuml -- ...` が使える。素のパス（`./plantuml`）で読むと、git の repo の
+中では repo 全体を `/nix/store` へ写す（作業ツリーが変わるたびに別の写し）。`path:` は `plantuml/` の
+中身（`.puml` と `out/` を含む。git で外したファイルも）を写すので、大きいものや秘密を置かない
+（`pjp-nix-flake` skill の「flake を置く場所」）。スクリプトそのものを CI で使いたい
 場合は `scripts/plantuml-export.sh` もコピーする（skill 側の `flake.lock` と
 プロジェクト側の `flake.lock` は別管理になる）。
 
