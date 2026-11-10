@@ -369,7 +369,8 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
    消すが、ユーザーの PATH に足した行 (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\Herdr.Herdr.Preview_…`) は残す
    (Preview の ARP に `InstallDirectoryAddedToPath` があっても消さない。2026-11-10 にこの PC で確かめた。winget v1.29.380)。
    残った行に害は無い (ディレクトリが無いので PATH ではその行が飛ばされ、後ろの `Herdr.Herdr` の herdr が引かれる)。
-   消すなら手で消す (環境変数の画面で、ユーザーの `Path` からその行を外すなど。`Install-Herdr` は PATH を直さない)
+   消すなら手で、「アカウントの環境変数を編集」の画面でユーザーの `Path` からその行を外す (2026-11-11 にこの PC で消せた。
+   値の型の REG_EXPAND_SZ も変わらなかった)。`Install-Herdr` は PATH を直さない
 3. 続けて `winget pin remove --id Herdr.Herdr.Preview --exact` で Preview の pin を外す (Preview を外す前に打つと、
    `Herdr.Herdr` として数えられた Preview の行に当たりうる)
 4. 新しい PowerShell から herdr を起動し直し、`Install-Herdr -Check` が「揃っている」になること (「PATH の herdr」が
