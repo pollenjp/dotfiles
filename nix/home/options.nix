@@ -22,6 +22,7 @@
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
 #   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
+#   dotfiles.cursorAgent.enable                  cursor-agent (Cursor の CLI) を mise で入れるか (既定 false。setup が入れた版に固定する)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #   dotfiles.ntn.keyring                         ntn (Notion CLI) の config.json の keyring (null なら触らない。false で token を auth.json に置く)
@@ -455,6 +456,28 @@ in
         nix/README.md の「遅延 (minimum_release_age) を期間付きで緩める」。
       '';
     };
+  };
+
+  options.dotfiles.cursorAgent.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    example = true;
+    description = ''
+      cursor-agent (Cursor の CLI) を mise で入れるか。既定は false で、入れるホストだけ、そのホストの modules
+      (dotfiles-private の `nix/hosts/<ホスト>.nix` か、ローカル flake の tmp。mkHome の引数ではない) で true にする。
+
+      - true: nix/scripts/bootstrap-mise.sh が `~/dotfiles/setup --update` のたびに、出てから claude と同じ遅延
+        (1d。dotfiles.mise.releaseAgeOverrides の上書き中は上限) を過ぎた一番新しい版を決め、mise の宣言
+        `~/.config/mise/conf.d/dotfiles-cursor-agent.toml` に版そのものを書いて入れる (雛形は
+        files/mise/conf.d/cursor-agent.toml)。版を指すので、どのディレクトリの素の `mise install` も遅延で落ちない
+      - false: 宣言を置かない (setup が前に書いた宣言は消す)。mise は cursor-agent を知らず、素の `mise install` も
+        触らない。入っている版は消さず、dotfiles.cleanup.enable のマシンなら週 1 回の掃除の `mise prune` が消す。今すぐ
+        消すなら `mise uninstall --all cursor-agent`
+
+      値は `~/.local/state/dotfiles/cursor-agent.json` (home/modules/cursor-agent.nix) に落ち、bootstrap-mise.sh が読む。
+      反映は `~/dotfiles/setup --update` で、`home-manager switch` だけでは宣言も版も変わらない。書き方と、on にする行を
+      足す順番 (この option を持つ本体が先) は nix/README.md の「`cursor-agent` も mise に置いている理由」。
+    '';
   };
 
   options.dotfiles.ccPages.port = lib.mkOption {

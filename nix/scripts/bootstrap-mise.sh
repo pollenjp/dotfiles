@@ -16,7 +16,7 @@
 #   setup の「残りの手作業」の手順 5 は、[tools] のうちこれ以外の名前 (前の setup や旧経路が書いた
 #   もの・Nix に移した道具など) を、手で消すものとして並べる。下の mise use -g を足す・変える・消す
 #   ときは、ここも直す (nix/tests/bootstrap-mise.test.sh が突き合わせる)。cursor-agent は [tools] に
-#   書かない (conf.d の宣言を使う。下の cursor-agent の節) ので並べない。
+#   書かない (on のホストだけ、conf.d に版を指した宣言を書く。下の cursor-agent の節) ので並べない。
 #
 # ## なぜ Nix で管理しないのか
 #
@@ -109,7 +109,7 @@ shape_jq='
 # 書く値を決める (冒頭の「遅延と、期間を区切った上書き」の表)。出すもの:
 #
 #   setting  minimum_release_age に書く値 (上書き中なら上限の日時、無ければ既定)
-#   claude   claude (と cursor-agent) を入れるときの MISE_MINIMUM_RELEASE_AGE (下の claude の節)
+#   claude   claude を入れるとき・cursor-agent の版を引くときの MISE_MINIMUM_RELEASE_AGE (下の claude と cursor-agent の節)
 #   age      既定 (minimumReleaseAge)
 #   use      上限を書く項目 (無ければ null)。ended (終わった)・pending (まだ) は from・zeroDays・reason の順に並べる
 #            (list の順は home-manager の module system が決めるので頼らない。上限が同じ項目のどれを出すかも決まる)
@@ -246,28 +246,253 @@ echo "==> claude (役割分担の例外)"
 # 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
 MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise use -g claude@latest
 
-echo "==> cursor-agent (Cursor の CLI。役割分担の例外)"
-# claude と同じ理由 (リリースの頻度が flake.lock の更新の周期に合わない) で mise に置き、同じ遅延 (claude_age) で入れる。
-# 何を入れるか (mise の registry の cursor-agent と、そこから変えたところ) は ~/.config/mise/conf.d/cursor-agent.toml
-# (nix/files/mise/conf.d/cursor-agent.toml) に書いてあり、ここは入れて上げるだけ。mise use -g は使わない
-# (config.toml に書くと、conf.d の宣言がまるごと隠れる)。
+echo "==> cursor-agent (Cursor の CLI。役割分担の例外。dotfiles.cursorAgent.enable のホストだけ)"
+# claude と同じ理由 (リリースの頻度が flake.lock の更新の周期に合わない) で mise に置く。入れるのは host option
+# dotfiles.cursorAgent.enable (既定 false) のホストだけ。home-manager が on / off を状態ファイル
+# (~/.local/state/dotfiles/cursor-agent.json。nix/home/modules/cursor-agent.nix) に置き、ここで読む。
 #
-# install はまだ入っていないときだけ入れ (入っていれば何もしない)、upgrade は遅延を過ぎた新しい版があれば上げる。
-# mise が知る版は最新の 1 つだけ (Cursor は版の一覧を出さず、mise は公式のインストーラから今の版を読む) で、版の日付は
-# 日までなので、遅延はその日の終わりから数える (1d なら 10/22 の版は 10/23 の終わりから)。それまでは取れる版が無く、
-# install は落ち、upgrade は mise の警告だけを出して入っている版のまま終わる。ここで止めると後ろの bootstrap が
-# 走らないので、落ちたら警告して続ける。
-cursor_conf="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/conf.d/cursor-agent.toml"
-if [[ ! -e ${cursor_conf} ]]; then
-  warn "cursor-agent (Cursor の CLI) の宣言がありません: ${cursor_conf}" \
-    "先に home-manager switch してください (~/dotfiles/setup --update なら続けて流れます)。cursor-agent は入れません。"
-elif ! MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise install cursor-agent; then
-  warn "cursor-agent (Cursor の CLI) を入れられませんでした (上の mise のエラー)。" \
-    "mise が知る版は最新の 1 つだけなので、それが遅延 (${claude_age}) を過ぎるまでは取れる版がありません。" \
-    "過ぎたあとの ~/dotfiles/setup --update で入ります。すぐ入れるなら mise install cursor-agent@<版> (エラーに出ている版)。"
-elif ! MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise upgrade cursor-agent; then
-  warn "cursor-agent (Cursor の CLI) を上げられませんでした (上の mise のエラー)。入っている版のままです。"
-fi
+# 宣言 (~/.config/mise/conf.d/dotfiles-cursor-agent.toml) は home-manager ではなくここで書き、version に版そのもの
+# (2026.11.05-86047df の形) を書く。latest を宣言すると素の mise install が落ちる: mise が知る版は最新の 1 つだけ
+# (Cursor は版の一覧を出さず、mise は公式のインストーラから今の版を読む) で、それが遅延 (config.toml の
+# minimum_release_age。既定 9d) の中にあると候補が 0 になる。Cursor はおおむね 1〜3 日おきに出すので、9d を過ぎた
+# 最新の版がある日はほとんど来ない。版を指した宣言なら mise は遅延を見ないので、どのディレクトリの mise install も落ちない。
+#
+# 版の決め方 (on。--update のたび):
+#
+#   1. claude と同じ遅延 (claude_age) で mise latest cursor-agent を引く (遅延の中なら何も出さずに 0 で終わる。版の日付は
+#      日までなので、遅延はその日の終わりから数える)
+#   2. 出なければ今の宣言の版 (版の形のときだけ。手で latest に書き換えたものは使わない)、それも無ければ入っている
+#      一番新しい版 (前の作りで入れた版もここで拾う)
+#   3. どれも無ければ宣言を書かずに警告する (版を指していない宣言が残っていれば消す。次の --update で入る)
+#   4. 雛形 (nix/files/mise/conf.d/cursor-agent.toml) の @version@ を版に替えて宣言に書き、mise install cursor-agent を
+#      打つ (版を指すので遅延の env は付けない。postinstall も宣言から効く)。落ちたら宣言を前の中身に戻し (無かったら
+#      消し)、警告する
+#
+# mise upgrade cursor-agent は使わない (上げるのは宣言の版を書き換えること)。mise use -g cursor-agent も打たない
+# (config.toml の宣言は conf.d より強く、まるごと置き換わり、bin_path が registry の dist-package に戻る)。
+#
+# 宣言の名前を前の home-manager の宣言 (cursor-agent.toml) と変えたのは、home-manager の古い世代へ戻したとき、その世代が
+# 張る symlink がここで書いた普通のファイルにぶつかって activate が止まるため。mise は global の conf.d を名前の順に読み、
+# 同じツールの宣言は後ろのファイルが勝つ (mise 2026.10.17 で確かめた) ので、古い世代の latest の宣言が並んでも、辞書順で
+# 後ろのこの宣言が勝つ。
+#
+# ここで書いた宣言は 1 行目の印 (cursor_mark) で見分け、印の無いファイル・symlink は手で置いたものとして消さない・
+# 書き換えない。off なら印つきの宣言を消し、入っている版は消さない (dotfiles.cleanup.enable のマシンなら週 1 回の掃除の
+# mise prune が消す。今すぐなら mise uninstall --all cursor-agent)。状態ファイルが無い・形が違う・jq が無いときは、警告して
+# 宣言に触らない。どの場合もここでは止めない (止めると後ろの bootstrap が走らない)。
+cursor_state="${HOME}/.local/state/dotfiles/cursor-agent.json"
+cursor_decl="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/conf.d/dotfiles-cursor-agent.toml"
+# ここで書いた宣言の 1 行目の頭。見るのは頭だけで、後ろの文言は変えてよい
+cursor_mark="# dotfiles-managed: nix/scripts/bootstrap-mise.sh"
+
+# 宣言の場所に何かあるか (壊れた symlink も数える)
+cursor_decl_exists() { [[ -e ${cursor_decl} || -L ${cursor_decl} ]]; }
+
+# 宣言がここで書いたものか (symlink でない普通のファイルで、1 行目が印で始まる)
+cursor_decl_is_ours() {
+  local first=""
+  [[ -f ${cursor_decl} && ! -L ${cursor_decl} ]] || return 1
+  IFS= read -r first <"${cursor_decl}" || [[ -n ${first} ]] || return 1
+  [[ ${first} == "${cursor_mark}"* ]]
+}
+
+# 宣言の最初の version = "<版>" の版を出す (無ければ何も出さない)
+cursor_decl_version() {
+  local line
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    if [[ ${line} =~ ^version\ =\ \"([^\"]*)\"$ ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done <"${cursor_decl}"
+  return 0
+}
+
+# 版の形 (Cursor の版は 2026.11.05-86047df のように数字で始まる)。TOML の文字列を壊す文字と、latest・lts のような語を
+# 通さない (印つきの宣言を手で latest に書き換えられても、それを版として書き戻さない。latest の宣言では素の mise install が
+# 遅延で落ちる)
+cursor_version_ok() { [[ $1 =~ ^[0-9][0-9A-Za-z._+-]*$ ]]; }
+
+# 宣言の雛形のパス (この script のいる checkout の nix/files/mise/conf.d/cursor-agent.toml)
+cursor_template() {
+  local dir
+  dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd -P) || return 1
+  printf '%s\n' "${dir%/scripts}/files/mise/conf.d/cursor-agent.toml"
+}
+
+# 宣言の中身を出す: 印と説明の行に続けて、雛形の [tools.cursor-agent] の行から終わりまでを、@version@ を $1 に替えて。
+# 雛形が読めない・[tools.cursor-agent] の行が無い・version = "@version@" の行がちょうど 1 つでないときは 1 を返す
+cursor_render() {
+  local ver=$1 tmpl line started=0 holes=0 text=""
+  tmpl=$(cursor_template) || return 1
+  [[ -f ${tmpl} && -r ${tmpl} ]] || return 1
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    if ((started == 0)); then
+      [[ ${line} == '[tools.cursor-agent]' ]] || continue
+      started=1
+    fi
+    if [[ ${line} == 'version = "@version@"' ]]; then
+      holes=$((holes + 1))
+      line="version = \"${ver}\""
+    fi
+    text+="${line}"$'\n'
+  done <"${tmpl}"
+  ((started == 1 && holes == 1)) || return 1
+  printf '%s が書いた cursor-agent の宣言 (dotfiles.cursorAgent.enable)。手で直しても次の ~/dotfiles/setup --update で書き直す\n' "${cursor_mark}"
+  printf '# 雛形は dotfiles の nix/files/mise/conf.d/cursor-agent.toml (何を変えているか・なぜ版そのものかはそちら)\n'
+  printf '%s' "${text}"
+}
+
+# 宣言に $1 を書く (conf.d を作り、同じディレクトリの一時ファイルに書いて mv で置き換える)。書けなければ 1
+cursor_write() {
+  local text=$1 dir tmp
+  dir=${cursor_decl%/*}
+  mkdir -p -- "${dir}" || return 1
+  # 名前が .toml で終わらないので、書いている間も mise は読まない
+  tmp=$(mktemp "${dir}/.dotfiles-cursor-agent.toml.XXXXXX") || return 1
+  if printf '%s\n' "${text}" >"${tmp}" && chmod 644 -- "${tmp}" && mv -f -- "${tmp}" "${cursor_decl}"; then
+    return 0
+  fi
+  rm -f -- "${tmp}"
+  return 1
+}
+
+# on: 版を決めて宣言に書き、入れる (上の「版の決め方」)
+cursor_on() {
+  local had=0 changed=0 prev="" cur="" before="宣言が無かった" latest="" target="" from="" text="" back="" dropped=""
+  if cursor_decl_exists && ! cursor_decl_is_ours; then
+    warn "cursor-agent の宣言の場所に、setup が書いたものでないファイルがあります: ${cursor_decl}" \
+      "1 行目が印 (${cursor_mark}) で始まらない・symlink なので書き換えず、cursor-agent も入れません (mise はそのファイルの宣言を使います)。" \
+      "setup に任せるなら、そのファイルを消してから ~/dotfiles/setup --update を流してください。"
+    return 0
+  fi
+  if cursor_decl_exists; then
+    had=1
+    prev=$(cat -- "${cursor_decl}") || prev=""
+    cur=$(cursor_decl_version)
+    before=${cur:-版の無い宣言}
+  fi
+
+  if ! latest=$(MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise latest cursor-agent); then
+    echo "  遅延 (${claude_age}) を過ぎた版を引けませんでした (上の mise のエラー)。今の宣言か、入っている版で入れます"
+    latest=""
+  fi
+  if [[ -n ${latest} ]]; then
+    target=${latest}
+    from="遅延 (${claude_age}) を過ぎた一番新しい版"
+  elif [[ -n ${cur} ]] && cursor_version_ok "${cur}"; then
+    target=${cur}
+    from="遅延 (${claude_age}) を過ぎた版が無いので、今の宣言の版"
+  else
+    # 宣言の版が版の形でない (手で latest に書き換えたなど) ときは、その版を使わずに入っている版へ進む
+    if [[ -n ${cur} ]]; then
+      echo "  今の宣言の版 (${cur}) は版の形でないので使いません。入っている一番新しい版で書き直します"
+    fi
+    if target=$(mise latest --installed cursor-agent) && [[ -n ${target} ]]; then
+      from="遅延 (${claude_age}) を過ぎた版も、版を指した宣言も無いので、入っている一番新しい版"
+    else
+      # ここに来て宣言があるなら、その宣言は版を指していない。残すと素の mise install が遅延で落ちうる (入っている版も
+      # 無いので、消しても使える cursor-agent は減らない)
+      dropped=""
+      if ((had)) && rm -f -- "${cursor_decl}"; then
+        dropped="版を指していない宣言 (${before}) は消しました。"
+      fi
+      warn "cursor-agent の版を決められませんでした: 遅延 (${claude_age}) を過ぎた版も、版を指した宣言も、入っている版もありません。" \
+        "${dropped}宣言は書かず、cursor-agent は入れません。出てから ${claude_age} を過ぎた後の ~/dotfiles/setup --update で入ります。"
+      return 0
+    fi
+  fi
+  if ! cursor_version_ok "${target}"; then
+    warn "cursor-agent の版の形が違うので使いません: ${target} (${from})" \
+      "宣言には触らず、cursor-agent は入れません。"
+    return 0
+  fi
+  if ! text=$(cursor_render "${target}"); then
+    warn "cursor-agent の宣言の雛形が無いか、形が違います: $(cursor_template || echo nix/files/mise/conf.d/cursor-agent.toml)" \
+      "[tools.cursor-agent] の行と、version = \"@version@\" の行がちょうど 1 つ要ります。宣言には触らず、cursor-agent は入れません。"
+    return 0
+  fi
+
+  if ((had)) && [[ ${prev} == "${text}" ]]; then
+    echo "  宣言は ${target} のまま (${from}): ${cursor_decl}"
+  elif cursor_write "${text}"; then
+    changed=1
+    echo "  ${target} を宣言に書いた (${from}。前は ${before}): ${cursor_decl}"
+  else
+    warn "cursor-agent の宣言を書けませんでした: ${cursor_decl}" "cursor-agent は入れません。"
+    return 0
+  fi
+
+  if ! mise install cursor-agent; then
+    if ((changed == 0)); then
+      back="宣言は ${target} のままです"
+    elif ((had)); then
+      if cursor_write "${prev}"; then
+        back="宣言は前の中身 (${before}) に戻しました"
+      else
+        back="宣言を前の中身 (${before}) に戻せませんでした (${cursor_decl} を確かめてください)"
+      fi
+    elif rm -f -- "${cursor_decl}"; then
+      back="書いた宣言は消しました (前は無かった)"
+    else
+      back="書いた宣言を消せませんでした (${cursor_decl} を確かめてください)"
+    fi
+    warn "cursor-agent (Cursor の CLI) の ${target} を入れられませんでした (上の mise のエラー)。" \
+      "${back}。次の ~/dotfiles/setup --update で入れ直します。"
+  fi
+  return 0
+}
+
+# off: ここで書いた宣言を消す。入っている版は消さない (週 1 回の掃除の mise prune が消す)
+cursor_off() {
+  local left=""
+  echo "  入れない (dotfiles.cursorAgent.enable = false)"
+  if cursor_decl_is_ours; then
+    if rm -f -- "${cursor_decl}"; then
+      echo "  setup が前に書いた宣言を消した: ${cursor_decl}"
+    else
+      warn "cursor-agent の宣言を消せませんでした: ${cursor_decl}" \
+        "dotfiles.cursorAgent.enable = false ですが、mise はこの宣言の cursor-agent を使い続けます。手で消してください。"
+    fi
+  elif cursor_decl_exists; then
+    echo "  ${cursor_decl} は setup が書いたものでない (1 行目が印で始まらない・symlink) ので残す (mise はその宣言を使う)"
+    return 0
+  fi
+  if left=$(mise latest --installed cursor-agent 2>/dev/null) && [[ -n ${left} ]]; then
+    echo "  入っている cursor-agent の版が残っています (一番新しいもの: ${left})。dotfiles.cleanup.enable (既定 true) のマシンなら、どの設定も使っていなければ週 1 回の掃除 (mise prune) で消えます。今すぐ消すなら: mise uninstall --all cursor-agent"
+  fi
+  return 0
+}
+
+# 状態ファイルを読み、on なら cursor_on、off なら cursor_off。読めなければ警告して宣言に触らない
+cursor_agent() {
+  local enable=""
+  if ! command -v jq &>/dev/null; then
+    warn "jq が見つかりません。cursor-agent を入れるか (dotfiles.cursorAgent) の状態ファイルを読めません。" \
+      "先に home-manager switch を実行してください。cursor-agent の宣言には触りません。"
+    return 0
+  fi
+  if [[ ! -r ${cursor_state} ]]; then
+    warn "cursor-agent を入れるかの状態ファイルがありません: ${cursor_state}" \
+      "dotfiles.cursorAgent を持つ世代へ先に home-manager switch してください (~/dotfiles/setup --update なら続けて流れます)。" \
+      "cursor-agent の宣言には触りません。"
+    return 0
+  fi
+  # 空のファイル (jq は何も出さずに 0 で終わる) や JSON が 2 つ並んだファイル (値を 2 行出す) も形が違うに数えるので、
+  # 出たものが true か false のちょうど 1 語かで分ける (jq -e は false を出すと 1 で終わるので使わない)
+  enable=$(jq -r 'if type == "object" and (.enable | type) == "boolean" then .enable else error("形が違う") end' \
+    "${cursor_state}" 2>/dev/null) || enable=""
+  case ${enable} in
+    true) cursor_on ;;
+    false) cursor_off ;;
+    *)
+      warn "cursor-agent を入れるかの状態ファイルの形が違います: ${cursor_state}" \
+        "({\"enable\": true か false}) cursor-agent の宣言には触りません。"
+      ;;
+  esac
+}
+
+cursor_agent
 
 echo
 echo "完了しました。現在のグローバル設定:"

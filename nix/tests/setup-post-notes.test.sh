@@ -630,22 +630,22 @@ fi
 if [[ -n ${scripts} ]]; then
   # ケースの checkout に本物の bootstrap-mise.sh を写す (サンドボックスでは store から写すので読み取り専用になり、
   # /usr/bin/env も無いので、書き込みの権限を足して shebang を $BASH にする)。HOME には、警告を出させないよう
-  # mise の遅延の状態ファイルと cursor-agent の conf.d の宣言を置く。config.toml は [tools] を最後の表にし、
-  # $2 (bootstrap-mise.sh より前からある [tools] の行) を入れておく
+  # mise の遅延の状態ファイルと、cursor-agent を入れない (off の) 状態ファイルを置く。config.toml は [tools] を最後の
+  # 表にし、$2 (bootstrap-mise.sh より前からある [tools] の行) を入れておく
   with_mise() {
     local s="$1/repo/nix/scripts/bootstrap-mise.sh"
     cp "${scripts}/bootstrap-mise.sh" "${s}"
     chmod u+w "${s}"
     sed -i "1s|.*|#!${BASH}|" "${s}"
     chmod +x "${s}"
-    mkdir -p "$1/home/.config/mise/conf.d" "$1/home/.local/state/dotfiles"
-    : >"$1/home/.config/mise/conf.d/cursor-agent.toml"
+    mkdir -p "$1/home/.config/mise" "$1/home/.local/state/dotfiles"
+    printf '%s\n' '{"enable":false}' >"$1/home/.local/state/dotfiles/cursor-agent.json"
     printf '%s\n' '{"minimumReleaseAge":"9d","releaseAgeOverrides":[]}' >"$1/home/.local/state/dotfiles/mise-release-age.json"
     printf '[settings]\nlockfile = true\n\n[tools]\n%s' "$2" >"$1/home/.config/mise/config.toml"
   }
   # 偽の mise を置いた bin を作り、その場所を出す。mise use -g <名前>[@<版>] だけ、本物と同じ形で config.toml の
   # [tools] (最後の表) の末尾に書き (名前に : か / があれば "" で囲む。版を省くか latest なら "latest")、書いた名前を
-  # <HOME>/mise-wrote に 1 行ずつ残す。ほかの呼び出し (settings set・install・upgrade・config ls) は何もせず 0 を返す
+  # <HOME>/mise-wrote に 1 行ずつ残す。ほかの呼び出し (settings set・install・latest・config ls) は何もせず 0 を返す
   fake_mise_bin() {
     local b="$1/mise-bin"
     mkdir -p "${b}"

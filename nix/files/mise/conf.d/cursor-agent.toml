@@ -1,6 +1,10 @@
-# mise の global の conf.d に置く、cursor-agent (Cursor の CLI) の宣言。nix/home/modules/files.nix が
-# ~/.config/mise/conf.d/cursor-agent.toml に置き、入れるのと上げるのは nix/scripts/bootstrap-mise.sh がする
-# (~/dotfiles/setup --update のたび。mise の遅延と、claude と同じく mise に置く理由もそちら)。
+# mise の global の conf.d に置く、cursor-agent (Cursor の CLI) の宣言の雛形。dotfiles.cursorAgent.enable のホストだけ、
+# nix/scripts/bootstrap-mise.sh が ~/dotfiles/setup --update のたびに版を決め、下の [tools.cursor-agent] の行から終わりまでを
+# 写して @version@ を版に替え、~/.config/mise/conf.d/dotfiles-cursor-agent.toml に書く (この先頭のコメントは写さない)。
+#
+# version に latest でなく版そのものを書くのは、latest を宣言すると素の mise install が遅延で落ちるため。mise が知る版は
+# 最新の 1 つだけで、それが遅延 (minimum_release_age。既定 9d) の中にあると候補が 0 になる。版を指せば mise は遅延を
+# 見ない。版の決め方 (遅延を過ぎた版 → 今の宣言の版 → 入っている版) は bootstrap-mise.sh の cursor-agent の節。
 #
 # cursor-agent は mise の registry にある (別名 cursor-cli)。http backend で downloads.cursor.com の配布物
 # (公式のインストーラが入れるものと同じ) を取り、版は公式のインストーラ (cursor.com/install) から読む。ここには
@@ -12,11 +16,13 @@
 #                          cursor-agent は symlink を辿り、隣の node で動く)。when = "always" は、もう入っている版にも
 #                          mise install・mise use のたびに張り直すため
 #
-# config.toml ではなくここに置くのは、mise use -g に option を渡すと registry の値 (url・version_regex など) まで
+# config.toml ではなく conf.d に置くのは、mise use -g に option を渡すと registry の値 (url・version_regex など) まで
 # config.toml に書き写され、以後 registry が直っても書き写した値が勝つため (mise 2026.10.17 で確かめた)。
-# config.toml の宣言はここより強く、まるごと置き換わるので、mise use -g cursor-agent は打たない (bin_path が
+# config.toml の宣言は conf.d より強く、まるごと置き換わるので、mise use -g cursor-agent は打たない (bin_path が
 # registry の dist-package に戻る)。
+#
+# 下の version の行は bootstrap-mise.sh が探して替える。行の形 (version = "@version@") を変えない。
 [tools.cursor-agent]
-version = "latest"
+version = "@version@"
 bin_path = "bin"
 postinstall = { run = 'mkdir -p "$MISE_TOOL_INSTALL_PATH/bin" && ln -sfn ../dist-package/cursor-agent "$MISE_TOOL_INSTALL_PATH/bin/cursor-agent"', when = "always" }
