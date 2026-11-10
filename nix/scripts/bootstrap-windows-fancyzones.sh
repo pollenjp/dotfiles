@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json) とカスタムレイアウト (uuid ごとに足す) を書く (冪等。更新時も毎回走る)。
+# PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json)・カスタムレイアウト (uuid ごとに足す)・ディスプレイへのあて方 (解像度で決める) を書く (冪等。更新時も毎回走る)。
 #
 # order: 92
 #
@@ -12,7 +12,8 @@
 # ## 何のために
 #
 # FancyZones の設定のうち、dotfiles で持ちたいもの (「Windows スナップのオーバーライド」のキーと、エディターの「カスタム」に
-# 登録したレイアウト) を全マシンで揃える (dotfiles-private の docs/adr/042_*・046_*)。
+# 登録したレイアウトと、どのディスプレイにどのレイアウトをあてるかの決まり) を全マシンで揃える (dotfiles-private の
+# docs/adr/042_*・046_*・053_*)。
 #
 # - settings.json は PowerToys が全部のキーを書き、設定画面でも書き換えるので、ファイルごとは配らない。managed.json に
 #   持つキーだけを書き、そのキーだけをここで書く。Windows Terminal (bootstrap-windows-terminal.sh) と違い、衝突にしない。
@@ -21,7 +22,12 @@
 #   キーは settings.json からは消さない (最後の値が残り、以後は戻さない)
 # - custom-layouts.json は、PC のエディターで作ったレイアウトも入る (PC ごとに違う)。ファイルごと配ると、PC でレイアウトを
 #   1 つ作るだけで衝突して setup が止まるので、repo のレイアウトを uuid で突き合わせ、レイアウトごとに足す。PC にだけある
-#   レイアウトと、どのモニターにどれをあてるか (applied-layouts.json。モニターのシリアルが入る) には触らない
+#   レイアウトには触らない
+# - applied-layouts.json (モニター × 仮想デスクトップの組ごとに、どのレイアウトをあてるか) は、モニターのシリアルが入り PC ごとに
+#   違うので持たない。代わりに、解像度からあてるレイアウトを決める決まり (layout-rules.json) を持ち、テンプレートのままの組を
+#   決まりのレイアウトで埋める。あて忘れた組を、エディターを開いてディスプレイの数だけあてて回らずに済ませるため。
+#   解像度を確かに知る手段がほかに無いので、この段だけ powershell.exe を呼ぶ (ADR 042・046 は exe を呼ばない作りだった)。
+#   呼ぶのは候補の組があるときだけ
 #
 # ## 何をするか
 #
@@ -52,10 +58,41 @@
 #    - 書く形は PowerToys の形 (字下げ 2・CRLF・末尾に改行なし。エディターが書くバイト列と同じ形)。書き換える前のファイルを
 #      ~/.local/state/dotfiles/windows-fancyzones/backup/<UTC の時刻>-<pid>/ へ写す (新しい方から 10 回分を残す)
 #    - PC のファイルを読めない (5 回読む)・記録が壊れている・repo のファイルに誤りがあるときは、書かずに警告する
-# 4. 2 と 3 は、隣に書いて mv した後に touch する。FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは気づかない
+# 4. 同じディレクトリの applied-layouts.json の組 (モニター × 仮想デスクトップ) へ、win/powertoys/fancyzones/layout-rules.json の
+#    決まり (今の表示の解像度がちょうど一致した rules の layout、どれにも当たらなければ default。今は 3840x2160 が 4k-43inch、
+#    それ以外が 1080p) のレイアウトをあてる。3 の後に置くのは、あてるレイアウトが PC の custom-layouts.json に入っている必要があるから
+#    - ファイルが無い・組が無ければ何もしない (FancyZones がまだディスプレイを開いていない)。組は新しく作らない (まだ開いていない
+#      仮想デスクトップは、FancyZones が開いたときに前のデスクトップから写す)
+#    - 候補 (テンプレートのままの組と、前にこの段があてたままの組。--force なら全部の組) が無ければ、powershell.exe を呼ばずに終わる
+#    - powershell.exe で、つながっているディスプレイの DeviceID と今の表示の解像度を、FancyZones と同じ手順で聞く
+#      (MonitorUtils.cpp。下の ps_body)。組の monitor が同じで、monitor-instance が同じか、違えば monitor-number が同じディスプレイに
+#      合わせる (instance で合う方を先に)。シリアルは見ない・読まない。FancyZones は同じ型のモニターに同じシリアルを入れるので
+#      見分けに使えず、シリアルだけが違う古い組も同じレイアウトにしておけば、列挙の順が変わっても揃っている
+#    - 組ごとに (目標 = そのディスプレイの解像度から決まりで決めたレイアウト):
+#
+#        合うディスプレイが無い (つながっていない)・縦向き (高さ > 幅)   触らない (--force でも)
+#        目標と同じカスタムレイアウト                                 何もしない (記録が無ければ記録だけする)
+#        テンプレートのまま (blank を除く。エディターで選んだものも)    目標にする
+#        前にこの段があてたまま (記録と同じ) で、目標が変わった         目標にする (決まりや解像度を変えたとき)
+#        手であてたカスタムレイアウト・blank・知らない type             残し、まとめて 1 行知らせる (--force なら目標にする)
+#        目標のレイアウトが PC の custom-layouts.json に無い (か canvas でない)  飛ばして警告する
+#
+#    - あてた中身は ~/.local/state/dotfiles/windows-fancyzones.assigned.json に組ごとに持つ
+#      ({"version":1,"assignments":{"<monitor>|<monitor-instance>|<monitor-number>|<virtual-desktop>":"<uuid>"}}。シリアルを入れない
+#      ので、シリアルだけが違う組は 1 つのキーにまとまる)。この段が組を目標にしたときと、目標と同じ組で記録が無いときに書き、
+#      applied-layouts.json から消えた組のキーは落とす。手であてた組 (記録と違う) と、前にこの段が埋めた組を見分けるため
+#    - 書く値は、エディターが canvas のカスタムレイアウトをあてたときと同じ (type custom・show-spacing false・spacing 0・zone-count は
+#      PC の custom-layouts.json のそのレイアウトのゾーンの数・sensitivity-radius はその info の値、無ければ 20)。device と組の並びは
+#      変えない。書く形 (PowerToys の形)・退避 (3 と同じ場所) も 3 と同じ。& をエスケープするかは合わせない (JSON として同じ)
+#    - 変えた組は 1 組 1 行 (モニター ID・解像度・仮想デスクトップ・前 → 後) で出す。シリアルは出さない。手であてた組を残した 1 行は、
+#      警告のまとめには載せない (会社の PC で毎回出るため)
+#    - --dry-run でも powershell.exe は呼ぶ (書かない)。--import では走らせない
+#    - applied-layouts.json を読めない (5 回読む)・記録が壊れている・決まりのファイルに誤りがある・powershell.exe が無い・失敗する・
+#      60 秒たっても終わらない・決めた形の JSON を返さないときは、書かずに警告する
+# 5. 2〜4 は、隣に書いて mv した後に touch する。FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは気づかない
 #    (src/common/SettingsAPI/FileWatcher.cpp。実機で確かめた)。読みかけを見せないよう、その場には書かない。
 #    PowerToys は起動し直さない
-# 5. 全体の設定 <windowsHome>/AppData/Local/Microsoft/PowerToys/settings.json の enabled.FancyZones が false なら、
+# 6. 全体の設定 <windowsHome>/AppData/Local/Microsoft/PowerToys/settings.json の enabled.FancyZones が false なら、
 #    設定が効かないので警告する。自動でオンにはしない。キーやファイルが無ければオンとして扱う (FancyZones は既定でオン)。
 #    読めないときは、確かめられないと警告する
 #
@@ -66,16 +103,20 @@ set -eu -o pipefail
 
 usage() {
   cat <<'EOS'
-PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json) とカスタムレイアウトを書く。
+PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json) とカスタムレイアウトを書き、
+ディスプレイへのレイアウトのあて方を解像度で決める。
 持つキーは、設定画面で変えていても dotfiles の値へ戻す。カスタムレイアウトは uuid ごとに足し、PC にだけあるものには触らない。
-PC のエディターで直したレイアウトは書き換えずに知らせる。FancyZones はその場で読み直す (PowerToys は起動し直さない)。
+PC のエディターで直したレイアウトは書き換えずに知らせる。テンプレートのままのディスプレイの組 (モニター × 仮想デスクトップ) には、
+解像度の決まり (layout-rules.json。今は 4K に 4k-43inch、それ以外に 1080p) のレイアウトをあてる。手であてたものは残す。
+FancyZones はその場で読み直す (PowerToys は起動し直さない)。
 
 使い方:
-  bootstrap-windows-fancyzones.sh                   値が違えば書き、無いレイアウトを足す
-  bootstrap-windows-fancyzones.sh --dry-run         判定だけ出して何も書かない
-  bootstrap-windows-fancyzones.sh --force           PC で直した・消したレイアウトも repo の中身にする (退避する)
+  bootstrap-windows-fancyzones.sh                   値が違えば書き、無いレイアウトを足し、テンプレートのままの組にレイアウトをあてる
+  bootstrap-windows-fancyzones.sh --dry-run         判定だけ出して何も書かない (解像度は powershell.exe で聞く)
+  bootstrap-windows-fancyzones.sh --force           PC で直した・消したレイアウトも repo の中身にし、手であてたカスタムレイアウト・
+                                                    blank の組も決まりのレイアウトにする (退避する。先に --dry-run --force で見られる)
   bootstrap-windows-fancyzones.sh --import <名前>   PC のレイアウトを名前で選び、repo の custom-layouts.json へ写す
-                                                    (繰り返せる。commit は自分で)
+                                                    (繰り返せる。commit は自分で。ディスプレイへのあて方は変えない)
   bootstrap-windows-fancyzones.sh --check           win/powertoys/fancyzones/ の検証だけ (state も PC のファイルも見ない)
 EOS
 }
@@ -137,11 +178,17 @@ managed_rel="win/powertoys/fancyzones/managed.json"
 managed_file="${repo_dir}/${managed_rel}"
 layouts_rel="win/powertoys/fancyzones/custom-layouts.json"
 layouts_file="${repo_dir}/${layouts_rel}"
+rules_rel="win/powertoys/fancyzones/layout-rules.json"
+rules_file="${repo_dir}/${rules_rel}"
 state_dir="${HOME}/.local/state/dotfiles"
 state_file="${state_dir}/windows-files.json"
 record_file="${state_dir}/windows-fancyzones.applied.json"
+assigned_file="${state_dir}/windows-fancyzones.assigned.json"
 backup_root="${state_dir}/windows-fancyzones/backup"
 keep_backups=10
+# --dry-run で、カスタムレイアウトの段 (上の 3) が PC の custom-layouts.json に足す・書き換えるレイアウトの uuid。
+# あて方の段 (上の 4) は、これらを PC にあるものとして見る
+pending_layouts='[]'
 
 # 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
 # setup.sh から走るときは、最後の「警告のまとめ」にも同じ行を残す (summary_warn)。
@@ -214,6 +261,44 @@ def layout_problems:
   end;
 '
 
+# jq で使う関数 (layout-rules.json)。layouts_lib と一緒に使う。
+#   rules_problems($layouts)  決まりのファイルの誤りを 1 行ずつ出す。$layouts は repo の custom-layouts の配列。名前は repo の
+#                             レイアウトを指し、canvas のものだけを受ける (あてる値をエディターで確かめたのが canvas だけのため)
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+rules_lib='
+def rule_name_problem($what; $layouts):
+  if type != "string" or . == "" then
+    "\($what) が空か、文字列ではありません。"
+  else
+    . as $n
+    | [$layouts[] | objects | select(.name == $n)] as $m
+    | if ($m | length) == 0 then "\($what) の「\($n)」というレイアウトが custom-layouts.json にありません。"
+      elif $m[0].type != "canvas" then "\($what) の「\($n)」は canvas のレイアウトではありません (あてる値を確かめた canvas のレイアウトだけを指せます)。"
+      else empty end
+  end;
+def rules_problems($layouts):
+  if type != "object" then
+    "JSON の object ではありません。"
+  else
+    ((keys - ["rules", "default"]) | select(length > 0) | "rules・default のほかにキーがあります: \(join(", "))"),
+    (if (.rules | type) != "array" then
+      "rules の配列がありません。"
+    else
+      (.rules | to_entries[] | (.key + 1) as $n | .value
+        | if type != "object" then
+            "rules の \($n) 番目が object ではありません。"
+          else
+            ((keys - ["resolution", "layout"]) | select(length > 0) | "rules の \($n) 番目に resolution・layout のほかのキーがあります: \(join(", "))"),
+            (if (.resolution | type) == "string" and (.resolution | test("^[1-9][0-9]*x[1-9][0-9]*$")) then empty
+             else "rules の \($n) 番目の resolution が「幅x高さ」(3840x2160 など) の形ではありません: \(.resolution | tojson)" end),
+            (.layout | rule_name_problem("rules の \($n) 番目の layout"; $layouts))
+          end),
+      ([.rules[] | objects | .resolution | strings] | group_by(.)[] | select(length > 1) | "resolution が重なっています: \(.[0])")
+    end),
+    (.default | rule_name_problem("default"; $layouts))
+  end;
+'
+
 # managed.json の誤りを 1 行ずつ出す。誤りが無ければ何も出さない
 managed_problems() {
   if [[ ! -s ${managed_file} ]]; then
@@ -242,6 +327,16 @@ layouts_problems() {
     return 0
   fi
   jq -r "${layouts_lib}"'layout_problems' "${layouts_file}" 2>&1 || true
+}
+
+# repo の layout-rules.json の誤りを 1 行ずつ出す。誤りが無ければ何も出さない。名前を引くので、custom-layouts.json に誤りが
+# 無いときに呼ぶ
+rules_problems() {
+  if [[ ! -s ${rules_file} ]]; then
+    echo "ファイルが無いか、空です (${rules_file})。"
+    return 0
+  fi
+  jq -r --slurpfile repo "${layouts_file}" "${layouts_lib}${rules_lib}"'rules_problems($repo[0] | layouts)' "${rules_file}" 2>&1 || true
 }
 
 # 標準入力の JSON を、PowerToys の書く形 (字下げ 2・CRLF・末尾に改行なし) で出す。読めない・空なら失敗する
@@ -279,9 +374,9 @@ if ((check)); then
     fail "${managed_rel} に誤りがあります:" "${problems}"
     failed=1
   fi
-  problems=$(layouts_problems)
-  if [[ -n ${problems} ]]; then
-    fail "${layouts_rel} に誤りがあります:" "${problems}"
+  layout_errors=$(layouts_problems)
+  if [[ -n ${layout_errors} ]]; then
+    fail "${layouts_rel} に誤りがあります:" "${layout_errors}"
     failed=1
   elif ! pt_form_ok "${layouts_file}"; then
     # --import は PowerToys の書く形で書き直すので、置いてあるファイルも揃えておく (取り込みの差分を中身の変更だけにする)
@@ -290,12 +385,24 @@ if ((check)); then
       "f=${layouts_rel}; b=\$(jq --indent 2 . \"\$f\") && printf '%s' \"\${b//\$'\\n'/\$'\\r\\n'}\" >\"\$f\""
     failed=1
   fi
+  # 決まりはレイアウトの名前で引くので、custom-layouts.json の中身に誤りが無いときだけ確かめる
+  if [[ -n ${layout_errors} ]]; then
+    fail "${rules_rel} は、${layouts_rel} を直してから確かめます (決まりはレイアウトの名前で引くため)。"
+  else
+    problems=$(rules_problems)
+    if [[ -n ${problems} ]]; then
+      fail "${rules_rel} に誤りがあります:" "${problems}"
+      failed=1
+    fi
+  fi
   if ((failed)); then
     exit 1
   fi
   n=$(jq "${jq_lib}"'[leaf_paths] | length' "${managed_file}")
   m=$(jq '.["custom-layouts"] | length' "${layouts_file}")
-  echo "win/powertoys/fancyzones/: OK (持つキー ${n} 件・カスタムレイアウト ${m} 件)"
+  r=$(jq '.rules | length' "${rules_file}")
+  default_layout=$(jq -r '.default' "${rules_file}")
+  echo "win/powertoys/fancyzones/: OK (持つキー ${n} 件・カスタムレイアウト ${m} 件・解像度の決まり ${r} 件と既定「${default_layout}」)"
   exit 0
 fi
 
@@ -331,6 +438,7 @@ fi
 fz_dir="${windows_home}/AppData/Local/Microsoft/PowerToys/FancyZones"
 settings_json="${fz_dir}/settings.json"
 pc_layouts="${fz_dir}/custom-layouts.json"
+pc_applied="${fz_dir}/applied-layouts.json"
 global_json="${windows_home}/AppData/Local/Microsoft/PowerToys/settings.json"
 
 # 一時ファイルの置き場 (PC のファイルの写し・計画・記録)。終わったら消す。作れなければ失敗する
@@ -520,23 +628,25 @@ save_record() {
   fi
 }
 
-# 書き換える前の PC のファイルを退避する (新しい方から ${keep_backups} 回分を残す)。退避の場所は backup_dir に入れる
+# 書き換える前の PC のファイル ($1) を退避する。1 回の実行で書き換えるファイル (custom-layouts.json・applied-layouts.json) は
+# 同じディレクトリ (backup_dir) に写し、そのディレクトリを作るときに新しい方から ${keep_backups} 回分を残す。ファイルが無ければ何もしない
 backup_dir=""
-backup_pc_layouts() {
-  local dirs=() i
-  [[ -e ${pc_layouts} ]] || return 0
-  backup_dir="${backup_root}/$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  if ! { mkdir -p -- "${backup_dir}" && cp -p -- "${pc_layouts}" "${backup_dir}/"; } 2>/dev/null; then
-    backup_dir=""
-    return 1
+backup_file() {
+  local dirs=() i dir
+  [[ -e $1 ]] || return 0
+  if [[ -z ${backup_dir} ]]; then
+    dir="${backup_root}/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    mkdir -p -- "${dir}" 2>/dev/null || return 1
+    backup_dir=${dir}
+    # ディレクトリの名前が時刻で始まるので、名前の順が古い順
+    shopt -s nullglob
+    dirs=("${backup_root}"/*/)
+    shopt -u nullglob
+    for ((i = 0; i < ${#dirs[@]} - keep_backups; i++)); do
+      rm -rf -- "${dirs[i]}" 2>/dev/null || true
+    done
   fi
-  # ディレクトリの名前が時刻で始まるので、名前の順が古い順
-  shopt -s nullglob
-  dirs=("${backup_root}"/*/)
-  shopt -u nullglob
-  for ((i = 0; i < ${#dirs[@]} - keep_backups; i++)); do
-    rm -rf -- "${dirs[i]}" 2>/dev/null || true
-  done
+  cp -p -- "$1" "${backup_dir}/" 2>/dev/null
 }
 
 # 書く中身 (PC のファイルの写しに、計画の書くものを当てたもの) を、PowerToys の書く形で出す
@@ -573,9 +683,11 @@ report_kept() {
   # PC にあるもの (直した・足す前からあった) は取り込める。--import は PC の名前で引く
   jq '[.entries[] | select(.action == "edited" or .action == "differs")]' "${work_dir}/plan.json" >"${work_dir}/kept.json"
   hint=$(jq -r 'map("--import \(.cur.name | tostring | @sh)") | join(" ")' "${work_dir}/kept.json")
+  # --force はディスプレイへのあて方の段 (上の 4) にも効くので、そのことと、先に見る口を添える
   warn "FancyZones のカスタムレイアウトのうち、次のものは PC の中身を残しました (書き換えていません。${pc_layouts}):" \
     "${kept}" \
     "repo の中身にするなら (PC のファイルは退避します): ${script_dir}/bootstrap-windows-fancyzones.sh --force" \
+    "--force は、手でディスプレイにあてたカスタムレイアウト・blank の組も、解像度の決まりのレイアウトで上書きします。先に --dry-run --force で何が変わるかを見られます。" \
     ${hint:+"PC の中身を repo へ取り込むなら (commit は自分で): ${script_dir}/bootstrap-windows-fancyzones.sh ${hint}"}
   # 直されたものの違い (PC → repo)。長くなるので、警告のまとめには入れない
   command -v diff &>/dev/null || return 0
@@ -671,6 +783,10 @@ sync_layouts() {
   pc_only=$(jq -r '.pc_only | join("、")' "${work_dir}/plan.json")
   nwrite=$(jq '[.entries[] | select(.write)] | length' "${work_dir}/plan.json")
   nsame=$(jq '[.entries[] | select(.action == "same")] | length' "${work_dir}/plan.json")
+  # --dry-run では書かないので、あて方の段が「足したら PC にある」と見られるよう、足す・書き換えるものを渡す
+  if ((dry_run && nwrite > 0)); then
+    pending_layouts=$(jq -c '[.entries[] | select(.write) | .uuid]' "${work_dir}/plan.json")
+  fi
 
   if ((nwrite == 0)); then
     save_record false
@@ -693,7 +809,7 @@ sync_layouts() {
       report_kept
       return 0
     fi
-    if ! backup_pc_layouts; then
+    if ! backup_file "${pc_layouts}"; then
       warn "FancyZones の custom-layouts.json を退避できないので、カスタムレイアウトを書きません: ${backup_root}" "${lines}"
       save_record false
       report_kept
@@ -723,6 +839,472 @@ sync_layouts() {
     echo "  書き換える前のファイルは ${backup_dir} に退避しました。"
   fi
   report_kept
+}
+
+# ---- ディスプレイへのあて方 (applied-layouts.json) ----
+
+# jq で使う関数 (applied-layouts.json)。
+#   well_formed            組が object で、device (monitor が文字列) と applied-layout が object
+#   entry_key              あて方の記録のキー (monitor|monitor-instance|monitor-number|virtual-desktop)。シリアルは入れない
+#   is_template            テンプレートのまま (blank を除く。FancyZones が既定であてたものも、エディターで選んだものも)
+#   is_recorded($rec)      この段が前にあてたまま (今のカスタムレイアウトが、あて方の記録と同じ)
+#   candidate($rec; $f)    powershell.exe で解像度を聞く候補。既定はテンプレートとこの段が前にあてたままの組、--force なら全部の組
+#   parse_displays         powershell.exe の返りを、FancyZones と同じ形 (DeviceID を # で分けた monitor・monitor-instance と、
+#                          \\.\DISPLAY<n> の n) にする。形の合わないディスプレイは落とす
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+assign_lib='
+def well_formed:
+  type == "object" and (.device | type) == "object" and (.device.monitor | type) == "string"
+  and (.["applied-layout"] | type) == "object";
+def entry_key:
+  "\(.device.monitor)|\(.device["monitor-instance"])|\(.device["monitor-number"])|\(.device["virtual-desktop"])";
+def is_template:
+  .["applied-layout"].type as $t | any("focus", "columns", "rows", "grid", "priority-grid"; . == $t);
+def is_recorded($rec):
+  .["applied-layout"].type == "custom" and (.["applied-layout"].uuid | type) == "string"
+  and $rec[entry_key] == .["applied-layout"].uuid;
+def candidate($rec; $force):
+  well_formed and ($force or is_template or is_recorded($rec));
+def parse_displays:
+  [.displays[]? | objects
+    | select((.device | type) == "string" and (.id | type) == "string"
+        and (.width | type) == "number" and (.height | type) == "number" and .width > 0 and .height > 0)
+    | (.id | split("#")) as $p
+    | ([.device | match("DISPLAY([0-9]+)$") | .captures[0].string] | first) as $n
+    | select(($p | length) >= 4 and $n != null)
+    | {monitor: $p[1], instance: $p[2], number: ($n | tonumber), width, height}];
+'
+
+# PC の applied-layouts.json を作業場所へ写す。applied-layouts が配列の JSON の object (無いのはよい) になるまで、5 回まで写す
+# (FancyZones・エディターが書いている途中に当たっても読めるように)
+snapshot_applied() {
+  local i
+  for ((i = 0; i < 5; i++)); do
+    if cp -- "${pc_applied}" "${work_dir}/apl.json" 2>/dev/null \
+      && jq -e 'type == "object" and ((has("applied-layouts") | not) or (.["applied-layouts"] | type) == "array")' \
+        "${work_dir}/apl.json" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# あて方の記録を作業場所へ写す。無ければ空の記録。壊れていれば失敗する
+load_assigned() {
+  if [[ ! -e ${assigned_file} ]]; then
+    printf '%s\n' '{"version":1,"assignments":{}}' >"${work_dir}/asg.json"
+    return 0
+  fi
+  jq -e 'type == "object" and (.assignments | type) == "object"' "${assigned_file}" >/dev/null 2>&1 || return 1
+  cp -- "${assigned_file}" "${work_dir}/asg.json"
+}
+
+# あて方の記録を書く (変わったときだけ。--dry-run では書かない)。applied-layouts.json から消えた組のキーは落とし、目標と同じ組で
+# 記録が無いものと、書けたときは書いた組を、目標のレイアウトの uuid で記録する。$1: 書けたか (true / false)
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+save_assigned() {
+  local new old
+  if ((dry_run)); then
+    return 0
+  fi
+  new=$(jq -S -n --slurpfile apl "${work_dir}/apl.json" --slurpfile rec "${work_dir}/asg.json" --slurpfile plan "${work_dir}/plan3.json" \
+    --argjson wrote "$1" "${assign_lib}"'
+    ([($apl[0]["applied-layouts"] // [])[] | select(well_formed) | entry_key] | unique) as $keys
+    | ($rec[0].assignments | with_entries(select(.key as $k | any($keys[]; . == $k)))) as $kept
+    | reduce ($plan[0].entries[] | . as $x
+        | select($x.key != null and (($x.action == "same" and ($kept | has($x.key) | not)) or ($wrote and $x.write)))) as $x
+        ($kept; .[$x.key] = $x.target)
+    | {version: 1, assignments: .}')
+  # 記録が無いのは、空の記録と同じ (記録するものが無ければ作らない)
+  if [[ -f ${assigned_file} ]]; then
+    old=$(jq -S . "${assigned_file}" 2>/dev/null) || old=""
+  else
+    old=$(jq -S -n '{version: 1, assignments: {}}')
+  fi
+  if [[ ${new} == "${old}" ]]; then
+    return 0
+  fi
+  if ! { mkdir -p -- "${state_dir}" && printf '%s\n' "${new}" >"${assigned_file}.dotfiles-tmp" && mv -f -- "${assigned_file}.dotfiles-tmp" "${assigned_file}"; } 2>/dev/null; then
+    rm -f -- "${assigned_file}.dotfiles-tmp" 2>/dev/null || true
+    warn "FancyZones のディスプレイへのあて方の記録を書けませんでした: ${assigned_file}" \
+      "次の回は、決まりであてた組を手であてたものとして残すことがあります (--force で決まりのレイアウトにし直せます)。"
+  fi
+}
+
+# PowerShell のコードを、powershell.exe の -EncodedCommand に渡す形 (UTF-16LE の base64) にする。ASCII だけを受け、ASCII の外の
+# 文字があれば 1 を返す (ASCII なら UTF-16LE は 1 byte ごとに 0 を足すだけなので、coreutils の od と base64 で作れる)。
+# -EncodedCommand で渡すのは、C# の P/Invoke ("user32.dll") の二重引用符が、WSL の interop の付ける引用符と混ざらないようにするため
+# (bootstrap-windows-international.sh と同じ)
+encode_ps() {
+  local LC_ALL=C hex bytes
+  if [[ $1 == *[![:ascii:]]* ]]; then
+    return 1
+  fi
+  hex=$(printf '%s' "$1" | od -An -v -tx1)
+  read -r -d '' -a bytes <<<"${hex}" || true
+  # 書式は \xHH の並びだけで、% を含まない
+  # shellcheck disable=SC2059
+  printf "$(printf '\\x%s\\x00' "${bytes[@]}")" | base64 -w0
+}
+
+# powershell.exe (Windows PowerShell 5.1) で流すコード (ASCII だけで書く)。FancyZones (MonitorUtils.cpp) と同じく、デスクトップに
+# つながっているアダプターごとに、ACTIVE で MIRRORING_DRIVER でない最初のモニターの DeviceID (EDD_GET_DEVICE_INTERFACE_NAME) を取り、
+# アダプターの今の表示の解像度 (EnumDisplaySettings の ENUM_CURRENT_SETTINGS。物理の値で、拡大率に左右されない) と組にする。
+# Win32 は C# から呼ぶ (PowerShell から文字列の引数に $null を渡すと空文字になり、最初のアダプターを引けないため)。
+# $ProgressPreference は、Add-Type の進み具合が CLIXML で stderr に出ないようにするため。返りは 1 行の JSON:
+#   {"displays":[{"device":"\\.\DISPLAY1","id":"\\?\DISPLAY#<monitor>#<monitor-instance>#{...}","width":3840,"height":2160}]}
+ps_body=$(
+  cat <<'EOS'
+$ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
+Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+public static class DotfilesFancyZonesDisplays {
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct DISPLAY_DEVICE {
+    public int cb;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceString;
+    public int StateFlags;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceID;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string DeviceKey;
+  }
+  [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+  struct DEVMODE {
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
+    public short dmSpecVersion;
+    public short dmDriverVersion;
+    public short dmSize;
+    public short dmDriverExtra;
+    public int dmFields;
+    public int dmPositionX;
+    public int dmPositionY;
+    public int dmDisplayOrientation;
+    public int dmDisplayFixedOutput;
+    public short dmColor;
+    public short dmDuplex;
+    public short dmYResolution;
+    public short dmTTOption;
+    public short dmCollate;
+    [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmFormName;
+    public short dmLogPixels;
+    public int dmBitsPerPel;
+    public int dmPelsWidth;
+    public int dmPelsHeight;
+    public int dmDisplayFlags;
+    public int dmDisplayFrequency;
+    public int dmICMMethod;
+    public int dmICMIntent;
+    public int dmMediaType;
+    public int dmDitherType;
+    public int dmReserved1;
+    public int dmReserved2;
+    public int dmPanningWidth;
+    public int dmPanningHeight;
+  }
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  static extern bool EnumDisplayDevicesW(string lpDevice, int iDevNum, ref DISPLAY_DEVICE lpDisplayDevice, int dwFlags);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  static extern bool EnumDisplaySettingsW(string lpszDeviceName, int iModeNum, ref DEVMODE lpDevMode);
+  public class Display {
+    public string Device { get; set; }
+    public string Id { get; set; }
+    public int Width { get; set; }
+    public int Height { get; set; }
+  }
+  // DISPLAY_DEVICE_ATTACHED_TO_DESKTOP (adapter) and DISPLAY_DEVICE_ACTIVE (monitor) are 0x1,
+  // DISPLAY_DEVICE_MIRRORING_DRIVER is 0x8, EDD_GET_DEVICE_INTERFACE_NAME is 0x1, ENUM_CURRENT_SETTINGS is -1.
+  public static Display[] Get() {
+    var list = new List<Display>();
+    for (int i = 0; ; i++) {
+      var adapter = new DISPLAY_DEVICE();
+      adapter.cb = Marshal.SizeOf(adapter);
+      if (!EnumDisplayDevicesW(null, i, ref adapter, 0)) { break; }
+      if ((adapter.StateFlags & 0x1) == 0 || (adapter.StateFlags & 0x8) != 0) { continue; }
+      var mode = new DEVMODE();
+      mode.dmSize = (short)Marshal.SizeOf(mode);
+      if (!EnumDisplaySettingsW(adapter.DeviceName, -1, ref mode)) { continue; }
+      for (int j = 0; ; j++) {
+        var monitor = new DISPLAY_DEVICE();
+        monitor.cb = Marshal.SizeOf(monitor);
+        if (!EnumDisplayDevicesW(adapter.DeviceName, j, ref monitor, 0x1)) { break; }
+        if ((monitor.StateFlags & 0x1) == 0 || (monitor.StateFlags & 0x8) != 0) { continue; }
+        list.Add(new Display { Device = adapter.DeviceName, Id = monitor.DeviceID, Width = mode.dmPelsWidth, Height = mode.dmPelsHeight });
+        break;
+      }
+    }
+    return list.ToArray();
+  }
+}
+'@
+$displays = @([DotfilesFancyZonesDisplays]::Get() | ForEach-Object {
+  [ordered]@{ device = $_.Device; id = $_.Id; width = $_.Width; height = $_.Height }
+})
+ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{ displays = $displays })
+EOS
+)
+
+# powershell.exe でディスプレイを聞く。stdout (CR を落とす) を ps_out に、stderr (CR を落とす) を ps_err に、終了コード
+# (時間切れは 124) を ps_rc に入れる。stdin は渡さない (interop が stdin を読み続けて止まらないように)。-OutputFormat Text は、
+# -EncodedCommand で起動したときにエラーを CLIXML でなく平文で出すため
+ps_rc=0
+ps_out=""
+ps_err=""
+read_displays() {
+  local enc
+  ps_rc=0
+  ps_out=""
+  ps_err=""
+  if ! enc=$(encode_ps "${ps_body}"); then
+    ps_rc=1
+    ps_err="powershell.exe に渡すコードに ASCII の外の文字があります (script の誤り)。"
+    return 0
+  fi
+  ps_out=$(timeout 60 powershell.exe -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand "${enc}" </dev/null 2>"${work_dir}/ps-err") \
+    || ps_rc=$?
+  ps_out=${ps_out//$'\r'/}
+  ps_err=$(<"${work_dir}/ps-err") || ps_err=""
+  ps_err=${ps_err//$'\r'/}
+}
+
+# 書く中身 (applied-layouts.json の写しの、計画で書く組の applied-layout を置き換えたもの) を、PowerToys の書く形で出す。
+# device・組の並び・ほかの組は変えない
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+render_applied() {
+  jq -n --slurpfile apl "${work_dir}/apl.json" --slurpfile plan "${work_dir}/plan3.json" '
+    ([$plan[0].entries[] | select(.write) | {key: (.i | tostring), value: .new_al}] | from_entries) as $w
+    | $apl[0] | .["applied-layouts"] |= [to_entries[] | (.key | tostring) as $k
+        | if ($w | has($k)) then .value["applied-layout"] = $w[$k] else . end | .value]' | to_pt_form
+}
+
+# 隣に書いてから置き換える (読みかけを見せない)
+write_applied() {
+  local tmp="${pc_applied}.dotfiles-tmp" body
+  if body=$(render_applied 2>/dev/null) && printf '%s' "${body}" 2>/dev/null >"${tmp}" && mv -f -- "${tmp}" "${pc_applied}" 2>/dev/null; then
+    return 0
+  fi
+  rm -f -- "${tmp}" 2>/dev/null || true
+  return 1
+}
+
+# 手であてたカスタムレイアウト・blank の組を残したことの 1 行 (警告のまとめには載せない。会社の PC で毎回出るため)。$1: 組の数
+kept_line() {
+  echo "手であてたカスタムレイアウト・blank の組 ($1 組) は残しました。決まりのレイアウトで上書きするなら: ${script_dir}/bootstrap-windows-fancyzones.sh --force (--force は、PC で直した・消した dotfiles のカスタムレイアウトも repo の中身に戻します。先に --dry-run --force で何が変わるかを見られます)"
+}
+
+# 揃っているときの 1 行の括弧の中。$1: 目標と同じ組の数、$2: 触らない組の数
+same_note() {
+  local parts=()
+  if (($1 > 0)); then
+    parts+=("決まりのレイアウトの組 $1 組")
+  fi
+  if (($2 > 0)); then
+    parts+=("つながっていない・縦向きのディスプレイの組 $2 組には触りません")
+  fi
+  if ((${#parts[@]} == 2)); then
+    echo " (${parts[0]}。${parts[1]})"
+  elif ((${#parts[@]} == 1)); then
+    echo " (${parts[0]})"
+  fi
+}
+
+# ディスプレイへのあて方 (上の 4): つながっている横向きのディスプレイの組へ、解像度の決まり (layout-rules.json) のレイアウトをあてる
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+assign_layouts() {
+  local problems force_json=false pre="" ncand nkept counts nwrite nsame nuntouched missing lname lcount lines
+  # 無いのは、FancyZones がまだ動いていない (ディスプレイを開いていない) とき
+  [[ -e ${pc_applied} ]] || return 0
+  if ! make_work_dir; then
+    warn "一時ディレクトリを作れないので、FancyZones のディスプレイへのレイアウトのあて方を書きません (TMPDIR=${TMPDIR:-/tmp})。"
+    return 0
+  fi
+  if ! snapshot_applied; then
+    warn "FancyZones の applied-layouts.json を読めないので、ディスプレイへのレイアウトのあて方を書きません: ${pc_applied}" \
+      "中身を確かめて直してから、流し直してください。"
+    return 0
+  fi
+  if [[ $(jq '[.["applied-layouts"][]?] | length' "${work_dir}/apl.json") == 0 ]]; then
+    return 0
+  fi
+  if [[ -n $(layouts_problems) ]]; then
+    warn "${layouts_rel} に誤りがあるので、FancyZones のディスプレイへのレイアウトのあて方を書きません。"
+    return 0
+  fi
+  problems=$(rules_problems)
+  if [[ -n ${problems} ]]; then
+    warn "${rules_rel} に誤りがあるので、FancyZones のディスプレイへのレイアウトのあて方を書きません:" "${problems}"
+    return 0
+  fi
+  if ! load_assigned; then
+    warn "FancyZones のディスプレイへのあて方の記録が壊れているので、あて方を書きません: ${assigned_file}" \
+      "消してから流し直してください (前に決まりであてた組も、手であてたものとして残します。決まりのレイアウトにし直すなら --force)。"
+    return 0
+  fi
+  if ((force)); then
+    force_json=true
+  fi
+  if ((dry_run)); then
+    pre="[dry-run] "
+  fi
+
+  # 候補 (テンプレートの組と、この段が前にあてたままの組。--force なら全部) が無ければ、powershell.exe は呼ばない。残っているのは、
+  # 手であてたカスタムレイアウト・blank (と知らない type) の組だけ
+  ncand=$(jq --slurpfile rec "${work_dir}/asg.json" --argjson force "${force_json}" "${assign_lib}"'
+    [.["applied-layouts"][]? | select(candidate($rec[0].assignments; $force))] | length' "${work_dir}/apl.json")
+  if ((ncand == 0)); then
+    printf '%s\n' '{"entries":[]}' >"${work_dir}/plan3.json"
+    save_assigned false
+    nkept=$(jq "${assign_lib}"'[.["applied-layouts"][]? | select(well_formed)] | length' "${work_dir}/apl.json")
+    if ((nkept > 0)); then
+      echo "FancyZones のディスプレイへのあて方: $(kept_line "${nkept}")"
+    fi
+    return 0
+  fi
+
+  # あてるレイアウトが PC にあるかと、ゾーンの数を見るために、カスタムレイアウトの段の後の PC の custom-layouts.json を読む
+  if [[ -e ${pc_layouts} ]]; then
+    if ! snapshot_pc_layouts; then
+      warn "FancyZones の custom-layouts.json を読めないので、ディスプレイへのレイアウトのあて方を書きません: ${pc_layouts}"
+      return 0
+    fi
+  else
+    printf '%s\n' '{}' >"${work_dir}/pc.json"
+  fi
+  if ! command -v powershell.exe &>/dev/null; then
+    warn "powershell.exe が見つからないので、ディスプレイの解像度が分からず、FancyZones のディスプレイへのレイアウトのあて方を書きません。" \
+      "WSL の PATH に Windows の PATH が入っているか (/etc/wsl.conf の appendWindowsPath)、WSL の interop が動いているかを確かめてください。"
+    return 0
+  fi
+  read_displays
+  if ((ps_rc != 0)); then
+    if ((ps_rc == 124)); then
+      warn "powershell.exe が 60 秒たっても終わりませんでした (時間切れ。WSL の interop が止まっているかもしれません)。FancyZones のディスプレイへのレイアウトのあて方は書きません。"
+    else
+      warn "powershell.exe でディスプレイの解像度を読めませんでした (終了コード ${ps_rc})。FancyZones のディスプレイへのレイアウトのあて方は書きません:" \
+        ${ps_err:+"${ps_err}"}
+    fi
+    return 0
+  fi
+  if ! printf '%s\n' "${ps_out}" 2>/dev/null >"${work_dir}/displays.json" \
+    || ! jq -e 'type == "object" and (.displays | type) == "array"' "${work_dir}/displays.json" >/dev/null 2>&1; then
+    warn "powershell.exe の返りが、決めた形の JSON ではありません。FancyZones のディスプレイへのレイアウトのあて方は書きません:" \
+      ${ps_out:+"${ps_out}"} ${ps_err:+"${ps_err}"}
+    return 0
+  fi
+
+  # 計画: 組ごとの判定。action は untouched (合うディスプレイが無い・縦向き・壊れた組) / same (目標と同じ) / fill (テンプレート) /
+  # retarget (この段が前にあてたままで目標が変わった) / force (--force で、手であてたカスタムレイアウト・blank・知らない type) /
+  # kept (それらを残す) / missing (目標のレイアウトが PC に無いか canvas でない)。ディスプレイは、monitor が同じで monitor-instance が
+  # 同じものを先に、無ければ monitor-number が同じものに合わせる (FancyZones の一致からシリアルを除いたもの)
+  jq -n --slurpfile apl "${work_dir}/apl.json" --slurpfile ps "${work_dir}/displays.json" --slurpfile rules "${rules_file}" \
+    --slurpfile repo "${layouts_file}" --slurpfile pc "${work_dir}/pc.json" --slurpfile rec "${work_dir}/asg.json" \
+    --argjson pending "${pending_layouts}" --argjson force "${force_json}" "${layouts_lib}${assign_lib}"'
+    ($ps[0] | parse_displays) as $disp
+    | $rules[0] as $r
+    | ($repo[0] | layouts) as $repo_list
+    | $rec[0].assignments as $asg
+    | ([$repo_list[] | {key: .name, value: .}] | from_entries) as $by_name
+    | ([$pc[0] | layouts | .[] | objects | select((.uuid | type) == "string") | {key: .uuid, value: .}] | from_entries) as $pc_by_uuid
+    | ($pc_by_uuid + ([$repo_list[] | select(.uuid as $u | any($pending[]; . == $u)) | {key: .uuid, value: .}] | from_entries)) as $present
+    | {entries: [
+        ($apl[0]["applied-layouts"] // []) | to_entries[] | .key as $i | .value as $e
+        | if ($e | well_formed | not) then
+            {i: $i, action: "untouched"}
+          else
+            $e.device as $dev
+            | (([$disp[] | select(.monitor == $dev.monitor and .instance == $dev["monitor-instance"])] | first)
+               // ([$disp[] | select(.monitor == $dev.monitor and .number == $dev["monitor-number"])] | first)) as $d
+            | if $d == null or $d.height > $d.width then
+                {i: $i, action: "untouched"}
+              else
+                ([$r.rules[] | select(.resolution == "\($d.width)x\($d.height)") | .layout] | first // $r.default) as $tname
+                | $by_name[$tname] as $tl
+                | $present[$tl.uuid] as $pl
+                | $e["applied-layout"] as $al
+                | (if $al.type == "custom" and $al.uuid == $tl.uuid then "same"
+                   elif ($e | is_template) then "fill"
+                   elif ($e | is_recorded($asg)) then "retarget"
+                   elif $force then "force"
+                   else "kept" end) as $base
+                | (($pl | type) == "object" and $pl.type == "canvas" and ($pl.info | type) == "object"
+                   and ($pl.info.zones | type) == "array") as $usable
+                | (if ($base == "fill" or $base == "retarget" or $base == "force") and ($usable | not) then "missing" else $base end) as $action
+                | {i: $i, key: ($e | entry_key), action: $action, target: $tl.uuid, tname: $tname,
+                   label: "\($dev.monitor) (\($dev["monitor-instance"] | tostring | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($dev["virtual-desktop"] | tostring | ltrimstr("{") | .[0:8])",
+                   before: (if $al.type == "custom" then ($pc_by_uuid[$al.uuid | tostring].name // "カスタム \($al.uuid)") else ($al.type | tostring) end),
+                   note: (if $action == "retarget" then " (前に決まりであてたもの)" elif $action == "force" then " (--force)" else "" end)}
+                | if .action == "fill" or .action == "retarget" or .action == "force" then
+                    .new_al = {uuid: $tl.uuid, type: "custom", "show-spacing": false, spacing: 0,
+                      "zone-count": ($pl.info.zones | length),
+                      "sensitivity-radius": (if ($pl.info["sensitivity-radius"] | type) == "number" then $pl.info["sensitivity-radius"] else 20 end)}
+                  else . end
+              end
+          end
+        | .write = (.action == "fill" or .action == "retarget" or .action == "force")
+      ]}' >"${work_dir}/plan3.json"
+
+  counts=$(jq -r '.entries | [map(select(.write)), map(select(.action == "same")), map(select(.action == "kept")), map(select(.action == "untouched"))]
+    | map(length) | @tsv' "${work_dir}/plan3.json")
+  read -r nwrite nsame nkept nuntouched <<<"${counts}"
+  # 目標のレイアウトが PC に無い組 (PC で消して、カスタムレイアウトの段が警告した) は飛ばして知らせる
+  missing=$(jq -r '[.entries[] | select(.action == "missing") | .tname] | group_by(.)[] | "\(.[0])\t\(length)"' "${work_dir}/plan3.json")
+  if [[ -n ${missing} ]]; then
+    while IFS=$'\t' read -r lname lcount; do
+      warn "決まりのレイアウト「${lname}」が PC の custom-layouts.json に無い (か canvas でない) ので、${lcount} 組にあてていません: ${pc_layouts}" \
+        "PC で消したものなら、--force で足し直すとあてます (先に --dry-run --force で何が変わるかを見られます)。"
+    done <<<"${missing}"
+  fi
+
+  if ((nwrite == 0)); then
+    save_assigned false
+    if [[ -z ${missing} ]]; then
+      echo "FancyZones のディスプレイへのあて方は揃っています$(same_note "${nsame}" "${nuntouched}")。"
+    else
+      echo "FancyZones のディスプレイへのあて方で、変える組はありません$(same_note "${nsame}" "${nuntouched}")。"
+    fi
+    if ((nkept > 0)); then
+      echo "  $(kept_line "${nkept}")"
+    fi
+    return 0
+  fi
+
+  # 変える組を 1 組 1 行で (シリアルは出さない)。シリアルだけが違う組の同じ行は、1 行にまとめて組の数を添える
+  lines=$(jq -r --arg pre "${pre}" '
+    [.entries[] | select(.write) | "  \($pre)\(.label): \(.before) → \(.tname)\(.note)"]
+    | reduce .[] as $l ([]; if any(.[]; .l == $l) then map(if .l == $l then .n += 1 else . end) else . + [{l: $l, n: 1}] end)
+    | .[] | .l + (if .n > 1 then " (\(.n) 組)" else "" end)' "${work_dir}/plan3.json")
+  if ((! dry_run)); then
+    if ! backup_file "${pc_applied}"; then
+      warn "FancyZones の applied-layouts.json を退避できないので、ディスプレイへのレイアウトのあて方を書きません: ${backup_root}" "${lines}"
+      save_assigned false
+      return 0
+    fi
+    if ! write_applied; then
+      warn "FancyZones の applied-layouts.json に書けないので、ディスプレイへのレイアウトのあて方を変えられませんでした: ${pc_applied}" "${lines}"
+      save_assigned false
+      return 0
+    fi
+    # FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは読み直さない
+    touch -- "${pc_applied}" 2>/dev/null \
+      || warn "FancyZones の applied-layouts.json に書きましたが、FancyZones に読み直させられませんでした: ${pc_applied}" \
+        "PowerToys を起動し直すと読みます。"
+    save_assigned true
+  fi
+
+  echo "==> ${pre}FancyZones のディスプレイへのあて方 (${pc_applied})"
+  printf '%s\n' "${lines}"
+  if ((nuntouched > 0)); then
+    echo "  つながっていない・縦向きのディスプレイの組 (${nuntouched} 組) には触りません。"
+  fi
+  if ((nkept > 0)); then
+    echo "  $(kept_line "${nkept}")"
+  fi
+  if ((! dry_run)) && [[ -n ${backup_dir} ]]; then
+    echo "  書き換える前のファイルは ${backup_dir} に退避しました。"
+  fi
 }
 
 # ---- --import ----
@@ -860,5 +1442,6 @@ fi
 
 sync_settings
 sync_layouts
+assign_layouts
 check_enabled
 exit 0

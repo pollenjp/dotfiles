@@ -22,3 +22,6 @@ end_of_line = crlf
 
 [win/powertoys/fancyzones/managed.json] # 手で書くファイル (PowerToys が書くものではない。配らない)
 insert_final_newline = true
+
+[win/powertoys/fancyzones/layout-rules.json] # 手で書くファイル (解像度で、ディスプレイにあてるレイアウトを決める。配らない)
+insert_final_newline = true
