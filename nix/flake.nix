@@ -418,7 +418,19 @@
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-claude-skill-overrides-test = scriptTest "bootstrap-claude-skill-overrides" ./scripts;
           bootstrap-claude-plugins-test = scriptTest "bootstrap-claude-plugins" ./scripts/bootstrap-claude-plugins.sh;
-          bootstrap-mise-test = scriptTest "bootstrap-mise" ./scripts/bootstrap-mise.sh;
+          # script は自分のいる checkout の cursor-agent の宣言の雛形を読むので、雛形も渡す (テストがケースの checkout に置く)
+          bootstrap-mise-test =
+            pkgs.runCommand "bootstrap-mise-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/bootstrap-mise.test.sh} ${./scripts/bootstrap-mise.sh} ${./files/mise/conf.d/cursor-agent.toml}
+                touch $out
+              '';
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
