@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# nix/scripts/check-herdr-app-version.sh の振る舞いを、偽の curl・gh と使い捨ての ps1 で確かめる。
+# nix/scripts/check-herdr-app-version.sh の振る舞いを、偽の curl・gh と使い捨ての releases.json で確かめる。
 #
 #   bash nix/tests/check-herdr-app-version.test.sh [<script のパス>]
 #
@@ -11,17 +11,20 @@
 #
 # ## 確かめること
 #
-#   - 固定した版の成果物の sha256 と manifest が固定した値と同じで、新しい版が無ければ exit 0
-#   - 固定した版の成果物の sha256 が変わった・manifest の sha256 や core の generation が違う・app の core_min が固定した
-#     core より新しいときは exit 1 で、何が違うかを出す
+#   - 固定した版の成果物 (app の Windows、core の Linux 2 つと Windows) の sha256 と manifest が固定した値と同じで、新しい版が
+#     無ければ exit 0
+#   - 固定した版の成果物の sha256 が変わった (core の Linux の target も)・manifest の target ごとの sha256 が違うか無い・core の
+#     generation が違う・app の core_min が固定した core より新しいときは exit 1 で、何が違うかを出す
 #   - 固定した版より新しい版が猶予 (7 日) の中なら ※ の行で知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)
-#   - 猶予がたった新しい版があれば exit 1 で、いちばん新しい版と、その sha256・core_min と、ソースが HERDR_RELEASES_URL を
+#   - 猶予がたった新しい版があれば exit 1 で、いちばん新しい版と、その sha256 (core は target ごと。無い target は無いと出す)・
+#     core_min と、ソースが HERDR_RELEASES_URL を
 #     読むか (読まなければ上げないこと) と、固定した版からの差分の URL を出す。core の generation が固定と違えば、app と一緒に
 #     上げると出す。Windows の成果物が無い (HEAD が 404) 版は数えない。redirect の先の Last-Modified を読む
 #   - 新しい版の HEAD が 404 のほか (5xx など) か、Last-Modified が無ければ、黙って飛ばさずに exit 2
 #   - tag は gh api --paginate で全部読む
 #   - GitHub Actions の中なら、知らせることを ::error の行にも出す
-#   - 落とせない・gh が失敗する・ps1 が読めない (版や sha256 の形でない) ときは exit 2。知らないことがあれば 1 を優先する
+#   - 落とせない・gh が失敗する・releases.json が無い・JSON でない・版や sha256 の形でないときは exit 2。知らせることがあれば
+#     1 を優先する
 #   - 知らない引数は exit 2、-h は使い方を出して exit 0。curl に stdin を渡さない
 #
 # ## 本物の curl と gh を見せない
@@ -85,7 +88,7 @@ new_case() {
   put_release "${d}" core 0.1.17 "${old_date}" '"generation": 1'
   printf 'v0.1.12\nv0.1.11\nnot-a-version\n' >"${d}/gh/herdrdev/herdr-app/tags"
   printf 'v0.1.17\nv0.1.16\n' >"${d}/gh/herdrdev/herdr-core/tags"
-  write_ps1 "${d}" "$(sha_of 'app 0.1.12')" "$(sha_of 'core 0.1.17')" 1
+  write_releases "${d}"
   # 偽の curl。引数を記録し、stdin を読み切って curl-stdin に足す (script が </dev/null を付けていれば空)。
   # -sSIL (HEAD) なら <URL のホストとパス>.headers を出し、無ければ 404 の見出しを出す (-f が無いので終了コードは 0)。
   # -o なら <URL のホストとパス> を写し、無ければ 22 (curl -f の HTTP エラー)
@@ -160,15 +163,36 @@ EOF
   echo "${d}"
 }
 
-# 版つきの成果物と manifest と、Last-Modified の headers を置く。$1: case、$2: app か core、$3: 版、$4: 公開日、$5: manifest の追加の項目
+# 版つきの成果物の名前。$1: app か core、$2: target
+artifact_name() {
+  case $1:$2 in
+    app:*) echo herdr-app-windows-x86_64.tar.gz ;;
+    core:windows-x86_64) echo herdr-core-windows-x86_64.zip ;;
+    *) echo "herdr-core-$2.tar.gz" ;;
+  esac
+}
+
+# 版つきの成果物と manifest と、Last-Modified の headers を置く。$1: case、$2: app か core、$3: 版、$4: 公開日、$5: manifest の
+# 追加の項目。target は app が windows-x86_64、core が linux-aarch64・linux-x86_64・windows-x86_64。成果物の中身は
+# "<部品> <版> <target>" (sha256 は同じ文字から sha_of で作る)
 put_release() {
-  local d=$1 kind=$2 v=$3 date=$4 extra=$5 name
-  if [[ ${kind} == app ]]; then name='herdr-app-windows-x86_64.tar.gz'; else name='herdr-core-windows-x86_64.zip'; fi
+  local d=$1 kind=$2 v=$3 date=$4 extra=$5 target name entries=''
+  local -a targets=(windows-x86_64)
+  if [[ ${kind} == core ]]; then targets=(linux-aarch64 linux-x86_64 windows-x86_64); fi
   mkdir -p "${d}/web/${rel}/${kind}/${v}"
-  printf '%s' "${kind} ${v}" >"${d}/web/${rel}/${kind}/${v}/${name}"
-  printf 'HTTP/2 200\r\nlast-modified: %s\r\ncontent-length: 1\r\n\r\n' "${date}" >"${d}/web/${rel}/${kind}/${v}/${name}.headers"
-  printf '{"version": "%s", %s, "targets": {"windows-x86_64": {"url": "https://%s/%s/%s/%s", "sha256": "%s"}}}\n' \
-    "${v}" "${extra}" "${rel}" "${kind}" "${v}" "${name}" "$(sha_of "${kind} ${v}")" >"${d}/web/${rel}/${kind}/${v}/manifest.json"
+  for target in "${targets[@]}"; do
+    name=$(artifact_name "${kind}" "${target}")
+    printf '%s' "${kind} ${v} ${target}" >"${d}/web/${rel}/${kind}/${v}/${name}"
+    printf 'HTTP/2 200\r\nlast-modified: %s\r\ncontent-length: 1\r\n\r\n' "${date}" >"${d}/web/${rel}/${kind}/${v}/${name}.headers"
+    entries+="${entries:+, }\"${target}\": {\"url\": \"https://${rel}/${kind}/${v}/${name}\", \"sha256\": \"$(sha_of "${kind} ${v} ${target}")\"}"
+  done
+  printf '{"version": "%s", %s, "targets": {%s}}\n' "${v}" "${extra}" "${entries}" >"${d}/web/${rel}/${kind}/${v}/manifest.json"
+}
+
+# manifest から 1 つの target を消す。$1: case、$2: app か core、$3: 版、$4: target
+drop_target() {
+  local m="$1/web/${rel}/$2/$3/manifest.json"
+  jq --arg t "$4" 'del(.targets[$t])' "${m}" >"${m}.new" && mv "${m}.new" "${m}"
 }
 
 # ソースの fixture を置く。$1: case、$2: repo、$3: 版、$4: ファイル、$5: 中身
@@ -177,27 +201,39 @@ put_source() {
   printf '%s\n' "$5" >"$1/gh/$2/src/$3/$4"
 }
 
-# 固定した版を書いた ps1。$1: case、$2: app の sha256、$3: core の sha256、$4: generation
-write_ps1() {
-  cat >"$1/Install-HerdrApp.ps1" <<EOF
-param(
-    [switch]\$Check,
-    [string]\$AppVersion = '0.1.12',
-    [string]\$AppSha256 = '$2',
-    [string]\$CoreVersion = '0.1.17',
-    [string]\$CoreSha256 = '$3',
-    [int]\$CoreGeneration = $4
-)
+# 固定した版を書いた releases.json (app 0.1.12・core 0.1.17。sha256 は put_release の成果物と同じ)。$1: case。残りは上書き
+# (app=<sha>・linux-aarch64=<sha>・linux-x86_64=<sha>・windows-x86_64=<sha>・generation=<値>)
+write_releases() {
+  local d=$1 kv app la lx win gen=1
+  app=$(sha_of 'app 0.1.12 windows-x86_64')
+  la=$(sha_of 'core 0.1.17 linux-aarch64')
+  lx=$(sha_of 'core 0.1.17 linux-x86_64')
+  win=$(sha_of 'core 0.1.17 windows-x86_64')
+  shift
+  for kv in "$@"; do
+    case ${kv} in
+      app=*) app=${kv#*=} ;;
+      linux-aarch64=*) la=${kv#*=} ;;
+      linux-x86_64=*) lx=${kv#*=} ;;
+      windows-x86_64=*) win=${kv#*=} ;;
+      generation=*) gen=${kv#*=} ;;
+    esac
+  done
+  cat >"${d}/releases.json" <<EOF
+{
+  "app": {"version": "0.1.12", "sha256": {"windows-x86_64": "${app}"}},
+  "core": {"version": "0.1.17", "generation": ${gen}, "sha256": {"linux-aarch64": "${la}", "linux-x86_64": "${lx}", "windows-x86_64": "${win}"}}
+}
 EOF
 }
 
-# $1: case、残り: script の引数 (既定は ps1)。環境変数は呼び出し側で付ける
+# $1: case、残り: script の引数 (既定は releases.json)。環境変数は呼び出し側で付ける
 run() {
   local d=$1
   shift
   local args=("$@")
   if ((${#args[@]} == 0)); then
-    args=("${d}/Install-HerdrApp.ps1")
+    args=("${d}/releases.json")
   fi
   env PATH="${d}/bin:${sys_bin}" FAKE_DIR="${d}" CHECK_HERDR_APP_NOW="${now}" "${BASH}" "${script}" "${args[@]}" >"${d}/out" 2>"${d}/err"
   echo $? >"${d}/rc"
@@ -217,9 +253,11 @@ echo "== check-herdr-app-version.sh: ${script}"
 # 1. 揃っていて、新しい版も無い: exit 0
 d=$(new_case c1)
 run "${d}"
-if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F '同じ: app 0.1.12 の成果物の sha256' && seen "${d}" -F '同じ: core 0.1.17 の成果物の sha256' \
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F '同じ: app 0.1.12 の成果物 (windows-x86_64) の sha256' \
+  && seen "${d}" -F '同じ: core 0.1.17 の成果物 (linux-aarch64) の sha256' && seen "${d}" -F '同じ: core 0.1.17 の成果物 (linux-x86_64) の sha256' \
+  && seen "${d}" -F '同じ: core 0.1.17 の成果物 (windows-x86_64) の sha256' \
   && seen "${d}" -F '新しい版は無い: app 0.1.12 が最新' && ! seen "${d}" '^::'; then
-  ok "固定した版が揃っていて新しい版も無ければ exit 0 (Actions の外では ::error を出さない)"
+  ok "固定した版 (core は 3 つの target) が揃っていて新しい版も無ければ exit 0 (Actions の外では ::error を出さない)"
 else
   ng "揃っている" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
@@ -233,11 +271,20 @@ fi
 d=$(new_case c2)
 printf '%s' 'tampered' >"${d}/web/${rel}/app/0.1.12/herdr-app-windows-x86_64.tar.gz"
 GITHUB_ACTIONS=true run "${d}"
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app 0.1.12 の成果物の sha256 が、固定した値 $(sha_of 'app 0.1.12') と違う (今は $(sha_of 'tampered'))" \
-  && grep -q '^::error title=herdr-app の固定した版::app 0.1.12 の成果物の sha256' "${d}/out"; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app 0.1.12 の成果物 (windows-x86_64) の sha256 が、固定した値 $(sha_of 'app 0.1.12 windows-x86_64') と違う (今は $(sha_of 'tampered'))" \
+  && grep -q '^::error title=herdr-app の固定した版::app 0.1.12 の成果物 (windows-x86_64) の sha256' "${d}/out"; then
   ok "固定した版の成果物の sha256 が変われば exit 1 で、今の値を出す (Actions の中では ::error も)"
 else
   ng "成果物が変わった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+d=$(new_case c2b)
+printf '%s' 'tampered' >"${d}/web/${rel}/core/0.1.17/herdr-core-linux-x86_64.tar.gz"
+run "${d}"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "core 0.1.17 の成果物 (linux-x86_64) の sha256 が、固定した値 $(sha_of 'core 0.1.17 linux-x86_64') と違う" \
+  && seen "${d}" -F '同じ: core 0.1.17 の成果物 (windows-x86_64) の sha256'; then
+  ok "core の Linux の target の成果物が変わっても exit 1 (Linux の home-manager が入れるもの)"
+else
+  ng "Linux の成果物が変わった" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # 3. manifest の sha256・generation・core_min が合わない: exit 1
@@ -252,13 +299,16 @@ else
   ng "manifest が合わない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 d=$(new_case c3b)
-write_ps1 "${d}" "$(sha_of 'app 0.1.12')" "$(sha_of 'core 0.1.17')" 1
-sed -i "s/$(sha_of 'app 0.1.12')/$(printf '%064d' 0)/" "${d}/web/${rel}/app/0.1.12/manifest.json"
+sed -i "s/$(sha_of 'app 0.1.12 windows-x86_64')/$(printf '%064d' 0)/" "${d}/web/${rel}/app/0.1.12/manifest.json"
 run "${d}"
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app 0.1.12 の manifest の sha256 ($(printf '%064d' 0)) が、固定した値"; then
-  ok "manifest の sha256 が固定した値と違えば exit 1"
+d2=$(new_case c3c)
+drop_target "${d2}" core 0.1.17 linux-aarch64
+run "${d2}"
+if [[ $(rc "${d}") == 1 && $(rc "${d2}") == 1 ]] && seen "${d}" -F "app 0.1.12 の manifest の windows-x86_64 の sha256 ($(printf '%064d' 0)) が、固定した値" \
+  && seen "${d2}" -F "core 0.1.17 の manifest の linux-aarch64 の sha256 (無い) が、固定した値"; then
+  ok "manifest の target の sha256 が固定した値と違う・無ければ exit 1"
 else
-  ng "manifest の sha256" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "manifest の sha256" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
 fi
 
 # 4. 新しい版が猶予の中: ※ で知らせて exit 0
@@ -280,7 +330,7 @@ put_release "${d}" app 0.1.14 "${new_date}" '"core_min": "0.1.11"'
 printf 'v0.1.13\nv0.1.14\n' >>"${d}/gh/herdrdev/herdr-app/tags"
 put_source "${d}" herdrdev/herdr-app 0.1.13 src/update.rs 'fn releases() -> String { std::env::var("HERDR_RELEASES_URL").unwrap_or_else(|_| "https://releases.herdr.dev".into()) }'
 run "${d}"
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app の新しい版 0.1.13 が公開から 15 日たった (公開 2026-11-04・猶予 7 日)。sha256 $(sha_of 'app 0.1.13')・core_min 0.1.11。ソース (src/update.rs) は HERDR_RELEASES_URL を読む" \
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F "app の新しい版 0.1.13 が公開から 15 日たった (公開 2026-11-04・猶予 7 日)。sha256 $(sha_of 'app 0.1.13 windows-x86_64')・core_min 0.1.11。ソース (src/update.rs) は HERDR_RELEASES_URL を読む" \
   && seen "${d}" -F '差分 (src/update.rs も読む): https://github.com/herdrdev/herdr-app/compare/v0.1.12...v0.1.13' \
   && seen "${d}" -F '※ app の新しい版 0.1.14' && grep -q -- '--paginate repos/herdrdev/herdr-app/tags' "${d}/gh-calls"; then
   ok "猶予がたった版があれば exit 1 で、版・sha256・core_min・ソースが変数を読むこと・差分の URL を出す (猶予の中の版は ※。tag は --paginate で読む)"
@@ -295,10 +345,22 @@ printf 'v0.1.18\n' >>"${d}/gh/herdrdev/herdr-core/tags"
 put_source "${d}" herdrdev/herdr-core 0.1.18 crates/herdr-core/src/releases.rs 'fn base() -> String { "https://releases.herdr.dev".into() }'
 run "${d}"
 if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F 'core の新しい版 0.1.18 が公開から 15 日たった' \
+  && seen "${d}" -F "sha256 linux-aarch64 $(sha_of 'core 0.1.18 linux-aarch64')・linux-x86_64 $(sha_of 'core 0.1.18 linux-x86_64')・windows-x86_64 $(sha_of 'core 0.1.18 windows-x86_64')・generation 1" \
   && seen "${d}" -F 'ソース (crates/herdr-core/src/releases.rs) が HERDR_RELEASES_URL を読まない。上げると取得元をフィードに替えられない (公式から上がる) ので、上げない'; then
-  ok "猶予がたった版のソースが変数を読まなければ、上げないと出す"
+  ok "猶予がたった core は target ごとの sha256 を出し、ソースが変数を読まなければ、上げないと出す"
 else
   ng "変数を読まない" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+d=$(new_case c6b)
+put_release "${d}" core 0.1.18 "${old_date}" '"generation": 1'
+drop_target "${d}" core 0.1.18 linux-aarch64
+printf 'v0.1.18\n' >>"${d}/gh/herdrdev/herdr-core/tags"
+put_source "${d}" herdrdev/herdr-core 0.1.18 crates/herdr-core/src/releases.rs 'std::env::var("HERDR_RELEASES_URL")'
+run "${d}"
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F 'sha256 linux-aarch64 無い (この版には上げられない)・linux-x86_64'; then
+  ok "猶予がたった core の manifest に無い target は、無い (上げられない) と出す"
+else
+  ng "target の無い新しい版" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # 7. Windows の成果物が無い新しい版は数えない
@@ -355,23 +417,27 @@ else
   ng "HEAD の失敗" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
 fi
 
-# 8. 確かめられない: 固定した版を落とせない・gh が失敗する・ps1 が読めない
+# 8. 確かめられない: 固定した版を落とせない・gh が失敗する・releases.json が読めない
 d=$(new_case c8)
 rm "${d}/web/${rel}/core/0.1.17/herdr-core-windows-x86_64.zip"
 run "${d}"
 d2=$(new_case c8b)
 FAKE_GH_FAIL=1 run "${d2}"
 d3=$(new_case c8c)
-write_ps1 "${d3}" 'not-a-sha' "$(sha_of 'core 0.1.17')" 1
+write_releases "${d3}" app=not-a-sha linux-x86_64=ABC
 run "${d3}"
 d4=$(new_case c8d)
-run "${d4}" "${d4}/missing.ps1"
-if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 && $(rc "${d3}") == 2 && $(rc "${d4}") == 2 ]] \
-  && seen "${d}" -F 'core 0.1.17 の成果物を落とせない' && seen "${d2}" -F 'tag を読めない' \
-  && seen "${d3}" -F 'ps1 から固定した版と sha256 を読めません' && seen "${d4}" -F 'ps1 が読めません'; then
-  ok "落とせない・gh が失敗する・ps1 から読めない・ps1 が無いときは exit 2"
+run "${d4}" "${d4}/missing.json"
+d5=$(new_case c8e)
+printf 'not json\n' >"${d5}/releases.json"
+run "${d5}"
+if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 && $(rc "${d3}") == 2 && $(rc "${d4}") == 2 && $(rc "${d5}") == 2 ]] \
+  && seen "${d}" -F 'core 0.1.17 の成果物 (windows-x86_64) を落とせない' && seen "${d2}" -F 'tag を読めない' \
+  && seen "${d3}" -F 'releases.json から固定した版と sha256 を読めません' && seen "${d3}" -F 'app.sha256.windows-x86_64=not-a-sha' \
+  && seen "${d3}" -F 'core.sha256.linux-x86_64=ABC' && seen "${d4}" -F 'releases.json が読めません' && seen "${d5}" -F 'releases.json が読めません'; then
+  ok "落とせない・gh が失敗する・releases.json の値の形が違う・無い・JSON でないときは exit 2"
 else
-  ng "確かめられない" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}")/$(rc "${d4}") $(outerr "${d}") $(outerr "${d2}") $(outerr "${d3}")"
+  ng "確かめられない" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}")/$(rc "${d4}")/$(rc "${d5}") $(outerr "${d}") $(outerr "${d2}") $(outerr "${d3}")"
 fi
 
 # 9. 知らせることと確かめられないことが両方あれば exit 1
@@ -379,7 +445,7 @@ d=$(new_case c9)
 printf '%s' 'tampered' >"${d}/web/${rel}/app/0.1.12/herdr-app-windows-x86_64.tar.gz"
 rm "${d}/web/${rel}/core/0.1.17/herdr-core-windows-x86_64.zip"
 run "${d}"
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '落とせない' && seen "${d}" -F '成果物の sha256 が'; then
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '落とせない' && seen "${d}" -F 'の sha256 が、固定した値'; then
   ok "知らせることと確かめられないことが両方あれば exit 1 (両方を出す)"
 else
   ng "両方" "rc=$(rc "${d}") $(outerr "${d}")"

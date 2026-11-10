@@ -1,35 +1,39 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows の herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
+# herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
 #
-#   check-herdr-app-version.sh [<Install-HerdrApp.ps1>]
+#   check-herdr-app-version.sh [<releases.json>]
 #
-# 固定した版と sha256 は win/herdr-app/Install-HerdrApp.ps1 の -AppVersion・-AppSha256・-CoreVersion・-CoreSha256・
-# -CoreGeneration の既定値 (書くのはそこ 1 か所だけ)。Install-HerdrApp.ps1 は、その版を入れ、app と core の自己更新の取得元
-# (HERDR_RELEASES_URL) を、その版だけを載せた手元のフィードに向ける (win/README.md の「herdr-app」)。
+# 固定した版と sha256 は nix/pkgs/herdr-core/releases.json (書くのはそこ 1 か所だけ)。app の版と windows-x86_64 の sha256、
+# core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持つ。Windows の
+# win/herdr-app/Install-HerdrApp.ps1 は、その版を入れ、app と core の自己更新の取得元 (HERDR_RELEASES_URL) を、その版だけを
+# 載せた手元のフィードに向ける (win/README.md の「herdr-app」)。Linux の home-manager は、同じ版の core を入れる
+# (nix/pkgs/herdr-core。nix/README.md の「herdr-core (hc) を Nix で入れる」)。
 #
 # GitHub Actions の herdr-app-installers (.github/workflows/herdr-app-installers.yml) が週 1 回と PR で流し、落ちることで
-# 知らせる。win/ は flake からは見えない (ADR 010) ので、checkout の上で走らせる。手元でも打てる (gh のログインが要る)。
+# 知らせる。手元でも打てる (gh のログインが要る)。
 #
 # ## 確かめること
 #
-# 1. 固定した版の成果物 (releases.herdr.dev の app/<版>/herdr-app-windows-x86_64.tar.gz・core/<版>/herdr-core-windows-x86_64.zip)
-#    を落とし直し、sha256 が固定した値と同じか。公開の後で取得元の成果物が差し替えられると、ここで気づく (exit 1)
-# 2. 固定した版の manifest (app/<版>/manifest.json・core/<版>/manifest.json) の windows-x86_64 の sha256 が固定した値と同じか、
+# 1. 固定した版の成果物 (releases.herdr.dev の app/<版>/herdr-app-windows-x86_64.tar.gz と、core/<版>/ の
+#    herdr-core-windows-x86_64.zip・herdr-core-linux-x86_64.tar.gz・herdr-core-linux-aarch64.tar.gz) を落とし直し、sha256 が
+#    固定した値と同じか。公開の後で取得元の成果物が差し替えられると、ここで気づく (exit 1)
+# 2. 固定した版の manifest (app/<版>/manifest.json・core/<版>/manifest.json) の target ごとの sha256 が固定した値と同じか、
 #    core の generation が固定した値と同じか、app の core_min が固定した core の版以下か (exit 1)
-# 3. 固定した版より新しい版 (GitHub の tag vX.Y.Z を並べ、版つきの成果物が releases.herdr.dev にあるもの) のうち、公開
-#    (成果物の Last-Modified) から猶予の 7 日がたったもの。あれば、いちばん新しいものを知らせる (exit 1)。その版の
-#    sha256 (と app なら core_min、core なら generation。固定と違えば、app と一緒に上げると出す) と、その版のソースが
-#    HERDR_RELEASES_URL を読むか (app は src/update.rs、core は crates/herdr-core/src/releases.rs) と、固定した版からの
-#    差分の URL を添える。読まない版に上げると、取得元をフィードに替えられない (公式から上がる)。文字があるかしか見ない
-#    ので、上げる前に差分を読む。猶予の中の版だけなら、※ の行で知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)。
-#    成果物が無い (404) 版は数えず、HEAD のほかの失敗 (5xx・403・つながらない・Last-Modified が無い) は確かめられない (exit 2)
+# 3. 固定した版より新しい版 (GitHub の tag vX.Y.Z を並べ、Windows の版つきの成果物が releases.herdr.dev にあるもの) のうち、
+#    公開 (成果物の Last-Modified) から猶予の 7 日がたったもの。あれば、いちばん新しいものを知らせる (exit 1)。その版の
+#    sha256 (core は target ごと。manifest に無い target は無いと出す) と、app なら core_min、core なら generation (固定と
+#    違えば、app と一緒に上げると出す) と、その版のソースが HERDR_RELEASES_URL を読むか (app は src/update.rs、core は
+#    crates/herdr-core/src/releases.rs) と、固定した版からの差分の URL を添える。読まない版に上げると、取得元をフィードに
+#    替えられない (公式から上がる)。文字があるかしか見ないので、上げる前に差分を読む。猶予の中の版だけなら、※ の行で
+#    知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)。成果物が無い (404) 版は数えず、HEAD のほかの失敗 (5xx・
+#    403・つながらない・Last-Modified が無い) は確かめられない (exit 2)
 #
 # 署名 (Authenticode) はここでは見ない。Linux の信頼の束に Microsoft のコード署名の root が無いので、Windows の
 # Install-HerdrApp.ps1 が入れる前と -Check で見る。
 #
-# 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった (ps1 が読めない・落とせない・
+# 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった (releases.json が読めない・落とせない・
 # API の失敗)。1 と 2 が両方あれば 1。GitHub Actions の中では、落ちる理由を ::error の行にも出す。
 #
 # ## 依存
@@ -44,6 +48,9 @@ grace_days=${CHECK_HERDR_APP_GRACE_DAYS:-7}
 # 今の時刻 (UNIX 秒)。テストは CHECK_HERDR_APP_NOW で決める
 now=${CHECK_HERDR_APP_NOW:-$(date +%s)}
 releases='https://releases.herdr.dev'
+# 部品ごとの target (releases.json の sha256 の名前。公式の manifest の targets の名前と同じ)
+app_targets=(windows-x86_64)
+core_targets=(linux-aarch64 linux-x86_64 windows-x86_64)
 
 script_dir=$(
   cd -- "$(dirname -- "$0")" &>/dev/null
@@ -53,12 +60,12 @@ repo_dir=$(dirname "$(dirname "${script_dir}")")
 
 usage() {
   cat <<'EOS'
-Windows の herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
+herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
 
 使い方:
-  check-herdr-app-version.sh [<Install-HerdrApp.ps1>]
+  check-herdr-app-version.sh [<releases.json>]
 
-  ps1 の既定は repo の win/herdr-app/Install-HerdrApp.ps1 (固定した版と sha256 は、その -AppVersion などの既定値)。
+  releases.json の既定は repo の nix/pkgs/herdr-core/releases.json (固定した版と sha256 の 1 か所)。
 
 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
 EOS
@@ -83,7 +90,7 @@ if ((${#args[@]} > 1)); then
   usage >&2
   exit 2
 fi
-ps1=${args[0]:-${repo_dir}/win/herdr-app/Install-HerdrApp.ps1}
+releases_file=${args[0]:-${repo_dir}/nix/pkgs/herdr-core/releases.json}
 
 # GitHub Actions の中なら、実行の画面の先頭に出る ::<$1> の行 (error か notice) を出す (% と改行は決まりどおりに書き換える)
 annotate() {
@@ -115,47 +122,55 @@ newer_than() {
   [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1) == "$1" ]]
 }
 
-# ps1 の param の既定値を読む。$1: 名前 (AppVersion など)。'…' で囲んだ値か、数
-ps1_default() {
-  local line value
-  line=$(grep -m 1 -E "^[[:space:]]*\[(string|int)\]\\\$$1[[:space:]]*=" "${ps1}") || true
-  value=${line#*=}
-  value=${value%,}
-  value=${value//[[:space:]]/}
-  value=${value#\'}
-  value=${value%\'}
-  printf '%s' "${value}"
+# releases.json の値を読む。$1: jq の式。無ければ空
+pin() {
+  jq -r "$1 // \"\" | tostring" "${releases_file}" 2>/dev/null || true
 }
 
-if [[ ! -r ${ps1} ]]; then
-  echo "!! ps1 が読めません: ${ps1}" >&2
-  annotate error "ps1 が読めません: ${ps1}"
+if [[ ! -r ${releases_file} ]] || ! jq -e 'type == "object"' "${releases_file}" &>/dev/null; then
+  echo "!! releases.json が読めません (無い・JSON でない): ${releases_file}" >&2
+  annotate error "releases.json が読めません: ${releases_file}"
   exit 2
 fi
-app_version=$(ps1_default AppVersion)
-app_sha=$(ps1_default AppSha256)
-core_version=$(ps1_default CoreVersion)
-core_sha=$(ps1_default CoreSha256)
-core_generation=$(ps1_default CoreGeneration)
+app_version=$(pin .app.version)
+core_version=$(pin .core.version)
+core_generation=$(pin .core.generation)
+declare -A pinned_sha=()
+for target in "${app_targets[@]}"; do
+  pinned_sha["app:${target}"]=$(pin ".app.sha256[\"${target}\"]")
+done
+for target in "${core_targets[@]}"; do
+  pinned_sha["core:${target}"]=$(pin ".core.sha256[\"${target}\"]")
+done
 version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
-if [[ ! ${app_version} =~ ${version_re} || ! ${core_version} =~ ${version_re} || ! ${app_sha} =~ ^[0-9a-f]{64}$ ||
-  ! ${core_sha} =~ ^[0-9a-f]{64}$ || ! ${core_generation} =~ ^[1-9][0-9]*$ ]]; then
-  echo "!! ps1 から固定した版と sha256 を読めません (AppVersion=${app_version} AppSha256=${app_sha} CoreVersion=${core_version} CoreSha256=${core_sha} CoreGeneration=${core_generation}): ${ps1}" >&2
-  annotate error "ps1 から固定した版と sha256 を読めません: ${ps1}"
+bad=''
+[[ ${app_version} =~ ${version_re} ]] || bad+=" app.version=${app_version}"
+[[ ${core_version} =~ ${version_re} ]] || bad+=" core.version=${core_version}"
+[[ ${core_generation} =~ ^[1-9][0-9]*$ ]] || bad+=" core.generation=${core_generation}"
+for key in "${!pinned_sha[@]}"; do
+  [[ ${pinned_sha["${key}"]} =~ ^[0-9a-f]{64}$ ]] || bad+=" ${key%%:*}.sha256.${key#*:}=${pinned_sha["${key}"]}"
+done
+if [[ -n ${bad} ]]; then
+  echo "!! releases.json から固定した版と sha256 を読めません (${bad# }): ${releases_file}" >&2
+  annotate error "releases.json から固定した版と sha256 を読めません: ${releases_file}"
   exit 2
 fi
-echo "固定した版: app ${app_version} (sha256 ${app_sha:0:12}…)・core ${core_version} (sha256 ${core_sha:0:12}…・generation ${core_generation})"
+core_pins=''
+for target in "${core_targets[@]}"; do
+  core_pins+="${core_pins:+・}${target} ${pinned_sha["core:${target}"]:0:12}…"
+done
+echo "固定した版: app ${app_version} (sha256 ${pinned_sha["app:windows-x86_64"]:0:12}…)・core ${core_version} (generation ${core_generation}。sha256 ${core_pins})"
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-herdr-app-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
 
-# 版つきの成果物の URL。$1: app か core、$2: 版
+# 版つきの成果物の URL。$1: app か core、$2: 版、$3: target (core の Windows は zip、Linux は tar.gz)
 artifact_url() {
-  if [[ $1 == app ]]; then
-    echo "${releases}/app/$2/herdr-app-windows-x86_64.tar.gz"
-  else
-    echo "${releases}/core/$2/herdr-core-windows-x86_64.zip"
-  fi
+  case $1:$3 in
+    app:*) echo "${releases}/app/$2/herdr-app-windows-x86_64.tar.gz" ;;
+    core:windows-x86_64) echo "${releases}/core/$2/herdr-core-windows-x86_64.zip" ;;
+    *) echo "${releases}/core/$2/herdr-core-$3.tar.gz" ;;
+  esac
 }
 
 # URL を $2 に落とす。落とせなければ 1 (stdin は渡さない)
@@ -205,31 +220,39 @@ reads_feed_variable() {
   return 1
 }
 
-# 1 つの部品 (app か core) を確かめる。$1: app か core、$2: 固定した版、$3: 固定した sha256、$4: GitHub の repo、
-# $5: HERDR_RELEASES_URL を読むはずのソース
+# 1 つの部品 (app か core) を確かめる。$1: app か core、$2: 固定した版、$3: GitHub の repo、$4: HERDR_RELEASES_URL を読む
+# はずのソース、残り: target
 check_one() {
-  local kind=$1 pinned=$2 sha=$3 repo=$4 src_file=$5
-  local file="${tmp}/${kind}-pinned" got manifest="${tmp}/${kind}-manifest.json" listed
+  local kind=$1 pinned=$2 repo=$3 src_file=$4
+  shift 4
+  local targets=("$@") target sha file got manifest="${tmp}/${kind}-manifest.json" listed
 
-  # 1. 固定した版の成果物を落とし直して sha256 を比べる
-  if fetch "$(artifact_url "${kind}" "${pinned}")" "${file}"; then
-    got=$(sha256sum "${file}")
-    got=${got%% *}
-    if [[ ${got} == "${sha}" ]]; then
-      echo "同じ: ${kind} ${pinned} の成果物の sha256 (${sha:0:12}…)"
+  # 1. 固定した版の成果物を target ごとに落とし直して sha256 を比べる
+  for target in "${targets[@]}"; do
+    sha=${pinned_sha["${kind}:${target}"]}
+    file="${tmp}/${kind}-${target}-pinned"
+    if fetch "$(artifact_url "${kind}" "${pinned}" "${target}")" "${file}"; then
+      got=$(sha256sum "${file}")
+      got=${got%% *}
+      if [[ ${got} == "${sha}" ]]; then
+        echo "同じ: ${kind} ${pinned} の成果物 (${target}) の sha256 (${sha:0:12}…)"
+      else
+        report "${kind} ${pinned} の成果物 (${target}) の sha256 が、固定した値 ${sha} と違う (今は ${got})。公開の後で取得元の成果物が差し替えられたかもしれない。win/README.md の「固定した版の成果物が変わったとき」"
+      fi
     else
-      report "${kind} ${pinned} の成果物の sha256 が、固定した値 ${sha} と違う (今は ${got})。公開の後で取得元の成果物が差し替えられたかもしれない。win/README.md の「固定した版の成果物が変わったとき」"
+      trouble "${kind} ${pinned} の成果物 (${target}) を落とせない: $(artifact_url "${kind}" "${pinned}" "${target}")"
     fi
-  else
-    trouble "${kind} ${pinned} の成果物を落とせない: $(artifact_url "${kind}" "${pinned}")"
-  fi
+  done
 
-  # 2. 固定した版の manifest の sha256 (と generation・core_min)
+  # 2. 固定した版の manifest の target ごとの sha256 (と generation・core_min)
   if fetch "${releases}/${kind}/${pinned}/manifest.json" "${manifest}"; then
-    listed=$(jq -r '.targets["windows-x86_64"].sha256 // ""' "${manifest}" 2>/dev/null) || listed=''
-    if [[ ${listed} != "${sha}" ]]; then
-      report "${kind} ${pinned} の manifest の sha256 (${listed:-無い}) が、固定した値 ${sha} と違う"
-    fi
+    for target in "${targets[@]}"; do
+      sha=${pinned_sha["${kind}:${target}"]}
+      listed=$(jq -r --arg t "${target}" '.targets[$t].sha256 // ""' "${manifest}" 2>/dev/null) || listed=''
+      if [[ ${listed} != "${sha}" ]]; then
+        report "${kind} ${pinned} の manifest の ${target} の sha256 (${listed:-無い}) が、固定した値 ${sha} と違う"
+      fi
+    done
     if [[ ${kind} == core ]]; then
       local generation
       generation=$(jq -r '.generation // ""' "${manifest}" 2>/dev/null) || generation=''
@@ -247,7 +270,7 @@ check_one() {
     trouble "${kind} ${pinned} の manifest を落とせない: ${releases}/${kind}/${pinned}/manifest.json"
   fi
 
-  # 3. 固定した版より新しい版のうち、猶予がたったもの
+  # 3. 固定した版より新しい版のうち、猶予がたったもの。公開日は Windows の成果物で見る (app も core も出す target)
   local versions v t rc age ripe='' ripe_age='' ripe_at='' waiting='' unread=0 listed_versions=()
   if ! versions=$(tag_versions "${repo}"); then
     trouble "GitHub の ${repo} の tag を読めない (gh api repos/${repo}/tags)"
@@ -257,13 +280,13 @@ check_one() {
   for v in "${listed_versions[@]}"; do
     newer_than "${v}" "${pinned}" || continue
     rc=0
-    t=$(published_at "$(artifact_url "${kind}" "${v}")") || rc=$?
+    t=$(published_at "$(artifact_url "${kind}" "${v}" windows-x86_64)") || rc=$?
     # 版つきの成果物が無い版 (Windows の成果物を出さなかった版) は数えない
     if ((rc == 3)); then
       continue
     fi
     if ((rc != 0)); then
-      trouble "${kind} ${v} の成果物の公開日 (HEAD の Last-Modified) を読めない: $(artifact_url "${kind}" "${v}")"
+      trouble "${kind} ${v} の成果物の公開日 (HEAD の Last-Modified) を読めない: $(artifact_url "${kind}" "${v}" windows-x86_64)"
       unread=1
       continue
     fi
@@ -277,9 +300,16 @@ check_one() {
     fi
   done
   if [[ -n ${ripe} ]]; then
-    local ripe_manifest="${tmp}/${kind}-ripe.json" ripe_sha='' extra='' reads ripe_generation
+    local ripe_manifest="${tmp}/${kind}-ripe.json" ripe_sha='' extra='' reads ripe_generation one
     if fetch "${releases}/${kind}/${ripe}/manifest.json" "${ripe_manifest}"; then
-      ripe_sha=$(jq -r '.targets["windows-x86_64"].sha256 // ""' "${ripe_manifest}" 2>/dev/null) || ripe_sha=''
+      if ((${#targets[@]} == 1)); then
+        ripe_sha=$(jq -r --arg t "${targets[0]}" '.targets[$t].sha256 // "不明"' "${ripe_manifest}" 2>/dev/null) || ripe_sha='不明'
+      else
+        for target in "${targets[@]}"; do
+          one=$(jq -r --arg t "${target}" '.targets[$t].sha256 // "無い (この版には上げられない)"' "${ripe_manifest}" 2>/dev/null) || one='不明'
+          ripe_sha+="${ripe_sha:+・}${target} ${one}"
+        done
+      fi
       if [[ ${kind} == app ]]; then
         extra="・core_min $(jq -r '.core_min // "?"' "${ripe_manifest}" 2>/dev/null || echo '?')"
       else
@@ -311,8 +341,8 @@ check_one() {
   fi
 }
 
-check_one app "${app_version}" "${app_sha}" herdrdev/herdr-app src/update.rs
-check_one core "${core_version}" "${core_sha}" herdrdev/herdr-core crates/herdr-core/src/releases.rs
+check_one app "${app_version}" herdrdev/herdr-app src/update.rs "${app_targets[@]}"
+check_one core "${core_version}" herdrdev/herdr-core crates/herdr-core/src/releases.rs "${core_targets[@]}"
 
 if ((changed)); then
   exit 1

@@ -1585,6 +1585,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
+| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`~/.local/bin` のものは同じ binary へのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` | `nix/home/modules/wsl-mtu-guard.nix` (生成。`wsl.mtuGuard.enable` のマシンだけ。`/etc` へは setup の手順が入れる。[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)) |
@@ -1636,7 +1637,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-herdr-app.sh        # herdr-app と herdr-core を固定した版とフィードに揃える部分だけ（--apply は確かめずに揃える）
-./nix/scripts/check-herdr-app-version.sh            # herdr-app の固定した版の成果物が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
+./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
 ./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足す部分だけ（--dry-run / --force / --import <名前> / --check）
@@ -1670,8 +1671,9 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 - herdr-app (herdr の desktop app) と herdr-core は winget に無いので、`bootstrap-windows-herdr-app.sh` (order 97) が、配った
   `Install-HerdrApp.ps1` を `pwsh.exe` で呼び、dotfiles が固定した版を公式の install.ps1 と同じ置き場所に入れる (遠くの script は流さない。
   sha256 と署名を確かめる)。app と core は自分で上がるので、取得元 (`HERDR_RELEASES_URL`) を固定した版だけを載せた手元のフィードに向け、
-  固定した版を上げる PR の後の setup がフィードを書き直す。外すのは人が PowerShell で `Install-HerdrApp -Uninstall` を打つときだけ
-  （[`win/README.md`](../win/README.md#herdr-app)、[ADR 048](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/048_win_herdr_app_official_layout_20261109T230034JST/README.md)）
+  固定した版を上げる PR の後の setup がフィードを書き直す。版と sha256 は `nix/pkgs/herdr-core/releases.json` (manifest の `base = "nix"` で
+  `herdr-releases.json` として配る。Linux のホストの herdr-core も同じ版で入る。[後述](#herdr-core-hc-を-nix-で入れる))。外すのは人が PowerShell で
+  `Install-HerdrApp -Uninstall` を打つときだけ（[`win/README.md`](../win/README.md#herdr-app)、[ADR 048](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/048_win_herdr_app_official_layout_20261109T230034JST/README.md)）
 - FancyZones の設定は持つキー (`win/powertoys/fancyzones/managed.json`) だけを、カスタムレイアウト (`custom-layouts.json`) はレイアウトごとに、
   `bootstrap-windows-fancyzones.sh` (order 92) が書く。どちらも manifest では配らない。`settings.json` は PowerToys が全部のキーを書くので
   ファイルごとは配らず、設定画面で変えていても dotfiles の値へ戻す (衝突で止めない)。`custom-layouts.json` は PC のエディターで作ったレイアウトも
@@ -4709,6 +4711,55 @@ store の binary は書き換えられないので、端末で `ntn update` を�
 cloud の VM は home-manager を通らないので、ntn は環境の setup script の install script で入れる（[前述](#環境を作る)。
 版は固定されず、その時の最新）。
 
+## herdr-core (hc) を Nix で入れる
+
+herdr-app (herdr の desktop app) は、SSH でつないだ machine (server) の terminal を、その machine の herdr-core に持たせる。手元の core は
+SSH で remote の `herdr-core connect` を起動し、remote は非対話の sh で `p=$(command -v herdr-core) || p=$HOME/.local/bin/herdr-core` を探す
+(herdr-core の `crates/herdr-core/src/machines.rs`)。server になりうる Linux のホストに herdr-core を入れるため、`home/modules/herdr-core.nix` が
+既定で Linux の全ホストに入れる (`dotfiles.herdrCore.enable`。入れないホストは、そのホストの modules で false にする。macOS には入れない)。
+Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`](../win/README.md#herdr-app))。
+
+- 公式の Linux 版 (`https://releases.herdr.dev/core/<版>/herdr-core-linux-<arch>.tar.gz`。static-pie の単体の binary) を、
+  `pkgs/herdr-core/releases.json` の版と sha256 で落とす (`pkgs/herdr-core/`)。nixpkgs の herdr-core は、dotfiles の nixpkgs の固定にまだ無く、
+  版も Windows とずれるので使わない
+- 版は Windows の herdr-core と同じ (同じ `releases.json`。Windows へは manifest の `base = "nix"` で `herdr-releases.json` として配る)。
+  同じ版なら、Windows の herdr-app・hc が machine としてつなぐときに、写し直しを聞かれない
+- `herdr-core` と `hc` を home.packages に入れ、`~/.local/bin/herdr-core`・`~/.local/bin/hc` も同じ binary へのリンクにする
+  ([下](#非対話の-ssh-から見つかるか))。前に `hc machine add --install` などで写したものは、リンクに置き換わる (force)。古い写しが残ると、
+  PATH で `~/.local/bin` が nix の profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる
+- switch せずに試すなら:
+
+  ```sh
+  nix run ./nix#herdr-core -- --version   # hc 0.1.17
+  ```
+
+### 非対話の SSH から見つかるか
+
+remote の探し先の 1 つ目 (`command -v herdr-core`) は、非対話の SSH の PATH に nix の profile が入るかで決まる。
+
+- multi-user の Nix の Ubuntu (今の WSL の PC など): installer が `/etc/bash.bashrc` の先頭に `nix-daemon.sh` を読む行を足し、Ubuntu の bash は
+  SSH から起こされると (`SSH_CLIENT` がある) それを読むので、`~/.nix-profile/bin` が PATH に入る (2026-11-10 に、sshd が渡す環境を真似た
+  `bash -c` で確かめた)
+- single-user の Nix は `~/.profile` にしか足さず、home-manager の `~/.bashrc` は先頭で非対話を返すので、入らない
+
+どちらでも見つかるよう、2 つ目の `~/.local/bin/herdr-core` もリンクにしている (実体は store の binary)。
+
+### hc update と hc machine update を打たない
+
+- store の core は、`hc update` が「nix のもの」として断る (`… belongs to nix`・`update it in your Nix configuration`)。実行ファイルの実体
+  (`~/.local/bin` のリンクもたどる) が `/nix/store/` の下にあるため (herdr-core の `crates/herdr-core/src/client.rs` の `manager_of`)
+- dotfiles が入れたホストへ、ほかの machine から `hc machine update` (と herdr-app の machine の更新) を打たない。`~/.local/bin/herdr-core` を
+  落とした binary に置き換える (次の switch でリンクに戻る)
+- 版は `pkgs/herdr-core/releases.json` を上げる PR で、Windows と一緒に上げる ([`win/README.md`](../win/README.md#固定した版を上げる))。merge の後に
+  各マシンで `~/dotfiles/setup --update` (Linux は home-manager の switch で、Windows は bootstrap が揃える)。上げた版と古い版の machine が
+  混ざると、つなぐときに写し直しを聞かれる (too old to talk to) ので、続けて上げる
+
+### dotfiles を当てないホスト
+
+dotfiles の home-manager を当てない Linux のホストへは、Windows の herdr-app・hc が machine を足すときに入れる (`~/.local/bin/herdr-core`)。
+Windows のフィード (`HERDR_RELEASES_URL`) の core の manifest には Linux (x86_64・aarch64) の target も載せているので、同じ版のその target の
+build を公式から落とし、固定した sha256 で確かめる (Linux の hc が同じフィードを読んで、sha256 が合わなければ断ることを確かめた)。
+
 ## CI
 
 `.github/workflows/nix.yml` が、main への push と PR で走る（`nix/**`・`win/**`・workflow 自身が変わったときだけ）。
@@ -4733,9 +4784,10 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 Windows の winget で固定した版 (OpenSSH・herdr・Google 日本語入力) が winget の最新に追いついているかは、別の
 workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめる (`check-winget-version.sh`。
 [`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。winget に無い herdr-app を入れる `Install-HerdrApp.ps1` が写した
-公式の install.ps1 が変わっていないかと、固定した版の成果物が変わっていないか・7 日たった新しい版があるかは、別の workflow
-`.github/workflows/herdr-app-installers.yml` が週 1 回と PR で確かめる (`check-herdr-app-installers.sh`・`check-herdr-app-version.sh`。
-[`win/README.md`](../win/README.md#固定した版を上げる))。
+公式の install.ps1 が変わっていないかと、固定した版の成果物 (app の Windows、core の Windows と Linux の 2 つ) が変わっていないか・7 日たった
+新しい版があるかは、別の workflow `.github/workflows/herdr-app-installers.yml` が週 1 回と PR で確かめる (`check-herdr-app-installers.sh`・
+`check-herdr-app-version.sh`。[`win/README.md`](../win/README.md#固定した版を上げる))。Linux の herdr-core の package の build
+(固定した sha256 で落とし、`hc --version` を版と照らす) は、`check` の `herdr-core-test` が見る ([前述](#herdr-core-hc-を-nix-で入れる))。
 
 ## 検証
 

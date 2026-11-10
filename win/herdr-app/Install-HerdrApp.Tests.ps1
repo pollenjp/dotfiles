@@ -44,7 +44,19 @@ $FeedUrl = 'file:///C:/Users/u/AppData/Local/dotfiles/herdr-releases'
 $AppExe = "$App\herdr-app.exe"
 $ShaA = 'dc1b5663244ed91d96f42e7ddeec73304bb955474142975f290711cabcf0354a'
 $ShaC = 'a212b69db0efb808882683f15e5da45ab9606da7bcc54b97b29ed4fa540f5491'
-$Pins = [pscustomobject]@{ AppVersion = '0.1.12'; AppSha256 = $ShaA; CoreVersion = '0.1.17'; CoreSha256 = $ShaC; CoreGeneration = 1 }
+$ShaLA = '3a37a454ec63494cf4306db26481fe9db96673d888723701d24f8a992ae8ab8c'
+$ShaLX = '82ec44043f6894bfdb716b979b87cda43fd7fa46b0104e7b7bd93e64d1a9b877'
+function New-Pins {
+    param([hashtable]$Change = @{}, [hashtable]$Targets = @{})
+    $t = [ordered]@{ 'linux-aarch64' = $ShaLA; 'linux-x86_64' = $ShaLX; 'windows-x86_64' = $ShaC }
+    foreach ($k in $Targets.Keys) { $t[$k] = $Targets[$k] }
+    $p = [ordered]@{ AppVersion = '0.1.12'; AppSha256 = $ShaA; CoreVersion = '0.1.17'; CoreGeneration = 1; CoreSha256 = $t['windows-x86_64']; CoreTargets = $t }
+    foreach ($k in $Change.Keys) { $p[$k] = $Change[$k] }
+    [pscustomobject]$p
+}
+$Pins = New-Pins
+# repo の固定した版のファイル (win/manifest.toml が herdr-releases.json として配る)
+$ReleasesJson = Join-Path $PSScriptRoot '../../nix/pkgs/herdr-core/releases.json'
 # 2026-11-10 に Get-AuthenticodeSignature が app 0.1.12 の herdr-app.exe に返したもの
 $GoodSig = [pscustomobject]@{ Status = 'Valid'; Subject = 'CN=herdr, O=herdr, L=Wilmington, S=Delaware, C=US'; Issuer = 'CN=Microsoft ID Verified CS AOC CA 04, O=Microsoft Corporation, C=US' }
 function New-Sig {
@@ -59,26 +71,35 @@ Test-Case '64 bit の PowerShell なら PROCESSOR_ARCHITECTURE' 'AMD64' { Get-He
 Test-Case '32 bit の PowerShell からは PROCESSOR_ARCHITEW6432 を見る' 'AMD64' { Get-HerdrAppArchitecture -Architecture 'x86' -Architecture6432 'AMD64' }
 Test-Case 'ARM64 は ARM64 のまま' 'ARM64' { Get-HerdrAppArchitecture -Architecture 'ARM64' -Architecture6432 $null }
 
+# ConvertFrom-HerdrAppReleases: 固定した版のファイル (repo の nix/pkgs/herdr-core/releases.json) を読む
+$fromRepo = ConvertFrom-HerdrAppReleases -Text ([IO.File]::ReadAllText($ReleasesJson))
+Test-Case 'repo の固定した版のファイルを読む (版・generation・Windows の sha256)' "0.1.12 $ShaA 0.1.17 1 $ShaC" { "$($fromRepo.AppVersion) $($fromRepo.AppSha256) $($fromRepo.CoreVersion) $($fromRepo.CoreGeneration) $($fromRepo.CoreSha256)" }
+Test-Case 'core の 3 つの target の sha256 を名前の順に読む' "linux-aarch64=$ShaLA linux-x86_64=$ShaLX windows-x86_64=$ShaC" { @($fromRepo.CoreTargets.Keys | ForEach-Object { "$_=$($fromRepo.CoreTargets[$_])" }) -join ' ' }
+Test-Case 'repo の固定した版のファイルは書き方が正しい' '' { Test-HerdrAppPins -Pins $fromRepo }
+Test-Case '無い項目は空として読む (書き方の誤りは Test-HerdrAppPins が見る)' 'CoreSha256 (linux-x86_64) が 64 桁の小文字の hex でない: ' { Test-HerdrAppPins -Pins (ConvertFrom-HerdrAppReleases -Text '{"app":{"version":"0.1.12","sha256":{"windows-x86_64":"dc1b5663244ed91d96f42e7ddeec73304bb955474142975f290711cabcf0354a"}},"core":{"version":"0.1.17","generation":1,"sha256":{"linux-aarch64":"3a37a454ec63494cf4306db26481fe9db96673d888723701d24f8a992ae8ab8c","windows-x86_64":"a212b69db0efb808882683f15e5da45ab9606da7bcc54b97b29ed4fa540f5491"}}}') }
+Test-Case 'JSON でなければ例外' $true { try { $null = ConvertFrom-HerdrAppReleases -Text 'not json'; $false } catch { $true } }
+
 # Test-HerdrAppPins: 固定した版と sha256 の書き方
 function Get-BadPins {
-    param([hashtable]$Change)
-    $p = [ordered]@{ AppVersion = $Pins.AppVersion; AppSha256 = $Pins.AppSha256; CoreVersion = $Pins.CoreVersion; CoreSha256 = $Pins.CoreSha256; CoreGeneration = $Pins.CoreGeneration }
-    foreach ($k in $Change.Keys) { $p[$k] = $Change[$k] }
-    Test-HerdrAppPins -Pins ([pscustomobject]$p)
+    param([hashtable]$Change = @{}, [hashtable]$Targets = @{})
+    Test-HerdrAppPins -Pins (New-Pins -Change $Change -Targets $Targets)
 }
 Test-Case '正しい書き方なら空' '' { Test-HerdrAppPins -Pins $Pins }
 Test-Case '版の形でなければ断る (JSON に書くので形を絞る)' 'AppVersion が版の形 (例 0.1.12) でない: 0.1.12"' { Get-BadPins @{ AppVersion = '0.1.12"' } }
 Test-Case 'v 付きの版も断る' 'CoreVersion が版の形 (例 0.1.12) でない: v0.1.17' { Get-BadPins @{ CoreVersion = 'v0.1.17' } }
 Test-Case '大文字の hex は断る' "AppSha256 が 64 桁の小文字の hex でない: $($ShaA.ToUpper())" { Get-BadPins @{ AppSha256 = $ShaA.ToUpper() } }
-Test-Case '桁の足りない sha256 は断る' 'CoreSha256 が 64 桁の小文字の hex でない: abc' { Get-BadPins @{ CoreSha256 = 'abc' } }
-Test-Case 'generation が 0 なら断る' 'CoreGeneration が 1 以上でない: 0' { Get-BadPins @{ CoreGeneration = 0 } }
+Test-Case '桁の足りない sha256 は断る' 'CoreSha256 (windows-x86_64) が 64 桁の小文字の hex でない: abc' { Get-BadPins -Targets @{ 'windows-x86_64' = 'abc' } }
+Test-Case 'Linux の target の sha256 も見る' 'CoreSha256 (linux-aarch64) が 64 桁の小文字の hex でない: xyz' { Get-BadPins -Targets @{ 'linux-aarch64' = 'xyz' } }
+Test-Case 'generation が 0 なら断る' 'CoreGeneration が 1 以上の整数でない: 0' { Get-BadPins @{ CoreGeneration = 0 } }
+Test-Case 'generation が文字列なら断る' 'CoreGeneration が 1 以上の整数でない: 1' { Get-BadPins @{ CoreGeneration = '1' } }
 Test-Case '末尾に改行の付いた版も断る ($ は改行の前でも合うので \z で見る)' "AppVersion が版の形 (例 0.1.12) でない: 0.1.12`n" { Get-BadPins @{ AppVersion = "0.1.12`n" } }
 Test-Case '全角の数字の版も断る (\d は全角にも合うので [0-9] で見る)' 'CoreVersion が版の形 (例 0.1.12) でない: ０.１.１７' { Get-BadPins @{ CoreVersion = '０.１.１７' } }
-Test-Case '末尾に改行の付いた sha256 も断る' "CoreSha256 が 64 桁の小文字の hex でない: $ShaC`n" { Get-BadPins @{ CoreSha256 = "$ShaC`n" } }
+Test-Case '末尾に改行の付いた sha256 も断る' "CoreSha256 (linux-x86_64) が 64 桁の小文字の hex でない: $ShaLX`n" { Get-BadPins -Targets @{ 'linux-x86_64' = "$ShaLX`n" } }
 
 # Get-HerdrAppArtifactUrl / Get-HerdrAppDownloadUrl
 Test-Case 'app の版つきの成果物の URL' "$R/app/0.1.12/herdr-app-windows-x86_64.tar.gz" { Get-HerdrAppArtifactUrl -Releases $R -Kind 'app' -Version '0.1.12' }
 Test-Case 'core の版つきの成果物の URL' "$R/core/0.1.17/herdr-core-windows-x86_64.zip" { Get-HerdrAppArtifactUrl -Releases $R -Kind 'core' -Version '0.1.17' }
+Test-Case 'Linux の core の成果物は tar.gz' "$R/core/0.1.17/herdr-core-linux-aarch64.tar.gz" { Get-HerdrAppArtifactUrl -Releases $R -Kind 'core' -Version '0.1.17' -Target 'linux-aarch64' }
 Test-Case 'releases の素の URL には ?src= を付ける' "$R/app/0.1.12/a.tar.gz?src=install" { Get-HerdrAppDownloadUrl -Url "$R/app/0.1.12/a.tar.gz" -Releases $R -Src 'install' }
 Test-Case '? を含む URL (mirror の署名付き) はそのまま' "$R/app/a.tar.gz?sig=1" { Get-HerdrAppDownloadUrl -Url "$R/app/a.tar.gz?sig=1" -Releases $R -Src 'install' }
 Test-Case 'releases の前方一致 (releases.herdr.dev.example) には付けない' 'https://releases.herdr.dev.example/a' { Get-HerdrAppDownloadUrl -Url 'https://releases.herdr.dev.example/a' -Releases $R -Src 'install' }
@@ -89,6 +110,17 @@ Test-Case 'フィードは app と core の latest.json と、core の版つき�
 Test-Case 'app/latest.json の中身 (LF・末尾に改行 1 つ)' (@('{', '  "version": "0.1.12",', '  "targets": {', '    "windows-x86_64": {', "      `"url`": `"$R/app/0.1.12/herdr-app-windows-x86_64.tar.gz`",", "      `"sha256`": `"$ShaA`"", '    }', '  }', '}', '') -join "`n") { $files[0].Text }
 Test-Case 'core/latest.json は generation を持つ' 1 { ($files[1].Text | ConvertFrom-Json).generation }
 Test-Case 'core/latest.json の成果物は固定した版の URL と sha256' "$R/core/0.1.17/herdr-core-windows-x86_64.zip $ShaC" { $t = ($files[1].Text | ConvertFrom-Json).targets.'windows-x86_64'; "$($t.url) $($t.sha256)" }
+Test-Case 'core/latest.json は Linux の 2 つの target も載せる (Linux の machine に core を入れるとき)' "$R/core/0.1.17/herdr-core-linux-aarch64.tar.gz $ShaLA $R/core/0.1.17/herdr-core-linux-x86_64.tar.gz $ShaLX" {
+    $t = ($files[1].Text | ConvertFrom-Json).targets
+    "$($t.'linux-aarch64'.url) $($t.'linux-aarch64'.sha256) $($t.'linux-x86_64'.url) $($t.'linux-x86_64'.sha256)"
+}
+Test-Case 'core の manifest の中身 (target は名前の順。LF・末尾に改行 1 つ)' (@(
+        '{', '  "version": "0.1.17",', '  "generation": 1,', '  "targets": {'
+        '    "linux-aarch64": {', "      `"url`": `"$R/core/0.1.17/herdr-core-linux-aarch64.tar.gz`",", "      `"sha256`": `"$ShaLA`"", '    },'
+        '    "linux-x86_64": {', "      `"url`": `"$R/core/0.1.17/herdr-core-linux-x86_64.tar.gz`",", "      `"sha256`": `"$ShaLX`"", '    },'
+        '    "windows-x86_64": {', "      `"url`": `"$R/core/0.1.17/herdr-core-windows-x86_64.zip`",", "      `"sha256`": `"$ShaC`"", '    }'
+        '  }', '}', ''
+    ) -join "`n") { $files[1].Text }
 Test-Case 'core の版つきの manifest は core/latest.json と同じ中身' $true { $files[2].Text -ceq $files[1].Text }
 Test-Case 'app/latest.json を JSON として読める (app が読む版)' '0.1.12' { ($files[0].Text | ConvertFrom-Json).version }
 Test-Case 'CR を含まない' 0 { @($files | Where-Object { $_.Text.Contains("`r") }).Count }
@@ -385,9 +417,13 @@ Remove-Item -LiteralPath $feedTmp -Recurse -Force
 # それでも終了コード 2 で止まり、成功 (0) に見せない
 $pwsh = (Get-Process -Id $PID).Path
 $entry = Join-Path $PSScriptRoot 'Install-HerdrApp.ps1'
-Test-Case '思わぬ例外では終了コード 2 で止まる' '2' { $null = & $pwsh -NoProfile -File $entry -Check 2>&1; $LASTEXITCODE }
-Test-Case '-Uninstall と -Check を一緒に打つと終了コード 2' '2' { $null = & $pwsh -NoProfile -File $entry -Uninstall -Check 2>&1; $LASTEXITCODE }
-Test-Case '固定した版の書き方が誤っていれば終了コード 2 (状態も読まない)' '2' { $null = & $pwsh -NoProfile -File $entry -Check -AppVersion 'latest' 2>&1; $LASTEXITCODE }
+$badReleases = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-app-tests-releases-$PID.json"
+[IO.File]::WriteAllText($badReleases, ([IO.File]::ReadAllText($ReleasesJson) -replace '"version": "0.1.12"', '"version": "latest"'))
+Test-Case '思わぬ例外では終了コード 2 で止まる' '2' { $null = & $pwsh -NoProfile -File $entry -Check -ReleasesFile $ReleasesJson 2>&1; $LASTEXITCODE }
+Test-Case '-Uninstall と -Check を一緒に打つと終了コード 2' '2' { $null = & $pwsh -NoProfile -File $entry -Uninstall -Check -ReleasesFile $ReleasesJson 2>&1; $LASTEXITCODE }
+Test-Case '固定した版の書き方が誤っていれば終了コード 2 (状態も読まない)' $true { $o = & $pwsh -NoProfile -File $entry -Check -ReleasesFile $badReleases 2>&1; ($LASTEXITCODE -eq 2) -and ("$o" -like '*AppVersion が版の形*latest*') }
+Test-Case '固定した版のファイルが無ければ終了コード 2 で、配り方を出す' $true { $o = & $pwsh -NoProfile -File $entry -Check -ReleasesFile (Join-Path $tmpBin 'missing.json') 2>&1; ($LASTEXITCODE -eq 2) -and ("$o" -like '*setup --update で配る*') }
+Remove-Item -LiteralPath $badReleases -Force
 
 # ---------------------------------------------------------------------------
 # Invoke-InstallHerdrApp の流れ。Windows に触る関数を偽物に差し替えて、すること (書く・入れる・作る・足す・外す) の順と、
@@ -471,7 +507,7 @@ Test-Case 'app を入れられなければ、わけと打ち直し方を出す' 
 Test-Case 'core を入れられなければ、app は入れたまま 1' '1 [feed env app lnk path+app core]' { $r = Invoke-Flow -States @($missing, (New-State @{ CoreExe = $false; CoreDirExists = $false; CorePathListed = $false })) -Fail @{ core = 1 }; "$($r.Code) [$($r.Calls)]" }
 Test-Case '落として入れられない PC (x64 でない) なら、フィードと環境変数だけ書いて 1' '1 [feed env]' { $r = Invoke-Flow -States @($missing) -Blocker 'x64 だけ'; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'lnk を足すだけなら、落とせるかは見ない' '0 [lnk]' { $r = Invoke-Flow -States @((New-State @{ LnkKind = 'missing' }), $installed) -Blocker 'x64 だけ'; "$($r.Code) [$($r.Calls)]" }
-Test-Case '固定した版の書き方が誤っていれば、状態も読まずに 2' '2 []' { $r = Invoke-Flow -States @() -UsePins ([pscustomobject]@{ AppVersion = 'latest'; AppSha256 = $ShaA; CoreVersion = '0.1.17'; CoreSha256 = $ShaC; CoreGeneration = 1 }); "$($r.Code) [$($r.Calls)]" }
+Test-Case '固定した版の書き方が誤っていれば、状態も読まずに 2' '2 []' { $r = Invoke-Flow -States @() -UsePins (New-Pins @{ AppVersion = 'latest' }); "$($r.Code) [$($r.Calls)]" }
 
 $busy = @($appProc, $coreProc)
 $full3 = New-State @{ AppPathsPresent = @($App, "$App.old") }

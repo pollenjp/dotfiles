@@ -447,6 +447,9 @@
               '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
+          # herdr-core (pkgs/herdr-core) の package そのもの。公式の Linux 版を releases.json の sha256 で落とし、build の
+          # installCheck が `herdr-core --version`・`hc --version` を版と照らす。配布物は Linux だけ
+          herdr-core-test = pkgs.callPackage ./pkgs/herdr-core { };
           # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
           # crate で流す (buildPhase を差し替え、test と install はしない)。指摘は system によらないので Linux だけ
           pjp-ghq-pull-lint = ghqPull.overrideAttrs (old: {
@@ -602,6 +605,14 @@
               ;
           };
           ntn-state = import ./tests/ntn.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          herdr-core-state = import ./tests/herdr-core.nix {
             inherit
               lib
               pkgs
@@ -811,7 +822,13 @@
         # 入れる。単体で試すなら (承認の画面が出る):
         #
         #   nix run ./nix#pjp-op -- --reason "<なぜ呼ぶか>" whoami
+        #
+        # herdr-core (hc) は公式の Linux 版だけを入れる (pkgs/herdr-core。版と sha256 は Windows と共通の releases.json)。
+        # home には home/modules/herdr-core.nix が入れる。switch せずに試すなら:
+        #
+        #   nix run ./nix#herdr-core -- --version
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
+          herdr-core = pkgs.callPackage ./pkgs/herdr-core { };
           pjp-exe-exec-trace = pkgs.callPackage ./pkgs/pjp-exe-exec-trace { };
           pjp-who-is-asking = pkgs.callPackage ./pkgs/pjp-who-is-asking { };
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };

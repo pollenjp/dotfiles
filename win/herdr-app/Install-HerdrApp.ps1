@@ -11,7 +11,9 @@ herdr-app は winget に無く、公式の入れ方は irm https://releases.herd
 公式の install.ps1 (app と、それが呼ぶ core の install.ps1) と同じ置き場所・手順で入れる (写した中身の sha256 は
 win/herdr-app/upstream-installers.txt。公式が変わると週 1 回の CI が知らせる)。
 
-版は dotfiles が決める (下の -AppVersion・-CoreVersion の既定値と sha256。公開から 7 日たった版を PR で上げる):
+版は dotfiles が決める。版と sha256 は隣の herdr-releases.json (repo の nix/pkgs/herdr-core/releases.json を win/manifest.toml が
+配る。Linux の home-manager が入れる herdr-core と、CI の check-herdr-app-version.sh も同じファイルを読む)。公開から 7 日たった
+版を PR で上げる:
 
 - 入れる: 固定した版を公式の版つき URL (releases.herdr.dev/app/<版>/…) から落とし、dotfiles の sha256 と、exe の Authenticode
   (Valid で、発行先が CN=herdr, O=herdr, L=Wilmington, S=Delaware, C=US、発行元が Microsoft ID Verified CS の CA) を確かめてから
@@ -20,6 +22,8 @@ win/herdr-app/upstream-installers.txt。公式が変わると週 1 回の CI が
   (止める設定は無い)。どちらも取得元を環境変数 HERDR_RELEASES_URL から読むので、%LOCALAPPDATA%\dotfiles\herdr-releases に
   固定した版だけを載せたフィード (app/latest.json・core/latest.json・core/<版>/manifest.json。sha256 は dotfiles の値) を書き、
   ユーザーの環境変数を file:/// の URL でそこへ向ける。app と core はフィードに載った版にだけ上がり、sha256 が合わなければ断る。
+  core の manifest には、Windows のほかに Linux (x86_64・aarch64) の target も載せる (herdr-app・hc が SSH の先の Linux の
+  machine に core を入れるとき、同じ版のその target の build を取得元から落とすため)。
   フィードに install.ps1 は置かない (app の「core を入れ直す」は失敗し、core は dotfiles が入れる)
 - 受け取った更新: 変数を置く前に開いた app は、公式から落とした版を置き場所の隣 (.new と受け取りの .new.json) に待たせ、閉じるか
   開き直すときに差し替える (変数も署名も見ない)。揃えるときは、固定した版で署名の合うもの、のほかは消す
@@ -50,31 +54,17 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 (~/.config/herdr-app) と core の状態・設定は残し、公式と違う置き場所 (winget など) のものには触らない。app か core が動いて
 いれば、何も外さずに止める (core を止めると terminal も終わるので、止めるのは人)。人が打つときだけ使う (setup は打たない)。
 
-.PARAMETER AppVersion
-固定する app の版。上げるときは、ここと -AppSha256 の既定値を変える (win/README.md の「固定した版を上げる」)。
-
-.PARAMETER AppSha256
-app の版つきの成果物 (herdr-app-windows-x86_64.tar.gz) の sha256。
-
-.PARAMETER CoreVersion
-固定する core の版。app の版の core_min 以上にする。
-
-.PARAMETER CoreSha256
-core の版つきの成果物 (herdr-core-windows-x86_64.zip) の sha256。
-
-.PARAMETER CoreGeneration
-core の版の generation (core/<版>/manifest.json の値)。app は、自分と同じ generation の core にだけ上げる。
+.PARAMETER ReleasesFile
+固定した版と sha256 を書いたファイル。既定は script の隣の herdr-releases.json (win/manifest.toml が repo の
+nix/pkgs/herdr-core/releases.json を配る)。形は repo のファイルのとおり (app の版と windows-x86_64 の sha256、core の版・
+generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256)。上げ方は win/README.md の「固定した版を上げる」。
 #>
 [CmdletBinding()]
 param(
     [switch]$Check,
     [switch]$IfMissing,
     [switch]$Uninstall,
-    [string]$AppVersion = '0.1.12',
-    [string]$AppSha256 = 'dc1b5663244ed91d96f42e7ddeec73304bb955474142975f290711cabcf0354a',
-    [string]$CoreVersion = '0.1.17',
-    [string]$CoreSha256 = 'a212b69db0efb808882683f15e5da45ab9606da7bcc54b97b29ed4fa540f5491',
-    [int]$CoreGeneration = 1
+    [string]$ReleasesFile = ''
 )
 
 # ---------------------------------------------------------------------------
@@ -88,6 +78,37 @@ function Get-HerdrAppArchitecture {
     $Architecture
 }
 
+# core の target (フィードの core の manifest に載せる順。公式の manifest と同じく名前の順)。Windows のほかに Linux の 2 つを
+# 載せるのは、herdr-app・hc が SSH の先の Linux の machine に core を入れるとき、同じ版のその target の build を落とすため
+$HerdrAppCoreTargets = @('linux-aarch64', 'linux-x86_64', 'windows-x86_64')
+
+# 固定した版のファイル (herdr-releases.json) の中身を、流れが使う形 (AppVersion・AppSha256・CoreVersion・CoreGeneration・
+# CoreSha256 (Windows)・CoreTargets (target → sha256)) にする。書き方の誤りは Test-HerdrAppPins が見る。JSON でなければ例外
+function ConvertFrom-HerdrAppReleases {
+    param([string]$Text)
+    $json = $Text | ConvertFrom-Json -ErrorAction Stop
+    $get = {
+        param($Object, [string]$Name)
+        if ($null -eq $Object) { return $null }
+        $prop = $Object.PSObject.Properties[$Name]
+        if ($null -eq $prop) { return $null }
+        $prop.Value
+    }
+    $app = & $get $json 'app'
+    $core = & $get $json 'core'
+    $coreSha = & $get $core 'sha256'
+    $targets = [ordered]@{}
+    foreach ($target in $HerdrAppCoreTargets) { $targets[$target] = & $get $coreSha $target }
+    [pscustomobject]@{
+        AppVersion     = & $get $app 'version'
+        AppSha256      = & $get (& $get $app 'sha256') 'windows-x86_64'
+        CoreVersion    = & $get $core 'version'
+        CoreGeneration = & $get $core 'generation'
+        CoreSha256     = $targets['windows-x86_64']
+        CoreTargets    = $targets
+    }
+}
+
 # 固定した版と sha256 の書き方が正しいか。誤りがあれば理由、無ければ $null (フィードの JSON にそのまま書くので、形を絞る。
 # \A・\z と [0-9] にするのは、$ が末尾の改行の前でも合い、\d が全角などの数字にも合うため)
 function Test-HerdrAppPins {
@@ -95,18 +116,22 @@ function Test-HerdrAppPins {
     foreach ($name in @('AppVersion', 'CoreVersion')) {
         if ("$($Pins.$name)" -cnotmatch '\A[0-9]+\.[0-9]+\.[0-9]+\z') { return "$name が版の形 (例 0.1.12) でない: $($Pins.$name)" }
     }
-    foreach ($name in @('AppSha256', 'CoreSha256')) {
-        if ("$($Pins.$name)" -cnotmatch '\A[0-9a-f]{64}\z') { return "$name が 64 桁の小文字の hex でない: $($Pins.$name)" }
+    if ("$($Pins.AppSha256)" -cnotmatch '\A[0-9a-f]{64}\z') { return "AppSha256 が 64 桁の小文字の hex でない: $($Pins.AppSha256)" }
+    foreach ($target in $HerdrAppCoreTargets) {
+        $sha = $Pins.CoreTargets[$target]
+        if ("$sha" -cnotmatch '\A[0-9a-f]{64}\z') { return "CoreSha256 ($target) が 64 桁の小文字の hex でない: $sha" }
     }
-    if ($Pins.CoreGeneration -lt 1) { return "CoreGeneration が 1 以上でない: $($Pins.CoreGeneration)" }
+    $generation = $Pins.CoreGeneration
+    if (-not (($generation -is [int]) -or ($generation -is [long])) -or ($generation -lt 1)) { return "CoreGeneration が 1 以上の整数でない: $generation" }
     $null
 }
 
-# 公式の版つきの成果物の URL (windows-x86_64)
+# 公式の版つきの成果物の URL。app は windows-x86_64 の tar.gz。core は target ごと (Windows は zip、Linux は tar.gz)
 function Get-HerdrAppArtifactUrl {
-    param([string]$Releases, [string]$Kind, [string]$Version)
+    param([string]$Releases, [string]$Kind, [string]$Version, [string]$Target = 'windows-x86_64')
     if ($Kind -eq 'app') { return "$Releases/app/$Version/herdr-app-windows-x86_64.tar.gz" }
-    "$Releases/core/$Version/herdr-core-windows-x86_64.zip"
+    if ($Target -eq 'windows-x86_64') { return "$Releases/core/$Version/herdr-core-windows-x86_64.zip" }
+    "$Releases/core/$Version/herdr-core-$Target.tar.gz"
 }
 
 # 公式と同じく、releases の素の URL (? も # も無い) にだけ ?src= を付ける (release の server のダウンロードの数の印。中身は同じ)
@@ -118,11 +143,11 @@ function Get-HerdrAppDownloadUrl {
 }
 
 # 手元のフィードに置くファイル (Path はフィードからの相対パス、Text は中身)。app と core は、ここに載った版にだけ上がる。
-# 中身は公式の manifest と同じ形で、成果物の URL は公式の版つき URL、sha256 は dotfiles の値。改行は LF、末尾に改行を 1 つ
+# 中身は公式の manifest と同じ形で、成果物の URL は公式の版つき URL、sha256 は dotfiles の値。改行は LF、末尾に改行を 1 つ。
+# core の targets は $HerdrAppCoreTargets の順 (Linux の machine に core を入れるときの target も載せる)
 function Get-HerdrAppFeedFiles {
     param($Pins, [string]$Releases)
     $appUrl = Get-HerdrAppArtifactUrl -Releases $Releases -Kind 'app' -Version $Pins.AppVersion
-    $coreUrl = Get-HerdrAppArtifactUrl -Releases $Releases -Kind 'core' -Version $Pins.CoreVersion
     $app = @(
         '{'
         "  `"version`": `"$($Pins.AppVersion)`","
@@ -135,15 +160,23 @@ function Get-HerdrAppFeedFiles {
         '}'
         ''
     ) -join "`n"
+    $coreTargets = @(
+        for ($i = 0; $i -lt $HerdrAppCoreTargets.Count; $i++) {
+            $target = $HerdrAppCoreTargets[$i]
+            $url = Get-HerdrAppArtifactUrl -Releases $Releases -Kind 'core' -Version $Pins.CoreVersion -Target $target
+            $close = if ($i -lt ($HerdrAppCoreTargets.Count - 1)) { '    },' } else { '    }' }
+            "    `"$target`": {"
+            "      `"url`": `"$url`","
+            "      `"sha256`": `"$($Pins.CoreTargets[$target])`""
+            $close
+        }
+    )
     $core = @(
         '{'
         "  `"version`": `"$($Pins.CoreVersion)`","
         "  `"generation`": $($Pins.CoreGeneration),"
         '  "targets": {'
-        '    "windows-x86_64": {'
-        "      `"url`": `"$coreUrl`","
-        "      `"sha256`": `"$($Pins.CoreSha256)`""
-        '    }'
+        $coreTargets
         '  }'
         '}'
         ''
@@ -1170,10 +1203,12 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        $pins = [pscustomobject]@{
-            AppVersion = $AppVersion; AppSha256 = $AppSha256
-            CoreVersion = $CoreVersion; CoreSha256 = $CoreSha256; CoreGeneration = $CoreGeneration
+        $file = if ($ReleasesFile) { $ReleasesFile } else { Join-Path $PSScriptRoot 'herdr-releases.json' }
+        if (-not (Test-Path -LiteralPath $file -PathType Leaf)) {
+            Write-Host "固定した版のファイル $file が無い (setup --update で配る。repo では nix/pkgs/herdr-core/releases.json)" -ForegroundColor Red
+            exit 2
         }
+        $pins = ConvertFrom-HerdrAppReleases -Text ([IO.File]::ReadAllText($file))
         exit (Invoke-InstallHerdrApp -Check:$Check -IfMissing:$IfMissing -Uninstall:$Uninstall -Pins $pins)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
