@@ -37,9 +37,37 @@ shellHook = ''
 flake は git リポジトリ内では **追跡済みファイルしか見ない。** `flake.nix` を
 `git add` しないと "file not found" で落ちる。
 
-逆に **git リポジトリでないディレクトリでは、ディレクトリ全体を `/nix/store` へ
-コピーする。** `/nix/store` は誰でも読めるので、`.env` が git 管理外になっていると
-トークンがそこに残る。`.gitignore` で必ず外すこと。
+その代わり、**素のパス（`nix develop .`・`nix develop ./nix`）で読むと repo 全体を
+`/nix/store` へ写す。** flake が repo の下のディレクトリにあっても、写すのは repo の
+root からの追跡済みファイル全部（commit していない変更も）で、作業ツリーが変わるたびに
+別の写しになる。道具の flake を flake だけのディレクトリに置き、`path:` で読むのはこのため
+（SKILL.md の「flake を置く場所」）。
+
+逆に **`path:` で読むディレクトリと、git リポジトリでないディレクトリは、git を見ずに
+ディレクトリの中身を全部 `/nix/store` へコピーする**（追跡していないファイルも、
+`.gitignore` で外したものも）。`/nix/store` は誰でも読めるので、`.env` などの秘密を
+そのディレクトリに置かない（`.gitignore` は効かない）。
+
+### たまった写しを片付ける
+
+素のパスで読んでできた repo の写しは、`/nix/store/<hash>-source` として残る。repo に
+しか無いファイル（下の例では `<目印>`。`scripts/lint.sh` のような、その repo の root からの
+パス）を持つものを探し、どこからも使われていなければ消す。
+
+```bash
+# 一覧 (写しを作った時刻つき)。store のパスは mtime が 1970 年にそろうので、時刻は ctime で見る
+for p in /nix/store/*-source; do
+  [[ -f $p/<目印> ]] && stat -c '%z %n' "$p"
+done
+
+# 消す。使われている写しは nix-store が alive と言って消さない (何が使っているかは nix-store --query --roots <path>)
+for p in /nix/store/*-source; do
+  [[ -f $p/<目印> ]] && nix-store --delete "$p"
+done
+```
+
+使われていないパスを repo の写しに限らずまとめて消すなら `nix store gc`（ディスクの空きを
+作る全体の手順は pjp-disk-cleanup skill）。
 
 ## 差分ビルドは無い
 

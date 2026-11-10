@@ -155,8 +155,13 @@ if ! command -v <tool> &>/dev/null; then
 fi
 ```
 
-`claude-skills` 側は実ディレクトリなので `path:` も `readlink` も要らない。
-そちらの `skills/README.md` を参照。
+`path:` で読むのは、symlink のためだけではない。この repo のチェックアウト（skill のテストを
+流すとき）は git の repo なので、素のパス（`nix develop "${skill_dir}"`）で読むと repo 全体を
+`/nix/store` へ写す（作業ツリーが変わるたびに別の写し）。`path:` なら写るのは skill のディレクトリ
+だけ（`pjp-nix-flake` の「flake を置く場所」）。
+
+`claude-skills` 側は実ディレクトリなので `readlink` は要らないが、git の作業クローンなので、
+素のパスで読むと同じく repo 全体が写る。そちらの `skills/README.md` を参照。
 
 ## 環境変数を受け取るとき (`pjp-env.txt`)
 

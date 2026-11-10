@@ -5,8 +5,10 @@ description: repo や script が手元に無い外部ツールを要求すると
   「依存ツールを入れて」「mise から flake へ移したい」と言われたとき、script を足して
   それが未インストールのコマンドを使うとき、`pip install` / `npm install -g` /
   `apt install` / `brew install` を打ちたくなったとき、そして
-  **`nix flake update` で版を上げる・`flake.lock` を更新する**ときに読む。
-  flake / mise / system の選択順、`flake.nix` の骨組み、script から devShell へ
+  **`nix flake update` で版を上げる・`flake.lock` を更新する**とき、
+  `nix develop` や script の入り直しで /nix/store に repo の写しがたまるときに読む。
+  flake / mise / system の選択順、flake を置く場所 (flake だけのディレクトリを `path:` で
+  読む。素のパスは git の repo 全体を写す)、`flake.nix` の骨組み、script から devShell へ
   自動で入り直すパターン、`flake.lock` を必ず commit する理由、**出たばかりの
   revision を pin しない遅延 (minimumReleaseAge 相当)** と、セキュリティパッチ
   (openssl など) のために猶予より新しい nixpkgs を入れる期間付きの例外
@@ -20,7 +22,8 @@ script や repo が、手元に無い外部ツールを要求するときの用�
 
 ## 選択順
 
-1. **nix flake** — その skill / repo に `flake.nix` と `flake.lock` を置き、devShell に入れる
+1. **nix flake** — その skill / repo に `flake.nix` と `flake.lock` を置き（repo では flake だけの
+   ディレクトリ。下の「flake を置く場所」）、devShell に入れる
 2. **mise** — flake が過剰なとき。`mise.toml` の `[tools]` に書く
 3. **system へ直接入れる** — 1 も 2 も不可能なときだけ
 
@@ -33,17 +36,43 @@ ADR 001 決定 6 に従う。
 
 ## 使い方
 
+道具の flake は `flake.nix` と `flake.lock` だけのディレクトリ（例: repo の `nix/`）に置き、
+`path:` で読む（下の「flake を置く場所」）。
+
 ```sh
-nix develop                    # devShell に入る
-nix develop --command <cmd>    # 1 コマンドだけ実行する
+nix develop path:./nix                    # devShell に入る (repo の root で)
+nix develop path:./nix --command <cmd>    # 1 コマンドだけ実行する
 ```
 
 版を上げるときは素の `nix flake update` を使わない（下の「新しすぎる revision を
 pin しない」）。
 
 ```sh
-nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update
+nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update nix
 ```
+
+## flake を置く場所
+
+**git の repo の中の flake を素のパス（`nix develop`・`nix develop ./nix`・`nix develop "${repo_root}"`）で
+読むと、nix は repo 全体を `/nix/store` へ写してから評価する。** 写すのは git で追っているファイル
+（commit していない変更も）で、作業ツリーが変わるたびに別の写しになる。テストや script を流し直すうちに
+repo の写しがたまり、大きい repo ではディスクが一杯になる。
+
+道具だけの devShell は、`flake.nix` と `flake.lock` だけのディレクトリ（例: `<repo>/nix/`）に置き、
+`path:` と絶対パスで読む（script からは下の「script から devShell へ入り直す」）。写るのはそのディレクトリ
+だけで、中身が同じなら写しは増えない。
+
+- **`path:` は git を見ずに、指したディレクトリの中身を全部写す**（追跡していないファイルも、`.gitignore` で
+  外したものも）。flake のディレクトリには `flake.nix`・`flake.lock`（と `release-age.nix`・
+  `vulnxscan-whitelist.csv`）のほかを置かない。書き出しや `.env` を置くと、それも写る（`/nix/store` は
+  誰でも読める）。repo の root やコードのディレクトリを `path:` で指さない（`.git`・`node_modules/`・
+  書き出しまで写る）
+- `path:` で読むディレクトリは `git add` しなくても読める（git を見ない）。`flake.lock` は commit する
+- repo の source を入力にする flake（`src = ./.;` で package を組むもの）は repo を読むのが仕事なので、
+  root に置いてよい（写しは避けられない）。道具だけの devShell は、そういう flake に同居させずに分ける
+- skill の flake（skill のディレクトリに `flake.nix` を置く形）は、skill のディレクトリを `path:` で読む
+  （dotfiles の `nix/files/claude/skills/README.md`）
+- 素のパスで読んでたまった写しの片付け方は `references/gotchas.md`
 
 ## `flake.nix` の骨組み
 
@@ -106,12 +135,19 @@ nix run "${FLA}" -- update    # その revision へ更新し、入る閉包を�
 nix run "${FLA}" -- check     # 今の flake.lock を検査 (CI 用)
 ```
 
+対象は今のディレクトリの flake。ほかの場所の flake はディレクトリを渡す（`-- update nix`。
+複数並べてもよい）。`update` は `flake.nix` と `flake.lock` だけを一時ディレクトリへ写して
+`nix flake update` し、`flake.lock` を戻すので、git の repo の中の flake でも repo は写らない
+（相対パスの input（`path:./x` など）を持つ flake だけは、その場で update する）。
+
 `update` は lock を書いたあと、その lock で実際に入る閉包のスキャン
 （`closure-scan`、OSV / GHSA / NVD 照合）を自動で差し込む。whitelist
 （`<flake>/vulnxscan-whitelist.csv`）が無いうちは表示だけで落ちないが、
 **表に目を通してからツールを実行する**こと（そのための差し込み。初回の lock で
 特に効く）。`--no-scan` で飛ばせる。理由と whitelist の作り方は
-`references/lock-age.md`。
+`references/lock-age.md`。スキャンは flake を評価するので、flake だけのディレクトリ
+（下にディレクトリを持たない）は `path:` で読む（ほかは素のパスで読み、git の repo の中なら
+repo が写る）。
 
 スキャナ（sbomnix）は、その flake の pin から組む。pin で組めなければ（nixpkgs で
 sbomnix の依存が壊れた時期）、dotfiles の pin、その flake の `flake.lock` の git の
@@ -185,43 +221,55 @@ git add flake.lock
 呼ぶ側に `nix develop` を意識させないためのパターン。**印を付けて 1 回だけにする**
 （devShell に入っても道具が揃わない場合の無限ループ防止）。
 
+flake は `flake.nix` と `flake.lock` だけのディレクトリ（下の例では `<repo>/nix/`。script は
+`<repo>/scripts/`）に置き、**`path:` と絶対パスで読む**。`exec nix develop "${repo_root}"` のような
+素のパスは、git の repo の中では入り直すたびに repo 全体を `/nix/store` へ写す（上の「flake を
+置く場所」）。
+
 ```bash
 #!/usr/bin/env bash
 set -eu -o pipefail
 
-repo_root=$(
-  cd -- "$(dirname -- "$0")/.." &>/dev/null
-  pwd -P
-)
+# 道具の flake は flake.nix と flake.lock だけのディレクトリに置き、path: で読む (素のパスは
+# git の repo 全体を /nix/store へ写す)
+flake_dir=$(cd -- "$(dirname -- "$0")/../nix" &>/dev/null && pwd -P) || {
+  echo "道具の flake のディレクトリがありません: $(dirname -- "$0")/../nix" >&2
+  exit 1
+}
 
 have() { command -v "$1" &>/dev/null; }
 
 if ! have <tool>; then
   if [[ -z ${<TOOL>_REEXEC:-} ]] && have nix; then
     export <TOOL>_REEXEC=1
-    exec nix develop "${repo_root}" --command "$0" "$@"
+    exec nix develop "path:${flake_dir}" --command "$0" "$@"
   fi
   echo "<tool> が見つかりません。nix があれば devShell へ自動で入り直します。" >&2
   exit 1
 fi
 ```
 
-⚠️ **`~/.claude/skills/<名前>` のような store への symlink では、この形は動かない。**
-`$0` のままだと flake の位置を見失い、symlink を `path:` へ渡すと解決先を外部パス
+- 絶対パスにするのは、script をどこから呼んでも同じ flake を指すため（`path:` の相対パスは
+  今のディレクトリから読まれる）
+- `cd … && pwd -P` を `&&` でつなぐ（`;` でつなぐと、`cd` が落ちたときに今のディレクトリを
+  flake として読む）
+
+⚠️ **`~/.claude/skills/<名前>` のような store への symlink 越しに呼ぶ script では、
+`$0` のままだと flake の位置を見失う。** symlink を `path:` へ渡すと、解決先を外部パス
 扱いされてこう落ちる。
 
 ```
 error: access to absolute path '/nix/store/...' is forbidden in pure evaluation mode
 ```
 
-`readlink -f` で実体まで解決してから `path:` に渡す。skill に flake を持たせる
+`readlink -f "$0"` で実体まで解決してから親を取り、`path:` に渡す。skill に flake を持たせる
 場合の置き場と形は `nix/files/claude/skills/README.md`（store へコピーされる側）と
 claude-skills の `skills/README.md`（作業クローン側）を参照。
 
 ## その他
 
-`.env` の読み込み、git 追跡まわりの罠、差分ビルドが無いこと、mise からの移行
-→ `references/gotchas.md`
+`.env` の読み込み、git 追跡まわりの罠（素のパスと `path:` で写るもの）、たまった写しの
+片付け方、差分ビルドが無いこと、mise からの移行 → `references/gotchas.md`
 
 pin の遅延の根拠、新規リポジトリへの入れ方、猶予の例外 (release-age.nix)、効かない範囲
 → `references/lock-age.md`

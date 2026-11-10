@@ -43,12 +43,15 @@ git diff --stat out/            # 出力が変わっていないか確認する
 
 ```sh
 cp ~/.claude/skills/pjp-drawio/flake.nix drawio/
-git add drawio/flake.nix   # flake は git の追跡済みファイルしか見ない
+git add drawio/flake.nix   # 素のパスで読む nix (update の後のスキャンなど) は git の追跡済みファイルしか見ない
 nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update ./drawio
 git add drawio/flake.lock
 ```
 
-以降は `nix develop ./drawio --command drawio ...` や `nix run ./drawio#drawio` が使える。
+以降は `nix develop path:./drawio --command drawio ...` や `nix run path:./drawio#drawio` が使える。
+素のパス（`./drawio`）で読むと、git の repo の中では repo 全体を `/nix/store` へ写す（作業ツリーが
+変わるたびに別の写し）。`path:` は `drawio/` の中身（図と書き出しを含む。git で外したファイルも）を
+写すので、大きいものや秘密を置かない（`pjp-nix-flake` skill の「flake を置く場所」）。
 スクリプトそのものを CI で使いたい場合は `scripts/drawio-export.sh` もコピーする
 （skill 側の `flake.lock` とプロジェクト側の `flake.lock` は別管理になる）。
 

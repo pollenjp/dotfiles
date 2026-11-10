@@ -118,8 +118,10 @@ git add flake.lock
 ```
 
 プロジェクト側で版を固定したい・CI で図を生成したい場合は、この skill の `flake.nix`
-をプロジェクトへコピーして、同じコマンドで lock を作ればよい（`nix run .#drawio` が
-使える）。理由は `pjp-nix-flake` skill の `references/lock-age.md`。
+をプロジェクトの `drawio/` へコピーして、同じコマンドで lock を作ればよい（`nix run path:./drawio#drawio`
+が使える。素のパス（`./drawio#drawio`）は git の repo 全体を `/nix/store` へ写す）。手順は
+`references/from-mise.md` の「CI で生成していた場合」、遅延の理由は `pjp-nix-flake` skill の
+`references/lock-age.md`。
 
 ## その他
 
