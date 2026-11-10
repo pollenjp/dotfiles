@@ -895,7 +895,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
-| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（[後述](#cursor-agent-も-mise-に置いている理由)） |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（`dotfiles.cursorAgent.enable` のホストだけ。[後述](#cursor-agent-も-mise-に置いている理由)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し・`op.exe` の直打ちを止める） |
@@ -1001,8 +1001,8 @@ nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<ホスト>
 option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_release_age-を期間付きで緩める)）。
 
 `claude` もここで入る。グローバルな CLI なので役割分担どおりなら Nix 側だが、
-例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。Cursor の CLI（`cursor-agent`）も同じ理由でここで入る
-（[理由と入れ方](#cursor-agent-も-mise-に置いている理由)）。
+例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。Cursor の CLI（`cursor-agent`）も同じ理由でここで入るが、
+入れるのはホストで `dotfiles.cursorAgent.enable = true` にしたマシンだけ（既定は入れない。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)）。
 
 #### 2.1 Claude Code の公式プラグイン (手順 4.1)
 
@@ -1275,6 +1275,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 | `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
 | `dotfiles.herdrCore.enable`（`modules`） | Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
+| `dotfiles.cursorAgent.enable`（`modules`） | `false`（入れない） | Cursor の CLI（`cursor-agent`）を使うマシンだけ `true`（[`cursor-agent` も mise に置いている理由](#cursor-agent-も-mise-に置いている理由)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -1594,6 +1595,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` | `nix/home/modules/wsl-mtu-guard.nix` (生成。`wsl.mtuGuard.enable` のマシンだけ。`/etc` へは setup の手順が入れる。[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)) |
 | `~/.config/systemd/user/{nix-gc,mise-prune}.{service,timer}` | `nix/home/modules/cleanup.nix` (生成。`dotfiles.cleanup.enable` のマシンだけ。[前述](#使わなくなったデータの定期削除)) |
 | `~/.local/state/dotfiles/mise-release-age.json` | `nix/home/modules/mise-release-age.nix` (生成。`dotfiles.mise.*` の値。`bootstrap-mise.sh` が読んで `~/.config/mise/config.toml` に書く。[後述](#遅延-minimum_release_age-を期間付きで緩める)) |
+| `~/.local/state/dotfiles/cursor-agent.json` | `nix/home/modules/cursor-agent.nix` (生成。`dotfiles.cursorAgent.enable` の値。`bootstrap-mise.sh` が読み、on なら `~/.config/mise/conf.d/dotfiles-cursor-agent.toml` に版を指した宣言を書く。宣言は home-manager の管理ではない。[後述](#cursor-agent-も-mise-に置いている理由)) |
 | `~/.local/state/dotfiles/ntn.json` | `nix/home/modules/ntn.nix` (生成。`dotfiles.ntn.keyring` の値。`bootstrap-ntn.sh` が読んで ntn の `config.json` の `keyring` に書く。[後述](#ntn-notion-cli-の-token-をファイルに置く-keyring)) |
 | `~/.config/systemd/user/pjp-agent-link-watch.{path,service}` | `nix/home/modules/agent-link.nix` (生成。Linux だけ。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
@@ -4574,7 +4576,7 @@ Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions
 | 言語ランタイム (go / node) | mise |
 | プロジェクト毎のツール固定 | mise (`mise.toml`) |
 | `claude` | mise（この表の例外。[理由](#claude-だけ-mise-に置いている理由)） |
-| `cursor-agent`（Cursor の CLI） | mise（この表の例外。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)） |
+| `cursor-agent`（Cursor の CLI） | mise（この表の例外。`dotfiles.cursorAgent.enable` のホストだけ。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)） |
 | `python3` | Nix（`home/modules/python.nix`。言語ランタイムだが、プロジェクトで切り替えず道具の前提として使う。[後述](#python3-と-uv)） |
 
 ### `claude` だけ mise に置いている理由
@@ -4696,7 +4698,8 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
   ==> mise の遅延を上書き中 (理由: …): 2026-10-24 の終わりまでに出た版を取る。2026-11-02 の終わりで上書きが終わり、その後の setup --update で既定の 9d に戻す。…
   ```
 
-- `claude`（と `cursor-agent`）も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる
+- `claude` も、上限の方が 1d より新しい版を取るあいだ（上限の日の翌日まで）は上限で入れる（on のホストの `cursor-agent` の版も、
+  同じ遅延で引く）
 - 終わった項目は写さず、[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-mise]` で出す。書いた所から PR で消す
   （消し忘れても害は無い）
 - 毎日流す timer は無い。`--update` を打たない日が続いても mise には上限が残るだけで、ずれるのは新しい版を取らない側
@@ -4706,28 +4709,76 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
 ### `cursor-agent` も mise に置いている理由
 
 Cursor の CLI（mise の registry の名前は `cursor-agent`、別名 `cursor-cli`）も、`claude` と同じ理由（リリースの頻度が
-`flake.lock` の更新の周期に合わない）で mise に置き、同じ遅延（1d。上書き中は上限）で入れる。中身は Cursor が
-`downloads.cursor.com` で配る配布物（公式のインストーラが入れるものと同じ）で、registry の http backend が取る。
+`flake.lock` の更新の周期に合わない）で mise に置く。ただし**既定では入れず**、ホストで `dotfiles.cursorAgent.enable = true` に
+したマシンにだけ入れる（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-10-cursor-agent-opt-in-design.md)）。
+中身は Cursor が `downloads.cursor.com` で配る配布物（公式のインストーラが入れるものと同じ）で、registry の http backend が取る。
+
+#### ホストで on にする
+
+使うマシンのホストの `modules`（dotfiles-private の `nix/hosts/<ホスト>.nix` か、`~/dotfiles/flake.nix` の tmp。`mkHome` の
+引数ではない）に書く。
+
+```nix
+modules = [
+  { dotfiles.cursorAgent.enable = true; }
+];
+```
+
+- **行を足すのは、この option を持つ本体が merge された後。** 先に足すと、まだ option の無い本体でそのホストの評価が止まる
+  （option `dotfiles.cursorAgent` が無い）。その PC では `~/dotfiles/setup --self-update --update` で、本体を新しくしてから当てる
+- 反映は `~/dotfiles/setup --update`。`switch` だけでは宣言も版も変わらない
+
+#### 宣言を入れた版に固定する
 
 | どこで | 何を |
 | --- | --- |
-| `files/mise/conf.d/cursor-agent.toml`（`home/modules/files.nix` が `~/.config/mise/conf.d/` に置く） | 宣言。registry から変えるのは `bin_path` と `postinstall` だけ（何をなぜ変えるかはファイルの先頭） |
-| `scripts/bootstrap-mise.sh` | `mise install cursor-agent`（まだ入っていないときだけ入れる）と `mise upgrade cursor-agent`（遅延を過ぎた新しい版があれば上げる） |
+| `home/modules/cursor-agent.nix` | on / off を `~/.local/state/dotfiles/cursor-agent.json`（`{"enable": <bool>}`）に置く。off のホストにも置く（switch の前の世代と見分けるため） |
+| `files/mise/conf.d/cursor-agent.toml` | 宣言の雛形。registry から変えるのは `bin_path` と `postinstall` だけ（何をなぜ変えるかはファイルの先頭）。版の所は `@version@` |
+| `scripts/bootstrap-mise.sh` | on なら版を決め、雛形の `@version@` を替えて `~/.config/mise/conf.d/dotfiles-cursor-agent.toml` に書き、`mise install cursor-agent` を打つ。off なら setup が前に書いた宣言を消す |
 
+宣言の `version` には `latest` でなく版そのもの（`2026.11.05-86047df` の形）を書く。mise が知る版は最新の 1 つだけ（Cursor は版の
+一覧を出さず、mise は公式のインストーラから今の版を読む）なので、`latest` を宣言すると、最新の版が遅延（`minimum_release_age`。
+既定 9d）の中にある間は候補が 0 になり、どのディレクトリの素の `mise install` も終了コード 1 で落ちる（Cursor はおおむね 1〜3 日
+おきに出すので、9d を過ぎた最新の版がある日はほとんど来ない）。版を指した宣言なら、mise は遅延を見ない。
+
+版は `setup --update` のたびに、次の順で決める。
+
+1. `claude` と同じ遅延（1d。上書き中は上限）で `mise latest cursor-agent` が出す版（遅延を過ぎた一番新しい版）
+2. 無ければ今の宣言の版。宣言も無ければ、入っている一番新しい版（`mise latest --installed cursor-agent`。前の作りで入れた版もここで拾う）
+3. どれも無ければ宣言を書かず、[警告のまとめ](#途中の警告のまとめ)に出す（次の `--update` で入る）
+
+決めた版を宣言に書いてから `mise install cursor-agent` を打つ（版を指すので遅延の env は付けない。`postinstall` も宣言から効く）。
+install が落ちたら宣言を前の中身に戻し（無かったなら消し）、警告する。`mise upgrade cursor-agent` は使わない（上げるのは宣言の版を
+書き換えること）。
+
+- **新しい版は、出てから 1d を過ぎた後の `--update` で入る。** 版の日付は日までなので、遅延はその日の終わりから数える（1d なら
+  10/22 の版は 10/23 の終わりから）。急ぐときは[期間付きの上書き](#遅延-minimum_release_age-を期間付きで緩める)を足す（ほかの mise の
+  道具にも効く）
+- **宣言は手で直さない。** 1 行目に印（`# dotfiles-managed: nix/scripts/bootstrap-mise.sh`）があり、次の `--update` で書き直す。
+  印の無いファイルや symlink を同じ場所に置くと、setup はそれを手で置いたものとして書き換えず、cursor-agent も入れない（警告が出る）
+- 上げた後の古い版は、週 1 回の掃除（[前述](#使わなくなったデータの定期削除)）の `mise prune` が消す（宣言の版は残る）
+- 宣言の名前（`dotfiles-cursor-agent.toml`）が前の home-manager の宣言（`cursor-agent.toml`）と違うのは、home-manager の古い世代へ
+  戻したとき、その世代の symlink がこの普通のファイルにぶつかって activate が止まらないようにするため。mise は global の conf.d を
+  名前の順に読み、同じツールの宣言は後ろのファイルが勝つので、古い世代の `latest` の宣言が並んでも版の宣言が勝つ
 - **`mise use -g cursor-agent` は打たない。** `config.toml` の宣言は conf.d より強く、まるごと置き換わる。`bin_path` が
   registry の `dist-package` に戻り、配布物に同梱の `rg` と `node` が PATH の先頭に並ぶ（`rg` は Nix の ripgrep より先に
   来る）。打ってしまったら `config.toml` の `[tools]` から消す（setup の「残りの手作業」にも出る）
-- **新しい版はすぐには入らない。** mise が知る版は最新の 1 つだけ（Cursor は版の一覧を出さず、mise は公式の
-  インストーラから今の版を読む）で、版の日付は日までなので、遅延はその日の終わりから数える（1d なら 10/22 の版は
-  10/23 の終わりから）。それまでは、まだ入っていなければ install が落ちて[警告のまとめ](#途中の警告のまとめ)に出て、
-  入っていれば upgrade は入っている版のまま終わる。Cursor はおおむね 1〜3 日おきに出すので、上がるのは出る間が
-  空いたときになりやすい
-- すぐ入れたいときは版を指す: `mise install cursor-agent@<版>`（版を指すと遅延を見ない。版は install が落ちたときの
-  mise のエラーに出る）。宣言は `latest` なので、入っている版のうち一番新しいものが使われる
 - hash の固定は無い（Cursor は checksum を出しておらず、global の tool は `mise lock --global` を打たないと lockfile にも
   残らない）。信頼の置き場所は `downloads.cursor.com` の TLS
 - コマンドは `cursor-agent` だけ（公式のインストーラが張る `agent` は無い）。公式のインストーラで入れたことがある PC は
   `~/.local/bin/{agent,cursor-agent}` と `~/.local/share/cursor-agent` を消す（PATH では mise の方が先に来るが、紛らわしい）
+
+#### off のホスト（既定）
+
+- mise の宣言を置かない（setup が前に書いた宣言は消す）。mise は cursor-agent を知らず、素の `mise install` も触らない
+- 前の作り（全ホストに `latest` の宣言を置いていた）から移ったマシンでは、`switch` が `~/.config/mise/conf.d/cursor-agent.toml`
+  （home-manager の symlink）を外す
+- 入っている版は消さない。週 1 回の掃除の `mise prune` が消す（宣言の無い道具の版は消す対象に入る）。残っている間は setup の出力に
+  1 行出る。今すぐ消すなら:
+
+  ```sh
+  mise uninstall --all cursor-agent
+  ```
 
 ### python3 と uv
 
