@@ -60,6 +60,7 @@ $Table = [ordered]@{ $Older = $HashOld; $V = $HashV }
 
 # Get-TypeClipboardReleases: 版ごとの SHA-256 (Release の type-clipboard.exe.sha256 の中身)
 Test-Case '0.1.0 は Release の type-clipboard.exe.sha256 と同じ値' '6788930f8c18aa1c786297f7a40044ab94931449a84d51fabaa5a5c45457c840' { (Get-TypeClipboardReleases)['0.1.0'] }
+Test-Case '0.2.0 は Release の type-clipboard.exe.sha256 と同じ値' '5335259f39fc68163087307159eaa2c5ee283fd31f014dfa9b79c68aef3cac15' { (Get-TypeClipboardReleases)['0.2.0'] }
 Test-Case '表の値はどれも 64 桁の小文字の 16 進' 0 { @((Get-TypeClipboardReleases).Values | Where-Object { "$_" -cnotmatch '^[0-9a-f]{64}$' }).Count }
 Test-Case '表の版はどれも X.Y.Z' 0 { @((Get-TypeClipboardReleases).Keys | Where-Object { "$_" -notmatch '^\d+\.\d+\.\d+$' }).Count }
 

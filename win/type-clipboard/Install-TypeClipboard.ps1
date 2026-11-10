@@ -36,7 +36,7 @@ exe を置くディレクトリ。既定は %LOCALAPPDATA%\Programs\type-clipboa
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.2.0',
     [switch]$Check,
     [switch]$IfMissing,
     [string]$InstallDir = '',
@@ -52,6 +52,7 @@ param(
 function Get-TypeClipboardReleases {
     [ordered]@{
         '0.1.0' = '6788930f8c18aa1c786297f7a40044ab94931449a84d51fabaa5a5c45457c840'
+        '0.2.0' = '5335259f39fc68163087307159eaa2c5ee283fd31f014dfa9b79c68aef3cac15'
     }
 }
 

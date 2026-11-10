@@ -1509,7 +1509,7 @@ type-clipboard はクリップボードの文字を、選んだ窓へキー入�
 - 置き場所は `%LOCALAPPDATA%\Programs\type-clipboard\type-clipboard.exe`。スタートメニューの `type-clipboard`
   (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\type-clipboard.lnk`) から起こす。設定は type-clipboard が自分で
   `%APPDATA%\type-clipboard\settings.ini` に置き、dotfiles は触らない
-- 版は `Install-TypeClipboard.ps1` の `-Version` の既定値 (今は `0.1.0`) の 1 か所で、その版の exe の SHA-256 は同じファイルの
+- 版は `Install-TypeClipboard.ps1` の `-Version` の既定値 (今は `0.2.0`) の 1 か所で、その版の exe の SHA-256 は同じファイルの
   表 (`Get-TypeClipboardReleases`) で固定する。表の値は Release に置いた `type-clipboard.exe.sha256` の中身と同じ
 - 自作のアプリの Release なので、依存の公開からの猶予 (7 日) は置かない。猶予は第三者のパッケージの汚染版を、気付かれて
   取り下げられるまで掴まないためのもので、自分の CI が作る Release には当たらない。中身は SHA-256 で固定する
