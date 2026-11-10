@@ -51,6 +51,10 @@
 # ファイル側にしか無い)。それ以外の flake なら devShells.<system>.default
 # (「これから実行するツール」は devShell に入っているものなので)。
 #
+# flake だけのディレクトリ (下にディレクトリを持たない) は path: で読む。素のパスで
+# 渡すと、git の repo の中では repo 全体が /nix/store へ写る (作業ツリーが変わるたびに
+# 別の写し)。下にディレクトリを持つ flake は、今までどおり素のパスで読む。
+#
 # ## 依存
 #
 # nix / coreutils / awk (git は前の pin をさかのぼるときだけ)。sbomnix (vulnxscan を
@@ -127,7 +131,8 @@ usage() {
   -h, --help        この使い方を出す
 
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
-無ければカレントディレクトリを対象にする。
+無ければカレントディレクトリを対象にする。flake だけのディレクトリ (下にディレクトリを
+持たない) は path: で読む (git の repo の中でも、repo を /nix/store へ写さない)。
 
 sbomnix (vulnxscan 同梱) が PATH に無ければ、対象の pin → dotfiles の pin →
 対象の flake.lock の git の履歴にある前の pin (新しい順に 3 つまで) の順に組み、
@@ -209,6 +214,27 @@ flake_dir=$(
   cd -- "${flake_dir}" &>/dev/null
   pwd -P
 )
+
+# ディレクトリ ($1) が下にディレクトリを持つか (隠しディレクトリも数える。ディレクトリへの symlink は数えない)。
+has_subdir() {
+  local e
+  for e in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+    if [[ -d ${e} && ! -L ${e} ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+# nix に渡す flake ref (--inputs-from・nix build・nix eval)。flake だけのディレクトリ (下にディレクトリを持たない) は
+# path: で読む。素のパスで渡すと、git の repo の中では nix が repo 全体 (追跡しているファイル。commit していない変更も)
+# を /nix/store へ写してから評価し、作業ツリーが変わるたびに写しが増える。path: は git を見ずにディレクトリの中身を
+# 全部写すので、下にディレクトリを持つ flake (dotfiles の nix/・skill のディレクトリ・repo の root) は今までどおり
+# 素のパスで読む (書き出しや .git まで写さないため)。ファイル (whitelist・flake.lock・git の履歴) は flake_dir で読む。
+flake_ref=${flake_dir}
+if ! has_subdir "${flake_dir}"; then
+  flake_ref="path:${flake_dir}"
+fi
 
 [[ -n ${whitelist} ]] || whitelist="${flake_dir}/vulnxscan-whitelist.csv"
 
@@ -447,7 +473,7 @@ ensure_sbomnix() {
   key=${lock_row%%$'\t'*}
   ref=${lock_row#*$'\t'}
   if build_sbomnix "対象の pin" "${key}" "${ref:-${flake_dir} の nixpkgs}" \
-    --inputs-from "${flake_dir}" 'nixpkgs#sbomnix'; then
+    --inputs-from "${flake_ref}" 'nixpkgs#sbomnix'; then
     use_sbomnix "対象の pin" "${ref:-${flake_dir} の nixpkgs}"
     return 0
   fi
@@ -718,8 +744,8 @@ report を使う。)"
   # 閉包のビルド (長い) より先に用意する。組めなければ閉包を組まずに止まる。
   ensure_sbomnix
 
-  step "nix build ${flake_dir}#${attr}"
-  nix build "${flake_dir}#${attr}" -o "${out_dir}/closure"
+  step "nix build ${flake_ref}#${attr}"
+  nix build "${flake_ref}#${attr}" -o "${out_dir}/closure"
   target=$(readlink -f "${out_dir}/closure")
   note "閉包: ${target}"
 
@@ -791,7 +817,7 @@ cmd_report() {
   # ここを差し込むので、スキャン対象を持たない flake (devShell の無い flake など)
   # で update まで失敗させないため。--attr で明示されたときは普通に落ちる。
   if [[ ${attr_defaulted} -eq 1 ]] \
-    && ! nix eval --raw "${flake_dir}#${attr}.drvPath" &>/dev/null; then
+    && ! nix eval --raw "${flake_ref}#${attr}.drvPath" &>/dev/null; then
     warn "${flake_dir} に ${attr} が無いのでスキャンを飛ばします (--attr で指定すれば見ます)。"
     return 0
   fi

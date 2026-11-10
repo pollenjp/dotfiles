@@ -37,9 +37,12 @@
 #     whitelist に無い findings を「なし」と書き、受け入れた件数を添える
 #   - --out-dir を使い回しても、前の実行の vulns.csv を読まない (findings が 0 件の実行で「なし」と出す)
 #   - whitelist を当てない report では、全部の findings を表にする。同じ組の版ちがいは行を分け、組の数と行の数を出す
+#   - flake だけのディレクトリ (下にディレクトリを持たない。ディレクトリへの symlink は数えない) は path: で、下に
+#     ディレクトリ (隠しディレクトリも) を持つ flake は素のパスで、--inputs-from と nix build に渡す
 #
 # 偽の nix build は、組めてよい pin の rev を FAKE_SBOMNIX_OK のファイルから 1 行ずつ読み、試した pin を FAKE_NIX_LOG へ
-# 「sbomnix <rev>」の行で残す。偽の sbomnix と vulnxscan は、呼ばれた自分のパスを FAKE_RUN_LOG へ残す。偽の vulnxscan は
+# 「sbomnix <rev>」の行で残す (--inputs-from の flake は「inputs-from <flake>」、閉包の installable は「build <installable>」
+# の行でも残す)。偽の sbomnix と vulnxscan は、呼ばれた自分のパスを FAKE_RUN_LOG へ残す。偽の vulnxscan は
 # FAKE_VULNS の csv を findings として書き (無ければ findings なし)、FAKE_CONSOLE のファイルの中身 (本物のログと表) を
 # FAKE_CONSOLE_TO (stdout か stderr) へ出す。偽のコマンドの shebang は $BASH から作る (Nix のサンドボックスには
 # /usr/bin/env が無い)。
@@ -179,9 +182,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ ${installable} == *'#sbomnix' ]]; then
-  # どの pin か: --inputs-from ならその flake の flake.lock の nixpkgs、ref ならその rev
+  # どの pin か: --inputs-from ならその flake (path: は外す) の flake.lock の nixpkgs、ref ならその rev
   if [[ -n ${from} ]]; then
-    rev=$(jq -r '.nodes[.nodes[.root].inputs.nixpkgs].locked.rev' "${from}/flake.lock")
+    printf 'inputs-from %s\n' "${from}" >>"${FAKE_NIX_LOG:?}"
+    rev=$(jq -r '.nodes[.nodes[.root].inputs.nixpkgs].locked.rev' "${from#path:}/flake.lock")
   else
     rev=${installable#github:NixOS/nixpkgs/}
     rev=${rev%%[?#]*}
@@ -196,6 +200,7 @@ if [[ ${installable} == *'#sbomnix' ]]; then
   mkdir -p "${p}/bin"
   cp "${tools}/sbomnix" "${tools}/vulnxscan" "${p}/bin/"
 else
+  printf 'build %s\n' "${installable}" >>"${FAKE_NIX_LOG:?}"
   p="${store}/closure"
   mkdir -p "${p}"
 fi
@@ -364,6 +369,34 @@ if [[ $(readlink "${d}/out/sbomnix") == "${work}/store/$(rev 1)-sbomnix-9.9" ]];
 else
   ng "組んだ sbomnix に、成果物のディレクトリから out-link を張る" "$(ls -l "${d}/out" 2>&1)"
 fi
+
+echo "flake の読み方 (path: か素のパスか)"
+# flake だけのディレクトリ (下にディレクトリを持たない。nix build が張る result のような、ディレクトリへの symlink は
+# 数えない) は path: で、下にディレクトリ (隠しディレクトリも) を持つ flake は素のパスで nix に渡す
+d=$(new_case ref-flake-only 1)
+new_flake "${d}/flake" 1
+ln -s "${work}" "${d}/flake/result"
+scan "${d}" "${app}" "${d}/flake"
+if [[ $(cat "${d}/rc") == 0 ]] && grep -qxF "inputs-from path:${d}/flake" "${d}/nix.log" \
+  && grep -qxF "build path:${d}/flake#packages.x86_64-linux.fake" "${d}/nix.log"; then
+  ok "flake だけのディレクトリは path: で読む (--inputs-from と nix build)"
+else
+  ng "flake だけのディレクトリは path: で読む (--inputs-from と nix build)" "rc=$(cat "${d}/rc")
+$(cat "${d}/nix.log" "${d}/stderr")"
+fi
+for sub in sub .direnv; do
+  d=$(new_case "ref-with-${sub#.}" 1)
+  new_flake "${d}/flake" 1
+  mkdir -p "${d}/flake/${sub}"
+  scan "${d}" "${app}" "${d}/flake"
+  if [[ $(cat "${d}/rc") == 0 ]] && grep -qxF "inputs-from ${d}/flake" "${d}/nix.log" \
+    && grep -qxF "build ${d}/flake#packages.x86_64-linux.fake" "${d}/nix.log"; then
+    ok "下にディレクトリ (${sub}) を持つ flake は、素のパスで読む"
+  else
+    ng "下にディレクトリ (${sub}) を持つ flake は、素のパスで読む" "rc=$(cat "${d}/rc")
+$(cat "${d}/nix.log" "${d}/stderr")"
+  fi
+done
 
 echo "dotfiles の pin へ退く (store の app に渡す flake.lock)"
 d=$(new_case dotfiles 1)
