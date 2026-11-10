@@ -463,17 +463,18 @@ cursor_agent() {
       "cursor-agent の宣言には触りません。"
     return 0
   fi
-  if ! enable=$(jq -r 'if type == "object" and (.enable | type) == "boolean" then .enable else error("形が違う") end' \
-    "${cursor_state}" 2>/dev/null); then
-    warn "cursor-agent を入れるかの状態ファイルの形が違います: ${cursor_state}" \
-      "({\"enable\": true か false}) cursor-agent の宣言には触りません。"
-    return 0
-  fi
-  if [[ ${enable} == true ]]; then
-    cursor_on
-  else
-    cursor_off
-  fi
+  # 空のファイル (jq は何も出さずに 0 で終わる) や JSON が 2 つ並んだファイル (値を 2 行出す) も形が違うに数えるので、
+  # 出たものが true か false のちょうど 1 語かで分ける (jq -e は false を出すと 1 で終わるので使わない)
+  enable=$(jq -r 'if type == "object" and (.enable | type) == "boolean" then .enable else error("形が違う") end' \
+    "${cursor_state}" 2>/dev/null) || enable=""
+  case ${enable} in
+    true) cursor_on ;;
+    false) cursor_off ;;
+    *)
+      warn "cursor-agent を入れるかの状態ファイルの形が違います: ${cursor_state}" \
+        "({\"enable\": true か false}) cursor-agent の宣言には触りません。"
+      ;;
+  esac
 }
 
 cursor_agent

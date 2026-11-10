@@ -42,7 +42,7 @@
 #   - on で雛形が無い・形が違う (version = "@version@" の行が無い) ときは、宣言を書かずに警告する
 #   - off (enable が false) なら cursor-agent を入れない。印つきの宣言は消し、手で置いたものは残す (どちらも警告しない)。
 #     手で置いたものが無く、入っている版があれば、消し方 (mise uninstall --all cursor-agent) を 1 行で知らせる
-#   - cursor-agent.json が無い・形が違う ({"enable":"yes"}・{}・[])・jq が無いときは、警告して宣言に触らず、cursor-agent の
+#   - cursor-agent.json が無い・形が違う ({"enable":"yes"}・{}・[]・空・JSON が 2 つ)・jq が無いときは、警告して宣言に触らず、cursor-agent の
 #     mise は打たない
 #   - cursor-agent の手順で何が起きても exit 0 で最後まで流れる (後ろの bootstrap を止めない)
 #   - ヘッダの `# mise-tools:` (setup.sh が読み、残りの手作業の手順 5 で「setup が書く名前」として数えない) に、
@@ -594,7 +594,8 @@ else
   ng "cursor-agent.json が無い" "$(detail "${h}")"
 fi
 
-for bad in '{"enable":"yes"}' '{}' '[]'; do
+# '' は改行だけのファイル (jq は何も出さずに 0 で終わる)、2 つ目は JSON が 2 つ並んだファイル (jq は値を 2 行出す)
+for bad in '{"enable":"yes"}' '{}' '[]' '' '{"enable":false} {"enable":true}'; do
   h=$(new_home "cursor-badstate-$((pass + fail))" "$(state 9d)" "${bad}")
   place_ours "${h}" 2026.11.01-aaaaaaa
   before=$(cat "$(decl "${h}")")
