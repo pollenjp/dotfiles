@@ -2619,7 +2619,7 @@ LOG_LEVEL=info                                      # 参照でない値はそ�
 | --- | --- |
 | 1. `.env` を読む | 1 行ずつ文字列として読む（`source`・`eval` をしない）。読めない行があれば、ファイル名と行番号だけを出して 2 で止める |
 | 2. program を引く | 実行ファイルを PATH から引く（`.env` を入れる前に引くので、`.env` の `PATH` で替わらない）。無ければ op を呼ばずに 127 |
-| 3. 参照を解く | 値の全体が `op://` で始まるものを集め、`op [--reason "<理由> (pjp-op-env が <program> に渡す: <参照>, …)"] inject` を 1 回だけ呼ぶ。参照は stdin のテンプレート（参照ごとに乱数の境界の印の行と `{{ <参照> }}` の行）で渡し、解いた値は stdout のパイプで受けてメモリにだけ置く。`--reason` は WSL の op（pjp-op。`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true）にだけ付ける |
+| 3. 参照を解く | 値の全体が `op://` で始まるものを集め、`op [--reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"] inject` を 1 回だけ呼ぶ。参照は stdin のテンプレート（参照ごとに乱数の境界の印の行と `{{ <参照> }}` の行）で渡し、解いた値は stdout のパイプで受けてメモリにだけ置く。`--reason` は WSL の op（pjp-op。`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true）にだけ付ける |
 | 4. 起こす | op が終わってから（WSL の op の lock と承認の窓を放してから）、op の認証の環境変数を外し、値を環境変数に入れて `exec` で program に置き換わる。program は Linux のプロセスとして、同じ pid・stdin・stdout・stderr で動く |
 
 WSL では `op run --env-file=.env -- <program>` を使わない。op は Windows の `op.exe` なので子のコマンドも Windows のプロセスとして
@@ -2637,12 +2637,14 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 | `KEY='値'` | 中をそのまま（エスケープなし） |
 | `KEY="値"` | `\\` と `\"` だけを戻し、ほかはそのまま。`$`・`` ` `` は展開しない |
 | `KEY=op://vault/項目/欄` | 値の全体が `op://` で始まれば参照（値の途中の `op://` は解かない）。`{`・`}`・制御文字を含む参照は読めない行 |
-| 行末の `\r` | 外す（Windows のエディタで書いたファイル） |
+| 行末の `\r`・頭の UTF-8 の BOM | 外す（Windows のエディタで書いたファイル） |
 
 - 変数の展開・コマンドの置き換え・複数行の値は無い。ファイルはデータとして読む
 - 同じ名前は後の行・後のファイルが勝つ。呼び手の環境に同じ名前があっても `.env` が勝つ
-- bash が読み取り専用にしている名前（`BASHOPTS`・`BASH_VERSINFO`・`EUID`・`PPID`・`SHELLOPTS`・`UID`）と、`pjp-op-env` が中で使う
-  `_poe_` で始まる名前は読めない行
+- bash が特別に扱う名前は読めない行にして、op を呼ぶ前に止める。整数の属性の名前（`OPTIND`・`RANDOM`・`SRANDOM`・`HISTCMD`・`LINENO`・
+  `SECONDS`）は代入で値が算術式として評価され（`$(…)` まで走る）、`_`・`EPOCHSECONDS` などは値が替わり、配列（`GROUPS`・`FUNCNAME`
+  など）と読み取り専用の名前（`EUID`・`PPID`・`UID`・`SHELLOPTS` など）は書いた値のまま渡せない。`BASH` で始まる名前・`IFS`・`TMOUT`・
+  `GLOBIGNORE`・`POSIXLY_CORRECT` と、`pjp-op-env` が中で使う `_poe_` で始まる名前も同じ
 
 ### なぜ安全か
 
@@ -2653,12 +2655,12 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 | --- | --- |
 | ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op は stdin の写しを作らず（前段が op の wrapper のときだけ作る）、stderr の写し（値は出ない）は tmpfs に置いて終わりに消す |
 | 引数（`/proc/<pid>/cmdline`・`ps`） | 値を引数に載せない。op に渡すのは理由と `inject` だけ。環境変数は bash の組み込みの `export` で入れ、外のコマンドを起こさずに `exec` で program に置き換わる（テストは strace ですべての `execve` の引数を見る） |
-| `.env` の評価 | `source`・`eval` をしない。値の `$(…)`・`` ` ``・`;`・引用符・空白は文字のまま渡す |
+| `.env` の評価 | `source`・`eval` をしない。値の `$(…)`・`` ` ``・`;`・引用符・空白は文字のまま渡す。代入で値を評価する bash の特別な名前（`OPTIND` など）は読めない行にする。入れた変数の数をループの後で数え、足りなければ program を起こさない |
 | 解けない参照・出力の取り違え | fail closed。op が 0 以外で終われば program を起こさない（参照が 1 つでも解けなければ op は 0 以外）。出力は起動ごとの乱数（128 bit）の境界の印で区切り、印の数・順・前後が合わない・NUL がある（環境変数にできない）なら 70 で止める |
 | 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`pjp-op-log`）に入るのは理由と `inject` だけ |
-| xtrace | 最初の行で `set +x +a`（呼び手の `SHELLOPTS=xtrace`・`BASH_ENV` が付けていても外す） |
+| xtrace | 最初の行で `set +x +a +m`（呼び手の `SHELLOPTS`・`BASH_ENV` が xtrace や job control を付けていても外す。job control が付いていると op の出力を受け損なう） |
 | op の認証 | `OP_SERVICE_ACCOUNT_TOKEN`・`OP_CONNECT_HOST`・`OP_CONNECT_TOKEN`・`OP_SESSION_*` は op に渡し、program を起こす前に外す |
-| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓には、理由の後ろに読む参照と program が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる） |
+| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓の理由には、頭に program と参照の件数、後ろに読む参照が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる）。窓は理由を 200 字で切るので、件数より並んだ参照が少なければ切れている（全部は記録に入る。`pjp-op-log --json`） |
 | lock と窓 | op の出力を読み切り、op が終わってから program を起こす。program が動いている間、ほかの pane の op は待たされない |
 
 守らないもの（op を素で使うとき・`op run` と同じで、`pjp-op-env` で増えも減りもしない）:
@@ -2675,9 +2677,10 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 | program の終了コード | 起こした後（`exec` で置き換わる） |
 | 0 | `--dry-run`・`--help` |
 | 2 | 引数の誤り（理由が無い・空、program が無い、知らない option）、`.env` が無い・読めない行がある |
-| 70 | op は 0 で終わったが、出力の形が合わない（NUL・境界の印のずれ）。program は起こさない |
+| 70 | op は 0 で終わったが、出力の形が合わない（NUL・境界の印のずれ）か、環境変数を入れきれない。program は起こさない |
 | 127 | 起こす program か op が見つからない（op は参照があるときだけ見る） |
-| op の終了コード | op が 0 以外で終わった（1 = 拒否・時間切れ・解けない参照など、75 = ほかの op の承認待ちが終わらない）。program は起こさない |
+| 126・127 | 承認の後に `exec` に失敗した（実行の権限が無いなど。bash が出す） |
+| op の終了コード | op が 0 以外で終わった（1 = 拒否・時間切れ・解けない参照など、75 = ほかの op の承認待ちが終わらない、130 = 止められた）。program は起こさない |
 
 ### 反映
 
@@ -2697,7 +2700,9 @@ pjp-op-log                                               # WSL: inject の 1 行
 
 - program が自分で `.env` を読む作り（dotenvy・python-dotenv など）でも、既にある環境変数を上書きしない既定なら `pjp-op-env` が
   入れた値が勝つ。上書きする設定（`override=True` など）にしていると、参照の文字列に戻る
-- 知らない repo の `.env` を `pjp-op-env` で読まない。読む参照は WSL の承認の窓に並ぶので、頼んだ覚えの無い項目があれば拒否する
+- 知らない repo の `.env` を `pjp-op-env` で読まない。読む参照は WSL の承認の窓に並ぶので、頼んだ覚えの無い項目があれば拒否する。
+  参照でない値も環境変数として program に渡るので、`LD_PRELOAD`・`NODE_OPTIONS` のような名前で program に別のコードを読ませられる
+  （env-file を読むほかの道具と同じ）
 - 承認を待つ間に Claude の Bash の時間切れで止められないよう、Claude に起こさせるときは timeout を長く（600000）し、常駐する program は
   裏で起こす（skill `pjp-secrets`）
 - service account の token（`OP_SERVICE_ACCOUNT_TOKEN`）が環境にあれば、op はそれで解く（WSL の op は承認の画面を出さない）。cron の

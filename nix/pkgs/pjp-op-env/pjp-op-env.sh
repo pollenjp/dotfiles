@@ -15,7 +15,7 @@
 #   2. .env を 1 行ずつ文字列として読む (source も eval もしない)。読めない行があれば、ファイル名と行番号だけを出して 2
 #   3. 起こす program の実行ファイルを PATH から引く (.env の PATH で替わらないよう、入れる前に引く)。無ければ op を呼ばずに 127
 #   4. 値の全体が op:// で始まるものを参照として集め、参照があれば op を 1 回だけ呼ぶ:
-#        op [--reason "<理由> (pjp-op-env が <program> に渡す: <参照>, …)"] inject
+#        op [--reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"] inject
 #      stdin には、参照ごとに乱数の境界の印の行と {{ <参照> }} の行を並べたテンプレートを流し、stdout はパイプで受けて
 #      bash の変数にだけ置く。--reason は pjp-op のあるマシン (~/.local/state/dotfiles/claude-op-reason.json の enable が
 #      true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い
@@ -30,7 +30,11 @@
 #     (外のコマンドを起こさない。だから package は runtimeInputs を持たず、program の PATH も変えない)
 #   - 評価: .env を shell の式として読まない。値の $・`・引用符・空白は文字のまま渡す
 #   - 出力: 値を表示しない。誤りの文に書くのはファイル名・行番号・名前・件数・終了コードだけ。記録は書かない
-#   - xtrace: 最初の行で set +x +a (呼び手の SHELLOPTS・BASH_ENV が付けていても外す)
+#   - xtrace: 最初の行で set +x +a +m (呼び手の SHELLOPTS・BASH_ENV が付けていても外す。job control が付いていると lastpipe が
+#     効かず、op の出力を受け損なう)
+#   - bash が特別に扱う名前: 整数の属性 (OPTIND・RANDOM など) の名前に代入すると値が算術式として評価され、$(…) まで走る。値が
+#     替わる名前 (SECONDS・_ など)・配列 (GROUPS など)・読み取り専用の名前も、書いた値のまま program に渡らない。どれも .env の
+#     読めない行にして、op を呼ぶ前に止める。export のあとに入れた数も数え、足りなければ program を起こさない
 #   - 中の変数: 名前を _poe_ で始め、始めに同じ頭の変数を消す。呼び手が export した名前に代入すると、その値が program に
 #     渡る。.env の名前を export すると同じ名前の shell の変数が替わるので、.env の _poe_* は読めない行にする
 #   - lock と窓: op の出力を読み切り、op が終わってから program を起こす。WSL の op (pjp-op) は op が終わるまで lock と承認の
@@ -38,16 +42,17 @@
 #
 # ## 終了コード
 #
-#   program の終了コード (起こした後) / 0 = --dry-run・--help / 2 = 引数・.env の誤り / 70 = op の出力の形が合わない /
-#   127 = program か op が無い / op の終了コード = op が 0 以外で終わった (program は起こさない)
+#   program の終了コード (起こした後) / 0 = --dry-run・--help / 2 = 引数・.env の誤り / 70 = op の出力の形が合わない・環境変数を
+#   入れきれない / 127 = program か op が無い / 126・127 = exec に失敗した (bash が出す) / op の終了コード = op が 0 以外で終わった
+#   (program は起こさない)
 #
 # ## テストのための口 (nix/tests/pjp-op-env.test.sh)
 #
 #   PJP_OP_ENV_OP   呼ぶ op (既定は PATH の op)
 
-set +x +a
+set +x +a +m
 set -u -o pipefail
-# パイプの最後の mapfile を今のシェルで流し、op の出力をサブシェルに渡さない (job control の無い script でだけ効く)
+# パイプの最後の mapfile を今のシェルで流し、op の出力をサブシェルに渡さない (job control の無い script でだけ効くので、上で +m)
 shopt -s lastpipe
 
 for _poe_name in "${!_poe_@}"; do
@@ -57,8 +62,14 @@ unset _poe_name
 
 _poe_me=pjp-op-env
 _poe_usage_line='使い方: pjp-op-env --reason "<なぜ値を読むか>" [--env-file <path>]... [--quiet] [--] <program> [<引数>...]'
-# bash が読み取り専用にしている名前 (export できない)
-_poe_readonly=' BASHOPTS BASH_VERSINFO EUID PPID SHELLOPTS UID '
+# bash が特別に扱う名前 (.env に書けない)。整数の属性で代入が算術式になるもの (OPTIND・RANDOM・SRANDOM・HISTCMD・LINENO・
+# SECONDS など)、代入しても値が替わる・消えるもの (_・EPOCHSECONDS・BASHPID など)、配列 (GROUPS・FUNCNAME・DIRSTACK・
+# PIPESTATUS など)、読み取り専用のもの (EUID・PPID・UID・SHELLOPTS など)、helper の動きを変えるもの (IFS・TMOUT・
+# GLOBIGNORE・POSIXLY_CORRECT など)。BASH で始まる名前もすべて。属性 (整数・配列・読み取り専用・nameref) は _poe_attrs でも見る
+_poe_special=' _ COMPREPLY COMP_CWORD COMP_KEY COMP_LINE COMP_POINT COMP_TYPE COMP_WORDBREAKS COMP_WORDS DIRSTACK EPOCHREALTIME
+  EPOCHSECONDS EUID EXECIGNORE FUNCNAME FUNCNEST GLOBIGNORE GLOBSORT GROUPS HISTCMD IFS LINENO MAPFILE OPTARG OPTERR OPTIND PIPESTATUS
+  POSIXLY_CORRECT PPID RANDOM SECONDS SHELLOPTS SRANDOM TMOUT UID '
+_poe_special=${_poe_special//$'\n'/ }
 
 _poe_say() {
   local _poe_line
@@ -245,6 +256,13 @@ _poe_value() {
   return 0
 }
 
+# _poe_attrs <名前>: bash がその名前に整数・配列・読み取り専用・nameref の属性を付けていれば 0
+_poe_attrs() {
+  local _poe_d
+  _poe_d=$(declare -p -- "$1" 2>/dev/null) || return 1
+  [[ ${_poe_d} =~ ^declare\ -([A-Za-z]+)\  && ${BASH_REMATCH[1]} == *[iaArn]* ]]
+}
+
 # _poe_read <ファイル>: .env を 1 行ずつ読んで _poe_put する
 _poe_read() {
   local LC_ALL=C _poe_file=$1 _poe_label=$1 _poe_n=0 _poe_line _poe_body _poe_key
@@ -253,6 +271,8 @@ _poe_read() {
   while IFS= read -r _poe_line || [[ -n ${_poe_line} ]]; do
     _poe_n=$((_poe_n + 1))
     _poe_line=${_poe_line%$'\r'}
+    # 頭の UTF-8 の BOM (Windows のエディタが付ける) を外す
+    ((_poe_n > 1)) || _poe_line=${_poe_line#$'\xef\xbb\xbf'}
     _poe_body=${_poe_line#"${_poe_line%%[![:space:]]*}"}
     [[ -n ${_poe_body} && ${_poe_body} != '#'* ]] || continue
     if [[ ${_poe_body} =~ ^export[[:space:]]+(.*)$ ]]; then
@@ -262,8 +282,9 @@ _poe_read() {
     _poe_key=${BASH_REMATCH[1]}
     _poe_value "${BASH_REMATCH[2]}" || _poe_bad "${_poe_label}" "${_poe_n}" "${_poe_why}"
     [[ ${_poe_key} != _poe_* ]] || _poe_bad "${_poe_label}" "${_poe_n}" "_poe_ で始まる名前は pjp-op-env が中で使う"
-    [[ ${_poe_readonly} != *" ${_poe_key} "* ]] \
-      || _poe_bad "${_poe_label}" "${_poe_n}" "${_poe_key} は bash が読み取り専用にしている名前"
+    if [[ ${_poe_special} == *" ${_poe_key} "* || ${_poe_key} == BASH* ]] || _poe_attrs "${_poe_key}"; then
+      _poe_bad "${_poe_label}" "${_poe_n}" "${_poe_key} は bash が特別に扱う名前で、書いた値のまま渡せない"
+    fi
     if [[ ${_poe_got} == op://* ]]; then
       # { } はテンプレートの {{ }} を壊し、制御文字は行の区切りを壊す
       [[ ${_poe_got} != *[{}]* && ${_poe_got} != *[[:cntrl:]]* ]] \
@@ -325,12 +346,17 @@ if ((${#_poe_refs[@]} > 0)); then
   if [[ -n ${HOME:-} && -r ${HOME}/.local/state/dotfiles/claude-op-reason.json ]]; then
     _poe_state=$(<"${HOME}/.local/state/dotfiles/claude-op-reason.json")
     if [[ ${_poe_state} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
-      # 窓のコマンドは op inject だけになるので、読む参照 (同じものは 1 回) と渡す program を理由の後ろに足す
+      # 窓のコマンドは op inject だけになるので、読む参照 (同じものは 1 回) と渡す program を理由に足す。pjp-op は窓の理由を
+      # 200 字で切るので、program と参照の件数を頭に置き、参照が窓で切れても件数で気づけるようにする (記録は 500 字まで)
       _poe_list=""
+      _poe_nref=0
       for _poe_r in "${_poe_refs[@]}"; do
-        [[ ", ${_poe_list}, " == *", ${_poe_r}, "* ]] || _poe_list+=${_poe_list:+, }${_poe_r}
+        if [[ ", ${_poe_list}, " != *", ${_poe_r}, "* ]]; then
+          _poe_list+=${_poe_list:+, }${_poe_r}
+          _poe_nref=$((_poe_nref + 1))
+        fi
       done
-      _poe_opargs+=(--reason "${_poe_reason} (pjp-op-env が ${_poe_argv0##*/} に渡す: ${_poe_list})")
+      _poe_opargs+=(--reason "[pjp-op-env: ${_poe_argv0##*/} に参照 ${_poe_nref} 件] ${_poe_reason} (読む参照: ${_poe_list})")
     fi
   fi
 
@@ -402,17 +428,22 @@ for _poe_name in "${!OP_SESSION_@}"; do
   unset "${_poe_name}"
 done
 
+# export の警告 (bash は値を含めて出すことがある) は捨てる。入れた数を数え、bash がループを途中で捨てても (代入の誤りは
+# トップレベルのコマンドごと捨てて次へ進む)、半端な環境で起こさないよう、ループの後の別のコマンドで確かめる
 _poe_n=0
+_poe_done=0
 for _poe_i in "${!_poe_keys[@]}"; do
   if ((_poe_isref[_poe_i])); then
-    export "${_poe_keys[_poe_i]}=${_poe_resolved[_poe_n]}" \
+    export "${_poe_keys[_poe_i]}=${_poe_resolved[_poe_n]}" 2>/dev/null \
       || _poe_die 2 "${_poe_keys[_poe_i]} を環境変数に入れられません。"
     _poe_n=$((_poe_n + 1))
   else
-    export "${_poe_keys[_poe_i]}=${_poe_vals[_poe_i]}" \
+    export "${_poe_keys[_poe_i]}=${_poe_vals[_poe_i]}" 2>/dev/null \
       || _poe_die 2 "${_poe_keys[_poe_i]} を環境変数に入れられません。"
   fi
+  _poe_done=$((_poe_done + 1))
 done
+((_poe_done == ${#_poe_keys[@]})) || _poe_die 70 "環境変数を入れきれなかったので、${_poe_argv0} を起こしません。"
 unset _poe_resolved _poe_vals
 
 ((_poe_quiet)) || _poe_say "${_poe_summary}"

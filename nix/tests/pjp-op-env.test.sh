@@ -21,6 +21,9 @@
 #     - $(…)・`…`・;・$HOME は評価せず、文字のまま渡す (コマンドは走らない)
 #     - 読めない行 (= の前の空白・数字で始まる名前・閉じない引用符・引用符の後ろの余計な文字・_poe_ で始まる名前・UID・
 #       { を含む参照) は 2 で止め、ファイル名と行番号を出し、行の中身を出さない。program も op も起こさない。.env が無くても 2
+#     - bash が特別に扱う名前 (整数の属性で代入が算術式になる OPTIND・RANDOM・SRANDOM・HISTCMD・LINENO・SECONDS、値が替わる
+#       _・EPOCHSECONDS、配列の GROUPS・FUNCNAME、BASH で始まる名前、IFS) は読めない行で、値の $(…)・`…` も走らない
+#     - 頭の UTF-8 の BOM を外して読む
 #   解く
 #     - 改行・$・`・'・"・;・空白・前後の空白・末尾の改行・日本語・不正な UTF-8 の byte と制御文字・空の値が、byte の単位で
 #       そのまま届く
@@ -28,19 +31,22 @@
 #     - 小文字の名前 (i・reason・http_proxy) もそのまま届き、起きるのは渡した program
 #     - 参照が 20 件でも op は 1 回
 #     - op が stderr に警告を出して 0 で終われば、警告はそのまま出て program を起こす
-#   理由: claude-op-reason.json の enable が true なら op に --reason "<理由> (pjp-op-env が <program> に渡す: <参照>, …)" を
-#     付け (同じ参照は 1 回、理由の改行とタブは空白)、false・無いなら付けない
+#   理由: claude-op-reason.json の enable が true なら op に --reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"
+#     を付け (同じ参照は 1 回、理由の改行とタブは空白)、false・無いなら付けない
 #   引数の誤り: 理由が無い・空・空白だけ、program が無い、知らない option は 2 で、op を呼ばない
-#   fail closed: op が 0 以外 (75)・解けない参照 (1)・印が欠けた出力 (70)・NUL を含む出力 (70) で program を起こさず、helper の
-#     stdout・stderr に値が無い
+#   fail closed: op が 0 以外 (75)・解けない参照 (1)・印が欠けた出力 (70)・NUL を含む出力 (70)・値に印が混ざった出力 (70) で
+#     program を起こさず、helper の stdout・stderr に値が無い
 #   無いもの: program が PATH に無ければ 127 で op を呼ばない。op が無ければ 127 で program を起こさない。参照の無い .env なら
 #     op が無くても op を呼ばずに起こす
 #   漏らさない
-#     - program が動いている間、どのプロセスの cmdline にも値が無い。program の argv[0] は打った名前
+#     - program が動いている間、テストから起きたどのプロセスの cmdline にも値が無い。program の argv[0] は打った名前
 #     - helper から起きたどのプロセスの execve の argv にも値が無い (strace で見る。途中で消えたコマンドの argv も)
 #     - 流した後、HOME・XDG_STATE_HOME・XDG_RUNTIME_DIR・TMPDIR・cwd のどのファイルにも値が無い
 #     - SHELLOPTS=xtrace・BASH_ENV (set -x) を付けて流しても、stderr に値が無い
-#     - op の認証 (OP_SERVICE_ACCOUNT_TOKEN・OP_CONNECT_HOST・OP_CONNECT_TOKEN・OP_SESSION_*) は op に届き、program の環境に無い
+#     - SHELLOPTS=monitor・BASH_ENV (set -m) で job control が付いていても、値が届く
+#     - op を呼ぶ時点の環境に、.env の参照でない値は入っていない
+#     - op の認証 (OP_SERVICE_ACCOUNT_TOKEN・OP_CONNECT_HOST・OP_CONNECT_TOKEN・OP_SESSION_*) は op に届き、program の環境に無い。
+#       .env に書いたものは program に入る
 #     - 呼び手の環境の _poe_ で始まる名前は program に渡らない
 #   --dry-run: 名前・種類・参照を出し、参照でない値は出さず、op を呼ばない (program が無くてよい)
 #   出す 1 行: stderr に参照の件数と名前を出し、--quiet なら出さない。--help は 0
@@ -48,7 +54,8 @@
 #     - 参照 3 件で、承認の出る呼び出し (desktop の mode の powershell) が 1 回、op.exe の inject が 1 回で、値がそのまま届く
 #     - program が起きた時点で pjp-op の lock が空いている (flock -n が通る)
 #     - program が動いている間に、別の op (PJP_OP_LOCK_WAIT=1) が待たされずに 0 で終わる
-#     - log.jsonl に値が無く、start の args は ["inject"]、reason に参照と「pjp-op-env が」が入る
+#     - log.jsonl に値が無く、start の args は ["inject"]、reason に件数と参照が入る
+#     - 参照が 6 件で窓の理由 (op.sh が 200 字で切る) が切れても、頭に program と参照の件数が出る
 #     - 流した後、HOME・XDG_STATE_HOME・XDG_RUNTIME_DIR・TMPDIR・cwd のどのファイルにも値が無い
 #
 # ## 作り
@@ -58,8 +65,8 @@
 # 置き換えて stdout に出す。vault に無ければ [ERROR] を出して 1。FAKE_OP_RC (その終了コードで断る)・FAKE_OP_WARN (stderr に
 # 出して続ける)・FAKE_OP_DROP_MARK (2 つ目の印の行を落とす)・FAKE_OP_NUL (出力に NUL を挟む) で形を変える。whoami・signout
 # (pjp-op の見張り) は FAKE_DIR/op.direct に書いて 1・0 で終わる。同じものを op.exe としても置く。偽の program は、PROG_KEYS の
-# 名前の値を NUL 区切りで PROG_DUMP/env に、全プロセスの cmdline を cmdline に書き、PROG_LOCK があれば flock -n を試して
-# lock に free か held を書いてから started を作る。PROG_SLEEP 秒眠る。shebang は $BASH から作る。偽の op と偽の program は
+# 名前の値を NUL 区切りで PROG_DUMP/env に、テスト (PROG_ROOT) から起きたプロセスの cmdline を cmdline に書き、PROG_LOCK があれば flock -n を試して
+# lock に free か held を書いてから started を作る。PROG_WAIT のファイルができるまで待つ。shebang は $BASH から作る。偽の op と偽の program は
 # set +x で始める (本物の op.exe と program は bash ではなく、BASH_ENV の set -x を受けない。受けると偽のものが値を出す)。
 
 set -u -o pipefail
@@ -79,14 +86,14 @@ trap 'rm -rf "${work}"' EXIT
 
 export LC_ALL=C.UTF-8
 export HOME=${work}/home XDG_STATE_HOME=${work}/state XDG_RUNTIME_DIR=${work}/runtime TMPDIR=${work}/tmp
-export FAKE_DIR=${work}/fake FAKE_VAULT=${work}/vault PROG_DUMP=${work}/dump
+export FAKE_DIR=${work}/fake FAKE_VAULT=${work}/vault PROG_DUMP=${work}/dump PROG_ROOT=$$
 fake_bin=${work}/bin
 proj=${work}/proj
 mkdir -p "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${FAKE_DIR}" "${FAKE_VAULT}" "${fake_bin}" "${proj}" \
   "${work}/win" "${work}/launcher"
 export PATH=${fake_bin}:${PATH}
 unset WSLENV HERDR_ENV HERDR_WORKSPACE_ID HERDR_PANE_ID CLAUDE_CODE_SESSION_ID OP_SERVICE_ACCOUNT_TOKEN OP_CONNECT_HOST \
-  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_ENV_OP BASH_ENV PROG_KEYS PROG_LOCK PROG_SLEEP
+  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_ENV_OP BASH_ENV PROG_KEYS PROG_LOCK PROG_WAIT
 
 pass=0
 fail=0
@@ -132,6 +139,7 @@ printf '%s\0' "$@" >"${d}/op.${n}.args"
 for v in OP_SERVICE_ACCOUNT_TOKEN OP_CONNECT_HOST OP_CONNECT_TOKEN OP_SESSION_abc; do
   printf '%s=%s\n' "${v}" "${!v-<unset>}"
 done >"${d}/op.${n}.env"
+env >"${d}/op.${n}.fullenv"
 [[ ${!#} == inject ]] || exit 0
 tmpl=$(
   cat
@@ -170,6 +178,10 @@ if [[ -n ${FAKE_OP_DROP_MARK:-} ]]; then
   mark=${tmpl%%:0$'\n'*}
   result=${result/$'\n'"${mark}":1$'\n'/$'\n'}
 fi
+if [[ -n ${FAKE_OP_MARK_IN_VALUE:-} ]]; then
+  mark=${tmpl%%:0$'\n'*}
+  result=${result/"${mark}":0$'\n'/"${mark}":0$'\n'"x ${mark}:9 "}
+fi
 if [[ -n ${FAKE_OP_NUL:-} ]]; then
   printf '%s\n' "${result%%$'\n'*}"
   printf 'NUL\0S3CR3T-after-nul'
@@ -191,7 +203,23 @@ for _pk in ${PROG_KEYS-}; do
     printf '%s<unset>\0' "${_pk}"
   fi
 done >"${d}/env"
+# テスト (PROG_ROOT) から起きたプロセスの cmdline だけを見る (同じ時に動いているほかのプロセスは拾わない)
 for _pf in /proc/[0-9]*/cmdline; do
+  _pq=${_pf#/proc/}
+  _pq=${_pq%/cmdline}
+  _pin=0
+  for ((_pk = 0; _pk < 64; _pk++)); do
+    if [[ ${_pq} == "${PROG_ROOT:-1}" ]]; then
+      _pin=1
+      break
+    fi
+    read -r _pst <"/proc/${_pq}/stat" 2>/dev/null || break
+    _pq=${_pst##*) }
+    _pq=${_pq#* }
+    _pq=${_pq%% *}
+    [[ ${_pq} =~ ^[0-9]+$ ]] && ((_pq > 1)) || break
+  done
+  ((_pin)) || continue
   tr '\0' ' ' <"${_pf}" 2>/dev/null
   echo
 done >"${d}/cmdline"
@@ -203,8 +231,11 @@ if [[ -n ${PROG_LOCK:-} ]]; then
   fi
 fi
 : >"${d}/started"
-if [[ -n ${PROG_SLEEP:-} ]]; then
-  sleep "${PROG_SLEEP}"
+if [[ -n ${PROG_WAIT:-} ]]; then
+  for _pw in $(seq 600); do
+    [[ ! -e ${PROG_WAIT} ]] || break
+    sleep 0.1
+  done
 fi
 exit "${PROG_RC:-0}"
 EOF
@@ -328,6 +359,39 @@ if ((bad_ok)); then
 else
   ng "読めない行は 2 で止め、.env:<行>: を出し、行の中身を出さない。program も op も起こさない (8 通り)" "${bad_detail}"
 fi
+special_ok=1
+special_detail=""
+for bad in 'OPTIND=PATH[$(touch pwned-o)]' 'RANDOM=BASH_VERSINFO[$(touch pwned-r)]' 'HISTCMD=HOME[`touch pwned-h`]' \
+  'SRANDOM=1-PLAINVAL' 'SECONDS=1-PLAINVAL' 'LINENO=1-PLAINVAL' '_=x-PLAINVAL' 'EPOCHSECONDS=1-PLAINVAL' 'GROUPS=x-PLAINVAL' \
+  'FUNCNAME=x-PLAINVAL' 'BASH_ENV=x-PLAINVAL' 'BASH_XTRACEFD=x-PLAINVAL' 'IFS=x-PLAINVAL' 'OPTIND=op://Test/a/password'; do
+  reset
+  printf '%s\n' 'GOOD=1' "${bad}" >"${proj}/.env"
+  run_env special --reason "特別な名前" -- prog
+  pwned=""
+  for f in "${proj}"/pwned*; do
+    [[ ! -e ${f} ]] || pwned+=" ${f##*/}"
+  done
+  if [[ ${rc} != 2 || -n ${pwned} ]] || started || [[ $(op_count) != 0 ]] || ! grep -qF '.env:2:' "${work}/special.stderr" \
+    || ! no_leak "${work}/special.stdout" "${work}/special.stderr"; then
+    special_ok=0
+    special_detail+="${bad}: rc=${rc} pwned=${pwned} op=$(op_count) err=$(cat "${work}/special.stderr")"$'\n'
+  fi
+done
+if ((special_ok)); then
+  ok "bash が特別に扱う名前は 2 で止め、値の \$(…)・\`…\` を走らせず、op も program も起こさない (14 通り)"
+else
+  ng "bash が特別に扱う名前は 2 で止め、値の \$(…)・\`…\` を走らせず、op も program も起こさない (14 通り)" "${special_detail}"
+fi
+reset
+printf '\xef\xbb\xbfBOMKEY=bom-PLAINVAL\nNEXT=1\n' >"${proj}/.env"
+export PROG_KEYS="BOMKEY NEXT"
+run_env bom --reason "BOM" -- prog
+expect_env 'BOMKEY=bom-PLAINVAL' 'NEXT=1'
+if [[ ${rc} == 0 ]] && same_env; then
+  ok "頭の UTF-8 の BOM を外して読む"
+else
+  ng "頭の UTF-8 の BOM を外して読む" "rc=${rc} err=$(cat "${work}/bom.stderr")"
+fi
 reset
 run_env noenv --reason "無い" -- prog
 if [[ ${rc} == 2 ]] && ! started; then
@@ -368,15 +432,17 @@ if [[ $(op_count) == 1 ]] && grep -qF '{{ op://Private/kabu station/password }}'
 else
   ng "op は 1 回で、名前に空白のある参照はそのままテンプレートに入る" "op=$(op_count) $(cat "${FAKE_DIR}/op.1.stdin" 2>&1)"
 fi
-if [[ $(op_args 1) == 'inject|' ]] && ! grep -qaF -e S3CR3T -e PLAINVAL -- "${FAKE_DIR}/op.1.stdin" "${FAKE_DIR}/op.1.args"; then
-  ok "claude-op-reason.json が false なら --reason を付けない。op の引数と stdin に値は無い"
+if [[ $(op_args 1) == 'inject|' ]] && ! grep -qaF -e S3CR3T -e PLAINVAL -- "${FAKE_DIR}/op.1.stdin" "${FAKE_DIR}/op.1.args" \
+  && ! grep -qaF PLAINVAL "${FAKE_DIR}/op.1.fullenv"; then
+  ok "claude-op-reason.json が false なら --reason を付けない。op の引数・stdin・環境に .env の値は無い"
 else
-  ng "claude-op-reason.json が false なら --reason を付けない。op の引数と stdin に値は無い" "args=$(op_args 1)"
+  ng "claude-op-reason.json が false なら --reason を付けない。op の引数・stdin・環境に .env の値は無い" \
+    "args=$(op_args 1) $(grep -aF PLAINVAL "${FAKE_DIR}/op.1.fullenv")"
 fi
 if no_leak "${work}/resolve.stdout" "${work}/resolve.stderr" && ! grep -qaF S3CR3T "${PROG_DUMP}/cmdline"; then
-  ok "helper の出力と、program が動いている間のどのプロセスの cmdline にも値が無い"
+  ok "helper の出力と、program が動いている間のテストから起きたどのプロセスの cmdline にも値が無い"
 else
-  ng "helper の出力と、program が動いている間のどのプロセスの cmdline にも値が無い" \
+  ng "helper の出力と、program が動いている間のテストから起きたどのプロセスの cmdline にも値が無い" \
     "$(cat "${work}/resolve.stderr") $(grep -aF S3CR3T "${PROG_DUMP}/cmdline")"
 fi
 if disk_clean; then
@@ -435,11 +501,11 @@ vault op://Test/b/password S3CR3T-b
 printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' 'C=op://Test/a/password' >"${proj}/.env"
 export PROG_KEYS="A B C"
 run_env reason --reason $'bot を\n起こす\tため' -- prog
-want='--reason|bot を 起こす ため (pjp-op-env が prog に渡す: op://Test/a/password, op://Test/b/password)|inject|'
+want='--reason|[pjp-op-env: prog に参照 2 件] bot を 起こす ため (読む参照: op://Test/a/password, op://Test/b/password)|inject|'
 if [[ ${rc} == 0 && $(op_args 1) == "${want}" ]]; then
-  ok "enable が true なら --reason に理由と読む参照 (同じものは 1 回) を付ける。改行とタブは空白"
+  ok "enable が true なら --reason に program・参照の件数・理由・読む参照 (同じものは 1 回) を付ける。改行とタブは空白"
 else
-  ng "enable が true なら --reason に理由と読む参照 (同じものは 1 回) を付ける。改行とタブは空白" "rc=${rc} args=$(op_args 1)"
+  ng "enable が true なら --reason に program・参照の件数・理由・読む参照 (同じものは 1 回) を付ける。改行とタブは空白" "rc=${rc} args=$(op_args 1)"
 fi
 reset
 set_state none
@@ -510,6 +576,15 @@ if [[ ${rc} == 70 ]] && ! started && no_leak "${work}/nul.stdout" "${work}/nul.s
   ok "NUL を含む出力なら program を起こさず 70。誤りの文に値が無い"
 else
   ng "NUL を含む出力なら program を起こさず 70。誤りの文に値が無い" "rc=${rc} err=$(cat "${work}/nul.stderr")"
+fi
+
+reset
+printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' >"${proj}/.env"
+FAKE_OP_MARK_IN_VALUE=1 run_env markin --reason "値に印" -- prog
+if [[ ${rc} == 70 ]] && ! started && no_leak "${work}/markin.stdout" "${work}/markin.stderr"; then
+  ok "値に境界の印が混ざった出力なら program を起こさず 70"
+else
+  ng "値に境界の印が混ざった出力なら program を起こさず 70" "rc=${rc} err=$(cat "${work}/markin.stderr")"
 fi
 
 echo "== 無いもの"
@@ -584,6 +659,24 @@ else
 fi
 reset
 printf '%s\n' 'A=op://Test/a/password' >"${proj}/.env"
+printf 'set -m\n' >"${work}/bash_env_m"
+export PROG_KEYS=A
+expect_env 'A=S3CR3T-a'
+rc=0
+(cd "${proj}" && env SHELLOPTS=monitor "${BASH}" "${script}" --reason "monitor" -- prog </dev/null >/dev/null 2>"${work}/monitor.stderr") || rc=$?
+mon_env=$(tr '\0' '|' <"${PROG_DUMP}/env" 2>/dev/null)
+rm -rf "${PROG_DUMP}"
+rc2=0
+(cd "${proj}" && env BASH_ENV="${work}/bash_env_m" "${BASH}" "${script}" --reason "set -m" -- prog </dev/null >/dev/null \
+  2>"${work}/setm.stderr") || rc2=$?
+if [[ ${rc} == 0 && ${rc2} == 0 && ${mon_env} == 'A=S3CR3T-a|' ]] && same_env; then
+  ok "SHELLOPTS=monitor・BASH_ENV (set -m) で job control が付いていても値が届く"
+else
+  ng "SHELLOPTS=monitor・BASH_ENV (set -m) で job control が付いていても値が届く" \
+    "rc=${rc} rc2=${rc2} mon=${mon_env} err=$(cat "${work}/monitor.stderr" "${work}/setm.stderr")"
+fi
+reset
+printf '%s\n' 'A=op://Test/a/password' >"${proj}/.env"
 export PROG_KEYS="A OP_SERVICE_ACCOUNT_TOKEN OP_CONNECT_HOST OP_CONNECT_TOKEN OP_SESSION_abc _poe_leak"
 OP_SERVICE_ACCOUNT_TOKEN=tok-S3CR3T-sa OP_CONNECT_HOST=https://connect.example OP_CONNECT_TOKEN=ctok-S3CR3T \
   OP_SESSION_abc=sess-S3CR3T _poe_leak=leak-PLAINVAL run_env auth --reason "token" -- prog
@@ -595,6 +688,17 @@ if [[ ${rc} == 0 ]] && same_env && grep -qx 'OP_SERVICE_ACCOUNT_TOKEN=tok-S3CR3T
 else
   ng "op の認証は op に届き、program の環境に無い。呼び手の _poe_ の名前も渡らない" \
     "rc=${rc} op-env=$(cat "${FAKE_DIR}/op.1.env" 2>&1)"$'\n'"$(show_env)"
+fi
+
+reset
+printf '%s\n' 'A=op://Test/a/password' 'OP_CONNECT_HOST=https://from-env-file' >"${proj}/.env"
+export PROG_KEYS="A OP_CONNECT_HOST"
+OP_CONNECT_HOST=https://caller run_env authfile --reason "token" -- prog
+expect_env 'A=S3CR3T-a' 'OP_CONNECT_HOST=https://from-env-file'
+if [[ ${rc} == 0 ]] && same_env; then
+  ok ".env に書いた op の認証の名前は program に入る"
+else
+  ng ".env に書いた op の認証の名前は program に入る" "rc=${rc}"$'\n'"$(show_env)"
 fi
 
 echo "== --dry-run・--help"
@@ -630,6 +734,7 @@ if [[ ${mode} == notify ]]; then
   exit 0
 fi
 echo "${mode}" >>"${d}/ps.modes"
+printf '%s' "${PJP_OP_PAYLOAD}" >"${d}/ps.payload"
 mapfile -d "" args < <(jq -j ".args64[] | (@base64d) + \"\u0000\"" <<<"${PJP_OP_PAYLOAD}")
 op=$(wslpath -u "$(jq -r .op <<<"${PJP_OP_PAYLOAD}")")
 status=$(wslpath -u "$(jq -r .status <<<"${PJP_OP_PAYLOAD}")")
@@ -667,11 +772,12 @@ else
 fi
 log=${XDG_STATE_HOME}/pjp-op/log.jsonl
 start_rec=$(jq -c 'select(.event == "start")' "${log}" 2>/dev/null | tail -n 1)
-if [[ $(jq -c '.args' <<<"${start_rec}") == '["inject"]' && $(jq -r '.reason' <<<"${start_rec}") == *"pjp-op-env が prog に渡す: op://Test/a/password, op://Test/b/password, op://Test/c/password"* ]] \
+want_reason='[pjp-op-env: prog に参照 3 件] kabu の bot を起こす (読む参照: op://Test/a/password, op://Test/b/password, op://Test/c/password)'
+if [[ $(jq -c '.args' <<<"${start_rec}") == '["inject"]' && $(jq -r '.reason' <<<"${start_rec}") == "${want_reason}" ]] \
   && ! grep -qaF S3CR3T "${log}"; then
-  ok "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に参照が入る"
+  ok "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入る"
 else
-  ng "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に参照が入る" "$(cat "${log}" 2>&1)"
+  ng "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入る" "$(cat "${log}" 2>&1)"
 fi
 if disk_clean; then
   ok "本物の op.sh を通しても、流した後の置き場に値が無い"
@@ -680,9 +786,28 @@ else
     "$(grep -rlaF S3CR3T -- "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${proj}")"
 fi
 reset
+: >"${proj}/.env"
+for i in $(seq 1 6); do
+  vault "op://Private/service-${i}/credential" "S3CR3T-svc-${i}"
+  printf 'SVC%s=op://Private/service-%s/credential\n' "${i}" "${i}" >>"${proj}/.env"
+done
+export PROG_KEYS=SVC6
+PATH=${pjp_bin}:${PATH} run_env six --reason "6 つのサービスに入る bot を起こすのにそれぞれの credential を読む" -- prog
+window_reason=$(jq -r '.ui.lines[] | select(.[0] == "理由") | .[1]' "${FAKE_DIR}/ps.payload" 2>/dev/null)
+log_reason=$(jq -r 'select(.event == "start") | .reason' "${XDG_STATE_HOME}/pjp-op/log.jsonl" 2>/dev/null | tail -n 1)
+if [[ ${rc} == 0 && ${window_reason} == '[pjp-op-env: prog に参照 6 件] '* && ${window_reason} == *… &&
+  ${log_reason} == *op://Private/service-6/credential* ]]; then
+  ok "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)"
+else
+  ng "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)" \
+    "rc=${rc} window=${window_reason} log=${log_reason}"
+fi
+reset
 printf '%s\n' 'A=op://Test/a/password' >"${proj}/.env"
 export PROG_KEYS=A
-(cd "${proj}" && PATH=${pjp_bin}:${PATH} PROG_SLEEP=3 "${BASH}" "${script}" --reason "長く動く bot" -- prog </dev/null \
+release=${work}/release
+rm -f "${release}"
+(cd "${proj}" && PATH=${pjp_bin}:${PATH} PROG_WAIT=${release} "${BASH}" "${script}" --reason "長く動く bot" -- prog </dev/null \
   >/dev/null 2>"${work}/long.stderr") &
 long_pid=$!
 for _ in $(seq 100); do
@@ -694,6 +819,7 @@ PATH=${pjp_bin}:${PATH} PJP_OP_LOCK_WAIT=1 "${BASH}" "${opsh}" --reason "ほか�
   2>"${work}/other.stderr" || other_rc=$?
 still=0
 kill -0 "${long_pid}" 2>/dev/null && still=1
+touch "${release}"
 long_rc=0
 wait "${long_pid}" || long_rc=$?
 if started && [[ ${other_rc} == 0 && ${still} == 1 && ${long_rc} == 0 ]]; then
