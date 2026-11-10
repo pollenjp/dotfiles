@@ -21,7 +21,8 @@
 #   2. 呼び手を集める (proc の祖先の claude・herdr の workspace と pane・cwd と git の repo・branch)
 #   3. mode を決める。理由があれば desktop で、OP_SERVICE_ACCOUNT_TOKEN か OP_CONNECT_HOST + OP_CONNECT_TOKEN があれば
 #      service。理由が無くても --version・--help など (is_help) は help (窓なし)。ほかは 2 で断る
-#   4. lock (flock。上限 PJP_OP_LOCK_WAIT 秒、既定 180) を取り、窓と 1Password の画面を 1 対 1 にする
+#   4. lock (flock。上限 PJP_OP_LOCK_WAIT 秒、既定 90) を取り、窓と 1Password の画面を 1 対 1 にする。op どうしのパイプでは、
+#      lock の前か待つ間に stdin を読み切り、lock を持つ op がこの出力を待っていれば lock を待たずに打つ (下の「## stdin」)
 #   5. 共有の承認の見張り: WSL から直に op.exe whoami を打ち、通れば (どの pane からも使える承認がある) op.exe signout で
 #      消して知らせる。承認が無いときの whoami は画面を出さない
 #   6. ログに start を書き、payload を組んで powershell.exe -EncodedCommand <起動の式> を起こす (launcher の本体は env の
@@ -50,9 +51,20 @@
 #
 # ## stdin
 #
-# 呼び手の stdin はそのまま op.exe に渡す。ただし前段が同じ op の wrapper のパイプ (op … | op …) なら、lock を取る前に stdin を
-# 読み切って一時のファイルから渡す。lock を取ってから読むと、受け手が lock を持ったまま送り手の出力を待ち、送り手は lock を待って
-# 止まる。ほかのパイプ (ssh のように閉じないものもある) と socket (Claude の Bash の stdin) は読み切らない。
+# 呼び手の stdin はそのまま op.exe に渡す。ただし op どうしのパイプ (op … | op …。間に jq などを挟んでもよい) では、受け手が
+# lock を持ったまま送り手の出力を待ち、送り手は lock を待って止まる (送り手が先に lock を取っても、出力がパイプのバッファを超えると
+# 送り手が書けずに止まり、lock を待つ受け手は読まない)。どちらが先に起き、先に lock を取っても止まらないよう、次の 2 つをする。
+#
+#   - 受け手: stdin のパイプを遡った先に op がいれば、lock を取る前に stdin を読み切って一時のファイルから渡す。lock を取る前に
+#     見るほか、lock を待つ間も 1 秒ごとに見直す (送り手がまだ op.sh を exec していないうちに見ると見落とす)
+#   - 送り手: lock を待つ間 1 秒ごとに、lock を持つ op (current.json の pid) が stdin のパイプを遡った先でこの op の出力を読んで
+#     いないかを見る。読んでいれば、受け手は lock を持ったままこの出力を待っているので、lock を待たずに打つ。2 つの op.exe が同時に
+#     動き、窓も 2 つ出るので、窓に「注意」の行を足し、記録の start の lock に skipped と書く。共有の承認の見張りは、lock を持つ受け手
+#     が始まりと終わりに打つので、打たない (受け手の op.exe が動いている間に signout --all を打たない)
+#
+# パイプの書き手は、/proc の fd 1 が同じパイプのプロセス (-ef で比べる)。そのプロセスの bash が読む script (cmdline の 2 つ目) が
+# この script と同じファイルなら op とみる。遡るのは pipe_depth 段まで。ほかのパイプ (ssh のように閉じないものもある) と
+# socket (Claude の Bash の stdin) は読み切らない。
 #
 # ## ログ
 #
@@ -75,8 +87,9 @@ state_dir=${XDG_STATE_HOME:-${HOME}/.local/state}/pjp-op
 log_file=${state_dir}/log.jsonl
 current_file=${state_dir}/current.json
 log_max=1048576
-# lock を待つ上限 (秒)。Claude の Bash の既定の時間切れ (120 秒) より短くし、止められる前に 75 で断る
+# lock を待つ上限 (秒。整数)。Claude の Bash の既定の時間切れ (120 秒) より短くし、止められる前に 75 で断る
 lock_wait=${PJP_OP_LOCK_WAIT:-90}
+[[ ${lock_wait} =~ ^[0-9]+$ ]] || lock_wait=90
 ps_cmd=${PJP_OP_POWERSHELL:-powershell.exe}
 # op の stderr の文言 (大文字小文字は問わない)。op は「[ERROR] <日時> <文>」の行で出す (op run の子のコマンドの
 # 「Connection timed out」などに当てない)。どちらも当たらない 0 以外は failed
@@ -489,57 +502,160 @@ trap 'on_signal 129' HUP
 
 mkdir -p "${state_dir}" "${run_dir}" "${tmp_dir}" && chmod 700 "${state_dir}" "${tmp_root}" 2>/dev/null
 
-# upstream_is_op: stdin が、同じ op の wrapper (この script) が書いているパイプなら 0。書き手は /proc の fd 1 が同じパイプの
-# プロセスで、bash が読む script (cmdline の 2 つ目) がこの script と同じもの
-upstream_is_op() {
-  local pipe hit pid arg me
-  [[ -p /dev/stdin ]] || return 1
-  pipe=$(readlink /proc/self/fd/0 2>/dev/null) || return 1
-  [[ ${pipe} == pipe:\[*\] ]] || return 1
-  me=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null) || return 1
-  while IFS= read -r hit; do
-    pid=${hit#/proc/}
-    pid=${pid%%/*}
-    [[ ${pid} != "$$" ]] || continue
-    arg=$(tr '\0' '\n' <"/proc/${pid}/cmdline" 2>/dev/null | sed -n 2p)
-    if [[ -n ${arg} && $(readlink -f "${arg}" 2>/dev/null) == "${me}" ]]; then
+# --- op どうしのパイプ (上の「## stdin」)
+
+pipe_depth=4
+me=${BASH_SOURCE[0]}
+[[ ${me} == /* ]] || me=${PWD}/${me}
+
+# 下の関数は subshell (process substitution・$(…)) を使わず、結果を配列で返す。while … done < <(…) は、ループの間この shell の
+# fd 0 を process substitution のパイプに差し替えるので、その中から /proc/$$/fd/0 を見ると、stdin でなく自分の subshell (この
+# script と同じ cmdline) が書くパイプを見てしまう
+
+# writers_of <パス>…: どれかと同じパイプを fd 1 に持つプロセスの pid を writers に入れる。/proc/<pid>/fd/1 を -ef で比べる (stat は
+# 同じパイプに同じ inode を返す)。リンク先の文字列 pipe:[<inode>] を find -lname に渡すと、[…] が glob の文字クラスになって当たらない
+writers_of() {
+  local fd t
+  writers=()
+  for fd in /proc/[0-9]*/fd/1; do
+    for t in "$@"; do
+      if [[ ${fd} -ef ${t} ]]; then
+        fd=${fd#/proc/}
+        writers+=("${fd%%/*}")
+        break
+      fi
+    done
+  done
+}
+
+# upstream_of <pid>: pid の stdin のパイプの書き手と、その書き手の stdin のパイプの書き手…を pipe_depth 段まで遡り、upstream に入れる
+upstream_of() {
+  local -a frontier=("$1") pipes=()
+  local -A seen=()
+  local i p w
+  upstream=()
+  for ((i = 0; i < pipe_depth; i++)); do
+    pipes=()
+    for p in "${frontier[@]}"; do
+      [[ ! -p /proc/${p}/fd/0 ]] || pipes+=("/proc/${p}/fd/0")
+    done
+    ((${#pipes[@]} > 0)) || return 0
+    writers_of "${pipes[@]}"
+    frontier=()
+    for w in "${writers[@]}"; do
+      [[ -z ${seen[${w}]:-} ]] || continue
+      seen[${w}]=1
+      frontier+=("${w}")
+      upstream+=("${w}")
+    done
+    ((${#frontier[@]} > 0)) || return 0
+  done
+}
+
+# is_op <pid>: そのプロセスの bash が読む script (cmdline の 2 つ目。相対ならそのプロセスの cwd から) がこの script と同じファイルなら
+# 0。cmdline は別の fd で読む (mapfile … <file でも fd 0 が差し替わり、ほかの op から stdin がパイプでなく見える)
+is_op() {
+  local -a argv=()
+  local s cfd
+  { exec {cfd}<"/proc/$1/cmdline"; } 2>/dev/null || return 1
+  mapfile -d '' -t -u "${cfd}" argv
+  exec {cfd}<&-
+  ((${#argv[@]} >= 2)) || return 1
+  s=${argv[1]}
+  [[ ${s} == /* ]] || s=/proc/$1/cwd/${s}
+  [[ ${s} -ef ${me} ]]
+}
+
+# op_upstream: stdin のパイプを遡った先に、ほかの op がいれば 0
+op_upstream() {
+  local pid
+  [[ -p /proc/$$/fd/0 ]] || return 1
+  upstream_of "$$"
+  for pid in "${upstream[@]}"; do
+    if [[ ${pid} != "$$" ]] && is_op "${pid}"; then
       return 0
     fi
-  done < <(find /proc/[0-9]*/fd -maxdepth 1 -name 1 -lname "${pipe}" 2>/dev/null)
+  done
   return 1
 }
+
+# feeds_holder: lock を持つ op (current.json の pid) が、stdin のパイプを遡った先でこの op の出力を読んでいれば 0。holder_reason に
+# その op の理由を入れる
+holder_reason=""
+feeds_holder() {
+  local holder pid
+  [[ -p /proc/$$/fd/1 ]] || return 1
+  holder=$(jq -r '.pid // empty' "${current_file}" 2>/dev/null) || return 1
+  [[ ${holder} =~ ^[0-9]+$ && ${holder} != "$$" ]] || return 1
+  is_op "${holder}" || return 1
+  upstream_of "${holder}"
+  for pid in "${upstream[@]}"; do
+    if [[ ${pid} == "$$" ]]; then
+      holder_reason=$(jq -r '.reason // ""' "${current_file}" 2>/dev/null) || holder_reason=""
+      return 0
+    fi
+  done
+  return 1
+}
+
+# drain_stdin: stdin を閉じるまで読み、一時のファイルに写す (op.exe にはそこから渡す)
 in_file=""
-if upstream_is_op; then
+drain_stdin() {
   in_file=${tmp_dir}/stdin
   cat >"${in_file}"
+}
+if op_upstream; then
+  drain_stdin
 fi
 
 # --- lock
 
+# lock_mode: held = lock を持って打つ・skipped = lock を持つ op がこの出力を待っているので、lock を待たずに打つ
+lock_mode=held
 exec {lock_fd}>>"${state_dir}/lock"
 if ! flock -n "${lock_fd}"; then
   if [[ -t 2 ]]; then
     say "ほかの op の承認待ちが終わるのを待っています (最大 ${lock_wait} 秒)。"
   fi
-  if ! flock -w "${lock_wait}" "${lock_fd}"; then
-    holder=$(jq -r '"\(.time) \(.caller) 理由「\(.reason)」 \(.command)"' "${current_file}" 2>/dev/null) || holder=""
-    refuse lock-timeout 75 "ほかの op の承認待ちが ${lock_wait} 秒たっても終わらないので、打たずに終えます。" \
-      "待たせている呼び出し: ${holder:-(分からない)}" \
-      "その承認の画面に応えてから (窓の出ていない画面なら拒否してから)、打ち直してください。"
-  fi
+  # 1 秒ずつ待ち、その間にパイプの前と後ろを見直す。stdin を読み切ったら、そこから上限を数え直す (読み切る間は lock を待たない)
+  deadline=$((SECONDS + lock_wait))
+  while :; do
+    if [[ -z ${in_file} ]] && op_upstream; then
+      drain_stdin
+      deadline=$((SECONDS + lock_wait))
+    fi
+    if feeds_holder; then
+      lock_mode=skipped
+      break
+    fi
+    if ((SECONDS >= deadline)); then
+      holder=$(jq -r '"\(.time) \(.caller) 理由「\(.reason)」 \(.command)"' "${current_file}" 2>/dev/null) || holder=""
+      refuse lock-timeout 75 "ほかの op の承認待ちが ${lock_wait} 秒たっても終わらないので、打たずに終えます。" \
+        "待たせている呼び出し: ${holder:-(分からない)}" \
+        "その承認の画面に応えてから (窓の出ていない画面なら拒否してから)、打ち直してください。"
+    fi
+    if flock -w 1 "${lock_fd}"; then
+      break
+    fi
+  done
 fi
 
 # 前に SIGKILL などで止められた呼び出しの置き場を片付ける (1 時間より古いもの。lock を待つ呼び出しのものは新しい)
 find "${state_dir}/run" "${tmp_root}" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf {} + 2>/dev/null
 
+# lock を持つ呼び出しを current.json に書く (待たせている呼び出しの呼び手と理由・パイプの前の op が見る pid)。lock を待たずに
+# 打つときは、lock を持つ op のものを残す
 if [[ ${mode} == help ]]; then
   current_reason="(理由なし: help)"
 else
   current_reason=$(clip "${reason}" 100)
 fi
-jq -cn --arg time "$(date '+%H:%M:%S')" --arg caller "${caller_short}" --arg reason "${current_reason}" \
-  --arg command "$(clip "${cmd_display}" 100)" '{time: $time, caller: $caller, reason: $reason, command: $command}' \
-  >"${current_file}" 2>/dev/null && wrote_current=1
+if [[ ${lock_mode} == held ]]; then
+  jq -cn --arg time "$(date '+%H:%M:%S')" --arg caller "${caller_short}" --arg reason "${current_reason}" \
+    --arg command "$(clip "${cmd_display}" 100)" --argjson pid "$$" \
+    '{time: $time, caller: $caller, reason: $reason, command: $command, pid: $pid}' \
+    >"${current_file}" 2>/dev/null && wrote_current=1
+fi
 
 # --- 共有の承認の見張り
 
@@ -601,18 +717,22 @@ watch_shared() {
   fi
 }
 
-watch_shared start
-watch_start=${watch_result}
+# lock を待たずに打つときは見張らない (lock を持つ op が始まりと終わりに見張る。上の「## stdin」)
+watch_start=""
+if [[ ${lock_mode} == held ]]; then
+  watch_shared start
+  watch_start=${watch_result}
+fi
 
 # --- start
 
 now
 start_epoch=${now_epoch}
 log_append "$(jq -cn --arg id "${id}" --arg time "${now_iso}" --argjson epoch "${now_epoch}" --argjson session "${session_json}" \
-  --arg mode "${mode}" --arg kind "${kind}" --argjson caller "${caller_json}" --arg reason "$(clip "${reason}" 500)" \
-  --argjson args "${masked_json}" \
-  '{v: 1, id: $id, event: "start", time: $time, epoch: $epoch, session: $session, mode: $mode, kind: $kind, caller: $caller,
-    reason: $reason, args: $args}')"
+  --arg mode "${mode}" --arg kind "${kind}" --arg lock "${lock_mode}" --argjson caller "${caller_json}" \
+  --arg reason "$(clip "${reason}" 500)" --argjson args "${masked_json}" \
+  '{v: 1, id: $id, event: "start", time: $time, epoch: $epoch, session: $session, mode: $mode, kind: $kind, lock: $lock,
+    caller: $caller, reason: $reason, args: $args}')"
 started=1
 
 st_json=null
@@ -650,19 +770,23 @@ if [[ ${mode} == desktop ]]; then
   if [[ ${in_herdr} == true ]]; then
     herdr_desc="workspace「${herdr_label:-?}」 · pane ${HERDR_PANE_ID:-?}"
   fi
-  note=""
+  notes=()
   if [[ ${watch_start} == cleared ]]; then
-    note="打つ前に、WSL のどの pane からも使える承認が残っていたので消しました"
+    notes+=("打つ前に、WSL のどの pane からも使える承認が残っていたので消しました")
   fi
+  if [[ ${lock_mode} == skipped ]]; then
+    notes+=("パイプの先の op (理由「$(clip "${holder_reason}" 60)」) が lock を持ったまま、この op の出力を待っています。lock を待たずに打つので、その op の窓も同時に出ています")
+  fi
+  notes_json=$(jq -cn '$ARGS.positional' --args -- "${notes[@]}")
   ui_json=$(jq -cn --arg time "$(date -d "@${start_epoch}" '+%Y-%m-%d %H:%M:%S')" --arg caller "${caller_desc}" \
     --arg herdr "${herdr_desc}" --arg place "${place_desc}" --arg reason "$(clip "${reason}" 200)" \
-    --arg cmd "$(clip "${cmd_display}" 300)" --arg note "${note}" \
+    --arg cmd "$(clip "${cmd_display}" 300)" --argjson notes "${notes_json}" \
     --arg toast1 "理由: $(clip "${reason}" 100)" --arg toast2 "${caller_short} · $(clip "${cmd_display}" 80)" \
     '{title: "1Password CLI の承認の依頼",
       lines: ([["時刻", $time], ["呼び手", $caller]]
         + (if $herdr == "" then [] else [["herdr", $herdr]] end)
         + [["場所", $place], ["理由", $reason], ["コマンド", $cmd]]
-        + (if $note == "" then [] else [["注意", $note]] end)),
+        + ($notes | map(["注意", .]))),
       footer: "この窓が出ていない 1Password の承認は拒否してください",
       others: "ほかにも op.exe が動いています (この窓の無いもの)。どれの承認か分からなければ拒否してください",
       toast: ["1Password CLI の承認の依頼", $toast1, $toast2]}')
@@ -728,7 +852,9 @@ else
   result=failed
 fi
 
-watch_shared end
-watch_end=${watch_result}
+if [[ ${lock_mode} == held ]]; then
+  watch_shared end
+  watch_end=${watch_result}
+fi
 write_end "${result}" "${op_rc}"
 exit "${op_rc}"

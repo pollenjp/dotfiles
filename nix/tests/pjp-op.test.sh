@@ -6,7 +6,7 @@
 #
 #   bash nix/tests/pjp-op.test.sh [<op.sh のパス>]
 #
-# flake の checks (pjp-op-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・jq・git・flock (util-linux)。
+# flake の checks (pjp-op-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・jq・git・flock と setsid (util-linux)。
 # 本物の powershell.exe・op.exe・1Password は使わない (launcher の中身は pjp-op-launcher.test.sh が確かめる)。
 #
 # ## 確かめること
@@ -41,7 +41,14 @@
 #     branch、CLAUDE_CODE_SESSION_ID を start と end の session に書く
 #   lock: ほかの呼び出しが lock を持ったまま上限を超えたら 75 で終わり、待った秒と待たせている呼び出しの理由を出し、
 #     powershell を呼ばない (ログに refused (lock-timeout))。lock を待つ間に TERM を受けたら 143 で終わり、refused (interrupted)
-#   パイプ: op の出力を別の op に渡す (op … | op …) と、どちらの lock の順でも止まらずに渡る (後ろの op が stdin を先に読み切る)
+#   パイプ: op の出力を別の op に渡す (op … | op …。間に cat を挟んでも) と、起こす順・lock を取る順によらず止まらずに渡る
+#     - 前の op が先に lock を取る: 後ろの op は始めに前の op を見つけて stdin を読み切る (出力がパイプのバッファより大きくても渡る)
+#     - 前の op が遅れて起き、先に lock を取る: 後ろの op は lock を待つ間に前の op を見つけて読み切る
+#     - 後ろの op が先に lock を取る: 前の op は、lock を持つ op が自分の出力を読んでいると見て、lock を待たずに打つ。記録の start の
+#       lock は前の op が skipped・後ろの op が held、前の op の窓に「注意」の行 (lock を待たないわけと、待っている op の理由) を出す
+#     - 前に op の無いパイプ (閉じない書き手) は読み切らず、書き手が閉じる前に終わる (lock を待った後も)
+#     - lock を持つ op がこの出力を読んでいなければ、パイプの前の op でも lock を待ち、上限で 75 で断る
+#     - 順を決めずに 4 回流しても止まらない
 #   共有の承認の見張り: WSL の直の op.exe whoami が通れば op.exe signout --all で消し、ログに shared-approval、通知を出す
 #     (powershell の notify と herdr)。通らなければ signout を打たない
 #   op.exe・powershell.exe が無ければ 127 (ログに refused)
@@ -56,8 +63,8 @@
 # 重なる)。ほかは引数・PJP_OP_PAYLOAD・WSLENV と token まわりの env を FAKE_DIR/ps.<番号>.* に書き、payload の args64 を戻して
 # 偽の op.exe (payload の op を偽の wslpath で戻したもの) を stdio を継いで起こし、status を書いて op の終了コードで終わる
 # (FAKE_PS_NO_STATUS=1 なら status を書かずに 1)。偽の op.exe は whoami (FAKE_DIR/shared が
-# あれば 0) と signout (shared を消す) を FAKE_DIR/op.direct に書き、ほかは引数を FAKE_DIR/op.args に書いて stdin を stdout へ写し、
-# stderr に FAKE_STDERR を出して FAKE_RC で終わる。偽の wslpath は /x/y と C:\fake\x\y を行き来する。偽の proc の木は
+# あれば 0) と signout (shared を消す) を FAKE_DIR/op.direct に書き、ほかは引数を FAKE_DIR/op.args に書いて、FAKE_OUT と
+# FAKE_OUT_FILE の中身・stdin (FAKE_NO_STDIN=1 なら読まない) を stdout へ写し、stderr に FAKE_STDERR を出して FAKE_RC で終わる。偽の wslpath は /x/y と C:\fake\x\y を行き来する。偽の proc の木は
 # PJP_OP_PROC と PJP_OP_PROC_START で渡す。shebang は $BASH から作る。
 
 set -u -o pipefail
@@ -164,7 +171,8 @@ esac
 printf "%s\0" "$@" >"${d}/op.args"
 if [[ -n ${FAKE_SLEEP:-} ]]; then sleep "${FAKE_SLEEP}"; fi
 printf "%s" "${FAKE_OUT:-}"
-cat
+if [[ -n ${FAKE_OUT_FILE:-} ]]; then cat "${FAKE_OUT_FILE}"; fi
+if [[ -z ${FAKE_NO_STDIN:-} ]]; then cat; fi
 printf "%s\n" "${FAKE_STDERR:-fake-err}" >&2
 exit "${FAKE_RC:-0}"
 EOF
@@ -627,24 +635,153 @@ else
   ng "lock を待つ間に TERM を受けたら 143 で終わり、refused (interrupted) を書く" "rc=${rc} log=$(cat "${log}" 2>&1)"
 fi
 wait "${holder}" 2>/dev/null
+
+echo "== パイプ"
+# 前の op (item list。理由「送る」) の出力を後ろの op (item get -。理由「受ける」) に渡す。起こす順を決めて、どちらが先に lock を
+# 取っても止まらずに渡ることを見る (順を決めないと、たいてい前の op が先に lock を取り、後ろの op の見落としが隠れる)。止まると、
+# lock を待つ側が PJP_OP_LOCK_WAIT (8 秒。混んだ CI でも、止まらずに待つ分には届かない長さ) で 75 で断られ、後ろの op は空か途中
+# までの入力で進む。終了コードの印 (A-rc=・B-rc=) は <名前>.err に、後ろの op の stdout は <名前>.out に出る
+export PJP_OP_LOCK_WAIT=8
+# パイプのバッファ (64 KiB) と、間に挟む cat の分 (読む単位 128 KiB と、もう 1 つのパイプ) を足しても収まらない大きさ
+big=${work}/big.out
+head -c 1048576 /dev/zero | tr '\0' x >"${big}"
+printf '\nend-of-A\n' >>"${big}"
+printf 'from-A' >"${work}/small.out"
+
+# wait_file <パス> [<0.05 秒の数>]: できるまで待つ (既定 400 回 = 20 秒)。できなければ 1
+wait_file() {
+  local i
+  for ((i = 0; i < ${2:-400}; i++)); do
+    [[ ! -e $1 ]] || return 0
+    sleep 0.05
+  done
+  [[ -e $1 ]]
+}
+# send・recv: 前の op と後ろの op。失敗したら終了コードの印を stderr に出す。前の op の出力は FAKE_OUT_FILE (呼び手が渡す)
+send() {
+  FAKE_OUT="" "${BASH}" "${script}" --reason "送る" item list </dev/null 2>/dev/null || echo "A-rc=$?" >&2
+}
+recv() {
+  FAKE_OUT="" FAKE_OUT_FILE="" "${BASH}" "${script}" --reason "受ける" item get - 2>/dev/null || echo "B-rc=$?" >&2
+}
+# pipe_check <名前> <期待する出力のファイル> <確かめること>
+pipe_check() {
+  if cmp -s "${work}/$1.out" "$2" && [[ ! -s ${work}/$1.err ]]; then
+    ok "$3"
+  else
+    ng "$3" "out=$(stat -c %s "${work}/$1.out") bytes (want $(stat -c %s "$2")) err=$(tr '\n' ' ' <"${work}/$1.err")"
+  fi
+}
+# start_of <理由>: その理由の start の記録
+start_of() {
+  jq -c --arg r "$1" 'select(.event == "start" and .reason == $r)' "${log}" 2>/dev/null | tail -n 1
+}
+# ui_note_of <理由>: その理由の呼び出しの窓の「注意」の行 (改行で並べる)
+ui_note_of() {
+  local f
+  for f in "${FAKE_DIR}"/ps.*.payload; do
+    [[ -e ${f} ]] || continue
+    jq -r --arg r "$1" 'select(any(.ui.lines[]?; .[0] == "理由" and .[1] == $r)) | .ui.lines[] | select(.[0] == "注意") | .[1]' "${f}" 2>/dev/null
+  done
+}
+
+reset
+{ FAKE_OUT_FILE=${big} send | { wait_file "${FAKE_DIR}/op.args" && recv; }; } >"${work}/pipe-a.out" 2>"${work}/pipe-a.err"
+pipe_check pipe-a "${big}" "前の op が先に lock を取る: 後ろの op が前の op を見つけて読み切り、パイプのバッファより大きい出力も渡る"
+
+reset
+mkdir -p "${XDG_STATE_HOME}/pjp-op"
+flock "${XDG_STATE_HOME}/pjp-op/lock" sleep 2 &
+holder=$!
+sleep 0.2
+{ { sleep 0.5 && FAKE_OUT_FILE=${big} send; } | recv; } >"${work}/pipe-c.out" 2>"${work}/pipe-c.err"
+wait "${holder}" 2>/dev/null
+pipe_check pipe-c "${big}" "前の op が遅れて起き、先に lock を取る: 後ろの op が lock を待つ間に前の op を見つけて読み切る"
+
+reset
+{ { wait_file "${FAKE_DIR}/op.args" && FAKE_OUT_FILE=${work}/small.out send; } | recv; } >"${work}/pipe-b.out" 2>"${work}/pipe-b.err"
+pipe_check pipe-b "${work}/small.out" "後ろの op が先に lock を取る: 前の op は lock を待たずに打って渡す"
+note=$(ui_note_of 送る)
+if [[ $(jq -r '.lock' <<<"$(start_of 送る)") == skipped && $(jq -r '.lock' <<<"$(start_of 受ける)") == held &&
+${note} == *"lock を待たずに"* && ${note} == *「受ける」* && -z $(ui_note_of 受ける) ]]; then
+  ok "lock を待たずに打った op は、記録の start の lock が skipped で、窓の「注意」にわけと待っている op の理由を出す"
+else
+  ng "lock を待たずに打った op は、記録の start の lock が skipped で、窓の「注意」にわけと待っている op の理由を出す" \
+    "send=$(start_of 送る) recv=$(start_of 受ける) note=${note}"
+fi
+
+reset
+{ FAKE_OUT_FILE=${big} send | cat | { wait_file "${FAKE_DIR}/op.args" && recv; }; } >"${work}/pipe-d1.out" 2>"${work}/pipe-d1.err"
+pipe_check pipe-d1 "${big}" "間に cat を挟んでも、前の op が先に lock を取れば後ろの op が読み切る"
+reset
+{ { wait_file "${FAKE_DIR}/op.args" && FAKE_OUT_FILE=${work}/small.out send; } | cat | recv; } >"${work}/pipe-d2.out" 2>"${work}/pipe-d2.err"
+pipe_check pipe-d2 "${work}/small.out" "間に cat を挟んでも、後ろの op が先に lock を取れば前の op が lock を待たずに打つ"
+
+# 前に op の無いパイプ: 書き手 (sleep) は 60 秒閉じない。op が読み切ろうとすれば、書き手が閉じるまで終わらない (30 秒待って見る)
+hold_open() {
+  sleep 60 &
+  echo $! >"${work}/writer.pid"
+  wait
+}
+nonop_recv() {
+  FAKE_NO_STDIN=1 "${BASH}" "${script}" --reason "閉じないパイプ" item get a >/dev/null 2>&1
+  echo "rc=$?" >"${work}/nonop.rc"
+}
+for contended in 0 1; do
+  reset
+  holder=""
+  if ((contended)); then
+    mkdir -p "${XDG_STATE_HOME}/pjp-op"
+    flock "${XDG_STATE_HOME}/pjp-op/lock" sleep 1 &
+    holder=$!
+    sleep 0.2
+  fi
+  hold_open | nonop_recv &
+  nonop=$!
+  label="前に op の無い閉じないパイプは読み切らず、書き手が閉じる前に終わる"
+  ((contended == 0)) || label+=" (lock を待った後も)"
+  if wait_file "${work}/nonop.rc" 600 && [[ $(<"${work}/nonop.rc") == rc=0 ]]; then
+    ok "${label}"
+  else
+    ng "${label}" "rc=$(cat "${work}/nonop.rc" 2>&1) log=$(cat "${log}" 2>&1)"
+  fi
+  kill "$(<"${work}/writer.pid")" 2>/dev/null
+  wait "${nonop}" 2>/dev/null
+  [[ -z ${holder} ]] || wait "${holder}" 2>/dev/null
+done
+
+# lock を持つのはほかの op (この出力を読まない。30 秒持ち、見終えたらプロセスのグループごと止める)。パイプの前の op でも lock を
+# 待ち、上限 (1 秒) で 75 で断る
+reset
+FAKE_SLEEP=30 setsid "${BASH}" "${script}" --reason "ほかの pane" item get z </dev/null >/dev/null 2>&1 &
+other=$!
+wait_file "${FAKE_DIR}/op.args"
+PJP_OP_LOCK_WAIT=1 FAKE_OUT="" "${BASH}" "${script}" --reason "送る" item list </dev/null 2>"${work}/unrelated.err" | cat >/dev/null
+rc=${PIPESTATUS[0]}
+kill -TERM -- "-${other}" 2>/dev/null
+wait "${other}" 2>/dev/null
+if [[ ${rc} == 75 && $(last_field refused '.why') == lock-timeout && $(<"${work}/unrelated.err") == *ほかの\ pane* ]]; then
+  ok "lock を持つ op がこの出力を読んでいなければ、パイプの前の op でも lock を待ち、上限で 75 で断る"
+else
+  ng "lock を持つ op がこの出力を読んでいなければ、パイプの前の op でも lock を待ち、上限で 75 で断る" "rc=${rc} err=$(cat "${work}/unrelated.err")"
+fi
+
 pipe_ok=1
 for i in 1 2 3 4; do
   reset
-  out=$(
-    export FAKE_OUT="from-A-${i}" PJP_OP_LOCK_WAIT=8
-    { "${BASH}" "${script}" --reason "送る" item list </dev/null 2>/dev/null || echo "A-rc=$?" >&2; } \
-      | { FAKE_OUT="" "${BASH}" "${script}" --reason "受ける" item get - 2>/dev/null || echo "B-rc=$?" >&2; }
-  ) 2>"${work}/pipe.err"
-  if [[ ${out} != "from-A-${i}" || -s ${work}/pipe.err ]]; then
+  printf 'from-A-%s' "${i}" >"${work}/round.want"
+  { FAKE_OUT_FILE=${work}/round.want send | recv; } >"${work}/round.out" 2>"${work}/round.err"
+  if ! cmp -s "${work}/round.out" "${work}/round.want" || [[ -s ${work}/round.err ]]; then
     pipe_ok=0
-    pipe_detail="round ${i}: out=${out} err=$(cat "${work}/pipe.err")"
+    pipe_detail="round ${i}: out=$(cat "${work}/round.out") err=$(cat "${work}/round.err")"
   fi
 done
 if ((pipe_ok)); then
-  ok "op … | op … は lock の順によらず止まらずに渡る (4 回)"
+  ok "op … | op … は、順を決めずに 4 回流しても止まらずに渡る"
 else
-  ng "op … | op … は lock の順によらず止まらずに渡る (4 回)" "${pipe_detail}"
+  ng "op … | op … は、順を決めずに 4 回流しても止まらずに渡る" "${pipe_detail}"
 fi
+unset PJP_OP_LOCK_WAIT
 
 echo "== stdin が閉じている・残りの片付け"
 reset

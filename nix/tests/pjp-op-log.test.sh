@@ -16,7 +16,8 @@
 #   行
 #     - start と end を 1 行にまとめ、結果 (許可・拒否・時間切れ・成功)・秒を出す。service account は「成功 (SA)」
 #     - end の無い start は「実行中か中断」、refused は「断った (理由なし)」・「断った (始める前に止められた)」、shared-approval は
-#       「共有の承認を消した」。窓を出せなかった desktop の呼び出しは結果に「(窓なし)」を添える
+#       「共有の承認を消した」。窓を出せなかった desktop の呼び出しは結果に「(窓なし)」、lock を待たずに打った呼び出し (start の
+#       lock が skipped。パイプの先の op が lock を持ってこの出力を待っていた) は「(lock を待たず)」を添える
 #     - 呼び手は Claude / 人 と herdr の label・pane、理由は日本語のまま、コマンドは op から始める
 #     - 時刻は今日なら HH:MM:SS、ほかの日は MM/DD HH:MM:SS。JSON でない行は読み飛ばす
 #   --json は呼び出しごとに 1 行の JSON (start に end を重ねたもの) を出す
@@ -80,6 +81,8 @@ human='{type: "human", claude_pid: null, herdr: null, cwd: "/w", repo: null, bra
   rec "{v: 1, id: \"k\", event: \"refused\", epoch: (\$now - 50), why: \"interrupted\", caller: ${human}, reason: \"止めた2\", args: [\"read\", \"x\"]}"
   rec "{v: 1, id: \"g\", event: \"start\", epoch: (\$now - 120), kind: \"service-account\", caller: ${human}, reason: \"CI\", args: [\"read\", \"op://v/i/f\"]}"
   rec '{v: 1, id: "g", event: "end", epoch: ($now - 119), result: "ok", exit: 0, seconds: 1}'
+  rec "{v: 1, id: \"m\", event: \"start\", epoch: (\$now - 40), kind: \"desktop\", lock: \"skipped\", caller: ${claude}, reason: \"パイプの前\", args: [\"item\", \"list\"]}"
+  rec '{v: 1, id: "m", event: "end", epoch: ($now - 38), result: "approved", exit: 0, seconds: 2}'
 } >"${dir}/log.jsonl"
 {
   rec "{v: 1, id: \"f\", event: \"start\", epoch: (\$now - 90000), kind: \"desktop\", caller: ${human}, reason: \"昨日の理由\", args: [\"whoami\"]}"
@@ -146,6 +149,11 @@ if [[ $(row default 窓が出ない) == *"許可 (窓なし)"* && $(row default 
 else
   ng "窓を出せなかった呼び出しに (窓なし)、始める前に止められた refused に名前を出す" "$(cat "${work}/default.out")"
 fi
+if [[ $(row default パイプの前) == *"許可 (lock を待たず)"* && $(row default 設定を読む) != *"lock を待たず"* ]]; then
+  ok "lock を待たずに打った呼び出し (lock が skipped) の結果に (lock を待たず) を添える"
+else
+  ng "lock を待たずに打った呼び出し (lock が skipped) の結果に (lock を待たず) を添える" "$(cat "${work}/default.out")"
+fi
 if [[ $(row all 昨日の理由) == "01/14 "* ]]; then
   ok "ほかの日の時刻は MM/DD HH:MM:SS"
 else
@@ -154,7 +162,7 @@ fi
 
 echo "== --json"
 run json --json
-if [[ ${rc} == 0 && $(jq -s 'length' "${work}/json.out" 2>/dev/null) == 7 &&
+if [[ ${rc} == 0 && $(jq -s 'length' "${work}/json.out" 2>/dev/null) == 8 &&
 $(jq -r 'select(.id == "a") | .end.result' "${work}/json.out" 2>/dev/null) == approved ]]; then
   ok "--json は呼び出しごとに 1 行 (start に end を重ねる)"
 else
