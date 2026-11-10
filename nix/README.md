@@ -2538,7 +2538,7 @@ fish には、op を呼ばない op の補完を `~/.config/fish/completions/op.
 | --- | --- |
 | `--reason` | まだ書いていなければ出す（`op <Tab>` でもコマンドと並べて出す）。理由の値には何も出さない |
 | コマンド | トップのコマンドと 2 段目（`op item <Tab>` → `get`・`list`…）。`--reason`・`--account` などの値をコマンドと読まない |
-| flag | global の flag と、よく使うコマンド（read・inject・run・signin・signout・item・document）の flag。ファイルを取る flag（`--out-file` など）と `op document create` の引数ではファイルを出す |
+| flag | global の flag と、よく使うコマンド（read・inject・run・signin・signout・item・document）の flag（短い形の `-o`・`-i`・`-f`・`-n` も）。ファイルを取る flag（`--out-file`・`-o` など）と `op document create` の引数ではファイルを出す |
 | `--` の後ろ | `op run -- <コマンド>` の子のコマンドは、そのコマンドの補完に任せる |
 
 item・vault の名前のように op に聞かないと分からないものは出さない（op を呼ぶと、補完のたびに powershell と `op.exe` が起き、

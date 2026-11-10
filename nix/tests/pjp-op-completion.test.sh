@@ -20,8 +20,9 @@
 #     3 段目 (op connect vault <Tab>) に vault の 2 段目を出さない。op help <Tab> はトップのコマンド
 #   flag: op item get --<Tab> は item get の flag (--vault・--fields・--reveal・--otp) と global の flag と --reason で、ほかの
 #     コマンドの flag (--out-file) は出さない。op --format <Tab> は human-readable と json
-#   ファイル: --out-file の値と、op document create の引数ではファイルを出す
-#   -- の後ろ (op run の子のコマンド): そのコマンドの名前と、そのコマンドの補完 (flag) を出し、op の flag は出さない
+#   ファイル: --out-file と短い形 (op read -o・op inject -i) の値と、op document create の引数ではファイルを出す
+#   -- の後ろ (op run の子のコマンド): そのコマンドの名前と、そのコマンドの補完 (flag) を出し、op の flag は出さない。
+#     op -- <Tab> にも、op のコマンドと --reason を出さない
 #
 # ## 作り
 #
@@ -196,6 +197,14 @@ if has afile.txt && quiet; then
 else
   ng "--out-file の値ではファイルを出す" "$(shown)"
 fi
+for line in "op read -o " "op inject -i "; do
+  cands "${line}"
+  if has afile.txt && quiet; then
+    ok "${line}<Tab> (短い形の flag の値) はファイルを出す"
+  else
+    ng "${line}<Tab> (短い形の flag の値) はファイルを出す" "$(shown)"
+  fi
+done
 cands "op document create "
 if has afile.txt && quiet; then
   ok "op document create <Tab> はファイルを出す"
@@ -215,6 +224,14 @@ if has --child-flag && lacks --reason --account --env-file && quiet; then
   ok "子のコマンドの flag を出し、op の flag は出さない"
 else
   ng "子のコマンドの flag を出し、op の flag は出さない" "$(shown)"
+fi
+# -- の後ろは子のコマンドの名前 (どのコマンドでも) を出すので、read (fish の組み込み)・whoami (coreutils) のような、ほかの
+# コマンドと同じ名前の op のコマンドでは見ない
+cands "op -- "
+if lacks item vault events-api --reason && quiet; then
+  ok "op -- <Tab> は op のコマンドも --reason も出さない"
+else
+  ng "op -- <Tab> は op のコマンドも --reason も出さない" "$(shown)"
 fi
 
 echo "== op を呼ばない"

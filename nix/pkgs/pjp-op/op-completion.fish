@@ -11,17 +11,19 @@
 # の名前のように、op に聞かないと分からない値は出さない。-- の後ろ (op run の子のコマンド) は、そのコマンドの補完に任せる。
 #
 # 一覧は op 2.41.0 の op __complete から写した。op を上げてコマンドや flag が変わったら写し直す。手元の op は wrapper なので、
-# Linux の op を借りて打つ (unfree。HOME を一時の場所にすると、手元の op の設定に触れない):
+# Linux の op (unfree) を借り、HOME を一時の場所にして打つ (手元の op の設定に触れない)。dotfiles の直下で、bash で:
 #
-#   NIXPKGS_ALLOW_UNFREE=1 nix build --impure --no-link --print-out-paths --inputs-from ./nix nixpkgs#_1password-cli
-#   <出たパス>/bin/op __complete ""              # トップのコマンド (item __complete item "" で 2 段目)
-#   <出たパス>/bin/op __complete item get --     # flag
+#   bin=$(NIXPKGS_ALLOW_UNFREE=1 nix build --impure --no-link --print-out-paths --inputs-from ./nix nixpkgs#_1password-cli)/bin
+#   HOME=$(mktemp -d) "$bin/op" __complete ""            # トップのコマンド
+#   HOME=$(mktemp -d) "$bin/op" __complete item ""       # 2 段目
+#   HOME=$(mktemp -d) "$bin/op" __complete item get -    # flag (- なら短い形も出る。-- では長い形だけ)
 
 # --- 今の行を読む
 
 # __pjp_op_words: 今の行の op より後ろ (カーソルのある語の前まで) の語から、flag とその値を除いたもの (コマンドの並び) を
 # 1 行に 1 つ出す。-- があれば -- を出して終える (後ろは op run などの子のコマンド)。値を空白で区切って取る flag は値を読み
-# 飛ばす (--reason "<理由>" の理由をコマンドと読まない)。下で -r・-x を付けた flag と揃える
+# 飛ばす (--reason "<理由>" の理由をコマンドと読まない)。下で -r・-x を付けた flag (短い形も) と揃える。fish の echo は -- を
+# option の終わりと読んで空行を出すので、printf で出す
 function __pjp_op_words
     set -l skip 0
     for w in (commandline -xpc)[2..]
@@ -31,14 +33,15 @@ function __pjp_op_words
         end
         switch $w
             case --
-                echo --
+                printf '%s\n' --
                 return
             case --reason --account --config --encoding --format --session --vault --fields --categories --tags \
-                --category --title --url --template --out-file --in-file --file-mode --env-file --environment --file-name
+                --category --title --url --template --out-file --in-file --file-mode --env-file --environment --file-name \
+                -o -i
                 set skip 1
             case '-*'
             case '*'
-                echo $w
+                printf '%s\n' $w
         end
     end
 end
@@ -223,21 +226,21 @@ end
 
 # --- よく使うコマンドの flag
 
-complete -c op -n '__pjp_op_in read' -l out-file -r -F -d 'Write the secret to a file instead of stdout'
+complete -c op -n '__pjp_op_in read' -s o -l out-file -r -F -d 'Write the secret to a file instead of stdout'
 complete -c op -n '__pjp_op_in read' -l file-mode -x -d 'Set filemode for the output file'
-complete -c op -n '__pjp_op_in read' -l force -d 'Do not prompt for confirmation'
-complete -c op -n '__pjp_op_in read' -l no-newline -d 'Do not print a new line after the secret'
+complete -c op -n '__pjp_op_in read' -s f -l force -d 'Do not prompt for confirmation'
+complete -c op -n '__pjp_op_in read' -s n -l no-newline -d 'Do not print a new line after the secret'
 
-complete -c op -n '__pjp_op_in inject' -l in-file -r -F -d 'The filename of a template file to inject'
-complete -c op -n '__pjp_op_in inject' -l out-file -r -F -d 'Write the injected template to a file instead of stdout'
+complete -c op -n '__pjp_op_in inject' -s i -l in-file -r -F -d 'The filename of a template file to inject'
+complete -c op -n '__pjp_op_in inject' -s o -l out-file -r -F -d 'Write the injected template to a file instead of stdout'
 complete -c op -n '__pjp_op_in inject' -l file-mode -x -d 'Set filemode for the output file'
-complete -c op -n '__pjp_op_in inject' -l force -d 'Do not prompt for confirmation'
+complete -c op -n '__pjp_op_in inject' -s f -l force -d 'Do not prompt for confirmation'
 
 complete -c op -n '__pjp_op_in run' -l env-file -r -F -d 'Enable Dotenv integration with specific Dotenv files to parse'
 complete -c op -n '__pjp_op_in run' -l environment -x -d 'Load environment variables from 1Password Environments by ID'
 complete -c op -n '__pjp_op_in run' -l no-masking -d 'Disable masking of secrets on stdout and stderr'
 
-complete -c op -n '__pjp_op_in signin' -l force -d 'Ignore warnings and print raw output from this command'
+complete -c op -n '__pjp_op_in signin' -s f -l force -d 'Ignore warnings and print raw output from this command'
 complete -c op -n '__pjp_op_in signin' -l raw -d 'Only return the session token'
 complete -c op -n '__pjp_op_in signout' -l all -d 'Sign out of all signed-in accounts'
 complete -c op -n '__pjp_op_in signout' -l forget -d 'Remove the details for a 1Password account from this device'
@@ -273,7 +276,7 @@ complete -c op -n '__pjp_op_in item delete' -l vault -x -d 'Look for the item in
 complete -c op -n '__pjp_op_in item delete' -l archive -d 'Move the item to the Archive'
 
 complete -c op -n '__pjp_op_in document get' -l vault -x -d 'Look for the document in this vault'
-complete -c op -n '__pjp_op_in document get' -l out-file -r -F -d 'Save the document to the file instead of stdout'
+complete -c op -n '__pjp_op_in document get' -s o -l out-file -r -F -d 'Save the document to the file instead of stdout'
 complete -c op -n '__pjp_op_in document get' -l file-mode -x -d 'Set filemode for the output file'
 complete -c op -n '__pjp_op_in document get' -l force -d 'Save or print the document without prompting'
 complete -c op -n '__pjp_op_in document get; or __pjp_op_in document list' -l include-archive -d 'Include document items in the Archive'
