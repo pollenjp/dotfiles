@@ -28,8 +28,9 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 2. ユーザーに 1Password のアプリで項目を作り、値をアプリに直に入れてもらう。外のサービスが発行する値 (API キーなど) はこれ。
    cron などで無人で動かす見込みがあれば、最初から専用の vault に作ってもらう (下の「人が承認できない処理」)。
    Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの名前で作るかを伝えてから、1Password の中で生む:
-   `op --reason "<理由>" item create --category password --title "<名前>" --vault "<vault>" --generate-password=letters,digits,32 >/dev/null`
-   (出力は捨てる。pjp-op の無いマシンでは `--reason` を外す)
+   `printf '%s' '{"title":"<名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" - --generate-password=letters,digits,32 >/dev/null`
+   (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
+   `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。pjp-op の無いマシンでは `--reason` を外す)
 3. 参照だけをもらう。アプリの欄のメニュー「Copy Secret Reference」で取れる (`op://Private/kabu-station/password` の形)
 4. `.env` に参照を足す。既にある `.env` は Read・Edit で開かず (平文が入っていれば会話に入る)、Bash で足す:
    `touch .env && sed -i -E '/^[[:space:]]*(export[[:space:]]+)?KABU_API_PASSWORD[[:space:]]*=/d' .env && printf '%s\n' 'KABU_API_PASSWORD=op://Private/kabu-station/password' >>.env`。
