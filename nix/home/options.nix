@@ -471,8 +471,8 @@ in
         `~/.config/mise/conf.d/dotfiles-cursor-agent.toml` に版そのものを書いて入れる (雛形は
         files/mise/conf.d/cursor-agent.toml)。版を指すので、どのディレクトリの素の `mise install` も遅延で落ちない
       - false: 宣言を置かない (setup が前に書いた宣言は消す)。mise は cursor-agent を知らず、素の `mise install` も
-        触らない。入っている版は消さず、週 1 回の掃除 (dotfiles.cleanup.enable) の `mise prune` が消す。今すぐ消すなら
-        `mise uninstall --all cursor-agent`
+        触らない。入っている版は消さず、dotfiles.cleanup.enable のマシンなら週 1 回の掃除の `mise prune` が消す。今すぐ
+        消すなら `mise uninstall --all cursor-agent`
 
       値は `~/.local/state/dotfiles/cursor-agent.json` (home/modules/cursor-agent.nix) に落ち、bootstrap-mise.sh が読む。
       反映は `~/dotfiles/setup --update` で、`home-manager switch` だけでは宣言も版も変わらない。書き方と、on にする行を

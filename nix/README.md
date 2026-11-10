@@ -4710,7 +4710,7 @@ option の値は home-manager が `~/.local/state/dotfiles/mise-release-age.json
 
 Cursor の CLI（mise の registry の名前は `cursor-agent`、別名 `cursor-cli`）も、`claude` と同じ理由（リリースの頻度が
 `flake.lock` の更新の周期に合わない）で mise に置く。ただし**既定では入れず**、ホストで `dotfiles.cursorAgent.enable = true` に
-したマシンにだけ入れる（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-10-cursor-agent-opt-in-design.md)）。
+したマシンにだけ入れる（[ADR 051](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/051_cursor_agent_opt_in_pinned_20261110T180826JST/README.md)・[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-10-cursor-agent-opt-in-design.md)）。
 中身は Cursor が `downloads.cursor.com` で配る配布物（公式のインストーラが入れるものと同じ）で、registry の http backend が取る。
 
 #### ホストで on にする
@@ -4744,8 +4744,12 @@ modules = [
 版は `setup --update` のたびに、次の順で決める。
 
 1. `claude` と同じ遅延（1d。上書き中は上限）で `mise latest cursor-agent` が出す版（遅延を過ぎた一番新しい版）
-2. 無ければ今の宣言の版。宣言も無ければ、入っている一番新しい版（`mise latest --installed cursor-agent`。前の作りで入れた版もここで拾う）
-3. どれも無ければ宣言を書かず、[警告のまとめ](#途中の警告のまとめ)に出す（次の `--update` で入る）
+2. 無ければ今の宣言の版（版の形のときだけ）。それも無ければ、入っている一番新しい版（`mise latest --installed cursor-agent`。前の作りで
+   入れた版もここで拾う）
+3. どれも無ければ宣言を書かず、[警告のまとめ](#途中の警告のまとめ)に出す（版を指していない宣言が残っていれば消す。次の `--update` で入る）
+
+版として書くのは、数字で始まる形（`^[0-9][0-9A-Za-z._+-]*$`）だけ。`latest` のような語は使わない（`latest` の宣言に戻すと、上の
+失敗に戻る）。
 
 決めた版を宣言に書いてから `mise install cursor-agent` を打つ（版を指すので遅延の env は付けない。`postinstall` も宣言から効く）。
 install が落ちたら宣言を前の中身に戻し（無かったなら消し）、警告する。`mise upgrade cursor-agent` は使わない（上げるのは宣言の版を
@@ -4754,9 +4758,11 @@ install が落ちたら宣言を前の中身に戻し（無かったなら消し
 - **新しい版は、出てから 1d を過ぎた後の `--update` で入る。** 版の日付は日までなので、遅延はその日の終わりから数える（1d なら
   10/22 の版は 10/23 の終わりから）。急ぐときは[期間付きの上書き](#遅延-minimum_release_age-を期間付きで緩める)を足す（ほかの mise の
   道具にも効く）
-- **宣言は手で直さない。** 1 行目に印（`# dotfiles-managed: nix/scripts/bootstrap-mise.sh`）があり、次の `--update` で書き直す。
-  印の無いファイルや symlink を同じ場所に置くと、setup はそれを手で置いたものとして書き換えず、cursor-agent も入れない（警告が出る）
-- 上げた後の古い版は、週 1 回の掃除（[前述](#使わなくなったデータの定期削除)）の `mise prune` が消す（宣言の版は残る）
+- **宣言は手で直さない。** 1 行目に印（`# dotfiles-managed: nix/scripts/bootstrap-mise.sh`）があり、次の `--update` で書き直す
+  （版を `latest` のような語に書き換えても使わず、入っている版で書き直す）。印の無いファイルや symlink を同じ場所に置くと、setup は
+  それを手で置いたものとして書き換えず、cursor-agent も入れない（警告が出る）
+- 上げた後の古い版は、`dotfiles.cleanup.enable`（既定 true）のマシンなら週 1 回の掃除（[前述](#使わなくなったデータの定期削除)）の
+  `mise prune` が消す（宣言の版は残る）
 - 宣言の名前（`dotfiles-cursor-agent.toml`）が前の home-manager の宣言（`cursor-agent.toml`）と違うのは、home-manager の古い世代へ
   戻したとき、その世代の symlink がこの普通のファイルにぶつかって activate が止まらないようにするため。mise は global の conf.d を
   名前の順に読み、同じツールの宣言は後ろのファイルが勝つので、古い世代の `latest` の宣言が並んでも版の宣言が勝つ
@@ -4773,8 +4779,8 @@ install が落ちたら宣言を前の中身に戻し（無かったなら消し
 - mise の宣言を置かない（setup が前に書いた宣言は消す）。mise は cursor-agent を知らず、素の `mise install` も触らない
 - 前の作り（全ホストに `latest` の宣言を置いていた）から移ったマシンでは、`switch` が `~/.config/mise/conf.d/cursor-agent.toml`
   （home-manager の symlink）を外す
-- 入っている版は消さない。週 1 回の掃除の `mise prune` が消す（宣言の無い道具の版は消す対象に入る）。残っている間は setup の出力に
-  1 行出る。今すぐ消すなら:
+- 入っている版は消さない。`dotfiles.cleanup.enable`（既定 true）のマシンなら、週 1 回の掃除の `mise prune` が消す（宣言の無い道具の版は
+  消す対象に入る。掃除を切ったマシンでは残る）。残っている間は setup の出力に 1 行出る。今すぐ消すなら:
 
   ```sh
   mise uninstall --all cursor-agent
