@@ -3,12 +3,13 @@
 #
 # nix/scripts/flake-lock-age.sh が、設定 (release-age.nix) の猶予の日数と例外で pin を選び (resolve・update)、検査する
 # (check) ことを、偽の curl (チャンネルの公開と GitHub の commit の表から答える) と nix の包み (eval は本物の nix に
-# --store dummy:// を付けて渡し、flake update は引数を残す) で確かめる。
+# --store dummy:// を付けて渡し、flake update は引数と --flake の先のファイルの一覧を残して、lock を書くのを真似る) で
+# 確かめる。
 #
 #   bash nix/tests/flake-lock-age.test.sh [<flake-lock-age.sh のパス>]
 #
 # flake の checks (flake-lock-age-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・nix (flake.lock・
-# flake.nix・設定を読む nix eval) だけ。
+# flake.nix・設定を読む nix eval)・git (新しく作った lock を git の追跡に入れるケース) だけ。
 #
 # ## 確かめること
 #
@@ -43,6 +44,12 @@
 #     時刻や時差の誤り・今より先の timestamp も止まる (今ちょうどは通る)
 #   - 設定の書き誤り: 知らない欄 (どの深さでも)・欄の型 (日数が整数でない・list でない・項目が attrset でない)・無い欄・
 #     空の reason を、まとめて出して止まる。後ろの flake の設定に誤りがあれば、前の flake も更新しない
+#   - update は nix flake update に flake のディレクトリを渡さず、flake.nix と flake.lock だけを写した一時ディレクトリを
+#     path: で渡す (ほかのファイルとディレクトリは写さない)。nix が写しに書いた lock を元の flake.lock へ戻し、変わら
+#     なければ書き戻さない (mtime も変えない)。lock の無い flake は写しで作った lock を置き、git の作業ツリーの中なら
+#     git add --intent-to-add する (外なら何もしない)。nix flake update が落ちたら元の flake.lock を変えない。どの
+#     終わり方でも一時ディレクトリを消す
+#   - 相対パスの input (path:./x・git+file:./x) を持つ flake は、写さずにその場のディレクトリを渡し、わけを出す
 #
 # 偽の curl は、公開の表 (releases.tsv) と commit の表 (commits.tsv) を 1 行ずつ「名前<TAB>UNIX 秒<TAB>rev」で読む。
 # 今の時刻は FLAKE_LOCK_AGE_NOW (UNIX 秒) で渡す。偽のコマンドの shebang は $BASH から作る (Nix のサンドボックスには
@@ -190,7 +197,25 @@ case $1 in
   flake)
     if [[ $2 == update ]]; then
       printf '%s\n' "$*" >>"${FAKE_NIX_LOG:?}"
-      exit 0
+      # --flake の先 (path: を外す) にあるファイルの一覧を FAKE_NIX_FILES へ 1 行で残し、nix が lock を書くのを真似る:
+      # FAKE_NIX_LOCK があればその中身を、無くて lock も無ければ input の無い lock を書く。FAKE_NIX_RC が 0 でなければ
+      # 何も書かずにその終了コードで落ちる
+      target=""
+      prev=""
+      for a in "$@"; do
+        if [[ ${prev} == --flake ]]; then target=${a#path:}; fi
+        prev=${a}
+      done
+      if [[ -d ${target} ]]; then
+        printf '%s\n' "$(LC_ALL=C ls -A "${target}" | tr '\n' ' ')" >>"${FAKE_NIX_FILES:-/dev/null}"
+        if [[ ${FAKE_NIX_RC:-0} != 0 ]]; then exit "${FAKE_NIX_RC}"; fi
+        if [[ -n ${FAKE_NIX_LOCK-} ]]; then
+          printf '%s\n' "${FAKE_NIX_LOCK}" >"${target}/flake.lock"
+        elif [[ ! -f ${target}/flake.lock ]]; then
+          printf '%s\n' '{"nodes": {"root": {}}, "root": "root", "version": 7}' >"${target}/flake.lock"
+        fi
+      fi
+      exit "${FAKE_NIX_RC:-0}"
     fi
     ;;
 esac
@@ -266,28 +291,37 @@ nixpkgs_node() { node NixOS nixpkgs "$(rev "$1")" "$2" nixpkgs-unstable; }
 # 設定のファイル。$1: パス、$2: 中身
 settings() { printf '%s\n' "$2" >"$1"; }
 
-# script を流す。$1: 結果を置くディレクトリ、残り: script の引数。FLAKE_MIN_RELEASE_AGE_DAYS は呼び側の env を渡す
+# script を流す。$1: 結果を置くディレクトリ、残り: script の引数。FLAKE_MIN_RELEASE_AGE_DAYS・FAKE_NIX_LOCK・FAKE_NIX_RC は
+# 呼び側の env を渡す。TMPDIR を <結果>/tmp にする (update が flake を写す一時ディレクトリが、流した後に残っていないかを見る)
 run_in() {
   local r=$1
   shift
-  mkdir -p "${r}"
+  mkdir -p "${r}/tmp"
   : >"${r}/nix.log"
-  env HOME="${HOME}" PATH="${bin}:${PATH}" FAKE_NIX_LOG="${r}/nix.log" FLAKE_LOCK_AGE_NOW="${now}" \
-    "${BASH}" "${run_script:-${script}}" "$@" >"${r}/stdout" 2>"${r}/stderr"
+  : >"${r}/files.log"
+  env HOME="${HOME}" PATH="${bin}:${PATH}" TMPDIR="${r}/tmp" FAKE_NIX_LOG="${r}/nix.log" FAKE_NIX_FILES="${r}/files.log" \
+    FLAKE_LOCK_AGE_NOW="${now}" "${BASH}" "${run_script:-${script}}" "$@" >"${r}/stdout" 2>"${r}/stderr"
   echo $? >"${r}/rc"
 }
-detail() { printf 'rc=%s\n--- nix.log\n%s\n--- stdout\n%s\n--- stderr\n%s' "$(cat "$1/rc")" "$(cat "$1/nix.log")" "$(cat "$1/stdout")" "$(cat "$1/stderr")"; }
+detail() {
+  printf 'rc=%s\n--- nix.log\n%s\n--- files.log\n%s\n--- tmp\n%s\n--- stdout\n%s\n--- stderr\n%s' "$(cat "$1/rc")" "$(cat "$1/nix.log")" \
+    "$(cat "$1/files.log")" "$(ls -A "$1/tmp")" "$(cat "$1/stdout")" "$(cat "$1/stderr")"
+}
 seen() { grep -Fq -- "$1" "$2"; }
+# nix.log の --flake の一時ディレクトリ (update が flake.nix と flake.lock を写す先。<TMPDIR>/flake-lock-age.XXXXXX/<flake の
+# ディレクトリの名前>) を「<写し>/<名前>」に置き換えて出す
+flake_log() { sed -E 's#--flake path:[^ ]*/flake-lock-age\.[A-Za-z0-9]+/#--flake <写し>/#' "$1/nix.log"; }
 # update が nixpkgs (と nixpkgs-exceptions) に選んだ rev を override に渡したか。$1: 結果、$2: input、$3: 公開の番号
 picked() { seen "--override-input $2 github:NixOS/nixpkgs/$(rev "$3")" "$1/nix.log"; }
-# picked の flake を分けて見る版 (複数の flake を渡したとき)。$1: 結果、$2: flake、$3: input、$4: 公開の番号
+# picked の flake を分けて見る版 (複数の flake を渡したとき。写しの名前で見分ける)。$1: 結果、$2: flake、$3: input、
+# $4: 公開の番号
 picked_in() {
   local line
   while IFS= read -r line; do
-    if [[ ${line} == *"--flake $2 "* && ${line} == *"--override-input $3 github:NixOS/nixpkgs/$(rev "$4")"* ]]; then
+    if [[ ${line} == *"--flake <写し>/${2##*/} "* && ${line} == *"--override-input $3 github:NixOS/nixpkgs/$(rev "$4")"* ]]; then
       return 0
     fi
-  done <"$1/nix.log"
+  done < <(flake_log "$1")
   return 1
 }
 
@@ -447,8 +481,8 @@ echo "== --input"
 settings "${cfg}" '{ }'
 r="${work}/r-input-none"
 run_in "${r}" --config "${cfg}" --input nixpkgs-exceptions --no-scan update "${d}"
-want="flake update nixpkgs-exceptions --flake ${d} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
-if [[ $(cat "${r}/rc") == 0 && $(cat "${r}/nix.log") == "${want}" ]]; then
+want="flake update nixpkgs-exceptions --flake <写し>/${d##*/} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
+if [[ $(cat "${r}/rc") == 0 && $(flake_log "${r}") == "${want}" ]]; then
   ok "--input nixpkgs-exceptions だけなら、それだけを lock の nixpkgs と同じ rev にする"
 else
   ng "--input nixpkgs-exceptions だけなら、それだけを lock の nixpkgs と同じ rev にする" "$(detail "${r}")"
@@ -457,8 +491,8 @@ fi
 settings "${cfg}" '{ exceptions.fromNixpkgs = [ { packages = [ "hello" ]; date = "2026-10-22"; reason = "一部の理由"; } ]; }'
 r="${work}/r-input-part"
 run_in "${r}" --config "${cfg}" --input nixpkgs-exceptions --no-scan update "${d}"
-want="flake update nixpkgs-exceptions --flake ${d} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 7)"
-if [[ $(cat "${r}/nix.log") == "${want}" ]]; then
+want="flake update nixpkgs-exceptions --flake <写し>/${d##*/} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 7)"
+if [[ $(flake_log "${r}") == "${want}" ]]; then
   ok "--input nixpkgs-exceptions で一部の例外があれば、lock の nixpkgs より新しい date までの公開"
 else
   ng "--input nixpkgs-exceptions で一部の例外があれば、lock の nixpkgs より新しい date までの公開" "$(detail "${r}")"
@@ -467,8 +501,8 @@ fi
 settings "${cfg}" '{ exceptions.fromNixpkgs = [ { packages = [ "hello" ]; date = "2026-10-17"; reason = "一部の理由"; } ]; }'
 r="${work}/r-input-older"
 run_in "${r}" --config "${cfg}" --input nixpkgs-exceptions --no-scan update "${d}"
-want="flake update nixpkgs-exceptions --flake ${d} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
-if [[ $(cat "${r}/nix.log") == "${want}" ]]; then
+want="flake update nixpkgs-exceptions --flake <写し>/${d##*/} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
+if [[ $(flake_log "${r}") == "${want}" ]]; then
   ok "--input で、date までの公開が lock の nixpkgs (公開の名前で見つける) より古ければ lock の nixpkgs の rev"
 else
   ng "--input で、date までの公開が lock の nixpkgs (公開の名前で見つける) より古ければ lock の nixpkgs の rev" "$(detail "${r}")"
@@ -488,8 +522,8 @@ settings "${cfg}" '{ }'
 d_missing=$(new_flake missing "$(lock "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")")")
 r="${work}/r-missing"
 run_in "${r}" --config "${cfg}" --input nixpkgs-exceptions --no-scan update "${d_missing}"
-want="flake update nixpkgs-exceptions --flake ${d_missing} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
-if [[ $(cat "${r}/rc") == 0 && $(cat "${r}/nix.log") == "${want}" ]]; then
+want="flake update nixpkgs-exceptions --flake <写し>/${d_missing##*/} --override-input nixpkgs-exceptions github:NixOS/nixpkgs/$(rev 4)"
+if [[ $(cat "${r}/rc") == 0 && $(flake_log "${r}") == "${want}" ]]; then
   ok "flake.nix にだけある nixpkgs-exceptions も、決まりどおり (lock の nixpkgs と同じ rev) に選ぶ"
 else
   ng "flake.nix にだけある nixpkgs-exceptions も、決まりどおり (lock の nixpkgs と同じ rev) に選ぶ" "$(detail "${r}")"
@@ -825,6 +859,108 @@ if [[ $(cat "${r}/rc") != 0 ]] && seen '2026-02-30' "${r}/stderr" && [[ ! -s ${r
 else
   ng "後ろの flake の設定に誤りがあれば、前の flake も更新しない" "$(detail "${r}")"
 fi
+
+echo "== 一時ディレクトリで update する (repo を /nix/store へ写さない)"
+
+settings "${cfg}" '{ }'
+# flake のほかのファイルとディレクトリも置く (写さないことを見る)。lock の mtime は古くしておく (書き戻さないことを見る)
+d_copy=$(new_flake in-repo "${old_lock}")
+printf 'x\n' >"${d_copy}/README.md"
+mkdir -p "${d_copy}/build"
+printf 'x\n' >"${d_copy}/build/out"
+touch -d 2000-01-01T00:00:00Z "${d_copy}/flake.lock"
+r="${work}/r-copy"
+run_in "${r}" --config "${cfg}" --no-scan update "${d_copy}"
+if [[ $(cat "${r}/rc") == 0 && $(cat "${r}/files.log") == "flake.lock flake.nix " && -z $(ls -A "${r}/tmp") ]] \
+  && seen "--flake path:${r}/tmp/flake-lock-age." "${r}/nix.log" && ! seen "--flake ${d_copy}" "${r}/nix.log"; then
+  ok "update は flake.nix と flake.lock だけを写した一時ディレクトリを path: で渡し、流した後に消す"
+else
+  ng "update は flake.nix と flake.lock だけを写した一時ディレクトリを path: で渡し、流した後に消す" "$(detail "${r}")"
+fi
+if [[ $(cat "${d_copy}/flake.lock") == "${old_lock}" && $(date -u -r "${d_copy}/flake.lock" +%Y) == 2000 ]] \
+  && ! seen 'flake.lock を戻しました' "${r}/stdout"; then
+  ok "lock が変わらなければ書き戻さない (mtime も変えない)"
+else
+  ng "lock が変わらなければ書き戻さない (mtime も変えない)" "$(detail "${r}")"
+fi
+
+new_lock='{"nodes": {"root": {}}, "root": "root", "version": 7, "written": "by nix"}'
+d_back=$(new_flake back "${old_lock}")
+r="${work}/r-copy-back"
+FAKE_NIX_LOCK=${new_lock} run_in "${r}" --config "${cfg}" --no-scan update "${d_back}"
+if [[ $(cat "${r}/rc") == 0 && $(cat "${d_back}/flake.lock") == "${new_lock}" && -z $(ls -A "${r}/tmp") ]] \
+  && seen "flake.lock を戻しました: ${d_back}/flake.lock" "${r}/stdout"; then
+  ok "nix が写しに書いた lock を、元の flake.lock へ戻す"
+else
+  ng "nix が写しに書いた lock を、元の flake.lock へ戻す" "$(detail "${r}")"
+fi
+
+d_fail=$(new_flake fail "${old_lock}")
+r="${work}/r-copy-fail"
+FAKE_NIX_RC=1 FAKE_NIX_LOCK=${new_lock} run_in "${r}" --config "${cfg}" --no-scan update "${d_fail}"
+if [[ $(cat "${r}/rc") != 0 && $(cat "${d_fail}/flake.lock") == "${old_lock}" && -z $(ls -A "${r}/tmp") ]]; then
+  ok "nix flake update が落ちたら元の flake.lock を変えず、一時ディレクトリも消す"
+else
+  ng "nix flake update が落ちたら元の flake.lock を変えず、一時ディレクトリも消す" "$(detail "${r}")"
+fi
+
+d_nolock=$(new_flake nolock "")
+r="${work}/r-copy-nolock"
+run_in "${r}" --config "${cfg}" --no-scan update "${d_nolock}"
+if [[ $(cat "${r}/rc") == 0 && $(cat "${r}/files.log") == "flake.nix " && -f ${d_nolock}/flake.lock && -z $(ls -A "${r}/tmp") ]] \
+  && ! seen 'git add' "${r}/stdout"; then
+  ok "lock の無い flake は、写しで作った lock を元に置く (git の repo の外なら git の追跡に入れない)"
+else
+  ng "lock の無い flake は、写しで作った lock を元に置く (git の repo の外なら git の追跡に入れない)" "$(detail "${r}")"
+fi
+
+git_repo="${work}/git-repo"
+mkdir -p "${git_repo}/sub/nix"
+git -C "${git_repo}" -c init.defaultBranch=main init -q
+cp "${d_nolock}/flake.nix" "${git_repo}/sub/nix/flake.nix"
+git -C "${git_repo}" add sub/nix/flake.nix
+r="${work}/r-copy-git"
+run_in "${r}" --config "${cfg}" --no-scan update "${git_repo}/sub/nix"
+if [[ $(cat "${r}/rc") == 0 && $(git -C "${git_repo}" status --porcelain -- sub/nix/flake.lock) == " A sub/nix/flake.lock" ]] \
+  && seen 'git の追跡に入れました' "${r}/stdout"; then
+  ok "git の作業ツリーの中で新しく作った lock は git add --intent-to-add する"
+else
+  ng "git の作業ツリーの中で新しく作った lock は git add --intent-to-add する" \
+    "$(detail "${r}")
+--- git status
+$(git -C "${git_repo}" status --porcelain)"
+fi
+
+# 相対パスの input を持つ flake。$1: 名前、$2: その input の url
+new_relative_flake() {
+  local d="${work}/$1"
+  mkdir -p "${d}/local"
+  cat >"${d}/flake.nix" <<EOF
+{
+  inputs = {
+    nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
+    local = {
+      url = "$2";
+      flake = false;
+    };
+  };
+  outputs = _: { };
+}
+EOF
+  printf '%s\n' "$(lock "$(nixpkgs_node 4 "$(at 2026-10-17T00:00:00Z)")")" >"${d}/flake.lock"
+  (cd -- "${d}" && pwd -P)
+}
+for url in path:./local git+file:./local; do
+  d_rel=$(new_relative_flake "relative-${url%%:*}" "${url}")
+  r="${work}/r-relative-${url%%:*}"
+  run_in "${r}" --config "${cfg}" --no-scan update "${d_rel}"
+  if [[ $(cat "${r}/rc") == 0 ]] && seen "--flake ${d_rel} " "${r}/nix.log" && ! seen 'flake-lock-age.' "${r}/nix.log" \
+    && seen '相対パスの input (local)' "${r}/stdout"; then
+    ok "相対パスの input (${url}) を持つ flake は、写さずにその場のディレクトリを渡す"
+  else
+    ng "相対パスの input (${url}) を持つ flake は、写さずにその場のディレクトリを渡す" "$(detail "${r}")"
+  fi
+done
 
 echo
 echo "${pass} passed, ${fail} failed"

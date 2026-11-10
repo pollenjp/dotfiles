@@ -277,11 +277,20 @@
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
-          # (store は使わない。テストの nix の包みが --store dummy:// を付ける)
-          flake-lock-age-test = pkgs.runCommand "flake-lock-age-test" { nativeBuildInputs = [ pkgs.nix ]; } ''
-            bash ${./tests/flake-lock-age.test.sh} ${./scripts/flake-lock-age.sh}
-            touch $out
-          '';
+          # (store は使わない。テストの nix の包みが --store dummy:// を付ける)。新しく作った lock を git の追跡に
+          # 入れるケースのために git も足す
+          flake-lock-age-test =
+            pkgs.runCommand "flake-lock-age-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.nix
+                  pkgs.git
+                ];
+              }
+              ''
+                bash ${./tests/flake-lock-age.test.sh} ${./scripts/flake-lock-age.sh}
+                touch $out
+              '';
           # sbomnix の退き先を選ぶ順を確かめる。flake.lock を本物の nix eval で読み (上と同じく store は使わない)、
           # 前の pin を本物の git の履歴からたどるので、nix・git・jq (偽の nix build が lock を読む) を足して流す
           closure-scan-test =

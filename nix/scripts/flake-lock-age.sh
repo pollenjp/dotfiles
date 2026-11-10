@@ -88,6 +88,14 @@
 # 位置に置くことで作っている。whitelist のある flake ではゲート (新規 findings
 # で失敗)、無い flake (初回の lock など) では表示だけ。--no-scan で飛ばせる。
 #
+# `update` は nix flake update を、flake.nix と flake.lock だけを写した一時ディレクトリで
+# (path: で) 打ち、出来た flake.lock を戻す (nix flake update が読むのはこの 2 つだけ)。
+# 素のパスで渡すと、git の repo の中では nix が repo 全体 (追跡しているファイル。commit
+# していない変更も) を /nix/store へ写してから読み、作業ツリーが変わるたびに写しが増える。
+# 相対パスの input (path:./x など) を持つ flake だけは、写した先から辿れないのでその場で打つ。
+# 新しく作った lock は、git の作業ツリーの中なら git add --intent-to-add する (nix がその場で
+# 作るときと同じ。追跡していない lock は素のパスで読む nix に見えず、先端で作り直される)。
+#
 # `resolve` / `update` は、`--input <名前>` (くり返せる) でその input だけを選ぶ。
 # 例外を足したときに普段の pin を動かさずに済む。ただし lock に無い github の input は、
 # --input に無くても一緒に選ぶ (nix flake update は lock に無い input を先端で足すため)。
@@ -113,7 +121,8 @@
 # ## 依存
 #
 # bash 3.2 / coreutils / curl / nix。**jq は使わない** (jq は Nix が入れるものな
-# ので初回 switch 前には無い)。JSON と設定は nix 自身に読ませる。
+# ので初回 switch 前には無い)。JSON と設定は nix 自身に読ませる。git は新しく作った
+# lock を git の追跡に入れるときだけ使う (無ければ git add を促すだけ)。
 
 set -eu -o pipefail
 
@@ -201,6 +210,10 @@ usage() {
 
 ディレクトリを省くと、この script の隣 (<script>/../flake.nix) があればそこ、
 無ければカレントディレクトリを対象にする。複数渡せば順に処理する (設定も flake ごとに探す)。
+
+update は flake.nix と flake.lock だけを一時ディレクトリへ写して nix flake update し、
+flake.lock を戻す (git の repo の中の flake でも、repo を /nix/store へ写さない)。
+相対パスの input (path:./x など) を持つ flake だけは、その場で update する。
 
 ほかの repo の猶予と例外は、flake.nix の隣の release-age.nix に書く (nix run で呼んでも
 読む。書けるのは minimumReleaseAgeDays と exceptions.all)。
@@ -1330,8 +1343,109 @@ auto_scan() {
   fi
 }
 
+# update が nix flake update を打つ一時ディレクトリ (flake.nix と flake.lock の写しを置く)。途中で落ちても
+# (die・nix の失敗・Ctrl+C) 消す。
+lock_copies=()
+remove_lock_copies() {
+  local d
+  for d in ${lock_copies[@]+"${lock_copies[@]}"}; do
+    rm -rf -- "${d}"
+  done
+}
+trap remove_lock_copies EXIT
+
+# flake.nix の inputs のうち、相対パスを指すもの (path:./sub・path:../x・git+file:./x など) の名前を 1 行 1 件で
+# 出す。一時ディレクトリへ写した flake からは相対パスの先を辿れないので、そういう flake はその場で update する。
+# url の文字列は input_rows と同じく builtins.parseFlakeRef に解かせる (path:./x は { path = "./x"; type = "path"; }、
+# git+file:./x は { type = "git"; url = "file:./x"; })。$1: flake のディレクトリ (絶対パス)
+relative_inputs() {
+  nix eval --raw --impure --expr "
+    let
+      specs = (import \"$1/flake.nix\").inputs or { };
+      rel = s: builtins.isString s && s != \"\" && builtins.substring 0 1 s != \"/\";
+      relFile = u: builtins.isString u && builtins.substring 0 5 u == \"file:\" && rel (builtins.substring 5 (-1) u);
+      isRel = n:
+        let
+          spec = specs.\${n};
+          r =
+            if builtins.isString spec then builtins.parseFlakeRef spec
+            else if spec ? url then builtins.parseFlakeRef spec.url
+            else spec;
+        in
+        rel (r.path or \"\") || relFile (r.url or \"\");
+    in
+    builtins.concatStringsSep \"\n\" (builtins.filter isRel (builtins.attrNames specs))
+  "
+}
+
+# nix flake update を打つ。$1: --flake に渡す flake ref。input の名前と --override-input は update_names と
+# update_overrides に置いて渡す。
+#
+# --override-input は flake.nix を書き換えずに lock の pin だけを差し替える。`nix flake update` 経由なら lock へ
+# 書き込まれる (nix 2.34 で実測)。lock がまだ無ければここで作られる (対象外の input は nix が普通に解決する)。
+# flake.nix 側は追跡先を指したままなので、素で `nix flake update` を叩くと先端へ飛ぶ。そのための保険が check
+# (CI で回している)。
+update_names=()
+update_overrides=()
+run_flake_update() {
+  local args
+  args=(${update_names[@]+"${update_names[@]}"} --flake "$1" ${update_overrides[@]+"${update_overrides[@]}"})
+  printf '%s+ nix flake update %s%s\n' "${c_cyan}" "${args[*]}" "${c_reset}"
+  nix flake update "${args[@]}"
+}
+
+# 新しく作った flake.lock を、git の作業ツリーの中なら git の追跡に入れる (git add --intent-to-add)。素のパスで
+# 読む nix は追跡していない flake.lock を見ず、先端で lock を作り直す (遅延が黙って外れる)。その場で update して
+# いたときは nix 自身が同じことをしていた。git が無ければ促すだけ。$1: flake のディレクトリ (絶対パス)
+track_new_lock() {
+  local dir=$1
+  if ! command -v git &>/dev/null; then
+    note "flake.lock を新しく作りました。git の repo の中なら git add すること (git が PATH に無いので足していません)。"
+    return 0
+  fi
+  git -C "${dir}" rev-parse --is-inside-work-tree &>/dev/null || return 0
+  if git -C "${dir}" add --intent-to-add -- flake.lock; then
+    note "新しい flake.lock を git の追跡に入れました (git add --intent-to-add。commit は自分で)。"
+  else
+    warn "新しい flake.lock を git の追跡に入れられませんでした。git add ${dir}/flake.lock すること。"
+  fi
+}
+
+# nix flake update を、flake.nix と flake.lock だけを写した一時ディレクトリで (path: で) 打ち、出来た flake.lock を
+# 戻す。nix flake update が読むのはこの 2 つだけ。flake のディレクトリを素のパスで渡すと、git の repo の中では nix が
+# repo 全体 (追跡しているファイル。commit していない変更も) を /nix/store へ写してから読み、作業ツリーが変わるたびに
+# 写しが増える。path: でその場のディレクトリを渡すと、git を見ずにディレクトリの中身を全部写す (repo の root なら
+# .git や書き出しも)。写しのディレクトリの名前は flake のディレクトリと同じにする (打ったコマンドの行で、どの flake
+# かが分かる)。$1: flake のディレクトリ (絶対パス)
+update_in_copy() {
+  local abs=$1 root copy name fresh=0
+  name=${abs##*/}
+  root=$(mktemp -d "${TMPDIR:-/tmp}/flake-lock-age.XXXXXX")
+  lock_copies+=("${root}")
+  copy="${root}/${name:-flake}"
+  mkdir -- "${copy}"
+  cp -- "${abs}/flake.nix" "${copy}/flake.nix"
+  if [[ -f ${abs}/flake.lock ]]; then
+    cp -- "${abs}/flake.lock" "${copy}/flake.lock"
+  else
+    fresh=1
+  fi
+  note "flake.nix と flake.lock だけを一時ディレクトリへ写して update し、flake.lock を戻します (repo を /nix/store へ写さないため)。"
+  run_flake_update "path:${copy}"
+  [[ -f ${copy}/flake.lock ]] || die "nix flake update が flake.lock を書きませんでした: ${copy}/flake.lock"
+  # 中身が同じなら書き戻さない (nix もその場では書かない)。$(<…) は末尾の改行を落とすが、lock の差はそこに出ない
+  if [[ ${fresh} -eq 1 || $(<"${copy}/flake.lock") != "$(<"${abs}/flake.lock")" ]]; then
+    cp -- "${copy}/flake.lock" "${abs}/flake.lock"
+    note "flake.lock を戻しました: ${abs}/flake.lock"
+  fi
+  rm -rf -- "${root}"
+  if [[ ${fresh} -eq 1 ]]; then
+    track_new_lock "${abs}"
+  fi
+}
+
 cmd_update() {
-  local dir i args failed=0
+  local dir abs i rel failed=0
   for dir in "${flake_dirs[@]}"; do
     use_settings "${dir}"
     # 1 つ落ちても残りは更新する (複数の flake をまとめて上げる用)。
@@ -1339,24 +1453,22 @@ cmd_update() {
       failed=1
       continue
     }
-    # --override-input は flake.nix を書き換えずに lock の pin だけを差し替える。
-    # `nix flake update` 経由なら lock へ書き込まれる (nix 2.34 で実測)。lock が
-    # まだ無ければここで作られる (対象外の input は nix が普通に解決する)。
-    # flake.nix 側は追跡先を指したままなので、素で `nix flake update` を叩くと
-    # 先端へ飛ぶ。そのための保険が check (CI で回している)。
-    #
-    # flake.nix が git に追加されていないと nix 側が止まる (flake は追跡済み
-    # ファイルしか見ない)。その旨は nix が git add を促す形で出すのでここでは見ない。
-    args=()
+    update_names=()
+    update_overrides=()
     for ((i = 0; i < ${#resolved_names[@]}; i++)); do
-      args+=("${resolved_names[i]}")
+      update_names+=("${resolved_names[i]}")
+      update_overrides+=(--override-input "${resolved_names[i]}" "${resolved_urls[i]}")
     done
-    args+=(--flake "${dir}")
-    for ((i = 0; i < ${#resolved_names[@]}; i++)); do
-      args+=(--override-input "${resolved_names[i]}" "${resolved_urls[i]}")
-    done
-    printf '%s+ nix flake update %s%s\n' "${c_cyan}" "${args[*]}" "${c_reset}"
-    nix flake update "${args[@]}"
+    abs=$(abs_flake_dir "${dir}")
+    rel=$(relative_inputs "${abs}") || die "flake の input を読めませんでした: ${dir}"
+    if [[ -n ${rel} ]]; then
+      # その場で打つ。git の repo の中なら flake.nix が git に追加されていないと nix 側が止まる (git add を促す形で
+      # nix が出すのでここでは見ない)
+      note "相対パスの input (${rel//$'\n'/, }) があるので、写さずにその場で update します (git の repo の中なら repo 全体が /nix/store へ写ります)。"
+      run_flake_update "${abs}"
+    else
+      update_in_copy "${abs}"
+    fi
     auto_scan "${dir}" || failed=1
   done
   return "${failed}"
