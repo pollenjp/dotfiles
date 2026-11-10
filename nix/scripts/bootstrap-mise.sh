@@ -261,8 +261,9 @@ echo "==> cursor-agent (Cursor の CLI。役割分担の例外。dotfiles.cursor
 #
 #   1. claude と同じ遅延 (claude_age) で mise latest cursor-agent を引く (遅延の中なら何も出さずに 0 で終わる。版の日付は
 #      日までなので、遅延はその日の終わりから数える)
-#   2. 出なければ今の宣言の版、宣言も無ければ入っている一番新しい版 (前の作りで入れた版もここで拾う)
-#   3. どれも無ければ宣言を書かずに警告する (次の --update で入る)
+#   2. 出なければ今の宣言の版 (版の形のときだけ。手で latest に書き換えたものは使わない)、それも無ければ入っている
+#      一番新しい版 (前の作りで入れた版もここで拾う)
+#   3. どれも無ければ宣言を書かずに警告する (版を指していない宣言が残っていれば消す。次の --update で入る)
 #   4. 雛形 (nix/files/mise/conf.d/cursor-agent.toml) の @version@ を版に替えて宣言に書き、mise install cursor-agent を
 #      打つ (版を指すので遅延の env は付けない。postinstall も宣言から効く)。落ちたら宣言を前の中身に戻し (無かったら
 #      消し)、警告する
@@ -276,9 +277,9 @@ echo "==> cursor-agent (Cursor の CLI。役割分担の例外。dotfiles.cursor
 # 後ろのこの宣言が勝つ。
 #
 # ここで書いた宣言は 1 行目の印 (cursor_mark) で見分け、印の無いファイル・symlink は手で置いたものとして消さない・
-# 書き換えない。off なら印つきの宣言を消し、入っている版は消さない (週 1 回の掃除の mise prune が消す。今すぐなら
-# mise uninstall --all cursor-agent)。状態ファイルが無い・形が違う・jq が無いときは、警告して宣言に触らない。どの場合も
-# ここでは止めない (止めると後ろの bootstrap が走らない)。
+# 書き換えない。off なら印つきの宣言を消し、入っている版は消さない (dotfiles.cleanup.enable のマシンなら週 1 回の掃除の
+# mise prune が消す。今すぐなら mise uninstall --all cursor-agent)。状態ファイルが無い・形が違う・jq が無いときは、警告して
+# 宣言に触らない。どの場合もここでは止めない (止めると後ろの bootstrap が走らない)。
 cursor_state="${HOME}/.local/state/dotfiles/cursor-agent.json"
 cursor_decl="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/conf.d/dotfiles-cursor-agent.toml"
 # ここで書いた宣言の 1 行目の頭。見るのは頭だけで、後ろの文言は変えてよい
@@ -307,8 +308,10 @@ cursor_decl_version() {
   return 0
 }
 
-# 版の形 (TOML の文字列を壊さない形だけを通す)
-cursor_version_ok() { [[ $1 =~ ^[0-9A-Za-z][0-9A-Za-z._+-]*$ ]]; }
+# 版の形 (Cursor の版は 2026.11.05-86047df のように数字で始まる)。TOML の文字列を壊す文字と、latest・lts のような語を
+# 通さない (印つきの宣言を手で latest に書き換えられても、それを版として書き戻さない。latest の宣言では素の mise install が
+# 遅延で落ちる)
+cursor_version_ok() { [[ $1 =~ ^[0-9][0-9A-Za-z._+-]*$ ]]; }
 
 # 宣言の雛形のパス (この script のいる checkout の nix/files/mise/conf.d/cursor-agent.toml)
 cursor_template() {
@@ -356,7 +359,7 @@ cursor_write() {
 
 # on: 版を決めて宣言に書き、入れる (上の「版の決め方」)
 cursor_on() {
-  local had=0 changed=0 prev="" cur="" before="宣言が無かった" latest="" target="" from="" text="" back=""
+  local had=0 changed=0 prev="" cur="" before="宣言が無かった" latest="" target="" from="" text="" back="" dropped=""
   if cursor_decl_exists && ! cursor_decl_is_ours; then
     warn "cursor-agent の宣言の場所に、setup が書いたものでないファイルがあります: ${cursor_decl}" \
       "1 行目が印 (${cursor_mark}) で始まらない・symlink なので書き換えず、cursor-agent も入れません (mise はそのファイルの宣言を使います)。" \
@@ -377,15 +380,27 @@ cursor_on() {
   if [[ -n ${latest} ]]; then
     target=${latest}
     from="遅延 (${claude_age}) を過ぎた一番新しい版"
-  elif [[ -n ${cur} ]]; then
+  elif [[ -n ${cur} ]] && cursor_version_ok "${cur}"; then
     target=${cur}
     from="遅延 (${claude_age}) を過ぎた版が無いので、今の宣言の版"
-  elif target=$(mise latest --installed cursor-agent) && [[ -n ${target} ]]; then
-    from="遅延 (${claude_age}) を過ぎた版も宣言も無いので、入っている一番新しい版"
   else
-    warn "cursor-agent の版を決められませんでした: 遅延 (${claude_age}) を過ぎた版も、宣言の版も、入っている版もありません。" \
-      "宣言は書かず、cursor-agent は入れません。出てから ${claude_age} を過ぎた後の ~/dotfiles/setup --update で入ります。"
-    return 0
+    # 宣言の版が版の形でない (手で latest に書き換えたなど) ときは、その版を使わずに入っている版へ進む
+    if [[ -n ${cur} ]]; then
+      echo "  今の宣言の版 (${cur}) は版の形でないので使いません。入っている一番新しい版で書き直します"
+    fi
+    if target=$(mise latest --installed cursor-agent) && [[ -n ${target} ]]; then
+      from="遅延 (${claude_age}) を過ぎた版も、版を指した宣言も無いので、入っている一番新しい版"
+    else
+      # ここに来て宣言があるなら、その宣言は版を指していない。残すと素の mise install が遅延で落ちうる (入っている版も
+      # 無いので、消しても使える cursor-agent は減らない)
+      dropped=""
+      if ((had)) && rm -f -- "${cursor_decl}"; then
+        dropped="版を指していない宣言 (${before}) は消しました。"
+      fi
+      warn "cursor-agent の版を決められませんでした: 遅延 (${claude_age}) を過ぎた版も、版を指した宣言も、入っている版もありません。" \
+        "${dropped}宣言は書かず、cursor-agent は入れません。出てから ${claude_age} を過ぎた後の ~/dotfiles/setup --update で入ります。"
+      return 0
+    fi
   fi
   if ! cursor_version_ok "${target}"; then
     warn "cursor-agent の版の形が違うので使いません: ${target} (${from})" \
@@ -444,7 +459,7 @@ cursor_off() {
     return 0
   fi
   if left=$(mise latest --installed cursor-agent 2>/dev/null) && [[ -n ${left} ]]; then
-    echo "  入っている cursor-agent の版が残っています (一番新しいもの: ${left})。どの設定も使っていなければ、週 1 回の掃除 (mise prune) で消えます。今すぐ消すなら: mise uninstall --all cursor-agent"
+    echo "  入っている cursor-agent の版が残っています (一番新しいもの: ${left})。dotfiles.cleanup.enable (既定 true) のマシンなら、どの設定も使っていなければ週 1 回の掃除 (mise prune) で消えます。今すぐ消すなら: mise uninstall --all cursor-agent"
   fi
   return 0
 }

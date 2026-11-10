@@ -38,12 +38,16 @@
 #   - on で install が落ちたら、宣言を前の中身に戻し (前が無ければ消し)、警告する
 #   - on で宣言の場所に手で置いたもの (印の無いファイル・印のあるファイルへの symlink・壊れた symlink) があれば、触らずに
 #     警告し、版も引かず install も打たない
-#   - on で mise latest が落ちても、今の宣言の版で入れる (警告しない)。形の合わない版は使わず、宣言を書かずに警告する
+#   - on で mise latest が落ちても、今の宣言の版で入れる (警告しない)。形の合わない版 (TOML を壊す文字を含む版・数字で
+#     始まらない語の latest) は使わず、宣言を書かずに警告する
+#   - on で宣言の版が数字で始まらない語 (手で書いた latest) なら使わず、入っている一番新しい版で書き直す (警告しない)。
+#     入っている版も無ければ、版を指していないその宣言を消して警告する (どちらでも latest の宣言を残さない)
 #   - on で雛形が無い・形が違う (version = "@version@" の行が無い) ときは、宣言を書かずに警告する
 #   - off (enable が false) なら cursor-agent を入れない。印つきの宣言は消し、手で置いたものは残す (どちらも警告しない)。
-#     手で置いたものが無く、入っている版があれば、消し方 (mise uninstall --all cursor-agent) を 1 行で知らせる
-#   - cursor-agent.json が無い・形が違う ({"enable":"yes"}・{}・[]・空・JSON が 2 つ)・jq が無いときは、警告して宣言に触らず、cursor-agent の
-#     mise は打たない
+#     手で置いたものが無く、入っている版があれば、消し方 (mise uninstall --all cursor-agent) と、週 1 回の掃除で消えるのは
+#     dotfiles.cleanup.enable のときだけであることを 1 行で知らせる
+#   - cursor-agent.json が無い・形が違う ({"enable":"yes"}・{}・[]・空・JSON が 2 つ)・jq が無いときは、警告して宣言に
+#     触らず、cursor-agent の mise は打たない
 #   - cursor-agent の手順で何が起きても exit 0 で最後まで流れる (後ろの bootstrap を止めない)
 #   - ヘッダの `# mise-tools:` (setup.sh が読み、残りの手作業の手順 5 で「setup が書く名前」として数えない) に、
 #     mise use -g で ~/.config/mise/config.toml の [tools] に書く名前 (版を除く) を過不足なく並べている。足りないと
@@ -518,13 +522,40 @@ else
   ng "on: mise latest が落ちる" "$(detail "${h}")"
 fi
 
-h=$(new_home cursor-bad-version "$(state 9d)")
-FAKE_MISE_LATEST='2026.11.05"x' run "${h}" 2026-11-10T03:00:00Z
-if finished "${h}" && [[ ! -e $(decl "${h}") ]] && ! grep -Fq 'install cursor-agent' "${h}/mise.log" \
-  && grep -Fq '形が違う' "${h}/warnings"; then
-  ok "on: 形の合わない版は使わず、宣言を書かずに警告する (exit 0)"
+# 形の合わない版: TOML を壊す文字を含む版と、数字で始まらない語 (latest の宣言に戻さない)
+for bad in '2026.11.05"x' latest; do
+  h=$(new_home "cursor-bad-version-$((pass + fail))" "$(state 9d)")
+  FAKE_MISE_LATEST=${bad} run "${h}" 2026-11-10T03:00:00Z
+  if finished "${h}" && [[ ! -e $(decl "${h}") ]] && ! grep -Fq 'install cursor-agent' "${h}/mise.log" \
+    && grep -Fq '形が違う' "${h}/warnings"; then
+    ok "on: 形の合わない版 (${bad}) は使わず、宣言を書かずに警告する (exit 0)"
+  else
+    ng "on: 形の合わない版 (${bad})" "$(detail "${h}")"
+  fi
+done
+
+# 印つきの宣言の版を手で latest にしたとき: その版は使わず、入っている版で書き直す。入っている版も無ければ、版を指して
+# いない宣言を消す (どちらでも latest の宣言を残さない)
+h=$(new_home cursor-hand-latest "$(state 9d)")
+place_ours "${h}" latest
+FAKE_MISE_LATEST='' FAKE_MISE_INSTALLED=2026.11.05-86047df run "${h}" 2026-11-10T03:00:00Z
+d=$(decl "${h}")
+if finished "${h}" && marked "${d}" && [[ $(decl_version "${d}") == 2026.11.05-86047df ]] \
+  && grep -Fxq '|latest --installed cursor-agent' "${h}/mise.log" && grep -Fxq '|install cursor-agent' "${h}/mise.log" \
+  && grep -Fq '版の形でない' "${h}/out" && no_warning "${h}"; then
+  ok "on: 宣言の版が数字で始まらない語 (手で書いた latest) なら使わず、入っている版で書き直す (警告しない)"
 else
-  ng "on: 形の合わない版" "$(detail "${h}")"
+  ng "on: 宣言の版が latest (入っている版あり)" "$(detail "${h}")"
+fi
+
+h=$(new_home cursor-hand-latest-none "$(state 9d)")
+place_ours "${h}" latest
+FAKE_MISE_LATEST='' FAKE_MISE_INSTALLED='' run "${h}" 2026-11-10T03:00:00Z
+if finished "${h}" && [[ ! -e $(decl "${h}") ]] && ! grep -Fq 'install cursor-agent' "${h}/mise.log" \
+  && grep -Fq '版を決められませんでした' "${h}/warnings" && grep -Fq '消しました' "${h}/warnings"; then
+  ok "on: 宣言の版が latest で入っている版も無ければ、版を指していない宣言を消して警告する (exit 0)"
+else
+  ng "on: 宣言の版が latest (入っている版なし)" "$(detail "${h}")"
 fi
 
 for kind in missing latest; do
@@ -568,8 +599,8 @@ fi
 h=$(new_home cursor-off-left "$(state 9d)" off)
 FAKE_MISE_INSTALLED=2026.11.05-86047df run "${h}" 2026-11-10T03:00:00Z
 if finished "${h}" && grep -Fq 'mise uninstall --all cursor-agent' "${h}/out" && grep -Fq '2026.11.05-86047df' "${h}/out" \
-  && ! grep -Fq 'install cursor-agent' "${h}/mise.log" && no_warning "${h}"; then
-  ok "off: 入っている版が残っていれば、消し方 (mise uninstall --all cursor-agent) を 1 行で知らせる (警告しない)"
+  && grep -Fq 'dotfiles.cleanup.enable' "${h}/out" && ! grep -Fq 'install cursor-agent' "${h}/mise.log" && no_warning "${h}"; then
+  ok "off: 入っている版が残っていれば、消し方 (mise uninstall --all cursor-agent) と、掃除で消えるのは dotfiles.cleanup.enable のときだけだと 1 行で知らせる (警告しない)"
 else
   ng "off: 入っている版が残っている" "$(detail "${h}")"
 fi
