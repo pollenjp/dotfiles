@@ -452,6 +452,22 @@
                   ${lib.getExe (pkgs.callPackage ./pkgs/pjp-pr-diff { })}
                 touch $out
               '';
+          # .env の op:// の参照を 1 回の op で解いて program を起こす pjp-op-env (pkgs/pjp-op-env) を、偽の op・vault・program で
+          # 流す。後半は本物の op.sh (pkgs/pjp-op) を偽の powershell.exe・op.exe で通し、lock に flock (util-linux) を使う。
+          # 値が execve の argv に載らないことを strace で見る
+          pjp-op-env-test =
+            pkgs.runCommand "pjp-op-env-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.util-linux
+                  pkgs.strace
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-env.test.sh} ${./pkgs/pjp-op-env/pjp-op-env.sh} ${./pkgs/pjp-op/op.sh}
+                touch $out
+              '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
           # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
@@ -640,6 +656,14 @@
               system
               ;
           };
+          op-env-state = import ./tests/op-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           windows-files-state = import ./tests/windows-files.nix {
             inherit
               lib
@@ -786,6 +810,13 @@
           #
           #   nix run ~/ghq/github.com/pollenjp/dotfiles/nix#pjp-pr-diff
           pjp-pr-diff = pkgs.callPackage ./pkgs/pjp-pr-diff { };
+
+          # .env の op:// の参照を 1 回の op で解き、値を環境変数に入れて program を起こす。home には home/modules/op-env.nix が
+          # 1Password を使うマシンに入れる。switch せずに試すなら (参照があると op の承認の画面が出る):
+          #
+          #   nix run ./nix#pjp-op-env -- --dry-run
+          #   nix run ./nix#pjp-op-env -- --reason "<なぜ値を読むか>" -- <program>
+          pjp-op-env = pkgs.callPackage ./pkgs/pjp-op-env { };
 
           # GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)。
           # home には modules/packages.nix が入れる。checks の git-gh-test もこれを流す。
