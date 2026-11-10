@@ -23,6 +23,10 @@
 #       }
 #     ];
 #   }
+#
+# src はふつう win/ からの相対パス。base = "nix" の表だけ、repo 直下の nix/ からの相対パスにする (Windows と Linux の
+# home-manager が同じファイルを読むとき。home-manager からは nix/ しか見えないので、1 か所は nix/ に置く)。nix/ は winDir の
+# 隣 (同じ repo) として見る。
 { winDir, windowsHome }:
 
 let
@@ -85,9 +89,18 @@ let
           "src"
           "dst"
           "hint"
+          "base"
         ]
       ) (builtins.attrNames f);
-      srcPath = /. + "${winDir}/${f.src}";
+      base = f.base or "win";
+      # winDir の末尾に / があっても、隣の nix/ を指す (dirOf "/r/win/" は "/r/win" になるので落としてから)
+      trimmedWinDir =
+        if builtins.match ".*/" winDir != null then
+          builtins.substring 0 (builtins.stringLength winDir - 1) winDir
+        else
+          winDir;
+      baseDir = if base == "nix" then "${dirOf trimmedWinDir}/nix" else winDir;
+      srcPath = /. + "${baseDir}/${f.src}";
       m = builtins.match "(%[A-Z]+%)/(.*)" f.dst;
       root = builtins.elemAt m 0;
       rest = builtins.elemAt m 1;
@@ -95,21 +108,28 @@ let
     if !builtins.isAttrs f then
       fail "${at}: [[files]] の表で書いてください"
     else if unknown != [ ] then
-      fail "${at}: 知らないキーがあります: ${concat unknown} (書けるのは src / dst / hint)"
+      fail "${at}: 知らないキーがあります: ${concat unknown} (書けるのは src / dst / hint / base)"
     else if !(f ? src && f ? dst) then
       fail "${at}: src と dst は必須です"
     else if
-      !(builtins.isString f.src && builtins.isString f.dst && builtins.isString (f.hint or ""))
+      !(
+        builtins.isString f.src
+        && builtins.isString f.dst
+        && builtins.isString (f.hint or "")
+        && builtins.isString (f.base or "")
+      )
     then
-      fail "${at}: src / dst / hint は文字列で書いてください"
+      fail "${at}: src / dst / hint / base は文字列で書いてください"
+    else if base != "win" && base != "nix" then
+      fail "${at}: base は \"win\" (既定) か \"nix\" で書いてください: ${base}"
     else if hasBackslash f.src then
       fail "${at}: src に \\ は書けません (区切りは /): ${f.src}"
     else if isAbs f.src then
-      fail "${at}: src は win/ からの相対パスで書いてください: ${f.src}"
+      fail "${at}: src は ${base}/ からの相対パスで書いてください: ${f.src}"
     else if !cleanSegments f.src then
       fail "${at}: src に空の要素・.・.. は書けません: ${f.src}"
     else if !(builtins.pathExists srcPath && builtins.readFileType srcPath == "regular") then
-      fail "${at}: src が見つからないか、通常のファイルではありません: win/${f.src}"
+      fail "${at}: src が見つからないか、通常のファイルではありません: ${base}/${f.src}"
     else if hasBackslash f.dst then
       fail "${at}: dst に \\ は書けません (区切りは /): ${f.dst}"
     else if m == null || !(roots ? ${root}) then
@@ -118,8 +138,8 @@ let
       fail "${at}: dst に空の要素・.・.. は書けません: ${f.dst}"
     else
       {
-        src = "${winDir}/${f.src}";
-        repoPath = "win/${f.src}";
+        src = "${baseDir}/${f.src}";
+        repoPath = "${base}/${f.src}";
         dst = "${roots.${root}}/${rest}";
         hint = f.hint or null;
       };

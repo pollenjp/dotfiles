@@ -25,6 +25,7 @@
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #   dotfiles.ntn.keyring                         ntn (Notion CLI) の config.json の keyring (null なら触らない。false で token を auth.json に置く)
+#   dotfiles.herdrCore.enable                    herdr-core (hc) を入れるか (既定は Linux なら true。herdr-app が SSH でつなぐ machine の側に要る)
 #   dotfiles.osCaBundle.enable                   自前の証明書の束を持つツールを、環境変数で OS の信頼ストアに寄せるか (Linux)
 #   dotfiles.osCaBundle.requestsCaBundle.enable  そのうち REQUESTS_CA_BUNDLE も入れるか
 #
@@ -510,6 +511,28 @@ in
 
       使うマシンのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp。mkHome の
       引数ではない) に書く。書き方は nix/README.md の「ntn (Notion CLI) の token をファイルに置く (keyring)」。
+    '';
+  };
+
+  options.dotfiles.herdrCore.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = pkgs.stdenv.hostPlatform.isLinux;
+    defaultText = lib.literalExpression "pkgs.stdenv.hostPlatform.isLinux";
+    example = false;
+    description = ''
+      herdr-core (hc) を入れるか (home/modules/herdr-core.nix)。Linux のホストだけで、既定は Linux なら true。
+
+      herdr-app (Windows・macOS の desktop app) が SSH でつなぐ machine は、その machine の herdr-core が terminal を
+      持つので、server になりうる Linux のホストには herdr-core が要る。版は Windows の herdr-core と同じ
+      (nix/pkgs/herdr-core/releases.json) で、同じ版ならつなぐときに写し直しを聞かれない。
+
+      `herdr-core` と `hc` を home.packages に入れ、`~/.local/bin/herdr-core`・`~/.local/bin/hc` も同じ binary への
+      リンクにする (remote の herdr-core の探し先の 2 つ目。非対話の SSH の PATH に nix の profile が入らないホストのため)。
+      前に `hc machine add --install` などで写した `~/.local/bin/herdr-core`・`hc` は、リンクに置き換わる。
+      store の core は `hc update` が「nix のもの」として断る。このホストへは `hc machine update` を打たず、版は
+      releases.json を上げる PR で上げる (nix/README.md の「herdr-core (hc) を Nix で入れる」)。
+
+      入れないホストは、そのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
     '';
   };
 

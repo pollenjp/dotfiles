@@ -797,6 +797,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
+| `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -913,6 +914,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
+| 6.10.1 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-type-clipboard.sh` | `bootstrap-windows-type-clipboard` | Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる（`wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。無ければ GitHub の Release から入れる。入れ替えはしない。[`win/README.md`](../win/README.md#type-clipboard)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
@@ -928,7 +930,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 #### 新しい WSL の PC
 
 Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh のログインも無い。そのうちに Windows のアプリ
-(PowerToys・Google 日本語入力・herdr・OpenSSH) まで入れられるよう、ローカル flake に初期用のホスト `initial` を書いて当てる。
+(PowerToys・Google 日本語入力・herdr・herdr-app・OpenSSH) まで入れられるよう、ローカル flake に初期用のホスト `initial` を書いて当てる。
 `initial` は dotfiles-private に登録するまでの踏み台で、登録したら外す (登録しない PC は [`tmp`](#登録簿に載せずにマシンを足す) を使う。
 [ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
 
@@ -1272,6 +1274,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 | `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
+| `dotfiles.herdrCore.enable`（`modules`） | Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -1585,6 +1588,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
+| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`~/.local/bin` のものは同じ binary へのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` | `nix/home/modules/wsl-mtu-guard.nix` (生成。`wsl.mtuGuard.enable` のマシンだけ。`/etc` へは setup の手順が入れる。[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)) |
@@ -1636,6 +1640,9 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
 ./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
+./nix/scripts/bootstrap-windows-herdr-app.sh        # herdr-app と herdr-core を固定した版とフィードに揃える部分だけ（--apply は確かめずに揃える）
+./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
+./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
 ./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足す部分だけ（--dry-run / --force / --import <名前> / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
@@ -1666,6 +1673,12 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   版を固定し、ずれは ⚠ で知らせるだけ (上げるのは手で打つ。UAC の確認が出る)。PowerToys は版を固定せず、91 が
   Keyboard Manager と自動起動がオフならオンにして起動し直す
   （[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)、[ADR 017](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/017_win_apps_winget_20261012T115007JST/README.md)）
+- herdr-app (herdr の desktop app) と herdr-core は winget に無いので、`bootstrap-windows-herdr-app.sh` (order 97) が、配った
+  `Install-HerdrApp.ps1` を `pwsh.exe` で呼び、dotfiles が固定した版を公式の install.ps1 と同じ置き場所に入れる (遠くの script は流さない。
+  sha256 と署名を確かめる)。app と core は自分で上がるので、取得元 (`HERDR_RELEASES_URL`) を固定した版だけを載せた手元のフィードに向け、
+  固定した版を上げる PR の後の setup がフィードを書き直す。版と sha256 は `nix/pkgs/herdr-core/releases.json` (manifest の `base = "nix"` で
+  `herdr-releases.json` として配る。Linux のホストの herdr-core も同じ版で入る。[後述](#herdr-core-hc-を-nix-で入れる))。外すのは人が PowerShell で
+  `Install-HerdrApp -Uninstall` を打つときだけ（[`win/README.md`](../win/README.md#herdr-app)、[ADR 048](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/048_win_herdr_app_official_layout_20261109T230034JST/README.md)）
 - FancyZones の設定は持つキー (`win/powertoys/fancyzones/managed.json`) だけを、カスタムレイアウト (`custom-layouts.json`) はレイアウトごとに、
   `bootstrap-windows-fancyzones.sh` (order 92) が書く。どちらも manifest では配らない。`settings.json` は PowerToys が全部のキーを書くので
   ファイルごとは配らず、設定画面で変えていても dotfiles の値へ戻す (衝突で止めない)。`custom-layouts.json` は PC のエディターで作ったレイアウトも
@@ -4734,6 +4747,66 @@ store の binary は書き換えられないので、端末で `ntn update` を�
 cloud の VM は home-manager を通らないので、ntn は環境の setup script の install script で入れる（[前述](#環境を作る)。
 版は固定されず、その時の最新）。
 
+## herdr-core (hc) を Nix で入れる
+
+herdr-app (herdr の desktop app) は、SSH でつないだ machine (server) の terminal を、その machine の herdr-core に持たせる。手元の core は
+SSH で remote の `herdr-core connect` を起動し、remote は非対話の sh で `p=$(command -v herdr-core) || p=$HOME/.local/bin/herdr-core` を探す
+(herdr-core の `crates/herdr-core/src/machines.rs`)。server になりうる Linux のホストに herdr-core を入れるため、`home/modules/herdr-core.nix` が
+既定で Linux の全ホストに入れる (`dotfiles.herdrCore.enable`。入れないホストは、そのホストの modules で false にする。macOS には入れない)。
+Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`](../win/README.md#herdr-app))。
+
+- 公式の Linux 版 (`https://releases.herdr.dev/core/<版>/herdr-core-linux-<arch>.tar.gz`。static-pie の単体の binary) を、
+  `pkgs/herdr-core/releases.json` の版と sha256 で落とす (`pkgs/herdr-core/`)。nixpkgs の herdr-core は、dotfiles の nixpkgs の固定にまだ無く、
+  版も Windows とずれるので使わない
+- 版は Windows の herdr-core と同じ (同じ `releases.json`。Windows へは manifest の `base = "nix"` で `herdr-releases.json` として配る)。
+  同じ版なら、Windows の herdr-app・hc が machine としてつなぐときに、写し直しを聞かれない
+- `herdr-core` と `hc` を home.packages に入れ、`~/.local/bin/herdr-core`・`~/.local/bin/hc` も同じ binary へのリンクにする
+  ([下](#非対話の-ssh-から見つかるか))。前に `hc machine add --install` などで写したものは、リンクに置き換わる (force。home-manager は
+  中身が同じふつうのファイルを置き換えないので、リンクを張る前に activation が消す)。古い写しが残ると、PATH で `~/.local/bin` が nix の
+  profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる。同じ版の写しでも、store の外の書けるファイルのままだと、そこから
+  打つ `hc update` が nix のものとして断られず、公式の最新へ上がる (Linux には取得元のフィードが無い)
+- switch せずに試すなら:
+
+  ```sh
+  nix run ./nix#herdr-core -- --version   # hc <固定した版>
+  ```
+
+### 非対話の SSH から見つかるか
+
+remote の探し先の 1 つ目 (`command -v herdr-core`) は、非対話の SSH の PATH に nix の profile が入るかで決まる。
+
+- multi-user の Nix の Ubuntu (今の WSL の PC など): installer が `/etc/bash.bashrc` の先頭に `nix-daemon.sh` を読む行を足し、Ubuntu の bash は
+  SSH から起こされると (`SSH_CLIENT` がある) それを読むので、`~/.nix-profile/bin` が PATH に入る (2026-11-10 に、sshd が渡す環境を真似た
+  `bash -c` で確かめた)
+- single-user の Nix は `~/.profile` にしか足さず、home-manager の `~/.bashrc` は先頭で非対話を返すので、入らない
+
+どちらでも見つかるよう、2 つ目の `~/.local/bin/herdr-core` もリンクにしている (実体は store の binary)。
+
+### hc update と hc machine update を打たない
+
+- store の core は、`hc update` が「nix のもの」として断る (`… belongs to nix`・`update it in your Nix configuration`)。実行ファイルの実体
+  (`~/.local/bin` のリンクもたどる) が `/nix/store/` の下にあるため (herdr-core の `crates/herdr-core/src/client.rs` の `manager_of`)
+- dotfiles が入れたホストへ、ほかの machine から `hc machine update` (と herdr-app の machine の更新) を打たない。`~/.local/bin/herdr-core` を
+  落とした binary に置き換える (次の switch が、同じ版でもリンクに戻す)
+- 版は `pkgs/herdr-core/releases.json` を上げる PR で、Windows と一緒に上げる ([`win/README.md`](../win/README.md#固定した版を上げる))。merge の後に
+  各マシンで `~/dotfiles/setup --update` (Linux は home-manager の switch で、Windows は bootstrap が揃える)。上げた版と古い版の machine が
+  混ざると、つなぐときに写し直しを聞かれる (too old to talk to) ので、続けて上げる
+
+### dotfiles を当てないホスト
+
+dotfiles の home-manager を当てない Linux のホストへは、Windows の herdr-app・hc が machine を足すときに入れる (`~/.local/bin/herdr-core`)。
+Windows のフィード (`HERDR_RELEASES_URL`) の core の manifest には Linux (x86_64・aarch64) の target も載せているので、同じ版のその target の
+build を公式から落とし、固定した sha256 で確かめる (Linux の hc が同じフィードを読んで、sha256 が合わなければ断ることを確かめた)。
+Linux の hc から別の CPU の Linux (x86_64 と aarch64) へ入れるときは、Linux に取得元のフィードが無いので、公式の版つきの manifest の sha256 を
+使う (版は同じでも、dotfiles が固定した値は通らない)。macOS へは入れない (フィードに macOS の target を載せていない)。
+
+### 成果物を落とせないとき
+
+Linux の switch は、herdr-core の成果物を releases.herdr.dev から落とす (cache.nixos.org には無い)。その store path を持っていないホストでは、
+落とせない・sha256 が合わない (公開の後で差し替えられた) と switch が丸ごと落ちる。急いで setup を通すなら、そのホストで
+`dotfiles.herdrCore.enable = false` にする (表は[前述](#足したホストに書く値)。差し替えの扱いは
+[`win/README.md`「固定した版の成果物が変わったとき」](../win/README.md#固定した版の成果物が変わったとき))。
+
 ## CI
 
 `.github/workflows/nix.yml` が、main への push と PR で走る（`nix/**`・`win/**`・workflow 自身が変わったときだけ）。
@@ -4757,7 +4830,11 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 
 Windows の winget で固定した版 (OpenSSH・herdr・Google 日本語入力) が winget の最新に追いついているかは、別の
 workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめる (`check-winget-version.sh`。
-[`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。
+[`win/README.md`](../win/README.md#winget-の新しい版を確かめる))。winget に無い herdr-app を入れる `Install-HerdrApp.ps1` が写した
+公式の install.ps1 が変わっていないかと、固定した版の成果物 (app の Windows、core の Windows と Linux の 2 つ) が変わっていないか・7 日たった
+新しい版があるかは、別の workflow `.github/workflows/herdr-app-installers.yml` が週 1 回と PR で確かめる (`check-herdr-app-installers.sh`・
+`check-herdr-app-version.sh`。[`win/README.md`](../win/README.md#固定した版を上げる))。Linux の herdr-core の package の build
+(固定した sha256 で落とし、`hc --version` を版と照らす) は、`check` の `herdr-core-test` が見る ([前述](#herdr-core-hc-を-nix-で入れる))。
 
 ## 検証
 

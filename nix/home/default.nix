@@ -28,6 +28,7 @@
     ./modules/cleanup.nix
     ./modules/mise-release-age.nix
     ./modules/ntn.nix
+    ./modules/herdr-core.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。

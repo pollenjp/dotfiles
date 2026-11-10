@@ -1,9 +1,11 @@
 # Windows 側へ配るファイル。WSL の nix/scripts/bootstrap-windows-files.sh が
 # /mnt/c へコピーする (~/dotfiles/setup --update で走る)。書き方は README.md。
 #
-#   src   win/ からの相対パス
+#   src   win/ からの相対パス (base = "nix" なら repo 直下の nix/ からの相対パス)
 #   dst   Windows 側の置き先。%USERPROFILE% / %APPDATA% / %LOCALAPPDATA% のどれかで始める
 #   hint  置き先を書き換えたときに出す文 (任意)
+#   base  src の起点。"win" (既定) か "nix" (Linux の home-manager も同じファイルを読むときだけ。home-manager からは
+#         nix/ しか見えない)
 
 [[files]]
 src = "orca/keybindings.json"
@@ -29,6 +31,19 @@ hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版と�
 src = "herdr/Install-Herdr.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
 hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+
+[[files]]
+src = "herdr-app/Install-HerdrApp.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-HerdrApp.ps1"
+hint = "PowerShell で Install-HerdrApp -Check を打つと、herdr-app と herdr-core が固定した版・取得元 (手元のフィード) どおりかが分かる (setup --update でも確かめ、揃っていなければ揃える)。外すのは Install-HerdrApp -Uninstall"
+
+# herdr-app と herdr-core の固定した版と sha256。Install-HerdrApp.ps1 が隣のこのファイルを読む。Linux の home-manager
+# (nix/pkgs/herdr-core) も同じファイルを読むので、nix/ に置いて base = "nix" で配る
+[[files]]
+base = "nix"
+src = "pkgs/herdr-core/releases.json"
+dst = "%USERPROFILE%/.config/powershell/herdr-releases.json"
+hint = "Install-HerdrApp.ps1 が読む固定した版。setup --update なら続く bootstrap-windows-herdr-app.sh が、その版とフィードに揃える (手で配ったなら PowerShell で Install-HerdrApp)"
 
 [[files]]
 src = "powertoys/keyboard-manager/default.json"

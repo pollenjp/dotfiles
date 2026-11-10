@@ -30,6 +30,8 @@
 #   nix-instantiate で通して、置き先を解決した計画 (JSON) にする。home-manager の評価
 #   からは win/ が見えない (ローカル flake は本体を path:<repo>/nix で読む) ので、
 #   ここで読む。配るのは working tree の中身で、commit していない変更も配られる。
+#   manifest の base = "nix" の表は、win/ ではなく repo 直下の nix/ のファイルを配る (Linux の
+#   home-manager も読むファイル。今は herdr の固定した版の nix/pkgs/herdr-core/releases.json)。
 #
 # ## 何をするか
 #

@@ -1,0 +1,9 @@
+# herdr-app と herdr-core の公式の install.ps1 の sha256。Install-HerdrApp.ps1 は、この中身と同じ置き場所・手順を踏む。
+# nix/scripts/check-herdr-app-installers.sh (GitHub Actions の herdr-app-installers が週 1 回と PR で流す) が URL から
+# 落として比べ、違えば落ちて知らせる。変わったら、差分 (3 列目の履歴) を読んで Install-HerdrApp.ps1 を合わせてから、
+# ここの sha256 を書き換える (win/README.md の「公式の install.ps1 が変わったとき」)。合わせることが無くても書き換える。
+# このファイルは manifest に無いので Windows へは配らない。
+#
+# 1 行に 1 つ、空白で区切って「sha256  落とす URL  中身の履歴 (差分を読む所)」。# で始まる行と空行は読まない。
+c973f34ec58fff5448d639da48f7a0a97a0cbb4f156d390cab141e9df889d59e  https://releases.herdr.dev/app/install.ps1  https://github.com/herdrdev/herdr-app/commits/master/distribution/install.ps1
+0eb72d7f9e8158142f5633d8039e3b9d02460581869858fdac95a20bbbc82fef  https://releases.herdr.dev/core/install.ps1  https://github.com/herdrdev/herdr-core/commits/master/distribution/install.ps1
