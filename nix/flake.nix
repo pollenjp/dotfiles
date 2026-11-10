@@ -630,6 +630,14 @@
               system
               ;
           };
+          cursor-agent-state = import ./tests/cursor-agent.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           ntn-state = import ./tests/ntn.nix {
             inherit
               lib

@@ -28,6 +28,7 @@
     ./modules/op-env.nix
     ./modules/cleanup.nix
     ./modules/mise-release-age.nix
+    ./modules/cursor-agent.nix
     ./modules/ntn.nix
     ./modules/herdr-core.nix
   ];
