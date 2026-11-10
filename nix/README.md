@@ -2593,6 +2593,116 @@ op.exe whoami                              # WSL の直の op.exe は account is
 - 承認の画面の名前は、挟む powershell にしても「wslhost」と出る（1Password が決める）。誰が呼んだかは窓と記録で見る
 - 見張りの `op.exe whoami` は 1 回およそ 1 秒かかる（1 回の呼び出しで 2 回）
 
+## シークレットを .env の参照から渡す (pjp-op-env)
+
+1Password を使うマシン（`onePassword.enable`。WSL もそれ以外も）の PATH に、`.env` の `op://` の参照を 1 回の op で解き、値を
+環境変数に入れて program を起こす `pjp-op-env`（`nix/pkgs/pjp-op-env/`）を置く（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-10-secrets-op-env-design.md)）。
+値は 1Password にだけ置き、`.env` には参照だけを書く。Claude にこの扱いを決めるのは skill `pjp-secrets` と、ユーザーの CLAUDE.md の
+「シークレット」の節（値を会話に貼らせない・ファイルに平文で書かない・値を表示するコマンドを打たない）。
+
+```sh
+pjp-op-env --reason "<なぜ値を読むか>" -- <program> [<引数>…]                    # 今の dir の .env を読む
+pjp-op-env --reason "kabu の bot を起こすのに API パスワードを読む" -- ./target/release/kabu-bot
+pjp-op-env --reason "<理由>" --env-file .env --env-file .env.local -- <program>   # 後のファイルが勝つ
+pjp-op-env --dry-run                                                              # op を呼ばず、名前と種類 (参照か値か) を出す
+```
+
+`.env` には値の代わりに参照を書く。参照は 1Password のアプリの欄のメニュー「Copy Secret Reference」で取れる。
+
+```sh
+KABU_API_PASSWORD=op://Private/kabu-station/password
+KABU_API_KEY="op://Private/kabu station/api key"   # 名前に空白があれば引用符で囲む
+LOG_LEVEL=info                                      # 参照でない値はそのまま渡す
+```
+
+| 段 | すること |
+| --- | --- |
+| 1. `.env` を読む | 1 行ずつ文字列として読む（`source`・`eval` をしない）。読めない行があれば、ファイル名と行番号だけを出して 2 で止める |
+| 2. program を引く | 実行ファイルを PATH から引く（`.env` を入れる前に引くので、`.env` の `PATH` で替わらない）。無ければ op を呼ばずに 127 |
+| 3. 参照を解く | 値の全体が `op://` で始まるものを集め、`op [--reason "<理由> (pjp-op-env が <program> に渡す: <参照>, …)"] inject` を 1 回だけ呼ぶ。参照は stdin のテンプレート（参照ごとに乱数の境界の印の行と `{{ <参照> }}` の行）で渡し、解いた値は stdout のパイプで受けてメモリにだけ置く。`--reason` は WSL の op（pjp-op。`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true）にだけ付ける |
+| 4. 起こす | op が終わってから（WSL の op の lock と承認の窓を放してから）、op の認証の環境変数を外し、値を環境変数に入れて `exec` で program に置き換わる。program は Linux のプロセスとして、同じ pid・stdin・stdout・stderr で動く |
+
+WSL では `op run --env-file=.env -- <program>` を使わない。op は Windows の `op.exe` なので子のコマンドも Windows のプロセスとして
+起きる見込みで、WSL の op（[前述](#wsl-の-op-を理由つきで呼ぶ-1password-cli)）は op が終わるまで lock と承認の窓を持つ。長く動く
+program を `op run` で起こすと窓が出たままになり、ほかの pane の op は 90 秒待って 75 で断られる。値ごとの `op read` は承認が
+値の数だけ出る。
+
+### `.env` の書き方
+
+| 書き方 | 読み方 |
+| --- | --- |
+| `KEY=値`・`export KEY=値` | 名前は `[A-Za-z_][A-Za-z0-9_]*`。`=` の前に空白を置かない。行頭の空白はよい |
+| 空行・`#` で始まる行 | 飛ばす |
+| `KEY=値 # コメント` | 引用符なしの値は、空白に続く `#` から後ろを外し、前後の空白を外す（`a#b` の `#` は値） |
+| `KEY='値'` | 中をそのまま（エスケープなし） |
+| `KEY="値"` | `\\` と `\"` だけを戻し、ほかはそのまま。`$`・`` ` `` は展開しない |
+| `KEY=op://vault/項目/欄` | 値の全体が `op://` で始まれば参照（値の途中の `op://` は解かない）。`{`・`}`・制御文字を含む参照は読めない行 |
+| 行末の `\r` | 外す（Windows のエディタで書いたファイル） |
+
+- 変数の展開・コマンドの置き換え・複数行の値は無い。ファイルはデータとして読む
+- 同じ名前は後の行・後のファイルが勝つ。呼び手の環境に同じ名前があっても `.env` が勝つ
+- bash が読み取り専用にしている名前（`BASHOPTS`・`BASH_VERSINFO`・`EUID`・`PPID`・`SHELLOPTS`・`UID`）と、`pjp-op-env` が中で使う
+  `_poe_` で始まる名前は読めない行
+
+### なぜ安全か
+
+まとめて解いても、値が通る道は「op（`op.exe`）→ パイプ → `pjp-op-env` のメモリ → program の環境変数」の 1 本だけで、ディスク・
+引数・端末・記録には出ない。どれも `nix/tests/pjp-op-env.test.sh` が偽の op・vault（WSL の分は本物の `op.sh` も）で確かめる。
+
+| 値が出うる所 | どう防いだか |
+| --- | --- |
+| ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op は stdin の写しを作らず（前段が op の wrapper のときだけ作る）、stderr の写し（値は出ない）は tmpfs に置いて終わりに消す |
+| 引数（`/proc/<pid>/cmdline`・`ps`） | 値を引数に載せない。op に渡すのは理由と `inject` だけ。環境変数は bash の組み込みの `export` で入れ、外のコマンドを起こさずに `exec` で program に置き換わる（テストは strace ですべての `execve` の引数を見る） |
+| `.env` の評価 | `source`・`eval` をしない。値の `$(…)`・`` ` ``・`;`・引用符・空白は文字のまま渡す |
+| 解けない参照・出力の取り違え | fail closed。op が 0 以外で終われば program を起こさない（参照が 1 つでも解けなければ op は 0 以外）。出力は起動ごとの乱数（128 bit）の境界の印で区切り、印の数・順・前後が合わない・NUL がある（環境変数にできない）なら 70 で止める |
+| 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`pjp-op-log`）に入るのは理由と `inject` だけ |
+| xtrace | 最初の行で `set +x +a`（呼び手の `SHELLOPTS=xtrace`・`BASH_ENV` が付けていても外す） |
+| op の認証 | `OP_SERVICE_ACCOUNT_TOKEN`・`OP_CONNECT_HOST`・`OP_CONNECT_TOKEN`・`OP_SESSION_*` は op に渡し、program を起こす前に外す |
+| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓には、理由の後ろに読む参照と program が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる） |
+| lock と窓 | op の出力を読み切り、op が終わってから program を起こす。program が動いている間、ほかの pane の op は待たされない |
+
+守らないもの（op を素で使うとき・`op run` と同じで、`pjp-op-env` で増えも減りもしない）:
+
+- 環境変数は、同じユーザーのプロセスと root から読める（`/proc/<pid>/environ`）
+- 値は program の子にも受け継がれる。起こすのはなるべく実行ファイルそのものにする（`cargo run`・`npm run` は build の script や
+  依存のコードにも値を渡すので、build してから `pjp-op-env … -- ./target/release/<名前>` で起こす）
+- program が値をどう扱うか（ログに出す・外へ送る）
+
+### 終了コード
+
+| コード | いつ |
+| --- | --- |
+| program の終了コード | 起こした後（`exec` で置き換わる） |
+| 0 | `--dry-run`・`--help` |
+| 2 | 引数の誤り（理由が無い・空、program が無い、知らない option）、`.env` が無い・読めない行がある |
+| 70 | op は 0 で終わったが、出力の形が合わない（NUL・境界の印のずれ）。program は起こさない |
+| 127 | 起こす program か op が見つからない（op は参照があるときだけ見る） |
+| op の終了コード | op が 0 以外で終わった（1 = 拒否・時間切れ・解けない参照など、75 = ほかの op の承認待ちが終わらない）。program は起こさない |
+
+### 反映
+
+`~/dotfiles/setup --self-update --update` で入る。skill `pjp-secrets` と CLAUDE.md の節も同じコマンドで配られる（Claude Code を
+起こし直すと効く）。
+
+### 確かめる
+
+```sh
+command -v pjp-op-env                                    # ~/.nix-profile/bin/pjp-op-env
+pjp-op-env --dry-run                                     # .env の名前と種類。参照でない値は出さず、op を呼ばない
+pjp-op-env --reason "参照が解けるかを確かめる" -- true   # 承認の画面が 1 回だけ出て、全部解ければ 0
+pjp-op-log                                               # WSL: inject の 1 行。理由の後ろに読む参照が並ぶ
+```
+
+### 気を付けること
+
+- program が自分で `.env` を読む作り（dotenvy・python-dotenv など）でも、既にある環境変数を上書きしない既定なら `pjp-op-env` が
+  入れた値が勝つ。上書きする設定（`override=True` など）にしていると、参照の文字列に戻る
+- 知らない repo の `.env` を `pjp-op-env` で読まない。読む参照は WSL の承認の窓に並ぶので、頼んだ覚えの無い項目があれば拒否する
+- 承認を待つ間に Claude の Bash の時間切れで止められないよう、Claude に起こさせるときは timeout を長く（600000）し、常駐する program は
+  裏で起こす（skill `pjp-secrets`）
+- service account の token（`OP_SERVICE_ACCOUNT_TOKEN`）が環境にあれば、op はそれで解く（WSL の op は承認の画面を出さない）。cron の
+  ような人が承認できない処理は、専用の vault だけを読める service account で動かす（skill `pjp-secrets`）
+
 ## fish
 
 `.fish/*.fish` (17 ファイル / 610 行) は `nix/home/modules/fish.nix` へ**全面移植**した。
