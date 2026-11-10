@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows の herdr (winget の Herdr.Herdr.Preview) が、dotfiles で固定した版に揃っているかを確かめる。
+# Windows の herdr (winget の Herdr.Herdr) が、dotfiles で固定した版に揃っているかを確かめる。
 # 冪等。`setup.sh --update` でも毎回走る。入っていなければ winget で入れ、入っていて揃っていなければ
-# ⚠ で囲んで知らせる (入れ替えはしない)。
+# ⚠ で囲んで知らせる (入れ替えはしない)。前に入れていた Herdr.Herdr.Preview が残っていれば、外す手順を
+# ⚠ で囲んで知らせる (外さない)。
 #
 # order: 97
 #
@@ -12,10 +13,14 @@
 #
 # ## 何のために
 #
-# Windows の herdr は winget の Herdr.Herdr.Preview で入れ、版は win/herdr/Install-Herdr.ps1 の
+# Windows の herdr は winget の Herdr.Herdr で入れ、版は win/herdr/Install-Herdr.ps1 の
 # -Version の既定値で固定する (win/README.md の「herdr を入れる」)。ただ、winget upgrade --all で
 # 上がったり、herdr update (herdr 自身の更新) で別の herdr が PATH の先頭に入ったりすると、
 # 気付かないままずれる。そこで setup のたびに差を確かめて見せる。新しいマシンでは入れるところまでする。
+#
+# 前は preview の Herdr.Herdr.Preview で入れていた。置き場所が別なので Herdr.Herdr を並べて入れられるが、
+# Preview が残っている間は PATH で Preview の herdr が先に引かれうる。Preview を外すには動いている
+# herdr server を止める (pane が消える) ので、setup は外さず、外すまで手順を知らせ続ける。
 #
 # ## 何をするか
 #
@@ -23,23 +28,28 @@
 #    マシンなら飛ばす。<windowsHome>/.config/powershell/Install-Herdr.ps1 が無いときも飛ばす
 # 2. pwsh.exe で Install-Herdr.ps1 -Check を流す (何も変えない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
-# 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す。
-#    3 (入っていない) なら Install-Herdr.ps1 -IfMissing で入れる (入っていないなら herdr server も
-#    動いていないので、何も巻き込まない)。どれも exit 0 (setup を止めない)。⚠ の見出しと揃える
-#    コマンドは、setup の最後の「警告のまとめ」にも残す (summary_warn)
+# 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と直し方を出す。直し方は -Check の
+#    締めの行 (Install-Herdr.ps1 の Format-HerdrVerdict) で決める: 版・pin・PATH の差なら揃えるコマンド、
+#    Herdr.Herdr.Preview が残っていれば外す手順。
+#    3 (入っていない) なら Install-Herdr.ps1 -IfMissing で入れる (Herdr.Herdr の置き場所の herdr は
+#    動いていないので、何も巻き込まない)。Preview が残っていても並べて入れ、入ったら Preview を外す手順を出す。
+#    どれも exit 0 (setup を止めない)。⚠ の見出しと直し方は、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。入れ替えが要るときに herdr が動いて
 # いれば、スクリプトは何も変えずに止まる (herdr server は止めない。先に herdr の外で hsvstop)。
+# Herdr.Herdr.Preview は --apply でも外さない。
 
 set -eu -o pipefail
 
 usage() {
   cat <<'EOS'
-Windows の herdr (winget の Herdr.Herdr.Preview) が、dotfiles で固定した版に揃っているかを確かめる。
+Windows の herdr (winget の Herdr.Herdr) が、dotfiles で固定した版に揃っているかを確かめる。
 
 使い方:
   bootstrap-windows-herdr.sh            確かめる (入っていなければ入れる。差があれば ⚠ で知らせる)
   bootstrap-windows-herdr.sh --apply    揃える (入れ替えが要るなら、先に herdr の外の PowerShell で hsvstop)
+
+前に入れていた Herdr.Herdr.Preview が残っていれば、外す手順を ⚠ で知らせる (どちらも外さない)。
 EOS
 }
 
@@ -142,27 +152,60 @@ clean() {
   tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g"
 }
 
-# ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など)
+# 直し方。版・pin・PATH の差を揃えるコマンド
+fix_sync=(
+  "揃えるには次のどちらかを打つ (入れ替えるときは、先に herdr の外の PowerShell で hsvstop):"
+  "  WSL:        ${script_dir}/bootstrap-windows-herdr.sh --apply"
+  "  PowerShell: Install-Herdr"
+)
+# 直し方。前に入れていた Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)。
+# Preview は product code で外す。Herdr.Herdr を並べて入れると、winget は Preview を Herdr.Herdr として数え、
+# --id Herdr.Herdr.Preview --exact では見つからなくなる。pin は Preview を外した後に外す (Install-Herdr.ps1 の
+# Format-HerdrVerdict の上のコメント)
+fix_preview=(
+  "Herdr.Herdr.Preview を外すには (setup は外さない。herdr server を止めると pane が消えるので、時期を選んで打つ):"
+  "  1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる"
+  "  2. PowerShell で winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ"
+  "  3. 続けて winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)"
+  "  4. 新しい PowerShell から herdr を起動し直す"
+)
+preview_title="Windows に前の herdr (Herdr.Herdr.Preview) が残っています"
+
+# ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など。空なら何も入れない)、
+# 残り: 直し方の行 (1 つが 1 行)
 rule="⚠️ ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ ⚠️"
 warn_frame() {
-  local line fix=(
-    "揃えるには次のどちらかを打つ (入れ替えるときは、先に herdr の外の PowerShell で hsvstop):"
-    "  WSL:        ${script_dir}/bootstrap-windows-herdr.sh --apply"
-    "  PowerShell: Install-Herdr"
-  )
+  local title=$1 body=$2 line
+  shift 2
   {
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-    printf '%s⚠️  %s%s\n' "${c_warn}" "$1" "${c_reset}"
+    printf '%s⚠️  %s%s\n' "${c_warn}" "${title}" "${c_reset}"
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
-    # PowerShell の締めの 1 行 (⚠️ … → Install-Herdr …) は、下の揃えるコマンドと重なるので落とす
-    printf '%s\n' "$2" | grep -v '^⚠️ ' | sed 's/^/    /' || true
-    for line in "${fix[@]}"; do
+    # PowerShell の締めの行 (⚠️ … → Install-Herdr …・Preview を外す手順) は、下の直し方と重なるので落とす
+    if [[ -n ${body} ]]; then
+      printf '%s\n' "${body}" | grep -v '^⚠️ ' | sed 's/^/    /' || true
+    fi
+    for line in "$@"; do
       printf '%s⚠️  %s%s\n' "${c_warn}" "${line}" "${c_reset}"
     done
     printf '%s%s%s\n' "${c_warn}" "${rule}" "${c_reset}"
   } >&2
-  # setup の最後のまとめには、見出しと揃えるコマンドだけを残す (状態の表は、その場の枠に出ている)
-  summary_warn "$1" "${fix[@]}"
+  # setup の最後のまとめには、見出しと直し方だけを残す (状態の表は、その場の枠に出ている)
+  summary_warn "${title}" "$@"
+}
+
+# Install-Herdr.ps1 の締めの行 (Format-HerdrVerdict) から、直すことを読む。$1: pwsh.exe の出力
+#   needs_sync:    版・pin・PATH の差がある・入っていない (Install-Herdr で揃える・入れる)
+#   needs_preview: Herdr.Herdr.Preview が残っている (人が外す)
+read_verdict() {
+  needs_sync=0
+  needs_preview=0
+  if grep -qE '^⚠️ .*→ Install-Herdr で(揃える|入れる)' <<<"$1"; then
+    needs_sync=1
+  fi
+  if grep -qF '⚠️ Herdr.Herdr.Preview が残っている' <<<"$1"; then
+    needs_preview=1
+  fi
 }
 
 if ((apply)); then
@@ -174,48 +217,67 @@ if ((apply)); then
     echo "揃いました。"
     exit 0
   fi
-  echo "!! 揃いませんでした (終了コード ${rc})。上の出力を確かめてください。" >&2
+  # Herdr.Herdr.Preview が残っていると、Herdr.Herdr が揃っていても 1 になる (Install-Herdr は Preview を外さない)
+  echo "!! 揃いませんでした (終了コード ${rc})。上の出力を確かめてください (Herdr.Herdr.Preview が残っているときは、出力の手順で外す)。" >&2
   exit 1
 fi
 
 # WSL の interop を通る。落ちていると Exec format error などで失敗する。
 # winget show (ネットワーク) を挟むので、少し長めに待つ。
+# pwsh.exe の出力は captured に取る (out は nix の build や devShell が export する名前で、大きな値を入れると
+# 子のコマンドの環境に載る。pjp-shell-traps の「nix develop が export する名前」)
 rc=0
-out=$(timeout 120 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -Check")" </dev/null 2>&1) || rc=$?
-out=$(printf '%s\n' "${out}" | clean)
+captured=$(timeout 120 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -Check")" </dev/null 2>&1) || rc=$?
+captured=$(printf '%s\n' "${captured}" | clean)
 
 # 差がある・入っていないときの出力には、状態の表の見出し (パッケージ名) が必ず入る。
 # 終了コードが 1 や 3 でも見出しが無ければ、スクリプトが動いていない (差とは扱わない)。
 header=0
-if grep -qF 'Herdr.Herdr.Preview' <<<"${out}"; then
+if grep -qF 'herdr (winget の Herdr.Herdr' <<<"${captured}"; then
   header=1
 fi
 
 if ((rc == 0)); then
   echo "Windows の herdr は、dotfiles で固定した版に揃っています。"
   # winget に新しい版がある、などの ※ の行は、揃っていても見せる (ずれではないので枠には入れない)
-  grep '^※' <<<"${out}" | sed 's/^/  /' || true
+  grep '^※' <<<"${captured}" | sed 's/^/  /' || true
   exit 0
 fi
 if ((rc == 1 && header)); then
-  warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${out}"
+  read_verdict "${captured}"
+  # 残っているのが Herdr.Herdr.Preview だけなら、見出しも直し方も Preview を外すことにする (Install-Herdr では直らない)。
+  # 差もあれば Preview を外す手順を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
+  if ((needs_preview && ! needs_sync)); then
+    warn_frame "${preview_title}" "${captured}" "${fix_preview[@]}"
+  elif ((needs_preview)); then
+    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_preview[@]}" "${fix_sync[@]}"
+  else
+    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_sync[@]}"
+  fi
   exit 0
 fi
 if ((rc == 3 && header)); then
-  echo "Windows に herdr が入っていないので、winget で固定した版を入れます (Install-Herdr.ps1 -IfMissing)。"
+  echo "Windows に herdr (winget の Herdr.Herdr) が入っていないので、winget で固定した版を入れます (Install-Herdr.ps1 -IfMissing)。"
   # zip のダウンロードを待つので長めに待つ。VCRedist が無いマシンでは、winget が依存を入れる UAC が Windows に出る
   rc=0
-  out=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
-  out=$(printf '%s\n' "${out}" | clean)
-  if ((rc == 0)); then
-    printf '%s\n' "${out}" | sed 's/^/  /'
+  captured=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
+  captured=$(printf '%s\n' "${captured}" | clean)
+  read_verdict "${captured}"
+  # Herdr.Herdr.Preview が残っていると -IfMissing は 1 を返す。締めの行が Preview のことだけなら、
+  # Herdr.Herdr は入って揃っているので、入れた扱いにして Preview を外す手順を出す
+  if ((rc == 0 || (rc == 1 && needs_preview && ! needs_sync))); then
+    printf '%s\n' "${captured}" | grep -v '^⚠️ ' | sed 's/^/  /' || true
     echo "Windows に herdr を入れました。"
+    if ((needs_preview)); then
+      warn_frame "${preview_title}" "" "${fix_preview[@]}"
+    fi
     exit 0
   fi
-  warn_frame "Windows に herdr を入れられませんでした (終了コード ${rc})" "${out}"
+  # 入れられなかったときは、Preview を外す手順を出さない (外すと herdr が無くなる)
+  warn_frame "Windows に herdr を入れられませんでした (終了コード ${rc})" "${captured}" "${fix_sync[@]}"
   exit 0
 fi
 # pwsh.exe の出力 (あれば) と、手で打つコマンドを続きの行にする
 warn "pwsh.exe で Windows の herdr を確かめられませんでした (終了コード ${rc}。WSL の interop が落ちているかもしれません):" \
-  ${out:+"${out}"} "$(manual)"
+  ${captured:+"${captured}"} "$(manual)"
 exit 0

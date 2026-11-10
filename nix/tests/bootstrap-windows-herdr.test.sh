@@ -14,9 +14,13 @@
 #   - 配らないマシン・Install-Herdr.ps1 が無いときは pwsh.exe を呼ばずに飛ばす
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す
-#   - -Check が 3 (入っていない) なら -IfMissing で入れる。入れられなければ ⚠ で囲んで知らせる
+#   - -Check が 1 で、締めの行が Herdr.Herdr.Preview が残っていることだけなら、⚠ の枠の見出しと直し方を
+#     Preview を外す手順にする (揃えるコマンドは出さない)。版・pin・PATH の差もあれば両方を出す
+#   - -Check が 3 (入っていない) なら -IfMissing で入れる。入れられなければ ⚠ で囲んで知らせる。
+#     Preview が残っていても並べて入れ、入ったら Preview を外す手順を ⚠ で囲んで出す。入れられなかったときは
+#     Preview を外す手順を出さない (外すと herdr が無くなる)
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
-#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
+#   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド・Preview を外す手順
 #     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
 #
 # ## 本物の pwsh.exe を見せない
@@ -49,11 +53,12 @@ ng() {
   fi
 }
 
-pkg='C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
-v='0.9.2-preview.2026-09-29-8e78f929d8f0'
+pkg='C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\Herdr.Herdr_Microsoft.Winget.Source_8wekyb3d8bbwe'
+preview_pkg='C:\Users\u\AppData\Local\Microsoft\WinGet\Packages\Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe'
+v='0.9.5'
 
 # Install-Herdr.ps1 -Check の出力 (pin だけ無いとき)
-check_out="herdr (winget の Herdr.Herdr.Preview、${pkg})
+check_out="herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : ${v}
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
@@ -62,7 +67,7 @@ check_out="herdr (winget の Herdr.Herdr.Preview、${pkg})
 ⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️"
 
 # Install-Herdr.ps1 -Check の出力 (入っていないとき)
-missing_out="herdr (winget の Herdr.Herdr.Preview、${pkg})
+missing_out="herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : 入っていない
 ⚠ 固定した版      : ${v} → 入れる
   winget の最新版 : ${v}
@@ -71,17 +76,77 @@ missing_out="herdr (winget の Herdr.Herdr.Preview、${pkg})
 ⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️"
 
 # Install-Herdr.ps1 -IfMissing が入れ終えたときの出力
-installed_out="winget install --id Herdr.Herdr.Preview --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
+installed_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
   Successfully installed
 winget pin を足した (winget upgrade --all から外れる)
 
-herdr (winget の Herdr.Herdr.Preview、${pkg})
+herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : ${v}
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
   winget pin      : あり
   PATH の herdr   : winget のもの
 揃った"
+
+# Install-Herdr.ps1 の締めの行のうち、Herdr.Herdr.Preview を外す手順 (Format-HerdrVerdict)。$1 は見出しの「→ 」の後ろ
+preview_verdict() {
+  printf '%s\n' \
+    "⚠️ Herdr.Herdr.Preview が残っている → $1次の手順で外す (Install-Herdr は外さない) ⚠️" \
+    '⚠️   1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる' \
+    '⚠️   2. winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ' \
+    '⚠️   3. winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)' \
+    '⚠️   4. 新しい PowerShell から herdr を起動し直す'
+}
+
+# Install-Herdr.ps1 -Check の出力 (Herdr.Herdr は揃っていて、Herdr.Herdr.Preview が残り、PATH でも先に引かれる)
+preview_out="herdr (winget の Herdr.Herdr、${pkg})
+  入っている版    : ${v}
+  固定した版      : ${v} → そのまま
+  winget の最新版 : ${v}
+  winget pin      : あり
+⚠ PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
+⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
+※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)
+$(preview_verdict '')"
+
+# Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている。締めの行は Preview を先に出す)
+preview_drift_out="herdr (winget の Herdr.Herdr、${pkg})
+  入っている版    : ${v}
+  固定した版      : ${v} → そのまま
+  winget の最新版 : ${v}
+⚠ winget pin      : 無し → 足す
+  PATH の herdr   : winget のもの
+⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
+$(preview_verdict '')
+⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️"
+
+# Install-Herdr.ps1 -Check の出力 (Herdr.Herdr が入っておらず、Herdr.Herdr.Preview だけがある。Preview から移る前の PC)。
+# 入る前は、PATH で Preview の herdr が引かれても ⚠ にせず、「Preview を外せば直る」とも出さない
+preview_only_out="herdr (winget の Herdr.Herdr、${pkg})
+  入っている版    : 入っていない
+⚠ 固定した版      : ${v} → 入れる
+  winget の最新版 : ${v}
+⚠ winget pin      : 無し → 足す
+  PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
+⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから外す
+⚠️ herdr が入っていない → Install-Herdr で入れる ⚠️
+$(preview_verdict 'Herdr.Herdr を入れてから、')"
+
+# Install-Herdr.ps1 -IfMissing が、Herdr.Herdr.Preview を残したまま Herdr.Herdr を並べて入れたときの出力 (終了コード 1)
+installed_preview_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
+  Successfully installed
+winget pin を足した (winget upgrade --all から外れる)
+
+$(sed -n '1,8p' <<<"${preview_out}")
+Herdr.Herdr は揃った
+$(preview_verdict '')"
+
+# Install-Herdr.ps1 -IfMissing が入れられなかったときの出力 (Herdr.Herdr.Preview は残っている。終了コード 1)
+install_failed_preview_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
+winget が失敗した (終了コード 0x8A150014)
+install が落ちたので、herdr が入っていないことがある。ネットワークを確かめて Install-Herdr を打ち直す (setup --update でも入る)
+
+${preview_only_out}"
 
 # 要るコマンドだけを並べた PATH (pwsh.exe と wslpath は入れない)
 sys_bin="${work}/sys-bin"
@@ -335,15 +400,15 @@ fi
 # 13. --apply が失敗: exit 1 (手で流すものなので失敗を返す)
 h=$(new_home t13 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="herdr.exe などが動いていて置き換えられない" run "${h}" 0 --apply
-if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした'; then
-  ok "--apply が失敗したら exit 1"
+if [[ $(rc "${h}") == 1 ]] && seen "${h}" '揃いませんでした' && seen "${h}" -F 'Herdr.Herdr.Preview が残っているときは'; then
+  ok "--apply が失敗したら exit 1 (Preview が残っているときは、出力の手順で外すと添える)"
 else
   ng "--apply 失敗" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 # 14. 揃っているが winget に新しい版がある: 1 行に加えて ※ の行も出す (ずれではないので ⚠ にはしない)
 h=$(new_home t14 "${state_on}" 1)
-newer='※ winget に固定した版より新しい 0.9.3-preview.2026-10-05-0123456789ab がある。上げるなら Install-Herdr.ps1 の -Version の既定値を変える'
+newer='※ winget に固定した版より新しい 0.9.6 がある。上げるなら Install-Herdr.ps1 の -Version の既定値を変える'
 FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${check_out}"$'\n'"${newer}"$'\n揃っている' run "${h}" 0
 if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") == 0 ]] && seen "${h}" '揃っています' \
   && seen "${h}" -F "${newer}"; then
@@ -354,7 +419,7 @@ fi
 
 # 15. pwsh.exe の出力に色のエスケープが混ざっていても、取り除いてから枠に入れる
 h=$(new_home t15 "${state_on}" 1)
-FAKE_PWSH_RC=1 FAKE_PWSH_OUT="herdr (winget の Herdr.Herdr.Preview、${pkg})"$'\n\e[33m⚠ winget pin      : 無し → 足す\e[0m' run "${h}" 0
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="herdr (winget の Herdr.Herdr、${pkg})"$'\n\e[33m⚠ winget pin      : 無し → 足す\e[0m' run "${h}" 0
 if [[ $(rc "${h}") == 0 ]] && ! seen "${h}" $'\e' && seen "${h}" -F '⚠ winget pin      : 無し → 足す'; then
   ok "pwsh.exe の色のエスケープは取り除いて出す"
 else
@@ -406,6 +471,83 @@ if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'pwsh.exe
   ok "pwsh.exe が無ければ、見出しと手で打つコマンドをまとめ用に残す"
 else
   ng "pwsh.exe が無いときのまとめ" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 21. Herdr.Herdr は揃っていて、Herdr.Herdr.Preview だけが残っている (-Check が 1): ⚠ の枠の見出しと直し方を
+#     Preview を外す手順にする。揃えるコマンドは出さず、PowerShell の締めの行 (⚠️ …) は枠の本文から落とす
+h=$(new_home t21 "${state_on}" 1)
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" -F '⚠️  Windows に前の herdr (Herdr.Herdr.Preview) が残っています' \
+  && seen "${h}" -F '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す' \
+  && seen "${h}" -F '⚠️    1. herdr の外の PowerShell (Windows Terminal など) で hsvstop を打ち、herdr --remote の窓も閉じる' \
+  && seen "${h}" -F '⚠️    2. PowerShell で winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe を打つ' \
+  && seen "${h}" -F '⚠️    3. 続けて winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)' \
+  && seen "${h}" -F '⚠️    4. 新しい PowerShell から herdr を起動し直す' \
+  && ! seen "${h}" -F -- '--apply' && ! seen "${h}" '揃っていません' && ! seen "${h}" -F 'Install-Herdr は外さない'; then
+  ok "Preview だけが残っていれば、⚠ の枠の見出しと直し方を Preview を外す手順にする (揃えるコマンドは出さない)"
+else
+  ng "Preview だけが残っている" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
+fi
+
+# 22. 版・pin・PATH の差もあり、Preview も残っている (-Check が 1): 見出しは揃っていないことにし、Preview を外す手順と
+#     揃えるコマンドを両方出す。Preview を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
+h=$(new_home t22 "${state_on}" 1)
+FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_drift_out}" run "${h}" 0
+n_preview=$(grep -n -m 1 -F 'Herdr.Herdr.Preview を外すには' "${h}/err" | cut -d: -f1)
+n_sync=$(grep -n -m 1 -F '揃えるには' "${h}/err" | cut -d: -f1)
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F '⚠️  Windows の herdr が、dotfiles で固定した版と揃っていません' \
+  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' \
+  && seen "${h}" -F 'winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe' \
+  && ! seen "${h}" '前の herdr (Herdr.Herdr.Preview) が残っています' \
+  && [[ -n ${n_preview} && -n ${n_sync} && ${n_preview} -lt ${n_sync} ]]; then
+  ok "差があって Preview も残っていれば、Preview を外す手順を先に、揃えるコマンドを後に出す"
+else
+  ng "差と Preview" "rc=$(rc "${h}") n_preview=${n_preview} n_sync=${n_sync} $(outerr "${h}")"
+fi
+
+# 23. setup から走るとき、Preview だけが残っていれば、見出しと Preview を外す手順をまとめ用に残す (揃えるコマンドは残さない)
+h=$(new_home t23 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に前の herdr (Herdr.Herdr.Preview) が残っています' ]] \
+  && grep -qE '^[[:space:]]+2\. PowerShell で winget uninstall --product-code Herdr\.Herdr\.Preview_Microsoft\.Winget\.Source_8wekyb3d8bbwe を打つ$' "${h}/warnings" \
+  && grep -qE '^[[:space:]]+3\. 続けて winget pin remove --id Herdr\.Herdr\.Preview --exact を打つ \(Preview の pin を外す\)$' "${h}/warnings" \
+  && ! grep -qF -- '--apply' "${h}/warnings" && ! grep -qF '前の Preview    :' "${h}/warnings"; then
+  ok "setup から走るとき、Preview だけが残っていれば、見出しと Preview を外す手順をまとめ用に残す"
+else
+  ng "Preview をまとめ用に残す" "rc=$(rc "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+
+# 24. Herdr.Herdr が入っておらず Preview だけがある (-Check が 3): -IfMissing で並べて入れる。-IfMissing は Preview が
+#     残っているので 1 を返すが、締めの行が Preview のことだけなら入れた扱いにし、Preview を外す手順を ⚠ で囲んで出す
+h=$(new_home t24 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${preview_only_out}" \
+  FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${installed_preview_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 2 ]] && called_last "${h}" -- '-IfMissing' && seen "${h}" '入れました' \
+  && seen "${h}" -F '⚠️  Windows に前の herdr (Herdr.Herdr.Preview) が残っています' \
+  && seen "${h}" -F 'winget uninstall --product-code Herdr.Herdr.Preview_Microsoft.Winget.Source_8wekyb3d8bbwe' \
+  && ! seen "${h}" '入れられませんでした' \
+  && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows に前の herdr (Herdr.Herdr.Preview) が残っています' ]]; then
+  ok "Preview が残っていても並べて入れ、入ったら Preview を外す手順を ⚠ で囲んで出す"
+else
+  ng "Preview を残して並べて入れる" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
+fi
+if [[ $(outerr "${h}" | grep -c -F '1. herdr の外の PowerShell') == 1 ]]; then
+  ok "並べて入れたときも、PowerShell の締めの行は出さず、Preview を外す手順は 1 回だけ出す"
+else
+  ng "Preview を外す手順が重なる" "$(outerr "${h}")"
+fi
+
+# 25. Preview だけがあって、Herdr.Herdr を入れられなかった: 入れられなかったと知らせ、Preview を外す手順は出さない
+#     (外すと herdr が無くなる)
+h=$(new_home t25 "${state_on}" 1)
+FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${preview_only_out}" FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${install_failed_preview_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入れられませんでした' && seen "${h}" -F '0x8A150014' \
+  && seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" -F 'winget uninstall' \
+  && ! seen "${h}" -F 'winget pin remove' && ! seen "${h}" '入れました' \
+  && ! seen "${h}" -F '外せば直る' && ! seen "${h}" '→ 外す$'; then
+  ok "Herdr.Herdr を入れられなければ、入れられなかったと知らせ、Preview を外す手順も外せと読める行も出さない"
+else
+  ng "入れられず Preview が残る" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
 # 16. 知らない引数: exit 2

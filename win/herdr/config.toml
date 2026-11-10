@@ -21,7 +21,7 @@ onboarding = false
 [update]
 # 新しい版の通知を出さない。通知から herdr update を打つと、herdr 自身の installer が
 # %USERPROFILE%\.herdr に別に入れてユーザーの PATH の先頭に足し、winget で入れた herdr
-# (Herdr.Herdr.Preview) が引かれなくなる。版は Install-Herdr.ps1 で固定していて、新しい版は
+# (Herdr.Herdr) が引かれなくなる。版は Install-Herdr.ps1 で固定していて、新しい版は
 # Install-Herdr -Check (setup --update でも走る) の ※ の行で分かる (win/README.md の「herdr を入れる」)。
 version_check = false
 

@@ -8,7 +8,7 @@
 #
 #   名前                    固定した版を書く ps1 (repo の win/ から)                  出た日 (猶予を数える起点)
 #   openssh                 openssh/Install-OpenSSH.ps1                              GitHub (PowerShell/Win32-OpenSSH) の release
-#   herdr                   herdr/Install-Herdr.ps1                                  GitHub (herdrdev/herdr) の preview の release
+#   herdr                   herdr/Install-Herdr.ps1                                  GitHub (herdrdev/herdr) の安定版の release
 #   google-japanese-input   google-japanese-input/Install-GoogleJapaneseInput.ps1    winget-pkgs に載った日
 #
 # ps1 から、-Version の既定値 (固定した版) と $packageId (winget のパッケージ ID) を読む。どちらも
@@ -26,9 +26,9 @@
 #
 # - openssh: GitHub の release が出た日。tag の形が揃っていない (v9.8.3.0p2-Preview / 10.0.0.0p2-Preview)
 #   ので、winget の版とは Win64 の MSI (OpenSSH-Win64-v<版>.msi) の名前で突き合わせる
-# - herdr: GitHub の preview の build (prerelease) の release が出た日。winget の版
-#   (<semver>-preview.<日付>-<hash>) の -preview. の後ろと、tag (preview-<日付>-<hash>) の preview- の後ろで
-#   突き合わせる。版の中の日付はビルドの日なので使わない
+# - herdr: GitHub の安定版の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。winget の版 (X.Y.Z) と、
+#   tag の v の後ろで突き合わせる。preview の build (tag が preview-<日付>-<hash> の prerelease) は、winget では
+#   別のパッケージ Herdr.Herdr.Preview に載るもので、dotfiles では使わない (2026-11 に安定版の Herdr.Herdr へ移った)
 # - google-japanese-input: GitHub の release が無いので、その版のディレクトリを winget-pkgs に足した commit
 #   (commits?path=… のいちばん古いもの) の日。manifest の ReleaseDate は版によって無い (2026-10 の時点で
 #   10 個のうち 1 個)
@@ -46,19 +46,18 @@
 # - GitHub の release の版が、winget のこのパッケージの最新より新しいのに winget に無い (見送った版は除く。
 #   openssh と herdr だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
 #   Microsoft.OpenSSH.Preview ができてから、Beta には 9.5.0.0 より新しい版が来なかった)。比べるのは winget に
-#   載る側の release だけ (openssh は prerelease を除き、herdr は preview だけ。herdr の安定版は winget に
-#   パッケージが無い)。新しいかは、openssh は版で比べ、herdr は winget の最新に合う release より後に出たかで
-#   決める (鍵の <日付>-<hash> では、同じ日の build の前後が hash の大小になる。合う release が無ければ鍵で
-#   比べる)。google-japanese-input は比べる相手が無く、ID が移っても気付けない
+#   載る側の release だけ (どちらも prerelease を除く)。新しいかは版で比べる。google-japanese-input は比べる
+#   相手が無く、ID が移っても気付けない
 #
 # 次は新しい版の知らせではなく、壊れていることの知らせなので、猶予を置かない。
 #
 # - 固定した版が winget-pkgs に無い (新しいマシンで Install-* が入れられない)
 # - パッケージが winget-pkgs に無い (Microsoft.OpenSSH.Beta は 2025-04-09 に全部の版が外された)
-# - 版の形でないディレクトリがある (版の付け方が変わると、新しい版を読み落とす)
+# - 版の形でないディレクトリがある (版の付け方が変わると、新しい版を読み落とす)。ID の続く別のパッケージの
+#   ディレクトリ (herdr の manifests/h/Herdr/Herdr/Preview は Herdr.Herdr.Preview) は、版ではないので除く
 # - GitHub の最新の release から版が読めない (openssh は OpenSSH-Win64-v<版>.msi が無い、herdr は tag が
-#   preview-<日付>-<hash> の形でない)・取った release に winget に載る側のものが無い (herdr なら preview が
-#   無い)。出し方や付け方が変わると、版も出た日も引けない
+#   v<X.Y.Z> の形でない)・取った release に winget に載る側のものが無い。出し方や付け方が変わると、版も
+#   出た日も引けない
 #
 # 確かめられなかったとき (ps1 が読めない・見送りの一覧が壊れている・API の失敗・gh が無い・猶予の日数が
 # 読めない) は exit 2。揃っている扱いにはしない。出た日を引く一覧 (GitHub の release・winget-pkgs の commit)
@@ -69,8 +68,6 @@
 #
 # 1 行に 1 つ、「版 理由」を空白で区切って書く。# で始まる行と空行は読まない。理由の無い行と、版が
 # その名前の版の形でない行は exit 2。固定した版以下になった行は、消してよいと出すだけで落とさない。
-# 版は鍵 (herdr は -preview. の後ろの <日付>-<hash>) で比べる。herdr は、winget に無い preview のために
-# 鍵だけの行も書ける (semver が分からない)。
 #
 # ## 依存
 #
@@ -125,22 +122,15 @@ fi
 name=${args[0]}
 
 # 名前ごとに違うもの。dates_from は出た日の取り方 (github: GitHub の release / winget: winget-pkgs の commit)。
-# github のときは、release から winget の版に突き合わせる鍵 (release_key。読めなければ "") と、winget に
-# 載る側の release か (release_channel) を jq の式で持つ。key_strip は、winget の版から鍵を出すときに
-# 前から外す glob。見送りの一覧の版も、比べるときは鍵にする。skip_re は見送りの一覧の版の形 (空なら version_re)。
-# ahead_by は、GitHub の release が winget の最新より新しいかの決め方 (version: 鍵を sort -V で比べる /
-# published: winget の最新に合う release より後に出たか。合う release が無ければ鍵で比べる)
+# github のときは、release から winget の版に突き合わせる鍵 (release_key。winget の版と同じ形の文字列で、読めなければ "")
+# と、winget に載る側の release か (release_channel) を jq の式で持つ。nested_dirs は、winget-pkgs の manifest の
+# ディレクトリに並ぶ、ID の続く別のパッケージのディレクトリ (版ではないので、版の形を見るときに除く)
 release_key=''
 release_channel=''
 releases_repo=''
 releases_per_page=30
-key_strip=''
-skip_re=''
-skip_note=''
-ahead_by=version
+nested_dirs=()
 channel_desc=''
-latest_word=''
-ahead_word=''
 key_missing=''
 moved_example=''
 case ${name} in
@@ -159,38 +149,33 @@ case ${name} in
     # prerelease は winget に載らない
     release_channel='.prerelease | not'
     channel_desc='prerelease でない release'
-    latest_word=release
     key_missing='に OpenSSH-Win64-v<版>.msi が無い'
     moved_example='Beta から Preview へ移った前例がある'
     ;;
   herdr)
     title='Windows の herdr'
     ps1_name=Install-Herdr.ps1
-    version_re='^[0-9]+\.[0-9]+\.[0-9]+-preview\.[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]+$'
-    version_example=0.9.3-preview.2026-10-12-6d697e1e75ff
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=0.9.5
     readme_section='herdr の新しい版が出たとき'
     search_word=herdr
     upgrade_before='変更点を読み、'
     upgrade_after=''
     dates_from=github
     releases_repo=herdrdev/herdr
-    # preview と安定版がそれぞれ週に何度か出るので、30 件では 2 か月ほどしか遡れない
+    # 安定版の間に preview の build が週に何度か挟まるので、30 件では安定版を 1 か月ほどしか遡れない
     releases_per_page=100
-    release_key='(.tag_name // "" | capture("^preview-(?<k>[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]+)$").k) // ""'
-    # winget の Herdr.Herdr.Preview に載るのは preview の build (GitHub では prerelease) だけ。
-    # 安定版 (vX.Y.Z) は winget にパッケージが無い
-    release_channel='.prerelease == true'
-    key_strip='*-preview.'
-    # winget に無い preview は semver が分からないので、見送りの一覧には鍵 (<日付>-<hash>) だけも書ける
-    skip_re='^([0-9]+\.[0-9]+\.[0-9]+-preview\.)?[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9a-f]+$'
-    skip_note='。winget に無い preview は -preview. の後ろ (<日付>-<hash>) だけでもよい'
-    # 鍵の並びでは、同じ日の build の前後が hash の大小になる
-    ahead_by=published
-    channel_desc=preview
-    latest_word=preview
-    ahead_word='preview の '
-    key_missing='の tag が preview-<日付>-<hash> の形でない'
-    moved_example='安定版のパッケージができて preview が止まった、など'
+    # 鍵は tag の v の後ろ (winget の版と同じ X.Y.Z の形)。GitHub の最新の行にもこの形で出し、claude-skills の
+    # pjp-dep-update (scripts/winget.py) がそれを winget の版と突き合わせる
+    release_key='(.tag_name // "" | capture("^v(?<k>[0-9]+\\.[0-9]+\\.[0-9]+)$").k) // ""'
+    # winget の Herdr.Herdr に載るのは安定版 (GitHub では prerelease でない release) だけ。preview の build
+    # (prerelease) は別のパッケージ Herdr.Herdr.Preview に載る
+    release_channel='.prerelease | not'
+    # manifests/h/Herdr/Herdr には、版と並んで Herdr.Herdr.Preview のディレクトリ (Preview) がある
+    nested_dirs=(Preview)
+    channel_desc='安定版 (prerelease でない release)'
+    key_missing='の tag が v<X.Y.Z> の形でない'
+    moved_example='安定版が winget に載らなくなった・別の ID へ移った、など'
     ;;
   google-japanese-input)
     title='Google 日本語入力'
@@ -260,12 +245,6 @@ newer_than() {
   [[ $1 != "$2" && $(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -n 1) == "$1" ]]
 }
 
-# winget の版から、release の鍵を出す (herdr は -preview. の後ろ。ほかは版そのまま)
-key_of() {
-  # shellcheck disable=SC2295 # key_strip は glob のパターンとして効かせる
-  printf '%s' "${1#${key_strip}}"
-}
-
 # 030 のような 0 始まりは、bash の算術で 8 進数として読まれるので受けない
 if [[ ! ${grace_days} =~ ^(0|[1-9][0-9]*)$ ]]; then
   cannot_check "猶予の日数が読めません (CHECK_WINGET_VERSION_GRACE_DAYS=${grace_days})。0 か、0 で始まらない整数 (日数) を渡す。"
@@ -324,33 +303,21 @@ if [[ -f ${skipped_file} ]]; then
       continue
     fi
     read -r v reason <<<"${line}"
-    if [[ ! ${v} =~ ${skip_re:-${version_re}} || -z ${reason} ]]; then
+    if [[ ! ${v} =~ ${version_re} || -z ${reason} ]]; then
       cannot_check "見送りの一覧の ${n} 行目が読めません (${skipped_label}): ${line}" \
-        "1 行に「版 理由」を空白で区切って書く。版は ${title} の版の形 (例: ${version_example} 試したら設定が読めなかった)${skip_note}。"
+        "1 行に「版 理由」を空白で区切って書く。版は ${title} の版の形 (例: ${version_example} 試したら設定が読めなかった)。"
     fi
     skipped_versions+=("${v}")
     skipped_reasons+=("${reason}")
   done <"${skipped_file}"
 fi
 
-# winget の版 $1 を見送っていれば、理由を出して 0 を返す (鍵で比べる)
+# 版 $1 (winget の版か、GitHub の release の鍵) を見送っていれば、理由を出して 0 を返す
 skip_reason() {
-  local i key
-  key=$(key_of "$1")
+  local i
   for i in "${!skipped_versions[@]}"; do
-    if [[ $(key_of "${skipped_versions[i]}") == "${key}" ]]; then
+    if [[ ${skipped_versions[i]} == "$1" ]]; then
       printf '%s' "${skipped_reasons[i]}"
-      return 0
-    fi
-  done
-  return 1
-}
-
-# release の鍵 $1 に当たる版を見送っていれば 0 を返す (見送りの一覧の版から鍵を出して比べる)
-skipped_key() {
-  local v
-  for v in "${skipped_versions[@]}"; do
-    if [[ $(key_of "${v}") == "$1" ]]; then
       return 0
     fi
   done
@@ -360,10 +327,9 @@ skipped_key() {
 # winget の版 $1 の出た日の行 (date_rows の 1 行) を出す。いくつかあれば、いちばん早く出たもの。
 # 無ければ 1 を返す
 dated() {
-  local key row
-  key=$(key_of "$1")
+  local row
   while IFS= read -r row; do
-    if [[ -n ${row} && ${row%%$'\x1f'*} == "${key}" ]]; then
+    if [[ -n ${row} && ${row%%$'\x1f'*} == "$1" ]]; then
       printf '%s\n' "${row}"
       return 0
     fi
@@ -408,8 +374,10 @@ wait_note() {
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-winget-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
 
-# winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない
+# winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない。
+# gone_why は、パッケージが無いと知らせるときに添える、無いと読んだわけ
 gone=0
+gone_why="${manifest_dir} が無い"
 versions=""
 odd=""
 if ! gh api "${contents_api}" >"${tmp}/contents.json" 2>"${tmp}/contents.err"; then
@@ -419,11 +387,17 @@ if ! gh api "${contents_api}" >"${tmp}/contents.json" 2>"${tmp}/contents.err"; t
   fi
   gone=1
 else
+  # ディレクトリはある (中に版のディレクトリが無ければ、パッケージが無いのと同じ)
+  gone_why="${manifest_dir} に版のディレクトリが無い"
   if ! names=$(jq -r 'if type == "array" then .[] | select(.type == "dir") | .name else error("ディレクトリの一覧ではない") end' \
     "${tmp}/contents.json" 2>/dev/null); then
     cannot_check "winget-pkgs の応答が読めませんでした (ディレクトリの一覧ではない):" \
       "$(head -c 300 "${tmp}/contents.json")"
   fi
+  # ID の続く別のパッケージのディレクトリは、版でもこのパッケージの中身でもないので除く
+  for nested in "${nested_dirs[@]}"; do
+    names=$(grep -vxF -- "${nested}" <<<"${names}" || true)
+  done
   if [[ -z ${names} ]]; then
     gone=1
   fi
@@ -436,15 +410,15 @@ echo "${title} (winget の ${package_id})"
 echo "  固定した版    : ${pinned} (${ps1_label} の -Version の既定値)"
 
 if ((gone)); then
-  echo "⚠ ${package_id} が winget-pkgs に無い (${manifest_dir} が無い)。winget で入れられない"
+  echo "⚠ ${package_id} が winget-pkgs に無い (${gone_why})。winget で入れられない"
   echo "    winget search ${search_word} で今のパッケージ ID を探し、${ps1_label} の \$packageId を直す"
   findings+=("${package_id} が winget-pkgs に無い")
   annotate error "${findings[-1]}"
   exit 1
 fi
 
-# winget の版 (新しい順)。固定した版が winget にあれば、それより古い版は数だけにする (herdr の preview は
-# 週に何度も増える)。無ければ、選び直せるよう全部を出す
+# winget の版 (新しい順)。固定した版が winget にあれば、それより古い版は数だけにする (版は上げるたびに
+# 溜まっていく)。無ければ、選び直せるよう全部を出す
 pinned_listed=0
 if grep -qxF "${pinned}" <<<"${versions}"; then
   pinned_listed=1
@@ -493,9 +467,9 @@ if [[ -n ${versions} ]]; then
   done <<<"${versions}"
 fi
 
-# 出た日を引く。date_rows は、出た日の分かる版 (release の鍵) を出た順 (古い順) に 1 行ずつ、鍵・出た時刻
-# (epoch)・出た日・出てからの日数・winget に載る側か (1 / 0)・URL。空の欄が詰まらないよう、区切りは空白でない
-# \x1f にする
+# 出た日を引く。date_rows は、出た日の分かる版 (release の鍵。winget の版と同じ形) を出た順 (古い順) に 1 行ずつ、
+# 鍵・出た時刻 (epoch)・出た日・出てからの日数・winget に載る側か (1 / 0)・URL。空の欄が詰まらないよう、区切りは
+# 空白でない \x1f にする
 dates_ok=0
 dates_problem=""
 date_rows=""
@@ -617,27 +591,10 @@ if [[ ${dates_from} == github ]]; then
     IFS=$'\x1f' read -r gh_tag gh_key gh_age gh_url <<<"${latest}"
     echo "  GitHub の最新 : ${gh_key:-?} (${gh_tag}、出て ${gh_age} 日)"
     if [[ -z ${gh_key} ]]; then
-      echo "⚠ GitHub の最新 ${latest_word} ${gh_tag} ${key_missing}。付け方が変わったなら、この script の読み方を直す"
+      echo "⚠ GitHub の最新 release ${gh_tag} ${key_missing}。付け方が変わったなら、この script の読み方を直す"
       echo "    ${gh_url}"
-      findings+=("GitHub の最新 ${latest_word} ${gh_tag} ${key_missing}")
+      findings+=("GitHub の最新 release ${gh_tag} ${key_missing}")
     elif [[ -n ${winget_latest} ]]; then
-      winget_latest_key=$(key_of "${winget_latest}")
-      winget_latest_at=""
-      if [[ ${ahead_by} == published ]] && row=$(dated "${winget_latest}"); then
-        IFS=$'\x1f' read -r _ winget_latest_at _ <<<"${row}"
-      fi
-      # 鍵 $1・出た時刻 $2 の release が、winget の最新より新しいか (ahead_by で決め方が変わる)
-      after_winget_latest() {
-        if [[ -n ${winget_latest_at} ]]; then
-          (($2 > winget_latest_at))
-        else
-          newer_than "$1" "${winget_latest_key}"
-        fi
-      }
-      winget_keys=""
-      while IFS= read -r v; do
-        winget_keys+=$(key_of "${v}")$'\n'
-      done <<<"${versions}"
       # date_rows は出た順なので、最初に見つかった行がいちばん早く出た版
       ahead=()
       ahead_row=""
@@ -645,9 +602,9 @@ if [[ ${dates_from} == github ]]; then
         if [[ -z ${row} ]]; then
           continue
         fi
-        IFS=$'\x1f' read -r k at _ _ ch _ <<<"${row}"
-        if [[ ${ch} == 1 && " ${ahead[*]-} " != *" ${k} "* ]] && after_winget_latest "${k}" "${at}" \
-          && ! grep -qxF "${k}" <<<"${winget_keys}" && ! skipped_key "${k}"; then
+        IFS=$'\x1f' read -r k _ _ _ ch _ <<<"${row}"
+        if [[ ${ch} == 1 && " ${ahead[*]-} " != *" ${k} "* ]] && newer_than "${k}" "${winget_latest}" \
+          && ! grep -qxF "${k}" <<<"${versions}" && ! skip_reason "${k}" >/dev/null; then
           ahead+=("${k}")
           if [[ -z ${ahead_row} ]]; then
             ahead_row=${row}
@@ -658,13 +615,13 @@ if [[ ${dates_from} == github ]]; then
         IFS=$'\x1f' read -r first_v _ first_day first_age _ first_url <<<"${ahead_row}"
         if ((first_age < grace_days)); then
           waiting=1
-          wait_note "GitHub の ${ahead_word}${ahead[*]} が winget の ${package_id} にまだ無い。$(grace_left "${#ahead[@]}" "${first_v}" "${first_day}" "${first_age}")"
+          wait_note "GitHub の ${ahead[*]} が winget の ${package_id} にまだ無い。$(grace_left "${#ahead[@]}" "${first_v}" "${first_day}" "${first_age}")"
         else
           why=$(grace_over "${#ahead[@]}" "${first_v}" "${first_age}")
-          echo "⚠ GitHub の ${ahead_word}${ahead[*]} が winget の ${package_id} に無い (${why})"
+          echo "⚠ GitHub の ${ahead[*]} が winget の ${package_id} に無い (${why})"
           echo "    パッケージ ID が移ったかもしれない (${moved_example})。winget search ${search_word} で確かめる"
           echo "    ${first_url}"
-          findings+=("GitHub の ${ahead_word}${ahead[*]} が winget の ${package_id} に無い (${why})")
+          findings+=("GitHub の ${ahead[*]} が winget の ${package_id} に無い (${why})")
         fi
       fi
     fi
@@ -674,7 +631,7 @@ if [[ ${dates_from} == github ]]; then
 fi
 
 for i in "${!skipped_versions[@]}"; do
-  if ! newer_than "$(key_of "${skipped_versions[i]}")" "$(key_of "${pinned}")"; then
+  if ! newer_than "${skipped_versions[i]}" "${pinned}"; then
     echo "  ※ 見送りの一覧の ${skipped_versions[i]} は固定した版 (${pinned}) 以下なので、消してよい"
   fi
 done
@@ -689,7 +646,7 @@ if [[ -n ${dates_problem} ]]; then
   if ((${#unskipped[@]})); then
     cannot_check "${dates_problem}" "固定した版より新しい ${unskipped[*]} が ${born_ta}日が分からず、猶予の中かを決められなかった。"
   fi
-  cannot_check "${dates_problem}" "winget の版では知らせることは無いが、GitHub の最新 ${latest_word} と比べられなかった。"
+  cannot_check "${dates_problem}" "winget の版では知らせることは無いが、GitHub の最新 release と比べられなかった。"
 fi
 if ((waiting)); then
   echo "知らせることは無い (新しい版は猶予の中。上げるか見送るかは、知らせる前に決めてもよい)。"
