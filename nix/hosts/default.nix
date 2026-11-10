@@ -49,6 +49,8 @@
 #
 # wsl.windowsFiles.enable = true で、repo 直下の win/ を Windows 側へ配るマシンになる
 # (windowsUserName が要る。dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
+# そのうえで wsl.windowsFiles.typeClipboard.enable = true にすると、Windows に自作の type-clipboard を
+# 固定した版で入れる (既定は入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
 { mkHome }:
 
 {

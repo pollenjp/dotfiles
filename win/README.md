@@ -22,6 +22,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | (dotfiles-private の `ssh/port-forward.toml`) | `%USERPROFILE%\.config\port-forward\hosts.json` | `pf` が出す port の組 (共有の組)。manifest では配らず、`bootstrap-windows-port-forward.sh` が JSON にして置く ([後述](#port-forwarding-pf)) |
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
+| `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
 
 ## 配る
 
@@ -1218,3 +1219,95 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
    書く順も表の順
 2. `managed.json` に同じ名前で値を書き、`--check` で検証して `--dry-run` で判定を見る
 3. commit して `~/dotfiles/setup --update`
+
+## type-clipboard
+
+`type-clipboard/Install-TypeClipboard.ps1` は、自作の Windows のアプリ type-clipboard
+([pollenjp/type-clipboard](https://github.com/pollenjp/type-clipboard)) を、GitHub の Release から固定した版で入れる。
+type-clipboard はクリップボードの文字を、選んだ窓へキー入力として 1 文字ずつ打ち込む (Hyper-V の VMConnect や RDP の
+サインイン画面など、貼り付けが効かない所にパスワードを入れるため)。単一の exe で、インストーラも署名も無く、winget にも無い。
+
+- setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ (既定は false)。値は dotfiles-private に
+  登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
+
+  ```nix
+  wsl = {
+    windowsFiles.enable = true;
+    windowsFiles.typeClipboard.enable = true;
+  };
+  ```
+
+- `Install-TypeClipboard.ps1` 自体は win/ を配るマシンのどれにも配る (manifest)。false のマシンでも、PowerShell で
+  `Install-TypeClipboard` を打てば入る (setup が見ないだけ)
+- 置き場所は `%LOCALAPPDATA%\Programs\type-clipboard\type-clipboard.exe`。スタートメニューの `type-clipboard`
+  (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\type-clipboard.lnk`) から起こす。設定は type-clipboard が自分で
+  `%APPDATA%\type-clipboard\settings.ini` に置き、dotfiles は触らない
+- 版は `Install-TypeClipboard.ps1` の `-Version` の既定値 (今は `0.1.0`) の 1 か所で、その版の exe の SHA-256 は同じファイルの
+  表 (`Get-TypeClipboardReleases`) で固定する。表の値は Release に置いた `type-clipboard.exe.sha256` の中身と同じ
+- 自作のアプリの Release なので、依存の公開からの猶予 (7 日) は置かない。猶予は第三者のパッケージの汚染版を、気付かれて
+  取り下げられるまで掴まないためのもので、自分の CI が作る Release には当たらない。中身は SHA-256 で固定する
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-TypeClipboard -Check` (PowerShell) | 差を出すだけ (ネットワークも使わない)。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-TypeClipboard` (PowerShell) | 揃える (入れる・入れ替える・ショートカットを作る) |
+| `nix/scripts/bootstrap-windows-type-clipboard.sh` (WSL) | `setup --update` でも毎回走る (order 97)。true のマシンだけ、入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない) |
+| `nix/scripts/bootstrap-windows-type-clipboard.sh --apply` (WSL) | WSL から揃える |
+
+揃えるときにすること:
+
+1. 置き場所の exe の SHA-256 を表と突き合わせ、入っている版を決める (exe は版の情報を持たないので、表に無い SHA-256 は
+   「不明」)。固定した版でなければ、固定した版の `type-clipboard.exe` を Release
+   (`https://github.com/pollenjp/type-clipboard/releases/download/v<版>/type-clipboard.exe`) から置き場所の中に別の名前で落とす
+2. 落とした物の SHA-256 が表の値と合うときだけ、置き場所の exe と入れ替える。合わない・落とせないときは、落とした物を消して
+   何も変えずに止まる (入っている版はそのまま)。入れ替えは、PowerShell 7 では 1 回の rename (置き先が動いている exe なら何も
+   変えずに落ちる)。Windows PowerShell 5.1 では古い exe を消してから名前を変えるので、その間で落ちると exe が消える (そう出る。
+   打ち直せば入る)
+3. スタートメニューのショートカットが無い・ほかを指していれば作り直す
+4. 読み直して、版とショートカットを確かめる
+
+- 入れ替えが要るときに置き場所の type-clipboard.exe が動いていると、何も変えずに止まって PID を出す (管理者として動いていて
+  パスが読めないものも、置き場所のものかもしれないので数える)。スクリプトは type-clipboard を止めない (打っている途中かも
+  しれない)。窓を閉じてから打ち直す
+- 止められた実行 (setup の時間切れなど) が置き場所に残した途中の物 (`type-clipboard.exe.download-<PID>`) は、次に入れるときに
+  10 分より古ければ消す
+- Invoke-WebRequest で落とすので、置いた exe に Mark of the Web (`Zone.Identifier`) は付かず、起こしても SmartScreen の警告は
+  出ない (中身は SHA-256 で確かめてある)
+- PowerShell 7 でも Windows PowerShell 5.1 でも動く。SHA-256 は .NET で出す (PowerShell 7 から起こした 5.1 は PSModulePath を
+  継ぎ、`Get-FileHash` が見つからないことがある)
+- 入れるのをやめる (option を false に戻す) ときも、setup は消さない。消すなら type-clipboard を閉じて、
+  `%LOCALAPPDATA%\Programs\type-clipboard` とスタートメニューの `type-clipboard.lnk` を消す (設定の `%APPDATA%\type-clipboard` も
+  要らなければ消す)
+
+### type-clipboard の新しい版を出したとき
+
+dotfiles が入れる版は自動では上がらない (setup は差を知らせるだけ)。type-clipboard の repo で新しい版の Release を出したら:
+
+1. Release の `type-clipboard.exe` を落とし、SHA-256 を自分でも出して `type-clipboard.exe.sha256` と同じかを確かめる
+   (`sha256sum type-clipboard.exe`)
+2. `type-clipboard/Install-TypeClipboard.ps1` の表 (`Get-TypeClipboardReleases`) に「版 = SHA-256」の行を足し (古い版の行は、
+   入っている版を名前で出すために残す)、`-Version` の既定値と、上の「今は」を新しい版にする
+3. `Install-TypeClipboard.Tests.ps1` を流して PR を出す
+4. merge したら、入れるマシンで `setup --update` を流す (差が ⚠ で出る)。type-clipboard の窓を閉じてから、
+   `Install-TypeClipboard` か `bootstrap-windows-type-clipboard.sh --apply` で揃える
+
+### Install-TypeClipboard.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (表・版の決め方・plan・状態の表) と、落とす・ショートカット・プロセスを偽物に差し替えた流れ (SHA-256 が
+  合わないと置かない・動いていると止まる・落とした物を残さない) は、`type-clipboard/Install-TypeClipboard.Tests.ps1` で確かめる。
+  Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/type-clipboard/Install-TypeClipboard.Tests.ps1
+  ```
+
+- 落とす・ショートカット (WScript.Shell の COM)・動いているかを見る本物の部分は、実機で置き場所を一時ディレクトリに向けて
+  確かめる (本物の置き場所とスタートメニューには触らない):
+
+  ```powershell
+  $t = Join-Path $env:TEMP 'type-clipboard-try'
+  & "$HOME\.config\powershell\Install-TypeClipboard.ps1" -InstallDir "$t\Programs\type-clipboard" -ShortcutDir "$t\StartMenu" -Check
+  & "$HOME\.config\powershell\Install-TypeClipboard.ps1" -InstallDir "$t\Programs\type-clipboard" -ShortcutDir "$t\StartMenu"
+  Remove-Item -Recurse -Force $t
+  ```

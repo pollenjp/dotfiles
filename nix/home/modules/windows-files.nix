@@ -4,7 +4,10 @@
 #
 #   1. ~/.local/state/dotfiles/windows-files.json (全ホスト)
 #
-#        {"enable":true,"version":1,"windowsHome":"/mnt/c/Users/<名前>"}
+#        {"enable":true,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/<名前>"}
+#
+#      typeClipboard は Windows に type-clipboard を入れるか (windowsFiles.typeClipboard.enable)。
+#      bootstrap-windows-type-clipboard.sh が読み、欄の無い前の世代のファイルは false と読む
 #
 #   2. PATH の pjp-google-ime (windowsFiles.enable のホストだけ)。Google 日本語入力の
 #      設定とテキストを行き来させる道具で、nix/scripts/bootstrap-windows-google-ime.sh が
@@ -50,6 +53,13 @@ in
         hosts/default.nix の wsl.windowsUserName を指定してください。
       '';
     }
+    {
+      assertion = wsl.windowsFiles.typeClipboard.enable -> enable;
+      message = ''
+        dotfiles.wsl.windowsFiles.typeClipboard.enable が true ですが dotfiles.wsl.windowsFiles.enable が false です。
+        type-clipboard を入れる Install-TypeClipboard.ps1 は win/ と一緒に配るので、win/ を配るマシンでだけ有効にしてください。
+      '';
+    }
   ];
 
   home.packages = lib.optional enable googleIme;
@@ -62,6 +72,9 @@ in
       # 見えなくなる。null にしておいて assertion に止めさせる。
       windowsHome =
         if enable && wsl.windowsUserName != null then "/mnt/c/Users/${wsl.windowsUserName}" else null;
+      # Windows に type-clipboard を入れるか (bootstrap-windows-type-clipboard.sh が読む)。
+      # 配らないマシンでは true にできない (上の assertion) が、念のため配るときだけ true にする
+      typeClipboard = enable && wsl.windowsFiles.typeClipboard.enable;
     }
     + "\n";
 }

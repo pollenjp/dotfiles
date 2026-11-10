@@ -6,6 +6,7 @@
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
+#   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
@@ -604,6 +605,26 @@ in
         `win/` を home-manager で読まないのは、ローカル flake が本体を
         `path:<repo>/nix` で読むので、その評価から repo 直下が見えないため
         (dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
+      '';
+    };
+
+    windowsFiles.typeClipboard.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Windows に type-clipboard (クリップボードの文字を選んだ窓へキー入力として打ち込む自作のアプリ。
+        pollenjp/type-clipboard の GitHub の Release の exe) を入れるマシンか。`windowsFiles.enable = true` の
+        マシンでだけ使える (false のマシンで true にすると評価時に止まる)。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `typeClipboard` に
+        落ち、`~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-type-clipboard.sh が読む。
+        true のマシンでは、配った `Install-TypeClipboard.ps1` (win/type-clipboard/) で、固定した版の exe を
+        Release から落とし、SHA-256 が合えば `%LOCALAPPDATA%\Programs\type-clipboard` に置いてスタートメニューに
+        出す (入っていなければ入れ、版がずれていれば ⚠ で知らせるだけ)。版と SHA-256 は ps1 で固定する
+        (win/README.md の「type-clipboard」)。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
       '';
     };
 

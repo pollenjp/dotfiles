@@ -10,7 +10,7 @@
 #
 #   - initial は評価でき、activationPackage の drvPath が出る
 #   - WSL の値 (windowsUserName・windowsFiles) が入り、windows-files.json が win/ を配るマシンとして配り先
-#     (/mnt/c/Users/alice) を持つ
+#     (/mnt/c/Users/alice) を持つ。type-clipboard (windowsFiles.typeClipboard) は入れない
 #   - 1Password・exeExecTrace・mtuGuard は無効 (鍵も sudo の手順も要らない初回)。git の署名を既定にせず、ssh のラッパー
 #     (~/.local/bin/ssh) も置かない
 #   - Dev Tracker は使わず、gitViaGh は本体の既定 (true) のまま
@@ -38,10 +38,11 @@ let
       ok = d.wsl.enable && d.wsl.windowsUserName == "alice" && d.wsl.windowsFiles.enable;
     }
     {
-      name = "windows-files.json は win/ を配るマシンとして配り先 (/mnt/c/Users/alice) を持つ";
+      name = "windows-files.json は win/ を配るマシンとして配り先 (/mnt/c/Users/alice) を持ち、type-clipboard は入れない";
       ok =
         builtins.fromJSON cfg.home.file.".local/state/dotfiles/windows-files.json".text == {
           enable = true;
+          typeClipboard = false;
           version = 1;
           windowsHome = "/mnt/c/Users/alice";
         };
