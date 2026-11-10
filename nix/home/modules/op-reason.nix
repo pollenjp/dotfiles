@@ -7,6 +7,11 @@
 # 入る条件は ssh.nix の ssh・ssh-add の wrapper と同じ (dotfiles.wsl.enable と dotfiles.onePassword.enable が両方 true)。
 # option は持たない。Claude の hook (files/claude/hooks/op-reason-guard.sh) はどのマシンにも置くので (claude.nix)、
 # この op があるかを ~/.local/state/dotfiles/claude-op-reason.json ({"enable": <bool>}) で知らせる。false でも必ず書く。
+#
+# fish の op の補完 (pkgs/pjp-op/op-completion.fish) も、入るマシンにだけ ~/.config/fish/completions/op.fish に置く
+# (programs.fish.completions)。fish に同梱の補完は、補完を初めて使うときに op completion fish を打ち、wrapper が理由なしと
+# して断った文を端末に出す。fish は fish_complete_path の頭にある ~/.config/fish/completions を先に探すので、こちらが読まれる。
+# 入らないマシンの fish は、同梱の補完 (本物の op を呼ぶ) のまま。
 {
   config,
   lib,
@@ -19,6 +24,10 @@ let
 in
 {
   home.packages = lib.optional enable (pkgs.callPackage ../../pkgs/pjp-op { });
+
+  programs.fish.completions = lib.mkIf enable {
+    op = builtins.readFile ../../pkgs/pjp-op/op-completion.fish;
+  };
 
   home.file.".local/state/dotfiles/claude-op-reason.json".text =
     builtins.toJSON { inherit enable; } + "\n";

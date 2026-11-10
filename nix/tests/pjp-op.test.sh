@@ -15,7 +15,9 @@
 #     - --reason が無い・空・空白だけなら 2 で終わり、stderr に使い方を出し、powershell を呼ばず、ログに refused (no-reason)
 #     - --reason X・--reason=X は op の引数のどこに置いてもよく、op には外した残りが届く。-- の後ろの --reason は op の引数
 #     - 改行・タブ・制御文字は空白 1 つに畳み、前後の空白を外す。窓は 200 字・ログは 500 字で切る
-#   理由なしで通るもの (--version・--help・-h・help・引数なし・-- より前の --help) は、窓の無い help の mode で powershell を通す
+#   理由なしで通るもの (--version・--help・-h・help・-- より前の --help) は、窓の無い help の mode で powershell を通す
+#   引数なし (op の引数が無い。--reason だけのときも): wrapper の使い方 (--reason・理由なしで通るもの・pjp-op-log・op 本体の
+#     help の出し方) を stdout に出して 0 で終わる。powershell も op.exe (見張りの whoami も) も起こさず、記録にも書かない
 #   通すもの
 #     - stdin の binary は op にそのまま届いて stdout に出る。stderr は op の出したものだけ。終了コードは op の終了コード
 #     - powershell は -NoProfile -NonInteractive -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand <起動の式> で起こし、
@@ -287,7 +289,7 @@ else
 fi
 
 echo "== 理由なしで通るもの"
-for c in "--version" "--help" "item get --help" "help item" ""; do
+for c in "--version" "--help" "item get --help" "help item"; do
   reset
   read -r -a words <<<"${c}"
   run_op help "${words[@]}"
@@ -296,6 +298,26 @@ for c in "--version" "--help" "item get --help" "help item" ""; do
     ok "理由なしの「op ${c}」は help の mode で通す (窓なし)"
   else
     ng "理由なしの「op ${c}」は help の mode で通す (窓なし)" "rc=${rc} payload=$(payload_of) err=$(cat "${work}/help.err")"
+  fi
+done
+
+echo "== 引数なし"
+# 使い方に要るもの: 理由の書き方 (--reason)・理由なしで通るもの (--version)・記録 (pjp-op-log)・op 本体の help (--help)
+for c in "" "--reason 理由だけ"; do
+  reset
+  read -r -a words <<<"${c}"
+  run_op noargs "${words[@]}"
+  usage_text=$(<"${work}/noargs.out")
+  if [[ ${rc} == 0 && ${usage_text} == *'op --reason "'* && ${usage_text} == *--version* &&
+    ${usage_text} == *pjp-op-log* && ${usage_text} == *'op --help'* && ! -s ${work}/noargs.err ]]; then
+    ok "「op ${c}」は wrapper の使い方を stdout に出して 0 で終わる (stderr は空)"
+  else
+    ng "「op ${c}」は wrapper の使い方を stdout に出して 0 で終わる (stderr は空)" "rc=${rc} out=${usage_text} err=$(cat "${work}/noargs.err")"
+  fi
+  if [[ $(ps_count) == 0 && ! -e ${FAKE_DIR}/op.direct && ! -e ${FAKE_DIR}/op.args && ! -e ${log} ]]; then
+    ok "「op ${c}」は powershell も op.exe (見張りの whoami も) も起こさず、記録に書かない"
+  else
+    ng "「op ${c}」は powershell も op.exe (見張りの whoami も) も起こさず、記録に書かない" "ps=$(ps_count) files=$(ls "${FAKE_DIR}") log=$(cat "${log}" 2>&1)"
   fi
 done
 

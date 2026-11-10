@@ -16,7 +16,8 @@
 #
 # ## 流れ
 #
-#   1. 自分の引数を読む。-- より前の最初の --reason X / --reason=X を外し、残りを op に渡す
+#   1. 自分の引数を読む。-- より前の最初の --reason X / --reason=X を外し、残りを op に渡す。op の引数が無ければ (--reason
+#      だけのときも)、wrapper の使い方を stdout に出して 0 で終わる (powershell も op.exe も起こさず、記録にも書かない)
 #   2. 呼び手を集める (proc の祖先の claude・herdr の workspace と pane・cwd と git の repo・branch)
 #   3. mode を決める。理由があれば desktop で、OP_SERVICE_ACCOUNT_TOKEN か OP_CONNECT_HOST + OP_CONNECT_TOKEN があれば
 #      service。理由が無くても --version・--help など (is_help) は help (窓なし)。ほかは 2 で断る
@@ -89,13 +90,42 @@ say() {
   done
 }
 
+# usage: 断るときに stderr へ出す短い使い方
 usage() {
   cat >&2 <<'EOS'
 使い方: op --reason "<なぜ op を呼ぶか>" <op の引数…>
   WSL の op は、呼ぶ理由を必須にした wrapper です (dotfiles の pjp-op)。理由は 1Password の承認の画面と一緒に出る窓と、
   記録 (pjp-op-log) に残ります。何のために何を読む・書くかを 1 文で書いてください。
   例: op --reason "infra-v2 の VM を作るのに Proxmox の API の token を読む" read "op://Private/proxmox/token"
-  理由なしで通るのは --version と help (--help・-h・help) だけです。
+  理由なしで通るのは --version と help (--help・-h・help) だけです。詳しい使い方は引数なしの op で出ます。
+EOS
+}
+
+# usage_full: 引数なしの op が stdout へ出す使い方
+usage_full() {
+  cat <<'EOS'
+使い方: op --reason "<なぜ op を呼ぶか>" <op の引数…>
+
+WSL の op は、呼ぶ理由を必須にした 1Password CLI の wrapper です (dotfiles の pjp-op)。
+呼び出しごとに新しい powershell.exe を挟んで op.exe を起こし、1Password の承認をその 1 回に
+閉じます。理由は、承認の画面と一緒に出る窓と、記録 (pjp-op-log) に残ります。
+
+理由 (--reason)
+  何のために何を読む・書くかを 1 文で書きます。人が打つときも要り、無ければ 2 で断ります。
+  --reason "<理由>" でも --reason=<理由> でもよく、op の引数のどこに置いてもかまいません
+  (-- より後ろは op の引数です)。
+  例: op --reason "infra-v2 の VM を作るのに Proxmox の API の token を読む" read "op://Private/proxmox/token"
+
+理由なしで通るもの (承認の画面は出ません)
+  op               この使い方 (op.exe は起こしません)
+  op --version     op の版
+  op --help        op 本体の使い方。コマンドごとは op <コマンド> --help
+
+記録を見る
+  pjp-op-log       直近 1 時間に、誰が何の理由で op を呼んだか (--since 1d・--all・--json)
+
+呼び手と理由の窓が出ていない 1Password CLI の承認の画面は、拒否してください。
+詳しくは dotfiles の nix/README.md「WSL の op を理由つきで呼ぶ」。
 EOS
 }
 
@@ -158,11 +188,17 @@ if ((have_reason)); then
   reason=$(normalize "${reason}")
 fi
 
+# op の引数が無ければ (--reason だけのときも)、wrapper の使い方を出して終わる。op.exe に渡すものが無いので、powershell も
+# op.exe (見張りの whoami も) も起こさず、承認とかかわりが無いので記録にも書かない。op 本体の使い方は op --help で出る
+if ((${#args[@]} == 0)); then
+  usage_full
+  exit 0
+fi
+
 # is_help: 理由なしで通す呼び出し (承認の要らない --version・help)。値の --help (--title --help) にも当たるが、help の mode も
 # 呼び出しごとの powershell を通り、窓を出さないので、出た承認の画面は「窓の無い承認は拒否」で断れる
 is_help() {
   local a
-  ((${#args[@]} > 0)) || return 0
   case ${args[0]} in
     --version | -v | --help | -h | help) return 0 ;;
   esac

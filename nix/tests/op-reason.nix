@@ -13,11 +13,14 @@
 #     - claude-op-reason.json は、入るマシンで {"enable":true}、ほかで {"enable":false}。どちらも改行で終わる
 #     - Claude の hook (op-reason-guard.sh) は、入らないマシンにも repo の script から実行できるファイルとして置かれる
 #       (hook は claude-op-reason.json を読んで黙る)
+#     - fish の op の補完 (~/.config/fish/completions/op.fish) は入るマシンにだけ置く (ほかは fish に同梱の補完のまま)
 #   ビルド時 (このランナーの system だけ)
 #     - 入るマシンの profile の bin/op と bin/pjp-op-log は、この package のもの
 #     - 入らないマシンの profile に bin/op は無い
 #     - profile の op は、呼ぶ側の PATH に何も無くても (runtimeInputs で足りる) 動き、op.exe が無ければ 127 で終わって、
 #       断ったことを記録に書く
+#     - 置いた補完 (home-manager が fish_indent を通したもの) を fish が読むと、op を呼ばずにコマンドの候補を出す
+#       (補完の動きの細部は pjp-op-completion.test.sh)
 {
   lib,
   pkgs,
@@ -51,6 +54,7 @@ let
   opOf = cfg: builtins.filter isOp cfg.home.packages;
   state = cfg: cfg.home.file.".local/state/dotfiles/claude-op-reason.json".text;
   hook = cfg: cfg.home.file.".claude/hooks/op-reason-guard.sh";
+  hasFishCompletion = cfg: cfg.xdg.configFile ? "fish/completions/op.fish";
 
   cases = [
     {
@@ -90,6 +94,14 @@ let
             plain
           ];
     }
+    {
+      name = "fish の op の補完は入るマシンにだけ置く";
+      ok =
+        hasFishCompletion wslOp
+        && !(hasFishCompletion wslOnly)
+        && !(hasFishCompletion opOnly)
+        && !(hasFishCompletion plain);
+    }
   ];
 
   failed = builtins.filter (c: !c.ok) cases;
@@ -97,7 +109,7 @@ let
 in
 assert lib.assertMsg (failed == [ ])
   "op-reason-state: 合わない項目: ${lib.concatMapStringsSep " / " (c: c.name) failed}";
-pkgs.runCommand "op-reason-state" { } ''
+pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks pkgs.fish; } ''
   echo ${lib.escapeShellArg (lib.concatMapStringsSep "\n" (c: "ok   ${c.name}") cases)}
   ${lib.optionalString buildChecks ''
     pkg=${lib.head (opOf wslOp)}
@@ -125,6 +137,19 @@ pkgs.runCommand "op-reason-state" { } ''
       exit 1
     fi
     echo "ok   profile の op は PATH が無くても動き、op.exe が無ければ 127 で断って記録に書く"
+
+    # 置いた補完を fish の補完の置き場の頭に足し、偽の op (呼ばれたら印を書いて 2 で終わる) で op <Tab> の候補を見る
+    mkdir -p "$TMPDIR/comp" "$TMPDIR/bin" "$TMPDIR/fish-home"
+    cp ${wslOp.xdg.configFile."fish/completions/op.fish".source} "$TMPDIR/comp/op.fish"
+    printf '#!%s\necho called >>%s/op.calls\nexit 2\n' "$BASH" "$TMPDIR" >"$TMPDIR/bin/op"
+    chmod +x "$TMPDIR/bin/op"
+    cand=$(HOME="$TMPDIR/fish-home" PATH="$TMPDIR/bin:$PATH" \
+      fish --no-config -c 'set -p fish_complete_path $argv[1]; complete -C "op "' "$TMPDIR/comp" | cut -f1)
+    if [[ $'\n'$cand$'\n' != *$'\n'item$'\n'* || -e $TMPDIR/op.calls ]]; then
+      echo "op-reason-state: 置いた fish の補完で op <Tab> が item を出さないか、op を呼んだ: $cand" >&2
+      exit 1
+    fi
+    echo "ok   置いた fish の補完は、op を呼ばずに op <Tab> の候補を出す"
   ''}
   touch $out
 ''
