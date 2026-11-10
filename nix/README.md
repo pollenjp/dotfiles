@@ -2488,7 +2488,7 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 
 | すること | 中身 |
 | --- | --- |
-| 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。op の引数のどこに置いてもよく、`--` より後ろは op の引数）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ |
+| 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。op の引数のどこに置いてもよく、`--` より後ろは op の引数）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ。引数なしの `op` は wrapper の使い方を出す（[後述](#使い方を見るfish-の補完)） |
 | 呼び出しごとの powershell | 呼び出しのたびに新しい `powershell.exe`（Windows PowerShell 5.1）を起こし、その子として `op.exe` を起こす。承認はこの powershell に付き、終わると同じ powershell の中で閉じる（`op whoami` で確かめ、承認があれば `op signout --all`） |
 | 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。最前面だが focus は奪わず、許可は求めない（決めるのは 1Password の画面だけ）。op が終われば閉じる |
 | 通知 | 窓と同じ中身を Windows の通知にも出す（補助。出せなければ黙って飛ばす） |
@@ -2523,6 +2523,29 @@ pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンド�
 列は 時刻・結果（許可・拒否・時間切れ・失敗・成功・中断）・秒・呼び手・理由・コマンド。終わっていない（止められた）呼び出しは
 「実行中か中断」、断った呼び出しと共有の承認を消したことも行に出る。
 
+### 使い方を見る・fish の補完
+
+引数なしの `op`（`--reason` だけのときも）は、wrapper の使い方（理由の書き方・理由なしで通るもの・`pjp-op-log`・op 本体の help
+の出し方）を stdout に出して 0 で終わる。`powershell.exe` も `op.exe` も起こさず、記録にも書かない。op 本体の使い方は今までどおり
+`op --help`（コマンドごとは `op <コマンド> --help`）で、呼び出しごとの powershell を通って `op.exe` が出す。
+
+fish には、op を呼ばない op の補完を `~/.config/fish/completions/op.fish` に置く（`nix/pkgs/pjp-op/op-completion.fish` を
+`programs.fish.completions` で）。fish に同梱の op の補完は `op completion fish | source` の 1 行で、補完を初めて使うとき（Tab・
+自動補完の候補）に `op completion fish` を打つ。wrapper は理由が無いので断り、使い方と断りの文が端末に出ていた（fish を起こす
+たびに 1 回。記録にも refused が残る）。fish は `~/.config/fish/completions` を同梱の補完より先に探すので、置いた方が読まれる。
+
+| 出すもの | 中身 |
+| --- | --- |
+| `--reason` | まだ書いていなければ出す（`op <Tab>` でもコマンドと並べて出す）。理由の値には何も出さない |
+| コマンド | トップのコマンドと 2 段目（`op item <Tab>` → `get`・`list`…）。`--reason`・`--account` などの値をコマンドと読まない |
+| flag | global の flag と、よく使うコマンド（read・inject・run・signin・signout・item・document）の flag。ファイルを取る flag（`--out-file` など）と `op document create` の引数ではファイルを出す |
+| `--` の後ろ | `op run -- <コマンド>` の子のコマンドは、そのコマンドの補完に任せる |
+
+item・vault の名前のように op に聞かないと分からないものは出さない（op を呼ぶと、補完のたびに powershell と `op.exe` が起き、
+承認の画面も出うる）。一覧は op 2.41.0 から写してある。op を上げてコマンドが変わったら、ファイルの先頭のコメントの手順で
+写し直す。wrapper の無いマシンの fish は、同梱の補完（本物の op を呼ぶ）のまま。`fish --no-config` は置き場を読まないので、
+同梱の補完が動く。
+
 ### 守る決まり
 
 - **窓が出ていない 1Password CLI の承認の画面は拒否する。** 窓の無い画面は `op` を通らずに `op.exe` を直に打ったもの（道具の中
@@ -2536,12 +2559,15 @@ pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンド�
 ### 反映
 
 `~/dotfiles/setup --self-update --update` で入る。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）
-の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。
+の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く（同梱の補完をもう読んだ
+fish は、起こし直すまでそのまま）。
 
 ### 確かめる
 
 ```sh
 command -v op                              # ~/.nix-profile/bin/op
+op                                         # wrapper の使い方 (powershell も op.exe も起こさない)
+fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --version                               # 理由なしで通る (承認の画面は出ない)
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。60 秒以内に許可すると vault の一覧が出る
 pjp-op-log                                 # 上の呼び出しが「許可」で残る
