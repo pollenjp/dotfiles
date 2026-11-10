@@ -246,6 +246,14 @@
                 bash ${./tests/pjp-op-log.test.sh} ${./pkgs/pjp-op/pjp-op-log.sh}
                 touch $out
               '';
+          # WSL の op の wrapper を入れるマシンに置く fish の op の補完 (pkgs/pjp-op/op-completion.fish) を、本物の fish と偽の op で
+          # 流す。op を呼ばないことと、fish に同梱の補完 (op completion fish を打つ) より先に読まれることを見る
+          pjp-op-completion-test =
+            pkgs.runCommand "pjp-op-completion-test" { nativeBuildInputs = [ pkgs.fish ]; }
+              ''
+                bash ${./tests/pjp-op-completion.test.sh} ${./pkgs/pjp-op/op-completion.fish}
+                touch $out
+              '';
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、

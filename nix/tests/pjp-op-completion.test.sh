@@ -76,6 +76,7 @@ touch "${work}/cwd/afile.txt"
 
 # cands <行> [<補完の置き場>]: その行の補完の候補の名前を 1 行に 1 つ cand に、fish の stderr を cand_err に入れる
 cands() {
+  # shellcheck disable=SC2016 # fish の式 ($argv は fish が読む)
   cand=$(cd "${work}/cwd" && fish --no-config -c 'set -p fish_complete_path $argv[1]; complete -C $argv[2]' \
     "${2:-${work}/comp}" "$1" 2>"${work}/fish.err" | cut -f1)
   cand_err=$(<"${work}/fish.err")
