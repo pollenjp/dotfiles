@@ -1,0 +1,9 @@
+{
+  "rules": [
+    {
+      "resolution": "3840x2160",
+      "layout": "4k-43inch"
+    }
+  ],
+  "default": "1080p"
+}
