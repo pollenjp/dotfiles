@@ -106,7 +106,7 @@ preview_out="herdr (winget の Herdr.Herdr、${pkg})
   winget pin      : あり
 ⚠ PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
 ⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
-※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)
+※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)
 $(preview_verdict '')"
 
 # Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている。締めの行は Preview を先に出す)

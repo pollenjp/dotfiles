@@ -176,7 +176,7 @@ Test-Case '見出しはパッケージ名と置き場所' "herdr (winget の Her
 Test-Case 'Preview が残っていれば、表の最後に ⚠ の行を足す' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す' { (Get-Rows (New-State $previewLeft))[6].Text }
 Test-Case 'Preview が残っているだけなら、ほかの行は ⚠ にしない' 1 { @((Get-Rows (New-State $previewLeft)) | Where-Object { $_.Warn }).Count }
 Test-Case 'PATH で Preview の herdr が先なら、その場所を ⚠ で出す' "⚠ PATH の herdr   : $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" { (Get-Rows (New-State $previewOnPath))[5].Text }
-Test-Case 'PATH で Preview の herdr が先なら、Preview を外せば直ると ※ で添える' '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)' { (Get-Rows (New-State $previewOnPath))[-1].Text }
+Test-Case 'PATH で Preview の herdr が先なら、Preview を外せば直ると ※ で添える' '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)' { (Get-Rows (New-State $previewOnPath))[-1].Text }
 Test-Case 'PATH で Preview の herdr が先でも、「PATH から外す」とは言わない' 0 { @((Get-Rows (New-State $previewOnPath)) | Where-Object { $_.Text -like '*PATH から外す*' }).Count }
 # Herdr.Herdr が入っていない間は、Preview を外せと読める行を出さない (入れる前に外すと herdr が無くなる。レビューの I1)
 Test-Case 'Herdr.Herdr が入っていなくて Preview だけがあるときは、Preview の行を「入れてから外す」にする' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから外す' { (Get-Rows (New-State $previewOnly))[6].Text }
