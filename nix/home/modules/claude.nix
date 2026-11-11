@@ -11,7 +11,10 @@
 #   の VM では scripts/claude-cloud/bootstrap-claude-cloud.sh がそこを cloud の冒頭に差し替え、最初の「## 」
 #   から後ろを写す (ADR 034)。手元と cloud の両方に効かせたい指示は「## 」の節に書く
 #   files/claude/statusline-command.sh -> ~/.claude/statusline-command.sh
+#                                     (先頭の 📄top の port を dotfiles.ccPages.port で埋める。下記)
 #   files/claude/hooks/<name>.sh   -> ~/.claude/hooks/<name>.sh   (フック。登録は bootstrap-claude-hook.sh)
+#   files/claude/hooks/footer-links-archive.mjs -> ~/.claude/hooks/footer-links-archive.mjs
+#                                     (Stop フック footer-links-archive.sh の本体。入口が PATH の node で起こす。下記)
 #   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
 #                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
 #   (op-reason-guard.sh が読む ~/.local/state/dotfiles/claude-op-reason.json は home/modules/op-reason.nix が書く)
@@ -96,6 +99,13 @@
 let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
+
+  # このマシンの cc-pages の port (null なら cc-pages の既定の 7777。home/modules/cc-pages.nix は config.toml を置かない)。
+  # footer の cc-page の規則 (claude-footer-links.json) と status line の 📄top (statusline-command.sh) の @ccPagesPort@ を埋める
+  ccPagesPort = if config.dotfiles.ccPages.port == null then 7777 else config.dotfiles.ccPages.port;
+  fillCcPagesPort =
+    file:
+    builtins.replaceStrings [ "@ccPagesPort@" ] [ (toString ccPagesPort) ] (builtins.readFile file);
 
   # Claude のセッション (Bash tool) にだけ渡す git の設定。1 組が
   # GIT_CONFIG_KEY_<n> / GIT_CONFIG_VALUE_<n> の 1 対になる (並びもこのまま)。
@@ -336,16 +346,11 @@ in
     # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
     # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず files/claude/footer-links.json に
     # 書き、cc-page の規則の @ccPagesPort@ だけをこのマシンの cc-pages の port で埋める。規則の url は
-    # 固定の origin (port を含む) で書くしかなく、port は dotfiles.ccPages.port でマシンごとに変わるため
-    # (null なら cc-pages の既定の 7777。home/modules/cc-pages.nix は config.toml を置かない)。
+    # 固定の origin (port を含む) で書くしかなく、port は dotfiles.ccPages.port でマシンごとに変わるため (上の ccPagesPort)。
     {
-      ".local/state/dotfiles/claude-footer-links.json".text =
-        let
-          port = if config.dotfiles.ccPages.port == null then 7777 else config.dotfiles.ccPages.port;
-        in
-        builtins.replaceStrings [ "@ccPagesPort@" ] [ (toString port) ] (
-          builtins.readFile (claudeRoot + "/footer-links.json")
-        );
+      ".local/state/dotfiles/claude-footer-links.json".text = fillCcPagesPort (
+        claudeRoot + "/footer-links.json"
+      );
     }
 
     # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。
@@ -498,15 +503,29 @@ in
       };
     }
 
+    # Stop フック。会話に出たリンク (footer のバッジと同じ規則で拾う PR・チケット・cc-page) を、cc-pages の会話のトップページの
+    # 「リンク」の節に全部残す (footer のバッジは 5 個までで、長い会話では押し出される)。入口の footer-links-archive.sh が
+    # cc-pages・node の有無と CC_PAGES_DISABLE を見てから、隣の本体 footer-links-archive.mjs を PATH の node (mise のもの) で
+    # 起こす。node は home の閉包に入れない (言語ランタイムは mise。nix から渡すと閉包の脆弱性スキャンに node が入る)。
+    # option は持たず、どのホストにも置く (cc-pages を使わないマシンでは黙る)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/footer-links-archive.sh" = {
+        source = claudeRoot + "/hooks/footer-links-archive.sh";
+        executable = true;
+      };
+      ".claude/hooks/footer-links-archive.mjs".source = claudeRoot + "/hooks/footer-links-archive.mjs";
+    }
+
     # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
     # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
+    # 先頭の 📄top (cc-pages の会話のトップページへのリンク) の port は @ccPagesPort@ と書き、上の ccPagesPort で埋める。
     #
     # 既存マシンには /statusline が書いた実ファイルが在る。home-manager は
     # 自分が作ったのではないファイルを消さないので、初回の switch は
     # "would be clobbered" で止まる。退避するか消してから switch する。
     {
       ".claude/statusline-command.sh" = {
-        source = claudeRoot + "/statusline-command.sh";
+        text = fillCcPagesPort (claudeRoot + "/statusline-command.sh");
         executable = true;
       };
     }

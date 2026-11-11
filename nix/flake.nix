@@ -291,6 +291,15 @@
                 touch $out
               '';
           footer-links-archive-gate-test = scriptTest "footer-links-archive-gate" ./files/claude/hooks/footer-links-archive.sh;
+          # status line (files/claude/statusline-command.sh) は 📄top の port を home の設定で埋めるので、home から作った
+          # script (既定の port 7777) を渡す
+          statusline-command-test = scriptTest "statusline-command" (
+            pkgs.writeText "statusline-command.sh"
+              (mkHome {
+                username = "tester";
+                inherit system;
+              }).config.home.file.".claude/statusline-command.sh".text
+          );
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
@@ -581,6 +590,22 @@
               ;
           };
           claude-footer-links-state = import ./tests/claude-footer-links.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-footer-links-archive-state = import ./tests/claude-footer-links-archive.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-statusline-state = import ./tests/claude-statusline.nix {
             inherit
               lib
               pkgs
