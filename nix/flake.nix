@@ -135,6 +135,15 @@
                 bash ${./tests + "/${name}.test.sh"} ${target}
                 touch $out
               '';
+          # home の設定 (modules) から作った ~/.local/state/dotfiles/claude-footer-links.json (footer の規則。cc-page の規則の
+          # port を埋めたもの)。規則を当てる node の試験に渡す
+          footerLinksJson =
+            modules:
+            pkgs.writeText "claude-footer-links.json"
+              (mkHome {
+                username = "tester";
+                inherit system modules;
+              }).config.home.file.".local/state/dotfiles/claude-footer-links.json".text;
         in
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
           lib.filterAttrs (_: cfg: cfg.pkgs.stdenv.hostPlatform.system == system) self.homeConfigurations
@@ -260,20 +269,28 @@
           # 同じ RegExp で確かめられる node で流す。cc-page の規則は port を home の設定で埋めるので、
           # home から作った JSON を、既定の port (7777) と 7780 の 2 通りで渡す
           claude-footer-links-test =
-            let
-              generated =
-                modules:
-                pkgs.writeText "claude-footer-links.json"
-                  (mkHome {
-                    username = "tester";
-                    inherit system modules;
-                  }).config.home.file.".local/state/dotfiles/claude-footer-links.json".text;
-            in
-            pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; } ''
-              node ${./tests/claude-footer-links.test.mjs} ${generated [ ]} 7777
-              node ${./tests/claude-footer-links.test.mjs} ${generated [ { dotfiles.ccPages.port = 7780; } ]} 7780
-              touch $out
-            '';
+            pkgs.runCommand "claude-footer-links-test" { nativeBuildInputs = [ pkgs.nodejs ]; }
+              ''
+                node ${./tests/claude-footer-links.test.mjs} ${footerLinksJson [ ]} 7777
+                node ${./tests/claude-footer-links.test.mjs} ${
+                  footerLinksJson [ { dotfiles.ccPages.port = 7780; } ]
+                } 7780
+                touch $out
+              '';
+          # footer から溢れるリンクを cc-pages の会話のトップページに残す Stop フック (files/claude/hooks/footer-links-archive.*)。
+          # 本体は footer と同じ規則を当てるので、上と同じく home から作った規則を 2 通りの port で渡す。入口の
+          # footer-links-archive.sh も本物の node で通すので、hooks の dir を丸ごと渡す。node はこの試験の中だけで使い、
+          # home の閉包には入れない (hook は PATH の mise の node を使う)
+          footer-links-archive-test =
+            pkgs.runCommand "footer-links-archive-test" { nativeBuildInputs = [ pkgs.nodejs ]; }
+              ''
+                node ${./tests/footer-links-archive.test.mjs} ${./files/claude/hooks} ${footerLinksJson [ ]} 7777
+                node ${./tests/footer-links-archive.test.mjs} ${./files/claude/hooks} ${
+                  footerLinksJson [ { dotfiles.ccPages.port = 7780; } ]
+                } 7780
+                touch $out
+              '';
+          footer-links-archive-gate-test = scriptTest "footer-links-archive-gate" ./files/claude/hooks/footer-links-archive.sh;
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;
           verify-test = scriptTest "verify" ./scripts/verify.sh;
           # flake.lock・flake.nix・設定 (release-age.nix) を本物の nix eval で読むので、nix を足して流す
