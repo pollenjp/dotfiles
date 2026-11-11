@@ -4,13 +4,15 @@ description: >-
   シークレット (API キー・パスワード・token・秘密鍵) を扱うときに読む。値が要る program を起こす・試すとき、
   .env・設定ファイル・CI・cron・systemd に認証情報を書くとき、ユーザーにパスワードや token を設定・入力して
   もらいたくなったとき、ユーザーが会話に値を貼ったとき、.env の中身を確かめたくなったとき、平文のシークレットを
-  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create を打とうとしたときに使う
+  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get を打とうとしたとき、
+  1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいときに使う
 ---
 
 # pjp-secrets
 
 シークレットの値は 1Password にだけ置き、会話・ファイル・端末に出さない。`.env` には `op://vault/項目/欄` の参照だけを書き、
-program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環境変数で渡す。
+program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環境変数で渡す。参照は `pjp-op-ref` で ID の形
+(`op://<vault の ID>/<項目の ID>/[<セクションの ID>/]<欄の ID>`) に直してから書く。
 
 **決まりの字面を外れることは、決まりの意図を外れること。** 「本人が頼んだから」「今回だけ」「伏せれば見てよい」で崩さない。
 
@@ -31,21 +33,43 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
    `printf '%s' '{"title":"<名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" - --generate-password=letters,digits,32 >/dev/null`
    (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
    `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。pjp-op の無いマシンでは `--reason` を外す)
-3. 参照だけをもらう。アプリの欄のメニュー「Copy Secret Reference」で取れる (`op://Private/kabu-station/password` の形)
-4. `.env` に参照を足す。既にある `.env` は Read・Edit で開かず (平文が入っていれば会話に入る)、Bash で足す:
-   `touch .env && sed -i -E '/^[[:space:]]*(export[[:space:]]+)?KABU_API_PASSWORD[[:space:]]*=/d' .env && printf '%s\n' 'KABU_API_PASSWORD=op://Private/kabu-station/password' >>.env`。
-   名前に空白のある参照は `"…"` で囲む。`git check-ignore -q .env` で git に載らないかも見る (載るなら `.gitignore` に足す。
-   もう追跡されていれば `git rm --cached .env` を提案し、平文が commit されたことがあれば作り直しを勧める)
-5. 起こす: `pjp-op-env --reason "<何のために何を読むか>" -- <実行ファイル> [引数…]` (今の dir の `.env` を読む。別のファイルは
+3. 参照だけをもらう。アプリの欄のメニュー「Copy Secret Reference」で取れる (`op://Private/kabu-station/password` のような
+   名前の形。名前に使えない文字のある部分だけが ID になる)
+4. 参照を ID の形に直す: `pjp-op-ref --reason "<何のために読むか>" "<参照>" ["<参照>"…]`。ID の参照を渡した順に 1 行ずつ出す
+   (値は出さない。op の出力から ID だけを抜き出す)。ID にするわけ:
+   - 名前は 1Password のアプリで変えられ、変えると名前の参照は切れる (`.env` を直すまで program が起きない)。項目の ID が変わるのは、
+     項目を別の vault へ移したときだけ
+   - ID は英小文字と数字なので、空白や記号のある名前でも `.env` で引用符で囲まずに済む (作りつけのセクションの ID の `add more`
+     のように空白のあるものは、pjp-op-ref が stderr で知らせるので `"…"` で囲む)
+
+   承認は項目ごとに 1 回出る (同じ項目の参照はまとめて 1 回なので、参照は全部並べて 1 回で打つ)。Bash の timeout は 600000 にする。
+   欄やセクションが見つからない・同じ名前で 2 つ以上あると、参照と件数を出して止まる (件数をユーザーに伝え、参照を確かめてもらう。
+   2 つ以上ならセクションを足した参照をもらう)。pjp-op-ref が無いマシン (古い dotfiles) では、名前の参照のまま書いてよい
+5. `.env` に参照を足す。既にある `.env` は Read・Edit で開かず (平文が入っていれば会話に入る)、Bash で足す:
+   `touch .env && sed -i -E '/^[[:space:]]*(export[[:space:]]+)?KABU_API_PASSWORD[[:space:]]*=/d' .env && sed -i -e '$a\' .env && printf '%s\n' 'KABU_API_PASSWORD=op://<vault の ID>/<項目の ID>/<欄の ID>' >>.env`
+   (`<…>` は 4 で出た ID の参照に置き換える。`sed -i -e '$a\'` は、末尾に改行の無い `.env` に改行を足し、足す行が前の行に
+   つながらないようにする)。空白のある参照は `"…"` で囲む。`git check-ignore -q .env` で git に載らないかも見る
+   (載るなら `.gitignore` に足す。もう追跡されていれば `git rm --cached .env` を提案し、平文が commit されたことがあれば作り直しを勧める)
+6. 起こす: `pjp-op-env --reason "<何のために何を読むか>" -- <実行ファイル> [引数…]` (今の dir の `.env` を読む。別のファイルは
    `--env-file <path>`)。Bash の timeout は 600000 にし (承認を待つ間に止められないよう)、常駐する program は `run_in_background`
    で起こし、出力を読んで承認が通ったか (pjp-op-env の 1 行か、op の誤りと終了コード) を確かめる
-6. 確かめるときも値は出さない (下の表)
+7. 確かめるときも値は出さない (下の表)
+
+## 既にある `.env` の名前の参照を ID に直す
+
+1. `pjp-op-env --dry-run` で名前と参照を見る (参照でない値は出ない。`.env` を開かない)
+2. 名前の参照を全部並べて `pjp-op-ref --reason "<理由>" "<参照>"…` を 1 回打つ (承認は項目ごとに 1 回)
+3. 名前ごとに、上の 5 と同じく sed で行を消して printf で ID の参照の行を足す。`.env` を読んで書き換える script は書かない
+   (平文の値の行に触れうる)
+4. `pjp-op-env --dry-run` で、参照が ID の形になったかを見る。解けるかは、次に program を起こすときに分かる (起こさずに
+   確かめたいときだけ `-- true`。承認が 1 回増える)
 
 ## 値を見ずに確かめる
 
 | 知りたいこと | 打つもの | 承認 |
 | --- | --- | --- |
-| `.env` にどの名前があり、参照か値か・空か | `pjp-op-env --dry-run` (参照は出し、参照でない値は出さない) | なし |
+| `.env` にどの名前があり、参照か値か・空か、参照が名前の形か ID の形か | `pjp-op-env --dry-run` (参照は出し、参照でない値は出さない) | なし |
+| もらった参照の ID の形 | `pjp-op-ref --reason "<理由>" "<参照>"…` (ID だけを出す) | 項目ごとに 1 回 |
 | 参照が全部解けるか | `pjp-op-env --reason "<理由>" -- true` (1 つでも解けなければ op の誤りで止まる) | 1 回 |
 | program に渡ったか | `pjp-op-env` が起こす前に出す 1 行 (解いた件数と名前) と、program の動き | — |
 | シークレットでない設定 (URL・ポート) の値 | 名前を指して `grep '^KABU_API_URL=' .env` (シークレットでないと分かっている名前だけ。`postgres://user:pass@…`・`?token=`・webhook の URL のように認証情報が入るものはシークレット) | なし |
@@ -73,6 +97,9 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 - 承認は 1 回。拒否・時間切れ (pjp-op-env が op の終了コードで止まり、hook が知らせる) のあとは打ち直さず、ユーザーに聞く
   (hook が出す問いに従う。hook の無いマシンでも同じ)
 - 起こし直すたびに承認が 1 回出るので、直すものを直してからまとめて 1 回で起こす
+- pjp-op-ref の承認は項目ごとに 1 回。窓のコマンドは `op item get <項目> --vault <vault> --format json` で、理由の頭に
+  `[pjp-op-ref: 参照 <N> 件を ID の形に直す。ID だけを抜き出し、値は捨てる]` が付く。拒否・時間切れのあとは pjp-op-env と同じく
+  打ち直さずに聞く (pjp-op-ref は残りの項目を読まずに止まる)
 
 ## マシンの違い
 
@@ -81,6 +108,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | WSL の op が wrapper (pjp-op) | `~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true | pjp-op-env を使う (pjp-op-env が op に `--reason` を付ける) |
 | 素の op のマシン | `enable` が true でなく、`command -v op` がある | pjp-op-env を使う (pjp-op-env は op に `--reason` を付けない) |
 | pjp-op-env が無い | `command -v pjp-op-env` が無い | 平文に逃げず、ユーザーに渡し方を聞く |
+| pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く)。`op item get` を素で打って ID を探さない |
 | op が無い | `command -v op` が無い | 平文に逃げず、ユーザーに渡し方を聞く (op を入れる・下の「自分の端末で入れる」) |
 
 `pjp-op-env --reason` はどのマシンでも受けるので、手順や script に書いてよい (書いてはいけないのは `op --reason`)。
@@ -128,6 +156,8 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | 「伏せる sed・awk を書けば `.env` を見てよい」 | 正規表現の漏れで値が出る。`pjp-op-env --dry-run` は値を出さない作り |
 | 「確かめるために値を表示する」「長さや hash なら出してよい」 | `--dry-run` と `-- true` と program の動きで足りる。表示したものは会話から消せず、弱い値は hash から戻る |
 | 「`op inject -o config.yml` で設定ファイルを作れば program を直さずに済む」 | 平文のファイルができる。環境変数で読む形にして pjp-op-env で起こす |
+| 「Copy Secret Reference の参照をそのまま書けば動く」 | 今は動くが、vault・項目・セクション・欄の名前を変えると切れる。pjp-op-ref で ID の形にしてから書く |
+| 「`op item get --format json \| jq` で ID を見れば足りる」 | 出力は隠す欄の値も含みうる。jq の書き方を誤ると値が端末に出る (jq の型の誤りの文にも値が入る)。pjp-op-ref は ID と件数だけを抜き出し、テストで守られている |
 
 ## 赤信号 (止まって、この skill の手順に戻る)
 
@@ -135,5 +165,6 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 - `cat .env`・Read で `.env` を開こうとした・伏せる sed を書き始めた
 - WSL で `op run` を打とうとした・`op read` を値ごとに打とうとした
 - `echo $KEY`・`env`・`printenv`・`set -x`・`ps eww <pid>`・`/proc/<pid>/environ`・`op item get --reveal`
+- ID を探すのに `op item get … --format json` を素で打とうとした (pjp-op-ref を使う)
 - `.env` に触れる `git diff`・`git show`・`git log -p`、`.env.local` などほかの env のファイルを Read で開く
 - 値を crontab・unit・script・引数に書こうとした
