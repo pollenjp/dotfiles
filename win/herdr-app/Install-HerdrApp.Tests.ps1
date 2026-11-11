@@ -73,8 +73,10 @@ Test-Case 'ARM64 は ARM64 のまま' 'ARM64' { Get-HerdrAppArchitecture -Archit
 
 # ConvertFrom-HerdrAppReleases: 固定した版のファイル (repo の nix/pkgs/herdr-core/releases.json) を読む
 $fromRepo = ConvertFrom-HerdrAppReleases -Text ([IO.File]::ReadAllText($ReleasesJson))
-Test-Case 'repo の固定した版のファイルを読む (版・generation・Windows の sha256)' "0.1.12 $ShaA 0.1.17 1 $ShaC" { "$($fromRepo.AppVersion) $($fromRepo.AppSha256) $($fromRepo.CoreVersion) $($fromRepo.CoreGeneration) $($fromRepo.CoreTargets['windows-x86_64'])" }
-Test-Case 'core の 3 つの target の sha256 を名前の順に読む' "linux-aarch64=$ShaLA linux-x86_64=$ShaLX windows-x86_64=$ShaC" { @($fromRepo.CoreTargets.Keys | ForEach-Object { "$_=$($fromRepo.CoreTargets[$_])" }) -join ' ' }
+# 比べる値は、同じファイルを ConvertFrom-Json で別に読んだもの (版を上げる PR でテストを直さずに済む。値の形は下の Test-HerdrAppPins が見る)
+$repoJson = [IO.File]::ReadAllText($ReleasesJson) | ConvertFrom-Json
+Test-Case 'repo の固定した版のファイルを読む (版・generation・Windows の sha256)' "$($repoJson.app.version) $($repoJson.app.sha256.'windows-x86_64') $($repoJson.core.version) $($repoJson.core.generation) $($repoJson.core.sha256.'windows-x86_64')" { "$($fromRepo.AppVersion) $($fromRepo.AppSha256) $($fromRepo.CoreVersion) $($fromRepo.CoreGeneration) $($fromRepo.CoreTargets['windows-x86_64'])" }
+Test-Case 'core の 3 つの target の sha256 を名前の順に読む' (@('linux-aarch64', 'linux-x86_64', 'windows-x86_64') | ForEach-Object { "$_=$($repoJson.core.sha256.$_)" }) { @($fromRepo.CoreTargets.Keys | ForEach-Object { "$_=$($fromRepo.CoreTargets[$_])" }) -join ' ' }
 Test-Case 'repo の固定した版のファイルは書き方が正しい' '' { Test-HerdrAppPins -Pins $fromRepo }
 Test-Case '無い項目は空として読む (書き方の誤りは Test-HerdrAppPins が見る)' 'CoreSha256 (linux-x86_64) が 64 桁の小文字の hex でない: ' { Test-HerdrAppPins -Pins (ConvertFrom-HerdrAppReleases -Text '{"app":{"version":"0.1.12","sha256":{"windows-x86_64":"dc1b5663244ed91d96f42e7ddeec73304bb955474142975f290711cabcf0354a"}},"core":{"version":"0.1.17","generation":1,"sha256":{"linux-aarch64":"3a37a454ec63494cf4306db26481fe9db96673d888723701d24f8a992ae8ab8c","windows-x86_64":"a212b69db0efb808882683f15e5da45ab9606da7bcc54b97b29ed4fa540f5491"}}}') }
 Test-Case 'JSON でなければ例外' $true { try { $null = ConvertFrom-HerdrAppReleases -Text 'not json'; $false } catch { $true } }
@@ -418,7 +420,10 @@ Remove-Item -LiteralPath $feedTmp -Recurse -Force
 $pwsh = (Get-Process -Id $PID).Path
 $entry = Join-Path $PSScriptRoot 'Install-HerdrApp.ps1'
 $badReleases = Join-Path ([IO.Path]::GetTempPath()) "install-herdr-app-tests-releases-$PID.json"
-[IO.File]::WriteAllText($badReleases, ([IO.File]::ReadAllText($ReleasesJson) -replace '"version": "0.1.12"', '"version": "latest"'))
+# repo のファイルの app の版だけを版の形でない値にする (固定した版の値によらない)
+$badJson = [IO.File]::ReadAllText($ReleasesJson) | ConvertFrom-Json
+$badJson.app.version = 'latest'
+[IO.File]::WriteAllText($badReleases, ($badJson | ConvertTo-Json -Depth 5))
 Test-Case '思わぬ例外では終了コード 2 で止まる' '2' { $null = & $pwsh -NoProfile -File $entry -Check -ReleasesFile $ReleasesJson 2>&1; $LASTEXITCODE }
 Test-Case '-Uninstall と -Check を一緒に打つと終了コード 2' '2' { $null = & $pwsh -NoProfile -File $entry -Uninstall -Check -ReleasesFile $ReleasesJson 2>&1; $LASTEXITCODE }
 Test-Case '固定した版の書き方が誤っていれば終了コード 2 (状態も読まない)' $true { $o = & $pwsh -NoProfile -File $entry -Check -ReleasesFile $badReleases 2>&1; ($LASTEXITCODE -eq 2) -and ("$o" -like '*AppVersion が版の形*latest*') }
