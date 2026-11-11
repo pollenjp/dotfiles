@@ -28,6 +28,8 @@
 #     - 改行・$・`・'・"・;・空白・前後の空白・末尾の改行・日本語・不正な UTF-8 の byte と制御文字・空の値が、byte の単位で
 #       そのまま届く
 #     - 名前に空白のある参照は、そのままテンプレートに入って解ける。値の途中の op:// は解かない
+#     - ID の参照 (どの部分も ID・一部が ID・?attribute= 付き・空白のあるセクションの ID。pjp-op-ref が出す形) も、そのまま
+#       テンプレートに入って解ける
 #     - 小文字の名前 (i・reason・http_proxy) もそのまま届き、起きるのは渡した program
 #     - 参照が 20 件でも op は 1 回
 #     - op が stderr に警告を出して 0 で終われば、警告はそのまま出て program を起こす
@@ -455,6 +457,35 @@ if grep -qF '参照 8 件' "${work}/resolve.stderr" && grep -qF 'V_NL' "${work}/
   ok "stderr に参照の件数と名前を 1 行出す"
 else
   ng "stderr に参照の件数と名前を 1 行出す" "$(cat "${work}/resolve.stderr")"
+fi
+# ID の参照 (pjp-op-ref が出す形)。ID は作り物
+reset
+id_all=op://vaultid0000000000000000001/itemid00000000000000000001/fieldid0000000000000000004
+id_sec=op://vaultid0000000000000000001/itemid00000000000000000001/sectionid00000000000000001/fieldid0000000000000000001
+id_mixed=op://Dev/itemid00000000000000000001/prod/fieldid0000000000000000003
+id_attr="${id_sec}?attribute=type"
+id_space='op://vaultid0000000000000000001/itemid00000000000000000001/add more/fieldid0000000000000000005'
+vault "${id_all}" 'S3CR3T-id-all'
+vault "${id_sec}" 'S3CR3T-id-sec'
+vault "${id_mixed}" 'S3CR3T-id-mixed'
+vault "${id_attr}" 'S3CR3T-id-attr'
+vault "${id_space}" 'S3CR3T-id-space'
+printf '%s\n' "ID_ALL=${id_all}" "ID_SEC=${id_sec}" "ID_MIXED=${id_mixed}" "ID_ATTR=${id_attr}" "ID_SPACE=\"${id_space}\"" \
+  >"${proj}/.env"
+export PROG_KEYS="ID_ALL ID_SEC ID_MIXED ID_ATTR ID_SPACE"
+run_env idref --reason "ID の参照を解く" -- prog
+expect_env 'ID_ALL=S3CR3T-id-all' 'ID_SEC=S3CR3T-id-sec' 'ID_MIXED=S3CR3T-id-mixed' 'ID_ATTR=S3CR3T-id-attr' \
+  'ID_SPACE=S3CR3T-id-space'
+idref_tmpl=1
+for r in "${id_all}" "${id_sec}" "${id_mixed}" "${id_attr}" "${id_space}"; do
+  grep -qxF "{{ ${r} }}" "${FAKE_DIR}/op.1.stdin" 2>/dev/null || idref_tmpl=0
+done
+if [[ ${rc} == 0 && $(op_count) == 1 && ${idref_tmpl} == 1 ]] && same_env \
+  && no_leak "${work}/idref.stdout" "${work}/idref.stderr"; then
+  ok "ID の参照 (どれも ID・一部が ID・?attribute=・空白のあるセクションの ID) もそのままテンプレートに入って解ける"
+else
+  ng "ID の参照 (どれも ID・一部が ID・?attribute=・空白のあるセクションの ID) もそのままテンプレートに入って解ける" \
+    "rc=${rc} op=$(op_count) err=$(cat "${work}/idref.stderr")"$'\n'"$(cat "${FAKE_DIR}/op.1.stdin" 2>&1)"$'\n'"$(show_env)"
 fi
 reset
 printf '%s\n' 'A=op://Test/nl/password' >"${proj}/.env"
