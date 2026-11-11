@@ -233,7 +233,7 @@ function Format-HerdrState {
         $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
         [pscustomobject]@{ Text = "※ PATH のずれは Install-Herdr では直らない。$dir をユーザーの PATH から外す (win/README.md の「herdr を入れる」)"; Warn = $false }
     } elseif (($State.PathKind -eq 'preview') -and ($State.Plan -ne 'install')) {
-        [pscustomobject]@{ Text = "※ PATH で先に引かれる herdr は $PreviewId のもの。Preview を外せば直る (外すと winget がその置き場所を PATH から消す)"; Warn = $false }
+        [pscustomobject]@{ Text = "※ PATH で先に引かれる herdr は $PreviewId のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)"; Warn = $false }
     } elseif (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install')) {
         [pscustomobject]@{ Text = "※ winget の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id $PackageId の後に Install-Herdr で入れ直す"; Warn = $false }
     }
