@@ -507,6 +507,8 @@ in
       - Claude Code の footer の cc-page のバッジ (home/modules/claude.nix が作る
         ~/.local/state/dotfiles/claude-footer-links.json) も、この port のページだけを拾う。
         settings.json へ写すのは scripts/bootstrap-claude-footer-links.sh (setup --update で走る)
+      - status line の先頭の 📄top (cc-pages の会話のトップページへのリンク。~/.claude/statusline-command.sh) も、
+        この port の /s/<session_id>/ を指す (home/modules/claude.nix が埋める。switch で変わる)
     '';
   };
 

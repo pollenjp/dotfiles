@@ -51,7 +51,8 @@
 # config.toml が変われば unit ファイルも変わるようにしている。
 #
 # この port は home/modules/claude.nix も読み、Claude Code の footer の cc-page のバッジの規則
-# (~/.local/state/dotfiles/claude-footer-links.json) に埋める (null なら同じく 7777)。
+# (~/.local/state/dotfiles/claude-footer-links.json) と、status line の先頭の 📄top (会話のトップページへの
+# リンク。~/.claude/statusline-command.sh) に埋める (null なら同じく 7777)。
 { config, lib, ... }:
 
 let
