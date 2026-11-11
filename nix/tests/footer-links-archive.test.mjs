@@ -19,7 +19,9 @@
 //   - 当て方: label の無い規則は一致した文字が label。型紙と origin の違う url・?・# より前に .. の段のある url・2048 字を
 //     超える url は捨てる。label は ANSI と制御文字を除いて trim する。RegExp にならない規則・type が regex でない規則・
 //     scheme が http(s) でない規則は使わない。組は URL の形で、どれでもなければ「その他」。1 片の 1 つの規則で前から 1000 件まで
-//     見て、超えた片は footer が見る末尾 8192 字の一致も足す
+//     見て、超えた片は footer が見る末尾 8192 字の一致も足す。label は 200 字までに切る
+//   - 渡す JSON Lines は 1 回 1 MiB 以下に分けて順に打つ。途中の呼び出しが落ちたら残りを打たず offset を進めず、次の回に初めから
+//     全部を渡し直す。全部の呼び出しが 0 で終わったときだけ offset を進める
 //   - 同じ URL は (url, source) ごとに、最初と最後の時刻の 2 行にまとめる
 //   - 読み方: 書きかけの最後の行 (改行が無い) は読まず、改行が来た次の回に拾う。控えより短くなった transcript・別の
 //     ファイル (パスか inode が違う) は 0 から読み直す。4 MiB の読みの塊をまたぐ長い行と、塊の境目にかかる日本語も拾う。
@@ -70,17 +72,20 @@ function check(name, got, want) {
 }
 
 // 偽の cc-pages。FAKE_CC_PAGES_MODE が ok なら受け取った行の数を added にした 1 行の JSON を出して 0、fail なら stderr に
-// 1 行出して 1、old なら古い cc-pages と同じ文を出して 1 (stdin を読まずに抜ける)。どれも引数 (と stdin) を書き留める
+// 1 行出して 1、fail-second なら書き留めが 1 件だけあるとき (2 回目の呼び出し) に fail と同じく 1、old なら古い cc-pages と同じ文を
+// 出して 1 (stdin を読まずに抜ける)。どれも引数 (と stdin) を書き留める
 const FAKE_CC_PAGES = `#!${process.execPath}
 const fs = require("node:fs");
 const mode = process.env.FAKE_CC_PAGES_MODE || "ok";
+const log = process.env.FAKE_CC_PAGES_LOG;
+const before = fs.existsSync(log) ? fs.readFileSync(log, "utf8").split("\\n").filter(Boolean).length : 0;
 const input = mode === "old" ? "" : fs.readFileSync(0, "utf8");
-fs.appendFileSync(process.env.FAKE_CC_PAGES_LOG, JSON.stringify({ argv: process.argv.slice(2), input }) + "\\n");
+fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2), input }) + "\\n");
 if (mode === "old") {
   process.stderr.write("cc-pages: 不明なサブコマンド: link\\n");
   process.exit(1);
 }
-if (mode === "fail") {
+if (mode === "fail" || (mode === "fail-second" && before === 1)) {
   process.stderr.write("cc-pages: 書けない\\n");
   process.exit(1);
 }
@@ -196,6 +201,8 @@ const lastSent = (c) => {
   const all = calls(c);
   return all.length === 0 ? null : sent(all[all.length - 1]);
 };
+// k 回目 (0 から) より後の呼び出しで渡した行を、呼んだ順につないだもの
+const sentFrom = (c, k) => calls(c).slice(k).flatMap(sent);
 const saved = (c) => {
   try {
     return JSON.parse(fs.readFileSync(path.join(c.stateDir, "sessions", `${SID}.json`), "utf8"));
@@ -443,11 +450,46 @@ console.log(`== footer-links-archive.mjs: ${body} (規則: ${rulesFile}、cc-pag
   fs.appendFileSync(c.ccPages, "// build し直した\n");
   c.mode = "ok";
   runHook(c);
-  check("binary が替われば、溜まった分をまとめて渡す", [calls(c).length, lastSent(c)?.length, lastSent(c)?.[0]], [
-    2,
-    9000,
-    prLink(1, "assistant", ts(1)),
-  ]);
+  check("binary が替われば、溜まった分を渡す", [sentFrom(c, 1).length, sentFrom(c, 1)[0]], [9000, prLink(1, "assistant", ts(1))]);
+}
+
+// 渡す JSON Lines は 1 回 1 MiB までに分けて打ち (cc-pages は 1 回の入力の 16 MiB を超えた分を読まない)、全部の呼び出しが 0 で
+// 終わったときだけ offset を進める
+{
+  const c = newCase();
+  const rows = Array.from({ length: 24 }, (_, k) =>
+    assistantText(Array.from({ length: 900 }, (_, i) => pr(k * 900 + i + 1)).join(" "), k + 1),
+  );
+  fs.writeFileSync(c.transcript, jsonl(rows));
+  const all = Array.from({ length: 21600 }, (_, i) => prLink(i + 1, "assistant", ts(Math.floor(i / 900) + 1)));
+  c.mode = "fail-second";
+  const r = runHook(c);
+  check("途中の呼び出しが落ちたら、残りを打たず、offset を進めない", [quiet(r), calls(c).length, saved(c)?.offset ?? 0], [QUIET, 2, 0]);
+  c.mode = "ok";
+  runHook(c);
+  const batches = calls(c).slice(2);
+  check(
+    "次の回は初めから、1 回 1 MiB 以下に分けて全部を順に渡し、全部 0 なら offset を進める",
+    [
+      batches.length > 1,
+      batches.every((call) => Buffer.byteLength(call.input) <= 1024 * 1024),
+      batches.every((call) => JSON.stringify(call.argv) === JSON.stringify(["link", "--session", SID, "--stdin"])),
+      JSON.stringify(sentFrom(c, 2)) === JSON.stringify(all),
+      saved(c)?.offset,
+    ],
+    [true, true, true, true, fs.statSync(c.transcript).size],
+  );
+}
+
+// label は 200 字までに切る (cc-pages と同じ。1 行を cc-pages の上限の 64 KiB に収める)
+{
+  const c = newCase({
+    settings: { footerLinksRegexes: [{ type: "regex", pattern: "LONG:[a-z]+", url: "https://example.com/long" }] },
+  });
+  fs.writeFileSync(c.transcript, jsonl([assistantText(`LONG:${"a".repeat(70_000)}`, 1)]));
+  runHook(c);
+  const got = lastSent(c) ?? [];
+  check("label の無い規則の長い一致は、label を前から 200 字に切る", [got.length, got[0]?.label], [1, `LONG:${"a".repeat(195)}`]);
 }
 
 // 30 日より古い会話の控えを消す (見るのは 1 日に 1 回)

@@ -18,8 +18,9 @@
 //   3. offset から、開いたときの大きさまでのうち、最後の改行までの行だけを読む (書きかけの最後の行は次に回す)
 //   4. 行から照らす文を取り出し、footer の規則を当ててリンクを作る。last_assistant_message にも当てる (Stop の時点で
 //      transcript に最後の応答が書かれているとは限らないため。次の回に transcript から同じものを渡しても cc-pages が 1 つにまとめる)
-//   5. リンクがあれば cc-pages link --session <session_id> --stdin に JSON Lines で 1 回で渡し、0 で終わったら offset を進める。
-//      失敗したら進めない (次の回に同じ所から読み直す)。リンクが無ければ呼ばずに進める
+//   5. リンクがあれば cc-pages link --session <session_id> --stdin に JSON Lines で渡す。cc-pages は 1 回の入力の 16 MiB を超えた分を
+//      読まないので、1 回 1 MiB までに分けて順に打ち、全部が 0 で終わったら offset を進める。どれかが失敗したら残りを打たず、進めない
+//      (次の回に同じ所から読み直す)。リンクが無ければ呼ばずに進める。label は 200 字までに切る (1 行を cc-pages の上限の 64 KiB に収める)
 //
 // 何が起きても終了コード 0 で、stdout にも stderr にも何も出さない (Stop の stdout の JSON は decision: "block" などとして
 // 読まれうる)。link を知らない古い cc-pages (「不明なサブコマンド: link」で 1) では offset を進めず、その binary (realpath・dev・
@@ -48,6 +49,8 @@ import path from "node:path";
 const MATCHES_PER_PIECE = 1000;
 const FOOTER_PIECE = 8192; // footer が 1 片で見る末尾の字数
 const URL_LENGTH = 2048;
+const LABEL_CHARS = 200; // cc-pages が label を切る字数。1 行を cc-pages の上限 (64 KiB) に収める
+const CALL_BYTES = 1024 * 1024; // 1 回の cc-pages link に渡す量の目安の上限 (cc-pages は 16 MiB を超えた分を読まない)
 const CHUNK = 4 * 1024 * 1024;
 const CC_PAGES_TIMEOUT_MS = 30_000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -192,7 +195,7 @@ function linkOf(rule, match, base) {
   const parsed = parseUrl(url);
   if (parsed === null || originOf(parsed) !== rule.origin) return null;
   const raw = rule.label === undefined ? match[0] : fillLabel(rule.label, groups);
-  const label = raw.replace(ESCAPES, "").replace(CONTROLS, "").trim();
+  const label = [...raw.replace(ESCAPES, "").replace(CONTROLS, "").trim()].slice(0, LABEL_CHARS).join("");
   return label === "" ? null : { index: base + match.index, url, label };
 }
 
@@ -379,22 +382,52 @@ function binaryIdentity(file) {
 const sameIdentity = (a, b) =>
   a !== null && b !== null && typeof a === "object" && ["path", "dev", "ino", "size", "mtimeNs"].every((key) => a[key] === b[key]);
 
+// JSON Lines の行を、1 回に渡す量が CALL_BYTES までになるよう分ける (1 行がそれを超えるときは、その行だけで 1 回)
+function batches(lines) {
+  const out = [];
+  let current = [];
+  let bytes = 0;
+  for (const line of lines) {
+    const text = `${JSON.stringify(line)}\n`;
+    const size = Buffer.byteLength(text);
+    if (current.length > 0 && bytes + size > CALL_BYTES) {
+      out.push(current.join(""));
+      current = [];
+      bytes = 0;
+    }
+    current.push(text);
+    bytes += size;
+  }
+  if (current.length > 0) out.push(current.join(""));
+  return out;
+}
+
+// cc-pages link を、分けた量ごとに順に打つ。どれかが 0 で終わらなければ、残りを打たずにそこで止める (ok は false)。
+// answers は 0 で終わった回の stdout (1 回 1 行の JSON)
 function callCcPages(ccPages, sessionId, lines) {
-  const r = spawnSync(ccPages, ["link", "--session", sessionId, "--stdin"], {
-    input: lines.map((line) => `${JSON.stringify(line)}\n`).join(""),
-    encoding: "utf8",
-    timeout: CC_PAGES_TIMEOUT_MS,
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  const stderr = r.stderr ?? "";
-  return {
-    ok: r.error === undefined && r.status === 0,
-    old: r.status === 1 && stderr.includes("不明なサブコマンド"),
-    status: r.status,
-    error: r.error,
-    stdout: r.stdout ?? "",
-    stderr,
-  };
+  const answers = [];
+  let stderr = "";
+  for (const input of batches(lines)) {
+    const r = spawnSync(ccPages, ["link", "--session", sessionId, "--stdin"], {
+      input,
+      encoding: "utf8",
+      timeout: CC_PAGES_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    stderr += r.stderr ?? "";
+    if (r.error !== undefined || r.status !== 0) {
+      return {
+        ok: false,
+        old: r.status === 1 && (r.stderr ?? "").includes("不明なサブコマンド"),
+        status: r.status,
+        error: r.error,
+        answers,
+        stderr,
+      };
+    }
+    if ((r.stdout ?? "").trim() !== "") answers.push(r.stdout.trim());
+  }
+  return { ok: true, old: false, status: 0, error: undefined, answers, stderr };
 }
 
 // cc-pages が受け取ったら控えを書き、古い cc-pages の控えを合わせる
@@ -491,7 +524,7 @@ function manualMode(opts) {
     return 0;
   }
   const result = callCcPages(opts.ccPages, opts.session, lines);
-  if (result.stdout.trim() !== "") say(`cc-pages: ${result.stdout.trim()}`);
+  for (const answer of result.answers) say(`cc-pages: ${answer}`);
   if (result.stderr.trim() !== "") process.stderr.write(`${result.stderr.trimEnd()}\n`);
   if (!settle(stateDir, opts.ccPages, opts.session, file, read, result)) {
     if (result.old) say("cc-pages が link を知りません (古い cc-pages)。cc-pages を build し直してください");

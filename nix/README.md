@@ -3654,14 +3654,15 @@ cc-pages の会話のトップページ（`/p/<会話>/`）の「リンク」の
   （footer に出たものは必ず残る）
 - 組（PR・チケット・cc-page・その他）は URL の形で付ける。cc-page は、footer の cc-page の規則と同じ port（このマシンの cc-pages）の
   ページ
-- 渡すのは `cc-pages link --session <session_id> --stdin`（1 行 1 件の JSON Lines。URL・label・組・出どころ（応答か tool か）・時刻）。
-  同じ URL は cc-pages が 1 つにまとめる
+- 渡すのは `cc-pages link --session <session_id> --stdin`（1 行 1 件の JSON Lines。URL・label（200 字まで）・組・出どころ（応答か
+  tool か）・時刻）。同じ URL は cc-pages が 1 つにまとめる。cc-pages は 1 回の入力の 16 MiB を超えた分を読まないので、1 回 1 MiB
+  までに分けて順に打つ
 - 本体（隣の `footer-links-archive.mjs`）は node で書いていて（footer の規則は JavaScript の RegExp）、PATH の node（mise が入れる
   言語ランタイム。Node 18 以上）で動く。home の閉包には node を入れない。hook は `/` に移ってから node を起こすので、PATH の node が
   mise の shim でも、会話の cwd の設定（repo が pin した古い版など）に左右されない
 - 会話ごとの控え（transcript のどこまで読んだか）は `${XDG_STATE_HOME:-~/.local/state}/pjp-footer-links-archive/sessions/<session_id>.json`。
-  次の turn は続きの完全な行だけを読む（書きかけの最後の行は次に回す）。cc-pages が受け取ってから控えを進めるので、失敗した分は
-  次の turn に渡し直す。transcript が縮んだ・別のファイルに替わったら初めから読み直す。30 日より古い控えは消す（消した会話を
+  次の turn は続きの完全な行だけを読む（書きかけの最後の行は次に回す）。分けて打った全部を cc-pages が受け取ってから控えを進めるので、
+  失敗した分は次の turn に渡し直す。transcript が縮んだ・別のファイルに替わったら初めから読み直す。30 日より古い控えは消す（消した会話を
   resume すると、初めから読み直して同じものを渡す）
 - 入れる前から続いている会話も、入れた後の最初の turn で初めから読んで全部渡す
 - Esc で止めた turn（Stop が来ない）の分は、次の turn にまとめて渡す。Stop の時点では最後の応答がまだ transcript に書かれていない
