@@ -492,6 +492,22 @@
                 bash ${./tests/pjp-op-env.test.sh} ${./pkgs/pjp-op-env/pjp-op-env.sh} ${./pkgs/pjp-op/op.sh}
                 touch $out
               '';
+          # 1Password の名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を、偽の op と偽の項目 (op item get --format json
+          # の形) で流す。後半は本物の op.sh (pkgs/pjp-op) を偽の powershell.exe・op.exe で通し、lock に flock (util-linux) を使う。
+          # 値が execve の argv に載らないことを strace で見る
+          pjp-op-ref-test =
+            pkgs.runCommand "pjp-op-ref-test"
+              {
+                nativeBuildInputs = [
+                  pkgs.jq
+                  pkgs.util-linux
+                  pkgs.strace
+                ];
+              }
+              ''
+                bash ${./tests/pjp-op-ref.test.sh} ${./pkgs/pjp-op-ref/pjp-op-ref.sh} ${./pkgs/pjp-op/op.sh}
+                touch $out
+              '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
           # herdr-core (pkgs/herdr-core) の package そのもの。公式の Linux 版を releases.json の sha256 で落とし、build の
@@ -860,6 +876,12 @@
           #   nix run ./nix#pjp-op-env -- --dry-run
           #   nix run ./nix#pjp-op-env -- --reason "<なぜ値を読むか>" -- <program>
           pjp-op-env = pkgs.callPackage ./pkgs/pjp-op-env { };
+
+          # 1Password の名前の参照を ID の参照に直す (値は出さない)。home には home/modules/op-env.nix が 1Password を使うマシンに
+          # 入れる。switch せずに試すなら (項目ごとに op の承認の画面が出る):
+          #
+          #   nix run ./nix#pjp-op-ref -- --reason "<なぜ読むか>" "op://<vault>/<項目>/[<セクション>/]<欄>"
+          pjp-op-ref = pkgs.callPackage ./pkgs/pjp-op-ref { };
 
           # GitHub との通信だけを gh の資格情報 (HTTPS) に向けて git を呼ぶ (git gh <コマンド>)。
           # home には modules/packages.nix が入れる。checks の git-gh-test もこれを流す。

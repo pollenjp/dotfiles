@@ -2638,6 +2638,7 @@ op.exe whoami                              # WSL の直の op.exe は account is
 
 1Password を使うマシン（`onePassword.enable`。WSL もそれ以外も）の PATH に、`.env` の `op://` の参照を 1 回の op で解き、値を
 環境変数に入れて program を起こす `pjp-op-env`（`nix/pkgs/pjp-op-env/`）を置く（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-10-secrets-op-env-design.md)）。
+名前の参照を ID の参照に直す `pjp-op-ref`（`nix/pkgs/pjp-op-ref/`。[後述](#参照を-id-の形に直す-pjp-op-ref)）も並べて置く。
 値は 1Password にだけ置き、`.env` には参照だけを書く。Claude にこの扱いを決めるのは skill `pjp-secrets` と、ユーザーの CLAUDE.md の
 「シークレット」の節（値を会話に貼らせない・ファイルに平文で書かない・値を表示するコマンドを打たない）。
 
@@ -2648,11 +2649,13 @@ pjp-op-env --reason "<理由>" --env-file .env --env-file .env.local -- <program
 pjp-op-env --dry-run                                                              # op を呼ばず、名前と種類 (参照か値か) を出す
 ```
 
-`.env` には値の代わりに参照を書く。参照は 1Password のアプリの欄のメニュー「Copy Secret Reference」で取れる。
+`.env` には値の代わりに参照を書く。参照は 1Password のアプリの欄のメニュー「Copy Secret Reference」で取れる。アプリが出すのは
+名前の参照で、名前を変えると切れるので、`pjp-op-ref` で ID の参照に直してから書く（[後述](#参照を-id-の形に直す-pjp-op-ref)）。
+どちらの参照も同じく解ける。
 
 ```sh
-KABU_API_PASSWORD=op://Private/kabu-station/password
-KABU_API_KEY="op://Private/kabu station/api key"   # 名前に空白があれば引用符で囲む
+KABU_API_PASSWORD=op://vaultid0000000000000000001/itemid00000000000000000001/fieldid0000000000000000004  # ID の参照 (ID は作り物)
+KABU_API_KEY="op://Private/kabu station/api key"   # 名前の参照。名前に空白があれば引用符で囲む
 LOG_LEVEL=info                                      # 参照でない値はそのまま渡す
 ```
 
@@ -2723,18 +2726,72 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 | 126・127 | 承認の後に `exec` に失敗した（実行の権限が無いなど。bash が出す） |
 | op の終了コード | op が 0 以外で終わった（1 = 拒否・時間切れ・解けない参照など、75 = ほかの op の承認待ちが終わらない、130 = 止められた）。program は起こさない |
 
+### 参照を ID の形に直す (pjp-op-ref)
+
+参照は vault・項目・セクション・欄のどれも、名前の代わりに ID で書ける（[参照の書き方](https://www.1password.dev/cli/secret-reference-syntax/)）。
+名前は 1Password のアプリで変えられ、変えると名前の参照は切れる。項目の ID が変わるのは、項目を別の vault に移したときだけ。
+ID は英小文字と数字なので、名前に空白や記号があっても `.env` で引用符で囲まずに済む。`pjp-op-ref` は参照を ID の参照に直して、
+渡した順に 1 行ずつ stdout に出す。値は出さない。
+
+```sh
+pjp-op-ref --reason "<なぜ読むか>" <参照>…
+pjp-op-ref --reason "bot の .env に書く参照を ID の形にする" "op://Dev/Example Service/prod/API_TOKEN" "op://Dev/Example Service/stg/API_TOKEN"
+```
+
+出力の例（ID は作り物。最後の 1 行は stderr）:
+
+```text
+op://vaultid0000000000000000001/itemid00000000000000000001/sectionid00000000000000001/fieldid0000000000000000001
+op://vaultid0000000000000000001/itemid00000000000000000001/sectionid00000000000000002/fieldid0000000000000000002
+pjp-op-ref: 参照 2 件を ID の形に直しました (op を 1 回呼びました)。
+```
+
+| 段 | すること |
+| --- | --- |
+| 1. 参照を分ける | `op://<vault>/<項目>/[<セクション>/]<欄>[?<attribute など>]` に分ける。`op://` で始まらない・部分が 3 つか 4 つでない・空の部分・制御文字・`-` で始まる vault か項目（op が option と読む）なら、op を呼ばずに 2 |
+| 2. 項目ごとに op を 1 回 | vault と項目の部分の組（大文字小文字は問わない）ごとにまとめ、初めて出た順に `op [--reason "[pjp-op-ref: 参照 <N> 件を ID の形に直す (項目 <k>/<M>)。ID だけを抜き出し、値は捨てる] <理由>"] item get <項目> --vault <vault> --format json` を呼ぶ（`(項目 …)` は項目が 2 つ以上のときだけ）。`--reason` は WSL の op（pjp-op）にだけ付ける。同じ項目の参照は何件でも 1 回 |
+| 3. ID を抜き出す | op の出力は jq にだけ流し、vault と項目の ID と、セクションと欄を ID か名前（大文字小文字は問わない）で当てた結果だけを受ける |
+| 4. 出す | どの参照も直せたら、渡した順に 1 行ずつ出す。1 つでも直せなければ何も出さずに止まり、残りの項目は読まない |
+
+- もう ID の部分は、その ID のまま。`?attribute=…`（`?attr=…`・`?ssh-format=…`）は後ろにそのまま付ける
+- セクションの無い欄は `op://<vault>/<項目>/<欄>`。参照にセクションが無くても、欄にセクションがあればセクションの ID を入れる
+- セクションか欄が見つからない・同じ名前で 2 つ以上あるときは、参照と件数を出して 1 で止まる（2 つ以上なら、セクションを足すか
+  ID で書く）
+- 作りつけのセクションの ID には空白のあるもの（`add more` など）がある。出した参照に空白があれば stderr で知らせるので、`.env` では
+  `"…"` で囲む
+- 項目が 2 つ以上なら op もその数だけ呼ぶ（WSL では承認の画面もその数だけ出る）。同じ項目でも書き方（名前か ID か）が違えば
+  別に読む
+- 項目を別の vault に移すと項目の ID が変わるので、移したら直し直す
+- `.env` を読んで書き換えはしない。既にある `.env` の名前の参照は、`pjp-op-env --dry-run` で参照を見て、`pjp-op-ref` で直し、行を
+  入れ替える（skill `pjp-secrets` の手順）
+
+`op item get --format json` の出力は、隠す欄（CONCEALED）の値も含みうる。`pjp-op-ref` はその出力を op から jq へのパイプだけに通し、
+shell の変数・ファイル・端末・引数に入れない。jq が出すのは ID と件数だけで、jq の stderr は捨てる（jq の型の誤りの文は、入力の値を
+入れて出すことがある）。誤りの文に書くのは参照（名前）・件数・終了コードだけ。どれも `nix/tests/pjp-op-ref.test.sh` が偽の op と
+偽の項目（WSL の分は本物の `op.sh` も）で確かめる。
+
+| コード | いつ |
+| --- | --- |
+| 0 | 直せた・`--help` |
+| 1 | セクションか欄が見つからない・同じ名前で 2 つ以上ある |
+| 2 | 引数の誤り（理由が無い・空、参照が無い、知らない option、参照の形） |
+| 70 | op は 0 で終わったが、出力の形が合わない（JSON でない・項目が 1 つでない・ID が無い） |
+| 127 | op か jq が見つからない |
+| op の終了コード | op が 0 以外で終わった（1 = 拒否・時間切れ・項目が無いなど、75 = ほかの op の承認待ちが終わらない）。残りの項目は読まない |
+
 ### 反映
 
-`~/dotfiles/setup --self-update --update` で入る。skill `pjp-secrets` と CLAUDE.md の節も同じコマンドで配られる（Claude Code を
-起こし直すと効く）。
+`~/dotfiles/setup --self-update --update` で入る（`pjp-op-ref` も）。skill `pjp-secrets` と CLAUDE.md の節も同じコマンドで配られる
+（Claude Code を起こし直すと効く）。
 
 ### 確かめる
 
 ```sh
-command -v pjp-op-env                                    # ~/.nix-profile/bin/pjp-op-env
+command -v pjp-op-env pjp-op-ref                         # ~/.nix-profile/bin/pjp-op-env・pjp-op-ref
 pjp-op-env --dry-run                                     # .env の名前と種類。参照でない値は出さず、op を呼ばない
 pjp-op-env --reason "参照が解けるかを確かめる" -- true   # 承認の画面が 1 回だけ出て、全部解ければ 0
 pjp-op-log                                               # WSL: inject の 1 行。理由の後ろに読む参照が並ぶ
+pjp-op-ref --reason "参照を ID の形にする" "<参照>"      # 承認の画面が項目ごとに 1 回出て、ID の参照を出す
 ```
 
 ### 気を付けること
