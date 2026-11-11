@@ -15,11 +15,12 @@
 #
 #   - hook の口 (引数なし): cc-pages が PATH に無い・CC_PAGES_DISABLE が空でない・node が PATH に無いときは、node を起こさず
 #     (transcript を読まず)、stdout にも stderr にも何も出さずに 0 で終わる
-#   - hook の口で揃っていれば、node に <入口の dir>/footer-links-archive.mjs --cc-pages <PATH の cc-pages> と、stdin の入力を
-#     そのまま渡す。node が 1 で終わり stdout・stderr に書いても、入口は何も出さずに 0 で終わる
+#   - hook の口で揃っていれば、node に <入口の dir の絶対パス>/footer-links-archive.mjs --cc-pages <PATH の cc-pages> と、stdin の
+#     入力をそのまま渡し、node は / で起こす (mise の shim でも会話の cwd の設定で node の版が変わらないように)。node が 1 で
+#     終わり stdout・stderr に書いても、signal で落ちても、入口は何も出さずに 0 で終わる
 #   - 手で流す口 (引数あり): cc-pages が無い・CC_PAGES_DISABLE が空でない・node が無いときは、理由を stderr に出して 1 で、
-#     node を起こさない。揃っていれば引数をそのまま node に渡し、node の終了コードで終わる。-h・--help は cc-pages が無くても
-#     node に渡す
+#     node を起こさない。揃っていれば引数をそのまま node に (今の cwd のまま) 渡し、node の終了コードで終わる。-h・--help は
+#     cc-pages が無くても node に渡す
 
 set -u -o pipefail
 
@@ -52,15 +53,18 @@ ng() {
   fi
 }
 
-# 偽の node: 引数を 1 行ずつ、stdin をそのまま書き留める (bash の組み込みだけで書く。PATH に coreutils が無い)
+# 偽の node: 引数を 1 行ずつ、stdin をそのまま、cwd を書き留める (bash の組み込みだけで書く。PATH に coreutils が無い)。
+# FAKE_NODE_SIGNAL が立っていれば、自分を SIGKILL で落とす
 fake_node="${work}/fake-node"
 cat >"${fake_node}" <<EOF
 #!${BASH}
 printf '%s\n' "\$@" >"\${FAKE_LOG}/node.args"
+pwd -P >"\${FAKE_LOG}/node.cwd"
 IFS= read -r -d '' input || true
 printf '%s' "\${input}" >"\${FAKE_LOG}/node.stdin"
 echo "node の stdout"
 echo "node の stderr" >&2
+[[ -z \${FAKE_NODE_SIGNAL:-} ]] || kill -KILL \$\$
 exit "\${FAKE_NODE_RC:-1}"
 EOF
 chmod +x "${fake_node}"
@@ -80,14 +84,17 @@ new_case() {
   done
   printf '%s' "${d}"
 }
-# run <case の dir> [<入口の引数>…]: 入口を、その case の PATH だけで起こす。stdin には hook の入力を流す。
-# 足す env は呼ぶ側で前に置く (CC_PAGES_DISABLE=1 run …)
+# run <case の dir> [<入口の引数>…]: 入口を、その case の dir (会話の cwd の代わり) で、その case の PATH だけで起こす。
+# stdin には hook の入力を流す。足す env は呼ぶ側で前に置く (CC_PAGES_DISABLE=1 run …)
 run() {
   local d=$1
   shift
-  printf '{"session_id":"abc","transcript_path":"/x.jsonl"}' \
-    | env PATH="${d}/bin" FAKE_LOG="${d}/log" "${BASH}" "${script}" "$@" >"${d}/out" 2>"${d}/err"
-  echo $? >"${d}/rc"
+  (
+    cd "${d}" || exit 1
+    printf '{"session_id":"abc","transcript_path":"/x.jsonl"}' \
+      | env PATH="${d}/bin" FAKE_LOG="${d}/log" "${BASH}" "${script}" "$@" >"${d}/out" 2>"${d}/err"
+    echo $? >"${d}/rc"
+  )
 }
 called() {
   [[ -e "$1/log/node.args" ]]
@@ -132,6 +139,19 @@ else
   ng "hook の口: 揃っていれば本体・cc-pages の path・stdin を node に渡し、node が 1 で書いても黙って 0 (CC_PAGES_DISABLE が空も)" \
     "rc=$(cat "${d}/rc") out=$(cat "${d}/out") err=$(cat "${d}/err") args=$(cat "${d}/log/node.args" 2>/dev/null)"
 fi
+if [[ $(cat "${d}/log/node.cwd" 2>/dev/null) == / ]]; then
+  ok "hook の口: node は / で起こす (会話の cwd で起こさない)"
+else
+  ng "hook の口: node は / で起こす (会話の cwd で起こさない)" "cwd=$(cat "${d}/log/node.cwd" 2>/dev/null)"
+fi
+
+d=$(new_case killed "node cc-pages")
+FAKE_NODE_SIGNAL=1 run "${d}"
+if [[ $(cat "${d}/rc") == 0 && ! -s "${d}/out" && ! -s "${d}/err" ]] && called "${d}"; then
+  ok "hook の口: node が signal で落ちても、何も出さずに 0"
+else
+  ng "hook の口: node が signal で落ちても、何も出さずに 0" "rc=$(cat "${d}/rc") out=$(cat "${d}/out") err=$(cat "${d}/err")"
+fi
 
 # 3. 手で流す口で足りない → 理由を stderr に出して 1、node を起こさない
 d=$(new_case manual-no-cc-pages node)
@@ -162,11 +182,12 @@ fi
 d=$(new_case manual-ready "node cc-pages")
 FAKE_NODE_RC=3 run "${d}" --session abc --transcript /x.jsonl
 want_args=$(printf '%s\n' "${body}" --cc-pages "${d}/bin/cc-pages" --session abc --transcript /x.jsonl)
-if [[ $(cat "${d}/rc") == 3 ]] && [[ $(cat "${d}/log/node.args" 2>/dev/null) == "${want_args}" ]]; then
-  ok "手で流す口: 揃っていれば引数をそのまま node に渡し、node の終了コードで終わる"
+if [[ $(cat "${d}/rc") == 3 ]] && [[ $(cat "${d}/log/node.args" 2>/dev/null) == "${want_args}" ]] \
+  && [[ $(cat "${d}/log/node.cwd" 2>/dev/null) == "$(cd -- "${d}" && pwd -P)" ]]; then
+  ok "手で流す口: 揃っていれば引数をそのまま node に今の cwd のまま渡し、node の終了コードで終わる"
 else
-  ng "手で流す口: 揃っていれば引数をそのまま node に渡し、node の終了コードで終わる" \
-    "rc=$(cat "${d}/rc") args=$(cat "${d}/log/node.args" 2>/dev/null)"
+  ng "手で流す口: 揃っていれば引数をそのまま node に今の cwd のまま渡し、node の終了コードで終わる" \
+    "rc=$(cat "${d}/rc") args=$(cat "${d}/log/node.args" 2>/dev/null) cwd=$(cat "${d}/log/node.cwd" 2>/dev/null)"
 fi
 
 d=$(new_case manual-help node)

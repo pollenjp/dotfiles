@@ -28,12 +28,13 @@
 //
 // ## 拾う文と当て方 (footer と同じ)
 //
-// 照らすのは、type が assistant の行の message の text block (source assistant) と、type が user で isMeta でない行の tool_result の
+// 照らす片は、type が assistant の行の message の text block (source assistant) と、type が user で isMeta でない行の tool_result の
 // 中身 (文字列か text block。source tool)。isSidechain・agentId のある行 (subagent) は拾わない。at はその行の timestamp。
 // 規則は ${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json の footerLinksRegexes で、url と label の埋め方・捨てる url は本体を写した
 // claude-skills の skills/pjp-question-footer/hooks/links.ts と同じ。footer と違い、片を末尾 8192 字に切らず、一致も 1 片の
-// 1 つの規則で 1000 件まで見る (全部を残すのが役目なので。上限はおかしな入力に備えたもの)。片は改行でつなぎ、頭に改行を 1 つ
-// 足して当てる (片の頭も行の頭として、PR の規則の後読み (ticket.sh list の行を外す) を効かせる)。
+// 1 つの規則で前から 1000 件まで見る (全部を残すのが役目なので。上限はおかしな入力に備えたもの)。上限に当たった片には、footer が
+// 見る末尾 8192 字にも当て直して足す (footer に出たものは必ず残す)。片の頭には改行を 1 つ足して当てる (片の頭も行の頭として、
+// PR の規則の後読み (ticket.sh list の行を外す) を効かせる)。
 //
 // 組 (group) は URL の形で決める: github.com の PR は PR、app.notion.com/p/ はチケット、cc-page の規則の型紙と同じ origin
 // (http://localhost:<このマシンの cc-pages の port>。home-manager が規則に埋めている) の /p/ は cc-page、ほかは「その他」。
@@ -45,6 +46,7 @@ import os from "node:os";
 import path from "node:path";
 
 const MATCHES_PER_PIECE = 1000;
+const FOOTER_PIECE = 8192; // footer が 1 片で見る末尾の字数
 const URL_LENGTH = 2048;
 const CHUNK = 4 * 1024 * 1024;
 const CC_PAGES_TIMEOUT_MS = 30_000;
@@ -182,22 +184,40 @@ function groupOf(url, ccOrigin) {
   return "その他";
 }
 
-// text に規則を当てたリンク (出現位置の順)。1 つの規則で見る一致は MATCHES_PER_PIECE まで
+// 1 つの一致をリンクにする (使えなければ null)。base は text の中での一致の位置の足し分
+function linkOf(rule, match, base) {
+  const groups = match.groups ?? {};
+  const url = fillUrl(rule.url, groups);
+  if (url === null || url.length > URL_LENGTH) return null;
+  const parsed = parseUrl(url);
+  if (parsed === null || originOf(parsed) !== rule.origin) return null;
+  const raw = rule.label === undefined ? match[0] : fillLabel(rule.label, groups);
+  const label = raw.replace(ESCAPES, "").replace(CONTROLS, "").trim();
+  return label === "" ? null : { index: base + match.index, url, label };
+}
+
+// text に規則を当てたリンク (出現位置の順)。1 つの規則で見る一致は前から MATCHES_PER_PIECE まで。上限に当たったら、footer が
+// 見る末尾 FOOTER_PIECE 字にも当て直して足す (重なったものは後でまとめる)
 function findLinks(rules, text) {
   const found = [];
   for (const rule of rules) {
     try {
       let seen = 0;
+      let capped = false;
       for (const match of text.matchAll(rule.re)) {
-        if (++seen > MATCHES_PER_PIECE) break;
-        const groups = match.groups ?? {};
-        const url = fillUrl(rule.url, groups);
-        if (url === null || url.length > URL_LENGTH) continue;
-        const parsed = parseUrl(url);
-        if (parsed === null || originOf(parsed) !== rule.origin) continue;
-        const raw = rule.label === undefined ? match[0] : fillLabel(rule.label, groups);
-        const label = raw.replace(ESCAPES, "").replace(CONTROLS, "").trim();
-        if (label !== "") found.push({ index: match.index, url, label });
+        if (++seen > MATCHES_PER_PIECE) {
+          capped = true;
+          break;
+        }
+        const link = linkOf(rule, match, 0);
+        if (link !== null) found.push(link);
+      }
+      if (capped && text.length > FOOTER_PIECE) {
+        const base = text.length - FOOTER_PIECE;
+        for (const match of text.slice(base).matchAll(rule.re)) {
+          const link = linkOf(rule, match, base);
+          if (link !== null) found.push(link);
+        }
       }
     } catch {
       continue;
@@ -257,8 +277,8 @@ function resultText(content) {
     .join("\n");
 }
 
-// transcript の 1 行から照らす文。拾わない行は null
-function pieceOf(row) {
+// transcript の 1 行から照らす片 (text block か tool_result ごと)。拾わない行は null
+function piecesOf(row) {
   if (typeof row !== "object" || row === null || row.isSidechain === true) return null;
   if (row.agentId !== undefined && row.agentId !== null) return null;
   const content = row.message?.content;
@@ -275,7 +295,7 @@ function pieceOf(row) {
     return null;
   }
   texts = texts.filter((text) => text !== "");
-  return texts.length === 0 ? null : { text: texts.join("\n"), source, at: row.timestamp };
+  return texts.length === 0 ? null : { texts, source, at: row.timestamp };
 }
 
 // transcript を saved の offset (使えなければ 0) から、開いたときの大きさまでの完全な行だけ読み、行ごとに onLine を呼ぶ。
@@ -340,8 +360,8 @@ function collect(rules, file, saved) {
       stats.broken++;
       return;
     }
-    const piece = pieceOf(row);
-    if (piece !== null) links.add(piece.text, piece.source, piece.at);
+    const pieces = piecesOf(row);
+    if (pieces !== null) for (const text of pieces.texts) links.add(text, pieces.source, pieces.at);
   });
   return read === null ? null : { ...read, links, stats };
 }

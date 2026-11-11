@@ -3650,13 +3650,15 @@ cc-pages の会話のトップページ（`/p/<会話>/`）の「リンク」の
 
 - 拾うのは footer と同じ文（Claude の応答の文章と tool の結果。ユーザーが打った文・subagent・thinking・tool の入力は拾わない）に、
   footer と同じ規則（`settings.json` の `footerLinksRegexes`）を当てたもの。footer と違い、文を末尾 8192 字に切らず、一致も 1 つの
-  文の 1 つの規則で 1000 件まで見る（全部を残すのが役目なので）
+  文の 1 つの規則で前から 1000 件まで見る（全部を残すのが役目なので）。1000 件を超えた文は、footer が見る末尾 8192 字の分も足す
+  （footer に出たものは必ず残る）
 - 組（PR・チケット・cc-page・その他）は URL の形で付ける。cc-page は、footer の cc-page の規則と同じ port（このマシンの cc-pages）の
   ページ
 - 渡すのは `cc-pages link --session <session_id> --stdin`（1 行 1 件の JSON Lines。URL・label・組・出どころ（応答か tool か）・時刻）。
   同じ URL は cc-pages が 1 つにまとめる
 - 本体（隣の `footer-links-archive.mjs`）は node で書いていて（footer の規則は JavaScript の RegExp）、PATH の node（mise が入れる
-  言語ランタイム）で動く。home の閉包には node を入れない
+  言語ランタイム。Node 18 以上）で動く。home の閉包には node を入れない。hook は `/` に移ってから node を起こすので、PATH の node が
+  mise の shim でも、会話の cwd の設定（repo が pin した古い版など）に左右されない
 - 会話ごとの控え（transcript のどこまで読んだか）は `${XDG_STATE_HOME:-~/.local/state}/pjp-footer-links-archive/sessions/<session_id>.json`。
   次の turn は続きの完全な行だけを読む（書きかけの最後の行は次に回す）。cc-pages が受け取ってから控えを進めるので、失敗した分は
   次の turn に渡し直す。transcript が縮んだ・別のファイルに替わったら初めから読み直す。30 日より古い控えは消す（消した会話を
@@ -3679,11 +3681,12 @@ stderr に出す（cc-pages が失敗すれば終了コード 1）。
 ~/.claude/hooks/footer-links-archive.sh --session <session_id> --transcript ~/.claude/projects/<dir>/<session_id>.jsonl
 ```
 
-登録は `bootstrap-claude-hook.sh`（[フックの登録](#フックの登録冪等更新時も毎回走る)。`--update` で走る）。`settings.json` に登録した
-hook は、動いている会話にも次の turn から効く。Claude Code の file watcher が settings の hook の変更を拾うため（2.1.321 で、動いている
-会話の `.claude/settings.local.json` に足した Stop の hook が次の turn から走ることを確かめた。`--settings` で渡したファイルは見張らないので、
-そちらに足した hook は開き直すまで走らない）。振る舞いは `nix/tests/footer-links-archive.test.mjs`（本体）と
-`nix/tests/footer-links-archive-gate.test.sh`（入口）が確かめる。
+登録は `bootstrap-claude-hook.sh`（[フックの登録](#フックの登録冪等更新時も毎回走る)。`--update` で走る）。登録の後に開いた（開き直した）
+会話では必ず走る。動いている会話にも、次の turn から効く見込み。Claude Code の file watcher は settings の hook の変更を拾う
+（2.1.321 で、動いている会話の `.claude/settings.local.json` に足した Stop の hook が次の turn から走ることを確かめた。ユーザーの
+`settings.json` そのものでは試していない。`--settings` で渡したファイルは見張らないので、そちらに足した hook は開き直すまで走らない）。
+bootstrap は登録のあと「再起動すると有効になります」と出す（hook の全部に向けた、確かに効く方の言い方）。振る舞いは
+`nix/tests/footer-links-archive.test.mjs`（本体）と `nix/tests/footer-links-archive-gate.test.sh`（入口）が確かめる。
 
 ### herdr の中の Claude Code にリンクを出させる
 

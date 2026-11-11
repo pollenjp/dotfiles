@@ -29,6 +29,8 @@ set -u -o pipefail
 
 here=${BASH_SOURCE[0]%/*}
 [[ ${here} == "${BASH_SOURCE[0]}" ]] && here=.
+# 本体は絶対パスで指す (hook の口は / に移ってから node を起こす)
+here=$(cd -- "${here}" &>/dev/null && pwd -P)
 body="${here}/footer-links-archive.mjs"
 
 if [[ $# -eq 0 ]]; then
@@ -37,7 +39,10 @@ if [[ $# -eq 0 ]]; then
     IFS= read -r -d '' _ || true
     exit 0
   fi
-  node "${body}" --cc-pages "${cc_pages}" >/dev/null 2>&1
+  # node は / で起こす (PATH の node が mise の shim でも、会話の cwd の設定で node の版が変わらないように)。
+  # { } で包んで捨てると、node が signal で落ちたときに bash が出す文 (「強制終了」など) も出ない
+  cd / || exit 0
+  { node "${body}" --cc-pages "${cc_pages}"; } >/dev/null 2>&1
   exit 0
 fi
 

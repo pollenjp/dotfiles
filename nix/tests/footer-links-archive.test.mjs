@@ -18,14 +18,16 @@
 //     ticket.sh list の行 (片の頭も行の頭として PR の規則の後読みを当てる)
 //   - 当て方: label の無い規則は一致した文字が label。型紙と origin の違う url・?・# より前に .. の段のある url・2048 字を
 //     超える url は捨てる。label は ANSI と制御文字を除いて trim する。RegExp にならない規則・type が regex でない規則・
-//     scheme が http(s) でない規則は使わない。組は URL の形で、どれでもなければ「その他」。1 片の 1 つの規則で 1000 件まで
+//     scheme が http(s) でない規則は使わない。組は URL の形で、どれでもなければ「その他」。1 片の 1 つの規則で前から 1000 件まで
+//     見て、超えた片は footer が見る末尾 8192 字の一致も足す
 //   - 同じ URL は (url, source) ごとに、最初と最後の時刻の 2 行にまとめる
 //   - 読み方: 書きかけの最後の行 (改行が無い) は読まず、改行が来た次の回に拾う。控えより短くなった transcript・別の
 //     ファイル (パスか inode が違う) は 0 から読み直す。4 MiB の読みの塊をまたぐ長い行と、塊の境目にかかる日本語も拾う。
 //     transcript_path の頭の ~/ は HOME。JSON でない行・空の行は飛ばす
 //   - 控え: cc-pages が 0 で終われば offset を進め、失敗したら進めない (次の回に同じリンクを渡す)。リンクが無ければ cc-pages を
-//     呼ばずに offset を進める。link を知らない古い cc-pages では進めず、同じ binary の間は呼ばない (build し直して binary が
-//     替われば、また渡す)。30 日より古い会話の控えを消し、見るのは 1 日に 1 回
+//     呼ばずに offset を進める。link を知らない古い cc-pages では進めず (渡す量が多く、stdin を読まずに抜けた古い cc-pages への
+//     書き込みが EPIPE になっても見分ける)、同じ binary の間は transcript を開かず (FIFO に替えて見る) cc-pages も呼ばない。
+//     build し直して binary が替われば、溜まった分を渡す。30 日より古い会話の控えを消し、見るのは 1 日に 1 回
 //   - Stop の入力の last_assistant_message のリンクも渡す (source assistant、at なし)
 //   - hook の口は stdout にも stderr にも何も出さず、終了コード 0。規則が無い・session id の形が違う・transcript が無い・
 //     stdin が JSON でないときは、cc-pages を呼ばない
@@ -158,12 +160,13 @@ const hookInput = (c, extra = {}) => ({
   stop_hook_active: false,
   ...extra,
 });
-// runHook: hook の口で本体を起こす。input が文字列ならそのまま stdin に流す
-function runHook(c, input = hookInput(c)) {
+// runHook: hook の口で本体を起こす。input が文字列ならそのまま stdin に流す。opts は spawnSync に足す (timeout など)
+function runHook(c, input = hookInput(c), opts = {}) {
   return spawnSync(process.execPath, [body, "--cc-pages", c.ccPages], {
     input: typeof input === "string" ? input : JSON.stringify(input),
     env: envOf(c),
     encoding: "utf8",
+    ...opts,
   });
 }
 function runManual(c, transcript = c.transcript) {
@@ -286,14 +289,18 @@ console.log(`== footer-links-archive.mjs: ${body} (規則: ${rulesFile}、cc-pag
   );
 }
 
-// 1 片の 1 つの規則で 1000 件まで
+// 1 片の 1 つの規則で前から 1000 件。超えたら footer が見る末尾 8192 字の一致も足す (footer に出たものは残す)
 {
   const c = newCase();
-  const many = Array.from({ length: 1001 }, (_, i) => pr(i + 1)).join("\n");
+  const many = Array.from({ length: 1500 }, (_, i) => pr(i + 1)).join("\n");
   fs.writeFileSync(c.transcript, jsonl([toolResult(many, 1)]));
   runHook(c);
-  const got = lastSent(c) ?? [];
-  check("1 片に別々の PR が 1001 個あっても、渡すのは前から 1000 個", [got.length, got[0]?.url, got.at(-1)?.url], [1000, pr(1), pr(1000)]);
+  const urls = new Set((lastSent(c) ?? []).map((link) => link.url));
+  check(
+    "1 片に別々の PR が 1500 個あれば、前から 1000 個と、footer が見る末尾 8192 字の分を渡す",
+    [urls.has(pr(1)), urls.has(pr(1000)), urls.has(pr(1001)), urls.has(pr(1253)), urls.has(pr(1500)), urls.size],
+    [true, true, false, true, true, 1248],
+  );
 }
 
 // 同じ URL は (url, source) ごとに最初と最後の時刻の 2 行
@@ -411,19 +418,36 @@ console.log(`== footer-links-archive.mjs: ${body} (規則: ${rulesFile}、cc-pag
   ]);
 }
 
-// link を知らない古い cc-pages
+// link を知らない古い cc-pages。古い cc-pages は stdin を読まずに抜けるので、渡す行を子との間の受け口に収まらない大きさ (1 MB 超。
+// 9000 件) にして、書き込みが EPIPE で失敗しても古い cc-pages と見分けることも見る
 {
   const c = newCase();
-  fs.writeFileSync(c.transcript, jsonl([assistantText(pr(90), 1)]));
+  const rows = Array.from({ length: 10 }, (_, k) =>
+    assistantText(Array.from({ length: 900 }, (_, i) => pr(k * 900 + i + 1)).join(" "), k + 1),
+  );
+  fs.writeFileSync(c.transcript, jsonl(rows));
   c.mode = "old";
   const r = runHook(c);
   check("古い cc-pages でも stdout・stderr に何も出さず 0 で、offset を進めない", [quiet(r), saved(c)?.offset ?? 0], [QUIET, 0]);
-  runHook(c);
-  check("同じ binary の間は cc-pages を呼ばない", calls(c).length, 1);
+  // 2 回目は transcript を FIFO に替える。開けば書き手が来るまで止まるので、時間内に 0 で返れば開いていない
+  fs.rmSync(c.transcript);
+  spawnSync("mkfifo", [c.transcript]);
+  const second = runHook(c, hookInput(c), { timeout: 10_000 });
+  check("同じ binary の間は transcript を開かず、cc-pages も呼ばない", [second.error?.code ?? null, second.status, calls(c).length], [
+    null,
+    0,
+    1,
+  ]);
+  fs.rmSync(c.transcript);
+  fs.writeFileSync(c.transcript, jsonl(rows));
   fs.appendFileSync(c.ccPages, "// build し直した\n");
   c.mode = "ok";
   runHook(c);
-  check("binary が替われば、溜まった分をまとめて渡す", [calls(c).length, lastSent(c)], [2, [prLink(90, "assistant", ts(1))]]);
+  check("binary が替われば、溜まった分をまとめて渡す", [calls(c).length, lastSent(c)?.length, lastSent(c)?.[0]], [
+    2,
+    9000,
+    prLink(1, "assistant", ts(1)),
+  ]);
 }
 
 // 30 日より古い会話の控えを消す (見るのは 1 日に 1 回)
