@@ -804,7 +804,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
 | `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 92〜99 と wsl-mtu-guard・exe-exec-trace は、直して流し直すまで走らない） |
-| `bootstrap-windows-fancyzones.sh` | 92 | `bootstrap-windows-powertoys.sh` (91) が PowerToys を入れた後に、`win/powertoys/fancyzones/managed.json` のキーだけを FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを uuid ごとに PC の `custom-layouts.json` へ足し、PC の `applied-layouts.json` のうちテンプレートのままのディスプレイの組を `layout-rules.json` の決まり (解像度で決める。`powershell.exe` で聞く) のレイアウトで埋める。91 は Keyboard Manager が使えないと早く抜けるので、別の script にしてある (exit 1 にしない。PC のエディターで直したレイアウトも、手であてたレイアウトも、知らせて先へ進む) |
+| `bootstrap-windows-fancyzones.sh` | 92 | `bootstrap-windows-powertoys.sh` (91) が PowerToys を入れた後に、`win/powertoys/fancyzones/managed.json` のキーだけを FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを uuid ごとに PC の `custom-layouts.json` へ足し、PC の `default-layouts.json` の横向きの既定を `layout-rules.json` の `default` にそろえ、PC の `applied-layouts.json` のうちテンプレートのままのディスプレイの組を `layout-rules.json` の決まり (解像度で決める。`powershell.exe` で聞く) のレイアウトで埋め、つながっている横向きのディスプレイの組を Windows にある全部の仮想デスクトップへ作る。91 は Keyboard Manager が使えないと早く抜けるので、別の script にしてある (exit 1 にしない。PC のエディターで直したレイアウトも、手であてたレイアウトも、知らせて先へ進む) |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
@@ -921,7 +921,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、Keyboard Manager と自動起動がオフならオンにして起動し直し、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#keyboard-manager-と自動起動をオンにする)） |
-| 6.8.2 | `./nix/scripts/bootstrap-windows-fancyzones.sh` | `bootstrap-windows-fancyzones` | FancyZones の `settings.json` に、dotfiles が持つキー (Windows スナップのオーバーライドなど) だけを書き、カスタムレイアウトを uuid ごとに足し、テンプレートのままのディスプレイの組に解像度の決まりのレイアウトをあてる。設定画面で変えたキーは戻し、PC のエディターで直したレイアウトと手であてたレイアウトは書き換えずに知らせる（[`win/README.md`](../win/README.md#fancyzones)） |
+| 6.8.2 | `./nix/scripts/bootstrap-windows-fancyzones.sh` | `bootstrap-windows-fancyzones` | FancyZones の `settings.json` に、dotfiles が持つキー (Windows スナップのオーバーライドなど) だけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定を決まりの `default` にそろえ、テンプレートのままのディスプレイの組に解像度の決まりのレイアウトをあて、組の無い仮想デスクトップに組を作る。設定画面で変えたキーは戻し、PC のエディターで直したレイアウトと手であてたレイアウトは書き換えずに知らせる（[`win/README.md`](../win/README.md#fancyzones)） |
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
@@ -1631,7 +1631,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | --- | --- | --- |
 | `switch` | 配り先と on / off (と、type-clipboard を入れるか) を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト）。`windowsFiles.enable` のホストでは `pjp-google-ime` も PATH に入れる | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName` / `dotfiles.wsl.windowsFiles.typeClipboard.enable`） |
 | bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
-| bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを、uuid ごとに前回足した中身と比べて PC の `custom-layouts.json` へ足し、`layout-rules.json` の解像度の決まりで、テンプレートのままのディスプレイの組にレイアウトをあてる | `scripts/bootstrap-windows-fancyzones.sh` |
+| bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを、uuid ごとに前回足した中身と比べて PC の `custom-layouts.json` へ足し、`layout-rules.json` の決まりで、横向きの既定をそろえ、テンプレートのままのディスプレイの組にレイアウトを解像度であて、組の無い仮想デスクトップに組を作る | `scripts/bootstrap-windows-fancyzones.sh` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
 | bootstrap (日付と時刻の形式) | `win/international/managed.json` の値を、値ごとに前回書いた値・地域の既定と比べて、ユーザーのレジストリ (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く | `scripts/bootstrap-windows-international.sh` |
 | bootstrap (port forwarding の組) | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、前回置いた中身と比べて `%USERPROFILE%\.config\port-forward\hosts.json` へ置く | `scripts/bootstrap-windows-port-forward.sh` |
@@ -1657,7 +1657,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
 ./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
-./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足し、ディスプレイの組にレイアウトを解像度であてる部分だけ（--dry-run / --force / --import <名前> / --check）
+./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定をそろえ、ディスプレイの組にレイアウトを解像度であてる部分だけ（--dry-run / --force / --import <名前> / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ./nix/scripts/bootstrap-windows-international.sh    # Windows の日付と時刻の形式に持つ値だけを書く部分だけ（--dry-run / --import / --force / --check）
@@ -1698,12 +1698,15 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   入るので、repo のレイアウトを uuid で突き合わせて足し、PC にだけあるものには触らない。PC のエディターで直した・消したものは、前に足した中身の
   記録 (`~/.local/state/dotfiles/windows-fancyzones.applied.json`) で見分け、書き換えずに知らせて先へ進む (`--force` で戻す・`--import` で取り込む)。
   どのディスプレイにどのレイアウトをあてるか (`applied-layouts.json`) はシリアルが入るので持たず、解像度からレイアウトを決める決まり
-  (`layout-rules.json`) を持つ。同じ script が、テンプレートのままのディスプレイの組を決まりのレイアウトで埋める (解像度は `powershell.exe` で
-  聞く。手であてたものは残し、`--force` で上書きする。あてた組は `~/.local/state/dotfiles/windows-fancyzones.assigned.json` に覚える)。
+  (`layout-rules.json`) を持つ。同じ script が、横向きの既定 (`default-layouts.json` の horizontal) を決まりの `default` にそろえ、テンプレートのままの
+  ディスプレイの組を決まりのレイアウトで埋め、つながっている横向きのディスプレイの組を Windows にある全部の仮想デスクトップへ作る (解像度と
+  仮想デスクトップの一覧は `powershell.exe` で聞く。手であてたものは残し、`--force` で上書きする。あてた組は
+  `~/.local/state/dotfiles/windows-fancyzones.assigned.json` に覚える)。
   FancyZones は `LastWriteTime` の変更しか見ていないので、`mv` の後に `touch` して読み直させる（[`win/README.md`](../win/README.md#fancyzones)、
   [ADR 042](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/042_win_powertoys_fancyzones_20261106T100504JST/README.md)・
   [ADR 046](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/046_win_fancyzones_layouts_by_uuid_20261109T200910JST/README.md)・
-  [ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md)）
+  [ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md)・
+  [ADR 054](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/054_win_fancyzones_renumber_20261113T061644JST/README.md)）
 - Google 日本語入力の設定 (`win/google-japanese-input/`) は manifest では配らない。protobuf のバイナリで
   保存のたびに時刻が入るので、`bootstrap-windows-google-ime.sh` (order 98) が `pjp-google-ime` で
   組み立て、時刻を除いた中身で比べて配り、変換サーバーを落として読み直させる。辞書は private な

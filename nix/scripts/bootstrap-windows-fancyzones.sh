@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json)・カスタムレイアウト (uuid ごとに足す)・ディスプレイへのあて方 (解像度で決める) を書く (冪等。更新時も毎回走る)。
+# PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json)・カスタムレイアウト (uuid ごとに足す)・横向きの既定・ディスプレイへのあて方 (解像度で決める。全部の仮想デスクトップの組) を書く (冪等。更新時も毎回走る)。
 #
 # order: 92
 #
@@ -13,7 +13,7 @@
 #
 # FancyZones の設定のうち、dotfiles で持ちたいもの (「Windows スナップのオーバーライド」のキーと、エディターの「カスタム」に
 # 登録したレイアウトと、どのディスプレイにどのレイアウトをあてるかの決まり) を全マシンで揃える (dotfiles-private の
-# docs/adr/042_*・046_*・053_*)。
+# docs/adr/042_*・046_*・053_*・054_*)。
 #
 # - settings.json は PowerToys が全部のキーを書き、設定画面でも書き換えるので、ファイルごとは配らない。managed.json に
 #   持つキーだけを書き、そのキーだけをここで書く。Windows Terminal (bootstrap-windows-terminal.sh) と違い、衝突にしない。
@@ -25,9 +25,13 @@
 #   レイアウトには触らない
 # - applied-layouts.json (モニター × 仮想デスクトップの組ごとに、どのレイアウトをあてるか) は、モニターのシリアルが入り PC ごとに
 #   違うので持たない。代わりに、解像度からあてるレイアウトを決める決まり (layout-rules.json) を持ち、テンプレートのままの組を
-#   決まりのレイアウトで埋める。あて忘れた組を、エディターを開いてディスプレイの数だけあてて回らずに済ませるため。
-#   解像度を確かに知る手段がほかに無いので、この段だけ powershell.exe を呼ぶ (ADR 042・046 は exe を呼ばない作りだった)。
-#   呼ぶのは候補の組があるときだけ
+#   決まりのレイアウトで埋め、つながっている横向きの画面の組を、Windows にある全部の仮想デスクトップへ作る。あて忘れた組を、
+#   エディターを開いてディスプレイの数だけあてて回らずに済ませるため。解像度と仮想デスクトップの一覧を確かに知る手段がほかに
+#   無いので、この段だけ powershell.exe を呼ぶ (ADR 042・046 は exe を呼ばない作りだった)。組があれば毎回呼ぶ
+# - default-layouts.json (組の無い画面に FancyZones があてる、横向き・縦向きの既定) は、横向きの既定だけを決まりの default の
+#   レイアウトにそろえる。FancyZones の本体もエディターも、合う組が無い画面にこの既定をあてる。ディスプレイの番号が振り直されると、
+#   エディターは組を番号の一致で引くので古い組を引けず、既定をあてて書く (本体もそれを使う)。そのときに priority-grid でなく
+#   決まりの default で始まるようにするため
 #
 # ## 何をするか
 #
@@ -58,15 +62,29 @@
 #    - 書く形は PowerToys の形 (字下げ 2・CRLF・末尾に改行なし。エディターが書くバイト列と同じ形)。書き換える前のファイルを
 #      ~/.local/state/dotfiles/windows-fancyzones/backup/<UTC の時刻>-<pid>/ へ写す (新しい方から 10 回分を残す)
 #    - PC のファイルを読めない (5 回読む)・記録が壊れている・repo のファイルに誤りがあるときは、書かずに警告する
-# 4. 同じディレクトリの applied-layouts.json の組 (モニター × 仮想デスクトップ) へ、win/powertoys/fancyzones/layout-rules.json の
-#    決まり (今の表示の解像度がちょうど一致した rules の layout、どれにも当たらなければ default。今は 3840x2160 が 4k-43inch、
-#    それ以外が 1080p) のレイアウトをあてる。3 の後に置くのは、あてるレイアウトが PC の custom-layouts.json に入っている必要があるから
-#    - ファイルが無い・組が無ければ何もしない (FancyZones がまだディスプレイを開いていない)。組は新しく作らない (まだ開いていない
-#      仮想デスクトップは、FancyZones が開いたときに前のデスクトップから写す)
-#    - 候補 (テンプレートのままの組と、前にこの段があてたままの組。--force なら全部の組) が無ければ、powershell.exe を呼ばずに終わる
-#    - powershell.exe で、つながっているディスプレイの DeviceID と今の表示の解像度を、FancyZones と同じ手順で聞く
-#      (MonitorUtils.cpp。下の ps_body)。組の monitor が同じで、monitor-instance が同じか、違えば monitor-number が同じディスプレイに
-#      合わせる (instance で合う方を先に)。シリアルは見ない・読まない。FancyZones は同じ型のモニターに同じシリアルを入れるので
+# 4. 同じディレクトリの default-layouts.json の横向き (horizontal) の既定を、win/powertoys/fancyzones/layout-rules.json の default の
+#    カスタムレイアウトにそろえる。3 の後に置くのは、そのレイアウトが PC の custom-layouts.json に入っている必要があるから
+#    (FancyZones は既定を、そのまま組にあてる)
+#    - 横向きのどの項目も type が custom で uuid がそのレイアウトなら、何もしない (ほかの値は比べない)。違えば横向きの項目の layout を
+#      書き換え (位置はそのまま)、横向きの項目が無ければ末尾に足す。ファイルが無ければ横向きの項目だけで作る (縦向きは FancyZones の
+#      既定のまま)。縦向き (vertical) の項目には触らない
+#    - 書く値は、エディターがカスタムレイアウトを既定にしたときと同じ (uuid・type custom・show-spacing false・spacing 0・zone-count 0・
+#      sensitivity-radius 0)。エディターは閉じるたびにこのファイルを書き直すので、値が違うと書き戻しを繰り返す。FancyZones は
+#      ゾーンを計算するときに、カスタムの値を custom-layouts.json から引き直す (WorkArea.cpp)
+#    - そのレイアウトが PC に無い (か canvas でない) ときは、書かずに警告する (--force で 3 が足し直せば、その回に書く。--dry-run では
+#      3 が足すものをあるものとして見る)。決まりのファイルか repo の custom-layouts.json に誤りがあれば、黙って飛ばす (5 が組のある
+#      ときに警告する。CI の --check も見る)
+#    - 書く形 (PowerToys の形)・退避 (3 と同じ場所)・読めないとき (5 回読む)・書けないときは 3 と同じ
+# 5. 同じディレクトリの applied-layouts.json の組 (モニター × 仮想デスクトップ) へ、layout-rules.json の決まり (今の表示の解像度が
+#    ちょうど一致した rules の layout、どれにも当たらなければ default。今は 3840x2160 が 4k-43inch、それ以外が 1080p) の
+#    レイアウトをあて、組の無い仮想デスクトップには組を作る。3 の後に置く理由は 4 と同じ
+#    - ファイルが無い・組が無ければ何もしない (FancyZones がまだディスプレイを開いていない)
+#    - powershell.exe で、つながっているディスプレイの DeviceID と今の表示の解像度を、FancyZones と同じ手順で聞く (MonitorUtils.cpp)。
+#      同じ 1 回の呼び出しで、Windows の仮想デスクトップの一覧 (HKCU の Explorer\VirtualDesktops の VirtualDesktopIDs。FancyZones の
+#      VirtualDesktop.cpp と同じ) も読む (下の ps_body)。組があれば、埋める組が無くても毎回呼ぶ (組の無い仮想デスクトップと、
+#      ディスプレイの番号の振り直しは、Windows に聞かないと分からない)
+#    - 組の monitor が同じで、monitor-instance が同じか、違えば monitor-number が同じディスプレイに合わせる (instance で合う方を先に。
+#      FancyZones の一致からシリアルを除いたもの)。シリアルは見ない・読まない。FancyZones は同じ型のモニターに同じシリアルを入れるので
 #      見分けに使えず、シリアルだけが違う古い組も同じレイアウトにしておけば、列挙の順が変わっても揃っている
 #    - 組ごとに (目標 = そのディスプレイの解像度から決まりで決めたレイアウト):
 #
@@ -74,25 +92,35 @@
 #        目標と同じカスタムレイアウト                                 何もしない (記録が無ければ記録だけする)
 #        テンプレートのまま (blank を除く。エディターで選んだものも)    目標にする
 #        前にこの段があてたまま (記録と同じ) で、目標が変わった         目標にする (決まりや解像度を変えたとき)
+#        横向きの既定 (決まりの default のカスタム) で、記録と違う      目標にする (4 の既定で始まった組。4K に手で default の
+#                                                                     レイアウトをあてた組も、見分けられずに目標にする)
 #        手であてたカスタムレイアウト・blank・知らない type             残し、まとめて 1 行知らせる (--force なら目標にする)
 #        目標のレイアウトが PC の custom-layouts.json に無い (か canvas でない)  飛ばして警告する
 #
+#    - 組を作る: つながっている横向きのディスプレイごとに、同じ画面 (monitor と monitor-instance が同じ。FancyZones の本体が同じ画面と
+#      みなす組) の組をシリアル (中を見ない値) ごとに分け、Windows の仮想デスクトップのうち、今の番号でその組が無いデスクトップへ組を
+#      作る。device は同じ画面の組から写し (シリアルもそのまま)、monitor-number を今の番号に、virtual-desktop をそのデスクトップにする。
+#      写す元は、今の番号の組があればそれ、無ければ番号の違う組 (番号が振り直された直後。FancyZones の本体は instance で古い組を
+#      使い続けて新しい組を作らないが、エディターは組を monitor・シリアル・monitor-number・virtual-desktop の一致で引き、無ければ既定を
+#      あてて書くので、今の番号の組が要る)。目標のレイアウトをあてて末尾に足す (先頭に置くと、本体が同じとみなす古い組より先に使い、
+#      手であてたレイアウトを隠しうる)。同じ画面の組がどこにも無いディスプレイには作らず、1 行知らせる。縦向き・つながっていない
+#      ディスプレイには作らない。目標のレイアウトが PC に無ければ作らず、上の警告に数える
 #    - あてた中身は ~/.local/state/dotfiles/windows-fancyzones.assigned.json に組ごとに持つ
 #      ({"version":1,"assignments":{"<monitor>|<monitor-instance>|<monitor-number>|<virtual-desktop>":"<uuid>"}}。シリアルを入れない
-#      ので、シリアルだけが違う組は 1 つのキーにまとまる)。この段が組を目標にしたときと、目標と同じ組で記録が無いときに書き、
-#      applied-layouts.json から消えた組のキーは落とす。手であてた組 (記録と違う) と、前にこの段が埋めた組を見分けるため
+#      ので、シリアルだけが違う組は 1 つのキーにまとまる)。この段が組を目標にしたとき・組を作ったときと、目標と同じ組で記録が無いときに
+#      書き、applied-layouts.json から消えた組のキーは落とす。手であてた組 (記録と違う) と、前にこの段が埋めた組を見分けるため
 #    - 書く値は、エディターが canvas のカスタムレイアウトをあてたときと同じ (type custom・show-spacing false・spacing 0・zone-count は
-#      PC の custom-layouts.json のそのレイアウトのゾーンの数・sensitivity-radius はその info の値、無ければ 20)。device と組の並びは
-#      変えない。書く形 (PowerToys の形)・退避 (3 と同じ場所) も 3 と同じ。& をエスケープするかは合わせない (JSON として同じ)
-#    - 変えた組は 1 組 1 行 (モニター ID・解像度・仮想デスクトップ・前 → 後) で出す。シリアルは出さない。手であてた組を残した 1 行は、
-#      警告のまとめには載せない (会社の PC で毎回出るため)
+#      PC の custom-layouts.json のそのレイアウトのゾーンの数・sensitivity-radius はその info の値、無ければ 20)。今ある組の device と
+#      並びは変えない。書く形 (PowerToys の形)・退避 (3 と同じ場所) も 3 と同じ。& をエスケープするかは合わせない (JSON として同じ)
+#    - 変えた組・作る組は 1 組 1 行 (モニター ID・解像度・仮想デスクトップ・前 → 後。作る組の前は「組なし」) で出す。シリアルは
+#      出さない。手であてた組を残した 1 行と、組を作らなかったディスプレイの 1 行は、警告のまとめには載せない (会社の PC で毎回出るため)
 #    - --dry-run でも powershell.exe は呼ぶ (書かない)。--import では走らせない
 #    - applied-layouts.json を読めない (5 回読む)・記録が壊れている・決まりのファイルに誤りがある・powershell.exe が無い・失敗する・
 #      60 秒たっても終わらない・決めた形の JSON を返さないときは、書かずに警告する
-# 5. 2〜4 は、隣に書いて mv した後に touch する。FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは気づかない
+# 6. 2〜5 は、隣に書いて mv した後に touch する。FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは気づかない
 #    (src/common/SettingsAPI/FileWatcher.cpp。実機で確かめた)。読みかけを見せないよう、その場には書かない。
 #    PowerToys は起動し直さない
-# 6. 全体の設定 <windowsHome>/AppData/Local/Microsoft/PowerToys/settings.json の enabled.FancyZones が false なら、
+# 7. 全体の設定 <windowsHome>/AppData/Local/Microsoft/PowerToys/settings.json の enabled.FancyZones が false なら、
 #    設定が効かないので警告する。自動でオンにはしない。キーやファイルが無ければオンとして扱う (FancyZones は既定でオン)。
 #    読めないときは、確かめられないと警告する
 #
@@ -104,15 +132,17 @@ set -eu -o pipefail
 usage() {
   cat <<'EOS'
 PowerToys の FancyZones へ、win/powertoys/fancyzones/ の持つキー (settings.json) とカスタムレイアウトを書き、
-ディスプレイへのレイアウトのあて方を解像度で決める。
+横向きの既定と、ディスプレイへのレイアウトのあて方を解像度で決める。
 持つキーは、設定画面で変えていても dotfiles の値へ戻す。カスタムレイアウトは uuid ごとに足し、PC にだけあるものには触らない。
-PC のエディターで直したレイアウトは書き換えずに知らせる。テンプレートのままのディスプレイの組 (モニター × 仮想デスクトップ) には、
-解像度の決まり (layout-rules.json。今は 4K に 4k-43inch、それ以外に 1080p) のレイアウトをあてる。手であてたものは残す。
-FancyZones はその場で読み直す (PowerToys は起動し直さない)。
+PC のエディターで直したレイアウトは書き換えずに知らせる。横向きの既定 (default-layouts.json) は決まりの default のレイアウトに
+そろえる。テンプレートや横向きの既定のままのディスプレイの組 (モニター × 仮想デスクトップ) には、解像度の決まり
+(layout-rules.json。今は 4K に 4k-43inch、それ以外に 1080p) のレイアウトをあて、つながっている横向きのディスプレイの組が無い
+仮想デスクトップには組を作る。手であてたものは残す。FancyZones はその場で読み直す (PowerToys は起動し直さない)。
 
 使い方:
-  bootstrap-windows-fancyzones.sh                   値が違えば書き、無いレイアウトを足し、テンプレートのままの組にレイアウトをあてる
-  bootstrap-windows-fancyzones.sh --dry-run         判定だけ出して何も書かない (解像度は powershell.exe で聞く)
+  bootstrap-windows-fancyzones.sh                   値が違えば書き、無いレイアウトを足し、横向きの既定をそろえ、
+                                                    埋める組にレイアウトをあて、組の無い仮想デスクトップに組を作る
+  bootstrap-windows-fancyzones.sh --dry-run         判定だけ出して何も書かない (解像度と仮想デスクトップは powershell.exe で聞く)
   bootstrap-windows-fancyzones.sh --force           PC で直した・消したレイアウトも repo の中身にし、手であてたカスタムレイアウト・
                                                     blank の組も決まりのレイアウトにする (退避する。先に --dry-run --force で見られる)
   bootstrap-windows-fancyzones.sh --import <名前>   PC のレイアウトを名前で選び、repo の custom-layouts.json へ写す
@@ -187,7 +217,7 @@ assigned_file="${state_dir}/windows-fancyzones.assigned.json"
 backup_root="${state_dir}/windows-fancyzones/backup"
 keep_backups=10
 # --dry-run で、カスタムレイアウトの段 (上の 3) が PC の custom-layouts.json に足す・書き換えるレイアウトの uuid。
-# あて方の段 (上の 4) は、これらを PC にあるものとして見る
+# 横向きの既定の段 (上の 4) とあて方の段 (上の 5) は、これらを PC にあるものとして見る
 pending_layouts='[]'
 
 # 手順を止めない警告を出す。引数は 1 つが 1 行で、2 つ目からは字下げした続きの行になる。
@@ -701,7 +731,7 @@ report_kept() {
   # PC にあるもの (直した・足す前からあった) は取り込める。--import は PC の名前で引く
   jq '[.entries[] | select(.action == "edited" or .action == "differs")]' "${work_dir}/plan.json" >"${work_dir}/kept.json"
   hint=$(jq -r 'map("--import \(.cur.name | tostring | @sh)") | join(" ")' "${work_dir}/kept.json")
-  # --force はディスプレイへのあて方の段 (上の 4) にも効くので、そのことと、先に見る口を添える
+  # --force はディスプレイへのあて方の段 (上の 5) にも効くので、そのことと、先に見る口を添える
   warn "FancyZones のカスタムレイアウトのうち、次のものは PC の中身を残しました (書き換えていません。${pc_layouts}):" \
     "${kept}" \
     "repo の中身にするなら (PC のファイルは退避します): ${script_dir}/bootstrap-windows-fancyzones.sh --force" \
@@ -1161,7 +1191,8 @@ same_note() {
   fi
 }
 
-# ディスプレイへのあて方 (上の 4): つながっている横向きのディスプレイの組へ、解像度の決まり (layout-rules.json) のレイアウトをあてる
+# ディスプレイへのあて方 (上の 5): つながっている横向きのディスプレイの組へ、解像度の決まり (layout-rules.json) のレイアウトをあて、
+# 組の無い仮想デスクトップには組を作る
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 assign_layouts() {
   local problems force_json=false pre="" nkept counts nwrite nsame nuntouched ncreate nosrc missing lname lcount lines
