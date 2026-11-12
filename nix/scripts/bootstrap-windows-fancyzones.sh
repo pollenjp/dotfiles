@@ -439,6 +439,7 @@ fz_dir="${windows_home}/AppData/Local/Microsoft/PowerToys/FancyZones"
 settings_json="${fz_dir}/settings.json"
 pc_layouts="${fz_dir}/custom-layouts.json"
 pc_applied="${fz_dir}/applied-layouts.json"
+pc_defaults="${fz_dir}/default-layouts.json"
 global_json="${windows_home}/AppData/Local/Microsoft/PowerToys/settings.json"
 
 # 一時ファイルの置き場 (PC のファイルの写し・計画・記録)。終わったら消す。作れなければ失敗する
@@ -586,6 +587,23 @@ snapshot_pc_layouts() {
     sleep 1
   done
   return 1
+}
+
+# カスタムレイアウトの段の後の PC の custom-layouts.json を作業場所へ写す (横向きの既定の段とあて方の段で、1 回だけ読む。読みかけに
+# 当たって 5 回読むのも 1 回だけにする)。無ければ空。読めなければ失敗する
+pc_layouts_state=""
+read_pc_layouts() {
+  if [[ -z ${pc_layouts_state} ]]; then
+    if [[ ! -e ${pc_layouts} ]]; then
+      printf '%s\n' '{}' >"${work_dir}/pc.json"
+      pc_layouts_state=ok
+    elif snapshot_pc_layouts; then
+      pc_layouts_state=ok
+    else
+      pc_layouts_state=bad
+    fi
+  fi
+  [[ ${pc_layouts_state} == ok ]]
 }
 
 # 記録を作業場所へ写す。無ければ空の記録。壊れていれば失敗する
@@ -1186,13 +1204,9 @@ assign_layouts() {
   # 一覧を聞かないと分からないため
 
   # あてるレイアウトが PC にあるかと、ゾーンの数を見るために、カスタムレイアウトの段の後の PC の custom-layouts.json を読む
-  if [[ -e ${pc_layouts} ]]; then
-    if ! snapshot_pc_layouts; then
-      warn "FancyZones の custom-layouts.json を読めないので、ディスプレイへのレイアウトのあて方を書きません: ${pc_layouts}"
-      return 0
-    fi
-  else
-    printf '%s\n' '{}' >"${work_dir}/pc.json"
+  if ! read_pc_layouts; then
+    warn "FancyZones の custom-layouts.json を読めないので、ディスプレイへのレイアウトのあて方を書きません: ${pc_layouts}"
+    return 0
   fi
   if ! command -v powershell.exe &>/dev/null; then
     warn "powershell.exe が見つからないので、ディスプレイの解像度が分からず、FancyZones のディスプレイへのレイアウトのあて方を書きません。" \
@@ -1369,6 +1383,135 @@ assign_layouts() {
   fi
 }
 
+# ---- 横向きの既定 (default-layouts.json) ----
+
+# PC の default-layouts.json を作業場所へ写す。default-layouts が配列の JSON の object (無いのはよい) になるまで、5 回まで写す
+# (エディターが書いている途中に当たっても読めるように)
+snapshot_defaults() {
+  local i
+  for ((i = 0; i < 5; i++)); do
+    if cp -- "${pc_defaults}" "${work_dir}/dl.json" 2>/dev/null \
+      && jq -e 'type == "object" and ((has("default-layouts") | not) or (.["default-layouts"] | type) == "array")' \
+        "${work_dir}/dl.json" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# 隣に書いてから置き換える (読みかけを見せない)。中身は計画の doc を PowerToys の書く形で
+write_defaults() {
+  local tmp="${pc_defaults}.dotfiles-tmp" body
+  if body=$(jq '.doc' "${work_dir}/dl-plan.json" 2>/dev/null | to_pt_form 2>/dev/null) \
+    && printf '%s' "${body}" 2>/dev/null >"${tmp}" && mv -f -- "${tmp}" "${pc_defaults}" 2>/dev/null; then
+    return 0
+  fi
+  rm -f -- "${tmp}" 2>/dev/null || true
+  return 1
+}
+
+# 横向きの既定 (段 ② の後、段 ③ の前): FancyZones が組の無い横向きの画面にあてる既定 (default-layouts.json の horizontal) を、
+# 決まりの default のカスタムレイアウトにそろえる。FancyZones の本体もエディターも、合う組が無い画面にこの既定をあてるので、ディスプレイの
+# 番号が振り直されて新しい組ができても、決まりの default のレイアウトで始まる。縦向き (vertical) には触らない
+# shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
+sync_default_layout() {
+  local pre="" fresh=false action before tname
+  # 決まりか repo のレイアウトに誤りがあれば、黙って飛ばす (段 ③ が組のあるときに警告する。CI の --check も見る)
+  if [[ -n $(layouts_problems) || -n $(rules_problems) ]]; then
+    return 0
+  fi
+  if ! make_work_dir; then
+    warn "一時ディレクトリを作れないので、FancyZones の横向きの既定を書きません (TMPDIR=${TMPDIR:-/tmp})。"
+    return 0
+  fi
+  if ! read_pc_layouts; then
+    warn "FancyZones の custom-layouts.json を読めないので、FancyZones の横向きの既定を書きません: ${pc_layouts}"
+    return 0
+  fi
+  if [[ -e ${pc_defaults} ]]; then
+    if ! snapshot_defaults; then
+      warn "FancyZones の default-layouts.json を読めないので、横向きの既定を書きません: ${pc_defaults}" \
+        "中身を確かめて直してから、流し直してください。"
+      return 0
+    fi
+  else
+    # 無いのは、エディターを一度も開いていない PC。横向きの項目だけで作る (縦向きは FancyZones の既定のまま)
+    fresh=true
+    printf '%s\n' '{}' >"${work_dir}/dl.json"
+  fi
+  if ((dry_run)); then
+    pre="[dry-run] "
+  fi
+
+  # 計画: action は same (横向きのどの項目も、決まりの default のカスタムレイアウト。type と uuid だけを比べる) / write (書き換える・
+  # 足す・作る) / missing (決まりの default のレイアウトが PC に無いか canvas でない)。書く値は、エディターがカスタムレイアウトを既定に
+  # したときと同じ (zone-count と sensitivity-radius は 0。FancyZones はゾーンを計算するときに custom-layouts.json から引き直す)
+  jq -n --slurpfile dl "${work_dir}/dl.json" --slurpfile rules "${rules_file}" --slurpfile repo "${layouts_file}" \
+    --slurpfile pc "${work_dir}/pc.json" --argjson pending "${pending_layouts}" "${layouts_lib}${assign_lib}"'
+    ($repo[0] | layouts) as $repo_list
+    | $rules[0].default as $tname
+    | ([$repo_list[] | objects | select(.name == $tname)] | first) as $tl
+    | ([$pc[0] | layouts | .[] | objects | select((.uuid | type) == "string") | {key: .uuid, value: .}] | from_entries) as $pc_by_uuid
+    | ($pc_by_uuid + ([$repo_list[] | select(.uuid as $u | any($pending[]; . == $u)) | {key: .uuid, value: .}] | from_entries)) as $present
+    | ($dl[0] | if type == "object" then . else {} end) as $doc
+    | ($doc["default-layouts"] // []) as $list
+    | [$list[] | objects | select(.["monitor-configuration"] == "horizontal")] as $hz
+    | {uuid: $tl.uuid, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0} as $want
+    | {tname: $tname,
+       before: (if ($hz | length) == 0 or ($hz[0].layout | type) != "object" then "(横向きの既定なし)"
+                elif $hz[0].layout.type == "custom" then ($pc_by_uuid[$hz[0].layout.uuid | tostring].name // "カスタム \($hz[0].layout.uuid)")
+                else ($hz[0].layout.type | tostring) end),
+       action: (if ($hz | length) > 0 and all($hz[]; (.layout | type) == "object" and .layout.type == "custom" and .layout.uuid == $tl.uuid) then "same"
+                elif ($present[$tl.uuid] | usable_layout) then "write"
+                else "missing" end),
+       doc: ($doc | .["default-layouts"] = (if ($hz | length) > 0
+               then [$list[] | if type == "object" and .["monitor-configuration"] == "horizontal" then .layout = $want else . end]
+               else $list + [{"monitor-configuration": "horizontal", layout: $want}] end))}' >"${work_dir}/dl-plan.json"
+  action=$(jq -r '.action' "${work_dir}/dl-plan.json")
+  tname=$(jq -r '.tname' "${work_dir}/dl-plan.json")
+  before=$(jq -r '.before' "${work_dir}/dl-plan.json")
+  case ${action} in
+    same)
+      echo "FancyZones の横向きの既定のレイアウトは揃っています (${tname})。"
+      return 0
+      ;;
+    missing)
+      # PC で消したもの (カスタムレイアウトの段が警告した)。--force で足し直すと、その回に既定にする
+      warn "決まりの既定のレイアウト「${tname}」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定にしていません: ${pc_defaults}" \
+        "PC で消したものなら、--force で足し直すと既定にします (先に --dry-run --force で何が変わるかを見られます)。"
+      return 0
+      ;;
+  esac
+  if ((! dry_run)); then
+    if [[ ${fresh} == true ]] && ! mkdir -p -- "${fz_dir}" 2>/dev/null; then
+      warn "FancyZones の default-layouts.json を作れませんでした: ${pc_defaults}" \
+        "Windows 側のディレクトリを確かめてから、流し直してください。"
+      return 0
+    fi
+    if ! backup_file "${pc_defaults}"; then
+      warn "FancyZones の default-layouts.json を退避できないので、横向きの既定を書きません: ${backup_root}" "${before} → ${tname}"
+      return 0
+    fi
+    if ! write_defaults; then
+      warn "FancyZones の default-layouts.json に書けないので、横向きの既定を変えられませんでした: ${pc_defaults}" "${before} → ${tname}"
+      return 0
+    fi
+    # FancyZones は LastWriteTime の変更しか見ていないので、mv だけでは読み直さない
+    touch -- "${pc_defaults}" 2>/dev/null \
+      || warn "FancyZones の default-layouts.json に書きましたが、FancyZones に読み直させられませんでした: ${pc_defaults}" \
+        "PowerToys を起動し直すと読みます。"
+  fi
+  echo "==> ${pre}FancyZones の横向きの既定のレイアウト (${pc_defaults})"
+  if [[ ${fresh} == true ]]; then
+    echo "  ${pre}default-layouts.json が無いので作る"
+  fi
+  echo "  ${pre}${before} → ${tname}"
+  if ((! dry_run)) && [[ -n ${backup_dir} ]]; then
+    echo "  書き換える前のファイルは ${backup_dir} に退避しました。"
+  fi
+}
+
 # ---- --import ----
 
 # PC のレイアウトを名前で選び、repo の custom-layouts.json へ写す。同じ uuid は同じ位置で置き換え、無ければ末尾に足す。
@@ -1504,6 +1647,7 @@ fi
 
 sync_settings
 sync_layouts
+sync_default_layout
 assign_layouts
 check_enabled
 exit 0

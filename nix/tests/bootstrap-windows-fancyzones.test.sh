@@ -1605,7 +1605,28 @@ no_serial() {
   ! grep -qF -e "${serial_1}" -e "${serial_2}" "$1/out" "$1/err" \
     && ! grep -qsF -e "${serial_1}" -e "${serial_2}" "$(assigned_json "$1")" "$1/warnings"
 }
-# ③ のケースの HOME: settings.json は揃い、PC のカスタムレイアウトは repo と同じ (② の記録もある) ので、① ② は何も書かない
+# default-layouts.json (横向き・縦向きの既定)。dl_json は PC のファイルのパス、dl_entry は 1 項目 ($1 monitor-configuration、$2 layout)、
+# pt_defaults は PowerToys の形の中身 (引数は項目)、put_dl は PC に置く
+dl_json() { echo "$(fz_dir "$1")/default-layouts.json"; }
+dl_entry() { jq -n -c --arg c "$1" --argjson l "$2" '{"monitor-configuration": $c, layout: $l}'; }
+pt_defaults() {
+  local body
+  body=$(jq -n --indent 2 '{"default-layouts": $ARGS.positional}' --jsonargs "$@")
+  printf '%s' "${body//$'\n'/$'\r\n'}"
+}
+put_dl() {
+  mkdir -p "$(fz_dir "$1")"
+  printf '%s' "$2" >"$(dl_json "$1")"
+}
+# PC の既定の形 (pjp-raiden の元の値): 縦向きは rows、横向きは priority-grid
+dl_vertical=$(dl_entry vertical '{"uuid":"","type":"rows","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
+dl_horizontal_pg=$(dl_entry horizontal '{"uuid":"","type":"priority-grid","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
+# エディターがカスタムレイアウト (1080p) を横向きの既定にしたときに書く値 (zone-count と sensitivity-radius は 0)
+dl_want_layout=$(jq -n -c --arg u "$(jq -r .uuid <<<"${lay_b}")" '{uuid: $u, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0}')
+dl_horizontal_want=$(dl_entry horizontal "${dl_want_layout}")
+
+# ③ のケースの HOME: settings.json は揃い、PC のカスタムレイアウトは repo と同じ (② の記録もある)、横向きの既定も揃っているので、
+# ① ② と横向きの既定の段は何も書かない
 fz3_home() {
   local h
   h=$(new_home "$1" "${state_on}")
@@ -1614,6 +1635,7 @@ fz3_home() {
   put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
   put_record "${h}" "${lay_a}" "${lay_b}"
   put_rules "${h}" "${rules_default}"
+  put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_want}")"
   make_fake_ps "${h}"
   echo "${h}"
 }
@@ -2290,6 +2312,194 @@ if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(
   ok "C: 仮想デスクトップは大文字で比べて書き、形の合わないもの・null・重なりは落とす"
 else
   ng "C の仮想デスクトップの形" "rc=$(rc "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# ---- 横向きの既定 (default-layouts.json。② と ③ の間の段。以下 A と書く) ----
+
+# 89. 横向きの既定が priority-grid: 決まりの default のレイアウト (1080p) を、エディターが既定にしたときと同じ値で書く。縦向き・項目の並びは
+#     変えず、PowerToys の形で書いて mv の後に touch し、書き換える前を退避する。同じ回に ③ も書けば、退避は同じディレクトリに入る
+h=$(fz3_home t89)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+put_apl "${h}" "$(pt_applied "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}")")"
+put_displays "${h}" "${d_aus}"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+dl=$(dl_json "${h}")
+apl=$(apl_json "${h}")
+nb=$(newest_backup "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${dl}") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && pt_form "${dl}" && recent_mtime "${dl}" \
+  && [[ $(jq -c '.["default-layouts"][1].layout | keys_unsorted' "${dl}") == '["uuid","type","show-spacing","spacing","zone-count","sensitivity-radius"]' ]] \
+  && [[ $(fs_calls "${h}") == "mv ${dl},touch ${dl},mv ${apl},touch ${apl},mv $(assigned_json "${h}")," ]] \
+  && [[ $(nbackups "${h}") == 1 ]] && file_is "${nb}default-layouts.json" "${before_dl}" && [[ -e ${nb}applied-layouts.json ]] \
+  && seen "${h}" -F "==> FancyZones の横向きの既定のレイアウト (${dl})" && seen "${h}" -F '  priority-grid → 1080p' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "A: 横向きの既定を決まりの default のレイアウトにし (エディターと同じ値)、縦向きと並びを変えず、退避・mv・touch する"
+else
+  ng "A (priority-grid → 1080p)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") doc=$(doc_of "${dl}") $(outerr "${h}")"
+fi
+
+# 90. 次の回: 揃っていると出し、書かない
+touch -d '2020-01-01 00:00:00' "${dl}"
+before_mtime=$(stat -c %Y "${dl}")
+: >"${h}/fs-calls"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/fs-calls && $(stat -c %Y "${dl}") == "${before_mtime}" ]] \
+  && seen "${h}" -F 'FancyZones の横向きの既定のレイアウトは揃っています (1080p)。'; then
+  ok "A: 次の回は揃っていると出し、書かない"
+else
+  ng "A の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 91. default-layouts.json が無い (エディターを開いたことの無い PC): 横向きの項目だけのファイルを作る (縦向きは FancyZones の既定のまま)
+h=$(fz3_home t91)
+rm -f "$(dl_json "${h}")"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+dl=$(dl_json "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${dl}") == "$(jq -n -c -S --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$hz]}')" ]] && pt_form "${dl}" \
+  && [[ $(fs_calls "${h}") == "mv ${dl},touch ${dl}," && ! -e $(backup_root "${h}") ]] \
+  && seen "${h}" -F '  default-layouts.json が無いので作る' && seen "${h}" -F '  (横向きの既定なし) → 1080p' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "A: default-layouts.json が無ければ、横向きの項目だけで作る"
+else
+  ng "A のファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") doc=$(doc_of "${dl}") $(outerr "${h}")"
+fi
+
+# 92. 横向きの項目が無い (縦向きだけ): 末尾に足す。縦向きは変えない
+h=$(fz3_home t92)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}")"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && seen "${h}" -F '  (横向きの既定なし) → 1080p'; then
+  ok "A: 横向きの項目が無ければ末尾に足し、縦向きは変えない"
+else
+  ng "A の横向きの項目が無い" "rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 93. 横向きの既定が別のカスタムレイアウト (エディターで既定にした): 決まりの default に戻す (前の名前は PC のレイアウトの名前)
+h=$(fz3_home t93)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "$(dl_entry horizontal "$(jq -n -c --arg u "${uuid_p1}" '{uuid: $u, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0}')")")"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && seen "${h}" -F '  Custom layout 1 → 1080p'; then
+  ok "A: 横向きの既定が別のカスタムレイアウトなら、決まりの default に戻す"
+else
+  ng "A の別のカスタムレイアウト" "rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 94. type と uuid が同じで、ほかの値だけが違う (エディターの版の違いなど): 揃っているとみなし、書かない
+h=$(fz3_home t94)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "$(dl_entry horizontal "$(jq -c '.["zone-count"] = 4 | .["sensitivity-radius"] = 20' <<<"${dl_want_layout}")")")"
+before_dl=$(cat "$(dl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && seen "${h}" -F 'FancyZones の横向きの既定のレイアウトは揃っています (1080p)。'; then
+  ok "A: type と uuid が同じなら、ほかの値が違っても揃っているとみなす"
+else
+  ng "A の値だけ違う" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 95. 目標のレイアウトが PC に無い (PC で消した): 書かずに警告する (まとめにも残す)。--dry-run --force は ② が足し直すものをあると見て
+#     予定を出す。--force は ② が足し直してから書く
+h=$(fz3_home t95)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+step1=no
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && grep -qF '決まりの既定のレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定にしていません' "${h}/warnings"; then
+  step1=yes
+fi
+run "${h}" --dry-run --force
+step2=no
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" && seen "${h}" -F '  [dry-run] priority-grid → 1080p' \
+  && ! grep -qF '横向きの既定にしていません' "${h}/err"; then
+  step2=yes
+fi
+run "${h}" --force
+if [[ ${step1}${step2} == yesyes && $(rc "${h}") == 0 ]] \
+  && [[ $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]]; then
+  ok "A: 目標のレイアウトが PC に無ければ書かずに警告し、--force は ② が足し直してから書く (--dry-run --force も見越す)"
+else
+  ng "A の目標が PC に無い" "step1=${step1} step2=${step2} rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 96. default-layouts.json を読めない: 5 回読んでから警告し (まとめにも残す)、書かない
+for t in "broken:not json" "empty:" "array:[1]" 'notarray:{"default-layouts":{}}'; do
+  name=${t%%:*}
+  body=${t#*:}
+  h=$(fz3_home "t96-${name}")
+  put_dl "${h}" "${body}"
+  DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  if [[ $(rc "${h}") == 0 && $(cat "$(dl_json "${h}")") == "${body}" && $(nsleep "${h}") == 5 && ! -e ${h}/fs-calls ]] \
+    && grep -q 'default-layouts.json を読めない' "${h}/err" && grep -q 'default-layouts.json を読めない' "${h}/warnings"; then
+    ok "A: default-layouts.json を読めなければ (${name}) 5 回読んでから警告し、書かない"
+  else
+    ng "A の読めない (${name})" "rc=$(rc "${h}") sleep=$(nsleep "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 97. 書けない (mv できない・一時ファイルを作れない・退避できない): 元のまま警告して exit 0 (まとめにも残す)。一時ファイルを残さず、素の
+#     エラーを混ぜない。touch できないときは、書いたうえで読み直させられなかったと警告する
+for t in mv tmpfile backup touch; do
+  h=$(fz3_home "t97-${t}")
+  put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+  dl=$(dl_json "${h}")
+  before_dl=$(cat "${dl}")
+  msg='default-layouts.json に書けない'
+  case ${t} in
+    tmpfile) mkdir "${dl}.dotfiles-tmp" ;;
+    backup)
+      mkdir -p "$(dirname "$(backup_root "${h}")")"
+      printf 'file' >"$(backup_root "${h}")"
+      msg='退避できない'
+      ;;
+    touch) msg='default-layouts.json に書きましたが' ;;
+  esac
+  case ${t} in
+    mv) FAKE_MV_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+    touch) FAKE_TOUCH_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+    *) DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+  esac
+  if [[ ${t} == touch ]]; then
+    wrote_ok=no
+    [[ $(doc_of "${dl}") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] && wrote_ok=yes
+  else
+    wrote_ok=no
+    file_is "${dl}" "${before_dl}" && [[ ! -f ${dl}.dotfiles-tmp ]] && wrote_ok=yes
+  fi
+  if [[ $(rc "${h}") == 0 && ${wrote_ok} == yes ]] && grep -q "${msg}" "${h}/warnings" && err_only_warnings "${h}"; then
+    ok "A: 書けなければ (${t}) 警告して exit 0 (素のエラーを混ぜない)"
+  else
+    ng "A が書けない (${t})" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 98. --dry-run: 予定を出すが、何も書かない (退避もしない)
+h=$(fz3_home t98)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+before_dl=$(cat "$(dl_json "${h}")")
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(backup_root "${h}") ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && seen "${h}" -F "==> [dry-run] FancyZones の横向きの既定のレイアウト ($(dl_json "${h}"))" && seen "${h}" -F '  [dry-run] priority-grid → 1080p'; then
+  ok "A: --dry-run は予定を出すが、何も書かない"
+else
+  ng "A の --dry-run" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 99. 決まりのファイルが無い (段 ③ の組も無い): A は何もせず、何も出さない (ファイルを作らない・警告しない)
+h=$(new_home t99 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_record "${h}" "${lay_a}" "${lay_b}"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e $(dl_json "${h}") && ! -e ${h}/fs-calls && ! -s ${h}/err && ! -s ${h}/warnings ]] && ! seen "${h}" '横向きの既定'; then
+  ok "A: 決まりのファイルが無ければ、何もせず何も出さない"
+else
+  ng "A の決まりのファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
