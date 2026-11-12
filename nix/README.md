@@ -3545,11 +3545,16 @@ cc-pages がその会話のトップページ（`/p/<会話>/`）へ送る。foo
   無いマシンには出ない。フックと同じ見方）
 - `<port>` は `dotfiles.ccPages.port`（`null` なら 7777）。script には `@ccPagesPort@` と書き、home-manager が footer の cc-page の
   規則と同じ port で埋めて置く（`home/modules/claude.nix`）。port を変えたら switch で変わる
+- 色は付けず、下線（`ESC[4m`）だけにする。Claude Code は status line の 1 行を dimColor（テーマの inactive 色）で包んで描き、
+  footer のバッジ（チケット・PR）も dimColor に下線で描くので、テーマによらずバッジと同じ見え方になる（2.1.322 の本体の JS で
+  確かめた）。dim（`ESC[2m`）を足すとバッジより暗く（ほかの欄の dim と同じく、inactive 色にさらに薄さが重なる）、色を足すと
+  テーマで見え方が変わる
 - 押して開けるのは、Claude Code が status line の OSC 8 をそのまま出す端末。herdr の pane では `FORCE_HYPERLINK=1`
   （[herdr の中の Claude Code にリンクを出させる](#herdr-の中の-claude-code-にリンクを出させる)）で OSC 8 のまま出し（2.1.321 で、
   pane の中の claude の生の出力に `ESC]8;id=…;http://localhost:<port>/s/<session_id>/` があることを確かめた）、herdr が Ctrl+クリックで開く
 - 問いの上に footer の 2 行を出す mod（claude-skills の `pjp-question-footer`）は status line の 1 行目を写すが、OSC 8 を捨てるので、
-  そこの `📄top` は押せない文字になる
+  そこの `📄top` は押せない文字になる。また、その 1 行を dimColor で包まないので、そこの `📄top` は既定の前景色に下線で、
+  バッジより明るく出る
 - 出し方は `nix/tests/statusline-command.test.sh`、port を埋めることは `nix/tests/claude-statusline.nix` が確かめる
 
 #### 登録（冪等。更新時も毎回走る）
