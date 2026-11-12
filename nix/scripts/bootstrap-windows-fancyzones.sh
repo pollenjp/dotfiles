@@ -848,9 +848,10 @@ sync_layouts() {
 #   entry_key              あて方の記録のキー (monitor|monitor-instance|monitor-number|virtual-desktop)。シリアルは入れない
 #   is_template            テンプレートのまま (blank を除く。FancyZones が既定であてたものも、エディターで選んだものも)
 #   is_recorded($rec)      この段が前にあてたまま (今のカスタムレイアウトが、あて方の記録と同じ)
-#   candidate($rec; $f)    powershell.exe で解像度を聞く候補。既定はテンプレートとこの段が前にあてたままの組、--force なら全部の組
 #   parse_displays         powershell.exe の返りを、FancyZones と同じ形 (DeviceID を # で分けた monitor・monitor-instance と、
 #                          \\.\DISPLAY<n> の n) にする。形の合わないディスプレイは落とす
+#   parse_desktops         powershell.exe の返りの仮想デスクトップを、大文字の {...} の GUID の並び (重ねず、Windows の並びのまま) に
+#                          する。形の合わないものと、null の GUID は落とす
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 assign_lib='
 def well_formed:
@@ -863,8 +864,11 @@ def is_template:
 def is_recorded($rec):
   .["applied-layout"].type == "custom" and (.["applied-layout"].uuid | type) == "string"
   and $rec[entry_key] == .["applied-layout"].uuid;
-def candidate($rec; $force):
-  well_formed and ($force or is_template or is_recorded($rec));
+def parse_desktops:
+  reduce (.desktops[]? | strings | ascii_upcase
+      | select(test("^\\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\\}$"))
+      | select(. != "{00000000-0000-0000-0000-000000000000}")) as $v
+    ([]; if any(.[]; . == $v) then . else . + [$v] end);
 def parse_displays:
   [.displays[]? | objects
     | select((.device | type) == "string" and (.id | type) == "string"
@@ -952,8 +956,12 @@ encode_ps() {
 # つながっているアダプターごとに、ACTIVE で MIRRORING_DRIVER でない最初のモニターの DeviceID (EDD_GET_DEVICE_INTERFACE_NAME) を取り、
 # アダプターの今の表示の解像度 (EnumDisplaySettings の ENUM_CURRENT_SETTINGS。物理の値で、拡大率に左右されない) と組にする。
 # Win32 は C# から呼ぶ (PowerShell から文字列の引数に $null を渡すと空文字になり、最初のアダプターを引けないため)。
+# 同じ呼び出しで、Windows の仮想デスクトップの一覧も読む。FancyZones (VirtualDesktop.cpp) と同じく、HKCU の
+# Explorer\VirtualDesktops の VirtualDesktopIDs (16 バイトずつの GUID) を、FancyZones が組に書く形 (大文字の {...}) にする。
+# 値が無ければ (Windows に仮想デスクトップが 1 つのとき) 空の配列。
 # $ProgressPreference は、Add-Type の進み具合が CLIXML で stderr に出ないようにするため。返りは 1 行の JSON:
-#   {"displays":[{"device":"\\.\DISPLAY1","id":"\\?\DISPLAY#<monitor>#<monitor-instance>#{...}","width":3840,"height":2160}]}
+#   {"displays":[{"device":"\\.\DISPLAY1","id":"\\?\DISPLAY#<monitor>#<monitor-instance>#{...}","width":3840,"height":2160}],
+#    "desktops":["{EA30C0ED-D985-4D21-9BC7-27C9D2A6EDC5}"]}
 ps_body=$(
   cat <<'EOS'
 $ProgressPreference = 'SilentlyContinue'
@@ -1043,7 +1051,15 @@ public static class DotfilesFancyZonesDisplays {
 $displays = @([DotfilesFancyZonesDisplays]::Get() | ForEach-Object {
   [ordered]@{ device = $_.Device; id = $_.Id; width = $_.Width; height = $_.Height }
 })
-ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{ displays = $displays })
+$desktops = @()
+$vd = Get-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\VirtualDesktops' -Name 'VirtualDesktopIDs' -ErrorAction SilentlyContinue
+if ($null -ne $vd -and $vd.VirtualDesktopIDs -is [byte[]]) {
+  $raw = $vd.VirtualDesktopIDs
+  for ($i = 0; $i + 16 -le $raw.Length; $i += 16) {
+    $desktops += [System.Guid]::new([byte[]]($raw[$i..($i + 15)])).ToString('B').ToUpperInvariant()
+  }
+}
+ConvertTo-Json -Compress -Depth 3 -InputObject ([ordered]@{ displays = $displays; desktops = $desktops })
 EOS
 )
 
@@ -1114,7 +1130,7 @@ same_note() {
 # ディスプレイへのあて方 (上の 4): つながっている横向きのディスプレイの組へ、解像度の決まり (layout-rules.json) のレイアウトをあてる
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 assign_layouts() {
-  local problems force_json=false pre="" ncand nkept counts nwrite nsame nuntouched missing lname lcount lines
+  local problems force_json=false pre="" nkept counts nwrite nsame nuntouched missing lname lcount lines
   # 無いのは、FancyZones がまだ動いていない (ディスプレイを開いていない) とき
   [[ -e ${pc_applied} ]] || return 0
   if ! make_work_dir; then
@@ -1150,19 +1166,8 @@ assign_layouts() {
     pre="[dry-run] "
   fi
 
-  # 候補 (テンプレートの組と、この段が前にあてたままの組。--force なら全部) が無ければ、powershell.exe は呼ばない。残っているのは、
-  # 手であてたカスタムレイアウト・blank (と知らない type) の組だけ
-  ncand=$(jq --slurpfile rec "${work_dir}/asg.json" --argjson force "${force_json}" "${assign_lib}"'
-    [.["applied-layouts"][]? | select(candidate($rec[0].assignments; $force))] | length' "${work_dir}/apl.json")
-  if ((ncand == 0)); then
-    printf '%s\n' '{"entries":[]}' >"${work_dir}/plan3.json"
-    save_assigned false
-    nkept=$(jq "${assign_lib}"'[.["applied-layouts"][]? | select(well_formed)] | length' "${work_dir}/apl.json")
-    if ((nkept > 0)); then
-      echo "FancyZones のディスプレイへのあて方: $(kept_line "${nkept}")"
-    fi
-    return 0
-  fi
+  # 組があれば、埋める組が無くても powershell.exe は呼ぶ。組の無い仮想デスクトップ (作る組) があるかは、Windows に仮想デスクトップの
+  # 一覧を聞かないと分からないため
 
   # あてるレイアウトが PC にあるかと、ゾーンの数を見るために、カスタムレイアウトの段の後の PC の custom-layouts.json を読む
   if [[ -e ${pc_layouts} ]]; then
@@ -1189,7 +1194,7 @@ assign_layouts() {
     return 0
   fi
   if ! printf '%s\n' "${ps_out}" 2>/dev/null >"${work_dir}/displays.json" \
-    || ! jq -e 'type == "object" and (.displays | type) == "array"' "${work_dir}/displays.json" >/dev/null 2>&1; then
+    || ! jq -e 'type == "object" and (.displays | type) == "array" and (.desktops | type) == "array"' "${work_dir}/displays.json" >/dev/null 2>&1; then
     warn "powershell.exe の返りが、決めた形の JSON ではありません。FancyZones のディスプレイへのレイアウトのあて方は書きません:" \
       ${ps_out:+"${ps_out}"} ${ps_err:+"${ps_err}"}
     return 0

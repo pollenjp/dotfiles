@@ -1537,11 +1537,18 @@ disp() {
   jq -n -c --arg n "$1" --arg m "$2" --arg i "$3" --argjson w "$4" --argjson hh "$5" \
     '{device: "\\\\.\\DISPLAY\($n)", id: "\\\\?\\DISPLAY#\($m)#\($i)#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}", width: $w, height: $hh}'
 }
-# 偽の powershell.exe が返すディスプレイを置く (Windows PowerShell 5.1 の ConvertTo-Json -Compress のように & を & で書く)
+# 偽の powershell.exe が返すディスプレイと仮想デスクトップを置く (Windows PowerShell 5.1 の ConvertTo-Json -Compress のように
+# & を & で書く)。$1 HOME、$2 仮想デスクトップの GUID の JSON の配列、残り: ディスプレイ
+put_displays_vd() {
+  local h=$1 vds=$2
+  shift 2
+  jq -n -c --argjson vds "${vds}" '{displays: $ARGS.positional, desktops: $vds}' --jsonargs "$@" | sed 's/&/\\u0026/g' >"${h}/ps-displays"
+}
+# 仮想デスクトップの一覧が空 (Windows に 1 つ・レジストリの値が無い) の返り。組は作らない
 put_displays() {
   local h=$1
   shift
-  jq -n -c '{displays: $ARGS.positional}' --jsonargs "$@" | sed 's/&/\\u0026/g' >"${h}/ps-displays"
+  put_displays_vd "${h}" '[]' "$@"
 }
 # 偽の powershell.exe を $1 (HOME) の bin に置く (上の「偽の powershell.exe」)
 make_fake_ps() {
@@ -1661,8 +1668,9 @@ fi
 # shellcheck disable=SC2016 # PowerShell の変数の名前を文字のまま探す
 if ps_called "${h}" && [[ $(cat "${h}/ps-args") == '-NoProfile -NonInteractive -OutputFormat Text -EncodedCommand' ]] \
   && [[ ! -e ${h}/ps-bad-encoding && ! -e ${h}/ps-stdin ]] && grep -qF 'EnumDisplayDevicesW' "${h}/ps-code" \
-  && grep -qF 'EnumDisplaySettingsW' "${h}/ps-code" && grep -qF '$ProgressPreference' "${h}/ps-code"; then
-  ok "あて方: powershell.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で ASCII の UTF-16LE を渡し、stdin を渡さない"
+  && grep -qF 'EnumDisplaySettingsW' "${h}/ps-code" && grep -qF '$ProgressPreference' "${h}/ps-code" \
+  && grep -qF 'Explorer\VirtualDesktops' "${h}/ps-code" && grep -qF 'VirtualDesktopIDs' "${h}/ps-code"; then
+  ok "あて方: powershell.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で ASCII の UTF-16LE を渡し、stdin を渡さない (仮想デスクトップの一覧も同じ 1 回で読む)"
 else
   ng "powershell.exe の呼び方" "args=$(cat "${h}/ps-args" 2>/dev/null) bad=$([[ -e ${h}/ps-bad-encoding ]] && echo yes) stdin=$(cat "${h}/ps-stdin" 2>/dev/null)"
 fi
@@ -1681,7 +1689,8 @@ else
   ng "あて方の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
 fi
 
-# 62. 候補が無い (手であてたカスタムレイアウト・blank・知らない type だけで、記録も無い): powershell.exe を呼ばず、書かない。
+# 62. 埋める組が無い (目標と同じ組と、手であてたカスタムレイアウト・blank・知らない type だけで、記録も無い): powershell.exe は呼ぶ
+#     (組の無い仮想デスクトップがあるかは Windows に聞かないと分からない) が、applied-layouts.json は書かない。目標と同じ組を記録し、
 #     残した組を 1 行で知らせ、--force と --dry-run --force を案内する (警告のまとめには載せない)
 h=$(fz3_home t62)
 put_apl "${h}" "$(pt_applied \
@@ -1692,12 +1701,14 @@ put_apl "${h}" "$(pt_applied \
 put_displays "${h}" "${d_4k}" "${d_ivm48}" "${d_ivm55}" "${d_aus}"
 before_apl=$(cat "$(apl_json "${h}")")
 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
-if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(assigned_json "${h}") ]] && ! ps_called "${h}" && file_is "$(apl_json "${h}")" "${before_apl}" \
-  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (4 組) は残しました' && seen "${h}" -F 'bootstrap-windows-fancyzones.sh --force' \
+if [[ $(rc "${h}") == 0 && $(fs_calls "${h}") == "mv $(assigned_json "${h}")," ]] && ps_called "${h}" && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}")" ]] \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 1 組)。' \
+  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (3 組) は残しました' && seen "${h}" -F 'bootstrap-windows-fancyzones.sh --force' \
   && seen "${h}" -F -- '先に --dry-run --force で何が変わるかを見られます' && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
-  ok "あて方: 候補が無ければ powershell.exe を呼ばずに書かず、残した組を 1 行で知らせる (まとめには載せない)"
+  ok "あて方: 埋める組が無くても powershell.exe は呼び、applied-layouts.json は書かず、残した組を 1 行で知らせる (まとめには載せない)"
 else
-  ng "あて方の候補が無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") ps=$(ps_called "${h}" && echo called) $(outerr "${h}")"
+  ng "あて方の埋める組が無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") ps=$(ps_called "${h}" && echo called) asg=$(asg_of "${h}") $(outerr "${h}")"
 fi
 
 # 63. 決まりや解像度が変わった: ③ が前にあてたまま (記録と今が同じ) の組は新しい目標へ移す。手であてた組 (記録が無い) は残す。
@@ -1859,7 +1870,7 @@ fi
 
 # 71. powershell.exe が無い・失敗する・時間切れ・決めた形の JSON を返さない: 書かずに警告し (まとめにも残す)、exit 0。
 #     powershell.exe のエラーは CR を落として出す
-for t in missing fail timeout badjson notobject; do
+for t in missing fail timeout badjson notobject nodesktops; do
   h=$(fz3_home "t71-${t}")
   put_apl "${h}" "$(pt_applied "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}")")"
   put_displays "${h}" "${d_aus}"
@@ -1877,6 +1888,11 @@ for t in missing fail timeout badjson notobject; do
       ;;
     notobject)
       printf '[1]' >"${h}/ps-displays"
+      msg='決めた形の JSON ではありません'
+      ;;
+    nodesktops)
+      # ディスプレイはあるが、仮想デスクトップの一覧が無い (powershell.exe に渡すコードと食い違っている)
+      jq -n -c --argjson d "${d_aus}" '{displays: [$d]}' >"${h}/ps-displays"
       msg='決めた形の JSON ではありません'
       ;;
   esac
