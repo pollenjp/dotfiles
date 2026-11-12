@@ -852,6 +852,8 @@ sync_layouts() {
 #                          \\.\DISPLAY<n> の n) にする。形の合わないディスプレイは落とす
 #   parse_desktops         powershell.exe の返りの仮想デスクトップを、大文字の {...} の GUID の並び (重ねず、Windows の並びのまま) に
 #                          する。形の合わないものと、null の GUID は落とす
+#   usable_layout          PC のレイアウトを組にあてられるか (canvas で、info.zones が配列)
+#   applied_value($uuid)   PC のレイアウトを組にあてるときの applied-layout (エディターが canvas のカスタムをあてたときと同じ値)
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 assign_lib='
 def well_formed:
@@ -869,6 +871,11 @@ def parse_desktops:
       | select(test("^\\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\\}$"))
       | select(. != "{00000000-0000-0000-0000-000000000000}")) as $v
     ([]; if any(.[]; . == $v) then . else . + [$v] end);
+def usable_layout:
+  type == "object" and .type == "canvas" and (.info | type) == "object" and (.info.zones | type) == "array";
+def applied_value($uuid):
+  {uuid: $uuid, type: "custom", "show-spacing": false, spacing: 0, "zone-count": (.info.zones | length),
+   "sensitivity-radius": (if (.info["sensitivity-radius"] | type) == "number" then .info["sensitivity-radius"] else 20 end)};
 def parse_displays:
   [.displays[]? | objects
     | select((.device | type) == "string" and (.id | type) == "string"
@@ -905,7 +912,7 @@ load_assigned() {
 }
 
 # あて方の記録を書く (変わったときだけ。--dry-run では書かない)。applied-layouts.json から消えた組のキーは落とし、目標と同じ組で
-# 記録が無いものと、書けたときは書いた組を、目標のレイアウトの uuid で記録する。$1: 書けたか (true / false)
+# 記録が無いものと、書けたときは書いた組・作った組を、目標のレイアウトの uuid で記録する。$1: 書けたか (true / false)
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 save_assigned() {
   local new old
@@ -914,11 +921,13 @@ save_assigned() {
   fi
   new=$(jq -S -n --slurpfile apl "${work_dir}/apl.json" --slurpfile rec "${work_dir}/asg.json" --slurpfile plan "${work_dir}/plan3.json" \
     --argjson wrote "$1" "${assign_lib}"'
-    ([($apl[0]["applied-layouts"] // [])[] | select(well_formed) | entry_key] | unique) as $keys
+    (if $wrote then [($plan[0].created // [])[] | select(.write)] else [] end) as $made
+    | ([($apl[0]["applied-layouts"] // [])[] | select(well_formed) | entry_key] + [$made[].key] | unique) as $keys
     | ($rec[0].assignments | with_entries(select(.key as $k | any($keys[]; . == $k)))) as $kept
     | reduce ($plan[0].entries[] | . as $x
         | select($x.key != null and (($x.action == "same" and ($kept | has($x.key) | not)) or ($wrote and $x.write)))) as $x
         ($kept; .[$x.key] = $x.target)
+    | reduce $made[] as $x (.; .[$x.key] = $x.target)
     | {version: 1, assignments: .}')
   # 記録が無いのは、空の記録と同じ (記録するものが無ければ作らない)
   if [[ -f ${assigned_file} ]]; then
@@ -1086,14 +1095,15 @@ read_displays() {
   ps_err=${ps_err//$'\r'/}
 }
 
-# 書く中身 (applied-layouts.json の写しの、計画で書く組の applied-layout を置き換えたもの) を、PowerToys の書く形で出す。
-# device・組の並び・ほかの組は変えない
+# 書く中身 (applied-layouts.json の写しの、計画で書く組の applied-layout を置き換え、作る組を末尾に足したもの) を、PowerToys の書く形で
+# 出す。今ある組の device・並び・ほかの組は変えない
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 render_applied() {
   jq -n --slurpfile apl "${work_dir}/apl.json" --slurpfile plan "${work_dir}/plan3.json" '
     ([$plan[0].entries[] | select(.write) | {key: (.i | tostring), value: .new_al}] | from_entries) as $w
-    | $apl[0] | .["applied-layouts"] |= [to_entries[] | (.key | tostring) as $k
-        | if ($w | has($k)) then .value["applied-layout"] = $w[$k] else . end | .value]' | to_pt_form
+    | [($plan[0].created // [])[] | select(.write) | {device, "applied-layout": .new_al}] as $add
+    | $apl[0] | .["applied-layouts"] |= ([to_entries[] | (.key | tostring) as $k
+        | if ($w | has($k)) then .value["applied-layout"] = $w[$k] else . end | .value] + $add)' | to_pt_form
 }
 
 # 隣に書いてから置き換える (読みかけを見せない)
@@ -1109,6 +1119,12 @@ write_applied() {
 # 手であてたカスタムレイアウト・blank の組を残したことの 1 行 (警告のまとめには載せない。会社の PC で毎回出るため)。$1: 組の数
 kept_line() {
   echo "手であてたカスタムレイアウト・blank の組 ($1 組) は残しました。決まりのレイアウトで上書きするなら: ${script_dir}/bootstrap-windows-fancyzones.sh --force (--force は、PC で直した・消した dotfiles のカスタムレイアウトも repo の中身に戻します。先に --dry-run --force で何が変わるかを見られます)"
+}
+
+# 写せる組が無いので組を作らなかった画面の 1 行 (警告のまとめには載せない。FancyZones かエディターがその画面の組を書けば、次の回に作る)。
+# $1: 画面を「、」で並べたもの
+nosrc_line() {
+  echo "次の画面は、同じ画面 (モニター ID と instance が同じ) の組がどの仮想デスクトップにも無いので、組を作りません: $1"
 }
 
 # 揃っているときの 1 行の括弧の中。$1: 目標と同じ組の数、$2: 触らない組の数
@@ -1130,7 +1146,7 @@ same_note() {
 # ディスプレイへのあて方 (上の 4): つながっている横向きのディスプレイの組へ、解像度の決まり (layout-rules.json) のレイアウトをあてる
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 assign_layouts() {
-  local problems force_json=false pre="" nkept counts nwrite nsame nuntouched missing lname lcount lines
+  local problems force_json=false pre="" nkept counts nwrite nsame nuntouched ncreate nosrc missing lname lcount lines
   # 無いのは、FancyZones がまだ動いていない (ディスプレイを開いていない) とき
   [[ -e ${pc_applied} ]] || return 0
   if ! make_work_dir; then
@@ -1200,15 +1216,21 @@ assign_layouts() {
     return 0
   fi
 
-  # 計画: 組ごとの判定。action は untouched (合うディスプレイが無い・縦向き・壊れた組) / same (目標と同じ) / fill (テンプレート) /
+  # 計画: 組ごとの判定 (entries) と、作る組 (created) と、写せる組の無い画面 (nosrc)。
+  # entries の action は untouched (合うディスプレイが無い・縦向き・壊れた組) / same (目標と同じ) / fill (テンプレート) /
   # retarget (この段が前にあてたままで目標が変わった) / default (横向きの既定 (決まりの default のレイアウト) があたり、この段の記録に
   # 無い) / force (--force で、手であてたカスタムレイアウト・blank・知らない type) / kept (それらを残す) / missing (目標のレイアウトが
   # PC に無いか canvas でない)。ディスプレイは、monitor が同じで monitor-instance が同じものを先に、無ければ monitor-number が同じものに
-  # 合わせる (FancyZones の一致からシリアルを除いたもの)
+  # 合わせる (FancyZones の一致からシリアルを除いたもの)。
+  # created は、つながっている横向きの画面ごとに、同じ画面 (monitor と monitor-instance が同じ。FancyZones が同じ画面とみなす) の組を
+  # シリアル (中を見ない値) ごとに分け、Windows の仮想デスクトップのうち、今の番号でその組が無いデスクトップへ作る組。device は今の番号の
+  # 組があればそれ、無ければ番号の違う組 (番号が振り直された直後) から写し、monitor-number と virtual-desktop だけを替える (FancyZones の
+  # エディターは、組を monitor・シリアル・monitor-number・virtual-desktop の一致で引くため)
   jq -n --slurpfile apl "${work_dir}/apl.json" --slurpfile ps "${work_dir}/displays.json" --slurpfile rules "${rules_file}" \
     --slurpfile repo "${layouts_file}" --slurpfile pc "${work_dir}/pc.json" --slurpfile rec "${work_dir}/asg.json" \
     --argjson pending "${pending_layouts}" --argjson force "${force_json}" "${layouts_lib}${assign_lib}"'
     ($ps[0] | parse_displays) as $disp
+    | ($ps[0] | parse_desktops) as $vds
     | $rules[0] as $r
     | ($repo[0] | layouts) as $repo_list
     | $rec[0].assignments as $asg
@@ -1217,7 +1239,33 @@ assign_layouts() {
     | $by_name[$r.default].uuid as $default_uuid
     | ([$pc[0] | layouts | .[] | objects | select((.uuid | type) == "string") | {key: .uuid, value: .}] | from_entries) as $pc_by_uuid
     | ($pc_by_uuid + ([$repo_list[] | select(.uuid as $u | any($pending[]; . == $u)) | {key: .uuid, value: .}] | from_entries)) as $present
-    | {entries: [
+    | [($apl[0]["applied-layouts"] // [])[] | select(well_formed)] as $wf
+    | [$disp[] | select(.height <= .width)] as $landscape
+    | {created: [
+        $landscape[] as $d
+        | [$wf[] | select(.device.monitor == $d.monitor and .device["monitor-instance"] == $d.instance)] as $same
+        | select(($same | length) > 0)
+        | ([$r.rules[] | select(.resolution == "\($d.width)x\($d.height)") | .layout] | first // $r.default) as $tname
+        | $by_name[$tname] as $tl
+        | $present[$tl.uuid] as $pl
+        | ($same | group_by(.device["serial-number"]))[] as $grp
+        | (([$grp[] | select(.device["monitor-number"] == $d.number)] | first) // $grp[0]) as $src
+        | [$grp[] | select(.device["monitor-number"] == $d.number) | .device["virtual-desktop"] | tostring | ascii_upcase] as $have
+        | $vds[] as $vd
+        | select(all($have[]; . != $vd))
+        | {device: ($src.device | .["monitor-number"] = $d.number | .["virtual-desktop"] = $vd)}
+        | .key = entry_key
+        | .target = $tl.uuid
+        | .tname = $tname
+        | .label = "\($d.monitor) (\($d.instance | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($vd | ltrimstr("{") | .[0:8])"
+        | if ($pl | usable_layout) then .write = true | .new_al = ($pl | applied_value($tl.uuid)) else .write = false end
+      ],
+      nosrc: [
+        $landscape[] as $d
+        | select(all($wf[]; (.device.monitor == $d.monitor and .device["monitor-instance"] == $d.instance) | not))
+        | "\($d.monitor) (\($d.instance | split("&") | last))・\($d.width)x\($d.height)"
+      ],
+      entries: [
         ($apl[0]["applied-layouts"] // []) | to_entries[] | .key as $i | .value as $e
         | if ($e | well_formed | not) then
             {i: $i, action: "untouched"}
@@ -1238,29 +1286,26 @@ assign_layouts() {
                    elif $al.type == "custom" and $al.uuid == $default_uuid then "default"
                    elif $force then "force"
                    else "kept" end) as $base
-                | (($pl | type) == "object" and $pl.type == "canvas" and ($pl.info | type) == "object"
-                   and ($pl.info.zones | type) == "array") as $usable
+                | ($pl | usable_layout) as $usable
                 | (if any($writes[]; . == $base) and ($usable | not) then "missing" else $base end) as $action
                 | {i: $i, key: ($e | entry_key), action: $action, target: $tl.uuid, tname: $tname,
                    label: "\($dev.monitor) (\($dev["monitor-instance"] | tostring | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($dev["virtual-desktop"] | tostring | ltrimstr("{") | .[0:8])",
                    before: (if $al.type == "custom" then ($pc_by_uuid[$al.uuid | tostring].name // "カスタム \($al.uuid)") else ($al.type | tostring) end),
                    note: (if $action == "retarget" then " (前に決まりであてたもの)" elif $action == "default" then " (横向きの既定)"
                           elif $action == "force" then " (--force)" else "" end)}
-                | if any($writes[]; . == $action) then
-                    .new_al = {uuid: $tl.uuid, type: "custom", "show-spacing": false, spacing: 0,
-                      "zone-count": ($pl.info.zones | length),
-                      "sensitivity-radius": (if ($pl.info["sensitivity-radius"] | type) == "number" then $pl.info["sensitivity-radius"] else 20 end)}
-                  else . end
+                | if any($writes[]; . == $action) then .new_al = ($pl | applied_value($tl.uuid)) else . end
               end
           end
         | .write = (.action as $a | any($writes[]; . == $a))
       ]}' >"${work_dir}/plan3.json"
 
-  counts=$(jq -r '.entries | [map(select(.write)), map(select(.action == "same")), map(select(.action == "kept")), map(select(.action == "untouched"))]
-    | map(length) | @tsv' "${work_dir}/plan3.json")
-  read -r nwrite nsame nkept nuntouched <<<"${counts}"
-  # 目標のレイアウトが PC に無い組 (PC で消して、カスタムレイアウトの段が警告した) は飛ばして知らせる
-  missing=$(jq -r '[.entries[] | select(.action == "missing") | .tname] | group_by(.)[] | "\(.[0])\t\(length)"' "${work_dir}/plan3.json")
+  counts=$(jq -r '[(.entries | map(select(.write)), map(select(.action == "same")), map(select(.action == "kept")), map(select(.action == "untouched"))),
+      (.created | map(select(.write)))] | map(length) | @tsv' "${work_dir}/plan3.json")
+  read -r nwrite nsame nkept nuntouched ncreate <<<"${counts}"
+  nosrc=$(jq -r '.nosrc | join("、")' "${work_dir}/plan3.json")
+  # 目標のレイアウトが PC に無い組 (PC で消して、カスタムレイアウトの段が警告した) は、埋めず・作らずに知らせる
+  missing=$(jq -r '[(.entries[] | select(.action == "missing") | .tname), (.created[] | select(.write | not) | .tname)]
+    | group_by(.)[] | "\(.[0])\t\(length)"' "${work_dir}/plan3.json")
   if [[ -n ${missing} ]]; then
     while IFS=$'\t' read -r lname lcount; do
       warn "決まりのレイアウト「${lname}」が PC の custom-layouts.json に無い (か canvas でない) ので、${lcount} 組にあてていません: ${pc_layouts}" \
@@ -1268,7 +1313,7 @@ assign_layouts() {
     done <<<"${missing}"
   fi
 
-  if ((nwrite == 0)); then
+  if ((nwrite == 0 && ncreate == 0)); then
     save_assigned false
     if [[ -z ${missing} ]]; then
       echo "FancyZones のディスプレイへのあて方は揃っています$(same_note "${nsame}" "${nuntouched}")。"
@@ -1278,12 +1323,16 @@ assign_layouts() {
     if ((nkept > 0)); then
       echo "  $(kept_line "${nkept}")"
     fi
+    if [[ -n ${nosrc} ]]; then
+      echo "  $(nosrc_line "${nosrc}")"
+    fi
     return 0
   fi
 
-  # 変える組を 1 組 1 行で (シリアルは出さない)。シリアルだけが違う組の同じ行は、1 行にまとめて組の数を添える
+  # 変える組と作る組を 1 組 1 行で (シリアルは出さない)。シリアルだけが違う組の同じ行は、1 行にまとめて組の数を添える
   lines=$(jq -r --arg pre "${pre}" '
-    [.entries[] | select(.write) | "  \($pre)\(.label): \(.before) → \(.tname)\(.note)"]
+    [(.entries[] | select(.write) | "  \($pre)\(.label): \(.before) → \(.tname)\(.note)"),
+     (.created[] | select(.write) | "  \($pre)\(.label): 組なし → \(.tname)")]
     | reduce .[] as $l ([]; if any(.[]; .l == $l) then map(if .l == $l then .n += 1 else . end) else . + [{l: $l, n: 1}] end)
     | .[] | .l + (if .n > 1 then " (\(.n) 組)" else "" end)' "${work_dir}/plan3.json")
   if ((! dry_run)); then
@@ -1311,6 +1360,9 @@ assign_layouts() {
   fi
   if ((nkept > 0)); then
     echo "  $(kept_line "${nkept}")"
+  fi
+  if [[ -n ${nosrc} ]]; then
+    echo "  $(nosrc_line "${nosrc}")"
   fi
   if ((! dry_run)) && [[ -n ${backup_dir} ]]; then
     echo "  書き換える前のファイルは ${backup_dir} に退避しました。"

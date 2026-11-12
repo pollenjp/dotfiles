@@ -2103,5 +2103,194 @@ else
   ng "あて方の横向きの既定の組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
 fi
 
+# ---- 全部の仮想デスクトップに組を作る (段 ③ の中。以下 C と書く) ----
+
+vd_c='{1769CDBD-E6F0-4AC6-B263-524BA8C16518}'
+k_4k_c="XXX0020|5&61cfcb&0&UID8449|1|${vd_c}"
+k_aus_b="AUS23CC|5&61cfcb&0&UID8453|4|${vd_b}"
+k_aus_c="AUS23CC|5&61cfcb&0&UID8453|4|${vd_c}"
+k_ivm48_b="IVM562D|5&61cfcb&0&UID8448|2|${vd_b}"
+# C が作る組の期待値: 元の組 $1 の device の virtual-desktop を $2 に (monitor-number を $3 に。空なら替えない) し、applied-layout を $4 にしたもの
+created_entry() {
+  jq -n -c --argjson e "$1" --arg vd "$2" --arg n "$3" --argjson al "$4" \
+    '$e | .device["virtual-desktop"] = $vd | (if $n != "" then .device["monitor-number"] = ($n | tonumber) else . end) | .["applied-layout"] = $al'
+}
+# 期待する中身 (キーの順によらない 1 行): 元の中身 $1 の末尾に、残りの組を足したもの
+want_doc_add() {
+  local doc=$1
+  shift
+  jq -c -S '.["applied-layouts"] += $ARGS.positional' --jsonargs "$@" <<<"${doc}"
+}
+
+# 80. pjp-raiden の形 (仮想デスクトップ 3 つ): 1 つのデスクトップにだけ組がある横向きの 2 台へ、残りの 2 つのデスクトップの組を作る。
+#     device は同じ画面の組から写し (シリアルもそのまま。キーの並びも同じ)、virtual-desktop だけを替え、決まりのレイアウトをあてて末尾に足す。
+#     同じ回に埋める組 (テンプレート) と一緒に書き、記録はシリアルなしのキー。作る組は 1 組 1 行「組なし → …」で、シリアルを出さない
+h=$(fz3_home t80)
+c80_4k=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}" "${serial_1}")
+c80_aus=$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}" "${serial_2}")
+put_apl "${h}" "$(pt_applied "${c80_4k}" "${c80_aus}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "${d_4k}" "${d_aus}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+apl=$(apl_json "${h}")
+al_4k=$(want_al "${uuid_a}" 2)
+al_b=$(want_al "${uuid_b}" 1)
+want=$(want_doc_add "$(want_doc "${before_apl}" 1 "${al_b}")" \
+  "$(created_entry "${c80_4k}" "${vd_b}" "" "${al_4k}")" "$(created_entry "${c80_4k}" "${vd_c}" "" "${al_4k}")" \
+  "$(created_entry "${c80_aus}" "${vd_b}" "" "${al_b}")" "$(created_entry "${c80_aus}" "${vd_c}" "" "${al_b}")")
+nb=$(newest_backup "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${apl}") == "${want}" ]] && pt_form "${apl}" \
+  && [[ $(jq -c '.["applied-layouts"][2].device | keys_unsorted' "${apl}") == '["monitor","monitor-instance","monitor-number","serial-number","virtual-desktop"]' ]] \
+  && [[ $(fs_calls "${h}") == "mv ${apl},touch ${apl},mv $(assigned_json "${h}")," ]] && recent_mtime "${apl}" && file_is "${nb}applied-layouts.json" "${before_apl}" \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}" "${k_4k_c}" "${uuid_a}" "${k_aus_b}" "${uuid_b}" "${k_aus_c}" "${uuid_b}")" ]] \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ EA30C0ED: priority-grid → 1080p' \
+  && seen "${h}" -F '  XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 組なし → 4k-43inch' \
+  && seen "${h}" -F '  XXX0020 (UID8449)・3840x2160・仮想デスクトップ 1769CDBD: 組なし → 4k-43inch' \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ 1769CDBD: 組なし → 1080p' \
+  && [[ $(grep -c ' → ' "${h}/out") == 5 ]] && no_serial "${h}" && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "C: 組の無い仮想デスクトップへ、同じ画面の組の device を写して (virtual-desktop だけ替えて) 組を作り、決まりのレイアウトをあてて記録する"
+else
+  ng "C (pjp-raiden の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
+fi
+
+# 81. 次の回: 作る組も変える組も無いので書かず、揃っていると出す (作った組も決まりのレイアウトの組に数える)
+touch -d '2020-01-01 00:00:00' "${apl}"
+before_mtime=$(stat -c %Y "${apl}")
+: >"${h}/fs-calls"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/fs-calls && $(stat -c %Y "${apl}") == "${before_mtime}" ]] \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 6 組)。' && ! seen "${h}" '組なし' && [[ ! -s ${h}/err ]]; then
+  ok "C: 次の回は作る組が無ければ書かず、揃っていると出す"
+else
+  ng "C の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 82. シリアルだけが違う組 (同じ画面): シリアルごとに組を作る (どちらが今のシリアルかは読まずに決められない)。同じ行は 1 行にまとめ、
+#     記録はシリアルなしの 1 つのキーにする
+h=$(fz3_home t82)
+c82_s1=$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}" "${serial_1}")
+c82_s2=$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}" "${serial_2}")
+put_apl "${h}" "$(pt_applied "${c82_s1}" "${c82_s2}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_ivm48}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c82_s1}" "${vd_b}" "" "${al_b}")" "$(created_entry "${c82_s2}" "${vd_b}" "" "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_ivm48_a}" "${uuid_b}" "${k_ivm48_b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'IVM562D (UID8448)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p (2 組)' && [[ $(grep -c ' → ' "${h}/out") == 1 ]] \
+  && no_serial "${h}"; then
+  ok "C: シリアルだけが違う組は、シリアルごとに作り、同じ行は 1 行にまとめる"
+else
+  ng "C のシリアル違いの組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 83. 番号が振り直された直後 (今の番号の組がどのデスクトップにも無く、instance が同じで番号の違う組だけがある): その組の device を写し、
+#     monitor-number を今の番号にして、全部のデスクトップへ作る (FancyZones のエディターは今の番号で組を引く)。古い組は目標と同じなので
+#     記録するだけで、書き換えない
+k_aus51_1a="AUS23CC|5&61cfcb&0&UID8451|1|${vd_a}"
+k_aus51_1b="AUS23CC|5&61cfcb&0&UID8451|1|${vd_b}"
+k_aus51_2a="AUS23CC|5&61cfcb&0&UID8451|2|${vd_a}"
+k_aus51_2b="AUS23CC|5&61cfcb&0&UID8451|2|${vd_b}"
+h=$(fz3_home t83)
+c83_a=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_a}" custom "${uuid_b}" "${serial_1}")
+c83_b=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_b}" custom "${uuid_b}" "${serial_1}")
+put_apl "${h}" "$(pt_applied "${c83_a}" "${c83_b}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c83_a}" "${vd_a}" 1 "${al_b}")" "$(created_entry "${c83_a}" "${vd_b}" 1 "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_1a}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}" "${k_aus51_2a}" "${uuid_b}" "${k_aus51_2b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ EA30C0ED: 組なし → 1080p' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' && [[ $(grep -c ' → ' "${h}/out") == 2 ]] && no_serial "${h}"; then
+  ok "C: 今の番号の組が無ければ、instance が同じで番号の違う組を写し、今の番号で全部のデスクトップへ作る"
+else
+  ng "C の番号の振り直し" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 84. 同じ画面 (monitor と monitor-instance が同じ) の組がどのデスクトップにも無い画面には作らず、1 行で知らせる (警告のまとめには載せない)。
+#     番号だけが同じ別の instance の組は、写す元にしない (その組は今までどおり番号でディスプレイに合わせて埋める)
+h=$(fz3_home t84)
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_a}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}" "$(disp 2 IVM562D '5&61cfcb&0&UID8453' 1920 1080)" \
+  "$(disp 3 LGE5555 '5&61cfcb&0&UID8461' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && seen "${h}" -F '次の画面は、同じ画面 (モニター ID と instance が同じ) の組がどの仮想デスクトップにも無いので、組を作りません: IVM562D (UID8453)・1920x1080、LGE5555 (UID8461)・1920x1080' \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 3 組)。' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "C: 同じ画面の組がどのデスクトップにも無い画面には作らず、1 行で知らせる (番号だけ同じ組は写さない)"
+else
+  ng "C の写せる組が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 85. 縦向き・つながっていない画面には作らない
+h=$(fz3_home t85)
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry DEL4321 '5&61cfcb&0&UID8460' 5 "${vd_a}" priority-grid "${null_uuid}")" \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8451' 1 "${vd_a}" priority-grid "${null_uuid}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_tall}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(apl_json "${h}")" "${before_apl}" && ! seen "${h}" '組なし' && ! seen "${h}" '組を作りません' \
+  && seen "${h}" -F 'つながっていない・縦向きのディスプレイの組 2 組には触りません'; then
+  ok "C: 縦向き・つながっていない画面には作らない"
+else
+  ng "C の縦向き・つながっていない画面" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 86. 目標のレイアウトが PC に無い: 作らず、決まりのレイアウトが無い警告に数える (まとめにも残す)。--force は ② が足し直してから作る
+h=$(fz3_home t86)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+c86=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}")
+put_apl "${h}" "$(pt_applied "${c86}" "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" custom "${uuid_b}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}" "${d_aus}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+step1=no
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c86}" "${vd_b}" "" "${al_4k}")")" ]] \
+  && grep -qF '決まりのレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、1 組にあてていません' "${h}/warnings"; then
+  step1=yes
+fi
+run "${h}" --force
+if [[ ${step1} == yes && $(rc "${h}") == 0 ]] && seen "${h}" -F 'AUS23CC (UID8453)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p'; then
+  ok "C: 目標のレイアウトが PC に無ければ作らずに警告し、--force は ② が足し直してから作る"
+else
+  ng "C の目標が PC に無い" "step1=${step1} rc=$(rc "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 87. --dry-run: 作る組を出すが、何も書かない (退避も記録もしない)
+h=$(fz3_home t87)
+put_apl "${h}" "$(pt_applied "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}" "${serial_1}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(assigned_json "${h}") && ! -e $(backup_root "${h}") ]] && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && seen "${h}" -F '==> [dry-run] FancyZones のディスプレイへのあて方' \
+  && seen "${h}" -F '  [dry-run] XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 組なし → 4k-43inch' && no_serial "${h}"; then
+  ok "C: --dry-run は作る組を出すが、何も書かない"
+else
+  ng "C の --dry-run" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 88. 仮想デスクトップの GUID は大文字にして比べる・書く。形の合わないもの・null の GUID・重なりは落とす
+h=$(fz3_home t88)
+c88=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "$(tr 'A-F' 'a-f' <<<"${vd_a}")" custom "${uuid_a}")
+put_apl "${h}" "$(pt_applied "${c88}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"not-a-guid\",\"$(tr 'A-F' 'a-f' <<<"${vd_b}")\",\"${vd_b}\",\"{00000000-0000-0000-0000-000000000000}\"]" "${d_4k}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c88}" "${vd_b}" "" "${al_4k}")")" ]] \
+  && [[ $(grep -c ' → ' "${h}/out") == 1 ]]; then
+  ok "C: 仮想デスクトップは大文字で比べて書き、形の合わないもの・null・重なりは落とす"
+else
+  ng "C の仮想デスクトップの形" "rc=$(rc "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]
