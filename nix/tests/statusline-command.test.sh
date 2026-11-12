@@ -9,13 +9,15 @@
 # flake の checks (statusline-command-test) が Nix のサンドボックスで、home の設定 (既定の port 7777) から作った
 # statusline-command.sh を渡して流す。引数を省けば、repo の script の @ccPagesPort@ を 7777 で埋めた写しを使う。使うのは
 # bash・jq・git・coreutils。status line は、要るコマンドだけを symlink で並べた PATH で起こす (cc-pages の無い PATH を
-# 作るため)。色 (SGR) は除いてから比べる (OSC 8 のリンクは残す)。
+# 作るため)。色 (SGR) は除いてから比べる (OSC 8 のリンクは残す)。📄top の SGR だけは生の出力で見る。
 #
 # ## 確かめること
 #
 #   - session_id が英数字と - だけで、CC_PAGES_DISABLE が空で、cc-pages が PATH にあれば、先頭に
 #     ESC]8;;http://localhost:7777/s/<session_id>/ BEL 📄top ESC]8;; BEL を出し、区切り「 · 」の後ろに今の 4 つ
 #     (model・dir・branch・context の残り) を続ける
+#   - 📄top は色も dim も付けず、下線 (ESC[4m) だけで描く。Claude Code が status line を dimColor (テーマの inactive 色)
+#     で包むので、footer のバッジ (dimColor に下線) と同じ見え方になる
 #   - session_id が無い・空・形が違う (/ や空白を含む)、cc-pages が PATH に無い、CC_PAGES_DISABLE が空でないときは、
 #     📄top を出さずに今の 4 つだけを出す
 #   - remaining_percentage が無い (会話の始め) ときも、session_id を取り違えずに 📄top を出す
@@ -102,6 +104,13 @@ if [[ $(wc -l <"${work}/full.raw") == 0 ]]; then
   ok "出力は 1 行 (改行を含まない)"
 else
   ng "出力は 1 行 (改行を含まない)" "$(cat -v "${work}/full.raw")"
+fi
+# 📄top の SGR は生の出力で見る。下線だけで、色も dim も付けない
+top_sgr="${BEL}${ESC}[4m📄top${ESC}[0m${ESC}]8;;${BEL}"
+if [[ $(cat "${work}/full.raw") == *"${top_sgr}"* ]]; then
+  ok "📄top は色も dim も付けず、下線 (ESC[4m) だけで描く"
+else
+  ng "📄top は色も dim も付けず、下線 (ESC[4m) だけで描く" "got:  $(cat -v "${work}/full.raw")"
 fi
 
 run no-session "$(input)" "${with_cc_pages}:${tools}"

@@ -11,6 +11,9 @@
 # 📄top は cc-pages の会話のトップページへのリンク (OSC 8)。押すと http://localhost:<port>/s/<session_id>/ が開き、
 # cc-pages がその会話のトップページへ送る。footer のバッジ (5 個まで) から溢れたリンクも、Stop フック
 # (hooks/footer-links-archive.sh) がそのページの「リンク」の節に残している。狭い pane でも切れないよう先頭に置く。
+# 色は付けず下線だけにする。Claude Code は status line の 1 行を dimColor (テーマの inactive 色) で包んで描き、
+# footer のバッジ (チケット・PR) も dimColor に下線で描くので、テーマによらずバッジと同じ見え方になる
+# (dim を足すとバッジより暗く、色を足すとテーマで見え方が変わる)。
 # 出すのは session_id が英数字と - だけで、cc-pages が PATH にあり、CC_PAGES_DISABLE が空のときだけ (フックと同じ見方)。
 # port は home-manager が @ccPagesPort@ を dotfiles.ccPages.port (null なら cc-pages の既定の 7777) で埋める
 # (home/modules/claude.nix)。
@@ -30,7 +33,7 @@ C_DIR=$'\033[2;36m'    # dim cyan
 C_BRANCH=$'\033[2;33m' # dim yellow
 C_CTX=$'\033[2;32m'    # dim green
 C_SEP=$'\033[2;90m'    # dim gray
-C_LINK=$'\033[2;4;34m' # dim underline blue (📄top)
+C_LINK=$'\033[4m'      # underline only (📄top。footer のバッジと同じ見え方。上記)
 
 # process substitution の中の jq がこのスクリプトの stdin をそのまま読む。
 # 値の中の制御文字を空白にしてから US (\x1f) でつなぐ。区切りが空白類 (タブ) だと、read は空の値の
