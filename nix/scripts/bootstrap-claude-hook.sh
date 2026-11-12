@@ -48,8 +48,13 @@
 #                gist やペースト共有のサービスへ上げるコマンドと、gist を作る・書き換える MCP の tool を、
 #                いつも止める (ADR 047)。MCP の tool 名は mcp__<server>__<tool> なので、gist を名前に含む
 #                tool だけで hook が走るよう matcher を絞る (大文字の Gist も拾う)
+#   Stop         (matcher なし・async)             footer-links-archive.sh
+#                会話に出たリンク (footer のバッジと同じ規則で拾う PR・チケット・cc-page) を、cc-pages の会話の
+#                トップページに全部残す (footer は 5 個まで)。Stop は matcher を使わないので付けない。turn の終わりを
+#                遅らせないよう async で走らせる (Claude を止める答えは返さない hook)
 #
-# 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない。
+# 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない (matcher の無い組は
+# matcher が空と見る)。
 
 set -eu -o pipefail
 
@@ -64,13 +69,14 @@ docs_guard="${hooks_dir}/docs-guard.sh"
 assignee_nudge="${hooks_dir}/pr-assignee-nudge.sh"
 op_guard="${hooks_dir}/op-reason-guard.sh"
 gist_guard="${hooks_dir}/gist-guard.sh"
+links_archive="${hooks_dir}/footer-links-archive.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}" "${assignee_nudge}" "${op_guard}" "${gist_guard}"; do
+for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}" "${assignee_nudge}" "${op_guard}" "${gist_guard}" "${links_archive}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -88,28 +94,31 @@ fi
 
 changed=0
 
-# register <event> <matcher> <if (空なら付けない)> <command>
+# register <event> <matcher (空なら付けない)> <if (空なら付けない)> <command> [async]
+#   5 つ目に async を渡すと、hook を async: true (裏で走らせ、turn を待たせない) で足す
 register() {
-  local event=$1 matcher=$2 cond=$3 cmd=$4 tmp
+  local event=$1 matcher=$2 cond=$3 cmd=$4 async=${5:-} tmp
   if jq -e --arg ev "${event}" --arg m "${matcher}" --arg cond "${cond}" --arg c "${cmd}" '
-      [.hooks[$ev] // [] | .[] | select(.matcher == $m) | .hooks // [] | .[]
+      [.hooks[$ev] // [] | .[] | select((.matcher // "") == $m) | .hooks // [] | .[]
         | select(.command == $c and ((.["if"] // "") == $cond))]
       | length > 0
     ' "${settings}" >/dev/null; then
-    echo "登録済みです: ${event} ${matcher}${cond:+ (${cond})} -> ${cmd}"
+    echo "登録済みです: ${event}${matcher:+ ${matcher}}${cond:+ (${cond})} -> ${cmd}"
     return 0
   fi
   tmp=$(mktemp "${settings}.XXXXXX")
-  jq --arg ev "${event}" --arg m "${matcher}" --arg cond "${cond}" --arg c "${cmd}" '
+  jq --arg ev "${event}" --arg m "${matcher}" --arg cond "${cond}" --arg c "${cmd}" --arg async "${async}" '
     .hooks //= {}
     | .hooks[$ev] //= []
-    | .hooks[$ev] += [{
-        matcher: $m,
-        hooks: [{type: "command", command: $c} + (if $cond == "" then {} else {"if": $cond} end)]
-      }]
+    | .hooks[$ev] += [
+        (if $m == "" then {} else {matcher: $m} end)
+        + {hooks: [{type: "command", command: $c}
+            + (if $cond == "" then {} else {"if": $cond} end)
+            + (if $async == "" then {} else {async: true} end)]}
+      ]
   ' "${settings}" >"${tmp}"
   mv "${tmp}" "${settings}"
-  echo "登録しました: ${event} ${matcher}${cond:+ (${cond})} -> ${cmd}"
+  echo "登録しました: ${event}${matcher:+ ${matcher}}${cond:+ (${cond})}${async:+ [async]} -> ${cmd}"
   changed=1
 }
 
@@ -129,6 +138,7 @@ register PostToolUse "Bash" "" "${op_guard}"
 register PostToolUseFailure "Bash" "" "${op_guard}"
 register PreToolUse "Bash" "" "${gist_guard}"
 register PreToolUse "mcp__.*[Gg]ist.*" "" "${gist_guard}"
+register Stop "" "" "${links_archive}" async
 
 if [[ ${changed} == 1 ]]; then
   echo

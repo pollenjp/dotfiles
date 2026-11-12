@@ -3519,16 +3519,38 @@ dotfiles-private の [ADR 047](https://github.com/pollenjp/dotfiles-private/blob
   MCP の tool の名前は `mcp__<server>__<tool>` なので、gist を名前に含む tool でだけ hook が走る。cloud
   （[後述](#claude-code-on-the-web-cloud-で使う)）にも張る
 
+#### footer から溢れるリンクを cc-pages の会話のトップページに残すフック
+
+`Stop` フック（`nix/files/claude/hooks/footer-links-archive.sh` と、本体の `footer-links-archive.mjs`）。会話に出たリンクを、footer の
+バッジと同じ規則で全部拾って cc-pages の会話のトップページに残す。何を拾い、どこに残し、いつ黙るかは
+[溢れたリンクを会話のトップページに残す](#溢れたリンクを会話のトップページに残す)。登録は上と同じ
+`./nix/scripts/bootstrap-claude-hook.sh` が `hooks.Stop` に 1 件（matcher なし・`async: true`）足す。cloud には張らない（cc-pages が無い）。
+
 ### statusLine
 
 Claude Code の下端に出る 1 行（`nix/files/claude/statusline-command.sh`）。
 
 ```
-<model> · <dir basename> · <git branch>[*] · <context% left>
+📄top · <model> · <dir basename> · <git branch>[*] · <context% left>
 ```
 
 shell prompt（starship）が既に出しているもの（時刻・`user@host`・フルパス）は
 意図的に繰り返さない。数百 ms ごとに呼ばれるので `jq` は 1 回にまとめて起動している。
+
+先頭の `📄top` は、cc-pages の会話のトップページへのリンク（OSC 8）。押すと `http://localhost:<port>/s/<session_id>/` が開き、
+cc-pages がその会話のトップページ（`/p/<会話>/`）へ送る。footer から溢れたリンクも、そのページの「リンク」の節に残っている
+（[溢れたリンクを会話のトップページに残す](#溢れたリンクを会話のトップページに残す)）。狭い pane でも切れないよう先頭に置く。
+
+- 出すのは、入力の `session_id` が英数字と `-` だけで、`cc-pages` が PATH にあり、`CC_PAGES_DISABLE` が空のときだけ（cc-pages の
+  無いマシンには出ない。フックと同じ見方）
+- `<port>` は `dotfiles.ccPages.port`（`null` なら 7777）。script には `@ccPagesPort@` と書き、home-manager が footer の cc-page の
+  規則と同じ port で埋めて置く（`home/modules/claude.nix`）。port を変えたら switch で変わる
+- 押して開けるのは、Claude Code が status line の OSC 8 をそのまま出す端末。herdr の pane では `FORCE_HYPERLINK=1`
+  （[herdr の中の Claude Code にリンクを出させる](#herdr-の中の-claude-code-にリンクを出させる)）で OSC 8 のまま出し（2.1.321 で、
+  pane の中の claude の生の出力に `ESC]8;id=…;http://localhost:<port>/s/<session_id>/` があることを確かめた）、herdr が Ctrl+クリックで開く
+- 問いの上に footer の 2 行を出す mod（claude-skills の `pjp-question-footer`）は status line の 1 行目を写すが、OSC 8 を捨てるので、
+  そこの `📄top` は押せない文字になる
+- 出し方は `nix/tests/statusline-command.test.sh`、port を埋めることは `nix/tests/claude-statusline.nix` が確かめる
 
 #### 登録（冪等。更新時も毎回走る）
 
@@ -3558,7 +3580,8 @@ Claude Code の `footerLinksRegexes`（2.1.176〜）を使う。turn の終わ�
 出力（tool の結果と Claude の応答の文章）を正規表現で走査し、当たったものをバッジにする。
 
 - 並ぶのは今の branch の PR バッジ（組み込み）込みで最大 5 個。新しいものが先頭に入り、
-  6 個目が来ると一番古いものが落ちる。同じ URL は 1 個にまとまる
+  6 個目が来ると一番古いものが落ちる。同じ URL は 1 個にまとまる。落ちたものも、cc-pages の会話のトップページに残る
+  （[溢れたリンクを会話のトップページに残す](#溢れたリンクを会話のトップページに残す)）
 - ユーザーが打った文は拾わない。Claude が応答で同じリンクに触れれば拾う
 - `/clear` で消え、resume すると transcript の末尾から作り直す
 - `settings.json` を書き換えると、実行中の session にも次の turn から効く
@@ -3617,6 +3640,54 @@ home-manager が `~/.local/state/dotfiles/claude-footer-links.json` に値（cc-
 
 `dotfiles.ccPages.port` を変えたら、switch で状態ファイルの cc-page の規則が新しい port になり、このコマンドが
 `settings.json` へ写す（`~/dotfiles/setup --update` なら続けて走る）。写すまで、footer は前の port のページを拾う。
+
+#### 溢れたリンクを会話のトップページに残す
+
+footer のバッジは 5 個まで（Claude Code の本体が決めていて、設定では増やせない）で、長い会話では前に出たリンクが押し出されて
+辿れなくなる。そこで Stop フック（`nix/files/claude/hooks/footer-links-archive.sh`）が turn の終わりごとに、会話に出たリンクを全部
+cc-pages の会話のトップページ（`/p/<会話>/`）の「リンク」の節に残す。status line の先頭の `📄top`（[statusLine](#statusline)）から
+開ける。footer の 5 枠と規則は変えない（footer には今までどおり出る）。
+
+- 拾うのは footer と同じ文（Claude の応答の文章と tool の結果。ユーザーが打った文・subagent・thinking・tool の入力は拾わない）に、
+  footer と同じ規則（`settings.json` の `footerLinksRegexes`）を当てたもの。footer と違い、文を末尾 8192 字に切らず、一致も 1 つの
+  文の 1 つの規則で前から 1000 件まで見る（全部を残すのが役目なので）。1000 件を超えた文は、footer が見る末尾 8192 字の分も足す
+  （footer に出たものは必ず残る）
+- 組（PR・チケット・cc-page・その他）は URL の形で付ける。cc-page は、footer の cc-page の規則と同じ port（このマシンの cc-pages）の
+  ページ
+- 渡すのは `cc-pages link --session <session_id> --stdin`（1 行 1 件の JSON Lines。URL・label（200 字まで）・組・出どころ（応答か
+  tool か）・時刻）。同じ URL は cc-pages が 1 つにまとめる。cc-pages は 1 回の入力の 16 MiB を超えた分を読まないので、1 回 1 MiB
+  までに分けて順に打つ
+- 本体（隣の `footer-links-archive.mjs`）は node で書いていて（footer の規則は JavaScript の RegExp）、PATH の node（mise が入れる
+  言語ランタイム。Node 18 以上）で動く。home の閉包には node を入れない。hook は `/` に移ってから node を起こすので、PATH の node が
+  mise の shim でも、会話の cwd の設定（repo が pin した古い版など）に左右されない
+- 会話ごとの控え（transcript のどこまで読んだか）は `${XDG_STATE_HOME:-~/.local/state}/pjp-footer-links-archive/sessions/<session_id>.json`。
+  次の turn は続きの完全な行だけを読む（書きかけの最後の行は次に回す）。分けて打った全部を cc-pages が受け取ってから控えを進めるので、
+  失敗した分は次の turn に渡し直す。transcript が縮んだ・別のファイルに替わったら初めから読み直す。30 日より古い控えは消す（消した会話を
+  resume すると、初めから読み直して同じものを渡す）
+- 入れる前から続いている会話も、入れた後の最初の turn で初めから読んで全部渡す
+- Esc で止めた turn（Stop が来ない）の分は、次の turn にまとめて渡す。Stop の時点では最後の応答がまだ transcript に書かれていない
+  ことがある（2.1.321 で見た）ので、Stop の入力の `last_assistant_message` にも規則を当てて渡す
+- hook は裏で走り（`async: true`）、turn の終わりを待たせない。何が起きても何も出さず、終了コード 0 で終わる
+
+| 状況 | hook |
+| --- | --- |
+| `cc-pages` が PATH に無い（取れないマシン）・`CC_PAGES_DISABLE` が空でない・`node` が PATH に無い | transcript を読まずに何もしない |
+| `cc-pages` が `link` を知らない（古い） | 控えを進めず、その binary の間は transcript を読まない。build し直すと（`bootstrap-cc-pages.sh`。`--update` で走る）、溜まった分をまとめて渡す |
+| `claude -p` の会話 | 終わりで裏の hook が止められることがある。控えは進まないので、resume して turn を進めると続きから渡る |
+
+1 つの会話を手で流すとき（終わった会話を埋める・試す）は、session id と transcript を渡す。初めから読み、拾った数と cc-pages の答えを
+stderr に出す（cc-pages が失敗すれば終了コード 1）。
+
+```sh
+~/.claude/hooks/footer-links-archive.sh --session <session_id> --transcript ~/.claude/projects/<dir>/<session_id>.jsonl
+```
+
+登録は `bootstrap-claude-hook.sh`（[フックの登録](#フックの登録冪等更新時も毎回走る)。`--update` で走る）。登録の後に開いた（開き直した）
+会話では必ず走る。動いている会話にも、次の turn から効く見込み。Claude Code の file watcher は settings の hook の変更を拾う
+（2.1.321 で、動いている会話の `.claude/settings.local.json` に足した Stop の hook が次の turn から走ることを確かめた。ユーザーの
+`settings.json` そのものでは試していない。`--settings` で渡したファイルは見張らないので、そちらに足した hook は開き直すまで走らない）。
+bootstrap は登録のあと「再起動すると有効になります」と出す（hook の全部に向けた、確かに効く方の言い方）。振る舞いは
+`nix/tests/footer-links-archive.test.mjs`（本体）と `nix/tests/footer-links-archive-gate.test.sh`（入口）が確かめる。
 
 ### herdr の中の Claude Code にリンクを出させる
 
@@ -4516,6 +4587,8 @@ systemctl --user status cc-pages               # daemon の状態
 - daemon を起こすのは Linux の user の systemd だけ。darwin には launchd の agent を置いていないので、
   バイナリは作るが常駐はしない
 - `cc-pages` が PATH（`~/bin`）に無いマシンでは、skill はページを作らずにターミナルで答える
+- 会話のトップページの「リンク」の節には、Stop フックが会話に出たリンクを全部残す（footer の 5 枠から溢れたものも）。status line の
+  先頭の `📄top` から開ける（[溢れたリンクを会話のトップページに残す](#溢れたリンクを会話のトップページに残す)）
 
 #### 待ち受けの port を変える
 
@@ -4545,6 +4618,7 @@ bind 先の `127.0.0.1` は変えない（LAN には出さない）。
 - Claude Code の footer の cc-page のバッジも、この port のページだけを拾う
   （[footer に会話のチケットと PR と cc-page のリンクを出す](#footer-に会話のチケットと-pr-と-cc-page-のリンクを出す)）。
   `--update` なら規則も続けて新しい port になる。switch だけのときは `bootstrap-claude-footer-links.sh` を打つ
+- status line の先頭の `📄top` も、この port の `/s/<session_id>/` を指す（switch で変わる。[statusLine](#statusline)）
 
 #### 取得できないマシンでも止まらない
 
