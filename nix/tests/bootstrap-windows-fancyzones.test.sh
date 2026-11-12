@@ -1712,11 +1712,13 @@ else
 fi
 
 # 63. 決まりや解像度が変わった: ③ が前にあてたまま (記録と今が同じ) の組は新しい目標へ移す。手であてた組 (記録が無い) は残す。
-#     applied-layouts.json から消えた組のキーは記録から落とす
+#     applied-layouts.json から消えた組のキーは記録から落とす。手であてたのは横向きの既定 (1080p) でないレイアウトにする
+#     (4K に手で 1080p をあてた組は、横向きの既定と見分けられずに埋める。79)
 h=$(fz3_home t63)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
 put_apl "${h}" "$(pt_applied \
   "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_b}")" \
-  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_b}")")"
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_p1}")")"
 put_assigned "${h}" "${k_4k_a}" "${uuid_b}" "GONE0001|5&61cfcb&0&UID9000|9|${vd_a}" "${uuid_b}"
 put_displays "${h}" "${d_4k}"
 before_apl=$(cat "$(apl_json "${h}")")
@@ -2074,6 +2076,31 @@ if [[ $(rc "${h}") == 0 && ! -e $(assigned_json "${h}") ]] && ! ps_called "${h}"
   ok "あて方: --import は ③ を走らせない"
 else
   ng "あて方と --import" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 79. 横向きの既定 (決まりの default のレイアウト。1080p) があたり、③ の記録に無い組は、目標が別なら目標にする (4K の新しい組が 1080p で
+#     始まっても 4k-43inch になる)。記録が別の uuid を指していても同じ。目標が 1080p の組は目標と同じなので記録だけ。ほかのカスタムは残す
+k_4k_b="XXX0020|5&61cfcb&0&UID8449|1|${vd_b}"
+h=$(fz3_home t79)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_p1}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_b}")")"
+put_assigned "${h}" "${k_4k_b}" "${uuid_p1}"
+put_displays "${h}" "${d_4k}" "${d_aus}" "${d_ivm48}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc "${before_apl}" 0,3 "$(want_al "${uuid_a}" 2)")" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}")" ]] \
+  && seen "${h}" -F 'XXX0020 (UID8449)・3840x2160・仮想デスクトップ EA30C0ED: 1080p → 4k-43inch (横向きの既定)' \
+  && seen "${h}" -F 'XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 1080p → 4k-43inch (横向きの既定)' \
+  && [[ $(grep -c ' → ' "${h}/out") == 2 ]] && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (1 組) は残しました' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "あて方: 横向きの既定があたり記録に無い組は、目標が別なら目標にし、目標が既定と同じ組は記録だけ、ほかのカスタムは残す"
+else
+  ng "あて方の横向きの既定の組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

@@ -1201,9 +1201,10 @@ assign_layouts() {
   fi
 
   # 計画: 組ごとの判定。action は untouched (合うディスプレイが無い・縦向き・壊れた組) / same (目標と同じ) / fill (テンプレート) /
-  # retarget (この段が前にあてたままで目標が変わった) / force (--force で、手であてたカスタムレイアウト・blank・知らない type) /
-  # kept (それらを残す) / missing (目標のレイアウトが PC に無いか canvas でない)。ディスプレイは、monitor が同じで monitor-instance が
-  # 同じものを先に、無ければ monitor-number が同じものに合わせる (FancyZones の一致からシリアルを除いたもの)
+  # retarget (この段が前にあてたままで目標が変わった) / default (横向きの既定 (決まりの default のレイアウト) があたり、この段の記録に
+  # 無い) / force (--force で、手であてたカスタムレイアウト・blank・知らない type) / kept (それらを残す) / missing (目標のレイアウトが
+  # PC に無いか canvas でない)。ディスプレイは、monitor が同じで monitor-instance が同じものを先に、無ければ monitor-number が同じものに
+  # 合わせる (FancyZones の一致からシリアルを除いたもの)
   jq -n --slurpfile apl "${work_dir}/apl.json" --slurpfile ps "${work_dir}/displays.json" --slurpfile rules "${rules_file}" \
     --slurpfile repo "${layouts_file}" --slurpfile pc "${work_dir}/pc.json" --slurpfile rec "${work_dir}/asg.json" \
     --argjson pending "${pending_layouts}" --argjson force "${force_json}" "${layouts_lib}${assign_lib}"'
@@ -1211,7 +1212,9 @@ assign_layouts() {
     | $rules[0] as $r
     | ($repo[0] | layouts) as $repo_list
     | $rec[0].assignments as $asg
+    | ["fill", "retarget", "default", "force"] as $writes
     | ([$repo_list[] | {key: .name, value: .}] | from_entries) as $by_name
+    | $by_name[$r.default].uuid as $default_uuid
     | ([$pc[0] | layouts | .[] | objects | select((.uuid | type) == "string") | {key: .uuid, value: .}] | from_entries) as $pc_by_uuid
     | ($pc_by_uuid + ([$repo_list[] | select(.uuid as $u | any($pending[]; . == $u)) | {key: .uuid, value: .}] | from_entries)) as $present
     | {entries: [
@@ -1232,23 +1235,25 @@ assign_layouts() {
                 | (if $al.type == "custom" and $al.uuid == $tl.uuid then "same"
                    elif ($e | is_template) then "fill"
                    elif ($e | is_recorded($asg)) then "retarget"
+                   elif $al.type == "custom" and $al.uuid == $default_uuid then "default"
                    elif $force then "force"
                    else "kept" end) as $base
                 | (($pl | type) == "object" and $pl.type == "canvas" and ($pl.info | type) == "object"
                    and ($pl.info.zones | type) == "array") as $usable
-                | (if ($base == "fill" or $base == "retarget" or $base == "force") and ($usable | not) then "missing" else $base end) as $action
+                | (if any($writes[]; . == $base) and ($usable | not) then "missing" else $base end) as $action
                 | {i: $i, key: ($e | entry_key), action: $action, target: $tl.uuid, tname: $tname,
                    label: "\($dev.monitor) (\($dev["monitor-instance"] | tostring | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($dev["virtual-desktop"] | tostring | ltrimstr("{") | .[0:8])",
                    before: (if $al.type == "custom" then ($pc_by_uuid[$al.uuid | tostring].name // "カスタム \($al.uuid)") else ($al.type | tostring) end),
-                   note: (if $action == "retarget" then " (前に決まりであてたもの)" elif $action == "force" then " (--force)" else "" end)}
-                | if .action == "fill" or .action == "retarget" or .action == "force" then
+                   note: (if $action == "retarget" then " (前に決まりであてたもの)" elif $action == "default" then " (横向きの既定)"
+                          elif $action == "force" then " (--force)" else "" end)}
+                | if any($writes[]; . == $action) then
                     .new_al = {uuid: $tl.uuid, type: "custom", "show-spacing": false, spacing: 0,
                       "zone-count": ($pl.info.zones | length),
                       "sensitivity-radius": (if ($pl.info["sensitivity-radius"] | type) == "number" then $pl.info["sensitivity-radius"] else 20 end)}
                   else . end
               end
           end
-        | .write = (.action == "fill" or .action == "retarget" or .action == "force")
+        | .write = (.action as $a | any($writes[]; . == $a))
       ]}' >"${work_dir}/plan3.json"
 
   counts=$(jq -r '.entries | [map(select(.write)), map(select(.action == "same")), map(select(.action == "kept")), map(select(.action == "untouched"))]
