@@ -89,6 +89,8 @@
 #     シリアルなしのキーで記録する。作る組は 1 組 1 行「組なし → …」で出し、シリアルを出さない。次の回は作らない
 #   - シリアルだけが違う組はシリアルごとに作り、同じ行は 1 行にまとめる。今の番号の組がどこにも無く、instance が同じで番号の違う組だけが
 #     あれば (番号が振り直された直後)、その device を写して monitor-number を今の番号にする
+#   - 振り直しの直後で、そのデスクトップの古い組が手であてたカスタムレイアウト・blank なら、作る組はそのレイアウトを写して記録しない
+#     (--force なら決まりのレイアウトで作って記録する)
 #   - 同じ画面の組がどこにも無いディスプレイ (番号だけ同じ別の instance の組があっても) には作らず、1 行で知らせる (まとめには載せない)。
 #     縦向き・つながっていない画面には作らない。目標のレイアウトが PC に無ければ作らずに警告に数え、--force は ② が足し直してから作る
 #   - --dry-run は作る組を出すが、何も書かない。仮想デスクトップは大文字で比べて書き、形の合わないもの・null の GUID・重なりは落とす
@@ -101,6 +103,7 @@
 #   - ファイルが無ければ横向きの項目だけで作り、横向きの項目が無ければ末尾に足す。別のカスタムレイアウトなら戻す (前の名前は PC の名前)。
 #     type と uuid が同じなら、ほかの値が違っても揃っているとみなす
 #   - 目標のレイアウトが PC に無ければ書かずに警告する (--dry-run --force は ② が足し直すものをあると見て、--force は足し直してから書く)。
+#     横向きの既定が揃っていても、そのレイアウトが PC に無ければ揃っていると言わずに警告する。作った回は「退避しました」と言わない。
 #     読めない (5 回読む)・書けない・退避できないときは警告し、touch できないときは書いたうえで警告する。--dry-run は書かない
 #   - 決まりのファイルが無ければ何もせず、何も出さない
 #   - applied-layouts.json を読めない (5 回読む。読めるようになれば進む)・記録が壊れている・決まりのファイルに誤りがある・書けない・
@@ -2303,6 +2306,7 @@ before_apl=$(cat "$(apl_json "${h}")")
 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
 step1=no
 if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c86}" "${vd_b}" "" "${al_4k}")")" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}")" ]] \
   && grep -qF '決まりのレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、1 組にあてていません' "${h}/warnings"; then
   step1=yes
 fi
@@ -2527,6 +2531,80 @@ if [[ $(rc "${h}") == 0 && ! -e $(dl_json "${h}") && ! -e ${h}/fs-calls && ! -s 
   ok "A: 決まりのファイルが無ければ、何もせず何も出さない"
 else
   ng "A の決まりのファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 100. 番号が振り直された直後で、同じデスクトップにある同じ画面の古い組が、手であてたカスタムレイアウト・blank: 作る組はそのレイアウトを
+#      写し、記録しない (エディターは今の番号の組を引くので、決まりのレイアウトにすると手であてたものが消える)。手であてていない古い組の
+#      デスクトップには、決まりのレイアウトで作って記録する
+k_aus51_1c="AUS23CC|5&61cfcb&0&UID8451|1|${vd_c}"
+k_aus51_2c="AUS23CC|5&61cfcb&0&UID8451|2|${vd_c}"
+h=$(fz3_home t100)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+c100_a=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_a}" custom "${uuid_p1}" "${serial_1}")
+c100_b=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_b}" custom "${uuid_b}" "${serial_1}")
+c100_c=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_c}" blank "${editor_uuid}" "${serial_1}")
+put_apl "${h}" "$(pt_applied "${c100_a}" "${c100_b}" "${c100_c}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" \
+  "$(created_entry "${c100_a}" "${vd_a}" 1 "$(jq -c '.["applied-layout"]' <<<"${c100_a}")")" \
+  "$(created_entry "${c100_a}" "${vd_b}" 1 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_c}" 1 "$(jq -c '.["applied-layout"]' <<<"${c100_c}")")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_2b}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ EA30C0ED: 組なし → Custom layout 1 (手であてた組と同じ)' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ 1769CDBD: 組なし → blank (手であてた組と同じ)' \
+  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (2 組) は残しました' && no_serial "${h}" && [[ ! -s ${h}/warnings ]]; then
+  ok "C: 振り直しの直後で同じデスクトップの古い組が手であてたものなら、そのレイアウトを写して記録せず、ほかは決まりのレイアウトで作る"
+else
+  ng "C の手であてた古い組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 101. 同じ形を --force で流す: 手であてた古い組も決まりのレイアウトにするので、作る組も決まりのレイアウトにして記録する
+h=$(fz3_home t101)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_apl "${h}" "$(pt_applied "${c100_a}" "${c100_b}" "${c100_c}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}" --force
+want=$(want_doc_add "$(want_doc "${before_apl}" 0,2 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_a}" 1 "${al_b}")" "$(created_entry "${c100_a}" "${vd_b}" 1 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_c}" 1 "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_2a}" "${uuid_b}" "${k_aus51_2b}" "${uuid_b}" "${k_aus51_2c}" "${uuid_b}" "${k_aus51_1a}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}" "${k_aus51_1c}" "${uuid_b}")" ]] \
+  && ! seen "${h}" '手であてた組と同じ' && ! seen "${h}" '残しました'; then
+  ok "C: --force では、手であてた古い組のデスクトップにも決まりのレイアウトで作って記録する"
+else
+  ng "C の手であてた古い組 (--force)" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 102. 横向きの既定は揃っているが、そのレイアウトが PC に無い (PC で消した): 「揃っています」と言わず、既定が使えないと警告する
+h=$(fz3_home t102)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" && ! seen "${h}" '横向きの既定のレイアウトは揃っています' \
+  && grep -qF '決まりの既定のレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定 (このレイアウト) が使えません' "${h}/warnings"; then
+  ok "A: 横向きの既定が揃っていても、そのレイアウトが PC に無ければ、揃っていると言わずに警告する"
+else
+  ng "A の揃っているが PC に無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 103. default-layouts.json を新しく作った回は、同じ回に ② が退避していても「退避しました」と言わない (作ったファイルは退避していない)
+h=$(fz3_home t103)
+rm -f "$(dl_json "${h}")"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a_edited}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+run "${h}"
+nb=$(newest_backup "${h}")
+dl_block=$(sed -n '/==> FancyZones の横向きの既定のレイアウト/,/^[^ ]/p' "${h}/out")
+if [[ $(rc "${h}") == 0 && -e $(dl_json "${h}") && -e ${nb}custom-layouts.json && ! -e ${nb}default-layouts.json ]] \
+  && [[ ${dl_block} == *'default-layouts.json が無いので作る'* && ${dl_block} != *'退避しました'* ]]; then
+  ok "A: 新しく作った回は、② が退避していても「退避しました」と言わない"
+else
+  ng "A の作った回の退避の行" "rc=$(rc "${h}") block=${dl_block} $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

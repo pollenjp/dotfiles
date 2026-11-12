@@ -1657,7 +1657,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
 ./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
 ./nix/scripts/bootstrap-windows-powertoys.sh         # PowerToys が無ければ入れ、Keyboard Manager と自動起動をオンにし、配った割り当てを読み直させる部分だけ
-./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定をそろえ、ディスプレイの組にレイアウトを解像度であてる部分だけ（--dry-run / --force / --import <名前> / --check）
+./nix/scripts/bootstrap-windows-fancyzones.sh        # FancyZones の settings.json に持つキーだけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定をそろえ、ディスプレイの組にレイアウトを解像度であて、組の無い仮想デスクトップに組を作る部分だけ（--dry-run / --force / --import <名前> / --check）
 ./nix/scripts/bootstrap-windows-google-ime-install.sh  # Google 日本語入力が固定した版かを確かめる部分だけ（無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-google-ime.sh        # Google 日本語入力の設定を組み立てて配る部分だけ（--dry-run / --import / --force / --check / --show-words）
 ./nix/scripts/bootstrap-windows-international.sh    # Windows の日付と時刻の形式に持つ値だけを書く部分だけ（--dry-run / --import / --force / --check）

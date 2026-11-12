@@ -72,7 +72,7 @@
 #      sensitivity-radius 0)。エディターは閉じるたびにこのファイルを書き直すので、値が違うと書き戻しを繰り返す。FancyZones は
 #      ゾーンを計算するときに、カスタムの値を custom-layouts.json から引き直す (WorkArea.cpp)
 #    - そのレイアウトが PC に無い (か canvas でない) ときは、書かずに警告する (--force で 3 が足し直せば、その回に書く。--dry-run では
-#      3 が足すものをあるものとして見る)。決まりのファイルか repo の custom-layouts.json に誤りがあれば、黙って飛ばす (5 が組のある
+#      3 が足すものをあるものとして見る)。横向きの既定がすでにそのレイアウトでも、PC に無ければ揃っているとは言わず、使えないと警告する。決まりのファイルか repo の custom-layouts.json に誤りがあれば、黙って飛ばす (5 が組のある
 #      ときに警告する。CI の --check も見る)
 #    - 書く形 (PowerToys の形)・退避 (3 と同じ場所)・読めないとき (5 回読む)・書けないときは 3 と同じ
 # 5. 同じディレクトリの applied-layouts.json の組 (モニター × 仮想デスクトップ) へ、layout-rules.json の決まり (今の表示の解像度が
@@ -103,7 +103,9 @@
 #      写す元は、今の番号の組があればそれ、無ければ番号の違う組 (番号が振り直された直後。FancyZones の本体は instance で古い組を
 #      使い続けて新しい組を作らないが、エディターは組を monitor・シリアル・monitor-number・virtual-desktop の一致で引き、無ければ既定を
 #      あてて書くので、今の番号の組が要る)。目標のレイアウトをあてて末尾に足す (先頭に置くと、本体が同じとみなす古い組より先に使い、
-#      手であてたレイアウトを隠しうる)。同じ画面の組がどこにも無いディスプレイには作らず、1 行知らせる。縦向き・つながっていない
+#      手であてたレイアウトを隠しうる)。そのデスクトップにある同じ画面の古い組 (並びで先のもの) が、手であてたカスタムレイアウト・blank・
+#      知らない type なら、作る組もそのレイアウトにして記録しない (エディターが今の番号の組を引くと、手であてたものが消えるため。--force なら
+#      古い組も目標にするので、作る組も目標にする)。同じ画面の組がどこにも無いディスプレイには作らず、1 行知らせる。縦向き・つながっていない
 #      ディスプレイには作らない。目標のレイアウトが PC に無ければ作らず、上の警告に数える
 #    - あてた中身は ~/.local/state/dotfiles/windows-fancyzones.assigned.json に組ごとに持つ
 #      ({"version":1,"assignments":{"<monitor>|<monitor-instance>|<monitor-number>|<virtual-desktop>":"<uuid>"}}。シリアルを入れない
@@ -900,6 +902,8 @@ sync_layouts() {
 #                          \\.\DISPLAY<n> の n) にする。形の合わないディスプレイは落とす
 #   parse_desktops         powershell.exe の返りの仮想デスクトップを、大文字の {...} の GUID の並び (重ねず、Windows の並びのまま) に
 #                          する。形の合わないものと、null の GUID は落とす
+#   base_action(...)       組の判定 (same / fill / retarget / default / force / kept)。目標の uuid・記録・横向きの既定の uuid・--force で決める
+#   layout_label($pc)      applied-layout の名前 (カスタムなら PC のレイアウトの名前、テンプレートと blank は type)
 #   usable_layout          PC のレイアウトを組にあてられるか (canvas で、info.zones が配列)
 #   applied_value($uuid)   PC のレイアウトを組にあてるときの applied-layout (エディターが canvas のカスタムをあてたときと同じ値)
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
@@ -919,6 +923,16 @@ def parse_desktops:
       | select(test("^\\{[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}\\}$"))
       | select(. != "{00000000-0000-0000-0000-000000000000}")) as $v
     ([]; if any(.[]; . == $v) then . else . + [$v] end);
+def base_action($target; $asg; $default_uuid; $force):
+  .["applied-layout"] as $al
+  | if $al.type == "custom" and $al.uuid == $target then "same"
+    elif is_template then "fill"
+    elif is_recorded($asg) then "retarget"
+    elif $al.type == "custom" and $al.uuid == $default_uuid then "default"
+    elif $force then "force"
+    else "kept" end;
+def layout_label($pc_by_uuid):
+  if .type == "custom" then ($pc_by_uuid[.uuid | tostring].name // "カスタム \(.uuid)") else (.type | tostring) end;
 def usable_layout:
   type == "object" and .type == "canvas" and (.info | type) == "object" and (.info.zones | type) == "array";
 def applied_value($uuid):
@@ -960,7 +974,8 @@ load_assigned() {
 }
 
 # あて方の記録を書く (変わったときだけ。--dry-run では書かない)。applied-layouts.json から消えた組のキーは落とし、目標と同じ組で
-# 記録が無いものと、書けたときは書いた組・作った組を、目標のレイアウトの uuid で記録する。$1: 書けたか (true / false)
+# 記録が無いものと、書けたときは書いた組・作った組 (手であてた組から写したものを除く) を、目標のレイアウトの uuid で記録する。
+# $1: 書けたか (true / false)
 # shellcheck disable=SC2016 # jq の $ はシェルの展開ではない
 save_assigned() {
   local new old
@@ -975,7 +990,7 @@ save_assigned() {
     | reduce ($plan[0].entries[] | . as $x
         | select($x.key != null and (($x.action == "same" and ($kept | has($x.key) | not)) or ($wrote and $x.write)))) as $x
         ($kept; .[$x.key] = $x.target)
-    | reduce $made[] as $x (.; .[$x.key] = $x.target)
+    | reduce ($made[] | select(.record)) as $x (.; .[$x.key] = $x.target)
     | {version: 1, assignments: .}')
   # 記録が無いのは、空の記録と同じ (記録するものが無ければ作らない)
   if [[ -f ${assigned_file} ]]; then
@@ -1298,12 +1313,22 @@ assign_layouts() {
         | [$grp[] | select(.device["monitor-number"] == $d.number) | .device["virtual-desktop"] | tostring | ascii_upcase] as $have
         | $vds[] as $vd
         | select(all($have[]; . != $vd))
+        # 同じデスクトップにある同じ画面の古い組 (番号の違う組。本体は今これを使っている) のうち、並びで先のもの
+        | ([$grp[] | select((.device["virtual-desktop"] | tostring | ascii_upcase) == $vd)] | first) as $old
         | {device: ($src.device | .["monitor-number"] = $d.number | .["virtual-desktop"] = $vd)}
         | .key = entry_key
         | .target = $tl.uuid
-        | .tname = $tname
         | .label = "\($d.monitor) (\($d.instance | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($vd | ltrimstr("{") | .[0:8])"
-        | if ($pl | usable_layout) then .write = true | .new_al = ($pl | applied_value($tl.uuid)) else .write = false end
+        | if $old != null and ($old | base_action($tl.uuid; $asg; $default_uuid; $force)) == "kept" then
+            # 古い組が手であてたもの (カスタムレイアウト・blank・知らない type) なら、そのレイアウトを写して記録しない。エディターは今の番号の
+            # 組を引くので、決まりのレイアウトにすると手であてたものが消える (--force なら古い組も目標にするので、ここには来ない)
+            .write = true | .record = false | .new_al = $old["applied-layout"]
+            | .tname = ($old["applied-layout"] | layout_label($pc_by_uuid)) | .note = " (手であてた組と同じ)"
+          elif ($pl | usable_layout) then
+            .write = true | .record = true | .new_al = ($pl | applied_value($tl.uuid)) | .tname = $tname | .note = ""
+          else
+            .write = false | .record = false | .tname = $tname
+          end
       ],
       nosrc: [
         $landscape[] as $d
@@ -1325,17 +1350,12 @@ assign_layouts() {
                 | $by_name[$tname] as $tl
                 | $present[$tl.uuid] as $pl
                 | $e["applied-layout"] as $al
-                | (if $al.type == "custom" and $al.uuid == $tl.uuid then "same"
-                   elif ($e | is_template) then "fill"
-                   elif ($e | is_recorded($asg)) then "retarget"
-                   elif $al.type == "custom" and $al.uuid == $default_uuid then "default"
-                   elif $force then "force"
-                   else "kept" end) as $base
+                | ($e | base_action($tl.uuid; $asg; $default_uuid; $force)) as $base
                 | ($pl | usable_layout) as $usable
                 | (if any($writes[]; . == $base) and ($usable | not) then "missing" else $base end) as $action
                 | {i: $i, key: ($e | entry_key), action: $action, target: $tl.uuid, tname: $tname,
                    label: "\($dev.monitor) (\($dev["monitor-instance"] | tostring | split("&") | last))・\($d.width)x\($d.height)・仮想デスクトップ \($dev["virtual-desktop"] | tostring | ltrimstr("{") | .[0:8])",
-                   before: (if $al.type == "custom" then ($pc_by_uuid[$al.uuid | tostring].name // "カスタム \($al.uuid)") else ($al.type | tostring) end),
+                   before: ($al | layout_label($pc_by_uuid)),
                    note: (if $action == "retarget" then " (前に決まりであてたもの)" elif $action == "default" then " (横向きの既定)"
                           elif $action == "force" then " (--force)" else "" end)}
                 | if any($writes[]; . == $action) then .new_al = ($pl | applied_value($tl.uuid)) else . end
@@ -1377,7 +1397,7 @@ assign_layouts() {
   # 変える組と作る組を 1 組 1 行で (シリアルは出さない)。シリアルだけが違う組の同じ行は、1 行にまとめて組の数を添える
   lines=$(jq -r --arg pre "${pre}" '
     [(.entries[] | select(.write) | "  \($pre)\(.label): \(.before) → \(.tname)\(.note)"),
-     (.created[] | select(.write) | "  \($pre)\(.label): 組なし → \(.tname)")]
+     (.created[] | select(.write) | "  \($pre)\(.label): 組なし → \(.tname)\(.note)")]
     | reduce .[] as $l ([]; if any(.[]; .l == $l) then map(if .l == $l then .n += 1 else . end) else . + [{l: $l, n: 1}] end)
     | .[] | .l + (if .n > 1 then " (\(.n) 組)" else "" end)' "${work_dir}/plan3.json")
   if ((! dry_run)); then
@@ -1476,7 +1496,8 @@ sync_default_layout() {
   fi
 
   # 計画: action は same (横向きのどの項目も、決まりの default のカスタムレイアウト。type と uuid だけを比べる) / write (書き換える・
-  # 足す・作る) / missing (決まりの default のレイアウトが PC に無いか canvas でない)。書く値は、エディターがカスタムレイアウトを既定に
+  # 足す・作る) / missing (決まりの default のレイアウトが PC に無いか canvas でない) / missing_same (揃っているが、そのレイアウトが
+  # PC に無い。組の無い画面にあてても、ゾーンが無くなる)。書く値は、エディターがカスタムレイアウトを既定に
   # したときと同じ (zone-count と sensitivity-radius は 0。FancyZones はゾーンを計算するときに custom-layouts.json から引き直す)
   jq -n --slurpfile dl "${work_dir}/dl.json" --slurpfile rules "${rules_file}" --slurpfile repo "${layouts_file}" \
     --slurpfile pc "${work_dir}/pc.json" --argjson pending "${pending_layouts}" "${layouts_lib}${assign_lib}"'
@@ -1493,9 +1514,9 @@ sync_default_layout() {
        before: (if ($hz | length) == 0 or ($hz[0].layout | type) != "object" then "(横向きの既定なし)"
                 elif $hz[0].layout.type == "custom" then ($pc_by_uuid[$hz[0].layout.uuid | tostring].name // "カスタム \($hz[0].layout.uuid)")
                 else ($hz[0].layout.type | tostring) end),
-       action: (if ($hz | length) > 0 and all($hz[]; (.layout | type) == "object" and .layout.type == "custom" and .layout.uuid == $tl.uuid) then "same"
-                elif ($present[$tl.uuid] | usable_layout) then "write"
-                else "missing" end),
+       action: ((($hz | length) > 0 and all($hz[]; (.layout | type) == "object" and .layout.type == "custom" and .layout.uuid == $tl.uuid)) as $aligned
+               | if ($present[$tl.uuid] | usable_layout | not) then (if $aligned then "missing_same" else "missing" end)
+                 elif $aligned then "same" else "write" end),
        doc: ($doc | .["default-layouts"] = (if ($hz | length) > 0
                then [$list[] | if type == "object" and .["monitor-configuration"] == "horizontal" then .layout = $want else . end]
                else $list + [{"monitor-configuration": "horizontal", layout: $want}] end))}' >"${work_dir}/dl-plan.json"
@@ -1511,6 +1532,11 @@ sync_default_layout() {
       # PC で消したもの (カスタムレイアウトの段が警告した)。--force で足し直すと、その回に既定にする
       warn "決まりの既定のレイアウト「${tname}」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定にしていません: ${pc_defaults}" \
         "PC で消したものなら、--force で足し直すと既定にします (先に --dry-run --force で何が変わるかを見られます)。"
+      return 0
+      ;;
+    missing_same)
+      warn "決まりの既定のレイアウト「${tname}」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定 (このレイアウト) が使えません: ${pc_defaults}" \
+        "PC で消したものなら、--force で足し直してください (先に --dry-run --force で何が変わるかを見られます)。"
       return 0
       ;;
   esac
@@ -1538,7 +1564,8 @@ sync_default_layout() {
     echo "  ${pre}default-layouts.json が無いので作る"
   fi
   echo "  ${pre}${before} → ${tname}"
-  if ((! dry_run)) && [[ -n ${backup_dir} ]]; then
+  # 作った回は退避していない (同じ回に ② が退避していても、そこに default-layouts.json は無い)
+  if ((! dry_run)) && [[ ${fresh} != true && -n ${backup_dir} ]]; then
     echo "  書き換える前のファイルは ${backup_dir} に退避しました。"
   fi
 }
