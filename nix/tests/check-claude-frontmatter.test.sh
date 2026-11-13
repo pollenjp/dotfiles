@@ -35,7 +35,7 @@
 #       1 行目のわけが重なれば全部言い、--- の後ろが文字なら空白のせいにしない)・skills の直下のファイル・SKILL.md の無い
 #       ディレクトリ・command のサブディレクトリの README.md (配置されて command になると言う)。frontmatter の無い agent には、
 #       説明の文書なら README.md という名前にするよう添える (skill・command には添えない)
-#   - skill の metadata: pjp-pack が pack の名前 (diagram・machine など) なら通り、pjp-pack の無い metadata・空の
+#   - skill の metadata: pjp-pack が pack の名前 (diagram・machine・lang など) なら通り、pjp-pack の無い metadata・空の
 #     metadata: も通る。metadata が map でない・pjp-pack が文字列でない・pack の名前でない・flow の形
 #     (metadata: {pjp-pack: …})・block scalar の値・入口の skill (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata
 #     は見ない。YAML として読めない skill には、metadata の理由を重ねない
@@ -610,6 +610,14 @@ metadata:
   pjp-pack: "machine"  # マシン
 ---
 EOF
+put "${cl}/skills/pjp-lang/SKILL.md" <<'EOF'
+---
+name: pjp-lang
+description: 言語の pack
+metadata:
+  pjp-pack: lang
+---
+EOF
 put "${cl}/skills/pjp-empty/SKILL.md" <<'EOF'
 ---
 name: pjp-empty
@@ -683,7 +691,7 @@ run "${n}"
 if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 7 ]] \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-seq/SKILL.md: metadata は key: value の map にしてください (!!seq)" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)" \
-  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser のどれか)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser lang のどれか)" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-flow/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-pack-diagram/SKILL.md: 入口の skill は常駐なので、metadata の pjp-pack を書かないでください" \

@@ -89,7 +89,7 @@ metadata:
 ```
 
 - pack は `diagram`（図）・`video`（動画）・`notion`（Notion）・`machine`（マシン）・`repo`（repo の手入れ）・
-  `browser`（ブラウザ）。入口は `claude-skills` の `skills/pjp-pack-<pack>/`
+  `browser`（ブラウザ）・`lang`（言語・道具ごとの好み）。入口は `claude-skills` の `skills/pjp-pack-<pack>/`
 - 書く形は上の 1 通り（`metadata:` の下に字下げした `pjp-pack: <pack>` の 1 行）。bootstrap は yq の無いマシンでも動くよう、
   この形だけを読む。`check-claude-frontmatter.sh` が、ほかの形と pack の名前でない値を落とす
 - どの会話でも要る skill と、入口を通らずに効く必要がある skill（依存を入れる前に読む `pjp-dep-release-age`、PR を作る前に
