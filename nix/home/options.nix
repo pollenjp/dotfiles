@@ -20,6 +20,7 @@
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
 #   dotfiles.claude.heavyJobs.limitPercent       重い処理 (動画の書き出し・推論など) が使ってよい CPU とメモリの、マシン全体に対する割合 (既定 70)
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
+#   dotfiles.claude.iacGuard.enable              Claude が打つ terraform・tofu・terragrunt の apply など (実物を変える操作) を hook で止めるか (既定 true)
 #   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
 #   dotfiles.cursorAgent.enable                  cursor-agent (Cursor の CLI) を mise で入れるか (既定 false。setup が入れた版に固定する)
@@ -357,6 +358,28 @@ in
         値は `~/.local/state/dotfiles/claude-ssh-agent-notice.json` (`{"extraCommands": [...]}`) に落ち
         (home/modules/claude.nix)、hook が読む。反映は home-manager switch (~/dotfiles/setup --update でもよい)。
         使う PC のホストの値 (dotfiles-private に登録したファイルか、ローカル flake の tmp) に書く。
+      '';
+    };
+
+    iacGuard.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Claude Code が Bash で打つ terraform・tofu・terragrunt の操作のうち、実物 (資源か state) を変えるもの
+        (apply・destroy・import・state rm など) を、打つ前に止めるか (hook の files/claude/hooks/install-iac-guard.sh)。
+        既定は true (止める)。実環境への apply は merge の後に人が流し、Claude は検査か plan までにする
+        (claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.5)。
+
+        false にするのは、agent が sandbox で自分でプロジェクトを作って消すマシン (止めると agent が進めない) だけ。
+        false でも、同じ hook が止める venv・project の外への install (pip install・npm install -g・apt install・
+        brew install など) は止める。止めたコマンドを流すときは、ユーザーが明示したうえでコマンドの頭に
+        PJP_ALLOW_IAC=1 を付ける (マシンごと外すのではなく 1 回だけ通す口)。
+
+        値は `~/.local/state/dotfiles/claude-iac-guard.json` (`{"enable": <bool>}`) に落ち
+        (home/modules/claude.nix)、hook が読む。ファイルが無い・壊れているときは止める。反映は home-manager switch
+        (~/dotfiles/setup --update でもよい)。外すマシンは、dotfiles-private に登録したホストのファイルか、
+        ローカル flake の tmp に書く。
       '';
     };
   };
