@@ -3531,16 +3531,18 @@ dotfiles-private の `docs/superpowers/plans/2026-11-13-lang-prefs-pack-dotfiles
 
 | 止めるもの | 止めないもの |
 | --- | --- |
-| `pip`・`pip3`・`python -m pip`・`python3 -m pip` の `install` で venv の印が無いもの。`sudo` 付き・`--user`・`--break-system-packages` はいつも | venv の印のある pip（venv の中のパスの interpreter（root に `pyvenv.cfg` がある・名前が venv や env・同じコマンドで作った venv）・同じコマンドの先の `source …/bin/activate`・`uv run`・`poetry run` などの後ろ・hook の env の `VIRTUAL_ENV`）、`-t`・`--target`、`--help` |
-| `uv pip install --system`（`--break-system-packages` も） | `--system` の無い `uv pip install` |
+| `pip`・`pip3`・`python -m pip`・`python3 -m pip` の `install` で venv の印が無いもの。`sudo` 付き・`--user`・`--break-system-packages` はいつも。パスで呼ぶ interpreter はパスで決める（activate の後の `/usr/bin/python3 -m pip` も止める） | venv の印のある pip（venv の中のパスの interpreter（root に `pyvenv.cfg` がある・名前が venv や env・同じコマンドで作った venv）、素の名前なら同じコマンドの先の `source …/bin/activate`・`uv run`・`poetry run` などの後ろ・hook の env の `VIRTUAL_ENV`）、`-t`・`--target`、`--dry-run`、`--help` |
+| `uv pip install --system`（`--break-system-packages`・頭の `UV_SYSTEM_PYTHON=1`・`--python <venv でないパス>` も） | `--system` の無い `uv pip install` |
 | `npm install -g`（`npm i -g`・`--global`・`npm -g install` も）・`pnpm add -g`・`yarn global add`・`bun add -g` | `-g` の無い `npm install`・`pnpm add`、`pipx install`・`cargo install`・`uv tool install`・`go install` |
-| `apt install`・`apt-get install`・`brew install`（`sudo` 付きも） | `apt list` などの読むだけのもの |
-| `terraform`・`tofu` の `apply`・`destroy`・`import`・`taint`・`untaint`・`force-unlock`・`refresh`、`state rm`・`mv`・`push`・`replace-provider`、`workspace delete`、`-migrate-state`・`-force-copy` 付きの `init` | `plan`・`validate`・`fmt`・flag の無い `init`・`output`・`show`・`state list`・`show`・`pull`・`graph`・`providers`・`test`・`workspace select`、`-help` |
+| `apt install`・`apt-get install`・`brew install`（`sudo` 付きも。`sudo DEBIAN_FRONTEND=noninteractive apt-get install` のように `sudo` の後ろに代入を置いたものも） | `apt list` などの読むだけのもの、確かめるだけの形（`apt-get install -s`・`--simulate`、`brew install --dry-run`、`npm install -g --dry-run`） |
+| `terraform`・`tofu` の `apply`・`destroy`・`import`・`taint`・`untaint`・`force-unlock`・`refresh`、`state rm`・`mv`・`push`・`replace-provider`、`workspace delete`、`-migrate-state`・`-force-copy` 付きの `init` | `plan`・`validate`・`fmt`・flag の無い `init`・`output`・`show`・`state list`・`show`・`pull`・`graph`・`providers`・`test`・`workspace select`、`state rm`・`mv` の `-dry-run`、`-help` |
 | `terragrunt` の同じ操作（`run --all apply`・`run -- apply`・`stack run apply`・`run-all destroy` のように別の語の後ろに来る形も）と `apply-all`・`destroy-all`・`backend bootstrap`・`delete`・`migrate` | 包み（`make apply`・`mise run apply`・repo の script の `apply`）、`git apply`・`kubectl apply` |
 
-- コマンドの読み方は xref-guard と同じ lexer で、commit の message・`echo`・heredoc の本文・引用符の中に書いただけでは止めない。
-  包むコマンド（`env`・`sudo`・`timeout`・`nix develop -c`・`mise exec --` など）・`bash -c`・`eval` の中も読む。64 KB（gawk・
-  mawk の無いマシンでは 16 KB）を超えるコマンドは中を読まず、行の頭に止める形があれば止めて、コマンドを短くするよう返す
+- コマンドの読み方は xref-guard と同じ lexer（写しが同じかは `nix/tests/hook-lexer-copy.test.sh` が確かめる）で、commit の
+  message・`echo`・heredoc の本文・引用符の中に書いただけでは止めない。包むコマンド（`env`・`sudo`・`timeout`・`nix develop -c`・
+  `mise exec --` など）とその後ろの代入・`bash -c`・`eval`・`cat <<EOF | bash`・`echo … | bash` の中も読む。64 KB（gawk・mawk の
+  無いマシンでは 16 KB）を超えるコマンドは中を読まず、行を `;`・`&`・`|`・`(`・`)` で分けた頭に止める形があれば止めて、
+  コマンドを短くするよう返す（awk で 1 回読むだけなので、区切りの多い長い 1 行でも 1 秒ほどで終わる）
 - 通す口は、ユーザーがこの会話で明示したときだけ付けるコマンドの頭の `PJP_ALLOW_INSTALL=1`（install）・`PJP_ALLOW_IAC=1`（IaC）。
   片方を付けても、もう片方は通さない（止めたときに返す文にも「自分の判断では付けない」と書いてある）
 - IaC の分は host の option `dotfiles.claude.iacGuard.enable`（既定 `true`）で外せる。外すのは、agent が sandbox で自分で
@@ -3563,8 +3565,9 @@ claude-skills の `docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md` 
 
 - 名指しする skill が無いマシン（claude-skills を取れない）と、user の `settings.json` の `skillOverrides` でその skill を `off`・
   `user-invocable-only` にしたマシンでは、その skill の文を出さない（`name-only` は名前で呼べるので出す）
-- コマンドは pr-assignee-nudge と同じく近似で読む（heredoc の本文と引用符の中を外し、単純コマンドの頭の代入と包みを外した語を見る）。
-  `bash -c '…'` の中と、オプションの値を前に置いたもの（`npm --prefix <dir> install …`）は読み落とす
+- コマンドは pr-assignee-nudge と同じく近似で読む（heredoc の本文と引用符の中を外し、単純コマンドの頭の代入と包み（`nix develop -c`・
+  `mise exec --` も）を外した語を見る）。`bash -c '…'` の中と、オプションの値を前に置いたもの（`npm --prefix <dir> install …`）は
+  読み落とす。32 KB を超える入力は読まない（作り始め・依存を足すコマンドは短く、jq の正規表現が長いコマンドで遅くなるため）
 - PreToolUse の `additionalContext` は tool の結果と一緒に Claude に届くので、PostToolUse と同じ時に読まれ、コマンドの成否によらない
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Bash`）足す。cloud にも張る
 

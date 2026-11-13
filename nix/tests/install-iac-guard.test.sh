@@ -21,7 +21,13 @@
 #   - npm install -g・npm i -g・--global・npm -g install・pnpm add -g・yarn global add・bun add -g を止め、npm install
 #     (引数なし・project へ)・pnpm add (project へ)・pipx install・cargo install・uv tool install・go install は通す
 #   - apt install・apt-get install (sudo・-y を前に置いたものも)・brew install を止める
-#   - cd・bash -c・env・mise exec -- の中も読む。commit の message・echo・heredoc の本文に書いた pip install は止めない
+#   - cd・bash -c・env・mise exec -- の中と、sudo・time の後ろの VAR=値 の後ろも読む。cat <<EOF | bash・echo … | bash で渡した
+#     中身も読む。commit の message・echo・heredoc の本文に書いた pip install は止めない
+#   - パスで呼ぶ interpreter はパスで決める ($HOME/.local/bin/pip・activate の後の /usr/bin/python3 -m pip は止める)。
+#     UV_SYSTEM_PYTHON=1・--python <venv でないパス> の uv pip install と、値を取る global の flag の後ろの uv pip install
+#     --system も止める
+#   - 確かめるだけの形 (pip install --dry-run・apt-get install -s・brew install --dry-run・npm install -g --dry-run・
+#     terraform state rm -dry-run) は通す
 #   - 通す口 PJP_ALLOW_INSTALL=1 (頭の代入と env の引数) で通す。PJP_ALLOW_IAC=1 では install を通さない
 #
 #   IaC (terraform・tofu・terragrunt で実物を変えるもの):
@@ -38,7 +44,10 @@
 #
 #   そのほか:
 #   - 止めるときは exit 0 で 1 行の JSON (PreToolUse の deny と理由) を出し、理由に止めたコマンドと通す口を書く
-#   - 読む長さ (64 KB) を超えたコマンドは、行に install・IaC の形があれば止め (理由に「長すぎて」)、無ければ通す
+#   - 読む長さ (64 KB) を超えたコマンドは、行に install・IaC の形があれば止め (理由に「長すぎて」)、無ければ通す。区切りの
+#     多い 80 KB の 1 行も 20 秒のうちに読み終える。sudo -E pip install・FOO="a b" terraform apply・bash -c 'terraform apply'
+#     は止め、npm ls -g・init -migrate-state=false・activate の後の素の pip・terraform plan・npm install foo は通す
+#   - lexer の本文は xref-guard.sh と同じ (hook-lexer-copy.test.sh が確かめる)。IaC を止めた理由に --no-iac-guard も書く
 #   - Bash でない tool・壊れた入力・どのコマンドにも当たらない入力は黙って exit 0
 
 set -u -o pipefail
@@ -161,6 +170,19 @@ expect_deny 'env A=1 pip install foo' 'pip install'
 expect_deny 'mise exec -- pip install foo' 'pip install'
 expect_deny 'plain/bin/pip install foo' 'pip install'
 expect_deny 'pip install --prefix /usr/local foo' 'pip install'
+expect_deny 'sudo DEBIAN_FRONTEND=noninteractive apt-get install -y foo' 'apt-get install'
+expect_deny 'sudo -E DEBIAN_FRONTEND=noninteractive apt-get install -y foo' 'apt-get install'
+expect_deny 'sudo PIP_BREAK_SYSTEM_PACKAGES=1 pip install foo' 'sudo'
+# shellcheck disable=SC2016 # $HOME を文字のまま渡す
+expect_deny '$HOME/.local/bin/pip install foo' 'pip install'
+expect_deny 'source .venv/bin/activate && /usr/bin/python3 -m pip install foo' 'pip install'
+expect_deny 'UV_SYSTEM_PYTHON=1 uv pip install foo' 'uv pip install'
+expect_deny 'uv pip install --python /usr/bin/python3 foo' 'uv pip install --python'
+expect_deny 'uv --directory app pip install --system foo' 'uv pip install --system'
+expect_deny "cat <<'EOF' | bash
+pip install foo
+EOF" 'pip install'
+expect_deny "echo 'npm install -g foo' | sh" 'npm install -g'
 
 echo "-- install: 通す"
 expect_allow '.venv/bin/pip install foo'
@@ -184,6 +206,19 @@ expect_allow '"${VENV_DIR}/bin/pip" install foo'
 expect_allow 'pip install -t ./vendor foo'
 expect_allow 'pip install --target=./vendor foo'
 expect_allow 'pip install --help'
+expect_allow 'pip install --dry-run foo'
+expect_allow 'sudo apt-get install -s foo'
+expect_allow 'apt-get install --simulate foo'
+expect_allow 'brew install --dry-run foo'
+expect_allow 'npm install -g --dry-run foo'
+expect_allow 'sudo PJP_ALLOW_INSTALL=1 apt install foo'
+expect_allow 'uv pip install --python .venv/bin/python foo'
+expect_allow 'python3 -m virtualenv /tmp/q && /tmp/q/bin/pip install foo'
+# shellcheck disable=SC2016 # $HOME を文字のまま渡す
+expect_allow '"$HOME/proj/.venv/bin/pip" install foo'
+expect_allow "cat <<'EOF' | bash
+ls -la
+EOF"
 expect_allow 'pip download foo'
 expect_allow 'pip list'
 expect_allow 'npm install foo'
@@ -263,6 +298,8 @@ expect_deny 'terragrunt state rm a.b' 'terragrunt state rm'
 expect_deny 'terragrunt backend delete' 'terragrunt backend delete'
 expect_deny 'cd live && TF_LOG=debug terraform apply' 'terraform apply'
 expect_deny 'timeout 600 terraform apply' 'terraform apply'
+expect_deny 'time TF_LOG=debug terraform apply' 'terraform apply'
+expect_deny "echo 'terraform apply -auto-approve' | bash" 'terraform apply'
 expect_deny "bash -c 'cd infra && terraform destroy -auto-approve'" 'terraform destroy'
 
 echo "-- IaC: 通す"
@@ -282,6 +319,8 @@ expect_allow 'terraform providers'
 expect_allow 'terraform test'
 expect_allow 'terraform workspace select dev'
 expect_allow 'terraform apply -help'
+expect_allow 'terraform state rm -dry-run a.b'
+expect_allow 'terraform init -migrate-state=false'
 expect_allow 'terraform -chdir=infra plan'
 expect_allow 'terragrunt run --all plan'
 expect_allow 'terragrunt plan'
@@ -327,33 +366,59 @@ pre 'pip install foo && terraform apply'
 r=$(reason)
 if denied && [[ ${r} == "[install-iac-guard] "* && ${r} == *'pip install'* && ${r} == *'terraform apply'* ]] \
   && [[ ${r} == *'PJP_ALLOW_INSTALL=1'* && ${r} == *'PJP_ALLOW_IAC=1'* && ${r} == *'自分の判断では付けない'* ]] \
-  && [[ ${r} == *venv* && ${r} == *plan* ]]; then
+  && [[ ${r} == *venv* && ${r} == *plan* && ${r} == *'--no-iac-guard'* ]]; then
   ok "理由に止めたものを並べ、代わりの手と通す口を書く"
 else
   ng "理由に止めたものを並べ、代わりの手と通す口を書く" "$(detail)"
 fi
 
-# 読む長さを超えたコマンド
+# 読む長さを超えたコマンド。long_cmd <後ろの行>: 70 KB の heredoc の後ろに行を足した、読む長さを超えるコマンド
 filler=$(printf '%070000d' 0)
-long_apply="cat <<'EOF' >notes.txt
-${filler}
-EOF
-terraform apply"
-pre "${long_apply}"
-if denied && [[ $(reason) == *'長すぎて'* ]]; then
-  ok "読む長さを超えたコマンドは、行に IaC の形があれば止め、長すぎると言う"
+long_cmd() {
+  printf "cat <<'EOF' >notes.txt\n%s\nEOF\n%s" "${filler}" "$1"
+}
+# expect_long_deny <後ろの行> <理由に含む文字>・expect_long_allow <後ろの行>
+expect_long_deny() {
+  local r
+  pre "$(long_cmd "$1")"
+  r=$(reason)
+  if denied && [[ ${r} == *'長すぎて'* && ${r} == *"$2"* ]]; then
+    ok "長いコマンドでも止める: $(show "$1")"
+  else
+    ng "長いコマンドでも止める: $(show "$1") (理由に「$2」)" "$(detail)"
+  fi
+}
+expect_long_allow() {
+  pre "$(long_cmd "$1")"
+  if silent; then
+    ok "長いコマンドでも通す: $(show "$1")"
+  else
+    ng "長いコマンドでも通す: $(show "$1")" "$(detail)"
+  fi
+}
+expect_long_deny 'terraform apply' 'terraform'
+expect_long_deny 'cd infra && TF_LOG=debug terraform destroy -auto-approve' 'terraform'
+expect_long_deny 'sudo -E pip install foo' 'pip install'
+expect_long_deny 'FOO="a b" terraform apply' 'terraform'
+expect_long_deny "bash -c 'terraform apply'" 'terraform'
+expect_long_deny 'sudo apt-get -y install foo' 'apt-get install'
+expect_long_deny 'npm install -g foo' 'npm'
+expect_long_allow 'ls'
+expect_long_allow 'terraform plan -out=apply.tfplan && npm install foo'
+expect_long_allow 'npm ls -g && npm uninstall -g foo'
+expect_long_allow 'terraform init -migrate-state=false'
+expect_long_allow 'source .venv/bin/activate && pip install -r requirements.txt'
+expect_long_allow 'PJP_ALLOW_IAC=1 terraform apply'
+
+# 区切り (; | & ( )) の多い 80 KB の 1 行 (minified の JS を書くようなもの) を、20 秒のうちに読み終える
+mini=$(for ((k = 0; k < 8000; k++)); do printf 'a;b|c&d(e)'; done)
+start=${SECONDS}
+run_input "$(pre_json "printf '%s' '${mini}' >min.js && terraform plan")"
+took=$((SECONDS - start))
+if silent && ((took < 20)); then
+  ok "区切りの多い 80 KB の 1 行も ${took} 秒で読み終え、terraform plan は通す"
 else
-  ng "読む長さを超えたコマンドに IaC の形がある" "$(detail)"
-fi
-long_ok="cat <<'EOF' >notes.txt
-${filler}
-EOF
-ls"
-pre "${long_ok}"
-if silent; then
-  ok "読む長さを超えても、install・IaC の形が無ければ通す"
-else
-  ng "読む長さを超えても、形が無ければ通す" "$(detail)"
+  ng "区切りの多い 80 KB の 1 行も 20 秒のうちに読み終える (${took} 秒)" "$(detail)"
 fi
 
 # Bash でない tool・壊れた入力・当たらない入力

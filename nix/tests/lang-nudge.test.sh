@@ -16,9 +16,11 @@
 #     pjp-node、ansible-galaxy init (role init・collection init も) → pjp-ansible
 #   - 依存を足すコマンド (cargo add・uv add・pnpm add・引数のある npm install・npm i・go get・yarn add・bun add) で、
 #     pjp-dep-release-age を読むよう知らせる。引数の無い npm install・npm ci では知らせない
-#   - cd・&& でつないだもの・頭の代入・env・timeout の後ろも読み、作り始めと依存の両方があれば両方の文を 1 つに並べる。
+#   - cd・&& でつないだもの・頭の代入・env・timeout・nix develop -c・mise exec -- の後ろも読み、作り始めと依存の両方が
+#     あれば両方の文を 1 つに並べる。
 #     hookEventName は PreToolUse
-#   - commit の message・heredoc の本文・echo の引数・コメントに書いただけでは知らせない
+#   - commit の message・heredoc の本文 (終わりの印に - を含むものも)・echo の引数・コメントに書いただけでは知らせない
+#   - 32 KB を超える入力は読まずに黙る (作り始め・依存を足すコマンドは短い。長いコマンドで jq の時間がかさむのを避ける)
 #   - 名指しする skill が無い・settings.json の skillOverrides で off・user-invocable-only なら、その skill の文を出さない
 #     (全部出さないなら黙る)。name-only (pack の skill) と壊れた settings.json では知らせる
 #   - PreToolUse でない event・Bash でない tool・当たらないコマンド・壊れた入力では黙って exit 0
@@ -141,6 +143,8 @@ expect_skill 'ansible-galaxy collection init ns.coll' pjp-ansible
 expect_skill 'cd ~/src && cargo new foo' pjp-rust
 expect_skill 'env RUSTFLAGS=-Dwarnings cargo new foo' pjp-rust
 expect_skill 'CARGO_HOME=/tmp/c cargo init .' pjp-rust
+expect_skill 'mise exec -- cargo new foo' pjp-rust
+expect_skill 'nix develop .#rust --command cargo init' pjp-rust
 
 # 言語の名前も文に入れる
 run "${cfg}" "$(pre 'go mod init example.com/x')"
@@ -160,6 +164,7 @@ expect_dep 'go get example.com/x@v1.2.3'
 expect_dep 'yarn add left-pad'
 expect_dep 'bun add zod'
 expect_dep 'timeout 60 cargo add anyhow'
+expect_dep 'nix develop -c cargo add serde'
 
 echo "-- 両方"
 run "${cfg}" "$(pre 'cargo new foo && cd foo && cargo add serde')"
@@ -184,8 +189,19 @@ expect_silent "cat <<'EOF' >notes.md
 cargo new foo
 uv add requests
 EOF"
+expect_silent "cat <<'END-DOC' >notes.md
+cargo new foo
+END-DOC"
 expect_silent '# cargo add serde'
 expect_silent 'ls -la'
+
+# 32 KB を超える入力は読まない
+big=$(printf '%040000d' 0)
+run "${cfg}" "$(pre "cat <<'EOF' >big.txt
+${big}
+EOF
+cargo add serde")"
+if silent; then ok "32 KB を超える入力は読まずに黙る"; else ng "32 KB を超える入力は読まずに黙る" "$(detail)"; fi
 
 echo "-- skill の有無と skillOverrides"
 none=$(config_dir none '')

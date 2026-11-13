@@ -414,6 +414,8 @@
           op-reason-guard-test = scriptTest "op-reason-guard" ./files/claude/hooks/op-reason-guard.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
           install-iac-guard-test = scriptTest "install-iac-guard" ./files/claude/hooks/install-iac-guard.sh;
+          # install-iac-guard.sh が xref-guard.sh から写した lexer の本文が同じか。hooks/ を丸ごと渡す
+          hook-lexer-copy-test = scriptTest "hook-lexer-copy" ./files/claude/hooks;
           gist-guard-test = scriptTest "gist-guard" ./files/claude/hooks/gist-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;

@@ -17,7 +17,8 @@
 #
 #   pip・pip3・python -m pip・python3 -m pip の install (python3.12 などの版付きも)
 #       sudo 付き・--user・--break-system-packages はいつも止める。それ以外は、下の venv の印が無ければ止める
-#   uv pip install の --system・--break-system-packages 付き
+#   uv pip install の --system・--break-system-packages 付き、頭の代入 UV_SYSTEM_PYTHON=1 付き、--python <venv でない
+#       interpreter のパス> 付き
 #   npm install -g (npm i -g・--global・--location=global、npm -g install も)・pnpm add -g・yarn global add・bun add -g
 #   apt install・apt-get install・brew install (sudo 付きも)
 #   terraform・tofu の apply・destroy・import・taint・untaint・force-unlock・refresh、state rm・mv・push・replace-provider、
@@ -25,19 +26,23 @@
 #   terragrunt の同じ操作 (run --all apply・run -- apply・stack run apply・run-all destroy のように別の語の後ろに来る形も)
 #       と apply-all・destroy-all・backend bootstrap・delete・migrate
 #   読む長さ (下の「読み方」) を超えたコマンド
-#       中を読まずに、行の中に上の形 (venv のパスで呼ぶ pip などは除く) があれば止め、コマンドを短くするよう返す
+#       中を読まずに、行を ; & | ( ) で分けた頭に上の形があれば止め、コマンドを短くするよう返す (awk で 1 回読むだけなので、
+#       区切りの多い長い行でも長さに比例した時間で終わる。venv の印は同じコマンドの activate と VIRTUAL_ENV だけを見る)
 #
 # ## 止めないもの
 #
 #   - venv の印のある pip:
-#       - パスで呼ぶ interpreter (<root>/bin/pip・<root>/bin/python -m pip) で、root に pyvenv.cfg がある・root の名前が venv を
-#         含むか env の語 (env・.env・build-env など) か、root の親が envs (conda の env)・同じコマンドの前の方で作った venv
-#         (python -m venv <dir>・virtualenv <dir>・uv venv [<dir>]) か、root に変数を含む (解けないので印とみなす)。
-#         /usr/bin/pip・~/.local/bin/pip・mise の python の pip は印にならない
-#       - 同じコマンドの前の方の activate (source・. の <root>/bin/activate、conda・mamba・micromamba activate <base 以外>)
-#       - uv run・poetry run・pdm run・hatch run・pipenv run・rye run・conda run の後ろ
-#       - hook の env の VIRTUAL_ENV (Claude Code を venv の中で起こした)
-#     -t・--target (dir を指して入れる) と -h・--help も通す
+#       - パスで呼ぶ interpreter (<root>/bin/pip・<root>/bin/python -m pip・pip --python <パス>) はパスだけで決める。root に
+#         pyvenv.cfg がある・root の名前が venv を含むか env の語 (env・.env・build-env など) か、root の親が envs (conda の
+#         env)・同じコマンドの前の方で作った venv (python -m venv <dir>・python -m virtualenv <dir>・virtualenv <dir>・
+#         uv venv [<dir>]) か、root に変数を含む ($HOME・${HOME}・~ は解いてから見る。ほかの変数は解けないので印とみなす)。
+#         /usr/bin/pip・~/.local/bin/pip・mise の python の pip は、activate の後でも印にならない
+#       - 素の名前の pip・python では、同じコマンドの前の方の activate (source・. の <root>/bin/activate、conda・mamba・
+#         micromamba activate <base 以外>)、uv run・poetry run・pdm run・hatch run・pipenv run・rye run・conda run の後ろ、
+#         hook の env の VIRTUAL_ENV (Claude Code を venv の中で起こした)
+#     -t・--target (dir を指して入れる)・--dry-run・-h・--help も通す
+#   - 確かめるだけの形: apt・apt-get の -s・--simulate・--dry-run など、brew・npm の --dry-run、terraform state rm・mv の
+#     -dry-run
 #   - --system の無い uv pip install、npm install (-g なし)・pnpm add (-g なし)、pipx install・cargo install・uv tool install・
 #     go install (止めるかをユーザーがまだ決めていない)
 #   - IaC の読むだけの操作 (plan・validate・fmt・flag の無い init・output・show・state list・show・pull・graph・providers・
@@ -59,10 +64,11 @@
 #
 # ## 読み方
 #
-# コマンドの文字を awk で単純コマンドに分ける (xref-guard.sh の lexer をそのまま写した。直すときは両方を見る)。頭の
-# VAR=値・包むコマンド (env・sudo・timeout・nohup・xargs・nix develop -c・mise exec -- など)・予約語は外し、bash -c・eval・
-# su -c・nix-shell --run などに文字列で渡したもの、bash <<EOF の本文は読み直す (3 段まで。読み直す中へは通す口・venv の印・
-# sudo を引き継ぐ)。cd は後ろの単純コマンドの dir に効かせる (pyvenv.cfg と venv のパスを引く dir)。script の中・関数・
+# コマンドの文字を awk で単純コマンドに分ける (xref-guard.sh の lexer をそのまま写した。直すときは両方を見る。本文が同じかは
+# nix/tests/hook-lexer-copy.test.sh が確かめる)。頭の VAR=値・包むコマンド (env・sudo・timeout・nohup・xargs・nix develop -c・
+# mise exec -- など) とその後ろの VAR=値 (sudo VAR=値 <コマンド>)・予約語は外し、bash -c・eval・su -c・nix-shell --run などに
+# 文字列で渡したもの、bash <<EOF の本文、cat <<EOF・echo・printf の出力をパイプで渡した shell (… | bash) は読み直す
+# (3 段まで。読み直す中へは通す口・venv の印・sudo を引き継ぐ)。cd は後ろの単純コマンドの dir に効かせる (pyvenv.cfg と venv のパスを引く dir)。script の中・関数・
 # alias・変数に入れたコマンドは見えない。読むのは 64 KB (gawk・mawk の無いマシンでは 16 KB) まで (xref-guard.sh と同じ)。
 #
 # ## 黙る場面
@@ -89,10 +95,11 @@ if [[ -r ${iac_state} ]]; then
   fi
 fi
 
-# 止める形の語を含むか (この hook は Bash のたびに走るので、まず文字で絞る)
+# 止める形の語を含むか (この hook は Bash のたびに走るので、まず文字で絞る)。yarn・bun は後ろの空白まで見る (cwd や
+# transcript_path の ubuntu・bundle などに当てない)
 has_words() {
   local k
-  for k in install npm yarn bun; do
+  for k in install npm 'yarn ' 'bun '; do
     [[ $1 == *"${k}"* ]] && return 0
   done
   if ((iac_on)); then
@@ -661,12 +668,16 @@ venv_new() {
 }
 
 # venv_mark <dir> <pip を呼ぶ語 (pip・.venv/bin/pip・python3 など)>: venv の中へ入れる印があるか (上の「止めないもの」)。
-# 呼び出し元の simple の runner を使う
+# パスで呼ぶ interpreter はパスで決め (activate・runner・VIRTUAL_ENV があっても、そのパスの interpreter が入れる)、素の名前の
+# ときだけ activate・runner・VIRTUAL_ENV を見る。呼び出し元の simple の runner を使う
 venv_mark() {
   local dir=$1 interp=$2 bindir root abs base parent
-  ((venv_active || runner)) && return 0
-  [[ -n ${VIRTUAL_ENV-} ]] && return 0
-  [[ ${interp} == */* ]] || return 1
+  if [[ ${interp} != */* ]]; then
+    ((venv_active || runner)) && return 0
+    [[ -n ${VIRTUAL_ENV-} ]] && return 0
+    return 1
+  fi
+  interp=$(expand_home "${interp}")
   [[ ${interp} != *'$'* ]] || return 0
   bindir=${interp%/*}
   case ${bindir##*/} in
@@ -688,6 +699,19 @@ venv_mark() {
   [[ ${base} =~ (^|[._-])env([._0-9-]|$) ]] && return 0
   parent=${abs%/*}
   [[ ${parent##*/} == envs ]] && return 0
+  return 1
+}
+
+# assigned <名前>: 呼び出し元の simple の頭の代入 (assigns) で、その名前に真の値 (1・true・yes・on) を入れたか
+assigned() {
+  local a v
+  for a in "${assigns[@]}"; do
+    [[ ${a%%=*} == "$1" ]] || continue
+    v=${a#*=}
+    case ${v,,} in
+      1 | true | yes | on) return 0 ;;
+    esac
+  done
   return 1
 }
 
@@ -721,7 +745,7 @@ pip_cmd() {
   [[ ${sub} == install ]] || return 0
   for x in "${a[@]:i+1}"; do
     case ${x} in
-      -h | --help) return 0 ;;
+      -h | --help | --dry-run) return 0 ;;
       --user) user=1 ;;
       --break-system-packages) bsp=1 ;;
       -t | --target | --target=*) target=1 ;;
@@ -741,7 +765,7 @@ pip_cmd() {
   return 0
 }
 
-# python_cmd <dir> <python を呼ぶ語> <python の後ろの語>…: -m pip・-m venv を見る
+# python_cmd <dir> <python を呼ぶ語> <python の後ろの語>…: -m pip・-m venv・-m virtualenv を見る
 python_cmd() {
   local dir=$1 interp=$2 i x mod
   shift 2
@@ -764,33 +788,52 @@ python_cmd() {
     esac
     case ${mod} in
       pip) pip_cmd "${dir}" "${interp}" "${interp} -m pip" "${a[@]:i}" ;;
-      venv) venv_new "${dir}" venv "${a[@]:i}" ;;
+      venv | virtualenv) venv_new "${dir}" venv "${a[@]:i}" ;;
     esac
     return 0
   done
   return 0
 }
 
-# uv_cmd <dir> <uv の後ろの語>…: uv pip install --system と uv venv を見る (uv run は simple が包みとして外す)
+# uv_cmd <dir> <uv の後ろの語>…: system へ入れる uv pip install と uv venv を見る (uv run は simple が包みとして外す)。
+# 呼び出し元の simple の allow_install・assigns を使う
 uv_cmd() {
-  local dir=$1 i x
+  local dir=$1 i x py=""
   shift
   local -a a=("$@")
+  # subcommand の前の global のオプション (値を取るものは値も飛ばす)
   for ((i = 0; i < ${#a[@]}; i++)); do
-    [[ ${a[i]} == -* ]] || break
+    case ${a[i]} in
+      --directory | --project | --cache-dir | --config-file | --color | --python-preference | --python-downloads | \
+        --allow-insecure-host) i=$((i + 1)) ;;
+      -*) ;;
+      *) break ;;
+    esac
   done
   case ${a[i]-} in
     pip)
       [[ ${a[i + 1]-} == install ]] || return 0
       ((allow_install)) && return 0
-      for x in "${a[@]:i+2}"; do
+      for ((i += 2; i < ${#a[@]}; i++)); do
+        x=${a[i]}
         case ${x} in
+          -h | --help | --dry-run) return 0 ;;
           --system | --break-system-packages)
             add_install "uv pip install ${x}" pip
             return 0
             ;;
+          --python=* | -p=*) py=${x#*=} ;;
+          --python | -p)
+            py=${a[i + 1]-}
+            i=$((i + 1))
+            ;;
         esac
       done
+      if assigned UV_SYSTEM_PYTHON; then
+        add_install "uv pip install (UV_SYSTEM_PYTHON=1)" pip
+      elif [[ ${py} == */* ]] && ! venv_mark "${dir}" "${py}"; then
+        add_install "uv pip install --python ${py} (venv でない interpreter)" pip
+      fi
       ;;
     venv) venv_new "${dir}" uv "${a[@]:i+1}" ;;
   esac
@@ -806,6 +849,7 @@ node_cmd() {
   for ((i = 0; i < ${#a[@]}; i++)); do
     x=${a[i]}
     case ${x} in
+      --dry-run) return 0 ;;
       -g | --global | --global=true | --location=global) global=1 ;;
       --location)
         [[ ${a[i + 1]-} == global ]] && global=1
@@ -833,12 +877,17 @@ node_cmd() {
   return 0
 }
 
-# os_cmd <apt|apt-get|brew> <後ろの語>…: OS の package の install を見る
+# os_cmd <apt|apt-get|brew> <後ろの語>…: OS の package の install を見る (確かめるだけの -s・--simulate・--dry-run などは通す)
 os_cmd() {
   local tool=$1 i x sub="" lead=""
   shift
   local -a a=("$@")
   ((allow_install)) && return 0
+  for x in "${a[@]}"; do
+    case ${x} in
+      -s | --simulate | --dry-run | --just-print | --no-act | --recon | -h | --help) return 0 ;;
+    esac
+  done
   for ((i = 0; i < ${#a[@]}; i++)); do
     x=${a[i]}
     case ${x} in
@@ -876,7 +925,10 @@ tf_sub() {
         fi
       done
       case ${sub}:${s2} in
-        state:rm | state:mv | state:push | state:replace-provider | workspace:delete) add_iac "${tool} ${sub} ${s2}" ;;
+        state:rm | state:mv | state:push | state:replace-provider | workspace:delete)
+          # state rm・mv の -dry-run は、消す・移すものを見るだけ
+          [[ " $* " == *' -dry-run '* || " $* " == *' --dry-run '* ]] || add_iac "${tool} ${sub} ${s2}"
+          ;;
       esac
       ;;
     init)
@@ -974,6 +1026,19 @@ skip_opts() {
   done
 }
 
+# take_assigns: 呼び出し元の simple の w の頭の VAR=値 を外して assigns に足す。通す口は allow_install・allow_iac に効かせる。
+# 単純コマンドの頭と、包みの後ろ (sudo VAR=値 <コマンド>・time VAR=値 <コマンド>) で使う
+take_assigns() {
+  while ((${#w[@]} > 0)) && [[ ${w[0]} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; do
+    case ${w[0]} in
+      PJP_ALLOW_INSTALL=1) allow_install=1 ;;
+      PJP_ALLOW_IAC=1) allow_iac=1 ;;
+    esac
+    assigns+=("${w[0]}")
+    w=("${w[@]:1}")
+  done
+}
+
 # rescan <dir> <段> <文字列>: bash -c などに文字列で渡したものを読み直す。通す口・venv の印・sudo は中にも効かせ、中の
 # activate は外へ出さない (呼び出し元の simple の allow_install・allow_iac・runner・sudo)
 inh_allow_install=0
@@ -994,28 +1059,38 @@ rescan() {
   venv_active=${s_venv}
 }
 
-# simple <dir> <段> <stdin> <語>…: 単純コマンドを 1 つ見る。cd なら next_dir に行き先を入れる
+# simple <dir> <段> <P|-> <stdin> <語>…: 単純コマンドを 1 つ見る。cd なら next_dir に行き先を入れ、出力 (パイプの先の stdin)
+# が分かれば out_text・out_known に入れる (cat <<EOF・echo … を | bash で流すもの)
 simple() {
-  local dir=$1 depth=$2 stdin=$3 i guard=0 name
-  shift 3
-  local -a w=("$@")
+  local dir=$1 depth=$2 pipe=$3 stdin=$4 i guard=0 name in_text="" in_known=0
+  shift 4
+  local -a w=("$@") assigns=()
   local allow_install=${inh_allow_install} allow_iac=${inh_allow_iac} runner=${inh_runner} sudo=${inh_sudo}
+  if [[ ${stdin} == H* ]]; then
+    in_text=${stdin:1}
+    in_known=1
+  elif [[ ${pipe} == P ]]; then
+    in_text=${last_out}
+    in_known=${last_known}
+  fi
 
-  # 頭の VAR=値 と予約語
+  # 頭の予約語と VAR=値
   while ((${#w[@]} > 0)); do
     case ${w[0]} in
-      PJP_ALLOW_INSTALL=*) [[ ${w[0]#*=} == 1 ]] && allow_install=1 ;;
-      PJP_ALLOW_IAC=*) [[ ${w[0]#*=} == 1 ]] && allow_iac=1 ;;
-      '!' | '{' | '}' | if | then | else | elif | do | while | until) ;;
+      '!' | '{' | '}' | if | then | else | elif | do | while | until) w=("${w[@]:1}") ;;
       for | case | select | function | 'fi' | 'done' | 'esac' | '[[' | '[') return 0 ;;
-      *=*) [[ ${w[0]%%=*} =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || break ;;
+      *=*)
+        [[ ${w[0]} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || break
+        take_assigns
+        ;;
       *) break ;;
     esac
-    w=("${w[@]:1}")
   done
 
-  # 包むコマンドを外す。中に文字列で渡すものは読み直す
+  # 包むコマンドを外す (包みの後ろの VAR=値 も)。中に文字列で渡すものは読み直す
   while ((${#w[@]} > 0 && guard++ < 16)); do
+    take_assigns
+    ((${#w[@]} > 0)) || return 0
     case ${w[0]##*/} in
       cd | pushd)
         next_dir=$(join_dir "${dir}" "${w[${#w[@]} - 1]}")
@@ -1045,7 +1120,11 @@ simple() {
               allow_iac=1
               w=("${w[@]:1}")
               ;;
-            -* | *=*) w=("${w[@]:1}") ;;
+            -*) w=("${w[@]:1}") ;;
+            *=*)
+              assigns+=("${w[0]}")
+              w=("${w[@]:1}")
+              ;;
             *) break ;;
           esac
         done
@@ -1120,8 +1199,8 @@ simple() {
             *) return 0 ;;
           esac
         done
-        # -c も script のファイルも無い shell (bash <<EOF・bash -s) は heredoc の本文を読む
-        [[ ${stdin} == H* ]] && rescan "${dir}" "${depth}" "${stdin:1}"
+        # -c も script のファイルも無い shell (bash <<EOF・bash -s・cat <<EOF | bash・echo … | bash) は stdin を読む
+        ((in_known)) && rescan "${dir}" "${depth}" "${in_text}"
         return 0
         ;;
       eval)
@@ -1222,6 +1301,29 @@ simple() {
     apt | apt-get | brew) os_cmd "${name}" "${w[@]:1}" ;;
     terraform | tofu) tf_cmd "${name}" "${w[@]:1}" ;;
     terragrunt) tg_cmd "${w[@]:1}" ;;
+    cat)
+      if ((${#w[@]} == 1)) || [[ ${w[1]} == - ]]; then
+        out_text=${in_text}
+        out_known=${in_known}
+      fi
+      ;;
+    echo)
+      w=("${w[@]:1}")
+      while ((${#w[@]} > 0)) && [[ ${w[0]} == -[neE] ]]; do
+        w=("${w[@]:1}")
+      done
+      out_text=${w[*]}
+      out_known=1
+      ;;
+    printf)
+      # 書式の後ろの引数を 1 行ずつ (printf '%s\n' 'a' 'b' の形)。引数が無ければ書式そのもの
+      if ((${#w[@]} > 2)); then
+        out_text=$(printf '%s\n' "${w[@]:2}")
+      else
+        out_text=${w[1]-}
+      fi
+      out_known=1
+      ;;
   esac
   return 0
 }
@@ -1233,80 +1335,91 @@ scan_command() {
   ((depth <= 3)) || return 0
   pick_awk
   (($(byte_len "$3") <= lex_limit)) || return 0
+  last_out=""
+  last_known=0
   while IFS=$'\037' read -r -d $'\036' -a rec; do
     next_dir=""
+    out_text=""
+    out_known=0
     if ((${#rec[@]} > 3)); then
-      simple "${dir}" "${depth}" "${rec[1]}" "${rec[@]:3}"
+      simple "${dir}" "${depth}" "${rec[0]}" "${rec[1]}" "${rec[@]:3}"
     fi
     [[ -z ${next_dir} ]] || dir=${next_dir}
+    last_out=${out_text}
+    last_known=${out_known}
   done < <(split_commands "$3")
 }
 
 # --- 長いコマンド
 
-# long_command <KB>: 読む長さを超えたコマンドは中を読まず、行を ; & | ( ) で分けた頭に止める形があれば止める (venv の印は
-# 見ない。パスで呼ぶ pip は頭の形に当たらない)。ファイルの中身を Write の tool で書けば、コマンドが短くなり中を読める
+# 読む長さを超えたコマンドの行を見る awk。行を ; & | ( ) で分けた頭 (空白・VAR=値・包むコマンドとその flag・bash -c '…' の
+# 頭を外したもの) が止める形なら「install<TAB><止めたもの>」か「iac<TAB><止めたもの>」を 1 行出す。venv の印は、同じコマンドの
+# 前の方の activate と hook の env の VIRTUAL_ENV (ENVIRON["VIRTUAL_ENV"]) だけを見る。1 回読むだけなので、区切りの多い長い
+# 行でも長さに比例した時間で終わる
+read -r -d '' long_awk <<'AWK' || true
+BEGIN { iac = (ENVIRON["PJP_IAC_ON"] == "1"); venv = (ENVIRON["VIRTUAL_ENV"] != "") }
+{
+  n = split($0, segs, /[;&|()]/)
+  for (k = 1; k <= n; k++) check(segs[k])
+}
+function check(seg,   s, ai, aa, w) {
+  ai = (seg ~ /PJP_ALLOW_INSTALL=1/)
+  aa = (seg ~ /PJP_ALLOW_IAC=1/)
+  s = seg
+  w = 0
+  while (1) {
+    sub(/^[ \t]+/, "", s)
+    if (s ~ /^[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'[^']*'|[^ \t]*)[ \t]+/) {
+      sub(/^[A-Za-z_][A-Za-z0-9_]*=("[^"]*"|'[^']*'|[^ \t]*)[ \t]+/, "", s)
+    } else if (s ~ /^(sudo|doas|env|time|nohup|exec|command|nice)[ \t]+/) {
+      sub(/^[^ \t]+[ \t]+/, "", s)
+      w = 1
+    } else if (w && s ~ /^-[^ \t]*[ \t]+/) {
+      sub(/^[^ \t]+[ \t]+/, "", s)
+    } else if (s ~ /^timeout[ \t]+[^ \t]+[ \t]+/) {
+      sub(/^timeout[ \t]+[^ \t]+[ \t]+/, "", s)
+    } else if (s ~ /^(bash|sh|zsh|dash)[ \t]+-[A-Za-z]*c[A-Za-z]*[ \t]+["']/) {
+      sub(/^[^ \t]+[ \t]+[^ \t]+[ \t]+["']/, "", s)
+    } else {
+      break
+    }
+  }
+  # 引用符は語を分けるだけなので空白にする (bash -c 'terraform apply' の閉じる ' など)
+  gsub(/["']/, " ", s)
+  s = s " "
+  if (s ~ /^(source|\.)[ \t]+[^ \t]*bin\/activate/) { venv = 1; return }
+  if (!ai) {
+    if (s ~ /^(pip[0-9.]*|python[0-9.]*[ \t]+-m[ \t]+pip)[ \t]+install[ \t]/ && !venv && s !~ /[ \t](-t|--target|--dry-run|-h|--help)[ \t=]/) out("install", "pip install")
+    else if (s ~ /^uv[ \t].*[ \t]pip[ \t]+install[ \t]/ && s ~ /[ \t]--(system|break-system-packages)[ \t]/) out("install", "uv pip install --system")
+    else if (s ~ /^(npm|pnpm|bun)[ \t]/ && s ~ /[ \t](install|i|add|a|in|ins|inst|insta|instal|isnt|isnta|isntal|isntall)[ \t]/ && s ~ /[ \t](-g|--global|--location=global)[ \t]/ && s !~ /[ \t]--dry-run[ \t]/) out("install", "npm・pnpm・bun の -g")
+    else if (s ~ /^yarn[ \t]+global[ \t]+add[ \t]/) out("install", "yarn global add")
+    else if (s ~ /^(apt|apt-get)[ \t]/ && s ~ /[ \t]install[ \t]/ && s !~ /[ \t](-s|--simulate|--dry-run|--just-print|--no-act|--recon)[ \t]/) out("install", "apt-get install")
+    else if (s ~ /^brew[ \t]+install[ \t]/ && s !~ /[ \t]--dry-run[ \t]/) out("install", "brew install")
+  }
+  if (iac && !aa && s ~ /^(terraform|tofu|terragrunt)[ \t]/ && s !~ /[ \t](-help|-h|--help)[ \t]/) {
+    if (s ~ /[ \t](apply|destroy|import|taint|untaint|force-unlock|refresh|apply-all|destroy-all)[ \t]/ \
+      || (s ~ /[ \t]state[ \t]+(rm|mv|push|replace-provider)[ \t]/ && s !~ /[ \t]--?dry-run[ \t]/) \
+      || s ~ /[ \t]workspace[ \t]+delete[ \t]/ \
+      || s ~ /[ \t]backend[ \t]+(bootstrap|delete|migrate)[ \t]/ \
+      || s ~ /[ \t]--?(migrate-state|force-copy)(=true)?[ \t]/) {
+      out("iac", substr(s, 1, index(s, " ") - 1) " の実物を変える操作")
+    }
+  }
+}
+function out(kind, what) { print kind "\t" what " (長いコマンドの中)" }
+AWK
+
+# long_command <KB>: 読む長さを超えたコマンドは中を読まず、行に止める形があれば止める (上の long_awk)。ファイルの中身を Write
+# の tool で書けば、コマンドが短くなり中を読める
 long_command() {
-  local line seg rest allow_i allow_a
-  local tf='(terraform|tofu|terragrunt)[[:space:]]'
+  local kind what
   long_kb=$1
-  while IFS= read -r line; do
-    line=${line//&&/;}
-    line=${line//||/;}
-    line=${line//[|&()]/;}
-    while [[ -n ${line} ]]; do
-      seg=${line%%;*}
-      if [[ ${line} == *';'* ]]; then
-        line=${line#*;}
-      else
-        line=""
-      fi
-      allow_i=0
-      allow_a=0
-      [[ ${seg} == *PJP_ALLOW_INSTALL=1* ]] && allow_i=1
-      [[ ${seg} == *PJP_ALLOW_IAC=1* ]] && allow_a=1
-      # 頭の空白・代入・包むコマンドを外す
-      rest=${seg}
-      while :; do
-        rest=${rest#"${rest%%[![:space:]]*}"}
-        if [[ ${rest} =~ ^[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+(.*)$ ]]; then
-          rest=${BASH_REMATCH[1]}
-        elif [[ ${rest} =~ ^(sudo|env|time|nohup|exec|command|nice)[[:space:]]+(.*)$ ]]; then
-          rest=${BASH_REMATCH[2]}
-        elif [[ ${rest} =~ ^timeout[[:space:]]+[^[:space:]]+[[:space:]]+(.*)$ ]]; then
-          rest=${BASH_REMATCH[1]}
-        else
-          break
-        fi
-      done
-      rest+=" "
-      if ((! allow_i)); then
-        if [[ ${rest} =~ ^(pip[0-9.]*|python[0-9.]*[[:space:]]+-m[[:space:]]+pip)[[:space:]]+install[[:space:]] ]] \
-          && [[ ${rest} != *' --target'* && ${rest} != *' -t '* ]]; then
-          add_install "pip install (長いコマンドの中)" pip
-        elif [[ ${rest} =~ ^uv[[:space:]]+pip[[:space:]]+install[[:space:]].*--(system|break-system-packages)[[:space:]] ]]; then
-          add_install "uv pip install --${BASH_REMATCH[1]} (長いコマンドの中)" pip
-        elif [[ ${rest} =~ ^(npm|pnpm|bun)[[:space:]].*[[:space:]](-g|--global)[[:space:]] ]]; then
-          add_install "${BASH_REMATCH[1]} の -g (長いコマンドの中)" node
-        elif [[ ${rest} =~ ^yarn[[:space:]]+global[[:space:]]+add[[:space:]] ]]; then
-          add_install "yarn global add (長いコマンドの中)" node
-        elif [[ ${rest} =~ ^(apt|apt-get)[[:space:]]+([^[:space:]]+[[:space:]]+)*install[[:space:]] ]]; then
-          add_install "${BASH_REMATCH[1]} install (長いコマンドの中)" os
-        elif [[ ${rest} =~ ^brew[[:space:]]+install[[:space:]] ]]; then
-          add_install "brew install (長いコマンドの中)" os
-        fi
-      fi
-      if ((iac_on && ! allow_a)) && [[ ${rest} =~ ^${tf} && ${rest} != *' -help '* ]]; then
-        if [[ ${rest} =~ [[:space:]](apply|destroy|import|taint|untaint|force-unlock|refresh|apply-all|destroy-all)[[:space:]] ]] \
-          || [[ ${rest} =~ [[:space:]]state[[:space:]]+(rm|mv|push|replace-provider)[[:space:]] ]] \
-          || [[ ${rest} =~ [[:space:]]workspace[[:space:]]+delete[[:space:]] ]] \
-          || [[ ${rest} =~ [[:space:]]backend[[:space:]]+(bootstrap|delete|migrate)[[:space:]] ]] \
-          || [[ ${rest} =~ [[:space:]]-{1,2}(migrate-state|force-copy)[[:space:]=] ]]; then
-          add_iac "${rest%% *} の実物を変える操作 (長いコマンドの中)"
-        fi
-      fi
-    done
-  done <<<"${cmd}"
+  while IFS=$'\t' read -r kind what; do
+    case ${kind} in
+      install) add_install "${what}" pip ;;
+      iac) add_iac "${what}" ;;
+    esac
+  done < <(printf '%s\n' "${cmd}" | PJP_IAC_ON=${iac_on} LC_ALL=C "${awk_bin}" "${long_awk}")
 }
 
 # --- 止める
@@ -1342,8 +1455,8 @@ emit() {
     msg+=$'\n\n'"IaC の操作は実物 (資源か state) を変えるので止めた。実環境への apply は、merge の後に人が流す (Claude は検査か plan まで)。"
     msg+=$'\n'"- plan・validate・test で確かめ、流すコマンドと plan の要点をユーザーに伝える"
     msg+=$'\n'"- ユーザーがこの会話で流すと明示したときだけ、コマンドの頭に PJP_ALLOW_IAC=1 を付けて打ち直す (自分の判断では付けない)"
-    msg+=$'\n'"- agent が自分で apply してよい sandbox のマシンなら、host の option dotfiles.claude.iacGuard.enable = false で外せる"
-    msg+=" (外すかはユーザーが決める)"
+    msg+=$'\n'"- agent が自分で apply してよい sandbox のマシンなら、host の option dotfiles.claude.iacGuard.enable = false (Claude Code"
+    msg+=" on the web では bootstrap-claude-cloud.sh の --no-iac-guard) で外せる (外すかはユーザーが決める)"
   fi
   if ((long_kb)); then
     msg+=$'\n\n'"ファイルの中身は Write の tool で書いてコマンドを短くすれば、中を読んで確かめる。"

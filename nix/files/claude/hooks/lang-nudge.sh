@@ -33,8 +33,9 @@
 #
 # 近似で読む (pr-assignee-nudge.sh と同じ。止める hook ほど細かく読まない)。heredoc の本文を外し、'…'・"…" を中身ごと
 # 外し、\ の行の継ぎをつなぎ、; & | 改行 ( ) で単純コマンドに分ける。単純コマンドの頭の代入 (VAR=値) と包み (env・sudo・
-# time・nohup・command・exec・nice・timeout <時間>) を外した語の並びで決めるので、commit の message・echo の引数・コメントに
-# 書いただけでは知らせない。引用符の中にだけあるコマンド (bash -c '…') と、オプションの値を前に置いたもの
+# time・nohup・command・exec・nice・timeout <時間>・nix develop … -c・mise exec … --) を外した語の並びで決めるので、commit の
+# message・echo の引数・コメントに書いただけでは知らせない。32 KB を超える入力は読まない (jq の gsub が長さの二乗で遅くなる。
+# 作り始め・依存を足すコマンドは短い)。引用符の中にだけあるコマンド (bash -c '…') と、オプションの値を前に置いたもの
 # (npm --prefix <dir> install …) は読み落とす。読み違えても、余分な 1 文か、1 文が出ないだけ。
 #
 # ## 登録
@@ -46,11 +47,14 @@ set -u -o pipefail
 # 黙って抜ける場合も、先に stdin を読み切る (書き手の Claude Code を待たせない)
 input=$(cat) || exit 0
 
-# 当たる語を含まない入力は読まない (この hook は Bash のたびに走る)
+# 当たる語を含まない入力は読まない (この hook は Bash のたびに走る)。cwd や transcript_path に当たらないよう、語の後ろの空白
+# まで見る (ubuntu の bun などに当てない)
 case ${input} in
-  *cargo* | *npm* | *yarn* | *bun* | *ansible-galaxy* | *'uv init'* | *'uv add'* | *'go mod'* | *'go get'*) ;;
+  *'cargo '* | *'npm '* | *'yarn add'* | *'bun add'* | *ansible-galaxy* | *'uv init'* | *'uv add'* | *'go mod'* | *'go get'*) ;;
   *) exit 0 ;;
 esac
+# 長い入力は読まない。作り始め・依存を足すコマンドは短く、jq の gsub は長いコマンドで二乗の時間がかかる
+((${#input} <= 32768)) || exit 0
 command -v jq &>/dev/null || exit 0
 
 config="${CLAUDE_CONFIG_DIR:-${HOME}/.claude}"
@@ -74,7 +78,7 @@ def strip_heredocs:
       if (if .tabs then ($line | sub("^\t+"; "")) else $line end) == .end then .end = null else . end
     else
       .out += [$line]
-      | (first($line | match("(?:^|[^<])<<(-?)[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\\2")) // null) as $m
+      | (first($line | match("(?:^|[^<])<<(-?)[ \t]*(['\"]?)([^ \t;&|<>()'\"]+)\\2")) // null) as $m
       | if $m == null then . else .end = $m.captures[2].string | .tabs = ($m.captures[0].string == "-") end
     end)
   | .out | join("\n");
@@ -82,12 +86,16 @@ def strip_heredocs:
 def strip_quotes: gsub("'[^']*'|\"(?:[^\"\\\\]|\\\\[\\s\\S])*\""; "Q");
 def simple_commands: gsub("\\\\\n"; " ") | [splits("[;&|\n()]")];
 def drop_flags: if length > 0 and (.[0] | startswith("-")) then .[1:] | drop_flags else . end;
-# 頭の代入と包みを外す
+# 頭の代入と包み (nix develop … -c <コマンド>・mise exec … -- <コマンド> も) を外す
+def after($marks): (first(range(length) as $i | select(.[$i] | IN($marks[])) | $i) // null) as $i
+  | if $i == null then [] else .[$i + 1:] end;
 def lead:
   if length == 0 then .
   elif (.[0] | test("^[A-Za-z_][A-Za-z0-9_]*=")) then .[1:] | lead
   elif (.[0] | IN("env", "sudo", "doas", "time", "nohup", "command", "exec", "nice")) then .[1:] | drop_flags | lead
   elif .[0] == "timeout" then .[1:] | drop_flags | .[1:] | lead
+  elif .[0] == "nix" and (.[1] | IN("develop", "shell")) then after(["-c", "--command"]) | lead
+  elif .[0] == "mise" and (.[1] | IN("exec", "x")) then after(["--"]) | lead
   else . end;
 def args: map(select((startswith("-") or startswith("+")) | not));
 def hits:
