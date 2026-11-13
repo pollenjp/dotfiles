@@ -417,6 +417,7 @@
           gist-guard-test = scriptTest "gist-guard" ./files/claude/hooks/gist-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
+          lang-nudge-test = scriptTest "lang-nudge" ./files/claude/hooks/lang-nudge.sh;
           pjp-drawio-export-test = scriptTest "pjp-drawio-export" ./files/claude/skills/pjp-drawio/scripts/drawio-export.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           bootstrap-path-shadow-test = scriptTest "bootstrap-path-shadow" ./scripts/bootstrap-path-shadow.sh;
@@ -695,6 +696,14 @@
               ;
           };
           claude-pr-assignee-nudge-state = import ./tests/claude-pr-assignee-nudge.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-lang-nudge-state = import ./tests/claude-lang-nudge.nix {
             inherit
               lib
               pkgs

@@ -499,6 +499,18 @@ in
       };
     }
 
+    # PreToolUse フック (matcher Bash)。project を作り始めるコマンド (cargo new・uv init・go mod init・npm init など) と依存を足す
+    # コマンド (cargo add・uv add・pnpm add など) を打つときに、読む skill (pack lang の pjp-<言語>・pjp-dep-release-age) を 1 文で
+    # Claude に知らせる。止めない。名指しする skill が無いマシンと、skillOverrides でその skill を止めたマシンでは黙る (option は
+    # 無い)。設計は claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.6。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/lang-nudge.sh" = {
+        source = claudeRoot + "/hooks/lang-nudge.sh";
+        executable = true;
+      };
+    }
+
     # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/pjp-op。理由が必須の 1Password CLI の
     # wrapper) を守る: op.exe の直打ちを止めて op --reason … に直させ、op の記録にこの会話の承認の拒否・時間切れがあれば、
     # 打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
