@@ -6,7 +6,9 @@
 # ## 何をするか
 #
 #   1. claude-skills を ghq root 配下へ clone する (既にあれば取得 (fetch) して fast-forward する)
-#   2. skills/ agents/ commands/ の中身を 1 つずつ ~/.claude/<種類>/ へ symlink する
+#   2. skills/ agents/ commands/ rules/ の中身を 1 つずつ ~/.claude/<種類>/ へ symlink する
+#      (rules/ は拡張子・置き場所で絞った rule。~/.claude/rules/ の symlink の rule も paths 付きで読まれることを
+#      Claude Code 2.1.322 で確かめた。dotfiles-private の docs/superpowers/plans/2026-11-13-lang-prefs-pack-dotfiles.md)
 #   3. リポジトリから消えたものの symlink を掃除する
 #
 # 冪等。skill を足したあとや、別マシンでの変更を取り込むときに何度でも実行してよい。
@@ -79,7 +81,7 @@ export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh} -o BatchMode=yes"
 
 repo_url="git@github.com:pollenjp/claude-skills.git"
 repo_path="github.com/pollenjp/claude-skills"
-kinds=(skills agents commands)
+kinds=(skills agents commands rules)
 # git_github が取れなかったときの案内 (警告の続きの行に添える)
 git_github_hint=""
 

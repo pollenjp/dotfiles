@@ -17,6 +17,8 @@
 #                                     (Stop フック footer-links-archive.sh の本体。入口が PATH の node で起こす。下記)
 #   dotfiles.claude.sshAgentNotice.extraCommands -> ~/.local/state/dotfiles/claude-ssh-agent-notice.json
 #                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
+#   dotfiles.claude.iacGuard.enable -> ~/.local/state/dotfiles/claude-iac-guard.json
+#                                     (install-iac-guard.sh が読む、IaC の実物を変える操作を止めるか。下記)
 #   (op-reason-guard.sh が読む ~/.local/state/dotfiles/claude-op-reason.json は home/modules/op-reason.nix が書く)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。cc-page の規則の
@@ -458,6 +460,23 @@ in
       };
     }
 
+    # PreToolUse フック (matcher Bash)。venv・project の外 (system・user の環境) へ入れる install (pip install・npm install -g・
+    # apt install・brew install など) と、terraform・tofu・terragrunt で実物 (資源か state) を変える操作 (apply・destroy など) を、
+    # 打つ前に止めて代わりの手を Claude に返す (claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.5)。
+    # IaC の分だけ iacGuard.enable で外せ、その値を claude-iac-guard.json に置いて hook が読む (無い・壊れているときは止める。
+    # false でも必ず書く)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/install-iac-guard.sh" = {
+        source = claudeRoot + "/hooks/install-iac-guard.sh";
+        executable = true;
+      };
+      ".local/state/dotfiles/claude-iac-guard.json".text =
+        builtins.toJSON {
+          enable = cfg.iacGuard.enable;
+        }
+        + "\n";
+    }
+
     # PreToolUse フック (matcher Write|Edit|MultiEdit|NotebookEdit)。public な dotfiles の docs/ に書こうとしたら止め、
     # 設計の文書の置き場 (private な dotfiles-private の docs/) を Claude に返す (dotfiles-private の ADR 035。決まりの
     # 正本は repo の直下の CLAUDE.md)。止める repo の表は hook の中に持つので option は無い。登録は上と同じく
@@ -476,6 +495,18 @@ in
     {
       ".claude/hooks/pr-assignee-nudge.sh" = {
         source = claudeRoot + "/hooks/pr-assignee-nudge.sh";
+        executable = true;
+      };
+    }
+
+    # PreToolUse フック (matcher Bash)。project を作り始めるコマンド (cargo new・uv init・go mod init・npm init など) と依存を足す
+    # コマンド (cargo add・uv add・pnpm add など) を打つときに、読む skill (pack lang の pjp-<言語>・pjp-dep-release-age) を 1 文で
+    # Claude に知らせる。止めない。名指しする skill が無いマシンと、skillOverrides でその skill を止めたマシンでは黙る (option は
+    # 無い)。設計は claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.6。登録は上と同じく
+    # scripts/bootstrap-claude-hook.sh。
+    {
+      ".claude/hooks/lang-nudge.sh" = {
+        source = claudeRoot + "/hooks/lang-nudge.sh";
         executable = true;
       };
     }

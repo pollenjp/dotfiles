@@ -36,6 +36,8 @@
 #                   claude.heavyJobs.limitPercent で、重い処理 (動画の書き出し・推論など) が使ってよい CPU と
 #                   メモリの、マシン全体に対する割合 (%) を決める (既定 70。claude-skills の skill pjp-heavy-jobs が
 #                   systemd の user slice に上限を付け、会話をまたいだ合計に効かせる。ADR 043)。
+#                   claude.iacGuard.enable = false で、Claude が打つ terraform・tofu・terragrunt の apply など (実物を
+#                   変える操作) を止める hook を外す (既定は止める。agent が sandbox で自分で apply するマシンだけ)。
 #   modules         mkHome の引数に無い option (home/options.nix の dotfiles.ccPages.port など) と、
 #                   home-manager の設定
 #

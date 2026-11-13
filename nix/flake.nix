@@ -413,9 +413,13 @@
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
           op-reason-guard-test = scriptTest "op-reason-guard" ./files/claude/hooks/op-reason-guard.sh;
           xref-guard-test = scriptTest "xref-guard" ./files/claude/hooks/xref-guard.sh;
+          install-iac-guard-test = scriptTest "install-iac-guard" ./files/claude/hooks/install-iac-guard.sh;
+          # install-iac-guard.sh が xref-guard.sh から写した lexer の本文が同じか。hooks/ を丸ごと渡す
+          hook-lexer-copy-test = scriptTest "hook-lexer-copy" ./files/claude/hooks;
           gist-guard-test = scriptTest "gist-guard" ./files/claude/hooks/gist-guard.sh;
           docs-guard-test = scriptTest "docs-guard" ./files/claude/hooks/docs-guard.sh;
           pr-assignee-nudge-test = scriptTest "pr-assignee-nudge" ./files/claude/hooks/pr-assignee-nudge.sh;
+          lang-nudge-test = scriptTest "lang-nudge" ./files/claude/hooks/lang-nudge.sh;
           pjp-drawio-export-test = scriptTest "pjp-drawio-export" ./files/claude/skills/pjp-drawio/scripts/drawio-export.sh;
           bootstrap-claude-hook-test = scriptTest "bootstrap-claude-hook" ./scripts/bootstrap-claude-hook.sh;
           bootstrap-path-shadow-test = scriptTest "bootstrap-path-shadow" ./scripts/bootstrap-path-shadow.sh;
@@ -669,6 +673,14 @@
               system
               ;
           };
+          claude-install-iac-guard-state = import ./tests/claude-install-iac-guard.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           claude-gist-guard-state = import ./tests/claude-gist-guard.nix {
             inherit
               lib
@@ -686,6 +698,14 @@
               ;
           };
           claude-pr-assignee-nudge-state = import ./tests/claude-pr-assignee-nudge.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-lang-nudge-state = import ./tests/claude-lang-nudge.nix {
             inherit
               lib
               pkgs

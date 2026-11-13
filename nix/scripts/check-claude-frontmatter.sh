@@ -116,7 +116,7 @@ notes=()
 
 # skill の metadata の pjp-pack に書ける pack の名前。入口の skill (pjp-pack-<pack>) は claude-skills にある。pack を足すなら、
 # ここと claude-skills の入口・scripts/lint.sh を一緒に直す
-packs=(diagram video notion machine repo browser)
+packs=(diagram video notion machine repo browser lang)
 
 # $1: ファイルかディレクトリ。nix/ から書いた名前を出す (CI の出力を短くする)
 label_of() {

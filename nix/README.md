@@ -3203,6 +3203,7 @@ ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drw
 | `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
 | `~/.local/state/dotfiles/claude-heavy-jobs.json` | `dotfiles.claude.heavyJobs.limitPercent` から生成 | ファイル（重い処理の資源の上限の割合。[後述](#重い処理の資源の上限を-host-ごとに決める)） |
 | `~/.local/state/dotfiles/claude-ssh-agent-notice.json` | `dotfiles.claude.sshAgentNotice.extraCommands` から生成 | ファイル（中で ssh を打つ道具の一覧。[後述](#1password-の-ssh-承認を知らせるフック)） |
+| `~/.local/state/dotfiles/claude-iac-guard.json` | `dotfiles.claude.iacGuard.enable` から生成 | ファイル（IaC の実物を変える操作を止めるか。[後述](#venv-の外への-install-と-iac-の実物を変える操作を止めるフック)） |
 | `~/.claude/skills/pjp-<名前>/` | `nix/files/claude/skills/pjp-<名前>/` | ディレクトリ |
 | `~/.claude/agents/pjp-<名前>.md` | `nix/files/claude/agents/pjp-<名前>.md` | ファイル |
 | `~/.claude/commands/pjp-<名前>.md` | `nix/files/claude/commands/pjp-<名前>.md` | ファイル（サブディレクトリで名前空間も可） |
@@ -3521,6 +3522,57 @@ dotfiles-private の [ADR 047](https://github.com/pollenjp/dotfiles-private/blob
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 2 件（`Bash` と `mcp__.*[Gg]ist.*`）足す。
   MCP の tool の名前は `mcp__<server>__<tool>` なので、gist を名前に含む tool でだけ hook が走る。cloud
   （[後述](#claude-code-on-the-web-cloud-で使う)）にも張る
+
+#### venv の外への install と IaC の実物を変える操作を止めるフック
+
+`PreToolUse` フック（`nix/files/claude/hooks/install-iac-guard.sh`）。Claude が venv・project の外（system・user の環境）へ入れる
+install と、terraform・tofu・terragrunt で実物（資源か state）を変える操作を打つ前に止め（`permissionDecision` の deny）、代わりの
+手を返す。install は `~/.claude/CLAUDE.md` の「同梱 script の依存ツール」の 4 つ（`pip install`・`npm install -g`・`apt install`・
+`brew install`）の意味、IaC は「実環境への apply は merge の後に人が流す（Claude は検査か plan まで）」の線で止める（設計は
+claude-skills の `docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md` の §3.5、dotfiles の分で決めたことは
+dotfiles-private の `docs/superpowers/plans/2026-11-13-lang-prefs-pack-dotfiles.md`）。判断は script がするので token を使わない。
+
+| 止めるもの | 止めないもの |
+| --- | --- |
+| `pip`・`pip3`・`python -m pip`・`python3 -m pip` の `install` で venv の印が無いもの。`sudo` 付き・`--user`・`--break-system-packages` はいつも。パスで呼ぶ interpreter はパスで決める（activate の後の `/usr/bin/python3 -m pip` も止める） | venv の印のある pip（venv の中のパスの interpreter（root に `pyvenv.cfg` がある・名前が venv や env・同じコマンドで作った venv）、素の名前なら同じコマンドの先の `source …/bin/activate`・`uv run`・`poetry run` などの後ろ・hook の env の `VIRTUAL_ENV`）、`-t`・`--target`、`--dry-run`、`--help` |
+| `uv pip install --system`（`--break-system-packages`・頭の `UV_SYSTEM_PYTHON=1`・`--python <venv でないパス>` も） | `--system` の無い `uv pip install` |
+| `npm install -g`（`npm i -g`・`--global`・`npm -g install` も）・`pnpm add -g`・`yarn global add`・`bun add -g` | `-g` の無い `npm install`・`pnpm add`、`pipx install`・`cargo install`・`uv tool install`・`go install` |
+| `apt install`・`apt-get install`・`brew install`（`sudo` 付きも。`sudo DEBIAN_FRONTEND=noninteractive apt-get install` のように `sudo` の後ろに代入を置いたものも） | `apt list` などの読むだけのもの、確かめるだけの形（`apt-get install -s`・`--simulate`、`brew install --dry-run`、`npm install -g --dry-run`） |
+| `terraform`・`tofu` の `apply`・`destroy`・`import`・`taint`・`untaint`・`force-unlock`・`refresh`、`state rm`・`mv`・`push`・`replace-provider`、`workspace delete`、`-migrate-state`・`-force-copy` 付きの `init` | `plan`・`validate`・`fmt`・flag の無い `init`・`output`・`show`・`state list`・`show`・`pull`・`graph`・`providers`・`test`・`workspace select`、`state rm`・`mv` の `-dry-run`、`-help` |
+| `terragrunt` の同じ操作（`run --all apply`・`run -- apply`・`stack run apply`・`run-all destroy` のように別の語の後ろに来る形も）と `apply-all`・`destroy-all`・`backend bootstrap`・`delete`・`migrate` | 包み（`make apply`・`mise run apply`・repo の script の `apply`）、`git apply`・`kubectl apply` |
+
+- コマンドの読み方は xref-guard と同じ lexer（写しが同じかは `nix/tests/hook-lexer-copy.test.sh` が確かめる）で、commit の
+  message・`echo`・heredoc の本文・引用符の中に書いただけでは止めない。包むコマンド（`env`・`sudo`・`timeout`・`nix develop -c`・
+  `mise exec --` など）とその後ろの代入・`bash -c`・`eval`・`cat <<EOF | bash`・`echo … | bash` の中も読む。64 KB（gawk・mawk の
+  無いマシンでは 16 KB）を超えるコマンドは中を読まず、行を `;`・`&`・`|`・`(`・`)` で分けた頭に止める形があれば止めて、
+  コマンドを短くするよう返す（awk で 1 回読むだけなので、区切りの多い長い 1 行でも 1 秒ほどで終わる）
+- 通す口は、ユーザーがこの会話で明示したときだけ付けるコマンドの頭の `PJP_ALLOW_INSTALL=1`（install）・`PJP_ALLOW_IAC=1`（IaC）。
+  片方を付けても、もう片方は通さない（止めたときに返す文にも「自分の判断では付けない」と書いてある）
+- IaC の分は host の option `dotfiles.claude.iacGuard.enable`（既定 `true`）で外せる。外すのは、agent が sandbox で自分で
+  プロジェクトを作って消すマシンだけ（止めると agent が進めない）。値は `~/.local/state/dotfiles/claude-iac-guard.json`
+  （`{"enable": <bool>}`）に落ち、hook が読む（無い・壊れているときは止める）。反映は `home-manager switch`。外しても install は止める
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Bash`）足す。cloud
+  （[後述](#claude-code-on-the-web-cloud-で使う)）にも張る（IaC の分は `--no-iac-guard` で外す）
+
+#### 作り始め・依存を足すコマンドで読む skill を知らせるフック
+
+`PreToolUse` フック（`nix/files/claude/hooks/lang-nudge.sh`）。project を作り始めるコマンドと依存を足すコマンドを打つときに、読む
+skill を Claude の文脈へ 1 文で差し込む（`additionalContext`）。止めない。言語・道具ごとの好みと tips の正本は claude-skills の pack
+`lang` の skill（一覧では名前だけ）と、依存を足す前に読む `pjp-dep-release-age` で、hook はその瞬間を知らせるだけ（設計は
+claude-skills の `docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md` の §3.6）。
+
+| コマンド | 差し込む文の要旨 |
+| --- | --- |
+| `cargo new`・`cargo init` / `uv init` / `go mod init` / `npm init`・`pnpm init`・`npm create`・`pnpm create` / `ansible-galaxy init`（`role init`・`collection init` も） | Rust / Python / Go / Node.js / Ansible の作業は、Skill tool で `pjp-rust` / `pjp-python` / `pjp-go` / `pjp-node` / `pjp-ansible` を名前を指して呼んでから進める |
+| `cargo add`・`uv add`・`pnpm add`・引数のある `npm install`（`npm i`・`npm add` も）・`go get`・`yarn add`・`bun add` | 依存を足す前に `pjp-dep-release-age` を読む |
+
+- 名指しする skill が無いマシン（claude-skills を取れない）と、user の `settings.json` の `skillOverrides` でその skill を `off`・
+  `user-invocable-only` にしたマシンでは、その skill の文を出さない（`name-only` は名前で呼べるので出す）
+- コマンドは pr-assignee-nudge と同じく近似で読む（heredoc の本文と引用符の中を外し、単純コマンドの頭の代入と包み（`nix develop -c`・
+  `mise exec --` も）を外した語を見る）。`bash -c '…'` の中と、オプションの値を前に置いたもの（`npm --prefix <dir> install …`）は
+  読み落とす。32 KB を超える入力は読まない（作り始め・依存を足すコマンドは短く、jq の正規表現が長いコマンドで遅くなるため）
+- PreToolUse の `additionalContext` は tool の結果と一緒に Claude に届くので、PostToolUse と同じ時に読まれ、コマンドの成否によらない
+- 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks.PreToolUse` に 1 件（`Bash`）足す。cloud にも張る
 
 #### footer から溢れるリンクを cc-pages の会話のトップページに残すフック
 
@@ -4289,7 +4341,7 @@ systemctl --user show pjp-heavy.slice -p CPUQuotaPerSecUSec -p MemoryMax   # 包
 | --- | --- |
 | `CLAUDE.md`・`settings.json`・`projects` | `~/.claude` への 1 段の symlink（共有） |
 | `skills/` | 実体の dir。`~/.claude/skills/` の中の **symlink と、実体でも `pjp-*` のもの**を同名のリンクで写す |
-| `agents/`・`commands/` | 実体の dir。`~/.claude/<種類>/` の中身を同名のリンクで写す（`synced` を除く） |
+| `agents/`・`commands/`・`rules/` | 実体の dir。`~/.claude/<種類>/` の中身を同名のリンクで写す（`synced` を除く。`rules/` の rule はリンクのリンクになるが、2 段の symlink の rule も `paths` 付きで読まれる） |
 | `plugins/` | 実体。`settings.json` の `enabledPlugins` のうち未導入のものを入れる（版は上げない） |
 | `.credentials.json`・`.claude.json` など | 実体。`/login` と起動のときに Claude Code が作る |
 
@@ -4377,7 +4429,7 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 ```
 
 `$(ghq root)/github.com/pollenjp/claude-skills` へ clone し、`skills/` `agents/`
-`commands/` の中身を 1 つずつ `~/.claude/<種類>/` へ symlink する。冪等なので、
+`commands/` `rules/` の中身を 1 つずつ `~/.claude/<種類>/` へ symlink する。冪等なので、
 skill を足したあとや別マシンの変更を取り込むときに何度でも実行してよい。
 「既存マシン更新」にも入っているので、`--update` するだけで別マシンの変更が入る。
 
@@ -4392,6 +4444,12 @@ skill を足したあとや別マシンの変更を取り込むときに何度�
 
 `nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、4 系統が兄弟として
 並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
+
+`rules/` は拡張子・置き場所（frontmatter の `paths`）で絞った rule で、合うファイルを Claude が読み書きしたときに読まれる
+（pack `lang` の rule は「その言語の skill を名前で呼ぶ」と言う）。`~/.claude/rules/` の中の symlink の rule も `paths` 付きで
+読まれることを Claude Code 2.1.322 で確かめた（手順と結果は dotfiles-private の
+`docs/superpowers/plans/2026-11-13-lang-prefs-pack-dotfiles.md` の「0. 確かめたこと」）。project の `.claude/rules/` の symlink は
+外部の import の扱いで、承認の後も `paths` の無いものだけが読まれるが、`~/.claude/rules/` には当たらない。
 
 #### 取得できないマシンでも止まらない
 
@@ -4656,11 +4714,12 @@ setup script から `nix/scripts/claude-cloud/bootstrap-claude-cloud.sh` を呼�
 
 | 組み立てるもの | 中身 |
 | --- | --- |
-| `~/.claude/skills/` など | dotfiles の `nix/files/claude/` と claude-skills の中身への symlink（手元と同じ単位）。mod を兼ねる skill・`claude-cloud/skip-skills.txt` の skill・（`--dev-tracker` でなければ）`pjp-dev-tracker` は張らない |
+| `~/.claude/skills/`・`rules/` など | dotfiles の `nix/files/claude/` と claude-skills の中身への symlink（手元と同じ単位）。mod を兼ねる skill・`claude-cloud/skip-skills.txt` の skill・（`--dev-tracker` でなければ）`pjp-dev-tracker` は張らない |
 | `~/.claude/CLAUDE.md` | 共通の `CLAUDE.md` の最初の `## ` の行より前を `claude-cloud/CLAUDE.cloud.md` に差し替えたもの（`--dev-tracker` なら「タスク管理」の節も足す） |
-| `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
+| `~/.claude/hooks/` と `settings.json` | xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard・install-iac-guard・lang-nudge を `bash <パス>` で登録する。SessionStart に自分を `--quiet` で登録し、session ごとに張り直す |
 | `settings.json` の `skillOverrides` | pack の skill を `name-only`、claude.ai から同期された skill を `user-invocable-only` にする（手元と同じ `nix/scripts/bootstrap-claude-skill-overrides.sh` を `--no-host-option` で流す。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `profile` は `--notion-profile` の値 |
+| `~/.local/state/dotfiles/claude-iac-guard.json` | 既定は `{"enable":true}`（install-iac-guard が IaC の操作も止める）。`--no-iac-guard` なら `{"enable":false}` |
 
 git の設定と `settings.json` の `env` には触らない（cloud の git の proxy と commit の署名を壊すため）。plugin は claude.ai で
 有効にすると同期される。
