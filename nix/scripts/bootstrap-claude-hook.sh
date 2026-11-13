@@ -48,6 +48,12 @@
 #                gist やペースト共有のサービスへ上げるコマンドと、gist を作る・書き換える MCP の tool を、
 #                いつも止める (ADR 047)。MCP の tool 名は mcp__<server>__<tool> なので、gist を名前に含む
 #                tool だけで hook が走るよう matcher を絞る (大文字の Gist も拾う)
+#   PreToolUse          Bash                     install-iac-guard.sh
+#                venv・project の外 (system・user の環境) へ入れる install と、terraform・tofu・terragrunt で実物
+#                (資源か state) を変える操作を止め、代わりの手を返す (IaC の分は dotfiles.claude.iacGuard.enable で外せる)
+#   PreToolUse          Bash                     lang-nudge.sh
+#                project を作り始めるコマンドと依存を足すコマンドで、読む skill (pack lang の pjp-<言語>・
+#                pjp-dep-release-age) を 1 文で知らせる (止めない)
 #   Stop         (matcher なし・async)             footer-links-archive.sh
 #                会話に出たリンク (footer のバッジと同じ規則で拾う PR・チケット・cc-page) を、cc-pages の会話の
 #                トップページに全部残す (footer は 5 個まで)。Stop は matcher を使わないので付けない。turn の終わりを
@@ -70,13 +76,15 @@ assignee_nudge="${hooks_dir}/pr-assignee-nudge.sh"
 op_guard="${hooks_dir}/op-reason-guard.sh"
 gist_guard="${hooks_dir}/gist-guard.sh"
 links_archive="${hooks_dir}/footer-links-archive.sh"
+iac_guard="${hooks_dir}/install-iac-guard.sh"
+lang_nudge="${hooks_dir}/lang-nudge.sh"
 
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}" "${assignee_nudge}" "${op_guard}" "${gist_guard}" "${links_archive}"; do
+for hook in "${guard}" "${nudge}" "${run_through}" "${ssh_notice}" "${xref_guard}" "${docs_guard}" "${assignee_nudge}" "${op_guard}" "${gist_guard}" "${links_archive}" "${iac_guard}" "${lang_nudge}"; do
   if [[ ! -x ${hook} ]]; then
     echo "フックが配置されていません: ${hook}" >&2
     echo "先に home-manager switch を実行してください。" >&2
@@ -139,6 +147,8 @@ register PostToolUseFailure "Bash" "" "${op_guard}"
 register PreToolUse "Bash" "" "${gist_guard}"
 register PreToolUse "mcp__.*[Gg]ist.*" "" "${gist_guard}"
 register Stop "" "" "${links_archive}" async
+register PreToolUse "Bash" "" "${iac_guard}"
+register PreToolUse "Bash" "" "${lang_nudge}"
 
 if [[ ${changed} == 1 ]]; then
   echo
