@@ -15,7 +15,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
 | `powertoys/fancyzones/custom-layouts.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\custom-layouts.json` の中のレイアウト | FancyZones のエディターの「カスタム」に登録したレイアウト。manifest では配らず、`bootstrap-windows-fancyzones.sh` が uuid ごとに足す (PC にだけあるレイアウトには触らない。[後述](#fancyzones)) |
-| `powertoys/fancyzones/layout-rules.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\applied-layouts.json` の、テンプレートのままの組 | ディスプレイの解像度から、あてるレイアウトを決める決まり。manifest では配らず、`bootstrap-windows-fancyzones.sh` がテンプレートのままのディスプレイの組を決まりのレイアウトで埋める (手であてたものは残す。[後述](#ディスプレイへのあて方)) |
+| `powertoys/fancyzones/layout-rules.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\applied-layouts.json` の組と、`default-layouts.json` の横向きの既定 | ディスプレイの解像度から、あてるレイアウトを決める決まり。manifest では配らず、`bootstrap-windows-fancyzones.sh` が横向きの既定を決まりの `default` にそろえ、テンプレートのままのディスプレイの組を決まりのレイアウトで埋め、組の無い仮想デスクトップに組を作る (手であてたものは残す。[後述](#ディスプレイへのあて方)) |
 | `powertoys/fancyzones/managed.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\FancyZones\settings.json` の一部のキー | FancyZones の設定のうち、dotfiles が持つキーだけ (今は「Windows スナップのオーバーライド」)。manifest では配らず、`bootstrap-windows-fancyzones.sh` が書く ([後述](#fancyzones)) |
 | `powertoys/Install-PowerToys.ps1` | `%USERPROFILE%\.config\powershell\Install-PowerToys.ps1` | Windows の PowerToys が入っていなければ winget で入れる。PowerShell の `Install-PowerToys` から呼ぶ ([後述](#powertoys-を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -1012,19 +1012,20 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 `powertoys/fancyzones/` は PowerToys の FancyZones の設定で、`windowsFiles` が有効なマシン全部に同じものを配る。PC ごとの切り替えは
 無い ([ADR 042](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/042_win_powertoys_fancyzones_20261106T100504JST/README.md)、
 カスタムレイアウトの足し方は [ADR 046](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/046_win_fancyzones_layouts_by_uuid_20261109T200910JST/README.md)、
-ディスプレイへのあて方は [ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md))。
+ディスプレイへのあて方は [ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md)、
+横向きの既定と、全部の仮想デスクトップへの組の作り方は [ADR 054](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/054_win_fancyzones_renumber_20261113T061644JST/README.md))。
 どれも manifest では配らず、`nix/scripts/bootstrap-windows-fancyzones.sh` (order 92) が `setup --update` のたびに書く。
 
 | ファイル | 中身 | 書き方 |
 | --- | --- | --- |
 | `custom-layouts.json` | エディターの「カスタム」に登録したレイアウト (今は `4k-43inch` と `1080p`)。uuid・名前・座標だけ | PC の `custom-layouts.json` へ、レイアウトを uuid ごとに足す。PC にだけあるレイアウトには触らない ([カスタムレイアウト](#カスタムレイアウト)) |
-| `layout-rules.json` | ディスプレイの解像度から、あてるレイアウトを決める決まり (今は 3840x2160 に `4k-43inch`、それ以外に `1080p`)。レイアウトの名前で書く | PC の `applied-layouts.json` のうち、テンプレートのままの組を決まりのレイアウトで埋める。手であてたものは残す ([ディスプレイへのあて方](#ディスプレイへのあて方)) |
+| `layout-rules.json` | ディスプレイの解像度から、あてるレイアウトを決める決まり (今は 3840x2160 に `4k-43inch`、それ以外に `1080p`)。レイアウトの名前で書く | PC の `default-layouts.json` の横向きの既定を `default` にそろえ、`applied-layouts.json` のうちテンプレートのままの組を決まりのレイアウトで埋め、組の無い仮想デスクトップに組を作る。手であてたものは残す ([ディスプレイへのあて方](#ディスプレイへのあて方)) |
 | `managed.json` | `settings.json` のうち dotfiles が持つキーだけを、同じ形で書いたもの。今は「Windows スナップのオーバーライド」(`fancyzones_overrideSnapHotkeys`) を `true` | そのキーだけを `settings.json` へ書く ([持つキー](#持つキー)) |
 
 | 打つもの | すること |
 | --- | --- |
-| `nix/scripts/bootstrap-windows-fancyzones.sh` | 持つキーの値が違えば書き、PC に無いレイアウトを足し、テンプレートのままのディスプレイの組にレイアウトをあてる (`setup --update` でも毎回走る) |
-| `nix/scripts/bootstrap-windows-fancyzones.sh --dry-run` | 判定だけ見る (ディスプレイの解像度は `powershell.exe` で聞く) |
+| `nix/scripts/bootstrap-windows-fancyzones.sh` | 持つキーの値が違えば書き、PC に無いレイアウトを足し、横向きの既定をそろえ、埋める組にレイアウトをあて、組の無い仮想デスクトップに組を作る (`setup --update` でも毎回走る) |
+| `nix/scripts/bootstrap-windows-fancyzones.sh --dry-run` | 判定だけ見る (ディスプレイの解像度と仮想デスクトップの一覧は `powershell.exe` で聞く) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --force` | PC のエディターで直した・消したレイアウトも repo の中身にし、手であてたカスタムレイアウト・blank の組も決まりのレイアウトにする (書き換える前のファイルは退避する。先に `--dry-run --force` で見られる) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --import <名前>` | PC のレイアウトを名前で選び、repo の `custom-layouts.json` へ写す (繰り返せる。commit は自分で) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --check` | `managed.json`・`custom-layouts.json`・`layout-rules.json` の検証だけ (CI の lint でも走る) |
@@ -1034,7 +1035,8 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 | ファイル | わけ |
 | --- | --- |
 | `applied-layouts.json` | どのモニター × 仮想デスクトップの組にどのレイアウトをあてたか。モニターのシリアルが入り、PC ごとに違う (この repo は public)。持つのは、解像度であてるレイアウトを決める決まり (`layout-rules.json`) だけ |
-| `layout-hotkeys.json`・`layout-templates.json`・`default-layouts.json` | 今は空か既定のまま |
+| `default-layouts.json` | 組の無い画面にあてる横向き・縦向きの既定。横向きの既定だけを、setup が `layout-rules.json` の `default` にそろえる ([ディスプレイへのあて方](#ディスプレイへのあて方))。縦向きは FancyZones の既定のまま |
+| `layout-hotkeys.json`・`layout-templates.json` | 今は空か既定のまま |
 | `settings.json` のほかのキー | 持ちたくなったら `managed.json` に足す ([キーを足す](#fancyzones-のキーを足す)) |
 
 #### カスタムレイアウト
@@ -1086,9 +1088,15 @@ repo の `custom-layouts.json` のレイアウトを、PC の `custom-layouts.js
 
 #### ディスプレイへのあて方
 
-FancyZones は、レイアウトを「モニター × 仮想デスクトップ」の組ごとにあてる (PC の `applied-layouts.json`)。新しいモニターや仮想デスクトップの
-組はテンプレート (priority-grid など) で始まるので、エディターを開いてディスプレイの数だけあてて回らずに済むよう、`bootstrap-windows-fancyzones.sh` が
-テンプレートのままの組を、解像度の決まりのレイアウトで埋める ([ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md))。
+FancyZones は、レイアウトを「モニター × 仮想デスクトップ」の組ごとにあてる (PC の `applied-layouts.json`)。組の無い画面 (新しいモニター・
+開いたことの無い仮想デスクトップ・番号が振り直された画面) には、横向き・縦向きの既定 (`default-layouts.json`。FancyZones の既定は priority-grid と
+rows) をあてる。エディターを開いてディスプレイの数だけあてて回らずに済むよう、`bootstrap-windows-fancyzones.sh` が次の 3 つをする
+([ADR 053](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/053_win_fancyzones_layout_by_resolution_20261110T213751JST/README.md)・
+[ADR 054](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/054_win_fancyzones_renumber_20261113T061644JST/README.md))。
+
+1. 横向きの既定を、決まりの `default` のレイアウト (今は `1080p`) にそろえる
+2. テンプレートのままの組 (と、横向きの既定のままで決まりが別のレイアウトの組) を、解像度の決まりのレイアウトで埋める
+3. つながっている横向きのディスプレイの組を、Windows にある全部の仮想デスクトップへ作る
 
 決まりは `layout-rules.json` に、レイアウトの名前で書く。
 
@@ -1104,8 +1112,8 @@ FancyZones は、レイアウトを「モニター × 仮想デスクトップ�
 - `resolution` は今の表示の解像度 (`幅x高さ`。物理の値で、拡大率に左右されない)。ちょうど一致したら、その `layout`。どれにも当たらなければ `default`
 - `layout`・`default` は `custom-layouts.json` のレイアウトの名前 (canvas のものだけ。あてる値をエディターで確かめたのが canvas だけのため)。
   `--check` が確かめる (CI の lint でも走る)
-- 解像度は `powershell.exe` で Windows に聞く (FancyZones と同じ手順でディスプレイを並べる。0.6 秒ほどかかる)。聞くのは、埋める候補の組
-  (テンプレートのままの組と、前に setup があてたままの組) があるときだけ
+- 解像度と仮想デスクトップの一覧は `powershell.exe` で Windows に聞く (FancyZones と同じ手順で、1 回の呼び出しで両方を聞く。0.6〜0.8 秒ほど
+  かかる)。`applied-layouts.json` に組があれば毎回聞く (組の無い仮想デスクトップと、ディスプレイの番号の振り直しは、Windows に聞かないと分からない)
 
 | 組 (モニター × 仮想デスクトップ) | 既定 | `--force` |
 | --- | --- | --- |
@@ -1113,7 +1121,9 @@ FancyZones は、レイアウトを「モニター × 仮想デスクトップ�
 | 決まりのレイアウトがあたっている | 何もしない | 何もしない |
 | テンプレートのまま (blank を除く。エディターで選んだものも) | 決まりのレイアウトにする | 同じ |
 | 前に setup があてたままで、決まりか解像度が変わった | 新しい決まりのレイアウトにする | 同じ |
+| 横向きの既定 (`default` のレイアウト) があたり、setup があてた記録と違う (4K の画面の新しい組が `1080p` で始まったとき) | 決まりのレイアウトにする | 同じ |
 | 手であてたカスタムレイアウト (PC にだけあるものも)・blank | 残し、まとめて 1 行知らせる (警告のまとめには載せない) | 決まりのレイアウトにする |
+| 組が無い (つながっている横向きのディスプレイで、その仮想デスクトップに今の番号の組が無い) | 組を作り、決まりのレイアウトにする (そのデスクトップの番号の違う古い組が手であてたものなら、そのレイアウトを写す) | 組を作り、決まりのレイアウトにする |
 | 決まりのレイアウトが PC の `custom-layouts.json` に無い (PC で消した) | 飛ばして ⚠ で知らせる | `--force` が足し直してから、あてる |
 
 - **手であてたものは、既定では残す。** blank (レイアウトなし) も、そのディスプレイではゾーンを使わないと選んだ印として残す。上書きするなら:
@@ -1123,16 +1133,44 @@ FancyZones は、レイアウトを「モニター × 仮想デスクトップ�
   nix/scripts/bootstrap-windows-fancyzones.sh --force             # 上書きする (PC で直した・消したカスタムレイアウトも repo の中身に戻る)
   ```
 
-- setup があてた組は `~/.local/state/dotfiles/windows-fancyzones.assigned.json` に覚える (キーはモニターの ID と仮想デスクトップで、シリアルは
-  入れない)。後で決まりを足したとき・ディスプレイの解像度を変えたときに、setup があてたままの組は新しい決まりへ移り、手であてた組は残る
-- 組は新しく作らない。まだ開いていない仮想デスクトップは、FancyZones が開いたときに前のデスクトップの組から写す。テンプレートのままの組に
-  気づいたら、`~/dotfiles/setup --steps bootstrap-windows-fancyzones` で埋まる
+- setup があてた組・作った組は `~/.local/state/dotfiles/windows-fancyzones.assigned.json` に覚える (キーはモニターの ID と仮想デスクトップで、
+  シリアルは入れない)。後で決まりを足したとき・ディスプレイの解像度を変えたときに、setup があてたままの組は新しい決まりへ移り、手であてた組は残る
 - シリアルは見ない・読まない・出さない (FancyZones は同じ型のモニターに同じシリアルを入れるので、見分けにも使えない)。シリアルだけが違う
   古い組も、同じレイアウトにする
-- 変えた組は 1 組 1 行で出す (モニター ID・解像度・仮想デスクトップの GUID の頭 8 桁・前 → 後)。書き方 (隣に書いて `mv` → `touch`・退避・
-  PowerToys の形) はカスタムレイアウトと同じで、FancyZones はその場で読み直す
+- 変えた組・作った組は 1 組 1 行で出す (モニター ID・解像度・仮想デスクトップの GUID の頭 8 桁・前 → 後。作った組の前は「組なし」)。書き方
+  (隣に書いて `mv` → `touch`・退避・PowerToys の形) はカスタムレイアウトと同じで、FancyZones はその場で読み直す
 - `powershell.exe` が無い・失敗する・60 秒たっても終わらない・`applied-layouts.json` を読めない・記録が壊れている・`layout-rules.json` に
   誤りがあるときは、書かずに ⚠ で知らせて先へ進む (exit 0)
+
+**番号の振り直しと横向きの既定。** Windows は、ディスプレイの番号 (`\\.\DISPLAY1` の 1) を振り直すことがある。FancyZones の本体は番号が
+変わっても、同じポート (instance) の組をそのまま使う。エディターは組を番号の一致で引くので、振り直しの後に
+エディターを開くと、古い組を引けない画面に横向きの既定をあて、閉じるときにその組を先頭に書く。本体は重なった組の先頭を使うので、そこでゾーンが
+変わる。
+
+- 横向きの既定を `default` (`1080p`) にそろえておくので、そのときも `1080p` で始まる (1920x1080 の画面はそのまま正しい)。4K の画面は次の
+  setup まで `1080p` のままで、次の setup が `4k-43inch` にする
+- 4K の画面にエディターで手で `1080p` をあてると、横向きの既定と見分けられず、次の setup で `4k-43inch` に戻る (残したいなら `layout-rules.json`
+  を変える)
+- 横向きの既定に書く値は、エディターがカスタムレイアウトを既定にしたときと同じ (`zone-count`・`sensitivity-radius` は 0。FancyZones はゾーンを
+  計算するときに `custom-layouts.json` から引き直す)。エディターは閉じるたびに `default-layouts.json` を書き直すので、値をそろえて書き戻しを
+  繰り返さない。そろっているかは `type` と `uuid` で見る。ファイルが無ければ横向きの項目だけで作る。縦向きの既定には触らない
+- 決まりの `default` のレイアウトが PC に無い (PC で消した) ときは、横向きの既定を書かずに ⚠ で知らせる (`--force` で足し直すと、その回に書く)。
+  横向きの既定がすでにそのレイアウトでも、PC に無ければ「揃っています」とは言わず、既定が使えないと ⚠ で知らせる
+
+**全部の仮想デスクトップに組を作る。** 振り直しの後にエディターを開いても、今の番号の組があればエディターはそれを引く。
+
+- つながっている横向きのディスプレイごとに、同じ画面 (モニター ID と instance が同じ) の組の device を写し、仮想デスクトップだけを替えて、
+  組の無いデスクトップへ組を作る。開いたことの無いデスクトップにも作る。シリアルは中を見ずにそのまま写す (どれが今のシリアルかを読まずに
+  決められないので、シリアルの違う組はシリアルごとに作る)
+- 今の番号の組がどこにも無い (番号が振り直された直後) ときは、番号の違う組から写し、番号を今のものにする。そのデスクトップにある古い組が、
+  手であてたカスタムレイアウト・blank なら、作る組もそのレイアウトにし、記録しない (手であてたものとして残る。`--force` なら決まりのレイアウトにする)。
+  エディターは今の番号の組を引くので、決まりのレイアウトで作ると、次にエディターを開いたときに手であてたものが消えるため
+- 作った組は末尾に足す。先頭に置くと、本体が同じとみなす古い組より先に使い、手であてたレイアウトを隠しうるため。本体が `applied-layouts.json` を
+  書き直すと (組の無い画面に既定をあてたときなど)、同じとみなす古い組の後ろにある組は捨てられるが、次の setup がまた作る (そのたびに書き換え、
+  退避が 1 つ増える。退避は新しい方から 10 回分なので、前の退避を残したいときは別に写しておく)
+- 同じ画面の組がどこにも無いディスプレイ (FancyZones がまだその画面の組を書いていない) には作らず、1 行で知らせる (警告のまとめには載せない)。
+  縦向き・つながっていないディスプレイには作らない
+- 仮想デスクトップを足したら、次の setup (か `~/dotfiles/setup --steps bootstrap-windows-fancyzones`) でそのデスクトップの組もそろう
 
 #### 持つキー
 

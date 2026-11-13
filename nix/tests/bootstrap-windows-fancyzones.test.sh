@@ -69,14 +69,43 @@
 #     キーは落とす。シリアルは出力にも記録にも出さない。シリアルだけが違う組の同じ行は 1 行にまとめる
 #   - 突き合わせは、monitor が同じで monitor-instance が同じディスプレイを先に、無ければ monitor-number が同じディスプレイ。monitor が
 #     違えば合わせない。解像度の決まりはちょうど一致したものだけ。合うディスプレイが無い組・縦向きのディスプレイの組・壊れた組には触らない
-#   - 次の回は、候補 (テンプレート・記録と同じ組) があれば powershell.exe を呼ぶが、変える組が無ければ書かない。候補が無ければ呼ばない
-#   - ③ が前にあてたまま (記録と同じ) の組は、決まりや解像度が変わったら新しい目標へ移す。手であてたカスタムレイアウト・blank・知らない
-#     type の組は残し、1 行で知らせて --force と --dry-run --force を案内する (警告のまとめには載せない)。--force はそれらも上書きする
+#   - 組があれば、埋める組が無くても powershell.exe を呼ぶ (組の無い仮想デスクトップは Windows に聞かないと分からない)。変える組・作る組が
+#     無ければ書かず、目標と同じ組を記録して、揃っていると出す
+#   - ③ が前にあてたまま (記録と同じ) の組は、決まりや解像度が変わったら新しい目標へ移す。横向きの既定 (決まりの default のレイアウト) が
+#     あたり記録と違う組も、目標が別なら目標にする (4K に手で 1080p をあてた組も見分けずに埋める)。手であてたほかのカスタムレイアウト・
+#     blank・知らない type の組は残し、1 行で知らせて --force と --dry-run --force を案内する (警告のまとめには載せない)。--force はそれらも
+#     上書きする
 #   - 目標のレイアウトが PC に無ければ、その組は飛ばして警告する。--dry-run --force は ② が足し直すものをあると見る。--force は ② が
 #     足し直してからあてる。② の警告の --force の案内は、③ にも効くことと --dry-run --force を添える
 #   - --dry-run は powershell.exe を呼び、変える組を出すが、何も書かない (退避も記録もしない)。--import は ③ を走らせない
 #   - powershell.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で ASCII の UTF-16LE を渡し、stdin を渡さない。
-#     無い・失敗する・時間切れ・決めた形の JSON を返さないときは、書かずに警告して exit 0 (まとめにも残す)
+#     同じ 1 回の呼び出しで仮想デスクトップの一覧 (VirtualDesktopIDs) も読む。無い・失敗する・時間切れ・決めた形の JSON (displays と desktops の
+#     配列) を返さないときは、書かずに警告して exit 0 (まとめにも残す)
+#
+# 全部の仮想デスクトップに組を作る (③ の中。C と書く):
+#
+#   - つながっている横向きのディスプレイごとに、同じ画面 (monitor と monitor-instance が同じ) の組の device を写し、virtual-desktop だけを
+#     替えて、組の無い仮想デスクトップへ組を作る。シリアルもそのまま写し、キーの並びも変えない。決まりのレイアウトをあてて末尾に足し、
+#     シリアルなしのキーで記録する。作る組は 1 組 1 行「組なし → …」で出し、シリアルを出さない。次の回は作らない
+#   - シリアルだけが違う組はシリアルごとに作り、同じ行は 1 行にまとめる。今の番号の組がどこにも無く、instance が同じで番号の違う組だけが
+#     あれば (番号が振り直された直後)、その device を写して monitor-number を今の番号にする
+#   - 振り直しの直後で、そのデスクトップの古い組が手であてたカスタムレイアウト・blank なら、作る組はそのレイアウトを写して記録しない
+#     (--force なら決まりのレイアウトで作って記録する)
+#   - 同じ画面の組がどこにも無いディスプレイ (番号だけ同じ別の instance の組があっても) には作らず、1 行で知らせる (まとめには載せない)。
+#     縦向き・つながっていない画面には作らない。目標のレイアウトが PC に無ければ作らずに警告に数え、--force は ② が足し直してから作る
+#   - --dry-run は作る組を出すが、何も書かない。仮想デスクトップは大文字で比べて書き、形の合わないもの・null の GUID・重なりは落とす
+#
+# 横向きの既定 (default-layouts.json。② と ③ の間の段。A と書く):
+#
+#   - 横向きの既定を、決まりの default のレイアウトにする。書く値はエディターがカスタムレイアウトを既定にしたときと同じ (zone-count と
+#     sensitivity-radius は 0)。縦向き・項目の並び・キーの並びは変えず、PowerToys の形で書いて mv の後に touch し、書き換える前を退避する
+#     (同じ回に ③ も書けば、同じ退避のディレクトリに入る)。次の回は揃っていると出し、書かない
+#   - ファイルが無ければ横向きの項目だけで作り、横向きの項目が無ければ末尾に足す。別のカスタムレイアウトなら戻す (前の名前は PC の名前)。
+#     type と uuid が同じなら、ほかの値が違っても揃っているとみなす
+#   - 目標のレイアウトが PC に無ければ書かずに警告する (--dry-run --force は ② が足し直すものをあると見て、--force は足し直してから書く)。
+#     横向きの既定が揃っていても、そのレイアウトが PC に無ければ揃っていると言わずに警告する。作った回は「退避しました」と言わない。
+#     読めない (5 回読む)・書けない・退避できないときは警告し、touch できないときは書いたうえで警告する。--dry-run は書かない
+#   - 決まりのファイルが無ければ何もせず、何も出さない
 #   - applied-layouts.json を読めない (5 回読む。読めるようになれば進む)・記録が壊れている・決まりのファイルに誤りがある・書けない・
 #     退避できないときは、書かずに警告して exit 0。touch できないときは、書いたうえで警告する。ファイルが無い・組が無ければ何もしない
 #   - --check は決まりのファイルの誤り (無い・形・知らないキー・resolution の形と重なり・知らない名前・canvas でないレイアウト・
@@ -92,7 +121,8 @@
 #
 # 偽の powershell.exe (<HOME>/bin/powershell.exe。段 ③ のケースだけに置く) は、-EncodedCommand の中身を UTF-16LE として読み戻して
 # <HOME>/ps-code に書き (ASCII の UTF-16LE でなければ <HOME>/ps-bad-encoding を作る)、最後の引数を除いた引数を <HOME>/ps-args に、
-# 読めた stdin を <HOME>/ps-stdin に残す。<HOME>/ps-displays の中身 (Windows PowerShell 5.1 の ConvertTo-Json の形) を CRLF で返す。
+# 読めた stdin を <HOME>/ps-stdin に残す。<HOME>/ps-displays の中身 (Windows PowerShell 5.1 の ConvertTo-Json の形の displays と
+# desktops。put_displays・put_displays_vd が置く) を CRLF で返す。
 # FAKE_PS_RC があれば、FAKE_PS_ERR を stderr に出してその終了コードで終わる。本物の Windows には触らない。
 
 set -u -o pipefail
@@ -1537,11 +1567,18 @@ disp() {
   jq -n -c --arg n "$1" --arg m "$2" --arg i "$3" --argjson w "$4" --argjson hh "$5" \
     '{device: "\\\\.\\DISPLAY\($n)", id: "\\\\?\\DISPLAY#\($m)#\($i)#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}", width: $w, height: $hh}'
 }
-# 偽の powershell.exe が返すディスプレイを置く (Windows PowerShell 5.1 の ConvertTo-Json -Compress のように & を & で書く)
+# 偽の powershell.exe が返すディスプレイと仮想デスクトップを置く (Windows PowerShell 5.1 の ConvertTo-Json -Compress のように
+# & を & で書く)。$1 HOME、$2 仮想デスクトップの GUID の JSON の配列、残り: ディスプレイ
+put_displays_vd() {
+  local h=$1 vds=$2
+  shift 2
+  jq -n -c --argjson vds "${vds}" '{displays: $ARGS.positional, desktops: $vds}' --jsonargs "$@" | sed 's/&/\\u0026/g' >"${h}/ps-displays"
+}
+# 仮想デスクトップの一覧が空 (Windows に 1 つ・レジストリの値が無い) の返り。組は作らない
 put_displays() {
   local h=$1
   shift
-  jq -n -c '{displays: $ARGS.positional}' --jsonargs "$@" | sed 's/&/\\u0026/g' >"${h}/ps-displays"
+  put_displays_vd "${h}" '[]' "$@"
 }
 # 偽の powershell.exe を $1 (HOME) の bin に置く (上の「偽の powershell.exe」)
 make_fake_ps() {
@@ -1598,7 +1635,28 @@ no_serial() {
   ! grep -qF -e "${serial_1}" -e "${serial_2}" "$1/out" "$1/err" \
     && ! grep -qsF -e "${serial_1}" -e "${serial_2}" "$(assigned_json "$1")" "$1/warnings"
 }
-# ③ のケースの HOME: settings.json は揃い、PC のカスタムレイアウトは repo と同じ (② の記録もある) ので、① ② は何も書かない
+# default-layouts.json (横向き・縦向きの既定)。dl_json は PC のファイルのパス、dl_entry は 1 項目 ($1 monitor-configuration、$2 layout)、
+# pt_defaults は PowerToys の形の中身 (引数は項目)、put_dl は PC に置く
+dl_json() { echo "$(fz_dir "$1")/default-layouts.json"; }
+dl_entry() { jq -n -c --arg c "$1" --argjson l "$2" '{"monitor-configuration": $c, layout: $l}'; }
+pt_defaults() {
+  local body
+  body=$(jq -n --indent 2 '{"default-layouts": $ARGS.positional}' --jsonargs "$@")
+  printf '%s' "${body//$'\n'/$'\r\n'}"
+}
+put_dl() {
+  mkdir -p "$(fz_dir "$1")"
+  printf '%s' "$2" >"$(dl_json "$1")"
+}
+# PC の既定の形 (pjp-raiden の元の値): 縦向きは rows、横向きは priority-grid
+dl_vertical=$(dl_entry vertical '{"uuid":"","type":"rows","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
+dl_horizontal_pg=$(dl_entry horizontal '{"uuid":"","type":"priority-grid","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
+# エディターがカスタムレイアウト (1080p) を横向きの既定にしたときに書く値 (zone-count と sensitivity-radius は 0)
+dl_want_layout=$(jq -n -c --arg u "$(jq -r .uuid <<<"${lay_b}")" '{uuid: $u, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0}')
+dl_horizontal_want=$(dl_entry horizontal "${dl_want_layout}")
+
+# ③ のケースの HOME: settings.json は揃い、PC のカスタムレイアウトは repo と同じ (② の記録もある)、横向きの既定も揃っているので、
+# ① ② と横向きの既定の段は何も書かない
 fz3_home() {
   local h
   h=$(new_home "$1" "${state_on}")
@@ -1607,6 +1665,7 @@ fz3_home() {
   put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
   put_record "${h}" "${lay_a}" "${lay_b}"
   put_rules "${h}" "${rules_default}"
+  put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_want}")"
   make_fake_ps "${h}"
   echo "${h}"
 }
@@ -1661,8 +1720,9 @@ fi
 # shellcheck disable=SC2016 # PowerShell の変数の名前を文字のまま探す
 if ps_called "${h}" && [[ $(cat "${h}/ps-args") == '-NoProfile -NonInteractive -OutputFormat Text -EncodedCommand' ]] \
   && [[ ! -e ${h}/ps-bad-encoding && ! -e ${h}/ps-stdin ]] && grep -qF 'EnumDisplayDevicesW' "${h}/ps-code" \
-  && grep -qF 'EnumDisplaySettingsW' "${h}/ps-code" && grep -qF '$ProgressPreference' "${h}/ps-code"; then
-  ok "あて方: powershell.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で ASCII の UTF-16LE を渡し、stdin を渡さない"
+  && grep -qF 'EnumDisplaySettingsW' "${h}/ps-code" && grep -qF '$ProgressPreference' "${h}/ps-code" \
+  && grep -qF 'Explorer\VirtualDesktops' "${h}/ps-code" && grep -qF 'VirtualDesktopIDs' "${h}/ps-code"; then
+  ok "あて方: powershell.exe には -NoProfile -NonInteractive -OutputFormat Text -EncodedCommand で ASCII の UTF-16LE を渡し、stdin を渡さない (仮想デスクトップの一覧も同じ 1 回で読む)"
 else
   ng "powershell.exe の呼び方" "args=$(cat "${h}/ps-args" 2>/dev/null) bad=$([[ -e ${h}/ps-bad-encoding ]] && echo yes) stdin=$(cat "${h}/ps-stdin" 2>/dev/null)"
 fi
@@ -1681,7 +1741,8 @@ else
   ng "あて方の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
 fi
 
-# 62. 候補が無い (手であてたカスタムレイアウト・blank・知らない type だけで、記録も無い): powershell.exe を呼ばず、書かない。
+# 62. 埋める組が無い (目標と同じ組と、手であてたカスタムレイアウト・blank・知らない type だけで、記録も無い): powershell.exe は呼ぶ
+#     (組の無い仮想デスクトップがあるかは Windows に聞かないと分からない) が、applied-layouts.json は書かない。目標と同じ組を記録し、
 #     残した組を 1 行で知らせ、--force と --dry-run --force を案内する (警告のまとめには載せない)
 h=$(fz3_home t62)
 put_apl "${h}" "$(pt_applied \
@@ -1692,20 +1753,24 @@ put_apl "${h}" "$(pt_applied \
 put_displays "${h}" "${d_4k}" "${d_ivm48}" "${d_ivm55}" "${d_aus}"
 before_apl=$(cat "$(apl_json "${h}")")
 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
-if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(assigned_json "${h}") ]] && ! ps_called "${h}" && file_is "$(apl_json "${h}")" "${before_apl}" \
-  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (4 組) は残しました' && seen "${h}" -F 'bootstrap-windows-fancyzones.sh --force' \
+if [[ $(rc "${h}") == 0 && $(fs_calls "${h}") == "mv $(assigned_json "${h}")," ]] && ps_called "${h}" && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}")" ]] \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 1 組)。' \
+  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (3 組) は残しました' && seen "${h}" -F 'bootstrap-windows-fancyzones.sh --force' \
   && seen "${h}" -F -- '先に --dry-run --force で何が変わるかを見られます' && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
-  ok "あて方: 候補が無ければ powershell.exe を呼ばずに書かず、残した組を 1 行で知らせる (まとめには載せない)"
+  ok "あて方: 埋める組が無くても powershell.exe は呼び、applied-layouts.json は書かず、残した組を 1 行で知らせる (まとめには載せない)"
 else
-  ng "あて方の候補が無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") ps=$(ps_called "${h}" && echo called) $(outerr "${h}")"
+  ng "あて方の埋める組が無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") ps=$(ps_called "${h}" && echo called) asg=$(asg_of "${h}") $(outerr "${h}")"
 fi
 
 # 63. 決まりや解像度が変わった: ③ が前にあてたまま (記録と今が同じ) の組は新しい目標へ移す。手であてた組 (記録が無い) は残す。
-#     applied-layouts.json から消えた組のキーは記録から落とす
+#     applied-layouts.json から消えた組のキーは記録から落とす。手であてたのは横向きの既定 (1080p) でないレイアウトにする
+#     (4K に手で 1080p をあてた組は、横向きの既定と見分けられずに埋める。79)
 h=$(fz3_home t63)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
 put_apl "${h}" "$(pt_applied \
   "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_b}")" \
-  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_b}")")"
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_p1}")")"
 put_assigned "${h}" "${k_4k_a}" "${uuid_b}" "GONE0001|5&61cfcb&0&UID9000|9|${vd_a}" "${uuid_b}"
 put_displays "${h}" "${d_4k}"
 before_apl=$(cat "$(apl_json "${h}")")
@@ -1859,7 +1924,7 @@ fi
 
 # 71. powershell.exe が無い・失敗する・時間切れ・決めた形の JSON を返さない: 書かずに警告し (まとめにも残す)、exit 0。
 #     powershell.exe のエラーは CR を落として出す
-for t in missing fail timeout badjson notobject; do
+for t in missing fail timeout badjson notobject nodesktops; do
   h=$(fz3_home "t71-${t}")
   put_apl "${h}" "$(pt_applied "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}")")"
   put_displays "${h}" "${d_aus}"
@@ -1877,6 +1942,11 @@ for t in missing fail timeout badjson notobject; do
       ;;
     notobject)
       printf '[1]' >"${h}/ps-displays"
+      msg='決めた形の JSON ではありません'
+      ;;
+    nodesktops)
+      # ディスプレイはあるが、仮想デスクトップの一覧が無い (powershell.exe に渡すコードと食い違っている)
+      jq -n -c --argjson d "${d_aus}" '{displays: [$d]}' >"${h}/ps-displays"
       msg='決めた形の JSON ではありません'
       ;;
   esac
@@ -2058,6 +2128,483 @@ if [[ $(rc "${h}") == 0 && ! -e $(assigned_json "${h}") ]] && ! ps_called "${h}"
   ok "あて方: --import は ③ を走らせない"
 else
   ng "あて方と --import" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 79. 横向きの既定 (決まりの default のレイアウト。1080p) があたり、③ の記録に無い組は、目標が別なら目標にする (4K の新しい組が 1080p で
+#     始まっても 4k-43inch になる)。記録が別の uuid を指していても同じ。目標が 1080p の組は目標と同じなので記録だけ。ほかのカスタムは残す
+k_4k_b="XXX0020|5&61cfcb&0&UID8449|1|${vd_b}"
+h=$(fz3_home t79)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_p1}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_b}")")"
+put_assigned "${h}" "${k_4k_b}" "${uuid_p1}"
+put_displays "${h}" "${d_4k}" "${d_aus}" "${d_ivm48}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc "${before_apl}" 0,3 "$(want_al "${uuid_a}" 2)")" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}")" ]] \
+  && seen "${h}" -F 'XXX0020 (UID8449)・3840x2160・仮想デスクトップ EA30C0ED: 1080p → 4k-43inch (横向きの既定)' \
+  && seen "${h}" -F 'XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 1080p → 4k-43inch (横向きの既定)' \
+  && [[ $(grep -c ' → ' "${h}/out") == 2 ]] && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (1 組) は残しました' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "あて方: 横向きの既定があたり記録に無い組は、目標が別なら目標にし、目標が既定と同じ組は記録だけ、ほかのカスタムは残す"
+else
+  ng "あて方の横向きの既定の組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# ---- 全部の仮想デスクトップに組を作る (段 ③ の中。以下 C と書く) ----
+
+vd_c='{1769CDBD-E6F0-4AC6-B263-524BA8C16518}'
+k_4k_c="XXX0020|5&61cfcb&0&UID8449|1|${vd_c}"
+k_aus_b="AUS23CC|5&61cfcb&0&UID8453|4|${vd_b}"
+k_aus_c="AUS23CC|5&61cfcb&0&UID8453|4|${vd_c}"
+k_ivm48_b="IVM562D|5&61cfcb&0&UID8448|2|${vd_b}"
+# C が作る組の期待値: 元の組 $1 の device の virtual-desktop を $2 に (monitor-number を $3 に。空なら替えない) し、applied-layout を $4 にしたもの
+created_entry() {
+  jq -n -c --argjson e "$1" --arg vd "$2" --arg n "$3" --argjson al "$4" \
+    '$e | .device["virtual-desktop"] = $vd | (if $n != "" then .device["monitor-number"] = ($n | tonumber) else . end) | .["applied-layout"] = $al'
+}
+# 期待する中身 (キーの順によらない 1 行): 元の中身 $1 の末尾に、残りの組を足したもの
+want_doc_add() {
+  local doc=$1
+  shift
+  jq -c -S '.["applied-layouts"] += $ARGS.positional' --jsonargs "$@" <<<"${doc}"
+}
+
+# 80. pjp-raiden の形 (仮想デスクトップ 3 つ): 1 つのデスクトップにだけ組がある横向きの 2 台へ、残りの 2 つのデスクトップの組を作る。
+#     device は同じ画面の組から写し (シリアルもそのまま。キーの並びも同じ)、virtual-desktop だけを替え、決まりのレイアウトをあてて末尾に足す。
+#     同じ回に埋める組 (テンプレート) と一緒に書き、記録はシリアルなしのキー。作る組は 1 組 1 行「組なし → …」で、シリアルを出さない
+h=$(fz3_home t80)
+c80_4k=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}" "${serial_1}")
+c80_aus=$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}" "${serial_2}")
+put_apl "${h}" "$(pt_applied "${c80_4k}" "${c80_aus}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "${d_4k}" "${d_aus}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+apl=$(apl_json "${h}")
+al_4k=$(want_al "${uuid_a}" 2)
+al_b=$(want_al "${uuid_b}" 1)
+want=$(want_doc_add "$(want_doc "${before_apl}" 1 "${al_b}")" \
+  "$(created_entry "${c80_4k}" "${vd_b}" "" "${al_4k}")" "$(created_entry "${c80_4k}" "${vd_c}" "" "${al_4k}")" \
+  "$(created_entry "${c80_aus}" "${vd_b}" "" "${al_b}")" "$(created_entry "${c80_aus}" "${vd_c}" "" "${al_b}")")
+nb=$(newest_backup "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${apl}") == "${want}" ]] && pt_form "${apl}" \
+  && [[ $(jq -c '.["applied-layouts"][2].device | keys_unsorted' "${apl}") == '["monitor","monitor-instance","monitor-number","serial-number","virtual-desktop"]' ]] \
+  && [[ $(fs_calls "${h}") == "mv ${apl},touch ${apl},mv $(assigned_json "${h}")," ]] && recent_mtime "${apl}" && file_is "${nb}applied-layouts.json" "${before_apl}" \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}" "${k_4k_c}" "${uuid_a}" "${k_aus_b}" "${uuid_b}" "${k_aus_c}" "${uuid_b}")" ]] \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ EA30C0ED: priority-grid → 1080p' \
+  && seen "${h}" -F '  XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 組なし → 4k-43inch' \
+  && seen "${h}" -F '  XXX0020 (UID8449)・3840x2160・仮想デスクトップ 1769CDBD: 組なし → 4k-43inch' \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' \
+  && seen "${h}" -F '  AUS23CC (UID8453)・1920x1080・仮想デスクトップ 1769CDBD: 組なし → 1080p' \
+  && [[ $(grep -c ' → ' "${h}/out") == 5 ]] && no_serial "${h}" && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "C: 組の無い仮想デスクトップへ、同じ画面の組の device を写して (virtual-desktop だけ替えて) 組を作り、決まりのレイアウトをあてて記録する"
+else
+  ng "C (pjp-raiden の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
+fi
+
+# 81. 次の回: 作る組も変える組も無いので書かず、揃っていると出す (作った組も決まりのレイアウトの組に数える)
+touch -d '2020-01-01 00:00:00' "${apl}"
+before_mtime=$(stat -c %Y "${apl}")
+: >"${h}/fs-calls"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/fs-calls && $(stat -c %Y "${apl}") == "${before_mtime}" ]] \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 6 組)。' && ! seen "${h}" '組なし' && [[ ! -s ${h}/err ]]; then
+  ok "C: 次の回は作る組が無ければ書かず、揃っていると出す"
+else
+  ng "C の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 82. シリアルだけが違う組 (同じ画面): シリアルごとに組を作る (どちらが今のシリアルかは読まずに決められない)。同じ行は 1 行にまとめ、
+#     記録はシリアルなしの 1 つのキーにする
+h=$(fz3_home t82)
+c82_s1=$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}" "${serial_1}")
+c82_s2=$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}" "${serial_2}")
+put_apl "${h}" "$(pt_applied "${c82_s1}" "${c82_s2}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_ivm48}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c82_s1}" "${vd_b}" "" "${al_b}")" "$(created_entry "${c82_s2}" "${vd_b}" "" "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_ivm48_a}" "${uuid_b}" "${k_ivm48_b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'IVM562D (UID8448)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p (2 組)' && [[ $(grep -c ' → ' "${h}/out") == 1 ]] \
+  && no_serial "${h}"; then
+  ok "C: シリアルだけが違う組は、シリアルごとに作り、同じ行は 1 行にまとめる"
+else
+  ng "C のシリアル違いの組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 83. 番号が振り直された直後 (今の番号の組がどのデスクトップにも無く、instance が同じで番号の違う組だけがある): その組の device を写し、
+#     monitor-number を今の番号にして、全部のデスクトップへ作る (FancyZones のエディターは今の番号で組を引く)。古い組は目標と同じなので
+#     記録するだけで、書き換えない
+k_aus51_1a="AUS23CC|5&61cfcb&0&UID8451|1|${vd_a}"
+k_aus51_1b="AUS23CC|5&61cfcb&0&UID8451|1|${vd_b}"
+k_aus51_2a="AUS23CC|5&61cfcb&0&UID8451|2|${vd_a}"
+k_aus51_2b="AUS23CC|5&61cfcb&0&UID8451|2|${vd_b}"
+h=$(fz3_home t83)
+c83_a=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_a}" custom "${uuid_b}" "${serial_1}")
+c83_b=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_b}" custom "${uuid_b}" "${serial_1}")
+put_apl "${h}" "$(pt_applied "${c83_a}" "${c83_b}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c83_a}" "${vd_a}" 1 "${al_b}")" "$(created_entry "${c83_a}" "${vd_b}" 1 "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_1a}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}" "${k_aus51_2a}" "${uuid_b}" "${k_aus51_2b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ EA30C0ED: 組なし → 1080p' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' && [[ $(grep -c ' → ' "${h}/out") == 2 ]] && no_serial "${h}"; then
+  ok "C: 今の番号の組が無ければ、instance が同じで番号の違う組を写し、今の番号で全部のデスクトップへ作る"
+else
+  ng "C の番号の振り直し" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 84. 同じ画面 (monitor と monitor-instance が同じ) の組がどのデスクトップにも無い画面には作らず、1 行で知らせる (警告のまとめには載せない)。
+#     番号だけが同じ別の instance の組は、写す元にしない (その組は今までどおり番号でディスプレイに合わせて埋める)
+h=$(fz3_home t84)
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8448' 2 "${vd_a}" custom "${uuid_b}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}")" \
+  "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_b}" custom "${uuid_a}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}" "$(disp 2 IVM562D '5&61cfcb&0&UID8453' 1920 1080)" \
+  "$(disp 3 LGE5555 '5&61cfcb&0&UID8461' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && seen "${h}" -F '次の画面は、同じ画面 (モニター ID と instance が同じ) の組がどの仮想デスクトップにも無いので、組を作りません: IVM562D (UID8453)・1920x1080、LGE5555 (UID8461)・1920x1080' \
+  && seen "${h}" -F 'FancyZones のディスプレイへのあて方は揃っています (決まりのレイアウトの組 3 組)。' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "C: 同じ画面の組がどのデスクトップにも無い画面には作らず、1 行で知らせる (番号だけ同じ組は写さない)"
+else
+  ng "C の写せる組が無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 85. 縦向き・つながっていない画面には作らない
+h=$(fz3_home t85)
+put_apl "${h}" "$(pt_applied \
+  "$(apl_entry DEL4321 '5&61cfcb&0&UID8460' 5 "${vd_a}" priority-grid "${null_uuid}")" \
+  "$(apl_entry IVM562D '5&61cfcb&0&UID8451' 1 "${vd_a}" priority-grid "${null_uuid}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_tall}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(apl_json "${h}")" "${before_apl}" && ! seen "${h}" '組なし' && ! seen "${h}" '組を作りません' \
+  && seen "${h}" -F 'つながっていない・縦向きのディスプレイの組 2 組には触りません'; then
+  ok "C: 縦向き・つながっていない画面には作らない"
+else
+  ng "C の縦向き・つながっていない画面" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 86. 目標のレイアウトが PC に無い: 作らず、決まりのレイアウトが無い警告に数える (まとめにも残す)。--force は ② が足し直してから作る
+h=$(fz3_home t86)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+c86=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}")
+put_apl "${h}" "$(pt_applied "${c86}" "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" custom "${uuid_b}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}" "${d_aus}"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+step1=no
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c86}" "${vd_b}" "" "${al_4k}")")" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_4k_a}" "${uuid_a}" "${k_aus_a}" "${uuid_b}" "${k_4k_b}" "${uuid_a}")" ]] \
+  && grep -qF '決まりのレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、1 組にあてていません' "${h}/warnings"; then
+  step1=yes
+fi
+run "${h}" --force
+if [[ ${step1} == yes && $(rc "${h}") == 0 ]] && seen "${h}" -F 'AUS23CC (UID8453)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p'; then
+  ok "C: 目標のレイアウトが PC に無ければ作らずに警告し、--force は ② が足し直してから作る"
+else
+  ng "C の目標が PC に無い" "step1=${step1} rc=$(rc "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 87. --dry-run: 作る組を出すが、何も書かない (退避も記録もしない)
+h=$(fz3_home t87)
+put_apl "${h}" "$(pt_applied "$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}" "${serial_1}")")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\"]" "${d_4k}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(assigned_json "${h}") && ! -e $(backup_root "${h}") ]] && file_is "$(apl_json "${h}")" "${before_apl}" \
+  && seen "${h}" -F '==> [dry-run] FancyZones のディスプレイへのあて方' \
+  && seen "${h}" -F '  [dry-run] XXX0020 (UID8449)・3840x2160・仮想デスクトップ CB8979A0: 組なし → 4k-43inch' && no_serial "${h}"; then
+  ok "C: --dry-run は作る組を出すが、何も書かない"
+else
+  ng "C の --dry-run" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 88. 仮想デスクトップの GUID は大文字にして比べる・書く。形の合わないもの・null の GUID・重なりは落とす
+h=$(fz3_home t88)
+c88=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "$(tr 'A-F' 'a-f' <<<"${vd_a}")" custom "${uuid_a}")
+put_apl "${h}" "$(pt_applied "${c88}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"not-a-guid\",\"$(tr 'A-F' 'a-f' <<<"${vd_b}")\",\"${vd_b}\",\"{00000000-0000-0000-0000-000000000000}\"]" "${d_4k}"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" "$(created_entry "${c88}" "${vd_b}" "" "${al_4k}")")" ]] \
+  && [[ $(grep -c ' → ' "${h}/out") == 1 ]]; then
+  ok "C: 仮想デスクトップは大文字で比べて書き、形の合わないもの・null・重なりは落とす"
+else
+  ng "C の仮想デスクトップの形" "rc=$(rc "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# ---- 横向きの既定 (default-layouts.json。② と ③ の間の段。以下 A と書く) ----
+
+# 89. 横向きの既定が priority-grid: 決まりの default のレイアウト (1080p) を、エディターが既定にしたときと同じ値で書く。縦向き・項目の並びは
+#     変えず、PowerToys の形で書いて mv の後に touch し、書き換える前を退避する。同じ回に ③ も書けば、退避は同じディレクトリに入る
+h=$(fz3_home t89)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+put_apl "${h}" "$(pt_applied "$(apl_entry AUS23CC '5&61cfcb&0&UID8453' 4 "${vd_a}" priority-grid "${null_uuid}")")"
+put_displays "${h}" "${d_aus}"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+dl=$(dl_json "${h}")
+apl=$(apl_json "${h}")
+nb=$(newest_backup "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${dl}") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && pt_form "${dl}" && recent_mtime "${dl}" \
+  && [[ $(jq -c '.["default-layouts"][1].layout | keys_unsorted' "${dl}") == '["uuid","type","show-spacing","spacing","zone-count","sensitivity-radius"]' ]] \
+  && [[ $(fs_calls "${h}") == "mv ${dl},touch ${dl},mv ${apl},touch ${apl},mv $(assigned_json "${h}")," ]] \
+  && [[ $(nbackups "${h}") == 1 ]] && file_is "${nb}default-layouts.json" "${before_dl}" && [[ -e ${nb}applied-layouts.json ]] \
+  && seen "${h}" -F "==> FancyZones の横向きの既定のレイアウト (${dl})" && seen "${h}" -F '  priority-grid → 1080p' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "A: 横向きの既定を決まりの default のレイアウトにし (エディターと同じ値)、縦向きと並びを変えず、退避・mv・touch する"
+else
+  ng "A (priority-grid → 1080p)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") doc=$(doc_of "${dl}") $(outerr "${h}")"
+fi
+
+# 90. 次の回: 揃っていると出し、書かない
+touch -d '2020-01-01 00:00:00' "${dl}"
+before_mtime=$(stat -c %Y "${dl}")
+: >"${h}/fs-calls"
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -s ${h}/fs-calls && $(stat -c %Y "${dl}") == "${before_mtime}" ]] \
+  && seen "${h}" -F 'FancyZones の横向きの既定のレイアウトは揃っています (1080p)。'; then
+  ok "A: 次の回は揃っていると出し、書かない"
+else
+  ng "A の次の回" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 91. default-layouts.json が無い (エディターを開いたことの無い PC): 横向きの項目だけのファイルを作る (縦向きは FancyZones の既定のまま)
+h=$(fz3_home t91)
+rm -f "$(dl_json "${h}")"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+dl=$(dl_json "${h}")
+if [[ $(rc "${h}") == 0 && $(doc_of "${dl}") == "$(jq -n -c -S --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$hz]}')" ]] && pt_form "${dl}" \
+  && [[ $(fs_calls "${h}") == "mv ${dl},touch ${dl}," && ! -e $(backup_root "${h}") ]] \
+  && seen "${h}" -F '  default-layouts.json が無いので作る' && seen "${h}" -F '  (横向きの既定なし) → 1080p' \
+  && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
+  ok "A: default-layouts.json が無ければ、横向きの項目だけで作る"
+else
+  ng "A のファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") doc=$(doc_of "${dl}") $(outerr "${h}")"
+fi
+
+# 92. 横向きの項目が無い (縦向きだけ): 末尾に足す。縦向きは変えない
+h=$(fz3_home t92)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}")"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && seen "${h}" -F '  (横向きの既定なし) → 1080p'; then
+  ok "A: 横向きの項目が無ければ末尾に足し、縦向きは変えない"
+else
+  ng "A の横向きの項目が無い" "rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 93. 横向きの既定が別のカスタムレイアウト (エディターで既定にした): 決まりの default に戻す (前の名前は PC のレイアウトの名前)
+h=$(fz3_home t93)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "$(dl_entry horizontal "$(jq -n -c --arg u "${uuid_p1}" '{uuid: $u, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0}')")")"
+run "${h}"
+if [[ $(rc "${h}") == 0 && $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] \
+  && seen "${h}" -F '  Custom layout 1 → 1080p'; then
+  ok "A: 横向きの既定が別のカスタムレイアウトなら、決まりの default に戻す"
+else
+  ng "A の別のカスタムレイアウト" "rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 94. type と uuid が同じで、ほかの値だけが違う (エディターの版の違いなど): 揃っているとみなし、書かない
+h=$(fz3_home t94)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "$(dl_entry horizontal "$(jq -c '.["zone-count"] = 4 | .["sensitivity-radius"] = 20' <<<"${dl_want_layout}")")")"
+before_dl=$(cat "$(dl_json "${h}")")
+run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && seen "${h}" -F 'FancyZones の横向きの既定のレイアウトは揃っています (1080p)。'; then
+  ok "A: type と uuid が同じなら、ほかの値が違っても揃っているとみなす"
+else
+  ng "A の値だけ違う" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 95. 目標のレイアウトが PC に無い (PC で消した): 書かずに警告する (まとめにも残す)。--dry-run --force は ② が足し直すものをあると見て
+#     予定を出す。--force は ② が足し直してから書く
+h=$(fz3_home t95)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+step1=no
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && grep -qF '決まりの既定のレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定にしていません' "${h}/warnings"; then
+  step1=yes
+fi
+run "${h}" --dry-run --force
+step2=no
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" && seen "${h}" -F '  [dry-run] priority-grid → 1080p' \
+  && ! grep -qF '横向きの既定にしていません' "${h}/err"; then
+  step2=yes
+fi
+run "${h}" --force
+if [[ ${step1}${step2} == yesyes && $(rc "${h}") == 0 ]] \
+  && [[ $(doc_of "$(dl_json "${h}")") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]]; then
+  ok "A: 目標のレイアウトが PC に無ければ書かずに警告し、--force は ② が足し直してから書く (--dry-run --force も見越す)"
+else
+  ng "A の目標が PC に無い" "step1=${step1} step2=${step2} rc=$(rc "${h}") doc=$(doc_of "$(dl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 96. default-layouts.json を読めない: 5 回読んでから警告し (まとめにも残す)、書かない
+for t in "broken:not json" "empty:" "array:[1]" 'notarray:{"default-layouts":{}}'; do
+  name=${t%%:*}
+  body=${t#*:}
+  h=$(fz3_home "t96-${name}")
+  put_dl "${h}" "${body}"
+  DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+  if [[ $(rc "${h}") == 0 && $(cat "$(dl_json "${h}")") == "${body}" && $(nsleep "${h}") == 5 && ! -e ${h}/fs-calls ]] \
+    && grep -q 'default-layouts.json を読めない' "${h}/err" && grep -q 'default-layouts.json を読めない' "${h}/warnings"; then
+    ok "A: default-layouts.json を読めなければ (${name}) 5 回読んでから警告し、書かない"
+  else
+    ng "A の読めない (${name})" "rc=$(rc "${h}") sleep=$(nsleep "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 97. 書けない (mv できない・一時ファイルを作れない・退避できない): 元のまま警告して exit 0 (まとめにも残す)。一時ファイルを残さず、素の
+#     エラーを混ぜない。touch できないときは、書いたうえで読み直させられなかったと警告する
+for t in mv tmpfile backup touch; do
+  h=$(fz3_home "t97-${t}")
+  put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+  dl=$(dl_json "${h}")
+  before_dl=$(cat "${dl}")
+  msg='default-layouts.json に書けない'
+  case ${t} in
+    tmpfile) mkdir "${dl}.dotfiles-tmp" ;;
+    backup)
+      mkdir -p "$(dirname "$(backup_root "${h}")")"
+      printf 'file' >"$(backup_root "${h}")"
+      msg='退避できない'
+      ;;
+    touch) msg='default-layouts.json に書きましたが' ;;
+  esac
+  case ${t} in
+    mv) FAKE_MV_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+    touch) FAKE_TOUCH_FAIL=1 DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+    *) DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}" ;;
+  esac
+  if [[ ${t} == touch ]]; then
+    wrote_ok=no
+    [[ $(doc_of "${dl}") == "$(jq -n -c -S --argjson v "${dl_vertical}" --argjson hz "${dl_horizontal_want}" '{"default-layouts": [$v, $hz]}')" ]] && wrote_ok=yes
+  else
+    wrote_ok=no
+    file_is "${dl}" "${before_dl}" && [[ ! -f ${dl}.dotfiles-tmp ]] && wrote_ok=yes
+  fi
+  if [[ $(rc "${h}") == 0 && ${wrote_ok} == yes ]] && grep -q "${msg}" "${h}/warnings" && err_only_warnings "${h}"; then
+    ok "A: 書けなければ (${t}) 警告して exit 0 (素のエラーを混ぜない)"
+  else
+    ng "A が書けない (${t})" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+  fi
+done
+
+# 98. --dry-run: 予定を出すが、何も書かない (退避もしない)
+h=$(fz3_home t98)
+put_dl "${h}" "$(pt_defaults "${dl_vertical}" "${dl_horizontal_pg}")"
+before_dl=$(cat "$(dl_json "${h}")")
+run "${h}" --dry-run
+if [[ $(rc "${h}") == 0 && ! -e ${h}/fs-calls && ! -e $(backup_root "${h}") ]] && file_is "$(dl_json "${h}")" "${before_dl}" \
+  && seen "${h}" -F "==> [dry-run] FancyZones の横向きの既定のレイアウト ($(dl_json "${h}"))" && seen "${h}" -F '  [dry-run] priority-grid → 1080p'; then
+  ok "A: --dry-run は予定を出すが、何も書かない"
+else
+  ng "A の --dry-run" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 99. 決まりのファイルが無い (段 ③ の組も無い): A は何もせず、何も出さない (ファイルを作らない・警告しない)
+h=$(new_home t99 "${state_on}")
+put_fz "${h}" "$(fz_settings true)"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+put_record "${h}" "${lay_a}" "${lay_b}"
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 && ! -e $(dl_json "${h}") && ! -e ${h}/fs-calls && ! -s ${h}/err && ! -s ${h}/warnings ]] && ! seen "${h}" '横向きの既定'; then
+  ok "A: 決まりのファイルが無ければ、何もせず何も出さない"
+else
+  ng "A の決まりのファイルが無い" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
+fi
+
+# 100. 番号が振り直された直後で、同じデスクトップにある同じ画面の古い組が、手であてたカスタムレイアウト・blank: 作る組はそのレイアウトを
+#      写し、記録しない (エディターは今の番号の組を引くので、決まりのレイアウトにすると手であてたものが消える)。手であてていない古い組の
+#      デスクトップには、決まりのレイアウトで作って記録する
+k_aus51_1c="AUS23CC|5&61cfcb&0&UID8451|1|${vd_c}"
+k_aus51_2c="AUS23CC|5&61cfcb&0&UID8451|2|${vd_c}"
+h=$(fz3_home t100)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+c100_a=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_a}" custom "${uuid_p1}" "${serial_1}")
+c100_b=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_b}" custom "${uuid_b}" "${serial_1}")
+c100_c=$(apl_entry AUS23CC '5&61cfcb&0&UID8451' 2 "${vd_c}" blank "${editor_uuid}" "${serial_1}")
+put_apl "${h}" "$(pt_applied "${c100_a}" "${c100_b}" "${c100_c}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+want=$(want_doc_add "$(jq -c -S . <<<"${before_apl}")" \
+  "$(created_entry "${c100_a}" "${vd_a}" 1 "$(jq -c '.["applied-layout"]' <<<"${c100_a}")")" \
+  "$(created_entry "${c100_a}" "${vd_b}" 1 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_c}" 1 "$(jq -c '.["applied-layout"]' <<<"${c100_c}")")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_2b}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}")" ]] \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ EA30C0ED: 組なし → Custom layout 1 (手であてた組と同じ)' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ CB8979A0: 組なし → 1080p' \
+  && seen "${h}" -F 'AUS23CC (UID8451)・1920x1080・仮想デスクトップ 1769CDBD: 組なし → blank (手であてた組と同じ)' \
+  && seen "${h}" -F '手であてたカスタムレイアウト・blank の組 (2 組) は残しました' && no_serial "${h}" && [[ ! -s ${h}/warnings ]]; then
+  ok "C: 振り直しの直後で同じデスクトップの古い組が手であてたものなら、そのレイアウトを写して記録せず、ほかは決まりのレイアウトで作る"
+else
+  ng "C の手であてた古い組" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 101. 同じ形を --force で流す: 手であてた古い組も決まりのレイアウトにするので、作る組も決まりのレイアウトにして記録する
+h=$(fz3_home t101)
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}" "${lay_p1}")"
+put_apl "${h}" "$(pt_applied "${c100_a}" "${c100_b}" "${c100_c}")"
+put_displays_vd "${h}" "[\"${vd_a}\",\"${vd_b}\",\"${vd_c}\"]" "$(disp 1 AUS23CC '5&61cfcb&0&UID8451' 1920 1080)"
+before_apl=$(cat "$(apl_json "${h}")")
+run "${h}" --force
+want=$(want_doc_add "$(want_doc "${before_apl}" 0,2 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_a}" 1 "${al_b}")" "$(created_entry "${c100_a}" "${vd_b}" 1 "${al_b}")" \
+  "$(created_entry "${c100_a}" "${vd_c}" 1 "${al_b}")")
+if [[ $(rc "${h}") == 0 && $(doc_of "$(apl_json "${h}")") == "${want}" ]] \
+  && [[ $(asg_of "${h}") == "$(want_asg "${k_aus51_2a}" "${uuid_b}" "${k_aus51_2b}" "${uuid_b}" "${k_aus51_2c}" "${uuid_b}" "${k_aus51_1a}" "${uuid_b}" "${k_aus51_1b}" "${uuid_b}" "${k_aus51_1c}" "${uuid_b}")" ]] \
+  && ! seen "${h}" '手であてた組と同じ' && ! seen "${h}" '残しました'; then
+  ok "C: --force では、手であてた古い組のデスクトップにも決まりのレイアウトで作って記録する"
+else
+  ng "C の手であてた古い組 (--force)" "rc=$(rc "${h}") asg=$(asg_of "${h}") doc=$(doc_of "$(apl_json "${h}")") $(outerr "${h}")"
+fi
+
+# 102. 横向きの既定は揃っているが、そのレイアウトが PC に無い (PC で消した): 「揃っています」と言わず、既定が使えないと警告する
+h=$(fz3_home t102)
+put_pcl "${h}" "$(pt_layouts "${lay_a}")"
+before_dl=$(cat "$(dl_json "${h}")")
+DOTFILES_SETUP_WARNINGS="${h}/warnings" run "${h}"
+if [[ $(rc "${h}") == 0 ]] && file_is "$(dl_json "${h}")" "${before_dl}" && ! seen "${h}" '横向きの既定のレイアウトは揃っています' \
+  && grep -qF '決まりの既定のレイアウト「1080p」が PC の custom-layouts.json に無い (か canvas でない) ので、FancyZones の横向きの既定 (このレイアウト) が使えません' "${h}/warnings"; then
+  ok "A: 横向きの既定が揃っていても、そのレイアウトが PC に無ければ、揃っていると言わずに警告する"
+else
+  ng "A の揃っているが PC に無い" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 103. default-layouts.json を新しく作った回は、同じ回に ② が退避していても「退避しました」と言わない (作ったファイルは退避していない)
+h=$(fz3_home t103)
+rm -f "$(dl_json "${h}")"
+put_repo_layouts "${h}" "$(pt_layouts "${lay_a_edited}" "${lay_b}")"
+put_pcl "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
+run "${h}"
+nb=$(newest_backup "${h}")
+dl_block=$(sed -n '/==> FancyZones の横向きの既定のレイアウト/,/^[^ ]/p' "${h}/out")
+if [[ $(rc "${h}") == 0 && -e $(dl_json "${h}") && -e ${nb}custom-layouts.json && ! -e ${nb}default-layouts.json ]] \
+  && [[ ${dl_block} == *'default-layouts.json が無いので作る'* && ${dl_block} != *'退避しました'* ]]; then
+  ok "A: 新しく作った回は、② が退避していても「退避しました」と言わない"
+else
+  ng "A の作った回の退避の行" "rc=$(rc "${h}") block=${dl_block} $(outerr "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
