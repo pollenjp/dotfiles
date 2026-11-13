@@ -15,11 +15,14 @@
 #
 # ## 何をするか
 #
-#   1. dotfiles の nix/files/claude/{skills,agents,commands}/ と claude-skills の {skills,agents,commands}/ の中身を、
-#      1 つずつ ~/.claude/<種類>/ へ symlink する (手元と同じ単位)。repo から消えたものの symlink は外す
+#   1. dotfiles の nix/files/claude/{skills,agents,commands}/ と claude-skills の {skills,agents,commands,rules}/ の中身を、
+#      1 つずつ ~/.claude/<種類>/ へ symlink する (手元と同じ単位)。repo から消えたものの symlink は外す。rules/ は
+#      拡張子・置き場所で絞った rule (~/.claude/rules/ の symlink の rule も paths 付きで読まれる)
 #   2. ~/.claude/CLAUDE.md を書く。共通の nix/files/claude/CLAUDE.md の最初の「## 」の行より前 (手元の Nix 管理の
 #      冒頭) を、この dir の CLAUDE.cloud.md に差し替える。--dev-tracker なら「タスク管理」の節を末尾に足す
-#   3. ~/.local/state/dotfiles/claude-notion.json を書く (Notion の宛先の resolver が読む。profile は --notion-profile)
+#   3. ~/.local/state/dotfiles/claude-notion.json を書く (Notion の宛先の resolver が読む。profile は --notion-profile)。
+#      ~/.local/state/dotfiles/claude-iac-guard.json も書く (install-iac-guard.sh が読む。既定は {"enable":true}、
+#      --no-iac-guard なら {"enable":false}。手元の dotfiles.claude.iacGuard.enable と同じ形)
 #   4. cloud で意味のある hook を ~/.claude/hooks/ へ張り、~/.claude/settings.json に登録する (下の「hook」)
 #   5. ~/.claude/settings.json の skillOverrides に、pack の skill の name-only と、claude.ai から同期された skill の
 #      user-invocable-only を書く。手元の setup と同じ nix/scripts/bootstrap-claude-skill-overrides.sh を
@@ -56,6 +59,8 @@
 #   PreToolUse   Write|Edit|MultiEdit|NotebookEdit  docs-guard.sh
 #   PreToolUse   Bash                            gist-guard.sh
 #   PreToolUse   mcp__.*[Gg]ist.*                gist-guard.sh
+#   PreToolUse   Bash                            install-iac-guard.sh
+#   PreToolUse   Bash                            lang-nudge.sh
 #   SessionStart startup|resume                  この script (--quiet と、今回と同じ option)
 #
 # nix-managed-guard.sh (cloud には Nix 管理のパスが無い)・ssh-agent-notice.sh (1Password の SSH agent が無い)・
@@ -84,11 +89,13 @@ usage() {
 Claude Code on the web (cloud) の VM の ~/.claude/ に、dotfiles と claude-skills の Claude の設定を組み立てる。
 
 使い方:
-  bootstrap-claude-cloud.sh [--notion-profile <名前>] [--dev-tracker] [--claude-skills <dir>] [--dotfiles <dir>] [--quiet]
+  bootstrap-claude-cloud.sh [--notion-profile <名前>] [--dev-tracker] [--no-iac-guard] [--claude-skills <dir>] [--dotfiles <dir>]
+                            [--quiet]
   bootstrap-claude-cloud.sh -h, --help   これ
 
   --notion-profile <名前>  claude-notion.json の profile (repo の外と、規則に当たらない repo の宛先)。無ければ null
   --dev-tracker            pjp-dev-tracker を張り、CLAUDE.md に「タスク管理」の節を足す
+  --no-iac-guard           install-iac-guard.sh の IaC の分 (terraform などの apply を止める) を外す (install は止める)
   --claude-skills <dir>    claude-skills の checkout (無ければ $CLAUDE_SKILLS_DIR、それも無ければ dotfiles の checkout の隣)
   --dotfiles <dir>         dotfiles の checkout (無ければ、この script の在る checkout)
   --quiet                  stdout に何も出さない (警告は stderr に出す)
@@ -120,6 +127,7 @@ die() {
 
 notion_profile=""
 dev_tracker=0
+iac_guard=1
 claude_skills_arg=""
 dotfiles_arg=""
 while [[ $# -gt 0 ]]; do
@@ -135,6 +143,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --dev-tracker)
       dev_tracker=1
+      shift
+      ;;
+    --no-iac-guard)
+      iac_guard=0
       shift
       ;;
     --quiet)
@@ -179,7 +191,7 @@ fi
 
 command -v jq &>/dev/null || die "jq が見つかりません"
 # cloud で意味のある hook (上の「hook」)
-hooks=(xref-guard run-through-nudge video-offer-nudge docs-guard gist-guard)
+hooks=(xref-guard run-through-nudge video-offer-nudge docs-guard gist-guard install-iac-guard lang-nudge)
 inputs=("${files}/CLAUDE.md" "${files}/CLAUDE.dev-tracker.md" "${cloud}/CLAUDE.cloud.md" "${cloud}/skip-skills.txt" "${overrides}")
 for hook in "${hooks[@]}"; do
   inputs+=("${files}/hooks/${hook}.sh")
@@ -283,7 +295,7 @@ prune_links() {
   done
 }
 
-for kind in skills agents commands; do
+for kind in skills agents commands rules; do
   link_entries "${kind}"
   prune_links "${kind}"
 done
@@ -330,6 +342,15 @@ if printf '%s\n' "${notion_json}" | write_if_changed "${HOME}/.local/state/dotfi
   note "書きました: ${HOME}/.local/state/dotfiles/claude-notion.json"
 fi
 
+# home-manager (claude.nix) が書くものと同じ形。install-iac-guard.sh が読み、enable が false なら IaC の分を止めない
+iac_json='{"enable":true}'
+if [[ ${iac_guard} == 0 ]]; then
+  iac_json='{"enable":false}'
+fi
+if printf '%s\n' "${iac_json}" | write_if_changed "${HOME}/.local/state/dotfiles/claude-iac-guard.json"; then
+  note "書きました: ${HOME}/.local/state/dotfiles/claude-iac-guard.json"
+fi
+
 # ---- hook ----
 
 mkdir -p -- "${HOME}/.claude/hooks"
@@ -351,6 +372,9 @@ if [[ -n ${notion_profile} ]]; then
 fi
 if [[ ${dev_tracker} == 1 ]]; then
   session_cmd+=" --dev-tracker"
+fi
+if [[ ${iac_guard} == 0 ]]; then
+  session_cmd+=" --no-iac-guard"
 fi
 if [[ -n ${claude_skills_arg} || -n ${CLAUDE_SKILLS_DIR:-} ]]; then
   if [[ -n ${claude_skills_dir} ]]; then
@@ -384,6 +408,8 @@ hooks_filter='
   | add_hook("PreToolUse"; "Write|Edit|MultiEdit|NotebookEdit"; ""; $docs_guard)
   | add_hook("PreToolUse"; "Bash"; ""; $gist_guard)
   | add_hook("PreToolUse"; "mcp__.*[Gg]ist.*"; ""; $gist_guard)
+  | add_hook("PreToolUse"; "Bash"; ""; $iac_guard)
+  | add_hook("PreToolUse"; "Bash"; ""; $lang_nudge)
   | .hooks.SessionStart = (
       [(.hooks.SessionStart // [])[]
         | .hooks = [(.hooks // [])[] | select((.command // "") | mine | not)]
@@ -400,7 +426,8 @@ if ! jq -e 'type == "object"' <<<"${current}" &>/dev/null \
   || ! new_settings=$(
     jq --arg xref "$(hook_cmd xref-guard)" --arg run_through "$(hook_cmd run-through-nudge)" \
       --arg nudge "$(hook_cmd video-offer-nudge)" --arg docs_guard "$(hook_cmd docs-guard)" \
-      --arg gist_guard "$(hook_cmd gist-guard)" \
+      --arg gist_guard "$(hook_cmd gist-guard)" --arg iac_guard "$(hook_cmd install-iac-guard)" \
+      --arg lang_nudge "$(hook_cmd lang-nudge)" \
       --arg self "${self_cmd}" --arg session "${session_cmd}" \
       "${hooks_filter}" <<<"${current}" 2>/dev/null
   ); then

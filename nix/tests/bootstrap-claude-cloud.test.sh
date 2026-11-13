@@ -13,7 +13,8 @@
 #
 # ## 確かめること
 #
-#   - dotfiles と claude-skills の skill・agent を ~/.claude/<種類>/<名前> へ張り (向き先も見る)、README.md は張らない
+#   - dotfiles と claude-skills の skill・agent と claude-skills の rule を ~/.claude/<種類>/<名前> へ張り (向き先も見る)、
+#     README.md は張らない
 #   - mod を兼ねる skill (.claude-plugin/plugin.json がある) と skip-skills.txt の名前 (dotfiles の pjp-dotfiles-update・
 #     claude-skills の pjp-cc-page) は張らない
 #   - pjp-dev-tracker と CLAUDE.md の「## タスク管理」の節は --dev-tracker のときだけ。外して流し直すと symlink を外す
@@ -22,18 +23,19 @@
 #   - 流し直すと、repo から消えた skill の symlink を外し、足した skill を張る。ほかを指す symlink と実体は残す
 #   - CLAUDE.md は CLAUDE.cloud.md で始まり、本物の CLAUDE.md の最初の「## 」の行から末尾までが続く。cloud に無い
 #     nix-managed-guard.sh には触れない
-#   - claude-notion.json に --notion-profile の値を書く (無ければ profile は null)
-#   - 同じ option で流し直すと CLAUDE.md・claude-notion.json を書き直さない (inode が変わらない)
+#   - claude-notion.json に --notion-profile の値を書く (無ければ profile は null)。claude-iac-guard.json は既定で
+#     {"enable":true}、--no-iac-guard なら {"enable":false}
+#   - 同じ option で流し直すと CLAUDE.md・claude-notion.json・claude-iac-guard.json を書き直さない (inode が変わらない)
 #   - claude-skills が無ければ dotfiles の分だけ張り、警告して 0 で終わる
 #   - claude-skills の場所は --claude-skills > CLAUDE_SKILLS_DIR > dotfiles の checkout の隣
 #   - --quiet は stdout に何も出さない
 #   - ~/.claude/CLAUDE.md が /nix/store を指す symlink (home-manager のマシン)・共通の CLAUDE.md に「## 」の行が無い・
 #     知らない引数のときは、何も書かずに 1 で終わる。--help は 0
-#   - xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を ~/.claude/hooks/ へ張り、settings.json に
-#     「bash <パス>」で 7 件登録する (gist-guard は PreToolUse の Bash と mcp__.*[Gg]ist.* の 2 件)。nix-managed-guard・
-#     ssh-agent-notice は張らない
-#   - SessionStart に自分を --quiet と同じ option で 1 件だけ登録し、option を変えて流し直すと置き換える。手で足した hook と
-#     ほかのキーは残し、同じ option なら settings.json を書き直さない
+#   - xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard・install-iac-guard・lang-nudge を
+#     ~/.claude/hooks/ へ張り、settings.json に「bash <パス>」で 9 件登録する (gist-guard は PreToolUse の Bash と
+#     mcp__.*[Gg]ist.* の 2 件)。nix-managed-guard・ssh-agent-notice は張らない
+#   - SessionStart に自分を --quiet と同じ option (--no-iac-guard も) で 1 件だけ登録し、option を変えて流し直すと
+#     置き換える。手で足した hook とほかのキーは残し、同じ option なら settings.json を書き直さない
 #   - settings.json が壊れていれば触らずに警告し、ほかは進めて 0 で終わる
 #   - settings.json の skillOverrides に、入口 (pjp-pack-<pack>) のある pack の skill (dotfiles の pjp-plantuml など) の
 #     name-only と、claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/) の anthropic-skills:<名前> の
@@ -76,11 +78,12 @@ new_dotfiles() {
   chmod -R u+w "$1"
 }
 
-# new_skills <dir> <skill の名前…>: 偽の claude-skills を作る。agents/ に pjp-fake-agent.md、各種類に README.md を置く
+# new_skills <dir> <skill の名前…>: 偽の claude-skills を作る。agents/ に pjp-fake-agent.md、rules/ に pjp-fake-rule.md、
+# 各種類に README.md を置く
 new_skills() {
   local d=$1 s
   shift
-  mkdir -p "${d}/skills" "${d}/agents" "${d}/commands"
+  mkdir -p "${d}/skills" "${d}/agents" "${d}/commands" "${d}/rules"
   for s in "$@"; do
     mkdir -p "${d}/skills/${s}"
     printf -- '---\nname: %s\ndescription: x\n---\n' "${s}" >"${d}/skills/${s}/SKILL.md"
@@ -89,6 +92,8 @@ new_skills() {
   printf '# agents\n' >"${d}/agents/README.md"
   printf -- '---\nname: pjp-fake-agent\ndescription: x\n---\n' >"${d}/agents/pjp-fake-agent.md"
   printf '# commands\n' >"${d}/commands/README.md"
+  printf -- '---\npaths:\n  - "**/*.rs"\n---\n# rust\n' >"${d}/rules/pjp-fake-rule.md"
+  printf '# rules\n' >"${d}/rules/README.md"
 }
 
 dot="${work}/dot files"
@@ -148,6 +153,13 @@ else
   ng "dotfiles と claude-skills の skill・agent を張り、README.md は張らない" "rc=$(rc_of t1) $(ls -la "${h}/.claude/skills" 2>&1) $(err_of t1)"
 fi
 
+if link_to "${h}/.claude/rules/pjp-fake-rule.md" "${sk_p}/rules/pjp-fake-rule.md" \
+  && [[ ! -e ${h}/.claude/rules/README.md ]]; then
+  ok "claude-skills の rule を ~/.claude/rules/ へ張り、README.md は張らない"
+else
+  ng "claude-skills の rule を ~/.claude/rules/ へ張り、README.md は張らない" "$(ls -la "${h}/.claude/rules" 2>&1)"
+fi
+
 if [[ $(rc_of t1) == 0 && -L ${h}/.claude/skills/pjp-fake-one ]] \
   && [[ ! -e ${h}/.claude/skills/pjp-fake-mod && ! -L ${h}/.claude/skills/pjp-fake-mod ]] \
   && [[ ! -e ${h}/.claude/skills/pjp-cc-page && ! -L ${h}/.claude/skills/pjp-cc-page ]] \
@@ -191,17 +203,24 @@ if [[ $(jq -c -S . "${h}/.local/state/dotfiles/claude-notion.json" 2>&1) == '{"o
 else
   ng "claude-notion.json に --notion-profile の値を書く" "$(cat "${h}/.local/state/dotfiles/claude-notion.json" 2>&1)"
 fi
+if [[ $(cat "${h}/.local/state/dotfiles/claude-iac-guard.json" 2>&1) == '{"enable":true}' ]]; then
+  ok "claude-iac-guard.json は既定で enable が true (IaC の guard を効かせる)"
+else
+  ng "claude-iac-guard.json は既定で enable が true" "$(cat "${h}/.local/state/dotfiles/claude-iac-guard.json" 2>&1)"
+fi
 
 # 2. 同じ option で流し直す → CLAUDE.md・claude-notion.json を書き直さない
 ino_md=$(stat -c %i "${h}/.claude/CLAUDE.md")
 ino_notion=$(stat -c %i "${h}/.local/state/dotfiles/claude-notion.json")
+ino_iac=$(stat -c %i "${h}/.local/state/dotfiles/claude-iac-guard.json")
 run_case t1 --notion-profile personal --claude-skills "${sk}"
 if [[ $(rc_of t1) == 0 ]] \
   && [[ $(stat -c %i "${h}/.claude/CLAUDE.md") == "${ino_md}" ]] \
-  && [[ $(stat -c %i "${h}/.local/state/dotfiles/claude-notion.json") == "${ino_notion}" ]]; then
-  ok "同じ option で流し直すと CLAUDE.md・claude-notion.json を書き直さない"
+  && [[ $(stat -c %i "${h}/.local/state/dotfiles/claude-notion.json") == "${ino_notion}" ]] \
+  && [[ $(stat -c %i "${h}/.local/state/dotfiles/claude-iac-guard.json") == "${ino_iac}" ]]; then
+  ok "同じ option で流し直すと CLAUDE.md・claude-notion.json・claude-iac-guard.json を書き直さない"
 else
-  ng "同じ option で流し直すと CLAUDE.md・claude-notion.json を書き直さない" "rc=$(rc_of t1) $(err_of t1)"
+  ng "同じ option で流し直すと CLAUDE.md・claude-notion.json・claude-iac-guard.json を書き直さない" "rc=$(rc_of t1) $(err_of t1)"
 fi
 
 # 3. --dev-tracker のときだけ入れ、外して流し直すと外す
@@ -381,7 +400,7 @@ hook_cmd() {
   printf 'bash %q' "$1/.claude/hooks/$2.sh"
 }
 
-# 13. 5 つの hook を張って登録し、SessionStart に自分を --quiet で登録する
+# 13. 7 つの hook を張って登録し、SessionStart に自分を --quiet で登録する
 h=$(case_home t13)
 run_case t13 --notion-profile personal
 settings="${h}/.claude/settings.json"
@@ -391,10 +410,12 @@ if [[ $(rc_of t13) == 0 ]] \
   && link_to "${h}/.claude/hooks/video-offer-nudge.sh" "${dot_p}/nix/files/claude/hooks/video-offer-nudge.sh" \
   && link_to "${h}/.claude/hooks/docs-guard.sh" "${dot_p}/nix/files/claude/hooks/docs-guard.sh" \
   && link_to "${h}/.claude/hooks/gist-guard.sh" "${dot_p}/nix/files/claude/hooks/gist-guard.sh" \
+  && link_to "${h}/.claude/hooks/install-iac-guard.sh" "${dot_p}/nix/files/claude/hooks/install-iac-guard.sh" \
+  && link_to "${h}/.claude/hooks/lang-nudge.sh" "${dot_p}/nix/files/claude/hooks/lang-nudge.sh" \
   && [[ ! -e ${h}/.claude/hooks/nix-managed-guard.sh && ! -e ${h}/.claude/hooks/ssh-agent-notice.sh ]]; then
-  ok "xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を張り、nix-managed-guard・ssh-agent-notice は張らない"
+  ok "xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard・install-iac-guard・lang-nudge を張り、nix-managed-guard・ssh-agent-notice は張らない"
 else
-  ng "xref-guard・run-through-nudge・video-offer-nudge・docs-guard・gist-guard を張り、nix-managed-guard・ssh-agent-notice は張らない" "rc=$(rc_of t13) $(ls -la "${h}/.claude/hooks" 2>&1) $(err_of t13)"
+  ng "7 つの hook を張り、nix-managed-guard・ssh-agent-notice は張らない" "rc=$(rc_of t13) $(ls -la "${h}/.claude/hooks" 2>&1) $(err_of t13)"
 fi
 if [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" xref-guard)") == 1 ]] \
   && [[ $(hook_count "${settings}" PostToolUse Skill '' "$(hook_cmd "${h}" run-through-nudge)") == 1 ]] \
@@ -403,11 +424,13 @@ if [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" xref-guar
   && [[ $(hook_count "${settings}" PreToolUse 'Write|Edit|MultiEdit|NotebookEdit' '' "$(hook_cmd "${h}" docs-guard)") == 1 ]] \
   && [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" gist-guard)") == 1 ]] \
   && [[ $(hook_count "${settings}" PreToolUse 'mcp__.*[Gg]ist.*' '' "$(hook_cmd "${h}" gist-guard)") == 1 ]] \
+  && [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" install-iac-guard)") == 1 ]] \
+  && [[ $(hook_count "${settings}" PreToolUse Bash '' "$(hook_cmd "${h}" lang-nudge)") == 1 ]] \
   && [[ $(hook_count "${settings}" SessionStart 'startup|resume' '' "${self_cmd} --quiet --notion-profile personal") == 1 ]] \
-  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${settings}") == 8 ]]; then
-  ok "settings.json に 7 件の hook と、SessionStart の自分の 1 件を登録する"
+  && [[ $(jq '[.hooks[] | .[] | .hooks[]] | length' "${settings}") == 10 ]]; then
+  ok "settings.json に 9 件の hook と、SessionStart の自分の 1 件を登録する"
 else
-  ng "settings.json に 7 件の hook と、SessionStart の自分の 1 件を登録する" "$(cat "${settings}" 2>&1)"
+  ng "settings.json に 9 件の hook と、SessionStart の自分の 1 件を登録する" "$(cat "${settings}" 2>&1)"
 fi
 
 # 14. 同じ option で流し直す → settings.json を書き直さない
@@ -425,9 +448,9 @@ jq '.model = "opus"
   | .hooks.PreToolUse += [{matcher: "Bash", hooks: [{type: "command", command: "other-pre"}]}]' \
   "${settings}" >"${work}/t13-settings.json"
 cp "${work}/t13-settings.json" "${settings}"
-run_case t13 --notion-profile work --dev-tracker
+run_case t13 --notion-profile work --dev-tracker --no-iac-guard
 if [[ $(rc_of t13) == 0 ]] \
-  && [[ $(hook_count "${settings}" SessionStart 'startup|resume' '' "${self_cmd} --quiet --notion-profile work --dev-tracker") == 1 ]] \
+  && [[ $(hook_count "${settings}" SessionStart 'startup|resume' '' "${self_cmd} --quiet --notion-profile work --dev-tracker --no-iac-guard") == 1 ]] \
   && [[ $(jq --arg s "${self_cmd}" '[.hooks.SessionStart[] | .hooks[] | select(.command | startswith($s))] | length' "${settings}") == 1 ]] \
   && [[ $(hook_count "${settings}" SessionStart startup '' other-start) == 1 ]] \
   && [[ $(hook_count "${settings}" PreToolUse Bash '' other-pre) == 1 ]] \
@@ -436,6 +459,11 @@ if [[ $(rc_of t13) == 0 ]] \
   ok "option を変えて流し直すと SessionStart の自分の登録を置き換え、手で足した hook とほかのキーは残す"
 else
   ng "option を変えて流し直すと SessionStart の自分の登録を置き換え、手で足した hook とほかのキーは残す" "$(cat "${settings}" 2>&1)"
+fi
+if [[ $(cat "${h}/.local/state/dotfiles/claude-iac-guard.json" 2>&1) == '{"enable":false}' ]]; then
+  ok "--no-iac-guard なら claude-iac-guard.json の enable を false にする"
+else
+  ng "--no-iac-guard なら claude-iac-guard.json の enable を false にする" "$(cat "${h}/.local/state/dotfiles/claude-iac-guard.json" 2>&1)"
 fi
 
 # 16. settings.json が壊れている → そのファイルは変えずに警告し、ほかは進めて 0
