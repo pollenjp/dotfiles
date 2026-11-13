@@ -44,6 +44,8 @@
 #   ├── skills/        実体。~/.claude/skills の中の symlink と、実体でも pjp-* のものを同名のリンクで写す
 #   ├── agents/        実体。~/.claude/agents の中身を写す (synced を除く。~/.claude/agents が在れば)
 #   ├── commands/      同上
+#   ├── rules/         同上 (bootstrap-claude-skills.sh が ~/.claude/rules へ張った claude-skills の rule。リンクのリンクに
+#   │                  なるが、2 段の symlink の rule も paths 付きで読まれる。Claude Code 2.1.322 で確認)
 #   ├── plugins/       実体。settings.json の enabledPlugins のうち未導入のものを入れる
 #   └── .credentials.json, .claude.json, …   実体。/login と起動のときに Claude Code が作る
 #
@@ -79,7 +81,7 @@
 #   skills/        丸ごとは共有しない。synced/ にアカウントごとの配信 skill が入り、古い版は
 #                  pdf/ などを直下に実体で置く。Nix と claude-skills が置くものは symlink、
 #                  自作の試作は pjp-* (命名規約) なので、その 2 つだけを写す
-#   agents/ など   Claude Code が中身を置かない (synced は念のため除く) ので、全部写す
+#   agents/ など   Claude Code が中身を置かない (synced は念のため除く) ので、全部写す (commands/・rules/ も)
 #   ログイン       .credentials.json / .claude.json は共有しない
 #   hooks/ など    置かない。settings.json が ~/.claude/… の絶対パスで登録している
 #
@@ -102,7 +104,7 @@ migrate_doc="nix/README.md「Claude Code のアカウントを分ける」の「
 # 1 段のリンクで ~/.claude の実体を見せるもの
 shared_links=(CLAUDE.md settings.json projects)
 # 実体の dir を作り、中身をリンクで写すもの
-mirrored_kinds=(skills agents commands)
+mirrored_kinds=(skills agents commands rules)
 
 warned=0
 changed=0

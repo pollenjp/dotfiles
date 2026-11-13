@@ -19,6 +19,7 @@
 #   - git gh で取れなければ ssh (git) で取り直し、setup の最後のまとめにも警告を残す
 #   - 履歴が分岐していたら fast-forward できない警告を出し、ssh で取り直さない。手元の clone のままリンクは張る
 #   - --dry-run では取得も merge もせず、走るコマンド (git_github -C <dir> fetch) を見せるだけ
+#   - rules/ の rule も ~/.claude/rules/ へ 1 つずつ張り (README.md は張らない)、repo から消えた rule の symlink は外す
 #
 # git gh の代わりに偽の git-gh を置く (引数を書き留めて本物の git に渡すか、落ちる)。gh も偽物で、
 # auth token の終了コードだけを返す。偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
@@ -180,6 +181,43 @@ if [[ $(rc "${h}") == 0 && $(head_of "${clone}") == "${local_head}" && ! -e ${h}
   ok "--dry-run では取得も merge もせず、git_github -C <dir> fetch を見せるだけ"
 else
   ng "--dry-run" "$(detail "${h}")"
+fi
+
+# 6. rules/ の rule: ~/.claude/rules/ へ張り (README.md は張らない)、repo から消えたら外す。ケース 4 で分岐させた
+#    clone の履歴に依らないよう、別の bare repo と clone で流す
+rbare="${work}/rules-remote.git"
+rclone="${work}/rules-skills"
+git init --quiet --bare "${rbare}"
+git -C "${rbare}" symbolic-ref HEAD refs/heads/main
+git clone --quiet "${rbare}" "${work}/rules-author" 2>/dev/null
+mkdir -p "${work}/rules-author/rules"
+printf -- '---\npaths:\n  - "**/*.rs"\n---\n# rust\n' >"${work}/rules-author/rules/pjp-rust.md"
+printf '# rules\n' >"${work}/rules-author/rules/README.md"
+git -C "${work}/rules-author" add -A
+git -C "${work}/rules-author" commit --quiet -m rules
+git -C "${work}/rules-author" push --quiet origin HEAD:main
+git clone --quiet "${rbare}" "${rclone}"
+h="${work}/t6"
+mkdir -p "${h}"
+env HOME="${h}" PATH="${fakebin}:${PATH}" GITGH_LOG="${h}/gitgh.log" \
+  "${BASH}" "${script}" --dir "${rclone}" >"${h}/out" 2>"${h}/err"
+echo $? >"${h}/rc"
+linked_rule=$(readlink "${h}/.claude/rules/pjp-rust.md" 2>/dev/null)
+if [[ $(rc "${h}") == 0 && ${linked_rule} == "${rclone}/rules/pjp-rust.md" && ! -e ${h}/.claude/rules/README.md ]]; then
+  ok "rules/ の rule を ~/.claude/rules/ へ張り、README.md は張らない"
+else
+  ng "rules/ の rule を張る" "$(detail "${h}")"$'\n'"rules=$(ls -la "${h}/.claude/rules" 2>&1)"
+fi
+git -C "${work}/rules-author" rm --quiet rules/pjp-rust.md
+git -C "${work}/rules-author" commit --quiet -m 'drop rust'
+git -C "${work}/rules-author" push --quiet origin HEAD:main
+env HOME="${h}" PATH="${fakebin}:${PATH}" GITGH_LOG="${h}/gitgh.log" \
+  "${BASH}" "${script}" --dir "${rclone}" >"${h}/out" 2>"${h}/err"
+echo $? >"${h}/rc"
+if [[ $(rc "${h}") == 0 && ! -L ${h}/.claude/rules/pjp-rust.md && ! -e ${h}/.claude/rules/pjp-rust.md ]]; then
+  ok "repo から消えた rule の symlink は外す"
+else
+  ng "消えた rule を外す" "$(detail "${h}")"$'\n'"rules=$(ls -la "${h}/.claude/rules" 2>&1)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
