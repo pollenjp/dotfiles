@@ -31,7 +31,7 @@ function hr { herdr --remote @args }
 
 # Claude Code。WSL の fish の abbr と bash の alias の c と同じ中身にそろえる。
 # Remote Control を有効にし、権限の確認を飛ばし、effort を max、モデルを Opus 5.5 に固定して
-# claude.exe を起動する。末尾の --remote-control に = で空の値を渡す理由は、fish.nix の同じ節に
+# claude.exe (Install-ClaudeCode が winget で入れたもの) を起動する。末尾の --remote-control に = で空の値を渡す理由は、fish.nix の同じ節に
 # 書いてある。
 function c { claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control= @args }
 
@@ -70,3 +70,13 @@ function pf { & "$HOME\.config\powershell\Start-PortForward.ps1" @args }
 # 中身は同じ場所へ配る Install-TypeClipboard.ps1 (win/README.md の「type-clipboard」)。-Check なら確かめるだけ。
 # GitHub の Release から落とし、SHA-256 が合うときだけ置く。入れ替えが要るときは、先に type-clipboard の窓を閉じる (動いていると止まる)。
 function Install-TypeClipboard { & "$HOME\.config\powershell\Install-TypeClipboard.ps1" @args }
+
+# Windows の ntn (Notion の CLI。winget の Notion.ntn) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-Ntn.ps1 (win/README.md の「ntn」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、動いている ntn を先に終わらせる (動いていると止まる)。setup --update でも揃える。
+function Install-Ntn { & "$HOME\.config\powershell\Install-Ntn.ps1" @args }
+
+# Windows の Claude Code (winget の Anthropic.ClaudeCode) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-ClaudeCode.ps1 (win/README.md の「Claude Code」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、Windows で開いている Claude Code の会話を先に閉じる (動いていると止まる)。setup --update でも揃える。
+function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1" @args }
