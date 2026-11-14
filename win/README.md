@@ -156,7 +156,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 Windows に固定した版で入れているものに新しい版が出たら、`setup --update` の手順 `nix/scripts/bootstrap-windows-pin-updates.sh`
 (order 97) が、その旨だけを短く出す。Claude Code の中で `! ~/dotfiles/setup --self-update --update` を流すと、Claude Code が最後の
 「警告のまとめ」の行を拾い、skill `pjp-dotfiles-win-pin-update` の手順で、猶予ごと (1 日・3 日・7 日) の上げ先の候補を出して、
-上げるか (どの版か・上げないか) を聞く。選んだ版で PR を作るところまでが skill の手順。
+上げるか (どの版か・上げないか) を聞く。選んだ版で PR を作るところまでが skill の手順 ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。
 
 ```text
 ⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code の pjp-dotfiles-win-pin-update skill で、上げるか (どの版か) を決める
