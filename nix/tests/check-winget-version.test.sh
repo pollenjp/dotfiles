@@ -62,6 +62,13 @@
 #   - 新しい winget の版が GitHub に出て 30 日たったら exit 1 で release notes の URL を添える
 #   - GitHub にある版が winget に無いのは、30 日たつまで ※ で待ち、たったら exit 1
 #
+#   JSON の口 (--json [--dates]):
+#   - 固定した版より新しい winget の版を古い順に、見送った版は理由つきで、JSON 1 つだけを stdout に出して exit 0
+#   - --dates が無ければ出た日を引かない (gh は winget-pkgs の一覧の 1 回だけ)。--dates なら、winget-pkgs に載った日
+#     (見送っていない版だけ引く) か GitHub の release の日と URL を入れる
+#   - 新しい版が無ければ newer は空。release の一覧が取れなければ datesChecked を false にし、datesProblem にわけを
+#     入れて exit 0。パッケージが winget-pkgs に無い・gh が無いときは何も出さずに exit 2。--dates だけは exit 2
+#
 # ## 本物の gh を見せない
 #
 # 手元では PATH に本物の gh があり、見えると本物の GitHub API を呼ぶ。要るコマンドだけを
@@ -1352,6 +1359,80 @@ if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" 'GitHub の 2\.
   ok "claude-code: GitHub にあって winget に無い版は、29 日なら ※ で待ち、31 日なら exit 1"
 else
   ng "claude-code: winget に無い版" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
+echo "-- --json"
+
+# j1. --json (出た日なし): 新しい版を古い順に、見送った版は理由つきで出す。gh は winget-pkgs の一覧の 1 回だけ
+pkg=ntn
+d=$(new_case j1 "${n_pin}" '0.23.30 試したら ntn api が落ちた')
+FAKE_GH_CONTENTS=$(contents_json 0.23.27 "${n_pin}" 0.23.29 0.23.30) run_args "${d}" 0 --json ntn "${d}/Install-Ntn.ps1" "${d}/skipped-versions.txt"
+if [[ $(rc "${d}") == 0 && $(grep -c '' "${d}/out") == 1 ]] \
+  && jq -e '.name == "ntn" and .pinned == "0.23.28" and .pinnedListed == true and .datesChecked == false
+    and .datesFrom == "winget" and .readmeSection == "ntn の新しい版が出たとき"
+    and ([.newer[].version] == ["0.23.29", "0.23.30"])
+    and .newer[0].skipped == null and .newer[1].skipped == "試したら ntn api が落ちた"
+    and .newer[0].published == null and .newer[0].age == null' "${d}/out" >/dev/null \
+  && [[ $(grep -c '' "${d}/gh-calls") == 1 ]]; then
+  ok "--json: 新しい版を古い順に、見送った版は理由つきで JSON 1 行に出し、gh は一覧の 1 回だけ"
+else
+  ng "--json" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# j2. --json --dates (winget-pkgs に載った日): 見送っていない版だけ commit の一覧を引き、出た日・日数・URL を入れる
+d=$(new_case j2 "${n_pin}" '0.23.30 試したら ntn api が落ちた')
+put_commits "${d}" 0.23.29 "$(ago 3)"
+FAKE_GH_CONTENTS=$(contents_json "${n_pin}" 0.23.29 0.23.30) run_args "${d}" 0 --json --dates ntn "${d}/Install-Ntn.ps1" "${d}/skipped-versions.txt"
+if [[ $(rc "${d}") == 0 ]] && jq -e --arg day "$(ago 3)" '.datesChecked == true and .datesProblem == null
+    and .newer[0].version == "0.23.29" and .newer[0].published == $day[0:10] and .newer[0].age == 3
+    and .newer[0].url == "https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/Notion/ntn/0.23.29"
+    and .newer[1].published == null' "${d}/out" >/dev/null \
+  && called "${d}" -F 'commits?path=manifests/n/Notion/ntn/0.23.29' && ! called "${d}" -F 'commits?path=manifests/n/Notion/ntn/0.23.30'; then
+  ok "--json --dates: 見送っていない版だけ winget-pkgs に載った日を引き、出た日・日数・URL を入れる"
+else
+  ng "--json --dates (winget)" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# j3. --json --dates (GitHub の release): release の日と URL を入れる。新しい版が無ければ newer は空
+pkg=claude-code
+d=$(new_case j3 "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_next}" FAKE_GH_RELEASES=$(claude_releases_json "v2.1.321|$(ago 5)" "${c_pin_rel}") \
+  run_args "${d}" 0 --json --dates claude-code "${d}/Install-ClaudeCode.ps1" "${d}/skipped-versions.txt"
+d2=$(new_case j3b "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_now}" run_args "${d2}" 0 --json claude-code "${d2}/Install-ClaudeCode.ps1" "${d2}/skipped-versions.txt"
+if [[ $(rc "${d}") == 0 ]] && jq -e '.datesFrom == "github" and .datesChecked == true and .newer[0].version == "2.1.321"
+    and .newer[0].age == 5 and .newer[0].url == "https://github.com/anthropics/claude-code/releases/tag/v2.1.321"' "${d}/out" >/dev/null \
+  && [[ $(rc "${d2}") == 0 ]] && jq -e '.newer == [] and .pinnedListed == true' "${d2}/out" >/dev/null; then
+  ok "--json --dates: GitHub の release の日と URL を入れ、新しい版が無ければ newer は空"
+else
+  ng "--json --dates (github)" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
+# j4. release の一覧が取れない: exit 0 で datesChecked を false にし、datesProblem にわけを入れる
+d=$(new_case j4 "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_next}" FAKE_GH_RELEASES_RC=1 FAKE_GH_RELEASES_ERR='HTTP 403: API rate limit exceeded' \
+  run_args "${d}" 0 --json --dates claude-code "${d}/Install-ClaudeCode.ps1" "${d}/skipped-versions.txt"
+if [[ $(rc "${d}") == 0 ]] && jq -e '.datesChecked == false and (.datesProblem | test("rate limit"))
+    and .newer[0].version == "2.1.321" and .newer[0].published == null' "${d}/out" >/dev/null; then
+  ok "--json --dates: release の一覧が取れなければ、exit 0 で datesChecked を false にし、わけを datesProblem に入れる"
+else
+  ng "--json --dates の失敗" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# j5. gh が無い・パッケージが winget-pkgs に無い: 何も出さずに exit 2。--dates だけは exit 2
+pkg=ntn
+d=$(new_case j5 "${n_pin}" -)
+run_args "${d}" 1 --json ntn "${d}/Install-Ntn.ps1" "${d}/skipped-versions.txt"
+d2=$(new_case j5b "${n_pin}" -)
+FAKE_GH_CONTENTS_RC=1 FAKE_GH_CONTENTS_ERR="gh: Not Found (HTTP 404)" FAKE_GH_CONTENTS="${not_found}" \
+  run_args "${d2}" 0 --json ntn "${d2}/Install-Ntn.ps1" "${d2}/skipped-versions.txt"
+d3=$(new_case j5c "${n_pin}" -)
+run_args "${d3}" 0 --dates ntn "${d3}/Install-Ntn.ps1"
+if [[ $(rc "${d}") == 2 && ! -s ${d}/out && $(rc "${d2}") == 2 && ! -s ${d2}/out ]] && seen "${d2}" -F 'winget-pkgs に無い' \
+  && [[ $(rc "${d3}") == 2 ]] && ! gh_called "${d3}" && seen "${d3}" -F -- '--dates は --json と一緒に'; then
+  ok "--json: gh が無い・パッケージが無いときは何も出さずに exit 2。--dates だけは exit 2"
+else
+  ng "--json の確かめられないとき" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}") $(outerr "${d}") / $(outerr "${d2}") / $(outerr "${d3}")"
 fi
 
 echo "-- 名前"

@@ -5,6 +5,7 @@
 # 追いついているかを確かめる。
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
+#   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 #
 #   名前                    固定した版を書く ps1 (repo の win/ から)                  出た日 (猶予を数える起点)
 #   openssh                 openssh/Install-OpenSSH.ps1                              GitHub (PowerShell/Win32-OpenSSH) の release
@@ -65,6 +66,20 @@
 #   v<X.Y.Z> の形でない)・取った release に winget に載る側のものが無い。出し方や付け方が変わると、版も
 #   出た日も引けない
 #
+# ## JSON の口 (--json)
+#
+# 固定した版より新しい winget の版を、JSON 1 つで stdout に出す (知らせるか・猶予がたったかは決めない)。
+# bootstrap-windows-pin-updates.sh が、setup の知らせ (出た日なし) と、猶予ごとの上げ先の候補 (--dates) に使う。
+#
+#   {"name", "title", "packageId", "pinned", "pinnedFile", "skippedFile", "pinnedListed", "readmeSection",
+#    "datesFrom": "github" | "winget", "datesChecked", "datesProblem": 文字列 | null,
+#    "newer": [{"version", "skipped": 理由 | null, "published": "YYYY-MM-DD" | null, "age": 日数 | null, "url": 文字列 | null}]}
+#
+# newer は固定した版より新しい winget の版を古い順に並べる (見送った版も skipped つきで入れる)。--dates が無ければ
+# 出た日を引かない (gh を打つのは winget-pkgs の一覧の 1 回だけ)。--dates なら、上の「出た日」と同じ取り方で引く
+# (winget-pkgs に載った日を引くのは、見送っていない版だけ)。出た日の一覧が取れなければ datesProblem にわけを入れて
+# exit 0。パッケージが winget-pkgs に無い・確かめられないときは、何も出さずに exit 2。上の出力 (--json の無いとき) は変えない。
+#
 # 確かめられなかったとき (ps1 が読めない・見送りの一覧が壊れている・API の失敗・gh が無い・猶予の日数が
 # 読めない) は exit 2。揃っている扱いにはしない。出た日を引く一覧 (GitHub の release・winget-pkgs の commit)
 # だけが取れないときも、新しい版が猶予の中かを決められないので exit 2。知らせることもあれば exit 1 を優先する。
@@ -98,21 +113,28 @@ Windows で winget の版を固定しているものが、winget の最新に追
 
 使い方:
   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
+  check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
   名前: openssh・herdr・google-japanese-input・ntn・claude-code
   ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。
 
-終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
+  --json:  固定した版より新しい winget の版を JSON で出す (知らせるかは決めない。--dates で出た日も引く)
+
+終了コード: 0 = 知らせることは無い (--json は出せた)、1 = 知らせることがある、2 = 確かめられなかった
 EOS
 }
 
 args=()
+json=0
+with_dates=0
 for arg in "$@"; do
   case ${arg} in
     -h | --help)
       usage
       exit 0
       ;;
+    --json) json=1 ;;
+    --dates) with_dates=1 ;;
     -*)
       echo "不明な引数です: ${arg}" >&2
       usage >&2
@@ -122,6 +144,11 @@ for arg in "$@"; do
   esac
 done
 if ((${#args[@]} < 1 || ${#args[@]} > 3)); then
+  usage >&2
+  exit 2
+fi
+if ((with_dates && ! json)); then
+  echo "--dates は --json と一緒に使います。" >&2
   usage >&2
   exit 2
 fi
@@ -412,6 +439,72 @@ wait_note() {
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-winget-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
 
+# 出た日を引く。date_rows は、出た日の分かる版 (release の鍵。winget の版と同じ形) を出た順 (古い順) に 1 行ずつ、
+# 鍵・出た時刻 (epoch)・出た日・出てからの日数・winget に載る側か (1 / 0)・URL。空の欄が詰まらないよう、区切りは
+# 空白でない \x1f にする。winget-pkgs に載った日を引くのは unskipped (見送っていない新しい版) だけ。
+# 結果は dates_ok・dates_problem・date_rows・latest (github のときだけ) に入れる (--json の口とふだんの出力で使う)
+fetch_dates() {
+  dates_ok=0
+  dates_problem=""
+  date_rows=""
+  latest=""
+  if [[ ${dates_from} == github ]]; then
+    # GitHub の releases。新しい版が出た日と release notes の URL を引くのと、winget に載るのが止まって
+    # いないかを見る。latest は、下書きを除き winget に載る側でいちばん新しく出た release の tag・鍵・
+    # 出てからの日数・URL
+    releases_api="repos/${releases_repo}/releases?per_page=${releases_per_page}"
+    jq_defs="def key: ${release_key}; def channel: ${release_channel};"
+    if gh api "${releases_api}" >"${tmp}/releases.json" 2>"${tmp}/releases.err"; then
+      # latest は、winget に載る側の release が取った中に 1 つも無ければ空 (読めないのとは分けて知らせる)
+      if date_rows=$(jq -r "${jq_defs}"'
+          if type == "array" then . else error("release の一覧ではない") end
+          | [.[] | select((.draft | not) and .published_at != null)
+            | { k: (key), at: (.published_at | fromdateiso8601), day: .published_at[0:10],
+                ch: (channel), url: .html_url }
+            | select(.k != "") ]
+          | sort_by(.at)[]
+          | [ .k, (.at | tostring), .day, ((now - .at) / 86400 | floor | tostring),
+              (if .ch then "1" else "0" end), .url ]
+          | join("\u001f")' "${tmp}/releases.json" 2>/dev/null) \
+        && latest=$(jq -r "${jq_defs}"'
+          [.[] | select((.draft | not) and channel)] | max_by(.published_at) // empty
+          | [ .tag_name, key, ((now - (.published_at | fromdateiso8601)) / 86400 | floor | tostring), .html_url ]
+          | join("\u001f")' "${tmp}/releases.json" 2>/dev/null); then
+        dates_ok=1
+      else
+        dates_problem="GitHub の release の一覧が読めない (${releases_api} の応答が release の一覧ではない)"
+      fi
+    else
+      dates_problem="GitHub の release の一覧が取れない ($(head -n 1 "${tmp}/releases.err"))"
+    fi
+  elif ((${#unskipped[@]})); then
+    # winget-pkgs に載った日。新しい版ごとに、その版のディレクトリの commit の一覧 (新しい順) を引き、
+    # いちばん古い commit (その版を足した commit) の日を取る。URL は manifest のディレクトリ
+    dates_ok=1
+    for v in "${unskipped[@]}"; do
+      commits_api="repos/microsoft/winget-pkgs/commits?path=${manifest_dir}/${v}&per_page=100"
+      if ! gh api "${commits_api}" >"${tmp}/commits.json" 2>"${tmp}/commits.err"; then
+        dates_ok=0
+        dates_problem="winget-pkgs の commit の一覧が取れない ($(head -n 1 "${tmp}/commits.err"))"
+        break
+      fi
+      if ! row=$(jq -r --arg v "${v}" --arg url "${tree_url}/${v}" '
+          if type == "array" then . else error("commit の一覧ではない") end
+          | last // empty
+          | (.commit.committer.date | fromdateiso8601) as $at
+          | [ $v, ($at | tostring), .commit.committer.date[0:10], ((now - $at) / 86400 | floor | tostring), "1", $url ]
+          | join("\u001f")' "${tmp}/commits.json" 2>/dev/null); then
+        dates_ok=0
+        dates_problem="winget-pkgs の commit の一覧が読めない (${commits_api} の応答が commit の一覧ではない)"
+        break
+      fi
+      if [[ -n ${row} ]]; then
+        date_rows+=${row}$'\n'
+      fi
+    done
+  fi
+}
+
 # winget-pkgs の版の一覧。404 はパッケージごと外されたとき (知らせる)。ほかの失敗は確かめられない。
 # gone_why は、パッケージが無いと知らせるときに添える、無いと読んだわけ
 gone=0
@@ -441,6 +534,67 @@ else
   fi
   versions=$(grep -E "${version_re}" <<<"${names}" | sort -V -r || true)
   odd=$(grep -vE "${version_re}" <<<"${names}" || true)
+fi
+
+# --json: 固定した版より新しい winget の版を JSON で出して終わる (ふだんの出力はしない)
+if ((json)); then
+  if ((gone)); then
+    cannot_check "${package_id} が winget-pkgs に無い (${gone_why})。新しい版を出せない"
+  fi
+  newer_all=()
+  unskipped=()
+  while IFS= read -r v; do
+    if [[ -n ${v} ]] && newer_than "${v}" "${pinned}"; then
+      newer_all=("${v}" "${newer_all[@]}")
+      if ! skip_reason "${v}" >/dev/null; then
+        unskipped+=("${v}")
+      fi
+    fi
+  done <<<"${versions}"
+  dates_ok=0
+  dates_problem=""
+  date_rows=""
+  latest=""
+  if ((with_dates)); then
+    fetch_dates
+    # winget-pkgs に載った日は、新しい版が無ければ引かない (引くものが無いので、引けたことにする)
+    if [[ ${dates_from} == winget && ${#unskipped[@]} == 0 ]]; then
+      dates_ok=1
+    fi
+  fi
+  : >"${tmp}/newer.jsonl"
+  for v in "${newer_all[@]}"; do
+    reason=$(skip_reason "${v}") || reason=""
+    day=""
+    age=""
+    url=""
+    if ((with_dates && dates_ok)) && row=$(dated "${v}"); then
+      IFS=$'\x1f' read -r _ _ day age _ url <<<"${row}"
+    fi
+    jq -cn --arg v "${v}" --arg reason "${reason}" --arg day "${day}" --arg age "${age}" --arg url "${url}" '{
+      version: $v,
+      skipped: (if $reason == "" then null else $reason end),
+      published: (if $day == "" then null else $day end),
+      age: (if $age == "" then null else ($age | tonumber) end),
+      url: (if $url == "" then null else $url end)
+    }' >>"${tmp}/newer.jsonl"
+  done
+  listed=false
+  if grep -qxF "${pinned}" <<<"${versions}"; then
+    listed=true
+  fi
+  checked=false
+  if ((with_dates && dates_ok)); then
+    checked=true
+  fi
+  jq -cn --slurpfile newer "${tmp}/newer.jsonl" --arg name "${name}" --arg title "${title}" --arg id "${package_id}" \
+    --arg pinned "${pinned}" --arg ps1 "${ps1_label}" --arg skipped "${skipped_label}" --argjson listed "${listed}" \
+    --arg section "${readme_section}" --arg from "${dates_from}" --argjson checked "${checked}" --arg problem "${dates_problem}" '{
+      name: $name, title: $title, packageId: $id, pinned: $pinned, pinnedFile: $ps1, skippedFile: $skipped,
+      pinnedListed: $listed, readmeSection: $section, datesFrom: $from, datesChecked: $checked,
+      datesProblem: (if $problem == "" then null else $problem end), newer: $newer
+    }'
+  exit 0
 fi
 
 findings=()
@@ -505,68 +659,7 @@ if [[ -n ${versions} ]]; then
   done <<<"${versions}"
 fi
 
-# 出た日を引く。date_rows は、出た日の分かる版 (release の鍵。winget の版と同じ形) を出た順 (古い順) に 1 行ずつ、
-# 鍵・出た時刻 (epoch)・出た日・出てからの日数・winget に載る側か (1 / 0)・URL。空の欄が詰まらないよう、区切りは
-# 空白でない \x1f にする
-dates_ok=0
-dates_problem=""
-date_rows=""
-latest=""
-if [[ ${dates_from} == github ]]; then
-  # GitHub の releases。新しい版が出た日と release notes の URL を引くのと、winget に載るのが止まって
-  # いないかを見る。latest は、下書きを除き winget に載る側でいちばん新しく出た release の tag・鍵・
-  # 出てからの日数・URL
-  releases_api="repos/${releases_repo}/releases?per_page=${releases_per_page}"
-  jq_defs="def key: ${release_key}; def channel: ${release_channel};"
-  if gh api "${releases_api}" >"${tmp}/releases.json" 2>"${tmp}/releases.err"; then
-    # latest は、winget に載る側の release が取った中に 1 つも無ければ空 (読めないのとは分けて知らせる)
-    if date_rows=$(jq -r "${jq_defs}"'
-        if type == "array" then . else error("release の一覧ではない") end
-        | [.[] | select((.draft | not) and .published_at != null)
-          | { k: (key), at: (.published_at | fromdateiso8601), day: .published_at[0:10],
-              ch: (channel), url: .html_url }
-          | select(.k != "") ]
-        | sort_by(.at)[]
-        | [ .k, (.at | tostring), .day, ((now - .at) / 86400 | floor | tostring),
-            (if .ch then "1" else "0" end), .url ]
-        | join("\u001f")' "${tmp}/releases.json" 2>/dev/null) \
-      && latest=$(jq -r "${jq_defs}"'
-        [.[] | select((.draft | not) and channel)] | max_by(.published_at) // empty
-        | [ .tag_name, key, ((now - (.published_at | fromdateiso8601)) / 86400 | floor | tostring), .html_url ]
-        | join("\u001f")' "${tmp}/releases.json" 2>/dev/null); then
-      dates_ok=1
-    else
-      dates_problem="GitHub の release の一覧が読めない (${releases_api} の応答が release の一覧ではない)"
-    fi
-  else
-    dates_problem="GitHub の release の一覧が取れない ($(head -n 1 "${tmp}/releases.err"))"
-  fi
-elif ((${#unskipped[@]})); then
-  # winget-pkgs に載った日。新しい版ごとに、その版のディレクトリの commit の一覧 (新しい順) を引き、
-  # いちばん古い commit (その版を足した commit) の日を取る。URL は manifest のディレクトリ
-  dates_ok=1
-  for v in "${unskipped[@]}"; do
-    commits_api="repos/microsoft/winget-pkgs/commits?path=${manifest_dir}/${v}&per_page=100"
-    if ! gh api "${commits_api}" >"${tmp}/commits.json" 2>"${tmp}/commits.err"; then
-      dates_ok=0
-      dates_problem="winget-pkgs の commit の一覧が取れない ($(head -n 1 "${tmp}/commits.err"))"
-      break
-    fi
-    if ! row=$(jq -r --arg v "${v}" --arg url "${tree_url}/${v}" '
-        if type == "array" then . else error("commit の一覧ではない") end
-        | last // empty
-        | (.commit.committer.date | fromdateiso8601) as $at
-        | [ $v, ($at | tostring), .commit.committer.date[0:10], ((now - $at) / 86400 | floor | tostring), "1", $url ]
-        | join("\u001f")' "${tmp}/commits.json" 2>/dev/null); then
-      dates_ok=0
-      dates_problem="winget-pkgs の commit の一覧が読めない (${commits_api} の応答が commit の一覧ではない)"
-      break
-    fi
-    if [[ -n ${row} ]]; then
-      date_rows+=${row}$'\n'
-    fi
-  done
-fi
+fetch_dates
 
 # 固定した版より新しく、見送っていない版。出てから猶予の日数がたつまでは待つ。数えるのは
 # いちばん早く出た版から (遅れ始めてから数える)。出た日が分からない版があれば待たない
