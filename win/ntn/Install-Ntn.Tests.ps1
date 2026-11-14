@@ -103,9 +103,14 @@ Test-Case '取得だけを確かめる winget download の引数' "download --id
 
 # Resolve-NtnOnPath: PATH を前から見て、最初に見つかった ntn.exe
 $exists = { param($p) $p -in @('C:\B\ntn.exe', 'C:\A\ntn.exe') }
-Test-Case '前から見て最初に見つかったもの' 'C:\A\ntn.exe' { Resolve-NtnOnPath -PathValue 'C:\A;C:\B' -Name 'ntn.exe' -Exists $exists }
-Test-Case '末尾の \・引用符・空白・空の要素を飛ばす' 'C:\B\ntn.exe' { Resolve-NtnOnPath -PathValue ';; "C:\Z\" ; C:\B\ ;' -Name 'ntn.exe' -Exists $exists }
-Test-Case 'どこにも無ければ空' '' { Resolve-NtnOnPath -PathValue 'C:\Z;C:\Y' -Name 'ntn.exe' -Exists $exists }
+Test-Case '前から見て最初に見つかったもの' 'C:\A\ntn.exe' { Resolve-NtnOnPath -PathValue 'C:\A;C:\B' -Names @('ntn.exe') -Exists $exists }
+Test-Case '末尾の \・引用符・空白・空の要素を飛ばす' 'C:\B\ntn.exe' { Resolve-NtnOnPath -PathValue ';; "C:\Z\" ; C:\B\ ;' -Names @('ntn.exe') -Exists $exists }
+Test-Case 'どこにも無ければ空' '' { Resolve-NtnOnPath -PathValue 'C:\Z;C:\Y' -Names @('ntn.exe') -Exists $exists }
+$npm = 'C:\Users\u\AppData\Roaming\npm'
+$existsNpm = { param($p) $p -in @("$npm\ntn.cmd", "$ExeDir\ntn.exe") }
+Test-Case 'npm の global の ntn.cmd が前のディレクトリにあれば、それが引かれる' "$npm\ntn.cmd" { Resolve-NtnOnPath -PathValue "$npm;$ExeDir" -Names @('ntn.exe', 'ntn.cmd', 'ntn.bat', 'ntn.ps1') -Exists $existsNpm }
+Test-Case '同じディレクトリなら .exe を先に見る' "$ExeDir\ntn.exe" { Resolve-NtnOnPath -PathValue "$ExeDir" -Names @('ntn.exe', 'ntn.cmd') -Exists { param($p) $true } }
+Test-Case 'npm の ntn.cmd は other' 'other' { Get-NtnPathKind -Resolved "$npm\ntn.cmd" -ExeDir $ExeDir -LinksDir $Links }
 
 # Get-NtnPathKind: PATH で引かれる ntn.exe がどこのものか
 Test-Case 'winget の置き場所の ntn.exe なら winget' 'winget' { Get-NtnPathKind -Resolved "$ExeDir\ntn.exe" -ExeDir $ExeDir -LinksDir $Links }

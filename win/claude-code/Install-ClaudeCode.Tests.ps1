@@ -93,7 +93,9 @@ Test-Case 'change は uninstall → install' "uninstall $common|install $common 
 
 # Resolve-ClaudeCodeOnPath・Get-ClaudeCodePathKind: PATH で引かれる claude.exe がどこのものか
 $exists = { param($p) $p -in @($Native, "$Pkg\claude.exe") }
-Test-Case 'native の installer の置き場所が先なら、それが引かれる' $Native { Resolve-ClaudeCodeOnPath -PathValue "C:\Users\u\.local\bin;$Pkg" -Name 'claude.exe' -Exists $exists }
+Test-Case 'native の installer の置き場所が先なら、それが引かれる' $Native { Resolve-ClaudeCodeOnPath -PathValue "C:\Users\u\.local\bin;$Pkg" -Names @('claude.exe') -Exists $exists }
+$npm = 'C:\Users\u\AppData\Roaming\npm'
+Test-Case 'npm の global の claude.cmd が前のディレクトリにあれば、それが引かれる' "$npm\claude.cmd" { Resolve-ClaudeCodeOnPath -PathValue "$npm;$Pkg" -Names @('claude.exe', 'claude.cmd', 'claude.bat', 'claude.ps1') -Exists { param($p) $p -in @("$npm\claude.cmd", "$Pkg\claude.exe") } }
 Test-Case 'winget の置き場所の claude.exe なら winget' 'winget' { Get-ClaudeCodePathKind -Resolved "$Pkg\claude.exe" -ExeDir $Pkg -LinksDir $Links }
 Test-Case 'WinGet\Links の symlink なら winget' 'winget' { Get-ClaudeCodePathKind -Resolved "$Links\claude.exe" -ExeDir $Pkg -LinksDir $Links }
 Test-Case 'native の installer (%USERPROFILE%\.local\bin) なら other' 'other' { Get-ClaudeCodePathKind -Resolved $Native -ExeDir $Pkg -LinksDir $Links }

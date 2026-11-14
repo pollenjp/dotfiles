@@ -109,16 +109,19 @@ function Get-WingetDownloadArguments {
         '--accept-source-agreements', '--disable-interactivity')
 }
 
-# PATH (; 区切り) を前から見て、$Name が最初に見つかったパスを返す。無ければ $null。
-# $Exists はファイルがあるかを答える scriptblock (テストでは偽物を渡す)。
+# PATH (; 区切り) を前から見て、$Names のどれかが最初に見つかったパスを返す。無ければ $null。
+# PowerShell は PATH のディレクトリの順に、.exe だけでなく .cmd・.bat・.ps1 も引く (npm の global は ntn.cmd を置く) ので、
+# ディレクトリごとに名前を並べて見る。$Exists はファイルがあるかを答える scriptblock (テストでは偽物を渡す)。
 # 区切りは \ で組む (Linux の pwsh で流すテストでも同じ文字列になるよう、Join-Path は使わない)
 function Resolve-NtnOnPath {
-    param([string]$PathValue, [string]$Name, [scriptblock]$Exists)
+    param([string]$PathValue, [string[]]$Names, [scriptblock]$Exists)
     foreach ($entry in ($PathValue -split ';')) {
         $dir = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\')
         if (-not $dir) { continue }
-        $candidate = "$dir\$Name"
-        if (& $Exists $candidate) { return $candidate }
+        foreach ($name in $Names) {
+            $candidate = "$dir\$name"
+            if (& $Exists $candidate) { return $candidate }
+        }
     }
     $null
 }
@@ -307,7 +310,7 @@ function Get-NtnState {
     $versions = @(Get-WingetVersionList -Lines $show.Lines)
     $latest = $null
     if ($versions.Count -gt 0) { $latest = $versions[0] }
-    $resolved = Resolve-NtnOnPath -PathValue (Get-NtnPathValue) -Name 'ntn.exe' -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    $resolved = Resolve-NtnOnPath -PathValue (Get-NtnPathValue) -Names @('ntn.exe', 'ntn.cmd', 'ntn.bat', 'ntn.ps1') -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
     [pscustomobject]@{
         Exists       = $exists
         Installed    = $installed
