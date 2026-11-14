@@ -410,6 +410,8 @@
           bootstrap-windows-herdr-app-test = scriptTest "bootstrap-windows-herdr-app" ./scripts/bootstrap-windows-herdr-app.sh;
           bootstrap-windows-ntn-test = scriptTest "bootstrap-windows-ntn" ./scripts/bootstrap-windows-ntn.sh;
           bootstrap-windows-claude-code-test = scriptTest "bootstrap-windows-claude-code" ./scripts/bootstrap-windows-claude-code.sh;
+          # 隣の check-winget-version.sh・check-herdr-app-version.sh を呼ぶ script だが、テストは script を写した場所に偽物を置く
+          bootstrap-windows-pin-updates-test = scriptTest "bootstrap-windows-pin-updates" ./scripts/bootstrap-windows-pin-updates.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
