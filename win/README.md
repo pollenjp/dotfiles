@@ -97,8 +97,9 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) は、新しい版が出ても手元では
-`-Check` の ※ の行でしか見えない (`setup --update` を流したときだけ)。そこで GitHub Actions の
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) は、新しい版が出ると `setup --update` が
+短く知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)。上げるかは Claude Code に聞かれて決める)。
+それとは別に、流さない間も気付けるよう、GitHub Actions の
 `winget-versions` ([`.github/workflows/winget-versions.yml`](../.github/workflows/winget-versions.yml)) が
 週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で確かめ、新しい版が出て 30 日たつと落ちて知らせる
 ([TKT-110](https://app.notion.com/p/Windows-OpenSSH-Win32-OpenSSH-3f179149a66f81eaa691e12ef3e0b86c)、
@@ -149,6 +150,44 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
   「消してよい」と出す)。このファイルは manifest に無いので Windows へは配らない
 - 猶予がたった新しい版がある間は、別の理由で ps1 や script を直す PR も赤くなる (merge は止まらない)。
   どれか 1 つを変えた PR でも、全部の job が走る
+
+## 固定した版より新しい版の知らせ
+
+Windows に固定した版で入れているものに新しい版が出たら、`setup --update` の手順 `nix/scripts/bootstrap-windows-pin-updates.sh`
+(order 97) が、その旨だけを短く出す。Claude Code の中で `! ~/dotfiles/setup --self-update --update` を流すと、Claude Code が最後の
+「警告のまとめ」の行を拾い、skill `pjp-dotfiles-win-pin-update` の手順で、猶予ごと (1 日・3 日・7 日) の上げ先の候補を出して、
+上げるか (どの版か・上げないか) を聞く。選んだ版で PR を作るところまでが skill の手順。
+
+```text
+⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code の pjp-dotfiles-win-pin-update skill で、上げるか (どの版か) を決める
+    Windows の ntn: 0.23.28 → 0.23.29・0.23.30
+    Windows の herdr-app: 0.1.13 → 0.1.14・0.1.15
+```
+
+| 名前 | 固定した版 | 新しい版の一覧と出た日 | 見送りの一覧 |
+| --- | --- | --- | --- |
+| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
+| `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
+
+- 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code は、入れるマシン
+  (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`) でだけ確かめる
+- 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
+  1 行だけ (警告のまとめには載らない)
+- setup では出た日を引かない (GitHub API を名前ごとに 1〜2 回。合わせて数秒)。gh のログインが要る
+- 確かめられないとき (gh が無い・ログインしていない・ネットに出られない・API の制限) は、setup を止めずに、確かめられなかった名前と
+  わけを 1 行出す (警告のまとめにも載る)
+- 猶予ごとの上げ先の候補は、skill が次を打って出す (手で打ってもよい):
+
+  ```sh
+  nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
+  ```
+
+  名前ごとに、新しい版 (出た日・何日前・URL、見送った版は理由)・猶予ごとの上げ先 (その日数以上たった、見送っていない新しい版の
+  うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す
+- 見送ると、今出ている新しい版は次から setup も CI も知らせない (もっと新しい版が出たらまた知らせる)
+- 対象の外: type-clipboard (自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。[後述](#type-clipboard-の新しい版を出したとき))
+  と PowerToys (版を固定しない)
+- 週 1 回の CI (`winget-versions`・`herdr-app-installers`) は今までどおり、猶予 (30 日・7 日) がたつと落ちて知らせる
 
 ## PowerShell のテスト
 
@@ -568,6 +607,10 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
    上がる。Linux のホストでは、home-manager の switch が新しい版の herdr-core を入れる (動いている core は、次に起動したときから新しい版)。
    machine としてつなぐホストは続けて上げる (版が混ざると、つなぐときに写し直しを聞かれる)
 5. `-Check` が「揃っている」になり、app が起動することを確かめる
+
+見送るとき (1・2 で上げないと決めたとき): `nix/pkgs/herdr-core/skipped-versions.txt` に「app か core・版・理由」を 1 行足して commit する
+(`app 0.1.14 core の generation 2 と組まないと話せない` など)。その版では `version` の job も setup の知らせも黙り、もっと新しい版が
+出るとまた知らせる。固定した版以下になった行は消してよい (job が知らせる)。
 
 ### 固定した版の成果物が変わったとき
 
