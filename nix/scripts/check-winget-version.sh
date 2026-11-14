@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力) が、winget の最新に
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) が、winget の最新に
 # 追いついているかを確かめる。
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
@@ -10,6 +10,8 @@
 #   openssh                 openssh/Install-OpenSSH.ps1                              GitHub (PowerShell/Win32-OpenSSH) の release
 #   herdr                   herdr/Install-Herdr.ps1                                  GitHub (herdrdev/herdr) の安定版の release
 #   google-japanese-input   google-japanese-input/Install-GoogleJapaneseInput.ps1    winget-pkgs に載った日
+#   ntn                     ntn/Install-Ntn.ps1                                      winget-pkgs に載った日
+#   claude-code             claude-code/Install-ClaudeCode.ps1                       GitHub (anthropics/claude-code) の release
 #
 # ps1 から、-Version の既定値 (固定した版) と $packageId (winget のパッケージ ID) を読む。どちらも
 # 書くのはそこ 1 か所だけ。それを winget-pkgs (winget の索引の元) の manifests/<頭文字>/<ID の . を / に>/<版>/
@@ -32,6 +34,10 @@
 # - google-japanese-input: GitHub の release が無いので、その版のディレクトリを winget-pkgs に足した commit
 #   (commits?path=… のいちばん古いもの) の日。manifest の ReleaseDate は版によって無い (2026-10 の時点で
 #   10 個のうち 1 個)
+# - ntn: Google 日本語入力と同じく、winget-pkgs に足した commit の日 (ntn は GitHub の release を出さず、配布物は
+#   ntn.dev に置く)。winget で入れられるようになった日なので、上流の公開の日より遅いか同じ
+# - claude-code: GitHub (anthropics/claude-code) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。
+#   winget の版 (X.Y.Z) と、tag の v の後ろで突き合わせる。winget には数日遅れて載り、載らない版もある
 #
 # ## 知らせるもの (exit 1)
 #
@@ -44,9 +50,9 @@
 # - 固定した版より新しい版が winget にあり、見送りの一覧にも無い。上げるか見送るかの手順は win/README.md の
 #   「<名前> の新しい版が出たとき」。出た日が分からない (合う release や commit が無い) ときは待たない
 # - GitHub の release の版が、winget のこのパッケージの最新より新しいのに winget に無い (見送った版は除く。
-#   openssh と herdr だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
+#   openssh・herdr・claude-code だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
 #   Microsoft.OpenSSH.Preview ができてから、Beta には 9.5.0.0 より新しい版が来なかった)。比べるのは winget に
-#   載る側の release だけ (どちらも prerelease を除く)。新しいかは版で比べる。google-japanese-input は比べる
+#   載る側の release だけ (どれも prerelease を除く)。新しいかは版で比べる。google-japanese-input と ntn は比べる
 #   相手が無く、ID が移っても気付けない
 #
 # 次は新しい版の知らせではなく、壊れていることの知らせなので、猶予を置かない。
@@ -93,7 +99,7 @@ Windows で winget の版を固定しているものが、winget の最新に追
 使い方:
   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
-  名前: openssh・herdr・google-japanese-input
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code
   ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。
 
 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
@@ -188,8 +194,40 @@ case ${name} in
     upgrade_after='。この PC で上げて設定を読み書きできるかを確かめてから commit する'
     dates_from=winget
     ;;
+  ntn)
+    title='Windows の ntn'
+    ps1_name=Install-Ntn.ps1
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=0.23.28
+    readme_section='ntn の新しい版が出たとき'
+    search_word=ntn
+    upgrade_before=''
+    upgrade_after=''
+    # ntn は GitHub の release を出さない (配布物は ntn.dev)。winget-pkgs に載った日から数える
+    dates_from=winget
+    ;;
+  claude-code)
+    title='Windows の Claude Code'
+    ps1_name=Install-ClaudeCode.ps1
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=2.1.318
+    readme_section='Claude Code の新しい版が出たとき'
+    search_word=ClaudeCode
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    dates_from=github
+    releases_repo=anthropics/claude-code
+    # 1 日に 1 つほど出るので、30 件では 1 か月ほどしか遡れない
+    releases_per_page=100
+    # 鍵は tag の v の後ろ (winget の版と同じ X.Y.Z の形)。herdr と同じく、GitHub の最新の行にもこの形で出す
+    release_key='(.tag_name // "" | capture("^v(?<k>[0-9]+\\.[0-9]+\\.[0-9]+)$").k) // ""'
+    release_channel='.prerelease | not'
+    channel_desc='prerelease でない release'
+    key_missing='の tag が v<X.Y.Z> の形でない'
+    moved_example='winget に載らなくなった・別の ID へ移った、など'
+    ;;
   *)
-    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input のどれか)" >&2
+    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code のどれか)" >&2
     usage >&2
     exit 2
     ;;
@@ -580,7 +618,7 @@ if ((${#unskipped[@]})); then
   fi
 fi
 
-# GitHub と比べる (openssh と herdr)。winget に載る側の release で、winget のこのパッケージの最新より新しいのに
+# GitHub と比べる (openssh・herdr・claude-code)。winget に載る側の release で、winget のこのパッケージの最新より新しいのに
 # winget に無い版 (見送った版は除く) を、猶予がたったら知らせる
 if [[ ${dates_from} == github ]]; then
   if ((dates_ok)) && [[ -z ${latest} ]]; then
