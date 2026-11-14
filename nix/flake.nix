@@ -408,6 +408,7 @@
               '';
           bootstrap-windows-herdr-test = scriptTest "bootstrap-windows-herdr" ./scripts/bootstrap-windows-herdr.sh;
           bootstrap-windows-herdr-app-test = scriptTest "bootstrap-windows-herdr-app" ./scripts/bootstrap-windows-herdr-app.sh;
+          bootstrap-windows-ntn-test = scriptTest "bootstrap-windows-ntn" ./scripts/bootstrap-windows-ntn.sh;
           video-offer-nudge-test = scriptTest "video-offer-nudge" ./files/claude/hooks/video-offer-nudge.sh;
           run-through-nudge-test = scriptTest "run-through-nudge" ./files/claude/hooks/run-through-nudge.sh;
           ssh-agent-notice-test = scriptTest "ssh-agent-notice" ./files/claude/hooks/ssh-agent-notice.sh;
