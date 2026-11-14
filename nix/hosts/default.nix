@@ -53,6 +53,8 @@
 # (windowsUserName が要る。dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
 # そのうえで wsl.windowsFiles.typeClipboard.enable = true にすると、Windows に自作の type-clipboard を
 # 固定した版で入れる (既定は入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
+# ntn と Claude Code は既定で入れる (winget で固定した版。入れないマシンは wsl.windowsFiles.ntn.enable = false・
+# wsl.windowsFiles.claudeCode.enable = false。win/README.md の「ntn」「Claude Code」)。
 { mkHome }:
 
 {
