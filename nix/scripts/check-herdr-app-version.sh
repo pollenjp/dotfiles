@@ -3,7 +3,8 @@
 #
 # herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
 #
-#   check-herdr-app-version.sh [<releases.json>]
+#   check-herdr-app-version.sh [<releases.json> [<skipped-versions.txt>]]
+#   check-herdr-app-version.sh --json [--dates] [<releases.json> [<skipped-versions.txt>]]
 #
 # 固定した版と sha256 は nix/pkgs/herdr-core/releases.json (書くのはそこ 1 か所だけ)。app の版と windows-x86_64 の sha256、
 # core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持つ。Windows の
@@ -29,6 +30,21 @@
 #    替えられない (公式から上がる)。文字があるかしか見ないので、上げる前に差分を読む。猶予の中の版だけなら、※ の行で
 #    知らせて exit 0 (GitHub Actions の中なら ::notice の行にも)。成果物が無い (404) 版は数えず、HEAD のほかの失敗 (5xx・
 #    403・つながらない・Last-Modified が無い) は確かめられない (exit 2)
+#
+# ## 見送りの一覧
+#
+# releases.json の隣の skipped-versions.txt (nix/pkgs/herdr-core/skipped-versions.txt)。1 行に 1 つ、「app か core・版・理由」を
+# 空白で区切って書く。# で始まる行と空行は読まない。見送った版は 3. の数えに入れず (猶予の中の ※ にも出さない)、
+# 「見送った」と 1 行出す。固定した版以下になった行は、消してよいと出すだけで落とさない。書き損じの行は確かめられない (exit 2)。
+#
+# ## JSON の口 (--json)
+#
+# 固定した版より新しい版 (3. と同じく、tag で並べて Windows の成果物が releases.herdr.dev にあるもの。見送った版も理由つきで
+# 入れる) を、app と core の 2 行の JSON で stdout に出す (形は check-winget-version.sh --json と同じ。name は herdr-app と
+# herdr-core、packageId は null、datesFrom は last-modified)。1. と 2. (固定した版の成果物の照らし直し) はしない。
+# 成果物があるかを HEAD で見るので、出た日 (Last-Modified) は --dates の有無によらず入れる (--dates は受けるだけ)。
+# HEAD が 404 のほかで失敗した版は、出た日を null にして datesProblem にわけを入れる。tag が読めなければ、何も出さずに exit 2。
+# bootstrap-windows-pin-updates.sh が、setup の知らせと猶予ごとの上げ先の候補に使う。
 #
 # 署名 (Authenticode) はここでは見ない。Linux の信頼の束に Microsoft のコード署名の root が無いので、Windows の
 # Install-HerdrApp.ps1 が入れる前と -Check で見る。
@@ -63,21 +79,28 @@ usage() {
 herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げられる新しい版を知らせる。
 
 使い方:
-  check-herdr-app-version.sh [<releases.json>]
+  check-herdr-app-version.sh [<releases.json> [<skipped-versions.txt>]]
+  check-herdr-app-version.sh --json [--dates] [<releases.json> [<skipped-versions.txt>]]
 
   releases.json の既定は repo の nix/pkgs/herdr-core/releases.json (固定した版と sha256 の 1 か所)。
+  見送りの一覧の既定は releases.json の隣の skipped-versions.txt (1 行に「app か core・版・理由」)。
+  --json: 固定した版より新しい版を、app と core の 2 行の JSON で出す (成果物の照らし直しはしない)
 
 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
 EOS
 }
 
 args=()
+json=0
 for arg in "$@"; do
   case ${arg} in
     -h | --help)
       usage
       exit 0
       ;;
+    --json) json=1 ;;
+    # 成果物があるかを HEAD で見るので、出た日はいつも入れる (check-winget-version.sh と同じ引数で呼べるよう受けるだけ)
+    --dates) ;;
     -*)
       echo "不明な引数です: ${arg}" >&2
       usage >&2
@@ -86,11 +109,15 @@ for arg in "$@"; do
     *) args+=("${arg}") ;;
   esac
 done
-if ((${#args[@]} > 1)); then
+if ((${#args[@]} > 2)); then
   usage >&2
   exit 2
 fi
 releases_file=${args[0]:-${repo_dir}/nix/pkgs/herdr-core/releases.json}
+skipped_file=${args[1]:-$(dirname "${releases_file}")/skipped-versions.txt}
+# 出力では、repo の中のファイルを repo からのパスで見せる (CI ではランナーの長いパスになるため)
+releases_label=${releases_file#"${repo_dir}/"}
+skipped_label=${skipped_file#"${repo_dir}/"}
 
 # GitHub Actions の中なら、実行の画面の先頭に出る ::<$1> の行 (error か notice) を出す (% と改行は決まりどおりに書き換える)
 annotate() {
@@ -155,11 +182,46 @@ if [[ -n ${bad} ]]; then
   annotate error "releases.json から固定した版と sha256 を読めません: ${releases_file}"
   exit 2
 fi
+
+# 見送りの一覧 (無ければ空)。skipped["<app か core>:<版>"] が理由。win/ の ps1 と同じく BOM 付き・CRLF で保存されても読む
+declare -A skipped=()
+skipped_keys=()
+if [[ -f ${skipped_file} ]]; then
+  n=0
+  while IFS= read -r line || [[ -n ${line} ]]; do
+    n=$((n + 1))
+    if ((n == 1)); then
+      line=${line#$'\xef\xbb\xbf'}
+    fi
+    line=${line%$'\r'}
+    if [[ ${line} =~ ^[[:space:]]*(#|$) ]]; then
+      continue
+    fi
+    read -r kind v reason <<<"${line}"
+    if [[ ! ${kind} =~ ^(app|core)$ || ! ${v} =~ ${version_re} || -z ${reason} ]]; then
+      echo "!! 確かめられなかった: 見送りの一覧の ${n} 行目が読めません (${skipped_label}): ${line}" >&2
+      echo "   1 行に「app か core・版・理由」を空白で区切って書く (例: app 0.1.14 試したら窓が開かなかった)。" >&2
+      annotate error "確かめられなかった: 見送りの一覧の ${n} 行目が読めません (${skipped_label})"
+      exit 2
+    fi
+    skipped["${kind}:${v}"]=${reason}
+    skipped_keys+=("${kind}:${v}")
+  done <"${skipped_file}"
+fi
+
+# 部品 $1 (app か core) の版 $2 を見送っていれば、理由を出して 0 を返す
+skip_reason() {
+  [[ -n ${skipped["$1:$2"]+set} ]] || return 1
+  printf '%s' "${skipped["$1:$2"]}"
+}
+
 core_pins=''
 for target in "${core_targets[@]}"; do
   core_pins+="${core_pins:+・}${target} ${pinned_sha["core:${target}"]:0:12}…"
 done
-echo "固定した版: app ${app_version} (sha256 ${pinned_sha["app:windows-x86_64"]:0:12}…)・core ${core_version} (generation ${core_generation}。sha256 ${core_pins})"
+if ((! json)); then
+  echo "固定した版: app ${app_version} (sha256 ${pinned_sha["app:windows-x86_64"]:0:12}…)・core ${core_version} (generation ${core_generation}。sha256 ${core_pins})"
+fi
 
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/check-herdr-app-version.XXXXXX")
 trap 'rm -rf "${tmp}"' EXIT
@@ -279,6 +341,11 @@ check_one() {
   mapfile -t listed_versions <<<"${versions}"
   for v in "${listed_versions[@]}"; do
     newer_than "${v}" "${pinned}" || continue
+    # 見送った版は数えない (成果物の HEAD も打たない)
+    if reason=$(skip_reason "${kind}" "${v}"); then
+      echo "  ${kind} ${v} は見送った (${reason})"
+      continue
+    fi
     rc=0
     t=$(published_at "$(artifact_url "${kind}" "${v}" windows-x86_64)") || rc=$?
     # 版つきの成果物が無い版 (Windows の成果物を出さなかった版) は数えない
@@ -341,8 +408,91 @@ check_one() {
   fi
 }
 
+# --json: 部品 1 つぶんの JSON の行を $5 に書く。$1: app か core、$2: 固定した版、$3: GitHub の repo、$4: name。
+# tag が読めなければ 1 を返す (何も書かない)
+json_component() {
+  local kind=$1 pinned=$2 repo=$3 jname=$4 versions v t rc reason day age listed=false checked=true problem=''
+  # local の 1 行の中では、前の名前の値はまだ入っていない (語の展開が先に済む) ので分ける
+  local items="${tmp}/${kind}-newer.jsonl"
+  local listed_versions=()
+  if ! versions=$(tag_versions "${repo}"); then
+    echo "!! 確かめられなかった: GitHub の ${repo} の tag を読めない (gh api repos/${repo}/tags)" >&2
+    return 1
+  fi
+  mapfile -t listed_versions <<<"${versions}"
+  : >"${items}"
+  for v in "${listed_versions[@]}"; do
+    if [[ ${v} == "${pinned}" ]]; then
+      listed=true
+    fi
+    if [[ -z ${v} ]] || ! newer_than "${v}" "${pinned}"; then
+      continue
+    fi
+    reason=''
+    day=''
+    age=''
+    if reason=$(skip_reason "${kind}" "${v}"); then
+      :
+    else
+      reason=''
+      rc=0
+      t=$(published_at "$(artifact_url "${kind}" "${v}" windows-x86_64)") || rc=$?
+      # Windows の成果物が無い版は入れない
+      if ((rc == 3)); then
+        continue
+      fi
+      if ((rc == 0)); then
+        day=$(date -u -d "@${t}" '+%Y-%m-%d')
+        age=$(((now - t) / 86400))
+      else
+        checked=false
+        problem=${problem:-"${kind} ${v} の成果物の公開日 (HEAD の Last-Modified) を読めない: $(artifact_url "${kind}" "${v}" windows-x86_64)"}
+      fi
+    fi
+    jq -cn --arg v "${v}" --arg reason "${reason}" --arg day "${day}" --arg age "${age}" \
+      --arg url "https://github.com/${repo}/compare/v${pinned}...v${v}" '{
+      version: $v,
+      skipped: (if $reason == "" then null else $reason end),
+      published: (if $day == "" then null else $day end),
+      age: (if $age == "" then null else ($age | tonumber) end),
+      url: $url
+    }' >>"${items}"
+  done
+  local title="Windows の ${jname}"
+  if [[ ${kind} == core ]]; then
+    title=${jname}
+  fi
+  jq -cn --slurpfile newer "${items}" --arg name "${jname}" --arg title "${title}" --arg pinned "${pinned}" \
+    --arg file "${releases_label}" --arg skipped "${skipped_label}" --argjson listed "${listed}" \
+    --argjson checked "${checked}" --arg problem "${problem}" '{
+      name: $name, title: $title, packageId: null, pinned: $pinned, pinnedFile: $file, skippedFile: $skipped,
+      pinnedListed: $listed, readmeSection: "固定した版を上げる", datesFrom: "last-modified", datesChecked: $checked,
+      datesProblem: (if $problem == "" then null else $problem end), newer: $newer
+    }' >"$5"
+}
+
+if ((json)); then
+  json_component app "${app_version}" herdrdev/herdr-app herdr-app "${tmp}/app.json" || exit 2
+  json_component core "${core_version}" herdrdev/herdr-core herdr-core "${tmp}/core.json" || exit 2
+  cat "${tmp}/app.json" "${tmp}/core.json"
+  exit 0
+fi
+
 check_one app "${app_version}" herdrdev/herdr-app src/update.rs "${app_targets[@]}"
 check_one core "${core_version}" herdrdev/herdr-core crates/herdr-core/src/releases.rs "${core_targets[@]}"
+
+# 固定した版以下になった見送りの行は、消してよいと出す (落とさない)
+for key in "${skipped_keys[@]}"; do
+  kind=${key%%:*}
+  v=${key#*:}
+  pinned=${app_version}
+  if [[ ${kind} == core ]]; then
+    pinned=${core_version}
+  fi
+  if ! newer_than "${v}" "${pinned}"; then
+    echo "  ※ 見送りの一覧 (${skipped_label}) の ${kind} ${v} は固定した版 (${pinned}) 以下なので、消してよい"
+  fi
+done
 
 if ((changed)); then
   exit 1

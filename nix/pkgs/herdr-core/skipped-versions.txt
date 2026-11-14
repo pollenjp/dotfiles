@@ -1,0 +1,12 @@
+# herdr-app と herdr-core (固定した版は隣の releases.json) で、上げずに見送った版。
+#
+# nix/scripts/check-herdr-app-version.sh (GitHub Actions の herdr-app-installers の version の job が週 1 回流す) と、
+# setup の nix/scripts/bootstrap-windows-pin-updates.sh が読み、ここに書いた版は、固定した版より新しくても知らせない。
+# 手順は win/README.md の「固定した版を上げる」。
+#
+# 1 行に 1 つ、「app か core・版・理由」を空白で区切って書く。版は GitHub の tag の v の後ろ (X.Y.Z) の形で書く。
+# # で始まる行と空行は読まない。部品の名前・版の形・理由のどれかが無い行は読めずに落ちる (確かめられない)。
+# 固定した版以下になった行は消してよい (job が知らせる)。releases.json と違い、Windows へも Linux の package へも渡らない。
+#
+# 例:
+# app 0.1.14 core の generation 2 と組まないと話せない (TKT-xxx)
