@@ -4,10 +4,13 @@
 #
 #   1. ~/.local/state/dotfiles/windows-files.json (全ホスト)
 #
-#        {"enable":true,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/<名前>"}
+#        {"claudeCode":true,"enable":true,"ntn":true,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/<名前>"}
 #
 #      typeClipboard は Windows に type-clipboard を入れるか (windowsFiles.typeClipboard.enable)。
-#      bootstrap-windows-type-clipboard.sh が読み、欄の無い前の世代のファイルは false と読む
+#      bootstrap-windows-type-clipboard.sh が読み、欄の無い前の世代のファイルは false と読む。
+#      ntn・claudeCode は Windows に ntn・Claude Code を入れるか (windowsFiles.ntn.enable・windowsFiles.claudeCode.enable)。
+#      bootstrap-windows-ntn.sh・bootstrap-windows-claude-code.sh が読み、欄の無い前の世代のファイルは option の既定
+#      どおり true と読む。どれも win/ を配らないマシンでは false にする
 #
 #   2. PATH の pjp-google-ime (windowsFiles.enable のホストだけ)。Google 日本語入力の
 #      設定とテキストを行き来させる道具で、nix/scripts/bootstrap-windows-google-ime.sh が
@@ -75,6 +78,10 @@ in
       # Windows に type-clipboard を入れるか (bootstrap-windows-type-clipboard.sh が読む)。
       # 配らないマシンでは true にできない (上の assertion) が、念のため配るときだけ true にする
       typeClipboard = enable && wsl.windowsFiles.typeClipboard.enable;
+      # Windows に ntn・Claude Code を入れるか (bootstrap-windows-ntn.sh・bootstrap-windows-claude-code.sh が読む)。
+      # option の既定は true なので、配らないマシンでも option は true のまま。ここで配るときだけ true にする
+      ntn = enable && wsl.windowsFiles.ntn.enable;
+      claudeCode = enable && wsl.windowsFiles.claudeCode.enable;
     }
     + "\n";
 }

@@ -7,6 +7,8 @@
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false)
+#   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定 true)
+#   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定 true)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
@@ -694,6 +696,44 @@ in
         Release から落とし、SHA-256 が合えば `%LOCALAPPDATA%\Programs\type-clipboard` に置いてスタートメニューに
         出す (入っていなければ入れ、版がずれていれば ⚠ で知らせるだけ)。版と SHA-256 は ps1 で固定する
         (win/README.md の「type-clipboard」)。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.ntn.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Windows に ntn (Notion の CLI。winget の `Notion.ntn`) を、dotfiles が固定した版で入れるマシンか。
+        効くのは `windowsFiles.enable = true` のマシンだけ (既定が true なので、配らないマシンでも true のまま。
+        そのマシンでは何もしない)。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `ntn` に落ち、
+        `~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-ntn.sh が読む。true のマシンでは、配った
+        `Install-Ntn.ps1` (win/ntn/) が、入っていなければ入れ、版がずれていれば固定した版に揃えて winget の pin を足す
+        (ntn.exe が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で固定する (win/README.md の「ntn」)。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.claudeCode.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      example = false;
+      description = ''
+        Windows に Claude Code (winget の `Anthropic.ClaudeCode`) を、dotfiles が固定した版で入れるマシンか。
+        効くのは `windowsFiles.enable = true` のマシンだけ (既定が true なので、配らないマシンでも true のまま。
+        そのマシンでは何もしない)。WSL の claude (mise が入れる) とは別のもの。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `claudeCode` に落ち、
+        `~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-claude-code.sh が読む。true のマシンでは、配った
+        `Install-ClaudeCode.ps1` (win/claude-code/) が、入っていなければ入れ、版がずれていれば固定した版に揃えて winget の pin を
+        足す (Windows の Claude Code が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で固定し、
+        `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE` は設定しない (win/README.md の「Claude Code」)。Claude Code の設定
+        (`%USERPROFILE%\.claude`) とログインには触らない。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
       '';

@@ -1,12 +1,12 @@
 name: winget-versions
 
-# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力) が、winget の最新に
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) が、winget の最新に
 # 追いついているかを確かめる (TKT-110・TKT-156)。固定した版は win/<名前>/Install-*.ps1 の -Version の既定値。
 #
 # 新しい版が出ても、手元では setup --update の ※ の 1 行でしか見えず、流さない間は気付けない。
 # そこで週 1 回ここで確かめ、固定した版より新しい版 (見送りの一覧に無いもの) が出て 30 日たつと
 # 落ちて知らせる。30 日の間は落ちず、版・出た日・あと何日で知らせるかを ::notice の行と summary に出す。
-# 出た日は、OpenSSH と herdr は GitHub の release、Google 日本語入力は winget-pkgs に載った日
+# 出た日は、OpenSSH・herdr・Claude Code は GitHub の release、Google 日本語入力と ntn は winget-pkgs に載った日
 # (nix/scripts/check-winget-version.sh の先頭)。GitHub に出た版が 30 日たっても winget に載らないとき
 # (パッケージ ID が移ったなど)・固定した版やパッケージが winget に無いときと、確かめられなかったとき
 # (API の失敗など) も落ちる。何で落ちたかは summary と ::error の行に出る。
@@ -24,7 +24,7 @@ on:
   schedule:
     - cron: "23 22 * * 0"
   # 固定した版を変える・見送りを足す PR で、書いた版が winget にあるかと、落ちなくなるかを確かめる。
-  # どれか 1 つを変えた PR でも 3 つの job が走るので、猶予 (30 日) がたった新しい版がある間は、
+  # どれか 1 つを変えた PR でも全部の job が走るので、猶予 (30 日) がたった新しい版がある間は、
   # 別の理由でこれらを直す PR も赤くなる (merge は止まらない)
   pull_request:
     paths:
@@ -34,6 +34,10 @@ on:
       - "win/herdr/skipped-versions.txt"
       - "win/google-japanese-input/Install-GoogleJapaneseInput.ps1"
       - "win/google-japanese-input/skipped-versions.txt"
+      - "win/ntn/Install-Ntn.ps1"
+      - "win/ntn/skipped-versions.txt"
+      - "win/claude-code/Install-ClaudeCode.ps1"
+      - "win/claude-code/skipped-versions.txt"
       - "nix/scripts/check-winget-version.sh"
       - ".github/workflows/winget-versions.yml"
   workflow_dispatch:
@@ -68,6 +72,14 @@ jobs:
             title: Google 日本語入力
             section: Google 日本語入力の新しい版が出たとき
             anchor: google-日本語入力の新しい版が出たとき
+          - package: ntn
+            title: Windows の ntn
+            section: ntn の新しい版が出たとき
+            anchor: ntn-の新しい版が出たとき
+          - package: claude-code
+            title: Windows の Claude Code
+            section: Claude Code の新しい版が出たとき
+            anchor: claude-code-の新しい版が出たとき
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

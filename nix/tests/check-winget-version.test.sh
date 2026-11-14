@@ -52,6 +52,16 @@
 #     数える。30 日たったら exit 1 で manifest の URL を添える。いくつかあれば、いちばん早く載った版から数える
 #   - commit の一覧が取れない・一覧でない応答は ⚠ を出さずに exit 2、空なら出た日が分からないので待たずに exit 1
 #
+#   ntn (出た日は winget-pkgs に載った日):
+#   - Install-Ntn.ps1 の形から読み、winget-pkgs の manifests/n/Notion/ntn を見る。GitHub の release は引かない
+#   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL を添える
+#
+#   Claude Code (出た日は GitHub の release):
+#   - Install-ClaudeCode.ps1 の形から読み、winget-pkgs の manifests/a/Anthropic/ClaudeCode と anthropics/claude-code の
+#     release (直近 100 件) を見る。GitHub の最新は v の付かない版で出す
+#   - 新しい winget の版が GitHub に出て 30 日たったら exit 1 で release notes の URL を添える
+#   - GitHub にある版が winget に無いのは、30 日たつまで ※ で待ち、たったら exit 1
+#
 # ## 本物の gh を見せない
 #
 # 手元では PATH に本物の gh があり、見えると本物の GitHub API を呼ぶ。要るコマンドだけを
@@ -96,7 +106,7 @@ done
 
 # 偽の gh。引数を FAKE_GH_LOG に足し、叩いた API ごとに決めた応答を返す。
 #   contents (winget-pkgs のディレクトリ)        FAKE_GH_CONTENTS (stdout)・FAKE_GH_CONTENTS_ERR (stderr)・FAKE_GH_CONTENTS_RC
-#   releases (Win32-OpenSSH・herdr)              FAKE_GH_RELEASES・FAKE_GH_RELEASES_ERR・FAKE_GH_RELEASES_RC
+#   releases (Win32-OpenSSH・herdr・claude-code) FAKE_GH_RELEASES・FAKE_GH_RELEASES_ERR・FAKE_GH_RELEASES_RC
 #   commits?path=… (winget-pkgs の版の履歴)      FAKE_GH_COMMITS_DIR/<版> の中身 (無ければ空の一覧)・
 #                                                FAKE_GH_COMMITS_ERR・FAKE_GH_COMMITS_RC
 fake_bin="${work}/fake-bin"
@@ -109,7 +119,7 @@ printf '%s\n' "$*" >>"${FAKE_GH_LOG}"
 case $2 in
   repos/microsoft/winget-pkgs/contents/*)
     out=${FAKE_GH_CONTENTS-} err=${FAKE_GH_CONTENTS_ERR-} rc=${FAKE_GH_CONTENTS_RC:-0} ;;
-  repos/PowerShell/Win32-OpenSSH/releases* | repos/herdrdev/herdr/releases*)
+  repos/PowerShell/Win32-OpenSSH/releases* | repos/herdrdev/herdr/releases* | repos/anthropics/claude-code/releases*)
     out=${FAKE_GH_RELEASES-} err=${FAKE_GH_RELEASES_ERR-} rc=${FAKE_GH_RELEASES_RC:-0} ;;
   repos/microsoft/winget-pkgs/commits*)
     p=${2#*path=}
@@ -141,6 +151,8 @@ manifest_dir_of() {
     openssh) echo manifests/m/Microsoft/OpenSSH/Preview ;;
     herdr) echo manifests/h/Herdr/Herdr ;;
     google-japanese-input) echo manifests/g/Google/JapaneseIME ;;
+    ntn) echo manifests/n/Notion/ntn ;;
+    claude-code) echo manifests/a/Anthropic/ClaudeCode ;;
   esac
 }
 ps1_of() {
@@ -148,6 +160,8 @@ ps1_of() {
     openssh) echo Install-OpenSSH.ps1 ;;
     herdr) echo Install-Herdr.ps1 ;;
     google-japanese-input) echo Install-GoogleJapaneseInput.ps1 ;;
+    ntn) echo Install-Ntn.ps1 ;;
+    claude-code) echo Install-ClaudeCode.ps1 ;;
   esac
 }
 
@@ -262,6 +276,29 @@ herdr_releases_json() {
           then "Preview build " + ($tag | ltrimstr("preview-")) + "\n\n[View changes](https://github.com/herdrdev/herdr/compare/v0.9.4...fbd2ae23927fe4923752bdb2db29661917fb05d7)"
           else "Release " + $tag end)
       }'
+  done | jq -s '.'
+}
+
+# anthropics/claude-code の releases (新しい順)。引数は「tag|公開日時」(3 つめに |pre を足すと prerelease にする)。
+# 本物は版ごとに 1 つ出し、成果物は付けない (配布物は downloads.claude.ai)
+claude_releases_json() {
+  local e tag at pre
+  for e in "$@"; do
+    IFS='|' read -r tag at pre <<<"${e}"
+    jq -n --arg tag "${tag}" --arg at "${at}" --arg pre "${pre}" '{
+      url: "https://api.github.com/repos/anthropics/claude-code/releases/262000000",
+      html_url: ("https://github.com/anthropics/claude-code/releases/tag/" + $tag),
+      id: 262000000,
+      tag_name: $tag,
+      target_commitish: "main",
+      name: $tag,
+      draft: false,
+      prerelease: ($pre == "pre"),
+      created_at: $at,
+      published_at: $at,
+      assets: [],
+      body: "## What'"'"'s changed\n\n- Bug fixes"
+    }'
   done | jq -s '.'
 }
 
@@ -392,6 +429,46 @@ write_gime_ps1() {
   } >"$1"
 }
 
+# Install-Ntn.ps1 の形 ($packageId は関数の中)。引数は write_openssh_ps1 と同じ
+write_ntn_ps1() {
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の ntn (Notion の CLI。winget の Notion.ntn) を、決めた版に揃える。\n#>\n'
+    printf '[CmdletBinding()]\nparam(\n'
+    if [[ -n $2 ]]; then
+      printf "    [string]\$Version = '%s',\n" "$2"
+    fi
+    # shellcheck disable=SC2016
+    printf '    [switch]$Check,\n    [switch]$IfMissing\n)\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Get-WingetCommands {\n    param([string]$Plan, [string]$PackageId, [string]$Version)\n}\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Invoke-InstallNtn {\n    param([string]$Version, [switch]$Check, [switch]$IfMissing)\n'
+    if [[ $3 != - ]]; then
+      printf "    \$packageId = '%s'\n" "$3"
+    fi
+    printf '}\n'
+  } >"$1"
+}
+
+# Install-ClaudeCode.ps1 の形 ($packageId は関数の中)。引数は write_openssh_ps1 と同じ
+write_claude_code_ps1() {
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の Claude Code (winget の Anthropic.ClaudeCode) を、決めた版に揃える。\n#>\n'
+    printf '[CmdletBinding()]\nparam(\n'
+    if [[ -n $2 ]]; then
+      printf "    [string]\$Version = '%s',\n" "$2"
+    fi
+    # shellcheck disable=SC2016
+    printf '    [switch]$Check,\n    [switch]$IfMissing\n)\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Invoke-InstallClaudeCode {\n    param([string]$Version, [switch]$Check, [switch]$IfMissing)\n'
+    if [[ $3 != - ]]; then
+      printf "    \$packageId = '%s'\n" "$3"
+    fi
+    printf '}\n'
+  } >"$1"
+}
+
 # 1 ケースぶんのディレクトリを作る。パッケージは今の pkg で、ps1 は本物と同じく BOM 付き。
 #   $1: 名前、$2: 固定した版 (空なら -Version の行を書かない)、$3: 見送りの一覧の中身 (- なら作らない)、
 #   $4: パッケージ ID (省くと pkg の本物の ID、- なら $packageId の行を書かない)
@@ -403,6 +480,8 @@ new_case() {
     openssh) write_openssh_ps1 "${d}/Install-OpenSSH.ps1" "$2" "${id:-Microsoft.OpenSSH.Preview}" ;;
     herdr) write_herdr_ps1 "${d}/Install-Herdr.ps1" "$2" "${id:-Herdr.Herdr}" ;;
     google-japanese-input) write_gime_ps1 "${d}/Install-GoogleJapaneseInput.ps1" "$2" "${id:-Google.JapaneseIME}" ;;
+    ntn) write_ntn_ps1 "${d}/Install-Ntn.ps1" "$2" "${id:-Notion.ntn}" ;;
+    claude-code) write_claude_code_ps1 "${d}/Install-ClaudeCode.ps1" "$2" "${id:-Anthropic.ClaudeCode}" ;;
   esac
   if [[ $3 != - ]]; then
     printf '%s\n' "$3" >"${d}/skipped-versions.txt"
@@ -1187,6 +1266,94 @@ else
   ng "Google 日本語入力: commit の一覧が読めない" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
+echo "-- ntn"
+pkg=ntn
+
+# 2026-11-14 の winget-pkgs の manifests/n/Notion/ntn の新しい方 (0.23.24 は無い)
+n_pin=0.23.28
+ntn_winget_now=$(contents_json 0.23.25 0.23.26 0.23.27 "${n_pin}")
+ntn_winget_next=$(contents_json 0.23.25 0.23.26 0.23.27 "${n_pin}" 0.23.29)
+
+# nt1. 固定した版が winget の最新: exit 0。Install-Ntn.ps1 の形から読み、manifests/n/Notion/ntn を見る。GitHub の release は
+#      引かない (ntn は出さない)
+d=$(new_case nt1 "${n_pin}" -)
+FAKE_GH_CONTENTS="${ntn_winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の ntn (winget の Notion.ntn)' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/n/Notion/ntn' && ! called "${d}" -F 'releases'; then
+  ok "ntn: 固定した版が最新なら exit 0 (manifests/n/Notion/ntn を見て、GitHub の release は引かない)"
+else
+  ng "ntn: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# nt2. 新しい版が winget-pkgs に載って 29 日: exit 0 で、版・載った日・あと 1 日を 1 行に出す
+d=$(new_case nt2 "${n_pin}" -)
+put_commits "${d}" 0.23.29 "${at29}"
+FAKE_GH_CONTENTS="${ntn_winget_next}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" "0\\.23\\.29.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
+  && called "${d}" -F 'commits?path=manifests/n/Notion/ntn/0.23.29'; then
+  ok "ntn: 新しい版が載って 29 日なら exit 0 で待ち、載った日とあと 1 日を出す"
+else
+  ng "ntn: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# nt3. 新しい版が載って 31 日: exit 1 で、manifest の URL と見送りの一覧の場所を出す
+d=$(new_case nt3 "${n_pin}" -)
+put_commits "${d}" 0.23.29 "$(ago 31)"
+FAKE_GH_CONTENTS="${ntn_winget_next}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 0\.23\.28 より新しい版が winget にある: 0\.23\.29' \
+  && seen "${d}" -F 'https://github.com/microsoft/winget-pkgs/tree/master/manifests/n/Notion/ntn/0.23.29' \
+  && seen "${d}" -F 'ntn の新しい版が出たとき' && seen "${d}" -F 'skipped-versions.txt'; then
+  ok "ntn: 新しい版が載って 31 日なら exit 1 で、manifest の URL と見送りの一覧の場所を出す"
+else
+  ng "ntn: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+echo "-- claude-code"
+pkg=claude-code
+
+# 2026-11-14 の winget-pkgs (manifests/a/Anthropic/ClaudeCode の新しい方。2.1.313・2.1.315 は無い) と GitHub の release
+c_pin=2.1.318
+cc_winget_now=$(contents_json 2.1.314 2.1.316 2.1.317 "${c_pin}")
+cc_winget_next=$(contents_json 2.1.314 2.1.316 2.1.317 "${c_pin}" 2.1.321)
+# 固定した版 (winget の最新) の release を 40 日前に出たことにした 1 件
+c_pin_rel="v2.1.318|$(ago 40)"
+
+# cc1. 固定した版が winget の最新で、GitHub の最新も同じ: exit 0。manifests/a/Anthropic/ClaudeCode と
+#      anthropics/claude-code の release (直近 100 件) を見る。GitHub の最新は v の付かない版で出す
+d=$(new_case cc1 "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_now}" FAKE_GH_RELEASES=$(claude_releases_json "${c_pin_rel}" "v2.1.317|$(ago 41)") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の Claude Code (winget の Anthropic.ClaudeCode)' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/a/Anthropic/ClaudeCode' \
+  && called "${d}" -xF 'api repos/anthropics/claude-code/releases?per_page=100' \
+  && seen_out "${d}" -E '^  GitHub の最新 : 2\.1\.318 \(v2\.1\.318、出て 40 日\)$'; then
+  ok "claude-code: 固定した版が最新なら exit 0 (anthropics/claude-code の release を 100 件読み、GitHub の最新は v の付かない版で出す)"
+else
+  ng "claude-code: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# cc2. 新しい winget の版 2.1.321 が GitHub に出て 31 日: exit 1 で release notes の URL を出す
+d=$(new_case cc2 "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_next}" FAKE_GH_RELEASES=$(claude_releases_json "v2.1.321|$(ago 31)" "${c_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 2\.1\.318 より新しい版が winget にある: 2\.1\.321' \
+  && seen "${d}" -F 'https://github.com/anthropics/claude-code/releases/tag/v2.1.321' \
+  && seen "${d}" -F 'Claude Code の新しい版が出たとき'; then
+  ok "claude-code: 新しい winget の版が GitHub に出て 31 日なら exit 1 で release notes の URL を出す"
+else
+  ng "claude-code: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# cc3. GitHub にある 2.1.325 が winget に無い: 29 日なら ※ で待ち、31 日なら exit 1 (パッケージ ID が移ったかもしれない)
+d=$(new_case cc3 "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_now}" FAKE_GH_RELEASES=$(claude_releases_json "v2.1.325|${at29}" "${c_pin_rel}") run "${d}" 0
+d2=$(new_case cc3b "${c_pin}" -)
+FAKE_GH_CONTENTS="${cc_winget_now}" FAKE_GH_RELEASES=$(claude_releases_json "v2.1.325|$(ago 31)" "${c_pin_rel}") run "${d2}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" 'GitHub の 2\.1\.325 が winget の Anthropic\.ClaudeCode にまだ無い.*あと 1 日' \
+  && [[ $(rc "${d2}") == 1 ]] && seen "${d2}" -F 'winget search ClaudeCode'; then
+  ok "claude-code: GitHub にあって winget に無い版は、29 日なら ※ で待ち、31 日なら exit 1"
+else
+  ng "claude-code: winget に無い版" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
 echo "-- 名前"
 
 # n1. 名前が無い: 使い方 (名前の一覧) を出し、gh を呼ばずに exit 2
@@ -1216,7 +1383,9 @@ cp "${script}" "${repo}/nix/scripts/check-winget-version.sh"
 for spec in \
   'openssh|win/openssh|10.0.0.0|10.1.0.0' \
   "herdr|win/herdr|${h_pin}|0.9.6" \
-  'google-japanese-input|win/google-japanese-input|3.34.6260.0|3.35.6300.0'; do
+  'google-japanese-input|win/google-japanese-input|3.34.6260.0|3.35.6300.0' \
+  'ntn|win/ntn|0.23.28|0.23.29' \
+  'claude-code|win/claude-code|2.1.318|2.1.321'; do
   IFS='|' read -r pkg dir pinned newer <<<"${spec}"
   d=$(new_case "n3-${pkg}" "${pinned}" "${newer} 試したら設定が読めなかった")
   mkdir -p "${repo}/${dir}"
@@ -1224,6 +1393,7 @@ for spec in \
   case ${pkg} in
     openssh) releases=${releases_now} ;;
     herdr) releases=$(herdr_releases_json 'v0.9.5|2026-10-14T16:07:28Z') ;;
+    claude-code) releases=$(claude_releases_json 'v2.1.318|2026-11-04T00:01:03Z') ;;
     *) releases='' ;;
   esac
   contents=$(contents_json "${pinned}" "${newer}")

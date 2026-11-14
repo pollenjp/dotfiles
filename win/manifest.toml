@@ -33,6 +33,16 @@ dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
 hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
 
 [[files]]
+src = "ntn/Install-Ntn.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Ntn.ps1"
+hint = "PowerShell で Install-Ntn -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.ntn.enable = true (既定) のマシン。ntn.exe が動いていれば揃えずに知らせる)"
+
+[[files]]
+src = "claude-code/Install-ClaudeCode.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-ClaudeCode.ps1"
+hint = "PowerShell で Install-ClaudeCode -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.claudeCode.enable = true (既定) のマシン。Windows の Claude Code が動いていれば揃えずに知らせる)"
+
+[[files]]
 src = "herdr-app/Install-HerdrApp.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-HerdrApp.ps1"
 hint = "PowerShell で Install-HerdrApp -Check を打つと、herdr-app と herdr-core が固定した版・取得元 (手元のフィード) どおりかが分かる (setup --update でも確かめ、揃っていなければ揃える)。外すのは Install-HerdrApp -Uninstall"

@@ -26,6 +26,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 | `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
+| `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン ([後述](#ntn)) |
+| `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン ([後述](#claude-code)) |
 
 ## 配る
 
@@ -95,7 +97,7 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力) は、新しい版が出ても手元では
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) は、新しい版が出ても手元では
 `-Check` の ※ の行でしか見えない (`setup --update` を流したときだけ)。そこで GitHub Actions の
 `winget-versions` ([`.github/workflows/winget-versions.yml`](../.github/workflows/winget-versions.yml)) が
 週 1 回 (月曜の朝) と、固定した版や見送りの一覧を変える PR で確かめ、新しい版が出て 30 日たつと落ちて知らせる
@@ -108,6 +110,8 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `openssh` | `openssh/Install-OpenSSH.ps1`・`openssh/skipped-versions.txt` | GitHub の release (`PowerShell/Win32-OpenSSH`) が出た日 | [OpenSSH の新しい版が出たとき](#openssh-の新しい版が出たとき) |
 | `herdr` | `herdr/Install-Herdr.ps1`・`herdr/skipped-versions.txt` | GitHub の安定版の release (`herdrdev/herdr` の `vX.Y.Z`) が出た日 | [herdr の新しい版が出たとき](#herdr-の新しい版が出たとき) |
 | `google-japanese-input` | `google-japanese-input/Install-GoogleJapaneseInput.ps1`・`google-japanese-input/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い) | [Google 日本語入力の新しい版が出たとき](#google-日本語入力の新しい版が出たとき) |
+| `ntn` | `ntn/Install-Ntn.ps1`・`ntn/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い。配布物は ntn.dev) | [ntn の新しい版が出たとき](#ntn-の新しい版が出たとき) |
+| `claude-code` | `claude-code/Install-ClaudeCode.ps1`・`claude-code/skipped-versions.txt` | GitHub の release (`anthropics/claude-code` の `vX.Y.Z`) が出た日 | [Claude Code の新しい版が出たとき](#claude-code-の新しい版が出たとき) |
 
 - 確かめるのは `nix/scripts/check-winget-version.sh <名前>`。ps1 から固定した版とパッケージ ID (`$packageId`) を読み、
   winget-pkgs (`manifests/<頭文字>/<ID の . を / に>/<版>/`) と、出た日を引く先を GitHub API で読むので、
@@ -122,11 +126,11 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
   - 追いついていない版がいくつかあるときは、いちばん早く出た版の日から数える。遅れ始めてから 30 日で知らせ、
     新しい版が続けて出ても先送りしない
   - 見送った版は数えない。猶予の中に上げるか見送るかを決めておけば、落ちずに済む
-  - 30 日は script の先頭の `grace_days` の 1 か所で決める (3 つで同じ)
+  - 30 日は script の先頭の `grace_days` の 1 か所で決める (どの名前でも同じ)
 - 猶予がたって落ちる (exit 1) のは:
   - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 名前ごとの手順で、上げるか見送るかを決める。
     出た日が分からない (合う release や commit が無い) ときは、待たずに落ちる
-  - GitHub に出た版が winget のこのパッケージに無い (OpenSSH と herdr だけ。パッケージ ID が移ると、古い ID には
+  - GitHub に出た版が winget のこのパッケージに無い (OpenSSH・herdr・Claude Code だけ。パッケージ ID が移ると、古い ID には
     新しい版が来ない) → 下の「パッケージ ID を確かめる」
 - 猶予を置かずに落ちる (exit 1) のは、新しい版の知らせではなく、壊れていることの知らせ:
   - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
@@ -134,7 +138,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
     → 下の「パッケージ ID を確かめる」
   - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
     ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`) で今のパッケージ ID を
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
 - 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・ps1 から版か ID が読めない・見送りの一覧の書き損じ。
@@ -144,7 +148,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
   もっと新しい版が出ると、その版が出てから 30 日でまた落ちる。固定した版以下になった行は消してよい (job が
   「消してよい」と出す)。このファイルは manifest に無いので Windows へは配らない
 - 猶予がたった新しい版がある間は、別の理由で ps1 や script を直す PR も赤くなる (merge は止まらない)。
-  どれか 1 つを変えた PR でも、3 つの job が走る
+  どれか 1 つを変えた PR でも、全部の job が走る
 
 ## PowerShell のテスト
 
@@ -219,8 +223,8 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `c` | `claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=` (Claude Code。Remote Control を有効にして起動する。末尾の `=` は、後ろに続く語をセッションの名前として取らせないため) |
 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr`) で、WSL の herdr とは
-別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (この PC では WinGet の
-`Anthropic.ClaudeCode`) を叩く。`claude.exe` は dotfiles からは入れていない。
+別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (WinGet の `Anthropic.ClaudeCode`。
+dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WSL の claude とは別のもの。
 
 ### dotfiles.ps1 を書くときの注意
 
@@ -1677,3 +1681,152 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   & "$HOME\.config\powershell\Install-TypeClipboard.ps1" -InstallDir "$t\Programs\type-clipboard" -ShortcutDir "$t\StartMenu"
   Remove-Item -Recurse -Force $t
   ```
+
+## ntn
+
+`ntn/Install-Ntn.ps1` は、Notion の CLI の ntn を winget の `Notion.ntn` (zip の中の portable。管理者は要らない。x64 だけ) で入れ、
+版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
+(install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
+([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
+
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン (既定は true)。入れないマシンは、dotfiles-private に
+  登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
+
+  ```nix
+  wsl = {
+    windowsFiles.enable = true;
+    windowsFiles.ntn.enable = false;
+  };
+  ```
+
+- false に戻しても setup は消さない (見なくなるだけ)。消すなら PowerShell で `winget pin remove --id Notion.ntn --exact` の後に
+  `winget uninstall --id Notion.ntn --exact` を打つ
+- ntn のログイン (`ntn login`) と設定は dotfiles では扱わない
+- 置き場所は `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Notion.ntn_Microsoft.Winget.Source_8wekyb3d8bbwe\ntn-x86_64-pc-windows-msvc\ntn.exe`
+  (zip の中のディレクトリの下)
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Ntn -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-Ntn` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
+| `nix/scripts/bootstrap-windows-ntn.sh` (WSL) | `setup --update` でも毎回走る (order 97)。入っていなければ入れ、版か pin がずれていれば揃える。揃わなければ ⚠ で囲んで知らせる (setup は止めない) |
+| `nix/scripts/bootstrap-windows-ntn.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
+| `nix/scripts/check-winget-version.sh ntn` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#ntn-の新しい版が出たとき)) |
+
+揃えるときにすること (herdr と同じ):
+
+1. 入っている版 (`ntn.exe --version`) と固定した版を比べる。違えば、先に `winget download` で固定した版の取得とハッシュを確かめ
+   (落ちたら何も変えずに止まる)、pin を外し、`winget uninstall` してから `winget install --version` で入れる
+2. 入れた後に `winget pin add` で `winget upgrade --all` から外す
+3. 読み直して、版・pin・PATH で引かれる ntn を確かめる
+
+- herdr と違い、setup は版のずれも揃える (常駐するものも UAC も無いので)。手で `winget upgrade` した新しい版も、固定した版に下げる
+- 入れ替えるときに置き場所の `ntn.exe` が動いていると、置き換えられないので何も変えずに止まり、PID とコマンドラインを出す
+  (setup は ⚠ で知らせる)。終わらせてから `Install-Ntn` か `bootstrap-windows-ntn.sh --apply` を打つ
+- PATH で別の ntn (npm の global の `ntn.cmd`・cargo で入れた `ntn.exe` など) が先に引かれると、`-Check` の「PATH の ntn」が ⚠ に
+  なり、外すディレクトリが ※ の行に出る。揃える手順では直らない (setup は揃えずに ⚠ で知らせる)。PATH は `.exe` のほか `.cmd`・
+  `.bat`・`.ps1` も、PowerShell と同じくディレクトリの順に見る
+- winget が置き場所をユーザーの PATH に足すマシン (pjp-raiden) と、`%LOCALAPPDATA%\Microsoft\WinGet\Links` に symlink を置くマシン
+  (開発者モードなど) がある。どちらも winget のものとして読む
+- 入れ替えの途中で `winget install` が落ちると、ntn が入っていない状態で止まることがある (取得は先に確かめてあるので稀)。そのときは
+  `Install-Ntn` を打ち直す (`setup --update` でも入る)
+
+### ntn の新しい版が出たとき
+
+固定した版より新しい版が winget に載って 30 日たつと、GitHub Actions の `winget-versions` の `Windows の ntn` の job が落ちて
+知らせる。出た日は winget-pkgs に載った日 (ntn は GitHub の release を出さない)。猶予・落ちる場合・見送りの一覧は
+[winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+上げるとき:
+
+1. 新しい版で `ntn --help` と使っているコマンドの振る舞いが変わっていないかを、WSL の ntn (同じ版を入れるのは `nix/pkgs/ntn`) か
+   Windows で試して確かめる
+2. `ntn/Install-Ntn.ps1` の `-Version` の既定値と、上の「今は」を新しい版にし、`Install-Ntn.Tests.ps1` を流して PR を出す
+   (`winget-versions` が、書いた版が winget にあるかを確かめる)
+3. merge したら、各マシンで `setup --update` を流す (setup が揃える)。ntn が動いていて止まったら、終わらせてから `Install-Ntn` か
+   `bootstrap-windows-ntn.sh --apply`
+4. `-Check` が「揃っている」になり、`ntn --version` が新しい版を出すことを確かめる
+
+見送るとき: `ntn/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版を戻すときは `-Version` を前の版にすれば、setup が下げる。
+
+### Install-Ntn.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (版の読み方・plan・状態の表・締めの行・PATH の解決) と、winget とプロセスを偽物に差し替えた流れ (打つ winget の
+  順・動いていると止まる・取得が落ちると何も変えない) は `ntn/Install-Ntn.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には
+  触らない (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/ntn/Install-Ntn.Tests.ps1
+  ```
+
+- 締めの行 (`→ Install-Ntn で入れる`・`→ Install-Ntn で揃える`・`→ ※ の手順で直す`) の文言は `bootstrap-windows-ntn.sh` が読む。
+  変えるときは向こうも直す
+- winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+
+## Claude Code
+
+`claude-code/Install-ClaudeCode.ps1` は、Claude Code を winget の `Anthropic.ClaudeCode` (portable の `claude.exe` 1 つ。管理者は要らない。
+x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。PowerShell の `c` が
+起動する `claude.exe` はこれ ([PowerShell](#powershell))。WSL の claude は mise の `claude@latest` (猶予 1 日) で、別のもの。
+
+- winget で入れた Claude Code は自分では上がらない (公式。`claude update` は何もしない)。版は dotfiles が決める
+- `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE` (Claude Code に `winget upgrade` を打たせる) は設定しない。ユーザー・マシンの環境変数か
+  `%USERPROFILE%\.claude\settings.json` の `env` で有効になっていれば、`-Check` が ※ の行で知らせる (固定した版から外れうるので消す)
+- Git for Windows は入れない。無ければ Claude Code は Bash tool の代わりに PowerShell tool で動く (公式)
+- Claude Code の設定 (`%USERPROFILE%\.claude`) とログインは dotfiles では扱わない
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン (既定は true)。入れないマシンは `wsl` に
+  `windowsFiles.claudeCode.enable = false;` を書く ([ntn](#ntn) と同じ)。false に戻しても setup は消さない。消すなら PowerShell で
+  `winget pin remove --id Anthropic.ClaudeCode --exact` の後に `winget uninstall --id Anthropic.ClaudeCode --exact`
+- 置き場所は `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe`
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-ClaudeCode -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-ClaudeCode` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
+| `nix/scripts/bootstrap-windows-claude-code.sh` (WSL) | `setup --update` でも毎回走る (order 97)。入っていなければ入れ、版か pin がずれていれば揃える。揃わなければ ⚠ で囲んで知らせる (setup は止めない) |
+| `nix/scripts/bootstrap-windows-claude-code.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
+| `nix/scripts/check-winget-version.sh claude-code` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#claude-code-の新しい版が出たとき)) |
+
+揃えるときにすることは [ntn](#ntn) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うところ:
+
+- 入れ替えるときに置き場所の `claude.exe` が動いている (Windows で Claude Code の会話を開いている) と、Windows が exe を lock するので、
+  何も変えずに止まって PID とコマンドラインを出す (setup は ⚠ で知らせる)。会話を閉じてから `Install-ClaudeCode` か
+  `bootstrap-windows-claude-code.sh --apply` を打つ。WSL の claude の中で `setup --update` を流すのは構わない (別のもの)。
+  pin を足すだけなら、動いていても進む
+- `claude.exe` は 340 MB ほどあり、入れ替えでは取得の確かめと install で 2 回落とす。setup は 1800 秒まで待つ
+- PATH で別の claude (native の installer か `claude install` の `%USERPROFILE%\.local\bin\claude.exe`・npm の global の `claude.cmd`) が
+  先に引かれると、`-Check` の「PATH の claude」が ⚠ になる。揃える手順では直らないので、その claude を外す: native なら
+  `%USERPROFILE%\.local\bin\claude.exe` と `%USERPROFILE%\.local\share\claude` を消し、npm なら `npm uninstall -g @anthropic-ai/claude-code`
+  (公式の uninstall の手順)
+
+### Claude Code の新しい版が出たとき
+
+固定した版より新しい winget の版が GitHub に出て 30 日たつと、GitHub Actions の `winget-versions` の `Windows の Claude Code` の job が
+落ちて知らせる。出た日は GitHub の release (`anthropics/claude-code` の `vX.Y.Z`。prerelease を除く) が出た日で、winget の版と tag の
+`v` の後ろで突き合わせる。winget には GitHub より数日遅れて載り、載らない版もある (GitHub にある版が 30 日たっても winget に無ければ、
+それも落ちて知らせる)。猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+上げるとき:
+
+1. release notes (GitHub の release か、Claude Code の CHANGELOG) で、Windows・PowerShell tool・設定に触る変更が無いかを見る
+2. `claude-code/Install-ClaudeCode.ps1` の `-Version` の既定値と、上の「今は」を新しい版にし、`Install-ClaudeCode.Tests.ps1` を流して
+   PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
+3. merge したら、各マシンで `setup --update` を流す (setup が揃える)。Windows の Claude Code が動いていて止まったら、会話を閉じてから
+   `Install-ClaudeCode` か `bootstrap-windows-claude-code.sh --apply`
+4. `-Check` が「揃っている」になり、`claude --version` が新しい版を出すことを確かめる
+
+見送るとき: `claude-code/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版を戻すときは `-Version` を前の版にすれば、
+setup が下げる。
+
+### Install-ClaudeCode.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `claude-code/Install-ClaudeCode.Tests.ps1` で確かめる (Linux の pwsh):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-code/Install-ClaudeCode.Tests.ps1
+  ```
+
+- 締めの行の文言は `bootstrap-windows-claude-code.sh` が読む。変えるときは向こうも直す
+- winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる

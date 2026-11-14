@@ -809,7 +809,9 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
+| `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
+| `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -925,13 +927,15 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
-| 6.10.1 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
+| 6.10.1 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
+| 6.10.2 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
-| 6.11.1 | `./nix/scripts/bootstrap-windows-type-clipboard.sh` | `bootstrap-windows-type-clipboard` | Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる（`wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。無ければ GitHub の Release から入れる。入れ替えはしない。[`win/README.md`](../win/README.md#type-clipboard)） |
-| 6.11.2 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
-| 6.11.3 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
-| 6.11.4 | `./nix/scripts/bootstrap-windows-port-forward.sh` | `bootstrap-windows-port-forward` | dotfiles-private の `ssh/port-forward.toml` (ssh の Host 名ごとの port forwarding の組) を JSON にして Windows に置く。PowerShell 7 の `pf` が読む。正本が無いマシンでは何もしない（[`win/README.md`](../win/README.md#port-forwarding-pf)） |
-| 6.11.5 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
+| 6.11.1 | `./nix/scripts/bootstrap-windows-ntn.sh` | `bootstrap-windows-ntn` | Windows の ntn (Notion の CLI) を固定した版に揃える（`wsl.windowsFiles.ntn.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#ntn)） |
+| 6.11.2 | `./nix/scripts/bootstrap-windows-type-clipboard.sh` | `bootstrap-windows-type-clipboard` | Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる（`wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。無ければ GitHub の Release から入れる。入れ替えはしない。[`win/README.md`](../win/README.md#type-clipboard)） |
+| 6.11.3 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
+| 6.11.4 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
+| 6.11.5 | `./nix/scripts/bootstrap-windows-port-forward.sh` | `bootstrap-windows-port-forward` | dotfiles-private の `ssh/port-forward.toml` (ssh の Host 名ごとの port forwarding の組) を JSON にして Windows に置く。PowerShell 7 の `pf` が読む。正本が無いマシンでは何もしない（[`win/README.md`](../win/README.md#port-forwarding-pf)） |
+| 6.11.6 | `./nix/scripts/bootstrap-windows-terminal.sh` | `bootstrap-windows-terminal` | Windows Terminal の `settings.json` に、dotfiles が持つキー (bell の音など) だけを書き足す。新しいマシンで `settings.json` がまだ無いときは、Windows Terminal を一度起動してから setup を流し直す（[`win/README.md`](../win/README.md#windows-terminal)） |
 | 6.12 | `./nix/scripts/bootstrap-cc-pages.sh` | `bootstrap-cc-pages` | private な cc-pages を取得してビルドし、daemon を起こす（[後述](#長い応答を読む-web-ビューア-cc-pages)） |
 | 6.13 | `./nix/scripts/bootstrap-path-shadow.sh` | `bootstrap-path-shadow` | PATH で Nix の ntn より先に来る、Nix のものでない ntn（前に install script で入れたもの）を警告する。消さない（[後述](#前に手で入れた-ntn-と-setup-の警告)） |
 | 7 | `chsh` でログインシェルを変更 | `chsh` | 必要なら |
@@ -1629,7 +1633,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 
 | 段 | すること | 決める場所 |
 | --- | --- | --- |
-| `switch` | 配り先と on / off (と、type-clipboard を入れるか) を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト）。`windowsFiles.enable` のホストでは `pjp-google-ime` も PATH に入れる | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName` / `dotfiles.wsl.windowsFiles.typeClipboard.enable`） |
+| `switch` | 配り先と on / off (と、type-clipboard・ntn・Claude Code を入れるか) を `~/.local/state/dotfiles/windows-files.json` に置く（全ホスト）。`windowsFiles.enable` のホストでは `pjp-google-ime` も PATH に入れる | `home/modules/windows-files.nix`（`dotfiles.wsl.windowsFiles.enable` / `dotfiles.wsl.windowsUserName` / `dotfiles.wsl.windowsFiles.typeClipboard.enable` / `dotfiles.wsl.windowsFiles.ntn.enable` / `dotfiles.wsl.windowsFiles.claudeCode.enable`） |
 | bootstrap | checkout の `win/manifest.toml` を計画にし、置き先ごとに判定してコピーする | `scripts/bootstrap-windows-files.sh` + `lib/windows-files.nix` |
 | bootstrap (FancyZones) | `win/powertoys/fancyzones/managed.json` のキーを、値が違えば FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを、uuid ごとに前回足した中身と比べて PC の `custom-layouts.json` へ足し、`layout-rules.json` の決まりで、横向きの既定をそろえ、テンプレートのままのディスプレイの組にレイアウトを解像度であて、組の無い仮想デスクトップに組を作る | `scripts/bootstrap-windows-fancyzones.sh` |
 | bootstrap (Google 日本語入力) | `win/google-japanese-input/` と dotfiles-private の辞書から組み立て、時刻を除いた中身で比べて置き、変換サーバーを落とす | `scripts/bootstrap-windows-google-ime.sh` + `pkgs/pjp-google-ime/` |
@@ -1637,6 +1641,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap (port forwarding の組) | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、前回置いた中身と比べて `%USERPROFILE%\.config\port-forward\hosts.json` へ置く | `scripts/bootstrap-windows-port-forward.sh` |
 | bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 | bootstrap (type-clipboard) | `windows-files.json` の `typeClipboard` が true のマシンだけ、配った `Install-TypeClipboard.ps1` で、固定した版の exe が入っているかを確かめる (無ければ GitHub の Release から落とし、SHA-256 が合えば置く) | `scripts/bootstrap-windows-type-clipboard.sh` |
+| bootstrap (ntn・Claude Code) | `windows-files.json` の `ntn`・`claudeCode` が true (欄が無ければ true) のマシンだけ、配った `Install-Ntn.ps1`・`Install-ClaudeCode.ps1` で確かめ、無ければ winget で入れ、版か pin がずれていれば固定した版に揃える | `scripts/bootstrap-windows-ntn.sh`・`scripts/bootstrap-windows-claude-code.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
 読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
@@ -1652,7 +1657,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
-./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input。CI の winget-versions が週 1 回流す。gh のログインが要る）
+./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input・ntn・claude-code。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-herdr-app.sh        # herdr-app と herdr-core を固定した版とフィードに揃える部分だけ（--apply は確かめずに揃える）
 ./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
 ./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）
@@ -1664,6 +1669,8 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-port-forward.sh    # dotfiles-private の port forwarding の組を Windows の hosts.json へ写す部分だけ（--dry-run / --force / --check）
 ./nix/scripts/bootstrap-windows-terminal.sh         # Windows Terminal の settings.json に持つキーだけを書き足す部分だけ（--dry-run / --import / --force / --check）
 ./nix/scripts/bootstrap-windows-type-clipboard.sh  # type-clipboard が固定した版かを確かめる部分だけ（typeClipboard を入れるマシンだけ。無ければ入れる。--apply で揃える）
+./nix/scripts/bootstrap-windows-ntn.sh             # ntn を固定した版に揃える部分だけ（ntn を入れるマシンだけ。--apply は確かめずに揃える）
+./nix/scripts/bootstrap-windows-claude-code.sh     # Claude Code を固定した版に揃える部分だけ（claudeCode を入れるマシンだけ。--apply は確かめずに揃える）
 ```
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（dotfiles-private に登録したファイルか、
@@ -1738,6 +1745,11 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   GitHub の Release から固定した版の exe を落として、SHA-256 が合えば `%LOCALAPPDATA%\Programs\type-clipboard` に置きスタートメニューに出す。
   版と SHA-256 は ps1 で固定し、ずれは ⚠ で知らせるだけ（[`win/README.md`](../win/README.md#type-clipboard)、
   [ADR 049](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/049_win_type_clipboard_release_pin_20261110T001612JST/README.md)）
+- ntn (Notion の CLI) と Claude Code は、`dotfiles.wsl.windowsFiles.ntn.enable`・`dotfiles.wsl.windowsFiles.claudeCode.enable` が true の
+  マシン (どちらも既定は true) で、`bootstrap-windows-ntn.sh`・`bootstrap-windows-claude-code.sh` (order 97) が配った `Install-Ntn.ps1`・
+  `Install-ClaudeCode.ps1` を `pwsh.exe` で呼び、winget の `Notion.ntn`・`Anthropic.ClaudeCode` で入れ、版か pin がずれていれば固定した版に
+  揃える (herdr と違い、常駐も UAC も無いので揃える。置き場所の exe が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で
+  固定する（[`win/README.md`](../win/README.md#ntn)・[`win/README.md`](../win/README.md#claude-code)、[ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
