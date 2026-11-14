@@ -26,6 +26,11 @@
 #   - 落とせない・gh が失敗する・releases.json が無い・JSON でない・版や sha256 の形でないときは exit 2。知らせることがあれば
 #     1 を優先する
 #   - 知らない引数は exit 2、-h は使い方を出して exit 0。curl に stdin を渡さない
+#   - 見送りの一覧 (releases.json の隣の skipped-versions.txt。「app か core・版・理由」) の版は数えず、猶予がたっていても
+#     exit 0 で「見送った」と出す。固定した版以下の行は消してよいと出す。書き損じの行は exit 2
+#   - --json は app と core の 2 行の JSON (新しい版を古い順に、見送った版は理由つきで、出た日と差分の URL つき) を出して
+#     exit 0。固定した版の成果物は落とし直さない。Windows の成果物の無い版は入れず、HEAD が 404 のほかで落ちた版は出た日を
+#     null にして datesProblem にわけを入れる。tag が読めなければ何も出さずに exit 2
 #
 # ## 本物の curl と gh を見せない
 #
@@ -449,6 +454,74 @@ if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '落とせない' && seen "${d}" -F
   ok "知らせることと確かめられないことが両方あれば exit 1 (両方を出す)"
 else
   ng "両方" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 11. 見送った新しい版は、猶予がたっていても数えずに exit 0。固定した版以下の行は消してよいと出す
+d=$(new_case c11)
+put_release "${d}" app 0.1.13 "${old_date}" '"core_min": "0.1.11"'
+printf 'v0.1.13\n' >>"${d}/gh/herdrdev/herdr-app/tags"
+printf '# 見送り\napp 0.1.13 窓が開かなかった\ncore 0.1.16 前の版の行\n' >"${d}/skipped-versions.txt"
+run "${d}"
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F 'app 0.1.13 は見送った (窓が開かなかった)' \
+  && ! seen "${d}" -F '公開から 15 日たった' && seen "${d}" -F '見送りの一覧' \
+  && seen "${d}" -F 'core 0.1.16 は固定した版 (0.1.17) 以下なので、消してよい' \
+  && ! grep -q 'app/0.1.13/herdr-app-windows-x86_64.tar.gz' "${d}/curl-calls"; then
+  ok "見送った新しい版は数えずに exit 0 (成果物の HEAD も打たない)。固定した版以下の行は消してよいと出す"
+else
+  ng "見送り" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 12. 見送りの一覧の書き損じ (部品の名前・版の形・理由が無い) は exit 2
+d=$(new_case c12)
+printf 'herdr 0.1.13 違う名前\n' >"${d}/skipped-versions.txt"
+run "${d}"
+d2=$(new_case c12b)
+printf 'app 0.1.13\n' >"${d2}/skipped-versions.txt"
+run "${d2}"
+if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 ]] && seen "${d}" -F '見送りの一覧の 1 行目が読めません' && seen "${d2}" -F 'app か core・版・理由'; then
+  ok "見送りの一覧の書き損じは exit 2"
+else
+  ng "見送りの書き損じ" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
+fi
+
+# 13. --json: app と core の 2 行。新しい版を古い順に、見送った版は理由つき・出た日なしで出す。Windows の成果物の無い版は
+#     入れない。固定した版の成果物は落とし直さない (-o の curl を打たない)
+d=$(new_case c13)
+put_release "${d}" app 0.1.13 "${old_date}" '"core_min": "0.1.11"'
+put_release "${d}" app 0.1.14 "${new_date}" '"core_min": "0.1.11"'
+printf 'v0.1.14\nv0.1.13\nv0.1.15\n' >>"${d}/gh/herdrdev/herdr-app/tags"
+printf 'core 0.1.18 試したら落ちた\n' >"${d}/skipped-versions.txt"
+printf 'v0.1.18\n' >>"${d}/gh/herdrdev/herdr-core/tags"
+run "${d}" --json "${d}/releases.json"
+if [[ $(rc "${d}") == 0 && $(grep -c '' "${d}/out") == 2 ]] \
+  && jq -se '.[0].name == "herdr-app" and .[0].pinned == "0.1.12" and .[0].packageId == null
+    and .[0].datesFrom == "last-modified" and .[0].datesChecked == true and .[0].readmeSection == "固定した版を上げる"
+    and ([.[0].newer[].version] == ["0.1.13", "0.1.14"])
+    and .[0].newer[0].published == "2026-11-04" and .[0].newer[0].age == 15
+    and .[0].newer[1].age == 1 and .[0].newer[1].url == "https://github.com/herdrdev/herdr-app/compare/v0.1.12...v0.1.14"
+    and .[1].name == "herdr-core" and .[1].title == "herdr-core"
+    and .[1].newer == [{"version": "0.1.18", "skipped": "試したら落ちた", "published": null, "age": null,
+      "url": "https://github.com/herdrdev/herdr-core/compare/v0.1.17...v0.1.18"}]' "${d}/out" >/dev/null \
+  && ! grep -q -- ' -o ' "${d}/curl-calls"; then
+  ok "--json: app と core の 2 行に新しい版を出し (見送った版は理由つき・成果物の無い版は入れない)、成果物は落とし直さない"
+else
+  ng "--json" "rc=$(rc "${d}") $(outerr "${d}") curl=$(cat "${d}/curl-calls" 2>/dev/null)"
+fi
+
+# 14. --json: HEAD が 404 のほかで落ちた版は出た日を null にし、datesProblem にわけを入れる。tag が読めなければ exit 2
+d=$(new_case c14)
+put_release "${d}" app 0.1.13 "${old_date}" '"core_min": "0.1.11"'
+printf 'HTTP/2 503\r\n\r\n' >"${d}/web/${rel}/app/0.1.13/herdr-app-windows-x86_64.tar.gz.headers"
+printf 'v0.1.13\n' >>"${d}/gh/herdrdev/herdr-app/tags"
+run "${d}" --json "${d}/releases.json"
+d2=$(new_case c14b)
+FAKE_GH_FAIL=1 run "${d2}" --json "${d2}/releases.json"
+if [[ $(rc "${d}") == 0 ]] && jq -se '.[0].datesChecked == false and (.[0].datesProblem | test("app 0.1.13"))
+    and .[0].newer[0].version == "0.1.13" and .[0].newer[0].published == null' "${d}/out" >/dev/null \
+  && [[ $(rc "${d2}") == 2 && ! -s ${d2}/out ]] && seen "${d2}" -F 'tag を読めない'; then
+  ok "--json: HEAD が落ちた版は出た日を null にして datesProblem に入れ、tag が読めなければ何も出さずに exit 2"
+else
+  ng "--json の失敗" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
 fi
 
 # 10. 知らない引数は exit 2、-h は exit 0
