@@ -1685,8 +1685,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ## ntn
 
 `ntn/Install-Ntn.ps1` は、Notion の CLI の ntn を winget の `Notion.ntn` (zip の中の portable。管理者は要らない。x64 だけ) で入れ、
-版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する。公式の手順も、Windows では winget だけ (install script は Windows に
-対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
+版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
+(install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 
 - setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン (既定は true)。入れないマシンは、dotfiles-private に
@@ -1767,8 +1767,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ## Claude Code
 
 `claude-code/Install-ClaudeCode.ps1` は、Claude Code を winget の `Anthropic.ClaudeCode` (portable の `claude.exe` 1 つ。管理者は要らない。
-x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の 1 か所で固定する。PowerShell の `c` が起動する `claude.exe` はこれ
-([PowerShell](#powershell))。WSL の claude は mise の `claude@latest` (猶予 1 日) で、別のもの。
+x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。PowerShell の `c` が
+起動する `claude.exe` はこれ ([PowerShell](#powershell))。WSL の claude は mise の `claude@latest` (猶予 1 日) で、別のもの。
 
 - winget で入れた Claude Code は自分では上がらない (公式。`claude update` は何もしない)。版は dotfiles が決める
 - `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE` (Claude Code に `winget upgrade` を打たせる) は設定しない。ユーザー・マシンの環境変数か

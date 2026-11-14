@@ -1749,7 +1749,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   マシン (どちらも既定は true) で、`bootstrap-windows-ntn.sh`・`bootstrap-windows-claude-code.sh` (order 97) が配った `Install-Ntn.ps1`・
   `Install-ClaudeCode.ps1` を `pwsh.exe` で呼び、winget の `Notion.ntn`・`Anthropic.ClaudeCode` で入れ、版か pin がずれていれば固定した版に
   揃える (herdr と違い、常駐も UAC も無いので揃える。置き場所の exe が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で
-  固定する（[`win/README.md`](../win/README.md#ntn)・[`win/README.md`](../win/README.md#claude-code)）
+  固定する（[`win/README.md`](../win/README.md#ntn)・[`win/README.md`](../win/README.md#claude-code)、[ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
