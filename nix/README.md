@@ -1316,6 +1316,28 @@ tmp = dotfiles.lib.mkHome {
   unit の並びが fixture（`nix/tests/fixtures/group-client/`）と同じことを確かめる（`group-client-state`）。**道具を足したら段を決める**:
   ② ③ なら道具の switch で止め、① なら fixture に足す（決め忘れると客先の PC に入り、ここで違いとして出る）
 
+グループごとの段・道具の既定の表と、作り物のホスト（個人・自社・客先・客先に Claude Code だけを足したもの）の図と表は
+[`nix/groups.md`](./groups.md)（生成物。`nix eval --raw ./nix#lib.groupsDoc > nix/groups.md` で出し直し、古ければ CI の `groups-doc` が落ちる）。
+
+#### ホストの要約
+
+ホストがどのグループで、どの道具が on か・その値がどこで決まったか（グループの既定・段の既定・ホストのファイル・dotfiles-private の
+`nix/shared/`）を出す（`mkHome` が組み立てたホストに `hostSummary` として足す。`nix/lib/host-summary.nix`）。
+
+```sh
+p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
+bash $p summary                                  # setup が選ぶホスト (客先の PC の tmp でも) の要約を端末に出す
+bash $p summary --host <ホスト> --markdown         # dotfiles-private の nix/hosts/<ホスト>.md に置く全文
+bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホストの nix/hosts/<ホスト>.md と nix/hosts/README.md を書く (--check は違いだけ)
+```
+
+- dotfiles-private では、ホストのファイル（`nix/hosts/<ホスト>.nix`）の隣に要約（`<ホスト>.md`。GitHub が描く mermaid の図と、道具ごとの表）を、
+  `nix/hosts/README.md` に目次と全ホストの一覧表とホストごとの図を置く。どちらも生成物で、ホストのファイルを足す・直すときは同じ PR で
+  `summaries` を流す（`pjp-dotfiles-register-host` skill）。`privateHosts` は `.nix` しか読まないので、`.md` を隣に置いても評価は変わらない
+- setup は switch のたびに、この PC のホスト（dotfiles-private に登録したもの）の要約を作り直して clone の `<ホスト>.md` と比べ、違えば・無ければ
+  警告のまとめに 1 件出す（`pjp-dotfiles-register-host` skill の名前と出し直すコマンドつき）。dotfiles-private には CI が無く、本体の変更
+  （段の割り当て・既定）でも要約は古くなるため
+
 ### 登録簿に載せずにマシンを足す
 
 dotfiles-private を読めない PC（会社の PC など）や一時的な環境は、`hosts/default.nix` を編集せず `~/dotfiles/flake.nix` に
@@ -1596,6 +1618,7 @@ p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
 bash $p inspect                                          # この PC・登録の有無・今の世代と一致するホスト (元にするホストの候補)
 bash $p draft --base <ホスト>                             # 元のホスト (前の雛形なら + local) から nix/hosts/<名前>.nix の下書きを描く (stdout)
 bash $p compare --base <ホスト> --private <作業ツリー>     # 旧い形と登録したホストを同じ本体・同じ lock で評価し、drvPath を比べる (shared/ を外しても比べる)
+bash $p summaries --private <作業ツリー>                   # 全ホストの要約 (nix/hosts/<ホスト>.md・README.md) を書き直す (同じ PR に入れる)
 ```
 
 - `draft` は元のホストの `options.dotfiles` を歩き、option の既定より強い定義を持つ値を描く（既定と同じ値を明示した行も描く）。

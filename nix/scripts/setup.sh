@@ -15,7 +15,8 @@
 #   同じ方針)。説明文も各スクリプト冒頭のコメントから取るので二重管理しない。
 # - 設定グループ (ADR 057) で off の道具の手順は飛ばす。どの道具の手順かも各スクリプト冒頭の
 #   `# tool: <key> (<option>)` から取り、off かは home-manager が置く ~/.local/state/dotfiles/group.json を
-#   jq なしで読む (tool_off)。実行の頭には、対象ホストのグループを 1 行出す (note_group)。
+#   jq なしで読む (tool_off)。実行の頭には、対象ホストのグループを 1 行出す (note_group)。switch のあとは、この PC の
+#   ホストの要約 (dotfiles-private の nix/hosts/<ホスト>.md) が今の設定と同じかを見る (check_host_summary)。
 # - `set -e` は関数を if の条件に置くと **その中で無効になる**。手順の関数は
 #   失敗しうるコマンドを必ず `|| return 1` で受けること。
 # - **実行中にこのファイル自身が書き換わると挙動が混ざる**。bash はスクリプトを
