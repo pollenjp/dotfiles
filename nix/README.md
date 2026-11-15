@@ -3391,8 +3391,8 @@ frontmatter が YAML として読めなくても、Claude Code はエラーを�
 いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が閉じる・素の値の「 #」から先がコメント
 として消える、といった形では値が黙って変わる。script は読み直しに頼らず YAML として読めない形をどれも落とし、これらと、
 `name` とディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前でも落ちる（全部は script の先頭）。
-skill の `metadata` も見る（map であること・`pjp-pack` が pack の名前のどれかで、`bootstrap-claude-skill-overrides.sh` の
-読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
+skill の `metadata` も見る（map であること・`pjp-pack` を空白で区切った名前がどれも pack の名前で重ならず、
+`bootstrap-claude-skill-overrides.sh` の読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
 観点は `claude-skills` の `scripts/lint.sh` に揃えてある。
 
 repo の root の `.claude/skills/<名前>/SKILL.md`（配置しない。この repo の session だけが読む skill。今は依存の更新の拡張
@@ -4293,13 +4293,18 @@ skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrid
 
 | 書く key | 値 | 何を読んで決めるか |
 | --- | --- | --- |
-| pack の skill | `"name-only"`（一覧に名前だけ。Skill tool で名前を指せば呼べる） | `~/.claude/skills/*/SKILL.md` の frontmatter の `metadata` の `pjp-pack` と、その pack の入口 `~/.claude/skills/pjp-pack-<pack>/SKILL.md` |
+| pack の skill | `"name-only"`（一覧に名前だけ。Skill tool で名前を指せば呼べる） | `~/.claude/skills/*/SKILL.md` の frontmatter の `metadata` の `pjp-pack`（空白で区切って複数書ける）と、書いた pack の入口 `~/.claude/skills/pjp-pack-<pack>/SKILL.md`（どれか 1 つあればよい） |
 | claude.ai から同期された skill（`anthropic-skills:<名前>`） | `"user-invocable-only"`（Claude の一覧から消え、ユーザーは `/` から呼べる） | `~/.claude/skills/synced/*/` と、`claude-<名前>` のアカウントの `~/.claude-<名前>/skills/synced/*/` の skill のディレクトリ |
 
-- pack の割り当ては、各 skill の `SKILL.md` に書く（`metadata:` の下の `pjp-pack: <pack>`。書き方は
-  `nix/files/claude/skills/README.md`）。割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
-- 入口の無い pack の skill は名前だけにしない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れない
-  マシン・入口がまだ無い版）なら 1 行出すだけ、ほかの pack の入口はあるのにその pack の入口だけ無いなら警告する
+- pack の割り当ては、各 skill の `SKILL.md` に書く（`metadata:` の下の `pjp-pack: <pack>`。話題をまたぐ skill は
+  `pjp-pack: notion docs` のように空白で区切って複数書き、先頭が主の pack。書き方は `nix/files/claude/skills/README.md`）。
+  割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
+- 書いた pack のどれかに入口があれば名前だけにする（主の pack かどうかは問わない）。どの pack にも入口が無い skill は名前だけに
+  しない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れないマシン・入口がまだ無い版）なら 1 行出す
+  だけ、ほかの pack の入口はあるのに書いた pack の入口が無いなら、入口の無い pack ごとに警告する（説明つきのまま残す skill と、
+  ほかに書いた pack の入口から辿れるので名前だけにする skill を分けて出す）
+- `pjp-pack` の値に pack の名前として読めないもの（大文字・記号・列の書き方など）が 1 つでもあれば、ほかの名前の入口があっても
+  その skill は説明つきのまま残す（警告する）。同じ名前を 2 度書いた重なりは 1 つにまとめる
 - frontmatter に `disable-model-invocation: true` がある skill も名前だけにしない（入口の目録には載るが、Claude が自分では
   呼ばない作りのまま残す）。前に書いた `name-only` は戻す
 - claude.ai から同期された skill は plugin ではなく、Claude Code が `~/.claude/skills/synced/<bucket>/` に同期する skill。
@@ -4313,7 +4318,7 @@ skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrid
 
 書いた key と値は `~/.local/state/dotfiles/claude-skill-overrides.applied.json` に控え、流すたびに今の値と比べて決める。
 
-| `settings.json` の今の値 | 書きたい値がある | 書きたい値が無くなった（入口が消えた・pack から外れた・同期された skill が消えた） |
+| `settings.json` の今の値 | 書きたい値がある | 書きたい値が無くなった（書いた pack の入口が全部消えた・pack から外れた・同期された skill が消えた） |
 | --- | --- | --- |
 | 無い | 書く | — |
 | 書きたい値と同じ | 控える（前から手で書いてあった同じ値も控え、あとで戻すことがある） | — |
@@ -4334,6 +4339,7 @@ jq .keys ~/.local/state/dotfiles/claude-skill-overrides.applied.json   # この 
 ```
 
 経緯と、Claude Code で確かめた振る舞いは dotfiles-private の `docs/superpowers/specs/2026-11-03-skill-listing-packs-design.md`。
+1 つの skill に pack を複数書く形は、同じ所の `2026-11-15-skill-multi-pack-design.md`。
 
 ### Notion の宛先を host ごとに選ぶ
 
