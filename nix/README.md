@@ -374,7 +374,7 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 | --- | --- |
 | 全体 | `./nix/scripts/flake-lock-age.sh update`（閉包のスキャンも挟まる）→ `nix/flake.lock` と `release-age.nix` を commit。CI の `lock-age` は例外の分だけ新しい pin を通す |
 | 一部 (nixpkgs から) | `./nix/scripts/flake-lock-age.sh update --input nixpkgs-exceptions`（普段の pin は動かさない。全部を上げてよければ素の `update`）→ commit |
-| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。実例は `pkgs/upstream/mise.nix`）→ commit。`flake.lock` は変わらない |
+| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。形は `pkgs/ntn/default.nix` と同じ）→ commit。`flake.lock` は変わらない |
 
 - **一部の例外（nixpkgs から・upstream から）に書けるのは、ほかの package から使われないアプリだけ**で、top-level の名前
   （`pkgs.<名前>`）に限る。home の pkgs に overlay で当てるので、`programs.<名前>` や `home.packages` を書き換えずに
@@ -5078,7 +5078,7 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 
 Notion の CLI `ntn` は nixpkgs に無いので、公式の配布物（`https://ntn.dev/releases/v<版>/ntn-<target>.tar.gz`。Linux は
 musl の静的な binary、macOS は署名済みの binary）を、版と system ごとの sha256（隣の `.sha256` の値）で固定して入れる
-（`pkgs/ntn/`。形は `pkgs/upstream/mise.nix` と同じ）。`home/modules/packages.nix` が全ホストに入れ、bash・fish・zsh の
+（`pkgs/ntn/`）。`home/modules/packages.nix` が全ホストに入れ、bash・fish・zsh の
 補完も入る。pjp-dev-tracker など Notion へ書く skill と、見回り役（[前述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)）が使う。
 token の置き場（keychain かファイルか）は[前述](#ntn-notion-cli-の-token-をファイルに置く-keyring)。switch せずに試すなら:
 
