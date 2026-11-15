@@ -49,6 +49,9 @@
 #   - cursor-agent.json が無い・形が違う ({"enable":"yes"}・{}・[]・空・JSON が 2 つ)・jq が無いときは、警告して宣言に
 #     触らず、cursor-agent の mise は打たない
 #   - cursor-agent の手順で何が起きても exit 0 で最後まで流れる (後ろの bootstrap を止めない)
+#   - group.json (設定グループ) の tools.claude が false なら claude を入れず (ほかの settings と言語ランタイムは今までどおり)、
+#     「入れない」と出す。config.toml の [tools] に前の claude が残っていれば、外すコマンド (mise unuse -g claude) を 1 行出す
+#     (警告にしない・config.toml を書き換えない)。true なら入れる (group.json が無い前の世代は、ほかのケースのとおり入れる)
 #   - ヘッダの `# mise-tools:` (setup.sh が読み、残りの手作業の手順 5 で「setup が書く名前」として数えない) に、
 #     mise use -g で ~/.config/mise/config.toml の [tools] に書く名前 (版を除く) を過不足なく並べている。足りないと
 #     手順 5 が setup の書いた名前を手で消すよう出し、余ると setup が書かなくなった名前の残りを見逃す
@@ -649,6 +652,26 @@ if [[ $(cat "${h}/rc") == 0 && -n ${written} && ${declared} == "${written}" ]]; 
   ok "ヘッダの mise-tools: に、mise use -g で [tools] に書く名前 (版を除く) を過不足なく並べている"
 else
   ng "ヘッダの mise-tools: (ヘッダ: ${declared//$'\n'/ } / 書いた名前: ${written//$'\n'/ })" "$(detail "${h}")"
+fi
+
+# 12. group.json の tools.claude が false なら claude を入れず、[tools] に残った claude は外すコマンドを出すだけ。true なら入れる
+h=$(new_home group-no-claude "$(state 9d)")
+printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"claude":false},"version":1}' \
+  >"${h}/.local/state/dotfiles/group.json"
+mkdir -p "${h}/.config/mise"
+printf '[tools]\nclaude = "latest"\ngo = "latest"\n' >"${h}/.config/mise/config.toml"
+run "${h}" 2026-10-22T03:00:00Z
+h2=$(new_home group-claude "$(state 9d)")
+printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"claude":true},"version":1}' \
+  >"${h2}/.local/state/dotfiles/group.json"
+run "${h2}" 2026-10-22T03:00:00Z
+if finished "${h}" && ! grep -Fq -- 'claude' "${h}/mise.log" && others_plain "${h}" \
+  && grep -Fq -- '入れない (dotfiles.claude.enable = false' "${h}/out" && grep -Fq -- 'mise unuse -g claude' "${h}/out" \
+  && no_warning "${h}" && grep -Fxq 'claude = "latest"' "${h}/.config/mise/config.toml" \
+  && finished "${h2}" && grep -Fxq -- '1d|use -g claude@latest' "${h2}/mise.log"; then
+  ok "group.json の tools.claude が false なら claude を入れず、[tools] に残った claude は外すコマンドを出すだけ (true なら入れる)"
+else
+  ng "group.json の tools.claude" "$(detail "${h}") / $(detail "${h2}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

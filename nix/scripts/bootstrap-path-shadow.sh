@@ -4,6 +4,12 @@
 # PATH で、Nix が入れる CLI (ntn) より先に来る、Nix のものでない同名のコマンドを警告する。
 # 冪等。`setup.sh --update` でも毎回走る。何も書き換えない。
 #
+# tool: ntn (dotfiles.ntn.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#   今の見張りの対象は ntn だけなので ntn の道具にしている。ほかの名前を足すときは、この行を外して script の中で分ける。
+#
 # ## なぜ要るのか
 #
 # ntn (Notion CLI) は、dotfiles が Nix で入れる (nix/pkgs/ntn。版を固定し、公開から 7 日たった版にする) 前は、公式の

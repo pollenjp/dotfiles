@@ -11,6 +11,11 @@
 # ^ setup.sh が読む実行順。bootstrap-windows-files.sh (order: 90) が Install-Herdr.ps1 を
 #   置いた後に走らせる。仕組みは nix/README.md「bootstrap の実行順」。
 #
+# tool: windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # Windows の herdr は winget の Herdr.Herdr で入れ、版は win/herdr/Install-Herdr.ps1 の

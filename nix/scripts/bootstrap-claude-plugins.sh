@@ -10,6 +10,11 @@
 #   後、かつ他の bootstrap-* (既定の 50) より前に走らせる。
 #   仕組みは nix/README.md 「bootstrap の実行順」。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## なぜ Nix でやらないのか
 #
 # プラグインの実体は ~/.claude/plugins/ 以下へ clone され、有効/無効は

@@ -244,7 +244,46 @@ echo "==> claude (役割分担の例外)"
 # 上の go / usage と違ってここだけ `@latest` を明示するのは、まさにその
 # 「自動で上がってほしい」を成立させるため。省くと --update を何度回しても
 # 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
-MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise use -g claude@latest
+#
+# Claude Code を入れないホスト (dotfiles.claude.enable が false。設定グループの ② AI の道具が off の客先の PC など) では
+# 入れない。値は ~/.local/state/dotfiles/group.json (nix/home/modules/group.nix) の tools.claude で、ファイル・欄が無い
+# (この仕組みの前の世代)・読めないときは今までどおり入れる。前に入れた claude が config.toml の [tools] に残っていれば、
+# 外すコマンドを 1 行出すだけで、消さない (setup は off にした道具の入れたものを消さない。ADR 057)。
+group_state="${HOME}/.local/state/dotfiles/group.json"
+claude_wanted() {
+  local v
+  if [[ ! -r ${group_state} ]] || ! command -v jq &>/dev/null; then
+    return 0
+  fi
+  v=$(jq -r 'if (.tools | type) == "object" and (.tools | has("claude")) then .tools.claude | tostring else "true" end' \
+    "${group_state}" 2>/dev/null) || return 0
+  [[ ${v} != false ]]
+}
+# ~/.config/mise/config.toml の [tools] に claude があるか (setup.sh の mise_extra_tools と同じ読み方。[tools.<名前>] の形は見ない)
+global_tools_has_claude() {
+  local f="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml" found
+  [[ -f ${f} ]] || return 1
+  found=$(awk '
+    /^[[:space:]]*\[/ { in_tools = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*$/); next }
+    !in_tools         { next }
+    /^[[:space:]]*#/  { next }
+    {
+      key = $0
+      sub(/[[:space:]]*=.*$/, "", key)
+      gsub(/[[:space:]"]/, "", key)
+      if (key == "claude") { print "yes"; exit }
+    }
+  ' "${f}")
+  [[ ${found} == yes ]]
+}
+if claude_wanted; then
+  MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise use -g claude@latest
+else
+  echo "  入れない (dotfiles.claude.enable = false。設定グループ)"
+  if global_tools_has_claude; then
+    echo "  前に入れた claude が ~/.config/mise/config.toml の [tools] に残っています (消さない)。外すなら: mise unuse -g claude"
+  fi
+fi
 
 echo "==> cursor-agent (Cursor の CLI。役割分担の例外。dotfiles.cursorAgent.enable のホストだけ)"
 # claude と同じ理由 (リリースの頻度が flake.lock の更新の周期に合わない) で mise に置く。入れるのは host option

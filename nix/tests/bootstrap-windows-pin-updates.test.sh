@@ -13,6 +13,8 @@
 #
 #   - 配らないマシン・windows-files.json が無いときは何も呼ばずに飛ばす。ntn・claudeCode が false の名前は確かめない
 #     (欄が無い前の世代は確かめる)
+#   - group.json (設定グループ) の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、ほかの名前は確かめる。
+#     true なら確かめる (group.json が無い前の世代も確かめる)
 #   - gh が無い・ログインしていないときは、確かめられないと 1 行出して exit 0 (まとめにも残す)
 #   - 見送っていない新しい版があれば、名前ごとに「<題>: <固定した版> → <新しい版>」(4 つ以上は頭と末尾と個数) を出し、
 #     警告のまとめに skill (pjp-dotfiles-win-pin-update) の名前を書いた見出しと続きの行で残す。出た日は引かない
@@ -237,6 +239,23 @@ if [[ $(rc "${d}") == 0 ]] && ! called "${d}" -E '^winget .*(ntn|claude-code)$' 
   ok "ntn・claudeCode が false の名前は確かめず、欄が無ければ確かめる (jq の // で false を true に化けさせない)"
 else
   ng "入れないマシンの名前" "calls=$(cat "${d}/calls") / $(cat "${d2}/calls")"
+fi
+
+# 4c. group.json の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめない。true なら確かめる
+d=$(new_case t4c "${state_on}")
+printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}' \
+  >"${d}/home/.local/state/dotfiles/group.json"
+run "${d}" 0
+d2=$(new_case t4d "${state_on}")
+printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true},"version":1}' \
+  >"${d2}/home/.local/state/dotfiles/group.json"
+run "${d2}" 0
+if [[ $(rc "${d}") == 0 ]] && ! called "${d}" -E '^winget .*herdr$' && ! called "${d}" -E '^herdr-app ' \
+  && called "${d}" -E '^winget .*ntn$' && called "${d}" -E '^winget .*openssh$' \
+  && called "${d2}" -E '^winget .*herdr$' && called "${d2}" -E '^herdr-app '; then
+  ok "group.json の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、true なら確かめる"
+else
+  ng "windowsHerdr" "calls=$(cat "${d}/calls" 2>/dev/null) / $(cat "${d2}/calls" 2>/dev/null)"
 fi
 
 # 5. 新しい版が無い・見送った版だけ: 「無い」の 1 行で、まとめには残さない

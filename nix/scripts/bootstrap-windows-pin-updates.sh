@@ -34,7 +34,9 @@
 # ## 何をするか
 #
 # 1. ~/.local/state/dotfiles/windows-files.json を読み、配らないマシンは飛ばす。ntn・claudeCode が false の名前は確かめない
-#    (欄が無い前の世代は true と読む)
+#    (欄が無い前の世代は true と読む)。herdr・herdr-app・herdr-core は、~/.local/state/dotfiles/group.json (設定グループ。
+#    home/modules/group.nix) の tools.windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable) が false なら確かめない (ファイル・欄が
+#    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)
 # 2. gh が無い・ログインしていないなら、確かめられないと 1 行出して exit 0
 # 3. 名前ごとに上の口を出た日なしで呼び (60 秒で打ち切る)、見送っていない新しい版があれば「<題>: <固定した版> → <新しい版>」を
 #    出す。警告のまとめには、skill の名前を書いた見出しと、その続きの行として残す。新しい版が無ければ 1 行だけ (まとめには
@@ -55,6 +57,7 @@ script_dir=$(
   pwd -P
 )
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
+group_file="${HOME}/.local/state/dotfiles/group.json"
 all_names=(openssh herdr google-japanese-input ntn claude-code herdr-app herdr-core)
 skill=pjp-dotfiles-win-pin-update
 
@@ -260,7 +263,13 @@ if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
   exit 0
 fi
-# ntn・Claude Code は、入れないマシンでは確かめない (欄が無い前の世代は入れる。jq の // は false も置き換えるので使わない)
+# ntn・Claude Code は、入れないマシンでは確かめない (欄が無い前の世代は入れる。jq の // は false も置き換えるので使わない)。
+# herdr・herdr-app・herdr-core は group.json の tools.windowsHerdr で決める (ファイル・欄が無い前の世代は入れる)
+windows_herdr=true
+if [[ -r ${group_file} ]]; then
+  windows_herdr=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsHerdr")) then .tools.windowsHerdr | tostring else "true" end' \
+    "${group_file}" 2>/dev/null) || windows_herdr=true
+fi
 names=()
 for n in "${all_names[@]}"; do
   case ${n} in
@@ -271,6 +280,11 @@ for n in "${all_names[@]}"; do
   if [[ -n ${key} && $(jq -r --arg k "${key}" 'if has($k) then .[$k] else true end' "${state_file}") != true ]]; then
     continue
   fi
+  case ${n} in
+    herdr | herdr-app | herdr-core)
+      [[ ${windows_herdr} != false ]] || continue
+      ;;
+  esac
   names+=("${n}")
 done
 

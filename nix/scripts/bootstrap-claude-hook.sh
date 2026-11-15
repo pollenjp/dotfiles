@@ -4,6 +4,11 @@
 # Claude Code のフックを ~/.claude/settings.json へ登録する。
 # 冪等。`setup.sh --update` でも毎回走る。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## なぜ Nix でやらないのか
 #
 # フックの定義は settings.json にしか書けない (プラグインを除く)。
