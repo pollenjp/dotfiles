@@ -9,7 +9,9 @@ clone の中のものを流す (win/README.md の「bootstrap (新しい Windows
 docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
 
 すること (この順):
-  1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 か ARM64)・Smart App Control (SAC)
+  0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと cargo が
+     作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
+  1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 か ARM64)
   2. Git for Windows → GitHub CLI → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で winget から入れ、pin を
      足す (winget upgrade --all から外す)。Build Tools に足りない部品は Visual Studio Installer で足し、rustup は自己更新を止める
      (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に入れる)
@@ -22,7 +24,7 @@ docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
 clone には触らない (確かめるだけ。取得もしない)。
 
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
-SAC がオン (cargo の産物の exe が止められ、Rust の runner を作れない)・知らない CPU。SAC の評価モードは ⚠ で知らせて進む。
+知らない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
 UAC は winget と Visual Studio Installer が道具ごとに出す。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。新しい Windows には 5.1 しか
@@ -42,7 +44,7 @@ rustup (winget の Rustlang.Rustup) の固定する版 (check-winget-version.sh 
 rust-toolchain.toml が決める)。
 
 .PARAMETER Check
-今の状態を出すだけで、何も変えない。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ (流せば揃う)・
+今の状態を出すだけで、何も変えない (SAC の警告は同じく最初に出す)。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ (流せば揃う)・
 1 = ほかに直すことがある・2 = winget が無い・思わぬ例外。
 #>
 [CmdletBinding()]
@@ -271,8 +273,9 @@ function New-BootstrapRow {
 function Get-BootstrapRows {
     param($State)
     $sacNote = '※ Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (Windows によっては、戻すのに再インストールが要る)'
+    # SAC がオフでなくても止めない (ユーザーの決まり。最初の警告と、この行の ⚠ で知らせる)
     switch ($State.Sac) {
-        'on' { New-BootstrapRow 'Smart App Control' 'オン → オフにしてから流し直す (cargo の産物の exe が止められ、Rust の runner を作れない)' 'blocker' $sacNote }
+        'on' { New-BootstrapRow 'Smart App Control' 'オン → オフにする (cargo の産物の exe が止められ、Rust の runner を作れない)' 'manual' $sacNote }
         'eval' { New-BootstrapRow 'Smart App Control' '評価モード → オフにする (今は止めないが、いつオンに変わるか分からない)' 'manual' $sacNote }
         'off' { New-BootstrapRow 'Smart App Control' 'オフ' '' '' }
         default { New-BootstrapRow 'Smart App Control' 'この Windows には無い' '' '' }
@@ -322,6 +325,22 @@ function Get-BootstrapRows {
             'other-origin' { New-BootstrapRow $r.Name "origin が $($r.Origin) ($($r.Url) ではない)" 'manual' "※ $($r.Directory) は別の repo の clone。退けて流し直すと clone する" }
             'autocrlf' { New-BootstrapRow $r.Name "core.autocrlf が $($r.AutoCrlf) (false でないと、WSL が配ったものとバイト列がずれる)" 'manual' "※ $($r.Directory) を退けて流し直すと、core.autocrlf=false で clone し直す" }
             default { New-BootstrapRow $r.Name $r.Directory '' '' }
+        }
+    }
+}
+
+# 最初に出す SAC の警告 (オフでなければ出す。bootstrap は止めずに続ける)。オフ・この Windows に無いときは何も返さない
+function Format-SacWarning {
+    param([string]$Sac)
+    $where = '   オフにする場所: Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 (Windows によっては、戻すのに再インストールが要る)'
+    switch ($Sac) {
+        'on' {
+            '⚠️ Smart App Control がオンになっている。cargo が作った exe (Rust の runner・build script) は止められて動かないので、Rust の runner を流す前にオフにする (bootstrap はこのまま続ける)'
+            $where
+        }
+        'eval' {
+            '⚠️ Smart App Control が評価モードになっている。いつオンに変わるか分からず、オンになると cargo が作った exe が止められるので、オフにしておく (bootstrap はこのまま続ける)'
+            $where
         }
     }
 }
@@ -518,6 +537,12 @@ function Get-SmartAppControlRaw {
     [pscustomobject]@{ PolicyState = $policy; DefenderState = $defender }
 }
 
+# 今の Smart App Control の状態 (off・on・eval・unavailable)
+function Get-BootstrapSac {
+    $raw = Get-SmartAppControlRaw
+    Get-SmartAppControlState -PolicyState $raw.PolicyState -DefenderState $raw.DefenderState
+}
+
 # vswhere で Build Tools を読む (JSON の文字列。vswhere が無い・落ちたら空)
 function Read-VsWhere {
     param([string]$VsWhere)
@@ -565,7 +590,6 @@ function Get-RepoState {
 # 今の状態を読む (何も変えない。管理者は要らない)
 function Get-BootstrapState {
     param([object[]]$Packages, $Paths, [string]$Arch)
-    $sacRaw = Get-SmartAppControlRaw
     $states = foreach ($p in $Packages) {
         $exists = $false
         $installed = $null
@@ -620,7 +644,7 @@ function Get-BootstrapState {
     [pscustomobject]@{
         Elevated   = [bool](Test-Elevated)
         Arch       = $Arch
-        Sac        = Get-SmartAppControlState -PolicyState $sacRaw.PolicyState -DefenderState $sacRaw.DefenderState
+        Sac        = Get-BootstrapSac
         Packages   = $states
         GhLoggedIn = $loggedIn
         Repos      = @($repos)
@@ -649,6 +673,12 @@ function Write-Tail {
 
 function Invoke-InstallBootstrap {
     param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Check)
+    # 最初に SAC を確かめ、オフでなければ警告して続ける (止めない。オフにするのはユーザー)
+    $sacWarning = @(Format-SacWarning -Sac (Get-BootstrapSac))
+    if ($sacWarning.Count -gt 0) {
+        foreach ($line in $sacWarning) { Write-Host $line -ForegroundColor Yellow }
+        Write-Host ''
+    }
     if (-not (Test-WingetAvailable)) {
         Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる (更新する) と使えるようになる'
         return 2
@@ -673,7 +703,7 @@ function Invoke-InstallBootstrap {
         Write-Host '揃っている。何もしない'
         return 0
     }
-    # 止める理由 (SAC がオン・管理者の PowerShell・知らない CPU) があれば、何も変えない
+    # 止める理由 (管理者の PowerShell・知らない CPU) があれば、何も変えない
     if (@($rows | Where-Object { $_.Kind -eq 'blocker' }).Count -gt 0) {
         Write-BootstrapVerdict -Rows $rows
         return 1

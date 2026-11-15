@@ -244,7 +244,7 @@ function Get-Kinds { param($State) (@(Get-BootstrapRows -State $State | Where-Ob
 
 Test-Case '揃っていれば直すことは無い' '' { Get-Kinds (New-State) }
 Test-Case 'まっさらな PC は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing Visual Studio Build Tools 2022=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
-Test-Case 'SAC がオンなら止める理由' 'Smart App Control=blocker' { Get-Kinds (New-State @{ Sac = 'on' }) }
+Test-Case 'SAC がオンでも止める理由にはせず、bootstrap では直らない差 (警告して続ける)' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'on' }) }
 Test-Case 'SAC が評価モードなら bootstrap では直らない差' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'eval' }) }
 Test-Case 'SAC の無い Windows は直すことが無い' '' { Get-Kinds (New-State @{ Sac = 'unavailable' }) }
 Test-Case '管理者の PowerShell は止める理由' '管理者の権限=blocker' { Get-Kinds (New-State @{ Elevated = $true }) }
@@ -276,7 +276,7 @@ Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for W
 Test-Case 'rustup の上げ方には toolchain を入れない引数を添える' '※ rustup を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Rustlang.Rustup --exact --version 1.29.3 --custom "--default-toolchain none"、下げるなら winget uninstall --id Rustlang.Rustup の後に流し直す' {
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
 }
-Test-Case 'SAC がオンなら、オフにする場所と戻せないことがあるのを ※ で出す' '⚠ Smart App Control : オン → オフにしてから流し直す (cargo の産物の exe が止められ、Rust の runner を作れない)|※ Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (Windows によっては、戻すのに再インストールが要る)' {
+Test-Case 'SAC がオンなら、オフにする場所と戻せないことがあるのを ※ で出す' '⚠ Smart App Control : オン → オフにする (cargo の産物の exe が止められ、Rust の runner を作れない)|※ Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (Windows によっては、戻すのに再インストールが要る)' {
     $l = Get-Lines (New-State @{ Sac = 'on' }); "$(@($l | Where-Object { $_ -like '*Smart App Control :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
 Test-Case 'clone が無ければ置き場を出す' "⚠ dotfiles : 無い → $Ghq\dotfiles に clone する" { @(Get-Lines (New-State -Dotfiles $freshRepo) | Where-Object { $_ -like '*dotfiles :*' })[0] }
@@ -285,7 +285,14 @@ Test-Case 'clone が無ければ置き場を出す' "⚠ dotfiles : 無い → $
 function Get-Verdict { param($State) (@(Format-BootstrapVerdict -Rows @(Get-BootstrapRows -State $State)) | ForEach-Object { "$_" }) -join '|' }
 Test-Case '揃っていれば締めの行は出さない' '' { Get-Verdict (New-State) }
 Test-Case 'まっさらな PC は、引数なしで流すと揃えると出す' '⚠️ 入っていない・足りないものがある → 引数なしで流すと揃える ⚠️' { Get-Verdict (New-FreshState) }
-Test-Case '止める理由があれば、何も変えていないことと、直してから流し直すことだけを出す' '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️' { Get-Verdict (New-State @{ Sac = 'on' } -Gh @{ Pinned = $false }) }
+Test-Case '止める理由があれば、何も変えていないことと、直してから流し直すことだけを出す' '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️' { Get-Verdict (New-State @{ Elevated = $true } -Gh @{ Pinned = $false }) }
+
+# Format-SacWarning: 最初に出す SAC の警告 (オフでなければ出し、bootstrap は続ける)
+$sacWhere = '   オフにする場所: Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 (Windows によっては、戻すのに再インストールが要る)'
+Test-Case 'SAC がオフなら警告しない' '' { (@(Format-SacWarning -Sac 'off') | ForEach-Object { "$_" }) -join '|' }
+Test-Case 'SAC の無い Windows は警告しない' '' { (@(Format-SacWarning -Sac 'unavailable') | ForEach-Object { "$_" }) -join '|' }
+Test-Case 'SAC がオンなら、Rust の runner を流す前にオフにするよう警告して続ける' "⚠️ Smart App Control がオンになっている。cargo が作った exe (Rust の runner・build script) は止められて動かないので、Rust の runner を流す前にオフにする (bootstrap はこのまま続ける)|$sacWhere" { (@(Format-SacWarning -Sac 'on') | ForEach-Object { "$_" }) -join '|' }
+Test-Case 'SAC が評価モードなら、オフにしておくよう警告して続ける' "⚠️ Smart App Control が評価モードになっている。いつオンに変わるか分からず、オンになると cargo が作った exe が止められるので、オフにしておく (bootstrap はこのまま続ける)|$sacWhere" { (@(Format-SacWarning -Sac 'eval') | ForEach-Object { "$_" }) -join '|' }
 Test-Case '版のずれだけなら、※ の手順で直すと出す' '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' { Get-Verdict (New-State -Git @{ Installed = '2.55.0.5' }) }
 
 # Get-GhLoginArguments: gh のログイン。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
@@ -298,6 +305,7 @@ Test-Case 'gh のログインはブラウザーで、ssh の鍵は作らない�
 # 呼んだものを $script:Calls に「何を・どれに」で書き留める偽物
 function Test-WingetAvailable { $script:HaveWinget }
 function Get-OsArchitecture { 'AMD64' }
+function Get-BootstrapSac { $script:Sac }
 function Get-BootstrapPaths {
     [pscustomobject]@{
         Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'
@@ -351,6 +359,8 @@ function Invoke-Flow {
     $script:Fail = $Fail
     $script:LoginCode = $LoginCode
     $script:HaveWinget = $Winget
+    # 最初に確かめる SAC は、最初の状態と同じ値にする
+    $script:Sac = $States[0].Sac
     $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Check:$Check 6>&1)
     [pscustomobject]@{
         Calls = ($script:Calls -join ' | ')
@@ -378,7 +388,16 @@ Test-Case 'まっさらな PC は、4 つを入れ、pin と自己更新を足�
     $r = Invoke-Flow -States @((New-FreshState), (New-InstalledState), (New-LoggedInState), (New-State)); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case '揃っていれば何も打たずに 0' '0 []' { $r = Invoke-Flow -States @((New-State)); "$($r.Code) [$($r.Calls)]" }
-Test-Case 'SAC がオンなら、まっさらでも何も打たずに 1' '1 [] True' { $s = New-FreshState; $s.Sac = 'on'; $r = Invoke-Flow -States @($s); "$($r.Code) [$($r.Calls)] $($r.Text -like '*止める理由があるので何も変えていない*')" }
+Test-Case 'SAC がオンでも止めず、最初に警告を出してから揃え、締めは 1' '1 [install Git.Git | install GitHub.cli | install Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills] True' {
+    $states = @((New-FreshState), (New-InstalledState), (New-LoggedInState), (New-State))
+    foreach ($s in $states) { $s.Sac = 'on' }
+    $r = Invoke-Flow -States $states
+    $lines = @($r.Text -split "`n")
+    # 警告は表 (最初の行は見出し) より前、出力の 1 行目に出す
+    "$($r.Code) [$($r.Calls)] $($lines[0] -like '⚠️ Smart App Control がオンになっている*')"
+}
+Test-Case '-Check でも SAC の警告を最初に出す' '1 True' { $s = New-State @{ Sac = 'eval' }; $r = Invoke-Flow -States @($s) -Check; "$($r.Code) $(@($r.Text -split "`n")[0] -like '⚠️ Smart App Control が評価モードになっている*')" }
+Test-Case 'winget が無くても、SAC の警告は先に出す' '2 True' { $s = New-State @{ Sac = 'on' }; $r = Invoke-Flow -States @($s) -Winget $false; "$($r.Code) $(@($r.Text -split "`n")[0] -like '⚠️ Smart App Control*')" }
 Test-Case '管理者の PowerShell なら、まっさらでも何も打たずに 1' '1 []' { $s = New-FreshState; $s.Elevated = $true; $r = Invoke-Flow -States @($s); "$($r.Code) [$($r.Calls)]" }
 Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [install GitHub.cli | pin-add GitHub.cli]' {
     $before = New-State @{ Sac = 'eval' } -Gh $fresh; $after = New-State @{ Sac = 'eval' }
