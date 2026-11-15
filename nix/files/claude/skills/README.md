@@ -97,6 +97,25 @@ metadata:
 - pack に skill を足したら、入口の目録（`claude-skills` の `pjp-pack-<pack>`）にも載せる
 - pack を足すなら、`claude-skills` の入口と `scripts/lint.sh`、この repo の `check-claude-frontmatter.sh` の `packs` を一緒に直す
 
+## repo の `.claude/skills/` との違い
+
+この repo には、ここ（`nix/files/claude/skills/`）のほかに、repo の root の `.claude/skills/` にも skill を置く。置き場所で、
+読む session と配り方が違う。
+
+| | ここ（`nix/files/claude/skills/`） | repo の root の `.claude/skills/` |
+| --- | --- | --- |
+| 読む session | どの repo の session でも（home-manager が `~/.claude/skills/` へ配る） | この repo の session だけ（Claude Code が project の skill として読む） |
+| 配り方 | `home-manager switch` で store の写しを張る | 配らない。checkout のファイルをそのまま読む（switch は要らない） |
+| 置くもの | どの repo でも使う手順 | この repo だけの手順と設定（repo の拡張） |
+| `metadata` | `pjp-pack`（pack の割り当て） | `pjp-extends`（拡張の印）。`pjp-pack` は書かない |
+
+- 今ある repo の skill は `pjp-dotfiles-deps`（依存の更新の拡張）だけ。依存の更新の skill（repo の手入れの pack）が、この repo を
+  流すときに印（`metadata:` の下に字下げした `pjp-extends: deps` の 1 行）で見つけ、段ごとに節を読む。設定は隣の `deps.toml`
+  （[ADR 056](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/056_dep_update_repo_extension_20261115T100845JST/README.md)）。この repo の session では一覧にも出るので、description で入口の依存の更新の skill へ向ける
+- 前はここに `pjp-dotfiles-update`・`pjp-dotfiles-win-pin-update` を置いていた。この repo の更新の手順を、どの repo でも読む
+  ここに置くと、ほかの repo の session の一覧を埋め、手順と設定が入口の skill と離れて、片方を直すともう片方がずれる
+- 名前は同じく `pjp-` で始める。`check-claude-frontmatter.sh` が両方を見る（repo の skill は `pjp-extends` の値と形も）
+
 ## script が外部ツールを要求するとき
 
 `scripts/` に置く script が手元に無いツールを要求する場合、用意する手段は

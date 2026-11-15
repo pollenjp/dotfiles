@@ -19,6 +19,10 @@
 #                            (Claude Code はサブディレクトリの下も読む)
 #   commands/**/<名前>.md    frontmatter・description (呼び出し名はパスから決まるので、name は見ない)
 #
+# と、repo の root (<nix> の親) の .claude/skills/<名前>/SKILL.md (配置しない。この repo の session だけが読む skill。無ければ
+# 見ない)。skills と同じく、frontmatter・name がディレクトリ名と同じ・description・pjp- で始まる名前と、metadata の拡張の印
+# (下) を見る。
+#
 # agents・commands の symlink は辿って、リンク先の中身を見る。README.md は見ない: skills・agents・commands の直下のものは
 # 配置されず、agents のサブディレクトリのものは Claude Code が文書として扱う (name の無いファイル)。commands の
 # サブディレクトリの README.md は配置されて command になるので落とす。名前 (skill はディレクトリ名、agent はファイル名、
@@ -37,6 +41,12 @@
 # 枠に収める」)。metadata が map でない・pjp-pack が文字列でない・pack の名前 (下の packs) のどれでもない・bootstrap の
 # 読む形 (「metadata:」の下に字下げした「pjp-pack: <pack>」の 1 行) でない・入口の skill (pjp-pack-<pack>。常駐) に
 # pjp-pack がある、のどれでも落とす。入口が在るかは見ない (入口は claude-skills にある)。
+#
+# pjp-extends は repo の拡張の印で、repo の .claude/skills/ の skill に書く (依存の更新の skill が、その repo を流すときに
+# 見つけて読む。ADR 056)。値は deps だけ。pjp-pack と同じく「metadata:」の下に字下げした「pjp-extends: <値>」の 1 行で書く
+# (読む側は yq の無いマシンでも 1 行で読む)。文字列でない・deps でない・その形でない、のどれでも落とす。~/.claude/ へ配る
+# skill (<nix>/files/claude/skills/) の pjp-extends と、repo の .claude/skills/ の skill の pjp-pack (pack は ~/.claude/ の
+# skill の一覧を枠に収める仕組みで、repo の skill には効かない) も落とす。
 #
 # 落とすものがあれば「<ファイル>: <理由>」を全部出して exit 1。見るものが 1 つも無くても exit 1。<nix>/files/claude が
 # 無い・知らない引数・yq が無いときは exit 2。CI の lint ジョブが流す。<nix のパス> を省けば、この script の隣の nix/ を
@@ -110,6 +120,9 @@ if [[ ! -d ${claude_dir} ]]; then
   exit 2
 fi
 base=$(basename "${nix_dir}")
+# repo の root (<nix> の親) と、この repo の session だけが読む skill の置き場所
+repo_dir=$(dirname "${nix_dir}")
+repo_skills=${repo_dir}/.claude/skills
 
 problems=()
 notes=()
@@ -117,10 +130,16 @@ notes=()
 # skill の metadata の pjp-pack に書ける pack の名前。入口の skill (pjp-pack-<pack>) は claude-skills にある。pack を足すなら、
 # ここと claude-skills の入口・scripts/lint.sh を一緒に直す
 packs=(diagram video notion machine repo browser lang)
+# repo の skill の metadata の pjp-extends (拡張の印) に書ける値。読む側と一緒に足す (ADR 056)
+extends=(deps)
 
-# $1: ファイルかディレクトリ。nix/ から書いた名前を出す (CI の出力を短くする)
+# $1: ファイルかディレクトリ。<nix> の下は nix/ から、repo の .claude/ の下は repo の root から書いた名前を出す (CI の出力を
+# 短くする)
 label_of() {
-  printf '%s\n' "${base}/${1#"${nix_dir}/"}"
+  case $1 in
+    "${nix_dir}"/*) printf '%s\n' "${base}/${1#"${nix_dir}/"}" ;;
+    *) printf '%s\n' "${1#"${repo_dir}/"}" ;;
+  esac
 }
 
 # $1 の 1 行目の --- から次の --- の行までの中身を出す。frontmatter が無ければ (1 行目が --- でない・閉じていない) 1 を返す
@@ -294,10 +313,40 @@ check_md() {
   fi
 }
 
-# $1: skill の SKILL.md、$2: skill の名前 (ディレクトリ名)。frontmatter の metadata を見る (先頭の「skill の metadata」)。
+# frontmatter ($1) の metadata の $2 (pjp-pack・pjp-extends) が、「metadata:」の下に字下げした「<key>: <値>」の 1 行の形か。
+# flow の形 (metadata: {…}) と block scalar (<key>: |) は違う (読む側は yq の無いマシンでも動くよう、この形だけを awk で読む)
+one_line_form() {
+  [[ $(fm_yq '.metadata | style' "$1") != flow ]] \
+    && [[ ! $(fm_yq ".metadata[\"$2\"] | style" "$1") =~ ^(literal|folded)$ ]]
+}
+
+# repo の .claude/skills/ の skill の metadata の pjp-extends (拡張の印) を見る。$1: ラベル、$2: frontmatter
+check_extends() {
+  local label=$1 fm=$2 ext_type ext known
+  ext_type=$(fm_yq '.metadata["pjp-extends"] | type' "${fm}")
+  [[ ${ext_type} != '!!null' ]] || return 0
+  if [[ ${ext_type} != '!!str' ]]; then
+    problems+=("${label}: metadata の pjp-extends が文字列ではありません (${ext_type})")
+    return 0
+  fi
+  if ! one_line_form "${fm}" pjp-extends; then
+    problems+=("${label}: metadata の pjp-extends は「metadata:」の下に字下げして「pjp-extends: <値>」の 1 行で書いてください (読む側はこの形だけを読みます)")
+    return 0
+  fi
+  ext=$(fm_yq '.metadata["pjp-extends"]' "${fm}")
+  for known in "${extends[@]}"; do
+    if [[ ${ext} == "${known}" ]]; then
+      return 0
+    fi
+  done
+  problems+=("${label}: metadata の pjp-extends '${ext}' は知らない値です (${extends[*]} のどれか。依存の更新の拡張なら deps)")
+}
+
+# $1: skill の SKILL.md、$2: skill の名前 (ディレクトリ名)、$3: 置き場所 (home: ~/.claude/ へ配る skill・repo: repo の
+# .claude/skills/ の skill)。frontmatter の metadata を見る (先頭の「skill の metadata」)。
 # frontmatter が無い・中に --- がある・YAML の map として読めないときは、check_md が落とすので何も言わない
 check_skill_metadata() {
-  local file=$1 skill_name=$2 label fm meta_type pack_type pack known
+  local file=$1 skill_name=$2 where=$3 label fm meta_type pack_type pack known
   label=$(label_of "${file}")
   fm=$(frontmatter "${file}") || return 0
   [[ -z $(awk 'index($0, "---") { print; exit }' <<<"${fm}") ]] || return 0
@@ -312,6 +361,16 @@ check_skill_metadata() {
       return 0
       ;;
   esac
+  if [[ ${where} == repo ]]; then
+    if [[ $(fm_yq '.metadata["pjp-pack"] | type' "${fm}") != '!!null' ]]; then
+      problems+=("${label}: repo の .claude/skills/ の skill には metadata の pjp-pack を書かないでください (pack は ~/.claude/ へ配る skill の一覧を枠に収める仕組みです)")
+    fi
+    check_extends "${label}" "${fm}"
+    return 0
+  fi
+  if [[ $(fm_yq '.metadata["pjp-extends"] | type' "${fm}") != '!!null' ]]; then
+    problems+=("${label}: metadata の pjp-extends は repo の拡張の印です。~/.claude/ へ配る skill には書かず、repo の .claude/skills/ の skill に書いてください")
+  fi
   pack_type=$(fm_yq '.metadata["pjp-pack"] | type' "${fm}")
   [[ ${pack_type} != '!!null' ]] || return 0
   if [[ ${skill_name} == pjp-pack-* ]]; then
@@ -324,8 +383,7 @@ check_skill_metadata() {
   fi
   # bootstrap-claude-skill-overrides.sh は yq の無いマシンでも動くよう、決まった形だけを awk で読む (読めない形の skill は
   # 黙って説明つきのまま残る)。flow の形 (metadata: {pjp-pack: …}) と block scalar (pjp-pack: |) はここで落とす
-  if [[ $(fm_yq '.metadata | style' "${fm}") == flow ]] \
-    || [[ $(fm_yq '.metadata["pjp-pack"] | style' "${fm}") =~ ^(literal|folded)$ ]]; then
+  if ! one_line_form "${fm}" pjp-pack; then
     problems+=("${label}: metadata の pjp-pack は「metadata:」の下に字下げして「pjp-pack: <pack>」の 1 行で書いてください (bootstrap-claude-skill-overrides.sh はこの形だけを読みます)")
     return 0
   fi
@@ -356,8 +414,29 @@ for entry in "${claude_dir}"/skills/*; do
     continue
   fi
   check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
-  check_skill_metadata "${entry}/SKILL.md" "${entry_name}"
+  check_skill_metadata "${entry}/SKILL.md" "${entry_name}" home
 done
+
+# repo の .claude/skills: <名前>/SKILL.md。配置せず、この repo の session だけが読む skill (repo の拡張など)。無ければ見ない
+if [[ -d ${repo_skills} ]]; then
+  for entry in "${repo_skills}"/*; do
+    [[ -e ${entry} ]] || continue
+    entry_name=$(basename "${entry}")
+    [[ ${entry_name} != README.md ]] || continue
+    found=$((found + 1))
+    if [[ ! -d ${entry} ]]; then
+      problems+=("$(label_of "${entry}"): .claude/skills の直下にはディレクトリだけを置いてください")
+      continue
+    fi
+    check_prefix "${entry_name}" "${entry}"
+    if [[ ! -f ${entry}/SKILL.md ]]; then
+      problems+=("$(label_of "${entry}"): SKILL.md がありません")
+      continue
+    fi
+    check_md "${entry}/SKILL.md" "${entry_name}" "ディレクトリ名"
+    check_skill_metadata "${entry}/SKILL.md" "${entry_name}" repo
+  done
+fi
 
 # $1 (agents・commands) の下の *.md を、サブディレクトリの下も含めて 1 行に 1 つずつ出す。symlink は辿って、リンク先の
 # 中身を見る (出すのはリンクのパス)

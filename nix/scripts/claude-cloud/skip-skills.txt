@@ -12,6 +12,5 @@ pjp-herdr-hub
 pjp-herdr-other-repo
 
 # そのマシンの ~/dotfiles (setup・switch・ローカル flake・ホストの登録) を扱う
-pjp-dotfiles-update
 pjp-dotfiles-register-host
 pjp-dotfiles-local-flake-migrate

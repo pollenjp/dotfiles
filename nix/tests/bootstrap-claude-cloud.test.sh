@@ -15,7 +15,7 @@
 #
 #   - dotfiles と claude-skills の skill・agent と claude-skills の rule を ~/.claude/<種類>/<名前> へ張り (向き先も見る)、
 #     README.md は張らない
-#   - mod を兼ねる skill (.claude-plugin/plugin.json がある) と skip-skills.txt の名前 (dotfiles の pjp-dotfiles-update・
+#   - mod を兼ねる skill (.claude-plugin/plugin.json がある) と skip-skills.txt の名前 (dotfiles の pjp-dotfiles-register-host・
 #     claude-skills の pjp-cc-page) は張らない
 #   - pjp-dev-tracker と CLAUDE.md の「## タスク管理」の節は --dev-tracker のときだけ。外して流し直すと symlink を外す
 #   - dotfiles と claude-skills に同じ名前があれば dotfiles を張り、警告に名前を出す
@@ -39,7 +39,7 @@
 #   - settings.json が壊れていれば触らずに警告し、ほかは進めて 0 で終わる
 #   - settings.json の skillOverrides に、入口 (pjp-pack-<pack>) のある pack の skill (dotfiles の pjp-plantuml など) の
 #     name-only と、claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/) の anthropic-skills:<名前> の
-#     user-invocable-only を書く。張らない skill (skip-skills.txt の pjp-dotfiles-update) と常駐の skill には書かず、
+#     user-invocable-only を書く。張らない skill (skip-skills.txt の pjp-dotfiles-register-host) と常駐の skill には書かず、
 #     host option のファイル (cloud に無い) の警告は出さない。--quiet ならこの分も stdout に出さない
 #   - nix/scripts/bootstrap-claude-skill-overrides.sh が無ければ、何も書かずに 1 で終わる
 
@@ -163,7 +163,7 @@ fi
 if [[ $(rc_of t1) == 0 && -L ${h}/.claude/skills/pjp-fake-one ]] \
   && [[ ! -e ${h}/.claude/skills/pjp-fake-mod && ! -L ${h}/.claude/skills/pjp-fake-mod ]] \
   && [[ ! -e ${h}/.claude/skills/pjp-cc-page && ! -L ${h}/.claude/skills/pjp-cc-page ]] \
-  && [[ ! -e ${h}/.claude/skills/pjp-dotfiles-update && ! -L ${h}/.claude/skills/pjp-dotfiles-update ]]; then
+  && [[ ! -e ${h}/.claude/skills/pjp-dotfiles-register-host && ! -L ${h}/.claude/skills/pjp-dotfiles-register-host ]]; then
   ok "mod と skip-skills.txt の skill は張らない"
 else
   ng "mod と skip-skills.txt の skill は張らない" "$(ls -la "${h}/.claude/skills" 2>&1)"
@@ -495,7 +495,7 @@ if [[ $(rc_of t17) == 0 ]] \
   && [[ $(jq -r '.skillOverrides["pjp-plantuml"]' "${settings}") == name-only ]] \
   && [[ $(jq -r '.skillOverrides["pjp-d3js"]' "${settings}") == name-only ]] \
   && [[ $(jq -r '.skillOverrides["anthropic-skills:pdf"]' "${settings}") == user-invocable-only ]] \
-  && [[ $(jq '.skillOverrides | has("pjp-dotfiles-update") or has("pjp-nix-flake") or has("pjp-pack-diagram")' "${settings}") == false ]] \
+  && [[ $(jq '.skillOverrides | has("pjp-dotfiles-register-host") or has("pjp-nix-flake") or has("pjp-pack-diagram")' "${settings}") == false ]] \
   && ! grep -q -F '生成ファイル' "${work}/t17/err"; then
   ok "入口のある pack の skill を name-only に、同期された skill を user-invocable-only にし、張らない skill・常駐の skill には書かない"
 else

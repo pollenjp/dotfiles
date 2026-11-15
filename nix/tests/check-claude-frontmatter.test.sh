@@ -39,6 +39,10 @@
 #     metadata: も通る。metadata が map でない・pjp-pack が文字列でない・pack の名前でない・flow の形
 #     (metadata: {pjp-pack: …})・block scalar の値・入口の skill (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata
 #     は見ない。YAML として読めない skill には、metadata の理由を重ねない
+#   - repo の root (<nix> の親) の .claude/skills/<名前>/SKILL.md も見る。名前の pjp-・SKILL.md の有無・name とディレクトリ名は
+#     skills と同じに見て、ファイルは repo の root から書く (.claude/skills/…)。直下の README.md は見ない。metadata の
+#     pjp-extends: deps (拡張の印) と印の無い skill は通り、知らない値・文字列でない・flow の形の pjp-extends と、repo の skill の
+#     pjp-pack は落とす。~/.claude/ へ配る skill (files/claude/skills/) の pjp-extends も落とす
 #   - agents・commands の symlink (ファイルもディレクトリも) は辿って、リンク先の中身を見る (出すのはリンクのパス)
 #   - description が 1024 文字を超えると、注意を出すが落とさない。数えるのは文字で、バイトではない (日本語の 1024 文字は
 #     出さない)
@@ -699,6 +703,108 @@ if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 7 ]] \
   ok "skill の metadata の pjp-pack は pack の名前を通し、map でない・文字列でない・pack の名前でない・bootstrap の読めない形・入口の skill の pjp-pack を出して exit 1 (agent は見ない)"
 else
   ng "skill の metadata" "rc=$(rc "${c}") err=$(err "${c}")"
+fi
+
+# 7c. repo の .claude/skills/ (配置しない、この repo の session だけの skill) も見る。pjp-extends: deps と印の無い skill は通り、
+#     知らない値・文字列でない・1 行の形でない pjp-extends と、repo の skill の pjp-pack は落とす。~/.claude/ へ配る skill の
+#     pjp-extends も落とす。名前・SKILL.md の有無・name とディレクトリ名は skills と同じに見て、ファイルは repo の root から書く
+n=$(new_nix t7c)
+cl=${n}/files/claude
+c=$(dirname "${n}")
+rs=${c}/.claude/skills
+put "${cl}/skills/pjp-home/SKILL.md" <<'EOF'
+---
+name: pjp-home
+description: 配る skill
+metadata:
+  pjp-pack: machine
+---
+EOF
+put "${cl}/skills/pjp-home-ext/SKILL.md" <<'EOF'
+---
+name: pjp-home-ext
+description: 配る skill に拡張の印
+metadata:
+  pjp-extends: deps
+---
+EOF
+put "${rs}/pjp-ext-ok/SKILL.md" <<'EOF'
+---
+name: pjp-ext-ok
+description: >-
+  repo の拡張。「: 」を含んでよい
+metadata:
+  pjp-extends: deps
+---
+EOF
+printf 'version = 1\n' >"${rs}/pjp-ext-ok/deps.toml"
+put "${rs}/pjp-plain/SKILL.md" <<'EOF'
+---
+name: pjp-plain
+description: 印の無い repo の skill
+---
+EOF
+put "${rs}/pjp-ext-unknown/SKILL.md" <<'EOF'
+---
+name: pjp-ext-unknown
+description: 知らない値
+metadata:
+  pjp-extends: lint
+---
+EOF
+put "${rs}/pjp-ext-seq/SKILL.md" <<'EOF'
+---
+name: pjp-ext-seq
+description: 文字列でない
+metadata:
+  pjp-extends: [deps]
+---
+EOF
+put "${rs}/pjp-ext-flow/SKILL.md" <<'EOF'
+---
+name: pjp-ext-flow
+description: flow の形
+metadata: {pjp-extends: deps}
+---
+EOF
+put "${rs}/pjp-ext-pack/SKILL.md" <<'EOF'
+---
+name: pjp-ext-pack
+description: repo の skill に pack
+metadata:
+  pjp-pack: machine
+  pjp-extends: deps
+---
+EOF
+put "${rs}/dotfiles-deps/SKILL.md" <<'EOF'
+---
+name: dotfiles-deps
+description: pjp- で始まらない
+---
+EOF
+put "${rs}/pjp-name-diff/SKILL.md" <<'EOF'
+---
+name: pjp-other
+description: name がディレクトリ名と違う
+---
+EOF
+mkdir -p "${rs}/pjp-no-skill-md"
+printf '%s\n' '# repo の skill の README' >"${rs}/README.md"
+run "${n}"
+lines_repo=$(grep -c '^   \.claude/skills/[^:]*: ' "${c}/err")
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 1 && ${lines_repo} == 7 ]] \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-home-ext/SKILL.md: metadata の pjp-extends は repo の拡張の印です" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-ext-unknown/SKILL.md: metadata の pjp-extends 'lint' は知らない値です (deps のどれか" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-ext-seq/SKILL.md: metadata の pjp-extends が文字列ではありません (!!seq)" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-ext-flow/SKILL.md: metadata の pjp-extends は「metadata:」の下に字下げして" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-ext-pack/SKILL.md: repo の .claude/skills/ の skill には metadata の pjp-pack を書かないでください" \
+  && seen_err "${c}" -F "   .claude/skills/dotfiles-deps: 名前 'dotfiles-deps' は 'pjp-' で始めてください" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-name-diff/SKILL.md: name が 'pjp-other' ですが、ディレクトリ名 'pjp-name-diff' と同じにしてください" \
+  && seen_err "${c}" -F "   .claude/skills/pjp-no-skill-md: SKILL.md がありません" \
+  && ! seen_err "${c}" -F 'pjp-ext-ok' && ! seen_err "${c}" -F 'pjp-plain' && ! seen_err "${c}" -F '.claude/skills/README'; then
+  ok "repo の .claude/skills/ も見て、pjp-extends: deps を通し、知らない値・文字列でない・1 行でない印と repo の skill の pjp-pack・配る skill の印を出して exit 1"
+else
+  ng "repo の .claude/skills/" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
 
 # 8. frontmatter が無い・閉じていない・skills の直下のファイル・SKILL.md の無いディレクトリ・command のサブディレクトリの

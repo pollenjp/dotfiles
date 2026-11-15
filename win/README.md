@@ -9,8 +9,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
-| `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
-| `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ ([後述](#herdr-app)) |
+| `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
+| `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `powertoys/keyboard-manager/editorSettings.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\editorSettings.json` | Keyboard Manager の新しいエディタが持つ割り当ての一覧 ([後述](#powertoys)) |
@@ -26,8 +26,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 | `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
-| `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン ([後述](#ntn)) |
-| `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン ([後述](#claude-code)) |
+| `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
+| `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 
 ## 配る
 
@@ -154,12 +154,12 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 ## 固定した版より新しい版の知らせ
 
 Windows に固定した版で入れているものに新しい版が出たら、`setup --update` の手順 `nix/scripts/bootstrap-windows-pin-updates.sh`
-(order 97) が、その旨だけを短く出す。Claude Code の中で `! ~/dotfiles/setup --self-update --update` を流すと、Claude Code が最後の
-「警告のまとめ」の行を拾い、skill `pjp-dotfiles-win-pin-update` の手順で、猶予ごと (1 日・3 日・7 日) の上げ先の候補を出して、
-上げるか (どの版か・上げないか) を聞く。選んだ版で PR を作るところまでが skill の手順 ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。
+(order 97) が、その旨だけを短く出す。上げるかは、Claude Code に「dotfiles の Windows に固定した版を上げて」と頼んで決める。
+依存の更新の skill がこの repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) を読み、猶予ごと (1 日・3 日・7 日) の上げ先の候補を
+出して、上げるか (どの版か・上げないか) を聞き、選んだ版で PR を作る ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)・[ADR 056](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/056_dep_update_repo_extension_20261115T100845JST/README.md))。
 
 ```text
-⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code の pjp-dotfiles-win-pin-update skill で、上げるか (どの版か) を決める
+⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める
     Windows の ntn: 0.23.28 → 0.23.29・0.23.30
     Windows の herdr-app: 0.1.13 → 0.1.14・0.1.15
 ```
@@ -169,21 +169,23 @@ Windows に固定した版で入れているものに新しい版が出たら、
 | `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
 
-- 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code は、入れるマシン
-  (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`) でだけ確かめる
+- 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も) は、
+  入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`) でだけ確かめる。下の
+  `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
   1 行だけ (警告のまとめには載らない)
 - setup では出た日を引かない (GitHub API を名前ごとに 1〜2 回。合わせて数秒)。gh のログインが要る
 - 確かめられないとき (gh が無い・ログインしていない・ネットに出られない・API の制限) は、setup を止めずに、確かめられなかった名前と
   わけを 1 行出す (警告のまとめにも載る)
-- 猶予ごとの上げ先の候補は、skill が次を打って出す (手で打ってもよい):
+- 猶予ごとの上げ先の候補は、次で出す (手で打ってよい):
 
   ```sh
   nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
   ```
 
   名前ごとに、新しい版 (出た日・何日前・URL、見送った版は理由)・猶予ごとの上げ先 (その日数以上たった、見送っていない新しい版の
-  うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す
+  うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す。依存の更新の skill は、同じものを
+  JSON で読む (`--candidates --json`。固定した版だけなら、ネットワークを使わない `--list --json`。形は script の先頭)
 - 見送ると、今出ている新しい版は次から setup も CI も知らせない (もっと新しい版が出たらまた知らせる)
 - 対象の外: type-clipboard (自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。[後述](#type-clipboard-の新しい版を出したとき))
   と PowerToys (版を固定しない)
@@ -384,6 +386,11 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
   `winget-versions` の notice か、`-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
   Windows に UAC が出る
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン (herdr-app と herdr-core も同じ値)。既定は設定
+  グループで決まり、② AI の道具の段が on のホスト (グループ `personal`・`company`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+  false のマシンでは `bootstrap-windows-herdr.sh`・`bootstrap-windows-herdr-app.sh` を飛ばし (setup の結果に `↷`)、新しい版の知らせ
+  も herdr・herdr-app・herdr-core を確かめない。false に戻しても setup は消さない。設定 (`%APPDATA%\herdr\config.toml`) と PowerShell の
+  関数は、この値によらず配る
 
 #### Herdr.Herdr.Preview から移る
 
@@ -496,7 +503,7 @@ app と core は自分で新しい版に上がる。上がる先を dotfiles が
 | `nix/scripts/check-herdr-app-version.sh` (WSL・CI) | 固定した版の成果物 (core は Windows と Linux の 2 つ) が変わっていないかと、上げられる新しい版を確かめる ([後述](#固定した版を上げる)) |
 | `nix/scripts/check-herdr-app-installers.sh` (WSL・CI) | 公式の install.ps1 が、写したときから変わっていないかを確かめる ([後述](#公式の-installps1-が変わったとき)) |
 
-固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.13・core 0.1.18) の 1 か所で決める。app の版と windows-x86_64 の sha256、
+固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.15・core 0.1.21) の 1 か所で決める。app の版と windows-x86_64 の sha256、
 core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持ち、Windows へは manifest が `herdr-releases.json` として
 `Install-HerdrApp.ps1` の隣に配る。Linux のホストの herdr-core (home-manager) も同じ版で入る ([後述](#server-側の-herdr-core-hc))。公開から 7 日たった
 版を、PR で上げる。
@@ -712,7 +719,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
 WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼んで 1Password の agent に
 つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
-`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.0.0.0`) の 1 か所だけに書く。
+`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.4.0.0`) の 1 か所だけに書く。
 
 | 打つもの | すること |
 | --- | --- |
@@ -1728,12 +1735,13 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ## ntn
 
 `ntn/Install-Ntn.ps1` は、Notion の CLI の ntn を winget の `Notion.ntn` (zip の中の portable。管理者は要らない。x64 だけ) で入れ、
-版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
+版を `-Version` の既定値 (今は `0.23.30`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
 (install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 
-- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン (既定は true)。入れないマシンは、dotfiles-private に
-  登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定は設定グループで決まり、③ 個人のアカウントに
+  つながるものの段が on のホスト (グループ `personal`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+  既定と違う値にするなら、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
 
   ```nix
   wsl = {
@@ -1818,8 +1826,10 @@ x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の
   `%USERPROFILE%\.claude\settings.json` の `env` で有効になっていれば、`-Check` が ※ の行で知らせる (固定した版から外れうるので消す)
 - Git for Windows は入れない。無ければ Claude Code は Bash tool の代わりに PowerShell tool で動く (公式)
 - Claude Code の設定 (`%USERPROFILE%\.claude`) とログインは dotfiles では扱わない
-- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン (既定は true)。入れないマシンは `wsl` に
-  `windowsFiles.claudeCode.enable = false;` を書く ([ntn](#ntn) と同じ)。false に戻しても setup は消さない。消すなら PowerShell で
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン。既定は設定グループで決まり、② AI の道具の
+  段が on のホスト (グループ `personal`・`company`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+  既定と違う値にするなら `wsl` に `windowsFiles.claudeCode.enable = false;` (か `true`) を書く ([ntn](#ntn) と同じ)。false に戻しても
+  setup は消さない。消すなら PowerShell で
   `winget pin remove --id Anthropic.ClaudeCode --exact` の後に `winget uninstall --id Anthropic.ClaudeCode --exact`
 - 置き場所は `%LOCALAPPDATA%\Microsoft\WinGet\Packages\Anthropic.ClaudeCode_Microsoft.Winget.Source_8wekyb3d8bbwe\claude.exe`
 

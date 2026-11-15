@@ -34,7 +34,7 @@ ssh.exe などが動いていても入れ替える (使用中のファイルは�
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '10.0.0.0',
+    [string]$Version = '10.4.0.0',
     [switch]$Check,
     [switch]$IfMissing,
     [switch]$Force,

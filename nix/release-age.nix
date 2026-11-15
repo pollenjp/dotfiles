@@ -28,7 +28,17 @@
     #    普段の pin が date を越えたら (おおよそ date + 猶予の日数のあと) 何もしなくなる。
     #
     #   { date = "2026-10-23"; reason = "CVE-…: openssl 3.x.y の修正が 2026-10-22 の公開に入った"; }
-    all = [ ];
+    all = [
+      {
+        # 直した版の入った最初の公開 nixpkgs-26.11pre1113202.085af13c1607 の公開の時刻 (それより後の公開は取らない)
+        date = "2026-11-12T09:07:32+09:00";
+        reason =
+          "CVE-2026-111497 (brotli 1.2.0。9.8・KEV)・CVE-2026-58016 (glib 2.88.3)・sqlite 3.53.3 の CVE 10 件"
+          + " (CVE-2026-119371〜CVE-2026-119379・CVE-2026-119591) を直す brotli 1.2.1・glib 2.90.0・sqlite 3.54.0。"
+          + "nixpkgs の staging-next (NixOS/nixpkgs#580394) が入った最初の nixpkgs-unstable の公開で、猶予 7 日の pin"
+          + " (2026-11-07 の公開) には入っていない (2026-11-15 に足した)";
+      }
+    ];
 
     # 2. 一部 (nixpkgs から): packages だけを、date までの公開の nixpkgs (flake の input
     #    nixpkgs-exceptions) から取る。ほかは普段の pin のまま。普段の pin が date を越えたら何もしなくなる。
@@ -42,15 +52,7 @@
     #    version 以上になったら何もしなくなる。
     #
     #   { package = "mise"; version = "2026.10.17"; reason = "CVE-…: nixpkgs#… を待つ間"; }
-    fromUpstream = [
-      {
-        package = "mise";
-        version = "2026.10.17";
-        reason =
-          "eMudhra の中間 CA の侵害 (CVE-2026-111943) の修正版。nixpkgs の mise は 2026.10.3 までで、"
-          + "NixOS/nixpkgs#577218 (mise: 2026.10.3 -> 2026.10.17) を待つ間の一時しのぎ (2026-10-24 に足した)";
-      }
-    ];
+    fromUpstream = [ ];
   };
 
   # 一部の例外 (2・3) は overlay で当てるので、使えるのは「ほかの package から使われないアプリ」で、top-level の名前
