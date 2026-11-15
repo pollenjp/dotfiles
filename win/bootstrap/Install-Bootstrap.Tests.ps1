@@ -288,6 +288,125 @@ Test-Case 'まっさらな PC は、引数なしで流すと揃えると出す' 
 Test-Case '止める理由があれば、何も変えていないことと、直してから流し直すことだけを出す' '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️' { Get-Verdict (New-State @{ Sac = 'on' } -Gh @{ Pinned = $false }) }
 Test-Case '版のずれだけなら、※ の手順で直すと出す' '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' { Get-Verdict (New-State -Git @{ Installed = '2.55.0.5' }) }
 
+# Get-GhLoginArguments: gh のログイン。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
+Test-Case 'gh のログインはブラウザーで、ssh の鍵は作らない・上げない' 'auth login --hostname github.com --web --git-protocol ssh --skip-ssh-key' { (Get-GhLoginArguments) -join ' ' }
+
+# ---------------------------------------------------------------------------
+# 流れ (Windows に触る関数を偽物に差し替える。ここより後ろは、上の関数のテストに戻らない)
+# ---------------------------------------------------------------------------
+
+# 呼んだものを $script:Calls に「何を・どれに」で書き留める偽物
+function Test-WingetAvailable { $script:HaveWinget }
+function Get-OsArchitecture { 'AMD64' }
+function Get-BootstrapPaths {
+    [pscustomobject]@{
+        Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'
+        RustupSettings = 'C:\Users\u\.rustup\settings.toml'; VsWhere = 'C:\vswhere.exe'; VsSetup = 'C:\setup.exe'; GhqRoot = 'C:\Users\u\ghq'
+    }
+}
+function Invoke-Winget {
+    param([string[]]$Arguments)
+    $id = $Arguments[[array]::IndexOf($Arguments, '--id') + 1]
+    $verb = $Arguments[0]
+    if ($verb -eq 'pin') { $verb = "pin-$($Arguments[1])" }
+    $script:Calls.Add("$verb $id")
+    $code = 0
+    if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
+    [pscustomobject]@{ ExitCode = $code; Lines = @() }
+}
+function Invoke-Native {
+    param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
+    $script:Calls.Add("native $($Arguments -join ' ')")
+    [pscustomobject]@{ ExitCode = 0; Lines = @() }
+}
+function Invoke-GitClone {
+    param([string]$GitPath, [string[]]$Arguments)
+    $script:Calls.Add("clone $($Arguments[-1] -replace '^.*\\', '')")
+    [pscustomobject]@{ ExitCode = 0; Lines = @() }
+}
+function Invoke-VsModify {
+    param([string]$VsSetup, [string]$InstallPath, [string[]]$Components)
+    $script:Calls.Add("vs-modify $($Components -join ',')")
+    0
+}
+function Invoke-GhLogin {
+    param([string]$GhPath)
+    $script:Calls.Add('gh-login')
+    $script:LoginCode
+}
+function Update-ProcessPath { }
+function New-CloneParent { param([string]$Directory) }
+# 状態は渡した順に返し、最後の 1 つは何度でも返す (読み直す回数に縛られない)
+function Get-BootstrapState {
+    param([object[]]$Packages, $Paths, [string]$Arch)
+    if ($script:States.Count -gt 1) { return $script:States.Dequeue() }
+    $script:States.Peek()
+}
+
+function Invoke-Flow {
+    param([object[]]$States, [switch]$Check, [hashtable]$Fail = @{}, [int]$LoginCode = 0, [bool]$Winget = $true)
+    $script:Calls = [System.Collections.Generic.List[string]]::new()
+    $script:States = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($s in $States) { $script:States.Enqueue($s) }
+    $script:Fail = $Fail
+    $script:LoginCode = $LoginCode
+    $script:HaveWinget = $Winget
+    $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Check:$Check 6>&1)
+    [pscustomobject]@{
+        Calls = ($script:Calls -join ' | ')
+        Text  = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+        Code  = @($out | Where-Object { $_ -is [int] })[-1]
+    }
+}
+
+# 道具が入ったが、pin が無く、rustup の自己更新が止まっておらず、gh はログインしていない・clone は無い状態 (入れた直後)
+function New-InstalledState {
+    $s = New-State -Git @{ Pinned = $false } -Gh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -Private $freshRepo
+    $s.GhLoggedIn = $false
+    $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
+    $s
+}
+function New-LoggedInState {
+    $s = New-State -Dotfiles $freshRepo -Private $freshRepo
+    $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
+    $s
+}
+
+Test-Case '-Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -States @((New-FreshState)) -Check; "$($r.Code) [$($r.Calls)]" }
+Test-Case '-Check で揃っていれば 0' '0 []' { $r = Invoke-Flow -States @((New-State)) -Check; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'まっさらな PC は、4 つを入れ、pin と自己更新を足し、ログインして 3 つを clone する' '0 [install Git.Git | install GitHub.cli | install Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills]' {
+    $r = Invoke-Flow -States @((New-FreshState), (New-InstalledState), (New-LoggedInState), (New-State)); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case '揃っていれば何も打たずに 0' '0 []' { $r = Invoke-Flow -States @((New-State)); "$($r.Code) [$($r.Calls)]" }
+Test-Case 'SAC がオンなら、まっさらでも何も打たずに 1' '1 [] True' { $s = New-FreshState; $s.Sac = 'on'; $r = Invoke-Flow -States @($s); "$($r.Code) [$($r.Calls)] $($r.Text -like '*止める理由があるので何も変えていない*')" }
+Test-Case '管理者の PowerShell なら、まっさらでも何も打たずに 1' '1 []' { $s = New-FreshState; $s.Elevated = $true; $r = Invoke-Flow -States @($s); "$($r.Code) [$($r.Calls)]" }
+Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [install GitHub.cli | pin-add GitHub.cli]' {
+    $before = New-State @{ Sac = 'eval' } -Gh $fresh; $after = New-State @{ Sac = 'eval' }
+    $r = Invoke-Flow -States @($before, (New-State @{ Sac = 'eval' } -Gh @{ Pinned = $false }), $after); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case '版のずれは入れ替えず、ほかに直すことが無ければ何も打たずに 1' '1 []' { $r = Invoke-Flow -States @((New-State -Git @{ Installed = '2.55.0.5' })); "$($r.Code) [$($r.Calls)]" }
+Test-Case 'Build Tools の部品が足りなければ、Visual Studio Installer で足りない部品だけを足す' '0 [vs-modify Microsoft.VisualStudio.Component.Windows11SDK.26100]' {
+    $lack = New-State -Vs @{ MissingComponents = @('Microsoft.VisualStudio.Component.Windows11SDK.26100'); InstallPath = 'C:\BT' }
+    $r = Invoke-Flow -States @($lack, $lack, (New-State)); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'install が 0 以外でも入っていれば入ったとして進む (再起動待ちなど)' '0 [install Git.Git | pin-add Git.Git] True' {
+    $r = Invoke-Flow -States @((New-State -Git $fresh), (New-State -Git @{ Pinned = $false }), (New-State)) -Fail @{ 'install Git.Git' = -1978335135 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*0x8A150061*')"
+}
+Test-Case 'install が落ちて入らなければ、pin も clone もせずに 1' '1 [install Git.Git]' {
+    $s = New-State -Git $fresh -Dotfiles $freshRepo
+    $r = Invoke-Flow -States @($s, $s) -Fail @{ 'install Git.Git' = 1 }; "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'ログインできなければ clone しない' '1 [gh-login] True' {
+    $s = New-State -Dotfiles $freshRepo; $s.GhLoggedIn = $false
+    $r = Invoke-Flow -States @($s, $s) -LoginCode 1; "$($r.Code) [$($r.Calls)] $($r.Text -like '*clone しない*')"
+}
+Test-Case 'git の repo でないディレクトリは clone せず、ほかの無い repo だけ clone する' '1 [clone dotfiles-private]' {
+    $s = New-State -Dotfiles @{ State = 'not-git' } -Private $freshRepo
+    $r = Invoke-Flow -States @($s, $s, (New-State -Dotfiles @{ State = 'not-git' })); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'winget が無ければ、何も読まずに 2' '2 [] True' { $r = Invoke-Flow -States @((New-State)) -Winget $false; "$($r.Code) [$($r.Calls)] $($r.Text -like '*アプリ インストーラー*')" }
+
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
     exit 1

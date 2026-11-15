@@ -360,9 +360,420 @@ function Format-BootstrapVerdict {
     if ($kinds -contains 'manual') { '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' }
 }
 
-# dot-source されたとき (テスト) は関数だけを読み、本体は走らせない
+# gh auth login の引数。ブラウザーで認める。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
+# (https を選ぶと、書くかを聞いてくる)。ssh の鍵は作らない・上げない
+function Get-GhLoginArguments {
+    @('auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'ssh', '--skip-ssh-key')
+}
+
+# ---------------------------------------------------------------------------
+# Windows に触る関数 (実機で -Check と本番を打って確かめる。テストでは偽物に差し替える)
+# ---------------------------------------------------------------------------
+
+function Test-WingetAvailable {
+    [bool](Get-Command winget -ErrorAction SilentlyContinue)
+}
+
+# CPU。32 ビットの PowerShell でも OS の CPU を返す (AMD64・ARM64 など)
+function Get-OsArchitecture {
+    $a = $env:PROCESSOR_ARCHITEW6432
+    if (-not $a) { $a = $env:PROCESSOR_ARCHITECTURE }
+    "$a".ToUpperInvariant()
+}
+
+# 道具の置き場所。Git と gh は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下。
+# 32 ビットの PowerShell では ProgramFiles が (x86) を指すので、64 ビットの方 (ProgramW6432) を先に見る
+function Get-BootstrapPaths {
+    $cargoHome = $env:CARGO_HOME
+    if (-not $cargoHome) { $cargoHome = Join-Path $env:USERPROFILE '.cargo' }
+    $rustupHome = $env:RUSTUP_HOME
+    if (-not $rustupHome) { $rustupHome = Join-Path $env:USERPROFILE '.rustup' }
+    $programFiles = $env:ProgramW6432
+    if (-not $programFiles) { $programFiles = $env:ProgramFiles }
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if (-not $programFilesX86) { $programFilesX86 = $programFiles }
+    $installer = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer'
+    [pscustomobject]@{
+        Git            = Join-Path $programFiles 'Git\cmd\git.exe'
+        Gh             = Join-Path $programFiles 'GitHub CLI\gh.exe'
+        Rustup         = Join-Path $cargoHome 'bin\rustup.exe'
+        RustupSettings = Join-Path $rustupHome 'settings.toml'
+        VsWhere        = Join-Path $installer 'vswhere.exe'
+        VsSetup        = Join-Path $installer 'setup.exe'
+        GhqRoot        = Join-Path $env:USERPROFILE 'ghq'
+    }
+}
+
+# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す (Install-Herdr.ps1 と同じ)
+function Invoke-Winget {
+    param([string[]]$Arguments)
+    # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
+    $ErrorActionPreference = 'Continue'
+    $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
+        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[█▒]' }
+    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
+}
+
+# exe を打ち、出力の行と終了コードを返す。起動できなければ終了コード -1。-Utf8 は、UTF-8 で書く exe (vswhere -utf8) の出力を
+# 読むあいだだけ、コンソールの文字コードを UTF-8 にする (日本語の Windows の既定は CP932)
+function Invoke-Native {
+    param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
+    $ErrorActionPreference = 'Continue'
+    $saved = $null
+    if ($Utf8) {
+        $saved = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+    }
+    try {
+        $lines = @(& $FilePath @Arguments 2>&1 | ForEach-Object { "$_" })
+        $code = $LASTEXITCODE
+    } catch {
+        $lines = @("$($_.Exception.Message)")
+        $code = -1
+    } finally {
+        if ($null -ne $saved) { [Console]::OutputEncoding = $saved }
+    }
+    [pscustomobject]@{ ExitCode = $code; Lines = $lines }
+}
+
+# clone を流す。git にも Git Credential Manager にも対話のプロンプトを出させない (取れなければ落ちて、締めの行で知らせる)
+function Invoke-GitClone {
+    param([string]$GitPath, [string[]]$Arguments)
+    $savedPrompt = $env:GIT_TERMINAL_PROMPT
+    $savedGcm = $env:GCM_INTERACTIVE
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:GCM_INTERACTIVE = 'never'
+    try {
+        Invoke-Native -FilePath $GitPath -Arguments $Arguments
+    } finally {
+        $env:GIT_TERMINAL_PROMPT = $savedPrompt
+        $env:GCM_INTERACTIVE = $savedGcm
+    }
+}
+
+# PATH をレジストリ (マシン → ユーザー) から読み直す。winget で入れた道具を、このプロセスと、ここから起こす git などから引けるように
+function Update-ProcessPath {
+    $parts = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }
+    $env:Path = $parts -join ';'
+}
+
+# 入っている Build Tools に部品を足す (Visual Studio Installer。UAC が出る)。終了コードを返す (3010 は再起動待ちで、足せている)
+function Invoke-VsModify {
+    param([string]$VsSetup, [string]$InstallPath, [string[]]$Components)
+    $argumentList = Get-VsModifyArgumentList -InstallPath $InstallPath -Components $Components
+    try {
+        $p = Start-Process -FilePath $VsSetup -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
+        return $p.ExitCode
+    } catch {
+        Write-Host "Visual Studio Installer を起動できなかった (UAC を断った・見つからない): $($_.Exception.Message)"
+        return -1
+    }
+}
+
+# gh auth login を、このコンソールで対話で流す (一回限りのコードが出て、ブラウザーで認める)。終了コードを返す。
+# & で呼ぶと関数の出力として stdout を受けることになり、gh が端末でないと見て対話をやめうるので、Start-Process でコンソールをそのまま渡す
+function Invoke-GhLogin {
+    param([string]$GhPath)
+    try {
+        $p = Start-Process -FilePath $GhPath -ArgumentList ((Get-GhLoginArguments) -join ' ') -NoNewWindow -Wait -PassThru
+        return $p.ExitCode
+    } catch {
+        Write-Host "gh を起動できなかった: $($_.Exception.Message)"
+        return -1
+    }
+}
+
+# clone の置き場の親ディレクトリを作る (%USERPROFILE%\ghq\github.com\pollenjp)
+function New-CloneParent {
+    param([string]$Directory)
+    $parent = Split-Path -Parent $Directory
+    if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+}
+
+# 管理者として動いているか (UAC で昇格したプロセス)
+function Test-Elevated {
+    $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+    (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# Smart App Control の値を、レジストリと Defender から読む (どちらも管理者は要らない。読めなければ $null)
+function Get-SmartAppControlRaw {
+    $policy = $null
+    try {
+        $item = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy' -Name 'VerifiedAndReputablePolicyState' -ErrorAction Stop
+        $policy = $item.VerifiedAndReputablePolicyState
+    } catch {
+        $policy = $null
+    }
+    $defender = $null
+    if ($null -eq $policy) {
+        try {
+            $mp = Get-MpComputerStatus -ErrorAction Stop
+            $prop = $mp.PSObject.Properties['SmartAppControlState']
+            if ($prop) { $defender = "$($prop.Value)" }
+        } catch {
+            $defender = $null
+        }
+    }
+    [pscustomobject]@{ PolicyState = $policy; DefenderState = $defender }
+}
+
+# vswhere で Build Tools を読む (JSON の文字列。vswhere が無い・落ちたら空)
+function Read-VsWhere {
+    param([string]$VsWhere)
+    if (-not (Test-Path -LiteralPath $VsWhere -PathType Leaf)) { return '' }
+    $r = Invoke-Native -FilePath $VsWhere -Arguments @('-products', 'Microsoft.VisualStudio.Product.BuildTools', '-format', 'json', '-include', 'packages', '-utf8') -Utf8
+    if ($r.ExitCode -ne 0) { return '' }
+    $r.Lines -join "`n"
+}
+
+# git の設定の値を 1 つ読む (無ければ空)。core.autocrlf は system の設定 (Git for Windows の既定は true) も込みで読む
+function Get-GitConfigValue {
+    param([string]$GitPath, [string]$Directory, [string]$Key)
+    $r = Invoke-Native -FilePath $GitPath -Arguments @('-C', $Directory, 'config', '--get', $Key)
+    if ($r.ExitCode -ne 0) { return '' }
+    "$(@($r.Lines)[0])".Trim()
+}
+
+# clone の置き場の状態 (missing・unknown・not-git・other-origin・autocrlf・ok)。あるものには触らない
+function Get-RepoState {
+    param($Target, [string]$GitPath, [bool]$HaveGit)
+    $dir = $Target.Directory
+    $state = 'ok'
+    $origin = $null
+    $crlf = $null
+    if (-not (Test-Path -LiteralPath $dir)) {
+        $state = 'missing'
+    } elseif (-not $HaveGit) {
+        $state = 'unknown'
+    } elseif (-not (Test-Path -LiteralPath (Join-Path $dir '.git'))) {
+        $state = 'not-git'
+    } else {
+        # origin は設定ファイルの値を読む (git remote get-url は insteadOf を当てた後の URL を返す)
+        $origin = Get-GitConfigValue -GitPath $GitPath -Directory $dir -Key 'remote.origin.url'
+        $crlf = Get-GitConfigValue -GitPath $GitPath -Directory $dir -Key 'core.autocrlf'
+        if (-not (Test-RepoOrigin -Url $origin -Owner 'pollenjp' -Repo $Target.Name)) {
+            $state = 'other-origin'
+        } elseif ($crlf -in @('true', 'yes', 'on', '1')) {
+            # 取り出すときに LF を CRLF にするのは true だけ (input は取り出しを変えない。空は git の既定の false)
+            $state = 'autocrlf'
+        }
+    }
+    [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf }
+}
+
+# 今の状態を読む (何も変えない。管理者は要らない)
+function Get-BootstrapState {
+    param([object[]]$Packages, $Paths, [string]$Arch)
+    $sacRaw = Get-SmartAppControlRaw
+    $states = foreach ($p in $Packages) {
+        $exists = $false
+        $installed = $null
+        $installPath = $null
+        $lacking = @()
+        $selfUpdateDisabled = $true
+        switch ($p.Name) {
+            'git' {
+                $exists = Test-Path -LiteralPath $Paths.Git -PathType Leaf
+                if ($exists) { $installed = Get-GitVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Git -Arguments @('--version')).Lines }
+            }
+            'gh' {
+                $exists = Test-Path -LiteralPath $Paths.Gh -PathType Leaf
+                if ($exists) { $installed = Get-GhVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Gh -Arguments @('--version')).Lines }
+            }
+            'vs-buildtools' {
+                $instance = Get-VsBuildToolsInstance -Json (Read-VsWhere -VsWhere $Paths.VsWhere) -Major 17
+                if ($instance) {
+                    $exists = $true
+                    $installed = $instance.Version
+                    $installPath = $instance.Path
+                    $lacking = @(Get-VsMissingComponents -Installed $instance.Packages -Arch $Arch)
+                }
+            }
+            'rustup' {
+                $exists = Test-Path -LiteralPath $Paths.Rustup -PathType Leaf
+                if ($exists) {
+                    $installed = Get-RustupVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Rustup -Arguments @('--version')).Lines
+                    $settings = $null
+                    if (Test-Path -LiteralPath $Paths.RustupSettings -PathType Leaf) { $settings = Get-Content -LiteralPath $Paths.RustupSettings -Raw }
+                    $selfUpdateDisabled = Test-RustupSelfUpdateDisabled -SettingsText $settings
+                }
+            }
+        }
+        $pinned = $false
+        if ($exists) {
+            $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $p.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+            $pinned = Test-WingetPinned -Lines $pins.Lines -PackageId $p.PackageId
+        }
+        [pscustomobject]@{
+            Name = $p.Name; Title = $p.Title; PackageId = $p.PackageId; Target = $p.Version; Exists = [bool]$exists; Installed = $installed
+            Pinned = $pinned; InstallPath = $installPath; MissingComponents = $lacking; SelfUpdateDisabled = [bool]$selfUpdateDisabled
+        }
+    }
+    $states = @($states)
+    $git = @($states | Where-Object { $_.Name -eq 'git' })[0]
+    $gh = @($states | Where-Object { $_.Name -eq 'gh' })[0]
+    # gh が無ければ $null (入れた後にログインする)。gh auth status は token を GitHub に確かめる (0 = ログインしている)
+    $loggedIn = $null
+    if ($gh.Exists) { $loggedIn = ((Invoke-Native -FilePath $Paths.Gh -Arguments @('auth', 'status', '--hostname', 'github.com')).ExitCode -eq 0) }
+    $repos = foreach ($t in @(Get-RepoTargets -GhqRoot $Paths.GhqRoot)) { Get-RepoState -Target $t -GitPath $Paths.Git -HaveGit $git.Exists }
+    [pscustomobject]@{
+        Elevated   = [bool](Test-Elevated)
+        Arch       = $Arch
+        Sac        = Get-SmartAppControlState -PolicyState $sacRaw.PolicyState -DefenderState $sacRaw.DefenderState
+        Packages   = $states
+        GhLoggedIn = $loggedIn
+        Repos      = @($repos)
+    }
+}
+
+# 状態の表を出す。直すことがある行 (⚠) は黄色にする
+function Write-BootstrapRows {
+    param([object[]]$Rows)
+    foreach ($line in @(Format-BootstrapRows -Rows $Rows)) {
+        if ($line.StartsWith('⚠')) { Write-Host $line -ForegroundColor Yellow } else { Write-Host $line }
+    }
+}
+
+# 締めの行を黄色で出す。直すことが無ければ何も出さない
+function Write-BootstrapVerdict {
+    param([object[]]$Rows)
+    foreach ($line in @(Format-BootstrapVerdict -Rows $Rows)) { Write-Host $line -ForegroundColor Yellow }
+}
+
+# winget の出力の終わりの数行を字下げして出す
+function Write-Tail {
+    param([string[]]$Lines)
+    $Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+}
+
+function Invoke-InstallBootstrap {
+    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Check)
+    if (-not (Test-WingetAvailable)) {
+        Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる (更新する) と使えるようになる'
+        return 2
+    }
+    $arch = Get-OsArchitecture
+    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Arch $arch)
+    $paths = Get-BootstrapPaths
+    Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1)'
+
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $rows = @(Get-BootstrapRows -State $state)
+    Write-BootstrapRows -Rows $rows
+    $code = Get-BootstrapExitCode -Rows $rows
+
+    # -Check は何も変えない
+    if ($Check) {
+        if ($code -eq 0) { Write-Host '揃っている' }
+        Write-BootstrapVerdict -Rows $rows
+        return $code
+    }
+    if ($code -eq 0) {
+        Write-Host '揃っている。何もしない'
+        return 0
+    }
+    # 止める理由 (SAC がオン・管理者の PowerShell・知らない CPU) があれば、何も変えない
+    if (@($rows | Where-Object { $_.Kind -eq 'blocker' }).Count -gt 0) {
+        Write-BootstrapVerdict -Rows $rows
+        return 1
+    }
+
+    # 1. 入っていない道具を、固定した版で入れる (入れた順に PATH を読み直す)
+    foreach ($p in $packages) {
+        $s = @($state.Packages | Where-Object { $_.Name -eq $p.Name })[0]
+        if ($s.Exists) { continue }
+        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Extra $p.Args)
+        Write-Host ''
+        Write-Host "winget $($arguments -join ' ')"
+        if ($p.Name -eq 'vs-buildtools') { Write-Host '  (Build Tools は数 GB を落として入れるので、10 分以上かかることがある。UAC が出る)' }
+        $result = Invoke-Winget -Arguments $arguments
+        Write-Tail -Lines $result.Lines
+        if ($result.ExitCode -ne 0) {
+            # 再起動待ち (Build Tools の 3010 など) でも 0 以外で返る。入ったかは読み直して決める
+            Write-Host ('winget が 0 以外で終わった (終了コード 0x{0:X8})。入ったかは読み直して確かめる' -f $result.ExitCode)
+        }
+        Update-ProcessPath
+    }
+
+    # 2. 読み直して、入っている道具に pin・Build Tools の部品・rustup の自己更新の止めを足す
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    foreach ($s in @($state.Packages)) {
+        if (-not $s.Exists) { continue }
+        if (-not $s.Pinned) {
+            $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $s.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+            if ($pin.ExitCode -eq 0) { Write-Host "$($s.Title): winget pin を足した (winget upgrade --all から外れる)" }
+            else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $s.Title, $pin.ExitCode) }
+        }
+        $lacking = @($s.MissingComponents | Where-Object { $_ })
+        if ($lacking.Count -gt 0) {
+            Write-Host "Build Tools に部品を足す (Visual Studio Installer。UAC が出る): $($lacking -join ' ')"
+            $vs = Invoke-VsModify -VsSetup $paths.VsSetup -InstallPath $s.InstallPath -Components $lacking
+            if (($vs -ne 0) -and ($vs -ne 3010)) { Write-Host "Visual Studio Installer が失敗した (終了コード $vs)" }
+        }
+        if (($s.Name -eq 'rustup') -and (-not $s.SelfUpdateDisabled)) {
+            $r = Invoke-Native -FilePath $paths.Rustup -Arguments @('set', 'auto-self-update', 'disable')
+            if ($r.ExitCode -eq 0) { Write-Host 'rustup: 自己更新を止めた (rustup update が rustup 自身を上げない)' }
+            else { Write-Host "rustup: 自己更新を止められなかった (終了コード $($r.ExitCode))" }
+        }
+    }
+
+    # 3. gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す
+    $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+    if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
+        Write-Host ''
+        Write-Host 'gh を github.com にログインさせる。出てきた一回限りのコードを、ブラウザーで入れて認める'
+        $login = Invoke-GhLogin -GhPath $paths.Gh
+        if ($login -ne 0) { Write-Host "gh auth login が失敗した (終了コード $login)" }
+        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    }
+
+    # 4. 無い repo を clone する (gh の資格情報で HTTPS。origin は ssh の URL のまま)
+    $missingRepos = @($state.Repos | Where-Object { $_.State -eq 'missing' })
+    if ($missingRepos.Count -gt 0) {
+        $git = @($state.Packages | Where-Object { $_.Name -eq 'git' })[0]
+        $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+        if (-not ($git.Exists -and $gh.Exists -and ($state.GhLoggedIn -eq $true))) {
+            Write-Host ''
+            Write-Host 'Git for Windows か gh が入っていない・gh が github.com にログインしていないので、clone しない'
+        } else {
+            foreach ($r in $missingRepos) {
+                New-CloneParent -Directory $r.Directory
+                Write-Host ''
+                Write-Host "clone: $($r.Url) → $($r.Directory)"
+                $result = Invoke-GitClone -GitPath $paths.Git -Arguments @(Get-GitCloneArguments -GhPath $paths.Gh -Url $r.Url -Directory $r.Directory)
+                if ($result.ExitCode -ne 0) {
+                    Write-Tail -Lines $result.Lines
+                    Write-Host "clone が失敗した (終了コード $($result.ExitCode))。gh auth status で、この repo を読めるアカウントか確かめる"
+                }
+            }
+        }
+    }
+
+    # 揃ったかを読み直して確かめる
+    Write-Host ''
+    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $rows = @(Get-BootstrapRows -State $after)
+    Write-BootstrapRows -Rows $rows
+    if ((Get-BootstrapExitCode -Rows $rows) -eq 0) {
+        Write-Host '揃った'
+        return 0
+    }
+    Write-BootstrapVerdict -Rows $rows
+    return 1
+}
+
+# dot-source されたとき (テスト) は関数だけを読み、本体は走らせない。
+# 思わぬ例外は受け止めて終了コード 2 で終える。受け止めないと exit まで届かず、
+# -Command から呼んだとき外側の exit $LASTEXITCODE が中の winget の 0 を返して成功に見える
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
-    exit 2
+    try {
+        exit (Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Check:$Check)
+    } catch {
+        Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host $_.ScriptStackTrace
+        exit 2
+    }
 }
