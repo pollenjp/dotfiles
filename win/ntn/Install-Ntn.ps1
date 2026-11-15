@@ -27,7 +27,7 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '0.23.28',
+    [string]$Version = '0.23.30',
     [switch]$Check,
     [switch]$IfMissing
 )

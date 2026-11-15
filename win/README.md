@@ -497,7 +497,7 @@ app と core は自分で新しい版に上がる。上がる先を dotfiles が
 | `nix/scripts/check-herdr-app-version.sh` (WSL・CI) | 固定した版の成果物 (core は Windows と Linux の 2 つ) が変わっていないかと、上げられる新しい版を確かめる ([後述](#固定した版を上げる)) |
 | `nix/scripts/check-herdr-app-installers.sh` (WSL・CI) | 公式の install.ps1 が、写したときから変わっていないかを確かめる ([後述](#公式の-installps1-が変わったとき)) |
 
-固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.13・core 0.1.18) の 1 か所で決める。app の版と windows-x86_64 の sha256、
+固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.15・core 0.1.21) の 1 か所で決める。app の版と windows-x86_64 の sha256、
 core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持ち、Windows へは manifest が `herdr-releases.json` として
 `Install-HerdrApp.ps1` の隣に配る。Linux のホストの herdr-core (home-manager) も同じ版で入る ([後述](#server-側の-herdr-core-hc))。公開から 7 日たった
 版を、PR で上げる。
@@ -713,7 +713,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
 WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼んで 1Password の agent に
 つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
-`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.0.0.0`) の 1 か所だけに書く。
+`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.4.0.0`) の 1 か所だけに書く。
 
 | 打つもの | すること |
 | --- | --- |
@@ -1729,7 +1729,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ## ntn
 
 `ntn/Install-Ntn.ps1` は、Notion の CLI の ntn を winget の `Notion.ntn` (zip の中の portable。管理者は要らない。x64 だけ) で入れ、
-版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
+版を `-Version` の既定値 (今は `0.23.30`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
 (install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 

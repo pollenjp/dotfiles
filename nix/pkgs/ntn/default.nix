@@ -23,20 +23,20 @@
 
 let
   # release-source: latest=https://ntn.dev/latest.txt url=https://ntn.dev/releases/v{version}/ntn-{target}.tar.gz sha256={url}.sha256 series=major
-  version = "0.23.25";
+  version = "0.23.28";
   # system → 配布物の target と、その .sha256 の値 (https://ntn.dev/releases/v<version>/ntn-<target>.tar.gz.sha256)
   assets = {
     x86_64-linux = {
       target = "x86_64-unknown-linux-musl";
-      sha256 = "99faf81af403553b66d0f06a466ba6ba6b0e2708fb6b8f1eac2cf7ad1d5db47f";
+      sha256 = "cbbdc03117b786c31e1c9244f88d5358bef2f90916fecd9c2e0603adef02fb64";
     };
     aarch64-linux = {
       target = "aarch64-unknown-linux-musl";
-      sha256 = "8379954cdb82a3c60866a18923da5f43a3358a6c8c698c085cc2905e7255a927";
+      sha256 = "c5cb2adbab714bbc0dcc83a40216fbe31cd742df97f91cb7294ad1531f752931";
     };
     aarch64-darwin = {
       target = "aarch64-apple-darwin";
-      sha256 = "53196c36f98fbf94f56837dd5997872b51baf5226824c3cbd8cf7dc1f966ea5c";
+      sha256 = "9755caf9feaaaa262b00da84d94d0571a1e7dd554c8c53192c0c39e39e0c6643";
     };
   };
   system = stdenvNoCC.hostPlatform.system;
