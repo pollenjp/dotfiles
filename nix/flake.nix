@@ -789,6 +789,14 @@
               system
               ;
           };
+          groups-state = import ./tests/groups.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           windows-files-state = import ./tests/windows-files.nix {
             inherit
               lib
