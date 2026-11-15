@@ -68,6 +68,8 @@
 #     (見送っていない版だけ引く) か GitHub の release の日と URL を入れる
 #   - 新しい版が無ければ newer は空。release の一覧が取れなければ datesChecked を false にし、datesProblem にわけを
 #     入れて exit 0。パッケージが winget-pkgs に無い・gh が無いときは何も出さずに exit 2。--dates だけは exit 2
+#   - --json --offline は gh が無くても動き、gh を呼ばずに固定した版とパッケージ ID だけを同じ形で出す (pinnedListed・newer は
+#     null、datesChecked は false)。ps1 が読めなければ何も出さずに exit 2。--json の無い --offline・--offline と --dates は exit 2
 #
 # ## 本物の gh を見せない
 #
@@ -1433,6 +1435,28 @@ if [[ $(rc "${d}") == 2 && ! -s ${d}/out && $(rc "${d2}") == 2 && ! -s ${d2}/out
   ok "--json: gh が無い・パッケージが無いときは何も出さずに exit 2。--dates だけは exit 2"
 else
   ng "--json の確かめられないとき" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}") $(outerr "${d}") / $(outerr "${d2}") / $(outerr "${d3}")"
+fi
+
+# j6. --json --offline: gh が無くても、gh を呼ばずに固定した版とパッケージ ID だけを出す。ps1 が読めなければ何も出さずに
+#     exit 2。--json の無い --offline・--offline と --dates は exit 2
+d=$(new_case j6 "${n_pin}" '0.23.30 試したら ntn api が落ちた')
+run_args "${d}" 1 --json --offline ntn "${d}/Install-Ntn.ps1" "${d}/skipped-versions.txt"
+d2=$(new_case j6b "" -)
+run_args "${d2}" 1 --json --offline ntn "${d2}/Install-Ntn.ps1" "${d2}/skipped-versions.txt"
+d3=$(new_case j6c "${n_pin}" -)
+run_args "${d3}" 0 --offline ntn "${d3}/Install-Ntn.ps1"
+d4=$(new_case j6d "${n_pin}" -)
+run_args "${d4}" 0 --json --offline --dates ntn "${d4}/Install-Ntn.ps1"
+if [[ $(rc "${d}") == 0 && $(grep -c '' "${d}/out") == 1 ]] \
+  && jq -e --arg ps1 "${d}/Install-Ntn.ps1" --arg skip "${d}/skipped-versions.txt" '. == {name: "ntn", title: "Windows の ntn",
+    packageId: "Notion.ntn", pinned: "0.23.28", pinnedFile: $ps1, skippedFile: $skip, pinnedListed: null,
+    readmeSection: "ntn の新しい版が出たとき", datesFrom: "winget", datesChecked: false, datesProblem: null, newer: null}' "${d}/out" >/dev/null \
+  && [[ $(rc "${d2}") == 2 && ! -s ${d2}/out ]] && seen "${d2}" -F '固定した版が読めません' \
+  && [[ $(rc "${d3}") == 2 && $(rc "${d4}") == 2 ]] && ! gh_called "${d3}" && ! gh_called "${d4}" \
+  && seen "${d3}" -F -- '--offline は --json と一緒に' && seen "${d4}" -F -- '--offline と --dates は一緒に使えません'; then
+  ok "--json --offline: gh が無くても固定した版と ID だけを出し、ps1 が読めなければ exit 2。--offline だけ・--dates と一緒は exit 2"
+else
+  ng "--json --offline" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}")/$(rc "${d4}") $(outerr "${d}") / $(outerr "${d2}") / $(outerr "${d3}") / $(outerr "${d4}")"
 fi
 
 echo "-- 名前"
