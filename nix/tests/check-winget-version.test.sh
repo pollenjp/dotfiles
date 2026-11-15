@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -62,12 +62,12 @@
 #   - 新しい winget の版が GitHub に出て 30 日たったら exit 1 で release notes の URL を添える
 #   - GitHub にある版が winget に無いのは、30 日たつまで ※ で待ち、たったら exit 1
 #
-#   bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
-#   - 名前ごとの param (-GitVersion・-GhVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
-#     を読む。文言の -Version・$packageId も、名前ごとの変数の名前で出す。ID の変数が無ければ gh を呼ばずに exit 2
+#   bootstrap の 3 つ (git・gh・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
+#   - 名前ごとの param (-GitVersion・-GhVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など) を読む。文言の
+#     -Version・$packageId も、名前ごとの変数の名前で出す。ID の変数が無ければ gh を呼ばずに exit 2
 #   - git は git-for-windows/git の release の tag (v<X.Y.Z>.windows.<N>) を、winget の版 (N が 1 なら X.Y.Z、ほかは X.Y.Z.N) に
-#     突き合わせる (prerelease の rc は数えない)。gh は cli/cli の release。vs-buildtools と rustup は winget-pkgs に載った日で、
-#     GitHub の release は引かない
+#     突き合わせる (prerelease の rc は数えない)。gh は cli/cli の release。rustup は winget-pkgs に載った日で、GitHub の release は
+#     引かない
 #   - 名前だけ渡すと、repo の win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt を読む
 #
 #   JSON の口 (--json [--dates]):
@@ -173,7 +173,6 @@ manifest_dir_of() {
     claude-code) echo manifests/a/Anthropic/ClaudeCode ;;
     git) echo manifests/g/Git/Git ;;
     gh) echo manifests/g/GitHub/cli ;;
-    vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
     rustup) echo manifests/r/Rustlang/Rustup ;;
   esac
 }
@@ -184,7 +183,7 @@ ps1_of() {
     google-japanese-input) echo Install-GoogleJapaneseInput.ps1 ;;
     ntn) echo Install-Ntn.ps1 ;;
     claude-code) echo Install-ClaudeCode.ps1 ;;
-    git | gh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
+    git | gh | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
 
@@ -514,7 +513,7 @@ write_claude_code_ps1() {
   } >"$1"
 }
 
-# win/bootstrap/Install-Bootstrap.ps1 の形 (param に 4 つの版が並び、ID の変数は関数の中に 4 つ並ぶ)。$1: 書き先、
+# win/bootstrap/Install-Bootstrap.ps1 の形 (param に 3 つの版が並び、ID の変数は関数の中に 3 つ並ぶ)。$1: 書き先、
 # $2: 今の pkg の固定した版 (空ならその param の行を書かない)、$3: 今の pkg のパッケージ ID (- ならその変数の行を書かない)。
 # ほかの道具の行は本物の値で書く
 write_bootstrap_ps1() {
@@ -522,7 +521,7 @@ write_bootstrap_ps1() {
   {
     printf '\xef\xbb\xbf<#\n.SYNOPSIS\n新しい Windows で最初に流す setup。\n#>\n'
     printf '[CmdletBinding()]\nparam(\n'
-    for line in 'git|GitVersion|2.56.0.4' 'gh|GhVersion|2.103.3' 'vs-buildtools|VsBuildToolsVersion|17.14.44' 'rustup|RustupVersion|1.29.3'; do
+    for line in 'git|GitVersion|2.56.0.4' 'gh|GhVersion|2.103.3' 'rustup|RustupVersion|1.29.3'; do
       IFS='|' read -r name var ver <<<"${line}"
       if [[ ${name} == "${pkg}" ]]; then
         [[ -n $2 ]] || continue
@@ -535,8 +534,8 @@ write_bootstrap_ps1() {
     # shellcheck disable=SC2016
     printf 'function Get-WingetInstallArguments {\n    param([string]$PackageId, [string]$Version, [string[]]$Extra)\n}\n\n'
     # shellcheck disable=SC2016
-    printf 'function Get-BootstrapPackages {\n    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [string]$Arch)\n'
-    for line in 'git|gitPackageId|Git.Git' 'gh|ghPackageId|GitHub.cli' 'vs-buildtools|vsBuildToolsPackageId|Microsoft.VisualStudio.2022.BuildTools' 'rustup|rustupPackageId|Rustlang.Rustup'; do
+    printf 'function Get-BootstrapPackages {\n    param([string]$GitVersion, [string]$GhVersion, [string]$RustupVersion)\n'
+    for line in 'git|gitPackageId|Git.Git' 'gh|ghPackageId|GitHub.cli' 'rustup|rustupPackageId|Rustlang.Rustup'; do
       IFS='|' read -r name var id <<<"${line}"
       if [[ ${name} == "${pkg}" ]]; then
         [[ $3 != - ]] || continue
@@ -563,7 +562,6 @@ new_case() {
     claude-code) write_claude_code_ps1 "${d}/Install-ClaudeCode.ps1" "$2" "${id:-Anthropic.ClaudeCode}" ;;
     git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
     gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
-    vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
     rustup) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Rustlang.Rustup}" ;;
   esac
   if [[ $3 != - ]]; then
@@ -1437,7 +1435,7 @@ else
   ng "claude-code: winget に無い版" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}")"
 fi
 
-echo "-- bootstrap (git・gh・vs-buildtools・rustup)"
+echo "-- bootstrap (git・gh・rustup)"
 
 # 2026-11-15 の winget-pkgs と GitHub の release (win/bootstrap/Install-Bootstrap.ps1 の固定した版のまわり)
 pkg=git
@@ -1508,29 +1506,29 @@ else
   ng "gh: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
-# bvs1. vs-buildtools: 新しい版が winget-pkgs に載って 29 日なら exit 0 で待つ。manifests/m/Microsoft/VisualStudio/2022/BuildTools を
-#       見て、GitHub の release は引かない
-pkg=vs-buildtools
-d=$(new_case bvs1 17.14.44 -)
-put_commits "${d}" 17.14.45 "${at29}"
-FAKE_GH_CONTENTS=$(contents_json 17.14.42 17.14.43 17.14.44 17.14.45) run "${d}" 0
-if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools)' \
-  && seen "${d}" "17\\.14\\.45.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
-  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/VisualStudio/2022/BuildTools' \
+# bru0. rustup: 新しい版が winget-pkgs に載って 29 日なら exit 0 で待つ。manifests/r/Rustlang/Rustup を見て、GitHub の release は
+#       引かない
+pkg=rustup
+d=$(new_case bru0 1.29.3 -)
+put_commits "${d}" 1.29.4 "${at29}"
+FAKE_GH_CONTENTS=$(contents_json 1.29.2 1.29.3 1.29.4) run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の rustup (winget の Rustlang.Rustup)' \
+  && seen "${d}" "1\\.29\\.4.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/r/Rustlang/Rustup' \
   && ! called "${d}" -F 'releases'; then
-  ok "vs-buildtools: 新しい版が載って 29 日なら exit 0 で待つ (winget-pkgs に載った日で数え、GitHub は引かない)"
+  ok "rustup: 新しい版が載って 29 日なら exit 0 で待つ (winget-pkgs に載った日で数え、GitHub は引かない)"
 else
-  ng "vs-buildtools: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+  ng "rustup: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-# bvs2. vs-buildtools: 固定した版が winget-pkgs に無い: 猶予を置かずに exit 1 で、-VsBuildToolsVersion を変えると出す
-d=$(new_case bvs2 17.14.99 -)
-FAKE_GH_CONTENTS=$(contents_json 17.14.43 17.14.44) run "${d}" 0
-if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '固定した版 17.14.99 が winget-pkgs に無い。新しいマシンで Install-Bootstrap が入れられない' \
-  && seen "${d}" -F -- '-VsBuildToolsVersion の既定値を変える'; then
-  ok "vs-buildtools: 固定した版が winget に無ければ exit 1 で、-VsBuildToolsVersion を選び直すと出す"
+# bru3. rustup: 固定した版が winget-pkgs に無い: 猶予を置かずに exit 1 で、-RustupVersion を変えると出す
+d=$(new_case bru3 1.29.9 -)
+FAKE_GH_CONTENTS=$(contents_json 1.29.2 1.29.3) run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '固定した版 1.29.9 が winget-pkgs に無い。新しいマシンで Install-Bootstrap が入れられない' \
+  && seen "${d}" -F -- '-RustupVersion の既定値を変える'; then
+  ok "rustup: 固定した版が winget に無ければ exit 1 で、-RustupVersion を選び直すと出す"
 else
-  ng "vs-buildtools: 固定した版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+  ng "rustup: 固定した版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
 # bru1. rustup: 新しい版が載って 31 日: exit 1 で manifest の URL を出す
@@ -1555,9 +1553,9 @@ else
   ng "rustup: ID が無い" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-# bj1. --json --offline: 4 つとも、固定した版・ID・ps1・見送りの一覧の場所を同じ形で出す (gh を呼ばない)
+# bj1. --json --offline: 3 つとも、固定した版・ID・ps1・見送りの一覧の場所を同じ形で出す (gh を呼ばない)
 okj=1
-for spec in 'git|2.56.0.4|Git.Git|github' 'gh|2.103.3|GitHub.cli|github' 'vs-buildtools|17.14.44|Microsoft.VisualStudio.2022.BuildTools|winget' 'rustup|1.29.3|Rustlang.Rustup|winget'; do
+for spec in 'git|2.56.0.4|Git.Git|github' 'gh|2.103.3|GitHub.cli|github' 'rustup|1.29.3|Rustlang.Rustup|winget'; do
   IFS='|' read -r pkg pinned id from <<<"${spec}"
   d=$(new_case "bj1-${pkg}" "${pinned}" -)
   run_args "${d}" 1 --json --offline "${pkg}" "${d}/Install-Bootstrap.ps1" "${d}/skipped-versions.txt"
@@ -1569,7 +1567,7 @@ for spec in 'git|2.56.0.4|Git.Git|github' 'gh|2.103.3|GitHub.cli|github' 'vs-bui
   fi
 done
 if ((okj)); then
-  ok "--json --offline: bootstrap の 4 つも、固定した版・ID・ps1・出た日の取り方を出す"
+  ok "--json --offline: bootstrap の 3 つも、固定した版・ID・ps1・出た日の取り方を出す"
 fi
 
 echo "-- --json"
@@ -1702,13 +1700,12 @@ for spec in \
   'claude-code|win/claude-code|2.1.318|2.1.321' \
   'git|win/bootstrap|2.56.0.4|2.56.1' \
   'gh|win/bootstrap|2.103.3|2.104.0' \
-  'vs-buildtools|win/bootstrap|17.14.44|17.14.45' \
   'rustup|win/bootstrap|1.29.3|1.29.4'; do
   IFS='|' read -r pkg dir pinned newer <<<"${spec}"
   d=$(new_case "n3-${pkg}" "${pinned}" "${newer} 試したら設定が読めなかった")
   mkdir -p "${repo}/${dir}"
   if [[ ${dir} == win/bootstrap ]]; then
-    # bootstrap の 4 つは ps1 を 1 つで持ち、見送りの一覧は名前ごとに skipped-versions/<名前>.txt
+    # bootstrap の 3 つは ps1 を 1 つで持ち、見送りの一覧は名前ごとに skipped-versions/<名前>.txt
     mkdir -p "${repo}/${dir}/skipped-versions"
     cp "${d}/Install-Bootstrap.ps1" "${repo}/${dir}/"
     cp "${d}/skipped-versions.txt" "${repo}/${dir}/skipped-versions/${pkg}.txt"

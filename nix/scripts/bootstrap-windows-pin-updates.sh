@@ -28,8 +28,7 @@
 #   google-japanese-input   win/google-japanese-input/Install-*.ps1      check-winget-version.sh --json
 #   ntn                     win/ntn/Install-Ntn.ps1                      check-winget-version.sh --json (windows-files.json の ntn)
 #   claude-code             win/claude-code/Install-ClaudeCode.ps1       check-winget-version.sh --json (windows-files.json の claudeCode)
-#   git・gh・vs-buildtools・rustup
-#                           win/bootstrap/Install-Bootstrap.ps1          check-winget-version.sh --json (Windows の ghq に dotfiles の clone
+#   git・gh・rustup         win/bootstrap/Install-Bootstrap.ps1          check-winget-version.sh --json (Windows の ghq に dotfiles の clone
 #                                                                         があるマシンだけ。下の「何をするか」の 1)
 #   herdr-app・herdr-core   nix/pkgs/herdr-core/releases.json            check-herdr-app-version.sh --json (1 回で 2 つ)
 #
@@ -42,7 +41,7 @@
 #    (欄が無い前の世代は true と読む)。herdr・herdr-app・herdr-core は、~/.local/state/dotfiles/group.json (設定グループ。
 #    home/modules/group.nix) の tools.windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable) が false なら確かめない (ファイル・欄が
 #    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)。
-#    bootstrap が入れる 4 つ (git・gh・vs-buildtools・rustup) は、Windows で bootstrap を流したマシン (windows-files.json の windowsHome の
+#    bootstrap が入れる 3 つ (git・gh・rustup) は、Windows で bootstrap を流したマシン (windows-files.json の windowsHome の
 #    下に ghq/github.com/pollenjp/dotfiles/.git がある) だけ確かめる (入れていない道具の版を知らせない。dotfiles-private の
 #    docs/adr/058_win_runner_bootstrap_*)
 # 2. gh が無い・ログインしていないなら、確かめられないと 1 行出して exit 0
@@ -92,7 +91,7 @@ script_dir=$(
 )
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
 group_file="${HOME}/.local/state/dotfiles/group.json"
-all_names=(openssh herdr google-japanese-input ntn claude-code git gh vs-buildtools rustup herdr-app herdr-core)
+all_names=(openssh herdr google-japanese-input ntn claude-code git gh rustup herdr-app herdr-core)
 
 usage() {
   cat <<'EOS'
@@ -104,7 +103,7 @@ Windows に固定した版で入れているものに、固定した版より新
   bootstrap-windows-pin-updates.sh --candidates --json [--grace 1,3,7] [<名前>…]  同じものを JSON で出す
   bootstrap-windows-pin-updates.sh --list --json [<名前>…]                        固定した版を JSON で出す (ネットワークを使わない)
 
-  名前: openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup・herdr-app・herdr-core (省けば全部)
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・rustup・herdr-app・herdr-core (省けば全部)
 EOS
 }
 
@@ -435,7 +434,7 @@ if [[ -r ${group_file} ]]; then
   windows_herdr=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsHerdr")) then .tools.windowsHerdr | tostring else "true" end' \
     "${group_file}" 2>/dev/null) || windows_herdr=true
 fi
-# bootstrap が入れる 4 つは、Windows で bootstrap を流した (Windows の ghq に dotfiles の clone がある) マシンでだけ確かめる
+# bootstrap が入れる 3 つは、Windows で bootstrap を流した (Windows の ghq に dotfiles の clone がある) マシンでだけ確かめる
 windows_home=$(jq -r '.windowsHome // empty' "${state_file}")
 bootstrapped=0
 if [[ -n ${windows_home} && -e ${windows_home}/ghq/github.com/pollenjp/dotfiles/.git ]]; then
@@ -455,7 +454,7 @@ for n in "${all_names[@]}"; do
     herdr | herdr-app | herdr-core)
       [[ ${windows_herdr} != false ]] || continue
       ;;
-    git | gh | vs-buildtools | rustup)
+    git | gh | rustup)
       ((bootstrapped)) || continue
       ;;
   esac
