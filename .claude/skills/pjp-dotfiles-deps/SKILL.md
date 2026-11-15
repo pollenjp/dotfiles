@@ -42,6 +42,7 @@ dotfiles の依存の更新の、この repo 固有の手順と設定 (repo の�
 | type-clipboard (`win/type-clipboard/`) | 自作のアプリ。公開からの猶予を置かず、Release を出す流れで上げる。Smart App Control の評判の確かめが要る (`win/README.md` の「type-clipboard の新しい版を出したとき」) |
 | PowerToys | 版を固定しない |
 | `nix/pkgs/upstream/` (`deps.toml` の `skip`) | 期間付きの例外 (`fromUpstream`) の中身。上げずに、片付け (「上げ方」) で扱う |
+| `nix/pkgs/herdr-core/` の fetchurl (`deps.toml` の `skip`) | 版は `releases.json` に固定していて、Windows に固定した版 (pins の herdr-app・herdr-core) で見る。印 `# release-source:` を置かず、2 か所で知らせない (build の確かめは `[[checks]]` の `herdr-core` のまま流れる) |
 | mise のグローバルの道具 (go・node・usage・claude) | repo に版を書いていない (`nix/scripts/bootstrap-mise.sh` が版を書かずに入れる)。repo の範囲では上げず、merge の後の反映で案内する (「反映」) |
 
 ほかの対象 (`nix/flake.lock` と skill の flake の `flake.lock`・印 `# release-source:` のある `nix/pkgs/ntn`・GitHub Actions) は、

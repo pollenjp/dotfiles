@@ -6,8 +6,10 @@ version = 1
 # flake.lock を上げる道具 (argv の頭)。猶予と例外は nix/release-age.nix、update の最後に閉包スキャン (ゲート) が挟まる
 flake_lock_age = ["nix/scripts/flake-lock-age.sh"]
 
-# 見ないパス (前方一致)。期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う
-skip = ["nix/pkgs/upstream/"]
+# 見ないパス (前方一致。[[checks]] の when には効かない)
+# - nix/pkgs/upstream/: 期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う
+# - nix/pkgs/herdr-core/: 版は [[pins]] の windows (releases.json の herdr-app・herdr-core) で見る
+skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/"]
 
 # release-age.nix の fromUpstream の消し時を見る (dotfiles だけの仕組み。nix/README.md の「猶予の日数と例外」)
 [upstream_cleanup]
