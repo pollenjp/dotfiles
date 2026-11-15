@@ -61,9 +61,10 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
 
    `update` は `nix flake update` を、`flake.nix` と `flake.lock` だけを写した一時ディレクトリで
    打ち、出来た `flake.lock` を戻す（`nix flake update` が読むのはこの 2 つだけ）。flake の
-   ディレクトリを素のパスで渡すと、git の repo の中では repo 全体が `/nix/store` へ写るため。
+   ディレクトリを素のパスで渡すと、git の repo の中では Nix 2.34 までの nix などで repo 全体が
+   `/nix/store` へ写るため（SKILL.md の「flake を置く場所」）。
    相対パスの input（`path:./x`・`git+file:./x` など）を持つ flake だけは、写した先から辿れない
-   ので、その場で update する（repo が写る）
+   ので、その場で update する（Nix 2.34 までの nix などでは repo が写る）
 
    `update` は完了時に、その lock で実際に入る閉包のスキャン（`closure-scan`、
    OSV / GHSA / NVD 照合）を自動で差し込む。whitelist
@@ -74,7 +75,8 @@ master の履歴そのもの（ブランチは Hydra を通った commit へ早�
    固定し続ける」リスクを新しく作るので、advisory との照合で塞ぐ）。スキャンは flake を
    評価するので一時ディレクトリの写しでは足りず、flake のディレクトリを読む。flake だけの
    ディレクトリ（下にディレクトリを持たない）は `path:` で読むので repo は写らない。下に
-   ディレクトリを持つ flake は素のパスで読む（git の repo の中なら、ここで repo が写る）
+   ディレクトリを持つ flake は素のパスで読む（git の repo の中なら、Nix 2.34 までの nix などでは
+   ここで repo が写る）
 
    スキャナの sbomnix も、その lock の pin から組む（スキャナにも同じ遅延を効かせる）。
    pin で組めなければ、dotfiles の pin（`nix run` の app を組んだときの dotfiles の
