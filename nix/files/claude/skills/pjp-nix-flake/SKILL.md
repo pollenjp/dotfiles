@@ -6,9 +6,10 @@ description: repo や script が手元に無い外部ツールを要求すると
   それが未インストールのコマンドを使うとき、`pip install` / `npm install -g` /
   `apt install` / `brew install` を打ちたくなったとき、そして
   **`nix flake update` で版を上げる・`flake.lock` を更新する**とき、
-  `nix develop` や script の入り直しで /nix/store に repo の写しがたまるときに読む。
+  `nix develop`・script の入り直し・nix-direnv で /nix/store に repo の写しがたまるとき、
+  lazy-trees (Determinate Nix) や Nix 2.35 で何が写るかを確かめるときに読む。
   flake / mise / system の選択順、flake を置く場所 (flake だけのディレクトリを `path:` で
-  読む。素のパスは git の repo 全体を写す)、`flake.nix` の骨組み、script から devShell へ
+  読む。素のパスは Nix 2.34 までの nix などで git の repo 全体を写す)、`flake.nix` の骨組み、script から devShell へ
   自動で入り直すパターン、`flake.lock` を必ず commit する理由、**出たばかりの
   revision を pin しない遅延 (minimumReleaseAge 相当)** と、セキュリティパッチ
   (openssl など) のために猶予より新しい nixpkgs を入れる期間付きの例外
@@ -54,25 +55,37 @@ nix run 'github:pollenjp/dotfiles?dir=nix#flake-lock-age' -- update nix
 ## flake を置く場所
 
 **git の repo の中の flake を素のパス（`nix develop`・`nix develop ./nix`・`nix develop "${repo_root}"`）で
-読むと、nix は repo 全体を `/nix/store` へ写してから評価する。** 写すのは git で追っているファイル
-（commit していない変更も）で、作業ツリーが変わるたびに別の写しになる。テストや script を流し直すうちに
-repo の写しがたまり、大きい repo ではディスクが一杯になる。
+読むと、upstream の Nix 2.34 まで（NixOS 26.05 の既定）と lazy-trees を切った Determinate Nix は、repo 全体を
+`/nix/store` へ写してから評価する。** 写すのは git で追っているファイル（commit していない変更も）で、作業ツリーが
+変わるたびに別の写しになる。テストや script を流し直すうちに repo の写しがたまり、大きい repo ではディスクが一杯になる。
 
-道具だけの devShell は、`flake.nix` と `flake.lock` だけのディレクトリ（例: `<repo>/nix/`）に置き、
-`path:` と絶対パスで読む（script からは下の「script から devShell へ入り直す」）。写るのはそのディレクトリ
-だけで、中身が同じなら写しは増えない。
+Determinate Nix の lazy-trees（Determinate の既定）と upstream の Nix 2.35 以降は、評価の前に写さず、derivation が
+参照した分だけを写す。source を参照しない道具だけの devShell なら、素のパスで読んでも写らない。ただし derivation に
+`self` を入れる・`nix flake archive` を打つ（nix-direnv の `use flake` は devShell を作り直すたびに打ち、最新の写しを
+GC root にする）と、どの nix でも repo 全体が写る。
+
+道具だけの devShell は、どの nix でも、`flake.nix` と `flake.lock` だけのディレクトリ（例: `<repo>/nix/`）に置き、
+`path:` と絶対パスで読む（script からは下の「script から devShell へ入り直す」。direnv なら `use flake path:./nix`）。
+写るのはそのディレクトリだけで、中身が同じなら写しは増えない。
+
+**素のパスで読んでいる repo は、今のホストで写らなくても（lazy-trees・Nix 2.35）この形へ直す。** 同じ repo を
+Nix 2.34 までのホスト（NixOS 26.05 など）や nix-direnv で読むと写り、devShell に `self` を足した時点でどのホストでも写る。
 
 - **`path:` は git を見ずに、指したディレクトリの中身を全部写す**（追跡していないファイルも、`.gitignore` で
-  外したものも）。flake のディレクトリには `flake.nix`・`flake.lock`（と `release-age.nix`・
-  `vulnxscan-whitelist.csv`）のほかを置かない。書き出しや `.env` を置くと、それも写る（`/nix/store` は
-  誰でも読める）。repo の root やコードのディレクトリを `path:` で指さない（`.git`・`node_modules/`・
-  書き出しまで写る）
+  外したものも。lazy-trees でも `nix flake archive` などで写る）。flake のディレクトリには `flake.nix`・
+  `flake.lock`（と `release-age.nix`・`vulnxscan-whitelist.csv`）のほかを置かない。書き出しや `.env` を置くと、
+  それも写る（`/nix/store` は誰でも読める）。repo の root やコードのディレクトリを `path:` で指さない
+  （`.git`・`node_modules/`・書き出しまで写る）
 - `path:` で読むディレクトリは `git add` しなくても読める（git を見ない）。`flake.lock` は commit する
 - repo の source を入力にする flake（`src = ./.;` で package を組むもの）は repo を読むのが仕事なので、
   root に置いてよい（写しは避けられない）。道具だけの devShell は、そういう flake に同居させずに分ける
+- root に置いた道具だけの flake は、`flake.nix` と `flake.lock` を `git mv` で `nix/` へ動かし、読む側（script の
+  `nix develop`・`.envrc` の `use flake`・CI）を `path:` で `nix/` を読む形に変える。`flake.nix` が repo のファイル
+  （`./scripts/…` など）を読んでいたら、`path:` では `nix/` の外が見えないので、道具だけの部分を分けてから動かす
 - skill の flake（skill のディレクトリに `flake.nix` を置く形）は、skill のディレクトリを `path:` で読む
   （dotfiles の `nix/files/claude/skills/README.md`）
-- 素のパスで読んでたまった写しの片付け方は `references/gotchas.md`
+- nix の版・lazy-trees ごとに写るもの・写らないものの表、ホストでの確かめ方、素のパスで読んでたまった
+  写しの片付け方は `references/gotchas.md`
 
 ## `flake.nix` の骨組み
 
@@ -147,7 +160,7 @@ nix run "${FLA}" -- check     # 今の flake.lock を検査 (CI 用)
 特に効く）。`--no-scan` で飛ばせる。理由と whitelist の作り方は
 `references/lock-age.md`。スキャンは flake を評価するので、flake だけのディレクトリ
 （下にディレクトリを持たない）は `path:` で読む（ほかは素のパスで読み、git の repo の中なら
-repo が写る）。
+Nix 2.34 までの nix などで repo が写る）。
 
 スキャナ（sbomnix）は、その flake の pin から組む。pin で組めなければ（nixpkgs で
 sbomnix の依存が壊れた時期）、dotfiles の pin、その flake の `flake.lock` の git の
@@ -223,15 +236,15 @@ git add flake.lock
 
 flake は `flake.nix` と `flake.lock` だけのディレクトリ（下の例では `<repo>/nix/`。script は
 `<repo>/scripts/`）に置き、**`path:` と絶対パスで読む**。`exec nix develop "${repo_root}"` のような
-素のパスは、git の repo の中では入り直すたびに repo 全体を `/nix/store` へ写す（上の「flake を
-置く場所」）。
+素のパスは、Nix 2.34 までの nix などでは、git の repo の中で入り直すたびに repo 全体を `/nix/store` へ写す
+（上の「flake を置く場所」）。
 
 ```bash
 #!/usr/bin/env bash
 set -eu -o pipefail
 
-# 道具の flake は flake.nix と flake.lock だけのディレクトリに置き、path: で読む (素のパスは
-# git の repo 全体を /nix/store へ写す)
+# 道具の flake は flake.nix と flake.lock だけのディレクトリに置き、path: で読む (素のパスは、
+# nix によっては git の repo 全体を /nix/store へ写す)
 flake_dir=$(cd -- "$(dirname -- "$0")/../nix" &>/dev/null && pwd -P) || {
   echo "道具の flake のディレクトリがありません: $(dirname -- "$0")/../nix" >&2
   exit 1
@@ -268,8 +281,8 @@ claude-skills の `skills/README.md`（作業クローン側）を参照。
 
 ## その他
 
-`.env` の読み込み、git 追跡まわりの罠（素のパスと `path:` で写るもの）、たまった写しの
-片付け方、差分ビルドが無いこと、mise からの移行 → `references/gotchas.md`
+`.env` の読み込み、git 追跡まわりの罠（素のパスと `path:` で写るもの。nix の版・lazy-trees ごとの表と
+確かめ方）、たまった写しの片付け方、差分ビルドが無いこと、mise からの移行 → `references/gotchas.md`
 
 pin の遅延の根拠、新規リポジトリへの入れ方、猶予の例外 (release-age.nix)、効かない範囲
 → `references/lock-age.md`

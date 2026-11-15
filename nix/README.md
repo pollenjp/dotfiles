@@ -3018,8 +3018,8 @@ bash では元々発火していなかった）。
 
 ```sh
 # 1 つの flake に devShell を並べ、ディレクトリごとに選ぶ例
-# (repo の直下の flake.nix が devShells.<system>.ch01 を持つとき)
-echo 'use flake ../..#ch01' > chapters/ch01/.envrc
+# (repo の nix/flake.nix が devShells.<system>.ch01 を持つとき。道具の flake は path: で読む)
+echo 'use flake path:../../nix#ch01' > chapters/ch01/.envrc
 echo 'dotenv_if_exists' >> chapters/ch01/.envrc   # 秘密の値は隣の .env に置いて読む (無ければ何もしない)
 cd chapters/ch01   # direnv: error … .envrc is blocked. Run `direnv allow` to approve its content
 direnv allow       # 中身を確かめてから許す。.envrc を書き換えると、また止められる
@@ -3030,6 +3030,10 @@ direnv allow       # 中身を確かめてから許す。.envrc を書き換え�
   `watch_file <ファイル>` を足す
 - devShell と flake の inputs には `.direnv/` から GC root が張られ、週 1 回の GC（[前述](#使わなくなったデータの定期削除)）でも
   消えない。要らなくなったら `.direnv/` を消せば root も外れる
+- `use flake` にも `path:` を付け、`flake.nix` と `flake.lock` だけのディレクトリを読む。nix-direnv は devShell を作り直す
+  たびに `nix flake archive` を打ち、写した store path に GC root を張るので、素のパス（`use flake`・`use flake .`）では
+  lazy-trees（Determinate Nix）でも repo 全体が写って残る（`pjp-nix-flake` skill の `references/gotchas.md` の
+  「何が /nix/store へ写るか」）
 - 読み込むたびの `direnv: export +AR +AS … ~PATH`（devShell では数十個の変数が 1 行に並ぶ）は出さない（`direnv.toml` の
   `hide_env_diff`）。`direnv: loading …` と、止められたときのエラーは出る。初めての評価・ビルドが 5 秒を超えると
   `… is taking a while to execute. Use CTRL-C to give up.` が出る（`warn_timeout` は既定のまま）
