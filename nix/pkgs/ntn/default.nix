@@ -2,7 +2,7 @@
 #
 # 配布物は https://ntn.dev/releases/v<版>/ntn-<target>.tar.gz で、sha256 は隣の .sha256 の値 (公式の install script
 # `curl -fsSL https://ntn.dev | bash` が落として照らすものと同じ)。Linux は musl の静的な binary、macOS は署名済みの
-# binary で、そのまま bin/ntn に置く (nix/pkgs/upstream/mise.nix と同じ形)。tar の中身は ntn と LICENSE.md (MIT)・
+# binary で、そのまま bin/ntn に置く。tar の中身は ntn と LICENSE.md (MIT)・
 # README.md だけ。LICENSE.md は share/doc に写す。
 #
 # 補完 (bash / fish / zsh) は、install した ntn に `ntn completions <shell>` で出させる。clap の動的な補完で、TAB の
