@@ -3,7 +3,8 @@
 # 評価して呼ぶ。
 #
 #   collect   元のホストの options.dotfiles から、既定でない定義を持つ option を [ { path; value; } ] で出す
-#   render    それを、mkHome を受け取って呼ぶ関数 (private-hosts.nix が読む形) のファイルの本文にする
+#   render    それを、mkHome を受け取って呼ぶ関数 (private-hosts.nix が読む形) のファイルの本文にする。設定グループ
+#             (dotfiles.group) は mkHome の引数の行 (group = "company";)、wsl・onePassword・claude は引数の組、ほかは modules に描く
 #
 # 「既定でない定義」は、option の既定 (優先度 1500 の mkOptionDefault) より強い定義があること。mkHome の引数・
 # 登録簿の modules・local のどこで書いたかは問わず、既定と同じ値を書いたもの (local の gitViaGh.enable = true
@@ -19,6 +20,9 @@ let
     "onePassword"
     "claude"
   ];
+
+  # mkHome が dotfiles.<名前> にそのまま入れる、組でない引数 (設定グループ。ADR 057)。system の行の後ろに 1 行で描く
+  argScalars = [ "group" ];
 
   walk =
     path: v:
@@ -98,7 +102,10 @@ in
     }:
     let
       inGroup = g: builtins.filter (v: builtins.head v.path == g) values;
-      others = builtins.filter (v: !(builtins.elem (builtins.head v.path) argGroups)) values;
+      scalars = builtins.filter (v: builtins.elem v.path (map (n: [ n ]) argScalars)) values;
+      others = builtins.filter (
+        v: !(builtins.elem (builtins.head v.path) argGroups) && !(builtins.elem v scalars)
+      ) values;
       groupLines =
         g:
         let
@@ -142,6 +149,7 @@ in
       ++ lib.optional (
         homeDirectory != null
       ) "  homeDirectory = ${lib.strings.escapeNixString homeDirectory};"
+      ++ map (v: line "  " v.path v.path v.value) scalars
       ++ lib.concatMap groupLines argGroups
       ++ moduleLines
       ++ [ "}" ]

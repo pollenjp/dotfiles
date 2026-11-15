@@ -77,7 +77,10 @@ in
     # ので、config.d の Host に自分の SetEnv がある接続先では、そこに PJP_SSH_CLIENT=%u@%L を足さないと
     # 届かない。WSL の ssh は Windows の ssh.exe へのラッパーで、ssh.exe は Windows 側の config を読む
     # (bootstrap-windows-ssh-config.sh が同じ行を置く)。
-    settings."*".SetEnv.PJP_SSH_CLIENT = "%u@%L";
+    #
+    # 受け取るのは ssh 先の herdr の固定名の仕組みだけなので、herdr を入れるホスト (dotfiles.herdr.enable) にだけ書く
+    # (客先の PC から客先のホストへ、使わない値を送らない)。
+    settings = lib.mkIf config.dotfiles.herdr.enable { "*".SetEnv.PJP_SSH_CLIENT = "%u@%L"; };
   };
 
   # WSL から Windows 側の ssh.exe / ssh-add.exe を呼ぶラッパー。

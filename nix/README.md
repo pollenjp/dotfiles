@@ -1155,9 +1155,10 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `username` | (必須) | Linux / macOS 側のユーザー名。`$USER` と一致しないと activate が中断する |
 | `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
+| `group` | （書かない = `"personal"`） | 設定グループ（`"personal"`・`"company"`・`"client"`）。どの段の道具まで入れるかの既定を決める（[設定グループ](#設定グループ)） |
 | `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
 | `onePassword` | `{ }` | `onePassword.enable = true` で 1Password を git の署名に使う（WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password。[git について](#git-について)） |
-| `claude` | `{ }` | Claude Code まわり（`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`・`heavyJobs.limitPercent`。[足したホストに書く値](#足したホストに書く値)） |
+| `claude` | `{ }` | Claude Code まわり（`enable`（既定は ② の段）・`privateSkills.enable`・`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`・`heavyJobs.limitPercent`。[足したホストに書く値](#足したホストに書く値)） |
 | `modules` | `[ ]` | `mkHome` の引数に無い option（`dotfiles.ccPages.port` など）と、home-manager の設定 |
 
 ### WSL 固有の設定は入れ子で渡す
@@ -1216,6 +1217,105 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 `exeExecTrace`・`mtuGuard` は 1Password の有無とは別に選べる。公開の登録簿には WSL のホストが無いので、CI は WSL・1Password・
 `windowsFiles`・`exeExecTrace`・`mtuGuard` を入れた作り物のホスト（flake の checks の `home-wsl-example`）を build して確かめる。
 
+### 設定グループ
+
+ホストは**設定グループ**を 1 つ選び（`mkHome` の `group`）、グループは「どの段の道具まで入れるか」で決まる
+（[ADR 057](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/057_host_setting_groups_20261115T111656JST/README.md)）。
+選んだ時点でそのグループの既定が入り、そのあとはホストのファイルで道具ごとに直す。グループを書かないホストは `personal`。
+
+| グループ | 使う PC | ① エンジニアの道具 | ② AI の道具 | ③ 個人のアカウント |
+| --- | --- | --- | --- | --- |
+| `personal`（既定） | 個人の開発用の PC | on | on | on |
+| `company` | 自社の PC（個人ほどではないが、ある程度自由） | on | on | off |
+| `client` | 客先の PC（エンジニアの道具を最低限） | on | off | off |
+
+| 段 | 入るもの | 段の switch |
+| --- | --- | --- |
+| ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
+| ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
+| ③ 個人のアカウントにつながるもの | 1Password・ntn（Notion の CLI）・Windows の ntn・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
+| ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
+
+既定は 3 つの高さで決まり、どれも option の既定（優先度 1500）なので、ホストのファイルは今と同じ素の値でどの高さでも上書きできる
+（`mkForce` は要らない）。
+
+1. グループ（`dotfiles.group`）が、段の switch の既定を決める
+2. 段の switch が、その段の道具の switch の既定を決める（道具の既定 = 段の switch && 今までの既定。`personal` は段が全部 on なので、
+   どの道具も今までと同じ既定になる）
+3. 道具の switch（`claude.enable`・`dotfiles.ntn.enable` など）が、その道具の module と setup の手順を決める
+
+| 道具の switch | 段 | 止めるもの |
+| --- | --- | --- |
+| `claude.enable` | ② | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・abbr / alias の `c`・setup の bootstrap-claude-*（7 本）と mise の claude |
+| `dotfiles.herdr.enable` | ② | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
+| `dotfiles.herdrCore.enable` | ②（Linux だけ） | herdr-core（hc） |
+| `wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable` | ② | Windows の Claude Code・herdr と herdr-app（`windowsFiles.enable` のマシンだけで効く） |
+| `claude.privateSkills.enable` | ② と ③ | setup の bootstrap-claude-skills（claude-skills の clone） |
+| `dotfiles.ccPages.enable` | ② と ③ | cc-pages の unit と config.toml・setup の bootstrap-cc-pages |
+| `dotfiles.herdr.hub.enable` | ② と ③ | setup の bootstrap-herdr-hub（`~/h`） |
+| `dotfiles.ntn.enable` | ③ | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
+| `wsl.windowsFiles.ntn.enable` | ③ | Windows の ntn |
+| `dotfiles.git.identity.enable` | ③ | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
+
+既定が `false` の option（`onePassword.enable`・`claude.devTracker.enable`・`cursorAgent.enable`・`wsl.windowsFiles.enable` など）は今のまま
+（段によらず、使うホストが入れる）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
+flake の checks の `groups-state` が段の on/off の 4 通りで確かめる。
+
+```nix
+# 自社の PC (例。値は作り物): ① ② はグループの既定で入る。③ は要るものだけを 1 つずつ足す
+mkHome {
+  username = "alice";
+  system = "x86_64-linux";
+  group = "company";
+  onePassword.enable = true;          # ③ (既定 false のまま。書けば入る)
+  claude = {
+    privateSkills.enable = true;      # ② と ③ (claude-skills。Dev Tracker に要る)
+    devTracker.enable = true;
+    notion.profile = "work";
+  };
+  modules = [
+    {
+      dotfiles.ntn.enable = true;           # ③
+      dotfiles.git.identity.enable = true;  # ③ (個人の名前とメールで commit する PC なら)
+    }
+  ];
+}
+
+# 客先の PC (~/dotfiles/flake.nix の tmp。例。値は作り物): ① だけ。許可の出た道具を 1 つずつ足す
+tmp = dotfiles.lib.mkHome {
+  username = "alice";
+  system = "x86_64-linux";
+  group = "client";
+  claude.enable = true;   # Claude Code の利用の許可が出たら (claude-skills・cc-pages・herdr は入らない)
+  modules = [
+    {
+      # 客先のグループでは git の名前とメールが入らない。そこで使うものを書く
+      programs.git.settings.user = {
+        name = "Alice Example";
+        email = "alice@example.com";
+      };
+    }
+  ];
+};
+```
+
+- **客先の PC は git の名前とメールを書く。** 書かなければ git は commit の前に「Please tell me who you are」で止まる（個人の名前で
+  commit してしまうことは無い）
+- **道具どうしの依存は評価で止まる。** `claude.privateSkills.enable` は `claude.enable` が、`claude.devTracker.enable` は
+  `claude.privateSkills.enable` が、`dotfiles.herdr.hub.enable` は `dotfiles.herdr.enable` と `claude.privateSkills.enable` が要る
+  （自社・客先のホストで道具を 1 つずつ足すときの、足し忘れに気づくため）
+- **setup も段に従う。** home-manager が on/off を `~/.local/state/dotfiles/group.json` に置き、setup は bootstrap-*.sh の冒頭の
+  `# tool: <key> (<option>)` の道具が off のホストで、その手順を流さずに飛ばす（結果に `↷ … (このホストでは off)`）。`group.json` が無い
+  前の世代は今までどおり全部流す。実行の頭には、対象ホストのグループと段の on/off を 1 行出す（`グループ: client (ホストで選んだ) · …`。
+  選んでいなければ「選んでいない。既定」。客先の PC で選び忘れたときに、switch の前に気づける）
+- **off にしても、前に入れたものは消さない。** setup が見なくなるだけ（mise の claude は外すコマンドを 1 行出す。clone した repo・
+  `~/bin/cc-pages`・`~/h`・Windows のアプリは残る。消し方はそれぞれの節）
+- 客先の PC は今までどおり `~/dotfiles/flake.nix` の `tmp` に置く（dotfiles-private を読めないため）。雛形の tmp の例（コメント）に、
+  グループの選び方が入っている
+- CI は客先のグループの作り物のホスト（`nix/lib/group-examples.nix`）を build し、② ③ のものが無いことと、入る package・ファイル・
+  unit の並びが fixture（`nix/tests/fixtures/group-client/`）と同じことを確かめる（`group-client-state`）。**道具を足したら段を決める**:
+  ② ③ なら道具の switch で止め、① なら fixture に足す（決め忘れると客先の PC に入り、ここで違いとして出る）
+
 ### 登録簿に載せずにマシンを足す
 
 dotfiles-private を読めない PC（会社の PC など）や一時的な環境は、`hosts/default.nix` を編集せず `~/dotfiles/flake.nix` に
@@ -1239,6 +1339,7 @@ outputs =
       tmp = dotfiles.lib.mkHome {
         username = "pollenjp";
         system = "x86_64-linux";
+        # group = "client";            # 設定グループ (書かなければ personal。客先の PC なら client。後述の「設定グループ」)
         wsl = {
           enable = true;
           windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (例は作り物)
@@ -1282,6 +1383,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 
 | 値 | 既定 | 書くマシン |
 | --- | --- | --- |
+| `group` | `"personal"` | 自社の PC は `"company"`、客先の PC は `"client"`（[設定グループ](#設定グループ)。段・道具の switch もここで直せる） |
 | `claude.devTracker.enable` | `false` | Notion Dev Tracker を使うマシン（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)） |
 | `claude.notion.profile` | `null` | Notion へ書く skill を使うマシン。`"personal"` / `"work"`（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)） |
 | `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
@@ -1291,7 +1393,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 | `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
-| `dotfiles.herdrCore.enable`（`modules`） | Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
+| `dotfiles.herdrCore.enable`（`modules`） | ② の段で Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
 | `dotfiles.cursorAgent.enable`（`modules`） | `false`（入れない） | Cursor の CLI（`cursor-agent`）を使うマシンだけ `true`（[`cursor-agent` も mise に置いている理由](#cursor-agent-も-mise-に置いている理由)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
@@ -1419,8 +1521,9 @@ dotfiles-private/
 ```
 
 中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。その PC の値は全部
-このファイルに書く（`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`。前の雛形の `local` に
-書いていた値も）。Dev Tracker を使う PC は `claude.devTracker.enable = true` を書く（本体の既定は使わない）。
+このファイルに書く（`group`・`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`。前の雛形の
+`local` に書いていた値も）。Dev Tracker を使う PC は `claude.devTracker.enable = true` を書く（本体の既定は使わない）。自社の PC は
+`group = "company";` を書き、要る ③ の道具を 1 つずつ足す（[設定グループ](#設定グループ)）。
 
 ```nix
 # 例 (値は作り物)

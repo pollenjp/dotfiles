@@ -4,6 +4,11 @@
 # ntn (Notion CLI) の config.json の keyring を host option (dotfiles.ntn.keyring) の値にそろえる。keyring: false なら、
 # token を置く config directory を 700・auth.json を 600 にもそろえる。冪等。`setup.sh --update` でも毎回走る。
 #
+# tool: ntn (dotfiles.ntn.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # ntn は `ntn login` の token を OS の keychain に置く。keychain の無い・続かないマシン (SSH で入る Linux の VM

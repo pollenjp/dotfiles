@@ -76,6 +76,18 @@
 #     (local-flake-migrate.sh render --windows-user)。local-flake-migrate.sh prepare は、手元の例の名前を元の雛形と今の
 #     雛形にも入れてから 3-way merge する。行の形は local-flake-migrate.sh も同じものを見る (直すならあちらも)
 #
+# ## tmp の例の設定グループ
+#
+# 雛形を描くとき (flake.nix が無い・--force・--initial) は、描いたあとで、tmp の例 (コメント) の
+# `        #   system = "x86_64-linux";` の行の後ろに、設定グループの選び方の塊 (group_example_block。コメント) を差し込む
+# (dotfiles-private の docs/adr/057_host_setting_groups_*)。雛形の heredoc は変えない (initial の塊・Windows のユーザー名と同じく、
+# 雛形の版の印を変えないため)。塊の本文はここにだけ書く: local-flake-migrate.sh render は、描く版の setup-local-flake.sh に
+# group_example_block があれば、その本文を同じ所に差し込む (その版の setup-local-flake.sh が書く形を描く)。
+#
+#   - 塊の group の行は 2 段のコメント (例を 1 段外しても personal のまま。例は Dev Tracker を on にした個人の PC の形なので、
+#     client になると評価で止まる)
+#   - 「今の雛形のまま」(--initial) の判定は、塊のある形と無い形 (この塊より前に描いたもの) のどちらも今の雛形と見る
+#
 # ## 雛形が新しくなったら
 #
 # 既にある flake.nix は、雛形が変わっても触らない (--force は作り直すので、手で足したホストと、前の雛形なら
@@ -306,6 +318,61 @@ insert_initial_block() {
   mv "${f}.new" "${f}"
 }
 
+# tmp の例に差し込む設定グループの選び方の塊 (冒頭の「tmp の例の設定グループ」)。local-flake-migrate.sh render は、描く版の
+# setup-local-flake.sh のこの関数の heredoc (開きの行 `  cat <<'EOB'` から `EOB` まで) を読んで同じ所に差し込むので、開きと
+# 閉じの行の形を変えない
+group_example_block() {
+  cat <<'EOB'
+        #
+        #   # 設定グループ (本体の nix/README.md「設定グループ」と nix/groups.md)。書かなければ "personal" (個人の PC。
+        #   # ① エンジニアの道具・② AI の道具・③ 個人のアカウントにつながるものの段を全部入れる)。ほかは:
+        #   #   "company"  自社の PC。① と ② を入れ、③ (1Password・ntn・private な repo・git の名前とメール) は要るものを
+        #   #              下で 1 つずつ足す
+        #   #   "client"   客先の PC。① だけを入れ、許可の出た道具を下で 1 つずつ足す (claude.enable = true; など)。git の
+        #   #              名前とメールも入らないので、modules に programs.git.settings.user = { name = "…"; email = "…"; };
+        #   #              を書く (書かなければ git が commit の前に止まる)
+        #   #   group = "client";
+EOB
+}
+
+# 塊を差し込む目印の行 (tmp の例の system の行。雛形にちょうど 1 行。local-flake-migrate.sh も同じ行を見る)
+group_example_anchor='        #   system = "x86_64-linux";'
+
+# $1 (描いたばかりの雛形) の tmp の例の system の行の後ろに、設定グループの選び方の塊を差し込む。目印がちょうど 1 行でなければ 1
+# (書き換えない)。条件の中で呼ぶ (set -e が効かない) ので、書けなければ自分で 1 を返す
+insert_group_example() {
+  local f=$1 n
+  n=$(grep -cxF -- "${group_example_anchor}" "${f}") || n=0
+  [[ ${n} == 1 ]] || return 1
+  if ! group_example_block >"${f}.group" || ! awk -v blockfile="${f}.group" -v anchor="${group_example_anchor}" '
+    { print }
+    $0 == anchor {
+      while ((getline line < blockfile) > 0) print line
+      close(blockfile)
+    }
+  ' "${f}" >"${f}.new"; then
+    rm -f "${f}.group" "${f}.new"
+    return 1
+  fi
+  rm -f "${f}.group"
+  mv "${f}.new" "${f}"
+}
+
+# $1 に設定グループの選び方の塊があるか (目印の行のすぐ後ろに、塊の行が全部そのまま並ぶ)
+has_group_example() {
+  local block
+  block=$(group_example_block)
+  BLOCK=${block} ANCHOR=${group_example_anchor} awk '
+    BEGIN { n = split(ENVIRON["BLOCK"], want, "\n") }
+    m > 0 {
+      if ($0 != want[m]) { m = 0 } else if (m == n) { found = 1; exit } else { m++ }
+      next
+    }
+    $0 == ENVIRON["ANCHOR"] { m = 1 }
+    END { exit found ? 0 : 1 }
+  ' "$1"
+}
+
 # 雛形の tmp の例の、Windows のユーザー名の行 (「        #     windowsUserName = "<名前>";」。コメント)。雛形の heredoc の中に
 # ちょうど 1 行あり、initial の塊の windowsUserName (字下げが違い、# が無い) には当たらない。local-flake-migrate.sh
 # (render --windows-user・prepare) も同じ形の行を見る (直すならあちらも。この行そのものの形を変えるときは、あちらの
@@ -367,12 +434,22 @@ example_user_values() {
 }
 
 # 既にある flake.nix ($1) が今の雛形のまま (手を入れていない) か。local-flake-migrate.sh render と 1 バイトも違わなければ 0。
-# tmp の例の Windows のユーザー名 (WSL の PC で描くと入る) は違ってよい (同じ名前を入れて描いたものと比べる)
+# tmp の例の Windows のユーザー名 (WSL の PC で描くと入る) は違ってよい (同じ名前を入れて描いたものと比べる)。設定グループの
+# 選び方の塊 (render は差し込んで描く) の無いもの (塊より前に描いた雛形) は、塊を差し込んでから比べる
 template_as_is() {
-  local name
-  name=$(example_windows_user_of "$1") || name=""
+  local name f=$1 rc=0
+  name=$(example_windows_user_of "${f}") || name=""
+  if ! has_group_example "${f}"; then
+    f=$(mktemp "${TMPDIR:-/tmp}/setup-local-flake-asis.XXXXXX") || return 1
+    if ! cp "$1" "${f}" || ! insert_group_example "${f}"; then
+      rm -f "${f}"
+      return 1
+    fi
+  fi
   "${BASH}" "${migrate}" render --file "${script_dir}/setup-local-flake.sh" --nix-dir "${nix_dir}" \
-    --private-dir "${private_nix_dir}" ${name:+--windows-user "${name}"} 2>/dev/null | cmp -s - "$1"
+    --private-dir "${private_nix_dir}" ${name:+--windows-user "${name}"} 2>/dev/null | cmp -s - "${f}" || rc=1
+  [[ ${f} == "$1" ]] || rm -f "${f}"
+  return "${rc}"
 }
 
 # $0 が symlink (~/dotfiles/setup など) 経由でも実体の場所を返す。
@@ -547,7 +624,7 @@ if [[ ${write_flake} == 1 ]]; then
   # なければ元のファイルを残す。書き写すので、既にある flake.nix の mode と symlink はそのまま)。一時ファイルは、止まったときも
   # 終わるときに消す。開きの行 (cat >"${flake_file}" <<EOS) は local-flake-migrate.sh が原文を抜く目印なので変えない
   draw_tmp="${local_dir}/.flake.nix.new-$$"
-  trap 'rm -f "${draw_tmp}" "${draw_tmp}.block" "${draw_tmp}.new" "${draw_tmp}.example"' EXIT
+  trap 'rm -f "${draw_tmp}" "${draw_tmp}.block" "${draw_tmp}.new" "${draw_tmp}.example" "${draw_tmp}.group"' EXIT
   real_flake_file=${flake_file}
   flake_file=${draw_tmp}
   cat >"${flake_file}" <<EOS
@@ -683,6 +760,9 @@ if [[ ${write_flake} == 1 ]]; then
     };
 }
 EOS
+  if ! insert_group_example "${flake_file}"; then
+    die "雛形の tmp の例に、設定グループの例を差し込む目印 (「${group_example_anchor}」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
+  fi
   if [[ ${initial} == 1 ]] && ! insert_initial_block "${flake_file}"; then
     die "雛形に、初期用のホスト initial を差し込む目印 (tmp の例の終わりの「        # };」) が 1 行ではありません。setup-local-flake.sh の差し込み方を直してください。"
   fi

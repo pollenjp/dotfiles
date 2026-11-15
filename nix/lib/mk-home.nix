@@ -54,6 +54,13 @@
   # dotfiles-private に登録したホストには、dotfiles-private の nix/shared/*.nix の module も modules の前に足される
   # (登録した全 PC に効かせる値。mise の遅延の上書きなど)。
   claude ? { },
+  # 設定グループ (dotfiles.group に入る。dotfiles-private の docs/adr/057_host_setting_groups_*)。段の switch の既定を決める。
+  #
+  #   group = "company";   # personal (個人の PC。既定)・company (自社の PC)・client (客先の PC)
+  #
+  # 省略すれば定義しない (option の既定の personal のまま。ホストの要約は「選んでいない」と出す)。段・道具の switch は
+  # claude の引数 (claude.enable など) か modules (dotfiles.ntn.enable など) で上書きする。
+  group ? null,
   modules ? [ ],
 }:
 
@@ -69,7 +76,10 @@ inputs.home-manager.lib.homeManagerConfiguration {
     ../home
     {
       home = { inherit username homeDirectory; };
-      dotfiles = { inherit wsl claude onePassword; };
+      dotfiles = {
+        inherit wsl claude onePassword;
+      }
+      // inputs.nixpkgs.lib.optionalAttrs (group != null) { inherit group; };
       inherit (exceptions) warnings;
     }
   ]

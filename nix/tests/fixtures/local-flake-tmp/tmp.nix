@@ -1,5 +1,6 @@
 # nix/tests/local-flake-tmp.nix と nix/tests/setup-local-flake.test.sh の fixture。ローカル flake の雛形
-# (nix/scripts/setup-local-flake.sh) の tmp の例のコメントを 1 段外したものを、attrset の中に置いた形。
+# (nix/scripts/setup-local-flake.sh) の tmp の例 (描いたあとに差し込む設定グループの選び方の塊も含む) のコメントを 1 段外した
+# ものを、attrset の中に置いた形。
 # setup-local-flake.test.sh が雛形の本文と同じかを見て、local-flake-tmp.nix がこれを評価する (雛形の例を直したら、
 # これも同じに直す)。
 { dotfiles }:
@@ -7,6 +8,15 @@
   tmp = dotfiles.lib.mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
+
+    # 設定グループ (本体の nix/README.md「設定グループ」と nix/groups.md)。書かなければ "personal" (個人の PC。
+    # ① エンジニアの道具・② AI の道具・③ 個人のアカウントにつながるものの段を全部入れる)。ほかは:
+    #   "company"  自社の PC。① と ② を入れ、③ (1Password・ntn・private な repo・git の名前とメール) は要るものを
+    #              下で 1 つずつ足す
+    #   "client"   客先の PC。① だけを入れ、許可の出た道具を下で 1 つずつ足す (claude.enable = true; など)。git の
+    #              名前とメールも入らないので、modules に programs.git.settings.user = { name = "…"; email = "…"; };
+    #              を書く (書かなければ git が commit の前に止まる)
+    #   group = "client";
 
     # WSL のマシンだけ書く (書かなければ WSL でないマシン)。
     wsl = {

@@ -4,6 +4,11 @@
 # Claude Code のセッションにだけ渡す env (git の設定と、Bash tool の shell と、plugin を https で取る印) を
 # ~/.claude/settings.json へ登録する。冪等。`setup.sh --update` でも毎回走る。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # 1. commit を無署名にする (いつも)。

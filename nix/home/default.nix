@@ -5,6 +5,7 @@
 {
   imports = [
     ./options.nix
+    ./modules/group.nix
     ./modules/packages.nix
     ./modules/python.nix
     ./modules/files.nix

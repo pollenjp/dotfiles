@@ -172,6 +172,11 @@
           home-wsl-initial-example =
             (import ./tests/fixtures/local-flake-initial/initial.nix { dotfiles.lib = { inherit mkHome; }; })
             .initial.activationPackage;
+          # 客先のグループの作り物のホスト (lib/group-examples.nix の client。WSL で win/ を配る) を build する (ADR 057)。
+          # ② ③ のものが入らないこと・入るものの並びが fixture と同じことは group-client-state が評価で見る
+          home-group-client-example =
+            (import ./lib/group-examples.nix { inherit mkHome; }).client.activationPackage;
+          group-client-state = import ./tests/group-client.nix { inherit lib pkgs mkHome; };
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
@@ -360,6 +365,8 @@
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
           setup-system-units-test = scriptTest "setup-system-units" ./scripts;
+          # 設定グループで off の道具の手順を飛ばす・グループの 1 行。setup.sh を写した checkout に偽の bootstrap を置く
+          setup-tools-test = scriptTest "setup-tools" ./scripts;
           # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)。
           # --initial が差し込む初期用のホスト initial の塊 (fixtures/local-flake-initial/initial.nix) も同じく渡す
           # (評価は local-flake-initial-state)
@@ -782,6 +789,14 @@
               ;
           };
           op-env-state = import ./tests/op-env.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          groups-state = import ./tests/groups.nix {
             inherit
               lib
               pkgs

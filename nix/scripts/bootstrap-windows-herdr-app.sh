@@ -12,6 +12,11 @@
 #   衝突で exit 1 しうる bootstrap-windows-google-ime.sh (98) より前に置き、それに止められないようにする。
 #   仕組みは nix/README.md「bootstrap の実行順」。
 #
+# tool: windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # herdr-app (herdr の desktop app) は winget に無く、公式の入れ方は install.ps1 を irm で落として流すだけ。

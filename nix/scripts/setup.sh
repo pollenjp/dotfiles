@@ -13,6 +13,9 @@
 # - bootstrap-*.sh は glob で **自動列挙** する。スクリプトを増やしても
 #   このファイルの編集は要らない (claude.nix が readDir で列挙しているのと
 #   同じ方針)。説明文も各スクリプト冒頭のコメントから取るので二重管理しない。
+# - 設定グループ (ADR 057) で off の道具の手順は飛ばす。どの道具の手順かも各スクリプト冒頭の
+#   `# tool: <key> (<option>)` から取り、off かは home-manager が置く ~/.local/state/dotfiles/group.json を
+#   jq なしで読む (tool_off)。実行の頭には、対象ホストのグループを 1 行出す (note_group)。
 # - `set -e` は関数を if の条件に置くと **その中で無効になる**。手順の関数は
 #   失敗しうるコマンドを必ず `|| return 1` で受けること。
 # - **実行中にこのファイル自身が書き換わると挙動が混ざる**。bash はスクリプトを
@@ -354,6 +357,7 @@ step_labels=()
 step_notes=()
 step_kinds=()  # step | group  (group は実行されない見出し行)
 step_depths=() # 0 | 1
+step_tools=()  # 設定グループで飛ばす道具 (bootstrap-*.sh の `# tool:` の行の残り。空ならいつも流す)
 
 add_step() {
   step_ids+=("$1")
@@ -361,6 +365,7 @@ add_step() {
   step_notes+=("$3")
   step_kinds+=("$4")
   step_depths+=("$5")
+  step_tools+=("${6-}")
 }
 
 # bootstrap-*.sh 冒頭のコメントから説明の 1 行目を取り出す。
@@ -393,6 +398,15 @@ script_order() {
     | sed -n 's/^#[[:space:]]*order:[[:space:]]*\([0-9]\{1,\}\).*/\1/p' \
     | head -1)
   printf '%s' "${n:-50}"
+}
+
+# bootstrap-*.sh 冒頭 (40 行) の `# tool: <key> (<option>)` の行の残りを出す (無ければ空)。設定グループ (ADR 057) で
+# その道具が off のホストでは、手順を流さずに飛ばす (下の tool_off・run_step)。order と同じく script 自身のヘッダに書く。
+# key は ~/.local/state/dotfiles/group.json の tools のキー (nix/lib/groups.nix の表の key)。
+#
+# NOTE: order と同じく、説明の 1 行目より **後ろ** に書くこと。
+script_tool() {
+  awk 'NR > 40 { exit } sub(/^#[[:space:]]*tool:[[:space:]]*/, "") { print; exit }' "$1"
 }
 
 add_step nix-install \
@@ -446,7 +460,7 @@ bootstrap_sorted=$(
 while IFS=$'\t' read -r _ f; do
   [[ -n ${f} ]] || continue
   base=$(basename "${f}")
-  add_step "${base%.sh}" "./nix/scripts/${base}" "$(script_summary "${f}")" step 1
+  add_step "${base%.sh}" "./nix/scripts/${base}" "$(script_summary "${f}")" step 1 "$(script_tool "${f}")"
 done <<<"${bootstrap_sorted}"
 unset f base bootstrap_sorted
 
@@ -1905,6 +1919,8 @@ step_switch() {
   warn_untracked
   warn_clobber
   sync_local_flake_lock || return 1
+  # 実行の頭で出せなかった (lock が合っていなかった) か、取得・決め直しで変わったときだけ、ここでグループを出す
+  note_group
   hm_args=(switch --flake "${flake_dir}#${host}")
   if [[ -n ${backup_ext} ]]; then
     hm_args+=(-b "${backup_ext}")
@@ -2112,7 +2128,43 @@ system_unit_drift() {
   fi
 }
 
+# 設定グループ (ADR 057) で off の道具か。~/.local/state/dotfiles/group.json (home/modules/group.nix) の tools で <key> が
+# false なら 0。ファイルが無い (この仕組みの前の世代へ switch したまま)・読めない・key が無い・true なら 1 (流す)。
+# setup.sh は Nix より前にも走るので jq は使わない。group.json は builtins.toJSON の出力で空白を持たないので、
+# "<key>":false の文字で見る (key は tools の中にしか無い名前。"claude" は "claudePrivateSkills" に当たらない)
+group_state_file="${HOME}/.local/state/dotfiles/group.json"
+tool_off() {
+  local text
+  [[ -r ${group_state_file} ]] || return 1
+  text=$(<"${group_state_file}") || return 1
+  [[ ${text} == *"\"$1\":false"* ]]
+}
+
+# 手順 $1 の道具 (bootstrap-*.sh の `# tool:`) がこのホストで off なら、そう出して 0 を返し、step_skipped を 1 にする
+# (結果に ↷ で出す)。道具が無い・on なら 1 (流す)。--dry-run でも同じに出す
+step_skipped=0
+skip_off_tool() {
+  local i tool key opt
+  i=$(index_of "$1") || return 1
+  tool=${step_tools[i]}
+  key=${tool%% *}
+  if [[ -z ${key} ]] || ! tool_off "${key}"; then
+    return 1
+  fi
+  # 見出しの (…) の中の option の名前。書いていなければ key
+  opt=${key}
+  case ${tool} in
+    *\(*\)*)
+      opt=${tool#*\(}
+      opt=${opt%%\)*}
+      ;;
+  esac
+  note "このホストでは ${opt} が off なので飛ばします (設定グループ。${group_state_file} の tools.${key})。"
+  step_skipped=1
+}
+
 run_step() {
+  step_skipped=0
   case $1 in
     nix-install) step_nix_install ;;
     preflight-unlink) step_script preflight-unlink.sh ;;
@@ -2130,7 +2182,12 @@ run_step() {
       fi
       step_script "$1.sh"
       ;;
-    bootstrap-*) step_script "$1.sh" ;;
+    bootstrap-*)
+      if skip_off_tool "$1"; then
+        return 0
+      fi
+      step_script "$1.sh"
+      ;;
     *)
       warn "未実装の手順: $1"
       return 1
@@ -2408,6 +2465,41 @@ local_flake_migrate_cmd() {
   printf '%s' "${cmd}"
 }
 
+# 対象ホストの設定グループ (ADR 057) を 1 行で出す。グループを選び忘れた PC (客先の PC の tmp など。選ばなければ personal に
+# なり、② ③ の道具まで入る) で、switch の前に気づけるようにする。選んでいなければ「選んでいない。既定」と添える。
+#
+# 実行の頭 (execute。対象ホストが決まっていて Nix があるとき) と、switch の手順の頭 (ホストが決まり、lock を張り直した後) で
+# 呼ぶ。switch の頭では評価し直し、実行の頭に出した行と同じなら出さない (dotfiles-private の取得 (private-fetch) でホストの
+# ファイルのグループが変わった・ホストを決め直したときだけ、もう一度出す)。ローカル flake の lock が本体と合っていない
+# (本体を pull した直後) と実行の頭では評価できず、switch の手順の頭で出る。評価できない (本体が設定グループより前・
+# ホストが無い) ときは黙る。lock は書き換えない
+group_noted=""
+# shellcheck disable=SC2016 # Nix の式をそのまま書く
+group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; onoff = b: if b then "on" else "off"; in
+  d.group + (if o.group.highestPrio < 1500 then " (ホストで選んだ)" else " (選んでいない。既定)")
+  + " · ① エンジニアの道具 on · ② AI の道具 " + onoff d.aiTools.enable
+  + " · ③ 個人のアカウント " + onoff d.personalAccounts.enable'
+note_group() {
+  local line
+  if [[ -z ${host} ]] || ! have nix; then
+    return 0
+  fi
+  if ! line=$(nix eval --raw --no-write-lock-file "${flake_dir}#homeConfigurations.\"${host}\"" \
+    --apply "${group_line_expr}" 2>/dev/null </dev/null) || [[ -z ${line} ]]; then
+    return 0
+  fi
+  # 前に出した行 (ホストと中身) と同じなら出さない
+  if [[ ${group_noted} == "${host}"$'\t'"${line}" ]]; then
+    return 0
+  fi
+  if [[ -n ${group_noted} ]]; then
+    note "グループ (前に出したものから変わった): ${line}  (nix/README.md「設定グループ」)"
+  else
+    note "グループ: ${line}  (nix/README.md「設定グループ」)"
+  fi
+  group_noted=${host}$'\t'${line}
+}
+
 # 自動で決めた対象ホスト (ローカル flake・dotfiles-private。決まっていないときも) を決め直す。$1: 直前の手順の名前。
 # private-fetch は clone にこの PC の登録を運んでくる (消す) ことがあり、local-flake はこの実行で clone を読むローカル flake を
 # 置くことがあるので、同じ実行の switch がそれを使うように (ADR 026)。--host・DOTFILES_HOST・メニューの h で選んだホストは
@@ -2493,6 +2585,7 @@ execute() {
       ;;
   esac
   warn_registered_host_differs
+  note_group
   if is_selected switch; then
     note "既存ファイル: $(backup_summary)"
   fi
@@ -2507,6 +2600,9 @@ execute() {
     warn_context "step-${n}"
     if run_step "${step_ids[i]}"; then
       states[n]="ok"
+      if [[ ${step_skipped} == 1 ]]; then
+        states[n]="skip"
+      fi
       # 対象ホストの判定を変える手順 (dotfiles-private の取得・ローカル flake を置く) のあとは、自動で決めたホストを決め直す
       case ${step_ids[i]} in
         private-fetch | local-flake) redetect_host "${step_labels[i]}" ;;
@@ -2532,6 +2628,8 @@ execute() {
         summary+=("${step_ids[i]}" "step-${n}")
         ;;
       fail) printf '  %s✖%s %s\n' "${c_red}" "${c_reset}" "${step_labels[i]}" ;;
+      # 設定グループでこのホストでは off の道具の手順 (skip_off_tool)。警告は出していないので、まとめには載せない
+      skip) printf '  %s↷ %s (このホストでは off)%s\n' "${c_dim}" "${step_labels[i]}" "${c_reset}" ;;
       *) printf '  %s· %s (未実行)%s\n' "${c_dim}" "${step_labels[i]}" "${c_reset}" ;;
     esac
   done

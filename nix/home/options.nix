@@ -2,17 +2,24 @@
 #
 # 有効な組み合わせが構造に出るよう、WSL 固有の設定は dotfiles.wsl 配下へ入れ子にしている。
 #
+#   dotfiles.group                               設定グループ (personal・company・client。既定 personal)。段の switch の既定を決める
+#   dotfiles.aiTools.enable                      ② AI の道具の段を入れるか (既定はグループから。personal・company は true)
+#   dotfiles.personalAccounts.enable             ③ 個人のアカウントにつながるものの段を入れるか (既定はグループから。personal だけ true)
 #   dotfiles.onePassword.enable                  1Password を使うか (WSL ならホスト側 Windows の、それ以外はこのマシンの)
+#   dotfiles.git.identity.enable                 git の名前とメールを個人のアカウント (pollenjp・pollenjp-sub) にするか (既定は ③)
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false)
-#   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定 true)
-#   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定 true)
+#   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は ③)
+#   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
+#   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
 #   dotfiles.wsl.mtuGuard.maxMtu                 その上限 (既定 1350。1280〜1500)
+#   dotfiles.claude.enable                       Claude Code 一式 (設定・hook・skill・status line・plugin・mise の claude) を入れるか (既定は ②)
+#   dotfiles.claude.privateSkills.enable         private な skill 置き場 (claude-skills) を clone して繋ぐか (既定は ② と ③)
 #   dotfiles.claude.devTracker.enable            Notion Dev Tracker (pjp-dev-tracker) を使うマシンか
 #   dotfiles.claude.devTracker.inbox.enable      チケットのコメントをハブ (~/h) の会話へ届ける見回り役を常駐させるか
 #   dotfiles.claude.gitViaGh.enable              Claude の git と plugin の取得・fetch 系の abbr / alias・setup の取得を gh の資格情報 (HTTPS) で GitHub へ通すか
@@ -27,9 +34,13 @@
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
 #   dotfiles.cursorAgent.enable                  cursor-agent (Cursor の CLI) を mise で入れるか (既定 false。setup が入れた版に固定する)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
+#   dotfiles.ccPages.enable                      cc-pages (clone と build・常駐のビューア) を入れるか (既定は ② と ③)
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
+#   dotfiles.ntn.enable                          ntn (Notion CLI) を入れるか (既定は ③)
 #   dotfiles.ntn.keyring                         ntn (Notion CLI) の config.json の keyring (null なら触らない。false で token を auth.json に置く)
-#   dotfiles.herdrCore.enable                    herdr-core (hc) を入れるか (既定は Linux なら true。herdr-app が SSH でつなぐ machine の側に要る)
+#   dotfiles.herdr.enable                        herdr (包み・ssh 先の agent の固定名・設定・abbr) を入れるか (既定は ②)
+#   dotfiles.herdr.hub.enable                    herdr の集約ハブ ~/h を setup が作るか (既定は ② と ③)
+#   dotfiles.herdrCore.enable                    herdr-core (hc) を入れるか (既定は ② で Linux なら true。herdr-app が SSH でつなぐ machine の側に要る)
 #   dotfiles.osCaBundle.enable                   自前の証明書の束を持つツールを、環境変数で OS の信頼ストアに寄せるか (Linux)
 #   dotfiles.osCaBundle.requestsCaBundle.enable  そのうち REQUESTS_CA_BUNDLE も入れるか
 #
@@ -49,6 +60,11 @@ let
   # 暦にある日付 (YYYY-MM-DD。dotfiles.mise.releaseAgeOverrides の from 用)。nixpkgs の猶予の例外の date
   # (lib/release-age.nix) と共用する
   calendarDate = import ../lib/calendar-date.nix { inherit lib; };
+
+  # 設定グループと段への割り当ての表 (lib/groups.nix)。段の switch の既定をグループから引く。道具の switch の既定は、段の
+  # switch を素の式 (config.dotfiles.aiTools.enable など) で書く (どれも option の既定 (優先度 1500) なので、ホストの素の値が勝つ。
+  # 素の式にしておくと、dotfiles-private の hostmap の読み手も既定をたどれる)
+  groups = import ../lib/groups.nix;
 in
 {
   # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう
@@ -60,6 +76,73 @@ in
       [ "dotfiles" "onePassword" "enable" ]
     )
   ];
+
+  options.dotfiles.group = lib.mkOption {
+    type = lib.types.enum groups.groupNames;
+    default = "personal";
+    example = "client";
+    description = ''
+      このホストの設定グループ (dotfiles-private の docs/adr/057_host_setting_groups_*)。グループは「どの段まで入れるか」で
+      決まり、段の switch (`aiTools.enable`・`personalAccounts.enable`) の既定になる。段の switch は、その段の道具の switch
+      (`claude.enable`・`ntn.enable` など) の既定になる。表は lib/groups.nix。
+
+      | グループ | ① エンジニアの道具 | ② AI の道具 | ③ 個人のアカウント |
+      | --- | --- | --- | --- |
+      | personal (個人の PC。既定) | on | on | on |
+      | company (自社の PC) | on | on | off |
+      | client (客先の PC) | on | off | off |
+
+      personal は段が全部 on で、どの道具も今までの既定と同じになる。グループを選ばないホストは personal。
+
+      mkHome の引数で `group = "client";` のように選ぶ (dotfiles-private に登録したファイルか、ローカル flake の tmp)。どれも
+      option の既定なので、ホストのファイルはグループ・段・道具のどこでも素の値で上書きできる (客先で Claude Code だけ許可が
+      出たら `claude.enable = true;`)。値は `~/.local/state/dotfiles/group.json` (home/modules/group.nix) に落ち、setup は off の
+      道具の手順を飛ばす。書き方は nix/README.md「設定グループ」。
+    '';
+  };
+
+  options.dotfiles.aiTools.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = groups.groupHasTier config.dotfiles.group "aiTools";
+    defaultText = lib.literalExpression ''config.dotfiles.group != "client"'';
+    example = false;
+    description = ''
+      ② AI の道具の段を入れるか。既定はグループから決まる (personal・company は true、client は false)。この段の道具の switch
+      (`claude.enable`・`herdr.enable`・`herdrCore.enable`・`wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable`) の
+      既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`) は、
+      `personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable` は既定が false のまま (段によらない)。
+    '';
+  };
+
+  options.dotfiles.personalAccounts.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = groups.groupHasTier config.dotfiles.group "personalAccounts";
+    defaultText = lib.literalExpression ''config.dotfiles.group == "personal"'';
+    example = false;
+    description = ''
+      ③ 個人のアカウントにつながるものの段を入れるか。既定はグループから決まる (personal だけ true)。この段の道具の switch
+      (`ntn.enable`・`wsl.windowsFiles.ntn.enable`・`git.identity.enable`) の既定になる。② と ③ の両方に当たる道具は
+      `aiTools.enable` も true のときだけ既定で入る。`onePassword.enable`・`claude.devTracker.enable` は既定が false のまま
+      (段によらず、使うホストが入れる)。
+
+      自社の PC (company) は ③ を段ごと戻さず、要る道具を 1 つずつ足す (何に頼っているかがホストのファイルで分かるように)。
+    '';
+  };
+
+  options.dotfiles.git.identity.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.dotfiles.personalAccounts.enable;
+    defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
+    example = false;
+    description = ''
+      git の名前とメールを個人のアカウントにするか (home/modules/git.nix)。true なら `user.name`・`user.email` を pollenjp にし、
+      `~/workdir/github.com/pollenjp-sub` の下の repo だけ pollenjp-sub にする。既定は ③ の段 (`personalAccounts.enable`)。
+
+      false なら名前もメールも書かない。そのホストで使う名前とメールを、ホストの modules に
+      `programs.git.settings.user = { name = "…"; email = "…"; };` で書く (書かなければ git は commit の前に止まり、
+      「Please tell me who you are」と出す。別の名前で commit してしまうことは無い)。
+    '';
+  };
 
   options.dotfiles.onePassword.enable = lib.mkOption {
     type = lib.types.bool;
@@ -88,6 +171,40 @@ in
   };
 
   options.dotfiles.claude = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
+      example = false;
+      description = ''
+        Claude Code 一式を入れるか。既定は ② の段 (`aiTools.enable`)。
+
+        true のとき入るもの: `~/.claude` の CLAUDE.md・hook・skill・agent・command・status line と、`~/.local/state/dotfiles/` の
+        Claude Code 向けの state (home/modules/claude.nix)、`claude-<名前>` のコマンド、fish・bash の abbr / alias の `c`。setup の
+        手順では、mise の claude (bootstrap-mise.sh) と bootstrap-claude-* (plugin・hook と status line の登録・env・footer の
+        リンク・skillOverrides・アカウントの dir)。
+
+        false なら、どれも入れない (setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。前に入れたものは消さない)。
+        客先の PC で利用の許可が出たら、そのホストで `claude.enable = true;` を書く (claude-skills・cc-pages・herdr は入らない)。
+        `git-via-gh.json` (setup の取得が gh を使うか) は Claude Code によらず書く。
+      '';
+    };
+
+    privateSkills.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
+      example = false;
+      description = ''
+        private な skill 置き場 (pollenjp/claude-skills) を clone して `~/.claude/` に繋ぐか (setup の bootstrap-claude-skills.sh)。
+        既定は ② と ③ の段が両方 on のとき (Claude Code の道具で、private な repo でもあるため)。`claude.enable` が要る
+        (false のマシンで true にすると評価で止まる)。
+
+        false なら setup は clone も繋ぎ直しもしない (前に clone したものと張った symlink は消さない)。Dev Tracker
+        (`devTracker.enable`) と集約ハブ (`herdr.hub.enable`) は claude-skills の skill を使うので、これが要る。
+      '';
+    };
+
     devTracker.enable = lib.mkOption {
       type = lib.types.bool;
       default = false;
@@ -113,6 +230,9 @@ in
         (雛形の例は true を書く)、検証用の sandbox。登録簿の型のホスト
         (`<user>@<system>`) を `--host` で当てたマシンでは使わない
         (dotfiles-private の docs/adr/027_*。前は既定が true で、ローカル flake の雛形の local が false を書いていた)。
+
+        skill (pjp-dev-tracker) は claude-skills にあるので、`claude.privateSkills.enable` が要る (false のマシンで true に
+        すると評価で止まる)。既定は設定グループ (`group`) によらず false (② と ③ の段の道具だが、使うホストが入れる)。
       '';
     };
 
@@ -505,6 +625,21 @@ in
     '';
   };
 
+  options.dotfiles.ccPages.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
+    defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
+    example = false;
+    description = ''
+      cc-pages (cc-page のページを見せるローカル web ビューア。private な pollenjp/cc-pages) を入れるか。既定は ② と ③ の段が
+      両方 on のとき (Claude Code の道具で、private な repo を clone して build するため)。
+
+      true のとき、home/modules/cc-pages.nix が systemd の user service (cc-pages.service) と、port を選んだマシンの
+      `~/.config/cc-pages/config.toml` を置き、setup の bootstrap-cc-pages.sh が clone・build して daemon を起こす。false なら
+      どちらも置かず、setup は bootstrap-cc-pages を飛ばす (前に build した `~/bin/cc-pages` と clone は消さない)。
+    '';
+  };
+
   options.dotfiles.ccPages.port = lib.mkOption {
     # types.port は 0 も通す。0 だと cc-pages は空いている port を選び、返すリンクが合わない
     type = lib.types.nullOr (lib.types.ints.between 1 65535);
@@ -537,6 +672,19 @@ in
     '';
   };
 
+  options.dotfiles.ntn.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.dotfiles.personalAccounts.enable;
+    defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
+    example = false;
+    description = ''
+      ntn (Notion の CLI。nix/pkgs/ntn) を入れるか。既定は ③ の段 (`personalAccounts.enable`)。
+
+      true のとき home.packages に ntn を入れ、`~/.local/state/dotfiles/ntn.json` (`ntn.keyring`) を置く。false ならどちらも置かず、
+      setup は bootstrap-ntn・bootstrap-path-shadow を飛ばす。Windows の ntn は `wsl.windowsFiles.ntn.enable` (既定は同じ ③)。
+    '';
+  };
+
   options.dotfiles.ntn.keyring = lib.mkOption {
     type = lib.types.nullOr lib.types.bool;
     default = null;
@@ -564,13 +712,44 @@ in
     '';
   };
 
+  options.dotfiles.herdr = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
+      example = false;
+      description = ''
+        herdr (coding agent 向けの terminal multiplexer) を入れるか。既定は ② の段 (`aiTools.enable`)。
+
+        true のとき入るもの: herdr を包んだ実行ファイルと、ssh 先で forward された agent を固定名で見せる仕組み
+        (home/modules/agent-link.nix の pjp-agent-link・`~/.ssh/rc`・見張りの unit。ADR 025)・ssh の `SetEnv PJP_SSH_CLIENT`
+        (home/modules/ssh.nix)・`~/.config/herdr/config.toml`・fish と bash の abbr / alias (`h`・`hss`・`hr` など)・Claude Code の
+        herdr の skill (`claude.enable` も true のとき)。false ならどれも入れない。Windows の herdr は
+        `wsl.windowsFiles.herdr.enable`、herdr-core (hc) は `herdrCore.enable` (どちらも既定は同じ ②)。
+      '';
+    };
+
+    hub.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
+      example = false;
+      description = ''
+        herdr の集約ハブ `~/h` を、setup (bootstrap-herdr-hub.sh) が claude-skills の hub-init.sh で作る (作り済みなら雛形との差だけ
+        直す) か。既定は ② と ③ の段が両方 on のとき (② の道具だが、作る hub-init.sh が claude-skills にあるため)。
+        `herdr.enable` と `claude.privateSkills.enable` が要る (どちらかが false のマシンで true にすると評価で止まる)。false なら
+        setup は bootstrap-herdr-hub を飛ばす (作った `~/h` は消さない)。
+      '';
+    };
+  };
+
   options.dotfiles.herdrCore.enable = lib.mkOption {
     type = lib.types.bool;
-    default = pkgs.stdenv.hostPlatform.isLinux;
-    defaultText = lib.literalExpression "pkgs.stdenv.hostPlatform.isLinux";
+    default = config.dotfiles.aiTools.enable && pkgs.stdenv.hostPlatform.isLinux;
+    defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && pkgs.stdenv.hostPlatform.isLinux";
     example = false;
     description = ''
-      herdr-core (hc) を入れるか (home/modules/herdr-core.nix)。Linux のホストだけで、既定は Linux なら true。
+      herdr-core (hc) を入れるか (home/modules/herdr-core.nix)。Linux のホストだけで、既定は ② の段 (`aiTools.enable`) で Linux なら true。
 
       herdr-app (Windows・macOS の desktop app) が SSH でつなぐ machine は、その machine の herdr-core が terminal を
       持つので、server になりうる Linux のホストには herdr-core が要る。版は Windows の herdr-core と同じ
@@ -703,12 +882,13 @@ in
 
     windowsFiles.ntn.enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
+      default = config.dotfiles.personalAccounts.enable;
+      defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
       example = false;
       description = ''
         Windows に ntn (Notion の CLI。winget の `Notion.ntn`) を、dotfiles が固定した版で入れるマシンか。
         効くのは `windowsFiles.enable = true` のマシンだけ (既定が true なので、配らないマシンでも true のまま。
-        そのマシンでは何もしない)。
+        そのマシンでは何もしない)。既定は ③ の段 (`personalAccounts.enable`。personal なら true)。
 
         switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `ntn` に落ち、
         `~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-ntn.sh が読む。true のマシンでは、配った
@@ -721,12 +901,14 @@ in
 
     windowsFiles.claudeCode.enable = lib.mkOption {
       type = lib.types.bool;
-      default = true;
+      default = config.dotfiles.aiTools.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
       example = false;
       description = ''
         Windows に Claude Code (winget の `Anthropic.ClaudeCode`) を、dotfiles が固定した版で入れるマシンか。
         効くのは `windowsFiles.enable = true` のマシンだけ (既定が true なので、配らないマシンでも true のまま。
-        そのマシンでは何もしない)。WSL の claude (mise が入れる) とは別のもの。
+        そのマシンでは何もしない)。WSL の claude (mise が入れる。`claude.enable`) とは別のもの。既定は ② の段
+        (`aiTools.enable`。personal・company なら true)。
 
         switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `claudeCode` に落ち、
         `~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-claude-code.sh が読む。true のマシンでは、配った
@@ -734,6 +916,25 @@ in
         足す (Windows の Claude Code が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で固定し、
         `CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE` は設定しない (win/README.md の「Claude Code」)。Claude Code の設定
         (`%USERPROFILE%\.claude`) とログインには触らない。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.herdr.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
+      example = false;
+      description = ''
+        Windows に herdr (winget の `Herdr.Herdr`) と herdr-app・herdr-core を、dotfiles が固定した版で入れるマシンか。
+        効くのは `windowsFiles.enable = true` のマシンだけ (配らないマシンでは true でも何もしない)。既定は ② の段
+        (`aiTools.enable`。personal・company なら true)。WSL の herdr (`herdr.enable`) とは別のもの。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsHerdr` に落ち (home/modules/group.nix。
+        `windows-files.json` には入れない)、`~/dotfiles/setup --update` は false なら bootstrap-windows-herdr.sh・
+        bootstrap-windows-herdr-app.sh を飛ばす (script の冒頭の `# tool: windowsHerdr`)。bootstrap-windows-pin-updates.sh も、false なら
+        herdr・herdr-app・herdr-core の新しい版を確かめない。group.json が無い前の世代では、今までどおり入れる。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
       '';

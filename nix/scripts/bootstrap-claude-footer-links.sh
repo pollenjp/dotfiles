@@ -4,6 +4,11 @@
 # Claude Code の footer に会話のチケットと PR と cc-page のリンクを出す設定 (footerLinksRegexes) を
 # ~/.claude/settings.json へ登録する。冪等。`setup.sh --update` でも毎回走る。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # 会話の中で触れた Dev Tracker のチケット (TKT-n / WRK-TKT-n) と GitHub の PR、cc-page のページを、

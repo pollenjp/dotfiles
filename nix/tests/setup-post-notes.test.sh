@@ -120,8 +120,9 @@ fake_step() {
 }
 
 # 偽の home-manager と nix を置いた bin を作り、その場所を出す。home-manager は何もせず 0 を返す。
-# nix は引数を <HOME>/nix-calls に書き、`nix eval` なら FAKE_NIX_EVAL_OUT を出して FAKE_NIX_EVAL_RC で
-# 終わる (setup.sh が渡す --apply の整形を済ませた形を、そのまま渡す)。ほかの nix のコマンドは 0 を返す
+# nix は引数を <HOME>/nix-calls に書き、config.warnings の `nix eval` なら FAKE_NIX_EVAL_OUT を出して FAKE_NIX_EVAL_RC で
+# 終わる (setup.sh が渡す --apply の整形を済ませた形を、そのまま渡す)。ほかの `nix eval` (setup.sh が対象ホストの設定
+# グループを 1 行出すための評価。setup-tools.test.sh が見る) には答えずに 1 で終わる。ほかの nix のコマンドは 0 を返す
 fake_hm_bin() {
   local b="$1/fake-bin"
   mkdir -p "${b}"
@@ -131,8 +132,13 @@ fake_hm_bin() {
     cat <<'EOF'
 printf '%s\n' "$*" >>"${HOME}/nix-calls"
 if [[ $1 == eval ]]; then
-  [[ -z ${FAKE_NIX_EVAL_OUT-} ]] || printf '%s' "${FAKE_NIX_EVAL_OUT}"
-  exit "${FAKE_NIX_EVAL_RC:-0}"
+  case "$*" in
+    *config.warnings*)
+      [[ -z ${FAKE_NIX_EVAL_OUT-} ]] || printf '%s' "${FAKE_NIX_EVAL_OUT}"
+      exit "${FAKE_NIX_EVAL_RC:-0}"
+      ;;
+  esac
+  exit 1
 fi
 exit 0
 EOF
@@ -356,7 +362,7 @@ fi
 # 12. --dry-run では switch しないので、home-manager の warnings も読まない
 c=$(new_case t12)
 PATH_EXTRA=$(fake_hm_bin "${c}") FAKE_NIX_EVAL_OUT='読まれないはずの warning' run "${c}" --dry-run --host testhost --steps switch
-if [[ $(rc "${c}") == 0 ]] && ! grep -qs 'eval' "${c}/home/nix-calls" && ! grep -q '読まれないはずの' "${c}/out"; then
+if [[ $(rc "${c}") == 0 ]] && ! grep -qs 'config.warnings' "${c}/home/nix-calls" && ! grep -q '読まれないはずの' "${c}/out"; then
   ok "--dry-run では home-manager の warnings を読まない"
 else
   ng "--dry-run の warnings" "rc=$(rc "${c}") calls=$(cat "${c}/home/nix-calls" 2>/dev/null) $(out "${c}")"

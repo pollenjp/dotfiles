@@ -54,6 +54,10 @@
 #     render --file --windows-user <その名前> と 1 バイトも違わない。名前の入った例 (WSL の PC で描いたまま。日本語と空白を
 #     含む名前も) は手を入れたと見ず、initial を差し込む (例の名前は initial の名前になる)。名前の入った例に別の手を入れた
 #     ものには書かずに 1
+#   - 雛形を描くと、tmp の例の system の行 (「        #   system = "x86_64-linux";」) の後ろに設定グループの選び方の塊 (コメント。
+#     group の行は 2 段のコメント) を差し込む。雛形の版の印は変えない (render --file も同じ塊を差し込むので、作った flake.nix は
+#     render --file と 1 バイトも違わない)。塊の無い今の雛形 (塊より前に描いたもの) も、--initial は今の雛形のままと見て、描き直して
+#     差し込む (描き直すので塊も入る)
 #   - 雛形は一時ファイル (.flake.nix.new-<pid>) に描いてから、既にある flake.nix へ書き写す: --force (--initial も) でも
 #     mode (0600) と symlink (先のファイルを書き換える) はそのまま。描いたあとに一時ファイルを残さない
 #   - WSL の PC のケース (--initial も) は、本物の pwsh.exe を見せないよう、要るコマンドだけを並べた PATH と env -i で流す。
@@ -477,6 +481,29 @@ if [[ $(rc "${c}") == 0 && $(initial_block "${c}/local/flake.nix") == "$(fixture
   ok "--initial: clone の nix/ を指す今の雛形にも差し込む"
 else
   ng "--initial (clone を指す雛形)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 11b. 設定グループの選び方の塊: 描いた雛形の tmp の例の system の行のすぐ後ろにあり、group の行は 2 段のコメント。塊の無い
+#      今の雛形 (塊より前に描いたもの) も --initial は今の雛形のままと見て、描き直して差し込む (描き直すので塊も入る)
+c=$(new_win_case i3c)
+run "${c}"
+anchor_line=$(grep -nxF '        #   system = "x86_64-linux";' "${c}/local/flake.nix" | cut -d: -f1)
+next_lines=$(sed -n "$((anchor_line + 1)),$((anchor_line + 3))p" "${c}/local/flake.nix")
+awk '
+  $0 == "        #   system = \"x86_64-linux\";" { print; skip = 1; next }
+  skip && $0 == "        #   #   group = \"client\";" { skip = 0; next }
+  !skip { print }
+' "${c}/local/flake.nix" >"${c}/old-style.nix"
+cp "${c}/old-style.nix" "${c}/local/flake.nix"
+run_win "${c}" --initial
+if [[ -n ${anchor_line} && ${next_lines} == "        #"$'\n'"        #   # 設定グループ"* ]] \
+  && grep -qxF '        #   #   group = "client";' "${c}/local/flake.nix" \
+  && [[ $(rc "${c}") == 0 ]] && grep -qF '今の雛形のままなので' "${c}/out" \
+  && [[ $(initial_block "${c}/local/flake.nix") == "$(fixture_initial "${initial_fixture}")" ]] \
+  && grep -qF '設定グループ (本体の' "${c}/local/flake.nix"; then
+  ok "塊は tmp の例の system の行の後ろにあり (group は 2 段のコメント)、塊の無い今の雛形も --initial は描き直して差し込む"
+else
+  ng "設定グループの選び方の塊" "anchor=${anchor_line} next=${next_lines} rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
 fi
 
 # 12. 手を入れた flake.nix: 書かずに 1。手で足す塊と --force --initial を出す

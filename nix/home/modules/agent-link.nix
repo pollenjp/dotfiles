@@ -26,13 +26,23 @@
 # 書く記録で、書けたあとに借りられるよう見る。path unit は service が走っている間の知らせを見ないので、
 # pjp-agent-link watch は始めと終わりで中身を比べて繰り返す。何も起きないホスト (WSL の手元など) では待つだけ。
 # macOS には systemd が無いので置かない (attach の張り替えだけが効く)。
-{ lib, pkgs, ... }:
+#
+# ## herdr を入れるホストだけ
+#
+# どれも herdr の session の固定名のための仕組みなので、herdr を入れるホスト (dotfiles.herdr.enable。既定は設定グループの
+# ② AI の道具) にだけ置く。このマシンを名乗る SetEnv PJP_SSH_CLIENT (modules/ssh.nix) も同じ条件。
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   agentLink = pkgs.callPackage ../../pkgs/pjp-agent-link { };
   herdr = pkgs.callPackage ../../pkgs/pjp-agent-link/herdr.nix { inherit agentLink; };
 in
-{
+lib.mkIf config.dotfiles.herdr.enable {
   home.packages = [
     herdr
     agentLink

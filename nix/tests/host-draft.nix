@@ -18,6 +18,9 @@
 #     頭のコメントに元にしたホストと notes を書く。fixtures/host-draft/ の期待のファイルと 1 字も違わない (WSL のホストも)
 #   - 期待のファイル (= 描いた下書き) を import したホストは、元のホストと drvPath が同じ。値を 1 つ変えたホストとは違う
 #   - 字句にできない値 (関数) は、値を書かずに「# TODO: dotfiles.<path>」の行にする
+#   - 設定グループ (group) を書いたホストは、下書きの mkHome の引数に `group = "company";` を system の行の後ろに描き、modules には
+#     入れない。グループで off になる段の道具を足した値 (claude.privateSkills.enable・ntn.enable など) は今の決まりどおり
+#     (claude は引数の組、ほかは modules)。fixtures/host-draft/grace@box.nix と 1 字も違わず、import すると drvPath が同じ
 {
   lib,
   pkgs,
@@ -77,6 +80,30 @@ let
     username = "dave";
     system = hostSystem;
     values = daveValues;
+  };
+
+  # 設定グループを選び、グループで off になる ③ の道具を足した自社のホスト (ADR 057)
+  grace = mkHome {
+    username = "grace";
+    system = hostSystem;
+    group = "company";
+    claude = {
+      privateSkills.enable = true;
+      devTracker.enable = true;
+      notion.profile = "work";
+    };
+    modules = [
+      {
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
+  };
+  graceText = draft.render {
+    name = "grace@box";
+    username = "grace";
+    system = hostSystem;
+    values = draft.collect grace.options.dotfiles;
   };
 
   # 改名した旧名 (dotfiles.wsl.onePassword.enable) で書いた local
@@ -171,6 +198,14 @@ let
     {
       name = "値を 1 つ変えたホスト (port 7802) とは drvPath が違う";
       ok = drvOf (importFixture "carol@box.nix") != drvOf (carolWith 7802);
+    }
+    {
+      name = "group を書いたホストの render は期待のファイル (fixtures/host-draft/grace@box.nix) と 1 字も違わない";
+      ok = graceText == builtins.readFile (fixture "grace@box.nix");
+    }
+    {
+      name = "group を書いたホストも、描いた下書きを import すると drvPath が同じ";
+      ok = drvOf (importFixture "grace@box.nix") == drvOf grace;
     }
     {
       name = "字句にできない値 (関数) は値を書かずに TODO の行にする";

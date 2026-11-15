@@ -9,6 +9,11 @@
 # ^ setup.sh が読む実行順。bootstrap-claude-skills.sh (既定の 50) が ~/.claude/skills へ張った skill の script を
 #   打つので、その後に走らせる。仕組みは nix/README.md「bootstrap の実行順」。
 #
+# tool: herdrHub (dotfiles.herdr.hub.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # ~/h は、herdr で子の Claude を回す集約 (指揮役) の会話の受け口 (ハブ)。コードを持たない git repo (remote なし) で、

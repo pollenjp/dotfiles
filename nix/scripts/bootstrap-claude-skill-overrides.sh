@@ -10,6 +10,11 @@
 #   (pack の割り当て) と入口の skill (pjp-pack-<pack>) を読むので、その後に走らせる。仕組みは nix/README.md
 #   「bootstrap の実行順」。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # skill の見え方 (Claude の一覧に説明つきで出るか・名前だけか・出ないか、`/` から呼べるか) は settings.json の

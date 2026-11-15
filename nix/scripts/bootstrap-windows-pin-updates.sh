@@ -36,7 +36,9 @@
 # ## 何をするか
 #
 # 1. ~/.local/state/dotfiles/windows-files.json を読み、配らないマシンは飛ばす。ntn・claudeCode が false の名前は確かめない
-#    (欄が無い前の世代は true と読む)
+#    (欄が無い前の世代は true と読む)。herdr・herdr-app・herdr-core は、~/.local/state/dotfiles/group.json (設定グループ。
+#    home/modules/group.nix) の tools.windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable) が false なら確かめない (ファイル・欄が
+#    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)
 # 2. gh が無い・ログインしていないなら、確かめられないと 1 行出して exit 0
 # 3. 名前ごとに上の口を出た日なしで呼び (60 秒で打ち切る)、見送っていない新しい版があれば「<題>: <固定した版> → <新しい版>」を
 #    出す。警告のまとめには、頼み方を書いた見出しと、その続きの行として残す。新しい版が無ければ 1 行だけ (まとめには
@@ -46,9 +48,10 @@
 #
 #   bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
 #
-# windows-files.json によらず、名前 (省けば全部) ごとに出た日つきで呼び、新しい版 (出た日・何日前・URL、見送った版は理由)、
-# 猶予ごとの上げ先 (猶予の日数以上たった、見送っていない新しい版のうち、いちばん新しいもの。出た日の分からない版は選ばない)、
-# 上げ方の README の節と見送りの一覧の場所を出す。確かめられない名前があれば、出せるものを出したうえで exit 2。
+# windows-files.json・group.json によらず、名前 (省けば全部) ごとに出た日つきで呼び、新しい版 (出た日・何日前・URL、
+# 見送った版は理由)、猶予ごとの上げ先 (猶予の日数以上たった、見送っていない新しい版のうち、いちばん新しいもの。出た日の
+# 分からない版は選ばない)、上げ方の README の節と見送りの一覧の場所を出す。確かめられない名前があれば、出せるものを出した
+# うえで exit 2。
 #
 # ## JSON の口 (--list --json・--candidates --json)
 #
@@ -72,8 +75,8 @@
 # - 確かめられなかった名前は error にわけを書き、ほかの名前は出したうえで exit 2 (stdout の JSON は読める)。ps1 が読めない
 #   名前は title が名前・files が []・pinned が ""・winget_id と skip_file が null。出た日を確かめられなかった名前・gh が
 #   無いときは candidates が []・targets が全部 null
-# - windows-files.json は見ない (repo が固定しているもの全部)。--list は jq だけで動き、gh もネットワークも使わない
-#   (固定した版は check の口の --json --offline で読む)
+# - windows-files.json・group.json は見ない (repo が固定しているもの全部。このマシンが設定グループで入れない名前も出す)。
+#   --list は jq だけで動き、gh もネットワークも使わない (固定した版は check の口の --json --offline で読む)
 
 set -eu -o pipefail
 
@@ -82,6 +85,7 @@ script_dir=$(
   pwd -P
 )
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
+group_file="${HOME}/.local/state/dotfiles/group.json"
 all_names=(openssh herdr google-japanese-input ntn claude-code herdr-app herdr-core)
 
 usage() {
@@ -418,7 +422,13 @@ if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
   exit 0
 fi
-# ntn・Claude Code は、入れないマシンでは確かめない (欄が無い前の世代は入れる。jq の // は false も置き換えるので使わない)
+# ntn・Claude Code は、入れないマシンでは確かめない (欄が無い前の世代は入れる。jq の // は false も置き換えるので使わない)。
+# herdr・herdr-app・herdr-core は group.json の tools.windowsHerdr で決める (ファイル・欄が無い前の世代は入れる)
+windows_herdr=true
+if [[ -r ${group_file} ]]; then
+  windows_herdr=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsHerdr")) then .tools.windowsHerdr | tostring else "true" end' \
+    "${group_file}" 2>/dev/null) || windows_herdr=true
+fi
 names=()
 for n in "${all_names[@]}"; do
   case ${n} in
@@ -429,6 +439,11 @@ for n in "${all_names[@]}"; do
   if [[ -n ${key} && $(jq -r --arg k "${key}" 'if has($k) then .[$k] else true end' "${state_file}") != true ]]; then
     continue
   fi
+  case ${n} in
+    herdr | herdr-app | herdr-core)
+      [[ ${windows_herdr} != false ]] || continue
+      ;;
+  esac
   names+=("${n}")
 done
 

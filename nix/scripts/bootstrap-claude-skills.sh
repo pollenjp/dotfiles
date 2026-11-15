@@ -3,6 +3,11 @@
 #
 # private な skill 置き場 (pollenjp/claude-skills) を取得して ~/.claude/ へ繋ぐ。
 #
+# tool: claudePrivateSkills (dotfiles.claude.privateSkills.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何をするか
 #
 #   1. claude-skills を ghq root 配下へ clone する (既にあれば取得 (fetch) して fast-forward する)

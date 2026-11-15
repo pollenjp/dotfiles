@@ -9,6 +9,11 @@
 # ^ setup.sh が読む実行順。bootstrap-claude-skills.sh (既定の 50) が ~/.claude/skills へ
 #   張ったリンクを写すので、その後に走らせる。仕組みは nix/README.md「bootstrap の実行順」。
 #
+# tool: claude (dotfiles.claude.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループで段が off の客先の PC など) では、setup はこの手順を飛ばす。
+#
 # ## 何のために
 #
 # Claude Code のログインを個人と会社のアカウントで分けたい。分けたいのはログインだけで、
