@@ -15,6 +15,7 @@
 #     (欄が無い前の世代は確かめる)
 #   - group.json (設定グループ) の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、ほかの名前は確かめる。
 #     true なら確かめる (group.json が無い前の世代も確かめる)
+#   - --candidates と --list --json は group.json を見ず、tools.windowsHerdr が false のマシンでも herdr・herdr-app・herdr-core を出す
 #   - gh が無い・ログインしていないときは、確かめられないと 1 行出して exit 0 (まとめにも残す)
 #   - 見送っていない新しい版があれば、名前ごとに「<題>: <固定した版> → <新しい版>」(4 つ以上は頭と末尾と個数) を出し、
 #     警告のまとめに頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を書いた見出しと続きの行で残す。
@@ -297,6 +298,25 @@ if [[ $(rc "${d}") == 0 ]] && ! called "${d}" -E '^winget .*herdr$' && ! called 
   ok "group.json の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、true なら確かめる"
 else
   ng "windowsHerdr" "calls=$(cat "${d}/calls" 2>/dev/null) / $(cat "${d2}/calls" 2>/dev/null)"
+fi
+
+# 4d. --candidates と --list --json (依存の更新の skill が読む口) は group.json を見ない。tools.windowsHerdr が false の
+#     マシンでも herdr・herdr-app・herdr-core を出す (repo が固定しているもの全部)
+group_no_herdr='{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}'
+d=$(new_case t4e "${state_on}")
+printf '%s\n' "${group_no_herdr}" >"${d}/home/.local/state/dotfiles/group.json"
+run "${d}" 1 --list --json
+d2=$(new_case t4f "${state_on}")
+printf '%s\n' "${group_no_herdr}" >"${d2}/home/.local/state/dotfiles/group.json"
+run "${d2}" 0 --candidates
+if [[ $(rc "${d}") == 0 ]] \
+  && jq -e '[.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "herdr-app", "herdr-core"]' \
+    "${d}/out" >/dev/null \
+  && [[ $(rc "${d2}") == 0 ]] && called "${d2}" -E '^winget .*herdr$' && called "${d2}" -E '^herdr-app '; then
+  ok "--candidates と --list --json は group.json を見ず、tools.windowsHerdr が false でも herdr・herdr-app・herdr-core を出す"
+else
+  ng "group.json と --candidates・--list --json" \
+    "rc=$(rc "${d}")/$(rc "${d2}") calls=$(cat "${d2}/calls" 2>/dev/null) $(outerr "${d}") / $(outerr "${d2}")"
 fi
 
 # 5. 新しい版が無い・見送った版だけ: 「無い」の 1 行で、まとめには残さない

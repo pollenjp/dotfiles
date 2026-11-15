@@ -48,9 +48,10 @@
 #
 #   bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
 #
-# windows-files.json によらず、名前 (省けば全部) ごとに出た日つきで呼び、新しい版 (出た日・何日前・URL、見送った版は理由)、
-# 猶予ごとの上げ先 (猶予の日数以上たった、見送っていない新しい版のうち、いちばん新しいもの。出た日の分からない版は選ばない)、
-# 上げ方の README の節と見送りの一覧の場所を出す。確かめられない名前があれば、出せるものを出したうえで exit 2。
+# windows-files.json・group.json によらず、名前 (省けば全部) ごとに出た日つきで呼び、新しい版 (出た日・何日前・URL、
+# 見送った版は理由)、猶予ごとの上げ先 (猶予の日数以上たった、見送っていない新しい版のうち、いちばん新しいもの。出た日の
+# 分からない版は選ばない)、上げ方の README の節と見送りの一覧の場所を出す。確かめられない名前があれば、出せるものを出した
+# うえで exit 2。
 #
 # ## JSON の口 (--list --json・--candidates --json)
 #
@@ -74,8 +75,8 @@
 # - 確かめられなかった名前は error にわけを書き、ほかの名前は出したうえで exit 2 (stdout の JSON は読める)。ps1 が読めない
 #   名前は title が名前・files が []・pinned が ""・winget_id と skip_file が null。出た日を確かめられなかった名前・gh が
 #   無いときは candidates が []・targets が全部 null
-# - windows-files.json は見ない (repo が固定しているもの全部)。--list は jq だけで動き、gh もネットワークも使わない
-#   (固定した版は check の口の --json --offline で読む)
+# - windows-files.json・group.json は見ない (repo が固定しているもの全部。このマシンが設定グループで入れない名前も出す)。
+#   --list は jq だけで動き、gh もネットワークも使わない (固定した版は check の口の --json --offline で読む)
 
 set -eu -o pipefail
 
