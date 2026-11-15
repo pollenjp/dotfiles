@@ -60,6 +60,9 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core。新しい�
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る) |
 
+- 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr` の `enable` が
+  false。herdr-app・herdr-core は `herdr` の値) では、setup はその名前を確かめも揃えもしない (`nix/README.md` の「設定グループ」)
+
 ## 対象の外
 
 - WSL・Linux の側の固定 (`nix/pkgs/ntn` の版・`nix/flake.lock`) は SKILL.md の「上げ方」のほかの行。mise のグローバルの道具は
