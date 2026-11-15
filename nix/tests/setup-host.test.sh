@@ -26,6 +26,9 @@
 #     (local-flake-migrate.sh prepare・pjp-dotfiles-local-flake-migrate) を出す
 #   - --dry-run では、決め直しに頼る実行 (取得・ローカル flake の手順が流れない) は switch で ✖ にせず、決め直せないことを
 #     出して 0
+#   - switch のあと、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むなら、ホストの要約
+#     (hostSummary.file) を clone の nix/hosts/<ホスト>.md と比べ、無ければ・違えば警告のまとめに [switch] で skill の名前
+#     (pjp-dotfiles-register-host) つきの 1 件を出す。同じなら出さない。登録簿のホスト (--host) では比べない。評価が空なら黙る
 #   - 最初から決まっておらず、取得しても登録が来ないときは、取得のあと switch の頭で止まる (home-manager を呼ばない)。
 #     そのとき、ローカル flake が前の雛形でも「前の雛形から作られています」の案内は出さない (評価までいっていない)
 #   - --host・DOTFILES_HOST で、この PC の登録した名前と違うホストを選んだら、警告する (警告のまとめの
@@ -114,7 +117,8 @@ chmod +x "${sys_bin}/uname"
 
 # 偽の home-manager と nix を置いた bin を作り、その場所を出す。home-manager は引数を <HOME>/hm-calls に書いて 0 を返す。
 # nix は引数を <HOME>/nix-calls に書き、`hash path <dir>` なら sha256-<dir/.fakehash の中身> (無ければ sha256-FAKE) を
-# 出す。ほかは何も出さずに 0 (eval の warnings は空)
+# 出す。ホストの要約 (hostSummary) の eval なら <HOME>/fake-summary の中身を出す (無ければ空)。ほかは何も出さずに 0
+# (eval の warnings は空)
 fake_hm_bin() {
   local b="$1/fake-bin"
   mkdir -p "${b}"
@@ -133,6 +137,9 @@ if [[ $1 == hash ]]; then
   last=""
   for a in "$@"; do last=$a; done
   if [[ -f ${last}/.fakehash ]]; then echo "sha256-$(cat "${last}/.fakehash")"; else echo sha256-FAKE; fi
+fi
+if [[ $1 == eval && $* == *.hostSummary* && -f ${HOME}/fake-summary ]]; then
+  cat "${HOME}/fake-summary"
 fi
 exit 0
 EOF
@@ -630,6 +637,37 @@ if [[ $(rc "${c}") == 1 ]] && grep -qF 'setup-local-flake.sh --initial' "${c}/er
   ok "決まらないときの選べる道に、新しい WSL の PC の setup-local-flake.sh --initial を出す"
 else
   ng "選べる道 (--initial)" "rc=$(rc "${c}") $(err "${c}")"
+fi
+
+# 30. 要約の古さ: 登録したホストで switch したら、clone の nix/hosts/<ホスト>.md と hostSummary.file を比べる。無い・違うなら警告の
+#     まとめに [switch] で 1 件 (skill の名前つき)。同じなら出さない。登録簿のホストを --host で当てたら比べない。評価が空なら黙る
+c=$(new_case t30)
+local_flake "${c}" "${c}/private/nix"
+b=$(fake_hm_bin "${c}")
+printf 'SUMMARY alice@box\n' >"${c}/home/fake-summary"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_missing=$(after_result "${c}")
+rc_missing=$(rc "${c}")
+printf 'SUMMARY alice@box\n' >"${c}/private/nix/hosts/alice@box.md"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_same=$(after_result "${c}")
+printf 'SUMMARY old\n' >"${c}/private/nix/hosts/alice@box.md"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_differ=$(after_result "${c}")
+PATH_EXTRA=${b} run "${c}" --steps switch --host alice@x86_64-linux
+s_registry=$(after_result "${c}")
+rm -f "${c}/home/fake-summary"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_empty=$(after_result "${c}")
+if [[ ${rc_missing} == 0 ]] \
+  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (nix/hosts/alice@box.md) がありません → Claude Code の pjp-dotfiles-register-host skill' <<<"${s_missing}" \
+  && grep -qF 'private-host.sh summaries --private' <<<"${s_missing}" \
+  && ! grep -qF 'ホストの要約' <<<"${s_same}" \
+  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (nix/hosts/alice@box.md) が今の設定と違います' <<<"${s_differ}" \
+  && ! grep -qF 'ホストの要約' <<<"${s_registry}" && ! grep -qF 'ホストの要約' <<<"${s_empty}"; then
+  ok "switch のあと、登録したホストの要約が clone の <ホスト>.md と無い・違うなら skill の名前つきで警告し、同じ・登録簿のホスト・評価が空なら出さない"
+else
+  ng "要約の古さ" "missing=${s_missing}"$'\n'"same=${s_same}"$'\n'"differ=${s_differ}"$'\n'"registry=${s_registry}"$'\n'"empty=${s_empty}"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

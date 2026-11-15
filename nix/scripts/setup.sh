@@ -1940,6 +1940,38 @@ step_switch() {
     run nix run "${flake_dir}#home-manager" -- "${hm_args[@]}" || return 1
   fi
   hm_warnings_to_summary
+  check_host_summary
+}
+
+# この PC のホストの要約 (dotfiles-private の nix/hosts/<ホスト>.md。ADR 057) が今の設定と同じかを見て、違えば・無ければ
+# 警告する (止めない)。dotfiles-private には CI が無く、ホストのファイルの直し忘れのほか、本体の変更 (段の割り当て・既定) でも
+# 要約は古くなるので、switch のたびに setup が見る。行に skill の名前を書き、Claude Code が拾って出し直せるようにする
+# (固定した版より新しい版の知らせと同じ形)。
+#
+# 見るのは、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むときだけ。比べる文は、switch
+# したのと同じローカル flake の hostSummary.file (private-host.sh summaries が書くのと同じ関数)。評価できない・空 (本体が要約より
+# 前など) なら黙る。--dry-run では見ない。lock は書き換えない
+check_host_summary() {
+  local want file how
+  if [[ ${dry_run} == 1 || -z ${host} ]] || ! have nix; then
+    return 0
+  fi
+  if [[ $(host_origin) != private ]] || ! local_flake_reads_private; then
+    return 0
+  fi
+  file="${private_clone}/nix/hosts/${host}.md"
+  if ! want=$(nix eval --raw --no-write-lock-file "${flake_dir}#homeConfigurations.\"${host}\".hostSummary" \
+    --apply "s: s.file \"${host}\"" 2>/dev/null </dev/null) || [[ -z ${want} ]]; then
+    return 0
+  fi
+  # どちらも $(…) と同じく末尾の改行を落として比べる
+  if [[ -f ${file} && $(<"${file}") == "${want}" ]]; then
+    return 0
+  fi
+  how='が今の設定と違います'
+  [[ -f ${file} ]] || how='がありません'
+  warn "dotfiles-private のこの PC のホストの要約 (nix/hosts/${host}.md) ${how} → Claude Code の pjp-dotfiles-register-host skill で、要約と README を出し直す PR を作る" \
+    "出し直すコマンド: ${script_dir}/private-host.sh summaries --private <dotfiles-private の作業ツリー> (ホストの値・本体の段の割り当てが変わると古くなる)"
 }
 
 # switch した設定のモジュールの warnings (config.warnings) を、警告のまとめに足す。
