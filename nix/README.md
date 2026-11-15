@@ -2675,8 +2675,9 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 | 呼び出しごとの Windows のプロセス | 呼び出しのたびに Windows で新しい `op-reason.exe`（動かないときは `launcher.ps1` を新しい `powershell.exe` で）を起こし、その子として `op.exe` を起こす。承認はこのプロセスに付き、`op` が終わると `op.exe whoami` で確かめて `op.exe signout --all` で閉じる |
 | 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。決めるのは 1Password の画面だけ |
 | 記録 | `~/.local/state/op-reason/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` と `name=value` の値は伏せる。1 MiB で `log.1.jsonl` へ回す |
-| 1 つずつ | WSL と Windows の呼び出しを 1 つずつにし（WSL の flock と Windows の mutex `Local\op-reason`）、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒（`OPREASON_LOCK_WAIT`）で終わらなければ、待っている側は 75 で断る。`op … \| op …` は動く（後ろの op が、待つ前に前の op の出力を読み切る） |
+| 1 つずつ | WSL と Windows の呼び出しを 1 つずつにし（WSL の flock と Windows の mutex `Local\op-reason`）、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒（`OPREASON_LOCK_WAIT`）で終わらなければ、待っている側は 75 で断る。`op … \| op …` は動く（後ろの op が、待つ前に前の op の出力を読み切る。後ろの op が先に lock を取ったときは、前の op が lock を待たずに打ち、窓が 2 つ出る。そのわけは前の op の窓の注意の行に、`op-reason-log` では結果の `(lock skipped)`（日本語なら `(lock を待たず)`）に出る） |
 | 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
+| service account・Connect | 環境に `OP_SERVICE_ACCOUNT_TOKEN`（か `OP_CONNECT_HOST` と `OP_CONNECT_TOKEN` の両方）があれば、デスクトップアプリの承認を使わずに走る（窓も承認の画面も出ない）。token はその 1 回の Windows のプロセスにだけ渡す。理由は必須のまま |
 
 op の stdout（binary も）・stderr・終了コードは変えない。終了コードの 2・75・127 は op-reason が断ったもの（op-reason の README の
 「終了コード」）。
@@ -2717,7 +2718,9 @@ home.sessionVariables.OPREASON_RUNNER = "launcher";   # exe を試さず launche
 ### 守る決まり
 
 - **窓が出ていない 1Password CLI の承認の画面は拒否する。** 窓の無い画面は `op` を通らずに `op.exe` を直に打ったもの（道具の中
-  など）で、許可すると WSL のどの pane からも使える承認ができる
+  など）で、許可すると WSL のどの pane からも使える承認ができる。窓に「ほかにも op.exe が動いています」（英語では
+  `Other op.exe processes are running`）と出たときも、どれの承認か分からなければ拒否する。op どうしのパイプで前の op が lock を
+  待たずに打ったとき（その窓の注意の行に出る）は、窓が 2 つ出て承認の画面も 2 つ出うる。画面が窓より多ければ拒否する
 - **うっかり許可したら、WSL で `op.exe signout --all` を打つ**（`op` を通さずに直に。WSL 全体の承認が消える）。次に `op` を
   打ったときの見張りも消す
 - **`op` を止めた後（Claude の Bash の時間切れ・Ctrl+C）に窓の無い承認の画面が残ったら、拒否する。** 許可してしまったら、
