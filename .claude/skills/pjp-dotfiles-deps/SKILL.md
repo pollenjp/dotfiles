@@ -90,6 +90,7 @@ flake.lock を上げる `update` (`deps.toml` の `flake_lock_age`) の最後に
   (Claude はこの PC の Windows 側を書き換えない)。設定を読み書きできなければ、見送る (`references/windows-pins.md` の「直す所」)
 - OpenSSH には、入れずに試す手順がある (`win/README.md` の「OpenSSH の新しい版が出たとき」)。これも Windows の手元でしかできないので、
   上げた PR の本文に書いて人に任せる
+- 閉包スキャンは、flake.lock を上げる `update` が挟むゲート。別には流さない (落ちたら「人が決めること」)
 - PR を出すと、CI の `nix` (lint・lock-age・閉包スキャン) と、`win/` を触った PR なら `winget-versions`・`herdr-app-installers`
   (書いた版が winget にあるか・成果物の sha256) が走る。落ちたら直すか、直せなければ PR の本文に書く
 
