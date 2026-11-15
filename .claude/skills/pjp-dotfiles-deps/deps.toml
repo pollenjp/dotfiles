@@ -7,7 +7,8 @@ version = 1
 flake_lock_age = ["nix/scripts/flake-lock-age.sh"]
 
 # 見ないパス (前方一致。[[checks]] の when には効かない)
-# - nix/pkgs/upstream/: 期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う
+# - nix/pkgs/upstream/: 期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う。項目が無いあいだはディレクトリも
+#   無い (skip と下の [upstream_cleanup] は、次に足す例外のために残す)
 # - nix/pkgs/herdr-core/: 版は [[pins]] の windows (releases.json の herdr-app・herdr-core) で見る
 skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/"]
 
