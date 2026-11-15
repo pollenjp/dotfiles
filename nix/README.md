@@ -2685,7 +2685,7 @@ op の stdout（binary も）・stderr・終了コードは変えない。終了
 
 | もの | 中身 |
 | --- | --- |
-| `op`・`op-reason`・`op-reason-log`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具）。包みは次の 2 つを既定にする（`--set-default`。環境に値があればそちらが勝つ）: `OPREASON_EXE`（Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`）・`OPREASON_LANG=ja`（文・窓・記録の表を日本語に） |
+| `op`・`op-reason`・`op-reason-log`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具）。包みは `OPREASON_EXE` を既定にする（`--set-default`。環境に値があればそちらが勝つ）: Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`。表示の言語は決めない（[後述](#表示の言語)） |
 | Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
 | fish の補完 | `~/.config/fish/completions/op.fish`・`op-reason.fish`（op-reason が `--completion fish` で出した、op を呼ばない補完）。fish に同梱の op の補完は `op completion fish` を打ち、wrapper が理由なしとして断った文が端末に出るので、それより先に読まれる場所に置く |
 | `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか（`{"enable": <bool>}`）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
@@ -2693,6 +2693,13 @@ op の stdout（binary も）・stderr・終了コードは変えない。終了
 win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Windows の側を setup が入れない。そのマシンで `op` を使うなら、
 op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` を
 そこへ向ける）。入っていない間の `op` は 127 で断る（refused の `no-exe`）。
+
+### 表示の言語
+
+dotfiles は表示の言語を決めない（包みに `OPREASON_LANG` を置かない）。固定している op-reason 0.1.0 は、`OPREASON_LANG`、無ければ
+`LC_ALL`・`LC_MESSAGES`・`LANG` のうち最初の空でない値で言語を決める（`ja` で始まれば日本語、ほかは英語。どれも無ければ英語）。
+決まった言語は WSL の文・`op-reason-log` の表と、WSL から起こした窓・通知に効く（Windows の表示言語は見ない）。`LANG=C.UTF-8` の
+WSL では英語になる。
 
 ### Smart App Control と OPREASON_RUNNER
 
@@ -2730,21 +2737,22 @@ op-reason --version                        # op-reason 0.1.0 (Windows を起こ�
 op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
-op-reason-log                              # 上の呼び出しが「許可」で残る
+op-reason-log                              # 上の呼び出しが approved (日本語なら「許可」) で残る
 op.exe whoami                              # WSL の直の op.exe は account is not signed in のまま (承認が漏れていない)
 ```
 
 確かめに `op --reason … whoami` は使えない。`whoami` は承認を求めず、呼び出しごとのプロセスには承認が無いので、窓だけが出て
-`account is not signed in` で終わる。`op` が 127 で「op-reason.exe が見つかりません」と断るなら、Windows の側がまだ入っていない
+`account is not signed in` で終わる。`op` が 127 で `op-reason.exe was not found`（日本語なら「op-reason.exe が見つかりません」）と
+断るなら、Windows の側がまだ入っていない
 （`nix/scripts/bootstrap-windows-op-reason.sh --apply` か、Windows の PowerShell で `Install-OpReason`）。
 
 ### 気を付けること
 
-- 1Password の承認の画面は、出てから約 60 秒で時間切れになる。記録は「時間切れ」、拒否すると「拒否」になる（op の `[ERROR]` の文言で
+- 1Password の承認の画面は、出てから約 60 秒で時間切れになる。記録は時間切れ（timed out）、拒否すると拒否（denied）になる（op の `[ERROR]` の文言で
   見分ける）。1Password がロック中なら、同じ画面から Windows Hello で解く
 - Claude Code の Bash の時間切れや端末の Ctrl+C で `op` を止めると、窓が消えて 1Password の承認の画面だけが残ることがある（窓の
   無い画面なので拒否する）。止められる機会を減らすため、Claude の hook は op を打つ Bash の timeout を長く（600000）するよう促す。
-  止められた呼び出しは `op-reason-log` に「中断」で残る
+  止められた呼び出しは `op-reason-log` に中断（interrupted）で残る
 - 道具の中で `op.exe` を直に打つものは止めない（Claude の hook はコマンドの文字だけを見る）。上の「窓が出ていない承認は拒否」と
   見張りで守る
 - `signout --all` は CLI の session をすべて閉じる。同じときにほかの端末で手で打った `op.exe` の session も閉じる

@@ -12,14 +12,15 @@
 # この op があるかを ~/.local/state/dotfiles/claude-op-reason.json ({"enable": <bool>}) で知らせる。false でも必ず書く。
 # pjp-op-env・pjp-op-ref (home/modules/op-env.nix) と bootstrap-windows-op-reason.sh も、同じファイルを読む。
 #
-# op・op-reason・op-reason-log は、op-reason の実行ファイルを makeWrapper で包み、既定の環境変数を 2 つ足す (--set-default なので、
+# op・op-reason・op-reason-log は、op-reason の実行ファイルを makeWrapper で包み、既定の環境変数を 1 つ足す (--set-default なので、
 # 環境に値があればそちらが勝つ)。home.sessionVariables にしないのは、ログインし直すまで今の shell に入らず、switch の直後の op が
 # op-reason.exe を見つけられないため。呼び名で動きが変わる (op-reason-log は記録を見る道具) ので、包みごとに argv[0] を渡す。
 #
 #   OPREASON_EXE   Windows の op-reason.exe の WSL のパス。Install-OpReason.ps1 の既定の置き場所 (%LOCALAPPDATA%\Programs\op-reason)
 #                  を、dotfiles.wsl.windowsUserName (無ければ wsl.onePassword.windowsUserName) で組み立てる。Windows の PATH に
 #                  足さずに済み、WSL が Windows の PATH を読み直す (wsl --shutdown) のも待たない。launcher.ps1 はその隣から探す
-#   OPREASON_LANG  ja (文・窓・記録の表を日本語にする)
+#
+# 表示の言語 (OPREASON_LANG) は既定にしない。op-reason が LC_ALL・LC_MESSAGES・LANG から決める (nix/README.md の「表示の言語」)。
 #
 # fish の op と op-reason の補完 (op を呼ばない。pkgs/op-reason が出したもの) も、入るマシンにだけ ~/.config/fish/completions に置く。
 # fish に同梱の op の補完は、補完を初めて使うときに op completion fish を打ち、wrapper が理由なしとして断った文を端末に出す。fish は
@@ -62,10 +63,9 @@ let
       ''
         mkdir -p "$out/bin" "$out/share"
         for name in op op-reason op-reason-log; do
-          makeWrapper ${opReason}/bin/op-reason "$out/bin/$name" --argv0 "$name" \
-            --set-default OPREASON_LANG ja ${
-              lib.optionalString (exePath != null) "--set-default OPREASON_EXE ${lib.escapeShellArg exePath}"
-            }
+          makeWrapper ${opReason}/bin/op-reason "$out/bin/$name" --argv0 "$name" ${
+            lib.optionalString (exePath != null) "--set-default OPREASON_EXE ${lib.escapeShellArg exePath}"
+          }
         done
         ln -s ${opReason}/share/fish "$out/share/fish"
       '';

@@ -13,8 +13,8 @@
 #
 # 1 つの実行ファイルを呼び名で切り替える: op と op-reason は wrapper、op-reason-log は記録を見る道具。bin/op と bin/op-reason-log は
 # bin/op-reason への symlink。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
-# 出させて share/fish/vendor_completions.d に置く。マシンごとの既定 (Windows の op-reason.exe の場所 OPREASON_EXE と、言語の
-# OPREASON_LANG) は、ここには入れず home/modules/op-reason.nix が包む。
+# 出させて share/fish/vendor_completions.d に置く。マシンごとの既定 (Windows の op-reason.exe の場所 OPREASON_EXE) は、ここには
+# 入れず home/modules/op-reason.nix が包む。
 {
   lib,
   stdenvNoCC,

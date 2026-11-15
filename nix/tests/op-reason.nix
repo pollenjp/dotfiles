@@ -20,8 +20,8 @@
 #   ビルド時 (このランナーの system だけ)
 #     - 入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log は、この包みのもの。入らないマシンの profile に bin/op は無い
 #     - profile の op-reason --version は、呼ぶ側の PATH に何も無くても pkgs/op-reason の版を出す
-#     - profile の op は、op.exe が無ければ 127 で日本語 (OPREASON_LANG の既定 ja) の断りを出し、op-reason の記録
-#       (~/.local/state/op-reason/log.jsonl) に refused の no-op-exe を書く
+#     - profile の op は、op.exe が無ければ 127 で断り、op-reason の記録 (~/.local/state/op-reason/log.jsonl) に refused の
+#       no-op-exe を書く。包みは表示の言語を決めない (OPREASON_LANG も LANG なども無ければ英語、LANG=ja_JP.UTF-8 なら日本語)
 #     - op.exe があって op-reason.exe が無ければ、既定の OPREASON_EXE の場所を断りの文に出して 127 (no-exe)。環境に
 #       OPREASON_EXE があれば、そちらを探す (既定は --set-default)
 #     - profile の op-reason-log は、呼び名どおり記録を見る道具として動き、上の断りを表に出す
@@ -180,17 +180,24 @@ pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks
     fi
     echo "ok   profile の op-reason --version は、PATH が無くても pkgs/op-reason の版を出す"
 
-    # op.exe が無い: 127 で日本語の断り、記録に no-op-exe
+    # op.exe が無い: 127 で断り、記録に no-op-exe。包みは言語を決めない (LANG なども無ければ英語、LANG=ja_JP.UTF-8 なら日本語)
     home=$TMPDIR/h1
     mkdir -p "$home"
     rc=0
     env -i PATH=/nonexistent HOME="$home" "$profile/bin/op" --reason "試す" item get x >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
-    if [[ $rc != 127 ]] || ! grep -q 'op.exe が見つかりません' "$TMPDIR/err" \
+    if [[ $rc != 127 ]] || ! grep -q 'op.exe was not found' "$TMPDIR/err" \
       || ! grep -q '"why":"no-op-exe"' "$home/.local/state/op-reason/log.jsonl"; then
-      echo "op-reason-state: op.exe の無い op が 127 で日本語の断りを出して記録に書かない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      echo "op-reason-state: op.exe の無い op が 127 で英語の断りを出して記録に書かない (rc=$rc): $(cat "$TMPDIR/err")" >&2
       exit 1
     fi
-    echo "ok   profile の op は、op.exe が無ければ 127 で日本語の断りを出し、記録に no-op-exe を書く"
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" LANG=ja_JP.UTF-8 "$profile/bin/op" --reason "試す" item get x \
+      >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 127 ]] || ! grep -q 'op.exe が見つかりません' "$TMPDIR/err"; then
+      echo "op-reason-state: LANG=ja_JP.UTF-8 の op が 127 で日本語の断りを出さない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    echo "ok   profile の op は、op.exe が無ければ 127 で断り、記録に no-op-exe を書く。言語は LANG に従う (無ければ英語)"
 
     # op.exe はあるが op-reason.exe が無い: 既定の OPREASON_EXE の場所を断りの文に出す。環境の OPREASON_EXE が勝つ
     touch "$TMPDIR/op.exe"
@@ -212,7 +219,7 @@ pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks
     echo "ok   op-reason.exe が無ければ既定の OPREASON_EXE の場所を出して 127 (no-exe)。環境の OPREASON_EXE が勝つ"
 
     if ! env -i PATH=/nonexistent HOME="$home" "$profile/bin/op-reason-log" --all >"$TMPDIR/log" 2>&1 \
-      || ! grep -q 'op-reason.exe が無い' "$TMPDIR/log"; then
+      || ! grep -qF 'no op-reason.exe' "$TMPDIR/log"; then
       echo "op-reason-state: op-reason-log が記録の表を出さない: $(cat "$TMPDIR/log")" >&2
       exit 1
     fi
