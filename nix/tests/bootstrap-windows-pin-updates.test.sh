@@ -17,15 +17,27 @@
 #     true なら確かめる (group.json が無い前の世代も確かめる)
 #   - gh が無い・ログインしていないときは、確かめられないと 1 行出して exit 0 (まとめにも残す)
 #   - 見送っていない新しい版があれば、名前ごとに「<題>: <固定した版> → <新しい版>」(4 つ以上は頭と末尾と個数) を出し、
-#     警告のまとめに skill (pjp-dotfiles-win-pin-update) の名前を書いた見出しと続きの行で残す。出た日は引かない
-#     (--dates を付けない)。herdr-app と herdr-core は 1 回の呼び出しで読む
+#     警告のまとめに頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を書いた見出しと続きの行で残す。
+#     出た日は引かない (--dates を付けない)。herdr-app と herdr-core は 1 回の呼び出しで読む
 #   - 新しい版が無い・見送った版だけなら「無い」の 1 行で、まとめには残さない
 #   - 確かめられない名前 (口が 2 で終わる・JSON でない) はわけを添えて 1 行出し、まとめにも残す。ほかの名前は知らせる。
 #     どれも exit 0
 #   - --candidates は windows-files.json によらず、出た日つき (--dates) で呼び、新しい版・猶予ごとの上げ先 (猶予以上たった、
 #     見送っていない版のうち一番新しいもの。出た日の分からない版は選ばない)・上げ方を出す。新しい版の無い名前は最後に
 #     1 行でまとめる。--grace で日数を変えられる。確かめられない名前があれば、ほかを出したうえで exit 2
-#   - 知らない名前・--candidates の無い名前・読めない --grace・知らない引数は exit 2
+#   - --list --json は gh が無くても動き、check の口を --json --offline で呼ぶ (ネットワークを使わない。--dates も付けない)。
+#     名前ごとの name・title・files・pinned・winget_id・skip_file・error を {"version": 1, "items": […]} で出して exit 0
+#     (windows-files.json は見ない)。名前を渡せば、その名前だけを出す
+#   - --list --json で固定した版を読めない名前は、error にわけを書き (title は名前・files は []・pinned は ""・winget_id と
+#     skip_file は null)、ほかの名前は出したうえで exit 2
+#   - --candidates --json は、--dates で読んだ新しい版を candidates に古い順に入れ (age は age_days に。url の無い版は
+#     winget-pkgs の manifest のディレクトリ)、猶予ごとの上げ先を targets (日数の文字列から版か null) に入れる。見送った版も
+#     理由つきで入れて上げ先にはせず、出た日の分からない版は published・age_days を null にして上げ先にしない。--grace の
+#     日数は数に読み直して key にする (07 は 7)。winget で入れないもの (herdr-app・herdr-core) は winget_id が null
+#   - --candidates --json で確かめられない名前 (口が落ちる・出た日を確かめられない・gh が無い) は、error にわけを書いて
+#     candidates を []・targets を全部 null にし、ほかの名前は出したうえで exit 2。gh が無ければ新しい版の口は呼ばない
+#   - 知らない名前・--candidates か --list の無い名前・読めない --grace・知らない引数・--json の無い --list・--candidates か
+#     --list の無い --json・--candidates と --list の両方は exit 2 (口は呼ばない)
 #
 # ## 本物の口と gh を見せない
 #
@@ -69,22 +81,31 @@ for c in env jq grep sed cat cp head tail mktemp rm dirname timeout tr sort mkdi
 done
 
 # 新しい版の JSON (check-winget-version.sh --json と同じ形)。$1: name、$2: title、$3: 固定した版、残り: 新しい版
-# 「版|見送った理由|出た日|日数」(空の欄は null)
+# 「版|見送った理由|出た日|日数[|nourl]」(空の欄は null。5 つ目に nourl と書くと url を null にする)。packageId は名前ごとの
+# 本物の ID (herdr-app・herdr-core は null)
 pin_json() {
-  local name=$1 title=$2 pinned=$3 e v reason day age items='[]'
+  local name=$1 title=$2 pinned=$3 e v reason day age nourl items='[]' id=''
   shift 3
+  case ${name} in
+    openssh) id=Microsoft.OpenSSH.Preview ;;
+    herdr) id=Herdr.Herdr ;;
+    google-japanese-input) id=Google.JapaneseIME ;;
+    ntn) id=Notion.ntn ;;
+    claude-code) id=Anthropic.ClaudeCode ;;
+  esac
   for e in "$@"; do
-    IFS='|' read -r v reason day age <<<"${e}"
-    items=$(jq -c --arg v "${v}" --arg reason "${reason}" --arg day "${day}" --arg age "${age}" '. + [{
+    IFS='|' read -r v reason day age nourl <<<"${e}"
+    items=$(jq -c --arg v "${v}" --arg reason "${reason}" --arg day "${day}" --arg age "${age}" --arg nourl "${nourl}" '. + [{
       version: $v,
       skipped: (if $reason == "" then null else $reason end),
       published: (if $day == "" then null else $day end),
       age: (if $age == "" then null else ($age | tonumber) end),
-      url: ("https://example.invalid/" + $v)
+      url: (if $nourl == "nourl" then null else "https://example.invalid/" + $v end)
     }]' <<<"${items}")
   done
-  jq -cn --arg name "${name}" --arg title "${title}" --arg pinned "${pinned}" --argjson newer "${items}" '{
-    name: $name, title: $title, packageId: null, pinned: $pinned, pinnedFile: ("win/" + $name + "/Install-X.ps1"),
+  jq -cn --arg name "${name}" --arg title "${title}" --arg pinned "${pinned}" --arg id "${id}" --argjson newer "${items}" '{
+    name: $name, title: $title, packageId: (if $id == "" then null else $id end), pinned: $pinned,
+    pinnedFile: ("win/" + $name + "/Install-X.ps1"),
     skippedFile: ("win/" + $name + "/skipped-versions.txt"), pinnedListed: true, readmeSection: ($title + " の新しい版が出たとき"),
     datesFrom: "github", datesChecked: true, datesProblem: null, newer: $newer
   }'
@@ -92,10 +113,11 @@ pin_json() {
 
 # 1 ケースぶんの場所を作る。$1: 名前、$2: windows-files.json の中身 (空なら作らない)。
 # 写した script と偽の口は <case>/scripts、偽の gh は <case>/bin、fixture は <case>/json/<name>.json (無ければ新しい版なし)・
-# <case>/rc/<name> (口の終了コード)・<case>/err/<name> (口の stderr)
+# <case>/rc/<name> (口の終了コード)・<case>/err/<name> (口の stderr)。--offline (固定した版だけ) の口は json/<name>.json から
+# 引かないものを null にして返し、<case>/rc-local/<name>・<case>/err-local/<name> で落とせる
 new_case() {
   local d="${work}/$1" n
-  mkdir -p "${d}/home/.local/state/dotfiles" "${d}/scripts" "${d}/bin" "${d}/json" "${d}/rc" "${d}/err"
+  mkdir -p "${d}/home/.local/state/dotfiles" "${d}/scripts" "${d}/bin" "${d}/json" "${d}/rc" "${d}/err" "${d}/rc-local" "${d}/err-local"
   if [[ -n $2 ]]; then
     printf '%s\n' "$2" >"${d}/home/.local/state/dotfiles/windows-files.json"
   fi
@@ -105,12 +127,21 @@ new_case() {
   done
   pin_json herdr-app "Windows の herdr-app" 0.1.0 >"${d}/json/herdr-app.json"
   pin_json herdr-core herdr-core 0.1.0 >"${d}/json/herdr-core.json"
-  # 偽の check-winget-version.sh。引数を記録し、名前 (最後の引数) の fixture を返す
+  # 偽の check-winget-version.sh。引数を記録し、名前 (最後の引数) の fixture を返す。--offline なら固定した版だけの形にする
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
 printf 'winget %s\n' "$*" >>"${FAKE_DIR}/calls"
 name=${*: -1}
+if [[ " $* " == *' --offline '* ]]; then
+  [[ ! -f ${FAKE_DIR}/err-local/${name} ]] || cat "${FAKE_DIR}/err-local/${name}" >&2
+  rc=0
+  [[ ! -f ${FAKE_DIR}/rc-local/${name} ]] || rc=$(<"${FAKE_DIR}/rc-local/${name}")
+  if [[ ${rc} == 0 ]]; then
+    jq -c '.newer = null | .pinnedListed = null | .datesChecked = false | .datesProblem = null' "${FAKE_DIR}/json/${name}.json"
+  fi
+  exit "${rc}"
+fi
 [[ ! -f ${FAKE_DIR}/err/${name} ]] || cat "${FAKE_DIR}/err/${name}" >&2
 rc=0
 [[ ! -f ${FAKE_DIR}/rc/${name} ]] || rc=$(<"${FAKE_DIR}/rc/${name}")
@@ -120,11 +151,21 @@ fi
 exit "${rc}"
 EOF
   } >"${d}/scripts/check-winget-version.sh"
-  # 偽の check-herdr-app-version.sh。引数を記録し、app と core の 2 行を返す
+  # 偽の check-herdr-app-version.sh。引数を記録し、app と core の 2 行を返す。--offline なら固定した版だけの形にする
   {
     printf '#!%s\n' "${BASH}"
     cat <<'EOF'
 printf 'herdr-app %s\n' "$*" >>"${FAKE_DIR}/calls"
+if [[ " $* " == *' --offline '* ]]; then
+  [[ ! -f ${FAKE_DIR}/err-local/herdr-app ]] || cat "${FAKE_DIR}/err-local/herdr-app" >&2
+  rc=0
+  [[ ! -f ${FAKE_DIR}/rc-local/herdr-app ]] || rc=$(<"${FAKE_DIR}/rc-local/herdr-app")
+  if [[ ${rc} == 0 ]]; then
+    jq -c '.newer = null | .pinnedListed = null | .datesChecked = false | .datesProblem = null' \
+      "${FAKE_DIR}/json/herdr-app.json" "${FAKE_DIR}/json/herdr-core.json"
+  fi
+  exit "${rc}"
+fi
 [[ ! -f ${FAKE_DIR}/err/herdr-app ]] || cat "${FAKE_DIR}/err/herdr-app" >&2
 rc=0
 [[ ! -f ${FAKE_DIR}/rc/herdr-app ]] || rc=$(<"${FAKE_DIR}/rc/herdr-app")
@@ -183,7 +224,7 @@ state_on='{"claudeCode":true,"enable":true,"ntn":true,"typeClipboard":false,"ver
 state_off='{"claudeCode":false,"enable":false,"ntn":false,"typeClipboard":false,"version":1,"windowsHome":null}'
 state_no_extra='{"claudeCode":false,"enable":true,"ntn":false,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/u"}'
 state_absent='{"enable":true,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/u"}'
-heading='Windows に固定した版より新しい版があります → Claude Code の pjp-dotfiles-win-pin-update skill で、上げるか (どの版か) を決める'
+heading='Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める'
 
 echo "== bootstrap-windows-pin-updates.sh: ${script}"
 
@@ -224,7 +265,7 @@ if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F "${heading}" \
   && [[ $(head -n 1 "${d}/warnings") == "${heading}" ]] \
   && grep -qxF '   Windows の herdr: 0.9.5 → 0.9.6' "${d}/warnings" \
   && ! called "${d}" -F -- '--dates' && [[ $(ncalls "${d}" herdr-app) == 1 && $(ncalls "${d}" winget) == 5 ]]; then
-  ok "新しい版があれば名前ごとに 1 行出し、まとめに skill の名前の見出しで残す (出た日は引かず、herdr-app と herdr-core は 1 回で読む)"
+  ok "新しい版があれば名前ごとに 1 行出し、まとめに頼み方の見出しで残す (出た日は引かず、herdr-app と herdr-core は 1 回で読む)"
 else
   ng "新しい版がある" "rc=$(rc "${d}") calls=$(cat "${d}/calls") warnings=$(cat "${d}/warnings" 2>/dev/null) $(outerr "${d}")"
 fi
@@ -341,6 +382,102 @@ if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 && $(rc "${d3}") == 2 && $(rc "${d
   ok "知らない名前・--candidates の無い名前・読めない --grace・知らない引数は exit 2 (口は呼ばない)"
 else
   ng "引数の誤り" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}")/$(rc "${d4}") $(outerr "${d}")"
+fi
+
+# 11. --list --json: gh が無くても、check の口を --json --offline で呼んで固定した版を出す (windows-files.json は見ない)。
+#     名前を渡せば、その名前だけ
+d=$(new_case t11 "")
+run "${d}" 1 --list --json
+d2=$(new_case t11b "${state_off}")
+run "${d2}" 1 --list --json ntn herdr-core
+if [[ $(rc "${d}") == 0 ]] && jq -e '.version == 1 and ([.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "herdr-app", "herdr-core"])
+    and (.items[] | select(.name == "ntn") | . == {name: "ntn", title: "Windows の ntn", files: ["win/ntn/Install-X.ps1"],
+      pinned: "1.0.0", winget_id: "Notion.ntn", skip_file: "win/ntn/skipped-versions.txt", error: null})
+    and (.items[] | select(.name == "herdr-app") | .winget_id == null and .files == ["win/herdr-app/Install-X.ps1"] and .pinned == "0.1.0")
+    and ([.items[] | has("candidates") or has("targets")] | any | not)' "${d}/out" >/dev/null \
+  && [[ $(ncalls "${d}" winget) == 5 && $(ncalls "${d}" herdr-app) == 1 ]] && ! called "${d}" -vF -- '--offline' \
+  && ! called "${d}" -F -- '--dates' && ! called "${d}" '^gh ' \
+  && [[ $(rc "${d2}") == 0 ]] && jq -e '[.items[].name] == ["ntn", "herdr-core"]' "${d2}/out" >/dev/null; then
+  ok "--list --json は gh が無くても --offline の口で固定した版を出し (windows-files.json は見ない)、名前を渡せばその名前だけ"
+else
+  ng "--list --json" "rc=$(rc "${d}")/$(rc "${d2}") calls=$(cat "${d}/calls" 2>/dev/null) $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
+# 12. --list --json で固定した版を読めない名前: error にわけを書き、ほかの名前は出して exit 2
+d=$(new_case t12 "")
+echo 2 >"${d}/rc-local/ntn"
+printf "!! 固定した版が読めません: win/ntn/Install-Ntn.ps1 に [string]\$Version = '<版>' の行がありません。\n" >"${d}/err-local/ntn"
+echo 2 >"${d}/rc-local/herdr-app"
+run "${d}" 1 --list --json
+if [[ $(rc "${d}") == 2 ]] && jq -e '
+    (.items[] | select(.name == "ntn") | . == {name: "ntn", title: "ntn", files: [], pinned: "", winget_id: null, skip_file: null,
+      error: "固定した版が読めません: win/ntn/Install-Ntn.ps1 に [string]$Version = '"'"'<版>'"'"' の行がありません。"})
+    and (.items[] | select(.name == "herdr-core") | .error == "終了コード 2" and .pinned == "")
+    and (.items[] | select(.name == "herdr") | .error == null and .pinned == "1.0.0")' "${d}/out" >/dev/null; then
+  ok "--list --json で固定した版を読めない名前は error にわけを書き (ほかの欄は空に)、ほかの名前は出して exit 2"
+else
+  ng "--list --json の読めない名前" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# 13. --candidates --json: 新しい版を candidates に、猶予ごとの上げ先を targets に入れる。見送った版・出た日の分からない版は
+#     上げ先にしない。url の無い版は winget-pkgs の manifest のディレクトリ。--grace の 07 は 7 の key になる
+d=$(new_case t13 "")
+pin_json claude-code 'Windows の Claude Code' 2.1.318 '2.1.321||2026-11-04|10' '2.1.322|速すぎた|2026-11-08|6' \
+  '2.1.323||2026-11-09|5' '2.1.325||2026-11-12|2' '2.1.330||||nourl' >"${d}/json/claude-code.json"
+pin_json herdr-core herdr-core 0.1.18 '0.1.19||2026-11-08|6' >"${d}/json/herdr-core.json"
+run "${d}" 0 --candidates --json --grace 1,3,07
+if [[ $(rc "${d}") == 0 ]] && jq -e '
+    (.items[] | select(.name == "claude-code")
+      | .winget_id == "Anthropic.ClaudeCode" and .pinned == "2.1.318" and .error == null
+        and ([.candidates[].version] == ["2.1.321", "2.1.322", "2.1.323", "2.1.325", "2.1.330"])
+        and .candidates[0] == {version: "2.1.321", published: "2026-11-04", age_days: 10, url: "https://example.invalid/2.1.321", skipped: null}
+        and .candidates[1].skipped == "速すぎた"
+        and .candidates[4] == {version: "2.1.330", published: null, age_days: null,
+          url: "https://github.com/microsoft/winget-pkgs/tree/master/manifests/a/Anthropic/ClaudeCode/2.1.330", skipped: null}
+        and .targets == {"1": "2.1.325", "3": "2.1.323", "7": "2.1.321"})
+    and (.items[] | select(.name == "herdr-core") | .winget_id == null and .targets == {"1": "0.1.19", "3": "0.1.19", "7": null})
+    and (.items[] | select(.name == "ntn") | .candidates == [] and .targets == {"1": null, "3": null, "7": null})' "${d}/out" >/dev/null \
+  && [[ $(grep -c -- '--dates' "${d}/calls") == 6 ]]; then
+  ok "--candidates --json は candidates (age_days・url の埋め) と targets を出し、見送った版・出た日の分からない版を上げ先にしない"
+else
+  ng "--candidates --json" "rc=$(rc "${d}") calls=$(cat "${d}/calls" 2>/dev/null) $(outerr "${d}")"
+fi
+
+# 14. --candidates --json で確かめられない名前: 口が落ちる・出た日を確かめられない・gh が無い。error にわけを書き、candidates を
+#     []・targets を全部 null にして、ほかの名前は出したうえで exit 2
+d=$(new_case t14 "")
+echo 2 >"${d}/rc/openssh"
+printf '!! winget-pkgs の manifests/m/Microsoft/OpenSSH/Preview を読めませんでした (gh api …):\n   HTTP 403: API rate limit exceeded\n' >"${d}/err/openssh"
+pin_json ntn 'Windows の ntn' 0.23.28 '0.23.29|||' | jq -c '.datesChecked = false | .datesProblem = "winget-pkgs の commit の一覧が取れない (HTTP 502)"' >"${d}/json/ntn.json"
+pin_json herdr 'Windows の herdr' 0.9.5 '0.9.6||2026-11-01|13' >"${d}/json/herdr.json"
+run "${d}" 0 --candidates --json
+d2=$(new_case t14b "")
+run "${d2}" 1 --candidates --json herdr herdr-app
+if [[ $(rc "${d}") == 2 ]] && jq -e '
+    (.items[] | select(.name == "openssh") | .error == "winget-pkgs の manifests/m/Microsoft/OpenSSH/Preview を読めませんでした (gh api …): / HTTP 403: API rate limit exceeded"
+      and .candidates == [] and .targets == {"1": null, "3": null, "7": null} and .pinned == "1.0.0" and .winget_id == "Microsoft.OpenSSH.Preview")
+    and (.items[] | select(.name == "ntn") | .error == "出た日を確かめられなかった: winget-pkgs の commit の一覧が取れない (HTTP 502)" and .candidates == [])
+    and (.items[] | select(.name == "herdr") | .error == null and .targets["7"] == "0.9.6")' "${d}/out" >/dev/null \
+  && [[ $(rc "${d2}") == 2 ]] && jq -e '[.items[] | .error | startswith("gh が見つからない")] == [true, true]
+    and ([.items[].name] == ["herdr", "herdr-app"]) and (.items[0].pinned == "1.0.0")' "${d2}/out" >/dev/null \
+  && ! called "${d2}" -- '--dates'; then
+  ok "--candidates --json で確かめられない名前は error にわけを書き (candidates は []・targets は null)、ほかを出して exit 2"
+else
+  ng "--candidates --json の失敗" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}") calls=$(cat "${d2}/calls" 2>/dev/null)"
+fi
+
+# 15. JSON の口の引数の誤り: --json の無い --list・--candidates か --list の無い --json・--candidates と --list の両方は exit 2
+d=$(new_case t15 "")
+run "${d}" 0 --list
+d2=$(new_case t15b "")
+run "${d2}" 0 --json
+d3=$(new_case t15c "")
+run "${d3}" 0 --candidates --list --json
+if [[ $(rc "${d}") == 2 && $(rc "${d2}") == 2 && $(rc "${d3}") == 2 ]] \
+  && [[ ! -s ${d}/calls && ! -s ${d2}/calls && ! -s ${d3}/calls ]] && seen "${d}" -F -- '--list は --json と一緒に'; then
+  ok "--json の無い --list・--candidates か --list の無い --json・--candidates と --list の両方は exit 2 (口は呼ばない)"
+else
+  ng "JSON の口の引数の誤り" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}") $(outerr "${d}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

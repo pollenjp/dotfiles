@@ -75,7 +75,6 @@
               repo = "drawio-mcp";
               # タグが打たれていないので rev で固定する。
               # mcp-tool-server/package.json の version が 1.10.0 のコミット。
-              # release-age-exception: until=2026-11-02 ids=GHSA-27r3-jxmh-p828,GHSA-mrhx-c7xc-m3w5 fixed=bea4c7b4c19f
               rev = "bea4c7b4c19fe65c8256c72e5b939b3ac87236bd";
               hash = "sha256-gCPat5nCcZVh3LTfFTtiP6tNysRWIKJ6/Jc0muUjvCM=";
             };

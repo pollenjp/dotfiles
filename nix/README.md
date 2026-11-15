@@ -374,7 +374,7 @@ Hydra の遅れ（実測 1〜2 日）の分だけ判定は緩い側に出る。�
 | --- | --- |
 | 全体 | `./nix/scripts/flake-lock-age.sh update`（閉包のスキャンも挟まる）→ `nix/flake.lock` と `release-age.nix` を commit。CI の `lock-age` は例外の分だけ新しい pin を通す |
 | 一部 (nixpkgs から) | `./nix/scripts/flake-lock-age.sh update --input nixpkgs-exceptions`（普段の pin は動かさない。全部を上げてよければ素の `update`）→ commit |
-| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。実例は `pkgs/upstream/mise.nix`）→ commit。`flake.lock` は変わらない |
+| 一部 (upstream から) | `pkgs/upstream/<package>.nix` を書く（release の配布物を `fetchurl` と sha256 で固定する。形は `pkgs/ntn/default.nix` と同じ）→ commit。`flake.lock` は変わらない |
 
 - **一部の例外（nixpkgs から・upstream から）に書けるのは、ほかの package から使われないアプリだけ**で、top-level の名前
   （`pkgs.<名前>`）に限る。home の pkgs に overlay で当てるので、`programs.<名前>` や `home.packages` を書き換えずに
@@ -811,7 +811,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める skill (`pjp-dotfiles-win-pin-update`) の名前を警告のまとめに残す。Windows には触らない。確かめられなくても exit 1 にしない |
+| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
 | `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -932,7 +932,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.10.2 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-ntn.sh` | `bootstrap-windows-ntn` | Windows の ntn (Notion の CLI) を固定した版に揃える（`wsl.windowsFiles.ntn.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#ntn)） |
-| 6.11.2 | `./nix/scripts/bootstrap-windows-pin-updates.sh` | `bootstrap-windows-pin-updates` | Windows に固定した版より新しい版があれば短く知らせる（上げるかは Claude Code の `pjp-dotfiles-win-pin-update` skill で決める。[`win/README.md`](../win/README.md#固定した版より新しい版の知らせ)） |
+| 6.11.2 | `./nix/scripts/bootstrap-windows-pin-updates.sh` | `bootstrap-windows-pin-updates` | Windows に固定した版より新しい版があれば短く知らせる（上げるかは Claude Code に「dotfiles の Windows に固定した版を上げて」と頼んで決める。[`win/README.md`](../win/README.md#固定した版より新しい版の知らせ)） |
 | 6.11.3 | `./nix/scripts/bootstrap-windows-type-clipboard.sh` | `bootstrap-windows-type-clipboard` | Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる（`wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。無ければ GitHub の Release から入れる。入れ替えはしない。[`win/README.md`](../win/README.md#type-clipboard)） |
 | 6.11.4 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.11.5 | `./nix/scripts/bootstrap-windows-international.sh` | `bootstrap-windows-international` | Windows の日付と時刻の形式 (短い日付・長い時刻・短い時刻) のうち、dotfiles が持つ値だけを SetLocaleInfoW で書く。形式を設定画面で手で変えてあると、衝突で止まる（[`win/README.md`](../win/README.md#日付と時刻の形式)） |
@@ -3367,6 +3367,10 @@ skill の `metadata` も見る（map であること・`pjp-pack` が pack の�
 読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
 観点は `claude-skills` の `scripts/lint.sh` に揃えてある。
 
+repo の root の `.claude/skills/<名前>/SKILL.md`（配置しない。この repo の session だけが読む skill。今は依存の更新の拡張
+`pjp-dotfiles-deps`）も同じ観点で見る。こちらの `metadata` は、拡張の印 `pjp-extends` が `deps` で、`pjp-pack` と同じ 1 行の
+形であることと、`pjp-pack` が無いことを見る（`nix/files/claude/skills/README.md` の「repo の `.claude/skills/` との違い」）。
+
 ### なぜディレクトリごとではなく中身を 1 つずつ symlink するのか
 
 `~/.claude/` 配下は **Claude Code 自身が書き換える**。`skills/` には `manifest.json`
@@ -5177,7 +5181,7 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 
 Notion の CLI `ntn` は nixpkgs に無いので、公式の配布物（`https://ntn.dev/releases/v<版>/ntn-<target>.tar.gz`。Linux は
 musl の静的な binary、macOS は署名済みの binary）を、版と system ごとの sha256（隣の `.sha256` の値）で固定して入れる
-（`pkgs/ntn/`。形は `pkgs/upstream/mise.nix` と同じ）。`home/modules/packages.nix` が全ホストに入れ、bash・fish・zsh の
+（`pkgs/ntn/`）。`home/modules/packages.nix` が全ホストに入れ、bash・fish・zsh の
 補完も入る。pjp-dev-tracker など Notion へ書く skill と、見回り役（[前述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)）が使う。
 token の置き場（keychain かファイルか）は[前述](#ntn-notion-cli-の-token-をファイルに置く-keyring)。switch せずに試すなら:
 

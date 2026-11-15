@@ -154,12 +154,12 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 ## 固定した版より新しい版の知らせ
 
 Windows に固定した版で入れているものに新しい版が出たら、`setup --update` の手順 `nix/scripts/bootstrap-windows-pin-updates.sh`
-(order 97) が、その旨だけを短く出す。Claude Code の中で `! ~/dotfiles/setup --self-update --update` を流すと、Claude Code が最後の
-「警告のまとめ」の行を拾い、skill `pjp-dotfiles-win-pin-update` の手順で、猶予ごと (1 日・3 日・7 日) の上げ先の候補を出して、
-上げるか (どの版か・上げないか) を聞く。選んだ版で PR を作るところまでが skill の手順 ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。
+(order 97) が、その旨だけを短く出す。上げるかは、Claude Code に「dotfiles の Windows に固定した版を上げて」と頼んで決める。
+依存の更新の skill がこの repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) を読み、猶予ごと (1 日・3 日・7 日) の上げ先の候補を
+出して、上げるか (どの版か・上げないか) を聞き、選んだ版で PR を作る ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)・[ADR 056](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/056_dep_update_repo_extension_20261115T100845JST/README.md))。
 
 ```text
-⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code の pjp-dotfiles-win-pin-update skill で、上げるか (どの版か) を決める
+⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める
     Windows の ntn: 0.23.28 → 0.23.29・0.23.30
     Windows の herdr-app: 0.1.13 → 0.1.14・0.1.15
 ```
@@ -176,14 +176,15 @@ Windows に固定した版で入れているものに新しい版が出たら、
 - setup では出た日を引かない (GitHub API を名前ごとに 1〜2 回。合わせて数秒)。gh のログインが要る
 - 確かめられないとき (gh が無い・ログインしていない・ネットに出られない・API の制限) は、setup を止めずに、確かめられなかった名前と
   わけを 1 行出す (警告のまとめにも載る)
-- 猶予ごとの上げ先の候補は、skill が次を打って出す (手で打ってもよい):
+- 猶予ごとの上げ先の候補は、次で出す (手で打ってよい):
 
   ```sh
   nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
   ```
 
   名前ごとに、新しい版 (出た日・何日前・URL、見送った版は理由)・猶予ごとの上げ先 (その日数以上たった、見送っていない新しい版の
-  うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す
+  うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す。依存の更新の skill は、同じものを
+  JSON で読む (`--candidates --json`。固定した版だけなら、ネットワークを使わない `--list --json`。形は script の先頭)
 - 見送ると、今出ている新しい版は次から setup も CI も知らせない (もっと新しい版が出たらまた知らせる)
 - 対象の外: type-clipboard (自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。[後述](#type-clipboard-の新しい版を出したとき))
   と PowerToys (版を固定しない)
@@ -496,7 +497,7 @@ app と core は自分で新しい版に上がる。上がる先を dotfiles が
 | `nix/scripts/check-herdr-app-version.sh` (WSL・CI) | 固定した版の成果物 (core は Windows と Linux の 2 つ) が変わっていないかと、上げられる新しい版を確かめる ([後述](#固定した版を上げる)) |
 | `nix/scripts/check-herdr-app-installers.sh` (WSL・CI) | 公式の install.ps1 が、写したときから変わっていないかを確かめる ([後述](#公式の-installps1-が変わったとき)) |
 
-固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.13・core 0.1.18) の 1 か所で決める。app の版と windows-x86_64 の sha256、
+固定した版は `nix/pkgs/herdr-core/releases.json` (今は app 0.1.15・core 0.1.21) の 1 か所で決める。app の版と windows-x86_64 の sha256、
 core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持ち、Windows へは manifest が `herdr-releases.json` として
 `Install-HerdrApp.ps1` の隣に配る。Linux のホストの herdr-core (home-manager) も同じ版で入る ([後述](#server-側の-herdr-core-hc))。公開から 7 日たった
 版を、PR で上げる。
@@ -712,7 +713,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
 WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼んで 1Password の agent に
 つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
-`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.0.0.0`) の 1 か所だけに書く。
+`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.4.0.0`) の 1 か所だけに書く。
 
 | 打つもの | すること |
 | --- | --- |
@@ -1728,7 +1729,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ## ntn
 
 `ntn/Install-Ntn.ps1` は、Notion の CLI の ntn を winget の `Notion.ntn` (zip の中の portable。管理者は要らない。x64 だけ) で入れ、
-版を `-Version` の既定値 (今は `0.23.28`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
+版を `-Version` の既定値 (今は `0.23.30`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。公式の手順も、Windows では winget だけ
 (install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 

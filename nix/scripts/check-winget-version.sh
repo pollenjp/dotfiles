@@ -6,6 +6,7 @@
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 #   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
+#   check-winget-version.sh --json --offline <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 #
 #   名前                    固定した版を書く ps1 (repo の win/ から)                  出た日 (猶予を数える起点)
 #   openssh                 openssh/Install-OpenSSH.ps1                              GitHub (PowerShell/Win32-OpenSSH) の release
@@ -80,6 +81,10 @@
 # (winget-pkgs に載った日を引くのは、見送っていない版だけ)。出た日の一覧が取れなければ datesProblem にわけを入れて
 # exit 0。パッケージが winget-pkgs に無い・確かめられないときは、何も出さずに exit 2。上の出力 (--json の無いとき) は変えない。
 #
+# --offline (--json と一緒に使う) は、ネットワークを使わずに repo の中のファイル (ps1 と見送りの一覧) だけを読み、同じ形の
+# JSON を出す。引かないものは pinnedListed・newer が null、datesChecked が false。gh が無くても動く。ps1 か見送りの一覧が
+# 読めなければ、何も出さずに exit 2。bootstrap-windows-pin-updates.sh --list --json (固定した版の一覧) に使う。
+#
 # 確かめられなかったとき (ps1 が読めない・見送りの一覧が壊れている・API の失敗・gh が無い・猶予の日数が
 # 読めない) は exit 2。揃っている扱いにはしない。出た日を引く一覧 (GitHub の release・winget-pkgs の commit)
 # だけが取れないときも、新しい版が猶予の中かを決められないので exit 2。知らせることもあれば exit 1 を優先する。
@@ -114,11 +119,13 @@ Windows で winget の版を固定しているものが、winget の最新に追
 使い方:
   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
+  check-winget-version.sh --json --offline <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
   名前: openssh・herdr・google-japanese-input・ntn・claude-code
   ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。
 
-  --json:  固定した版より新しい winget の版を JSON で出す (知らせるかは決めない。--dates で出た日も引く)
+  --json:     固定した版より新しい winget の版を JSON で出す (知らせるかは決めない。--dates で出た日も引く)
+  --offline:  --json で、ネットワークを使わずに固定した版とパッケージ ID だけを出す (newer は null)
 
 終了コード: 0 = 知らせることは無い (--json は出せた)、1 = 知らせることがある、2 = 確かめられなかった
 EOS
@@ -127,6 +134,7 @@ EOS
 args=()
 json=0
 with_dates=0
+offline=0
 for arg in "$@"; do
   case ${arg} in
     -h | --help)
@@ -135,6 +143,7 @@ for arg in "$@"; do
       ;;
     --json) json=1 ;;
     --dates) with_dates=1 ;;
+    --offline) offline=1 ;;
     -*)
       echo "不明な引数です: ${arg}" >&2
       usage >&2
@@ -149,6 +158,16 @@ if ((${#args[@]} < 1 || ${#args[@]} > 3)); then
 fi
 if ((with_dates && ! json)); then
   echo "--dates は --json と一緒に使います。" >&2
+  usage >&2
+  exit 2
+fi
+if ((offline && ! json)); then
+  echo "--offline は --json と一緒に使います。" >&2
+  usage >&2
+  exit 2
+fi
+if ((offline && with_dates)); then
+  echo "--offline と --dates は一緒に使えません (出た日はネットワークで引く)。" >&2
   usage >&2
   exit 2
 fi
@@ -315,7 +334,12 @@ if [[ ! ${grace_days} =~ ^(0|[1-9][0-9]*)$ ]]; then
   cannot_check "猶予の日数が読めません (CHECK_WINGET_VERSION_GRACE_DAYS=${grace_days})。0 か、0 で始まらない整数 (日数) を渡す。"
 fi
 
-for c in gh jq; do
+# --offline はネットワークに出ないので、gh は要らない
+needed=(gh jq)
+if ((offline)); then
+  needed=(jq)
+fi
+for c in "${needed[@]}"; do
   if ! command -v "${c}" &>/dev/null; then
     cannot_check "${c} が見つかりません (CI なら GitHub の ubuntu のランナーに入っている。手元なら home-manager switch)。"
   fi
@@ -375,6 +399,16 @@ if [[ -f ${skipped_file} ]]; then
     skipped_versions+=("${v}")
     skipped_reasons+=("${reason}")
   done <"${skipped_file}"
+fi
+
+# --json --offline: repo の中のファイルから読めたものだけを JSON で出して終わる (ネットワークに出ない)
+if ((offline)); then
+  jq -cn --arg name "${name}" --arg title "${title}" --arg id "${package_id}" --arg pinned "${pinned}" \
+    --arg ps1 "${ps1_label}" --arg skipped "${skipped_label}" --arg section "${readme_section}" --arg from "${dates_from}" '{
+      name: $name, title: $title, packageId: $id, pinned: $pinned, pinnedFile: $ps1, skippedFile: $skipped,
+      pinnedListed: null, readmeSection: $section, datesFrom: $from, datesChecked: false, datesProblem: null, newer: null
+    }'
+  exit 0
 fi
 
 # 版 $1 (winget の版か、GitHub の release の鍵) を見送っていれば、理由を出して 0 を返す

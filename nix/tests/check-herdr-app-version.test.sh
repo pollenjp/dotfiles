@@ -31,6 +31,8 @@
 #   - --json は app と core の 2 行の JSON (新しい版を古い順に、見送った版は理由つきで、出た日と差分の URL つき) を出して
 #     exit 0。固定した版の成果物は落とし直さない。Windows の成果物の無い版は入れず、HEAD が 404 のほかで落ちた版は出た日を
 #     null にして datesProblem にわけを入れる。tag が読めなければ何も出さずに exit 2
+#   - --json --offline は curl も gh も呼ばずに、app と core の固定した版だけを同じ形の 2 行で出す (pinnedListed・newer は null、
+#     datesChecked は false)。releases.json が読めなければ何も出さずに exit 2。--json の無い --offline は exit 2
 #
 # ## 本物の curl と gh を見せない
 #
@@ -522,6 +524,30 @@ if [[ $(rc "${d}") == 0 ]] && jq -se '.[0].datesChecked == false and (.[0].dates
   ok "--json: HEAD が落ちた版は出た日を null にして datesProblem に入れ、tag が読めなければ何も出さずに exit 2"
 else
   ng "--json の失敗" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") $(outerr "${d2}")"
+fi
+
+# 15. --json --offline: curl も gh も呼ばずに、app と core の固定した版だけを同じ形の 2 行で出す (引かないものは null・false)。
+#     releases.json が読めなければ何も出さずに exit 2。--offline だけは exit 2
+d=$(new_case c15)
+printf 'core 0.1.18 試したら落ちた\n' >"${d}/skipped-versions.txt"
+run "${d}" --json --offline "${d}/releases.json"
+d2=$(new_case c15b)
+printf 'not json\n' >"${d2}/releases.json"
+run "${d2}" --json --offline "${d2}/releases.json"
+d3=$(new_case c15c)
+run "${d3}" --offline "${d3}/releases.json"
+if [[ $(rc "${d}") == 0 && $(grep -c '' "${d}/out") == 2 ]] \
+  && jq -se --arg file "${d}/releases.json" --arg skip "${d}/skipped-versions.txt" '
+    .[0] == {name: "herdr-app", title: "Windows の herdr-app", packageId: null, pinned: "0.1.12", pinnedFile: $file,
+      skippedFile: $skip, pinnedListed: null, readmeSection: "固定した版を上げる", datesFrom: "last-modified",
+      datesChecked: false, datesProblem: null, newer: null}
+    and .[1].name == "herdr-core" and .[1].title == "herdr-core" and .[1].pinned == "0.1.17" and .[1].newer == null' "${d}/out" >/dev/null \
+  && [[ ! -s ${d}/curl-calls && ! -s ${d}/gh-calls ]] \
+  && [[ $(rc "${d2}") == 2 && ! -s ${d2}/out ]] && seen "${d2}" -F 'releases.json が読めません' \
+  && [[ $(rc "${d3}") == 2 ]] && seen "${d3}" -F -- '--offline は --json と一緒に'; then
+  ok "--json --offline: curl も gh も呼ばずに固定した版だけを 2 行で出し、releases.json が読めなければ exit 2。--offline だけは exit 2"
+else
+  ng "--json --offline" "rc=$(rc "${d}")/$(rc "${d2}")/$(rc "${d3}") $(outerr "${d}") / $(outerr "${d2}") / $(outerr "${d3}")"
 fi
 
 # 10. 知らない引数は exit 2、-h は exit 0

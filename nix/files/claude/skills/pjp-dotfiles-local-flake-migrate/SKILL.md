@@ -5,7 +5,7 @@ description: dotfiles のローカル flake (`~/dotfiles/flake.nix`) を、本�
   「ローカル flake を最新の雛形に合わせて」「~/dotfiles/flake.nix が古い形のまま」と言われたとき、setup が
   「flake.nix は前の雛形から作られています」と知らせたとき、本体を更新したら `~/dotfiles` 経由の switch が
   「option が無い・削除された」で落ちるようになったとき、`setup-local-flake.sh --force` で作り直したくなったとき
-  (作り直すと値が消える) に読む。flake.lock を上げて switch する話は pjp-dotfiles-update の側。
+  (作り直すと値が消える) に読む。flake.lock を上げる話は、Claude Code に「dotfiles を更新して」と頼む側 (worktree の PR で上げる)。
 metadata:
   pjp-pack: machine
 ---
@@ -218,4 +218,5 @@ apply が出す `cp -p` の 2 つ (`flake.nix.bak-<日時>` と `flake.lock.bak-
 
 - `nix/README.md`「雛形が新しくなったら」— 印・setup の知らせ・script の使い方
 - ADR 024 — 雛形の版の印と、3-way merge と評価の比較で移すことの決定
-- `pjp-dotfiles-update` skill — flake.lock を上げて switch まで通す側
+- 依存の更新 — flake.lock を上げる側。Claude Code に「dotfiles を更新して」と頼むと、この repo の拡張
+  (`.claude/skills/pjp-dotfiles-deps/`) を読んで PR を作る。反映は merge の後の `~/dotfiles/setup --self-update --update`

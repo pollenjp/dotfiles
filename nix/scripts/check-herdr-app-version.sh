@@ -5,6 +5,7 @@
 #
 #   check-herdr-app-version.sh [<releases.json> [<skipped-versions.txt>]]
 #   check-herdr-app-version.sh --json [--dates] [<releases.json> [<skipped-versions.txt>]]
+#   check-herdr-app-version.sh --json --offline [<releases.json> [<skipped-versions.txt>]]
 #
 # 固定した版と sha256 は nix/pkgs/herdr-core/releases.json (書くのはそこ 1 か所だけ)。app の版と windows-x86_64 の sha256、
 # core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の sha256 を持つ。Windows の
@@ -46,6 +47,10 @@
 # HEAD が 404 のほかで失敗した版は、出た日を null にして datesProblem にわけを入れる。tag が読めなければ、何も出さずに exit 2。
 # bootstrap-windows-pin-updates.sh が、setup の知らせと猶予ごとの上げ先の候補に使う。
 #
+# --offline (--json と一緒に使う) は、ネットワークを使わずに releases.json と見送りの一覧だけを読み、同じ形の 2 行を出す。引かない
+# ものは pinnedListed・newer が null、datesChecked が false。どちらかが読めなければ、何も出さずに exit 2。
+# bootstrap-windows-pin-updates.sh --list --json (固定した版の一覧) に使う。
+#
 # 署名 (Authenticode) はここでは見ない。Linux の信頼の束に Microsoft のコード署名の root が無いので、Windows の
 # Install-HerdrApp.ps1 が入れる前と -Check で見る。
 #
@@ -81,10 +86,12 @@ herdr-app と herdr-core の、dotfiles が固定した版を確かめ、上げ�
 使い方:
   check-herdr-app-version.sh [<releases.json> [<skipped-versions.txt>]]
   check-herdr-app-version.sh --json [--dates] [<releases.json> [<skipped-versions.txt>]]
+  check-herdr-app-version.sh --json --offline [<releases.json> [<skipped-versions.txt>]]
 
   releases.json の既定は repo の nix/pkgs/herdr-core/releases.json (固定した版と sha256 の 1 か所)。
   見送りの一覧の既定は releases.json の隣の skipped-versions.txt (1 行に「app か core・版・理由」)。
-  --json: 固定した版より新しい版を、app と core の 2 行の JSON で出す (成果物の照らし直しはしない)
+  --json:     固定した版より新しい版を、app と core の 2 行の JSON で出す (成果物の照らし直しはしない)
+  --offline:  --json で、ネットワークを使わずに固定した版だけを出す (newer は null)
 
 終了コード: 0 = 知らせることは無い、1 = 知らせることがある、2 = 確かめられなかった
 EOS
@@ -92,6 +99,7 @@ EOS
 
 args=()
 json=0
+offline=0
 for arg in "$@"; do
   case ${arg} in
     -h | --help)
@@ -99,6 +107,7 @@ for arg in "$@"; do
       exit 0
       ;;
     --json) json=1 ;;
+    --offline) offline=1 ;;
     # 成果物があるかを HEAD で見るので、出た日はいつも入れる (check-winget-version.sh と同じ引数で呼べるよう受けるだけ)
     --dates) ;;
     -*)
@@ -110,6 +119,11 @@ for arg in "$@"; do
   esac
 done
 if ((${#args[@]} > 2)); then
+  usage >&2
+  exit 2
+fi
+if ((offline && ! json)); then
+  echo "--offline は --json と一緒に使います。" >&2
   usage >&2
   exit 2
 fi
@@ -214,6 +228,29 @@ skip_reason() {
   [[ -n ${skipped["$1:$2"]+set} ]] || return 1
   printf '%s' "${skipped["$1:$2"]}"
 }
+
+# --json の title。$1: name (herdr-app か herdr-core)。core は Linux にも入るので、Windows の と付けない
+title_of() {
+  if [[ $1 == herdr-core ]]; then
+    echo "$1"
+  else
+    echo "Windows の $1"
+  fi
+}
+
+# --json --offline: releases.json と見送りの一覧から読めたものだけを、app と core の 2 行で出して終わる (ネットワークに出ない)
+if ((offline)); then
+  for one in "herdr-app ${app_version}" "herdr-core ${core_version}"; do
+    read -r jname pinned <<<"${one}"
+    jq -cn --arg name "${jname}" --arg title "$(title_of "${jname}")" --arg pinned "${pinned}" \
+      --arg file "${releases_label}" --arg skipped "${skipped_label}" '{
+        name: $name, title: $title, packageId: null, pinned: $pinned, pinnedFile: $file, skippedFile: $skipped,
+        pinnedListed: null, readmeSection: "固定した版を上げる", datesFrom: "last-modified", datesChecked: false,
+        datesProblem: null, newer: null
+      }'
+  done
+  exit 0
+fi
 
 core_pins=''
 for target in "${core_targets[@]}"; do
@@ -458,10 +495,8 @@ json_component() {
       url: $url
     }' >>"${items}"
   done
-  local title="Windows の ${jname}"
-  if [[ ${kind} == core ]]; then
-    title=${jname}
-  fi
+  local title
+  title=$(title_of "${jname}")
   jq -cn --slurpfile newer "${items}" --arg name "${jname}" --arg title "${title}" --arg pinned "${pinned}" \
     --arg file "${releases_label}" --arg skipped "${skipped_label}" --argjson listed "${listed}" \
     --argjson checked "${checked}" --arg problem "${problem}" '{
