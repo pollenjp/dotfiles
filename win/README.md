@@ -713,7 +713,7 @@ nix/scripts/check-herdr-app-installers.sh   # 0 = 変わっていない、1 = �
 WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼んで 1Password の agent に
 つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
-`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.0.0.0`) の 1 か所だけに書く。
+`openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.4.0.0`) の 1 か所だけに書く。
 
 | 打つもの | すること |
 | --- | --- |
