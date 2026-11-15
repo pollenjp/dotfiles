@@ -497,7 +497,7 @@ awk '
 cp "${c}/old-style.nix" "${c}/local/flake.nix"
 run_win "${c}" --initial
 if [[ -n ${anchor_line} && ${next_lines} == "        #"$'\n'"        #   # 設定グループ"* ]] \
-  && grep -qxF '        #   #   group = "client";' "${work}/i3/local/flake.nix" \
+  && grep -qxF '        #   #   group = "client";' "${c}/local/flake.nix" \
   && [[ $(rc "${c}") == 0 ]] && grep -qF '今の雛形のままなので' "${c}/out" \
   && [[ $(initial_block "${c}/local/flake.nix") == "$(fixture_initial "${initial_fixture}")" ]] \
   && grep -qF '設定グループ (本体の' "${c}/local/flake.nix"; then

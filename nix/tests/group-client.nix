@@ -7,7 +7,8 @@
 # ## 確かめること
 #
 #   - client に ② ③ のものが無い: ~/.claude/ の下・Claude Code 向けの state (.local/state/dotfiles/claude-*.json。1Password の
-#     道具も読む claude-op-reason.json を除く)・ntn.json・herdr の設定・~/.ssh/rc・cc-pages の config.toml が無い。package に
+#     道具も読む claude-op-reason.json を除く)・ntn.json・herdr の設定・~/.ssh/rc が無い。cc-pages の port を選んだ客先のホストにも
+#     cc-pages の config.toml と unit が無い。package に
 #     herdr・ntn・herdr-core・pjp-agent-link・claude-personal・claude-work が無い。systemd の user unit に cc-pages・
 #     pjp-agent-link-watch が無い。fish の abbr と bash の alias に h・hr・c が無い。ssh の設定に PJP_SSH_CLIENT が無い。git の
 #     設定に名前とメール (settings.user) と pollenjp-sub の includes が無い
@@ -27,6 +28,14 @@ let
   examples = import ../lib/group-examples.nix { inherit mkHome; };
   client = examples.client.config;
   clientClaude = examples.client-claude.config;
+  # cc-pages の port を選んだ客先のホスト (port を選ぶと personal なら config.toml が置かれる)
+  clientPort =
+    (mkHome {
+      username = "user";
+      system = "x86_64-linux";
+      group = "client";
+      modules = [ { dotfiles.ccPages.port = 7801; } ];
+    }).config;
 
   sorted = l: lib.sort (a: b: a < b) (lib.unique l);
   rel = cfg: t: lib.removePrefix (cfg.home.homeDirectory + "/") t;
@@ -97,14 +106,18 @@ let
   cases = [
     (noneOf "~/.claude/ の下のファイル" (builtins.filter (lib.hasPrefix ".claude/") (files client)))
     (noneOf "Claude Code 向けの state (claude-op-reason.json を除く)" (claudeStates client))
-    (noneOf "ntn.json・herdr の設定・~/.ssh/rc・cc-pages の config.toml" (
+    (noneOf "ntn.json・herdr の設定・~/.ssh/rc" (
       builtins.filter (hasFile client) [
         ".local/state/dotfiles/ntn.json"
         ".config/herdr/config.toml"
         ".ssh/rc"
-        ".config/cc-pages/config.toml"
       ]
     ))
+    {
+      name = "cc-pages の port を選んだ客先のホストにも、cc-pages の config.toml と unit が無い";
+      ok =
+        !(hasFile clientPort ".config/cc-pages/config.toml") && !(hasUnit clientPort "cc-pages.service");
+    }
     (noneOf "② ③ の package (herdr・ntn・herdr-core・pjp-agent-link・claude-<名前>)" (
       builtins.filter (hasPackage client) [
         "herdr"

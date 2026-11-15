@@ -15,17 +15,20 @@
 #     結果に「↷ … (このホストでは off)」を出す。見出しの無い手順・true の key の手順は流す。終了コードは 0
 #   - group.json が無い (この仕組みの前の世代)・読めない形なら、見出しによらず全部流す
 #   - key は文字で見るが、名前の頭が同じ別の key (claude と claudePrivateSkills) を取り違えない
-#   - --dry-run でも、off の手順は「飛ばします」と出し、ほかの手順はコマンドを見せるだけ (どれも流さない)
+#   - --dry-run でも、off の手順は「飛ばします」と出し、ほかの手順はコマンド (「+ …/bootstrap-<名前>.sh」) を見せるだけ (どれも流さない)
 #   - 冒頭の 40 行より後ろの `# tool:` の行は読まない (order と同じ)
-#   - 対象ホストが決まっていれば、実行の頭に nix eval でそのホストのグループを 1 行 (「グループ: …」) 出す。1 回だけで、
-#     nix eval が落ちれば何も出さずに進む。対象ホストが決まっていなければ nix を呼ばない
+#   - 対象ホストが決まっていれば、実行の頭に nix eval でそのホストのグループを 1 行 (「グループ: …」) 出す。nix eval が落ちれば
+#     何も出さずに進む。対象ホストが決まっていなければ nix を呼ばない
+#   - switch の手順の頭でもう一度評価し、実行の頭に出した行と同じなら出さない (1 回だけ)。変わっていれば (取得でグループが
+#     変わった) 「グループ (前に出したものから変わった): …」と出し直す
 #
 # ## 作り
 #
 # setup-system-units.test.sh と同じく、使い捨ての checkout (<ケース>/repo/nix/scripts/) に setup.sh と偽の bootstrap を置き、
 # 要るコマンドだけを並べた PATH で --steps を流す。偽の bootstrap は流れたら <ケース>/home/ran-<名前> を作る。偽の nix は
-# 引数を <ケース>/home/nix-calls に書き、FAKE_GROUP_LINE を出す (FAKE_NIX_FAIL があれば 1 で終わる)。shebang は $BASH から
-# 作る (サンドボックスに /usr/bin/env が無い)。
+# 引数を <ケース>/home/nix-calls に書き、グループの 1 行の eval (--apply hc: …) なら FAKE_GROUP_LINE を出す (2 回目からは
+# FAKE_GROUP_LINE2 があればそれ)。FAKE_NIX_FAIL があれば 1 で終わる。ほかの eval (config.warnings) には何も出さない。偽の
+# home-manager は何もせず 0 を返す。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
 
 set -u -o pipefail
 
@@ -70,10 +73,20 @@ mkdir -p "${fake_bin}"
   cat <<'EOF'
 printf '%s\n' "$*" >>"${HOME}/nix-calls"
 [[ -z ${FAKE_NIX_FAIL-} ]] || exit 1
-printf '%s' "${FAKE_GROUP_LINE-}"
+case "$*" in
+  *'--apply hc:'*)
+    n=$(grep -c -- '--apply hc:' "${HOME}/nix-calls")
+    if ((n >= 2)) && [[ -n ${FAKE_GROUP_LINE2-} ]]; then
+      printf '%s' "${FAKE_GROUP_LINE2}"
+    else
+      printf '%s' "${FAKE_GROUP_LINE-}"
+    fi
+    ;;
+esac
 EOF
 } >"${fake_bin}/nix"
-chmod +x "${fake_bin}/nix"
+printf '#!%s\nexit 0\n' "${BASH}" >"${fake_bin}/home-manager"
+chmod +x "${fake_bin}/nix" "${fake_bin}/home-manager"
 
 # 偽の bootstrap を書く。$1: ケース、$2: 名前 (bootstrap-<名前>.sh)、$3: 見出しの行 (空なら書かない)、$4: 見出しの前に置く
 # コメントの行数 (省けば 0)
@@ -117,7 +130,8 @@ run() {
   local c=$1
   shift
   env -i HOME="${c}/home" USER=test TMPDIR="${c}/tmp" NO_COLOR=1 PATH="${fake_bin}:${sys_bin}" \
-    DOTFILES_LOCAL_DIR="${c}/local" FAKE_GROUP_LINE="${FAKE_GROUP_LINE-}" ${FAKE_NIX_FAIL+"FAKE_NIX_FAIL=1"} \
+    DOTFILES_LOCAL_DIR="${c}/local" FAKE_GROUP_LINE="${FAKE_GROUP_LINE-}" ${FAKE_GROUP_LINE2+"FAKE_GROUP_LINE2=${FAKE_GROUP_LINE2}"} \
+    ${FAKE_NIX_FAIL+"FAKE_NIX_FAIL=1"} \
     "${BASH}" "${c}/repo/nix/scripts/setup.sh" "$@" >"${c}/out" 2>"${c}/err" </dev/null
   echo $? >"${c}/rc"
 }
@@ -176,7 +190,8 @@ c=$(new_case dry "${off_claude}")
 run "${c}" --dry-run --steps "${steps}"
 if [[ $(rc "${c}") == 0 ]] && ! ran "${c}" claude && ! ran "${c}" plain \
   && grep -Fq 'このホストでは dotfiles.claude.enable が off なので飛ばします' "${c}/out" \
-  && grep -Fq 'bootstrap-plain.sh' "${c}/out"; then
+  && grep -Fxq "+ ${c}/repo/nix/scripts/bootstrap-plain.sh" "${c}/out" \
+  && ! grep -Fq "+ ${c}/repo/nix/scripts/bootstrap-claude.sh" "${c}/out"; then
   ok "--dry-run でも off の手順は「飛ばします」と出し、どの手順も流さない"
 else
   ng "--dry-run" "$(show "${c}")"
@@ -198,6 +213,24 @@ if [[ $(rc "${c}") == 0 && ${lines} == 1 && ${evals} == 1 ]] && ran "${c}" plain
   ok "対象ホストが決まっていれば実行の頭にグループを 1 回出し、nix eval が落ちれば黙る。決まっていなければ nix を呼ばない"
 else
   ng "グループの 1 行" "lines=${lines} evals=${evals}"$'\n'"$(show "${c}")"$'\n'"--- 落ちる nix"$'\n'"$(show "${c2}")"$'\n'"--- ホストなし"$'\n'"$(show "${c3}")"
+fi
+
+# 6. switch の頭でもう一度評価し、同じ行なら出さない (1 回だけ)。変わっていれば「前に出したものから変わった」と出し直す
+c=$(new_case group-switch "${all_on}")
+FAKE_GROUP_LINE='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント off' \
+  run "${c}" --host testhost --steps switch
+same_lines=$(grep -c 'グループ' "${c}/out" || true)
+same_evals=$(grep -c -- '--apply hc:' "${c}/home/nix-calls" 2>/dev/null || true)
+c2=$(new_case group-switch-changed "${all_on}")
+FAKE_GROUP_LINE='personal (選んでいない。既定) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント on' \
+  FAKE_GROUP_LINE2='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント off' \
+  run "${c2}" --host testhost --steps switch
+if [[ $(rc "${c}") == 0 && ${same_lines} == 1 && ${same_evals} == 2 && $(rc "${c2}") == 0 ]] \
+  && grep -Fq '  グループ: personal (選んでいない。既定)' "${c2}/out" \
+  && grep -Fq '  グループ (前に出したものから変わった): company (ホストで選んだ)' "${c2}/out"; then
+  ok "switch の頭で評価し直し、同じ行なら出さず (1 回だけ)、変わっていれば「前に出したものから変わった」と出し直す"
+else
+  ng "switch の頭のグループ" "lines=${same_lines} evals=${same_evals}"$'\n'"$(show "${c}")"$'\n'"--- 変わる"$'\n'"$(show "${c2}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
