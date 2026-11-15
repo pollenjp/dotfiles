@@ -1,0 +1,74 @@
+# dotfiles の依存の更新の設定 (repo の拡張 pjp-dotfiles-deps)。依存の更新の skill の script が読む (python3 の tomllib)。
+# key の名前・型・取る値は読む側との約束 (ADR 056)。key を足す・変えるときは読む側と揃える。コマンドは argv の配列で書き
+# (shell を通さない)、repo の root で打つ。
+version = 1
+
+# flake.lock を上げる道具 (argv の頭)。猶予と例外は nix/release-age.nix、update の最後に閉包スキャン (ゲート) が挟まる
+flake_lock_age = ["nix/scripts/flake-lock-age.sh"]
+
+# 見ないパス (前方一致)。期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う
+skip = ["nix/pkgs/upstream/"]
+
+# release-age.nix の fromUpstream の消し時を見る (dotfiles だけの仕組み。nix/README.md の「猶予の日数と例外」)
+[upstream_cleanup]
+release_age = "nix/release-age.nix"
+pkgs_dir = "nix/pkgs/upstream"
+
+# Windows に固定した版 (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core)。口の JSON の形は
+# nix/scripts/bootstrap-windows-pin-updates.sh の先頭。会話では名前ごとに聞く (問いの中身は SKILL.md の「人が決めること」)
+[[pins]]
+name = "windows"
+list = ["nix/scripts/bootstrap-windows-pin-updates.sh", "--list", "--json"]
+candidates = ["nix/scripts/bootstrap-windows-pin-updates.sh", "--candidates", "--json"]
+grace_flag = "--grace"
+ask = "interactive"
+
+# PR の前に流す確かめ (when のパスが変わったときだけ)
+[[checks]]
+name = "ntn"
+run = ["nix", "build", "--no-link", "-L", "./nix#checks.x86_64-linux.ntn-test"]
+when = ["nix/pkgs/ntn/"]
+
+[[checks]]
+name = "herdr-core"
+run = ["nix", "build", "--no-link", "-L", "./nix#checks.x86_64-linux.herdr-core-test"]
+when = ["nix/pkgs/herdr-core/"]
+
+# win/ の ps1 のテスト。CI の lint と同じく、flake が固定している nixpkgs の pwsh で流す (Windows には触らない)。
+# 上げた名前のテストだけが流れるよう、名前ごとに分ける
+[[checks]]
+name = "win-openssh"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/openssh/Install-OpenSSH.Tests.ps1"]
+when = ["win/openssh/"]
+
+[[checks]]
+name = "win-herdr"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/herdr/Install-Herdr.Tests.ps1"]
+when = ["win/herdr/"]
+
+[[checks]]
+name = "win-google-japanese-input"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/google-japanese-input/Install-GoogleJapaneseInput.Tests.ps1"]
+when = ["win/google-japanese-input/"]
+
+[[checks]]
+name = "win-ntn"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/ntn/Install-Ntn.Tests.ps1"]
+when = ["win/ntn/"]
+
+[[checks]]
+name = "win-claude-code"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/claude-code/Install-ClaudeCode.Tests.ps1"]
+when = ["win/claude-code/"]
+
+# Install-HerdrApp.Tests.ps1 は repo の nix/pkgs/herdr-core/releases.json も読む
+[[checks]]
+name = "win-herdr-app"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/herdr-app/Install-HerdrApp.Tests.ps1"]
+when = ["win/herdr-app/", "nix/pkgs/herdr-core/"]
+
+# skill などの frontmatter (この repo の拡張も)。yq が無ければ script が nix/ の devShell に入り直す
+[[checks]]
+name = "claude-frontmatter"
+run = ["nix/scripts/check-claude-frontmatter.sh"]
+when = [".claude/skills/", "nix/files/claude/"]
