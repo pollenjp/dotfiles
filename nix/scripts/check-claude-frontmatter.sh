@@ -40,8 +40,9 @@
 # 複数の pack を書ける。先頭が主の pack)、bootstrap-claude-skill-overrides.sh が読んで、書いた pack のどれかに入口がある skill
 # を一覧で名前だけにする (nix/README.md「skill の一覧を枠に収める」)。metadata が map でない・pjp-pack が文字列でない (列も)・
 # 空白だけ・空白で区切った名前のどれかが pack の名前 (下の packs) でない・同じ名前が 2 度ある・bootstrap の読む形
-# (「metadata:」の下に字下げした「pjp-pack: <pack> [<pack>…]」の 1 行) でない・入口の skill (pjp-pack-<pack>。常駐) に
-# pjp-pack がある、のどれでも落とす。入口が在るかは見ない (入口は claude-skills にある)。
+# (「metadata:」の下に字下げした「pjp-pack: <pack> [<pack>…]」の 1 行) でない・YAML の値と、bootstrap が pjp-pack の行から
+# 読む値 (下の skill_pack。bootstrap の写し) の名前の並びが違う (素の値の折り返し・引用符の中のエスケープ・tag・anchor)・
+# 入口の skill (pjp-pack-<pack>。常駐) に pjp-pack がある、のどれでも落とす。入口が在るかは見ない (入口は claude-skills にある)。
 #
 # pjp-extends は repo の拡張の印で、repo の .claude/skills/ の skill に書く (依存の更新の skill が、その repo を流すときに
 # 見つけて読む。ADR 056)。値は deps だけ。pjp-pack と同じく「metadata:」の下に字下げした「pjp-extends: <値>」の 1 行で書く
@@ -322,6 +323,32 @@ one_line_form() {
     && [[ ! $(fm_yq ".metadata[\"$2\"] | style" "$1") =~ ^(literal|folded)$ ]]
 }
 
+# skill_pack <SKILL.md>: bootstrap-claude-skill-overrides.sh の skill_pack の写し (1 字も変えない。bootstrap の test が
+# 2 つを比べる)。bootstrap が pjp-pack の行から読む値を 1 行で出す。YAML の値と照らし、bootstrap が違う値に読む書き方
+# (素の値の折り返し・引用符の中のエスケープ・tag・anchor など) を落とすのに使う
+skill_pack() {
+  awk -v q="'" '
+    { sub(/\r$/, "") }
+    NR == 1 { if ($0 !~ /^---[ \t]*$/) exit; next }
+    /^---[ \t]*$/ { exit }
+    /^[^ \t#]/ { in_meta = ($0 ~ /^metadata:[ \t]*(#.*)?$/); depth = -1; next }
+    !in_meta || /^[ \t]*(#.*)?$/ { next }
+    {
+      match($0, /^[ \t]*/)
+      if (depth < 0) depth = RLENGTH
+      if (RLENGTH != depth) next
+      v = substr($0, RLENGTH + 1)
+      if (v !~ /^pjp-pack:/) next
+      sub(/^pjp-pack:[ \t]*/, "", v)
+      sub(/[ \t]+#.*$/, "", v)
+      sub(/[ \t]+$/, "", v)
+      if (v ~ /^".*"$/ || v ~ ("^" q ".*" q "$")) v = substr(v, 2, length(v) - 2)
+      print v
+      exit
+    }
+  ' "$1"
+}
+
 # repo の .claude/skills/ の skill の metadata の pjp-extends (拡張の印) を見る。$1: ラベル、$2: frontmatter
 check_extends() {
   local label=$1 fm=$2 ext_type ext known
@@ -349,8 +376,9 @@ check_extends() {
 # frontmatter が無い・中に --- がある・YAML の map として読めないときは、check_md が落とすので何も言わない
 check_skill_metadata() {
   local file=$1 skill_name=$2 where=$3 label fm meta_type pack_type pack known name found_name
-  # names: pjp-pack の名前の並び、seen・dups: 見た名前・2 度目の名前 (空白で挟んで並べる)、unknown: pack の名前でないもの
-  local names=() seen=' ' dups=' ' unknown=''
+  # names・read_names: pjp-pack の名前の並び (YAML の値・bootstrap の読み)、seen・dups: 見た名前・2 度目の名前 (空白で挟んで
+  # 並べる)、unknown: pack の名前でないもの
+  local names=() read_names=() seen=' ' dups=' ' unknown=''
   label=$(label_of "${file}")
   fm=$(frontmatter "${file}") || return 0
   [[ -z $(awk 'index($0, "---") { print; exit }' <<<"${fm}") ]] || return 0
@@ -396,8 +424,15 @@ check_skill_metadata() {
     return 0
   fi
   pack=$(fm_yq '.metadata["pjp-pack"]' "${fm}")
-  # 空白で区切った pack の名前 (先頭が主の pack)。bootstrap と同じく空白の並びで区切る
-  read -r -a names <<<"${pack}"
+  # 空白 (改行も) で区切った pack の名前 (先頭が主の pack)
+  read -r -d '' -a names <<<"${pack}" || true
+  # bootstrap は pjp-pack の行だけを読む (skill_pack)。YAML の値と名前の並びが違えば、検査を通っても bootstrap は別の値に
+  # 読む (素の値の折り返しは 1 行目だけ・引用符の中のエスケープや tag・anchor は字のまま)
+  read -r -a read_names <<<"$(skill_pack "${file}")"
+  if [[ "${names[*]}" != "${read_names[*]}" ]]; then
+    problems+=("${label}: metadata の pjp-pack を、bootstrap-claude-skill-overrides.sh は '${read_names[*]}' と読みます (YAML の値は '${names[*]}')。「pjp-pack:」の行に、折り返し・エスケープ・tag・anchor を使わずに書いてください")
+    return 0
+  fi
   if ((${#names[@]} == 0)); then
     problems+=("${label}: metadata の pjp-pack が空です。pack の名前 (${packs[*]} のどれか。複数なら空白で区切る) を書くか、pjp-pack の行を消してください")
     return 0

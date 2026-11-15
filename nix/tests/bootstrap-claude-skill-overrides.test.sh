@@ -42,6 +42,7 @@
 #     1 で終わる。控えが壊れていれば警告し、無いものとして進めて控えを書き直す
 #   - --quiet は stdout に何も出さない。知らない引数は何も書かずに 2、--help は 0
 #   - setup の手順の並び (setup.sh --list) で、claude-skills の skill を張る bootstrap-claude-skills より後に来る
+#   - check-claude-frontmatter.sh が持つ読み方の写し (関数 skill_pack) が、この script の skill_pack と 1 字も違わない
 
 set -u -o pipefail
 
@@ -622,6 +623,16 @@ if [[ $(rc "${h}") == 0 ]] && same "$(overrides "${h}")" '{"pjp-a":"name-only"}'
   ok "列で書いた pjp-pack は名前だけにせず、flow の列は空白で区切るよう添えて警告する"
 else
   ng "列で書いた pjp-pack" "$(detail "${h}")"
+fi
+
+# 18. check-claude-frontmatter.sh は、bootstrap と同じ読み方で pjp-pack の行を読んで YAML の値と照らす。その読み方の関数
+#     skill_pack の写しが、ここの関数と 1 字も違わない (片方だけ直すと、検査を通った skill を bootstrap が違う値に読む)
+mine=$(sed -n '/^skill_pack() {$/,/^}$/p' "${script}")
+theirs=$(sed -n '/^skill_pack() {$/,/^}$/p' "${scripts}/check-claude-frontmatter.sh")
+if [[ -n ${mine} && ${mine} == "${theirs}" ]]; then
+  ok "check-claude-frontmatter.sh の skill_pack は、bootstrap の skill_pack と同じ"
+else
+  ng "skill_pack の写し" "$(diff <(printf '%s\n' "${mine}") <(printf '%s\n' "${theirs}") 2>&1 | head -20)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

@@ -39,8 +39,9 @@
 #     (notion docs。引用符と後ろのコメントも) なら通り、pjp-pack の無い metadata・空の metadata: も通る。metadata が map で
 #     ない・pjp-pack が文字列でない (flow と block の列は、空白で区切って 1 行に書くよう添える)・pack の名前でない (複数なら
 #     外れた名前を並べる)・同じ pack が 2 度・空白だけ・flow の形 (metadata: {pjp-pack: …})・block scalar の値・入口の skill
-#     (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata は見ない。YAML として読めない skill には、metadata の理由を
-#     重ねない
+#     (pjp-pack-<pack>) の pjp-pack は落とす。YAML の値の名前の並びと、bootstrap が pjp-pack の行から読む名前の並びが違う
+#     書き方 (素の値の折り返し・引用符の中のエスケープ・tag・anchor) も、両方の読みを出して落とす。agent の metadata は
+#     見ない。YAML として読めない skill には、metadata の理由を重ねない
 #   - repo の root (<nix> の親) の .claude/skills/<名前>/SKILL.md も見る。名前の pjp-・SKILL.md の有無・name とディレクトリ名は
 #     skills と同じに見て、ファイルは repo の root から書く (.claude/skills/…)。直下の README.md は見ない。metadata の
 #     pjp-extends: deps (拡張の印) と印の無い skill は通り、知らない値・文字列でない・flow の形の pjp-extends と、repo の skill の
@@ -719,6 +720,40 @@ metadata:
   pjp-pack: " "
 ---
 EOF
+# YAML としては pack の名前の並びでも、bootstrap (pjp-pack の行だけを読む) が違う値に読む書き方
+put "${cl}/skills/pjp-folded/SKILL.md" <<'EOF'
+---
+name: pjp-folded
+description: 素の値を次の行へ折り返す
+metadata:
+  pjp-pack: video
+    notion
+---
+EOF
+put "${cl}/skills/pjp-escaped/SKILL.md" <<'EOF'
+---
+name: pjp-escaped
+description: 引用符の中のエスケープ
+metadata:
+  pjp-pack: "notion\nvideo"
+---
+EOF
+put "${cl}/skills/pjp-tagged/SKILL.md" <<'EOF'
+---
+name: pjp-tagged
+description: tag を付けた値
+metadata:
+  pjp-pack: !!str notion docs
+---
+EOF
+put "${cl}/skills/pjp-anchored/SKILL.md" <<'EOF'
+---
+name: pjp-anchored
+description: anchor を付けた値
+metadata:
+  pjp-pack: &p notion
+---
+EOF
 put "${cl}/skills/pjp-flow/SKILL.md" <<'EOF'
 ---
 name: pjp-flow
@@ -752,7 +787,11 @@ metadata:
 ---
 EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 11 ]] \
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 15 ]] \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-folded/SKILL.md: metadata の pjp-pack を、bootstrap-claude-skill-overrides.sh は 'video' と読みます (YAML の値は 'video notion')" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-escaped/SKILL.md: metadata の pjp-pack を、bootstrap-claude-skill-overrides.sh は 'notion\nvideo' と読みます (YAML の値は 'notion video')" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-tagged/SKILL.md: metadata の pjp-pack を、bootstrap-claude-skill-overrides.sh は '!!str notion docs' と読みます (YAML の値は 'notion docs')" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-anchored/SKILL.md: metadata の pjp-pack を、bootstrap-claude-skill-overrides.sh は '&p notion' と読みます (YAML の値は 'notion')" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-seq/SKILL.md: metadata は key: value の map にしてください (!!seq)" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block-seq/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
