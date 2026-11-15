@@ -1,18 +1,18 @@
 {
   "comment": "dotfiles が固定した herdr-app と herdr-core の版と、公式の版つきの成果物の sha256。読むのは nix/pkgs/herdr-core (Linux の home-manager)・win/herdr-app/Install-HerdrApp.ps1 (Windows。win/manifest.toml が herdr-releases.json として配る)・nix/scripts/check-herdr-app-version.sh (CI)。上げ方は win/README.md の「固定した版を上げる」",
   "app": {
-    "version": "0.1.13",
+    "version": "0.1.15",
     "sha256": {
-      "windows-x86_64": "72cb26f92a6b77e1125fecd2b18f87cc69a18c2da766a8ed8a5bcbd7b16c6012"
+      "windows-x86_64": "62ddf27ee9acc13d9b3421389817d1cabdc906c23f9ff1363f6cdbc8af3da39c"
     }
   },
   "core": {
-    "version": "0.1.18",
+    "version": "0.1.21",
     "generation": 1,
     "sha256": {
-      "linux-aarch64": "cf33393cf950bb763734dc3e16610ab9daf8492391a4ef0de56026cd7f752853",
-      "linux-x86_64": "5b2f97cb4b2a9d7a6b2cc5942628203ed9fbb7cc0c2b4b09ad8a6f5648e246b7",
-      "windows-x86_64": "2e54e0b1dcbd652a7e89b14c588178f8241b9732fdc4e5f2b27208829b0bfbbc"
+      "linux-aarch64": "e844a2bfab48a226097679d076bc83042fe57fccef5387ef802e5b24e78b529a",
+      "linux-x86_64": "78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1",
+      "windows-x86_64": "a8984634c35b58ba82d0aec078d5a5e6004da01d5a25b3daf822ab5e31c7312b"
     }
   }
 }
