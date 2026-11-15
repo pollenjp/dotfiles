@@ -35,10 +35,12 @@
 #       1 行目のわけが重なれば全部言い、--- の後ろが文字なら空白のせいにしない)・skills の直下のファイル・SKILL.md の無い
 #       ディレクトリ・command のサブディレクトリの README.md (配置されて command になると言う)。frontmatter の無い agent には、
 #       説明の文書なら README.md という名前にするよう添える (skill・command には添えない)
-#   - skill の metadata: pjp-pack が pack の名前 (diagram・machine・lang など) なら通り、pjp-pack の無い metadata・空の
-#     metadata: も通る。metadata が map でない・pjp-pack が文字列でない・pack の名前でない・flow の形
-#     (metadata: {pjp-pack: …})・block scalar の値・入口の skill (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata
-#     は見ない。YAML として読めない skill には、metadata の理由を重ねない
+#   - skill の metadata: pjp-pack が pack の名前 (diagram・machine・lang・docs など) か、空白で区切ったその並び
+#     (notion docs。引用符と後ろのコメントも) なら通り、pjp-pack の無い metadata・空の metadata: も通る。metadata が map で
+#     ない・pjp-pack が文字列でない (flow と block の列は、空白で区切って 1 行に書くよう添える)・pack の名前でない (複数なら
+#     外れた名前を並べる)・同じ pack が 2 度・空白だけ・flow の形 (metadata: {pjp-pack: …})・block scalar の値・入口の skill
+#     (pjp-pack-<pack>) の pjp-pack は落とす。agent の metadata は見ない。YAML として読めない skill には、metadata の理由を
+#     重ねない
 #   - repo の root (<nix> の親) の .claude/skills/<名前>/SKILL.md も見る。名前の pjp-・SKILL.md の有無・name とディレクトリ名は
 #     skills と同じに見て、ファイルは repo の root から書く (.claude/skills/…)。直下の README.md は見ない。metadata の
 #     pjp-extends: deps (拡張の印) と印の無い skill は通り、知らない値・文字列でない・flow の形の pjp-extends と、repo の skill の
@@ -622,6 +624,30 @@ metadata:
   pjp-pack: lang
 ---
 EOF
+put "${cl}/skills/pjp-multi/SKILL.md" <<'EOF'
+---
+name: pjp-multi
+description: 空白で区切った複数の pack (先頭が主の pack)
+metadata:
+  pjp-pack: notion docs
+---
+EOF
+put "${cl}/skills/pjp-docs/SKILL.md" <<'EOF'
+---
+name: pjp-docs
+description: 文書の pack (入口より先に名前を足した)
+metadata:
+  pjp-pack: docs
+---
+EOF
+put "${cl}/skills/pjp-quoted-multi/SKILL.md" <<'EOF'
+---
+name: pjp-quoted-multi
+description: 引用符で囲んだ複数の pack と後ろのコメント
+metadata:
+  pjp-pack: "machine lang"  # 2 つ
+---
+EOF
 put "${cl}/skills/pjp-empty/SKILL.md" <<'EOF'
 ---
 name: pjp-empty
@@ -651,12 +677,46 @@ metadata:
   pjp-pack: [diagram]
 ---
 EOF
+put "${cl}/skills/pjp-block-seq/SKILL.md" <<'EOF'
+---
+name: pjp-block-seq
+description: pjp-pack が block の列
+metadata:
+  pjp-pack:
+    - notion
+    - docs
+---
+EOF
 put "${cl}/skills/pjp-unknown/SKILL.md" <<'EOF'
 ---
 name: pjp-unknown
 description: pack の名前でない
 metadata:
   pjp-pack: diagrams
+---
+EOF
+put "${cl}/skills/pjp-unknown-multi/SKILL.md" <<'EOF'
+---
+name: pjp-unknown-multi
+description: 複数のうち 2 つが pack の名前でない
+metadata:
+  pjp-pack: notion diagrams foo
+---
+EOF
+put "${cl}/skills/pjp-dup/SKILL.md" <<'EOF'
+---
+name: pjp-dup
+description: 同じ pack を 2 度
+metadata:
+  pjp-pack: notion notion
+---
+EOF
+put "${cl}/skills/pjp-blank/SKILL.md" <<'EOF'
+---
+name: pjp-blank
+description: 空白だけの値
+metadata:
+  pjp-pack: " "
 ---
 EOF
 put "${cl}/skills/pjp-flow/SKILL.md" <<'EOF'
@@ -692,15 +752,19 @@ metadata:
 ---
 EOF
 run "${n}"
-if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 7 ]] \
+if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 11 ]] \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-seq/SKILL.md: metadata は key: value の map にしてください (!!seq)" \
-  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)" \
-  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser lang のどれか)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block-seq/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser lang docs のどれか。" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown-multi/SKILL.md: metadata の pjp-pack 'notion diagrams foo' のうち 'diagrams', 'foo' は pack の名前ではありません (diagram video notion machine repo browser lang docs のどれか。" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-dup/SKILL.md: metadata の pjp-pack に同じ pack が 2 度あります (notion)" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-blank/SKILL.md: metadata の pjp-pack が空です" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-flow/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-pack-diagram/SKILL.md: 入口の skill は常駐なので、metadata の pjp-pack を書かないでください" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-broken/SKILL.md: frontmatter を YAML として読めません"; then
-  ok "skill の metadata の pjp-pack は pack の名前を通し、map でない・文字列でない・pack の名前でない・bootstrap の読めない形・入口の skill の pjp-pack を出して exit 1 (agent は見ない)"
+  ok "skill の metadata の pjp-pack は pack の名前 (空白で区切った複数も) を通し、map でない・文字列でない (列も)・pack の名前でない・重なり・空・bootstrap の読めない形・入口の skill の pjp-pack を出して exit 1 (agent は見ない)"
 else
   ng "skill の metadata" "rc=$(rc "${c}") err=$(err "${c}")"
 fi
