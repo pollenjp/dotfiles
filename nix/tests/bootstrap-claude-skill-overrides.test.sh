@@ -17,10 +17,16 @@
 #     し、控え (claude-skill-overrides.applied.json) に書く。pack の無い skill には書かない
 #   - 入口の無い pack の skill は名前だけにしない。ほかの pack の入口があれば、その pack と skill の名前を警告し (setup の
 #     最後のまとめにも残す)、入口が 1 つも無ければ stdout に 1 行出すだけ (警告しない)
-#   - 入口の skill・mod を兼ねる skill (.claude-plugin/plugin.json) の pjp-pack と、pack の名前として読めない値は、
-#     警告して名前だけにしない
+#   - pjp-pack に空白で区切って複数の pack を書いた skill は、どれかの入口があれば name-only にする。入口の無い pack は
+#     pack ごとに警告し、説明つきのまま残す skill (書いた pack のどれにも入口が無い) と、ほかの pack の入口から辿れるので
+#     名前だけにする skill を分けて出す。片方の入口が消えても名前だけのままで、両方消えたら戻す。同じ名前の重なりは
+#     1 つにまとめて黙る。入口が 1 つも無いときの 1 行は skill の本数を数える (pack を 2 つ書いても 1 本)
+#   - 入口の skill・mod を兼ねる skill (.claude-plugin/plugin.json) の pjp-pack と、pack の名前として読めない値 (複数の
+#     名前のうち 1 つでも読めなければ skill ごと) は、警告して名前だけにしない。列で書いた値は名前だけにしない (flow の
+#     列は空白で区切るよう添えて警告し、block の列は pack の無い skill として黙る)
 #   - metadata の読み方: 値の引用符と後ろのコメント・metadata の中のコメントの行・CRLF の SKILL.md は受ける。metadata の
-#     外の pjp-pack・description の中の文字・metadata の下の深い字下げの pjp-pack・flow の形・frontmatter の後ろは読まない
+#     外の pjp-pack・description の中の文字・metadata の下の深い字下げの pjp-pack・flow の形・frontmatter の後ろは読まない。
+#     複数の pack の間の空白の並びと、引用符で囲んだ複数の pack も受ける
 #   - claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/ と、claude-accounts.json のアカウントの
 #     ~/.claude-<アカウント>/skills/synced/*/<名前>/) を anthropic-skills:<名前> の user-invocable-only にする。重なりは 1 つ
 #   - host option の key と同じ名前の pack の skill は、host option の値だけを書き、控えない
@@ -495,6 +501,127 @@ if [[ ${ids} == $'bootstrap-claude-skills\nbootstrap-claude-skill-overrides' ]];
   ok "setup の手順の並びで、bootstrap-claude-skills より後に来る"
 else
   ng "setup の並び" "${listed}"
+fi
+
+# 14. pack を複数書いた skill: 書いた pack のどれかに入口があれば名前だけにする。入口の無い pack は pack ごとに警告し (まとめにも
+#     残す)、説明つきのまま残す skill (どの pack にも入口が無い) と、ほかの pack の入口から辿れるので名前だけにする skill を分けて
+#     出す。同じ名前の重なりは 1 つにまとめて黙り、読めない名前が 1 つでもあれば skill ごと説明つきのまま残す。空白の並び・引用符・
+#     後ろのコメントは受ける
+h=$(new_home t14)
+host_file "${h}" '{}'
+entry "${h}" diagram
+entry "${h}" notion
+skill "${h}" pjp-two 'notion docs'
+skill "${h}" pjp-none 'docs video'
+skill "${h}" pjp-dup 'diagram diagram'
+skill "${h}" pjp-bad 'diagram Diagram!'
+raw_skill "${h}" pjp-spaced <<'EOF'
+---
+name: pjp-spaced
+description: x
+metadata:
+  pjp-pack: "notion  docs"  # 2 つ
+---
+EOF
+run_env=("DOTFILES_SETUP_WARNINGS=${work}/t14/warnings")
+run "${h}"
+run_env=()
+e="${work}/t14/err"
+if [[ $(rc "${h}") == 0 ]] \
+  && same "$(overrides "${h}")" '{"pjp-two":"name-only","pjp-dup":"name-only","pjp-spaced":"name-only"}' \
+  && [[ $(grep -c 'pack docs の入口' "${e}") == 1 && $(grep -c 'pack video の入口' "${e}") == 1 ]] \
+  && grep -q -F 'pjp-pack-docs がありません。次の skill は説明つきのまま残します: pjp-none' "${e}" \
+  && grep -q -F 'ほかに書いた pack の入口から辿れるので名前だけにします: pjp-spaced, pjp-two' "${e}" \
+  && grep -q -F 'pjp-pack-video がありません。次の skill は説明つきのまま残します: pjp-none' "${e}" \
+  && [[ $(grep -c '名前だけにします' "${e}") == 1 ]] \
+  && grep -q -F 'pack の名前として読めません: diagram Diagram!' "${e}" \
+  && grep -q -F '複数の pack は空白で区切ります' "${e}" \
+  && ! grep -q 'pjp-dup' "${e}" \
+  && grep -q 'pack docs の入口' "${work}/t14/warnings"; then
+  ok "pack を複数書いた skill は、どれかの入口があれば名前だけにし、入口の無い pack は説明つきの skill と辿れる skill を分けて警告する"
+else
+  ng "pack を複数書いた skill" "$(detail "${h}")"
+fi
+
+# 15. 2 つの pack の片方の入口が消えても名前だけのまま (控えも残す)。両方消えたら戻す
+h=$(new_home t15)
+host_file "${h}" '{}'
+entry "${h}" diagram
+entry "${h}" notion
+entry "${h}" machine
+skill "${h}" pjp-two 'diagram notion'
+run "${h}"
+first_ok=0
+if [[ $(rc "${h}") == 0 && -z $(err "${h}") ]] && same "$(overrides "${h}")" '{"pjp-two":"name-only"}' \
+  && same "$(recorded "${h}")" '{"pjp-two":"name-only"}'; then
+  first_ok=1
+fi
+first_detail=$(detail "${h}")
+rm -rf "${h}/.claude/skills/pjp-pack-diagram"
+run "${h}"
+second_ok=0
+if [[ ${first_ok} == 1 && $(rc "${h}") == 0 ]] && same "$(overrides "${h}")" '{"pjp-two":"name-only"}' \
+  && same "$(recorded "${h}")" '{"pjp-two":"name-only"}' \
+  && grep -q -F 'pjp-pack-diagram がありません。' "${work}/t15/err" \
+  && grep -q -F '名前だけにします: pjp-two' "${work}/t15/err" \
+  && ! grep -q '説明つきのまま残します' "${work}/t15/err" \
+  && ! grep -q '戻しました' "${work}/t15/out"; then
+  second_ok=1
+fi
+second_detail=$(detail "${h}")
+rm -rf "${h}/.claude/skills/pjp-pack-notion"
+run "${h}"
+if [[ ${second_ok} == 1 && $(rc "${h}") == 0 ]] \
+  && [[ $(jq '.skillOverrides | has("pjp-two")' "${h}/.claude/settings.json") == false ]] \
+  && same "$(recorded "${h}")" '{}' && grep -q '戻しました' "${work}/t15/out" \
+  && grep -q -F 'pjp-pack-notion がありません。次の skill は説明つきのまま残します: pjp-two' "${work}/t15/err"; then
+  ok "2 つの pack の片方の入口が消えても名前だけのままにし、両方消えたら戻す"
+else
+  ng "片方の入口が消えた" "${first_detail}"$'\n'"--- 2 回目"$'\n'"${second_detail}"$'\n'"--- 3 回目"$'\n'"$(detail "${h}")"
+fi
+
+# 16. 入口が 1 つも無いときの 1 行は skill の本数を数える (pack を 2 つ書いた skill を 2 本と数えない)
+h=$(new_home t16)
+skill "${h}" pjp-two 'diagram notion'
+skill "${h}" pjp-one machine
+run "${h}" --no-host-option
+if [[ $(rc "${h}") == 0 && -z $(err "${h}") ]] && grep -q -F '(2 本)' "${work}/t16/out"; then
+  ok "入口が 1 つも無いときは、pack を複数書いた skill も 1 本と数える"
+else
+  ng "入口が 1 つも無いときの本数" "$(detail "${h}")"
+fi
+
+# 17. 列で書いた pjp-pack: flow の列は読めないと警告し (空白で区切って書くよう添える)、block の列は pack の無い skill として黙る。
+#     どちらも説明つきのまま残す
+h=$(new_home t17)
+host_file "${h}" '{}'
+entry "${h}" diagram
+skill "${h}" pjp-a diagram
+raw_skill "${h}" pjp-seq <<'EOF'
+---
+name: pjp-seq
+description: x
+metadata:
+  pjp-pack: [diagram, notion]
+---
+EOF
+raw_skill "${h}" pjp-block-seq <<'EOF'
+---
+name: pjp-block-seq
+description: x
+metadata:
+  pjp-pack:
+    - diagram
+---
+EOF
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && same "$(overrides "${h}")" '{"pjp-a":"name-only"}' \
+  && grep -q -F 'pack の名前として読めません: [diagram, notion]' "${work}/t17/err" \
+  && grep -q -F '複数の pack は空白で区切ります' "${work}/t17/err" \
+  && ! grep -q 'pjp-block-seq' "${work}/t17/err"; then
+  ok "列で書いた pjp-pack は名前だけにせず、flow の列は空白で区切るよう添えて警告する"
+else
+  ng "列で書いた pjp-pack" "$(detail "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

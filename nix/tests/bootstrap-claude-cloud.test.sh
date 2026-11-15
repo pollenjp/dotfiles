@@ -37,7 +37,8 @@
 #   - SessionStart に自分を --quiet と同じ option (--no-iac-guard も) で 1 件だけ登録し、option を変えて流し直すと
 #     置き換える。手で足した hook とほかのキーは残し、同じ option なら settings.json を書き直さない
 #   - settings.json が壊れていれば触らずに警告し、ほかは進めて 0 で終わる
-#   - settings.json の skillOverrides に、入口 (pjp-pack-<pack>) のある pack の skill (dotfiles の pjp-plantuml など) の
+#   - settings.json の skillOverrides に、入口 (pjp-pack-<pack>) のある pack の skill (dotfiles の pjp-plantuml など。pack を
+#     複数書いた skill は、どれかの入口があれば) の
 #     name-only と、claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/) の anthropic-skills:<名前> の
 #     user-invocable-only を書く。張らない skill (skip-skills.txt の pjp-dotfiles-register-host) と常駐の skill には書かず、
 #     host option のファイル (cloud に無い) の警告は出さない。--quiet ならこの分も stdout に出さない
@@ -486,6 +487,10 @@ fi
 # skill には書かず、host option の警告は出さない。--quiet なら stdout に何も出さない
 sk_pack="${work}/pack-skills"
 new_skills "${sk_pack}" pjp-fake-one pjp-pack-diagram
+# pack を 2 つ書いた skill (video の入口は無く、diagram の入口はある)
+mkdir -p "${sk_pack}/skills/pjp-fake-multi"
+printf -- '---\nname: pjp-fake-multi\ndescription: x\nmetadata:\n  pjp-pack: video diagram\n---\n' \
+  >"${sk_pack}/skills/pjp-fake-multi/SKILL.md"
 h=$(case_home t17)
 mkdir -p "${h}/.claude/skills/synced/b1/pdf"
 printf -- '---\nname: pdf\ndescription: x\n---\n' >"${h}/.claude/skills/synced/b1/pdf/SKILL.md"
@@ -494,6 +499,7 @@ settings="${h}/.claude/settings.json"
 if [[ $(rc_of t17) == 0 ]] \
   && [[ $(jq -r '.skillOverrides["pjp-plantuml"]' "${settings}") == name-only ]] \
   && [[ $(jq -r '.skillOverrides["pjp-d3js"]' "${settings}") == name-only ]] \
+  && [[ $(jq -r '.skillOverrides["pjp-fake-multi"]' "${settings}") == name-only ]] \
   && [[ $(jq -r '.skillOverrides["anthropic-skills:pdf"]' "${settings}") == user-invocable-only ]] \
   && [[ $(jq '.skillOverrides | has("pjp-dotfiles-register-host") or has("pjp-nix-flake") or has("pjp-pack-diagram")' "${settings}") == false ]] \
   && ! grep -q -F '生成ファイル' "${work}/t17/err"; then
