@@ -1727,8 +1727,9 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
 | `xdg-open` (PATH) | `nix/pkgs/pjp-wsl-xdg-open/` (WSL のマシンだけ。[後述](#wsl-の-xdg-open)) |
-| `op`・`pjp-op-log` (PATH) | `nix/pkgs/pjp-op/` (WSL + 1Password のマシンだけ。[後述](#wsl-の-op-を理由つきで呼ぶ-1password-cli)) |
-| `~/.local/state/dotfiles/claude-op-reason.json` | `nix/home/modules/op-reason.nix` (生成。上の `op` があるマシンか。Claude の hook が読む。[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)) |
+| `op`・`op-reason`・`op-reason-log` (PATH) | `nix/pkgs/op-reason/` (WSL + 1Password のマシンだけ。自作の OSS の op-reason の Release を版と SHA-256 で固定したものを、`nix/home/modules/op-reason.nix` が包む。[後述](#wsl-の-op-を理由つきで呼ぶ-1password-cli)) |
+| `~/.config/fish/completions/op.fish`・`op-reason.fish` | `nix/pkgs/op-reason/` (上の `op` があるマシンだけ。op-reason が出した、op を呼ばない補完。同上) |
+| `~/.local/state/dotfiles/claude-op-reason.json` | `nix/home/modules/op-reason.nix` (生成。上の `op` があるマシンか。Claude の hook・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む。[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)) |
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
@@ -2649,135 +2650,118 @@ grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # 
 ## WSL の op を理由つきで呼ぶ (1Password CLI)
 
 WSL で 1Password を使うマシン（`wsl.enable` と `onePassword.enable` が両方 true。[ssh の wrapper](#wsl-では-ssh-自体を-windows-側に差し替える)
-と同じ）の PATH に、呼ぶ理由を必須にした `op`（`nix/pkgs/pjp-op/`）と、その記録を見る `pjp-op-log` を置く
-（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)）。option は無い。
+と同じ）の PATH に、呼ぶ理由を必須にした `op` と、その記録を見る `op-reason-log` を置く。中身は自作の OSS の
+[op-reason](https://github.com/pollenjp/op-reason)（`nix/pkgs/op-reason/`。GitHub の Release の静的な実行ファイルを版と SHA-256 で
+固定したもの）で、Windows の側（`op-reason-windows.zip` の `op-reason.exe`・`launcher.ps1`）も同じ版を `setup --update` が入れる
+（[`win/README.md`「op-reason」](../win/README.md#op-reason)）。option は無い（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)。
+dotfiles の中の wrapper（pjp-op）から op-reason へ移したときに決めたことは、dotfiles-private の
+`docs/superpowers/specs/2026-11-15-op-reason-switch-design.md`）。
 
 ```sh
 op --reason "<なぜ op を呼ぶか>" <op の引数…>
 op --reason "infra-v2 の VM を作るのに Proxmox の API の token を読む" read "op://Private/proxmox/token"
+op-reason-log                # 直近 1 時間の呼び出し (--since 1d・--all・--json)
+op-reason --skill            # AI エージェント向けの手引き (理由の書き方・拒否と時間切れのあとにすること)
 ```
 
-WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直の親に付く。WSL のどの pane から打っても親は同じ `wsl.exe`
-（herdr の server の `WSL_INTEROP`）なので、1 回の許可が後の呼び出しにも、ほかの pane（Claude の作業も）にも効き、承認の画面が
-出なくなる。承認の画面はどの呼び出しでも「Allow wslhost」としか出ず、誰が何のために呼んだかも分からない。`op` はこれを次のように閉じる。
+WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直の親に付く。WSL のどの pane から打っても親は同じ `wslhost`
+なので、1 回の許可が後の呼び出しにも、ほかの pane（Claude の作業も）にも効き、承認の画面が出なくなる。承認の画面はどの呼び出しでも
+「wslhost」としか出ず、誰が何のために呼んだかも分からない。`op` はこれを次のように閉じる（細部は op-reason の README と
+`docs/architecture/README.md`）。
 
 | すること | 中身 |
 | --- | --- |
-| 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。op の引数のどこに置いてもよく、`--` より後ろは op の引数）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ。引数なしの `op` は wrapper の使い方を出す（[後述](#使い方を見るfish-の補完)） |
-| 呼び出しごとの powershell | 呼び出しのたびに新しい `powershell.exe`（Windows PowerShell 5.1）を起こし、その子として `op.exe` を起こす。承認はこの powershell に付き、終わると同じ powershell の中で閉じる（`op whoami` で確かめ、承認があれば `op signout --all`） |
-| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。最前面だが focus は奪わず、許可は求めない（決めるのは 1Password の画面だけ）。op が終われば閉じる |
-| 通知 | 窓と同じ中身を Windows の通知にも出す（補助。出せなければ黙って飛ばす） |
-| 記録 | `~/.local/state/pjp-op/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` の値と `name=value` の値は `***` に伏せる。1 MiB を超えたら `log.1.jsonl` へ回す |
-| 1 つずつ | 呼び出しを flock で 1 つずつにし、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒で終わらなければ、待っている側は 75 で断る（待たせている呼び出しの呼び手と理由を出す。90 秒は Claude の Bash の既定の時間切れ 120 秒より短くしてある）。op どうしのパイプで後ろの op が先に lock を取ったときだけ、前の op は待たずに打つ（下の stdin の段落） |
-| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる。`whoami` は承認を求めないので、1Password がロック中でも画面は出ない |
+| 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。`--` より前ならどこに置いてもよい）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ。引数なしの `op` は wrapper の使い方を出す |
+| 呼び出しごとの Windows のプロセス | 呼び出しのたびに Windows で新しい `op-reason.exe`（動かないときは `launcher.ps1` を新しい `powershell.exe` で）を起こし、その子として `op.exe` を起こす。承認はこのプロセスに付き、`op` が終わると `op.exe whoami` で確かめて `op.exe signout --all` で閉じる |
+| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。決めるのは 1Password の画面だけ |
+| 記録 | `~/.local/state/op-reason/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` と `name=value` の値は伏せる。1 MiB で `log.1.jsonl` へ回す |
+| 1 つずつ | WSL と Windows の呼び出しを 1 つずつにし（WSL の flock と Windows の mutex `Local\op-reason`）、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒（`OPREASON_LOCK_WAIT`）で終わらなければ、待っている側は 75 で断る。`op … \| op …` は動く（後ろの op が、待つ前に前の op の出力を読み切る） |
+| 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
 
-op の stdout（`op document get` の binary も）・stderr・終了コードは変えない。引数は空白・引用符・`&`・`%`・`^`・日本語を含んでも
-そのまま届く（launcher が Windows の規則で command line を組む）。引数は環境変数に載せて渡すので、合わせて base64 で 28000 字を
-超えると 2 で断る（長い値は `--template` やファイルで渡す）。
+op の stdout（binary も）・stderr・終了コードは変えない。終了コードの 2・75・127 は op-reason が断ったもの（op-reason の README の
+「終了コード」）。
 
-stdin はそのまま `op.exe` に渡す。ただし op の出力を別の op に渡すパイプ（`op --reason … item list --format json | op --reason …
-item get -`。間に `jq` などを挟んでもよい）では、後ろの op が lock を持ったまま前の op の出力を待ち、前の op が lock を待って止まる
-ことがある（前の op が先に lock を取っても、出力がパイプのバッファの 64 KiB を超えると、lock を待つ後ろの op が読まないので前の op が
-書けずに止まる）。どちらが先に起き、先に lock を取っても止まらないよう、次のようにする。
+### dotfiles が入れるもの
 
-| 場合 | すること |
+| もの | 中身 |
 | --- | --- |
-| 前の op が先に lock を取る | 後ろの op は lock を取る前（と、lock を待つ間）に stdin のパイプを遡って前の op を見つけ、stdin を読み切ってから渡す（前の op が終わるまで待つ） |
-| 後ろの op が先に lock を取る（前の op が遅れて起きた） | 前の op は lock を待つ間に、lock を持つ op が自分の出力を読んでいると見て、lock を待たずに打つ。2 つの `op.exe` が同時に動き、窓も 2 つ出る。前の op の窓には、そのわけと後ろの op の理由を「注意」の行に出し、`pjp-op-log` の結果に「(lock を待たず)」を添える。共有の承認の見張りは lock を持つ後ろの op に任せる |
+| `op`・`op-reason`・`op-reason-log`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具）。包みは次の 2 つを既定にする（`--set-default`。環境に値があればそちらが勝つ）: `OPREASON_EXE`（Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`）・`OPREASON_LANG=ja`（文・窓・記録の表を日本語に） |
+| Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
+| fish の補完 | `~/.config/fish/completions/op.fish`・`op-reason.fish`（op-reason が `--completion fish` で出した、op を呼ばない補完）。fish に同梱の op の補完は `op completion fish` を打ち、wrapper が理由なしとして断った文が端末に出るので、それより先に読まれる場所に置く |
+| `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか（`{"enable": <bool>}`）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
 
-前に op の無いパイプ（`cat file | op …`・`ssh … | op …`。ssh のように閉じないものもある）と socket（Claude の Bash の stdin）は
-読み切らず、待ち時間も増えない。パイプを遡って書き手を見るのは lock の前に 1 回と、lock を待つ間の 1 秒ごとで、1 回はプロセスが
-130 ほどの WSL で 2 ms だった。
+win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Windows の側を setup が入れない。そのマシンで `op` を使うなら、
+op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` を
+そこへ向ける）。入っていない間の `op` は 127 で断る（refused の `no-exe`）。
 
-### service account・Connect の token
+### Smart App Control と OPREASON_RUNNER
 
-呼び手の環境に `OP_SERVICE_ACCOUNT_TOKEN`（か `OP_CONNECT_HOST` と `OP_CONNECT_TOKEN` の両方）があれば、デスクトップアプリの承認を
-使わない呼び出しとして扱う。token はその 1 回の Windows のプロセスにだけ渡し（`WSLENV` の `/w`）、`OP_BIOMETRIC_UNLOCK_ENABLED=false`
-を付けて、token が効かなくてもデスクトップアプリに落ちないようにする。承認の画面が出ないので、窓・通知・承認の閉じ方は省く。
-理由は必須のまま、記録には service account（Connect）で動いたことを残す。
+`op-reason.exe` には署名が無いので、Smart App Control（SAC）がオンの Windows では起こすことを断られることがある（版を上げるたびに
+評判は振り出しに戻る）。そのとき WSL からの呼び出しは、ひとりでに `launcher.ps1`（Windows に入っている Windows PowerShell 5.1）へ回り、
+stderr に 1 行そう出し、記録の end に `fallback` が残る。窓が出るまでは 1〜1.5 秒ほど遅くなる。止められるマシンで毎回の試しと
+その 1 行を無くすなら、そのホストの modules（dotfiles-private の `nix/hosts/<ホスト>.nix`）に次を書く:
 
-### 記録を見る (`pjp-op-log`)
-
-```sh
-pjp-op-log               # 直近 1 時間
-pjp-op-log --since 1d    # 期間を広げる (s・m・h・d)
-pjp-op-log --all         # 残っている記録を全部
-pjp-op-log --json        # 1 呼び出し 1 行の JSON (理由とコマンドを切らない)
+```nix
+home.sessionVariables.OPREASON_RUNNER = "launcher";   # exe を試さず launcher.ps1 だけで動かす
 ```
 
-列は 時刻・結果（許可・拒否・時間切れ・失敗・成功・中断）・秒・呼び手・理由・コマンド。終わっていない（止められた）呼び出しは
-「実行中か中断」、断った呼び出しと共有の承認を消したことも行に出る。
-
-### 使い方を見る・fish の補完
-
-引数なしの `op`（`--reason` だけのときも）は、wrapper の使い方（理由の書き方・理由なしで通るもの・`pjp-op-log`・op 本体の help
-の出し方）を stdout に出して 0 で終わる。`powershell.exe` も `op.exe` も起こさず、記録にも書かない。op 本体の使い方は今までどおり
-`op --help`（コマンドごとは `op <コマンド> --help`）で、呼び出しごとの powershell を通って `op.exe` が出す。
-
-fish には、op を呼ばない op の補完を `~/.config/fish/completions/op.fish` に置く（`nix/pkgs/pjp-op/op-completion.fish` を
-`programs.fish.completions` で）。fish に同梱の op の補完は `op completion fish | source` の 1 行で、補完を初めて使うとき（Tab・
-自動補完の候補）に `op completion fish` を打つ。wrapper は理由が無いので断り、使い方と断りの文が端末に出ていた（fish を起こす
-たびに 1 回。記録にも refused が残る）。fish は `~/.config/fish/completions` を同梱の補完より先に探すので、置いた方が読まれる。
-
-| 出すもの | 中身 |
-| --- | --- |
-| `--reason` | まだ書いていなければ出す（`op <Tab>` でもコマンドと並べて出す）。理由の値には何も出さない |
-| コマンド | トップのコマンドと 2 段目（`op item <Tab>` → `get`・`list`…）。`--reason`・`--account` などの値をコマンドと読まない |
-| flag | global の flag と、よく使うコマンド（read・inject・run・signin・signout・item・document）の flag（短い形の `-o`・`-i`・`-f`・`-n` も）。ファイルを取る flag（`--out-file`・`-o` など）と `op document create` の引数ではファイルを出す |
-| `--` の後ろ | `op run -- <コマンド>` の子のコマンドは、そのコマンドの補完に任せる |
-
-item・vault の名前のように op に聞かないと分からないものは出さない（op を呼ぶと、補完のたびに powershell と `op.exe` が起き、
-承認の画面も出うる）。一覧は op 2.41.0 から写してある。op を上げてコマンドが変わったら、ファイルの先頭のコメントの手順で
-写し直す。wrapper の無いマシンの fish は、同梱の補完（本物の op を呼ぶ）のまま。`fish --no-config` は置き場を読まないので、
-同梱の補完が動く。
+`OPREASON_RUNNER=exe` なら回り道をしない。ほかの環境変数（`OPREASON_LOCK_WAIT` など）は op-reason の README の「環境変数」。
 
 ### 守る決まり
 
 - **窓が出ていない 1Password CLI の承認の画面は拒否する。** 窓の無い画面は `op` を通らずに `op.exe` を直に打ったもの（道具の中
-  など）で、許可すると WSL のどの pane からも使える承認ができる。窓に「ほかにも op.exe が動いています」と出たときも、どれの承認か
-  分からなければ拒否する。op どうしのパイプで前の op が lock を待たずに打ったとき（その窓の「注意」に出る）は、窓が 2 つ出て承認の
-  画面も 2 つ出うる。画面が窓より多ければ拒否する
+  など）で、許可すると WSL のどの pane からも使える承認ができる
 - **うっかり許可したら、WSL で `op.exe signout --all` を打つ**（`op` を通さずに直に。WSL 全体の承認が消える）。次に `op` を
   打ったときの見張りも消す
-- **`op` を止めた後（Claude の Bash の時間切れ・Ctrl+C）に窓の無い承認の画面が残ったら、拒否する。** 止めると Windows 側の
-  powershell も終わり、窓が消える（下の「気を付けること」）。許可してしまったら、1Password をロックして消す
+- **`op` を止めた後（Claude の Bash の時間切れ・Ctrl+C）に窓の無い承認の画面が残ったら、拒否する。** 許可してしまったら、
+  1Password をロックして消す（承認は終わったプロセスに付いたまま、1Password の 10 分の期限まで残る）
 
 ### 反映
 
-`~/dotfiles/setup --self-update --update` で入る。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）
-の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く（同梱の補完をもう読んだ
-fish は、起こし直すまでそのまま）。
+`~/dotfiles/setup --self-update --update` で入る（WSL の `op` は switch、Windows の zip は `bootstrap-windows-op-reason.sh`）。
+Claude の hook の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く。前の wrapper
+（pjp-op）の記録 `~/.local/state/pjp-op/` は読まなくなる（要らなければ消してよい）。
 
 ### 確かめる
 
 ```sh
-command -v op                              # ~/.nix-profile/bin/op
-op                                         # wrapper の使い方 (powershell も op.exe も起こさない)
+command -v op op-reason-log                # ~/.nix-profile/bin/op・op-reason-log
+op-reason --version                        # op-reason 0.1.0 (Windows を起こさない)
+op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
-op --version                               # 理由なしで通る (承認の画面は出ない)
-op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。60 秒以内に許可すると vault の一覧が出る
-pjp-op-log                                 # 上の呼び出しが「許可」で残る
+op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
+op-reason-log                              # 上の呼び出しが「許可」で残る
 op.exe whoami                              # WSL の直の op.exe は account is not signed in のまま (承認が漏れていない)
 ```
 
-確かめに `op --reason … whoami` は使えない。`whoami` は承認を求めず、呼び出しごとの powershell には承認が無いので、窓だけが
-出て `account is not signed in` で終わる。
+確かめに `op --reason … whoami` は使えない。`whoami` は承認を求めず、呼び出しごとのプロセスには承認が無いので、窓だけが出て
+`account is not signed in` で終わる。`op` が 127 で「op-reason.exe が見つかりません」と断るなら、Windows の側がまだ入っていない
+（`nix/scripts/bootstrap-windows-op-reason.sh --apply` か、Windows の PowerShell で `Install-OpReason`）。
 
 ### 気を付けること
 
-- 1Password の承認の画面は、出てから約 60 秒で時間切れになる。op は `[ERROR] <日時> authorization timeout` を出して 1 で終わり、
-  記録は「時間切れ」になる。拒否すると `[ERROR] <日時> authorization prompt dismissed, please try again` で「拒否」になる
-  （wrapper はこの 2 つの文言で見分ける。op 2.41.1 で確かめた）。1Password がロック中なら、同じ画面から Windows Hello で解く
-- Claude Code の Bash の時間切れや端末の Ctrl+C で `op` を止めると、`powershell.exe` の relay も止まり、Windows 側の powershell
-  （launcher）も終わる。op が承認を待っていれば、窓は消えて 1Password の承認の画面だけが残る（窓の無い画面なので拒否する）。
-  許可してしまうと、その承認は終わった powershell に付いたまま閉じられず（WSL の `op.exe signout --all` では消えない）、1Password の
-  10 分の期限まで残るので、1Password をロックして消す。lock も離れるので、次の `op` の窓に「ほかにも op.exe が動いています」と出る。
-  止められる機会を減らすため、Claude の hook は op を打つ Bash の timeout を長く（600000）するよう促す。止められた呼び出しは
-  `pjp-op-log` に「中断」か「断った (始める前に止められた)」で残る
+- 1Password の承認の画面は、出てから約 60 秒で時間切れになる。記録は「時間切れ」、拒否すると「拒否」になる（op の `[ERROR]` の文言で
+  見分ける）。1Password がロック中なら、同じ画面から Windows Hello で解く
+- Claude Code の Bash の時間切れや端末の Ctrl+C で `op` を止めると、窓が消えて 1Password の承認の画面だけが残ることがある（窓の
+  無い画面なので拒否する）。止められる機会を減らすため、Claude の hook は op を打つ Bash の timeout を長く（600000）するよう促す。
+  止められた呼び出しは `op-reason-log` に「中断」で残る
 - 道具の中で `op.exe` を直に打つものは止めない（Claude の hook はコマンドの文字だけを見る）。上の「窓が出ていない承認は拒否」と
-  見張りで守る。Windows 側から service account の token で `op.exe` を起こす道具は承認の画面を出さないので、関わらない
-- 承認の画面の名前は、挟む powershell にしても「wslhost」と出る（1Password が決める）。誰が呼んだかは窓と記録で見る
-- 見張りの `op.exe whoami` は 1 回およそ 1 秒かかる（1 回の呼び出しで 2 回）
+  見張りで守る
+- `signout --all` は CLI の session をすべて閉じる。同じときにほかの端末で手で打った `op.exe` の session も閉じる
+- 長く動く program を `op run` で起こさない（lock と窓が program の間ずっと残る）。値は `pjp-op-env` で解いて渡す（[次の節](#シークレットを-env-の参照から渡す-pjp-op-env)）
+
+### op-reason の新しい版を出したとき
+
+dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
+上げる（版がずれると、WSL の `op` が Windows の `op-reason.exe` と取り決めの版が合わずに断る）。自作のアプリの Release なので、依存の
+公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。依存の更新の skill `pjp-dotfiles-deps` も見ない）。
+
+1. Release の `op-reason-x86_64-linux`・`op-reason-aarch64-linux` を落とし、`sha256sum -c` で隣の `.sha256` と同じかを確かめる
+2. `nix/pkgs/op-reason/default.nix` の `version` と、`assets` の 2 つの `sha256` を新しい版にする（`installCheck` が `--version` を
+   版と照らす）
+3. Windows の側は [`win/README.md`「op-reason の新しい版を出したとき」](../win/README.md#op-reason-の新しい版を出したとき)（`Install-OpReason.ps1` の表と既定の版）
+4. `nix build ./nix#checks.x86_64-linux.op-reason-state` と `Install-OpReason.Tests.ps1` を流して PR を出す。merge したら
+   `setup --update` で WSL と Windows が揃う
 
 ## シークレットを .env の参照から渡す (pjp-op-env)
 
@@ -2842,14 +2826,14 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 
 | 値が出うる所 | どう防いだか |
 | --- | --- |
-| ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op は stdin の写しを作らず（前段が op の wrapper のときだけ作る）、stderr の写し（値は出ない）は tmpfs に置いて終わりに消す |
+| ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op（op-reason）は stdin と stderr の写しをファイルに作らない（前段が op のときだけ stdin を読み切ってメモリに持ち、承認の結果を見分けるための stderr の末尾もメモリに持つ） |
 | 引数（`/proc/<pid>/cmdline`・`ps`） | 値を引数に載せない。op に渡すのは理由と `inject` だけ。環境変数は bash の組み込みの `export` で入れ、外のコマンドを起こさずに `exec` で program に置き換わる（テストは strace ですべての `execve` の引数を見る） |
 | `.env` の評価 | `source`・`eval` をしない。値の `$(…)`・`` ` ``・`;`・引用符・空白は文字のまま渡す。代入で値を評価する bash の特別な名前（`OPTIND` など）は読めない行にする。入れた変数の数をループの後で数え、足りなければ program を起こさない |
 | 解けない参照・出力の取り違え | fail closed。op が 0 以外で終われば program を起こさない（参照が 1 つでも解けなければ op は 0 以外）。出力は起動ごとの乱数（128 bit）の境界の印で区切り、印の数・順・前後が合わない・NUL がある（環境変数にできない）なら 70 で止める |
-| 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`pjp-op-log`）に入るのは理由と `inject` だけ |
+| 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`op-reason-log`）に入るのは理由と `inject` だけ |
 | xtrace | 最初の行で `set +x +a +m`（呼び手の `SHELLOPTS`・`BASH_ENV` が xtrace や job control を付けていても外す。job control が付いていると op の出力を受け損なう） |
 | op の認証 | `OP_SERVICE_ACCOUNT_TOKEN`・`OP_CONNECT_HOST`・`OP_CONNECT_TOKEN`・`OP_SESSION_*` は op に渡し、program を起こす前に外す |
-| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓の理由には、頭に program と参照の件数、後ろに読む参照が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる）。窓は理由を 200 字で切るので、件数より並んだ参照が少なければ切れている（全部は記録に入る。`pjp-op-log --json`） |
+| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓の理由には、頭に program と参照の件数、後ろに読む参照が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる）。窓は理由を 200 字で切るので、件数より並んだ参照が少なければ切れている（全部は記録に入る。`op-reason-log --json`） |
 | lock と窓 | op の出力を読み切り、op が終わってから program を起こす。program が動いている間、ほかの pane の op は待たされない |
 
 守らないもの（op を素で使うとき・`op run` と同じで、`pjp-op-env` で増えも減りもしない）:
@@ -2935,7 +2919,7 @@ shell の変数・ファイル・端末・引数に入れない。jq が出す�
 command -v pjp-op-env pjp-op-ref                         # ~/.nix-profile/bin/pjp-op-env・pjp-op-ref
 pjp-op-env --dry-run                                     # .env の名前と種類。参照でない値は出さず、op を呼ばない
 pjp-op-env --reason "参照が解けるかを確かめる" -- true   # 承認の画面が 1 回だけ出て、全部解ければ 0
-pjp-op-log                                               # WSL: inject の 1 行。理由の後ろに読む参照が並ぶ
+op-reason-log                                            # WSL: inject の 1 行。理由の後ろに読む参照が並ぶ
 pjp-op-ref --reason "参照を ID の形にする" "<参照>"      # 承認の画面が項目ごとに 1 回出て、ID の参照を出す
 ```
 
@@ -3626,13 +3610,16 @@ skill が読まれなかったときの念押しが `PostToolUse`・`PostToolUse
 
 | いつ | すること |
 | --- | --- |
-| 打つ前（PreToolUse） | `op.exe` を直に起こすコマンドを止め（deny）、`op --reason "<なぜ op を呼ぶか>" …` で打ち直すよう返す。承認は呼び出しごとに出るので、呼ぶ回数を減らす書き方（`vault get` を 11 回打たず `vault list --format json` を 1 回にするなど）と、op を打つ Bash の timeout を長く（600000）することも促す。承認の要らない `whoami`・`signout`・`--version`・`--help` は止めない |
-| 拒否・時間切れ・止められたあと（PostToolUse・PostToolUseFailure） | `op` の記録に、この会話（`session_id`）の承認の拒否・時間切れ・承認を待つ間に止められた（end の `interrupted`）・ほかの op の承認待ちが終わらない（refused の `lock-timeout`）・それを待つ間に止められた（refused の `interrupted`）があれば、Claude に「同じ op を打ち直さない。何を・なぜ・どこからを書いてから、① 直し方（許可する・Bash の timeout を長くするなど）で 1 回だけ打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。続けて承認の画面が出ると、慣れで許可しやすくなるため。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く |
+| 打つ前（PreToolUse） | `op.exe` を直に起こすコマンドを止め（deny）、`op --reason "<なぜ op を呼ぶか>" …` で打ち直すよう返す（初めてなら `op-reason --skill` を読むよう添える）。承認は呼び出しごとに出るので、呼ぶ回数を減らす書き方（`vault get` を 11 回打たず `vault list --format json` を 1 回にするなど）と、op を打つ Bash の timeout を長く（600000）することも促す。承認の要らない `whoami`・`signout`・`--version`・`--help` は止めない |
+| 拒否・時間切れ・止められたあと（PostToolUse・PostToolUseFailure） | op-reason の記録（`~/.local/state/op-reason/log.jsonl`）に、この会話（`session_id`）の承認の拒否・時間切れ・承認を待つ間に止められた（end の `interrupted`）・ほかの op の承認待ちが終わらない（refused の `lock-timeout` と、Windows の mutex を待ち切れなかった end の `lock-timeout`）・それを待つ間に止められた（refused の `interrupted`）があれば、Claude に「同じ op を打ち直さない。何を・なぜ・どこからを書いてから、① 直し方（許可する・Bash の timeout を長くするなど）で 1 回だけ打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。続けて承認の画面が出ると、慣れで許可しやすくなるため。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く |
+| Windows の部品が無いと断られたあと（同上） | refused の `no-exe`・`no-launcher`（op-reason の `op-reason.exe`・`launcher.ps1` が見つからない）なら、入れるまで打ち直しても同じく断られるので、① Windows に op-reason の zip を入れてもらってから（`~/dotfiles/setup --update` か Windows の PowerShell で `Install-OpReason`）1 回だけ打ち直す（推奨）② 飛ばす ③ 止める の問いを出させる。`no-powershell`（launcher に固定したときに `powershell.exe` が見つからない）なら、① は WSL の PATH の `powershell.exe`（か `OPREASON_POWERSHELL`）を確かめてもらってから打ち直す |
 
 - コマンドの読み方は ssh-agent-notice.sh と同じ（引用符・heredoc の本文・コメントの中の `op.exe` では止めない。包むコマンドを外し、
   `bash -c` などに文字列で渡したものは読み直す）。それに `powershell`・`pwsh` の `-Command`・`-c` と `cmd` の `/c` の中も読み、
   `C:\…\op.exe` のような `\` のパスも見る。script の中・関数・変数に入れた `op.exe` は見えない
-- 拒否・時間切れは op の stderr の文言ではなく、`op` の記録（`end` の `result`）で見る（`op` は op の stderr を変えない）
+- 拒否・時間切れは op の stderr の文言ではなく、op-reason の記録（`end` の `result`）で見る（op-reason は op の stderr を変えない）。
+  `op-reason.exe` が動かず `launcher.ps1` に回った呼び出し（end の `fallback`）なら、問いの文にそれを添える（Smart App Control に
+  止められたかの手がかり）。記録の形と断りの理由は op-reason の `docs/architecture/README.md`
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure` に
   1 件ずつ（`Bash`）足す
 
