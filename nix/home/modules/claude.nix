@@ -91,6 +91,13 @@
 #
 # アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
 # ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
+#
+# ## Claude Code を入れるホストだけ (dotfiles.claude.enable)
+#
+# ここで置くものは、dotfiles.claude.enable のホスト (既定は設定グループの ② AI の道具) にだけ置く。false のホスト (客先の PC
+# など) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
+# ただし git-via-gh.json (gitViaGh.enable の値) は Claude Code によらず置く (setup の取得と fetch 系の abbr / alias が読む)。
+# herdr の skill は herdr も入れるホスト (dotfiles.herdr.enable) だけ。
 {
   config,
   lib,
@@ -219,367 +226,373 @@ let
     ) entries;
 in
 
-{
-  # CLAUDE_CODE_SHELL は profile の bin/bash を指す。programs.bash が profile に bash を入れない
-  # 設定では指す先が無くなり、Claude Code は黙って zsh を探し直すので、評価で止める。
-  assertions = [
-    {
-      assertion = config.programs.bash.enable && config.programs.bash.package != null;
-      message = ''
-        claude.nix: Claude Code の Bash tool の shell (CLAUDE_CODE_SHELL) は profile の bash
-        (${claudeShell}) を指します。programs.bash.enable を true のままにし、
-        programs.bash.package を null にしないでください (既定は bashInteractive)。
-      '';
-    }
-  ];
+lib.mkMerge [
+  # gitViaGh.enable の値。setup が GitHub から取るとき (bootstrap の clone / 取得と、本体の更新の fetch) に
+  # nix/scripts/ の git_github が読み、true なら gh の資格情報を先に試す (TKT-221)。setup.sh は Nix より
+  # 前にも走るので、jq を使わずに読める形 ({"enable":true} / {"enable":false}) にし、値によらず必ず書く。
+  # Claude Code を入れないホストでも setup が読むので、下の claude.enable の条件の外に置く。
+  {
+    home.file.".local/state/dotfiles/git-via-gh.json".text =
+      builtins.toJSON { enable = cfg.gitViaGh.enable; } + "\n";
+  }
 
-  # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
-  # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
-  # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
-  warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
-    dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
-    規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
-    このホストの mkHome (dotfiles-private に登録したファイルか、~/dotfiles/flake.nix に足した tmp) に
-    claude.notion.profile = "personal"; (か "work") を書いて switch してください
-    (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
-  '';
+  (lib.mkIf cfg.enable {
+    # CLAUDE_CODE_SHELL は profile の bin/bash を指す。programs.bash が profile に bash を入れない
+    # 設定では指す先が無くなり、Claude Code は黙って zsh を探し直すので、評価で止める。
+    assertions = [
+      {
+        assertion = config.programs.bash.enable && config.programs.bash.package != null;
+        message = ''
+          claude.nix: Claude Code の Bash tool の shell (CLAUDE_CODE_SHELL) は profile の bash
+          (${claudeShell}) を指します。programs.bash.enable を true のままにし、
+          programs.bash.package を null にしないでください (既定は bashInteractive)。
+        '';
+      }
+    ];
 
-  home.packages = map mkAccountCommand accounts;
+    # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
+    # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
+    # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
+    warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
+      dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
+      規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
+      このホストの mkHome (dotfiles-private に登録したファイルか、~/dotfiles/flake.nix に足した tmp) に
+      claude.notion.profile = "personal"; (か "work") を書いて switch してください
+      (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
+    '';
 
-  home.file = lib.mkMerge [
-    # 全セッションで読まれるユーザーレベルの指示。
-    # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
-    #
-    # 「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
-    # CLAUDE.dev-tracker.md に分けてあり、dotfiles.claude.devTracker.enable の
-    # マシンでだけ末尾に連結する。skill を隠したマシンに節だけが残ると、Claude が
-    # 無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
-    #
-    # 連結は「常時部分 (末尾は改行 1 つ) + 空行 + 節」で、enable = true の出力は
-    # 分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
-    {
-      ".claude/CLAUDE.md".text =
-        builtins.readFile (claudeRoot + "/CLAUDE.md")
-        + lib.optionalString cfg.devTracker.enable (
-          "\n" + builtins.readFile (claudeRoot + "/CLAUDE.dev-tracker.md")
-        );
-    }
+    home.packages = map mkAccountCommand accounts;
 
-    # Claude Code の skillOverrides へ流す値。
-    #
-    # skill の見え方 (自動起動するか / 一覧に出るか) は ~/.claude/settings.json の
-    # skillOverrides でしか変えられず、そのファイルは Claude Code 自身が書き換える
-    # ので Nix 管理下に置けない (フックの登録と同じ事情)。そこで望む値だけを
-    # store に置き、nix/scripts/bootstrap-claude-skill-overrides.sh が settings.json へ
-    # merge する。置き場は windows-files.json などと同じ ~/.local/state/dotfiles/。
-    #
-    # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
-    # この key は option が正だと settings.json 側からも読めるよう、enable = true
-    # でも明示して書く。
-    {
-      ".local/state/dotfiles/claude-skill-overrides.json".text =
-        builtins.toJSON {
-          "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
-        }
-        + "\n";
-    }
+    home.file = lib.mkMerge [
+      # 全セッションで読まれるユーザーレベルの指示。
+      # 常時トークンを消費するので最小限に留め、詳しい手順は下のフックに持たせている。
+      #
+      # 「タスク管理」の節 (pjp-dev-tracker skill を使えという指示) は
+      # CLAUDE.dev-tracker.md に分けてあり、dotfiles.claude.devTracker.enable の
+      # マシンでだけ末尾に連結する。skill を隠したマシンに節だけが残ると、Claude が
+      # 無い skill を探しに行ったり、skillOverrides を外そうとしたりするため。
+      #
+      # 連結は「常時部分 (末尾は改行 1 つ) + 空行 + 節」で、enable = true の出力は
+      # 分割前の CLAUDE.md とバイト単位で同じになる (verify: git show main:… と diff)。
+      {
+        ".claude/CLAUDE.md".text =
+          builtins.readFile (claudeRoot + "/CLAUDE.md")
+          + lib.optionalString cfg.devTracker.enable (
+            "\n" + builtins.readFile (claudeRoot + "/CLAUDE.dev-tracker.md")
+          );
+      }
 
-    # claude-<名前> のアカウント一覧。bootstrap-claude-accounts.sh がこれを読んで
-    # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
-    {
-      ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
-    }
-
-    # Claude のセッションに渡す env (settings.json の env)。git の設定 (GIT_CONFIG_*) と、
-    # Bash tool の shell (CLAUDE_CODE_SHELL) と、plugin を https で取る印 (CLAUDE_CODE_PLUGIN_PREFER_HTTPS)。
-    #
-    # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
-    # nix/scripts/bootstrap-claude-env.sh が写す。
-    #
-    #   managed      bootstrap が面倒を見る git のキー。env にあるこのキーの組はいったん全部外し、
-    #                gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
-    #                消えるよう、option の値によらず両方の組のキーを載せる。
-    #                使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
-    #                組が残り続ける)
-    #   gitConfig    入れる組
-    #   managedVars  bootstrap が面倒を見る env の名前 (GIT_CONFIG_* 以外)。vars に無い名前は
-    #                env から消す。managed と同じく、使わなくなった名前もここからは外さない
-    #   vars         入れる env (名前 → 値)
-    #
-    # CLAUDE_CODE_PLUGIN_PREFER_HTTPS は gitViaGh.enable のときだけ vars に入れる (managedVars には
-    # いつも載せ、false にしたとき env から消えるようにする)。Claude Code は source が GitHub
-    # (owner/repo の形) の marketplace と plugin を git で取る前に、ssh -T git@github.com で鍵が通るかを
-    # 確かめる (plugin の自動更新では会話ごとに 1 回、最初の発言から最大 10 分のどこか)。WSL ではその ssh が
-    # ssh.exe を通るので、1Password の承認が出る。clone と fetch は gitConfigGh (insteadOf と gh の helper) で
-    # すでに https と gh の token を通っている (settings.json の env は Claude Code 自身が打つ git にも届く)。
-    # git を通らない確認だけが ssh を直に打つ。この env があると確認を飛ばして最初から https の URL で取るので、
-    # 取れる repo (private も) は変わらず、承認だけが出なくなる。https で取れなくても ssh には切り替えない。
-    # helper が gh なのは gitViaGh.enable のときだけなので、同じ option に結ぶ
-    {
-      ".local/state/dotfiles/claude-env.json".text =
-        builtins.toJSON {
-          managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
-          gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
-          managedVars = [
-            "CLAUDE_CODE_SHELL"
-            "CLAUDE_CODE_PLUGIN_PREFER_HTTPS"
-          ];
-          vars = {
-            CLAUDE_CODE_SHELL = claudeShell;
+      # Claude Code の skillOverrides へ流す値。
+      #
+      # skill の見え方 (自動起動するか / 一覧に出るか) は ~/.claude/settings.json の
+      # skillOverrides でしか変えられず、そのファイルは Claude Code 自身が書き換える
+      # ので Nix 管理下に置けない (フックの登録と同じ事情)。そこで望む値だけを
+      # store に置き、nix/scripts/bootstrap-claude-skill-overrides.sh が settings.json へ
+      # merge する。置き場は windows-files.json などと同じ ~/.local/state/dotfiles/。
+      #
+      # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
+      # この key は option が正だと settings.json 側からも読めるよう、enable = true
+      # でも明示して書く。
+      {
+        ".local/state/dotfiles/claude-skill-overrides.json".text =
+          builtins.toJSON {
+            "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
           }
-          // lib.optionalAttrs cfg.gitViaGh.enable {
-            CLAUDE_CODE_PLUGIN_PREFER_HTTPS = "1";
-          };
-        }
-        + "\n";
-    }
+          + "\n";
+      }
 
-    # gitViaGh.enable の値。setup が GitHub から取るとき (bootstrap の clone / 取得と、本体の更新の fetch) に
-    # nix/scripts/ の git_github が読み、true なら gh の資格情報を先に試す (TKT-221)。setup.sh は Nix より
-    # 前にも走るので、jq を使わずに読める形 ({"enable":true} / {"enable":false}) にし、値によらず必ず書く。
-    {
-      ".local/state/dotfiles/git-via-gh.json".text =
-        builtins.toJSON { enable = cfg.gitViaGh.enable; } + "\n";
-    }
+      # claude-<名前> のアカウント一覧。bootstrap-claude-accounts.sh がこれを読んで
+      # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
+      {
+        ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
+      }
 
-    # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
-    # チケット・PR と cc-page のページを、Claude Code の footer にクリックできるバッジとして並べる。
-    #
-    # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
-    # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず files/claude/footer-links.json に
-    # 書き、cc-page の規則の @ccPagesPort@ だけをこのマシンの cc-pages の port で埋める。規則の url は
-    # 固定の origin (port を含む) で書くしかなく、port は dotfiles.ccPages.port でマシンごとに変わるため (上の ccPagesPort)。
-    {
-      ".local/state/dotfiles/claude-footer-links.json".text = fillCcPagesPort (
-        claudeRoot + "/footer-links.json"
-      );
-    }
+      # Claude のセッションに渡す env (settings.json の env)。git の設定 (GIT_CONFIG_*) と、
+      # Bash tool の shell (CLAUDE_CODE_SHELL) と、plugin を https で取る印 (CLAUDE_CODE_PLUGIN_PREFER_HTTPS)。
+      #
+      # env も settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+      # nix/scripts/bootstrap-claude-env.sh が写す。
+      #
+      #   managed      bootstrap が面倒を見る git のキー。env にあるこのキーの組はいったん全部外し、
+      #                gitConfig を足し直す。gitViaGh.enable を false にしたとき HTTPS の組が
+      #                消えるよう、option の値によらず両方の組のキーを載せる。
+      #                使わなくなったキーも、ここからは外さずに残す (外すと settings.json に
+      #                組が残り続ける)
+      #   gitConfig    入れる組
+      #   managedVars  bootstrap が面倒を見る env の名前 (GIT_CONFIG_* 以外)。vars に無い名前は
+      #                env から消す。managed と同じく、使わなくなった名前もここからは外さない
+      #   vars         入れる env (名前 → 値)
+      #
+      # CLAUDE_CODE_PLUGIN_PREFER_HTTPS は gitViaGh.enable のときだけ vars に入れる (managedVars には
+      # いつも載せ、false にしたとき env から消えるようにする)。Claude Code は source が GitHub
+      # (owner/repo の形) の marketplace と plugin を git で取る前に、ssh -T git@github.com で鍵が通るかを
+      # 確かめる (plugin の自動更新では会話ごとに 1 回、最初の発言から最大 10 分のどこか)。WSL ではその ssh が
+      # ssh.exe を通るので、1Password の承認が出る。clone と fetch は gitConfigGh (insteadOf と gh の helper) で
+      # すでに https と gh の token を通っている (settings.json の env は Claude Code 自身が打つ git にも届く)。
+      # git を通らない確認だけが ssh を直に打つ。この env があると確認を飛ばして最初から https の URL で取るので、
+      # 取れる repo (private も) は変わらず、承認だけが出なくなる。https で取れなくても ssh には切り替えない。
+      # helper が gh なのは gitViaGh.enable のときだけなので、同じ option に結ぶ
+      {
+        ".local/state/dotfiles/claude-env.json".text =
+          builtins.toJSON {
+            managed = lib.unique (map (p: p.k) (gitConfigBase ++ gitConfigGh));
+            gitConfig = gitConfigBase ++ lib.optionals cfg.gitViaGh.enable gitConfigGh;
+            managedVars = [
+              "CLAUDE_CODE_SHELL"
+              "CLAUDE_CODE_PLUGIN_PREFER_HTTPS"
+            ];
+            vars = {
+              CLAUDE_CODE_SHELL = claudeShell;
+            }
+            // lib.optionalAttrs cfg.gitViaGh.enable {
+              CLAUDE_CODE_PLUGIN_PREFER_HTTPS = "1";
+            };
+          }
+          + "\n";
+      }
 
-    # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。
-    #
-    # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
-    # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
-    {
-      ".local/state/dotfiles/claude-notion.json".text =
-        builtins.toJSON {
-          inherit (cfg.notion) profile routes override;
-        }
-        + "\n";
-    }
+      # footer のリンク (settings.json の footerLinksRegexes)。会話に出た Dev Tracker の
+      # チケット・PR と cc-page のページを、Claude Code の footer にクリックできるバッジとして並べる。
+      #
+      # これも settings.json にしか書けないので、skill-overrides と同じく望む値だけを置き、
+      # nix/scripts/bootstrap-claude-footer-links.sh が写す。値は option にせず files/claude/footer-links.json に
+      # 書き、cc-page の規則の @ccPagesPort@ だけをこのマシンの cc-pages の port で埋める。規則の url は
+      # 固定の origin (port を含む) で書くしかなく、port は dotfiles.ccPages.port でマシンごとに変わるため (上の ccPagesPort)。
+      {
+        ".local/state/dotfiles/claude-footer-links.json".text = fillCcPagesPort (
+          claudeRoot + "/footer-links.json"
+        );
+      }
 
-    # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
-    #
-    # claude-notion.json と同じく、claude-skills の skill (pjp-video-explainer-offer) に option の値を
-    # 渡す置き場で、下の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
-    # false・ファイルが無い・壊れているときは作る前に聞く。false でも必ず書く。
-    {
-      ".local/state/dotfiles/claude-video-offer.json".text =
-        builtins.toJSON {
-          autoStart = cfg.videoOffer.autoStart.enable;
-        }
-        + "\n";
-    }
+      # Notion へ書く skill の宛先 (プロファイル名と、このマシンだけの規則と上書き)。
+      #
+      # null / 空でも必ず書く。ファイルが無いのは「dotfiles が古い」、profile が null
+      # なのは「このマシンで選んでいない」と、resolver が見分けて案内を出せるように。
+      {
+        ".local/state/dotfiles/claude-notion.json".text =
+          builtins.toJSON {
+            inherit (cfg.notion) profile routes override;
+          }
+          + "\n";
+      }
 
-    # 重い処理の資源の上限の割合 (heavyJobs.limitPercent。ADR 043)。
-    #
-    # claude-video-offer.json と同じく、claude-skills に option の値を渡す置き場。skill pjp-heavy-jobs の
-    # scripts/limit.sh が limitPercent の割合で systemd の user slice pjp-heavy.slice に CPU とメモリの
-    # 上限を付け、包んだ重い処理をその中で流す。ファイルが無い・読めないときは 70 で縛る。既定のままでも必ず書く。
-    {
-      ".local/state/dotfiles/claude-heavy-jobs.json".text =
-        builtins.toJSON {
-          inherit (cfg.heavyJobs) limitPercent;
-        }
-        + "\n";
-    }
+      # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
+      #
+      # claude-notion.json と同じく、claude-skills の skill (pjp-video-explainer-offer) に option の値を
+      # 渡す置き場で、下の hook も読む。どちらも autoStart が真偽値の true のときだけ作り始め、
+      # false・ファイルが無い・壊れているときは作る前に聞く。false でも必ず書く。
+      {
+        ".local/state/dotfiles/claude-video-offer.json".text =
+          builtins.toJSON {
+            autoStart = cfg.videoOffer.autoStart.enable;
+          }
+          + "\n";
+      }
 
-    # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
-    #
-    # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
-    # そのファイルは Claude Code 自身が書き換える (権限の「常に許可」など) ため
-    # Nix 管理下に置けない。スクリプトだけを配置し、登録はマシンごとに手で行う。
-    # 手順は scripts/bootstrap-claude-hook.sh と nix/README.md を参照。
-    {
-      ".claude/hooks/nix-managed-guard.sh" = {
-        source = claudeRoot + "/hooks/nix-managed-guard.sh";
-        executable = true;
-      };
-    }
+      # 重い処理の資源の上限の割合 (heavyJobs.limitPercent。ADR 043)。
+      #
+      # claude-video-offer.json と同じく、claude-skills に option の値を渡す置き場。skill pjp-heavy-jobs の
+      # scripts/limit.sh が limitPercent の割合で systemd の user slice pjp-heavy.slice に CPU とメモリの
+      # 上限を付け、包んだ重い処理をその中で流す。ファイルが無い・読めないときは 70 で縛る。既定のままでも必ず書く。
+      {
+        ".local/state/dotfiles/claude-heavy-jobs.json".text =
+          builtins.toJSON {
+            inherit (cfg.heavyJobs) limitPercent;
+          }
+          + "\n";
+      }
 
-    # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
-    # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (上の claude-video-offer.json の
-    # autoStart が true なら、答えを待たずに短尺を作り始めるよう知らせる)。作るかどうかを決める
-    # skill (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンと、
-    # settings.json の skillOverrides で skill を止めたマシンでは黙る。
-    # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/video-offer-nudge.sh" = {
-        source = claudeRoot + "/hooks/video-offer-nudge.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse フック。Nix 管理パスを編集しようとしたときだけ介入する。
+      #
+      # フックの **登録** は ~/.claude/settings.json に書く必要があるが、
+      # そのファイルは Claude Code 自身が書き換える (権限の「常に許可」など) ため
+      # Nix 管理下に置けない。スクリプトだけを配置し、登録はマシンごとに手で行う。
+      # 手順は scripts/bootstrap-claude-hook.sh と nix/README.md を参照。
+      {
+        ".claude/hooks/nix-managed-guard.sh" = {
+          source = claudeRoot + "/hooks/nix-managed-guard.sh";
+          executable = true;
+        };
+      }
 
-    # PostToolUse フック。superpowers の 4 つの skill (brainstorming・writing-plans・
-    # using-git-worktrees・finishing-a-development-branch) を読んだ直後に、確認を挟まずに
-    # PR まで走り切るよう Claude に念を押す。正本は CLAUDE.md の「方針を承認したら PR まで
-    # 走り切る」節 (ADR 019)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/run-through-nudge.sh" = {
-        source = claudeRoot + "/hooks/run-through-nudge.sh";
-        executable = true;
-      };
-    }
+      # PostToolUse フック。設計の書き出し (タグ「設計」の cc-page・spec・ADR) と PR の作成を
+      # 見つけ、解説動画を作るかを聞くよう Claude に知らせる (上の claude-video-offer.json の
+      # autoStart が true なら、答えを待たずに短尺を作り始めるよう知らせる)。作るかどうかを決める
+      # skill (pjp-video-explainer-offer) は private な claude-skills にあり、無いマシンと、
+      # settings.json の skillOverrides で skill を止めたマシンでは黙る。
+      # 登録は上のガードと同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/video-offer-nudge.sh" = {
+          source = claudeRoot + "/hooks/video-offer-nudge.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。SSH agent (1Password) を使うコマンドを
-    # 打つ前に、会話の画面と herdr の通知で「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせ、
-    # 断られたら打ち直さずに選択肢の問いを出すよう Claude に指示を足す (ADR 029)。登録は上と同じく
-    # scripts/bootstrap-claude-hook.sh。
-    #
-    # 中で ssh を打つ道具 (sshAgentNotice.extraCommands) は claude-ssh-agent-notice.json に置き、hook が読む。
-    # 空でも必ず書く (hook は無いときも組み込みの一覧で動く)。
-    {
-      ".claude/hooks/ssh-agent-notice.sh" = {
-        source = claudeRoot + "/hooks/ssh-agent-notice.sh";
-        executable = true;
-      };
-      ".local/state/dotfiles/claude-ssh-agent-notice.json".text =
-        builtins.toJSON {
-          inherit (cfg.sshAgentNotice) extraCommands;
-        }
-        + "\n";
-    }
+      # PostToolUse フック。superpowers の 4 つの skill (brainstorming・writing-plans・
+      # using-git-worktrees・finishing-a-development-branch) を読んだ直後に、確認を挟まずに
+      # PR まで走り切るよう Claude に念を押す。正本は CLAUDE.md の「方針を承認したら PR まで
+      # 走り切る」節 (ADR 019)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/run-through-nudge.sh" = {
+          source = claudeRoot + "/hooks/run-through-nudge.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse フック (matcher Bash)。public な repo へ、ほかの repo の issue・PR・commit への参照を書く
-    # git push と gh pr create などを打つ前に止め、どこか・どう直すかを Claude に返す (ADR 033。参照先の
-    # timeline に付く跡は消せない)。option は持たない (マシンごとに変える値が無い)。登録は上と同じく
-    # scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/xref-guard.sh" = {
-        source = claudeRoot + "/hooks/xref-guard.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。SSH agent (1Password) を使うコマンドを
+      # 打つ前に、会話の画面と herdr の通知で「どこから・何を・承認の画面はどの接続の端末に出るか」を知らせ、
+      # 断られたら打ち直さずに選択肢の問いを出すよう Claude に指示を足す (ADR 029)。登録は上と同じく
+      # scripts/bootstrap-claude-hook.sh。
+      #
+      # 中で ssh を打つ道具 (sshAgentNotice.extraCommands) は claude-ssh-agent-notice.json に置き、hook が読む。
+      # 空でも必ず書く (hook は無いときも組み込みの一覧で動く)。
+      {
+        ".claude/hooks/ssh-agent-notice.sh" = {
+          source = claudeRoot + "/hooks/ssh-agent-notice.sh";
+          executable = true;
+        };
+        ".local/state/dotfiles/claude-ssh-agent-notice.json".text =
+          builtins.toJSON {
+            inherit (cfg.sshAgentNotice) extraCommands;
+          }
+          + "\n";
+      }
 
-    # PreToolUse フック (matcher Bash)。venv・project の外 (system・user の環境) へ入れる install (pip install・npm install -g・
-    # apt install・brew install など) と、terraform・tofu・terragrunt で実物 (資源か state) を変える操作 (apply・destroy など) を、
-    # 打つ前に止めて代わりの手を Claude に返す (claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.5)。
-    # IaC の分だけ iacGuard.enable で外せ、その値を claude-iac-guard.json に置いて hook が読む (無い・壊れているときは止める。
-    # false でも必ず書く)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/install-iac-guard.sh" = {
-        source = claudeRoot + "/hooks/install-iac-guard.sh";
-        executable = true;
-      };
-      ".local/state/dotfiles/claude-iac-guard.json".text =
-        builtins.toJSON {
-          enable = cfg.iacGuard.enable;
-        }
-        + "\n";
-    }
+      # PreToolUse フック (matcher Bash)。public な repo へ、ほかの repo の issue・PR・commit への参照を書く
+      # git push と gh pr create などを打つ前に止め、どこか・どう直すかを Claude に返す (ADR 033。参照先の
+      # timeline に付く跡は消せない)。option は持たない (マシンごとに変える値が無い)。登録は上と同じく
+      # scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/xref-guard.sh" = {
+          source = claudeRoot + "/hooks/xref-guard.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse フック (matcher Write|Edit|MultiEdit|NotebookEdit)。public な dotfiles の docs/ に書こうとしたら止め、
-    # 設計の文書の置き場 (private な dotfiles-private の docs/) を Claude に返す (dotfiles-private の ADR 035。決まりの
-    # 正本は repo の直下の CLAUDE.md)。止める repo の表は hook の中に持つので option は無い。登録は上と同じく
-    # scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/docs-guard.sh" = {
-        source = claudeRoot + "/hooks/docs-guard.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse フック (matcher Bash)。venv・project の外 (system・user の環境) へ入れる install (pip install・npm install -g・
+      # apt install・brew install など) と、terraform・tofu・terragrunt で実物 (資源か state) を変える操作 (apply・destroy など) を、
+      # 打つ前に止めて代わりの手を Claude に返す (claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.5)。
+      # IaC の分だけ iacGuard.enable で外せ、その値を claude-iac-guard.json に置いて hook が読む (無い・壊れているときは止める。
+      # false でも必ず書く)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/install-iac-guard.sh" = {
+          source = claudeRoot + "/hooks/install-iac-guard.sh";
+          executable = true;
+        };
+        ".local/state/dotfiles/claude-iac-guard.json".text =
+          builtins.toJSON {
+            enable = cfg.iacGuard.enable;
+          }
+          + "\n";
+      }
 
-    # PostToolUse・PostToolUseFailure フック (matcher Bash)。gh pr create が assignee を指定せずに PR を作ったら、
-    # gh の認証ユーザーを Assignees に付けて確かめるよう Claude に念を押す (ADR 039)。決まりの正本は同じ dotfiles の
-    # skill pjp-gh-pr-create で、settings.json の skillOverrides でその skill を止めたマシンでは黙る (option は無い)。
-    # 登録は上と同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/pr-assignee-nudge.sh" = {
-        source = claudeRoot + "/hooks/pr-assignee-nudge.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse フック (matcher Write|Edit|MultiEdit|NotebookEdit)。public な dotfiles の docs/ に書こうとしたら止め、
+      # 設計の文書の置き場 (private な dotfiles-private の docs/) を Claude に返す (dotfiles-private の ADR 035。決まりの
+      # 正本は repo の直下の CLAUDE.md)。止める repo の表は hook の中に持つので option は無い。登録は上と同じく
+      # scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/docs-guard.sh" = {
+          source = claudeRoot + "/hooks/docs-guard.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse フック (matcher Bash)。project を作り始めるコマンド (cargo new・uv init・go mod init・npm init など) と依存を足す
-    # コマンド (cargo add・uv add・pnpm add など) を打つときに、読む skill (pack lang の pjp-<言語>・pjp-dep-release-age) を 1 文で
-    # Claude に知らせる。止めない。名指しする skill が無いマシンと、skillOverrides でその skill を止めたマシンでは黙る (option は
-    # 無い)。設計は claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.6。登録は上と同じく
-    # scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/lang-nudge.sh" = {
-        source = claudeRoot + "/hooks/lang-nudge.sh";
-        executable = true;
-      };
-    }
+      # PostToolUse・PostToolUseFailure フック (matcher Bash)。gh pr create が assignee を指定せずに PR を作ったら、
+      # gh の認証ユーザーを Assignees に付けて確かめるよう Claude に念を押す (ADR 039)。決まりの正本は同じ dotfiles の
+      # skill pjp-gh-pr-create で、settings.json の skillOverrides でその skill を止めたマシンでは黙る (option は無い)。
+      # 登録は上と同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/pr-assignee-nudge.sh" = {
+          source = claudeRoot + "/hooks/pr-assignee-nudge.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/pjp-op。理由が必須の 1Password CLI の
-    # wrapper) を守る: op.exe の直打ちを止めて op --reason … に直させ、op の記録にこの会話の承認の拒否・時間切れがあれば、
-    # 打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
-    # (claude-op-reason.json の enable が false。home/modules/op-reason.nix が書く) では黙る。登録は上と同じく
-    # scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/op-reason-guard.sh" = {
-        source = claudeRoot + "/hooks/op-reason-guard.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse フック (matcher Bash)。project を作り始めるコマンド (cargo new・uv init・go mod init・npm init など) と依存を足す
+      # コマンド (cargo add・uv add・pnpm add など) を打つときに、読む skill (pack lang の pjp-<言語>・pjp-dep-release-age) を 1 文で
+      # Claude に知らせる。止めない。名指しする skill が無いマシンと、skillOverrides でその skill を止めたマシンでは黙る (option は
+      # 無い)。設計は claude-skills の docs/superpowers/specs/2026-11-13-lang-prefs-pack-design.md の §3.6。登録は上と同じく
+      # scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/lang-nudge.sh" = {
+          source = claudeRoot + "/hooks/lang-nudge.sh";
+          executable = true;
+        };
+      }
 
-    # PreToolUse フック (matcher Bash と mcp__.*[Gg]ist.*)。gist やペースト共有のサービス (0x0.st・termbin など) へ上げる
-    # コマンドと、gist を作る・書き換える MCP の tool を、打つ前にいつも止める (ADR 047。確かめずに外へ上げると private な
-    # 中身も公開される)。通す口は作らず、上げたいときはユーザーが ! で自分で打つ。option は持たない (止めるサービスの
-    # 一覧は hook の中に持つ)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/gist-guard.sh" = {
-        source = claudeRoot + "/hooks/gist-guard.sh";
-        executable = true;
-      };
-    }
+      # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/pjp-op。理由が必須の 1Password CLI の
+      # wrapper) を守る: op.exe の直打ちを止めて op --reason … に直させ、op の記録にこの会話の承認の拒否・時間切れがあれば、
+      # 打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
+      # (claude-op-reason.json の enable が false。home/modules/op-reason.nix が書く) では黙る。登録は上と同じく
+      # scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/op-reason-guard.sh" = {
+          source = claudeRoot + "/hooks/op-reason-guard.sh";
+          executable = true;
+        };
+      }
 
-    # Stop フック。会話に出たリンク (footer のバッジと同じ規則で拾う PR・チケット・cc-page) を、cc-pages の会話のトップページの
-    # 「リンク」の節に全部残す (footer のバッジは 5 個までで、長い会話では押し出される)。入口の footer-links-archive.sh が
-    # cc-pages・node の有無と CC_PAGES_DISABLE を見てから、隣の本体 footer-links-archive.mjs を PATH の node (mise のもの) で
-    # 起こす。node は home の閉包に入れない (言語ランタイムは mise。nix から渡すと閉包の脆弱性スキャンに node が入る)。
-    # option は持たず、どのホストにも置く (cc-pages を使わないマシンでは黙る)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
-    {
-      ".claude/hooks/footer-links-archive.sh" = {
-        source = claudeRoot + "/hooks/footer-links-archive.sh";
-        executable = true;
-      };
-      ".claude/hooks/footer-links-archive.mjs".source = claudeRoot + "/hooks/footer-links-archive.mjs";
-    }
+      # PreToolUse フック (matcher Bash と mcp__.*[Gg]ist.*)。gist やペースト共有のサービス (0x0.st・termbin など) へ上げる
+      # コマンドと、gist を作る・書き換える MCP の tool を、打つ前にいつも止める (ADR 047。確かめずに外へ上げると private な
+      # 中身も公開される)。通す口は作らず、上げたいときはユーザーが ! で自分で打つ。option は持たない (止めるサービスの
+      # 一覧は hook の中に持つ)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/gist-guard.sh" = {
+          source = claudeRoot + "/hooks/gist-guard.sh";
+          executable = true;
+        };
+      }
 
-    # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
-    # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
-    # 先頭の 📄top (cc-pages の会話のトップページへのリンク) の port は @ccPagesPort@ と書き、上の ccPagesPort で埋める。
-    #
-    # 既存マシンには /statusline が書いた実ファイルが在る。home-manager は
-    # 自分が作ったのではないファイルを消さないので、初回の switch は
-    # "would be clobbered" で止まる。退避するか消してから switch する。
-    {
-      ".claude/statusline-command.sh" = {
-        text = fillCcPagesPort (claudeRoot + "/statusline-command.sh");
-        executable = true;
-      };
-    }
+      # Stop フック。会話に出たリンク (footer のバッジと同じ規則で拾う PR・チケット・cc-page) を、cc-pages の会話のトップページの
+      # 「リンク」の節に全部残す (footer のバッジは 5 個までで、長い会話では押し出される)。入口の footer-links-archive.sh が
+      # cc-pages・node の有無と CC_PAGES_DISABLE を見てから、隣の本体 footer-links-archive.mjs を PATH の node (mise のもの) で
+      # 起こす。node は home の閉包に入れない (言語ランタイムは mise。nix から渡すと閉包の脆弱性スキャンに node が入る)。
+      # option は持たず、どのホストにも置く (cc-pages を使わないマシンでは黙る)。登録は上と同じく scripts/bootstrap-claude-hook.sh。
+      {
+        ".claude/hooks/footer-links-archive.sh" = {
+          source = claudeRoot + "/hooks/footer-links-archive.sh";
+          executable = true;
+        };
+        ".claude/hooks/footer-links-archive.mjs".source = claudeRoot + "/hooks/footer-links-archive.mjs";
+      }
 
-    # パッケージが同梱する agent skill。今は herdr だけ。
-    #
-    # nixpkgs の installAgentSkills は skill を $out/share/skills/<pname>/<skill>/ に
-    # 入れるだけで、Claude Code はそこを探さない。使うものを 1 つずつ ~/.claude/skills/ へ
-    # 張る (nixpkgs manual の installAgentSkills の節が勧める形)。
-    #
-    # home.packages の herdr (modules/agent-link.nix が包んだもの) の中身と同じ pkgs.herdr を指すので、skill の
-    # 版は CLI と揃い、flake.lock を上げれば一緒に上がる。公式の手順
-    # (npx skills add herdrdev/herdr --skill herdr -g) は打った日の master を取り、
-    # 宣言的でもないので使わない。名前は公式どおり herdr (pjp- は自作の印)。
-    #
-    # 張る元が無くても home-manager は切れた symlink を黙って作る。nixpkgs が置き場所を
-    # 変えたら tests/claude-herdr-skill.nix (flake の checks) で落ちる。
-    {
-      ".claude/skills/herdr".source = "${pkgs.herdr}/share/skills/herdr/herdr";
-    }
+      # statusLine のスクリプト。フックとまったく同じ事情で、**登録**だけが
+      # settings.json 側に残る。手順は scripts/bootstrap-claude-statusline.sh。
+      # 先頭の 📄top (cc-pages の会話のトップページへのリンク) の port は @ccPagesPort@ と書き、上の ccPagesPort で埋める。
+      #
+      # 既存マシンには /statusline が書いた実ファイルが在る。home-manager は
+      # 自分が作ったのではないファイルを消さないので、初回の switch は
+      # "would be clobbered" で止まる。退避するか消してから switch する。
+      {
+        ".claude/statusline-command.sh" = {
+          text = fillCcPagesPort (claudeRoot + "/statusline-command.sh");
+          executable = true;
+        };
+      }
 
-    (linkEntries "skills")
-    (linkEntries "agents")
-    (linkEntries "commands")
-  ];
-}
+      # パッケージが同梱する agent skill。今は herdr だけ。
+      #
+      # nixpkgs の installAgentSkills は skill を $out/share/skills/<pname>/<skill>/ に
+      # 入れるだけで、Claude Code はそこを探さない。使うものを 1 つずつ ~/.claude/skills/ へ
+      # 張る (nixpkgs manual の installAgentSkills の節が勧める形)。
+      #
+      # home.packages の herdr (modules/agent-link.nix が包んだもの) の中身と同じ pkgs.herdr を指すので、skill の
+      # 版は CLI と揃い、flake.lock を上げれば一緒に上がる。公式の手順
+      # (npx skills add herdrdev/herdr --skill herdr -g) は打った日の master を取り、
+      # 宣言的でもないので使わない。名前は公式どおり herdr (pjp- は自作の印)。
+      #
+      # 張る元が無くても home-manager は切れた symlink を黙って作る。nixpkgs が置き場所を
+      # 変えたら tests/claude-herdr-skill.nix (flake の checks) で落ちる。
+      #
+      # herdr を入れないホスト (dotfiles.herdr.enable が false。客先で Claude Code だけ許可が出た PC など) には張らない
+      # (無い CLI の skill になり、pkgs.herdr を閉包に入れることにもなる)。
+      (lib.mkIf config.dotfiles.herdr.enable {
+        ".claude/skills/herdr".source = "${pkgs.herdr}/share/skills/herdr/herdr";
+      })
+
+      (linkEntries "skills")
+      (linkEntries "agents")
+      (linkEntries "commands")
+    ];
+  })
+]

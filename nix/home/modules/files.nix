@@ -5,7 +5,7 @@
 #
 # ネイティブモジュール (programs.tmux / programs.neovim / programs.zellij) を
 # あえて使っていない理由は ADR の「対象外にしたもの」を参照。
-{ ... }:
+{ config, lib, ... }:
 
 {
   home.file = {
@@ -26,6 +26,17 @@
     "starship.toml".source = ../../files/starship.toml;
     "zellij/config.kdl".source = ../../files/zellij/config.kdl;
 
+    # init.vim は ~/.vim/common.vim を source する (複製時に書き換え済み)
+    "nvim/init.vim".source = ../../files/nvim/init.vim;
+
+    # tss() から `tmux -f` で指定される設定。
+    # 元は ~/dotfiles/tmux/home.tmux.conf を source-file していたが
+    # ~/.tmux.conf を見るように書き換えてある。
+    # これを参照する tss() 自体は Stage 5 (shell) で移行する。
+    "tmux/interactive_shell.tmux.conf".source = ../../files/tmux/interactive_shell.tmux.conf;
+  }
+  # herdr を入れるホスト (dotfiles.herdr.enable。既定は設定グループの ② AI の道具) だけに置く
+  // lib.optionalAttrs config.dotfiles.herdr.enable {
     # herdr。zellij / tmux と指の動きを揃えたキーバインドを入れてある。
     #
     # herdr は設定画面 (prefix+s) の一部トグルを config.toml へ**書き戻す**
@@ -37,14 +48,5 @@
     # 初回のオンボーディング完了時の書き込みだけは、設定ファイル側に
     # `onboarding = false` を先に書いて避けている。
     "herdr/config.toml".source = ../../files/herdr/config.toml;
-
-    # init.vim は ~/.vim/common.vim を source する (複製時に書き換え済み)
-    "nvim/init.vim".source = ../../files/nvim/init.vim;
-
-    # tss() から `tmux -f` で指定される設定。
-    # 元は ~/dotfiles/tmux/home.tmux.conf を source-file していたが
-    # ~/.tmux.conf を見るように書き換えてある。
-    # これを参照する tss() 自体は Stage 5 (shell) で移行する。
-    "tmux/interactive_shell.tmux.conf".source = ../../files/tmux/interactive_shell.tmux.conf;
   };
 }

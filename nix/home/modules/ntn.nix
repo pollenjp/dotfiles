@@ -9,9 +9,12 @@
 # bootstrap が見分けるため):
 #
 #   {"keyring": false}
-{ config, ... }:
+#
+# ntn を入れないホスト (dotfiles.ntn.enable が false。既定は設定グループの ③ 個人のアカウントが off のとき) には置かない
+# (setup は bootstrap-ntn を飛ばす)。
+{ config, lib, ... }:
 
-{
+lib.mkIf config.dotfiles.ntn.enable {
   home.file.".local/state/dotfiles/ntn.json".text =
     builtins.toJSON { inherit (config.dotfiles.ntn) keyring; } + "\n";
 }

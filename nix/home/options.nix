@@ -933,10 +933,10 @@ in
         効くのは `windowsFiles.enable = true` のマシンだけ (配らないマシンでは true でも何もしない)。既定は ② の段
         (`aiTools.enable`。personal・company なら true)。WSL の herdr (`herdr.enable`) とは別のもの。
 
-        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `herdr` に落ち、`~/dotfiles/setup --update`
-        で走る nix/scripts/bootstrap-windows-herdr.sh・bootstrap-windows-herdr-app.sh が読み、false なら飛ばす。
-        bootstrap-windows-pin-updates.sh も、false なら herdr・herdr-app・herdr-core の新しい版を確かめない。欄の無い前の世代の
-        ファイルは true と読む。
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsHerdr` に落ち (home/modules/group.nix。
+        `windows-files.json` には入れない)、`~/dotfiles/setup --update` は false なら bootstrap-windows-herdr.sh・
+        bootstrap-windows-herdr-app.sh を飛ばす (script の冒頭の `# tool: windowsHerdr`)。bootstrap-windows-pin-updates.sh も、false なら
+        herdr・herdr-app・herdr-core の新しい版を確かめない。group.json が無い前の世代では、今までどおり入れる。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
       '';

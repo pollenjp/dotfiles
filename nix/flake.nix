@@ -172,6 +172,11 @@
           home-wsl-initial-example =
             (import ./tests/fixtures/local-flake-initial/initial.nix { dotfiles.lib = { inherit mkHome; }; })
             .initial.activationPackage;
+          # 客先のグループの作り物のホスト (lib/group-examples.nix の client。WSL で win/ を配る) を build する (ADR 057)。
+          # ② ③ のものが入らないこと・入るものの並びが fixture と同じことは group-client-state が評価で見る
+          home-group-client-example =
+            (import ./lib/group-examples.nix { inherit mkHome; }).client.activationPackage;
+          group-client-state = import ./tests/group-client.nix { inherit lib pkgs mkHome; };
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";

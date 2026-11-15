@@ -199,6 +199,9 @@ in
       zdel = "zellij delete-session";
       zdel-all = "zellij delete-all-sessions";
 
+    }
+    # herdr を入れるホスト (dotfiles.herdr.enable。既定は ② AI の道具) だけに置く
+    // lib.optionalAttrs config.dotfiles.herdr.enable {
       # herdr。zellij の z* と指の動きが揃うよう、先頭の z を h に変えただけ。
       # キーバインドを揃えたのと同じ方針 (files/herdr/config.toml)。
       #
@@ -250,6 +253,9 @@ in
       # 後ろに `--session <name>` を続ければ、その session に入る。r は remote の r。
       hr = "herdr --remote";
 
+    }
+    # Claude Code を入れるホスト (dotfiles.claude.enable。既定は ② AI の道具) だけに置く
+    // lib.optionalAttrs config.dotfiles.claude.enable {
       #########################
       # Claude Code
       #########################

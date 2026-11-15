@@ -17,7 +17,7 @@
 #   .bash/02_asdf.sh                        : asdf は既に使われていない
 #   050_common の `bindkey -v`               : zsh 専用のガード付きで、
 #                                             bash では元々発火していなかった
-{ config, ... }:
+{ config, lib, ... }:
 
 let
   # fetch 系の alias と関数が打つ git と、gfp の中身。何をするか・gfp に名前ではなく中身を書く理由は
@@ -185,6 +185,9 @@ in
       zdel = "z delete-session";
       zdel-all = "z delete-all-sessions";
 
+    }
+    # herdr を入れるホスト (dotfiles.herdr.enable。既定は ② AI の道具) だけに置く
+    // lib.optionalAttrs config.dotfiles.herdr.enable {
       # herdr。zellij の z* の先頭を h に変えただけ。対応表・`hd` を作れない
       # 理由・落としたものは fish.nix の同じ節に書いてある。
       #
@@ -207,6 +210,9 @@ in
       hsvstop = "herdr server stop";
       hr = "herdr --remote";
 
+    }
+    # Claude Code を入れるホスト (dotfiles.claude.enable。既定は ② AI の道具) だけに置く
+    // lib.optionalAttrs config.dotfiles.claude.enable {
       #########################
       # Claude Code
       #########################

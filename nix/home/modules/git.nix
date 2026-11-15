@@ -38,6 +38,11 @@ let
   # Windows ユーザー名が要る。useWindowsSigner が false のときは参照されない
   # (mkIf の中身は条件が false なら評価されないので null 補間にならない)。
   opSshSignPath = "/mnt/c/Users/${wsl.onePassword.windowsUserName}/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
+
+  # git の名前とメールを個人のアカウント (pollenjp・pollenjp-sub) にするか (既定は設定グループの ③ 個人のアカウント)。
+  # false のホスト (自社・客先) には名前もメールも書かない。そのホストで使うものをホストの modules に
+  # programs.git.settings.user で書く (書かなければ git が commit の前に止まる。個人の名前で commit してしまわない)。
+  useIdentity = config.dotfiles.git.identity.enable;
 in
 
 {
@@ -119,8 +124,8 @@ in
 
     # 複製元: .gitconfig.pollenjp-sub.github.com
     # contents を使うと include 先のファイルも home-manager が生成するので、
-    # 別途 files/ に置く必要がない。
-    includes = [
+    # 別途 files/ に置く必要がない。個人のアカウントの名前とメールなので、上の useIdentity のホストだけ。
+    includes = lib.optionals useIdentity [
       {
         condition = "gitdir:~/workdir/github.com/pollenjp-sub";
         contents.user = {
@@ -131,7 +136,7 @@ in
     ];
 
     settings = {
-      user = {
+      user = lib.mkIf useIdentity {
         name = "pollenjp";
         email = "polleninjp@gmail.com";
       };

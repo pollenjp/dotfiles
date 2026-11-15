@@ -53,13 +53,19 @@
 # この port は home/modules/claude.nix も読み、Claude Code の footer の cc-page のバッジの規則
 # (~/.local/state/dotfiles/claude-footer-links.json) と、status line の先頭の 📄top (会話のトップページへの
 # リンク。~/.claude/statusline-command.sh) に埋める (null なら同じく 7777)。
+#
+# ## cc-pages を入れるホストだけ
+#
+# unit と config.toml は dotfiles.ccPages.enable のホストにだけ置く (既定は設定グループの ② AI の道具と ③ 個人のアカウントが
+# 両方 on のとき。private な repo を clone して build する Claude Code の道具なので)。false のホストでは setup も
+# bootstrap-cc-pages を飛ばす。Claude Code の footer の規則と status line の 📄top は cc-pages が無くても置く (リンクが開けないだけ)。
 { config, lib, ... }:
 
 let
   cfg = config.dotfiles.ccPages;
   configToml = ".config/cc-pages/config.toml";
 in
-{
+lib.mkIf cfg.enable {
   home.file = lib.mkIf (cfg.port != null) {
     ${configToml}.text = ''
       addr = "127.0.0.1:${toString cfg.port}"
