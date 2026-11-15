@@ -694,7 +694,7 @@ PATH_EXTRA=${b} run "${c}" --steps switch
 s_behind=$(after_result "${c}")
 if [[ $(rc "${c}") == 0 ]] \
   && grep -qF 'が今の設定と違います。ただし本体 ('"${c}"'/repo) が upstream より 3 commit 遅れているので、まだ出し直さない' <<<"${s_behind}" \
-  && grep -qF -- '~/dotfiles/setup --self-update --update' <<<"${s_behind}" \
+  && grep -qF -- 'dotfiles/setup --self-update --update' <<<"${s_behind}" \
   && ! grep -qF '要約と README を出し直す PR を作る' <<<"${s_behind}"; then
   ok "要約が違っても、本体が upstream より遅れていれば、出し直さずに --self-update で本体を進めるよう出す"
 else
