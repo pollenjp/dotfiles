@@ -50,6 +50,20 @@
 #
 # 評価はローカル flake の写しで行い、ユーザーの ~/dotfiles (flake.nix と flake.lock) にも dotfiles-private にも書かない
 # (shared/ を外すのも、dotfiles-private の nix/ の写しで行う)。
+#
+# ## ホストの要約 (summary・summaries)
+#
+# ホストの設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles-private の docs/adr/057_host_setting_groups_*)。
+# 中身は mkHome が組み立てたホストに足す hostSummary (nix/lib/host-summary.nix) で、ここは評価して出す・書くだけ。
+#
+#   summary     1 ホストの要約を stdout に出す (既定は setup が --host なしで選ぶホスト。客先の PC の tmp でも)。ローカル flake の
+#               写しで評価する (--nix-dir を渡したときだけ写しの本体を替える)。--markdown なら <ホスト>.md の全文
+#   summaries   dotfiles-private の作業ツリーの nix/hosts/*.nix の全ホストを、compare の新しい形と同じく privateHosts だけの flake で
+#               評価し、nix/hosts/<ホスト>.md と nix/hosts/README.md を書く (ホストのファイルが無くなった .md は消す)。--check は
+#               書かずに、古い・足りない・余るファイルを出して 1。作業ツリーに書くのは nix/hosts/ の中だけ
+#
+# 並びは毎回同じ (要約は日時・store のパス・dotfiles の版を持たない) なので、同じ本体とホストのファイルなら出し直しても差が
+# 出ない。setup.sh も、この PC の <ホスト>.md を同じ hostSummary.file で作り直して比べる (古ければ警告のまとめに出す)。
 
 set -eu -o pipefail
 
@@ -90,6 +104,14 @@ usage() {
       shared/ が同じかを出す)。--out は作業ツリーの nix/・ローカル flake・その dotfiles-private の nix/ の外に置く。
       0 = 同じ (shared/ を外すと同じ = shared/ の値だけ違うときも)、1 = 違う (config.dotfiles の違いを出す)、
       2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形 (shared/ を足した形) が評価できない
+  private-host.sh summary [--host <ホスト>] [--flake <dir>] [--nix-dir <本体の nix>] [--markdown]
+      ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか) を出す。既定のホストは setup が --host なしで
+      選ぶもの (決まらなければ 2)。ローカル flake の写しで評価し、--nix-dir を渡せば写しの本体をそこに替える。--markdown なら
+      dotfiles-private の nix/hosts/<ホスト>.md に置く全文。ホストを評価できなければ 3
+  private-host.sh summaries --private <dotfiles-private の作業ツリー> [--nix-dir <本体の nix>] [--check]
+      作業ツリーの nix/hosts/*.nix の全ホストの要約を、nix/hosts/<ホスト>.md と nix/hosts/README.md に書く (本体は --nix-dir。既定は
+      この script の repo の nix/)。ホストのファイルが無い <名前>.md は消す。--check は書かずに、違うファイルを出して 1 (同じなら 0)。
+      2 = 使い方の誤り・jq が無い、3 = 評価できない
   private-host.sh -h, --help
       これ
 
@@ -994,6 +1016,179 @@ cmd_compare() {
   return "${rc}"
 }
 
+# summary: 1 ホストの要約を出す (冒頭の「ホストの要約」)
+cmd_summary() {
+  local flake_dir=${default_flake_dir} host="" nd="" markdown=0 which text expr
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --host | --flake | --nix-dir)
+        [[ $# -ge 2 ]] || die "$1 に値を渡してください"
+        case $1 in
+          --host) host=$2 ;;
+          --flake) flake_dir=${2%/} ;;
+          --nix-dir) nd=${2%/} ;;
+        esac
+        shift
+        ;;
+      --markdown) markdown=1 ;;
+      *) die "summary の知らない引数です: $1 (--help)" ;;
+    esac
+    shift
+  done
+  [[ -f ${flake_dir}/flake.nix ]] || die "ローカル flake がありません: ${flake_dir}/flake.nix"
+  if [[ -z ${host} ]]; then
+    if ! which=$(DOTFILES_LOCAL_DIR="${flake_dir}" "${BASH}" "${script_dir}/setup.sh" --which-host 2>/dev/null </dev/null) \
+      || [[ -z ${which} ]]; then
+      die "対象ホストが決まりません (setup が --host なしで選ぶホストが無い)。--host <ホスト> で選んでください"
+    fi
+    host=${which%%$'\t'*}
+  fi
+  check_host "${host}"
+  need_nix
+  need_tmp
+  copy_flake "${flake_dir}" "${tmp}/cur"
+  if [[ -n ${nd} ]]; then
+    nd=$(cd -P -- "${nd}" && pwd) || die "--nix-dir がありません: ${nd}"
+    check_path "${nd}"
+    set_input "${tmp}/cur/flake.nix" dotfiles "${nd}"
+  fi
+  if ! lock_sync "${tmp}/cur"; then
+    echo "!! ローカル flake の写しの lock を、path: の入力に合わせられません:" >&2
+    eval_error_excerpt "${tmp}/cur.lock.log" >&2
+    exit 2
+  fi
+  expr='s: s.text'
+  if ((markdown)); then
+    expr="s: s.file \"${host}\""
+  fi
+  if ! text=$(nix eval --raw "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" --apply "${expr}" \
+    2>"${tmp}/summary.err" </dev/null); then
+    {
+      printf '!! ホスト %s の要約を、ローカル flake (%s) の写しで評価できません (ホストの名前が違う・本体が設定グループより前、など):\n' \
+        "${host}" "${flake_dir}"
+      eval_error_excerpt "${tmp}/summary.err"
+    } >&2
+    exit 3
+  fi
+  # $(…) は末尾の改行を落とすので、出すときに 1 つ足す (要約の文は改行で終わる)
+  if ((markdown)); then
+    printf '%s\n' "${text}"
+    return 0
+  fi
+  printf '==> ホスト %s の要約 (設定グループ。ローカル flake %s で評価)\n%s\n' "${host}" "${flake_dir}" "${text}"
+  echo "  (段・道具の switch の直し方は本体の nix/README.md「設定グループ」。グループごとの既定は nix/groups.md)"
+}
+
+# summaries の flake: dotfiles-private の nix/ ($3) のホストと、その要約のファイル (名前 → 中身) を出す (本体は $2)
+summaries_flake() {
+  mkdir -p "$1"
+  cat >"$1/flake.nix" <<EOS
+# private-host.sh summaries が作った、dotfiles-private の nix/ のホストの要約を出す flake (書き出すための写し)
+{
+  inputs.dotfiles.url = "path:$2";
+  inputs.dotfiles-private.url = "path:$3";
+  inputs.dotfiles-private.flake = false;
+  outputs =
+    { dotfiles, dotfiles-private, ... }:
+    {
+      summaryFiles = dotfiles.lib.hostSummary.files (dotfiles.lib.privateHosts dotfiles-private);
+    };
+}
+EOS
+}
+
+# summaries: dotfiles-private の作業ツリーの nix/hosts/ に、全ホストの要約と README を書く (冒頭の「ホストの要約」)
+cmd_summaries() {
+  local private="" nd=${nix_dir} check=0 pnix work json name f base differ=() wrote=() removed=()
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --private | --nix-dir)
+        [[ $# -ge 2 ]] || die "$1 に値を渡してください"
+        case $1 in
+          --private) private=${2%/} ;;
+          --nix-dir) nd=${2%/} ;;
+        esac
+        shift
+        ;;
+      --check) check=1 ;;
+      *) die "summaries の知らない引数です: $1 (--help)" ;;
+    esac
+    shift
+  done
+  [[ -n ${private} ]] || die "summaries には --private <dotfiles-private の作業ツリー> が要ります"
+  if [[ -d ${private}/nix/hosts ]]; then
+    pnix=${private}/nix
+  elif [[ -d ${private}/hosts ]]; then
+    pnix=${private}
+  else
+    die "dotfiles-private の作業ツリーに nix/hosts/ がありません: ${private}"
+  fi
+  pnix=$(cd -P -- "${pnix}" && pwd)
+  nd=$(cd -P -- "${nd}" && pwd) || die "--nix-dir がありません: ${nd}"
+  check_path "${nd}"
+  check_path "${pnix}"
+  command -v jq &>/dev/null || die "jq がありません (要約のファイルの組を読むのに使う。home-manager switch の後に流す)。"
+  need_nix
+  need_tmp
+  work="${tmp}/summaries"
+  summaries_flake "${work}" "${nd}" "${pnix}"
+  if ! lock_sync "${work}"; then
+    echo "!! 要約を出す flake の lock を作れません:" >&2
+    eval_error_excerpt "${work}.lock.log" >&2
+    exit 2
+  fi
+  if ! json=$(nix eval --json "path:${work}#summaryFiles" 2>"${work}.err" </dev/null); then
+    {
+      printf '!! %s/hosts/ のホストの要約を評価できません (ホストのファイルの誤り・本体が設定グループより前、など。本体: %s):\n' \
+        "${pnix}" "${nd}"
+      eval_error_excerpt "${work}.err"
+    } >&2
+    exit 3
+  fi
+  printf '%s' "${json}" >"${work}.json"
+  while IFS= read -r name; do
+    [[ -n ${name} ]] || continue
+    check_host "${name%.md}"
+    jq -j --arg k "${name}" '.[$k]' "${work}.json" >"${work}.want" || die "要約の ${name} を読めません"
+    f="${pnix}/hosts/${name}"
+    if [[ -f ${f} ]] && cmp -s "${work}.want" "${f}"; then
+      continue
+    fi
+    differ+=("${name}")
+    if ((check == 0)); then
+      cp "${work}.want" "${f}"
+      wrote+=("${name}")
+    fi
+  done < <(jq -r 'keys[]' "${work}.json")
+  # ホストのファイルが無くなった <名前>.md (README.md は除く)
+  for f in "${pnix}"/hosts/*.md; do
+    [[ -f ${f} ]] || continue
+    base=${f##*/}
+    [[ ${base} != README.md && ! -f ${pnix}/hosts/${base%.md}.nix ]] || continue
+    differ+=("${base} (ホストのファイルが無い)")
+    if ((check == 0)); then
+      rm -f -- "${f}"
+      removed+=("${base}")
+    fi
+  done
+  if ((check)); then
+    if ((${#differ[@]} == 0)); then
+      printf '==> %s/hosts/ の要約は今の設定と同じ (本体: %s)\n' "${pnix}" "${nd}"
+      return 0
+    fi
+    printf '==> %s/hosts/ の要約が今の設定と違う (本体: %s。出し直すなら --check を外す):\n' "${pnix}" "${nd}"
+    printf '  %s\n' "${differ[@]}"
+    return 1
+  fi
+  if ((${#wrote[@]} == 0 && ${#removed[@]} == 0)); then
+    printf '==> %s/hosts/ の要約は今の設定と同じ (書き換えたファイルは無い。本体: %s)\n' "${pnix}" "${nd}"
+    return 0
+  fi
+  printf '==> %s/hosts/ の要約を出し直しました (本体: %s)\n' "${pnix}" "${nd}"
+  ((${#wrote[@]} == 0)) || printf '  書いた: %s\n' "${wrote[@]}"
+  ((${#removed[@]} == 0)) || printf '  消した: %s (ホストのファイルが無い)\n' "${removed[@]}"
+}
+
 if [[ $# -eq 0 ]]; then
   usage >&2
   exit 2
@@ -1039,6 +1234,8 @@ case ${cmd} in
   inspect) cmd_inspect "$@" ;;
   draft) cmd_draft "$@" ;;
   compare) cmd_compare "$@" ;;
+  summary) cmd_summary "$@" ;;
+  summaries) cmd_summaries "$@" ;;
   -h | --help) usage ;;
   *)
     usage >&2
