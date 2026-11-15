@@ -3,8 +3,9 @@
 #
 # Windows に固定した版で入れているものに、固定した版より新しい版が出ていないかを確かめて、短く知らせる。
 # 冪等。`setup.sh --update` でも毎回走る。dotfiles.wsl.windowsFiles.enable = true のマシンが対象。新しい版があれば
-# 名前ごとに 1 行と、上げるかを決める Claude Code の skill (pjp-dotfiles-win-pin-update) の名前を、setup の最後の
-# 「警告のまとめ」に残す。確かめられなければ (gh が無い・ログインしていない・API の失敗) 1 行出して先へ進む。
+# 名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を、setup の
+# 最後の「警告のまとめ」に残す。確かめられなければ (gh が無い・ログインしていない・API の失敗) 1 行出して先へ進む。
+# 依存の更新の skill が読む JSON の口 (--list --json・--candidates --json) も持つ (下の「JSON の口」)。
 #
 # order: 97
 #
@@ -16,7 +17,8 @@
 #
 # Windows のアプリは版を固定して入れている (win/README.md の「固定した版より新しい版の知らせ」)。新しい版が出ても、今までは
 # 各手順の ※ の行と、週 1 回の CI (猶予 30 日・7 日) でしか見えなかった。setup のたびに「新しい版がある」とだけ短く出し、
-# Claude Code がそれを拾って、猶予ごとの上げ先の候補を出し、上げるか (どの版か・上げないか) をユーザーに聞けるようにする。
+# Claude Code に頼めば、猶予ごとの上げ先の候補を出して、上げるか (どの版か・上げないか) をユーザーに聞けるようにする。
+# 候補は、repo の拡張 (.claude/skills/pjp-dotfiles-deps/。設定の deps.toml の [[pins]] の windows) が指す JSON の口から出る。
 #
 # ## 対象
 #
@@ -37,16 +39,41 @@
 #    (欄が無い前の世代は true と読む)
 # 2. gh が無い・ログインしていないなら、確かめられないと 1 行出して exit 0
 # 3. 名前ごとに上の口を出た日なしで呼び (60 秒で打ち切る)、見送っていない新しい版があれば「<題>: <固定した版> → <新しい版>」を
-#    出す。警告のまとめには、skill の名前を書いた見出しと、その続きの行として残す。新しい版が無ければ 1 行だけ (まとめには
+#    出す。警告のまとめには、頼み方を書いた見出しと、その続きの行として残す。新しい版が無ければ 1 行だけ (まとめには
 #    残さない)。確かめられなかった名前は、わけを添えて 1 行出し、まとめにも残す。どれも exit 0 (setup を止めない)
 #
-# ## --candidates (skill が打つ)
+# ## --candidates (人が読む)
 #
 #   bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]
 #
 # windows-files.json によらず、名前 (省けば全部) ごとに出た日つきで呼び、新しい版 (出た日・何日前・URL、見送った版は理由)、
 # 猶予ごとの上げ先 (猶予の日数以上たった、見送っていない新しい版のうち、いちばん新しいもの。出た日の分からない版は選ばない)、
 # 上げ方の README の節と見送りの一覧の場所を出す。確かめられない名前があれば、出せるものを出したうえで exit 2。
+#
+# ## JSON の口 (--list --json・--candidates --json)
+#
+# repo の拡張の設定 (.claude/skills/pjp-dotfiles-deps/deps.toml の [[pins]] の windows) が指す口。依存の更新の skill が repo の
+# root で打ち、stdout の JSON 1 つを読む。形は読む側との約束 (ADR 056) で、項目を足す・変えるときは読む側と揃える。
+#
+#   bootstrap-windows-pin-updates.sh --list --json [<名前>…]                         固定した版と ID だけ (ネットワークを使わない)
+#   bootstrap-windows-pin-updates.sh --candidates --json [--grace 1,3,7] [<名前>…]   新しい版と、猶予ごとの上げ先も
+#
+#   {"version": 1, "items": [
+#     {"name", "title", "files": [repo の root からのパス], "pinned", "winget_id": 文字列 | null, "skip_file": 文字列 | null,
+#      "candidates": [{"version", "published": "YYYY-MM-DD" | null, "age_days": 日数 | null, "url", "skipped": 理由 | null}],
+#      "targets": {"<猶予の日数>": 版 | null},
+#      "error": 文字列 | null}]}
+#
+# - candidates と targets は --candidates のときだけ。candidates は固定した版より新しい版を古い順に並べる (見送った版も理由
+#   つきで入れる)。published・age_days は、出た日の分からない版 (見送った版の多く・release と突き合わせられない版) で null。
+#   url はいつも文字列 (release notes などが無い版は winget-pkgs の manifest のディレクトリ)。targets は --candidates の上げ先と
+#   同じ選び方で、日数ごとに版か null
+# - winget_id は winget で入れないもの (herdr-app・herdr-core) で null。files は版を書くファイル (ps1 か releases.json)
+# - 確かめられなかった名前は error にわけを書き、ほかの名前は出したうえで exit 2 (stdout の JSON は読める)。ps1 が読めない
+#   名前は title が名前・files が []・pinned が ""・winget_id と skip_file が null。出た日を確かめられなかった名前・gh が
+#   無いときは candidates が []・targets が全部 null
+# - windows-files.json は見ない (repo が固定しているもの全部)。--list は jq だけで動き、gh もネットワークも使わない
+#   (固定した版は check の口の --json --offline で読む)
 
 set -eu -o pipefail
 
@@ -56,26 +83,31 @@ script_dir=$(
 )
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
 all_names=(openssh herdr google-japanese-input ntn claude-code herdr-app herdr-core)
-skill=pjp-dotfiles-win-pin-update
 
 usage() {
   cat <<'EOS'
 Windows に固定した版で入れているものに、固定した版より新しい版が出ていないかを確かめて、短く知らせる。
 
 使い方:
-  bootstrap-windows-pin-updates.sh                                        確かめて知らせる (setup の手順)
-  bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]  猶予ごとの上げ先の候補を出す
+  bootstrap-windows-pin-updates.sh                                               確かめて知らせる (setup の手順)
+  bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]         猶予ごとの上げ先の候補を出す
+  bootstrap-windows-pin-updates.sh --candidates --json [--grace 1,3,7] [<名前>…]  同じものを JSON で出す
+  bootstrap-windows-pin-updates.sh --list --json [<名前>…]                        固定した版を JSON で出す (ネットワークを使わない)
 
   名前: openssh・herdr・google-japanese-input・ntn・claude-code・herdr-app・herdr-core (省けば全部)
 EOS
 }
 
 candidates=0
+list=0
+json=0
 graces=1,3,7
 names=()
 while (($#)); do
   case $1 in
     --candidates) candidates=1 ;;
+    --list) list=1 ;;
+    --json) json=1 ;;
     --grace)
       if (($# < 2)); then
         echo "--grace には日数を , で区切って渡します (例: --grace 1,3,7)。" >&2
@@ -97,8 +129,23 @@ while (($#)); do
   esac
   shift
 done
-if ((! candidates && (${#names[@]} > 0))); then
-  echo "名前は --candidates と一緒に渡します。" >&2
+if ((candidates && list)); then
+  echo "--candidates と --list は一緒に使えません。" >&2
+  usage >&2
+  exit 2
+fi
+if ((list && ! json)); then
+  echo "--list は --json と一緒に使います。" >&2
+  usage >&2
+  exit 2
+fi
+if ((json && ! candidates && ! list)); then
+  echo "--json は --candidates か --list と一緒に使います。" >&2
+  usage >&2
+  exit 2
+fi
+if ((! candidates && ! list && (${#names[@]} > 0))); then
+  echo "名前は --candidates か --list と一緒に渡します。" >&2
   usage >&2
   exit 2
 fi
@@ -178,7 +225,41 @@ fetch() {
   return 0
 }
 
-# 確かめられなかったわけを 1 行にする ($1: 名前)。!! と字下げを落とし、空でない最初の 2 行を「 / 」でつなぐ
+# 名前 $1 の固定した版の JSON (check の口の --json --offline。ネットワークを使わない) を ${tmp}/<名前>.local.json に、エラーの
+# 出力を ${tmp}/<名前>.local.err に書く。読めなければ 1 を返す。herdr-app と herdr-core は 1 回の呼び出しで 2 つを書く
+fetch_local() {
+  local name=$1 rc=0
+  case ${name} in
+    herdr-app | herdr-core)
+      if [[ ! -e ${tmp}/herdr-app.local.done ]]; then
+        : >"${tmp}/herdr-app.local.done"
+        "${BASH}" "${script_dir}/check-herdr-app-version.sh" --json --offline \
+          >"${tmp}/herdr-app.local.lines" 2>"${tmp}/herdr-app.local.err" </dev/null || rc=$?
+        if ((rc == 0)); then
+          jq -c 'select(.name == "herdr-app")' "${tmp}/herdr-app.local.lines" >"${tmp}/herdr-app.local.json" 2>/dev/null || true
+          jq -c 'select(.name == "herdr-core")' "${tmp}/herdr-app.local.lines" >"${tmp}/herdr-core.local.json" 2>/dev/null || true
+        elif [[ ! -s ${tmp}/herdr-app.local.err ]]; then
+          echo "終了コード ${rc}" >"${tmp}/herdr-app.local.err"
+        fi
+        cp "${tmp}/herdr-app.local.err" "${tmp}/herdr-core.local.err"
+      fi
+      ;;
+    *)
+      "${BASH}" "${script_dir}/check-winget-version.sh" --json --offline "${name}" \
+        >"${tmp}/${name}.local.json" 2>"${tmp}/${name}.local.err" </dev/null || rc=$?
+      ;;
+  esac
+  if [[ ! -s ${tmp}/${name}.local.json ]] || ! jq -e 'type == "object" and has("pinned")' "${tmp}/${name}.local.json" &>/dev/null; then
+    if [[ ! -s ${tmp}/${name}.local.err ]]; then
+      echo "終了コード ${rc}" >"${tmp}/${name}.local.err"
+    fi
+    return 1
+  fi
+  return 0
+}
+
+# 確かめられなかったわけを 1 行にする ($1: ${tmp} の中のエラーの出力の名前。<名前> か <名前>.local)。!! と字下げを落とし、
+# 空でない最初の 2 行を「 / 」でつなぐ
 reason_of() {
   local line out='' n=0
   while IFS= read -r line || [[ -n ${line} ]]; do
@@ -193,6 +274,83 @@ reason_of() {
   done <"${tmp}/$1.err"
   printf '%s' "${out}"
 }
+
+# ---------------------------------------------------------------------------
+# JSON の口: --list --json と --candidates --json
+# ---------------------------------------------------------------------------
+if ((json)); then
+  if ((${#names[@]} == 0)); then
+    names=("${all_names[@]}")
+  fi
+  have_gh=1
+  if ((candidates)) && ! command -v gh &>/dev/null; then
+    have_gh=0
+  fi
+  failed=0
+  : >"${tmp}/items.jsonl"
+  for name in "${names[@]}"; do
+    # 確かめられなかったときの項目の頭 (固定した版を読めれば、その値で埋める)
+    base_ok=1
+    if ! fetch_local "${name}"; then
+      base_ok=0
+    fi
+    error=''
+    if ((! base_ok)); then
+      error=$(reason_of "${name}.local")
+    elif ((candidates && ! have_gh)); then
+      error='gh が見つからない (新しい版と出た日は GitHub API で読む。home-manager switch の後に流し直す)'
+    elif ((candidates)); then
+      if ! fetch "${name}" 180 1; then
+        error=$(reason_of "${name}")
+      elif problem=$(jq -er '.datesProblem // empty' "${tmp}/${name}.json"); then
+        error="出た日を確かめられなかった: ${problem}"
+      fi
+    fi
+    if [[ -n ${error} ]]; then
+      failed=1
+      if ((base_ok)); then
+        base="${tmp}/${name}.local.json"
+      else
+        base="${tmp}/${name}.none.json"
+        jq -cn --arg name "${name}" '{name: $name, title: $name, pinnedFile: null, pinned: "", packageId: null, skippedFile: null}' >"${base}"
+      fi
+      jq -c --arg name "${name}" --arg error "${error}" --arg graces "${graces}" --argjson candidates "${candidates}" '
+        { name: $name, title, files: ([.pinnedFile] | map(select(. != null))), pinned, winget_id: .packageId,
+          skip_file: .skippedFile }
+        + (if $candidates == 1 then
+             { candidates: [],
+               targets: (reduce ($graces | split(",")[] | tonumber) as $g ({}; .[$g | tostring] = null)) }
+           else {} end)
+        + { error: $error }' "${base}" >>"${tmp}/items.jsonl"
+      continue
+    fi
+    if ((list)); then
+      jq -c --arg name "${name}" '{
+        name: $name, title, files: [.pinnedFile], pinned, winget_id: .packageId, skip_file: .skippedFile, error: null
+      }' "${tmp}/${name}.local.json" >>"${tmp}/items.jsonl"
+      continue
+    fi
+    # --candidates --json: 新しい版と、猶予ごとの上げ先 (--candidates と同じ選び方)
+    jq -c --arg name "${name}" --arg graces "${graces}" '
+      def manifest_dir: "https://github.com/microsoft/winget-pkgs/tree/master/manifests/"
+        + (.packageId[0:1] | ascii_downcase) + "/" + (.packageId | gsub("\\."; "/"));
+      . as $p
+      | [.newer[] | select(.skipped == null)] as $u
+      | { name: $name, title, files: [.pinnedFile], pinned, winget_id: .packageId, skip_file: .skippedFile,
+          candidates: [ .newer[]
+            | { version, published, age_days: .age,
+                url: (.url // (if $p.packageId != null then ($p | manifest_dir) + "/" + .version else "" end)),
+                skipped } ],
+          targets: (reduce ($graces | split(",")[] | tonumber) as $g ({};
+            .[$g | tostring] = ([$u[] | select(.age != null and .age >= $g)] | last | .version? // null))),
+          error: null }' "${tmp}/${name}.json" >>"${tmp}/items.jsonl"
+  done
+  jq -s '{version: 1, items: .}' "${tmp}/items.jsonl"
+  if ((failed)); then
+    exit 2
+  fi
+  exit 0
+fi
 
 # ---------------------------------------------------------------------------
 # --candidates: 猶予ごとの上げ先の候補
@@ -302,7 +460,7 @@ for name in "${names[@]}"; do
 done
 
 if ((${#newer_lines[@]})); then
-  warn "Windows に固定した版より新しい版があります → Claude Code の ${skill} skill で、上げるか (どの版か) を決める" \
+  warn "Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める" \
     "${newer_lines[@]}"
 elif ((${#failed[@]} == 0)); then
   echo "Windows に固定した版より新しい版は無い (見送った版を除く。確かめたもの: $(printf '%s・' "${names[@]}" | sed 's/・$//'))。"
