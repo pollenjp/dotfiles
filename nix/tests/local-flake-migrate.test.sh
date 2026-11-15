@@ -19,7 +19,8 @@
 #     開きの行 (`  cat >"${flake_file}" <<EOS`) が 1 つでない・閉じの EOS が無い script は、id も render も 1
 #   - render --rev は、repo の履歴の setup-local-flake.sh の版を描く (古い版の script を実行しない)
 #   - render は、描く版の setup-local-flake.sh に group_example_block (設定グループの選び方の塊) があれば、その heredoc の本文を
-#     tmp の例の system の行の後ろに差し込む。group_example_block の無い版 (塊より前) には差し込まない。どちらも雛形の版の印は同じ
+#     tmp の例の system の行の後ろに差し込む。group_example_block の無い版 (塊より前) には差し込まない。塊は雛形の heredoc の外に
+#     ある (雛形の版の印は heredoc の原文から計算するので、塊で印は変わらない)
 #   - どのコマンドも一時ファイルを TMPDIR に残さない (id - と render --rev も)
 #   - check は、ローカル flake の「# 雛形の版:」の印が今の雛形と同じなら何も出さず 0 (中身を利用者が書き換えて
 #     いても)、違えば「旧い印 → 今の印」(印が無ければ「印なし → 今の印」) を出して 1、inputs.dotfiles.url の
@@ -1376,13 +1377,13 @@ block=$(awk -v open="  cat <<'EOB'" '
   g { print }
 ' "${dir}/setup-local-flake.sh")
 BLOCK=${block} awk '{ print } $0 == "        #   system = \"x86_64-linux\";" { print ENVIRON["BLOCK"] }' "${r}/without.nix" >"${r}/want.nix"
-id_new=$(HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" id "${r}/nix/scripts/setup-local-flake.sh")
-id_old=$(HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" id "${r}/nix/scripts/old.sh")
-if [[ ${rc_with} == 0 && $(rc "${r}") == 0 && -n ${block} ]] && cmp -s "${r}/want.nix" "${r}/with.nix" \
-  && ! grep -qF '設定グループ (本体の' "${r}/without.nix" && [[ -n ${id_new} && ${id_new} == "${id_old}" ]]; then
-  ok "render は、描く版に group_example_block があれば塊を tmp の例の system の行の後ろに差し込み、無い版には差し込まない (印は同じ)"
+# 雛形の版の印は heredoc の原文から計算するので、塊が heredoc の外にあれば印は変わらない
+heredoc=$(awk '/^  cat >"\$\{flake_file\}" <<EOS$/ { f = 1; next } f && /^EOS$/ { exit } f { print }' "${dir}/setup-local-flake.sh")
+if [[ ${rc_with} == 0 && $(rc "${r}") == 0 && -n ${block} && -n ${heredoc} ]] && cmp -s "${r}/want.nix" "${r}/with.nix" \
+  && ! grep -qF '設定グループ (本体の' "${r}/without.nix" && ! grep -qF '設定グループ (本体の' <<<"${heredoc}"; then
+  ok "render は、描く版に group_example_block があれば塊を tmp の例の system の行の後ろに差し込み、無い版には差し込まない (塊は heredoc の外)"
 else
-  ng "設定グループの選び方の塊" "rc=${rc_with}/$(rc "${r}") id=${id_new}/${id_old} $(err "${r}") $(diff "${r}/want.nix" "${r}/with.nix" | head -20)"
+  ng "設定グループの選び方の塊" "rc=${rc_with}/$(rc "${r}") heredoc=${#heredoc} $(err "${r}") $(diff "${r}/want.nix" "${r}/with.nix" | head -20)"
 fi
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)

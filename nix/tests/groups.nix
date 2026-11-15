@@ -213,7 +213,11 @@ let
           group = "company";
           claude.privateSkills.enable = true;
           modules = [ { dotfiles.herdr.hub.enable = true; } ];
-        };
+        }
+        # personal (hub の既定は on) で herdr だけを外すと止まる
+        && !(evaluates {
+          modules = [ { dotfiles.herdr.enable = false; } ];
+        });
     }
     {
       name = "知らないグループ (\"customer\") は評価で止まる";

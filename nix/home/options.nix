@@ -61,12 +61,10 @@ let
   # (lib/release-age.nix) と共用する
   calendarDate = import ../lib/calendar-date.nix { inherit lib; };
 
-  # 設定グループと段への割り当ての表 (lib/groups.nix)。段の switch の既定をグループから引く
+  # 設定グループと段への割り当ての表 (lib/groups.nix)。段の switch の既定をグループから引く。道具の switch の既定は、段の
+  # switch を素の式 (config.dotfiles.aiTools.enable など) で書く (どれも option の既定 (優先度 1500) なので、ホストの素の値が勝つ。
+  # 素の式にしておくと、dotfiles-private の hostmap の読み手も既定をたどれる)
   groups = import ../lib/groups.nix;
-
-  # 段の switch と、そこから決まる道具の switch の既定 (どれも option の既定 (優先度 1500) なので、ホストの素の値が勝つ)
-  aiTools = config.dotfiles.aiTools.enable;
-  personalAccounts = config.dotfiles.personalAccounts.enable;
 in
 {
   # 1Password は WSL 専用の dotfiles.wsl.onePassword.enable だったのを、WSL 以外でも使えるよう
@@ -133,7 +131,7 @@ in
 
   options.dotfiles.git.identity.enable = lib.mkOption {
     type = lib.types.bool;
-    default = personalAccounts;
+    default = config.dotfiles.personalAccounts.enable;
     defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
     example = false;
     description = ''
@@ -175,7 +173,7 @@ in
   options.dotfiles.claude = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools;
+      default = config.dotfiles.aiTools.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
       example = false;
       description = ''
@@ -194,7 +192,7 @@ in
 
     privateSkills.enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools && personalAccounts;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
       example = false;
       description = ''
@@ -629,7 +627,7 @@ in
 
   options.dotfiles.ccPages.enable = lib.mkOption {
     type = lib.types.bool;
-    default = aiTools && personalAccounts;
+    default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
     defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
     example = false;
     description = ''
@@ -676,7 +674,7 @@ in
 
   options.dotfiles.ntn.enable = lib.mkOption {
     type = lib.types.bool;
-    default = personalAccounts;
+    default = config.dotfiles.personalAccounts.enable;
     defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
     example = false;
     description = ''
@@ -717,7 +715,7 @@ in
   options.dotfiles.herdr = {
     enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools;
+      default = config.dotfiles.aiTools.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
       example = false;
       description = ''
@@ -733,7 +731,7 @@ in
 
     hub.enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools && personalAccounts;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
       example = false;
       description = ''
@@ -747,7 +745,7 @@ in
 
   options.dotfiles.herdrCore.enable = lib.mkOption {
     type = lib.types.bool;
-    default = aiTools && pkgs.stdenv.hostPlatform.isLinux;
+    default = config.dotfiles.aiTools.enable && pkgs.stdenv.hostPlatform.isLinux;
     defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && pkgs.stdenv.hostPlatform.isLinux";
     example = false;
     description = ''
@@ -884,7 +882,7 @@ in
 
     windowsFiles.ntn.enable = lib.mkOption {
       type = lib.types.bool;
-      default = personalAccounts;
+      default = config.dotfiles.personalAccounts.enable;
       defaultText = lib.literalExpression "config.dotfiles.personalAccounts.enable";
       example = false;
       description = ''
@@ -903,7 +901,7 @@ in
 
     windowsFiles.claudeCode.enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools;
+      default = config.dotfiles.aiTools.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
       example = false;
       description = ''
@@ -925,7 +923,7 @@ in
 
     windowsFiles.herdr.enable = lib.mkOption {
       type = lib.types.bool;
-      default = aiTools;
+      default = config.dotfiles.aiTools.enable;
       defaultText = lib.literalExpression "config.dotfiles.aiTools.enable";
       example = false;
       description = ''

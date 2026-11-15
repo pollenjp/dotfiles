@@ -1920,7 +1920,7 @@ step_switch() {
   warn_untracked
   warn_clobber
   sync_local_flake_lock || return 1
-  # 実行の頭で出せなかった (lock が合っていなかった・ホストを決め直した) ときだけ、ここでグループを出す
+  # 実行の頭で出せなかった (lock が合っていなかった) か、取得・決め直しで変わったときだけ、ここでグループを出す
   note_group
   hm_args=(switch --flake "${flake_dir}#${host}")
   if [[ -n ${backup_ext} ]]; then
@@ -2502,8 +2502,10 @@ local_flake_migrate_cmd() {
 # なり、② ③ の道具まで入る) で、switch の前に気づけるようにする。選んでいなければ「選んでいない。既定」と添える。
 #
 # 実行の頭 (execute。対象ホストが決まっていて Nix があるとき) と、switch の手順の頭 (ホストが決まり、lock を張り直した後) で
-# 呼び、同じホストには 1 度だけ出す。ローカル flake の lock が本体と合っていない (本体を pull した直後) と実行の頭では評価
-# できず、switch の手順の頭で出る。評価できない (本体が設定グループより前・ホストが無い) ときは黙る。lock は書き換えない
+# 呼ぶ。switch の頭では評価し直し、実行の頭に出した行と同じなら出さない (dotfiles-private の取得 (private-fetch) でホストの
+# ファイルのグループが変わった・ホストを決め直したときだけ、もう一度出す)。ローカル flake の lock が本体と合っていない
+# (本体を pull した直後) と実行の頭では評価できず、switch の手順の頭で出る。評価できない (本体が設定グループより前・
+# ホストが無い) ときは黙る。lock は書き換えない
 group_noted=""
 # shellcheck disable=SC2016 # Nix の式をそのまま書く
 group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; onoff = b: if b then "on" else "off"; in
@@ -2512,15 +2514,23 @@ group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; onoff 
   + " · ③ 個人のアカウント " + onoff d.personalAccounts.enable'
 note_group() {
   local line
-  if [[ -z ${host} || ${group_noted} == "${host}" ]] || ! have nix; then
+  if [[ -z ${host} ]] || ! have nix; then
     return 0
   fi
   if ! line=$(nix eval --raw --no-write-lock-file "${flake_dir}#homeConfigurations.\"${host}\"" \
     --apply "${group_line_expr}" 2>/dev/null </dev/null) || [[ -z ${line} ]]; then
     return 0
   fi
-  group_noted=${host}
-  note "グループ: ${line}  (nix/README.md「設定グループ」)"
+  # 前に出した行 (ホストと中身) と同じなら出さない
+  if [[ ${group_noted} == "${host}"$'\t'"${line}" ]]; then
+    return 0
+  fi
+  if [[ -n ${group_noted} ]]; then
+    note "グループ (前に出したものから変わった): ${line}  (nix/README.md「設定グループ」)"
+  else
+    note "グループ: ${line}  (nix/README.md「設定グループ」)"
+  fi
+  group_noted=${host}$'\t'${line}
 }
 
 # 自動で決めた対象ホスト (ローカル flake・dotfiles-private。決まっていないときも) を決め直す。$1: 直前の手順の名前。
