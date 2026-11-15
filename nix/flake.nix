@@ -493,6 +493,7 @@
           bootstrap-windows-international-test = scriptTest "bootstrap-windows-international" ./scripts/bootstrap-windows-international.sh;
           bootstrap-windows-port-forward-test = scriptTest "bootstrap-windows-port-forward" ./scripts/bootstrap-windows-port-forward.sh;
           bootstrap-windows-type-clipboard-test = scriptTest "bootstrap-windows-type-clipboard" ./scripts/bootstrap-windows-type-clipboard.sh;
+          bootstrap-windows-op-reason-test = scriptTest "bootstrap-windows-op-reason" ./scripts/bootstrap-windows-op-reason.sh;
           # repo の dotfiles.txt も渡し、警告なしに欄へ入ることを確かめる
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
             bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}
