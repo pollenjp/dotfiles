@@ -68,6 +68,42 @@
       # と呼ぶ。素の mkHome で組む (ファイルがその PC の値の全部を持つ。前の雛形の local も当たらない)。
       # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (ADR 030)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
+
+      # ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか。ADR 057)。mkHome が組み立てたホストに
+      # hostSummary として足す。ここの組は、dotfiles-private の nix/hosts/ に書くファイル (files。private-host.sh summaries) と
+      # nix/groups.md (groupsDoc) を作るのに使う
+      hostSummary = import ./lib/host-summary.nix { inherit lib; };
+
+      # nix/groups.md の中身。グループごとの素のホスト (グループだけを書いたもの) と、作り物のホスト (lib/group-examples.nix) の
+      # 要約から作る。どの system でも同じ文になるので x86_64-linux で評価する。古いかは checks の groups-doc が見る
+      groupsDoc =
+        let
+          plainHost =
+            group:
+            (mkHome {
+              username = "user";
+              system = "x86_64-linux";
+              inherit group;
+            }).hostSummary.data;
+          examples = import ./lib/group-examples.nix { inherit mkHome; };
+          example = name: title: {
+            inherit title;
+            inherit (examples.${name}.hostSummary) data;
+          };
+        in
+        hostSummary.groupsDoc {
+          plain = lib.genAttrs [
+            "personal"
+            "company"
+            "client"
+          ] plainHost;
+          examples = [
+            (example "personal" "personal (個人の PC。グループの既定のまま)")
+            (example "company" "company (自社の PC。③ の道具を足していない)")
+            (example "client" "client (客先の PC)")
+            (example "client-claude" "client に Claude Code だけを足したホスト (`claude.enable = true`)")
+          ];
+        };
     in
     {
       homeConfigurations = hostsWith [ ];
@@ -88,7 +124,15 @@
       # 詳細は README 「登録簿に載せずにマシンを足す」を参照 (雛形は scripts/setup-local-flake.sh)。
       # privateHosts は dotfiles-private に登録したホストを読む入口 (README「dotfiles-private に登録したホスト」)。
       # hostsWith は前の雛形が呼ぶので残している (上)。
-      lib = { inherit mkHome hostsWith privateHosts; };
+      lib = {
+        inherit
+          mkHome
+          hostsWith
+          privateHosts
+          hostSummary
+          groupsDoc
+          ;
+      };
 
       # `nix flake check` は homeConfigurations を評価しない (well-known output ではない)。
       # activationPackage を checks へ再エクスポートして初めて検証対象になる。
@@ -177,6 +221,22 @@
           home-group-client-example =
             (import ./lib/group-examples.nix { inherit mkHome; }).client.activationPackage;
           group-client-state = import ./tests/group-client.nix { inherit lib pkgs mkHome; };
+          # nix/groups.md (生成物) が lib.groupsDoc と同じか。違えば出し直すコマンドを出して落ちる
+          groups-doc =
+            pkgs.runCommand "groups-doc"
+              {
+                nativeBuildInputs = [ pkgs.diffutils ];
+                passAsFile = [ "want" ];
+                want = groupsDoc;
+              }
+              ''
+                if ! diff -u ${./groups.md} "$wantPath"; then
+                  echo "nix/groups.md が古い (nix/lib/groups.nix・host-summary.nix・option の既定が変わった)。dotfiles の root で出し直す:" >&2
+                  echo "  nix eval --raw ./nix#lib.groupsDoc > nix/groups.md" >&2
+                  exit 1
+                fi
+                touch $out
+              '';
         }
         // lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           pjp-exe-exec-trace-unittest = unittest "pjp-exe-exec-trace";
@@ -794,6 +854,16 @@
               pkgs
               mkHome
               system
+              ;
+          };
+          host-summary-state = import ./tests/host-summary.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              hostSummary
+              privateHosts
               ;
           };
           groups-state = import ./tests/groups.nix {
