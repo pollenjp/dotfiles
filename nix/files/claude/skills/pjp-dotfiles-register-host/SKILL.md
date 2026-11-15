@@ -173,10 +173,13 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
   取得を飛ばす)。pjp-herdr-other-repo の herdr の worktree か、herdr を使わない会話なら
   `git -C <clone> worktree add <場所> -b <branch> origin/main`
 - 確かめた下書きを `nix/hosts/<名前>.nix` に置く (頭のコメントは残す。merge のあと、元にしたホストをそこから引く)。README も確かめた形で
-- **要約を出し直す**: `bash <p> summaries --private <worktree>` (本体は `--nix-dir`。既定はこの script の repo の `nix/`)。全ホストの
-  `nix/hosts/<名前>.md` と `nix/hosts/README.md` を書き直す (ホストのファイルの無い `.md` は消す)。書いたファイルを `git -C <worktree> diff`
-  で見て、このホストの `<名前>.md` (グループ・道具の on/off・どこで決まったか) が下書きの意図と合うかを確かめる。ほかのホストの `.md` も
-  変わっていたら、本体の変更で古くなっていた分 (この PR に入れてよい。PR の本文にそう書く)。`--check` は書かずに違いだけを出す
+- **要約を出し直す**: 本体を dotfiles の origin/main にそろえて `summaries` を流す。本体の checkout が origin/main より古いと、ほかの
+  ホストの新しい要約まで古い形に戻す。`git -C <本体> fetch origin` のあと `git -C <本体> archive origin/main nix | tar -x -C <scratchpad>/body`
+  で写し、`bash <scratchpad>/body/nix/scripts/private-host.sh summaries --private <worktree> --nix-dir <scratchpad>/body/nix` (本体の
+  option を足す PR と一緒に出すときだけ、その PR の branch の本体)。全ホストの `nix/hosts/<名前>.md` と `nix/hosts/README.md` を
+  書き直す (ホストのファイルの無い `.md` は消す)。書いたファイルを `git -C <worktree> diff` で見て、このホストの `<名前>.md` (グループ・
+  道具の on/off・どこで決まったか) が下書きの意図と合うかを確かめる。ほかのホストの `.md` も変わっていたら、本体の変更で古くなっていた分
+  (この PR に入れてよい。PR の本文にそう書く)。`--check` は書かずに違いだけを出す
 - dotfiles-private の README の決まりで、ホストの値を直す PR では hostmap (`docs/architecture/hosts/`) も
   `python3 docs/architecture/hosts/hostmap/build.py --private-ref HEAD` で作り直す (本体の option を足した直後で、本体の origin/main に
   まだ無ければ `--dotfiles <本体の checkout> --dotfiles-ref <その branch>`)
@@ -263,8 +266,12 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 setup の警告のまとめに「dotfiles-private のこの PC のホストの要約 (`nix/hosts/<名前>.md`) が今の設定と違います」(か「がありません」) が
 出たとき・本体の段の割り当てや既定を変えたとき。ホストのファイルは触らない。
 
-1. dotfiles-private の worktree (手順 3 と同じ作り方。main の clone には書かない) で `bash <p> summaries --private <worktree>`
-   (setup が比べたのは、その PC のローカル flake が指す本体。`<p>` もその本体の `private-host.sh` を使い、違う本体なら `--nix-dir` で合わせる)
+- 警告に「本体 … が upstream より … commit 遅れているので、まだ出し直さない」と出ていたら、出し直さない。その PC の本体が古いだけで、
+  要約は新しい本体で出し直してあることが多い。`~/dotfiles/setup --self-update --update` を流してもらい、まだ出るかを見る
+
+1. dotfiles-private の worktree (手順 3 と同じ作り方。main の clone には書かない) で、手順 3 の「要約を出し直す」と同じく、dotfiles の
+   origin/main を写した本体で `summaries --private <worktree> --nix-dir <写した本体>/nix` を流す (setup が比べたのは、その PC のローカル
+   flake が指す本体。origin/main より古いなら、要約を古い形に戻す PR になるので出さない)
 2. `git -C <worktree> diff --stat` で書き換わったファイルを見て、変わり方を 1〜2 行にまとめる (例: 本体に道具の switch が増えた)
 3. commit・push・PR (ホストの値は変わらないので compare は要らない。本文に、何で古くなったかと出し直したことを書く)。merge のあと、
    その PC の `~/dotfiles/setup --update` で警告が消える
@@ -312,6 +319,7 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 移したあとも local に値を残す (既定と同じ明示の値も) | 登録したファイルが持つので外す。残すと 2 か所に同じ値が並び、片方だけ直してずれる |
 | ホストのファイルを足す・直したのに、要約 (`<名前>.md`・`README.md`) を出し直さない | 同じ PR で `summaries` を流す。出し直さないと、merge のあと各 PC の setup が「要約が今の設定と違います」と出し続ける |
 | 要約の `.md` を手で直す | 生成物 (先頭に印がある)。ホストのファイルか本体を直して `summaries` で出し直す |
+| 古い本体 (その PC の checkout) で `summaries` を流す | 新しい本体が書いた要約を古い形に戻す。dotfiles の origin/main を写した本体を `--nix-dir` に渡す |
 | 自社のグループにして、使っていた ③ の道具 (Dev Tracker・1Password・ntn など) を足し忘れる | グループを変えると ③ の既定が off になる。今使っているものを 1 つずつ聞いて足し、要約で on/off を確かめる (Dev Tracker を足して claude-skills を足し忘れると、評価で止まる) |
 | 登録したのに `tmp` を残す | `tmp` が登録したホストより先に選ばれる (ローカル flake のホストが先)。外す |
 | 登録したのに `initial` を残す | `tmp` と同じく、登録したホストより先に選ばれる (setup が外し方を出す)。`setup-local-flake.sh --force` で作り直して外す |

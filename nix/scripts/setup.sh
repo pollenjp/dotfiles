@@ -1971,8 +1971,15 @@ check_host_summary() {
   fi
   how='が今の設定と違います'
   [[ -f ${file} ]] || how='がありません'
+  # 本体 (この checkout) が upstream より遅れていると、新しい本体で出し直した要約と違って見える。出し直すと古い形に戻すので、
+  # 先に本体を進めるよう出す (遅れの数は実行の頭に数えたもの。--self-update を付ければ本体の更新のあとに数え直している)
+  if [[ -n ${repo_behind_count} && ${repo_behind_count} != 0 ]]; then
+    warn "dotfiles-private のこの PC のホストの要約 (nix/hosts/${host}.md) ${how}。ただし本体 (${repo_dir}) が upstream より ${repo_behind_count} commit 遅れているので、まだ出し直さない" \
+      "先に本体を進めて流し直す: ~/dotfiles/setup --self-update --update (それでも出たら、Claude Code の pjp-dotfiles-register-host skill で出し直す)"
+    return 0
+  fi
   warn "dotfiles-private のこの PC のホストの要約 (nix/hosts/${host}.md) ${how} → Claude Code の pjp-dotfiles-register-host skill で、要約と README を出し直す PR を作る" \
-    "出し直すコマンド: ${script_dir}/private-host.sh summaries --private <dotfiles-private の作業ツリー> (ホストの値・本体の段の割り当てが変わると古くなる)"
+    "出し直すコマンド: ${script_dir}/private-host.sh summaries --private <dotfiles-private の作業ツリー> --nix-dir <dotfiles の origin/main の nix/> (ホストの値・本体の段の割り当てが変わると古くなる)"
 }
 
 # switch した設定のモジュールの warnings (config.warnings) を、警告のまとめに足す。

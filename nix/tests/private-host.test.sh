@@ -54,8 +54,9 @@
 #     (頭に「==> ホスト <名前> の要約」)。--markdown は hostSummary.file "<名前>" だけを出す。--host で選べる。ホストが決まらなければ 2、
 #     評価が落ちれば原因の行を出して 3。ユーザーの flake.nix と flake.lock は変えない
 #   - summaries (偽の nix・jq) は、作業ツリーの nix/hosts/ の全ホストの要約 (privateHosts だけの flake の summaryFiles。本体は --nix-dir) を
-#     <名前>.md と README.md に書き、ホストのファイルの無い <名前>.md を消す。同じなら書かない。--check は書かずに、違うファイルを
-#     出して 1 (同じなら 0)。jq が無ければ 2、評価が落ちれば 3。nix/hosts/ の外には書かない
+#     <名前>.md と README.md に書き、ホストのファイルの無い <名前>.md を消す。同じなら書かない (2 回目は「書き換えたファイルは無い」)。
+#     --check は書かずに、違うファイルを出して 1 (同じなら 0)。ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す。
+#     jq が無ければ 2、評価が落ちれば 3。nix/hosts/ の外には書かない
 
 set -u -o pipefail
 
@@ -1088,7 +1089,17 @@ else
   ng "summaries" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(ls "${h}")"
 fi
 
-# 34. summaries --check: 同じなら 0 で書かない。違えば違うファイルを出して 1 (書かない)。もう一度流しても書かない
+# 33b. 2 回目 (--check なし): 同じなので書かない
+cp -p "${h}/bob@other.md" "${c}/bob.before"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+if [[ $(rc "${c}") == 0 ]] && grep -qF '書き換えたファイルは無い' "${c}/out" && ! grep -qF '書いた:' "${c}/out" \
+  && [[ ! "${h}/bob@other.md" -nt "${c}/bob.before" ]]; then
+  ok "summaries: 2 回目は同じなので書かない (「書き換えたファイルは無い」)"
+else
+  ng "summaries (2 回目)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 34. summaries --check: 同じなら 0 で書かない。違えば違うファイルを出して 1 (書かない)
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix" --check
 rc_same=$(rc "${c}")
 printf 'hand edit\n' >"${h}/bob@other.md"
@@ -1098,6 +1109,18 @@ if [[ ${rc_same} == 0 && $(rc "${c}") == 1 ]] && grep -qxF '  bob@other.md' "${c
   ok "summaries --check: 同じなら 0、違えば違うファイルを出して 1 (どちらも書かない)"
 else
   ng "summaries --check" "same=${rc_same} rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
+fi
+
+# 34b. summaries: ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す
+c=$(summaries_case r34b)
+rm -f "${c}/wt/nix/hosts/"*.nix
+printf 'old\n' >"${c}/wt/nix/hosts/bob@other.md"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+if [[ $(rc "${c}") == 0 && ! -e ${c}/wt/nix/hosts/bob@other.md && ! -e ${c}/wt/nix/hosts/old@gone.md ]] \
+  && [[ $(cat "${c}/wt/nix/hosts/README.md") == 'README ' ]]; then
+  ok "summaries: ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す"
+else
+  ng "summaries (0 台)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(ls "${c}/wt/nix/hosts")"
 fi
 
 # 35. summaries: jq が無ければ 2、評価が落ちれば 3

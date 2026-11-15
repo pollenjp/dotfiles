@@ -28,7 +28,9 @@
 #     出して 0
 #   - switch のあと、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むなら、ホストの要約
 #     (hostSummary.file) を clone の nix/hosts/<ホスト>.md と比べ、無ければ・違えば警告のまとめに [switch] で skill の名前
-#     (pjp-dotfiles-register-host) つきの 1 件を出す。同じなら出さない。登録簿のホスト (--host) では比べない。評価が空なら黙る
+#     (pjp-dotfiles-register-host) つきの 1 件を出す。同じなら出さない。登録簿のホスト (--host) では比べない。評価が空なら黙る。
+#     本体 (repo) が upstream より遅れていれば、出し直さずに先に本体を進める (--self-update) よう出す (古い本体で出し直すと、
+#     新しい要約を古い形に戻すため)
 #   - 最初から決まっておらず、取得しても登録が来ないときは、取得のあと switch の頭で止まる (home-manager を呼ばない)。
 #     そのとき、ローカル flake が前の雛形でも「前の雛形から作られています」の案内は出さない (評価までいっていない)
 #   - --host・DOTFILES_HOST で、この PC の登録した名前と違うホストを選んだら、警告する (警告のまとめの
@@ -668,6 +670,35 @@ if [[ ${rc_missing} == 0 ]] \
   ok "switch のあと、登録したホストの要約が clone の <ホスト>.md と無い・違うなら skill の名前つきで警告し、同じ・登録簿のホスト・評価が空なら出さない"
 else
   ng "要約の古さ" "missing=${s_missing}"$'\n'"same=${s_same}"$'\n'"differ=${s_differ}"$'\n'"registry=${s_registry}"$'\n'"empty=${s_empty}"
+fi
+
+# 31. 要約が違っても、本体が upstream より遅れていれば、出し直さずに --self-update で本体を進めるよう出す (偽の git が 3 commit
+#     遅れと答える)
+c=$(new_case t31)
+local_flake "${c}" "${c}/private/nix"
+b=$(fake_hm_bin "${c}")
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'GITEOF'
+case "$*" in
+  *'rev-parse --is-inside-work-tree'*) echo true ;;
+  *'rev-list --count'*) echo 3 ;;
+esac
+exit 0
+GITEOF
+} >"${b}/git"
+chmod +x "${b}/git"
+printf 'SUMMARY alice@box\n' >"${c}/home/fake-summary"
+printf 'SUMMARY old\n' >"${c}/private/nix/hosts/alice@box.md"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_behind=$(after_result "${c}")
+if [[ $(rc "${c}") == 0 ]] \
+  && grep -qF 'が今の設定と違います。ただし本体 ('"${c}"'/repo) が upstream より 3 commit 遅れているので、まだ出し直さない' <<<"${s_behind}" \
+  && grep -qF -- '~/dotfiles/setup --self-update --update' <<<"${s_behind}" \
+  && ! grep -qF '要約と README を出し直す PR を作る' <<<"${s_behind}"; then
+  ok "要約が違っても、本体が upstream より遅れていれば、出し直さずに --self-update で本体を進めるよう出す"
+else
+  ng "要約の古さ (本体が遅れている)" "rc=$(rc "${c}") ${s_behind} $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

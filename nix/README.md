@@ -1336,7 +1336,8 @@ bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホス�
   `summaries` を流す（`pjp-dotfiles-register-host` skill）。`privateHosts` は `.nix` しか読まないので、`.md` を隣に置いても評価は変わらない
 - setup は switch のたびに、この PC のホスト（dotfiles-private に登録したもの）の要約を作り直して clone の `<ホスト>.md` と比べ、違えば・無ければ
   警告のまとめに 1 件出す（`pjp-dotfiles-register-host` skill の名前と出し直すコマンドつき）。dotfiles-private には CI が無く、本体の変更
-  （段の割り当て・既定）でも要約は古くなるため
+  （段の割り当て・既定）でも要約は古くなるため。本体の checkout が upstream より遅れていれば、出し直さずに先に本体を進める
+  （`--self-update`）よう出す（古い本体で出し直すと、新しい要約を古い形に戻す。出し直すときは dotfiles の origin/main の本体で `summaries` を流す）
 
 ### 登録簿に載せずにマシンを足す
 

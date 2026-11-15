@@ -304,25 +304,28 @@ let
 
   matrix =
     entries:
-    let
-      tierCell = e: t: cell t (onoff t.value);
-      toolCell = e: r: cell r (shown r);
-      rowOf = label: cells: "| ${label} | ${lib.concatStringsSep " | " cells} |";
-      first = (builtins.head entries).data;
-    in
-    lib.concatStringsSep "\n" (
-      [
-        "| 道具 | ${lib.concatMapStringsSep " | " (e: headOf e.name) entries} |"
-        "| --- | ${lib.concatMapStringsSep " | " (_: "---") entries} |"
-        (rowOf "グループ" (map (e: cell e.data.group "`${e.data.group.value}`") entries))
-      ]
-      ++ lib.imap0 (
-        i: t: rowOf "${t.mark} ${t.label}" (map (e: tierCell e (builtins.elemAt e.data.tiers i)) entries)
-      ) first.tiers
-      ++ lib.imap0 (
-        i: r: rowOf "${r.marks} ${r.label}" (map (e: toolCell e (builtins.elemAt e.data.tools i)) entries)
-      ) first.tools
-    );
+    if entries == [ ] then
+      "登録したホストはありません。"
+    else
+      let
+        tierCell = e: t: cell t (onoff t.value);
+        toolCell = e: r: cell r (shown r);
+        rowOf = label: cells: "| ${label} | ${lib.concatStringsSep " | " cells} |";
+        first = (builtins.head entries).data;
+      in
+      lib.concatStringsSep "\n" (
+        [
+          "| 道具 | ${lib.concatMapStringsSep " | " (e: headOf e.name) entries} |"
+          "| --- | ${lib.concatMapStringsSep " | " (_: "---") entries} |"
+          (rowOf "グループ" (map (e: cell e.data.group "`${e.data.group.value}`") entries))
+        ]
+        ++ lib.imap0 (
+          i: t: rowOf "${t.mark} ${t.label}" (map (e: tierCell e (builtins.elemAt e.data.tiers i)) entries)
+        ) first.tiers
+        ++ lib.imap0 (
+          i: r: rowOf "${r.marks} ${r.label}" (map (e: toolCell e (builtins.elemAt e.data.tools i)) entries)
+        ) first.tools
+      );
 
   readme =
     entries:

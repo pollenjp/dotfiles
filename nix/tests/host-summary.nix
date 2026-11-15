@@ -9,11 +9,12 @@
 #     off、② の道具は段の既定 (tier)、ホストのファイルで書いた道具はホスト (host)、dotfiles-private の nix/shared/ の module で
 #     書いた値は shared。既定が段によらない道具と ① の道具は既定 (default)
 #   - 効く条件 (wsl.windowsFiles.enable) が off の Windows の道具は、値が on でも「–」(効かない) と出す
-#   - markdown は mermaid の図と表を持ち、ホストで決めた道具は図で赤い枠の class (onHost)・表で太字。node の id にホスト名を使わない
+#   - markdown は mermaid の図と表を持ち、ホストで決めた道具は図で赤い枠の class (onHost)・表で太字。file (<ホスト>.md) の mermaid の
+#     図にホスト名が出ない (node の id は作った名前)
 #   - file (<ホスト>.md) は生成物の印・出し直す手順・code span のホスト名の見出し・隣のホストのファイルへのリンクを持つ
 #   - readme は、@ と . を含むホスト名を code span の見出しにし、明示の anchor (<a id="host-…">) と目次のリンク (#host-…) を
 #     持つ。ホストは名前の順で、渡す順を変えても同じ文になる。一覧表はホストを列に並べる
-#   - files は README.md と <ホスト>.md を全ホストぶん出す
+#   - files は README.md と <ホスト>.md を全ホストぶん出す。ホストが 0 台でも README.md だけを出す (一覧表は「ありません」)
 #   - line は グループと段を 1 行にする
 {
   lib,
@@ -126,7 +127,14 @@ let
         && lib.hasInfix "| 段 | 道具 | option (`dotfiles.…`) | 値 | どこで決まったか |" md
         && builtins.match "(.*\n)?  class [^\n]*ntn[^\n]* onHost\n.*" md != null
         && lib.hasInfix "| **on** |" (tableRow md "ntn (Notion の CLI)")
-        && !(lib.hasInfix "carol" md);
+        # file には見出しにホスト名があるが、mermaid の図 (``` で囲んだ所) には出ない
+        && (
+          let
+            afterOpen = builtins.elemAt (lib.splitString "```mermaid\n" carolFile) 1;
+            diagram = builtins.head (lib.splitString "\n```" afterOpen);
+          in
+          lib.hasInfix "flowchart LR" diagram && !(lib.hasInfix "carol" diagram)
+        );
     }
     {
       name = "file は生成物の印・出し直す手順・code span の見出し・隣のホストのファイルへのリンクを持つ";
@@ -153,6 +161,14 @@ let
           "carol@three.md"
         ]
         && files."carol@three.md" == carolFile;
+    }
+    {
+      name = "ホストが 0 台でも、files は README.md だけを出す (一覧表は「ありません」)";
+      ok =
+        let
+          empty = hostSummary.files { };
+        in
+        builtins.attrNames empty == [ "README.md" ] && lib.hasInfix "登録したホストはありません。" empty."README.md";
     }
     {
       name = "line はグループと段を 1 行にする";
