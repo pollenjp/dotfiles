@@ -520,9 +520,9 @@ lib.mkMerge [
         };
       }
 
-      # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/pjp-op。理由が必須の 1Password CLI の
-      # wrapper) を守る: op.exe の直打ちを止めて op --reason … に直させ、op の記録にこの会話の承認の拒否・時間切れがあれば、
-      # 打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
+      # PreToolUse・PostToolUse・PostToolUseFailure フック (matcher Bash)。WSL の op (pkgs/op-reason。理由が必須の 1Password CLI の
+      # wrapper の自作の OSS) を守る: op.exe の直打ちを止めて op --reason … に直させ、op-reason の記録にこの会話の承認の拒否・
+      # 時間切れがあれば、打ち直さずに選択肢の問いを出すよう Claude に指示を足す。どのマシンにも置き、op の wrapper が無いマシン
       # (claude-op-reason.json の enable が false。home/modules/op-reason.nix が書く) では黙る。登録は上と同じく
       # scripts/bootstrap-claude-hook.sh。
       {

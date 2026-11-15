@@ -1,5 +1,5 @@
 # 1Password を使うマシン (dotfiles.onePassword.enable) の PATH に、.env の op:// の参照を 1 回の op で解いて program を起こす
-# pjp-op-env (pkgs/pjp-op-env) と、名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を入れる。WSL では op が pjp-op の
+# pjp-op-env (pkgs/pjp-op-env) と、名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を入れる。WSL では op が op-reason の
 # wrapper (home/modules/op-reason.nix) になり、どちらも ~/.local/state/dotfiles/claude-op-reason.json を見て --reason を付ける。
 # WSL でないマシンでは素の op (1Password CLI。NixOS では system の側で入れる) を使う。
 #

@@ -1,26 +1,31 @@
-# WSL + 1Password のマシンにだけ入る op と pjp-op-log (home/modules/op-reason.nix・pkgs/pjp-op) と、Claude の hook に知らせる
-# claude-op-reason.json を確かめる。
+# WSL + 1Password のマシンにだけ入る op・op-reason・op-reason-log (home/modules/op-reason.nix が pkgs/op-reason を包んだもの) と、
+# Claude の hook に知らせる claude-op-reason.json を確かめる。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、CI の `nix flake check --all-systems --no-build`
 # (全 system の評価) でも落ちる。flake.nix の checks (op-reason-state) から呼ぶ。ビルドして確かめる項目は Linux の checks に
-# だけ置く (WSL は Linux)。動きそのものは pjp-op.test.sh・pjp-op-launcher.test.sh・pjp-op-log.test.sh が確かめる。
+# だけ置く (WSL は Linux)。wrapper そのものの動き (理由・lock・窓・記録・補完) は op-reason の repo のテストが確かめる。
 #
 # ## 確かめること
 #
 #   評価時 (assert)
 #     - wsl.enable と onePassword.enable が両方 true のマシンの home.packages に op (mainProgram) の package が 1 つ入る
 #     - WSL だけ・1Password だけ・どちらも無しのマシンには入らない
+#     - 包みが既定にする OPREASON_EXE は、Install-OpReason.ps1 の既定の置き場所 (%LOCALAPPDATA%\Programs\op-reason) の op-reason.exe
+#       を、wsl.windowsUserName (無ければ wsl.onePassword.windowsUserName) で組み立てた WSL のパス
 #     - claude-op-reason.json は、入るマシンで {"enable":true}、ほかで {"enable":false}。どちらも改行で終わる
 #     - Claude の hook (op-reason-guard.sh) は、入らないマシンにも repo の script から実行できるファイルとして置かれる
 #       (hook は claude-op-reason.json を読んで黙る)
-#     - fish の op の補完 (~/.config/fish/completions/op.fish) は入るマシンにだけ置く (ほかは fish に同梱の補完のまま)
+#     - fish の op と op-reason の補完 (~/.config/fish/completions/op.fish・op-reason.fish) は入るマシンにだけ置き、中身は
+#       pkgs/op-reason が出したもの (ほかのマシンは fish に同梱の op の補完のまま)
 #   ビルド時 (このランナーの system だけ)
-#     - 入るマシンの profile の bin/op と bin/pjp-op-log は、この package のもの
-#     - 入らないマシンの profile に bin/op は無い
-#     - profile の op は、呼ぶ側の PATH に何も無くても (runtimeInputs で足りる) 動き、op.exe が無ければ 127 で終わって、
-#       断ったことを記録に書く
-#     - 置いた補完 (home-manager が fish_indent を通したもの) を fish が読むと、op を呼ばずにコマンドの候補を出す
-#       (補完の動きの細部は pjp-op-completion.test.sh)
+#     - 入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log は、この包みのもの。入らないマシンの profile に bin/op は無い
+#     - profile の op-reason --version は、呼ぶ側の PATH に何も無くても pkgs/op-reason の版を出す
+#     - profile の op は、op.exe が無ければ 127 で日本語 (OPREASON_LANG の既定 ja) の断りを出し、op-reason の記録
+#       (~/.local/state/op-reason/log.jsonl) に refused の no-op-exe を書く
+#     - op.exe があって op-reason.exe が無ければ、既定の OPREASON_EXE の場所を断りの文に出して 127 (no-exe)。環境に
+#       OPREASON_EXE があれば、そちらを探す (既定は --set-default)
+#     - profile の op-reason-log は、呼び名どおり記録を見る道具として動き、上の断りを表に出す
+#     - 置いた補完を fish が読むと、op を呼ばずに op <Tab> の候補 (item など) と --reason を出す
 {
   lib,
   pkgs,
@@ -46,6 +51,14 @@ let
     };
     onePassword.enable = true;
   };
+  # 1Password だけ別の Windows のユーザー名を書いたマシン (wsl.windowsUserName が無い)
+  wslOpOnly1p = configWith {
+    wsl = {
+      enable = true;
+      onePassword.windowsUserName = "bob";
+    };
+    onePassword.enable = true;
+  };
   wslOnly = configWith { wsl.enable = true; };
   opOnly = configWith { onePassword.enable = true; };
   plain = configWith { };
@@ -54,7 +67,19 @@ let
   opOf = cfg: builtins.filter isOp cfg.home.packages;
   state = cfg: cfg.home.file.".local/state/dotfiles/claude-op-reason.json".text;
   hook = cfg: cfg.home.file.".claude/hooks/op-reason-guard.sh";
-  hasFishCompletion = cfg: cfg.xdg.configFile ? "fish/completions/op.fish";
+  fishCompletion = cfg: name: cfg.xdg.configFile."fish/completions/${name}.fish" or null;
+  hasFishCompletion = cfg: fishCompletion cfg "op" != null || fishCompletion cfg "op-reason" != null;
+  exeFor = user: "/mnt/c/Users/${user}/AppData/Local/Programs/op-reason/op-reason.exe";
+
+  # 入るマシンの op の package (無ければ null。無いことは最初の項目で落とすので、ほかの項目は null で投げずに外れにする)
+  opPkg =
+    cfg:
+    let
+      found = opOf cfg;
+    in
+    if found == [ ] then null else lib.head found;
+  pkg = opPkg wslOp;
+  unwrapped = pkg.unwrapped;
 
   cases = [
     {
@@ -64,6 +89,14 @@ let
     {
       name = "WSL だけ・1Password だけ・どちらも無しのマシンには入らない";
       ok = opOf wslOnly == [ ] && opOf opOnly == [ ] && opOf plain == [ ];
+    }
+    {
+      name = "OPREASON_EXE の既定は Install-OpReason.ps1 の既定の置き場所の op-reason.exe (wsl.windowsUserName か wsl.onePassword.windowsUserName)";
+      ok =
+        pkg != null
+        && opPkg wslOpOnly1p != null
+        && pkg.exePath == exeFor "alice"
+        && (opPkg wslOpOnly1p).exePath == exeFor "bob";
     }
     {
       name = "claude-op-reason.json は入るマシンで {\"enable\":true}";
@@ -95,9 +128,21 @@ let
           ];
     }
     {
-      name = "fish の op の補完は入るマシンにだけ置く";
+      name = "fish の op と op-reason の補完は入るマシンにだけ置き、中身は pkgs/op-reason が出したもの";
       ok =
-        hasFishCompletion wslOp
+        pkg != null
+        && fishCompletion wslOp "op" != null
+        && fishCompletion wslOp "op-reason" != null
+        # 中身のパスは op-reason の package の出力で、package は Linux にしか無い (ほかの system で評価すると止まる)
+        && (
+          !buildChecks
+          || (
+            "${(fishCompletion wslOp "op").source}" == "${unwrapped}/share/fish/vendor_completions.d/op.fish"
+            &&
+              "${(fishCompletion wslOp "op-reason").source}"
+              == "${unwrapped}/share/fish/vendor_completions.d/op-reason.fish"
+          )
+        )
         && !(hasFishCompletion wslOnly)
         && !(hasFishCompletion opOnly)
         && !(hasFishCompletion plain);
@@ -112,15 +157,15 @@ assert lib.assertMsg (failed == [ ])
 pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks pkgs.fish; } ''
   echo ${lib.escapeShellArg (lib.concatMapStringsSep "\n" (c: "ok   ${c.name}") cases)}
   ${lib.optionalString buildChecks ''
-    pkg=${lib.head (opOf wslOp)}
-    for bin in op pjp-op-log; do
-      got=$(readlink -f ${wslOp.home.path}/bin/$bin)
-      if [[ $got != "$(readlink -f "$pkg/bin/$bin")" ]]; then
-        echo "op-reason-state: 入るマシンの profile の bin/$bin が $pkg のものでなく $got" >&2
+    profile=${wslOp.home.path}
+    for bin in op op-reason op-reason-log; do
+      got=$(readlink -f "$profile/bin/$bin")
+      if [[ $got != "$(readlink -f "${pkg}/bin/$bin")" ]]; then
+        echo "op-reason-state: 入るマシンの profile の bin/$bin が ${pkg} のものでなく $got" >&2
         exit 1
       fi
     done
-    echo "ok   入るマシンの profile の bin/op と bin/pjp-op-log は、この package のもの"
+    echo "ok   入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log は、この包みのもの"
 
     if [[ -e ${plain.home.path}/bin/op ]]; then
       echo "op-reason-state: 入らないマシンの profile に bin/op がある" >&2
@@ -128,28 +173,64 @@ pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks
     fi
     echo "ok   入らないマシンの profile に bin/op は無い"
 
-    rc=0
-    env -i PATH=/nonexistent HOME="$TMPDIR" ${wslOp.home.path}/bin/op --reason "試す" item get x \
-      >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
-    if [[ $rc != 127 ]] || ! grep -q 'op.exe' "$TMPDIR/err" \
-      || ! grep -q '"why":"no-op-exe"' "$TMPDIR/.local/state/pjp-op/log.jsonl"; then
-      echo "op-reason-state: PATH の無い op が 127 で断って記録に書かない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+    got=$(env -i PATH=/nonexistent HOME="$TMPDIR/v" "$profile/bin/op-reason" --version)
+    if [[ $got != "op-reason ${unwrapped.version}" ]]; then
+      echo "op-reason-state: profile の op-reason --version が「op-reason ${unwrapped.version}」でなく「$got」" >&2
       exit 1
     fi
-    echo "ok   profile の op は PATH が無くても動き、op.exe が無ければ 127 で断って記録に書く"
+    echo "ok   profile の op-reason --version は、PATH が無くても pkgs/op-reason の版を出す"
+
+    # op.exe が無い: 127 で日本語の断り、記録に no-op-exe
+    home=$TMPDIR/h1
+    mkdir -p "$home"
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" "$profile/bin/op" --reason "試す" item get x >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 127 ]] || ! grep -q 'op.exe が見つかりません' "$TMPDIR/err" \
+      || ! grep -q '"why":"no-op-exe"' "$home/.local/state/op-reason/log.jsonl"; then
+      echo "op-reason-state: op.exe の無い op が 127 で日本語の断りを出して記録に書かない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    echo "ok   profile の op は、op.exe が無ければ 127 で日本語の断りを出し、記録に no-op-exe を書く"
+
+    # op.exe はあるが op-reason.exe が無い: 既定の OPREASON_EXE の場所を断りの文に出す。環境の OPREASON_EXE が勝つ
+    touch "$TMPDIR/op.exe"
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" OPREASON_OP_EXE="$TMPDIR/op.exe" "$profile/bin/op" --reason "試す" item get x \
+      >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 127 ]] || ! grep -qF '${pkg.exePath}' "$TMPDIR/err" \
+      || ! grep -q '"why":"no-exe"' "$home/.local/state/op-reason/log.jsonl"; then
+      echo "op-reason-state: op-reason.exe の無い op が既定の場所を出して 127 (no-exe) で終わらない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" OPREASON_OP_EXE="$TMPDIR/op.exe" OPREASON_EXE=/x/op-reason.exe \
+      "$profile/bin/op" --reason "試す" item get x >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 127 ]] || ! grep -qF '(/x/op-reason.exe)' "$TMPDIR/err"; then
+      echo "op-reason-state: 環境の OPREASON_EXE が既定に勝たない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    echo "ok   op-reason.exe が無ければ既定の OPREASON_EXE の場所を出して 127 (no-exe)。環境の OPREASON_EXE が勝つ"
+
+    if ! env -i PATH=/nonexistent HOME="$home" "$profile/bin/op-reason-log" --all >"$TMPDIR/log" 2>&1 \
+      || ! grep -q 'op-reason.exe が無い' "$TMPDIR/log"; then
+      echo "op-reason-state: op-reason-log が記録の表を出さない: $(cat "$TMPDIR/log")" >&2
+      exit 1
+    fi
+    echo "ok   profile の op-reason-log は記録を見る道具として動き、上の断りを表に出す"
 
     # 置いた補完を fish の補完の置き場の頭に足し、偽の op (呼ばれたら印を書いて 2 で終わる) で op <Tab> の候補を見る
     mkdir -p "$TMPDIR/comp" "$TMPDIR/bin" "$TMPDIR/fish-home"
-    cp ${wslOp.xdg.configFile."fish/completions/op.fish".source} "$TMPDIR/comp/op.fish"
+    cp ${(fishCompletion wslOp "op").source} "$TMPDIR/comp/op.fish"
     printf '#!%s\necho called >>%s/op.calls\nexit 2\n' "$BASH" "$TMPDIR" >"$TMPDIR/bin/op"
     chmod +x "$TMPDIR/bin/op"
-    cand=$(HOME="$TMPDIR/fish-home" PATH="$TMPDIR/bin:$PATH" \
-      fish --no-config -c 'set -p fish_complete_path $argv[1]; complete -C "op "' "$TMPDIR/comp" | cut -f1)
-    if [[ $'\n'$cand$'\n' != *$'\n'item$'\n'* || -e $TMPDIR/op.calls ]]; then
-      echo "op-reason-state: 置いた fish の補完で op <Tab> が item を出さないか、op を呼んだ: $cand" >&2
+    HOME="$TMPDIR/fish-home" PATH="$TMPDIR/bin:$PATH" \
+      fish --no-config -c 'set -p fish_complete_path $argv[1]; complete -C "op "' "$TMPDIR/comp" >"$TMPDIR/cand"
+    cut -f1 "$TMPDIR/cand" >"$TMPDIR/cand1"
+    if ! grep -qx 'item' "$TMPDIR/cand1" || ! grep -qx -- '--reason' "$TMPDIR/cand1" || [[ -e $TMPDIR/op.calls ]]; then
+      echo "op-reason-state: 置いた fish の補完で op <Tab> が item と --reason を出さないか、op を呼んだ: $(cat "$TMPDIR/cand1")" >&2
       exit 1
     fi
-    echo "ok   置いた fish の補完は、op を呼ばずに op <Tab> の候補を出す"
+    echo "ok   置いた fish の補完は、op を呼ばずに op <Tab> の候補 (item と --reason) を出す"
   ''}
   touch $out
 ''

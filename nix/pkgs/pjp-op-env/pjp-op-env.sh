@@ -17,8 +17,8 @@
 #   4. 値の全体が op:// で始まるものを参照として集め、参照があれば op を 1 回だけ呼ぶ:
 #        op [--reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"] inject
 #      stdin には、参照ごとに乱数の境界の印の行と {{ <参照> }} の行を並べたテンプレートを流し、stdout はパイプで受けて
-#      bash の変数にだけ置く。--reason は pjp-op のあるマシン (~/.local/state/dotfiles/claude-op-reason.json の enable が
-#      true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い
+#      bash の変数にだけ置く。--reason は WSL の op が wrapper の op-reason のマシン (~/.local/state/dotfiles/
+#      claude-op-reason.json の enable が true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い
 #   5. op が 0 以外で終われば、その終了コードで終わる。出力に NUL がある・境界の印の数や順が合わないなら 70 で終わる
 #   6. op の認証の環境変数 (OP_SERVICE_ACCOUNT_TOKEN・OP_CONNECT_HOST・OP_CONNECT_TOKEN・OP_SESSION_*) を外し、.env の名前と
 #      値 (参照は解いた値) を export して、exec で自分を program に置き換える (argv[0] は打った名前のまま)
@@ -37,7 +37,7 @@
 #     読めない行にして、op を呼ぶ前に止める。export のあとに入れた数も数え、足りなければ program を起こさない
 #   - 中の変数: 名前を _poe_ で始め、始めに同じ頭の変数を消す。呼び手が export した名前に代入すると、その値が program に
 #     渡る。.env の名前を export すると同じ名前の shell の変数が替わるので、.env の _poe_* は読めない行にする
-#   - lock と窓: op の出力を読み切り、op が終わってから program を起こす。WSL の op (pjp-op) は op が終わるまで lock と承認の
+#   - lock と窓: op の出力を読み切り、op が終わってから program を起こす。WSL の op (op-reason) は op が終わるまで lock と承認の
 #     窓を持つので、op run のように program の間ずっと持たせない
 #
 # ## 終了コード
@@ -93,7 +93,7 @@ _poe_usage() {
     '.env の op:// の参照 (op://vault/項目/欄) を 1 回の op で解き、値を環境変数に入れて program を起こします。' \
     '値はファイル・端末・引数に出さず、op が終わってから program を起こします (WSL の op の lock と承認の窓を持ち続けません)。' \
     '' \
-    '  --reason <理由>    何のために何を読むかを 1 文で (必須)。WSL の op (pjp-op) では承認の窓と記録に出ます' \
+    '  --reason <理由>    何のために何を読むかを 1 文で (必須)。WSL の op (op-reason) では承認の窓と記録に出ます' \
     '  --env-file <path>  読む .env (繰り返せる。後のファイルが勝つ)。無ければ今の dir の .env' \
     '  --dry-run          op を呼ばず、.env の名前と種類 (参照か値か) を出します。参照でない値は出しません' \
     '  -q, --quiet        起こす前の 1 行を出しません' \
@@ -346,7 +346,7 @@ if ((${#_poe_refs[@]} > 0)); then
   if [[ -n ${HOME:-} && -r ${HOME}/.local/state/dotfiles/claude-op-reason.json ]]; then
     _poe_state=$(<"${HOME}/.local/state/dotfiles/claude-op-reason.json")
     if [[ ${_poe_state} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
-      # 窓のコマンドは op inject だけになるので、読む参照 (同じものは 1 回) と渡す program を理由に足す。pjp-op は窓の理由を
+      # 窓のコマンドは op inject だけになるので、読む参照 (同じものは 1 回) と渡す program を理由に足す。op-reason は窓の理由を
       # 200 字で切るので、program と参照の件数を頭に置き、参照が窓で切れても件数で気づけるようにする (記録は 500 字まで)
       _poe_list=""
       _poe_nref=0
