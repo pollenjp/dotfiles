@@ -35,6 +35,15 @@
 # 印と入力しか見ないので、名前の入った例でも変わらない。行の形は setup-local-flake.sh と同じものを見る (直すならあちらも。
 # 行そのものの形を変えるときは、下の example_user_of)。
 #
+# ## tmp の例の設定グループ
+#
+# setup-local-flake.sh は雛形を描くと、tmp の例 (コメント) の `        #   system = "x86_64-linux";` の行の後ろに、設定グループの
+# 選び方の塊 (setup-local-flake.sh の group_example_block の heredoc) を差し込む (heredoc は変えないので、雛形の版の印は
+# 変わらない。dotfiles-private の docs/adr/057_host_setting_groups_*)。雛形の各版を描くとき (template_render) は、その版の
+# setup-local-flake.sh に group_example_block があれば、その本文を同じ所に差し込む (その版が書く形を描く)。塊の本文は
+# setup-local-flake.sh にだけあり、ここは読むだけ。塊より前の版は差し込まずに描くので、prepare の 3-way merge では、塊の
+# 無い旧いファイルには今の雛形の塊が足され、塊のある旧いファイルは両側が同じ塊を持つので衝突しない。
+#
 # ## 雛形の版の印
 #
 # 雛形の先頭のコメントに「# 雛形の版: <8 桁の 16 進>」を置く。値は heredoc の原文 (展開する前) の POSIX cksum の
@@ -146,7 +155,41 @@ template_id() {
 # 雛形の 1 版を描く。$1: setup-local-flake.sh のパス、$2: ${nix_dir} に入れるパス、$3: ${private_nix_dir} に入れる
 # パス (dotfiles-private の入力。その展開の無い版では使わない)。
 # 引用しない heredoc の展開を真似る。描けない展開があれば、何も出さずに理由を stderr に出して 1
+# 描く版の setup-local-flake.sh ($1) の group_example_block の heredoc の本文 (冒頭の「tmp の例の設定グループ」)。その関数が
+# 無い版 (塊より前) なら何も出さずに 1
+group_example_anchor='        #   system = "x86_64-linux";'
+group_example_of() {
+  awk -v open="  cat <<'EOB'" '
+    $0 == "group_example_block() {" { f = 1; next }
+    f && !g && $0 == open { g = 1; next }
+    g && $0 == "EOB" { done = 1; exit }
+    g { print }
+    END { exit done ? 0 : 1 }
+  ' "$1"
+}
+
+# 雛形の 1 版を描く (heredoc の展開を真似る template_heredoc に、その版が差し込む設定グループの選び方の塊を足す)。
+# $1: setup-local-flake.sh のパス、$2: 本体の nix/、$3: dotfiles-private の入力
 template_render() {
+  local block
+  if ! block=$(group_example_of "$1"); then
+    template_heredoc "$@"
+    return
+  fi
+  template_heredoc "$@" | BLOCK=${block} ANCHOR=${group_example_anchor} awk '
+    { print }
+    $0 == ENVIRON["ANCHOR"] { print ENVIRON["BLOCK"]; n++ }
+    END {
+      if (n != 1) {
+        printf "!! 雛形の tmp の例に、設定グループの例を差し込む目印 (%s) がちょうど 1 行ありません\n", ENVIRON["ANCHOR"] > "/dev/stderr"
+        exit 1
+      }
+    }
+  '
+}
+
+# 雛形の 1 版の heredoc を、bash の heredoc の展開を真似て描く (${nix_dir}・${private_nix_dir}・${template_id} と \$ \` \\)
+template_heredoc() {
   local id
   id=$(template_id "$1") || return 1
   template_raw "$1" | NIX_DIR=$2 PRIVATE_NIX_DIR=${3:-} TEMPLATE_ID=${id} awk '

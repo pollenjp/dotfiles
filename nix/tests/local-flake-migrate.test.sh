@@ -18,6 +18,8 @@
 #   - id は heredoc の原文から 8 桁の 16 進を出す。heredoc の中を変えると変わり、外を変えても変わらない。
 #     開きの行 (`  cat >"${flake_file}" <<EOS`) が 1 つでない・閉じの EOS が無い script は、id も render も 1
 #   - render --rev は、repo の履歴の setup-local-flake.sh の版を描く (古い版の script を実行しない)
+#   - render は、描く版の setup-local-flake.sh に group_example_block (設定グループの選び方の塊) があれば、その heredoc の本文を
+#     tmp の例の system の行の後ろに差し込む。group_example_block の無い版 (塊より前) には差し込まない。どちらも雛形の版の印は同じ
 #   - どのコマンドも一時ファイルを TMPDIR に残さない (id - と render --rev も)
 #   - check は、ローカル flake の「# 雛形の版:」の印が今の雛形と同じなら何も出さず 0 (中身を利用者が書き換えて
 #     いても)、違えば「旧い印 → 今の印」(印が無ければ「印なし → 今の印」) を出して 1、inputs.dotfiles.url の
@@ -1354,6 +1356,33 @@ if grep -qxF '        #     windowsUserName = "olduser";' "${r}/local/flake.nix"
   ok "prepare: 例が元の雛形の作り物の名前のままなら入れず、今の雛形の作り物の名前になる"
 else
   ng "prepare (作り物の名前のまま)" "rc=$(rc "${r}") $(out "${r}") $(err "${r}") $(diff "${r}/want.nix" "${r}/w/new/flake.nix" 2>&1 | head -20)"
+fi
+
+# 36. 設定グループの選び方の塊: render は、描く版に group_example_block があれば、その本文を tmp の例の system の行の後ろに
+#     差し込む。無い版 (塊より前) には差し込まない。雛形の版の印はどちらも同じ (heredoc は同じ)
+r=$(new_repo r36)
+cp "${dir}/setup-local-flake.sh" "${dir}/private-host.sh" "${r}/nix/scripts/"
+run "${r}" render --file "${r}/nix/scripts/setup-local-flake.sh" --nix-dir /N --private-dir /P
+cp "${r}/out" "${r}/with.nix"
+rc_with=$(rc "${r}")
+# 塊より前の版: group_example_block の定義の名前だけを変える (heredoc は同じ)
+sed 's/^group_example_block() {$/group_example_block_gone() {/' "${dir}/setup-local-flake.sh" >"${r}/nix/scripts/old.sh"
+run "${r}" render --file "${r}/nix/scripts/old.sh" --nix-dir /N --private-dir /P
+cp "${r}/out" "${r}/without.nix"
+block=$(awk -v open="  cat <<'EOB'" '
+  $0 == "group_example_block() {" { f = 1; next }
+  f && !g && $0 == open { g = 1; next }
+  g && $0 == "EOB" { exit }
+  g { print }
+' "${dir}/setup-local-flake.sh")
+BLOCK=${block} awk '{ print } $0 == "        #   system = \"x86_64-linux\";" { print ENVIRON["BLOCK"] }' "${r}/without.nix" >"${r}/want.nix"
+id_new=$(HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" id "${r}/nix/scripts/setup-local-flake.sh")
+id_old=$(HOME="${work}/githome" "${BASH}" "${r}/nix/scripts/local-flake-migrate.sh" id "${r}/nix/scripts/old.sh")
+if [[ ${rc_with} == 0 && $(rc "${r}") == 0 && -n ${block} ]] && cmp -s "${r}/want.nix" "${r}/with.nix" \
+  && ! grep -qF '設定グループ (本体の' "${r}/without.nix" && [[ -n ${id_new} && ${id_new} == "${id_old}" ]]; then
+  ok "render は、描く版に group_example_block があれば塊を tmp の例の system の行の後ろに差し込み、無い版には差し込まない (印は同じ)"
+else
+  ng "設定グループの選び方の塊" "rc=${rc_with}/$(rc "${r}") id=${id_new}/${id_old} $(err "${r}") $(diff "${r}/want.nix" "${r}/with.nix" | head -20)"
 fi
 
 # 27. どのコマンドも一時ファイルを残さない (id - と render --rev も)
