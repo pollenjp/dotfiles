@@ -83,7 +83,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\ghq\github.com\pollenj
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
    | --- | --- | --- | --- |
    | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
-   | GitHub CLI | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`) |
+   | GitHub CLI | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
    | rustup | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を GNU (`--default-host x86_64-pc-windows-gnu`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
 
    Rust は GNU の host (`x86_64-pc-windows-gnu`) を使う。GNU の toolchain は linker を同梱するので、Visual Studio の Build Tools は入れない

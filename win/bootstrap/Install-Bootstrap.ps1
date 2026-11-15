@@ -140,10 +140,13 @@ function Test-WingetPinned {
     $false
 }
 
-# 固定した版で入れる winget install の引数。道具ごとの引数 (scope・installer の種類・--custom) を後ろに足す
+# 固定した版で入れる winget install の引数。道具ごとの引数 (scope・installer の種類・--custom) を後ろに足す。-Silent $false なら
+# --silent を付けず、winget の既定 (進み具合の小さな窓が出る形。MSI なら /passive) で流す
 function Get-WingetInstallArguments {
-    param([string]$PackageId, [string]$Version, [string[]]$Extra)
-    @('install', '--id', $PackageId, '--exact', '--source', 'winget', '--silent', '--accept-source-agreements',
+    param([string]$PackageId, [string]$Version, [bool]$Silent = $true, [string[]]$Extra)
+    $silentArgs = @()
+    if ($Silent) { $silentArgs = @('--silent') }
+    @('install', '--id', $PackageId, '--exact', '--source', 'winget') + $silentArgs + @('--accept-source-agreements',
         '--disable-interactivity', '--version', $Version, '--accept-package-agreements') + @($Extra | Where-Object { $_ })
 }
 
@@ -160,11 +163,14 @@ function Get-BootstrapPackages {
     $ghPackageId = 'GitHub.cli'
     $rustupPackageId = 'Rustlang.Rustup'
     # Git は machine の scope (C:\Program Files\Git。インストーラーの選択肢は既定のまま)、gh は MSI (C:\Program Files\GitHub CLI。
-    # zip の portable もある)、rustup は GNU の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)
+    # zip の portable もある)、rustup は GNU の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
+    # Silent: gh の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに落ちる
+    # (Error 1925)。gh だけ --silent を付けず、winget の既定 (/passive) で UAC を出させる。Git の installer は自分で昇格し、rustup は
+    # user に入るので --silent でよい
     @(
-        [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Args = @('--scope', 'machine') }
-        [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Args = @('--installer-type', 'wix') }
-        [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Args = @('--custom', (Get-RustupInitArgument)) }
+        [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
+        [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
+        [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
     )
 }
 
@@ -410,11 +416,15 @@ function Update-ProcessPath {
 }
 
 # gh auth login を、このコンソールで対話で流す (一回限りのコードが出て、ブラウザーで認める)。終了コードを返す。
-# & で呼ぶと関数の出力として stdout を受けることになり、gh が端末でないと見て対話をやめうるので、Start-Process でコンソールをそのまま渡す
+# & で呼ぶと関数の出力として stdout を受けることになり、gh が端末でないと見て対話をやめうるので、Start-Process でコンソールをそのまま渡す。
+# -Wait は使わない (5.1 の -Wait は子孫のプロセスまで待つので、gh が開いたブラウザーを閉じるまで返らない)。handle を先に掴んでから
+# WaitForExit で gh だけを待つ (掴まないと、終わった後に ExitCode が読めない)
 function Invoke-GhLogin {
     param([string]$GhPath)
     try {
-        $p = Start-Process -FilePath $GhPath -ArgumentList ((Get-GhLoginArguments) -join ' ') -NoNewWindow -Wait -PassThru
+        $p = Start-Process -FilePath $GhPath -ArgumentList ((Get-GhLoginArguments) -join ' ') -NoNewWindow -PassThru
+        $null = $p.Handle
+        $p.WaitForExit()
         return $p.ExitCode
     } catch {
         Write-Host "gh を起動できなかった: $($_.Exception.Message)"
@@ -615,7 +625,7 @@ function Invoke-InstallBootstrap {
     foreach ($p in $packages) {
         $s = @($state.Packages | Where-Object { $_.Name -eq $p.Name })[0]
         if ($s.Exists) { continue }
-        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Extra $p.Args)
+        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $p.Args)
         Write-Host ''
         Write-Host "winget $($arguments -join ' ')"
         $result = Invoke-Winget -Arguments $arguments

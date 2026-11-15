@@ -67,6 +67,16 @@ Test-Case 'Join-Path に 3 つ目の引数を渡していない (5.1 は 2 つ�
             }, $true) | ForEach-Object { $_.Extent.StartLineNumber }) -join ' '
 }
 
+# 5.1 の Start-Process -Wait は、起こしたプロセスの子孫 (gh が開いたブラウザーなど) が全部終わるまで返らない
+Test-Case 'Start-Process に -Wait を付けていない (gh のログインの後、ブラウザーを閉じるまで止まる)' '' {
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$null, [ref]$null)
+    @($ast.FindAll({
+                param($n)
+                ($n -is [System.Management.Automation.Language.CommandAst]) -and ($n.GetCommandName() -eq 'Start-Process') -and
+                (@($n.CommandElements | Where-Object { ($_ -is [System.Management.Automation.Language.CommandParameterAst]) -and ($_.ParameterName -eq 'Wait') }).Count -gt 0)
+            }, $true) | ForEach-Object { $_.Extent.StartLineNumber }) -join ' '
+}
+
 Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 1.29.3' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
     foreach ($p in @('GitVersion', 'GhVersion', 'RustupVersion')) {
@@ -134,7 +144,8 @@ Test-Case 'pin の行があれば True' 'True' { Test-WingetPinned -Lines $pins 
 Test-Case 'ほかのパッケージの pin しか無ければ False' 'False' { Test-WingetPinned -Lines $pins -PackageId 'GitHub.cli' }
 
 # Get-WingetInstallArguments: 固定した版で入れる winget の引数
-Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Extra @('--scope', 'machine')) -join ' ' }
+Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ' }
+Test-Case '--silent を付けないとき (winget の既定の、進み具合の窓が出る形)' 'install --id GitHub.cli --exact --source winget --accept-source-agreements --disable-interactivity --version 2.103.3 --accept-package-agreements --installer-type wix' { (Get-WingetInstallArguments -PackageId 'GitHub.cli' -Version '2.103.3' -Silent $false -Extra @('--installer-type', 'wix')) -join ' ' }
 
 # Get-BootstrapPackages: 入れる順と、道具ごとの引数
 $packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -RustupVersion '1.29.3')
@@ -143,6 +154,9 @@ Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Rustl
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
 Test-Case 'rustup は GNU の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-gnu --default-toolchain none' { $packages[2].Args -join '|' }
+# per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Git は installer が自分で
+# 昇格し、rustup は user に入るので --silent でよい
+Test-Case 'gh だけ --silent を付けない (MSI が UAC を出せるように)' 'git=True gh=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
 
 # ---------------------------------------------------------------------------
 # clone
@@ -300,6 +314,7 @@ function Invoke-Winget {
     $id = $Arguments[[array]::IndexOf($Arguments, '--id') + 1]
     $verb = $Arguments[0]
     if ($verb -eq 'pin') { $verb = "pin-$($Arguments[1])" }
+    if (($verb -eq 'install') -and ($Arguments -notcontains '--silent')) { $verb = 'install-with-progress' }
     $script:Calls.Add("$verb $id")
     $code = 0
     if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
@@ -359,7 +374,7 @@ function New-LoggedInState {
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
 }
-$freshCalls = 'install Git.Git | install GitHub.cli | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
+$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
 
 Test-Case '-Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -States @((New-FreshState)) -Check; "$($r.Code) [$($r.Calls)]" }
 Test-Case '-Check で揃っていれば 0' '0 []' { $r = Invoke-Flow -States @((New-State)) -Check; "$($r.Code) [$($r.Calls)]" }
@@ -378,7 +393,7 @@ Test-Case 'SAC がオンでも止めず、最初に警告を出してから揃�
 Test-Case '-Check でも SAC の警告を最初に出す' '1 True' { $s = New-State @{ Sac = 'eval' }; $r = Invoke-Flow -States @($s) -Check; "$($r.Code) $(@($r.Text -split "`n")[0] -like '⚠️ Smart App Control が評価モードになっている*')" }
 Test-Case 'winget が無くても、SAC の警告は先に出す' '2 True' { $s = New-State @{ Sac = 'on' }; $r = Invoke-Flow -States @($s) -Winget $false; "$($r.Code) $(@($r.Text -split "`n")[0] -like '⚠️ Smart App Control*')" }
 Test-Case '管理者の PowerShell なら、まっさらでも何も打たずに 1' '1 []' { $s = New-FreshState; $s.Elevated = $true; $r = Invoke-Flow -States @($s); "$($r.Code) [$($r.Calls)]" }
-Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [install GitHub.cli | pin-add GitHub.cli]' {
+Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [install-with-progress GitHub.cli | pin-add GitHub.cli]' {
     $before = New-State @{ Sac = 'eval' } -Gh $fresh; $after = New-State @{ Sac = 'eval' }
     $r = Invoke-Flow -States @($before, (New-State @{ Sac = 'eval' } -Gh @{ Pinned = $false }), $after); "$($r.Code) [$($r.Calls)]"
 }
