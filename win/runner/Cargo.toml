@@ -1,0 +1,28 @@
+[package]
+name = "dotfiles-win"
+version = "0.1.0"
+edition = "2024"
+# rust-toolchain.toml の版に合わせる
+rust-version = "1.99"
+description = "dotfiles の Windows 側の runner (win/manifest.toml のファイルを配り、win/*/Install-*.ps1 を確かめてから入れる・揃える)"
+publish = false
+
+# 版は公開から 7 日以上たったものに限る (Cargo.lock の間接の依存も。cargo には猶予の設定が無いので、足す・上げるときに
+# crates.io の公開日時を見て、新しすぎる版は cargo update -p <名前> --precise <前の版> で下げる)。C のコンパイラが要る crate と
+# HTTP の crate は入れない (HTTP は gh、git は git の CLI を呼ぶ。claude-skills の Rust の道具と同じ方針)
+[dependencies]
+serde_json = "1.0.154"
+# 既定の features (alloc・oid) は使わない (oid は const-oid を引く)
+sha2 = { version = "0.11.1", default-features = false }
+# 読むだけ (win/manifest.toml・dotfiles-private の win/hosts/*.toml)。書き出し (display) は使わない
+toml = { version = "1.2.1", default-features = false, features = ["std", "parse", "serde"] }
+
+[lints.rust]
+# OS の API は外のコマンド (pwsh・git・cmd) で呼ぶ。unsafe を書く所を作らない
+unsafe_code = "deny"
+
+# dotfiles 関数 (win/powershell/dotfiles.ps1) は打つたびに cargo run --release を通す。速さより、pull の後の作り直しの短さを取る
+# (runner はほとんどの時間 pwsh を待っていて、最適化の差は出ない。claude-skills の Rust の道具と同じ)
+[profile.release]
+opt-level = 1
+incremental = true
