@@ -98,6 +98,26 @@ Test-Case 'downgrade の install に --version を付ける' '9.8.3.0' {
 }
 Test-Case 'none なら何も打たない' 0 { @(Get-WingetCommands -Plan 'none' -PackageId $Id -Version '10.0.0.0').Count }
 
+# winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと、この script が足した pin (Pinning) に
+# 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は
+# --include-pinned を受け付けない (下げるときの install は、uninstall で入っていない形にしてからなので pin を見ない)
+Test-Case 'upgrade は自分の pin を越える (--include-pinned)' 'True' {
+    @(Get-WingetCommands -Plan 'upgrade' -PackageId $Id -Version '10.0.0.0')[0] -contains '--include-pinned'
+}
+Test-Case 'install と、下げるときの uninstall・install には --include-pinned を付けない' 'False False False' {
+    $commands = @(Get-WingetCommands -Plan 'install' -PackageId $Id -Version '10.0.0.0') + @(Get-WingetCommands -Plan 'downgrade' -PackageId $Id -Version '9.8.3.0')
+    $commands | ForEach-Object { @($_) -contains '--include-pinned' }
+}
+
+# Get-WingetPinnedHint: winget が pin に止められて落ちた (0x8A150068) ときだけ、pin の見方と外し方を添える
+Test-Case 'pin に止められたら、pin の種類の見方と外し方を出す' 'True True' {
+    $h = @(Get-WingetPinnedHint -ExitCode -1978335128 -PackageId $Id)
+    "$($h[0].Contains("winget pin list --id $Id --exact")) $($h[0].Contains("winget pin remove --id $Id --exact"))"
+}
+Test-Case 'ほかの終了コードなら何も添えない' '0 0' {
+    "$(@(Get-WingetPinnedHint -ExitCode 1 -PackageId $Id).Count) $(@(Get-WingetPinnedHint -ExitCode -1978334964 -PackageId $Id).Count)"
+}
+
 # Test-SshAgentDisabled: ssh-agent が停止・無効か (サービスが無ければ問題なし)
 Test-Case '停止・無効' 'True' { Test-SshAgentDisabled -Status 'Stopped' -StartType 'Disabled' }
 Test-Case 'MSI が作り直した直後 (実行中・自動)' 'False' { Test-SshAgentDisabled -Status 'Running' -StartType 'Automatic' }

@@ -110,9 +110,19 @@ Test-Case 'Id の前方一致では True にしない' 'False' { Test-WingetPinn
 # Get-WingetCommands: plan ごとに打つ winget の引数
 $common = "--id $Id --exact --source winget --silent --accept-source-agreements --disable-interactivity"
 Test-Case 'install は版を名指しして入れる' "install $common --version $V --accept-package-agreements" { @(Get-WingetCommands -Plan install -PackageId $Id -Version $V)[0] -join ' ' }
-Test-Case 'upgrade は版を名指しして上げる' "upgrade $common --version $V --accept-package-agreements" { @(Get-WingetCommands -Plan upgrade -PackageId $Id -Version $V)[0] -join ' ' }
+Test-Case 'upgrade は版を名指しして上げ、自分の pin を越える' "upgrade $common --version $V --accept-package-agreements --include-pinned" { @(Get-WingetCommands -Plan upgrade -PackageId $Id -Version $V)[0] -join ' ' }
+# 版を名指しした upgrade は、--include-pinned が無いと、この script が足した pin (Pinning) に止められる (0x8A150068)。
+# 上げる前に pin を外すが、外せなかったときも止められないように付ける。install は --include-pinned を受け付けない
+Test-Case 'install には --include-pinned を付けない' 'False' { @(Get-WingetCommands -Plan install -PackageId $Id -Version $V)[0] -contains '--include-pinned' }
 Test-Case 'install と upgrade は 1 本ずつ' '1 1' { "$(@(Get-WingetCommands -Plan install -PackageId $Id -Version $V).Count) $(@(Get-WingetCommands -Plan upgrade -PackageId $Id -Version $V).Count)" }
 Test-Case 'none・newer・unknown なら打たない' '0 0 0' { "$(@(Get-WingetCommands -Plan none -PackageId $Id -Version $V).Count) $(@(Get-WingetCommands -Plan newer -PackageId $Id -Version $V).Count) $(@(Get-WingetCommands -Plan unknown -PackageId $Id -Version $V).Count)" }
+
+# Get-WingetPinnedHint: winget が pin に止められて落ちた (0x8A150068) ときだけ、pin の見方と外し方を添える
+Test-Case 'pin に止められたら、pin の種類の見方と外し方を出す' 'True True' {
+    $h = @(Get-WingetPinnedHint -ExitCode -1978335128 -PackageId $Id)
+    "$($h[0].Contains("winget pin list --id $Id --exact")) $($h[0].Contains("winget pin remove --id $Id --exact"))"
+}
+Test-Case 'ほかの終了コードなら何も添えない' '0' { @(Get-WingetPinnedHint -ExitCode 1 -PackageId $Id).Count }
 
 # 状態の既定 (揃っている)。テストごとに一部を差し替える
 function New-State {
@@ -202,6 +212,11 @@ function Invoke-Winget {
     $script:Calls.Add($verb)
     $code = 0
     if ($script:Fail.ContainsKey($verb)) { $code = $script:Fail[$verb] }
+    # pin の持ち方は winget と同じにする: 外せば無くなり、足せば付く。版を名指しした upgrade は、--include-pinned が無ければ
+    # 付いている pin (Pinning) に止められる (0x8A150068)
+    if (($code -eq 0) -and ($verb -eq 'pin remove')) { $script:PinnedNow = $false }
+    if (($code -eq 0) -and ($verb -eq 'pin add')) { $script:PinnedNow = $true }
+    if (($code -eq 0) -and ($verb -eq 'upgrade') -and $script:PinnedNow -and ($Arguments -notcontains '--include-pinned')) { $code = -1978335128 }
     if (($code -eq 0) -and (@('install', 'upgrade') -contains $verb)) { $script:InstalledNow = $true }
     $lines = @()
     if (($verb -eq 'pin list') -and $script:PinListed) { $lines = @("Google 日本語入力 $Id $V winget Pinning") }
@@ -220,6 +235,8 @@ function Invoke-Flow {
     $script:Fail = $Fail
     $script:InstalledNow = [bool]$Installed
     $script:PinListed = [bool]$PinListed
+    # winget の pin の持ち方の初め (偽の Invoke-Winget が upgrade を止めるかに使う)。揃える前の状態の Pinned から取る
+    $script:PinnedNow = [bool]$States[0].Pinned
     $out = @(Invoke-InstallGoogleJapaneseInput -Version $V -Check:$Check -IfMissing:$IfMissing 6>&1)
     [pscustomobject]@{
         Calls = ($script:Calls -join ' ')
@@ -239,6 +256,14 @@ Test-Case 'pin だけ無ければ pin を足すだけ (UAC は出ない)' '0 [pi
 Test-Case 'この PC: upgrade して pin を足す' '0 [upgrade pin list pin add]' { $r = Invoke-Flow -States @((New-State $thisPc), $synced) -Installed; "$($r.Code) [$($r.Calls)]" }
 Test-Case '上げる前に、アプリを閉じるよう出す' $true { $r = Invoke-Flow -States @((New-State $thisPc), $synced) -Installed; $r.Text -like '*アプリをできるだけ閉じる*' }
 Test-Case 'pin があるときは外してから上げ、足し直す' '0 [pin remove upgrade pin list pin add]' { $r = Invoke-Flow -States @((New-State $thisPcPinned), $synced) -Installed; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'pin を外せなくても、上げる upgrade は自分の pin に止められない' '0 [pin remove upgrade pin list] False' {
+    $r = Invoke-Flow -States @((New-State $thisPcPinned), $synced) -Installed -PinListed -Fail @{ 'pin remove' = 1 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*winget が失敗した*')"
+}
+Test-Case 'upgrade が pin に止められたら (Blocking の pin など)、pin の見方と外し方を出す' 'True' {
+    $r = Invoke-Flow -States @((New-State $thisPcPinned), (New-State $thisPcPinned)) -Installed -PinListed -Fail @{ upgrade = -1978335128 }
+    $r.Text -like "*winget pin list --id $Id --exact*"
+}
 Test-Case '新しければ何も打たずに 1 (下げない)' '1 [] True' { $r = Invoke-Flow -States @((New-State $newer)) -Installed; "$($r.Code) [$($r.Calls)] $($r.Text -like '*下げない*')" }
 Test-Case '版が読めなければ何も打たずに 1' '1 []' { $r = Invoke-Flow -States @((New-State @{ Installed = $null; Plan = 'unknown' })) -Installed; "$($r.Code) [$($r.Calls)]" }
 Test-Case '固定した版が winget に無ければ何も打たずに 1' '1 []' { $r = Invoke-Flow -States @((New-State ($missing + @{ Versions = @('3.35.6300.0'); Latest = '3.35.6300.0' }))) -IfMissing; "$($r.Code) [$($r.Calls)]" }
