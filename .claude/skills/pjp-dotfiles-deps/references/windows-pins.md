@@ -2,13 +2,13 @@
 
 dotfiles は Windows のアプリを版を固定して入れる (`win/README.md` の「固定した版より新しい版の知らせ」)。対象は OpenSSH・herdr・
 Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新しい Windows で最初に流す bootstrap (`win/bootstrap/Install-Bootstrap.ps1`) が
-入れる Git for Windows (`git`)・GitHub CLI (`gh`)・rustup (`rustup`)。新しい版の候補と猶予ごとの上げ先は、依存の更新の skill が repo の口
+入れる Git for Windows (`git`)・GitHub CLI (`gh`)・Visual Studio Build Tools 2022 (`vs-buildtools`)・rustup (`rustup`)。新しい版の候補と猶予ごとの上げ先は、依存の更新の skill が repo の口
 (`deps.toml` の `[[pins]]` の `windows`。`nix/scripts/bootstrap-windows-pin-updates.sh --candidates --json`) から出す。どの版を
 入れるか (上げないかも) はユーザーが決めること。候補を出して推奨を添えるまでが Claude で、黙って猶予より新しい版にしない。
 
 - 人が読んで確かめるなら、同じ候補を文で出せる: `nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]`
   (gh のログインが要る。見送った版の理由・上げ方の README の節・見送りの一覧の場所も出る)
-- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・rustup が winget-pkgs に
+- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・vs-buildtools・rustup が winget-pkgs に
   載った日、herdr-app・herdr-core が成果物の Last-Modified。winget の版だけを数える (GitHub にあって winget にまだ無い版は上げ先にならない)
 - 口の JSON で `error` のある名前は確かめられていない。その名前は上げず、わけを報告と PR の本文に書く
 
@@ -38,7 +38,7 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
 | `ntn` | `win/ntn/Install-Ntn.ps1` の同じ所 | 「ntn」の「今は」 | 「ntn の新しい版が出たとき」 |
 | `claude-code` | `win/claude-code/Install-ClaudeCode.ps1` の同じ所 | 「Claude Code」の「今は」 | 「Claude Code の新しい版が出たとき」 |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` の版と sha256 (core は 3 つの target と generation) | 「herdr-app を入れる」の「今は」 | 「固定した版を上げる」(sha256・core_min・generation・ソースが取得元の変数を読むかを確かめる) |
-| `git`・`gh`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(rustup は `--default-host x86_64-pc-windows-gnu --default-toolchain none` と自己更新の止めが効くかも見る) |
+| `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る) |
 
 - テスト (名前ごとの ps1 のテストと herdr-core の build) は `deps.toml` の `[[checks]]` にあり、依存の更新の skill が PR の前に流す
 - 上げる前に、その節のとおり release notes (CHANGELOG) を読み、設定・置き場所・更新の仕組みに触る変更が無いかを見る。気になる
@@ -61,7 +61,7 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
 | `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る) |
-| `git`・`gh`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 3 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「bootstrap」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版>`) で手で揃える (Rust の runner ができたら runner が揃える) |
+| `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「bootstrap」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版>`) で手で揃える (Rust の runner ができたら runner が揃える) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr` の `enable` が
   false。herdr-app・herdr-core は `herdr` の値) では、setup はその名前を確かめも揃えもしない (`nix/README.md` の「設定グループ」)

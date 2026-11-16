@@ -1,5 +1,5 @@
 ﻿# win/bootstrap/Install-Bootstrap.ps1 のうち、副作用の無い関数と、Windows に触る関数を偽物に差し替えた流れのテスト。
-# Pester は使わない。winget・UAC・gh のログイン・clone の本物の動きは、Windows の実機で -Check と本番を打って確かめる
+# Pester は使わない。winget・UAC・vswhere・gh のログイン (Ctrl+C の受け止めも)・clone の本物の動きは、Windows の実機で -Check と本番を打って確かめる
 # (win/README.md の「bootstrap (新しい Windows で最初に流す)」)。
 #
 # WSL から流す (Linux の pwsh で動かすので、Windows 側には触らない):
@@ -77,17 +77,17 @@ Test-Case 'Start-Process に -Wait を付けていない (gh のログインの�
             }, $true) | ForEach-Object { $_.Extent.StartLineNumber }) -join ' '
 }
 
-Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 1.29.3' {
+Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 17.14.44 1.29.3' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
-    foreach ($p in @('GitVersion', 'GhVersion', 'RustupVersion')) {
+    foreach ($p in @('GitVersion', 'GhVersion', 'VsBuildToolsVersion', 'RustupVersion')) {
         $line = @($text | Where-Object { $_ -match "^\s*\[string\]\`$$p\s*=\s*'([^']*)'" })[0]
         if ($line -match "'([^']*)'") { $Matches[1] }
     }
 }
 
-Test-Case 'パッケージ ID は 1 行ずつの変数 (check-winget-version.sh が読む行の形)' 'Git.Git GitHub.cli Rustlang.Rustup' {
+Test-Case 'パッケージ ID は 1 行ずつの変数 (check-winget-version.sh が読む行の形)' 'Git.Git GitHub.cli Microsoft.VisualStudio.2022.BuildTools Rustlang.Rustup' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
-    foreach ($v in @('gitPackageId', 'ghPackageId', 'rustupPackageId')) {
+    foreach ($v in @('gitPackageId', 'ghPackageId', 'vsBuildToolsPackageId', 'rustupPackageId')) {
         $line = @($text | Where-Object { $_ -match "^\s*\`$$v\s*=\s*'[A-Za-z0-9][A-Za-z0-9.-]*'" })[0]
         if ($line -match "'([^']*)'") { $Matches[1] }
     }
@@ -112,6 +112,33 @@ Test-Case 'rustup: 版を拾う (ほかの行が先にあっても)' '1.29.3' { 
 Test-Case 'rustup: rustc の行は版と読まない' '' { Get-RustupVersionFromOutput -Lines @('rustc 1.91.0 (f8297e351 2025-10-28)') }
 
 # ---------------------------------------------------------------------------
+# Visual Studio Build Tools
+# ---------------------------------------------------------------------------
+
+$bt2022 = '{"productId":"Microsoft.VisualStudio.Product.BuildTools","installationPath":"C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools","installationVersion":"17.14.36616.10","catalog":{"productDisplayVersion":"17.14.44"},"packages":[{"id":"Microsoft.VisualStudio.Workload.VCTools","type":"Workload"},{"id":"Microsoft.VisualStudio.Component.VC.Tools.x86.x64","type":"Component"},{"id":"Microsoft.VisualStudio.Component.Windows11SDK.26100","type":"Component"}]}'
+$bt2026 = '{"productId":"Microsoft.VisualStudio.Product.BuildTools","installationPath":"C:\\Program Files (x86)\\Microsoft Visual Studio\\18\\BuildTools","installationVersion":"18.11.11222.10","catalog":{"productDisplayVersion":"18.11.3"},"packages":[]}'
+$community = '{"productId":"Microsoft.VisualStudio.Product.Community","installationPath":"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community","installationVersion":"17.14.36616.10","catalog":{"productDisplayVersion":"17.14.44"},"packages":[{"id":"Microsoft.VisualStudio.Component.VC.Tools.x86.x64","type":"Component"}]}'
+
+# Get-VsBuildToolsInstance: vswhere の JSON から、Build Tools でメジャーの合うものを選ぶ
+Test-Case 'vswhere: 何も入っていなければ空' '' { Get-VsBuildToolsInstance -Json '[]' -Major 17 }
+Test-Case 'vswhere: 2022 の Build Tools の置き場所と版と、入っているワークロードと部品' 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools|17.14.44|3' { $i = Get-VsBuildToolsInstance -Json "[$bt2022]" -Major 17; "$($i.Path)|$($i.Version)|$(@($i.Packages).Count)" }
+Test-Case 'vswhere: 2026 と 2022 があれば 2022 を選ぶ' '17.14.44' { (Get-VsBuildToolsInstance -Json "[$bt2026,$bt2022]" -Major 17).Version }
+Test-Case 'vswhere: Community だけなら空 (Build Tools は入っていない)' '' { Get-VsBuildToolsInstance -Json "[$community]" -Major 17 }
+
+# Get-VsRequiredComponents・Get-VsMissingComponents: 入れるもの (C++ のワークロードと、rustup 1.29.3 が自分で入れるときと同じ 2 つの部品)
+$vsAll = @('Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', 'Microsoft.VisualStudio.Component.Windows11SDK.26100')
+Test-Case 'Build Tools に入れるのは C++ のワークロード・x64 の MSVC・Windows SDK' ($vsAll -join ' ') { Get-VsRequiredComponents }
+Test-Case '何も入っていなければ 3 つとも足りない' ($vsAll -join ' ') { Get-VsMissingComponents -Installed @() }
+Test-Case '3 つともあれば足りないものは無い' '' { Get-VsMissingComponents -Installed $vsAll }
+Test-Case 'Windows SDK は 10 や 11 の別の版でも足りる' '' { Get-VsMissingComponents -Installed @('Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', 'Microsoft.VisualStudio.Component.Windows10SDK.20348') }
+Test-Case 'ワークロードの必須の部品の Windows10SDK (UCRT。版の付かない ID) は SDK と数えない' 'Microsoft.VisualStudio.Component.Windows11SDK.26100' { Get-VsMissingComponents -Installed @('Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64', 'Microsoft.VisualStudio.Component.Windows10SDK') }
+Test-Case 'MSVC と SDK だけ (ワークロードが無い) なら、ワークロードを足す' 'Microsoft.VisualStudio.Workload.VCTools' { Get-VsMissingComponents -Installed @('Microsoft.VisualStudio.Component.VC.Tools.x86.x64', 'Microsoft.VisualStudio.Component.Windows11SDK.26100') }
+
+# Get-VsInstallCustomArgument・Get-VsModifyArgumentList: installer に渡す引数
+Test-Case 'winget の --custom に渡す引数 (英語の言語パックと再起動しない)' '--norestart --addProductLang En-us --add A --add B' { Get-VsInstallCustomArgument -Components @('A', 'B') }
+Test-Case 'modify は進み具合の窓を出し、置き場を二重引用符で囲む (空白を含む)' 'modify --installPath "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools" --add A --passive --norestart' { Get-VsModifyArgumentList -InstallPath 'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools' -Components @('A') }
+
+# ---------------------------------------------------------------------------
 # Smart App Control・rustup・winget
 # ---------------------------------------------------------------------------
 
@@ -122,17 +149,18 @@ Test-Case 'SAC: レジストリの 2 は評価モード' 'eval' { Get-SmartAppCo
 Test-Case 'SAC: レジストリが無ければ Defender の値 (大文字小文字は問わない)' 'on eval off' { "$(Get-SmartAppControlState -PolicyState $null -DefenderState 'On') $(Get-SmartAppControlState -PolicyState $null -DefenderState 'Eval') $(Get-SmartAppControlState -PolicyState $null -DefenderState 'off')" }
 Test-Case 'SAC: どちらも無ければ、この Windows には無い' 'unavailable' { Get-SmartAppControlState -PolicyState $null -DefenderState $null }
 
-# Test-RustupSelfUpdateDisabled: rustup の settings.toml に auto_self_update = "disable" があるか
-$rustupSettings = "version = `"12`"`ndefault_host_triple = `"x86_64-pc-windows-gnu`"`nprofile = `"default`"`nauto_self_update = `"disable`"`n"
+# Test-RustupSelfUpdateDisabled: rustup の settings.toml に auto_self_update = "disable" があるか (rustup 1.29.3 が書く形)
+$rustupSettings = "version = `"12`"`ndefault_host_tuple = `"x86_64-pc-windows-msvc`"`nprofile = `"default`"`nauto_self_update = `"disable`"`n"
 Test-Case 'rustup の自己更新を止めてある' 'True' { Test-RustupSelfUpdateDisabled -SettingsText $rustupSettings }
 Test-Case 'rustup の自己更新の行が無ければ止まっていない' 'False' { Test-RustupSelfUpdateDisabled -SettingsText "version = `"12`"`nprofile = `"default`"`n" }
 Test-Case 'check-only は止めたことにしない' 'False' { Test-RustupSelfUpdateDisabled -SettingsText "auto_self_update = `"check-only`"`n" }
 Test-Case 'settings.toml が無ければ止まっていない' 'False' { Test-RustupSelfUpdateDisabled -SettingsText $null }
 
-# Get-RustupDefaultHost: rustup の settings.toml の default_host_triple (無ければ空)
-Test-Case 'rustup の既定の host を読む' 'x86_64-pc-windows-gnu' { Get-RustupDefaultHost -SettingsText $rustupSettings }
-Test-Case 'MSVC の host も読む (CRLF でも)' 'x86_64-pc-windows-msvc' { Get-RustupDefaultHost -SettingsText "version = `"12`"`r`ndefault_host_triple = `"x86_64-pc-windows-msvc`"`r`n" }
-Test-Case 'default_host_triple の行が無ければ空' '' { Get-RustupDefaultHost -SettingsText "version = `"12`"`n" }
+# Get-RustupDefaultHost: rustup show の出力の Default host (無ければ空)。settings.toml のキーの名前 (default_host_triple・
+# default_host_tuple) は rustup の版で変わるので、rustup が今使う値を出す rustup show を読む
+Test-Case 'rustup show の Default host を読む (toolchain が無いとき)' 'x86_64-pc-windows-msvc' { Get-RustupDefaultHost -Lines @('Default host: x86_64-pc-windows-msvc', 'rustup home:  C:\Users\u\.rustup', '', 'no active toolchain') }
+Test-Case 'GNU の host も読む (行末の CR を落とす)' 'x86_64-pc-windows-gnu' { Get-RustupDefaultHost -Lines @("Default host: x86_64-pc-windows-gnu`r", "rustup home:  C:\Users\u\.rustup`r") }
+Test-Case 'Default host の行が無ければ空 (settings.toml の中身は読まない)' '' { Get-RustupDefaultHost -Lines @($rustupSettings -split "`n") }
 
 # Test-WingetPinned: winget pin list の出力に、その Id の行があるか (今の ps1 と同じ)
 $pins = @(
@@ -148,15 +176,16 @@ Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足�
 Test-Case '--silent を付けないとき (winget の既定の、進み具合の窓が出る形)' 'install --id GitHub.cli --exact --source winget --accept-source-agreements --disable-interactivity --version 2.103.3 --accept-package-agreements --installer-type wix' { (Get-WingetInstallArguments -PackageId 'GitHub.cli' -Version '2.103.3' -Silent $false -Extra @('--installer-type', 'wix')) -join ' ' }
 
 # Get-BootstrapPackages: 入れる順と、道具ごとの引数
-$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -RustupVersion '1.29.3')
-Test-Case '入れるのは Git・gh・rustup の 3 つ (Visual Studio Build Tools は入れない)' 'git gh rustup' { ($packages | ForEach-Object { $_.Name }) -join ' ' }
-Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
+$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+Test-Case '入れる順は Git・gh・Build Tools・rustup (rustup-init が MSVC を見るので Build Tools を先に)' 'git gh vs-buildtools rustup' { ($packages | ForEach-Object { $_.Name }) -join ' ' }
+Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
-Test-Case 'rustup は GNU の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-gnu --default-toolchain none' { $packages[2].Args -join '|' }
-# per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Git は installer が自分で
-# 昇格し、rustup は user に入るので --silent でよい
-Test-Case 'gh だけ --silent を付けない (MSI が UAC を出せるように)' 'git=True gh=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
+Test-Case 'Build Tools は C++ のワークロード・x64 の MSVC・Windows SDK を入れる' '--custom|--norestart --addProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100' { $packages[2].Args -join '|' }
+Test-Case 'rustup は MSVC の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-msvc --default-toolchain none' { $packages[3].Args -join '|' }
+# per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
+# かかるので進み具合の窓を出す。Git は installer が自分で昇格し、rustup は user に入るので --silent でよい
+Test-Case 'gh と Build Tools は --silent を付けない (UAC と進み具合の窓を出す)' 'git=True gh=False vs-buildtools=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
 
 # ---------------------------------------------------------------------------
 # clone
@@ -184,6 +213,7 @@ Test-Case 'clone の組は gh のパスを / にして一重引用符で囲む' 
 # ---------------------------------------------------------------------------
 
 $Ghq = 'C:\Users\u\ghq\github.com\pollenjp'
+$Msvc = 'x86_64-pc-windows-msvc'
 $Gnu = 'x86_64-pc-windows-gnu'
 
 # 揃っている状態。テストごとに一部を差し替える
@@ -191,7 +221,7 @@ function New-Package {
     param([string]$Name, [string]$Title, [string]$Id, [string]$Target, [hashtable]$Change = @{})
     $p = [ordered]@{
         Name = $Name; Title = $Title; PackageId = $Id; Target = $Target; Exists = $true; Installed = $Target; Pinned = $true
-        SelfUpdateDisabled = $true; DefaultHost = $Gnu
+        InstallPath = $null; MissingComponents = @(); SelfUpdateDisabled = $true; DefaultHost = $Msvc
     }
     foreach ($k in $Change.Keys) { $p[$k] = $Change[$k] }
     [pscustomobject]$p
@@ -206,7 +236,7 @@ function New-Repo {
     [pscustomobject]$r
 }
 function New-State {
-    param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Gh = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$Private = @{})
+    param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Gh = @{}, [hashtable]$Vs = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$Private = @{})
     $s = [ordered]@{
         Elevated   = $false
         Arch       = 'AMD64'
@@ -214,6 +244,7 @@ function New-State {
         Packages   = @(
             (New-Package 'git' 'Git for Windows' 'Git.Git' '2.56.0.4' $Git)
             (New-Package 'gh' 'GitHub CLI' 'GitHub.cli' '2.103.3' $Gh)
+            (New-Package 'vs-buildtools' 'Visual Studio Build Tools 2022' 'Microsoft.VisualStudio.2022.BuildTools' '17.14.44' $Vs)
             (New-Package 'rustup' 'rustup' 'Rustlang.Rustup' '1.29.3' $Rustup)
         )
         GhLoggedIn = $true
@@ -225,7 +256,7 @@ function New-State {
 $fresh = @{ Exists = $false; Installed = $null; Pinned = $false }
 $freshRepo = @{ State = 'missing'; Origin = $null; AutoCrlf = $null }
 function New-FreshState {
-    $s = New-State -Git $fresh -Gh $fresh -Rustup ($fresh + @{ SelfUpdateDisabled = $false; DefaultHost = $null }) -Dotfiles $freshRepo -Private $freshRepo
+    $s = New-State -Git $fresh -Gh $fresh -Vs $fresh -Rustup ($fresh + @{ SelfUpdateDisabled = $false; DefaultHost = $null }) -Dotfiles $freshRepo -Private $freshRepo
     $s.GhLoggedIn = $null
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
@@ -235,18 +266,20 @@ function New-FreshState {
 function Get-Kinds { param($State) (@(Get-BootstrapRows -State $State | Where-Object { $_.Kind }) | ForEach-Object { "$($_.Label)=$($_.Kind)" }) -join ' ' }
 
 Test-Case '揃っていれば直すことは無い' '' { Get-Kinds (New-State) }
-Test-Case 'まっさらな PC は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
+Test-Case 'まっさらな PC は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing Visual Studio Build Tools 2022=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
 Test-Case 'SAC がオンでも止める理由にはせず、bootstrap では直らない差 (警告して続ける)' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'on' }) }
 Test-Case 'SAC が評価モードなら bootstrap では直らない差' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'eval' }) }
 Test-Case 'SAC の無い Windows は直すことが無い' '' { Get-Kinds (New-State @{ Sac = 'unavailable' }) }
 Test-Case '管理者の PowerShell は止める理由' '管理者の権限=blocker' { Get-Kinds (New-State @{ Elevated = $true }) }
-Test-Case 'ARM64 は今は対象外 (Rust は x64 の GNU の host だけ)' 'CPU=blocker' { Get-Kinds (New-State @{ Arch = 'ARM64' }) }
+Test-Case 'ARM64 は今は対象外 (Rust は x64 の MSVC の host だけ)' 'CPU=blocker' { Get-Kinds (New-State @{ Arch = 'ARM64' }) }
 Test-Case '知らない CPU は止める理由' 'CPU=blocker' { Get-Kinds (New-State @{ Arch = 'x86' }) }
 Test-Case '版のずれは bootstrap では直らない差' 'Git for Windows=manual' { Get-Kinds (New-State -Git @{ Installed = '2.55.0.5' }) }
 Test-Case '版が読めなければ bootstrap では直らない差' 'GitHub CLI=manual' { Get-Kinds (New-State -Gh @{ Installed = $null }) }
 Test-Case 'pin が無ければ足りない' 'GitHub CLI の pin=fix' { Get-Kinds (New-State -Gh @{ Pinned = $false }) }
+Test-Case 'Build Tools の部品が足りなければ足りない' 'Build Tools の部品=fix' { Get-Kinds (New-State -Vs @{ MissingComponents = @('Microsoft.VisualStudio.Component.Windows11SDK.26100'); InstallPath = 'C:\BT' }) }
 Test-Case 'rustup の自己更新が止まっていなければ足りない' 'rustup の自己更新=fix' { Get-Kinds (New-State -Rustup @{ SelfUpdateDisabled = $false }) }
-Test-Case 'rustup の既定の host が GNU でなければ足りない' 'rustup の既定の host=fix' { Get-Kinds (New-State -Rustup @{ DefaultHost = 'x86_64-pc-windows-msvc' }) }
+Test-Case 'rustup の既定の host が GNU なら足りない (MSVC に直す)' 'rustup の既定の host=fix' { Get-Kinds (New-State -Rustup @{ DefaultHost = $Gnu }) }
+Test-Case 'rustup の既定の host が読めなければ足りない' 'rustup の既定の host=fix' { Get-Kinds (New-State -Rustup @{ DefaultHost = $null }) }
 Test-Case 'gh がログインしていなければ足りない' 'gh のログイン=fix' { Get-Kinds (New-State @{ GhLoggedIn = $false }) }
 Test-Case 'git の repo でないディレクトリ・別の origin の clone は bootstrap では直らない差' 'dotfiles=manual dotfiles-private=manual' { Get-Kinds (New-State -Dotfiles @{ State = 'not-git' } -Private @{ State = 'other-origin'; Origin = 'git@github.com:someone/dotfiles-private.git' }) }
 Test-Case '改行が false でない clone' 'dotfiles=manual' { Get-Kinds (New-State -Dotfiles @{ State = 'autocrlf'; AutoCrlf = 'true' }) }
@@ -262,16 +295,23 @@ Test-Case 'まっさらでも SAC がオンなら 1' 1 { $s = New-FreshState; $s
 function Get-Lines { param($State) @(Format-BootstrapRows -Rows @(Get-BootstrapRows -State $State)) }
 Test-Case '揃っていれば ⚠ の行は無い' '0' { @(Get-Lines (New-State) | Where-Object { $_ -like '⚠*' }).Count }
 Test-Case 'Git の行は版を出す' '  Git for Windows : 2.56.0.4' { @(Get-Lines (New-State) | Where-Object { $_ -like '*Git for Windows*' })[0] }
-Test-Case 'rustup の行は版と既定の host を出す' '  rustup : 1.29.3 (既定の host は x86_64-pc-windows-gnu)' { @(Get-Lines (New-State) | Where-Object { $_ -like '*rustup :*' })[0] }
+Test-Case 'rustup の行は版と既定の host を出す' '  rustup : 1.29.3 (既定の host は x86_64-pc-windows-msvc)' { @(Get-Lines (New-State) | Where-Object { $_ -like '*rustup :*' })[0] }
+Test-Case '既定の host が読めなければ、rustup の行は読めないと出す (空のまま出さない)' '  rustup : 1.29.3 (既定の host が読めない)' { @(Get-Lines (New-State -Rustup @{ DefaultHost = $null }) | Where-Object { $_ -like '*rustup :*' })[0] }
 Test-Case '入っていなければ固定した版を入れると出す' '⚠ GitHub CLI : 入っていない → 2.103.3 を入れる' { @(Get-Lines (New-State -Gh $fresh) | Where-Object { $_ -like '*GitHub CLI :*' })[0] }
 Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for Windows : 2.55.0.5 (固定した版は 2.56.0.4)|※ Git for Windows を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Git.Git --exact --version 2.56.0.4、下げるなら winget uninstall --id Git.Git の後に流し直す' {
     $l = Get-Lines (New-State -Git @{ Installed = '2.55.0.5' }); "$(@($l | Where-Object { $_ -like '*Git for Windows :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
-Test-Case 'rustup の上げ方には GNU の host と toolchain を入れない引数を添える' '※ rustup を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Rustlang.Rustup --exact --version 1.29.3 --custom "--default-host x86_64-pc-windows-gnu --default-toolchain none"、下げるなら winget uninstall --id Rustlang.Rustup の後に流し直す' {
+Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない引数を添える' '※ rustup を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Rustlang.Rustup --exact --version 1.29.3 --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"、下げるなら winget uninstall --id Rustlang.Rustup の後に流し直す' {
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
 }
-Test-Case '既定の host が GNU でなければ、rustup set default-host で直すと出す' '⚠ rustup の既定の host : x86_64-pc-windows-msvc → x86_64-pc-windows-gnu にする (rustup set default-host x86_64-pc-windows-gnu)' {
-    @(Get-Lines (New-State -Rustup @{ DefaultHost = 'x86_64-pc-windows-msvc' }) | Where-Object { $_ -like '*既定の host :*' })[0]
+Test-Case '既定の host が GNU なら、rustup set default-host で MSVC に直すと出す' '⚠ rustup の既定の host : x86_64-pc-windows-gnu → x86_64-pc-windows-msvc にする (rustup set default-host x86_64-pc-windows-msvc)' {
+    @(Get-Lines (New-State -Rustup @{ DefaultHost = $Gnu }) | Where-Object { $_ -like '*既定の host :*' })[0]
+}
+Test-Case '既定の host が読めなければ、読めないと出して直す' '⚠ rustup の既定の host : 読めない → x86_64-pc-windows-msvc にする (rustup set default-host x86_64-pc-windows-msvc)' {
+    @(Get-Lines (New-State -Rustup @{ DefaultHost = $null }) | Where-Object { $_ -like '*既定の host :*' })[0]
+}
+Test-Case 'Build Tools の部品が足りなければ、足りないものと Visual Studio Installer で足すことを出す' '⚠ Build Tools の部品 : 足りない: Microsoft.VisualStudio.Workload.VCTools → Visual Studio Installer で足す (UAC)' {
+    @(Get-Lines (New-State -Vs @{ MissingComponents = @('Microsoft.VisualStudio.Workload.VCTools'); InstallPath = 'C:\BT' }) | Where-Object { $_ -like '*Build Tools の部品 :*' })[0]
 }
 Test-Case 'SAC がオンなら、オフにする場所と戻せないことがあるのを ※ で出す' '⚠ Smart App Control : オン → オフにする (cargo の産物の exe が止められ、Rust の runner を作れない)|※ Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (Windows によっては、戻すのに再インストールが要る)' {
     $l = Get-Lines (New-State @{ Sac = 'on' }); "$(@($l | Where-Object { $_ -like '*Smart App Control :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
@@ -292,8 +332,17 @@ Test-Case 'SAC の無い Windows は警告しない' '' { (@(Format-SacWarning -
 Test-Case 'SAC がオンなら、Rust の runner を流す前にオフにするよう警告して続ける' "⚠️ Smart App Control がオンになっている。cargo が作った exe (Rust の runner・build script) は止められて動かないので、Rust の runner を流す前にオフにする (bootstrap はこのまま続ける)|$sacWhere" { (@(Format-SacWarning -Sac 'on') | ForEach-Object { "$_" }) -join '|' }
 Test-Case 'SAC が評価モードなら、オフにしておくよう警告して続ける' "⚠️ Smart App Control が評価モードになっている。いつオンに変わるか分からず、オンになると cargo が作った exe が止められるので、オフにしておく (bootstrap はこのまま続ける)|$sacWhere" { (@(Format-SacWarning -Sac 'eval') | ForEach-Object { "$_" }) -join '|' }
 
-# Get-GhLoginArguments: gh のログイン。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
-Test-Case 'gh のログインはブラウザーで、ssh の鍵は作らない・上げない' 'auth login --hostname github.com --web --git-protocol ssh --skip-ssh-key' { (Get-GhLoginArguments) -join ' ' }
+# Get-GhLoginArguments: gh のログイン。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため。
+# 一回限りのコードは gh がクリップボードに入れる (手で写そうとして Ctrl+C を押すと gh が止まる)
+Test-Case 'gh のログインはブラウザーで、コードはクリップボードに入れ、ssh の鍵は作らない・上げない' 'auth login --hostname github.com --web --clipboard --git-protocol ssh --skip-ssh-key' { (Get-GhLoginArguments) -join ' ' }
+
+# Set-ConsoleBreakIgnored: gh のログインのあいだ Ctrl+C を受け止める handler。C# は Add-Type で読めること (Windows でなければ
+# kernel32 が無いので、足せずに $false を返す。Windows で足したら、すぐ外す) と、例外を出さずに真偽を返すことを見る
+Test-Case 'Ctrl+C を受け止める handler の C# を読め、足す・外すは例外を出さずに真偽を返す' 'True True True' {
+    $set = Set-ConsoleBreakIgnored -Ignore $true
+    $unset = Set-ConsoleBreakIgnored -Ignore $false
+    "$([bool]('DotfilesBootstrap.ConsoleBreak' -as [type])) $($set -is [bool]) $($unset -is [bool])"
+}
 
 # ---------------------------------------------------------------------------
 # 流れ (Windows に触る関数を偽物に差し替える。ここより後ろは、上の関数のテストに戻らない)
@@ -306,7 +355,7 @@ function Get-BootstrapSac { $script:Sac }
 function Get-BootstrapPaths {
     [pscustomobject]@{
         Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'
-        RustupSettings = 'C:\Users\u\.rustup\settings.toml'; GhqRoot = 'C:\Users\u\ghq'
+        RustupSettings = 'C:\Users\u\.rustup\settings.toml'; VsWhere = 'C:\vswhere.exe'; VsSetup = 'C:\setup.exe'; GhqRoot = 'C:\Users\u\ghq'
     }
 }
 function Invoke-Winget {
@@ -329,6 +378,11 @@ function Invoke-GitClone {
     param([string]$GitPath, [string[]]$Arguments)
     $script:Calls.Add("clone $($Arguments[-1] -replace '^.*\\', '')")
     [pscustomobject]@{ ExitCode = 0; Lines = @() }
+}
+function Invoke-VsModify {
+    param([string]$VsSetup, [string]$InstallPath, [string[]]$Components)
+    $script:Calls.Add("vs-modify $($Components -join ',')")
+    0
 }
 function Invoke-GhLogin {
     param([string]$GhPath)
@@ -354,7 +408,7 @@ function Invoke-Flow {
     $script:HaveWinget = $Winget
     # 最初に確かめる SAC は、最初の状態と同じ値にする
     $script:Sac = $States[0].Sac
-    $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -RustupVersion '1.29.3' -Check:$Check 6>&1)
+    $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Check:$Check 6>&1)
     [pscustomobject]@{
         Calls = ($script:Calls -join ' | ')
         Text  = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
@@ -364,7 +418,7 @@ function Invoke-Flow {
 
 # 道具が入ったが、pin が無く、rustup の自己更新が止まっておらず、gh はログインしていない・clone は無い状態 (入れた直後)
 function New-InstalledState {
-    $s = New-State -Git @{ Pinned = $false } -Gh @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -Private $freshRepo
+    $s = New-State -Git @{ Pinned = $false } -Gh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -Private $freshRepo
     $s.GhLoggedIn = $false
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
@@ -374,11 +428,12 @@ function New-LoggedInState {
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
 }
-$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
+$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
 
 Test-Case '-Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -States @((New-FreshState)) -Check; "$($r.Code) [$($r.Calls)]" }
 Test-Case '-Check で揃っていれば 0' '0 []' { $r = Invoke-Flow -States @((New-State)) -Check; "$($r.Code) [$($r.Calls)]" }
-Test-Case 'まっさらな PC は、3 つを入れ、pin と自己更新の止めを足し、ログインして 3 つを clone する' "0 [$freshCalls]" {
+Test-Case '-Check で既定の host が GNU なら、直さずに 1' '1 []' { $r = Invoke-Flow -States @((New-State -Rustup @{ DefaultHost = $Gnu })) -Check; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'まっさらな PC は、4 つを入れ、pin と自己更新の止めを足し、ログインして 3 つを clone する' "0 [$freshCalls]" {
     $r = Invoke-Flow -States @((New-FreshState), (New-InstalledState), (New-LoggedInState), (New-State)); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case '揃っていれば何も打たずに 0' '0 []' { $r = Invoke-Flow -States @((New-State)); "$($r.Code) [$($r.Calls)]" }
@@ -398,9 +453,14 @@ Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [instal
     $r = Invoke-Flow -States @($before, (New-State @{ Sac = 'eval' } -Gh @{ Pinned = $false }), $after); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case '版のずれは入れ替えず、ほかに直すことが無ければ何も打たずに 1' '1 []' { $r = Invoke-Flow -States @((New-State -Git @{ Installed = '2.55.0.5' })); "$($r.Code) [$($r.Calls)]" }
-Test-Case 'rustup の既定の host が GNU でなければ、rustup set default-host で直す' '0 [native set default-host x86_64-pc-windows-gnu]' {
-    $msvc = New-State -Rustup @{ DefaultHost = 'x86_64-pc-windows-msvc' }
-    $r = Invoke-Flow -States @($msvc, $msvc, (New-State)); "$($r.Code) [$($r.Calls)]"
+Test-Case 'rustup の既定の host が GNU なら、rustup set default-host で MSVC に直す' '0 [native set default-host x86_64-pc-windows-msvc]' {
+    $gnu = New-State -Rustup @{ DefaultHost = $Gnu }
+    $r = Invoke-Flow -States @($gnu, $gnu, (New-State)); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case '既定の host が MSVC と読めれば、流し直しても host を設定し直さない' '0 []' { $r = Invoke-Flow -States @((New-State), (New-State)); "$($r.Code) [$($r.Calls)]" }
+Test-Case 'Build Tools の部品が足りなければ、Visual Studio Installer で足りないものだけを足す' '0 [vs-modify Microsoft.VisualStudio.Workload.VCTools,Microsoft.VisualStudio.Component.Windows11SDK.26100]' {
+    $lack = New-State -Vs @{ MissingComponents = @('Microsoft.VisualStudio.Workload.VCTools', 'Microsoft.VisualStudio.Component.Windows11SDK.26100'); InstallPath = 'C:\BT' }
+    $r = Invoke-Flow -States @($lack, $lack, (New-State)); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case 'install が 0 以外でも入っていれば入ったとして進む (再起動待ちなど)' '0 [install Git.Git | pin-add Git.Git] True' {
     $r = Invoke-Flow -States @((New-State -Git $fresh), (New-State -Git @{ Pinned = $false }), (New-State)) -Fail @{ 'install Git.Git' = -1978335135 }
@@ -413,6 +473,12 @@ Test-Case 'install が落ちて入らなければ、pin も clone もせずに 1
 Test-Case 'ログインできなければ clone しない' '1 [gh-login] True' {
     $s = New-State -Dotfiles $freshRepo; $s.GhLoggedIn = $false
     $r = Invoke-Flow -States @($s, $s) -LoginCode 1; "$($r.Code) [$($r.Calls)] $($r.Text -like '*clone しない*')"
+}
+# Ctrl+C で止めた gh は 0xC000013A (STATUS_CONTROL_C_EXIT) で終わる。script は止まらず、止まったことを出して締めの表まで流し、1 で終える
+Test-Case 'gh のログインを Ctrl+C で止めたら、止まったことを出し、clone せずに 1 で終える' '1 [gh-login] True True' {
+    $s = New-State -Dotfiles $freshRepo; $s.GhLoggedIn = $false
+    $r = Invoke-Flow -States @($s, $s) -LoginCode -1073741510
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*gh のログインが終わらなかった (止めた・失敗した。終了コード 0xC000013A)*') $($r.Text -like '*⚠ gh のログイン : していない*')"
 }
 Test-Case 'git の repo でないディレクトリは clone せず、ほかの無い repo だけ clone する' '1 [clone dotfiles-private]' {
     $s = New-State -Dotfiles @{ State = 'not-git' } -Private $freshRepo

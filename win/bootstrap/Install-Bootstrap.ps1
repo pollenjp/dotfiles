@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
-新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・GitHub CLI・rustup と、
-dotfiles・dotfiles-private・claude-skills の clone) を揃える。
+新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・GitHub CLI・Visual Studio Build Tools・
+rustup と、dotfiles・dotfiles-private・claude-skills の clone) を揃える。
 
 .DESCRIPTION
 dotfiles の win/bootstrap/Install-Bootstrap.ps1。新しい Windows では GitHub の raw の URL からファイルに落として流し、clone した後は
@@ -12,11 +12,13 @@ docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
   0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと cargo が
      作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
   1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)
-  2. Git for Windows → GitHub CLI → rustup を、下の param の固定した版で winget から入れ、pin を足す (winget upgrade --all から外す)。
-     rustup は GNU の host (x86_64-pc-windows-gnu) にし、toolchain は入れず、自己更新を止める。GNU の toolchain は linker を同梱する
-     ので、Visual Studio の Build Tools は入れない (C のコンパイラが要る crate は使えない。claude-skills と dotfiles の Rust の
-     script は、そういう crate を入れない)
-  3. gh が github.com にログインしていなければ gh auth login を流す (ブラウザーで認める)
+  2. Git for Windows → GitHub CLI → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で winget から入れ、pin を
+     足す (winget upgrade --all から外す)。Build Tools には C++ のワークロード・MSVC (x64)・Windows SDK を入れ、入っている Build Tools に
+     足りないものは Visual Studio Installer で足す。rustup は MSVC の host (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を
+     止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に入れる)。GNU の host にしないのは、windows-sys 0.61
+     (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の toolchain に同梱のものだけでは作れないため
+  3. gh が github.com にログインしていなければ gh auth login を流す (一回限りのコードはクリップボードに入る。ブラウザーで認める)。
+     ログインの途中で Ctrl+C を押すと gh は止まるが、この script は止まらずに締めの表まで出し、終了コード 1 で終える
   4. dotfiles・dotfiles-private・claude-skills を %USERPROFILE%\ghq\github.com\pollenjp\ に clone する。gh の資格情報で HTTPS を通す組
      (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡し、origin は WSL と同じ ssh の URL のまま。core.autocrlf=false で、WSL が配った
      ものとバイト列をそろえる。~/.gitconfig は書かない
@@ -26,7 +28,7 @@ clone には触らない (確かめるだけ。取得もしない)。
 
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
 x64 でない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
-UAC は winget が道具ごとに出す。
+UAC は winget と Visual Studio Installer が道具ごとに出す。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。新しい Windows には 5.1 しか
 無いので、PowerShell 7 にしか無い書き方を使わない (Install-Bootstrap.Tests.ps1 が見る)。
@@ -36,6 +38,9 @@ Git for Windows (winget の Git.Git) の固定する版。版を変えるとき�
 
 .PARAMETER GhVersion
 GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。
+
+.PARAMETER VsBuildToolsVersion
+Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools) の固定する版 (check-winget-version.sh vs-buildtools が読む)。
 
 .PARAMETER RustupVersion
 rustup (winget の Rustlang.Rustup) の固定する版 (check-winget-version.sh rustup が読む)。toolchain は入れない (Rust の runner の
@@ -49,6 +54,7 @@ rust-toolchain.toml が決める)。
 param(
     [string]$GitVersion = '2.56.0.4',
     [string]$GhVersion = '2.103.3',
+    [string]$VsBuildToolsVersion = '17.14.44',
     [string]$RustupVersion = '1.29.3',
     [switch]$Check
 )
@@ -57,8 +63,15 @@ param(
 # 副作用の無い関数 (Install-Bootstrap.Tests.ps1 で確かめる)
 # ---------------------------------------------------------------------------
 
-# rustup の既定の host。GNU の toolchain は linker を同梱するので、Visual Studio の Build Tools が要らない (dotfiles-private の ADR 058)
-$script:RustHost = 'x86_64-pc-windows-gnu'
+# rustup の既定の host。GNU の host は windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、toolchain に
+# 同梱の dlltool だけでは import library を作れないので、MSVC にする (dotfiles-private の ADR 058)
+$script:RustHost = 'x86_64-pc-windows-msvc'
+
+# Build Tools に入れるもの: C++ のワークロード (必須の部品だけ)・MSVC の x64 の build tools・Windows SDK。MSVC と SDK はワークロードの
+# 推奨の部品で、ワークロードだけでは入らないので名指しする (rustup 1.29.3 が自分で Visual Studio を入れるときと同じ 2 つ)
+$script:VsWorkload = 'Microsoft.VisualStudio.Workload.VCTools'
+$script:VsToolsComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
+$script:VsSdkComponent = 'Microsoft.VisualStudio.Component.Windows11SDK.26100'
 
 # git --version の出力 ("git version 2.56.0.windows.4") を winget の Git.Git の版にする。.windows.1 は 3 つの数 (2.56.0)、
 # ほかは 4 つ目に足す (2.56.0.4)。読めなければ $null
@@ -93,6 +106,65 @@ function Get-RustupVersionFromOutput {
     $null
 }
 
+# JSON から作ったオブジェクトの項目を読む (無ければ $null。Set-StrictMode の下でも止まらない)
+function Get-JsonProperty {
+    param($Object, [string]$Name)
+    if ($null -eq $Object) { return $null }
+    $p = $Object.PSObject.Properties[$Name]
+    if ($p) { return $p.Value }
+    $null
+}
+
+# vswhere -format json -include packages の出力から、Build Tools (productId) でメジャーの合うもの (catalog の productDisplayVersion が
+# "<Major>." で始まる) を 1 つ選び、置き場所・版・入っているワークロードと部品の ID を返す。無ければ $null。
+# 5.1 の ConvertFrom-Json は配列を 1 つの値として返すので、パイプでほどいてから見る
+function Get-VsBuildToolsInstance {
+    param([string]$Json, [int]$Major)
+    if (-not "$Json".Trim()) { return $null }
+    $parsed = ConvertFrom-Json -InputObject $Json
+    foreach ($i in @($parsed | ForEach-Object { $_ })) {
+        if ("$(Get-JsonProperty $i 'productId')" -ne 'Microsoft.VisualStudio.Product.BuildTools') { continue }
+        $display = "$(Get-JsonProperty (Get-JsonProperty $i 'catalog') 'productDisplayVersion')"
+        if (-not $display.StartsWith("$Major.")) { continue }
+        $ids = @(@(Get-JsonProperty $i 'packages') | Where-Object { $_ } | ForEach-Object { "$(Get-JsonProperty $_ 'id')" })
+        return [pscustomobject]@{ Path = "$(Get-JsonProperty $i 'installationPath')"; Version = $display; Packages = $ids }
+    }
+    $null
+}
+
+# Build Tools に入れるもの (C++ のワークロード・MSVC・Windows SDK)
+function Get-VsRequiredComponents {
+    @($script:VsWorkload, $script:VsToolsComponent, $script:VsSdkComponent)
+}
+
+# 入っているもののうち、足りないもの。Windows SDK は 10 か 11 の SDK のどれかがあれば足りたことにする (rustup と同じ考え。
+# ワークロードの必須の部品の Windows10SDK (UCRT) は版の付かない ID なので、SDK とは数えない)
+function Get-VsMissingComponents {
+    param([string[]]$Installed)
+    $have = @($Installed | Where-Object { $_ })
+    if ($have -notcontains $script:VsWorkload) { $script:VsWorkload }
+    if ($have -notcontains $script:VsToolsComponent) { $script:VsToolsComponent }
+    if (@($have | Where-Object { $_ -match '^Microsoft\.VisualStudio\.Component\.Windows1[01]SDK\.' }).Count -eq 0) { $script:VsSdkComponent }
+}
+
+# winget install の --custom に渡す、Build Tools の installer の引数 (英語の言語パック・再起動しない・入れるもの)
+function Get-VsInstallCustomArgument {
+    param([string[]]$Components)
+    $parts = @('--norestart', '--addProductLang', 'En-us')
+    foreach ($c in $Components) { $parts += @('--add', $c) }
+    $parts -join ' '
+}
+
+# 入っている Build Tools に足りないものを足す Visual Studio Installer (setup.exe) の引数。進み具合の窓を出し (--passive)、再起動しない。
+# Start-Process の -ArgumentList は値を引用符で囲まないので、空白を含む置き場は二重引用符で囲んだ 1 つの文字列にする
+function Get-VsModifyArgumentList {
+    param([string]$InstallPath, [string[]]$Components)
+    $parts = @('modify', '--installPath', ('"{0}"' -f $InstallPath))
+    foreach ($c in $Components) { $parts += @('--add', $c) }
+    $parts += @('--passive', '--norestart')
+    $parts -join ' '
+}
+
 # Smart App Control の状態。レジストリの VerifiedAndReputablePolicyState (0 = オフ・1 = オン・2 = 評価モード) を先に、読めなければ
 # Defender の SmartAppControlState (Off・On・Eval) を読む。どちらも無ければ、この Windows には無い (unavailable)
 function Get-SmartAppControlState {
@@ -121,11 +193,13 @@ function Test-RustupSelfUpdateDisabled {
     $false
 }
 
-# rustup の settings.toml の default_host_triple (rustup の既定の host)。無ければ $null
+# rustup show の出力の "Default host: x86_64-pc-windows-msvc" から、rustup が今使う既定の host を拾う。無ければ $null。
+# settings.toml は読まない (キーの名前が rustup の版で変わり (default_host_triple → default_host_tuple)、書いていなければ rustup の
+# build の host が使われる)
 function Get-RustupDefaultHost {
-    param([string]$SettingsText)
-    foreach ($line in ("$SettingsText" -split "`r?`n")) {
-        if ($line -match '^\s*default_host_triple\s*=\s*"([^"]+)"\s*$') { return $Matches[1] }
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        if ("$line".Trim() -match '^Default host:\s*(\S+)$') { return $Matches[1] }
     }
     $null
 }
@@ -150,26 +224,30 @@ function Get-WingetInstallArguments {
         '--disable-interactivity', '--version', $Version, '--accept-package-agreements') + @($Extra | Where-Object { $_ })
 }
 
-# rustup-init に渡す引数 (winget の --custom。rustup-init の -y -q の後ろに足される)。GNU の host にし、toolchain は入れない
+# rustup-init に渡す引数 (winget の --custom。rustup-init の -y -q の後ろに足される)。MSVC の host にし、toolchain は入れない
 function Get-RustupInitArgument {
     "--default-host $script:RustHost --default-toolchain none"
 }
 
-# 入れる道具。並びは入れる順
+# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)
 function Get-BootstrapPackages {
-    param([string]$GitVersion, [string]$GhVersion, [string]$RustupVersion)
+    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion)
     # パッケージ ID は 1 行ずつの変数に書く (nix/scripts/check-winget-version.sh がこの行を読む)
     $gitPackageId = 'Git.Git'
     $ghPackageId = 'GitHub.cli'
+    $vsBuildToolsPackageId = 'Microsoft.VisualStudio.2022.BuildTools'
     $rustupPackageId = 'Rustlang.Rustup'
+    $vsCustom = Get-VsInstallCustomArgument -Components @(Get-VsRequiredComponents)
     # Git は machine の scope (C:\Program Files\Git。インストーラーの選択肢は既定のまま)、gh は MSI (C:\Program Files\GitHub CLI。
-    # zip の portable もある)、rustup は GNU の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
+    # zip の portable もある)、rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
     # Silent: gh の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに落ちる
-    # (Error 1925)。gh だけ --silent を付けず、winget の既定 (/passive) で UAC を出させる。Git の installer は自分で昇格し、rustup は
+    # (Error 1925)。gh は --silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
+    # 数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。Git の installer は自分で昇格し、rustup は
     # user に入るので --silent でよい
     @(
         [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
         [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
+        [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom) }
         [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
     )
 }
@@ -208,9 +286,10 @@ function Get-GitCloneArguments {
 }
 
 # gh auth login の引数。ブラウザーで認める。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
-# (https を選ぶと、書くかを聞いてくる)。ssh の鍵は作らない・上げない
+# (https を選ぶと、書くかを聞いてくる)。ssh の鍵は作らない・上げない。一回限りのコードは gh がクリップボードに入れる (--clipboard。
+# 手で写そうとして Ctrl+C を押すと、gh が止まる)
 function Get-GhLoginArguments {
-    @('auth', 'login', '--hostname', 'github.com', '--web', '--git-protocol', 'ssh', '--skip-ssh-key')
+    @('auth', 'login', '--hostname', 'github.com', '--web', '--clipboard', '--git-protocol', 'ssh', '--skip-ssh-key')
 }
 
 # 状態の表の 1 行。Kind は直すことの種類 ('' = 直すことが無い、missing = 入っていない・無い (流せば入れる・作る)、fix = 足りない
@@ -239,7 +318,7 @@ function Get-BootstrapRows {
     if ($State.Arch -eq 'AMD64') {
         New-BootstrapRow 'CPU' 'x64' '' ''
     } else {
-        New-BootstrapRow 'CPU' "$($State.Arch) → 対象外 (x64 だけ。Rust は GNU の host $script:RustHost を使う)" 'blocker' ''
+        New-BootstrapRow 'CPU' "$($State.Arch) → 対象外 (x64 だけ。Rust は MSVC の host $script:RustHost を使う)" 'blocker' ''
     }
     foreach ($p in @($State.Packages)) {
         if (-not $p.Exists) {
@@ -247,11 +326,13 @@ function Get-BootstrapRows {
             continue
         }
         $hostText = ''
-        if ($p.Name -eq 'rustup') { $hostText = " (既定の host は $($p.DefaultHost))" }
+        if ($p.Name -eq 'rustup') {
+            if ($p.DefaultHost) { $hostText = " (既定の host は $($p.DefaultHost))" } else { $hostText = ' (既定の host が読めない)' }
+        }
         if (-not $p.Installed) {
             New-BootstrapRow $p.Title "入っているが版が読めない (固定した版は $($p.Target))" 'manual' "※ $($p.Title) の版が読めない。winget uninstall --id $($p.PackageId) の後に流し直すと、固定した版で入れ直す"
         } elseif ($p.Installed -cne $p.Target) {
-            # rustup は winget upgrade でも rustup-init が走るので、GNU の host と toolchain を入れない引数をもう一度渡す
+            # rustup は winget upgrade でも rustup-init が走るので、MSVC の host と toolchain を入れない引数をもう一度渡す
             $extra = ''
             if ($p.Name -eq 'rustup') { $extra = " --custom `"$(Get-RustupInitArgument)`"" }
             New-BootstrapRow $p.Title "$($p.Installed) (固定した版は $($p.Target))" 'manual' "※ $($p.Title) を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id $($p.PackageId) --exact --version $($p.Target)$extra、下げるなら winget uninstall --id $($p.PackageId) の後に流し直す"
@@ -259,11 +340,13 @@ function Get-BootstrapRows {
             New-BootstrapRow $p.Title "$($p.Installed)$hostText" '' ''
         }
         if (-not $p.Pinned) { New-BootstrapRow "$($p.Title) の pin" '無し → 足す (winget upgrade --all から外す)' 'fix' '' }
+        $lacking = @($p.MissingComponents | Where-Object { $_ })
+        if ($lacking.Count -gt 0) { New-BootstrapRow 'Build Tools の部品' "足りない: $($lacking -join '・') → Visual Studio Installer で足す (UAC)" 'fix' '' }
         if ($p.Name -eq 'rustup') {
             if (-not $p.SelfUpdateDisabled) { New-BootstrapRow 'rustup の自己更新' '有効 → 止める (rustup set auto-self-update disable)' 'fix' '' }
             if ("$($p.DefaultHost)" -ne $script:RustHost) {
                 $current = "$($p.DefaultHost)"
-                if (-not $current) { $current = '無い' }
+                if (-not $current) { $current = '読めない' }
                 New-BootstrapRow 'rustup の既定の host' "$current → $script:RustHost にする (rustup set default-host $script:RustHost)" 'fix' ''
             }
         }
@@ -352,7 +435,8 @@ function Get-OsArchitecture {
     "$a".ToUpperInvariant()
 }
 
-# 道具の置き場所。Git と gh は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下。
+# 道具の置き場所。Git と gh は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、
+# vswhere と Visual Studio Installer は Program Files (x86) の下。
 # 32 ビットの PowerShell では ProgramFiles が (x86) を指すので、64 ビットの方 (ProgramW6432) を先に見る
 function Get-BootstrapPaths {
     $cargoHome = $env:CARGO_HOME
@@ -361,11 +445,16 @@ function Get-BootstrapPaths {
     if (-not $rustupHome) { $rustupHome = Join-Path $env:USERPROFILE '.rustup' }
     $programFiles = $env:ProgramW6432
     if (-not $programFiles) { $programFiles = $env:ProgramFiles }
+    $programFilesX86 = ${env:ProgramFiles(x86)}
+    if (-not $programFilesX86) { $programFilesX86 = $programFiles }
+    $installer = Join-Path $programFilesX86 'Microsoft Visual Studio\Installer'
     [pscustomobject]@{
         Git            = Join-Path $programFiles 'Git\cmd\git.exe'
         Gh             = Join-Path $programFiles 'GitHub CLI\gh.exe'
         Rustup         = Join-Path $cargoHome 'bin\rustup.exe'
         RustupSettings = Join-Path $rustupHome 'settings.toml'
+        VsWhere        = Join-Path $installer 'vswhere.exe'
+        VsSetup        = Join-Path $installer 'setup.exe'
         GhqRoot        = Join-Path $env:USERPROFILE 'ghq'
     }
 }
@@ -380,18 +469,38 @@ function Invoke-Winget {
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
 }
 
-# exe を打ち、出力の行と終了コードを返す。起動できなければ終了コード -1
+# exe を打ち、出力の行と終了コードを返す。起動できなければ終了コード -1。-Utf8 は、UTF-8 で書く exe (vswhere -utf8) の出力を
+# 読むあいだだけ、コンソールの文字コードを UTF-8 にする (日本語の Windows の既定は CP932)
 function Invoke-Native {
-    param([string]$FilePath, [string[]]$Arguments)
+    param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
     $ErrorActionPreference = 'Continue'
+    $saved = $null
+    if ($Utf8) {
+        $saved = [Console]::OutputEncoding
+        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+    }
     try {
         $lines = @(& $FilePath @Arguments 2>&1 | ForEach-Object { "$_" })
         $code = $LASTEXITCODE
     } catch {
         $lines = @("$($_.Exception.Message)")
         $code = -1
+    } finally {
+        if ($null -ne $saved) { [Console]::OutputEncoding = $saved }
     }
     [pscustomobject]@{ ExitCode = $code; Lines = $lines }
+}
+
+# rustup show を打つ。cwd に rust-toolchain.toml があっても toolchain を入れさせない (RUSTUP_AUTO_INSTALL=0。-Check は何も変えない)
+function Invoke-RustupShow {
+    param([string]$RustupPath)
+    $saved = $env:RUSTUP_AUTO_INSTALL
+    $env:RUSTUP_AUTO_INSTALL = '0'
+    try {
+        Invoke-Native -FilePath $RustupPath -Arguments @('show')
+    } finally {
+        $env:RUSTUP_AUTO_INSTALL = $saved
+    }
 }
 
 # clone を流す。git にも Git Credential Manager にも対話のプロンプトを出させない (取れなければ落ちて、締めの行で知らせる)
@@ -415,12 +524,74 @@ function Update-ProcessPath {
     $env:Path = $parts -join ';'
 }
 
+# 入っている Build Tools に部品を足す (Visual Studio Installer。UAC が出る)。終了コードを返す (3010 は再起動待ちで、足せている)。
+# -Wait は使わない (5.1 の -Wait は子孫のプロセスまで待つ)。handle を先に掴んでから WaitForExit で setup.exe だけを待つ
+function Invoke-VsModify {
+    param([string]$VsSetup, [string]$InstallPath, [string[]]$Components)
+    $argumentList = Get-VsModifyArgumentList -InstallPath $InstallPath -Components $Components
+    try {
+        $p = Start-Process -FilePath $VsSetup -ArgumentList $argumentList -Verb RunAs -PassThru
+        $null = $p.Handle
+        $p.WaitForExit()
+        return $p.ExitCode
+    } catch {
+        Write-Host "Visual Studio Installer を起動できなかった (UAC を断った・見つからない): $($_.Exception.Message)"
+        return -1
+    }
+}
+
+# この PowerShell のプロセスだけ、Ctrl+C と Ctrl+Break を受け止めて何もしない (-Ignore $true) か、元に戻す (-Ignore $false)。
+# kernel32 の SetConsoleCtrlHandler に handler を足す・外す (CTRL_C_EVENT = 0 と CTRL_BREAK_EVENT = 1 だけを受け止め、窓を閉じる・
+# サインアウト・シャットダウンは既定の動きのまま)。Ctrl+C は同じコンソールのプロセスのどれにも届くので、足しておくと子の gh は
+# 止まり、この script は止まらずに続きを流せる (足さないと、gh と一緒に script も黙って止まり、終了コードが 0 に見える)。
+# 足せない・外せないとき (Add-Type が使えない Windows など) は $false
+function Set-ConsoleBreakIgnored {
+    param([bool]$Ignore)
+    try {
+        if (-not ('DotfilesBootstrap.ConsoleBreak' -as [type])) {
+            # Windows PowerShell 5.1 の Add-Type は C# 5 で読むので、それより新しい書き方を使わない
+            Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace DotfilesBootstrap
+{
+    public static class ConsoleBreak
+    {
+        private delegate bool HandlerRoutine(uint ctrlType);
+
+        [DllImport("kernel32.dll", SetLastError = true)]
+        private static extern bool SetConsoleCtrlHandler(HandlerRoutine handler, bool add);
+
+        private static readonly HandlerRoutine Handler = IgnoreBreak;
+
+        private static bool IgnoreBreak(uint ctrlType)
+        {
+            return ctrlType == 0 || ctrlType == 1;
+        }
+
+        public static bool Set(bool ignore)
+        {
+            return SetConsoleCtrlHandler(Handler, ignore);
+        }
+    }
+}
+'@
+        }
+        return [bool]([DotfilesBootstrap.ConsoleBreak]::Set($Ignore))
+    } catch {
+        return $false
+    }
+}
+
 # gh auth login を、このコンソールで対話で流す (一回限りのコードが出て、ブラウザーで認める)。終了コードを返す。
 # & で呼ぶと関数の出力として stdout を受けることになり、gh が端末でないと見て対話をやめうるので、Start-Process でコンソールをそのまま渡す。
 # -Wait は使わない (5.1 の -Wait は子孫のプロセスまで待つので、gh が開いたブラウザーを閉じるまで返らない)。handle を先に掴んでから
-# WaitForExit で gh だけを待つ (掴まないと、終わった後に ExitCode が読めない)
+# WaitForExit で gh だけを待つ (掴まないと、終わった後に ExitCode が読めない)。
+# 待つあいだは Ctrl+C を受け止める (Set-ConsoleBreakIgnored)。押すと gh だけが止まり (0 以外の終了コード)、続きの読み直しと締めの表を流せる
 function Invoke-GhLogin {
     param([string]$GhPath)
+    $ignored = Set-ConsoleBreakIgnored -Ignore $true
     try {
         $p = Start-Process -FilePath $GhPath -ArgumentList ((Get-GhLoginArguments) -join ' ') -NoNewWindow -PassThru
         $null = $p.Handle
@@ -429,6 +600,8 @@ function Invoke-GhLogin {
     } catch {
         Write-Host "gh を起動できなかった: $($_.Exception.Message)"
         return -1
+    } finally {
+        if ($ignored) { $null = Set-ConsoleBreakIgnored -Ignore $false }
     }
 }
 
@@ -473,6 +646,15 @@ function Get-BootstrapSac {
     Get-SmartAppControlState -PolicyState $raw.PolicyState -DefenderState $raw.DefenderState
 }
 
+# vswhere で Build Tools を読む (JSON の文字列。vswhere が無い・落ちたら空)
+function Read-VsWhere {
+    param([string]$VsWhere)
+    if (-not (Test-Path -LiteralPath $VsWhere -PathType Leaf)) { return '' }
+    $r = Invoke-Native -FilePath $VsWhere -Arguments @('-products', 'Microsoft.VisualStudio.Product.BuildTools', '-format', 'json', '-include', 'packages', '-utf8') -Utf8
+    if ($r.ExitCode -ne 0) { return '' }
+    $r.Lines -join "`n"
+}
+
 # git の設定の値を 1 つ読む (無ければ空)。core.autocrlf は system の設定 (Git for Windows の既定は true) も込みで読む
 function Get-GitConfigValue {
     param([string]$GitPath, [string]$Directory, [string]$Key)
@@ -514,6 +696,8 @@ function Get-BootstrapState {
     $states = foreach ($p in $Packages) {
         $exists = $false
         $installed = $null
+        $installPath = $null
+        $lacking = @()
         $selfUpdateDisabled = $true
         $defaultHost = $null
         switch ($p.Name) {
@@ -525,6 +709,15 @@ function Get-BootstrapState {
                 $exists = Test-Path -LiteralPath $Paths.Gh -PathType Leaf
                 if ($exists) { $installed = Get-GhVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Gh -Arguments @('--version')).Lines }
             }
+            'vs-buildtools' {
+                $instance = Get-VsBuildToolsInstance -Json (Read-VsWhere -VsWhere $Paths.VsWhere) -Major 17
+                if ($instance) {
+                    $exists = $true
+                    $installed = $instance.Version
+                    $installPath = $instance.Path
+                    $lacking = @(Get-VsMissingComponents -Installed $instance.Packages)
+                }
+            }
             'rustup' {
                 $exists = Test-Path -LiteralPath $Paths.Rustup -PathType Leaf
                 if ($exists) {
@@ -532,7 +725,8 @@ function Get-BootstrapState {
                     $settings = $null
                     if (Test-Path -LiteralPath $Paths.RustupSettings -PathType Leaf) { $settings = Get-Content -LiteralPath $Paths.RustupSettings -Raw }
                     $selfUpdateDisabled = Test-RustupSelfUpdateDisabled -SettingsText $settings
-                    $defaultHost = Get-RustupDefaultHost -SettingsText $settings
+                    # 既定の host は、rustup が今使う値 (rustup show の Default host) を読む
+                    $defaultHost = Get-RustupDefaultHost -Lines (Invoke-RustupShow -RustupPath $Paths.Rustup).Lines
                 }
             }
         }
@@ -543,7 +737,8 @@ function Get-BootstrapState {
         }
         [pscustomobject]@{
             Name = $p.Name; Title = $p.Title; PackageId = $p.PackageId; Target = $p.Version; Exists = [bool]$exists; Installed = $installed
-            Pinned = $pinned; SelfUpdateDisabled = [bool]$selfUpdateDisabled; DefaultHost = $defaultHost
+            Pinned = $pinned; InstallPath = $installPath; MissingComponents = $lacking; SelfUpdateDisabled = [bool]$selfUpdateDisabled
+            DefaultHost = $defaultHost
         }
     }
     $states = @($states)
@@ -584,7 +779,7 @@ function Write-Tail {
 }
 
 function Invoke-InstallBootstrap {
-    param([string]$GitVersion, [string]$GhVersion, [string]$RustupVersion, [switch]$Check)
+    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Check)
     # 最初に SAC を確かめ、オフでなければ警告して続ける (止めない。オフにするのはユーザー)
     $sacWarning = @(Format-SacWarning -Sac (Get-BootstrapSac))
     if ($sacWarning.Count -gt 0) {
@@ -596,7 +791,7 @@ function Invoke-InstallBootstrap {
         return 2
     }
     $arch = Get-OsArchitecture
-    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -RustupVersion $RustupVersion)
+    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion)
     $paths = Get-BootstrapPaths
     Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1)'
 
@@ -628,16 +823,17 @@ function Invoke-InstallBootstrap {
         $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $p.Args)
         Write-Host ''
         Write-Host "winget $($arguments -join ' ')"
+        if ($p.Name -eq 'vs-buildtools') { Write-Host '  (Build Tools は数 GB を落として入れるので、10 分以上かかることがある。UAC と進み具合の窓が出る)' }
         $result = Invoke-Winget -Arguments $arguments
         Write-Tail -Lines $result.Lines
         if ($result.ExitCode -ne 0) {
-            # 再起動待ちなどでも 0 以外で返る。入ったかは読み直して決める
+            # 再起動待ち (Build Tools の 3010 など) でも 0 以外で返る。入ったかは読み直して決める
             Write-Host ('winget が 0 以外で終わった (終了コード 0x{0:X8})。入ったかは読み直して確かめる' -f $result.ExitCode)
         }
         Update-ProcessPath
     }
 
-    # 2. 読み直して、入っている道具に pin と、rustup の自己更新の止め・既定の host を足す
+    # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す
     $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
     foreach ($s in @($state.Packages)) {
         if (-not $s.Exists) { continue }
@@ -645,6 +841,12 @@ function Invoke-InstallBootstrap {
             $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $s.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
             if ($pin.ExitCode -eq 0) { Write-Host "$($s.Title): winget pin を足した (winget upgrade --all から外れる)" }
             else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $s.Title, $pin.ExitCode) }
+        }
+        $lacking = @($s.MissingComponents | Where-Object { $_ })
+        if ($lacking.Count -gt 0) {
+            Write-Host "Build Tools に足りないものを足す (Visual Studio Installer。UAC と進み具合の窓が出る): $($lacking -join ' ')"
+            $vs = Invoke-VsModify -VsSetup $paths.VsSetup -InstallPath $s.InstallPath -Components $lacking
+            if (($vs -ne 0) -and ($vs -ne 3010)) { Write-Host "Visual Studio Installer が失敗した (終了コード $vs)" }
         }
         if ($s.Name -ne 'rustup') { continue }
         if (-not $s.SelfUpdateDisabled) {
@@ -659,13 +861,16 @@ function Invoke-InstallBootstrap {
         }
     }
 
-    # 3. gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す
+    # 3. gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す。
+    # 途中で止めても (Ctrl+C)、ここで止まらずに読み直しと締めの表まで流し、終了コード 1 で終える
     $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
     if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
         Write-Host ''
-        Write-Host 'gh を github.com にログインさせる。出てきた一回限りのコードを、ブラウザーで入れて認める'
+        Write-Host 'gh を github.com にログインさせる。一回限りのコードはクリップボードに入るので、Enter で開いたブラウザーに貼り付けて認める (Ctrl+C は押さない。gh が止まる)'
         $login = Invoke-GhLogin -GhPath $paths.Gh
-        if ($login -ne 0) { Write-Host "gh auth login が失敗した (終了コード $login)" }
+        if ($login -ne 0) {
+            Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
+        }
         $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
     }
 
@@ -706,15 +911,26 @@ function Invoke-InstallBootstrap {
 
 # dot-source されたとき (テスト) は関数だけを読み、本体は走らせない。
 # 思わぬ例外は受け止めて終了コード 2 で終える。受け止めないと exit まで届かず、
-# -Command から呼んだとき外側の exit $LASTEXITCODE が中の winget の 0 を返して成功に見える
+# -Command から呼んだとき外側の exit $LASTEXITCODE が中の winget の 0 を返して成功に見える。
+# Ctrl+C で止めると catch を通らずに finally だけが流れ、そのままだと何も出さずに終了コード 0 で終わる (Windows PowerShell 5.1 の
+# -File)。finally で止めたことを出し、終了コード 1 で終える (finally の exit は、Ctrl+C の止めより先に効く)
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
+    $exitCode = $null
     try {
-        exit (Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -RustupVersion $RustupVersion -Check:$Check)
+        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Check:$Check
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace
-        exit 2
+        $exitCode = 2
+    } finally {
+        if ($null -eq $exitCode) {
+            # 止めている最中の finally でも Write-Host は画面に出る (5.1 で確かめた)
+            Write-Host ''
+            Write-Host '⚠️ 途中で止めた (Ctrl+C)。終わっていないので、流し直す ⚠️' -ForegroundColor Yellow
+            exit 1
+        }
     }
+    exit $exitCode
 }
