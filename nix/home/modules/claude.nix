@@ -27,6 +27,7 @@
 #   files/claude/agents/<name>.md   -> ~/.claude/agents/<name>.md
 #   files/claude/commands/<name>.md -> ~/.claude/commands/<name>.md
 #   pkgs.herdr の share/skills/herdr/herdr/ -> ~/.claude/skills/herdr  (パッケージ同梱の skill。下記)
+#   pkgs/herdr-core の `hc --skill` から作る SKILL.md -> ~/.claude/skills/hc  (herdr-core を入れるホストだけ。下記)
 #
 # ## なぜ skills/ agents/ commands/ ごとではなく中身を 1 つずつ配置するのか
 #
@@ -43,6 +44,7 @@
 #   ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
 #   ├── <自作>/            <- Nix 管理 (store への symlink)
 #   ├── herdr/             <- Nix 管理 (herdr パッケージの中への symlink。下記)
+#   ├── hc/                <- Nix 管理 (hc --skill から build した dir への symlink。下記)
 #   └── <private>/         <- claude-skills の作業クローンへの symlink
 #                             (scripts/bootstrap-claude-skills.sh が張る)
 #
@@ -97,7 +99,8 @@
 # ここで置くものは、dotfiles.claude.enable のホスト (既定は設定グループの ② AI の道具) にだけ置く。false のホスト (客先の PC
 # など) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
 # ただし git-via-gh.json (gitViaGh.enable の値) は Claude Code によらず置く (setup の取得と fetch 系の abbr / alias が読む)。
-# herdr の skill は herdr も入れるホスト (dotfiles.herdr.enable) だけ。
+# herdr の skill は herdr も入れるホスト (dotfiles.herdr.enable) だけ。hc の skill は herdr-core も入れるホスト
+# (dotfiles.herdrCore.enable) だけ。
 {
   config,
   lib,
@@ -224,6 +227,12 @@ let
         source = dir + "/${name}";
       }
     ) entries;
+
+  # hc (herdr-core) の agent skill。home/modules/herdr-core.nix が入れるのと同じ package の `hc --skill` から作る
+  # (pkgs/herdr-core/claude-skill.nix)。herdrCore.enable でないホスト (macOS) では評価しない (package が Linux だけ)
+  hcSkill = pkgs.callPackage ../../pkgs/herdr-core/claude-skill.nix {
+    herdr-core = pkgs.callPackage ../../pkgs/herdr-core { };
+  };
 in
 
 lib.mkMerge [
@@ -588,6 +597,14 @@ lib.mkMerge [
       # (無い CLI の skill になり、pkgs.herdr を閉包に入れることにもなる)。
       (lib.mkIf config.dotfiles.herdr.enable {
         ".claude/skills/herdr".source = "${pkgs.herdr}/share/skills/herdr/herdr";
+      })
+
+      # hc (herdr-core) の skill。herdr-core のパッケージは skill を同梱せず、`hc --skill` が手引きを出すので、build の中で
+      # それに frontmatter を足した SKILL.md を作って張る (pkgs/herdr-core/claude-skill.nix。中身は home.packages の hc と同じ版で、
+      # releases.json を上げれば作り直る)。名前は公式の CLI の名前どおり hc。herdr-core を入れないホスト (dotfiles.herdrCore.enable が
+      # false。macOS・客先の PC など) には張らない。確かめるのは tests/claude-hc-skill.nix (flake の checks)
+      (lib.mkIf config.dotfiles.herdrCore.enable {
+        ".claude/skills/hc".source = hcSkill;
       })
 
       (linkEntries "skills")

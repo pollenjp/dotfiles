@@ -86,3 +86,36 @@ function Install-Ntn { & "$HOME\.config\powershell\Install-Ntn.ps1" @args }
 # 中身は同じ場所へ配る Install-ClaudeCode.ps1 (win/README.md の「Claude Code」)。-Check なら確かめるだけ。
 # 入れ替えが要るときは、Windows で開いている Claude Code の会話を先に閉じる (動いていると止まる)。setup --update でも揃える。
 function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1" @args }
+
+# Windows 側の runner (dotfiles の win/runner/。Rust)。dotfiles check で手順を順に確かめ (何も書かない)、dotfiles apply で揃え
+# (このホストの受け持ちが runner のときだけ。dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [runner] enable = true)、
+# dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で
+# build して起こす。cargo は win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は
+# 既定の toolchain を入れていないので、--manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
+function dotfiles {
+    $runner = [IO.Path]::Combine($HOME, 'ghq', 'github.com', 'pollenjp', 'dotfiles', 'win', 'runner')
+    if (-not (Test-Path -LiteralPath (Join-Path $runner 'Cargo.toml'))) {
+        Write-Host "dotfiles の runner がありません: $runner (先に win\bootstrap\Install-Bootstrap.ps1 で clone する)" -ForegroundColor Yellow
+        $global:LASTEXITCODE = 2
+        return
+    }
+    $runnerArgs = @(ConvertTo-DotfilesRunnerArgs -Arguments $args)
+    Push-Location -LiteralPath $runner
+    try {
+        # '--' は引用符で囲む。素の -- は PowerShell が引数の終わりの印として読み、版や呼び先によっては cargo に届かない
+        # (届かないと、runner への --steps などを cargo が自分の引数として読んで落ちる)
+        cargo run --quiet --release --locked '--' @runnerArgs
+    } finally {
+        Pop-Location
+    }
+}
+
+# dotfiles 関数が runner に渡す引数。PowerShell は `--steps files,ntn` の `files,ntn` を配列にし (`--steps=files,ntn` も
+# `--steps=files` と `ntn` の配列にする)、関数の @args はそれを別々の引数に広げるので、配列は , でつなぎ直して 1 つの引数にする
+# (runner は `--steps a,b` の形で受ける)。
+function ConvertTo-DotfilesRunnerArgs {
+    param([object[]]$Arguments)
+    foreach ($a in $Arguments) {
+        if ($a -is [array]) { ($a | ForEach-Object { "$_" }) -join ',' } else { "$a" }
+    }
+}

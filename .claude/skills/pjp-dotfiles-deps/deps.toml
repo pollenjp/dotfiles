@@ -19,7 +19,8 @@ skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/", "nix/pkgs/op-reason/"]
 release_age = "nix/release-age.nix"
 pkgs_dir = "nix/pkgs/upstream"
 
-# Windows に固定した版 (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core)。口の JSON の形は
+# Windows に固定した版 (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、bootstrap が入れる
+# Git for Windows (git)・GitHub CLI (gh)・Visual Studio Build Tools (vs-buildtools)・rustup)。口の JSON の形は
 # nix/scripts/bootstrap-windows-pin-updates.sh の先頭。会話では名前ごとに聞く (問いの中身は SKILL.md の「人が決めること」)
 [[pins]]
 name = "windows"
@@ -65,6 +66,12 @@ when = ["win/ntn/"]
 name = "win-claude-code"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/claude-code/Install-ClaudeCode.Tests.ps1"]
 when = ["win/claude-code/"]
+
+# bootstrap の 4 つ (git・gh・vs-buildtools・rustup) の版は、どれも win/bootstrap/Install-Bootstrap.ps1 の param の既定値
+[[checks]]
+name = "win-bootstrap"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/bootstrap/Install-Bootstrap.Tests.ps1"]
+when = ["win/bootstrap/"]
 
 # Install-HerdrApp.Tests.ps1 は repo の nix/pkgs/herdr-core/releases.json も読む
 [[checks]]

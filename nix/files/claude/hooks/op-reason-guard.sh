@@ -587,16 +587,30 @@ before() {
   return 0
 }
 
-# child_mark: この pane の workspace に herdr の指揮役の子の印があれば 0 (ssh-agent-notice.sh の child_mark と同じ印。ADR 036)
+# child_mark: この会話が指揮役の子なら 0 を返し、どちらの子かを child_kind (hc・herdr) に入れる (呼び出し元で使うので $( ) で
+# 呼ばない)。ssh-agent-notice.sh と同じ見分け方:
+#   hc (herdr-core) の端末の中 (HC_TERMINAL_ID がある)  hc get <端末> --json の、親の端末 (parent が空でない) か label pjp.role=child。
+#                                                     HERDR_ENV が残っていても herdr を呼ばない (hc の core を旧 herdr の pane から
+#                                                     立てたときに漏れた値。claude-skills の spec §7.2)
+#   旧 herdr の pane の中 (HERDR_ENV が 1)             workspace の子の印 (token parent・kin の 🌱・名前の先頭の 🌱。ADR 036)
 child_mark() {
   local got
+  child_kind=""
+  if [[ -n ${HC_TERMINAL_ID:-} ]]; then
+    command -v hc &>/dev/null || return 1
+    got=$(timeout 2 hc get "${HC_TERMINAL_ID}" --json </dev/null 2>/dev/null) || return 1
+    jq -e '((.parent // "") != "") or ((.labels["pjp.role"] // "") == "child")' <<<"${got}" &>/dev/null || return 1
+    child_kind=hc
+    return 0
+  fi
   [[ ${HERDR_ENV:-} == 1 && -n ${HERDR_WORKSPACE_ID:-} ]] || return 1
   command -v herdr &>/dev/null || return 1
   got=$(timeout 2 herdr workspace get "${HERDR_WORKSPACE_ID}" </dev/null 2>/dev/null) || return 1
   jq -e '.result.workspace
     | ((.tokens.parent // "") != "")
       or ((.tokens.kin // "") | startswith("🌱"))
-      or ((.label // "") | startswith("🌱"))' <<<"${got}" &>/dev/null
+      or ((.label // "") | startswith("🌱"))' <<<"${got}" &>/dev/null || return 1
+  child_kind=herdr
 }
 
 after() {
@@ -704,10 +718,12 @@ after() {
     ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、${desc}こと (何を: ${command}。なぜ: ${reason}。"
     ctx+="どこから: ${where}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"
   else
-    if child_mark; then
+    if child_mark && [[ ${child_kind} == hc ]]; then
+      rule='この端末は hc の指揮役の子 (hc の親の端末がいるか、label pjp.role=child がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+    elif [[ ${child_kind} == herdr ]]; then
       rule='この pane は herdr の指揮役の子 (workspace に子の印 🌱 か、親を示す ↑ がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
     else
-      rule='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
+      rule='herdr や hc の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
     fi
     ctx+="1. 何を (${command}) と、なぜ (理由「${reason}」) と、どこから (${where}) を書く。"$'\n'
     ctx+="2. 選択肢の問いを出す: ① ${first} (推奨) ② この手順を飛ばして進める ③ ここで止める。① が選ばれたら、同じ op を 1 回だけ打ち直す。"$'\n'

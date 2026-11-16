@@ -792,10 +792,11 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 
 | スクリプト | order | 理由 |
 | --- | --- | --- |
-| `bootstrap-mise.sh` | 10 | `claude` を入れる |
+| `bootstrap-mise.sh` | 10 | `claude` と rust (rustup) を入れる |
 | `bootstrap-claude-plugins.sh` | 20 | その `claude` を使う |
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98)・`bootstrap-windows-port-forward.sh` (99) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
+| `bootstrap-pjp.sh` | 55 | `bootstrap-claude-skills.sh`（50）が取得した claude-skills の clone から、shim の `pjp` を入れて道具を作る。cargo は `bootstrap-mise.sh`（10）の rust が入れる（[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-claude-skill-overrides.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill の `SKILL.md`（pack の割り当て）と入口の skill（`pjp-pack-<pack>`）を読む（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
@@ -811,7 +812,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
+| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、Windows の ghq に dotfiles の clone があるマシンでは bootstrap の Git for Windows・gh・Visual Studio Build Tools・rustup) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
 | `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -909,7 +910,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
-| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（`dotfiles.cursorAgent.enable` のホストだけ。[後述](#cursor-agent-も-mise-に置いている理由)） |
+| 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（`dotfiles.cursorAgent.enable` のホストだけ。[後述](#cursor-agent-も-mise-に置いている理由)）・rust（rustup。`claude.privateSkills.enable` のホストだけ。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
 | 6 | `./nix/scripts/bootstrap-claude-hook.sh` | `bootstrap-claude-hook` | Claude Code のフック登録（ガード・解説動画の知らせ・走り切りの念押し・1Password の承認の知らせ・ほかの repo への参照で止める・設計の文書を `docs/` に書かせない・PR の assignee の念押し・`op.exe` の直打ちを止める） |
@@ -919,6 +920,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.4 | `./nix/scripts/bootstrap-claude-footer-links.sh` | `bootstrap-claude-footer-links` | Claude Code の footer に会話のチケットと PR と cc-page のリンクを出す設定の登録（[後述](#footer-に会話のチケットと-pr-と-cc-page-のリンクを出す)） |
 | 6.5 | `./nix/scripts/bootstrap-claude-skills.sh` | `bootstrap-claude-skills` | private な skill 置き場の取得（後述） |
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
+| 6.5.2 | `./nix/scripts/bootstrap-pjp.sh` | `bootstrap-pjp` | claude-skills の Rust の道具の入口 (shim の `pjp`) を入れ、道具を作る (`pjp --build`)。6.5 の後に走る（[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
@@ -1094,6 +1096,9 @@ marketplace の clone は SSH（`git@github.com:`）で行われるので GitHub
 ```
 
 このリポジトリを使わないマシンでは、この手順ごと飛ばしてよい。
+
+取れた clone に Rust の道具 (claude-skills の W0-1 から) があれば、続く手順 6.5.2 (`bootstrap-pjp`) が shim の `pjp` を入れて道具を作る
+（[後述](#claude-skills-の-rust-の道具-shim-の-pjp)）。clone を取り直したあとに流し直すなら `--steps bootstrap-claude-skills,bootstrap-pjp`。
 
 #### 4. ログインシェルの変更 (手順 7)
 
@@ -1734,7 +1739,9 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
-| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`~/.local/bin` のものは同じ binary へのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
+| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は core を立てたシェルに固有の env (旧 herdr の pane の印・`RUSTUP_TOOLCHAIN`) を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
+| `~/.claude/skills/hc/SKILL.md` | `nix/pkgs/herdr-core/claude-skill.nix` (生成。同じ package の `hc --skill` に `claude-skill-head.md` の frontmatter を足したもの。`dotfiles.herdrCore.enable` のマシン。[後述](#hc-の-skill-claudeskillshc)) |
+| `~/.cargo/bin/pjp` | `nix/scripts/bootstrap-pjp.sh` (claude-skills の `crates/pjp-shim` を `cargo install` したもの。Nix 管理ではない。`dotfiles.claude.privateSkills.enable` のマシン。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
 | `~/.local/share/dotfiles/systemd/dotfiles-exe-exec-trace.service` | `nix/home/modules/exe-exec-trace.nix` (生成。`/etc` へは setup の手順が入れる。同上) |
 | `~/.local/share/dotfiles/systemd/dotfiles-wsl-mtu-guard.service` | `nix/home/modules/wsl-mtu-guard.nix` (生成。`wsl.mtuGuard.enable` のマシンだけ。`/etc` へは setup の手順が入れる。[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)) |
@@ -3013,8 +3020,8 @@ bash では元々発火していなかった）。
 
 ```sh
 # 1 つの flake に devShell を並べ、ディレクトリごとに選ぶ例
-# (repo の直下の flake.nix が devShells.<system>.ch01 を持つとき)
-echo 'use flake ../..#ch01' > chapters/ch01/.envrc
+# (repo の nix/flake.nix が devShells.<system>.ch01 を持つとき。道具の flake は path: で読む)
+echo 'use flake path:../../nix#ch01' > chapters/ch01/.envrc
 echo 'dotenv_if_exists' >> chapters/ch01/.envrc   # 秘密の値は隣の .env に置いて読む (無ければ何もしない)
 cd chapters/ch01   # direnv: error … .envrc is blocked. Run `direnv allow` to approve its content
 direnv allow       # 中身を確かめてから許す。.envrc を書き換えると、また止められる
@@ -3025,6 +3032,10 @@ direnv allow       # 中身を確かめてから許す。.envrc を書き換え�
   `watch_file <ファイル>` を足す
 - devShell と flake の inputs には `.direnv/` から GC root が張られ、週 1 回の GC（[前述](#使わなくなったデータの定期削除)）でも
   消えない。要らなくなったら `.direnv/` を消せば root も外れる
+- `use flake` にも `path:` を付け、`flake.nix` と `flake.lock` だけのディレクトリを読む。nix-direnv は devShell を作り直す
+  たびに `nix flake archive` を打ち、写した store path に GC root を張るので、素のパス（`use flake`・`use flake .`）では
+  lazy-trees（Determinate Nix）でも repo 全体が写って残る（`pjp-nix-flake` skill の `references/gotchas.md` の
+  「何が /nix/store へ写るか」）
 - 読み込むたびの `direnv: export +AR +AS … ~PATH`（devShell では数十個の変数が 1 行に並ぶ）は出さない（`direnv.toml` の
   `hide_env_diff`）。`direnv: loading …` と、止められたときのエラーは出る。初めての評価・ビルドが 5 秒を超えると
   `… is taking a while to execute. Use CTRL-C to give up.` が出る（`warn_timeout` は既定のまま）
@@ -3358,14 +3369,15 @@ ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drw
 `name` の両方（`pjp-drawio` `pjp-plantuml`）。agent / command も同じ。
 
 `~/.claude/skills/` には Anthropic 配信・このリポジトリ・`claude-skills`・パッケージ同梱
-（herdr）の 4 系統が同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
+（herdr）と、パッケージの CLI の手引きから作るもの（hc）の 5 系統が同じ名前空間で並ぶ。prefix が無いと **一覧を見ても自分のものが判別できず**、
 配信物は増減するので一般名詞（`dataviz` `run` `init` など）は将来ぶつかる。
 こちら側は `check-claude-frontmatter.sh` が検査する（[次節](#frontmatter-を確かめる)）。
 `claude-skills` 側も同じ規約で、あちらは `scripts/lint.sh` が検査する。
 
 パッケージ同梱の skill（nixpkgs の `installAgentSkills` が `share/skills/` に入れるもの）は
 自作ではないので、upstream の名前のまま置く。張り方は `nix/files/claude/skills/README.md`
-の「パッケージ同梱の skill」。
+の「パッケージ同梱の skill」。hc の skill も中身は upstream の手引き（`hc --skill`）なので、CLI の名前のまま `hc` と置く
+（[前述](#hc-の-skill-claudeskillshc)）。
 
 ### frontmatter を確かめる
 
@@ -3382,8 +3394,8 @@ frontmatter が YAML として読めなくても、Claude Code はエラーを�
 いつ使うものかが Claude に伝わらない）。読めても、値の途中の `---` で frontmatter が閉じる・素の値の「 #」から先がコメント
 として消える、といった形では値が黙って変わる。script は読み直しに頼らず YAML として読めない形をどれも落とし、これらと、
 `name` とディレクトリ名（agent はファイル名）の食い違い・`pjp-` で始まらない名前でも落ちる（全部は script の先頭）。
-skill の `metadata` も見る（map であること・`pjp-pack` が pack の名前のどれかで、`bootstrap-claude-skill-overrides.sh` の
-読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
+skill の `metadata` も見る（map であること・`pjp-pack` を空白で区切った名前がどれも pack の名前で重ならず、
+`bootstrap-claude-skill-overrides.sh` の読む形であること・入口の skill `pjp-pack-<pack>` に `pjp-pack` が無いこと。[前述](#skill-の一覧を枠に収める-pack-と同期された-skill)）。
 観点は `claude-skills` の `scripts/lint.sh` に揃えてある。
 
 repo の root の `.claude/skills/<名前>/SKILL.md`（配置しない。この repo の session だけが読む skill。今は依存の更新の拡張
@@ -3403,7 +3415,8 @@ repo の root の `.claude/skills/<名前>/SKILL.md`（配置しない。この 
 ├── manifest.json      <- Claude Code 管理 (実ファイル)
 ├── pdf/  docx/  ...   <- Claude Code 管理 (実ディレクトリ)
 ├── pjp-my-skill -> /nix/store/…   <- Nix 管理
-└── herdr -> /nix/store/…-herdr-…/share/skills/herdr/herdr   <- Nix 管理 (パッケージ同梱)
+├── herdr -> /nix/store/…-herdr-…/share/skills/herdr/herdr   <- Nix 管理 (パッケージ同梱)
+└── hc -> /nix/store/…-hc-claude-skill-<版>   <- Nix 管理 (hc --skill から build)
 ```
 
 ### ⚠️ `~/.claude/` を直接編集しないこと
@@ -3535,6 +3548,11 @@ herdr の中の agent は手元の PC から転送された接続のもので（
   pjp-herdr-other-repo の `ws-mark.sh` が付ける印のどれか（親を示す token `parent`・親子の印の token `kin` の 🌱・
   前の形の名前の先頭の 🌱）があれば子だと言い切り、無ければ条件つきで書く（経緯は
   [ADR 036](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/036_ssh_agent_notice_child_tokens_20261026T184721JST/README.md)）
+- hc (herdr-core) の端末（`HC_TERMINAL_ID` がある）では herdr を呼ばない（`HERDR_ENV` が残っていても、それは hc の core を旧 herdr の
+  pane から立てたときに漏れた値。claude-skills の spec の §7.2）。通知は出さず、断られたあとは `hc get $HC_TERMINAL_ID --json` を 1 回
+  打って、どこからを「hc の端末 <address>「<名前>」」にし、親の端末がいる（`hc run` で立てた）か label `pjp.role=child`（claude-skills の
+  `pjp child new` が付ける）なら hc の指揮役の子だと言い切る。hc は 2 秒で切って呼び、落ちたら env の address だけにして条件つきで書く。
+  下の `op-reason-guard.sh` も同じ見分け方をする
 - 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
   しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`
@@ -4287,13 +4305,18 @@ skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrid
 
 | 書く key | 値 | 何を読んで決めるか |
 | --- | --- | --- |
-| pack の skill | `"name-only"`（一覧に名前だけ。Skill tool で名前を指せば呼べる） | `~/.claude/skills/*/SKILL.md` の frontmatter の `metadata` の `pjp-pack` と、その pack の入口 `~/.claude/skills/pjp-pack-<pack>/SKILL.md` |
+| pack の skill | `"name-only"`（一覧に名前だけ。Skill tool で名前を指せば呼べる） | `~/.claude/skills/*/SKILL.md` の frontmatter の `metadata` の `pjp-pack`（空白で区切って複数書ける）と、書いた pack の入口 `~/.claude/skills/pjp-pack-<pack>/SKILL.md`（どれか 1 つあればよい） |
 | claude.ai から同期された skill（`anthropic-skills:<名前>`） | `"user-invocable-only"`（Claude の一覧から消え、ユーザーは `/` から呼べる） | `~/.claude/skills/synced/*/` と、`claude-<名前>` のアカウントの `~/.claude-<名前>/skills/synced/*/` の skill のディレクトリ |
 
-- pack の割り当ては、各 skill の `SKILL.md` に書く（`metadata:` の下の `pjp-pack: <pack>`。書き方は
-  `nix/files/claude/skills/README.md`）。割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
-- 入口の無い pack の skill は名前だけにしない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れない
-  マシン・入口がまだ無い版）なら 1 行出すだけ、ほかの pack の入口はあるのにその pack の入口だけ無いなら警告する
+- pack の割り当ては、各 skill の `SKILL.md` に書く（`metadata:` の下の `pjp-pack: <pack>`。話題をまたぐ skill は
+  `pjp-pack: notion docs` のように空白で区切って複数書き、先頭が主の pack。書き方は `nix/files/claude/skills/README.md`）。
+  割り当ての表は持たない。入口の skill（pack の目録）は `claude-skills` にある
+- 書いた pack のどれかに入口があれば名前だけにする（主の pack かどうかは問わない）。どの pack にも入口が無い skill は名前だけに
+  しない（呼ぶきっかけが消えるため）。入口が 1 つも無い（`claude-skills` を取れないマシン・入口がまだ無い版）なら 1 行出す
+  だけ、ほかの pack の入口はあるのに書いた pack の入口が無いなら、入口の無い pack ごとに警告する（説明つきのまま残す skill と、
+  ほかに書いた pack の入口から辿れるので名前だけにする skill を分けて出す）
+- `pjp-pack` の値に pack の名前として読めないもの（大文字・記号・列の書き方など）が 1 つでもあれば、ほかの名前の入口があっても
+  その skill は説明つきのまま残す（警告する）。同じ名前を 2 度書いた重なりは 1 つにまとめる
 - frontmatter に `disable-model-invocation: true` がある skill も名前だけにしない（入口の目録には載るが、Claude が自分では
   呼ばない作りのまま残す）。前に書いた `name-only` は戻す
 - claude.ai から同期された skill は plugin ではなく、Claude Code が `~/.claude/skills/synced/<bucket>/` に同期する skill。
@@ -4307,7 +4330,7 @@ skill の組（pack）は名前だけにする。`bootstrap-claude-skill-overrid
 
 書いた key と値は `~/.local/state/dotfiles/claude-skill-overrides.applied.json` に控え、流すたびに今の値と比べて決める。
 
-| `settings.json` の今の値 | 書きたい値がある | 書きたい値が無くなった（入口が消えた・pack から外れた・同期された skill が消えた） |
+| `settings.json` の今の値 | 書きたい値がある | 書きたい値が無くなった（書いた pack の入口が全部消えた・pack から外れた・同期された skill が消えた） |
 | --- | --- | --- |
 | 無い | 書く | — |
 | 書きたい値と同じ | 控える（前から手で書いてあった同じ値も控え、あとで戻すことがある） | — |
@@ -4328,6 +4351,7 @@ jq .keys ~/.local/state/dotfiles/claude-skill-overrides.applied.json   # この 
 ```
 
 経緯と、Claude Code で確かめた振る舞いは dotfiles-private の `docs/superpowers/specs/2026-11-03-skill-listing-packs-design.md`。
+1 つの skill に pack を複数書く形は、同じ所の `2026-11-15-skill-multi-pack-design.md`。
 
 ### Notion の宛先を host ごとに選ぶ
 
@@ -4583,10 +4607,11 @@ skill を足したあとや別マシンの変更を取り込むときに何度�
 ├── pdf/ docx/ ...     <- Anthropic 配信 (実ディレクトリ)
 ├── <公開してよいもの> -> /nix/store/…                       (nix/files/claude/skills/)
 ├── herdr              -> /nix/store/…-herdr-…/share/skills/… (パッケージ同梱。claude.nix)
+├── hc                 -> /nix/store/…-hc-claude-skill-<版>   (hc --skill から build。claude.nix)
 └── <private>          -> ~/ghq/…/claude-skills/skills/…     (bootstrap-claude-skills.sh)
 ```
 
-`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、4 系統が兄弟として
+`nix/files/claude/` と同じく **中身を 1 つずつ**置く方式なので、5 系統が兄弟として
 並ぶだけで衝突しない。同名のものが既にある場合は上書きせず警告して飛ばす。
 
 `rules/` は拡張子・置き場所（frontmatter の `paths`）で絞った rule で、合うファイルを Claude が読み書きしたときに読まれる
@@ -5287,6 +5312,46 @@ store の binary は書き換えられないので、端末で `ntn update` を�
 cloud の VM は home-manager を通らないので、ntn は環境の setup script の install script で入れる（[前述](#環境を作る)。
 版は固定されず、その時の最新）。
 
+## claude-skills の Rust の道具 (shim の pjp)
+
+claude-skills は skill の script を Rust に移している (Windows のハブでも同じ道具を動かすため。claude-skills の
+`docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md`)。道具は shim の `pjp` から `pjp <道具> …` で打ち、shim は clone の
+`rust-toolchain.toml` の版で `cargo build` してから道具を起こす (clone を pull すれば、次の呼び出しから新しいコードで動く)。Linux で
+それを動かすための用意を、claude-skills の clone を持つホスト (`dotfiles.claude.privateSkills.enable`。既定は ② と ③ の両方が on の
+personal) に 3 つ置く。
+
+| もの | 置き場所 | 入れるもの |
+| --- | --- | --- |
+| rustup (cargo・rustc の proxy) | `~/.cargo/bin`・`~/.rustup` | `bootstrap-mise.sh` (手順 4) の `mise use -g rust`。言語のランタイムなので mise で入れる ([ADR 001](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/001_home_manager_migration_20260808T163454JST/README.md) の決定 6) |
+| shim の `pjp` | `~/.cargo/bin/pjp` | `bootstrap-pjp.sh` (手順 6.5.2) の `cargo install --locked --path <clone>/crates/pjp-shim` |
+| 道具 (`pjp-<道具>`) | clone の `target/release/` | `bootstrap-pjp.sh` の `pjp --build` (会話の途中で道具を初めて打ったときに、作り直しを待たせない) |
+
+- mise の rust は、効いている間 `RUSTUP_TOOLCHAIN` を入れ、rustup はそれを repo の `rust-toolchain.toml` より上に置く。全体の rust だけでは、
+  repo が固定した toolchain (claude-skills の `rust-toolchain.toml`。CI と同じ版) が mise の効いたシェルで効かなくなるので、
+  `bootstrap-mise.sh` は mise の `idiomatic_version_file_enable_tools` に `rust` を足し、`rust-toolchain.toml` の channel を mise に読ませる
+  (mise の文書 lang/rust の勧め)。mise が読むのは `rust-toolchain.toml` だけで、拡張子の無い古い名前の `rust-toolchain` の repo では、mise の
+  効いたシェルで全体の版が勝つ (その repo に `mise.toml` で `rust` を書く)。版は go と同じく省く (入っている中の最高版。無ければ遅延を過ぎた
+  最新の stable)。上げるときは `mise up rust`
+- shim は、無い・起きない・版 (`pjp --version`) が clone の `crates/pjp-shim` の版と違うときだけ入れ直す (shim は動きを変えたら版を上げる決まり)。
+  cargo は clone の中で、clone の `rust-toolchain.toml` の channel を `RUSTUP_TOOLCHAIN` にして打つ (shim と同じ。mise の
+  `RUSTUP_TOOLCHAIN` や cwd に引きずられない)。入れ先は `--root ${CARGO_HOME:-~/.cargo}` で固め、使い捨ての `--target-dir` で毎回作り直して
+  link する (`cargo install --path` は既定で workspace の `target/` を使い、前に作った exe を link し直さずに写すことがあるため)。入れた後に
+  shim が起きなければ警告して止まる。`pjp --build` は毎回流す (clone が変わっていなければ cargo の確かめだけで終わる)
+- リンカの `cc` の無い Linux (u24 など) と cargo の無いマシンでは、claude-skills の nix の devShell (`path:<clone>/nix`。rustup と cc がある)
+  の中で `cargo install` を打つ。devShell の cc で作った exe は devShell の glibc に結ばれるので、devShell を
+  `~/.local/state/dotfiles/pjp-shim-devshell` の profile に残す (nix の GC root)。入れられたら、その profile の前の世代は消す。道具の方は
+  shim が同じ判断をする (GC root は clone の `target/pjp-devshell`)
+- `~/.cargo/bin` は login のシェルの PATH にも入れる (`home/modules/shell-common.nix` の `home.sessionPath`)。対話の bash は `~/.cargo/env`
+  でも足すが、hc の core が読む login の環境には入らなかった ([後述](#hc-の-core-の-env-と-hc-の子の-path))
+- どこで落ちても止めない (警告して続ける)。shim が無くても、claude-skills の skill は今までどおり `scripts/` の bash・Python で動く
+
+```sh
+~/dotfiles/setup --steps bootstrap-pjp     # shim を (要れば) 入れ、道具を作る
+./nix/scripts/bootstrap-pjp.sh --dry-run   # 打つコマンドだけを見る
+pjp --version                              # 入れた shim の版
+pjp doctor                                 # shim・clone・toolchain・外の道具 (git・gh・ntn・hc) を 1 行ずつ確かめる
+```
+
 ## herdr-core (hc) を Nix で入れる
 
 herdr-app (herdr の desktop app) は、SSH でつないだ machine (server) の terminal を、その machine の herdr-core に持たせる。手元の core は
@@ -5305,11 +5370,58 @@ Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`]
   中身が同じふつうのファイルを置き換えないので、リンクを張る前に activation が消す)。古い写しが残ると、PATH で `~/.local/bin` が nix の
   profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる。同じ版の写しでも、store の外の書けるファイルのままだと、そこから
   打つ `hc update` が nix のものとして断られず、公式の最新へ上がる (Linux には取得元のフィードが無い)
+- package の `bin/herdr-core` (と、それへの symlink の `bin/hc`) は、core を立てたシェルに固有の env を外してから本物
+  (`libexec/herdr-core/herdr-core`) を起こす包み ([下](#hc-の-core-の-env-と-hc-の子の-path))。外すのは旧 herdr (TUI) の pane の印
+  (`HERDR_ENV`・`HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_SOCKET_PATH`・`HERDR_BIN_PATH`・`HERDR_SESSION`・
+  `HERDR_STARTUP_CWD`) と、mise の全体の rust が対話のシェルに入れる `RUSTUP_TOOLCHAIN`。hc が読む `HERDR_RELEASES_URL` などは外さない
+  (名前で外す)。本物の実体は store の中のままなので、`hc update` が断るのも、`hc machine add --install` が写すもの (本物の exe) も変わらない
 - switch せずに試すなら:
 
   ```sh
   nix run ./nix#herdr-core -- --version   # hc <固定した版>
   ```
+
+### hc の core の env と hc の子の PATH
+
+hc の core は、立てた hc の process の env を写して動き (Linux では systemd の user の transient unit `hc-serve-*`・`hc-hold-*`)、hc の子
+(端末と `hc exec` のコマンド) をその env で起こす。SSH で立った Linux の core は、アカウントの shell の非対話の login 環境を 1 回読んで使う
+(`hc --skill` の「Status, recovery, and cleanup」)。`--via` の machine は、`--via` のコマンドが login のシェルなら同じになる (Windows の hc が
+`wsl.exe -d u24 --cd ~ -e bash -lc` でつなぐ u24 の形)。hc の手引きの例の `--via 'wsl.exe -d <distro> -e sh -c'` で足した machine は login の
+環境を読まないので、`bash -lc` で足し直す。
+
+- login の環境の PATH (`home/modules/shell-common.nix`。`~/.profile` が読む hm-session-vars と、fish の config.fish が読む同じ中身) に、
+  `~/.cargo/bin` (shim の `pjp`。`claude.privateSkills.enable` のホスト) を前に、mise の shim (`~/.local/share/mise/shims`。mise で入れる
+  `claude` など。`herdrCore.enable` のホスト) を最後に足す。`mise activate` は対話のシェルでだけ効くので、前は hc の子から `claude` を
+  名前で引けなかった。shim を最後に置くのは、project で mise に入れた道具の shim が Nix の同じ名前の道具を隠さないため (mise の shim は、
+  cwd に版の無い道具だと「No version is set for shim」で落ちる)。対話のシェルでは `mise activate` が install の場所を前に足すので、
+  今までどおり mise の版が先に来る
+- 旧 herdr の pane で打った最初の hc (WSL を立ち上げ直した後の `hc ls`・pane の中の `hc server restart --fresh`) から core が立つと、
+  pane の `HERDR_*` が hc の子に漏れ、旧 herdr を相手にする道具 (hook の `ssh-agent-notice.sh`・`op-reason-guard.sh`、claude-skills の
+  `ticket.sh`) が古い herdr を呼んでいた。対話のシェルから立つと、mise の全体の rust の `RUSTUP_TOOLCHAIN` も子に付き、子が claude-skills の
+  worktree で打つ cargo が `rust-toolchain.toml` の版 (CI と同じ版) でなく全体の版になる。package の包みが hc の入口でどちらも外すので、
+  どこから core が立っても漏れない。hook も、hc の端末 (`HC_TERMINAL_ID` がある) では `HERDR_ENV` を見ずに hc で子を見分ける
+  ([前述](#1password-の-ssh-承認を知らせるフック))
+- 包みが外すのは上の名前だけ。対話のシェルや Claude Code の会話から core を立てると、ほかの固有の値 (mise の go の `GOROOT`・会話の
+  `CLAUDECODE` など) は子に付くので、core は login の環境で立てる・立て直す (下)
+- 立っている core の env は、立て直すまで変わらない。setup で login の PATH が変わったら、login の環境で core を立て直す。WSL (u24) の core は
+  Windows の PowerShell から (`--fresh` は、そのシェルの env を新しい端末に使う):
+
+  ```powershell
+  wsl.exe -d u24 --cd '~' -e bash -lc 'hc server restart --fresh'
+  ```
+
+  SSH 先の Linux は、herdr の外の素の SSH のログインで `hc server restart --fresh` (hc の文書の勧め)。立っている端末 (会話) は残り、
+  新しい env は次に立てる端末から効く
+
+### hc の skill (~/.claude/skills/hc)
+
+herdr-core のパッケージは agent skill を同梱せず、`hc --skill` が hc の CLI の手引き (Markdown。hc の版ごとに中身が変わる) を出す。
+`home/modules/claude.nix` が、home.packages の hc と同じ package の `hc --skill` に frontmatter (name `hc` と、使う場面の description) を
+足した `SKILL.md` を Nix の build で作り (`pkgs/herdr-core/claude-skill.nix`)、`~/.claude/skills/hc` に張る (`herdrCore.enable` のホスト)。
+
+- frontmatter と、作った版を書くコメントは `pkgs/herdr-core/claude-skill-head.md`。Windows で同じ `SKILL.md` を作るときも同じ head を使う
+- hc の版を上げる (`pkgs/herdr-core/releases.json`) と derivation が変わり、次の switch で作り直る (setup の手順は要らない)
+- 確かめるのは flake の checks の `claude-hc-skill` (name が `hc`・本文が `hc --skill` の出力そのもの)
 
 ### 非対話の SSH から見つかるか
 

@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -61,6 +61,14 @@
 #     release (直近 100 件) を見る。GitHub の最新は v の付かない版で出す
 #   - 新しい winget の版が GitHub に出て 30 日たったら exit 1 で release notes の URL を添える
 #   - GitHub にある版が winget に無いのは、30 日たつまで ※ で待ち、たったら exit 1
+#
+#   bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
+#   - 名前ごとの param (-GitVersion・-GhVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
+#     を読む。文言の -Version・$packageId も、名前ごとの変数の名前で出す。ID の変数が無ければ gh を呼ばずに exit 2
+#   - git は git-for-windows/git の release の tag (v<X.Y.Z>.windows.<N>) を、winget の版 (N が 1 なら X.Y.Z、ほかは X.Y.Z.N) に
+#     突き合わせる (prerelease の rc は数えない)。gh は cli/cli の release。vs-buildtools と rustup は winget-pkgs に載った日で、
+#     GitHub の release は引かない
+#   - 名前だけ渡すと、repo の win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt を読む
 #
 #   JSON の口 (--json [--dates]):
 #   - 固定した版より新しい winget の版を古い順に、見送った版は理由つきで、JSON 1 つだけを stdout に出して exit 0
@@ -115,7 +123,7 @@ done
 
 # 偽の gh。引数を FAKE_GH_LOG に足し、叩いた API ごとに決めた応答を返す。
 #   contents (winget-pkgs のディレクトリ)        FAKE_GH_CONTENTS (stdout)・FAKE_GH_CONTENTS_ERR (stderr)・FAKE_GH_CONTENTS_RC
-#   releases (Win32-OpenSSH・herdr・claude-code) FAKE_GH_RELEASES・FAKE_GH_RELEASES_ERR・FAKE_GH_RELEASES_RC
+#   releases (Win32-OpenSSH・herdr・claude-code・git-for-windows・cli) FAKE_GH_RELEASES・FAKE_GH_RELEASES_ERR・FAKE_GH_RELEASES_RC
 #   commits?path=… (winget-pkgs の版の履歴)      FAKE_GH_COMMITS_DIR/<版> の中身 (無ければ空の一覧)・
 #                                                FAKE_GH_COMMITS_ERR・FAKE_GH_COMMITS_RC
 fake_bin="${work}/fake-bin"
@@ -128,7 +136,8 @@ printf '%s\n' "$*" >>"${FAKE_GH_LOG}"
 case $2 in
   repos/microsoft/winget-pkgs/contents/*)
     out=${FAKE_GH_CONTENTS-} err=${FAKE_GH_CONTENTS_ERR-} rc=${FAKE_GH_CONTENTS_RC:-0} ;;
-  repos/PowerShell/Win32-OpenSSH/releases* | repos/herdrdev/herdr/releases* | repos/anthropics/claude-code/releases*)
+  repos/PowerShell/Win32-OpenSSH/releases* | repos/herdrdev/herdr/releases* | repos/anthropics/claude-code/releases* \
+    | repos/git-for-windows/git/releases* | repos/cli/cli/releases*)
     out=${FAKE_GH_RELEASES-} err=${FAKE_GH_RELEASES_ERR-} rc=${FAKE_GH_RELEASES_RC:-0} ;;
   repos/microsoft/winget-pkgs/commits*)
     p=${2#*path=}
@@ -162,6 +171,10 @@ manifest_dir_of() {
     google-japanese-input) echo manifests/g/Google/JapaneseIME ;;
     ntn) echo manifests/n/Notion/ntn ;;
     claude-code) echo manifests/a/Anthropic/ClaudeCode ;;
+    git) echo manifests/g/Git/Git ;;
+    gh) echo manifests/g/GitHub/cli ;;
+    vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
+    rustup) echo manifests/r/Rustlang/Rustup ;;
   esac
 }
 ps1_of() {
@@ -171,6 +184,7 @@ ps1_of() {
     google-japanese-input) echo Install-GoogleJapaneseInput.ps1 ;;
     ntn) echo Install-Ntn.ps1 ;;
     claude-code) echo Install-ClaudeCode.ps1 ;;
+    git | gh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
 
@@ -307,6 +321,28 @@ claude_releases_json() {
       published_at: $at,
       assets: [],
       body: "## What'"'"'s changed\n\n- Bug fixes"
+    }'
+  done | jq -s '.'
+}
+
+# git-for-windows/git・cli/cli の releases (新しい順)。$1: repo (owner/name)、残り: 「tag|公開日時」(3 つめに |pre を足すと
+# prerelease にする)。成果物は読まないので付けない
+plain_releases_json() {
+  local repo=$1 e tag at pre
+  shift
+  for e in "$@"; do
+    IFS='|' read -r tag at pre <<<"${e}"
+    jq -n --arg repo "${repo}" --arg tag "${tag}" --arg at "${at}" --arg pre "${pre}" '{
+      url: ("https://api.github.com/repos/" + $repo + "/releases/1"),
+      html_url: ("https://github.com/" + $repo + "/releases/tag/" + $tag),
+      id: 1,
+      tag_name: $tag,
+      name: $tag,
+      draft: false,
+      prerelease: ($pre == "pre"),
+      created_at: $at,
+      published_at: $at,
+      assets: []
     }'
   done | jq -s '.'
 }
@@ -478,6 +514,40 @@ write_claude_code_ps1() {
   } >"$1"
 }
 
+# win/bootstrap/Install-Bootstrap.ps1 の形 (param に 4 つの版が並び、ID の変数は関数の中に 4 つ並ぶ)。$1: 書き先、
+# $2: 今の pkg の固定した版 (空ならその param の行を書かない)、$3: 今の pkg のパッケージ ID (- ならその変数の行を書かない)。
+# ほかの道具の行は本物の値で書く
+write_bootstrap_ps1() {
+  local name var ver id line
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\n新しい Windows で最初に流す setup。\n#>\n'
+    printf '[CmdletBinding()]\nparam(\n'
+    for line in 'git|GitVersion|2.56.0.4' 'gh|GhVersion|2.103.3' 'vs-buildtools|VsBuildToolsVersion|17.14.44' 'rustup|RustupVersion|1.29.3'; do
+      IFS='|' read -r name var ver <<<"${line}"
+      if [[ ${name} == "${pkg}" ]]; then
+        [[ -n $2 ]] || continue
+        ver=$2
+      fi
+      printf "    [string]\$%s = '%s',\n" "${var}" "${ver}"
+    done
+    # shellcheck disable=SC2016 # PowerShell の $Check などを文字のまま書く
+    printf '    [switch]$Check\n)\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Get-WingetInstallArguments {\n    param([string]$PackageId, [string]$Version, [string[]]$Extra)\n}\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Get-BootstrapPackages {\n    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [string]$Arch)\n'
+    for line in 'git|gitPackageId|Git.Git' 'gh|ghPackageId|GitHub.cli' 'vs-buildtools|vsBuildToolsPackageId|Microsoft.VisualStudio.2022.BuildTools' 'rustup|rustupPackageId|Rustlang.Rustup'; do
+      IFS='|' read -r name var id <<<"${line}"
+      if [[ ${name} == "${pkg}" ]]; then
+        [[ $3 != - ]] || continue
+        id=$3
+      fi
+      printf "    \$%s = '%s'\n" "${var}" "${id}"
+    done
+    printf '}\n'
+  } >"$1"
+}
+
 # 1 ケースぶんのディレクトリを作る。パッケージは今の pkg で、ps1 は本物と同じく BOM 付き。
 #   $1: 名前、$2: 固定した版 (空なら -Version の行を書かない)、$3: 見送りの一覧の中身 (- なら作らない)、
 #   $4: パッケージ ID (省くと pkg の本物の ID、- なら $packageId の行を書かない)
@@ -491,6 +561,10 @@ new_case() {
     google-japanese-input) write_gime_ps1 "${d}/Install-GoogleJapaneseInput.ps1" "$2" "${id:-Google.JapaneseIME}" ;;
     ntn) write_ntn_ps1 "${d}/Install-Ntn.ps1" "$2" "${id:-Notion.ntn}" ;;
     claude-code) write_claude_code_ps1 "${d}/Install-ClaudeCode.ps1" "$2" "${id:-Anthropic.ClaudeCode}" ;;
+    git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
+    gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
+    vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
+    rustup) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Rustlang.Rustup}" ;;
   esac
   if [[ $3 != - ]]; then
     printf '%s\n' "$3" >"${d}/skipped-versions.txt"
@@ -1363,6 +1437,141 @@ else
   ng "claude-code: winget に無い版" "rc=$(rc "${d}")/$(rc "${d2}") $(outerr "${d}") / $(outerr "${d2}")"
 fi
 
+echo "-- bootstrap (git・gh・vs-buildtools・rustup)"
+
+# 2026-11-15 の winget-pkgs と GitHub の release (win/bootstrap/Install-Bootstrap.ps1 の固定した版のまわり)
+pkg=git
+git_winget_now=$(contents_json 2.55.0.5 2.56.0 2.56.0.2 2.56.0.3 2.56.0.4)
+git_winget_next=$(contents_json 2.55.0.5 2.56.0 2.56.0.2 2.56.0.3 2.56.0.4 2.56.1)
+# 固定した版 (winget の最新) の release を 40 日前に出たことにした 1 件と、その前の rc (prerelease)
+git_pin_rel="v2.56.0.windows.4|$(ago 40)"
+git_rc_rel="v2.56.0-rc2.windows.1|$(ago 60)|pre"
+
+# bg1. git: 固定した版が winget の最新で、GitHub の最新も同じ: exit 0。Install-Bootstrap.ps1 の -GitVersion と $gitPackageId を
+#      読み、manifests/g/Git/Git と git-for-windows/git の release を見る。GitHub の最新は winget の版の形 (tag の .windows.4 を
+#      4 つ目の数に) で出す
+d=$(new_case bg1 2.56.0.4 -)
+FAKE_GH_CONTENTS="${git_winget_now}" FAKE_GH_RELEASES=$(plain_releases_json git-for-windows/git "${git_pin_rel}" "${git_rc_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の Git for Windows (winget の Git.Git)' \
+  && seen "${d}" -F 'Install-Bootstrap.ps1 の -GitVersion の既定値' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/g/Git/Git' \
+  && called "${d}" -F 'api repos/git-for-windows/git/releases?per_page=' \
+  && seen_out "${d}" -E '^  GitHub の最新 : 2\.56\.0\.4 \(v2\.56\.0\.windows\.4、出て 40 日\)$'; then
+  ok "git: 固定した版が最新なら exit 0 (-GitVersion と \$gitPackageId を読み、tag の .windows.N を winget の版にして突き合わせる)"
+else
+  ng "git: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# bg2. git: 新しい winget の版 2.56.1 (tag は v2.56.1.windows.1。.windows.1 は 3 つの数) が出て 31 日: exit 1 で release notes の
+#      URL と、上げるなら -GitVersion を変えると出す
+d=$(new_case bg2 2.56.0.4 -)
+FAKE_GH_CONTENTS="${git_winget_next}" FAKE_GH_RELEASES=$(plain_releases_json git-for-windows/git "v2.56.1.windows.1|$(ago 31)" "${git_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 2\.56\.0\.4 より新しい版が winget にある: 2\.56\.1' \
+  && seen "${d}" -F 'https://github.com/git-for-windows/git/releases/tag/v2.56.1.windows.1' \
+  && seen "${d}" -F 'Install-Bootstrap.ps1 の -GitVersion の既定値を変える' \
+  && seen "${d}" -F 'bootstrap の固定した版の新しい版が出たとき'; then
+  ok "git: 新しい winget の版が出て 31 日なら exit 1 で、release notes の URL と -GitVersion を変える手順を出す"
+else
+  ng "git: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# bg3. git: GitHub の v2.56.1.windows.1 がまだ winget に無い: 29 日なら ※ で待つ (鍵は 2.56.1)
+d=$(new_case bg3 2.56.0.4 -)
+FAKE_GH_CONTENTS="${git_winget_now}" FAKE_GH_RELEASES=$(plain_releases_json git-for-windows/git "v2.56.1.windows.1|${at29}" "${git_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" 'GitHub の 2\.56\.1 が winget の Git\.Git にまだ無い.*あと 1 日'; then
+  ok "git: GitHub にあって winget に無い版は、29 日なら ※ で待つ"
+else
+  ng "git: winget に無い版" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# bgh1. gh: 固定した版が winget の最新: exit 0。cli/cli の release を見る
+pkg=gh
+gh_pin_rel="v2.103.3|$(ago 40)"
+d=$(new_case bgh1 2.103.3 -)
+FAKE_GH_CONTENTS=$(contents_json 2.103.1 2.103.2 2.103.3) FAKE_GH_RELEASES=$(plain_releases_json cli/cli "${gh_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の GitHub CLI (winget の GitHub.cli)' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/g/GitHub/cli' \
+  && called "${d}" -F 'api repos/cli/cli/releases?per_page=' \
+  && seen_out "${d}" -E '^  GitHub の最新 : 2\.103\.3 \(v2\.103\.3、出て 40 日\)$'; then
+  ok "gh: 固定した版が最新なら exit 0 (cli/cli の release を見る)"
+else
+  ng "gh: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# bgh2. gh: 新しい 2.104.0 が出て 31 日: exit 1 で、上げるなら -GhVersion を変えると出す
+d=$(new_case bgh2 2.103.3 -)
+FAKE_GH_CONTENTS=$(contents_json 2.103.3 2.104.0) FAKE_GH_RELEASES=$(plain_releases_json cli/cli "v2.104.0|$(ago 31)" "${gh_pin_rel}") run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 2\.103\.3 より新しい版が winget にある: 2\.104\.0' \
+  && seen "${d}" -F 'https://github.com/cli/cli/releases/tag/v2.104.0' && seen "${d}" -F 'の -GhVersion の既定値を変える'; then
+  ok "gh: 新しい版が出て 31 日なら exit 1 で、-GhVersion を変える手順を出す"
+else
+  ng "gh: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# bvs1. vs-buildtools: 新しい版が winget-pkgs に載って 29 日なら exit 0 で待つ。manifests/m/Microsoft/VisualStudio/2022/BuildTools を
+#       見て、GitHub の release は引かない
+pkg=vs-buildtools
+d=$(new_case bvs1 17.14.44 -)
+put_commits "${d}" 17.14.45 "${at29}"
+FAKE_GH_CONTENTS=$(contents_json 17.14.42 17.14.43 17.14.44 17.14.45) run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools)' \
+  && seen "${d}" "17\\.14\\.45.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/VisualStudio/2022/BuildTools' \
+  && ! called "${d}" -F 'releases'; then
+  ok "vs-buildtools: 新しい版が載って 29 日なら exit 0 で待つ (winget-pkgs に載った日で数え、GitHub は引かない)"
+else
+  ng "vs-buildtools: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# bvs2. vs-buildtools: 固定した版が winget-pkgs に無い: 猶予を置かずに exit 1 で、-VsBuildToolsVersion を変えると出す
+d=$(new_case bvs2 17.14.99 -)
+FAKE_GH_CONTENTS=$(contents_json 17.14.43 17.14.44) run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" -F '固定した版 17.14.99 が winget-pkgs に無い。新しいマシンで Install-Bootstrap が入れられない' \
+  && seen "${d}" -F -- '-VsBuildToolsVersion の既定値を変える'; then
+  ok "vs-buildtools: 固定した版が winget に無ければ exit 1 で、-VsBuildToolsVersion を選び直すと出す"
+else
+  ng "vs-buildtools: 固定した版が無い" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# bru1. rustup: 新しい版が載って 31 日: exit 1 で manifest の URL を出す
+pkg=rustup
+d=$(new_case bru1 1.29.3 -)
+put_commits "${d}" 1.29.4 "$(ago 31)"
+FAKE_GH_CONTENTS=$(contents_json 1.29.2 1.29.3 1.29.4) run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 1\.29\.3 より新しい版が winget にある: 1\.29\.4' \
+  && seen "${d}" -F 'https://github.com/microsoft/winget-pkgs/tree/master/manifests/r/Rustlang/Rustup/1.29.4' \
+  && seen "${d}" -F 'の -RustupVersion の既定値を変える'; then
+  ok "rustup: 新しい版が載って 31 日なら exit 1 で、manifest の URL と -RustupVersion を変える手順を出す"
+else
+  ng "rustup: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# bru2. rustup: $rustupPackageId の行が無い: gh を呼ばずに exit 2 で、読む変数の名前を出す
+d=$(new_case bru2 1.29.3 - -)
+FAKE_GH_CONTENTS=$(contents_json 1.29.3) run "${d}" 0
+if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}" && seen "${d}" -F "\$rustupPackageId = '<ID>' の行がありません"; then
+  ok "rustup: パッケージ ID の変数が無ければ、gh を呼ばずに exit 2 (読む変数の名前を出す)"
+else
+  ng "rustup: ID が無い" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# bj1. --json --offline: 4 つとも、固定した版・ID・ps1・見送りの一覧の場所を同じ形で出す (gh を呼ばない)
+okj=1
+for spec in 'git|2.56.0.4|Git.Git|github' 'gh|2.103.3|GitHub.cli|github' 'vs-buildtools|17.14.44|Microsoft.VisualStudio.2022.BuildTools|winget' 'rustup|1.29.3|Rustlang.Rustup|winget'; do
+  IFS='|' read -r pkg pinned id from <<<"${spec}"
+  d=$(new_case "bj1-${pkg}" "${pinned}" -)
+  run_args "${d}" 1 --json --offline "${pkg}" "${d}/Install-Bootstrap.ps1" "${d}/skipped-versions.txt"
+  if ! [[ $(rc "${d}") == 0 ]] || ! jq -e --arg name "${pkg}" --arg pinned "${pinned}" --arg id "${id}" --arg from "${from}" \
+    --arg ps1 "${d}/Install-Bootstrap.ps1" '.name == $name and .pinned == $pinned and .packageId == $id and .pinnedFile == $ps1
+      and .datesFrom == $from and .readmeSection == "bootstrap の固定した版の新しい版が出たとき" and .newer == null' "${d}/out" >/dev/null; then
+    okj=0
+    ng "--json --offline (${pkg})" "rc=$(rc "${d}") $(outerr "${d}")"
+  fi
+done
+if ((okj)); then
+  ok "--json --offline: bootstrap の 4 つも、固定した版・ID・ps1・出た日の取り方を出す"
+fi
+
 echo "-- --json"
 
 # j1. --json (出た日なし): 新しい版を古い順に、見送った版は理由つきで出す。gh は winget-pkgs の一覧の 1 回だけ
@@ -1490,15 +1699,28 @@ for spec in \
   "herdr|win/herdr|${h_pin}|0.9.6" \
   'google-japanese-input|win/google-japanese-input|3.34.6260.0|3.35.6300.0' \
   'ntn|win/ntn|0.23.28|0.23.29' \
-  'claude-code|win/claude-code|2.1.318|2.1.321'; do
+  'claude-code|win/claude-code|2.1.318|2.1.321' \
+  'git|win/bootstrap|2.56.0.4|2.56.1' \
+  'gh|win/bootstrap|2.103.3|2.104.0' \
+  'vs-buildtools|win/bootstrap|17.14.44|17.14.45' \
+  'rustup|win/bootstrap|1.29.3|1.29.4'; do
   IFS='|' read -r pkg dir pinned newer <<<"${spec}"
   d=$(new_case "n3-${pkg}" "${pinned}" "${newer} 試したら設定が読めなかった")
   mkdir -p "${repo}/${dir}"
-  cp "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt" "${repo}/${dir}/"
+  if [[ ${dir} == win/bootstrap ]]; then
+    # bootstrap の 4 つは ps1 を 1 つで持ち、見送りの一覧は名前ごとに skipped-versions/<名前>.txt
+    mkdir -p "${repo}/${dir}/skipped-versions"
+    cp "${d}/Install-Bootstrap.ps1" "${repo}/${dir}/"
+    cp "${d}/skipped-versions.txt" "${repo}/${dir}/skipped-versions/${pkg}.txt"
+  else
+    cp "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt" "${repo}/${dir}/"
+  fi
   case ${pkg} in
     openssh) releases=${releases_now} ;;
     herdr) releases=$(herdr_releases_json 'v0.9.5|2026-10-14T16:07:28Z') ;;
     claude-code) releases=$(claude_releases_json 'v2.1.318|2026-11-04T00:01:03Z') ;;
+    git) releases=$(plain_releases_json git-for-windows/git 'v2.56.0.windows.4|2026-10-26T07:05:26Z') ;;
+    gh) releases=$(plain_releases_json cli/cli 'v2.103.3|2026-10-26T19:20:08Z') ;;
     *) releases='' ;;
   esac
   contents=$(contents_json "${pinned}" "${newer}")

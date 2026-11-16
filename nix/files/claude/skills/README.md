@@ -88,13 +88,26 @@ metadata:
 ---
 ```
 
+話題をまたいで使う skill は、pack の名前を空白で区切って並べ、複数の pack に入れる。先頭が主の pack。
+
+```yaml
+metadata:
+  pjp-pack: notion docs
+```
+
 - pack は `diagram`（図）・`video`（動画）・`notion`（Notion）・`machine`（マシン）・`repo`（repo の手入れ）・
-  `browser`（ブラウザ）・`lang`（言語・道具ごとの好み）。入口は `claude-skills` の `skills/pjp-pack-<pack>/`
-- 書く形は上の 1 通り（`metadata:` の下に字下げした `pjp-pack: <pack>` の 1 行）。bootstrap は yq の無いマシンでも動くよう、
-  この形だけを読む。`check-claude-frontmatter.sh` が、ほかの形と pack の名前でない値を落とす
+  `browser`（ブラウザ）・`lang`（言語・道具ごとの好み）・`docs`（文書。入口はまだ無い）。入口は `claude-skills` の
+  `skills/pjp-pack-<pack>/`
+- 書く形は上の 1 通り（`metadata:` の下に字下げした `pjp-pack: <pack> [<pack>…]` の 1 行）。列（`[notion, docs]`）にせず、
+  同じ名前を 2 度書かない。bootstrap は yq の無いマシンでも動くよう、この形だけを読む。`check-claude-frontmatter.sh` が、
+  ほかの形と pack の名前でない値・重なりを落とす
+- 書いた pack のどれかに入口があれば、一覧で名前だけになる。どの pack にも入口が無い skill は説明つきのまま残る（bootstrap が
+  警告する）
 - どの会話でも要る skill と、入口を通らずに効く必要がある skill（依存を入れる前に読む `pjp-dep-release-age`、PR を作る前に
   読む `pjp-gh-pr-create` など）には書かない
-- pack に skill を足したら、入口の目録（`claude-skills` の `pjp-pack-<pack>`）にも載せる
+- pack に skill を足したら、書いた pack の入口すべての目録（`claude-skills` の `pjp-pack-<pack>`）に載せる。主の pack の入口には
+  全部（いつ使うか・使い分け・中身・呼び方・置き場所）を書き、ほかの入口には、その pack から見た使いどころと主の入口への
+  案内だけを書く
 - pack を足すなら、`claude-skills` の入口と `scripts/lint.sh`、この repo の `check-claude-frontmatter.sh` の `packs` を一緒に直す
 
 ## repo の `.claude/skills/` との違い
@@ -221,6 +234,12 @@ nixpkgs のパッケージが同梱している skill（`installAgentSkills` が
 - 名前は upstream のまま。`pjp-` は自作の印なので付けない
 - 張る元が無くても home-manager は切れた symlink を黙って作る。在ることは
   `nix/tests/claude-herdr-skill.nix`（flake の checks）で確かめる
+
+skill を同梱せず、CLI が手引きを出すだけのパッケージ（今は herdr-core の `hc --skill`）は、
+`nix/pkgs/<パッケージ>/` に置いた derivation が build の中でその手引きに frontmatter を足した `SKILL.md` を作り、
+`claude.nix` が `~/.claude/skills/<CLI の名前>` へ張る（`nix/pkgs/herdr-core/claude-skill.nix`。frontmatter は隣の
+`claude-skill-head.md`）。同梱の skill と同じく、版は CLI と揃い、名前は CLI の名前のまま。確かめるのは
+`nix/tests/claude-hc-skill.nix`
 
 ## 配置後の構造
 

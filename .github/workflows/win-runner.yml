@@ -1,0 +1,78 @@
+name: win-runner
+
+# Windows 側の runner (win/runner/。Rust の dotfiles-win) を、Linux と Windows の両方で確かめる (dotfiles-private の
+# docs/adr/060_win_runner_core_*)。
+#
+# - Linux: Nix も入れて、runner の manifest の読み方を WSL が使う nix/lib/windows-files.nix (nix-instantiate) と突き合わせる
+#   (tests/manifest_parity.rs。DOTFILES_WIN_NIX_PARITY=1 で、nix-instantiate が無ければ飛ばさずに落ちる)。fmt もここだけ
+# - Windows: MSVC (windows-latest の既定の host。bootstrap が入れるのと同じ) で、Windows のパスと外のコマンド (PowerShell・hostname・git)
+#   の口を確かめる
+#
+# runner は win/ のファイル (manifest.toml とその src・Install-*.ps1・groups.json)・nix/lib/windows-files.nix・WSL の手順の一覧
+# (nix/scripts/bootstrap-windows-*.sh。手順の id を突き合わせる) を読むので、それらを変えた PR でも流す。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "win/**"
+      - "nix/lib/windows-files.nix"
+      - "nix/scripts/bootstrap-windows-*.sh"
+      - ".github/workflows/win-runner.yml"
+  pull_request:
+    paths:
+      - "win/**"
+      - "nix/lib/windows-files.nix"
+      - "nix/scripts/bootstrap-windows-*.sh"
+      - ".github/workflows/win-runner.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux
+            os: ubuntu-latest
+          # GNU の host は使わない (bootstrap が入れるのは MSVC。dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 D)
+          - name: windows (msvc)
+            os: windows-latest
+    runs-on: ${{ matrix.os }}
+    # 固まったジョブが分を食いつぶさないようにする (既定は 360 分)
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: win/runner
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # manifest の読み方を nix-instantiate と突き合わせるため (Linux だけ)
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+        if: runner.os == 'Linux'
+
+      # 版と components (rustfmt・clippy) は rust-toolchain.toml から rustup が入れる
+      - name: toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: fmt
+        if: runner.os == 'Linux'
+        run: cargo fmt --check
+
+      - name: clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      # 1 つの test の束が落ちても、残りの束も流す (Windows の落ち方は手元で流せないので、1 回の run で全部を見る)
+      - name: test
+        env:
+          DOTFILES_WIN_NIX_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
+        run: cargo test --locked --no-fail-fast

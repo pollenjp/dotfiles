@@ -3,10 +3,18 @@
 Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しにコピーして配る
 (経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
 
+新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
+(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは今までどおり
+WSL が配り、runner は確かめるだけ (経緯は
+[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
+
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
+| `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
+| `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -30,9 +38,253 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 
+## bootstrap (新しい Windows で最初に流す)
+
+新しい Windows で最初に流す PowerShell の script (`bootstrap/Install-Bootstrap.ps1`)。Rust の runner を動かせるところまで (Git for Windows・
+GitHub CLI・Visual Studio Build Tools・rustup と、dotfiles・dotfiles-private・claude-skills の clone) を揃える。WSL は要らない。Windows の
+環境を Windows 側の runner で作る最初の段で、その後は runner (`runner/`。[後述](#runner-windows-の側で確かめて揃える)) が受け持つ。ホストごとに
+受け持ちを runner に切り替えるまで、Windows のアプリと設定を配るのは今までどおり WSL の setup ([配る](#配る))。経緯は
+[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md)
+(ADR 010 の前提「WSL のある Windows だけ」を改めた)。
+
+- 対象は設定グループ personal の Windows (ハブにする PC)。個人の gh のアカウントでログインして private な repo を取るので、自社・客先の
+  Windows では流さない
+- 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
+  権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る
+- 対象の CPU は x64 だけ (ARM64 の Windows は今は対象外)
+
+### bootstrap を流す
+
+新しい Windows (git が無い) では、Windows PowerShell でファイルに落としてから流す (`irm … | iex` にしない。読んでから流せるように):
+
+```powershell
+$f = Join-Path $env:TEMP 'Install-Bootstrap.ps1'
+Invoke-WebRequest -UseBasicParsing -OutFile $f https://raw.githubusercontent.com/pollenjp/dotfiles/main/win/bootstrap/Install-Bootstrap.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File $f -Check   # 何も変えずに状態を出す
+powershell -NoProfile -ExecutionPolicy Bypass -File $f          # 揃える
+```
+
+clone した後は、clone の中のものを流す (冪等。揃っていれば何もしない):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\ghq\github.com\pollenjp\dotfiles\win\bootstrap\Install-Bootstrap.ps1 -Check
+```
+
+| 終了コード | 意味 |
+| --- | --- |
+| 0 | 直すことが無い |
+| 3 | 入っていない・無いものだけ (引数なしで流せば揃う。締めの行は「入っていない・無いものがある → 引数なしで流すと揃える」) |
+| 1 | ほかに直すことがある (表の ⚠ の行を見る)。足りない・ずれているもの (pin・Build Tools の部品・rustup の設定と既定の host・gh のログイン) は引数なしで流せば直り (締めの行は「足りないもの・ずれているものがある → 引数なしで流すと直す」)、bootstrap では直らない差は ※ の手順で直す。Ctrl+C で止めた・揃えきれなかったときも |
+| 2 | winget が無い (Microsoft Store の「アプリ インストーラー」を入れる)・思わぬ例外 |
+
+- 道具を入れるときの UAC で「はい」を押さない・installer の窓を閉じると、その道具は入らず「インストーラーが取り消された」と出て、
+  締めの表の ⚠ とともに終了コード 1 で終わる。流し直すと、もう一度入れる
+
+### bootstrap がすること
+
+1. 最初に Smart App Control (SAC) を確かめる (`-Check` でも)。オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。
+   オンだと cargo が作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (Windows セキュリティ →
+   アプリとブラウザーの制御 → スマート アプリ コントロールの設定。Windows によっては戻すのに再インストールが要る)。script は SAC を変えない
+2. 道具を固定した版で入れ、winget の pin を足す (この順。rustup-init が MSVC を見るので、Build Tools を rustup より先に入れる):
+
+   | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
+   | --- | --- | --- | --- |
+   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
+   | GitHub CLI | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
+   | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
+   | rustup | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
+
+   Rust は MSVC の host (`x86_64-pc-windows-msvc`) を使う。GNU の host (`x86_64-pc-windows-gnu`) にしないのは、`windows-sys` 0.61 が使う
+   `windows-link` の `raw-dylib` の build に MinGW の `dlltool` と `as` が要り、GNU の toolchain に同梱の `dlltool` だけでは import library を
+   作れないため (`windows-latest` の GitHub Actions は MinGW が入っているので通る)。
+   - 入っている Build Tools に足りないもの (ワークロード・MSVC・SDK) があれば、Visual Studio Installer で足す (UAC と進み具合の窓)。Windows SDK は
+     10 か 11 のどれかがあれば足りたことにする
+   - 入っている rustup の既定の host (`rustup show` の `Default host`) が MSVC でなければ (GNU にしていた Windows など)、
+     `rustup set default-host x86_64-pc-windows-msvc` で直す。入っている toolchain には触らない (GNU の toolchain が残っていて要らなければ
+     `rustup toolchain list` で見て `rustup toolchain uninstall <名前>` で外す)
+3. gh が github.com にログインしていなければ `gh auth login --hostname github.com --web --clipboard --git-protocol ssh --skip-ssh-key` を流す
+   (一回限りのコードは gh がクリップボードに入れるので、Enter で開いたブラウザーに貼り付けて認める)。`--git-protocol ssh` にするのは、gh に
+   `~/.gitconfig` の credential helper を書かせないため
+   - コードを写そうとして Ctrl+C を押すと gh が止まる。そのときも bootstrap は止まらずに読み直しと締めの表まで出し、clone はせずに終了コード
+     1 で終える (流し直すと、ログインからやり直す)。ログインのほかの所で Ctrl+C を押したときは、止めたことを 1 行出して終了コード 1 で終える
+4. 無い repo を `%USERPROFILE%\ghq\github.com\pollenjp\` に clone する (dotfiles・dotfiles-private・claude-skills。ghq の既定の root)
+   - gh の資格情報で HTTPS を通す組 (`nix/pkgs/git-gh` と同じ) を、clone のときだけ `-c` で渡す。origin は WSL と同じ ssh の URL
+     (`git@github.com:pollenjp/<repo>.git`) のまま。`~/.gitconfig` は書かない
+   - `core.autocrlf=false` をその repo に書く。Git for Windows の既定 (`true`) のままだと LF が CRLF で取り出され、WSL が配ったものと
+     バイト列がずれる
+   - あるディレクトリと clone には触らない (取得もしない)。git の repo でない・origin が別の repo・`core.autocrlf` が `true` なら ⚠ で
+     知らせる (退けて流し直すと clone し直す)
+
+- 入っている道具の版が固定した版と違っても揃えない (⚠ と、手で揃える手順の ※ を出す。下の「版のずれを手で揃える」)
+- 見るのは固定した版の置き場所だけ。別の形で入っているもの (user の scope の Git・zip の gh・Visual Studio の Community や 2026) があっても、
+  固定した版を並べて入れる。どちらが使われるかは PATH の順や rustc の探し方で決まるので、気になれば別の形のものを外す
+- Git for Windows を入れると、Windows の Claude Code が Git Bash を見つけて使えるようになる
+
+### 版のずれを手で揃える
+
+固定した版を上げた PR が merge された後、入っている Windows では `-Check` が版のずれを ⚠ で出す (runner の `dotfiles check` も、bootstrap の
+手順の行で同じずれを出す)。揃えるのは Rust の runner の受け持ちだが、今の runner は見せるだけで揃える手順はまだ無いので、それまでは手で
+揃える。pin があっても、名指しの upgrade は通る:
+
+```powershell
+winget upgrade --id Git.Git --exact --version <版>
+winget upgrade --id GitHub.cli --exact --version <版>
+winget upgrade --id Microsoft.VisualStudio.2022.BuildTools --exact --version <版>   # UAC が出る
+winget upgrade --id Rustlang.Rustup --exact --version <版> --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"
+```
+
+- 下げるときは `winget uninstall --id <ID>` の後に bootstrap を流し直す (固定した版で入れ直す)
+- Git・gh は、使っているプロセス (Git Bash・Windows の Claude Code の会話など) を閉じてから
+
+### bootstrap の固定した版の新しい版が出たとき
+
+4 つの版も、ほかの Windows のアプリと同じく新しい版の知らせに乗る ([winget の新しい版を確かめる](#winget-の新しい版を確かめる)・
+[固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ))。setup の手順 97 の知らせは、Windows の ghq に dotfiles の clone がある
+(bootstrap を流した) マシンでだけ出る。
+
+- 出た日は、`git` が GitHub (`git-for-windows/git`) の release (tag `v<X.Y.Z>.windows.<N>` を winget の版 `X.Y.Z` (N が 1) か `X.Y.Z.N` に
+  突き合わせる)、`gh` が GitHub (`cli/cli`) の release、`vs-buildtools`・`rustup` が winget-pkgs に載った日
+- 上げるとき: release notes を読み、`bootstrap/Install-Bootstrap.ps1` の名前ごとの param の既定値と、上の道具の表の版を新しい版にし、
+  `Install-Bootstrap.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)。Build Tools はワークロードと
+  部品の ID (`Workload.VCTools`・`VC.Tools.x86.x64`・`Windows11SDK.26100`) が残っているか、rustup は `--default-host`・
+  `--default-toolchain none` と自己更新の止めが効くかも見る
+- 見送るとき: `bootstrap/skipped-versions/<名前>.txt` に「版 理由」を 1 行足して commit する
+
+### Install-Bootstrap.ps1 を書くときの注意
+
+- BOM 付きの UTF-8 で保存する。新しい Windows には Windows PowerShell 5.1 しか無いので、PowerShell 7 にしか無い書き方 (`??`・`?.`・
+  三項演算子・`&&`・`||`・`-AsHashtable`・3 引数の `Join-Path`) を使わない (`Install-Bootstrap.Tests.ps1` が見る)
+- 固定した版は param の既定値 (`[string]$GitVersion = '<版>'` の形の行)、パッケージ ID は 1 行ずつの変数 (`$gitPackageId = '<ID>'`)。
+  `nix/scripts/check-winget-version.sh` がこの行を読む
+- 副作用の無い関数と、Windows に触る関数を偽物に差し替えた流れは `bootstrap/Install-Bootstrap.Tests.ps1` で確かめる (Linux の pwsh。
+  [PowerShell のテスト](#powershell-のテスト))。winget・UAC・vswhere・gh のログイン・clone の本物の動きは、Windows の実機で `-Check` と
+  本番を打って確かめる
+
+## runner (Windows の側で確かめて揃える)
+
+`runner/` は Windows の側から Windows の環境を作る Rust の runner (`dotfiles-win`)。WSL の setup の Windows の手順
+(`nix/scripts/bootstrap-windows-*.sh`。order 90〜99) を 1 つずつ写したもので、判定と文言をそろえている。経緯は
+[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) §2 H・I と
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
+
+- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは今までどおり WSL の setup が配り
+  ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と同じ判定を出すかを突き合わせられる)
+- 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
+  (`powershell/dotfiles.ps1`) が `win\runner` に入って `cargo run --quiet --release --locked` を打つ (rustup は `rust-toolchain.toml` を今の
+  ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く
+
+### runner を流す
+
+```powershell
+dotfiles list                          # 手順と、このホストでの on/off・runner に移したか
+dotfiles check                         # 手順を順に確かめる (何も書かない)
+dotfiles check --steps files,ntn       # 手順を id で絞る (PowerShell が配列にした files,ntn は dotfiles 関数が , でつなぎ直す)
+dotfiles apply --dry-run               # apply がすることを出す (何も書かない。受け持ちによらず流せる)
+dotfiles apply                         # 揃える (このホストの [runner] enable = true のときだけ。でなければ止まって 1)
+dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
+dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
+```
+
+- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = runner にまだ無い) と、種類ごとの締めの行を出す
+- 終了コードは bootstrap と同じ: 0 = 直すことが無い・3 = 入っていない・無いものだけ (apply で揃う)・1 = ほかに直すことがある (足りない・
+  ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
+  環境変数が無い)
+- 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
+- 受け持ちが WSL のホストでは apply は止まるので、締めの行の「dotfiles apply で揃える」の下に、WSL の `~/dotfiles/setup --update` で揃える道を添える
+  (files の衝突の解き方も、WSL の `bootstrap-windows-files.sh --force` を出す)
+
+### ホストの値
+
+dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml` (`<PC の名前>` は `hostname` を小文字にしたもの。pjp-raiden なら
+`polle@pjp-raiden.toml`)。WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。
+
+```toml
+group = "personal"            # personal (既定)・company・client (nix/README.md の「設定グループ」)
+
+[tools]                       # 道具の switch の上書き。書かなければグループの既定 (runner/groups.json)
+windowsTypeClipboard = true
+
+[runner]
+enable = false                # 受け持ちの印。true で apply を許す
+```
+
+- 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
+  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`)。知らないキー・名前は runner が止める (終了コード 2)
+- dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
+  を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
+- ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
+- `runner/groups.json` は生成物 (グループごとの道具の既定。Nix がグループごとの素のホストの `group.json` を集める)。`nix/lib/groups.nix` や
+  option の既定を変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
+  CI の `lint` が落ちる)
+
+### 受け持ちを runner に切り替える
+
+ホストごとに、dotfiles-private の同じ PR で 2 つを変える (同じものを WSL と Windows の両方が配らないように):
+
+1. そのホストの Nix の値 (`nix/hosts/<user>@<hostname>.nix`) を `wsl.windowsFiles.enable = false` にする (WSL が Windows に触らない)
+2. Windows のホストの値を `[runner] enable = true` にする (runner の apply を許す)
+
+- 切り替える前に `dotfiles check` を流し、runner にまだ無い手順 (下の表の「まだ」) をどうするかを決める。切り替えたホストでは、まだ無い手順は
+  誰も流さないので ⚠ (runner では直らない差) になる
+- 初めて apply するときは記録が無いので、中身が repo と同じファイルは「同じ」(記録だけ作る) になる。WSL と Windows の clone を同じ commit に
+  しておく。違う中身は「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら)と同じ解き方。PowerShell では `Copy-Item` か `--force`)
+- WSL の無い Windows は、はじめから 2 だけを書く
+
+### runner の手順
+
+| order | id | すること | on/off | runner |
+| --- | --- | --- | --- | --- |
+| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る |
+| 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
+| 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
+| 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
+| 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
+| 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 95 | `powershell-profile` | `$PROFILE` から `dotfiles.ps1` を読ませる | | まだ |
+| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
+| 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
+| 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
+| 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
+| 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
+| 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
+| 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
+| 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
+
+- ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
+  引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
+  `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
+- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
+  時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
+- WSL にしか無い 9 手順は、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
+  fancyzones → international → google-ime → pin-updates)
+
+### runner の手順を足す
+
+1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
+   コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
+   `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
+2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
+   足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
+3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
+4. この節の表に行を足す
+
+### runner を直すとき
+
+- `win/runner` で `cargo fmt`・`cargo clippy --all-targets -- -D warnings`・`cargo test`。CI
+  ([`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml)) は Linux と `windows-latest` (MSVC) で流し、Linux では manifest の
+  読み方を `nix-instantiate` (`nix/lib/windows-files.nix`) と突き合わせる (`DOTFILES_WIN_NIX_PARITY=1`。手元でも nix-instantiate があれば流れる)
+- WSL や Linux で build するには C のリンカ (`cc`) が要る。無ければ flake の nixpkgs の gcc を借りる:
+  `nix shell --inputs-from ../../nix nixpkgs#gcc --command cargo test`
+- toolchain は `runner/rust-toolchain.toml` (1.99.1。claude-skills と同じ)、crate は `toml`・`serde_json`・`sha2` だけ。版は公開から 7 日以上
+  たったものにする (`Cargo.lock` の間接の依存も。cargo には猶予の設定が無いので、作り直したら crates.io の公開日時を見て、新しすぎる版は
+  `cargo update -p <名前> --precise <前の版>` で下げる)。C のコンパイラが要る crate と HTTP の crate は足さない
+- `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
+
 ## 配る
 
-WSL で流す。`home-manager switch` だけでは Windows 側に届かない。
+WSL で流す。`home-manager switch` だけでは Windows 側に届かない。runner の `dotfiles check --steps files` は、同じ判定を Windows の側で出す
+([runner](#runner-windows-の側で確かめて揃える))。
 
 ```sh
 ~/dotfiles/setup --update                          # switch + bootstrap をまとめて
@@ -98,7 +350,8 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) は、新しい版が出ると `setup --update` が
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) は、新しい版が出ると `setup --update` が
 短く知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)。上げるかは Claude Code に聞かれて決める)。
 それとは別に、流さない間も気付けるよう、GitHub Actions の
 `winget-versions` ([`.github/workflows/winget-versions.yml`](../.github/workflows/winget-versions.yml)) が
@@ -114,8 +367,13 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `google-japanese-input` | `google-japanese-input/Install-GoogleJapaneseInput.ps1`・`google-japanese-input/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い) | [Google 日本語入力の新しい版が出たとき](#google-日本語入力の新しい版が出たとき) |
 | `ntn` | `ntn/Install-Ntn.ps1`・`ntn/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い。配布物は ntn.dev) | [ntn の新しい版が出たとき](#ntn-の新しい版が出たとき) |
 | `claude-code` | `claude-code/Install-ClaudeCode.ps1`・`claude-code/skipped-versions.txt` | GitHub の release (`anthropics/claude-code` の `vX.Y.Z`) が出た日 | [Claude Code の新しい版が出たとき](#claude-code-の新しい版が出たとき) |
+| `git` | `bootstrap/Install-Bootstrap.ps1` の `-GitVersion`・`bootstrap/skipped-versions/git.txt` | GitHub の release (`git-for-windows/git` の `v<X.Y.Z>.windows.<N>`。winget の版は N が 1 なら `X.Y.Z`、ほかは `X.Y.Z.N`) が出た日 | [bootstrap の固定した版の新しい版が出たとき](#bootstrap-の固定した版の新しい版が出たとき) |
+| `gh` | `bootstrap/Install-Bootstrap.ps1` の `-GhVersion`・`bootstrap/skipped-versions/gh.txt` | GitHub の release (`cli/cli` の `vX.Y.Z`) が出た日 | 同じ |
+| `vs-buildtools` | `bootstrap/Install-Bootstrap.ps1` の `-VsBuildToolsVersion`・`bootstrap/skipped-versions/vs-buildtools.txt` | winget-pkgs に載った日 (GitHub の release が無い) | 同じ |
+| `rustup` | `bootstrap/Install-Bootstrap.ps1` の `-RustupVersion`・`bootstrap/skipped-versions/rustup.txt` | winget-pkgs に載った日 (tag だけで GitHub の release を出さない) | 同じ |
 
-- 確かめるのは `nix/scripts/check-winget-version.sh <名前>`。ps1 から固定した版とパッケージ ID (`$packageId`) を読み、
+- 確かめるのは `nix/scripts/check-winget-version.sh <名前>`。ps1 から固定した版とパッケージ ID (`$packageId`。bootstrap の 4 つは
+  名前ごとの param (`-GitVersion` など) と ID の変数 (`$gitPackageId` など)) を読み、
   winget-pkgs (`manifests/<頭文字>/<ID の . を / に>/<版>/`) と、出た日を引く先を GitHub API で読むので、
   Windows は要らない。手元で打つなら gh のログインが要る:
 
@@ -132,7 +390,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 - 猶予がたって落ちる (exit 1) のは:
   - 固定した版より新しい版が winget にある (見送りの一覧に無いもの) → 名前ごとの手順で、上げるか見送るかを決める。
     出た日が分からない (合う release や commit が無い) ときは、待たずに落ちる
-  - GitHub に出た版が winget のこのパッケージに無い (OpenSSH・herdr・Claude Code だけ。パッケージ ID が移ると、古い ID には
+  - GitHub に出た版が winget のこのパッケージに無い (OpenSSH・herdr・Claude Code・git・gh だけ。パッケージ ID が移ると、古い ID には
     新しい版が来ない) → 下の「パッケージ ID を確かめる」
 - 猶予を置かずに落ちる (exit 1) のは、新しい版の知らせではなく、壊れていることの知らせ:
   - 固定した版が winget に無い (新しいマシンで入れられない) → winget にある版を選び直す
@@ -140,7 +398,8 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
     → 下の「パッケージ ID を確かめる」
   - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
     ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`) で今のパッケージ ID を
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Git.Git`・`GitHub.cli`・
+  `BuildTools`・`Rustup`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
 - 確かめられずに落ちる (exit 2) のは、GitHub API の失敗・ps1 から版か ID が読めない・見送りの一覧の書き損じ。
@@ -169,10 +428,12 @@ Windows に固定した版で入れているものに新しい版が出たら、
 | --- | --- | --- | --- |
 | `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
+| `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion` など) の既定値 | `nix/scripts/check-winget-version.sh --json` (出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/bootstrap/skipped-versions/<名前>.txt` (「版 理由」) |
 
 - 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も) は、
-  入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`) でだけ確かめる。下の
-  `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
+  入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`) でだけ確かめる。bootstrap の
+  4 つ (git・gh・vs-buildtools・rustup) は、Windows の ghq に dotfiles の clone がある (`<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git`
+  がある。bootstrap を流した) マシンでだけ確かめる。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
   1 行だけ (警告のまとめには載らない)
 - setup では出た日を引かない (GitHub API を名前ごとに 1〜2 回。合わせて数秒)。gh のログインが要る

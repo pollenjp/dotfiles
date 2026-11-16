@@ -1,0 +1,8 @@
+# Windows 側の runner の toolchain。rustup は今のディレクトリからこのファイルを探すので、dotfiles 関数 (win/powershell/dotfiles.ps1) は
+# win/runner に入ってから cargo を打つ (bootstrap は既定の toolchain を入れないので、ここで決めた版を rustup がその場で入れる)。
+# CI も rustup でこの版を入れる。版を上げるときは、公開から 7 日以上たった stable にする (pjp-dep-release-age。1.99.1 は
+# 2026-10-15 の公開。claude-skills の rust-toolchain.toml と同じ版)。
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

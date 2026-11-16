@@ -31,6 +31,8 @@
 #     - ほかの会話の end・approved・failed では何も出さない。同じ end は 2 回目に出さない (見た印)
 #     - subagent (入力に agent_id) では、問いを出させず報告に書かせる
 #     - herdr の workspace に子の印 (token parent) があれば、AskUserQuestion を使わずに問いを書くと言い切る
+#     - hc の端末 (HC_TERMINAL_ID がある) では、hc get <端末> --json に親の端末か label pjp.role=child があれば hc の子の決まりを
+#       言い切り、どちらも無ければ条件つきで書く。どちらでも、漏れた HERDR_ENV があっても herdr を呼ばない
 #
 # ## 作り
 #
@@ -67,6 +69,8 @@ EOF
 } >"${work}/bin/herdr"
 chmod +x "${work}/bin/herdr"
 export PATH=${work}/bin:${PATH}
+# 手元 (hc の端末の中の Claude の会話) で流しても同じになるよう、hc の端末の印を外す (hc のケースは最後に足す)
+unset HC_TERMINAL_ID
 
 pass=0
 fail=0
@@ -319,6 +323,58 @@ if [[ $(context) == *"この pane は herdr の指揮役の子"* && $(context) =
   ok "herdr の子の印があれば、AskUserQuestion を使わずに問いを書くと言い切る"
 else
   ng "herdr の子の印があれば、AskUserQuestion を使わずに問いを書くと言い切る" "$(detail)"
+fi
+
+# hc (herdr-core) の端末 (HC_TERMINAL_ID がある): hc get <端末> --json の親の端末か label pjp.role=child で見分け、HERDR_ENV が
+# 漏れていても herdr を呼ばない。偽の hc は get に FAKE_HC_JSON を返し、偽の herdr (子の印のある workspace を返す) は呼ばれた
+# ことを herdr.calls に残す。どちらも PATH の先頭の dir に置く
+mkdir -p "${work}/bin-hc"
+{
+  printf '#!%s\n' "${BASH}"
+  cat <<'EOF'
+if [[ $1 == get && $3 == --json ]]; then
+  printf '%s\n' "${FAKE_HC_JSON:-{\}}"
+  exit 0
+fi
+exit 1
+EOF
+} >"${work}/bin-hc/hc"
+{
+  printf '#!%s\n' "${BASH}"
+  printf 'echo "$*" >>%q\n' "${work}/herdr.calls"
+  printf '%s\n' "echo '{\"result\":{\"workspace\":{\"label\":\"🌱 dotfiles: op\",\"tokens\":{\"parent\":\"↑ TKT-1\"}}}}'"
+} >"${work}/bin-hc/herdr"
+chmod +x "${work}/bin-hc/hc" "${work}/bin-hc/herdr"
+# hc_case <id> <epoch> <hc get の JSON>: この会話の denied を記録に置き、hc の端末の env (漏れた HERDR_* も) で PostToolUse を流す
+hc_case() {
+  local saved_path=${PATH}
+  reset_log
+  put_call "$1" s1 denied "$2"
+  : >"${work}/herdr.calls"
+  export PATH="${work}/bin-hc:${PATH}" HC_TERMINAL_ID=t1h HERDR_ENV=1 HERDR_WORKSPACE_ID=wX FAKE_HC_JSON="$3"
+  post PostToolUse
+  export PATH="${saved_path}"
+  unset HC_TERMINAL_ID HERDR_ENV HERDR_WORKSPACE_ID FAKE_HC_JSON
+}
+hc_case f 6000 '{"address":"t1h","name":"dotfiles-x","parent":"e56d/t8","labels":{"herdr.space":"sp1"}}'
+if [[ $(context) == *"この端末は hc の指揮役の子"* && $(context) == *"AskUserQuestion を使わず"* && ! -s ${work}/herdr.calls ]]; then
+  ok "hc の端末で親の端末がいれば、herdr を呼ばずに hc の子の決まりを言い切る"
+else
+  ng "hc の端末で親の端末がいれば、herdr を呼ばずに hc の子の決まりを言い切る" "$(detail) herdr=$(cat "${work}/herdr.calls")"
+fi
+hc_case g 7000 '{"address":"t1h","parent":null,"labels":{"pjp.role":"child"}}'
+if [[ $(context) == *"この端末は hc の指揮役の子"* && ! -s ${work}/herdr.calls ]]; then
+  ok "hc の端末で label pjp.role=child なら、親が無くても hc の子の決まりを言い切る"
+else
+  ng "hc の端末で label pjp.role=child なら、親が無くても hc の子の決まりを言い切る" "$(detail) herdr=$(cat "${work}/herdr.calls")"
+fi
+hc_case h 8000 '{"address":"t1h","parent":null,"labels":{"pjp.role":"hub"}}'
+ctx=$(context)
+if [[ ${ctx} == *"herdr や hc の指揮役から依頼を受けて動いている子は"* && ${ctx} != *"指揮役の子 ("* && ! -s ${work}/herdr.calls ]]; then
+  ok "hc の端末で親も label pjp.role=child も無ければ、漏れた HERDR_ENV の workspace に子の印があっても herdr を呼ばず、条件つきで書く"
+else
+  ng "hc の端末で親も label pjp.role=child も無ければ、漏れた HERDR_ENV の workspace に子の印があっても herdr を呼ばず、条件つきで書く" \
+    "$(detail) herdr=$(cat "${work}/herdr.calls")"
 fi
 
 echo

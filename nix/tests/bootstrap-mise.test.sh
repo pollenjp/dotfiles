@@ -55,6 +55,10 @@
 #   - ヘッダの `# mise-tools:` (setup.sh が読み、残りの手作業の手順 5 で「setup が書く名前」として数えない) に、
 #     mise use -g で ~/.config/mise/config.toml の [tools] に書く名前 (版を除く) を過不足なく並べている。足りないと
 #     手順 5 が setup の書いた名前を手で消すよう出し、余ると setup が書かなくなった名前の残りを見逃す
+#   - group.json の tools.claudePrivateSkills が false でなければ (無い前の世代も)、rust を遅延の env なしの mise use -g rust で
+#     入れ、idiomatic_version_file_enable_tools に rust が無ければ mise settings add で足す (あれば足さず、もうあると出す)。
+#     false なら rust の mise を打たず「入れない」と出し、[tools] に前の rust が残っていれば外すコマンド (mise unuse -g rust) を
+#     1 行出す (警告にしない・config.toml を書き換えない)。mise use -g rust や settings add が落ちても、警告して最後まで流れる
 #
 # 偽の mise は、受けた env の MISE_MINIMUM_RELEASE_AGE と引数を「<env>|<引数>」の形で $HOME/mise.log に 1 行ずつ残す。
 # FAKE_MISE_FAIL に引数の並び (例: install cursor-agent) を渡すと、その呼び出しだけ exit 1 で落ちる。latest cursor-agent
@@ -137,6 +141,7 @@ if [[ -n ${FAKE_MISE_FAIL-} && $* == "${FAKE_MISE_FAIL}" ]]; then
 fi
 case "$*" in
   'config ls'*) echo '{}' ;;
+  'settings get idiomatic_version_file_enable_tools') printf '%s\n' "${FAKE_MISE_IDIOMATIC-[]}" ;;
   'latest cursor-agent')
     if [[ -n ${FAKE_MISE_LATEST-} ]]; then printf '%s\n' "${FAKE_MISE_LATEST}"; fi
     ;;
@@ -153,13 +158,14 @@ EOF
 
 # $1: HOME、$2: 今 (ISO 8601 の UTC)、$3: 偽の mise の後ろに続ける PATH (省けば今の PATH)。
 # ケースの checkout の script を流す。setup から走るときと同じく、警告のまとめ用のファイルを渡す。
-# 呼ぶ側の FAKE_MISE_FAIL・FAKE_MISE_LATEST・FAKE_MISE_INSTALLED は偽の mise へ渡す
+# 呼ぶ側の FAKE_MISE_FAIL・FAKE_MISE_LATEST・FAKE_MISE_INSTALLED・FAKE_MISE_IDIOMATIC は偽の mise へ渡す
 run() {
   local h=$1 now
   now=$(at "$2")
   env -u MISE_MINIMUM_RELEASE_AGE HOME="${h}" XDG_CONFIG_HOME="${h}/.config" PATH="${h}/bin:${3:-${PATH}}" \
     BOOTSTRAP_MISE_NOW="${now}" DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_MISE_FAIL="${FAKE_MISE_FAIL-}" \
     FAKE_MISE_LATEST="${FAKE_MISE_LATEST-${latest_default}}" FAKE_MISE_INSTALLED="${FAKE_MISE_INSTALLED-}" \
+    FAKE_MISE_IDIOMATIC="${FAKE_MISE_IDIOMATIC-[]}" \
     "${BASH}" "${h}/repo/nix/scripts/bootstrap-mise.sh" >"${h}/out" 2>"${h}/err"
   echo $? >"${h}/rc"
 }
@@ -673,6 +679,58 @@ if finished "${h}" && ! grep -Fq -- 'claude' "${h}/mise.log" && others_plain "${
 else
   ng "group.json の tools.claude" "$(detail "${h}") / $(detail "${h2}")"
 fi
+
+# 13. rust (rustup): group.json の tools.claudePrivateSkills が false でなければ入れ、idiomatic_version_file_enable_tools に rust を足す
+h=$(new_home rust-default "$(state 9d)")
+run "${h}" 2026-10-22T03:00:00Z
+if finished "${h}" && grep -Fxq -- '|use -g rust' "${h}/mise.log" \
+  && grep -Fxq -- '|settings add idiomatic_version_file_enable_tools rust' "${h}/mise.log" && no_warning "${h}"; then
+  ok "group.json が無ければ (前の世代)、rust を遅延の env なしで入れ、idiomatic_version_file_enable_tools に rust を足す"
+else
+  ng "rust: group.json が無い" "$(detail "${h}")"
+fi
+
+h=$(new_home rust-on "$(state 9d)")
+printf '%s\n' '{"group":"personal","tools":{"claude":true,"claudePrivateSkills":true},"version":1}' \
+  >"${h}/.local/state/dotfiles/group.json"
+FAKE_MISE_IDIOMATIC='["node","rust"]' run "${h}" 2026-10-22T03:00:00Z
+if finished "${h}" && grep -Fxq -- '|use -g rust' "${h}/mise.log" \
+  && ! grep -Fq -- 'settings add idiomatic_version_file_enable_tools' "${h}/mise.log" \
+  && grep -Fq 'idiomatic_version_file_enable_tools に rust はもうある' "${h}/out" && no_warning "${h}"; then
+  ok "tools.claudePrivateSkills が true で、idiomatic_version_file_enable_tools に rust がもうあれば、足さずに rust を入れる"
+else
+  ng "rust: on・idiomatic あり" "$(detail "${h}")"
+fi
+
+h=$(new_home rust-off "$(state 9d)")
+printf '%s\n' '{"group":"company","tools":{"claude":true,"claudePrivateSkills":false},"version":1}' \
+  >"${h}/.local/state/dotfiles/group.json"
+mkdir -p "${h}/.config/mise"
+printf '[tools]\nrust = "latest"\ngo = "latest"\n' >"${h}/.config/mise/config.toml"
+run "${h}" 2026-10-22T03:00:00Z
+h2=$(new_home rust-off-clean "$(state 9d)")
+printf '%s\n' '{"group":"company","tools":{"claude":true,"claudePrivateSkills":false},"version":1}' \
+  >"${h2}/.local/state/dotfiles/group.json"
+run "${h2}" 2026-10-22T03:00:00Z
+if finished "${h}" && ! grep -Eq -- '(rust|idiomatic)' "${h}/mise.log" && others_plain "${h}" \
+  && grep -Fq -- '入れない (dotfiles.claude.privateSkills.enable = false' "${h}/out" \
+  && grep -Fq -- 'mise unuse -g rust' "${h}/out" && grep -Fxq 'rust = "latest"' "${h}/.config/mise/config.toml" \
+  && no_warning "${h}" && finished "${h2}" && ! grep -Fq -- 'mise unuse -g rust' "${h2}/out" && no_warning "${h2}"; then
+  ok "tools.claudePrivateSkills が false なら rust の mise を打たず、[tools] に残った rust は外すコマンドを出すだけ (無ければ出さない)"
+else
+  ng "rust: off" "$(detail "${h}") / $(detail "${h2}")"
+fi
+
+for failing in 'use -g rust' 'settings add idiomatic_version_file_enable_tools rust'; do
+  h=$(new_home "rust-fails-$((pass + fail))" "$(state 9d)")
+  FAKE_MISE_FAIL=${failing} run "${h}" 2026-10-22T03:00:00Z
+  if finished "${h}" && grep -Fq -- '!! ' "${h}/err" && [[ -s ${h}/warnings ]] \
+    && grep -Fxq -- '|use -g rust' "${h}/mise.log" && cursor_lines "${h}" 1d; then
+    ok "mise の ${failing} が落ちても、警告して最後まで流れる (cursor-agent の手順も走る。exit 0)"
+  else
+    ng "rust: ${failing} が落ちる" "$(detail "${h}")"
+  fi
+done
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

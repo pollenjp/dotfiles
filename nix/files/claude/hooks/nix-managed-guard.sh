@@ -178,6 +178,9 @@ reason=$(
        ~/.claude/skills/herdr/      -> repo に実体は無い。herdr パッケージ同梱の skill を
                                        nix/home/modules/claude.nix が張っていて、中身は
                                        flake.lock の herdr の版で決まる
+       ~/.claude/skills/hc/         -> 本文は hc の \`hc --skill\` の出力 (hc の版は
+                                       nix/pkgs/herdr-core/releases.json)。frontmatter は
+                                       nix/pkgs/herdr-core/claude-skill-head.md
   2. 新規ファイルなら git add する
        git -C "\${REPO}" add nix/files/claude
      (~/dotfiles 経由の switch は path: なので untracked でも入るが、
