@@ -580,6 +580,13 @@ mod tests {
         }
     }
 
+    /// Windows のエディタ (Windows PowerShell 5.1 の Set-Content -Encoding UTF8 など) が付ける頭の BOM は読み飛ばす
+    #[test]
+    fn leading_bom_is_ignored() {
+        let h = host("\u{feff}group = \"company\"\n").unwrap();
+        assert_eq!(h.group, "company");
+    }
+
     #[test]
     fn missing_file_is_not_an_error() {
         let t = TempDir::new("host");

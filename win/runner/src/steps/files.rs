@@ -140,8 +140,8 @@ impl Step for Files {
                             "   repo 側で上書きするなら:   dotfiles apply --steps files --force",
                         );
                     } else {
-                        // 受け持ちが WSL の間は runner の apply は止まるので、WSL の手順を出す
-                        ctx.say("   repo 側で上書きするなら:   WSL で nix/scripts/bootstrap-windows-files.sh --force (受け持ちが WSL の setup の間。runner の apply は止まる)");
+                        // 受け持ちが WSL の間は runner の apply は files を流さないので、WSL の手順を出す
+                        ctx.say("   repo 側で上書きするなら:   WSL で nix/scripts/bootstrap-windows-files.sh --force (受け持ちが WSL の setup の間。runner の apply は files を流さない)");
                     }
                 }
                 Action::Copy | Action::Update | Action::Force => {

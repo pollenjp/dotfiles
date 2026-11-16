@@ -18,7 +18,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
 使い方:
   dotfiles check   [--steps <id>,…] [--host-file <path>]   手順を順に確かめる (何も書かない)
   dotfiles apply   [--dry-run] [--force] [--steps <id>,…] [--host-file <path>]
-                                                          手順を順に揃える (ホストの値の runner.enable = true のときだけ)
+                                                          手順を順に揃える (受け持ちが WSL のホスト (runner.enable が true でない) では、
+                                                          Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
 
