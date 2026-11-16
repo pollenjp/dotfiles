@@ -27,11 +27,13 @@
   # mise の shim (~/.local/share/mise/shims) を、herdr-core を入れるホスト (dotfiles.herdrCore.enable) の login の環境の
   # PATH の最後に足す。
   #
-  # hc 0.1.21 は、SSH や --via (Windows の hc が wsl.exe -d u24 … bash -lc でつなぐ形) で立った Linux の core に、アカウントの
-  # shell の非対話の login 環境を 1 回読ませ、hc の子 (端末と hc exec のコマンド) をその env で起こす (hc --skill の「A new Linux
-  # core started over SSH loads the account shell's non-interactive login environment once」)。下の mise activate は対話の
-  # シェルだけで効く (home-manager は ~/.bashrc の対話の部分と config.fish の is-interactive に置く) ので、mise で入れる claude
-  # (bootstrap-mise.sh) が hc の子から名前で引けなかった。shim なら、版を上げても dir が変わらず、cwd の mise.toml の版も選ぶ。
+  # hc 0.1.21 は、SSH で立った Linux の core に、アカウントの shell の非対話の login 環境を 1 回読ませ、hc の子 (端末と hc exec の
+  # コマンド) をその env で起こす (hc --skill の「A new Linux core started over SSH loads the account shell's non-interactive login
+  # environment once」)。--via の machine は、--via のコマンドが login のシェルなら同じになる (Windows の hc が
+  # wsl.exe -d u24 --cd ~ -e bash -lc でつなぐ u24 の形。hc の手引きの例の `-e sh -c` で足した machine は login の環境を読まない)。
+  # 下の mise activate は対話のシェルだけで効く (home-manager は ~/.bashrc の対話の部分と config.fish の is-interactive に置く) ので、
+  # mise で入れる claude (bootstrap-mise.sh) が hc の子から名前で引けなかった。shim なら、版を上げても dir が変わらず、cwd の
+  # mise.toml の版も選ぶ。
   #
   # 前ではなく最後に足すのは、project で mise に入れた道具の shim が、Nix の同じ名前の道具を隠さないため (mise の shim は、
   # cwd に版の無い道具だと「No version is set for shim」で落ち、PATH の後ろへは落ちない)。対話のシェルでは mise activate が

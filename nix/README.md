@@ -1738,7 +1738,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
-| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は旧 herdr の pane の env を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
+| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は core を立てたシェルに固有の env (旧 herdr の pane の印・`RUSTUP_TOOLCHAIN`) を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
 | `~/.claude/skills/hc/SKILL.md` | `nix/pkgs/herdr-core/claude-skill.nix` (生成。同じ package の `hc --skill` に `claude-skill-head.md` の frontmatter を足したもの。`dotfiles.herdrCore.enable` のマシン。[後述](#hc-の-skill-claudeskillshc)) |
 | `~/.cargo/bin/pjp` | `nix/scripts/bootstrap-pjp.sh` (claude-skills の `crates/pjp-shim` を `cargo install` したもの。Nix 管理ではない。`dotfiles.claude.privateSkills.enable` のマシン。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
@@ -5325,14 +5325,18 @@ personal) に 3 つ置く。
 - mise の rust は、効いている間 `RUSTUP_TOOLCHAIN` を入れ、rustup はそれを repo の `rust-toolchain.toml` より上に置く。全体の rust だけでは、
   repo が固定した toolchain (claude-skills の `rust-toolchain.toml`。CI と同じ版) が mise の効いたシェルで効かなくなるので、
   `bootstrap-mise.sh` は mise の `idiomatic_version_file_enable_tools` に `rust` を足し、`rust-toolchain.toml` の channel を mise に読ませる
-  (mise の文書 lang/rust の勧め)。版は go と同じく省く (入っている中の最高版。無ければ遅延を過ぎた最新の stable)。上げるときは `mise up rust`
+  (mise の文書 lang/rust の勧め)。mise が読むのは `rust-toolchain.toml` だけで、拡張子の無い古い名前の `rust-toolchain` の repo では、mise の
+  効いたシェルで全体の版が勝つ (その repo に `mise.toml` で `rust` を書く)。版は go と同じく省く (入っている中の最高版。無ければ遅延を過ぎた
+  最新の stable)。上げるときは `mise up rust`
 - shim は、無い・起きない・版 (`pjp --version`) が clone の `crates/pjp-shim` の版と違うときだけ入れ直す (shim は動きを変えたら版を上げる決まり)。
   cargo は clone の中で、clone の `rust-toolchain.toml` の channel を `RUSTUP_TOOLCHAIN` にして打つ (shim と同じ。mise の
-  `RUSTUP_TOOLCHAIN` や cwd に引きずられない)。`pjp --build` は毎回流す (clone が変わっていなければ cargo の確かめだけで終わる)
+  `RUSTUP_TOOLCHAIN` や cwd に引きずられない)。入れ先は `--root ${CARGO_HOME:-~/.cargo}` で固め、使い捨ての `--target-dir` で毎回作り直して
+  link する (`cargo install --path` は既定で workspace の `target/` を使い、前に作った exe を link し直さずに写すことがあるため)。入れた後に
+  shim が起きなければ警告して止まる。`pjp --build` は毎回流す (clone が変わっていなければ cargo の確かめだけで終わる)
 - リンカの `cc` の無い Linux (u24 など) と cargo の無いマシンでは、claude-skills の nix の devShell (`path:<clone>/nix`。rustup と cc がある)
   の中で `cargo install` を打つ。devShell の cc で作った exe は devShell の glibc に結ばれるので、devShell を
-  `~/.local/state/dotfiles/pjp-shim-devshell` の profile に残す (nix の GC root)。道具の方は shim が同じ判断をする (GC root は clone の
-  `target/pjp-devshell`)
+  `~/.local/state/dotfiles/pjp-shim-devshell` の profile に残す (nix の GC root)。入れられたら、その profile の前の世代は消す。道具の方は
+  shim が同じ判断をする (GC root は clone の `target/pjp-devshell`)
 - `~/.cargo/bin` は login のシェルの PATH にも入れる (`home/modules/shell-common.nix` の `home.sessionPath`)。対話の bash は `~/.cargo/env`
   でも足すが、hc の core が読む login の環境には入らなかった ([後述](#hc-の-core-の-env-と-hc-の子の-path))
 - どこで落ちても止めない (警告して続ける)。shim が無くても、claude-skills の skill は今までどおり `scripts/` の bash・Python で動く
@@ -5362,10 +5366,11 @@ Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`]
   中身が同じふつうのファイルを置き換えないので、リンクを張る前に activation が消す)。古い写しが残ると、PATH で `~/.local/bin` が nix の
   profile より先に来て (`home.sessionPath`)、対話の `hc` が古い版になる。同じ版の写しでも、store の外の書けるファイルのままだと、そこから
   打つ `hc update` が nix のものとして断られず、公式の最新へ上がる (Linux には取得元のフィードが無い)
-- package の `bin/herdr-core` (と、それへの symlink の `bin/hc`) は、旧 herdr (TUI) の pane の env (`HERDR_ENV`・`HERDR_PANE_ID`・
-  `HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_SOCKET_PATH`・`HERDR_BIN_PATH`・`HERDR_SESSION`) を外してから本物
-  (`libexec/herdr-core/herdr-core`) を起こす包み ([下](#hc-の-core-の-env-と-hc-の子の-path))。本物の実体は store の中のままなので、
-  `hc update` が断るのも、`hc machine add --install` が写すもの (本物の exe) も変わらない
+- package の `bin/herdr-core` (と、それへの symlink の `bin/hc`) は、core を立てたシェルに固有の env を外してから本物
+  (`libexec/herdr-core/herdr-core`) を起こす包み ([下](#hc-の-core-の-env-と-hc-の子の-path))。外すのは旧 herdr (TUI) の pane の印
+  (`HERDR_ENV`・`HERDR_PANE_ID`・`HERDR_TAB_ID`・`HERDR_WORKSPACE_ID`・`HERDR_SOCKET_PATH`・`HERDR_BIN_PATH`・`HERDR_SESSION`・
+  `HERDR_STARTUP_CWD`) と、mise の全体の rust が対話のシェルに入れる `RUSTUP_TOOLCHAIN`。hc が読む `HERDR_RELEASES_URL` などは外さない
+  (名前で外す)。本物の実体は store の中のままなので、`hc update` が断るのも、`hc machine add --install` が写すもの (本物の exe) も変わらない
 - switch せずに試すなら:
 
   ```sh
@@ -5375,8 +5380,10 @@ Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`]
 ### hc の core の env と hc の子の PATH
 
 hc の core は、立てた hc の process の env を写して動き (Linux では systemd の user の transient unit `hc-serve-*`・`hc-hold-*`)、hc の子
-(端末と `hc exec` のコマンド) をその env で起こす。SSH や `--via` (Windows の hc が `wsl.exe -d u24 --cd ~ -e bash -lc` でつなぐ形) で
-立った Linux の core は、アカウントの shell の非対話の login 環境を 1 回読んで使う (`hc --skill` の「Status, recovery, and cleanup」)。
+(端末と `hc exec` のコマンド) をその env で起こす。SSH で立った Linux の core は、アカウントの shell の非対話の login 環境を 1 回読んで使う
+(`hc --skill` の「Status, recovery, and cleanup」)。`--via` の machine は、`--via` のコマンドが login のシェルなら同じになる (Windows の hc が
+`wsl.exe -d u24 --cd ~ -e bash -lc` でつなぐ u24 の形)。hc の手引きの例の `--via 'wsl.exe -d <distro> -e sh -c'` で足した machine は login の
+環境を読まないので、`bash -lc` で足し直す。
 
 - login の環境の PATH (`home/modules/shell-common.nix`。`~/.profile` が読む hm-session-vars と、fish の config.fish が読む同じ中身) に、
   `~/.cargo/bin` (shim の `pjp`。`claude.privateSkills.enable` のホスト) を前に、mise の shim (`~/.local/share/mise/shims`。mise で入れる
@@ -5386,8 +5393,12 @@ hc の core は、立てた hc の process の env を写して動き (Linux で
   今までどおり mise の版が先に来る
 - 旧 herdr の pane で打った最初の hc (WSL を立ち上げ直した後の `hc ls`・pane の中の `hc server restart --fresh`) から core が立つと、
   pane の `HERDR_*` が hc の子に漏れ、旧 herdr を相手にする道具 (hook の `ssh-agent-notice.sh`・`op-reason-guard.sh`、claude-skills の
-  `ticket.sh`) が古い herdr を呼んでいた。package の包みが hc の入口で外すので、どこから core が立っても漏れない。hook も、hc の端末
-  (`HC_TERMINAL_ID` がある) では `HERDR_ENV` を見ずに hc で子を見分ける ([前述](#1password-の-ssh-承認を知らせるフック))
+  `ticket.sh`) が古い herdr を呼んでいた。対話のシェルから立つと、mise の全体の rust の `RUSTUP_TOOLCHAIN` も子に付き、子が claude-skills の
+  worktree で打つ cargo が `rust-toolchain.toml` の版 (CI と同じ版) でなく全体の版になる。package の包みが hc の入口でどちらも外すので、
+  どこから core が立っても漏れない。hook も、hc の端末 (`HC_TERMINAL_ID` がある) では `HERDR_ENV` を見ずに hc で子を見分ける
+  ([前述](#1password-の-ssh-承認を知らせるフック))
+- 包みが外すのは上の名前だけ。対話のシェルや Claude Code の会話から core を立てると、ほかの固有の値 (mise の go の `GOROOT`・会話の
+  `CLAUDECODE` など) は子に付くので、core は login の環境で立てる・立て直す (下)
 - 立っている core の env は、立て直すまで変わらない。setup で login の PATH が変わったら、login の環境で core を立て直す。WSL (u24) の core は
   Windows の PowerShell から (`--fresh` は、そのシェルの env を新しい端末に使う):
 
