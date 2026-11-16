@@ -209,7 +209,10 @@ enable = false                # 受け持ちの印。true で apply を許す
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
-  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`)。知らないキー・名前は runner が止める (終了コード 2)
+  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard` と、runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は
+  runner が止める (終了コード 2)
+- `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
+  (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
@@ -246,6 +249,7 @@ enable = false                # 受け持ちの印。true で apply を許す
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
+| 97 | `op-reason` | WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える ([op-reason](#op-reason)) | `onePassword` | まだ |
 | 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
@@ -256,8 +260,9 @@ enable = false                # 受け持ちの印。true で apply を許す
   `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
-- WSL にしか無い 9 手順は、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)
+- WSL にしか無い手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
+  fancyzones → international → google-ime → pin-updates)。`op-reason` はその後に足したもので、この順にはまだ入っていない
+- まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
 
@@ -268,6 +273,10 @@ enable = false                # 受け持ちの印。true で apply を許す
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
 4. この節の表に行を足す
+
+WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
+に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
+gate が違うと、試験が落ちる
 
 ### runner を直すとき
 
@@ -2007,6 +2016,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
   win/ を配らないマシンでは setup がそう 1 行出すので、op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の
   既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
+- Windows 側の runner にはまだ無い ([runner の手順](#runner-の手順)の `op-reason`)。受け持ちを runner に切り替えたホストでは setup も
+  runner も揃えないので、`Install-OpReason` を手で流す
 - 置き場所は `%LOCALAPPDATA%\Programs\op-reason`。WSL の op は、ここの `op-reason.exe` を `OPREASON_EXE`
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
