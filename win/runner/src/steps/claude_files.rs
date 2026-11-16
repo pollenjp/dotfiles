@@ -189,13 +189,11 @@ fn replace_file(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    // 前に退けたもの
+    // 前に退けたもの (動いていて消せなかった) と、落ちた apply が残した一時のもの
     if let Ok(entries) = std::fs::read_dir(dir) {
         for e in entries.flatten() {
-            if e.file_name()
-                .to_string_lossy()
-                .starts_with(&format!("{name}.old-"))
-            {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(&format!("{name}.old-")) || n.starts_with(&format!("{name}.new-")) {
                 let _ = std::fs::remove_file(e.path());
             }
         }
@@ -210,13 +208,15 @@ fn replace_file(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
         Ok(()) => Ok(()),
         Err(_) if dest.exists() => {
             let old = dir.join(format!("{name}.old-{nanos}"));
-            std::fs::rename(dest, &old).and_then(|()| {
+            let swapped = std::fs::rename(dest, &old).and_then(|()| {
                 std::fs::rename(&tmp, dest).inspect_err(|_| {
                     let _ = std::fs::rename(&old, dest);
                 })
-            })?;
-            let _ = std::fs::remove_file(&old);
-            Ok(())
+            });
+            if swapped.is_ok() {
+                let _ = std::fs::remove_file(&old);
+            }
+            swapped
         }
         Err(e) => Err(e),
     };
@@ -498,17 +498,52 @@ mod tests {
         let dest = t.path().join("hooks").join("x.exe");
         replace_file(b"one", &dest).unwrap();
         t.write("hooks/x.exe.old-1", "stale");
+        t.write("hooks/x.exe.new-9-1", "crashed");
+        t.write("hooks/y.exe.new-9-1", "someone else");
         replace_file(b"two", &dest).unwrap();
         assert_eq!(std::fs::read(&dest).unwrap(), b"two");
+        let mut left: Vec<String> = std::fs::read_dir(t.path().join("hooks"))
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        left.sort();
+        assert_eq!(
+            left,
+            vec!["x.exe".to_string(), "y.exe.new-9-1".to_string()],
+            "退けたものと一時のものは残さない (ほかの名前のものには触らない)"
+        );
+    }
+
+    /// Windows では、動いている exe も入れ替えられる (上書きできないので退けてから置き、退けたものは次に消す)
+    #[cfg(windows)]
+    #[test]
+    fn replaces_a_running_exe() {
+        let t = TempDir::new("claude-files-running");
+        let dest = t.path().join("hooks").join("x.exe");
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+        let ping = PathBuf::from(std::env::var("SystemRoot").unwrap())
+            .join("System32")
+            .join("PING.EXE");
+        std::fs::copy(&ping, &dest).unwrap();
+        let mut child = std::process::Command::new(&dest)
+            .args(["-n", "30", "127.0.0.1"])
+            .stdout(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        // 動いている間は上書きできない (この試験が確かめたい場面になっている)
+        assert!(std::fs::write(&dest, b"x").is_err());
+        let replaced = replace_file(b"new", &dest);
+        let _ = child.kill();
+        let _ = child.wait();
+        replaced.unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        // 止まった後の次の入れ替えで、退けたものが消える
+        replace_file(b"newer", &dest).unwrap();
         let left: Vec<String> = std::fs::read_dir(t.path().join("hooks"))
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
-        assert_eq!(
-            left,
-            vec!["x.exe".to_string()],
-            "退けたものと一時のものは残さない"
-        );
+        assert_eq!(left, vec!["x.exe".to_string()]);
     }
 
     /// 本物の repo の冒頭・共通の CLAUDE.md・skip-skills.txt から組み立てられ、skip の skill は dotfiles にある

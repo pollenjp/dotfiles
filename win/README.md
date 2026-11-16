@@ -391,11 +391,12 @@ dotfiles apply                                                                  
 | `claude-skill-overrides` | `settings.json` の `skillOverrides` に、`pjp-dev-tracker` (ホストの値の `devTracker` で on / off)・pack の skill (入口 `pjp-pack-<pack>` があれば `name-only`)・claude.ai から同期された skill (`anthropic-skills:<名前>` を `user-invocable-only`) を書く。選び方は Linux の `bootstrap-claude-skill-overrides.sh` と同じ | 書いた key は `%LOCALAPPDATA%\dotfiles\state\claude-skill-overrides.applied.json` に控え、書かなくなったら戻す。手で別の値を書いた key には触らない。order は 60 (claude-files と claude-skills が skill をつないだ後) |
 
 - settings.json を書く手順 (`claude-env` も) は、どれも自分の持つキーだけを直し、ほかのキーと順を残す。キーの順を見ずに同じなら書かない。書く前の中身を
-  `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (手順をまたいで新しい方から 10 個)
+  `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (手順をまたいで、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と新しい方から 10 個)
 - 効くのは新しい Claude Code の会話から (hook・status line・skillOverrides。footer のリンクは実行中の会話にも次の turn から)。確かめるのは Claude Code の
   `/hooks`・`/skills` と、status line の表示
-- `dotfiles-claude.exe` は runner の exe の写しで、`claude-hook`・`claude-statusline` だけを受ける (ほかのコマンドは終了コード 2 で止める。古い写しで runner
-  を流さない)。runner を作り直したら (clone を pull したら) `dotfiles apply` で写し直す
+- `dotfiles-claude.exe` は runner の exe の写しで、`claude-hook`・`claude-statusline` だけを受ける (ほかのコマンドは何もせずに知らせる。古い写しで runner
+  を流さない。登録の `args` が欠けて引数なしで呼ばれても tool を止めないよう、終了コードは 0)。runner を作り直したら (clone を pull したら) `dotfiles apply`
+  で写し直す
 
 Windows に入れる hook と status line (Linux の `nix/files/claude/hooks/` の 12 個の hook と `statusline-command.sh`)。Windows の Git Bash には jq が無く
 (Git for Windows が同梱しない)、bash の hook は黙って何もしないので、入れるものは Rust に写した (`runner/src/hooks/`。ふるまいと文は bash の版と同じで、
@@ -403,11 +404,11 @@ Linux の CI が同じ入力で突き合わせる):
 
 | hook | Windows | わけ |
 | --- | --- | --- |
-| `docs-guard.sh` | Rust に写して入れる | 小さい。Windows のパス (`C:\…`) も読む (bash の版は `/` で始まらないパスを相対パスと読み、Windows では止めない) |
+| `docs-guard.sh` | Rust に写して入れる | 小さい。Windows のパス (`C:\…`) も読み、`docs` の大文字小文字を区別しない (bash の版は `/` で始まらないパスを相対パスと読み、Windows では止めない) |
 | `run-through-nudge.sh` | Rust に写して入れる | 小さい (文を返すだけ) |
-| `pr-assignee-nudge.sh` | Rust に写して入れる | GitHub の PR の決まり (Assignees) を Windows の会話でも守る。コマンドの読み方 (jq の式) も写した |
+| `pr-assignee-nudge.sh` | Rust に写して入れる | 小さい (コマンドの読み方の jq の式 1 つ)。Windows の会話で PR を作ったときに効く |
 | `statusline-command.sh` | Rust に写して入れる | 毎回の表示に要る。cc-pages の 📄top は cc-pages が PATH にあるときだけ (今の Windows には無い) |
-| `xref-guard.sh`・`gist-guard.sh`・`install-iac-guard.sh` | まだ (後の PR で Rust に写す) | どれも awk の lexer を含む 1500 行ほど。Windows のハブは push・PR・install を自分では打たず、Linux の子が打つ (子の側の hook が効く) |
+| `xref-guard.sh`・`gist-guard.sh`・`install-iac-guard.sh` | まだ (後の PR で Rust に写す) | どれも awk の lexer を含む 1500 行ほどで、この PR では写していない。Windows の会話で public な repo へ push・PR を出す、gist に上げる、system へ install すると、Linux の hook の網が無い (知っている穴)。Windows のハブは repo の作業を Linux の子に任せ (子の側の hook が効く)、ふだんはこれらを打たない |
 | `video-offer-nudge.sh`・`lang-nudge.sh` | まだ (後の PR) | Windows のハブは spec・ADR・PR・project を自分では作らない (Linux の子が作る)。解説動画は CLAUDE.md の節が聞かせる |
 | `nix-managed-guard.sh` | 入れない | `/nix/store` が無い。runner が置くのはコピー (変えると次の apply が衝突で知らせる) と clone への junction で、直し方は `CLAUDE.md` の冒頭に書いた |
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |

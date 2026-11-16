@@ -193,7 +193,9 @@ pub fn main(args: Vec<String>) -> i32 {
 }
 
 /// Claude Code の hook と status line の口 (`claude-hook <名前>`・`claude-statusline`)。そのどちらでもなければ None (runner のコマンド)。
-/// hook の口の写し (`hook_exe`) では、ほかのコマンドを止める (2)。hook はいつも 0 で終える (止めるときは JSON の permissionDecision)。
+/// hook の口の写し (`hook_exe`) では、ほかのコマンドは何もせずに知らせるだけにする。どれも終了コードは 0 (止めるときは JSON の
+/// permissionDecision)。登録の args が欠けて写しが引数なしで呼ばれても、PreToolUse の tool を止めないように (2 は止める合図で、Git Bash の
+/// 無い Windows の shell form では 0 と 2 のほかも止めうる)。
 pub fn claude_entry(
     args: &[String],
     hook_exe: bool,
@@ -234,9 +236,9 @@ pub fn claude_entry(
         _ if hook_exe => {
             let _ = writeln!(
                 err,
-                "!! この exe は Claude Code の hook と status line の口 (claude-hook・claude-statusline) です。runner は PowerShell の dotfiles 関数で流してください"
+                "!! この exe は Claude Code の hook と status line の口 (claude-hook・claude-statusline) です。runner は PowerShell の dotfiles 関数で流してください (何もしていません)"
             );
-            Some(2)
+            Some(0)
         }
         _ => None,
     }
@@ -480,7 +482,7 @@ mod tests {
         }
     }
 
-    /// hook と status line の口: stdin を読んで答え、いつも 0。hook の口の写しは runner のコマンドを止める (2)。ほかは runner へ (None)
+    /// hook と status line の口: stdin を読んで答え、いつも 0。hook の口の写しは runner のコマンドを流さない (0)。ほかは runner へ (None)
     #[test]
     fn claude_entry_points() {
         let sys = crate::testutil::FakeSys::new(|_| unreachable!());
@@ -517,10 +519,14 @@ mod tests {
         );
         assert_eq!(code, Some(0));
         assert!(out.contains("Opus") && !out.ends_with('\n'), "{out:?}");
-        let (code, _, err) = call(&["apply"], true, "");
-        assert_eq!(code, Some(2));
-        assert!(err.contains("dotfiles 関数"), "{err}");
+        // hook の口の写しは runner のコマンドを流さず、引数が欠けても 0 で終える (PreToolUse の tool を止めない)
+        for args in [&["apply"][..], &[][..]] {
+            let (code, out, err) = call(args, true, "");
+            assert_eq!((code, out.as_str()), (Some(0), ""), "{args:?}");
+            assert!(err.contains("dotfiles 関数"), "{err}");
+        }
         assert_eq!(call(&["check"], false, "").0, None);
+        assert_eq!(call(&[], false, "").0, None);
     }
 
     mod flow {

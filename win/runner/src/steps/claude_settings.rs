@@ -2,8 +2,8 @@
 //! claude-skill-overrides) が共有する読み書き。
 //!
 //! settings.json は Claude Code 自身も書く (権限の「常に許可」など) ので、手順は自分の持つキーだけを直し、ほかのキーと順を残す (順を保つ JSON の
-//! 型 `ojson`)。キーの順を見ずに同じなら書かない。書く前に前の中身を `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (新しい方から
-//! 10 個。dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_* と docs/adr/065_win_claude_config_*)。
+//! 型 `ojson`)。キーの順を見ずに同じなら書かない。書く前に前の中身を `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (いちばん
+//! 古いものと、新しい方から 10 個。dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_* と docs/adr/065_win_claude_config_*)。
 
 use super::{Mode, Outcome};
 use crate::context::Ctx;
@@ -88,7 +88,8 @@ pub fn store(ctx: &mut Ctx, path: &Path, value: &OValue, existed: bool) -> Resul
         .map_err(|e| format!("{shown} を書けない ({e})"))
 }
 
-/// 書く前の settings.json を `<state_dir>\claude-settings\backup\settings-<秒>-<ナノ秒>.json` に写し、新しい方から 10 個だけ残す。
+/// 書く前の settings.json を `<state_dir>\claude-settings\backup\settings-<秒>-<ナノ秒>.json` に写す。残すのは、いちばん古いもの (dotfiles の
+/// 手順が初めて書く前の中身。手順が 5 つあり、新しい方からの 10 個だけでは数回の apply で消える) と、新しい方から 10 個。
 pub fn backup(ctx: &mut Ctx, path: &Path) -> std::io::Result<()> {
     let dir = ctx.state_dir.join("claude-settings").join("backup");
     std::fs::create_dir_all(&dir)?;
@@ -117,9 +118,10 @@ pub fn backup(ctx: &mut Ctx, path: &Path) -> std::io::Result<()> {
         .filter(|n| n.starts_with("settings-") && n.ends_with(".json"))
         .collect();
     olds.sort();
-    while olds.len() > BACKUPS {
-        let old = olds.remove(0);
-        let _ = std::fs::remove_file(dir.join(old));
+    if olds.len() > BACKUPS + 1 {
+        for old in &olds[1..olds.len() - BACKUPS] {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
     }
     ctx.say(format!(
         "前の中身を写しました: {}",

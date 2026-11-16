@@ -3,7 +3,8 @@
 //! (dotfiles-private の ADR 035) の写しで、判定と返す文は bash の版と同じ。
 //!
 //! Windows だけの違い: Claude Code は Windows のパスを `C:\…` の形で渡す (Git Bash で動かす hook にも)。`\` を `/` にしてから判定する (bash の
-//! 版は `/` で始まらないパスを相対パスと読み、Windows では何も止めない)。
+//! 版は `/` で始まらないパスを相対パスと読み、Windows では何も止めない)。Windows のファイルの名前は大文字小文字を区別しないので、`docs` の
+//! 判定も区別しない (`Docs\x.md` も docs/ の中に書かれる)。
 
 use super::{answer, field};
 use crate::process::{CommandSpec, Sys};
@@ -37,6 +38,15 @@ fn tostring(v: Option<&Value>) -> String {
         Some(other) => other.to_string(),
     };
     s.split('\n').next().unwrap_or("").to_string()
+}
+
+/// パスを比べる形 (Windows はファイルの名前の大文字小文字を区別しないので小文字にする。ほかはそのまま)。
+fn fold(p: &str) -> String {
+    if cfg!(windows) {
+        p.to_lowercase()
+    } else {
+        p.to_string()
+    }
 }
 
 /// 絶対パスか (bash は `/` で始まるか。Windows はドライブ (`C:/`) と UNC (`//server`) も)。
@@ -85,7 +95,7 @@ pub fn run(input: &Value, sys: &dyn Sys) -> Option<String> {
         // bash の ${cwd%/} (末尾の / を 1 つだけ外す)
         path = format!("{}/{}", cwd.strip_suffix('/').unwrap_or(&cwd), path);
     }
-    if !path.contains("/docs/") {
+    if !fold(&path).contains("/docs/") {
         return None;
     }
     // 在る一番近い祖先のディレクトリと、そこから先のまだ無い分
@@ -125,7 +135,8 @@ pub fn run(input: &Value, sys: &dyn Sys) -> Option<String> {
     };
     let prefix = git_out(&["rev-parse", "--show-prefix"])?;
     let rel = format!("{prefix}{rest}");
-    if !rel.starts_with("docs/") {
+    // git の --show-prefix は打った字のまま返す (Windows の `Docs\` も docs/ の中)
+    if !fold(&rel).starts_with("docs/") {
         return None;
     }
     let url = git_out(&["remote", "get-url", "origin"])?;
@@ -300,6 +311,9 @@ mod tests {
             let win = format!("{}\\docs\\adr\\b.md", ds.replace('/', "\\"));
             let r = denied(&run(&input("Write", &win, None), &sys)).unwrap();
             assert!(r.contains("docs/adr/b.md"), "{r}");
+            // 大文字小文字を区別しない (Windows のファイルの名前と同じ)
+            let upper = format!("{}\\Docs\\adr\\c.md", ds.replace('/', "\\"));
+            assert!(denied(&run(&input("Write", &upper, None), &sys)).is_some());
         }
     }
 

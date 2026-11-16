@@ -306,7 +306,11 @@ fn wanted(skills_dir: &Path) -> (BTreeMap<String, String>, Vec<String>, Option<S
         }
         let text = String::from_utf8_lossy(&std::fs::read(&f).unwrap_or_default()).into_owned();
         let value = skill_pack(&text).unwrap_or_default();
-        let names: Vec<&str> = value.split_whitespace().collect();
+        // bash の `read -a` と同じく、空白・タブ・改行だけで分ける (全角の空白などは名前の字として読み、読めない名前になる)
+        let names: Vec<&str> = value
+            .split([' ', '\t', '\n'])
+            .filter(|s| !s.is_empty())
+            .collect();
         if names.is_empty() {
             continue;
         }
@@ -682,6 +686,7 @@ mod tests {
         w("pjp-lonely/SKILL.md", &pack("video # c"));
         w("pjp-lonely2/SKILL.md", &pack("video"));
         w("pjp-bad/SKILL.md", &pack("Diagram"));
+        w("pjp-fullwidth/SKILL.md", &pack("diagram\u{3000}lang"));
         w("pjp-mod/SKILL.md", &pack("diagram"));
         w("pjp-mod/.claude-plugin/plugin.json", "{}");
         w(
@@ -782,6 +787,7 @@ mod tests {
         for k in [
             "pjp-lonely",
             "pjp-bad",
+            "pjp-fullwidth",
             "pjp-mod",
             "pjp-dmi",
             "pjp-pack-repo",
@@ -814,6 +820,12 @@ mod tests {
             "{o:?}"
         );
         assert!(o.notes.iter().any(|n| n.contains("pjp-bad")), "{o:?}");
+        assert!(
+            o.notes
+                .iter()
+                .any(|n| n.contains("pjp-fullwidth") && n.contains("読めない")),
+            "全角の空白は区切りにしない (bash の read -a と同じ): {o:?}"
+        );
         assert!(
             o.notes
                 .iter()

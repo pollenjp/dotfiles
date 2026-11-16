@@ -6,7 +6,8 @@
 //!   振り直す (番号に穴があると git はその手前までしか読まない)
 //! - この手順が持つ名前 (`CLAUDE_CODE_PLUGIN_PREFER_HTTPS`・`GCM_INTERACTIVE`) は外してから足す
 //! - settings.json のほかのキーと順は残す (順を保つ JSON の型 `ojson`)。キーの順を見ずに同じなら書かない。書く前に前の中身を
-//!   `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (10 回分)
+//!   `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (いちばん古いものと、新しい方から 10 回分。settings.json を書く手順のあいだで
+//!   共有する `claude_settings`)
 //!
 //! Windows だけの違い: Git for Windows は system の設定に Git Credential Manager (`credential.helper = manager`) を持ち、env で足す gh の helper
 //! より先に呼ばれる。GCM が窓を出して止まらないよう `GCM_INTERACTIVE=never` も足す (GCM は窓を出さずに抜け、git は次の gh に進む)。空の値で
@@ -443,14 +444,23 @@ mod tests {
         assert_eq!(e.run(Mode::Check).kind, Kind::Ok);
     }
 
+    /// 控えは、いちばん古いもの (初めて書く前の中身) と新しい方から 10 個
     #[test]
-    fn keeps_ten_backups() {
+    fn keeps_the_first_and_ten_backups() {
         let e = Env::new();
         for i in 0..12 {
             e.t.write("home/.claude/settings.json", &format!("{{\"n\": {i}}}\n"));
             assert_eq!(e.run(Mode::Apply { force: false }).kind, Kind::Ok);
         }
-        assert_eq!(e.backups().len(), 10);
+        let backups = e.backups();
+        assert_eq!(backups.len(), 11, "{backups:?}");
+        let first =
+            e.t.path()
+                .join("state")
+                .join("claude-settings")
+                .join("backup")
+                .join(&backups[0]);
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "{\"n\": 0}\n");
     }
 
     #[test]
