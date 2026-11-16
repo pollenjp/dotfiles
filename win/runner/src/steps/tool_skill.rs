@@ -375,8 +375,10 @@ mod tests {
     fn real_heads_have_frontmatter() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
         for spec in SPECS {
-            let head =
-                std::fs::read_to_string(crate::context::join_segments(&repo, spec.head)).unwrap();
+            // windows-latest の checkout はテキストを CRLF で取り出す (本体も頭の CRLF を LF にしてから使う)
+            let head = std::fs::read_to_string(crate::context::join_segments(&repo, spec.head))
+                .unwrap()
+                .replace("\r\n", "\n");
             assert!(
                 head.starts_with(&format!("---\nname: {}\ndescription: \"", spec.dir)),
                 "{}",
