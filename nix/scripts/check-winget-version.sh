@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code) が、winget の最新に
-# 追いついているかを確かめる。
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、bootstrap が入れる
+# Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる。
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 #   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
@@ -14,11 +14,17 @@
 #   google-japanese-input   google-japanese-input/Install-GoogleJapaneseInput.ps1    winget-pkgs に載った日
 #   ntn                     ntn/Install-Ntn.ps1                                      winget-pkgs に載った日
 #   claude-code             claude-code/Install-ClaudeCode.ps1                       GitHub (anthropics/claude-code) の release
+#   git                     bootstrap/Install-Bootstrap.ps1 (-GitVersion)            GitHub (git-for-windows/git) の release
+#   gh                      bootstrap/Install-Bootstrap.ps1 (-GhVersion)             GitHub (cli/cli) の release
+#   vs-buildtools           bootstrap/Install-Bootstrap.ps1 (-VsBuildToolsVersion)   winget-pkgs に載った日
+#   rustup                  bootstrap/Install-Bootstrap.ps1 (-RustupVersion)         winget-pkgs に載った日
 #
 # ps1 から、-Version の既定値 (固定した版) と $packageId (winget のパッケージ ID) を読む。どちらも
 # 書くのはそこ 1 か所だけ。それを winget-pkgs (winget の索引の元) の manifests/<頭文字>/<ID の . を / に>/<版>/
 # の並びと比べる。GitHub API で読むので、Windows も winget も要らない。見送りの一覧は ps1 の隣の
 # skipped-versions.txt。
+# bootstrap の 4 つは 1 つの ps1 (win/bootstrap/Install-Bootstrap.ps1) で持つので、読む param と ID の変数の名前が名前ごとに
+# 違い (-GitVersion と $gitPackageId など。下の version_param・id_var)、見送りの一覧は win/bootstrap/skipped-versions/<名前>.txt。
 #
 # GitHub Actions の winget-versions (.github/workflows/winget-versions.yml) が週 1 回と PR で、名前ごとの
 # job で流し、落ちることで知らせる (TKT-110・TKT-156)。win/ は flake からは見えない (ADR 010) ので、
@@ -40,6 +46,11 @@
 #   ntn.dev に置く)。winget で入れられるようになった日なので、上流の公開の日より遅いか同じ
 # - claude-code: GitHub (anthropics/claude-code) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。
 #   winget の版 (X.Y.Z) と、tag の v の後ろで突き合わせる。winget には数日遅れて載り、載らない版もある
+# - git: GitHub (git-for-windows/git) の release (prerelease でないもの) が出た日。tag は v<X.Y.Z>.windows.<N> で、winget の
+#   Git.Git の版は N が 1 なら X.Y.Z、ほかは X.Y.Z.N (v2.56.0.windows.4 → 2.56.0.4)。rc は prerelease で出る
+# - gh: GitHub (cli/cli) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。tag の v の後ろで突き合わせる
+# - vs-buildtools・rustup: winget-pkgs に足した commit の日 (Build Tools は GitHub の release が無く、rustup は tag だけで release を
+#   出さない)
 #
 # ## 知らせるもの (exit 1)
 #
@@ -52,10 +63,10 @@
 # - 固定した版より新しい版が winget にあり、見送りの一覧にも無い。上げるか見送るかの手順は win/README.md の
 #   「<名前> の新しい版が出たとき」。出た日が分からない (合う release や commit が無い) ときは待たない
 # - GitHub の release の版が、winget のこのパッケージの最新より新しいのに winget に無い (見送った版は除く。
-#   openssh・herdr・claude-code だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
+#   openssh・herdr・claude-code・git・gh だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
 #   Microsoft.OpenSSH.Preview ができてから、Beta には 9.5.0.0 より新しい版が来なかった)。比べるのは winget に
 #   載る側の release だけ (どれも prerelease を除く)。新しいかは版で比べる。google-japanese-input と ntn は比べる
-#   相手が無く、ID が移っても気付けない
+#   相手が無く、ID が移っても気付けない (vs-buildtools・rustup も同じ)
 #
 # 次は新しい版の知らせではなく、壊れていることの知らせなので、猶予を置かない。
 #
@@ -121,8 +132,9 @@ Windows で winget の版を固定しているものが、winget の最新に追
   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
   check-winget-version.sh --json --offline <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
-  名前: openssh・herdr・google-japanese-input・ntn・claude-code
-  ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup
+  ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。git・gh・vs-buildtools・rustup は
+  win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt。
 
   --json:     固定した版より新しい winget の版を JSON で出す (知らせるかは決めない。--dates で出た日も引く)
   --offline:  --json で、ネットワークを使わずに固定した版とパッケージ ID だけを出す (newer は null)
@@ -185,6 +197,12 @@ nested_dirs=()
 channel_desc=''
 key_missing=''
 moved_example=''
+# ps1 の中の、固定した版の param の名前と、パッケージ ID の変数の名前 (bootstrap の 4 つは名前ごとに違う)。ps1 と見送りの一覧の
+# 既定の場所は、repo の win/ からのパス
+version_param=Version
+id_var=packageId
+ps1_rel=''
+skipped_rel=''
 case ${name} in
   openssh)
     title='Windows の OpenSSH'
@@ -272,8 +290,85 @@ case ${name} in
     key_missing='の tag が v<X.Y.Z> の形でない'
     moved_example='winget に載らなくなった・別の ID へ移った、など'
     ;;
+  git)
+    title='Windows の Git for Windows'
+    ps1_name=Install-Bootstrap.ps1
+    ps1_rel=bootstrap/Install-Bootstrap.ps1
+    skipped_rel=bootstrap/skipped-versions/git.txt
+    version_param=GitVersion
+    id_var=gitPackageId
+    # winget の Git.Git の版は 3 つか 4 つの数 (.windows.1 は 3 つ)
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'
+    version_example=2.56.0.4
+    readme_section='bootstrap の固定した版の新しい版が出たとき'
+    search_word=Git.Git
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    dates_from=github
+    releases_repo=git-for-windows/git
+    # 鍵は tag の v<X.Y.Z>.windows.<N> を winget の版の形にしたもの (N が 1 なら X.Y.Z、ほかは X.Y.Z.N)
+    release_key='(.tag_name // "" | capture("^v(?<v>[0-9]+\\.[0-9]+\\.[0-9]+)\\.windows\\.(?<n>[0-9]+)$") | if .n == "1" then .v else .v + "." + .n end) // ""'
+    # rc は prerelease で出て、winget には載らない
+    release_channel='.prerelease | not'
+    channel_desc='prerelease でない release'
+    key_missing='の tag が v<X.Y.Z>.windows.<N> の形でない'
+    moved_example='winget に載らなくなった・別の ID へ移った、など'
+    ;;
+  gh)
+    title='Windows の GitHub CLI'
+    ps1_name=Install-Bootstrap.ps1
+    ps1_rel=bootstrap/Install-Bootstrap.ps1
+    skipped_rel=bootstrap/skipped-versions/gh.txt
+    version_param=GhVersion
+    id_var=ghPackageId
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=2.103.3
+    readme_section='bootstrap の固定した版の新しい版が出たとき'
+    search_word=GitHub.cli
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    dates_from=github
+    releases_repo=cli/cli
+    release_key='(.tag_name // "" | capture("^v(?<k>[0-9]+\\.[0-9]+\\.[0-9]+)$").k) // ""'
+    release_channel='.prerelease | not'
+    channel_desc='prerelease でない release'
+    key_missing='の tag が v<X.Y.Z> の形でない'
+    moved_example='winget に載らなくなった・別の ID へ移った、など'
+    ;;
+  vs-buildtools)
+    title='Windows の Visual Studio Build Tools 2022'
+    ps1_name=Install-Bootstrap.ps1
+    ps1_rel=bootstrap/Install-Bootstrap.ps1
+    skipped_rel=bootstrap/skipped-versions/vs-buildtools.txt
+    version_param=VsBuildToolsVersion
+    id_var=vsBuildToolsPackageId
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=17.14.44
+    readme_section='bootstrap の固定した版の新しい版が出たとき'
+    search_word=BuildTools
+    upgrade_before=''
+    upgrade_after=''
+    # Build Tools は GitHub の release を出さない。winget-pkgs に載った日から数える
+    dates_from=winget
+    ;;
+  rustup)
+    title='Windows の rustup'
+    ps1_name=Install-Bootstrap.ps1
+    ps1_rel=bootstrap/Install-Bootstrap.ps1
+    skipped_rel=bootstrap/skipped-versions/rustup.txt
+    version_param=RustupVersion
+    id_var=rustupPackageId
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=1.29.3
+    readme_section='bootstrap の固定した版の新しい版が出たとき'
+    search_word=Rustup
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    # rustup は tag だけで GitHub の release を出さない。winget-pkgs に載った日から数える
+    dates_from=winget
+    ;;
   *)
-    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code のどれか)" >&2
+    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup のどれか)" >&2
     usage >&2
     exit 2
     ;;
@@ -293,8 +388,8 @@ else
 fi
 install_cmd=${ps1_name%.ps1}
 
-ps1=${args[1]:-${repo_dir}/win/${name}/${ps1_name}}
-skipped_file=${args[2]:-${repo_dir}/win/${name}/skipped-versions.txt}
+ps1=${args[1]:-${repo_dir}/win/${ps1_rel:-${name}/${ps1_name}}}
+skipped_file=${args[2]:-${repo_dir}/win/${skipped_rel:-${name}/skipped-versions.txt}}
 # 出力では、repo の中のファイルを repo からのパスで見せる (CI ではランナーの長いパスになるため)
 ps1_label=${ps1#"${repo_dir}/"}
 skipped_label=${skipped_file#"${repo_dir}/"}
@@ -345,15 +440,15 @@ for c in "${needed[@]}"; do
   fi
 done
 
-# ps1 から、固定した版 (param の [string]$Version = '<版>') とパッケージ ID ($packageId = '<ID>') を読む
+# ps1 から、固定した版 (param の [string]$<version_param> = '<版>') とパッケージ ID ($<id_var> = '<ID>') を読む
 if [[ ! -r ${ps1} ]]; then
   cannot_check "${ps1_name} が読めません: ${ps1_label}"
 fi
 pinned=""
 pinned_line=0
 package_id=""
-pinned_re="^[[:space:]]*\\[string\\][\$]Version[[:space:]]*=[[:space:]]*'([^']*)'"
-id_re="^[[:space:]]*[\$]packageId[[:space:]]*=[[:space:]]*'([A-Za-z0-9][A-Za-z0-9.-]*)'"
+pinned_re="^[[:space:]]*\\[string\\][\$]${version_param}[[:space:]]*=[[:space:]]*'([^']*)'"
+id_re="^[[:space:]]*[\$]${id_var}[[:space:]]*=[[:space:]]*'([A-Za-z0-9][A-Za-z0-9.-]*)'"
 while IFS= read -r line || [[ -n ${line} ]]; do
   if ((! pinned_line)) && [[ ${line} =~ ${pinned_re} ]]; then
     pinned=${BASH_REMATCH[1]}
@@ -363,13 +458,13 @@ while IFS= read -r line || [[ -n ${line} ]]; do
   fi
 done <"${ps1}"
 if ((! pinned_line)); then
-  cannot_check "固定した版が読めません: ${ps1_label} に [string]\$Version = '<版>' の行がありません。"
+  cannot_check "固定した版が読めません: ${ps1_label} に [string]\$${version_param} = '<版>' の行がありません。"
 fi
 if [[ ! ${pinned} =~ ${version_re} ]]; then
-  cannot_check "固定した版が読めません: ${ps1_label} の -Version の既定値 '${pinned}' が ${title} の版の形ではありません (例: ${version_example})。"
+  cannot_check "固定した版が読めません: ${ps1_label} の -${version_param} の既定値 '${pinned}' が ${title} の版の形ではありません (例: ${version_example})。"
 fi
 if [[ -z ${package_id} ]]; then
-  cannot_check "パッケージ ID が読めません: ${ps1_label} に \$packageId = '<ID>' の行がありません。"
+  cannot_check "パッケージ ID が読めません: ${ps1_label} に \$${id_var} = '<ID>' の行がありません。"
 fi
 # winget-pkgs の置き場所: manifests/<ID の頭文字 (小文字)>/<ID の . を / にしたもの>
 initial=${package_id:0:1}
@@ -633,11 +728,11 @@ fi
 
 findings=()
 echo "${title} (winget の ${package_id})"
-echo "  固定した版    : ${pinned} (${ps1_label} の -Version の既定値)"
+echo "  固定した版    : ${pinned} (${ps1_label} の -${version_param} の既定値)"
 
 if ((gone)); then
   echo "⚠ ${package_id} が winget-pkgs に無い (${gone_why})。winget で入れられない"
-  echo "    winget search ${search_word} で今のパッケージ ID を探し、${ps1_label} の \$packageId を直す"
+  echo "    winget search ${search_word} で今のパッケージ ID を探し、${ps1_label} の \$${id_var} を直す"
   findings+=("${package_id} が winget-pkgs に無い")
   annotate error "${findings[-1]}"
   exit 1
@@ -676,7 +771,7 @@ fi
 
 if ((! pinned_listed)); then
   echo "⚠ 固定した版 ${pinned} が winget-pkgs に無い。新しいマシンで ${install_cmd} が入れられない"
-  echo "    winget の版から選び直し、-Version の既定値を変える (win/README.md の「${readme_section}」)"
+  echo "    winget の版から選び直し、-${version_param} の既定値を変える (win/README.md の「${readme_section}」)"
   findings+=("固定した版 ${pinned} が winget-pkgs に無い")
 fi
 
@@ -736,7 +831,7 @@ if ((${#unskipped[@]})); then
         echo "    ${v} の ${notes_word}: ${url:-$(fallback_url "${v}")}"
       done
       echo "⚠ 上げるか見送るかを決める (win/README.md の「${readme_section}」):"
-      echo "    上げる: ${upgrade_before}${ps1_label} の -Version の既定値を変える${upgrade_after}"
+      echo "    上げる: ${upgrade_before}${ps1_label} の -${version_param} の既定値を変える${upgrade_after}"
       echo "    見送る: ${skipped_label} に「版 理由」を 1 行足す"
       findings+=("固定した版 ${pinned} より新しい ${unskipped[*]} が winget にある (上げるか見送るかを決める)")
     fi

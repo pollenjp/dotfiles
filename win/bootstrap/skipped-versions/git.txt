@@ -1,0 +1,12 @@
+﻿# Windows の Git for Windows (winget の Git.Git) で、上げずに見送った版 (win/bootstrap/Install-Bootstrap.ps1 が入れるもの)。
+#
+# nix/scripts/check-winget-version.sh git (GitHub Actions の winget-versions が週 1 回流す) と、setup の
+# bootstrap-windows-pin-updates.sh が読み、ここに書いた版は、固定した版より新しくても知らせない。
+# 手順は win/README.md の「bootstrap の固定した版の新しい版が出たとき」。
+#
+# 1 行に 1 つ、「版 理由」を空白で区切って書く。版は winget の版 (X.Y.Z か X.Y.Z.N。GitHub の tag の v<X.Y.Z>.windows.<N> の、N が 1 なら X.Y.Z、ほかは X.Y.Z.N) の形で書く。
+# # で始まる行と空行は読まない。理由の無い行と、版の形でない行は読めずに落ちる。
+# 固定した版以下になった行は消してよい (job が知らせる)。manifest に無いので Windows へは配らない。
+#
+# 例:
+# 2.56.1 試したら Rust の runner の build が通らなかった (TKT-xxx)

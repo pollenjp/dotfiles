@@ -7,7 +7,7 @@ Nix home-manager で配置する。リポジトリ本体は `~/ghq/github.com/po
 | パス | 中身 |
 | --- | --- |
 | [`nix/`](./nix/README.md) | home-manager の flake と `setup.sh`。対象は Linux / macOS / WSL |
-| [`win/`](./win/README.md) | Windows 側のアプリの設定（Orca など）。WSL の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る |
+| [`win/`](./win/README.md) | Windows 側のアプリの設定（Orca など）。WSL の `~/dotfiles/setup --update` が `/mnt/c` へコピーして配る。新しい Windows で最初に流す bootstrap（[`win/bootstrap/Install-Bootstrap.ps1`](./win/README.md#bootstrap-新しい-windows-で最初に流す)。WSL は要らない）もここ |
 | [`CLAUDE.md`](./CLAUDE.md) | この repo で作業する Claude Code への決まり（設計の文書の置き場・PR と commit に書くもの） |
 
 決めたことと、その理由の記録（ADR）と設計の文書（spec・実装計画）は、この repo（public）には置かず、private な
