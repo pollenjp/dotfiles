@@ -88,7 +88,8 @@ metadata:
 ---
 ```
 
-話題をまたいで使う skill は、pack の名前を空白で区切って並べ、複数の pack に入れる。先頭が主の pack。
+話題をまたいで使う skill は、pack の名前を空白で区切って並べ、複数の pack に入れる。先頭が主の pack（下の例は
+`claude-skills` の `pjp-docs-to-notion` の形で、主は notion）。
 
 ```yaml
 metadata:
@@ -96,7 +97,7 @@ metadata:
 ```
 
 - pack は `diagram`（図）・`video`（動画）・`notion`（Notion）・`machine`（マシン）・`repo`（repo の手入れ）・
-  `browser`（ブラウザ）・`lang`（言語・道具ごとの好み）・`docs`（文書。入口はまだ無い）。入口は `claude-skills` の
+  `browser`（ブラウザ）・`lang`（言語・道具ごとの好み）・`docs`（文書）。入口は `claude-skills` の
   `skills/pjp-pack-<pack>/`
 - 書く形は上の 1 通り（`metadata:` の下に字下げした `pjp-pack: <pack> [<pack>…]` の 1 行）。列（`[notion, docs]`）にせず、
   同じ名前を 2 度書かない。bootstrap は yq の無いマシンでも動くよう、この形だけを読む。`check-claude-frontmatter.sh` が、
