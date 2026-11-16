@@ -39,8 +39,8 @@
 #       ({"pjp-dev-tracker":"off"})。無ければ、option を含む世代へまだ switch していないので、警告してこの分だけ飛ばす。
 #       --no-host-option では読まない (home-manager の無い cloud の VM。claude-cloud/bootstrap-claude-cloud.sh が渡す)
 #   ~/.claude/skills/*/SKILL.md
-#       frontmatter の metadata の pjp-pack (pack の割り当て)。yq の無いマシン (cloud の VM) でも読めるよう、決まった形
-#       だけを awk で読む (下の skill_pack)。その pack の入口は ~/.claude/skills/pjp-pack-<pack>/SKILL.md
+#       frontmatter の metadata の pjp-pack (pack の割り当て。空白で区切って複数の pack を書ける)。yq の無いマシン (cloud の
+#       VM) でも読めるよう、決まった形だけを awk で読む (下の skill_pack)。pack の入口は ~/.claude/skills/pjp-pack-<pack>/SKILL.md
 #   ~/.claude/skills/synced/*/<名前>/SKILL.md と ~/.claude-<アカウント>/skills/synced/*/<名前>/SKILL.md
 #       claude.ai から同期された skill。アカウントは ~/.local/state/dotfiles/claude-accounts.json の一覧
 #       (bootstrap-claude-accounts.sh と同じ)。settings.json はアカウントの間で共有なので、どのアカウントの分も書く
@@ -61,10 +61,14 @@
 # 書きたくなくなった key (入口が消えた・skill が pack から外れた・同期された skill が消えた) は、今の値が控えた値と同じ
 # なら消して既定の見え方に戻し、違えば (手で変えた) 触らない。どちらも控えから外す。
 #
-#   - 入口の無い pack の skill は名前だけにしない (呼ぶきっかけが消えるため)。入口が 1 つも無い (claude-skills を取れない
-#     マシン・入口がまだ無い版) なら 1 行出すだけにし、ほかの pack の入口はあるなら、その pack の分を警告する
+#   - 書いた pack のどれにも入口が無い skill は名前だけにしない (呼ぶきっかけが消えるため)。どれか 1 つに入口があれば
+#     名前だけにする (先頭の主の pack かどうかは問わない)。入口が 1 つも無い (claude-skills を取れないマシン・入口がまだ
+#     無い版) なら 1 行出すだけにし、ほかの pack の入口はあるなら、入口の無い pack ごとに警告する (説明つきのまま残す
+#     skill と、ほかに書いた pack の入口から辿れるので名前だけにする skill を分けて出す)。同じ名前を 2 度書いた重なりは
+#     1 つにまとめる (知らせない。落とすのは check-claude-frontmatter.sh)
 #   - 入口の skill 自身・mod を兼ねる skill (.claude-plugin/plugin.json がある。plugin の skill には skillOverrides が効かない)
-#     に pjp-pack があれば、警告して名前だけにしない。pjp-pack の値が pack の名前として読めないときも同じ
+#     に pjp-pack があれば、警告して名前だけにしない。pjp-pack の値が pack の名前として読めないとき (空白で区切った名前の
+#     うち 1 つでも読めなければ、ほかの名前の入口があっても) も同じ
 #   - frontmatter に disable-model-invocation: true がある skill は、pack に入っていても名前だけにしない (入口の目録には
 #     載るが、Claude が自分では呼ばない作りのまま残す。user の設定をその作りと食い違わせない)。前に書いた name-only は
 #     上の「書きたくなくなった key」として戻す
@@ -103,7 +107,7 @@ Claude Code の skill の見え方 (skillOverrides) を ~/.claude/settings.json 
 
 書く key と値:
   host option の skill (pjp-dev-tracker)        on / off (dotfiles.claude.devTracker.enable)
-  pack の skill (SKILL.md の metadata.pjp-pack)  name-only (その pack の入口 pjp-pack-<pack> があるときだけ)
+  pack の skill (SKILL.md の metadata.pjp-pack)  name-only (書いた pack のどれかの入口 pjp-pack-<pack> があるときだけ)
   claude.ai から同期された skill                anthropic-skills:<名前> を user-invocable-only
 
 書いた key は ~/.local/state/dotfiles/claude-skill-overrides.applied.json に控え、書かなくなったら戻す。
@@ -167,13 +171,14 @@ summary_warn() {
   { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
-# skill_pack <SKILL.md>: frontmatter の metadata の pjp-pack の値を出す (無ければ何も出さない)。
+# skill_pack <SKILL.md>: frontmatter の metadata の pjp-pack の値 (空白で区切った pack の名前の並び) を 1 行で出す (無ければ
+# 何も出さない)。名前に分けるのは呼ぶ側。
 #
 # yq を前提にしない (cloud の VM には無い) ので、次の形だけを読む。値は引用符で囲んでもよく、値の後ろの「 #」から先は
 # コメントとして外す。metadata の直下 (最初の子の字下げ) の pjp-pack だけを見る。
 #
 #   metadata:
-#     pjp-pack: <pack>
+#     pjp-pack: <pack> [<pack>…]
 #
 # ほかの形 (metadata: {pjp-pack: …} など) は読まない。pack の無い skill として説明つきのまま残る (安全な側に倒れる)。
 # frontmatter は 1 行目の --- から次の --- の行まで (Claude Code と同じく、--- の後ろの空白と CRLF は受ける)。
@@ -267,36 +272,7 @@ fi
 
 want_rows=""
 
-# pack の skill ("<skill>\t<pack>" の行)
-pack_rows=""
-for f in "${skills_dir}"/*/SKILL.md; do
-  [[ -f ${f} ]] || continue
-  skill_dir=$(dirname -- "${f}")
-  skill=$(basename -- "${skill_dir}")
-  pack=$(skill_pack "${f}")
-  [[ -n ${pack} ]] || continue
-  if ! [[ ${pack} =~ ${pack_re} ]]; then
-    warn "${f} の metadata の pjp-pack が、pack の名前として読めません: ${pack}" \
-      "pack の名前は小文字の英数字とハイフン (diagram など) です。この skill は説明つきのまま残します。"
-    continue
-  fi
-  if [[ ${skill} == pjp-pack-* ]]; then
-    warn "入口の skill ${skill} に metadata の pjp-pack があります (${pack})。入口は常駐なので、名前だけにはしません。" \
-      "${f} から pjp-pack を外してください。"
-    continue
-  fi
-  if [[ -f ${skill_dir}/.claude-plugin/plugin.json ]]; then
-    warn "mod を兼ねる skill ${skill} に metadata の pjp-pack があります (${pack})。" \
-      "plugin として読まれ skillOverrides が効かないので、名前だけにはしません。"
-    continue
-  fi
-  # Claude が自分では呼ばない作りの skill (入口の目録には載る) は、そのまま残す。知らせない (決めた形なので)
-  if [[ $(fm_top_value "${f}" disable-model-invocation) =~ ${true_re} ]]; then
-    continue
-  fi
-  pack_rows+="${skill}"$'\t'"${pack}"$'\n'
-done
-
+# pack の入口が 1 つでもあるか (1 つも無いマシンでは、入口の無い pack を警告しない)
 any_entry=0
 for f in "${skills_dir}"/pjp-pack-*/SKILL.md; do
   if [[ -f ${f} ]]; then
@@ -305,24 +281,93 @@ for f in "${skills_dir}"/pjp-pack-*/SKILL.md; do
   fi
 done
 
-no_entry_count=0
-packs=$(printf '%s' "${pack_rows}" | cut -f 2 | sort -u)
-while IFS= read -r pack; do
-  [[ -n ${pack} ]] || continue
-  members=$(printf '%s' "${pack_rows}" | awk -F '\t' -v p="${pack}" '$2 == p { print $1 }' | sort)
-  if [[ -f ${skills_dir}/pjp-pack-${pack}/SKILL.md ]]; then
-    while IFS= read -r skill; do
-      want_rows+="${skill}"$'\t'"name-only"$'\n'
-    done <<<"${members}"
-  elif [[ ${any_entry} == 1 ]]; then
-    warn "pack ${pack} の入口 ${skills_dir}/pjp-pack-${pack} がありません。次の skill は説明つきのまま残します: ${members//$'\n'/, }" \
-      "claude-skills の clone が古いか、入口の名前が変わった・消えたか、skill の metadata の pjp-pack を書き違えています。"
-  else
-    no_entry_count=$((no_entry_count + $(wc -l <<<"${members}")))
+# pack の skill。書いた pack のどれかに入口があれば名前だけにする。入口の無い pack は
+# "<pack>\t<skill>\t<辿れるか (ほかに書いた pack の入口があれば 1)>" の行に控え、読み終えてから pack ごとに知らせる
+missing_rows=""
+unreachable=0
+for f in "${skills_dir}"/*/SKILL.md; do
+  [[ -f ${f} ]] || continue
+  skill_dir=$(dirname -- "${f}")
+  skill=$(basename -- "${skill_dir}")
+  value=$(skill_pack "${f}")
+  # 空白で区切った pack の名前 (先頭が主の pack。ここでは主かどうかで扱いを変えない)
+  names=()
+  read -r -a names <<<"${value}"
+  [[ ${#names[@]} -gt 0 ]] || continue
+  readable=1
+  for pack in "${names[@]}"; do
+    if ! [[ ${pack} =~ ${pack_re} ]]; then
+      readable=0
+    fi
+  done
+  # 読めない名前が 1 つでもあれば、残りの名前で入口を探さない (書き違いを半分だけ効かせない)
+  if [[ ${readable} == 0 ]]; then
+    warn "${f} の metadata の pjp-pack が、pack の名前として読めません: ${value}" \
+      "pack の名前は小文字の英数字とハイフン (diagram など) です。複数の pack は空白で区切ります。この skill は説明つきのまま残します。"
+    continue
   fi
-done <<<"${packs}"
-if [[ ${no_entry_count} -gt 0 ]]; then
-  note "pack の入口 (${skills_dir}/pjp-pack-*) が 1 つも無いので、pack の skill (${no_entry_count} 本) は説明つきのまま残します (claude-skills を取れないマシン・入口がまだ無い版)。"
+  if [[ ${skill} == pjp-pack-* ]]; then
+    warn "入口の skill ${skill} に metadata の pjp-pack があります (${value})。入口は常駐なので、名前だけにはしません。" \
+      "${f} から pjp-pack を外してください。"
+    continue
+  fi
+  if [[ -f ${skill_dir}/.claude-plugin/plugin.json ]]; then
+    warn "mod を兼ねる skill ${skill} に metadata の pjp-pack があります (${value})。" \
+      "plugin として読まれ skillOverrides が効かないので、名前だけにはしません。"
+    continue
+  fi
+  # Claude が自分では呼ばない作りの skill (入口の目録には載る) は、そのまま残す。知らせない (決めた形なので)
+  if [[ $(fm_top_value "${f}" disable-model-invocation) =~ ${true_re} ]]; then
+    continue
+  fi
+  # 同じ名前の重なりは 1 つにまとめる。振る舞いは変わらないので知らせない (書き方の誤りとして落とすのは
+  # check-claude-frontmatter.sh)
+  distinct=()
+  seen=" "
+  for pack in "${names[@]}"; do
+    if [[ ${seen} != *" ${pack} "* ]]; then
+      seen+="${pack} "
+      distinct+=("${pack}")
+    fi
+  done
+  reach=0
+  for pack in "${distinct[@]}"; do
+    if [[ -f ${skills_dir}/pjp-pack-${pack}/SKILL.md ]]; then
+      reach=1
+    fi
+  done
+  for pack in "${distinct[@]}"; do
+    if [[ ! -f ${skills_dir}/pjp-pack-${pack}/SKILL.md ]]; then
+      missing_rows+="${pack}"$'\t'"${skill}"$'\t'"${reach}"$'\n'
+    fi
+  done
+  if [[ ${reach} == 1 ]]; then
+    want_rows+="${skill}"$'\t'"name-only"$'\n'
+  else
+    unreachable=$((unreachable + 1))
+  fi
+done
+
+if [[ ${any_entry} == 1 ]]; then
+  # 入口の無い pack ごとに 1 件。説明つきのまま残す skill (書いた pack のどれにも入口が無い) と、ほかに書いた pack の入口から
+  # 辿れるので名前だけにする skill を分けて出す (後者も出すのは、pack の名前の書き違いに気付けるように)
+  missing_packs=$(printf '%s' "${missing_rows}" | cut -f 1 | sort -u)
+  while IFS= read -r pack; do
+    [[ -n ${pack} ]] || continue
+    kept=$(printf '%s' "${missing_rows}" | awk -F '\t' -v p="${pack}" '$1 == p && $3 == 0 { print $2 }' | sort)
+    via=$(printf '%s' "${missing_rows}" | awk -F '\t' -v p="${pack}" '$1 == p && $3 == 1 { print $2 }' | sort)
+    lines=("pack ${pack} の入口 ${skills_dir}/pjp-pack-${pack} がありません。")
+    if [[ -n ${kept} ]]; then
+      lines[0]+="次の skill は説明つきのまま残します: ${kept//$'\n'/, }"
+    fi
+    if [[ -n ${via} ]]; then
+      lines+=("次の skill は、ほかに書いた pack の入口から辿れるので名前だけにします: ${via//$'\n'/, }")
+    fi
+    lines+=("claude-skills の clone が古いか、入口の名前が変わった・消えたか、skill の metadata の pjp-pack を書き違えています。")
+    warn "${lines[@]}"
+  done <<<"${missing_packs}"
+elif [[ ${unreachable} -gt 0 ]]; then
+  note "pack の入口 (${skills_dir}/pjp-pack-*) が 1 つも無いので、pack の skill (${unreachable} 本) は説明つきのまま残します (claude-skills を取れないマシン・入口がまだ無い版)。"
 fi
 
 # claude.ai から同期された skill。settings.json を共有するアカウントの dir の分も読む
