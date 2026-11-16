@@ -104,6 +104,38 @@
             (example "client-claude" "client に Claude Code だけを足したホスト (`claude.enable = true`)")
           ];
         };
+
+      # win/runner/groups.json (生成物) の中身。グループごとの素のホスト (グループだけを書いたもの) の group.json (段と道具の switch の値。
+      # home/modules/group.nix) を集める。Windows の runner が、ホストの値 (dotfiles-private の win/hosts/*.toml) に書いていない道具の
+      # 既定を引くのに使う (dotfiles-private の docs/adr/060_win_runner_core_*)。flake からは win/ が見えないので、古いかは CI の lint が見る。
+      # 出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json`
+      windowsGroupsJson =
+        let
+          plainGroupJson =
+            group:
+            builtins.fromJSON
+              (mkHome {
+                username = "user";
+                system = "x86_64-linux";
+                inherit group;
+              }).config.home.file.".local/state/dotfiles/group.json".text;
+          names = map (g: g.name) (import ./lib/groups.nix).groups;
+        in
+        builtins.toJSON {
+          version = 1;
+          # ホストの値に group を書かなかったときのグループ (options.nix の dotfiles.group の既定)
+          default = "personal";
+          groups = lib.genAttrs names (
+            group:
+            let
+              j = plainGroupJson group;
+            in
+            {
+              inherit (j) tiers tools;
+            }
+          );
+        }
+        + "\n";
     in
     {
       homeConfigurations = hostsWith [ ];
@@ -131,6 +163,7 @@
           privateHosts
           hostSummary
           groupsDoc
+          windowsGroupsJson
           ;
       };
 
