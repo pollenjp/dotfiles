@@ -362,6 +362,63 @@ Test-Case 'Ctrl+C を受け止める handler の C# を読め、足す・外す�
 }
 
 # ---------------------------------------------------------------------------
+# 状態を読む (本物の Get-BootstrapState。Windows に触る一番下の関数だけを偽物にし、道具の置き場所は一時ディレクトリの空のファイル)
+# ---------------------------------------------------------------------------
+
+$stateRoot = Join-Path ([IO.Path]::GetTempPath()) ('install-bootstrap-tests-' + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $stateRoot | Out-Null
+foreach ($f in @('git.exe', 'gh.exe', 'rustup.exe')) { Set-Content -LiteralPath (Join-Path $stateRoot $f) -Value '' }
+# settings.toml の既定の host は GNU のまま。rustup show が MSVC を出せば、host は rustup show から読んでいる
+Set-Content -LiteralPath (Join-Path $stateRoot 'settings.toml') -Value "version = `"12`"`ndefault_host_tuple = `"x86_64-pc-windows-gnu`"`nauto_self_update = `"disable`"`n"
+$statePaths = [pscustomobject]@{
+    Git = (Join-Path $stateRoot 'git.exe'); Gh = (Join-Path $stateRoot 'gh.exe'); Rustup = (Join-Path $stateRoot 'rustup.exe')
+    RustupSettings = (Join-Path $stateRoot 'settings.toml'); VsWhere = (Join-Path $stateRoot 'vswhere.exe'); VsSetup = (Join-Path $stateRoot 'setup.exe')
+    GhqRoot = (Join-Path $stateRoot 'ghq')
+}
+$script:NativeLog = [System.Collections.Generic.List[string]]::new()
+# MSVC とワークロードはあるが、SDK は版の付かない UCRT だけの Build Tools 2022
+$script:VsJson = '[{"productId":"Microsoft.VisualStudio.Product.BuildTools","installationPath":"C:\\BT","catalog":{"productDisplayVersion":"17.14.44"},"packages":[{"id":"Microsoft.VisualStudio.Workload.VCTools","type":"Workload"},{"id":"Microsoft.VisualStudio.Component.VC.Tools.x86.x64","type":"Component"},{"id":"Microsoft.VisualStudio.Component.Windows10SDK","type":"Component"}]}]'
+function Test-Elevated { $false }
+function Get-BootstrapSac { 'off' }
+function Read-VsWhere { param([string]$VsWhere) $script:VsJson }
+function Invoke-Winget { param([string[]]$Arguments) [pscustomobject]@{ ExitCode = 0; Lines = @("x $($Arguments[3])") } }
+# 打ったものを「exe 引数 [打ったときの RUSTUP_AUTO_INSTALL]」で書き留め、道具ごとの出力を返す
+function Invoke-Native {
+    param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
+    $leaf = Split-Path -Leaf $FilePath
+    $script:NativeLog.Add("$leaf $($Arguments -join ' ') [RUSTUP_AUTO_INSTALL=$($env:RUSTUP_AUTO_INSTALL)]")
+    $lines = @()
+    switch ("$leaf $($Arguments -join ' ')") {
+        'git.exe --version' { $lines = @('git version 2.56.0.windows.4') }
+        'gh.exe --version' { $lines = @('gh version 2.103.3 (2026-10-26)') }
+        'rustup.exe --version' { $lines = @('rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
+        'rustup.exe show' { $lines = @('Default host: x86_64-pc-windows-msvc', 'rustup home:  C:\Users\u\.rustup', '', 'no active toolchain') }
+    }
+    [pscustomobject]@{ ExitCode = 0; Lines = $lines }
+}
+$statePackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+$env:RUSTUP_AUTO_INSTALL = 'keep'
+try {
+    $readState = Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64'
+    $afterEnv = $env:RUSTUP_AUTO_INSTALL
+} finally {
+    $env:RUSTUP_AUTO_INSTALL = $null
+    Remove-Item -LiteralPath $stateRoot -Recurse -Force
+}
+$readRustup = @($readState.Packages | Where-Object { $_.Name -eq 'rustup' })[0]
+$readVs = @($readState.Packages | Where-Object { $_.Name -eq 'vs-buildtools' })[0]
+
+# rustup 1.29.3 は --version・show でも、cwd の rust-toolchain.toml の入っていない toolchain を入れにいく。-Check は何も変えない
+Test-Case 'rustup は --version も show も RUSTUP_AUTO_INSTALL=0 で打つ (toolchain を入れさせない)' 'rustup.exe --version [RUSTUP_AUTO_INSTALL=0]|rustup.exe show [RUSTUP_AUTO_INSTALL=0]' {
+    @($script:NativeLog | Where-Object { $_ -like 'rustup.exe *' }) -join '|'
+}
+Test-Case '打った後は RUSTUP_AUTO_INSTALL を元の値に戻す' 'keep' { $afterEnv }
+Test-Case '既定の host は rustup show から読む (settings.toml の default_host_tuple は読まない)' 'x86_64-pc-windows-msvc|1.29.3|True' { "$($readRustup.DefaultHost)|$($readRustup.Installed)|$($readRustup.SelfUpdateDisabled)" }
+Test-Case 'Build Tools は vswhere から版・置き場所・足りないもの (版の付いた SDK) を読む' 'True|17.14.44|C:\BT|Microsoft.VisualStudio.Component.Windows11SDK.26100' {
+    "$($readVs.Exists)|$($readVs.Installed)|$($readVs.InstallPath)|$(@($readVs.MissingComponents) -join ',')"
+}
+
+# ---------------------------------------------------------------------------
 # 流れ (Windows に触る関数を偽物に差し替える。ここより後ろは、上の関数のテストに戻らない)
 # ---------------------------------------------------------------------------
 

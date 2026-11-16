@@ -508,13 +508,15 @@ function Invoke-Native {
     [pscustomobject]@{ ExitCode = $code; Lines = $lines }
 }
 
-# rustup show を打つ。cwd に rust-toolchain.toml があっても toolchain を入れさせない (RUSTUP_AUTO_INSTALL=0。-Check は何も変えない)
-function Invoke-RustupShow {
-    param([string]$RustupPath)
+# rustup を打つ。cwd に rust-toolchain.toml があっても toolchain を入れさせない (RUSTUP_AUTO_INSTALL=0)。rustup 1.29.3 は
+# --version・show でも、入っていない active toolchain を入れにいく (-Check は何も変えない・bootstrap は toolchain を入れない)。
+# rustup はどれもこれで打つ
+function Invoke-Rustup {
+    param([string]$RustupPath, [string[]]$Arguments)
     $saved = $env:RUSTUP_AUTO_INSTALL
     $env:RUSTUP_AUTO_INSTALL = '0'
     try {
-        Invoke-Native -FilePath $RustupPath -Arguments @('show')
+        Invoke-Native -FilePath $RustupPath -Arguments $Arguments
     } finally {
         $env:RUSTUP_AUTO_INSTALL = $saved
     }
@@ -738,12 +740,12 @@ function Get-BootstrapState {
             'rustup' {
                 $exists = Test-Path -LiteralPath $Paths.Rustup -PathType Leaf
                 if ($exists) {
-                    $installed = Get-RustupVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Rustup -Arguments @('--version')).Lines
+                    $installed = Get-RustupVersionFromOutput -Lines (Invoke-Rustup -RustupPath $Paths.Rustup -Arguments @('--version')).Lines
                     $settings = $null
                     if (Test-Path -LiteralPath $Paths.RustupSettings -PathType Leaf) { $settings = Get-Content -LiteralPath $Paths.RustupSettings -Raw }
                     $selfUpdateDisabled = Test-RustupSelfUpdateDisabled -SettingsText $settings
                     # 既定の host は、rustup が今使う値 (rustup show の Default host) を読む
-                    $defaultHost = Get-RustupDefaultHost -Lines (Invoke-RustupShow -RustupPath $Paths.Rustup).Lines
+                    $defaultHost = Get-RustupDefaultHost -Lines (Invoke-Rustup -RustupPath $Paths.Rustup -Arguments @('show')).Lines
                 }
             }
         }
@@ -870,12 +872,12 @@ function Invoke-InstallBootstrap {
         }
         if ($s.Name -ne 'rustup') { continue }
         if (-not $s.SelfUpdateDisabled) {
-            $r = Invoke-Native -FilePath $paths.Rustup -Arguments @('set', 'auto-self-update', 'disable')
+            $r = Invoke-Rustup -RustupPath $paths.Rustup -Arguments @('set', 'auto-self-update', 'disable')
             if ($r.ExitCode -eq 0) { Write-Host 'rustup: 自己更新を止めた (rustup update が rustup 自身を上げない)' }
             else { Write-Host "rustup: 自己更新を止められなかった (終了コード $($r.ExitCode))" }
         }
         if ("$($s.DefaultHost)" -ne $script:RustHost) {
-            $r = Invoke-Native -FilePath $paths.Rustup -Arguments @('set', 'default-host', $script:RustHost)
+            $r = Invoke-Rustup -RustupPath $paths.Rustup -Arguments @('set', 'default-host', $script:RustHost)
             if ($r.ExitCode -eq 0) { Write-Host "rustup: 既定の host を $script:RustHost にした" }
             else { Write-Host "rustup: 既定の host を変えられなかった (終了コード $($r.ExitCode))" }
         }
