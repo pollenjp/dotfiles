@@ -5,4 +5,8 @@
 //! 「runner」。
 
 pub mod cli;
+pub mod manifest;
 pub mod report;
+
+#[cfg(test)]
+mod testutil;
