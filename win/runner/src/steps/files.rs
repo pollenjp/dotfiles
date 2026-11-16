@@ -160,7 +160,8 @@ impl Step for Files {
                             Ok(()) => {
                                 records.set(&dst_key, &want);
                                 ctx.say(format!("{label}: {dst_key}"));
-                                if let Some(h) = &f.hint {
+                                // 空の hint は出さない (WSL の [[ -n ${hint} ]] と同じ)
+                                if let Some(h) = f.hint.as_deref().filter(|h| !h.is_empty()) {
                                     hints.push(format!("{dst_key}: {h}"));
                                 }
                             }
@@ -382,6 +383,17 @@ mod tests {
         let (o, out) = e.run(APPLY);
         assert_eq!(o[0].text, "コピー 0 / 上書き 0 / 同じ 2 / 衝突 0");
         assert!(!out.contains("読み直させてください"));
+    }
+
+    #[test]
+    fn empty_hint_is_not_shown() {
+        let e = Env::new();
+        e.t.write(
+            "repo/win/manifest.toml",
+            "[[files]]\nsrc = \"app/a.json\"\ndst = \"%USERPROFILE%/.app/a.json\"\nhint = \"\"\n",
+        );
+        let (_, out) = e.run(APPLY);
+        assert!(!out.contains("読み直させてください"), "{out}");
     }
 
     #[test]
