@@ -66,6 +66,8 @@ $Exe = "$Dir\op-reason.exe"
 # Get-OpReasonReleases: 版ごとの zip の SHA-256 (Release の op-reason-windows.zip.sha256 の中身) と、展開した中身の値
 Test-Case '0.1.0 の Zip は Release の op-reason-windows.zip.sha256 と同じ値' '4b664af358559faf8e94a1142f579236846d75a8e6698dee66dbf35bb0335fb0' { (Get-OpReasonReleases)['0.1.0'].Zip }
 Test-Case '0.1.0 の Tree は Release の zip を展開した中身の値' 'b2b09e1c101a7b1da0a9facd81cac8f18ad4018d9a34ecac04db38133d9e796a' { (Get-OpReasonReleases)['0.1.0'].Tree }
+Test-Case '0.2.0 の Zip は Release の op-reason-windows.zip.sha256 と同じ値' '6e9a104484a019da093726d0bad2ee3da7cedb2e238a592e12c67dcc2336dbf3' { (Get-OpReasonReleases)['0.2.0'].Zip }
+Test-Case '0.2.0 の Tree は Release の zip を展開した中身の値' '5ced1fd007b3a92b3bc3539915babdb14c9064548dbb176031427b004342619b' { (Get-OpReasonReleases)['0.2.0'].Tree }
 Test-Case '表のどの版にも Zip と Tree がある' 0 { @((Get-OpReasonReleases).Values | Where-Object { -not ($_.Zip -and $_.Tree) }).Count }
 Test-Case '表の値はどれも 64 桁の小文字の 16 進' 0 { @((Get-OpReasonReleases).Values | ForEach-Object { $_.Zip; $_.Tree } | Where-Object { "$_" -cnotmatch '^[0-9a-f]{64}$' }).Count }
 Test-Case '表の版はどれも X.Y.Z' 0 { @((Get-OpReasonReleases).Keys | Where-Object { "$_" -notmatch '^\d+\.\d+\.\d+$' }).Count }
@@ -77,7 +79,7 @@ function Get-DefaultVersion {
     $param.DefaultValue.Value
 }
 Test-Case '-Version の既定値は表にある' 'True' { (Get-OpReasonReleases).Contains((Get-DefaultVersion)) }
-# WSL の実行ファイル (repo の nix/pkgs/op-reason/default.nix の version) と同じ版でないと、呼び出しの取り決めが合わずに断られる
+# WSL の実行ファイル (repo の nix/pkgs/op-reason/default.nix の version) と同じ版にそろえる (呼び出しの取り決めが変わった版どうしでは断られる)
 Test-Case '-Version の既定値は、WSL の nix/pkgs/op-reason/default.nix の version と同じ' 'True' {
     $nix = [IO.File]::ReadAllText((Join-Path $PSScriptRoot '../../nix/pkgs/op-reason/default.nix'))
     $m = [regex]::Match($nix, '(?m)^\s*version = "([^"]+)";')

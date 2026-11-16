@@ -9,7 +9,7 @@ PowerShell では dotfiles.ps1 の Install-OpReason から呼ぶ (win/README.md 
 op-reason は 1Password CLI (op) の wrapper (自作の OSS)。WSL の op (dotfiles の home/modules/op-reason.nix が入れる、Release の
 Linux の実行ファイル) は、呼び出しごとに Windows の op-reason.exe (動かないときは隣の launcher.ps1) を起こして承認の窓を出す。
 その Windows の部品が op-reason-windows.zip (op-reason.exe・launcher.ps1・powershell-entry\・SKILL.md・README・ライセンス) で、
-WSL の実行ファイルと同じ版でないと呼び出しの取り決めが合わずに断られる。
+WSL の実行ファイルと同じ版にそろえる (呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 と 0.2.0 は同じ取り決め)。
 
 固定した版の zip を GitHub の Release から落とし、SHA-256 が表 (Get-OpReasonReleases) の Zip と合うときだけ隣に展開し、
 展開した中身が表の Tree と合えば %LOCALAPPDATA%\Programs\op-reason と入れ替える。合わなければ何も変えずに止まる。
@@ -37,7 +37,7 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '0.1.0',
+    [string]$Version = '0.2.0',
     [switch]$Check,
     [string]$InstallDir = ''
 )
@@ -55,6 +55,10 @@ function Get-OpReasonReleases {
         '0.1.0' = @{
             Zip  = '4b664af358559faf8e94a1142f579236846d75a8e6698dee66dbf35bb0335fb0'
             Tree = 'b2b09e1c101a7b1da0a9facd81cac8f18ad4018d9a34ecac04db38133d9e796a'
+        }
+        '0.2.0' = @{
+            Zip  = '6e9a104484a019da093726d0bad2ee3da7cedb2e238a592e12c67dcc2336dbf3'
+            Tree = '5ced1fd007b3a92b3bc3539915babdb14c9064548dbb176031427b004342619b'
         }
     }
 }

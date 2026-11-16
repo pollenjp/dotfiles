@@ -2,9 +2,9 @@
 #
 # GitHub の Release に置いた静的な実行ファイル (musl。op-reason-<arch>-linux) を、版と system ごとの SHA-256 で固定して入れる。
 # SHA-256 は Release の隣の .sha256 の値。Windows の側 (op-reason-windows.zip の op-reason.exe と launcher.ps1) は
-# win/op-reason/Install-OpReason.ps1 が同じ版で入れ、WSL の実行ファイルはそれを起こして窓を出す。2 つの版がずれると呼び出しの
-# 取り決め (payload の版) が合わずに断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ PR で上げる
-# (手順は nix/README.md の「op-reason の新しい版を出したとき」)。
+# win/op-reason/Install-OpReason.ps1 が同じ版で入れ、WSL の実行ファイルはそれを起こして窓を出す。呼び出しの取り決め (payload の版。
+# 0.1.0 と 0.2.0 は同じ 1) が変わった版どうしでは断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ PR で
+# 上げる (手順は nix/README.md の「op-reason の新しい版を出したとき」)。
 #
 # op-reason の flake (packages.op) を input にしないのは、flake-lock-age.sh が github の input に commit から 7 日の猶予を課すため
 # (公開したばかりの版では update が止まり、CI の lock-age が落ちる。release-age.nix の例外は nixpkgs にしか効かない)。自作の
@@ -22,17 +22,17 @@
 }:
 
 let
-  version = "0.1.0";
+  version = "0.2.0";
   # system → Release の asset の名前と、その .sha256 の値
   # (https://github.com/pollenjp/op-reason/releases/download/v<version>/<name>.sha256)
   assets = {
     x86_64-linux = {
       name = "op-reason-x86_64-linux";
-      sha256 = "28a41d594e0ca20108f50e34cac41c7624f9e53cc420a12b88a9698ffe2cebbb";
+      sha256 = "cb8ee3556c5b5ed7abe471e4053dd51d62e99b361c58af83303a9d738358c723";
     };
     aarch64-linux = {
       name = "op-reason-aarch64-linux";
-      sha256 = "9cc3f30b7df4f4f83c7b8338de865c04fe4fddbe8c31dfe84f6a0355881ac804";
+      sha256 = "ba289632c983f091959317d3c77ec25fca3b293fccc7a97b3be58c1512f1e035";
     };
   };
   system = stdenvNoCC.hostPlatform.system;

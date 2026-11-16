@@ -20,7 +20,8 @@
 #                  を、dotfiles.wsl.windowsUserName (無ければ wsl.onePassword.windowsUserName) で組み立てる。Windows の PATH に
 #                  足さずに済み、WSL が Windows の PATH を読み直す (wsl --shutdown) のも待たない。launcher.ps1 はその隣から探す
 #
-# 表示の言語 (OPREASON_LANG) は既定にしない。op-reason が LC_ALL・LC_MESSAGES・LANG から決める (nix/README.md の「表示の言語」)。
+# 表示の言語 (OPREASON_LANG) は既定にしない。op-reason が窓で選んだ言語、無ければ OPREASON_LANG、無ければ英語で決める
+# (nix/README.md の「表示の言語」)。
 #
 # fish の op と op-reason の補完 (op を呼ばない。pkgs/op-reason が出したもの) も、入るマシンにだけ ~/.config/fish/completions に置く。
 # fish に同梱の op の補完は、補完を初めて使うときに op completion fish を打ち、wrapper が理由なしとして断った文を端末に出す。fish は
