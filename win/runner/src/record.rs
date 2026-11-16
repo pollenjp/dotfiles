@@ -48,6 +48,16 @@ impl Records {
         );
     }
 
+    /// 鍵を外す。在ったら true。
+    pub fn remove(&mut self, key: &str) -> bool {
+        self.map.remove(key).is_some()
+    }
+
+    /// 鍵の一覧 (キーの順)。
+    pub fn keys(&self) -> Vec<String> {
+        self.map.keys().cloned().collect()
+    }
+
     /// 変わっていれば書く。書いたら true。
     pub fn save_if_changed(&self) -> std::io::Result<bool> {
         if self.map == self.original && self.path.exists() {
@@ -84,6 +94,25 @@ mod tests {
         std::fs::write(&p, "[1]").unwrap();
         let e = Records::load(&p).err().unwrap();
         assert!(e.contains("壊れています"), "{e}");
+    }
+
+    /// 片付け (clone から消えたコピーを消す) で使う: 鍵を並べ、外す
+    #[test]
+    fn keys_and_remove() {
+        let t = TempDir::new("record");
+        let p = t.path().join("r.json");
+        let mut r = Records::load(&p).unwrap();
+        r.set("b", "2");
+        r.set("a", "1");
+        assert_eq!(r.keys(), vec!["a".to_string(), "b".to_string()]);
+        assert!(r.remove("a"));
+        assert!(!r.remove("a"));
+        assert_eq!(r.keys(), vec!["b".to_string()]);
+        assert!(r.save_if_changed().unwrap());
+        assert_eq!(
+            std::fs::read_to_string(&p).unwrap(),
+            "{\n  \"b\": \"2\"\n}\n"
+        );
     }
 
     #[test]

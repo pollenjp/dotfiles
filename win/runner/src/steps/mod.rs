@@ -4,9 +4,16 @@
 //! 手順を足すときは、この下に module を 1 つ書き、`all()` に 1 行足す (win/README.md の「runner の手順を足す」)。
 
 pub mod bootstrap;
+pub mod claude_env;
+pub mod claude_notion;
+pub mod claude_skills;
 pub mod files;
+pub mod generated;
+pub mod hc_hub;
 pub mod pending;
+pub mod pjp;
 pub mod ps1;
+pub mod tool_skill;
 
 use crate::context::Ctx;
 use crate::host::HostValues;
@@ -73,6 +80,10 @@ pub struct StepInfo {
     pub gate: Gate,
     /// runner に移したか (false は WSL にしか無い手順)
     pub ported: bool,
+    /// Windows にしか無い手順か (WSL の setup に同じ手順が無い。bootstrap の確かめ・W0-2)。受け持ちによらず runner が受け持ち、
+    /// 受け持ちが WSL のホストの apply でも流す。false は WSL の `bootstrap-windows-*.sh` を写した手順とまだ無い手順で、受け持ちを
+    /// runner に切り替えたホストでだけ apply が書く (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)
+    pub windows_only: bool,
 }
 
 /// 流し方。
@@ -131,8 +142,19 @@ pub trait Step {
 
 /// 手順の一覧 (順番どおり)。
 pub fn all() -> Vec<Box<dyn Step>> {
-    let mut steps: Vec<Box<dyn Step>> =
-        vec![Box::new(bootstrap::Bootstrap), Box::new(files::Files)];
+    let mut steps: Vec<Box<dyn Step>> = vec![
+        Box::new(bootstrap::Bootstrap),
+        // W0-2 の Windows の側 (Windows にしか無い手順。dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)
+        Box::new(claude_env::ClaudeEnv),
+        Box::new(claude_notion::ClaudeNotion),
+        Box::new(claude_skills::ClaudeSkills),
+        Box::new(pjp::Pjp),
+        Box::new(hc_hub::HcHub),
+        Box::new(files::Files),
+    ];
+    for spec in tool_skill::SPECS {
+        steps.push(Box::new(tool_skill::ToolSkill(spec)));
+    }
     for spec in ps1::SPECS {
         steps.push(Box::new(ps1::Ps1Step(spec)));
     }
@@ -168,6 +190,11 @@ mod tests {
             ids,
             vec![
                 (5, "bootstrap"),
+                (50, "claude-env"),
+                (50, "claude-notion"),
+                (50, "claude-skills"),
+                (55, "pjp"),
+                (60, "hc-hub"),
                 (90, "files"),
                 (91, "powertoys"),
                 (91, "ssh-config"),
@@ -183,6 +210,8 @@ mod tests {
                 (97, "pin-updates"),
                 (97, "type-clipboard"),
                 (98, "google-ime"),
+                (98, "hc-skill"),
+                (98, "herdr-app-skill"),
                 (99, "international"),
                 (99, "port-forward"),
                 (99, "terminal"),
@@ -215,6 +244,32 @@ mod tests {
             {
                 assert!(ids.contains(&id), "{name} が一覧に無い");
             }
+        }
+    }
+
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    #[test]
+    fn windows_only_steps() {
+        let only: Vec<&str> = all()
+            .iter()
+            .filter(|s| s.info().windows_only)
+            .map(|s| s.info().id)
+            .collect();
+        assert_eq!(
+            only,
+            vec![
+                "bootstrap",
+                "claude-env",
+                "claude-notion",
+                "claude-skills",
+                "pjp",
+                "hc-hub",
+                "hc-skill",
+                "herdr-app-skill",
+            ]
+        );
+        for s in all() {
+            assert!(s.info().ported || !s.info().windows_only, "{}", s.info().id);
         }
     }
 

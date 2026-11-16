@@ -11,6 +11,10 @@ publish = false
 # crates.io の公開日時を見て、新しすぎる版は cargo update -p <名前> --precise <前の版> で下げる)。C のコンパイラが要る crate と
 # HTTP の crate は入れない (HTTP は gh、git は git の CLI を呼ぶ。claude-skills の Rust の道具と同じ方針)
 [dependencies]
+# Deserialize・Serialize の trait だけを使う (順を保つ JSON の型 src/ojson.rs。Claude Code の settings.json の部分書き換え)。serde_json と
+# toml が既に引いている版で、新しい crate は増えない。serde_json の preserve_order は foldhash を引き、Map の並びを crate 全体で変えるので
+# 使わない (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)
+serde = { version = "1.0.229", default-features = false, features = ["std"] }
 serde_json = "1.0.154"
 # 既定の features (alloc・oid) は使わない (oid は const-oid を引く)
 sha2 = { version = "0.11.1", default-features = false }

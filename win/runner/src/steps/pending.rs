@@ -92,6 +92,7 @@ impl Step for Pending {
             title: self.0.title,
             gate: self.0.gate,
             ported: false,
+            windows_only: false,
         }
     }
 

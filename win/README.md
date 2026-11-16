@@ -4,10 +4,11 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 (経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
 
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
-(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは今までどおり
-WSL が配り、runner は確かめるだけ (経緯は
+(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
+同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
+Claude Code で使う W0-2 の手順など) は、受け持ちによらず runner が流す (経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
-dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -18,6 +19,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
+| `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -169,8 +171,10 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --c
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) §2 H・I と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
 
-- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは今までどおり WSL の setup が配り
-  ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と同じ判定を出すかを突き合わせられる)
+- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは、WSL の setup と同じ手順 (files と
+  `Install-*.ps1`) は今までどおり WSL の setup が配り ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と
+  同じ判定を出すかを突き合わせられる)。Windows にしか無い手順 (claude-skills を Windows の Claude Code で使う W0-2 の手順など。[後述](#claude-skills-と-windows-のハブ-w0-2))
+  は、WSL の setup が Windows に配らないので、受け持ちによらず runner の `dotfiles apply` が流す (dotfiles-private の ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))
 - 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
   (`powershell/dotfiles.ps1`) が `win\runner` に入って `cargo run --quiet --release --locked` を打つ (rustup は `rust-toolchain.toml` を今の
   ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く
@@ -182,7 +186,7 @@ dotfiles list                          # 手順と、このホストでの on/of
 dotfiles check                         # 手順を順に確かめる (何も書かない)
 dotfiles check --steps files,ntn       # 手順を id で絞る (PowerShell が配列にした files,ntn は dotfiles 関数が , でつなぎ直す)
 dotfiles apply --dry-run               # apply がすることを出す (何も書かない。受け持ちによらず流せる)
-dotfiles apply                         # 揃える (このホストの [runner] enable = true のときだけ。でなければ止まって 1)
+dotfiles apply                         # 揃える (受け持ちが WSL のホストでは Windows にしか無い手順だけ。ホストの値が無ければ止まって 1)
 dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
@@ -192,8 +196,9 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
   ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
   環境変数が無い)
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
-- 受け持ちが WSL のホストでは apply は止まるので、締めの行の「dotfiles apply で揃える」の下に、WSL の `~/dotfiles/setup --update` で揃える道を添える
-  (files の衝突の解き方も、WSL の `bootstrap-windows-files.sh --force` を出す)
+- 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
+  `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files の衝突の解き方も、WSL の `bootstrap-windows-files.sh --force` を出す)
 
 ### ホストの値
 
@@ -207,14 +212,25 @@ group = "personal"            # personal (既定)・company・client (nix/README
 windowsTypeClipboard = true
 
 [runner]
-enable = false                # 受け持ちの印。true で apply を許す
+enable = false                # 受け持ちの印。true で WSL の setup と同じ手順も apply で書く
+
+[claude.notion]               # Notion へ書く skill の宛先 (Nix の dotfiles.claude.notion と同じ名前と形)
+profile = "personal"          # このマシンの既定のプロファイル (書かなければ null)
+routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の規則 (書かなければ空)
+
+[claude.notion.override.personal]            # プロファイルの値を、このマシンだけ差し替える (書かなければ空)
+scanData = "https://app.notion.com/p/…"
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
-  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard` と、runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は
-  runner が止める (終了コード 2)
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
+  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub` と、runner にまだ無い
+  `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
   (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
+- `[claude.notion]` は `claude-notion` の手順が `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` に書く (Linux の home-manager が書くのと同じ中身)。
+  runner が確かめるのは Nix の option と同じ型だけ (`profile` は `[a-z0-9][a-z0-9_-]*`・`routes` は文字列の表・`override` は表。日時は書けない)。
+  プロファイルの名前やキーの綴りは、claude-skills の pjp-notion-profile が使うときに確かめる。TOML に null は無いので、`override` で値を消す形
+  (Nix の `null`) は書けない
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
@@ -230,7 +246,8 @@ enable = false                # 受け持ちの印。true で apply を許す
 2. Windows のホストの値を `[runner] enable = true` にする (runner の apply を許す)
 
 - 切り替える前に `dotfiles check` を流し、runner にまだ無い手順 (下の表の「まだ」) をどうするかを決める。切り替えたホストでは、まだ無い手順は
-  誰も流さないので ⚠ (runner では直らない差) になる
+  誰も流さないので ⚠ (runner では直らない差) になる。切り替えるのは、そのホストで on の手順を全部移してから (ADR 060)
+- Windows にしか無い手順 (下の表の「有る (Windows だけ)」) は、切り替える前から apply で流れる (ホストの値は要る。`runner.enable = false` のままでよい)
 - 初めて apply するときは記録が無いので、中身が repo と同じファイルは「同じ」(記録だけ作る) になる。WSL と Windows の clone を同じ commit に
   しておく。違う中身は「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら)と同じ解き方。PowerShell では `Copy-Item` か `--force`)
 - WSL の無い Windows は、はじめから 2 だけを書く
@@ -239,7 +256,12 @@ enable = false                # 受け持ちの印。true で apply を許す
 
 | order | id | すること | on/off | runner |
 | --- | --- | --- | --- | --- |
-| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る |
+| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る (Windows だけ) |
+| 50 | `claude-env` | Claude Code の `%USERPROFILE%\.claude\settings.json` の `env` に、Claude の git を無署名・GitHub は gh の資格情報 (HTTPS) で通す設定を足す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-notion` | ホストの値の `[claude.notion]` から `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` を書く | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
+| 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
+| 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
 | 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
@@ -255,6 +277,7 @@ enable = false                # 受け持ちの印。true で apply を許す
 | 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
+| 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
@@ -268,7 +291,8 @@ enable = false                # 受け持ちの印。true で apply を許す
 
 ### runner の手順を足す
 
-1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
+1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`)・`windows_only` (WSL の setup に同じ手順が無く、受け持ちによらず
+   runner が流すなら true) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
    コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
    `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
 2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
@@ -287,10 +311,47 @@ gate が違うと、試験が落ちる
   読み方を `nix-instantiate` (`nix/lib/windows-files.nix`) と突き合わせる (`DOTFILES_WIN_NIX_PARITY=1`。手元でも nix-instantiate があれば流れる)
 - WSL や Linux で build するには C のリンカ (`cc`) が要る。無ければ flake の nixpkgs の gcc を借りる:
   `nix shell --inputs-from ../../nix nixpkgs#gcc --command cargo test`
-- toolchain は `runner/rust-toolchain.toml` (1.99.1。claude-skills と同じ)、crate は `toml`・`serde_json`・`sha2` だけ。版は公開から 7 日以上
-  たったものにする (`Cargo.lock` の間接の依存も。cargo には猶予の設定が無いので、作り直したら crates.io の公開日時を見て、新しすぎる版は
-  `cargo update -p <名前> --precise <前の版>` で下げる)。C のコンパイラが要る crate と HTTP の crate は足さない
+- toolchain は `runner/rust-toolchain.toml` (1.99.1。claude-skills と同じ)、crate は `toml`・`serde_json`・`sha2` と、trait だけを使う `serde`
+  (serde_json と toml が引いている版。順を保つ JSON の型 `runner/src/ojson.rs` に使う)。版は公開から 7 日以上たったものにする (`Cargo.lock` の間接の
+  依存も。cargo には猶予の設定が無いので、作り直したら crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で
+  下げる)。C のコンパイラが要る crate と HTTP の crate は足さない。serde_json の `preserve_order` は足さない (foldhash を引き、`Map` の並びを crate
+  全体で変える)
 - `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
+- settings.json の env に足す git の組と claude-notion.json の中身も、Linux の CI が `tests/claude_parity.rs` で、Linux の
+  `nix/home/modules/claude.nix` が sandbox のホストに書く claude-env.json・claude-notion.json (`nix eval`) と突き合わせる
+
+### claude-skills と Windows のハブ (W0-2)
+
+claude-skills (private な skill 置き場。Rust の道具の入口 `pjp`) を Windows の Claude Code で使い、herdr-app と hc のハブ `%USERPROFILE%\h` を作る
+手順 (claude-skills の spec `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §9 の Windows の項目。経緯は dotfiles-private の
+ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す
+(ホストの値は要る)。Linux の側は `nix/README.md` の「claude-skills の Rust の道具 (shim の pjp)」と「hc の skill」。
+
+```powershell
+# runner は clone を取得しない。先に 3 つの clone を進める (gh の資格情報で HTTPS を通す。SSH の鍵を使わない)
+foreach ($r in 'dotfiles', 'dotfiles-private', 'claude-skills') {
+    git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= -c 'credential.helper=!gh auth git-credential' `
+        -C "$HOME\ghq\github.com\pollenjp\$r" pull --ff-only
+}
+dotfiles check                     # W0-2 の手順の差も出る (何も書かない)
+dotfiles apply --dry-run           # することを出す
+dotfiles apply                     # 受け持ちが WSL なら、Windows にしか無い手順だけを流す
+pjp doctor                         # shim・clone・toolchain・外の道具を確かめる (新しい PowerShell で)
+```
+
+| 手順 | すること | 気をつけること |
+| --- | --- | --- |
+| `claude-env` | `settings.json` の `env` に `GIT_CONFIG_*` (commit・tag を無署名に・GitHub の ssh の URL を https に読み替え・資格情報を `gh auth git-credential` から) と、`CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1`・`GCM_INTERACTIVE=never` を足す。Linux の `bootstrap-claude-env.sh` と同じ書き方 (この手順のキーの古い組を外し、ほかの組は残して番号を振り直す) | ほかのキーと順は残す。書く前の中身を `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (10 回分)。Git for Windows の system の設定には Git Credential Manager (`credential.helper = manager`) があり、gh より先に呼ばれる。窓を出して止まらないよう `GCM_INTERACTIVE=never` を足す (gh で通った token は GCM にも保存される)。空の値で helper を消す組は足さない (Windows では空の値の env が消えやすく、欠けると git が全部落ちる) |
+| `claude-notion` | ホストの値の `[claude.notion]` から `claude-notion.json` を書く | dotfiles が持つファイルなので、違えば書き直す |
+| `claude-skills` | clone の中身を 1 つずつ `~/.claude/<種類>/` へ。ディレクトリは junction (`cmd /c mklink /J`)、ファイル (`rules/*.md` など) はコピー (記録 `%LOCALAPPDATA%\dotfiles\state\claude-skills.deployed.json`) | README.md は除く。同じ名前の実体 (手で置いたディレクトリなど)・別の先へのリンク・記録の無い違う中身のコピーは飛ばして ⚠ で知らせる (コピーは `--force` で上書き)。clone から消えたものは外す (junction の先は消さない)。ファイルはコピーなので、clone を pull したら `dotfiles apply` で写し直す |
+| `pjp` | shim が無い・起きない・版が違うときだけ `cargo install --locked --root <CARGO_HOME> --target-dir <使い捨て> --path <clone>\crates\pjp-shim` (clone の中で、clone の toolchain で) を打ち、毎回 `pjp --build` | pjp を使っている会話・端末 (ハブの hook の `pjp hub guard` など) があると、shim の入れ替えが落ちることがある。入れた直後の `pjp` は新しい PowerShell で (rustup が `~/.cargo/bin` を PATH に足している) |
+| `hc-hub` | `pjp hub check` で差を見て、差があれば `pjp hub init` (引数なし。`%USERPROFILE%\h`) | まだハブでない場所に雛形の外のものがある・別の repo の中などでは、`pjp hub init` が何も書かずに止まる (runner は ⚠ でわけを出す)。ハブで動いている Claude Code の会話には、作った後から hook (`pjp hub guard`) が効く |
+| `hc-skill`・`herdr-app-skill` | `<道具> --skill` に頭 (frontmatter と版のコメント) を足して `~/.claude/skills/<道具>/SKILL.md` | 道具は PATH → 公式の置き場所 (`%LOCALAPPDATA%\Programs\herdr-core\hc.exe`・`…\herdr-app\herdr-app.exe`) の順に探す。手で置いた写しも書き直す。道具を上げたら `dotfiles apply` で作り直る |
+
+- junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
+  打たない (先の中身まで消すことがある)
+- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・settings.json の skillOverrides・plugin・hook・`c` の `--no-chrome`・
+  Defender の除外・pjp-spaces・`~/.config/pjp/env`・runner の `self-update`
 
 ## 配る
 

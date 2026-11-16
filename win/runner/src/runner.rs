@@ -23,8 +23,22 @@ pub fn describe_host(ctx: &mut Ctx) {
     if h.runner_enable {
         ctx.say("受け持ち: runner (runner.enable = true。apply で揃える)");
     } else {
-        ctx.say("受け持ち: WSL の setup (runner.enable が true でない。runner は確かめるだけ)");
+        ctx.say(
+            "受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)",
+        );
     }
+}
+
+/// 受け持ちが WSL のホストの apply で流さない手順か (runner に移した、WSL の setup と同じ手順)。
+fn deferred_to_wsl(host: &HostValues, info: &crate::steps::StepInfo) -> bool {
+    !host.runner_enable && info.ported && !info.windows_only
+}
+
+/// その id の手順が、WSL の setup と同じ手順 (Windows にしか無い手順でない) か。手順でない行 (host) は false。
+fn shared_with_wsl(id: &str) -> bool {
+    crate::steps::all()
+        .iter()
+        .any(|s| s.info().id == id && !s.info().windows_only)
 }
 
 /// ホストの値が無いときの行。
@@ -45,13 +59,26 @@ pub fn host_rows(host: &HostValues) -> Vec<Row> {
     }
 }
 
-/// 手順を順に流して行を返す。off の手順は流さずに ↷ の行、まだ無い手順は見出しを出さずに行だけ。
+/// 手順を順に流して行を返す。off の手順は流さずに ↷ の行、まだ無い手順は見出しを出さずに行だけ。受け持ちが WSL のホストの apply は、
+/// WSL の setup と同じ手順を流さずに · の行 (Windows にしか無い手順だけを流す)。
 pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
     let mut rows = host_rows(&ctx.host);
     for step in steps {
         let info = step.info();
         if let Some(reason) = info.gate.off_reason(&ctx.host) {
             rows.push(Row::new(Some(info.order), info.id, Kind::Off, reason));
+            continue;
+        }
+        if matches!(mode, Mode::Apply { .. }) && deferred_to_wsl(&ctx.host, &info) {
+            rows.push(Row::new(
+                Some(info.order),
+                info.id,
+                Kind::Info,
+                format!(
+                    "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-{}.sh が配る)",
+                    info.id
+                ),
+            ));
             continue;
         }
         if info.ported {
@@ -78,18 +105,20 @@ pub fn finish(ctx: &mut Ctx, title: &str, rows: &[Row]) -> i32 {
     for l in report::verdict_lines(rows) {
         ctx.say(l);
     }
-    // 受け持ちが WSL のホストでは apply は止まるので、締めの行の「dotfiles apply で揃える・直す」の代わりの道を添える
+    // 受け持ちが WSL のホストでは、WSL の setup と同じ手順は apply で流さないので、締めの行の「dotfiles apply で揃える・直す」の代わりの
+    // 道を添える (Windows にしか無い手順は apply で揃う)
     let fixable = rows
         .iter()
-        .any(|r| matches!(r.kind, Kind::Missing | Kind::Fix));
+        .any(|r| matches!(r.kind, Kind::Missing | Kind::Fix) && shared_with_wsl(&r.id));
     if fixable && !ctx.host.runner_enable {
-        ctx.say("※ このホストの受け持ちは WSL の setup なので、dotfiles apply は止まる。揃えるのは WSL の ~/dotfiles/setup --update (受け持ちを runner に切り替えるまで)");
+        ctx.say("※ このホストの受け持ちは WSL の setup なので、files と ps1 の手順は dotfiles apply では流さない。揃えるのは WSL の ~/dotfiles/setup --update (受け持ちを runner に切り替えるまで)");
     }
     report::exit_code(rows)
 }
 
-/// apply を止めるわけ (無ければ流してよい)。
-pub fn apply_blocker(host: &HostValues) -> Option<Row> {
+/// apply を止めるわけ (無ければ流してよい)。ホストの値が無いとき・受け持ちが WSL のホストで Windows にしか無い手順を選んでいないとき
+/// (`apply --steps files` が黙って何もせずに 0 で終わらないように)。
+pub fn apply_blocker(host: &HostValues, steps: &[Box<dyn Step>]) -> Option<Row> {
     match &host.source {
         Source::Missing(_) => Some(Row::new(
             None,
@@ -97,21 +126,29 @@ pub fn apply_blocker(host: &HostValues) -> Option<Row> {
             Kind::Blocker,
             "ホストの値が無いので apply は止めた (check と apply --dry-run は流せる)",
         )),
-        Source::File(p) if !host.runner_enable => Some(
-            Row::new(
-                None,
-                "host",
-                Kind::Blocker,
-                "受け持ちは WSL の setup (runner.enable が true でない) なので apply は止めた",
+        Source::File(p)
+            if !host.runner_enable
+                && !steps.iter().any(|s| {
+                    let info = s.info();
+                    info.windows_only && info.gate.off_reason(host).is_none()
+                }) =>
+        {
+            Some(
+                Row::new(
+                    None,
+                    "host",
+                    Kind::Blocker,
+                    "受け持ちは WSL の setup (runner.enable が true でない) なので apply は止めた (選んだ手順に、このホストで on の Windows にしか無い手順が無い)",
+                )
+                .with_notes(vec![
+                    "check と apply --dry-run は流せる".to_string(),
+                    format!(
+                        "受け持ちを runner に切り替えるのは dotfiles-private の同じ PR で: このホストの Nix の値の wsl.windowsFiles.enable = false と、{} の [runner] enable = true (win/README.md の「runner」)",
+                        p.display()
+                    ),
+                ]),
             )
-            .with_notes(vec![
-                "check と apply --dry-run は流せる".to_string(),
-                format!(
-                    "受け持ちを runner に切り替えるのは dotfiles-private の同じ PR で: このホストの Nix の値の wsl.windowsFiles.enable = false と、{} の [runner] enable = true (win/README.md の「runner」)",
-                    p.display()
-                ),
-            ]),
-        ),
+        }
         Source::File(_) => None,
     }
 }
@@ -145,13 +182,19 @@ pub fn list(ctx: &mut Ctx, steps: &[Box<dyn Step>]) {
         } else {
             ("on ", String::new())
         };
+        let only = if info.ported && info.windows_only {
+            " (Windows だけ)"
+        } else {
+            ""
+        };
         ctx.say(format!(
-            "  [{:>2}] {:<width$}  {state}  {}{extra}",
+            "  [{:>2}] {:<width$}  {state}  {}{extra}{only}",
             info.order, info.id, info.title
         ));
     }
     ctx.say("");
     ctx.say("on/off の決め方: いつも・設定グループ・道具の switch (ホストの値の [tools] か、win/runner/groups.json のグループの既定)");
+    ctx.say("Windows だけ: WSL の setup に同じ手順が無いので、受け持ちによらず runner の apply が流す (ほかの手順は、受け持ちを runner に切り替えたホストでだけ apply が書く)");
 }
 
 #[cfg(test)]
@@ -187,7 +230,110 @@ mod tests {
             title: "x",
             gate,
             ported,
+            windows_only: false,
         }
+    }
+
+    fn windows_only(id: &'static str) -> StepInfo {
+        StepInfo {
+            windows_only: true,
+            ..info(id, Gate::Always, true)
+        }
+    }
+
+    fn host_of(text: Option<&str>) -> HostValues {
+        let g = Groups::embedded().unwrap();
+        match text {
+            Some(t) => parse(t, Path::new("h.toml"), g).unwrap(),
+            None => HostValues::missing(Path::new("h.toml"), g),
+        }
+    }
+
+    /// 偽の手順を、ホストの値 `host_text` のもとで `mode` で流す。行と出力を返す
+    fn run_steps(
+        host_text: Option<&str>,
+        mode: Mode,
+        steps: &[Box<dyn Step>],
+    ) -> (Vec<Row>, String) {
+        let sys = FakeSys::new(|_| unreachable!());
+        let mut out = Vec::new();
+        let rows = {
+            let mut ctx = Ctx {
+                repo: "/r".into(),
+                roots: Roots::from_home(Path::new("/h")),
+                state_dir: "/s".into(),
+                host: host_of(host_text),
+                sys: &sys,
+                out: &mut out,
+            };
+            execute(&mut ctx, mode, steps)
+        };
+        (rows, String::from_utf8(out).unwrap())
+    }
+
+    /// 受け持ちが WSL のホストの apply は、Windows にしか無い手順だけを流し、WSL と同じ手順は流さずに · の行を出す (ADR 064)
+    #[test]
+    fn wsl_host_apply_runs_windows_only_steps() {
+        let steps: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(windows_only("w"), Kind::Ok)),
+            Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+        ];
+        let (rows, out) = run_steps(Some(""), Mode::Apply { force: false }, &steps);
+        assert_eq!(out.matches("ran").count(), 1, "{out}");
+        assert!(out.contains("━━ [97] w: x ━━"));
+        assert!(!out.contains("━━ [97] s: x ━━"));
+        assert_eq!(rows[0].kind, Kind::Ok);
+        assert_eq!(rows[1].kind, Kind::Info);
+        assert_eq!(
+            rows[1].text,
+            "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-s.sh が配る)"
+        );
+        assert_eq!(report::exit_code(&rows), 0);
+
+        // check と dry-run は受け持ちによらず全部を流す。受け持ちを切り替えたホストの apply も全部を流す
+        for (host, mode) in [
+            (Some(""), Mode::Check),
+            (Some(""), Mode::DryRun { force: false }),
+            (
+                Some("[runner]\nenable = true\n"),
+                Mode::Apply { force: false },
+            ),
+        ] {
+            let (rows, out) = run_steps(host, mode, &steps);
+            assert_eq!(out.matches("ran").count(), 2, "{mode:?}: {out}");
+            assert!(rows.iter().all(|r| r.kind == Kind::Ok), "{mode:?}");
+        }
+    }
+
+    #[test]
+    fn list_marks_windows_only_steps() {
+        let steps: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(windows_only("w"), Kind::Ok)),
+            Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+        ];
+        let sys = FakeSys::new(|_| unreachable!());
+        let mut out = Vec::new();
+        {
+            let mut ctx = Ctx {
+                repo: "/r".into(),
+                roots: Roots::from_home(Path::new("/h")),
+                state_dir: "/s".into(),
+                host: host_of(Some("")),
+                sys: &sys,
+                out: &mut out,
+            };
+            list(&mut ctx, &steps);
+        }
+        let out = String::from_utf8(out).unwrap();
+        let line = |id: &str| {
+            out.lines()
+                .find(|l| l.contains(&format!("] {id} ")))
+                .unwrap()
+                .to_string()
+        };
+        assert!(line("w").ends_with("x (Windows だけ)"), "{out}");
+        assert!(line("s").ends_with(" x"), "{out}");
+        assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"));
     }
 
     fn rows_for(host_text: Option<&str>) -> (Vec<Row>, String) {
@@ -250,13 +396,36 @@ mod tests {
         assert_eq!(rows[0].kind, Kind::Manual);
     }
 
+    /// apply を止めるのは、ホストの値が無いときと、受け持ちが WSL のホストで Windows にしか無い手順を選んでいないとき
     #[test]
     fn apply_blockers() {
-        let g = Groups::embedded().unwrap();
-        assert!(apply_blocker(&HostValues::missing(Path::new("h"), g.clone())).is_some());
-        let wsl = parse("", Path::new("h"), g.clone()).unwrap();
-        assert_eq!(apply_blocker(&wsl).unwrap().kind, Kind::Blocker);
-        let runner = parse("[runner]\nenable = true", Path::new("h"), g).unwrap();
-        assert!(apply_blocker(&runner).is_none());
+        let shared: Vec<Box<dyn Step>> =
+            vec![Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok))];
+        let mixed: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+            Box::new(Fixed(windows_only("w"), Kind::Ok)),
+        ];
+        let missing = apply_blocker(&host_of(None), &mixed).unwrap();
+        assert_eq!(missing.kind, Kind::Blocker);
+        assert!(missing.text.contains("ホストの値が無い"));
+        let wsl = apply_blocker(&host_of(Some("")), &shared).unwrap();
+        assert_eq!(wsl.kind, Kind::Blocker);
+        assert!(wsl.text.contains("受け持ちは WSL の setup"), "{}", wsl.text);
+        assert!(apply_blocker(&host_of(Some("")), &mixed).is_none());
+        let runner = host_of(Some("[runner]\nenable = true"));
+        assert!(apply_blocker(&runner, &shared).is_none());
+        // Windows にしか無い手順が、このホストでは off (グループ client の道具の既定) なら、流すものが無いので止める
+        let off: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+            Box::new(Fixed(
+                StepInfo {
+                    gate: Gate::Tool("windowsClaudeCode"),
+                    ..windows_only("w")
+                },
+                Kind::Ok,
+            )),
+        ];
+        assert!(apply_blocker(&host_of(Some("group = \"client\"")), &off).is_some());
+        assert!(apply_blocker(&host_of(Some("group = \"personal\"")), &off).is_none());
     }
 }

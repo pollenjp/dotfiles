@@ -18,6 +18,12 @@ pub struct CommandSpec {
     pub args: Vec<OsString>,
     /// 待つ上限。無ければ終わるまで待つ
     pub timeout: Option<Duration>,
+    /// 今のディレクトリ。無ければ runner のもの
+    pub cwd: Option<PathBuf>,
+    /// 足す env (`Some`) と外す env (`None`)。並べた順に効く
+    pub envs: Vec<(OsString, Option<OsString>)>,
+    /// stderr の行を写し (`RunResult::output`) に入れない。流す口 (`on_line`) には渡す
+    pub stdout_only: bool,
 }
 
 impl CommandSpec {
@@ -26,6 +32,9 @@ impl CommandSpec {
             program: program.into(),
             args: Vec::new(),
             timeout: None,
+            cwd: None,
+            envs: Vec::new(),
+            stdout_only: false,
         }
     }
 
@@ -37,6 +46,44 @@ impl CommandSpec {
     pub fn timeout(mut self, d: Duration) -> Self {
         self.timeout = Some(d);
         self
+    }
+
+    pub fn current_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.cwd = Some(dir.into());
+        self
+    }
+
+    pub fn env(mut self, key: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.envs.push((key.into(), Some(value.into())));
+        self
+    }
+
+    pub fn env_remove(mut self, key: impl Into<OsString>) -> Self {
+        self.envs.push((key.into(), None));
+        self
+    }
+
+    pub fn stdout_only(mut self) -> Self {
+        self.stdout_only = true;
+        self
+    }
+
+    /// 足した env の値 (外したなら None。触っていなければ None)。試験で比べるため
+    pub fn env_value(&self, key: &str) -> Option<String> {
+        self.envs
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .and_then(|(_, v)| v.as_ref().map(|v| v.to_string_lossy().into_owned()))
+    }
+
+    /// その env を外すか (最後に触ったのが外すなら true)。試験で比べるため
+    pub fn removes_env(&self, key: &str) -> bool {
+        self.envs
+            .iter()
+            .rev()
+            .find(|(k, _)| k == key)
+            .is_some_and(|(_, v)| v.is_none())
     }
 
     /// 引数を文字列で (試験で比べるため)
@@ -96,13 +143,22 @@ const DRAIN_LIMIT: Duration = Duration::from_secs(30);
 
 impl Sys for RealSys {
     fn run(&self, spec: &CommandSpec, on_line: &mut dyn FnMut(&str)) -> RunResult {
-        let mut child = match Command::new(&spec.program)
+        let mut command = Command::new(&spec.program);
+        command
             .args(&spec.args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
+            .stderr(Stdio::piped());
+        if let Some(dir) = &spec.cwd {
+            command.current_dir(dir);
+        }
+        for (key, value) in &spec.envs {
+            match value {
+                Some(v) => command.env(key, v),
+                None => command.env_remove(key),
+            };
+        }
+        let mut child = match command.spawn() {
             Ok(c) => c,
             Err(e) => {
                 return RunResult {
@@ -111,14 +167,14 @@ impl Sys for RealSys {
                 };
             }
         };
-        let (tx, rx) = mpsc::channel::<Option<String>>();
+        let (tx, rx) = mpsc::channel::<Msg>();
         let mut readers = 0;
         if let Some(out) = child.stdout.take() {
-            spawn_reader(out, tx.clone());
+            spawn_reader(out, false, tx.clone());
             readers += 1;
         }
         if let Some(err) = child.stderr.take() {
-            spawn_reader(err, tx.clone());
+            spawn_reader(err, true, tx.clone());
             readers += 1;
         }
         drop(tx);
@@ -139,7 +195,7 @@ impl Sys for RealSys {
                 if now >= d {
                     let _ = child.kill();
                     let _ = child.wait();
-                    drain_ready(&rx, on_line, &mut output, &mut open);
+                    drain_ready(&rx, on_line, &mut output, &mut open, spec.stdout_only);
                     return RunResult {
                         exit: Exit::TimedOut,
                         output,
@@ -152,9 +208,8 @@ impl Sys for RealSys {
                 std::thread::sleep(wait);
             } else {
                 match rx.recv_timeout(wait) {
-                    Ok(Some(line)) => {
-                        on_line(&line);
-                        output.push(line);
+                    Ok(Some((is_err, line))) => {
+                        accept(on_line, &mut output, spec.stdout_only, is_err, line);
                         quiet_since = Instant::now();
                     }
                     Ok(None) => open -= 1,
@@ -170,7 +225,7 @@ impl Sys for RealSys {
             }
             if let Some((status, at)) = exited {
                 // 溜まっている行は待たずに全部受ける
-                if drain_ready(&rx, on_line, &mut output, &mut open) {
+                if drain_ready(&rx, on_line, &mut output, &mut open, spec.stdout_only) {
                     quiet_since = Instant::now();
                 }
                 if open == 0
@@ -215,19 +270,36 @@ fn candidate_names(name: &str) -> Vec<String> {
     }
 }
 
+/// reader からの知らせ: 1 行 (stderr の行か・中身) か、その pipe が閉じた (`None`)。
+type Msg = Option<(bool, String)>;
+
+/// 受けた 1 行を流す口に渡し、写しに足す (`stdout_only` なら stderr の行は写しに入れない)。
+fn accept(
+    on_line: &mut dyn FnMut(&str),
+    output: &mut Vec<String>,
+    stdout_only: bool,
+    is_err: bool,
+    line: String,
+) {
+    on_line(&line);
+    if !(stdout_only && is_err) {
+        output.push(line);
+    }
+}
+
 /// 溜まっている行を待たずに全部受ける。1 行でも受けたら true。
 fn drain_ready(
-    rx: &mpsc::Receiver<Option<String>>,
+    rx: &mpsc::Receiver<Msg>,
     on_line: &mut dyn FnMut(&str),
     output: &mut Vec<String>,
     open: &mut usize,
+    stdout_only: bool,
 ) -> bool {
     let mut got = false;
     loop {
         match rx.try_recv() {
-            Ok(Some(line)) => {
-                on_line(&line);
-                output.push(line);
+            Ok(Some((is_err, line))) => {
+                accept(on_line, output, stdout_only, is_err, line);
                 got = true;
             }
             Ok(None) => *open = open.saturating_sub(1),
@@ -240,7 +312,8 @@ fn drain_ready(
     }
 }
 
-fn spawn_reader(stream: impl Read + Send + 'static, tx: mpsc::Sender<Option<String>>) {
+/// `stream` を行ごとに読んで `tx` へ送る (`is_err` は stderr の pipe か)。読み終えたら `None` を送る。
+fn spawn_reader(stream: impl Read + Send + 'static, is_err: bool, tx: mpsc::Sender<Msg>) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         let mut buf = Vec::new();
@@ -258,7 +331,7 @@ fn spawn_reader(stream: impl Read + Send + 'static, tx: mpsc::Sender<Option<Stri
                         line = line.trim_start_matches('\u{feff}');
                         first = false;
                     }
-                    if tx.send(Some(line.to_string())).is_err() {
+                    if tx.send(Some((is_err, line.to_string()))).is_err() {
                         return;
                     }
                 }
@@ -300,6 +373,68 @@ mod tests {
     #[cfg(unix)]
     fn shell(script: &str) -> CommandSpec {
         CommandSpec::new("sh").arg("-c").arg(script)
+    }
+
+    #[cfg(windows)]
+    fn powershell(script: &str) -> CommandSpec {
+        CommandSpec::new("powershell")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg(script)
+    }
+
+    /// cwd と env を渡す (cargo install を claude-skills の clone の中で、clone の toolchain で打つため)
+    #[test]
+    fn runs_in_cwd_with_env() {
+        let t = crate::testutil::TempDir::new("process-cwd");
+        t.write("marker.txt", "here\n");
+        #[cfg(unix)]
+        let spec = shell("cat marker.txt; echo \"$DOTFILES_WIN_X\"");
+        #[cfg(windows)]
+        let spec = powershell("Get-Content marker.txt; Write-Output $env:DOTFILES_WIN_X");
+        let r = RealSys.run(
+            &spec.current_dir(t.path()).env("DOTFILES_WIN_X", "1"),
+            &mut |_| {},
+        );
+        assert_eq!(r.exit, Exit::Code(0), "{:?}", r.output);
+        let got: Vec<&str> = r.output.iter().map(|l| l.trim()).collect();
+        assert_eq!(got, vec!["here", "1"]);
+    }
+
+    /// 親から受けた env を外す (cargo run で起こした runner に rustup が付ける RUSTUP_TOOLCHAIN を、pjp に渡さないため)
+    #[test]
+    fn env_remove_drops_an_inherited_variable() {
+        // rustup の cargo から起こした試験の process には RUSTUP_TOOLCHAIN が付く。無ければ確かめられないので飛ばす
+        if std::env::var_os("RUSTUP_TOOLCHAIN").is_none() {
+            return;
+        }
+        #[cfg(unix)]
+        let spec = shell("echo \"[${RUSTUP_TOOLCHAIN-}]\"");
+        #[cfg(windows)]
+        let spec = powershell("Write-Output \"[$env:RUSTUP_TOOLCHAIN]\"");
+        let r = RealSys.run(&spec.env_remove("RUSTUP_TOOLCHAIN"), &mut |_| {});
+        assert_eq!(r.exit, Exit::Code(0));
+        let got: Vec<&str> = r.output.iter().map(|l| l.trim()).collect();
+        assert_eq!(got, vec!["[]"]);
+    }
+
+    /// stdout だけを写しに入れる (`hc --skill` の出力を SKILL.md にする)。stderr の行も流す口には渡す (落ちたときに見える)
+    #[test]
+    fn stdout_only_keeps_stderr_out_of_output() {
+        #[cfg(unix)]
+        let spec = shell("echo out; echo err >&2");
+        #[cfg(windows)]
+        let spec = powershell("Write-Output out; [Console]::Error.WriteLine('err')");
+        let mut seen = Vec::new();
+        let r = RealSys.run(&spec.stdout_only(), &mut |l| {
+            seen.push(l.trim().to_string())
+        });
+        assert_eq!(r.exit, Exit::Code(0));
+        let got: Vec<&str> = r.output.iter().map(|l| l.trim()).collect();
+        assert_eq!(got, vec!["out"]);
+        seen.sort();
+        assert_eq!(seen, vec!["err", "out"]);
     }
 
     #[test]

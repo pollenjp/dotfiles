@@ -18,12 +18,13 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
 使い方:
   dotfiles check   [--steps <id>,…] [--host-file <path>]   手順を順に確かめる (何も書かない)
   dotfiles apply   [--dry-run] [--force] [--steps <id>,…] [--host-file <path>]
-                                                          手順を順に揃える (ホストの値の runner.enable = true のときだけ)
+                                                          手順を順に揃える (受け持ちが WSL のホスト (runner.enable が true でない) では、
+                                                          Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
-  --force           files の衝突 (Windows 側で変わっていた) も上書きする
+  --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
@@ -203,7 +204,11 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             return 2;
         }
     };
-    let repo = a.repo.clone().unwrap_or_else(default_repo);
+    // 相対パスの --repo は絶対パスにする (隣の clone・控え (claude-skills-dir)・cargo install --path が、cwd を移した後に別の場所を指さない)
+    let repo = match a.repo.clone() {
+        Some(p) => std::path::absolute(&p).unwrap_or(p),
+        None => default_repo(),
+    };
     match a.command {
         Command::Help => {
             let _ = writeln!(out, "{USAGE}");
@@ -318,8 +323,10 @@ fn steps_command(
         _ if a.dry_run => {
             ctx.say("==> dotfiles apply --dry-run (することを出すだけ。何も書かない)");
             runner::describe_host(&mut ctx);
-            if let Some(b) = runner::apply_blocker(&ctx.host) {
+            if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 ctx.say(format!("※ 本番の apply は止まる: {}", b.text));
+            } else if !ctx.host.runner_enable {
+                ctx.say("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す。files と ps1 の手順の [dry-run] は、受け持ちを runner に切り替えたときにすること");
             }
             let rows = runner::execute(&mut ctx, Mode::DryRun { force: a.force }, &selected);
             Ok(runner::finish(&mut ctx, "apply --dry-run", &rows))
@@ -327,7 +334,7 @@ fn steps_command(
         _ => {
             ctx.say("==> dotfiles apply");
             runner::describe_host(&mut ctx);
-            if let Some(b) = runner::apply_blocker(&ctx.host) {
+            if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 let mut rows = runner::host_rows(&ctx.host);
                 rows.push(b);
                 return Ok(runner::finish(&mut ctx, "apply", &rows));
@@ -404,8 +411,10 @@ mod tests {
     mod flow {
         //! ## 確かめること (コマンドの流れ。偽の Sys と一時ディレクトリで)
         //!
-        //! - check は何も書かず、入っていないものだけなら 3。apply は runner.enable = true のホストだけ揃え、でなければ止めて 1
-        //! - apply --dry-run は何も書かず、本番が止まることを知らせる
+        //! - check は何も書かず、入っていないものだけなら 3。apply は、受け持ちが WSL のホストでは Windows にしか無い手順だけを流し、
+        //!   それを選んでいなければ止めて 1。runner.enable = true のホストは全部を揃える
+        //! - apply --dry-run は何も書かず、本番が止まる・Windows にしか無い手順だけを流すことを知らせる
+        //! - 相対パスの --repo は絶対パスにしてから使う (隣の clone と控えに相対パスを書かない)
         //! - ホストの値の既定の場所は、USERNAME と hostname (小文字) から。list は環境変数が無くても流せる
         //! - 知らない手順・ホストの値の誤り・環境変数が無いのは 2。manifest の誤りは 1
 
@@ -529,6 +538,34 @@ mod tests {
             assert!(!w.dst().exists());
         }
 
+        /// 受け持ちが WSL のホストでも、Windows にしか無い手順 (claude-notion) は apply が書き、WSL と同じ手順 (files) は流さない
+        #[test]
+        fn wsl_host_applies_windows_only_steps() {
+            let w = World::new(Some("[claude.notion]\nprofile = \"personal\"\n"));
+            let notion =
+                w.t.path()
+                    .join("home")
+                    .join(".local")
+                    .join("state")
+                    .join("dotfiles")
+                    .join("claude-notion.json");
+            let (code, out, _) = w.run(&["apply", "--dry-run", "--steps", "files,claude-notion"]);
+            assert_eq!(code, 3, "{out}");
+            assert!(out.contains("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す"), "{out}");
+            assert!(!notion.exists());
+
+            let (code, out, _) = w.run(&["apply", "--steps", "files,claude-notion"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"), "{out}");
+            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-files.sh が配る)"), "{out}");
+            assert_eq!(
+                std::fs::read_to_string(&notion).unwrap(),
+                "{\"override\":{},\"profile\":\"personal\",\"routes\":{}}\n"
+            );
+            assert!(!w.dst().exists());
+            assert!(!w.record().exists());
+        }
+
         #[test]
         fn apply_copies_when_runner_enabled() {
             let w = World::new(Some("[runner]\nenable = true\n"));
@@ -633,6 +670,31 @@ mod tests {
                 )),
                 "{out}"
             );
+        }
+
+        /// 相対パスの --repo は絶対パスにしてから使う (cargo test の cwd は win/runner なので ../.. は dotfiles の root)
+        #[test]
+        fn relative_repo_becomes_absolute() {
+            let sys = FakeSys::new(|_| RunResult {
+                exit: Exit::Code(0),
+                output: vec!["pjp-raiden".into()],
+            })
+            .with_env("USERNAME", "polle");
+            let args: Vec<String> = ["list", "--repo", "../.."]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            assert_eq!(run(&args, &sys, &mut out, &mut err), 0);
+            let out = String::from_utf8(out).unwrap();
+            let line = out.lines().find(|l| l.starts_with("ホストの値: ")).unwrap();
+            // 「ホストの値: <path> (グループ …)」か「ホストの値: 無い (<path>)。…」
+            let rest = line.trim_start_matches("ホストの値: ");
+            let shown = match rest.strip_prefix("無い (") {
+                Some(r) => r.split(')').next().unwrap(),
+                None => rest.split(" (").next().unwrap(),
+            };
+            assert!(Path::new(shown).is_absolute(), "{line}");
         }
 
         #[test]

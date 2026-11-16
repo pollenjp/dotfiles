@@ -5351,6 +5351,8 @@ personal) に 3 つ置く。
 - `~/.cargo/bin` は login のシェルの PATH にも入れる (`home/modules/shell-common.nix` の `home.sessionPath`)。対話の bash は `~/.cargo/env`
   でも足すが、hc の core が読む login の環境には入らなかった ([後述](#hc-の-core-の-env-と-hc-の子の-path))
 - どこで落ちても止めない (警告して続ける)。shim が無くても、claude-skills の skill は今までどおり `scripts/` の bash・Python で動く
+- Windows の側 (skill の junction・shim・`pjp --build`・claude-notion.json・Claude Code の settings.json の env・hc と herdr-app の skill・ハブ) は、
+  Windows の runner の手順 ([`win/README.md`「claude-skills と Windows のハブ (W0-2)」](../win/README.md#claude-skills-と-windows-のハブ-w0-2))
 
 ```sh
 ~/dotfiles/setup --steps bootstrap-pjp     # shim を (要れば) 入れ、道具を作る
@@ -5426,7 +5428,8 @@ herdr-core のパッケージは agent skill を同梱せず、`hc --skill` が 
 `home/modules/claude.nix` が、home.packages の hc と同じ package の `hc --skill` に frontmatter (name `hc` と、使う場面の description) を
 足した `SKILL.md` を Nix の build で作り (`pkgs/herdr-core/claude-skill.nix`)、`~/.claude/skills/hc` に張る (`herdrCore.enable` のホスト)。
 
-- frontmatter と、作った版を書くコメントは `pkgs/herdr-core/claude-skill-head.md`。Windows で同じ `SKILL.md` を作るときも同じ head を使う
+- frontmatter と、作った版を書くコメントは `pkgs/herdr-core/claude-skill-head.md`。Windows は runner の `hc-skill` の手順が同じ head で
+  `%USERPROFILE%\.claude\skills\hc\SKILL.md` を作る ([`win/README.md`「claude-skills と Windows のハブ (W0-2)」](../win/README.md#claude-skills-と-windows-のハブ-w0-2))
 - hc の版を上げる (`pkgs/herdr-core/releases.json`) と derivation が変わり、次の switch で作り直る (setup の手順は要らない)
 - 確かめるのは flake の checks の `claude-hc-skill` (name が `hc`・本文が `hc --skill` の出力そのもの)
 
