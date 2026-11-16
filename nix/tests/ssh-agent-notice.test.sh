@@ -7,8 +7,9 @@
 #
 # flake の checks (ssh-agent-notice-test) が Nix のサンドボックスで流す。使うのは bash・jq・git・coreutils と
 # stdenv の awk だけ。HOME・XDG_STATE_HOME は使い捨ての dir に向け、git の設定は GIT_CONFIG_GLOBAL と
-# GIT_CONFIG_COUNT で場面ごとに渡す。herdr は呼ばれた引数を書き留める偽物で代える。時刻は TZ=UTC0 で比べる。
-# 手元 (Claude の会話の中) で流しても同じになるよう、始めに GIT_CONFIG_*・HERDR_*・SSH_AUTH_SOCK を外す。
+# GIT_CONFIG_COUNT で場面ごとに渡す。herdr と hc は呼ばれた引数を書き留める偽物で代える。時刻は TZ=UTC0 で比べる。
+# 手元 (Claude の会話の中・WSL) で流しても同じになるよう、始めに GIT_CONFIG_*・HERDR_*・HC_*・SSH_AUTH_SOCK・WSL_DISTRO_NAME
+# を外す。
 #
 # ## 確かめること
 #
@@ -43,6 +44,10 @@
 #     WSL の Windows の 1Password・空) ごとの直し方
 #   - 子の印 (token parent・token kin の 🌱・名前の先頭の 🌱) のある workspace では子の決まりを言い切り、親だけの印
 #     (kin の 🌳) や印の無い workspace では条件つきで書く。subagent の中では問いを出させず報告に書かせる
+#   - hc の端末 (HC_TERMINAL_ID がある) では、HERDR_ENV が漏れていても herdr を呼ばない (打つ前の通知も、断られたあとも)。
+#     断られたあとは hc get <端末> --json を 1 回だけ打ち、どこからを「hc の端末 <address>「<名前>」」にする。親の端末がいるか
+#     label pjp.role=child なら hc の子の決まりを言い切り、どちらも無ければ条件つきで書く。hc が落ちる・無い・返事をしない
+#     (2 秒で切る) ときは、どこからを env の address だけにして条件つきで書く (exit 0)
 #   - 失敗した Bash は行の終わりが文言のとき、成功した Bash はさらに ssh・git の出す行の頭のときだけ当て、diff・cat・
 #     grep の結果や行の途中の文言、行をまたいだ Permission denied と publickey では黙る。口が生きている・空のときの
 #     鍵の認証の失敗・断りの無い失敗・Bash 以外でも黙る
@@ -60,7 +65,7 @@ work=$(mktemp -d "${TMPDIR:-/tmp}/ssh-agent-notice-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
 # compgen は readline の無い bash (Nix のサンドボックスの bash) に無いので、名前の頭で引く形を使う
-for v in ${!GIT_CONFIG_@} ${!HERDR_@} SSH_AUTH_SOCK; do
+for v in ${!GIT_CONFIG_@} ${!HERDR_@} ${!HC_@} SSH_AUTH_SOCK WSL_DISTRO_NAME; do
   unset "${v}"
 done
 export HOME="${work}/home" XDG_STATE_HOME="${work}/state" TZ=UTC0 GIT_CONFIG_NOSYSTEM=1
@@ -493,8 +498,9 @@ first_reconnect='手元の PC からこのマシンへ接続し直す (agent の
 first_local='1Password を起動してロックを解除するので、打ち直す'
 first_windows='Windows の 1Password を起動してロックを解除するので、打ち直す'
 first_none='agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す'
-child_default='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
+child_default='herdr や hc の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
 child_sprout='この pane は herdr の指揮役の子 (workspace に子の印 🌱 か、親を示す ↑ がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+child_hc='この端末は hc の指揮役の子 (hc の親の端末がいるか、label pjp.role=child がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
 outside='herdr の外の会話'
 # 接続の文 (fwd_sock は「承認の画面の接続」の節で作った、記録のある転送された agent と、より新しい接続のある口)
 fwd_sock="${HOME}/.ssh/agent.a.sock"
@@ -665,6 +671,102 @@ expect_told "token kin が 🌳 だけ (親) で parent の無い workspace で�
   "🔑 1Password に断られた: ssh h true — ${none_conn}" \
   "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'workspace「TKT-n 親の会話」・pane w9:p9・agent dot-x' "${none_conn}" "${child_default}")" \
   'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hp9[@]}"
+
+# --- hc (herdr-core) の端末
+# 偽の hc: 呼ばれた引数を JSON の配列で hc.log に足し、get <端末> --json には端末の JSON を返す。FAKE_HC_PARENT で親の端末
+# (空なら null)、FAKE_HC_ROLE で label pjp.role (空なら置かない)、FAKE_HC_NAME で名前 (空なら null)、FAKE_HC_RC で終了コード、
+# FAKE_HC_SLEEP で返事をするまでの秒を変える
+hclog="${work}/hc.log"
+cat >"${fakebin}/hc" <<EOF
+#!${BASH}
+jq -cn '\$ARGS.positional' --args -- "\$@" >>"${hclog}"
+[[ -z \${FAKE_HC_SLEEP:-} ]] || sleep "\${FAKE_HC_SLEEP}"
+if [[ \$1 == get ]]; then
+  jq -cn --arg a "\$2" --arg n "\${FAKE_HC_NAME-dotfiles-x}" --arg p "\${FAKE_HC_PARENT-}" --arg r "\${FAKE_HC_ROLE-}" \
+    '{address: \$a, name: (if \$n == "" then null else \$n end), parent: (if \$p == "" then null else \$p end),
+      labels: ({"herdr.space": "sp1"} + (if \$r == "" then {} else {"pjp.role": \$r} end))}'
+fi
+exit "\${FAKE_HC_RC:-0}"
+EOF
+chmod +x "${fakebin}/hc"
+: >"${hclog}"
+# hc の無い PATH。手元 (hc のあるマシン) でも本物の hc を拾わないよう、使うコマンドと偽の herdr だけを並べる
+nohc="${work}/bin-nohc"
+mkdir -p "${nohc}"
+for c in bash env jq git awk gawk mawk cat date stat readlink touch mkdir rm mktemp sleep grep timeout; do
+  p=$(command -v "${c}") && ln -sf "${p}" "${nohc}/${c}"
+done
+ln -sf "${fakebin}/herdr" "${nohc}/herdr"
+# in_hc [NAME=VALUE…]: hc の端末の env。旧 herdr の pane から立てた core から漏れた HERDR_* も並べる (herdr を呼ばないことを見る)
+in_hc() {
+  printf '%s\n' HC_TERMINAL_ID=t1h HERDR_ENV=1 HERDR_PANE_ID=w9:p1 HERDR_WORKSPACE_ID=w9 HERDR_SESSION=s2 \
+    "PATH=${fakebin}:${PATH}" "$@"
+}
+hc_calls() {
+  jq -s 'length' "${hclog}"
+}
+
+age_stamps
+mapfile -t hc1 < <(in_hc)
+n0=$(calls)
+pre 'ssh h true' "${work}" "${hc1[@]}"
+if noticed && [[ $(calls) == "${n0}" && $(hc_calls) == 0 ]]; then
+  ok "hc の端末では、HERDR_ENV が漏れていても打つ前に herdr を呼ばず (hc も呼ばない)、会話の 1 行だけ出す"
+else
+  ng "hc の端末の打つ前" "n0=${n0} $(detail) herdr=$(cat "${hlog}") hc=$(cat "${hclog}")"
+fi
+
+mapfile -t hc2 < <(in_hc FAKE_HC_PARENT=e56d/t8)
+n0=$(calls)
+expect_told "hc の親の端末がいる子には、herdr を呼ばずに hc の子の決まりを言い切る (どこからは hc の端末の address と名前)" \
+  PostToolUseFailure "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h「dotfiles-x」' "${none_conn}" "${child_hc}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hc2[@]}"
+if [[ $(calls) == "${n0}" && $(jq -sc '.' "${hclog}") == '[["get","t1h","--json"]]' ]]; then
+  ok "断られたあとも hc の端末では herdr を呼ばず (通知も出さない)、hc get <端末> --json を 1 回だけ打つ"
+else
+  ng "断られたあとの hc の端末の呼び出し" "n0=${n0} herdr=$(cat "${hlog}") hc=$(cat "${hclog}")"
+fi
+
+mapfile -t hc3 < <(in_hc FAKE_HC_ROLE=child)
+expect_told "親が無くても label pjp.role=child の端末なら、hc の子の決まりを言い切る" PostToolUseFailure \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h「dotfiles-x」' "${none_conn}" "${child_hc}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hc3[@]}"
+
+mapfile -t hc4 < <(in_hc FAKE_HC_ROLE=hub FAKE_HC_NAME=)
+expect_told "親も label pjp.role=child も無い端末 (ハブ・人が立てた会話) では、子の決まりを条件つきで書く (名前が無ければ address だけ)" \
+  PostToolUseFailure "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h' "${none_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hc4[@]}"
+
+mapfile -t hc5 < <(in_hc FAKE_HC_PARENT=e56d/t8 FAKE_HC_RC=1)
+expect_told "hc が落ちたら、どこからを env の address だけにして、子の決まりを条件つきで書く" PostToolUseFailure \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h' "${none_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hc5[@]}"
+
+n0=$(calls)
+expect_told "hc が無いマシンでも、どこからを env の address だけにする" PostToolUseFailure \
+  "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h' "${none_conn}" "${child_default}")" \
+  'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" HC_TERMINAL_ID=t1h HERDR_ENV=1 HERDR_WORKSPACE_ID=w9 "PATH=${nohc}"
+if [[ $(calls) == "${n0}" ]]; then
+  ok "hc が無いマシンの hc の端末でも、herdr を呼ばない"
+else
+  ng "hc が無いマシンの hc の端末で herdr を呼んだ" "n0=${n0} herdr=$(cat "${hlog}")"
+fi
+
+mapfile -t hc6 < <(in_hc FAKE_HC_PARENT=e56d/t8 FAKE_HC_SLEEP=5)
+t0=$(date +%s%N)
+post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" "${hc6[@]}"
+e1=$(ms_since "${t0}")
+if ((e1 < 4000)) && told PostToolUseFailure "🔑 1Password に断られた: ssh h true — ${none_conn}" \
+  "$(want_ctx "${desc_refused}" "${first_refused}" "ssh h true" 'hc の端末 t1h' "${none_conn}" "${child_default}")"; then
+  ok "返事をしない hc は 2 秒で切り、どこからを env の address だけにして条件つきで書く"
+else
+  ng "返事をしない hc" "e1=${e1}ms $(detail)"
+fi
 
 extra_json='{"agent_id": "agent-1", "agent_type": "general-purpose"}'
 expect_told "subagent の中では問いを出させず、報告に書いて終えさせる" PostToolUseFailure \

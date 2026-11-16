@@ -41,6 +41,12 @@
 # だけを数える)。会話の画面の 1 行は毎回出す。herdr は 2 秒で切って呼び (timeout の無いマシンでは裏で流して見張る)、
 # 落ちた・返事をしないときは、その回の残りと続く 60 秒は呼ばない (印は同じ dir の herdr-down)。
 #
+# hc (herdr-core) の端末 (HC_TERMINAL_ID がある) では herdr を呼ばない。HERDR_ENV が残っていても、それは hc の core を
+# 旧 herdr の pane から立てたときに漏れた値で、その会話の herdr の pane は無い (claude-skills の
+# docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md の §7.2: 旧 herdr の会話は HERDR_ENV が 1 で HC_TERMINAL_ID が
+# 無い会話)。通知は出さず (blocked・done は herdr-app が知らせる)、断られたあとの「どこから」(端末の address と名前) と
+# 子の見分けを `hc get $HC_TERMINAL_ID --json` で読む (2 秒で切る。落ちたら env の address だけ)。
+#
 # 承認の画面の接続 (conn_desc) は、SSH_AUTH_SOCK (コマンドの頭の SSH_AUTH_SOCK= が勝つ。~ と $HOME は置き換える) の
 # symlink の先を見る。sshd が転送した agent (s.*.sshd.*) なら、pjp-agent-link の記録 (~/.local/state/pjp-agent-link/
 # conn/) の時刻と PJP_SSH_CLIENT の値 (無ければファイルの時刻) と、同じ dir のより新しい接続を出す。socket かどうかは
@@ -68,8 +74,9 @@
 # 指示は「同じコマンドを打ち直さない。何を (コマンドの頭) とどこから (workspace・pane・agent) を書いてから、
 # ① 直し方 (推奨) ② 飛ばして進める ③ 止める の問いを出す」。① は、断られたら「1Password を開いて承認する」、通信が
 # 切れた・届かないなら agent の口の種類ごと (転送された接続なら「このマシンへ接続し直す」、手元の口なら「1Password を
-# 起動してロックを解除する」、WSL で空なら Windows の 1Password、空なら SSH_AUTH_SOCK を設定する)。herdr の指揮役の
-# 子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace に子の印があれば言い切る。印は child_mark)。
+# 起動してロックを解除する」、WSL で空なら Windows の 1Password、空なら SSH_AUTH_SOCK を設定する)。herdr や hc の指揮役の
+# 子は AskUserQuestion を使わず、問いを書いてターンを終える (workspace に子の印があるか、hc の端末に親か label
+# pjp.role=child があれば言い切る。印は child_mark・hc_child_mark)。
 # subagent の中 (入力に agent_id がある) では問いを出させず、報告に書いて終えさせる。
 #
 # ## 黙る場面
@@ -977,10 +984,12 @@ herdr_down_path() {
   printf '%s/pjp-ssh-agent-notice/herdr-down' "${XDG_STATE_HOME:-${HOME}/.local/state}"
 }
 
-# herdr_ready: herdr の pane で herdr があり、この回と直近 60 秒に呼べなかったことが無い
+# herdr_ready: herdr の pane (hc の端末でない) で herdr があり、この回と直近 60 秒に呼べなかったことが無い
 herdr_ready() {
   local f
   ((herdr_failed == 0)) || return 1
+  # hc の端末では、漏れた HERDR_ENV があっても herdr を呼ばない (冒頭の「hc (herdr-core) の端末」)
+  [[ -z ${HC_TERMINAL_ID:-} ]] || return 1
   [[ ${HERDR_ENV:-} == 1 ]] || return 1
   command -v herdr &>/dev/null || return 1
   f=$(herdr_down_path)
@@ -997,15 +1006,19 @@ herdr_down() {
   return 0
 }
 
-# herdr_call <引数>…: 2 秒で切って呼ぶ。timeout の無いマシン (macOS) では裏で流して見張る
-herdr_call() {
+# herdr_call <引数>…・hc_call <引数>…: herdr・hc を 2 秒で切って呼ぶ (brief_call)
+herdr_call() { brief_call herdr "$@"; }
+hc_call() { brief_call hc "$@"; }
+
+# brief_call <コマンド> <引数>…: 2 秒で切って呼ぶ。timeout の無いマシン (macOS) では裏で流して見張る
+brief_call() {
   local f pid i rc
   if command -v timeout &>/dev/null; then
-    timeout 2 herdr "$@" </dev/null 2>/dev/null
+    timeout 2 "$@" </dev/null 2>/dev/null
     return
   fi
   f=$(mktemp "${TMPDIR:-/tmp}/ssh-agent-notice.XXXXXX") || return 1
-  herdr "$@" </dev/null >"${f}" 2>/dev/null &
+  "$@" </dev/null >"${f}" 2>/dev/null &
   pid=$!
   for ((i = 0; i < 20; i++)); do
     kill -0 "${pid}" 2>/dev/null || break
@@ -1043,15 +1056,36 @@ child_mark() {
       or ((.label // "") | startswith("🌱"))' <<<"$1" &>/dev/null
 }
 
-# where_desc: 「どこから」(workspace の名前・pane の ID・agent の名前・subagent) を where に、workspace の名前を
-# ws_label に、子の印 (child_mark) があれば ws_child に 1 を入れる (呼び出し元で使うので $( ) で呼ばない)
+# hc_child_mark <hc get の JSON>: hc の指揮役の子なら 0。親の端末がある (parent が空でない。hc run で立てた端末) か、label
+# pjp.role が child (claude-skills の pjp child new が付ける。spec §7.5) のどちらか
+hc_child_mark() {
+  jq -e '((.parent // "") != "") or ((.labels["pjp.role"] // "") == "child")' <<<"$1" &>/dev/null
+}
+
+# where_desc: 「どこから」(workspace の名前・pane の ID・agent の名前、hc の端末の address と名前・subagent) を where に、
+# workspace の名前を ws_label に、子の印 (child_mark・hc_child_mark) があれば ws_child に 1 を、hc の端末なら ws_hc に 1 を
+# 入れる (呼び出し元で使うので $( ) で呼ばない)。hc の端末では herdr を呼ばない
 where_desc() {
-  local agent_name="" agent_type part got
+  local agent_name="" agent_type part got term_name term_addr
   local -a parts=()
   where=""
   ws_label=""
   ws_child=0
-  if [[ ${HERDR_ENV:-} == 1 ]]; then
+  ws_hc=0
+  if [[ -n ${HC_TERMINAL_ID:-} ]]; then
+    ws_hc=1
+    term_name=""
+    term_addr=${HC_TERMINAL_ID}
+    if command -v hc &>/dev/null && got=$(hc_call get "${HC_TERMINAL_ID}" --json) \
+      && jq -e 'type == "object"' <<<"${got}" &>/dev/null; then
+      term_name=$(jq -r '.name // empty' <<<"${got}" 2>/dev/null)
+      term_addr=$(jq -r --arg a "${term_addr}" '.address // $a' <<<"${got}" 2>/dev/null)
+      if hc_child_mark "${got}"; then
+        ws_child=1
+      fi
+    fi
+    parts+=("hc の端末 ${term_addr}${term_name:+「${term_name}」}")
+  elif [[ ${HERDR_ENV:-} == 1 ]]; then
     if [[ -n ${HERDR_WORKSPACE_ID:-} ]] && herdr_ready; then
       if got=$(herdr_call workspace get "${HERDR_WORKSPACE_ID}"); then
         ws_label=$(jq -r '.result.workspace.label // empty' <<<"${got}" 2>/dev/null)
@@ -1247,10 +1281,12 @@ after() {
     ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、失敗したこと (何を: ${head} の接続先や署名する対象。"
     ctx+="どこから: ${where}。${conn}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"
   else
-    if ((ws_child)); then
+    if ((ws_child && ws_hc)); then
+      rule='この端末は hc の指揮役の子 (hc の親の端末がいるか、label pjp.role=child がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
+    elif ((ws_child)); then
       rule='この pane は herdr の指揮役の子 (workspace に子の印 🌱 か、親を示す ↑ がある) なので、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。'
     else
-      rule='herdr の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
+      rule='herdr や hc の指揮役から依頼を受けて動いている子は、AskUserQuestion を使わず、問いと選択肢を書いてターンを終える (指揮役がユーザーに聞く)。それ以外は AskUserQuestion で聞く。'
     fi
     ctx+="1. 何を (${head} の接続先や署名する対象) と、どこから (${where}) を書く。${conn}。"$'\n'
     ctx+="2. 選択肢の問いを出す: ① ${first} (推奨) ② この手順を飛ばして進める ③ ここで止める。① が選ばれたら、同じコマンドを 1 回だけ打ち直す。"$'\n'

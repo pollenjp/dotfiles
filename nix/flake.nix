@@ -577,6 +577,8 @@
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
+          # setup.sh の手順の並び (bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前) も見るので、scripts/ を丸ごと渡す
+          bootstrap-pjp-test = scriptTest "bootstrap-pjp" ./scripts;
           # setup.sh の手順の並び (bootstrap-claude-skills・bootstrap-herdr-hub の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-dev-tracker-inbox-test = scriptTest "bootstrap-dev-tracker-inbox" ./scripts;
           bootstrap-ssh-config-test = scriptTest "bootstrap-ssh-config" ./scripts/bootstrap-ssh-config.sh;
@@ -645,7 +647,8 @@
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
           # herdr-core (pkgs/herdr-core) の package そのもの。公式の Linux 版を releases.json の sha256 で落とし、build の
-          # installCheck が `herdr-core --version`・`hc --version` を版と照らす。配布物は Linux だけ
+          # installCheck が `herdr-core --version`・`hc --version` を版と照らし、包みが core を立てたシェルに固有の env (旧 herdr の
+          # pane の印・RUSTUP_TOOLCHAIN) を外して、ほかの env (hc が読む HERDR_RELEASES_URL も) を残すことを確かめる。配布物は Linux だけ
           herdr-core-test = pkgs.callPackage ./pkgs/herdr-core { };
           # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
           # crate で流す (buildPhase を差し替え、test と install はしない)。指摘は system によらないので Linux だけ
@@ -730,6 +733,14 @@
               ;
           };
           claude-herdr-skill = import ./tests/claude-herdr-skill.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-hc-skill = import ./tests/claude-hc-skill.nix {
             inherit
               lib
               pkgs
@@ -850,6 +861,14 @@
               ;
           };
           herdr-core-state = import ./tests/herdr-core.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          login-path-state = import ./tests/login-path.nix {
             inherit
               lib
               pkgs

@@ -10,7 +10,7 @@
 #   bootstrap-claude-plugins.sh が claude を要求し、その claude を入れるのは
 #   ここなので、辞書順 (bootstrap-mise は最後尾) より前に出す必要がある。
 #
-# mise-tools: aqua:jdx/usage go node claude
+# mise-tools: aqua:jdx/usage go node claude rust
 #
 # ^ setup.sh が読む、この script が mise use -g で config.toml の [tools] に書く名前 (版は除く)。
 #   setup の「残りの手作業」の手順 5 は、[tools] のうちこれ以外の名前 (前の setup や旧経路が書いた
@@ -36,7 +36,7 @@
 # ## 役割分担
 #
 #   グローバルな CLI ツール    -> Nix (nix/home/modules/packages.nix。例外は下の claude と cursor-agent)
-#   言語ランタイム (go/node)   -> mise (このスクリプト)
+#   言語ランタイム (go/node)   -> mise (このスクリプト。rust (rustup) も。下の rust の節)
 #   プロジェクト毎のツール固定 -> mise (各リポジトリの mise.toml)
 #
 # ## 遅延 (minimum_release_age) と、期間を区切った上書き (ADR 030)
@@ -250,20 +250,22 @@ echo "==> claude (役割分担の例外)"
 # (この仕組みの前の世代)・読めないときは今までどおり入れる。前に入れた claude が config.toml の [tools] に残っていれば、
 # 外すコマンドを 1 行出すだけで、消さない (setup は off にした道具の入れたものを消さない。ADR 057)。
 group_state="${HOME}/.local/state/dotfiles/group.json"
-claude_wanted() {
+# group.json の tools.<$1> が false でなければ 0 (入れる)。ファイル・欄が無い・読めないときも 0 (今までどおり入れる)
+tool_wanted() {
   local v
   if [[ ! -r ${group_state} ]] || ! command -v jq &>/dev/null; then
     return 0
   fi
-  v=$(jq -r 'if (.tools | type) == "object" and (.tools | has("claude")) then .tools.claude | tostring else "true" end' \
+  v=$(jq -r --arg k "$1" 'if (.tools | type) == "object" and (.tools | has($k)) then .tools[$k] | tostring else "true" end' \
     "${group_state}" 2>/dev/null) || return 0
   [[ ${v} != false ]]
 }
-# ~/.config/mise/config.toml の [tools] に claude があるか (setup.sh の mise_extra_tools と同じ読み方。[tools.<名前>] の形は見ない)
-global_tools_has_claude() {
+claude_wanted() { tool_wanted claude; }
+# ~/.config/mise/config.toml の [tools] に $1 があるか (setup.sh の mise_extra_tools と同じ読み方。[tools.<名前>] の形は見ない)
+global_tools_has() {
   local f="${XDG_CONFIG_HOME:-${HOME}/.config}/mise/config.toml" found
   [[ -f ${f} ]] || return 1
-  found=$(awk '
+  found=$(awk -v want="$1" '
     /^[[:space:]]*\[/ { in_tools = ($0 ~ /^[[:space:]]*\[tools\][[:space:]]*$/); next }
     !in_tools         { next }
     /^[[:space:]]*#/  { next }
@@ -271,7 +273,7 @@ global_tools_has_claude() {
       key = $0
       sub(/[[:space:]]*=.*$/, "", key)
       gsub(/[[:space:]"]/, "", key)
-      if (key == "claude") { print "yes"; exit }
+      if (key == want) { print "yes"; exit }
     }
   ' "${f}")
   [[ ${found} == yes ]]
@@ -280,8 +282,45 @@ if claude_wanted; then
   MISE_MINIMUM_RELEASE_AGE="${claude_age}" mise use -g claude@latest
 else
   echo "  入れない (dotfiles.claude.enable = false。設定グループ)"
-  if global_tools_has_claude; then
+  if global_tools_has claude; then
     echo "  前に入れた claude が ~/.config/mise/config.toml の [tools] に残っています (消さない)。外すなら: mise unuse -g claude"
+  fi
+fi
+
+echo "==> rust (rustup。claude-skills の Rust の道具のため。dotfiles.claude.privateSkills.enable のホストだけ)"
+# claude-skills は script を Rust に移している (claude-skills の docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md の
+# §6.5・§9)。道具の入口の shim の pjp (bootstrap-pjp.sh が入れる) と、pjp が打つ cargo は rustup が要る。言語のランタイムなので
+# mise で入れる (ADR 001 の決定 6)。mise の rust (core:rust) は、rustup が無ければ sh.rustup.rs の rustup-init で ~/.cargo に
+# 入れ、toolchain を rustup で入れる (CARGO_HOME・RUSTUP_HOME は既定の ~/.cargo・~/.rustup)。版は go と同じく省く (入っている
+# 中の最高版。無ければ遅延 (minimum_release_age) を過ぎた最新の stable)。上げるときは mise up rust。
+#
+# mise の rust は、効いている間 RUSTUP_TOOLCHAIN を入れる。rustup はそれを repo の rust-toolchain.toml より上に置くので、全体の
+# rust だけを足すと、repo が固定した toolchain (claude-skills の rust-toolchain.toml。CI と同じ版) が mise の効いたシェルで効かなく
+# なる。mise の文書 (lang/rust) が勧めるとおり idiomatic_version_file_enable_tools に rust を足し、rust-toolchain.toml の channel を
+# mise に読ませる (mise がその版を入れていなければ RUSTUP_TOOLCHAIN を入れず、rustup が file を読む)。shim の pjp は mise に頼らず、
+# clone の rust-toolchain.toml の channel を RUSTUP_TOOLCHAIN にして ~/.cargo/bin の cargo を打つ。
+#
+# 入れるのは Rust の道具を使うホスト (claude-skills の clone を持つ dotfiles.claude.privateSkills.enable。値は group.json の
+# tools.claudePrivateSkills) だけ。off なら入れず、前に入れた rust が [tools] に残っていれば外すコマンドを 1 行出すだけで、消さない
+# (claude と同じ。ADR 057)。idiomatic の設定は off でも外さない (mise の rust を使わないなら効かない)。
+#
+# 入れられなくても止めない (警告して続ける)。止めると後ろの bootstrap が走らない。rustup が無いマシンでも、bootstrap-pjp.sh と
+# shim の pjp は claude-skills の nix の devShell の rustup で作れる。
+if tool_wanted claudePrivateSkills; then
+  if [[ $(mise settings get idiomatic_version_file_enable_tools 2>/dev/null) =~ \"rust\" ]]; then
+    echo "  idiomatic_version_file_enable_tools に rust はもうある (repo の rust-toolchain.toml を mise が読む)"
+  elif ! mise settings add idiomatic_version_file_enable_tools rust; then
+    warn "mise の idiomatic_version_file_enable_tools に rust を足せませんでした (上の mise のエラー)。" \
+      "このままだと、mise の rust が repo の rust-toolchain.toml より勝ちます。手で足すなら: mise settings add idiomatic_version_file_enable_tools rust"
+  fi
+  if ! mise use -g rust; then
+    warn "mise の rust (rustup) を入れられませんでした (上の mise のエラー)。" \
+      "claude-skills の Rust の道具は、nix の devShell の rustup で作ります (bootstrap-pjp.sh)。次の ~/dotfiles/setup --update で入れ直します。"
+  fi
+else
+  echo "  入れない (dotfiles.claude.privateSkills.enable = false。設定グループ)"
+  if global_tools_has rust; then
+    echo "  前に入れた rust が ~/.config/mise/config.toml の [tools] に残っています (消さない)。外すなら: mise unuse -g rust"
   fi
 fi
 
