@@ -113,7 +113,9 @@ function Test-WingetPinned {
 }
 
 # plan ごとに打つ winget の引数 (配列の配列)。上げるときは winget upgrade に版を名指しする
-# (MSI の更新で入れ替わる。Install-OpenSSH.ps1 と同じ)
+# (MSI の更新で入れ替わる。Install-OpenSSH.ps1 と同じ)。
+# upgrade には --include-pinned を付ける。版を名指しした upgrade は、付けないとこの script が足した pin (Pinning) に止められる
+# (0x8A150068)。上げる前に pin を外すが、外せなかったときも止められないようにする。install は --include-pinned を受け付けない
 function Get-WingetCommands {
     param([string]$Plan, [string]$PackageId, [string]$Version)
     $common = @('--id', $PackageId, '--exact', '--source', 'winget', '--silent',
@@ -121,8 +123,17 @@ function Get-WingetCommands {
     $put = $common + @('--version', $Version, '--accept-package-agreements')
     switch ($Plan) {
         'install' { , (@('install') + $put) }
-        'upgrade' { , (@('upgrade') + $put) }
+        'upgrade' { , (@('upgrade') + $put + @('--include-pinned')) }
     }
+}
+
+# winget が pin に止められて落ちた (0x8A150068 = APPINSTALLER_CLI_ERROR_PACKAGE_IS_PINNED) ときに添える行。ほかの終了コードなら
+# 何も返さない (Install-OpenSSH.ps1 と同じ)。この script が足す pin (Pinning) は upgrade の --include-pinned で越えるので、出るのは
+# pin を Blocking・Gating に替えたときか、入っていると winget が見ているのに install を打ったとき (install は --include-pinned を受け付けない)
+function Get-WingetPinnedHint {
+    param([int]$ExitCode, [string]$PackageId)
+    if ($ExitCode -ne -1978335128) { return }
+    "※ winget の pin に止められた。winget pin list --id $PackageId --exact で pin を確かめ、winget pin remove --id $PackageId --exact で外してから打ち直す (打ち直すと、揃えた後に pin を足し直す)"
 }
 
 # 終了コード。入っていなければ 3、版と pin が揃っていれば 0、ほかは 1
@@ -318,7 +329,8 @@ function Invoke-InstallGoogleJapaneseInput {
     if ($state.Plan -ne 'none') {
         Write-Host 'Windows のデスクトップに UAC の確認が出る。「はい」を押す'
     }
-    # 上げるときは、古い版の pin を残さないよう先に外す (上げた後に足し直す。Install-Herdr.ps1 と同じ)
+    # 上げるときは、古い版の pin を残さないよう先に外す (上げた後に足し直す。Install-Herdr.ps1 と同じ)。外せなくても、upgrade に
+    # 付けた --include-pinned で pin を越える (Get-WingetCommands)
     if (($state.Plan -eq 'upgrade') -and $state.Pinned) {
         $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
         if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
@@ -329,6 +341,7 @@ function Invoke-InstallGoogleJapaneseInput {
         $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
         if ($result.ExitCode -ne 0) {
             Write-Host ('winget が失敗した (終了コード 0x{0:X8})。UAC で「いいえ」を押したなら、Install-GoogleJapaneseInput を打ち直す' -f $result.ExitCode)
+            Get-WingetPinnedHint -ExitCode $result.ExitCode -PackageId $packageId | ForEach-Object { Write-Host $_ }
             break
         }
     }

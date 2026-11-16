@@ -10,7 +10,9 @@ flake_lock_age = ["nix/scripts/flake-lock-age.sh"]
 # - nix/pkgs/upstream/: 期間付きの例外 (fromUpstream) の中身で、上げずに片付けで扱う。項目が無いあいだはディレクトリも
 #   無い (skip と下の [upstream_cleanup] は、次に足す例外のために残す)
 # - nix/pkgs/herdr-core/: 版は [[pins]] の windows (releases.json の herdr-app・herdr-core) で見る
-skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/"]
+# - nix/pkgs/op-reason/: 自作のアプリ (WSL の op の wrapper) の Release。公開からの猶予を置かず、Release を出す流れで
+#   win/op-reason/ と同じ PR で上げる (nix/README.md の「op-reason の新しい版を出したとき」)。印 # release-source: も置かない
+skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/", "nix/pkgs/op-reason/"]
 
 # release-age.nix の fromUpstream の消し時を見る (dotfiles だけの仕組み。nix/README.md の「猶予の日数と例外」)
 [upstream_cleanup]

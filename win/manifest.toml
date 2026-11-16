@@ -84,3 +84,8 @@ hint = "PowerShell 7 で pf を打つ (dotfiles.ps1 の pf から呼ぶ。開い
 src = "type-clipboard/Install-TypeClipboard.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-TypeClipboard.ps1"
 hint = "PowerShell で Install-TypeClipboard -Check を打つと、固定した版との差が分かる (setup --update が入れて確かめるのは dotfiles.wsl.windowsFiles.typeClipboard.enable = true のマシンだけ。ほかのマシンでも Install-TypeClipboard で入れられる)"
+
+[[files]]
+src = "op-reason/Install-OpReason.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-OpReason.ps1"
+hint = "PowerShell で Install-OpReason -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは、WSL の op の wrapper (op-reason) を入れるマシンだけ。ほかのマシンでも Install-OpReason で入れられる)"

@@ -22,9 +22,9 @@
 #   2. 参照を項目 (vault と項目の部分の組。大文字小文字は問わない) ごとにまとめ、初めて出た順に、項目ごとに 1 回だけ op を呼ぶ:
 #        op [--reason "[pjp-op-ref: 参照 <N> 件を ID の形に直す (項目 <k>/<M>)。ID だけを抜き出し、値は捨てる] <理由>"] \
 #          item get <項目> --vault <vault> --format json
-#      (項目 …) は項目が 2 つ以上のときだけ。--reason は pjp-op のあるマシン (~/.local/state/dotfiles/claude-op-reason.json の
-#      enable が true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い。同じ項目でも書き方 (名前か
-#      ID か) が違えば別に読む (op の出力は、次の項目のために残さない)
+#      (項目 …) は項目が 2 つ以上のときだけ。--reason は WSL の op が wrapper の op-reason のマシン (~/.local/state/dotfiles/
+#      claude-op-reason.json の enable が true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い。
+#      同じ項目でも書き方 (名前か ID か) が違えば別に読む (op の出力は、次の項目のために残さない)
 #   3. op の stdout は jq にだけ流す。jq は vault と項目の ID を取り、セクションと欄を ID か名前 (大文字小文字は問わない) で
 #      当てて、ID の参照か、当たったものの件数 (0 件・2 件以上) だけを出す。参照にセクションが無くても、欄にセクションが
 #      あればセクションの ID を入れる。セクションの無い欄は op://<vault>/<項目>/<欄>
@@ -78,9 +78,9 @@ usage() {
     '' \
     '1Password の参照 (op://vault/項目/[セクション/]欄) を、vault・項目・セクション・欄の ID の参照に直して 1 行ずつ出します。' \
     '名前は変えられ、変えると名前の参照は切れるので、.env には ID の参照を書きます。値は出しません (op の出力から ID だけを抜き出す)。' \
-    'op は項目ごとに 1 回呼びます (同じ項目の参照はまとめる)。WSL の op (pjp-op) では、そのたびに承認の画面が出ます。' \
+    'op は項目ごとに 1 回呼びます (同じ項目の参照はまとめる)。WSL の op (op-reason) では、そのたびに承認の画面が出ます。' \
     '' \
-    '  --reason <理由>  何のために読むかを 1 文で (必須)。WSL の op (pjp-op) では承認の窓と記録に出ます' \
+    '  --reason <理由>  何のために読むかを 1 文で (必須)。WSL の op (op-reason) では承認の窓と記録に出ます' \
     '  -q, --quiet      終わりの 1 行を出しません' \
     '' \
     "${example}" \

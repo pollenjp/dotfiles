@@ -192,6 +192,8 @@
           pkgs = nixpkgs.legacyPackages.${system};
           googleIme = pkgs.callPackage ./pkgs/pjp-google-ime { };
           ghqPull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
+          # WSL の op (1Password CLI の wrapper。自作の OSS の op-reason を Release の版と SHA-256 で固定したもの)。配布物は Linux だけ
+          opReason = pkgs.callPackage ./pkgs/op-reason { };
           unittest =
             name:
             pkgs.runCommand "${name}-unittest" { nativeBuildInputs = [ pkgs.python3 ]; } ''
@@ -293,74 +295,9 @@
               system
               ;
           };
-          # WSL の op の launcher (pkgs/pjp-op/launcher.ps1) を、Linux の pwsh と偽の op で流す。窓と通知は Windows でだけ
-          # 出すので、ここでは出さない (どちらも skipped と書く)。package が build のときに作った launcher の dir も渡し、op と
-          # 同じ起動の式 (-EncodedCommand が env の本体を読む) でも流す
-          pjp-op-launcher-test =
-            pkgs.runCommand "pjp-op-launcher-test"
-              {
-                nativeBuildInputs = [
-                  pkgs.powershell
-                  pkgs.jq
-                ];
-              }
-              ''
-                bash ${./tests/pjp-op-launcher.test.sh} ${./pkgs/pjp-op/launcher.ps1} \
-                  ${(pkgs.callPackage ./pkgs/pjp-op { }).launcher}
-                touch $out
-              '';
-          # WSL の op (pkgs/pjp-op/op.sh) を、偽の powershell.exe・op.exe・wslpath・herdr で流す。lock に flock (util-linux) を使う
-          pjp-op-test =
-            pkgs.runCommand "pjp-op-test"
-              {
-                nativeBuildInputs = [
-                  pkgs.jq
-                  pkgs.git
-                  pkgs.util-linux
-                ];
-              }
-              ''
-                bash ${./tests/pjp-op.test.sh} ${./pkgs/pjp-op/op.sh}
-                touch $out
-              '';
-          # op.sh から本物の launcher (Linux の pwsh) までを偽の op で端から端まで通す (op.sh と launcher の取り決めのずれを見る)
-          pjp-op-e2e-test =
-            pkgs.runCommand "pjp-op-e2e-test"
-              {
-                nativeBuildInputs = [
-                  pkgs.powershell
-                  pkgs.jq
-                  pkgs.git
-                  pkgs.util-linux
-                ];
-              }
-              ''
-                bash ${./tests/pjp-op-e2e.test.sh} ${./pkgs/pjp-op/op.sh} ${
-                  (pkgs.callPackage ./pkgs/pjp-op { }).launcher
-                }
-                touch $out
-              '';
-          # op の記録を表で見る pjp-op-log (pkgs/pjp-op/pjp-op-log.sh) を作り物の記録で流す。表を揃えるのに column (util-linux) を使う
-          pjp-op-log-test =
-            pkgs.runCommand "pjp-op-log-test"
-              {
-                nativeBuildInputs = [
-                  pkgs.jq
-                  pkgs.util-linux
-                ];
-              }
-              ''
-                bash ${./tests/pjp-op-log.test.sh} ${./pkgs/pjp-op/pjp-op-log.sh}
-                touch $out
-              '';
-          # WSL の op の wrapper を入れるマシンに置く fish の op の補完 (pkgs/pjp-op/op-completion.fish) を、本物の fish と偽の op で
-          # 流す。op を呼ばないことと、fish に同梱の補完 (op completion fish を打つ) より先に読まれることを見る
-          pjp-op-completion-test =
-            pkgs.runCommand "pjp-op-completion-test" { nativeBuildInputs = [ pkgs.fish ]; }
-              ''
-                bash ${./tests/pjp-op-completion.test.sh} ${./pkgs/pjp-op/op-completion.fish}
-                touch $out
-              '';
+          # WSL の op は自作の OSS の op-reason (pkgs/op-reason)。wrapper・launcher・記録・補完の動きは op-reason の repo の
+          # テスト (CI) が確かめるので、ここでは流さない。dotfiles が包んだものは op-reason-state、op を呼ぶ道具との組み合わせは
+          # pjp-op-env-test・pjp-op-ref-test の後半、Claude の hook は op-reason-guard-test が見る
           bootstrap-claude-env-test = scriptTest "bootstrap-claude-env" ./scripts/bootstrap-claude-env.sh;
           bootstrap-claude-footer-links-test = scriptTest "bootstrap-claude-footer-links" ./scripts/bootstrap-claude-footer-links.sh;
           # Claude Code は footer-links.json の正規表現を JavaScript の RegExp で読むので、
@@ -591,6 +528,7 @@
           bootstrap-windows-international-test = scriptTest "bootstrap-windows-international" ./scripts/bootstrap-windows-international.sh;
           bootstrap-windows-port-forward-test = scriptTest "bootstrap-windows-port-forward" ./scripts/bootstrap-windows-port-forward.sh;
           bootstrap-windows-type-clipboard-test = scriptTest "bootstrap-windows-type-clipboard" ./scripts/bootstrap-windows-type-clipboard.sh;
+          bootstrap-windows-op-reason-test = scriptTest "bootstrap-windows-op-reason" ./scripts/bootstrap-windows-op-reason.sh;
           # repo の dotfiles.txt も渡し、警告なしに欄へ入ることを確かめる
           bootstrap-local-env-test = pkgs.runCommand "bootstrap-local-env-test" { } ''
             bash ${./tests/bootstrap-local-env.test.sh} ${./scripts/bootstrap-local-env.sh} ${./pjp-env/dotfiles.txt}
@@ -613,8 +551,8 @@
                 touch $out
               '';
           # .env の op:// の参照を 1 回の op で解いて program を起こす pjp-op-env (pkgs/pjp-op-env) を、偽の op・vault・program で
-          # 流す。後半は本物の op.sh (pkgs/pjp-op) を偽の powershell.exe・op.exe で通し、lock に flock (util-linux) を使う。
-          # 値が execve の argv に載らないことを strace で見る
+          # 流す。後半は本物の op-reason (pkgs/op-reason の WSL の実行ファイル) を偽の op-reason.exe・op.exe・wslpath で通し、
+          # lock に flock (util-linux) を使う。値が execve の argv に載らないことを strace で見る
           pjp-op-env-test =
             pkgs.runCommand "pjp-op-env-test"
               {
@@ -625,12 +563,12 @@
                 ];
               }
               ''
-                bash ${./tests/pjp-op-env.test.sh} ${./pkgs/pjp-op-env/pjp-op-env.sh} ${./pkgs/pjp-op/op.sh}
+                bash ${./tests/pjp-op-env.test.sh} ${./pkgs/pjp-op-env/pjp-op-env.sh} ${opReason}/bin/op-reason
                 touch $out
               '';
           # 1Password の名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を、偽の op と偽の項目 (op item get --format json
-          # の形) で流す。後半は本物の op.sh (pkgs/pjp-op) を偽の powershell.exe・op.exe で通し、lock に flock (util-linux) を使う。
-          # 値が execve の argv に載らないことを strace で見る
+          # の形) で流す。後半は本物の op-reason (pkgs/op-reason の WSL の実行ファイル) を偽の op-reason.exe・op.exe・wslpath で
+          # 通し、lock に flock (util-linux) を使う。値が execve の argv に載らないことを strace で見る
           pjp-op-ref-test =
             pkgs.runCommand "pjp-op-ref-test"
               {
@@ -641,7 +579,7 @@
                 ];
               }
               ''
-                bash ${./tests/pjp-op-ref.test.sh} ${./pkgs/pjp-op-ref/pjp-op-ref.sh} ${./pkgs/pjp-op/op.sh}
+                bash ${./tests/pjp-op-ref.test.sh} ${./pkgs/pjp-op-ref/pjp-op-ref.sh} ${opReason}/bin/op-reason
                 touch $out
               '';
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
@@ -1121,10 +1059,12 @@
         #
         #   nix run ./nix#pjp-wsl-xdg-open -- <URL かファイルのパス>
         #
-        # WSL の op (1Password CLI の wrapper) と pjp-op-log も WSL のマシンでしか使わない。home には home/modules/op-reason.nix が
-        # 入れる。単体で試すなら (承認の画面が出る):
+        # WSL の op (1Password CLI の wrapper。自作の OSS の op-reason の Release を版と SHA-256 で固定したもの) と op-reason-log も
+        # WSL のマシンでしか使わない。home には home/modules/op-reason.nix が、Windows の op-reason.exe の場所の既定を足して
+        # 包んで入れる (表示の言語は決めない)。単体で試すなら (承認の画面は出ない):
         #
-        #   nix run ./nix#pjp-op -- --reason "<なぜ呼ぶか>" whoami
+        #   nix run ./nix#op-reason -- --version
+        #   nix run ./nix#op-reason -- --skill
         #
         # herdr-core (hc) は公式の Linux 版だけを入れる (pkgs/herdr-core。版と sha256 は Windows と共通の releases.json)。
         # home には home/modules/herdr-core.nix が入れる。switch せずに試すなら:
@@ -1137,7 +1077,7 @@
           pjp-google-ime = pkgs.callPackage ./pkgs/pjp-google-ime { };
           pjp-wsl-mtu-guard = pkgs.callPackage ./pkgs/pjp-wsl-mtu-guard { };
           pjp-wsl-xdg-open = pkgs.callPackage ./pkgs/pjp-wsl-xdg-open { };
-          pjp-op = pkgs.callPackage ./pkgs/pjp-op { };
+          op-reason = pkgs.callPackage ./pkgs/op-reason { };
         }
       );
 

@@ -2,14 +2,16 @@
 # shellcheck shell=bash
 #
 # nix/pkgs/pjp-op-ref/pjp-op-ref.sh (1Password の名前の参照を ID の参照に直す) を、偽の op と偽の項目 (op item get
-# --format json の形の JSON) で確かめる。後半 (「pjp-op を通す」) は本物の op.sh (nix/pkgs/pjp-op/op.sh) を、pjp-op.test.sh と
-# 同じ形の偽の powershell.exe・op.exe・wslpath で通す。
+# --format json の形の JSON) で確かめる。後半 (「op-reason を通す」) は本物の op-reason (WSL の op。nix/pkgs/op-reason の実行
+# ファイル) を、op-reason の repo の tests/wrapper.test.sh と同じ形の偽の op-reason.exe・op.exe・wslpath で通す。
 #
-#   bash nix/tests/pjp-op-ref.test.sh [<pjp-op-ref.sh のパス> [<op.sh のパス>]]
+#   bash nix/tests/pjp-op-ref.test.sh [<pjp-op-ref.sh のパス> [<op-reason の実行ファイルのパス>]]
 #
-# flake の checks (pjp-op-ref-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・jq・flock (util-linux)・strace。
-# 本物の 1Password・op.exe・powershell.exe は使わない。偽の項目の値 (value・totp・additional_information) はどれも S3CR3T を
-# 含む (漏れを探す印)。vault・項目・セクション・欄の ID と名前はどれも作り物。
+# flake の checks (pjp-op-ref-test) が Nix のサンドボックスで流し、op-reason の実行ファイルも渡す (渡さないと後半は FAIL に
+# なる。repo に op-reason の実行ファイルは無い)。使うのは bash・coreutils・jq・flock (util-linux)・strace。本物の 1Password・
+# op.exe・op-reason.exe・powershell.exe は使わない (WSL で手で流しても見えないよう、PATH から /mnt/ の下を外す)。偽の項目の値
+# (value・totp・additional_information) はどれも S3CR3T を含む (漏れを探す印)。vault・項目・セクション・欄の ID と名前はどれも
+# 作り物。
 #
 # ## 確かめること
 #
@@ -43,9 +45,11 @@
 #     - helper から起きたどのプロセスの execve の argv にも値が無い (strace)
 #     - SHELLOPTS=xtrace・BASH_ENV (set -x) を付けて流しても、stderr に値が無い
 #   出す 1 行: stderr に参照の件数と op の回数を出し、--quiet なら出さない。--help は 0
-#   pjp-op を通す (本物の op.sh)
-#     - 参照 2 件で、承認の出る呼び出し (desktop の mode の powershell) が 1 回、op.exe の item get が 1 回で、ID の参照が出る
-#     - log.jsonl に値が無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件
+#   op-reason を通す (本物の op-reason の WSL の実行ファイル)
+#     - 参照 2 件で、承認の出る呼び出し (desktop の mode の payload で起きた op-reason.exe) が 1 回、op.exe の item get が 1 回で、
+#       ID の参照が出る
+#     - op-reason の記録 (log.jsonl) に値が無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件、end は
+#       op-reason.exe で動いた approved
 #     - 流した後、HOME・XDG_STATE_HOME・XDG_RUNTIME_DIR・TMPDIR・cwd のどのファイルにも値が無い
 #
 # ## 作り
@@ -53,9 +57,11 @@
 # 偽の op は、呼ばれるたびに引数を FAKE_DIR/op.<番号>.args (NUL 区切り) に書き、item get <項目> --vault <vault> --format json
 # なら、偽の項目 (FAKE_ITEMS/*.json) から vault の名前か ID と、項目の名前か ID が合うもの (大文字小文字は問わない) を
 # stdout に出す。合うものが無い・2 つ以上なら [ERROR] を出して 1。FAKE_OP_RC (その終了コードで断る)・FAKE_OP_OUT (項目の
-# 代わりにそのファイルを出す) で形を変える。whoami・signout (pjp-op の見張り) は FAKE_DIR/op.direct に書いて 1・0 で終わる。
-# 同じものを op.exe としても置く。shebang は $BASH から作り、set +x で始める (本物の op.exe は bash ではなく、BASH_ENV の
-# set -x を受けない)。
+# 代わりにそのファイルを出す) で形を変える。whoami・signout (op-reason の共有の承認の見張り) は FAKE_DIR/op.direct に書いて
+# 1・0 で終わる。同じものを op.exe としても置く。偽の op-reason.exe は、本物と同じく payload (OPREASON_PAYLOAD) を読んだら
+# すぐ status を書き、mode を FAKE_DIR/runner.modes に残し、args64 を解いて payload の op (偽の op.exe) を起こし、status を
+# 書いて op の終了コードで終わる。偽の wslpath は /x/y と C:\fake\x\y を行き来させる。shebang は $BASH から作り、set +x で
+# 始める (本物の op.exe は bash ではなく、BASH_ENV の set -x を受けない)。
 
 set -u -o pipefail
 
@@ -64,10 +70,12 @@ here=$(
   pwd -P
 )
 script=${1:-${here}/../pkgs/pjp-op-ref/pjp-op-ref.sh}
-opsh=${2:-${here}/../pkgs/pjp-op/op.sh}
+opr=${2:-}
 # cwd を移してから流すので、絶対パスにする
 script=$(cd -- "$(dirname "${script}")" && pwd -P)/$(basename "${script}")
-opsh=$(cd -- "$(dirname "${opsh}")" && pwd -P)/$(basename "${opsh}")
+if [[ -n ${opr} ]]; then
+  opr=$(cd -- "$(dirname "${opr}")" && pwd -P)/$(basename "${opr}")
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/pjp-op-ref-test.XXXXXX")
 work=$(cd "${work}" && pwd -P)
 trap 'rm -rf "${work}"' EXIT
@@ -78,10 +86,17 @@ export FAKE_DIR=${work}/fake FAKE_ITEMS=${work}/items
 fake_bin=${work}/bin
 proj=${work}/proj
 mkdir -p "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${FAKE_DIR}" "${FAKE_ITEMS}" "${fake_bin}" "${proj}" \
-  "${work}/win" "${work}/launcher"
-export PATH=${fake_bin}:${PATH}
+  "${work}/win" "${work}/winapp"
+# WSL で手で流したときに Windows の op.exe・op-reason.exe・powershell.exe が見えないよう、PATH から /mnt/ の下を外す
+no_win_path=""
+IFS=: read -r -a path_dirs <<<"${PATH}"
+for path_dir in "${path_dirs[@]}"; do
+  [[ ${path_dir} == /mnt/* ]] || no_win_path+=${no_win_path:+:}${path_dir}
+done
+export PATH=${fake_bin}:${no_win_path}
 unset WSLENV HERDR_ENV HERDR_WORKSPACE_ID HERDR_PANE_ID CLAUDE_CODE_SESSION_ID OP_SERVICE_ACCOUNT_TOKEN OP_CONNECT_HOST \
-  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_REF_OP BASH_ENV FAKE_OP_RC FAKE_OP_OUT
+  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_REF_OP BASH_ENV FAKE_OP_RC FAKE_OP_OUT \
+  OPREASON_EXE OPREASON_OP_EXE OPREASON_RUNNER OPREASON_POWERSHELL OPREASON_LOCK_WAIT OPREASON_LANG
 
 pass=0
 fail=0
@@ -262,7 +277,7 @@ cat >"${FAKE_ITEMS}/ops.json" <<'EOF'
 EOF
 
 state_file=${HOME}/.local/state/dotfiles/claude-op-reason.json
-# set_state <true|false|none>: pjp-op があるかの印 (home/modules/op-reason.nix が書くもの)
+# set_state <true|false|none>: WSL の op の wrapper (op-reason) があるかの印 (home/modules/op-reason.nix が書くもの)
 set_state() {
   rm -f "${state_file}"
   if [[ $1 != none ]]; then
@@ -272,7 +287,7 @@ set_state() {
 }
 
 reset() {
-  rm -rf "${FAKE_DIR:?}"/* "${XDG_STATE_HOME}/pjp-op" "${XDG_RUNTIME_DIR:?}"/*
+  rm -rf "${FAKE_DIR:?}"/* "${XDG_STATE_HOME}/op-reason" "${XDG_RUNTIME_DIR:?}"/*
 }
 
 # run_ref <名前> <引数>…: proj の中で pjp-op-ref を流す。<名前>.stdout・<名前>.stderr と rc に入れる
@@ -565,7 +580,13 @@ run_ref help --help
 [[ ${rc} == 0 ]] && grep -qF -- '--reason' "${work}/help.stdout"
 check "--help は使い方を出して 0" $? help
 
-echo "== pjp-op を通す"
+echo "== op-reason を通す"
+if [[ -z ${opr} ]]; then
+  ng "op-reason を通す: 2 つ目の引数に op-reason の WSL の実行ファイルを渡す (flake の check は pkgs/op-reason のものを渡す)"
+  echo
+  echo "pass=${pass} fail=${fail}"
+  exit 1
+fi
 fake wslpath <<'EOF'
 case $1 in
   -w) p=${2//\//\\}; printf "C:\\\\fake%s\n" "${p}" ;;
@@ -573,49 +594,64 @@ case $1 in
   *) exit 2 ;;
 esac
 EOF
-fake powershell.exe <<'EOF'
+# Windows の zip を展開した所に見立てる dir の、偽の op-reason.exe (WSL からの呼び出しを受ける runner)
+fake "${work}/winapp/op-reason.exe" <<'EOF'
+set +x
 d=${FAKE_DIR}
-mode=$(jq -r .mode <<<"${PJP_OP_PAYLOAD}")
+mode=$(jq -r .mode <<<"${OPREASON_PAYLOAD}")
+status_w=$(jq -r '.status // empty' <<<"${OPREASON_PAYLOAD}")
+status=""
+if [[ -n ${status_w} ]]; then
+  # 本物の exe と同じく、payload を読んだらすぐ status を書く (WSL の側が launcher.ps1 に回らないように)
+  status=$(wslpath -u "${status_w}")
+  printf '{"started":false,"error":"","runner":"exe"}' >"${status}"
+fi
 if [[ ${mode} == notify ]]; then
   exit 0
 fi
-echo "${mode}" >>"${d}/ps.modes"
-mapfile -d "" args < <(jq -j ".args64[] | (@base64d) + \"\u0000\"" <<<"${PJP_OP_PAYLOAD}")
-op=$(wslpath -u "$(jq -r .op <<<"${PJP_OP_PAYLOAD}")")
-status=$(wslpath -u "$(jq -r .status <<<"${PJP_OP_PAYLOAD}")")
+echo "${mode}" >>"${d}/runner.modes"
+args=()
+while IFS= read -r b; do
+  a=$(
+    printf '%s' "${b}" | base64 -d
+    printf x
+  )
+  args+=("${a%x}")
+done < <(jq -r '.args64[]' <<<"${OPREASON_PAYLOAD}")
+op=$(wslpath -u "$(jq -r .op <<<"${OPREASON_PAYLOAD}")")
 rc=0
 "${op}" "${args[@]}" || rc=$?
-jq -cn --argjson rc "${rc}" "{started: true, exit: \$rc, error: \"\", window: \"shown\", toast: \"shown\", others: 0, signout: \"ok\"}" >"${status}"
+jq -cn --argjson rc "${rc}" '{started: true, exit: $rc, error: "", window: "shown", toast: "shown", others: 0, signout: "ok", runner: "exe"}' >"${status}"
 exit "${rc}"
 EOF
-pjp_bin=${work}/bin-pjp
-mkdir -p "${pjp_bin}"
-fake "${pjp_bin}/op" <<EOF
-exec "${BASH}" "${opsh}" "\$@"
-EOF
-printf 'TEST-COMMAND-B64' >"${work}/launcher/command.b64"
-printf 'TEST-SCRIPT-B64' >"${work}/launcher/script.b64"
-export PJP_OP_EXE=${work}/win/op.exe PJP_OP_LAUNCHER=${work}/launcher
+# op-reason は呼び名で動きを変える (op は wrapper)。pjp-op-ref は PATH の op を引く
+opr_bin=${work}/bin-opr
+mkdir -p "${opr_bin}"
+ln -s "${opr}" "${opr_bin}/op"
+export OPREASON_EXE=${work}/winapp/op-reason.exe OPREASON_OP_EXE=${work}/win/op.exe
 reset
 set_state true
-PATH=${pjp_bin}:${PATH} run_ref pjp --reason "bot の .env に書く参照を ID の形にする" "op://Dev/Example Service/prod/API_TOKEN" \
+PATH=${opr_bin}:${PATH} run_ref opr --reason "bot の .env に書く参照を ID の形にする" "op://Dev/Example Service/prod/API_TOKEN" \
   "op://Dev/Example Service/stg/API_TOKEN"
-[[ ${rc} == 0 && $(cat "${FAKE_DIR}/ps.modes" 2>/dev/null) == desktop && $(op_count) == 1 ]] \
+[[ ${rc} == 0 && $(cat "${FAKE_DIR}/runner.modes" 2>/dev/null) == desktop && $(op_count) == 1 ]] \
   && args_is 1 'item|get|Example Service|--vault|Dev|--format|json|' \
-  && out_is pjp "op://${v1}/${i1}/${s1}/${f1}" "op://${v1}/${i1}/${s2}/${f2}"
-check "本物の op.sh を通しても、承認の出る呼び出し (desktop) と op.exe の item get は 1 回で、ID の参照が出る" $? pjp
-log=${XDG_STATE_HOME}/pjp-op/log.jsonl
+  && out_is opr "op://${v1}/${i1}/${s1}/${f1}" "op://${v1}/${i1}/${s2}/${f2}"
+check "本物の op-reason を通しても、承認の出る呼び出し (desktop) と op.exe の item get は 1 回で、ID の参照が出る" $? opr
+log=${XDG_STATE_HOME}/op-reason/log.jsonl
 start_rec=$(jq -c 'select(.event == "start")' "${log}" 2>/dev/null | tail -n 1)
+end_rec=$(jq -c 'select(.event == "end")' "${log}" 2>/dev/null | tail -n 1)
 if [[ $(jq -c '.args' <<<"${start_rec}") == '["item","get","Example Service","--vault","Dev","--format","json"]' ]] \
-  && [[ $(jq -r '.reason' <<<"${start_rec}") == '[pjp-op-ref: 参照 2 件'* ]] && no_leak "${log}"; then
-  ok "pjp-op の記録に値は無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件"
+  && [[ $(jq -r '.reason' <<<"${start_rec}") == '[pjp-op-ref: 参照 2 件'* ]] \
+  && [[ $(jq -r '.result + " " + .runner' <<<"${end_rec}") == 'approved exe' ]] && no_leak "${log}"; then
+  ok "op-reason の記録に値は無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件、end は op-reason.exe で動いた approved"
 else
-  ng "pjp-op の記録に値は無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件" "$(cat "${log}" 2>&1)"
+  ng "op-reason の記録に値は無く、start の args は item get の引数、reason の頭は [pjp-op-ref: 参照 2 件、end は op-reason.exe で動いた approved" \
+    "$(cat "${log}" 2>&1)"
 fi
 if disk_clean; then
-  ok "本物の op.sh を通しても、流した後の置き場に値が無い"
+  ok "本物の op-reason を通しても、流した後の置き場に値が無い"
 else
-  ng "本物の op.sh を通しても、流した後の置き場に値が無い" \
+  ng "本物の op-reason を通しても、流した後の置き場に値が無い" \
     "$(grep -rlaF S3CR3T -- "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${proj}")"
 fi
 

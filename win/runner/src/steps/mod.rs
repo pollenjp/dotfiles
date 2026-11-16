@@ -173,6 +173,7 @@ mod tests {
     //!
     //! - 一覧の順番が WSL の setup と同じ (order・同じ order は script の名前の辞書順)・id が重ならない
     //! - 移した手順と、まだ無い手順の id が WSL の bootstrap-windows-*.sh の名前と同じ
+    //! - まだ無い手順の on/off が、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
     //! - on/off の決め方 (道具の switch・グループ)
 
     use super::*;
@@ -205,6 +206,7 @@ mod tests {
                 (97, "herdr-app"),
                 (97, "herdr"),
                 (97, "ntn"),
+                (97, "op-reason"),
                 (97, "pin-updates"),
                 (97, "type-clipboard"),
                 (98, "google-ime"),
@@ -268,6 +270,36 @@ mod tests {
         );
         for s in all() {
             assert!(s.info().ported || !s.info().windows_only, "{}", s.info().id);
+        }
+    }
+
+    #[test]
+    fn pending_gates_follow_wsl_tool_lines() {
+        let scripts = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("nix")
+            .join("scripts");
+        for p in pending::PENDING {
+            let path = scripts.join(format!("bootstrap-windows-{}.sh", p.id));
+            let text = std::fs::read_to_string(&path).unwrap();
+            // 「# tool: onePassword (dotfiles.onePassword.enable)」の道具の名前 (setup.sh が読む行)
+            let tool = text
+                .lines()
+                .find_map(|l| l.strip_prefix("# tool: "))
+                .and_then(|t| t.split_whitespace().next());
+            match p.gate {
+                Gate::Always => {
+                    assert_eq!(tool, None, "{} の # tool: が gate に無い", path.display())
+                }
+                Gate::Tool(key) => assert_eq!(
+                    tool,
+                    Some(key),
+                    "{} の # tool: と gate が違う",
+                    path.display()
+                ),
+                Gate::Groups(_) => panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id),
+            }
         }
     }
 

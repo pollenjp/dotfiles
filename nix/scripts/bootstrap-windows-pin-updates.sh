@@ -33,7 +33,8 @@
 #                                                                         があるマシンだけ。下の「何をするか」の 1)
 #   herdr-app・herdr-core   nix/pkgs/herdr-core/releases.json            check-herdr-app-version.sh --json (1 回で 2 つ)
 #
-# type-clipboard (自作のアプリ。公開からの猶予を置かず、Release を出す流れで上げる) と PowerToys (版を固定しない) は外す。
+# type-clipboard と op-reason (どちらも自作のアプリ。公開からの猶予を置かず、Release を出す流れで上げる) と PowerToys (版を
+# 固定しない) は外す。
 # 見送りの一覧 (各 skipped-versions.txt) にある版は知らせない。
 #
 # ## 何をするか

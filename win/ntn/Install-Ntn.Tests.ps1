@@ -99,6 +99,14 @@ Test-Case 'install は版を名指しして入れる' "install $common --version
 Test-Case 'change は 2 本 (外してから入れる)' 2 { @(Get-WingetCommands -Plan change -PackageId $Id -Version $V).Count }
 Test-Case 'change の 1 本目は uninstall' "uninstall $common" { @(Get-WingetCommands -Plan change -PackageId $Id -Version $V)[0] -join ' ' }
 Test-Case 'none なら打たない' 0 { @(Get-WingetCommands -Plan none -PackageId $Id -Version $V).Count }
+# winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと自分で足した pin に止められる (0x8A150068)。
+# 入れ替えは uninstall → install で、入っていない形にしてから入れるので winget は pin を見ない (先に打つ download も pin を
+# 見ない)。install・uninstall は --include-pinned を受け付けない。入れ替えを upgrade に変えるなら、--include-pinned を付けて
+# この試験も直す
+Test-Case 'どの plan も upgrade を打たず、--include-pinned も付けない' '' {
+    @('install', 'change', 'none') | ForEach-Object { @(Get-WingetCommands -Plan $_ -PackageId $Id -Version $V) } |
+        Where-Object { ($_[0] -eq 'upgrade') -or (@($_) -contains '--include-pinned') } | ForEach-Object { $_ -join ' ' }
+}
 Test-Case '取得だけを確かめる winget download の引数' "download --id $Id --exact --source winget --version $V --download-directory C:\tmp\dl --skip-dependencies --accept-package-agreements --accept-source-agreements --disable-interactivity" { (Get-WingetDownloadArguments -PackageId $Id -Version $V -Directory 'C:\tmp\dl') -join ' ' }
 
 # Resolve-NtnOnPath: PATH を前から見て、最初に見つかった ntn.exe

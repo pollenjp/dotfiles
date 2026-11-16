@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Claude Code の hook。WSL の op (dotfiles の pkgs/pjp-op。理由 (--reason) が必須の 1Password CLI の wrapper) を守る。
+# Claude Code の hook。WSL の op (dotfiles が入れる op-reason。pkgs/op-reason・home/modules/op-reason.nix。理由 (--reason) が
+# 必須の 1Password CLI の wrapper) を守る。
 #
-# WSL から直に op.exe を起こすと、1Password の承認がどの pane にも共通の wsl.exe に付き、1 回の許可が後の呼び出しとほかの
-# pane に効く。op は呼び出しごとの powershell で承認を閉じ、承認の画面と一緒に呼び手と理由の窓を出して記録する。
-# 設計は dotfiles-private の docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md。
+# WSL から直に op.exe を起こすと、1Password の承認がどの pane にも共通の wslhost に付き、1 回の許可が後の呼び出しとほかの
+# pane に効く。op は呼び出しごとの Windows の op-reason.exe (動かなければ launcher.ps1) で承認を閉じ、承認の画面と一緒に
+# 呼び手と理由の窓を出して記録する。設計は dotfiles-private の docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md、
+# 記録の形と断りの理由は op-reason の repo の docs/architecture/README.md。
 #
 # ## 打つ前 (PreToolUse・matcher Bash)
 #
 # コマンドの中に op.exe を直に起こす単純コマンドがあれば止め (permissionDecision の deny)、op --reason "<理由>" … で打ち直す
-# よう返す。承認の要らない whoami・signout・--version・-v・--help・-h・help と引数なしは止めない。
+# よう返す (初めて使うなら op-reason --skill で手引きを読むようにも添える)。承認の要らない whoami・signout・--version・-v・
+# --help・-h・help と引数なしは止めない。
 #
 # 読み方は ssh-agent-notice.sh と同じ。lexer (awk)・pick_awk・split_commands・skip_opts はそのまま写し、match_simple の
 # 「頭の VAR=値と予約語」と「包むコマンドを外す」(env・sudo・exec・command・nohup・nice・timeout・xargs・watch・flock・
@@ -19,25 +22,30 @@
 # どちらでも切り、小文字にして比べる。引用符・heredoc の本文・コメントの中の op.exe では止めない (commit のメッセージや
 # grep の引数)。script の中・関数・変数に入れた op.exe は見えない (窓の無い承認の画面は拒否する決まりと、op の共有の承認の
 # 見張りで守る)。止める文では、op を打つ Bash の timeout を長くするよう促す (承認を待つ間に既定の 2 分で止められると、
-# 窓が消えて承認の画面だけが残る。op.sh の「止められたとき」)。
+# 窓が消えて承認の画面だけが残る。op-reason の README の「知っておくこと」)。
 #
 # ## 拒否・時間切れ・止められたあと (PostToolUse・PostToolUseFailure・matcher Bash)
 #
-# op の記録 (${XDG_STATE_HOME:-~/.local/state}/pjp-op/log.jsonl と log.1.jsonl) に、この会話 (入力の session_id。op は
+# op の記録 (${XDG_STATE_HOME:-~/.local/state}/op-reason/log.jsonl と log.1.jsonl) に、この会話 (入力の session_id。op は
 # CLAUDE_CODE_SESSION_ID を書く) の次のものが、まだ見ていないものとしてあれば、Claude に「同じ op を打ち直さず、選択肢の
 # 問いを出す」指示を足し (additionalContext)、会話の画面に 1 行出す (systemMessage)。
 #
-#   end の result が denied (拒否)・timeout (時間切れ)・interrupted (承認を待つ間に止められた)
-#   refused の why が lock-timeout (ほかの op の承認待ちが終わらない)・interrupted (それを待つ間に止められた)
+#   end の result が denied (拒否)・timeout (時間切れ)・interrupted (承認を待つ間に止められた)・lock-timeout (Windows の
+#     mutex Local\op-reason を待ち切れなかった。ほかの op (WSL か Windows) の承認待ちが終わらない)
+#   refused の why が lock-timeout (WSL の lock を待ち切れなかった。同上)・interrupted (それを待つ間に止められた)・
+#     no-exe・no-launcher・no-powershell (op-reason の Windows の部品 (op-reason.exe・launcher.ps1・powershell.exe) が見つから
+#     ない。承認の話ではないが、入れるまで打ち直しても同じく断られる)
 #
 # 続けて承認の画面が出ると慣れで許可しやすくなり、「窓の無い承認は拒否」の決まりが弱まるため。op は op の stderr を変えない
-# ので、文言ではなく記録で見る。見た印は同じ dir の hook-seen/<session> (見た end の epoch の最大)。記録が印より古ければ
-# 読まない。7 日より古い印は消す。herdr の指揮役の子と subagent の決まりは ssh-agent-notice.sh と同じ (子の印は workspace の
-# token と名前)。
+# ので、文言ではなく記録で見る。end に fallback (auto の呼び出しが op-reason.exe から launcher.ps1 に回った。Smart App Control に
+# exe を止められたかの手がかり) があれば、そのことも添える。ほかの refused (no-reason など) では黙る。見た印は同じ dir の
+# hook-seen/<session> (見た end の epoch の最大)。記録が印より古ければ読まない。7 日より古い印は消す。herdr の指揮役の子と
+# subagent の決まりは ssh-agent-notice.sh と同じ (子の印は workspace の token と名前)。
 #
 # ## 黙る場面
 #
-#   - ~/.local/state/dotfiles/claude-op-reason.json の enable が true でないマシン (op の wrapper が無い。home/modules/op-reason.nix)
+#   - ~/.local/state/dotfiles/claude-op-reason.json の enable が true でないマシン (op の wrapper の op-reason が無い。
+#     home/modules/op-reason.nix)
 #   - Bash 以外の tool・op.exe の文字の無いコマンド (Pre)・この会話の新しい拒否・時間切れが記録に無い (Post)
 #   - 想定外の入力・jq が無いとき。tool の流れを止めないよう、何があっても exit 0 で終える
 #
@@ -565,8 +573,9 @@ before() {
   [[ -n ${cmd} && ${cmd,,} == *op.exe* ]] || return 0
   hit_head=""
   find_op 0 "${cmd}" || return 0
-  reason='[op] op.exe を直接打たない。WSL では op --reason "<なぜ op を呼ぶか>" <op の引数…> で呼ぶ (dotfiles の wrapper。'
-  reason+='承認を呼び出しごとの powershell に閉じ、承認の画面と一緒に呼び手と理由を窓に出して記録する)。'
+  reason='[op] op.exe を直接打たない。WSL では op --reason "<なぜ op を呼ぶか>" <op の引数…> で呼ぶ (dotfiles が入れる op-reason。'
+  reason+='承認を呼び出しごとの op-reason.exe (動かなければ launcher.ps1) に閉じ、承認の画面と一緒に呼び手と理由を窓に出して記録する)。'
+  reason+='初めて使うなら、先に op-reason --skill で手引きを読む。'
   reason+='理由はユーザーが承認の画面の横で読むので、何のために何を読む・書くかを 1 文で書く。'
   reason+='承認は呼び出しごとに出るので、呼ぶ回数を減らす (例: vault get を 11 回打たず vault list --format json を 1 回にする。'
   reason+='複数の項目は item list --format json や op inject でまとめて読む)。'
@@ -605,11 +614,11 @@ child_mark() {
 }
 
 after() {
-  local session dir log seen_file seen=0 got hit kind when reason command where ctx title desc first rule
+  local session dir log seen_file seen=0 got hit kind when reason command where ctx title desc first rule part fallback again
   local -a files=()
   session=$(field '.session_id')
   [[ -n ${session} ]] || return 0
-  dir=${XDG_STATE_HOME:-${HOME}/.local/state}/pjp-op
+  dir=${XDG_STATE_HOME:-${HOME}/.local/state}/op-reason
   log=${dir}/log.jsonl
   [[ -f ${log} ]] || return 0
   seen_file=${dir}/hook-seen/${session//[^A-Za-z0-9_-]/_}
@@ -620,16 +629,21 @@ after() {
   fi
   [[ ! -f ${dir}/log.1.jsonl ]] || files+=("${dir}/log.1.jsonl")
   files+=("${log}")
+  # end の lock-timeout (Windows の mutex を待ち切れなかった) は、refused の lock-timeout (WSL の lock) と同じ文にする
   got=$(jq -cnR --arg s "${session}" --argjson seen "${seen}" '
     [inputs | fromjson? | objects] as $recs
     | ($recs | map(select(.event == "start" and (.id | type) == "string")) | map({key: .id, value: .}) | from_entries) as $starts
     | [$recs[] | select((.event == "end" or .event == "refused") and .session == $s and ((.epoch // 0) > $seen))] as $mine
+    | ["denied", "timeout", "interrupted", "lock-timeout"] as $ends
+    | ["lock-timeout", "interrupted", "no-exe", "no-launcher", "no-powershell"] as $refusals
     | {max: ([$mine[].epoch] + [$seen] | max),
        hit: ([$mine[]
-           | select((.event == "end" and (.result == "denied" or .result == "timeout" or .result == "interrupted"))
-             or (.event == "refused" and (.why == "lock-timeout" or .why == "interrupted")))] | last
+           | select((.event == "end" and (.result as $r | any($ends[]; . == $r)))
+             or (.event == "refused" and (.why as $w | any($refusals[]; . == $w))))] | last
          | if . == null then null
-           elif .event == "end" then . + {kind: .result, start: ($starts[.id] // {})}
+           elif .event == "end" then
+             . + {kind: (if .result == "lock-timeout" then "refused-lock-timeout" else .result end),
+                  start: ($starts[.id] // {})}
            else . + {kind: ("refused-" + .why), start: {reason: .reason, args: .args, caller: .caller}} end)}' \
     "${files[@]}" 2>/dev/null) || return 0
   if mkdir -p "${seen_file%/*}" 2>/dev/null; then
@@ -647,6 +661,8 @@ after() {
     | if . == null then "herdr の外の会話"
       else "workspace「" + ((.label // "") | if . == "" then "?" else . end) + "」・pane " + (.pane // "?") end' <<<"${hit}")
 
+  # 打ち直さないわけ。承認の画面の出ない断り (部品が無い) では、文を替える
+  again="打ち直すと承認の画面がまた出て、慣れで許可しやすくなる"
   case ${kind} in
     denied)
       title="🔑 op の承認が拒否された"
@@ -665,8 +681,24 @@ after() {
       ;;
     refused-lock-timeout)
       title="⏳ ほかの op の承認待ちが終わらなかった"
-      desc="ほかの op の承認待ちが終わらず、打たずに断られた"
+      desc="ほかの op (WSL か Windows) の承認待ちが終わらず、打たずに断られた"
       first="前の承認の画面に応えてもらってから、1 回だけ打ち直す"
+      ;;
+    refused-no-exe | refused-no-launcher)
+      # auto (既定) では op-reason.exe も launcher.ps1 も無いと no-exe、launcher に固定 (OPREASON_RUNNER=launcher) すると no-launcher
+      part="op-reason.exe と、動かないときに回る launcher.ps1"
+      [[ ${kind} == refused-no-exe ]] || part="launcher.ps1"
+      title="🧩 op-reason の Windows の部品が見つからなかった"
+      desc="op-reason の Windows の部品 (${part}) が見つからず、打たずに断られた"
+      first="Windows に op-reason の zip を入れてもらってから (~/dotfiles/setup --update か、Windows の PowerShell で Install-OpReason)、1 回だけ打ち直す"
+      again="部品を入れるまでは、打ち直しても同じく断られる"
+      ;;
+    refused-no-powershell)
+      # launcher に固定したときだけ出る。zip ではなく、WSL の PATH の powershell.exe (か OPREASON_POWERSHELL) の話
+      title="🧩 op-reason が launcher.ps1 を起こす powershell.exe が見つからなかった"
+      desc="op-reason が launcher.ps1 を起こす powershell.exe が見つからず、打たずに断られた"
+      first="WSL の PATH に Windows の PATH (powershell.exe) があるか、OPREASON_POWERSHELL を確かめてもらってから、1 回だけ打ち直す"
+      again="powershell.exe が見つかるまでは、打ち直しても同じく断られる"
       ;;
     *)
       title="⏹ op がほかの op の承認待ちを待つ間に止められた"
@@ -674,8 +706,14 @@ after() {
       first="op を打つ Bash の timeout を 600000 にして、1 回だけ打ち直す"
       ;;
   esac
+  # auto の呼び出しが op-reason.exe から launcher.ps1 に回った (why は not-found・not-started・no-status)。Smart App Control に
+  # exe を止められたかの手がかりなので、文に添える
+  fallback=$(jq -r '.fallback.why // empty' <<<"${hit}" 2>/dev/null) || fallback=""
+  if [[ -n ${fallback} ]]; then
+    desc+=" (op-reason.exe が動かず (${fallback})、launcher.ps1 で動いた)"
+  fi
   ctx="[op] 直前の Bash の op は、${desc} (${when}・理由「${reason}」・${command})。"
-  ctx+="同じ op を打ち直さない (打ち直すと承認の画面がまた出て、慣れで許可しやすくなる)。"$'\n'
+  ctx+="同じ op を打ち直さない (${again})。"$'\n'
   if [[ -n $(field '.agent_id') ]]; then
     ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、${desc}こと (何を: ${command}。なぜ: ${reason}。"
     ctx+="どこから: ${where}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"

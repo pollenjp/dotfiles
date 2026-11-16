@@ -90,6 +90,14 @@ Test-Case 'Id の列が一致すれば True' 'True' { Test-WingetPinned -Lines (
 $common = "--id $Id --exact --source winget --silent --accept-source-agreements --disable-interactivity"
 Test-Case 'install は版を名指しして入れる' "install $common --version $V --accept-package-agreements" { @(Get-WingetCommands -Plan install -PackageId $Id -Version $V)[0] -join ' ' }
 Test-Case 'change は uninstall → install' "uninstall $common|install $common --version $V --accept-package-agreements" { (@(Get-WingetCommands -Plan change -PackageId $Id -Version $V) | ForEach-Object { $_ -join ' ' }) -join '|' }
+# winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと自分で足した pin に止められる (0x8A150068)。
+# 入れ替えは uninstall → install で、入っていない形にしてから入れるので winget は pin を見ない (先に打つ download も pin を
+# 見ない)。install・uninstall は --include-pinned を受け付けない。入れ替えを upgrade に変えるなら、--include-pinned を付けて
+# この試験も直す
+Test-Case 'どの plan も upgrade を打たず、--include-pinned も付けない' '' {
+    @('install', 'change', 'none') | ForEach-Object { @(Get-WingetCommands -Plan $_ -PackageId $Id -Version $V) } |
+        Where-Object { ($_[0] -eq 'upgrade') -or (@($_) -contains '--include-pinned') } | ForEach-Object { $_ -join ' ' }
+}
 
 # Resolve-ClaudeCodeOnPath・Get-ClaudeCodePathKind: PATH で引かれる claude.exe がどこのものか
 $exists = { param($p) $p -in @($Native, "$Pkg\claude.exe") }

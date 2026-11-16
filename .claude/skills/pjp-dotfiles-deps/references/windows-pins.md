@@ -61,7 +61,7 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
 | `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る) |
-| `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「bootstrap」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版>`) で手で揃える (Rust の runner ができたら runner が揃える) |
+| `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (Rust の runner ができたら runner が揃える) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr` の `enable` が
   false。herdr-app・herdr-core は `herdr` の値) では、setup はその名前を確かめも揃えもしない (`nix/README.md` の「設定グループ」)
@@ -72,5 +72,7 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
   「反映」
 - type-clipboard (自作のアプリ。公開からの猶予を置かず、Release を出す流れで上げる。`win/README.md` の「type-clipboard の新しい版を
   出したとき」) と PowerToys (版を固定しない)
+- op-reason (`win/op-reason/Install-OpReason.ps1`。自作のアプリ。WSL の `nix/pkgs/op-reason` と同じ版を同じ PR で、Release を出す
+  流れで上げる。`nix/README.md` の「op-reason の新しい版を出したとき」)
 - 週 1 回の CI (`winget-versions` の猶予 30 日・`herdr-app-installers` の猶予 7 日) は、これと別に今までどおり知らせる。見送りの
   一覧はどちらにも効く
