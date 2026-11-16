@@ -34,6 +34,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 | `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
+| `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 
@@ -208,7 +209,10 @@ enable = false                # 受け持ちの印。true で apply を許す
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
-  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`)。知らないキー・名前は runner が止める (終了コード 2)
+  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard` と、runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は
+  runner が止める (終了コード 2)
+- `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
+  (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
@@ -245,6 +249,7 @@ enable = false                # 受け持ちの印。true で apply を許す
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
+| 97 | `op-reason` | WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える ([op-reason](#op-reason)) | `onePassword` | まだ |
 | 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
@@ -255,8 +260,9 @@ enable = false                # 受け持ちの印。true で apply を許す
   `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
-- WSL にしか無い 9 手順は、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)
+- WSL にしか無い手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
+  fancyzones → international → google-ime → pin-updates)。`op-reason` はその後に足したもので、この順にはまだ入っていない
+- まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
 
@@ -267,6 +273,10 @@ enable = false                # 受け持ちの印。true で apply を許す
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
 4. この節の表に行を足す
+
+WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
+に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
+gate が違うと、試験が落ちる
 
 ### runner を直すとき
 
@@ -448,8 +458,8 @@ Windows に固定した版で入れているものに新しい版が出たら、
   うち、いちばん新しいもの。出た日の分からない版は選ばない)・上げ方の節・見送りの一覧の場所を出す。依存の更新の skill は、同じものを
   JSON で読む (`--candidates --json`。固定した版だけなら、ネットワークを使わない `--list --json`。形は script の先頭)
 - 見送ると、今出ている新しい版は次から setup も CI も知らせない (もっと新しい版が出たらまた知らせる)
-- 対象の外: type-clipboard (自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。[後述](#type-clipboard-の新しい版を出したとき))
-  と PowerToys (版を固定しない)
+- 対象の外: type-clipboard と op-reason (どちらも自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。
+  [後述](#type-clipboard-の新しい版を出したとき)・[後述](#op-reason-の新しい版を出したとき)) と PowerToys (版を固定しない)
 - 週 1 回の CI (`winget-versions`・`herdr-app-installers`) は今までどおり、猶予 (30 日・7 日) がたつと落ちて知らせる
 
 ## PowerShell のテスト
@@ -1990,6 +2000,111 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   $t = Join-Path $env:TEMP 'type-clipboard-try'
   & "$HOME\.config\powershell\Install-TypeClipboard.ps1" -InstallDir "$t\Programs\type-clipboard" -ShortcutDir "$t\StartMenu" -Check
   & "$HOME\.config\powershell\Install-TypeClipboard.ps1" -InstallDir "$t\Programs\type-clipboard" -ShortcutDir "$t\StartMenu"
+  Remove-Item -Recurse -Force $t
+  ```
+
+## op-reason
+
+`op-reason/Install-OpReason.ps1` は、WSL の op (自作の OSS の op-reason ([pollenjp/op-reason](https://github.com/pollenjp/op-reason))。
+1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版で入れる。WSL の op
+([`nix/README.md`「WSL の op を理由つきで呼ぶ (1Password CLI)」](../nix/README.md#wsl-の-op-を理由つきで呼ぶ-1password-cli)) は、
+呼び出しごとに Windows の `op-reason.exe` (動かないときは隣の `launcher.ps1`) を起こして承認の窓を出す。zip の中身は
+`op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版でないと、
+呼び出しの取り決めが合わずに断られる。
+
+- setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
+  home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
+  win/ を配らないマシンでは setup がそう 1 行出すので、op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の
+  既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
+- Windows 側の runner にはまだ無い ([runner の手順](#runner-の手順)の `op-reason`)。受け持ちを runner に切り替えたホストでは setup も
+  runner も揃えないので、`Install-OpReason` を手で流す
+- 置き場所は `%LOCALAPPDATA%\Programs\op-reason`。WSL の op は、ここの `op-reason.exe` を `OPREASON_EXE`
+  (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
+  で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
+  待たずに済む)
+- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.1.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
+  中身の値 (`Tree`) を同じファイルの表 (`Get-OpReasonReleases`) で固定する。`Zip` は Release に置いた `op-reason-windows.zip.sha256`
+  の中身と同じ。WSL の実行ファイルの版 (`nix/pkgs/op-reason/default.nix` の `version`) と同じにする (テストが突き合わせる)
+- 自作のアプリの Release なので、type-clipboard と同じく依存の公開からの猶予 (7 日) は置かない。中身は SHA-256 で固定する
+- WSL の実行ファイルは switch で上がるので、Windows の部品も setup のたびに揃える (type-clipboard と違い、版がずれていれば
+  入れ替えまでする)。`op-reason.exe` は op の呼び出しの間しか動かない
+- `op-reason.exe` には署名が無い。Smart App Control に止められると、WSL からの呼び出しはひとりでに `launcher.ps1` に回り、
+  そのたびに stderr に 1 行出る (止められる間は、窓が launcher の窓になる)。毎回の試しをやめるなら、そのホストの WSL の環境に
+  `OPREASON_RUNNER=launcher` を置く (nix/README.md)。`Install-OpReason.ps1` は exe を起こさないので、止められても入れて揃えられる
+- Windows から直に呼ぶ (Windows の Claude Code など) ときは、op-reason の README の「Windows で」のとおり置き場所を Windows の
+  PATH に足す。Smart App Control に止められるマシンでは、`<置き場所>\powershell-entry` を置き場所より前に足す。dotfiles はどちらも
+  足さない
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-OpReason -Check` (PowerShell) | 差を出すだけ (ネットワークも使わない)。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-OpReason` (PowerShell) | 揃える (入れる・入れ替える) |
+| `nix/scripts/bootstrap-windows-op-reason.sh` (WSL) | `setup --update` でも毎回走る (order 97)。WSL の op を入れて win/ を配るマシンだけ、入っていなければ入れ、差があれば入れ替える。揃えられなければ ⚠ で囲んで知らせる |
+| `nix/scripts/bootstrap-windows-op-reason.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
+
+揃えるときにすること:
+
+1. 置き場所の中身の値 (`Tree`) を表と突き合わせ、入っている版を決める (中の全部のファイルの SHA-256 と相対パスから作る値。表に無い
+   値は「不明」)。`op-reason.exe --version` は聞かない (署名が無く止められうる)
+2. 固定した版でなければ、Release (`https://github.com/pollenjp/op-reason/releases/download/v<版>/op-reason-windows.zip`) から置き場所の
+   隣 (`op-reason.download-<PID>.zip`) に落とし、SHA-256 が表の `Zip` と合うときだけ隣 (`op-reason.new-<PID>`) に展開する。展開した
+   `op-reason-windows` の中身の値が表の `Tree` と合えば、前の置き場所を `op-reason.old-<PID>` によけ、展開した物を置き場所の名前に
+   して、よけた物を消す。合わない・落とせない・展開できないときは、落とした物と展開した物を消して何も変えずに止まる。展開した物を
+   置けなければ、よけた物を元に戻す (戻せなければ、`op-reason.old-<PID>` に残したことを出す)
+3. 読み直して、版を確かめる
+
+- 入れ替えが要るときに置き場所の `op-reason.exe` が動いている (op の呼び出しの途中) と、何も変えずに止まって PID を出す (管理者
+  として動いていてパスが読めないものも数える)。呼び出しが終わってから打ち直す。スクリプトは止めない (承認を待っている途中かも
+  しれない)
+- 止められた実行 (setup の時間切れなど) が隣に残した途中の物 (`op-reason.download-*`・`op-reason.new-*`・`op-reason.old-*`) は、
+  次に入れるときに 10 分より古ければ消す
+- Invoke-WebRequest で落とすので、展開した物に Mark of the Web (`Zone.Identifier`) は付かない。`powershell-entry` の `.ps1` も
+  `Unblock-File` せずに RemoteSigned で動く (中身は SHA-256 で確かめてある)
+- 記録 (`%LOCALAPPDATA%\op-reason\log.jsonl`) は op-reason が置く別の場所で、触らない
+- PowerShell 7 でも Windows PowerShell 5.1 でも動く。SHA-256 と展開は .NET で行う (PowerShell 7 から起こした 5.1 は PSModulePath を
+  継ぎ、`Get-FileHash`・`Expand-Archive` が見つからないことがある)
+- 入れるのをやめる (WSL の op を入れないマシンにする) ときも、setup は消さない。消すなら op の呼び出しが無いときに
+  `%LOCALAPPDATA%\Programs\op-reason` を消す (記録の `%LOCALAPPDATA%\op-reason` も要らなければ消す)
+
+### op-reason の新しい版を出したとき
+
+dotfiles が入れる版は自動では上がらない (依存の更新も見ない)。op-reason の repo で新しい版の Release を出したら、WSL の実行ファイルと
+同じ PR で上げる:
+
+1. Release の `op-reason-windows.zip` を落とし、SHA-256 を自分でも出して `op-reason-windows.zip.sha256` と同じかを確かめる
+   (`sha256sum op-reason-windows.zip`)
+2. zip を展開し、`op-reason-windows` の中身の値を出す (`Get-OpReasonTreeHash` と同じ値):
+
+   ```sh
+   cd op-reason-windows && find . -type f | sed 's|^\./||' | LC_ALL=C sort | while IFS= read -r f; do sha256sum -- "$f"; done | sha256sum
+   ```
+
+3. `op-reason/Install-OpReason.ps1` の表 (`Get-OpReasonReleases`) に「版 = Zip と Tree」の行を足し (古い版の行は、入っている版を
+   名前で出すために残す)、`-Version` の既定値と、上の「今は」を新しい版にする。`Install-OpReason.Tests.ps1` にも新しい版の値の行を足す
+4. WSL の実行ファイル (`nix/pkgs/op-reason/default.nix` の `version` と 2 つの SHA-256) も同じ版にする
+   ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき))
+5. `Install-OpReason.Tests.ps1` を流して PR を出す
+6. merge したら、入れるマシンで `setup --update` を流す (WSL の実行ファイルが上がり、Windows の部品も入れ替わる)。op の呼び出しの
+   途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える
+
+### Install-OpReason.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (表・中身の値の作り方・版の決め方・plan・状態の表) と、落とす・プロセスを偽物に差し替えた流れ (SHA-256 が合わないと
+  置かない・動いていると止まる・入れ替えが落ちたら戻す・途中の物を残さない) は、`op-reason/Install-OpReason.Tests.ps1` で確かめる。
+  zip の展開と置き場所の入れ替えは、一時ディレクトリの本物のファイルで流す。Linux の pwsh で流すので Windows には触らない
+  (このファイルは manifest に無いので配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/op-reason/Install-OpReason.Tests.ps1
+  ```
+
+- 落とす・動いているかを見る本物の部分は、実機で置き場所を一時ディレクトリに向けて確かめる (本物の置き場所には触らない):
+
+  ```powershell
+  $t = Join-Path $env:TEMP 'op-reason-try'
+  & "$HOME\.config\powershell\Install-OpReason.ps1" -InstallDir "$t\Programs\op-reason" -Check
+  & "$HOME\.config\powershell\Install-OpReason.ps1" -InstallDir "$t\Programs\op-reason"
   Remove-Item -Recurse -Force $t
   ```
 

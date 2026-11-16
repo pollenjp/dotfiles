@@ -71,6 +71,12 @@ function pf { & "$HOME\.config\powershell\Start-PortForward.ps1" @args }
 # GitHub の Release から落とし、SHA-256 が合うときだけ置く。入れ替えが要るときは、先に type-clipboard の窓を閉じる (動いていると止まる)。
 function Install-TypeClipboard { & "$HOME\.config\powershell\Install-TypeClipboard.ps1" @args }
 
+# Windows の op-reason (WSL の op の Windows の部品。1Password CLI の wrapper の自作の OSS) を、dotfiles で固定した版に揃える。
+# 中身は同じ場所へ配る Install-OpReason.ps1 (win/README.md の「op-reason」)。-Check なら確かめるだけ。
+# GitHub の Release の zip を、SHA-256 が合うときだけ %LOCALAPPDATA%\Programs\op-reason に展開する。op の呼び出しの途中
+# (op-reason.exe が動いている) なら止まるので、終わってから打ち直す。setup --update でも揃える。
+function Install-OpReason { & "$HOME\.config\powershell\Install-OpReason.ps1" @args }
+
 # Windows の ntn (Notion の CLI。winget の Notion.ntn) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-Ntn.ps1 (win/README.md の「ntn」)。-Check なら確かめるだけ。
 # 入れ替えが要るときは、動いている ntn を先に終わらせる (動いていると止まる)。setup --update でも揃える。

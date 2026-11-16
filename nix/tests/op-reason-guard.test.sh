@@ -13,7 +13,7 @@
 #   打つ前 (PreToolUse)
 #     - op.exe を直に起こすコマンドは止める (deny)。パスつき (\ の Windows のパスも)・大文字・timeout や env で包んだもの・
 #       cd の後・bash -c の中・パイプの先・$( ) の中・powershell (pwsh) の -Command・-c の中・cmd の /c の中も。返す文に
-#       op --reason と、呼ぶ回数を減らす例と、Bash の timeout を長くする勧めと、止めたコマンドがある
+#       op --reason と、op-reason --skill の勧めと、呼ぶ回数を減らす例と、Bash の timeout を長くする勧めと、止めたコマンドがある
 #     - op.exe の文字があっても起こさないものは止めない: grep の引数・commit のメッセージ・heredoc の本文・command -v・ls の
 #       引数・コメント。op --reason … (wrapper) と、承認の要らない op.exe の whoami・signout・--version・--help も止めない
 #     - claude-op-reason.json が無い・enable が false のマシンでは何も止めない
@@ -21,8 +21,13 @@
 #     - この会話の end が denied なら、打ち直さない指示と ①②③ の問い・時刻・理由・コマンド・どこからを additionalContext に、
 #       1 行を systemMessage に出す。hookEventName は入力の event
 #     - timeout なら時間切れの文、interrupted (承認を待つ間に止められた) なら止められた文と Bash の timeout の勧め
+#     - end が lock-timeout (Windows の mutex を待ち切れなかった) なら、ほかの op (WSL か Windows) の承認待ちが終わらない文
 #     - この会話の refused が lock-timeout (ほかの op の承認待ちが終わらない)・interrupted (それを待つ間に止められた) でも
-#       問いを出させる。refused のほかの why (no-reason など) では何も出さない
+#       問いを出させる
+#     - refused が no-exe・no-launcher (op-reason の Windows の部品が無い) なら、無い部品と、zip の入れ方 (setup --update か
+#       Install-OpReason) を ① にした問いを出させる。no-powershell なら powershell.exe と WSL の PATH を ① にする。
+#       refused のほかの why (no-reason など) では何も出さない
+#     - end に fallback (op-reason.exe から launcher.ps1 に回った) があれば、その why を添える
 #     - ほかの会話の end・approved・failed では何も出さない。同じ end は 2 回目に出さない (見た印)
 #     - subagent (入力に agent_id) では、問いを出させず報告に書かせる
 #     - herdr の workspace に子の印 (token parent) があれば、AskUserQuestion を使わずに問いを書くと言い切る
@@ -31,8 +36,8 @@
 #
 # ## 作り
 #
-# 偽の herdr は workspace get に FAKE_HERDR_JSON を返す。記録は XDG_STATE_HOME の pjp-op/log.jsonl に jq で並べる。
-# shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
+# 偽の herdr は workspace get に FAKE_HERDR_JSON を返す。記録は XDG_STATE_HOME の op-reason/log.jsonl (op-reason の記録の
+# 置き場所) に jq で並べる。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
 
 set -u -o pipefail
 
@@ -46,11 +51,11 @@ trap 'rm -rf "${work}"' EXIT
 
 export LC_ALL=C.UTF-8
 export HOME=${work}/home XDG_STATE_HOME=${work}/state
-mkdir -p "${HOME}/.local/state/dotfiles" "${XDG_STATE_HOME}/pjp-op" "${work}/bin"
+mkdir -p "${HOME}/.local/state/dotfiles" "${XDG_STATE_HOME}/op-reason" "${work}/bin"
 unset HERDR_ENV HERDR_WORKSPACE_ID
 state=${HOME}/.local/state/dotfiles/claude-op-reason.json
 echo '{"enable":true}' >"${state}"
-log=${XDG_STATE_HOME}/pjp-op/log.jsonl
+log=${XDG_STATE_HOME}/op-reason/log.jsonl
 
 {
   printf '#!%s\n' "${BASH}"
@@ -126,11 +131,11 @@ for c in 'op.exe vault list' '/mnt/c/x/op.exe item get a' 'OP.EXE item get a' 't
 done
 pre 'op.exe vault list'
 why=$(jq -r '.hookSpecificOutput.permissionDecisionReason // empty' "${work}/stdout")
-if [[ ${why} == *'op --reason'* && ${why} == *'vault list --format json'* && ${why} == *呼ぶ回数を減らす* &&
-  ${why} == *600000* && ${why} == *"(止めたもの: op.exe vault list)"* ]]; then
-  ok "返す文に op --reason と、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある"
+if [[ ${why} == *'op --reason'* && ${why} == *'op-reason --skill'* && ${why} == *'vault list --format json'* &&
+  ${why} == *呼ぶ回数を減らす* && ${why} == *600000* && ${why} == *"(止めたもの: op.exe vault list)"* ]]; then
+  ok "返す文に op --reason と、op-reason --skill の勧めと、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある"
 else
-  ng "返す文に op --reason と、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある" "${why}"
+  ng "返す文に op --reason と、op-reason --skill の勧めと、呼ぶ回数を減らす例と、Bash の timeout の勧めと、止めたコマンドがある" "${why}"
 fi
 for c in 'grep -rn op.exe nix/' 'git commit -m "op.exe を直す"' $'cat <<\'EOF\'\nop.exe item get a\nEOF' \
   'command -v op.exe' 'ls /mnt/c/x/op.exe' 'echo hi # op.exe item get a' 'op --reason "x" item get a' \
@@ -159,19 +164,22 @@ fi
 echo '{"enable":true}' >"${state}"
 
 echo "== 拒否・時間切れのあと"
-# put_call <id> <session> <result> <epoch>: start と end を記録に足す
+# put_call <id> <session> <result> <epoch> [<fallback の why>]: start と end を記録に足す。fallback の why を渡すと、end に
+# op-reason.exe から launcher.ps1 に回ったこと (runner と fallback) を書く
 put_call() {
   jq -cn --arg id "$1" --arg s "$2" --argjson e "$4" \
     '{v: 1, id: $id, event: "start", time: "2026-11-08T10:11:12+09:00", epoch: $e, session: $s, mode: "desktop", kind: "desktop",
       caller: {type: "claude", herdr: {workspace: "wX", label: "TKT-1 テスト", pane: "wX:p1"}},
       reason: "設定を読む", args: ["item", "get", "a"]}' >>"${log}"
-  jq -cn --arg id "$1" --arg s "$2" --arg r "$3" --argjson e "$4" \
-    '{v: 1, id: $id, event: "end", time: "2026-11-08T10:11:20+09:00", epoch: ($e + 8), session: $s, result: $r, exit: 1, seconds: 8}' \
+  jq -cn --arg id "$1" --arg s "$2" --arg r "$3" --argjson e "$4" --arg fb "${5:-}" \
+    '{v: 1, id: $id, event: "end", time: "2026-11-08T10:11:20+09:00", epoch: ($e + 8), session: $s, result: $r, exit: 1, seconds: 8,
+      runner: "exe"}
+     + (if $fb == "" then {} else {runner: "launcher", fallback: {why: $fb, exit: 1}} end)' \
     >>"${log}"
 }
 reset_log() {
-  rm -rf "${XDG_STATE_HOME}/pjp-op"
-  mkdir -p "${XDG_STATE_HOME}/pjp-op"
+  rm -rf "${XDG_STATE_HOME}/op-reason"
+  mkdir -p "${XDG_STATE_HOME}/op-reason"
 }
 
 reset_log
@@ -185,6 +193,11 @@ if [[ ${ctx} == *打ち直さない* && ${ctx} == *①* && ${ctx} == *②* && ${
   ok "この会話の denied で、打ち直さない指示と ①②③ の問い・時刻・理由・コマンド・どこからを出す"
 else
   ng "この会話の denied で、打ち直さない指示と ①②③ の問い・時刻・理由・コマンド・どこからを出す" "$(detail)"
+fi
+if [[ ${ctx} != *'launcher.ps1 で動いた'* ]]; then
+  ok "end に fallback が無ければ、launcher.ps1 に回ったとは書かない"
+else
+  ng "end に fallback が無ければ、launcher.ps1 に回ったとは書かない" "${ctx}"
 fi
 post PostToolUseFailure
 if silent; then
@@ -219,6 +232,24 @@ if [[ $(context) == *止められた* && $(context) == *600000* && $(context) ==
 else
   ng "interrupted なら止められた文と、Bash の timeout を長くして打ち直す選択肢" "$(detail)"
 fi
+reset_log
+put_call l s1 lock-timeout 3550
+post PostToolUseFailure
+ctx=$(context)
+if [[ ${ctx} == *"ほかの op (WSL か Windows) の承認待ちが終わらず"* && ${ctx} == *"op item get a"* &&
+  ${ctx} == *設定を読む* && ${ctx} == *"前の承認の画面に応えてもらってから"* ]]; then
+  ok "end の lock-timeout (Windows の mutex) でも、ほかの op の承認待ちが終わらない文と、start の理由・コマンドを出す"
+else
+  ng "end の lock-timeout (Windows の mutex) でも、ほかの op の承認待ちが終わらない文と、start の理由・コマンドを出す" "$(detail)"
+fi
+reset_log
+put_call f s1 denied 3580 no-status
+post PostToolUse
+if [[ $(context) == *拒否* && $(context) == *'op-reason.exe が動かず (no-status)、launcher.ps1 で動いた'* ]]; then
+  ok "end に fallback があれば、op-reason.exe が動かず launcher.ps1 で動いたことと why を添える"
+else
+  ng "end に fallback があれば、op-reason.exe が動かず launcher.ps1 で動いたことと why を添える" "$(detail)"
+fi
 # put_refused <session> <why> <epoch>: refused を記録に足す
 put_refused() {
   jq -cn --arg s "$1" --arg why "$2" --argjson e "$3" \
@@ -236,13 +267,44 @@ for case in "lock-timeout:承認待ちが終わらず" "interrupted:承認待ち
   fi
 done
 reset_log
-put_refused s1 no-reason 3700
+put_refused s1 no-exe 3650
 post PostToolUseFailure
-if silent; then
-  ok "refused の no-reason では何も出さない"
+ctx=$(context)
+if [[ ${ctx} == *"Windows の部品 (op-reason.exe と、動かないときに回る launcher.ps1) が見つからず"* && ${ctx} == *①* &&
+  ${ctx} == *'~/dotfiles/setup --update'* && ${ctx} == *Install-OpReason* && ${ctx} == *"op item get b"* &&
+  ${ctx} == *"打ち直さない (部品を入れるまでは、打ち直しても同じく断られる)"* && ${ctx} != *承認の画面がまた出て* &&
+  $(jq -r '.systemMessage // empty' "${work}/stdout") == *'Windows の部品'* ]]; then
+  ok "refused の no-exe なら、無い部品と、zip の入れ方 (setup --update か Install-OpReason) を ① にした問いを出させる (打ち直さないわけも部品の話)"
 else
-  ng "refused の no-reason では何も出さない" "$(detail)"
+  ng "refused の no-exe なら、無い部品と、zip の入れ方 (setup --update か Install-OpReason) を ① にした問いを出させる (打ち直さないわけも部品の話)" "$(detail)"
 fi
+reset_log
+put_refused s1 no-launcher 3660
+post PostToolUseFailure
+if [[ $(context) == *"Windows の部品 (launcher.ps1) が見つからず"* && $(context) == *Install-OpReason* ]]; then
+  ok "refused の no-launcher なら、launcher.ps1 が無い文と zip の入れ方を出す"
+else
+  ng "refused の no-launcher なら、launcher.ps1 が無い文と zip の入れ方を出す" "$(detail)"
+fi
+reset_log
+put_refused s1 no-powershell 3670
+post PostToolUseFailure
+ctx=$(context)
+if [[ ${ctx} == *powershell.exe* && ${ctx} == *OPREASON_POWERSHELL* && ${ctx} == *①* && ${ctx} != *Install-OpReason* ]]; then
+  ok "refused の no-powershell なら、powershell.exe と WSL の PATH (OPREASON_POWERSHELL) を ① にする (zip の入れ方は出さない)"
+else
+  ng "refused の no-powershell なら、powershell.exe と WSL の PATH (OPREASON_POWERSHELL) を ① にする (zip の入れ方は出さない)" "$(detail)"
+fi
+for why in no-reason no-op-exe no-wslpath too-long; do
+  reset_log
+  put_refused s1 "${why}" 3700
+  post PostToolUseFailure
+  if silent; then
+    ok "refused の ${why} では何も出さない"
+  else
+    ng "refused の ${why} では何も出さない" "$(detail)"
+  fi
+done
 reset_log
 put_call d s1 denied 4000
 post PostToolUse agent-1

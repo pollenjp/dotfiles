@@ -4,14 +4,15 @@
 # shellcheck disable=SC2016
 #
 # nix/pkgs/pjp-op-env/pjp-op-env.sh (.env の op:// の参照を 1 回の op で解き、値を環境変数に入れて program を起こす) を、
-# 偽の op・偽の vault・偽の program で確かめる。後半 (「pjp-op を通す」) は本物の op.sh (nix/pkgs/pjp-op/op.sh) を、
-# pjp-op.test.sh と同じ形の偽の powershell.exe・op.exe・wslpath で通す。
+# 偽の op・偽の vault・偽の program で確かめる。後半 (「op-reason を通す」) は本物の op-reason (WSL の op。nix/pkgs/op-reason の
+# 実行ファイル) を、op-reason の repo の tests/wrapper.test.sh と同じ形の偽の op-reason.exe・op.exe・wslpath で通す。
 #
-#   bash nix/tests/pjp-op-env.test.sh [<pjp-op-env.sh のパス> [<op.sh のパス>]]
+#   bash nix/tests/pjp-op-env.test.sh [<pjp-op-env.sh のパス> [<op-reason の実行ファイルのパス>]]
 #
-# flake の checks (pjp-op-env-test) が Nix のサンドボックスで流す。使うのは bash・coreutils・jq・flock (util-linux)・strace。
-# 本物の 1Password・op.exe・powershell.exe は使わない。偽の vault の値はどれも S3CR3T を含み (漏れを探す印)、.env に書く
-# 参照でない値は PLAINVAL を含む。
+# flake の checks (pjp-op-env-test) が Nix のサンドボックスで流し、op-reason の実行ファイルも渡す (渡さないと後半は FAIL に
+# なる。repo に op-reason の実行ファイルは無い)。使うのは bash・coreutils・jq・flock (util-linux)・strace。本物の 1Password・
+# op.exe・op-reason.exe・powershell.exe は使わない (WSL で手で流しても見えないよう、PATH から /mnt/ の下を外す)。偽の vault の
+# 値はどれも S3CR3T を含み (漏れを探す印)、.env に書く参照でない値は PLAINVAL を含む。
 #
 # ## 確かめること
 #
@@ -52,12 +53,14 @@
 #     - 呼び手の環境の _poe_ で始まる名前は program に渡らない
 #   --dry-run: 名前・種類・参照を出し、参照でない値は出さず、op を呼ばない (program が無くてよい)
 #   出す 1 行: stderr に参照の件数と名前を出し、--quiet なら出さない。--help は 0
-#   pjp-op を通す (本物の op.sh)
-#     - 参照 3 件で、承認の出る呼び出し (desktop の mode の powershell) が 1 回、op.exe の inject が 1 回で、値がそのまま届く
-#     - program が起きた時点で pjp-op の lock が空いている (flock -n が通る)
-#     - program が動いている間に、別の op (PJP_OP_LOCK_WAIT=1) が待たされずに 0 で終わる
-#     - log.jsonl に値が無く、start の args は ["inject"]、reason に件数と参照が入る
-#     - 参照が 6 件で窓の理由 (op.sh が 200 字で切る) が切れても、頭に program と参照の件数が出る
+#   op-reason を通す (本物の op-reason の WSL の実行ファイル)
+#     - 参照 3 件で、承認の出る呼び出し (desktop の mode の payload で起きた op-reason.exe) が 1 回、op.exe の inject が 1 回で、
+#       値がそのまま届く
+#     - program が起きた時点で op-reason の lock (<state>/op-reason/lock) が空いている (flock -n が通る)
+#     - program が動いている間に、別の op (OPREASON_LOCK_WAIT=1) が待たされずに 0 で終わる
+#     - op-reason の記録 (log.jsonl) に値が無く、start の args は ["inject"]、reason に件数と参照が入り、end は op-reason.exe で
+#       動いた approved
+#     - 参照が 6 件で窓の理由 (payload の facts.reason。op-reason が 200 字で切る) が切れても、頭に program と参照の件数が出る
 #     - 流した後、HOME・XDG_STATE_HOME・XDG_RUNTIME_DIR・TMPDIR・cwd のどのファイルにも値が無い
 #
 # ## 作り
@@ -66,7 +69,10 @@
 # inject なら stdin を op.<番号>.stdin に写し、{{ <参照> }} を偽の vault (FAKE_VAULT/<参照の sha256 の先頭 16 桁>) の中身に
 # 置き換えて stdout に出す。vault に無ければ [ERROR] を出して 1。FAKE_OP_RC (その終了コードで断る)・FAKE_OP_WARN (stderr に
 # 出して続ける)・FAKE_OP_DROP_MARK (2 つ目の印の行を落とす)・FAKE_OP_NUL (出力に NUL を挟む) で形を変える。whoami・signout
-# (pjp-op の見張り) は FAKE_DIR/op.direct に書いて 1・0 で終わる。同じものを op.exe としても置く。偽の program は、PROG_KEYS の
+# (op-reason の共有の承認の見張り) は FAKE_DIR/op.direct に書いて 1・0 で終わる。同じものを op.exe としても置く。偽の
+# op-reason.exe は、本物と同じく payload (OPREASON_PAYLOAD) を読んだらすぐ status を書き、mode と payload を FAKE_DIR/runner.* に
+# 残し、args64 を解いて payload の op (偽の op.exe) を起こし、status を書いて op の終了コードで終わる。偽の wslpath は
+# /x/y と C:\fake\x\y を行き来させる。偽の program は、PROG_KEYS の
 # 名前の値を NUL 区切りで PROG_DUMP/env に、テスト (PROG_ROOT) から起きたプロセスの cmdline を cmdline に書き、PROG_LOCK があれば flock -n を試して
 # lock に free か held を書いてから started を作る。PROG_WAIT のファイルができるまで待つ。shebang は $BASH から作る。偽の op と偽の program は
 # set +x で始める (本物の op.exe と program は bash ではなく、BASH_ENV の set -x を受けない。受けると偽のものが値を出す)。
@@ -78,10 +84,12 @@ here=$(
   pwd -P
 )
 script=${1:-${here}/../pkgs/pjp-op-env/pjp-op-env.sh}
-opsh=${2:-${here}/../pkgs/pjp-op/op.sh}
+opr=${2:-}
 # cwd を移してから流すので、絶対パスにする
 script=$(cd -- "$(dirname "${script}")" && pwd -P)/$(basename "${script}")
-opsh=$(cd -- "$(dirname "${opsh}")" && pwd -P)/$(basename "${opsh}")
+if [[ -n ${opr} ]]; then
+  opr=$(cd -- "$(dirname "${opr}")" && pwd -P)/$(basename "${opr}")
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/pjp-op-env-test.XXXXXX")
 work=$(cd "${work}" && pwd -P)
 trap 'rm -rf "${work}"' EXIT
@@ -92,10 +100,17 @@ export FAKE_DIR=${work}/fake FAKE_VAULT=${work}/vault PROG_DUMP=${work}/dump PRO
 fake_bin=${work}/bin
 proj=${work}/proj
 mkdir -p "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${FAKE_DIR}" "${FAKE_VAULT}" "${fake_bin}" "${proj}" \
-  "${work}/win" "${work}/launcher"
-export PATH=${fake_bin}:${PATH}
+  "${work}/win" "${work}/winapp"
+# WSL で手で流したときに Windows の op.exe・op-reason.exe・powershell.exe が見えないよう、PATH から /mnt/ の下を外す
+no_win_path=""
+IFS=: read -r -a path_dirs <<<"${PATH}"
+for path_dir in "${path_dirs[@]}"; do
+  [[ ${path_dir} == /mnt/* ]] || no_win_path+=${no_win_path:+:}${path_dir}
+done
+export PATH=${fake_bin}:${no_win_path}
 unset WSLENV HERDR_ENV HERDR_WORKSPACE_ID HERDR_PANE_ID CLAUDE_CODE_SESSION_ID OP_SERVICE_ACCOUNT_TOKEN OP_CONNECT_HOST \
-  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_ENV_OP BASH_ENV PROG_KEYS PROG_LOCK PROG_WAIT
+  OP_CONNECT_TOKEN OP_BIOMETRIC_UNLOCK_ENABLED PJP_OP_ENV_OP BASH_ENV PROG_KEYS PROG_LOCK PROG_WAIT \
+  OPREASON_EXE OPREASON_OP_EXE OPREASON_RUNNER OPREASON_POWERSHELL OPREASON_LOCK_WAIT OPREASON_LANG
 
 pass=0
 fail=0
@@ -244,7 +259,7 @@ EOF
 ln -s "${BASH}" "${fake_bin}/mybash"
 
 state_file=${HOME}/.local/state/dotfiles/claude-op-reason.json
-# set_state <true|false|none>: pjp-op があるかの印 (home/modules/op-reason.nix が書くもの)
+# set_state <true|false|none>: WSL の op の wrapper (op-reason) があるかの印 (home/modules/op-reason.nix が書くもの)
 set_state() {
   rm -f "${state_file}"
   if [[ $1 != none ]]; then
@@ -261,7 +276,7 @@ vault() {
 }
 
 reset() {
-  rm -rf "${FAKE_DIR:?}"/* "${PROG_DUMP}" "${XDG_STATE_HOME}/pjp-op" "${XDG_RUNTIME_DIR:?}"/* "${proj:?}"/.env*
+  rm -rf "${FAKE_DIR:?}"/* "${PROG_DUMP}" "${XDG_STATE_HOME}/op-reason" "${XDG_RUNTIME_DIR:?}"/* "${proj:?}"/.env*
 }
 
 # run_env <名前> <引数>…: proj の中で pjp-op-env を流す。<名前>.stdout・<名前>.stderr と rc に入れる
@@ -750,7 +765,13 @@ else
   ng "--help は使い方を出して 0" "rc=${rc}"
 fi
 
-echo "== pjp-op を通す"
+echo "== op-reason を通す"
+if [[ -z ${opr} ]]; then
+  ng "op-reason を通す: 2 つ目の引数に op-reason の WSL の実行ファイルを渡す (flake の check は pkgs/op-reason のものを渡す)"
+  echo
+  echo "pass=${pass} fail=${fail}"
+  exit 1
+fi
 fake wslpath <<'EOF'
 case $1 in
   -w) p=${2//\//\\}; printf "C:\\\\fake%s\n" "${p}" ;;
@@ -758,62 +779,80 @@ case $1 in
   *) exit 2 ;;
 esac
 EOF
-fake powershell.exe <<'EOF'
+# Windows の zip を展開した所に見立てる dir の、偽の op-reason.exe (WSL からの呼び出しを受ける runner)
+fake "${work}/winapp/op-reason.exe" <<'EOF'
+set +x
 d=${FAKE_DIR}
-mode=$(jq -r .mode <<<"${PJP_OP_PAYLOAD}")
+mode=$(jq -r .mode <<<"${OPREASON_PAYLOAD}")
+status_w=$(jq -r '.status // empty' <<<"${OPREASON_PAYLOAD}")
+status=""
+if [[ -n ${status_w} ]]; then
+  # 本物の exe と同じく、payload を読んだらすぐ status を書く (WSL の側が launcher.ps1 に回らないように)
+  status=$(wslpath -u "${status_w}")
+  printf '{"started":false,"error":"","runner":"exe"}' >"${status}"
+fi
 if [[ ${mode} == notify ]]; then
   exit 0
 fi
-echo "${mode}" >>"${d}/ps.modes"
-printf '%s' "${PJP_OP_PAYLOAD}" >"${d}/ps.payload"
-mapfile -d "" args < <(jq -j ".args64[] | (@base64d) + \"\u0000\"" <<<"${PJP_OP_PAYLOAD}")
-op=$(wslpath -u "$(jq -r .op <<<"${PJP_OP_PAYLOAD}")")
-status=$(wslpath -u "$(jq -r .status <<<"${PJP_OP_PAYLOAD}")")
+echo "${mode}" >>"${d}/runner.modes"
+printf '%s' "${OPREASON_PAYLOAD}" >"${d}/runner.payload"
+args=()
+while IFS= read -r b; do
+  a=$(
+    printf '%s' "${b}" | base64 -d
+    printf x
+  )
+  args+=("${a%x}")
+done < <(jq -r '.args64[]' <<<"${OPREASON_PAYLOAD}")
+op=$(wslpath -u "$(jq -r .op <<<"${OPREASON_PAYLOAD}")")
 rc=0
 "${op}" "${args[@]}" || rc=$?
-jq -cn --argjson rc "${rc}" "{started: true, exit: \$rc, error: \"\", window: \"shown\", toast: \"shown\", others: 0, signout: \"ok\"}" >"${status}"
+jq -cn --argjson rc "${rc}" '{started: true, exit: $rc, error: "", window: "shown", toast: "shown", others: 0, signout: "ok", runner: "exe"}' >"${status}"
 exit "${rc}"
 EOF
-pjp_bin=${work}/bin-pjp
-mkdir -p "${pjp_bin}"
-fake "${pjp_bin}/op" <<EOF
-exec "${BASH}" "${opsh}" "\$@"
-EOF
-printf 'TEST-COMMAND-B64' >"${work}/launcher/command.b64"
-printf 'TEST-SCRIPT-B64' >"${work}/launcher/script.b64"
-export PJP_OP_EXE=${work}/win/op.exe PJP_OP_LAUNCHER=${work}/launcher
-lock_file=${XDG_STATE_HOME}/pjp-op/lock
+# op-reason は呼び名で動きを変える (op は wrapper)。pjp-op-env は PATH の op を引く
+opr_bin=${work}/bin-opr
+mkdir -p "${opr_bin}"
+ln -s "${opr}" "${opr_bin}/op"
+export OPREASON_EXE=${work}/winapp/op-reason.exe OPREASON_OP_EXE=${work}/win/op.exe
+opr_state=${XDG_STATE_HOME}/op-reason
+lock_file=${opr_state}/lock
 reset
 set_state true
 vault op://Test/c/password $'S3CR3T-c\nline2'
 printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' 'C=op://Test/c/password' >"${proj}/.env"
 export PROG_KEYS="A B C"
-PATH=${pjp_bin}:${PATH} PROG_LOCK=${lock_file} run_env pjp --reason "kabu の bot を起こす" -- prog
+PATH=${opr_bin}:${PATH} PROG_LOCK=${lock_file} run_env opr --reason "kabu の bot を起こす" -- prog
 expect_env 'A=S3CR3T-a' 'B=S3CR3T-b' $'C=S3CR3T-c\nline2'
-if [[ ${rc} == 0 ]] && same_env && [[ $(<"${FAKE_DIR}/ps.modes") == desktop && $(op_count) == 1 && $(op_args 1) == 'inject|' ]]; then
-  ok "本物の op.sh を通しても、承認の出る呼び出し (desktop) と op.exe の inject は 1 回で、値がそのまま届く"
+if [[ ${rc} == 0 ]] && same_env && [[ $(<"${FAKE_DIR}/runner.modes") == desktop && $(op_count) == 1 && $(op_args 1) == 'inject|' ]]; then
+  ok "本物の op-reason を通しても、承認の出る呼び出し (desktop) と op.exe の inject は 1 回で、値がそのまま届く"
 else
-  ng "本物の op.sh を通しても、承認の出る呼び出し (desktop) と op.exe の inject は 1 回で、値がそのまま届く" \
-    "rc=${rc} modes=$(cat "${FAKE_DIR}/ps.modes" 2>&1) op=$(op_count) args=$(op_args 1) err=$(cat "${work}/pjp.stderr")"$'\n'"$(show_env)"
+  ng "本物の op-reason を通しても、承認の出る呼び出し (desktop) と op.exe の inject は 1 回で、値がそのまま届く" \
+    "rc=${rc} modes=$(cat "${FAKE_DIR}/runner.modes" 2>&1) op=$(op_count) args=$(op_args 1) err=$(cat "${work}/opr.stderr")"$'\n'"$(show_env)"
 fi
 if [[ $(cat "${PROG_DUMP}/lock" 2>/dev/null) == free ]]; then
-  ok "program が起きた時点で pjp-op の lock は空いている"
+  ok "program が起きた時点で op-reason の lock は空いている"
 else
-  ng "program が起きた時点で pjp-op の lock は空いている" "lock=$(cat "${PROG_DUMP}/lock" 2>&1)"
+  ng "program が起きた時点で op-reason の lock は空いている" "lock=$(cat "${PROG_DUMP}/lock" 2>&1)"
 fi
-log=${XDG_STATE_HOME}/pjp-op/log.jsonl
+log=${opr_state}/log.jsonl
 start_rec=$(jq -c 'select(.event == "start")' "${log}" 2>/dev/null | tail -n 1)
+end_rec=$(jq -c 'select(.event == "end")' "${log}" 2>/dev/null | tail -n 1)
+start_args=$(jq -c '.args' <<<"${start_rec}" 2>/dev/null)
+start_reason=$(jq -r '.reason' <<<"${start_rec}" 2>/dev/null)
+end_how=$(jq -r '.result + " " + .runner' <<<"${end_rec}" 2>/dev/null)
 want_reason='[pjp-op-env: prog に参照 3 件] kabu の bot を起こす (読む参照: op://Test/a/password, op://Test/b/password, op://Test/c/password)'
-if [[ $(jq -c '.args' <<<"${start_rec}") == '["inject"]' && $(jq -r '.reason' <<<"${start_rec}") == "${want_reason}" ]] \
+if [[ ${start_args} == '["inject"]' && ${start_reason} == "${want_reason}" && ${end_how} == 'approved exe' ]] \
   && ! grep -qaF S3CR3T "${log}"; then
-  ok "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入る"
+  ok "op-reason の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入り、end は op-reason.exe で動いた approved"
 else
-  ng "pjp-op の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入る" "$(cat "${log}" 2>&1)"
+  ng "op-reason の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入り、end は op-reason.exe で動いた approved" \
+    "$(cat "${log}" 2>&1)"
 fi
 if disk_clean; then
-  ok "本物の op.sh を通しても、流した後の置き場に値が無い"
+  ok "本物の op-reason を通しても、流した後の置き場に値が無い"
 else
-  ng "本物の op.sh を通しても、流した後の置き場に値が無い" \
+  ng "本物の op-reason を通しても、流した後の置き場に値が無い" \
     "$(grep -rlaF S3CR3T -- "${HOME}" "${XDG_STATE_HOME}" "${XDG_RUNTIME_DIR}" "${TMPDIR}" "${proj}")"
 fi
 reset
@@ -823,22 +862,22 @@ for i in $(seq 1 6); do
   printf 'SVC%s=op://Private/service-%s/credential\n' "${i}" "${i}" >>"${proj}/.env"
 done
 export PROG_KEYS=SVC6
-PATH=${pjp_bin}:${PATH} run_env six --reason "6 つのサービスに入る bot を起こすのにそれぞれの credential を読む" -- prog
-window_reason=$(jq -r '.ui.lines[] | select(.[0] == "理由") | .[1]' "${FAKE_DIR}/ps.payload" 2>/dev/null)
-log_reason=$(jq -r 'select(.event == "start") | .reason' "${XDG_STATE_HOME}/pjp-op/log.jsonl" 2>/dev/null | tail -n 1)
+PATH=${opr_bin}:${PATH} run_env six --reason "6 つのサービスに入る bot を起こすのにそれぞれの credential を読む" -- prog
+window_reason=$(jq -r '.facts.reason // empty' "${FAKE_DIR}/runner.payload" 2>/dev/null)
+log_reason=$(jq -r 'select(.event == "start") | .reason' "${opr_state}/log.jsonl" 2>/dev/null | tail -n 1)
 if [[ ${rc} == 0 && ${window_reason} == '[pjp-op-env: prog に参照 6 件] '* && ${window_reason} == *… &&
   ${log_reason} == *op://Private/service-6/credential* ]]; then
   ok "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)"
 else
   ng "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)" \
-    "rc=${rc} window=${window_reason} log=${log_reason}"
+    "rc=${rc} window=${window_reason} log=${log_reason} err=$(cat "${work}/six.stderr")"
 fi
 reset
 printf '%s\n' 'A=op://Test/a/password' >"${proj}/.env"
 export PROG_KEYS=A
 release=${work}/release
 rm -f "${release}"
-(cd "${proj}" && PATH=${pjp_bin}:${PATH} PROG_WAIT=${release} "${BASH}" "${script}" --reason "長く動く bot" -- prog </dev/null \
+(cd "${proj}" && PATH=${opr_bin}:${PATH} PROG_WAIT=${release} "${BASH}" "${script}" --reason "長く動く bot" -- prog </dev/null \
   >/dev/null 2>"${work}/long.stderr") &
 long_pid=$!
 for _ in $(seq 100); do
@@ -846,7 +885,7 @@ for _ in $(seq 100); do
   sleep 0.1
 done
 other_rc=0
-PATH=${pjp_bin}:${PATH} PJP_OP_LOCK_WAIT=1 "${BASH}" "${opsh}" --reason "ほかの pane" item get x </dev/null >/dev/null \
+PATH=${opr_bin}:${PATH} OPREASON_LOCK_WAIT=1 "${opr_bin}/op" --reason "ほかの pane" item get x </dev/null >/dev/null \
   2>"${work}/other.stderr" || other_rc=$?
 still=0
 kill -0 "${long_pid}" 2>/dev/null && still=1

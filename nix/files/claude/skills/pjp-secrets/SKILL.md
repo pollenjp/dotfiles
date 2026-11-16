@@ -32,7 +32,8 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
    Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの名前で作るかを伝えてから、1Password の中で生む:
    `printf '%s' '{"title":"<名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" - --generate-password=letters,digits,32 >/dev/null`
    (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
-   `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。pjp-op の無いマシンでは `--reason` を外す)
+   `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。op が wrapper の op-reason でない
+   マシン (素の op) では `--reason` を外す)
 3. 参照だけをもらう。アプリの欄のメニュー「Copy Secret Reference」で取れる (`op://Private/kabu-station/password` のような
    名前の形。名前に使えない文字のある部分だけが ID になる)
 4. 参照を ID の形に直す: `pjp-op-ref --reason "<何のために読むか>" "<参照>" ["<参照>"…]`。ID の参照を渡した順に 1 行ずつ出す
@@ -80,7 +81,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 
 ## program の書き方
 
-- 環境変数を読むだけにし、op を呼ばない。repo の script に `op --reason …` を書かない (`--reason` は WSL の wrapper にだけある
+- 環境変数を読むだけにし、op を呼ばない。repo の script に `op --reason …` を書かない (`--reason` は WSL の wrapper (op-reason) にだけある
   flag で、ほかのマシンの op では落ちる。CI では CI のシークレットを環境変数で渡せばそのまま動く)
 - 起こすのは実行ファイルそのもの。`cargo run`・`npm run` は build の script や依存のコードにも値を渡すので、build してから
   `pjp-op-env … -- ./target/release/<名前>` で起こす
@@ -93,7 +94,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 
 - 理由は、何のために何を読むかを 1 文: `--reason "kabu の bot を起こすのに kabu ステーションの API パスワードを読む"`。
   WSL では承認の窓の理由の頭に program と参照の件数、後ろに読む参照が並ぶ (窓は 200 字で切るので、件数より並んだ参照が少なければ
-  切れている。全部は `pjp-op-log --json`)
+  切れている。全部は `op-reason-log --json`)
 - 承認は 1 回。拒否・時間切れ (pjp-op-env が op の終了コードで止まり、hook が知らせる) のあとは打ち直さず、ユーザーに聞く
   (hook が出す問いに従う。hook の無いマシンでも同じ)
 - 起こし直すたびに承認が 1 回出るので、直すものを直してからまとめて 1 回で起こす
@@ -105,7 +106,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 
 | 状況 | 見分け方 | すること |
 | --- | --- | --- |
-| WSL の op が wrapper (pjp-op) | `~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true | pjp-op-env を使う (pjp-op-env が op に `--reason` を付ける) |
+| WSL の op が wrapper (op-reason) | `~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true | pjp-op-env を使う (pjp-op-env が op に `--reason` を付ける)。op を自分で打つ前に、初めてなら `op-reason --skill` で wrapper の手引き (理由の書き方・拒否・時間切れのあとにすること) を読む |
 | 素の op のマシン | `enable` が true でなく、`command -v op` がある | pjp-op-env を使う (pjp-op-env は op に `--reason` を付けない) |
 | pjp-op-env が無い | `command -v pjp-op-env` が無い | 平文に逃げず、ユーザーに渡し方を聞く |
 | pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く)。`op item get` を素で打って ID を探さない |
@@ -121,7 +122,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
   `LoadCredential=` など) はユーザーと決め、crontab の行や unit の `Environment=` に書かない。token のファイルはユーザーが
   自分の端末で書く (Claude は token を読まない・書かない)
 - script で token を読んで起こす: `OP_SERVICE_ACCOUNT_TOKEN=$(<"$HOME/.config/<名前>/op-token") exec pjp-op-env --reason "<理由>" --env-file <絶対パス> -- <実行ファイル>`。
-  pjp-op-env は token を op に渡し、program には渡さない (pjp-op は token があると承認の画面を出さない)
+  pjp-op-env は token を op に渡し、program には渡さない (op-reason は token があると承認の画面を出さない)
 - cron は PATH が短く cwd も決まらないので、script で PATH (`~/.nix-profile/bin`) と cwd を決める。登録の前に、cron に近い環境
   (`env -i HOME="$HOME" PATH=/usr/bin:/bin <script>`) で `-- true` を起こし、承認の画面を出さずに解けるか (token が効くか・WSL の
   cron から op を起こせるか) を確かめる。`crontab -l` は昔の行の平文を出しうるので、中身を出さずに行を足す
@@ -149,7 +150,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 
 | 言い分 | 実際 |
 | --- | --- |
-| 「1Password の定番は `op run --env-file=.env -- <program>`」 | WSL の op は Windows の op.exe で、pjp-op は op が終わるまで lock と承認の窓を持つ。長く動く program を `op run` で起こすと窓が出たままになり、ほかの pane の op は 90 秒待って断られる。pjp-op-env は解いてすぐ放す |
+| 「1Password の定番は `op run --env-file=.env -- <program>`」 | WSL の op は Windows の op.exe で、op-reason は op が終わるまで lock と承認の窓を持つ。長く動く program を `op run` で起こすと窓が出たままになり、ほかの pane の op は 90 秒 (`OPREASON_LOCK_WAIT`) 待って断られる。pjp-op-env は解いてすぐ放す |
 | 「`op read` で 1 つずつ取れば足りる」「`KEY=$(op read …) program`」 | 承認が値の数だけ出て、慣れで許可するようになる。pjp-op-env なら何件でも 1 回 |
 | 「本人が貼って頼んだので、権限 600 の `.env` なら危うさは増えない」 | ディスクに平文が増える (バックアップ・ほかの道具・誤った共有)。本当の手当ては作り直しと 1Password |
 | 「急いでいるので今回だけ」 | 今回だけが残る。参照を書く手間は値を書く手間と変わらない |
