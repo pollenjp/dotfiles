@@ -250,18 +250,18 @@ mod tests {
         CommandSpec::new("sh").arg("-c").arg(script)
     }
 
-    #[cfg(windows)]
-    fn shell(script: &str) -> CommandSpec {
-        CommandSpec::new("cmd").arg("/C").arg(script)
-    }
-
     #[test]
     fn streams_lines_and_returns_code() {
         let mut seen = Vec::new();
         #[cfg(unix)]
         let spec = shell("echo one; echo two >&2; exit 3");
+        // Windows は runner が ps1 を呼ぶのと同じく PowerShell の -Command で (cmd の引用符の読み方に頼らない)
         #[cfg(windows)]
-        let spec = shell("echo one& echo two 1>&2& exit /b 3");
+        let spec = CommandSpec::new("powershell")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg("Write-Output one; [Console]::Error.WriteLine('two'); exit 3");
         let r = RealSys.run(&spec, &mut |l| seen.push(l.trim().to_string()));
         assert_eq!(r.exit, Exit::Code(3));
         let mut got: Vec<String> = r.output.iter().map(|l| l.trim().to_string()).collect();

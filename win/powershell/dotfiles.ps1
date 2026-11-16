@@ -80,3 +80,23 @@ function Install-Ntn { & "$HOME\.config\powershell\Install-Ntn.ps1" @args }
 # 中身は同じ場所へ配る Install-ClaudeCode.ps1 (win/README.md の「Claude Code」)。-Check なら確かめるだけ。
 # 入れ替えが要るときは、Windows で開いている Claude Code の会話を先に閉じる (動いていると止まる)。setup --update でも揃える。
 function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1" @args }
+
+# Windows 側の runner (dotfiles の win/runner/。Rust)。dotfiles check で手順を順に確かめ (何も書かない)、dotfiles apply で揃え
+# (このホストの受け持ちが runner のときだけ。dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [runner] enable = true)、
+# dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で
+# build して起こす。cargo は win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は
+# 既定の toolchain を入れていないので、--manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
+function dotfiles {
+    $runner = Join-Path $HOME 'ghq\github.com\pollenjp\dotfiles\win\runner'
+    if (-not (Test-Path -LiteralPath (Join-Path $runner 'Cargo.toml'))) {
+        Write-Host "dotfiles の runner がありません: $runner (先に win\bootstrap\Install-Bootstrap.ps1 で clone する)" -ForegroundColor Yellow
+        $global:LASTEXITCODE = 2
+        return
+    }
+    Push-Location -LiteralPath $runner
+    try {
+        cargo run --quiet --release --locked -- @args
+    } finally {
+        Pop-Location
+    }
+}

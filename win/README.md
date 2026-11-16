@@ -3,15 +3,18 @@
 Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しにコピーして配る
 (経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
 
-新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner で作る
-途中で、受け持ちを runner へ切り替えるまでは今までどおり WSL が配る (経緯は
-[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md))。
+新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
+(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは今までどおり
+WSL が配り、runner は確かめるだけ (経緯は
+[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
+| `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -38,8 +41,8 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 
 新しい Windows で最初に流す PowerShell の script (`bootstrap/Install-Bootstrap.ps1`)。Rust の runner を動かせるところまで (Git for Windows・
 GitHub CLI・Visual Studio Build Tools・rustup と、dotfiles・dotfiles-private・claude-skills の clone) を揃える。WSL は要らない。Windows の
-環境を Windows 側の runner で作る最初の段で、runner (Rust・`cargo run`) は続きの PR で足す。それまで Windows のアプリと設定を配るのは、
-今までどおり WSL の setup ([配る](#配る))。経緯は
+環境を Windows 側の runner で作る最初の段で、その後は runner (`runner/`。[後述](#runner-windows-の側で確かめて揃える)) が受け持つ。ホストごとに
+受け持ちを runner に切り替えるまで、Windows のアプリと設定を配るのは今までどおり WSL の setup ([配る](#配る))。経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md)
 (ADR 010 の前提「WSL のある Windows だけ」を改めた)。
 
@@ -118,8 +121,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\ghq\github.com\pollenj
 
 ### 版のずれを手で揃える
 
-固定した版を上げた PR が merge された後、入っている Windows では `-Check` が版のずれを ⚠ で出す。揃えるのは Rust の runner の受け持ち
-(続きの PR) で、それまでは手で揃える。pin があっても、名指しの upgrade は通る:
+固定した版を上げた PR が merge された後、入っている Windows では `-Check` が版のずれを ⚠ で出す (runner の `dotfiles check` も、bootstrap の
+手順の行で同じずれを出す)。揃えるのは Rust の runner の受け持ちだが、今の runner は見せるだけで揃える手順はまだ無いので、それまでは手で
+揃える。pin があっても、名指しの upgrade は通る:
 
 ```powershell
 winget upgrade --id Git.Git --exact --version <版>
@@ -155,9 +159,125 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --custom "--default-
   [PowerShell のテスト](#powershell-のテスト))。winget・UAC・vswhere・gh のログイン・clone の本物の動きは、Windows の実機で `-Check` と
   本番を打って確かめる
 
+## runner (Windows の側で確かめて揃える)
+
+`runner/` は Windows の側から Windows の環境を作る Rust の runner (`dotfiles-win`)。WSL の setup の Windows の手順
+(`nix/scripts/bootstrap-windows-*.sh`。order 90〜99) を 1 つずつ写したもので、判定と文言をそろえている。経緯は
+[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) §2 H・I と
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
+
+- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは今までどおり WSL の setup が配り
+  ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と同じ判定を出すかを突き合わせられる)
+- 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
+  (`powershell/dotfiles.ps1`) が `win\runner` に入って `cargo run --quiet --release --locked` を打つ (rustup は `rust-toolchain.toml` を今の
+  ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く
+
+### runner を流す
+
+```powershell
+dotfiles list                          # 手順と、このホストでの on/off・runner に移したか
+dotfiles check                         # 手順を順に確かめる (何も書かない)
+dotfiles check --steps files,ntn       # 手順を id で絞る
+dotfiles apply --dry-run               # apply がすることを出す (何も書かない。受け持ちによらず流せる)
+dotfiles apply                         # 揃える (このホストの [runner] enable = true のときだけ。でなければ止まって 1)
+dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
+dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
+```
+
+- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = runner にまだ無い) と、種類ごとの締めの行を出す
+- 終了コードは bootstrap と同じ: 0 = 直すことが無い・3 = 入っていない・無いものだけ (apply で揃う)・1 = ほかに直すことがある (足りない・
+  ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
+  環境変数が無い)
+- 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
+
+### ホストの値
+
+dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml` (`<PC の名前>` は `hostname` を小文字にしたもの。pjp-raiden なら
+`polle@pjp-raiden.toml`)。WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。
+
+```toml
+group = "personal"            # personal (既定)・company・client (nix/README.md の「設定グループ」)
+
+[tools]                       # 道具の switch の上書き。書かなければグループの既定 (runner/groups.json)
+windowsTypeClipboard = true
+
+[runner]
+enable = false                # 受け持ちの印。true で apply を許す
+```
+
+- 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
+  `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`)。知らないキー・名前は runner が止める (終了コード 2)
+- ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
+- `runner/groups.json` は生成物 (グループごとの道具の既定。Nix がグループごとの素のホストの `group.json` を集める)。`nix/lib/groups.nix` や
+  option の既定を変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
+  CI の `lint` が落ちる)
+
+### 受け持ちを runner に切り替える
+
+ホストごとに、dotfiles-private の同じ PR で 2 つを変える (同じものを WSL と Windows の両方が配らないように):
+
+1. そのホストの Nix の値 (`nix/hosts/<user>@<hostname>.nix`) を `wsl.windowsFiles.enable = false` にする (WSL が Windows に触らない)
+2. Windows のホストの値を `[runner] enable = true` にする (runner の apply を許す)
+
+- 切り替える前に `dotfiles check` を流し、runner にまだ無い手順 (下の表の「まだ」) をどうするかを決める。切り替えたホストでは、まだ無い手順は
+  誰も流さないので ⚠ (runner では直らない差) になる
+- 初めて apply するときは記録が無いので、中身が repo と同じファイルは「同じ」(記録だけ作る) になる。WSL と Windows の clone を同じ commit に
+  しておく。違う中身は「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら)と同じ解き方。PowerShell では `Copy-Item` か `--force`)
+- WSL の無い Windows は、はじめから 2 だけを書く
+
+### runner の手順
+
+| order | id | すること | on/off | runner |
+| --- | --- | --- | --- | --- |
+| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る |
+| 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`) | いつも | 有る |
+| 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
+| 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
+| 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
+| 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 95 | `powershell-profile` | `$PROFILE` から `dotfiles.ps1` を読ませる | | まだ |
+| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
+| 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
+| 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
+| 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
+| 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
+| 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
+| 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
+| 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
+
+- ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
+  引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
+  `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
+- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒)。時間切れなら pwsh を止める (子の winget までは止めない)
+- WSL にしか無い 9 手順は、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
+  fancyzones → international → google-ime → pin-updates)
+
+### runner の手順を足す
+
+1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
+   コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
+   `ctx.sibling("claude-skills")`・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
+2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)
+3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
+4. この節の表に行を足す
+
+### runner を直すとき
+
+- `win/runner` で `cargo fmt`・`cargo clippy --all-targets -- -D warnings`・`cargo test`。CI
+  ([`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml)) は Linux と `windows-latest` (MSVC) で流し、Linux では manifest の
+  読み方を `nix-instantiate` (`nix/lib/windows-files.nix`) と突き合わせる (`DOTFILES_WIN_NIX_PARITY=1`。手元でも nix-instantiate があれば流れる)
+- WSL や Linux で build するには C のリンカ (`cc`) が要る。無ければ flake の nixpkgs の gcc を借りる:
+  `nix shell --inputs-from ../../nix nixpkgs#gcc --command cargo test`
+- toolchain は `runner/rust-toolchain.toml` (1.99.1。claude-skills と同じ)、crate は `toml`・`serde_json`・`sha2` だけ。版は公開から 7 日以上
+  たったものにする (`Cargo.lock` の間接の依存も。cargo には猶予の設定が無いので、作り直したら crates.io の公開日時を見て、新しすぎる版は
+  `cargo update -p <名前> --precise <前の版>` で下げる)。C のコンパイラが要る crate と HTTP の crate は足さない
+- `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
+
 ## 配る
 
-WSL で流す。`home-manager switch` だけでは Windows 側に届かない。
+WSL で流す。`home-manager switch` だけでは Windows 側に届かない。runner の `dotfiles check --steps files` は、同じ判定を Windows の側で出す
+([runner](#runner-windows-の側で確かめて揃える))。
 
 ```sh
 ~/dotfiles/setup --update                          # switch + bootstrap をまとめて
