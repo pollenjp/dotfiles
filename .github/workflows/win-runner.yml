@@ -9,19 +9,24 @@ name: win-runner
 #   の口を確かめる
 #
 # runner は win/ のファイル (manifest.toml とその src・Install-*.ps1・groups.json)・nix/lib/windows-files.nix・WSL の手順の一覧
-# (nix/scripts/bootstrap-windows-*.sh。手順の id を突き合わせる) を読むので、それらを変えた PR でも流す。
+# (nix/scripts/bootstrap-windows-*.sh。手順の id を突き合わせる)・hc の skill の頭 (nix/pkgs/herdr-core/claude-skill-head.md。Linux と
+# 共有)・Claude の git の組 (nix/lib/git-via-gh.nix。Linux の CI で突き合わせる) を読むので、それらを変えた PR でも流す。
 on:
   push:
     branches: [main]
     paths:
       - "win/**"
       - "nix/lib/windows-files.nix"
+      - "nix/lib/git-via-gh.nix"
+      - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
       - ".github/workflows/win-runner.yml"
   pull_request:
     paths:
       - "win/**"
       - "nix/lib/windows-files.nix"
+      - "nix/lib/git-via-gh.nix"
+      - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
       - ".github/workflows/win-runner.yml"
   workflow_dispatch:

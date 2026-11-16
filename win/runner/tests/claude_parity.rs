@@ -1,10 +1,11 @@
-//! runner が書く claude-notion.json の中身を、Linux の home/modules/claude.nix (`builtins.toJSON { inherit profile routes override; } + "\n"`)
-//! と突き合わせる。
+//! runner が Windows の Claude Code に書くものを、Linux の home/modules/claude.nix の値と突き合わせる。
 //!
 //! ## 確かめること
 //!
-//! - ホストの値の `[claude.notion]` から作った中身が、同じ値の Nix の `builtins.toJSON` と同じバイト列 (キーの順・空白なし・小数・真偽値・
-//!   配列・入れ子・profile の null)
+//! - ホストの値の `[claude.notion]` から作った claude-notion.json の中身が、同じ値の Nix の `builtins.toJSON` (claude.nix の
+//!   `builtins.toJSON { inherit profile routes override; } + "\n"`) と同じバイト列 (キーの順・空白なし・小数・真偽値・配列・入れ子・profile の null)
+//! - settings.json の env に足す git の組のうち GitHub の組が、Linux の nix/lib/git-via-gh.nix と同じ (並びも)。頭の 2 組は claude.nix の
+//!   gitConfigBase (commit・tag を無署名に)
 //!
 //! nix-instantiate が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
 
@@ -12,8 +13,54 @@ mod common;
 
 use common::which;
 use dotfiles_win::host::{Groups, parse};
+use dotfiles_win::steps::claude_env::GIT_CONFIG;
 use std::path::Path;
 use std::process::Command;
+
+#[test]
+fn git_config_matches_nix() {
+    if !nix_available() {
+        return;
+    }
+    let lib = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("nix")
+        .join("lib")
+        .join("git-via-gh.nix");
+    let out = Command::new("nix-instantiate")
+        .args(["--eval", "--strict", "--json"])
+        .arg(&lib)
+        .output()
+        .expect("nix-instantiate を起こせない");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let gh: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
+    let gh: Vec<(String, String)> = gh
+        .iter()
+        .map(|p| {
+            (
+                p["k"].as_str().unwrap().to_string(),
+                p["v"].as_str().unwrap().to_string(),
+            )
+        })
+        .collect();
+    let ours: Vec<(String, String)> = GIT_CONFIG
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    assert_eq!(
+        ours[..2],
+        [
+            ("commit.gpgsign".to_string(), "false".to_string()),
+            ("tag.gpgsign".to_string(), "false".to_string()),
+        ]
+    );
+    assert_eq!(ours[2..], gh[..]);
+}
 
 fn nix_available() -> bool {
     let found = which("nix-instantiate").is_some();

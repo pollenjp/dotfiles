@@ -66,6 +66,29 @@ impl Sys for FakeSys {
     }
 }
 
+/// 偽の口で `cmd /c mklink /J <link> <target>` を受けたら junction を真似て張る (Unix は symlink、Windows は本物の `cmd` で junction)。
+/// mklink でないコマンドなら None (呼ぶ側がほかの答えを返す)。
+pub fn fake_mklink(c: &CommandSpec) -> Option<RunResult> {
+    let args = c.args_lossy();
+    if args.len() != 5 || args[0] != "/c" || args[1] != "mklink" || args[2] != "/J" {
+        return None;
+    }
+    #[cfg(unix)]
+    let exit = match std::os::unix::fs::symlink(&args[4], &args[3]) {
+        Ok(()) => crate::process::Exit::Code(0),
+        Err(_) => crate::process::Exit::Code(1),
+    };
+    #[cfg(windows)]
+    let exit = crate::process::RealSys.run(c, &mut |_| {}).exit;
+    Some(RunResult {
+        exit,
+        output: vec![format!(
+            "Junction created for {} <<===>> {}",
+            args[3], args[4]
+        )],
+    })
+}
+
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub struct TempDir(PathBuf);

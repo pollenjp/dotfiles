@@ -267,7 +267,7 @@ mod tests {
         (rows, String::from_utf8(out).unwrap())
     }
 
-    /// 受け持ちが WSL のホストの apply は、Windows にしか無い手順だけを流し、WSL と同じ手順は流さずに · の行を出す (ADR 062)
+    /// 受け持ちが WSL のホストの apply は、Windows にしか無い手順だけを流し、WSL と同じ手順は流さずに · の行を出す (ADR 064)
     #[test]
     fn wsl_host_apply_runs_windows_only_steps() {
         let steps: Vec<Box<dyn Step>> = vec![

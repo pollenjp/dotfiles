@@ -2,7 +2,8 @@
 #
 # `hc --skill` は hc の CLI の手引き (Markdown。hc の版ごとに中身が変わる) を出すだけで、Claude Code が読む frontmatter が無い。
 # 頭に frontmatter (name: hc と、使う場面の description) と、作った版を書いたコメントを足す。どちらも隣の claude-skill-head.md
-# に書き、@version@ を hc の版に替える。Windows で同じ SKILL.md を作るとき (win/ の runner。別の PR) も、同じ head を使う。
+# に書き、@version@ を hc の版に替える。Windows で同じ SKILL.md を作る runner の手順 (win/runner/src/steps/tool_skill.rs の hc-skill) も、
+# 同じ head を使う。
 #
 # build の中で `hc --skill` を流す。hc は HOME にも core にも触らずに手引きを出す (空の env と HOME だけで、手元と同じ出力に
 # なることを確かめた)。hc の版は releases.json で決まり、上げると derivation が変わるので、SKILL.md も一緒に作り直る (setup の

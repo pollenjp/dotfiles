@@ -531,6 +531,34 @@ mod tests {
             assert!(!w.dst().exists());
         }
 
+        /// 受け持ちが WSL のホストでも、Windows にしか無い手順 (claude-notion) は apply が書き、WSL と同じ手順 (files) は流さない
+        #[test]
+        fn wsl_host_applies_windows_only_steps() {
+            let w = World::new(Some("[claude.notion]\nprofile = \"personal\"\n"));
+            let notion =
+                w.t.path()
+                    .join("home")
+                    .join(".local")
+                    .join("state")
+                    .join("dotfiles")
+                    .join("claude-notion.json");
+            let (code, out, _) = w.run(&["apply", "--dry-run", "--steps", "files,claude-notion"]);
+            assert_eq!(code, 3, "{out}");
+            assert!(out.contains("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す"), "{out}");
+            assert!(!notion.exists());
+
+            let (code, out, _) = w.run(&["apply", "--steps", "files,claude-notion"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"), "{out}");
+            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-files.sh が配る)"), "{out}");
+            assert_eq!(
+                std::fs::read_to_string(&notion).unwrap(),
+                "{\"override\":{},\"profile\":\"personal\",\"routes\":{}}\n"
+            );
+            assert!(!w.dst().exists());
+            assert!(!w.record().exists());
+        }
+
         #[test]
         fn apply_copies_when_runner_enabled() {
             let w = World::new(Some("[runner]\nenable = true\n"));

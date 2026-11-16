@@ -4,7 +4,7 @@
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の
 //! `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
-//! docs/adr/062_win_w02_claude_skills_hub_*)。
+//! docs/adr/064_win_w02_claude_skills_hub_*)。
 //!
 //! ```toml
 //! group = "personal"            # personal (既定)・company・client
