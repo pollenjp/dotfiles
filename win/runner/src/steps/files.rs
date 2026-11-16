@@ -45,6 +45,7 @@ impl Step for Files {
             title: "win/manifest.toml のファイルを配る",
             gate: super::Gate::Always,
             ported: true,
+            windows_only: false,
         }
     }
 

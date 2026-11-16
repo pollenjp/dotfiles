@@ -27,6 +27,8 @@ impl Step for Bootstrap {
             title: "bootstrap の道具と clone を確かめる (Install-Bootstrap.ps1 -Check。揃えるのは人)",
             gate: Gate::Groups(&["personal"]),
             ported: true,
+            // 確かめるだけで書かない。WSL の setup に同じ手順は無い
+            windows_only: true,
         }
     }
 

@@ -74,6 +74,7 @@ impl Step for Pending {
             title: self.0.title,
             gate: Gate::Always,
             ported: false,
+            windows_only: false,
         }
     }
 

@@ -487,6 +487,7 @@ impl Step for Ps1Step {
             title: self.0.title,
             gate: self.0.gate,
             ported: true,
+            windows_only: false,
         }
     }
 

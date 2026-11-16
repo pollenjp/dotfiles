@@ -318,8 +318,10 @@ fn steps_command(
         _ if a.dry_run => {
             ctx.say("==> dotfiles apply --dry-run (することを出すだけ。何も書かない)");
             runner::describe_host(&mut ctx);
-            if let Some(b) = runner::apply_blocker(&ctx.host) {
+            if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 ctx.say(format!("※ 本番の apply は止まる: {}", b.text));
+            } else if !ctx.host.runner_enable {
+                ctx.say("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す。files と ps1 の手順の [dry-run] は、受け持ちを runner に切り替えたときにすること");
             }
             let rows = runner::execute(&mut ctx, Mode::DryRun { force: a.force }, &selected);
             Ok(runner::finish(&mut ctx, "apply --dry-run", &rows))
@@ -327,7 +329,7 @@ fn steps_command(
         _ => {
             ctx.say("==> dotfiles apply");
             runner::describe_host(&mut ctx);
-            if let Some(b) = runner::apply_blocker(&ctx.host) {
+            if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 let mut rows = runner::host_rows(&ctx.host);
                 rows.push(b);
                 return Ok(runner::finish(&mut ctx, "apply", &rows));

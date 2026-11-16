@@ -73,6 +73,10 @@ pub struct StepInfo {
     pub gate: Gate,
     /// runner に移したか (false は WSL にしか無い手順)
     pub ported: bool,
+    /// Windows にしか無い手順か (WSL の setup に同じ手順が無い。bootstrap の確かめ・W0-2)。受け持ちによらず runner が受け持ち、
+    /// 受け持ちが WSL のホストの apply でも流す。false は WSL の `bootstrap-windows-*.sh` を写した手順とまだ無い手順で、受け持ちを
+    /// runner に切り替えたホストでだけ apply が書く (dotfiles-private の docs/adr/062_win_w02_claude_skills_hub_*)
+    pub windows_only: bool,
 }
 
 /// 流し方。
