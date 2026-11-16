@@ -22,6 +22,9 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
+  dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
+                                                          %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
+  dotfiles-win claude-statusline                          Claude Code の status line (同じ口)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
   --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする
@@ -167,7 +170,76 @@ fn command_name(c: Command) -> &'static str {
 pub fn main(args: Vec<String>) -> i32 {
     let stdout = std::io::stdout();
     let stderr = std::io::stderr();
+    // claude-files が写した hook の口 (dotfiles-claude.exe) は、hook と status line だけを受ける (古い写しで runner を流さない)
+    let hook_exe = std::env::args_os()
+        .next()
+        .and_then(|a| {
+            Path::new(&a)
+                .file_stem()
+                .map(|s| s.to_string_lossy().eq_ignore_ascii_case("dotfiles-claude"))
+        })
+        .unwrap_or(false);
+    if let Some(code) = claude_entry(
+        &args,
+        hook_exe,
+        &mut std::io::stdin().lock(),
+        &RealSys,
+        &mut stdout.lock(),
+        &mut stderr.lock(),
+    ) {
+        return code;
+    }
     run(&args, &RealSys, &mut stdout.lock(), &mut stderr.lock())
+}
+
+/// Claude Code の hook と status line の口 (`claude-hook <名前>`・`claude-statusline`)。そのどちらでもなければ None (runner のコマンド)。
+/// hook の口の写し (`hook_exe`) では、ほかのコマンドを止める (2)。hook はいつも 0 で終える (止めるときは JSON の permissionDecision)。
+pub fn claude_entry(
+    args: &[String],
+    hook_exe: bool,
+    stdin: &mut dyn std::io::Read,
+    sys: &dyn Sys,
+    out: &mut dyn Write,
+    err: &mut dyn Write,
+) -> Option<i32> {
+    let mut read_stdin = || {
+        let mut buf = Vec::new();
+        let _ = stdin.read_to_end(&mut buf);
+        String::from_utf8_lossy(&buf).into_owned()
+    };
+    match args.first().map(String::as_str) {
+        Some("claude-hook") => {
+            let input = read_stdin();
+            match args.get(1) {
+                Some(name) if args.len() == 2 => {
+                    if let Some(answer) = crate::hooks::run(name, &input, sys) {
+                        let _ = out.write_all(answer.as_bytes());
+                    }
+                }
+                _ => {
+                    let _ = writeln!(
+                        err,
+                        "claude-hook: hook の名前を 1 つ渡してください ({})",
+                        crate::hooks::NAMES.join("・")
+                    );
+                }
+            }
+            Some(0)
+        }
+        Some("claude-statusline") => {
+            let input = read_stdin();
+            let _ = out.write_all(crate::hooks::statusline::line(&input, sys).as_bytes());
+            Some(0)
+        }
+        _ if hook_exe => {
+            let _ = writeln!(
+                err,
+                "!! この exe は Claude Code の hook と status line の口 (claude-hook・claude-statusline) です。runner は PowerShell の dotfiles 関数で流してください"
+            );
+            Some(2)
+        }
+        _ => None,
+    }
 }
 
 /// runner を build した clone (`win/runner` の 2 つ上)。
@@ -406,6 +478,49 @@ mod tests {
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }
+    }
+
+    /// hook と status line の口: stdin を読んで答え、いつも 0。hook の口の写しは runner のコマンドを止める (2)。ほかは runner へ (None)
+    #[test]
+    fn claude_entry_points() {
+        let sys = crate::testutil::FakeSys::new(|_| unreachable!());
+        let call = |args: &[&str], hook_exe: bool, stdin: &str| {
+            let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = claude_entry(
+                &args,
+                hook_exe,
+                &mut stdin.as_bytes(),
+                &sys,
+                &mut out,
+                &mut err,
+            );
+            (
+                code,
+                String::from_utf8(out).unwrap(),
+                String::from_utf8(err).unwrap(),
+            )
+        };
+        let skill = "{\"tool_name\": \"Skill\", \"tool_input\": {\"skill\": \"superpowers:brainstorming\"}}";
+        let (code, out, _) = call(&["claude-hook", "run-through-nudge"], true, skill);
+        assert_eq!(code, Some(0));
+        assert!(out.contains("[走り切り]") && out.ends_with('\n'), "{out}");
+        let (code, out, err) = call(&["claude-hook"], false, skill);
+        assert_eq!((code, out.as_str()), (Some(0), ""));
+        assert!(err.contains("docs-guard"), "{err}");
+        let (code, out, _) = call(&["claude-hook", "nope"], false, "{}");
+        assert_eq!((code, out.as_str()), (Some(0), ""));
+        let (code, out, _) = call(
+            &["claude-statusline"],
+            true,
+            "{\"model\": {\"display_name\": \"Opus\"}}",
+        );
+        assert_eq!(code, Some(0));
+        assert!(out.contains("Opus") && !out.ends_with('\n'), "{out:?}");
+        let (code, _, err) = call(&["apply"], true, "");
+        assert_eq!(code, Some(2));
+        assert!(err.contains("dotfiles 関数"), "{err}");
+        assert_eq!(call(&["check"], false, "").0, None);
     }
 
     mod flow {

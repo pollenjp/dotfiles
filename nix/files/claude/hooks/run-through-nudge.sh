@@ -35,6 +35,9 @@
 # scripts/bootstrap-claude-hook.sh が settings.json の hooks.PostToolUse に 1 件足す (matcher Skill)。
 # hook の if で skill の名前を絞る書き方 (Skill(<名前>)) は 2.1.299 で発火しなかったので、
 # 名前はここで見る。
+#
+# Windows の Claude Code では、同じふるまい (と文) を Rust に写した win/runner/src/hooks/run_through_nudge.rs が動く (Git Bash に
+# jq が無いため)。ここを直したら、そちらも同じに直す (win-runner の CI が、同じ入力でこの script と突き合わせる)。
 
 set -u -o pipefail
 

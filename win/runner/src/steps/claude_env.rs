@@ -13,13 +13,13 @@
 //! helper の並びを消す組は足さない (Windows では空の値の env が消えやすく、`GIT_CONFIG_VALUE_<n>` が欠けると git が全部落ちる)。
 //! 経緯は dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*。
 
+use super::claude_settings::backup;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
 use crate::ojson::OValue;
 use crate::process::CommandSpec;
 use crate::report::Kind;
-use std::path::Path;
 use std::time::Duration;
 
 /// Claude のセッションの git に足す設定 (git の `-c <キー>=<値>` の組。並びもこのまま)。Linux の home/modules/claude.nix の gitConfigBase
@@ -41,9 +41,6 @@ pub const VARS: &[(&str, &str)] = &[
     ("CLAUDE_CODE_PLUGIN_PREFER_HTTPS", "1"),
     ("GCM_INTERACTIVE", "never"),
 ];
-
-/// 書く前の settings.json を写す数
-const BACKUPS: usize = 10;
 
 pub struct ClaudeEnv;
 
@@ -212,46 +209,6 @@ fn with_env(settings: &OValue) -> Result<OValue, String> {
     let mut result = settings.clone();
     result.set("env", OValue::Object(out));
     Ok(result)
-}
-
-/// 書く前の settings.json を `<state_dir>\claude-settings\backup\settings-<秒>-<ナノ秒>.json` に写し、新しい方から 10 個だけ残す。
-fn backup(ctx: &mut Ctx, path: &Path) -> std::io::Result<()> {
-    let dir = ctx.state_dir.join("claude-settings").join("backup");
-    std::fs::create_dir_all(&dir)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let mut name = format!(
-        "settings-{:012}-{:09}.json",
-        now.as_secs(),
-        now.subsec_nanos()
-    );
-    // 同じ時刻の写しを上書きしない
-    let mut n = 0;
-    while dir.join(&name).exists() {
-        n += 1;
-        name = format!(
-            "settings-{:012}-{:09}-{n}.json",
-            now.as_secs(),
-            now.subsec_nanos()
-        );
-    }
-    std::fs::copy(path, dir.join(&name))?;
-    let mut olds: Vec<String> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("settings-") && n.ends_with(".json"))
-        .collect();
-    olds.sort();
-    while olds.len() > BACKUPS {
-        let old = olds.remove(0);
-        let _ = std::fs::remove_file(dir.join(old));
-    }
-    ctx.say(format!(
-        "前の中身を写しました: {}",
-        dir.join(&name).display()
-    ));
-    Ok(())
 }
 
 /// 書いても効かないかもしれないわけ (※ で知らせる。env は書く): gh が無い・ログインしていない、git の設定ファイルにほかの credential helper

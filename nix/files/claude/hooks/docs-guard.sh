@@ -53,6 +53,9 @@
 # exit   : 常に 0 (止めるのは JSON の permissionDecision で表す)
 #
 # 依存: jq・git (無ければ黙って通す)
+#
+# Windows の Claude Code では、同じふるまいを Rust に写した win/runner/src/hooks/docs_guard.rs が動く (Git Bash に jq が無いため。
+# Windows の C:\… のパスも読む)。ここを直したら、そちらも同じに直す (win-runner の CI が、同じ入力でこの script と突き合わせる)。
 
 set -u -o pipefail
 

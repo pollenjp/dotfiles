@@ -66,6 +66,10 @@
 #
 # 既存の設定は保持する。同じ event・matcher・if・command の組が既にあれば足さない (matcher の無い組は
 # matcher が空と見る)。
+#
+# Windows の Claude Code には、Windows の runner の claude-hook (win/runner/src/steps/claude_hook.rs) が、Rust に写した hook だけを同じ
+# event・matcher・if で登録する (どれを写したかは win/README.md の「Claude Code の設定」)。写した hook の行をここで変えたら、そちらの
+# REGISTRATIONS も同じに直す (win-runner の CI が突き合わせる)。
 
 set -eu -o pipefail
 

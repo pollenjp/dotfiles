@@ -41,6 +41,9 @@
 # (どちらも matcher Bash + if "Bash(gh pr create *)")。0 以外で終わった Bash (gh pr create の後ろにつないだ
 # コマンドが落ちた・作ったあとの段で落ちた) には PostToolUse が来ず、PostToolUseFailure が来る (出力は入力の
 # error に入る。ssh-agent-notice.sh と同じ)。
+#
+# Windows の Claude Code では、同じふるまいを Rust に写した win/runner/src/hooks/pr_assignee_nudge.rs が動く (Git Bash に jq が
+# 無いため)。ここ (コマンドの読み方の jq の式も) を直したら、そちらも同じに直す (win-runner の CI が、同じ入力でこの script と突き合わせる)。
 
 set -u -o pipefail
 

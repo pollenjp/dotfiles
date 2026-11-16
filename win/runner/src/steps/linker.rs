@@ -1,0 +1,506 @@
+//! repo の中身を 1 つずつ `~/.claude/<種類>/` へつなぐ道具 (claude-skills と claude-files の手順が共有する)。
+//!
+//! ディレクトリは junction (`cmd /c mklink /J`。権限が要らない)、ファイルはコピー (ファイルの symlink は開発者モードか管理者が要り、hard link は
+//! git が取り出し直すと切れる)。コピーは files と同じ記録で判定する: 置き先が無い → コピー・同じ中身 → 何もしない・記録と同じ中身 → 上書き・
+//! ほか → 衝突 (`--force` で上書き)。repo から消えたものは片付ける (リンクは外し、先は消さない。コピーは中身が記録どおりなら消す)。選び方は Linux の
+//! `nix/scripts/bootstrap-claude-skills.sh` と同じ (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*・docs/adr/065_win_claude_config_*)。
+
+use super::{Mode, Outcome};
+use crate::context::Ctx;
+use crate::fsutil;
+use crate::link::{create_junction, is_link, is_under, link_target, remove_link, same_path};
+use crate::record::Records;
+use crate::report::Kind;
+use std::path::{Path, PathBuf};
+
+/// junction を張る・コピーする名前か (cmd が特別に読む文字を、名前で持ち込まない)。
+fn name_ok(name: &str) -> bool {
+    !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+#[derive(Default)]
+pub struct Tally {
+    pub added: usize,
+    pub updated: usize,
+    pub removed: usize,
+    pub same: usize,
+    pub skipped: Vec<String>,
+    pub errors: usize,
+}
+
+/// どこから何をつなぐか。
+pub struct Source {
+    /// つなぐ元の根 (`<root>/<種類>/<名前>`)
+    pub root: PathBuf,
+    /// 前に使った根 (そこを指すリンクも、この手順が張ったものとして扱う)
+    pub prev: Option<PathBuf>,
+    /// ほかの clone の同じ場所 (`<どこか>/<この印>/<種類>/<名前>`) を指すリンクも、この手順が張ったものとして扱う (dotfiles の `nix/files/claude`)
+    pub foreign_suffix: Option<&'static str>,
+    /// つなぐ種類
+    pub kinds: &'static [&'static str],
+    /// skills のうち張らない名前 (前に張ったものは外す)
+    pub skip_skills: Vec<String>,
+    /// 衝突したコピーの中身を取り込む先 (締めの文に出す repo の名前)
+    pub absorb: &'static str,
+    /// 手順の id (締めの文の `dotfiles apply --steps <id> --force`)
+    pub step: &'static str,
+}
+
+pub struct Linker {
+    pub src: Source,
+    pub claude: PathBuf,
+    /// `~/.claude/<種類>` そのものがリンクの種類 (手でつないだ場所。触らない)
+    pub linked_kinds: Vec<&'static str>,
+    pub mode: Mode,
+    pub records: Records,
+    pub tally: Tally,
+}
+
+impl Linker {
+    pub fn new(src: Source, claude: PathBuf, mode: Mode, records: Records) -> Self {
+        let linked_kinds = src
+            .kinds
+            .iter()
+            .copied()
+            .filter(|k| is_link(&claude.join(k)))
+            .collect();
+        Linker {
+            src,
+            claude,
+            linked_kinds,
+            mode,
+            records,
+            tally: Tally::default(),
+        }
+    }
+
+    /// この手順が張ったリンクの先か (今の根か前の根の中。印があれば、ほかの clone の同じ場所も)。
+    fn is_ours(&self, target: &Path) -> bool {
+        if is_under(target, &self.src.root)
+            || self.src.prev.as_ref().is_some_and(|p| is_under(target, p))
+        {
+            return true;
+        }
+        let Some(suffix) = self.src.foreign_suffix else {
+            return false;
+        };
+        let suffix: PathBuf = suffix.split('/').collect();
+        let kind = target.parent();
+        let root = kind.and_then(Path::parent);
+        let kind_ok = kind.and_then(Path::file_name).is_some_and(|k| {
+            self.src
+                .kinds
+                .iter()
+                .any(|x| k.to_string_lossy().eq_ignore_ascii_case(x))
+        });
+        kind_ok && root.is_some_and(|r| ends_with_ignore_case(r, &suffix))
+    }
+
+    fn skipped_name(&self, kind: &str, name: &str) -> bool {
+        kind == "skills" && self.src.skip_skills.iter().any(|s| s == name)
+    }
+
+    pub fn skip(&mut self, ctx: &mut Ctx, why: String) {
+        ctx.say(format!("!! 飛ばす: {why}"));
+        self.tally.skipped.push(why);
+    }
+
+    pub fn fail(&mut self, ctx: &mut Ctx, why: String) {
+        ctx.say(format!("!! {why}"));
+        self.tally.errors += 1;
+    }
+
+    /// 全部の種類をつなぎ、片付ける。
+    pub fn run(&mut self, ctx: &mut Ctx) {
+        for kind in self.linked_kinds.clone() {
+            self.skip(
+                ctx,
+                format!("{kind} (~/.claude/{kind} がリンク。手でつないだ場所なので、この種類には触らない)"),
+            );
+        }
+        for kind in self.src.kinds {
+            self.link_kind(ctx, kind);
+        }
+        for kind in self.src.kinds {
+            self.prune_links(ctx, kind);
+        }
+        self.prune_copies(ctx);
+    }
+
+    /// 根の `<kind>/` の中身を 1 つずつつなぐ (README.md と張らない名前は除く)。`~/.claude/<kind>` そのものがリンクなら触らない。
+    fn link_kind(&mut self, ctx: &mut Ctx, kind: &str) {
+        if self.linked_kinds.contains(&kind) {
+            return;
+        }
+        let src_dir = self.src.root.join(kind);
+        let Ok(entries) = std::fs::read_dir(&src_dir) else {
+            return;
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        for name in names {
+            if name == "README.md" {
+                continue;
+            }
+            let label = format!("{kind}/{name}");
+            if self.skipped_name(kind, &name) {
+                ctx.say(format!("張らない (このマシンでは使わない): {label}"));
+                continue;
+            }
+            if !name_ok(&name) {
+                self.skip(
+                    ctx,
+                    format!("{label} (名前に英数字・. _ - の外の文字がある)"),
+                );
+                continue;
+            }
+            let src = src_dir.join(&name);
+            let dest = self.claude.join(kind).join(&name);
+            if src.is_dir() {
+                self.link_dir(ctx, &src, &dest, &label);
+            } else if src.is_file() {
+                match std::fs::read(&src) {
+                    Ok(bytes) => self.copy_bytes(ctx, &bytes, &dest, &label),
+                    Err(e) => self.fail(ctx, format!("{label} のコピー元が読めない ({e})")),
+                }
+            } else {
+                self.skip(ctx, format!("{label} (ディレクトリでもファイルでもない)"));
+            }
+        }
+    }
+
+    /// ディレクトリを junction でつなぐ。
+    fn link_dir(&mut self, ctx: &mut Ctx, src: &Path, dest: &Path, label: &str) {
+        if let Some(target) = link_target(dest) {
+            if same_path(&target, src) {
+                self.tally.same += 1;
+                return;
+            }
+            if !self.is_ours(&target) {
+                self.skip(
+                    ctx,
+                    format!("{label} (別のリンクがある: -> {})", target.display()),
+                );
+                return;
+            }
+            match self.mode {
+                Mode::Check => ctx.say(format!(
+                    "張り替える (apply で): {label} (今は -> {})",
+                    target.display()
+                )),
+                Mode::DryRun { .. } => ctx.say(format!(
+                    "[dry-run] 張り替える: {label} -> {}",
+                    src.display()
+                )),
+                Mode::Apply { .. } => {
+                    if let Err(e) = remove_link(dest) {
+                        self.fail(ctx, format!("{label} のリンクを外せない ({e})"));
+                        return;
+                    }
+                    if let Err(e) = create_junction(ctx.sys, dest, src) {
+                        self.fail(ctx, format!("{label} を張れない ({e})"));
+                        return;
+                    }
+                    ctx.say(format!("張り替えました: {label} -> {}", src.display()));
+                }
+            }
+            self.tally.updated += 1;
+            return;
+        }
+        if dest.symlink_metadata().is_ok() {
+            self.skip(
+                ctx,
+                format!("{label} (実体がある。手で置いたものか、Anthropic の配信と同じ名前)"),
+            );
+            return;
+        }
+        match self.mode {
+            Mode::Check => ctx.say(format!("無い (apply で張る): {label}")),
+            Mode::DryRun { .. } => ctx.say(format!("[dry-run] 張る: {label} -> {}", src.display())),
+            Mode::Apply { .. } => {
+                if let Some(parent) = dest.parent()
+                    && let Err(e) = std::fs::create_dir_all(parent)
+                {
+                    self.fail(ctx, format!("{} を作れない ({e})", parent.display()));
+                    return;
+                }
+                if let Err(e) = create_junction(ctx.sys, dest, src) {
+                    self.fail(ctx, format!("{label} を張れない ({e})"));
+                    return;
+                }
+                ctx.say(format!("張りました: {label} -> {}", src.display()));
+            }
+        }
+        self.tally.added += 1;
+    }
+
+    /// 中身 `want_bytes` を `dest` にコピーする (files と同じ記録の判定)。
+    pub fn copy_bytes(&mut self, ctx: &mut Ctx, want_bytes: &[u8], dest: &Path, label: &str) {
+        if is_link(dest) {
+            self.skip(ctx, format!("{label} (リンクがある)"));
+            return;
+        }
+        if dest.is_dir() {
+            self.skip(ctx, format!("{label} (ディレクトリがある)"));
+            return;
+        }
+        let want = fsutil::sha256_bytes(want_bytes);
+        let key = dest.to_string_lossy().into_owned();
+        let recorded = self.records.get(&key).map(str::to_string);
+        let copy = if !dest.exists() {
+            true
+        } else {
+            match fsutil::sha256_file(dest) {
+                Err(e) => {
+                    self.fail(ctx, format!("{label} の置き先が読めない ({e})"));
+                    return;
+                }
+                Ok(have) if have == want => {
+                    self.tally.same += 1;
+                    if self.mode.writes() && recorded.as_deref() != Some(want.as_str()) {
+                        self.records.set(&key, &want);
+                    }
+                    return;
+                }
+                Ok(have) if recorded.as_deref() == Some(have.as_str()) || self.mode.force() => {
+                    false
+                }
+                Ok(_) => {
+                    let why = if recorded.is_some() {
+                        "Windows 側で変わった"
+                    } else {
+                        "置いた記録が無い"
+                    };
+                    let (absorb, step) = (self.src.absorb, self.src.step);
+                    self.skip(
+                        ctx,
+                        format!(
+                            "{label} (中身が違う。{why}。Windows 側の中身を残すなら {absorb} へ取り込む・上書きするなら dotfiles apply --steps {step} --force)"
+                        ),
+                    );
+                    return;
+                }
+            }
+        };
+        let (todo, done) = if copy {
+            ("コピーする", "コピーしました")
+        } else {
+            ("上書きする", "上書きしました")
+        };
+        match self.mode {
+            Mode::Check => ctx.say(format!("{todo} (apply で): {label}")),
+            Mode::DryRun { .. } => ctx.say(format!("[dry-run] {todo}: {label}")),
+            Mode::Apply { .. } => match fsutil::write_atomic(dest, want_bytes) {
+                Ok(()) => {
+                    self.records.set(&key, &want);
+                    ctx.say(format!("{done}: {label}"));
+                }
+                Err(e) => {
+                    self.fail(ctx, format!("{label} を書けない ({e})"));
+                    return;
+                }
+            },
+        }
+        if copy {
+            self.tally.added += 1;
+        } else {
+            self.tally.updated += 1;
+        }
+    }
+
+    /// `~/.claude/<kind>/` のリンクのうち、この手順が張ったもので、今の根に無い (か張らない) ものを外す (先は消さない)。
+    fn prune_links(&mut self, ctx: &mut Ctx, kind: &str) {
+        let dest_dir = self.claude.join(kind);
+        if is_link(&dest_dir) {
+            return;
+        }
+        let Ok(entries) = std::fs::read_dir(&dest_dir) else {
+            return;
+        };
+        let mut names: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        for name in names {
+            let dest = dest_dir.join(&name);
+            let Some(target) = link_target(&dest) else {
+                continue;
+            };
+            let skipped = self.skipped_name(kind, &name);
+            // 今の根にある名前は link_kind が受け持つ (張り替えを二度数えない)
+            if !skipped && name != "README.md" && self.src.root.join(kind).join(&name).exists() {
+                continue;
+            }
+            if !self.is_ours(&target)
+                || (!skipped && is_under(&target, &self.src.root) && target.exists())
+            {
+                continue;
+            }
+            let label = format!("{kind}/{name}");
+            let why = if skipped {
+                "このマシンでは使わない"
+            } else {
+                "clone に無い"
+            };
+            match self.mode {
+                Mode::Check => ctx.say(format!(
+                    "外す (apply で): {label} (-> {}。{why})",
+                    target.display()
+                )),
+                Mode::DryRun { .. } => ctx.say(format!("[dry-run] 外す: {label}")),
+                Mode::Apply { .. } => {
+                    if let Err(e) = remove_link(&dest) {
+                        self.fail(ctx, format!("{label} のリンクを外せない ({e})"));
+                        continue;
+                    }
+                    ctx.say(format!("外しました: {label} (先は残す)"));
+                }
+            }
+            self.tally.removed += 1;
+        }
+    }
+
+    /// 記録にあるコピーのうち、根からコピー元が消えたものを消す (中身を変えていれば残して知らせる)。
+    fn prune_copies(&mut self, ctx: &mut Ctx) {
+        for key in self.records.keys() {
+            let dest = PathBuf::from(&key);
+            let Some((kind, name)) = self.split_dest(&dest) else {
+                continue;
+            };
+            if self.linked_kinds.contains(&kind.as_str())
+                || self.src.root.join(&kind).join(&name).is_file()
+            {
+                continue;
+            }
+            let label = format!("{kind}/{name}");
+            if !dest.exists() || is_link(&dest) {
+                if self.mode.writes() {
+                    self.records.remove(&key);
+                }
+                continue;
+            }
+            let recorded = self.records.get(&key).map(str::to_string);
+            match fsutil::sha256_file(&dest) {
+                Ok(have) if recorded.as_deref() == Some(have.as_str()) => {
+                    match self.mode {
+                        Mode::Check => {
+                            ctx.say(format!("消す (apply で): {label} (clone から消えた)"))
+                        }
+                        Mode::DryRun { .. } => ctx.say(format!("[dry-run] 消す: {label}")),
+                        Mode::Apply { .. } => {
+                            if let Err(e) = std::fs::remove_file(&dest) {
+                                self.fail(ctx, format!("{label} を消せない ({e})"));
+                                continue;
+                            }
+                            self.records.remove(&key);
+                            ctx.say(format!("消しました: {label} (clone から消えた)"));
+                        }
+                    }
+                    self.tally.removed += 1;
+                }
+                Ok(_) => {
+                    self.skip(
+                        ctx,
+                        format!(
+                            "{label} (clone から消えたが、Windows 側で変わっているので消さない。要らなければ手で消す)"
+                        ),
+                    );
+                    if self.mode.writes() {
+                        self.records.remove(&key);
+                    }
+                }
+                Err(e) => self.fail(ctx, format!("{label} が読めない ({e})")),
+            }
+        }
+    }
+
+    /// 記録の鍵 (`~/.claude/<kind>/<name>`) を種類と名前に分ける。`~/.claude` の下の、この手順の種類のディレクトリでなければ None。
+    fn split_dest(&self, dest: &Path) -> Option<(String, String)> {
+        let name = dest.file_name()?.to_string_lossy().into_owned();
+        let kind_dir = dest.parent()?;
+        let kind = kind_dir.file_name()?.to_string_lossy().into_owned();
+        if !self.src.kinds.contains(&kind.as_str()) || !same_path(kind_dir.parent()?, &self.claude)
+        {
+            return None;
+        }
+        Some((kind, name))
+    }
+
+    /// 記録を書き (apply で変わっていれば)、締めの行を作る。`extra` はほかに直すことの種類 (控えのファイル・hook の口など)。
+    pub fn finish(
+        &mut self,
+        ctx: &mut Ctx,
+        record_path: &Path,
+        extra: Option<Kind>,
+    ) -> Vec<Outcome> {
+        if self.mode.writes()
+            && let Err(e) = self.records.save_if_changed()
+        {
+            let why = format!("コピーの記録を書けない: {} ({e})", record_path.display());
+            self.fail(ctx, why);
+        }
+        let t = &self.tally;
+        let mut summary = format!(
+            "追加 {} / 更新 {} / 削除 {} / 同じ {} / 飛ばした {}",
+            t.added,
+            t.updated,
+            t.removed,
+            t.same,
+            t.skipped.len()
+        );
+        if t.errors > 0 {
+            summary.push_str(&format!(" / エラー {}", t.errors));
+        }
+        if matches!(self.mode, Mode::DryRun { .. }) {
+            summary = format!("[dry-run] {summary}");
+        }
+        ctx.say("");
+        ctx.say(&summary);
+        let kind = if t.errors > 0 || extra == Some(Kind::Failed) {
+            Kind::Failed
+        } else if self.mode.writes() {
+            Kind::Ok
+        } else if t.updated + t.removed > 0 || extra == Some(Kind::Fix) {
+            Kind::Fix
+        } else if t.added > 0 || extra == Some(Kind::Missing) {
+            Kind::Missing
+        } else {
+            Kind::Ok
+        };
+        let mut outcomes = vec![Outcome::new(kind, summary)];
+        if !t.skipped.is_empty() {
+            let mut o = Outcome::new(
+                Kind::Manual,
+                format!(
+                    "飛ばした {} (同じ名前の実体・別のリンク・中身の違うコピー) → ※ の名前を見て直す",
+                    t.skipped.len()
+                ),
+            );
+            for s in &t.skipped {
+                o = o.note(s.clone());
+            }
+            outcomes.push(o);
+        }
+        outcomes
+    }
+}
+
+/// `p` の終わりの要素が `suffix` と同じか (Windows のパスは大文字小文字を区別しない)。
+fn ends_with_ignore_case(p: &Path, suffix: &Path) -> bool {
+    let a: Vec<String> = p
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    let b: Vec<String> = suffix
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+        .collect();
+    a.len() >= b.len() && a[a.len() - b.len()..] == b[..]
+}
