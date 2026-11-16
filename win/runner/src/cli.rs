@@ -281,7 +281,11 @@ fn steps_command(
             let pc = pc_name(sys).ok_or(
                 "PC の名前が分かりません (hostname も COMPUTERNAME も読めない。--host-file で渡す)",
             )?;
-            host::default_path(&repo, &user, &pc)
+            let user_profile = sys
+                .env("USERPROFILE")
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from);
+            host::default_path(&repo, user_profile.as_deref(), &user, &pc)
         }
     };
     let host = host::load(&host_path, groups)?;
@@ -600,6 +604,35 @@ mod tests {
             let (code, _, err) = w.run(&["manifest"]);
             assert_eq!(code, 1);
             assert!(err.contains("知らないキーがあります"));
+        }
+
+        /// 一時の場所の clone から流しても、ホストの値を bootstrap の置き場 (%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private) で見つける
+        #[test]
+        fn host_file_falls_back_to_bootstrap_place() {
+            let w = World::new(None);
+            w.t.write(
+                "home/ghq/github.com/pollenjp/dotfiles-private/win/hosts/polle@pjp-raiden.toml",
+                "group = \"company\"\n",
+            );
+            let (code, out, _) = w.run(&["list"]);
+            assert_eq!(code, 0, "{out}");
+            let want =
+                w.t.path()
+                    .join("home")
+                    .join("ghq")
+                    .join("github.com")
+                    .join("pollenjp")
+                    .join("dotfiles-private")
+                    .join("win")
+                    .join("hosts")
+                    .join("polle@pjp-raiden.toml");
+            assert!(
+                out.contains(&format!(
+                    "ホストの値: {} (グループ company)",
+                    want.display()
+                )),
+                "{out}"
+            );
         }
 
         #[test]

@@ -209,6 +209,8 @@ enable = false                # 受け持ちの印。true で apply を許す
 
 - 書けるのは `group`・`[tools]`・`[runner] enable` だけ。道具の名前は `group.json` の `tools` と同じ (runner が使うのは `windowsClaudeCode`・
   `windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`)。知らないキー・名前は runner が止める (終了コード 2)
+- dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
+  を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
 - `runner/groups.json` は生成物 (グループごとの道具の既定。Nix がグループごとの素のホストの `group.json` を集める)。`nix/lib/groups.nix` や
   option の既定を変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
@@ -232,7 +234,7 @@ enable = false                # 受け持ちの印。true で apply を許す
 | order | id | すること | on/off | runner |
 | --- | --- | --- | --- | --- |
 | 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る |
-| 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`) | いつも | 有る |
+| 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
 | 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
 | 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
@@ -260,7 +262,7 @@ enable = false                # 受け持ちの印。true で apply を許す
 
 1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
    コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
-   `ctx.sibling("claude-skills")`・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
+   `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
 2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す

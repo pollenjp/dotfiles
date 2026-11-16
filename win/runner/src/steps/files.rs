@@ -68,6 +68,8 @@ impl Step for Files {
                 return vec![Outcome::new(Kind::Failed, "配った記録が壊れている").note(e)];
             }
         };
+        // clone の core.autocrlf が true だと、テキストが CRLF で取り出され、WSL が配った LF と中身が合わずに全部が衝突に見える
+        let crlf = autocrlf_outcome(ctx);
         let force = mode.force();
         let (mut copied, mut updated, mut unchanged, mut conflicts, mut errors) = (0, 0, 0, 0, 0);
         let mut hints = Vec::new();
@@ -230,8 +232,48 @@ impl Step for Files {
                 outcome = outcome.note("受け持ちは WSL の setup (runner.enable が true でない)。WSL が配った中身とこの clone の中身が違うなら、clone を同じ commit にそろえて見直す。衝突を解くのは WSL の側 (bootstrap-windows-files.sh)");
             }
         }
-        vec![outcome]
+        crlf.into_iter().chain(std::iter::once(outcome)).collect()
     }
+}
+
+/// dotfiles の clone の core.autocrlf が true なら、そう出して `manual` の行を返す (bootstrap の clone は false)。git が無い・clone が
+/// git の作業ツリーでない (試すときの一時ディレクトリ)・読めないときは何もしない。
+fn autocrlf_outcome(ctx: &mut Ctx) -> Option<Outcome> {
+    let git = ctx.sys.which("git")?;
+    let git_in_repo = |args: &[&str]| {
+        let mut spec = CommandSpec::new(&git)
+            .arg("-C")
+            .arg(ctx.repo.as_os_str())
+            .timeout(Duration::from_secs(10));
+        for a in args {
+            spec = spec.arg(*a);
+        }
+        ctx.sys.run(&spec, &mut |_| {})
+    };
+    // 作業ツリーの外では、system・global の値を読んでしまう (Git for Windows の system は true)
+    if git_in_repo(&["rev-parse", "--is-inside-work-tree"]).code() != Some(0) {
+        return None;
+    }
+    let r = git_in_repo(&["config", "--get", "core.autocrlf"]);
+    let value = r.output.first().map(|l| l.trim().to_ascii_lowercase());
+    if r.code() != Some(0) || value.as_deref() != Some("true") {
+        return None;
+    }
+    let repo = ps_quote(&ctx.repo.to_string_lossy());
+    ctx.say(format!(
+        "!! dotfiles の clone の core.autocrlf が true です ({})。テキストのファイルが CRLF で取り出され、WSL が配った LF と中身が合わずに衝突になります。",
+        ctx.repo.display()
+    ));
+    Some(
+        Outcome::new(
+            Kind::Manual,
+            "dotfiles の clone の core.autocrlf が true (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる)",
+        )
+        .note("bootstrap の clone は core.autocrlf=false (git clone -c core.autocrlf=false)。core.autocrlf=false で clone し直すのが確か")
+        .note(format!(
+            "この clone を直すなら、変更が無いことを確かめてから: git -C '{repo}' config core.autocrlf false → git -C '{repo}' rm --cached -r -q . → git -C '{repo}' reset --hard"
+        )),
+    )
 }
 
 /// 衝突の diff を `git diff --no-index` で出す (git が無ければ、そう出して進む)。
@@ -383,6 +425,41 @@ mod tests {
         let (o, out) = e.run(APPLY);
         assert_eq!(o[0].text, "コピー 0 / 上書き 0 / 同じ 2 / 衝突 0");
         assert!(!out.contains("読み直させてください"));
+    }
+
+    /// clone の core.autocrlf が true なら、files の行の前に manual の行を出す (作業ツリーでなければ見ない)
+    #[test]
+    fn warns_when_clone_converts_line_endings() {
+        let mut e = Env::new();
+        e.sys = FakeSys::new(|spec| {
+            let args = spec.args_lossy();
+            let answer = |code: i32, line: &str| crate::process::RunResult {
+                exit: crate::process::Exit::Code(code),
+                output: vec![line.to_string()],
+            };
+            // 作業ツリーの中 (rev-parse) で、core.autocrlf が true (config)
+            if args.iter().any(|a| a == "rev-parse" || a == "config") {
+                answer(0, "true")
+            } else {
+                answer(1, "")
+            }
+        })
+        .with_program("git", "/usr/bin/git");
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(o.len(), 2);
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert!(o[0].text.contains("core.autocrlf が true"), "{:?}", o[0]);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("config core.autocrlf false"))
+        );
+        assert!(o[1].text.starts_with("コピー "));
+        assert!(out.contains("!! dotfiles の clone の core.autocrlf が true です"));
+        // 作業ツリーでなければ (rev-parse が落ちる) 見ない
+        let e = Env::new();
+        let (o, _) = e.run(Mode::Check);
+        assert_eq!(o.len(), 1);
     }
 
     #[test]

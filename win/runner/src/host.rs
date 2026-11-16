@@ -134,11 +134,10 @@ impl HostValues {
     }
 }
 
-/// ホストの値の既定の置き場所: dotfiles の clone の隣の dotfiles-private の `win/hosts/<user>@<pc>.toml`。
-pub fn default_path(repo: &Path, user: &str, pc: &str) -> PathBuf {
-    let owner = repo.parent().unwrap_or(repo);
-    owner
-        .join("dotfiles-private")
+/// ホストの値の既定の置き場所: dotfiles-private の clone の `win/hosts/<user>@<pc>.toml`。dotfiles-private は dotfiles の clone の隣、
+/// 無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`) で探す (`context::clone_dir`)。
+pub fn default_path(repo: &Path, user_profile: Option<&Path>, user: &str, pc: &str) -> PathBuf {
+    crate::context::clone_dir(repo, user_profile, "dotfiles-private")
         .join("win")
         .join("hosts")
         .join(format!("{user}@{pc}.toml"))
@@ -344,7 +343,7 @@ mod tests {
     fn default_path_is_next_to_the_clone() {
         let repo = Path::new("/g/github.com/pollenjp/dotfiles");
         assert_eq!(
-            default_path(repo, "polle", "pjp-raiden"),
+            default_path(repo, None, "polle", "pjp-raiden"),
             Path::new("/g/github.com/pollenjp/dotfiles-private")
                 .join("win")
                 .join("hosts")
