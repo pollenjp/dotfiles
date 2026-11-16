@@ -544,6 +544,8 @@
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
+          # setup.sh の手順の並び (bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前) も見るので、scripts/ を丸ごと渡す
+          bootstrap-pjp-test = scriptTest "bootstrap-pjp" ./scripts;
           # setup.sh の手順の並び (bootstrap-claude-skills・bootstrap-herdr-hub の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-dev-tracker-inbox-test = scriptTest "bootstrap-dev-tracker-inbox" ./scripts;
           bootstrap-ssh-config-test = scriptTest "bootstrap-ssh-config" ./scripts/bootstrap-ssh-config.sh;
