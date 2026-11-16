@@ -16,11 +16,16 @@
 # の §6.3・§9)。道具は `pjp <道具> …` (shim) で打ち、shim は clone の rust-toolchain.toml の版で `cargo build` してから道具を起こす
 # (clone を pull すれば、次の呼び出しから新しいコードで動く)。ここでは、その shim を入れ、clone の道具を作っておく。
 #
-#   1. clone を決める (--dir → PJP_SKILLS_DIR → bootstrap-claude-skills.sh が書いた claude-skills-dir)。決まらない・clone に
-#      Rust の道具が無い (crates/pjp-shim が無い。claude-skills の W0-1 より前) なら、何もしない
+#   1. clone を決める (--dir → PJP_SKILLS_DIR → bootstrap-claude-skills.sh が書いた claude-skills-dir。相対パスは今の dir から
+#      読んで絶対パスにする)。決まらない・clone に Rust の道具が無い (crates/pjp-shim が無い。claude-skills の W0-1 より前) なら、
+#      何もしない
 #   2. shim を入れる: ${CARGO_HOME:-~/.cargo}/bin/pjp が無い・起きない・`pjp --version` の版が clone の crates/pjp-shim の
-#      Cargo.toml の版と違うときだけ、`cargo install --locked --path <clone>/crates/pjp-shim` を打つ (shim の Cargo.toml の決まり:
-#      shim の動きを変えたら版を上げる。shim も、版が違えば入れ直すよう 1 行出す)
+#      Cargo.toml の版と違うときだけ、`cargo install --locked --root ${CARGO_HOME:-~/.cargo} --target-dir <使い捨ての dir>
+#      --path <clone>/crates/pjp-shim` を打つ (shim の Cargo.toml の決まり: shim の動きを変えたら版を上げる。shim も、版が違えば
+#      入れ直すよう 1 行出す)。--root は入れ先を確かめる場所に固める (CARGO_INSTALL_ROOT や clone の .cargo/config.toml の
+#      install.root に引きずられない)。使い捨ての target dir は、workspace の target/ に残った古い exe (GC root の無い devShell で
+#      作ったもの) を link し直さずに写すのを避け、いつも今の環境で作り直して link するため。入れた後に shim が起きなければ警告して
+#      止まる
 #   3. 道具を作る: `pjp --build` (clone の `cargo build --release --locked --bins`)。会話の途中で道具を初めて打ったときに、作り直しを
 #      待たせない。clone が変わっていなければ cargo の確かめだけで終わるので、毎回流す
 #
@@ -31,8 +36,9 @@
 # cargo が無い、または Linux でリンカの cc が無い (u24 など) ときは、claude-skills の nix の devShell (path:<clone>/nix。rustup と
 # cc がある) の中で cargo install を打つ (shim が道具を作るときと同じ判断)。devShell の cc で作った exe は devShell の glibc に
 # 結ばれるので、devShell を ~/.local/state/dotfiles/pjp-shim-devshell の profile に残す (nix develop --profile が nix の GC root に
-# 足す)。nix の GC で glibc が消えると shim が起きなくなるため。pjp --build は shim が同じ判断をする (道具の devShell の GC root は
-# clone の target/ の中)。
+# 足す)。nix の GC で glibc が消えると shim が起きなくなるため。入れられたら、その profile の前の世代 (前の glibc の GC root) は
+# nix-env --delete-generations old で消す (入れた shim は今の世代に結ばれている)。pjp --build は shim が同じ判断をする (道具の
+# devShell の GC root は clone の target/ の中)。
 #
 # ## 止まらない
 #
@@ -123,7 +129,8 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-# clone の場所を出す。決まらなければ 1
+# clone の場所を出す (ある dir は絶対パスにする。cargo と nix は clone の中で打つので、相対パスのままだと先が変わる)。
+# 決まらなければ 1
 resolve_dir() {
   local d=""
   if [[ -n ${dir_arg} ]]; then
@@ -134,6 +141,9 @@ resolve_dir() {
     d=$(head -n 1 "${state_file}")
   fi
   [[ -n ${d} ]] || return 1
+  if [[ -d ${d} ]]; then
+    d=$(cd -- "${d}" && pwd -P) || return 1
+  fi
   printf '%s' "${d%/}"
 }
 
@@ -205,7 +215,9 @@ if [[ ! ${want} =~ ^[0-9][0-9A-Za-z.+-]*$ ]]; then
 fi
 note "toolchain ${channel}・shim ${want}"
 
-shim="${CARGO_HOME:-${HOME}/.cargo}/bin/pjp"
+# cargo install の入れ先。--root で渡し、CARGO_INSTALL_ROOT や clone の .cargo/config.toml の install.root に引きずられないようにする
+cargo_root="${CARGO_HOME:-${HOME}/.cargo}"
+shim="${cargo_root}/bin/pjp"
 
 echo "==> shim (pjp)"
 have=$(installed_version) || have=""
@@ -227,8 +239,20 @@ else
   elif [[ $(uname -s) == Linux ]] && ! command -v cc &>/dev/null; then
     in_nix="リンカの cc が見つかりません"
   fi
+  # shim は使い捨ての target dir で毎回作り直して link する。cargo install --path は既定で workspace の target/ を使い、fingerprint が
+  # 新しい target/release/pjp を link し直さずに写すので、前に別の devShell (GC root の無いもの) で作った exe が残っていると、
+  # 起きない shim をまた入れてしまう。作り直せば、shim が結ぶ glibc はいつも今の devShell (下の GC root) のものになる
+  if [[ ${dry_run} == 1 ]]; then
+    target_dir="<使い捨ての target dir>"
+  elif ! target_dir=$(mktemp -d "${TMPDIR:-/tmp}/pjp-shim-target.XXXXXX"); then
+    warn "shim を作る一時の dir を作れません (TMPDIR: ${TMPDIR:-/tmp})。shim を入れず、道具も作りません。"
+    exit 0
+  else
+    trap 'rm -rf -- "${target_dir}"' EXIT
+  fi
+  install_args=(install --locked --root "${cargo_root}" --target-dir "${target_dir}" --path "${clone}/crates/pjp-shim")
   if [[ -z ${in_nix} ]]; then
-    if ! (cd "${clone}" && run env RUSTUP_TOOLCHAIN="${channel}" "${cargo}" install --locked --path "${clone}/crates/pjp-shim"); then
+    if ! (cd "${clone}" && run env RUSTUP_TOOLCHAIN="${channel}" "${cargo}" "${install_args[@]}"); then
       warn "shim の pjp を入れられませんでした (上の cargo のエラー): ${clone}/crates/pjp-shim" \
         "道具も作りません。直してから流し直してください: $0"
       exit 0
@@ -239,17 +263,29 @@ else
     exit 0
   else
     note "${in_nix}。claude-skills の nix の devShell (path:${clone}/nix) の中で入れます"
-    [[ ${dry_run} == 1 ]] || mkdir -p "${state_dir}"
+    if [[ ${dry_run} == 0 ]] && ! mkdir -p "${state_dir}"; then
+      warn "devShell の profile を置く dir を作れません: ${state_dir}" "shim を入れず、道具も作りません。"
+      exit 0
+    fi
     if ! (cd "${clone}" && run nix develop --profile "${devshell_profile}" "path:${clone}/nix" --command \
-      env RUSTUP_TOOLCHAIN="${channel}" cargo install --locked --path "${clone}/crates/pjp-shim"); then
+      env RUSTUP_TOOLCHAIN="${channel}" cargo "${install_args[@]}"); then
       warn "shim の pjp を nix の devShell で入れられませんでした (上の nix・cargo のエラー): ${clone}/crates/pjp-shim" \
         "道具も作りません。直してから流し直してください: $0"
       exit 0
     fi
+    # 入れた shim は今の世代の devShell に結ばれている。前の世代 (前の glibc の GC root) は要らないので消す (消せなくても止めない)
+    if [[ ${dry_run} == 0 ]] && command -v nix-env &>/dev/null; then
+      nix-env --profile "${devshell_profile}" --delete-generations old &>/dev/null || true
+    fi
   fi
-  if [[ ${dry_run} == 0 ]] && have=$(installed_version) && [[ ${have} != "${want}" ]]; then
-    warn "入れた shim の版 (${have}) が clone の版 (${want}) と違います: ${shim}" \
-      "PATH の先に別の pjp が無いか、cargo の入れ先 (CARGO_HOME) を確かめてください。"
+  if [[ ${dry_run} == 0 ]]; then
+    if ! have=$(installed_version); then
+      warn "入れたはずの shim が見つからないか、起きません: ${shim}" \
+        "cargo の入れ先 (--root ${cargo_root}) を確かめてください。道具は作りません。"
+      exit 0
+    elif [[ ${have} != "${want}" ]]; then
+      warn "入れた shim の版 (${have}) が clone の版 (${want}) と違います: ${shim}"
+    fi
   fi
 fi
 

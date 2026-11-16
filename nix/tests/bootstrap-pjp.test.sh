@@ -14,23 +14,28 @@
 #   - clone が決まらない (claude-skills-dir も PJP_SKILLS_DIR も無い) か、clone に crates/pjp-shim が無い (claude-skills の W0-1
 #     より前) なら、cargo も nix も打たずに「飛ばします」と出して 0 で終わる (警告しない)
 #   - shim が無ければ、clone の中で、clone の rust-toolchain.toml の channel を RUSTUP_TOOLCHAIN にして
-#     cargo install --locked --path <clone>/crates/pjp-shim を打ち、その後で PJP_SKILLS_DIR=<clone> の pjp --build を打つ
-#     (警告しない)。cargo は $CARGO_HOME/bin の cargo を PATH の cargo より先に使う。clone は、claude-skills-dir より
-#     PJP_SKILLS_DIR を、それより --dir を先に見る
+#     cargo install --locked --root <CARGO_HOME> --target-dir <使い捨ての dir> --path <clone>/crates/pjp-shim を打ち、その後で
+#     PJP_SKILLS_DIR=<clone> の pjp --build を打つ (警告しない)。使い捨ての dir は cargo install の間はあり、終わったら消えている。
+#     cargo は $CARGO_HOME/bin の cargo を PATH の cargo より先に使う。clone は、claude-skills-dir より PJP_SKILLS_DIR を、それより
+#     --dir を先に見て、相対パスは今の dir から読む (cargo と nix は clone の中で打つ)
 #   - 入れてある shim の版 (pjp --version) が clone の crates/pjp-shim の版と同じなら入れ直さず「のまま」と出し、pjp --build は打つ。
 #     版が違う・shim が起きない (終了コードが 0 でない) なら入れ直す
 #   - cargo はあるが Linux でリンカの cc が無いとき、cargo が無いときは、nix develop --profile ~/.local/state/dotfiles/pjp-shim-devshell
-#     path:<clone>/nix --command env RUSTUP_TOOLCHAIN=<channel> cargo install … を clone の中で打つ (devShell を GC root に残す)
-#   - cargo も nix も無いとき、cargo install・nix・pjp --build が落ちたとき、rust-toolchain.toml の channel か crates/pjp-shim の
-#     version を読めないときは、警告して (setup の最後のまとめにも残し) 0 で終わる。落ちた後の手順 (pjp --build) は打たない
+#     path:<clone>/nix --command env RUSTUP_TOOLCHAIN=<channel> cargo install … を clone の中で打ち (devShell を GC root に残す)、
+#     入れられたら nix-env --profile <その profile> --delete-generations old で前の世代を消す
+#   - cargo も nix も無いとき、cargo install・nix・pjp --build が落ちたとき、cargo install が通っても shim が入っていないとき、
+#     rust-toolchain.toml の channel か crates/pjp-shim の version を読めないときは、警告して (setup の最後のまとめにも残し) 0 で終わる。
+#     落ちた後の手順 (pjp --build) は打たない
 #   - --dry-run では、cargo・nix・pjp を打たずに、打つコマンドを「+ 」の行で出す
 #   - setup の手順の並び (setup.sh --list) で、bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前に来る
 #
-# 偽の cargo は「cwd|RUSTUP_TOOLCHAIN|引数」を、偽の nix は「nix|引数」を、偽の pjp は「pjp|PJP_SKILLS_DIR|引数」を $HOME/calls に
-# 1 行ずつ残す。偽の cargo の install は ${CARGO_HOME:-~/.cargo}/bin/pjp に偽の pjp (FAKE_SHIM_VERSION の版。既定 0.1.0) を書き、
-# FAKE_CARGO_FAIL=install なら落ちる。偽の nix は --profile の先に profile の link を作ってから、--command の後ろを打つ
-# (FAKE_NIX_FAIL=1 なら落ちる)。偽の pjp の --build は FAKE_BUILD_RC で終わる。サンドボックスの stdenv の cc を拾わないよう、
-# PATH は使うコマンドだけを並べた dir (farm) と偽物の dir で作る。偽物の shebang は $BASH から作る。
+# 偽の cargo は「cwd|RUSTUP_TOOLCHAIN|引数」を、偽の nix は「nix|引数」を、偽の nix-env は「nix-env|引数」を、偽の pjp は
+# 「pjp|PJP_SKILLS_DIR|引数」を $HOME/calls に 1 行ずつ残す (--target-dir の値は使い捨ての dir で毎回変わるので TMP と書き、
+# 値は $HOME/target-dirs に、その dir があったかを $HOME/target-dir-seen に残す)。偽の cargo の install は --root の下の
+# bin/pjp に偽の pjp (FAKE_SHIM_VERSION の版。既定 0.1.0) を書き、FAKE_CARGO_FAIL=install なら落ち、FAKE_CARGO_NOINSTALL=1 なら
+# 何も書かずに 0 で終わる。偽の nix は --profile の先に profile の link を作ってから、devShell と同じく偽の cargo を PATH に足して
+# --command の後ろを打つ (FAKE_NIX_FAIL=1 なら落ちる)。偽の pjp の --build は FAKE_BUILD_RC で終わる。サンドボックスの stdenv の cc を
+# 拾わないよう、PATH は使うコマンドだけを並べた dir (farm) と偽物の dir で作る。偽物の shebang は $BASH から作る。
 
 set -u -o pipefail
 
@@ -42,6 +47,8 @@ scripts=${1:-${here}/../scripts}
 script=${scripts}/bootstrap-pjp.sh
 work=$(mktemp -d "${TMPDIR:-/tmp}/bootstrap-pjp-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
+# script は clone を pwd -P で絶対パスにするので、比べるパスも symlink をたどった形にしておく (macOS の /tmp など)
+work=$(cd -- "${work}" && pwd -P)
 
 pass=0
 fail=0
@@ -60,7 +67,7 @@ ng() {
 # script と偽物が使うコマンドだけを並べた dir (cc は置かない)
 farm="${work}/farm"
 mkdir -p "${farm}"
-for c in bash env awk head uname mkdir cat chmod ln touch rm sed grep; do
+for c in bash env awk head uname mkdir mktemp cat chmod ln touch rm sed grep; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -93,16 +100,32 @@ EOF
 {
   printf '#!%s\n' "${BASH}"
   cat <<'EOF'
-printf '%s|%s|%s\n' "${PWD}" "${RUSTUP_TOOLCHAIN-}" "$*" >>"${HOME}/calls"
-if [[ ${1-} == install ]]; then
+args=()
+root="${CARGO_HOME:-${HOME}/.cargo}"
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --target-dir)
+      args+=(--target-dir TMP)
+      printf '%s\n' "$2" >>"${HOME}/target-dirs"
+      if [[ -d $2 ]]; then echo yes >>"${HOME}/target-dir-seen"; fi
+      shift 2
+      continue
+      ;;
+    --root) root=$2 ;;
+  esac
+  args+=("$1")
+  shift
+done
+printf '%s|%s|%s\n' "${PWD}" "${RUSTUP_TOOLCHAIN-}" "${args[*]}" >>"${HOME}/calls"
+if [[ ${args[0]-} == install ]]; then
   if [[ ${FAKE_CARGO_FAIL-} == install ]]; then
     echo "error: 偽の cargo の失敗" >&2
     exit 101
   fi
-  bin="${CARGO_HOME:-${HOME}/.cargo}/bin"
-  mkdir -p "${bin}"
-  "${FAKE_SHIM_TEXT}" "${FAKE_SHIM_VERSION:-0.1.0}" >"${bin}/pjp"
-  chmod +x "${bin}/pjp"
+  [[ -z ${FAKE_CARGO_NOINSTALL-} ]] || exit 0
+  mkdir -p "${root}/bin"
+  "${FAKE_SHIM_TEXT}" "${FAKE_SHIM_VERSION:-0.1.0}" >"${root}/bin/pjp"
+  chmod +x "${root}/bin/pjp"
 fi
 exit 0
 EOF
@@ -110,7 +133,18 @@ EOF
 {
   printf '#!%s\n' "${BASH}"
   cat <<'EOF'
-printf 'nix|%s\n' "$*" >>"${HOME}/calls"
+logged=()
+skip=0
+for a in "$@"; do
+  if ((skip)); then
+    logged+=(TMP)
+    skip=0
+    continue
+  fi
+  [[ ${a} != --target-dir ]] || skip=1
+  logged+=("${a}")
+done
+printf 'nix|%s\n' "${logged[*]}" >>"${HOME}/calls"
 [[ -z ${FAKE_NIX_FAIL-} ]] || exit 1
 profile=""
 while [[ $# -gt 0 ]]; do
@@ -134,8 +168,13 @@ fi
 PATH="${FAKE_DEVSHELL_PATH}:${PATH}" exec "$@"
 EOF
 } >"${fakes}/nix"
+{
+  printf '#!%s\n' "${BASH}"
+  # shellcheck disable=SC2016 # 偽物の中で展開する
+  printf 'printf "nix-env|%%s\\n" "$*" >>"${HOME}/calls"\n'
+} >"${fakes}/nix-env"
 printf '#!%s\nexit 0\n' "${BASH}" >"${ccdir}/cc"
-chmod +x "${fakes}/cargo" "${fakes}/nix" "${ccdir}/cc" "${work}/shim-text"
+chmod +x "${fakes}/cargo" "${fakes}/nix" "${fakes}/nix-env" "${ccdir}/cc" "${work}/shim-text"
 
 # 1 ケースぶんの HOME と clone を作る。$1: 名前。clone は <HOME>/clone (crates/pjp-shim の版 0.1.0・channel 1.99.1・nix/flake.nix)。
 # claude-skills-dir には clone の場所を書く
@@ -160,8 +199,9 @@ run() {
     HOME="${h}" PATH="${CASE_PATH-${fakes}:${ccdir}}:${farm}" CARGO_HOME="${h}/cargo-home"
     DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_SHIM_TEXT="${work}/shim-text" FAKE_DEVSHELL_PATH="${fakes}"
     FAKE_CARGO_FAIL="${FAKE_CARGO_FAIL-}" FAKE_NIX_FAIL="${FAKE_NIX_FAIL-}" FAKE_BUILD_RC="${FAKE_BUILD_RC-0}"
-    FAKE_SHIM_VERSION="${FAKE_SHIM_VERSION-0.1.0}"
+    FAKE_SHIM_VERSION="${FAKE_SHIM_VERSION-0.1.0}" FAKE_CARGO_NOINSTALL="${FAKE_CARGO_NOINSTALL-}" TMPDIR="${h}/tmp"
   )
+  mkdir -p "${h}/tmp"
   [[ -z ${PJP_SKILLS_DIR-} ]] || envs+=(PJP_SKILLS_DIR="${PJP_SKILLS_DIR}")
   env -i "${envs[@]}" "${BASH}" "${script}" "$@" >"${h}/out" 2>"${h}/err"
   echo $? >"${h}/rc"
@@ -186,8 +226,15 @@ place_shim() {
   fi
   chmod +x "$1/cargo-home/bin/pjp"
 }
-install_line() { printf '%s|1.99.1|install --locked --path %s\n' "$1/clone" "$1/clone/crates/pjp-shim"; }
-build_line() { printf 'pjp|%s|--build\n' "$1/clone"; }
+# cargo install の引数 (--target-dir の値は偽の cargo が TMP と書く)。$1: HOME、$2: clone (省けば <HOME>/clone)
+install_args() { printf 'install --locked --root %s --target-dir TMP --path %s/crates/pjp-shim' "$1/cargo-home" "${2:-$1/clone}"; }
+install_line() { printf '%s|1.99.1|%s\n' "${2:-$1/clone}" "$(install_args "$@")"; }
+build_line() { printf 'pjp|%s|--build\n' "${2:-$1/clone}"; }
+# 使い捨ての target dir が cargo install の間はあり、終わったら消えている (1 回だけ使った)
+target_dir_cleaned() {
+  [[ $(grep -c '' "$1/target-dirs" 2>/dev/null) == 1 && $(cat "$1/target-dir-seen" 2>/dev/null) == yes ]] \
+    && [[ ! -e $(cat "$1/target-dirs") ]]
+}
 
 echo "== bootstrap-pjp.sh: ${script}"
 
@@ -213,12 +260,17 @@ CASE_PATH="${h}/pathbin:${ccdir}:${fakes}" run "${h}"
 want="$(install_line "${h}")"$'\n'"$(build_line "${h}")"
 if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" ]] && [[ -x ${h}/cargo-home/bin/pjp ]] && no_warning "${h}" \
   && grep -Fq '完了しました' "${h}/out"; then
-  ok "shim が無ければ、clone の中で channel を RUSTUP_TOOLCHAIN にして cargo install を打ち、PJP_SKILLS_DIR=<clone> の pjp --build を打つ"
+  ok "shim が無ければ、clone の中で channel を RUSTUP_TOOLCHAIN にして cargo install (--root と使い捨ての --target-dir) を打ち、PJP_SKILLS_DIR=<clone> の pjp --build を打つ"
 else
   ng "shim が無い" "want=${want}"$'\n'"$(detail "${h}")"
 fi
+if target_dir_cleaned "${h}"; then
+  ok "使い捨ての target dir は cargo install の間はあり、終わったら消えている"
+else
+  ng "使い捨ての target dir" "dirs=$(cat "${h}/target-dirs" 2>/dev/null) seen=$(cat "${h}/target-dir-seen" 2>/dev/null)"
+fi
 # CARGO_HOME の cargo を使ったか (PATH の cargo は ${h}/pathbin。ここでは同じ偽物を指すので、使った場所を out の + 行で見る)
-if grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo install --locked --path ${h}/clone/crates/pjp-shim" "${h}/out"; then
+if grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo install --locked --root ${h}/cargo-home --target-dir " "${h}/out"; then
   ok "cargo は \$CARGO_HOME/bin の cargo を PATH の cargo より先に使う"
 else
   ng "\$CARGO_HOME/bin の cargo を先に使う" "$(detail "${h}")"
@@ -235,10 +287,21 @@ rm -f "${h}/cargo-home/bin/pjp"
 : >"${h}/calls"
 PJP_SKILLS_DIR="${h}/clone-env" run "${h}" --dir "${h}/clone-arg"
 if [[ ${env_ok} == yes ]] && rc0 "${h}" && grep -Fq "pjp|${h}/clone-arg|--build" "${h}/calls" \
-  && grep -Fq "install --locked --path ${h}/clone-arg/crates/pjp-shim" "${h}/calls"; then
+  && grep -Fq "$(install_args "${h}" "${h}/clone-arg")" "${h}/calls"; then
   ok "clone は claude-skills-dir より PJP_SKILLS_DIR を、それより --dir を先に見る"
 else
   ng "clone の決まり方" "env_ok=${env_ok}"$'\n'"$(detail "${h}")"
+fi
+
+# 相対パスの --dir は今の dir から読む (cargo と nix は clone の中で打つので、絶対パスにして渡す)
+h=$(new_home dir-relative)
+place_cargo_in_home "${h}"
+(cd "${h}" && run "${h}" --dir clone)
+want="$(install_line "${h}")"$'\n'"$(build_line "${h}")"
+if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" ]] && no_warning "${h}"; then
+  ok "相対パスの --dir は今の dir から読み、cargo と pjp --build には絶対パスで渡す"
+else
+  ng "相対パスの --dir" "want=${want}"$'\n'"$(detail "${h}")"
 fi
 
 # 3. 同じ版の shim は入れ直さない。違う版・起きない shim は入れ直す
@@ -273,24 +336,33 @@ for kind in no-cc no-cargo; do
       CASE_PATH="${fakes}" run "${h}"
       ;;
     no-cargo)
+      # nix には nix-env も付いてくる
       ln -s "${fakes}/nix" "${h}/pathbin/nix"
+      ln -s "${fakes}/nix-env" "${h}/pathbin/nix-env"
       CASE_PATH="${h}/pathbin:${ccdir}" run "${h}"
       ;;
   esac
   profile="${h}/.local/state/dotfiles/pjp-shim-devshell"
-  want="nix|develop --profile ${profile} path:${h}/clone/nix --command env RUSTUP_TOOLCHAIN=1.99.1 cargo install --locked --path ${h}/clone/crates/pjp-shim"
-  if rc0 "${h}" && [[ $(sed -n 1p "${h}/calls") == "${want}" ]] && [[ -L ${profile} ]] \
-    && [[ $(sed -n 3p "${h}/calls") == "$(build_line "${h}")" ]] && no_warning "${h}"; then
-    ok "${kind}: nix develop --profile <state>/pjp-shim-devshell path:<clone>/nix の中で cargo install を打ち、pjp --build を打つ"
+  want="nix|develop --profile ${profile} path:${h}/clone/nix --command env RUSTUP_TOOLCHAIN=1.99.1 cargo $(install_args "${h}")"
+  want+=$'\n'"$(install_line "${h}")"
+  want+=$'\n'"nix-env|--profile ${profile} --delete-generations old"
+  want+=$'\n'"$(build_line "${h}")"
+  if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" ]] && [[ -L ${profile} ]] && target_dir_cleaned "${h}" \
+    && no_warning "${h}"; then
+    ok "${kind}: nix develop --profile <state>/pjp-shim-devshell path:<clone>/nix の中で、clone の中で channel を付けて cargo install を打ち、profile の前の世代を消してから pjp --build を打つ"
   else
     ng "${kind}: devShell" "want=${want}"$'\n'"$(detail "${h}")"
   fi
 done
-# no-cargo の 2 行目 (devShell の中の cargo) が clone の中で channel を付けて打たれたか
-if [[ $(sed -n 2p "${h}/calls") == "${h}/clone|1.99.1|install --locked --path ${h}/clone/crates/pjp-shim" ]]; then
-  ok "devShell の中の cargo install も、clone の中で channel を RUSTUP_TOOLCHAIN にして打つ"
+
+# cargo install が通っても shim が入っていなければ (入れ先が違うなど)、警告して pjp --build を打たない
+h=$(new_home not-installed)
+place_cargo_in_home "${h}"
+FAKE_CARGO_NOINSTALL=1 run "${h}"
+if rc0 "${h}" && [[ $(cat "${h}/calls") == "$(install_line "${h}")" ]] && warned "${h}" '見つからないか、起きません'; then
+  ok "cargo install が通っても shim が入っていなければ、警告して 0 で終わる (pjp --build は打たない)"
 else
-  ng "devShell の中の cargo install" "$(detail "${h}")"
+  ng "cargo install の後に shim が無い" "$(detail "${h}")"
 fi
 
 # 5. 落ちたとき
@@ -346,7 +418,7 @@ h=$(new_home dry-run)
 place_cargo_in_home "${h}"
 run "${h}" --dry-run
 if rc0 "${h}" && [[ ! -s ${h}/calls ]] && [[ ! -e ${h}/cargo-home/bin/pjp ]] \
-  && grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo install --locked --path ${h}/clone/crates/pjp-shim" "${h}/out" \
+  && grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo install --locked --root ${h}/cargo-home --target-dir <使い捨ての target dir> --path ${h}/clone/crates/pjp-shim" "${h}/out" \
   && grep -Fq "+ env PJP_SKILLS_DIR=${h}/clone ${h}/cargo-home/bin/pjp --build" "${h}/out" && no_warning "${h}"; then
   ok "--dry-run では何も打たず、打つコマンドを「+ 」の行で出す"
 else
