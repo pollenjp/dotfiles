@@ -1060,8 +1060,8 @@
         #   nix run ./nix#pjp-wsl-xdg-open -- <URL かファイルのパス>
         #
         # WSL の op (1Password CLI の wrapper。自作の OSS の op-reason の Release を版と SHA-256 で固定したもの) と op-reason-log も
-        # WSL のマシンでしか使わない。home には home/modules/op-reason.nix が、Windows の op-reason.exe の場所と言語の既定を足して
-        # 包んで入れる。単体で試すなら (承認の画面は出ない):
+        # WSL のマシンでしか使わない。home には home/modules/op-reason.nix が、Windows の op-reason.exe の場所の既定を足して
+        # 包んで入れる (表示の言語は決めない)。単体で試すなら (承認の画面は出ない):
         #
         #   nix run ./nix#op-reason -- --version
         #   nix run ./nix#op-reason -- --skill
