@@ -8,7 +8,8 @@ PowerShell では dotfiles.ps1 の Install-OpenSSH から呼ぶ (win/README.md �
 
 MSI の更新は ssh-agent サービスを「自動・実行中」で作り直し、1Password の SSH agent と
 \\.\pipe\openssh-ssh-agent を取り合う (Win32-OpenSSH の issue #2057)。揃えた後に
-ssh-agent を停止・無効へ戻し、winget pin で winget upgrade --all から外す。
+ssh-agent を停止・無効へ戻し、winget pin で winget upgrade --all から外す。固定した版へ上げる
+winget upgrade には --include-pinned を付けて、その pin を越える (付けないと pin に止められる)。
 
 管理者が要るのは winget と ssh-agent を直す段だけで、そのときだけ UAC で自分を
 起動し直す。-Check は何も変えない。
@@ -74,7 +75,10 @@ function Test-WingetPinned {
 }
 
 # plan ごとに打つ winget の引数 (配列の配列)。下げるときは、新しい版が入っていると
-# MSI が止める (LaunchCondition) ので、先に外してから入れる
+# MSI が止める (LaunchCondition) ので、先に外してから入れる。
+# 上げる upgrade には --include-pinned を付ける。版を名指しした upgrade は、付けないとこの script が足した pin (Pinning) に
+# 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は --include-pinned を
+# 受け付けないので付けない (下げるときの install は、uninstall で入っていない形にしてからなので pin を見ない)
 function Get-WingetCommands {
     param([string]$Plan, [string]$PackageId, [string]$Version)
     $common = @('--id', $PackageId, '--exact', '--source', 'winget', '--silent',
@@ -83,12 +87,21 @@ function Get-WingetCommands {
     $put = $common + @('--version', $Version, '--custom', 'ADDLOCAL=Client', '--accept-package-agreements')
     switch ($Plan) {
         'install' { , (@('install') + $put) }
-        'upgrade' { , (@('upgrade') + $put) }
+        'upgrade' { , (@('upgrade') + $put + @('--include-pinned')) }
         'downgrade' {
             , (@('uninstall') + $common)
             , (@('install') + $put)
         }
     }
+}
+
+# winget が pin に止められて落ちた (0x8A150068 = APPINSTALLER_CLI_ERROR_PACKAGE_IS_PINNED) ときに添える行。ほかの終了コードなら
+# 何も返さない。この script が足す pin (Pinning) は upgrade の --include-pinned で越えるので、出るのは pin を Blocking・Gating に
+# 替えたときか、入っていると winget が見ているのに install を打ったとき (install は --include-pinned を受け付けない)
+function Get-WingetPinnedHint {
+    param([int]$ExitCode, [string]$PackageId)
+    if ($ExitCode -ne -1978335128) { return }
+    "※ winget の pin に止められた。winget pin list --id $PackageId --exact で pin を確かめ、winget pin remove --id $PackageId --exact で外してから打ち直す (打ち直すと、揃えた後に pin を足し直す)"
 }
 
 # ssh-agent が停止・無効か。サービスが無ければ 1Password とぶつからないので問題なし
@@ -241,6 +254,7 @@ function Invoke-OpenSshFix {
         $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Step "  $_" }
         if ($result.ExitCode -ne 0) {
             Write-Step ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
+            Get-WingetPinnedHint -ExitCode $result.ExitCode -PackageId $PackageId | ForEach-Object { Write-Step $_ }
             $ok = $false
             break
         }

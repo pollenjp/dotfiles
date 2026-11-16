@@ -23,8 +23,9 @@ docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
      (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡し、origin は WSL と同じ ssh の URL のまま。core.autocrlf=false で、WSL が配った
      ものとバイト列をそろえる。~/.gitconfig は書かない
 
-入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち)。あるディレクトリと
-clone には触らない (確かめるだけ。取得もしない)。
+入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち)。※ の上げ方の
+winget upgrade には --include-pinned を付ける (付けないと、bootstrap が足した pin に止められる)。あるディレクトリと clone には触らない
+(確かめるだけ。取得もしない)。
 
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
 x64 でない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
@@ -346,10 +347,11 @@ function Get-BootstrapRows {
         if (-not $p.Installed) {
             New-BootstrapRow $p.Title "入っているが版が読めない (固定した版は $($p.Target))" 'manual' "※ $($p.Title) の版が読めない。winget uninstall --id $($p.PackageId) の後に流し直すと、固定した版で入れ直す"
         } elseif ($p.Installed -cne $p.Target) {
+            # 版を名指しした winget upgrade は、--include-pinned が無いと bootstrap が足した pin (Pinning) に止められる (0x8A150068)。
             # rustup は winget upgrade でも rustup-init が走るので、MSVC の host と toolchain を入れない引数をもう一度渡す
             $extra = ''
             if ($p.Name -eq 'rustup') { $extra = " --custom `"$(Get-RustupInitArgument)`"" }
-            New-BootstrapRow $p.Title "$($p.Installed) (固定した版は $($p.Target))" 'manual' "※ $($p.Title) を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id $($p.PackageId) --exact --version $($p.Target)$extra、下げるなら winget uninstall --id $($p.PackageId) の後に流し直す"
+            New-BootstrapRow $p.Title "$($p.Installed) (固定した版は $($p.Target))" 'manual' "※ $($p.Title) を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id $($p.PackageId) --exact --version $($p.Target) --include-pinned$extra、下げるなら winget uninstall --id $($p.PackageId) の後に流し直す"
         } else {
             New-BootstrapRow $p.Title "$($p.Installed)$hostText" '' ''
         }

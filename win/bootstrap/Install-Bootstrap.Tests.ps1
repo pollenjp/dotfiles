@@ -309,11 +309,22 @@ Test-Case 'Git の行は版を出す' '  Git for Windows : 2.56.0.4' { @(Get-Lin
 Test-Case 'rustup の行は版と既定の host を出す' '  rustup : 1.29.3 (既定の host は x86_64-pc-windows-msvc)' { @(Get-Lines (New-State) | Where-Object { $_ -like '*rustup :*' })[0] }
 Test-Case '既定の host が読めなければ、rustup の行は読めないと出す (空のまま出さない)' '  rustup : 1.29.3 (既定の host が読めない)' { @(Get-Lines (New-State -Rustup @{ DefaultHost = $null }) | Where-Object { $_ -like '*rustup :*' })[0] }
 Test-Case '入っていなければ固定した版を入れると出す' '⚠ GitHub CLI : 入っていない → 2.103.3 を入れる' { @(Get-Lines (New-State -Gh $fresh) | Where-Object { $_ -like '*GitHub CLI :*' })[0] }
-Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for Windows : 2.55.0.5 (固定した版は 2.56.0.4)|※ Git for Windows を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Git.Git --exact --version 2.56.0.4、下げるなら winget uninstall --id Git.Git の後に流し直す' {
+Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for Windows : 2.55.0.5 (固定した版は 2.56.0.4)|※ Git for Windows を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Git.Git --exact --version 2.56.0.4 --include-pinned、下げるなら winget uninstall --id Git.Git の後に流し直す' {
     $l = Get-Lines (New-State -Git @{ Installed = '2.55.0.5' }); "$(@($l | Where-Object { $_ -like '*Git for Windows :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
-Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない引数を添える' '※ rustup を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Rustlang.Rustup --exact --version 1.29.3 --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"、下げるなら winget uninstall --id Rustlang.Rustup の後に流し直す' {
+Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない引数を添える' '※ rustup を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Rustlang.Rustup --exact --version 1.29.3 --include-pinned --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"、下げるなら winget uninstall --id Rustlang.Rustup の後に流し直す' {
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
+}
+# 版を名指しした winget upgrade は、--include-pinned が無いと bootstrap が足した pin (Pinning) に止められる (0x8A150068。
+# 2026-11-16 に pjp-raiden の OpenSSH で起きた形)。4 つの道具のどれの上げ方にも付ける
+Test-Case '4 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
+    $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
+    $notes = @(Get-Lines $s | Where-Object { $_ -like '※*' })
+    @('Git.Git', 'GitHub.cli', 'Microsoft.VisualStudio.2022.BuildTools', 'Rustlang.Rustup') | ForEach-Object {
+        $id = $_
+        $note = @($notes | Where-Object { $_.Contains("winget upgrade --id $id ") })[0]
+        "$id=$("$note".Contains("winget upgrade --id $id --exact --version") -and "$note".Contains('--include-pinned'))"
+    }
 }
 Test-Case '既定の host が GNU なら、rustup set default-host で MSVC に直すと出す' '⚠ rustup の既定の host : x86_64-pc-windows-gnu → x86_64-pc-windows-msvc にする (rustup set default-host x86_64-pc-windows-msvc)' {
     @(Get-Lines (New-State -Rustup @{ DefaultHost = $Gnu }) | Where-Object { $_ -like '*既定の host :*' })[0]

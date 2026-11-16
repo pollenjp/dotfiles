@@ -100,6 +100,13 @@ Test-Case 'change は 2 本 (外してから入れる)' 2 { @(Get-WingetCommands
 Test-Case 'change の 1 本目は uninstall' "uninstall $common" { @(Get-WingetCommands -Plan change -PackageId $Id -Version $V)[0] -join ' ' }
 Test-Case 'change の 2 本目は版を名指しした install' "install $common --version $V --accept-package-agreements" { @(Get-WingetCommands -Plan change -PackageId $Id -Version $V)[1] -join ' ' }
 Test-Case 'none なら打たない' 0 { @(Get-WingetCommands -Plan none -PackageId $Id -Version $V).Count }
+# winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと自分で足した pin に止められる (0x8A150068)。
+# 入れ替えは uninstall → install で、入っていない形にしてから入れるので winget は pin を見ない。install・uninstall は
+# --include-pinned を受け付けない。入れ替えを upgrade に変えるなら、--include-pinned を付けてこの試験も直す
+Test-Case 'どの plan も upgrade を打たず、--include-pinned も付けない' '' {
+    @('install', 'change', 'none') | ForEach-Object { @(Get-WingetCommands -Plan $_ -PackageId $Id -Version $V) } |
+        Where-Object { ($_[0] -eq 'upgrade') -or (@($_) -contains '--include-pinned') } | ForEach-Object { $_ -join ' ' }
+}
 
 # Resolve-HerdrOnPath: PATH を前から見て、最初に見つかった herdr.exe
 $exists = { param($p) $p -in @('C:\B\herdr.exe', 'C:\A\herdr.exe') }

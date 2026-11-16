@@ -123,15 +123,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File $HOME\ghq\github.com\pollenj
 
 固定した版を上げた PR が merge された後、入っている Windows では `-Check` が版のずれを ⚠ で出す (runner の `dotfiles check` も、bootstrap の
 手順の行で同じずれを出す)。揃えるのは Rust の runner の受け持ちだが、今の runner は見せるだけで揃える手順はまだ無いので、それまでは手で
-揃える。pin があっても、名指しの upgrade は通る:
+揃える。bootstrap が足した pin があるので、版を名指しした upgrade には `--include-pinned` を付ける (付けないと pin に止められ、終了コード
+`0x8A150068` で落ちる。[winget の pin](#winget-の-pin)):
 
 ```powershell
-winget upgrade --id Git.Git --exact --version <版>
-winget upgrade --id GitHub.cli --exact --version <版>
-winget upgrade --id Microsoft.VisualStudio.2022.BuildTools --exact --version <版>   # UAC が出る
-winget upgrade --id Rustlang.Rustup --exact --version <版> --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"
+winget upgrade --id Git.Git --exact --version <版> --include-pinned
+winget upgrade --id GitHub.cli --exact --version <版> --include-pinned
+winget upgrade --id Microsoft.VisualStudio.2022.BuildTools --exact --version <版> --include-pinned   # UAC が出る
+winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"
 ```
 
+- pin は付いたまま残る (上げた後に足し直さなくてよい)。bootstrap の `-Check` の ※ の行も、同じコマンドを出す
 - 下げるときは `winget uninstall --id <ID>` の後に bootstrap を流し直す (固定した版で入れ直す)
 - Git・gh は、使っているプロセス (Git Bash・Windows の Claude Code の会話など) を閉じてから
 
@@ -346,6 +348,28 @@ nix/scripts/bootstrap-windows-files.sh --force
 手で設定してあった) ときも衝突になり、「置いた記録が無く」と出る。手で同じ設定をしてあっても、id や
 書式が違えばバイト列は揃わない ([PowerToys](#powertoys) など)。diff を見て、違いがそれだけなら
 `--force` で上書きしてよい。
+
+## winget の pin
+
+winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+入れる 4 つ) は、入れた後に `winget pin add --id <ID> --exact` で pin (種類は Pinning) を足し、`winget upgrade --all` から外す。版を変えるときに
+自分の pin に止められない打ち方は、winget の作り (`microsoft/winget-cli` の `WorkflowBase.cpp`・`PinningData.cpp`) に合わせて決めてある
+([ADR 063](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/063_win_winget_pin_include_pinned_20261116T132001JST/README.md)):
+
+| 打つもの | pin (Pinning) があるとき |
+| --- | --- |
+| 入っているものへの `winget upgrade --id <ID> --exact --version <版>` | 止められる (終了コード `0x8A150068`。版を名指しすると、名指しの upgrade でも pin を見る) |
+| 上に `--include-pinned` を付ける | 通る (Pinning を越える。Blocking の pin と、Gating の pin の範囲の外は越えない) |
+| 入っているものへの `winget install --version <版>` | 止められる (upgrade の道に移る。install は `--include-pinned` を受け付けない) |
+| 入っていないものへの `winget install`・`winget uninstall`・`winget download` | pin を見ない (pin が残っていても) |
+
+- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力)、入れ替える道は uninstall → install (herdr・ntn・Claude Code。
+  入っていない形にしてから入れるので pin を見ない)。どちらも `*.Tests.ps1` が確かめる (upgrade には `--include-pinned` を付け、install・
+  uninstall には付けない)
+- 手で揃えるときも、版を名指しした upgrade に `--include-pinned` を付ける (bootstrap の ※ の行と[版のずれを手で揃える](#版のずれを手で揃える))。
+  pin は付いたまま残る
+- `0x8A150068` で落ちたら (pin を Blocking・Gating に替えた・入っていると winget が見ているのに install を打った)、OpenSSH と Google 日本語入力は
+  pin の確かめ方と外し方を ※ で添える。`winget pin remove --id <ID> --exact` で外して打ち直すと、揃えた後に pin を足し直す
 
 ## winget の新しい版を確かめる
 
@@ -994,12 +1018,13 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 揃えるときにすること:
 
 1. 入っている版 (`ssh.exe` の FileVersion) と固定した版を比べ、`winget upgrade` か `install` に
-   `--version` を付けて揃える。下げるときは MSI が「新しい版が入っている」で止めるので、先に `uninstall` する。
+   `--version` を付けて揃える。upgrade には `--include-pinned` も付け、3 で足した pin を越える (付けないと、版を名指しした upgrade は
+   pin に止められる。[winget の pin](#winget-の-pin))。下げるときは MSI が「新しい版が入っている」で止めるので、先に `uninstall` する。
    どれにも `--custom ADDLOCAL=Client` を付け、sshd は入れない
 2. ssh-agent サービスを停止・無効に戻す。MSI の更新は ssh-agent を「自動・実行中」で作り直し、1Password と
    `\\.\pipe\openssh-ssh-agent` を取り合う ([Win32-OpenSSH#2057](https://github.com/PowerShell/Win32-OpenSSH/issues/2057))。
    ssh-agent はクライアント側の部品でもあるので、`ADDLOCAL=Client` でも入る
-3. `winget pin add` で `winget upgrade --all` から外す (名指しの `winget upgrade --id …` は通る)
+3. `winget pin add` で `winget upgrade --all` から外す (版を名指しした `winget upgrade --id …` も、`--include-pinned` が無ければ止める)
 4. 読み直して、版・ssh-agent・pin と、`ssh-add -l` で 1Password の鍵が見えるかを確かめる
 
 - 入れ替える (上げる・下げる) ときに `ssh.exe` などが動いていると、閉じるよう出して止まる (`-Force` で進む)。
@@ -1068,6 +1093,8 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/openssh/Install-OpenSSH.Tests.ps1
   ```
 
+- winget の引数 (`Get-WingetCommands`) の upgrade には `--include-pinned` を付け、install・uninstall には付けない
+  ([winget の pin](#winget-の-pin)。試験が確かめる)
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
   `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる
@@ -1649,7 +1676,8 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
 - 上げるのは setup からはしない。日本語入力は全部のアプリに読み込まれていて、入れ替えるとアプリや Windows の
   再起動が要ることがあるため。上げる前に、日本語入力を使っているアプリをできるだけ閉じる。上げた後も `-Check` が
   古い版を出すなら、Windows を再起動してからもう一度 `-Check` で確かめる
-- 入れた後と上げた後に `winget pin add` で `winget upgrade --all` から外す (上げるときは先に pin を外し、上げた後に足し直す)
+- 入れた後と上げた後に `winget pin add` で `winget upgrade --all` から外す (上げるときは先に pin を外し、上げた後に足し直す。上げる
+  upgrade には `--include-pinned` も付け、外せなかったときも pin に止められない。[winget の pin](#winget-の-pin))
 - 入っている版の方が新しい (Google 日本語入力が自分で上がった) ときは下げない。`-Check` と setup が ⚠ で知らせ続けるので、
   下の「版を上げる」で repo の版を追いつかせる
 - 入っていなくても、固定した版が winget に無い (`-Version` の書き間違いか、winget から消えた) ときは、setup は入れにいかず
@@ -1719,6 +1747,8 @@ PowerToys の割り当ては、これとは別に、91 が Keyboard Manager と�
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/google-japanese-input/Install-GoogleJapaneseInput.Tests.ps1
   ```
 
+- winget の引数 (`Get-WingetCommands`) の upgrade には `--include-pinned` を付け、install には付けない ([winget の pin](#winget-の-pin)。
+  試験の偽の winget も、付けない upgrade を pin で止める)
 - winget やファイルに触る部分は、実機で `-Check` と本番を打って確かめる
 
 ### pjp-google-ime
