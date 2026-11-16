@@ -1,0 +1,9 @@
+# Windows の Claude Code には張らない dotfiles の skill (runner の claude-files が読む)。1 行 1 名前。「#」から行末と空行は読まない。
+#
+# Windows に無いもの (Nix・home-manager・そのマシンの ~/dotfiles の setup) を前提にする skill を並べる (cloud の
+# nix/scripts/claude-cloud/skip-skills.txt と同じ考え)。前に張ったものは claude-files が外す。claude-skills の skill はここに書かない
+# (claude-skills の手順が受け持つ)。
+
+# そのマシンの ~/dotfiles (setup・switch・ローカル flake・ホストの登録) を扱う
+pjp-dotfiles-register-host
+pjp-dotfiles-local-flake-migrate

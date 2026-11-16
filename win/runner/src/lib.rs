@@ -7,6 +7,7 @@
 pub mod cli;
 pub mod context;
 pub mod fsutil;
+pub mod hooks;
 pub mod host;
 pub mod link;
 pub mod manifest;

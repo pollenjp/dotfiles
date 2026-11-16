@@ -91,6 +91,10 @@
 # pack の割り当てと入口は claude-skills (private) の作業クローンにもあり、Nix からは見えない。
 #
 # macOS の /bin/bash (3.2) でも動くように書く (連想配列・mapfile を使わない。表は jq で組む)。
+#
+# Windows の Claude Code には、同じ選び方と書き方を Rust に写した Windows の runner の claude-skill-overrides
+# (win/runner/src/steps/claude_skill_overrides.rs) が書く。ここを直したら、そちらも同じに直す (win-runner の CI が、同じ skill の並びで
+# この script と突き合わせる)。
 
 set -eu -o pipefail
 shopt -s nullglob

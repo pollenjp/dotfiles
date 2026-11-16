@@ -13,6 +13,7 @@ pub struct FakeSys {
     responder: Responder,
     programs: BTreeMap<String, PathBuf>,
     env: BTreeMap<String, String>,
+    exe: Option<PathBuf>,
     pub calls: RefCell<Vec<CommandSpec>>,
 }
 
@@ -22,8 +23,15 @@ impl FakeSys {
             responder: Box::new(responder),
             programs: BTreeMap::new(),
             env: BTreeMap::new(),
+            exe: None,
             calls: RefCell::new(Vec::new()),
         }
+    }
+
+    /// `current_exe()` が返すパス (渡さなければ None)
+    pub fn with_exe(mut self, path: &Path) -> Self {
+        self.exe = Some(path.to_path_buf());
+        self
     }
 
     /// `which(name)` が返すパス
@@ -63,6 +71,10 @@ impl Sys for FakeSys {
 
     fn env(&self, name: &str) -> Option<String> {
         self.env.get(name).cloned()
+    }
+
+    fn current_exe(&self) -> Option<PathBuf> {
+        self.exe.clone()
     }
 }
 

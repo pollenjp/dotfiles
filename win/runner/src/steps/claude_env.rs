@@ -6,20 +6,21 @@
 //!   振り直す (番号に穴があると git はその手前までしか読まない)
 //! - この手順が持つ名前 (`CLAUDE_CODE_PLUGIN_PREFER_HTTPS`・`GCM_INTERACTIVE`) は外してから足す
 //! - settings.json のほかのキーと順は残す (順を保つ JSON の型 `ojson`)。キーの順を見ずに同じなら書かない。書く前に前の中身を
-//!   `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (10 回分)
+//!   `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (いちばん古いものと、新しい方から 10 回分。settings.json を書く手順のあいだで
+//!   共有する `claude_settings`)
 //!
 //! Windows だけの違い: Git for Windows は system の設定に Git Credential Manager (`credential.helper = manager`) を持ち、env で足す gh の helper
 //! より先に呼ばれる。GCM が窓を出して止まらないよう `GCM_INTERACTIVE=never` も足す (GCM は窓を出さずに抜け、git は次の gh に進む)。空の値で
 //! helper の並びを消す組は足さない (Windows では空の値の env が消えやすく、`GIT_CONFIG_VALUE_<n>` が欠けると git が全部落ちる)。
 //! 経緯は dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*。
 
+use super::claude_settings::backup;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
 use crate::ojson::OValue;
 use crate::process::CommandSpec;
 use crate::report::Kind;
-use std::path::Path;
 use std::time::Duration;
 
 /// Claude のセッションの git に足す設定 (git の `-c <キー>=<値>` の組。並びもこのまま)。Linux の home/modules/claude.nix の gitConfigBase
@@ -41,9 +42,6 @@ pub const VARS: &[(&str, &str)] = &[
     ("CLAUDE_CODE_PLUGIN_PREFER_HTTPS", "1"),
     ("GCM_INTERACTIVE", "never"),
 ];
-
-/// 書く前の settings.json を写す数
-const BACKUPS: usize = 10;
 
 pub struct ClaudeEnv;
 
@@ -212,46 +210,6 @@ fn with_env(settings: &OValue) -> Result<OValue, String> {
     let mut result = settings.clone();
     result.set("env", OValue::Object(out));
     Ok(result)
-}
-
-/// 書く前の settings.json を `<state_dir>\claude-settings\backup\settings-<秒>-<ナノ秒>.json` に写し、新しい方から 10 個だけ残す。
-fn backup(ctx: &mut Ctx, path: &Path) -> std::io::Result<()> {
-    let dir = ctx.state_dir.join("claude-settings").join("backup");
-    std::fs::create_dir_all(&dir)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let mut name = format!(
-        "settings-{:012}-{:09}.json",
-        now.as_secs(),
-        now.subsec_nanos()
-    );
-    // 同じ時刻の写しを上書きしない
-    let mut n = 0;
-    while dir.join(&name).exists() {
-        n += 1;
-        name = format!(
-            "settings-{:012}-{:09}-{n}.json",
-            now.as_secs(),
-            now.subsec_nanos()
-        );
-    }
-    std::fs::copy(path, dir.join(&name))?;
-    let mut olds: Vec<String> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("settings-") && n.ends_with(".json"))
-        .collect();
-    olds.sort();
-    while olds.len() > BACKUPS {
-        let old = olds.remove(0);
-        let _ = std::fs::remove_file(dir.join(old));
-    }
-    ctx.say(format!(
-        "前の中身を写しました: {}",
-        dir.join(&name).display()
-    ));
-    Ok(())
 }
 
 /// 書いても効かないかもしれないわけ (※ で知らせる。env は書く): gh が無い・ログインしていない、git の設定ファイルにほかの credential helper
@@ -486,14 +444,23 @@ mod tests {
         assert_eq!(e.run(Mode::Check).kind, Kind::Ok);
     }
 
+    /// 控えは、いちばん古いもの (初めて書く前の中身) と新しい方から 10 個
     #[test]
-    fn keeps_ten_backups() {
+    fn keeps_the_first_and_ten_backups() {
         let e = Env::new();
         for i in 0..12 {
             e.t.write("home/.claude/settings.json", &format!("{{\"n\": {i}}}\n"));
             assert_eq!(e.run(Mode::Apply { force: false }).kind, Kind::Ok);
         }
-        assert_eq!(e.backups().len(), 10);
+        let backups = e.backups();
+        assert_eq!(backups.len(), 11, "{backups:?}");
+        let first =
+            e.t.path()
+                .join("state")
+                .join("claude-settings")
+                .join("backup")
+                .join(&backups[0]);
+        assert_eq!(std::fs::read_to_string(first).unwrap(), "{\"n\": 0}\n");
     }
 
     #[test]

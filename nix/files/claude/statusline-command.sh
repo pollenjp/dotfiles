@@ -25,6 +25,9 @@
 # 登録は nix/scripts/bootstrap-claude-statusline.sh が行う。フックと同じ切り分け。
 #
 # 途中で失敗しても statusLine が消えるだけで済むよう set -e は付けない。
+#
+# Windows の Claude Code では、同じ 1 行を出す Rust の写し (win/runner/src/hooks/statusline.rs。Git Bash に jq が無いため) が動く。
+# ここを直したら、そちらも同じに直す (win-runner の CI が、同じ入力でこの script と突き合わせる)。
 set -uo pipefail
 
 RESET=$'\033[0m'

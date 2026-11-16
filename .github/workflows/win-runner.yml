@@ -11,7 +11,9 @@ name: win-runner
 # runner は win/ のファイル (manifest.toml とその src・Install-*.ps1・groups.json)・nix/lib/windows-files.nix・WSL の手順の一覧
 # (nix/scripts/bootstrap-windows-*.sh。手順の id を突き合わせる)・hc の skill の頭 (nix/pkgs/herdr-core/claude-skill-head.md。Linux と
 # 共有)・Claude の settings.json の env と claude-notion.json の元 (nix/home/modules/claude.nix・nix/lib/git-via-gh.nix と、突き合わせに使う
-# sandbox のホストの nix/hosts/default.nix。Linux の CI で突き合わせる) を読むので、それらを変えた PR でも流す。
+# sandbox のホストの nix/hosts/default.nix。Linux の CI で突き合わせる)・Windows の Claude Code に配る設定の元 (nix/files/claude/ の CLAUDE.md・
+# skill・footer-links.json と、Rust に写した hook・status line の bash の版。Linux の CI で bash の版と突き合わせる。hook の登録と skillOverrides
+# は nix/scripts/bootstrap-claude-hook.sh・bootstrap-claude-skill-overrides.sh と突き合わせる) を読むので、それらを変えた PR でも流す。
 on:
   push:
     branches: [main]
@@ -23,6 +25,9 @@ on:
       - "nix/hosts/default.nix"
       - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
+      - "nix/files/claude/**"
+      - "nix/scripts/bootstrap-claude-hook.sh"
+      - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - ".github/workflows/win-runner.yml"
   pull_request:
     paths:
@@ -33,6 +38,9 @@ on:
       - "nix/hosts/default.nix"
       - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
+      - "nix/files/claude/**"
+      - "nix/scripts/bootstrap-claude-hook.sh"
+      - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - ".github/workflows/win-runner.yml"
   workflow_dispatch:
 
@@ -81,8 +89,10 @@ jobs:
       - name: clippy
         run: cargo clippy --locked --all-targets -- -D warnings
 
-      # 1 つの test の束が落ちても、残りの束も流す (Windows の落ち方は手元で流せないので、1 回の run で全部を見る)
+      # 1 つの test の束が落ちても、残りの束も流す (Windows の落ち方は手元で流せないので、1 回の run で全部を見る)。Linux では、Rust に写した
+      # Claude Code の hook・status line・skillOverrides を bash の版 (bash と jq。ubuntu の image に入っている) と突き合わせる (飛ばさずに落ちる)
       - name: test
         env:
           DOTFILES_WIN_NIX_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
+          DOTFILES_WIN_BASH_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: cargo test --locked --no-fail-fast

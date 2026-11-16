@@ -6,9 +6,10 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
 同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
-Claude Code で使う W0-2 の手順など) は、受け持ちによらず runner が流す (経緯は
+Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順など) は、受け持ちによらず runner が流す (経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
-dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
+(`docs/adr/065_win_claude_config_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -39,6 +40,8 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
+| `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
+| `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 
 ## bootstrap (新しい Windows で最初に流す)
 
@@ -223,8 +226,10 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub` と、runner にまだ無い
-  `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub`・`devTracker` と、runner に
+  まだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+- `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
+  書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
   (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
 - `[claude.notion]` は `claude-notion` の手順が `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` に書く (Linux の home-manager が書くのと同じ中身)。
@@ -258,9 +263,14 @@ scanData = "https://app.notion.com/p/…"
 | --- | --- | --- | --- | --- |
 | 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る (Windows だけ) |
 | 50 | `claude-env` | Claude Code の `%USERPROFILE%\.claude\settings.json` の `env` に、Claude の git を無署名・GitHub は gh の資格情報 (HTTPS) で通す設定を足す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-files` | dotfiles の `CLAUDE.md` (冒頭を Windows のものに)・skill・agent・command を `%USERPROFILE%\.claude\` へ置き (ディレクトリは junction、ファイルはコピー)、hook の口 (runner の exe の写し `hooks\dotfiles-claude.exe`) を写す ([後述](#claude-code-の設定)) | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` にする | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-hook` | `settings.json` の `hooks` に、hook の口を exec form で登録する | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-notion` | ホストの値の `[claude.notion]` から `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
+| 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
+| 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
@@ -319,6 +329,10 @@ gate が違うと、試験が落ちる
 - `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
 - settings.json の env に足す git の組と claude-notion.json の中身も、Linux の CI が `tests/claude_parity.rs` で、Linux の
   `nix/home/modules/claude.nix` が sandbox のホストに書く claude-env.json・claude-notion.json (`nix eval`) と突き合わせる
+- Rust に写した Claude Code の hook・status line (`src/hooks/`) と skillOverrides (`src/steps/claude_skill_overrides.rs`) は、Linux の CI が同じ入力で
+  bash の版 (`nix/files/claude/hooks/*.sh`・`statusline-command.sh`・`nix/scripts/bootstrap-claude-skill-overrides.sh`) と突き合わせる
+  (`DOTFILES_WIN_BASH_PARITY=1`。手元でも bash と jq があれば流れる)。hook の登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は
+  `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -350,8 +364,56 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 
 - junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
   打たない (先の中身まで消すことがある)
-- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・settings.json の skillOverrides・plugin・hook・`c` の `--no-chrome`・
-  Defender の除外・pjp-spaces・`~/.config/pjp/env`・runner の `self-update`
+- dotfiles の `CLAUDE.md`・skill・hook・status line・skillOverrides は次の節 ([Claude Code の設定](#claude-code-の設定))
+- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外・pjp-spaces・
+  `~/.config/pjp/env`・runner の `self-update`
+
+### Claude Code の設定
+
+Windows の Claude Code (herdr-app のハブ) に、WSL の Claude Code と同じ決まり (dotfiles の `nix/files/claude/` の `CLAUDE.md`・skill と、settings.json の
+hook・status line・skillOverrides・footer のリンク) を配る手順。Linux では `nix/home/modules/claude.nix` (home-manager) がファイルを置き、
+`nix/scripts/bootstrap-claude-{hook,statusline,footer-links,skill-overrides}.sh` が settings.json に書く。Windows では runner の 5 つの手順が同じことをする
+(経緯は dotfiles-private の ADR 065 (`docs/adr/065_win_claude_config_*`))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも
+`dotfiles apply` が流す (ホストの値は要る)。
+
+```powershell
+dotfiles check --steps claude-files,claude-hook,claude-statusline,claude-footer-links,claude-skill-overrides   # 差を見る (何も書かない)
+dotfiles apply --dry-run                                                                                      # することを出す
+dotfiles apply                                                                                                # 揃える
+```
+
+| 手順 | すること | 気をつけること |
+| --- | --- | --- |
+| `claude-files` | `CLAUDE.md` を、`claude-code/CLAUDE.windows.md` (Windows の冒頭) + 空行 + `nix/files/claude/CLAUDE.md` の最初の「## 」の行から後ろ (+ `devTracker` のホストは空行と `CLAUDE.dev-tracker.md`) にして置く (改行は LF)。`nix/files/claude/{skills,agents,commands}/` の中身を 1 つずつ置く (ディレクトリは junction、ファイルはコピー。`claude-code/skip-skills.txt` の skill は張らず、前に張ったものは外す)。runner の exe を `%USERPROFILE%\.claude\hooks\dotfiles-claude.exe` に写す (hook と status line の口) | `CLAUDE.md` とファイルは記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\claude-files.deployed.json`)。Windows 側で変えた・記録の無い違う中身は衝突で飛ばす (dotfiles に取り込むか、`dotfiles apply --steps claude-files --force` で上書き)。exe は dotfiles が持つ生成物で、違えば書き直す。動いている exe は上書きできないので、退けてから置く (退けたものは次に消す) |
+| `claude-hook` | `settings.json` の `hooks` に、hook の口を exec form (`command` に exe の絶対パス、`args` に `claude-hook <名前>`) で登録する。event・matcher・if は Linux の `bootstrap-claude-hook.sh` の同じ hook の行と同じ | shell を通さないので、Git Bash が見つからない会話でも PowerShell が command を読まない (shell form の PreToolUse の hook は、Git Bash が無いと失敗が tool を止めうる)。この手順の口 (`dotfiles-claude.exe`) の登録で今は入れない組は外す。ほかの hook (ハブの `pjp hub guard` などのプロジェクトの hook は別のファイル) とキーの順は残す |
+| `claude-statusline` | `settings.json` の `statusLine` を `~/.claude/hooks/dotfiles-claude.exe claude-statusline` にする (別の値は置き換える) | status line は Git Bash (無ければ PowerShell) が読む shell の文なので、Claude Code の docs のとおり `~` と `/` で書く |
+| `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` で丸ごと置き換える (cc-page の規則の port は cc-pages の既定の 7777) | 手で足した項目も消える (Linux と同じ。足すなら repo の `footer-links.json`) |
+| `claude-skill-overrides` | `settings.json` の `skillOverrides` に、`pjp-dev-tracker` (ホストの値の `devTracker` で on / off)・pack の skill (入口 `pjp-pack-<pack>` があれば `name-only`)・claude.ai から同期された skill (`anthropic-skills:<名前>` を `user-invocable-only`) を書く。選び方は Linux の `bootstrap-claude-skill-overrides.sh` と同じ | 書いた key は `%LOCALAPPDATA%\dotfiles\state\claude-skill-overrides.applied.json` に控え、書かなくなったら戻す。手で別の値を書いた key には触らない。order は 60 (claude-files と claude-skills が skill をつないだ後) |
+
+- settings.json を書く手順 (`claude-env` も) は、どれも自分の持つキーだけを直し、ほかのキーと順を残す。キーの順を見ずに同じなら書かない。書く前の中身を
+  `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (手順をまたいで、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と新しい方から 10 個)
+- 効くのは新しい Claude Code の会話から (hook・status line・skillOverrides。footer のリンクは実行中の会話にも次の turn から)。確かめるのは Claude Code の
+  `/hooks`・`/skills` と、status line の表示
+- `dotfiles-claude.exe` は runner の exe の写しで、`claude-hook`・`claude-statusline` だけを受ける (ほかのコマンドは何もせずに知らせる。古い写しで runner
+  を流さない。登録の `args` が欠けて引数なしで呼ばれても tool を止めないよう、終了コードは 0)。runner を作り直したら (clone を pull したら) `dotfiles apply`
+  で写し直す
+
+Windows に入れる hook と status line (Linux の `nix/files/claude/hooks/` の 12 個の hook と `statusline-command.sh`)。Windows の Git Bash には jq が無く
+(Git for Windows が同梱しない)、bash の hook は黙って何もしないので、入れるものは Rust に写した (`runner/src/hooks/`。ふるまいと文は bash の版と同じで、
+Linux の CI が同じ入力で突き合わせる):
+
+| hook | Windows | わけ |
+| --- | --- | --- |
+| `docs-guard.sh` | Rust に写して入れる | 小さい。Windows のパス (`C:\…`) も読み、`docs` の大文字小文字を区別しない (bash の版は `/` で始まらないパスを相対パスと読み、Windows では止めない) |
+| `run-through-nudge.sh` | Rust に写して入れる | 小さい (文を返すだけ) |
+| `pr-assignee-nudge.sh` | Rust に写して入れる | 小さい (コマンドの読み方の jq の式 1 つ)。Windows の会話で PR を作ったときに効く |
+| `statusline-command.sh` | Rust に写して入れる | 毎回の表示に要る。cc-pages の 📄top は cc-pages が PATH にあるときだけ (今の Windows には無い) |
+| `xref-guard.sh`・`gist-guard.sh`・`install-iac-guard.sh` | まだ (後の PR で Rust に写す) | どれも awk の lexer を含む 1500 行ほどで、この PR では写していない。Windows の会話で public な repo へ push・PR を出す、gist に上げる、system へ install すると、Linux の hook の網が無い (知っている穴)。Windows のハブは repo の作業を Linux の子に任せ (子の側の hook が効く)、ふだんはこれらを打たない |
+| `video-offer-nudge.sh`・`lang-nudge.sh` | まだ (後の PR) | Windows のハブは spec・ADR・PR・project を自分では作らない (Linux の子が作る)。解説動画は CLAUDE.md の節が聞かせる |
+| `nix-managed-guard.sh` | 入れない | `/nix/store` が無い。runner が置くのはコピー (変えると次の apply が衝突で知らせる) と clone への junction で、直し方は `CLAUDE.md` の冒頭に書いた |
+| `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
+| `footer-links-archive.sh` | 入れない | cc-pages が Windows に無い (claude-skills の spec も Windows の cc-pages は扱わない) |
+| `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない。承認の画面は、ユーザーが見ている Windows の画面に出る |
 
 ## 配る
 

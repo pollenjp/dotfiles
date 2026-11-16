@@ -5,11 +5,18 @@
 
 pub mod bootstrap;
 pub mod claude_env;
+pub mod claude_files;
+pub mod claude_footer_links;
+pub mod claude_hook;
 pub mod claude_notion;
+pub mod claude_settings;
+pub mod claude_skill_overrides;
 pub mod claude_skills;
+pub mod claude_statusline;
 pub mod files;
 pub mod generated;
 pub mod hc_hub;
+pub mod linker;
 pub mod pending;
 pub mod pjp;
 pub mod ps1;
@@ -150,6 +157,12 @@ pub fn all() -> Vec<Box<dyn Step>> {
         Box::new(claude_skills::ClaudeSkills),
         Box::new(pjp::Pjp),
         Box::new(hc_hub::HcHub),
+        // Windows の Claude Code に dotfiles の設定を配る (Windows にしか無い手順。dotfiles-private の docs/adr/065_win_claude_config_*)
+        Box::new(claude_files::ClaudeFiles),
+        Box::new(claude_hook::ClaudeHook),
+        Box::new(claude_statusline::ClaudeStatusline),
+        Box::new(claude_footer_links::ClaudeFooterLinks),
+        Box::new(claude_skill_overrides::ClaudeSkillOverrides),
         Box::new(files::Files),
     ];
     for spec in tool_skill::SPECS {
@@ -191,9 +204,14 @@ mod tests {
             vec![
                 (5, "bootstrap"),
                 (50, "claude-env"),
+                (50, "claude-files"),
+                (50, "claude-footer-links"),
+                (50, "claude-hook"),
                 (50, "claude-notion"),
                 (50, "claude-skills"),
+                (50, "claude-statusline"),
                 (55, "pjp"),
+                (60, "claude-skill-overrides"),
                 (60, "hc-hub"),
                 (90, "files"),
                 (91, "powertoys"),
@@ -247,7 +265,7 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -260,9 +278,14 @@ mod tests {
             vec![
                 "bootstrap",
                 "claude-env",
+                "claude-files",
+                "claude-footer-links",
+                "claude-hook",
                 "claude-notion",
                 "claude-skills",
+                "claude-statusline",
                 "pjp",
+                "claude-skill-overrides",
                 "hc-hub",
                 "hc-skill",
                 "herdr-app-skill",

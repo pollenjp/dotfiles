@@ -3367,6 +3367,11 @@ ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drw
 **追加するときに `.nix` を編集する必要はない**（`README.md` は除外される）。
 書き方は各ディレクトリの `README.md` を参照。
 
+Windows の Claude Code（herdr-app のハブ）には、Windows の runner が同じものを配る（`CLAUDE.md` の冒頭を Windows のものに差し替え、
+Windows に無いものを前提にする skill は張らず、hook と status line は Rust に写したものだけ。
+[`win/README.md`「Claude Code の設定」](../win/README.md#claude-code-の設定)）。ここの hook・status line・`bootstrap-claude-hook.sh`・
+`bootstrap-claude-skill-overrides.sh` を直したら、Rust の写しも同じに直す（win-runner の CI が bash の版と突き合わせる）。
+
 **このリポジトリは public なので、ここに置けるのは公開して差し支えないものだけ。**
 公開できないものは次節の `claude-skills` へ置く。
 

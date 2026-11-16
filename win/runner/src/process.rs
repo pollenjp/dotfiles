@@ -131,6 +131,10 @@ pub trait Sys {
     fn which(&self, name: &str) -> Option<PathBuf>;
     /// 環境変数
     fn env(&self, name: &str) -> Option<String>;
+    /// この runner の exe のパス (claude-files が Claude Code の hook の口として写す)
+    fn current_exe(&self) -> Option<PathBuf> {
+        std::env::current_exe().ok()
+    }
 }
 
 /// 本物の口。
@@ -204,8 +208,9 @@ impl Sys for RealSys {
                 wait = wait.min(d - now);
             }
             if open == 0 {
-                // pipe は両方閉じたが、プロセスがまだ終わっていない。終わるのを待つ (空回りしない)
-                std::thread::sleep(wait);
+                // pipe は両方閉じたが、プロセスがまだ終わっていない。終わるのを待つ (空回りしない。ふつうはすぐ終わるので、細かく見て
+                // 待ちを延ばさない: Claude Code の hook と status line は打つたびに git を数回呼ぶ)
+                std::thread::sleep(wait.min(Duration::from_millis(5)));
             } else {
                 match rx.recv_timeout(wait) {
                     Ok(Some((is_err, line))) => {
