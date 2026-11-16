@@ -5,6 +5,7 @@
 //! 「runner」。
 
 pub mod cli;
+pub mod host;
 pub mod manifest;
 pub mod report;
 

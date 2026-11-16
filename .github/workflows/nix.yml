@@ -235,6 +235,16 @@ jobs:
       - name: win/manifest.toml
         run: ./nix/scripts/bootstrap-windows-files.sh --check
 
+      # win/runner/groups.json (Windows の runner が読む設定グループの写し。生成物) が、nix/lib/groups.nix と option の既定から作ったもの
+      # (flake の lib.windowsGroupsJson) と同じか (dotfiles-private の docs/adr/060_win_runner_core_*)。flake からは win/ が見えないので
+      # checkout の上で比べる。runner の manifest の読み方と Nix の突き合わせは win-runner.yml の Linux の job
+      - name: win/runner/groups.json
+        run: |
+          if ! diff -u win/runner/groups.json <(nix eval --raw ./nix#lib.windowsGroupsJson); then
+            echo "::error::win/runner/groups.json が古い (nix/lib/groups.nix・option の既定が変わった)。dotfiles の root で出し直す: nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json"
+            exit 1
+          fi
+
       # win/google-japanese-input/ のテキストの検証 (ADR 015)。flake からは win/ が見えないので
       # checkout の上で流す。組み立てる道具 (pjp-google-ime) は nix shell で借りる。
       # CI で確かめるのは config.txtpb と keymap.tsv だけ (辞書は private repo にあり、ランナーに無い)。
