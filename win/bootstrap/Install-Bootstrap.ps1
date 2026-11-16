@@ -214,6 +214,20 @@ function Test-WingetPinned {
     $false
 }
 
+# winget install が「取り消された」(UAC で「はい」を押さなかった・installer の窓を閉じた) で落ちたか。winget の「取り消した」
+# (0x8A15010C。MSI の 1602 は winget がこれにする) か、出力のインストーラーの終了コードが 1602 (取り消し)・1223 (UAC を断った) か。
+# exe の installer の終了コードは、winget が 0x8A150006 にして「Installer failed with exit code: 1602」(日本語なら
+# 「インストーラーが終了コードで失敗しました: 1602」) と出す。コロンの直後の数だけを見る (URL の中の数を拾わない)
+function Test-WingetCancelled {
+    param([int]$ExitCode, [string[]]$Lines)
+    if ($ExitCode -eq 0) { return $false }
+    if ($ExitCode -eq -1978334964) { return $true }
+    foreach ($line in $Lines) {
+        if ("$line".Trim() -match '[:：]\s*(1602|1223)$') { return $true }
+    }
+    $false
+}
+
 # 固定した版で入れる winget install の引数。道具ごとの引数 (scope・installer の種類・--custom) を後ろに足す。-Silent $false なら
 # --silent を付けず、winget の既定 (進み具合の小さな窓が出る形。MSI なら /passive) で流す
 function Get-WingetInstallArguments {
@@ -408,7 +422,9 @@ function Format-BootstrapRows {
     }
 }
 
-# 締めの行 (⚠️ で始めて ⚠️ で終える)。直すことが無ければ何も返さない。止める理由があれば、それだけを返す
+# 締めの行 (⚠️ で始めて ⚠️ で終える)。直すことが無ければ何も返さない。止める理由があれば、それだけを返す。
+# 行は種類ごとに分ける (今の Install-*.ps1 の「入っていない → 入れる」と「揃っていない → 揃える」と同じ)。入っていない・無い (missing)
+# だけなら終了コード 3、足りない・ずれている (fix。流せば直る) や bootstrap では直らない差 (manual) があれば 1 なので、その行も並べる
 function Format-BootstrapVerdict {
     param([object[]]$Rows)
     $kinds = @($Rows | Where-Object { $_.Kind } | ForEach-Object { $_.Kind })
@@ -416,7 +432,8 @@ function Format-BootstrapVerdict {
         '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️'
         return
     }
-    if (($kinds -contains 'missing') -or ($kinds -contains 'fix')) { '⚠️ 入っていない・足りないものがある → 引数なしで流すと揃える ⚠️' }
+    if ($kinds -contains 'missing') { '⚠️ 入っていない・無いものがある → 引数なしで流すと揃える ⚠️' }
+    if ($kinds -contains 'fix') { '⚠️ 足りないもの・ずれているものがある → 引数なしで流すと直す ⚠️' }
     if ($kinds -contains 'manual') { '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' }
 }
 
@@ -829,6 +846,9 @@ function Invoke-InstallBootstrap {
         if ($result.ExitCode -ne 0) {
             # 再起動待ち (Build Tools の 3010 など) でも 0 以外で返る。入ったかは読み直して決める
             Write-Host ('winget が 0 以外で終わった (終了コード 0x{0:X8})。入ったかは読み直して確かめる' -f $result.ExitCode)
+            if (Test-WingetCancelled -ExitCode $result.ExitCode -Lines $result.Lines) {
+                Write-Host "$($p.Title) のインストーラーが取り消された (UAC で「はい」を押さなかった・窓を閉じた)。流し直すと、もう一度入れる" -ForegroundColor Yellow
+            }
         }
         Update-ProcessPath
     }

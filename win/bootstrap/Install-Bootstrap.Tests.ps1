@@ -171,6 +171,17 @@ $pins = @(
 Test-Case 'pin の行があれば True' 'True' { Test-WingetPinned -Lines $pins -PackageId 'Git.Git' }
 Test-Case 'ほかのパッケージの pin しか無ければ False' 'False' { Test-WingetPinned -Lines $pins -PackageId 'GitHub.cli' }
 
+# Test-WingetCancelled: winget install が「取り消された」(UAC で「はい」を押さなかった・窓を閉じた) で落ちたか。winget の
+# 「取り消した」(0x8A15010C。MSI の 1602 は winget がこれにする) か、出力のインストーラーの終了コード (「…exit code: 1602」・
+# 「インストーラーが終了コードで失敗しました: 1602」。exe の installer は winget が 0x8A150006 にする) が 1602・1223 か
+Test-Case 'winget の「取り消した」(0x8A15010C) は取り消し' 'True' { Test-WingetCancelled -ExitCode -1978334964 -Lines @() }
+Test-Case 'インストーラーの終了コード 1602 (英語の出力) は取り消し' 'True' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1602') }
+Test-Case 'インストーラーの終了コード 1602 (日本語の出力) も取り消し' 'True' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('ダウンロード中 https://example.invalid/vs_BuildTools.exe', 'インストーラーが終了コードで失敗しました: 1602') }
+Test-Case 'UAC を断ったときの 1223 も取り消し' 'True' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1223') }
+Test-Case 'ほかの終了コード (1603) は取り消しではない' 'False' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1603') }
+Test-Case 'URL の中の 1602 は終了コードと読まない' 'False' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('ダウンロード中 https://download.visualstudio.microsoft.com/download/pr/6bd63d7f-1602-4e03/vs_BuildTools.exe') }
+Test-Case 'winget が 0 で終わったら取り消しではない' 'False' { Test-WingetCancelled -ExitCode 0 -Lines @('Installer failed with exit code: 1602') }
+
 # Get-WingetInstallArguments: 固定した版で入れる winget の引数
 Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ' }
 Test-Case '--silent を付けないとき (winget の既定の、進み具合の窓が出る形)' 'install --id GitHub.cli --exact --source winget --accept-source-agreements --disable-interactivity --version 2.103.3 --accept-package-agreements --installer-type wix' { (Get-WingetInstallArguments -PackageId 'GitHub.cli' -Version '2.103.3' -Silent $false -Extra @('--installer-type', 'wix')) -join ' ' }
@@ -321,7 +332,13 @@ Test-Case 'clone が無ければ置き場を出す' "⚠ dotfiles : 無い → $
 # Format-BootstrapVerdict: 締めの行 (⚠️ で始めて ⚠️ で終える)
 function Get-Verdict { param($State) (@(Format-BootstrapVerdict -Rows @(Get-BootstrapRows -State $State)) | ForEach-Object { "$_" }) -join '|' }
 Test-Case '揃っていれば締めの行は出さない' '' { Get-Verdict (New-State) }
-Test-Case 'まっさらな PC は、引数なしで流すと揃えると出す' '⚠️ 入っていない・足りないものがある → 引数なしで流すと揃える ⚠️' { Get-Verdict (New-FreshState) }
+Test-Case 'まっさらな PC は、引数なしで流すと揃えると出す' '⚠️ 入っていない・無いものがある → 引数なしで流すと揃える ⚠️' { Get-Verdict (New-FreshState) }
+# 足りない・ずれている (fix) は流せば直るが、終了コードは 1 (3 は入っていない・無いものだけ)。3 のときと同じ文にしない
+Test-Case 'pin が無いだけなら、足りないもの・ずれているものを直すと出す' '⚠️ 足りないもの・ずれているものがある → 引数なしで流すと直す ⚠️' { Get-Verdict (New-State -Gh @{ Pinned = $false }) }
+Test-Case '入っていないものと host のずれが混ざれば、2 つの行を出す (終了コードは 1)' '⚠️ 入っていない・無いものがある → 引数なしで流すと揃える ⚠️|⚠️ 足りないもの・ずれているものがある → 引数なしで流すと直す ⚠️|1' {
+    $s = New-State -Vs $fresh -Rustup @{ DefaultHost = $Gnu }
+    "$(Get-Verdict $s)|$(Get-BootstrapExitCode -Rows @(Get-BootstrapRows -State $s))"
+}
 Test-Case '止める理由があれば、何も変えていないことと、直してから流し直すことだけを出す' '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️' { Get-Verdict (New-State @{ Elevated = $true } -Gh @{ Pinned = $false }) }
 Test-Case '版のずれだけなら、※ の手順で直すと出す' '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' { Get-Verdict (New-State -Git @{ Installed = '2.55.0.5' }) }
 
@@ -367,7 +384,9 @@ function Invoke-Winget {
     $script:Calls.Add("$verb $id")
     $code = 0
     if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
-    [pscustomobject]@{ ExitCode = $code; Lines = @() }
+    $lines = @()
+    if ($script:FailLines.ContainsKey("$verb $id")) { $lines = @($script:FailLines["$verb $id"]) }
+    [pscustomobject]@{ ExitCode = $code; Lines = $lines }
 }
 function Invoke-Native {
     param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
@@ -399,11 +418,12 @@ function Get-BootstrapState {
 }
 
 function Invoke-Flow {
-    param([object[]]$States, [switch]$Check, [hashtable]$Fail = @{}, [int]$LoginCode = 0, [bool]$Winget = $true)
+    param([object[]]$States, [switch]$Check, [hashtable]$Fail = @{}, [hashtable]$FailLines = @{}, [int]$LoginCode = 0, [bool]$Winget = $true)
     $script:Calls = [System.Collections.Generic.List[string]]::new()
     $script:States = [System.Collections.Generic.Queue[object]]::new()
     foreach ($s in $States) { $script:States.Enqueue($s) }
     $script:Fail = $Fail
+    $script:FailLines = $FailLines
     $script:LoginCode = $LoginCode
     $script:HaveWinget = $Winget
     # 最初に確かめる SAC は、最初の状態と同じ値にする
@@ -469,6 +489,17 @@ Test-Case 'install が 0 以外でも入っていれば入ったとして進む 
 Test-Case 'install が落ちて入らなければ、pin も clone もせずに 1' '1 [install Git.Git]' {
     $s = New-State -Git $fresh -Dotfiles $freshRepo
     $r = Invoke-Flow -States @($s, $s) -Fail @{ 'install Git.Git' = 1 }; "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'Build Tools のインストーラーが取り消されたら (1602)、取り消されたことと流し直すことを出して 1' '1 [install-with-progress Microsoft.VisualStudio.2022.BuildTools] True' {
+    $s = New-State -Vs $fresh
+    $key = 'install-with-progress Microsoft.VisualStudio.2022.BuildTools'
+    $r = Invoke-Flow -States @($s, $s) -Fail @{ $key = -1978335226 } -FailLines @{ $key = @('インストーラーが終了コードで失敗しました: 1602') }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*Visual Studio Build Tools 2022 のインストーラーが取り消された (UAC で「はい」を押さなかった・窓を閉じた)。流し直すと、もう一度入れる*')"
+}
+Test-Case '取り消しでない失敗には、取り消しの文を出さない' 'False' {
+    $s = New-State -Git $fresh
+    $r = Invoke-Flow -States @($s, $s) -Fail @{ 'install Git.Git' = -1978335226 } -FailLines @{ 'install Git.Git' = @('Installer failed with exit code: 1603') }
+    $r.Text -like '*取り消された*'
 }
 Test-Case 'ログインできなければ clone しない' '1 [gh-login] True' {
     $s = New-State -Dotfiles $freshRepo; $s.GhLoggedIn = $false
