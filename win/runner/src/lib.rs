@@ -5,9 +5,15 @@
 //! 「runner」。
 
 pub mod cli;
+pub mod context;
+pub mod fsutil;
 pub mod host;
 pub mod manifest;
+pub mod process;
+pub mod record;
 pub mod report;
+pub mod runner;
+pub mod steps;
 
 #[cfg(test)]
 mod testutil;
