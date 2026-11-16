@@ -222,6 +222,12 @@ nixpkgs のパッケージが同梱している skill（`installAgentSkills` が
 - 張る元が無くても home-manager は切れた symlink を黙って作る。在ることは
   `nix/tests/claude-herdr-skill.nix`（flake の checks）で確かめる
 
+skill を同梱せず、CLI が手引きを出すだけのパッケージ（今は herdr-core の `hc --skill`）は、
+`nix/pkgs/<パッケージ>/` に置いた derivation が build の中でその手引きに frontmatter を足した `SKILL.md` を作り、
+`claude.nix` が `~/.claude/skills/<CLI の名前>` へ張る（`nix/pkgs/herdr-core/claude-skill.nix`。frontmatter は隣の
+`claude-skill-head.md`）。同梱の skill と同じく、版は CLI と揃い、名前は CLI の名前のまま。確かめるのは
+`nix/tests/claude-hc-skill.nix`
+
 ## 配置後の構造
 
 `~/.claude/skills/` は **Claude Code 自身が書き換える**ディレクトリなので、
