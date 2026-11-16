@@ -3,8 +3,8 @@
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、
 # CI の `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。
-# flake.nix の checks (herdr-core-state) から呼ぶ。package の build (公式の Linux 版を落として `hc --version` を照らす) は
-# checks の herdr-core-test (Linux だけ)。
+# flake.nix の checks (herdr-core-state) から呼ぶ。package の build (公式の Linux 版を落として `hc --version` を照らし、
+# bin/ の包みが旧 herdr の pane の env を外すことを見る) は checks の herdr-core-test (Linux だけ)。
 #
 # ## 確かめること
 #
