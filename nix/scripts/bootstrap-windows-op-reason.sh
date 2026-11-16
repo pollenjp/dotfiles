@@ -22,7 +22,7 @@
 # %LOCALAPPDATA%\Programs\op-reason に置く (WSL の op は OPREASON_EXE でここを指す)。版と SHA-256 はその ps1 の表と
 # -Version の既定値で固定する (win/README.md の「op-reason」)。
 #
-# WSL の実行ファイルは switch で上がり、Windows の部品が同じ版でないと呼び出しの取り決めが合わずに断られる。そこで
+# WSL の実行ファイルは switch で上がり、呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。そこで
 # type-clipboard と違い、版がずれていれば setup のたびに入れ替えまでする。op-reason.exe は op の呼び出しの間しか動かないので、
 # 動いていなければ入れ替えても何も巻き込まない (動いていれば Install-OpReason.ps1 が何も変えずに止まる)。
 #

@@ -2705,10 +2705,15 @@ op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\o
 
 ### 表示の言語
 
-dotfiles は表示の言語を決めない（包みに `OPREASON_LANG` を置かない）。固定している op-reason 0.1.0 は、`OPREASON_LANG`、無ければ
-`LC_ALL`・`LC_MESSAGES`・`LANG` のうち最初の空でない値で言語を決める（`ja` で始まれば日本語、ほかは英語。どれも無ければ英語）。
-決まった言語は WSL の文・`op-reason-log` の表と、WSL から起こした窓・通知に効く（Windows の表示言語は見ない）。`LANG=C.UTF-8` の
-WSL では英語になる。
+dotfiles は表示の言語を決めない（包みに `OPREASON_LANG` を置かない）。固定している op-reason 0.2.0 では、`op-reason.exe` の窓の右下の
+「English | 日本語」で選ぶ。押すと窓はその場で切り替わり（1Password の承認の画面から focus を奪わない）、Windows の
+`%LOCALAPPDATA%\op-reason\settings.json` に覚える。その後の呼び出しは、窓・通知・WSL の端末の文・`op-reason-log` の表がその言語になる
+（WSL の実行ファイルは、呼び出しのたびに選んだ言語を `~/.local/state/op-reason/lang.json` に写して使うので、WSL の側の文と表には、
+押した呼び出しが終わってから効く）。
+
+- 窓で選んでいなければ `OPREASON_LANG`（`ja` で始まれば日本語、ほかは英語）、それも無ければ英語。`LANG`・`LC_ALL`・`LC_MESSAGES` と
+  Windows の表示言語では決めない（0.1.0 では `LANG` などで日本語になった。日本語にするなら窓で「日本語」を 1 回押す）
+- 選んだのを取り消すなら `settings.json` を消す（WSL の控えの `lang.json` は次の呼び出しが消す）
 
 ### Smart App Control と OPREASON_RUNNER
 
@@ -2744,7 +2749,7 @@ Claude の hook の登録も同じコマンドが行う（Claude Code を起こ�
 
 ```sh
 command -v op op-reason-log                # ~/.nix-profile/bin/op・op-reason-log
-op-reason --version                        # op-reason 0.1.0 (Windows を起こさない)
+op-reason --version                        # op-reason 0.2.0 (Windows を起こさない)
 op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
@@ -2772,8 +2777,9 @@ op.exe whoami                              # WSL の直の op.exe は account is
 ### op-reason の新しい版を出したとき
 
 dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
-上げる（版がずれると、WSL の `op` が Windows の `op-reason.exe` と取り決めの版が合わずに断る）。自作のアプリの Release なので、依存の
-公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。依存の更新の skill `pjp-dotfiles-deps` も見ない）。
+上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 と 0.2.0 は
+同じ取り決め）。自作のアプリの Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。
+依存の更新の skill `pjp-dotfiles-deps` も見ない）。
 
 1. Release の `op-reason-x86_64-linux`・`op-reason-aarch64-linux` を落とし、`sha256sum -c` で隣の `.sha256` と同じかを確かめる
 2. `nix/pkgs/op-reason/default.nix` の `version` と、`assets` の 2 つの `sha256` を新しい版にする（`installCheck` が `--version` を

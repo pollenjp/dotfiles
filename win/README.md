@@ -2009,8 +2009,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版で入れる。WSL の op
 ([`nix/README.md`「WSL の op を理由つきで呼ぶ (1Password CLI)」](../nix/README.md#wsl-の-op-を理由つきで呼ぶ-1password-cli)) は、
 呼び出しごとに Windows の `op-reason.exe` (動かないときは隣の `launcher.ps1`) を起こして承認の窓を出す。zip の中身は
-`op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版でないと、
-呼び出しの取り決めが合わずに断られる。
+`op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版にそろえる
+(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 と 0.2.0 は同じ取り決め)。
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
@@ -2022,7 +2022,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
   待たずに済む)
-- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.1.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
+- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.2.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
   中身の値 (`Tree`) を同じファイルの表 (`Get-OpReasonReleases`) で固定する。`Zip` は Release に置いた `op-reason-windows.zip.sha256`
   の中身と同じ。WSL の実行ファイルの版 (`nix/pkgs/op-reason/default.nix` の `version`) と同じにする (テストが突き合わせる)
 - 自作のアプリの Release なので、type-clipboard と同じく依存の公開からの猶予 (7 日) は置かない。中身は SHA-256 で固定する
