@@ -6,8 +6,9 @@
 # ~/.local/bin/herdr-core に写す (hc が無ければ hc の symlink も)。
 #
 # - 版は Windows の herdr-core と同じ (nix/pkgs/herdr-core/releases.json)。同じ版なら写し直しを聞かれずにつながる
-# - package の bin/herdr-core と hc は、旧 herdr の pane の env (HERDR_ENV など) を外してから本物 (libexec/) を起こす包み
-#   (pkgs/herdr-core/default.nix の「旧 herdr の pane の env を外す包み」)。どこから core が立っても、hc の子に HERDR_* が漏れない
+# - package の bin/herdr-core と hc は、core を立てたシェルに固有の env (旧 herdr の pane の HERDR_ENV など・mise の全体の rust の
+#   RUSTUP_TOOLCHAIN) を外してから本物 (libexec/) を起こす包み (pkgs/herdr-core/default.nix の「立てたシェルに固有の env を外す包み」)。
+#   どこから core が立っても、hc の子に漏れない
 # - home.packages に入れる (対話のシェルの herdr-core と hc)
 # - ~/.local/bin/herdr-core と hc も、同じ binary へのリンクにする。非対話の SSH の PATH に nix の profile が入らない形のホスト
 #   (single-user の Nix は ~/.profile にしか足さず、home-manager の ~/.bashrc は先頭で非対話を返す) でも、remote の探し先の

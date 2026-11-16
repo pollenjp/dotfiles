@@ -614,8 +614,8 @@
           # 包んだ後の package を渡す (-c で付ける組は、Nix が lib/git-via-gh.nix から書き込む)
           git-gh-test = scriptTest "git-gh" (lib.getExe (pkgs.callPackage ./pkgs/git-gh { }));
           # herdr-core (pkgs/herdr-core) の package そのもの。公式の Linux 版を releases.json の sha256 で落とし、build の
-          # installCheck が `herdr-core --version`・`hc --version` を版と照らし、包みが旧 herdr の pane の env (HERDR_*) を外して
-          # ほかの env を残すことを確かめる。配布物は Linux だけ
+          # installCheck が `herdr-core --version`・`hc --version` を版と照らし、包みが core を立てたシェルに固有の env (旧 herdr の
+          # pane の印・RUSTUP_TOOLCHAIN) を外して、ほかの env (hc が読む HERDR_RELEASES_URL も) を残すことを確かめる。配布物は Linux だけ
           herdr-core-test = pkgs.callPackage ./pkgs/herdr-core { };
           # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
           # crate で流す (buildPhase を差し替え、test と install はしない)。指摘は system によらないので Linux だけ
