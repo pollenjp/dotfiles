@@ -119,22 +119,29 @@ impl Step for HcHub {
         let shim = shim_path(ctx);
         let clone = clone_dir(ctx);
         if !shim.is_file() {
-            return vec![if mode.writes() {
-                Outcome::new(
+            return vec![match mode {
+                Mode::Apply { .. } => Outcome::new(
                     Kind::Failed,
                     format!(
                         "shim の pjp が無い ({}) → 上の pjp の手順を見る",
                         shim.display()
                     ),
-                )
-            } else {
-                Outcome::new(
+                ),
+                Mode::Check => Outcome::new(
                     Kind::Missing,
                     format!(
                         "shim の pjp が無いので確かめられない ({}) → apply で pjp を入れてから pjp hub init を流す",
                         shim.display()
                     ),
-                )
+                ),
+                Mode::DryRun { .. } => {
+                    // 同じ apply の pjp の手順 (order 55) が shim を入れてから、この手順が流れる
+                    ctx.say("[dry-run] (pjp の手順が shim を入れた後に) pjp hub check で差を見て、差があれば pjp hub init を流す");
+                    Outcome::new(
+                        Kind::Missing,
+                        "[dry-run] shim の pjp が無い → pjp を入れた後に pjp hub check で差を見て、差があれば pjp hub init を流す",
+                    )
+                }
             }];
         }
         let tool = clone
@@ -439,6 +446,15 @@ mod tests {
         std::fs::remove_file(w.shim()).unwrap();
         let sys = w.sys((0, vec![]), 0);
         assert_eq!(w.run(&sys, Mode::Check).kind, Kind::Missing);
+        // dry-run は、同じ apply の pjp の手順が shim を入れた後にすることを [dry-run] の形で出す
+        let o = w.run(&sys, Mode::DryRun { force: false });
+        assert_eq!(o.kind, Kind::Missing);
+        assert!(o.text.starts_with("[dry-run] "), "{o:?}");
+        assert!(
+            o.text
+                .contains("pjp hub check で差を見て、差があれば pjp hub init を流す"),
+            "{o:?}"
+        );
         assert_eq!(w.run(&sys, Mode::Apply { force: false }).kind, Kind::Failed);
         assert!(sys.calls.borrow().is_empty());
 
