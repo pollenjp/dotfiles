@@ -62,6 +62,8 @@ struct Work {
     /// 前に使った clone (控えの値が今の clone と違うとき)。そこを指すリンクも、この手順が張ったものとして扱う
     prev: Option<PathBuf>,
     claude: PathBuf,
+    /// `~/.claude/<種類>` そのものがリンクの種類 (手でつないだ場所。触らない)
+    linked_kinds: Vec<&'static str>,
     mode: Mode,
     records: Records,
     tally: Tally,
@@ -114,7 +116,13 @@ impl Step for ClaudeSkills {
         ctx.say(format!("clone: {}", clone.display()));
         let home = ctx.roots.user_profile.clone();
         let state_file = join_segments(&home, STATE_FILE_REL);
-        let prev = read_state_line(&state_file).filter(|p| !same_path(p, &clone));
+        // 控えの値を前の clone として信じるのは、名前が claude-skills のときだけ (この手順はいつも clone の場所を書く。ホームのような広い値で、
+        // ユーザーのリンクまで「この手順のもの」として外さない)
+        let prev = read_state_line(&state_file).filter(|p| {
+            !same_path(p, &clone)
+                && p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case("claude-skills"))
+        });
         let record_path = ctx.state_dir.join(RECORD_FILE);
         let records = match Records::load(&record_path) {
             Ok(r) => r,
@@ -125,14 +133,27 @@ impl Step for ClaudeSkills {
                 ];
             }
         };
+        let claude = home.join(".claude");
+        let linked_kinds: Vec<&'static str> = KINDS
+            .iter()
+            .copied()
+            .filter(|k| is_link(&claude.join(k)))
+            .collect();
         let mut w = Work {
             clone,
             prev,
-            claude: home.join(".claude"),
+            claude,
+            linked_kinds,
             mode,
             records,
             tally: Tally::default(),
         };
+        for kind in w.linked_kinds.clone() {
+            w.skip(
+                ctx,
+                format!("{kind} (~/.claude/{kind} がリンク。手でつないだ場所なので、この種類には触らない)"),
+            );
+        }
         for kind in KINDS {
             link_kind(ctx, &mut w, kind);
         }
@@ -194,8 +215,11 @@ impl Step for ClaudeSkills {
     }
 }
 
-/// clone の `<kind>/` の中身を 1 つずつつなぐ (README.md は除く)。
+/// clone の `<kind>/` の中身を 1 つずつつなぐ (README.md は除く)。`~/.claude/<kind>` そのものがリンクなら触らない。
 fn link_kind(ctx: &mut Ctx, w: &mut Work, kind: &str) {
+    if w.linked_kinds.contains(&kind) {
+        return;
+    }
     let src_dir = w.clone.join(kind);
     let Ok(entries) = std::fs::read_dir(&src_dir) else {
         return;
@@ -423,7 +447,7 @@ fn prune_copies(ctx: &mut Ctx, w: &mut Work) {
         let Some((kind, name)) = split_dest(&dest, &w.claude) else {
             continue;
         };
-        if w.clone.join(&kind).join(&name).is_file() {
+        if w.linked_kinds.contains(&kind.as_str()) || w.clone.join(&kind).join(&name).is_file() {
             continue;
         }
         let label = format!("{kind}/{name}");
@@ -730,6 +754,55 @@ mod tests {
         // 記録から外したので、次は何も言わない
         let (o, _) = e.run(Mode::Check);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+    }
+
+    /// `~/.claude/<種類>` そのものがリンク (手で別の場所へつないだ) なら、その種類には触らない (先へ書かない・先を消さない)
+    #[test]
+    fn skips_a_kind_dir_that_is_a_link() {
+        let e = Env::new();
+        let elsewhere = e.t.path().join("my-rules");
+        e.t.write("my-rules/pjp-r.md", "mine\n");
+        std::fs::create_dir_all(e.claude("")).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+        crate::link::create_junction(&sys, &e.claude("rules"), &elsewhere).unwrap();
+        let (o, out) = e.run(Mode::Apply { force: true });
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}\n{out}");
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.starts_with("rules (~/.claude/rules がリンク")),
+            "{o:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(elsewhere.join("pjp-r.md")).unwrap(),
+            "mine\n"
+        );
+        // skills は張る
+        assert!(is_link(&e.claude("skills/pjp-a")));
+    }
+
+    /// 控えの値は、名前が claude-skills のときだけ前の clone として信じる (ホームのような広い値で、ユーザーのリンクを外さない)
+    #[test]
+    fn ignores_a_broad_previous_clone() {
+        let e = Env::new();
+        let home = e.t.path().join("home");
+        e.t.write(
+            "home/.local/state/dotfiles/claude-skills-dir",
+            &format!("{}\n", home.display()),
+        );
+        e.t.write("home/my-skills/mine/SKILL.md", "mine\n");
+        std::fs::create_dir_all(e.claude("skills")).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+        crate::link::create_junction(
+            &sys,
+            &e.claude("skills/mine"),
+            &home.join("my-skills").join("mine"),
+        )
+        .unwrap();
+        let (o, out) = e.run(Mode::Apply { force: false });
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("削除 0"), "{o:?}");
+        assert!(is_link(&e.claude("skills/mine")));
     }
 
     #[test]

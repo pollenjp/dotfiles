@@ -24,7 +24,7 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
-  --force           files の衝突 (Windows 側で変わっていた) も上書きする
+  --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
@@ -204,7 +204,11 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             return 2;
         }
     };
-    let repo = a.repo.clone().unwrap_or_else(default_repo);
+    // 相対パスの --repo は絶対パスにする (隣の clone・控え (claude-skills-dir)・cargo install --path が、cwd を移した後に別の場所を指さない)
+    let repo = match a.repo.clone() {
+        Some(p) => std::path::absolute(&p).unwrap_or(p),
+        None => default_repo(),
+    };
     match a.command {
         Command::Help => {
             let _ = writeln!(out, "{USAGE}");
@@ -407,8 +411,10 @@ mod tests {
     mod flow {
         //! ## 確かめること (コマンドの流れ。偽の Sys と一時ディレクトリで)
         //!
-        //! - check は何も書かず、入っていないものだけなら 3。apply は runner.enable = true のホストだけ揃え、でなければ止めて 1
-        //! - apply --dry-run は何も書かず、本番が止まることを知らせる
+        //! - check は何も書かず、入っていないものだけなら 3。apply は、受け持ちが WSL のホストでは Windows にしか無い手順だけを流し、
+        //!   それを選んでいなければ止めて 1。runner.enable = true のホストは全部を揃える
+        //! - apply --dry-run は何も書かず、本番が止まる・Windows にしか無い手順だけを流すことを知らせる
+        //! - 相対パスの --repo は絶対パスにしてから使う (隣の clone と控えに相対パスを書かない)
         //! - ホストの値の既定の場所は、USERNAME と hostname (小文字) から。list は環境変数が無くても流せる
         //! - 知らない手順・ホストの値の誤り・環境変数が無いのは 2。manifest の誤りは 1
 
@@ -664,6 +670,31 @@ mod tests {
                 )),
                 "{out}"
             );
+        }
+
+        /// 相対パスの --repo は絶対パスにしてから使う (cargo test の cwd は win/runner なので ../.. は dotfiles の root)
+        #[test]
+        fn relative_repo_becomes_absolute() {
+            let sys = FakeSys::new(|_| RunResult {
+                exit: Exit::Code(0),
+                output: vec!["pjp-raiden".into()],
+            })
+            .with_env("USERNAME", "polle");
+            let args: Vec<String> = ["list", "--repo", "../.."]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            assert_eq!(run(&args, &sys, &mut out, &mut err), 0);
+            let out = String::from_utf8(out).unwrap();
+            let line = out.lines().find(|l| l.starts_with("ホストの値: ")).unwrap();
+            // 「ホストの値: <path> (グループ …)」か「ホストの値: 無い (<path>)。…」
+            let rest = line.trim_start_matches("ホストの値: ");
+            let shown = match rest.strip_prefix("無い (") {
+                Some(r) => r.split(')').next().unwrap(),
+                None => rest.split(" (").next().unwrap(),
+            };
+            assert!(Path::new(shown).is_absolute(), "{line}");
         }
 
         #[test]

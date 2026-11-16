@@ -32,16 +32,42 @@ enum State {
     Differs,
     /// init が止まる (人が直す)。添える行
     Stops(Vec<String>),
+    /// pjp hub check まで届かなかった (shim が pjp-hub を作れない。check ではオフラインで作るので、取得が要る作り直しもここ)。添える行
+    Unreachable(Vec<String>),
     Failed(String),
 }
 
-fn pjp(shim: &Path, clone: &Path, sub: &str) -> CommandSpec {
-    CommandSpec::new(shim)
+/// `pjp hub <sub>` を打つコマンド。`offline` (check と dry-run) なら、shim の作り直しで crate も toolchain も取りに行かない (check は
+/// `~/.cargo` と `~/.rustup` を書かない。clone の `target/` は build の置き場なので書いてよい)。
+fn pjp(shim: &Path, clone: &Path, sub: &str, offline: bool) -> CommandSpec {
+    let spec = CommandSpec::new(shim)
         .arg("hub")
         .arg(sub)
         .env("PJP_SKILLS_DIR", clone.as_os_str())
         .env_remove("RUSTUP_TOOLCHAIN")
-        .timeout(Duration::from_secs(HUB_SECS))
+        .timeout(Duration::from_secs(HUB_SECS));
+    if offline {
+        spec.env("CARGO_NET_OFFLINE", "true")
+            .env("RUSTUP_AUTO_INSTALL", "0")
+    } else {
+        spec
+    }
+}
+
+/// pjp-hc-hub の道具自身が出した行か (`pjp hub check: …`・`pjp hub init: …`。shim の `pjp: …` と分ける)
+fn from_hub(line: &str) -> bool {
+    let l = line.trim();
+    l.starts_with("pjp hub check:") || l.starts_with("pjp hub init:")
+}
+
+/// 添える行 (空でない行の最後の 5 行)
+fn tail(lines: &[String]) -> Vec<String> {
+    let kept: Vec<String> = lines
+        .iter()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    kept[kept.len().saturating_sub(5)..].to_vec()
 }
 
 /// 差の行 (`差: ` の後ろ) が、ハブそのものが無い・git repo でないことか (`<絶対パス> が無い`・`<絶対パス> は git repo でない`)。雛形の
@@ -56,22 +82,17 @@ fn classify(exit: &Exit, lines: &[String]) -> State {
         .iter()
         .filter_map(|l| l.trim().strip_prefix("差: ").map(str::to_string))
         .collect();
+    let hub_said = lines.iter().any(|l| from_hub(l));
     match exit {
         Exit::Code(0) => State::Same,
-        Exit::Code(1) if diffs.is_empty() || diffs.iter().any(|d| d.contains(STOPS)) => {
-            let notes = if diffs.is_empty() {
-                lines
-                    .iter()
-                    .map(|l| l.trim().to_string())
-                    .filter(|l| !l.is_empty())
-                    .collect()
-            } else {
-                diffs
-            };
-            State::Stops(notes)
-        }
+        Exit::Code(1) if diffs.iter().any(|d| d.contains(STOPS)) => State::Stops(diffs),
+        // 差の行が無く、道具が自分で断った (別の repo の中など)
+        Exit::Code(1) if diffs.is_empty() && hub_said => State::Stops(tail(lines)),
+        // 差の行も道具の行も無い: shim が pjp-hub を作れなかった (`pjp: …`)
+        Exit::Code(1) if diffs.is_empty() => State::Unreachable(tail(lines)),
         Exit::Code(1) if diffs.iter().any(|d| hub_absent(d)) => State::Missing,
         Exit::Code(1) => State::Differs,
+        Exit::Code(2) if !hub_said => State::Unreachable(tail(lines)),
         Exit::Code(2) => {
             State::Failed("pjp hub check が動けない (設定の誤り。上の出力)".to_string())
         }
@@ -135,10 +156,27 @@ impl Step for HcHub {
             ctx.roots.user_profile.join("h").display()
         ));
         ctx.say("+ pjp hub check");
-        let r = run_streaming(ctx, &pjp(&shim, &clone, "check"));
+        let r = run_streaming(ctx, &pjp(&shim, &clone, "check", !mode.writes()));
         let (kind, text) = match classify(&r.exit, &r.output) {
             State::Same => return vec![Outcome::new(Kind::Ok, "ハブは雛形どおり")],
             State::Failed(why) => return vec![Outcome::new(Kind::Failed, why)],
+            State::Unreachable(notes) => {
+                let mut o = if mode.writes() {
+                    Outcome::new(
+                        Kind::Failed,
+                        "pjp hub check まで届かなかった (shim が pjp-hub を作れない。上の出力)",
+                    )
+                } else {
+                    Outcome::new(
+                        Kind::Fix,
+                        "ハブを確かめられない (shim が pjp-hub を作れない。check は crate と toolchain を取らずに作るので、取得が要る作り直しもここ) → apply で pjp --build の後に確かめる",
+                    )
+                };
+                for n in notes {
+                    o = o.note(n);
+                }
+                return vec![o];
+            }
             State::Stops(notes) => {
                 let mut o = Outcome::new(
                     Kind::Manual,
@@ -166,14 +204,14 @@ impl Step for HcHub {
             }
             Mode::Apply { .. } => {
                 ctx.say("+ pjp hub init");
-                let r = run_streaming(ctx, &pjp(&shim, &clone, "init"));
+                let r = run_streaming(ctx, &pjp(&shim, &clone, "init", false));
                 vec![match r.exit {
                     Exit::Code(0) => {
                         Outcome::new(Kind::Ok, format!("{text}ので pjp hub init で揃えた"))
                     }
                     Exit::Code(1) => Outcome::new(
                         Kind::Manual,
-                        "pjp hub init が止まった (何も書いていない。上の出力のわけを直す)",
+                        "pjp hub init が止まった・落ちた (上の出力のわけを直す。止まる場所なら何も書いていない。commit で落ちたなら書いた後)",
                     ),
                     other => Outcome::new(
                         Kind::Failed,
@@ -343,7 +381,56 @@ mod tests {
         let sys = w.sys((1, vec!["差: CLAUDE.md が無い"]), 1);
         let o = w.run(&sys, Mode::Apply { force: false });
         assert_eq!(o.kind, Kind::Manual, "{o:?}");
-        assert!(o.text.contains("何も書いていない"), "{o:?}");
+        assert!(o.text.contains("pjp hub init が止まった・落ちた"), "{o:?}");
+    }
+
+    /// check と dry-run の pjp hub check は、shim の作り直しで crate と toolchain を取りに行かない (CARGO_NET_OFFLINE・RUSTUP_AUTO_INSTALL)。
+    /// apply は取りに行ってよい
+    #[test]
+    fn check_does_not_fetch() {
+        let w = World::new();
+        let sys = w.sys((0, vec![]), 0);
+        for mode in [Mode::Check, Mode::DryRun { force: false }] {
+            w.run(&sys, mode);
+            let calls = sys.calls.borrow();
+            let last = calls.last().unwrap();
+            assert_eq!(
+                last.env_value("CARGO_NET_OFFLINE").as_deref(),
+                Some("true"),
+                "{mode:?}"
+            );
+            assert_eq!(
+                last.env_value("RUSTUP_AUTO_INSTALL").as_deref(),
+                Some("0"),
+                "{mode:?}"
+            );
+        }
+        w.run(&sys, Mode::Apply { force: false });
+        let calls = sys.calls.borrow();
+        let last = calls.last().unwrap();
+        assert_eq!(last.env_value("CARGO_NET_OFFLINE"), None);
+        assert_eq!(last.env_value("RUSTUP_AUTO_INSTALL"), None);
+    }
+
+    /// shim が道具を作れずに落ちた (pjp: …) のは、init が止まる差ではない。check は「確かめられない」、apply は落ちた
+    #[test]
+    fn shim_failure_is_not_a_stop() {
+        let w = World::new();
+        let lines = vec![
+            "error: no matching package named `foo` found",
+            "pjp: 道具 pjp-hub を作れませんでした (cargo build)",
+        ];
+        let sys = w.sys((1, lines.clone()), 0);
+        let o = w.run(&sys, Mode::Check);
+        assert_eq!(o.kind, Kind::Fix, "{o:?}");
+        assert!(o.text.contains("確かめられない"), "{o:?}");
+        assert!(
+            o.notes.iter().any(|n| n.contains("pjp: 道具 pjp-hub")),
+            "{o:?}"
+        );
+        let o = w.run(&sys, Mode::Apply { force: false });
+        assert_eq!(o.kind, Kind::Failed, "{o:?}");
+        assert_eq!(inits(&sys), 0);
     }
 
     #[test]

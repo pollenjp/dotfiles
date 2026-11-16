@@ -150,8 +150,9 @@ fn with_env(settings: &OValue) -> Result<OValue, String> {
     let OValue::Object(_) = settings else {
         return Err("object でない (中身が {…} でない)".to_string());
     };
+    // null は Linux の jq の `.env // {}`・`.GIT_CONFIG_COUNT // "0"`・`select(.k != null)` と同じに読む
     let env = match settings.get("env") {
-        None => OValue::Object(Vec::new()),
+        None | Some(OValue::Null) => OValue::Object(Vec::new()),
         Some(v @ OValue::Object(_)) => v.clone(),
         Some(_) => return Err("env が object でない".to_string()),
     };
@@ -159,7 +160,7 @@ fn with_env(settings: &OValue) -> Result<OValue, String> {
         unreachable!("上で object だけを通した")
     };
     let count = match env.get("GIT_CONFIG_COUNT") {
-        None => 0,
+        None | Some(OValue::Null) => 0,
         Some(OValue::String(s)) => s
             .trim()
             .parse::<usize>()
@@ -174,7 +175,10 @@ fn with_env(settings: &OValue) -> Result<OValue, String> {
     // 今の組のうち、この手順のキーでないものを順に残す (キーの無い番号は飛ばす。jq の select(.k != null) と同じ)
     let mut all: Vec<(OValue, OValue)> = (0..count)
         .filter_map(|i| {
-            let key = env.get(&format!("GIT_CONFIG_KEY_{i}"))?.clone();
+            let key = env
+                .get(&format!("GIT_CONFIG_KEY_{i}"))
+                .filter(|k| **k != OValue::Null)?
+                .clone();
             let value = env
                 .get(&format!("GIT_CONFIG_VALUE_{i}"))
                 .cloned()
@@ -259,14 +263,17 @@ fn notes(ctx: &mut Ctx) -> Vec<String> {
             "gh が見つからない。Claude の git は gh の資格情報で GitHub へ HTTPS で通す (gh は bootstrap が入れる)".to_string(),
         ),
         Some(gh) => {
+            // Linux の bootstrap-claude-env.sh と同じく gh auth token で見る (手元の資格情報を読むだけで、ネットワークに頼らない)。
+            // token は流す口に渡さず (stdout だけを取り、写しはすぐ捨てる)、表には出さない
             let spec = CommandSpec::new(gh)
                 .arg("auth")
-                .arg("status")
+                .arg("token")
                 .arg("--hostname")
                 .arg("github.com")
+                .stdout_only()
                 .timeout(Duration::from_secs(30));
-            // 出力は見ない (token は伏せて出るが、写しを持たない)
-            if ctx.sys.run(&spec, &mut |_| {}).code() != Some(0) {
+            let logged_in = ctx.sys.run(&spec, &mut |_| {}).code() == Some(0);
+            if !logged_in {
                 notes.push(
                     "gh が github.com にログインしていない → gh auth login (Claude の git は gh の資格情報で GitHub へ HTTPS で通す)"
                         .to_string(),
@@ -291,7 +298,8 @@ fn notes(ctx: &mut Ctx) -> Vec<String> {
                 let (_, value) = rest.split_once(' ').unwrap_or((rest, ""));
                 (scope != "command"
                     && !value.trim().is_empty()
-                    && !value.contains("gh auth git-credential"))
+                    // gh 自身 (`!gh auth git-credential`・Windows の gh auth setup-git が書く `!'C:\…\gh.exe' auth git-credential`)
+                    && !value.contains("auth git-credential"))
                 .then(|| format!("{scope} {}", rest.trim_end()))
             })
             .collect();
@@ -508,6 +516,39 @@ mod tests {
         }
     }
 
+    /// null は Linux の jq と同じに読む: env の null は空、GIT_CONFIG_COUNT の null は 0、キーが null の組は落とす
+    #[test]
+    fn nulls_read_like_jq() {
+        let e = Env::new();
+        e.t.write("home/.claude/settings.json", "{\"env\": null}\n");
+        assert_eq!(e.run(Mode::Apply { force: false }).kind, Kind::Ok);
+        assert_eq!(env_of(&e.settings()), pairs(&OURS));
+
+        let e = Env::new();
+        e.t.write(
+            "home/.claude/settings.json",
+            "{\"env\": {\"FOO\": \"1\", \"GIT_CONFIG_COUNT\": null}}\n",
+        );
+        assert_eq!(e.run(Mode::Apply { force: false }).kind, Kind::Ok);
+        let mut want = pairs(&[("FOO", "1")]);
+        want.extend(pairs(&OURS));
+        assert_eq!(env_of(&e.settings()), want);
+
+        let e = Env::new();
+        e.t.write(
+            "home/.claude/settings.json",
+            "{\"env\": {\"GIT_CONFIG_COUNT\": \"2\", \"GIT_CONFIG_KEY_0\": null, \"GIT_CONFIG_VALUE_0\": \"x\", \"GIT_CONFIG_KEY_1\": \"core.x\", \"GIT_CONFIG_VALUE_1\": \"y\"}}\n",
+        );
+        assert_eq!(e.run(Mode::Apply { force: false }).kind, Kind::Ok);
+        let env = env_of(&e.settings());
+        assert_eq!(env[0], ("GIT_CONFIG_COUNT".to_string(), "6".to_string()));
+        assert_eq!(
+            env[1],
+            ("GIT_CONFIG_KEY_0".to_string(), "core.x".to_string())
+        );
+        assert_eq!(env[2], ("GIT_CONFIG_VALUE_0".to_string(), "y".to_string()));
+    }
+
     #[test]
     fn notes_gh_and_other_helpers() {
         let e = Env::new();
@@ -522,6 +563,9 @@ mod tests {
         let sys = FakeSys::new(|c| {
             let args = c.args_lossy();
             if args.first().map(String::as_str) == Some("auth") {
+                // ネットワークに頼らない確かめ (Linux の bootstrap-claude-env.sh と同じ)。token は写しに残さない
+                assert_eq!(args, vec!["auth", "token", "--hostname", "github.com"]);
+                assert!(c.stdout_only);
                 RunResult {
                     exit: Exit::Code(1),
                     output: vec![],
@@ -541,6 +585,9 @@ mod tests {
                     output: vec![
                         "system\tcredential.helper manager".to_string(),
                         "command\tcredential.https://github.com.helper !gh auth git-credential"
+                            .to_string(),
+                        // Windows で gh auth setup-git が書く形も gh 自身
+                        "global\tcredential.https://github.com.helper !'C:\\Program Files\\GitHub CLI\\gh.exe' auth git-credential"
                             .to_string(),
                         "global\tcredential.helper ".to_string(),
                     ],

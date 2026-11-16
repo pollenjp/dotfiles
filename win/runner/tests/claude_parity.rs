@@ -2,44 +2,58 @@
 //!
 //! ## 確かめること
 //!
-//! - ホストの値の `[claude.notion]` から作った claude-notion.json の中身が、同じ値の Nix の `builtins.toJSON` (claude.nix の
-//!   `builtins.toJSON { inherit profile routes override; } + "\n"`) と同じバイト列 (キーの順・空白なし・小数・真偽値・配列・入れ子・profile の null)
-//! - settings.json の env に足す git の組のうち GitHub の組が、Linux の nix/lib/git-via-gh.nix と同じ (並びも)。頭の 2 組は claude.nix の
-//!   gitConfigBase (commit・tag を無署名に)
+//! - claude-notion.json の中身が、Linux の claude.nix が sandbox のホスト (nix/hosts/default.nix) に書くものと同じバイト列。さらに、いろいろな値
+//!   (routes・override の入れ子・小数・真偽値・配列・profile の null) で、同じ値の Nix の `builtins.toJSON` (claude.nix の
+//!   `builtins.toJSON { inherit profile routes override; } + "\n"`) と同じバイト列
+//! - settings.json の env に足す git の組 (並びも) と、plugin を https で取る印が、Linux の claude.nix が sandbox のホストに書く claude-env.json の
+//!   gitConfig と vars と同じ
 //!
-//! nix-instantiate が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
+//! nix-instantiate か nix が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
 
 mod common;
 
 use common::which;
 use dotfiles_win::host::{Groups, parse};
-use dotfiles_win::steps::claude_env::GIT_CONFIG;
+use dotfiles_win::steps::claude_env::{GIT_CONFIG, VARS};
 use std::path::Path;
 use std::process::Command;
 
-#[test]
-fn git_config_matches_nix() {
-    if !nix_available() {
-        return;
-    }
-    let lib = Path::new(env!("CARGO_MANIFEST_DIR"))
+/// Linux の claude.nix が sandbox のホスト (nix/hosts/default.nix) に書く `~/.local/state/dotfiles/<name>` の中身 (flake を `path:` で評価する。
+/// 素のパスだと repo 全体を /nix/store へ写す)
+fn sandbox_file(name: &str) -> String {
+    let flake = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("..")
         .join("nix")
-        .join("lib")
-        .join("git-via-gh.nix");
-    let out = Command::new("nix-instantiate")
-        .args(["--eval", "--strict", "--json"])
-        .arg(&lib)
+        .canonicalize()
+        .unwrap();
+    let attr = format!(
+        "path:{}#homeConfigurations.sandbox.config.home.file.\".local/state/dotfiles/{name}\".text",
+        flake.display()
+    );
+    let out = Command::new("nix")
+        .args(["eval", "--raw"])
+        .arg(&attr)
         .output()
-        .expect("nix-instantiate を起こせない");
+        .expect("nix を起こせない");
     assert!(
         out.status.success(),
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
-    let gh: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).unwrap();
-    let gh: Vec<(String, String)> = gh
+    String::from_utf8(out.stdout).unwrap()
+}
+
+/// settings.json の env に足す git の組と名前が、Linux の claude.nix の claude-env.json (gitConfigBase と git-via-gh の組・vars) と同じ
+#[test]
+fn git_config_matches_claude_nix() {
+    if !nix_available() {
+        return;
+    }
+    let env: serde_json::Value = serde_json::from_str(&sandbox_file("claude-env.json")).unwrap();
+    let linux: Vec<(String, String)> = env["gitConfig"]
+        .as_array()
+        .unwrap()
         .iter()
         .map(|p| {
             (
@@ -52,20 +66,37 @@ fn git_config_matches_nix() {
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
+    assert_eq!(ours, linux);
+    // plugin を https で取る印は Linux と同じ値 (CLAUDE_CODE_SHELL は Windows に無い。GCM_INTERACTIVE は Windows だけ)
+    let prefer = VARS
+        .iter()
+        .find(|(k, _)| *k == "CLAUDE_CODE_PLUGIN_PREFER_HTTPS")
+        .map(|(_, v)| *v);
     assert_eq!(
-        ours[..2],
-        [
-            ("commit.gpgsign".to_string(), "false".to_string()),
-            ("tag.gpgsign".to_string(), "false".to_string()),
-        ]
+        prefer,
+        env["vars"]["CLAUDE_CODE_PLUGIN_PREFER_HTTPS"].as_str()
     );
-    assert_eq!(ours[2..], gh[..]);
+}
+
+/// claude-notion.json の中身が、Linux の claude.nix が sandbox のホストに書くものと同じ (同じ profile のとき)
+#[test]
+fn notion_json_matches_claude_nix() {
+    if !nix_available() {
+        return;
+    }
+    let linux = sandbox_file("claude-notion.json");
+    let v: serde_json::Value = serde_json::from_str(&linux).unwrap();
+    let toml_text = match v["profile"].as_str() {
+        Some(p) => format!("[claude.notion]\nprofile = \"{p}\"\n"),
+        None => String::new(),
+    };
+    assert_eq!(runner_json(&toml_text), linux);
 }
 
 fn nix_available() -> bool {
-    let found = which("nix-instantiate").is_some();
+    let found = which("nix-instantiate").is_some() && which("nix").is_some();
     if !found && std::env::var("DOTFILES_WIN_NIX_PARITY").as_deref() == Ok("1") {
-        panic!("DOTFILES_WIN_NIX_PARITY=1 なのに nix-instantiate が PATH にありません");
+        panic!("DOTFILES_WIN_NIX_PARITY=1 なのに nix-instantiate か nix が PATH にありません");
     }
     found
 }

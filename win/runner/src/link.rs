@@ -8,8 +8,9 @@ use crate::process::{CommandSpec, Sys};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// cmd が引用符の中でも読む・引用符の外で読む文字。パスに含まれていれば junction を張らない (cmd に別のコマンドとして読ませない)。
-const CMD_SPECIALS: &[char] = &['%', '!', '^', '&', '|', '<', '>', '"'];
+/// cmd が引用符の中でも読む・引用符の外で読む文字と、cmd の区切り文字 (`,` `;` `=`。空白の無い引数は引用符で囲まれないので、mklink の
+/// 引数が割れる)。パスに含まれていれば junction を張らない (cmd に別のコマンドとして読ませない)。
+const CMD_SPECIALS: &[char] = &['%', '!', '^', '&', '|', '<', '>', '"', ',', ';', '='];
 
 /// パスを比べる鍵 (`windows` は Windows の決まりで比べるか)。Windows は `/` を `\` にし、`\\?\UNC\` を `\\` に、`\\?\`・`\??\` を落とし、
 /// 末尾の区切りを落として小文字にする (大文字小文字を区別しない)。Unix は末尾の `/` を落とすだけ。
@@ -77,13 +78,18 @@ pub fn is_link(p: &Path) -> bool {
     std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
 }
 
-/// リンクを外す (先は消さない)。
+/// リンクを外す (先は消さない)。Windows は junction とディレクトリの symlink を `remove_dir`、ファイルの symlink を `remove_file` で外す。
 pub fn remove_link(p: &Path) -> std::io::Result<()> {
-    if cfg!(windows) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::FileTypeExt;
+        if std::fs::symlink_metadata(p)?.file_type().is_symlink_file() {
+            return std::fs::remove_file(p);
+        }
         std::fs::remove_dir(p)
-    } else {
-        std::fs::remove_file(p)
     }
+    #[cfg(not(windows))]
+    std::fs::remove_file(p)
 }
 
 /// `link` に `target` を指す junction を張る (`%ComSpec%` か `cmd` の `/c mklink /J`)。張った後に先を読み直して確かめる。cmd が特別に
@@ -175,6 +181,10 @@ mod tests {
             "C:\\Users\\a%b\\x",
             "C:\\Users\\a&b\\x",
             "C:\\Users\\a\"b\\x",
+            // cmd の区切り文字 (空白の無い引数は引用符で囲まれないので、mklink の引数が割れる)
+            "C:\\Users\\a,b\\x",
+            "C:\\Users\\a;b\\x",
+            "C:\\Users\\a=b\\x",
         ] {
             let e = create_junction(&sys, Path::new(bad), Path::new("C:\\t")).unwrap_err();
             assert!(e.contains("cmd が特別に読む文字"), "{e}");
@@ -207,5 +217,45 @@ mod tests {
         assert!(!link.exists() && !is_link(&link));
         assert!(target.join("SKILL.md").is_file());
         assert_eq!(link_target(&target), None);
+    }
+
+    /// ファイルの symlink (Windows では開発者モードか管理者で作れる) も外せ、先は残る
+    #[test]
+    fn removes_a_file_symlink() {
+        let t = TempDir::new("link-file");
+        let target = t.path().join("rule.md");
+        std::fs::write(&target, "r\n").unwrap();
+        let link = t.path().join("link.md");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(windows)]
+        if std::os::windows::fs::symlink_file(&target, &link).is_err() {
+            eprintln!("ファイルの symlink を作る権限が無いので飛ばす");
+            return;
+        }
+        assert!(is_link(&link));
+        remove_link(&link).unwrap();
+        assert!(!is_link(&link));
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "r\n");
+    }
+
+    /// 空白と日本語を含むパスでも junction を張れる (Rust が引数を引用符で囲み、cmd がそのまま mklink に渡す)
+    #[test]
+    fn junction_with_spaces_and_japanese() {
+        let t = TempDir::new("link-space");
+        let base = t.path().join("a b").join("日本");
+        let target = base.join("clone dir").join("pjp-a");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::write(target.join("SKILL.md"), "x\n").unwrap();
+        let link = base.join("home dir").join("pjp-a");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).expect("mklink だけを打つ"));
+        create_junction(&sys, &link, &target).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(link.join("SKILL.md")).unwrap(),
+            "x\n"
+        );
+        remove_link(&link).unwrap();
+        assert!(target.join("SKILL.md").is_file());
     }
 }

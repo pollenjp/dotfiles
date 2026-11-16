@@ -71,6 +71,7 @@ fn installed_version(ctx: &Ctx, shim: &Path) -> Option<String> {
     let r = ctx.sys.run(
         &CommandSpec::new(shim)
             .arg("--version")
+            .stdout_only()
             .timeout(Duration::from_secs(30)),
         &mut |_| {},
     );
@@ -234,6 +235,12 @@ impl Step for Pjp {
                         .timeout(Duration::from_secs(INSTALL_SECS));
                     let r = run_streaming(ctx, &spec);
                     let _ = std::fs::remove_dir_all(&target_dir);
+                    if target_dir.exists() {
+                        ctx.say(format!(
+                            "!! 使い捨ての target dir を消せなかった (数百 MB になりうる。要らなければ手で消す): {}",
+                            target_dir.display()
+                        ));
+                    }
                     if r.code() != Some(0) {
                         return vec![
                             Outcome::new(
@@ -361,6 +368,8 @@ mod tests {
                     output: vec![],
                 };
                 if c.program == shim && args == ["--version"] {
+                    // 版は stdout だけから読む (shim の注意は stderr に出る)
+                    assert!(c.stdout_only, "--version は stdout だけを取る");
                     return match installed.borrow().as_ref() {
                         Some(v) => RunResult {
                             exit: Exit::Code(0),

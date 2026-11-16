@@ -4,10 +4,11 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 (経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md))。
 
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
-(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは今までどおり
-WSL が配り、runner は確かめるだけ (経緯は
+(`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
+同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
+Claude Code で使う W0-2 の手順など) は、受け持ちによらず runner が流す (経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
-dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`))。
+dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -316,8 +317,8 @@ gate が違うと、試験が落ちる
   下げる)。C のコンパイラが要る crate と HTTP の crate は足さない。serde_json の `preserve_order` は足さない (foldhash を引き、`Map` の並びを crate
   全体で変える)
 - `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
-- Claude の git の組 (`nix/lib/git-via-gh.nix`) と claude-notion.json の形 (`builtins.toJSON`) も、Linux の CI が `tests/claude_parity.rs` で
-  突き合わせる
+- settings.json の env に足す git の組と claude-notion.json の中身も、Linux の CI が `tests/claude_parity.rs` で、Linux の
+  `nix/home/modules/claude.nix` が sandbox のホストに書く claude-env.json・claude-notion.json (`nix eval`) と突き合わせる
 
 ### claude-skills と Windows のハブ (W0-2)
 

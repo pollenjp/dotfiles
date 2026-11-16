@@ -127,14 +127,18 @@ pub fn apply_blocker(host: &HostValues, steps: &[Box<dyn Step>]) -> Option<Row> 
             "ホストの値が無いので apply は止めた (check と apply --dry-run は流せる)",
         )),
         Source::File(p)
-            if !host.runner_enable && !steps.iter().any(|s| s.info().windows_only) =>
+            if !host.runner_enable
+                && !steps.iter().any(|s| {
+                    let info = s.info();
+                    info.windows_only && info.gate.off_reason(host).is_none()
+                }) =>
         {
             Some(
                 Row::new(
                     None,
                     "host",
                     Kind::Blocker,
-                    "受け持ちは WSL の setup (runner.enable が true でない) なので apply は止めた (選んだ手順に、Windows にしか無い手順が無い)",
+                    "受け持ちは WSL の setup (runner.enable が true でない) なので apply は止めた (選んだ手順に、このホストで on の Windows にしか無い手順が無い)",
                 )
                 .with_notes(vec![
                     "check と apply --dry-run は流せる".to_string(),
@@ -410,5 +414,18 @@ mod tests {
         assert!(apply_blocker(&host_of(Some("")), &mixed).is_none());
         let runner = host_of(Some("[runner]\nenable = true"));
         assert!(apply_blocker(&runner, &shared).is_none());
+        // Windows にしか無い手順が、このホストでは off (グループ client の道具の既定) なら、流すものが無いので止める
+        let off: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+            Box::new(Fixed(
+                StepInfo {
+                    gate: Gate::Tool("windowsClaudeCode"),
+                    ..windows_only("w")
+                },
+                Kind::Ok,
+            )),
+        ];
+        assert!(apply_blocker(&host_of(Some("group = \"client\"")), &off).is_some());
+        assert!(apply_blocker(&host_of(Some("group = \"personal\"")), &off).is_none());
     }
 }
