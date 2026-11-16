@@ -14,6 +14,7 @@
 //! Windows 側にあった。初めて流す Windows は記録が無いので、同じ commit から WSL が配った置き先は「同じ」(記録だけ作る) になる。
 //! manifest から消したファイルは Windows 側から消さない (アプリが持つファイルなので)。
 
+use super::ps1::ps_quote;
 use super::{Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
@@ -67,7 +68,7 @@ impl Step for Files {
                 return vec![Outcome::new(Kind::Failed, "配った記録が壊れている").note(e)];
             }
         };
-        let force = matches!(mode, Mode::Apply { force: true });
+        let force = mode.force();
         let (mut copied, mut updated, mut unchanged, mut conflicts, mut errors) = (0, 0, 0, 0, 0);
         let mut hints = Vec::new();
 
@@ -128,10 +129,17 @@ impl Step for Files {
                     let repo_file = ctx.repo_path(&f.repo_path);
                     ctx.say(format!(
                         "   Windows 側の中身を残すなら: Copy-Item -LiteralPath '{}' -Destination '{}' (PowerShell。取り込んだら repo で commit する)",
-                        quote(&dst_key),
-                        quote(&repo_file.to_string_lossy())
+                        ps_quote(&dst_key),
+                        ps_quote(&repo_file.to_string_lossy())
                     ));
-                    ctx.say("   repo 側で上書きするなら:   dotfiles apply --steps files --force");
+                    if ctx.host.runner_enable {
+                        ctx.say(
+                            "   repo 側で上書きするなら:   dotfiles apply --steps files --force",
+                        );
+                    } else {
+                        // 受け持ちが WSL の間は runner の apply は止まるので、WSL の手順を出す
+                        ctx.say("   repo 側で上書きするなら:   WSL で nix/scripts/bootstrap-windows-files.sh --force (受け持ちが WSL の setup の間。runner の apply は止まる)");
+                    }
                 }
                 Action::Copy | Action::Update | Action::Force => {
                     let label = match action {
@@ -147,7 +155,7 @@ impl Step for Files {
                                 _ => "repo 側が更新された (apply で上書きする)",
                             }
                         )),
-                        Mode::DryRun => ctx.say(format!("[dry-run] {label}: {dst_key}")),
+                        Mode::DryRun { .. } => ctx.say(format!("[dry-run] {label}: {dst_key}")),
                         Mode::Apply { .. } => match fsutil::read_then_write(&f.src, &f.dst) {
                             Ok(()) => {
                                 records.set(&dst_key, &want);
@@ -194,7 +202,7 @@ impl Step for Files {
         if errors > 0 {
             summary.push_str(&format!(" / エラー {errors}"));
         }
-        if mode == Mode::DryRun {
+        if matches!(mode, Mode::DryRun { .. }) {
             summary = format!("[dry-run] {summary}");
         }
         ctx.say("");
@@ -215,18 +223,14 @@ impl Step for Files {
         };
         let mut outcome = Outcome::new(kind, summary);
         if conflicts > 0 {
-            outcome = outcome.note("衝突は上の出力の解き方で直す (Windows 側の中身を repo へ取り込むか、dotfiles apply --steps files --force)");
-            if !ctx.host.runner_enable {
-                outcome = outcome.note("受け持ちは WSL の setup (runner.enable が true でない)。WSL が配った中身とこの clone の中身が違うなら、clone を同じ commit にそろえて見直す");
+            if ctx.host.runner_enable {
+                outcome = outcome.note("衝突は上の出力の解き方で直す (Windows 側の中身を repo へ取り込むか、dotfiles apply --steps files --force)");
+            } else {
+                outcome = outcome.note("受け持ちは WSL の setup (runner.enable が true でない)。WSL が配った中身とこの clone の中身が違うなら、clone を同じ commit にそろえて見直す。衝突を解くのは WSL の側 (bootstrap-windows-files.sh)");
             }
         }
         vec![outcome]
     }
-}
-
-/// PowerShell の一重引用符の中に入れる (`'` は `''`)。
-fn quote(s: &str) -> String {
-    s.replace('\'', "''")
 }
 
 /// 衝突の diff を `git diff --no-index` で出す (git が無ければ、そう出して進む)。
@@ -324,13 +328,25 @@ mod tests {
         }
 
         fn run(&self, mode: Mode) -> (Vec<Outcome>, String) {
+            self.run_as(mode, false)
+        }
+
+        /// `runner_enable` はホストの値の [runner] enable (false は受け持ちが WSL)
+        fn run_as(&self, mode: Mode, runner_enable: bool) -> (Vec<Outcome>, String) {
+            let groups = Groups::embedded().unwrap();
+            let host = if runner_enable {
+                crate::host::parse("[runner]\nenable = true\n", Path::new("h.toml"), groups)
+                    .unwrap()
+            } else {
+                HostValues::missing(Path::new("h.toml"), groups)
+            };
             let mut out = Vec::new();
             let outcomes = {
                 let mut ctx = Ctx {
                     repo: self.t.path().join("repo"),
                     roots: Roots::from_home(&self.home()),
                     state_dir: self.record_path().parent().unwrap().to_path_buf(),
-                    host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                    host,
                     sys: &self.sys,
                     out: &mut out,
                 };
@@ -403,7 +419,7 @@ mod tests {
         let e = Env::new();
         e.run(APPLY);
         write(&e.dst_a(), "changed on windows\n");
-        let (o, out) = e.run(APPLY);
+        let (o, out) = e.run_as(APPLY, true);
         assert_eq!(
             std::fs::read_to_string(e.dst_a()).unwrap(),
             "changed on windows\n"
@@ -414,6 +430,11 @@ mod tests {
         assert!(out.contains("   diff diff --no-index --no-color -- "));
         assert!(out.contains("dotfiles apply --steps files --force"));
         assert!(out.contains("Copy-Item -LiteralPath"));
+        // 受け持ちが WSL のホストでは、止まる apply ではなく WSL の手順を出す
+        let (o, out) = e.run_as(Mode::Check, false);
+        assert!(out.contains("WSL で nix/scripts/bootstrap-windows-files.sh --force"));
+        assert!(!out.contains("dotfiles apply --steps files --force"));
+        assert!(o[0].notes[0].contains("受け持ちは WSL の setup"));
         assert_eq!(
             e.records()[e.dst_a().to_string_lossy().as_ref()],
             fsutil::sha256_bytes(b"A1\n")
@@ -436,6 +457,47 @@ mod tests {
     }
 
     #[test]
+    fn check_and_dry_run_never_write_on_conflict() {
+        let e = Env::new();
+        e.run(APPLY);
+        write(&e.dst_a(), "changed on windows\n");
+        let before = std::fs::read_to_string(e.record_path()).unwrap();
+        for mode in [
+            Mode::Check,
+            Mode::DryRun { force: false },
+            Mode::DryRun { force: true },
+        ] {
+            let _ = e.run(mode);
+            assert_eq!(
+                std::fs::read_to_string(e.dst_a()).unwrap(),
+                "changed on windows\n",
+                "{mode:?}"
+            );
+            assert_eq!(
+                std::fs::read_to_string(e.record_path()).unwrap(),
+                before,
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// apply --dry-run --force は、衝突を「上書き (--force)」として予告する (WSL の --dry-run --force と同じ)
+    #[test]
+    fn dry_run_with_force_previews_overwrite() {
+        let e = Env::new();
+        write(&e.dst_a(), "made by the app\n");
+        let (o, out) = e.run(Mode::DryRun { force: true });
+        assert!(out.contains("[dry-run] 上書き (--force): "), "{out}");
+        assert!(!out.contains("衝突:"));
+        assert_eq!(o[0].kind, Kind::Fix);
+        assert_eq!(o[0].text, "[dry-run] コピー 1 / 上書き 1 / 同じ 0 / 衝突 0");
+        assert_eq!(
+            std::fs::read_to_string(e.dst_a()).unwrap(),
+            "made by the app\n"
+        );
+    }
+
+    #[test]
     fn force_overwrites_conflicts() {
         let e = Env::new();
         write(&e.dst_a(), "made by the app\n");
@@ -453,7 +515,7 @@ mod tests {
     fn dry_run_and_check_write_nothing() {
         let e = Env::new();
         write(&e.dst_b(), "B1\n");
-        let (o, out) = e.run(Mode::DryRun);
+        let (o, out) = e.run(Mode::DryRun { force: false });
         assert!(out.contains("[dry-run] コピー: "));
         assert_eq!(o[0].text, "[dry-run] コピー 1 / 上書き 0 / 同じ 1 / 衝突 0");
         assert_eq!(o[0].kind, Kind::Missing);

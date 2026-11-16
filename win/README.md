@@ -177,7 +177,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
 ```powershell
 dotfiles list                          # 手順と、このホストでの on/off・runner に移したか
 dotfiles check                         # 手順を順に確かめる (何も書かない)
-dotfiles check --steps files,ntn       # 手順を id で絞る
+dotfiles check --steps files,ntn       # 手順を id で絞る (PowerShell が配列にした files,ntn は dotfiles 関数が , でつなぎ直す)
 dotfiles apply --dry-run               # apply がすることを出す (何も書かない。受け持ちによらず流せる)
 dotfiles apply                         # 揃える (このホストの [runner] enable = true のときだけ。でなければ止まって 1)
 dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
@@ -189,6 +189,8 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
   ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
   環境変数が無い)
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
+- 受け持ちが WSL のホストでは apply は止まるので、締めの行の「dotfiles apply で揃える」の下に、WSL の `~/dotfiles/setup --update` で揃える道を添える
+  (files の衝突の解き方も、WSL の `bootstrap-windows-files.sh --force` を出す)
 
 ### ホストの値
 
@@ -249,7 +251,8 @@ enable = false                # 受け持ちの印。true で apply を許す
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
   引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
   `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
-- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒)。時間切れなら pwsh を止める (子の winget までは止めない)
+- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
+  時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無い 9 手順は、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
   fancyzones → international → google-ime → pin-updates)
 
@@ -258,7 +261,8 @@ enable = false                # 受け持ちの印。true で apply を許す
 1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
    コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
    `ctx.sibling("claude-skills")`・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
-2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)
+2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
+   足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
 4. この節の表に行を足す
 

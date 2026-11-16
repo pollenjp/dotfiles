@@ -317,7 +317,7 @@ fn steps_command(
             if let Some(b) = runner::apply_blocker(&ctx.host) {
                 ctx.say(format!("※ 本番の apply は止まる: {}", b.text));
             }
-            let rows = runner::execute(&mut ctx, Mode::DryRun, &selected);
+            let rows = runner::execute(&mut ctx, Mode::DryRun { force: a.force }, &selected);
             Ok(runner::finish(&mut ctx, "apply --dry-run", &rows))
         }
         _ => {

@@ -3,7 +3,7 @@
 //! ## 確かめること
 //!
 //! - 本物の `win/manifest.toml` の計画 (置き先を解いた JSON) が、nix-instantiate の計画と同じ
-//! - 誤りのある manifest を両方が止め、誤りの無い manifest は両方が通して計画も同じ
+//! - 誤りのある manifest を両方が止め、止めた文も同じ (Nix の `error: win/manifest.toml: …` の行)。誤りの無い manifest は両方が通して計画も同じ
 //!
 //! nix-instantiate が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
 
@@ -138,7 +138,15 @@ fn fixtures_are_judged_the_same() {
         let rust = rust_plan(&repo);
         match (&nix, &rust) {
             (Ok(n), Ok(r)) => assert_eq!(r, n, "manifest:\n{text}"),
-            (Err(_), Err(_)) => {}
+            (Err(n), Err(r)) => {
+                // nix の stderr の最後の「error: win/manifest.toml: …」の行が、runner の文と同じ
+                let nix_msg = n
+                    .lines()
+                    .rev()
+                    .find_map(|l| l.trim().strip_prefix("error: "))
+                    .filter(|m| m.starts_with("win/manifest.toml: "));
+                assert_eq!(Some(r.as_str()), nix_msg, "manifest:\n{text}\nnix:\n{n}");
+            }
             _ => panic!("判定が違う manifest:\n{text}\nnix: {nix:?}\nrunner: {rust:?}"),
         }
         assert_eq!(rust.is_ok(), good.contains(text), "manifest:\n{text}");

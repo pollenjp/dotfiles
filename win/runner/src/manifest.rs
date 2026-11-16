@@ -4,6 +4,13 @@
 //! `tests/manifest_parity.rs` で、同じ manifest を両方に通して突き合わせる (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H)。
 //! 加えて、Windows のパスの要素として読めないもの (`:` を含む要素。ドライブや代替データストリームに読まれる) も止める (Nix の側には無い)。
 //!
+//! Nix との違いで、残しているもの (どちらも本物の manifest は CI の `bootstrap-windows-files.sh --check` が守るので、困らない):
+//!
+//! - 置き先の重複を比べる小文字化は Unicode 全体 (Nix は ASCII だけ)。NTFS は `Ä.json` と `ä.json` も同じファイルとして扱うので、
+//!   runner は止める
+//! - TOML は 1.1 として読む (toml の crate の版)。`"\e"` や改行を含む inline table など、Nix の fromTOML (TOML 1.0) が止める書き方を
+//!   runner は通す
+//!
 //! パスは要素ごとに `push` する。`Path::join` に `C:/…` のような要素を渡すと、Windows では前のパスが捨てられるため。
 
 use std::path::{Path, PathBuf};

@@ -78,6 +78,13 @@ pub fn finish(ctx: &mut Ctx, title: &str, rows: &[Row]) -> i32 {
     for l in report::verdict_lines(rows) {
         ctx.say(l);
     }
+    // 受け持ちが WSL のホストでは apply は止まるので、締めの行の「dotfiles apply で揃える・直す」の代わりの道を添える
+    let fixable = rows
+        .iter()
+        .any(|r| matches!(r.kind, Kind::Missing | Kind::Fix));
+    if fixable && !ctx.host.runner_enable {
+        ctx.say("※ このホストの受け持ちは WSL の setup なので、dotfiles apply は止まる。揃えるのは WSL の ~/dotfiles/setup --update (受け持ちを runner に切り替えるまで)");
+    }
     report::exit_code(rows)
 }
 

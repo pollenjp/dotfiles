@@ -86,6 +86,9 @@ pub struct Ps1Spec {
     pub releases_file: bool,
     /// 3 でも、出力にこれがあれば入れられないので打たない (google-ime-install の「固定した版が winget に無い」)
     pub missing_blocked: Option<&'static str>,
+    /// 出力の印ごとの直し方 (上から見て最初に当たったもの)。当たれば `manual_fix`・`sync_fix` の代わりに出す (google-ime-install の
+    /// 「下げない」「winget に無い」「比べられない」。揃えるコマンドを打っても直らないとき)
+    pub output_fixes: &'static [(&'static str, &'static str)],
 }
 
 const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから流し直す (残ったまま流し直すと、別のインストールが進行中 (1618) で落ちる)";
@@ -111,11 +114,27 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         synced: &[],
         manual_fix: &[
-            "上の出力の ⚠️ の行の手順で直す。上げるのは PowerShell の Install-GoogleJapaneseInput (日本語入力を使っているアプリをできるだけ閉じる。UAC の確認が出る)。runner は上げない (入れ替えるとアプリや Windows の再起動が要ることがある)",
+            "揃えるには PowerShell で Install-GoogleJapaneseInput を打つ (入れる・上げるときは Windows に UAC の確認が出る。上げる前に、日本語入力を使っているアプリをできるだけ閉じる。runner は上げない: 入れ替えるとアプリや Windows の再起動が要ることがある)",
         ],
-        sync_fix: &[],
+        sync_fix: &[
+            "入れるには PowerShell で Install-GoogleJapaneseInput を打つか、dotfiles apply --steps google-ime-install を流し直す (Windows に UAC の確認が出る)",
+        ],
         releases_file: false,
         missing_blocked: Some("winget show --versions に無い"),
+        output_fixes: &[
+            (
+                "(下げない)",
+                "入っている版の方が新しいので、下げはしない。上の ※ のとおり、repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を上げる",
+            ),
+            (
+                "winget show --versions に無い",
+                "固定した版が winget に無いので、入れることも上げることもできない。repo の版 (Install-GoogleJapaneseInput.ps1 の -Version) を winget show --id Google.JapaneseIME --versions にある版へ変える",
+            ),
+            (
+                "比べられない",
+                "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で winget list --id Google.JapaneseIME を打って入っている版を確かめる",
+            ),
+        ],
     },
     Ps1Spec {
         id: "openssh",
@@ -145,6 +164,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         missing_blocked: None,
+        output_fixes: &[],
     },
     Ps1Spec {
         id: "claude-code",
@@ -157,7 +177,8 @@ pub const SPECS: &[Ps1Spec] = &[
         package: "Claude Code (winget の Anthropic.ClaudeCode)",
         header: Header::Contains("Claude Code (winget の Anthropic.ClaudeCode"),
         check_secs: 120,
-        install_secs: 600,
+        // claude.exe は約 340 MB で、winget download と install で 2 回落とす (WSL の bootstrap-windows-claude-code.sh の apply_timeout)
+        install_secs: 1800,
         policy: Policy::Sync,
         uac: false,
         ok_text: "Windows の Claude Code は、dotfiles で固定した版に揃っています。",
@@ -171,6 +192,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         missing_blocked: None,
+        output_fixes: &[],
     },
     Ps1Spec {
         id: "herdr-app",
@@ -197,6 +219,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: true,
         missing_blocked: None,
+        output_fixes: &[],
     },
     Ps1Spec {
         id: "herdr",
@@ -221,6 +244,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sync_fix: &["入れ直すには PowerShell で Install-Herdr -IfMissing を打つ"],
         releases_file: false,
         missing_blocked: None,
+        output_fixes: &[],
     },
     Ps1Spec {
         id: "ntn",
@@ -247,6 +271,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         missing_blocked: None,
+        output_fixes: &[],
     },
     Ps1Spec {
         id: "type-clipboard",
@@ -273,6 +298,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sync_fix: &["入れ直すには PowerShell で Install-TypeClipboard -IfMissing を打つ"],
         releases_file: false,
         missing_blocked: None,
+        output_fixes: &[],
     },
 ];
 
@@ -315,9 +341,16 @@ fn read_verdict(spec: &Ps1Spec, lines: &[String]) -> Verdict {
 
 pub struct Ps1Step(pub &'static Ps1Spec);
 
-/// PowerShell の一重引用符の中に入れる (`'` は `''`)。
+/// PowerShell の一重引用符の中に入れる。`'` と、PowerShell が `'` と同じに読む U+2018〜U+201B (‘ ’ ‚ ‛) は、どれも重ねる。
 pub fn ps_quote(s: &str) -> String {
-    s.replace('\'', "''")
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        out.push(c);
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}') {
+            out.push(c);
+        }
+    }
+    out
 }
 
 /// pwsh (無ければ Windows PowerShell) で ps1 を流すコマンド。`script_args` は ps1 に渡す引数 (`" -Check"` など。空なら揃える)。
@@ -374,6 +407,16 @@ impl Ps1Step {
         } else {
             base.to_string()
         }
+    }
+
+    /// 直し方: 出力の印 (`output_fixes`) に当たればそれ、無ければ `default`。
+    fn fixes(&self, lines: &[String], default: &[&'static str]) -> Vec<String> {
+        for (marker, fix) in self.0.output_fixes {
+            if lines.iter().any(|l| l.contains(marker)) {
+                return vec![fix.to_string()];
+            }
+        }
+        default.iter().map(|n| n.to_string()).collect()
     }
 
     fn manual_command(&self) -> String {
@@ -502,18 +545,29 @@ impl Step for Ps1Step {
                     _ => "終了コードが無い".to_string(),
                 };
                 vec![
-                    Outcome::new(Kind::Failed, format!("{name} -Check で確かめられなかった ({why})"))
-                        .note(self.manual_command()),
+                    Outcome::new(
+                        Kind::Failed,
+                        format!("{name} -Check で確かめられなかった ({why})"),
+                    )
+                    .note(self.manual_command()),
                 ]
             }
-            Plan::Blocked => vec![
-                Outcome::new(
+            Plan::Blocked => {
+                let mut o = Outcome::new(
                     Kind::Manual,
-                    format!("入っていないが、固定した版が winget に無いので入れられない ({name} の -Version)"),
-                )
-                .note("上の出力の ⚠️ の行の手順で -Version を winget にある版へ変える"),
-            ],
-            Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => self.warn(plan, v),
+                    format!(
+                        "入っていないが、固定した版が winget に無いので入れられない ({name} の -Version)"
+                    ),
+                );
+                for n in self.fixes(
+                    &r.output,
+                    &["上の出力の ⚠️ の行の手順で -Version を winget にある版へ変える"],
+                ) {
+                    o = o.note(n);
+                }
+                vec![o]
+            }
+            Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => self.warn(plan, v, &r.output),
             Plan::Install | Plan::Sync | Plan::SyncIfMissing => {
                 let (args, label) = match plan {
                     Plan::Install => (" -IfMissing", "入れる"),
@@ -523,7 +577,7 @@ impl Step for Ps1Step {
                 let shown = format!("{name}{args}");
                 match mode {
                     Mode::Check => vec![self.pending_outcome(plan, &shown)],
-                    Mode::DryRun => {
+                    Mode::DryRun { .. } => {
                         ctx.say(format!("[dry-run] {shown} を流す ({label})"));
                         vec![self.pending_outcome(plan, &shown)]
                     }
@@ -550,7 +604,7 @@ impl Ps1Step {
     }
 
     /// 知らせるだけの行
-    fn warn(&self, plan: Plan, v: Verdict) -> Vec<Outcome> {
+    fn warn(&self, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
         let s = self.0;
         match plan {
             Plan::PathOnly => {
@@ -586,8 +640,8 @@ impl Ps1Step {
                         o = o.note(*n);
                     }
                 }
-                for n in s.manual_fix {
-                    o = o.note(*n);
+                for n in self.fixes(lines, s.manual_fix) {
+                    o = o.note(n);
                 }
                 vec![o]
             }
@@ -642,8 +696,8 @@ impl Ps1Step {
             if s.uac {
                 o = o.note(UAC_LEFT);
             }
-            for n in s.sync_fix {
-                o = o.note(*n);
+            for n in self.fixes(&r.output, s.sync_fix) {
+                o = o.note(n);
             }
             return vec![o];
         }
@@ -691,8 +745,8 @@ impl Ps1Step {
             Kind::Failed,
             format!("{did}られなかった ({why}。上の出力を見る)"),
         );
-        for n in s.sync_fix {
-            o = o.note(*n);
+        for n in self.fixes(&r.output, s.sync_fix) {
+            o = o.note(n);
         }
         if v.path && s.policy == Policy::Sync {
             for n in s.manual_fix {
@@ -824,7 +878,7 @@ mod tests {
         assert_eq!(ends(&calls), vec!["-Check"]);
 
         let sys2 = sys(check.clone(), (0, vec![]));
-        let (o, out, calls) = run("ntn", &sys2, Mode::DryRun);
+        let (o, out, calls) = run("ntn", &sys2, Mode::DryRun { force: false });
         assert_eq!(o[0].kind, Kind::Missing);
         assert!(out.contains("[dry-run] Install-Ntn.ps1 -IfMissing を流す (入れる)"));
         assert_eq!(ends(&calls), vec!["-Check"]);
@@ -1077,5 +1131,155 @@ mod tests {
             fake.calls.borrow()[0].program,
             PathBuf::from("C:/Windows/powershell.exe")
         );
+    }
+
+    /// 待つ秒数が WSL の wrapper (nix/scripts/bootstrap-windows-<id>.sh の timeout) と同じ
+    #[test]
+    fn timeouts_match_wsl_wrappers() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        for s in SPECS {
+            let script = repo
+                .join("nix")
+                .join("scripts")
+                .join(format!("bootstrap-windows-{}.sh", s.id));
+            let text = std::fs::read_to_string(&script).unwrap();
+            // apply_timeout=1800 のような、数を入れる変数
+            let vars: std::collections::BTreeMap<&str, u64> = text
+                .lines()
+                .filter_map(|l| {
+                    let (k, v) = l.trim().split_once('=')?;
+                    if k.chars().all(|c| c.is_ascii_lowercase() || c == '_') {
+                        Some((k, v.parse().ok()?))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let secs = |line: &str| -> Option<u64> {
+                let rest = line.split("timeout ").nth(1)?;
+                let tok = rest.split_whitespace().next()?.trim_matches('"');
+                match tok.strip_prefix("${").and_then(|t| t.strip_suffix('}')) {
+                    Some(var) => vars.get(var).copied(),
+                    None => tok.parse().ok(),
+                }
+            };
+            let timed = |l: &&str| l.contains("timeout ") && l.contains("pwsh.exe");
+            let checks: Vec<u64> = text
+                .lines()
+                .filter(timed)
+                .filter(|l| l.contains("pwsh_command \" -Check\""))
+                .filter_map(secs)
+                .collect();
+            let acts: Vec<u64> = text
+                .lines()
+                .filter(timed)
+                .filter(|l| {
+                    l.contains("pwsh_command \" -IfMissing\"") || l.contains("pwsh_command \"\")")
+                })
+                .filter_map(secs)
+                .collect();
+            assert_eq!(checks, vec![s.check_secs], "{} の -Check", s.id);
+            assert!(!acts.is_empty(), "{} の入れる・揃える", s.id);
+            for a in acts {
+                assert_eq!(a, s.install_secs, "{} の入れる・揃える", s.id);
+            }
+        }
+    }
+
+    #[test]
+    fn google_ime_picks_fix_by_output() {
+        let s = spec("google-ime-install");
+        for (line, want) in [
+            (
+                "⚠ 固定した版 : 3.35 → 入っている版の方が新しい (下げない)",
+                "下げはしない",
+            ),
+            ("⚠ 入っている版 : 比べられない", "入っている版が読めない"),
+            (
+                "⚠ 固定した版 : 3.35 → 上げる",
+                "Install-GoogleJapaneseInput を打つ",
+            ),
+        ] {
+            let sys1 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+            let (o, _, _) = run("google-ime-install", &sys1, APPLY);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(o[0].notes.len(), 1, "{line}");
+            assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
+        }
+        let blocked = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠ 固定した版 : 3.35 → winget show --versions に無い".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, _, _) = run("google-ime-install", &blocked, APPLY);
+        assert!(o[0].notes[0].contains("winget show --id Google.JapaneseIME --versions"));
+    }
+
+    #[test]
+    fn claude_code_waits_like_wsl_when_syncing() {
+        let s = spec("claude-code");
+        let drift = (
+            1,
+            vec![
+                header_line(s),
+                "⚠️ 固定した版と揃っていない → Install-ClaudeCode で揃える ⚠️".into(),
+            ],
+        );
+        let sys1 = sys(drift, (0, vec![]));
+        let _ = run("claude-code", &sys1, APPLY);
+        let calls = sys1.calls.borrow();
+        assert_eq!(calls[0].timeout, Some(Duration::from_secs(120)));
+        assert_eq!(calls[1].timeout, Some(Duration::from_secs(1800)));
+    }
+
+    #[test]
+    fn quotes_powershell_single_quotes_and_lookalikes() {
+        assert_eq!(ps_quote("a'b"), "a''b");
+        assert_eq!(
+            ps_quote("o\u{2019}neil\u{2018}x"),
+            "o\u{2019}\u{2019}neil\u{2018}\u{2018}x"
+        );
+        assert_eq!(ps_quote("C:\\Users\\a b"), "C:\\Users\\a b");
+    }
+
+    /// 本物の PowerShell で、空白と ' を含むパスの ps1 を呼び、UTF-8 の ⚠️ と終了コードが届く (Windows の CI)
+    #[cfg(windows)]
+    #[test]
+    fn real_powershell_runs_a_script_with_awkward_path() {
+        use crate::process::{RealSys, Sys};
+        let t = TempDir::new("pwsh path");
+        let dir = t.path().join("a b'c");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("Install-Test.ps1");
+        std::fs::write(
+            &script,
+            "\u{feff}param([switch]$Check)\nif ($Check) { Write-Output '⚠️ テスト → Install-Test で入れる ⚠️'; exit 3 }\nexit 0\n",
+        )
+        .unwrap();
+        for shell in ["powershell", "pwsh"] {
+            let Some(path) = RealSys.which(shell) else {
+                continue;
+            };
+            let spec = powershell_command(
+                path,
+                &script.to_string_lossy(),
+                " -Check",
+                Duration::from_secs(60),
+            );
+            let r = RealSys.run(&spec, &mut |_| {});
+            assert_eq!(r.exit, Exit::Code(3), "{shell}: {:?}", r.output);
+            assert!(
+                r.output
+                    .iter()
+                    .any(|l| l == "⚠️ テスト → Install-Test で入れる ⚠️"),
+                "{shell}: {:?}",
+                r.output
+            );
+        }
     }
 }

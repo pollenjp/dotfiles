@@ -80,8 +80,8 @@ pub struct StepInfo {
 pub enum Mode {
     /// 確かめるだけ (何も書かない)
     Check,
-    /// apply がすることを出すだけ (何も書かない)
-    DryRun,
+    /// apply がすることを出すだけ (何も書かない)。`force` は apply の --force のときと同じ予告を出す
+    DryRun { force: bool },
     /// 揃える。`force` は files の衝突も上書きする
     Apply { force: bool },
 }
@@ -89,6 +89,14 @@ pub enum Mode {
 impl Mode {
     pub fn writes(self) -> bool {
         matches!(self, Mode::Apply { .. })
+    }
+
+    /// --force (files の衝突も上書きする・dry-run ならそう予告する)
+    pub fn force(self) -> bool {
+        matches!(
+            self,
+            Mode::DryRun { force: true } | Mode::Apply { force: true }
+        )
     }
 }
 
@@ -183,15 +191,16 @@ mod tests {
     #[test]
     fn wsl_scripts_exist_for_every_windows_step() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-        for s in all() {
-            let info = s.info();
-            if info.id == "bootstrap" {
-                continue;
-            }
+        // WSL から写した手順 (files・ps1) と、まだ無い手順には、同じ名前の WSL の script がある。bootstrap と、W0-2 などで足す
+        // Windows にしか無い手順は WSL の script を持たないので見ない
+        let ported_from_wsl = std::iter::once("files")
+            .chain(ps1::SPECS.iter().map(|s| s.id))
+            .chain(pending::PENDING.iter().map(|p| p.id));
+        for id in ported_from_wsl {
             let script = repo
                 .join("nix")
                 .join("scripts")
-                .join(format!("bootstrap-windows-{}.sh", info.id));
+                .join(format!("bootstrap-windows-{id}.sh"));
             assert!(script.is_file(), "{} が無い", script.display());
         }
         // WSL の Windows の手順は全部、一覧にある (移したか、まだ無いかのどちらか)

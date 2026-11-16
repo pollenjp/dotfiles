@@ -87,16 +87,29 @@ function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1
 # build して起こす。cargo は win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は
 # 既定の toolchain を入れていないので、--manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
 function dotfiles {
-    $runner = Join-Path $HOME 'ghq\github.com\pollenjp\dotfiles\win\runner'
+    $runner = [IO.Path]::Combine($HOME, 'ghq', 'github.com', 'pollenjp', 'dotfiles', 'win', 'runner')
     if (-not (Test-Path -LiteralPath (Join-Path $runner 'Cargo.toml'))) {
         Write-Host "dotfiles の runner がありません: $runner (先に win\bootstrap\Install-Bootstrap.ps1 で clone する)" -ForegroundColor Yellow
         $global:LASTEXITCODE = 2
         return
     }
+    $runnerArgs = @(ConvertTo-DotfilesRunnerArgs -Arguments $args)
     Push-Location -LiteralPath $runner
     try {
-        cargo run --quiet --release --locked -- @args
+        # '--' は引用符で囲む。素の -- は PowerShell が引数の終わりの印として読み、版や呼び先によっては cargo に届かない
+        # (届かないと、runner への --steps などを cargo が自分の引数として読んで落ちる)
+        cargo run --quiet --release --locked '--' @runnerArgs
     } finally {
         Pop-Location
+    }
+}
+
+# dotfiles 関数が runner に渡す引数。PowerShell は `--steps files,ntn` の `files,ntn` を配列にし (`--steps=files,ntn` も
+# `--steps=files` と `ntn` の配列にする)、関数の @args はそれを別々の引数に広げるので、配列は , でつなぎ直して 1 つの引数にする
+# (runner は `--steps a,b` の形で受ける)。
+function ConvertTo-DotfilesRunnerArgs {
+    param([object[]]$Arguments)
+    foreach ($a in $Arguments) {
+        if ($a -is [array]) { ($a | ForEach-Object { "$_" }) -join ',' } else { "$a" }
     }
 }

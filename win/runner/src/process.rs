@@ -89,8 +89,10 @@ pub trait Sys {
 /// 本物の口。
 pub struct RealSys;
 
-/// プロセスが終わった後、孫が pipe を持ったままのときに出力を待つ長さ
+/// プロセスが終わった後、孫が pipe を持ったままのときに、新しい行が来ないまま待つ長さ
 const DRAIN_AFTER_EXIT: Duration = Duration::from_secs(2);
+/// プロセスが終わった後に、孫の出力を待つ上限 (孫が書き続けても返る)
+const DRAIN_LIMIT: Duration = Duration::from_secs(30);
 
 impl Sys for RealSys {
     fn run(&self, spec: &CommandSpec, on_line: &mut dyn FnMut(&str)) -> RunResult {
@@ -125,19 +127,25 @@ impl Sys for RealSys {
         let mut output = Vec::new();
         let mut open = readers;
         let mut exited: Option<(std::process::ExitStatus, Instant)> = None;
+        // 終わった後、新しい行が来なくなってからの時間を数える起点。溜まった行を読み終える前に打ち切らず、孫が pipe を持った
+        // ままでも返る
+        let mut quiet_since = Instant::now();
         loop {
             let mut wait = Duration::from_millis(100);
-            if let Some(d) = deadline {
+            if exited.is_none()
+                && let Some(d) = deadline
+            {
                 let now = Instant::now();
-                if now >= d && exited.is_none() {
+                if now >= d {
                     let _ = child.kill();
                     let _ = child.wait();
+                    drain_ready(&rx, on_line, &mut output, &mut open);
                     return RunResult {
                         exit: Exit::TimedOut,
                         output,
                     };
                 }
-                wait = wait.min(d.saturating_duration_since(now));
+                wait = wait.min(d - now);
             }
             if open == 0 {
                 // pipe は両方閉じたが、プロセスがまだ終わっていない。終わるのを待つ (空回りしない)
@@ -147,6 +155,7 @@ impl Sys for RealSys {
                     Ok(Some(line)) => {
                         on_line(&line);
                         output.push(line);
+                        quiet_since = Instant::now();
                     }
                     Ok(None) => open -= 1,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -157,17 +166,25 @@ impl Sys for RealSys {
                 && let Ok(Some(status)) = child.try_wait()
             {
                 exited = Some((status, Instant::now()));
+                quiet_since = Instant::now();
             }
-            if let Some((status, at)) = exited
-                && (open == 0 || at.elapsed() >= DRAIN_AFTER_EXIT)
-            {
-                return RunResult {
-                    exit: match status.code() {
-                        Some(c) => Exit::Code(c),
-                        None => Exit::NoCode,
-                    },
-                    output,
-                };
+            if let Some((status, at)) = exited {
+                // 溜まっている行は待たずに全部受ける
+                if drain_ready(&rx, on_line, &mut output, &mut open) {
+                    quiet_since = Instant::now();
+                }
+                if open == 0
+                    || quiet_since.elapsed() >= DRAIN_AFTER_EXIT
+                    || at.elapsed() >= DRAIN_LIMIT
+                {
+                    return RunResult {
+                        exit: match status.code() {
+                            Some(c) => Exit::Code(c),
+                            None => Exit::NoCode,
+                        },
+                        output,
+                    };
+                }
             }
         }
     }
@@ -185,28 +202,63 @@ impl Sys for RealSys {
     }
 }
 
+/// PATH で探す名前。Windows で拡張子の無い名前は .exe・.cmd・.bat だけを試す (拡張子の無い同名のファイル (npm の shim など) は
+/// 起こせないので選ばない)。
 fn candidate_names(name: &str) -> Vec<String> {
-    let mut names = vec![name.to_string()];
     if cfg!(windows) && Path::new(name).extension().is_none() {
-        for ext in ["exe", "cmd", "bat"] {
-            names.push(format!("{name}.{ext}"));
+        ["exe", "cmd", "bat"]
+            .iter()
+            .map(|ext| format!("{name}.{ext}"))
+            .collect()
+    } else {
+        vec![name.to_string()]
+    }
+}
+
+/// 溜まっている行を待たずに全部受ける。1 行でも受けたら true。
+fn drain_ready(
+    rx: &mpsc::Receiver<Option<String>>,
+    on_line: &mut dyn FnMut(&str),
+    output: &mut Vec<String>,
+    open: &mut usize,
+) -> bool {
+    let mut got = false;
+    loop {
+        match rx.try_recv() {
+            Ok(Some(line)) => {
+                on_line(&line);
+                output.push(line);
+                got = true;
+            }
+            Ok(None) => *open = open.saturating_sub(1),
+            Err(mpsc::TryRecvError::Empty) => return got,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                *open = 0;
+                return got;
+            }
         }
     }
-    names
 }
 
 fn spawn_reader(stream: impl Read + Send + 'static, tx: mpsc::Sender<Option<String>>) {
     std::thread::spawn(move || {
         let mut reader = BufReader::new(stream);
         let mut buf = Vec::new();
+        let mut first = true;
         loop {
             buf.clear();
             match reader.read_until(b'\n', &mut buf) {
                 Ok(0) | Err(_) => break,
                 Ok(_) => {
                     let line = String::from_utf8_lossy(&buf);
-                    let line = line.trim_end_matches(['\n', '\r']).to_string();
-                    if tx.send(Some(line)).is_err() {
+                    let mut line = line.trim_end_matches(['\n', '\r']);
+                    if first {
+                        // Windows PowerShell 5.1 は [Console]::OutputEncoding を UTF-8 (BOM 付きの Encoding) にすると、出力の頭に BOM を
+                        // 書くことがある。見出しや締めの行の読みに混ざらないよう落とす
+                        line = line.trim_start_matches('\u{feff}');
+                        first = false;
+                    }
+                    if tx.send(Some(line.to_string())).is_err() {
                         return;
                     }
                 }
@@ -299,5 +351,52 @@ mod tests {
     fn strips_ansi_colors() {
         assert_eq!(strip_ansi("\u{1b}[33m⚠ x\u{1b}[0m"), "⚠ x");
         assert_eq!(strip_ansi("plain"), "plain");
+    }
+
+    /// 終わった後に溜まっている行を、受ける側が遅くても全部受ける (締めの行は出力の最後にあるので、落とすと判定を誤る)
+    #[test]
+    fn keeps_every_line_even_when_the_receiver_is_slow() {
+        #[cfg(unix)]
+        let spec = shell("seq 1 3001");
+        #[cfg(windows)]
+        let spec = CommandSpec::new("powershell")
+            .arg("-NoProfile")
+            .arg("-NonInteractive")
+            .arg("-Command")
+            .arg("1..3001");
+        let r = RealSys.run(&spec, &mut |_| {
+            std::thread::sleep(Duration::from_millis(1));
+        });
+        assert_eq!(r.exit, Exit::Code(0));
+        assert_eq!(r.output.len(), 3001);
+        assert_eq!(r.output.last().map(|l| l.trim()), Some("3001"));
+    }
+
+    /// 孫が pipe を持ったままでも、終わってから新しい行が来なくなれば返る
+    #[cfg(unix)]
+    #[test]
+    fn returns_while_a_grandchild_holds_the_pipe() {
+        let start = Instant::now();
+        let r = RealSys.run(&shell("sleep 8 & echo done"), &mut |_| {});
+        assert_eq!(r.exit, Exit::Code(0));
+        assert_eq!(r.output, vec!["done"]);
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn candidate_names_per_os() {
+        if cfg!(windows) {
+            assert_eq!(
+                candidate_names("git"),
+                vec!["git.exe", "git.cmd", "git.bat"]
+            );
+            assert_eq!(candidate_names("pwsh.exe"), vec!["pwsh.exe"]);
+        } else {
+            assert_eq!(candidate_names("git"), vec!["git"]);
+        }
     }
 }
