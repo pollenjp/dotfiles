@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck shell=bash
 #
-# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、bootstrap が入れる
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale と、bootstrap が入れる
 # Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる。
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
@@ -14,6 +14,7 @@
 #   google-japanese-input   google-japanese-input/Install-GoogleJapaneseInput.ps1    winget-pkgs に載った日
 #   ntn                     ntn/Install-Ntn.ps1                                      winget-pkgs に載った日
 #   claude-code             claude-code/Install-ClaudeCode.ps1                       GitHub (anthropics/claude-code) の release
+#   tailscale               tailscale/Install-Tailscale.ps1                          winget-pkgs に載った日
 #   git                     bootstrap/Install-Bootstrap.ps1 (-GitVersion)            GitHub (git-for-windows/git) の release
 #   gh                      bootstrap/Install-Bootstrap.ps1 (-GhVersion)             GitHub (cli/cli) の release
 #   vs-buildtools           bootstrap/Install-Bootstrap.ps1 (-VsBuildToolsVersion)   winget-pkgs に載った日
@@ -46,6 +47,8 @@
 #   ntn.dev に置く)。winget で入れられるようになった日なので、上流の公開の日より遅いか同じ
 # - claude-code: GitHub (anthropics/claude-code) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。
 #   winget の版 (X.Y.Z) と、tag の v の後ろで突き合わせる。winget には数日遅れて載り、載らない版もある
+# - tailscale: winget-pkgs に足した commit の日。Tailscale は GitHub (tailscale/tailscale) に release を出すが、Windows の MSI を
+#   出さない版 (1.98.5・1.102.5) は winget に載らない。GitHub と比べると「GitHub に出た版が winget に無い」で落ちうるので比べない
 # - git: GitHub (git-for-windows/git) の release (prerelease でないもの) が出た日。tag は v<X.Y.Z>.windows.<N> で、winget の
 #   Git.Git の版は N が 1 なら X.Y.Z、ほかは X.Y.Z.N (v2.56.0.windows.4 → 2.56.0.4)。rc は prerelease で出る
 # - gh: GitHub (cli/cli) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。tag の v の後ろで突き合わせる
@@ -66,7 +69,7 @@
 #   openssh・herdr・claude-code・git・gh だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
 #   Microsoft.OpenSSH.Preview ができてから、Beta には 9.5.0.0 より新しい版が来なかった)。比べるのは winget に
 #   載る側の release だけ (どれも prerelease を除く)。新しいかは版で比べる。google-japanese-input と ntn は比べる
-#   相手が無く、ID が移っても気付けない (vs-buildtools・rustup も同じ)
+#   相手が無く、ID が移っても気付けない (vs-buildtools・rustup・tailscale も同じ)
 #
 # 次は新しい版の知らせではなく、壊れていることの知らせなので、猶予を置かない。
 #
@@ -132,7 +135,7 @@ Windows で winget の版を固定しているものが、winget の最新に追
   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
   check-winget-version.sh --json --offline <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
-  名前: openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・git・gh・vs-buildtools・rustup
   ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。git・gh・vs-buildtools・rustup は
   win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt。
 
@@ -197,6 +200,8 @@ nested_dirs=()
 channel_desc=''
 key_missing=''
 moved_example=''
+# 固定した版に許す形 (空なら version_re。winget-pkgs の版より狭くしたい名前だけが書く)
+pinned_version_re=''
 # ps1 の中の、固定した版の param の名前と、パッケージ ID の変数の名前 (bootstrap の 4 つは名前ごとに違う)。ps1 と見送りの一覧の
 # 既定の場所は、repo の win/ からのパス
 version_param=Version
@@ -290,6 +295,22 @@ case ${name} in
     key_missing='の tag が v<X.Y.Z> の形でない'
     moved_example='winget に載らなくなった・別の ID へ移った、など'
     ;;
+  tailscale)
+    title='Windows の Tailscale'
+    ps1_name=Install-Tailscale.ps1
+    # 今の版は X.Y.Z だが、manifests/t/Tailscale/Tailscale には 2020 年ごろの 4 つ区切りの版 (0.98.0.0・0.99.0.0・1.0.4.0) が残る。
+    # 固定した版は Install-Tailscale.ps1 が読める X.Y.Z だけにする
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'
+    pinned_version_re='^[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=1.104.5
+    readme_section='Tailscale の新しい版が出たとき'
+    search_word=Tailscale
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    # GitHub (tailscale/tailscale) の release には winget に載らない版 (Windows の MSI を出さない 1.98.5・1.102.5) があるので比べず、
+    # winget-pkgs に載った日から数える
+    dates_from=winget
+    ;;
   git)
     title='Windows の Git for Windows'
     ps1_name=Install-Bootstrap.ps1
@@ -368,7 +389,7 @@ case ${name} in
     dates_from=winget
     ;;
   *)
-    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup のどれか)" >&2
+    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・git・gh・vs-buildtools・rustup のどれか)" >&2
     usage >&2
     exit 2
     ;;
@@ -460,7 +481,8 @@ done <"${ps1}"
 if ((! pinned_line)); then
   cannot_check "固定した版が読めません: ${ps1_label} に [string]\$${version_param} = '<版>' の行がありません。"
 fi
-if [[ ! ${pinned} =~ ${version_re} ]]; then
+pinned_form=${pinned_version_re:-${version_re}}
+if [[ ! ${pinned} =~ ${pinned_form} ]]; then
   cannot_check "固定した版が読めません: ${ps1_label} の -${version_param} の既定値 '${pinned}' が ${title} の版の形ではありません (例: ${version_example})。"
 fi
 if [[ -z ${package_id} ]]; then

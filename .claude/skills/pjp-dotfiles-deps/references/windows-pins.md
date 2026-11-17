@@ -1,14 +1,14 @@
 # Windows に固定した版 (pins の `windows`)
 
 dotfiles は Windows のアプリを版を固定して入れる (`win/README.md` の「固定した版より新しい版の知らせ」)。対象は OpenSSH・herdr・
-Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新しい Windows で最初に流す bootstrap (`win/bootstrap/Install-Bootstrap.ps1`) が
+Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core と、新しい Windows で最初に流す bootstrap (`win/bootstrap/Install-Bootstrap.ps1`) が
 入れる Git for Windows (`git`)・GitHub CLI (`gh`)・Visual Studio Build Tools 2022 (`vs-buildtools`)・rustup (`rustup`)。新しい版の候補と猶予ごとの上げ先は、依存の更新の skill が repo の口
 (`deps.toml` の `[[pins]]` の `windows`。`nix/scripts/bootstrap-windows-pin-updates.sh --candidates --json`) から出す。どの版を
 入れるか (上げないかも) はユーザーが決めること。候補を出して推奨を添えるまでが Claude で、黙って猶予より新しい版にしない。
 
 - 人が読んで確かめるなら、同じ候補を文で出せる: `nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]`
   (gh のログインが要る。見送った版の理由・上げ方の README の節・見送りの一覧の場所も出る)
-- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・vs-buildtools・rustup が winget-pkgs に
+- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・Tailscale・vs-buildtools・rustup が winget-pkgs に
   載った日、herdr-app・herdr-core が成果物の Last-Modified。winget の版だけを数える (GitHub にあって winget にまだ無い版は上げ先にならない)
 - 口の JSON で `error` のある名前は確かめられていない。その名前は上げず、わけを報告と PR の本文に書く
 
@@ -37,6 +37,7 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
 | `google-japanese-input` | `win/google-japanese-input/Install-GoogleJapaneseInput.ps1` の同じ所 | (README に版は書いていない) | 「Google 日本語入力の新しい版が出たとき」(「版を上げる」の 1〜5。Windows で上げて設定を読み書きできるかを確かめてから merge する) |
 | `ntn` | `win/ntn/Install-Ntn.ps1` の同じ所 | 「ntn」の「今は」 | 「ntn の新しい版が出たとき」 |
 | `claude-code` | `win/claude-code/Install-ClaudeCode.ps1` の同じ所 | 「Claude Code」の「今は」 | 「Claude Code の新しい版が出たとき」 |
+| `tailscale` | `win/tailscale/Install-Tailscale.ps1` の同じ所 | 「Tailscale」の「今は」 | 「Tailscale の新しい版が出たとき」(固定した版は新しく入れるときの版。入っている Tailscale は自動更新で上がるので、上げ遅れても困るのは新しいマシンだけ) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` の版と sha256 (core は 3 つの target と generation) | 「herdr-app を入れる」の「今は」 | 「固定した版を上げる」(sha256・core_min・generation・ソースが取得元の変数を読むかを確かめる) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る) |
 
@@ -60,11 +61,13 @@ Google 日本語入力・ntn・Claude Code・herdr-app・herdr-core と、新し
 | `herdr` | 差が ⚠ で出る。herdr の外の PowerShell で `hsvstop` を打ち、`herdr --remote` の窓も閉じてから `Install-Herdr` |
 | `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
+| `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (Rust の runner ができたら runner が揃える) |
 
-- 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr` の `enable` が
-  false。herdr-app・herdr-core は `herdr` の値) では、setup はその名前を確かめも揃えもしない (`nix/README.md` の「設定グループ」)
+- 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
+  `enable` が false。herdr-app・herdr-core は `herdr` の値。`tailscale` はどのグループでも既定が false) では、setup はその名前を確かめも
+  揃えもしない (`nix/README.md` の「設定グループ」)
 
 ## 対象の外
 

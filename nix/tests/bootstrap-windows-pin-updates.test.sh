@@ -16,6 +16,8 @@
 #   - group.json (設定グループ) の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、ほかの名前は確かめる。
 #     true なら確かめる (group.json が無い前の世代も確かめる)
 #   - --candidates と --list --json は group.json を見ず、tools.windowsHerdr が false のマシンでも herdr・herdr-app・herdr-core を出す
+#   - tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる (false・欄の無い前の世代・group.json が無い
+#     ときは確かめない。どのグループでも既定は off)。--candidates と --list --json はいつも出す
 #   - bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1) は、setup の手順では Windows の ghq に
 #     dotfiles の clone がある (<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git がある) マシンでだけ確かめる。--candidates と
 #     --list --json はいつも出す
@@ -96,6 +98,7 @@ pin_json() {
     google-japanese-input) id=Google.JapaneseIME ;;
     ntn) id=Notion.ntn ;;
     claude-code) id=Anthropic.ClaudeCode ;;
+    tailscale) id=Tailscale.Tailscale ;;
     git) id=Git.Git ;;
     gh) id=GitHub.cli ;;
     vs-buildtools) id=Microsoft.VisualStudio.2022.BuildTools ;;
@@ -130,7 +133,7 @@ new_case() {
     printf '%s\n' "$2" >"${d}/home/.local/state/dotfiles/windows-files.json"
   fi
   cp "${script}" "${d}/scripts/bootstrap-windows-pin-updates.sh"
-  for n in openssh herdr google-japanese-input ntn claude-code git gh vs-buildtools rustup; do
+  for n in openssh herdr google-japanese-input ntn claude-code tailscale git gh vs-buildtools rustup; do
     pin_json "${n}" "Windows の ${n}" 1.0.0 >"${d}/json/${n}.json"
   done
   pin_json herdr-app "Windows の herdr-app" 0.1.0 >"${d}/json/herdr-app.json"
@@ -317,13 +320,38 @@ d2=$(new_case t4f "${state_on}")
 printf '%s\n' "${group_no_herdr}" >"${d2}/home/.local/state/dotfiles/group.json"
 run "${d2}" 0 --candidates
 if [[ $(rc "${d}") == 0 ]] \
-  && jq -e '[.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "git", "gh", "vs-buildtools", "rustup", "herdr-app", "herdr-core"]' \
+  && jq -e '[.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "tailscale", "git", "gh", "vs-buildtools", "rustup", "herdr-app", "herdr-core"]' \
     "${d}/out" >/dev/null \
   && [[ $(rc "${d2}") == 0 ]] && called "${d2}" -E '^winget .*herdr$' && called "${d2}" -E '^herdr-app '; then
   ok "--candidates と --list --json は group.json を見ず、tools.windowsHerdr が false でも herdr・herdr-app・herdr-core を出す"
 else
   ng "group.json と --candidates・--list --json" \
     "rc=$(rc "${d}")/$(rc "${d2}") calls=$(cat "${d2}/calls" 2>/dev/null) $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
+# 4h. tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる。false・欄が無い (前の世代)・group.json が
+#     無いときは確かめない (どのグループでも既定は off。入れていない道具の版を知らせない)。ほかの名前は今までどおり確かめる
+d=$(new_case t4ts-on "${state_on}")
+printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true,"windowsTailscale":true},"version":1}' \
+  >"${d}/home/.local/state/dotfiles/group.json"
+pin_json tailscale 'Windows の Tailscale' 1.104.5 '1.104.6|||' >"${d}/json/tailscale.json"
+run "${d}" 0
+d2=$(new_case t4ts-off "${state_on}")
+printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true,"windowsTailscale":false},"version":1}' \
+  >"${d2}/home/.local/state/dotfiles/group.json"
+run "${d2}" 0
+d3=$(new_case t4ts-absent "${state_on}")
+printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true},"version":1}' \
+  >"${d3}/home/.local/state/dotfiles/group.json"
+run "${d3}" 0
+d4=$(new_case t4ts-nogroup "${state_on}")
+run "${d4}" 0
+if [[ $(rc "${d}") == 0 ]] && called "${d}" -E '^winget .*tailscale$' && seen "${d}" -xF '   Windows の Tailscale: 1.104.5 → 1.104.6' \
+  && ! called "${d2}" -E '^winget .*tailscale$' && called "${d2}" -E '^winget .*openssh$' \
+  && ! called "${d3}" -E '^winget .*tailscale$' && ! called "${d4}" -E '^winget .*tailscale$' && called "${d4}" -E '^winget .*ntn$'; then
+  ok "tailscale は tools.windowsTailscale が true のマシンでだけ確かめ、false・欄が無い・group.json が無いときは確かめない"
+else
+  ng "windowsTailscale" "calls=$(cat "${d}/calls" 2>/dev/null) / $(cat "${d2}/calls" 2>/dev/null) / $(cat "${d3}/calls" 2>/dev/null) / $(cat "${d4}/calls" 2>/dev/null)"
 fi
 
 # 4g. bootstrap の 4 つ (git・gh・vs-buildtools・rustup) は、Windows で bootstrap を流したマシン (Windows の ghq に dotfiles の clone が
@@ -379,7 +407,7 @@ d=$(new_case t7 "")
 pin_json claude-code 'Windows の Claude Code' 2.1.318 '2.1.321||2026-11-04|10' '2.1.322|速すぎた|2026-11-08|6' \
   '2.1.323||2026-11-09|5' '2.1.325||2026-11-12|2' '2.1.330|||' >"${d}/json/claude-code.json"
 run "${d}" 0 --candidates
-if [[ $(rc "${d}") == 0 ]] && [[ $(ncalls "${d}" winget) == 9 && $(ncalls "${d}" herdr-app) == 1 ]] && ! called "${d}" -vF -- '--dates' \
+if [[ $(rc "${d}") == 0 ]] && [[ $(ncalls "${d}" winget) == 10 && $(ncalls "${d}" herdr-app) == 1 ]] && ! called "${d}" -vF -- '--dates' \
   && seen "${d}" -xF '■ Windows の Claude Code (claude-code)' \
   && seen "${d}" -F '2.1.322 (見送った: 速すぎた)' && seen "${d}" -F '2.1.330 (出た日が分からない)' \
   && seen "${d}" -F '2.1.321 (2026-11-04 に出た、10 日前)  https://example.invalid/2.1.321' \
@@ -438,12 +466,12 @@ d=$(new_case t11 "")
 run "${d}" 1 --list --json
 d2=$(new_case t11b "${state_off}")
 run "${d2}" 1 --list --json ntn herdr-core
-if [[ $(rc "${d}") == 0 ]] && jq -e '.version == 1 and ([.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "git", "gh", "vs-buildtools", "rustup", "herdr-app", "herdr-core"])
+if [[ $(rc "${d}") == 0 ]] && jq -e '.version == 1 and ([.items[].name] == ["openssh", "herdr", "google-japanese-input", "ntn", "claude-code", "tailscale", "git", "gh", "vs-buildtools", "rustup", "herdr-app", "herdr-core"])
     and (.items[] | select(.name == "ntn") | . == {name: "ntn", title: "Windows の ntn", files: ["win/ntn/Install-X.ps1"],
       pinned: "1.0.0", winget_id: "Notion.ntn", skip_file: "win/ntn/skipped-versions.txt", error: null})
     and (.items[] | select(.name == "herdr-app") | .winget_id == null and .files == ["win/herdr-app/Install-X.ps1"] and .pinned == "0.1.0")
     and ([.items[] | has("candidates") or has("targets")] | any | not)' "${d}/out" >/dev/null \
-  && [[ $(ncalls "${d}" winget) == 9 && $(ncalls "${d}" herdr-app) == 1 ]] && ! called "${d}" -vF -- '--offline' \
+  && [[ $(ncalls "${d}" winget) == 10 && $(ncalls "${d}" herdr-app) == 1 ]] && ! called "${d}" -vF -- '--offline' \
   && ! called "${d}" -F -- '--dates' && ! called "${d}" '^gh ' \
   && [[ $(rc "${d2}") == 0 ]] && jq -e '[.items[].name] == ["ntn", "herdr-core"]' "${d2}/out" >/dev/null; then
   ok "--list --json は gh が無くても --offline の口で固定した版を出し (windows-files.json は見ない)、名前を渡せばその名前だけ"
@@ -485,7 +513,7 @@ if [[ $(rc "${d}") == 0 ]] && jq -e '
         and .targets == {"1": "2.1.325", "3": "2.1.323", "7": "2.1.321"})
     and (.items[] | select(.name == "herdr-core") | .winget_id == null and .targets == {"1": "0.1.19", "3": "0.1.19", "7": null})
     and (.items[] | select(.name == "ntn") | .candidates == [] and .targets == {"1": null, "3": null, "7": null})' "${d}/out" >/dev/null \
-  && [[ $(grep -c -- '--dates' "${d}/calls") == 10 ]]; then
+  && [[ $(grep -c -- '--dates' "${d}/calls") == 11 ]]; then
   ok "--candidates --json は candidates (age_days・url の埋め) と targets を出し、見送った版・出た日の分からない版を上げ先にしない"
 else
   ng "--candidates --json" "rc=$(rc "${d}") calls=$(cat "${d}/calls" 2>/dev/null) $(outerr "${d}")"
