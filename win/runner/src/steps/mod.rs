@@ -15,6 +15,7 @@ pub mod claude_skills;
 pub mod claude_statusline;
 pub mod files;
 pub mod generated;
+pub mod git_config;
 pub mod hc_hub;
 pub mod linker;
 pub mod pending;
@@ -163,6 +164,8 @@ pub fn all() -> Vec<Box<dyn Step>> {
         Box::new(claude_statusline::ClaudeStatusline),
         Box::new(claude_footer_links::ClaudeFooterLinks),
         Box::new(claude_skill_overrides::ClaudeSkillOverrides),
+        // git の設定を WSL の home-manager と同じ git.toml から置く (Windows にしか無い手順。dotfiles-private の docs/adr/066_win_git_config_*)
+        Box::new(git_config::GitConfig),
         Box::new(files::Files),
     ];
     for spec in tool_skill::SPECS {
@@ -210,6 +213,7 @@ mod tests {
                 (50, "claude-notion"),
                 (50, "claude-skills"),
                 (50, "claude-statusline"),
+                (50, "git-config"),
                 (55, "pjp"),
                 (60, "claude-skill-overrides"),
                 (60, "hc-hub"),
@@ -265,7 +269,7 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -284,6 +288,7 @@ mod tests {
                 "claude-notion",
                 "claude-skills",
                 "claude-statusline",
+                "git-config",
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",

@@ -2,6 +2,11 @@
 #
 # 複製元: .gitconfig / .gitconfig.pollenjp-sub.github.com / .gitignore_global
 #
+# どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) は、隣の git.toml に書く。
+# Windows の runner の git-config の手順も同じ git.toml を読み、Windows の %USERPROFILE%\.config\git\config・ignore に書く
+# (dotfiles-private の docs/adr/066_win_git_config_*)。ここに残すのは OS で違うもの (1Password の署名・delta・lfs・
+# includeIf の条件) だけ。
+#
 # ここはファイル配置ではなく programs.git を採用している。
 # 目的は .gitconfig:11-17 の 1Password op-ssh-sign のパスで、
 # 従来は WSL 用と Windows 用がコメントアウトで並んでおり手で切り替える運用だった
@@ -43,12 +48,24 @@ let
   # false のホスト (自社・客先) には名前もメールも書かない。そのホストで使うものをホストの modules に
   # programs.git.settings.user で書く (書かなければ git が commit の前に止まる。個人の名前で commit してしまわない)。
   useIdentity = config.dotfiles.git.identity.enable;
+
+  # どの OS でも同じにする値 (Windows の runner も読む)。書き方は git.toml の冒頭
+  shared = lib.importTOML ./git.toml;
+
+  # git.toml の [settings] に書かない節 (名前とメールは [identity]・useIdentity で、署名は useOnePassword で、include は
+  # includes で切り替えるので、[settings] にあると切り替えの外で書き出される)
+  reservedSections = builtins.filter (s: shared.settings ? ${s}) [
+    "user"
+    "gpg"
+    "include"
+    "includeIf"
+  ];
 in
 
 {
-  # windowsUserName を書き忘れると op-ssh-sign が黙って無効のまま
-  # commit.gpgSign だけが残り、「署名しようとするが署名できない」状態になる。
   assertions = [
+    # windowsUserName を書き忘れると op-ssh-sign が黙って無効のまま
+    # commit.gpgSign だけが残り、「署名しようとするが署名できない」状態になる。
     {
       assertion = useWindowsSigner -> wsl.onePassword.windowsUserName != null;
       message = ''
@@ -56,6 +73,13 @@ in
         Windows 側の op-ssh-sign-wsl.exe のパスを組み立てられません。
         hosts/default.nix の wsl.windowsUserName を指定するか、
         1Password を使わないマシンなら onePassword.enable を外してください。
+      '';
+    }
+    {
+      assertion = reservedSections == [ ];
+      message = ''
+        home/modules/git.toml の [settings] に ${lib.concatStringsSep "・" reservedSections} があります。
+        名前とメールは [identity] に書きます (署名と include は git.nix が持つ)。
       '';
     }
   ];
@@ -96,71 +120,32 @@ in
     # [filter "lfs"] の 4 項目を生成し git-lfs も入れる
     lfs.enable = true;
 
-    # 複製元: .gitignore_global (main.bash は ~/.config/git/ignore へ symlink していた)
-    #
-    # NOTE: .envrc (direnv。modules/direnv.nix) は無視しない。repo に置いて共有する .envrc
-    #       (`use flake` など) を、その repo の .gitignore に "!.envrc" を書かずに commit できる。
-    #       秘密の値は .envrc に書かず、ここで無視している .env に置いて、.envrc から
-    #       `dotenv_if_exists` で読む (direnv の stdlib。.env が無ければ何もしない)。
-    #       commit しない手元だけの .envrc は、その repo の .git/info/exclude に書く。
-    #
+    # ~/.config/git/ignore。中身と、.envrc を無視しないわけは git.toml の ignores
+    # (main.bash は .gitignore_global を ~/.config/git/ignore へ symlink していた)。
     # .direnv/ (nix-direnv の cache と GC root) は modules/direnv.nix の enableGitIntegration が足す。
-    ignores = [
-      ".DS_Store"
-      ".env"
-      ".env.*"
-      "!.env.*.txt"
-      ".python-version"
-      ".ruby-version"
-      ".secrets/"
-      "*.code-workspace"
-      ".tmp"
-      "node_modules/"
-      ".vscode/"
-      ".claude/settings.local.json"
-      # used by like asdf
-      ".tool-version"
-    ];
+    inherit (shared) ignores;
 
-    # 複製元: .gitconfig.pollenjp-sub.github.com
+    # ghq の owner ごとの名前とメール (git.toml の [[identity.owners]]。複製元: .gitconfig.pollenjp-sub.github.com)。
     # contents を使うと include 先のファイルも home-manager が生成するので、
     # 別途 files/ に置く必要がない。個人のアカウントの名前とメールなので、上の useIdentity のホストだけ。
-    includes = lib.optionals useIdentity [
-      {
-        condition = "gitdir:~/workdir/github.com/pollenjp-sub";
+    #
+    # NOTE: 条件は旧い .gitconfig (ghq の root が ~/workdir だったころ) の写しのまま変えていない。末尾に / が無いので、
+    #       git はこのディレクトリの下の repo に当てない (末尾が / のときだけ ** を足す)。Windows の runner は ghq の root
+    #       (%USERPROFILE%\ghq) の下に末尾の / を付けて書く (dotfiles-private の docs/adr/066_win_git_config_*)。
+    includes = lib.optionals useIdentity (
+      map (o: {
+        condition = "gitdir:~/workdir/github.com/${o.owner}";
         contents.user = {
-          email = "polleninjp+github_sub@gmail.com";
-          name = "pollenjp-sub";
+          inherit (o) email name;
         };
-      }
-    ];
+      }) shared.identity.owners
+    );
 
-    settings = {
+    # どのホストにも書く設定は git.toml の [settings]。ここで足すのは OS やホストで切り替えるものだけ
+    settings = shared.settings // {
       user = lib.mkIf useIdentity {
-        name = "pollenjp";
-        email = "polleninjp@gmail.com";
+        inherit (shared.identity) name email;
       };
-
-      alias = {
-        co = "checkout";
-        br = "branch";
-        ci = "commit";
-        st = "status";
-        w = "switch";
-        push-f = "push --force-with-lease";
-      };
-
-      core = {
-        editor = "vim";
-        quotepath = false;
-        autocrlf = false;
-      };
-      pager.branch = false;
-      push.default = "simple";
-      init.defaultBranch = "main";
-      merge.conflictstyle = "diff3";
-      diff.colorMoved = "default";
-      pull.rebase = false;
 
       # [gpg "ssh"] — HM に対応オプションが無いので直接書く。
       # 1Password の ssh-agent が持つ鍵から "Signing" を含むものを署名鍵として選ぶ。

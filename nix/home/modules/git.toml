@@ -1,0 +1,83 @@
+# git の設定のうち、どの OS でも同じにする値の正本 (dotfiles-private の docs/adr/066_win_git_config_*)。2 か所が読む:
+#
+#   - WSL・Linux・macOS: home/modules/git.nix が programs.git に入れ、home-manager が ~/.config/git/config・ignore を作る
+#   - Windows: runner の git-config の手順 (win/runner/src/steps/git_config.rs) が clone の中のこのファイルを読み、
+#     %USERPROFILE%\.config\git\config・ignore に書く (win/README.md の「git の設定」)
+#
+# OS で違うもの (1Password の署名・delta・lfs の filter の git-lfs のパス・pollenjp-sub の includeIf の条件) はここに書かず、
+# git.nix と runner が持つ。どの OS でも同じにする値を足す・変えるときは、ここだけを直す (Linux の CI の
+# win/runner/tests/git_parity.rs が、WSL の home-manager の設定と Windows に書く中身を突き合わせる)。
+#
+# 書けるのは ignores・[identity]・[settings.<節>] だけ (runner は知らないキーで止まる)。
+
+# ~/.config/git/ignore (全部の repo で無視するもの)。複製元: .gitignore_global
+#
+# NOTE: .envrc (direnv。home/modules/direnv.nix) は無視しない。repo に置いて共有する .envrc (`use flake` など) を、その repo の
+#       .gitignore に "!.envrc" を書かずに commit できる。秘密の値は .envrc に書かず、ここで無視している .env に置いて、.envrc
+#       から `dotenv_if_exists` で読む (direnv の stdlib。.env が無ければ何もしない)。commit しない手元だけの .envrc は、
+#       その repo の .git/info/exclude に書く。
+#
+# .direnv/ (nix-direnv の cache と GC root) は home/modules/direnv.nix の enableGitIntegration が WSL・Linux に足す
+# (Windows には direnv が無いので足さない)。
+ignores = [
+  ".DS_Store",
+  ".env",
+  ".env.*",
+  "!.env.*.txt",
+  ".python-version",
+  ".ruby-version",
+  ".secrets/",
+  "*.code-workspace",
+  ".tmp",
+  "node_modules/",
+  ".vscode/",
+  ".claude/settings.local.json",
+  # used by like asdf
+  ".tool-version",
+]
+
+# 個人のアカウントの名前とメール。書くのは dotfiles.git.identity.enable (Windows はホストの値の道具 gitIdentity) が true の
+# ホストだけ (既定は設定グループの ③ 個人のアカウント)。false のホスト (自社・客先) には名前もメールも書かない
+[identity]
+name = "pollenjp"
+email = "polleninjp@gmail.com"
+
+# ghq の owner ごとの名前とメール。その owner の下 (github.com/<owner>/) の repo でだけ替える (includeIf)。
+# 複製元: .gitconfig.pollenjp-sub.github.com
+[[identity.owners]]
+owner = "pollenjp-sub"
+name = "pollenjp-sub"
+email = "polleninjp+github_sub@gmail.com"
+
+# どのホストにも書く設定 ([settings.<節>] の <キー> = <値> が git config の [<節>] の <キー>)。値は文字列・真偽値・整数
+# (同じキーを並べるなら配列)。subsection は [settings.<節>."<名前>"]。名前とメール ([user])・署名 ([gpg])・include は書かない
+[settings.alias]
+co = "checkout"
+br = "branch"
+ci = "commit"
+st = "status"
+w = "switch"
+push-f = "push --force-with-lease"
+
+[settings.core]
+editor = "vim"
+quotepath = false
+autocrlf = false
+
+[settings.pager]
+branch = false
+
+[settings.push]
+default = "simple"
+
+[settings.init]
+defaultBranch = "main"
+
+[settings.merge]
+conflictstyle = "diff3"
+
+[settings.diff]
+colorMoved = "default"
+
+[settings.pull]
+rebase = false
