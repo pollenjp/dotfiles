@@ -2449,7 +2449,8 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 6. merge したら、入れるマシンで `setup --update` を流す (WSL の実行ファイルが上がり、Windows の部品も入れ替わる)。op の呼び出しの
    途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える。WSL の側で入るものが新しい
    版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した) では、Windows の部品を先に揃えてから switch する
-   ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)
+   ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)。setup が揃えない
+   ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に `Install-OpReason` を手で流す
 
 ### Install-OpReason.ps1 を書くときの注意
 

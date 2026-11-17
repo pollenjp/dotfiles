@@ -2841,7 +2841,9 @@ dotfiles が入れる版は自動では上がらない。op-reason の repo で�
 
    1 行目のあと、Windows の PowerShell の `Install-OpReason -Check` で、固定した版の行が「そのまま」（入っている版が固定した版。
    終了コード 0）と出ることを確かめてから 2 行目を打つ。`op-reason.exe` が動いていて入れ替えられなかったら（op の呼び出しの途中）、
-   その呼び出しが終わってから 1 行目を打ち直す
+   その呼び出しが終わってから 1 行目を打ち直す。win/ を配らないマシン（Windows の runner に受け持ちを切り替えたホストなど）では
+   setup が Windows の側を揃えないので、1 行目の代わりに Windows で `Install-OpReason` を手で流して新しい版にしてから 2 行目を打つ
+   （[`win/README.md`「op-reason」](../win/README.md#op-reason)）
 
 ## シークレットを .env の参照から渡す (pjp-op-env)
 
