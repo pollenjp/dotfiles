@@ -555,6 +555,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | キー | herdr-app ですること | 旧 herdr |
 | --- | --- | --- |
 | `Ctrl+PageUp`・`Ctrl+PageDown` | 前・次の space (`space.prev`・`space.next`。herdr-app の既定ではタブの移動) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。旧 herdr は PageUp・PageDown をキーに使えない) |
+| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 同じく前・次の space | (旧 herdr は `Ctrl+Alt+↑↓`) |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
 | prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
@@ -574,10 +575,10 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
   取るかを伝えるよう書いている)。端末のプログラムに送るときは、prefix の後にもう一度 `Ctrl+K`。小窓に focus がある間の `Ctrl+K` を mod に
   渡すのは keys.json の section `mod:pjp-prefix` (細かい section が `global` より勝つ。無いと `global` の `Ctrl+K` が小窓を閉じるだけになる)
-- space の移動は `Ctrl+PageUp`・`Ctrl+PageDown`。herdr-app の既定ではタブの移動 (`tab.prev`・`tab.next`) に使うキーなので、repo の
-  `herdr-app/keys.defaults.json` にその既定の値を書いて上書きする (下の「書き足し方」)。タブの移動は `Ctrl+↑↓` と、herdr-app の既定の `Ctrl+Tab`・
-  `Ctrl+Shift+Tab`・`Alt+]`・`Alt+[` が残る。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定でも取っているキーで、端末のプログラムに届かないのは前と
-  同じ。前の版で space に使った `Ctrl+Shift+↑↓` は割り当てない (当てると、記録どおりの値なら keys.json から外れ、端末のプログラムに返る)
+- space の移動は `Ctrl+PageUp`・`Ctrl+PageDown` と `Ctrl+Shift+↑↓` の両方。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定ではタブの移動
+  (`tab.prev`・`tab.next`) に使うキーなので、repo の `herdr-app/keys.defaults.json` にその既定の値を書いて上書きする (下の「書き足し方」)。タブの移動は
+  `Ctrl+↑↓` と、herdr-app の既定の `Ctrl+Tab`・`Ctrl+Shift+Tab`・`Alt+]`・`Alt+[` が残る。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定でも取って
+  いるキーで、端末のプログラムに届かないのは前と同じ。`Ctrl+Shift+↑↓` も herdr-app が取るので、端末のプログラムには届かない
 - 旧 herdr は PageUp・PageDown をキーの名前に持たない (0.9.5 でも、どう綴っても `herdr config check` が invalid keybinding にする。
   [`nix/files/herdr/config.toml`](../nix/files/herdr/config.toml) のコメント) ので、旧 herdr の workspace の移動は `Ctrl+Alt+↑↓` のまま。herdr-app の中で
   旧 herdr を動かすと、`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app が先に取り (旧 herdr には届かない)、`Ctrl+Alt+↑↓` は herdr-app が割り当てないので
