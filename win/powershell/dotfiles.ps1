@@ -29,7 +29,8 @@ function hreload { herdr server reload-config @args }
 function hsvstop { herdr server stop @args }
 function hr { herdr --remote @args }
 
-# Claude Code。WSL の fish の abbr と bash の alias の c と同じ中身にそろえる。
+# Claude Code。WSL の fish の abbr と bash の alias の c、herdr-app の prefix の mod (win/herdr-app/mods/pjp-prefix/main.js の
+# CLAUDE。worktree を作って Claude Code を起こす argv) と同じ中身にそろえる。
 # Remote Control を有効にし、権限の確認を飛ばし、effort を max、モデルを Opus 5.5 に固定して
 # claude.exe (Install-ClaudeCode が winget で入れたもの) を起動する。末尾の --remote-control に = で空の値を渡す理由は、fish.nix の同じ節に
 # 書いてある。

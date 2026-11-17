@@ -1,8 +1,8 @@
-//! ファイルの小さな道具 (sha256・置き先と同じディレクトリの一時ファイルから rename で書く)。
+//! ファイルの小さな道具 (sha256・置き先と同じディレクトリの一時ファイルから rename で書く・書く前の中身の写し)。
 
 use sha2::{Digest, Sha256};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -55,12 +55,43 @@ pub fn read_then_write(src: &Path, dst: &Path) -> std::io::Result<()> {
     write_atomic(dst, &bytes)
 }
 
+/// 書く前のファイル `path` を `dir\<prefix>-<秒>-<ナノ秒>.json` に写し、写した先を返す (同じ時刻の写しは上書きせず `-<n>` を足す)。`dir` の
+/// `<prefix>-*.json` のうち、残すのは、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と、新しい方から `keep` 個。
+pub fn backup_copy(path: &Path, dir: &Path, prefix: &str, keep: usize) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let stamp = format!("{:012}-{:09}", now.as_secs(), now.subsec_nanos());
+    let mut name = format!("{prefix}-{stamp}.json");
+    let mut n = 0;
+    while dir.join(&name).exists() {
+        n += 1;
+        name = format!("{prefix}-{stamp}-{n}.json");
+    }
+    std::fs::copy(path, dir.join(&name))?;
+    let head = format!("{prefix}-");
+    let mut olds: Vec<String> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&head) && n.ends_with(".json"))
+        .collect();
+    olds.sort();
+    if olds.len() > keep + 1 {
+        for old in &olds[1..olds.len() - keep] {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
+    }
+    Ok(dir.join(name))
+}
+
 #[cfg(test)]
 mod tests {
     //! ## 確かめること
     //!
     //! - sha256 が sha256sum と同じ値 (空と "abc" の既知の値)
     //! - 親を作って書き、あるファイルは置き換え、一時ファイルを残さない
+    //! - 書く前の写し: 中身を写し、いちばん古いものと新しい方から N 個を残す。ほかの prefix のファイルには触らない
 
     use super::*;
     use crate::testutil::TempDir;
@@ -90,5 +121,30 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["b.json"]);
         assert_eq!(sha256_file(&p).unwrap(), sha256_bytes(b"two"));
+    }
+
+    #[test]
+    fn backup_copy_keeps_the_first_and_newest() {
+        let t = TempDir::new("fsutil-backup");
+        let src = t.path().join("a.json");
+        let dir = t.path().join("backup");
+        t.write("backup/other-1.json", "x");
+        for i in 0..5 {
+            std::fs::write(&src, format!("{i}")).unwrap();
+            let copied = backup_copy(&src, &dir, "a", 2).unwrap();
+            assert_eq!(std::fs::read_to_string(&copied).unwrap(), format!("{i}"));
+        }
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        let kept: Vec<String> = names
+            .iter()
+            .filter(|n| n.starts_with("a-") && n.ends_with(".json"))
+            .map(|n| std::fs::read_to_string(dir.join(n)).unwrap())
+            .collect();
+        assert_eq!(kept, vec!["0", "3", "4"], "{names:?}");
+        assert!(names.contains(&"other-1.json".to_string()), "{names:?}");
     }
 }
