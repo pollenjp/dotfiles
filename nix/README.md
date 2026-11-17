@@ -1722,10 +1722,10 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.screenrc` | `nix/files/screenrc` |
 | `~/.vimrc` | `nix/files/vim/vimrc` |
 | `~/.vim/{common,clipboard}.vim` | `nix/files/vim/` |
-| `~/.config/git/config` | `nix/home/modules/git.nix` (生成) |
+| `~/.config/git/config` | `nix/home/modules/git.nix` (生成。どの OS でも同じにする値は `git.toml`。[後述](#git-について)) |
 | `~/.ssh/config` | `nix/home/modules/ssh.nix` (生成。Include の骨組みと、このマシンを名乗る `SetEnv PJP_SSH_CLIENT`) |
 | `~/.ssh/rc` | `nix/home/modules/agent-link.nix` (生成。接続を記録する `pjp-agent-link rc` を呼ぶ。[後述](#forward-された-agent-を固定名で見せる)) |
-| `~/.config/git/ignore` | 同上 (`programs.git.ignores`) |
+| `~/.config/git/ignore` | 同上 (`programs.git.ignores`。中身は `git.toml` の `ignores`) |
 | `~/.config/direnv/direnv.toml`・`~/.config/direnv/lib/hm-nix-direnv.sh` | `nix/home/modules/direnv.nix` (生成。lib は nix-direnv の direnvrc。[後述](#direnv)) |
 | `~/.config/uv/uv.toml` | `nix/home/modules/python.nix` (生成。`programs.uv` の settings。uv 本体は入れない。[後述](#python3-と-uv)) |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
@@ -1897,6 +1897,17 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 `programs.git` で `~/.config/git/config` を **生成** している（素のファイル配置ではない）。
 目的は 1Password `op-ssh-sign` のパスで、従来は WSL 用と Windows 用がコメントアウトで
 並んでおり手で切り替える運用だった。これを登録簿の指定による分岐に置き換えている。
+
+どの OS でも同じにする値（名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore）は、`git.nix` の隣の
+`nix/home/modules/git.toml` に書く。Windows の runner の手順 `git-config` も同じファイルを読み、Windows の `~/.config/git/config` に
+書く（署名と delta は入れない。[`win/README.md`「git の設定」](../win/README.md#git-の設定)・dotfiles-private の ADR 066
+(`docs/adr/066_win_git_config_*`)）。値を足す・変えるときは `git.toml` を直す（`git.nix` に直に書いた値は Windows に届かず、
+Linux の CI の `win/runner/tests/git_parity.rs` が落ちる）。`git.nix` に残すのは OS やホストで切り替えるもの（署名・delta・lfs・
+includeIf の条件）だけ。
+
+pollenjp-sub の includeIf の条件（`gitdir:~/workdir/github.com/pollenjp-sub`）は旧い `.gitconfig`（ghq の root が `~/workdir` だったころ）の
+写しで、末尾に `/` が無いので、そのディレクトリの下の repo には当たらない（今は何にも当たっていない。Windows の runner は
+`~/ghq` の下に末尾の `/` を付けて書く）。
 
 署名まわりは `dotfiles.onePassword.enable` で丸ごと切り替わる
 （マシンごとの指定は[マシン登録簿](#マシン登録簿-hostsdefaultnix)を参照）。

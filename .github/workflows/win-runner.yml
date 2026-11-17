@@ -13,7 +13,8 @@ name: win-runner
 # 共有)・Claude の settings.json の env と claude-notion.json の元 (nix/home/modules/claude.nix・nix/lib/git-via-gh.nix と、突き合わせに使う
 # sandbox のホストの nix/hosts/default.nix。Linux の CI で突き合わせる)・Windows の Claude Code に配る設定の元 (nix/files/claude/ の CLAUDE.md・
 # skill・footer-links.json と、Rust に写した hook・status line の bash の版。Linux の CI で bash の版と突き合わせる。hook の登録と skillOverrides
-# は nix/scripts/bootstrap-claude-hook.sh・bootstrap-claude-skill-overrides.sh と突き合わせる) を読むので、それらを変えた PR でも流す。
+# は nix/scripts/bootstrap-claude-hook.sh・bootstrap-claude-skill-overrides.sh と突き合わせる)・git の設定の正本 (nix/home/modules/git.toml。Linux の CI で
+# git.nix と direnv.nix が作る home-manager の programs.git と突き合わせる) を読むので、それらを変えた PR でも流す。
 on:
   push:
     branches: [main]
@@ -22,6 +23,9 @@ on:
       - "nix/lib/windows-files.nix"
       - "nix/lib/git-via-gh.nix"
       - "nix/home/modules/claude.nix"
+      - "nix/home/modules/git.toml"
+      - "nix/home/modules/git.nix"
+      - "nix/home/modules/direnv.nix"
       - "nix/hosts/default.nix"
       - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
@@ -35,6 +39,9 @@ on:
       - "nix/lib/windows-files.nix"
       - "nix/lib/git-via-gh.nix"
       - "nix/home/modules/claude.nix"
+      - "nix/home/modules/git.toml"
+      - "nix/home/modules/git.nix"
+      - "nix/home/modules/direnv.nix"
       - "nix/hosts/default.nix"
       - "nix/pkgs/herdr-core/claude-skill-head.md"
       - "nix/scripts/bootstrap-windows-*.sh"
