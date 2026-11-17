@@ -87,6 +87,12 @@ function Install-Ntn { & "$HOME\.config\powershell\Install-Ntn.ps1" @args }
 # 入れ替えが要るときは、Windows で開いている Claude Code の会話を先に閉じる (動いていると止まる)。setup --update でも揃える。
 function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1" @args }
 
+# Windows の Tailscale (winget の Tailscale.Tailscale。machine スコープの MSI) を、dotfiles で固定した版で入れる。
+# 中身は同じ場所へ配る Install-Tailscale.ps1 (win/README.md の「Tailscale」)。-Check なら確かめるだけ。
+# 入れる・上げるときは Windows に UAC の確認が出る (上げる間、Tailscale の接続が少しの間切れる)。入っている版の方が新しければ下げない
+# (Tailscale が自分で上がる)。tailnet へのログインは、入れた後にタスクトレイの Tailscale のアイコンから手でする。
+function Install-Tailscale { & "$HOME\.config\powershell\Install-Tailscale.ps1" @args }
+
 # Windows 側の runner (dotfiles の win/runner/。Rust)。dotfiles check で手順を順に確かめ (何も書かない)、dotfiles apply で揃え
 # (このホストの受け持ちが runner のときだけ。dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [runner] enable = true)、
 # dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で

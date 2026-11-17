@@ -1,0 +1,11 @@
+# Windows の Tailscale (winget の Tailscale.Tailscale) で、上げずに見送った版。
+#
+# nix/scripts/check-winget-version.sh tailscale (GitHub Actions の winget-versions が週 1 回流す) と
+# nix/scripts/bootstrap-windows-pin-updates.sh (setup の知らせ) が読み、ここに書いた版は、固定した版より新しくても知らせない。
+# 手順は win/README.md の「Tailscale の新しい版が出たとき」。
+#
+# 1 行に 1 つ、「版 理由」を空白で区切って書く。# で始まる行と空行は読まない。理由の無い行は読めずに落ちる。
+# 固定した版以下になった行は消してよい (job が知らせる)。manifest に無いので Windows へは配らない。
+#
+# 例:
+# 1.106.0 Windows で MSI が入らない不具合がある
