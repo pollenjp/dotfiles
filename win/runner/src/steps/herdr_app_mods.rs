@@ -83,38 +83,53 @@ impl Step for HerdrAppMods {
             step: "herdr-app-mods",
         };
         let mut w = Linker::new(src, mods_dir.clone(), mode, records);
-        // 今も置くファイル: mods\ からの相対パスの鍵 → 今の綴りの置き先 (記録の鍵)
-        let mut keep = BTreeMap::new();
+        let mut keep = Keep::new();
         for m in &mods {
-            for why in &m.odd {
-                w.skip(ctx, format!("mods/{}/{why}", m.name));
-            }
-            let dest_mod = mods_dir.join(&m.name);
-            if is_link(&dest_mod) {
-                w.skip(
-                    ctx,
-                    format!(
-                        "mods/{} (置き先がリンク。手でつないだ場所なので、この mod には触らない)",
-                        m.name
-                    ),
-                );
-                continue;
-            }
-            for rel in &m.files {
-                let label = format!("mods/{}/{rel}", m.name);
-                let dest = join_segments(&dest_mod, rel);
-                keep.insert(
-                    rel_key(&join_segments(Path::new(&m.name), rel)),
-                    dest.to_string_lossy().into_owned(),
-                );
-                match std::fs::read(join_segments(&root.join(&m.name), rel)) {
-                    Ok(bytes) => w.copy_bytes(ctx, &bytes, &dest, &label),
-                    Err(e) => w.fail(ctx, format!("{label} のコピー元が読めない ({e})")),
-                }
-            }
+            copy_mod(ctx, &mut w, &root.join(&m.name), m, &mods_dir, &mut keep);
         }
         prune(ctx, &mut w, &mods_dir, &keep);
         w.finish(ctx, &record_path, None)
+    }
+}
+
+/// 今も置くファイル: `mods\` からの相対パスの鍵 → 今の綴りの置き先 (記録の鍵)
+pub type Keep = BTreeMap<Vec<String>, String>;
+
+/// mod 1 つ (`src` は元の mod のフォルダ) のファイルを `mods_dir\<名前>\` の同じパスへ記録つきのコピーで置き、置くファイルを `keep` に足す。
+/// 置き先の mod のフォルダがリンク (手でつないだ場所) なら、その mod には触らない。herdr-app-pjp-spaces (claude-skills の mod) も使う。
+pub fn copy_mod(
+    ctx: &mut Ctx,
+    w: &mut Linker,
+    src: &Path,
+    m: &ModFiles,
+    mods_dir: &Path,
+    keep: &mut Keep,
+) {
+    for why in &m.odd {
+        w.skip(ctx, format!("mods/{}/{why}", m.name));
+    }
+    let dest_mod = mods_dir.join(&m.name);
+    if is_link(&dest_mod) {
+        w.skip(
+            ctx,
+            format!(
+                "mods/{} (置き先がリンク。手でつないだ場所なので、この mod には触らない)",
+                m.name
+            ),
+        );
+        return;
+    }
+    for rel in &m.files {
+        let label = format!("mods/{}/{rel}", m.name);
+        let dest = join_segments(&dest_mod, rel);
+        keep.insert(
+            rel_key(&join_segments(Path::new(&m.name), rel)),
+            dest.to_string_lossy().into_owned(),
+        );
+        match std::fs::read(join_segments(src, rel)) {
+            Ok(bytes) => w.copy_bytes(ctx, &bytes, &dest, &label),
+            Err(e) => w.fail(ctx, format!("{label} のコピー元が読めない ({e})")),
+        }
     }
 }
 
@@ -165,19 +180,20 @@ pub fn list_mods(root: &Path) -> Result<Vec<ModFiles>, String> {
         .filter(|n| !n.starts_with('.'))
         .collect();
     names.sort();
-    let mut mods = Vec::new();
-    for name in names {
-        let mut m = ModFiles {
-            name: name.clone(),
-            files: Vec::new(),
-            odd: Vec::new(),
-        };
-        walk(&root.join(&name), "", &mut m)?;
-        m.files.sort();
-        m.odd.sort();
-        mods.push(m);
-    }
-    Ok(mods)
+    names.iter().map(|name| list_mod(root, name)).collect()
+}
+
+/// `root\<name>\` の mod 1 つのファイルを並べる (配らない名前は除く。名前の順)。
+pub fn list_mod(root: &Path, name: &str) -> Result<ModFiles, String> {
+    let mut m = ModFiles {
+        name: name.to_string(),
+        files: Vec::new(),
+        odd: Vec::new(),
+    };
+    walk(&root.join(name), "", &mut m)?;
+    m.files.sort();
+    m.odd.sort();
+    Ok(m)
 }
 
 /// `dir` (mod の中の `prefix`) の中のファイルを `m` に足す。配らない名前 (`skipped_name`) は、ファイルもディレクトリも除く。
@@ -219,8 +235,9 @@ fn rel_key(rel: &Path) -> Vec<String> {
 /// 記録にあるコピーのうち、今の home の `mods\` の下にあって、今は置かないもの (repo から消えたファイル・mod) を消す。中身が記録どおりで
 /// なければ残して知らせる (記録からは外す)。今も置くファイルかは `mods\` からの相対パスの鍵で比べる (`keep`)。同じファイルを別の綴りで書いた
 /// 鍵 (home を `/` で書いた・大文字小文字が違う) は消さず、apply では今の綴りの鍵が記録にあれば外す。置き先の mod のフォルダがリンクなら、その
-/// 中は見ない。ほかの home の下の記録 (`HERDR_APP_HOME` を替えた前の home) は、そのまま残す。
-fn prune(ctx: &mut Ctx, w: &mut Linker, mods_dir: &Path, keep: &BTreeMap<Vec<String>, String>) {
+/// 中は見ない。ほかの home の下の記録 (`HERDR_APP_HOME` を替えた前の home) と、`mods\` の外の記録 (herdr-app-pjp-spaces の layout) は、
+/// そのまま残す。
+pub fn prune(ctx: &mut Ctx, w: &mut Linker, mods_dir: &Path, keep: &Keep) {
     for key in w.records.keys() {
         let dest = PathBuf::from(&key);
         let Ok(rel) = dest.strip_prefix(mods_dir) else {
