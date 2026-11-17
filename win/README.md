@@ -6,10 +6,11 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
 同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
-Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod など) は、受け持ちによらず runner が
-流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
+Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod とキーなど) は、受け持ちによらず
+runner が流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
-(`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`))。
+(`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`)・ADR 070
+(`docs/adr/070_win_herdr_app_keys_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -22,6 +23,8 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
 | `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる板 (質問・状況の説明・進み具合・図) ([後述](#herdr-app-の-mod)) |
+| `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
+| `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (旧 herdr に寄せた space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -298,6 +301,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
+| 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
@@ -491,6 +495,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
 | `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。panel.json の形・図の置き場所・罠の正本は `main.js` の頭のコメント |
+| `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
   置き場所と同じ)。どれにしたかは手順の出力の頭に出る
@@ -532,6 +537,66 @@ herdr-app do pane.split '{"direction":"right","pane":"<ペイン>","mod":"pjp-hu
   変えるときは名前を変える (`x.svg` → `x-2.svg`)
 - SVG の `font-family` は名前を引用符で囲む (`'Yu Gothic UI', 'Meiryo UI', Meiryo, sans-serif`)。囲まないと日本語を混ぜた行が BIZ UDGothic に落ち、
   `~` が `‾` に、`\` が `¥` に化ける
+
+### herdr-app のキー
+
+旧 herdr ([`herdr/config.toml`](#herdr) の `[keys]`) と同じ手で herdr-app を操るキー。herdr-app の `keys.json` には 2 回に分けて打つキー (prefix) の
+仕組みが無いので、prefix は自作の mod `pjp-prefix` (小窓) で作る。keys.json に dotfiles のキーを書き足すのは runner の手順 `herdr-app-keys` (order 99)、
+mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちらも Windows にしか無い手順で、受け持ちが WSL のホストでも `dotfiles apply` が流す
+(on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`)。
+
+```powershell
+dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
+dotfiles apply --dry-run --steps herdr-app-mods,herdr-app-keys   # することを出す
+dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書き足す (herdr-app は保存するとすぐ読み直す)
+```
+
+| キー | herdr-app ですること | 旧 herdr |
+| --- | --- | --- |
+| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 前・次の space (`space.prev`・`space.next`) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。Windows の herdr-app では Ctrl+Alt が AltGr になるので Shift にした) |
+| `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
+| `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
+| prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
+| prefix → `Shift+G` | 同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する | `new_worktree` (旧 herdr は `Shift+C` と同じ) |
+| prefix → `v`・`\|` | 右に分割 (`pane.split` の right) | `split_vertical` |
+| prefix → `-`・`Shift+S` | 下に分割 (`pane.split` の down) | `split_horizontal` |
+| prefix → `n`・`p` | 次・前のタブ | `next_tab`・`previous_tab` |
+| prefix → `Shift+T`・`,` | タブの名前を変える (名前を訊く) | `rename_tab` |
+| prefix → `Tab`・`o` | 今のタブの次のペイン (端末のペインを順に回る) | `cycle_pane_next` |
+| prefix → `g`・`"` | 端末の picker (`mod.open:picker`) | `goto` |
+| prefix → `Shift+O` | 次のエージェント (`agent.next`) | `open_notification_target` の代わり |
+| prefix → `Ctrl+K` | prefix を開く前の端末へ `Ctrl+K` を送る (shell の行末まで消すなど、端末のプログラムの `Ctrl+K` を使うとき) | (無い) |
+
+- 割り当てないもの: detach (`q`・`d`) と設定の読み直し (`Shift+R`)。herdr-app は窓を閉じても端末が止まらず、設定は保存するとすぐ読み直す
+- prefix の小窓は窓の上の方に出て、押せるキーの一覧を出す (行を押しても同じ命令)。`Esc` で取り消し、割り当てに無いキーは何もせずに閉じる。キーは打った
+  文字で見るので、日本語の配列でも `"` (Shift+2)・`|` (Shift+¥) で届く
+- `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
+  取るかを伝えるよう書いている)。端末のプログラムに送るときは、prefix の後にもう一度 `Ctrl+K`。小窓に focus がある間の `Ctrl+K` を mod に
+  渡すのは keys.json の section `mod:pjp-prefix` (細かい section が `global` より勝つ。無いと `global` の `Ctrl+K` が小窓を閉じるだけになる)
+- worktree の名前は `worktree/<形容詞>-<名詞>-<16 進 4 桁>` (旧 herdr と同じ形。例 `worktree/calm-river-8281`。フォルダは
+  `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
+  作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
+  開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
+- `Shift+G` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
+  `c` は fish では abbr、bash では alias で、herdr-app が argv で起こすときに広がるとは限らないので、中身を並べている。machine の space でも同じ argv で、
+  claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる
+- 書き足し方: repo の `herdr-app/keys.json` (herdr-app の keys.json と同じ形で、dotfiles が持つキーだけ) を、herdr-app の home の `keys.json` に足す。
+  ほかのキー・section と順は残し、キーの順を見ずに同じなら書かない。書いたキーは `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys.applied.json` に記録し、
+  repo から消したキーは、今の値が記録どおりなら外す (空になった section も外す)。dotfiles が書いた値でないキー (herdr-app の既定・手で書いた値) と、
+  書いた後に herdr-app の側で書き換えたキーは、上書きせずに ⚠ で知らせる (残すなら repo の `herdr-app/keys.json` に取り込み、dotfiles の値にするなら
+  `dotfiles apply --steps herdr-app-keys --force`)。書く前の中身を `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys\backup\` に写す (いちばん古いものと、
+  新しい方から 10 個)
+- **keys.json を一度書き換えると、herdr-app を上げても新しい既定のキーは足されない。** herdr-app は手を入れていない keys.json だけを新しい版の既定に替え、
+  少しでも書き換えたファイルは丸ごとユーザーのものとして残す (herdr-app の home の `AGENTS.md` の Keys の節)。herdr-app を上げたら、新しい版の既定の
+  キーをその節と `herdr-app commands` で見て、要るものを手で足す
+- keys.json が無ければ書かない (herdr-app をまだ起こしていない新しい PC)。herdr-app は keys.json をキーの全部として読むので、dotfiles のキーだけの
+  ファイルを作ると既定のキーが無くなる。herdr-app を一度起こしてから `dotfiles apply --steps herdr-app-keys`。herdr-app の逃げ道のキー
+  (`Ctrl+Alt+Shift+Esc`) は keys.json を `keys.json.reset-<時刻>` へ退けて既定に戻すので、その後も `dotfiles apply --steps herdr-app-keys` で足し直す
+- herdr-app は keys.json を保存するとすぐ読み直す。読めなければ前に読めたキーのまま動き、隣の `keys.error` にわけを書く (runner は ※ で知らせる。
+  `herdr-app status` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
+  focus がある間はそちらが効く
+- キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`)。キーの書き方と命令の名前は、
+  herdr-app の home の `AGENTS.md` の Keys の節と `herdr-app commands`
 
 ## 配る
 
@@ -874,6 +939,8 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 - Orca の中で動かすと、`ctrl+up` / `ctrl+down` / `ctrl+alt+up` / `ctrl+alt+down` は Orca が
   先に取る (`orca/keybindings.json` のタブと worktree の移動)。Orca の中では prefix+n / prefix+p で
   タブを移る。Windows Terminal ならすべて herdr に届く
+- herdr-app (herdr の desktop app) でも同じ手で操れるよう、キーを寄せている ([herdr-app のキー](#herdr-app-のキー))。
+  ここの `[keys]` を変えたら、herdr-app の `herdr-app/keys.json` と prefix の mod (`herdr-app/mods/pjp-prefix/`) もそろえるかを決める
 - 初めて配るマシンで、Windows 側に herdr が作った `config.toml` (`onboarding = false` だけ) が
   あると、記録が無いので衝突として止まる。新しいファイルもその行を持つので、差分を見たうえで
   `nix/scripts/bootstrap-windows-files.sh --force` で上書きしてよい
@@ -1074,7 +1141,8 @@ core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の s
   (公式は待ち続ける。setup が止まったままにならないよう)
 - 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
 - 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない。自作の mod (`~/.config/herdr-app/mods/`
-  の下) だけは、runner の `herdr-app-mods` の手順が配る ([herdr-app の mod](#herdr-app-の-mod))
+  の下) は runner の `herdr-app-mods` の手順が配り、`keys.json` には runner の `herdr-app-keys` の手順が dotfiles のキーだけを書き足す
+  ([herdr-app の mod](#herdr-app-の-mod)・[herdr-app のキー](#herdr-app-のキー))
 
 ### 更新の取得元をフィードに替える
 
