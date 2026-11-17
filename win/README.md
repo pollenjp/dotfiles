@@ -6,11 +6,11 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
 同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
-Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod とキーなど) は、受け持ちによらず
+Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod とキーとハブの印など) は、受け持ちによらず
 runner が流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
 (`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`)・ADR 070
-(`docs/adr/070_win_herdr_app_keys_*`))。
+(`docs/adr/070_win_herdr_app_keys_*`)・ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -26,6 +26,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
+| (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替えた layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -302,6 +303,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
+| 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
@@ -385,8 +387,8 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 - junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
   打たない (先の中身まで消すことがある)
 - dotfiles の `CLAUDE.md`・skill・hook・status line・skillOverrides は次の節 ([Claude Code の設定](#claude-code-の設定))
-- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外・pjp-spaces・
-  `~/.config/pjp/env`・runner の `self-update`
+- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外・
+  `~/.config/pjp/env`・runner の `self-update`。pjp-spaces (W2-4) は [herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces)
 
 ### Claude Code の設定
 
@@ -630,6 +632,65 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`。herdr-app の既定のキーを替える
   ときは `herdr-app/keys.defaults.json` にその既定の値も書く)。キーの書き方と命令の名前は、herdr-app の home の `AGENTS.md` の Keys の節と
   `herdr-app commands`。既定の値は、herdr-app を一度も書き換えていない keys.json (新しい PC で herdr-app が書いたもの) で見る
+
+### herdr-app の印 (pjp-spaces)
+
+herdr-app の sidebar の space の行の 2 行目に、旧 herdr の sidebar の 2 行目と同じハブと子の印 (`🌱`・`🌳[N]`・`🔄`・`👀`・`🗑️`・`↑ TKT-n`) を出す。
+印を出すのは claude-skills の mod `pjp-spaces` (herdr-app の同梱の mod `spaces` を写して印を足したもの。claude-skills の spec
+`docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・W2-4)。runner の手順 `herdr-app-pjp-spaces` (order 98) がそれを herdr-app の
+home に置き、同梱の layout `main` を写した自分の layout `pjp-main` の sidebar の spaces を pjp-spaces に替える。Windows にしか無い手順で、受け持ちが
+WSL のホストでも `dotfiles apply` が流す (on/off はハブの手順 `hc-hub` と同じ `herdrHub`)。経緯は dotfiles-private の ADR 072
+(`docs/adr/072_win_herdr_app_pjp_spaces_*`)。
+
+```powershell
+dotfiles check --steps herdr-app-pjp-spaces             # 差を見る (何も書かない)
+dotfiles apply --dry-run --steps herdr-app-pjp-spaces   # することを出す
+dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置くときは、表示する layout が pjp-main に替わる (画面が替わる)
+```
+
+| 置くもの | 置き先 (herdr-app の home の下) | 置き方 |
+| --- | --- | --- |
+| claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` | `mods\pjp-spaces\` | `herdr-app-mods` と同じ記録つきのコピー (記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`) |
+| 同梱の `layouts\main.json` の、spaces を指す block (`content.mod` が `spaces`) を `pjp-spaces` に替えたもの | `layouts\pjp-main.json` | 初めては `herdr-app do layout.clone '{"name":"main","as":"pjp-main"}'` で写してから替える。その後は runner が今の main から作り直す (同じ記録) |
+
+- **初めて置く apply は、表示する layout を main から pjp-main に替える** (`layout.clone` は写した layout へ表示を替える)。sidebar の幅などの clicks
+  (`layouts\.state\`) は herdr-app が clone で写すので、main で広げた幅のまま。表示を替えるのはこの 1 回だけ。表示が main でない (ほかの layout を
+  選んでいる) ときは作らずに · で知らせる。herdr-app の窓が開いていないと clone が落ちる (⚠。窓を開いて流し直す)
+- runner が herdr-app に打つのは `herdr-app do layout.clone` だけ (窓を止めない・立て直さない)。表示している layout は herdr-app の home の `shared.json`
+  の `layout` で読む。同梱の `main.json` は直さない (herdr-app は起動のたびに同梱のファイルを書き戻し、直したものは `main-edited` に移す)
+- herdr-app を上げて main が変わったら、`dotfiles check` が pjp-main の行に変わった node を出す (⚠。例「同梱の main から作り直す。変わった node:
+  sidebar・status」)。`dotfiles apply` が今の main に同じ差し替えをした形へ書き直す (clone し直さない。`cloned_from` と clicks は残る)。main が変えた
+  欄は、herdr-app の決まり (ファイルを直した欄はファイルが clicks に勝つ) で新しい値になる
+- pjp-main.json を手で直すと、次の apply は書き直さずに ⚠ で知らせる。残すなら別の名前の layout に写して使い
+  (`herdr-app do layout.clone --name pjp-main --as <名前>`)、main から作り直すなら `dotfiles apply --steps herdr-app-pjp-spaces --force`
+- 同梱の main に spaces を指す block が無くなったら (herdr-app の形が変わった)、pjp-main は前のままにして ⚠ で知らせる。claude-skills の pjp-spaces と
+  合わせて差し替え方を決め直す
+- 同梱の mod `spaces` が変わったとき (herdr-app を上げた) に pjp-spaces へ差を取り込むのは claude-skills (pjp-spaces の頭に、写した元の herdr-app の版が
+  ある)。取り込んだ版は、clone を pull して `dotfiles apply` で届く
+- claude-skills の clone に pjp-spaces がまだ無い (claude-skills の PR の merge 前) うちは何もしない (· で知らせる)。置いた後で clone から無くなったら、
+  置いたものに触らずに ⚠ で知らせる (layout が mod を指しているので、片付けると sidebar が壊れる)
+- mod.json の `place` が `none` でない mod は置かない (⚠。herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)
+- 置き方の細部 (herdr-app が mod のフォルダに書く `gpui-kit.d.ts`・`jsconfig.json` は配らない・置き先の mod のフォルダがリンクなら触らない・元から
+  消えたファイルは記録どおりなら消す) は [herdr-app の mod](#herdr-app-の-mod) と同じ。置いた後は `herdr-app status` で errors が無いか、mod は
+  `herdr-app check <mod のフォルダ>` ([herdr-app の mod](#herdr-app-の-mod) の見方) で確かめる
+
+切り戻し (PowerShell):
+
+```powershell
+# 1. 表示を同梱の main に戻す (ctrl-shift-l で巡っても、逃げ道のキー ctrl-alt-shift-escape でもよい)。runner は自分から pjp-main へ替え直さない
+herdr-app do layout.switch --name main
+# 2. 配ったファイルも外すなら (1 の後で)。runner は記録から「作った pjp-main が無い」と分かり、次の apply から mod も layout も置かない
+$h = Join-Path $HOME '.config\herdr-app'   # HERDR_APP_HOME を置いていれば、その値
+Remove-Item (Join-Path $h 'layouts\pjp-main.json')
+Remove-Item -Recurse (Join-Path $h 'mods\pjp-spaces')   # 手でリンクにしていたら cmd /c rmdir で外す (先は消さない)
+dotfiles check --steps herdr-app-pjp-spaces             # · で「mod も layout も置かない」と出る
+```
+
+- 1 だけなら pjp-main と mod は残り、apply は main が変わるたびに pjp-main を作り直す (表示は替えない)。`ctrl-shift-l` でいつでも pjp-main に戻れる
+- 2 の後に戻すときは `dotfiles apply --steps herdr-app-pjp-spaces --force` (mod を置き直し、main を clone し直して表示を pjp-main に替える)。逃げ道のキーで
+  pjp-main が `pjp-main.json.reset-<時刻>` へ退けられたときも、runner は 2 と同じく外したものとして扱う (戻すのは同じく `--force`)
+- `layouts\.state\pjp-main.json` (pjp-main の clicks) は herdr-app のファイルなので消さない (herdr-app の決まり)。clone し直すと main の clicks で写し直される
+- 記録 (`%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`) を消すと、次の apply は初めてとして置き直す (表示も替わる)
 
 ## 配る
 
@@ -1174,8 +1235,9 @@ core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の s
   (公式は待ち続ける。setup が止まったままにならないよう)
 - 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
 - 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない。自作の mod (`~/.config/herdr-app/mods/`
-  の下) は runner の `herdr-app-mods` の手順が配り、`keys.json` には runner の `herdr-app-keys` の手順が dotfiles のキーだけを書き足す
-  ([herdr-app の mod](#herdr-app-の-mod)・[herdr-app のキー](#herdr-app-のキー))
+  の下) は runner の `herdr-app-mods` の手順が配り、`keys.json` には runner の `herdr-app-keys` の手順が dotfiles のキーだけを書き足す。claude-skills の
+  mod `pjp-spaces` と、それを使う自分の layout `pjp-main` は runner の `herdr-app-pjp-spaces` の手順が置く
+  ([herdr-app の mod](#herdr-app-の-mod)・[herdr-app のキー](#herdr-app-のキー)・[herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces))
 
 ### 更新の取得元をフィードに替える
 
