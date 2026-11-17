@@ -58,6 +58,7 @@
 # 固定した版で入れる (既定は入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
 # ntn と Claude Code は既定で入れる (winget で固定した版。入れないマシンは wsl.windowsFiles.ntn.enable = false・
 # wsl.windowsFiles.claudeCode.enable = false。win/README.md の「ntn」「Claude Code」)。
+# Tailscale は既定で入れない (VPN の道具。入れるマシンは wsl.windowsFiles.tailscale.enable = true。win/README.md の「Tailscale」)。
 { mkHome }:
 
 {

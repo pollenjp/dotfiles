@@ -451,7 +451,22 @@ mod tests {
         assert!(!tool("company", "windowsNtn"));
         for group in ["personal", "company", "client"] {
             assert!(!tool(group, "windowsTypeClipboard"), "{group}");
+            // Tailscale は VPN の道具で、どのグループでも既定は off (入れるホストが [tools] に書く)
+            assert!(!tool(group, "windowsTailscale"), "{group}");
         }
+    }
+
+    #[test]
+    fn windows_tailscale_is_a_known_tool_that_hosts_turn_on() {
+        let h = host("[tools]\nwindowsTailscale = true\n").unwrap();
+        assert!(h.tool("windowsTailscale"));
+        assert_eq!(h.tool_origin("windowsTailscale"), "ホストの値");
+        let h = host("").unwrap();
+        assert!(!h.tool("windowsTailscale"));
+        assert_eq!(
+            h.tool_origin("windowsTailscale"),
+            "グループ personal の既定"
+        );
     }
 
     #[test]
