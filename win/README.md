@@ -41,6 +41,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
+| `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 | (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
@@ -228,7 +229,7 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
   WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
@@ -236,6 +237,8 @@ scanData = "https://app.notion.com/p/…"
   書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
   (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
+- `windowsTailscale` もどのグループでも既定が false。Tailscale を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.tailscale.enable = true`) は、同じ値を
+  `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
 - `[claude.notion]` は `claude-notion` の手順が `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` に書く (Linux の home-manager が書くのと同じ中身)。
   runner が確かめるのは Nix の option と同じ型だけ (`profile` は `[a-z0-9][a-z0-9_-]*`・`routes` は文字列の表・`override` は表。日時は書けない)。
   プロファイルの名前やキーの綴りは、claude-skills の pjp-notion-profile が使うときに確かめる。TOML に null は無いので、`override` で値を消す形
@@ -284,6 +287,7 @@ scanData = "https://app.notion.com/p/…"
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` から `dotfiles.ps1` を読ませる | | まだ |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
@@ -598,7 +602,7 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の pin
 
-winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる 4 つ) は、入れた後に `winget pin add --id <ID> --exact` で pin (種類は Pinning) を足し、`winget upgrade --all` から外す。版を変えるときに
 自分の pin に止められない打ち方は、winget の作り (`microsoft/winget-cli` の `WorkflowBase.cpp`・`PinningData.cpp`) に合わせて決めてある
 ([ADR 063](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/063_win_winget_pin_include_pinned_20261116T132001JST/README.md)):
@@ -610,17 +614,17 @@ winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語�
 | 入っているものへの `winget install --version <版>` | 止められる (upgrade の道に移る。install は `--include-pinned` を受け付けない) |
 | 入っていないものへの `winget install`・`winget uninstall`・`winget download` | pin を見ない (pin が残っていても) |
 
-- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力)、入れ替える道は uninstall → install (herdr・ntn・Claude Code。
+- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力・Tailscale)、入れ替える道は uninstall → install (herdr・ntn・Claude Code。
   入っていない形にしてから入れるので pin を見ない)。どちらも `*.Tests.ps1` が確かめる (upgrade には `--include-pinned` を付け、install・
   uninstall には付けない)
 - 手で揃えるときも、版を名指しした upgrade に `--include-pinned` を付ける (bootstrap の ※ の行と[版のずれを手で揃える](#版のずれを手で揃える))。
   pin は付いたまま残る
-- `0x8A150068` で落ちたら (pin を Blocking・Gating に替えた・入っていると winget が見ているのに install を打った)、OpenSSH と Google 日本語入力は
+- `0x8A150068` で落ちたら (pin を Blocking・Gating に替えた・入っていると winget が見ているのに install を打った)、OpenSSH・Google 日本語入力・Tailscale は
   pin の確かめ方と外し方を ※ で添える。`winget pin remove --id <ID> --exact` で外して打ち直すと、揃えた後に pin を足し直す
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) は、新しい版が出ると `setup --update` が
 短く知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)。上げるかは Claude Code に聞かれて決める)。
 それとは別に、流さない間も気付けるよう、GitHub Actions の
@@ -637,6 +641,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `google-japanese-input` | `google-japanese-input/Install-GoogleJapaneseInput.ps1`・`google-japanese-input/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い) | [Google 日本語入力の新しい版が出たとき](#google-日本語入力の新しい版が出たとき) |
 | `ntn` | `ntn/Install-Ntn.ps1`・`ntn/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い。配布物は ntn.dev) | [ntn の新しい版が出たとき](#ntn-の新しい版が出たとき) |
 | `claude-code` | `claude-code/Install-ClaudeCode.ps1`・`claude-code/skipped-versions.txt` | GitHub の release (`anthropics/claude-code` の `vX.Y.Z`) が出た日 | [Claude Code の新しい版が出たとき](#claude-code-の新しい版が出たとき) |
+| `tailscale` | `tailscale/Install-Tailscale.ps1`・`tailscale/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | [Tailscale の新しい版が出たとき](#tailscale-の新しい版が出たとき) |
 | `git` | `bootstrap/Install-Bootstrap.ps1` の `-GitVersion`・`bootstrap/skipped-versions/git.txt` | GitHub の release (`git-for-windows/git` の `v<X.Y.Z>.windows.<N>`。winget の版は N が 1 なら `X.Y.Z`、ほかは `X.Y.Z.N`) が出た日 | [bootstrap の固定した版の新しい版が出たとき](#bootstrap-の固定した版の新しい版が出たとき) |
 | `gh` | `bootstrap/Install-Bootstrap.ps1` の `-GhVersion`・`bootstrap/skipped-versions/gh.txt` | GitHub の release (`cli/cli` の `vX.Y.Z`) が出た日 | 同じ |
 | `vs-buildtools` | `bootstrap/Install-Bootstrap.ps1` の `-VsBuildToolsVersion`・`bootstrap/skipped-versions/vs-buildtools.txt` | winget-pkgs に載った日 (GitHub の release が無い) | 同じ |
@@ -668,7 +673,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
     → 下の「パッケージ ID を確かめる」
   - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
     ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Git.Git`・`GitHub.cli`・
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Tailscale`・`Git.Git`・`GitHub.cli`・
   `BuildTools`・`Rustup`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
@@ -696,12 +701,12 @@ Windows に固定した版で入れているものに新しい版が出たら、
 
 | 名前 | 固定した版 | 新しい版の一覧と出た日 | 見送りの一覧 |
 | --- | --- | --- | --- |
-| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
+| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code`・`tailscale` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion` など) の既定値 | `nix/scripts/check-winget-version.sh --json` (出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/bootstrap/skipped-versions/<名前>.txt` (「版 理由」) |
 
-- 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も) は、
-  入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`) でだけ確かめる。bootstrap の
+- 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も)・Tailscale は、
+  入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`・`windowsFiles.tailscale.enable`) でだけ確かめる。bootstrap の
   4 つ (git・gh・vs-buildtools・rustup) は、Windows の ghq に dotfiles の clone がある (`<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git`
   がある。bootstrap を流した) マシンでだけ確かめる。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
@@ -2527,3 +2532,95 @@ setup が下げる。
 
 - 締めの行の文言は `bootstrap-windows-claude-code.sh` が読む。変えるときは向こうも直す
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+
+## Tailscale
+
+`tailscale/Install-Tailscale.ps1` は、Tailscale (VPN。Windows を tailnet に参加させる) を winget の `Tailscale.Tailscale` (machine スコープの
+MSI。入れる・上げるときは Windows のデスクトップに UAC の確認と、進み具合の小さな窓が出る) で入れ、版を `-Version` の既定値 (今は `1.104.5`)
+の 1 か所で固定する (dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`))。固定した版は新しく入れるときの版で、入れた後の更新は
+Tailscale の自動更新に任せる ([Tailscale を入れる](#tailscale-を入れる-winget))。
+
+- setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ。tailnet にログインして使う VPN の道具で、会社の PC などに
+  勝手に入れないよう、どのグループでも既定は false ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入れるホストは、
+  dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
+
+  ```nix
+  wsl = {
+    windowsFiles.enable = true;
+    windowsFiles.tailscale.enable = true;
+  };
+  ```
+
+  Windows の runner では、ホストの値の `[tools]` に `windowsTailscale = true` を書く ([ホストの値](#ホストの値))
+- false に戻しても setup は消さない (見なくなるだけ)。消すなら PowerShell で `winget pin remove --id Tailscale.Tailscale --exact` の後に
+  `winget uninstall --id Tailscale.Tailscale --exact` を打つ (UAC の確認が出る)
+- tailnet へのログイン (タスクトレイの Tailscale のアイコンからの Log in・`tailscale up`・auth key) と Tailscale の設定は dotfiles では扱わない。
+  入れた後に、ユーザーが手でログインする
+- 置き場所は `C:\Program Files\Tailscale\` (`tailscale.exe`・`tailscaled.exe`・`tailscale-ipn.exe`)。版は `tailscale.exe version` の 1 行目で読む
+  (別の置き場所に入れていても、PATH で引ければ読む)
+
+### Tailscale を入れる (winget)
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Tailscale -Check` (PowerShell) | 差を出すだけ。揃っていれば (入っている版の方が新しいときも) 終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-Tailscale` (PowerShell) | 揃える (入れる・古ければ上げる・pin を足す)。入っている版の方が新しければ下げない。入れる・上げるときは UAC の確認が出る |
+| `nix/scripts/bootstrap-windows-tailscale.sh` (WSL) | `setup --update` でも毎回走る (order 96。`windowsFiles.tailscale.enable = true` のマシンだけ)。入っていなければ入れ (UAC の確認が出る)、古ければ ⚠ で囲んで知らせる (上げはしない) |
+| `nix/scripts/bootstrap-windows-tailscale.sh --apply` (WSL) | WSL から揃える (確かめずに流す)。UAC の確認は Windows のデスクトップに出る |
+| `nix/scripts/check-winget-version.sh tailscale` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#tailscale-の新しい版が出たとき)) |
+
+- winget の manifest は burn (exe の束) と wix (MSI) の 2 つの installer を並べるので、入れるときは `--installer-type wix` で MSI を名指しする
+  (Tailscale の自動更新も MSI で上げる)
+- `--silent` は付けない (winget の既定の `/passive` で、進み具合の小さな窓が出る)。per-machine の MSI は、管理者でない PowerShell から quiet
+  (`--silent` → `/quiet`) で流すと UAC が出ずに落ちる ([bootstrap がすること](#bootstrap-がすること) の GitHub CLI と同じ)
+- MSI は入れ終えると Tailscale の GUI を起こす (タスクトレイにアイコンが出る)。そこからログインする
+- 入れた後に `winget pin add` で `winget upgrade --all` から外す。Tailscale の自動更新は止めない (pin は winget の中の印で、Tailscale の
+  自動更新は自分で MSI を落として入れる)
+- Tailscale は Windows で自分を更新する。既定は tailnet の管理画面の Settings → Device management の「Auto-update new devices」で決まり
+  (2024-02 より後に作った tailnet は既定で on)、端末ごとには Tailscale のタスクトレイの Preferences → Automatically install updates で変えられる。
+  自動更新はリリースのおよそ 1 週間後に届く。そのため、入っている版の方が新しいときは下げず、`-Check` は揃っている扱い (終了コード 0) にして
+  ※ で添えるだけにする (setup も ⚠ を出さない)
+- 古いとき (自動更新を切っている・repo の版を上げた) は ⚠ で知らせるが、setup は上げない (上げる間、Tailscale の接続が少しの間切れる。
+  Tailscale 越しにこの PC へつないでいる接続も切れる)。自動更新を待つか、`Install-Tailscale` で上げる (upgrade は installer を名指しせず
+  入っている形で上げ、`--include-pinned` を付ける。[winget の pin](#winget-の-pin))
+- 入っていなくても、固定した版が winget に無い (`-Version` の書き間違いか、winget から消えた) ときは、setup は入れにいかず (UAC も出さず)、
+  repo の版 (`-Version` の既定値) の直し方を出す。入っている版が読めないときは、確かめ方 (`winget list --id Tailscale.Tailscale`) を出す
+- setup が待つ上限は、`-Check` が 120 秒、入れる `-IfMissing` が 600 秒。時間切れになったらそう出して先へ進む (setup は止めない)。
+  入れるときに UAC の確認を押さないまま 600 秒たった場合は、⚠ で囲んで、手で打つコマンドも出す
+
+### Tailscale の新しい版が出たとき
+
+固定した版より新しい版が winget に載って 30 日たつと、GitHub Actions の `winget-versions` の `Windows の Tailscale` の job が落ちて知らせる。
+出た日は winget-pkgs に載った日 (Tailscale は GitHub (`tailscale/tailscale`) に release を出すが、Windows の MSI を出さない版 (1.98.5・1.102.5) は
+winget に載らないので、GitHub とは比べない)。猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+固定した版は新しく入れるときの版なので、上げ遅れて困るのは新しいマシンだけ (入っている Tailscale は自動更新で上がる)。
+
+上げるとき:
+
+1. changelog (`https://tailscale.com/changelog`) で、Windows の installer・自動更新・ログインに触る変更が無いかを見る
+2. `tailscale/Install-Tailscale.ps1` の `-Version` の既定値と、上の「今は」を新しい版にし、`Install-Tailscale.Tests.ps1` を流して PR を出す
+   (`winget-versions` が、書いた版が winget にあるかを確かめる)
+3. merge したら、各マシンで `setup --update` を流す。入っているマシンでは何も変わらない (古ければ ⚠ が出るので、自動更新を待つか
+   `Install-Tailscale` で上げる)
+
+見送るとき: `tailscale/skipped-versions.txt` に「版 理由」を 1 行足して commit する。
+
+### Install-Tailscale.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (版の読み方・探す場所・plan・winget の引数・状態の表) と、winget を偽物に差し替えた流れ (打つ winget の順・入れられない
+  とき) は `tailscale/Install-Tailscale.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので
+  配られない):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/tailscale/Install-Tailscale.Tests.ps1
+  ```
+
+- winget の引数 (`Get-WingetCommands`) の install には `--installer-type wix` を付け、`--silent` と `--include-pinned` は付けない。upgrade には
+  `--include-pinned` を付ける ([winget の pin](#winget-の-pin))
+- `bootstrap-windows-tailscale.sh` と runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し
+  (`Tailscale (winget の Tailscale.Tailscale)`) と印 (`winget show --versions に無い`・`比べられない`) で分かれる。変えるときは向こうも直す。
+  締めの行 (`⚠️ ` で始まる行) は、WSL の wrapper が枠に入れるときに落とす (下に出す揃えるコマンドと重なるので)
+- tailnet へのログインの案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)
+- winget やファイルに触る本物の部分は、実機で `-Check` と本番を打って確かめる
