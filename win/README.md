@@ -6,10 +6,10 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
 同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
-Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順など) は、受け持ちによらず runner が流す (経緯は
+Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定など) は、受け持ちによらず runner が流す (経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
-(`docs/adr/065_win_claude_config_*`))。
+(`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -42,6 +42,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
+| (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
 
 ## bootstrap (新しい Windows で最初に流す)
 
@@ -226,8 +227,10 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub`・`devTracker` と、runner に
-  まだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+- `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
+  WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
 - `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
   書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
@@ -269,6 +272,7 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-notion` | ホストの値の `[claude.notion]` から `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
@@ -329,6 +333,9 @@ gate が違うと、試験が落ちる
 - `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
 - settings.json の env に足す git の組と claude-notion.json の中身も、Linux の CI が `tests/claude_parity.rs` で、Linux の
   `nix/home/modules/claude.nix` が sandbox のホストに書く claude-env.json・claude-notion.json (`nix eval`) と突き合わせる
+- git の設定 (`git-config`) は、Linux の CI が `tests/git_parity.rs` で、Linux の home-manager の `programs.git` (sandbox と作り物のホスト。`nix eval`) と
+  突き合わせる (Windows に入れない署名と delta の外に値の差が無いか・書き方が home-manager の toGitINI と同じか)。どの OS でも同じにする値は
+  `nix/home/modules/git.toml` を直す (git.nix に直に書いた値は Windows に届かず、この突き合わせが落ちる)
 - Rust に写した Claude Code の hook・status line (`src/hooks/`) と skillOverrides (`src/steps/claude_skill_overrides.rs`) は、Linux の CI が同じ入力で
   bash の版 (`nix/files/claude/hooks/*.sh`・`statusline-command.sh`・`nix/scripts/bootstrap-claude-skill-overrides.sh`) と突き合わせる
   (`DOTFILES_WIN_BASH_PARITY=1`。手元でも bash と jq があれば流れる)。コマンドを読む 3 つの guard は、bash の版の試験 (`nix/tests/<名前>.test.sh`)
@@ -418,6 +425,50 @@ Linux の CI が同じ入力で突き合わせる)。Windows の Claude Code は
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
 | `footer-links-archive.sh` | 入れない | cc-pages が Windows に無い (claude-skills の spec も Windows の cc-pages は扱わない) |
 | `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない。承認の画面は、ユーザーが見ている Windows の画面に出る |
+
+### git の設定
+
+WSL の home-manager の `programs.git` (`nix/home/modules/git.nix`) と同じ中身の git の設定を、Windows の `%USERPROFILE%\.config\git\` に置く手順
+`git-config`。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す (ホストの値は要る)。どの OS でも同じにする値
+(名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) は `nix/home/modules/git.toml` にだけ書き、git.nix と runner が同じファイルを読む
+(経緯は dotfiles-private の ADR 066 (`docs/adr/066_win_git_config_*`))。
+
+```powershell
+dotfiles check --steps git-config                  # 差を見る (何も書かない)
+dotfiles apply --dry-run                           # することを出す
+dotfiles apply                                     # 揃える
+git config --list --show-origin --show-scope       # どのファイルのどの値が効いているか
+```
+
+| 置くもの | 中身 |
+| --- | --- |
+| `config` | git.toml の `[settings]`・`[user]` (`gitIdentity` が true のとき)・`[filter "lfs"]` を home-manager と同じ形 (節とキーは名前の順) で並べ、`gitIdentity` なら後ろに owner ごとの `[includeIf "gitdir/i:~/ghq/github.com/<owner>/"]` |
+| `config.<owner>` | owner (今は pollenjp-sub) の `[user]`。上の includeIf が読む (`gitIdentity` のときだけ) |
+| `ignore` | git.toml の `ignores` (git が既定で読む全体の ignore) |
+
+WSL と違うもの:
+
+| もの | WSL | Windows | わけ |
+| --- | --- | --- | --- |
+| 1Password の署名 (`commit.gpgSign`・`tag.gpgSign`・`[gpg]`) | `onePassword.enable` のホストで書く | 書かない | Windows には入れない (Claude の commit は `claude-env` の env で無署名) |
+| delta (`pager.<diff・log・show・blame>`・`interactive.diffFilter`・`[delta]`) | 書く | 書かない | Windows に delta が無い |
+| `[filter "lfs"]` の git-lfs | `/nix/store` のパス | PATH の `git-lfs` | Git for Windows に同梱 (system の設定にも同じ 4 つがある) |
+| pollenjp-sub の includeIf の条件 | `gitdir:~/workdir/github.com/pollenjp-sub` | `gitdir/i:~/ghq/github.com/pollenjp-sub/` | Windows の ghq の root は `%USERPROFILE%\ghq`。末尾の `/` でその下の repo に当て、`/i` で大文字小文字を区別しない。WSL の条件は旧い ghq の root (`~/workdir`) の写しで末尾に `/` が無く、今は何にも当たらない (WSL のふるまいは変えていない) |
+| ignore の `.direnv/` | direnv の module が足す | 足さない | Windows に direnv が無い |
+| credential helper | 書かない | 書かない | bootstrap が gh に書かせない決まりと、`claude-env` が settings.json の env に足す組を壊さない |
+
+- 置き方は `CLAUDE.md` と同じ記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\git-config.deployed.json`)。git.toml が変われば `dotfiles apply` で書き直す。
+  Windows 側で変わった・記録の無い違う中身は衝突で飛ばして ⚠ で知らせる (dotfiles の git.toml へ取り込むか、`dotfiles apply --steps git-config --force` で
+  上書き)。書かなくなったファイル (`gitIdentity` を外したときの `config.<owner>`) は、中身が記録どおりなら消す
+- `~/.gitconfig` が無いと、`git config --global` (gh の `auth setup-git` なども) はここの `config` に書き、次の `dotfiles check` が衝突で知らせる。Windows だけの
+  設定は `~/.gitconfig` に書く (`git config --file "$HOME\.gitconfig" <キー> <値>`)。git は `~/.config/git/config` の後に `~/.gitconfig` を読むので同じキーは
+  `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
+- `gitIdentity` が false のホスト (自社・客先) には名前もメールも書かない (WSL と同じ。git は commit の前に止まる)。そのホストで使う名前とメールは `~/.gitconfig` に書く
+- `core.autocrlf = false` が Git for Windows の system の `true` より先に効く (WSL と同じく、取り出すときに LF を CRLF にしない)。repo に `core.autocrlf` を
+  書いていない既にある clone のうち、作業ツリーが CRLF で取り出されたものは、触ったファイルが変わったように見えることがある (`git ls-files --eol` の
+  `i/lf w/crlf` の行)。その repo に `git config core.autocrlf true` を書けば今までどおり。bootstrap の clone は repo に `false` を書いてある
+- git は `XDG_CONFIG_HOME` があれば `%XDG_CONFIG_HOME%\git\config` を、無ければ `$HOME\.config\git\config` を読む。どちらかの環境変数で git が別の場所を
+  読むなら ⚠ で知らせる (ここに置いた設定は効かない)
 
 ## 配る
 
