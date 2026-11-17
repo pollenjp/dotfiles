@@ -2371,7 +2371,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ([`nix/README.md`「WSL の op を理由つきで呼ぶ (1Password CLI)」](../nix/README.md#wsl-の-op-を理由つきで呼ぶ-1password-cli)) は、
 呼び出しごとに Windows の `op-reason.exe` (動かないときは隣の `launcher.ps1`) を起こして承認の窓を出す。zip の中身は
 `op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版にそろえる
-(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 と 0.2.0 は同じ取り決め)。
+(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.3.0 まで同じ取り決め)。
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
@@ -2383,7 +2383,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
   待たずに済む)
-- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.2.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
+- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.3.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
   中身の値 (`Tree`) を同じファイルの表 (`Get-OpReasonReleases`) で固定する。`Zip` は Release に置いた `op-reason-windows.zip.sha256`
   の中身と同じ。WSL の実行ファイルの版 (`nix/pkgs/op-reason/default.nix` の `version`) と同じにする (テストが突き合わせる)
 - 自作のアプリの Release なので、type-clipboard と同じく依存の公開からの猶予 (7 日) は置かない。中身は SHA-256 で固定する
@@ -2421,7 +2421,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   次に入れるときに 10 分より古ければ消す
 - Invoke-WebRequest で落とすので、展開した物に Mark of the Web (`Zone.Identifier`) は付かない。`powershell-entry` の `.ps1` も
   `Unblock-File` せずに RemoteSigned で動く (中身は SHA-256 で確かめてある)
-- 記録 (`%LOCALAPPDATA%\op-reason\log.jsonl`) は op-reason が置く別の場所で、触らない
+- 記録などの置き場 (`%LOCALAPPDATA%\op-reason`。記録の `log.jsonl`・窓で選んだ言語の `settings.json`・0.3.0 からは窓のリンクに使う
+  アカウントの ID の `account.json` など) は op-reason が置く別の場所で、触らない
 - PowerShell 7 でも Windows PowerShell 5.1 でも動く。SHA-256 と展開は .NET で行う (PowerShell 7 から起こした 5.1 は PSModulePath を
   継ぎ、`Get-FileHash`・`Expand-Archive` が見つからないことがある)
 - 入れるのをやめる (WSL の op を入れないマシンにする) ときも、setup は消さない。消すなら op の呼び出しが無いときに
@@ -2446,7 +2447,10 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
    ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき))
 5. `Install-OpReason.Tests.ps1` を流して PR を出す
 6. merge したら、入れるマシンで `setup --update` を流す (WSL の実行ファイルが上がり、Windows の部品も入れ替わる)。op の呼び出しの
-   途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える
+   途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える。WSL の側で入るものが新しい
+   版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した) では、Windows の部品を先に揃えてから switch する
+   ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)。setup が揃えない
+   ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に `Install-OpReason` を手で流す
 
 ### Install-OpReason.ps1 を書くときの注意
 

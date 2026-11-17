@@ -34,8 +34,8 @@
 #     - 小文字の名前 (i・reason・http_proxy) もそのまま届き、起きるのは渡した program
 #     - 参照が 20 件でも op は 1 回
 #     - op が stderr に警告を出して 0 で終われば、警告はそのまま出て program を起こす
-#   理由: claude-op-reason.json の enable が true なら op に --reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"
-#     を付け (同じ参照は 1 回、理由の改行とタブは空白)、false・無いなら付けない
+#   理由: claude-op-reason.json の enable が true なら op に --reason "[pjp-op-env: <program> に渡す] <理由>" を付け (理由の改行と
+#     タブは空白。読む参照は並べない)、false・無いなら付けない
 #   引数の誤り: 理由が無い・空・空白だけ、program が無い、知らない option は 2 で、op を呼ばない
 #   fail closed: op が 0 以外 (75)・解けない参照 (1)・印が欠けた出力 (70)・NUL を含む出力 (70)・値に印が混ざった出力 (70) で
 #     program を起こさず、helper の stdout・stderr に値が無い
@@ -58,9 +58,12 @@
 #       値がそのまま届く
 #     - program が起きた時点で op-reason の lock (<state>/op-reason/lock) が空いている (flock -n が通る)
 #     - program が動いている間に、別の op (OPREASON_LOCK_WAIT=1) が待たされずに 0 で終わる
-#     - op-reason の記録 (log.jsonl) に値が無く、start の args は ["inject"]、reason に件数と参照が入り、end は op-reason.exe で
-#       動いた approved
-#     - 参照が 6 件で窓の理由 (payload の facts.reason。op-reason が 200 字で切る) が切れても、頭に program と参照の件数が出る
+#     - 窓 (payload の facts) の理由は program と理由だけで、読む参照 (同じものは 1 回) は facts.refs に stdin から並ぶ
+#       (op-reason 0.3.0 が stdin のテンプレートから拾う)
+#     - op-reason の記録 (log.jsonl) に値が無く、start の args は ["inject"]、reason は program と理由だけ、refs に読む参照が
+#       全部入り、end は op-reason.exe で動いた approved。op-reason-log の表の行には参照の件数が付く
+#     - 参照が 10 件なら、窓 (facts.refs) は total 10 で 8 件を並べ (残りは窓が「ほか 2 件」と出す)、記録 (start.refs) には
+#       10 件全部が入る。理由は切れない
 #     - 流した後、HOME・XDG_STATE_HOME・XDG_RUNTIME_DIR・TMPDIR・cwd のどのファイルにも値が無い
 #
 # ## 作り
@@ -547,11 +550,12 @@ vault op://Test/b/password S3CR3T-b
 printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' 'C=op://Test/a/password' >"${proj}/.env"
 export PROG_KEYS="A B C"
 run_env reason --reason $'bot を\n起こす\tため' -- prog
-want='--reason|[pjp-op-env: prog に参照 2 件] bot を 起こす ため (読む参照: op://Test/a/password, op://Test/b/password)|inject|'
+want='--reason|[pjp-op-env: prog に渡す] bot を 起こす ため|inject|'
 if [[ ${rc} == 0 && $(op_args 1) == "${want}" ]]; then
-  ok "enable が true なら --reason に program・参照の件数・理由・読む参照 (同じものは 1 回) を付ける。改行とタブは空白"
+  ok "enable が true なら --reason に program と理由を付け、読む参照は並べない (op-reason の窓が stdin から並べる)。改行とタブは空白"
 else
-  ng "enable が true なら --reason に program・参照の件数・理由・読む参照 (同じものは 1 回) を付ける。改行とタブは空白" "rc=${rc} args=$(op_args 1)"
+  ng "enable が true なら --reason に program と理由を付け、読む参照は並べない (op-reason の窓が stdin から並べる)。改行とタブは空白" \
+    "rc=${rc} args=$(op_args 1)"
 fi
 reset
 set_state none
@@ -814,16 +818,17 @@ EOF
 opr_bin=${work}/bin-opr
 mkdir -p "${opr_bin}"
 ln -s "${opr}" "${opr_bin}/op"
+ln -s "${opr}" "${opr_bin}/op-reason-log"
 export OPREASON_EXE=${work}/winapp/op-reason.exe OPREASON_OP_EXE=${work}/win/op.exe
 opr_state=${XDG_STATE_HOME}/op-reason
 lock_file=${opr_state}/lock
 reset
 set_state true
 vault op://Test/c/password $'S3CR3T-c\nline2'
-printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' 'C=op://Test/c/password' >"${proj}/.env"
-export PROG_KEYS="A B C"
+printf '%s\n' 'A=op://Test/a/password' 'B=op://Test/b/password' 'C=op://Test/c/password' 'D=op://Test/a/password' >"${proj}/.env"
+export PROG_KEYS="A B C D"
 PATH=${opr_bin}:${PATH} PROG_LOCK=${lock_file} run_env opr --reason "kabu の bot を起こす" -- prog
-expect_env 'A=S3CR3T-a' 'B=S3CR3T-b' $'C=S3CR3T-c\nline2'
+expect_env 'A=S3CR3T-a' 'B=S3CR3T-b' $'C=S3CR3T-c\nline2' 'D=S3CR3T-a'
 if [[ ${rc} == 0 ]] && same_env && [[ $(<"${FAKE_DIR}/runner.modes") == desktop && $(op_count) == 1 && $(op_args 1) == 'inject|' ]]; then
   ok "本物の op-reason を通しても、承認の出る呼び出し (desktop) と op.exe の inject は 1 回で、値がそのまま届く"
 else
@@ -835,19 +840,37 @@ if [[ $(cat "${PROG_DUMP}/lock" 2>/dev/null) == free ]]; then
 else
   ng "program が起きた時点で op-reason の lock は空いている" "lock=$(cat "${PROG_DUMP}/lock" 2>&1)"
 fi
+want_reason='[pjp-op-env: prog に渡す] kabu の bot を起こす'
+# .env の D は A と同じ参照。op-reason は同じ参照を 1 回だけ並べる
+want_refs='{"total":3,"from":[{"kind":"stdin"}],"list":["op://Test/a/password","op://Test/b/password","op://Test/c/password"]}'
+window_reason=$(jq -r '.facts.reason // empty' "${FAKE_DIR}/runner.payload" 2>/dev/null)
+window_refs=$(jq -c '.facts.refs // empty' "${FAKE_DIR}/runner.payload" 2>/dev/null)
+if [[ ${window_reason} == "${want_reason}" && ${window_refs} == "${want_refs}" ]]; then
+  ok "窓 (payload の facts) の理由は program と理由だけで、読む参照は facts.refs に stdin から並ぶ (同じものは 1 回)"
+else
+  ng "窓 (payload の facts) の理由は program と理由だけで、読む参照は facts.refs に stdin から並ぶ (同じものは 1 回)" \
+    "reason=${window_reason} refs=${window_refs}"
+fi
 log=${opr_state}/log.jsonl
 start_rec=$(jq -c 'select(.event == "start")' "${log}" 2>/dev/null | tail -n 1)
 end_rec=$(jq -c 'select(.event == "end")' "${log}" 2>/dev/null | tail -n 1)
 start_args=$(jq -c '.args' <<<"${start_rec}" 2>/dev/null)
 start_reason=$(jq -r '.reason' <<<"${start_rec}" 2>/dev/null)
+start_refs=$(jq -c '.refs // empty' <<<"${start_rec}" 2>/dev/null)
 end_how=$(jq -r '.result + " " + .runner' <<<"${end_rec}" 2>/dev/null)
-want_reason='[pjp-op-env: prog に参照 3 件] kabu の bot を起こす (読む参照: op://Test/a/password, op://Test/b/password, op://Test/c/password)'
-if [[ ${start_args} == '["inject"]' && ${start_reason} == "${want_reason}" && ${end_how} == 'approved exe' ]] \
-  && ! grep -qaF S3CR3T "${log}"; then
-  ok "op-reason の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入り、end は op-reason.exe で動いた approved"
+if [[ ${start_args} == '["inject"]' && ${start_reason} == "${want_reason}" && ${start_refs} == "${want_refs}" &&
+  ${end_how} == 'approved exe' ]] && ! grep -qaF S3CR3T "${log}"; then
+  ok "op-reason の記録に値は無く、start の args は [\"inject\"]、reason は program と理由だけ、refs に読む参照が全部入り、end は op-reason.exe で動いた approved"
 else
-  ng "op-reason の記録に値は無く、start の args は [\"inject\"]、reason に件数と参照が入り、end は op-reason.exe で動いた approved" \
+  ng "op-reason の記録に値は無く、start の args は [\"inject\"]、reason は program と理由だけ、refs に読む参照が全部入り、end は op-reason.exe で動いた approved" \
     "$(cat "${log}" 2>&1)"
+fi
+# 表の言語は英語 (OPREASON_LANG が無く、偽の op-reason.exe は選んだ言語を status に書かないので lang.json もできない)
+log_view=$("${opr_bin}/op-reason-log" </dev/null 2>&1)
+if [[ ${log_view} == *'op inject (3 refs)'* ]]; then
+  ok "op-reason-log の表の inject の行に、読む参照の件数 (3 refs) が付く"
+else
+  ng "op-reason-log の表の inject の行に、読む参照の件数 (3 refs) が付く" "${log_view}"
 fi
 if disk_clean; then
   ok "本物の op-reason を通しても、流した後の置き場に値が無い"
@@ -857,20 +880,24 @@ else
 fi
 reset
 : >"${proj}/.env"
-for i in $(seq 1 6); do
+for i in $(seq 1 10); do
   vault "op://Private/service-${i}/credential" "S3CR3T-svc-${i}"
   printf 'SVC%s=op://Private/service-%s/credential\n' "${i}" "${i}" >>"${proj}/.env"
 done
-export PROG_KEYS=SVC6
-PATH=${opr_bin}:${PATH} run_env six --reason "6 つのサービスに入る bot を起こすのにそれぞれの credential を読む" -- prog
+export PROG_KEYS=SVC10
+PATH=${opr_bin}:${PATH} run_env ten --reason "10 のサービスに入る bot を起こすのにそれぞれの credential を読む" -- prog
 window_reason=$(jq -r '.facts.reason // empty' "${FAKE_DIR}/runner.payload" 2>/dev/null)
-log_reason=$(jq -r 'select(.event == "start") | .reason' "${opr_state}/log.jsonl" 2>/dev/null | tail -n 1)
-if [[ ${rc} == 0 && ${window_reason} == '[pjp-op-env: prog に参照 6 件] '* && ${window_reason} == *… &&
-  ${log_reason} == *op://Private/service-6/credential* ]]; then
-  ok "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)"
+# [件数, 並べた数, 最初, 最後]
+window_refs=$(jq -c '.facts.refs | [.total, (.list | length), .list[0], .list[-1]]' "${FAKE_DIR}/runner.payload" 2>/dev/null)
+log_refs=$(jq -c 'select(.event == "start") | .refs | [.total, (.list | length), .list[0], .list[-1]]' "${opr_state}/log.jsonl" \
+  2>/dev/null | tail -n 1)
+if [[ ${rc} == 0 && ${window_reason} == '[pjp-op-env: prog に渡す] 10 のサービスに入る bot を起こすのにそれぞれの credential を読む' &&
+  ${window_refs} == '[10,8,"op://Private/service-1/credential","op://Private/service-8/credential"]' &&
+  ${log_refs} == '[10,10,"op://Private/service-1/credential","op://Private/service-10/credential"]' ]]; then
+  ok "参照が 10 件なら、窓 (facts.refs) は total 10 で 8 件を並べ、記録 (start.refs) には 10 件全部が入る。理由は切れない"
 else
-  ng "参照が 6 件で窓の理由が切れても、頭に program と参照の件数が出る (記録には全部が入る)" \
-    "rc=${rc} window=${window_reason} log=${log_reason} err=$(cat "${work}/six.stderr")"
+  ng "参照が 10 件なら、窓 (facts.refs) は total 10 で 8 件を並べ、記録 (start.refs) には 10 件全部が入る。理由は切れない" \
+    "rc=${rc} window=${window_reason} ${window_refs} log=${log_refs} err=$(cat "${work}/ten.stderr")"
 fi
 reset
 printf '%s\n' 'A=op://Test/a/password' >"${proj}/.env"

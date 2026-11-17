@@ -68,6 +68,8 @@ Test-Case '0.1.0 の Zip は Release の op-reason-windows.zip.sha256 と同じ�
 Test-Case '0.1.0 の Tree は Release の zip を展開した中身の値' 'b2b09e1c101a7b1da0a9facd81cac8f18ad4018d9a34ecac04db38133d9e796a' { (Get-OpReasonReleases)['0.1.0'].Tree }
 Test-Case '0.2.0 の Zip は Release の op-reason-windows.zip.sha256 と同じ値' '6e9a104484a019da093726d0bad2ee3da7cedb2e238a592e12c67dcc2336dbf3' { (Get-OpReasonReleases)['0.2.0'].Zip }
 Test-Case '0.2.0 の Tree は Release の zip を展開した中身の値' '5ced1fd007b3a92b3bc3539915babdb14c9064548dbb176031427b004342619b' { (Get-OpReasonReleases)['0.2.0'].Tree }
+Test-Case '0.3.0 の Zip は Release の op-reason-windows.zip.sha256 と同じ値' '28bf706c426fbd3a64097aab8082bd26fda2b9b281cf5bbbfb22b3142bd4d7e1' { (Get-OpReasonReleases)['0.3.0'].Zip }
+Test-Case '0.3.0 の Tree は Release の zip を展開した中身の値' 'db5677cc7535d97f78d3a9355dac60d22a92aa1fb02b9f771242b4552b57eb5a' { (Get-OpReasonReleases)['0.3.0'].Tree }
 Test-Case '表のどの版にも Zip と Tree がある' 0 { @((Get-OpReasonReleases).Values | Where-Object { -not ($_.Zip -and $_.Tree) }).Count }
 Test-Case '表の値はどれも 64 桁の小文字の 16 進' 0 { @((Get-OpReasonReleases).Values | ForEach-Object { $_.Zip; $_.Tree } | Where-Object { "$_" -cnotmatch '^[0-9a-f]{64}$' }).Count }
 Test-Case '表の版はどれも X.Y.Z' 0 { @((Get-OpReasonReleases).Keys | Where-Object { "$_" -notmatch '^\d+\.\d+\.\d+$' }).Count }
