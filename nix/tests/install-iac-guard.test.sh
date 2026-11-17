@@ -5,6 +5,9 @@
 #
 #   bash nix/tests/install-iac-guard.test.sh [<install-iac-guard.sh のパス>]
 #
+# win-runner の CI (win/runner/tests/guard_suites.rs) は、Windows の hook の口 (dotfiles-win claude-hook install-iac-guard) を呼ぶ包みを渡し、
+# 同じ例を Rust の写しにも流す (例の正本はここ 1 つ。Windows・PowerShell の tool だけの例は Rust の試験に書く)。
+#
 # flake の checks (install-iac-guard-test) が Nix のサンドボックスで流す。使うのは bash・jq・coreutils と stdenv の awk
 # だけ。hook はコマンドを打たずに止めるか通すかを決めるだけなので、何も入れず、terraform も呼ばない。HOME は使い捨ての
 # dir にし (IaC の guard を外す ~/.local/state/dotfiles/claude-iac-guard.json を置き換える)、流す人の VIRTUAL_ENV は外す。

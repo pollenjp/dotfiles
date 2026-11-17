@@ -10,6 +10,7 @@
 //! 入力の誤りで tool の流れを止めない)。
 
 pub mod docs_guard;
+pub mod guard;
 pub mod pr_assignee_nudge;
 pub mod run_through_nudge;
 pub mod statusline;
@@ -19,17 +20,33 @@ use serde_json::Value;
 use std::path::PathBuf;
 
 /// Windows に写した hook の名前 (`claude-hook <名前>`)。Linux の `nix/files/claude/hooks/<名前>.sh` と同じ名前
-pub const NAMES: [&str; 3] = ["docs-guard", "pr-assignee-nudge", "run-through-nudge"];
+pub const NAMES: [&str; 6] = [
+    "docs-guard",
+    "gist-guard",
+    "install-iac-guard",
+    "pr-assignee-nudge",
+    "run-through-nudge",
+    "xref-guard",
+];
 
 /// hook を流す。stdout に出す文 (JSON の 1 行と改行) を返す。黙るときは None。知らない名前も黙る (登録の誤りで tool を止めない)。
-pub fn run(name: &str, input: &str, sys: &dyn Sys) -> Option<String> {
-    let input: Value = serde_json::from_str(input).ok()?;
+pub fn run(name: &str, raw: &str, sys: &dyn Sys) -> Option<String> {
+    let input: Value = serde_json::from_str(raw).ok()?;
     match name {
         "docs-guard" => docs_guard::run(&input, sys),
+        "gist-guard" => quiet(|| guard::gist::run(raw, &input, sys)),
+        "install-iac-guard" => quiet(|| guard::iac::run(raw, &input, sys)),
         "pr-assignee-nudge" => pr_assignee_nudge::run(&input, sys),
         "run-through-nudge" => run_through_nudge::run(&input),
+        "xref-guard" => quiet(|| guard::xref::run(raw, &input, sys)),
         _ => None,
     }
+}
+
+/// コマンドを読む guard は、思わぬ入力で panic しても黙って 0 で終える (bash の版の「何があっても exit 0」。0 と 2 のほかの終了コードは tool の
+/// 流れを乱す)。panic の文は stderr に出る
+fn quiet(f: impl FnOnce() -> Option<String>) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(None)
 }
 
 /// ホーム (Windows は `USERPROFILE`、ほかは `HOME`。Linux の hook の `${HOME}` に当たる)。

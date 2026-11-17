@@ -71,6 +71,10 @@
 # ## 登録
 #
 # scripts/bootstrap-claude-hook.sh が settings.json の hooks の PreToolUse に 2 件 (matcher Bash と mcp__.*[Gg]ist.*) 足す。
+#
+# Windows の Claude Code では、同じふるまいを Rust に写した win/runner/src/hooks/guard/gist.rs (lexer は guard/lex.rs) が動く (Git Bash に jq
+# が無いため。PowerShell の tool のコマンドも読み、Windows の runner が matcher Bash|PowerShell と mcp__.*[Gg]ist.* で登録する)。ここを直したら、
+# そちらも同じに直す (win-runner の CI が、nix/tests/gist-guard.test.sh を Rust の写しにも流し、lexer をこの awk と突き合わせる)。
 
 set -u -o pipefail
 

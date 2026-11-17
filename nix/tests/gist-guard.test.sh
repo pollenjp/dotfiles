@@ -5,6 +5,9 @@
 #
 #   bash nix/tests/gist-guard.test.sh [<gist-guard.sh のパス>]
 #
+# win-runner の CI (win/runner/tests/guard_suites.rs) は、Windows の hook の口 (dotfiles-win claude-hook gist-guard) を呼ぶ包みを渡し、
+# 同じ例を Rust の写しにも流す (例の正本はここ 1 つ。Windows・PowerShell の tool だけの例は Rust の試験に書く)。
+#
 # flake の checks (gist-guard-test) が Nix のサンドボックスで流す。使うのは bash・jq・git・coreutils と stdenv の awk
 # だけ。hook はコマンドを打たずに止めるか通すかを決めるだけなので、gist にもペースト共有のサービスにも送らない
 # (ネットワークに出ない。repo の remote の URL は gist.github.com などにするが push はしない)。

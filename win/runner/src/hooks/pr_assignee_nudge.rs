@@ -1,4 +1,4 @@
-//! pr-assignee-nudge (PostToolUse・PostToolUseFailure・matcher Bash): `gh pr create` が assignee を指定せずに PR を作ったとき (と、作ったあとの段で
+//! pr-assignee-nudge (PostToolUse・PostToolUseFailure・matcher Bash と PowerShell): `gh pr create` が assignee を指定せずに PR を作ったとき (と、作ったあとの段で
 //! 落ちたとき)、gh の認証ユーザーを Assignees に付けて確かめるよう Claude の文脈へ 1 文を差し込む。Linux の
 //! `nix/files/claude/hooks/pr-assignee-nudge.sh` (dotfiles-private の ADR 039) の写し。コマンドの読み方 (heredoc の本文と引用符を外し、
 //! `; & |` 改行で分け、`gh pr create` の後ろの語に `--assignee`・`-a` があるか) は bash の版の jq の式と同じ。
@@ -33,7 +33,9 @@ pub fn run(input: &Value, sys: &dyn Sys) -> Option<String> {
     if event != "PostToolUse" && event != "PostToolUseFailure" {
         return None;
     }
-    if field(input, &["tool_name"]) != "Bash" {
+    // Windows の PowerShell の tool で打った gh pr create も同じに読む (登録は matcher PowerShell・if PowerShell(gh pr create *)。
+    // dotfiles-private の docs/adr/067_win_hook_guards_*)
+    if !matches!(field(input, &["tool_name"]).as_str(), "Bash" | "PowerShell") {
         return None;
     }
     let cmd = field(input, &["tool_input", "command"]);
@@ -454,6 +456,17 @@ mod tests {
             a.contains("PostToolUseFailure") && a.contains("pull request update failed"),
             "{a}"
         );
+    }
+
+    /// Windows の PowerShell の tool で打った gh pr create も読む (bash の版に無い足し。突き合わせの例には入れない)
+    #[test]
+    fn reads_powershell_tool() {
+        let (_t, sys) = env(None);
+        let mut v = input("PostToolUse", "gh pr create -t x -b y", &format!("{URL}\n"));
+        v["tool_name"] = json!("PowerShell");
+        assert!(run(&v, &sys).is_some_and(|a| a.contains("--add-assignee @me")));
+        v["tool_input"]["command"] = json!("gh pr create -t x -a '@me'");
+        assert_eq!(run(&v, &sys), None);
     }
 
     #[test]

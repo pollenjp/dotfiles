@@ -338,8 +338,10 @@ gate が違うと、試験が落ちる
   `nix/home/modules/git.toml` を直す (git.nix に直に書いた値は Windows に届かず、この突き合わせが落ちる)
 - Rust に写した Claude Code の hook・status line (`src/hooks/`) と skillOverrides (`src/steps/claude_skill_overrides.rs`) は、Linux の CI が同じ入力で
   bash の版 (`nix/files/claude/hooks/*.sh`・`statusline-command.sh`・`nix/scripts/bootstrap-claude-skill-overrides.sh`) と突き合わせる
-  (`DOTFILES_WIN_BASH_PARITY=1`。手元でも bash と jq があれば流れる)。hook の登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は
-  `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。bash の版を直したら、Rust の写しも同じに直す
+  (`DOTFILES_WIN_BASH_PARITY=1`。手元でも bash と jq があれば流れる)。コマンドを読む 3 つの guard は、bash の版の試験 (`nix/tests/<名前>.test.sh`)
+  に exe の `claude-hook <名前>` を呼ぶ包みを渡して流し (`tests/guard_suites.rs`)、lexer (`src/hooks/guard/lex.rs`) は awk と突き合わせる。hook の
+  登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。bash の版を直したら、Rust の
+  写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -392,7 +394,7 @@ dotfiles apply                                                                  
 | 手順 | すること | 気をつけること |
 | --- | --- | --- |
 | `claude-files` | `CLAUDE.md` を、`claude-code/CLAUDE.windows.md` (Windows の冒頭) + 空行 + `nix/files/claude/CLAUDE.md` の最初の「## 」の行から後ろ (+ `devTracker` のホストは空行と `CLAUDE.dev-tracker.md`) にして置く (改行は LF)。`nix/files/claude/{skills,agents,commands}/` の中身を 1 つずつ置く (ディレクトリは junction、ファイルはコピー。`claude-code/skip-skills.txt` の skill は張らず、前に張ったものは外す)。runner の exe を `%USERPROFILE%\.claude\hooks\dotfiles-claude.exe` に写す (hook と status line の口) | `CLAUDE.md` とファイルは記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\claude-files.deployed.json`)。Windows 側で変えた・記録の無い違う中身は衝突で飛ばす (dotfiles に取り込むか、`dotfiles apply --steps claude-files --force` で上書き)。exe は dotfiles が持つ生成物で、違えば書き直す。動いている exe は上書きできないので、退けてから置く (退けたものは次に消す) |
-| `claude-hook` | `settings.json` の `hooks` に、hook の口を exec form (`command` に exe の絶対パス、`args` に `claude-hook <名前>`) で登録する。event・matcher・if は Linux の `bootstrap-claude-hook.sh` の同じ hook の行と同じ | shell を通さないので、Git Bash が見つからない会話でも PowerShell が command を読まない (shell form の PreToolUse の hook は、Git Bash が無いと失敗が tool を止めうる)。この手順の口 (`dotfiles-claude.exe`) の登録で今は入れない組は外す。ほかの hook (ハブの `pjp hub guard` などのプロジェクトの hook は別のファイル) とキーの順は残す |
+| `claude-hook` | `settings.json` の `hooks` に、hook の口を exec form (`command` に exe の絶対パス、`args` に `claude-hook <名前>`) で登録する。event・matcher・if は Linux の `bootstrap-claude-hook.sh` の同じ hook の行と同じ。ただしコマンドを読む hook は PowerShell の tool にも登録する (matcher の `Bash` は `Bash\|PowerShell`、if で絞る pr-assignee-nudge は `PowerShell(gh pr create *)` の組も足す) | shell を通さないので、Git Bash が見つからない会話でも PowerShell が command を読まない (shell form の PreToolUse の hook は、Git Bash が無いと失敗が tool を止めうる)。この手順の口 (`dotfiles-claude.exe`) の登録で今は入れない組は外す。ほかの hook (ハブの `pjp hub guard` などのプロジェクトの hook は別のファイル) とキーの順は残す |
 | `claude-statusline` | `settings.json` の `statusLine` を `~/.claude/hooks/dotfiles-claude.exe claude-statusline` にする (別の値は置き換える) | status line は Git Bash (無ければ PowerShell) が読む shell の文なので、Claude Code の docs のとおり `~` と `/` で書く |
 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` で丸ごと置き換える (cc-page の規則の port は cc-pages の既定の 7777) | 手で足した項目も消える (Linux と同じ。足すなら repo の `footer-links.json`) |
 | `claude-skill-overrides` | `settings.json` の `skillOverrides` に、`pjp-dev-tracker` (ホストの値の `devTracker` で on / off)・pack の skill (入口 `pjp-pack-<pack>` があれば `name-only`)・claude.ai から同期された skill (`anthropic-skills:<名前>` を `user-invocable-only`) を書く。選び方は Linux の `bootstrap-claude-skill-overrides.sh` と同じ | 書いた key は `%LOCALAPPDATA%\dotfiles\state\claude-skill-overrides.applied.json` に控え、書かなくなったら戻す。手で別の値を書いた key には触らない。order は 60 (claude-files と claude-skills が skill をつないだ後) |
@@ -407,15 +409,17 @@ dotfiles apply                                                                  
 
 Windows に入れる hook と status line (Linux の `nix/files/claude/hooks/` の 12 個の hook と `statusline-command.sh`)。Windows の Git Bash には jq が無く
 (Git for Windows が同梱しない)、bash の hook は黙って何もしないので、入れるものは Rust に写した (`runner/src/hooks/`。ふるまいと文は bash の版と同じで、
-Linux の CI が同じ入力で突き合わせる):
+Linux の CI が同じ入力で突き合わせる)。Windows の Claude Code は PowerShell の tool を主の shell にする (Bash だけの matcher の hook は走らない) ので、
+コマンドを読む hook は PowerShell の tool のコマンドも PowerShell の書き方で読む (`runner/src/hooks/guard/pslex.rs`。通す口は `$env:PJP_ALLOW_XREF='1';`
+のように PowerShell の形。決めたことは dotfiles-private の `docs/adr/067_win_hook_guards_*`):
 
 | hook | Windows | わけ |
 | --- | --- | --- |
 | `docs-guard.sh` | Rust に写して入れる | 小さい。Windows のパス (`C:\…`) も読み、`docs` の大文字小文字を区別しない (bash の版は `/` で始まらないパスを相対パスと読み、Windows では止めない) |
 | `run-through-nudge.sh` | Rust に写して入れる | 小さい (文を返すだけ) |
-| `pr-assignee-nudge.sh` | Rust に写して入れる | 小さい (コマンドの読み方の jq の式 1 つ)。Windows の会話で PR を作ったときに効く |
+| `pr-assignee-nudge.sh` | Rust に写して入れる | 小さい (コマンドの読み方の jq の式 1 つ)。Windows の会話で PR を作ったときに効く (PowerShell の tool で打った `gh pr create` にも) |
 | `statusline-command.sh` | Rust に写して入れる | 毎回の表示に要る。cc-pages の 📄top は cc-pages が PATH にあるときだけ (今の Windows には無い) |
-| `xref-guard.sh`・`gist-guard.sh`・`install-iac-guard.sh` | まだ (後の PR で Rust に写す) | どれも awk の lexer を含む 1500 行ほどで、この PR では写していない。Windows の会話で public な repo へ push・PR を出す、gist に上げる、system へ install すると、Linux の hook の網が無い (知っている穴)。Windows のハブは repo の作業を Linux の子に任せ (子の側の hook が効く)、ふだんはこれらを打たない |
+| `xref-guard.sh`・`gist-guard.sh`・`install-iac-guard.sh` | Rust に写して入れる (`runner/src/hooks/guard/`。awk の lexer は `lex.rs` に 1 つ) | Windows の会話で public な repo へ push・PR を出す、gist に上げる、system へ install するときも止める。bash の版の試験 (`nix/tests/<名前>.test.sh`) をそのまま Rust の口にも流す。Windows だけの足し: `pwsh -Command`・`cmd /c` の中も読む。`wsl` の後ろの git push は押す commit を Windows から読めないので、押す先が private と分からなければ止める。install-iac-guard は winget・scoop・choco の install と PowerShell の module の install も止め、IaC の guard を外す口は無い (いつも止める) |
 | `video-offer-nudge.sh`・`lang-nudge.sh` | まだ (後の PR) | Windows のハブは spec・ADR・PR・project を自分では作らない (Linux の子が作る)。解説動画は CLAUDE.md の節が聞かせる |
 | `nix-managed-guard.sh` | 入れない | `/nix/store` が無い。runner が置くのはコピー (変えると次の apply が衝突で知らせる) と clone への junction で、直し方は `CLAUDE.md` の冒頭に書いた |
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
