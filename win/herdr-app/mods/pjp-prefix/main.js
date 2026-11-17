@@ -40,7 +40,8 @@ const TRIES = 8;
 
 // Shift+G で起動する Claude Code。c (nix/home/modules/fish.nix の abbr・bash.nix の alias・win/powershell/dotfiles.ps1 の function) と
 // 同じ引数。argv が shell の abbr・alias・function を通るとは限らない (fish の abbr は打ったときだけ広がる) ので、c と書かずに中身を
-// 並べる。claude が PATH に無い machine では、herdr-app が端末のエラーを出し、shell が残る
+// 並べる。claude が PATH に無い machine では、herdr-app が端末のエラーを出し、shell が残る。4 か所が同じ引数かは、runner の試験
+// (win/runner/src/steps/herdr_app_keys.rs の claude_argv_matches_c) が突き合わせる
 const CLAUDE = ["claude", "--dangerously-skip-permissions", "--effort", "max", "--model", "claude-opus-5-5", "--remote-control="];
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -96,7 +97,8 @@ export default class Prefix extends View {
       cwd: f.cwd ?? pane?.cwd ?? null,
     };
     // prefix のキーは keys.json で、この小窓を開くキー (無ければ ctrl-k)
-    this.prefix = keys().find((b) => b.section === "global" && b.action === "mod.open:pjp-prefix")?.keys ?? "ctrl-k";
+    const opener = keys().find((b) => b.section === "global" && b.action === "mod.open:pjp-prefix")?.keys;
+    this.prefix = typeof opener === "string" && opener ? opener : "ctrl-k";
     this.literal = keys().some((b) => b.section === "mod:pjp-prefix" && b.action === "pjp-prefix.literal");
     this.busy = false;
     this.closed = false;
@@ -109,7 +111,7 @@ export default class Prefix extends View {
     cx.spawn(async (cx) => {
       for (;;) {
         const c = await nextCommand();
-        if (c === "literal" && !this.busy) this.sendPrefix(cx);
+        if (c === "literal" && !this.busy && !this.closed) this.sendPrefix(cx);
       }
     });
   }
@@ -146,27 +148,34 @@ export default class Prefix extends View {
     run("pane.focus", { pane: list[(at + 1) % list.length].pane });
   }
 
-  // prefix のキーをもう 1 回: 開く前の端末へ prefix のキーを送る。hc は呼んだ時点で走り出し、小窓を閉じても止まらない
+  // prefix のキーをもう 1 回: 開く前の端末へ prefix のキーを送る。1 つの小窓で 1 回だけ (押しっぱなしの繰り返しで、閉じ切る前に何度も
+  // 届いても二重に送らない)。hc は呼んだ時点で走り出し、小窓を閉じても止まらない。結果を見る task は、閉じた後の task が打ち切られない
+  // よう owner を null にし、小窓の cx を使わない
   sendPrefix(cx) {
+    if (this.closed) return;
     const term = this.origin.terminal;
-    const sent = term ? hc(["keys", term, hcKey(this.prefix)]) : null;
+    if (term) {
+      const sent = hc(["keys", term, hcKey(this.prefix)]);
+      const title = `${showKey(this.prefix)} を ${term} へ送れなかった`;
+      cx.spawn(
+        async () => {
+          try {
+            const r = await sent;
+            if (r.code !== 0) notify({ title, body: (r.stderr || r.stdout).trim(), level: "warning" });
+          } catch (e) {
+            notify({ title, body: String(e), level: "warning" });
+          }
+        },
+        { owner: null },
+      );
+    }
     this.dismiss();
-    if (!sent) return;
-    cx.spawn(async () => {
-      const fail = (body) => notify({ title: `${showKey(this.prefix)} を ${term} へ送れなかった`, body, level: "warning" });
-      try {
-        const r = await sent;
-        if (r.code !== 0) fail((r.stderr || r.stdout).trim());
-      } catch (e) {
-        fail(String(e));
-      }
-    });
   }
 
   // 名前を自動で付けた worktree。今の space の machine で、開く前のペインのフォルダの repo に同じ名前の branch が無いかを見てから、
   // herdr-app の worktree の小窓に渡す (git の repo でない・machine に届かないときは確かめずに渡し、小窓にわけを出させる)
   worktree(cx, withClaude) {
-    if (this.busy) return;
+    if (this.busy || this.closed) return;
     this.busy = true;
     cx.notify();
     cx.spawn(async (cx) => {
@@ -197,7 +206,7 @@ export default class Prefix extends View {
           ...(withClaude ? { argv: CLAUDE } : {}),
         },
       });
-      cx.notify();
+      // 閉じた小窓の cx は使わない (閉じると投げる)
     });
   }
 
@@ -205,10 +214,11 @@ export default class Prefix extends View {
     const k = e.key ?? "";
     if (MODIFIERS.has(k)) return;
     cx.stop_propagation();
-    // 押しっぱなしの繰り返しと、名前を選んでいる間のキーは読まない (Esc は herdr-app が閉じる)
-    if (e.is_held || this.busy) return;
+    // 閉じた後 (閉じ切る前に届いたキー)・押しっぱなしの繰り返し・名前を選んでいる間のキーは読まない (Esc は herdr-app が閉じる)
+    if (this.closed || e.is_held || this.busy) return;
     if (k === "escape") return this.dismiss();
-    // prefix のキーをもう 1 回 (keys.json の mod:pjp-prefix が無いときの受け口。ふつうは nextCommand の literal で届く)
+    // prefix のキーをもう 1 回。キーの割り当ては on_key_down より先に効くので、ふつうはここに来ない (mod:pjp-prefix があれば nextCommand の
+    // literal、無ければ global の mod.open の 2 回目が小窓を閉じる)。global に小窓を開くキーが無いとき (palette から開いたなど) の受け口
     if (e.keystroke === this.prefix) return this.sendPrefix(cx);
     const name = pressed(e);
     const b = name && BINDINGS.find((x) => x.keys.includes(name));
@@ -231,7 +241,7 @@ export default class Prefix extends View {
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
         .on_click((_e, cx) => {
-          if (!this.busy) b.act(this, cx);
+          if (!this.busy && !this.closed) b.act(this, cx);
         })
         .child(h_flex().w(104).flex_none().gap(4).children(b.keys.map(chip)))
         .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(b.label));
