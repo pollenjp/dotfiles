@@ -7,7 +7,7 @@
 //! 判断は手順ごとに WSL の wrapper と同じ (`SPECS` の表。dotfiles-private の docs/adr/060_win_runner_core_* の spec §6):
 //!
 //! - 0: 揃っている
-//! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install は、固定した版が winget に無ければ打たずに知らせる)
+//! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる)
 //! - 1 (揃っていない): 手順の `Policy` で、揃える (引数なし・`-IfMissing`)・知らせるだけ (※ の手順)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
@@ -165,6 +165,44 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+    },
+    Ps1Spec {
+        id: "tailscale",
+        order: 96,
+        title: "Tailscale を固定した版で入れる (ずれていても上げない)",
+        gate: Gate::Tool("windowsTailscale"),
+        script: "win/tailscale/Install-Tailscale.ps1",
+        command: "Install-Tailscale",
+        subject: "Windows の Tailscale",
+        package: "Tailscale (winget の Tailscale.Tailscale)",
+        header: Header::Contains("Tailscale (winget の Tailscale.Tailscale"),
+        check_secs: 120,
+        install_secs: 600,
+        // 入っている版の方が新しいとき (Tailscale の自動更新で上がった) は ps1 が 0 を返す。1 は古い・pin が無い・版が読めない
+        policy: Policy::Warn,
+        uac: true,
+        ok_text: "Windows の Tailscale は、dotfiles で固定した版以上で入っています。",
+        // tailnet へのログインは手でする、の案内は ps1 の出力 (上に流れている) に入っている (重ねて出さない)
+        installed: &["Windows に Tailscale を入れました。"],
+        synced: &[],
+        manual_fix: &[
+            "揃えるには PowerShell で Install-Tailscale を打つ (上げるときは Windows に UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる。pin を足すだけなら UAC は出ない。runner は上げない: Tailscale の自動更新を有効にしてあれば、自分で上がる)",
+        ],
+        sync_fix: &[
+            "入れるには PowerShell で Install-Tailscale を打つか、dotfiles apply --steps tailscale を流し直す (Windows に UAC の確認が出る)",
+        ],
+        releases_file: false,
+        missing_blocked: Some("winget show --versions に無い"),
+        output_fixes: &[
+            (
+                "winget show --versions に無い",
+                "固定した版が winget に無いので、入れることも上げることもできない。repo の版 (Install-Tailscale.ps1 の -Version) を winget show --id Tailscale.Tailscale --versions にある版へ変える",
+            ),
+            (
+                "比べられない",
+                "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で winget list --id Tailscale.Tailscale を打って入っている版を確かめる",
+            ),
+        ],
     },
     Ps1Spec {
         id: "claude-code",
@@ -763,9 +801,10 @@ mod tests {
     //! ## 確かめること (WSL の bootstrap-windows-<id>.sh の分かれ道と同じ)
     //!
     //! - 0 は揃っている。check と dry-run は -Check だけを打つ (dry-run は打つはずのものを出す)
-    //! - 3 は apply で -IfMissing を打つ。google-ime-install は、固定した版が winget に無ければ打たずに知らせる
+    //! - 3 は apply で -IfMissing を打つ。google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる
     //! - 1 は手順ごと: ntn・claude-code は「→ … で揃える」なら引数なしで揃え、PATH のずれだけなら知らせる。herdr-app は -IfMissing で
-    //!   揃える。openssh・type-clipboard・google-ime-install は知らせるだけ。herdr は知らせるだけで、Preview が残っていれば外す手順も出す
+    //!   揃える。openssh・tailscale・type-clipboard・google-ime-install は知らせるだけ。herdr は知らせるだけで、Preview が残っていれば外す手順も出す
+    //! - tailscale は道具の switch (windowsTailscale) で on/off し、入れた後にログインは手でと出す (入っている版の方が新しいときは ps1 が 0)
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -979,7 +1018,12 @@ mod tests {
 
     #[test]
     fn warn_policies_do_not_touch_drift() {
-        for id in ["openssh", "type-clipboard", "google-ime-install"] {
+        for id in [
+            "openssh",
+            "tailscale",
+            "type-clipboard",
+            "google-ime-install",
+        ] {
             let s = spec(id);
             let sys1 = sys((1, vec![header_line(s)]), (0, vec![]));
             let (o, _, calls) = run(id, &sys1, APPLY);
@@ -1010,6 +1054,80 @@ mod tests {
         assert_eq!(o[0].kind, Kind::Ok);
         assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
         assert!(out.contains("UAC の確認が出ます"));
+    }
+
+    /// tailscale: 道具の switch (windowsTailscale) で on/off。3 は UAC を先に知らせて -IfMissing で入れ、入れた後にログインは手でと出す。
+    /// 固定した版が winget に無ければ打たない。1 は知らせるだけで、出力の印ごとに直し方を選ぶ
+    #[test]
+    fn tailscale_installs_only_when_missing_and_only_warns_drift() {
+        let s = spec("tailscale");
+        assert_eq!(s.gate, Gate::Tool("windowsTailscale"));
+        assert_eq!(s.order, 96);
+        // 3: UAC を先に知らせてから -IfMissing。ログインの案内は ps1 が出す 1 行だけ (重ねて出さない)
+        let login = "tailnet へのログインは手でする (タスクトレイの Tailscale のアイコンから Log in。dotfiles はログインに触らない)";
+        let sys1 = sys(
+            (3, vec![header_line(s)]),
+            (0, vec![login.to_string(), "揃った".into()]),
+        );
+        let (o, out, calls) = run("tailscale", &sys1, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(out.contains("UAC の確認が出ます"));
+        assert!(out.contains("Windows に Tailscale を入れました。"));
+        assert_eq!(
+            out.matches("tailnet へのログインは手でする").count(),
+            1,
+            "{out}"
+        );
+        // 3 でも固定した版が winget に無ければ打たない
+        let blocked = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠ 固定した版が winget show --versions に無い (書き間違いか、winget から消えた) ので入れられない"
+                        .into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, _, calls) = run("tailscale", &blocked, APPLY);
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert!(o[0].notes[0].contains("winget show --id Tailscale.Tailscale --versions"));
+        // 1: 古い・pin が無いなら Install-Tailscale を案内する (runner は上げない)。版が読めなければ確かめ方
+        for (line, want) in [
+            (
+                "⚠ 固定した版      : 1.104.5 → 上げる",
+                "PowerShell で Install-Tailscale を打つ",
+            ),
+            (
+                "⚠ 固定した版      : 1.104.5 → 比べられない",
+                "winget list --id Tailscale.Tailscale",
+            ),
+        ] {
+            let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+            let (o, _, calls) = run("tailscale", &sys2, APPLY);
+            assert_eq!(o[0].kind, Kind::Manual, "{line}");
+            assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+            assert_eq!(o[0].notes.len(), 1, "{line}");
+            assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
+        }
+        // 0 (入っている版の方が新しいときも ps1 は 0): 揃っている
+        let sys3 = sys(
+            (
+                0,
+                vec![
+                    header_line(s),
+                    "  固定した版      : 1.104.5 → 入っている版の方が新しい (下げない)".into(),
+                ],
+            ),
+            (9, vec![]),
+        );
+        let (o, out, calls) = run("tailscale", &sys3, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert!(out.contains("Windows の Tailscale は、dotfiles で固定した版以上で入っています。"));
     }
 
     #[test]
