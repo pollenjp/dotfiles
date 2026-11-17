@@ -15,10 +15,11 @@
 #   2. .env を 1 行ずつ文字列として読む (source も eval もしない)。読めない行があれば、ファイル名と行番号だけを出して 2
 #   3. 起こす program の実行ファイルを PATH から引く (.env の PATH で替わらないよう、入れる前に引く)。無ければ op を呼ばずに 127
 #   4. 値の全体が op:// で始まるものを参照として集め、参照があれば op を 1 回だけ呼ぶ:
-#        op [--reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"] inject
+#        op [--reason "[pjp-op-env: <program> に渡す] <理由>"] inject
 #      stdin には、参照ごとに乱数の境界の印の行と {{ <参照> }} の行を並べたテンプレートを流し、stdout はパイプで受けて
 #      bash の変数にだけ置く。--reason は WSL の op が wrapper の op-reason のマシン (~/.local/state/dotfiles/
-#      claude-op-reason.json の enable が true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い
+#      claude-op-reason.json の enable が true。home/modules/op-reason.nix が書く) でだけ付ける。素の op に --reason は無い。
+#      読む参照は理由に足さない (op-reason 0.3.0 は stdin のテンプレートから参照を拾い、承認の窓に並べて記録にも残す)
 #   5. op が 0 以外で終われば、その終了コードで終わる。出力に NUL がある・境界の印の数や順が合わないなら 70 で終わる
 #   6. op の認証の環境変数 (OP_SERVICE_ACCOUNT_TOKEN・OP_CONNECT_HOST・OP_CONNECT_TOKEN・OP_SESSION_*) を外し、.env の名前と
 #      値 (参照は解いた値) を export して、exec で自分を program に置き換える (argv[0] は打った名前のまま)
@@ -346,17 +347,9 @@ if ((${#_poe_refs[@]} > 0)); then
   if [[ -n ${HOME:-} && -r ${HOME}/.local/state/dotfiles/claude-op-reason.json ]]; then
     _poe_state=$(<"${HOME}/.local/state/dotfiles/claude-op-reason.json")
     if [[ ${_poe_state} =~ \"enable\"[[:space:]]*:[[:space:]]*true ]]; then
-      # 窓のコマンドは op inject だけになるので、読む参照 (同じものは 1 回) と渡す program を理由に足す。op-reason は窓の理由を
-      # 200 字で切るので、program と参照の件数を頭に置き、参照が窓で切れても件数で気づけるようにする (記録は 500 字まで)
-      _poe_list=""
-      _poe_nref=0
-      for _poe_r in "${_poe_refs[@]}"; do
-        if [[ ", ${_poe_list}, " != *", ${_poe_r}, "* ]]; then
-          _poe_list+=${_poe_list:+, }${_poe_r}
-          _poe_nref=$((_poe_nref + 1))
-        fi
-      done
-      _poe_opargs+=(--reason "[pjp-op-env: ${_poe_argv0##*/} に参照 ${_poe_nref} 件] ${_poe_reason} (読む参照: ${_poe_list})")
+      # 窓のコマンドは op inject だけなので、値を渡す program を理由の頭に足す。読む参照は足さない: op-reason (0.3.0 から) が
+      # stdin のテンプレートから拾い、窓の「読む参照 (N 件・標準入力 から)」に 8 件まで並べ、記録 (start の refs) には全部を残す
+      _poe_opargs+=(--reason "[pjp-op-env: ${_poe_argv0##*/} に渡す] ${_poe_reason}")
     fi
   fi
 

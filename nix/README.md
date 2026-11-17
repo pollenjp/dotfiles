@@ -2702,8 +2702,8 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 | --- | --- |
 | 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。`--` より前ならどこに置いてもよい）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ。引数なしの `op` は wrapper の使い方を出す |
 | 呼び出しごとの Windows のプロセス | 呼び出しのたびに Windows で新しい `op-reason.exe`（動かないときは `launcher.ps1` を新しい `powershell.exe` で）を起こし、その子として `op.exe` を起こす。承認はこのプロセスに付き、`op` が終わると `op.exe whoami` で確かめて `op.exe signout --all` で閉じる |
-| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド」の窓を出す。決めるのは 1Password の画面だけ |
-| 記録 | `~/.local/state/op-reason/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` と `name=value` の値は伏せる。1 MiB で `log.1.jsonl` へ回す |
+| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド・読む参照」の窓を出す（読む参照は[後述](#窓の読む参照)）。決めるのは 1Password の画面だけ |
+| 記録 | `~/.local/state/op-reason/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` と `name=value` の値は伏せる。読む参照は start の `refs` に全部入る（値は入らない）。1 MiB で `log.1.jsonl` へ回す |
 | 1 つずつ | WSL と Windows の呼び出しを 1 つずつにし（WSL の flock と Windows の mutex `Local\op-reason`）、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒（`OPREASON_LOCK_WAIT`）で終わらなければ、待っている側は 75 で断る。`op … \| op …` は動く（後ろの op が、待つ前に前の op の出力を読み切る。後ろの op が先に lock を取ったときは、前の op が lock を待たずに打ち、窓が 2 つ出る。そのわけは前の op の窓の注意の行に、`op-reason-log` では結果の `(lock skipped)`（日本語なら `(lock を待たず)`）に出る） |
 | 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
 | service account・Connect | 環境に `OP_SERVICE_ACCOUNT_TOKEN`（か `OP_CONNECT_HOST` と `OP_CONNECT_TOKEN` の両方）があれば、デスクトップアプリの承認を使わずに走る（窓も承認の画面も出ない）。token はその 1 回の Windows のプロセスにだけ渡す。理由は必須のまま |
@@ -2724,9 +2724,29 @@ win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Win
 op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` を
 そこへ向ける）。入っていない間の `op` は 127 で断る（refused の `no-exe`）。
 
+### 窓の読む参照
+
+固定している op-reason 0.3.0 では、窓のコマンドの行の下に、その呼び出しが読む `op://` の参照を「読む参照 (N 件・… から)」（英語では
+`References to read (N, from …)`）として並べる（細部は op-reason の README と、op-reason の repo の
+`docs/superpowers/specs/2026-11-17-refs-in-window-design.md`）。
+
+- 拾うのは、引数（`--` より前で `op://` で始まるもの）・`op inject` のテンプレート（`-i` のファイルか stdin）・`op run` の
+  `--env-file`。同じ参照は 1 回で、8 件まで並べ、9 件目からは「ほか N 件」。全部は記録の start の `refs` に入る
+  （`op-reason-log --json`）。`op-reason-log` の表は、ファイルか stdin から拾ったときにコマンドへ件数を足す（`op inject (参照 3 件)`。
+  英語では `(3 refs)`）
+- vault と項目が ID の参照（`pjp-op-ref` が出す形。[後述](#参照を-id-の形に直す-pjp-op-ref)）は、押すと 1Password のアプリで
+  その項目が開く（窓は 1Password の承認の画面から focus を奪わない）。名前の参照はリンクにならない
+- リンクにはアカウントの ID が要る。承認が通った呼び出しの終わりに、op-reason が `op whoami` の出力からアカウントの ID と
+  サインインのアドレスだけを `%LOCALAPPDATA%\op-reason\account.json` に覚え、その後の窓から付く。最初の窓にはリンクが無く、
+  そのわけを 1 行出す。ファイルを消すと、次に承認が通るまでリンクは付かない
+- `pjp-op-env` はテンプレートを stdin で渡すので、その参照も並ぶ（`pjp-op-env` は理由に参照を並べない。
+  [後述](#シークレットを-env-の参照から渡す-pjp-op-env)）
+- 参照を拾うのは WSL の実行ファイル、並べるのは Windows の `op-reason.exe`・`launcher.ps1`。どちらかが 0.2.0 のままだと、WSL からの
+  呼び出しの窓に一覧は出ない（取り決めは同じなので、断られはしない）。上げる順は[後述](#op-reason-の新しい版を出したとき)
+
 ### 表示の言語
 
-dotfiles は表示の言語を決めない（包みに `OPREASON_LANG` を置かない）。固定している op-reason 0.2.0 では、`op-reason.exe` の窓の右下の
+dotfiles は表示の言語を決めない（包みに `OPREASON_LANG` を置かない）。op-reason 0.2.0 からは、`op-reason.exe` の窓の右下の
 「English | 日本語」で選ぶ。押すと窓はその場で切り替わり（1Password の承認の画面から focus を奪わない）、Windows の
 `%LOCALAPPDATA%\op-reason\settings.json` に覚える。その後の呼び出しは、窓・通知・WSL の端末の文・`op-reason-log` の表がその言語になる
 （WSL の実行ファイルは、呼び出しのたびに選んだ言語を `~/.local/state/op-reason/lang.json` に写して使うので、WSL の側の文と表には、
@@ -2763,6 +2783,7 @@ home.sessionVariables.OPREASON_RUNNER = "launcher";   # exe を試さず launche
 ### 反映
 
 `~/dotfiles/setup --self-update --update` で入る（WSL の `op` は switch、Windows の zip は `bootstrap-windows-op-reason.sh`）。
+版を上げたときは、Windows の側を先に上げる版がある（0.3.0 がそれ。[後述](#op-reason-の新しい版を出したとき)）。
 Claude の hook の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く。前の wrapper
 （pjp-op）の記録 `~/.local/state/pjp-op/` は読まなくなる（要らなければ消してよい）。
 
@@ -2770,7 +2791,7 @@ Claude の hook の登録も同じコマンドが行う（Claude Code を起こ�
 
 ```sh
 command -v op op-reason-log                # ~/.nix-profile/bin/op・op-reason-log
-op-reason --version                        # op-reason 0.2.0 (Windows を起こさない)
+op-reason --version                        # op-reason 0.3.0 (Windows を起こさない)
 op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
@@ -2798,16 +2819,29 @@ op.exe whoami                              # WSL の直の op.exe は account is
 ### op-reason の新しい版を出したとき
 
 dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
-上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 と 0.2.0 は
-同じ取り決め）。自作のアプリの Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。
+上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.3.0
+まで同じ取り決め）。自作のアプリの Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。
 依存の更新の skill `pjp-dotfiles-deps` も見ない）。
 
 1. Release の `op-reason-x86_64-linux`・`op-reason-aarch64-linux` を落とし、`sha256sum -c` で隣の `.sha256` と同じかを確かめる
 2. `nix/pkgs/op-reason/default.nix` の `version` と、`assets` の 2 つの `sha256` を新しい版にする（`installCheck` が `--version` を
    版と照らす）
 3. Windows の側は [`win/README.md`「op-reason の新しい版を出したとき」](../win/README.md#op-reason-の新しい版を出したとき)（`Install-OpReason.ps1` の表と既定の版）
-4. `nix build ./nix#checks.x86_64-linux.op-reason-state` と `Install-OpReason.Tests.ps1` を流して PR を出す。merge したら
-   `setup --update` で WSL と Windows が揃う
+4. `nix build ./nix#checks.x86_64-linux.op-reason-state`・`pjp-op-env-test`・`pjp-op-ref-test`（後ろの 2 つは本物の op-reason の
+   実行ファイルを通す）と `Install-OpReason.Tests.ps1` を流して PR を出す
+5. merge したら `setup --update` で WSL と Windows が揃う。setup は WSL の側（switch）を先に、Windows の側（bootstrap の 97）を後に
+   上げる。WSL の側で入るものが新しい版の窓に頼るときは、Windows の側を先に揃えてから switch する。0.3.0 がそれで、`pjp-op-env` が
+   理由から読む参照を外し、その一覧は 0.3.0 の窓が出す（[前述](#窓の読む参照)。WSL の側だけ先に上がると、窓にも理由にも読む参照が
+   出ない）:
+
+   ```sh
+   ~/dotfiles/setup --self-update --steps bootstrap-windows-files,bootstrap-windows-op-reason   # Windows の op-reason を上げる
+   ~/dotfiles/setup --update                                                                     # WSL の op と pjp-op-env (switch)
+   ```
+
+   1 行目のあと、Windows の PowerShell の `Install-OpReason -Check` で、固定した版の行が「そのまま」（入っている版が固定した版。
+   終了コード 0）と出ることを確かめてから 2 行目を打つ。`op-reason.exe` が動いていて入れ替えられなかったら（op の呼び出しの途中）、
+   その呼び出しが終わってから 1 行目を打ち直す
 
 ## シークレットを .env の参照から渡す (pjp-op-env)
 
@@ -2838,7 +2872,7 @@ LOG_LEVEL=info                                      # 参照でない値はそ�
 | --- | --- |
 | 1. `.env` を読む | 1 行ずつ文字列として読む（`source`・`eval` をしない）。読めない行があれば、ファイル名と行番号だけを出して 2 で止める |
 | 2. program を引く | 実行ファイルを PATH から引く（`.env` を入れる前に引くので、`.env` の `PATH` で替わらない）。無ければ op を呼ばずに 127 |
-| 3. 参照を解く | 値の全体が `op://` で始まるものを集め、`op [--reason "[pjp-op-env: <program> に参照 <N> 件] <理由> (読む参照: <参照>, …)"] inject` を 1 回だけ呼ぶ。参照は stdin のテンプレート（参照ごとに乱数の境界の印の行と `{{ <参照> }}` の行）で渡し、解いた値は stdout のパイプで受けてメモリにだけ置く。`--reason` は WSL の op（pjp-op。`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true）にだけ付ける |
+| 3. 参照を解く | 値の全体が `op://` で始まるものを集め、`op [--reason "[pjp-op-env: <program> に渡す] <理由>"] inject` を 1 回だけ呼ぶ。参照は stdin のテンプレート（参照ごとに乱数の境界の印の行と `{{ <参照> }}` の行）で渡し、解いた値は stdout のパイプで受けてメモリにだけ置く。`--reason` は WSL の op（op-reason。`~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true）にだけ付ける。読む参照は理由に並べない（WSL の op が stdin のテンプレートから拾って窓に並べる。[前述](#窓の読む参照)） |
 | 4. 起こす | op が終わってから（WSL の op の lock と承認の窓を放してから）、op の認証の環境変数を外し、値を環境変数に入れて `exec` で program に置き換わる。program は Linux のプロセスとして、同じ pid・stdin・stdout・stderr で動く |
 
 WSL では `op run --env-file=.env -- <program>` を使わない。op は Windows の `op.exe` なので子のコマンドも Windows のプロセスとして
@@ -2872,14 +2906,14 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 
 | 値が出うる所 | どう防いだか |
 | --- | --- |
-| ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op（op-reason）は stdin と stderr の写しをファイルに作らない（前段が op のときだけ stdin を読み切ってメモリに持ち、承認の結果を見分けるための stderr の末尾もメモリに持つ） |
+| ディスク | 一時ファイルを使わない。テンプレート（参照だけ）は stdin のパイプで渡し、値は stdout のパイプで受ける。WSL の op（op-reason）は stdin と stderr の写しをファイルに作らない（前段が op のときと、`-i` の無い `op inject`（`pjp-op-env` はこれ）のときに stdin を読み切ってメモリに持ち、同じ byte 列を op に渡す。承認の結果を見分けるための stderr の末尾もメモリに持つ） |
 | 引数（`/proc/<pid>/cmdline`・`ps`） | 値を引数に載せない。op に渡すのは理由と `inject` だけ。環境変数は bash の組み込みの `export` で入れ、外のコマンドを起こさずに `exec` で program に置き換わる（テストは strace ですべての `execve` の引数を見る） |
 | `.env` の評価 | `source`・`eval` をしない。値の `$(…)`・`` ` ``・`;`・引用符・空白は文字のまま渡す。代入で値を評価する bash の特別な名前（`OPTIND` など）は読めない行にする。入れた変数の数をループの後で数え、足りなければ program を起こさない |
 | 解けない参照・出力の取り違え | fail closed。op が 0 以外で終われば program を起こさない（参照が 1 つでも解けなければ op は 0 以外）。出力は起動ごとの乱数（128 bit）の境界の印で区切り、印の数・順・前後が合わない・NUL がある（環境変数にできない）なら 70 で止める |
-| 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`op-reason-log`）に入るのは理由と `inject` だけ |
+| 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`op-reason-log`）に入るのは理由と `inject` と読む参照（start の `refs`）だけ |
 | xtrace | 最初の行で `set +x +a +m`（呼び手の `SHELLOPTS`・`BASH_ENV` が xtrace や job control を付けていても外す。job control が付いていると op の出力を受け損なう） |
 | op の認証 | `OP_SERVICE_ACCOUNT_TOKEN`・`OP_CONNECT_HOST`・`OP_CONNECT_TOKEN`・`OP_SESSION_*` は op に渡し、program を起こす前に外す |
-| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op の窓の理由には、頭に program と参照の件数、後ろに読む参照が並ぶ（`inject` は参照を stdin で受けるので、足さないと窓のコマンドが `op inject` だけになる）。窓は理由を 200 字で切るので、件数より並んだ参照が少なければ切れている（全部は記録に入る。`op-reason-log --json`） |
+| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op（op-reason 0.3.0）は stdin のテンプレートから参照を拾い、窓のコマンド（`op inject`）の下に「読む参照 (N 件・標準入力 から)」として 8 件まで並べる（9 件目からは「ほか N 件」。全部は記録の start の `refs` に入る。`op-reason-log --json`）。理由の頭には値を渡す program が付く（`[pjp-op-env: <program> に渡す]`） |
 | lock と窓 | op の出力を読み切り、op が終わってから program を起こす。program が動いている間、ほかの pane の op は待たされない |
 
 守らないもの（op を素で使うとき・`op run` と同じで、`pjp-op-env` で増えも減りもしない）:
@@ -2905,8 +2939,9 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 
 参照は vault・項目・セクション・欄のどれも、名前の代わりに ID で書ける（[参照の書き方](https://www.1password.dev/cli/secret-reference-syntax/)）。
 名前は 1Password のアプリで変えられ、変えると名前の参照は切れる。項目の ID が変わるのは、項目を別の vault に移したときだけ。
-ID は英小文字と数字なので、名前に空白や記号があっても `.env` で引用符で囲まずに済む。`pjp-op-ref` は参照を ID の参照に直して、
-渡した順に 1 行ずつ stdout に出す。値は出さない。
+ID は英小文字と数字なので、名前に空白や記号があっても `.env` で引用符で囲まずに済む。WSL の承認の窓では、vault と項目が ID の
+参照は押すと 1Password のアプリでその項目が開く（[前述](#窓の読む参照)。名前の参照は開けない）。`pjp-op-ref` は参照を ID の参照に
+直して、渡した順に 1 行ずつ stdout に出す。値は出さない。
 
 ```sh
 pjp-op-ref --reason "<なぜ読むか>" <参照>…
@@ -2959,13 +2994,16 @@ shell の変数・ファイル・端末・引数に入れない。jq が出す�
 `~/dotfiles/setup --self-update --update` で入る（`pjp-op-ref` も）。skill `pjp-secrets` と CLAUDE.md の節も同じコマンドで配られる
 （Claude Code を起こし直すと効く）。
 
+op-reason を 0.3.0 に上げた変更から、`pjp-op-env` は理由に読む参照を並べない（0.3.0 の窓が並べる）。Windows の `op-reason.exe` が
+0.2.0 のままだと窓にも並ばないので、Windows の側を先に上げてから switch する（[前述](#op-reason-の新しい版を出したとき)の 5.）。
+
 ### 確かめる
 
 ```sh
 command -v pjp-op-env pjp-op-ref                         # ~/.nix-profile/bin/pjp-op-env・pjp-op-ref
 pjp-op-env --dry-run                                     # .env の名前と種類。参照でない値は出さず、op を呼ばない
-pjp-op-env --reason "参照が解けるかを確かめる" -- true   # 承認の画面が 1 回だけ出て、全部解ければ 0
-op-reason-log                                            # WSL: inject の 1 行。理由の後ろに読む参照が並ぶ
+pjp-op-env --reason "参照が解けるかを確かめる" -- true   # 承認の画面が 1 回だけ出て (WSL の窓に読む参照が並ぶ)、全部解ければ 0
+op-reason-log                                            # WSL: op inject (参照 N 件) の 1 行。参照の一覧は --json の refs
 pjp-op-ref --reason "参照を ID の形にする" "<参照>"      # 承認の画面が項目ごとに 1 回出て、ID の参照を出す
 ```
 

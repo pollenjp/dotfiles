@@ -22,7 +22,7 @@
 #     - profile の op-reason --version は、呼ぶ側の PATH に何も無くても pkgs/op-reason の版を出す
 #     - profile の op は、op.exe が無ければ 127 で断り、op-reason の記録 (~/.local/state/op-reason/log.jsonl) に refused の
 #       no-op-exe を書く。包みは表示の言語を決めない (OPREASON_LANG が無ければ英語で、LANG=ja_JP.UTF-8 でも英語。
-#       OPREASON_LANG=ja なら日本語。op-reason 0.2.0 は LANG などで決めない)
+#       OPREASON_LANG=ja なら日本語。op-reason は 0.2.0 から LANG などで決めない)
 #     - op.exe があって op-reason.exe が無ければ、既定の OPREASON_EXE の場所を断りの文に出して 127 (no-exe)。環境に
 #       OPREASON_EXE があれば、そちらを探す (既定は --set-default)
 #     - profile の op-reason-log は、呼び名どおり記録を見る道具として動き、上の断りを表に出す
