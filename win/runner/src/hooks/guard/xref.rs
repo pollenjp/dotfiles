@@ -636,6 +636,27 @@ impl<'a> Xref<'a> {
                 }
             } else if let Some(t) = self.w.read_file(dir, &body_file) {
                 texts.push(text(head_b, suffix_b, true, md_b, fix_b, t));
+            } else if dir.starts_with(FOREIGN) {
+                // WSL の中のファイルは Windows の hook から読めない: 押す commit と同じく、確かめられないものとして止める (Windows だけ)
+                let (vis, _, _) = if target.is_empty() {
+                    (String::new(), String::new(), String::new())
+                } else {
+                    let cwd = self.w.cwd.clone();
+                    self.visibility(&cwd, &target)
+                };
+                if vis != "PRIVATE" && vis != "INTERNAL" {
+                    let name = if own.is_empty() {
+                        "WSL の中の repo".to_string()
+                    } else {
+                        own[0].clone()
+                    };
+                    self.sections.push(format!(
+                        "gh {kind} → {name} (公開範囲を確かめられない: WSL の中の repo は Windows の hook から確かめられない):\n- {head_b}ファイル {body_file} を Windows の hook から読めない"
+                    ));
+                    if !self.fixes.iter().any(|f| f == "wsl") {
+                        self.fixes.push("wsl".to_string());
+                    }
+                }
             } else {
                 // 読めないファイル (<( ) など) は、語の文字のまま数える
                 texts.push(text(head_b, suffix_b, true, md_b, fix_b, body_file.clone()));
@@ -1340,7 +1361,7 @@ impl<'a> Xref<'a> {
                 }
                 "cmd" => {
                     if let Some(s) = cmd_command(&w[1..]) {
-                        self.rescan(&dir, depth, &s, Lang::Bash, &l);
+                        self.rescan(&dir, depth, &s, Lang::PowerShell, &l);
                     }
                     return;
                 }
@@ -1401,7 +1422,7 @@ impl<'a> Xref<'a> {
             }
             // PowerShell の Get-Content・Tee-Object・Set-Content (Out-File・Add-Content)
             "get-content" => {
-                let (named, pos) = ps_params(&w[1..], &["raw", "force", "wait", "asbytestream"]);
+                let (named, pos) = ps_params(&w[1..], super::GET_CONTENT_VALUES);
                 if let Some(p) = ps_named(&named, &["path", "literalpath"])
                     .map(str::to_string)
                     .or(pos.first().cloned())
@@ -1414,7 +1435,7 @@ impl<'a> Xref<'a> {
             "tee-object" => {
                 self.out_text = l.in_text.clone();
                 self.out_known = l.in_known;
-                let (named, pos) = ps_params(&w[1..], &["append"]);
+                let (named, pos) = ps_params(&w[1..], super::TEE_VALUES);
                 if let Some(p) = ps_named(&named, &["filepath", "literalpath", "path"])
                     .map(str::to_string)
                     .or(pos.first().cloned())
@@ -1542,7 +1563,7 @@ impl<'a> Xref<'a> {
             msg.push_str("\n- 本文・コメントの参照は backquote で囲む (`owner/repo#123` の形の inline code にする)。[文](URL) のリンクにもしない");
         }
         if has("wsl") {
-            msg.push_str("\n- WSL の中の repo への push は、WSL の Claude の会話 (hc の子) で打つ (WSL の hook が押す commit の message を読んで確かめる)");
+            msg.push_str("\n- WSL の中の repo への push・PR は、WSL の Claude の会話 (hc の子) で打つ (WSL の hook が押す commit の message と本文のファイルを読んで確かめる)");
         }
         if self.lang == Lang::PowerShell {
             msg.push_str("\n- ユーザーがこの参照を書くと明示したときだけ、コマンドの頭に $env:PJP_ALLOW_XREF='1'; を付けて打ち直す (PowerShell の tool。Bash の tool なら PJP_ALLOW_XREF=1。自分の判断では付けない)");
@@ -1727,7 +1748,20 @@ mod tests {
         assert!(deny("pwsh -NoProfile -Command \"git push\"").is_some());
         let why = deny("wsl -d u24 -- git push").expect("WSL の中の push は止める");
         assert!(why.contains("WSL の中の repo"), "{why}");
+        let why = deny("wsl gh pr create -t x --body-file body.md")
+            .expect("WSL の中の本文のファイルは読めないので止める");
+        assert!(why.contains("Windows の hook から読めない"), "{why}");
         assert!(deny("gh pr view 1").is_none());
+        // pwsh の略したオプション・cmd /c の中 (\ を字のまま読む)・式の文のつなぎ
+        assert!(deny("powershell -NoProfile -Exec Bypass -Command \"git push\"").is_some());
+        assert!(deny(&format!("cmd /c \"cd /d {} && git push\"", r.display())).is_some());
+        assert!(deny("'Refs ' + 'NixOS/nixpkgs#12' | gh pr create -t x -F -").is_some());
+        // 通す口は、後ろで付けた env を前の ( ) の中に効かせず、Remove-Item Env: で外れる
+        assert!(deny("Write-Output (git push); $env:PJP_ALLOW_XREF='1'").is_some());
+        assert!(
+            deny("$env:PJP_ALLOW_XREF='1'; Remove-Item Env:PJP_ALLOW_XREF; git push").is_some()
+        );
+        assert!(deny("$env:PJP_ALLOW_XREF='1'; Write-Output (git push)").is_none());
         // Bash の tool の文は bash の版と同じ通す口
         let (raw, v) = input("Bash", "git push", &r);
         let why = reason(run(&raw, &v, &s)).unwrap();

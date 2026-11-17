@@ -91,6 +91,8 @@ struct Lexer {
     /// 読みかけの heredoc (終わりの印・`<<-` か・本文を入れる単純コマンドの番号)
     pending: Vec<(String, bool, usize)>,
     queue: Vec<String>,
+    /// 控えた文字の合計
+    queued: usize,
 }
 
 fn at(s: &[char], i: usize) -> Option<char> {
@@ -177,6 +179,9 @@ fn heredoc_read(s: &[char], pos: usize, delim: &str, strip: bool) -> (String, us
 /// `"…"` の中の `$( )` の入れ子をたどる深さの上限。これより深いものは閉じないものとみなす (awk に上限は無いが、Windows の main thread の
 /// stack は 1 MB しか無く、64 KB のコマンドで入れ子を 1 万段にすると溢れて hook が落ちる)
 const MAX_NEST: usize = 200;
+
+/// 外を読み終えてから読む `$( )` などの中の文字の合計の上限
+const QUEUE_BUDGET: usize = 1 << 20;
 
 /// `s[j]` の `"` に対応する `"` の位置 (無ければ `s.len()`)
 fn dq_end(s: &[char], j: usize, nest: usize) -> usize {
@@ -515,7 +520,7 @@ impl Lexer {
     fn subst(&mut self, s: &[char], p: usize, kind: char) -> usize {
         let e = paren_end(s, p);
         let inner = sub_str(s, p + 1, e);
-        self.queue.push(inner.clone());
+        self.enqueue(&inner);
         if kind == '$' {
             let v = subst_value(&inner);
             self.add_char(&v);
@@ -529,10 +534,20 @@ impl Lexer {
     fn subst_bt(&mut self, s: &[char], i: usize) -> usize {
         let e = bt_end(s, i);
         let inner = sub_str(s, i + 1, e).replace("\\`", "`");
-        self.queue.push(inner.clone());
+        self.enqueue(&inner);
         let v = subst_value(&inner);
         self.add_char(&v);
         e
+    }
+
+    /// `$( )` などの中を、外を読み終えてから読むよう控える。控える文字の合計には上限を置く (awk に上限は無いが、入れ子の深いコマンドで控えが長さの
+    /// 二乗に膨らみ、hook が時間切れか落ちると Claude Code は止めずに通す。ふつうのコマンドは 64 KB までなので届かない)
+    fn enqueue(&mut self, inner: &str) {
+        if self.queued + inner.len() > QUEUE_BUDGET {
+            return;
+        }
+        self.queued += inner.len();
+        self.queue.push(inner.to_string());
     }
 
     /// `s[p]` の `'` で始まる `$'…'` を読む (`\n`・`\t` を文字に戻す)。閉じる位置を返す

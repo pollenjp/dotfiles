@@ -548,12 +548,22 @@ impl<'a> Iac<'a> {
         if l.allow_install {
             return;
         }
-        if a.iter().any(|x| {
-            matches!(
-                x.to_lowercase().as_str(),
-                "-?" | "-h" | "--help" | "/?" | "--noop" | "-n" | "--whatif" | "--what-if"
-            )
-        }) {
+        // help と確かめるだけの印は道具ごとに違う (winget の -h は --silent、choco の -n は --skip-powershell で、どちらも入れる)
+        let info: &[&str] = match tool {
+            "winget" => &["-?", "--help", "/?"],
+            "choco" => &[
+                "-?",
+                "-h",
+                "--help",
+                "/?",
+                "--noop",
+                "--whatif",
+                "--what-if",
+            ],
+            "scoop" => &["-h", "--help", "/?"],
+            _ => &[],
+        };
+        if a.iter().any(|x| info.contains(&x.to_lowercase().as_str())) {
             return;
         }
         let sub = a
@@ -759,8 +769,12 @@ impl<'a> Iac<'a> {
             if rec.ps {
                 name = ps_alias(&name).to_string();
             }
-            // Windows の venv の Activate.ps1 をそのまま流す (& .venv\Scripts\Activate.ps1)
-            if self.w.win && is_activate(&w[0], true) {
+            // PowerShell で Windows の venv の Activate.ps1 をそのまま流す (& .venv\Scripts\Activate.ps1。拡張子の無い activate も
+            // PowerShell は Activate.ps1 を選ぶ)。Git Bash で source せずに流した activate と、cmd を起こす activate.bat は今の shell に効かない
+            if rec.ps && is_activate(&w[0], true) && {
+                let leaf = w[0].rsplit(['/', '\\']).next().unwrap_or("").to_lowercase();
+                leaf.ends_with(".ps1") || !leaf.contains('.')
+            } {
                 self.venv_active = true;
                 return;
             }
@@ -775,7 +789,9 @@ impl<'a> Iac<'a> {
                     return;
                 }
                 "source" | "." => {
-                    if w.get(1).is_some_and(|x| is_activate(x, self.w.win)) {
+                    if w.get(1)
+                        .is_some_and(|x| is_activate(x, self.w.win || rec.ps))
+                    {
                         self.venv_active = true;
                     }
                     return;
@@ -1044,7 +1060,7 @@ impl<'a> Iac<'a> {
                 }
                 "cmd" => {
                     if let Some(s) = cmd_command(&w[1..]) {
-                        self.rescan(&dir, depth, &s, Lang::Bash, &l);
+                        self.rescan(&dir, depth, &s, Lang::PowerShell, &l);
                     }
                     return;
                 }
@@ -1637,10 +1653,26 @@ mod tests {
         assert!(ps("winget list").is_none());
         assert!(ps("Install-Module Pester -WhatIf").is_none());
         assert!(ps("terraform plan").is_none());
+        // help と確かめるだけの印は道具ごと (winget の -h は --silent、choco の -n は --skip-powershell)
+        assert!(ps("winget install -e --id Git.Git -h").is_some());
+        assert!(ps("choco install git -y -n").is_some());
+        assert!(ps("choco install git --noop").is_none());
+        assert!(ps("winget install --help").is_none());
+        // PowerShell で Activate.ps1 (拡張子の無い activate も) を流すと venv の中。activate.bat は今の shell に効かない
+        assert!(ps("& .venv\\Scripts\\Activate.ps1; pip install x").is_none());
+        assert!(ps(". .\\.venv\\Scripts\\Activate.ps1; pip install x").is_none());
+        assert!(ps(".venv\\Scripts\\activate; pip install x").is_none());
+        assert!(ps(".venv\\Scripts\\activate.bat; pip install x").is_some());
+        assert!(ps("powershell -NoProfile -Exec Bypass -Command \"pip install x\"").is_some());
+        // Git Bash で source せずに流した activate は、今の shell に効かない
+        let bash = |cmd: &str| {
+            let v = json!({"tool_name": "Bash", "tool_input": {"command": cmd}, "cwd": t.path().to_string_lossy()});
+            run(&v.to_string(), &v, &sys)
+        };
+        assert!(bash(".venv/Scripts/activate; pip install x").is_some());
         if cfg!(windows) {
+            assert!(bash("source .venv/Scripts/activate; pip install x").is_none());
             assert!(ps(".\\box\\Scripts\\pip.exe install x").is_none());
-            assert!(ps("& .venv\\Scripts\\Activate.ps1; pip install x").is_none());
-            assert!(ps(". .\\.venv\\Scripts\\Activate.ps1; pip install x").is_none());
         }
     }
 }

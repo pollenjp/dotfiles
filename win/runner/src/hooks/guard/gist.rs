@@ -1213,34 +1213,54 @@ impl<'a> Gist<'a> {
     /// PowerShell の Invoke-WebRequest・Invoke-RestMethod (Windows PowerShell 5.1 の curl・wget も): method は -Method (既定は GET)、-Body・
     /// -InFile・-Form があれば本文
     fn iwr_cmd(&mut self, dir: &str, name: &str, a: &[String]) {
-        let switches = [
-            "usebasicparsing",
-            "usedefaultcredentials",
-            "skipcertificatecheck",
-            "skipheadervalidation",
-            "skiphttperrorcheck",
-            "passthru",
-            "resume",
-            "allowunencryptedauthentication",
-            "allowinsecureredirect",
-            "disablekeepalive",
-            "noproxy",
-            "preservehttpmethodonredirect",
-            "preserveauthorizationonredirect",
-            "followrellink",
+        // 値を取る引数 (略した名前は頭の字で引く。ほかの名前は switch とみなし、後ろの URL を値として取らない)。先に書いたものほど、略した名前で
+        // 先に当たる (-M は Method、-U は Uri)
+        const VALUES: &[&str] = &[
+            "uri",
+            "method",
+            "body",
+            "infile",
+            "form",
+            "headers",
+            "outfile",
+            "contenttype",
+            "custommethod",
+            "websession",
+            "sessionvariable",
+            "timeoutsec",
+            "credential",
+            "proxy",
+            "proxycredential",
+            "certificate",
+            "certificatethumbprint",
+            "useragent",
+            "maximumredirection",
+            "maximumretrycount",
+            "retryintervalsec",
+            "authentication",
+            "token",
+            "sslprotocol",
+            "transferencoding",
+            "httpversion",
+            "connectiontimeoutseconds",
+            "operationtimeoutseconds",
+            "responseheadersvariable",
+            "statuscodevariable",
+            "maximumfollowrellink",
+            "unixsocket",
         ];
-        let (named, pos) = ps_params(a, &switches);
-        let Some(uri) = ps_named(&named, &["uri"])
+        let (named, pos) = ps_params(a, VALUES);
+        // -Uri と、位置の引数を全部 (値を取る知らない引数の値が位置の引数に紛れても、URL を取りこぼさない)
+        let mut urls: Vec<String> = ps_named(&named, &["uri"])
             .map(str::to_string)
-            .or_else(|| pos.first().cloned())
-        else {
-            return;
-        };
+            .into_iter()
+            .collect();
+        urls.extend(pos);
         let method = ps_named(&named, &["method", "custommethod"])
             .unwrap_or("GET")
             .to_uppercase();
         let body = ps_named(&named, &["body", "infile", "form"]).is_some();
-        self.send_check(dir, name, &method, body, &[uri]);
+        self.send_check(dir, name, &method, body, &urls);
     }
 
     /// nc・ncat・netcat・socat・telnet の宛先 (socat は TCP:<host>:<port> などの host) がペースト共有のサービスなら止める
@@ -1693,7 +1713,7 @@ impl<'a> Gist<'a> {
                 }
                 "cmd" => {
                     if let Some(s) = cmd_command(&w[1..]) {
-                        self.rescan(&dir, depth, &s, Lang::Bash);
+                        self.rescan(&dir, depth, &s, Lang::PowerShell);
                     }
                     return;
                 }
@@ -1771,7 +1791,7 @@ impl<'a> Gist<'a> {
             }
             // PowerShell の Get-Content・Tee-Object・Set-Content (Out-File・Add-Content)
             "get-content" => {
-                let (named, pos) = ps_params(args, &["raw", "force", "wait", "asbytestream"]);
+                let (named, pos) = ps_params(args, super::GET_CONTENT_VALUES);
                 if let Some(p) = ps_named(&named, &["path", "literalpath"])
                     .map(str::to_string)
                     .or(pos.first().cloned())
@@ -1784,7 +1804,7 @@ impl<'a> Gist<'a> {
             "tee-object" => {
                 self.out_text = l.in_text.clone();
                 self.out_known = l.in_known;
-                let (named, pos) = ps_params(args, &["append"]);
+                let (named, pos) = ps_params(args, super::TEE_VALUES);
                 if let Some(p) = ps_named(&named, &["filepath", "literalpath", "path"])
                     .map(str::to_string)
                     .or(pos.first().cloned())
@@ -2165,8 +2185,21 @@ mod tests {
             "gh gist view 0123abcd",
             "Write-Output 'gh gist create a.txt'",
             "iwr https://0x0.st/abcd.txt -OutFile x.txt",
+            "iwr -useb https://0x0.st/abcd.txt -Headers @{Accept = 'text/plain'}",
         ] {
             assert!(run_ps(cmd).is_none(), "通す: {cmd}");
+        }
+        // hashtable の後ろの引数・略した switch・pwsh の略したオプションも読む
+        for cmd in [
+            "Invoke-RestMethod -Uri https://api.github.com/gists -Headers @{Authorization=\"Bearer $t\"} -Method Post -Body $json",
+            "Invoke-RestMethod -Uri https://api.github.com/gists `\n  -Headers @{ Authorization = \"Bearer $t\"; Accept = 'application/json' } `\n  -Method Post -Body $json",
+            "Invoke-WebRequest -Uri https://paste.rs -Headers @{X=\"y\"} -InFile a.txt",
+            "iwr -useb https://paste.rs -Method Post -InFile a.txt",
+            "iwr -Verbose https://paste.rs -Meth Post -InFile a.txt",
+            "powershell -NoProfile -Exec Bypass -Command \"gh gist create a.txt\"",
+            "cmd /c \"gh gist create a.txt\"",
+        ] {
+            assert!(run_ps(cmd).is_some(), "止める: {cmd}");
         }
     }
 }

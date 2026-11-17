@@ -58,6 +58,8 @@ pub struct World<'a> {
     pub vars: HashMap<String, String>,
     /// 同じコマンドの前の方で書いたファイル (中身が分からなければ None)
     pub written: HashMap<String, Option<String>>,
+    /// Windows の Git Bash の `/tmp` の行き先 (`%TEMP%`。`/` の形。Windows の形でなければ空)
+    git_bash_tmp: String,
     git: Option<Option<PathBuf>>,
 }
 
@@ -79,9 +81,18 @@ impl<'a> World<'a> {
             cwd: String::new(),
             vars: HashMap::new(),
             written: HashMap::new(),
+            git_bash_tmp: String::new(),
             git: None,
         };
         w.home = w.norm(&home);
+        if win {
+            let tmp = sys
+                .env("TEMP")
+                .filter(|t| !t.is_empty())
+                .or_else(|| sys.env("TMP"))
+                .unwrap_or_default();
+            w.git_bash_tmp = w.norm(&tmp).trim_end_matches('/').to_string();
+        }
         let cwd = w.norm(cwd);
         w.cwd = if !cwd.is_empty() && Path::new(&cwd).is_dir() {
             cwd
@@ -229,11 +240,21 @@ impl<'a> World<'a> {
     /// bash の read_file: 同じコマンドの前の方で書いたファイルは書いた中身 (分からなければ None)、ほかはふつうのファイルの頭の 1 MB
     /// (`$(…)` と同じく末尾の改行を外す)
     pub fn read_file(&self, dir: &str, path: &str) -> Option<String> {
-        let p = self.abs_path(dir, path, false);
+        let mut p = self.abs_path(dir, path, false);
         if let Some(v) = self.written.get(&self.key(&p)) {
             return v.clone();
         }
-        if p.starts_with(FOREIGN) || !Path::new(&p).is_file() {
+        if p.starts_with(FOREIGN) {
+            return None;
+        }
+        // Windows の Git Bash の /tmp は %TEMP% (ドライブの根の \tmp に無ければ、そちらを読む)
+        if !Path::new(&p).is_file()
+            && !self.git_bash_tmp.is_empty()
+            && (p == "/tmp" || p.starts_with("/tmp/"))
+        {
+            p = format!("{}{}", self.git_bash_tmp, &p[4..]);
+        }
+        if !Path::new(&p).is_file() {
             return None;
         }
         let mut buf = Vec::new();
@@ -384,18 +405,7 @@ pub fn ps_write_target(
     in_text: &str,
     in_known: bool,
 ) -> Option<(String, bool, String)> {
-    let (named, pos) = ps_params(
-        args,
-        &[
-            "nonewline",
-            "force",
-            "append",
-            "noclobber",
-            "passthru",
-            "whatif",
-            "confirm",
-        ],
-    );
+    let (named, pos) = ps_params(args, WRITE_VALUES);
     let path = ps_named(&named, &["path", "filepath", "literalpath"])
         .map(str::to_string)
         .or_else(|| pos.first().cloned())?;
@@ -414,8 +424,59 @@ pub fn ps_write_target(
     })
 }
 
-/// PowerShell の cmdlet の引数を、名前つき (`-Name 値`・`-Name:値`) と位置の引数に分ける。`flags` は値を取らない名前 (小文字・`-` なし)
-pub fn ps_params(args: &[String], flags: &[&str]) -> (Vec<(String, String)>, Vec<String>) {
+/// Get-Content の値を取る引数 (小文字。略した名前は頭の字で引く。ほかの名前は値を取らない switch)
+pub const GET_CONTENT_VALUES: &[&str] = &[
+    "path",
+    "literalpath",
+    "encoding",
+    "totalcount",
+    "tail",
+    "head",
+    "readcount",
+    "delimiter",
+    "filter",
+    "include",
+    "exclude",
+    "stream",
+    "credential",
+];
+
+/// Tee-Object の値を取る引数
+pub const TEE_VALUES: &[&str] = &[
+    "filepath",
+    "literalpath",
+    "variable",
+    "inputobject",
+    "encoding",
+];
+
+/// Set-Content・Add-Content・Out-File の値を取る引数
+pub const WRITE_VALUES: &[&str] = &[
+    "path",
+    "filepath",
+    "literalpath",
+    "value",
+    "inputobject",
+    "encoding",
+    "filter",
+    "include",
+    "exclude",
+    "credential",
+    "stream",
+    "width",
+];
+
+/// PowerShell の cmdlet の引数を、名前つき (`-Name 値`・`-Name:値`) と位置の引数に分ける。`values` は値を取る引数の正式な名前 (小文字・`-` なし)
+/// で、略した名前 (`-Meth`) は頭の字が合う最初のものと読む。どれにも合わない名前は値を取らない switch とみなす (`-UseBasicParsing`・`-useb`・
+/// `-Verbose` が、後ろの URL を値として取ってしまわないように)。名前つきの引数は正式な名前で返す
+pub fn ps_params(args: &[String], values: &[&str]) -> (Vec<(String, String)>, Vec<String>) {
+    let canon = |n: &str| -> Option<&str> {
+        let l = n.to_lowercase();
+        values
+            .iter()
+            .copied()
+            .find(|v| !l.is_empty() && v.starts_with(&l))
+    };
     let mut named = Vec::new();
     let mut pos = Vec::new();
     let mut i = 0;
@@ -427,15 +488,16 @@ pub fn ps_params(args: &[String], flags: &[&str]) -> (Vec<(String, String)>, Vec
         {
             let body = &a[1..];
             if let Some((n, v)) = body.split_once(':') {
-                named.push((n.to_lowercase(), v.to_string()));
-            } else if flags.contains(&body.to_lowercase().as_str()) {
-                named.push((body.to_lowercase(), String::new()));
-            } else {
+                let name = canon(n).map_or_else(|| n.to_lowercase(), str::to_string);
+                named.push((name, v.to_string()));
+            } else if let Some(name) = canon(body) {
                 named.push((
-                    body.to_lowercase(),
+                    name.to_string(),
                     args.get(i + 1).cloned().unwrap_or_default(),
                 ));
                 i += 1;
+            } else {
+                named.push((body.to_lowercase(), String::new()));
             }
         } else {
             pos.push(a.clone());
@@ -445,15 +507,11 @@ pub fn ps_params(args: &[String], flags: &[&str]) -> (Vec<(String, String)>, Vec
     (named, pos)
 }
 
-/// 名前つきの引数の値 (頭の字で略した名前も。`names` は小文字の正式な名前)
+/// 名前つきの引数の値 (`names` は正式な名前。ps_params が正式な名前で返す)
 pub fn ps_named<'b>(named: &'b [(String, String)], names: &[&str]) -> Option<&'b str> {
     named
         .iter()
-        .find(|(n, _)| {
-            names
-                .iter()
-                .any(|full| !n.is_empty() && full.starts_with(n.as_str()))
-        })
+        .find(|(n, _)| names.contains(&n.as_str()))
         .map(|(_, v)| v.as_str())
 }
 
@@ -468,8 +526,24 @@ pub fn deny(reason: &str) -> String {
     )
 }
 
-/// `pwsh`・`powershell` の引数から `-Command` の文字列 (後ろの語をつないだもの)。無ければ None
+/// `pwsh`・`powershell` の引数から `-Command` の文字列 (後ろの語をつないだもの)。無ければ None。オプションの名前は PowerShell と同じく、頭の字で
+/// 略してよい (`-Exec Bypass`・`-win hidden`・`-c`)
 pub fn pwsh_command(args: &[String]) -> Option<String> {
+    // 値を取るオプション (正式な名前と、決まった別名)
+    const VALUES: &[&str] = &[
+        "executionpolicy",
+        "workingdirectory",
+        "windowstyle",
+        "outputformat",
+        "inputformat",
+        "configurationname",
+        "configurationfile",
+        "settingsfile",
+        "psconsolefile",
+        "version",
+        "custompipename",
+    ];
+    const VALUE_ALIASES: &[&str] = &["ex", "ep", "wd", "w", "of", "o", "if", "v"];
     let mut i = 0;
     while i < args.len() {
         let a = args[i].to_lowercase();
@@ -478,36 +552,22 @@ pub fn pwsh_command(args: &[String]) -> Option<String> {
             return Some(args[i..].join(" "));
         }
         let name = a.trim_start_matches(['-', '/']);
-        if !name.is_empty() && "command".starts_with(name) {
+        if name == "c"
+            || (name.len() >= 3 && "command".starts_with(name))
+            || name == "cwa"
+            || "commandwithargs" == name
+        {
             return Some(args[i + 1..].join(" "));
         }
-        if !name.is_empty()
-            && ("file".starts_with(name) || "encodedcommand".starts_with(name) || name == "ec")
+        if name == "f"
+            || name == "e"
+            || name == "ec"
+            || (name.len() >= 2 && ("file".starts_with(name) || "encodedcommand".starts_with(name)))
         {
             return None;
         }
-        // 値を取るオプション
-        if [
-            "executionpolicy",
-            "ex",
-            "ep",
-            "workingdirectory",
-            "wd",
-            "configurationname",
-            "settingsfile",
-            "outputformat",
-            "of",
-            "inputformat",
-            "if",
-            "windowstyle",
-            "w",
-            "psconsolefile",
-            "version",
-            "v",
-            "custompipename",
-            "configurationfile",
-        ]
-        .contains(&name)
+        if VALUE_ALIASES.contains(&name)
+            || (name.len() >= 2 && VALUES.iter().any(|v| v.starts_with(name)))
         {
             i += 1;
         }
@@ -516,7 +576,8 @@ pub fn pwsh_command(args: &[String]) -> Option<String> {
     None
 }
 
-/// `cmd /c …`・`cmd /k …` の後ろの文字 (Git Bash の `cmd //c` も)。無ければ None
+/// `cmd /c …`・`cmd /k …` の後ろの文字 (Git Bash の `cmd //c` も)。無ければ None。読み直すときは、`\` を字のまま残す PowerShell の lexer で
+/// 近似する (cmd の `"…"` と `&`・`&&`・`|` は同じに分かれる)
 pub fn cmd_command(args: &[String]) -> Option<String> {
     let i = args.iter().position(|a| {
         let l = a.to_lowercase();
@@ -596,6 +657,22 @@ mod tests {
         assert_eq!(w.join_dir(FOREIGN, "/home/u", true), FOREIGN);
     }
 
+    /// Git Bash の /tmp は %TEMP% (ドライブの根の \tmp に無ければ、そちらを読む)
+    #[test]
+    fn git_bash_tmp_is_temp() {
+        let t = crate::testutil::TempDir::new("guard-tmp");
+        let name = format!("dotfiles-win-guard-{}.md", std::process::id());
+        t.write(&name, "NixOS/nixpkgs#1\n");
+        let sys = FakeSys::new(|_| unreachable!()).with_env("TEMP", &t.path().to_string_lossy());
+        let w = World::with_style(&sys, ".", true);
+        assert_eq!(
+            w.read_file("C:/r", &format!("/tmp/{name}")).as_deref(),
+            Some("NixOS/nixpkgs#1")
+        );
+        let linux = World::with_style(&sys, ".", false);
+        assert_eq!(linux.read_file("/r", &format!("/tmp/{name}")), None);
+    }
+
     #[test]
     fn options_and_names() {
         let mut v: Vec<String> = ["-u", "root", "-E", "pip", "x"]
@@ -611,28 +688,58 @@ mod tests {
         );
         assert_eq!(base_name("git.exe", false), "git.exe");
         assert_eq!(ps_alias("set-location"), "cd");
-        let args: Vec<String> = ["-Uri", "https://x", "-Method:Post", "-UseBasicParsing", "a"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        let (named, pos) = ps_params(&args, &["usebasicparsing"]);
-        assert_eq!(ps_named(&named, &["method"]), Some("Post"));
-        assert_eq!(ps_named(&named, &["uri"]), Some("https://x"));
-        assert_eq!(pos, vec!["a"]);
         let s = |l: &[&str]| -> Vec<String> { l.iter().map(|x| x.to_string()).collect() };
-        assert_eq!(
-            pwsh_command(&s(&[
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-c",
-                "git",
-                "push"
-            ]))
-            .as_deref(),
-            Some("git push")
-        );
-        assert_eq!(pwsh_command(&s(&["-File", "x.ps1"])), None);
+        // 値を取る引数は略した名前でも引き、知らない名前 (-UseBasicParsing・-useb・-Verbose) は後ろの語を取らない switch
+        let args = s(&[
+            "-useb",
+            "https://x",
+            "-Meth:Post",
+            "-UseBasicParsing",
+            "-Verbose",
+            "-Head",
+            "@{…}",
+            "a",
+        ]);
+        let (named, pos) = ps_params(&args, &["uri", "method", "headers"]);
+        assert_eq!(ps_named(&named, &["method"]), Some("Post"));
+        assert_eq!(ps_named(&named, &["headers"]), Some("@{…}"));
+        assert_eq!(ps_named(&named, &["uri"]), None);
+        assert_eq!(pos, vec!["https://x", "a"]);
+        for (args, want) in [
+            (
+                &[
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-c",
+                    "git",
+                    "push",
+                ][..],
+                Some("git push"),
+            ),
+            (
+                &["-nop", "-Exec", "Bypass", "-Command", "git push"][..],
+                Some("git push"),
+            ),
+            (
+                &[
+                    "-win",
+                    "hidden",
+                    "-o",
+                    "Text",
+                    "-WorkingDir",
+                    ".",
+                    "-com",
+                    "x",
+                ][..],
+                Some("x"),
+            ),
+            (&["-NoLogo", "git push"][..], Some("git push")),
+            (&["-File", "x.ps1"][..], None),
+            (&["-ec", "ZwBpAHQA"][..], None),
+        ] {
+            assert_eq!(pwsh_command(&s(args)).as_deref(), want, "{args:?}");
+        }
         assert_eq!(
             cmd_command(&s(&["/c", "git", "push"])).as_deref(),
             Some("git push")

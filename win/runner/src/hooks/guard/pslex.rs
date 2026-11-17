@@ -58,7 +58,10 @@ struct Ps<'w, 'a> {
     vars: HashMap<String, String>,
     /// `$env:NAME = 値` で付けた env (書いた名前・値)
     env: Vec<(String, String)>,
-    queue: Vec<String>,
+    /// 外を読み終えてから読む `( )` の中と、そのときの env
+    queue: Vec<(String, Vec<(String, String)>)>,
+    /// 控えた文字の合計
+    queued: usize,
     /// `$( )` の値を読む lexer の入れ子の深さ
     nest: usize,
 }
@@ -129,12 +132,20 @@ fn here_end(s: &[char], body: usize, dq: bool) -> (usize, usize) {
 /// ものは閉じない・値は中の文字のまま、とみなす)
 const MAX_NEST: usize = 64;
 
+/// 外を読み終えてから読む `( )` の中の文字の合計の上限 (ふつうのコマンドは 64 KB までなので届かない)
+const QUEUE_BUDGET: usize = 1 << 20;
+
 /// `s[p]` の `(` に対応する `)` の位置 (無ければ `s.len()`)。引用符・here-string・コメント・backtick の中の括弧は数えない
 fn paren_end(s: &[char], p: usize) -> usize {
-    paren_end_n(s, p, 0)
+    group_end(s, p, '(', ')', 0)
 }
 
 fn paren_end_n(s: &[char], p: usize, nest: usize) -> usize {
+    group_end(s, p, '(', ')', nest)
+}
+
+/// `s[p]` の `open` に対応する `close` の位置 (無ければ `s.len()`)。`( )` と `{ }` に使う
+fn group_end(s: &[char], p: usize, open: char, close: char, nest: usize) -> usize {
     let n = s.len();
     if nest > MAX_NEST {
         return n;
@@ -197,9 +208,9 @@ fn paren_end_n(s: &[char], p: usize, nest: usize) -> usize {
                 Some(k) => j += k - 1,
                 None => return n,
             }
-        } else if c == '(' {
+        } else if c == open {
             depth += 1;
-        } else if c == ')' {
+        } else if c == close {
             depth -= 1;
             if depth == 0 {
                 return j;
@@ -227,6 +238,7 @@ impl<'w, 'a> Ps<'w, 'a> {
             vars,
             env: Vec::new(),
             queue: Vec::new(),
+            queued: 0,
             nest: 0,
         }
     }
@@ -239,11 +251,23 @@ impl<'w, 'a> Ps<'w, 'a> {
         let mut qi = 0;
         while qi < self.queue.len() {
             self.pipein = false;
-            let inner: Vec<char> = self.queue[qi].chars().collect();
+            // 中のコマンドには、その ( ) を読んだ時点の env を効かせる (後ろの $env:… = … を前の ( ) に効かせない)
+            self.env = self.queue[qi].1.clone();
+            let inner: Vec<char> = self.queue[qi].0.chars().collect();
             self.lex(&inner);
             self.flush(false);
             qi += 1;
         }
+    }
+
+    /// `$( )`・`@( )`・`( )`・`@{ }` の中を、外を読み終えてから別の単純コマンドとして読むよう控える。控える文字の合計には上限を置く (入れ子の
+    /// 深いコマンドで、控えが長さの二乗に膨らまないように)
+    fn enqueue(&mut self, inner: &str) {
+        if self.queued + inner.len() > QUEUE_BUDGET {
+            return;
+        }
+        self.queued += inner.len();
+        self.queue.push((inner.to_string(), self.env.clone()));
     }
 
     fn add(&mut self, s: &str, kind: Kind) {
@@ -343,10 +367,36 @@ impl<'w, 'a> Ps<'w, 'a> {
             }
         } else if !toks.is_empty() {
             if call || !value_tok(&toks[0]) {
+                // Remove-Item Env:NAME (ri・rm・del も) は、付けた env を外す
+                let name = super::base_name(&toks[0].text, true);
+                if matches!(
+                    name.as_str(),
+                    "remove-item" | "ri" | "rm" | "del" | "erase" | "rd" | "rmdir"
+                ) {
+                    for t in &toks[1..] {
+                        if let Some(n) = t
+                            .text
+                            .get(..4)
+                            .filter(|p| p.eq_ignore_ascii_case("env:"))
+                            .map(|_| &t.text[4..])
+                        {
+                            self.env.retain(|(e, _)| !e.eq_ignore_ascii_case(n));
+                        }
+                    }
+                }
                 self.push_cmd(toks.into_iter().map(|t| t.text).collect());
             } else {
-                // 式の文 ('本文' | …): 値を出す echo にする
-                let v = toks[0].text.clone();
+                // 式の文 ('本文' | …・'a' + 'b' | …): 値を出す echo にする (値の語をつなぎ、+ の外の演算子は空白で添える)
+                let mut v = String::new();
+                for t in &toks {
+                    if t.kind == Kind::Bare && t.text == "+" {
+                        continue;
+                    }
+                    if !value_tok(t) && !v.is_empty() {
+                        v.push(' ');
+                    }
+                    v.push_str(&t.text);
+                }
                 self.push_cmd(vec!["echo".to_string(), v]);
             }
             stored = true;
@@ -389,7 +439,7 @@ impl<'w, 'a> Ps<'w, 'a> {
             Some('(') => {
                 let e = paren_end(s, i + 1);
                 let inner: String = s[i + 2..e.min(n)].iter().collect();
-                self.queue.push(inner.clone());
+                self.enqueue(&inner);
                 (self.subst_value(&inner), e)
             }
             Some('{') => {
@@ -600,14 +650,19 @@ impl<'w, 'a> Ps<'w, 'a> {
                 '@' if !self.in_tok && at(s, i + 1) == Some('(') => {
                     let e = paren_end(s, i + 1);
                     let inner: String = s[i + 2..e.min(n)].iter().collect();
-                    self.queue.push(inner.clone());
+                    self.enqueue(&inner);
                     let v = self.subst_value(&inner);
                     self.add(&v, Kind::Sub);
                     i = e;
                 }
-                '@' if !self.in_tok && at(s, i + 1) == Some('{') => {
-                    self.flush(false);
-                    i += 1;
+                // hashtable (@{ Authorization = "Bearer $t" }) は 1 つの値の語にする (文を分けない。後ろの -Method Post なども同じコマンドの
+                // 引数)。中は別の単純コマンドとしても読む
+                '@' if at(s, i + 1) == Some('{') => {
+                    let e = group_end(s, i + 1, '{', '}', 0);
+                    let inner: String = s[i + 2..e.min(n)].iter().collect();
+                    self.enqueue(&inner);
+                    self.add(&format!("@{{{inner}}}"), Kind::Sub);
+                    i = e;
                 }
                 '$' => {
                     // 文の頭の $name = … は代入
@@ -656,7 +711,7 @@ impl<'w, 'a> Ps<'w, 'a> {
                     } else {
                         let e = paren_end(s, i);
                         let inner: String = s[i + 1..e.min(n)].iter().collect();
-                        self.queue.push(inner.clone());
+                        self.enqueue(&inner);
                         let v = self.subst_value(&inner);
                         self.add(&v, Kind::Sub);
                         i = e;
@@ -737,7 +792,7 @@ fn file_mark(words: &[String]) -> Option<String> {
     if !matches!(super::ps_alias(&name), "get-content" | "cat") {
         return None;
     }
-    let (named, pos) = super::ps_params(&words[1..], &["raw", "force", "wait", "asbytestream"]);
+    let (named, pos) = super::ps_params(&words[1..], super::GET_CONTENT_VALUES);
     let path = super::ps_named(&named, &["path", "literalpath"])
         .map(str::to_string)
         .or_else(|| pos.first().cloned())?;
