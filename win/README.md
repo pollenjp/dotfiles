@@ -579,7 +579,8 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
 - `Shift+G` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
   `c` は fish では abbr、bash では alias で、herdr-app が argv で起こすときに広がるとは限らないので、中身を並べている。machine の space でも同じ argv で、
-  claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる
+  claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる (runner の試験
+  `claude_argv_matches_c` が、fish・bash・PowerShell の `c` と突き合わせる)
 - 書き足し方: repo の `herdr-app/keys.json` (herdr-app の keys.json と同じ形で、dotfiles が持つキーだけ) を、herdr-app の home の `keys.json` に足す。
   ほかのキー・section と順は残し、キーの順を見ずに同じなら書かない。書いたキーは `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys.applied.json` に記録し、
   repo から消したキーは、今の値が記録どおりなら外す (空になった section も外す)。dotfiles が書いた値でないキー (herdr-app の既定・手で書いた値) と、
@@ -587,13 +588,16 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   `dotfiles apply --steps herdr-app-keys --force`)。書く前の中身を `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys\backup\` に写す (いちばん古いものと、
   新しい方から 10 個)
 - **keys.json を一度書き換えると、herdr-app を上げても新しい既定のキーは足されない。** herdr-app は手を入れていない keys.json だけを新しい版の既定に替え、
-  少しでも書き換えたファイルは丸ごとユーザーのものとして残す (herdr-app の home の `AGENTS.md` の Keys の節)。herdr-app を上げたら、新しい版の既定の
-  キーをその節と `herdr-app commands` で見て、要るものを手で足す
+  少しでも書き換えたファイルは丸ごとユーザーのものとして残す (herdr-app の home の `AGENTS.md` の Keys の節)。herdr-app を上げたら、更新ノート
+  (Settings → Updates の What's new。命令は `app.whats_new`) を見る。既定のキーが増えた版は「keys.json を書き換えたなら自分で足す」として、足すキーと
+  section を書いている (例: section `terminal` に `"ctrl-shift-f": "terminal.search"`)。要るものを手で足す (どの PC でも使うなら repo の
+  `herdr-app/keys.json` に足す)
 - keys.json が無ければ書かない (herdr-app をまだ起こしていない新しい PC)。herdr-app は keys.json をキーの全部として読むので、dotfiles のキーだけの
   ファイルを作ると既定のキーが無くなる。herdr-app を一度起こしてから `dotfiles apply --steps herdr-app-keys`。herdr-app の逃げ道のキー
   (`Ctrl+Alt+Shift+Esc`) は keys.json を `keys.json.reset-<時刻>` へ退けて既定に戻すので、その後も `dotfiles apply --steps herdr-app-keys` で足し直す
-- herdr-app は keys.json を保存するとすぐ読み直す。読めなければ前に読めたキーのまま動き、隣の `keys.error` にわけを書く (runner は ※ で知らせる。
-  `herdr-app status` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
+- herdr-app は keys.json を保存するとすぐ読み直す。読めなければ前に読めたキーのまま動き、隣の `keys.error` にわけを書く。書き足した後は少し置いて
+  `dotfiles check --steps herdr-app-keys` を流すと、`keys.error` があれば ※ で知らせる (書いたその apply では、`keys.error` は前の中身のものなので
+  知らせない。`herdr-app status` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
   focus がある間はそちらが効く
 - キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`)。キーの書き方と命令の名前は、
   herdr-app の home の `AGENTS.md` の Keys の節と `herdr-app commands`
