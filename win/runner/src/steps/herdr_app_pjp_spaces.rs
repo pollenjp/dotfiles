@@ -5,22 +5,27 @@
 //! 手順は無い (Windows にしか無い手順)。
 //!
 //! - mod の元は claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` (claude-skills と決めた置き場)。置き方は herdr-app-mods と
-//!   同じ記録つきのコピー (herdr-app が書くファイルと名前が `.` で始まるものは配らない。元から消えたファイルは記録どおりなら消す)
+//!   同じ記録つきのコピー (herdr-app が書くファイルと名前が `.` で始まるものは配らない。元から消えたファイルは記録どおりなら消す。mod.json を
+//!   先に置く)
 //! - clone にまだ無ければ (claude-skills の PR の merge 前) 何もしない。置いた後で clone から無くなったら、置いたものには触らずに知らせる
 //!   (layout が mod を指しているので、片付けると sidebar が壊れる)
-//! - mod.json の place が none でない mod は置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)
+//! - mod.json の place が none でない mod は置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。同梱の main が
+//!   無ければ (herdr-app をまだ起こしていない) mod も置かない
 //! - layout は `layouts\pjp-main.json`。無く、作った記録も無いときだけ、apply が `herdr-app do layout.clone {"name":"main","as":"pjp-main"}` を
 //!   打つ。clone は main と clicks (sidebar の幅など。`layouts\.state\`) を写して `cloned_from` を残し、表示を pjp-main に替える (画面が替わる)。
 //!   続けて spaces を指す block (content.mod が spaces) を pjp-spaces に替えて書く。表示が main でなければ作らない (ユーザーの選んだ layout を
 //!   替えない)
 //! - 作った後は、今の main に同じ差し替えをした形 (cloned_from は今のファイルのまま) を持つ。main が変わったら (herdr-app を上げた) check が
-//!   変わった node を出し、apply が書き直す。記録 (sha256) と違う中身 (手で直した) は衝突で残す (`--force` で上書き)。clicks には触らない
+//!   変わった node を出し、apply が書き直す。spaces を pjp-spaces に替えると今の形になるファイル (人が clone し直した・保存し直した) は、記録に
+//!   よらず引き取る。ほかの違う中身 (手で直した) は衝突で残す (`--force` で上書き)。clicks には触らない
 //! - 表示を替えるのは、初めて作るときの clone の 1 回だけ。作った pjp-main が無くなったら (逃げ道のキー ctrl-alt-shift-escape が退けた・手で
-//!   外した)、mod も layout も置かない (外したままにする。`--force` で置き直して clone し直す)
+//!   外した)、mod も layout も置かない (外したままにする)。戻すのは人 (main を clone し直すか、退けたファイルの名前を戻す)。`--force` では戻さない
+//!   (ほかの手順の衝突を解く `dotfiles apply --force` で、表示を替えない)
+//! - layout を書かなかった実行で、herdr-app が layout を読めなかった理由のファイルがあれば ※ で添える
 //! - herdr-app に打つのは `herdr-app do layout.clone` だけ (止めない・立て直さない)。表示中の layout は `shared.json` の `layout` で読む
 //!
-//! 記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json` (mod のファイルと layout の sha256)。dotfiles-private の
-//! docs/adr/072_win_herdr_app_pjp_spaces_*。
+//! 記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json` (mod のファイルと layout の sha256)。layout の記録は home の綴りの
+//! 違い (`/` と `\`・Windows の大文字小文字) を見ずに引く。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*。
 
 use super::claude_skills::clone_dir;
 use super::herdr_app_mods::{Keep, app_home, copy_mod, list_mod, prune};
@@ -34,7 +39,7 @@ use crate::process::CommandSpec;
 use crate::record::Records;
 use crate::report::Kind;
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// claude-skills の clone の中の mod の置き場 (`/` 区切り。この下の `pjp-spaces` が mod。claude-skills と決めた約束)
@@ -95,21 +100,30 @@ impl Step for HerdrAppPjpSpaces {
             let placed = !records.keys().is_empty();
             return vec![missing_source(ctx, &clone, &src, placed)];
         }
-        let layout_path = home.join("layouts").join(format!("{LAYOUT}.json"));
-        if records.get(&layout_path.to_string_lossy()).is_some()
-            && !layout_path.exists()
-            && !mode.force()
-        {
+        let layouts = home.join("layouts");
+        let layout_path = layouts.join(format!("{LAYOUT}.json"));
+        if record_key(&records, &layout_path).is_some() && !layout_path.exists() {
             return vec![say_out(
                 ctx,
                 Kind::Info,
                 format!(
-                    "layout {LAYOUT} は前に作ったが、今は無い (逃げ道のキー ctrl-alt-shift-escape が退けた・手で外した) ので、mod も layout も置かない → 戻すなら dotfiles apply --steps herdr-app-pjp-spaces --force (mod を置き、{BASE} を写して表示を {LAYOUT} に替える)"
+                    "layout {LAYOUT} は前に作ったが、今は無い (逃げ道のキー ctrl-alt-shift-escape が退けた・手で外した) ので、mod も layout も置かない (外したまま。--force でも戻さない) → 戻すなら herdr-app do layout.clone --name {BASE} --as {LAYOUT} (表示が {LAYOUT} に替わる) の後で dotfiles apply --steps herdr-app-pjp-spaces。逃げ道のキーで退けたなら、layouts\\{LAYOUT}.json.reset-<時刻> の名前を {LAYOUT}.json に戻してもよい"
                 ),
             )];
         }
         if let Err(why) = check_mod(&src) {
             return vec![say_out(ctx, Kind::Manual, why)];
+        }
+        let base_path = layouts.join(format!("{BASE}.json"));
+        if !base_path.is_file() {
+            return vec![say_out(
+                ctx,
+                Kind::Manual,
+                format!(
+                    "同梱の layout {BASE} が無い ({}。herdr-app をまだ起こしていない) → herdr-app を一度起こしてから dotfiles apply --steps herdr-app-pjp-spaces (それまで mod も置かない)",
+                    base_path.display()
+                ),
+            )];
         }
         let m = match list_mod(&root, MOD) {
             Ok(m) => m,
@@ -216,6 +230,39 @@ fn check_mod(src: &Path) -> Result<(), String> {
     }
 }
 
+/// パスを比べる要素 (区切りの `/` と `\`・重なった区切りを見ない。Windows は大文字小文字も見ない)。
+fn path_parts(p: &Path) -> Vec<String> {
+    p.components()
+        .map(|c| {
+            let s = c.as_os_str().to_string_lossy();
+            if cfg!(windows) {
+                s.to_lowercase()
+            } else {
+                s.into_owned()
+            }
+        })
+        .collect()
+}
+
+/// 記録の鍵のうち、`path` と同じ場所を指すもの (home を別の綴りで書いた記録も引く)。
+fn record_key(records: &Records, path: &Path) -> Option<String> {
+    let want = path_parts(path);
+    records
+        .keys()
+        .into_iter()
+        .find(|k| path_parts(Path::new(k)) == want)
+}
+
+/// layout の記録を今の綴りの鍵で書く (別の綴りの鍵は外す)。
+fn set_record(w: &mut Linker, found: Option<&str>, key_now: &str, sha: &str) {
+    if let Some(old) = found
+        && old != key_now
+    {
+        w.records.remove(old);
+    }
+    w.records.set(key_now, sha);
+}
+
 /// layout `pjp-main` を揃え、その行を返す。`mod_ok` は mod を置けたか (置けなければ layout を作らない)。
 fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outcome {
     let layouts = home.join("layouts");
@@ -236,16 +283,6 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
                 );
             }
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return say_out(
-                ctx,
-                Kind::Manual,
-                format!(
-                    "同梱の layout {BASE} が無い ({}。herdr-app をまだ起こしていない) → herdr-app を一度起こしてから dotfiles apply --steps herdr-app-pjp-spaces",
-                    base_path.display()
-                ),
-            );
-        }
         Err(e) => {
             return say_out(
                 ctx,
@@ -268,7 +305,10 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
         );
     }
     match std::fs::read(&dest) {
-        Ok(bytes) => update_layout(ctx, w, home, &dest, &label, wanted, &bytes),
+        Ok(bytes) => match update_layout(ctx, w, &dest, &label, wanted, &bytes) {
+            (o, _) if o.kind == Kind::Failed => o,
+            (o, wrote) => annotate(home, o, wrote),
+        },
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             create_layout(ctx, w, home, &dest, &label, wanted, mod_ok)
         }
@@ -276,8 +316,8 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
     }
 }
 
-/// layout が無いとき (初めてか --force。前に作って外したものは run が先に止める): main を clone して表示を替え、spaces を指す block を
-/// pjp-spaces に替えて書く。
+/// layout が無いとき (初めて。前に作って外したものは run が先に止める): main を clone して表示を替え、spaces を指す block を pjp-spaces に
+/// 替えて書く。
 fn create_layout(
     ctx: &mut Ctx,
     w: &mut Linker,
@@ -288,7 +328,6 @@ fn create_layout(
     mod_ok: bool,
 ) -> Outcome {
     let mode = w.mode;
-    let key = dest.to_string_lossy().into_owned();
     match shown_layout(home) {
         Ok(name) if name == BASE => {}
         Ok(name) => {
@@ -397,8 +436,13 @@ fn create_layout(
             ),
         );
     }
-    w.records
-        .set(&key, &fsutil::sha256_bytes(desired.as_bytes()));
+    let found = record_key(&w.records, dest);
+    set_record(
+        w,
+        found.as_deref(),
+        &dest.to_string_lossy(),
+        &fsutil::sha256_bytes(desired.as_bytes()),
+    );
     ctx.say(format!(
         "作りました: {label} (表示を {LAYOUT} に替えた。戻すなら ctrl-shift-l か herdr-app do layout.switch --name {BASE})"
     ));
@@ -408,21 +452,25 @@ fn create_layout(
     )
 }
 
-/// layout があるとき: 今の main に同じ差し替えをした形 (cloned_from は今のファイルのまま) にそろえる。runner が書いたまま (記録どおり) なら
-/// 書き直し、記録の無い clone の写し (差し替える前・後) は引き取り、ほかは衝突 (`--force` で上書き)。
+/// layout があるとき: 今の main に同じ差し替えをした形 (cloned_from は今のファイルのまま) にそろえ、行と、書いたかを返す。runner が書いたまま
+/// (記録どおり) なら書き直し、spaces を pjp-spaces に替えると今の形になるもの (clone の写し・保存し直したもの) は記録によらず引き取り、
+/// ほかは衝突 (`--force` で上書き)。
 fn update_layout(
     ctx: &mut Ctx,
     w: &mut Linker,
-    home: &Path,
     dest: &Path,
     label: &str,
     wanted: OValue,
     bytes: &[u8],
-) -> Outcome {
+) -> (Outcome, bool) {
     let mode = w.mode;
-    let key = dest.to_string_lossy().into_owned();
+    let key_now = dest.to_string_lossy().into_owned();
+    let found = record_key(&w.records, dest);
     let have = fsutil::sha256_bytes(bytes);
-    let recorded = w.records.get(&key).map(str::to_string);
+    let recorded = found
+        .as_deref()
+        .and_then(|k| w.records.get(k))
+        .map(str::to_string);
     let current = OValue::parse(&String::from_utf8_lossy(bytes)).ok();
     let desired_value = match &current {
         Some(c) => with_cloned_from(wanted, c),
@@ -431,16 +479,17 @@ fn update_layout(
     let desired = desired_value.to_pretty();
     let want = fsutil::sha256_bytes(desired.as_bytes());
     if have == want {
-        if mode.writes() && recorded.as_deref() != Some(want.as_str()) {
-            w.records.set(&key, &want);
+        if mode.writes()
+            && (recorded.as_deref() != Some(want.as_str())
+                || found.as_deref() != Some(key_now.as_str()))
+        {
+            set_record(w, found.as_deref(), &key_now, &want);
         }
-        return with_shown(
-            home,
-            Outcome::new(
-                Kind::Ok,
-                format!("layout {LAYOUT} は今の {BASE} と同じ形 ({SHIPPED} → {MOD})"),
-            ),
+        let o = Outcome::new(
+            Kind::Ok,
+            format!("layout {LAYOUT} は今の {BASE} と同じ形 ({SHIPPED} → {MOD})"),
         );
+        return (o, false);
     }
     let reason = match &current {
         // runner が書いたまま: main (か差し替え方) が変わった
@@ -448,16 +497,14 @@ fn update_layout(
             "同梱の {BASE} から作り直す。{}",
             changed_nodes(c, &desired_value)
         )),
-        // 記録の無い clone の写し (指揮役が手で clone した・clone の後で書けなかった)
-        Some(c) if recorded.is_none() && same(&pointed(c), &desired_value) => {
-            Some(if same(c, &desired_value) {
-                "記録の無い同じ形を引き取り、書き方をそろえる".to_string()
-            } else {
-                format!(
-                    "記録の無い {BASE} の写しを引き取り、{SHIPPED} を指す block を {MOD} に替える"
-                )
-            })
-        }
+        // 差し替えると今の形になる: 人が clone し直した (逃げ道のキーの後など)・clone の後で書けなかった・保存し直した
+        Some(c) if same(&pointed(c), &desired_value) => Some(if same(c, &desired_value) {
+            "中身は同じで書き方だけが違う (保存し直された) ので、runner の形に書き直す".to_string()
+        } else {
+            format!(
+                "{BASE} の写し (layout.clone) を引き取り、{SHIPPED} を指す block を {MOD} に替える"
+            )
+        }),
         _ if mode.force() => Some("--force で上書き (Windows 側の中身は残らない)".to_string()),
         _ => None,
     };
@@ -467,51 +514,85 @@ fn update_layout(
         } else {
             "置いた記録が無い"
         };
-        return say_out(
+        let o = say_out(
             ctx,
             Kind::Manual,
             format!(
                 "{label} の中身が違う ({why}) → 残すなら別の名前の layout に写して使い (herdr-app do layout.clone --name {LAYOUT} --as <名前>)、{BASE} から作り直すなら dotfiles apply --steps herdr-app-pjp-spaces --force"
             ),
         );
+        return (o, false);
     };
     match mode {
         Mode::Check => {
             ctx.say(format!("上書きする (apply で): {label} ({reason})"));
-            with_shown(
-                home,
-                Outcome::new(Kind::Fix, format!("layout {LAYOUT} を書き直す ({reason})")),
-            )
+            let o = Outcome::new(Kind::Fix, format!("layout {LAYOUT} を書き直す ({reason})"));
+            (o, false)
         }
         Mode::DryRun { .. } => {
             ctx.say(format!("[dry-run] 上書きする: {label} ({reason})"));
-            Outcome::new(
+            let o = Outcome::new(
                 Kind::Fix,
                 format!("[dry-run] layout {LAYOUT} を書き直す ({reason})"),
-            )
+            );
+            (o, false)
         }
         Mode::Apply { .. } => match fsutil::write_atomic(dest, desired.as_bytes()) {
             Ok(()) => {
-                w.records.set(&key, &want);
+                set_record(w, found.as_deref(), &key_now, &want);
                 ctx.say(format!("上書きしました: {label} ({reason})"));
-                with_shown(
-                    home,
-                    Outcome::new(Kind::Ok, format!("layout {LAYOUT} を書き直した ({reason})")),
-                )
+                let o = Outcome::new(Kind::Ok, format!("layout {LAYOUT} を書き直した ({reason})"));
+                (o, true)
             }
-            Err(e) => say_out(ctx, Kind::Failed, format!("{label} を書けない ({e})")),
+            Err(e) => (
+                say_out(ctx, Kind::Failed, format!("{label} を書けない ({e})")),
+                false,
+            ),
         },
     }
 }
 
-/// 表示している layout が pjp-main でなければ、替え方を ※ で添える (runner は作るとき (clone) のほかは表示を替えない)。
-fn with_shown(home: &Path, o: Outcome) -> Outcome {
-    match shown_layout(home) {
-        Ok(name) if name != LAYOUT => o.note(format!(
+/// layout の行に ※ を添える: 表示が pjp-main でなければ替え方 (runner は作るとき (clone) のほかは表示を替えない)。layout を書かなかった実行で
+/// は、herdr-app が layout を読めなかった理由のファイルがあれば、その 1 行目 (書いた実行では前の中身のものなので見ない)。
+fn annotate(home: &Path, mut o: Outcome, wrote: bool) -> Outcome {
+    let shown = shown_layout(home).ok();
+    if let Some(name) = shown.as_deref()
+        && name != LAYOUT
+    {
+        o = o.note(format!(
             "表示している layout は {name}。{MOD} の印を出すなら ctrl-shift-l か herdr-app do layout.switch --name {LAYOUT}"
-        )),
-        _ => o,
+        ));
     }
+    if !wrote {
+        for path in error_files(home, shown.as_deref() == Some(LAYOUT)) {
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let first: String = text
+                .lines()
+                .map(str::trim)
+                .find(|l| !l.is_empty())
+                .unwrap_or("")
+                .chars()
+                .take(200)
+                .collect();
+            o = o.note(format!(
+                "herdr-app が layout を読めなかった ({}: {first}) → herdr-app status を見る (herdr-app は前に読めた形のまま動く)",
+                path.display()
+            ));
+        }
+    }
+    o
+}
+
+/// herdr-app が layout を読めなかったときに理由を書くファイル (AGENTS.md の「`<name>.error` (`layout.error`, …)」)。置き場所は確かめていない
+/// ので、layout の隣の `pjp-main.error` と、pjp-main を表示しているときは home の `layout.error` を見る。
+fn error_files(home: &Path, shown_is_ours: bool) -> Vec<PathBuf> {
+    let mut files = vec![home.join("layouts").join(format!("{LAYOUT}.error"))];
+    if shown_is_ours {
+        files.push(home.join("layout.error"));
+    }
+    files
 }
 
 /// 表示している layout の名前 (herdr-app の home の shared.json の `layout`。ファイルかキーが無ければ既定の main)。
@@ -681,9 +762,13 @@ mod tests {
     //! - 表示が main でなければ layout を作らない (·)。herdr-app が無い・同梱の main が無い・main に spaces の block が無いときは ⚠ で、
     //!   herdr-app を打たない。clone が落ちたら ⚠ で、記録を作らない (次の apply で作り直せる)
     //! - main が変わったら check が変わった node を出し、apply が書き直す (clone し直さない・cloned_from は残す)
-    //! - 手で直した layout は衝突で残し、--force で上書きする。記録の無い main の写しは引き取って差し替える
-    //! - 作った layout が無くなったら (逃げ道のキー・手で外した) mod も layout も置かない (·)。--force なら置き直して clone し直す
-    //! - 表示が pjp-main でなければ ※ で替え方を添える。元から消えたファイルは記録どおりなら消す
+    //! - 手で直した layout は衝突で残し、--force で上書きする。main の写し (人が clone した・し直した) と、書き方だけ違うもの (CRLF で保存し
+    //!   直した) は、記録によらず引き取って差し替える
+    //! - 作った layout が無くなったら (逃げ道のキー・手で外した) mod も layout も置かない (·)。--force でも戻さず、herdr-app を打たない。人が
+    //!   clone し直すか、退けたファイルの名前を戻せば揃う。同梱の main が無ければ mod も置かない
+    //! - 表示が pjp-main でなければ ※ で替え方を添える。書かなかった実行では、herdr-app が layout を読めなかった理由のファイルも ※ で添える。
+    //!   元から消えたファイルは記録どおりなら消す。mod.json を先に置く
+    //! - layout の記録は home の綴りの違いを見ずに引く (作り直さない・外したままも保つ。記録の鍵は今の綴りに寄る)
     //! - 差し替え (point_to) と node の違い (changed_nodes)・数を値で比べる (same)
     //! - dotfiles の repo に pjp-spaces を置いていない (claude-skills のもの。herdr-app-mods と二重に配らない)
 
@@ -692,7 +777,6 @@ mod tests {
     use crate::manifest::Roots;
     use crate::process::{Exit, RunResult};
     use crate::testutil::{FakeSys, TempDir};
-    use std::path::PathBuf;
 
     const MAIN_JS: &str = "// pjp-spaces\n";
     const MOD_JSON: &str = "{ \"place\": \"none\", \"title\": \"Spaces\" }\n";
@@ -834,6 +918,14 @@ mod tests {
         }
     }
 
+    /// 人が打つ `herdr-app do layout.clone` (偽の口に直に渡す)
+    fn clone_spec() -> CommandSpec {
+        CommandSpec::new("herdr-app")
+            .arg("do")
+            .arg("layout.clone")
+            .arg("{\"name\":\"main\",\"as\":\"pjp-main\"}")
+    }
+
     fn floats(v: &mut OValue) {
         match v {
             OValue::Number(n) => {
@@ -894,6 +986,12 @@ mod tests {
         assert!(
             out.contains("表示する layout を main から pjp-main に替えます"),
             "{out}"
+        );
+        let at = |s: &str| out.find(s).unwrap_or_else(|| panic!("{s} が無い\n{out}"));
+        assert!(
+            at("コピーしました: mods/pjp-spaces/mod.json")
+                < at("コピーしました: mods/pjp-spaces/main.js"),
+            "mod.json を先に置く"
         );
         assert_eq!(e.read("mods/pjp-spaces/main.js"), MAIN_JS);
         assert_eq!(e.read("mods/pjp-spaces/mod.json"), MOD_JSON);
@@ -1015,12 +1113,19 @@ mod tests {
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
         assert!(o[1].text.contains("spaces を指す block"), "{o:?}");
         assert!(calls.is_empty());
-        // 同梱の main が無い (herdr-app をまだ起こしていない)
+        // 同梱の main が無い (herdr-app をまだ起こしていない): mod も置かない
+        let e = Env::new();
         std::fs::remove_file(e.home("layouts/main.json")).unwrap();
-        let (o, _, calls) = e.run(Mode::Check);
-        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
-        assert!(o[1].text.contains("同梱の layout main が無い"), "{o:?}");
-        assert!(calls.is_empty());
+        for mode in [Mode::Check, APPLY] {
+            let (o, out, calls) = e.run(mode);
+            assert_eq!(kinds(&o), vec![Kind::Manual], "{mode:?} {o:?}\n{out}");
+            assert!(o[0].text.contains("同梱の layout main が無い"), "{o:?}");
+            assert!(calls.is_empty());
+        }
+        assert!(
+            !e.home("mods").exists(),
+            "herdr-app の home に mod を作らない"
+        );
         assert!(!e.home("layouts/pjp-main.json").exists());
     }
 
@@ -1103,20 +1208,14 @@ mod tests {
     }
 
     #[test]
-    fn adopts_an_unrecorded_clone_of_main() {
+    fn adopts_clones_and_resaves_of_main() {
         let e = Env::new();
         // 指揮役が手で layout.clone した (spaces のまま。記録が無い)
-        fake_clone(
-            &e.home(""),
-            &CommandSpec::new("herdr-app")
-                .arg("do")
-                .arg("layout.clone")
-                .arg("{\"name\":\"main\",\"as\":\"pjp-main\"}"),
-        );
+        fake_clone(&e.home(""), &clone_spec());
         let (o, out, calls) = e.run(Mode::Check);
         assert_eq!(kinds(&o), vec![Kind::Missing, Kind::Fix], "{o:?}\n{out}");
         assert!(
-            o[1].text.contains("記録の無い main の写しを引き取り"),
+            o[1].text.contains("main の写し (layout.clone) を引き取り"),
             "{o:?}"
         );
         assert!(calls.is_empty());
@@ -1125,34 +1224,161 @@ mod tests {
         assert!(calls.is_empty());
         assert_eq!(mod_of(&e.layout(), "spaces").as_deref(), Some("pjp-spaces"));
         assert!(e.record().contains_key(&e.layout_key()));
+        // 記録があっても、中身が同じで書き方だけ違う (CRLF で保存し直した) なら書き直す
+        let text = e.read("layouts/pjp-main.json");
+        std::fs::write(e.home("layouts/pjp-main.json"), text.replace('\n', "\r\n")).unwrap();
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(o[1].text.contains("書き方だけが違う"), "{o:?}");
+        assert_eq!(e.read("layouts/pjp-main.json"), text);
+        // 記録があっても、人が clone し直した (spaces のまま) なら引き取る
+        fake_clone(&e.home(""), &clone_spec());
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(o[1].text.contains("引き取り"), "{o:?}");
+        assert!(calls.is_empty());
+        assert_eq!(e.read("layouts/pjp-main.json"), text);
     }
 
     #[test]
-    fn removed_layout_stands_down_until_forced() {
+    fn removed_layout_stays_removed_even_with_force() {
         let e = Env::new();
         e.run(APPLY);
-        // 逃げ道のキー: 表示中の layout を退けて main に戻す。続けて mod も手で外した (README の切り戻し)
-        std::fs::rename(
-            e.home("layouts/pjp-main.json"),
-            e.home("layouts/pjp-main.json.reset-20261117T2300"),
-        )
-        .unwrap();
+        // 切り戻し: 表示を main に戻し、配ったファイルを外す
         e.show("main");
+        std::fs::remove_file(e.home("layouts/pjp-main.json")).unwrap();
         std::fs::remove_dir_all(e.home("mods/pjp-spaces")).unwrap();
-        for mode in [Mode::Check, APPLY] {
+        for mode in [Mode::Check, APPLY, FORCE] {
             let (o, out, calls) = e.run(mode);
             assert_eq!(kinds(&o), vec![Kind::Info], "{mode:?} {o:?}\n{out}");
-            assert!(o[0].text.contains("mod も layout も置かない"), "{o:?}");
-            assert!(calls.is_empty(), "{calls:?}");
+            assert!(
+                o[0].text.contains("mod も layout も置かない")
+                    && o[0].text.contains("--force でも戻さない"),
+                "{o:?}"
+            );
+            assert!(calls.is_empty(), "{mode:?} は表示を替えない: {calls:?}");
         }
         assert!(!e.home("layouts/pjp-main.json").exists());
         assert!(!e.home("mods/pjp-spaces").exists(), "外したままにする");
-        // --force で mod を置き直し、clone し直す
-        let (o, out, calls) = e.run(FORCE);
+        // 戻す: 人が main を clone し直し (表示が替わる)、apply が mod を置いて差し替える (runner は clone を打たない)
+        fake_clone(&e.home(""), &clone_spec());
+        let (o, out, calls) = e.run(APPLY);
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
         assert!(o[0].text.contains("追加 2"), "{o:?}");
-        assert_eq!(calls, vec![CLONE_ARGS.to_string()]);
+        assert!(
+            o[1].text.contains("main の写し (layout.clone) を引き取り"),
+            "{o:?}"
+        );
+        assert!(calls.is_empty(), "{calls:?}");
         assert_eq!(mod_of(&e.layout(), "spaces").as_deref(), Some("pjp-spaces"));
+    }
+
+    #[test]
+    fn escape_hatch_file_can_be_renamed_back() {
+        let e = Env::new();
+        e.run(APPLY);
+        // 逃げ道のキー: 表示中の layout を退けて main に戻す
+        let reset = e.home("layouts/pjp-main.json.reset-20261117T2300");
+        std::fs::rename(e.home("layouts/pjp-main.json"), &reset).unwrap();
+        e.show("main");
+        let (o, _, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Info], "{o:?}");
+        assert!(calls.is_empty());
+        // 名前を戻せば、記録どおりの中身として揃う (表示は替えない。※ で替え方を添える)
+        std::fs::rename(&reset, e.home("layouts/pjp-main.json")).unwrap();
+        let (o, out, calls) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(calls.is_empty());
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.starts_with("表示している layout は main。")),
+            "{o:?}"
+        );
+    }
+
+    /// 同じ home を別の綴りで書いても (HERDR_APP_HOME を / で書いた Windows など)、layout の記録を引く (作り直さず、外したままも保つ)
+    #[test]
+    fn layout_record_follows_the_home_spelling() {
+        let e = Env::new();
+        let plain = e.home("").to_string_lossy().into_owned();
+        let other = if cfg!(windows) {
+            plain.replace('\\', "/")
+        } else {
+            plain.replacen("/home/", "//home/", 1)
+        };
+        assert_ne!(plain, other);
+        let sys = |h: &str| {
+            let home = e.home("");
+            FakeSys::new(move |c| fake_clone(&home, c))
+                .with_program("herdr-app", "herdr-app")
+                .with_env("HERDR_APP_HOME", h)
+        };
+        let (o, out) = e.run_with(APPLY, &sys(&plain));
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        let s = sys(&other);
+        let (o, out) = e.run_with(APPLY, &s);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(s.call_args().is_empty(), "作り直さない");
+        let rec = e.record();
+        let layouts: Vec<&String> = rec
+            .keys()
+            .filter(|k| k.ends_with("pjp-main.json"))
+            .collect();
+        assert_eq!(layouts.len(), 1, "{rec:?}");
+        assert!(
+            layouts[0].starts_with(&other),
+            "記録の鍵は今の綴りに寄る: {rec:?}"
+        );
+        // 外した後も、別の綴りで外したままと分かる
+        std::fs::remove_file(e.home("layouts/pjp-main.json")).unwrap();
+        e.show("main");
+        let s = sys(&plain);
+        let (o, out) = e.run_with(APPLY, &s);
+        assert_eq!(kinds(&o), vec![Kind::Info], "{o:?}\n{out}");
+        assert!(s.call_args().is_empty());
+    }
+
+    #[test]
+    fn notes_layout_errors_only_when_not_written() {
+        let e = Env::new();
+        e.run(APPLY);
+        e.t.write(
+            "home/.config/herdr-app/layouts/pjp-main.error",
+            "\nunknown mod: pjp-spaces\n",
+        );
+        let (o, out, _) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("pjp-main.error: unknown mod: pjp-spaces")),
+            "{o:?}"
+        );
+        // 書いた実行では見ない (前の中身のもの)
+        e.t.write(
+            "home/.config/herdr-app/layouts/main.json",
+            &BASE_JSON.replace("\"px\": 268", "\"px\": 300"),
+        );
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(o[1].notes.is_empty(), "{o:?}");
+        // pjp-main を表示している間は、home の layout.error も見る
+        std::fs::remove_file(e.home("layouts/pjp-main.error")).unwrap();
+        e.t.write("home/.config/herdr-app/layout.error", "bad node\n");
+        let (o, _, _) = e.run(Mode::Check);
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("layout.error: bad node")),
+            "{o:?}"
+        );
+        e.show("win98");
+        let (o, _, _) = e.run(Mode::Check);
+        assert!(
+            !o[1].notes.iter().any(|n| n.contains("layout.error")),
+            "表示が pjp-main でなければ見ない: {o:?}"
+        );
     }
 
     #[test]

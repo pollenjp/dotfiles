@@ -96,7 +96,8 @@ impl Step for HerdrAppMods {
 pub type Keep = BTreeMap<Vec<String>, String>;
 
 /// mod 1 つ (`src` は元の mod のフォルダ) のファイルを `mods_dir\<名前>\` の同じパスへ記録つきのコピーで置き、置くファイルを `keep` に足す。
-/// 置き先の mod のフォルダがリンク (手でつないだ場所) なら、その mod には触らない。herdr-app-pjp-spaces (claude-skills の mod) も使う。
+/// 置き先の mod のフォルダがリンク (手でつないだ場所) なら、その mod には触らない。mod.json を先に置く (herdr-app は初めて見た mod のフォルダを、
+/// mod.json の place に従って表示中の layout へ差し込むので、place より先に main.js を見せない)。herdr-app-pjp-spaces (claude-skills の mod) も使う。
 pub fn copy_mod(
     ctx: &mut Ctx,
     w: &mut Linker,
@@ -119,7 +120,9 @@ pub fn copy_mod(
         );
         return;
     }
-    for rel in &m.files {
+    let mut files: Vec<&String> = m.files.iter().collect();
+    files.sort_by_key(|rel| rel.as_str() != "mod.json");
+    for rel in files {
         let label = format!("mods/{}/{rel}", m.name);
         let dest = join_segments(&dest_mod, rel);
         keep.insert(

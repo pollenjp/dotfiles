@@ -662,14 +662,18 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
   sidebar・status」)。`dotfiles apply` が今の main に同じ差し替えをした形へ書き直す (clone し直さない。`cloned_from` と clicks は残る)。main が変えた
   欄は、herdr-app の決まり (ファイルを直した欄はファイルが clicks に勝つ) で新しい値になる
 - pjp-main.json を手で直すと、次の apply は書き直さずに ⚠ で知らせる。残すなら別の名前の layout に写して使い
-  (`herdr-app do layout.clone --name pjp-main --as <名前>`)、main から作り直すなら `dotfiles apply --steps herdr-app-pjp-spaces --force`
+  (`herdr-app do layout.clone --name pjp-main --as <名前>`)、main から作り直すなら `dotfiles apply --steps herdr-app-pjp-spaces --force`。spaces を
+  pjp-spaces に替えると今の形になるもの (人が `layout.clone` で main を写し直した・中身は同じで保存し直した) は、⚠ にせずに引き取って書き直す
+- 書かなかった実行で、herdr-app が layout を読めなかった理由のファイル (`layouts\pjp-main.error`、pjp-main を表示しているときは home の `layout.error`)
+  があれば、pjp-main の行に ※ でその 1 行目を添える。`herdr-app status` でも見られる
 - 同梱の main に spaces を指す block が無くなったら (herdr-app の形が変わった)、pjp-main は前のままにして ⚠ で知らせる。claude-skills の pjp-spaces と
   合わせて差し替え方を決め直す
 - 同梱の mod `spaces` が変わったとき (herdr-app を上げた) に pjp-spaces へ差を取り込むのは claude-skills (pjp-spaces の頭に、写した元の herdr-app の版が
   ある)。取り込んだ版は、clone を pull して `dotfiles apply` で届く
 - claude-skills の clone に pjp-spaces がまだ無い (claude-skills の PR の merge 前) うちは何もしない (· で知らせる)。置いた後で clone から無くなったら、
   置いたものに触らずに ⚠ で知らせる (layout が mod を指しているので、片付けると sidebar が壊れる)
-- mod.json の `place` が `none` でない mod は置かない (⚠。herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)
+- mod.json の `place` が `none` でない mod は置かない (⚠。herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。mod.json は先に置く。
+  同梱の main が無い (herdr-app をまだ起こしていない) ときは mod も置かずに ⚠ (一度起こしてから apply)
 - 置き方の細部 (herdr-app が mod のフォルダに書く `gpui-kit.d.ts`・`jsconfig.json` は配らない・置き先の mod のフォルダがリンクなら触らない・元から
   消えたファイルは記録どおりなら消す) は [herdr-app の mod](#herdr-app-の-mod) と同じ。置いた後は `herdr-app status` で errors が無いか、mod は
   `herdr-app check <mod のフォルダ>` ([herdr-app の mod](#herdr-app-の-mod) の見方) で確かめる
@@ -677,7 +681,7 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
 切り戻し (PowerShell):
 
 ```powershell
-# 1. 表示を同梱の main に戻す (ctrl-shift-l で巡っても、逃げ道のキー ctrl-alt-shift-escape でもよい)。runner は自分から pjp-main へ替え直さない
+# 1. 表示を同梱の main に戻す (ctrl-shift-l で巡ってもよい)。runner は自分から pjp-main へ替え直さない
 herdr-app do layout.switch --name main
 # 2. 配ったファイルも外すなら (1 の後で)。runner は記録から「作った pjp-main が無い」と分かり、次の apply から mod も layout も置かない
 $h = Join-Path $HOME '.config\herdr-app'   # HERDR_APP_HOME を置いていれば、その値
@@ -687,10 +691,13 @@ dotfiles check --steps herdr-app-pjp-spaces             # · で「mod も layou
 ```
 
 - 1 だけなら pjp-main と mod は残り、apply は main が変わるたびに pjp-main を作り直す (表示は替えない)。`ctrl-shift-l` でいつでも pjp-main に戻れる
-- 2 の後に戻すときは `dotfiles apply --steps herdr-app-pjp-spaces --force` (mod を置き直し、main を clone し直して表示を pjp-main に替える)。逃げ道のキーで
-  pjp-main が `pjp-main.json.reset-<時刻>` へ退けられたときも、runner は 2 と同じく外したものとして扱う (戻すのは同じく `--force`)
-- `layouts\.state\pjp-main.json` (pjp-main の clicks) は herdr-app のファイルなので消さない (herdr-app の決まり)。clone し直すと main の clicks で写し直される
-- 記録 (`%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`) を消すと、次の apply は初めてとして置き直す (表示も替わる)
+- 2 の後は、`--force` を付けても置き直さない (ほかの手順の衝突を解く `dotfiles apply --force` で、表示を替えない)。戻すときは、人が
+  `herdr-app do layout.clone --name main --as pjp-main` で main を写し直し (表示が pjp-main に替わる)、`dotfiles apply --steps herdr-app-pjp-spaces` で
+  mod を置いて spaces を差し替える
+- 逃げ道のキー (`ctrl-alt-shift-escape`) は、表示中の layout (pjp-main) と `keys.json` を `*.reset-<時刻>` へ退けて main に戻す。runner は 2 と同じく
+  外したものとして扱う。戻すときは上の写し直しか、`layouts\pjp-main.json.reset-<時刻>` の名前を `pjp-main.json` に戻す (中身が記録どおりなら揃う)。
+  dotfiles のキーは [herdr-app のキー](#herdr-app-のキー) のとおり `dotfiles apply --steps herdr-app-keys` で足し直す
+- `layouts\.state\pjp-main.json` (pjp-main の clicks) は herdr-app のファイルなので消さない (herdr-app の決まり)。写し直すと main の clicks で写し直される
 
 ## 配る
 
