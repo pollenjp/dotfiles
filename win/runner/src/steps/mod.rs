@@ -17,6 +17,7 @@ pub mod files;
 pub mod generated;
 pub mod git_config;
 pub mod hc_hub;
+pub mod herdr_app_keys;
 pub mod herdr_app_mods;
 pub mod linker;
 pub mod pending;
@@ -170,6 +171,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
         // docs/adr/068_win_herdr_app_mods_*)
         Box::new(herdr_app_mods::HerdrAppMods),
+        // dotfiles の herdr-app のキーを herdr-app の home の keys.json に書き足す (Windows にしか無い手順。dotfiles-private の
+        // docs/adr/070_win_herdr_app_keys_*)
+        Box::new(herdr_app_keys::HerdrAppKeys),
         Box::new(files::Files),
     ];
     for spec in tool_skill::SPECS {
@@ -240,6 +244,7 @@ mod tests {
                 (98, "hc-skill"),
                 (98, "herdr-app-mods"),
                 (98, "herdr-app-skill"),
+                (99, "herdr-app-keys"),
                 (99, "international"),
                 (99, "port-forward"),
                 (99, "terminal"),
@@ -275,8 +280,8 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod だけ (WSL から写した手順・まだ無い
-    /// 手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod とキーだけ (WSL から写した手順・
+    /// まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -302,6 +307,7 @@ mod tests {
                 "hc-skill",
                 "herdr-app-mods",
                 "herdr-app-skill",
+                "herdr-app-keys",
             ]
         );
         for s in all() {
