@@ -1,8 +1,8 @@
-//! ファイルの小さな道具 (sha256・置き先と同じディレクトリの一時ファイルから rename で書く)。
+//! ファイルの小さな道具 (sha256・置き先と同じディレクトリの一時ファイルから rename で書く・書く前の中身の写し)。
 
 use sha2::{Digest, Sha256};
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -53,6 +53,36 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 pub fn read_then_write(src: &Path, dst: &Path) -> std::io::Result<()> {
     let bytes = std::fs::read(src)?;
     write_atomic(dst, &bytes)
+}
+
+/// 書く前のファイル `path` を `dir\<prefix>-<秒>-<ナノ秒>.json` に写し、写した先を返す (同じ時刻の写しは上書きせず `-<n>` を足す)。`dir` の
+/// `<prefix>-*.json` のうち、残すのは、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と、新しい方から `keep` 個。
+pub fn backup_copy(path: &Path, dir: &Path, prefix: &str, keep: usize) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(dir)?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let stamp = format!("{:012}-{:09}", now.as_secs(), now.subsec_nanos());
+    let mut name = format!("{prefix}-{stamp}.json");
+    let mut n = 0;
+    while dir.join(&name).exists() {
+        n += 1;
+        name = format!("{prefix}-{stamp}-{n}.json");
+    }
+    std::fs::copy(path, dir.join(&name))?;
+    let head = format!("{prefix}-");
+    let mut olds: Vec<String> = std::fs::read_dir(dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.starts_with(&head) && n.ends_with(".json"))
+        .collect();
+    olds.sort();
+    if olds.len() > keep + 1 {
+        for old in &olds[1..olds.len() - keep] {
+            let _ = std::fs::remove_file(dir.join(old));
+        }
+    }
+    Ok(dir.join(name))
 }
 
 #[cfg(test)]

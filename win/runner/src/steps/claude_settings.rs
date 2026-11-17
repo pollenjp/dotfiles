@@ -92,41 +92,8 @@ pub fn store(ctx: &mut Ctx, path: &Path, value: &OValue, existed: bool) -> Resul
 /// 手順が初めて書く前の中身。手順が 5 つあり、新しい方からの 10 個だけでは数回の apply で消える) と、新しい方から 10 個。
 pub fn backup(ctx: &mut Ctx, path: &Path) -> std::io::Result<()> {
     let dir = ctx.state_dir.join("claude-settings").join("backup");
-    std::fs::create_dir_all(&dir)?;
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let mut name = format!(
-        "settings-{:012}-{:09}.json",
-        now.as_secs(),
-        now.subsec_nanos()
-    );
-    // 同じ時刻の写しを上書きしない
-    let mut n = 0;
-    while dir.join(&name).exists() {
-        n += 1;
-        name = format!(
-            "settings-{:012}-{:09}-{n}.json",
-            now.as_secs(),
-            now.subsec_nanos()
-        );
-    }
-    std::fs::copy(path, dir.join(&name))?;
-    let mut olds: Vec<String> = std::fs::read_dir(&dir)?
-        .filter_map(|e| e.ok())
-        .map(|e| e.file_name().to_string_lossy().into_owned())
-        .filter(|n| n.starts_with("settings-") && n.ends_with(".json"))
-        .collect();
-    olds.sort();
-    if olds.len() > BACKUPS + 1 {
-        for old in &olds[1..olds.len() - BACKUPS] {
-            let _ = std::fs::remove_file(dir.join(old));
-        }
-    }
-    ctx.say(format!(
-        "前の中身を写しました: {}",
-        dir.join(&name).display()
-    ));
+    let copied = fsutil::backup_copy(path, &dir, "settings", BACKUPS)?;
+    ctx.say(format!("前の中身を写しました: {}", copied.display()));
     Ok(())
 }
 
