@@ -14,6 +14,7 @@
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は ③)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は ②)
+#   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定 false。どのグループでも)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
@@ -935,6 +936,30 @@ in
         `windows-files.json` には入れない)、`~/dotfiles/setup --update` は false なら bootstrap-windows-herdr.sh・
         bootstrap-windows-herdr-app.sh を飛ばす (script の冒頭の `# tool: windowsHerdr`)。bootstrap-windows-pin-updates.sh も、false なら
         herdr・herdr-app・herdr-core の新しい版を確かめない。group.json が無い前の世代では、今までどおり入れる。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.tailscale.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Windows に Tailscale (winget の `Tailscale.Tailscale`。machine スコープの MSI) を、dotfiles が固定した版で入れるマシンか。
+        効くのは `windowsFiles.enable = true` のマシンだけ (配らないマシンでは true でも何もしない)。tailnet にログインして使う
+        VPN の道具で、会社の PC などに勝手に入れないよう、どのグループでも既定は false (③ の段に置くが、段からは決めない。
+        入れるホストが true を書く)。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsTailscale` に落ち
+        (home/modules/group.nix。`windows-files.json` には入れない)、`~/dotfiles/setup --update` は false なら
+        bootstrap-windows-tailscale.sh を飛ばす (script の冒頭の `# tool: windowsTailscale`。group.json やその欄が無い前の世代でも、
+        script が入れないマシンとして飛ばす)。true のマシンでは、配った `Install-Tailscale.ps1` (win/tailscale/) が、入っていなければ
+        固定した版を入れて winget の pin を足す (UAC の確認が出る)。入っていれば上げない (Tailscale が自分で上がる。入っている版の方が
+        新しくても下げない)。版は ps1 の `-Version` の既定値で固定する (win/README.md の「Tailscale」)。bootstrap-windows-pin-updates.sh も、
+        true のときだけ Tailscale の新しい版を確かめる。tailnet へのログインには触らない (入れた後に手でする)。
+
+        Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsTailscale = true` を書く。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
       '';

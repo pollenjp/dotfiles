@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -61,6 +61,13 @@
 #     release (直近 100 件) を見る。GitHub の最新は v の付かない版で出す
 #   - 新しい winget の版が GitHub に出て 30 日たったら exit 1 で release notes の URL を添える
 #   - GitHub にある版が winget に無いのは、30 日たつまで ※ で待ち、たったら exit 1
+#
+#   Tailscale (出た日は winget-pkgs に載った日):
+#   - Install-Tailscale.ps1 の形から読み、winget-pkgs の manifests/t/Tailscale/Tailscale を見る。GitHub の release は引かない
+#     (Tailscale は winget に載らない GitHub の release も出すので、比べない)。古い 4 つ区切りの版 (0.98.0.0 など) も版として読む
+#   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL を添える
+#   - --json --offline は、パッケージ ID Tailscale.Tailscale と出た日の取り方 winget を出す
+#   - 固定した版は X.Y.Z だけを受ける (Install-Tailscale.ps1 の読める形。4 つ区切りなら gh を呼ばずに exit 2)
 #
 #   bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
 #   - 名前ごとの param (-GitVersion・-GhVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
@@ -171,6 +178,7 @@ manifest_dir_of() {
     google-japanese-input) echo manifests/g/Google/JapaneseIME ;;
     ntn) echo manifests/n/Notion/ntn ;;
     claude-code) echo manifests/a/Anthropic/ClaudeCode ;;
+    tailscale) echo manifests/t/Tailscale/Tailscale ;;
     git) echo manifests/g/Git/Git ;;
     gh) echo manifests/g/GitHub/cli ;;
     vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
@@ -184,6 +192,7 @@ ps1_of() {
     google-japanese-input) echo Install-GoogleJapaneseInput.ps1 ;;
     ntn) echo Install-Ntn.ps1 ;;
     claude-code) echo Install-ClaudeCode.ps1 ;;
+    tailscale) echo Install-Tailscale.ps1 ;;
     git | gh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
@@ -514,6 +523,25 @@ write_claude_code_ps1() {
   } >"$1"
 }
 
+# Install-Tailscale.ps1 の形 ($packageId は関数の中)。引数は write_openssh_ps1 と同じ
+write_tailscale_ps1() {
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の Tailscale (winget の Tailscale.Tailscale) を、決めた版で入れる。\n#>\n'
+    printf '[CmdletBinding()]\nparam(\n'
+    if [[ -n $2 ]]; then
+      printf "    [string]\$Version = '%s',\n" "$2"
+    fi
+    # shellcheck disable=SC2016
+    printf '    [switch]$Check,\n    [switch]$IfMissing\n)\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Invoke-InstallTailscale {\n    param([string]$Version, [switch]$Check, [switch]$IfMissing)\n'
+    if [[ $3 != - ]]; then
+      printf "    \$packageId = '%s'\n" "$3"
+    fi
+    printf '}\n'
+  } >"$1"
+}
+
 # win/bootstrap/Install-Bootstrap.ps1 の形 (param に 4 つの版が並び、ID の変数は関数の中に 4 つ並ぶ)。$1: 書き先、
 # $2: 今の pkg の固定した版 (空ならその param の行を書かない)、$3: 今の pkg のパッケージ ID (- ならその変数の行を書かない)。
 # ほかの道具の行は本物の値で書く
@@ -561,6 +589,7 @@ new_case() {
     google-japanese-input) write_gime_ps1 "${d}/Install-GoogleJapaneseInput.ps1" "$2" "${id:-Google.JapaneseIME}" ;;
     ntn) write_ntn_ps1 "${d}/Install-Ntn.ps1" "$2" "${id:-Notion.ntn}" ;;
     claude-code) write_claude_code_ps1 "${d}/Install-ClaudeCode.ps1" "$2" "${id:-Anthropic.ClaudeCode}" ;;
+    tailscale) write_tailscale_ps1 "${d}/Install-Tailscale.ps1" "$2" "${id:-Tailscale.Tailscale}" ;;
     git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
     gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
     vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
@@ -1391,6 +1420,70 @@ else
   ng "ntn: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
 fi
 
+echo "-- tailscale"
+pkg=tailscale
+
+# 2026-11-17 の winget-pkgs の manifests/t/Tailscale/Tailscale の古い 4 つ区切りの版 (2020 年ごろ) と新しい方 (1.104.3 は無い)
+t_pin=1.104.5
+ts_winget_now=$(contents_json 0.98.0.0 0.99.0.0 1.0.4.0 1.104.1 1.104.2 1.104.4 "${t_pin}")
+ts_winget_next=$(contents_json 0.98.0.0 0.99.0.0 1.0.4.0 1.104.1 1.104.2 1.104.4 "${t_pin}" 1.104.6)
+
+# ts1. 固定した版が winget の最新: exit 0。Install-Tailscale.ps1 の形から読み、manifests/t/Tailscale/Tailscale を見る。
+#      GitHub の release は引かない (winget に載らない GitHub の release があるので比べない)。古い 4 つ区切りの版
+#      (0.98.0.0・0.99.0.0・1.0.4.0) も版として読み、「版の形でないディレクトリ」にしない
+d=$(new_case ts1 "${t_pin}" -)
+FAKE_GH_CONTENTS="${ts_winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の Tailscale (winget の Tailscale.Tailscale)' \
+  && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/t/Tailscale/Tailscale' && ! called "${d}" -F 'releases'; then
+  ok "tailscale: 固定した版が最新なら exit 0 (manifests/t/Tailscale/Tailscale を見て、GitHub の release は引かない)"
+else
+  ng "tailscale: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# ts2. 新しい版が winget-pkgs に載って 29 日: exit 0 で、版・載った日・あと 1 日を 1 行に出す
+d=$(new_case ts2 "${t_pin}" -)
+put_commits "${d}" 1.104.6 "${at29}"
+FAKE_GH_CONTENTS="${ts_winget_next}" run "${d}" 0
+if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" "1\\.104\\.6.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
+  && called "${d}" -F 'commits?path=manifests/t/Tailscale/Tailscale/1.104.6'; then
+  ok "tailscale: 新しい版が載って 29 日なら exit 0 で待ち、載った日とあと 1 日を出す"
+else
+  ng "tailscale: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
+# ts3. 新しい版が載って 31 日: exit 1 で、manifest の URL と手順の節と見送りの一覧の場所を出す
+d=$(new_case ts3 "${t_pin}" -)
+put_commits "${d}" 1.104.6 "$(ago 31)"
+FAKE_GH_CONTENTS="${ts_winget_next}" run "${d}" 0
+if [[ $(rc "${d}") == 1 ]] && seen "${d}" '⚠ 固定した版 1\.104\.5 より新しい版が winget にある: 1\.104\.6' \
+  && seen "${d}" -F 'https://github.com/microsoft/winget-pkgs/tree/master/manifests/t/Tailscale/Tailscale/1.104.6' \
+  && seen "${d}" -F 'Tailscale の新しい版が出たとき' && seen "${d}" -F 'skipped-versions.txt'; then
+  ok "tailscale: 新しい版が載って 31 日なら exit 1 で、manifest の URL と手順の節と見送りの一覧の場所を出す"
+else
+  ng "tailscale: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# ts4. --json --offline: gh を呼ばずに、パッケージ ID・固定した版・出た日の取り方 (winget)・手順の節を出す
+d=$(new_case ts4 "${t_pin}" -)
+run_args "${d}" 1 --json --offline tailscale "${d}/Install-Tailscale.ps1" "${d}/skipped-versions.txt"
+if [[ $(rc "${d}") == 0 ]] && ! gh_called "${d}" \
+  && jq -e '.name == "tailscale" and .title == "Windows の Tailscale" and .packageId == "Tailscale.Tailscale"
+    and .pinned == "1.104.5" and .datesFrom == "winget" and .readmeSection == "Tailscale の新しい版が出たとき"' "${d}/out" >/dev/null; then
+  ok "tailscale: --json --offline は gh を呼ばずに、ID・固定した版・出た日の取り方 (winget)・手順の節を出す"
+else
+  ng "tailscale: --json --offline" "rc=$(rc "${d}") $(outerr "${d}")"
+fi
+
+# ts5. 固定した版は X.Y.Z だけ (Install-Tailscale.ps1 が読む形)。winget-pkgs の古い 4 つ区切りの版を固定した版に書くと、
+#      gh を呼ばずに exit 2 (CI で通って setup で ps1 が止まる、を防ぐ)
+d=$(new_case ts5 1.0.4.0 -)
+FAKE_GH_CONTENTS="${ts_winget_now}" run "${d}" 0
+if [[ $(rc "${d}") == 2 ]] && ! gh_called "${d}" && seen "${d}" -F "固定した版が読めません" && seen "${d}" -F "'1.0.4.0'"; then
+  ok "tailscale: 固定した版が X.Y.Z でなければ (古い 4 つ区切りの版でも)、gh を呼ばずに exit 2"
+else
+  ng "tailscale: 4 つ区切りの固定した版" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+fi
+
 echo "-- claude-code"
 pkg=claude-code
 
@@ -1700,6 +1793,7 @@ for spec in \
   'google-japanese-input|win/google-japanese-input|3.34.6260.0|3.35.6300.0' \
   'ntn|win/ntn|0.23.28|0.23.29' \
   'claude-code|win/claude-code|2.1.318|2.1.321' \
+  'tailscale|win/tailscale|1.104.5|1.104.6' \
   'git|win/bootstrap|2.56.0.4|2.56.1' \
   'gh|win/bootstrap|2.103.3|2.104.0' \
   'vs-buildtools|win/bootstrap|17.14.44|17.14.45' \

@@ -161,6 +161,15 @@ let
     (tool "windowsNtn" "Windows の ntn" [ "wsl" "windowsFiles" "ntn" "enable" ] [ "personalAccounts" ] {
       requires = [ windowsFiles ];
     })
+    # tailnet にログインして使う VPN の道具。会社の PC などに勝手に入れないよう、personal でも既定で入れない (入れるホストが足す)
+    (tool "windowsTailscale" "Windows の Tailscale"
+      [ "wsl" "windowsFiles" "tailscale" "enable" ]
+      [ "personalAccounts" ]
+      {
+        derived = false;
+        requires = [ windowsFiles ];
+      }
+    )
     (tool "gitIdentity" "git の名前とメール (pollenjp・pollenjp-sub)"
       [ "git" "identity" "enable" ]
       [

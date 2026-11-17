@@ -228,6 +228,7 @@ mod tests {
                 (95, "google-ime-install"),
                 (95, "powershell-profile"),
                 (96, "openssh"),
+                (96, "tailscale"),
                 (97, "claude-code"),
                 (97, "herdr-app"),
                 (97, "herdr"),
