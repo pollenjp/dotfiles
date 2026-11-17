@@ -18,7 +18,11 @@ use crate::context::Ctx;
 use crate::ojson::OValue;
 use crate::report::Kind;
 
-/// 登録する組 (event・matcher (空なら付けない)・if (空なら付けない)・hook の名前)。Linux の bootstrap-claude-hook.sh の同じ hook の行と同じ形
+/// 登録する組 (event・matcher (空なら付けない)・if (空なら付けない)・hook の名前)。Linux の bootstrap-claude-hook.sh の同じ hook の行と同じ形。
+///
+/// Windows では PowerShell の tool が主の shell になり、Bash だけの matcher の hook は走らない (Claude Code の hooks の docs)。そこでコマンドを読む
+/// hook は PowerShell も読む: guard (Linux の matcher が Bash のもの) は matcher を `Bash|PowerShell` にし、if で絞る hook (pr-assignee-nudge) は
+/// 1 つの if が 1 つの tool しか名指せないので、PowerShell の組を別に足す (dotfiles-private の docs/adr/067_win_hook_guards_*)
 pub const REGISTRATIONS: &[(&str, &str, &str, &str)] = &[
     (
         "PreToolUse",
@@ -39,7 +43,37 @@ pub const REGISTRATIONS: &[(&str, &str, &str, &str)] = &[
         "Bash(gh pr create *)",
         "pr-assignee-nudge",
     ),
+    (
+        "PostToolUse",
+        "PowerShell",
+        "PowerShell(gh pr create *)",
+        "pr-assignee-nudge",
+    ),
+    (
+        "PostToolUseFailure",
+        "PowerShell",
+        "PowerShell(gh pr create *)",
+        "pr-assignee-nudge",
+    ),
+    ("PreToolUse", "Bash|PowerShell", "", "xref-guard"),
+    ("PreToolUse", "Bash|PowerShell", "", "gist-guard"),
+    ("PreToolUse", "mcp__.*[Gg]ist.*", "", "gist-guard"),
+    ("PreToolUse", "Bash|PowerShell", "", "install-iac-guard"),
 ];
+
+/// Linux の組の形に戻す (matcher の `Bash|PowerShell` は `Bash`。PowerShell だけの組 (if の PowerShell(…)) は None)。Linux の
+/// bootstrap-claude-hook.sh と突き合わせるため
+pub fn linux_form(matcher: &str, cond: &str) -> Option<(String, String)> {
+    if matcher == "PowerShell" {
+        return None;
+    }
+    let m = if matcher == "Bash|PowerShell" {
+        "Bash"
+    } else {
+        matcher
+    };
+    Some((m.to_string(), cond.to_string()))
+}
 
 pub struct ClaudeHook;
 
@@ -220,10 +254,11 @@ fn with_hooks(settings: &OValue, exe: &str) -> Result<OValue, String> {
 mod tests {
     //! ## 確かめること
     //!
-    //! - 無ければ 4 件を exec form (command・args) で足し、2 回目は登録済み。ほかの hook・キーの順は残す
+    //! - 無ければ 10 件を exec form (command・args) で足し、2 回目は登録済み。ほかの hook・キーの順は残す
     //! - 前の版の口の登録 (今は入れない hook・別の場所の exe) は外し、外して空になった組・event は消す (もとから空のものは残す)
     //! - hooks が object でない・event が配列でない settings.json は failed (書かない)
-    //! - 登録する組 (event・matcher・if) は Linux の bootstrap-claude-hook.sh の同じ hook の行と同じ
+    //! - 登録する組 (event・matcher・if) は Linux の bootstrap-claude-hook.sh の同じ hook の行と同じ (matcher の Bash|PowerShell は Bash と読み、
+    //!   PowerShell だけの組は除く)。コマンドを読む hook は PowerShell の tool でも走る
 
     use super::*;
     use crate::hooks;
@@ -246,9 +281,15 @@ mod tests {
         assert!(text.find("\"hooks\"").unwrap() < text.find("\"env\"").unwrap());
         let v = after.to_value();
         let pre = v["hooks"]["PreToolUse"].as_array().unwrap();
-        assert_eq!(pre.len(), 2);
+        assert_eq!(pre.len(), 6);
         assert_eq!(pre[0]["hooks"][0]["command"], "pjp hub guard");
         assert_eq!(pre[1]["matcher"], "Write|Edit|MultiEdit|NotebookEdit");
+        assert_eq!(pre[2]["matcher"], "Bash|PowerShell");
+        assert_eq!(
+            pre[2]["hooks"][0]["args"],
+            serde_json::json!(["claude-hook", "xref-guard"])
+        );
+        assert_eq!(pre[4]["matcher"], "mcp__.*[Gg]ist.*");
         assert_eq!(pre[1]["hooks"][0]["command"], EXE);
         assert_eq!(
             pre[1]["hooks"][0]["args"],
@@ -355,10 +396,32 @@ mod tests {
             let ours: Vec<(String, String, String)> = REGISTRATIONS
                 .iter()
                 .filter(|r| r.3 == name)
-                .map(|(e, m, c, _)| (e.to_string(), m.to_string(), c.to_string()))
+                .filter_map(|(e, m, c, _)| linux_form(m, c).map(|(m, c)| (e.to_string(), m, c)))
                 .collect();
             assert!(!ours.is_empty(), "{name} を登録していない");
             assert_eq!(ours, linux, "{name}");
+        }
+    }
+
+    /// コマンドを読む hook は PowerShell の tool も読む: matcher が Bash だけの組は、if で絞る hook (1 つの if は 1 つの tool しか名指せない) に
+    /// 限り、PowerShell の組 (if は PowerShell(…)) を対に持つ。ほかは matcher を Bash|PowerShell にする
+    #[test]
+    fn powershell_is_registered_with_bash() {
+        for (event, matcher, cond, name) in REGISTRATIONS {
+            if *matcher != "Bash" {
+                continue;
+            }
+            assert!(
+                cond.starts_with("Bash("),
+                "{name}: matcher Bash だけでは PowerShell の tool で走らない (Bash|PowerShell にする)"
+            );
+            let want = cond.replacen("Bash(", "PowerShell(", 1);
+            assert!(
+                REGISTRATIONS
+                    .iter()
+                    .any(|r| r.0 == *event && r.1 == "PowerShell" && r.2 == want && r.3 == *name),
+                "{name}: {event} {cond} の PowerShell の組が無い"
+            );
         }
     }
 }

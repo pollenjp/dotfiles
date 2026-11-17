@@ -101,7 +101,11 @@ impl<'a> World<'a> {
         }
         let p = p.replace('\\', "/");
         let b = p.as_bytes();
-        if b.len() >= 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && (b.len() == 2 || b[2] == b'/') {
+        if b.len() >= 2
+            && b[0] == b'/'
+            && b[1].is_ascii_alphabetic()
+            && (b.len() == 2 || b[2] == b'/')
+        {
             let rest = if b.len() == 2 { "/" } else { &p[2..] };
             return format!("{}:{}", (b[1] as char).to_ascii_uppercase(), rest);
         }
@@ -166,7 +170,11 @@ impl<'a> World<'a> {
 
     /// 控えの鍵 (Windows はファイルの名前の大文字小文字を区別しない)
     fn key(&self, p: &str) -> String {
-        if self.win { p.to_lowercase() } else { p.to_string() }
+        if self.win {
+            p.to_lowercase()
+        } else {
+            p.to_string()
+        }
     }
 
     /// bash の join_dir: cd の行き先。分からない (cd -・$( )・変数) なら今の dir。`expand` なら前の代入とファイルの印を入れる (xref・gist の版)
@@ -328,7 +336,11 @@ pub fn skip_opts(w: &mut Vec<String>, takes: &[&str]) {
             return;
         }
         if first.len() >= 2 && first.starts_with('-') {
-            let n = if takes.contains(&first.as_str()) { 2 } else { 1 };
+            let n = if takes.contains(&first.as_str()) {
+                2
+            } else {
+                1
+            };
             w.drain(..n.min(w.len()));
         } else {
             return;
@@ -341,7 +353,11 @@ pub fn base_name(word: &str, win: bool) -> String {
     if !win {
         return word.rsplit('/').next().unwrap_or(word).to_string();
     }
-    let b = word.rsplit(['/', '\\']).next().unwrap_or(word).to_lowercase();
+    let b = word
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(word)
+        .to_lowercase();
     b.strip_suffix(".exe").map(str::to_string).unwrap_or(b)
 }
 
@@ -362,14 +378,36 @@ pub fn ps_alias(name: &str) -> &str {
 
 /// PowerShell の Set-Content・Add-Content・Out-File が書くファイルと中身 (パス・中身が分かるか・中身)。`-Value` (Set-Content は 2 つ目の位置の
 /// 引数も) が無ければ、パイプで受けたもの。Add-Content は bash の `>>` と同じく、書いた中身だけを控える
-pub fn ps_write_target(name: &str, args: &[String], in_text: &str, in_known: bool) -> Option<(String, bool, String)> {
-    let (named, pos) = ps_params(args, &["nonewline", "force", "append", "noclobber", "passthru", "whatif", "confirm"]);
+pub fn ps_write_target(
+    name: &str,
+    args: &[String],
+    in_text: &str,
+    in_known: bool,
+) -> Option<(String, bool, String)> {
+    let (named, pos) = ps_params(
+        args,
+        &[
+            "nonewline",
+            "force",
+            "append",
+            "noclobber",
+            "passthru",
+            "whatif",
+            "confirm",
+        ],
+    );
     let path = ps_named(&named, &["path", "filepath", "literalpath"])
         .map(str::to_string)
         .or_else(|| pos.first().cloned())?;
     let value = ps_named(&named, &["value", "inputobject"])
         .map(str::to_string)
-        .or_else(|| if name == "set-content" { pos.get(1).cloned() } else { None });
+        .or_else(|| {
+            if name == "set-content" {
+                pos.get(1).cloned()
+            } else {
+                None
+            }
+        });
     Some(match value {
         Some(v) => (path, true, v),
         None => (path, in_known, in_text.to_string()),
@@ -383,14 +421,20 @@ pub fn ps_params(args: &[String], flags: &[&str]) -> (Vec<(String, String)>, Vec
     let mut i = 0;
     while i < args.len() {
         let a = &args[i];
-        if a.len() >= 2 && a.starts_with('-') && a[1..].starts_with(|c: char| c.is_ascii_alphabetic()) {
+        if a.len() >= 2
+            && a.starts_with('-')
+            && a[1..].starts_with(|c: char| c.is_ascii_alphabetic())
+        {
             let body = &a[1..];
             if let Some((n, v)) = body.split_once(':') {
                 named.push((n.to_lowercase(), v.to_string()));
             } else if flags.contains(&body.to_lowercase().as_str()) {
                 named.push((body.to_lowercase(), String::new()));
             } else {
-                named.push((body.to_lowercase(), args.get(i + 1).cloned().unwrap_or_default()));
+                named.push((
+                    body.to_lowercase(),
+                    args.get(i + 1).cloned().unwrap_or_default(),
+                ));
                 i += 1;
             }
         } else {
@@ -405,7 +449,11 @@ pub fn ps_params(args: &[String], flags: &[&str]) -> (Vec<(String, String)>, Vec
 pub fn ps_named<'b>(named: &'b [(String, String)], names: &[&str]) -> Option<&'b str> {
     named
         .iter()
-        .find(|(n, _)| names.iter().any(|full| !n.is_empty() && full.starts_with(n.as_str())))
+        .find(|(n, _)| {
+            names
+                .iter()
+                .any(|full| !n.is_empty() && full.starts_with(n.as_str()))
+        })
         .map(|(_, v)| v.as_str())
 }
 
@@ -433,7 +481,9 @@ pub fn pwsh_command(args: &[String]) -> Option<String> {
         if !name.is_empty() && "command".starts_with(name) {
             return Some(args[i + 1..].join(" "));
         }
-        if !name.is_empty() && ("file".starts_with(name) || "encodedcommand".starts_with(name) || name == "ec") {
+        if !name.is_empty()
+            && ("file".starts_with(name) || "encodedcommand".starts_with(name) || name == "ec")
+        {
             return None;
         }
         // 値を取るオプション
@@ -536,7 +586,10 @@ mod tests {
         assert_eq!(w.expand_home("~\\repo"), "C:/Users/u/repo");
         assert!(w.is_abs("D:/x"));
         assert_eq!(w.abs_path("C:/r", "..\\b\\.\\c", false), "C:/r/../b/c");
-        assert_eq!(w.abs_path("C:/r", "\\\\srv\\share\\f", false), "//srv/share/f");
+        assert_eq!(
+            w.abs_path("C:/r", "\\\\srv\\share\\f", false),
+            "//srv/share/f"
+        );
         assert_eq!(w.join_dir("C:/r", "D:\\work", true), "D:/work");
         w.remember_write("C:/R", "Body.md", true, "x");
         assert_eq!(w.read_written("c:/r", "body.MD").as_deref(), Some("x"));
@@ -545,11 +598,17 @@ mod tests {
 
     #[test]
     fn options_and_names() {
-        let mut v: Vec<String> = ["-u", "root", "-E", "pip", "x"].iter().map(|s| s.to_string()).collect();
+        let mut v: Vec<String> = ["-u", "root", "-E", "pip", "x"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         skip_opts(&mut v, &["-u"]);
         assert_eq!(v, vec!["pip", "x"]);
         assert_eq!(base_name("/usr/bin/git", false), "git");
-        assert_eq!(base_name("C:\\Program Files\\Git\\cmd\\Git.EXE", true), "git");
+        assert_eq!(
+            base_name("C:\\Program Files\\Git\\cmd\\Git.EXE", true),
+            "git"
+        );
         assert_eq!(base_name("git.exe", false), "git.exe");
         assert_eq!(ps_alias("set-location"), "cd");
         let args: Vec<String> = ["-Uri", "https://x", "-Method:Post", "-UseBasicParsing", "a"]
@@ -562,12 +621,26 @@ mod tests {
         assert_eq!(pos, vec!["a"]);
         let s = |l: &[&str]| -> Vec<String> { l.iter().map(|x| x.to_string()).collect() };
         assert_eq!(
-            pwsh_command(&s(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-c", "git", "push"])).as_deref(),
+            pwsh_command(&s(&[
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-c",
+                "git",
+                "push"
+            ]))
+            .as_deref(),
             Some("git push")
         );
         assert_eq!(pwsh_command(&s(&["-File", "x.ps1"])), None);
-        assert_eq!(cmd_command(&s(&["/c", "git", "push"])).as_deref(), Some("git push"));
-        assert_eq!(wsl_command(&s(&["-d", "u24", "--", "git", "push"])), s(&["git", "push"]));
+        assert_eq!(
+            cmd_command(&s(&["/c", "git", "push"])).as_deref(),
+            Some("git push")
+        );
+        assert_eq!(
+            wsl_command(&s(&["-d", "u24", "--", "git", "push"])),
+            s(&["git", "push"])
+        );
         assert_eq!(wsl_command(&s(&["git", "push"])), s(&["git", "push"]));
     }
 }

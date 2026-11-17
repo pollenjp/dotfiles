@@ -8,8 +8,8 @@
 
 use super::refs::{self, Text};
 use super::{
-    FOREIGN, LEX_LIMIT, Lang, World, base_name, cmd_command, deny, is_name, ps_alias, ps_named, ps_params,
-    pwsh_command, skip_opts, split, wsl_command,
+    FOREIGN, LEX_LIMIT, Lang, World, base_name, cmd_command, deny, is_name, ps_alias, ps_named,
+    ps_params, pwsh_command, skip_opts, split, wsl_command,
 };
 use crate::hooks::field;
 use crate::process::{CommandSpec, Exit, Sys};
@@ -30,7 +30,9 @@ pub fn run(raw: &str, input: &Value, sys: &dyn Sys) -> Option<String> {
     };
     let cmd = field(input, &["tool_input", "command"]);
     let cwd = field(input, &["cwd"]);
-    if !(cmd.contains("push") || (cmd.contains("gh") && (cmd.contains("pr") || cmd.contains("issue")))) {
+    if !(cmd.contains("push")
+        || (cmd.contains("gh") && (cmd.contains("pr") || cmd.contains("issue"))))
+    {
         return None;
     }
     let mut x = Xref::new(sys, &cwd, lang);
@@ -88,7 +90,12 @@ fn url_parse(u: &str, win: bool) -> Option<(String, String)> {
     // Windows の手元の path (C:\…・C:/…・\\server\…) も GitHub に届かない
     if win {
         let b = u.as_bytes();
-        if u.starts_with('\\') || (b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && matches!(b[2], b'/' | b'\\')) {
+        if u.starts_with('\\')
+            || (b.len() >= 3
+                && b[0].is_ascii_alphabetic()
+                && b[1] == b':'
+                && matches!(b[2], b'/' | b'\\'))
+        {
             return None;
         }
     }
@@ -138,7 +145,11 @@ pub fn has_git_push(cmd: &str) -> bool {
     // 各位置から次の ; & | 改行 までの終わり (後ろから一度で求める)
     let mut stop = vec![n; n + 1];
     for i in (0..n).rev() {
-        stop[i] = if matches!(c[i], ';' | '&' | '|' | '\n') { i } else { stop[i + 1] };
+        stop[i] = if matches!(c[i], ';' | '&' | '|' | '\n') {
+            i
+        } else {
+            stop[i + 1]
+        };
     }
     let push_at: Vec<usize> = (0..n.saturating_sub(3))
         .filter(|&p| {
@@ -250,7 +261,11 @@ impl<'a> Xref<'a> {
             self.gh = Some(self.w.sys.which("gh"));
         }
         let Some(Some(gh)) = self.gh.clone() else {
-            return (String::new(), String::new(), "gh が見つからない".to_string());
+            return (
+                String::new(),
+                String::new(),
+                "gh が見つからない".to_string(),
+            );
         };
         if target.is_empty() && dir.starts_with(FOREIGN) {
             return (
@@ -277,7 +292,11 @@ impl<'a> Xref<'a> {
         let mut all: Vec<String> = Vec::new();
         let r = self.w.sys.run(&spec, &mut |l| all.push(l.to_string()));
         match r.exit {
-            Exit::TimedOut => (String::new(), String::new(), "gh が 10 秒で返らなかった".to_string()),
+            Exit::TimedOut => (
+                String::new(),
+                String::new(),
+                "gh が 10 秒で返らなかった".to_string(),
+            ),
             Exit::Code(0) => {
                 let v: Option<Value> = serde_json::from_str(r.output.join("\n").trim()).ok();
                 let vis = v
@@ -313,7 +332,15 @@ impl<'a> Xref<'a> {
     }
 
     /// 文を同じ repo (own) として調べる。参照があって、public か公開範囲を確かめられない repo なら、止める理由の節を足す
-    fn check_texts(&mut self, label: &str, dir: &str, target: &str, hint: &str, texts: &[Text], own: &[String]) {
+    fn check_texts(
+        &mut self,
+        label: &str,
+        dir: &str,
+        target: &str,
+        hint: &str,
+        texts: &[Text],
+        own: &[String],
+    ) {
         if texts.is_empty() {
             return;
         }
@@ -326,7 +353,10 @@ impl<'a> Xref<'a> {
             return;
         }
         let mut name = if vis_name.is_empty() {
-            target.split_once('/').map_or(target, |(_, r)| r).to_string()
+            target
+                .split_once('/')
+                .map_or(target, |(_, r)| r)
+                .to_string()
         } else {
             vis_name
         };
@@ -342,7 +372,8 @@ impl<'a> Xref<'a> {
         } else {
             format!("公開範囲を確かめられない: {why}")
         };
-        self.sections.push(format!("{label} → {name} ({desc}):\n{lines}"));
+        self.sections
+            .push(format!("{label} → {name} ({desc}):\n{lines}"));
         for f in fixes {
             if !self.fixes.contains(&f) {
                 self.fixes.push(f);
@@ -357,18 +388,26 @@ impl<'a> Xref<'a> {
             let (h, s) = v.split_once('/').unwrap();
             (h.to_string(), s.to_string())
         } else {
-            let h = if env_host.is_empty() { "github.com" } else { env_host };
+            let h = if env_host.is_empty() {
+                "github.com"
+            } else {
+                env_host
+            };
             (h.to_string(), v.to_string())
         };
-        (vec![slug.clone()], format!("{}/{slug}", host.to_lowercase()))
+        (
+            vec![slug.clone()],
+            format!("{}/{slug}", host.to_lowercase()),
+        )
     }
 
     /// gh repo set-default が書く remote.<名前>.gh-resolved があれば、その repo を同じ repo と公開範囲を引く repo にする
     fn gh_default(&mut self, dir: &str) -> Option<(Vec<String>, String)> {
-        for line in self
-            .w
-            .git_lines(dir, &[], &["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"])
-        {
+        for line in self.w.git_lines(
+            dir,
+            &[],
+            &["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"],
+        ) {
             let line = line.trim_start();
             let (key, val) = match line.split_once([' ', '\t']) {
                 Some((k, v)) => (k, v.trim()),
@@ -384,7 +423,8 @@ impl<'a> Xref<'a> {
                 };
                 return Some((vec![slug.clone()], format!("{host}/{slug}")));
             } else if val.contains('/') {
-                let host = url_parse(&u, self.w.win).map_or_else(|| "github.com".to_string(), |(h, _)| h);
+                let host =
+                    url_parse(&u, self.w.win).map_or_else(|| "github.com".to_string(), |(h, _)| h);
                 return Some((vec![val.to_string()], format!("{host}/{val}")));
             }
         }
@@ -428,8 +468,26 @@ impl<'a> Xref<'a> {
                 "",
                 "",
             ),
-            "pr comment" | "issue comment" => ("bFR", "|body|body-file|repo|", "", "コメントの", "", true, "", ""),
-            "pr review" => ("bFR", "|body|body-file|repo|", "", "review の本文の", "", true, "", ""),
+            "pr comment" | "issue comment" => (
+                "bFR",
+                "|body|body-file|repo|",
+                "",
+                "コメントの",
+                "",
+                true,
+                "",
+                "",
+            ),
+            "pr review" => (
+                "bFR",
+                "|body|body-file|repo|",
+                "",
+                "review の本文の",
+                "",
+                true,
+                "",
+                "",
+            ),
             "pr merge" => (
                 "tbFRA",
                 "|subject|body|body-file|repo|match-head-commit|author-email|",
@@ -475,8 +533,14 @@ impl<'a> Xref<'a> {
         }
         let fix_t = if fix_t.is_empty() { "title" } else { fix_t };
         let a: &[String] = if args.len() > 2 { &args[2..] } else { &[] };
-        let (mut title, mut title_set, mut body, mut body_set, mut body_file, mut bf_set) =
-            (String::new(), false, String::new(), false, String::new(), false);
+        let (mut title, mut title_set, mut body, mut body_set, mut body_file, mut bf_set) = (
+            String::new(),
+            false,
+            String::new(),
+            false,
+            String::new(),
+            false,
+        );
         let mut repo_flag = String::new();
         let (mut url_host, mut url_repo) = (String::new(), String::new());
         let mut flag = |name: &str, v: &str| match name {
@@ -548,14 +612,15 @@ impl<'a> Xref<'a> {
         };
 
         let mut texts = Vec::new();
-        let text = |head: &str, suffix: &str, numbered: bool, md: bool, fix: &str, t: String| Text {
-            head: head.to_string(),
-            suffix: suffix.to_string(),
-            numbered,
-            md,
-            fix: fix.to_string(),
-            text: t,
-        };
+        let text =
+            |head: &str, suffix: &str, numbered: bool, md: bool, fix: &str, t: String| Text {
+                head: head.to_string(),
+                suffix: suffix.to_string(),
+                numbered,
+                md,
+                fix: fix.to_string(),
+                text: t,
+            };
         if title_set {
             let v = self.w.expand_value(dir, &title);
             texts.push(text(head_t, "", false, false, fix_t, v));
@@ -597,9 +662,14 @@ impl<'a> Xref<'a> {
                     gopts.push(a.get(1).cloned().unwrap_or_default());
                     a.drain(..2.min(a.len()));
                 }
-                s if ["--git-dir=", "--work-tree=", "--namespace=", "--config-env="]
-                    .iter()
-                    .any(|p| s.starts_with(p)) =>
+                s if [
+                    "--git-dir=",
+                    "--work-tree=",
+                    "--namespace=",
+                    "--config-env=",
+                ]
+                .iter()
+                .any(|p| s.starts_with(p)) =>
                 {
                     gopts.push(first.clone());
                     a.remove(0);
@@ -660,8 +730,8 @@ impl<'a> Xref<'a> {
                 "--amend" => amend = true,
                 _ if x.starts_with("--message=") => add_msg(self, 'm', &x["--message=".len()..]),
                 _ if x.starts_with("--file=") => add_msg(self, 'F', &x["--file=".len()..]),
-                "--message" | "--file" | "--reuse-message" | "--reedit-message" | "--template" | "--author" | "--date"
-                | "--fixup" | "--squash" | "--trailer" => {
+                "--message" | "--file" | "--reuse-message" | "--reedit-message" | "--template"
+                | "--author" | "--date" | "--fixup" | "--squash" | "--trailer" => {
                     let v = a.get(i + 1).cloned().unwrap_or_default();
                     if x == "--message" {
                         add_msg(self, 'm', &v);
@@ -780,18 +850,41 @@ impl<'a> Xref<'a> {
         }
 
         // 押す先: 引数・--repo、無ければ branch.<今>.pushRemote → remote.pushDefault → branch.<今>.remote → origin
-        let mut remote = pos.first().cloned().filter(|s| !s.is_empty()).unwrap_or(repo_opt);
-        let (ok, cur) = self.w.git(dir, gopts, &["symbolic-ref", "-q", "--short", "HEAD"]);
+        let mut remote = pos
+            .first()
+            .cloned()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(repo_opt);
+        let (ok, cur) = self
+            .w
+            .git(dir, gopts, &["symbolic-ref", "-q", "--short", "HEAD"]);
         let cur = if ok { cur } else { String::new() };
         if remote.is_empty() {
             if !cur.is_empty() {
-                remote = self.w.git(dir, gopts, &["config", "--get", &format!("branch.{cur}.pushRemote")]).1;
+                remote = self
+                    .w
+                    .git(
+                        dir,
+                        gopts,
+                        &["config", "--get", &format!("branch.{cur}.pushRemote")],
+                    )
+                    .1;
             }
             if remote.is_empty() {
-                remote = self.w.git(dir, gopts, &["config", "--get", "remote.pushDefault"]).1;
+                remote = self
+                    .w
+                    .git(dir, gopts, &["config", "--get", "remote.pushDefault"])
+                    .1;
             }
             if remote.is_empty() && !cur.is_empty() {
-                remote = self.w.git(dir, gopts, &["config", "--get", &format!("branch.{cur}.remote")]).1;
+                remote = self
+                    .w
+                    .git(
+                        dir,
+                        gopts,
+                        &["config", "--get", &format!("branch.{cur}.remote")],
+                    )
+                    .1;
             }
             if remote.is_empty() {
                 remote = "origin".to_string();
@@ -800,16 +893,26 @@ impl<'a> Xref<'a> {
         let url = if !remote.contains('/')
             && !self
                 .w
-                .git(dir, gopts, &["config", "--get", &format!("remote.{remote}.url")])
+                .git(
+                    dir,
+                    gopts,
+                    &["config", "--get", &format!("remote.{remote}.url")],
+                )
                 .1
                 .is_empty()
         {
-            self.w.git(dir, gopts, &["remote", "get-url", "--push", &remote]).1
+            self.w
+                .git(dir, gopts, &["remote", "get-url", "--push", &remote])
+                .1
         } else {
-            self.w.git(dir, gopts, &["ls-remote", "--get-url", &remote]).1
+            self.w
+                .git(dir, gopts, &["ls-remote", "--get-url", &remote])
+                .1
         };
         // 手元の path・file:// は GitHub に届かないので見ない
-        let Some((url_host, url_slug)) = url_parse(if url.is_empty() { &remote } else { &url }, self.w.win) else {
+        let Some((url_host, url_slug)) =
+            url_parse(if url.is_empty() { &remote } else { &url }, self.w.win)
+        else {
             return;
         };
 
@@ -819,7 +922,16 @@ impl<'a> Xref<'a> {
         if mirror
             || self
                 .w
-                .git(dir, gopts, &["config", "--type=bool", "--get", &format!("remote.{remote}.mirror")])
+                .git(
+                    dir,
+                    gopts,
+                    &[
+                        "config",
+                        "--type=bool",
+                        "--get",
+                        &format!("remote.{remote}.mirror"),
+                    ],
+                )
                 .1
                 == "true"
         {
@@ -832,9 +944,11 @@ impl<'a> Xref<'a> {
             revs.push("--tags".to_string());
         }
         if specs.is_empty() && revs.is_empty() {
-            specs = self
-                .w
-                .git_lines(dir, gopts, &["config", "--get-all", &format!("remote.{remote}.push")]);
+            specs = self.w.git_lines(
+                dir,
+                gopts,
+                &["config", "--get-all", &format!("remote.{remote}.push")],
+            );
             if specs.is_empty() {
                 specs = vec!["HEAD".to_string()];
             }
@@ -859,14 +973,25 @@ impl<'a> Xref<'a> {
                 continue;
             }
             let expanded = self.w.expand_value(dir, &src);
-            let (ok, r) = self
-                .w
-                .git(dir, gopts, &["rev-parse", "--verify", "-q", &format!("{expanded}^{{commit}}")]);
+            let (ok, r) = self.w.git(
+                dir,
+                gopts,
+                &[
+                    "rev-parse",
+                    "--verify",
+                    "-q",
+                    &format!("{expanded}^{{commit}}"),
+                ],
+            );
             if ok {
                 revs.push(r);
             } else {
                 // 解けない ref (同じコマンドで作る branch・$( )・変数) は、HEAD から作るものとみなす
-                let (ok, r) = self.w.git(dir, gopts, &["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
+                let (ok, r) = self.w.git(
+                    dir,
+                    gopts,
+                    &["rev-parse", "--verify", "-q", "HEAD^{commit}"],
+                );
                 if ok {
                     revs.push(r);
                 }
@@ -874,7 +999,11 @@ impl<'a> Xref<'a> {
         }
         // 同じコマンドの amend で書き換える HEAD は数えず、その親から辿る (新しい message は pending_msgs で数える)
         if self.amend_head {
-            let (ok, head) = self.w.git(dir, gopts, &["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
+            let (ok, head) = self.w.git(
+                dir,
+                gopts,
+                &["rev-parse", "--verify", "-q", "HEAD^{commit}"],
+            );
             if ok {
                 let mut kept = Vec::new();
                 for r in revs {
@@ -890,7 +1019,12 @@ impl<'a> Xref<'a> {
 
         let mut texts: Vec<Text> = Vec::new();
         if !revs.is_empty() {
-            let mut args: Vec<&str> = vec!["log", "--no-color", "--format=%H%x1f%B%x1e", "--max-count=1000"];
+            let mut args: Vec<&str> = vec![
+                "log",
+                "--no-color",
+                "--format=%H%x1f%B%x1e",
+                "--max-count=1000",
+            ];
             args.extend(revs.iter().map(String::as_str));
             args.extend(["--not", "--remotes", "--"]);
             let (_, log) = self.w.git(dir, gopts, &args);
@@ -907,7 +1041,14 @@ impl<'a> Xref<'a> {
             });
         }
         let target = format!("{url_host}/{url_slug}");
-        self.check_texts("git push", dir, &target, &url_slug.clone(), &texts, &[url_slug]);
+        self.check_texts(
+            "git push",
+            dir,
+            &target,
+            &url_slug.clone(),
+            &texts,
+            &[url_slug],
+        );
     }
 
     /// bash -c などに文字列で渡したものを読み直す。頭の VAR=値 (通す口・GH_REPO・GH_HOST) は中にも効かせる
@@ -1037,7 +1178,12 @@ impl<'a> Xref<'a> {
                 }
                 "sudo" | "doas" => {
                     w.remove(0);
-                    skip_opts(&mut w, &["-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T", "-R"]);
+                    skip_opts(
+                        &mut w,
+                        &[
+                            "-u", "-g", "-h", "-p", "-C", "-D", "-r", "-t", "-U", "-T", "-R",
+                        ],
+                    );
                 }
                 "exec" => {
                     w.remove(0);
@@ -1064,7 +1210,10 @@ impl<'a> Xref<'a> {
                 }
                 "stdbuf" => {
                     w.remove(0);
-                    skip_opts(&mut w, &["-i", "-o", "-e", "--input", "--output", "--error"]);
+                    skip_opts(
+                        &mut w,
+                        &["-i", "-o", "-e", "--input", "--output", "--error"],
+                    );
                 }
                 "timeout" => {
                     w.remove(0);
@@ -1078,8 +1227,21 @@ impl<'a> Xref<'a> {
                     skip_opts(
                         &mut w,
                         &[
-                            "-I", "-n", "-P", "-L", "-d", "-E", "-s", "-a", "--max-args", "--max-procs", "--max-lines",
-                            "--delimiter", "--eof", "--max-chars", "--arg-file",
+                            "-I",
+                            "-n",
+                            "-P",
+                            "-L",
+                            "-d",
+                            "-E",
+                            "-s",
+                            "-a",
+                            "--max-args",
+                            "--max-procs",
+                            "--max-lines",
+                            "--delimiter",
+                            "--eof",
+                            "--max-chars",
+                            "--arg-file",
                         ],
                     );
                 }
@@ -1148,7 +1310,11 @@ impl<'a> Xref<'a> {
                     return;
                 }
                 "nix-shell" => {
-                    if let Some(i) = w.iter().skip(1).position(|x| x == "--run" || x == "--command") {
+                    if let Some(i) = w
+                        .iter()
+                        .skip(1)
+                        .position(|x| x == "--run" || x == "--command")
+                    {
                         let s = w.get(i + 2).cloned().unwrap_or_default();
                         self.rescan(&dir, depth, &s, Lang::Bash, &l);
                         return;
@@ -1157,7 +1323,8 @@ impl<'a> Xref<'a> {
                 }
                 "nix" => {
                     if matches!(w.get(1).map(String::as_str), Some("develop" | "shell"))
-                        && let Some(i) = w.iter().skip(2).position(|x| x == "-c" || x == "--command")
+                        && let Some(i) =
+                            w.iter().skip(2).position(|x| x == "-c" || x == "--command")
                     {
                         w.drain(..i + 3);
                         continue;
@@ -1183,7 +1350,10 @@ impl<'a> Xref<'a> {
                 }
                 "invoke-expression" if rec.ps => {
                     let mut rest: Vec<String> = w[1..].to_vec();
-                    if rest.first().is_some_and(|x| "-command".starts_with(&x.to_lowercase()) && x.len() > 1) {
+                    if rest
+                        .first()
+                        .is_some_and(|x| "-command".starts_with(&x.to_lowercase()) && x.len() > 1)
+                    {
                         rest.remove(0);
                     }
                     self.rescan(&dir, depth, &rest.join(" "), Lang::PowerShell, &l);
@@ -1232,7 +1402,9 @@ impl<'a> Xref<'a> {
             // PowerShell の Get-Content・Tee-Object・Set-Content (Out-File・Add-Content)
             "get-content" => {
                 let (named, pos) = ps_params(&w[1..], &["raw", "force", "wait", "asbytestream"]);
-                if let Some(p) = ps_named(&named, &["path", "literalpath"]).map(str::to_string).or(pos.first().cloned())
+                if let Some(p) = ps_named(&named, &["path", "literalpath"])
+                    .map(str::to_string)
+                    .or(pos.first().cloned())
                     && let Some(t) = self.w.read_file(&dir, &p)
                 {
                     self.out_text = t;
@@ -1243,12 +1415,17 @@ impl<'a> Xref<'a> {
                 self.out_text = l.in_text.clone();
                 self.out_known = l.in_known;
                 let (named, pos) = ps_params(&w[1..], &["append"]);
-                if let Some(p) = ps_named(&named, &["filepath", "literalpath", "path"]).map(str::to_string).or(pos.first().cloned()) {
+                if let Some(p) = ps_named(&named, &["filepath", "literalpath", "path"])
+                    .map(str::to_string)
+                    .or(pos.first().cloned())
+                {
                     self.w.remember_write(&dir, &p, l.in_known, &l.in_text);
                 }
             }
             "set-content" | "out-file" => {
-                if let Some((p, known, v)) = super::ps_write_target(&name, &w[1..], &l.in_text, l.in_known) {
+                if let Some((p, known, v)) =
+                    super::ps_write_target(&name, &w[1..], &l.in_text, l.in_known)
+                {
                     self.w.remember_write(&dir, &p, known, &v);
                 }
             }
@@ -1325,8 +1502,9 @@ impl<'a> Xref<'a> {
         } else {
             format!("公開範囲を確かめられない: {why}")
         };
-        self.sections
-            .push(format!("git push → {name} ({desc}):\n- 押す commit の message を確かめられない"));
+        self.sections.push(format!(
+            "git push → {name} ({desc}):\n- 押す commit の message を確かめられない"
+        ));
     }
 
     fn emit(&self) -> String {
@@ -1338,7 +1516,8 @@ impl<'a> Xref<'a> {
                 LEX_LIMIT / 1024
             )
         } else {
-            "[xref-guard] ほかの repo の issue・PR・commit への参照を書こうとしているので止めた。".to_string()
+            "[xref-guard] ほかの repo の issue・PR・commit への参照を書こうとしているので止めた。"
+                .to_string()
         };
         msg.push_str("GitHub は参照先の timeline に跡を残し、付いた跡は本文を直しても force push で commit を外しても消えない。");
         for s in &self.sections {
@@ -1384,14 +1563,19 @@ pub fn is_c_flag(x: &str) -> bool {
 
 /// `^https?://([^/]+)/([^/]+)/([^/]+)/(pull|issues)/[0-9]+` の (host (小文字)、owner/repo)
 fn pr_url(x: &str) -> Option<(String, String)> {
-    let rest = x.strip_prefix("https://").or_else(|| x.strip_prefix("http://"))?;
+    let rest = x
+        .strip_prefix("https://")
+        .or_else(|| x.strip_prefix("http://"))?;
     let parts: Vec<&str> = rest.splitn(5, '/').collect();
     if parts.len() == 5
         && parts[..3].iter().all(|p| !p.is_empty())
         && matches!(parts[3], "pull" | "issues")
         && parts[4].starts_with(|c: char| c.is_ascii_digit())
     {
-        return Some((parts[0].to_lowercase(), format!("{}/{}", parts[1], parts[2])));
+        return Some((
+            parts[0].to_lowercase(),
+            format!("{}/{}", parts[1], parts[2]),
+        ));
     }
     None
 }
@@ -1415,9 +1599,18 @@ mod tests {
     #[test]
     fn parses_remote_urls() {
         let p = |u: &str| url_parse(u, false);
-        assert_eq!(p("https://github.com/o/r.git"), Some(("github.com".into(), "o/r".into())));
-        assert_eq!(p("git@github.com:o/r.git"), Some(("github.com".into(), "o/r".into())));
-        assert_eq!(p("ssh://git@GitHub.com:22/o/r/"), Some(("github.com".into(), "o/r".into())));
+        assert_eq!(
+            p("https://github.com/o/r.git"),
+            Some(("github.com".into(), "o/r".into()))
+        );
+        assert_eq!(
+            p("git@github.com:o/r.git"),
+            Some(("github.com".into(), "o/r".into()))
+        );
+        assert_eq!(
+            p("ssh://git@GitHub.com:22/o/r/"),
+            Some(("github.com".into(), "o/r".into()))
+        );
         assert_eq!(p("https://github.com"), None);
         assert_eq!(p("/tmp/bare.git"), None);
         assert_eq!(p("../bare.git"), None);
@@ -1442,7 +1635,10 @@ mod tests {
             .arg("-C")
             .arg(dir)
             .args(args)
-            .env("GIT_CONFIG_GLOBAL", if cfg!(windows) { "NUL" } else { "/dev/null" })
+            .env(
+                "GIT_CONFIG_GLOBAL",
+                if cfg!(windows) { "NUL" } else { "/dev/null" },
+            )
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_AUTHOR_NAME", "t")
             .env("GIT_AUTHOR_EMAIL", "t@example.com")
@@ -1460,7 +1656,15 @@ mod tests {
         let r = t.path().join("repo");
         std::fs::create_dir_all(&r).unwrap();
         git(&r, &["init", "-q", "-b", "main"]);
-        git(&r, &["remote", "add", "origin", "https://github.com/pollenjp/dotfiles.git"]);
+        git(
+            &r,
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/pollenjp/dotfiles.git",
+            ],
+        );
         git(&r, &["commit", "-q", "--allow-empty", "-m", "init"]);
         git(&r, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
         git(&r, &["switch", "-q", "-c", "feat"]);
@@ -1473,7 +1677,9 @@ mod tests {
             if spec.program.to_string_lossy().contains("fake-gh") {
                 return RunResult {
                     exit: Exit::Code(0),
-                    output: vec![format!("{{\"nameWithOwner\":\"pollenjp/dotfiles\",\"visibility\":\"{vis}\"}}")],
+                    output: vec![format!(
+                        "{{\"nameWithOwner\":\"pollenjp/dotfiles\",\"visibility\":\"{vis}\"}}"
+                    )],
                 };
             }
             RealSys.run(spec, &mut |_| {})
@@ -1489,7 +1695,9 @@ mod tests {
 
     fn reason(out: Option<String>) -> Option<String> {
         let v: Value = serde_json::from_str(out?.trim()).ok()?;
-        v["hookSpecificOutput"]["permissionDecisionReason"].as_str().map(str::to_string)
+        v["hookSpecificOutput"]["permissionDecisionReason"]
+            .as_str()
+            .map(str::to_string)
     }
 
     #[test]
@@ -1505,8 +1713,12 @@ mod tests {
         assert!(why.contains("NixOS/nixpkgs#577218"), "{why}");
         assert!(why.contains("$env:PJP_ALLOW_XREF='1';"), "{why}");
         assert!(deny("$env:PJP_ALLOW_XREF = '1'; git push").is_none());
-        let why = deny("gh pr create --title x --body @'\n## 概要\n- NixOS/nixpkgs#1 を待つ\n'@").expect("本文の参照");
-        assert!(why.contains("本文の 2 行目 (backquote の外): NixOS/nixpkgs#1"), "{why}");
+        let why = deny("gh pr create --title x --body @'\n## 概要\n- NixOS/nixpkgs#1 を待つ\n'@")
+            .expect("本文の参照");
+        assert!(
+            why.contains("本文の 2 行目 (backquote の外): NixOS/nixpkgs#1"),
+            "{why}"
+        );
         assert!(deny("gh pr create --title x --body @'\n- `NixOS/nixpkgs#1`\n'@").is_none());
         assert!(deny("$b = @'\nNixOS/nixpkgs#2\n'@\ngh pr create -t x -b $b").is_some());
         assert!(deny("Set-Content -Path b.md -Value 'NixOS/nixpkgs#3'; gh pr create -t x --body-file b.md").is_some());
@@ -1519,7 +1731,12 @@ mod tests {
         // Bash の tool の文は bash の版と同じ通す口
         let (raw, v) = input("Bash", "git push", &r);
         let why = reason(run(&raw, &v, &s)).unwrap();
-        assert!(why.ends_with("コマンドの頭に PJP_ALLOW_XREF=1 を付けて打ち直す (自分の判断では付けない)"), "{why}");
+        assert!(
+            why.ends_with(
+                "コマンドの頭に PJP_ALLOW_XREF=1 を付けて打ち直す (自分の判断では付けない)"
+            ),
+            "{why}"
+        );
         // private な repo は通す
         let p = sys("PRIVATE");
         let (raw, v) = input("PowerShell", "git push", &r);

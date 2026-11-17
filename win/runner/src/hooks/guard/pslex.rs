@@ -177,7 +177,9 @@ fn paren_end(s: &[char], p: usize) -> usize {
                 Some(k) => j = k + 1,
                 None => return n,
             }
-        } else if c == '#' && (j == 0 || matches!(s[j - 1], ' ' | '\t' | '\n' | ';' | '(' | '{' | '|')) {
+        } else if c == '#'
+            && (j == 0 || matches!(s[j - 1], ' ' | '\t' | '\n' | ';' | '(' | '{' | '|'))
+        {
             match s[j..].iter().position(|&x| x == '\n') {
                 Some(k) => j += k - 1,
                 None => return n,
@@ -346,7 +348,12 @@ impl<'w, 'a> Ps<'w, 'a> {
     fn var_value(&self, name: &str) -> Option<String> {
         let l = name.to_lowercase();
         if let Some(env) = l.strip_prefix("env:") {
-            if let Some((_, v)) = self.env.iter().rev().find(|(n, _)| n.eq_ignore_ascii_case(env)) {
+            if let Some((_, v)) = self
+                .env
+                .iter()
+                .rev()
+                .find(|(n, _)| n.eq_ignore_ascii_case(env))
+            {
                 return Some(v.clone());
             }
             return self.world.sys.env(&name[4..]).filter(|v| !v.is_empty());
@@ -484,7 +491,10 @@ impl<'w, 'a> Ps<'w, 'a> {
         while i < n {
             let c = s[i];
             // --% の後ろは行末まで、空白で分けた語 (引用符は外す)
-            if !self.in_tok && c == '-' && s[i..].starts_with(&['-', '-', '%']) && !matches!(at(s, i + 3), Some(x) if !x.is_whitespace())
+            if !self.in_tok
+                && c == '-'
+                && s[i..].starts_with(&['-', '-', '%'])
+                && !matches!(at(s, i + 3), Some(x) if !x.is_whitespace())
             {
                 let end = s[i..].iter().position(|&x| x == '\n').map_or(n, |k| i + k);
                 let rest: String = s[i + 3..end].iter().collect();
@@ -579,7 +589,9 @@ impl<'w, 'a> Ps<'w, 'a> {
                     if self.at_start() && !self.call {
                         let (name, e) = match at(s, i + 1) {
                             Some('{') => match s[i + 2..].iter().position(|&x| x == '}') {
-                                Some(k) => (s[i + 2..i + 2 + k].iter().collect::<String>(), i + 3 + k),
+                                Some(k) => {
+                                    (s[i + 2..i + 2 + k].iter().collect::<String>(), i + 3 + k)
+                                }
                                 None => (String::new(), i),
                             },
                             Some(x) if x.is_alphanumeric() || x == '_' => read_var_name(s, i + 1),
@@ -605,7 +617,11 @@ impl<'w, 'a> Ps<'w, 'a> {
                         }
                     }
                     let (v, e) = self.dollar(s, i);
-                    let kind = if at(s, i + 1) == Some('(') { Kind::Sub } else { Kind::Var };
+                    let kind = if at(s, i + 1) == Some('(') {
+                        Kind::Sub
+                    } else {
+                        Kind::Var
+                    };
                     self.add(&v, kind);
                     i = e;
                 }
@@ -762,19 +778,25 @@ mod tests {
                 &["echo", "$x"]
             ])
         );
-        assert_eq!(words("cmd --% /c \"git push\" x"), w(&[&["cmd", "/c", "git", "push", "x"]]));
+        assert_eq!(
+            words("cmd --% /c \"git push\" x"),
+            w(&[&["cmd", "/c", "git", "push", "x"]])
+        );
     }
 
     #[test]
     fn here_strings_and_variables() {
-        let c = split("$body = @'\nline1\nNixOS/nixpkgs#1\n'@\ngh pr create --body $body --title \"t $body\"");
+        let c = split(
+            "$body = @'\nline1\nNixOS/nixpkgs#1\n'@\ngh pr create --body $body --title \"t $body\"",
+        );
         assert_eq!(c.len(), 1);
         assert_eq!(c[0].words[4], "line1\nNixOS/nixpkgs#1");
         assert!(c[0].words[6].starts_with("t line1"));
         let c = split("@\"\na $env:TEMP `t\n\"@ | gh pr create -F -");
         assert_eq!(c[0].words, vec!["echo", "a C:\\Temp \t"]);
         assert!(c[1].pipe);
-        let c = split("$env:PJP_ALLOW_XREF = '1'; gh pr create; $env:PJP_ALLOW_XREF = $null; git push");
+        let c =
+            split("$env:PJP_ALLOW_XREF = '1'; gh pr create; $env:PJP_ALLOW_XREF = $null; git push");
         assert_eq!(c[0].words[0], "PJP_ALLOW_XREF=1");
         assert_eq!(c[1].words, vec!["git", "push"]);
         let c = split("$b = Get-Content -Raw body.md; gh pr create --body $b");

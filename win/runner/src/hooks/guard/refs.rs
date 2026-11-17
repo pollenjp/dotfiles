@@ -451,7 +451,10 @@ mod tests {
         assert!(refs("```\nNixOS/nixpkgs#1\n```").is_empty());
         assert!(refs("~~~sh\nNixOS/nixpkgs#1\n~~~").is_empty());
         assert!(refs("``a `NixOS/nixpkgs#1` b``").is_empty());
-        assert_eq!(refs("[`x`](https://github.com/NixOS/nixpkgs/pull/1)").len(), 1);
+        assert_eq!(
+            refs("[`x`](https://github.com/NixOS/nixpkgs/pull/1)").len(),
+            1
+        );
         assert_eq!(refs("`閉じない\n\nNixOS/nixpkgs#1 `").len(), 1);
         let f = refs_of(&md("```\nx\n```\nNixOS/nixpkgs#1"), &[]);
         assert_eq!(f[0].line, 4);

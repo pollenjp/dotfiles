@@ -111,7 +111,10 @@ fn is_blank(c: Option<char>) -> bool {
 
 /// heredoc の終わりの印を終える文字 (`[ \t\n;&|<>()]`)
 fn ends_delim(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | ';' | '&' | '|' | '<' | '>' | '(' | ')')
+    matches!(
+        c,
+        ' ' | '\t' | '\n' | ';' | '&' | '|' | '<' | '>' | '(' | ')'
+    )
 }
 
 /// heredoc の終わりの印を読む (引用符と `\` は外す)。印の次の位置を返す
@@ -140,7 +143,10 @@ fn heredoc_read(s: &[char], pos: usize, delim: &str, strip: bool) -> (String, us
         let needle = format!("\n{delim}\n");
         if let Some(byte_k) = t.find(&needle) {
             let k = t[..byte_k].chars().count();
-            return (sub_str(s, pos, pos + k), pos + k + 1 + delim.chars().count());
+            return (
+                sub_str(s, pos, pos + k),
+                pos + k + 1 + delim.chars().count(),
+            );
         }
         return (sub_str(s, pos, n), n);
     }
@@ -409,7 +415,10 @@ fn cat_heredoc(t: &[char]) -> Option<String> {
         return None;
     }
     let (body, e) = heredoc_read(t, i + 1, &delim, strip);
-    if t[e.min(n)..].iter().any(|&c| !matches!(c, ' ' | '\t' | '\n')) {
+    if t[e.min(n)..]
+        .iter()
+        .any(|&c| !matches!(c, ' ' | '\t' | '\n'))
+    {
         return None;
     }
     Some(body.trim_end_matches('\n').to_string())
@@ -799,7 +808,10 @@ mod tests {
 
     #[test]
     fn redirections_and_heredocs() {
-        let c = split_commands("cat <<'EOF' > out.md\nbody 1)\nEOF\ngh pr create -F out.md", false);
+        let c = split_commands(
+            "cat <<'EOF' > out.md\nbody 1)\nEOF\ngh pr create -F out.md",
+            false,
+        );
         assert_eq!(c[0].words, vec!["cat"]);
         assert_eq!(c[0].stdin, Stdin::Here("body 1)\n".to_string()));
         assert_eq!(c[0].outf, "out.md");
