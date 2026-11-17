@@ -1,0 +1,6 @@
+{
+  "global": {
+    "ctrl-pageup": "tab.prev",
+    "ctrl-pagedown": "tab.next"
+  }
+}

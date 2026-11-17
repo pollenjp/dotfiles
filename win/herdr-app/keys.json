@@ -4,7 +4,9 @@
     "ctrl-up": "tab.prev",
     "ctrl-down": "tab.next",
     "ctrl-shift-up": "space.prev",
-    "ctrl-shift-down": "space.next"
+    "ctrl-shift-down": "space.next",
+    "ctrl-pageup": "space.prev",
+    "ctrl-pagedown": "space.next"
   },
   "mod:pjp-prefix": {
     "ctrl-k": "pjp-prefix.literal"

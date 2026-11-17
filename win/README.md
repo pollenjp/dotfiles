@@ -24,7 +24,8 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
 | `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる板 (質問・状況の説明・進み具合・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
-| `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (旧 herdr に寄せた space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
+| `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
+| `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -301,7 +302,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
-| 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
+| 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
@@ -553,7 +554,8 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 
 | キー | herdr-app ですること | 旧 herdr |
 | --- | --- | --- |
-| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 前・次の space (`space.prev`・`space.next`) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。Windows の herdr-app では Ctrl+Alt が AltGr になるので Shift にした) |
+| `Ctrl+PageUp`・`Ctrl+PageDown` | 前・次の space (`space.prev`・`space.next`。herdr-app の既定ではタブの移動) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。旧 herdr は PageUp・PageDown をキーに使えない) |
+| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 同じく前・次の space | (旧 herdr は `Ctrl+Alt+↑↓`) |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
 | prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
@@ -573,6 +575,14 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
   取るかを伝えるよう書いている)。端末のプログラムに送るときは、prefix の後にもう一度 `Ctrl+K`。小窓に focus がある間の `Ctrl+K` を mod に
   渡すのは keys.json の section `mod:pjp-prefix` (細かい section が `global` より勝つ。無いと `global` の `Ctrl+K` が小窓を閉じるだけになる)
+- space の移動は `Ctrl+PageUp`・`Ctrl+PageDown` と `Ctrl+Shift+↑↓` の両方。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定ではタブの移動
+  (`tab.prev`・`tab.next`) に使うキーなので、repo の `herdr-app/keys.defaults.json` にその既定の値を書いて上書きする (下の「書き足し方」)。タブの移動は
+  `Ctrl+↑↓` と、herdr-app の既定の `Ctrl+Tab`・`Ctrl+Shift+Tab`・`Alt+]`・`Alt+[` が残る。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定でも取って
+  いるキーで、端末のプログラムに届かないのは前と同じ。`Ctrl+Shift+↑↓` も herdr-app が取るので、端末のプログラムには届かない
+- 旧 herdr は PageUp・PageDown をキーの名前に持たない (0.9.5 でも、どう綴っても `herdr config check` が invalid keybinding にする。
+  [`nix/files/herdr/config.toml`](../nix/files/herdr/config.toml) のコメント) ので、旧 herdr の workspace の移動は `Ctrl+Alt+↑↓` のまま。herdr-app の中で
+  旧 herdr を動かすと、`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app が先に取り (旧 herdr には届かない)、`Ctrl+Alt+↑↓` は herdr-app が割り当てないので
+  旧 herdr に届く
 - worktree の名前は `worktree/<形容詞>-<名詞>-<16 進 4 桁>` (旧 herdr と同じ形。例 `worktree/calm-river-8281`。フォルダは
   `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
   作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
@@ -587,6 +597,11 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   書いた後に herdr-app の側で書き換えたキーは、上書きせずに ⚠ で知らせる (残すなら repo の `herdr-app/keys.json` に取り込み、dotfiles の値にするなら
   `dotfiles apply --steps herdr-app-keys --force`)。書く前の中身を `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys\backup\` に写す (いちばん古いものと、
   新しい方から 10 個)
+- herdr-app の既定のキーを替える: repo の `herdr-app/keys.defaults.json` (keys.json と同じ形) に、dotfiles が上書きしてよい herdr-app の既定の値を書く
+  (今は `global` の `ctrl-pageup` = `tab.prev`・`ctrl-pagedown` = `tab.next`)。今の値がその値なら、⚠ を出さずに書き換えて記録する (新しい PC でも、
+  逃げ道のキーで既定に戻されたときも)。ほかの値 (手で変えた値・herdr-app の別の版の既定) は今までどおり ⚠ で飛ばす。repo の keys.json から消した
+  キーは、今の値が記録どおりなら、keys.defaults.json に値があれば外さずにその値へ戻す (外すと herdr-app のそのキーが無くなるので、keys.defaults.json の
+  行は残す)。`--force` はほかの衝突も上書きするので、既定のキーを替えるためには使わない
 - **keys.json を一度書き換えると、herdr-app を上げても新しい既定のキーは足されない。** herdr-app は手を入れていない keys.json だけを新しい版の既定に替え、
   少しでも書き換えたファイルは丸ごとユーザーのものとして残す (herdr-app の home の `AGENTS.md` の Keys の節)。herdr-app を上げたら、更新ノート
   (Settings → Updates の What's new。命令は `app.whats_new`) を見る。既定のキーが増えた版は「keys.json を書き換えたなら自分で足す」として、足すキーと
@@ -599,8 +614,9 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   `dotfiles check --steps herdr-app-keys` を流すと、`keys.error` があれば ※ で知らせる (書いたその apply では、`keys.error` は前の中身のものなので
   知らせない。`herdr-app status` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
   focus がある間はそちらが効く
-- キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`)。キーの書き方と命令の名前は、
-  herdr-app の home の `AGENTS.md` の Keys の節と `herdr-app commands`
+- キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`。herdr-app の既定のキーを替える
+  ときは `herdr-app/keys.defaults.json` にその既定の値も書く)。キーの書き方と命令の名前は、herdr-app の home の `AGENTS.md` の Keys の節と
+  `herdr-app commands`。既定の値は、herdr-app を一度も書き換えていない keys.json (新しい PC で herdr-app が書いたもの) で見る
 
 ## 配る
 
