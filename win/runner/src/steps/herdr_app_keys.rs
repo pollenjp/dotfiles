@@ -8,6 +8,9 @@
 //!   書き換え、そうでなければ衝突として残して ⚠ で知らせる (`--force` で上書き)。repo から消えたキーは、今の値が記録どおりなら外す (空に
 //!   なった section も外す)。書き換えてあれば残して知らせる。キーの順を見ずに同じなら書かない。改行の形 (herdr-app は Windows で CRLF) は前の
 //!   中身に合わせる
+//! - herdr-app の既定のキーを替えるときは、repo の `keys.defaults.json` (keys.json と同じ形) にその既定の値を書く。今の値がその値と同じキーは、
+//!   衝突にせずに書き換えて記録する (逃げ道のキーで既定に戻されたときも)。repo から消したキーは、今の値が記録どおりなら、ここに値があれば外さずに
+//!   その値へ戻す (外すと herdr-app のそのキーが無くなる)。既定でも dotfiles の値でもない値 (手で変えた値) は、今までどおり衝突
 //! - keys.json が無ければ作らない。herdr-app は keys.json をキーの全部として読み、無ければ起きたときに既定を書く (dotfiles のキーだけの
 //!   ファイルを作ると、既定のキーが無くなる)
 //! - herdr-app は、手を入れていない keys.json だけを、版上げのときに新しい既定のキーへ替える。この手順が一度書くと、ファイルは丸ごとユーザーの
@@ -30,6 +33,8 @@ use std::path::Path;
 
 /// repo のキーの置き場 (`/` 区切り)。herdr-app の keys.json と同じ形 (section → { キー: action }) で、dotfiles が持つキーだけを書く
 pub const KEYS: &str = "win/herdr-app/keys.json";
+/// herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`/` 区切り。keys.json と同じ形)
+pub const DEFAULTS: &str = "win/herdr-app/keys.defaults.json";
 /// 書いたキーの記録 (`%LOCALAPPDATA%\dotfiles\state\` の下)
 pub const RECORD_FILE: &str = "herdr-app-keys.applied.json";
 /// 書く前の keys.json を写す数 (いちばん古いものとは別に)
@@ -65,6 +70,10 @@ impl Step for HerdrAppKeys {
         ctx.say(format!("herdr-app の home: {} ({why})", home.display()));
         let wanted = match load_wanted(&src) {
             Ok(w) => w,
+            Err(e) => return failed(ctx, e),
+        };
+        let defaults = match load_defaults(&ctx.repo_path(DEFAULTS)) {
+            Ok(d) => d,
             Err(e) => return failed(ctx, e),
         };
         let text = match std::fs::read_to_string(&target) {
@@ -113,7 +122,7 @@ impl Step for HerdrAppKeys {
             .and_then(|k| record.get(k))
             .cloned()
             .unwrap_or_default();
-        let plan = match merge(&doc, &wanted, &written, mode.force()) {
+        let plan = match merge(&doc, &wanted, &defaults, &written, mode.force()) {
             Ok(p) => p,
             Err(e) => return failed(ctx, format!("{shown} の {e} → 手で直す")),
         };
@@ -206,6 +215,15 @@ pub fn load_wanted(path: &Path) -> Result<Wanted, String> {
         .collect()
 }
 
+/// herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (repo の `keys.defaults.json`。keys.json と同じ形で読む)。ファイルが無ければ空。
+/// 今の値がここの値と同じキーは、衝突にせずに dotfiles の値へ書き換え、repo から消したキーは外さずにここの値へ戻す。
+pub fn load_defaults(path: &Path) -> Result<Wanted, String> {
+    match std::fs::metadata(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        _ => load_wanted(path),
+    }
+}
+
 /// 記録 (`{"version":1,"files":{<keys.json のパス>:{<section>:{<キー>:<action>}}}}`) と、読めなかったときの知らせ。読めなければ空として
 /// 進める (claude-skill-overrides と同じ。apply で直す)。
 fn load_record(path: &Path) -> (BTreeMap<String, Written>, Option<String>) {
@@ -269,12 +287,21 @@ enum Act {
     Same,
     /// dotfiles が前に書いた値 (記録どおり) から書き換える
     Update { from: OValue },
+    /// herdr-app の既定の値 (keys.defaults.json どおり) から書き換える
+    Replace { from: OValue },
     /// 違う値を --force で上書きする
     Force { from: OValue },
-    /// 違う値を残す (`written`: dotfiles が書いた後に herdr-app の側で書き換えた。false は dotfiles が書いた値でない)
-    Conflict { have: OValue, written: bool },
+    /// 違う値を残す (`written`: dotfiles が書いた後に herdr-app の側で書き換えた。false は dotfiles が書いた値でない。`default`:
+    /// keys.defaults.json の既定の値 (今の値はそれとも違う))
+    Conflict {
+        have: OValue,
+        written: bool,
+        default: Option<OValue>,
+    },
     /// repo から消えたキーを外す (今の値が記録どおり)
     Remove { have: OValue },
+    /// repo から消えたキーを、herdr-app の既定の値 (keys.defaults.json) に戻す (今の値が記録どおり)
+    Restore { have: OValue, to: OValue },
     /// repo から消えたが、今の値が記録と違うので残す
     Kept {
         have: OValue,
@@ -296,25 +323,52 @@ struct Plan {
     changes: Vec<Change>,
 }
 
-/// keys.json に dotfiles のキーを入れる。触る section が object でない (null は無いものとして読む) なら、その名前を添えて誤り。
-fn merge(doc: &OValue, wanted: &Wanted, written: &Written, force: bool) -> Result<Plan, String> {
+/// keys.json に dotfiles のキーを入れる。`defaults` は herdr-app の既定の値のうち上書きしてよいもの (keys.defaults.json)。触る section が
+/// object でない (null は無いものとして読む) なら、その名前を添えて誤り。
+fn merge(
+    doc: &OValue,
+    wanted: &Wanted,
+    defaults: &Wanted,
+    written: &Written,
+    force: bool,
+) -> Result<Plan, String> {
+    let default_of = |section: &str, key: &str| {
+        defaults
+            .iter()
+            .find(|(s, _)| s == section)
+            .and_then(|(_, ks)| ks.iter().find(|(k, _)| k == key))
+            .map(|(_, v)| v.clone())
+    };
     let mut out = doc.clone();
     let mut next: Written = BTreeMap::new();
     let mut changes = Vec::new();
     for (section, keys) in wanted {
         for (key, want) in keys {
             let was = written.get(section).and_then(|m| m.get(key));
+            let default = default_of(section, key);
             let act = match entry(&out, section, key)? {
                 None => Act::Add,
                 Some(have) if have.to_value() == want.to_value() => Act::Same,
                 Some(have) if was == Some(&have.to_value()) => Act::Update { from: have },
+                // herdr-app の既定のまま (逃げ道のキーで既定に戻されたときも): 記録が無い・記録と違っても、衝突にしない
+                Some(have)
+                    if default
+                        .as_ref()
+                        .is_some_and(|d| d.to_value() == have.to_value()) =>
+                {
+                    Act::Replace { from: have }
+                }
                 Some(have) if force => Act::Force { from: have },
                 Some(have) => Act::Conflict {
                     have,
                     written: was.is_some(),
+                    default,
                 },
             };
-            if matches!(act, Act::Add | Act::Update { .. } | Act::Force { .. }) {
+            if matches!(
+                act,
+                Act::Add | Act::Update { .. } | Act::Replace { .. } | Act::Force { .. }
+            ) {
                 put(&mut out, section, key, want.clone());
             }
             // 残した値は記録を変えない (前に書いた値があれば、その記録を持ち越す)
@@ -348,13 +402,20 @@ fn merge(doc: &OValue, wanted: &Wanted, written: &Written, force: bool) -> Resul
             }
             let act = match entry(&out, section, key)? {
                 None => continue,
-                Some(have) if have.to_value() == *was => {
-                    take(&mut out, section, key);
-                    if !emptied.contains(&section) {
-                        emptied.push(section);
+                // herdr-app の既定の値があれば、外さずに戻す (外すと herdr-app のそのキーが無くなる)
+                Some(have) if have.to_value() == *was => match default_of(section, key) {
+                    Some(to) => {
+                        put(&mut out, section, key, to.clone());
+                        Act::Restore { have, to }
                     }
-                    Act::Remove { have }
-                }
+                    None => {
+                        take(&mut out, section, key);
+                        if !emptied.contains(&section) {
+                            emptied.push(section);
+                        }
+                        Act::Remove { have }
+                    }
+                },
                 Some(have) => Act::Kept {
                     have,
                     was: was.clone(),
@@ -459,6 +520,15 @@ impl Tally {
                     format!("{label} = {want} (前は {})", shown(from)),
                 );
             }
+            Act::Replace { from } => {
+                self.updated += 1;
+                say(
+                    ctx,
+                    "書き換える",
+                    "書き換えました",
+                    format!("{label} = {want} (前は herdr-app の既定 {})", shown(from)),
+                );
+            }
             Act::Force { from } => {
                 self.updated += 1;
                 say(
@@ -477,11 +547,33 @@ impl Tally {
                     format!("{label} = {} (repo から消えた)", shown(have)),
                 );
             }
-            Act::Conflict { have, written } => {
-                let why = if *written {
-                    "herdr-app の側で書き換えた"
-                } else {
-                    "dotfiles が書いた値でない (herdr-app の既定・手で書いた値)"
+            Act::Restore { have, to } => {
+                self.removed += 1;
+                say(
+                    ctx,
+                    "戻す",
+                    "戻しました",
+                    format!(
+                        "{label} = {} (repo から消えた。herdr-app の既定に戻す。前は {})",
+                        shown(to),
+                        shown(have)
+                    ),
+                );
+            }
+            Act::Conflict {
+                have,
+                written,
+                default,
+            } => {
+                let why = match (written, default) {
+                    (true, _) => "herdr-app の側で書き換えた".to_string(),
+                    (false, Some(d)) => format!(
+                        "dotfiles が書いた値でも、herdr-app の既定 (keys.defaults.json の {}) でもない",
+                        shown(d)
+                    ),
+                    (false, None) => {
+                        "dotfiles が書いた値でない (herdr-app の既定・手で書いた値)".to_string()
+                    }
                 };
                 let s = format!(
                     "{label} (keys.json は {}、dotfiles は {want}。{why} → 残すなら dotfiles の win/herdr-app/keys.json に取り込む。dotfiles の値にするなら dotfiles apply --steps herdr-app-keys --force)",
@@ -558,14 +650,18 @@ mod tests {
     //! - 手で書いた同じ値は引き取る (書き換えず、記録だけ作る)。action が object なら、キーの順を見ずに比べる
     //! - 記録どおりの値は、repo を変えると書き換える。記録の無い違う値・herdr-app の側で書き換えた値は衝突 (残して ⚠。--force で上書き)
     //! - repo から消えたキーは、今の値が記録どおりなら外す (空になった section も外す)。書き換えてあれば残して ⚠
-    //! - keys.json が無ければ作らない (⚠。herdr-app を一度起こしてから)。壊れた keys.json・object でない section・壊れた repo のキーは failed (書かない)
+    //! - keys.defaults.json の herdr-app の既定の値は、衝突にせずに書き換える (既定に戻されたときも)。既定でも dotfiles の値でもない値は衝突
+    //!   (文に既定の値を添える)。repo から消えたキーは、記録どおりなら既定の値に戻す (同じ場所で)。ファイルが無ければ空
+    //! - keys.json が無ければ作らない (⚠。herdr-app を一度起こしてから)。壊れた keys.json・object でない section・壊れた repo のキーと既定の値は
+    //!   failed (書かない)
     //! - 書く前の中身を控えに写す (いちばん古いものと、新しい方から 10 個)
     //! - 記録は keys.json のパスごと。同じ home を別の綴りで書いても同じ記録を引き、ほかの home の記録は残す。壊れた記録は無いものとして知らせ、
     //!   apply で直す (書くキーが無くても)。衝突したキーは apply でも残し、前に書いた値の記録を持ち越す
     //! - keys.error (herdr-app が keys.json を読めなかった) があれば ※ で知らせる。その apply で書いたときは、前の中身のものなので知らせず、
     //!   後で check で見るよう出す
-    //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。Shift+G の argv が c の
-    //!   3 か所 (fish・bash・PowerShell) と同じ引数
+    //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。space は Ctrl+PageUp/Down
+    //!   (herdr-app の既定のタブの移動を keys.defaults.json で上書きする)・タブは Ctrl+↑↓ で、Ctrl+Shift+↑↓・Ctrl+Alt+↑↓ は割り当てない。
+    //!   Shift+G の argv が c の 3 か所 (fish・bash・PowerShell) と同じ引数
 
     use super::*;
     use crate::context::join_segments;
@@ -999,6 +1095,137 @@ mod tests {
         assert_eq!(rec["files"], serde_json::json!({}), "{rec}");
     }
 
+    /// herdr-app の既定の ctrl-pageup (tab.prev) を入れた keys.json と、それを space.prev に替える repo のキー・既定の値
+    fn with_pageup_default(e: &Env) {
+        e.t.write(
+            "home/.config/herdr-app/keys.json",
+            &DEFAULT.replace(
+                "\"ctrl-shift-t\": \"tab.new\"",
+                "\"ctrl-pageup\": \"tab.prev\",\n    \"ctrl-shift-t\": \"tab.new\"",
+            ),
+        );
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            r#"{ "global": { "ctrl-k": "mod.open:pjp-prefix", "ctrl-pageup": "space.prev" } }"#,
+        );
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.defaults.json",
+            r#"{ "global": { "ctrl-pageup": "tab.prev" } }"#,
+        );
+    }
+
+    /// repo の keys.defaults.json に書いた herdr-app の既定の値は、衝突にせずに dotfiles の値へ書き換える (既定に戻されたときも)。
+    /// 既定でも dotfiles の値でもない値 (手で変えた値) は今までどおり衝突
+    #[test]
+    fn replaces_listed_herdr_app_defaults() {
+        let e = Env::new();
+        with_pageup_default(&e);
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            out.contains(
+                "書き換える (apply で): global ctrl-pageup = space.prev (前は herdr-app の既定 tab.prev)"
+            ),
+            "{out}"
+        );
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(
+            o[0].text
+                .starts_with("追加 1 / 更新 1 / 削除 0 / 同じ 0 / 飛ばした 0"),
+            "{o:?}"
+        );
+        assert_eq!(
+            e.keys()[0].1,
+            pairs(&[
+                ("alt-1", "space.select:1"),
+                ("ctrl-pageup", "space.prev"),
+                ("ctrl-shift-t", "tab.new"),
+                ("ctrl-k", "mod.open:pjp-prefix"),
+            ]),
+            "同じ場所で書き換える"
+        );
+        assert_eq!(e.recorded()["global"]["ctrl-pageup"], "space.prev");
+        // herdr-app の既定に戻された (逃げ道のキーで keys.json を作り直したなど) ら、記録と違っても衝突にせずに書き直す
+        let text = e.keys_text().replace("\"space.prev\"", "\"tab.prev\"");
+        std::fs::write(e.home("keys.json"), text).unwrap();
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("更新 1"), "{o:?}");
+        assert!(
+            e.keys()[0]
+                .1
+                .contains(&("ctrl-pageup".to_string(), "\"space.prev\"".to_string()))
+        );
+        // 既定でも dotfiles の値でもない値は衝突 (残して ⚠)。--force なら上書きする
+        let e = Env::new();
+        with_pageup_default(&e);
+        let text = e.keys_text().replace("\"tab.prev\"", "\"pane.zoom\"");
+        std::fs::write(e.home("keys.json"), &text).unwrap();
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}\n{out}");
+        assert!(
+            o[1].notes.iter().any(|n| n.starts_with(
+                "global ctrl-pageup (keys.json は pane.zoom、dotfiles は space.prev。dotfiles が書いた値でも、herdr-app の既定 (keys.defaults.json の tab.prev) でもない"
+            )),
+            "{o:?}"
+        );
+        assert!(
+            e.keys()[0]
+                .1
+                .contains(&("ctrl-pageup".to_string(), "\"pane.zoom\"".to_string())),
+            "残す"
+        );
+        let (o, out) = e.run(Mode::Apply { force: true });
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(e.recorded()["global"]["ctrl-pageup"], "space.prev");
+    }
+
+    /// repo から消したキーは、今の値が記録どおりなら、keys.defaults.json の herdr-app の既定の値に戻す (外すと herdr-app のそのキーが無くなる)
+    #[test]
+    fn restores_herdr_app_defaults_for_keys_gone_from_the_repo() {
+        let e = Env::new();
+        with_pageup_default(&e);
+        e.run(APPLY);
+        // repo のキーから ctrl-pageup を消す (既定の値の行は残す)
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            r#"{ "global": { "ctrl-k": "mod.open:pjp-prefix" } }"#,
+        );
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            out.contains(
+                "戻す (apply で): global ctrl-pageup = tab.prev (repo から消えた。herdr-app の既定に戻す。前は space.prev)"
+            ),
+            "{out}"
+        );
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(
+            o[0].text
+                .starts_with("追加 0 / 更新 0 / 削除 1 / 同じ 1 / 飛ばした 0"),
+            "{o:?}"
+        );
+        assert_eq!(
+            e.keys()[0].1,
+            pairs(&[
+                ("alt-1", "space.select:1"),
+                ("ctrl-pageup", "tab.prev"),
+                ("ctrl-shift-t", "tab.new"),
+                ("ctrl-k", "mod.open:pjp-prefix"),
+            ]),
+            "外さずに、同じ場所で既定の値に戻す"
+        );
+        assert_eq!(
+            e.recorded(),
+            serde_json::json!({ "global": { "ctrl-k": "mod.open:pjp-prefix" } })
+        );
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("同じ 1"), "{o:?}");
+    }
+
     /// keys.json はキーの全部 (無ければ herdr-app が既定を書く)。dotfiles のキーだけのファイルを作ると既定のキーが消えるので作らない
     #[test]
     fn missing_keys_json_is_not_created() {
@@ -1054,6 +1281,25 @@ mod tests {
             assert_eq!(kinds(&o), vec![Kind::Failed], "{text}: {o:?}\n{out}");
             assert!(o[0].text.contains(want), "{text}: {o:?}");
             assert_eq!(e.keys_text(), DEFAULT);
+        }
+        // repo の herdr-app の既定の値 (keys.defaults.json) が読めない・形が違う
+        for (text, want) in [
+            ("{", "壊れて"),
+            (
+                "{\"global\": {\"ctrl-pageup\": 1}}",
+                "global ctrl-pageup の action が文字列でも object でもない",
+            ),
+        ] {
+            let e = Env::new();
+            e.t.write("dotfiles/win/herdr-app/keys.defaults.json", text);
+            let (o, out) = e.run(APPLY);
+            assert_eq!(kinds(&o), vec![Kind::Failed], "{text}: {o:?}\n{out}");
+            assert!(
+                o[0].text.contains(want) && o[0].text.contains("keys.defaults.json"),
+                "{text}: {o:?}"
+            );
+            assert_eq!(e.keys_text(), DEFAULT);
+            assert!(e.record_text().is_none());
         }
     }
 
@@ -1275,25 +1521,45 @@ mod tests {
                 "main.js が {command} を受けない"
             );
         }
-        // ほかに要る形: global に space (旧 herdr と同じ Ctrl+Alt+↑↓) と tab の移動
+        // ほかに要る形: global に space (Ctrl+PageUp/Down) と tab (Ctrl+↑↓) の移動
+        let has = |keys: &[(String, OValue)], key: &str, action: &str| {
+            keys.iter()
+                .any(|(k, v)| k == key && *v == OValue::String(action.to_string()))
+        };
         for (key, action) in [
-            ("ctrl-alt-up", "space.prev"),
-            ("ctrl-alt-down", "space.next"),
+            ("ctrl-pageup", "space.prev"),
+            ("ctrl-pagedown", "space.next"),
             ("ctrl-up", "tab.prev"),
             ("ctrl-down", "tab.next"),
         ] {
             assert!(
-                global
-                    .iter()
-                    .any(|(k, v)| k == key && *v == OValue::String(action.to_string())),
+                has(global, key, action),
                 "global の {key} が {action} でない"
             );
         }
-        // 前に space に使った Ctrl+Shift+↑↓ は割り当てず、端末のプログラムに返す
-        for key in ["ctrl-shift-up", "ctrl-shift-down"] {
+        // space に Ctrl+Shift+↑↓・Ctrl+Alt+↑↓ は割り当てない (端末のプログラムに返す)
+        for key in [
+            "ctrl-shift-up",
+            "ctrl-shift-down",
+            "ctrl-alt-up",
+            "ctrl-alt-down",
+        ] {
             assert!(
                 global.iter().all(|(k, _)| k != key),
-                "global に {key} が残っている"
+                "global に {key} がある"
+            );
+        }
+        // Ctrl+PageUp/Down の herdr-app の既定 (タブの移動) は、keys.defaults.json に書いて上書きする
+        let defaults = load_wanted(&join_segments(&repo, DEFAULTS)).unwrap();
+        let default_global = &defaults
+            .iter()
+            .find(|(s, _)| s == "global")
+            .expect("keys.defaults.json に global がある")
+            .1;
+        for (key, action) in [("ctrl-pageup", "tab.prev"), ("ctrl-pagedown", "tab.next")] {
+            assert!(
+                has(default_global, key, action),
+                "keys.defaults.json の global の {key} が {action} でない"
             );
         }
     }

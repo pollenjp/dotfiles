@@ -3,8 +3,8 @@
     "ctrl-k": "mod.open:pjp-prefix",
     "ctrl-up": "tab.prev",
     "ctrl-down": "tab.next",
-    "ctrl-alt-up": "space.prev",
-    "ctrl-alt-down": "space.next"
+    "ctrl-pageup": "space.prev",
+    "ctrl-pagedown": "space.next"
   },
   "mod:pjp-prefix": {
     "ctrl-k": "pjp-prefix.literal"
