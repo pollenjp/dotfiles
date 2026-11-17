@@ -59,6 +59,8 @@ struct Ps<'w, 'a> {
     /// `$env:NAME = 値` で付けた env (書いた名前・値)
     env: Vec<(String, String)>,
     queue: Vec<String>,
+    /// `$( )` の値を読む lexer の入れ子の深さ
+    nest: usize,
 }
 
 fn is_sq(c: char) -> bool {
@@ -123,9 +125,20 @@ fn here_end(s: &[char], body: usize, dq: bool) -> (usize, usize) {
     (n, n)
 }
 
+/// `"…"` の中の `$( )` と、`$( )` の値を読む lexer の入れ子をたどる深さの上限 (Windows の main thread の stack は 1 MB しか無い。これより深い
+/// ものは閉じない・値は中の文字のまま、とみなす)
+const MAX_NEST: usize = 64;
+
 /// `s[p]` の `(` に対応する `)` の位置 (無ければ `s.len()`)。引用符・here-string・コメント・backtick の中の括弧は数えない
 fn paren_end(s: &[char], p: usize) -> usize {
+    paren_end_n(s, p, 0)
+}
+
+fn paren_end_n(s: &[char], p: usize, nest: usize) -> usize {
     let n = s.len();
+    if nest > MAX_NEST {
+        return n;
+    }
     let mut depth = 0i64;
     let mut j = p;
     while j < n {
@@ -167,7 +180,7 @@ fn paren_end(s: &[char], p: usize) -> usize {
                     break;
                 }
                 if d == '$' && at(s, j + 1) == Some('(') {
-                    j = paren_end(s, j + 1) + 1;
+                    j = paren_end_n(s, j + 1, nest + 1) + 1;
                     continue;
                 }
                 j += 1;
@@ -214,6 +227,7 @@ impl<'w, 'a> Ps<'w, 'a> {
             vars,
             env: Vec::new(),
             queue: Vec::new(),
+            nest: 0,
         }
     }
 
@@ -401,7 +415,18 @@ impl<'w, 'a> Ps<'w, 'a> {
 
     /// `$( )` の値: `Get-Content <file>` (`gc`・`cat`・`type` も) だけならファイルの印、ほかは `$(中の文字)`
     fn subst_value(&self, inner: &str) -> String {
+        // 頭の語が Get-Content (gc・cat・type) のときだけ読む (ほかは中を読み直さない。入れ子の深いコマンドで二乗に遅くならないように)
+        let head: String = inner
+            .trim_start()
+            .chars()
+            .take_while(|c| !c.is_whitespace() && !matches!(c, ';' | '|' | '(' | ')' | '{' | '}'))
+            .collect();
+        let name = super::base_name(head.trim_matches(['\'', '"']), true);
+        if self.nest >= MAX_NEST || super::ps_alias(&name) != "get-content" {
+            return format!("$({inner})");
+        }
         let mut sub = Ps::new(self.world, self.vars.clone());
+        sub.nest = self.nest + 1;
         let chars: Vec<char> = inner.replace("\r\n", "\n").chars().collect();
         sub.lex(&chars);
         sub.flush(false);
@@ -812,6 +837,13 @@ mod tests {
             w(&[&["PJP_ALLOW_IAC=1", "terraform", "apply"]])
         );
         assert_eq!(words("$n = 3"), Vec::<Vec<String>>::new());
+    }
+
+    /// 引用符の中の $( ) を深く入れ子にしても stack が溢れない (Windows の main thread の stack は 1 MB)
+    #[test]
+    fn deep_nesting_does_not_overflow() {
+        assert!(!split(&"echo \"$(".repeat(1000)).is_empty());
+        assert!(!split(&"echo $(".repeat(1000)).is_empty());
     }
 
     #[test]

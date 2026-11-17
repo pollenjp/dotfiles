@@ -34,13 +34,19 @@ pub fn run(name: &str, raw: &str, sys: &dyn Sys) -> Option<String> {
     let input: Value = serde_json::from_str(raw).ok()?;
     match name {
         "docs-guard" => docs_guard::run(&input, sys),
-        "gist-guard" => guard::gist::run(raw, &input, sys),
-        "install-iac-guard" => guard::iac::run(raw, &input, sys),
+        "gist-guard" => quiet(|| guard::gist::run(raw, &input, sys)),
+        "install-iac-guard" => quiet(|| guard::iac::run(raw, &input, sys)),
         "pr-assignee-nudge" => pr_assignee_nudge::run(&input, sys),
         "run-through-nudge" => run_through_nudge::run(&input),
-        "xref-guard" => guard::xref::run(raw, &input, sys),
+        "xref-guard" => quiet(|| guard::xref::run(raw, &input, sys)),
         _ => None,
     }
+}
+
+/// コマンドを読む guard は、思わぬ入力で panic しても黙って 0 で終える (bash の版の「何があっても exit 0」。0 と 2 のほかの終了コードは tool の
+/// 流れを乱す)。panic の文は stderr に出る
+fn quiet(f: impl FnOnce() -> Option<String>) -> Option<String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or(None)
 }
 
 /// ホーム (Windows は `USERPROFILE`、ほかは `HOME`。Linux の hook の `${HOME}` に当たる)。

@@ -174,8 +174,12 @@ fn heredoc_read(s: &[char], pos: usize, delim: &str, strip: bool) -> (String, us
     (body, pos)
 }
 
+/// `"…"` の中の `$( )` の入れ子をたどる深さの上限。これより深いものは閉じないものとみなす (awk に上限は無いが、Windows の main thread の
+/// stack は 1 MB しか無く、64 KB のコマンドで入れ子を 1 万段にすると溢れて hook が落ちる)
+const MAX_NEST: usize = 200;
+
 /// `s[j]` の `"` に対応する `"` の位置 (無ければ `s.len()`)
-fn dq_end(s: &[char], j: usize) -> usize {
+fn dq_end(s: &[char], j: usize, nest: usize) -> usize {
     let n = s.len();
     let mut j = j + 1;
     while j < n {
@@ -188,7 +192,7 @@ fn dq_end(s: &[char], j: usize) -> usize {
             return j;
         }
         if d == '$' && at(s, j + 1) == Some('(') {
-            j = paren_end(s, j + 1) + 1;
+            j = paren_end_n(s, j + 1, nest + 1) + 1;
             continue;
         }
         if d == '`' {
@@ -220,7 +224,14 @@ fn bt_end(s: &[char], j: usize) -> usize {
 
 /// `s[p]` の `(` に対応する `)` の位置 (無ければ `s.len()`)。引用符・`\`・`` ` ` ``・heredoc の本文・コメントの中の括弧は数えない
 fn paren_end(s: &[char], p: usize) -> usize {
+    paren_end_n(s, p, 0)
+}
+
+fn paren_end_n(s: &[char], p: usize, nest: usize) -> usize {
     let n = s.len();
+    if nest > MAX_NEST {
+        return n;
+    }
     let mut depth = 0i64;
     let mut hds: Vec<(String, bool)> = Vec::new();
     let mut j = p;
@@ -237,7 +248,7 @@ fn paren_end(s: &[char], p: usize) -> usize {
                     j += 1;
                 }
             }
-            '"' => j = dq_end(s, j),
+            '"' => j = dq_end(s, j, nest),
             '`' => j = bt_end(s, j),
             '(' => depth += 1,
             ')' => {
@@ -833,6 +844,13 @@ mod tests {
         assert_eq!(c[0].words[4], "1) a");
         // 中のコマンドも別の単純コマンドとして読む
         assert_eq!(c[1].words, vec!["cat"]);
+    }
+
+    /// 引用符の中の $( ) を深く入れ子にしても stack が溢れない (Windows の main thread の stack は 1 MB)
+    #[test]
+    fn deep_nesting_does_not_overflow() {
+        let src = "echo \"$(".repeat(1000);
+        assert!(!split_commands(&src, false).is_empty());
     }
 
     #[test]
