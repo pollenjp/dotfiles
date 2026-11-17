@@ -1275,10 +1275,10 @@ mod tests {
                 "main.js が {command} を受けない"
             );
         }
-        // ほかに要る形: global に space と tab の移動
+        // ほかに要る形: global に space (旧 herdr と同じ Ctrl+Alt+↑↓) と tab の移動
         for (key, action) in [
-            ("ctrl-shift-up", "space.prev"),
-            ("ctrl-shift-down", "space.next"),
+            ("ctrl-alt-up", "space.prev"),
+            ("ctrl-alt-down", "space.next"),
             ("ctrl-up", "tab.prev"),
             ("ctrl-down", "tab.next"),
         ] {
@@ -1287,6 +1287,13 @@ mod tests {
                     .iter()
                     .any(|(k, v)| k == key && *v == OValue::String(action.to_string())),
                 "global の {key} が {action} でない"
+            );
+        }
+        // 前に space に使った Ctrl+Shift+↑↓ は割り当てず、端末のプログラムに返す
+        for key in ["ctrl-shift-up", "ctrl-shift-down"] {
+            assert!(
+                global.iter().all(|(k, _)| k != key),
+                "global に {key} が残っている"
             );
         }
     }

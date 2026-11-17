@@ -553,7 +553,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 
 | キー | herdr-app ですること | 旧 herdr |
 | --- | --- | --- |
-| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 前・次の space (`space.prev`・`space.next`) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。Windows の herdr-app では Ctrl+Alt が AltGr になるので Shift にした) |
+| `Ctrl+Alt+↑`・`Ctrl+Alt+↓` | 前・次の space (`space.prev`・`space.next`) | `previous_workspace`・`next_workspace` |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
 | prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
@@ -573,6 +573,11 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
   取るかを伝えるよう書いている)。端末のプログラムに送るときは、prefix の後にもう一度 `Ctrl+K`。小窓に focus がある間の `Ctrl+K` を mod に
   渡すのは keys.json の section `mod:pjp-prefix` (細かい section が `global` より勝つ。無いと `global` の `Ctrl+K` が小窓を閉じるだけになる)
+- space の移動は旧 herdr と同じ `Ctrl+Alt+↑↓` にした。Windows では Ctrl+Alt が AltGr として読まれるので、herdr-app の案内 (home の `AGENTS.md` の Keys の
+  節) は、Ctrl+Alt のキーを自分からは選ばず、頼まれて割り当てるときは何を取るかを伝えるよう書いている。取るのは端末のプログラム (shell・TUI) に届く
+  `Ctrl+Alt+↑↓` だけで、矢印は AltGr を足しても字を打たないので、打てなくなる字は無い。グラフィックのドライバーなどが `Ctrl+Alt+矢印` を global hotkey に
+  取っている PC (画面を回すキーなど) では、herdr-app に届かず space が移らない。前の版で space に使った `Ctrl+Shift+↑↓` は割り当てない (当てると、記録
+  どおりの値なら keys.json から外れ、端末のプログラムに返る)
 - worktree の名前は `worktree/<形容詞>-<名詞>-<16 進 4 桁>` (旧 herdr と同じ形。例 `worktree/calm-river-8281`。フォルダは
   `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
   作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
