@@ -33,6 +33,8 @@ import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand } f
 const MOD = "mods/pjp-hub-panel";
 const MEDIA = "pjp-hub-panel-media"; // 図の置き場所。herdr-app の home の下で、mod のフォルダの外
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
+// #rrggbb に不透明度 (16 進の 2 桁) を足す。ほかの形 (#rgb・#rrggbbaa) は足すと色にならないので null (塗らない)
+const withAlpha = (color, aa) => (/^#[0-9a-fA-F]{6}$/.test(color ?? "") ? `${color}${aa}` : null);
 
 export default class HubPanel extends View {
   init(_props, cx) {
@@ -98,11 +100,15 @@ export default class HubPanel extends View {
 
   answerLine() {
     const parts = [];
-    for (const q of this.data?.questions ?? []) {
+    for (const [qi, q] of (this.data?.questions ?? []).entries()) {
       const oi = this.picked[q.id];
       if (oi === undefined) continue;
       const o = (q.options ?? [])[oi];
-      if (o) parts.push(o.answer ?? `${q.short ?? q.title} -> ${o.label}`);
+      if (!o) continue;
+      // short・title・label が無くても undefined を字にしない。問いはカードの札 (Q1…)、選択肢は何番目かで呼ぶ
+      const name = q.short ?? q.title ?? `Q${qi + 1}`;
+      const label = o.label ?? `${oi + 1} 番目`;
+      parts.push(o.answer ?? `${name} -> ${label}`);
     }
     return parts.join(" / ");
   }
@@ -156,6 +162,8 @@ export default class HubPanel extends View {
   colors() {
     const t = theme();
     const col = (k, d) => t[k] ?? d;
+    // いまの段 (active) の色。herdr-app の Agents 欄が動いているエージェントの印に使う色。無い theme では ansi3 (黄)
+    const working = col("working", col("ansi3", "#e5c07b"));
     return {
       t,
       fg: col("foreground", "#dddddd"),
@@ -168,6 +176,8 @@ export default class HubPanel extends View {
       solid: col("solid", col("accent", "#6aa0ff")),
       solidFg: col("solid_foreground", "#ffffff"),
       blocked: col("blocked", col("ansi1", "#e06c75")),
+      working,
+      workingBg: withAlpha(working, "26"), // working を薄く (Agents 欄の「Needs you」の札と同じ 0x26)。#rrggbb でなければ null
       ok: col("ansi2", "#98c379"),
       warn: col("ansi3", "#e5c07b"),
     };
@@ -252,7 +262,7 @@ export default class HubPanel extends View {
       if (s.type === "markdown") body = div().text_size(12).text_color(c.fg).child(TextView.markdown(`hp-md-${id}`, s.text ?? "").selectable(true));
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
-      else body = div().text_color(c.dim).child(`知らない節: ${s.type}`);
+      else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
     }
     return v_flex()
       .id(`hp-s-${id}`)
@@ -290,17 +300,20 @@ export default class HubPanel extends View {
 
   step(st, key, c) {
     const state = st.state ?? "todo";
+    const label = st.label ?? ""; // label の無い段は印だけにする (undefined・null を字にしない)
+    const tail = label === "" ? "" : ` ${label}`; // 印の後ろに付ける字
     const base = h_flex().id(`hp-st-${key}`).px(7).py(2).rounded(6).border_1().text_size(11).gap(4).items_center();
-    if (state === "done") return base.border_color(c.ok).text_color(c.ok).child(`✓ ${st.label}`);
+    if (state === "done") return base.border_color(c.ok).text_color(c.ok).child(`✓${tail}`);
+    // いまの段: working の枠と字に、同じ色を薄く敷いて点滅させる
     if (state === "active")
       return base
-        .border_color(c.accent)
-        .bg(c.accent)
-        .text_color(c.solidFg)
+        .border_color(c.working)
+        .when(!!c.workingBg, (el) => el.bg(c.workingBg))
+        .text_color(c.working)
         .loop("opacity", { from: 0.55, to: 1, period: 1400 })
-        .child(`● ${st.label}`);
-    if (state === "blocked") return base.border_color(c.blocked).text_color(c.blocked).child(`■ ${st.label}`);
-    return base.border_color(c.border).text_color(c.dim).child(st.label ?? "");
+        .child(`●${tail}`);
+    if (state === "blocked") return base.border_color(c.blocked).text_color(c.blocked).child(`■${tail}`);
+    return base.border_color(c.border).text_color(c.dim).child(label);
   }
 
   // 図の場所: "mods/" で始まるものはそのまま (herdr-app の home から)、ほかは MEDIA の下から。
