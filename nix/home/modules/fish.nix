@@ -271,7 +271,9 @@ in
       # ログインしていない・組織のポリシーで無効など) では警告を出して無視し、そのまま起動する。
       # c は以前 c-func (git commit -m "$*") を呼んでいた。git commit -m は gcm で打てる。
       # 同じ名前・同じ中身を bash (bash.nix の shellAliases) と Windows の PowerShell
-      # (win/powershell/dotfiles.ps1) にも置いている。直すときは 3 つをそろえる。
+      # (win/powershell/dotfiles.ps1) にも置き、herdr-app の prefix の mod
+      # (win/herdr-app/mods/pjp-prefix/main.js の CLAUDE。worktree を作って Claude Code を起こす argv。
+      # argv では abbr が広がらないので中身を並べる) にも同じ引数を並べている。直すときは 4 つをそろえる。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
     };
 

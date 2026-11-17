@@ -218,7 +218,8 @@ in
       #########################
       # 何をするか・末尾の --remote-control に = で空の値を渡す理由・以前の c (c-func) のことは
       # fish.nix の同じ節に書いてある。
-      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function の 3 つをそろえる。
+      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function と
+      # win/herdr-app/mods/pjp-prefix/main.js の CLAUDE (herdr-app で Claude Code を起こす argv) の 4 つをそろえる。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
     };
 
