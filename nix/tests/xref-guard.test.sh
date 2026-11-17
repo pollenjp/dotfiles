@@ -5,6 +5,9 @@
 #
 #   bash nix/tests/xref-guard.test.sh [<xref-guard.sh のパス>]
 #
+# win-runner の CI (win/runner/tests/guard_suites.rs) は、Windows の hook の口 (dotfiles-win claude-hook xref-guard) を呼ぶ包みを渡し、
+# 同じ例を Rust の写しにも流す (例の正本はここ 1 つ。Windows・PowerShell の tool だけの例は Rust の試験に書く)。
+#
 # flake の checks (xref-guard-test) が Nix のサンドボックスで流す。使うのは bash・jq・git・coreutils と stdenv の awk
 # だけ。gh は、公開範囲を FAKE_GH_VIS から答え、呼ばれた引数を書き留める偽物で代える (ネットワークに出ない)。repo の
 # remote の URL は github.com にするが push はしない (hook は打つ前に止めるか通すかを決めるだけ)。remote-tracking ref は
