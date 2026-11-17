@@ -1,6 +1,20 @@
 // pjp-hub-panel: ハブの Claude がユーザーに見せる板。質問 (選んで送る) と、今の状況の説明 (markdown)・
 // 進み具合 (flow)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。
-// props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>" }
+// props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
+//   role で、1 つの panel.json を「まとめ」と「問い」の 2 つのペインに分けて出せる (ハブはまとめのペインを開いておき、問いを
+//   出すときだけ、まとめのペインを下に分けて問いのペインを開く)。
+//   - 無い: 問いと状況の節を 1 つのペインに出す (role を足す前の形)
+//   - "summary" (まとめ): title・updated・sections だけを出す。questions は出さない (送信の UI も、Enter で送ることもしない)
+//   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。sections は出さない。
+//     questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
+//   - ほかの値: わけを出し、無いときと同じに出す
+//   どの role も、開いたときに自分からキーボードを取らない (取るのは pane.go で来た "focus" (nextCommand) のときだけ)。
+//   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
+//   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で focused() の pane (キーボードのあるペイン) を
+//   控え、その panes() の行が端末を持たず (terminal が null)、mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のとき
+//   だけ、Enter まで済んだ後にその ID で pane.close を打つ。確かめられなければ閉じず「送った (閉じるのはハブ)」と出す。pane.close を
+//   pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」では閉じない (端末で
+//   直に答えたときと同じく、閉じるのはハブ)。
 //
 // panel.json の形:
 //   { version, title, updated,
@@ -28,9 +42,13 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand } from "herdr";
+import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes } from "herdr";
 
 const MOD = "mods/pjp-hub-panel";
+const NAME = MOD.slice(MOD.lastIndexOf("/") + 1); // この mod の名前
+// この mod のペインか。写し (試しに置く pjp-hub-panel-try・mod.clone の pjp-hub-panel-copy など) は名前の後ろに -<何か> が付く
+const isOwnMod = (name) => typeof name === "string" && (name === NAME || name.startsWith(`${NAME}-`));
+const ROLES = ["summary", "questions"];
 const MEDIA = "pjp-hub-panel-media"; // 図の置き場所。herdr-app の home の下で、mod のフォルダの外
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
 // #rrggbb に不透明度 (16 進の 2 桁) を足す。ほかの形 (#rgb・#rrggbbaa) は足すと色にならないので null (塗らない)
@@ -98,6 +116,19 @@ export default class HubPanel extends View {
     cx.notify();
   }
 
+  // props.role。無い・空は null (1 つのペインに両方を出す)。知らない値はそのまま返す (render がわけを出す)
+  role() {
+    const r = props()?.role;
+    return r == null || r === "" ? null : r;
+  }
+
+  // id のペインが、端末を持たない (terminal が null) この mod のペインなら、その id。確かめられなければ null
+  ownPane(id) {
+    if (!id) return null;
+    const p = panes().find((x) => x.pane === id);
+    return p && p.terminal == null && isOwnMod(p.mod) ? id : null;
+  }
+
   answerLine() {
     const parts = [];
     for (const [qi, q] of (this.data?.questions ?? []).entries()) {
@@ -116,6 +147,11 @@ export default class HubPanel extends View {
   async deliver(cx, submit) {
     const line = this.answerLine();
     if (!line || this.busy) return;
+    // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でキーボードのあるペイン (この後の pane.focus で端末へ移る前に
+    // 控える)。この板のペインかは、Enter まで済んだ後に ownPane で確かめる
+    const closing = submit && this.role() === "questions";
+    const self = closing ? (focused()?.pane ?? null) : null;
+    let closed = false;
     this.busy = true;
     this.status = submit ? "送っています…" : "入れています…";
     cx.notify();
@@ -151,11 +187,22 @@ export default class HubPanel extends View {
       }
       this.status = `${term} に送った: ${line}`;
       this.picked = {};
+      if (closing) {
+        const pane = this.ownPane(self);
+        if (!pane) {
+          this.status = `${term} に送った (閉じるのはハブ): ${line}`;
+          return;
+        }
+        run("pane.close", { pane });
+        closed = true;
+        run("pane.focus", { terminal: term });
+      }
     } catch (e) {
       this.status = `止まった: ${e}`;
     } finally {
       this.busy = false;
-      cx.notify();
+      // 自分のペインを閉じた後は cx を使わない (このコピーはもう無い)
+      if (!closed) cx.notify();
     }
   }
 
@@ -427,22 +474,33 @@ export default class HubPanel extends View {
   render(cx) {
     const c = this.colors();
     const d = this.data;
-    const qs = d?.questions ?? [];
-    const secs = d?.sections ?? [];
-    const line = this.answerLine();
+    const role = this.role();
+    const known = role === null || ROLES.includes(role);
+    const r = known ? role : null; // 知らない値は、無いときと同じに出す
+    const qs = r === "summary" ? [] : (d?.questions ?? []);
+    const secs = r === "questions" ? [] : (d?.sections ?? []);
+    const line = r === "summary" ? "" : this.answerLine();
     const ready = !!line && !this.busy;
 
     const body = [];
+    if (!known) body.push(div().text_color(c.blocked).child(`props.role が分からない: ${JSON.stringify(role)} (summary か questions。無ければ両方を出す)`));
     if (this.error) body.push(div().text_color(c.blocked).child(this.error));
-    if (qs.length > 0) {
-      body.push(div().text_size(12).font_semibold().text_color(c.accent).child(`質問 (${qs.length})`));
+    if (r === "questions") {
       qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
+      if (!this.error && d && qs.length === 0) body.push(div().text_color(c.muted).child("問いはありません"));
+    } else {
+      if (qs.length > 0) {
+        body.push(div().text_size(12).font_semibold().text_color(c.accent).child(`質問 (${qs.length})`));
+        qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
+      }
+      if (secs.length > 0) {
+        if (qs.length > 0) body.push(div().h(4), div().text_size(12).font_semibold().text_color(c.muted).child("いまの状況"));
+        secs.forEach((s, i) => body.push(this.section(s, i, c)));
+      }
+      if (!this.error && d && qs.length === 0 && secs.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
     }
-    if (secs.length > 0) {
-      if (qs.length > 0) body.push(div().h(4), div().text_size(12).font_semibold().text_color(c.muted).child("いまの状況"));
-      secs.forEach((s, i) => body.push(this.section(s, i, c)));
-    }
-    if (!this.error && d && qs.length === 0 && secs.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
+    // 上の帯の題。問いのペインは見出しと件数、ほかは panel.json の title
+    const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");
 
     const footer =
       qs.length === 0
@@ -467,7 +525,8 @@ export default class HubPanel extends View {
       .id("hp")
       .track_focus(this.handle)
       .on_key_down((e, cx) => {
-        if (e.key !== "enter") return;
+        // まとめのペインは送らない (Enter も素通し)
+        if (e.key !== "enter" || r === "summary") return;
         if (ready) this.deliver(cx, true);
         cx.stop_propagation();
       })
@@ -489,7 +548,7 @@ export default class HubPanel extends View {
           .items_center()
           .border_b_1()
           .border_color(c.border)
-          .child(div().flex_1().text_size(15).font_semibold().child(d?.title ?? "ハブ"))
+          .child(div().flex_1().text_size(15).font_semibold().child(heading))
           .child(div().text_size(11).text_color(c.dim).child(d?.updated ?? "")),
       )
       .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))

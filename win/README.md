@@ -495,7 +495,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。panel.json の形・図の置き場所・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。props・panel.json の形・図の置き場所・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -522,13 +522,24 @@ $p = Start-Process herdr-app -ArgumentList ('check "{0}"' -f $mod) -NoNewWindow 
 $p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-check.err"   # 0 と「check passed」。落ちたらわけが出る
 ```
 
-ハブの板 (`pjp-hub-panel`) の使い方 (ハブの Claude がすること):
+ハブの板 (`pjp-hub-panel`) の使い方 (ハブの Claude がすること。手順の正本は claude-skills の pjp-hc-hub の `references/panel.md`):
 
 ```powershell
-# 会話の scratchpad に panel.json を書き、ハブの端末の横に開く (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
-herdr-app do pane.split '{"direction":"right","pane":"<ペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>"}}'
+# 会話の scratchpad に panel.json を書き、まとめのペインをハブの端末の右に開く (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
+herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}'
+# 問いを出すとき: panel.json に questions を書き、まとめのペインを下に分けて問いのペインを開く。出力の pane (問いのペインの ID) を控える
+herdr-app do pane.split '{"direction":"down","pane":"<まとめのペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}'
+# ユーザーが端末で直に答えたとき・問いを取り下げるとき: 控えた ID で問いのペインを閉じる (pane を省かない)
+herdr-app do pane.close '{"pane":"<問いのペイン>"}'
 ```
 
+- `role` は `summary` (まとめ: title・updated・sections だけ)・`questions` (問い: questions だけ。空なら「問いはありません」) のどちらか。省くと
+  role を足す前と同じく、問いと状況を 1 つのペインに出す。どの role のペインも、開いたときに自分からはキーボードを取らない
+- 問いのペインは、「送信」(ペインの Enter も) で送れたら自分を閉じ、キーボードをハブの端末 (`terminal`) へ戻す。mod は自分のペインの ID を
+  知る手段が無いので、送信の頭でキーボードのあるペインを控え、それが端末を持たない `pjp-hub-panel` (写しの `pjp-hub-panel-<何か>` も) のペインだと
+  確かめられたときだけ閉じる。確かめられなければ閉じずに「送った (閉じるのはハブ)」と出すので、そのときと「入力欄に入れる」で入れたとき・端末で
+  直に答えたときは、ハブが ID で閉じる
+- `pane.close` を `pane` なしで打たない。今キーボードのあるペインを閉じ、それが端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)
 - 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
   「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
 - 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の
