@@ -1,0 +1,5 @@
+# herdr-app (gpui-shell) が mod を読むと書くファイル。gpui-kit.d.ts は gpui-kit を import するディレクトリごとに毎回書き直し、jsconfig.json は
+# 無ければ 1 度だけ書く。runner の herdr-app-mods の手順はどちらも配らず、置き先のものにも触らない。Windows の mod のフォルダから写し戻すときに
+# 混ざらないよう、どの深さでも repo に入れない (win/README.md の「herdr-app の mod」)
+gpui-kit.d.ts
+jsconfig.json

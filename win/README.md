@@ -6,10 +6,10 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
 同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
-Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定など) は、受け持ちによらず runner が流す (経緯は
-[ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
+Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod など) は、受け持ちによらず runner が
+流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
-(`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`))。
+(`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`))。
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
@@ -21,6 +21,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
+| `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる板 (質問・状況の説明・進み具合・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -292,6 +293,7 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
+| 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
@@ -469,6 +471,63 @@ WSL と違うもの:
   `i/lf w/crlf` の行)。その repo に `git config core.autocrlf true` を書けば今までどおり。bootstrap の clone は repo に `false` を書いてある
 - git は `XDG_CONFIG_HOME` があれば `%XDG_CONFIG_HOME%\git\config` を、無ければ `$HOME\.config\git\config` を読む。どちらかの環境変数で git が別の場所を
   読むなら ⚠ で知らせる (ここに置いた設定は効かない)
+
+### herdr-app の mod
+
+dotfiles の自作の herdr-app の mod (`herdr-app/mods/<名前>/`) を、herdr-app の home の `mods\<名前>\` に置く手順 `herdr-app-mods`。herdr-app は
+Windows だけなので Windows にしか無い手順で、受け持ちが WSL のホストでも `dotfiles apply` が流す (ホストの値は要る。on/off は herdr-app を入れる
+手順と同じ `windowsHerdr`)。経緯は dotfiles-private の ADR 068 (`docs/adr/068_win_herdr_app_mods_*`)。
+
+```powershell
+dotfiles check --steps herdr-app-mods             # 差を見る (何も書かない)
+dotfiles apply --dry-run --steps herdr-app-mods   # することを出す
+dotfiles apply --steps herdr-app-mods             # 置く
+```
+
+| mod | 置くファイル | 中身 |
+| --- | --- | --- |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。panel.json の形・図の置き場所・罠の正本は `main.js` の頭のコメント |
+
+- herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
+  置き場所と同じ)。どれにしたかは手順の出力の頭に出る
+- 置き方は `CLAUDE.md` と同じ記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\herdr-app-mods.deployed.json`)。手で置いた同じ中身は引き取り (記録だけ
+  作る)、Windows 側で変わった・記録の無い違う中身は衝突で飛ばして ⚠ で知らせる (dotfiles の `herdr-app/mods/` へ取り込むか、
+  `dotfiles apply --steps herdr-app-mods --force` で上書き)。repo から消したファイルは、中身が記録どおりなら消す。repo から mod を丸ごと消しても、
+  置き先の mod のフォルダ (herdr-app が書いたファイルが残る) は消さないので、要らなければ手で消す
+- herdr-app は mod のフォルダを見張っていて、ファイルを保存すると mod を読み直す (herdr-app が書くファイルと、名前が `.` で始まるものは除く)。
+  clone を pull したら `dotfiles apply` で配り直す
+- herdr-app (gpui-shell) は mod を読むと、`gpui-kit.d.ts` (約 800 KB。gpui-kit を import するディレクトリごとに毎回書き直す) と `jsconfig.json` (無ければ
+  1 度だけ書き、その後は書き直さない) を mod のフォルダに書く。runner はどちらもどの深さでも配らず、置き先のものにも触らない。repo にも入れない
+  (`herdr-app/mods/.gitignore`。Windows の mod のフォルダから写し戻すときに混ざらないように)。名前が `.` で始まるもの (エディタの設定など) も配らない
+- 置き先の mod のフォルダがリンク (手でつないだ場所) なら、その mod には触らない。home のほかの場所 (下の図の置き場など) にも触らない
+- mod は Windows で確かめたバイト列のまま repo に置く (`.gitattributes` の `-text`。commit でも取り出しでも改行を変えない)
+- mod を直すときは、Windows の置き先で直して `herdr-app check <mod のフォルダ>` で確かめてから `herdr-app/mods/<名前>/` に写し戻し、PR を出す (merge の
+  後に pull して `dotfiles apply` を流すと、中身が揃って記録だけが変わる)。Windows の `herdr-app check` は素で打つと何も出ないので、終了コードと出力を
+  受けて見る:
+
+```powershell
+$mod = Join-Path $HOME '.config\herdr-app\mods\pjp-hub-panel'   # 確かめる mod のフォルダ (HERDR_APP_HOME を置いていれば、その下)
+$p = Start-Process herdr-app -ArgumentList ('check "{0}"' -f $mod) -NoNewWindow -Wait -PassThru `
+    -RedirectStandardOutput "$env:TEMP\herdr-app-check.out" -RedirectStandardError "$env:TEMP\herdr-app-check.err"
+$p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-check.err"   # 0 と「check passed」。落ちたらわけが出る
+```
+
+ハブの板 (`pjp-hub-panel`) の使い方 (ハブの Claude がすること):
+
+```powershell
+# 会話の scratchpad に panel.json を書き、ハブの端末の横に開く (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
+herdr-app do pane.split '{"direction":"right","pane":"<ペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>"}}'
+```
+
+- 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
+  「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
+- 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の
+  下しか読めない (scratchpad の絶対パスを渡すと何も出ない)。mod のフォルダには置かない (dotfiles が配る所で、書き換えると mod も読み直す)。
+  `pjp-hub-panel-media` はハブの Claude が書く実行時のデータなので、runner は触らない
+- `pjp-hub-panel-media` の図は、同じ名前で書き換えても描き直らない (herdr-app がパスで覚えている。保存で描き直るのは `mods\` の下の画像だけ)。図を
+  変えるときは名前を変える (`x.svg` → `x-2.svg`)
+- SVG の `font-family` は名前を引用符で囲む (`'Yu Gothic UI', 'Meiryo UI', Meiryo, sans-serif`)。囲まないと日本語を混ぜた行が BIZ UDGothic に落ち、
+  `~` が `‾` に、`\` が `¥` に化ける
 
 ## 配る
 
@@ -1009,7 +1068,8 @@ core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の s
 - 落とすのは公式と同じく `curl.exe` だが、つながらない (30 秒)・転送が止まった (60 秒のあいだ 1 KB/s を下回る) ときは打ち切る
   (公式は待ち続ける。setup が止まったままにならないよう)
 - 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
-- 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない
+- 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない。自作の mod (`~/.config/herdr-app/mods/`
+  の下) だけは、runner の `herdr-app-mods` の手順が配る ([herdr-app の mod](#herdr-app-の-mod))
 
 ### 更新の取得元をフィードに替える
 

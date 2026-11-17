@@ -1,2 +1,6 @@
 # PowerToys が書いたバイト列のまま置く (改行を変えない。win/README.md「PowerToys」)
 win/powertoys/** -text
+
+# herdr-app の mod は Windows で確かめたバイト列のまま置く (改行を変えない。clone の core.autocrlf によらず、commit も取り出しもそのまま。
+# runner の herdr-app-mods は作業ツリーのバイト列をそのまま配るので、置き先から写し戻した版と、配った版が同じ中身になる。win/README.md「herdr-app の mod」)
+win/herdr-app/mods/** -text
