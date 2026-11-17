@@ -5,16 +5,18 @@
 //   出すときだけ、まとめのペインを下に分けて問いのペインを開く)。
 //   - 無い: 問いと状況の節を 1 つのペインに出す (role を足す前の形)
 //   - "summary" (まとめ): title・updated・sections だけを出す。questions は出さない (送信の UI も、Enter で送ることもしない)
-//   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。sections は出さない。
-//     questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
+//   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。title・updated・
+//     sections は出さない。questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
 //   - ほかの値: わけを出し、無いときと同じに出す
-//   どの role も、開いたときに自分からキーボードを取らない (取るのは pane.go で来た "focus" (nextCommand) のときだけ)。
+//   どの role も、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
+//   ユーザーが選択肢をクリックしたときだけ)。
 //   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
-//   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で focused() の pane (キーボードのあるペイン) を
-//   控え、その panes() の行が端末を持たず (terminal が null)、mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のとき
-//   だけ、Enter まで済んだ後にその ID で pane.close を打つ。確かめられなければ閉じず「送った (閉じるのはハブ)」と出す。pane.close を
-//   pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」では閉じない (端末で
-//   直に答えたときと同じく、閉じるのはハブ)。
+//   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で、この板の handle がキーボードを持つ
+//   (is_focused) ときだけ focused() の pane (キーボードのあるペイン) を控え、その panes() の行が端末を持たず (terminal が null)、
+//   mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のときだけ、Enter まで済んだ後にその ID で pane.close を打つ
+//   (同じ mod のまとめのペインがキーボードを持つときに、まとめを閉じない)。確かめられなければ閉じず「送った (閉じるのはハブ)」と
+//   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
+//   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
 //
 // panel.json の形:
 //   { version, title, updated,
@@ -122,6 +124,15 @@ export default class HubPanel extends View {
     return r == null || r === "" ? null : r;
   }
 
+  // この板 (root に track_focus した handle) が今キーボードを持つか。確かめられなければ false (送信は止めない)
+  holdsKeyboard() {
+    try {
+      return this.handle.is_focused() === true;
+    } catch {
+      return false;
+    }
+  }
+
   // id のペインが、端末を持たない (terminal が null) この mod のペインなら、その id。確かめられなければ null
   ownPane(id) {
     if (!id) return null;
@@ -144,66 +155,69 @@ export default class HubPanel extends View {
     return parts.join(" / ");
   }
 
-  async deliver(cx, submit) {
+  deliver(cx, submit) {
     const line = this.answerLine();
     if (!line || this.busy) return;
-    // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でキーボードのあるペイン (この後の pane.focus で端末へ移る前に
-    // 控える)。この板のペインかは、Enter まで済んだ後に ownPane で確かめる
+    // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でこの板の handle がキーボードを持つときの、キーボードのある
+    // ペイン (この後の pane.focus で端末へ移る前に控える)。この板のペインかは、Enter まで済んだ後に ownPane で確かめる
     const closing = submit && this.role() === "questions";
-    const self = closing ? (focused()?.pane ?? null) : null;
-    let closed = false;
+    const self = closing && this.holdsKeyboard() ? (focused()?.pane ?? null) : null;
     this.busy = true;
     this.status = submit ? "送っています…" : "入れています…";
-    cx.notify();
-    try {
-      const codes = Array.from(line).map((ch) => ch.codePointAt(0));
-      const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
-      const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
-      if (r.code !== 0) {
-        this.status = `クリップボードに入れられない: ${r.stderr.trim()}`;
-        return;
-      }
-      const term = props()?.terminal;
-      if (!term) {
-        this.status = "クリップボードに入れた (props.terminal が無い)";
-        return;
-      }
-      run("pane.focus", { terminal: term });
-      run("terminal.paste");
-      if (!submit) {
-        this.status = `${term} の入力欄に入れた。Enter で送る`;
-        return;
-      }
-      // 貼った文が届いてから Enter を押す。端末がいるかの確かめを兼ねて hc get を 1 回挟んで間を置く
-      const g = await hc(["get", term, "--json"]);
-      if (g.code !== 0) {
-        this.status = `端末 ${term} が見つからない。入力欄に入れたところで止めた`;
-        return;
-      }
-      const k = await hc(["keys", term, "enter"]);
-      if (k.code !== 0) {
-        this.status = `Enter を押せなかった: ${k.stderr.trim()}。入力欄で Enter を押して送る`;
-        return;
-      }
-      this.status = `${term} に送った: ${line}`;
-      this.picked = {};
-      if (closing) {
-        const pane = this.ownPane(self);
-        if (!pane) {
-          this.status = `${term} に送った (閉じるのはハブ): ${line}`;
+    // await をまたぐ仕事は cx.spawn の cx でする (クリックやキーの cx は、await の後には使えない)
+    cx.spawn(async (cx) => {
+      let closed = false;
+      try {
+        const codes = Array.from(line).map((ch) => ch.codePointAt(0));
+        const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
+        const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
+        if (r.code !== 0) {
+          this.status = `クリップボードに入れられない: ${r.stderr.trim()}`;
           return;
         }
-        run("pane.close", { pane });
-        closed = true;
+        const term = props()?.terminal;
+        if (!term) {
+          this.status = "クリップボードに入れた (props.terminal が無い)";
+          return;
+        }
         run("pane.focus", { terminal: term });
+        run("terminal.paste");
+        if (!submit) {
+          this.status = `${term} の入力欄に入れた。Enter で送る`;
+          return;
+        }
+        // 貼った文が届いてから Enter を押す。端末がいるかの確かめを兼ねて hc get を 1 回挟んで間を置く
+        const g = await hc(["get", term, "--json"]);
+        if (g.code !== 0) {
+          this.status = `端末 ${term} が見つからない。入力欄に入れたところで止めた`;
+          return;
+        }
+        const k = await hc(["keys", term, "enter"]);
+        if (k.code !== 0) {
+          this.status = `Enter を押せなかった: ${k.stderr.trim()}。入力欄で Enter を押して送る`;
+          return;
+        }
+        this.status = `${term} に送った: ${line}`;
+        this.picked = {};
+        if (closing) {
+          const pane = this.ownPane(self);
+          if (!pane) {
+            this.status = `${term} に送った (閉じるのはハブ): ${line}`;
+            return;
+          }
+          run("pane.close", { pane });
+          closed = true;
+          run("pane.focus", { terminal: term });
+        }
+      } catch (e) {
+        this.status = `止まった: ${e}`;
+      } finally {
+        this.busy = false;
+        // 自分のペインを閉じた後は cx を使わない (このコピーはもう無い)
+        if (!closed) cx.notify();
       }
-    } catch (e) {
-      this.status = `止まった: ${e}`;
-    } finally {
-      this.busy = false;
-      // 自分のペインを閉じた後は cx を使わない (このコピーはもう無い)
-      if (!closed) cx.notify();
-    }
+    });
+    cx.notify();
   }
 
   colors() {
@@ -499,7 +513,7 @@ export default class HubPanel extends View {
       }
       if (!this.error && d && qs.length === 0 && secs.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
     }
-    // 上の帯の題。問いのペインは見出しと件数、ほかは panel.json の title
+    // 上の帯の題。問いのペインは見出しと件数 (updated も出さない)、ほかは panel.json の title
     const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");
 
     const footer =
@@ -549,7 +563,7 @@ export default class HubPanel extends View {
           .border_b_1()
           .border_color(c.border)
           .child(div().flex_1().text_size(15).font_semibold().child(heading))
-          .child(div().text_size(11).text_color(c.dim).child(d?.updated ?? "")),
+          .when(r !== "questions", (el) => el.child(div().text_size(11).text_color(c.dim).child(d?.updated ?? ""))),
       )
       .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))
       .when(!!footer, (el) => el.child(footer))

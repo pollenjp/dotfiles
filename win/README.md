@@ -529,17 +529,19 @@ $p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-c
 herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}'
 # 問いを出すとき: panel.json に questions を書き、まとめのペインを下に分けて問いのペインを開く。出力の pane (問いのペインの ID) を控える
 herdr-app do pane.split '{"direction":"down","pane":"<まとめのペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}'
-# ユーザーが端末で直に答えたとき・問いを取り下げるとき: 控えた ID で問いのペインを閉じる (pane を省かない)
-herdr-app do pane.close '{"pane":"<問いのペイン>"}'
+# 答えを受けたとき・問いを取り下げるとき: 問いのペインが残っていれば、控えた ID で閉じる (JSON でなく --pane <ID> の形。pane を省かない)
+herdr-app do pane.close --pane '<問いのペイン>'
 ```
 
 - `role` は `summary` (まとめ: title・updated・sections だけ)・`questions` (問い: questions だけ。空なら「問いはありません」) のどちらか。省くと
   role を足す前と同じく、問いと状況を 1 つのペインに出す。どの role のペインも、開いたときに自分からはキーボードを取らない
 - 問いのペインは、「送信」(ペインの Enter も) で送れたら自分を閉じ、キーボードをハブの端末 (`terminal`) へ戻す。mod は自分のペインの ID を
-  知る手段が無いので、送信の頭でキーボードのあるペインを控え、それが端末を持たない `pjp-hub-panel` (写しの `pjp-hub-panel-<何か>` も) のペインだと
-  確かめられたときだけ閉じる。確かめられなければ閉じずに「送った (閉じるのはハブ)」と出すので、そのときと「入力欄に入れる」で入れたとき・端末で
-  直に答えたときは、ハブが ID で閉じる
-- `pane.close` を `pane` なしで打たない。今キーボードのあるペインを閉じ、それが端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)
+  知る手段が無いので、送信の頭で、この板がキーボードを持つとき (handle の `is_focused()`) にキーボードのあるペインを控え、それが端末を持たない
+  `pjp-hub-panel` (写しの `pjp-hub-panel-<何か>` も) のペインだと確かめられたときだけ閉じる。確かめられなければ閉じずに「送った (閉じるのはハブ)」と
+  出す。そのときと、「入力欄に入れる」で入れたとき・端末で直に答えたときは問いのペインが残るので、ハブは答えを受けたら控えた ID で閉じる
+- `pane.close` は `--pane <ID>` の形で打つ (JSON を引用符で包んで渡したら効かなかった)。`pane` なしで打たない。今キーボードのあるペインを閉じ、それが
+  端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)。閉じる前に `herdr-app ls` で、その ID が端末の行に出ていないことを確かめる (板の
+  ペインは ls に出ない。出ていれば端末のペイン)
 - 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
   「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
 - 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の
