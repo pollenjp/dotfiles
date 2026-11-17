@@ -13,7 +13,8 @@
 //! - herdr-app は、手を入れていない keys.json だけを、版上げのときに新しい既定のキーへ替える。この手順が一度書くと、ファイルは丸ごとユーザーの
 //!   ものになり、新しい既定のキーは手で足す (win/README.md の「herdr-app のキー」)
 //! - 書く前の中身を `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys\backup\` に写す (いちばん古いものと、新しい方から 10 個)。herdr-app は
-//!   keys.json を見張っていて、保存するとすぐ読み直す (読めなければ前のキーのまま動き、隣の keys.error にわけを書く)
+//!   keys.json を見張っていて、保存するとすぐ読み直す (読めなければ前のキーのまま動き、隣の keys.error にわけを書く)。この手順は、書かなかった
+//!   ときに keys.error を ※ で知らせる (書いたときの keys.error は前の中身のものなので、後の check で見るよう出す)
 //!
 //! 記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-keys.applied.json` (keys.json のパスごとに、書いたキーと値)。dotfiles-private の
 //! docs/adr/070_win_herdr_app_keys_*。
@@ -96,9 +97,10 @@ impl Step for HerdrAppKeys {
         };
         let record_path = ctx.state_dir.join(RECORD_FILE);
         let mut notes = Vec::new();
-        let mut record = load_record(&record_path, &mut notes);
-        for n in &notes {
+        let (mut record, unreadable) = load_record(&record_path);
+        if let Some(n) = unreadable.clone() {
             ctx.say(format!("!! {n}"));
+            notes.push(n);
         }
         let original = record.clone();
         // 同じ keys.json を別の綴りで書いた記録も引く (HERDR_APP_HOME を / で書いた Windows など)
@@ -115,7 +117,8 @@ impl Step for HerdrAppKeys {
             Ok(p) => p,
             Err(e) => return failed(ctx, format!("{shown} の {e} → 手で直す")),
         };
-        if mode.writes() && plan.doc.to_value() != doc.to_value() {
+        let writes = mode.writes() && plan.doc.to_value() != doc.to_value();
+        if writes {
             let dir = ctx.state_dir.join("herdr-app-keys").join("backup");
             match fsutil::backup_copy(&target, &dir, "keys", BACKUPS) {
                 Ok(copied) => ctx.say(format!("前の中身を写しました: {}", copied.display())),
@@ -133,7 +136,7 @@ impl Step for HerdrAppKeys {
                 return failed(ctx, format!("{shown} を書けない ({e})"));
             }
             ctx.say(format!(
-                "書きました: {shown} (herdr-app はすぐ読み直す。手を入れた keys.json は、herdr-app を上げても新しい既定のキーに替わらない。新しい既定のキーは手で足す)"
+                "書きました: {shown} (herdr-app はすぐ読み直す。読めたかは、少し後に dotfiles check --steps herdr-app-keys で見る (読めなければ keys.error を ※ で出す)。手を入れた keys.json は、herdr-app を上げても新しい既定のキーに替わらない。新しい既定のキーは手で足す)"
             ));
         }
         let mut tally = Tally::default();
@@ -147,7 +150,8 @@ impl Step for HerdrAppKeys {
             if !plan.written.is_empty() {
                 record.insert(target.to_string_lossy().into_owned(), plan.written);
             }
-            if record != original || (!record.is_empty() && !record_path.exists()) {
+            // 読めなかった記録は、書くキーが無くても直す (毎回は知らせない)
+            if record != original || unreadable.is_some() {
                 let body = serde_json::json!({ "version": 1, "files": record });
                 let text = serde_json::to_string_pretty(&body).expect("記録はいつも JSON に書ける");
                 if let Err(e) = fsutil::write_atomic(&record_path, format!("{text}\n").as_bytes()) {
@@ -159,7 +163,8 @@ impl Step for HerdrAppKeys {
                 }
             }
         }
-        if let Some(n) = keys_error(&home) {
+        // 今書いたときの keys.error は前の中身のもの (herdr-app はこれから読み直す) なので、知らせない (上の「書きました」で check を勧める)
+        if !writes && let Some(n) = keys_error(&home) {
             ctx.say(format!("!! {n}"));
             notes.push(n);
         }
@@ -201,30 +206,28 @@ pub fn load_wanted(path: &Path) -> Result<Wanted, String> {
         .collect()
 }
 
-/// 記録 (`{"version":1,"files":{<keys.json のパス>:{<section>:{<キー>:<action>}}}}`)。読めなければ知らせて空 (claude-skill-overrides と同じ)。
-fn load_record(path: &Path, notes: &mut Vec<String>) -> BTreeMap<String, Written> {
+/// 記録 (`{"version":1,"files":{<keys.json のパス>:{<section>:{<キー>:<action>}}}}`) と、読めなかったときの知らせ。読めなければ空として
+/// 進める (claude-skill-overrides と同じ。apply で直す)。
+fn load_record(path: &Path) -> (BTreeMap<String, Written>, Option<String>) {
+    let unreadable = |why: String| {
+        format!(
+            "記録が読めない: {} ({why})。無いものとして進める (repo から消したキーは外せない。今も書くキーはまた記録する)",
+            path.display()
+        )
+    };
     let text = match std::fs::read_to_string(path) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return BTreeMap::new(),
-        Err(e) => {
-            notes.push(format!(
-                "記録が読めない: {} ({e})。無いものとして進める (repo から消したキーは外せない。今も書くキーはまた記録する)",
-                path.display()
-            ));
-            return BTreeMap::new();
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (BTreeMap::new(), None),
+        Err(e) => return (BTreeMap::new(), Some(unreadable(e.to_string()))),
     };
-    serde_json::from_str::<serde_json::Value>(&text)
+    match serde_json::from_str::<serde_json::Value>(&text)
         .ok()
         .filter(|v| v.get("version") == Some(&serde_json::Value::from(1)))
         .and_then(|v| serde_json::from_value(v.get("files")?.clone()).ok())
-        .unwrap_or_else(|| {
-            notes.push(format!(
-                "記録が読めない: {} (形が違う)。無いものとして進める (repo から消したキーは外せない。今も書くキーはまた記録する)",
-                path.display()
-            ));
-            BTreeMap::new()
-        })
+    {
+        Some(record) => (record, None),
+        None => (BTreeMap::new(), Some(unreadable("形が違う".to_string()))),
+    }
 }
 
 /// keys.json のパスを比べる鍵 (要素ごと。Windows は大文字小文字を区別しない)。要素に分けるので、`/` と `\`・重なった区切りの違いは消える
@@ -557,9 +560,12 @@ mod tests {
     //! - repo から消えたキーは、今の値が記録どおりなら外す (空になった section も外す)。書き換えてあれば残して ⚠
     //! - keys.json が無ければ作らない (⚠。herdr-app を一度起こしてから)。壊れた keys.json・object でない section・壊れた repo のキーは failed (書かない)
     //! - 書く前の中身を控えに写す (いちばん古いものと、新しい方から 10 個)
-    //! - 記録は keys.json のパスごと。同じ home を別の綴りで書いても同じ記録を引き、ほかの home の記録は残す。壊れた記録は無いものとして知らせる
-    //! - keys.error (herdr-app が keys.json を読めなかった) があれば ※ で知らせる
-    //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている
+    //! - 記録は keys.json のパスごと。同じ home を別の綴りで書いても同じ記録を引き、ほかの home の記録は残す。壊れた記録は無いものとして知らせ、
+    //!   apply で直す (書くキーが無くても)。衝突したキーは apply でも残し、前に書いた値の記録を持ち越す
+    //! - keys.error (herdr-app が keys.json を読めなかった) があれば ※ で知らせる。その apply で書いたときは、前の中身のものなので知らせず、
+    //!   後で check で見るよう出す
+    //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。Shift+G の argv が c の
+    //!   3 か所 (fish・bash・PowerShell) と同じ引数
 
     use super::*;
     use crate::context::join_segments;
@@ -923,6 +929,15 @@ mod tests {
             )),
             "{o:?}"
         );
+        // apply でも残し、前に書いた値の記録を持ち越す (次も「書き換えた」と知らせ、値を戻せば dotfiles の値として扱う)
+        let (o, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
+        assert!(
+            e.keys()[0]
+                .1
+                .contains(&("ctrl-k".to_string(), "\"terminal\"".to_string()))
+        );
+        assert_eq!(e.recorded()["global"]["ctrl-k"], "mod.open:pjp-prefix");
     }
 
     #[test]
@@ -1133,6 +1148,19 @@ mod tests {
             "{o:?}"
         );
         assert_eq!(e.recorded()["global"]["ctrl-k"], "mod.open:pjp-prefix");
+        // 書くキーが無くても、壊れた記録は直す (毎回は知らせない)
+        let e = Env::new();
+        e.t.write("state/herdr-app-keys.applied.json", "[1]");
+        e.t.write("dotfiles/win/herdr-app/keys.json", "{}");
+        let (o, _) = e.run(APPLY);
+        assert!(
+            o[0].notes.iter().any(|n| n.starts_with("記録が読めない")),
+            "{o:?}"
+        );
+        let rec: serde_json::Value = serde_json::from_str(&e.record_text().unwrap()).unwrap();
+        assert_eq!(rec, serde_json::json!({ "version": 1, "files": {} }));
+        let (o, _) = e.run(Mode::Check);
+        assert!(o[0].notes.is_empty(), "{o:?}");
     }
 
     #[test]
@@ -1148,6 +1176,65 @@ mod tests {
                 && n.contains("unknown command: tab.nxt")
                 && !n.contains("more")),
             "{o:?}"
+        );
+        // 書いた直後の keys.error は前の中身のもの (herdr-app はこれから読み直す)。※ にせず、後で check で見るよう出す
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        assert!(
+            !o[0].notes.iter().any(|n| n.contains("keys.error")),
+            "{o:?}"
+        );
+        assert!(
+            out.contains("読めたかは、少し後に dotfiles check --steps herdr-app-keys"),
+            "{out}"
+        );
+        // 書かなかった apply と check では知らせる
+        for mode in [APPLY, Mode::Check] {
+            let (o, _) = e.run(mode);
+            assert!(
+                o[0].notes.iter().any(|n| n.contains("keys.error がある")),
+                "{mode:?} {o:?}"
+            );
+        }
+    }
+
+    /// Shift+G の argv (mod の CLAUDE) が、c (fish の abbr・bash の alias・PowerShell の function) と同じ引数
+    #[test]
+    fn claude_argv_matches_c() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let read = |rel: &str| {
+            std::fs::read_to_string(join_segments(&repo, rel))
+                .unwrap_or_else(|e| panic!("{rel} が読めない ({e})"))
+                .replace("\r\n", "\n")
+        };
+        let main = read("win/herdr-app/mods/pjp-prefix/main.js");
+        let head = "const CLAUDE = [";
+        let start = main.find(head).expect("main.js に CLAUDE が無い") + head.len();
+        let end = start + main[start..].find(']').unwrap();
+        let argv: Vec<&str> = main[start..end]
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .collect();
+        assert_eq!(argv.first(), Some(&"claude"), "{argv:?}");
+        for rel in ["nix/home/modules/fish.nix", "nix/home/modules/bash.nix"] {
+            let text = read(rel);
+            let c: Vec<&str> = text
+                .lines()
+                .filter_map(|l| l.trim().strip_prefix("c = \"")?.strip_suffix("\";"))
+                .collect();
+            assert_eq!(c.len(), 1, "{rel} の c: {c:?}");
+            assert_eq!(c[0].split_whitespace().collect::<Vec<_>>(), argv, "{rel}");
+        }
+        let ps = read("win/powershell/dotfiles.ps1");
+        let c: Vec<&str> = ps
+            .lines()
+            .filter_map(|l| l.strip_prefix("function c { ")?.strip_suffix(" @args }"))
+            .collect();
+        assert_eq!(c.len(), 1, "dotfiles.ps1 の function c: {c:?}");
+        assert_eq!(
+            c[0].split_whitespace().collect::<Vec<_>>(),
+            argv,
+            "dotfiles.ps1"
         );
     }
 

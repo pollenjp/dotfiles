@@ -91,6 +91,7 @@ mod tests {
     //!
     //! - sha256 が sha256sum と同じ値 (空と "abc" の既知の値)
     //! - 親を作って書き、あるファイルは置き換え、一時ファイルを残さない
+    //! - 書く前の写し: 中身を写し、いちばん古いものと新しい方から N 個を残す。ほかの prefix のファイルには触らない
 
     use super::*;
     use crate::testutil::TempDir;
@@ -120,5 +121,30 @@ mod tests {
             .collect();
         assert_eq!(names, vec!["b.json"]);
         assert_eq!(sha256_file(&p).unwrap(), sha256_bytes(b"two"));
+    }
+
+    #[test]
+    fn backup_copy_keeps_the_first_and_newest() {
+        let t = TempDir::new("fsutil-backup");
+        let src = t.path().join("a.json");
+        let dir = t.path().join("backup");
+        t.write("backup/other-1.json", "x");
+        for i in 0..5 {
+            std::fs::write(&src, format!("{i}")).unwrap();
+            let copied = backup_copy(&src, &dir, "a", 2).unwrap();
+            assert_eq!(std::fs::read_to_string(&copied).unwrap(), format!("{i}"));
+        }
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        let kept: Vec<String> = names
+            .iter()
+            .filter(|n| n.starts_with("a-") && n.ends_with(".json"))
+            .map(|n| std::fs::read_to_string(dir.join(n)).unwrap())
+            .collect();
+        assert_eq!(kept, vec!["0", "3", "4"], "{names:?}");
+        assert!(names.contains(&"other-1.json".to_string()), "{names:?}");
     }
 }
