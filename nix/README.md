@@ -809,6 +809,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
+| `bootstrap-windows-sshd.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Sshd.ps1` で、Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ (`# tool: windowsSshd`。どのグループでも既定は false)。先に鍵の写しを置き、入っていなければ OpenSSH の MSI に Server を足して揃える。UAC の確認が出る。入っていてずれていれば ⚠ で知らせ、揃えはしない)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なので openssh (sshd を足す MSI を入れる) の後・tailscale の前 |
 | `bootstrap-windows-tailscale.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Tailscale.ps1` で、Windows の Tailscale を固定した版で入れる (`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ (`# tool: windowsTailscale`。どのグループでも既定は false)。入っていなければ入れる。UAC の確認が出る。入っていれば上げず、古ければ ⚠ で知らせる。入っている版の方が新しいのは Tailscale の自動更新で、揃っている扱い)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
@@ -932,9 +933,10 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
-| 6.10.1 | `./nix/scripts/bootstrap-windows-tailscale.sh` | `bootstrap-windows-tailscale` | Windows の Tailscale を固定した版で入れる（`wsl.windowsFiles.tailscale.enable = true` のマシンだけ。どのグループでも既定は false。無ければ winget で入れる (UAC の確認が出る)。上げはしない。ログインは手でする。[`win/README.md`](../win/README.md#tailscale)） |
-| 6.10.2 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
-| 6.10.3 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
+| 6.10.1 | `./nix/scripts/bootstrap-windows-sshd.sh` | `bootstrap-windows-sshd` | Windows に sshd を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる（`wsl.windowsFiles.sshd.enable = true` のマシンだけ。どのグループでも既定は false。鍵の写しを置き、無ければ入れる (UAC の確認が出る)。ずれは揃えない。[`win/README.md`](../win/README.md#sshd)） |
+| 6.10.2 | `./nix/scripts/bootstrap-windows-tailscale.sh` | `bootstrap-windows-tailscale` | Windows の Tailscale を固定した版で入れる（`wsl.windowsFiles.tailscale.enable = true` のマシンだけ。どのグループでも既定は false。無ければ winget で入れる (UAC の確認が出る)。上げはしない。ログインは手でする。[`win/README.md`](../win/README.md#tailscale)） |
+| 6.10.3 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
+| 6.10.4 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
 | 6.11.1 | `./nix/scripts/bootstrap-windows-ntn.sh` | `bootstrap-windows-ntn` | Windows の ntn (Notion の CLI) を固定した版に揃える（`wsl.windowsFiles.ntn.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#ntn)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-pin-updates.sh` | `bootstrap-windows-pin-updates` | Windows に固定した版より新しい版があれば短く知らせる（上げるかは Claude Code に「dotfiles の Windows に固定した版を上げて」と頼んで決める。[`win/README.md`](../win/README.md#固定した版より新しい版の知らせ)） |
@@ -1241,7 +1243,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | --- | --- | --- |
 | ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
 | ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
-| ③ 個人のアカウントにつながるもの | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
+| ③ 個人のアカウントにつながるもの | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
 | ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
 
 既定は 3 つの高さで決まり、どれも option の既定（優先度 1500）なので、ホストのファイルは今と同じ素の値でどの高さでも上書きできる
@@ -1263,11 +1265,12 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | `dotfiles.herdr.hub.enable` | ② と ③ | setup の bootstrap-herdr-hub（`~/h`） |
 | `dotfiles.ntn.enable` | ③ | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
 | `wsl.windowsFiles.ntn.enable` | ③ | Windows の ntn |
+| `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable` | ③ (既定は off) | Windows の Tailscale・sshd（`windowsFiles.enable` のマシンだけで効く。どのグループでも既定は false） |
 | `dotfiles.git.identity.enable` | ③ | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
 
 既定が `false` の option（`onePassword.enable`・`claude.devTracker.enable`・`cursorAgent.enable`・`wsl.windowsFiles.enable`・
-`wsl.windowsFiles.tailscale.enable` など）は今のまま（段によらず、使うホストが入れる。Windows の Tailscale は VPN の道具で、`personal` でも
-既定で入れない）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
+`wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable` など）は今のまま（段によらず、使うホストが入れる。Windows の Tailscale は
+VPN の道具、Windows の sshd は PC に外から入る口で、`personal` でも既定で入れない）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
 flake の checks の `groups-state` が段の on/off の 4 通りで確かめる。
 
 ```nix
@@ -1784,6 +1787,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap (type-clipboard) | `windows-files.json` の `typeClipboard` が true のマシンだけ、配った `Install-TypeClipboard.ps1` で、固定した版の exe が入っているかを確かめる (無ければ GitHub の Release から落とし、SHA-256 が合えば置く) | `scripts/bootstrap-windows-type-clipboard.sh` |
 | bootstrap (ntn・Claude Code) | `windows-files.json` の `ntn`・`claudeCode` が true (欄が無ければ true) のマシンだけ、配った `Install-Ntn.ps1`・`Install-ClaudeCode.ps1` で確かめ、無ければ winget で入れ、版か pin がずれていれば固定した版に揃える | `scripts/bootstrap-windows-ntn.sh`・`scripts/bootstrap-windows-claude-code.sh` |
 | bootstrap (Tailscale) | `group.json` の `tools.windowsTailscale` が true (欄・ファイルが無ければ false) のマシンだけ、配った `Install-Tailscale.ps1` で確かめ、無ければ winget で入れる (UAC の確認が出る)。入っていれば上げない (古ければ ⚠ で知らせ、新しいのは Tailscale の自動更新で揃っている扱い) | `scripts/bootstrap-windows-tailscale.sh` |
+| bootstrap (sshd) | `group.json` の `tools.windowsSshd` が true (欄・ファイルが無ければ false) のマシンだけ、`windows-sshd.json` の鍵の list を Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写し (null なら写しを消す)、配った `Install-Sshd.ps1` で確かめる。sshd が無ければ OpenSSH の MSI に Server を足して揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせる (揃えない) | `scripts/bootstrap-windows-sshd.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
 読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
@@ -1814,6 +1818,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-ntn.sh             # ntn を固定した版に揃える部分だけ（ntn を入れるマシンだけ。--apply は確かめずに揃える）
 ./nix/scripts/bootstrap-windows-claude-code.sh     # Claude Code を固定した版に揃える部分だけ（claudeCode を入れるマシンだけ。--apply は確かめずに揃える）
 ./nix/scripts/bootstrap-windows-tailscale.sh       # Tailscale を固定した版で入れる部分だけ（tailscale を入れるマシンだけ。無ければ入れる。--apply で揃える）
+./nix/scripts/bootstrap-windows-sshd.sh            # sshd を入れて Tailscale と localhost からだけ鍵で入れる形に揃える部分だけ（sshd を入れるマシンだけ。鍵の写しを置き、無ければ入れる。--apply で揃える）
 ./nix/scripts/bootstrap-windows-pin-updates.sh     # Windows に固定した版より新しい版があるかを知らせる部分だけ（--candidates で猶予ごとの上げ先の候補。gh のログインが要る）
 ```
 
@@ -1899,6 +1904,13 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   winget の `Tailscale.Tailscale` (MSI) を固定した版で入れる (UAC の確認が出る)。入っていれば上げない (Tailscale が自分で上がるので、
   入っている版の方が新しくても揃っている扱い。古ければ ⚠ で知らせる)。tailnet へのログインは入れた後に手でする
   （[`win/README.md`](../win/README.md#tailscale)、dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`)）
+- sshd (OpenSSH Server) は、`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシン (どのグループでも既定は false。PC に外から入る口を開け
+  るので、会社の PC などに勝手に入れない) だけ、`bootstrap-windows-sshd.sh` (order 96) が鍵の写しを置いてから、配った `Install-Sshd.ps1` を
+  `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers で tailnet と localhost に
+  限る `sshd_config`、Windows Firewall の拒否の規則 (tailnet からは 22 番だけ、22 番には tailnet と localhost からだけ)、鍵
+  (`administrators_authorized_keys`)、自動の起動を揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせ、揃えるのは `--apply` か
+  PowerShell の `Install-Sshd`。鍵はホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) に書く
+  （[`win/README.md`](../win/README.md#sshd)、dotfiles-private の ADR 078 (`docs/adr/078_win_sshd_tailscale_*`)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。
 
