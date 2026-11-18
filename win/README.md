@@ -632,7 +632,9 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   少しでも書き換えたファイルは丸ごとユーザーのものとして残す (herdr-app の home の `AGENTS.md` の Keys の節)。herdr-app を上げたら、更新ノート
   (Settings → Updates の What's new。命令は `app.whats_new`) を見る。既定のキーが増えた版は「keys.json を書き換えたなら自分で足す」として、足すキーと
   section を書いている (例: section `terminal` に `"ctrl-shift-f": "terminal.search"`)。要るものを手で足す (どの PC でも使うなら repo の
-  `herdr-app/keys.json` に足す)
+  `herdr-app/keys.json` に足す)。dotfiles が固定した版を上げる PR では、上げる版までの CHANGELOG で見て、その PR で repo に足す
+  ([固定した版を上げる](#固定した版を上げる)の 3)。setup の新しい版の知らせも、herdr-app に新しい版があればこの注意を添える
+  ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ))
 - keys.json が無ければ書かない (herdr-app をまだ起こしていない新しい PC)。herdr-app は keys.json をキーの全部として読むので、dotfiles のキーだけの
   ファイルを作ると既定のキーが無くなる。herdr-app を一度起こしてから `dotfiles apply --steps herdr-app-keys`。herdr-app の逃げ道のキー
   (`Ctrl+Alt+Shift+Esc`) は keys.json を `keys.json.reset-<時刻>` へ退けて既定に戻すので、その後も `dotfiles apply --steps herdr-app-keys` で足し直す
@@ -874,6 +876,8 @@ Windows に固定した版で入れているものに新しい版が出たら、
 ⚠️  [bootstrap-windows-pin-updates] Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める
     Windows の ntn: 0.23.28 → 0.23.29・0.23.30
     Windows の herdr-app: 0.1.13 → 0.1.14・0.1.15
+    ※ herdr-app を上げるなら、新しい既定のキーも足す (dotfiles がキーを書き足した keys.json には、herdr-app を上げても新しい既定のキーが足されない)
+      → 上げる版までの更新ノート (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) で keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、Windows で効くキーを win/herdr-app/keys.json に足す (dotfiles のキーと重なる既定のキーは、その既定の値を keys.defaults.json に書く。win/README.md の「固定した版を上げる」)
 ```
 
 | 名前 | 固定した版 | 新しい版の一覧と出た日 | 見送りの一覧 |
@@ -888,6 +892,10 @@ Windows に固定した版で入れているものに新しい版が出たら、
   がある。bootstrap を流した) マシンでだけ確かめる。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
   1 行だけ (警告のまとめには載らない)
+- herdr-app に見送っていない新しい版があるときは、続きの行の末尾に keys.json の注意を 2 行添える (上の例の ※ と →)。dotfiles がキーを
+  書き足した keys.json には、herdr-app を上げても新しい既定のキーが足されない ([herdr-app のキー](#herdr-app-のキー))。上げる作業の中で、上げる版
+  までの更新ノートの既定のキーを repo の `win/herdr-app/keys.json` に足す ([固定した版を上げる](#固定した版を上げる)の 3)。herdr-core だけのとき・
+  herdr-app は見送った版だけのときは添えない。末尾に置くのは、警告のまとめが続きの行の長い警告の間を省いても、末尾は残すため
 - setup では出た日を引かない (GitHub API を名前ごとに 1〜2 回。合わせて数秒)。gh のログインが要る
 - 確かめられないとき (gh が無い・ログインしていない・ネットに出られない・API の制限) は、setup を止めずに、確かめられなかった名前と
   わけを 1 行出す (警告のまとめにも載る)
@@ -1322,17 +1330,31 @@ nix/scripts/check-herdr-app-version.sh   # 0 = 知らせることは無い、1 =
    読まないと出たら上げない (取得元をフィードに替えられない)。CI は文字があるかしか見ないので、summary の差分の URL で、取得元を決めるソース
    (app は `src/update.rs`、core は `crates/herdr-core/src/releases.rs`) の差分も読む (テストのときだけ読むように移っていないか)
 2. CHANGELOG (`herdrdev/herdr-app`・`herdrdev/herdr-core` の `CHANGELOG.md`) で、設定・置き場所・更新の仕組みに触る変更が無いかを見る
-3. `nix/pkgs/herdr-core/releases.json` の版と sha256 (app は windows-x86_64、core は linux-aarch64・linux-x86_64・windows-x86_64 の 3 つと
+3. app を上げるときは、既定のキーが増えた・変わったかも、上げる版までの app の CHANGELOG で見る。dotfiles がキーを書き足した keys.json には、
+   herdr-app を上げても新しい既定のキーが足されない ([herdr-app のキー](#herdr-app-のキー))。app の CHANGELOG は、herdr-app の更新ノート
+   (Settings → Updates の What's new) と同じ中身で、足すキーを「if you edited keys.json, add …」のように keys.json に触れて書く
+   (setup の新しい版の知らせも、app に新しい版があればこの注意を添える)
+   - Windows で効くキー (macOS だけの `cmd-` のキーと、Linux だけの項は除く) を、repo の `win/herdr-app/keys.json` の同じ section に足す。
+     merge の後、Windows の runner の `herdr-app-keys` が各 PC の keys.json に書き足す (新しい PC は、herdr-app が新しい版の既定で keys.json を
+     書くので、そのままでも入る。足すのは、keys.json を書き足し済みの PC のため)
+   - 増えた・変わった既定のキーが、dotfiles のキー (`win/herdr-app/keys.json`) と同じ section の同じキーなら、keys.json には足さず (dotfiles の
+     値のまま)、その既定の値を `win/herdr-app/keys.defaults.json` に書く (今ある行なら新しい既定の値に替える)。書かないと、新しい PC で runner が
+     そのキーを衝突として ⚠ で残す。細かい section (`terminal` など) に dotfiles のキーと同じキーが増えたときは、端末に focus がある間は
+     dotfiles のキーが効かなくなるので、PR の本文に書いて扱いを決める
+   - 足さないと決めたキーと、Windows で効くキーが無かったことは、PR の本文に書く
+4. `nix/pkgs/herdr-core/releases.json` の版と sha256 (app は windows-x86_64、core は linux-aarch64・linux-x86_64・windows-x86_64 の 3 つと
    generation) と、「[herdr-app を入れる](#herdr-app-を入れる)」の「今は」を新しい版にする。Windows と Linux は、この 1 つの PR で一緒に上がる。
    core は app の core_min 以上にする。core の generation が固定と違うと出たら、app を、その generation の core と話せる版と一緒に上げる
    (`update --from` は generation を見ないので、core だけを上げると app と話せない core が入る)。`Install-HerdrApp.Tests.ps1` と
    `nix build ./nix#checks.x86_64-linux.herdr-core-test` (Linux の build と `hc --version`) を流して PR を出す (CI の `version` の job が、書いた版の
    成果物と manifest が合うかを target ごとに確かめる)
-4. merge したら、各マシンで `setup --update` を流す。Windows ではフィードが新しい版に書き換わり、`-IfMissing` が app と core を上げる (署名と
+5. merge したら、各マシンで `setup --update` を流す。Windows ではフィードが新しい版に書き換わり、`-IfMissing` が app と core を上げる (署名と
    sha256 を確かめてから。動いている app は置き場所の rename で入れ替わり、再起動で新しい版になる)。開いている app も、1 時間以内にフィードの版へ
    上がる。Linux のホストでは、home-manager の switch が新しい版の herdr-core を入れる (動いている core は、次に起動したときから新しい版)。
-   machine としてつなぐホストは続けて上げる (版が混ざると、つなぐときに写し直しを聞かれる)
-5. `-Check` が「揃っている」になり、app が起動することを確かめる
+   machine としてつなぐホストは続けて上げる (版が混ざると、つなぐときに写し直しを聞かれる)。3 で keys.json にキーを足したなら、Windows で
+   clone (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) を pull し、`dotfiles apply --steps herdr-app-keys` を流す (受け持ちが WSL のホストでも
+   流す。[herdr-app のキー](#herdr-app-のキー))
+6. `-Check` が「揃っている」になり、app が起動することを確かめる
 
 見送るとき (1・2 で上げないと決めたとき): `nix/pkgs/herdr-core/skipped-versions.txt` に「app か core・版・理由」を 1 行足して commit する
 (`app 0.1.14 core の generation 2 と組まないと話せない` など)。その版では `version` の job も setup の知らせも黙り、もっと新しい版が

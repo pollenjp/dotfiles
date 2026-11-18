@@ -38,12 +38,19 @@ Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core 
 | `ntn` | `win/ntn/Install-Ntn.ps1` の同じ所 | 「ntn」の「今は」 | 「ntn の新しい版が出たとき」 |
 | `claude-code` | `win/claude-code/Install-ClaudeCode.ps1` の同じ所 | 「Claude Code」の「今は」 | 「Claude Code の新しい版が出たとき」 |
 | `tailscale` | `win/tailscale/Install-Tailscale.ps1` の同じ所 | 「Tailscale」の「今は」 | 「Tailscale の新しい版が出たとき」(固定した版は新しく入れるときの版。入っている Tailscale は自動更新で上がるので、上げ遅れても困るのは新しいマシンだけ) |
-| `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` の版と sha256 (core は 3 つの target と generation) | 「herdr-app を入れる」の「今は」 | 「固定した版を上げる」(sha256・core_min・generation・ソースが取得元の変数を読むかを確かめる) |
+| `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` の版と sha256 (core は 3 つの target と generation) | 「herdr-app を入れる」の「今は」。app を上げるなら、Windows で効く新しい既定のキーを `win/herdr-app/keys.json` に (dotfiles のキーと重なる既定のキーは、その既定の値を `win/herdr-app/keys.defaults.json` に) | 「固定した版を上げる」(sha256・core_min・generation・ソースが取得元の変数を読むか・既定のキーの増えを確かめる) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る) |
 
 - テスト (名前ごとの ps1 のテストと herdr-core の build) は `deps.toml` の `[[checks]]` にあり、依存の更新の skill が PR の前に流す
 - 上げる前に、その節のとおり release notes (CHANGELOG) を読み、設定・置き場所・更新の仕組みに触る変更が無いかを見る。気になる
   変更があれば、PR を出す前にユーザーに伝える (定期実行なら PR の本文に書く)
+- herdr-app (app) を上げるときは、既定のキーが増えた・変わったかも見る。dotfiles (Windows の runner の `herdr-app-keys`) がキーを書き足した
+  keys.json には、herdr-app を上げても新しい既定のキーが足されない (`win/README.md` の「herdr-app のキー」)。上げる版までの `herdrdev/herdr-app` の
+  `CHANGELOG.md` (herdr-app の更新ノート What's new と同じ中身) で、keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、
+  Windows で効くキー (macOS だけの `cmd-` のキー・Linux だけの項は除く) を同じ PR で `win/herdr-app/keys.json` の同じ section に足す。dotfiles の
+  キーと同じ section の同じキーなら keys.json には足さず、その既定の値を `win/herdr-app/keys.defaults.json` に書く。細かい section (`terminal`
+  など) に dotfiles のキーと同じキーが増えたとき・足さないと決めたキー・Windows で効くキーが無かったことは、PR の本文に書く (手順の細部は
+  `win/README.md` の「固定した版を上げる」の 3)。setup の新しい版の知らせ (警告のまとめ) も、herdr-app の行があれば末尾に同じ注意を添える
 - 見送るなら、その名前の見送りの一覧に 1 行足す (候補の JSON の `skip_file`)。winget のものは「版 理由」、herdr-app・herdr-core は
   「app か core・版・理由」。今出ている新しい版を全部書く (1 つだけだと、残りの版でまた知らせる)
 - 同じファイルを触る open の PR (`gh pr list --state open`) があれば、重ねずにユーザーに伝える
@@ -62,7 +69,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core 
 | `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
-| `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る) |
+| `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で clone (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) を pull し、`dotfiles apply --steps herdr-app-keys` を流す (受け持ちが WSL のホストでも流す) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (Rust の runner ができたら runner が揃える) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の

@@ -80,7 +80,7 @@ flake.lock を上げる `update` (`deps.toml` の `flake_lock_age`) の最後に
 | flake.lock | `deps.toml` の `flake_lock_age` に `update <flake のディレクトリ>` を続けて打つ (`nix/scripts/flake-lock-age.sh update "$PWD/nix"`。ディレクトリは絶対パスか `./…`)。素の `nix flake update`・`nix flake lock` は使わない。猶予の日数と期間付きの例外 (全体・一部 nixpkgs・一部 upstream) は `nix/release-age.nix` で、書き方は `nix/README.md` の「猶予の日数と例外」。例外を足すのは人の判断 (「人が決めること」) |
 | 例外の片付け | `nix/release-age.nix` の消し時の過ぎた項目を消す。`fromUpstream` は lock の nixpkgs の版が追いついたら、項目と `nix/pkgs/upstream/<pkg>.nix` を一緒に消す (依存の更新の skill が `deps.toml` の `upstream_cleanup` で消し時を出す) |
 | `nix/pkgs/ntn` (印のある fetchurl) | 依存の更新の skill の apply が版と hash を書く。残った古い版 (コメントなど) は、その skill が出す「手で直す」の行に従う |
-| Windows に固定した版 | 決まった版を、名前ごとの直す所に書く。上げる前に release notes を読み、見送るなら見送りの一覧に足す (`references/windows-pins.md` の「直す所」) |
+| Windows に固定した版 | 決まった版を、名前ごとの直す所に書く。上げる前に release notes を読み、見送るなら見送りの一覧に足す。herdr-app は、増えた既定のキーも同じ PR で `win/herdr-app/keys.json` に足す (`references/windows-pins.md` の「直す所」) |
 
 ## 確かめ方
 

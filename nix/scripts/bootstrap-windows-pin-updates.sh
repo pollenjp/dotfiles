@@ -4,7 +4,8 @@
 # Windows に固定した版で入れているものに、固定した版より新しい版が出ていないかを確かめて、短く知らせる。
 # 冪等。`setup.sh --update` でも毎回走る。dotfiles.wsl.windowsFiles.enable = true のマシンが対象。新しい版があれば
 # 名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を、setup の
-# 最後の「警告のまとめ」に残す。確かめられなければ (gh が無い・ログインしていない・API の失敗) 1 行出して先へ進む。
+# 最後の「警告のまとめ」に残す (herdr-app の新しい版には、keys.json に新しい既定のキーを足す注意も添える)。確かめられなければ
+# (gh が無い・ログインしていない・API の失敗) 1 行出して先へ進む。
 # 依存の更新の skill が読む JSON の口 (--list --json・--candidates --json) も持つ (下の「JSON の口」)。
 #
 # order: 97
@@ -52,7 +53,14 @@
 # 2. gh が無い・ログインしていないなら、確かめられないと 1 行出して exit 0
 # 3. 名前ごとに上の口を出た日なしで呼び (60 秒で打ち切る)、見送っていない新しい版があれば「<題>: <固定した版> → <新しい版>」を
 #    出す。警告のまとめには、頼み方を書いた見出しと、その続きの行として残す。新しい版が無ければ 1 行だけ (まとめには
-#    残さない)。確かめられなかった名前は、わけを添えて 1 行出し、まとめにも残す。どれも exit 0 (setup を止めない)
+#    残さない)。確かめられなかった名前は、わけを添えて 1 行出し、まとめにも残す。どれも exit 0 (setup を止めない)。
+#    herdr-app に見送っていない新しい版があれば、続きの行の末尾に keys.json の注意を 2 行添える。dotfiles (Windows の runner の
+#    herdr-app-keys) がキーを書き足した keys.json は丸ごとユーザーのものになり、herdr-app を上げても新しい既定のキーが足されない
+#    (win/README.md の「herdr-app のキー」)。上げる作業 (Claude Code が警告のまとめを読んで上げる) の中で、上げる版までの更新ノート
+#    (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) を見て、Windows で効く新しい既定のキーを repo の win/herdr-app/keys.json
+#    に足すよう促す (上げ方の節は win/README.md の「固定した版を上げる」)。herdr-app を確かめる条件 (tools.windowsHerdr) は
+#    herdr-app-keys の on/off と同じなので、ほかの条件は足さない (keys.json を書いたかは見ない。足すのは repo で、どの PC にも効く)。
+#    末尾に置くのは、警告のまとめが続きの行の長い警告の間を省いても、末尾は残すため
 #
 # ## --candidates (人が読む)
 #
@@ -486,6 +494,7 @@ fi
 
 newer_lines=()
 failed=()
+herdr_app_newer=0
 for name in "${names[@]}"; do
   if ! fetch "${name}" 60 0; then
     failed+=("${name}")
@@ -499,10 +508,21 @@ for name in "${names[@]}"; do
       end' "${tmp}/${name}.json")
   if [[ -n ${line} ]]; then
     newer_lines+=("${line}")
+    if [[ ${name} == herdr-app ]]; then
+      herdr_app_newer=1
+    fi
   fi
 done
 
 if ((${#newer_lines[@]})); then
+  # herdr-app に新しい版があれば、keys.json の注意を続きの行の末尾に添える (「何をするか」の 3)。警告のまとめは続きの行が
+  # 長いと頭と末尾だけを残すので、末尾に置けば省かれない
+  if ((herdr_app_newer)); then
+    newer_lines+=(
+      "※ herdr-app を上げるなら、新しい既定のキーも足す (dotfiles がキーを書き足した keys.json には、herdr-app を上げても新しい既定のキーが足されない)"
+      "  → 上げる版までの更新ノート (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) で keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、Windows で効くキーを win/herdr-app/keys.json に足す (dotfiles のキーと重なる既定のキーは、その既定の値を keys.defaults.json に書く。win/README.md の「固定した版を上げる」)"
+    )
+  fi
   warn "Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める" \
     "${newer_lines[@]}"
 elif ((${#failed[@]} == 0)); then
