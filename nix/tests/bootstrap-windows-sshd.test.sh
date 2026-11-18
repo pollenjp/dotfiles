@@ -16,12 +16,12 @@
 #   - script の冒頭に setup が読む `# tool: windowsSshd (dotfiles.wsl.windowsFiles.sshd.enable)` と `# order: 96` がある
 #   - 鍵の写し (%LOCALAPPDATA%\dotfiles\sshd\authorized_keys): windows-sshd.json の authorizedKeys が list なら、見出しの後ろに
 #     その行を書き、-Check より前に置く (空の list なら見出しだけ)。中身が同じなら書き直さない。null なら消す。windows-sshd.json が
-#     無い前の世代では触らない。--apply でも先に置く
+#     無い前の世代では触らない。--apply でも先に置き、pwsh.exe を呼べないときも先に揃える
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #     (-Check が時間切れ (124) のときは、時間切れと出す)
 #   - -Check が 0 なら 1 行 (※ の補足があれば添える)。1 なら ⚠ で囲んだ注意・状態・揃えるコマンド (--apply と Install-Sshd) を出す
 #     (揃えはしない)。揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの
-#     読めない行) なら、揃えるコマンドの代わりにその直し方を出す
+#     読めない行・拒否の規則が効かないプロファイル・サービスの無い sshd.exe) なら、揃えるコマンドの代わりにその直し方を出す
 #   - -Check が 3 (sshd が入っていない) なら、UAC の確認が出ると先に出してから -IfMissing で入れる。入れられない・時間切れなら ⚠ で
 #     囲んで知らせる (時間切れなら、UAC の確認が残っているときの打ち直し方も)
 #   - 偽の timeout が上限の秒数を記録し、-Check は 120 秒・-IfMissing は 600 秒で打つこと、UAC の案内が
@@ -118,8 +118,14 @@ blocked_inbox_out='sshd (OpenSSH Server、C:\Program Files\OpenSSH)
 ※ Windows の機能の OpenSSH Server を外すには、管理者の PowerShell で Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 を打つ (その後 Install-Sshd を打ち直す)
 ⚠️ Windows の機能の OpenSSH Server が入っている → 先に外す (二重にしない。上の ※ の行) ⚠️'
 blocked_user_out='sshd (OpenSSH Server、C:\Program Files\OpenSSH)
-※ AllowUsers に書けないユーザー名: john doe (英小文字・数字・. _ - の名前だけ書ける。-AllowUser で渡す)
-⚠️ AllowUsers に書けないユーザー名 → -AllowUser で英小文字・数字・. _ - の名前を渡す ⚠️'
+※ AllowUsers に書けないユーザー名: john doe (dotfiles は英小文字・数字・. _ - の名前だけを書く。sshd はログインした本当の名前と比べるので、別の名前は渡せない)
+⚠️ AllowUsers に書けないユーザー名 → このユーザーでは dotfiles の sshd を使えない (上の ※ の行) ⚠️'
+blocked_firewall_out='sshd (OpenSSH Server、C:\Program Files\OpenSSH)
+※ 拒否の規則が効かない Windows Firewall のプロファイル: Public (無効か、グループ ポリシーがローカルの規則を止めている)。有効にするには、管理者の PowerShell で Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True を打つ
+⚠️ Windows Firewall が効いていないプロファイルがある → 先に有効にする (拒否の規則が効かない。上の ※ の行) ⚠️'
+blocked_service_out='sshd (OpenSSH Server、C:\Program Files\OpenSSH)
+⚠ server          : C:\Program Files\OpenSSH\sshd.exe はあるが、サービス sshd が無い (MSI の入り方が崩れている)
+⚠️ sshd.exe はあるがサービス sshd が無い → Server の機能を外してから入れ直す (上の ※ の行) ⚠️'
 blocked_keys_out='sshd (OpenSSH Server、C:\Program Files\OpenSSH)
 ※ 鍵の写しの読めない行: garbage line
 ⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️'
@@ -322,11 +328,11 @@ else
   ng "Install-Sshd.ps1 が無い" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# 5. pwsh.exe が無い: 手で打つコマンドを出して exit 0
+# 5. pwsh.exe が無い: 手で打つコマンドを出して exit 0。鍵の写しは先に揃える (外した鍵が写しに残らない)
 h=$(new_home t5 "${state_on}" 1)
 run "${h}" 1
-if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-Sshd -Check'; then
-  ok "pwsh.exe が無ければ手で打つコマンドを出して exit 0"
+if [[ $(rc "${h}") == 0 ]] && seen "${h}" -F 'Install-Sshd -Check' && [[ $(grep -c -v '^#' "$(copy_of "${h}")") == 2 ]]; then
+  ok "pwsh.exe が無ければ手で打つコマンドを出して exit 0 (鍵の写しは先に揃える)"
 else
   ng "pwsh.exe が無い" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
@@ -437,7 +443,7 @@ else
 fi
 
 # 10. 揃える前に人が直すこと (-Check が 1): 揃えるコマンドの代わりに、その直し方を出す
-for c in openssh inbox user keys; do
+for c in openssh inbox user keys firewall service; do
   case ${c} in
     openssh)
       o=${blocked_openssh_out}
@@ -449,7 +455,15 @@ for c in openssh inbox user keys; do
       ;;
     user)
       o=${blocked_user_out}
-      want='Install-Sshd -AllowUser'
+      want='このユーザーでは dotfiles の sshd を使えません'
+      ;;
+    firewall)
+      o=${blocked_firewall_out}
+      want='Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True'
+      ;;
+    service)
+      o=${blocked_service_out}
+      want='「sshd を止める・外す」'
       ;;
     keys)
       o=${blocked_keys_out}

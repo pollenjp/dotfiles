@@ -29,7 +29,7 @@
 #    ~/.local/state/dotfiles/group.json の tools.windowsSshd が true でないマシン (false・欄の無い前の世代・ファイルが無い) も
 #    飛ばす (setup も # tool: で飛ばすが、手で流したときと前の世代のため)。<windowsHome>/.config/powershell/Install-Sshd.ps1 が
 #    無いときも飛ばす
-# 2. 鍵の写しを置く。~/.local/state/dotfiles/windows-sshd.json の authorizedKeys (ホストの値の wsl.windowsFiles.sshd.authorizedKeys)
+# 2. 鍵の写しを置く (pwsh.exe を呼べないときも先に揃える)。~/.local/state/dotfiles/windows-sshd.json の authorizedKeys (ホストの値の wsl.windowsFiles.sshd.authorizedKeys)
 #    が list なら、Windows の %LOCALAPPDATA%\dotfiles\sshd\authorized_keys にその行を書く (中身が同じなら書かない)。null なら
 #    写しを消す (Install-Sshd は写しが無ければ鍵の中身に触らない)。windows-sshd.json が無い前の世代では写しに触らない。
 #    Install-Sshd.ps1 がこの写しどおりに administrators_authorized_keys を書く (管理者の鍵のファイルは管理者でないと書けないので、
@@ -213,6 +213,9 @@ sync_keys_copy() {
   fi
 }
 
+# 写しは pwsh.exe を呼べないときも先に揃える (外した鍵が写しに残ると、後で PowerShell から打つ Install-Sshd が書き戻す)
+sync_keys_copy
+
 if ! command -v pwsh.exe &>/dev/null; then
   warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
   exit 0
@@ -221,8 +224,6 @@ if ! win_script=$(wslpath -w "${deployed}" 2>/dev/null) || [[ -z ${win_script} ]
   warn "Install-Sshd.ps1 の場所を Windows のパスに直せませんでした: ${deployed}" "$(manual)"
   exit 0
 fi
-
-sync_keys_copy
 
 # pwsh.exe に渡すコマンド。$1 はスクリプトに渡す引数 (" -Check" など。空なら揃える)。
 # 出力は UTF-8 にする (日本語と ⚠ が化けないよう)。パスは '' で囲む (中の ' は '' に)。
@@ -256,7 +257,11 @@ warn_frame() {
   elif grep -qF 'Windows の機能の OpenSSH Server が入っている' <<<"$2"; then
     fix+=("二重にしないため、先に Windows の機能の OpenSSH Server を外してください (管理者の PowerShell で Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0)。外したら setup を流し直します")
   elif grep -qF 'AllowUsers に書けないユーザー名' <<<"$2"; then
-    fix+=("Windows のユーザー名を AllowUsers に書けません (英小文字・数字・. _ - の名前だけ)。PowerShell で Install-Sshd -AllowUser <名前> を打つか、win/README.md の「sshd」を見てください")
+    fix+=("Windows のユーザー名を AllowUsers に書けないので、このユーザーでは dotfiles の sshd を使えません (英小文字・数字・. _ - の名前のユーザーだけ。win/README.md の「sshd」)")
+  elif grep -qF 'Windows Firewall が効いていないプロファイルがある' <<<"$2"; then
+    fix+=("拒否の規則が効かないので揃えません。管理者の PowerShell で Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True を打ってから、setup を流し直してください (グループ ポリシーがローカルの規則を止めている PC では、dotfiles の sshd は使えません)")
+  elif grep -qF 'sshd.exe はあるがサービス sshd が無い' <<<"$2"; then
+    fix+=("MSI の入り方が崩れています。win/README.md の「sshd を止める・外す」の手順で Server の機能を外してから、setup を流し直してください")
   elif grep -qF '鍵の写しに読めない行がある' <<<"$2"; then
     fix+=("ホストの値の wsl.windowsFiles.sshd.authorizedKeys (dotfiles-private) の、authorized_keys の行として読めない値を直し、home-manager switch と setup を流し直してください")
   else

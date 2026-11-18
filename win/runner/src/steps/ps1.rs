@@ -192,8 +192,9 @@ pub const SPECS: &[Ps1Spec] = &[
         manual_fix: &[
             "揃えるには PowerShell で Install-Sshd を打つ (Windows に UAC の確認が 1 回出る。sshd を起こし直すと、つないでいる SSH が切れることがある。runner は揃えない)",
         ],
+        // 入れかけで止まると ps1 は 1 (ずれ) を返し、-IfMissing は何もしないので、引数なしの Install-Sshd を案内する
         sync_fix: &[
-            "入れ直すには PowerShell で Install-Sshd -IfMissing を打つか、dotfiles apply --steps sshd を流し直す (Windows に UAC の確認が出る)",
+            "揃えるには PowerShell で Install-Sshd を打つ (Windows に UAC の確認が 1 回出る。入れかけで止まったときも、これで続きを揃える)",
         ],
         releases_file: false,
         missing_blocked: None,
@@ -209,7 +210,15 @@ pub const SPECS: &[Ps1Spec] = &[
             ),
             (
                 "AllowUsers に書けないユーザー名",
-                "Windows のユーザー名を AllowUsers に書けない (英小文字・数字・. _ - の名前だけ)。PowerShell で Install-Sshd -AllowUser <名前> を打つ",
+                "Windows のユーザー名を AllowUsers に書けないので、このユーザーでは dotfiles の sshd を使えない (英小文字・数字・. _ - の名前のユーザーだけ。win/README.md の「sshd」)",
+            ),
+            (
+                "Windows Firewall が効いていないプロファイルがある",
+                "拒否の規則が効かないので揃えない。管理者の PowerShell で Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True を打つ (グループ ポリシーがローカルの規則を止めている PC では、dotfiles の sshd は使えない)",
+            ),
+            (
+                "sshd.exe はあるがサービス sshd が無い",
+                "MSI の入り方が崩れている。win/README.md の「sshd を止める・外す」の手順で Server の機能を外してから、PowerShell で Install-Sshd を打つ",
             ),
             (
                 "鍵の写しに読めない行がある",
@@ -857,7 +866,8 @@ mod tests {
     //!   揃える。openssh・sshd・tailscale・type-clipboard・google-ime-install は知らせるだけ。herdr は知らせるだけで、Preview が残っていれば外す手順も出す
     //! - tailscale は道具の switch (windowsTailscale) で on/off し、入れた後にログインは手でと出す (入っている版の方が新しいときは ps1 が 0)
     //! - sshd は道具の switch (windowsSshd) で on/off し、3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
-    //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行) はその直し方を出す
+    //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行・拒否の規則が効かない
+    //!   プロファイル・サービスの無い sshd.exe) はその直し方を出す。入れかけで止まったら、引数なしの Install-Sshd を案内する
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1232,8 +1242,16 @@ mod tests {
                 "Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0",
             ),
             (
-                "⚠️ AllowUsers に書けないユーザー名 → -AllowUser で英小文字・数字・. _ - の名前を渡す ⚠️",
-                "Install-Sshd -AllowUser",
+                "⚠️ AllowUsers に書けないユーザー名 → このユーザーでは dotfiles の sshd を使えない (上の ※ の行) ⚠️",
+                "このユーザーでは dotfiles の sshd を使えない",
+            ),
+            (
+                "⚠️ Windows Firewall が効いていないプロファイルがある → 先に有効にする (拒否の規則が効かない。上の ※ の行) ⚠️",
+                "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True",
+            ),
+            (
+                "⚠️ sshd.exe はあるがサービス sshd が無い → Server の機能を外してから入れ直す (上の ※ の行) ⚠️",
+                "sshd を止める・外す",
             ),
             (
                 "⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️",
@@ -1247,6 +1265,22 @@ mod tests {
             assert_eq!(o[0].notes.len(), 1, "{line}");
             assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
         }
+        // 入れかけで止まった (-IfMissing が 1): 引数なしの Install-Sshd を案内する (-IfMissing は 1 のとき何もしない)
+        let sys4 = sys(
+            (3, vec![header_line(s)]),
+            (1, vec!["msiexec が失敗した (終了コード 1603)".into()]),
+        );
+        let (o, _, calls) = run("sshd", &sys4, APPLY);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("PowerShell で Install-Sshd を打つ")
+                    && !n.contains("-IfMissing")),
+            "{:?}",
+            o[0].notes
+        );
         // 0: 揃っている
         let sys3 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
         let (o, out, calls) = run("sshd", &sys3, APPLY);
