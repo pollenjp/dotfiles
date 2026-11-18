@@ -661,7 +661,7 @@ mod tests {
     //!   後で check で見るよう出す
     //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。space は Ctrl+PageUp/Down
     //!   (herdr-app の既定のタブの移動を keys.defaults.json で上書きする) と Ctrl+Shift+↑↓・タブは Ctrl+↑↓ で、Ctrl+Alt+↑↓ は割り当てない。
-    //!   Shift+G の argv が c の 3 か所 (fish・bash・PowerShell) と同じ引数
+    //!   prefix の mod が worktree と一緒に Claude Code を起こす argv (main.js の CLAUDE) が c の 3 か所 (fish・bash・PowerShell) と同じ引数
 
     use super::*;
     use crate::context::join_segments;
@@ -1444,7 +1444,8 @@ mod tests {
         }
     }
 
-    /// Shift+G の argv (mod の CLAUDE) が、c (fish の abbr・bash の alias・PowerShell の function) と同じ引数
+    /// prefix の mod が worktree と一緒に Claude Code を起こす argv (main.js の CLAUDE) が、c (fish の abbr・bash の alias・PowerShell の function) と
+    /// 同じ引数 (どのキーで起こすかは見ない)
     #[test]
     fn claude_argv_matches_c() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");

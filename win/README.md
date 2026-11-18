@@ -584,8 +584,8 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 同じく前・次の space | (旧 herdr は `Ctrl+Alt+↑↓`) |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
-| prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
-| prefix → `Shift+G` | 同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する | `new_worktree` (旧 herdr は `Shift+C` と同じ) |
+| prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space の最初のタブで Claude Code を起動する | `new_worktree` (旧 herdr は Claude Code を起動しない。`Shift+G` と同じ) |
+| prefix → `Shift+G` | 同じく worktree を作り、新しい space で開く (Claude Code は起動しない) | `new_worktree` |
 | prefix → `v`・`\|` | 右に分割 (`pane.split` の right) | `split_vertical` |
 | prefix → `-`・`Shift+S` | 下に分割 (`pane.split` の down) | `split_horizontal` |
 | prefix → `n`・`p` | 次・前のタブ | `next_tab`・`previous_tab` |
@@ -613,7 +613,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
   作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
   開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
-- `Shift+G` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
+- `Shift+C` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
   `c` は fish では abbr、bash では alias で、herdr-app が argv で起こすときに広がるとは限らないので、中身を並べている。machine の space でも同じ argv で、
   claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる (runner の試験
   `claude_argv_matches_c` が、fish・bash・PowerShell の `c` と突き合わせる)
