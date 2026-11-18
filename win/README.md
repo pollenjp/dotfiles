@@ -535,7 +535,8 @@ $p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-c
 ```powershell
 # 会話の scratchpad に panel.json を書き、まとめのペインを開く。split は right と down だけなので、ハブの端末を right に split してまとめの
 # ペインを開き、pane.swap でハブの端末の左へ移す ([まとめ 1/2 | ハブの端末 1/2])。出力の pane (まとめのペインの ID) を控える
-# (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
+# (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)。ユーザーが見ている tab では split がキーボードを
+# 新しいペインへ移すので、split のたびに pane.focus で前のペインへ戻す (戻し方は references/panel.md。下の箇条)
 herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}' | Out-String
 herdr-app do pane.swap '{"pane":"<まとめのペイン>","target":"<ハブの端末のペイン>"}' | Out-String
 # 問いを出すとき: panel.json に questions を書き、ハブの端末を right に split して問いのペインを開く ([まとめ 1/2 | ハブの端末 1/4 | 問い 1/4])。

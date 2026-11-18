@@ -4,15 +4,13 @@
 // props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
 //   role で、1 つの panel.json を「まとめ」と「問い」の 2 つのペインに分けて出せる (ハブはまとめのペインをハブの端末の左に開いて
 //   おき、問いを出すときだけ、ハブの端末を右に分けて問いのペインを開く。並べ方は win/README.md の「herdr-app の mod」)。
-//   props.image (ハブは渡さない): 図の節 (panel.json の sections の type "image" の 1 つ) がオブジェクトで来たら、その図だけを
-//   出す小窓になる (板の図のクリックで、この mod が自分を開くときに渡す)。
 //   - 無い: 問いと状況の節を 1 つのペインに出す (role を足す前の形)
 //   - "summary" (まとめ): title・updated・sections だけを出す。questions は出さない (送信の UI も、Enter で送ることもしない)
 //   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。title・updated・
 //     sections は出さない。questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
 //   - ほかの値: わけを出し、無いときと同じに出す
-//   どの role も、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
-//   ユーザーが選択肢をクリックしたときだけ)。
+//   どの role のペインも、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
+//   ユーザーが選択肢をクリックしたときだけ。図を大きく見る小窓は別で、開いたときに focus する)。
 //   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
 //   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で、この板の handle がキーボードを持つ
 //   (is_focused) ときだけ focused() の pane (キーボードのあるペイン) を控え、その panes() の行が端末を持たず (terminal が null)、
@@ -20,6 +18,8 @@
 //   (同じ mod のまとめのペインがキーボードを持つときに、まとめを閉じない)。確かめられなければ閉じず「送った (閉じるのはハブ)」と
 //   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
 //   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
+// props.image (ハブは渡さない): 図の節 (panel.json の sections の type "image" の 1 つ) がオブジェクトで来たら、その図だけを出す
+//   小窓になる (板の図のクリックで、この mod が自分を開くときに渡す。下の「図の大きさと、大きく見る小窓」)。
 //
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、板 (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
@@ -43,12 +43,17 @@
 //   掛けた後の logical px で、w()・h() に渡す px は zoom を掛ける前の px (描くと zoom 倍になる) なので、幅を settings().zoom で割って
 //   から合わせる (herdr-app の release notes の図も width / settings().zoom。割らないと、zoom 1.4 で図が 1.4 倍に描かれ、ペインの端で
 //   切れる)。図は板の文字の % に従わない。2 倍で止めるのは、広いペイン (pane.zoom など) で図が縦に長くなり、ほかの節を押し出さないため。
-//   図には pointer の形・hover・tooltip と、下の「クリックで拡大」の字を付ける。
+//   図には pointer の形・hover・tooltip と、下の「クリックで拡大」の字を付ける。flow の marks の輪 (ring.svg) は、倍率を 2 の 1/4 乗の
+//   刻みに丸めた大きさで描く (svg() は描く大きさごとに絵を作って持つので、ペインの境を動かしても作る絵の数を抑える。輪は矢印の中点を
+//   通るように置くので、丸めても点は矢印に沿う)。
 //   図をクリックすると、この mod を dialog の小窓 (窓の幅の 92%・高さの 90%) で開き、props.image に図の節を渡す。小窓は panel.json を
 //   読まず見張らず、図の題・図 (marks も)・図の説明だけを出し、図を小窓の図の欄に縦横とも収める (0.1〜4 倍。欄の大きさも zoom で割る)。
-//   閉じるのは Esc・「閉じる」・図の欄のクリック (外のクリックと Esc では herdr-app も閉じる)。開いたときに小窓の handle に focus する
-//   (Esc を受けるため。板のペインは今までどおり focus しない)。開く mod の名前は MOD から取るので、写しを試すときは MOD を写しの名前に
-//   書き換える (書き換えないと写しの図から本物の pjp-hub-panel の小窓が開く。shared の名前と ring.svg のパスも写しのものになる)。
+//   地は theme の popover (herdr-app の dialog の mod と同じ)。閉じるのは Esc・「閉じる」・図の欄のクリック (ダブルクリックの 2 回目は
+//   数えない。図をダブルクリックしても、開いた小窓がすぐ閉じない。外のクリックと Esc では herdr-app も閉じる)。開いたときに小窓の
+//   handle に focus する (Esc を受けるため)。開く mod の名前は MOD から取るので、写しを試すときは MOD を写しの名前に書き換える (書き
+//   換えないと写しの図から本物の pjp-hub-panel の小窓が開く。shared の名前と ring.svg のパスも写しのものになる)。SVG の図を大きく
+//   したときの細かさは herdr-app の画像の読み込み次第 (GPUI 本家の img() は、SVG を SVG の width・height の 2 倍で 1 回だけ絵にして、
+//   引き伸ばして描く。それより大きく描くとにじむ)。
 //
 // panel.json の形:
 //   { version, title, updated,
@@ -107,6 +112,7 @@ const BAR_H = atBase(22) + 4; // 「− % +」の組の高さ (区切りの高�
 const PIC = { min: 0.1, max: 2, pad: 24 + 26 };
 // 図を大きく見る小窓。窓に対する割合の dialog で開き、図は小窓の図の欄に縦横とも収める (max 倍まで)
 const BIG = { kind: "dialog", width: 0.92, height: 0.9, max: 4 };
+const BIG_FAIL = "図を大きく見られない"; // 小窓を開けなかったときのわけの頭
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 // 図の幅・高さ。数でない・0 以下は既定 (520×300)
 const sizeOr = (v, d) => (typeof v === "number" && Number.isFinite(v) && v > 0 ? v : d);
@@ -561,8 +567,13 @@ export default class HubPanel extends View {
   openBig(s, cx) {
     try {
       openOverlay({ mod: NAME, kind: BIG.kind, width: BIG.width, height: BIG.height, props: { image: s } });
+      // 前に開けなかったわけが残っていれば消す (ほかのわけは残す)
+      if (this.status.startsWith(BIG_FAIL)) {
+        this.status = "";
+        cx.notify();
+      }
     } catch (e) {
-      this.status = `図を大きく見られない: ${e}`;
+      this.status = `${BIG_FAIL}: ${e}`;
       cx.notify();
     }
   }
@@ -601,6 +612,7 @@ export default class HubPanel extends View {
       .min_h(0)
       .p(12)
       .gap(8)
+      .bg(c.t.popover ?? c.surface) // herdr-app の dialog の mod (confirm・worktree) と同じく、地を塗る
       .text_size(this.fs(13))
       .text_color(c.fg)
       .child(
@@ -622,7 +634,11 @@ export default class HubPanel extends View {
           .items_center()
           .justify_center()
           .cursor_pointer()
-          .on_click(() => this.closeBig())
+          // ダブルクリックの 2 回目は数えない (板の図をダブルクリックすると、2 回目が開いたばかりの小窓に落ちる)
+          .on_click((e) => {
+            if ((e?.click_count ?? 1) > 1) return;
+            this.closeBig();
+          })
           .on_size_change((size, cx) => {
             const b = this.bigBox;
             if (!b || Math.abs(b.width - size.width) > 1 || Math.abs(b.height - size.height) > 1) {
@@ -641,8 +657,9 @@ export default class HubPanel extends View {
     const color = this.paint(c, m.color, c.accent);
     if (m.kind === "flow") {
       // 一方向に流れる点。loop は行って戻るので向きを出せない。点を並べた輪 (ring.svg) を spin で回し、矢印の外接矩形で
-      // 切り抜く。輪の点の通り道が矢印の中点で矢印に接し、時計回りの向きが矢印の向きになるように輪の中心を置く
-      const s = Math.max(k, 0.6);
+      // 切り抜く。輪の点の通り道が矢印の中点で矢印に接し、時計回りの向きが矢印の向きになるように輪の中心を置く。
+      // 輪の倍率は 2 の 1/4 乗の刻みに丸める (svg() は描く大きさごとに絵を作って持つ。ペインの境を動かしても作る絵の数を抑える)
+      const s = Math.max(2 ** (Math.round(Math.log2(Math.max(k, 0.6)) * 4) / 4), 0.6);
       const D = 600 * s; // ring.svg の大きさ
       const R0 = 292 * s; // 点の通り道の半径
       const pad = 4 * s + 1; // 点の半径 + 1
