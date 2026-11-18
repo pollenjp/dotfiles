@@ -2849,8 +2849,8 @@ SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-c
 
 | もの | 揃える形 |
 | --- | --- |
-| server | OpenSSH の MSI の Server の機能。入っている版と同じ版の MSI を `winget download` で取り直し (winget が manifest の sha256 と照らす)、`msiexec /i <MSI> ADDLOCAL=Client,Server` で足す (同じ ProductCode なので保守の install)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない |
-| `C:\ProgramData\ssh\sshd_config` | dotfiles が書く中身 (下の表)。違えば `sshd_config.dotfiles-bak-<日時>` に退避して書き直す。MSI は Server を足した時点で sshd を起こし、sshd は sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく |
+| server | OpenSSH の MSI の Server の機能。入っている版と同じ版の MSI を `winget download` で取り直し (winget が manifest の sha256 と照らす)、`msiexec /i <MSI> ADDLOCAL=Client,Server` で足す (同じ ProductCode なので保守の install)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。MSI は管理者と SYSTEM だけが書ける `C:\ProgramData\dotfiles\sshd-msi` に落とす (利用者の権限で動くものが、msiexec の前に差し替えられない) |
+| `C:\ProgramData\ssh\sshd_config` | dotfiles が書く中身 (下の表)。違えば (先頭に BOM が付いているときも) `sshd_config.dotfiles-bak-<日時>` に退避し、一時ファイルから差し替える (書けずに消えたままにならない)。MSI は Server を足した時点で sshd を起こし、sshd は sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく |
 | Windows Firewall | 拒否の規則を 3 つ置き (グループ `dotfiles (sshd)`。下の表)、22 番を許す受信の規則 (MSI が作る `OpenSSH SSH Server Preview (sshd)` など) を無効にする |
 | `C:\ProgramData\ssh\administrators_authorized_keys` | 管理者のユーザーの鍵の置き場 (Win32-OpenSSH は管理者の鍵をユーザーの `.ssh` から読まない)。鍵の写し (下の「鍵の置き方」) があれば、その中身どおりに書く (写しに無い鍵は消す。元は `.dotfiles-bak-<日時>` に退避する)。写しが無ければ中身に触らず、ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする (Microsoft の文書の `icacls` と同じ形を、表示の言語によらない SID で書く) |
 | サービス `sshd` | 自動で起こし、動かす。sshd_config を書き直したら起こし直す (つないでいる SSH が切れることがある) |
@@ -2878,6 +2878,12 @@ sshd が読むファイル (sshd_config・administrators_authorized_keys) のコ
 
 - 規則はアドレスで絞る (インターフェイスで絞らない)。Tailscale-In と同じく宛先のアドレスで決まり、Tailscale を入れる前から置ける
 - tailnet から来る ICMP (ping) は止めない。この PC から出ていく通信の戻り (MagicDNS の答えなど) は、受信の規則に当たらない
+- 規則が揃っているかは、アドレスを数の区間にそろえて比べる (Windows は 100.64.0.0/10 を 100.64.0.0/255.192.0.0 と返し、範囲をサブネットの形で返す
+  こともある)。program・サービス・インターフェイスで絞られた規則は、sshd に効かないことがあるので揃っていない扱い
+- 22 番を許す受信の規則のうち、無効にするのは sshd.exe の規則とポートが 22 番だけの規則。22 番とほかのポートを並べた手の規則は、ほかのポートまで
+  閉じないよう残し、※ で添える (22 番は拒否の規則が止める)
+- 拒否の規則が効くのは Windows Firewall が有効なときだけ。3 つのプロファイルのどれかが無効か、グループ ポリシーがローカルの規則を止めている
+  (`AllowLocalFirewallRules` が False) と、`Install-Sshd` は揃えずに止まる (有効にするのは人)
 
 ### 鍵の置き方
 
@@ -2888,9 +2894,9 @@ PR に残る。
 2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、ホストの値の list に足して PR を出す (鍵が漏れても、
    その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る)
 3. merge したら `~/dotfiles/setup --update` を流す。`bootstrap-windows-sshd.sh` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを
-   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す
-4. `bootstrap-windows-sshd.sh --apply` か PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る)。端末を失くしたら、その行を消して同じ手順を
-   流し、Tailscale の管理画面からも端末を消す
+   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す。足す鍵と消す鍵は ※ の行に、コメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
+4. ※ の行に覚えのない鍵が無いのを見てから、`bootstrap-windows-sshd.sh --apply` か PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る)。
+   端末を失くしたら、その行を消して同じ手順を流し、Tailscale の管理画面からも端末を消す
 
 - 写しは利用者が書けるファイル (administrators_authorized_keys は管理者でないと書けないので、間に挟む)。sshd は写しを読まない
 - `authorizedKeys` が null (既定) のホストでは写しを置かず (前に置いた写しは消す)、`Install-Sshd` は鍵の中身に触らない (鍵は管理者のメモ帳などで
@@ -2914,10 +2920,21 @@ PR に残る。
 - 揃える順は、拒否の規則 → sshd_config → 鍵 → server → 22 番の許可を無効にする → ssh-agent → サービス。MSI は Server を足した時点で sshd を起こし、
   22 番の許可も作るので、その前に拒否の規則と sshd_config と鍵を置く (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
 - MSI を流すと ssh-agent のサービスが自動・実行中に戻りうるので、`Install-OpenSSH` と同じく停止・無効に戻す (1Password の agent と pipe を取り合う)
-- 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・AllowUsers に書けないユーザー名・鍵の写しの読めない行) があれば、
-  揃えずに 1 で止まり、締めの行と ※ で直し方を出す (setup と runner もその直し方を出す)
+- 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・AllowUsers に書けないユーザー名・鍵の写しの読めない行・
+  拒否の規則が効かない Windows Firewall のプロファイル・サービスの無い `sshd.exe`) があれば、揃えずに 1 で止まり、締めの行と ※ で直し方を出す
+  (setup と runner もその直し方を出す)
+- SSH の会話の中 (`SSH_CONNECTION` がある) で揃えるときは、sshd を起こし直さない (起こし直すと会話ごと切れ、止めてから起こす間に落ちると sshd が
+  止まったままになる)。書き直した sshd_config を効かせるには、PC の管理者の PowerShell で `Restart-Service sshd` を打つ
+- 管理者で起動し直した子の思わぬ失敗も、親が `[管理者]` の行で出す (子の窓はすぐ閉じる)
 - OpenSSH を上げる・下げるとき (`Install-OpenSSH`) は Server も一緒に入れ直す。上げ直した MSI は 22 番の受信の許可を有効に戻し、サービスを作り直す
-  ので、終わったら `Install-Sshd` で揃える (その間も、LAN からの 22 番は拒否の規則が止める)
+  ので、終わったら `Install-Sshd` で揃える (その間も、LAN からの 22 番は拒否の規則が止める)。入れ替えると SSH の会話が切れるので、`Install-OpenSSH` は
+  `sshd-session` (sshd の会話) も動いているものに数え、閉じるよう出して止まる (`-Force` で進む)
+
+守れないこと (dotfiles-private の ADR 078):
+
+- 配った `Install-Sshd.ps1` と鍵の写しは、利用者が書けるファイル。同じユーザーの権限で動く悪いコードは、UAC の確認より前にそれらを書き換えられる
+  (repo のほかの `Install-*.ps1` と同じ形。UAC は守りの境ではない)。揃える前の ※ の行で、足す鍵に覚えがあるかを見る
+- 送り元のアドレスで絞っているので、100.64.0.0/10 を使う LAN (ISP の CGNAT の内側など) からは、拒否の規則と AllowUsers を通る。残る壁は鍵と `from=`
 
 ### Herdr のアプリと hc からつなぐ
 
@@ -2942,8 +2959,9 @@ PR に残る。
 ### Install-Sshd.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (sshd_config の中身・鍵の行の読み方・administrators_authorized_keys の中身・Windows Firewall のアドレスのそろえ方と規則の比べ方・
-  鍵のファイルの権限・winget download と msiexec の引数・判定と状態の表) は `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
+- 副作用の無い関数 (sshd_config の中身・鍵の行の読み方と指紋・administrators_authorized_keys の中身・Windows Firewall のアドレスの区間と規則の比べ方・
+  外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・鍵のファイルの権限・winget download と msiexec の引数・判定と状態の表) と、
+  BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
   Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、AllowUsers の CIDR の書き方の誤り (sshd が起動しなくなる) を
   ここで見つける (CI は `nixpkgs#openssh` を足して流す):
 
