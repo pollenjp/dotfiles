@@ -552,9 +552,9 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   ペインは ls に出ない。出ていれば端末のペイン)
 - 板の文字の大きさは、どの role のペインでも上の行 (題・更新の時刻の行) の `− <今の %> +` で変える。1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に
   戻る。100% は前の固定の大きさ (本文 13px など) の 1.2 倍で、字と札・ボタンの大きさが同じ倍率で変わり、カードの余白と図 (ペインの幅に合わせて縮める) は変わら
-  ない。大きさは herdr-app の shared の `pjp-hub-panel.textPercent` (整数の %) に残るので、どの space の板も、後から開いた問いのペインも同じ大きさで出て、
-  herdr-app を上げ直しても残る。変わるのは板の文字だけで、アプリの zoom (`settings.json` の `zoom`・`Ctrl+=` などのキー) と端末・ほかの mod は変わらない。
-  ペインが狭いときは、更新の時刻とボタンが次の行へ回る
+  ない。`− % +` の組はいつも 100% の大きさで右上に留まる (押してもボタンが動かない)。大きさは herdr-app の shared の `pjp-hub-panel.textPercent` (整数の %) に
+  残るので、どの space の板も、後から開いた問いのペインも同じ大きさで出て、herdr-app を上げ直しても残る。変わるのは板の文字だけで、アプリの zoom
+  (`settings.json` の `zoom`・`Ctrl+=` などのキー) と端末・ほかの mod は変わらない。ペインが狭いときは、題と更新の時刻、下の行のボタンが折り返す
 - 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
   「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
 - 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の

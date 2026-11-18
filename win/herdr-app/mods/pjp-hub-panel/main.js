@@ -21,15 +21,17 @@
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、板 (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
 //   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
-//   1.2 倍。字と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる。カードと一覧の余白・間と、図 (image の節。今までどおり
-//   ペインの幅に合わせて縮める。marks の label の字も図の倍率のまま) は変えない。markdown の中の見出し (#) の大きさは TextView が
-//   決める (倍率に従うかは試していない。本文と箇条書きは親の字の大きさに従う)。
+//   1.2 倍。字 (図の説明 caption も) と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる。変えないもの: カードと一覧の
+//   余白・間、図そのもの (image の節の絵と marks。今までどおりペインの幅に合わせて縮め、marks の label の字も図の倍率のまま)、「− % +」の
+//   組 (いつも 100% の大きさ。押しても組の幅が変わらず、ボタンがポインタの下から動かないように)。markdown の中の見出し (#) の大きさは
+//   TextView が決める (倍率に従うかは試していない。本文と箇条書きは親の字の大きさに従う)。
 //   値は shared の "pjp-hub-panel.textPercent" (整数の %。名前は MOD から作るので、MOD を書き換えずに写した pjp-hub-panel-try なども
 //   同じ値を使う) に置く。どの space の板も、後から開いた問いのペインも同じ大きさで出て、herdr-app を上げ直しても残る (localStorage は
 //   ペインの写しごとで、問いのペインは開くたびに新しい写しになるので使わない)。数でない値は既定、範囲の外は端に寄せ、整数に丸めて出す。
 //   アプリの zoom (settings.json の zoom・app.zoom_in) は端末もほかの mod も大きくするので使わない (板の px もアプリの zoom には従う)。
-//   キーでは変えない (Ctrl+= などはアプリの zoom のキー)。ペインが狭いときは、上の行の更新の時刻とボタンが次の行へ回り (ボタンは
-//   縮めない)、題は縮んで折り返す。下の行の「入力欄に入れる」「送信」も、わけの字の横に入らなければ次の行へ回る。
+//   キーでは変えない (Ctrl+= などはアプリの zoom のキー)。上の行の組は折り返さずに右上に留まり、ペインが狭いときは、左の欄の中で
+//   更新の時刻が次の行へ回り、題は縮んで折り返す。下の行の「入力欄に入れる」「送信」は、わけの字の横に入らなければ次の行へ回り、
+//   2 つが並ばない幅では「送信」がさらに次の行へ回る (どちらも右寄せで、ボタンは縮めない)。
 //
 // panel.json の形:
 //   { version, title, updated,
@@ -77,6 +79,9 @@ const zoomOf = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.min(ZO
 // 1 刻み上げた (dir が 1)・下げた (-1) %。刻みの途中の値 (105 など) からは次の刻み (110・100) へ
 const zoomStep = (z, dir) =>
   dir > 0 ? Math.min(ZOOM.max, (Math.floor(z / ZOOM.step) + 1) * ZOOM.step) : Math.max(ZOOM.min, (Math.ceil(z / ZOOM.step) - 1) * ZOOM.step);
+// 既定の倍率だけを掛けた大きさ (板の % に従わない)。「− % +」の組に使い、押しても組の幅と高さが変わらず、ボタンがポインタの下から動かない
+const atBase = (n) => Math.round(n * TEXT_BASE * 10) / 10;
+const BAR_H = atBase(22) + 4; // 「− % +」の組の高さ (区切りの高さに、内の余白と枠の上下 1 px ずつを足したもの)
 
 export default class HubPanel extends View {
   init(_props, cx) {
@@ -416,7 +421,6 @@ export default class HubPanel extends View {
     const tail = label === "" ? "" : ` ${label}`; // 印の後ろに付ける字
     const base = h_flex()
       .id(`hp-st-${key}`)
-      .min_w(0)
       .px(this.fs(7))
       .py(this.fs(2))
       .rounded(this.fs(6))
@@ -546,35 +550,38 @@ export default class HubPanel extends View {
       .child(label);
   }
 
-  // 上の行の「- <今の %> +」。押すと板の文字だけを 1 刻みずつ上げ下げし、% で既定に戻す (アプリの zoom は替えない)
+  // 上の行の「− <今の %> +」。押すと板の文字だけを 1 刻みずつ上げ下げし、% で既定に戻す (アプリの zoom は替えない)。
+  // 組の大きさは板の % に従わない (atBase)。% の札は「200%」が入る幅を初めから取る。どちらも、押しても組の幅が変わらず、
+  // 右に寄せた組の「−」と「%」がポインタの下から動かないため
   zoomControls(z, c) {
     const seg = (id, label, tip, enabled, onClick, color, offColor = c.dim) =>
       h_flex()
         .id(id)
         .flex_none()
-        .h(this.fs(22))
-        .min_w(this.fs(22))
-        .px(this.fs(5))
+        .h(atBase(22))
+        .min_w(atBase(22))
+        .px(atBase(5))
         .justify_center()
         .items_center()
-        .rounded(this.fs(5))
-        .text_size(this.fs(12))
+        .rounded(atBase(5))
+        .text_size(atBase(12))
         .text_color(enabled ? color : offColor)
         .tooltip(tip)
         .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(c.raised)).on_click(onClick))
         .child(label);
     const changed = z !== ZOOM.def;
+    // 押したときの % は、描いたときの z でなく shared から読み直す (描き直す前に 2 回押しても 2 刻み進む)
+    const step = (dir) => (_, cx) => this.setZoom(zoomStep(this.zoom(), dir), cx);
     return h_flex()
       .id("hp-zoom")
       .flex_none()
-      .ml_auto() // 次の行へ回ったときも右に寄せる (行が足りないときは左から詰め、「-」を押せるようにする)
-      .gap(this.fs(2))
+      .gap(atBase(2))
       .p(1)
       .items_center()
-      .rounded(this.fs(6))
+      .rounded(atBase(6))
       .border_1()
       .border_color(c.border)
-      .child(seg("hp-zoom-out", "−", `板の文字を小さく (${ZOOM.min}% まで)`, z > ZOOM.min, (_, cx) => this.setZoom(zoomStep(z, -1), cx), c.fg))
+      .child(seg("hp-zoom-out", "−", `板の文字を小さく (${ZOOM.min}% まで)`, z > ZOOM.min, step(-1), c.fg))
       .child(
         seg(
           "hp-zoom-reset",
@@ -584,9 +591,9 @@ export default class HubPanel extends View {
           (_, cx) => this.setZoom(ZOOM.def, cx),
           c.accent, // 既定から変えているときは accent で出し、押すと戻せると分かるようにする
           c.muted,
-        ),
+        ).min_w(atBase(46)),
       )
-      .child(seg("hp-zoom-in", "+", `板の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, (_, cx) => this.setZoom(zoomStep(z, 1), cx), c.fg));
+      .child(seg("hp-zoom-in", "+", `板の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, step(1), c.fg));
   }
 
   render(cx) {
@@ -634,7 +641,8 @@ export default class HubPanel extends View {
             .border_color(c.border)
             .child(div().text_size(this.fs(12)).text_color(line ? c.fg : c.dim).child(line || "選択肢を選ぶと、ここに答えの文が出ます"))
             .child(
-              // 狭いときはボタンの組が次の行へ回る (ボタンは縮めない。わけの字は縮んで折り返す)
+              // 狭いときはボタンの組がわけの字の次の行へ回り、組も入らなければ「送信」が次の行へ回る (どちらも右寄せ。ボタンは
+              // 縮めない。わけの字は縮んで折り返す)
               h_flex()
                 .flex_wrap()
                 .gap(8)
@@ -642,8 +650,10 @@ export default class HubPanel extends View {
                 .when(hint !== "", (el) => el.child(div().flex_auto().min_w(0).text_size(this.fs(11)).text_color(c.dim).child(hint)))
                 .child(
                   h_flex()
-                    .flex_none()
+                    .min_w(0)
                     .ml_auto()
+                    .flex_wrap()
+                    .justify_end()
                     .gap(8)
                     .items_center()
                     .child(this.button("hp-paste", "入力欄に入れる", false, ready, c, (_, cx) => this.deliver(cx, false)))
@@ -671,18 +681,30 @@ export default class HubPanel extends View {
       .text_size(this.fs(13))
       .text_color(c.fg)
       .child(
-        // 上の行: 題・更新の時刻・文字の大きさのボタン。狭いときは更新の時刻とボタンが次の行へ回り、題は縮んで折り返す
+        // 上の行: 題と更新の時刻の欄 | 文字の大きさの組。組は折り返さずに右上に留め (items_start)、押しても動かない。
+        // 狭いときは欄の中で、更新の時刻が次の行へ回り、題は縮んで折り返す
         h_flex()
-          .flex_wrap()
           .px(14)
           .py(10)
-          .gap_x(8)
-          .gap_y(6)
-          .items_center()
+          .gap(8)
+          .items_start()
           .border_b_1()
           .border_color(c.border)
-          .child(div().flex_auto().min_w(0).text_size(this.fs(15)).font_semibold().child(heading))
-          .when(r !== "questions" && !!d?.updated, (el) => el.child(div().flex_none().text_size(this.fs(11)).text_color(c.dim).child(d.updated)))
+          .child(
+            h_flex()
+              .flex_1()
+              .min_w(0)
+              .min_h(BAR_H) // 1 行の題を組と上下の中ほどにそろえる (題が組より高くなれば欄が伸び、組は上に留まる)
+              .flex_wrap()
+              .content_center()
+              .gap_x(8)
+              .gap_y(2)
+              .items_center()
+              .child(div().flex_auto().min_w(0).text_size(this.fs(15)).font_semibold().child(heading))
+              .when(r !== "questions" && !!d?.updated, (el) =>
+                el.child(div().flex_none().ml_auto().text_size(this.fs(11)).text_color(c.dim).child(d.updated)),
+              ),
+          )
           .child(this.zoomControls(z, c)),
       )
       .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))
