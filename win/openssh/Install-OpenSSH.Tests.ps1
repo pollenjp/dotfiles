@@ -97,6 +97,20 @@ Test-Case 'downgrade の install に --version を付ける' '9.8.3.0' {
     $a[$a.IndexOf('--version') + 1]
 }
 Test-Case 'none なら何も打たない' 0 { @(Get-WingetCommands -Plan 'none' -PackageId $Id -Version '10.0.0.0').Count }
+Test-Case 'install も sshd を入れない (Server は Install-Sshd.ps1 が足す)' 'ADDLOCAL=Client' {
+    $a = @(Get-WingetCommands -Plan 'install' -PackageId $Id -Version '10.0.0.0')[0]
+    $a[$a.IndexOf('--custom') + 1]
+}
+# Install-Sshd.ps1 が Server を足したマシン (-Server): 上げる・下げるときも Server を残す (ADDLOCAL を渡すと MSI は前の版の機能を
+# 引き継がないので、Client だけで上げると sshd が消える)
+Test-Case 'Server があれば upgrade は Client と Server を並べる' 'ADDLOCAL=Client,Server' {
+    $a = @(Get-WingetCommands -Plan 'upgrade' -PackageId $Id -Version '10.0.0.0' -Server)[0]
+    $a[$a.IndexOf('--custom') + 1]
+}
+Test-Case 'Server があれば、下げるときの install も Client と Server を並べる' 'ADDLOCAL=Client,Server' {
+    $a = @(Get-WingetCommands -Plan 'downgrade' -PackageId $Id -Version '9.8.3.0' -Server)[1]
+    $a[$a.IndexOf('--custom') + 1]
+}
 
 # winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと、この script が足した pin (Pinning) に
 # 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は
@@ -128,19 +142,19 @@ Test-Case 'サービスが無い' 'True' { Test-SshAgentDisabled -Status $null -
 $dir = 'C:\Program Files\OpenSSH'
 $drift = [pscustomobject]@{
     Installed = [version]'9.5.0.0'; Plan = 'upgrade'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
-    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $false
+    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $false; Server = $false
 }
 $inSync = [pscustomobject]@{
     Installed = [version]'10.0.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
-    AgentDisabled = $true; Pinned = $true; Latest = [version]'10.0.0.0'; Inbox = $false
+    AgentDisabled = $true; Pinned = $true; Latest = [version]'10.0.0.0'; Inbox = $false; Server = $false
 }
 $agentBack = [pscustomobject]@{
     Installed = [version]'10.0.0.0'; Plan = 'none'; AgentStatus = 'Running'; AgentStartType = 'Automatic'
-    AgentDisabled = $false; Pinned = $true; Latest = [version]'10.0.0.0'; Inbox = $false
+    AgentDisabled = $false; Pinned = $true; Latest = [version]'10.0.0.0'; Inbox = $false; Server = $false
 }
 $newer = [pscustomobject]@{
     Installed = [version]'10.0.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
-    AgentDisabled = $true; Pinned = $true; Latest = [version]'10.1.0.0'; Inbox = $false
+    AgentDisabled = $true; Pinned = $true; Latest = [version]'10.1.0.0'; Inbox = $false; Server = $false
 }
 Test-Case '版と pin がずれていれば、その 2 行だけ ⚠' @('⚠ 固定した版      : 10.0.0.0 → 上げる', '⚠ winget pin      : 無し → 足す') {
     Format-OpenSshState -State $drift -Target '10.0.0.0' -InstallDir $dir | Where-Object Warn | ForEach-Object Text
@@ -154,6 +168,16 @@ Test-Case '揃っていれば ⚠ の行は無い' 0 {
 Test-Case 'ssh-agent が自動・実行中に戻っていれば ⚠' '⚠ ssh-agent       : Running / Automatic → 停止・無効にする' {
     Format-OpenSshState -State $agentBack -Target '10.0.0.0' -InstallDir $dir | Where-Object Warn | ForEach-Object Text
 }
+Test-Case 'sshd (Server) も入っていて上げるなら、一緒に入れ直して Install-Sshd で揃えると ※ で添える' 'True' {
+    $s = $drift.PSObject.Copy()
+    $s.Server = $true
+    [bool](@(Format-OpenSshState -State $s -Target '10.0.0.0' -InstallDir $dir | Where-Object { $_.Text -like '※ sshd (Server の機能) も入っている*Install-Sshd*' }).Count -eq 1)
+}
+Test-Case 'sshd (Server) が入っていても、揃っていれば何も添えない' 0 {
+    $s = $inSync.PSObject.Copy()
+    $s.Server = $true
+    @(Format-OpenSshState -State $s -Target '10.0.0.0' -InstallDir $dir | Where-Object { $_.Text -like '※ sshd*' }).Count
+}
 Test-Case 'winget に新しい版があれば ※ で知らせる (ずれではないので ⚠ にはしない)' '※ winget に固定した版より新しい 10.1.0.0 がある。上げるなら Install-OpenSSH.ps1 の -Version の既定値を変える' {
     Format-OpenSshState -State $newer -Target '10.0.0.0' -InstallDir $dir | Where-Object { $_.Text -like '※*' } | ForEach-Object Text
 }
@@ -161,11 +185,11 @@ Test-Case 'winget に新しい版があれば ※ で知らせる (ずれでは�
 # Get-OpenSshExitCode: -Check の終了コード。入っていなければ 3、版・ssh-agent・pin が揃えば 0、ほかは 1
 $missing = [pscustomobject]@{
     Installed = $null; Plan = 'install'; AgentStatus = $null; AgentStartType = $null
-    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $true
+    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $true; Server = $false
 }
 $unpinned = [pscustomobject]@{
     Installed = [version]'10.0.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
-    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $false
+    AgentDisabled = $true; Pinned = $false; Latest = [version]'10.0.0.0'; Inbox = $false; Server = $false
 }
 Test-Case '入っていなければ 3' 3 { Get-OpenSshExitCode -State $missing }
 Test-Case '版・ssh-agent・pin が揃えば 0' 0 { Get-OpenSshExitCode -State $inSync }
