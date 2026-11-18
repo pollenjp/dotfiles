@@ -1,0 +1,474 @@
+﻿# win/openssh/Install-Sshd.ps1 のうち、副作用の無い関数のテスト。Pester は使わない。
+# サービス・ファイル・Windows Firewall・winget・msiexec に触る部分は、実機で -Check と本番を打って確かめる (win/README.md の「sshd」)。
+#
+# WSL から流す (Linux の pwsh で動かすので、Windows 側には触らない。PATH に sshd があれば、作る sshd_config を sshd -G で読ませる):
+#   nix shell nixpkgs#powershell nixpkgs#openssh -c pwsh -NoProfile -File win/openssh/Install-Sshd.Tests.ps1
+#
+# BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
+#
+# ## 確かめること
+#
+#   - AllowUsers に書けるユーザー名 (英小文字・数字・. _ -) だけを通す
+#   - 作る sshd_config: 鍵だけ (PasswordAuthentication no・KbdInteractiveAuthentication no・AuthenticationMethods publickey)、AllowUsers は
+#     ユーザーを tailnet (100.64.0.0/10・fd7a:115c:a1e0::/48) と localhost からに限り、Match Group administrators より前に書く。
+#     ListenAddress は書かない。改行は LF で、BOM も CR も無く、ASCII だけ。PATH に sshd があれば sshd -G が読め、AllowUsers が 4 つ並ぶ
+#   - 鍵の写しの読み方: コメントと空の行を除き、authorized_keys の行として読めない行は分ける。from= の有無を見分ける。名札はコメント
+#     (無ければ base64 の末尾) と鍵の種類
+#   - administrators_authorized_keys に書く中身 (鍵の行と ASCII の見出し) と、鍵の行の差 (足す・消す・並びも同じか)
+#   - Windows Firewall のアドレスを 1 つの形にそろえる (Get-NetFirewallAddressFilter の 100.64.0.0/255.192.0.0 も /10 にする)。拒否の
+#     規則は 3 つで、読んだ規則が同じかを、有効・向き・拒否・プロファイル・プロトコル・ポート・アドレスで比べる
+#   - 鍵のファイルの権限は、継承を切り、管理者と SYSTEM だけに FullControl を許す形だけを通す
+#   - Server を足すときの winget download と msiexec の引数 (同じ版を取り直し、ADDLOCAL=Client,Server。--include-pinned は付けない)
+#   - 判定: 揃っていれば 0、server が無ければ 3、ずれていれば 1。OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けない
+#     ユーザー名・鍵の写しの読めない行は、揃えずに 1 で止まり、締めの行で先に直すことを出す。管理者でなく読めないファイルは、揃えた
+#     ときの記録と比べる。鍵の写しが無いときは鍵の中身を見ない。鍵が 0 本・from= の無い鍵・Tailscale が無いときは ※ で添える
+#   - 本体の入口: 思わぬ例外では終了コード 2 で止まる
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+
+# dot-source すると関数だけを読み、本体は走らない (Install-Sshd.ps1 の末尾)
+. (Join-Path $PSScriptRoot 'Install-Sshd.ps1')
+
+$script:Failures = 0
+
+# Actual の scriptblock を走らせ、文字列にして Expected と比べる。
+# 関数が無いなどで例外になったら、その文面を結果として失敗にする。
+function Test-Case {
+    param([string]$Name, $Expected, [scriptblock]$Actual)
+    try {
+        $got = & $Actual
+    } catch {
+        $got = "ERROR: $($_.Exception.Message)"
+    }
+    $e = @($Expected | ForEach-Object { "$_" }) -join ' '
+    $a = @($got | ForEach-Object { "$_" }) -join ' '
+    # 文化に依存しない比較 (Ordinal)。-ceq は U+FE0F のような無視できる文字を無視するので、締めの行の ⚠️ を見分けられない
+    if ([string]::Equals($e, $a, [System.StringComparison]::Ordinal)) {
+        Write-Host "ok   $Name"
+    } else {
+        Write-Host "FAIL $Name"
+        Write-Host "     expected: [$e]"
+        Write-Host "     actual:   [$a]"
+        $script:Failures++
+    }
+}
+
+# 例の鍵 (作り物。from= の IP は tailnet の範囲の例)
+$key1 = 'from="100.64.0.1,fd7a:115c:a1e0::1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample01 phone (Herdr)'
+$key2 = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample02'
+$key3 = 'from="100.64.0.2" ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYExampleExample03 tablet'
+
+# Test-SshdUserName: AllowUsers に書けるユーザー名か
+Test-Case 'ふつうの名前は書ける' 'True' { Test-SshdUserName -Name 'alice' }
+Test-Case '数字・. _ - を含む名前も書ける' 'True' { Test-SshdUserName -Name 'a.b_c-1' }
+Test-Case '大文字は小文字にしてから渡す (大文字のままは断る)' 'False' { Test-SshdUserName -Name 'Alice' }
+Test-Case '空白・@・* を含む名前は断る' 'False False False' {
+    Test-SshdUserName -Name 'john doe'; Test-SshdUserName -Name 'a@b'; Test-SshdUserName -Name 'a*'
+}
+Test-Case '空の名前は断る' 'False' { Test-SshdUserName -Name '' }
+
+# ConvertTo-Lf: CRLF を LF にそろえる
+Test-Case 'CRLF を LF にする' "a`nb`n" { ConvertTo-Lf "a`r`nb`r`n" }
+
+# Get-SshdConfigText: 作る sshd_config
+$config = Get-SshdConfigText -AllowUser 'alice'
+$configLines = @($config -split "`n")
+Test-Case 'AllowUsers はユーザーを tailnet と localhost からに限る' 'AllowUsers alice@100.64.0.0/10 alice@fd7a:115c:a1e0::/48 alice@127.0.0.1 alice@::1' {
+    $configLines | Where-Object { $_ -like 'AllowUsers *' }
+}
+Test-Case '鍵だけで入れる (パスワードとキーボード対話を止め、認証の方法を publickey に限る)' 'PubkeyAuthentication yes|PasswordAuthentication no|KbdInteractiveAuthentication no|AuthenticationMethods publickey' {
+    ($configLines | Where-Object { $_ -match '^(PubkeyAuthentication|PasswordAuthentication|KbdInteractiveAuthentication|AuthenticationMethods) ' }) -join '|'
+}
+Test-Case 'AllowUsers は Match Group administrators より前 (Match の中に入れない)' 'True' {
+    $configLines.IndexOf(($configLines | Where-Object { $_ -like 'AllowUsers *' })) -lt $configLines.IndexOf('Match Group administrators')
+}
+Test-Case '管理者の鍵は administrators_authorized_keys から読む (Win32-OpenSSH の既定)' '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys' {
+    $configLines[$configLines.IndexOf('Match Group administrators') + 1]
+}
+Test-Case 'Match の後ろはその 1 行だけ (ほかの設定を Match の中に入れない)' 2 {
+    $after = @($configLines[$configLines.IndexOf('Match Group administrators')..($configLines.Count - 1)] | Where-Object { $_ })
+    $after.Count
+}
+Test-Case 'ListenAddress は書かない (起動のときに Tailscale の IP がまだ無いと落ちる)' 0 {
+    @($configLines | Where-Object { $_ -match '^\s*ListenAddress' }).Count
+}
+Test-Case 'sftp の subsystem は残す (hc machine add の scp が使う)' 'Subsystem sftp sftp-server.exe' {
+    $configLines | Where-Object { $_ -like 'Subsystem *' }
+}
+Test-Case '改行は LF で、CR は無く、末尾は改行' 'False True' { $config.Contains("`r"); $config.EndsWith("`n") }
+Test-Case 'ASCII だけ (sshd は設定を byte のまま読む)' 'True' { $config -cmatch '^[\x00-\x7F]*$' }
+
+# PATH に sshd があれば、作る sshd_config を sshd -G (host の鍵が要らない、設定を読んで出すだけの形) で読ませる。
+# AllowUsers の CIDR の書き方の誤りは sshd が読む時点で落とす (起動しなくなる誤りを、ここで見つける)
+$sshd = Get-Command sshd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($sshd) {
+    $tmp = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-test-$PID"
+    $null = New-Item -ItemType Directory -Force -Path $tmp
+    try {
+        $cfg = Join-Path $tmp 'sshd_config'
+        [IO.File]::WriteAllText($cfg, $config, [Text.UTF8Encoding]::new($false))
+        Test-Case 'sshd -G が作る sshd_config を読める (終了コード 0)' 0 {
+            $null = & $sshd.Source -G -f $cfg 2>&1
+            $LASTEXITCODE
+        }
+        Test-Case 'sshd -G が読んだ AllowUsers は 4 つで、パスワードの認証は no' '4 True' {
+            $out = @(& $sshd.Source -G -f $cfg 2>&1 | ForEach-Object { "$_" })
+            @($out | Where-Object { $_ -match '^(?i)allowusers alice@' }).Count
+            [bool](@($out | Where-Object { $_ -match '^(?i)passwordauthentication no$' }).Count -eq 1)
+        }
+        $bad = Join-Path $tmp 'bad_config'
+        [IO.File]::WriteAllText($bad, "AllowUsers alice@100.64.0.0/33`n", [Text.UTF8Encoding]::new($false))
+        Test-Case 'sshd -G は書き方の誤った AllowUsers の CIDR を断る (確かめ方が効いている)' 'True' {
+            $null = & $sshd.Source -G -f $bad 2>&1
+            $LASTEXITCODE -ne 0
+        }
+    } finally {
+        Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+} else {
+    Write-Host 'skip sshd -G で読ませる確かめ (PATH に sshd が無い。nix shell nixpkgs#openssh を足して流すと確かめる)'
+}
+
+# Get-KeyLines・Test-AuthorizedKeyLine・ConvertFrom-KeysCopy: 鍵の写しの読み方
+Test-Case 'コメントと空の行を除き、前後の空白を落とす' "$key1|$key2" {
+    @(Get-KeyLines -Lines @('# 見出し', '', "  $key1  ", '   ', $key2)) -join '|'
+}
+Test-Case 'from= の付いた ed25519・付かない ed25519・ecdsa は読める' 'True True True' {
+    Test-AuthorizedKeyLine -Line $key1; Test-AuthorizedKeyLine -Line $key2; Test-AuthorizedKeyLine -Line $key3
+}
+Test-Case '鍵の種類が無い・base64 が無い・改行を含む行は読めない' 'False False False' {
+    Test-AuthorizedKeyLine -Line 'hello world'
+    Test-AuthorizedKeyLine -Line 'ssh-ed25519'
+    Test-AuthorizedKeyLine -Line "$key2`n$key2"
+}
+Test-Case 'DSA の鍵は読まない (OpenSSH 10 は DSA を使えない)' 'False' {
+    Test-AuthorizedKeyLine -Line 'ssh-dss AAAAB3NzaC1kc3MAAACBAExampleExampleExample'
+}
+Test-Case '写しの中身を鍵の行と読めない行に分ける' "2 1 $key2" {
+    $c = ConvertFrom-KeysCopy -Lines @('# dotfiles の写し', $key1, 'garbage line', $key2)
+    @($c.Lines).Count; @($c.Bad).Count; $c.Lines[1]
+}
+Test-Case '写しが見出しだけなら鍵は 0 本 (読めない行も 0)' '0 0' {
+    $c = ConvertFrom-KeysCopy -Lines @('# dotfiles の写し', '')
+    @($c.Lines).Count; @($c.Bad).Count
+}
+
+# Get-KeyLabel・Test-KeyWithoutFrom: 表に出す名札と from= の有無
+Test-Case '名札はコメントと鍵の種類 (from= があれば何も添えない)' 'phone (Herdr) (ssh-ed25519)' { Get-KeyLabel -Line $key1 }
+Test-Case 'コメントが無ければ base64 の末尾 8 字。from= が無ければ添える' '…xample02 (ssh-ed25519・from= 無し)' { Get-KeyLabel -Line $key2 }
+Test-Case 'from= の有無' 'False True' { Test-KeyWithoutFrom -Line $key1; Test-KeyWithoutFrom -Line $key2 }
+
+# Get-AdminKeysText: administrators_authorized_keys に書く中身
+Test-Case '写しがあれば、見出しの後ろに鍵の行を並べ、LF で終える' "True $key1 $key3 True" {
+    $t = Get-AdminKeysText -KeyLines @($key1, $key3)
+    $lines = @(($t -split "`n") | Where-Object { $_ })
+    $lines[0].StartsWith('# Written by dotfiles'); @(Get-KeyLines -Lines $lines) -join ' '; $t.EndsWith("`n")
+}
+Test-Case '写しが無いときに空で作る中身は、見出しだけ (鍵は 0 本)' 'True 0' {
+    $t = Get-AdminKeysText -KeyLines @() -Managed $false
+    $t.StartsWith('# Created empty by dotfiles'); @(Get-KeyLines -Lines ($t -split "`n")).Count
+}
+Test-Case '見出しは ASCII だけ' 'True True' {
+    (Get-AdminKeysText -KeyLines @($key1)) -cmatch '^[\x00-\x7F]*$'
+    (Get-AdminKeysText -KeyLines @() -Managed $false) -cmatch '^[\x00-\x7F]*$'
+}
+
+# Compare-KeyLines: 鍵の行の差
+Test-Case '同じ行が同じ並びなら Same' 'True 0 0' {
+    $d = Compare-KeyLines -Want @($key1, $key2) -Have @($key1, $key2)
+    $d.Same; @($d.Added).Count; @($d.Removed).Count
+}
+Test-Case '足す行と消す行を数える' "False $key3 $key2" {
+    $d = Compare-KeyLines -Want @($key1, $key3) -Have @($key1, $key2)
+    $d.Same; $d.Added; $d.Removed
+}
+Test-Case '並びだけが違っても書き直す (Same ではない。足す・消すは 0)' 'False 0 0' {
+    $d = Compare-KeyLines -Want @($key2, $key1) -Have @($key1, $key2)
+    $d.Same; @($d.Added).Count; @($d.Removed).Count
+}
+Test-Case '両方 0 本なら Same' 'True' { (Compare-KeyLines -Want @() -Have @()).Same }
+
+# Get-TextSha256: 書いた中身の記録
+Test-Case 'sha256 は小文字の 16 進 (BOM の無い UTF-8 の byte)' 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad' { Get-TextSha256 'abc' }
+Test-Case '中身が違えば値も違う' 'True' { (Get-TextSha256 'a') -ne (Get-TextSha256 'b') }
+
+# ConvertTo-CanonicalAddress・ConvertTo-CanonicalAddressList: Windows Firewall のアドレスの形をそろえる
+Test-Case 'IPv4 のサブネットのマスク表記を長さにする (Get-NetFirewallAddressFilter の形)' '100.64.0.0/10' { ConvertTo-CanonicalAddress '100.64.0.0/255.192.0.0' }
+Test-Case '長さの表記はそのまま' '100.64.0.0/10' { ConvertTo-CanonicalAddress '100.64.0.0/10' }
+Test-Case 'IPv6 のサブネットは小文字の省略形' 'fd7a:115c:a1e0::/48' { ConvertTo-CanonicalAddress 'FD7A:115C:A1E0:0:0:0:0:0/48' }
+Test-Case '範囲は両端をそろえる' '::2-fd7a:115c:a1df:ffff:ffff:ffff:ffff:ffff' { ConvertTo-CanonicalAddress '0:0:0:0:0:0:0:2-FD7A:115C:A1DF:FFFF:FFFF:FFFF:FFFF:FFFF' }
+Test-Case 'Any などの語は小文字' 'any' { ConvertTo-CanonicalAddress 'Any' }
+Test-Case '並びは辞書順にそろえ、重なりを落とす' 'any' { (ConvertTo-CanonicalAddressList @('Any', 'any')) -join ',' }
+
+# Get-SshdFirewallSpecs・Test-FirewallRuleMatch: 拒否の規則
+$specs = @(Get-SshdFirewallSpecs)
+Test-Case '拒否の規則は 3 つ' 'dotfiles-sshd-tailnet-tcp dotfiles-sshd-tailnet-udp dotfiles-sshd-outside-tcp22' { $specs | ForEach-Object { $_.Name } }
+Test-Case 'tailnet の TCP は 22 番以外 (1-21 と 23-65535)、宛先は tailnet のアドレス' 'TCP 1-21,23-65535 100.64.0.0/10,fd7a:115c:a1e0::/48 Any' {
+    $s = $specs[0]; $s.Protocol; $s.LocalPort -join ','; $s.LocalAddress -join ','; $s.RemoteAddress -join ','
+}
+Test-Case 'tailnet の UDP は全ポート' 'UDP Any 100.64.0.0/10,fd7a:115c:a1e0::/48' {
+    $s = $specs[1]; $s.Protocol; $s.LocalPort -join ','; $s.LocalAddress -join ','
+}
+Test-Case '外からの 22 番は、接続元が tailnet と localhost の外' 'TCP 22 Any 5' {
+    $s = $specs[2]; $s.Protocol; $s.LocalPort -join ','; $s.LocalAddress -join ','; @($s.RemoteAddress).Count
+}
+# 外のアドレスに、tailnet と localhost が入っていないこと (範囲の端を並べて見る)
+Test-Case '外のアドレスの範囲は、100.64.0.0/10・127.0.0.0/8・fd7a:115c:a1e0::/48・::1 の手前と後ろで切れる' '100.63.255.255 100.128.0.0 126.255.255.255 128.0.0.0 ::2 fd7a:115c:a1df:ffff:ffff:ffff:ffff:ffff fd7a:115c:a1e1::' {
+    $r = $specs[2].RemoteAddress
+    ($r[0] -split '-')[1]; ($r[1] -split '-')[0]; ($r[1] -split '-')[1]; ($r[2] -split '-')[0]
+    ($r[3] -split '-')[0]; ($r[3] -split '-')[1]; ($r[4] -split '-')[0]
+}
+# Get-NetFirewallRule・Get-NetFirewallPortFilter・Get-NetFirewallAddressFilter が返す形 (IPv4 のサブネットはマスク表記)
+function New-RuleFacts {
+    param($Spec, [hashtable]$Change = @{})
+    $local = @($Spec.LocalAddress | ForEach-Object { if ($_ -eq '100.64.0.0/10') { '100.64.0.0/255.192.0.0' } else { $_ } })
+    $r = [ordered]@{
+        Name = $Spec.Name; DisplayName = $Spec.DisplayName; Enabled = 'True'; Direction = 'Inbound'; Action = 'Block'; Profile = 'Any'
+        Protocol = $Spec.Protocol; LocalPort = @($Spec.LocalPort); LocalAddress = $local; RemoteAddress = @($Spec.RemoteAddress)
+    }
+    # GetEnumerator で回す ($Change.Keys は、Keys という名前の項目があるとその値を返す)
+    foreach ($e in $Change.GetEnumerator()) { $r[$e.Key] = $e.Value }
+    [pscustomobject]$r
+}
+Test-Case '作ったとおりの規則は同じ (マスク表記のアドレスでも)' 'True True True' {
+    $specs | ForEach-Object { Test-FirewallRuleMatch -Spec $_ -Rule (New-RuleFacts -Spec $_) }
+}
+Test-Case '無い規則は同じでない' 'False' { Test-FirewallRuleMatch -Spec $specs[0] -Rule $null }
+Test-Case '無効・許可・Private だけ・22 番を含むポート・別の宛先は同じでない' 'False False False False False' {
+    Test-FirewallRuleMatch -Spec $specs[0] -Rule (New-RuleFacts -Spec $specs[0] -Change @{ Enabled = 'False' })
+    Test-FirewallRuleMatch -Spec $specs[0] -Rule (New-RuleFacts -Spec $specs[0] -Change @{ Action = 'Allow' })
+    Test-FirewallRuleMatch -Spec $specs[0] -Rule (New-RuleFacts -Spec $specs[0] -Change @{ Profile = 'Private' })
+    Test-FirewallRuleMatch -Spec $specs[0] -Rule (New-RuleFacts -Spec $specs[0] -Change @{ LocalPort = @('1-65535') })
+    Test-FirewallRuleMatch -Spec $specs[0] -Rule (New-RuleFacts -Spec $specs[0] -Change @{ LocalAddress = @('Any') })
+}
+
+# Test-AdminOnlyAcl: 鍵のファイルの権限
+function New-Acl {
+    param([bool]$Protected = $true, [string]$Owner = 'S-1-5-32-544', $Rules)
+    if ($null -eq $Rules) {
+        $Rules = @(
+            [pscustomobject]@{ Sid = 'S-1-5-32-544'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }
+            [pscustomobject]@{ Sid = 'S-1-5-18'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }
+        )
+    }
+    [pscustomobject]@{ Protected = $Protected; Owner = $Owner; Rules = @($Rules) }
+}
+Test-Case '継承を切り、管理者と SYSTEM だけに FullControl なら通す' 'True' { Test-AdminOnlyAcl -Acl (New-Acl) }
+Test-Case '持ち主が SYSTEM でも通す' 'True' { Test-AdminOnlyAcl -Acl (New-Acl -Owner 'S-1-5-18') }
+Test-Case '継承している・持ち主がユーザー・ユーザーにも許す・片方しか無い・読むだけは断る' 'False False False False False' {
+    Test-AdminOnlyAcl -Acl (New-Acl -Protected $false)
+    Test-AdminOnlyAcl -Acl (New-Acl -Owner 'S-1-5-21-1-2-3-1001')
+    Test-AdminOnlyAcl -Acl (New-Acl -Rules @(
+            [pscustomobject]@{ Sid = 'S-1-5-32-544'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }
+            [pscustomobject]@{ Sid = 'S-1-5-18'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }
+            [pscustomobject]@{ Sid = 'S-1-5-11'; Rights = 'ReadAndExecute, Synchronize'; Type = 'Allow'; Inherited = $false }
+        ))
+    Test-AdminOnlyAcl -Acl (New-Acl -Rules @([pscustomobject]@{ Sid = 'S-1-5-18'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }))
+    Test-AdminOnlyAcl -Acl (New-Acl -Rules @(
+            [pscustomobject]@{ Sid = 'S-1-5-32-544'; Rights = 'Read'; Type = 'Allow'; Inherited = $false }
+            [pscustomobject]@{ Sid = 'S-1-5-18'; Rights = 'FullControl'; Type = 'Allow'; Inherited = $false }
+        ))
+}
+Test-Case '権限が読めなかった ($null) は断る' 'False' { Test-AdminOnlyAcl -Acl $null }
+
+# Get-WingetDownloadArgs・Get-MsiAddServerArgs・Get-MsiexecResultText: Server を足す
+Test-Case 'winget download は同じ版を、決めた場所へ取り直す (pin を越える引数は付けない)' 'download Microsoft.OpenSSH.Preview 10.4.0.0 D:\tmp\msi False' {
+    $a = Get-WingetDownloadArgs -PackageId 'Microsoft.OpenSSH.Preview' -Version '10.4.0.0' -Directory 'D:\tmp\msi'
+    $a[0]; $a[$a.IndexOf('--id') + 1]; $a[$a.IndexOf('--version') + 1]; $a[$a.IndexOf('--download-directory') + 1]; $a -contains '--include-pinned'
+}
+Test-Case 'msiexec は取り直した MSI に Client と Server を並べ、黙って流してログを取る (パスは "" で囲む)' '/i "D:\m x\o.msi" ADDLOCAL=Client,Server /qn /norestart /l*v "D:\l.log"' {
+    (Get-MsiAddServerArgs -Msi 'D:\m x\o.msi' -Log 'D:\l.log') -join ' '
+}
+Test-Case 'msiexec の 0 と 3010 は足せた、1618 は別のインストールが進んでいる' 'True True True' {
+    $null -eq (Get-MsiexecResultText -ExitCode 0)
+    $null -eq (Get-MsiexecResultText -ExitCode 3010)
+    (Get-MsiexecResultText -ExitCode 1618).Contains('別のインストール')
+}
+
+# Get-SshdVerdict・Format-SshdState・Get-SshdExitCode・Get-SshdCheckMessage: 判定と表
+$copyPath = 'C:\Users\alice\AppData\Local\dotfiles\sshd\authorized_keys'
+function New-Facts {
+    param([hashtable]$Change = @{})
+    $rules = @{}
+    foreach ($s in @(Get-SshdFirewallSpecs)) { $rules[$s.Name] = New-RuleFacts -Spec $s }
+    $f = [ordered]@{
+        InstallDir       = 'C:\Program Files\OpenSSH'
+        User             = 'alice'
+        OpenSsh          = $true
+        Server           = $true
+        Inbox            = $false
+        Service          = [pscustomobject]@{ Exists = $true; Status = 'Running'; StartType = 'Automatic' }
+        Config           = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-SshdConfigText -AllowUser 'alice') }
+        Keys             = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-AdminKeysText -KeyLines @($key1)) }
+        Acl              = [pscustomobject]@{ Readable = $true; Value = (New-Acl) }
+        Record           = [pscustomobject]@{ ConfigSha = $null; KeysSha = $null }
+        Copy             = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @(); Path = $copyPath }
+        FirewallReadable = $true
+        Rules            = $rules
+        AllowRules       = @()
+        Tailscale        = $true
+    }
+    # GetEnumerator で回す ($Change.Keys は、Keys という名前の項目 (鍵のファイルの事実) があるとその値を返す)
+    foreach ($e in $Change.GetEnumerator()) { $f[$e.Key] = $e.Value }
+    [pscustomobject]$f
+}
+function Get-WarnRows {
+    param($Facts)
+    @(Format-SshdState -Verdict (Get-SshdVerdict -Facts $Facts) | Where-Object Warn | ForEach-Object Text)
+}
+function Get-Notes {
+    param($Facts)
+    @(Format-SshdState -Verdict (Get-SshdVerdict -Facts $Facts) | Where-Object { $_.Text.StartsWith('※') } | ForEach-Object Text)
+}
+
+$ok = New-Facts
+Test-Case '揃っていれば 0 で、⚠ の行は無く、締めは「揃っている」' '0 0 揃っている' {
+    $v = Get-SshdVerdict -Facts $ok
+    Get-SshdExitCode -Verdict $v; @(Get-WarnRows $ok).Count; Get-SshdCheckMessage -Verdict $v
+}
+Test-Case '表の見出しは sshd (OpenSSH Server、<置き場所>) (wrapper と runner がこれで表を見分ける)' 'sshd (OpenSSH Server、C:\Program Files\OpenSSH)' {
+    @(Format-SshdState -Verdict (Get-SshdVerdict -Facts $ok))[0].Text
+}
+Test-Case '揃っていれば、鍵の名札を ※ で添える' '※ 鍵: phone (Herdr) (ssh-ed25519)' { Get-Notes $ok }
+
+$notInstalled = New-Facts -Change @{
+    Server  = $false
+    Service = [pscustomobject]@{ Exists = $false; Status = $null; StartType = $null }
+    Config  = [pscustomobject]@{ Exists = $false; Readable = $false; Text = $null }
+    Keys    = [pscustomobject]@{ Exists = $false; Readable = $false; Text = $null }
+    Acl     = [pscustomobject]@{ Readable = $false; Value = $null }
+    Rules   = @{}
+}
+Test-Case 'server が無ければ 3 で、締めは -IfMissing で入れる (UAC が出る)' '3 True True' {
+    $v = Get-SshdVerdict -Facts $notInstalled
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('sshd が入っていない → Install-Sshd -IfMissing で入れる')
+    (Get-SshdCheckMessage -Verdict $v).StartsWith('⚠️')
+}
+Test-Case 'server が無いときの ⚠ の行: server・サービス・sshd_config・鍵・拒否の規則 (鍵の権限は作るときに揃えるので出さない)' 'server サービス sshd_config 鍵 拒否の規則' {
+    (Get-WarnRows $notInstalled) | ForEach-Object { ($_.Substring(2) -split '\s*:')[0] }
+}
+
+$drift = New-Facts -Change @{
+    Service    = [pscustomobject]@{ Exists = $true; Status = 'Stopped'; StartType = 'Manual' }
+    AllowRules = @([pscustomobject]@{ Name = '{6e3b1f2a-0000-4000-8000-000000000000}'; DisplayName = 'OpenSSH SSH Server Preview (sshd)' })
+}
+Test-Case 'ずれていれば 1 で、締めは Install-Sshd で揃える (起こし直すと SSH が切れうる)' '1 True True' {
+    $v = Get-SshdVerdict -Facts $drift
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('dotfiles の形と揃っていない → Install-Sshd で揃える')
+    (Get-SshdCheckMessage -Verdict $v).Contains('SSH が切れる')
+}
+Test-Case 'サービスが止まっている・MSI の 22 番の許可が有効なら、その 2 行だけ ⚠' '⚠ サービス        : Stopped / Manual → 自動で起こし、動かす|⚠ 22 番の受信の許可: 有効 (OpenSSH SSH Server Preview (sshd)) → 無効にする' {
+    (Get-WarnRows $drift) -join '|'
+}
+Test-Case 'sshd_config が違えば ⚠ (CRLF だけの違いは数えない)' "1 0" {
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-SshdConfigText -AllowUser 'alice').Replace('PasswordAuthentication no', 'PasswordAuthentication yes') } }))
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-SshdConfigText -AllowUser 'alice').Replace("`n", "`r`n") } }))
+}
+Test-Case '別のユーザーの AllowUsers の sshd_config は違う' 1 {
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-SshdConfigText -AllowUser 'bob') } }))
+}
+Test-Case '鍵が写しと違えば、足す・消す本数を出す' '⚠ 鍵              : 写しと違う (足す 1 本・消す 1 本) → 写しどおりに書く' {
+    Get-WarnRows (New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key3); Bad = @(); Path = $copyPath } })
+}
+Test-Case '鍵の見出しのコメントだけが違っても、鍵の行が同じなら揃っている' 0 {
+    $keys = [pscustomobject]@{ Exists = $true; Readable = $true; Text = "# old header`r`n$key1`r`n" }
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Keys = $keys }))
+}
+Test-Case '鍵の権限がユーザーにも許していれば ⚠' '⚠ 鍵の権限        : 管理者と SYSTEM のほかにも許している (か継承している) → 管理者と SYSTEM だけにする' {
+    Get-WarnRows (New-Facts -Change @{ Acl = [pscustomobject]@{ Readable = $true; Value = (New-Acl -Protected $false) } })
+}
+Test-Case '拒否の規則が無い・違えば、その名前を出す' '⚠ 拒否の規則      : 無い・違うものが 2 つ (dotfiles-sshd-tailnet-udp・dotfiles-sshd-outside-tcp22) → 作り直す' {
+    $f = New-Facts
+    $f.Rules['dotfiles-sshd-tailnet-udp'] = $null
+    $f.Rules['dotfiles-sshd-outside-tcp22'] = New-RuleFacts -Spec $specs[2] -Change @{ Enabled = 'False' }
+    Get-WarnRows $f
+}
+Test-Case 'Windows Firewall が読めなければ ⚠ (22 番の許可の行は出さない)' '⚠ 拒否の規則      : 読めない (Get-NetFirewallRule が失敗した)' {
+    Get-WarnRows (New-Facts -Change @{ FirewallReadable = $false })
+}
+
+# 管理者でないと読めないファイル: 揃えたときの記録 (sha256) と比べる
+$unreadable = [pscustomobject]@{ Exists = $true; Readable = $false; Text = $null }
+$noAcl = [pscustomobject]@{ Readable = $false; Value = $null }
+$record = [pscustomobject]@{
+    ConfigSha = (Get-TextSha256 (Get-SshdConfigText -AllowUser 'alice'))
+    KeysSha   = (Get-TextSha256 (Get-AdminKeysText -KeyLines @($key1)))
+}
+Test-Case '読めないファイルは、揃えたときの記録と同じなら揃っている (権限が読めないのは管理者だけの形とみる)' 0 {
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = $unreadable; Keys = $unreadable; Acl = $noAcl; Record = $record }))
+}
+Test-Case '読めない鍵は、写しが変わって記録と違えば ⚠' '⚠ 鍵              : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 写しどおりに書く' {
+    Get-WarnRows (New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key3); Bad = @(); Path = $copyPath } })
+}
+Test-Case '記録が無ければ、読めない sshd_config は ⚠' '⚠ sshd_config     : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 退避して書き直す' {
+    Get-WarnRows (New-Facts -Change @{ Config = $unreadable })
+}
+
+# 鍵の写しが無い (ホストの値が null): 鍵の中身は見ない
+$unmanaged = [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $copyPath }
+Test-Case '写しが無ければ、鍵のファイルの中身が何でも揃っている扱い (※ で、鍵を置かないと添える)' "0 True" {
+    $f = New-Facts -Change @{ Copy = $unmanaged; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; Text = "$key2`n$key3`n" } }
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('dotfiles は鍵を置かない') }).Count -eq 1)
+}
+Test-Case '写しが無く鍵のファイルも無ければ、空で作る ⚠' '⚠ 鍵              : ファイルが無い → 空で作る (鍵の写しが無いので、鍵は手で置く)' {
+    Get-WarnRows (New-Facts -Change @{ Copy = $unmanaged; Keys = [pscustomobject]@{ Exists = $false; Readable = $false; Text = $null } })
+}
+
+# ※ の補足
+Test-Case '鍵が 0 本なら ※ で、誰も入れないことと足し方を添える (揃っている扱い)' '0 True' {
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @(); Bad = @(); Path = $copyPath }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-AdminKeysText -KeyLines @()) } }
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('鍵が 0 本 (誰も入れない)') }).Count -eq 1)
+}
+Test-Case 'from= の無い鍵があれば ※ で本数を添える' 'True' {
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key2); Bad = @(); Path = $copyPath }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; Text = (Get-AdminKeysText -KeyLines @($key1, $key2)) } }
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('from= の無い鍵が 1 本ある') }).Count -eq 1)
+}
+Test-Case 'Tailscale が無ければ ※ で添える (揃っている扱いのまま)' '0 True' {
+    $f = New-Facts -Change @{ Tailscale = $false }
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('Tailscale が入っていない') }).Count -eq 1)
+}
+
+# 揃える前に人が直すこと: 1 で止まり、締めの行で直し方を出す (-IfMissing でも入れない)
+Test-Case 'OpenSSH が無ければ 1 で、先に Install-OpenSSH -IfMissing' '1 True' {
+    $v = Get-SshdVerdict -Facts (New-Facts -Change @{ OpenSsh = $false; Server = $false })
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('OpenSSH が入っていない → 先に Install-OpenSSH -IfMissing で入れる')
+}
+Test-Case 'Windows の機能の OpenSSH Server があれば 1 で、外し方を ※ で出す' '1 True True' {
+    $f = New-Facts -Change @{ Inbox = $true }
+    $v = Get-SshdVerdict -Facts $f
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('Windows の機能の OpenSSH Server が入っている → 先に外す')
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0') }).Count -eq 1)
+}
+Test-Case 'AllowUsers に書けないユーザー名なら 1 (server が無くても 3 にしない)' '1 True' {
+    $v = Get-SshdVerdict -Facts (New-Facts -Change @{ User = 'john doe'; Server = $false })
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('AllowUsers に書けないユーザー名')
+}
+Test-Case '鍵の写しに読めない行があれば 1 で、ホストの値を直させる' '1 True True' {
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @('garbage line'); Path = $copyPath } }
+    $v = Get-SshdVerdict -Facts $f
+    Get-SshdExitCode -Verdict $v
+    (Get-SshdCheckMessage -Verdict $v).Contains('鍵の写しに読めない行がある → ホストの値')
+    [bool](@(Get-Notes $f | Where-Object { $_.Contains('鍵の写しの読めない行: garbage line') }).Count -eq 1)
+}
+
+# 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
+# Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う (Install-OpenSSH.Tests.ps1 と同じ)
+Test-Case '思わぬ例外では終了コード 2 で止まる' '2' {
+    $pwsh = (Get-Process -Id $PID).Path
+    $null = & $pwsh -NoProfile -File (Join-Path $PSScriptRoot 'Install-Sshd.ps1') -Check 2>&1
+    $LASTEXITCODE
+}
+
+if ($script:Failures -gt 0) {
+    Write-Host "$($script:Failures) 件失敗"
+    exit 1
+}
+Write-Host 'すべて通った'
