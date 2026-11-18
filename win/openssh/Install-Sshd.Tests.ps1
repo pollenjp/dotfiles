@@ -19,6 +19,10 @@
 #     外のアドレスは、tailnet・localhost と合わせて全部の空間をちょうど覆う。拒否の規則は 3 つで、読んだ規則が同じかを、有効・向き・
 #     拒否・プロファイル・プロトコル・ポート・アドレスと、program などの絞りが Any かで比べる。拒否の規則が効かないプロファイル
 #     (無効・ローカルの規則を止めた GPO) を見分ける
+#   - 22 番を許す受信の規則の選び方 (COM の HNetCfg.FwPolicy2 の規則の形で渡す): 有効な受信の許可のうち、TCP の 22 番を名指しする規則と
+#     sshd.exe の規則を選び、sshd.exe の規則と 22 番だけの規則を無効にする印を付ける。22 番とほかのポートを並べた規則は残し、全ポート・
+#     範囲・2222 番・UDP・送信・拒否・無効の規則は数えない
+#   - 例外を「<落ちたコマンド>: <文の 1 行目>」の 1 行にする (コマンドが分からなければ読み方の名前を頭に付ける)
 #   - 鍵の指紋は ssh-keygen -l と同じ SHA256:<base64>
 #   - BOM の付いたファイルを見分け、一時ファイルから差し替える (元を退避し、無ければそのまま置く)
 #   - 鍵のファイルの権限は、継承を切り、管理者と SYSTEM だけに FullControl を許す形だけを通す
@@ -27,7 +31,8 @@
 #     ユーザー名・鍵の写しの読めない行・拒否の規則が効かないプロファイル・サービスの無い sshd.exe は、揃えずに 1 で止まり、締めの行で
 #     先に直すことを出す。BOM の付いた sshd_config・鍵はずれ。足す鍵と消す鍵は ※ で名札と指紋を出す。22 番だけの許可は無効にし、
 #     22 番とほかのポートを並べた許可は ※ で添えるだけ。管理者でなく読めないファイルは、揃えた
-#     ときの記録と比べる。鍵の写しが無いときは鍵の中身を見ない。鍵が 0 本・from= の無い鍵・Tailscale が無いときは ※ で添える
+#     ときの記録と比べる。鍵の写しが無いときは鍵の中身を見ない。鍵が 0 本・from= の無い鍵・Tailscale が無いときは ※ で添える。
+#     Windows Firewall の拒否の規則と 22 番の許可は別に読み、読めない方の行だけを ⚠ で「読めない (<落ちたコマンド>: <理由>)」にする
 #   - 本体の入口: 思わぬ例外では終了コード 2 で止まる
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -342,6 +347,76 @@ Test-Case '無効なプロファイルと、ローカルの規則を止めた (A
     Get-IneffectiveFirewallProfiles -Profiles (New-Profiles -Change @{ Private = @{ Enabled = 'False' }; Public = @{ AllowLocal = 'False' } })
 }
 
+# Select-SshdAllowRules: 22 番を許す受信の規則を選ぶ。規則は COM (HNetCfg.FwPolicy2 の Rules) が返す形で渡す: Direction は 1 が受信・2 が送信、
+# Action は 1 が許可・0 が拒否、Protocol は 6 が TCP・17 が UDP・256 がすべて。LocalPorts は , 区切りで、すべてなら空か *。値が無ければ $null
+function New-ComRule {
+    param([string]$Name, [hashtable]$Change = @{})
+    $r = [ordered]@{ Name = $Name; Enabled = $true; Direction = 1; Action = 1; Protocol = 6; LocalPorts = '22'; ApplicationName = $null }
+    foreach ($e in $Change.GetEnumerator()) { $r[$e.Key] = $e.Value }
+    [pscustomobject]$r
+}
+function Get-Picked {
+    param([object[]]$Rules)
+    @(Select-SshdAllowRules -Rules $Rules | ForEach-Object { "$($_.DisplayName):$($_.Disable)" })
+}
+$msiRule = New-ComRule -Name 'OpenSSH SSH Server Preview (sshd)' -Change @{ ApplicationName = 'C:\Program Files\OpenSSH\sshd.exe' }
+Test-Case 'MSI の規則 (sshd.exe の TCP 22) と Windows の機能の規則 (%SystemRoot% の sshd.exe) は無効にする。並びは名前の順' 'OpenSSH SSH Server (sshd):True OpenSSH SSH Server Preview (sshd):True' {
+    Get-Picked @($msiRule, (New-ComRule -Name 'OpenSSH SSH Server (sshd)' -Change @{ ApplicationName = '%SystemRoot%\system32\OpenSSH\sshd.exe' }))
+}
+Test-Case 'program を問わず TCP の 22 番だけを許す規則は無効にし、22 番とほかのポートを並べた規則は残す (空白があっても読む)' 'only22:True ssh-rdp:False ssh-rdp-space:False' {
+    Get-Picked @(
+        (New-ComRule -Name 'only22')
+        (New-ComRule -Name 'ssh-rdp' -Change @{ LocalPorts = '22,3389' })
+        (New-ComRule -Name 'ssh-rdp-space' -Change @{ LocalPorts = '3389, 22' })
+    )
+}
+Test-Case 'sshd.exe の規則は、プロトコルとポートが何でも無効にする (大文字小文字も問わない)' 'any-port:True upper:True' {
+    Get-Picked @(
+        (New-ComRule -Name 'any-port' -Change @{ Protocol = 256; LocalPorts = ''; ApplicationName = 'C:\Program Files\OpenSSH\sshd.exe' })
+        (New-ComRule -Name 'upper' -Change @{ LocalPorts = '2222'; ApplicationName = 'C:\PROGRAM FILES\OPENSSH\SSHD.EXE' })
+    )
+}
+Test-Case '数えない: 無効・送信・拒否・UDP の 22 番・2222 番・範囲・全ポート (空・*・$null)・OpenSSH の外の sshd.exe・ssh.exe' 0 {
+    @(Select-SshdAllowRules -Rules @(
+            (New-ComRule -Name 'disabled' -Change @{ Enabled = $false })
+            (New-ComRule -Name 'outbound' -Change @{ Direction = 2 })
+            (New-ComRule -Name 'block' -Change @{ Action = 0 })
+            (New-ComRule -Name 'udp22' -Change @{ Protocol = 17 })
+            (New-ComRule -Name 'port2222' -Change @{ LocalPorts = '2222' })
+            (New-ComRule -Name 'range' -Change @{ LocalPorts = '1-1024' })
+            (New-ComRule -Name 'Tailscale-In' -Change @{ Protocol = 256; LocalPorts = '' })
+            (New-ComRule -Name 'all-tcp' -Change @{ LocalPorts = '*' })
+            (New-ComRule -Name 'null-ports' -Change @{ LocalPorts = $null })
+            (New-ComRule -Name 'other-sshd' -Change @{ LocalPorts = '2222'; ApplicationName = 'C:\tools\sshd.exe' })
+            (New-ComRule -Name 'ssh-client' -Change @{ Protocol = 256; LocalPorts = ''; ApplicationName = 'C:\Program Files\OpenSSH\ssh.exe' })
+        )).Count
+}
+Test-Case '規則が無い・$null が混ざっても落ちない' '0 0 1' {
+    @(Select-SshdAllowRules -Rules @()).Count
+    @(Select-SshdAllowRules -Rules @($null)).Count
+    @(Select-SshdAllowRules -Rules @($null, $msiRule)).Count
+}
+Test-Case 'Rule に元の規則を持つ (無効にするときは、その COM の規則の Enabled を書く)' 'True' {
+    [object]::ReferenceEquals(@(Select-SshdAllowRules -Rules @($msiRule))[0].Rule, $msiRule)
+}
+
+# Get-ErrorSummary: 「読めない」の行に出す、落ちたコマンドと理由
+Test-Case 'コマンドの失敗は「<コマンド>: <文>」' 'True' {
+    try {
+        Get-Item -LiteralPath (Join-Path ([IO.Path]::GetTempPath()) "install-sshd-missing-$PID") -ErrorAction Stop
+        'no error'
+    } catch {
+        (Get-ErrorSummary -ErrorRecord $_ -Fallback 'HNetCfg.FwPolicy2').StartsWith('Get-Item: ')
+    }
+}
+Test-Case 'コマンドが分からない例外は、読み方の名前を頭に付け、文は 1 行目だけ (渡さなければ文だけ)' 'HNetCfg.FwPolicy2: denied|denied' {
+    try {
+        throw [System.UnauthorizedAccessException]::new("denied`r`n  second line")
+    } catch {
+        (Get-ErrorSummary -ErrorRecord $_ -Fallback 'HNetCfg.FwPolicy2') + '|' + (Get-ErrorSummary -ErrorRecord $_)
+    }
+}
+
 # Get-WingetDownloadArgs・Get-MsiAddServerArgs・Get-MsiexecResultText: Server を足す
 Test-Case 'winget download は同じ版を、決めた場所へ取り直す (pin を越える引数は付けない)' 'download Microsoft.OpenSSH.Preview 10.4.0.0 D:\tmp\msi False' {
     $a = Get-WingetDownloadArgs -PackageId 'Microsoft.OpenSSH.Preview' -Version '10.4.0.0' -Directory 'D:\tmp\msi'
@@ -394,8 +469,11 @@ function New-Facts {
         Record           = [pscustomobject]@{ ConfigSha = $null; KeysSha = $null }
         Copy             = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @(); Path = $copyPath }
         FirewallReadable = $true
+        FirewallError    = $null
         FirewallProfiles = @(New-Profiles)
         Rules            = $rules
+        AllowReadable    = $true
+        AllowError       = $null
         AllowRules       = @()
         Tailscale        = $true
     }
@@ -442,7 +520,7 @@ Test-Case 'server が無いときの ⚠ の行: server・サービス・sshd_co
 
 $drift = New-Facts -Change @{
     Service    = [pscustomobject]@{ Exists = $true; Status = 'Stopped'; StartType = 'Manual' }
-    AllowRules = @([pscustomobject]@{ Name = '{6e3b1f2a-0000-4000-8000-000000000000}'; DisplayName = 'OpenSSH SSH Server Preview (sshd)'; Disable = $true })
+    AllowRules = @(Select-SshdAllowRules -Rules @($msiRule))
 }
 Test-Case 'ずれていれば 1 で、締めは Install-Sshd で揃える (起こし直すと SSH が切れうる)' '1 True True' {
     $v = Get-SshdVerdict -Facts $drift
@@ -474,7 +552,7 @@ Test-Case 'BOM の付いた鍵のファイルもずれ (鍵の行が同じでも
     Get-WarnRows (New-Facts -Change @{ Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $true; Text = (Get-AdminKeysText -KeyLines @($key1)) } })
 }
 Test-Case '22 番とほかのポートを許す規則は無効にせず、※ で添えるだけ (揃っている扱い)' '0 True' {
-    $f = New-Facts -Change @{ AllowRules = @([pscustomobject]@{ Name = 'my-rule'; DisplayName = 'ssh と rdp'; Disable = $false }) }
+    $f = New-Facts -Change @{ AllowRules = @(Select-SshdAllowRules -Rules @(New-ComRule -Name 'ssh と rdp' -Change @{ LocalPorts = '22,3389' })) }
     Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
     [bool](@(Get-Notes $f | Where-Object { $_.Contains('22 番とほかのポートを許す受信の規則 (ssh と rdp) は無効にしない') }).Count -eq 1)
 }
@@ -491,8 +569,22 @@ Test-Case '拒否の規則が無い・違えば、その名前を出す' '⚠ �
     $f.Rules['dotfiles-sshd-outside-tcp22'] = New-RuleFacts -Spec $specs[2] -Change @{ Enabled = 'False' }
     Get-WarnRows $f
 }
-Test-Case 'Windows Firewall が読めなければ ⚠ (22 番の許可の行は出さない)' '⚠ 拒否の規則      : 読めない (Get-NetFirewallRule が失敗した)' {
-    Get-WarnRows (New-Facts -Change @{ FirewallReadable = $false })
+Test-Case '拒否の規則が読めなければ ⚠ で、落ちたコマンドと理由を出す (22 番の許可は別に読むので、その行は出る)' '⚠ 拒否の規則      : 読めない (Get-NetFirewallRule: アクセスが拒否されました。) True' {
+    $f = New-Facts -Change @{ FirewallReadable = $false; FirewallError = 'Get-NetFirewallRule: アクセスが拒否されました。' }
+    Get-WarnRows $f
+    [bool](@(Format-SshdState -Verdict (Get-SshdVerdict -Facts $f) | Where-Object { $_.Text -eq '  22 番の受信の許可: 有効なものは無い' }).Count -eq 1)
+}
+Test-Case '22 番の許可が読めなければ、その行だけ ⚠ で読めないと出し (「無い」と読まない)、拒否の規則の行はそのまま出す' '⚠ 22 番の受信の許可: 読めない (HNetCfg.FwPolicy2: Access is denied.) 1 True' {
+    $f = New-Facts -Change @{ AllowReadable = $false; AllowError = 'HNetCfg.FwPolicy2: Access is denied.' }
+    Get-WarnRows $f
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
+    [bool](@(Format-SshdState -Verdict (Get-SshdVerdict -Facts $f) | Where-Object { $_.Text -eq '  拒否の規則      : 3 つとも揃っている (グループ dotfiles (sshd))' }).Count -eq 1)
+}
+Test-Case 'server が無くても、22 番の許可が読めないのは 3 のまま (入れる前の確かめを止めない)' 3 {
+    Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{
+                Server = $false; Service = [pscustomobject]@{ Exists = $false; Status = $null; StartType = $null }
+                AllowReadable = $false; AllowError = 'HNetCfg.FwPolicy2: Access is denied.'
+            }))
 }
 
 # 管理者でないと読めないファイル: 揃えたときの記録 (sha256) と比べる

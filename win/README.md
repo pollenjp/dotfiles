@@ -2882,6 +2882,8 @@ sshd が読むファイル (sshd_config・administrators_authorized_keys) のコ
   こともある)。program・サービス・インターフェイスで絞られた規則は、sshd に効かないことがあるので揃っていない扱い
 - 22 番を許す受信の規則のうち、無効にするのは sshd.exe の規則とポートが 22 番だけの規則。22 番とほかのポートを並べた手の規則は、ほかのポートまで
   閉じないよう残し、※ で添える (22 番は拒否の規則が止める)
+- Windows Firewall を読めないときは「無い」と読まず、その行を ⚠ で「読めない (<落ちたコマンド>: <理由>)」にする。拒否の規則 (`Get-NetFirewallProfile`・
+  `Get-NetFirewallRule`) と 22 番の許可 (COM の `HNetCfg.FwPolicy2`) は別に読むので、片方が落ちても、もう片方の行は出る
 - 拒否の規則が効くのは Windows Firewall が有効なときだけ。3 つのプロファイルのどれかが無効か、グループ ポリシーがローカルの規則を止めている
   (`AllowLocalFirewallRules` が False) と、`Install-Sshd` は揃えずに止まる (有効にするのは人)
 
@@ -2960,7 +2962,8 @@ PR に残る。
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
 - 副作用の無い関数 (sshd_config の中身・鍵の行の読み方と指紋・administrators_authorized_keys の中身・Windows Firewall のアドレスの区間と規則の比べ方・
-  外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・鍵のファイルの権限・winget download と msiexec の引数・判定と状態の表) と、
+  外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・22 番を許す受信の規則の選び方・例外を 1 行にする形・鍵のファイルの権限・
+  winget download と msiexec の引数・判定と状態の表) と、
   BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
   Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、AllowUsers の CIDR の書き方の誤り (sshd が起動しなくなる) を
   ここで見つける (CI は `nixpkgs#openssh` を足して流す):
@@ -2972,4 +2975,8 @@ PR に残る。
 - `bootstrap-windows-sshd.sh` と runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`sshd (OpenSSH Server`) と、締めの行の文言
   (`→ Install-Sshd で揃える`・`→ Install-Sshd -IfMissing で入れる`・揃える前に人が直すことの文言) で分かれる。変えるときは向こうも直す
 - Herdr を開いたままにする案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)
+- 管理者でない PowerShell (setup・runner の `-Check`) では、`Get-NetFirewallPortFilter -All` が PermissionDenied で落ちる (`Get-NetFirewallProfile`・
+  `Get-NetFirewallRule -Name`・規則からパイプで引く filter は通る)。22 番を許す受信の規則は COM (`HNetCfg.FwPolicy2` の `Rules`) で読み、無効にするのも
+  COM の規則の `Enabled` で書く (COM の規則は `Get-NetFirewallRule` の `Name` を持たない)。規則ごとに `Get-NetFirewallPortFilter` を引く形は、管理者で
+  なくても通るが、有効な受信の許可に絞っても 10 秒を超え、毎回の setup に乗る
 - サービス・ファイル・権限・Windows Firewall・winget・msiexec に触る本物の部分は、実機で `-Check` と本番を打って確かめる

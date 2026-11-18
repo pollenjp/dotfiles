@@ -379,6 +379,42 @@ function Test-FirewallRuleMatch {
     ((& $ports $Rule.InterfaceType) -eq 'any')
 }
 
+# 22 番を許す、有効な受信の規則を選ぶ。$Rules は Windows Firewall の COM (HNetCfg.FwPolicy2 の Rules) の規則か、同じ名前の値を持つもの:
+# Name (表示の名前)・Enabled・Direction (1 = 受信)・Action (1 = 許可)・Protocol (6 = TCP。256 = すべて)・LocalPorts (, 区切りの文字列。
+# すべてなら空か *)・ApplicationName。選ぶのは、TCP の 22 番を名指しする規則と、sshd.exe を名指しする規則。Disable は無効にするもの
+# (sshd.exe の規則と、ポートが 22 番だけの規則。22 番とほかのポートを並べた規則は、ほかのポートまで閉じないよう残す)。Tailscale-In の
+# ように全ポートを許す規則と、範囲 (1-1024 など) で許す規則は数えない (22 番は拒否の規則がそれより強い)。Rule は元の規則 (無効にするときに
+# その Enabled を書く)
+function Select-SshdAllowRules {
+    param([object[]]$Rules)
+    $picked = @(foreach ($r in @($Rules)) {
+            if ($null -eq $r) { continue }
+            if (("$($r.Enabled)" -ne 'True') -or ("$($r.Direction)" -ne '1') -or ("$($r.Action)" -ne '1')) { continue }
+            $ports = @("$($r.LocalPorts)" -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+            $tcp22 = ("$($r.Protocol)" -eq '6') -and ($ports -contains '22')
+            $sshd = "$($r.ApplicationName)" -like '*\OpenSSH\sshd.exe'
+            if (-not ($tcp22 -or $sshd)) { continue }
+            [pscustomobject]@{
+                DisplayName = "$($r.Name)"
+                Disable     = [bool]($sshd -or ($ports.Count -eq 1))
+                Rule        = $r
+            }
+        })
+    @($picked | Sort-Object -Property DisplayName)
+}
+
+# 例外 ($ErrorRecord) を表の 1 行に収める: 「<落ちたコマンド>: <文の 1 行目>」。コマンドが分からない (.NET や COM のメソッド・プロパティの
+# 例外) ときは、$Fallback (読み方の名前) を頭に付ける。「読めない」の行に、どの読み方が何で落ちたかを出す
+function Get-ErrorSummary {
+    param($ErrorRecord, [string]$Fallback)
+    $lines = @("$($ErrorRecord.Exception.Message)" -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -ne '' })
+    $message = if ($lines.Count -gt 0) { $lines[0] } else { $ErrorRecord.Exception.GetType().Name }
+    $command = $Fallback
+    $invocation = $ErrorRecord.InvocationInfo
+    if ($invocation -and $invocation.MyCommand -and "$($invocation.MyCommand.Name)") { $command = "$($invocation.MyCommand.Name)" }
+    if ($command) { "${command}: $message" } else { $message }
+}
+
 # Windows Firewall のプロファイル ($Profiles。Name・Enabled・AllowLocal) のうち、拒否の規則が効かないもの (無効か、グループ ポリシーが
 # ローカルの規則を止めている) の名前
 function Get-IneffectiveFirewallProfiles {
@@ -555,7 +591,7 @@ function Get-SshdVerdict {
 
     # 6. 拒否の規則
     if (-not $Facts.FirewallReadable) {
-        & $add 'block' $false '拒否の規則      : 読めない (Get-NetFirewallRule が失敗した)'
+        & $add 'block' $false "拒否の規則      : 読めない ($($Facts.FirewallError))"
     } else {
         $specs = @(Get-SshdFirewallSpecs)
         $bad = @($specs | Where-Object { -not (Test-FirewallRuleMatch -Spec $_ -Rule $Facts.Rules[$_.Name]) })
@@ -567,8 +603,10 @@ function Get-SshdVerdict {
     }
 
     # 7. 22 番を許す受信の規則 (22 番だけの規則と sshd.exe の規則は無効にする。22 番とほかのポートを並べた規則は、ほかのポートまで
-    #    閉じないよう残す。22 番は拒否の規則が止める)
-    if ($Facts.FirewallReadable) {
+    #    閉じないよう残す。22 番は拒否の規則が止める)。拒否の規則とは別に読むので、読めないときもこの行だけを ⚠ にする
+    if (-not $Facts.AllowReadable) {
+        & $add 'allow' $false "22 番の受信の許可: 読めない ($($Facts.AllowError))"
+    } else {
         $allow = @($Facts.AllowRules | Where-Object { $_.Disable })
         $mixed = @($Facts.AllowRules | Where-Object { -not $_.Disable })
         if ($allow.Count -eq 0) {
@@ -814,28 +852,15 @@ function Read-FirewallRuleFacts {
     }
 }
 
-# 22 番を許す、有効な受信の規則 (MSI が作るもの・Windows の機能が作るもの・手で作ったもの)。TCP の 22 番を名指しする規則と、
-# sshd.exe を名指しする規則。Disable は無効にするもの (sshd.exe の規則と、ポートが 22 番だけの規則。22 番とほかのポートを並べた規則は
-# ほかのポートまで閉じないよう残す)。Tailscale-In のように全ポートを許す規則は数えない (拒否の規則がそれより強い)。
-# 一覧を読めなければ例外にする (読めないのを「無い」と読まない)
+# 22 番を許す、有効な受信の規則 (MSI が作るもの・Windows の機能が作るもの・手で作ったもの。選び方は Select-SshdAllowRules)。
+# 規則は Windows Firewall の COM (HNetCfg.FwPolicy2) の Rules で読む。管理者でない PowerShell (setup・runner の -Check) では
+# Get-NetFirewallPortFilter -All が PermissionDenied で落ちる。規則ごとに Get-NetFirewallPortFilter を引けば管理者でなくても読めるが、
+# 有効な受信の許可に絞っても 10 秒を超え、毎回の setup に乗る (COM は 500 余りの規則を 1 秒かからずに読む)。COM の規則は
+# Get-NetFirewallRule の Name を持たないので、無効にするときも COM の規則の Enabled を書く。読めなければ例外にする (読めないのを
+# 「無い」と読まない)
 function Get-SshdAllowRules {
-    $found = @{}
-    foreach ($f in @(Get-NetFirewallPortFilter -All -ErrorAction Stop |
-                Where-Object { ("$($_.Protocol)" -eq 'TCP') -and (@(@($_.LocalPort) | ForEach-Object { "$_" }) -contains '22') })) {
-        $only22 = (@(@($f.LocalPort) | ForEach-Object { "$_" }) -join ',') -eq '22'
-        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction Stop)) {
-            $found[$r.Name] = [pscustomobject]@{ Rule = $r; Disable = ($only22 -or ($found.ContainsKey($r.Name) -and $found[$r.Name].Disable)) }
-        }
-    }
-    foreach ($f in @(Get-NetFirewallApplicationFilter -All -ErrorAction Stop |
-                Where-Object { "$($_.Program)" -like '*\OpenSSH\sshd.exe' })) {
-        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction Stop)) { $found[$r.Name] = [pscustomobject]@{ Rule = $r; Disable = $true } }
-    }
-    @($found.Values | Where-Object {
-            ("$($_.Rule.Enabled)" -eq 'True') -and ("$($_.Rule.Direction)" -eq 'Inbound') -and ("$($_.Rule.Action)" -eq 'Allow')
-        } | Sort-Object { $_.Rule.Name } | ForEach-Object {
-            [pscustomobject]@{ Name = $_.Rule.Name; DisplayName = $_.Rule.DisplayName; Disable = [bool]$_.Disable }
-        })
+    $policy = New-Object -ComObject HNetCfg.FwPolicy2
+    @(Select-SshdAllowRules -Rules @($policy.Rules))
 }
 
 # 揃えたときの記録 (書いた中身の sha256)。無ければ両方 $null
@@ -878,18 +903,28 @@ function Get-SshdFacts {
     $acl = [pscustomobject]@{ Readable = $false; Value = $null }
     if ($keys.Exists) { $acl = Read-AclFacts -Path $keysPath }
     $rules = @{}
-    $allowRules = @()
     $profiles = @()
     $firewallReadable = $true
+    $firewallError = $null
     try {
         # 効いている値 (グループ ポリシーを含む) で、プロファイルが有効か・ローカルの規則を使うかを見る
         $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop | ForEach-Object {
                 [pscustomobject]@{ Name = "$($_.Name)"; Enabled = "$($_.Enabled)"; AllowLocal = "$($_.AllowLocalFirewallRules)" }
             })
         foreach ($spec in @(Get-SshdFirewallSpecs)) { $rules[$spec.Name] = Read-FirewallRuleFacts -Name $spec.Name }
-        $allowRules = @(Get-SshdAllowRules)
     } catch {
         $firewallReadable = $false
+        $firewallError = Get-ErrorSummary -ErrorRecord $_ -Fallback 'Windows Firewall'
+    }
+    # 22 番の許可は読み方 (COM) が違うので、別に受け止める (片方が落ちても、もう片方の行は出す)
+    $allowRules = @()
+    $allowReadable = $true
+    $allowError = $null
+    try {
+        $allowRules = @(Get-SshdAllowRules)
+    } catch {
+        $allowReadable = $false
+        $allowError = Get-ErrorSummary -ErrorRecord $_ -Fallback 'HNetCfg.FwPolicy2'
     }
     $service = [pscustomobject]@{ Exists = $false; Status = $null; StartType = $null }
     if ($svc) { $service = [pscustomobject]@{ Exists = $true; Status = "$($svc.Status)"; StartType = "$($svc.StartType)" } }
@@ -906,8 +941,11 @@ function Get-SshdFacts {
         Record           = Read-SshdRecord -Dir $StateDir
         Copy             = Read-KeysCopy -Path $CopyPath
         FirewallReadable = $firewallReadable
+        FirewallError    = $firewallError
         FirewallProfiles = $profiles
         Rules            = $rules
+        AllowReadable    = $allowReadable
+        AllowError       = $allowError
         AllowRules       = $allowRules
         Tailscale        = Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')
     }
@@ -1100,9 +1138,10 @@ function Invoke-SshdFix {
     }
 
     # 6. 22 番を許す受信の規則を無効にする (MSI が作る OpenSSH SSH Server Preview (sshd) は、Private のネットワークの全部から
-    #    22 番を許し、修復や上げ直しのたびに有効へ戻る。外からの 22 番は拒否の規則が止めるが、許可も残さない)
+    #    22 番を許し、修復や上げ直しのたびに有効へ戻る。外からの 22 番は拒否の規則が止めるが、許可も残さない)。読んだ COM の規則の
+    #    Enabled を書く (COM の規則には Disable-NetFirewallRule に渡す Name が無い)
     foreach ($r in @(Get-SshdAllowRules | Where-Object { $_.Disable })) {
-        Disable-NetFirewallRule -Name $r.Name
+        $r.Rule.Enabled = $false
         Write-Step "22 番の受信の許可を無効にした: $($r.DisplayName)"
     }
 
