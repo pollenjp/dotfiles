@@ -250,9 +250,10 @@ function Write-OpenSshState {
     }
 }
 
-# 入れ替えの邪魔になる、動いている ssh.exe などを返す
+# 入れ替えの邪魔になる、動いている ssh.exe などを返す。sshd-session は sshd (Server の機能) の SSH の会話 (入れ替えると切れる。
+# Install-Sshd.ps1 が Server を足したマシンだけにある)
 function Get-BusyOpenSshProcess {
-    @(Get-Process -Name ssh, ssh-add, scp, sftp -ErrorAction SilentlyContinue)
+    @(Get-Process -Name ssh, ssh-add, scp, sftp, sshd-session -ErrorAction SilentlyContinue)
 }
 
 # 管理者で行う段: winget で版を揃え、ssh-agent を停止・無効にする。成功なら $true
@@ -361,7 +362,7 @@ function Invoke-InstallOpenSsh {
         # $null.Count が例外になる (2026-10-06 の本番で、ssh.exe が 0 本のときにここで止まった)
         $busy = @(Get-BusyOpenSshProcess)
         if ($busy.Count -gt 0 -and -not $Force) {
-            Write-Host '入れ替える ssh.exe などが動いている。閉じてから打ち直す (-Force で進む):'
+            Write-Host '入れ替える ssh.exe など (sshd の SSH の会話の sshd-session も) が動いている。閉じてから打ち直す (-Force で進む):'
             foreach ($p in $busy) {
                 $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
                 Write-Host "  $($p.Id)  $commandLine"
