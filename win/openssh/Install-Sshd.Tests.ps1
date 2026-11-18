@@ -29,7 +29,8 @@
 #   - Server を足すときの winget download と msiexec の引数 (同じ版を取り直し、ADDLOCAL=Client,Server。--include-pinned は付けない)
 #   - 判定: 揃っていれば 0、server が無ければ 3、ずれていれば 1。OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けない
 #     ユーザー名・鍵の写しの読めない行・拒否の規則が効かないプロファイル・サービスの無い sshd.exe は、揃えずに 1 で止まり、締めの行で
-#     先に直すことを出す。BOM の付いた sshd_config・鍵はずれ。足す鍵と消す鍵は ※ で名札と指紋を出す。22 番だけの許可は無効にし、
+#     先に直すことを出す。BOM の付いた sshd_config・鍵はずれ。鍵のファイルを読めるときは足す鍵と消す鍵を、読めないとき (管理者でない) は
+#     写しの鍵を全部、※ で名札と指紋つきで出す。22 番だけの許可は無効にし、
 #     22 番とほかのポートを並べた許可は ※ で添えるだけ。管理者でなく読めないファイルは、揃えた
 #     ときの記録と比べる。鍵の写しが無いときは鍵の中身を見ない。鍵が 0 本・from= の無い鍵・Tailscale が無いときは ※ で添える。
 #     Windows Firewall の拒否の規則と 22 番の許可は別に読み、読めない方の行だけを ⚠ で「読めない (<落ちたコマンド>: <理由>)」にする
@@ -599,6 +600,11 @@ Test-Case '読めないファイルは、揃えたときの記録と同じなら
 }
 Test-Case '読めない鍵は、写しが変わって記録と違えば ⚠' '⚠ 鍵              : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 写しどおりに書く' {
     Get-WarnRows (New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key3); Bad = @(); Path = $copyPath } })
+}
+Test-Case '鍵のファイルを読めない (管理者でない) ときは、足す・消すに分けず、写しの鍵を全部 ※ で名札と指紋つきで出す (UAC の前の表)' "※ 鍵: phone (Herdr) (ssh-ed25519)|※ 鍵: test-phone (ssh-ed25519 $realFp・from= 無し) 0" {
+    $f = New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $realKey); Bad = @(); Path = $copyPath } }
+    @(Get-Notes $f | Where-Object { $_ -like '※ 鍵: *' }) -join '|'
+    @(Get-Notes $f | Where-Object { $_ -like '※ 鍵を*' }).Count
 }
 Test-Case '記録が無ければ、読めない sshd_config は ⚠' '⚠ sshd_config     : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 退避して書き直す' {
     Get-WarnRows (New-Facts -Change @{ Config = $unreadable })

@@ -188,7 +188,7 @@ function Get-KeyFingerprint {
     }
 }
 
-# 表に出す鍵の名札: コメント (無ければ base64 の末尾 8 字) と鍵の種類と指紋。from= が無ければそう添える (足す鍵を UAC の前に見分ける)
+# 表に出す鍵の名札: コメント (無ければ base64 の末尾 8 字) と鍵の種類と指紋。from= が無ければそう添える (UAC の前に、覚えのない鍵が無いかを見分ける)
 function Get-KeyLabel {
     param([string]$Line)
     if ("$Line" -cmatch "(?:^|\s)($script:KeyTypePattern)\s+([A-Za-z0-9+/]+={0,3})(?:\s+(.*))?$") {
@@ -550,7 +550,8 @@ function Get-SshdVerdict {
                 & $add 'keys' $false '鍵              : 先頭に BOM が付いている → 写しどおりに書き直す'
             } else {
                 & $add 'keys' $false "鍵              : 写しと違う (足す $(@($diff.Added).Count) 本・消す $(@($diff.Removed).Count) 本) → 写しどおりに書く"
-                # UAC の確認の前に、足す鍵と消す鍵を見分けられるようにする (写しは利用者の権限で書けるので、覚えのない鍵が無いかを見る)
+                # 今の鍵のファイルを読めるとき (管理者の PowerShell) は、足す鍵と消す鍵を分けて出す (写しは利用者の権限で書けるので、
+                # 覚えのない鍵が無いかを見る)
                 foreach ($line in @($diff.Added)) { $notes.Add("※ 鍵を足す: $(Get-KeyLabel -Line $line)") }
                 foreach ($line in @($diff.Removed)) { $notes.Add("※ 鍵を消す: $(Get-KeyLabel -Line $line)") }
             }
@@ -559,6 +560,8 @@ function Get-SshdVerdict {
         } else {
             & $add 'keys' $false '鍵              : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 写しどおりに書く'
         }
+        # 写しの鍵は全部、名札と指紋で出す。管理者でない -Check (setup・runner・UAC の前の表) は今の鍵のファイルを読めず、足す・消すに
+        # 分けられないので、ここで覚えのない鍵が無いかを見る (揃えたときの記録は利用者が書けるので、記録と比べて分けることはしない)
         foreach ($line in $wantLines) { $notes.Add("※ 鍵: $(Get-KeyLabel -Line $line)") }
         if ($wantLines.Count -eq 0) {
             $notes.Add('※ 鍵が 0 本 (誰も入れない)。入れる端末の公開鍵は、ホストの値 (dotfiles-private の wsl.windowsFiles.sshd.authorizedKeys) に足して setup を流す')

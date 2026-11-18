@@ -2896,7 +2896,8 @@ PR に残る。
 2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、ホストの値の list に足して PR を出す (鍵が漏れても、
    その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る)
 3. merge したら `~/dotfiles/setup --update` を流す。`bootstrap-windows-sshd.sh` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを
-   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す。足す鍵と消す鍵は ※ の行に、コメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
+   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す。写しの鍵は全部、※ の行にコメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
+   (setup の `-Check` は管理者でなく、今の鍵のファイルを読めないので、足す鍵と消す鍵には分けない。管理者の PowerShell の `-Check` は分けて出す)
 4. ※ の行に覚えのない鍵が無いのを見てから、`bootstrap-windows-sshd.sh --apply` か PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る)。
    端末を失くしたら、その行を消して同じ手順を流し、Tailscale の管理画面からも端末を消す
 
@@ -2935,7 +2936,7 @@ PR に残る。
 守れないこと (dotfiles-private の ADR 078):
 
 - 配った `Install-Sshd.ps1` と鍵の写しは、利用者が書けるファイル。同じユーザーの権限で動く悪いコードは、UAC の確認より前にそれらを書き換えられる
-  (repo のほかの `Install-*.ps1` と同じ形。UAC は守りの境ではない)。揃える前の ※ の行で、足す鍵に覚えがあるかを見る
+  (repo のほかの `Install-*.ps1` と同じ形。UAC は守りの境ではない)。揃える前の ※ の行 (写しの鍵の全部) に、覚えのない鍵が無いかを見る
 - 送り元のアドレスで絞っているので、100.64.0.0/10 を使う LAN (ISP の CGNAT の内側など) からは、拒否の規則と AllowUsers を通る。残る壁は鍵と `from=`
 
 ### Herdr のアプリと hc からつなぐ
