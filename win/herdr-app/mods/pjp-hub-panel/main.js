@@ -18,6 +18,38 @@
 //   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
 //   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
 //
+// リンク: markdown の文 (markdown の節の text と、問いの body) の [字](URL)・<URL>・素の URL は、TextView がリンクにする (色・下線・
+//   ポインタの形は TextView が theme から決める)。押すと http と https の URL (host のあるもの。user@host の形は除く) だけを既定のブラウザで
+//   開き (cx.open_url)、ほかの scheme (file:・mailto: など) やパスは開かずに、下の行にわけを出す (開けたら、そのわけは消す)。TextView の既定の
+//   開き方は scheme を確かめないので、on_link_click で替える。図の説明 (caption) の TextView はこの扱いの外 (既定の開き方のまま)。
+//
+// チケットと PR の一覧 (type "tickets"・"prs"): ハブが panel.json に書いた行を、そのまま 1 行ずつ出す (mod から gh や Notion を引かない)。
+//   行の形: tickets は { id: "TKT-n", title, url: "https://app.notion.com/p/…", status: "In Progress", note }、
+//   prs は { id: "dotfiles#251", title, url: "https://github.com/pollenjp/dotfiles/pull/251", state: "open", ci: "pass", note }。
+//   上の段に ID・状態の札・題を並べ (入らなければ札や題が次の段へ回り、長い ID と題は縮んで折り返す)、note (一言) はその下に小さく出す。
+//   ID (accent の色) と題は下線つきで、押すと url を開く (リンクと同じく http と https だけ。ダブルクリックの 2 回目は数えない。url が無い・
+//   ほかの scheme なら下線の無い押せない字で出す)。
+//   status の札: Todo は muted・In Progress は working・In Review は accent・Done は ok (緑)・Canceled は dim・Blocked は blocked (赤)。
+//   state の札: open は ok (緑)・draft は muted・merged は ansi5 (紫)・closed は blocked (赤)。ci の札: pass は「CI ✓」(緑)・fail は
+//   「CI ✗」(赤)・pending は「CI …」(working)。どれも大文字小文字を問わず、知らない値は muted の札に字のまま (ci は「CI <値>」) 出し、
+//   無い・空なら札を出さない。rows が空なら「(行はありません)」と出す。
+//
+// 節を消す印: まとめのペイン (role が summary か無い) の、id (空でない文字列) のある節の右上に「×」を出す。押すと印が付き (枠が warn の
+//   点線になり、題に取り消し線が引かれ、中身が薄くなって「次の更新で消える」と出る)、「戻す」を押すと外れる (ダブルクリックの 2 回目は
+//   数えない)。問いのペインには出さない。
+//   印は mod が panel.json の隣のファイルに書く。名前は panel.json の名前の .json を .dismiss.json に替えたもの (panel.json → panel.dismiss.json):
+//     { "file": "panel.json", "dismissed": [{ "id": "<節の id>", "title": "<印を付けたときの題>", "at": "<印を付けた時刻 (ISO 8601 の UTC)>",
+//       "base": "<印を付けたときの panel.json の指紋>" }] }
+//   panel.json はハブだけが書き、印のファイルは mod だけが書く (ハブは読むだけ)。写しのペインどうしの書き違いは writeTextFile の expected
+//   (読んだときの中身と今の中身が合うときだけ書く) で防ぎ、合わずに断られたら読み直してやり直す。
+//   印を付けた後に panel.json の中身が変わったら、その節を出さない。変わったかは、キーの順と空白によらない指紋 (base) で比べる (印のファイルの
+//   書き込みや、同じ中身での書き直しは変わったと数えない。ConvertTo-Json の @{} はキーの順が書くたびに替わりうる)。ハブが外さずに同じ id で
+//   書き続けても、印がある間は出さない。panel.json の節から消えた id の印は、mod が panel.json を読めた読み直しのたびに印のファイルから外す
+//   (panel.json が無い・読めない間は外さない)。印はファイルに残るので、まとめのペインを開き直しても (herdr-app を上げ直しても) 同じに出す
+//   (印の後に panel.json が変わっていれば出さず、変わっていなければ印つきで出す)。
+//   ハブがすること: panel.json を書く前に印のファイルを読み (無ければ印は無い)、dismissed の id の節を外して書く。同じ話を続けて出すなら
+//   別の id (next-2 など) にする (印の付いた id を使う間は出ない)。印のファイルは書き換えない (要らなくなった印は、節を外せば mod が消す)。
+//
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、板 (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
 //   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
@@ -37,8 +69,10 @@
 //   { version, title, updated,
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
-//       { type: "markdown", id, title, text, collapsed },
+//       { type: "markdown", id, title, text (リンクは上の「リンク」), collapsed },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
+//       { type: "tickets", id, title, rows: [{ id, title, url, status, note }] },   (チケットの一覧。上の「チケットと PR の一覧」)
+//       { type: "prs", id, title, rows: [{ id, title, url, state, ci, note }] },    (PR の一覧)
 //       { type: "image", id, title, src (下の「図の置き場所」の下のパス。例 "TKT-n/x.svg"), width, height, caption,
 //         marks: [{ kind: "flow", x1, y1, x2, y2, speed, color }      (x1,y1 から x2,y2 へ一方向に流れる点。speed は px/s)
 //                 | { kind: "pulse", x, y, w, h, radius, period, color } (点滅する枠)
@@ -58,6 +92,7 @@
 // ユーザーの発言と見分けられなくなる)。ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら選んだものを消す)。
 
 import { View, div, image, svg } from "gpui-kit";
+import { writeTextFile } from "herdr"; // 節を消す印のファイル (panel.json の隣) を書く
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared } from "herdr";
 
@@ -83,6 +118,68 @@ const zoomStep = (z, dir) =>
 const atBase = (n) => Math.round(n * TEXT_BASE * 10) / 10;
 const BAR_H = atBase(22) + 4; // 「− % +」の組の高さ (区切りの高さに、内の余白と枠の上下 1 px ずつを足したもの)
 
+// ---- 節を消す印・リンク・チケットと PR の一覧 (頭のコメントの「節を消す印」「リンク」「チケットと PR の一覧」) ----
+// 印のファイル: panel.json の隣に、名前の末尾の .json を .dismiss.json に替えて置く (.json で終わらなければ足す)
+const dismissPathOf = (file) => file.replace(/(\.json)?$/i, ".dismiss.json");
+const baseName = (p) => p.replace(/^.*[\\/]/, "");
+// 消す印を付けられる節の名前。id が空でない文字列の節だけ (印のファイルの dismissed の行も同じ形で読む)
+const markKey = (s) => (typeof s?.id === "string" && s.id !== "" ? s.id : null);
+// 値を字にする (無い・null は空の字)
+const str = (v) => (v == null ? "" : typeof v === "string" ? v : String(v));
+// キーを並べ替えた JSON の字。キーの順と空白によらず panel.json の中身を比べるため (ConvertTo-Json の @{} はキーの順が書くたびに替わりうる)
+const canon = (v) =>
+  Array.isArray(v)
+    ? `[${v.map(canon).join(",")}]`
+    : v !== null && typeof v === "object"
+      ? `{${Object.keys(v)
+          .sort()
+          .map((k) => `${JSON.stringify(k)}:${canon(v[k])}`)
+          .join(",")}}`
+      : (JSON.stringify(v) ?? "null");
+// panel.json の中身の指紋 (canon の字の cyrb53。53 bit を 16 進で)。印を付けたときと今とで、中身が変わったかを比べるだけに使う
+const fingerprint = (data) => {
+  const s = canon(data);
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16);
+};
+// 印のファイルの中身 (id → 印)。無い・読めない・形の違うものは印の無いものとみる (次に書くときに正しい形で書き直る)
+const parseMarks = (text) => {
+  const marks = new Map();
+  let o = null;
+  try {
+    o = text == null ? null : JSON.parse(text);
+  } catch {
+    o = null;
+  }
+  for (const e of Array.isArray(o?.dismissed) ? o.dismissed : []) {
+    const id = markKey(e);
+    if (id != null && !marks.has(id)) marks.set(id, { id, title: str(e.title), at: str(e.at), base: str(e.base) });
+  }
+  return marks;
+};
+const marksJson = (file, marks) => `${JSON.stringify({ file: baseName(file), dismissed: [...marks.values()] }, null, 2)}\n`;
+// http・https の URL (host のあるもの) ならその字 (前後の空白を除く)、ほかは null。user@host の形・空白や制御文字を含むものも null。
+// リンクと一覧の行の url は、これを通ったものだけを開く
+const webUrl = (v) => {
+  if (typeof v !== "string") return null;
+  const u = v.trim();
+  return /^https?:\/\/[^\s/?#@\\]+(?:[/?#]\S*)?$/i.test(u) && !/[\u0000-\u001f\u007f]/.test(u) ? u : null;
+};
+// 状態の札の色 (colors() か theme() の名前)。知らない値は muted
+const TICKET_COLOR = { todo: "muted", "in progress": "working", "in review": "accent", done: "ok", canceled: "dim", cancelled: "dim", blocked: "blocked" };
+const PR_COLOR = { open: "ok", draft: "muted", merged: "ansi5", closed: "blocked" };
+const CI_CHIP = { pass: ["ok", "CI ✓"], fail: ["blocked", "CI ✗"], pending: ["working", "CI …"] };
+
 export default class HubPanel extends View {
   init(_props, cx) {
     this.data = null;
@@ -93,6 +190,14 @@ export default class HubPanel extends View {
     this.busy = false;
     this.width = null;
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
+    // 節を消す印: 印 (id → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)・まだ書いていない押下 (op の並び)・
+    // 読み書きできなかったわけ・読み書きを 1 つずつ流す鎖と、今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (下の行に出したもの)
+    this.marks = new Map();
+    this.pending = [];
+    this.markError = null;
+    this.markTail = Promise.resolve();
+    this.hash = null;
+    this.linkMsg = null;
     this.handle = cx.focus_handle();
     const file = props()?.file;
     cx.spawn(async (cx) => {
@@ -124,25 +229,33 @@ export default class HubPanel extends View {
       cx.notify();
       return;
     }
+    // panel.json と印のファイルを読み終えてから、まとめて入れる (読む間に描き直されても、印で隠す節が一瞬出たり、印の見た目が
+    // 戻ったりしない)。fresh はこの読み直しで読めた panel.json (無い・読めなければ null。印を外すのは読めたときだけ)
+    let next = { data: this.data, hash: this.hash, error: null };
+    let fresh = null;
     try {
       const text = await readTextFile(file);
       if (text == null) {
-        this.data = null;
-        this.error = `ファイルが無い: ${file}`;
+        next = { data: null, hash: null, error: `ファイルが無い: ${file}` };
       } else {
-        const data = JSON.parse(text);
-        if (this.data?.version !== data.version) {
-          this.picked = {};
-          this.status = "";
-          this.collapsed = {};
-          for (const s of data.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
-        }
-        this.data = data;
-        this.error = null;
+        fresh = JSON.parse(text);
+        next = { data: fresh, hash: fingerprint(fresh), error: null };
       }
     } catch (e) {
-      this.error = `読めない: ${e}`;
+      next.error = `読めない: ${e}`;
     }
+    // 印のファイルも読み直し、panel.json の節から消えた id の印を外す (印のファイルの書き込みでも、ここへ来る)
+    const marks = await this.syncMarks(fresh);
+    if (fresh && this.data?.version !== fresh.version) {
+      this.picked = {};
+      this.status = "";
+      this.collapsed = {};
+      for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
+    }
+    this.data = next.data;
+    this.hash = next.hash;
+    this.error = next.error;
+    if (marks) this.takeMarks(marks);
     cx.notify();
   }
 
@@ -339,7 +452,7 @@ export default class HubPanel extends View {
           .child(this.badge(`Q${qi + 1}`, c.solid, c.solidFg))
           .child(div().flex_1().min_w(0).text_size(this.fs(14)).font_semibold().text_color(c.fg).child(q.title ?? "")),
       )
-      .when(!!q.body, (el) => el.child(div().text_color(c.fg).child(TextView.markdown(`hp-qb-${q.id}`, q.body).selectable(true))))
+      .when(!!q.body, (el) => el.child(div().text_color(c.fg).child(this.md(`hp-qb-${q.id}`, q.body))))
       .children(opts);
   }
 
@@ -360,8 +473,13 @@ export default class HubPanel extends View {
   section(s, i, c) {
     const id = s.id ?? `s${i}`;
     const closed = !!this.collapsed[id];
+    // 消す印 (頭のコメントの「節を消す印」)。ボタンを出すのは、まとめのペインの id のある節だけ
+    const key = this.marksOn() ? markKey(s) : null;
+    const marked = this.markState(s) === "marked";
     const head = h_flex()
       .id(`hp-sh-${id}`)
+      .flex_1()
+      .min_w(0)
       .gap(6)
       .items_center()
       .cursor_pointer()
@@ -370,13 +488,23 @@ export default class HubPanel extends View {
         cx.notify();
       })
       .child(div().flex_none().w(this.fs(12)).text_color(c.dim).child(closed ? "▸" : "▾"))
-      .child(div().flex_1().min_w(0).text_size(this.fs(13)).font_semibold().text_color(c.fg).child(s.title ?? ""));
+      .child(
+        div()
+          .flex_1()
+          .min_w(0)
+          .text_size(this.fs(13))
+          .font_semibold()
+          .text_color(marked ? c.muted : c.fg)
+          .when(marked, (el) => el.line_through())
+          .child(s.title ?? ""),
+      );
     let body = null;
     if (!closed) {
-      if (s.type === "markdown")
-        body = div().text_size(this.fs(12)).text_color(c.fg).child(TextView.markdown(`hp-md-${id}`, s.text ?? "").selectable(true));
+      if (s.type === "markdown") body = div().text_size(this.fs(12)).text_color(c.fg).child(this.md(`hp-md-${id}`, s.text));
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
+      else if (s.type === "tickets") body = this.ticketList(s, id, c);
+      else if (s.type === "prs") body = this.prList(s, id, c);
       else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
     }
     return v_flex()
@@ -385,10 +513,287 @@ export default class HubPanel extends View {
       .gap(8)
       .rounded(10)
       .border_1()
-      .border_color(c.border)
+      .when(marked, (el) => el.border_dashed())
+      .border_color(marked ? c.warn : c.border)
       .bg(c.surface)
-      .child(head)
-      .when(!!body, (el) => el.child(body));
+      // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
+      .child(h_flex().gap(6).items_center().child(head).when(key != null, (el) => el.child(this.markButton(key, s, marked, c))))
+      .when(marked, (el) => el.child(div().text_size(this.fs(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
+      .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
+  }
+
+  // ---- 節を消す印 (頭のコメントの「節を消す印」) ----
+
+  // 印を扱うペインか。問いのペインは節を出さないので、印のファイルを読みも書きもしない
+  marksOn() {
+    return this.role() !== "questions" && !!props()?.file;
+  }
+
+  // 節の印の状態。null: 印なし (印を付けられない節も)。"marked": 印あり・panel.json は印を付けたときの中身のまま (印つきで出す)。
+  // "hidden": 印あり・印の後に panel.json の中身が変わった (出さない)
+  markState(s) {
+    const key = markKey(s);
+    const m = key != null && this.marksOn() ? this.marks.get(key) : undefined;
+    if (!m) return null;
+    return m.base === this.hash ? "marked" : "hidden";
+  }
+
+  // 出す節 (印で隠す節を除く)。i は panel.json の sections の何番目か (id の無い節の名前に使う)
+  shownSections(secs) {
+    return (Array.isArray(secs) ? secs : []).map((s, i) => ({ s, i })).filter(({ s }) => this.markState(s) !== "hidden");
+  }
+
+  // 印のファイルの読み書きを、この写しの中で 1 つずつ流す (前の書き換えが済んでから次を読む。続けて押したら、後に押した方が残る)
+  async serial(fn) {
+    const prev = this.markTail;
+    let release;
+    this.markTail = new Promise((r) => {
+      release = r;
+    });
+    try {
+      await prev;
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  // 印のファイルを読み、op (今の印 → 新しい印。変えないなら null) で書き換える。読んでから書くまでにほかの写しが書いていたら
+  // (writeTextFile の expected が合わずに断られたら) 読み直してやり直す。返すのは { marks: 書いた (か読んだ) 印 } か、読み書き
+  // できなければ { error: わけ }。this には入れない (入れるのは takeMarks。reload は panel.json とまとめて入れる)
+  async editMarks(op) {
+    const file = props().file;
+    const path = dismissPathOf(file);
+    let err = null;
+    for (let i = 0; i < 4; i++) {
+      let text;
+      try {
+        text = await readTextFile(path);
+      } catch (e) {
+        err = e;
+        break;
+      }
+      const cur = parseMarks(text);
+      const next = op(cur);
+      if (next == null) return { marks: cur };
+      try {
+        await writeTextFile(path, marksJson(file, next), text ?? null);
+        return { marks: next };
+      } catch (e) {
+        err = e;
+      }
+    }
+    return { error: `消す印のファイル (${baseName(path)}) を読み書きできない: ${err}` };
+  }
+
+  // editMarks の結果を入れる。まだ書いていない押下 (pending) を当て直すので、ほかの読み書きが先に済んでも、押した見た目が戻らない
+  // (op は「付ける」「外す」の形なので、2 度当てても同じ)
+  takeMarks(res) {
+    if (res.marks) {
+      this.marks = this.pending.reduce((m, op) => op(m) ?? m, res.marks);
+      this.markError = null;
+    } else {
+      this.markError = res.error;
+    }
+  }
+
+  // 読み直したとき: 印のファイルを読み、この読み直しで読めた panel.json (fresh) の節に無い id の印を外す。fresh が無い (panel.json が
+  // 無い・読めない) ときは外さない (前の中身から外すと、ほかの写しが新しい中身の節に付けた印を消しうる)。問いのペインは null
+  syncMarks(fresh) {
+    if (!this.marksOn()) return Promise.resolve(null);
+    const secs = Array.isArray(fresh?.sections) ? fresh.sections : [];
+    const ids = fresh ? new Set(secs.map(markKey).filter((k) => k != null)) : null;
+    return this.serial(() =>
+      this.editMarks((m) => {
+        if (!ids) return null;
+        const next = new Map([...m].filter(([id]) => ids.has(id)));
+        return next.size === m.size ? null : next;
+      }),
+    );
+  }
+
+  // 節の印を付け外しする。見た目はすぐに変え、ファイルへは後で書く (書けなければファイルの中身に戻し、わけを出す)。印は今の panel.json の
+  // 指紋 (base) と組で残し、panel.json の中身がこれと違えば出さない
+  toggleMark(key, s, cx) {
+    const on = !this.marks.has(key);
+    const entry = { id: key, title: str(s.title), at: new Date().toISOString(), base: this.hash ?? "" };
+    const op = (m) => {
+      if (on === m.has(key)) return null;
+      const next = new Map(m);
+      if (on) next.set(key, entry);
+      else next.delete(key);
+      return next;
+    };
+    this.pending.push(op);
+    this.marks = op(this.marks) ?? this.marks;
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const res = await this.serial(() => this.editMarks(op));
+      this.pending = this.pending.filter((o) => o !== op);
+      if (res.marks) {
+        this.takeMarks(res);
+      } else {
+        // 書けなかった: わけを残し、見た目をファイルの中身 (に、ほかのまだ書いていない押下を当てたもの) へ戻す
+        this.markError = res.error;
+        const back = await this.serial(() => this.editMarks(() => null));
+        if (back.marks) this.marks = this.pending.reduce((m, o) => o(m) ?? m, back.marks);
+      }
+      cx.notify();
+    });
+  }
+
+  // 節の右上の印のボタン。「×」で次の更新で消す印を付け、「戻す」で外す
+  markButton(key, s, marked, c) {
+    return h_flex()
+      .id(`hp-dm-${key}`)
+      .flex_none()
+      .h(this.fs(20))
+      .min_w(this.fs(20))
+      .px(this.fs(6))
+      .justify_center()
+      .items_center()
+      .rounded(this.fs(5))
+      .border_1()
+      .border_color(marked ? c.warn : c.border)
+      .text_size(this.fs(11))
+      .text_color(marked ? c.warn : c.dim)
+      .cursor_pointer()
+      .hover((st) => st.bg(c.raised))
+      .tooltip(marked ? "印を外す (この節を残す)" : "次の更新でこの節を消す (もう一度押すと戻せる)")
+      .on_click((e, cx) => {
+        cx.stop_propagation();
+        // ダブルクリックの 2 回目は数えない (付けてすぐ外さない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.toggleMark(key, s, cx);
+      })
+      .child(marked ? "戻す" : "×");
+  }
+
+  // ---- リンク (頭のコメントの「リンク」) ----
+
+  // markdown の文 (TextView)。リンクを押すと openLink で開く (TextView の既定の開き方は scheme を確かめないので使わない)
+  md(id, text) {
+    return TextView.markdown(id, str(text))
+      .selectable(true)
+      .on_link_click((url, cx) => this.openLink(url, cx));
+  }
+
+  // url を既定のブラウザで開く。http と https (webUrl) だけで、ほかは開かずに下の行にわけを出す。開けたら、前に出した開かなかった
+  // わけを消す (ほかのわけは残す)
+  openLink(url, cx) {
+    const u = webUrl(url);
+    if (!u) {
+      this.linkNote(`開かない (http と https の URL だけを開く): ${str(url)}`, cx);
+      return;
+    }
+    try {
+      cx.open_url(u);
+    } catch (e) {
+      this.linkNote(`開けない: ${u} (${e})`, cx);
+      return;
+    }
+    if (this.status !== "" && this.status === this.linkMsg) {
+      this.status = "";
+      cx.notify();
+    }
+  }
+
+  linkNote(msg, cx) {
+    this.status = msg;
+    this.linkMsg = msg;
+    cx.notify();
+  }
+
+  // ---- チケットと PR の一覧 (頭のコメントの「チケットと PR の一覧」) ----
+
+  // チケットの一覧の節 (type "tickets")。行: { id, title, url, status, note }
+  ticketList(s, id, c) {
+    return this.rowList(s, id, c, (r) => {
+      const st = str(r.status).trim();
+      return st === "" ? [] : [this.chip(st, this.paint(c, TICKET_COLOR[st.toLowerCase()] ?? "muted", c.muted))];
+    });
+  }
+
+  // PR の一覧の節 (type "prs")。行: { id, title, url, state, ci, note }
+  prList(s, id, c) {
+    return this.rowList(s, id, c, (r) => {
+      const chips = [];
+      const st = str(r.state).trim();
+      if (st !== "") chips.push(this.chip(st, this.paint(c, PR_COLOR[st.toLowerCase()] ?? "muted", c.muted)));
+      const ci = str(r.ci).trim();
+      if (ci !== "") {
+        const [color, label] = CI_CHIP[ci.toLowerCase()] ?? ["muted", `CI ${ci}`];
+        chips.push(this.chip(label, this.paint(c, color, c.muted)));
+      }
+      return chips;
+    });
+  }
+
+  // 一覧の行を並べる。上の段に ID・状態の札 (chipsOf)・題 (入らなければ題が次の段へ回って折り返す)、下に note
+  rowList(s, id, c, chipsOf) {
+    const rows = Array.isArray(s.rows) ? s.rows : [];
+    if (rows.length === 0) return div().text_color(c.muted).child("(行はありません)");
+    return v_flex()
+      .gap(8)
+      .children(
+        rows.map((r, ri) => {
+          const row = r !== null && typeof r === "object" ? r : {};
+          const key = `${id}-${ri}`;
+          const url = webUrl(row.url);
+          const rid = str(row.id);
+          const title = str(row.title);
+          const note = str(row.note);
+          return v_flex()
+            .id(`hp-row-${key}`)
+            .gap(2)
+            .child(
+              h_flex()
+                .flex_wrap()
+                .gap_x(6)
+                .gap_y(2)
+                .items_center()
+                .when(rid !== "", (el) => el.child(this.linkText(`hp-rid-${key}`, rid, url, c.accent, c).min_w(0).font_semibold()))
+                .children(chipsOf(row))
+                .when(title !== "", (el) => el.child(this.linkText(`hp-rt-${key}`, title, url, c.fg, c).min_w(0))),
+            )
+            .when(note !== "", (el) => el.child(div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(note)));
+        }),
+      );
+  }
+
+  // 押すと url を開く字。下線と指の形のポインタで押せると分かるようにし、上に来ると url を出す。url が無ければ押せない字 (fg の色・下線なし)
+  linkText(eid, text, url, color, c) {
+    const el = div().id(eid);
+    if (!url) return el.text_color(c.fg).child(text);
+    return el
+      .text_color(color)
+      .underline()
+      .cursor_pointer()
+      .hover((st) => st.opacity(0.8))
+      .tooltip(url)
+      .on_click((e, cx) => {
+        // ダブルクリックの 2 回目は数えない (ブラウザのタブを 2 つ開かない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.openLink(url, cx);
+      })
+      .child(text);
+  }
+
+  // 状態の札。枠と字を color で、地を同じ色の薄い色で塗る (地は color が #rrggbb のときだけ)
+  chip(text, color) {
+    const bg = withAlpha(color, "26");
+    return div()
+      .flex_none()
+      .px(this.fs(6))
+      .py(this.fs(1))
+      .rounded(this.fs(8))
+      .border_1()
+      .border_color(color)
+      .when(!!bg, (el) => el.bg(bg))
+      .text_color(color)
+      .text_size(this.fs(10))
+      .font_semibold()
+      .child(text);
   }
 
   flow(s, id, c) {
@@ -612,6 +1017,7 @@ export default class HubPanel extends View {
     const body = [];
     if (!known) body.push(div().text_color(c.blocked).child(`props.role が分からない: ${JSON.stringify(role)} (summary か questions。無ければ両方を出す)`));
     if (this.error) body.push(div().text_color(c.blocked).child(this.error));
+    if (this.markError && this.marksOn()) body.push(div().text_color(c.blocked).child(this.markError));
     if (r === "questions") {
       qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
       if (!this.error && d && qs.length === 0) body.push(div().text_color(c.muted).child("問いはありません"));
@@ -620,11 +1026,13 @@ export default class HubPanel extends View {
         body.push(div().text_size(this.fs(12)).font_semibold().text_color(c.accent).child(`質問 (${qs.length})`));
         qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
       }
-      if (secs.length > 0) {
+      // 消す印を付けた後に panel.json が変わった節は出さない (頭のコメントの「節を消す印」)
+      const shown = this.shownSections(secs);
+      if (shown.length > 0) {
         if (qs.length > 0) body.push(div().h(4), div().text_size(this.fs(12)).font_semibold().text_color(c.muted).child("いまの状況"));
-        secs.forEach((s, i) => body.push(this.section(s, i, c)));
+        shown.forEach(({ s, i }) => body.push(this.section(s, i, c)));
       }
-      if (!this.error && d && qs.length === 0 && secs.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
+      if (!this.error && d && qs.length === 0 && shown.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
     }
     // 上の帯の題。問いのペインは見出しと件数 (updated も出さない)、ほかは panel.json の title
     const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");

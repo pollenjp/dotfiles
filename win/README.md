@@ -564,6 +564,41 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   変えるときは名前を変える (`x.svg` → `x-2.svg`)
 - SVG の `font-family` は名前を引用符で囲む (`'Yu Gothic UI', 'Meiryo UI', Meiryo, sans-serif`)。囲まないと日本語を混ぜた行が BIZ UDGothic に落ち、
   `~` が `‾` に、`\` が `¥` に化ける
+- markdown の文 (節の `text`・問いの `body`) の `[字](URL)`・`<URL>`・素の URL はリンクになり (色・下線・指の形のポインタは TextView が theme から
+  決める)、押すと既定のブラウザで開く。開くのは http と https の URL (host のあるもの) だけで、ほかの scheme (`file:`・`mailto:` など) やパスは開かず、
+  板の下の行にわけを出す
+- チケットの一覧と PR の一覧は、節の型 `tickets`・`prs` で書く。板はハブが書いた行をそのまま出す (板から gh や Notion を引かない)。行ごとに ID・
+  状態の札・題と、その下に一言 (`note`) を出し、ID か題を押すと `url` を開く (リンクと同じく http と https だけ)。状態の札の色は、チケットの `status`
+  (Todo・In Progress・In Review・Done・Canceled・Blocked)、PR の `state` (open・draft・merged・closed) と `ci` (pass・fail・pending) で決まる。
+  色と、知らない値の出し方の正本は `main.js` の頭のコメント:
+
+```json
+{ "type": "tickets", "id": "tickets", "title": "チケット", "rows": [
+  { "id": "TKT-n", "title": "板の図を大きく見る", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "note": "PR はまだ" } ] }
+{ "type": "prs", "id": "prs", "title": "PR", "rows": [
+  { "id": "dotfiles#251", "title": "板の文字を 1.2 倍に", "url": "https://github.com/pollenjp/dotfiles/pull/251", "state": "merged", "ci": "pass", "note": "当てた" } ] }
+```
+
+- 節を消す印: まとめのペイン (role が `summary` か無い) の、`id` (空でない文字列) のある節の右上に `×` が出る。ユーザーが押すと印が付き (warn の
+  点線の枠・題の取り消し線・薄い中身と「次の更新で消える」)、`戻す` で外れる。問いのペインには出ない。印は板が panel.json の隣の
+  `<名前>.dismiss.json` (panel.json の名前の `.json` を `.dismiss.json` に替えたもの。`panel.json` なら `panel.dismiss.json`) に書く:
+  `{ "file": "panel.json", "dismissed": [{ "id": "<節の id>", "title": "<印を付けたときの題>", "at": "<時刻 (UTC)>", "base": "<板が使う指紋>" }] }`。
+  panel.json はハブだけが書き、印のファイルは板だけが書く (写しのペインどうしは `writeTextFile` の expected で書き違いを防ぐ)
+- 印を付けた後に panel.json の中身が変わると、板はその節を出さない (キーの順と空白は比べないので、同じ中身の書き直しは変わったと数えない)。ハブが
+  同じ id で書き続けても、印がある間は出さない。panel.json から外れた id の印は、板が印のファイルから消す。印はファイルに残るので、まとめのペインを
+  開き直しても (herdr-app を上げ直しても) 同じに出る (印の後に panel.json が変わっていれば出さず、変わっていなければ印つきで出す)
+- ハブは panel.json を書く前に印のファイルを読み (無ければ印は無い)、印の付いた id の節を外して書く。同じ話を続けて出すなら別の id (`next-2` など)
+  にする。印のファイルは書き換えない (要らなくなった印は、節を外せば板が消す):
+
+```powershell
+# panel.json を書く前に (PowerShell 7。$panel は書く中身、$panelPath は panel.json の絶対パス)
+$dismiss = Join-Path (Split-Path $panelPath) 'panel.dismiss.json'
+$ids = @()
+if (Test-Path $dismiss) { $ids = @((Get-Content $dismiss -Raw | ConvertFrom-Json).dismissed | ForEach-Object { $_.id }) }
+# id の無い節は残す (dismissed が空のとき、$x.dismissed.id は $null になり、$null -notin @($null) は偽になるので、-notin だけでは外れる)。
+# 板は id の大文字小文字を区別するので -cnotin で比べる
+$panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnotin $ids })
+```
 
 ### herdr-app のキー
 
