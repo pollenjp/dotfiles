@@ -107,7 +107,7 @@ impl Step for HerdrAppPjpSpaces {
                 ctx,
                 Kind::Info,
                 format!(
-                    "layout {LAYOUT} は前に作ったが、今は無い (逃げ道のキー ctrl-alt-shift-escape が退けた・手で外した) ので、mod も layout も置かない (外したまま。--force でも戻さない) → 戻すなら herdr-app do layout.clone --name {BASE} --as {LAYOUT} (表示が {LAYOUT} に替わる) の後で dotfiles apply --steps herdr-app-pjp-spaces。逃げ道のキーで退けたなら、layouts\\{LAYOUT}.json.reset-<時刻> の名前を {LAYOUT}.json に戻してもよい"
+                    "layout {LAYOUT} は前に作ったが、今は無い (逃げ道のキー ctrl-alt-shift-escape が退けた・手で外した) ので、mod も layout も置かない (外したまま。--force でも戻さない) → 戻すなら herdr-app do layout.clone --name {BASE} --as {LAYOUT} | Out-String (表示が {LAYOUT} に替わる) の後で dotfiles apply --steps herdr-app-pjp-spaces。逃げ道のキーで退けたなら、layouts\\{LAYOUT}.json.reset-<時刻> の名前を {LAYOUT}.json に戻してもよい"
                 ),
             )];
         }
@@ -335,7 +335,7 @@ fn create_layout(
                 ctx,
                 Kind::Info,
                 format!(
-                    "表示している layout が {name} ({BASE} でない) ので、{label} は作らない ({LAYOUT} は {BASE} を写して作り、写すと表示が替わる) → 使うなら {BASE} に戻して (ctrl-shift-l か herdr-app do layout.switch --name {BASE}) から dotfiles apply --steps herdr-app-pjp-spaces"
+                    "表示している layout が {name} ({BASE} でない) ので、{label} は作らない ({LAYOUT} は {BASE} を写して作り、写すと表示が替わる) → 使うなら {BASE} に戻して (ctrl-shift-l か herdr-app do layout.switch --name {BASE} | Out-String) から dotfiles apply --steps herdr-app-pjp-spaces"
                 ),
             );
         }
@@ -422,7 +422,7 @@ fn create_layout(
             ctx,
             Kind::Failed,
             format!(
-                "herdr-app do layout.clone の後に {label} ができない (表示は {LAYOUT} に替わったかもしれない) → herdr-app status を見てから dotfiles apply --steps herdr-app-pjp-spaces"
+                "herdr-app do layout.clone の後に {label} ができない (表示は {LAYOUT} に替わったかもしれない) → herdr-app status | Out-String を見てから dotfiles apply --steps herdr-app-pjp-spaces"
             ),
         );
     };
@@ -444,7 +444,7 @@ fn create_layout(
         &fsutil::sha256_bytes(desired.as_bytes()),
     );
     ctx.say(format!(
-        "作りました: {label} (表示を {LAYOUT} に替えた。戻すなら ctrl-shift-l か herdr-app do layout.switch --name {BASE})"
+        "作りました: {label} (表示を {LAYOUT} に替えた。戻すなら ctrl-shift-l か herdr-app do layout.switch --name {BASE} | Out-String)"
     ));
     Outcome::new(
         Kind::Ok,
@@ -518,7 +518,7 @@ fn update_layout(
             ctx,
             Kind::Manual,
             format!(
-                "{label} の中身が違う ({why}) → 残すなら別の名前の layout に写して使い (herdr-app do layout.clone --name {LAYOUT} --as <名前>)、{BASE} から作り直すなら dotfiles apply --steps herdr-app-pjp-spaces --force"
+                "{label} の中身が違う ({why}) → 残すなら別の名前の layout に写して使い (herdr-app do layout.clone --name {LAYOUT} --as <名前> | Out-String)、{BASE} から作り直すなら dotfiles apply --steps herdr-app-pjp-spaces --force"
             ),
         );
         return (o, false);
@@ -560,7 +560,7 @@ fn annotate(home: &Path, mut o: Outcome, wrote: bool) -> Outcome {
         && name != LAYOUT
     {
         o = o.note(format!(
-            "表示している layout は {name}。{MOD} の印を出すなら ctrl-shift-l か herdr-app do layout.switch --name {LAYOUT}"
+            "表示している layout は {name}。{MOD} の印を出すなら ctrl-shift-l か herdr-app do layout.switch --name {LAYOUT} | Out-String"
         ));
     }
     if !wrote {
@@ -577,7 +577,7 @@ fn annotate(home: &Path, mut o: Outcome, wrote: bool) -> Outcome {
                 .take(200)
                 .collect();
             o = o.note(format!(
-                "herdr-app が layout を読めなかった ({}: {first}) → herdr-app status を見る (herdr-app は前に読めた形のまま動く)",
+                "herdr-app が layout を読めなかった ({}: {first}) → herdr-app status | Out-String で見る (herdr-app は前に読めた形のまま動く)",
                 path.display()
             ));
         }

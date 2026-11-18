@@ -524,15 +524,21 @@ $p = Start-Process herdr-app -ArgumentList ('check "{0}"' -f $mod) -NoNewWindow 
 $p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-check.err"   # 0 と「check passed」。落ちたらわけが出る
 ```
 
+- ほかの herdr-app の命令 (`status`・`ls`・`do …`・`shot`) も、PowerShell では出力を pipeline の次のコマンドへ流して待つ (`herdr-app status | Out-String`・
+  `herdr-app status | ConvertFrom-Json`・`$r = (herdr-app do … | Out-String).Trim()` の後で `$LASTEXITCODE`・`herdr-app shot <png> | Out-Null`)。herdr-app.exe は
+  GUI の exe (PE の subsystem が 2) で、PowerShell は GUI の exe を、出力を pipeline に流すときにだけ終わりまで待つ。行に単独で打つ・
+  `$x = (herdr-app …)`・`$null = herdr-app …` は待たずに次へ進み、出力は空・`$LASTEXITCODE` は前のコマンドの値のままで、herdr-app は後から書こうと
+  して `failed printing to stdout: … (os error 232)` で panic する (2026-11-18。herdr-app 0.1.15・pwsh 7)。`check` は上の `Start-Process -Wait` の形でよい
+
 ハブの板 (`pjp-hub-panel`) の使い方 (ハブの Claude がすること。手順の正本は claude-skills の pjp-hc-hub の `references/panel.md`):
 
 ```powershell
 # 会話の scratchpad に panel.json を書き、まとめのペインをハブの端末の右に開く (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
-herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}'
+herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}' | Out-String
 # 問いを出すとき: panel.json に questions を書き、まとめのペインを下に分けて問いのペインを開く。出力の pane (問いのペインの ID) を控える
-herdr-app do pane.split '{"direction":"down","pane":"<まとめのペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}'
+herdr-app do pane.split '{"direction":"down","pane":"<まとめのペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}' | Out-String
 # 答えを受けたとき・問いを取り下げるとき: 問いのペインが残っていれば、控えた ID で閉じる (JSON でなく --pane <ID> の形。pane を省かない)
-herdr-app do pane.close --pane '<問いのペイン>'
+herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 ```
 
 - `role` は `summary` (まとめ: title・updated・sections だけ)・`questions` (問い: questions だけ。空なら「問いはありません」) のどちらか。省くと
@@ -542,7 +548,7 @@ herdr-app do pane.close --pane '<問いのペイン>'
   `pjp-hub-panel` (写しの `pjp-hub-panel-<何か>` も) のペインだと確かめられたときだけ閉じる。確かめられなければ閉じずに「送った (閉じるのはハブ)」と
   出す。そのときと、「入力欄に入れる」で入れたとき・端末で直に答えたときは問いのペインが残るので、ハブは答えを受けたら控えた ID で閉じる
 - `pane.close` は `--pane <ID>` の形で打つ (JSON を引用符で包んで渡したら効かなかった)。`pane` なしで打たない。今キーボードのあるペインを閉じ、それが
-  端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)。閉じる前に `herdr-app ls` で、その ID が端末の行に出ていないことを確かめる (板の
+  端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)。閉じる前に `herdr-app ls | Out-String` で、その ID が端末の行に出ていないことを確かめる (板の
   ペインは ls に出ない。出ていれば端末のペイン)
 - 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
   「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
@@ -627,7 +633,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   (`Ctrl+Alt+Shift+Esc`) は keys.json を `keys.json.reset-<時刻>` へ退けて既定に戻すので、その後も `dotfiles apply --steps herdr-app-keys` で足し直す
 - herdr-app は keys.json を保存するとすぐ読み直す。読めなければ前に読めたキーのまま動き、隣の `keys.error` にわけを書く。書き足した後は少し置いて
   `dotfiles check --steps herdr-app-keys` を流すと、`keys.error` があれば ※ で知らせる (書いたその apply では、`keys.error` は前の中身のものなので
-  知らせない。`herdr-app status` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
+  知らせない。`herdr-app status | Out-String` でも見られる)。section は細かい方が勝つ (`terminal` > `layout:<名前>` > `global`) ので、`terminal` に同じキーを書くと、端末に
   focus がある間はそちらが効く
 - キーを足す・変えるときは repo の `herdr-app/keys.json` を直す (prefix の後のキーは `pjp-prefix/main.js` の `BINDINGS`。herdr-app の既定のキーを替える
   ときは `herdr-app/keys.defaults.json` にその既定の値も書く)。キーの書き方と命令の名前は、herdr-app の home の `AGENTS.md` の Keys の節と
@@ -656,16 +662,16 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
 - **初めて置く apply は、表示する layout を main から pjp-main に替える** (`layout.clone` は写した layout へ表示を替える)。sidebar の幅などの clicks
   (`layouts\.state\`) は herdr-app が clone で写すので、main で広げた幅のまま。表示を替えるのはこの 1 回だけ。表示が main でない (ほかの layout を
   選んでいる) ときは作らずに · で知らせる。herdr-app の窓が開いていないと clone が落ちる (⚠。窓を開いて流し直す)
-- runner が herdr-app に打つのは `herdr-app do layout.clone` だけ (窓を止めない・立て直さない)。表示している layout は herdr-app の home の `shared.json`
+- runner が herdr-app に打つのは `herdr-app do layout.clone` だけ (窓を止めない・立て直さない。出力を受けて終わりまで待つ)。表示している layout は herdr-app の home の `shared.json`
   の `layout` で読む。同梱の `main.json` は直さない (herdr-app は起動のたびに同梱のファイルを書き戻し、直したものは `main-edited` に移す)
 - herdr-app を上げて main が変わったら、`dotfiles check` が pjp-main の行に変わった node を出す (⚠。例「同梱の main から作り直す。変わった node:
   sidebar・status」)。`dotfiles apply` が今の main に同じ差し替えをした形へ書き直す (clone し直さない。`cloned_from` と clicks は残る)。main が変えた
   欄は、herdr-app の決まり (ファイルを直した欄はファイルが clicks に勝つ) で新しい値になる
 - pjp-main.json を手で直すと、次の apply は書き直さずに ⚠ で知らせる。残すなら別の名前の layout に写して使い
-  (`herdr-app do layout.clone --name pjp-main --as <名前>`)、main から作り直すなら `dotfiles apply --steps herdr-app-pjp-spaces --force`。spaces を
+  (`herdr-app do layout.clone --name pjp-main --as <名前> | Out-String`)、main から作り直すなら `dotfiles apply --steps herdr-app-pjp-spaces --force`。spaces を
   pjp-spaces に替えると今の形になるもの (人が `layout.clone` で main を写し直した・中身は同じで保存し直した) は、⚠ にせずに引き取って書き直す
 - 書かなかった実行で、herdr-app が layout を読めなかった理由のファイル (`layouts\pjp-main.error`、pjp-main を表示しているときは home の `layout.error`)
-  があれば、pjp-main の行に ※ でその 1 行目を添える。`herdr-app status` でも見られる
+  があれば、pjp-main の行に ※ でその 1 行目を添える。`herdr-app status | Out-String` でも見られる
 - 同梱の main に spaces を指す block が無くなったら (herdr-app の形が変わった)、pjp-main は前のままにして ⚠ で知らせる。claude-skills の pjp-spaces と
   合わせて差し替え方を決め直す
 - 同梱の mod `spaces` が変わったとき (herdr-app を上げた) に pjp-spaces へ差を取り込むのは claude-skills (pjp-spaces の頭に、写した元の herdr-app の版が
@@ -675,14 +681,14 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
 - mod.json の `place` が `none` でない mod は置かない (⚠。herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。mod.json は先に置く。
   同梱の main が無い (herdr-app をまだ起こしていない) ときは mod も置かずに ⚠ (一度起こしてから apply)
 - 置き方の細部 (herdr-app が mod のフォルダに書く `gpui-kit.d.ts`・`jsconfig.json` は配らない・置き先の mod のフォルダがリンクなら触らない・元から
-  消えたファイルは記録どおりなら消す) は [herdr-app の mod](#herdr-app-の-mod) と同じ。置いた後は `herdr-app status` で errors が無いか、mod は
+  消えたファイルは記録どおりなら消す) は [herdr-app の mod](#herdr-app-の-mod) と同じ。置いた後は `herdr-app status | Out-String` で errors が無いか、mod は
   `herdr-app check <mod のフォルダ>` ([herdr-app の mod](#herdr-app-の-mod) の見方) で確かめる
 
 切り戻し (PowerShell):
 
 ```powershell
-# 1. 表示を同梱の main に戻す (ctrl-shift-l で巡ってもよい)。runner は自分から pjp-main へ替え直さない
-herdr-app do layout.switch --name main
+# 1. 表示を同梱の main に戻す (ctrl-shift-l で巡ってもよい)。runner は自分から pjp-main へ替え直さない。| Out-String で終わりまで待つ (上の「herdr-app の mod」)
+herdr-app do layout.switch --name main | Out-String
 # 2. 配ったファイルも外すなら (1 の後で)。runner は記録から「作った pjp-main が無い」と分かり、次の apply から mod も layout も置かない
 $h = Join-Path $HOME '.config\herdr-app'   # HERDR_APP_HOME を置いていれば、その値
 Remove-Item (Join-Path $h 'layouts\pjp-main.json')
@@ -692,7 +698,7 @@ dotfiles check --steps herdr-app-pjp-spaces             # · で「mod も layou
 
 - 1 だけなら pjp-main と mod は残り、apply は main が変わるたびに pjp-main を作り直す (表示は替えない)。`ctrl-shift-l` でいつでも pjp-main に戻れる
 - 2 の後は、`--force` を付けても置き直さない (ほかの手順の衝突を解く `dotfiles apply --force` で、表示を替えない)。戻すときは、人が
-  `herdr-app do layout.clone --name main --as pjp-main` で main を写し直し (表示が pjp-main に替わる)、`dotfiles apply --steps herdr-app-pjp-spaces` で
+  `herdr-app do layout.clone --name main --as pjp-main | Out-String` で main を写し直し (表示が pjp-main に替わる)、`dotfiles apply --steps herdr-app-pjp-spaces` で
   mod を置いて spaces を差し替える
 - 逃げ道のキー (`ctrl-alt-shift-escape`) は、表示中の layout (pjp-main) と `keys.json` を `*.reset-<時刻>` へ退けて main に戻す。runner は 2 と同じく
   外したものとして扱う。戻すときは上の写し直しか、`layouts\pjp-main.json.reset-<時刻>` の名前を `pjp-main.json` に戻す (中身が記録どおりなら揃う)。
