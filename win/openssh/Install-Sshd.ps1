@@ -170,7 +170,25 @@ function ConvertFrom-KeysCopy {
     }
 }
 
-# 表に出す鍵の名札: コメント (無ければ base64 の末尾 8 字) と鍵の種類。from= が無ければそう添える
+# 鍵の指紋 (ssh-keygen -l と同じ SHA256:<base64>)。base64 が読めなければ $null
+function Get-KeyFingerprint {
+    param([string]$Line)
+    if (-not ("$Line" -cmatch "(?:^|\s)(?:$script:KeyTypePattern)\s+([A-Za-z0-9+/]+={0,3})(?:\s|$)")) { return $null }
+    $b64 = $Matches[1]
+    try {
+        $blob = [Convert]::FromBase64String($b64)
+    } catch {
+        return $null
+    }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        'SHA256:' + ([Convert]::ToBase64String($sha.ComputeHash($blob))).TrimEnd('=')
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+# 表に出す鍵の名札: コメント (無ければ base64 の末尾 8 字) と鍵の種類と指紋。from= が無ければそう添える (足す鍵を UAC の前に見分ける)
 function Get-KeyLabel {
     param([string]$Line)
     if ("$Line" -cmatch "(?:^|\s)($script:KeyTypePattern)\s+([A-Za-z0-9+/]+={0,3})(?:\s+(.*))?$") {
@@ -178,8 +196,10 @@ function Get-KeyLabel {
         $b64 = $Matches[2]
         $comment = "$($Matches[3])".Trim()
         $name = if ($comment) { $comment } else { '…' + $b64.Substring([Math]::Max(0, $b64.Length - 8)) }
+        $fp = Get-KeyFingerprint -Line $Line
+        $fpText = if ($fp) { " $fp" } else { '' }
         $from = if ("$Line" -match '(^|[\s,])from="') { '' } else { '・from= 無し' }
-        return "$name ($type$from)"
+        return "$name ($type$fpText$from)"
     }
     '(読めない行)'
 }
@@ -228,49 +248,79 @@ function Get-TextSha256 {
     }
 }
 
-# Windows Firewall のアドレスの書き方を 1 つの形にそろえる (Get-NetFirewallAddressFilter は 100.64.0.0/10 を 100.64.0.0/255.192.0.0 と
-# 返す)。IP は [ipaddress] の文字列 (IPv6 は小文字の省略形)、範囲は両端を、サブネットは長さ (/10) にする。Any などの語は小文字
-function ConvertTo-CanonicalAddress {
+# Windows Firewall のアドレスの書き方 (1 つの IP・範囲 a-b・サブネット a/長さ・a/マスク) を、数の区間 (Family・Lo・Hi) にする。
+# Get-NetFirewallAddressFilter は 100.64.0.0/10 を 100.64.0.0/255.192.0.0 と返し、範囲をサブネットの形で返すこともあるので、書き方に
+# よらず数で比べる。IP として読めないもの (Any・LocalSubnet などの語) は $null
+function ConvertTo-AddressInterval {
     param([string]$Address)
     $a = "$Address".Trim()
-    $parse = {
-        param([string]$s)
+    $num = {
+        param([string]$text)
         $ip = $null
-        if ([System.Net.IPAddress]::TryParse($s, [ref]$ip)) { return $ip.ToString() }
-        $null
+        if (-not [System.Net.IPAddress]::TryParse($text, [ref]$ip)) { return $null }
+        $bytes = $ip.GetAddressBytes()
+        $le = [byte[]]::new($bytes.Length + 1)
+        for ($i = 0; $i -lt $bytes.Length; $i++) { $le[$i] = $bytes[$bytes.Length - 1 - $i] }
+        [pscustomobject]@{ Family = "$($ip.AddressFamily)"; Value = [System.Numerics.BigInteger]::new($le); Bits = $bytes.Length * 8 }
     }
     if ($a -match '^([^/-]+)-([^/-]+)$') {
-        $from = $Matches[1]
-        $to = $Matches[2]
-        $lo = & $parse $from
-        $hi = & $parse $to
-        if ($lo -and $hi) { return "$lo-$hi" }
-        return $a.ToLowerInvariant()
+        $loText = $Matches[1]
+        $hiText = $Matches[2]
+        $lo = & $num $loText
+        $hi = & $num $hiText
+        if (($null -eq $lo) -or ($null -eq $hi) -or ($lo.Family -ne $hi.Family) -or ($lo.Value -gt $hi.Value)) { return $null }
+        return [pscustomobject]@{ Family = $lo.Family; Lo = $lo.Value; Hi = $hi.Value }
     }
     if ($a -match '^([^/]+)/(.+)$') {
         $netText = $Matches[1]
         $lenText = $Matches[2]
-        $net = & $parse $netText
-        if ($net) {
-            if ($lenText -match '^\d+$') { return "$net/$([int]$lenText)" }
-            $mask = $null
-            if ([System.Net.IPAddress]::TryParse($lenText, [ref]$mask) -and ("$($mask.AddressFamily)" -eq 'InterNetwork')) {
-                $bits = 0
-                foreach ($b in $mask.GetAddressBytes()) { $bits += ([Convert]::ToString([int]$b, 2) -replace '0', '').Length }
-                return "$net/$bits"
+        $net = & $num $netText
+        if ($null -eq $net) { return $null }
+        $len = $null
+        if ($lenText -match '^\d+$') {
+            $len = [int]$lenText
+        } else {
+            $mask = & $num $lenText
+            if (($null -eq $mask) -or ($mask.Family -ne 'InterNetwork') -or ($net.Family -ne 'InterNetwork')) { return $null }
+            $len = 0
+            $bits = $mask.Value
+            for ($i = 31; $i -ge 0; $i--) {
+                if (($bits / [System.Numerics.BigInteger]::Pow(2, $i)) % 2 -eq 1) { $len++ } else { break }
             }
         }
-        return $a.ToLowerInvariant()
+        if (($len -lt 0) -or ($len -gt $net.Bits)) { return $null }
+        $size = [System.Numerics.BigInteger]::Pow(2, $net.Bits - $len)
+        $lo = $net.Value - ($net.Value % $size)
+        return [pscustomobject]@{ Family = $net.Family; Lo = $lo; Hi = $lo + $size - 1 }
     }
-    $single = & $parse $a
-    if ($single) { return $single }
-    $a.ToLowerInvariant()
+    $one = & $num $a
+    if ($null -eq $one) { return $null }
+    [pscustomobject]@{ Family = $one.Family; Lo = $one.Value; Hi = $one.Value }
 }
 
-# アドレスの並びを、そろえた形の重ならない並び (辞書順) にする
+# アドレスの並びを、比べられる 1 つの形にする: IP は family ごとに区間を並べて重なり・隣り合いをつなぎ、語 (Any など) は小文字にする
 function ConvertTo-CanonicalAddressList {
     param([string[]]$Addresses)
-    @(@($Addresses | Where-Object { "$_" } | ForEach-Object { ConvertTo-CanonicalAddress -Address $_ }) | Sort-Object -Unique)
+    $words = [System.Collections.Generic.List[string]]::new()
+    $intervals = [System.Collections.Generic.List[object]]::new()
+    foreach ($a in @($Addresses | Where-Object { "$_" })) {
+        $iv = ConvertTo-AddressInterval -Address $a
+        if ($null -eq $iv) { $words.Add("$a".Trim().ToLowerInvariant()) } else { $intervals.Add($iv) }
+    }
+    $out = [System.Collections.Generic.List[string]]::new()
+    foreach ($family in @('InterNetwork', 'InterNetworkV6')) {
+        $cur = $null
+        foreach ($iv in @($intervals | Where-Object { $_.Family -eq $family } | Sort-Object { $_.Lo.ToString().PadLeft(40, '0') })) {
+            if (($null -ne $cur) -and ($iv.Lo -le ($cur.Hi + 1))) {
+                if ($iv.Hi -gt $cur.Hi) { $cur.Hi = $iv.Hi }
+            } else {
+                if ($null -ne $cur) { $out.Add("$($family):$($cur.Lo)-$($cur.Hi)") }
+                $cur = [pscustomobject]@{ Lo = $iv.Lo; Hi = $iv.Hi }
+            }
+        }
+        if ($null -ne $cur) { $out.Add("$($family):$($cur.Lo)-$($cur.Hi)") }
+    }
+    @(@($words | Sort-Object -Unique) + @($out))
 }
 
 # 置く拒否の規則。どれも受信 (Inbound)・拒否 (Block)・すべてのプロファイル (Any) で、グループは $script:RuleGroup
@@ -307,8 +357,9 @@ function Get-SshdFirewallSpecs {
     )
 }
 
-# 読んだ規則 ($Rule。Enabled・Direction・Action・Profile・Protocol・LocalPort・LocalAddress・RemoteAddress を文字列で持つ) が、
-# spec の拒否の規則と同じか。規則が無ければ偽
+# 読んだ規則 ($Rule。Enabled・Direction・Action・Profile・Protocol・LocalPort・LocalAddress・RemoteAddress と、絞りの条件 Program・
+# Service・InterfaceAlias・InterfaceType を文字列で持つ) が、spec の拒否の規則と同じか。規則が無ければ偽。絞りの条件が Any でなければ
+# (画面で program などを足された)、sshd に効かないことがあるので同じとみない
 function Test-FirewallRuleMatch {
     param($Spec, $Rule)
     if ($null -eq $Rule) { return $false }
@@ -321,7 +372,18 @@ function Test-FirewallRuleMatch {
     ("$($Rule.Protocol)" -eq $Spec.Protocol) -and
     ((& $ports $Rule.LocalPort) -eq (& $ports $Spec.LocalPort)) -and
     ((& $addrs $Rule.LocalAddress) -eq (& $addrs $Spec.LocalAddress)) -and
-    ((& $addrs $Rule.RemoteAddress) -eq (& $addrs $Spec.RemoteAddress))
+    ((& $addrs $Rule.RemoteAddress) -eq (& $addrs $Spec.RemoteAddress)) -and
+    ((& $ports $Rule.Program) -eq 'any') -and
+    ((& $ports $Rule.Service) -eq 'any') -and
+    ((& $ports $Rule.InterfaceAlias) -eq 'any') -and
+    ((& $ports $Rule.InterfaceType) -eq 'any')
+}
+
+# Windows Firewall のプロファイル ($Profiles。Name・Enabled・AllowLocal) のうち、拒否の規則が効かないもの (無効か、グループ ポリシーが
+# ローカルの規則を止めている) の名前
+function Get-IneffectiveFirewallProfiles {
+    param($Profiles)
+    @($Profiles | Where-Object { ("$($_.Enabled)" -ne 'True') -or ("$($_.AllowLocal)" -eq 'False') } | ForEach-Object { "$($_.Name)" })
 }
 
 # 鍵のファイルの権限が、管理者と SYSTEM だけか (Win32-OpenSSH が administrators_authorized_keys に求める形)。$Acl は Protected
@@ -371,7 +433,8 @@ function Get-MsiexecResultText {
 
 # 読んだ事実 ($Facts。Get-SshdFacts) から、項目ごとの判定と表の行を作る。Blocked は揃える前に人が直すこと
 # (no-openssh: OpenSSH が無い / inbox: Windows の機能の OpenSSH Server がある / bad-user: AllowUsers に書けない名前 /
-# bad-keys: 鍵の写しに読めない行がある)。Items は Key・Ok・Text の並び、Notes は ※ の行
+# bad-keys: 鍵の写しに読めない行がある / firewall-off: 拒否の規則が効かないプロファイルがある / no-service: sshd.exe はあるが
+# サービスが無い)。Items は Key・Ok・Text の並び、Notes は ※ の行
 function Get-SshdVerdict {
     param($Facts)
     $items = [System.Collections.Generic.List[object]]::new()
@@ -387,6 +450,10 @@ function Get-SshdVerdict {
         $blocked = 'bad-user'
     } elseif (@($Facts.Copy.Bad).Count -gt 0) {
         $blocked = 'bad-keys'
+    } elseif ($Facts.FirewallReadable -and (@(Get-IneffectiveFirewallProfiles -Profiles $Facts.FirewallProfiles).Count -gt 0)) {
+        $blocked = 'firewall-off'
+    } elseif ($Facts.Server -and (-not $Facts.Service.Exists)) {
+        $blocked = 'no-service'
     }
 
     # 1. server
@@ -394,6 +461,8 @@ function Get-SshdVerdict {
         & $add 'server' $false "server          : OpenSSH が入っていない ($($Facts.InstallDir)\ssh.exe が無い)。sshd はその MSI に足す"
     } elseif ($Facts.Inbox) {
         & $add 'server' $false 'server          : Windows の機能の OpenSSH Server (System32\OpenSSH) が入っている。二重にしない'
+    } elseif ($Facts.Server -and (-not $Facts.Service.Exists)) {
+        & $add 'server' $false "server          : $($Facts.InstallDir)\sshd.exe はあるが、サービス sshd が無い (MSI の入り方が崩れている)"
     } elseif ($Facts.Server) {
         & $add 'server' $true "server          : 入っている ($($Facts.InstallDir)\sshd.exe)"
     } else {
@@ -415,6 +484,8 @@ function Get-SshdVerdict {
     $config = $Facts.Config
     if (-not $config.Exists) {
         & $add 'config' $false 'sshd_config     : 無い → dotfiles の中身を書く'
+    } elseif ($config.Readable -and $config.HasBom) {
+        & $add 'config' $false 'sshd_config     : 先頭に BOM が付いている (sshd は読めずに起きない) → 退避して書き直す'
     } elseif ($config.Readable) {
         if ((ConvertTo-Lf $config.Text) -ceq $configText) {
             & $add 'config' $true 'sshd_config     : dotfiles の中身と同じ'
@@ -437,10 +508,15 @@ function Get-SshdVerdict {
             & $add 'keys' $false "鍵              : ファイルが無い → 写しの $($wantLines.Count) 本を書く"
         } elseif ($keys.Readable) {
             $diff = Compare-KeyLines -Want $wantLines -Have @(Get-KeyLines -Lines ((ConvertTo-Lf $keys.Text) -split "`n"))
-            if ($diff.Same) {
+            if ($diff.Same -and (-not $keys.HasBom)) {
                 & $add 'keys' $true "鍵              : $($wantLines.Count) 本 (写しと同じ)"
+            } elseif ($diff.Same) {
+                & $add 'keys' $false '鍵              : 先頭に BOM が付いている → 写しどおりに書き直す'
             } else {
                 & $add 'keys' $false "鍵              : 写しと違う (足す $(@($diff.Added).Count) 本・消す $(@($diff.Removed).Count) 本) → 写しどおりに書く"
+                # UAC の確認の前に、足す鍵と消す鍵を見分けられるようにする (写しは利用者の権限で書けるので、覚えのない鍵が無いかを見る)
+                foreach ($line in @($diff.Added)) { $notes.Add("※ 鍵を足す: $(Get-KeyLabel -Line $line)") }
+                foreach ($line in @($diff.Removed)) { $notes.Add("※ 鍵を消す: $(Get-KeyLabel -Line $line)") }
             }
         } elseif ("$($Facts.Record.KeysSha)" -eq (Get-TextSha256 $keysText)) {
             & $add 'keys' $true "鍵              : $($wantLines.Count) 本 (読めないので、揃えたときの記録と比べた。写しと同じ)"
@@ -490,13 +566,18 @@ function Get-SshdVerdict {
         }
     }
 
-    # 7. 22 番を許す受信の規則
+    # 7. 22 番を許す受信の規則 (22 番だけの規則と sshd.exe の規則は無効にする。22 番とほかのポートを並べた規則は、ほかのポートまで
+    #    閉じないよう残す。22 番は拒否の規則が止める)
     if ($Facts.FirewallReadable) {
-        $allow = @($Facts.AllowRules)
+        $allow = @($Facts.AllowRules | Where-Object { $_.Disable })
+        $mixed = @($Facts.AllowRules | Where-Object { -not $_.Disable })
         if ($allow.Count -eq 0) {
             & $add 'allow' $true '22 番の受信の許可: 有効なものは無い'
         } else {
             & $add 'allow' $false "22 番の受信の許可: 有効 ($(@($allow | ForEach-Object { $_.DisplayName }) -join '・')) → 無効にする"
+        }
+        if ($mixed.Count -gt 0) {
+            $notes.Add("※ 22 番とほかのポートを許す受信の規則 ($(@($mixed | ForEach-Object { $_.DisplayName }) -join '・')) は無効にしない (ほかのポートまで閉じないため。22 番は拒否の規則が止める)")
         }
     }
 
@@ -504,7 +585,13 @@ function Get-SshdVerdict {
         $notes.Add('※ Windows の機能の OpenSSH Server を外すには、管理者の PowerShell で Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 を打つ (その後 Install-Sshd を打ち直す)')
     }
     if ($blocked -eq 'bad-user') {
-        $notes.Add("※ AllowUsers に書けないユーザー名: $($Facts.User) (英小文字・数字・. _ - の名前だけ書ける。-AllowUser で渡す)")
+        $notes.Add("※ AllowUsers に書けないユーザー名: $($Facts.User) (dotfiles は英小文字・数字・. _ - の名前だけを書く。sshd はログインした本当の名前と比べるので、別の名前は渡せない)")
+    }
+    if ($blocked -eq 'firewall-off') {
+        $notes.Add("※ 拒否の規則が効かない Windows Firewall のプロファイル: $(@(Get-IneffectiveFirewallProfiles -Profiles $Facts.FirewallProfiles) -join '・') (無効か、グループ ポリシーがローカルの規則を止めている)。有効にするには、管理者の PowerShell で Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True を打つ")
+    }
+    if ($blocked -eq 'no-service') {
+        $notes.Add('※ サービスを作り直すには、win/README.md の「sshd を止める・外す」の手順で Server の機能を外してから、Install-Sshd を打ち直す')
     }
     foreach ($line in @($Facts.Copy.Bad)) {
         $notes.Add("※ 鍵の写しの読めない行: $(if ("$line".Length -gt 40) { "$line".Substring(0, 40) + '…' } else { $line })")
@@ -555,7 +642,13 @@ function Get-SshdCheckMessage {
         return '⚠️ Windows の機能の OpenSSH Server が入っている → 先に外す (二重にしない。上の ※ の行) ⚠️'
     }
     if ($Verdict.Blocked -eq 'bad-user') {
-        return '⚠️ AllowUsers に書けないユーザー名 → -AllowUser で英小文字・数字・. _ - の名前を渡す ⚠️'
+        return '⚠️ AllowUsers に書けないユーザー名 → このユーザーでは dotfiles の sshd を使えない (上の ※ の行) ⚠️'
+    }
+    if ($Verdict.Blocked -eq 'firewall-off') {
+        return '⚠️ Windows Firewall が効いていないプロファイルがある → 先に有効にする (拒否の規則が効かない。上の ※ の行) ⚠️'
+    }
+    if ($Verdict.Blocked -eq 'no-service') {
+        return '⚠️ sshd.exe はあるがサービス sshd が無い → Server の機能を外してから入れ直す (上の ※ の行) ⚠️'
     }
     if ($Verdict.Blocked -eq 'bad-keys') {
         return '⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️'
@@ -583,11 +676,18 @@ function Test-IsAdmin {
     ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# ファイルを読む。Exists は在るか (読めないときは在るとみる)、Readable は読めたか
+# SSH の会話の中で動いているか (sshd が SSH_CONNECTION・SSH_CLIENT を渡す)
+function Test-InSshSession {
+    [bool]($env:SSH_CONNECTION -or $env:SSH_CLIENT)
+}
+
+# ファイルを読む。Exists は在るか (読めないときは在るとみる)、Readable は読めたか、HasBom は先頭に UTF-8 の BOM があるか
+# (ReadAllText は BOM を落とすので、byte で見る。sshd は BOM を設定の文字として読み、起きなくなる)
 function Read-TextFile {
     param([string]$Path)
     $exists = $false
     $readable = $false
+    $hasBom = $false
     $text = $null
     try {
         $null = Get-Item -LiteralPath $Path -ErrorAction Stop
@@ -600,19 +700,35 @@ function Read-TextFile {
     }
     if ($exists) {
         try {
-            $text = [IO.File]::ReadAllText($Path)
+            $bytes = [IO.File]::ReadAllBytes($Path)
+            $hasBom = ($bytes.Length -ge 3) -and ($bytes[0] -eq 0xEF) -and ($bytes[1] -eq 0xBB) -and ($bytes[2] -eq 0xBF)
+            $text = [Text.UTF8Encoding]::new($false).GetString($bytes)
+            if ($hasBom) { $text = $text.Substring(1) }
             $readable = $true
         } catch {
             $readable = $false
         }
     }
-    [pscustomobject]@{ Exists = $exists; Readable = $readable; Text = $text }
+    [pscustomobject]@{ Exists = $exists; Readable = $readable; HasBom = $hasBom; Text = $text }
 }
 
 # BOM の無い UTF-8 で書く (sshd は先頭の BOM を設定の文字として読む。Set-Content -Encoding UTF8 は 5.1 で BOM を付ける)
 function Write-TextNoBom {
     param([string]$Path, [string]$Text)
     [IO.File]::WriteAllText($Path, $Text, [Text.UTF8Encoding]::new($false))
+}
+
+# 一時ファイルに書いてから差し替える。在れば元を $Backup に退避して入れ替え ([IO.File]::Replace)、無ければ名前を替えて置く。途中で
+# 落ちても、元のファイルが消えたままにならない (sshd_config が無いと、sshd は次に起きるときに既定 (パスワードでも入れる) を写す)
+function Write-TextReplacing {
+    param([string]$Path, [string]$Text, [string]$Backup)
+    $tmp = "$Path.dotfiles-tmp"
+    Write-TextNoBom -Path $tmp -Text $Text
+    if (Test-Path -LiteralPath $Path) {
+        [IO.File]::Replace($tmp, $Path, $Backup)
+    } else {
+        [IO.File]::Move($tmp, $Path)
+    }
 }
 
 # 鍵の写しを読む。無ければ Managed が偽 (dotfiles は鍵を置かない)
@@ -664,13 +780,22 @@ function Set-AdminOnlyAcl {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
-# 拒否の規則を 1 つ読む (無ければ $null)
+# 拒否の規則を 1 つ読む (無ければ $null)。無い (ObjectNotFound) 以外の失敗は例外にする (読めないのを「無い」と読まない)
 function Read-FirewallRuleFacts {
     param([string]$Name)
-    $rule = Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue | Select-Object -First 1
-    if (-not $rule) { return $null }
-    $port = $rule | Get-NetFirewallPortFilter
-    $addr = $rule | Get-NetFirewallAddressFilter
+    $err = $null
+    $rule = Get-NetFirewallRule -Name $Name -ErrorAction SilentlyContinue -ErrorVariable err | Select-Object -First 1
+    if (-not $rule) {
+        $other = @($err | Where-Object { "$($_.CategoryInfo.Category)" -ne 'ObjectNotFound' })
+        if ($other.Count -gt 0) { throw $other[0] }
+        return $null
+    }
+    $port = $rule | Get-NetFirewallPortFilter -ErrorAction Stop
+    $addr = $rule | Get-NetFirewallAddressFilter -ErrorAction Stop
+    $app = $rule | Get-NetFirewallApplicationFilter -ErrorAction Stop
+    $svc = $rule | Get-NetFirewallServiceFilter -ErrorAction Stop
+    $ifa = $rule | Get-NetFirewallInterfaceFilter -ErrorAction Stop
+    $ift = $rule | Get-NetFirewallInterfaceTypeFilter -ErrorAction Stop
     [pscustomobject]@{
         Name          = $rule.Name
         DisplayName   = $rule.DisplayName
@@ -680,26 +805,37 @@ function Read-FirewallRuleFacts {
         Profile       = "$($rule.Profile)"
         Protocol      = "$($port.Protocol)"
         LocalPort     = @(@($port.LocalPort) | ForEach-Object { "$_" })
-        LocalAddress  = @(@($addr.LocalAddress) | ForEach-Object { "$_" })
-        RemoteAddress = @(@($addr.RemoteAddress) | ForEach-Object { "$_" })
+        LocalAddress   = @(@($addr.LocalAddress) | ForEach-Object { "$_" })
+        RemoteAddress  = @(@($addr.RemoteAddress) | ForEach-Object { "$_" })
+        Program        = "$($app.Program)"
+        Service        = "$($svc.Service)"
+        InterfaceAlias = @(@($ifa.InterfaceAlias) | ForEach-Object { "$_" })
+        InterfaceType  = "$($ift.InterfaceType)"
     }
 }
 
 # 22 番を許す、有効な受信の規則 (MSI が作るもの・Windows の機能が作るもの・手で作ったもの)。TCP の 22 番を名指しする規則と、
-# sshd.exe を名指しする規則。Tailscale-In のように全ポートを許す規則は数えない (拒否の規則がそれより強い)
+# sshd.exe を名指しする規則。Disable は無効にするもの (sshd.exe の規則と、ポートが 22 番だけの規則。22 番とほかのポートを並べた規則は
+# ほかのポートまで閉じないよう残す)。Tailscale-In のように全ポートを許す規則は数えない (拒否の規則がそれより強い)。
+# 一覧を読めなければ例外にする (読めないのを「無い」と読まない)
 function Get-SshdAllowRules {
     $found = @{}
-    foreach ($f in @(Get-NetFirewallPortFilter -All -ErrorAction SilentlyContinue |
+    foreach ($f in @(Get-NetFirewallPortFilter -All -ErrorAction Stop |
                 Where-Object { ("$($_.Protocol)" -eq 'TCP') -and (@(@($_.LocalPort) | ForEach-Object { "$_" }) -contains '22') })) {
-        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction SilentlyContinue)) { $found[$r.Name] = $r }
+        $only22 = (@(@($f.LocalPort) | ForEach-Object { "$_" }) -join ',') -eq '22'
+        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction Stop)) {
+            $found[$r.Name] = [pscustomobject]@{ Rule = $r; Disable = ($only22 -or ($found.ContainsKey($r.Name) -and $found[$r.Name].Disable)) }
+        }
     }
-    foreach ($f in @(Get-NetFirewallApplicationFilter -All -ErrorAction SilentlyContinue |
+    foreach ($f in @(Get-NetFirewallApplicationFilter -All -ErrorAction Stop |
                 Where-Object { "$($_.Program)" -like '*\OpenSSH\sshd.exe' })) {
-        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction SilentlyContinue)) { $found[$r.Name] = $r }
+        foreach ($r in @($f | Get-NetFirewallRule -ErrorAction Stop)) { $found[$r.Name] = [pscustomobject]@{ Rule = $r; Disable = $true } }
     }
     @($found.Values | Where-Object {
-            ("$($_.Enabled)" -eq 'True') -and ("$($_.Direction)" -eq 'Inbound') -and ("$($_.Action)" -eq 'Allow')
-        } | Sort-Object Name | ForEach-Object { [pscustomobject]@{ Name = $_.Name; DisplayName = $_.DisplayName } })
+            ("$($_.Rule.Enabled)" -eq 'True') -and ("$($_.Rule.Direction)" -eq 'Inbound') -and ("$($_.Rule.Action)" -eq 'Allow')
+        } | Sort-Object { $_.Rule.Name } | ForEach-Object {
+            [pscustomobject]@{ Name = $_.Rule.Name; DisplayName = $_.Rule.DisplayName; Disable = [bool]$_.Disable }
+        })
 }
 
 # 揃えたときの記録 (書いた中身の sha256)。無ければ両方 $null
@@ -743,8 +879,13 @@ function Get-SshdFacts {
     if ($keys.Exists) { $acl = Read-AclFacts -Path $keysPath }
     $rules = @{}
     $allowRules = @()
+    $profiles = @()
     $firewallReadable = $true
     try {
+        # 効いている値 (グループ ポリシーを含む) で、プロファイルが有効か・ローカルの規則を使うかを見る
+        $profiles = @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop | ForEach-Object {
+                [pscustomobject]@{ Name = "$($_.Name)"; Enabled = "$($_.Enabled)"; AllowLocal = "$($_.AllowLocalFirewallRules)" }
+            })
         foreach ($spec in @(Get-SshdFirewallSpecs)) { $rules[$spec.Name] = Read-FirewallRuleFacts -Name $spec.Name }
         $allowRules = @(Get-SshdAllowRules)
     } catch {
@@ -765,6 +906,7 @@ function Get-SshdFacts {
         Record           = Read-SshdRecord -Dir $StateDir
         Copy             = Read-KeysCopy -Path $CopyPath
         FirewallReadable = $firewallReadable
+        FirewallProfiles = $profiles
         Rules            = $rules
         AllowRules       = $allowRules
         Tailscale        = Test-Path -LiteralPath (Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')
@@ -801,6 +943,16 @@ function New-SshProgramDataDir {
     Write-Step "$Path を作った (sshd が作るときと同じ権限)"
 }
 
+# 管理者と SYSTEM だけが書けるディレクトリを、空で作り直す (取り直した MSI を、msiexec の前に利用者の権限で差し替えられないように)
+function New-AdminOnlyDir {
+    param([string]$Path)
+    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
+    $null = New-Item -ItemType Directory -Force -Path $Path
+    $acl = Get-Acl -LiteralPath $Path
+    $acl.SetSecurityDescriptorSddlForm($script:AdminDirSddl)
+    Set-Acl -LiteralPath $Path -AclObject $acl
+}
+
 # Install-OpenSSH が入れた MSI に Server の機能を足す。入っている版と同じ版の MSI を winget download で取り直し、msiexec で
 # ADDLOCAL=Client,Server を流す (保守の install)。MSI は sshd のサービスを自動で作って起こし、22 番の受信の許可を作る。成功なら $true
 function Invoke-MsiAddServer {
@@ -815,9 +967,9 @@ function Invoke-MsiAddServer {
         Write-Step 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
         return $false
     }
-    $dir = Join-Path $StateDir 'msi'
-    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
-    $null = New-Item -ItemType Directory -Force -Path $dir
+    # 落とす先は、管理者と SYSTEM だけが書ける場所 (利用者の %LOCALAPPDATA% だと、winget が sha256 を照らした後に差し替えられうる)
+    $dir = Join-Path $env:ProgramData 'dotfiles\sshd-msi'
+    New-AdminOnlyDir -Path $dir
     $arguments = Get-WingetDownloadArgs -PackageId $script:PackageId -Version $version -Directory $dir
     Write-Step "winget $($arguments -join ' ')"
     $download = Invoke-Winget -Arguments $arguments
@@ -860,6 +1012,14 @@ function Invoke-SshdFix {
         Write-Step "鍵の写し ($CopyPath) に読めない行がある。何もしない"
         return $false
     }
+    # 拒否の規則が効かないプロファイルがあれば、何もしない (sshd を LAN に開けない)
+    $ineffective = @(Get-IneffectiveFirewallProfiles -Profiles @(Get-NetFirewallProfile -PolicyStore ActiveStore -ErrorAction Stop | ForEach-Object {
+                [pscustomobject]@{ Name = "$($_.Name)"; Enabled = "$($_.Enabled)"; AllowLocal = "$($_.AllowLocalFirewallRules)" }
+            }))
+    if ($ineffective.Count -gt 0) {
+        Write-Step "拒否の規則が効かない Windows Firewall のプロファイルがある ($($ineffective -join '・'))。何もしない"
+        return $false
+    }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $configText = Get-SshdConfigText -AllowUser $User
     $keysText = if ($copy.Managed) { Get-AdminKeysText -KeyLines @($copy.Lines) } else { Get-AdminKeysText -KeyLines @() -Managed $false }
@@ -884,12 +1044,10 @@ function Invoke-SshdFix {
     New-SshProgramDataDir -Path $sshDir
     $configChanged = $false
     $current = Read-TextFile -Path $configPath
-    if (-not ($current.Readable -and ((ConvertTo-Lf $current.Text) -ceq $configText))) {
-        if ($current.Exists) {
-            Move-Item -LiteralPath $configPath -Destination "$configPath.dotfiles-bak-$stamp"
-            Write-Step "sshd_config を退避した: sshd_config.dotfiles-bak-$stamp"
-        }
-        Write-TextNoBom -Path $configPath -Text $configText
+    if (-not ($current.Readable -and (-not $current.HasBom) -and ((ConvertTo-Lf $current.Text) -ceq $configText))) {
+        # 一時ファイルから差し替える (書けずに消えると、sshd は次に起きるときに既定を写す)
+        Write-TextReplacing -Path $configPath -Text $configText -Backup "$configPath.dotfiles-bak-$stamp"
+        if ($current.Exists) { Write-Step "sshd_config を退避した: sshd_config.dotfiles-bak-$stamp" }
         Write-Step 'sshd_config を dotfiles の中身にした'
         $configChanged = $true
     }
@@ -902,7 +1060,7 @@ function Invoke-SshdFix {
             $writeKeys = $true
         } else {
             $have = @(Get-KeyLines -Lines ((ConvertTo-Lf $keys.Text) -split "`n"))
-            $writeKeys = -not (Compare-KeyLines -Want @($copy.Lines) -Have $have).Same
+            $writeKeys = $keys.HasBom -or (-not (Compare-KeyLines -Want @($copy.Lines) -Have $have).Same)
         }
     } elseif (-not $keys.Exists) {
         $writeKeys = $true
@@ -914,8 +1072,12 @@ function Invoke-SshdFix {
             Write-Step "administrators_authorized_keys を退避した: administrators_authorized_keys.dotfiles-bak-$stamp"
         }
         Write-TextNoBom -Path $keysPath -Text $keysText
-        if ($copy.Managed) { Write-Step "administrators_authorized_keys に鍵の写しの $(@($copy.Lines).Count) 本を書いた" }
-        else { Write-Step 'administrators_authorized_keys を空で作った (鍵は手で置く)' }
+        if ($copy.Managed) {
+            Write-Step "administrators_authorized_keys に鍵の写しの $(@($copy.Lines).Count) 本を書いた"
+            foreach ($line in @($copy.Lines)) { Write-Step "  鍵: $(Get-KeyLabel -Line $line)" }
+        } else {
+            Write-Step 'administrators_authorized_keys を空で作った (鍵は手で置く)'
+        }
     }
     if (-not (Test-AdminOnlyAcl -Acl (Read-AclFacts -Path $keysPath).Value)) {
         Set-AdminOnlyAcl -Path $keysPath
@@ -939,7 +1101,7 @@ function Invoke-SshdFix {
 
     # 6. 22 番を許す受信の規則を無効にする (MSI が作る OpenSSH SSH Server Preview (sshd) は、Private のネットワークの全部から
     #    22 番を許し、修復や上げ直しのたびに有効へ戻る。外からの 22 番は拒否の規則が止めるが、許可も残さない)
-    foreach ($r in @(Get-SshdAllowRules)) {
+    foreach ($r in @(Get-SshdAllowRules | Where-Object { $_.Disable })) {
         Disable-NetFirewallRule -Name $r.Name
         Write-Step "22 番の受信の許可を無効にした: $($r.DisplayName)"
     }
@@ -966,7 +1128,10 @@ function Invoke-SshdFix {
     try {
         $svc = Get-Service -Name sshd
         if ("$($svc.Status)" -eq 'Running') {
-            if ($configChanged) {
+            if ($configChanged -and (Test-InSshSession)) {
+                # 起こし直すとこの会話ごと切れ、止めてから起こす間に落ちると、sshd が止まったままになる (外から入れなくなる)
+                Write-Step 'SSH の会話の中なので sshd を起こし直さない。書き直した sshd_config を効かせるには、PC で Restart-Service sshd を打つ (管理者の PowerShell)'
+            } elseif ($configChanged) {
                 Restart-Service -Name sshd -Force
                 Write-Step 'sshd を起こし直した (sshd_config を書き直したので)'
             }
@@ -1073,6 +1238,14 @@ if ($MyInvocation.InvocationName -ne '.') {
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace
+        # 管理者で起動し直した子の窓はすぐ閉じるので、親が出せるようにログにも書く
+        if ($LogPath) {
+            try {
+                Add-Content -LiteralPath $LogPath -Value @("エラーで止まった: $($_.Exception.Message)", "$($_.ScriptStackTrace)") -Encoding utf8
+            } catch {
+                Write-Host "ログにも書けなかった: $($_.Exception.Message)"
+            }
+        }
         exit 2
     }
 }
