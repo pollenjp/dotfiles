@@ -25,6 +25,9 @@
 #   - 見送っていない新しい版があれば、名前ごとに「<題>: <固定した版> → <新しい版>」(4 つ以上は頭と末尾と個数) を出し、
 #     警告のまとめに頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を書いた見出しと続きの行で残す。
 #     出た日は引かない (--dates を付けない)。herdr-app と herdr-core は 1 回の呼び出しで読む
+#   - herdr-app に見送っていない新しい版があれば、警告の続きの行の末尾 (警告のまとめが長い警告の間を省いても残る所) に、keys.json の
+#     注意 (更新ノートで既定のキーが増えたかを見て win/herdr-app/keys.json に足す) を 2 行で添える。herdr-core だけ・herdr-app は見送った
+#     版だけ・tools.windowsHerdr が false (herdr-app を確かめない) なら添えない
 #   - 新しい版が無い・見送った版だけなら「無い」の 1 行で、まとめには残さない
 #   - 確かめられない名前 (口が 2 で終わる・JSON でない) はわけを添えて 1 行出し、まとめにも残す。ほかの名前は知らせる。
 #     どれも exit 0
@@ -236,6 +239,9 @@ state_off='{"claudeCode":false,"enable":false,"ntn":false,"typeClipboard":false,
 state_no_extra='{"claudeCode":false,"enable":true,"ntn":false,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/u"}'
 state_absent='{"enable":true,"typeClipboard":false,"version":1,"windowsHome":"/mnt/c/Users/u"}'
 heading='Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める'
+# herdr-app に新しい版があるときに、警告の末尾に添える keys.json の注意 (2 行。warn が続きの行の頭に 3 つの空白を足す前の形)
+keys_note1='※ herdr-app を上げるなら、新しい既定のキーも足す (dotfiles がキーを書き足した keys.json には、herdr-app を上げても新しい既定のキーが足されない)'
+keys_note2="  → 上げる版までの更新ノート (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) で keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、Windows で効くキーを win/herdr-app/keys.json に足す (dotfiles のキーと重なる既定のキーは、その既定の値を keys.defaults.json に書く。win/README.md の「固定した版を上げる」)"
 
 echo "== bootstrap-windows-pin-updates.sh: ${script}"
 
@@ -279,6 +285,38 @@ if [[ $(rc "${d}") == 0 ]] && seen "${d}" -F "${heading}" \
   ok "新しい版があれば名前ごとに 1 行出し、まとめに頼み方の見出しで残す (出た日は引かず、herdr-app と herdr-core は 1 回で読む)"
 else
   ng "新しい版がある" "rc=$(rc "${d}") calls=$(cat "${d}/calls") warnings=$(cat "${d}/warnings" 2>/dev/null) $(outerr "${d}")"
+fi
+
+# 3b. herdr-app に見送っていない新しい版があれば、警告の続きの行の末尾に keys.json の注意を 2 行で添える (ほかの名前の行より後ろ。
+#     警告のまとめは続きの行が長いと頭と末尾だけを残すので、末尾に置けば省かれない)。herdr-core だけ・herdr-app は見送った版だけ・
+#     tools.windowsHerdr が false (herdr-app を確かめない) なら添えない
+d=$(new_case t3b "${state_on}")
+pin_json openssh 'Windows の openssh' 1.0.0 '1.0.1|||' >"${d}/json/openssh.json"
+pin_json herdr-app 'Windows の herdr-app' 0.1.15 '0.1.16|||' >"${d}/json/herdr-app.json"
+pin_json herdr-core herdr-core 0.1.21 '0.1.22|||' >"${d}/json/herdr-core.json"
+run "${d}" 0
+d2=$(new_case t3c "${state_on}")
+pin_json herdr-app 'Windows の herdr-app' 0.1.15 '0.1.16|設定が読めなかった||' >"${d2}/json/herdr-app.json"
+pin_json herdr-core herdr-core 0.1.21 '0.1.22|||' >"${d2}/json/herdr-core.json"
+run "${d2}" 0
+d3=$(new_case t3d "${state_on}")
+printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}' \
+  >"${d3}/home/.local/state/dotfiles/group.json"
+pin_json openssh 'Windows の openssh' 1.0.0 '1.0.1|||' >"${d3}/json/openssh.json"
+pin_json herdr-app 'Windows の herdr-app' 0.1.15 '0.1.16|||' >"${d3}/json/herdr-app.json"
+run "${d3}" 0
+if [[ $(rc "${d}") == 0 ]] && seen "${d}" -xF '   Windows の herdr-app: 0.1.15 → 0.1.16' \
+  && seen "${d}" -xF "   ${keys_note1}" && seen "${d}" -xF "   ${keys_note2}" \
+  && [[ $(head -n 1 "${d}/warnings") == "${heading}" ]] \
+  && [[ $(tail -n 3 "${d}/warnings") == "   herdr-core: 0.1.21 → 0.1.22"$'\n'"   ${keys_note1}"$'\n'"   ${keys_note2}" ]] \
+  && [[ $(rc "${d2}") == 0 ]] && grep -qxF '   herdr-core: 0.1.21 → 0.1.22' "${d2}/warnings" \
+  && ! seen "${d2}" -F 'keys.json' && ! grep -qF 'keys.json' "${d2}/warnings" \
+  && [[ $(rc "${d3}") == 0 ]] && grep -qxF '   Windows の openssh: 1.0.0 → 1.0.1' "${d3}/warnings" \
+  && ! seen "${d3}" -F 'herdr-app' && ! grep -qF 'keys.json' "${d3}/warnings"; then
+  ok "herdr-app に新しい版があれば警告の末尾に keys.json の注意を 2 行で添え、herdr-core だけ・見送った版だけ・windowsHerdr が false なら添えない"
+else
+  ng "herdr-app の keys.json の注意" \
+    "warnings=$(cat "${d}/warnings" 2>/dev/null) / $(cat "${d2}/warnings" 2>/dev/null) / $(cat "${d3}/warnings" 2>/dev/null) $(outerr "${d}")"
 fi
 
 # 4. ntn・claudeCode が false の名前は確かめない。欄が無ければ (前の世代) 確かめる
