@@ -497,7 +497,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。props・panel.json の形・図の置き場所・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。上の行の `−`・`+` で板の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -550,6 +550,11 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 - `pane.close` は `--pane <ID>` の形で打つ (JSON を引用符で包んで渡したら効かなかった)。`pane` なしで打たない。今キーボードのあるペインを閉じ、それが
   端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)。閉じる前に `herdr-app ls | Out-String` で、その ID が端末の行に出ていないことを確かめる (板の
   ペインは ls に出ない。出ていれば端末のペイン)
+- 板の文字の大きさは、どの role のペインでも上の行 (題・更新の時刻の行) の `− <今の %> +` で変える。1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に
+  戻る。100% は前の固定の大きさ (本文 13px など) の 1.2 倍で、字と札・ボタンの大きさが同じ倍率で変わり、カードの余白と図 (ペインの幅に合わせて縮める) は変わら
+  ない。`− % +` の組はいつも 100% の大きさで右上に留まる (押してもボタンが動かない)。大きさは herdr-app の shared の `pjp-hub-panel.textPercent` (整数の %) に
+  残るので、どの space の板も、後から開いた問いのペインも同じ大きさで出て、herdr-app を上げ直しても残る。変わるのは板の文字だけで、アプリの zoom
+  (`settings.json` の `zoom`・`Ctrl+=` などのキー) と端末・ほかの mod は変わらない。ペインが狭いときは、題と更新の時刻、下の行のボタンが折り返す
 - 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
   「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
 - 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の
