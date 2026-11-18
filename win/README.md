@@ -497,7 +497,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。上の行の `−`・`+` で板の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる板。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で板の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -533,14 +533,24 @@ $p.ExitCode; Get-Content "$env:TEMP\herdr-app-check.out", "$env:TEMP\herdr-app-c
 ハブの板 (`pjp-hub-panel`) の使い方 (ハブの Claude がすること。手順の正本は claude-skills の pjp-hc-hub の `references/panel.md`):
 
 ```powershell
-# 会話の scratchpad に panel.json を書き、まとめのペインをハブの端末の右に開く (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)
+# 会話の scratchpad に panel.json を書き、まとめのペインを開く。split は right と down だけなので、ハブの端末を right に split してまとめの
+# ペインを開き、pane.swap でハブの端末の左へ移す ([まとめ 1/2 | ハブの端末 1/2])。出力の pane (まとめのペインの ID) を控える
+# (PowerShell 7.3 以降。Windows PowerShell 5.1 は外のコマンドに渡す引数の中の " を落とす)。ユーザーが見ている tab では split がキーボードを
+# 新しいペインへ移すので、split のたびに pane.focus で前のペインへ戻す (戻し方は references/panel.md。下の箇条)
 herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"summary"}}' | Out-String
-# 問いを出すとき: panel.json に questions を書き、まとめのペインを下に分けて問いのペインを開く。出力の pane (問いのペインの ID) を控える
-herdr-app do pane.split '{"direction":"down","pane":"<まとめのペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}' | Out-String
+herdr-app do pane.swap '{"pane":"<まとめのペイン>","target":"<ハブの端末のペイン>"}' | Out-String
+# 問いを出すとき: panel.json に questions を書き、ハブの端末を right に split して問いのペインを開く ([まとめ 1/2 | ハブの端末 1/4 | 問い 1/4])。
+# 出力の pane (問いのペインの ID) を控える
+herdr-app do pane.split '{"direction":"right","pane":"<ハブの端末のペイン>","mod":"pjp-hub-panel","props":{"file":"<panel.json の絶対パス>","terminal":"<答えを送る端末>","role":"questions"}}' | Out-String
 # 答えを受けたとき・問いを取り下げるとき: 問いのペインが残っていれば、控えた ID で閉じる (JSON でなく --pane <ID> の形。pane を省かない)
 herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 ```
 
+- 並び: ふだんは [まとめ | ハブの端末] の 1:1。問いのペインはハブの端末の右に開き ([まとめ 1/2 | ハブの端末 1/4 | 問い 1/4])、問いのペインが
+  閉じると、その幅は左隣のハブの端末へ戻って 1:1 に戻る。herdr-app (0.1.15) は閉じたペインの幅を左隣のペインへ渡すので、問いのペインを
+  端末の左に置くと (split してから swap)、閉じた幅がまとめへ行き [まとめ 3/4 | ハブの端末 1/4] になる (2026-11-18 にハブの tab で試した)
+- `pane.swap` は 2 つのペインの場所だけを替え、キーボードは動かさない (mod のペインでも `{ "ok": true }` で返る)。`pane.split` は、ユーザーが
+  見ている tab ではキーボードを新しいペインへ移すので、ハブは split の後に `pane.focus` でハブの端末へ戻す (手順は `references/panel.md`)
 - `role` は `summary` (まとめ: title・updated・sections だけ)・`questions` (問い: questions だけ。空なら「問いはありません」) のどちらか。省くと
   role を足す前と同じく、問いと状況を 1 つのペインに出す。どの role のペインも、開いたときに自分からはキーボードを取らない
 - 問いのペインは、「送信」(ペインの Enter も) で送れたら自分を閉じ、キーボードをハブの端末 (`terminal`) へ戻す。mod は自分のペインの ID を
@@ -551,12 +561,19 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   端末のペインならその端末が終わる (ハブの端末なら会話ごと終わる)。閉じる前に `herdr-app ls | Out-String` で、その ID が端末の行に出ていないことを確かめる (板の
   ペインは ls に出ない。出ていれば端末のペイン)
 - 板の文字の大きさは、どの role のペインでも上の行 (題・更新の時刻の行) の `− <今の %> +` で変える。1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に
-  戻る。100% は前の固定の大きさ (本文 13px など) の 1.2 倍で、字と札・ボタンの大きさが同じ倍率で変わり、カードの余白と図 (ペインの幅に合わせて縮める) は変わら
+  戻る。100% は前の固定の大きさ (本文 13px など) の 1.2 倍で、字と札・ボタンの大きさが同じ倍率で変わり、カードの余白と図 (ペインの幅に合わせる) は変わら
   ない。`− % +` の組はいつも 100% の大きさで右上に留まる (押してもボタンが動かない)。大きさは herdr-app の shared の `pjp-hub-panel.textPercent` (整数の %) に
   残るので、どの space の板も、後から開いた問いのペインも同じ大きさで出て、herdr-app を上げ直しても残る。変わるのは板の文字だけで、アプリの zoom
   (`settings.json` の `zoom`・`Ctrl+=` などのキー) と端末・ほかの mod は変わらない。ペインが狭いときは、題と更新の時刻、下の行のボタンが折り返す
-- 板は panel.json のフォルダを見張って読み直す。答えは powershell.exe の `Set-Clipboard` でクリップボードに入れて端末に貼り (`terminal.paste`)、
-  「送信」かペインの Enter では `hc keys` で Enter も押す (powershell.exe を使うので Windows だけ)
+- 板は panel.json のフォルダを見張って読み直す。答えは問いの順に 1 つ 1 行にし、改行でつないで powershell.exe の `Set-Clipboard` でクリップボードに
+  入れ、端末に 1 回で貼る (`terminal.paste`)。「送信」かペインの Enter では `hc keys` で Enter も 1 回押す (powershell.exe を使うので Windows だけ)。
+  複数行の答えが Claude Code の入力欄に 1 つの入力として入るのは、`terminal.paste` が bracketed paste で渡すことを当てにしている (herdr-app の
+  文書には書かれていない)
+- 図はペインの幅 (一覧とカードの余白を引いた幅) に合わせて縮め・大きくする (0.1〜2 倍。ペインの境を動かすと追う)。幅はアプリの zoom
+  (`settings.json` の `zoom`) で割ってから合わせるので、zoom が 1 でなくてもペインの端で切れない。図は板の文字の % には従わない
+- 図をクリックすると、その図だけを大きく出す小窓 (dialog。窓の幅の 92%・高さの 90%) が開く。図は小窓に縦横とも収め (4 倍まで)、marks の
+  動きも重ねる。Esc・「閉じる」・図のクリック・小窓の外のクリックで閉じる。小窓は板と同じ mod を `props.image` で開き、開く mod の名前は
+  `main.js` の `MOD` から取るので、写しを試すときは `MOD` を写しの名前に書き換える (書き換えないと、写しの図から本物の板の小窓が開く)
 - 図は herdr-app の home の `pjp-hub-panel-media\<会話ごとのフォルダ>\` に置き、panel.json にはそこからのパスを書く。`image()` は herdr-app の home の
   下しか読めない (scratchpad の絶対パスを渡すと何も出ない)。mod のフォルダには置かない (dotfiles が配る所で、書き換えると mod も読み直す)。
   `pjp-hub-panel-media` はハブの Claude が書く実行時のデータなので、runner は触らない
