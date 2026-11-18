@@ -170,6 +170,15 @@ let
         requires = [ windowsFiles ];
       }
     )
+    # tailnet から鍵でだけ入れる sshd。PC に外から入る口を開けるので、personal でも既定で入れない (入れるホストが足す)
+    (tool "windowsSshd" "Windows の sshd (Tailscale から鍵で入る)"
+      [ "wsl" "windowsFiles" "sshd" "enable" ]
+      [ "personalAccounts" ]
+      {
+        derived = false;
+        requires = [ windowsFiles ];
+      }
+    )
     (tool "gitIdentity" "git の名前とメール (pollenjp・pollenjp-sub)"
       [ "git" "identity" "enable" ]
       [

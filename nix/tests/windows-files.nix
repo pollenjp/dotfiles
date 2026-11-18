@@ -15,6 +15,10 @@
 #   - windowsFiles.typeClipboard.enable = true なら typeClipboard が true になる (bootstrap-windows-type-clipboard.sh が入れる)
 #   - windowsFiles.enable = false のマシンで typeClipboard.enable = true にすると、評価で止まる (配らないと
 #     Install-TypeClipboard.ps1 が届かない)
+#   - windows-sshd.json (Windows の sshd に入れる公開鍵) もどのホストにも置き、既定は authorizedKeys が null (dotfiles は鍵を
+#     置かない)。sshd を入れて鍵の list を書いたホストだけ、その list (空の list も) が入る。鍵を書いても、sshd を入れない・
+#     win/ を配らないホストでは null
+#   - 改行を含む鍵の値は評価で止まる (写しの authorized_keys の 1 行を割るため)
 {
   lib,
   pkgs,
@@ -31,6 +35,50 @@ let
     }).config;
 
   stateOf = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/windows-files.json".text;
+  sshdOf = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/windows-sshd.json".text;
+  # 例の鍵 (作り物。from= の IP は tailnet の範囲の例)
+  exampleKey = "from=\"100.64.0.1\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample phone";
+  sshdWith =
+    extra:
+    configWith {
+      enable = true;
+      windowsUserName = "alice";
+      windowsFiles = {
+        enable = true;
+      }
+      // extra;
+    };
+  sshdKeys = sshdWith {
+    sshd = {
+      enable = true;
+      authorizedKeys = [ exampleKey ];
+    };
+  };
+  sshdNoKeys = sshdWith {
+    sshd = {
+      enable = true;
+      authorizedKeys = [ ];
+    };
+  };
+  sshdUnmanaged = sshdWith { sshd.enable = true; };
+  # 鍵を書いても sshd を入れないホストでは渡さない
+  keysWithoutSshd = sshdWith { sshd.authorizedKeys = [ exampleKey ]; };
+  keysWithoutFiles = configWith {
+    enable = true;
+    windowsUserName = "alice";
+    windowsFiles.sshd = {
+      enable = true;
+      authorizedKeys = [ exampleKey ];
+    };
+  };
+  keyWithNewline =
+    builtins.tryEval
+      (sshdWith {
+        sshd = {
+          enable = true;
+          authorizedKeys = [ "${exampleKey}\n${exampleKey}" ];
+        };
+      }).home.username;
 
   notWindows = configWith { };
   files = configWith {
@@ -119,6 +167,30 @@ let
     {
       name = "windowsFiles.enable = false のマシンで typeClipboard.enable = true にすると評価で止まる";
       ok = !withoutFiles.success;
+    }
+    {
+      name = "windows-sshd.json はどのホストにも置き、既定は authorizedKeys が null (dotfiles は鍵を置かない)";
+      ok =
+        sshdOf notWindows == {
+          authorizedKeys = null;
+          version = 1;
+        }
+        && (sshdOf files).authorizedKeys == null
+        && (sshdOf sshdUnmanaged).authorizedKeys == null;
+    }
+    {
+      name = "sshd を入れて鍵の list を書いたホストは、その list が入る (空の list も空のまま)";
+      ok =
+        (sshdOf sshdKeys).authorizedKeys == [ exampleKey ] && (sshdOf sshdNoKeys).authorizedKeys == [ ];
+    }
+    {
+      name = "鍵を書いても、sshd を入れない・win/ を配らないホストでは null";
+      ok =
+        (sshdOf keysWithoutSshd).authorizedKeys == null && (sshdOf keysWithoutFiles).authorizedKeys == null;
+    }
+    {
+      name = "改行を含む鍵の値は評価で止まる";
+      ok = !keyWithNewline.success;
     }
   ];
 

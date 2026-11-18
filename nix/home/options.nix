@@ -15,6 +15,8 @@
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定 false。どのグループでも)
+#   dotfiles.wsl.windowsFiles.sshd.enable        Windows に sshd (OpenSSH Server) を入れ、Tailscale から鍵でだけ入れるようにするか (既定 false。どのグループでも)
+#   dotfiles.wsl.windowsFiles.sshd.authorizedKeys  その sshd に入れる公開鍵 (authorized_keys の行。既定 null: dotfiles は鍵を置かない)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
@@ -962,6 +964,51 @@ in
         Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsTailscale = true` を書く。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.sshd.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Windows に sshd (OpenSSH Server) を入れ、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れるようにするマシンか。
+        iPhone の Herdr のアプリや hc が、Windows の herdr-core に SSH でつなぐのに使う。効くのは `windowsFiles.enable = true` の
+        マシンだけ (配らないマシンでは true でも何もしない)。PC に外から入る口を開けるので、会社の PC などに勝手に入れないよう、
+        どのグループでも既定は false (③ の段に置くが、段からは決めない。入れるホストが true を書く)。入る経路の Tailscale も
+        入れるホスト (`windowsFiles.tailscale.enable`) で使う。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsSshd` に落ち (home/modules/group.nix)、
+        `~/dotfiles/setup --update` は false なら bootstrap-windows-sshd.sh を飛ばす (script の冒頭の `# tool: windowsSshd`)。true の
+        マシンでは、配った `Install-Sshd.ps1` (win/openssh/) が、dotfiles が winget で固定した OpenSSH (`Install-OpenSSH.ps1` が入れる
+        `C:\Program Files\OpenSSH`) に server を足して入れ、sshd の設定 (鍵だけ・AllowUsers で tailnet と localhost に限る)・Windows Firewall の
+        拒否の規則・自動起動を揃える (入っていないときだけ setup が入れる。UAC の確認が出る。ずれていれば ⚠ で知らせ、揃えはしない)。
+        Windows の機能 (System32) の OpenSSH Server とは二重にしない (win/README.md の「sshd」)。
+
+        Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsSshd = true` を書く。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。止め方・消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.sshd.authorizedKeys = lib.mkOption {
+      type = lib.types.nullOr (lib.types.listOf lib.types.str);
+      default = null;
+      example = lib.literalExpression ''
+        [ "from=\"100.64.0.1,fd7a:115c:a1e0::1\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... phone (Herdr)" ]
+      '';
+      description = ''
+        `windowsFiles.sshd.enable` の sshd に入れる公開鍵。authorized_keys の 1 行を 1 つの文字列で書く (先頭に `from="<端末の
+        Tailscale の IP>"` を付けると、鍵が漏れてもその端末からしか使えない)。Windows のユーザーは管理者なので、sshd は
+        `C:\ProgramData\ssh\administrators_authorized_keys` を読む。
+
+        null (既定) なら dotfiles は鍵を置かない (そのファイルが無ければ空で作り、権限だけ揃える。中身は手で置く)。list なら、
+        bootstrap-windows-sshd.sh が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` へ写しを置き、`Install-Sshd.ps1` が
+        その写しどおりに administrators_authorized_keys を書く (写しに無い鍵は消す。空の list なら鍵は 0 本で、誰も入れない)。
+        値は `~/.local/state/dotfiles/windows-sshd.json` の `authorizedKeys` に落ちる (home/modules/windows-files.nix)。
+
+        公開鍵と、from= に書く端末の IP は public な dotfiles には書かず、dotfiles-private のホストの値に書く (端末の足し引きが PR に
+        残る)。1 行に改行は入れられない (評価で止まる)。
       '';
     };
 

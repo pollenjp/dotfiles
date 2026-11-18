@@ -42,6 +42,7 @@
 | ③ | ntn (Notion の CLI) | `ntn.enable` | on | off | off |  |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | off | off | `wsl.windowsFiles.enable` |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | off | off | `wsl.windowsFiles.enable` |
+| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | off | off |  |
 
 ## 作り物のホストの要約
@@ -83,6 +84,7 @@ flowchart LR
   ntn["ntn (Notion の CLI)<br/>on"]
   windowsNtn["Windows の ntn<br/>on"]
   windowsTailscale["Windows の Tailscale<br/>off"]
+  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
   gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>on"]
   t1 --> wsl
   t1 --> windowsFiles
@@ -111,6 +113,7 @@ flowchart LR
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
+  t3 --> windowsSshd
   t3 --> gitIdentity
   classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
   classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
@@ -119,7 +122,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,ntn,windowsNtn,gitIdentity on
-  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,windowsTailscale off
+  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,windowsTailscale,windowsSshd off
   class wsl,windowsFiles onHost
 ```
 
@@ -153,6 +156,7 @@ flowchart LR
 | ③ | ntn (Notion の CLI) | `ntn.enable` | on | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
+| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | 段 (③) の既定 |
 
 ### company (自社の PC。③ の道具を足していない)
@@ -190,6 +194,7 @@ flowchart LR
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
+  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
   gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
   t1 --> wsl
   t1 --> windowsFiles
@@ -218,6 +223,7 @@ flowchart LR
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
+  t3 --> windowsSshd
   t3 --> gitIdentity
   classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
   classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
@@ -226,7 +232,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr on
-  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,gitIdentity off
+  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -260,6 +266,7 @@ flowchart LR
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
+| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
 
 ### client (客先の PC)
@@ -297,6 +304,7 @@ flowchart LR
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
+  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
   gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
   t1 --> wsl
   t1 --> windowsFiles
@@ -325,6 +333,7 @@ flowchart LR
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
+  t3 --> windowsSshd
   t3 --> gitIdentity
   classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
   classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
@@ -333,7 +342,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -367,6 +376,7 @@ flowchart LR
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
+| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
 
 ### client に Claude Code だけを足したホスト (`claude.enable = true`)
@@ -404,6 +414,7 @@ flowchart LR
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
+  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
   gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
   t1 --> wsl
   t1 --> windowsFiles
@@ -432,6 +443,7 @@ flowchart LR
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
+  t3 --> windowsSshd
   t3 --> gitIdentity
   classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
   classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
@@ -440,7 +452,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles,claude onHost
 ```
 
@@ -474,4 +486,5 @@ flowchart LR
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
+| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
