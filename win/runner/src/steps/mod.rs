@@ -19,6 +19,7 @@ pub mod git_config;
 pub mod hc_hub;
 pub mod herdr_app_keys;
 pub mod herdr_app_mods;
+pub mod herdr_app_pjp_spaces;
 pub mod linker;
 pub mod pending;
 pub mod pjp;
@@ -171,6 +172,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
         // docs/adr/068_win_herdr_app_mods_*)
         Box::new(herdr_app_mods::HerdrAppMods),
+        // claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替える (Windows にしか
+        // 無い手順。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*)
+        Box::new(herdr_app_pjp_spaces::HerdrAppPjpSpaces),
         // dotfiles の herdr-app のキーを herdr-app の home の keys.json に書き足す (Windows にしか無い手順。dotfiles-private の
         // docs/adr/070_win_herdr_app_keys_*)
         Box::new(herdr_app_keys::HerdrAppKeys),
@@ -243,6 +247,7 @@ mod tests {
                 (98, "google-ime"),
                 (98, "hc-skill"),
                 (98, "herdr-app-mods"),
+                (98, "herdr-app-pjp-spaces"),
                 (98, "herdr-app-skill"),
                 (99, "herdr-app-keys"),
                 (99, "international"),
@@ -280,8 +285,8 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod とキーだけ (WSL から写した手順・
-    /// まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキー
+    /// だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -306,6 +311,7 @@ mod tests {
                 "hc-hub",
                 "hc-skill",
                 "herdr-app-mods",
+                "herdr-app-pjp-spaces",
                 "herdr-app-skill",
                 "herdr-app-keys",
             ]

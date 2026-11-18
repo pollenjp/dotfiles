@@ -13,6 +13,7 @@ use crate::context::{Ctx, join_segments};
 use crate::link::is_link;
 use crate::process::CommandSpec;
 use crate::report::Kind;
+use std::path::PathBuf;
 use std::time::Duration;
 
 /// 道具の skill の表の 1 行。
@@ -42,12 +43,26 @@ pub const SPECS: &[ToolSkillSpec] = &[
     ToolSkillSpec {
         id: "herdr-app-skill",
         program: "herdr-app",
-        official: "Programs/herdr-app/herdr-app.exe",
+        official: HERDR_APP_OFFICIAL,
         head: "win/herdr-app/claude-skill-head.md",
         dir: "herdr-app",
         title: "herdr-app の skill (~/.claude/skills/herdr-app/SKILL.md) を herdr-app --skill から作る",
     },
 ];
+
+/// herdr-app の公式の置き場所 (`%LOCALAPPDATA%` からの相対。`/` 区切り)
+pub const HERDR_APP_OFFICIAL: &str = "Programs/herdr-app/herdr-app.exe";
+
+/// 道具の exe を PATH → 公式の置き場所 (`%LOCALAPPDATA%` からの相対の `official`) の順に探す (同じ apply の herdr-app の手順が入れた直後は、
+/// runner の PATH に無い)。見つからなければ、知らせるための公式の置き場所を Err で返す。
+pub fn locate(ctx: &Ctx, program: &str, official: &str) -> Result<PathBuf, PathBuf> {
+    let official = join_segments(&ctx.roots.local_app_data, official);
+    match ctx.sys.which(program) {
+        Some(p) => Ok(p),
+        None if official.is_file() => Ok(official),
+        None => Err(official),
+    }
+}
 
 /// `<name> --version` の出力 (`hc 0.1.21`・`herdr-app v0.1.20 (abc)`) から版を拾う。Install-HerdrApp.ps1 の
 /// Get-HerdrAppVersionFromOutput と同じ読み方 (`^\s*<名前>\s+v?(X.Y.Z)` の後ろに数字か `.` が続かない)。
@@ -90,20 +105,18 @@ impl Step for ToolSkill {
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
         let s = self.0;
-        let official = join_segments(&ctx.roots.local_app_data, s.official);
-        let exe = ctx
-            .sys
-            .which(s.program)
-            .or_else(|| official.is_file().then(|| official.clone()));
-        let Some(exe) = exe else {
-            return vec![Outcome::new(
-                Kind::Manual,
-                format!(
-                    "{} が見つからない (PATH と {}) → herdr-app の手順 (Install-HerdrApp.ps1) で入れる",
-                    s.program,
-                    official.display()
-                ),
-            )];
+        let exe = match locate(ctx, s.program, s.official) {
+            Ok(exe) => exe,
+            Err(official) => {
+                return vec![Outcome::new(
+                    Kind::Manual,
+                    format!(
+                        "{} が見つからない (PATH と {}) → herdr-app の手順 (Install-HerdrApp.ps1) で入れる",
+                        s.program,
+                        official.display()
+                    ),
+                )];
+            }
         };
         let head_path = ctx.repo_path(s.head);
         let head = match std::fs::read_to_string(&head_path) {
