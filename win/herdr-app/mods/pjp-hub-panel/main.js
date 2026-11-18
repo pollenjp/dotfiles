@@ -18,6 +18,19 @@
 //   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
 //   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
 //
+// 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、板 (この mod) の文字だけを上げ下げする。
+//   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
+//   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
+//   1.2 倍。字と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる。カードと一覧の余白・間と、図 (image の節。今までどおり
+//   ペインの幅に合わせて縮める。marks の label の字も図の倍率のまま) は変えない。markdown の中の見出し (#) の大きさは TextView が
+//   決める (倍率に従うかは試していない。本文と箇条書きは親の字の大きさに従う)。
+//   値は shared の "pjp-hub-panel.textPercent" (整数の %。名前は MOD から作るので、MOD を書き換えずに写した pjp-hub-panel-try なども
+//   同じ値を使う) に置く。どの space の板も、後から開いた問いのペインも同じ大きさで出て、herdr-app を上げ直しても残る (localStorage は
+//   ペインの写しごとで、問いのペインは開くたびに新しい写しになるので使わない)。数でない値は既定、範囲の外は端に寄せ、整数に丸めて出す。
+//   アプリの zoom (settings.json の zoom・app.zoom_in) は端末もほかの mod も大きくするので使わない (板の px もアプリの zoom には従う)。
+//   キーでは変えない (Ctrl+= などはアプリの zoom のキー)。ペインが狭いときは、上の行の更新の時刻とボタンが次の行へ回り (ボタンは
+//   縮めない)、題は縮んで折り返す。下の行の「入力欄に入れる」「送信」も、わけの字の横に入らなければ次の行へ回る。
+//
 // panel.json の形:
 //   { version, title, updated,
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
@@ -44,7 +57,7 @@
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes } from "herdr";
+import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared } from "herdr";
 
 const MOD = "mods/pjp-hub-panel";
 const NAME = MOD.slice(MOD.lastIndexOf("/") + 1); // この mod の名前
@@ -55,6 +68,15 @@ const MEDIA = "pjp-hub-panel-media"; // 図の置き場所。herdr-app の home 
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
 // #rrggbb に不透明度 (16 進の 2 桁) を足す。ほかの形 (#rgb・#rrggbbaa) は足すと色にならないので null (塗らない)
 const withAlpha = (color, aa) => (/^#[0-9a-fA-F]{6}$/.test(color ?? "") ? `${color}${aa}` : null);
+// 板の文字の大きさ (上の行の -・%・+)。shared に整数の % で置き、どの写しも同じ大きさで出す
+const ZOOM_KEY = `${NAME}.textPercent`;
+const ZOOM = { def: 100, min: 70, max: 200, step: 10 };
+const TEXT_BASE = 1.2; // 100% の倍率。字の大きさの値 (本文 13 など。この mod を書いたときの px) の 1.2 倍で出す
+// shared の値を % にする。数でない (無い・文字・NaN・Infinity) は既定、範囲の外は端へ寄せ、整数に丸める
+const zoomOf = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.min(ZOOM.max, Math.max(ZOOM.min, Math.round(v))) : ZOOM.def);
+// 1 刻み上げた (dir が 1)・下げた (-1) %。刻みの途中の値 (105 など) からは次の刻み (110・100) へ
+const zoomStep = (z, dir) =>
+  dir > 0 ? Math.min(ZOOM.max, (Math.floor(z / ZOOM.step) + 1) * ZOOM.step) : Math.max(ZOOM.min, (Math.ceil(z / ZOOM.step) - 1) * ZOOM.step);
 
 export default class HubPanel extends View {
   init(_props, cx) {
@@ -65,6 +87,7 @@ export default class HubPanel extends View {
     this.status = "";
     this.busy = false;
     this.width = null;
+    this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
     this.handle = cx.focus_handle();
     const file = props()?.file;
     cx.spawn(async (cx) => {
@@ -122,6 +145,21 @@ export default class HubPanel extends View {
   role() {
     const r = props()?.role;
     return r == null || r === "" ? null : r;
+  }
+
+  // 板の文字の大きさ (%)。render のたびに shared から読む (どの写しが書いても、herdr-app がすべての mod を描き直す)
+  zoom() {
+    return zoomOf(shared(ZOOM_KEY));
+  }
+
+  // 字の大きさと、字を囲む札・ボタンの高さ・余白・角を、板の倍率で引く。n はこの mod を書いたときの px (100% の 1/1.2)
+  fs(n) {
+    return Math.round(n * this.k * 10) / 10;
+  }
+
+  setZoom(z, cx) {
+    setShared(ZOOM_KEY, z);
+    cx.notify();
   }
 
   // この板 (root に track_focus した handle) が今キーボードを持つか。確かめられなければ false (送信は止めない)
@@ -275,11 +313,12 @@ export default class HubPanel extends View {
           h_flex()
             .gap(6)
             .items_center()
-            .child(div().text_color(on ? c.accent : c.dim).child(on ? "●" : "○"))
-            .child(div().font_semibold().text_color(c.fg).child(o.label ?? ""))
+            .child(div().flex_none().text_color(on ? c.accent : c.dim).child(on ? "●" : "○"))
+            // min_w(0): 長い選択肢は縮んで折り返す (付けないと字が 1 行ぶんの幅より縮まず、カードからはみ出す)
+            .child(div().min_w(0).font_semibold().text_color(c.fg).child(o.label ?? ""))
             .when(!!o.recommended, (el) => el.child(this.badge("推奨", c.solid, c.solidFg))),
         )
-        .when(!!o.desc, (el) => el.child(div().text_size(12).text_color(c.muted).child(o.desc)));
+        .when(!!o.desc, (el) => el.child(div().text_size(this.fs(12)).text_color(c.muted).child(o.desc)));
     });
     return v_flex()
       .id(`hp-q-${q.id}`)
@@ -293,14 +332,23 @@ export default class HubPanel extends View {
           .gap(8)
           .items_center()
           .child(this.badge(`Q${qi + 1}`, c.solid, c.solidFg))
-          .child(div().flex_1().text_size(14).font_semibold().text_color(c.fg).child(q.title ?? "")),
+          .child(div().flex_1().min_w(0).text_size(this.fs(14)).font_semibold().text_color(c.fg).child(q.title ?? "")),
       )
       .when(!!q.body, (el) => el.child(div().text_color(c.fg).child(TextView.markdown(`hp-qb-${q.id}`, q.body).selectable(true))))
       .children(opts);
   }
 
   badge(text, bg, fg) {
-    return div().px(6).py(1).rounded(4).bg(bg).text_color(fg).text_size(10).font_semibold().child(text);
+    return div()
+      .flex_none()
+      .px(this.fs(6))
+      .py(this.fs(1))
+      .rounded(this.fs(4))
+      .bg(bg)
+      .text_color(fg)
+      .text_size(this.fs(10))
+      .font_semibold()
+      .child(text);
   }
 
   // ---- 状況の節 ----
@@ -316,11 +364,12 @@ export default class HubPanel extends View {
         this.collapsed[id] = !closed;
         cx.notify();
       })
-      .child(div().w(12).text_color(c.dim).child(closed ? "▸" : "▾"))
-      .child(div().flex_1().text_size(13).font_semibold().text_color(c.fg).child(s.title ?? ""));
+      .child(div().flex_none().w(this.fs(12)).text_color(c.dim).child(closed ? "▸" : "▾"))
+      .child(div().flex_1().min_w(0).text_size(this.fs(13)).font_semibold().text_color(c.fg).child(s.title ?? ""));
     let body = null;
     if (!closed) {
-      if (s.type === "markdown") body = div().text_size(12).text_color(c.fg).child(TextView.markdown(`hp-md-${id}`, s.text ?? "").selectable(true));
+      if (s.type === "markdown")
+        body = div().text_size(this.fs(12)).text_color(c.fg).child(TextView.markdown(`hp-md-${id}`, s.text ?? "").selectable(true));
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
       else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
@@ -341,18 +390,20 @@ export default class HubPanel extends View {
     const rows = (s.rows ?? []).map((r, ri) => {
       const steps = [];
       (r.steps ?? []).forEach((st, si) => {
-        if (si > 0) steps.push(div().text_color(c.dim).text_size(11).child("›"));
+        if (si > 0) steps.push(div().text_color(c.dim).text_size(this.fs(11)).child("›"));
         steps.push(this.step(st, `${id}-${ri}-${si}`, c));
       });
       return v_flex()
         .id(`hp-fr-${id}-${ri}`)
         .gap(4)
         .child(
+          // 狭いときは sub が次の行へ回り、長い label は縮んで折り返す
           h_flex()
+            .flex_wrap()
             .gap(6)
             .items_center()
-            .child(div().font_semibold().text_size(12).text_color(c.fg).child(r.label ?? ""))
-            .when(!!r.sub, (el) => el.child(div().text_size(11).text_color(c.muted).child(r.sub))),
+            .child(div().min_w(0).font_semibold().text_size(this.fs(12)).text_color(c.fg).child(r.label ?? ""))
+            .when(!!r.sub, (el) => el.child(div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(r.sub))),
         )
         .child(h_flex().flex_wrap().gap(4).items_center().children(steps));
     });
@@ -363,7 +414,16 @@ export default class HubPanel extends View {
     const state = st.state ?? "todo";
     const label = st.label ?? ""; // label の無い段は印だけにする (undefined・null を字にしない)
     const tail = label === "" ? "" : ` ${label}`; // 印の後ろに付ける字
-    const base = h_flex().id(`hp-st-${key}`).px(7).py(2).rounded(6).border_1().text_size(11).gap(4).items_center();
+    const base = h_flex()
+      .id(`hp-st-${key}`)
+      .min_w(0)
+      .px(this.fs(7))
+      .py(this.fs(2))
+      .rounded(this.fs(6))
+      .border_1()
+      .text_size(this.fs(11))
+      .gap(this.fs(4))
+      .items_center();
     if (state === "done") return base.border_color(c.ok).text_color(c.ok).child(`✓${tail}`);
     // いまの段: working の枠と字に、同じ色を薄く敷いて点滅させる
     if (state === "active")
@@ -393,7 +453,7 @@ export default class HubPanel extends View {
     return v_flex()
       .gap(6)
       .child(div().relative().w(W * k).h(H * k).child(image(src).w(W * k).h(H * k)).children(marks))
-      .when(!!s.caption, (el) => el.child(div().text_size(11).text_color(c.muted).child(TextView.markdown(`hp-cap-${id}`, s.caption))));
+      .when(!!s.caption, (el) => el.child(div().text_size(this.fs(11)).text_color(c.muted).child(TextView.markdown(`hp-cap-${id}`, s.caption))));
   }
 
   mark(m, key, k, c) {
@@ -472,21 +532,67 @@ export default class HubPanel extends View {
   button(id, label, primary, enabled, c, onClick) {
     return h_flex()
       .id(id)
-      .h(30)
-      .px(12)
+      .flex_none()
+      .h(this.fs(30))
+      .px(this.fs(12))
       .items_center()
-      .rounded(8)
+      .rounded(this.fs(8))
       .border_1()
       .border_color(primary && enabled ? c.solid : c.border)
       .bg(primary && enabled ? c.solid : c.raised)
       .text_color(enabled ? (primary ? c.solidFg : c.fg) : c.dim)
-      .text_size(12)
+      .text_size(this.fs(12))
       .when(enabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click(onClick))
       .child(label);
   }
 
+  // 上の行の「- <今の %> +」。押すと板の文字だけを 1 刻みずつ上げ下げし、% で既定に戻す (アプリの zoom は替えない)
+  zoomControls(z, c) {
+    const seg = (id, label, tip, enabled, onClick, color, offColor = c.dim) =>
+      h_flex()
+        .id(id)
+        .flex_none()
+        .h(this.fs(22))
+        .min_w(this.fs(22))
+        .px(this.fs(5))
+        .justify_center()
+        .items_center()
+        .rounded(this.fs(5))
+        .text_size(this.fs(12))
+        .text_color(enabled ? color : offColor)
+        .tooltip(tip)
+        .when(enabled, (el) => el.cursor_pointer().hover((s) => s.bg(c.raised)).on_click(onClick))
+        .child(label);
+    const changed = z !== ZOOM.def;
+    return h_flex()
+      .id("hp-zoom")
+      .flex_none()
+      .ml_auto() // 次の行へ回ったときも右に寄せる (行が足りないときは左から詰め、「-」を押せるようにする)
+      .gap(this.fs(2))
+      .p(1)
+      .items_center()
+      .rounded(this.fs(6))
+      .border_1()
+      .border_color(c.border)
+      .child(seg("hp-zoom-out", "−", `板の文字を小さく (${ZOOM.min}% まで)`, z > ZOOM.min, (_, cx) => this.setZoom(zoomStep(z, -1), cx), c.fg))
+      .child(
+        seg(
+          "hp-zoom-reset",
+          `${z}%`,
+          changed ? `既定 (${ZOOM.def}%) に戻す` : `板の文字の大きさ (既定 ${ZOOM.def}%)`,
+          changed,
+          (_, cx) => this.setZoom(ZOOM.def, cx),
+          c.accent, // 既定から変えているときは accent で出し、押すと戻せると分かるようにする
+          c.muted,
+        ),
+      )
+      .child(seg("hp-zoom-in", "+", `板の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, (_, cx) => this.setZoom(zoomStep(z, 1), cx), c.fg));
+  }
+
   render(cx) {
     const c = this.colors();
+    const z = this.zoom();
+    this.k = (TEXT_BASE * z) / 100; // この描画の fs() の倍率
     const d = this.data;
     const role = this.role();
     const known = role === null || ROLES.includes(role);
@@ -504,11 +610,11 @@ export default class HubPanel extends View {
       if (!this.error && d && qs.length === 0) body.push(div().text_color(c.muted).child("問いはありません"));
     } else {
       if (qs.length > 0) {
-        body.push(div().text_size(12).font_semibold().text_color(c.accent).child(`質問 (${qs.length})`));
+        body.push(div().text_size(this.fs(12)).font_semibold().text_color(c.accent).child(`質問 (${qs.length})`));
         qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
       }
       if (secs.length > 0) {
-        if (qs.length > 0) body.push(div().h(4), div().text_size(12).font_semibold().text_color(c.muted).child("いまの状況"));
+        if (qs.length > 0) body.push(div().h(4), div().text_size(this.fs(12)).font_semibold().text_color(c.muted).child("いまの状況"));
         secs.forEach((s, i) => body.push(this.section(s, i, c)));
       }
       if (!this.error && d && qs.length === 0 && secs.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
@@ -516,6 +622,7 @@ export default class HubPanel extends View {
     // 上の帯の題。問いのペインは見出しと件数 (updated も出さない)、ほかは panel.json の title
     const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");
 
+    const hint = this.status || (line ? "Enter (このペインで) か「送信」で送る" : "");
     const footer =
       qs.length === 0
         ? null
@@ -525,14 +632,23 @@ export default class HubPanel extends View {
             .gap(8)
             .border_t_1()
             .border_color(c.border)
-            .child(div().text_size(12).text_color(line ? c.fg : c.dim).child(line || "選択肢を選ぶと、ここに答えの文が出ます"))
+            .child(div().text_size(this.fs(12)).text_color(line ? c.fg : c.dim).child(line || "選択肢を選ぶと、ここに答えの文が出ます"))
             .child(
+              // 狭いときはボタンの組が次の行へ回る (ボタンは縮めない。わけの字は縮んで折り返す)
               h_flex()
+                .flex_wrap()
                 .gap(8)
                 .items_center()
-                .child(div().flex_1().text_size(11).text_color(c.dim).child(this.status || (line ? "Enter (このペインで) か「送信」で送る" : "")))
-                .child(this.button("hp-paste", "入力欄に入れる", false, ready, c, (_, cx) => this.deliver(cx, false)))
-                .child(this.button("hp-send", "送信", true, ready, c, (_, cx) => this.deliver(cx, true))),
+                .when(hint !== "", (el) => el.child(div().flex_auto().min_w(0).text_size(this.fs(11)).text_color(c.dim).child(hint)))
+                .child(
+                  h_flex()
+                    .flex_none()
+                    .ml_auto()
+                    .gap(8)
+                    .items_center()
+                    .child(this.button("hp-paste", "入力欄に入れる", false, ready, c, (_, cx) => this.deliver(cx, false)))
+                    .child(this.button("hp-send", "送信", true, ready, c, (_, cx) => this.deliver(cx, true))),
+                ),
             );
 
     return v_flex()
@@ -552,21 +668,27 @@ export default class HubPanel extends View {
       })
       .size_full()
       .min_h(0)
-      .text_size(13)
+      .text_size(this.fs(13))
       .text_color(c.fg)
       .child(
+        // 上の行: 題・更新の時刻・文字の大きさのボタン。狭いときは更新の時刻とボタンが次の行へ回り、題は縮んで折り返す
         h_flex()
+          .flex_wrap()
           .px(14)
           .py(10)
-          .gap(8)
+          .gap_x(8)
+          .gap_y(6)
           .items_center()
           .border_b_1()
           .border_color(c.border)
-          .child(div().flex_1().text_size(15).font_semibold().child(heading))
-          .when(r !== "questions", (el) => el.child(div().text_size(11).text_color(c.dim).child(d?.updated ?? ""))),
+          .child(div().flex_auto().min_w(0).text_size(this.fs(15)).font_semibold().child(heading))
+          .when(r !== "questions" && !!d?.updated, (el) => el.child(div().flex_none().text_size(this.fs(11)).text_color(c.dim).child(d.updated)))
+          .child(this.zoomControls(z, c)),
       )
       .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))
       .when(!!footer, (el) => el.child(footer))
-      .when(!footer && !!this.status, (el) => el.child(div().px(14).py(6).border_t_1().border_color(c.border).text_size(11).text_color(c.dim).child(this.status)));
+      .when(!footer && !!this.status, (el) =>
+        el.child(div().px(14).py(6).border_t_1().border_color(c.border).text_size(this.fs(11)).text_color(c.dim).child(this.status)),
+      );
   }
 }
