@@ -91,6 +91,11 @@ dst = "%USERPROFILE%/.config/powershell/Install-OpReason.ps1"
 hint = "PowerShell で Install-OpReason -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは、WSL の op の wrapper (op-reason) を入れるマシンだけ。ほかのマシンでも Install-OpReason で入れられる)"
 
 [[files]]
+src = "openssh/Install-Sshd.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Sshd.ps1"
+hint = "PowerShell で Install-Sshd -Check を打つと、sshd (Tailscale と localhost からだけ、鍵でだけ入れる形) との差が分かる (setup --update が入れるのは dotfiles.wsl.windowsFiles.sshd.enable = true のマシンだけで、入っていないときだけ入れる (UAC の確認が出る)。ずれていれば知らせるだけ)"
+
+[[files]]
 src = "tailscale/Install-Tailscale.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Tailscale.ps1"
 hint = "PowerShell で Install-Tailscale -Check を打つと、固定した版との差が分かる (setup --update が入れるのは dotfiles.wsl.windowsFiles.tailscale.enable = true のマシンだけで、入っていないときだけ入れる (UAC の確認が出る)。入っていれば上げない。ログインは手でする)"

@@ -94,6 +94,12 @@ function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1
 # (Tailscale が自分で上がる)。tailnet へのログインは、入れた後にタスクトレイの Tailscale のアイコンから手でする。
 function Install-Tailscale { & "$HOME\.config\powershell\Install-Tailscale.ps1" @args }
 
+# Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ、鍵でだけ SSH で入れる形に揃える。
+# 中身は同じ場所へ配る Install-Sshd.ps1 (win/README.md の「sshd」)。-Check なら確かめるだけ。揃えるときは Windows に UAC の確認が
+# 1 回出る (sshd を起こし直すと、つないでいる SSH が切れることがある)。鍵は setup が置く写し (%LOCALAPPDATA%\dotfiles\sshd\authorized_keys)
+# どおりに置く。iPhone の Herdr のアプリや hc からつなぐときは、この PC で Herdr を開いたままにしておく。
+function Install-Sshd { & "$HOME\.config\powershell\Install-Sshd.ps1" @args }
+
 # Windows 側の runner (dotfiles の win/runner/。Rust)。dotfiles check で手順を順に確かめ (何も書かない)、dotfiles apply で揃え
 # (このホストの受け持ちが runner のときだけ。dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [runner] enable = true)、
 # dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で

@@ -19,6 +19,17 @@
 #      設定とテキストを行き来させる道具で、nix/scripts/bootstrap-windows-google-ime.sh が
 #      PATH から呼ぶ (ADR 015)
 #
+#   3. ~/.local/state/dotfiles/windows-sshd.json (全ホスト)
+#
+#        {"authorizedKeys":null,"version":1}
+#
+#      Windows の sshd に入れる公開鍵 (windowsFiles.sshd.authorizedKeys。authorized_keys の 1 行を 1 つの文字列)。
+#      bootstrap-windows-sshd.sh が読み、list なら Windows の %LOCALAPPDATA%\dotfiles\sshd\authorized_keys へ写しを置く
+#      (Install-Sshd.ps1 がその写しどおりに administrators_authorized_keys を書く)。null は dotfiles が鍵を置かないホストで、
+#      win/ を配らない・sshd を入れない (windowsFiles.sshd.enable が false の) ホストも null にする。windows-files.json に
+#      入れないのは、欄を足すと今までのホストのそのファイルの中身まで変わるため (上の windowsHerdr と同じ)。ファイルの
+#      無い前の世代では、script は写しに触らない
+#
 # 配る中身 (repo 直下の win/) はここでは読まない。ローカル flake は本体を
 # path:<repo>/nix で読むので、この評価から win/ は見えない (ADR 010 §1 の 3)。
 # win/ を読んで /mnt/c へコピーするのは nix/scripts/bootstrap-windows-files.sh、Google 日本語入力の
@@ -40,6 +51,11 @@ let
   # Google 日本語入力の設定とテキストを行き来させる道具 (ADR 015)。bootstrap-windows-google-ime.sh が
   # PATH から呼ぶ。win/ を配るマシンでだけ要る
   googleIme = pkgs.callPackage ../../pkgs/pjp-google-ime { };
+  # Windows の sshd に入れる公開鍵 (null は dotfiles が鍵を置かない)。win/ を配り sshd を入れるホストでだけ値を渡す
+  sshdKeys =
+    if wsl.windowsFiles.sshd.authorizedKeys == null then [ ] else wsl.windowsFiles.sshd.authorizedKeys;
+  sshdKeysState =
+    if enable && wsl.windowsFiles.sshd.enable then wsl.windowsFiles.sshd.authorizedKeys else null;
 in
 {
   # 階層で表現しきれない「親が false なのに子が true」を評価時に止める (git.nix と同じ)。
@@ -66,6 +82,14 @@ in
         type-clipboard を入れる Install-TypeClipboard.ps1 は win/ と一緒に配るので、win/ を配るマシンでだけ有効にしてください。
       '';
     }
+    {
+      # 写し (authorized_keys) は 1 行 1 鍵で書くので、改行の入った値は鍵の行を割ってしまう
+      assertion = builtins.all (k: !(lib.hasInfix "\n" k || lib.hasInfix "\r" k)) sshdKeys;
+      message = ''
+        dotfiles.wsl.windowsFiles.sshd.authorizedKeys に改行を含む値があります。authorized_keys の 1 行 (鍵 1 本) を
+        1 つの文字列で書いてください (複数の鍵は list の要素を分ける)。
+      '';
+    }
   ];
 
   home.packages = lib.optional enable googleIme;
@@ -85,6 +109,14 @@ in
       # option の既定は true なので、配らないマシンでも option は true のまま。ここで配るときだけ true にする
       ntn = enable && wsl.windowsFiles.ntn.enable;
       claudeCode = enable && wsl.windowsFiles.claudeCode.enable;
+    }
+    + "\n";
+
+  # Windows の sshd に入れる公開鍵 (bootstrap-windows-sshd.sh が読む)。null は鍵を置かない (上の 3)
+  home.file.".local/state/dotfiles/windows-sshd.json".text =
+    builtins.toJSON {
+      version = 1;
+      authorizedKeys = sshdKeysState;
     }
     + "\n";
 }

@@ -47,6 +47,12 @@ name = "win-openssh"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/openssh/Install-OpenSSH.Tests.ps1"]
 when = ["win/openssh/"]
 
+# sshd (OpenSSH の MSI の Server) の ps1 のテスト。作る sshd_config を sshd -G で読ませるので openssh も借りる
+[[checks]]
+name = "win-sshd"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "nixpkgs#openssh", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/openssh/Install-Sshd.Tests.ps1"]
+when = ["win/openssh/"]
+
 [[checks]]
 name = "win-herdr"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/herdr/Install-Herdr.Tests.ps1"]

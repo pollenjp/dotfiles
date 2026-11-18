@@ -524,6 +524,7 @@
           bootstrap-windows-fancyzones-test = scriptTest "bootstrap-windows-fancyzones" ./scripts/bootstrap-windows-fancyzones.sh;
           bootstrap-windows-google-ime-install-test = scriptTest "bootstrap-windows-google-ime-install" ./scripts/bootstrap-windows-google-ime-install.sh;
           bootstrap-windows-tailscale-test = scriptTest "bootstrap-windows-tailscale" ./scripts/bootstrap-windows-tailscale.sh;
+          bootstrap-windows-sshd-test = scriptTest "bootstrap-windows-sshd" ./scripts/bootstrap-windows-sshd.sh;
           bootstrap-windows-files-test = scriptTest "bootstrap-windows-files" ./scripts/bootstrap-windows-files.sh;
           bootstrap-windows-terminal-test = scriptTest "bootstrap-windows-terminal" ./scripts/bootstrap-windows-terminal.sh;
           bootstrap-windows-international-test = scriptTest "bootstrap-windows-international" ./scripts/bootstrap-windows-international.sh;

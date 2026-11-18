@@ -453,7 +453,19 @@ mod tests {
             assert!(!tool(group, "windowsTypeClipboard"), "{group}");
             // Tailscale は VPN の道具で、どのグループでも既定は off (入れるホストが [tools] に書く)
             assert!(!tool(group, "windowsTailscale"), "{group}");
+            // sshd は PC に外から入る口で、どのグループでも既定は off (入れるホストが [tools] に書く)
+            assert!(!tool(group, "windowsSshd"), "{group}");
         }
+    }
+
+    #[test]
+    fn windows_sshd_is_a_known_tool_that_hosts_turn_on() {
+        let h = host("[tools]\nwindowsSshd = true\n").unwrap();
+        assert!(h.tool("windowsSshd"));
+        assert_eq!(h.tool_origin("windowsSshd"), "ホストの値");
+        let h = host("").unwrap();
+        assert!(!h.tool("windowsSshd"));
+        assert_eq!(h.tool_origin("windowsSshd"), "グループ personal の既定");
     }
 
     #[test]

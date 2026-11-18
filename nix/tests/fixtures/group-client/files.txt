@@ -54,6 +54,7 @@
 .local/state/dotfiles/group.json
 .local/state/dotfiles/mise-release-age.json
 .local/state/dotfiles/windows-files.json
+.local/state/dotfiles/windows-sshd.json
 .manpath
 .profile
 .screenrc

@@ -46,6 +46,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
+| `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
@@ -234,7 +235,7 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
   WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
@@ -244,6 +245,9 @@ scanData = "https://app.notion.com/p/…"
   (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
 - `windowsTailscale` もどのグループでも既定が false。Tailscale を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.tailscale.enable = true`) は、同じ値を
   `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
+- `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
+  書く (書かなければ `sshd` の行は off。[後述](#sshd))。鍵 (`wsl.windowsFiles.sshd.authorizedKeys`) は TOML には書かない。runner の `sshd` の手順は、
+  WSL の setup が Windows に置く鍵の写しを読む (受け持ちを runner に切り替えるホストが出たら、鍵の置き方を足す)
 - `[claude.notion]` は `claude-notion` の手順が `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` に書く (Linux の home-manager が書くのと同じ中身)。
   runner が確かめるのは Nix の option と同じ型だけ (`profile` は `[a-z0-9][a-z0-9_-]*`・`routes` は文字列の表・`override` は表。日時は書けない)。
   プロファイルの名前やキーの綴りは、claude-skills の pjp-notion-profile が使うときに確かめる。TOML に null は無いので、`override` で値を消す形
@@ -292,6 +296,7 @@ scanData = "https://app.notion.com/p/…"
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` から `dotfiles.ps1` を読ませる | | まだ |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ (鍵の写しは WSL の setup が置く) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
@@ -1528,7 +1533,9 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 1. 入っている版 (`ssh.exe` の FileVersion) と固定した版を比べ、`winget upgrade` か `install` に
    `--version` を付けて揃える。upgrade には `--include-pinned` も付け、3 で足した pin を越える (付けないと、版を名指しした upgrade は
    pin に止められる。[winget の pin](#winget-の-pin))。下げるときは MSI が「新しい版が入っている」で止めるので、先に `uninstall` する。
-   どれにも `--custom ADDLOCAL=Client` を付け、sshd は入れない
+   どれにも `--custom ADDLOCAL=Client` を付け、sshd は入れない。ただし `Install-Sshd.ps1` が Server を足したマシン (`sshd.exe` がある) では
+   `ADDLOCAL=Client,Server` にして Server を残す (ADDLOCAL を渡すと MSI は前の版の機能を引き継がないので、Client だけで上げると sshd が消える)。
+   上げ直した MSI は 22 番の受信の許可を有効に戻すので、終わったら `Install-Sshd` で揃える ([sshd](#sshd))
 2. ssh-agent サービスを停止・無効に戻す。MSI の更新は ssh-agent を「自動・実行中」で作り直し、1Password と
    `\\.\pipe\openssh-ssh-agent` を取り合う ([Win32-OpenSSH#2057](https://github.com/PowerShell/Win32-OpenSSH/issues/2057))。
    ssh-agent はクライアント側の部品でもあるので、`ADDLOCAL=Client` でも入る
@@ -2883,3 +2890,168 @@ winget に載らないので、GitHub とは比べない)。猶予・落ちる�
   締めの行 (`⚠️ ` で始まる行) は、WSL の wrapper が枠に入れるときに落とす (下に出す揃えるコマンドと重なるので)
 - tailnet へのログインの案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)
 - winget やファイルに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+
+## sshd
+
+`openssh/Install-Sshd.ps1` は、Windows に sshd (OpenSSH Server) を入れ、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れるように
+する (dotfiles-private の ADR 078 (`docs/adr/078_win_sshd_tailscale_*`))。iPhone の Herdr のアプリや hc (`hc machine add`) が、この PC の herdr-core に
+SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-core に SSH でつなぎ、Tailscale SSH のサーバーに Windows はなれない)。
+
+- setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ。PC に外から入る口を開けるので、会社の PC などに勝手に入れないよう、
+  どのグループでも既定は false ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入る経路の Tailscale も入れる
+  ([Tailscale](#tailscale))。入れるホストは、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く
+  (鍵の例は作り物。実機の鍵と IP は dotfiles-private に書く):
+
+  ```nix
+  wsl = {
+    windowsFiles.enable = true;
+    windowsFiles.tailscale.enable = true;
+    windowsFiles.sshd.enable = true;
+    # 入れる端末の公開鍵。authorized_keys の 1 行を 1 つの文字列で書く (null なら dotfiles は鍵を置かない。空の list なら 0 本で、誰も入れない)
+    windowsFiles.sshd.authorizedKeys = [
+      "from=\"100.64.0.1,fd7a:115c:a1e0::1\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... phone (Herdr)"
+    ];
+  };
+  ```
+
+  Windows の runner では、ホストの値の `[tools]` に `windowsSshd = true` を書く ([ホストの値](#ホストの値))
+- sshd は、dotfiles が winget で固定した OpenSSH (`Install-OpenSSH.ps1` が入れる `C:\Program Files\OpenSSH`。[OpenSSH](#openssh)) の MSI に、Server の
+  機能を足して入れる。Windows の機能 (System32) の OpenSSH Server とは二重にしない (入っていれば揃えずに止まり、外し方を出す)
+- false に戻しても setup は消さない (見なくなるだけ)。止め方・消し方は[後述](#sshd-を止める外す)
+
+### sshd で揃えるもの
+
+| もの | 揃える形 |
+| --- | --- |
+| server | OpenSSH の MSI の Server の機能。入っている版と同じ版の MSI を `winget download` で取り直し (winget が manifest の sha256 と照らす)、`msiexec /i <MSI> ADDLOCAL=Client,Server` で足す (同じ ProductCode なので保守の install)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。MSI は管理者と SYSTEM だけが書ける `C:\ProgramData\dotfiles\sshd-msi` に落とす (利用者の権限で動くものが、msiexec の前に差し替えられない) |
+| `C:\ProgramData\ssh\sshd_config` | dotfiles が書く中身 (下の表)。違えば (先頭に BOM が付いているときも) `sshd_config.dotfiles-bak-<日時>` に退避し、一時ファイルから差し替える (書けずに消えたままにならない)。MSI は Server を足した時点で sshd を起こし、sshd は sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく |
+| Windows Firewall | 拒否の規則を 3 つ置き (グループ `dotfiles (sshd)`。下の表)、22 番を許す受信の規則 (MSI が作る `OpenSSH SSH Server Preview (sshd)` など) を無効にする |
+| `C:\ProgramData\ssh\administrators_authorized_keys` | 管理者のユーザーの鍵の置き場 (Win32-OpenSSH は管理者の鍵をユーザーの `.ssh` から読まない)。鍵の写し (下の「鍵の置き方」) があれば、その中身どおりに書く (写しに無い鍵は消す。元は `.dotfiles-bak-<日時>` に退避する)。写しが無ければ中身に触らず、ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする (Microsoft の文書の `icacls` と同じ形を、表示の言語によらない SID で書く) |
+| サービス `sshd` | 自動で起こし、動かす。sshd_config を書き直したら起こし直す (つないでいる SSH が切れることがある) |
+
+sshd_config の中身 (`Install-Sshd.ps1` の `Get-SshdConfigText`):
+
+| 設定 | わけ |
+| --- | --- |
+| `PubkeyAuthentication yes`・`PasswordAuthentication no`・`KbdInteractiveAuthentication no`・`AuthenticationMethods publickey` | 鍵だけで入れる |
+| `AllowUsers <ユーザー>@100.64.0.0/10 <ユーザー>@fd7a:115c:a1e0::/48 <ユーザー>@127.0.0.1 <ユーザー>@::1` | 入れるのはスクリプトを流したユーザー (小文字。`-AllowUser` で変えられる) だけで、tailnet と localhost から来たときだけ。末尾の `Match` より前に書く (後ろに書くと Match の中に入る) |
+| `ListenAddress` は書かない | Tailscale の IP に縛ると、起動のときに Tailscale の IP がまだ無いと sshd が落ちる。入れる元は AllowUsers と拒否の規則で絞る |
+| `Match Group administrators` の `AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys` | Win32-OpenSSH の既定のまま (管理者の鍵は ProgramData から読む) |
+| `Subsystem sftp sftp-server.exe` | 既定のまま (`hc machine add` が hc を入れるときの scp が使う) |
+
+sshd が読むファイル (sshd_config・administrators_authorized_keys) のコメントは ASCII にする (sshd は設定を byte のまま読む。BOM も付けない)。
+
+拒否の規則 (どれも受信・拒否・すべてのプロファイル。block は allow より強いので、Tailscale が入れる許可 `Tailscale-In` (Tailscale の IP 宛てを
+全ポートで許す) や、MSI が有効に戻す 22 番の許可があっても効く):
+
+| 名前 (`Name`) | 拒否するもの | わけ |
+| --- | --- | --- |
+| `dotfiles-sshd-tailnet-tcp` | 宛先が tailnet のアドレス (100.64.0.0/10・fd7a:115c:a1e0::/48) の TCP のうち 22 番以外 | tailnet の ACL を誤っても (既定の allow all のままでも)、tailnet からは 22 番にしか届かない。Taildrop でこの PC へ送るのも止まる |
+| `dotfiles-sshd-tailnet-udp` | 宛先が tailnet のアドレスの UDP (全ポート) | 同じ |
+| `dotfiles-sshd-outside-tcp22` | 接続元が tailnet と localhost の外 (LAN・WSL・Hyper-V など) の TCP の 22 番 | MSI の許可は Private のネットワークの全部から 22 番を許し (家の Wi-Fi を Private にしていると LAN からも開く)、OpenSSH の修復や上げ直しのたびに有効へ戻る。拒否の規則なら作り直されても効く |
+
+- 規則はアドレスで絞る (インターフェイスで絞らない)。Tailscale-In と同じく宛先のアドレスで決まり、Tailscale を入れる前から置ける
+- tailnet から来る ICMP (ping) は止めない。この PC から出ていく通信の戻り (MagicDNS の答えなど) は、受信の規則に当たらない
+- 規則が揃っているかは、アドレスを数の区間にそろえて比べる (Windows は 100.64.0.0/10 を 100.64.0.0/255.192.0.0 と返し、範囲をサブネットの形で返す
+  こともある)。program・サービス・インターフェイスで絞られた規則は、sshd に効かないことがあるので揃っていない扱い
+- 22 番を許す受信の規則のうち、無効にするのは sshd.exe の規則とポートが 22 番だけの規則。22 番とほかのポートを並べた手の規則は、ほかのポートまで
+  閉じないよう残し、※ で添える (22 番は拒否の規則が止める)
+- Windows Firewall を読めないときは「無い」と読まず、その行を ⚠ で「読めない (<落ちたコマンド>: <理由>)」にする。拒否の規則 (`Get-NetFirewallProfile`・
+  `Get-NetFirewallRule`) と 22 番の許可 (COM の `HNetCfg.FwPolicy2`) は別に読むので、片方が落ちても、もう片方の行は出る
+- 拒否の規則が効くのは Windows Firewall が有効なときだけ。3 つのプロファイルのどれかが無効か、グループ ポリシーがローカルの規則を止めている
+  (`AllowLocalFirewallRules` が False) と、`Install-Sshd` は揃えずに止まる (有効にするのは人)
+
+### 鍵の置き方
+
+鍵の足し引きは、ホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) でする。端末の足し引きが dotfiles-private の
+PR に残る。
+
+1. 端末で鍵を作る (iPhone の Herdr のアプリは、アプリの中で鍵を作って公開鍵を出す)
+2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、ホストの値の list に足して PR を出す (鍵が漏れても、
+   その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る)
+3. merge したら `~/dotfiles/setup --update` を流す。`bootstrap-windows-sshd.sh` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを
+   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す。写しの鍵は全部、※ の行にコメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
+   (setup の `-Check` は管理者でなく、今の鍵のファイルを読めないので、足す鍵と消す鍵には分けない。管理者の PowerShell の `-Check` は分けて出す)
+4. ※ の行に覚えのない鍵が無いのを見てから、`bootstrap-windows-sshd.sh --apply` か PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る)。
+   端末を失くしたら、その行を消して同じ手順を流し、Tailscale の管理画面からも端末を消す
+
+- 写しは利用者が書けるファイル (administrators_authorized_keys は管理者でないと書けないので、間に挟む)。sshd は写しを読まない
+- `authorizedKeys` が null (既定) のホストでは写しを置かず (前に置いた写しは消す)、`Install-Sshd` は鍵の中身に触らない (鍵は管理者のメモ帳などで
+  `administrators_authorized_keys` に手で書く。権限だけ揃える)
+- 管理者でない PowerShell (setup・runner) の `-Check` は administrators_authorized_keys を読めないので、揃えたときに書いた中身の sha256 の記録
+  (`%LOCALAPPDATA%\dotfiles\sshd\deployed.json`) と比べる。管理者の PowerShell で `Install-Sshd -Check` を打つと、中身そのものと比べる
+- 鍵が 0 本でも揃っている扱い (※ で、誰も入れないと添える)。from= の無い鍵は ※ で本数を添える
+
+### sshd を入れる・揃える
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Sshd -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、sshd が入っていなければ 3、ほかの差があれば (先に直すことがあって揃えられないときも) 1 |
+| `Install-Sshd -IfMissing` (PowerShell) | sshd が入っていなければ入れて揃える (UAC の確認が 1 回出る)。入っていれば `-Check` と同じ |
+| `Install-Sshd` (PowerShell) | 揃える (直すことがあるときだけ UAC の確認が 1 回出る) |
+| `nix/scripts/bootstrap-windows-sshd.sh` (WSL) | `setup --update` でも毎回走る (order 96。`windowsFiles.sshd.enable = true` のマシンだけ)。鍵の写しを置いてから `-Check` を流し、sshd が入っていなければ `-IfMissing` で入れて揃える (UAC の確認が出る。待つのは 600 秒まで)。入っていてずれていれば ⚠ で囲んで知らせる (揃えはしない) |
+| `nix/scripts/bootstrap-windows-sshd.sh --apply` (WSL) | 鍵の写しを置いてから揃える。UAC の確認は Windows のデスクトップに出る |
+
+- setup はずれを揃えない。揃えるには UAC の確認が要り (外の端末から setup を流すと、押す人がいないまま待つ)、sshd を起こし直すと、つないでいる SSH が
+  切れることがあるため (runner も同じ)
+- 揃える順は、拒否の規則 → sshd_config → 鍵 → server → 22 番の許可を無効にする → ssh-agent → サービス。MSI は Server を足した時点で sshd を起こし、
+  22 番の許可も作るので、その前に拒否の規則と sshd_config と鍵を置く (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
+- MSI を流すと ssh-agent のサービスが自動・実行中に戻りうるので、`Install-OpenSSH` と同じく停止・無効に戻す (1Password の agent と pipe を取り合う)
+- 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・AllowUsers に書けないユーザー名・鍵の写しの読めない行・
+  拒否の規則が効かない Windows Firewall のプロファイル・サービスの無い `sshd.exe`) があれば、揃えずに 1 で止まり、締めの行と ※ で直し方を出す
+  (setup と runner もその直し方を出す)
+- SSH の会話の中 (`SSH_CONNECTION` がある) で揃えるときは、sshd を起こし直さない (起こし直すと会話ごと切れ、止めてから起こす間に落ちると sshd が
+  止まったままになる)。書き直した sshd_config を効かせるには、PC の管理者の PowerShell で `Restart-Service sshd` を打つ
+- 管理者で起動し直した子の思わぬ失敗も、親が `[管理者]` の行で出す (子の窓はすぐ閉じる)
+- OpenSSH を上げる・下げるとき (`Install-OpenSSH`) は Server も一緒に入れ直す。上げ直した MSI は 22 番の受信の許可を有効に戻し、サービスを作り直す
+  ので、終わったら `Install-Sshd` で揃える (その間も、LAN からの 22 番は拒否の規則が止める)。入れ替えると SSH の会話が切れるので、`Install-OpenSSH` は
+  `sshd-session` (sshd の会話) も動いているものに数え、閉じるよう出して止まる (`-Force` で進む)
+
+守れないこと (dotfiles-private の ADR 078):
+
+- 配った `Install-Sshd.ps1` と鍵の写しは、利用者が書けるファイル。同じユーザーの権限で動く悪いコードは、UAC の確認より前にそれらを書き換えられる
+  (repo のほかの `Install-*.ps1` と同じ形。UAC は守りの境ではない)。揃える前の ※ の行 (写しの鍵の全部) に、覚えのない鍵が無いかを見る
+- 送り元のアドレスで絞っているので、100.64.0.0/10 を使う LAN (ISP の CGNAT の内側など) からは、拒否の規則と AllowUsers を通る。残る壁は鍵と `from=`
+
+### Herdr のアプリと hc からつなぐ
+
+- Windows の管理者のユーザーで SSH で入ると、その会話は昇格する (UAC の確認なしに管理者になる)。昇格した SSH の会話から herdr-core を起こすと、
+  同じユーザーのデスクトップの会話をふさぎうるので、herdr-core は SSH からは起こさない。つなぐ前に、この PC で Herdr (herdr-app) を開いたままにして
+  おく (か、ふつうのデスクトップの端末で `hc server start`)。スリープしているとつながらない
+- 既定の shell (cmd.exe) のままでつながる。hc は Windows の相手に `cmd /d /c "if exist .\AppData\Local\Programs\herdr-core\herdr-core.exe (…)"` の形で、
+  ホームからの相対パスで herdr-core を呼び、`hc connect` は sh・cmd・PowerShell で同じに読める形にしてある (`DefaultShell` を変えない)
+- OpenSSH 10.4.0.0 は、SSH の会話の PATH にユーザーの PATH (HKCU) が入らない (Win32-OpenSSH の既知の不具合)。hc は PATH を使わないので当たらない。
+  Herdr のアプリが `hc` を名前で呼んで見つからないと言うときは、これを疑う
+- つなぐ先は、この PC の Tailscale の IP (か MagicDNS の名前) と Windows のユーザー名 (小文字)。Herdr のアプリは Tailscale の端末を候補に出す
+- tailnet の ACL・古い端末の整理・端末の承認 (device approval) は Tailscale の管理画面でする (dotfiles では扱わない)
+
+### sshd を止める・外す
+
+- 止める: 管理者の PowerShell で `Stop-Service sshd` と `Set-Service sshd -StartupType Disabled` (switch を false にしてから。true のままだと
+  `Install-Sshd -Check` が ⚠ を出す)
+- 外す: 同じ版の MSI を `winget download --id Microsoft.OpenSSH.Preview --version <ssh.exe の版> --download-directory <場所>` で取り、管理者の
+  PowerShell で `msiexec /i <MSI> REMOVE=Server /qn` を打つ。拒否の規則は `Remove-NetFirewallRule -Group 'dotfiles (sshd)'` で消す。
+  `C:\ProgramData\ssh` (sshd_config・host の鍵・administrators_authorized_keys) は MSI の外なので残る
+
+### Install-Sshd.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (sshd_config の中身・鍵の行の読み方と指紋・administrators_authorized_keys の中身・Windows Firewall のアドレスの区間と規則の比べ方・
+  外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・22 番を許す受信の規則の選び方・例外を 1 行にする形・鍵のファイルの権限・
+  winget download と msiexec の引数・判定と状態の表) と、
+  BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
+  Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、AllowUsers の CIDR の書き方の誤り (sshd が起動しなくなる) を
+  ここで見つける (CI は `nixpkgs#openssh` を足して流す):
+
+  ```sh
+  nix shell nixpkgs#powershell nixpkgs#openssh -c pwsh -NoProfile -File win/openssh/Install-Sshd.Tests.ps1
+  ```
+
+- `bootstrap-windows-sshd.sh` と runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`sshd (OpenSSH Server`) と、締めの行の文言
+  (`→ Install-Sshd で揃える`・`→ Install-Sshd -IfMissing で入れる`・揃える前に人が直すことの文言) で分かれる。変えるときは向こうも直す
+- Herdr を開いたままにする案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)
+- 管理者でない PowerShell (setup・runner の `-Check`) では、`Get-NetFirewallPortFilter -All` が PermissionDenied で落ちる (`Get-NetFirewallProfile`・
+  `Get-NetFirewallRule -Name`・規則からパイプで引く filter は通る)。22 番を許す受信の規則は COM (`HNetCfg.FwPolicy2` の `Rules`) で読み、無効にするのも
+  COM の規則の `Enabled` で書く (COM の規則は `Get-NetFirewallRule` の `Name` を持たない)。規則ごとに `Get-NetFirewallPortFilter` を引く形は、管理者で
+  なくても通るが、有効な受信の許可に絞っても 10 秒を超え、毎回の setup に乗る
+- サービス・ファイル・権限・Windows Firewall・winget・msiexec に触る本物の部分は、実機で `-Check` と本番を打って確かめる

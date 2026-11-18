@@ -11,6 +11,10 @@ MSI の更新は ssh-agent サービスを「自動・実行中」で作り直�
 ssh-agent を停止・無効へ戻し、winget pin で winget upgrade --all から外す。固定した版へ上げる
 winget upgrade には --include-pinned を付けて、その pin を越える (付けないと pin に止められる)。
 
+sshd (MSI の Server の機能) は入れない (ADDLOCAL=Client)。ただし Install-Sshd.ps1 が Server を足したマシン (sshd.exe がある) では、
+上げる・下げるときも ADDLOCAL=Client,Server にして Server を残す (ADDLOCAL を渡すと MSI は前の版の機能を引き継がないので、
+Client だけで上げると sshd が消える)。上げ直した MSI は 22 番の受信の許可を有効に戻すので、続けて Install-Sshd で揃える。
+
 管理者が要るのは winget と ssh-agent を直す段だけで、そのときだけ UAC で自分を
 起動し直す。-Check は何も変えない。
 
@@ -80,11 +84,13 @@ function Test-WingetPinned {
 # 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は --include-pinned を
 # 受け付けないので付けない (下げるときの install は、uninstall で入っていない形にしてからなので pin を見ない)
 function Get-WingetCommands {
-    param([string]$Plan, [string]$PackageId, [string]$Version)
+    param([string]$Plan, [string]$PackageId, [string]$Version, [switch]$Server)
     $common = @('--id', $PackageId, '--exact', '--source', 'winget', '--silent',
         '--accept-source-agreements', '--disable-interactivity')
-    # ADDLOCAL=Client で sshd を入れない (ssh-agent はクライアント側の部品でもあるので入る)
-    $put = $common + @('--version', $Version, '--custom', 'ADDLOCAL=Client', '--accept-package-agreements')
+    # ADDLOCAL=Client で sshd を入れない (ssh-agent はクライアント側の部品でもあるので入る)。Install-Sshd.ps1 が Server を足した
+    # マシン (-Server) では Client,Server にして残す (ADDLOCAL を渡すと MSI は前の版の機能を引き継がず、Client だけだと sshd が消える)
+    $features = if ($Server) { 'ADDLOCAL=Client,Server' } else { 'ADDLOCAL=Client' }
+    $put = $common + @('--version', $Version, '--custom', $features, '--accept-package-agreements')
     switch ($Plan) {
         'install' { , (@('install') + $put) }
         'upgrade' { , (@('upgrade') + $put + @('--include-pinned')) }
@@ -138,6 +144,9 @@ function Format-OpenSshState {
     }
     if ($State.Inbox) {
         [pscustomobject]@{ Text = '※ Windows の機能の OpenSSH (System32\OpenSSH) も入っている。PATH では Program Files が先なので使われないが、ssh-agent サービスの名前がぶつかる'; Warn = $false }
+    }
+    if ($State.Server -and ($State.Plan -ne 'none')) {
+        [pscustomobject]@{ Text = '※ sshd (Server の機能) も入っている。上げる・下げるときは Server も一緒に入れ直し、終わったら Install-Sshd で揃える (MSI が 22 番の受信の許可を有効に戻す)'; Warn = $false }
     }
 }
 
@@ -228,6 +237,8 @@ function Get-OpenSshState {
         Pinned         = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
         Latest         = Get-WingetLatestVersion -Lines $show.Lines
         Inbox          = Test-Path -LiteralPath (Join-Path $env:SystemRoot 'System32\OpenSSH\ssh.exe')
+        # Install-Sshd.ps1 が MSI に Server の機能を足したか (上げる・下げるときに Server も残す)
+        Server         = Test-Path -LiteralPath (Join-Path $InstallDir 'sshd.exe')
     }
 }
 
@@ -239,16 +250,17 @@ function Write-OpenSshState {
     }
 }
 
-# 入れ替えの邪魔になる、動いている ssh.exe などを返す
+# 入れ替えの邪魔になる、動いている ssh.exe などを返す。sshd-session は sshd (Server の機能) の SSH の会話 (入れ替えると切れる。
+# Install-Sshd.ps1 が Server を足したマシンだけにある)
 function Get-BusyOpenSshProcess {
-    @(Get-Process -Name ssh, ssh-add, scp, sftp -ErrorAction SilentlyContinue)
+    @(Get-Process -Name ssh, ssh-add, scp, sftp, sshd-session -ErrorAction SilentlyContinue)
 }
 
 # 管理者で行う段: winget で版を揃え、ssh-agent を停止・無効にする。成功なら $true
 function Invoke-OpenSshFix {
-    param([string]$Plan, [string]$PackageId, [string]$Version)
+    param([string]$Plan, [string]$PackageId, [string]$Version, [switch]$Server)
     $ok = $true
-    foreach ($arguments in @(Get-WingetCommands -Plan $Plan -PackageId $PackageId -Version $Version)) {
+    foreach ($arguments in @(Get-WingetCommands -Plan $Plan -PackageId $PackageId -Version $Version -Server:$Server)) {
         Write-Step "winget $($arguments -join ' ')"
         $result = Invoke-Winget -Arguments $arguments
         $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Step "  $_" }
@@ -321,7 +333,8 @@ function Invoke-InstallOpenSsh {
         $sshExe = Join-Path $installDir 'ssh.exe'
         if (Test-Path -LiteralPath $sshExe) { $installed = [version](Get-Item -LiteralPath $sshExe).VersionInfo.FileVersion }
         $plan = Get-OpenSshPlan -Installed $installed -Target $target
-        if (Invoke-OpenSshFix -Plan $plan -PackageId $packageId -Version $Version) { return 0 }
+        $server = Test-Path -LiteralPath (Join-Path $installDir 'sshd.exe')
+        if (Invoke-OpenSshFix -Plan $plan -PackageId $packageId -Version $Version -Server:$server) { return 0 }
         return 1
     }
 
@@ -349,7 +362,7 @@ function Invoke-InstallOpenSsh {
         # $null.Count が例外になる (2026-10-06 の本番で、ssh.exe が 0 本のときにここで止まった)
         $busy = @(Get-BusyOpenSshProcess)
         if ($busy.Count -gt 0 -and -not $Force) {
-            Write-Host '入れ替える ssh.exe などが動いている。閉じてから打ち直す (-Force で進む):'
+            Write-Host '入れ替える ssh.exe など (sshd の SSH の会話の sshd-session も) が動いている。閉じてから打ち直す (-Force で進む):'
             foreach ($p in $busy) {
                 $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
                 Write-Host "  $($p.Id)  $commandLine"
@@ -360,7 +373,7 @@ function Invoke-InstallOpenSsh {
 
     if (($state.Plan -ne 'none') -or -not $state.AgentDisabled) {
         if (Test-IsAdmin) {
-            [void](Invoke-OpenSshFix -Plan $state.Plan -PackageId $packageId -Version $Version)
+            [void](Invoke-OpenSshFix -Plan $state.Plan -PackageId $packageId -Version $Version -Server:$state.Server)
         } else {
             [void](Invoke-Elevated -Version $Version -Force:$Force)
         }
@@ -376,6 +389,9 @@ function Invoke-InstallOpenSsh {
     Write-Host ''
     $after = Get-OpenSshState -PackageId $packageId -InstallDir $installDir -Target $target
     Write-OpenSshState -State $after -Target $target -InstallDir $installDir
+    if ($after.Server -and ($state.Plan -ne 'none')) {
+        Write-Host '  sshd            : Server の機能も入れ直した → Install-Sshd で揃える (上げ直した MSI が 22 番の受信の許可を有効に戻す)'
+    }
     $keys = Get-AgentKeyCount -SshAddExe (Join-Path $installDir 'ssh-add.exe')
     if ($null -ne $keys) {
         Write-Host "  ssh-add -l      : 鍵 $keys 本"

@@ -7,7 +7,8 @@
 //! 判断は手順ごとに WSL の wrapper と同じ (`SPECS` の表。dotfiles-private の docs/adr/060_win_runner_core_* の spec §6):
 //!
 //! - 0: 揃っている
-//! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる)
+//! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる。sshd は
+//!   入れられないとき (OpenSSH が無いなど) は ps1 が 1 を返す)
 //! - 1 (揃っていない): 手順の `Policy` で、揃える (引数なし・`-IfMissing`)・知らせるだけ (※ の手順)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
@@ -165,6 +166,65 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+    },
+    Ps1Spec {
+        id: "sshd",
+        order: 96,
+        title: "sshd を OpenSSH の MSI に足し、Tailscale と localhost からだけ鍵で入れる形に揃える (ずれていても揃えない)",
+        gate: Gate::Tool("windowsSshd"),
+        script: "win/openssh/Install-Sshd.ps1",
+        command: "Install-Sshd",
+        subject: "Windows の sshd",
+        package: "sshd (OpenSSH Server。Microsoft.OpenSSH.Preview の MSI の Server の機能)",
+        header: Header::Contains("sshd (OpenSSH Server"),
+        check_secs: 120,
+        install_secs: 600,
+        // 揃えるには UAC の確認が要り (外から流すと押す人がいない)、sshd を起こし直すと、つないでいる SSH が切れることがある。
+        // runner は WSL の wrapper と同じく、入っていないときだけ入れ、ずれは知らせるだけにする
+        policy: Policy::Warn,
+        uac: true,
+        ok_text: "Windows の sshd は、dotfiles の形 (Tailscale と localhost からだけ、鍵でだけ入れる) に揃っています。",
+        // Herdr を開いたままにする案内は ps1 の出力 (上に流れている) に入っている (重ねて出さない)
+        installed: &[
+            "Windows に sshd を入れて揃えました (Tailscale と localhost からだけ、鍵でだけ入れます)。",
+        ],
+        synced: &[],
+        manual_fix: &[
+            "揃えるには PowerShell で Install-Sshd を打つ (Windows に UAC の確認が 1 回出る。sshd を起こし直すと、つないでいる SSH が切れることがある。runner は揃えない)",
+        ],
+        // 入れかけで止まると ps1 は 1 (ずれ) を返し、-IfMissing は何もしないので、引数なしの Install-Sshd を案内する
+        sync_fix: &[
+            "揃えるには PowerShell で Install-Sshd を打つ (Windows に UAC の確認が 1 回出る。入れかけで止まったときも、これで続きを揃える)",
+        ],
+        releases_file: false,
+        missing_blocked: None,
+        // 揃える前に人が直すこと (Install-Sshd.ps1 の締めの行の文言)。揃えるコマンドを打っても直らない
+        output_fixes: &[
+            (
+                "OpenSSH が入っていない → 先に Install-OpenSSH",
+                "sshd は OpenSSH の MSI に足すので、先に OpenSSH を入れる (PowerShell で Install-OpenSSH -IfMissing。Windows に UAC の確認が出る)",
+            ),
+            (
+                "Windows の機能の OpenSSH Server が入っている",
+                "二重にしないため、先に Windows の機能の OpenSSH Server を外す (管理者の PowerShell で Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0)",
+            ),
+            (
+                "AllowUsers に書けないユーザー名",
+                "Windows のユーザー名を AllowUsers に書けないので、このユーザーでは dotfiles の sshd を使えない (英小文字・数字・. _ - の名前のユーザーだけ。win/README.md の「sshd」)",
+            ),
+            (
+                "Windows Firewall が効いていないプロファイルがある",
+                "拒否の規則が効かないので揃えない。管理者の PowerShell で Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True を打つ (グループ ポリシーがローカルの規則を止めている PC では、dotfiles の sshd は使えない)",
+            ),
+            (
+                "sshd.exe はあるがサービス sshd が無い",
+                "MSI の入り方が崩れている。win/README.md の「sshd を止める・外す」の手順で Server の機能を外してから、PowerShell で Install-Sshd を打つ",
+            ),
+            (
+                "鍵の写しに読めない行がある",
+                "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\authorized_keys) の元、ホストの値の wsl.windowsFiles.sshd.authorizedKeys の、authorized_keys の行として読めない値を直す",
+            ),
+        ],
     },
     Ps1Spec {
         id: "tailscale",
@@ -803,8 +863,11 @@ mod tests {
     //! - 0 は揃っている。check と dry-run は -Check だけを打つ (dry-run は打つはずのものを出す)
     //! - 3 は apply で -IfMissing を打つ。google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる
     //! - 1 は手順ごと: ntn・claude-code は「→ … で揃える」なら引数なしで揃え、PATH のずれだけなら知らせる。herdr-app は -IfMissing で
-    //!   揃える。openssh・tailscale・type-clipboard・google-ime-install は知らせるだけ。herdr は知らせるだけで、Preview が残っていれば外す手順も出す
+    //!   揃える。openssh・sshd・tailscale・type-clipboard・google-ime-install は知らせるだけ。herdr は知らせるだけで、Preview が残っていれば外す手順も出す
     //! - tailscale は道具の switch (windowsTailscale) で on/off し、入れた後にログインは手でと出す (入っている版の方が新しいときは ps1 が 0)
+    //! - sshd は道具の switch (windowsSshd) で on/off し、3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
+    //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行・拒否の規則が効かない
+    //!   プロファイル・サービスの無い sshd.exe) はその直し方を出す。入れかけで止まったら、引数なしの Install-Sshd を案内する
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1020,6 +1083,7 @@ mod tests {
     fn warn_policies_do_not_touch_drift() {
         for id in [
             "openssh",
+            "sshd",
             "tailscale",
             "type-clipboard",
             "google-ime-install",
@@ -1128,6 +1192,101 @@ mod tests {
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
         assert_eq!(ends(&calls), vec!["-Check"]);
         assert!(out.contains("Windows の Tailscale は、dotfiles で固定した版以上で入っています。"));
+    }
+
+    /// sshd: 道具の switch (windowsSshd) で on/off。3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
+    /// 直すことは出力の印ごとに直し方を選ぶ
+    #[test]
+    fn sshd_installs_only_when_missing_and_only_warns_drift() {
+        let s = spec("sshd");
+        assert_eq!(s.gate, Gate::Tool("windowsSshd"));
+        assert_eq!(s.order, 96);
+        assert_eq!(s.script, "win/openssh/Install-Sshd.ps1");
+        // 3: UAC を先に知らせてから -IfMissing
+        let sys1 = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠️ sshd が入っていない → Install-Sshd -IfMissing で入れる (UAC の確認が 1 回出る) ⚠️".into(),
+                ],
+            ),
+            (0, vec!["入れた".into()]),
+        );
+        let (o, out, calls) = run("sshd", &sys1, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(out.contains("UAC の確認が出ます"));
+        assert!(out.contains("Windows に sshd を入れて揃えました"));
+        // check では -Check だけを打ち、apply で入れると出す
+        let sys1c = sys((3, vec![header_line(s)]), (0, vec![]));
+        let (o, _, calls) = run("sshd", &sys1c, Mode::Check);
+        assert_eq!(o[0].kind, Kind::Missing);
+        assert_eq!(
+            o[0].text,
+            "入っていない → apply で入れる (Install-Sshd.ps1 -IfMissing)"
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 1: ずれは Install-Sshd を案内する (runner は揃えない)。揃える前に人が直すことは、その直し方
+        for (line, want) in [
+            (
+                "⚠️ dotfiles の形と揃っていない → Install-Sshd で揃える (UAC の確認が 1 回出る。sshd を起こし直すと、つないでいる SSH が切れることがある) ⚠️",
+                "PowerShell で Install-Sshd を打つ",
+            ),
+            (
+                "⚠️ OpenSSH が入っていない → 先に Install-OpenSSH -IfMissing で入れる (sshd はその MSI に足す) ⚠️",
+                "Install-OpenSSH -IfMissing",
+            ),
+            (
+                "⚠️ Windows の機能の OpenSSH Server が入っている → 先に外す (二重にしない。上の ※ の行) ⚠️",
+                "Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0",
+            ),
+            (
+                "⚠️ AllowUsers に書けないユーザー名 → このユーザーでは dotfiles の sshd を使えない (上の ※ の行) ⚠️",
+                "このユーザーでは dotfiles の sshd を使えない",
+            ),
+            (
+                "⚠️ Windows Firewall が効いていないプロファイルがある → 先に有効にする (拒否の規則が効かない。上の ※ の行) ⚠️",
+                "Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True",
+            ),
+            (
+                "⚠️ sshd.exe はあるがサービス sshd が無い → Server の機能を外してから入れ直す (上の ※ の行) ⚠️",
+                "sshd を止める・外す",
+            ),
+            (
+                "⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️",
+                "wsl.windowsFiles.sshd.authorizedKeys",
+            ),
+        ] {
+            let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+            let (o, _, calls) = run("sshd", &sys2, APPLY);
+            assert_eq!(o[0].kind, Kind::Manual, "{line}");
+            assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+            assert_eq!(o[0].notes.len(), 1, "{line}");
+            assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
+        }
+        // 入れかけで止まった (-IfMissing が 1): 引数なしの Install-Sshd を案内する (-IfMissing は 1 のとき何もしない)
+        let sys4 = sys(
+            (3, vec![header_line(s)]),
+            (1, vec!["msiexec が失敗した (終了コード 1603)".into()]),
+        );
+        let (o, _, calls) = run("sshd", &sys4, APPLY);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("PowerShell で Install-Sshd を打つ")
+                    && !n.contains("-IfMissing")),
+            "{:?}",
+            o[0].notes
+        );
+        // 0: 揃っている
+        let sys3 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, out, calls) = run("sshd", &sys3, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert!(out.contains("Windows の sshd は、dotfiles の形"));
     }
 
     #[test]

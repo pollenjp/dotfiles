@@ -28,6 +28,8 @@
   #     windowsFiles.ntn.enable = false;          # Windows に ntn を入れない (既定は winget で固定した版を入れる)
   #     windowsFiles.claudeCode.enable = false;   # Windows に Claude Code を入れない (既定は winget で固定した版を入れる)
   #     windowsFiles.tailscale.enable = true;     # Windows に Tailscale を winget で固定した版で入れる (既定は入れない)
+  #     windowsFiles.sshd.enable = true;          # Windows に sshd を入れ、Tailscale から鍵でだけ入れる (既定は入れない)
+  #     windowsFiles.sshd.authorizedKeys = [ "from=\"100.64.0.1\" ssh-ed25519 AAAA… phone" ];   # その鍵 (例は作り物。実機の鍵は dotfiles-private に書く)
   #     exeExecTrace.enable = true;   # .exe の起動を常時記録する (ADR 012。setup の手順が要る)
   #     mtuGuard.enable = true;       # eth0 の MTU を上限 (mtuGuard.maxMtu。既定 1350) まで下げ続ける (setup の手順が要る)
   #   };
