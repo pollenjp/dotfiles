@@ -479,15 +479,16 @@ claude-work                                # 初回は /login で会社のアカ
 | `.claude-<名前>\plugins\`・`.credentials.json`・`.claude.json` など | 実体。Claude Code が作る (触らない) |
 | `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe` | runner の exe の写し (exe の名前で launcher として動く)。置き場をユーザーの PATH の末尾に足す (`HKCU\Environment` の生の値に足す。値の型と、ほかの要素の `%VAR%` の書き方はそのまま) |
 
-- launcher は `~/.claude-<名前>\settings.json` が `~/.claude\settings.json` へのリンクでなければ、Claude Code を起こさずに止まる (Claude Code は空の
-  config dir に起動しただけで `projects\` などを実体で作り、runner がリンクを張れなくなるため)。用意されていれば `ANTHROPIC_API_KEY`・
+- launcher は `~/.claude-<名前>\settings.json` と `projects` が `~/.claude` の同じ名前へのリンクでなければ、Claude Code を起こさずに止まる (Claude Code は
+  空の config dir に起動しただけで `projects\` などを実体で作り、runner がリンクを張れなくなる・履歴が分かれるため)。用意されていれば `ANTHROPIC_API_KEY`・
   `CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN` (`/login` の資格情報より優先される env) を外し、`CLAUDE_CONFIG_DIR` を付けて PATH の
   `claude.exe` を起こし、その終了コードで終わる。exe なので PowerShell・Git Bash・cmd からも、`hc run` のように shell を通さない起こし方からも
   同じ名前で打てる
 - Ctrl+C は Claude Code に任せる (launcher は Ctrl+C・Ctrl+Break を受け流すだけで、自分だけが落ちない)。launcher だけを外から止めると
   `claude.exe` は残る (端末を閉じれば両方終わる)
 - UAC の確認を断った・出せない (SSH の会話・非対話) ときは、symlink の行だけを ⚠ にして、ほかは用意する。次の `dotfiles apply` でまた聞く。
-  `check` と `apply --dry-run` は昇格しない。別の先を指す symlink は、昇格する前に外してから張り直す (断ると無いままになり、次の apply でまた聞く)
+  `check` と `apply --dry-run` は昇格しない。別の先を指す symlink は、昇格する前に外してから張り直す (断ると無いままになり、次の apply でまた聞く。
+  外せなければ張らずに ⚠)
 - **PATH に足しても、もう動いている process には効かない。** herdr-app とその中の端末・動いている Claude Code は古い PATH のままなので、
   初めて足した後は herdr-app を上げ直すか、新しい PowerShell で打つ
 - launcher は runner の exe の写しなので、runner を作り直すと (clone を pull すると) `dotfiles check` が「書き直す」と出す。`dotfiles apply` で
@@ -511,12 +512,14 @@ $d = "$HOME\.claude-work"                         # claude-personal なら .clau
 Get-Content "$d\settings.json"                    # 残したい設定は ~/.claude\settings.json へ移す
 Remove-Item "$d\settings.json"
 (Get-Item "$d\projects").LinkType                 # 空 (実体) のときだけ次の 2 行を打つ
-robocopy "$d\projects" "$HOME\.claude\projects" /E /XC /XN /XO   # ~/.claude\projects へ寄せる (同じ名前のファイルは上書きしない)
-cmd /c rmdir /s /q "$d\projects"
+robocopy "$d\projects" "$HOME\.claude\projects" /E /XC /XN /XO /R:1 /W:1   # ~/.claude\projects へ寄せる (同じ名前のファイルは上書きしない)
+if ($LASTEXITCODE -lt 8) { Rename-Item "$d\projects" projects.bak }        # 消さずに退ける (robocopy が落ちたら退けない)
 dotfiles apply --steps claude-accounts
 ```
 
-ログイン (`.credentials.json`・`.claude.json`) と `plugins\` はそのまま残してよい (`/login` し直さなくてよい)。`CLAUDE.md` が実体のときも、
+同じ名前で中身の違うファイル (`memory\*.md` など) は写さないので、`projects.bak` に残る。`~/.claude\projects` の同じ名前のものと見比べ、
+要るものを移してから `projects.bak` を消す (`cmd /c rmdir /s /q "$d\projects.bak"`)。ログイン (`.credentials.json`・`.claude.json`) と `plugins\` は
+そのまま残してよい (`/login` し直さなくてよい)。`CLAUDE.md` が実体のときも、
 中身を見てから消す (共通の指示は dotfiles の `nix/files/claude/CLAUDE.md` に書く)。
 
 #### switch を外したとき
