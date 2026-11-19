@@ -43,9 +43,11 @@
 //     「クリックで大きく見る (Esc で閉じる)」を出す。説明はミニ絵の下には出さない。
 //   - 出せないとき (パスが空・絶対パス・.. を含む・URL・図が無い・SVG を読めない) は、その場所に薄い字 (dim) で 1 行「ミニ絵を出せない: <わけ>」と
 //     出す。図があるかは、panel.json を読み直すたびに readTextFile で確かめる (SVG は中身に <svg があるかも見る。SVG でない図は、有るかだけ)。
-//   - 絵の行で切った後ろの文は、TextView が別の文として読む (字下げした箇条書きの行で始まると 1 段目として、4 つ以上の空白で始まるとコードとして
-//     出しうる。番号付きの箇条書きは、後ろの文の最初の項目に書いた番号から数える)。mod では直さない (置く場所の決まりで避ける)。問いの body と
-//     図の説明 (caption) では、絵だけの行も今までどおり TextView に渡す (ミニ絵にしない)。
+//   - 絵の行で切った後ろの文は、別の TextView で出す。後ろの文が箇条書きの項目の行で始まるときは、絵の行の前で開いていた項目のうち、その項目を
+//     入れる項目と同じ並びの 1 つ前の項目を、中身の無い項目の行 (元の字下げと記号。番号はその項目の番号) にして頭に足し、元の段・記号・番号の
+//     まま出す (TextView は、中身の無い項目と、入れ子の並びから始まる項目に、記号も行も出さない)。後ろの文が項目でない行 (続きの文) で始まると、
+//     左の端からの別の文として出る (4 つ以上の空白で始まるとコード)。mod では直さない (置く場所の決まりで避ける)。問いの body と図の説明
+//     (caption) では、絵だけの行も今までどおり TextView に渡す (ミニ絵にしない)。
 //
 // チケットと PR の一覧 (type "tickets"・"prs"): ハブが panel.json に書いた行を、そのまま 1 行ずつ出す (mod から gh や Notion を引かない)。
 //   行の形: tickets は { id: "TKT-n", title, url: "https://app.notion.com/p/…", status: "In Progress", note }、
@@ -357,10 +359,13 @@ const prefixOf = (depth, item) => {
   }
   return BULLETS[Math.min(depth, BULLETS.length) - 1];
 };
-// 文の塊 (TextView に渡す行の並び) の最後の行 (空の行は飛ばす) の字の頭: 箇条書きの段 (0 は箇条書きの外) と、その項目の記号の欄の字。
-// 塊ごとに頭から数える (TextView も塊ごとに読む)。字下げで入れ子と項目の終わりを決め、怠けた続きの行 (字下げの無い続き) は見ない
-const alignOf = (lines) => {
-  const stack = []; // 開いている項目: { ci: 字の頭の位置, kind: 記号か番号の区切り, start: 並びの最初の番号, ix: その並びの何番目 (0 から) }
+// 文の塊 (TextView に渡す行の並び) を、TextView と同じく頭から読んだ形: 最後の行 (空の行は飛ばす) の字の頭 (align: 箇条書きの段 (0 は
+// 箇条書きの外) と、その項目の記号の欄の字) と、最後に開いている項目の並び (open)。字下げで入れ子と項目の終わりを決め、怠けた続きの行
+// (字下げの無い続き) は見ない
+const shapeOf = (lines) => {
+  // 開いている項目: { ci: 字の頭の位置, mi: 記号の位置, kind: 記号か番号の区切り, num: 書いた番号の字, start: 並びの最初の番号,
+  // ix: その並びの何番目 (0 から) }
+  const stack = [];
   let fence = null;
   let res = { depth: 0, prefix: "" };
   for (const raw of lines) {
@@ -378,7 +383,7 @@ const alignOf = (lines) => {
         const kind = m[3] ? m[4] : m[2];
         const same = prev && prev.kind === kind;
         const ci = m[5] === "" ? m[0].length + 1 : m[0].length;
-        stack.push({ ci, kind, start: same ? prev.start : m[3] ? Number(m[3]) : 1, ix: same ? prev.ix + 1 : 0 });
+        stack.push({ ci, mi, kind, num: m[3] ?? "", start: same ? prev.start : m[3] ? Number(m[3]) : 1, ix: same ? prev.ix + 1 : 0 });
       } else {
         const ind = line.length - line.trimStart().length;
         while (stack.length > 0 && ind < stack[stack.length - 1].ci) stack.pop();
@@ -388,7 +393,25 @@ const alignOf = (lines) => {
     const top = stack[stack.length - 1];
     res = { depth: stack.length, prefix: top ? prefixOf(stack.length, top) : "" };
   }
-  return res;
+  return { align: res, open: stack };
+};
+// 中身の無い項目の行 (contextOf)。元の記号の位置と記号で書き、番号は、その項目の番号 (start + 何番目) を書いた番号の桁にそろえる (0 で
+// 埋める)。桁が増えるなら書いた番号のまま (中身の無い項目は、記号の後ろ 1 つの位置が字の頭になり、桁が変わると中に入る字下げが変わる)
+const emptyItem = (it) => {
+  if (it.kind !== "." && it.kind !== ")") return `${" ".repeat(it.mi)}${it.kind}`;
+  const n = String(it.start + it.ix);
+  return `${" ".repeat(it.mi)}${n.length <= it.num.length ? n.padStart(it.num.length, "0") : it.num}${it.kind}`;
+};
+// 絵の行の後ろの文の頭に足す行 (頭のコメントの「ミニ絵」)。後ろの文の最初の行 (first) が項目の行なら、前の文の終わりで開いていた項目
+// (open) のうち、その項目を入れる項目 (字の頭の位置がその項目の記号の位置より深くないもの) と、同じ並びの 1 つ前の項目 (記号か区切りが
+// 同じとき) を、中身の無い項目の行にする。TextView は、中身の無い項目と、入れ子の並びから始まる項目に、記号も行も出さない
+const contextOf = (open, first) => {
+  const m = LIST_ITEM.exec(first.replace(/\t/g, "    "));
+  if (!m) return [];
+  const kind = m[3] ? m[4] : m[2];
+  const keep = open.filter((it) => it.ci <= m[1].length);
+  const next = open[keep.length];
+  return [...keep, ...(next && next.kind === kind ? [next] : [])].map(emptyItem);
 };
 // ミニ絵の図のパスが決まりの外なら、そのわけ (中なら null)。決まりは image の節の src と同じ (pjp-hub-panel-media/ からのパス。"mods/" は home から)
 const miniPathWhy = (p) => {
@@ -399,13 +422,20 @@ const miniPathWhy = (p) => {
   return null;
 };
 // markdown の節の text を、絵だけの行で切る。返すのは、文 { kind: "text", text, align } とミニ絵 { kind: "mini", alt, path, why, align } の
-// 並び (中身が空白だけの文は除く)。ミニ絵の align は、すぐ上の文の最後の行の字の頭 (すぐ上が絵なら、その絵と同じ。上に何も無ければ 0 段)
+// 並び (中身が空白だけの文は除く)。文の text は TextView に渡す字で、頭の空の行を除き、絵の行の後ろなら contextOf の行を頭に足す。
+// ミニ絵の align は、すぐ上の文の最後の行の字の頭 (すぐ上が絵なら、その絵と同じ。上に何も無ければ 0 段)
 const splitMinis = (text) => {
   const parts = [];
   let buf = [];
   let fence = null;
+  let shape = { align: { depth: 0, prefix: "" }, open: [] }; // すぐ上の文の形 (shapeOf)
   const flush = () => {
-    if (buf.some((l) => l.trim() !== "")) parts.push({ kind: "text", text: buf.join("\n"), align: alignOf(buf) });
+    const at = buf.findIndex((l) => l.trim() !== "");
+    if (at >= 0) {
+      const lines = [...contextOf(shape.open, buf[at]), ...buf.slice(at)];
+      shape = shapeOf(lines);
+      parts.push({ kind: "text", text: lines.join("\n"), align: shape.align });
+    }
     buf = [];
   };
   for (const line of text.split(/\r?\n/)) {
@@ -421,8 +451,7 @@ const splitMinis = (text) => {
       continue;
     }
     flush();
-    const last = parts[parts.length - 1];
-    parts.push({ kind: "mini", alt: m[1], path: m[2], why: miniPathWhy(m[2]), align: last ? last.align : { depth: 0, prefix: "" } });
+    parts.push({ kind: "mini", alt: m[1], path: m[2], why: miniPathWhy(m[2]), align: shape.align });
   }
   flush();
   return parts;
