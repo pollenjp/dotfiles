@@ -692,7 +692,7 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   `{ kind, id, title, url, status, state, ci, who, note, steps, children, related }` で、`kind` は `ticket` (省いてよい)・`pr`・`item`。チケットの行の
   `children` に子のチケット・PR・item を入れると 1 段下げて出し、字下げに縦と横の線を引く (3 段まで)。行ごとに ID・状態の札・題・誰が (`who`。枠だけの札)
   を並べ、その下に段 (`steps`。flow の段と同じ札)・一言 (`note`)・子を出す。ID か題を押すと `url` を開く (一覧と同じく http と https だけ)。
-  Done・Canceled のチケットで、下に動いているもの (active か blocked の段・open か draft の PR) が無ければ初め 1 行に畳み、下の PR の数を足す
+  Done・Canceled のチケットで、下に動いているもの (active か blocked の段・open か draft の PR) が無ければ初め上の段だけに畳み、下の PR の数を足す
   (「PR 3 本 merged」。`▸` で開き、`▾` で畳む)。`related` が true の根の行は、点線の下に「関連」として出す。欄の意味・札の色・畳み方の正本は
   `main.js` の頭のコメント:
 

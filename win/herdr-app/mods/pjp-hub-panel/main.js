@@ -59,7 +59,7 @@
 //     問わず) の PR の数を state ごとに足す (例「PR 3 本 merged」「PR 2 本 merged・1 本 closed」。open・draft・merged・closed の順で、
 //     知らない state は出てきた順に字のまま、state の無い PR は数だけ。大文字小文字の違う同じ state は 1 つに数え、初めに出てきた字で
 //     出す。PR が無ければ足さない)。手で開け閉めした行は、節の畳みと同じくペインの中で覚え (鍵は節の id と行の id。id の無い行は木の
-//     中の位置)、panel.json を書き直しても残し、version が変わると初めの形に戻す。
+//     中の位置。同じ id の行が木に 2 つあれば一緒に開け閉めする)、panel.json を書き直しても残し、version が変わると初めの形に戻す。
 //   - related が true の根の行は関連の行 (束ねていないチケット・親の無い PR)。ほかの根の行 (ふつうは 1 つ目がハブのチケットで、子の
 //     チケットはその children) を上から順に出した下に点線を引き、その下に「関連」の字と並べて出す (ほかの根の行が無ければ点線は
 //     引かない)。根でない行の related は見ない (その場に出す)。
@@ -972,10 +972,10 @@ export default class HubPanel extends View {
 
   // ---- チケット・進み具合・PR の木 (頭のコメントの「チケット・進み具合・PR の木」) ----
 
-  // 木の寸法。S は開け閉めの印の欄の幅 (節の題の行の ▸ の欄と同じ fs(12))、gap は欄と ID の間、I は 1 段の字下げ (欄 + 間。子の
-  // 印の欄は親の ID の頭にそろう)、x0 は縦の線を引く所 (欄のまん中)
+  // 木の寸法。S は開け閉めの印の欄の幅 (節の題の行の ▸ の欄と同じ fs(12) を整数に丸めたもの。1 段の字下げが整数になり、縦の線が段に
+  // よって半端な px に来ない)、gap は欄と ID の間、I は 1 段の字下げ (欄 + 間。子の印の欄は親の ID の頭にそろう)、x0 は縦の線を引く所 (欄のまん中)
   treeGeom() {
-    const S = this.fs(12);
+    const S = Math.round(this.fs(12));
     const gap = 6;
     return { S, gap, I: S + gap, x0: Math.floor(S / 2) };
   }
@@ -1076,7 +1076,8 @@ export default class HubPanel extends View {
       // ID の無い行 (item など) は、題を太字にして行の名前にする
       .when(title !== "", (el) => el.child(this.linkText(`hp-wtt-${id}-${path}`, title, url, c.fg, c).min_w(0).when(rid === "", (e) => e.font_semibold())))
       .when(who !== "", (el) => el.child(this.outlineChip(who, c.muted)))
-      .when(o.summary !== "", (el) => el.child(div().flex_none().ml_auto().text_size(this.fs(11)).text_color(c.muted).child(o.summary)));
+      // 畳んだ行の PR の数は右に寄せ、狭ければ縮んで折り返す (カードの外へはみ出さない)
+      .when(o.summary !== "", (el) => el.child(div().min_w(0).ml_auto().text_size(this.fs(11)).text_color(c.muted).child(o.summary)));
     return h_flex().items_start().gap(g.gap).child(this.treeSlot(path, id, g, c, o)).child(head);
   }
 
