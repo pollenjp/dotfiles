@@ -276,8 +276,8 @@ scanData = "https://app.notion.com/p/…"
 - `powershell-profile` も、初めての apply は記録が無いので、WSL の setup が `$PROFILE` に足した読み込みの行を見て記録だけ作る (行は足さない。
   runner は WSL の記録 `~/.local/state/dotfiles/windows-powershell-profile.json` を読まず、自分の記録を `%LOCALAPPDATA%\dotfiles\state\` に作る)。
   WSL の setup が「以前 `$PROFILE` に足した 1 行が見当たりません」と出していたホスト (Windows 側で行を消した) は、runner に足した記録が無いので、
-  切り替えた後の apply が足し直す。消したままにするなら、切り替える前に、行を消す代わりに頭に `#` を付けて残す (`.config\powershell\dotfiles.ps1`
-  を含む行があれば、WSL も runner も足さない)
+  切り替えた後の apply が足し直す (受け持ちが WSL の間の check も、行が無ければそう添える)。消したままにするなら、切り替える前に、頭に `#` を
+  付けた同じ行を `$PROFILE` に置く (`.config\powershell\dotfiles.ps1` を含む行があれば、WSL も runner も足さない)
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順

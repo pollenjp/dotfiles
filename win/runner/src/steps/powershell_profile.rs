@@ -51,6 +51,8 @@ const QUERY_SECS: u64 = 60;
 const ADDED: &str = "added";
 /// 記録が壊れていたときの直し方 (WSL と同じ)
 const BROKEN_HINT: &str = "消してから流し直してください (足した記録が無いものとして扱います)";
+/// 受け持ちが WSL のホストで行が無いときに添える、切り替えた後にすること
+const SWITCH_NOTE: &str = "WSL の setup が「以前 $PROFILE に足した 1 行が見当たりません」と出すなら Windows 側で消した行で、runner は WSL の記録を読まないので、受け持ちを runner に切り替えた後の初めての apply が足し直す。消したままにするなら、切り替える前に頭に # を付けた同じ行を $PROFILE に置く (win/README.md の「受け持ちを runner に切り替える」)";
 
 pub struct PowershellProfile;
 
@@ -134,6 +136,20 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
         return Outcome::new(Kind::Failed, "pwsh が $PROFILE の場所を返さなかった")
             .note(manual_note());
     };
+    // 出力が UTF-8 として読めなかった (置き換えの文字が混じる) 場所には書かない (化けたフォルダに足して記録し、以後ずっと揃っていると読まないよう)
+    if win_profile.contains('\u{fffd}') {
+        warn(
+            ctx,
+            &with_manual(vec![format!(
+                "pwsh が返した $PROFILE の場所に、読めない文字があります: {win_profile}"
+            )]),
+        );
+        return Outcome::new(
+            Kind::Failed,
+            "pwsh が返した $PROFILE の場所に読めない文字がある (出力を UTF-8 で読めなかった)",
+        )
+        .note(manual_note());
+    }
     let profile = PathBuf::from(&win_profile);
     if profile.is_dir() {
         ctx.say(format!(
@@ -203,11 +219,15 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
             .note(manual_note());
     }
 
+    // runner は WSL の記録を読まないので、受け持ちが WSL の間は、Windows 側で消した行と初めから無い行を見分けられない。WSL の setup は消した
+    // 行を足し直さないが、切り替えた後の runner は足し直すので、そう添える
+    let switch_note = !ctx.host.runner_enable && !recorded;
     let pending = || {
-        Outcome::new(
+        let o = Outcome::new(
             Kind::Missing,
             "読み込みの 1 行が無い → apply で $PROFILE に足す",
-        )
+        );
+        if switch_note { o.note(SWITCH_NOTE) } else { o }
     };
     match mode {
         Mode::Check => {
@@ -352,9 +372,13 @@ mod tests {
     //! - 1 行が既にあれば変えない (書き方が違っても dotfiles.ps1 を指していればよい)。記録が無ければ apply で記録だけ付け、check は書かずに
     //!   いつ記録を作るかを出す
     //! - 足した記録があって消えていたら足し直さず、--force を案内する (受け持ちで案内を替える)。--force なら足し直す
-    //! - check と --dry-run は $PROFILE も記録も書かない。UTF-16 の $PROFILE には書かない。壊れた記録・ディレクトリの置き先では止まる
+    //! - 受け持ちが WSL のホストの check で行が無ければ、Windows 側で消した行なら切り替えた後の apply が足し直すことと、消したままにする道を添える
+    //! - check と --dry-run は $PROFILE も記録も書かない。UTF-16 の $PROFILE には書かない。壊れた記録・ディレクトリの置き先・読めない文字の混じった
+    //!   場所では止まる
     //! - pwsh の出力から、最後の絶対パスの行を $PROFILE の場所として拾う。本物の pwsh が返す場所も読める (pwsh が PATH にあるとき)
-    //! - WSL の script と同じ $PROFILE から、同じバイト列を書いて同じく記録する (bash の版と突き合わせる。bash と jq がある Linux)
+    //! - 順番・on/off・聞く式と秒数・記録の名前・書く行と読む行の印が WSL の script と同じ
+    //! - WSL の script と同じ $PROFILE から、同じバイト列を書いて同じく記録する。WSL の script が書いた $PROFILE を、記録の無い runner が変えずに
+    //!   引き継ぐ (bash の版と突き合わせる。bash と jq がある Linux)
 
     use super::*;
     use crate::hooks::parity;
@@ -516,6 +540,56 @@ mod tests {
             assert!(!e.profile().exists());
             assert!(!e.record().exists());
         }
+    }
+
+    /// pwsh の出力が UTF-8 として読めなかった (置き換えの文字 U+FFFD が混じる) 場所には書かない。書くと、化けたフォルダを作ってそこに足して
+    /// 記録し、本物の $PROFILE に行が無いまま、以後ずっと揃っていると読んでしまう
+    #[test]
+    fn garbled_profile_path_is_not_written() {
+        let e = Env::new(true);
+        let garbled_dir = e.home().join("OneDrive").join("\u{fffd}\u{fffd}");
+        let answer = garbled_dir
+            .join("PowerShell")
+            .join("Microsoft.PowerShell_profile.ps1")
+            .to_string_lossy()
+            .into_owned();
+        let sys = FakeSys::new(move |_| RunResult {
+            exit: Exit::Code(0),
+            output: vec![answer.clone()],
+        })
+        .with_program("pwsh", "/fake/pwsh");
+        let (o, out) = e.run(&sys, RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Failed, "{out}");
+        assert!(
+            out.contains("!! pwsh が返した $PROFILE の場所に、読めない文字があります: "),
+            "{out}"
+        );
+        assert!(has_note(&o, "Add-Content -Path $PROFILE"), "{o:?}");
+        assert!(!garbled_dir.exists());
+        assert!(!e.record().exists());
+    }
+
+    /// 受け持ちが WSL のホストの check で行が無ければ、Windows 側で消した行なら切り替えた後の apply が足し直すことと、消したままにする道を
+    /// 添える (runner は WSL の記録を読まないので、消したのか初めから無いのかを見分けられない。WSL の setup は消した行を足し直さない)
+    #[test]
+    fn wsl_host_check_warns_that_switching_adds_the_line_back() {
+        let e = Env::new(true);
+        e.write_profile(b"Invoke-Expression (&starship init powershell)\n");
+        let sys = e.sys();
+        let (o, out) = e.run(&sys, WSL_HOST, Mode::Check);
+        assert_eq!(o.kind, Kind::Missing, "{out}");
+        assert!(
+            has_note(&o, "「以前 $PROFILE に足した 1 行が見当たりません」"),
+            "{o:?}"
+        );
+        assert!(
+            has_note(&o, "頭に # を付けた同じ行を $PROFILE に置く"),
+            "{o:?}"
+        );
+        // 受け持ちが runner なら、apply が足すだけ (添えない)
+        let (o, _) = e.run(&sys, RUNNER_HOST, Mode::Check);
+        assert_eq!(o.kind, Kind::Missing);
+        assert!(o.notes.is_empty(), "{o:?}");
     }
 
     #[test]
@@ -781,6 +855,15 @@ mod tests {
             "WSL の script の pwsh.exe の行と違う"
         );
         assert!(text.contains(&format!("record_file=\"${{state_dir}}/{RECORD_FILE}\"")));
+        // 書く行と読む行の印 (bash の版との突き合わせは Linux でだけ流れるので、Windows の CI でも字で比べる)
+        assert!(
+            text.contains(&format!("line='{LINE}'")),
+            "WSL の script の line と違う"
+        );
+        assert!(
+            text.contains(&format!("marker='{MARKER}'")),
+            "WSL の script の marker と違う"
+        );
     }
 
     /// 本物の pwsh が返す $PROFILE の場所を読める (出力の文字コード・BOM・改行)。聞くだけで $PROFILE には触らない。pwsh が PATH に
@@ -838,6 +921,50 @@ mod tests {
             let (o, out) = e.run(&e.sys(), RUNNER_HOST, APPLY);
             let runner = (std::fs::read(e.profile()).ok(), e.recorded());
             assert_eq!(runner, wsl, "{name}: {o:?}\n{out}");
+        }
+    }
+
+    /// 受け持ちを切り替えた後の引き継ぎ: WSL の script が書いた $PROFILE を、記録の無い runner が自分のものとして読む (受け持ちが WSL の間の check は
+    /// ✔、切り替えた後の apply は変えずに記録だけ作り、2 回目も変えない。読む行は 1 つのまま)。bash と jq が無ければ飛ばす
+    #[cfg(unix)]
+    #[test]
+    fn takes_over_what_the_wsl_script_wrote() {
+        if !parity::available() {
+            return;
+        }
+        let script = parity::repo_file("nix/scripts/bootstrap-windows-powershell-profile.sh");
+        let cases: Vec<(&str, Option<&[u8]>)> = vec![
+            ("無かった", None),
+            (
+                "CRLF・末尾の改行なし",
+                Some(b"Invoke-Expression (&starship init powershell)\r\n# x"),
+            ),
+            (
+                "UTF-8 の BOM つき",
+                Some("\u{feff}Set-PSReadLineOption -EditMode Emacs\n".as_bytes()),
+            ),
+        ];
+        for (name, before) in cases {
+            let (written, recorded) = wsl_run(&script, before);
+            let written = written.unwrap();
+            assert!(recorded, "{name}");
+            let marked = written
+                .split(|b| *b == b'\n')
+                .filter(|l| contains(l, MARKER.as_bytes()))
+                .count();
+            assert_eq!(marked, 1, "{name}: WSL が書いた読む行");
+
+            let e = Env::new(true);
+            e.write_profile(&written);
+            let sys = e.sys();
+            let (o, out) = e.run(&sys, WSL_HOST, Mode::Check);
+            assert_eq!(o.kind, Kind::Ok, "{name}: {out}");
+            for _ in 0..2 {
+                let (o, out) = e.run(&sys, RUNNER_HOST, APPLY);
+                assert_eq!(o.kind, Kind::Ok, "{name}: {out}");
+                assert_eq!(e.read_profile(), written, "{name}");
+            }
+            assert!(e.recorded(), "{name}");
         }
     }
 

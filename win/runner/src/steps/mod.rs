@@ -114,7 +114,7 @@ pub enum Mode {
     Check,
     /// apply がすることを出すだけ (何も書かない)。`force` は apply の --force のときと同じ予告を出す
     DryRun { force: bool },
-    /// 揃える。`force` は files の衝突も上書きする
+    /// 揃える。`force` は files などのコピーの衝突も上書きし、足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile)
     Apply { force: bool },
 }
 
@@ -123,7 +123,7 @@ impl Mode {
         matches!(self, Mode::Apply { .. })
     }
 
-    /// --force (files の衝突も上書きする・dry-run ならそう予告する)
+    /// --force (files などのコピーの衝突も上書きする・消した `$PROFILE` の 1 行も足し直す・dry-run ならそう予告する)
     pub fn force(self) -> bool {
         matches!(
             self,
