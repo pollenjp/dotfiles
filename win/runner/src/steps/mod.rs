@@ -4,6 +4,7 @@
 //! 手順を足すときは、この下に module を 1 つ書き、`all()` に 1 行足す (win/README.md の「runner の手順を足す」)。
 
 pub mod bootstrap;
+pub mod claude_accounts;
 pub mod claude_env;
 pub mod claude_files;
 pub mod claude_footer_links;
@@ -185,6 +186,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // dotfiles の herdr-app のキーを herdr-app の home の keys.json に書き足す (Windows にしか無い手順。dotfiles-private の
         // docs/adr/070_win_herdr_app_keys_*)
         Box::new(herdr_app_keys::HerdrAppKeys),
+        // Windows の claude-personal・claude-work の ~/.claude-<名前> と launcher (Windows にしか無い手順。dotfiles-private の
+        // docs/adr/081_win_claude_accounts_*)
+        Box::new(claude_accounts::ClaudeAccounts),
         Box::new(files::Files),
     ];
     for spec in tool_skill::SPECS {
@@ -257,6 +261,7 @@ mod tests {
                 (98, "herdr-app-mods"),
                 (98, "herdr-app-pjp-spaces"),
                 (98, "herdr-app-skill"),
+                (99, "claude-accounts"),
                 (99, "herdr-app-keys"),
                 (99, "international"),
                 (99, "port-forward"),
@@ -293,8 +298,8 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキー
-    /// だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキーと
+    /// claude-personal・claude-work だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -321,6 +326,7 @@ mod tests {
                 "herdr-app-mods",
                 "herdr-app-pjp-spaces",
                 "herdr-app-skill",
+                "claude-accounts",
                 "herdr-app-keys",
             ]
         );
