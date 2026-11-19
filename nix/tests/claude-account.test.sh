@@ -33,6 +33,13 @@
 #     - token が無い・行が無い・値が空なら 1 で忠告 (claude setup-token・claude-account set-token・op://)
 #     - 止まる行: ほかの名前の行 (行の番号と名前)・2 つ目の行・KEY=値 でない行・空白のある値。どれも値を出さない
 #     - op: op:// の参照 (権限は見ない) なら偽の op が 1 回呼ばれ、claude に値が届く。op が 5 で終われば 5 で、claude は起きない
+#   直し (レビュー・子 B)
+#     - check の 2 は add の手を出す。名前に token を渡しても (規則に合わない名前は) 文に出さない (add・set-token・check・remove)
+#     - op の参照の check の 1 行は「起動のときに承認が要る」。1Password から読んだ値が空・空白入りなら claude を起こさず 70
+#     - 引用符の中の前後の空白は値の一部 (" op://…" は op の参照でなく、token の形でもない) で、check も launcher も止まる
+#     - add は用意が済まなければ (settings.json が実体) 1。token のファイルがリンクなら止まり、set-token を出す
+#     - 登録の一覧の規則外の名前・account は読めない形。list は読めない形を 1 回だけ出す
+#     - help token の 1 行は chmod 600 も打つ。add は ~/.config/claude-accounts を 700 で作る
 #   bootstrap
 #     - --account <名前> は、そのアカウントの dir だけを用意する
 #     - 引数なしは、既定に加えて登録のアカウントの dir も用意し、launcher の link が無ければ警告する
@@ -93,7 +100,7 @@ if [[ ${1-} != inject ]]; then
 fi
 while IFS= read -r line; do
   if [[ ${line} == '{{ '*' }}' ]]; then
-    printf '%s\n' dummy-op-value
+    printf '%s\n' "${FAKE_OP_VALUE-dummy-op-value}"
   else
     printf '%s\n' "${line}"
   fi
@@ -133,6 +140,7 @@ run() {
   env -i HOME="${home}" PATH="${linkbin}:${fakebin}:${coreutils_bin}:${jq_bin}:${home}/.local/bin" \
     ANTHROPIC_API_KEY=dummy-inherited-key ANTHROPIC_AUTH_TOKEN=dummy-inherited-auth CLAUDE_CODE_OAUTH_TOKEN=dummy-inherited-oauth \
     CLAUDE_CONFIG_DIR=/somewhere/else FAKE_CLAUDE_EXIT="${FAKE_CLAUDE_EXIT:-0}" ${FAKE_OP_EXIT:+FAKE_OP_EXIT="${FAKE_OP_EXIT}"} \
+    ${FAKE_OP_VALUE+FAKE_OP_VALUE="${FAKE_OP_VALUE}"} \
     "${linkbin}/${cmd}" "$@" <"${input}" >"${work}/out" 2>"${work}/err"
   echo $? >"${work}/rc"
 }
@@ -175,6 +183,7 @@ run claude-account help token
 if [[ $(rc) == 0 ]] && grep -Fq 'claude-account set-token <名前>' "${work}/out" \
   && grep -Fq 'claude-account check <名前>' "${work}/out" && grep -Fq 'Claude Code の ! は使わない' "${work}/out" \
   && grep -Fq "umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp" "${work}/out" \
+  && grep -Fq '&& chmod 600 ~/.config/claude-accounts/<名前>.env' "${work}/out" \
   && grep -Fq 'CLAUDE_CODE_OAUTH_TOKEN=op://' "${work}/out"; then
   ok "help token: このマシン・ほかのマシン (claude-account が無いときの 1 行も)・check・値の取り方・op の形を出す"
 else
@@ -212,7 +221,8 @@ if [[ $(rc) == 0 && $(mode_of token1) == token ]] \
   && [[ $(readlink "${home}/.claude-token1/projects") == "${home}/.claude/projects" ]] \
   && [[ -L ${home}/.claude-token1/skills/pjp-a ]] \
   && grep -Fq 'claude setup-token' "${work}/out" && grep -Fq 'claude-account set-token token1' "${work}/out" \
-  && grep -Fq 'ほかのマシン' "${work}/out" && grep -Fq 'claude-account check token1' "${work}/out"; then
+  && grep -Fq 'ほかのマシン' "${work}/out" && grep -Fq 'claude-account check token1' "${work}/out" \
+  && [[ $(stat -c %a "${home}/.config/claude-accounts") == 700 ]]; then
   ok "add token1 --mode token: 登録に書き、launcher を profileBin の claude-account への link にし、dir を用意し、置き方 (help token) を出す"
 else
   ng "add token1 --mode token" "$(detail)
@@ -236,6 +246,14 @@ if [[ $(rc) == 0 && $(mode_of sub2) == subscription ]] && grep -Fq '/login' "${w
 else
   ng "add sub2" "$(detail)"
 fi
+mkdir -p "${home}/.claude-real1"
+printf '{}\n' >"${home}/.claude-real1/settings.json"
+run claude-account add real1 --mode subscription
+if [[ $(rc) == 1 ]] && grep -Fq '既に ~/.claude-<名前> があるとき' "${work}/err"; then
+  ok "add は用意が済まなければ (settings.json が実体) 1 で、片付け方を出す"
+else
+  ng "add (実体)" "$(detail)"
+fi
 printf 'mine\n' >"${home}/.local/bin/claude-other"
 run claude-account add other --mode token
 if [[ $(rc) == 1 && $(mode_of other) == '<none>' ]] && grep -Fq 'claude-other' "${work}/err"; then
@@ -253,7 +271,24 @@ else
   ng "check (token なし)" "$(detail)"
 fi
 run claude-account check nosuch
-if [[ $(rc) == 2 ]]; then ok "check: 知らない名前は 2"; else ng "check (知らない名前)" "$(detail)"; fi
+if [[ $(rc) == 2 ]] && grep -Fq 'claude-account add nosuch --mode' "${work}/err"; then
+  ok "check: 知らない名前は 2 で、足す手 (claude-account add <名前> --mode …) を出す"
+else
+  ng "check (知らない名前)" "$(detail)"
+fi
+bad=0
+for sub in "check" "set-token" "remove" "add"; do
+  if [[ ${sub} == add ]]; then
+    run claude-account add sk-ant-oat01-dummy-leak-1 --mode token
+  else
+    STDIN_TEXT=$'dummy-x\n' run claude-account "${sub}" sk-ant-oat01-dummy-leak-1
+  fi
+  if [[ $(rc) != 2 ]] || ! no_values; then
+    bad=1
+    ng "名前に token を渡した ${sub}" "$(detail)"
+  fi
+done
+if ((bad == 0)); then ok "名前に token を渡しても (規則に合わない名前は) 2 で、文に出さない"; fi
 run claude-account check personal
 if [[ $(rc) == 1 ]] && grep -Fq 'setup' "${work}/err"; then
   ok "check: 既定の dir が用意されていなければ 1 で setup を出す"
@@ -291,8 +326,8 @@ fi
 put_token 'CLAUDE_CODE_OAUTH_TOKEN=op://vault/item/field
 ' 644
 run claude-account check token1
-if [[ $(rc) == 0 && $(cat "${work}/out") == 'claude-token1: token (1Password)' && ! -e ${home}/op.log ]]; then
-  ok "check: op の参照は権限を見ずに 0 で「token (1Password)」。op は呼ばない"
+if [[ $(rc) == 0 && $(cat "${work}/out") == 'claude-token1: token (1Password・起動のときに承認が要る)' && ! -e ${home}/op.log ]]; then
+  ok "check: op の参照は権限を見ずに 0 で「token (1Password・起動のときに承認が要る)」。op は呼ばない"
 else
   ng "check (op)" "$(detail)"
 fi
@@ -507,6 +542,41 @@ if [[ $(rc) == 5 && ! -e ${home}/claude.log ]]; then
 else
   ng "op の失敗" "$(detail)"
 fi
+bad=0
+for v in '' 'dummy op value'; do
+  FAKE_OP_VALUE=${v} run claude-token1
+  if [[ $(rc) != 70 || -e ${home}/claude.log ]] || ! no_values; then
+    bad=1
+    ng "1Password から読んだ値「${v}」" "$(detail)"
+  fi
+done
+if ((bad == 0)); then ok "1Password から読んだ値が空・空白入りなら claude を起こさず 70 (値は出さない)"; fi
+put_token 'CLAUDE_CODE_OAUTH_TOKEN=" op://vault/item/field"
+' 600
+run claude-account check token1
+r1=$(rc)
+run claude-token1
+if [[ ${r1} == 1 && $(rc) == 1 && ! -e ${home}/claude.log && ! -e ${home}/op.log ]]; then
+  ok "引用符の中の前後の空白は値の一部で、check も launcher も止まる"
+else
+  ng "引用符の中の空白 (${r1})" "$(detail)"
+fi
+mkdir -p "${work}/elsewhere"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-plain-8\n' >"${work}/elsewhere/t.env"
+chmod 600 "${work}/elsewhere/t.env"
+rm -f "${token_file}"
+ln -s "${work}/elsewhere/t.env" "${token_file}"
+run claude-account check token1
+r1=$(rc)
+grep -Fq 'set-token' "${work}/err"
+g1=$?
+run claude-token1
+if [[ ${r1} == 1 && ${g1} == 0 && $(rc) == 1 && ! -e ${home}/claude.log ]] && no_values; then
+  ok "token のファイルがリンクなら check も launcher も止まり、set-token を出す"
+else
+  ng "token のファイルがリンク (${r1}/${g1})" "$(detail)"
+fi
+rm -f "${token_file}"
 
 # --- 登録の一覧が壊れている
 cp "${home}/.config/claude-accounts/accounts.json" "${work}/accounts.bak"
@@ -519,6 +589,13 @@ if [[ ${r1} == 1 && ${r2} == 0 ]]; then
   ok "登録の一覧が壊れていれば登録のアカウントは 1 で、既定はそのまま起きる"
 else
   ng "壊れた登録 (${r1}/${r2})" "$(detail)"
+fi
+printf '{"version":1,"accounts":{"Bad Name":{"mode":"token"}}}\n' >"${home}/.config/claude-accounts/accounts.json"
+run claude-account list
+if [[ $(rc) == 1 && $(grep -c 'accounts.json' "${work}/err") == 1 ]] && grep -Eq '^personal ' "${work}/out"; then
+  ok "登録の規則外の名前は読めない形。list は既定を並べ、読めない形を 1 回だけ出して 1"
+else
+  ng "規則外の名前の登録" "$(detail)"
 fi
 cp "${work}/accounts.bak" "${home}/.config/claude-accounts/accounts.json"
 

@@ -91,7 +91,7 @@ token_help() {
     "    claude-account add ${n} --mode token" \
     "    claude-account set-token ${n}" \
     "  そのマシンに claude-account がまだ無い (dotfiles が古い) ときは、同じ形のファイルを手で置く (fish からも打てる):" \
-    "    bash -c 'umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp \"token: \" t && echo && printf \"CLAUDE_CODE_OAUTH_TOKEN=%s\\n\" \"\$t\" > ~/.config/claude-accounts/${n}.env && unset t && echo 置いた'" \
+    "    bash -c 'umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp \"token: \" t && echo && printf \"CLAUDE_CODE_OAUTH_TOKEN=%s\\n\" \"\$t\" > ~/.config/claude-accounts/${n}.env && unset t && chmod 600 ~/.config/claude-accounts/${n}.env && echo 置いた'" \
     "    (dotfiles を新しくしたら claude-account add ${n} --mode token を打つ。置いたファイルはそのまま使う)" \
     "  置けたかは、そのマシンで claude-account check ${n} (0 なら使える。値は出さない)" \
     "" \
@@ -122,9 +122,24 @@ shown() {
 where() {
   if [[ -n ${WSL_DISTRO_NAME-} ]]; then
     printf 'WSL (%s)' "${WSL_DISTRO_NAME}"
+  elif [[ -e /proc/sys/fs/binfmt_misc/WSLInterop || -n ${WSL_INTEROP-} ]]; then
+    # hc exec などで WSL_DISTRO_NAME が無いとき。ホスト名は Windows の PC と同じなので、WSL と添える
+    printf 'WSL (%s)' "${HOSTNAME:-?}"
   else
     printf 'このマシン (%s)' "${HOSTNAME:-?}"
   fi
+}
+
+# アカウントの名前の形: 英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。token の頭 (sk-ant-) で始まるものは断る
+# (token を名前の所に渡したときに、登録したり文に出したりしないため)
+name_ok() {
+  [[ $1 =~ ${name_re} && ${#1} -le 32 && $1 != sk-ant-* ]]
+}
+
+# 名前に使えない文字列は文に出さない (token を名前に渡したときに、token を画面に出さないため)
+bad_name() {
+  err "claude-account: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。sk-ant- で始まらない)。" \
+    "  token を名前の所に渡していないか確かめてください (渡した文字は出しません。token は set-token の見えない入力で渡す)。"
 }
 
 is_default() {
@@ -143,7 +158,8 @@ is_default() {
 registry_ok() {
   [[ -e ${registry} ]] || return 0
   if "${jq}" -e '(.version == 1) and (.accounts | type == "object")
-      and (.accounts | to_entries | all(.value | type == "object" and (.mode == "subscription" or .mode == "token")))' \
+      and (.accounts | to_entries | all(.value | type == "object" and (.mode == "subscription" or .mode == "token")))
+      and (.accounts | keys | all(test("^[a-z0-9][a-z0-9_-]{0,31}$") and . != "account" and (startswith("sk-ant-") | not)))' \
     "${registry}" >/dev/null 2>&1; then
     return 0
   fi
@@ -169,7 +185,7 @@ registry_names() {
 # 登録に $1 を種類 $2 で書く ($2 が空なら外す)。一時ファイルに書いて置き換える
 registry_put() {
   local tmp filter
-  "${cu}/mkdir" -p -- "${conf_dir}" || return 1
+  (umask 077 && "${cu}/mkdir" -p -- "${conf_dir}") || return 1
   tmp=$("${cu}/mktemp" "${conf_dir}/.accounts.json.XXXXXX") || return 1
   if [[ -n $2 ]]; then
     # shellcheck disable=SC2016 # $n・$m は jq の変数
@@ -187,7 +203,7 @@ registry_put() {
     "${cu}/rm" -f -- "${tmp}"
     return 1
   }
-  "${cu}/mv" -f -- "${tmp}" "${registry}"
+  "${cu}/mv" -fT -- "${tmp}" "${registry}"
 }
 
 # $1 の種類を mode に、元 (既定・登録) を origin に入れる。知らない名前なら mode は空。登録の一覧が読めなければ 1
@@ -267,7 +283,7 @@ unquote() {
       if [[ ${rest} == *[[:space:]]'#'* ]]; then
         rest=${rest%%[[:space:]]#*}
       fi
-      unq=${rest}
+      unq=${rest%"${rest##*[![:space:]]}"}
       return 0
       ;;
   esac
@@ -280,6 +296,10 @@ read_token_file() {
   tok_state="" tok_value="" tok_why=""
   if [[ ! -e ${file} ]]; then
     tok_state=missing
+    return 0
+  fi
+  if [[ -L ${file} ]]; then
+    tok_state=bad tok_why="ファイルがリンクです (実体のファイルにする。claude-account set-token で書き直せる)"
     return 0
   fi
   if [[ -d ${file} || ! -r ${file} ]]; then
@@ -324,8 +344,7 @@ read_token_file() {
     tok_state=noline
     return 0
   fi
-  tok_value=${tok_value#"${tok_value%%[![:space:]]*}"}
-  tok_value=${tok_value%"${tok_value##*[![:space:]]}"}
+  # 引用符の中の前後の空白は値の一部 (pjp-op-env と同じ読み方。" op://…" は参照でも token の形でもない)
   if [[ -z ${tok_value} ]]; then
     tok_state=empty
   elif [[ ${tok_value} == op://* ]]; then
@@ -347,7 +366,7 @@ local_file_ok() {
   local perm
   perm_why=""
   if [[ ! -O $1 ]]; then
-    perm_why="持ち主が自分ではありません"
+    perm_why="持ち主が自分ではありません (claude-account set-token で書き直す)"
     return 1
   fi
   perm=$("${cu}/stat" -c '%a' -- "$1") || {
@@ -355,7 +374,7 @@ local_file_ok() {
     return 1
   }
   if ((8#${perm} & 8#077)); then
-    perm_why="権限が ${perm} です (ほかのユーザーが読める。600 にする)"
+    perm_why="権限が ${perm} です (ほかのユーザーが読める。chmod 600 $(shown "$1") を打つ)"
     return 1
   fi
   return 0
@@ -388,7 +407,11 @@ state() {
   st_code=1 st_short="" st_line="" st_fix=""
   if ! prepared "${name}"; then
     st_short="dir が用意されていない"
-    st_fix="${cmd}: $(shown "${dir}") がまだ用意されていません。${w} の端末で $(prepare_fix "${name}" "${mode}" "${origin}")。"
+    if [[ ${why} == real ]]; then
+      st_fix="${cmd}: $(shown "${dir}/settings.json") が実体です (先に Claude Code を起こした、など)。${w} の端末で、nix/README.md の「既に ~/.claude-<名前> があるとき」の手順で片付けてから $(prepare_fix "${name}" "${mode}" "${origin}")。"
+    else
+      st_fix="${cmd}: $(shown "${dir}") がまだ用意されていません。${w} の端末で $(prepare_fix "${name}" "${mode}" "${origin}")。"
+    fi
     return 0
   fi
   if [[ ${origin} == 登録 && $("${cu}/readlink" -- "${bin_dir}/${cmd}" 2>/dev/null) != "${launcher_target}" ]]; then
@@ -397,7 +420,10 @@ state() {
     return 0
   fi
   if [[ ${mode} == subscription ]]; then
-    if [[ -e ${dir}/.credentials.json ]]; then
+    if [[ ${OSTYPE-} == darwin* ]]; then
+      # macOS のログインは Keychain にあり、.credentials.json ができない
+      st_code=0 st_short="subscription (ログインは確かめない)" st_line="${cmd}: subscription (ログインは Keychain にあり、確かめない)"
+    elif [[ -e ${dir}/.credentials.json ]]; then
       st_code=0 st_short="ログイン済み" st_line="${cmd}: subscription (ログイン済み)"
     else
       st_short="ログインしていない"
@@ -420,12 +446,13 @@ state() {
       if local_file_ok "${file}"; then
         st_code=0 st_short="token (ローカル)" st_line="${cmd}: token (ローカル)"
       else
-        st_short="token のファイルの権限が緩い"
-        st_fix="${cmd}: token のファイル ($(shown "${file}")) の${perm_why}。${w} の端末で chmod 600 $(shown "${file}") を打つ。"
+        st_short="token のファイルの権限・持ち主が違う"
+        st_fix="${cmd}: token のファイル ($(shown "${file}")) の${perm_why}。${w} の端末で直す。"
       fi
       ;;
     op)
-      st_code=0 st_short="token (1Password)" st_line="${cmd}: token (1Password)"
+      # 起こすたびに 1Password の承認が要る (子を立てる側からは、起動の直後に止まって見えうる)
+      st_code=0 st_short="token (1Password・起動のときに承認が要る)" st_line="${cmd}: token (1Password・起動のときに承認が要る)"
       ;;
   esac
   return 0
@@ -456,8 +483,8 @@ cmd_add() {
   done
   [[ -n ${name} && -n ${new_mode} ]] || usage_err "add には名前と --mode が要ります。"
   [[ ${new_mode} == subscription || ${new_mode} == token ]] || usage_err "種類は subscription か token です: ${new_mode}"
-  if [[ ! ${name} =~ ${name_re} ]]; then
-    err "claude-account: ${name} はアカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけ)。"
+  if ! name_ok "${name}"; then
+    bad_name
     return 2
   fi
   if [[ ${name} == account ]]; then
@@ -492,8 +519,13 @@ cmd_add() {
     fi
     echo "張りました: $(shown "${link}") -> ${launcher_target}"
   fi
-  if ! PATH="${jq%/jq}:${cu}:${PATH}" "${BASH}" "${bootstrap}" --account "${name}"; then
-    err "claude-account: $(shown "${HOME}/.claude-${name}") の用意が途中で止まりました (上の !! を見る)。直してから claude-account add ${name} --mode ${new_mode} を打ち直してください。"
+  if ! PATH="${jq%/jq}:${cu}:${PATH}" "${BASH}" "${bootstrap}" --account "${name}" || ! prepared "${name}"; then
+    if [[ ${why} == real ]]; then
+      err "claude-account: $(shown "${HOME}/.claude-${name}/settings.json") が実体なので用意できません (先に Claude Code を起こした、など)。" \
+        "  nix/README.md の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、claude-account add ${name} --mode ${new_mode} を打ち直してください。"
+    else
+      err "claude-account: $(shown "${HOME}/.claude-${name}") の用意が途中で止まりました (上の !! を見る)。直してから claude-account add ${name} --mode ${new_mode} を打ち直してください。"
+    fi
     return 1
   fi
   if [[ :${PATH}: != *":${bin_dir}:"* ]]; then
@@ -523,6 +555,10 @@ cmd_set_token() {
   local name tok="" file tmp
   (($# == 1)) || usage_err "set-token に渡すのは名前 1 つだけです (token は引数でなく、見えない入力かパイプで渡す)。"
   name=$1
+  if ! name_ok "${name}"; then
+    bad_name
+    return 2
+  fi
   lookup "${name}" || return 1
   if [[ -z ${mode} ]]; then
     err "claude-account: ${name} は既定のアカウントでも、登録したアカウントでもありません (足すなら claude-account add ${name} --mode token)。"
@@ -571,7 +607,7 @@ cmd_set_token() {
     return 1
   }
   if ! printf '# claude-%s の token (claude setup-token で出したもの)。claude-account set-token が書いた。値を画面・会話に出さない\nCLAUDE_CODE_OAUTH_TOKEN=%s\n' \
-    "${name}" "${tok}" >"${tmp}" || ! "${cu}/chmod" 600 -- "${tmp}" || ! "${cu}/mv" -f -- "${tmp}" "${file}"; then
+    "${name}" "${tok}" >"${tmp}" || ! "${cu}/chmod" 600 -- "${tmp}" || ! "${cu}/mv" -fT -- "${tmp}" "${file}"; then
     tok=""
     "${cu}/rm" -f -- "${tmp}"
     err "claude-account: $(shown "${file}") に書けません。"
@@ -586,8 +622,9 @@ cmd_list() {
   local names reg n
   (($# == 0)) || usage_err "list は引数を取りません。"
   names=("${defaults[@]}")
+  bad_registry=0
   if ! reg=$(registry_names); then
-    reg=""
+    reg="" bad_registry=1
   fi
   while IFS= read -r n; do
     if [[ -n ${n} ]]; then
@@ -595,20 +632,25 @@ cmd_list() {
     fi
   done <<<"${reg}"
   for n in "${names[@]}"; do
-    lookup "${n}" || return 1
+    lookup "${n}" 2>/dev/null || continue
     state "${n}"
     printf '%-14s %-13s %s  %s\n' "${n}" "${mode}" "${origin}" "${st_short}"
   done
-  registry_ok
+  return "${bad_registry}"
 }
 
 cmd_check() {
   local name
   (($# == 1)) || usage_err "check に渡すのは名前 1 つだけです。"
   name=$1
+  if ! name_ok "${name}"; then
+    bad_name
+    return 2
+  fi
   lookup "${name}" || return 1
   if [[ -z ${mode} ]]; then
-    err "claude-account: claude-${name} は既定のアカウントでも、登録したアカウントでもありません (claude-account list で見る)。"
+    err "claude-account: claude-${name} は既定のアカウントでも、登録したアカウントでもありません (一覧は claude-account list)。" \
+      "  足すなら $(where) の端末で claude-account add ${name} --mode subscription (か --mode token) を打つ。"
     return 2
   fi
   state "${name}"
@@ -655,8 +697,12 @@ cmd_remove() {
     esac
   done
   [[ -n ${name} ]] || usage_err "remove には名前が要ります。"
-  if [[ ! ${name} =~ ${name_re} || ${name} == account ]]; then
-    err "claude-account: ${name} はアカウントの名前ではありません。"
+  if ! name_ok "${name}"; then
+    bad_name
+    return 2
+  fi
+  if [[ ${name} == account ]]; then
+    err "claude-account: account は管理のコマンドの名前で、アカウントではありません。"
     return 2
   fi
   if is_default "${name}"; then
@@ -738,8 +784,9 @@ manager() {
         "") usage ;;
         token)
           (($# <= 2)) || usage_err "help token に渡すのは名前 1 つまでです。"
-          if [[ -n ${2-} && ! ${2} =~ ${name_re} ]]; then
-            usage_err "${2} はアカウントの名前に使えません。"
+          if [[ -n ${2-} ]] && ! name_ok "$2"; then
+            bad_name
+            exit 2
           fi
           token_help "${2-}"
           ;;
@@ -780,8 +827,11 @@ start_with_token() {
       exec "${claude}" "$@"
       ;;
     op)
+      # pjp-op-env が 1Password から読んで env に入れたあと、この script の次の段 (末尾の __exec-with-token) が値の形を確かめてから
+      # claude を起こす (空・空白入りの値で起こさない。値は env だけを通る)
       tok_value=""
-      exec "${pjp_op_env}" --reason "claude-${name} ${reason_tail}" --env-file "${file}" -- "${claude}" "$@"
+      export CLAUDE_ACCOUNT_STAGE="claude-${name}"
+      exec "${pjp_op_env}" --reason "claude-${name} ${reason_tail}" --env-file "${file}" -- "${0}" __exec-with-token "${claude}" "$@"
       ;;
   esac
   err "claude-${name}: token の読み方が決まりません (${tok_state})。"
@@ -792,8 +842,8 @@ launcher() {
   local name=$1 cmd dir file
   shift
   cmd="claude-${name}"
-  if [[ ! ${name} =~ ${name_re} ]]; then
-    err "${cmd}: アカウントの名前に使えない字があります (英小文字・数字で始まり、英小文字・数字・- と _ だけ)。"
+  if ! name_ok "${name}"; then
+    err "${cmd}: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで)。"
     exit 2
   fi
   lookup "${name}" || exit 1
@@ -864,6 +914,19 @@ launcher() {
 # --- 振り分け
 
 me=${0##*/}
+
+# op の道の次の段 (start_with_token が pjp-op-env 越しに起こす)。印 (CLAUDE_ACCOUNT_STAGE) が自分の名前のときだけ受ける
+if [[ ${1-} == __exec-with-token && ${CLAUDE_ACCOUNT_STAGE-} == "${me}" && $# -ge 2 ]]; then
+  unset CLAUDE_ACCOUNT_STAGE
+  if ! token_ok "${CLAUDE_CODE_OAUTH_TOKEN-}" || [[ ${CLAUDE_CODE_OAUTH_TOKEN} == op://* ]]; then
+    unset CLAUDE_CODE_OAUTH_TOKEN
+    err "${me}: 1Password から読んだ値が token の形ではありません (空・空白・引用符など。値は出しません)。" \
+      "  1Password の項目と欄を確かめるか、claude-account set-token ${me#claude-} でこのマシンに token を置いてください。"
+    exit 70
+  fi
+  shift
+  exec "$@"
+fi
 case ${me} in
   claude-account)
     manager "$@"

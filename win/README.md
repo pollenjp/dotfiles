@@ -525,7 +525,9 @@ claude-account help token [token1]             # token をこの PC とほかの
 - add は登録に書いたあと、手順 `claude-accounts` をそのアカウントのぶんだけ流す (dir・symlink・`claude-<名前>.exe`。足りない symlink は
   `dotfiles apply` と同じく、1 つ目を直に張ってみて落ちたら UAC の確認 1 回で張る)。UAC を断った・出せない (SSH の会話) ときは ⚠ を出して 1 で
   終わり、add の打ち直しか次の `dotfiles apply` でまた聞く
-- `dotfiles apply` は、既定に加えて登録のアカウントの dir と launcher も保つ。登録が読めない形なら、既定だけを用意して ⚠
+- `dotfiles apply` は、既定に加えて登録のアカウントの dir と launcher も保つ (launcher は runner の exe の写しなので、runner を作り直したら
+  置き直す。Linux の link と違い、消えていれば置く)。登録が読めない形なら、既定だけを用意して ⚠。既定の `claude-personal`・`claude-work` は
+  登録を読まないので、登録が壊れていても起きる
 - `remove` は `claude-<名前>.exe` が動いている (会話が開いている) と消せないので、登録を変えずに 1 で止まる。閉じてから打ち直す。`--purge` は
   `~/.claude-<名前>` を、中の junction・symlink を辿らずに消す
 
@@ -538,9 +540,13 @@ claude-account help token [token1]             # token をこの PC とほかの
 | token そのもの (手で書いた平文) | そのまま渡し、`set-token` で入れ直す (DPAPI) よう 1 行出す |
 
 - ファイルの形・止まる行・token が無いときの忠告は Linux と同じ ([`nix/README.md`「token のアカウント」](../nix/README.md#token-のアカウント))
-- `set-token` は Windows PowerShell の `Read-Host -AsSecureString` (パイプなら stdin の 1 行) で読み、`ConvertFrom-SecureString` の暗号文だけを
-  書く。平文は PowerShell の中だけにある。DPAPI の暗号文は、ほかのユーザー・ほかの PC・ディスクの写しでは読めない (同じユーザーの process は
-  読める)
+- `set-token` は Windows PowerShell の `Read-Host -AsSecureString` (パイプなら stdin の 1 行) で読み、形を確かめて (空・`op://`・token の形で
+  ないものは書かない)、`ConvertFrom-SecureString` の暗号文だけを書く。平文は PowerShell の中だけにある。DPAPI の暗号文は、ほかのユーザー・
+  ほかの PC・ディスクの写しでは読めない (同じユーザーの process は読める)
+- **Git Bash (mintty) では `set-token` を打たない。** 見えない入力にできない (打った token が画面に出る) ので、読まずに止まる。PowerShell・
+  Windows Terminal で打つか、`winpty claude-account set-token <名前>` で打つ。パイプ (`… | claude-account set-token <名前>`) はどこでも使える
+- 復号と set-token の PowerShell は System32 の Windows PowerShell 5.1 で、受け継いだ `PSModulePath` を外して起こす (pwsh 7 から打っても
+  `ConvertTo-SecureString` を読めるように)
 - op-reason.exe は PATH か `%LOCALAPPDATA%\Programs\op-reason` (WSL の setup の `Install-OpReason` が入れる所) から探す。Smart App Control に
   止められるマシンの PowerShell の入口への回り道は、まだ無い (`set-token` でこの PC に置く)
 - token の会話の注意 (Remote Control・connector・`/login`・`auth status`・env を出さない) と、シークレットの決まりの例外・漏れたときは Linux と同じ

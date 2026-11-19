@@ -98,6 +98,7 @@ pub fn run(args: &[String], io: &mut Io) -> i32 {
                 let _ = writeln!(io.out, "{}", token::help_text(Some(n)));
                 0
             }
+            [t, _] if t == "token" => bad_name(io),
             _ => usage_err(io, "知らない help です (help token [<名前>] がある)。"),
         },
         None => {
@@ -115,6 +116,27 @@ fn usage_err(io: &mut Io, why: &str) -> i32 {
 
 fn say_err(io: &mut Io, text: &str) {
     let _ = writeln!(io.err, "{text}");
+}
+
+/// 名前に使えない文字列は文に出さない (token を名前の所に渡したときに、token を画面に出さないため)。2 を返す
+fn bad_name(io: &mut Io) -> i32 {
+    say_err(
+        io,
+        "claude-account: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。sk-ant- で始まらない)。\n  token を名前の所に渡していないか確かめてください (渡した文字は出しません。token は set-token の見えない入力で渡す)。",
+    );
+    2
+}
+
+/// 名前の種類と元。既定は登録を読まずに決める (登録が壊れていても既定は使える)。登録が読めなければ Err
+fn lookup_name(home: &Path, name: &str) -> Result<Option<(Mode, Origin)>, String> {
+    if claude_accounts::DEFAULT_ACCOUNTS.contains(&name) {
+        return Ok(Some((Mode::Subscription, Origin::Default)));
+    }
+    Ok(accounts::lookup(
+        name,
+        &claude_accounts::DEFAULT_ACCOUNTS,
+        &registry(home)?,
+    ))
 }
 
 /// 家 (USERPROFILE)
@@ -167,14 +189,20 @@ fn state(io: &Io, home: &Path, name: &str, mode: Mode, origin: Origin) -> (i32, 
             Origin::Default => "dotfiles apply を打つ (初回は UAC の確認が 1 回出る)".to_string(),
             Origin::Registered => format!("{fix_add} を打つ"),
         };
-        return (
-            1,
+        let settings = dir.join("settings.json");
+        let real = std::fs::symlink_metadata(&settings).is_ok_and(|m| !m.file_type().is_symlink());
+        let text = if real {
+            format!(
+                "{cmd}: {} が実体です (先に Claude Code を起こした、など)。{w} の端末で、win/README.md の「既に ~/.claude-<名前> があるとき」の手順で片付けてから {fix}。",
+                settings.display()
+            )
+        } else {
             format!(
                 "{cmd}: {} がまだ用意されていません。{w} の端末で {fix}。",
                 dir.display()
-            ),
-            "dir が用意されていない".to_string(),
-        );
+            )
+        };
+        return (1, text, "dir が用意されていない".to_string());
     }
     let exe = bin_dir(io, home).join(format!("{cmd}.exe"));
     if origin == Origin::Registered && !exe.is_file() {
@@ -211,10 +239,11 @@ fn state(io: &Io, home: &Path, name: &str, mode: Mode, origin: Origin) -> (i32, 
             format!("{cmd}: token (ローカル)"),
             "token (ローカル)".to_string(),
         ),
+        // 起こすたびに 1Password の承認が要る (子を立てる側からは、起動の直後に止まって見えうる)
         Ok(token::Stored::Op(_)) => (
             0,
-            format!("{cmd}: token (1Password)"),
-            "token (1Password)".to_string(),
+            format!("{cmd}: token (1Password・起動のときに承認が要る)"),
+            "token (1Password・起動のときに承認が要る)".to_string(),
         ),
         Err(p) if p.needs_guidance() => (
             1,
@@ -239,19 +268,22 @@ fn check(args: &[String], io: &mut Io) -> i32 {
     let [name] = args else {
         return usage_err(io, "check に渡すのは名前 1 つだけです。");
     };
-    let (home, reg) = match home(io).and_then(|h| registry(&h).map(|r| (h, r))) {
+    if !accounts::name_ok(name) {
+        return bad_name(io);
+    }
+    let (home, found) = match home(io).and_then(|h| lookup_name(&h, name).map(|f| (h, f))) {
         Ok(x) => x,
         Err(e) => {
             say_err(io, &e);
             return 1;
         }
     };
-    let Some((mode, origin)) = accounts::lookup(name, &claude_accounts::DEFAULT_ACCOUNTS, &reg)
-    else {
+    let Some((mode, origin)) = found else {
+        let w = machine(io);
         say_err(
             io,
             &format!(
-                "claude-account: claude-{name} は既定のアカウントでも、登録したアカウントでもありません (claude-account list で見る)。"
+                "claude-account: claude-{name} は既定のアカウントでも、登録したアカウントでもありません (一覧は claude-account list)。\n  足すなら {w} の端末で claude-account add {name} --mode subscription (か --mode token) を打つ。"
             ),
         );
         return 2;
@@ -305,9 +337,9 @@ fn list(args: &[String], io: &mut Io) -> i32 {
 /// 足す名前を確かめる。だめなら (2, わけ)
 fn new_name_ok(name: &str) -> Result<(), String> {
     if !accounts::name_ok(name) {
-        return Err(format!(
-            "claude-account: {name} はアカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけ)。"
-        ));
+        return Err(
+            "claude-account: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。sk-ant- で始まらない)。\n  token を名前の所に渡していないか確かめてください (渡した文字は出しません)。".to_string(),
+        );
     }
     if name == MANAGER {
         return Err(
@@ -471,14 +503,17 @@ fn set_token(args: &[String], io: &mut Io) -> i32 {
             "set-token に渡すのは名前 1 つだけです (token は引数でなく、見えない入力かパイプで渡す)。",
         );
     };
-    let (home, reg) = match home(io).and_then(|h| registry(&h).map(|r| (h, r))) {
+    if !accounts::name_ok(name) {
+        return bad_name(io);
+    }
+    let (home, found) = match home(io).and_then(|h| lookup_name(&h, name).map(|f| (h, f))) {
         Ok(x) => x,
         Err(e) => {
             say_err(io, &e);
             return 1;
         }
     };
-    match accounts::lookup(name, &claude_accounts::DEFAULT_ACCOUNTS, &reg) {
+    match found {
         None => {
             say_err(
                 io,
@@ -576,10 +611,13 @@ fn remove(args: &[String], io: &mut Io) -> i32 {
     let Some(name) = name else {
         return usage_err(io, "remove には名前が要ります。");
     };
-    if !accounts::name_ok(name) || name == MANAGER {
+    if !accounts::name_ok(name) {
+        return bad_name(io);
+    }
+    if name == MANAGER {
         say_err(
             io,
-            &format!("claude-account: {name} はアカウントの名前ではありません。"),
+            "claude-account: account は管理のコマンドの名前で、アカウントではありません。",
         );
         return 2;
     }
@@ -883,7 +921,10 @@ mod tests {
         let (code, out, _) = w.run(&["check", "token1"]);
         assert_eq!(
             (code, out.as_str()),
-            (0, "claude-token1: token (1Password)\n")
+            (
+                0,
+                "claude-token1: token (1Password・起動のときに承認が要る)\n"
+            )
         );
         std::fs::write(&file, "ANTHROPIC_API_KEY=dummy-key\n").unwrap();
         let (code, out, err) = w.run(&["check", "token1"]);
@@ -925,6 +966,37 @@ mod tests {
                 .join("s.jsonl")
                 .is_file()
         );
+    }
+
+    /// 登録の一覧が壊れていても既定は確かめられる。名前に token を渡しても文に出さない。知らない名前の 2 は add の手を出す
+    #[test]
+    fn broken_registry_and_token_like_names() {
+        let w = World::new();
+        w.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":[",
+        );
+        let (code, _, err) = w.run(&["check", "personal"]);
+        assert_eq!(code, 1, "{err}");
+        assert!(!err.contains("accounts.json"), "{err}");
+        assert!(err.contains("dotfiles apply"), "{err}");
+        std::fs::remove_file(w.home().join(".config/claude-accounts/accounts.json")).unwrap();
+        for sub in ["check", "set-token", "remove", "add"] {
+            let args: Vec<&str> = if sub == "add" {
+                vec![sub, "sk-ant-oat01-dummy-leak", "--mode", "token"]
+            } else {
+                vec![sub, "sk-ant-oat01-dummy-leak"]
+            };
+            let (code, out, err) = w.run(&args);
+            assert_eq!(code, 2, "{sub}: {err}");
+            assert!(
+                !out.contains("dummy") && !err.contains("dummy"),
+                "{sub}: {err}"
+            );
+        }
+        let (code, _, err) = w.run(&["check", "nosuch"]);
+        assert_eq!(code, 2);
+        assert!(err.contains("claude-account add nosuch --mode"), "{err}");
     }
 
     #[test]

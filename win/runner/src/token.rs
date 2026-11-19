@@ -34,8 +34,10 @@ pub const OP_REASON_EXE: &str = if cfg!(windows) {
 /// DPAPI の暗号文 (env `DOTFILES_TOKEN_BLOB`) を復号して、改行を付けずに stdout へ出す。ASCII だけ
 pub const DECRYPT_SCRIPT: &str = "$ErrorActionPreference = 'Stop'; try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false); $s = ConvertTo-SecureString -String $env:DOTFILES_TOKEN_BLOB; $p = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); try { [Console]::Out.Write([Runtime.InteropServices.Marshal]::PtrToStringBSTR($p)) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p) }; exit 0 } catch { [Console]::Error.WriteLine('DPAPI: ' + $_.Exception.Message); exit 1 }";
 
-/// token を見えない入力 (stdin がパイプなら 1 行) で読み、DPAPI の暗号文だけを env `DOTFILES_TOKEN_OUT` のファイルに書く。空なら 3。ASCII だけ
-pub const SET_SCRIPT: &str = "$ErrorActionPreference = 'Stop'; try { if ([Console]::IsInputRedirected) { $line = [Console]::In.ReadLine(); if ($null -eq $line) { exit 3 }; $line = $line.Trim(); if ($line.Length -eq 0) { exit 3 }; $s = ConvertTo-SecureString -String $line -AsPlainText -Force; $line = $null } else { $s = Read-Host -AsSecureString -Prompt 'token' }; if ($s.Length -eq 0) { exit 3 }; $blob = ConvertFrom-SecureString -SecureString $s; [IO.File]::WriteAllText($env:DOTFILES_TOKEN_OUT, $blob, (New-Object System.Text.UTF8Encoding($false))); exit 0 } catch { [Console]::Error.WriteLine('set-token: ' + $_.Exception.Message); exit 1 }";
+/// token を見えない入力 (stdin がパイプなら 1 行) で読み、形を確かめて、DPAPI の暗号文だけを env `DOTFILES_TOKEN_OUT` のファイルに書く。
+/// 終了コード: 3 = 空、4 = 端末なのに入力がリダイレクト扱い (Git Bash の mintty。読むと画面に出るので読まない。env `DOTFILES_SET_TOKEN_TTY`
+/// が印)、5 = op:// の参照、6 = token の形でない。平文は PowerShell の中だけにあり、確かめたら消す。ASCII だけ
+pub const SET_SCRIPT: &str = "$ErrorActionPreference = 'Stop'; try { if ([Console]::IsInputRedirected) { if ($env:DOTFILES_SET_TOKEN_TTY -eq '1') { exit 4 }; $line = [Console]::In.ReadLine(); if ($null -eq $line) { exit 3 }; $line = $line.Trim(); if ($line.Length -eq 0) { exit 3 }; $s = ConvertTo-SecureString -String $line -AsPlainText -Force; $line = $null } else { $s = Read-Host -AsSecureString -Prompt 'token' }; if ($s.Length -eq 0) { exit 3 }; $p = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($s); try { $t = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($p).Trim(); if ($t.Length -eq 0) { $code = 3 } elseif ($t.StartsWith('op://')) { $code = 5 } elseif ($t -cnotmatch '^[!-~]+$' -or $t.Contains([string][char]34) -or $t.Contains([string][char]39) -or $t.Contains([string][char]92)) { $code = 6 } else { $code = 0; $s = ConvertTo-SecureString -String $t -AsPlainText -Force }; $t = $null } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($p) }; if ($code -ne 0) { exit $code }; $blob = ConvertFrom-SecureString -SecureString $s; [IO.File]::WriteAllText($env:DOTFILES_TOKEN_OUT, $blob, (New-Object System.Text.UTF8Encoding($false))); exit 0 } catch { [Console]::Error.WriteLine('set-token: ' + $_.Exception.Message); exit 1 }";
 
 /// token のファイル (`<家>\.config\claude-accounts\<名前>.env`)
 pub fn file(home: &Path, name: &str) -> PathBuf {
@@ -72,6 +74,10 @@ pub enum Problem {
     BadValue,
     /// 参照に使えない字がある
     BadRef,
+    /// UTF-16 で保存されている (PowerShell 5.1 の `>` など)
+    Utf16,
+    /// ファイルがリンク (実体のファイルにする)
+    Link,
 }
 
 impl Problem {
@@ -99,6 +105,8 @@ impl Problem {
                 "値が token の形ではありません (空白・引用符・制御文字など)".to_string()
             }
             Problem::BadRef => "参照 (op://…) に使えない字があります".to_string(),
+            Problem::Utf16 => "ファイルが UTF-16 で保存されています (UTF-8 で保存し直すか、claude-account set-token で書き直す)".to_string(),
+            Problem::Link => "ファイルがリンクです (実体のファイルにする。claude-account set-token で書き直せる)".to_string(),
         }
     }
 }
@@ -143,10 +151,11 @@ fn unquote(raw: &str) -> Option<String> {
     }
     let bytes = rest.as_bytes();
     let cut = (1..bytes.len()).find(|&i| bytes[i] == b'#' && bytes[i - 1].is_ascii_whitespace());
-    Some(match cut {
-        Some(i) => rest[..i].to_string(),
-        None => rest.to_string(),
-    })
+    let v = match cut {
+        Some(i) => &rest[..i],
+        None => rest,
+    };
+    Some(v.trim_end_matches(is_ws).to_string())
 }
 
 /// token のファイルの中身を読む
@@ -187,7 +196,7 @@ pub fn parse(text: &str) -> Result<Stored, Problem> {
     let Some((_, v)) = found else {
         return Err(Problem::NoLine);
     };
-    let v = v.trim_matches(is_ws).to_string();
+    // 引用符の中の前後の空白は値の一部 (Linux の pjp-op-env と同じ読み方。" op://…" は参照でも token の形でもない)
     if v.is_empty() {
         return Err(Problem::Empty);
     }
@@ -210,7 +219,13 @@ pub fn parse(text: &str) -> Result<Stored, Problem> {
 
 /// token のファイルを読む
 pub fn load(path: &Path) -> Result<Stored, Problem> {
+    if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        return Err(Problem::Link);
+    }
     match std::fs::read(path) {
+        Ok(bytes) if bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff]) => {
+            Err(Problem::Utf16)
+        }
         Ok(bytes) => parse(&String::from_utf8_lossy(&bytes)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(Problem::Missing),
         Err(e) => Err(Problem::Unreadable(e.to_string())),
@@ -270,7 +285,7 @@ pub fn help_text(name: Option<&str>) -> String {
         format!("    claude-account set-token {n}"),
         "  そのマシンに claude-account がまだ無い (dotfiles が古い) ときは、同じ形のファイルを手で置く (fish からも打てる):".to_string(),
         format!(
-            "    bash -c 'umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp \"token: \" t && echo && printf \"CLAUDE_CODE_OAUTH_TOKEN=%s\\n\" \"$t\" > ~/.config/claude-accounts/{n}.env && unset t && echo 置いた'"
+            "    bash -c 'umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp \"token: \" t && echo && printf \"CLAUDE_CODE_OAUTH_TOKEN=%s\\n\" \"$t\" > ~/.config/claude-accounts/{n}.env && unset t && chmod 600 ~/.config/claude-accounts/{n}.env && echo 置いた'"
         ),
         format!(
             "    (dotfiles を新しくしたら claude-account add {n} --mode token を打つ。置いたファイルはそのまま使う)"
@@ -396,6 +411,8 @@ pub fn read(cmd: &str, name: &str, plan: &Plan) -> Result<String, (i32, String)>
                     DECRYPT_SCRIPT,
                 ])
                 .env("DOTFILES_TOKEN_BLOB", blob)
+                // pwsh 7 から受け継いだ PSModulePath だと、Windows PowerShell 5.1 が ConvertTo-SecureString の module を読めないことがある
+                .env_remove("PSModulePath")
                 .stdin(Stdio::null())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -486,7 +503,12 @@ pub fn compose(name: &str, blob: &str) -> String {
 }
 
 /// SET_SCRIPT を流し、暗号文を `out` に書かせる。`input` があれば stdin に流す (試験)、無ければ端末の stdin のまま。PowerShell の終了コード
-fn run_set_script(powershell: &Path, out: &Path, input: Option<&str>) -> Result<i32, String> {
+fn run_set_script(
+    powershell: &Path,
+    out: &Path,
+    input: Option<&str>,
+    tty: bool,
+) -> Result<i32, String> {
     let mut cmd = Command::new(powershell);
     cmd.args([
         "-NoProfile",
@@ -495,7 +517,12 @@ fn run_set_script(powershell: &Path, out: &Path, input: Option<&str>) -> Result<
         "-Command",
         SET_SCRIPT,
     ])
-    .env("DOTFILES_TOKEN_OUT", out);
+    .env("DOTFILES_TOKEN_OUT", out)
+    .env_remove("PSModulePath");
+    // Git Bash の mintty は Rust には端末、PowerShell にはリダイレクトに見える。印を渡して、画面に出る読み方をさせない
+    if tty {
+        cmd.env("DOTFILES_SET_TOKEN_TTY", "1");
+    }
     let status = match input {
         None => cmd.status(),
         Some(text) => {
@@ -528,12 +555,13 @@ pub fn set_token(
         .map_err(|e| (1, format!("{} を作れません ({e})", dir.display())))?;
     let tmp = dir.join(format!(".{name}.env.blob-{}", std::process::id()));
     let _ = std::fs::remove_file(&tmp);
-    if input.is_none() && std::io::stdin().is_terminal() {
+    let tty = input.is_none() && std::io::stdin().is_terminal();
+    if tty {
         eprintln!(
             "claude-account: claude setup-token で出した token を貼って Enter を押してください (画面には * だけが出ます)"
         );
     }
-    let code = run_set_script(powershell, &tmp, input);
+    let code = run_set_script(powershell, &tmp, input, tty);
     let blob = std::fs::read_to_string(&tmp);
     let _ = std::fs::remove_file(&tmp);
     match code {
@@ -542,6 +570,24 @@ pub fn set_token(
             return Err((
                 1,
                 "claude-account: token が空です。何も書いていません。".to_string(),
+            ));
+        }
+        Ok(4) => {
+            return Err((
+                1,
+                "claude-account: この端末 (Git Bash の mintty など) では見えない入力にできないので、読みませんでした。PowerShell か Windows Terminal で打つか、winpty claude-account set-token <名前> で打ってください。何も書いていません。".to_string(),
+            ));
+        }
+        Ok(5) => {
+            return Err((
+                1,
+                "claude-account: op の参照は set-token でなく、token のファイルに 1 行で書きます (CLAUDE_CODE_OAUTH_TOKEN=op://…)。何も書いていません。".to_string(),
+            ));
+        }
+        Ok(6) => {
+            return Err((
+                1,
+                "claude-account: 入れた値が token の形ではありません (空白・引用符・制御文字など)。何も書いていません (値は出しません)。".to_string(),
             ));
         }
         Ok(c) => {
@@ -638,7 +684,13 @@ mod tests {
 
     #[test]
     fn parse_stops_without_showing_values() {
-        let cases: [(&str, Problem); 9] = [
+        let cases: [(&str, Problem); 11] = [
+            // 引用符の中の前後の空白は値の一部 (Linux の pjp-op-env と同じ)
+            (
+                "CLAUDE_CODE_OAUTH_TOKEN=\" op://v/i/f\"\n",
+                Problem::BadValue,
+            ),
+            ("CLAUDE_CODE_OAUTH_TOKEN=\"dummy-q \"\n", Problem::BadValue),
             ("# だけ\n", Problem::NoLine),
             ("", Problem::NoLine),
             ("CLAUDE_CODE_OAUTH_TOKEN=\n", Problem::Empty),
@@ -664,6 +716,30 @@ mod tests {
             assert!(msg.contains("claude-account set-token token1"), "{msg}");
         }
         assert_eq!(load(&f.join("nosuch")), Err(Problem::Missing));
+    }
+
+    /// PowerShell 5.1 の > で書いた UTF-16 と、リンクの token のファイルは、わけと直し方を出して止まる
+    #[test]
+    fn load_refuses_utf16_and_links() {
+        let t = TempDir::new("token-load");
+        let p = t.path().join("token1.env");
+        let mut bytes = vec![0xff, 0xfe];
+        for u in "CLAUDE_CODE_OAUTH_TOKEN=dummy-u16\r\n".encode_utf16() {
+            bytes.extend_from_slice(&u.to_le_bytes());
+        }
+        std::fs::write(&p, bytes).unwrap();
+        let e = load(&p).unwrap_err();
+        assert_eq!(e, Problem::Utf16);
+        let msg = problem_message("claude-token1", "token1", &p, &e);
+        assert!(msg.contains("UTF-8"), "{msg}");
+        assert!(!msg.contains("dummy"), "{msg}");
+        #[cfg(unix)]
+        {
+            let real = t.write("elsewhere/t.env", "CLAUDE_CODE_OAUTH_TOKEN=dummy-l\n");
+            let link = t.path().join("token2.env");
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            assert_eq!(load(&link), Err(Problem::Link));
+        }
     }
 
     #[test]
@@ -841,9 +917,25 @@ mod tests {
             read("claude-token1", "token1", &p),
             Ok("dummy-dpapi-1".to_string())
         );
-        // 空の入力は書かない
-        let (code, _) = set_token("token1", &t.path().join("x.env"), &ps, Some("\n")).unwrap_err();
-        assert_eq!(code, 1);
-        assert!(!t.path().join("x.env").exists());
+        // 空・op の参照・token の形でない入力は書かない
+        for (input, want) in [
+            ("\n", "空"),
+            ("op://v/i/f\n", "op の参照"),
+            ("two words\n", "token の形"),
+        ] {
+            let (code, msg) =
+                set_token("token1", &t.path().join("x.env"), &ps, Some(input)).unwrap_err();
+            assert_eq!(code, 1, "{input:?}: {msg}");
+            assert!(msg.contains(want), "{input:?}: {msg}");
+            assert!(!msg.contains("two words"), "{msg}");
+            assert!(!t.path().join("x.env").exists());
+        }
+        // 端末の印があるのに入力がリダイレクト扱い (Git Bash の mintty) なら読まない
+        let out = t.path().join("tty.blob");
+        assert_eq!(
+            run_set_script(&ps, &out, Some("dummy-dpapi-2\n"), true),
+            Ok(4)
+        );
+        assert!(!out.exists());
     }
 }

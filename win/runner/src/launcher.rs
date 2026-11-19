@@ -62,7 +62,7 @@ pub fn prepare(
         return Err((
             2,
             format!(
-                "{cmd}: アカウントの名前に使えない字があります (英小文字・数字で始まり、英小文字・数字・- と _ だけ)"
+                "{cmd}: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで)"
             ),
         ));
     }
@@ -76,10 +76,15 @@ pub fn prepare(
             format!("{cmd}: 環境変数 USERPROFILE がありません (~/.claude-{name} を決められない)"),
         ));
     };
-    // 既定か登録か (どちらでもなければ起こさない)
-    let registry =
-        Registry::load(&accounts::registry_path(&home)).map_err(|e| (1, format!("{cmd}: {e}")))?;
-    let Some((mode, origin)) = accounts::lookup(name, &DEFAULT_ACCOUNTS, &registry) else {
+    // 既定か登録か (どちらでもなければ起こさない)。既定は登録を読まずに決める (登録が壊れていても既定は起きる)
+    let found = if DEFAULT_ACCOUNTS.contains(&name) {
+        Some((Mode::Subscription, accounts::Origin::Default))
+    } else {
+        let registry = Registry::load(&accounts::registry_path(&home))
+            .map_err(|e| (1, format!("{cmd}: {e}")))?;
+        accounts::lookup(name, &DEFAULT_ACCOUNTS, &registry)
+    };
+    let Some((mode, origin)) = found else {
         return Err((
             2,
             format!(
@@ -360,7 +365,7 @@ mod tests {
         let path = h.path_var();
         let (code, msg) = prepare("Work", &h.env(), Some(&path)).unwrap_err();
         assert_eq!(code, 2, "{msg}");
-        assert!(msg.contains("使えない字"), "{msg}");
+        assert!(msg.contains("名前に使えません"), "{msg}");
         let (code, msg) = prepare("work", &|_| None, Some(&path)).unwrap_err();
         assert_eq!(code, 1);
         assert!(msg.contains("USERPROFILE"), "{msg}");
@@ -450,6 +455,11 @@ mod tests {
         let (code, msg) = prepare("token1", &h.env(), Some(&path)).unwrap_err();
         assert_eq!(code, 1, "{msg}");
         assert!(msg.contains("accounts.json"), "{msg}");
+        // 既定のアカウントは登録を読まない (壊れていても、用意の確かめに進む)
+        let (code, msg) = prepare("personal", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(!msg.contains("accounts.json"), "{msg}");
+        assert!(msg.contains("まだ用意されていません"), "{msg}");
     }
 
     /// 登録の token のアカウント: 用意 (リンク) の後に token のファイルを読み、無ければ忠告、平文なら Plan::Plain

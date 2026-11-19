@@ -66,7 +66,11 @@ pub fn name_ok(name: &str) -> bool {
     let lead_ok = chars
         .next()
         .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    lead_ok && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    // token を名前の所に渡したときに、登録したり文に出したりしないよう、長いものと token の頭 (sk-ant-) のものは断る
+    lead_ok
+        && name.len() <= 32
+        && !name.starts_with("sk-ant-")
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
 }
 
 /// 登録と token のファイルを置く dir (`<家>\.config\claude-accounts`)
@@ -136,9 +140,11 @@ impl Registry {
 
 /// 登録の一覧の文字列を読む。形が違えばわけ
 fn parse(text: &str) -> Result<Registry, String> {
+    // PowerShell 5.1 の Set-Content -Encoding UTF8・メモ帳は頭に BOM を付ける (jq は読むので、Linux とそろえる)
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let v: serde_json::Value =
         serde_json::from_str(text).map_err(|e| format!("JSON でない: {e}"))?;
-    if v.get("version").and_then(serde_json::Value::as_i64) != Some(1) {
+    if v.get("version").and_then(serde_json::Value::as_f64) != Some(1.0) {
         return Err("version が 1 でない".to_string());
     }
     let Some(accounts) = v.get("accounts").and_then(serde_json::Value::as_object) else {
@@ -200,6 +206,10 @@ mod tests {
         for ng in ["", "Work", "-a", "_a", "a.b", "a b", "a/b", "a\\b", "ａ"] {
             assert!(!name_ok(ng), "{ng}");
         }
+        // token の頭と長すぎる名前 (token を名前に渡した) は断る
+        assert!(!name_ok("sk-ant-oat01-dummy"));
+        assert!(name_ok(&"a".repeat(32)));
+        assert!(!name_ok(&"a".repeat(33)));
     }
 
     #[test]
@@ -215,10 +225,10 @@ mod tests {
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(text.ends_with("}\n"), "{text}");
         assert!(text.contains("\"version\": 1"), "{text}");
-        // Linux の claude-account (jq) が書く形も読める
+        // Linux の claude-account (jq) が書く形も、BOM 付き (PowerShell 5.1・メモ帳) と 1.0 の version も読める
         std::fs::write(
             &path,
-            "{\"version\":1,\"accounts\":{\"t\":{\"mode\":\"token\"}}}\n",
+            "\u{feff}{\"version\":1.0,\"accounts\":{\"t\":{\"mode\":\"token\"}}}\n",
         )
         .unwrap();
         assert_eq!(

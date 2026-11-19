@@ -4612,10 +4612,12 @@ claude-account help token [token1]             # token をこのマシンとほ�
 - setup（`bootstrap-claude-accounts`）は、既定に加えて登録のアカウントの dir も保つ。launcher の link が消えていれば知らせる
   （add の打ち直しで張る）
 - `check` は値を出さず、op を呼ばない（ファイルの有る無し・形・権限と、dir・link・`.credentials.json` の有る無しだけを見る）。
-  子を立てる前の確かめに使う（claude-skills の pjp child）
+  子を立てる前の確かめに使う（claude-skills の pjp child）。op の参照のアカウントは 0 で「token (1Password・起動のときに承認が要る)」と
+  出す（起こすたびに 1Password の承認が出るので、子は起動の直後にその画面で止まって見えうる）。知らない名前の 2 は足す手（add）を出す
 - `remove` は `~/.claude-<名前>`（ログイン・履歴）と token のファイルを残す。`--purge` は両方を消すが、中のリンクは辿らない
   （`~/.claude` の中身は消えない）。登録から外したあとでも `--purge` で消せる
-- 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）。`account` と既定の名前は使えない
+- 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）で、32 字まで。`account`・既定の名前・`sk-ant-` で
+  始まるもの（token の頭）は使えない。規則に合わない文字列は文に出さない（token を名前の所に渡しても、画面に出さない）
 
 #### token のアカウント
 
@@ -4629,7 +4631,10 @@ claude-account help token [token1]             # token をこのマシンとほ�
 
 - 中身は `CLAUDE_CODE_OAUTH_TOKEN=<値>` の 1 行と、`#` のコメント・空行だけ（`export `・引用符・BOM・CRLF は読む）。ほかの名前の行は
   止める（op の道で `pjp-op-env` がファイルの全部の行を env に入れ、`ANTHROPIC_API_KEY` などが紛れると token より先に効くため）
-- token が無い・置き方が違うと、claude を起こさずに置き方（setup-token → set-token、op の参照の形）を出して止まる
+- token が無い・置き方が違うと、claude を起こさずに置き方（setup-token → set-token、op の参照の形）を出して止まる。token のファイルが
+  リンクなら読まない（実体のファイルにする）。引用符の中の前後の空白は値の一部（`" op://…"` は参照でも token の形でもない）
+- op の道は、1Password から読んだ値を確かめてから claude を起こす（空・空白入りなら 70 で止まる。pjp-op-env の後ろの段が env の値だけを
+  見る）
 - **シークレットの決まりの例外**: token の値をファイルに置くのはユーザーの決定（2026-11-19）。値を入れるのはユーザーだけ
   （`set-token` の見えない入力）で、Claude は読まない・書かない・出さない（有る無しと権限だけを見る）。元の token は 1Password にも置く。
   わけと守り・漏れたときは dotfiles-private の ADR 082（`docs/adr/082_claude_token_accounts_*`）
