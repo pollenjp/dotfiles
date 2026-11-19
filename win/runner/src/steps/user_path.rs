@@ -16,11 +16,13 @@ pub struct UserPath {
     pub kind: String,
 }
 
-/// 生の値と型を `kind=…`・`raw=…` の 2 行で出す。
-const READ_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $raw = ''; $kind = 'None'; $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false); if ($null -ne $k) { try { if ($k.GetValueNames() -contains 'Path') { $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $kind = [string]$k.GetValueKind('Path') } } finally { $k.Close() } }; Write-Output ('kind=' + $kind); Write-Output ('raw=' + $raw)";
+/// 生の値と型を `kind=…`・`raw=…` の 2 行で出す。途中の誤りでは先へ進まずに 1 で終わる (`$ErrorActionPreference = 'Stop'` と catch。
+/// 黙って空の値を返すと、書く側が PATH を書き潰しうるため)。
+const READ_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; try { $raw = ''; $kind = 'None'; $k = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false); if ($null -ne $k) { try { if ($k.GetValueNames() -contains 'Path') { $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); $kind = [string]$k.GetValueKind('Path') } } finally { $k.Close() } }; Write-Output ('kind=' + $kind); Write-Output ('raw=' + $raw) } catch { Write-Output ('error: ' + $_.Exception.Message); exit 1 }";
 
-/// 読み直して `DOTFILES_USER_PATH_OLD` と違えば書かずに 3 で終わる。同じなら型を保って `DOTFILES_USER_PATH_NEW` を書き、知らせる。
-const WRITE_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $old = [string]$env:DOTFILES_USER_PATH_OLD; $new = [string]$env:DOTFILES_USER_PATH_NEW; $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); try { $has = $k.GetValueNames() -contains 'Path'; $raw = ''; if ($has) { $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }; if ($raw -cne $old) { Write-Output 'changed since read'; exit 3 }; $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString; if ($has) { $kind = $k.GetValueKind('Path') }; $k.SetValue('Path', $new, $kind) } finally { $k.Close() }; [Environment]::SetEnvironmentVariable('DOTFILES_USER_PATH_REFRESH', '1', 'User'); [Environment]::SetEnvironmentVariable('DOTFILES_USER_PATH_REFRESH', $null, 'User'); exit 0";
+/// 読み直して `DOTFILES_USER_PATH_OLD` と違えば書かずに 3 で終わる (try の中の exit は catch に捕まらない)。同じなら型を保って
+/// `DOTFILES_USER_PATH_NEW` を書き、知らせる。途中の誤りでは先へ進まずに 1 で終わる。
+const WRITE_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $ErrorActionPreference = 'Stop'; try { $old = [string]$env:DOTFILES_USER_PATH_OLD; $new = [string]$env:DOTFILES_USER_PATH_NEW; $k = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment'); if ($null -eq $k) { throw 'cannot open HKCU Environment' }; try { $has = $k.GetValueNames() -contains 'Path'; $raw = ''; if ($has) { $raw = [string]$k.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) }; if ($raw -cne $old) { Write-Output 'changed since read'; exit 3 }; $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString; if ($has) { $kind = $k.GetValueKind('Path') }; $k.SetValue('Path', $new, $kind) } finally { $k.Close() }; [Environment]::SetEnvironmentVariable('DOTFILES_USER_PATH_REFRESH', '1', 'User'); [Environment]::SetEnvironmentVariable('DOTFILES_USER_PATH_REFRESH', $null, 'User'); exit 0 } catch { Write-Output ('error: ' + $_.Exception.Message); exit 1 }";
 
 fn powershell(shell: &Path, script: &str) -> CommandSpec {
     CommandSpec::new(shell)
@@ -222,6 +224,12 @@ mod tests {
             args[args.len() - 1].contains("DoNotExpandEnvironmentNames"),
             "{args:?}"
         );
+        // 途中の誤りで先へ進まない (誤りなら 1 で終わる)
+        assert!(
+            args[args.len() - 1].contains("$ErrorActionPreference = 'Stop'"),
+            "{args:?}"
+        );
+        assert!(args[args.len() - 1].contains("exit 1 }"), "{args:?}");
         drop(calls);
         let sys = pwsh(&["kind=None", "raw="], 0);
         assert_eq!(read(&sys, Path::new("pwsh")).unwrap().raw, "");
@@ -245,6 +253,11 @@ mod tests {
         let script = c.args_lossy().pop().unwrap();
         assert!(script.contains("SetValue('Path', $new, $kind)"), "{script}");
         assert!(script.contains("DOTFILES_USER_PATH_REFRESH"), "{script}");
+        assert!(
+            script.contains("$ErrorActionPreference = 'Stop'"),
+            "{script}"
+        );
+        assert!(script.contains("exit 1 }"), "{script}");
         let sys = pwsh(&["changed"], 3);
         let e = write(&sys, Path::new("pwsh"), "a", "a;b").unwrap_err();
         assert!(e.contains("読んだ後に変わった"), "{e}");

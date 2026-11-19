@@ -561,6 +561,13 @@ fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, St
         Mode::Apply { .. } => {
             let new = user_path::with_entry(&cur.raw, bin);
             user_path::write(ctx.sys, &shell, &cur.raw, &new)?;
+            // PowerShell が 0 で終わっても、読み直して入っていなければ足したと言わない
+            let after = user_path::read(ctx.sys, &shell)?;
+            if !user_path::listed(&after.raw, bin, &|n| sys.env(n)) {
+                return Err(format!(
+                    "ユーザーの PATH に書いたはずが、読み直すと {shown} が入っていない (registry への書き込みが止められた、など)"
+                ));
+            }
             ctx.say(format!("ユーザーの PATH の末尾に足しました: {shown}"));
             Ok(PathState::Added)
         }
@@ -731,7 +738,7 @@ mod tests {
     use crate::process::{Exit, RunResult};
     use crate::report::Kind;
     use crate::testutil::{FakeSys, TempDir, fake_file_symlink, fake_mklink};
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
     use std::time::Duration;
 
@@ -765,7 +772,13 @@ mod tests {
 
     /// 偽の外のコマンド: mklink (junction とファイルの symlink)・昇格・ユーザーの PATH (`reg` を registry の Path の生の値として読み書き
     /// する)。current_exe は `exe`、%LOCALAPPDATA% は `local`
-    fn fake(uac: Uac, reg: Rc<RefCell<String>>, exe: &Path, local: &Path) -> FakeSys {
+    fn fake(
+        uac: Uac,
+        reg: Rc<RefCell<String>>,
+        sticky: Rc<Cell<bool>>,
+        exe: &Path,
+        local: &Path,
+    ) -> FakeSys {
         FakeSys::new(move |c| {
             let args = c.args_lossy();
             if args.len() == 4 && args[1] == "mklink" && uac != Uac::NotNeeded {
@@ -802,7 +815,10 @@ mod tests {
                         output: vec!["changed".to_string()],
                     };
                 }
-                *reg.borrow_mut() = new;
+                // 書き込みが止められた registry を真似るときは、0 を返しても値を変えない
+                if sticky.get() {
+                    *reg.borrow_mut() = new;
+                }
                 return RunResult {
                     exit: Exit::Code(0),
                     output: Vec::new(),
@@ -845,6 +861,8 @@ mod tests {
         t: TempDir,
         /// registry のユーザーの PATH の生の値 (偽物が読み書きする)
         reg: Rc<RefCell<String>>,
+        /// 偽物の PATH の書き込みが値を変えるか (false で、書き込みが止められた registry を真似る)
+        sticky: Rc<Cell<bool>>,
     }
 
     impl Env {
@@ -854,6 +872,7 @@ mod tests {
             Env {
                 t,
                 reg: Rc::new(RefCell::new("C:\\Windows".to_string())),
+                sticky: Rc::new(Cell::new(true)),
             }
         }
 
@@ -889,7 +908,13 @@ mod tests {
         }
 
         fn fake(&self, uac: Uac) -> FakeSys {
-            fake(uac, self.reg.clone(), &self.exe(), &self.local())
+            fake(
+                uac,
+                self.reg.clone(),
+                self.sticky.clone(),
+                &self.exe(),
+                &self.local(),
+            )
         }
 
         fn exe(&self) -> PathBuf {
@@ -1446,5 +1471,21 @@ mod tests {
         assert!(cmds.text.contains("runner の exe が読めない"), "{cmds:?}");
         // ほかは用意する
         assert_eq!(row(&o, DIRS).kind, Kind::Ok, "{o:?}");
+    }
+
+    /// PowerShell が 0 で終わっても、読み直して入っていなければ「足した」と言わない (書き込みを止められた registry など)
+    #[test]
+    fn path_write_that_does_not_stick_fails() {
+        let e = Env::new();
+        e.sticky.set(false);
+        let sys = e.fake(Uac::Decline);
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        let cmds = row(&o, COMMANDS);
+        assert_eq!(cmds.kind, Kind::Failed, "{cmds:?}\n{out}");
+        assert!(
+            cmds.notes.iter().any(|n| n.contains("読み直すと")),
+            "{cmds:?}"
+        );
+        assert!(!out.contains("末尾に足しました"), "{out}");
     }
 }
