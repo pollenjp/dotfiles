@@ -568,6 +568,29 @@
                 bash ${./tests/pjp-op-env.test.sh} ${./pkgs/pjp-op-env/pjp-op-env.sh} ${opReason}/bin/op-reason
                 touch $out
               '';
+          # アカウントを足す管理のコマンド claude-account と launcher claude-<名前> (pkgs/claude-account) を、一時の HOME・偽の
+          # claude・偽の op で流す。profileBin は試験のための値 (add が張る link の先として見るだけで、そこに実物は無い)。add と
+          # setup の両方が流す bootstrap-claude-accounts.sh も渡す
+          claude-account-test =
+            let
+              profileBin = "/claude-account-test/profile/bin";
+            in
+            pkgs.runCommand "claude-account-test"
+              {
+                nativeBuildInputs = [ pkgs.jq ];
+              }
+              ''
+                bash ${./tests/claude-account.test.sh} ${
+                  pkgs.callPackage ./pkgs/claude-account {
+                    defaults = [
+                      "personal"
+                      "work"
+                    ];
+                    inherit profileBin;
+                  }
+                } ${profileBin} ${./scripts/bootstrap-claude-accounts.sh}
+                touch $out
+              '';
           # 1Password の名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を、偽の op と偽の項目 (op item get --format json
           # の形) で流す。後半は本物の op-reason (pkgs/op-reason の WSL の実行ファイル) を偽の op-reason.exe・op.exe・wslpath で
           # 通し、lock に flock (util-linux) を使う。値が execve の argv に載らないことを strace で見る
