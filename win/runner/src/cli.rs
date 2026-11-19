@@ -25,6 +25,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
   dotfiles-win claude-statusline                          Claude Code の status line (同じ口)
+  claude-<名前>.exe [引数…]                               この exe の写し (claude-accounts が %LOCALAPPDATA%\\dotfiles\\bin に置く)。
+                                                          CLAUDE_CONFIG_DIR を %USERPROFILE%\\.claude-<名前> にして claude.exe を起こす
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
   --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする

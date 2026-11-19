@@ -92,32 +92,57 @@ pub fn remove_link(p: &Path) -> std::io::Result<()> {
     std::fs::remove_file(p)
 }
 
-/// `link` に `target` を指す junction を張る (`%ComSpec%` か `cmd` の `/c mklink /J`)。張った後に先を読み直して確かめる。cmd が特別に
-/// 読む文字を含むパスは、cmd を打たずに断る。
-pub fn create_junction(sys: &dyn Sys, link: &Path, target: &Path) -> Result<(), String> {
-    for p in [link, target] {
+/// パスに cmd が特別に読む文字があれば、どれのどの文字かを返す (cmd に別のコマンドとして読ませない)。
+pub fn check_cmd_specials(paths: &[&Path]) -> Result<(), String> {
+    for p in paths {
         let s = p.to_string_lossy();
         if let Some(c) = s.chars().find(|c| CMD_SPECIALS.contains(c)) {
             return Err(format!(
-                "パスに cmd が特別に読む文字 ({c}) があるので junction を張らない: {s}"
+                "パスに cmd が特別に読む文字 ({c}) があるので cmd に渡さない: {s}"
             ));
         }
     }
-    let cmd = sys
-        .env("ComSpec")
+    Ok(())
+}
+
+/// cmd の exe (`%ComSpec%`。無ければ `cmd`)。
+pub fn comspec(sys: &dyn Sys) -> String {
+    sys.env("ComSpec")
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "cmd".to_string());
-    let spec = CommandSpec::new(cmd)
-        .arg("/c")
-        .arg("mklink")
-        .arg("/J")
+        .unwrap_or_else(|| "cmd".to_string())
+}
+
+/// `link` に `target` を指す junction を張る (`%ComSpec%` か `cmd` の `/c mklink /J`)。張った後に先を読み直して確かめる。cmd が特別に
+/// 読む文字を含むパスは、cmd を打たずに断る。
+pub fn create_junction(sys: &dyn Sys, link: &Path, target: &Path) -> Result<(), String> {
+    mklink(sys, Some("/J"), link, target)
+}
+
+/// `link` に `target` を指すファイルの symlink を張る (`%ComSpec%` か `cmd` の `/c mklink`)。管理者の権限か開発者モードが要り、無ければ
+/// mklink が落ちる (Err)。張った後に先を読み直して確かめる。cmd が特別に読む文字を含むパスは、cmd を打たずに断る。
+pub fn create_symlink_file(sys: &dyn Sys, link: &Path, target: &Path) -> Result<(), String> {
+    mklink(sys, None, link, target)
+}
+
+/// `cmd /c mklink [<flag>] <link> <target>` を打ち、張ったリンクの先を読み直す。
+fn mklink(sys: &dyn Sys, flag: Option<&str>, link: &Path, target: &Path) -> Result<(), String> {
+    check_cmd_specials(&[link, target])?;
+    let mut spec = CommandSpec::new(comspec(sys)).arg("/c").arg("mklink");
+    if let Some(f) = flag {
+        spec = spec.arg(f);
+    }
+    let spec = spec
         .arg(link.as_os_str())
         .arg(target.as_os_str())
         .timeout(Duration::from_secs(30));
+    let what = match flag {
+        Some(f) => format!("mklink {f}"),
+        None => "mklink".to_string(),
+    };
     let r = sys.run(&spec, &mut |_| {});
     if r.code() != Some(0) {
         return Err(format!(
-            "mklink /J が落ちた ({:?}): {}",
+            "{what} が落ちた ({:?}): {}",
             r.exit,
             r.output.join(" / ")
         ));
@@ -125,12 +150,12 @@ pub fn create_junction(sys: &dyn Sys, link: &Path, target: &Path) -> Result<(), 
     match link_target(link) {
         Some(t) if same_path(&t, target) => Ok(()),
         Some(t) => Err(format!(
-            "張った junction の先が違う: {} (望んだのは {})",
+            "張ったリンクの先が違う: {} (望んだのは {})",
             t.display(),
             target.display()
         )),
         None => Err(format!(
-            "mklink /J は通ったが、{} がリンクになっていない",
+            "{what} は通ったが、{} がリンクになっていない",
             link.display()
         )),
     }
@@ -217,6 +242,48 @@ mod tests {
         assert!(!link.exists() && !is_link(&link));
         assert!(target.join("SKILL.md").is_file());
         assert_eq!(link_target(&target), None);
+    }
+
+    /// ファイルの symlink を `cmd /c mklink <link> <target>` で張り (試験の偽物は std の symlink)、先を読み直す。cmd が特別に読む文字は
+    /// 打たずに断る
+    #[test]
+    fn file_symlink_round_trip() {
+        let t = TempDir::new("link-file-symlink");
+        let target = t.path().join(".claude").join("settings.json");
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        std::fs::write(&target, "{}\n").unwrap();
+        let link = t.path().join(".claude-work").join("settings.json");
+        std::fs::create_dir_all(link.parent().unwrap()).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).expect("mklink だけを打つ"));
+        if let Err(e) = create_symlink_file(&sys, &link, &target) {
+            // Windows でファイルの symlink を作る権限が無い (開発者モードでない・昇格していない) なら飛ばす
+            if !cfg!(windows) {
+                panic!("{e}");
+            }
+            eprintln!("ファイルの symlink を作る権限が無いので飛ばす: {e}");
+            return;
+        }
+        let args = sys.call_args();
+        assert_eq!(args.len(), 1);
+        assert_eq!(
+            args[0],
+            format!("/c mklink {} {}", link.display(), target.display())
+        );
+        assert!(same_path(&link_target(&link).unwrap(), &target));
+        assert_eq!(std::fs::read_to_string(&link).unwrap(), "{}\n");
+
+        let sys = FakeSys::new(|_| unreachable!("cmd を打たない"));
+        let e = create_symlink_file(&sys, Path::new("C:\\a%b\\x"), &target).unwrap_err();
+        assert!(e.contains("cmd が特別に読む文字"), "{e}");
+        assert_eq!(
+            check_cmd_specials(&[Path::new("C:\\ok\\x"), Path::new("C:\\a&b")]).unwrap_err(),
+            "パスに cmd が特別に読む文字 (&) があるので cmd に渡さない: C:\\a&b"
+        );
+        assert_eq!(comspec(&FakeSys::new(|_| unreachable!())), "cmd");
+        assert_eq!(
+            comspec(&FakeSys::new(|_| unreachable!()).with_env("ComSpec", "C:\\Windows\\cmd.exe")),
+            "C:\\Windows\\cmd.exe"
+        );
     }
 
     /// ファイルの symlink (Windows では開発者モードか管理者で作れる) も外せ、先は残る

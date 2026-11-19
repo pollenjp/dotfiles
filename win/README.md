@@ -235,8 +235,10 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+- `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
+  出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
   WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
 - `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
@@ -309,6 +311,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
+| 99 | `claude-accounts` | claude-personal・claude-work の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
@@ -443,6 +446,90 @@ Linux の CI が同じ入力で突き合わせる)。Windows の Claude Code は
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
 | `footer-links-archive.sh` | 入れない | cc-pages が Windows に無い (claude-skills の spec も Windows の cc-pages は扱わない) |
 | `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない。承認の画面は、ユーザーが見ている Windows の画面に出る |
+
+### claude-personal・claude-work
+
+Claude Code のログインを個人と会社のアカウントで分けるコマンド (Linux の `claude-personal`・`claude-work` と同じ考え。nix/README.md の
+「[Claude Code のアカウントを分ける](../nix/README.md#claude-code-のアカウントを分ける-claude-personal--claude-work)」)。**分かれるのはログインだけ**で、
+CLAUDE.md・skill・hook・設定・履歴と auto memory は素の `claude` (`%USERPROFILE%\.claude`) と同じものが効く。runner の手順 `claude-accounts`
+(order 99。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す) が用意する。on/off は道具の switch
+`windowsClaudeAccounts` (personal は既定で on、company・client は off。初回の apply で UAC の確認が出るため) と `windowsClaudeCode` の両方
+(経緯は dotfiles-private の ADR 081 (`docs/adr/081_win_claude_accounts_*`))。
+
+| コマンド | 使う config dir | ログイン |
+| --- | --- | --- |
+| `claude` | `%USERPROFILE%\.claude` (今まで通り) | 今まで通り |
+| `claude-personal` | `%USERPROFILE%\.claude-personal` | 個人のアカウント (初回に `/login`) |
+| `claude-work` | `%USERPROFILE%\.claude-work` | 会社のアカウント (初回に `/login`) |
+
+```powershell
+dotfiles check --steps claude-accounts     # 差を見る (何も書かない。UAC の確認も出さない)
+dotfiles apply --steps claude-accounts     # 揃える (初回は UAC の確認が 1 回出る)
+# 初めて PATH に足した後は、新しい PowerShell で (herdr-app の中の端末なら herdr-app を上げ直してから)
+claude-work                                # 初回は /login で会社のアカウント。/status で config dir とアカウントを見る
+```
+
+`claude-accounts` が置くもの:
+
+| 置くもの | 形 |
+| --- | --- |
+| `.claude-<名前>\settings.json`・`CLAUDE.md` | `~/.claude` へのファイルの symlink。ファイルの symlink は管理者の権限か開発者モードが要るので、足りないものを全部のアカウントのぶん集め、直に張れなければ **UAC の確認 1 回**でまとめて張る (昇格した cmd の `mklink`)。足りていれば確認は出ない |
+| `.claude-<名前>\projects` | `~/.claude\projects` への junction (履歴と auto memory。権限は要らない) |
+| `.claude-<名前>\skills\`・`agents\`・`commands\`・`rules\` | 実体の dir。`~/.claude\<種類>` の中身を 1 つずつ写す (dir は junction、ファイルは記録つきのコピー。記録は `%LOCALAPPDATA%\dotfiles\state\claude-accounts.deployed.json`)。skills はリンク・`pjp-*`・runner が書く `hc`・`herdr-app` だけで、`synced`・`manifest.json` は写さない (Claude Code がアカウントごとに置く) |
+| `.claude-<名前>\plugins\`・`.credentials.json`・`.claude.json` など | 実体。Claude Code が作る (触らない) |
+| `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe` | runner の exe の写し (exe の名前で launcher として動く)。置き場をユーザーの PATH の末尾に足す (`HKCU\Environment` の生の値に足す。値の型と、ほかの要素の `%VAR%` の書き方はそのまま) |
+
+- launcher は `~/.claude-<名前>\settings.json` と `projects` が `~/.claude` の同じ名前へのリンクでなければ、Claude Code を起こさずに止まる (Claude Code は
+  空の config dir に起動しただけで `projects\` などを実体で作り、runner がリンクを張れなくなる・履歴が分かれるため)。用意されていれば `ANTHROPIC_API_KEY`・
+  `CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN` (`/login` の資格情報より優先される env) を外し、`CLAUDE_CONFIG_DIR` を付けて PATH の
+  `claude.exe` を起こし、その終了コードで終わる。exe なので PowerShell・Git Bash・cmd からも、`hc run` のように shell を通さない起こし方からも
+  同じ名前で打てる
+- Ctrl+C は Claude Code に任せる (launcher は Ctrl+C・Ctrl+Break を受け流すだけで、自分だけが落ちない)。launcher だけを外から止めると
+  `claude.exe` は残る (端末を閉じれば両方終わる)
+- UAC の確認を断った・出せない (SSH の会話・非対話) ときは、symlink の行だけを ⚠ にして、ほかは用意する。次の `dotfiles apply` でまた聞く。
+  `check` と `apply --dry-run` は昇格しない。別の先を指す symlink は、昇格する前に外してから張り直す (断ると無いままになり、次の apply でまた聞く。
+  外せなければ張らずに ⚠)
+- **PATH に足しても、もう動いている process には効かない。** herdr-app とその中の端末・動いている Claude Code は古い PATH のままなので、
+  初めて足した後は herdr-app を上げ直すか、新しい PowerShell で打つ
+- launcher は runner の exe の写しなので、runner を作り直すと (clone を pull すると) `dotfiles check` が「書き直す」と出す。`dotfiles apply` で
+  置き直す (会話の途中で動いている launcher は退けてから置き、退けたものは次に置くときに消す)
+- アカウントごとに分かれるもの (Linux と同じ): `.claude.json` (repo ごとの「信頼する」の確認・MCP サーバーの設定)・↑ キーの入力履歴・
+  巻き戻し・`plugins\`・`skills\synced\`。`claude-work` の会話の中で素の `claude` を打つと、`CLAUDE_CONFIG_DIR` が引き継がれて work で起動する
+- `~/.claude` に skill や rule を足した・消したあと、薄い dir が追従するのは次の `dotfiles apply` から (rule などのファイルはコピーなので、
+  中身が変わったときも同じ)
+- Linux と違う所: settings.json と CLAUDE.md の symlink に管理者の権限が要る・projects は junction・rule などのファイルはリンクでなくコピー
+  (ファイルの symlink にすると rule が増えるたびに UAC が要り、dir ごとの junction は Claude Code が実パスで見る所があるかを確かめていない)・
+  plugin は入れない (Windows の settings.json に `enabledPlugins` が無い)・アカウントの一覧は runner の中の固定 (`personal`・`work`。Linux の
+  claude.nix と同じ)
+
+#### 既に ~/.claude-<名前> があるとき
+
+`$env:CLAUDE_CONFIG_DIR = "$HOME\.claude-work"; claude` のように先に起動していると、Claude Code が `settings.json` や `projects\` を実体で作って
+いる。runner は実体を上書きせず (⚠ で知らせる)、launcher も「リンクではありません」と言って起動しない。片付けてから流し直す。
+
+```powershell
+$d = "$HOME\.claude-work"                         # claude-personal なら .claude-personal
+Get-Content "$d\settings.json"                    # 残したい設定は ~/.claude\settings.json へ移す
+Remove-Item "$d\settings.json"
+(Get-Item "$d\projects").LinkType                 # 空 (実体) のときだけ次の 2 行を打つ
+robocopy "$d\projects" "$HOME\.claude\projects" /E /XC /XN /XO /R:1 /W:1   # ~/.claude\projects へ寄せる (同じ名前のファイルは上書きしない)
+if ($LASTEXITCODE -lt 8) { Rename-Item "$d\projects" projects.bak }        # 消さずに退ける (robocopy が落ちたら退けない)
+dotfiles apply --steps claude-accounts
+```
+
+同じ名前で中身の違うファイル (`memory\*.md` など) は写さないので、`projects.bak` に残る。`~/.claude\projects` の同じ名前のものと見比べ、
+要るものを移してから `projects.bak` を消す (`cmd /c rmdir /s /q "$d\projects.bak"`)。ログイン (`.credentials.json`・`.claude.json`) と `plugins\` は
+そのまま残してよい (`/login` し直さなくてよい)。`CLAUDE.md` が実体のときも、
+中身を見てから消す (共通の指示は dotfiles の `nix/files/claude/CLAUDE.md` に書く)。
+
+#### switch を外したとき
+
+`windowsClaudeAccounts = false` にしても、作ったものは消さない (runner が見なくなるだけ)。外すなら:
+
+- `%LOCALAPPDATA%\dotfiles\bin\claude-personal.exe`・`claude-work.exe` を消し、ユーザーの PATH から `%LOCALAPPDATA%\dotfiles\bin` を外す
+  (`rundll32 sysdm.cpl,EditEnvironmentVariables` の「ユーザー環境変数」の Path)
+- `~/.claude-<名前>` を消すと、そのアカウントのログインも消える。中の junction は `cmd /c rmdir` で外し (先は消えない)、Windows PowerShell 5.1 の
+  `Remove-Item -Recurse` を junction に打たない (先の中身まで消すことがある)
 
 ### git の設定
 

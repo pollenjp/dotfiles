@@ -9,6 +9,7 @@ pub mod context;
 pub mod fsutil;
 pub mod hooks;
 pub mod host;
+pub mod launcher;
 pub mod link;
 pub mod manifest;
 pub mod ojson;

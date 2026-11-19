@@ -13,6 +13,7 @@
 #   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false)
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は ③)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
+#   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は ② と ③。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定 false。どのグループでも)
 #   dotfiles.wsl.windowsFiles.sshd.enable        Windows に sshd (OpenSSH Server) を入れ、Tailscale から鍵でだけ入れるようにするか (既定 false。どのグループでも)
@@ -112,8 +113,9 @@ in
     description = ''
       ② AI の道具の段を入れるか。既定はグループから決まる (personal・company は true、client は false)。この段の道具の switch
       (`claude.enable`・`herdr.enable`・`herdrCore.enable`・`wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable`) の
-      既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`) は、
-      `personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable` は既定が false のまま (段によらない)。
+      既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`・
+      `wsl.windowsFiles.claudeAccounts.enable`) は、`personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable` は
+      既定が false のまま (段によらない)。
     '';
   };
 
@@ -124,8 +126,8 @@ in
     example = false;
     description = ''
       ③ 個人のアカウントにつながるものの段を入れるか。既定はグループから決まる (personal だけ true)。この段の道具の switch
-      (`ntn.enable`・`wsl.windowsFiles.ntn.enable`・`git.identity.enable`) の既定になる。② と ③ の両方に当たる道具は
-      `aiTools.enable` も true のときだけ既定で入る。`onePassword.enable`・`claude.devTracker.enable` は既定が false のまま
+      (`ntn.enable`・`wsl.windowsFiles.ntn.enable`・`git.identity.enable`) の既定になる。② と ③ の両方に当たる道具
+      (`wsl.windowsFiles.claudeAccounts.enable` など) は `aiTools.enable` も true のときだけ既定で入る。`onePassword.enable`・`claude.devTracker.enable` は既定が false のまま
       (段によらず、使うホストが入れる)。
 
       自社の PC (company) は ③ を段ごと戻さず、要る道具を 1 つずつ足す (何に頼っているかがホストのファイルで分かるように)。
@@ -921,6 +923,29 @@ in
         (`%USERPROFILE%\.claude`) とログインには触らない。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.claudeAccounts.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
+      example = false;
+      description = ''
+        Windows の claude-personal・claude-work (ログインだけを分けて Windows の Claude Code を起こすコマンド。Linux の
+        `claude-<名前>` と同じ考え) を、Windows の runner が用意するマシンか。runner の手順 `claude-accounts` が
+        `%USERPROFILE%\.claude-<名前>` と `claude-<名前>.exe` を置き、その置き場をユーザーの PATH に足す (win/README.md の
+        「claude-personal・claude-work」)。効くのは Windows の Claude Code を入れるマシン (`windowsFiles.claudeCode.enable`) だけ。
+
+        settings.json と CLAUDE.md をファイルの symlink で `~/.claude` と共有するので、初回の apply で UAC の確認が 1 回出る。
+        そのため既定は ② と ③ の段が両方 on のとき (personal だけ true) で、会社や客先の PC (company・client) では既定で
+        走らせない。
+
+        WSL の setup はこの switch を読まない (Windows にしか無い手順)。値は `~/.local/state/dotfiles/group.json` の
+        `tools.windowsClaudeAccounts` と、Windows の runner が読むグループの既定 (win/runner/groups.json) に落ちる。Windows の runner
+        では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsClaudeAccounts = true` (か false) を書く。
+
+        false に戻しても、作った `~/.claude-<名前>` とコマンドは消さない (runner が見なくなるだけ。片付け方は win/README.md)。
       '';
     };
 

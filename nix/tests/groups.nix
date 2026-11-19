@@ -13,6 +13,8 @@
 #   - グループを書かないホストと group = "personal" のホストで、表の全 option の値が同じ (personal は今までの既定のまま)
 #   - group.json は version・group・tiers と、表の key を全部持つ tools で、改行で終わる。client では段のある道具が全部 false
 #   - 客先で道具を 1 つ足せる (group = "client" と claude.enable = true で、claude だけが on)
+#   - windowsClaudeAccounts (Windows の claude-personal・claude-work) は personal だけ既定で on (初回の apply で UAC の確認が出る
+#     手順なので、company・client では既定で走らせない)
 #   - 依存の assertion: client で devTracker.enable = true だけを書くと評価で止まり、claude.privateSkills.enable と
 #     claude.enable も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る
 #   - 知らないグループ ("customer") は評価で止まる
@@ -181,6 +183,13 @@ let
       ok = builtins.all (
         t: t.tiers == [ ] || (json clientClaude).tools.${t.key} == (t.key == "claude")
       ) groups.tools;
+    }
+    {
+      name = "windowsClaudeAccounts は personal だけ既定で on (UAC の確認が出る手順なので company・client は off)";
+      ok =
+        (json personal).tools.windowsClaudeAccounts
+        && !(json company).tools.windowsClaudeAccounts
+        && !(json client).tools.windowsClaudeAccounts;
     }
     {
       name = "client で devTracker.enable = true だけを書くと評価で止まる";

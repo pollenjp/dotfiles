@@ -79,6 +79,8 @@ impl Step for HerdrAppMods {
             foreign_suffix: None,
             kinds: &[],
             skip_skills: Vec::new(),
+            select: None,
+            origin: "clone",
             absorb: "dotfiles の win/herdr-app/mods",
             step: "herdr-app-mods",
         };

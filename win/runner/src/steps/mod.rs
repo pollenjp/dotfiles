@@ -4,6 +4,7 @@
 //! 手順を足すときは、この下に module を 1 つ書き、`all()` に 1 行足す (win/README.md の「runner の手順を足す」)。
 
 pub mod bootstrap;
+pub mod claude_accounts;
 pub mod claude_env;
 pub mod claude_files;
 pub mod claude_footer_links;
@@ -25,6 +26,7 @@ pub mod pending;
 pub mod pjp;
 pub mod ps1;
 pub mod tool_skill;
+pub mod user_path;
 
 use crate::context::Ctx;
 use crate::host::HostValues;
@@ -37,8 +39,22 @@ pub enum Gate {
     Always,
     /// 道具の switch (`groups.json` の tools の名前) が true のとき
     Tool(&'static str),
+    /// 道具の switch がどれも true のとき (Nix の表で効く条件 (requires) のある道具。先頭がその道具、後ろが Windows でも効く条件)
+    AllTools(&'static [&'static str]),
     /// 設定グループがこのどれかのとき
     Groups(&'static [&'static str]),
+}
+
+/// 道具の switch が off ならそのわけ。
+fn tool_off_reason(host: &HostValues, key: &str) -> Option<String> {
+    if host.tool(key) {
+        None
+    } else {
+        Some(format!(
+            "このホストでは off ({key} = false。{})",
+            host.tool_origin(key)
+        ))
+    }
 }
 
 impl Gate {
@@ -46,16 +62,8 @@ impl Gate {
     pub fn off_reason(&self, host: &HostValues) -> Option<String> {
         match self {
             Gate::Always => None,
-            Gate::Tool(key) => {
-                if host.tool(key) {
-                    None
-                } else {
-                    Some(format!(
-                        "このホストでは off ({key} = false。{})",
-                        host.tool_origin(key)
-                    ))
-                }
-            }
+            Gate::Tool(key) => tool_off_reason(host, key),
+            Gate::AllTools(keys) => keys.iter().find_map(|key| tool_off_reason(host, key)),
             Gate::Groups(groups) => {
                 if groups.contains(&host.group.as_str()) {
                     None
@@ -75,6 +83,7 @@ impl Gate {
         match self {
             Gate::Always => "いつも".to_string(),
             Gate::Tool(key) => key.to_string(),
+            Gate::AllTools(keys) => keys.join("・"),
             Gate::Groups(groups) => format!("グループ {}", groups.join("・")),
         }
     }
@@ -178,6 +187,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // dotfiles の herdr-app のキーを herdr-app の home の keys.json に書き足す (Windows にしか無い手順。dotfiles-private の
         // docs/adr/070_win_herdr_app_keys_*)
         Box::new(herdr_app_keys::HerdrAppKeys),
+        // Windows の claude-personal・claude-work の ~/.claude-<名前> と launcher (Windows にしか無い手順。dotfiles-private の
+        // docs/adr/081_win_claude_accounts_*)
+        Box::new(claude_accounts::ClaudeAccounts),
         Box::new(files::Files),
     ];
     for spec in tool_skill::SPECS {
@@ -250,6 +262,7 @@ mod tests {
                 (98, "herdr-app-mods"),
                 (98, "herdr-app-pjp-spaces"),
                 (98, "herdr-app-skill"),
+                (99, "claude-accounts"),
                 (99, "herdr-app-keys"),
                 (99, "international"),
                 (99, "port-forward"),
@@ -286,8 +299,8 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキー
-    /// だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキーと
+    /// claude-personal・claude-work だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -314,6 +327,7 @@ mod tests {
                 "herdr-app-mods",
                 "herdr-app-pjp-spaces",
                 "herdr-app-skill",
+                "claude-accounts",
                 "herdr-app-keys",
             ]
         );
@@ -347,7 +361,9 @@ mod tests {
                     "{} の # tool: と gate が違う",
                     path.display()
                 ),
-                Gate::Groups(_) => panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id),
+                Gate::Groups(_) | Gate::AllTools(_) => {
+                    panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id)
+                }
             }
         }
     }
@@ -369,6 +385,21 @@ mod tests {
         assert_eq!(
             Gate::Groups(&["personal"]).off_reason(&h).unwrap(),
             "このホストでは off (グループ company。この手順は personal だけ)"
+        );
+        // 効く条件のある道具: どれも true のときだけ on。off のわけは最初の false の道具
+        assert_eq!(
+            Gate::AllTools(&["windowsHerdr", "windowsNtn"])
+                .off_reason(&h)
+                .unwrap(),
+            "このホストでは off (windowsNtn = false。グループ company の既定)"
+        );
+        assert_eq!(
+            Gate::AllTools(&["windowsClaudeCode", "windowsHerdr"]).off_reason(&h),
+            None
+        );
+        assert_eq!(
+            Gate::AllTools(&["windowsClaudeAccounts", "windowsClaudeCode"]).describe(),
+            "windowsClaudeAccounts・windowsClaudeCode"
         );
     }
 }
