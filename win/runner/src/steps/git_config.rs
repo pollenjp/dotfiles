@@ -395,6 +395,8 @@ impl Step for GitConfig {
             foreign_suffix: None,
             kinds: &[],
             skip_skills: Vec::new(),
+            select: None,
+            origin: "clone",
             absorb: "dotfiles の nix/home/modules/git.toml",
             step: "git-config",
         };

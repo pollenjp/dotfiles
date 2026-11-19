@@ -93,6 +93,8 @@ impl Step for ClaudeSkills {
             foreign_suffix: None,
             kinds: &KINDS,
             skip_skills: Vec::new(),
+            select: None,
+            origin: "clone",
             absorb: "claude-skills",
             step: "claude-skills",
         };

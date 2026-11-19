@@ -37,8 +37,22 @@ pub enum Gate {
     Always,
     /// 道具の switch (`groups.json` の tools の名前) が true のとき
     Tool(&'static str),
+    /// 道具の switch がどれも true のとき (Nix の表で効く条件 (requires) のある道具。先頭がその道具、後ろが Windows でも効く条件)
+    AllTools(&'static [&'static str]),
     /// 設定グループがこのどれかのとき
     Groups(&'static [&'static str]),
+}
+
+/// 道具の switch が off ならそのわけ。
+fn tool_off_reason(host: &HostValues, key: &str) -> Option<String> {
+    if host.tool(key) {
+        None
+    } else {
+        Some(format!(
+            "このホストでは off ({key} = false。{})",
+            host.tool_origin(key)
+        ))
+    }
 }
 
 impl Gate {
@@ -46,16 +60,8 @@ impl Gate {
     pub fn off_reason(&self, host: &HostValues) -> Option<String> {
         match self {
             Gate::Always => None,
-            Gate::Tool(key) => {
-                if host.tool(key) {
-                    None
-                } else {
-                    Some(format!(
-                        "このホストでは off ({key} = false。{})",
-                        host.tool_origin(key)
-                    ))
-                }
-            }
+            Gate::Tool(key) => tool_off_reason(host, key),
+            Gate::AllTools(keys) => keys.iter().find_map(|key| tool_off_reason(host, key)),
             Gate::Groups(groups) => {
                 if groups.contains(&host.group.as_str()) {
                     None
@@ -75,6 +81,7 @@ impl Gate {
         match self {
             Gate::Always => "いつも".to_string(),
             Gate::Tool(key) => key.to_string(),
+            Gate::AllTools(keys) => keys.join("・"),
             Gate::Groups(groups) => format!("グループ {}", groups.join("・")),
         }
     }
@@ -347,7 +354,9 @@ mod tests {
                     "{} の # tool: と gate が違う",
                     path.display()
                 ),
-                Gate::Groups(_) => panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id),
+                Gate::Groups(_) | Gate::AllTools(_) => {
+                    panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id)
+                }
             }
         }
     }
@@ -369,6 +378,21 @@ mod tests {
         assert_eq!(
             Gate::Groups(&["personal"]).off_reason(&h).unwrap(),
             "このホストでは off (グループ company。この手順は personal だけ)"
+        );
+        // 効く条件のある道具: どれも true のときだけ on。off のわけは最初の false の道具
+        assert_eq!(
+            Gate::AllTools(&["windowsHerdr", "windowsNtn"])
+                .off_reason(&h)
+                .unwrap(),
+            "このホストでは off (windowsNtn = false。グループ company の既定)"
+        );
+        assert_eq!(
+            Gate::AllTools(&["windowsClaudeCode", "windowsHerdr"]).off_reason(&h),
+            None
+        );
+        assert_eq!(
+            Gate::AllTools(&["windowsClaudeAccounts", "windowsClaudeCode"]).describe(),
+            "windowsClaudeAccounts・windowsClaudeCode"
         );
     }
 }

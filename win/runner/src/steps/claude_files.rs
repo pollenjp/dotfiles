@@ -70,6 +70,8 @@ impl Step for ClaudeFiles {
             foreign_suffix: Some("nix/files/claude"),
             kinds: &KINDS,
             skip_skills,
+            select: None,
+            origin: "clone",
             absorb: "dotfiles",
             step: "claude-files",
         };
@@ -179,8 +181,8 @@ fn sync_exe(ctx: &mut Ctx, mode: Mode) -> Option<Kind> {
 }
 
 /// `dest` を中身 `bytes` に替える。動いている exe は上書きも消すこともできないが (Windows)、名前は替えられるので、退けてから置く (退けたものは
-/// 消せれば消し、消せなければ次に写すときに消す)。
-fn replace_file(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
+/// 消せれば消し、消せなければ次に写すときに消す)。claude-accounts も launcher (`claude-<名前>.exe`) を置くのに使う。
+pub fn replace_file(bytes: &[u8], dest: &Path) -> std::io::Result<()> {
     let dir = dest
         .parent()
         .ok_or_else(|| std::io::Error::other("親のディレクトリが無い"))?;

@@ -79,9 +79,13 @@ impl Sys for FakeSys {
 }
 
 /// 偽の口で `cmd /c mklink /J <link> <target>` を受けたら junction を真似て張る (Unix は symlink、Windows は本物の `cmd` で junction)。
+/// `cmd /c mklink <link> <target>` (ファイルの symlink) は std の symlink で張る (Windows で権限が無ければ 1 で落ちる。本物の mklink と同じ)。
 /// mklink でないコマンドなら None (呼ぶ側がほかの答えを返す)。
 pub fn fake_mklink(c: &CommandSpec) -> Option<RunResult> {
     let args = c.args_lossy();
+    if args.len() == 4 && args[0] == "/c" && args[1] == "mklink" {
+        return Some(fake_file_symlink(&args[2], &args[3]));
+    }
     if args.len() != 5 || args[0] != "/c" || args[1] != "mklink" || args[2] != "/J" {
         return None;
     }
@@ -99,6 +103,24 @@ pub fn fake_mklink(c: &CommandSpec) -> Option<RunResult> {
             args[3], args[4]
         )],
     })
+}
+
+/// `link` に `target` を指すファイルの symlink を std で張り、mklink の答えの形で返す。
+pub fn fake_file_symlink(link: &str, target: &str) -> RunResult {
+    #[cfg(unix)]
+    let made = std::os::unix::fs::symlink(target, link);
+    #[cfg(windows)]
+    let made = std::os::windows::fs::symlink_file(target, link);
+    match made {
+        Ok(()) => RunResult {
+            exit: crate::process::Exit::Code(0),
+            output: vec![format!("symbolic link created for {link} <<===>> {target}")],
+        },
+        Err(e) => RunResult {
+            exit: crate::process::Exit::Code(1),
+            output: vec![format!("You do not have sufficient privilege ({e})")],
+        },
+    }
 }
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);

@@ -136,6 +136,8 @@ impl Step for HerdrAppPjpSpaces {
             foreign_suffix: None,
             kinds: &[],
             skip_skills: Vec::new(),
+            select: None,
+            origin: "clone",
             absorb: "claude-skills の skills/pjp-hc-hub/herdr-app/mods/pjp-spaces",
             step: "herdr-app-pjp-spaces",
         };
