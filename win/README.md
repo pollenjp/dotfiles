@@ -589,7 +589,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・状況の説明 (markdown)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -676,6 +676,20 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 - markdown の文 (節の `text`・問いの `body`) の `[字](URL)`・`<URL>`・素の URL はリンクになり (色・下線・指の形のポインタは TextView が theme から
   決める)、押すと既定のブラウザで開く。開くのは http と https の URL (host のあるもの) だけで、ほかの scheme (`file:`・`mailto:` など) やパスは開かず、
   panel の下の行にわけを出す
+- markdown の節の `text` に絵だけの行 `![<説明>](<図のパス>)` を書くと、その行で文を切り、そこに小さな絵 (ミニ絵) を出す。図のパスは image の節と同じく
+  `pjp-hub-panel-media\` からのパスで、大きさは 1 つ (幅 200・高さ 80 を panel の文字の % で変える。100% で 240×96。ペインの幅には合わせず、入らない
+  ときだけ比を保って縮める)。横の位置はすぐ上の行の字の頭 (箇条書きなら記号の後ろ) にそろえ、押すと図と同じ小窓で大きく見る (説明は小窓とポインタの
+  ヒントにだけ出す)。パスが決まりの外 (絶対パス・`..`・URL) や図が無いときは、その場所に薄い字で「ミニ絵を出せない: <わけ>」と出す。問いの `body` と
+  図の説明ではミニ絵にしない。書き方・置く場所・位置の決め方の正本は `main.js` の頭のコメントの「ミニ絵」:
+
+```markdown
+- **畳み方**
+  - Done・Canceled で、動くものが無いチケットは上の段だけに畳む
+  ![畳む前と後](TKT-n/mini-fold.svg)
+- **データ**
+  - 新しい節の type work
+```
+
 - チケットの一覧と PR の一覧は、節の型 `tickets`・`prs` で書く。panel はハブが書いた行をそのまま出す (panel から gh や Notion を引かない)。行ごとに ID・
   状態の札・題と、その下に一言 (`note`) を出し、ID か題を押すと `url` を開く (リンクと同じく http と https だけ)。状態の札の色は、チケットの `status`
   (Todo・In Progress・In Review・Done・Canceled・Blocked)、PR の `state` (open・draft・merged・closed) と `ci` (pass・fail・pending) で決まる。

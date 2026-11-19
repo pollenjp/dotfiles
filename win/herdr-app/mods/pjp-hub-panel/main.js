@@ -27,6 +27,24 @@
 //   開き (cx.open_url)、ほかの scheme (file:・mailto: など) やパスは開かずに、下の行にわけを出す (開けたら、そのわけは消す)。TextView の既定の
 //   開き方は scheme を確かめないので、on_link_click で替える。図の説明 (caption) の TextView はこの扱いの外 (既定の開き方のまま)。
 //
+// ミニ絵: markdown の節の text に、絵だけの行 ![<説明>](<図のパス>) を 1 行書くと、その行で text を切り、前の文・小さな絵 (ミニ絵)・後ろの文の
+//   順に縦に並べる (文はそれぞれ TextView で出し、リンクの扱いは上の「リンク」のまま)。絵だけの行は、前の空白はいくつでもよく、後ろに字を
+//   続けない (後ろの空白はよい。``` や ~~~ で囲んだコードの中の行は絵にしない)。図のパスは image の節の src と同じ決まり (下の「図の置き場所」の
+//   pjp-hub-panel-media/ からのパス。"mods/" で始まれば home から)。ハブは、絵を付ける項目の詳細の最後の行のすぐ後ろ (次の見出しの項目の前) に置く。
+//   - 大きさは 1 つ: 幅 200・高さ 80 (この mod を書いたときの px。100% で 240×96) を panel の文字の % で変え、ペインの幅には合わせない。ペインが
+//     狭くて入らないときだけ、縦横の比を保って縮める (0.1 倍まで)。動き (marks) は付けない。
+//   - 横の位置は、すぐ上の行 (空の行は飛ばす) の字の頭にそろえる。箇条書きなら記号の後ろの字の頭で、TextView (gpui-component 0.5.1) は入れ子の
+//     箇条書きを 1 段 1 rem ずつ下げ、項目の頭の字 (1 段目から "▪ "・"• "・"◦ "・"‣ "・"⁃ "。番号は 1 段目が "1. "、2 段目が "A. "、3 段目からは
+//     "a. ") の後ろに字を置くので、1 rem × (段 - 1) + 頭の字の幅にする。1 rem と頭の字の幅は、節の中の見えない物差しの要素の on_size_change で
+//     測る (測る前の最初の 1 回は見積もり)。段は、切った文の塊ごとに頭から字下げで数える。すぐ上も絵なら、その絵と同じ位置。
+//   - 押すと、image の節の図と同じ小窓で大きく見る (題は節の題、説明は小窓の図の説明)。ポインタを載せると、説明と図と同じヒント
+//     「クリックで大きく見る (Esc で閉じる)」を出す。説明はミニ絵の下には出さない。
+//   - 出せないとき (パスが空・絶対パス・.. を含む・URL・図が無い・SVG を読めない) は、その場所に薄い字 (dim) で 1 行「ミニ絵を出せない: <わけ>」と
+//     出す。図があるかは、panel.json を読み直すたびに readTextFile で確かめる (SVG は中身に <svg があるかも見る。SVG でない図は、有るかだけ)。
+//   - 絵の行で切った後ろの文は、TextView が別の文として読む (字下げした箇条書きの行で始まると 1 段目として、4 つ以上の空白で始まるとコードとして
+//     出しうる。番号付きの箇条書きは 1 から数え直す)。mod では直さない (置く場所の決まりで避ける)。問いの body と図の説明 (caption) では、絵だけの
+//     行も今までどおり TextView に渡す (ミニ絵にしない)。
+//
 // チケットと PR の一覧 (type "tickets"・"prs"): ハブが panel.json に書いた行を、そのまま 1 行ずつ出す (mod から gh や Notion を引かない)。
 //   行の形: tickets は { id: "TKT-n", title, url: "https://app.notion.com/p/…", status: "In Progress", note }、
 //   prs は { id: "dotfiles#251", title, url: "https://github.com/pollenjp/dotfiles/pull/251", state: "open", ci: "pass", note }。
@@ -120,7 +138,7 @@
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
 //       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」)
-//       { type: "markdown", id, title, text (リンクは上の「リンク」), collapsed },
+//       { type: "markdown", id, title, text (リンクは上の「リンク」、絵だけの行は上の「ミニ絵」), collapsed },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
 //       { type: "tickets", id, title, rows: [{ id, title, url, status, note }] },   (チケットの一覧。上の「チケットと PR の一覧」)
 //       { type: "prs", id, title, rows: [{ id, title, url, state, ci, note }] },    (PR の一覧)
@@ -131,7 +149,7 @@
 //                 | { kind: "label", x, y, text, size, color }] } ] }
 //   marks の座標は画像の px (width・height と同じ空間) で、図と同じ倍率で置く。color は "#rrggbb" か
 //   theme の名前 (accent・ok・warn・blocked・muted など)。width・height が数でない・0 以下なら 520×300 とみる。
-//   図の置き場所: herdr-app の home の pjp-hub-panel-media/ (Windows は %USERPROFILE%\.config\herdr-app\pjp-hub-panel-media)。
+//   図の置き場所: herdr-app の home の pjp-hub-panel-media/ (Windows は %USERPROFILE%\.config\herdr-app\pjp-hub-panel-media)。ミニ絵の図も同じ。
 //   会話ごとにフォルダを切る (例 TKT-n/)。image() は home の外 (scratchpad など) を読めない。mod のフォルダには置かない
 //   (dotfiles が配るフォルダで、書き換えると mod も読み直す)。src が "mods/" で始まれば home からのパスとして読む。
 //   同じ名前で書き換えた図は描き直らない (herdr-app がパスで覚えている)。図を変えるときは名前を変える (例 x-2.svg)。
@@ -147,7 +165,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { writeTextFile } from "herdr"; // 節を消す印のファイル (panel.json の隣) を書く
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared, settings, openOverlay, closeOverlay } from "herdr";
+import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared, settings, openOverlay, closeOverlay, appHome } from "herdr";
 
 const MOD = "mods/pjp-hub-panel";
 const NAME = MOD.slice(MOD.lastIndexOf("/") + 1); // この mod の名前
@@ -309,6 +327,94 @@ const prSummary = (r) => {
   return `PR ${keys.map((k) => (k === "" ? `${t.get(k).n} 本` : `${t.get(k).n} 本 ${t.get(k).label}`)).join("・")}`;
 };
 
+// ---- ミニ絵 (頭のコメントの「ミニ絵」) ----
+// 大きさ (この mod を書いたときの px。fs() で panel の % に従う) と、文とミニ絵の間 (px。% に従わない)
+const MINI = { w: 200, h: 80, gap: 4 };
+// 絵だけの行: 前の空白はいくつでもよく、後ろは空白だけ。説明に ] と改行を、パスに空白と括弧を含めない
+const MINI_LINE = /^[ \t]*!\[([^\]\r\n]*)\]\(([^()\s]*)\)[ \t]*$/;
+// コードの囲みの行 (``` か ~~~。前の空白は 3 つまで)。囲みの中の行は絵にしない
+const FENCE = /^ {0,3}(`{3,}|~{3,})/;
+// 箇条書きの項目の行 (記号か番号の後ろに空白か行の終わり。番号は 9 桁まで)
+const LIST_ITEM = /^( *)([-*+]|(\d{1,9})([.)]))( +|$)/;
+// TextView (gpui-component 0.5.1 の text/utils.rs の list_item_prefix) が箇条書きの頭に付ける記号。段 (1 から) で選び、5 段目からは最後のもの
+const BULLETS = ["▪", "•", "◦", "‣", "⁃"];
+// 項目の頭の字 (TextView と同じもの)。番号は 1 段目が数、2 段目が A.、3 段目からは a. (どれも 1 つ目の項目から数える)
+const prefixOf = (depth, item) => {
+  if (item.kind === "." || item.kind === ")") {
+    if (depth === 1) return `${item.n}. `;
+    return `${String.fromCharCode((depth === 2 ? 65 : 97) + ((item.n - 1) % 26))}. `;
+  }
+  return `${BULLETS[Math.min(depth, BULLETS.length) - 1]} `;
+};
+// 文の塊 (TextView に渡す行の並び) の最後の行 (空の行は飛ばす) の字の頭: 箇条書きの段 (0 は箇条書きの外) と、その項目の頭の字。
+// 塊ごとに頭から数える (TextView も塊ごとに読む)。字下げで入れ子と項目の終わりを決め、怠けた続きの行 (字下げの無い続き) は見ない
+const alignOf = (lines) => {
+  const stack = []; // 開いている項目: { ci: 字の頭の位置, kind: 記号か番号の区切り, n: その並びの何番目 }
+  let fence = null;
+  let res = { depth: 0, prefix: "" };
+  for (const raw of lines) {
+    const line = raw.replace(/\t/g, "    ");
+    if (line.trim() === "") continue;
+    const f = FENCE.exec(line);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+    } else {
+      const m = f ? null : LIST_ITEM.exec(line);
+      if (m) {
+        const mi = m[1].length;
+        let prev = null;
+        while (stack.length > 0 && mi < stack[stack.length - 1].ci) prev = stack.pop();
+        const kind = m[3] ? m[4] : m[2];
+        stack.push({ ci: m[5] === "" ? m[0].length + 1 : m[0].length, kind, n: prev && prev.kind === kind ? prev.n + 1 : 1 });
+      } else {
+        const ind = line.length - line.trimStart().length;
+        while (stack.length > 0 && ind < stack[stack.length - 1].ci) stack.pop();
+        if (f) fence = f[1];
+      }
+    }
+    const top = stack[stack.length - 1];
+    res = { depth: stack.length, prefix: top ? prefixOf(stack.length, top) : "" };
+  }
+  return res;
+};
+// ミニ絵の図のパスが決まりの外なら、そのわけ (中なら null)。決まりは image の節の src と同じ (pjp-hub-panel-media/ からのパス。"mods/" は home から)
+const miniPathWhy = (p) => {
+  if (p === "") return "図のパスが空";
+  if (/^[a-zA-Z]:/.test(p) || /^[\\/]/.test(p)) return `絶対パスは使えない (pjp-hub-panel-media からのパスにする): ${p}`;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(p)) return `URL は使えない (pjp-hub-panel-media に置いた図のパスにする): ${p}`;
+  if (p.split(/[\\/]/).includes("..")) return `パスに .. は使えない: ${p}`;
+  return null;
+};
+// markdown の節の text を、絵だけの行で切る。返すのは、文 { kind: "text", text, align } とミニ絵 { kind: "mini", alt, path, why, align } の
+// 並び (中身が空白だけの文は除く)。ミニ絵の align は、すぐ上の文の最後の行の字の頭 (すぐ上が絵なら、その絵と同じ。上に何も無ければ 0 段)
+const splitMinis = (text) => {
+  const parts = [];
+  let buf = [];
+  let fence = null;
+  const flush = () => {
+    if (buf.some((l) => l.trim() !== "")) parts.push({ kind: "text", text: buf.join("\n"), align: alignOf(buf) });
+    buf = [];
+  };
+  for (const line of text.split(/\r?\n/)) {
+    const f = FENCE.exec(line);
+    const m = fence || f ? null : MINI_LINE.exec(line);
+    if (fence) {
+      if (f && f[1][0] === fence[0] && f[1].length >= fence.length) fence = null;
+    } else if (f) {
+      fence = f[1];
+    }
+    if (!m) {
+      buf.push(line);
+      continue;
+    }
+    flush();
+    const last = parts[parts.length - 1];
+    parts.push({ kind: "mini", alt: m[1], path: m[2], why: miniPathWhy(m[2]), align: last ? last.align : { depth: 0, prefix: "" } });
+  }
+  flush();
+  return parts;
+};
+
 export default class HubPanel extends View {
   init(_props, cx) {
     this.data = null;
@@ -316,6 +422,8 @@ export default class HubPanel extends View {
     this.picked = {};
     this.collapsed = {};
     this.rowOpen = {}; // 木の行を手で開け閉めした形 (鍵は rowKey。無い行は初めの形)
+    this.miniCheck = new Map(); // ミニ絵の図を確かめた結果 (図のパス → { why } か { ok })。panel.json を読み直すたびに作り直す
+    this.probe = {}; // ミニ絵の物差しで測った幅 ("rem" と "t:<記号の字>" → zoom を掛けた後の logical px)
     this.status = "";
     this.busy = false;
     this.width = null;
@@ -389,6 +497,8 @@ export default class HubPanel extends View {
     }
     // 印のファイルも読み直し、panel.json の節から消えた id の印を外す (印のファイルの書き込みでも、ここへ来る)
     const marks = await this.syncMarks(fresh);
+    // ミニ絵の図を確かめる (読めた panel.json の markdown の節の分。問いのペインは節を出さないので見ない)
+    const minis = fresh && this.role() !== "questions" ? await this.checkMinis(fresh) : null;
     if (fresh && this.data?.version !== fresh.version) {
       this.picked = {};
       this.status = "";
@@ -400,7 +510,40 @@ export default class HubPanel extends View {
     this.hash = next.hash;
     this.error = next.error;
     if (marks) this.takeMarks(marks);
+    if (minis) this.miniCheck = minis;
     cx.notify();
+  }
+
+  // ミニ絵の図が有り、読めるかを確かめる (パスが決まりの外の絵は読まない)。SVG は readTextFile で読み、中身に <svg があるかも見る。
+  // SVG でない図 (PNG など) は UTF-8 で読めないことがあるので、無い (null) ときだけ出せないとする
+  async checkMinis(data) {
+    const out = new Map();
+    let base = null;
+    try {
+      base = appHome();
+    } catch {
+      base = null;
+    }
+    if (typeof base !== "string" || base === "") return out;
+    for (const s of Array.isArray(data?.sections) ? data.sections : []) {
+      if (s?.type !== "markdown" || typeof s.text !== "string") continue;
+      for (const p of splitMinis(s.text)) {
+        if (p.kind !== "mini" || p.why || out.has(p.path)) continue;
+        const rel = this.imagePath(p.path);
+        const svg = /\.svg$/i.test(p.path);
+        let res;
+        try {
+          const t = await readTextFile(`${base.replace(/[\\/]+$/, "")}/${rel}`);
+          if (t == null) res = { why: `図が無い: ${rel}` };
+          else if (svg && !/<svg[\s>]/i.test(t)) res = { why: `SVG として読めない: ${rel}` };
+          else res = { ok: true };
+        } catch (e) {
+          res = svg ? { why: `図を読めない: ${rel} (${e})` } : { ok: true };
+        }
+        out.set(p.path, res);
+      }
+    }
+    return out;
   }
 
   // props.role。無い・空は null (1 つのペインに両方を出す)。知らない値はそのまま返す (render がわけを出す)
@@ -653,7 +796,7 @@ export default class HubPanel extends View {
       );
     let body = null;
     if (!closed) {
-      if (s.type === "markdown") body = div().text_size(this.fs(12)).text_color(c.fg).child(this.md(`hp-md-${id}`, s.text));
+      if (s.type === "markdown") body = this.markdownBody(s, id, c);
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
       else if (s.type === "tickets") body = this.ticketList(s, id, c);
@@ -855,6 +998,91 @@ export default class HubPanel extends View {
   linkNote(msg, cx) {
     this.status = msg;
     this.linkMsg = msg;
+    cx.notify();
+  }
+
+  // ---- ミニ絵 (頭のコメントの「ミニ絵」) ----
+
+  // markdown の節の中身。絵だけの行があれば、文・ミニ絵・文の順に縦に並べる (文はそれぞれ md() の TextView)。無ければ今までどおり 1 つの TextView
+  markdownBody(s, id, c) {
+    const parts = typeof s.text === "string" ? splitMinis(s.text) : [];
+    if (!parts.some((p) => p.kind === "mini")) return div().text_size(this.fs(12)).text_color(c.fg).child(this.md(`hp-md-${id}`, s.text));
+    // 物差しで測る記号の字 (箇条書きの中のミニ絵の分だけ)
+    const prefixes = [...new Set(parts.filter((p) => p.kind === "mini" && p.align.depth > 0).map((p) => p.align.prefix))];
+    return v_flex()
+      .relative()
+      .gap(MINI.gap)
+      .text_size(this.fs(12))
+      .text_color(c.fg)
+      .children(parts.map((p, k) => (p.kind === "text" ? this.md(k === 0 ? `hp-md-${id}` : `hp-md-${id}-${k}`, p.text) : this.mini(p, s, id, k, c))))
+      .when(prefixes.length > 0, (el) => el.child(this.miniRulers(id, prefixes)));
+  }
+
+  // ミニ絵 (か、出せないわけの 1 行)。左は、すぐ上の行の字の頭 (miniX) まで空ける。大きさは fs(MINI.w)×fs(MINI.h) で、ペインの幅には
+  // 合わせず、ペインが狭くて入らないときだけ比を保って縮める (PIC.min 倍まで)。押すと image の節の図と同じ小窓で大きく見る
+  mini(p, s, id, k, c) {
+    const x = this.miniX(p.align);
+    const why = p.why ?? this.miniCheck.get(p.path)?.why ?? null;
+    if (why) return div().pl(x).text_size(this.fs(11)).text_color(c.dim).child(`ミニ絵を出せない: ${why}`);
+    const W = this.fs(MINI.w);
+    const H = this.fs(MINI.h);
+    // ペインの幅 (zoom で割った px) から一覧と節のカードの余白 (PIC.pad) と左の空きを引いた幅。幅を知るまで (最初の描画) は等倍
+    const avail = this.width == null ? null : this.width / appZoom() - PIC.pad - x;
+    const r = avail == null ? 1 : clamp(avail / W, PIC.min, 1);
+    const fig = { title: s.title, src: p.path, width: MINI.w, height: MINI.h, caption: p.alt };
+    const hint = "クリックで大きく見る (Esc で閉じる)";
+    return div()
+      .pl(x)
+      .child(
+        div()
+          .id(`hp-mini-${id}-${k}`)
+          .flex_none()
+          .w(W * r)
+          .h(H * r)
+          .cursor_pointer()
+          .hover((st) => st.opacity(0.9))
+          .tooltip(p.alt === "" ? hint : `${p.alt} (${hint})`)
+          .on_click((_, cx) => this.openBig(fig, cx))
+          .child(image(this.imagePath(p.path)).w(W * r).h(H * r)),
+      );
+  }
+
+  // ミニ絵の左の空き (zoom を掛ける前の px)。TextView は入れ子の箇条書きを 1 段 1 rem ずつ下げ、記号の字 ("▪ " など) の後ろに字を置くので、
+  // 1 rem × (段 - 1) + 記号の字の幅。どちらも物差し (miniRulers) で測った幅を zoom で割って使い、測る前は見積もり (1 rem = 16・記号 = 字の 0.9 倍)
+  miniX(a) {
+    if (!a || a.depth === 0) return 0;
+    const z = appZoom();
+    const rem = this.probe.rem != null ? this.probe.rem / z : 16;
+    const key = `t:${a.prefix}`;
+    const head = this.probe[key] != null ? this.probe[key] / z : this.fs(12) * 0.9;
+    return rem * (a.depth - 1) + head;
+  }
+
+  // 物差し: 見えない要素で 1 rem と記号の字の幅を測る (on_size_change は zoom を掛けた後の logical px。字の大きさは TextView と同じく節の
+  // 中身の字を継ぐ)。流れの外 (absolute) に置き、並びを変えない。測った幅が変わったら (panel の % や zoom を替えた) 描き直す
+  miniRulers(id, prefixes) {
+    return div()
+      .absolute()
+      .left(0)
+      .top(0)
+      .opacity(0)
+      .child(div().id(`hp-mp-${id}-rem`).absolute().w("1rem").h(1).on_size_change((size, cx) => this.takeRuler("rem", size.width, cx)))
+      .children(
+        prefixes.map((pf, i) =>
+          div()
+            .id(`hp-mp-${id}-${i}`)
+            .absolute()
+            .whitespace_nowrap()
+            .on_size_change((size, cx) => this.takeRuler(`t:${pf}`, size.width, cx))
+            .child(pf),
+        ),
+      );
+  }
+
+  takeRuler(key, w, cx) {
+    if (typeof w !== "number" || !Number.isFinite(w)) return;
+    if (this.probe[key] != null && Math.abs(this.probe[key] - w) < 0.25) return;
+    this.probe[key] = w;
     cx.notify();
   }
 
