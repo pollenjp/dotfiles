@@ -4,6 +4,7 @@
 //! 手順は WSL の `nix/scripts/bootstrap-windows-*.sh` を 1 つずつ写したもので、判定と文言をそろえる。使い方は `win/README.md` の
 //! 「runner」。
 
+pub mod account_cli;
 pub mod accounts;
 pub mod cli;
 pub mod context;

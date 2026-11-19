@@ -8,6 +8,9 @@
 //! - settings.json の env に足す git の組 (並びも) と、plugin を https で取る印が、Linux の claude.nix が sandbox のホストに書く claude-env.json の
 //!   gitConfig と vars と同じ
 //!
+//! - 既定のアカウントの名前 (steps::claude_accounts::DEFAULT_ACCOUNTS) が、Linux の claude.nix が sandbox のホストに書く claude-accounts.json と
+//!   同じ並び (claude-account の既定の personal・work)
+//!
 //! nix-instantiate か nix が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
 
 mod common;
@@ -91,6 +94,19 @@ fn notion_json_matches_claude_nix() {
         None => String::new(),
     };
     assert_eq!(runner_json(&toml_text), linux);
+}
+
+/// 既定のアカウントの名前が、Linux の claude.nix の accounts (claude-accounts.json) と同じ並び
+#[test]
+fn default_accounts_match_claude_nix() {
+    if !nix_available() {
+        return;
+    }
+    let linux: Vec<String> = serde_json::from_str(&sandbox_file("claude-accounts.json")).unwrap();
+    assert_eq!(
+        linux,
+        dotfiles_win::steps::claude_accounts::DEFAULT_ACCOUNTS.to_vec()
+    );
 }
 
 fn nix_available() -> bool {

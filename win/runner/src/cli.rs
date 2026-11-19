@@ -27,6 +27,9 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles-win claude-statusline                          Claude Code の status line (同じ口)
   claude-<名前>.exe [引数…]                               この exe の写し (claude-accounts が %LOCALAPPDATA%\\dotfiles\\bin に置く)。
                                                           CLAUDE_CONFIG_DIR を %USERPROFILE%\\.claude-<名前> にして claude.exe を起こす
+                                                          (token のアカウントは token のファイルの token を渡す)
+  claude-account.exe <add|set-token|list|check|remove|help> …
+                                                          同じ写し。アカウントを足す・消す・確かめる (claude-account.exe --help)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
   --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする
