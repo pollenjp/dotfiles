@@ -111,7 +111,7 @@ pub fn finish(ctx: &mut Ctx, title: &str, rows: &[Row]) -> i32 {
         .iter()
         .any(|r| matches!(r.kind, Kind::Missing | Kind::Fix) && shared_with_wsl(&r.id));
     if fixable && !ctx.host.runner_enable {
-        ctx.say("※ このホストの受け持ちは WSL の setup なので、files と ps1 の手順は dotfiles apply では流さない。揃えるのは WSL の ~/dotfiles/setup --update (受け持ちを runner に切り替えるまで)");
+        ctx.say("※ このホストの受け持ちは WSL の setup なので、WSL の setup と同じ手順 (files・ps1・powershell-profile など。dotfiles list で「(Windows だけ)」の付かない手順) は dotfiles apply では流さない。揃えるのは WSL の ~/dotfiles/setup --update (受け持ちを runner に切り替えるまで)");
     }
     report::exit_code(rows)
 }

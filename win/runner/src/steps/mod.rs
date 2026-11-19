@@ -24,6 +24,7 @@ pub mod herdr_app_pjp_spaces;
 pub mod linker;
 pub mod pending;
 pub mod pjp;
+pub mod powershell_profile;
 pub mod ps1;
 pub mod tool_skill;
 pub mod user_path;
@@ -113,7 +114,7 @@ pub enum Mode {
     Check,
     /// apply がすることを出すだけ (何も書かない)。`force` は apply の --force のときと同じ予告を出す
     DryRun { force: bool },
-    /// 揃える。`force` は files の衝突も上書きする
+    /// 揃える。`force` は files などのコピーの衝突も上書きし、足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile)
     Apply { force: bool },
 }
 
@@ -122,7 +123,7 @@ impl Mode {
         matches!(self, Mode::Apply { .. })
     }
 
-    /// --force (files の衝突も上書きする・dry-run ならそう予告する)
+    /// --force (files などのコピーの衝突も上書きする・消した `$PROFILE` の 1 行も足し直す・dry-run ならそう予告する)
     pub fn force(self) -> bool {
         matches!(
             self,
@@ -191,6 +192,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // docs/adr/081_win_claude_accounts_*)
         Box::new(claude_accounts::ClaudeAccounts),
         Box::new(files::Files),
+        // WSL の setup の手順を写したもの (受け持ちを runner に切り替えたホストでだけ apply が書く。移す順と移し方は dotfiles-private の
+        // docs/adr/060_win_runner_core_* の §2 A)
+        Box::new(powershell_profile::PowershellProfile),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -274,12 +278,16 @@ mod tests {
     #[test]
     fn wsl_scripts_exist_for_every_windows_step() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-        // WSL から写した手順 (files・ps1) と、まだ無い手順には、同じ名前の WSL の script がある。bootstrap と、W0-2 などで足す
-        // Windows にしか無い手順は WSL の script を持たないので見ない
-        let ported_from_wsl = std::iter::once("files")
-            .chain(ps1::SPECS.iter().map(|s| s.id))
-            .chain(pending::PENDING.iter().map(|p| p.id));
-        for id in ported_from_wsl {
+        // WSL から写した手順 (files・ps1・powershell-profile など) と、まだ無い手順には、同じ名前の WSL の script がある。bootstrap と、
+        // W0-2 などで足す Windows にしか無い手順は WSL の script を持たないので見ない
+        let from_wsl: Vec<&str> = all()
+            .iter()
+            .map(|s| s.info())
+            .filter(|i| !i.windows_only)
+            .map(|i| i.id)
+            .collect();
+        assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
+        for id in from_wsl {
             let script = repo
                 .join("nix")
                 .join("scripts")

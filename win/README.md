@@ -5,7 +5,7 @@ Windows 側のアプリの設定を置く場所。WSL から `/mnt/c` 越しに�
 
 新しい Windows で最初に流す bootstrap も置く ([後述](#bootstrap-新しい-windows-で最初に流す))。Windows の環境は Windows 側の runner
 (`runner/`。Rust。[後述](#runner-windows-の側で確かめて揃える)) で作る途中で、ホストごとに受け持ちを runner へ切り替えるまでは、WSL の setup と
-同じ手順 (files と `Install-*.ps1`) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
+同じ手順 (files・`Install-*.ps1`・`$PROFILE` の 1 行など) は今までどおり WSL が配り、runner は確かめるだけ。Windows にしか無い手順 (claude-skills を Windows の
 Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の設定を配る手順・git の設定・herdr-app の mod とキーとハブの印など) は、受け持ちによらず
 runner が流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
@@ -183,8 +183,8 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --c
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) §2 H・I と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
 
-- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは、WSL の setup と同じ手順 (files と
-  `Install-*.ps1`) は今までどおり WSL の setup が配り ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と
+- 受け持ちはホストごとに一度に切り替える ([後述](#受け持ちを-runner-に切り替える))。切り替えるまでは、WSL の setup と同じ手順 (files・
+  `Install-*.ps1`・`$PROFILE` の 1 行など) は今までどおり WSL の setup が配り ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と
   同じ判定を出すかを突き合わせられる)。Windows にしか無い手順 (claude-skills を Windows の Claude Code で使う W0-2 の手順など。[後述](#claude-skills-と-windows-のハブ-w0-2))
   は、WSL の setup が Windows に配らないので、受け持ちによらず runner の `dotfiles apply` が流す (dotfiles-private の ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))
 - 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
@@ -203,14 +203,14 @@ dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わ�
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
 
-- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = runner にまだ無い) と、種類ごとの締めの行を出す
+- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = 知らせるだけ (runner にまだ無い・受け持ちは WSL の setup・前提がまだ無いので流さない)) と、種類ごとの締めの行を出す
 - 終了コードは bootstrap と同じ: 0 = 直すことが無い・3 = 入っていない・無いものだけ (apply で揃う)・1 = ほかに直すことがある (足りない・
   ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
   環境変数が無い)
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
-  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files の衝突の解き方も、WSL の `bootstrap-windows-files.sh --force` を出す)
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` を出す)
 
 ### ホストの値
 
@@ -273,6 +273,11 @@ scanData = "https://app.notion.com/p/…"
 - Windows にしか無い手順 (下の表の「有る (Windows だけ)」) は、切り替える前から apply で流れる (ホストの値は要る。`runner.enable = false` のままでよい)
 - 初めて apply するときは記録が無いので、中身が repo と同じファイルは「同じ」(記録だけ作る) になる。WSL と Windows の clone を同じ commit に
   しておく。違う中身は「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら)と同じ解き方。PowerShell では `Copy-Item` か `--force`)
+- `powershell-profile` も、初めての apply は記録が無いので、WSL の setup が `$PROFILE` に足した読み込みの行を見て記録だけ作る (行は足さない。
+  runner は WSL の記録 `~/.local/state/dotfiles/windows-powershell-profile.json` を読まず、自分の記録を `%LOCALAPPDATA%\dotfiles\state\` に作る)。
+  WSL の setup が「以前 `$PROFILE` に足した 1 行が見当たりません」と出していたホスト (Windows 側で行を消した) は、runner に足した記録が無いので、
+  切り替えた後の apply が足し直す (受け持ちが WSL の間の check も、行が無ければそう添える)。消したままにするなら、切り替える前に、頭に `#` を
+  付けた同じ行を `$PROFILE` に置く (`.config\powershell\dotfiles.ps1` を含む行があれば、WSL も runner も足さない)
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -296,7 +301,7 @@ scanData = "https://app.notion.com/p/…"
 | 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
 | 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
-| 95 | `powershell-profile` | `$PROFILE` から `dotfiles.ps1` を読ませる | | まだ |
+| 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ (鍵の写しは WSL の setup が置く) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
@@ -320,8 +325,8 @@ scanData = "https://app.notion.com/p/…"
   `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
-- WSL にしか無い手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。`op-reason` はその後に足したもので、この順にはまだ入っていない
+- WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
+  fancyzones → international → google-ime → pin-updates)。powershell-profile は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -338,6 +343,9 @@ scanData = "https://app.notion.com/p/…"
 WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
 に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
 gate が違うと、試験が落ちる
+
+まだ無い手順を runner に移すときは、`PENDING` の行を消して 1〜3 のとおり module を足し、上の表の行を「有る」にする (`order_matches_wsl_setup` の
+並びは変わらない)。判定・文言・記録の名前と形は WSL の script にそろえる (受け持ちを切り替えた後に、WSL が書いたものをそのまま引き継ぐ)
 
 ### runner を直すとき
 
@@ -361,8 +369,9 @@ gate が違うと、試験が落ちる
   bash の版 (`nix/files/claude/hooks/*.sh`・`statusline-command.sh`・`nix/scripts/bootstrap-claude-skill-overrides.sh`) と突き合わせる
   (`DOTFILES_WIN_BASH_PARITY=1`。手元でも bash と jq があれば流れる)。コマンドを読む 3 つの guard は、bash の版の試験 (`nix/tests/<名前>.test.sh`)
   に exe の `claude-hook <名前>` を呼ぶ包みを渡して流し (`tests/guard_suites.rs`)、lexer (`src/hooks/guard/lex.rs`) は awk と突き合わせる。hook の
-  登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。bash の版を直したら、Rust の
-  写しも同じに直す
+  登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。`powershell-profile`
+  (`src/steps/powershell_profile.rs`) は、`nix/scripts/bootstrap-windows-powershell-profile.sh` を偽の `pwsh.exe`・`wslpath` で流し、同じ `$PROFILE` から
+  同じバイト列を書いて同じく記録するかを突き合わせる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -1169,7 +1178,8 @@ jq --indent 2 . win/orca/keybindings.json | cmp - win/orca/keybindings.json   # 
 変わる (この PC では `OneDrive\ドキュメント`) ので、manifest の `dst` に書けない。
 
 `$PROFILE` に読み込みの 1 行を足すのは、`setup --update` の
-`nix/scripts/bootstrap-windows-powershell-profile.sh` (`dotfiles.ps1` を配る手順の後に走る)。
+`nix/scripts/bootstrap-windows-powershell-profile.sh` (`dotfiles.ps1` を配る手順の後に走る)。受け持ちを runner に切り替えたホストでは、
+runner の `powershell-profile` の手順が同じ判定で足す ([runner の手順](#runner-の手順))。
 `pwsh.exe` に `$PROFILE` の場所を聞き、次の 1 行が無ければ足す:
 
 ```powershell
@@ -1183,9 +1193,10 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
 - `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
   そこに置いたままでよい
 - 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
-  `nix/scripts/bootstrap-windows-powershell-profile.sh --force`
-- `$PROFILE` の場所は WSL の interop で聞く。interop が落ちていると足せないので、そのときは
-  setup が出す次のコマンドを PowerShell 7 で 1 回打つ:
+  `nix/scripts/bootstrap-windows-powershell-profile.sh --force` (受け持ちを runner に切り替えたホストでは
+  `dotfiles apply --steps powershell-profile --force`)
+- WSL の setup は `$PROFILE` の場所を WSL の interop で聞く (runner は pwsh に直に聞く)。聞けないと足せないので、そのときは
+  setup (runner) が出す次のコマンドを PowerShell 7 で 1 回打つ:
 
   ```powershell
   Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'

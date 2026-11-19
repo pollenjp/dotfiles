@@ -32,7 +32,9 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           同じ写し。アカウントを足す・消す・確かめる (claude-account.exe --help)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
-  --force           files と claude-skills のコピーの衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする
+  --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・記録つきのコピーの手順 (claude-skills・
+                    claude-accounts など)・herdr-app-keys ほか。手順ごとの中身は win/README.md)。powershell-profile は、足した後で
+                    消した $PROFILE の読み込みの 1 行も足し直す。--steps で手順を絞って使う
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
@@ -405,7 +407,7 @@ fn steps_command(
             if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 ctx.say(format!("※ 本番の apply は止まる: {}", b.text));
             } else if !ctx.host.runner_enable {
-                ctx.say("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す。files と ps1 の手順の [dry-run] は、受け持ちを runner に切り替えたときにすること");
+                ctx.say("※ 本番の apply は、受け持ちが WSL の setup なので Windows にしか無い手順だけを流す。WSL の setup と同じ手順 (files・ps1・powershell-profile など) の [dry-run] は、受け持ちを runner に切り替えたときにすること");
             }
             let rows = runner::execute(&mut ctx, Mode::DryRun { force: a.force }, &selected);
             Ok(runner::finish(&mut ctx, "apply --dry-run", &rows))
@@ -730,6 +732,83 @@ mod tests {
             assert!(out.contains("runner にまだ無い。WSL の bootstrap-windows-powertoys.sh"));
             assert!(out.contains("[97] type-clipboard"));
             assert!(!out.contains("type-clipboard を固定した版で入れる (ずれていても入れ替えない) (windowsTypeClipboard"));
+            // runner に移した powershell-profile は on の手順として出る (まだ無い手順の印は付かない)
+            let profile = out
+                .lines()
+                .find(|l| l.contains("] powershell-profile "))
+                .unwrap_or_else(|| panic!("{out}"));
+            assert!(
+                profile.contains("  on   $PROFILE から dotfiles.ps1 を読ませる"),
+                "{profile}"
+            );
+            assert!(!profile.contains("runner にまだ無い"), "{profile}");
+        }
+
+        /// runner に移した WSL と同じ手順 (powershell-profile) は、受け持ちが WSL のホストの apply では流さず ($PROFILE に触らず、pwsh も
+        /// 呼ばない)、check は今の $PROFILE を確かめて、揃えるのは WSL の setup だと添える
+        #[test]
+        fn wsl_host_leaves_powershell_profile_to_wsl() {
+            let w = World::new(Some("[claude.notion]\nprofile = \"personal\"\n"));
+            w.t.write("home/.config/powershell/dotfiles.ps1", "# dotfiles.ps1\n");
+            let home = w.t.path().join("home");
+            let profile = home
+                .join("Documents")
+                .join("PowerShell")
+                .join("Microsoft.PowerShell_profile.ps1");
+            let answer = profile.to_string_lossy().into_owned();
+            let sys = FakeSys::new(move |c| {
+                let output = if c.program == Path::new("hostname") {
+                    vec!["PJP-Raiden".to_string()]
+                } else {
+                    vec![answer.clone()]
+                };
+                RunResult {
+                    exit: Exit::Code(0),
+                    output,
+                }
+            })
+            .with_program("pwsh", "/fake/pwsh")
+            .with_env("USERNAME", "polle")
+            .with_env("USERPROFILE", &home.to_string_lossy())
+            .with_env(
+                "APPDATA",
+                &home.join("AppData").join("Roaming").to_string_lossy(),
+            )
+            .with_env(
+                "LOCALAPPDATA",
+                &home.join("AppData").join("Local").to_string_lossy(),
+            );
+            let pwsh_calls = |sys: &FakeSys| {
+                sys.calls
+                    .borrow()
+                    .iter()
+                    .filter(|c| c.program == Path::new("/fake/pwsh"))
+                    .count()
+            };
+
+            let (code, out, _) = w.run_with(
+                &sys,
+                &["apply", "--steps", "claude-notion,powershell-profile"],
+            );
+            assert_eq!(code, 0, "{out}");
+            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-powershell-profile.sh が配る)"), "{out}");
+            assert!(!profile.exists());
+            assert_eq!(pwsh_calls(&sys), 0);
+
+            let (code, out, _) = w.run_with(&sys, &["check", "--steps", "powershell-profile"]);
+            assert_eq!(code, 3, "{out}");
+            assert!(
+                out.contains(
+                    "━━ [95] powershell-profile: $PROFILE から dotfiles.ps1 を読ませる ━━"
+                ),
+                "{out}"
+            );
+            assert!(
+                out.contains("揃えるのは WSL の ~/dotfiles/setup --update"),
+                "{out}"
+            );
+            assert_eq!(pwsh_calls(&sys), 1);
+            assert!(!profile.exists());
         }
 
         #[test]

@@ -39,12 +39,6 @@ pub const PENDING: &[PendingSpec] = &[
         gate: Gate::Always,
     },
     PendingSpec {
-        id: "powershell-profile",
-        order: 95,
-        title: "$PROFILE から dotfiles.ps1 を読ませる",
-        gate: Gate::Always,
-    },
-    PendingSpec {
         id: "op-reason",
         order: 97,
         title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",

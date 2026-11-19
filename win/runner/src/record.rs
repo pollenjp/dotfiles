@@ -16,6 +16,14 @@ pub struct Records {
 impl Records {
     /// 読む。ファイルが無ければ空。JSON の object でなければ、消し方を添えた文を返す。
     pub fn load(path: &Path) -> Result<Self, String> {
+        Self::load_with(
+            path,
+            "消してから流し直すと、Windows 側に既にあるファイルは衝突として扱われます (中身を確かめて、取り込むか --force)",
+        )
+    }
+
+    /// 読む (`load` と同じ)。壊れていたときの文の後半 (消した後にどうなるか) を `broken_hint` にする (記録の意味は手順ごとに違う)。
+    pub fn load_with(path: &Path, broken_hint: &str) -> Result<Self, String> {
         let map = match std::fs::read_to_string(path) {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => serde_json::Map::new(),
             Err(e) => return Err(format!("{} が読めません ({e})", path.display())),
@@ -23,7 +31,7 @@ impl Records {
                 Ok(serde_json::Value::Object(m)) => m,
                 _ => {
                     return Err(format!(
-                        "{} が壊れています (JSON の object ではありません)。消してから流し直すと、Windows 側に既にあるファイルは衝突として扱われます (中身を確かめて、取り込むか --force)",
+                        "{} が壊れています (JSON の object ではありません)。{broken_hint}",
                         path.display()
                     ));
                 }
@@ -94,6 +102,23 @@ mod tests {
         std::fs::write(&p, "[1]").unwrap();
         let e = Records::load(&p).err().unwrap();
         assert!(e.contains("壊れています"), "{e}");
+    }
+
+    /// 壊れていたときの文の後半は、手順ごとに替えられる (powershell-profile は「足した記録が無いものとして扱う」)
+    #[test]
+    fn broken_hint_can_be_replaced() {
+        let t = TempDir::new("record");
+        let p = t.write("state/r.json", "not json\n");
+        let e = Records::load_with(&p, "消してから流し直してください")
+            .err()
+            .unwrap();
+        assert_eq!(
+            e,
+            format!(
+                "{} が壊れています (JSON の object ではありません)。消してから流し直してください",
+                p.display()
+            )
+        );
     }
 
     /// 片付け (clone から消えたコピーを消す) で使う: 鍵を並べ、外す
