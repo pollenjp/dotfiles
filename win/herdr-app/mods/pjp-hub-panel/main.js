@@ -1,4 +1,4 @@
-// pjp-hub-panel: ハブの Claude がユーザーに見せる板。質問 (選んで送る) と、今の状況の説明 (markdown)・
+// pjp-hub-panel: ハブの Claude がユーザーに見せる panel。質問 (選んで送る) と、今の状況の説明 (markdown)・
 // 進み具合 (flow)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
 // 大きくし、クリックすると大きく見る小窓で開く (下の「図の大きさと、大きく見る小窓」)。
 // props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
@@ -12,14 +12,14 @@
 //   どの role のペインも、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
 //   ユーザーが選択肢をクリックしたときだけ。図を大きく見る小窓は別で、開いたときに focus する)。
 //   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
-//   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で、この板の handle がキーボードを持つ
+//   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で、この panel の handle がキーボードを持つ
 //   (is_focused) ときだけ focused() の pane (キーボードのあるペイン) を控え、その panes() の行が端末を持たず (terminal が null)、
 //   mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のときだけ、Enter まで済んだ後にその ID で pane.close を打つ
 //   (同じ mod のまとめのペインがキーボードを持つときに、まとめを閉じない)。確かめられなければ閉じず「送った (閉じるのはハブ)」と
 //   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
 //   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
 // props.image (ハブは渡さない): 図の節 (panel.json の sections の type "image" の 1 つ) がオブジェクトで来たら、その図だけを出す
-//   小窓になる (板の図のクリックで、この mod が自分を開くときに渡す。下の「図の大きさと、大きく見る小窓」)。
+//   小窓になる (panel の図のクリックで、この mod が自分を開くときに渡す。下の「図の大きさと、大きく見る小窓」)。
 //
 // リンク: markdown の文 (markdown の節の text と、問いの body) の [字](URL)・<URL>・素の URL は、TextView がリンクにする (色・下線・
 //   ポインタの形は TextView が theme から決める)。押すと http と https の URL (host のあるもの。user@host の形は除く) だけを既定のブラウザで
@@ -53,7 +53,7 @@
 //   ハブがすること: panel.json を書く前に印のファイルを読み (無ければ印は無い)、dismissed の id の節を外して書く。同じ話を続けて出すなら
 //   別の id (next-2 など) にする (印の付いた id を使う間は出ない)。印のファイルは書き換えない (要らなくなった印は、節を外せば mod が消す)。
 //
-// 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、板 (この mod) の文字だけを上げ下げする。
+// 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、panel (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
 //   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
 //   1.2 倍。字 (図の説明 caption も) と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる。変えないもの: カードと一覧の
@@ -61,20 +61,20 @@
 //   組 (いつも 100% の大きさ。押しても組の幅が変わらず、ボタンがポインタの下から動かないように)。markdown の中の見出し (#) の大きさは
 //   TextView が決める (倍率に従うかは試していない。本文と箇条書きは親の字の大きさに従う)。
 //   値は shared の "pjp-hub-panel.textPercent" (整数の %。名前は MOD から作るので、MOD を書き換えずに写した写しは本物と同じ値を、
-//   MOD を写しの名前に書き換えた pjp-hub-panel-try などは写しの値を使う) に置く。どの space の板も、後から開いた問いのペインも同じ
+//   MOD を写しの名前に書き換えた pjp-hub-panel-try などは写しの値を使う) に置く。どの space の panel も、後から開いた問いのペインも同じ
 //   大きさで出て、herdr-app を上げ直しても残る (localStorage はペインの写しごとで、問いのペインは開くたびに新しい写しになるので
 //   使わない)。数でない値は既定、範囲の外は端に寄せ、整数に丸めて出す。
-//   アプリの zoom (settings.json の zoom・app.zoom_in) は端末もほかの mod も大きくするので使わない (板の px もアプリの zoom には従う)。
+//   アプリの zoom (settings.json の zoom・app.zoom_in) は端末もほかの mod も大きくするので使わない (panel の px もアプリの zoom には従う)。
 //   キーでは変えない (Ctrl+= などはアプリの zoom のキー)。上の行の組は折り返さずに右上に留まり、ペインが狭いときは、左の欄の中で
 //   更新の時刻が次の行へ回り、題は縮んで折り返す。下の行の「入力欄に入れる」「送信」は、わけの字の横に入らなければ次の行へ回り、
 //   2 つが並ばない幅では「送信」がさらに次の行へ回る (どちらも右寄せで、ボタンは縮めない)。
 //
 // 図の大きさと、大きく見る小窓:
-//   板のペインの図は、ペインの幅から一覧と節のカードの余白 (50 px) を引いた幅に合わせて縮め・大きくする (0.1〜2 倍。width と height の
+//   panel のペインの図は、ペインの幅から一覧と節のカードの余白 (50 px) を引いた幅に合わせて縮め・大きくする (0.1〜2 倍。width と height の
 //   比は保ち、marks も同じ倍率で置く)。ペインの境を動かすと追う。root の on_size_change の幅は、アプリの zoom (settings.json の zoom) を
 //   掛けた後の logical px で、w()・h() に渡す px は zoom を掛ける前の px (描くと zoom 倍になる) なので、幅を settings().zoom で割って
 //   から合わせる (herdr-app の release notes の図も width / settings().zoom。割らないと、zoom 1.4 で図が 1.4 倍に描かれ、ペインの端で
-//   切れる)。図は板の文字の % に従わない。2 倍で止めるのは、広いペイン (pane.zoom など) で図が縦に長くなり、ほかの節を押し出さないため。
+//   切れる)。図は panel の文字の % に従わない。2 倍で止めるのは、広いペイン (pane.zoom など) で図が縦に長くなり、ほかの節を押し出さないため。
 //   図には pointer の形・hover・tooltip と、下の「クリックで拡大」の字を付ける。flow の marks の輪 (ring.svg) は、倍率を 2 の 1/4 乗の
 //   刻みに丸めた大きさで描く (svg() は描く大きさごとに絵を作って持つので、ペインの境を動かしても作る絵の数を抑える。輪は矢印の中点を
 //   通るように置くので、丸めても点は矢印に沿う)。
@@ -112,7 +112,7 @@
 // 答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないでクリップボードに入れてから、端末に 1 回で貼る (terminal.paste)。「送信」
 // (このペインで Enter も) は、貼ったあと hc keys で Enter を 1 回押す。改行を含む文が Claude Code の入力欄に 1 つの入力として入るのは、
 // terminal.paste が bracketed paste で渡すことを当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は
-// 1 行目で送ってしまう)。板の下の行にも、答えを 1 行ずつ出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の
+// 1 行目で送ってしまう)。panel の下の行にも、答えを 1 行ずつ出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の
 // 札が付き、ユーザーの発言と見分けられなくなる)。ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら選んだものを消す)。
 
 import { View, div, image, svg } from "gpui-kit";
@@ -129,7 +129,7 @@ const MEDIA = "pjp-hub-panel-media"; // 図の置き場所。herdr-app の home 
 const dirOf = (p) => p.replace(/[\\/][^\\/]*$/, "");
 // #rrggbb に不透明度 (16 進の 2 桁) を足す。ほかの形 (#rgb・#rrggbbaa) は足すと色にならないので null (塗らない)
 const withAlpha = (color, aa) => (/^#[0-9a-fA-F]{6}$/.test(color ?? "") ? `${color}${aa}` : null);
-// 板の文字の大きさ (上の行の -・%・+)。shared に整数の % で置き、どの写しも同じ大きさで出す
+// panel の文字の大きさ (上の行の -・%・+)。shared に整数の % で置き、どの写しも同じ大きさで出す
 const ZOOM_KEY = `${NAME}.textPercent`;
 const ZOOM = { def: 100, min: 70, max: 200, step: 10 };
 const TEXT_BASE = 1.2; // 100% の倍率。字の大きさの値 (本文 13 など。この mod を書いたときの px) の 1.2 倍で出す
@@ -138,10 +138,10 @@ const zoomOf = (v) => (typeof v === "number" && Number.isFinite(v) ? Math.min(ZO
 // 1 刻み上げた (dir が 1)・下げた (-1) %。刻みの途中の値 (105 など) からは次の刻み (110・100) へ
 const zoomStep = (z, dir) =>
   dir > 0 ? Math.min(ZOOM.max, (Math.floor(z / ZOOM.step) + 1) * ZOOM.step) : Math.max(ZOOM.min, (Math.ceil(z / ZOOM.step) - 1) * ZOOM.step);
-// 既定の倍率だけを掛けた大きさ (板の % に従わない)。「− % +」の組に使い、押しても組の幅と高さが変わらず、ボタンがポインタの下から動かない
+// 既定の倍率だけを掛けた大きさ (panel の % に従わない)。「− % +」の組に使い、押しても組の幅と高さが変わらず、ボタンがポインタの下から動かない
 const atBase = (n) => Math.round(n * TEXT_BASE * 10) / 10;
 const BAR_H = atBase(22) + 4; // 「− % +」の組の高さ (区切りの高さに、内の余白と枠の上下 1 px ずつを足したもの)
-// 図の倍率。板のペインの図は、ペインの幅から pad (一覧の p(12) の左右と、節のカードの p(12) の左右・枠 1 px の左右) を引いた幅に
+// 図の倍率。panel のペインの図は、ペインの幅から pad (一覧の p(12) の左右と、節のカードの p(12) の左右・枠 1 px の左右) を引いた幅に
 // 合わせる。大きくするのは max 倍まで (広いペインで図が縦に長くなり、ほかの節を押し出さないように。もっと大きく見るのは小窓)。
 // min は、とても狭いペインでも 0 や負の大きさを渡さないための下限
 const PIC = { min: 0.1, max: 2, pad: 24 + 26 };
@@ -162,7 +162,7 @@ const appZoom = () => {
   }
   return typeof z === "number" && Number.isFinite(z) && z > 0 ? z : 1;
 };
-// 大きく見る小窓に渡された図 (props.image)。オブジェクトでなければ null (ふつうの板)
+// 大きく見る小窓に渡された図 (props.image)。オブジェクトでなければ null (ふつうの panel)
 const bigOf = (p) => (p?.image && typeof p.image === "object" && !Array.isArray(p.image) ? p.image : null);
 
 // ---- 節を消す印・リンク・チケットと PR の一覧 (頭のコメントの「節を消す印」「リンク」「チケットと PR の一覧」) ----
@@ -246,7 +246,7 @@ export default class HubPanel extends View {
     this.hash = null;
     this.linkMsg = null;
     this.handle = cx.focus_handle();
-    // 図を大きく見る小窓 (板の図のクリックで、この mod が自分を開いたもの)。panel.json は読まず見張らず、渡された図だけを出す
+    // 図を大きく見る小窓 (panel の図のクリックで、この mod が自分を開いたもの)。panel.json は読まず見張らず、渡された図だけを出す
     this.big = bigOf(props());
     if (this.big) {
       this.bigBox = null; // 図の欄の大きさ (on_size_change の logical px)
@@ -325,12 +325,12 @@ export default class HubPanel extends View {
     return r == null || r === "" ? null : r;
   }
 
-  // 板の文字の大きさ (%)。render のたびに shared から読む (どの写しが書いても、herdr-app がすべての mod を描き直す)
+  // panel の文字の大きさ (%)。render のたびに shared から読む (どの写しが書いても、herdr-app がすべての mod を描き直す)
   zoom() {
     return zoomOf(shared(ZOOM_KEY));
   }
 
-  // 字の大きさと、字を囲む札・ボタンの高さ・余白・角を、板の倍率で引く。n はこの mod を書いたときの px (100% の 1/1.2)
+  // 字の大きさと、字を囲む札・ボタンの高さ・余白・角を、panel の倍率で引く。n はこの mod を書いたときの px (100% の 1/1.2)
   fs(n) {
     return Math.round(n * this.k * 10) / 10;
   }
@@ -340,7 +340,7 @@ export default class HubPanel extends View {
     cx.notify();
   }
 
-  // この板 (root に track_focus した handle) が今キーボードを持つか。確かめられなければ false (送信は止めない)
+  // この panel (root に track_focus した handle) が今キーボードを持つか。確かめられなければ false (送信は止めない)
   holdsKeyboard() {
     try {
       return this.handle.is_focused() === true;
@@ -382,8 +382,8 @@ export default class HubPanel extends View {
   deliver(cx, submit) {
     const text = this.answerText();
     if (!text || this.busy) return;
-    // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でこの板の handle がキーボードを持つときの、キーボードのある
-    // ペイン (この後の pane.focus で端末へ移る前に控える)。この板のペインかは、Enter まで済んだ後に ownPane で確かめる
+    // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でこの panel の handle がキーボードを持つときの、キーボードのある
+    // ペイン (この後の pane.focus で端末へ移る前に控える)。この panel のペインかは、Enter まで済んだ後に ownPane で確かめる
     const closing = submit && this.role() === "questions";
     const self = closing && this.holdsKeyboard() ? (focused()?.pane ?? null) : null;
     this.busy = true;
@@ -921,7 +921,7 @@ export default class HubPanel extends View {
     return src.startsWith("mods/") ? src : `${MEDIA}/${src}`;
   }
 
-  // 図 (絵と、その上に重ねる marks) を k 倍で描く。板のペインと大きく見る小窓で同じものを使う。decorate は、子を足す前の箱に
+  // 図 (絵と、その上に重ねる marks) を k 倍で描く。panel のペインと大きく見る小窓で同じものを使う。decorate は、子を足す前の箱に
   // id やクリックを付ける関数。縮めない (flex_none。小窓の図の欄で縦に縮められると、marks が絵からずれる)
   figure(s, id, W, H, k, c, decorate = (el) => el) {
     const src = this.imagePath(s.src ?? "");
@@ -935,7 +935,7 @@ export default class HubPanel extends View {
       .children(marks);
   }
 
-  // 板のペインの図。ペインの幅に合わせて縮め・大きくし (PIC)、クリックで大きく見る小窓を開く
+  // panel のペインの図。ペインの幅に合わせて縮め・大きくし (PIC)、クリックで大きく見る小窓を開く
   picture(s, id, c) {
     const W = sizeOr(s.width, 520);
     const H = sizeOr(s.height, 300);
@@ -1039,7 +1039,7 @@ export default class HubPanel extends View {
           .items_center()
           .justify_center()
           .cursor_pointer()
-          // ダブルクリックの 2 回目は数えない (板の図をダブルクリックすると、2 回目が開いたばかりの小窓に落ちる)
+          // ダブルクリックの 2 回目は数えない (panel の図をダブルクリックすると、2 回目が開いたばかりの小窓に落ちる)
           .on_click((e) => {
             if ((e?.click_count ?? 1) > 1) return;
             this.closeBig();
@@ -1149,8 +1149,8 @@ export default class HubPanel extends View {
       .child(label);
   }
 
-  // 上の行の「− <今の %> +」。押すと板の文字だけを 1 刻みずつ上げ下げし、% で既定に戻す (アプリの zoom は替えない)。
-  // 組の大きさは板の % に従わない (atBase)。% の札は「200%」が入る幅を初めから取る。どちらも、押しても組の幅が変わらず、
+  // 上の行の「− <今の %> +」。押すと panel の文字だけを 1 刻みずつ上げ下げし、% で既定に戻す (アプリの zoom は替えない)。
+  // 組の大きさは panel の % に従わない (atBase)。% の札は「200%」が入る幅を初めから取る。どちらも、押しても組の幅が変わらず、
   // 右に寄せた組の「−」と「%」がポインタの下から動かないため
   zoomControls(z, c) {
     const seg = (id, label, tip, enabled, onClick, color, offColor = c.dim) =>
@@ -1180,19 +1180,19 @@ export default class HubPanel extends View {
       .rounded(atBase(6))
       .border_1()
       .border_color(c.border)
-      .child(seg("hp-zoom-out", "−", `板の文字を小さく (${ZOOM.min}% まで)`, z > ZOOM.min, step(-1), c.fg))
+      .child(seg("hp-zoom-out", "−", `panel の文字を小さく (${ZOOM.min}% まで)`, z > ZOOM.min, step(-1), c.fg))
       .child(
         seg(
           "hp-zoom-reset",
           `${z}%`,
-          changed ? `既定 (${ZOOM.def}%) に戻す` : `板の文字の大きさ (既定 ${ZOOM.def}%)`,
+          changed ? `既定 (${ZOOM.def}%) に戻す` : `panel の文字の大きさ (既定 ${ZOOM.def}%)`,
           changed,
           (_, cx) => this.setZoom(ZOOM.def, cx),
           c.accent, // 既定から変えているときは accent で出し、押すと戻せると分かるようにする
           c.muted,
         ).min_w(atBase(46)),
       )
-      .child(seg("hp-zoom-in", "+", `板の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, step(1), c.fg));
+      .child(seg("hp-zoom-in", "+", `panel の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, step(1), c.fg));
   }
 
   render(cx) {
