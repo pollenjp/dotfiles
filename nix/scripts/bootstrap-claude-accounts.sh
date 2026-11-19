@@ -40,6 +40,13 @@
 # 無ければ、この一覧を含む世代へまだ switch していないということなので、警告して exit 0 する
 # (setup.sh は手順が 1 つ失敗すると残りを走らせないため)。
 #
+# 既定のほかに、claude-account add で足したアカウント (~/.config/claude-accounts/accounts.json の登録。nix/pkgs/claude-account)
+# も同じ形に保つ。登録が読めない形なら、登録のアカウントは飛ばして警告する。登録のアカウントの launcher (~/.local/bin/claude-<名前>
+# の link) は add が張り、ここは消えていれば知らせるだけ (link の先を決めるのは claude-account だけにする)。
+#
+# `--account <名前>` を渡すと、そのアカウントだけを用意する (claude-account add が package に写したこの script を流す)。生成ファイル・
+# 登録・~/.claude の plugin は見ず、最後の案内も出さない。
+#
 # ## 何をするか (アカウントごと)
 #
 #   ~/.claude-<名前>/
@@ -104,6 +111,8 @@ shopt -s nullglob
 
 base="${HOME}/.claude"
 generated="${HOME}/.local/state/dotfiles/claude-accounts.json"
+# claude-account add で足したアカウントの登録 (nix/pkgs/claude-account。名前ごとの種類 subscription・token)
+registry="${HOME}/.config/claude-accounts/accounts.json"
 migrate_doc="nix/README.md「Claude Code のアカウントを分ける」の「既に ~/.claude-<名前> があるとき」"
 
 # 1 段のリンクで ~/.claude の実体を見せるもの
@@ -133,27 +142,87 @@ summary_warn() {
   { printf '%s\n' "${text//${nl}/${nl}   }" >>"${DOTFILES_SETUP_WARNINGS}"; } 2>/dev/null || true
 }
 
+# --account <名前>: そのアカウントだけを用意する (claude-account add が流す。生成ファイルと ~/.claude の plugin は見ない)
+only=""
+while (($# > 0)); do
+  case $1 in
+    --account)
+      if (($# < 2)); then
+        echo "--account の後ろにアカウントの名前がありません。" >&2
+        exit 2
+      fi
+      only=$2
+      shift 2
+      ;;
+    *)
+      echo "知らない引数です: $1 (受けるのは --account <名前> だけ)" >&2
+      exit 2
+      ;;
+  esac
+done
+
 if ! command -v jq &>/dev/null; then
   echo "jq が見つかりません。先に home-manager switch を実行してください。" >&2
   exit 1
 fi
 
-if [[ ! -r ${generated} ]]; then
+# 登録のアカウントの名前と種類 (並びをそろえた 2 つの配列。bash 3.2 に連想配列が無いため)
+reg_names=()
+reg_modes=()
+if [[ -z ${only} && -e ${registry} ]]; then
+  if jq -e '(.version == 1) and (.accounts | type == "object")
+      and (.accounts | to_entries | all(.value | type == "object" and (.mode == "subscription" or .mode == "token")))' \
+    "${registry}" >/dev/null 2>&1; then
+    while IFS=$'\t' read -r a m; do
+      reg_names+=("${a}")
+      reg_modes+=("${m}")
+    done < <(jq -r '.accounts | to_entries[] | "\(.key)\t\(.value.mode)"' "${registry}")
+  else
+    warn "登録の一覧 (~/.config/claude-accounts/accounts.json) が読めない形なので、claude-account で足したアカウントは飛ばします" \
+      "直すか、消してから claude-account add で足し直してください。"
+  fi
+fi
+
+# 登録の種類を出す (claude-account で足したアカウントでなければ何も出さない)
+reg_mode_of() {
+  local i
+  for ((i = 0; i < ${#reg_names[@]}; i++)); do
+    if [[ ${reg_names[i]} == "$1" ]]; then
+      printf '%s' "${reg_modes[i]}"
+      return 0
+    fi
+  done
+  return 0
+}
+
+accounts=()
+if [[ -n ${only} ]]; then
+  accounts=("${only}")
+elif [[ ! -r ${generated} ]]; then
   warn "生成ファイルがありません: ${generated}" \
     "claude-personal / claude-work を持つ世代へ先に home-manager switch してください。" \
     "この手順は飛ばします。"
   exit 0
-fi
-
-if ! jq -e 'type == "array" and all(.[]; type == "string")' "${generated}" >/dev/null 2>&1; then
+elif ! jq -e 'type == "array" and all(.[]; type == "string")' "${generated}" >/dev/null 2>&1; then
   echo "${generated} がアカウント名の配列 (JSON の文字列の配列) ではありません。" >&2
   exit 1
+else
+  while IFS= read -r a; do
+    accounts+=("${a}")
+  done < <(jq -r '.[]' "${generated}")
+  # 既定に加えて、claude-account で足したアカウントも保つ (既定と同じ名前・管理のコマンドの名前 account は足さない)
+  for a in ${reg_names[@]+"${reg_names[@]}"}; do
+    dup=0
+    for b in ${accounts[@]+"${accounts[@]}"}; do
+      if [[ ${a} == "${b}" ]]; then
+        dup=1
+      fi
+    done
+    if [[ ${dup} -eq 0 && ${a} != account ]]; then
+      accounts+=("${a}")
+    fi
+  done
 fi
-
-accounts=()
-while IFS= read -r a; do
-  accounts+=("${a}")
-done < <(jq -r '.[]' "${generated}")
 
 # claude の探し方は bootstrap-claude-plugins.sh と同じ。
 # mise は `mise activate` 方式なので、同じ setup.sh の実行内で入った直後は PATH に無い。
@@ -349,7 +418,7 @@ if ! jq -e . "${base}/settings.json" &>/dev/null; then
   settings_ok=0
 fi
 
-if [[ ${settings_ok} -eq 1 ]]; then
+if [[ ${settings_ok} -eq 1 && -z ${only} ]]; then
   echo "==> ${base} (plugin だけ揃える)"
   changed=0
   sync_plugins "${base}"
@@ -397,11 +466,25 @@ for name in ${accounts[@]+"${accounts[@]}"}; do
   fi
 
   [[ ${changed} -eq 1 ]] || echo "   変更なし"
+
+  # claude-account で足したアカウントの launcher (~/.local/bin の link) は add が張る。消えていれば知らせる
+  m=$(reg_mode_of "${name}")
+  if [[ -n ${m} && ! -L ${HOME}/.local/bin/claude-${name} ]]; then
+    warn "claude-${name} の launcher (~/.local/bin/claude-${name}) がありません" \
+      "claude-account add ${name} --mode ${m} で張り直してください。"
+  fi
 done
 
+if [[ -n ${only} ]]; then
+  if [[ ${warned} -eq 1 ]]; then
+    echo "!! の行を確認してください。" >&2
+  fi
+  exit 0
+fi
 echo
 if [[ ${warned} -eq 1 ]]; then
   echo "!! の行を確認してください。" >&2
 fi
 echo "claude-<名前> で起動し、初回は /login でそのアカウントにログインします。"
-echo "確認: ls -l ~/.claude-<名前>  /  各セッションの /status"
+echo "token のアカウント (claude-account add <名前> --mode token) は /login せず、claude-account set-token <名前> で token を入れます。"
+echo "確認: claude-account list  /  ls -l ~/.claude-<名前>  /  各セッションの /status"

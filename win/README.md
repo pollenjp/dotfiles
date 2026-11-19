@@ -311,7 +311,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
-| 99 | `claude-accounts` | claude-personal・claude-work の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
+| 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
 
@@ -461,6 +461,7 @@ CLAUDE.md・skill・hook・設定・履歴と auto memory は素の `claude` (`%
 | `claude` | `%USERPROFILE%\.claude` (今まで通り) | 今まで通り |
 | `claude-personal` | `%USERPROFILE%\.claude-personal` | 個人のアカウント (初回に `/login`) |
 | `claude-work` | `%USERPROFILE%\.claude-work` | 会社のアカウント (初回に `/login`) |
+| `claude-<名前>` (`claude-account add` で足したもの) | `%USERPROFILE%\.claude-<名前>` | subscription は初回に `/login`。token は `claude setup-token` の token ([後述](#token-のアカウント-windows)) |
 
 ```powershell
 dotfiles check --steps claude-accounts     # 差を見る (何も書かない。UAC の確認も出さない)
@@ -477,7 +478,7 @@ claude-work                                # 初回は /login で会社のアカ
 | `.claude-<名前>\projects` | `~/.claude\projects` への junction (履歴と auto memory。権限は要らない) |
 | `.claude-<名前>\skills\`・`agents\`・`commands\`・`rules\` | 実体の dir。`~/.claude\<種類>` の中身を 1 つずつ写す (dir は junction、ファイルは記録つきのコピー。記録は `%LOCALAPPDATA%\dotfiles\state\claude-accounts.deployed.json`)。skills はリンク・`pjp-*`・runner が書く `hc`・`herdr-app` だけで、`synced`・`manifest.json` は写さない (Claude Code がアカウントごとに置く) |
 | `.claude-<名前>\plugins\`・`.credentials.json`・`.claude.json` など | 実体。Claude Code が作る (触らない) |
-| `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe` | runner の exe の写し (exe の名前で launcher として動く)。置き場をユーザーの PATH の末尾に足す (`HKCU\Environment` の生の値に足す。値の型と、ほかの要素の `%VAR%` の書き方はそのまま) |
+| `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe`・`claude-account.exe` | runner の exe の写し (exe の名前で launcher・管理のコマンドとして動く)。置き場をユーザーの PATH の末尾に足す (`HKCU\Environment` の生の値に足す。値の型と、ほかの要素の `%VAR%` の書き方はそのまま) |
 
 - launcher は `~/.claude-<名前>\settings.json` と `projects` が `~/.claude` の同じ名前へのリンクでなければ、Claude Code を起こさずに止まる (Claude Code は
   空の config dir に起動しただけで `projects\` などを実体で作り、runner がリンクを張れなくなる・履歴が分かれるため)。用意されていれば `ANTHROPIC_API_KEY`・
@@ -499,8 +500,56 @@ claude-work                                # 初回は /login で会社のアカ
   中身が変わったときも同じ)
 - Linux と違う所: settings.json と CLAUDE.md の symlink に管理者の権限が要る・projects は junction・rule などのファイルはリンクでなくコピー
   (ファイルの symlink にすると rule が増えるたびに UAC が要り、dir ごとの junction は Claude Code が実パスで見る所があるかを確かめていない)・
-  plugin は入れない (Windows の settings.json に `enabledPlugins` が無い)・アカウントの一覧は runner の中の固定 (`personal`・`work`。Linux の
-  claude.nix と同じ)
+  plugin は入れない (Windows の settings.json に `enabledPlugins` が無い)・既定のアカウントの一覧は runner の中の固定 (`personal`・`work`。
+  Linux の claude.nix と同じ。試験が突き合わせる)。足したアカウントは `claude-account` の登録 (下)
+- 既定でも登録でもない名前の `claude-<名前>.exe` は起こさない (2。`claude-account add` を出す)
+
+#### アカウントを足す (claude-account)
+
+Linux の `claude-account` ([`nix/README.md`「アカウントを足す (claude-account)」](../nix/README.md#アカウントを足す-claude-account)) と同じ
+サブコマンドと文。`claude-account.exe` は `claude-accounts` が launcher と一緒に置く runner の exe の写しで、PowerShell・Git Bash・cmd・
+`hc run` から打てる (`dotfiles` 関数と違い、clone で cargo を流さない)。
+
+```powershell
+claude-account add token1 --mode token         # 登録・~/.claude-token1・claude-token1.exe を作り、token の置き方を出す (足りない symlink に UAC の確認が 1 回)
+claude-account set-token token1                # token を見えない入力で入れる (DPAPI で暗号化して書く)
+claude-account add sub2 --mode subscription    # /login で入るアカウント
+claude-account list                            # 既定と登録のアカウントと、その状態
+claude-account check token1                    # 0 = 使える / 1 = 用意が無い (stderr に手) / 2 = 知らない名前
+claude-account remove token1 [--purge]         # 登録と claude-token1.exe を消す (--purge なら ~/.claude-token1 と token のファイルも)
+claude-account help token [token1]             # token をこの PC とほかのマシンに置く手順
+```
+
+- 登録は**マシンごと** (`%USERPROFILE%\.config\claude-accounts\accounts.json`。Linux と同じ形)。u24・lavie などの子でも使うなら、そのマシンで
+  add と set-token を打つ
+- add は登録に書いたあと、手順 `claude-accounts` をそのアカウントのぶんだけ流す (dir・symlink・`claude-<名前>.exe`。足りない symlink は
+  `dotfiles apply` と同じく、1 つ目を直に張ってみて落ちたら UAC の確認 1 回で張る)。UAC を断った・出せない (SSH の会話) ときは ⚠ を出して 1 で
+  終わり、add の打ち直しか次の `dotfiles apply` でまた聞く
+- `dotfiles apply` は、既定に加えて登録のアカウントの dir と launcher も保つ (launcher は runner の exe の写しなので、runner を作り直したら
+  置き直す。Linux の link と違い、消えていれば置く)。登録が読めない形なら、既定だけを用意して ⚠。既定の `claude-personal`・`claude-work` は
+  登録を読まないので、登録が壊れていても起きる
+- `remove` は `claude-<名前>.exe` が動いている (会話が開いている) と消せないので、登録を変えずに 1 で止まる。閉じてから打ち直す。`--purge` は
+  `~/.claude-<名前>` を、中の junction・symlink を辿らずに消す
+
+#### token のアカウント (Windows)
+
+| token のファイル `%USERPROFILE%\.config\claude-accounts\<名前>.env` の値 | 読み方 |
+| --- | --- |
+| DPAPI の暗号文 (`claude-account set-token` が書く) | System32 の `powershell.exe` で復号して渡す (既定。確認は出ない)。このユーザーとこの PC でだけ読める |
+| `op://…` (1Password の参照) | 起こすたびに op-reason.exe (`--reason <理由> read <参照>`) で読む。1Password の承認と一緒に、理由と読む参照の窓が出る。op-reason.exe が無ければ op.exe に落とさずに止まる |
+| token そのもの (手で書いた平文) | そのまま渡し、`set-token` で入れ直す (DPAPI) よう 1 行出す |
+
+- ファイルの形・止まる行・token が無いときの忠告は Linux と同じ ([`nix/README.md`「token のアカウント」](../nix/README.md#token-のアカウント))
+- `set-token` は Windows PowerShell の `Read-Host -AsSecureString` (パイプなら stdin の 1 行) で読み、形を確かめて (空・`op://`・token の形で
+  ないものは書かない)、`ConvertFrom-SecureString` の暗号文だけを書く。平文は PowerShell の中だけにある。DPAPI の暗号文は、ほかのユーザー・
+  ほかの PC・ディスクの写しでは読めない (同じユーザーの process は読める)
+- **Git Bash (mintty) では `set-token` を打たない。** 見えない入力にできない (打った token が画面に出る) ので、読まずに止まる。PowerShell・
+  Windows Terminal で打つか、`winpty claude-account set-token <名前>` で打つ。パイプ (`… | claude-account set-token <名前>`) はどこでも使える
+- 復号と set-token の PowerShell は System32 の Windows PowerShell 5.1 で、受け継いだ `PSModulePath` を外して起こす (pwsh 7 から打っても
+  `ConvertTo-SecureString` を読めるように)
+- op-reason.exe は PATH か `%LOCALAPPDATA%\Programs\op-reason` (WSL の setup の `Install-OpReason` が入れる所) から探す。Smart App Control に
+  止められるマシンの PowerShell の入口への回り道は、まだ無い (`set-token` でこの PC に置く)
+- token の会話の注意 (Remote Control・connector・`/login`・`auth status`・env を出さない) と、シークレットの決まりの例外・漏れたときは Linux と同じ
 
 #### 既に ~/.claude-<名前> があるとき
 
@@ -526,7 +575,7 @@ dotfiles apply --steps claude-accounts
 
 `windowsClaudeAccounts = false` にしても、作ったものは消さない (runner が見なくなるだけ)。外すなら:
 
-- `%LOCALAPPDATA%\dotfiles\bin\claude-personal.exe`・`claude-work.exe` を消し、ユーザーの PATH から `%LOCALAPPDATA%\dotfiles\bin` を外す
+- `%LOCALAPPDATA%\dotfiles\bin\claude-*.exe` (`claude-account.exe` も) を消し、ユーザーの PATH から `%LOCALAPPDATA%\dotfiles\bin` を外す
   (`rundll32 sysdm.cpl,EditEnvironmentVariables` の「ユーザー環境変数」の Path)
 - `~/.claude-<名前>` を消すと、そのアカウントのログインも消える。中の junction は `cmd /c rmdir` で外し (先は消えない)、Windows PowerShell 5.1 の
   `Remove-Item -Recurse` を junction に打たない (先の中身まで消すことがある)

@@ -85,3 +85,7 @@ cc-page・spec / ADR の書き出しは hook (`~/.claude/hooks/video-offer-nudge
 API キー・パスワード・token の値は、会話に貼らせない・ファイルに平文で書かない・値を表示するコマンド
 (`cat .env`・素の `op read`・`env` など) を打たない。値は 1Password に置き、`.env` には `op://` の参照だけを書く。
 値が要る program を起こす・`.env` や認証の設定を書く・値を貼られた・平文を見つけたときは `pjp-secrets` skill を読む。
+
+例外: Claude Code の token のファイル (`~/.config/claude-accounts/<名前>.env` の `CLAUDE_CODE_OAUTH_TOKEN`) は、ユーザーの決定
+(2026-11-19) でローカルに値を置く。値はユーザーが `claude-account set-token <名前>` で入れ、Claude は読まない・書かない・出さない
+(有る無しと権限は `claude-account check <名前>` で見る)。わけと守りは dotfiles-private の ADR 082。

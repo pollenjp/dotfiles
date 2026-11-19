@@ -9,14 +9,14 @@
 #   - client に ② ③ のものが無い: ~/.claude/ の下・Claude Code 向けの state (.local/state/dotfiles/claude-*.json。1Password の
 #     道具も読む claude-op-reason.json を除く)・ntn.json・herdr の設定・~/.ssh/rc が無い。cc-pages の port を選んだ客先のホストにも
 #     cc-pages の config.toml と unit が無い。package に
-#     herdr・ntn・herdr-core・pjp-agent-link・claude-personal・claude-work が無い。systemd の user unit に cc-pages・
+#     herdr・ntn・herdr-core・pjp-agent-link・claude-account (claude-personal・claude-work を含む) が無い。systemd の user unit に cc-pages・
 #     pjp-agent-link-watch が無い。fish の abbr と bash の alias に h・hr・c が無い。ssh の設定に PJP_SSH_CLIENT が無い。git の
 #     設定に名前とメール (settings.user) と pollenjp-sub の includes が無い
 #   - client の group.json で段のある道具が全部 false、windows-files.json の claudeCode・ntn が false (win/ は配る)
 #   - client に入る package の名前・home.file の置き先・systemd の user unit の名前が、fixture
 #     (tests/fixtures/group-client/*.txt) と同じ。新しい道具を段 (lib/groups.nix) に入れ忘れると、客先の PC にも入り、ここで
 #     違いとして出る (段の決め忘れの見張り)。① の道具なら fixture に足し、② ③ なら switch で止める
-#   - client-claude (客先で Claude Code だけ許可が出たホスト) には ~/.claude/CLAUDE.md と claude-personal があり、herdr の skill・
+#   - client-claude (客先で Claude Code だけ許可が出たホスト) には ~/.claude/CLAUDE.md と claude-account (claude-personal) があり、herdr の skill・
 #     herdr・cc-pages・ntn・claude-skills の手順 (group.json の claudePrivateSkills) は入らない
 {
   lib,
@@ -118,14 +118,13 @@ let
       ok =
         !(hasFile clientPort ".config/cc-pages/config.toml") && !(hasUnit clientPort "cc-pages.service");
     }
-    (noneOf "② ③ の package (herdr・ntn・herdr-core・pjp-agent-link・claude-<名前>)" (
+    (noneOf "② ③ の package (herdr・ntn・herdr-core・pjp-agent-link・claude-account)" (
       builtins.filter (hasPackage client) [
         "herdr"
         "ntn"
         "herdr-core"
         "pjp-agent-link"
-        "claude-personal"
-        "claude-work"
+        "claude-account"
       ]
     ))
     (noneOf "cc-pages・pjp-agent-link-watch の unit" (
@@ -170,8 +169,8 @@ let
     (snapshot "files" (files client))
     (snapshot "units" (units client))
     {
-      name = "client-claude には ~/.claude/CLAUDE.md と claude-personal がある";
-      ok = hasFile clientClaude ".claude/CLAUDE.md" && hasPackage clientClaude "claude-personal";
+      name = "client-claude には ~/.claude/CLAUDE.md と claude-account (claude-personal) がある";
+      ok = hasFile clientClaude ".claude/CLAUDE.md" && hasPackage clientClaude "claude-account";
     }
     {
       name = "client-claude に herdr の skill・herdr・cc-pages・ntn・claude-skills の手順は入らない";

@@ -24,6 +24,12 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
    値から作ったもの (長さ・hash・一致の比較) も出さない。値を `KEY=値 command` や引数に書かず、`pjp-op-env … --` の後ろは
    実行ファイルとその引数だけにする (`sh -c` で値を展開しない)
 
+**例外: Claude Code の token のファイル。** `~/.config/claude-accounts/<名前>.env` (Windows は `%USERPROFILE%\.config\claude-accounts\<名前>.env`) の
+`CLAUDE_CODE_OAUTH_TOKEN` は、ユーザーの決定 (2026-11-19) でローカルに値を置く (Linux は権限 600 の平文、Windows は DPAPI の暗号文。`op://…` の
+参照も置ける)。値はユーザーが自分の端末で入れ (`claude-account set-token <名前>`)、Claude は読まない・書かない・出さない (確かめるのは
+`claude-account check <名前>` で、有る無しと権限だけ)。わけと守り・漏れたときは dotfiles-private の ADR 082 (`docs/adr/082_claude_token_accounts_*`)。
+ほかのシークレットは上の決まりのまま。
+
 ## 新しくシークレットが要るとき
 
 1. program が読む環境変数の名前を決める (program は環境変数を読むだけで、op を呼ばない)

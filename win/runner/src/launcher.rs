@@ -8,8 +8,15 @@
 //!
 //! `.cmd`・`.ps1` にしないのは、Git Bash と `hc run` (shell を通さない) が拡張子の無い名前で `.cmd` を探さず、`.cmd` は Ctrl+C で
 //! 「バッチ ジョブを終了しますか」を出すため。
+//!
+//! アカウントの種類 (`crate::accounts`。dotfiles-private の docs/adr/082_claude_token_accounts_*): 既定 (personal・work) と、`claude-account add`
+//! で足した登録 (`%USERPROFILE%\.config\claude-accounts\accounts.json`)。どちらでもない名前は起こさない (2)。token のアカウントは、token のファイル
+//! を読み (`crate::token`)、`CLAUDE_CODE_OAUTH_TOKEN` に入れて起こす。exe の名前が `claude-account` なら管理のコマンド (`crate::account_cli`)。
 
+use crate::accounts::{self, Mode, Registry};
 use crate::link::{link_target, same_path};
+use crate::steps::claude_accounts::DEFAULT_ACCOUNTS;
+use crate::token;
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 
@@ -27,16 +34,6 @@ pub const REMOVED_ENV: [&str; 3] = [
     "ANTHROPIC_AUTH_TOKEN",
 ];
 
-/// アカウントの名前の形 (`[a-z0-9][a-z0-9_-]*`。Linux の claude.nix と bootstrap-claude-accounts.sh と同じ)。dir の名前 (`~/.claude-<名前>`)
-/// とコマンドの名前に使うので、パスを壊す字を入れない。
-pub fn account_name_ok(name: &str) -> bool {
-    let mut chars = name.chars();
-    let lead_ok = chars
-        .next()
-        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
-    lead_ok && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
-}
-
 /// exe の名前 (拡張子を除いて小文字にしたもの) が `claude-` で始まれば、その残り (アカウントの名前。形は `prepare` が確かめる)。
 pub fn account_from_exe(exe: &Path) -> Option<String> {
     let stem = exe.file_stem()?.to_string_lossy().to_ascii_lowercase();
@@ -50,6 +47,8 @@ pub struct Launch {
     pub program: PathBuf,
     /// CLAUDE_CONFIG_DIR に渡す薄い dir (`%USERPROFILE%\.claude-<名前>`)
     pub config_dir: PathBuf,
+    /// token のアカウントなら token の読み方 (起こす直前に `token::read` で読む)
+    pub token: Option<token::Plan>,
 }
 
 /// 起こしてよいかを確かめ、起こすものを返す。断るときは (終了コード, stderr に出す文)。`env` は環境変数、`path` は PATH の値。
@@ -59,11 +58,11 @@ pub fn prepare(
     path: Option<&OsStr>,
 ) -> Result<Launch, (i32, String)> {
     let cmd = format!("claude-{name}");
-    if !account_name_ok(name) {
+    if !accounts::name_ok(name) {
         return Err((
             2,
             format!(
-                "{cmd}: アカウントの名前に使えない字があります (英小文字・数字で始まり、英小文字・数字・- と _ だけ)"
+                "{cmd}: アカウントの名前に使えません (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで)"
             ),
         ));
     }
@@ -77,6 +76,31 @@ pub fn prepare(
             format!("{cmd}: 環境変数 USERPROFILE がありません (~/.claude-{name} を決められない)"),
         ));
     };
+    // 既定か登録か (どちらでもなければ起こさない)。既定は登録を読まずに決める (登録が壊れていても既定は起きる)
+    let found = if DEFAULT_ACCOUNTS.contains(&name) {
+        Some((Mode::Subscription, accounts::Origin::Default))
+    } else {
+        let registry = Registry::load(&accounts::registry_path(&home))
+            .map_err(|e| (1, format!("{cmd}: {e}")))?;
+        accounts::lookup(name, &DEFAULT_ACCOUNTS, &registry)
+    };
+    let Some((mode, origin)) = found else {
+        return Err((
+            2,
+            format!(
+                "{cmd}: {name} は既定のアカウントでも、claude-account で登録したアカウントでもありません。\n  足すなら claude-account add {name} --mode subscription (か --mode token) を打ってください (一覧は claude-account list)。"
+            ),
+        ));
+    };
+    let fix = match origin {
+        accounts::Origin::Default => {
+            "dotfiles apply を打ってください (初回は UAC の確認が 1 回出ます)".to_string()
+        }
+        accounts::Origin::Registered => format!(
+            "claude-account add {name} --mode {} を打ってください (初回は UAC の確認が 1 回出ます)",
+            mode.as_str()
+        ),
+    };
     let dir = home.join(format!(".claude-{name}"));
     // settings.json (symlink) と projects (junction) が ~/.claude を指しているか。Claude Code は空の config dir に起動しただけで実体を作る
     let base = home.join(".claude");
@@ -85,10 +109,7 @@ pub fn prepare(
         &dir.join("settings.json"),
         &base,
         "settings.json",
-        format!(
-            "{cmd}: {} がまだ用意されていません。dotfiles apply を打ってください (初回は UAC の確認が 1 回出ます)。",
-            dir.display()
-        ),
+        format!("{cmd}: {} がまだ用意されていません。{fix}。", dir.display()),
     )?;
     check_link(
         &cmd,
@@ -96,7 +117,7 @@ pub fn prepare(
         &base,
         "projects",
         format!(
-            "{cmd}: {} がまだ用意されていません (~/.claude/projects への junction が無い)。dotfiles apply を打ってください。",
+            "{cmd}: {} がまだ用意されていません (~/.claude/projects への junction が無い)。{fix}。",
             dir.join("projects").display()
         ),
     )?;
@@ -115,9 +136,19 @@ pub fn prepare(
             ),
         ));
     };
+    let token = match mode {
+        Mode::Subscription => None,
+        Mode::Token => {
+            let file = token::file(&home, name);
+            let stored = token::load(&file)
+                .map_err(|p| (1, token::problem_message(&cmd, name, &file, &p)))?;
+            Some(token::plan(&cmd, name, stored, env, path)?)
+        }
+    };
     Ok(Launch {
         program,
         config_dir: dir,
+        token,
     })
 }
 
@@ -155,12 +186,26 @@ fn check_link(
 pub fn run(name: &str, launch: &Launch, args: &[OsString]) -> i32 {
     #[cfg(windows)]
     let _ = console_ctrl::pass_to_children();
+    // token のアカウントは、ここで読む (op の道は op-reason の承認が出る。Ctrl+C は op-reason が受け、その終了コードで止まる)
+    let value = match &launch.token {
+        None => None,
+        Some(plan) => match token::read(&format!("claude-{name}"), name, plan) {
+            Ok(v) => Some(v),
+            Err((code, msg)) => {
+                eprintln!("{msg}");
+                return code;
+            }
+        },
+    };
     let mut cmd = std::process::Command::new(&launch.program);
     cmd.args(args);
     for key in REMOVED_ENV {
         cmd.env_remove(key);
     }
     cmd.env("CLAUDE_CONFIG_DIR", &launch.config_dir);
+    if let Some(v) = value {
+        cmd.env(token::KEY, v);
+    }
     match cmd.status() {
         Ok(s) => s.code().unwrap_or(1),
         Err(e) => {
@@ -178,6 +223,9 @@ pub fn main_if_launcher() -> Option<i32> {
     let exe = std::env::current_exe().ok()?;
     let name = account_from_exe(&exe)?;
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    if name == accounts::MANAGER {
+        return Some(crate::account_cli::main(&args));
+    }
     let env = |key: &str| std::env::var(key).ok();
     let path = std::env::var_os("PATH");
     Some(match prepare(&name, &env, path.as_deref()) {
@@ -225,25 +273,16 @@ mod console_ctrl {
 mod tests {
     //! ## 確かめること
     //!
-    //! - アカウントの名前の形 (英小文字・数字で始まり、英小文字・数字・- と _ だけ)
     //! - exe の名前 (拡張子を除き小文字にした名前が `claude-` で始まる) からアカウントの名前を取る。runner (`dotfiles-win`)・hook の口
     //!   (`dotfiles-claude`)・素の `claude` は launcher でない
     //! - 断り方: 名前が規則に合わない → 2・USERPROFILE が無い → 1・settings.json が無い (まだ用意されていない) → 1・実体 → 1 (片付け方)・
     //!   別の先へのリンク → 1 (dotfiles apply で張り直す)・projects が ~/.claude/projects へのリンクでない → 1・PATH に claude が無い → 127。
     //!   通るときは PATH の最初の claude と薄い dir
+    //! - 既定でも登録でもない名前は 2 (claude-account add を出す)。登録の一覧が壊れていれば 1
+    //! - token のアカウント: token のファイルが無ければ 1 と忠告 (set-token)。平文なら Plan::Plain を返す (読むのは run)
 
     use super::*;
     use crate::testutil::{FakeSys, TempDir, fake_file_symlink, fake_mklink};
-
-    #[test]
-    fn account_names() {
-        for ok in ["personal", "work", "a-b_c", "0x"] {
-            assert!(account_name_ok(ok), "{ok}");
-        }
-        for ng in ["", "Work", "-a", "_a", "a.b", "a b", "a/b", "a\\b", "ａ"] {
-            assert!(!account_name_ok(ng), "{ng}");
-        }
-    }
 
     #[test]
     fn account_from_exe_reads_the_file_name() {
@@ -326,7 +365,7 @@ mod tests {
         let path = h.path_var();
         let (code, msg) = prepare("Work", &h.env(), Some(&path)).unwrap_err();
         assert_eq!(code, 2, "{msg}");
-        assert!(msg.contains("使えない字"), "{msg}");
+        assert!(msg.contains("名前に使えません"), "{msg}");
         let (code, msg) = prepare("work", &|_| None, Some(&path)).unwrap_err();
         assert_eq!(code, 1);
         assert!(msg.contains("USERPROFILE"), "{msg}");
@@ -377,6 +416,7 @@ mod tests {
             Launch {
                 program: h.t.path().join("bin").join(CLAUDE_EXE),
                 config_dir: h.home().join(".claude-work"),
+                token: None,
             }
         );
         let empty = std::env::join_paths([h.t.path().join("empty")]).unwrap();
@@ -399,5 +439,58 @@ mod tests {
         assert_eq!(code, 1);
         assert!(msg.contains("別の先"), "{msg}");
         assert!(msg.contains("dotfiles apply"), "{msg}");
+    }
+
+    #[test]
+    fn prepare_refuses_unknown_and_broken_registry() {
+        let h = Home::new();
+        let path = h.path_var();
+        let (code, msg) = prepare("nosuch", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 2, "{msg}");
+        assert!(msg.contains("claude-account add nosuch"), "{msg}");
+        h.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":[",
+        );
+        let (code, msg) = prepare("token1", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(msg.contains("accounts.json"), "{msg}");
+        // 既定のアカウントは登録を読まない (壊れていても、用意の確かめに進む)
+        let (code, msg) = prepare("personal", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(!msg.contains("accounts.json"), "{msg}");
+        assert!(msg.contains("まだ用意されていません"), "{msg}");
+    }
+
+    /// 登録の token のアカウント: 用意 (リンク) の後に token のファイルを読み、無ければ忠告、平文なら Plan::Plain
+    #[test]
+    fn prepare_plans_the_token() {
+        let h = Home::new();
+        h.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":{\"token1\":{\"mode\":\"token\"}}}\n",
+        );
+        let path = h.path_var();
+        let (code, msg) = prepare("token1", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(
+            msg.contains("claude-account add token1 --mode token"),
+            "{msg}"
+        );
+        if !h.prepare_link("token1", &h.home().join(".claude").join("settings.json")) {
+            return;
+        }
+        h.link_projects("token1");
+        let (code, msg) = prepare("token1", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(msg.contains("token がありません"), "{msg}");
+        assert!(msg.contains("claude-account set-token token1"), "{msg}");
+        h.t.write(
+            "home/.config/claude-accounts/token1.env",
+            "CLAUDE_CODE_OAUTH_TOKEN=dummy-plain-9\n",
+        );
+        let l = prepare("token1", &h.env(), Some(&path)).unwrap();
+        assert_eq!(l.token, Some(token::Plan::Plain("dummy-plain-9".into())));
+        assert_eq!(l.config_dir, h.home().join(".claude-token1"));
     }
 }

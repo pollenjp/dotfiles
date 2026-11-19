@@ -1,5 +1,5 @@
-//! claude-accounts (order 99): Windows の claude-personal・claude-work (ログインだけを分けて Windows の Claude Code を起こすコマンド) が使う
-//! `%USERPROFILE%\.claude-<名前>\` を用意する。Linux の `nix/scripts/bootstrap-claude-accounts.sh` に当たり、分けるのはログインだけで、
+//! claude-accounts (order 99): Windows の claude-<名前> (ログインだけを分けて Windows の Claude Code を起こすコマンド。既定の personal・work と、
+//! `claude-account add` で足したアカウント) が使う `%USERPROFILE%\.claude-<名前>\` を用意する。Linux の `nix/scripts/bootstrap-claude-accounts.sh` に当たり、分けるのはログインだけで、
 //! CLAUDE.md・skill・hook・設定・履歴と auto memory は素の claude (`~/.claude`) と同じものを使う (dotfiles-private の
 //! docs/adr/009_claude_account_config_dirs_*・docs/adr/081_win_claude_accounts_*)。
 //!
@@ -9,7 +9,11 @@
 //! | `projects` | `~/.claude/projects` への junction (履歴と auto memory) |
 //! | `skills\`・`agents\`・`commands\`・`rules\` | 実体の dir。`~/.claude/<種類>` の中身を 1 つずつ (dir は junction、ファイルは記録つきの写し。claude-skills の手順と同じ `Linker`)。skills はリンク・`pjp-*`・runner が書く実体 (hc・herdr-app) だけ、どの種類も `synced`・`manifest.json` は写さない |
 //! | `plugins\`・`.credentials.json`・`.claude.json` など | 実体。Claude Code が作る (触らない) |
-//! | `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe` | この runner の exe の写し (exe の名前で launcher として動く。`crate::launcher`)。動いている exe は上書きできないので、退けてから置く |
+//! | `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe`・`claude-account.exe` | この runner の exe の写し (exe の名前で launcher・管理のコマンドとして動く。`crate::launcher`・`crate::account_cli`)。動いている exe は上書きできないので、退けてから置く |
+//!
+//! アカウントは既定 ([`DEFAULT_ACCOUNTS`]) と、`claude-account add` が書く登録 (`crate::accounts`。`%USERPROFILE%\.config\claude-accounts\accounts.json`)。
+//! 登録が読めない形なら、登録のアカウントは飛ばして ⚠ を出し、既定は用意する。管理のコマンドの add は、同じ流れ ([`run_accounts`]) を
+//! 足したアカウントのぶんだけ流す (dotfiles-private の docs/adr/082_claude_token_accounts_*)。
 //!
 //! launcher の置き場はユーザーの PATH の末尾に足す (`user_path`。値の型と、ほかの要素の `%VAR%` の書き方は変えない)。足しても、もう動いている
 //! process (herdr-app とその中の端末・Claude Code) には効かない。
@@ -24,6 +28,7 @@ use super::claude_files::replace_file;
 use super::linker::{Linker, Source, Tally};
 use super::ps1::{find_powershell, run_streaming};
 use super::{Gate, Mode, Outcome, Step, StepInfo, tool_skill, user_path};
+use crate::accounts::{self, Registry};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil;
 use crate::link::{
@@ -36,8 +41,9 @@ use crate::report::Kind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// アカウントの名前 (Linux の claude.nix の accounts と同じ。launcher の名前の規則 `launcher::account_name_ok` に合うことを試験が見る)
-pub const ACCOUNTS: [&str; 2] = ["personal", "work"];
+/// 既定のアカウントの名前 (Linux の claude.nix の accounts と同じ。名前の規則 `accounts::name_ok` に合うことを試験が見る。Linux の
+/// claude-accounts.json との突き合わせは tests/claude_parity.rs)
+pub const DEFAULT_ACCOUNTS: [&str; 2] = ["personal", "work"];
 /// 中身を 1 つずつ写す種類 (Linux の bootstrap-claude-accounts.sh の mirrored_kinds と同じ)
 pub const KINDS: [&str; 4] = ["skills", "agents", "commands", "rules"];
 /// `~/.claude` へのファイルの symlink にするもの (Linux の shared_links のうちファイルのもの。projects は junction)
@@ -48,7 +54,7 @@ pub const RECORD_FILE: &str = "claude-accounts.deployed.json";
 /// Install-ClaudeCode が「別の claude」と見る所なので使わない
 pub const BIN_DIR_REL: &str = "dotfiles/bin";
 /// PATH に足したときに添える文
-const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-personal・claude-work を打つ";
+const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-<名前>・claude-account を打つ";
 /// 昇格を断られた・出せなかったときの終了コード (ERROR_CANCELLED)
 pub const ELEVATE_DECLINED: i32 = 1223;
 /// 昇格した cmd で mklink を打つ PowerShell (cmd の引数は env で渡す。cmd は System32 のもの: 同じユーザーが差し替えられる %ComSpec% を、
@@ -173,7 +179,7 @@ impl Step for ClaudeAccounts {
             id: "claude-accounts",
             // ~/.claude の側を作る手順 (claude-files・claude-skills (50) と hc-skill・herdr-app-skill (98)) の後。初回の apply で全部写せるように
             order: 99,
-            title: "claude-personal・claude-work の ~/.claude-<名前> を用意し、claude-<名前>.exe を置いてユーザーの PATH に足す (settings.json と CLAUDE.md の symlink は、初回だけ UAC の確認が 1 回出る)",
+            title: "claude-<名前> (既定の personal・work と claude-account add で足したもの) の ~/.claude-<名前> を用意し、claude-<名前>.exe と claude-account.exe を置いてユーザーの PATH に足す (settings.json と CLAUDE.md の symlink は、足りないときだけ UAC の確認が 1 回出る)",
             // Windows の Claude Code を入れないホストでは効かない (Nix の表の requires)
             gate: Gate::AllTools(&["windowsClaudeAccounts", "windowsClaudeCode"]),
             ported: true,
@@ -182,56 +188,89 @@ impl Step for ClaudeAccounts {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
-        let home = ctx.roots.user_profile.clone();
-        let base = home.join(".claude");
-        if !base.is_dir() {
-            let why = format!(
-                "~/.claude が無い ({}) → claude-files などの手順 (dotfiles apply) が作ってから流し直す",
-                base.display()
+        let (names, registry_error) = account_names(&ctx.roots.user_profile);
+        let mut out = run_accounts(ctx, mode, &names, true);
+        if let Some(e) = registry_error {
+            ctx.say(format!("!! {e}"));
+            out.push(
+                Outcome::new(
+                    Kind::Manual,
+                    "claude-account の登録の一覧が読めないので、足したアカウントは飛ばした (既定は用意した) → ※ を見て直す",
+                )
+                .note(e),
             );
-            ctx.say(format!("!! {why}"));
-            return vec![Outcome::new(Kind::Manual, why)];
-        }
-        let record_path = ctx.state_dir.join(RECORD_FILE);
-        let mut records = match Records::load(&record_path) {
-            Ok(r) => r,
-            Err(e) => {
-                ctx.say(format!("!! {e}"));
-                return vec![
-                    Outcome::new(Kind::Failed, "claude-accounts のコピーの記録が壊れている")
-                        .note(e),
-                ];
-            }
-        };
-        let mut acc = Acc::default();
-        prepare_base(ctx, mode, &base, &mut acc);
-        for name in ACCOUNTS {
-            records = account(ctx, mode, &home, &base, name, records, &mut acc);
-        }
-        if mode.writes()
-            && let Err(e) = records.save_if_changed()
-        {
-            let why = format!("コピーの記録を書けない: {} ({e})", record_path.display());
-            acc.fail(ctx, why);
-        }
-        let links = sync_links(ctx, mode, &mut acc);
-        let commands = sync_commands(ctx, mode);
-        let mut out = vec![dirs_outcome(mode, &acc.tally), links, commands];
-        if !acc.tally.skipped.is_empty() {
-            let mut o = Outcome::new(
-                Kind::Manual,
-                format!(
-                    "飛ばした {} (実体・別の先のリンク・中身の違うコピー) → ※ の名前を見て直す",
-                    acc.tally.skipped.len()
-                ),
-            );
-            for s in &acc.tally.skipped {
-                o = o.note(s.clone());
-            }
-            out.push(o);
         }
         out
     }
+}
+
+/// 用意するアカウントの名前 (既定のあとに登録を名前の順)。登録が読めなければ既定だけと、わけ
+pub fn account_names(home: &Path) -> (Vec<String>, Option<String>) {
+    match Registry::load(&accounts::registry_path(home)) {
+        Ok(r) => (accounts::all_names(&DEFAULT_ACCOUNTS, &r), None),
+        Err(e) => (
+            DEFAULT_ACCOUNTS.iter().map(|s| s.to_string()).collect(),
+            Some(e),
+        ),
+    }
+}
+
+/// `names` のアカウントの薄い dir・symlink・launcher を揃える (手順の本体。`claude-account add` は足したアカウント 1 つで流す)。
+/// `place_manager` なら `claude-account.exe` も置く。締めの表の行を返す
+pub fn run_accounts(
+    ctx: &mut Ctx,
+    mode: Mode,
+    names: &[String],
+    place_manager: bool,
+) -> Vec<Outcome> {
+    let home = ctx.roots.user_profile.clone();
+    let base = home.join(".claude");
+    if !base.is_dir() {
+        let why = format!(
+            "~/.claude が無い ({}) → claude-files などの手順 (dotfiles apply) が作ってから流し直す",
+            base.display()
+        );
+        ctx.say(format!("!! {why}"));
+        return vec![Outcome::new(Kind::Manual, why)];
+    }
+    let record_path = ctx.state_dir.join(RECORD_FILE);
+    let mut records = match Records::load(&record_path) {
+        Ok(r) => r,
+        Err(e) => {
+            ctx.say(format!("!! {e}"));
+            return vec![
+                Outcome::new(Kind::Failed, "claude-accounts のコピーの記録が壊れている").note(e),
+            ];
+        }
+    };
+    let mut acc = Acc::default();
+    prepare_base(ctx, mode, &base, &mut acc);
+    for name in names {
+        records = account(ctx, mode, &home, &base, name, records, &mut acc);
+    }
+    if mode.writes()
+        && let Err(e) = records.save_if_changed()
+    {
+        let why = format!("コピーの記録を書けない: {} ({e})", record_path.display());
+        acc.fail(ctx, why);
+    }
+    let links = sync_links(ctx, mode, &mut acc);
+    let commands = sync_commands(ctx, mode, names, place_manager);
+    let mut out = vec![dirs_outcome(mode, &acc.tally, names), links, commands];
+    if !acc.tally.skipped.is_empty() {
+        let mut o = Outcome::new(
+            Kind::Manual,
+            format!(
+                "飛ばした {} (実体・別の先のリンク・中身の違うコピー) → ※ の名前を見て直す",
+                acc.tally.skipped.len()
+            ),
+        );
+        for s in &acc.tally.skipped {
+            o = o.note(s.clone());
+        }
+        out.push(o);
+    }
+    out
 }
 
 /// リンクが切れないよう、`~/.claude` の側のリンク先を用意する (projects は空の dir、settings.json は `{}`。Linux と同じ。CLAUDE.md は
@@ -588,8 +627,12 @@ fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, St
 
 /// launcher (`claude-<名前>.exe` = この runner の exe の写し) を置き、置き場をユーザーの PATH に足す。中身が違えば置き直す (動いていれば
 /// 退けてから置く。退けたものは次に置くときに消す)。
-fn sync_commands(ctx: &mut Ctx, mode: Mode) -> Outcome {
-    const LABEL: &str = "コマンド (claude-personal・claude-work)";
+fn sync_commands(ctx: &mut Ctx, mode: Mode, names: &[String], place_manager: bool) -> Outcome {
+    let mut commands: Vec<String> = names.iter().map(|n| format!("claude-{n}")).collect();
+    if place_manager {
+        commands.push(format!("claude-{}", accounts::MANAGER));
+    }
+    let label = format!("コマンド ({})", commands.join("・"));
     let bin = join_segments(&ctx.roots.local_app_data, BIN_DIR_REL);
     ctx.say("");
     ctx.say(format!("==> {} (launcher)", bin.display()));
@@ -604,15 +647,15 @@ fn sync_commands(ctx: &mut Ctx, mode: Mode) -> Outcome {
             ctx.say(format!("!! {why}"));
             return Outcome::new(
                 Kind::Failed,
-                format!("{LABEL}: {why} (claude-<名前>.exe を置けない)"),
+                format!("{label}: {why} (claude-<名前>.exe を置けない)"),
             );
         }
     };
     let want = fsutil::sha256_bytes(&bytes);
     let (mut add, mut update, mut same) = (0, 0, 0);
     let mut errors = Vec::new();
-    for name in ACCOUNTS {
-        let dest = bin.join(format!("claude-{name}.exe"));
+    for command in &commands {
+        let dest = bin.join(format!("{command}.exe"));
         let stale = match std::fs::read(&dest) {
             Ok(have) if fsutil::sha256_bytes(&have) == want => {
                 same += 1;
@@ -670,9 +713,9 @@ fn sync_commands(ctx: &mut Ctx, mode: Mode) -> Outcome {
     notes.extend(errors.iter().cloned());
     let to_add = matches!(path, Ok(PathState::ToAdd));
     let mut text = if mode.writes() {
-        format!("{LABEL}: 置いた {add} / 書き直した {update} / 同じ {same} / PATH: {path_text}")
+        format!("{label}: 置いた {add} / 書き直した {update} / 同じ {same} / PATH: {path_text}")
     } else {
-        format!("{LABEL}: 置く {add} / 書き直す {update} / 同じ {same} / PATH: {path_text}")
+        format!("{label}: 置く {add} / 書き直す {update} / 同じ {same} / PATH: {path_text}")
     };
     if !mode.writes() && (add + update > 0 || to_add) {
         text.push_str(" → dotfiles apply で揃える");
@@ -699,8 +742,8 @@ fn sync_commands(ctx: &mut Ctx, mode: Mode) -> Outcome {
 }
 
 /// 薄い dir の行 (junction・写し・`~/.claude` の側のリンク先)。
-fn dirs_outcome(mode: Mode, t: &Tally) -> Outcome {
-    let names: Vec<String> = ACCOUNTS.iter().map(|n| format!("~/.claude-{n}")).collect();
+fn dirs_outcome(mode: Mode, t: &Tally, accounts: &[String]) -> Outcome {
+    let names: Vec<String> = accounts.iter().map(|n| format!("~/.claude-{n}")).collect();
     let mut text = format!(
         "{}: 追加 {} / 更新 {} / 削除 {} / 同じ {} / 飛ばした {}",
         names.join("・"),
@@ -980,7 +1023,7 @@ mod tests {
 
     const DIRS: &str = "~/.claude-personal・~/.claude-work:";
     const LINKS: &str = "symlink (settings.json・CLAUDE.md):";
-    const COMMANDS: &str = "コマンド (claude-personal・claude-work):";
+    const COMMANDS: &str = "コマンド (claude-personal・claude-work・claude-account):";
 
     fn path_writes(sys: &FakeSys) -> usize {
         sys.calls
@@ -1008,8 +1051,8 @@ mod tests {
 
     #[test]
     fn accounts_follow_the_name_rule() {
-        for name in ACCOUNTS {
-            assert!(crate::launcher::account_name_ok(name), "{name}");
+        for name in DEFAULT_ACCOUNTS {
+            assert!(crate::accounts::name_ok(name), "{name}");
         }
     }
 
@@ -1042,7 +1085,7 @@ mod tests {
             assert_eq!((mklinks(&sys), elevated(&sys)), (0, 0), "{mode:?}");
             let cmds = row(&o, COMMANDS);
             assert_eq!(cmds.kind, Kind::Missing, "{cmds:?}");
-            assert!(cmds.text.contains("置く 2"), "{cmds:?}");
+            assert!(cmds.text.contains("置く 3"), "{cmds:?}");
             assert!(cmds.text.contains("PATH: 足す"), "{cmds:?}");
             assert_eq!(path_writes(&sys), 0);
             assert!(!e.bin("work").exists());
@@ -1063,7 +1106,7 @@ mod tests {
         assert!(row(&o, LINKS).text.contains("張った 4"), "{o:?}");
         assert!(!o.iter().any(|x| x.kind == Kind::Manual), "{o:?}");
         assert_eq!(elevated(&sys), 0);
-        for name in ACCOUNTS {
+        for name in DEFAULT_ACCOUNTS {
             for f in ["settings.json", "CLAUDE.md"] {
                 assert!(
                     same_path(&link_target(&e.dir(name, f)).unwrap(), &e.claude(f)),
@@ -1134,7 +1177,7 @@ mod tests {
             .count();
         assert_eq!(file_mklinks, 1);
         assert!(out.contains("UAC の確認を 1 回出す"), "{out}");
-        for name in ACCOUNTS {
+        for name in DEFAULT_ACCOUNTS {
             for f in ["settings.json", "CLAUDE.md"] {
                 assert!(same_path(
                     &link_target(&e.dir(name, f)).unwrap(),
@@ -1300,7 +1343,7 @@ mod tests {
         std::fs::remove_file(e.claude("rules/pjp-r.md")).unwrap();
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         assert!(row(&o, DIRS).text.contains("削除 4"), "{o:?}\n{out}");
-        for name in ACCOUNTS {
+        for name in DEFAULT_ACCOUNTS {
             assert!(std::fs::symlink_metadata(e.dir(name, "skills/pjp-a")).is_err());
             assert!(!e.dir(name, "rules/pjp-r.md").exists());
         }
@@ -1430,13 +1473,13 @@ mod tests {
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         let cmds = row(&o, COMMANDS);
         assert_eq!(cmds.kind, Kind::Ok, "{o:?}\n{out}");
-        assert!(cmds.text.contains("置いた 2"), "{cmds:?}");
+        assert!(cmds.text.contains("置いた 3"), "{cmds:?}");
         assert!(cmds.text.contains("PATH: 足した"), "{cmds:?}");
         assert!(
             cmds.notes.iter().any(|n| n.contains("新しい端末から効く")),
             "{cmds:?}"
         );
-        for name in ACCOUNTS {
+        for name in DEFAULT_ACCOUNTS.iter().chain(&[crate::accounts::MANAGER]) {
             assert_eq!(std::fs::read(e.bin(name)).unwrap(), b"runner-v1", "{name}");
         }
         let bin_dir = e.local().join("dotfiles").join("bin");
@@ -1450,7 +1493,7 @@ mod tests {
         let (o, _) = e.run(Mode::Apply { force: false }, &sys);
         let cmds = row(&o, COMMANDS);
         assert_eq!(cmds.kind, Kind::Ok, "{cmds:?}");
-        assert!(cmds.text.contains("同じ 2"), "{cmds:?}");
+        assert!(cmds.text.contains("同じ 3"), "{cmds:?}");
         assert!(cmds.text.contains("PATH: 入っている"), "{cmds:?}");
         assert_eq!(path_writes(&sys), 0);
     }
@@ -1468,7 +1511,7 @@ mod tests {
         let (o, _) = e.run(Mode::Check, &sys);
         let cmds = row(&o, COMMANDS);
         assert_eq!(cmds.kind, Kind::Fix, "{cmds:?}");
-        assert!(cmds.text.contains("置く 1 / 書き直す 1"), "{cmds:?}");
+        assert!(cmds.text.contains("置く 2 / 書き直す 1"), "{cmds:?}");
         assert!(cmds.text.contains("PATH: 入っている"), "{cmds:?}");
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         assert_eq!(row(&o, COMMANDS).kind, Kind::Ok, "{o:?}\n{out}");
@@ -1558,5 +1601,90 @@ mod tests {
             &link_target(&e.dir("work", "settings.json")).unwrap(),
             &other
         ));
+    }
+
+    /// claude-account add で足したアカウント (登録) も、既定と同じ形に用意し、launcher を置く。管理のコマンドは run_accounts で
+    /// 1 つのアカウントのぶんだけ流せる (claude-account.exe は置かない)
+    #[test]
+    fn registered_accounts_are_prepared_too() {
+        let e = Env::new();
+        if !file_symlinks_work(&e.t) {
+            return;
+        }
+        e.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":{\"token1\":{\"mode\":\"token\"}}}\n",
+        );
+        let sys = e.fake(Uac::NotNeeded);
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        assert_eq!(
+            row(&o, "~/.claude-personal・~/.claude-work・~/.claude-token1:").kind,
+            Kind::Ok,
+            "{o:?}\n{out}"
+        );
+        assert!(row(&o, LINKS).text.contains("張った 6"), "{o:?}");
+        let cmds = row(
+            &o,
+            "コマンド (claude-personal・claude-work・claude-token1・claude-account):",
+        );
+        assert!(cmds.text.contains("置いた 4"), "{cmds:?}");
+        for f in ["settings.json", "CLAUDE.md", "projects"] {
+            assert!(
+                same_path(&link_target(&e.dir("token1", f)).unwrap(), &e.claude(f)),
+                "token1/{f}"
+            );
+        }
+        assert_eq!(std::fs::read(e.bin("token1")).unwrap(), b"runner-v1");
+
+        // 1 つのアカウントだけ (claude-account add の形)
+        std::fs::remove_dir_all(e.dir("token1", "")).unwrap();
+        std::fs::remove_file(e.bin("token1")).unwrap();
+        std::fs::remove_file(e.bin(crate::accounts::MANAGER)).unwrap();
+        let sys = e.fake(Uac::NotNeeded);
+        let mut buf = Vec::new();
+        let o = {
+            let mut ctx = Ctx {
+                repo: PathBuf::new(),
+                roots: Roots::from_home(&e.home()),
+                state_dir: e.t.path().join("state"),
+                host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                sys: &sys,
+                out: &mut buf,
+            };
+            run_accounts(
+                &mut ctx,
+                Mode::Apply { force: false },
+                &["token1".to_string()],
+                false,
+            )
+        };
+        assert!(o.iter().all(|x| x.kind == Kind::Ok), "{o:?}");
+        assert!(row(&o, "~/.claude-token1:").text.contains("追加"), "{o:?}");
+        assert!(
+            row(&o, "コマンド (claude-token1):")
+                .text
+                .contains("置いた 1"),
+            "{o:?}"
+        );
+        assert!(is_link(&e.dir("token1", "settings.json")));
+        assert!(e.bin("token1").exists());
+        assert!(!e.bin(crate::accounts::MANAGER).exists());
+    }
+
+    /// 登録の一覧が読めなければ、既定は用意して、⚠ (Manual) の行で知らせる
+    #[test]
+    fn broken_registry_keeps_the_defaults() {
+        let e = Env::new();
+        e.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":[",
+        );
+        let sys = e.fake(Uac::Decline);
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        assert_eq!(row(&o, DIRS).kind, Kind::Ok, "{o:?}\n{out}");
+        let m = row(&o, "claude-account の登録の一覧が読めない");
+        assert_eq!(m.kind, Kind::Manual, "{m:?}");
+        assert!(m.notes.iter().any(|n| n.contains("accounts.json")), "{m:?}");
+        assert!(e.dir("work", "projects").exists());
     }
 }
