@@ -4573,6 +4573,8 @@ systemctl --user show pjp-heavy.slice -p CPUQuotaPerSecUSec -p MemoryMax   # 包
 ログインするアカウントを明示したいときだけ、素の `claude` の代わりに次を使う。
 **分かれるのはログインだけ**で、CLAUDE.md・skill・フック・設定・履歴と memory は
 素の `claude` と同じものが効く。素の `claude` と `~/.claude` は今まで通り。
+Windows の Claude Code (herdr-app のハブなど) では、Windows の runner の手順 `claude-accounts` が同じ形のものを用意する
+(`win/README.md` の「[claude-personal・claude-work](../win/README.md#claude-personalclaude-work)」)。
 
 | コマンド | 使う config dir | ログイン |
 | --- | --- | --- |
