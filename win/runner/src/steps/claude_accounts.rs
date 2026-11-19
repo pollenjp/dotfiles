@@ -27,8 +27,8 @@ use super::{Gate, Mode, Outcome, Step, StepInfo, tool_skill, user_path};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil;
 use crate::link::{
-    check_cmd_specials, comspec, create_junction, create_symlink_file, is_link, link_target,
-    remove_link, same_path,
+    check_cmd_specials, create_junction, create_symlink_file, is_link, link_target, remove_link,
+    same_path,
 };
 use crate::process::CommandSpec;
 use crate::record::Records;
@@ -51,9 +51,9 @@ pub const BIN_DIR_REL: &str = "dotfiles/bin";
 const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-personal・claude-work を打つ";
 /// 昇格を断られた・出せなかったときの終了コード (ERROR_CANCELLED)
 pub const ELEVATE_DECLINED: i32 = 1223;
-/// 昇格した cmd で mklink を打つ PowerShell (cmd と、その引数は env で渡す。Start-Process は昇格した process の出力を受けられないので、
-/// 張れたかは呼ぶ側が読み直す)
-const ELEVATE_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; try { $p = Start-Process -FilePath $env:DOTFILES_ELEVATE_FILE -ArgumentList $env:DOTFILES_ELEVATE_ARGS -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop; exit $p.ExitCode } catch { Write-Output ('UAC: ' + $_.Exception.Message); exit 1223 }";
+/// 昇格した cmd で mklink を打つ PowerShell (cmd の引数は env で渡す。cmd は System32 のもの: 同じユーザーが差し替えられる %ComSpec% を、
+/// 昇格させる exe に使わない)。Start-Process は昇格した process の出力を受けられないので、張れたかは呼ぶ側が読み直す
+const ELEVATE_SCRIPT: &str = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; try { $cmd = Join-Path ([Environment]::SystemDirectory) 'cmd.exe'; $p = Start-Process -FilePath $cmd -ArgumentList $env:DOTFILES_ELEVATE_ARGS -Verb RunAs -WindowStyle Hidden -Wait -PassThru -ErrorAction Stop; exit $p.ExitCode } catch { Write-Output ('UAC: ' + $_.Exception.Message); exit 1223 }";
 /// 実体を見つけたときに添える片付け方
 const CLEANUP: &str = "片付け方は win/README.md の「既に ~/.claude-<名前> があるとき」";
 
@@ -74,13 +74,9 @@ pub fn mirrorable(kind: &str, src: &Path) -> bool {
     is_link(src) || name.starts_with("pjp-") || tool_skill::SPECS.iter().any(|s| s.dir == name)
 }
 
-/// 張る組 (リンク, 先) を、昇格した cmd の mklink でまとめて張る PowerShell のコマンド。cmd の引数は `/d /c mklink "<link>" "<target>" && …`
-/// (1 つ落ちたら残りは打たない)。cmd が特別に読む文字を含むパスは断る。
-pub fn elevation_command(
-    shell: &Path,
-    comspec: &str,
-    jobs: &[(PathBuf, PathBuf)],
-) -> Result<CommandSpec, String> {
+/// 張る組 (リンク, 先) を、昇格した cmd の mklink でまとめて張る PowerShell のコマンド。cmd の引数は `/d /c mklink "<link>" "<target>" & …`
+/// (1 つ落ちても残りを打つ。張れたかは呼ぶ側が読み直す)。cmd が特別に読む文字を含むパスは断る。
+pub fn elevation_command(shell: &Path, jobs: &[(PathBuf, PathBuf)]) -> Result<CommandSpec, String> {
     let paths: Vec<&Path> = jobs
         .iter()
         .flat_map(|(l, t)| [l.as_path(), t.as_path()])
@@ -97,10 +93,9 @@ pub fn elevation_command(
         .arg("Bypass")
         .arg("-Command")
         .arg(ELEVATE_SCRIPT)
-        .env("DOTFILES_ELEVATE_FILE", comspec)
         .env(
             "DOTFILES_ELEVATE_ARGS",
-            format!("/d /c {}", links.join(" && ")),
+            format!("/d /c {}", links.join(" & ")),
         )
         .timeout(Duration::from_secs(300)))
 }
@@ -445,31 +440,23 @@ fn sync_links(ctx: &mut Ctx, mode: Mode, acc: &mut Acc) -> Outcome {
         return Outcome::new(kind, text);
     }
     let mut notes = Vec::new();
-    // 別の先を指すリンクを外す (リンクを消すのに権限は要らない)
-    for j in jobs.iter().filter(|j| j.relink) {
-        if let Err(e) = remove_link(&j.link) {
+    // 別の先を指すリンクを外す (リンクを消すのに権限は要らない)。外せなかったものは張らない (張れずに UAC を無駄にしない)
+    let mut todo: Vec<&LinkJob> = Vec::new();
+    for j in &jobs {
+        if j.relink
+            && let Err(e) = remove_link(&j.link)
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            ctx.say(format!("!! {} のリンクを外せない ({e})", j.label));
             notes.push(format!("{} のリンクを外せない ({e})", j.label));
+            continue;
         }
+        todo.push(j);
     }
-    let how = match create_symlink_file(ctx.sys, &jobs[0].link, &jobs[0].target) {
-        Ok(()) => {
-            ctx.say(format!("張りました: {}", jobs[0].label));
-            for j in &jobs[1..] {
-                match create_symlink_file(ctx.sys, &j.link, &j.target) {
-                    Ok(()) => ctx.say(format!("張りました: {}", j.label)),
-                    Err(e) => notes.push(format!("{} を張れない ({e})", j.label)),
-                }
-            }
-            "権限があったので UAC なし"
-        }
-        Err(direct) => {
-            ctx.say(format!("直には張れない (管理者の権限が無い): {direct}"));
-            if let Err(e) = elevate(ctx, &jobs) {
-                ctx.say(format!("!! {e}"));
-                notes.push(e);
-            }
-            "UAC で"
-        }
+    let how = if todo.is_empty() {
+        "張れるものが無い"
+    } else {
+        link_files(ctx, &todo, &mut notes)
     };
     let failed: Vec<&str> = jobs
         .iter()
@@ -496,8 +483,33 @@ fn sync_links(ctx: &mut Ctx, mode: Mode, acc: &mut Acc) -> Outcome {
     o.note(format!("張れなかったもの: {}", failed.join("・")))
 }
 
+/// `todo` (空でない) のファイルの symlink を張る: 1 つ目を直に張ってみて (開発者モード・昇格した会話なら通る)、通れば残りも直に、落ちたら
+/// 全部を 1 回の昇格で張る。どう張ったかの言葉を返す。
+fn link_files(ctx: &mut Ctx, todo: &[&LinkJob], notes: &mut Vec<String>) -> &'static str {
+    match create_symlink_file(ctx.sys, &todo[0].link, &todo[0].target) {
+        Ok(()) => {
+            ctx.say(format!("張りました: {}", todo[0].label));
+            for j in &todo[1..] {
+                match create_symlink_file(ctx.sys, &j.link, &j.target) {
+                    Ok(()) => ctx.say(format!("張りました: {}", j.label)),
+                    Err(e) => notes.push(format!("{} を張れない ({e})", j.label)),
+                }
+            }
+            "権限があったので UAC なし"
+        }
+        Err(direct) => {
+            ctx.say(format!("直には張れない: {direct}"));
+            if let Err(e) = elevate(ctx, todo) {
+                ctx.say(format!("!! {e}"));
+                notes.push(e);
+            }
+            "UAC で"
+        }
+    }
+}
+
 /// 張るものを全部、1 回の昇格 (UAC の確認) で張る。
-fn elevate(ctx: &mut Ctx, jobs: &[LinkJob]) -> Result<(), String> {
+fn elevate(ctx: &mut Ctx, jobs: &[&LinkJob]) -> Result<(), String> {
     let Some(shell) = find_powershell(ctx) else {
         return Err("PowerShell が見つからない (pwsh・powershell) ので昇格できない".to_string());
     };
@@ -505,7 +517,7 @@ fn elevate(ctx: &mut Ctx, jobs: &[LinkJob]) -> Result<(), String> {
         .iter()
         .map(|j| (j.link.clone(), j.target.clone()))
         .collect();
-    let spec = elevation_command(&shell, &comspec(ctx.sys), &pairs)?;
+    let spec = elevation_command(&shell, &pairs)?;
     ctx.say(format!(
         "UAC の確認を 1 回出す (settings.json と CLAUDE.md の symlink を {} 個張る)。Windows のデスクトップに確認が出たら「はい」を押す",
         pairs.len()
@@ -753,10 +765,10 @@ mod tests {
         Decline,
     }
 
-    /// `/d /c mklink "<link>" "<target>" && mklink …` から組を拾う (偽の昇格が張るため)
+    /// `/d /c mklink "<link>" "<target>" & mklink …` から組を拾う (偽の昇格が張るため)
     fn parse_mklinks(args: &str) -> Vec<(String, String)> {
         let rest = args.strip_prefix("/d /c ").expect("/d /c で始まる");
-        rest.split(" && ")
+        rest.split(" & ")
             .map(|part| {
                 let q: Vec<&str> = part
                     .strip_prefix("mklink ")
@@ -798,12 +810,13 @@ mod tests {
                         output: vec!["UAC: The operation was canceled by the user.".to_string()],
                     };
                 }
+                // cmd の & と同じく、落ちたものがあっても残りも張り、終了コードは最後のもの
+                let mut last = Exit::Code(0);
                 for (l, t) in parse_mklinks(&a) {
-                    let r = fake_file_symlink(&l, &t);
-                    assert_eq!(r.exit, Exit::Code(0), "{:?}", r.output);
+                    last = fake_file_symlink(&l, &t).exit;
                 }
                 return RunResult {
-                    exit: Exit::Code(0),
+                    exit: last,
                     output: Vec::new(),
                 };
             }
@@ -1361,21 +1374,14 @@ mod tests {
                 PathBuf::from("C:\\Users\\a b\\.claude\\CLAUDE.md"),
             ),
         ];
-        let c = elevation_command(
-            Path::new("C:\\pwsh\\pwsh.exe"),
-            "C:\\Windows\\system32\\cmd.exe",
-            &pairs,
-        )
-        .unwrap();
+        let c = elevation_command(Path::new("C:\\pwsh\\pwsh.exe"), &pairs).unwrap();
         assert_eq!(c.program, PathBuf::from("C:\\pwsh\\pwsh.exe"));
         assert_eq!(
             c.env_value("DOTFILES_ELEVATE_ARGS").unwrap(),
-            "/d /c mklink \"C:\\Users\\a b\\.claude-personal\\settings.json\" \"C:\\Users\\a b\\.claude\\settings.json\" && mklink \"C:\\Users\\a b\\.claude-work\\CLAUDE.md\" \"C:\\Users\\a b\\.claude\\CLAUDE.md\""
+            "/d /c mklink \"C:\\Users\\a b\\.claude-personal\\settings.json\" \"C:\\Users\\a b\\.claude\\settings.json\" & mklink \"C:\\Users\\a b\\.claude-work\\CLAUDE.md\" \"C:\\Users\\a b\\.claude\\CLAUDE.md\""
         );
-        assert_eq!(
-            c.env_value("DOTFILES_ELEVATE_FILE").unwrap(),
-            "C:\\Windows\\system32\\cmd.exe"
-        );
+        // 昇格させる cmd は System32 のもの (同じユーザーが差し替えられる %ComSpec% を見ない)
+        assert_eq!(c.env_value("DOTFILES_ELEVATE_FILE"), None);
         let args = c.args_lossy();
         assert_eq!(
             &args[..5],
@@ -1387,14 +1393,24 @@ mod tests {
                 "-Command"
             ]
         );
-        assert!(args[5].contains("Start-Process -FilePath $env:DOTFILES_ELEVATE_FILE -ArgumentList $env:DOTFILES_ELEVATE_ARGS -Verb RunAs"), "{}", args[5]);
+        assert!(
+            args[5].contains("Join-Path ([Environment]::SystemDirectory) 'cmd.exe'"),
+            "{}",
+            args[5]
+        );
+        assert!(
+            args[5].contains("-ArgumentList $env:DOTFILES_ELEVATE_ARGS -Verb RunAs"),
+            "{}",
+            args[5]
+        );
+        assert!(!args[5].contains("ComSpec"), "{}", args[5]);
         assert!(args[5].contains("exit 1223"), "{}", args[5]);
         assert_eq!(c.timeout, Some(Duration::from_secs(300)));
         let bad = vec![(
             PathBuf::from("C:\\Users\\a%b\\.claude-work\\settings.json"),
             PathBuf::from("C:\\Users\\a%b\\.claude\\settings.json"),
         )];
-        let e = elevation_command(Path::new("pwsh"), "cmd", &bad).unwrap_err();
+        let e = elevation_command(Path::new("pwsh"), &bad).unwrap_err();
         assert!(e.contains("cmd が特別に読む文字 (%)"), "{e}");
     }
 
@@ -1487,5 +1503,60 @@ mod tests {
             "{cmds:?}"
         );
         assert!(!out.contains("末尾に足しました"), "{out}");
+    }
+
+    /// 別の先を指す symlink を外せなければ、それは張らずに知らせ、ほかは 1 回の昇格で張る (外せなかったもので UAC を無駄にしない)
+    #[cfg(unix)]
+    #[test]
+    fn skips_links_it_cannot_remove() {
+        use std::os::unix::fs::PermissionsExt;
+        let e = Env::new();
+        let other = e.t.write("home/other.json", "{}\n");
+        let work = e.dir("work", "");
+        std::fs::create_dir_all(&work).unwrap();
+        std::os::unix::fs::symlink(&other, e.dir("work", "settings.json")).unwrap();
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // root は読み取りだけの dir でも消せるので、この試験にならない
+        let probe = work.join("probe");
+        if std::fs::write(&probe, "x").is_ok() {
+            let _ = std::fs::remove_file(&probe);
+            std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o755)).unwrap();
+            eprintln!("読み取りだけの dir に書けた (root) ので飛ばす");
+            return;
+        }
+        let sys = e.fake(Uac::Accept);
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        std::fs::set_permissions(&work, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let links = row(&o, LINKS);
+        assert_eq!(links.kind, Kind::Missing, "{o:?}\n{out}");
+        assert!(
+            links
+                .notes
+                .iter()
+                .any(|n| n.starts_with("work/settings.json のリンクを外せない")),
+            "{links:?}"
+        );
+        let calls = sys.calls.borrow();
+        let elevated: Vec<String> = calls
+            .iter()
+            .filter_map(|c| c.env_value("DOTFILES_ELEVATE_ARGS"))
+            .collect();
+        assert_eq!(elevated.len(), 1, "{elevated:?}");
+        let stuck = e.dir("work", "settings.json").display().to_string();
+        assert!(!elevated[0].contains(&stuck), "{elevated:?}");
+        assert!(elevated[0].contains("claude-personal"), "{elevated:?}");
+        drop(calls);
+        // personal は張れた
+        for f in ["settings.json", "CLAUDE.md"] {
+            assert!(same_path(
+                &link_target(&e.dir("personal", f)).unwrap(),
+                &e.claude(f)
+            ));
+        }
+        // 外せなかったリンクはそのまま
+        assert!(same_path(
+            &link_target(&e.dir("work", "settings.json")).unwrap(),
+            &other
+        ));
     }
 }
