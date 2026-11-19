@@ -419,8 +419,8 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
 mod tests {
     //! ## 確かめること
     //!
-    //! - 埋めた groups.json が読め、グループごとの Windows の道具の既定が Nix の段の決まりどおり (personal は全部・company は ③ の ntn が
-    //!   off・client は全部 off。type-clipboard はどれも off)
+    //! - 埋めた groups.json が読め、グループごとの Windows の道具の既定が Nix の段の決まりどおり (personal は全部・company は ③ の ntn と
+    //!   ② ③ の両方の claude-personal・claude-work が off・client は全部 off。type-clipboard はどれも off)
     //! - group を書かなければ personal、上書きはグループの既定より先に効く、runner.enable の既定は false
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
 
@@ -449,6 +449,10 @@ mod tests {
         assert!(tool("company", "windowsClaudeCode"));
         assert!(tool("company", "windowsHerdr"));
         assert!(!tool("company", "windowsNtn"));
+        // claude-personal・claude-work は ② と ③ の両方 (初回の apply で UAC の確認が出るので、company・client では既定で走らせない)
+        assert!(tool("personal", "windowsClaudeAccounts"));
+        assert!(!tool("company", "windowsClaudeAccounts"));
+        assert!(!tool("client", "windowsClaudeAccounts"));
         for group in ["personal", "company", "client"] {
             assert!(!tool(group, "windowsTypeClipboard"), "{group}");
             // Tailscale は VPN の道具で、どのグループでも既定は off (入れるホストが [tools] に書く)

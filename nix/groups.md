@@ -36,6 +36,7 @@
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | off | off |  |
 | ②③ | cc-pages | `ccPages.enable` | on | off | off |  |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | off | off |  |
+| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | on | off | off | `wsl.windowsFiles.enable`・`wsl.windowsFiles.claudeCode.enable` |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | off | off |  |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | off | off |  |
 | ③ | 1Password | `onePassword.enable` | off | off | off |  |
@@ -78,6 +79,7 @@ flowchart LR
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>on"]
   ccPages["cc-pages<br/>on"]
   herdrHub["集約ハブ ~/h<br/>on"]
+  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>on"]
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
@@ -105,6 +107,8 @@ flowchart LR
   t3 --> ccPages
   t2 --> herdrHub
   t3 --> herdrHub
+  t2 --> windowsClaudeAccounts
+  t3 --> windowsClaudeAccounts
   t2 --> devTracker
   t3 --> devTracker
   t2 --> devTrackerInbox
@@ -121,7 +125,7 @@ flowchart LR
   classDef onHost fill:#e6f4ea,stroke:#d93025,stroke-width:3px,color:#0d652d
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
-  class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,ntn,windowsNtn,gitIdentity on
+  class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,ntn,windowsNtn,gitIdentity on
   class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,windowsTailscale,windowsSshd off
   class wsl,windowsFiles onHost
 ```
@@ -150,6 +154,7 @@ flowchart LR
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | on | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | 段 (② と ③) の既定 |
+| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | on | 段 (② と ③) の既定 |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
@@ -188,6 +193,7 @@ flowchart LR
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
+  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
@@ -215,6 +221,8 @@ flowchart LR
   t3 --> ccPages
   t2 --> herdrHub
   t3 --> herdrHub
+  t2 --> windowsClaudeAccounts
+  t3 --> windowsClaudeAccounts
   t2 --> devTracker
   t3 --> devTracker
   t2 --> devTrackerInbox
@@ -232,7 +240,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr on
-  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -260,6 +268,7 @@ flowchart LR
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
+| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
@@ -298,6 +307,7 @@ flowchart LR
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
+  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
@@ -325,6 +335,8 @@ flowchart LR
   t3 --> ccPages
   t2 --> herdrHub
   t3 --> herdrHub
+  t2 --> windowsClaudeAccounts
+  t3 --> windowsClaudeAccounts
   t2 --> devTracker
   t3 --> devTracker
   t2 --> devTrackerInbox
@@ -342,7 +354,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -370,6 +382,7 @@ flowchart LR
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
+| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
@@ -408,6 +421,7 @@ flowchart LR
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
+  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
@@ -435,6 +449,8 @@ flowchart LR
   t3 --> ccPages
   t2 --> herdrHub
   t3 --> herdrHub
+  t2 --> windowsClaudeAccounts
+  t3 --> windowsClaudeAccounts
   t2 --> devTracker
   t3 --> devTracker
   t2 --> devTrackerInbox
@@ -452,7 +468,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles,claude onHost
 ```
 
@@ -480,6 +496,7 @@ flowchart LR
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
+| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |

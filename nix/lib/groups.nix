@@ -146,6 +146,23 @@ let
     ] both { })
     (tool "ccPages" "cc-pages" [ "ccPages" "enable" ] both { })
     (tool "herdrHub" "集約ハブ ~/h" [ "herdr" "hub" "enable" ] both { })
+    # 初回の apply で UAC の確認 (管理者の権限) が出る手順なので、会社や客先の PC では既定で走らせない (personal だけ既定で on)。
+    # Windows の runner の手順 claude-accounts だけが読む switch (WSL の setup に同じ手順は無い)
+    (tool "windowsClaudeAccounts" "Windows の claude-personal・claude-work"
+      [ "wsl" "windowsFiles" "claudeAccounts" "enable" ]
+      both
+      {
+        requires = [
+          windowsFiles
+          [
+            "wsl"
+            "windowsFiles"
+            "claudeCode"
+            "enable"
+          ]
+        ];
+      }
+    )
     (tool "devTracker" "Notion Dev Tracker" [ "claude" "devTracker" "enable" ] both {
       derived = false;
     })
