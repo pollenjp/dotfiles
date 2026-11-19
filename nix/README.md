@@ -4581,12 +4581,68 @@ Windows の Claude Code (herdr-app のハブなど) では、Windows の runner 
 | `claude` | `~/.claude`（今まで通り） | 今まで通り |
 | `claude-personal` | `~/.claude-personal` | 個人のアカウント（初回に `/login`） |
 | `claude-work` | `~/.claude-work` | 会社のアカウント（初回に `/login`） |
+| `claude-<名前>`（`claude-account add` で足したもの） | `~/.claude-<名前>` | subscription は初回に `/login`。token は `claude setup-token` の token（[後述](#token-のアカウント)） |
 
-どちらも `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN`（`/login` の
-資格情報より優先される env）を外し、`CLAUDE_CONFIG_DIR` をその dir にして `claude` を exec する。
-`home/modules/claude.nix` が `writeShellApplication` で作るので PATH にあり、bash / fish の
-どちらからも、シェルを通さない起動元からも呼べる（`claude` が PATH に無ければ
-`mise which claude` で探す）。どのマシンにも両方ある。
+どれも `ANTHROPIC_API_KEY`・`CLAUDE_CODE_OAUTH_TOKEN`・`ANTHROPIC_AUTH_TOKEN`（`/login` の
+資格情報より優先される env）を外し、`CLAUDE_CONFIG_DIR` をその dir にして `claude` を exec する
+（token のアカウントは、外したあとに token を入れる）。`home/modules/claude.nix` が入れる `pkgs/claude-account` の
+1 本の script で、呼ばれた名前で振り分ける（`claude-account` は管理のコマンド、`claude-<名前>` は launcher）。PATH にあり、
+bash / fish のどちらからも、シェルを通さない起動元（hc exec など）からも呼べる（`claude` が PATH に無ければ
+`mise which claude` で探す）。既定の personal・work はどのマシンにもある（package の中の link）。
+
+#### アカウントを足す (claude-account)
+
+既定の personal・work のほかのアカウント（別のアカウント・臨時の token のアカウント）は、`claude-account` で足す・消す。
+
+```sh
+claude-account add token1 --mode token         # 登録・launcher・~/.claude-token1 を作り、token の置き方を出す
+claude-account set-token token1                # token を見えない入力で入れる (パイプなら 1 行)
+claude-account add sub2 --mode subscription    # /login で入るアカウント (claude-sub2 を起こして /login)
+claude-account list                            # 既定と登録のアカウントと、その状態
+claude-account check token1                    # 0 = 使える (stdout に 1 行) / 1 = 用意が無い (stderr に手) / 2 = 知らない名前
+claude-account remove token1 [--purge]         # 登録と launcher を消す (--purge なら ~/.claude-token1 と token のファイルも)
+claude-account help token [token1]             # token をこのマシンとほかのマシンに置く手順
+```
+
+- 登録は**マシンごと**（`~/.config/claude-accounts/accounts.json`）。子を立てる u24・lavie などで使うなら、そのマシンの端末で
+  add と set-token を打つ（`claude-account help token <名前>` が手順と、claude-account の無い古いマシンで同じ形のファイルを置く 1 行を出す）
+- add は、launcher `~/.local/bin/claude-<名前>` を profile の bin の `claude-account` への link にし（home-manager の package は後から
+  足せないため。`~/.local/bin` は `home.sessionPath` で PATH にあり、link の先は世代を切り替えても変わらない）、package に写した
+  `bootstrap-claude-accounts.sh` を `--account <名前>` で流して `~/.claude-<名前>` を既定と同じ形にする
+- setup（`bootstrap-claude-accounts`）は、既定に加えて登録のアカウントの dir も保つ。launcher の link が消えていれば知らせる
+  （add の打ち直しで張る）
+- `check` は値を出さず、op を呼ばない（ファイルの有る無し・形・権限と、dir・link・`.credentials.json` の有る無しだけを見る）。
+  子を立てる前の確かめに使う（claude-skills の pjp child）
+- `remove` は `~/.claude-<名前>`（ログイン・履歴）と token のファイルを残す。`--purge` は両方を消すが、中のリンクは辿らない
+  （`~/.claude` の中身は消えない）。登録から外したあとでも `--purge` で消せる
+- 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）。`account` と既定の名前は使えない
+
+#### token のアカウント
+
+`claude-account add <名前> --mode token` で足したアカウントは、`claude setup-token` の token（1 年有効の OAuth token）を
+`CLAUDE_CODE_OAUTH_TOKEN` で渡して動く（`/login` のアカウントの週の上限で止まったときに、別のアカウントで続けるなど）。
+
+| token のファイル `~/.config/claude-accounts/<名前>.env` の値 | 読み方 |
+| --- | --- |
+| token そのもの（`claude-account set-token` が書く。権限 600） | そのまま渡す（既定。起こすときに確認は出ない）。権限が 600 より緩い・持ち主が自分でないなら起こさない |
+| `op://…`（1Password の参照） | 起こすたびに `pjp-op-env` で 1Password から読む（WSL では op-reason の理由の窓が出る） |
+
+- 中身は `CLAUDE_CODE_OAUTH_TOKEN=<値>` の 1 行と、`#` のコメント・空行だけ（`export `・引用符・BOM・CRLF は読む）。ほかの名前の行は
+  止める（op の道で `pjp-op-env` がファイルの全部の行を env に入れ、`ANTHROPIC_API_KEY` などが紛れると token より先に効くため）
+- token が無い・置き方が違うと、claude を起こさずに置き方（setup-token → set-token、op の参照の形）を出して止まる
+- **シークレットの決まりの例外**: token の値をファイルに置くのはユーザーの決定（2026-11-19）。値を入れるのはユーザーだけ
+  （`set-token` の見えない入力）で、Claude は読まない・書かない・出さない（有る無しと権限だけを見る）。元の token は 1Password にも置く。
+  わけと守り・漏れたときは dotfiles-private の ADR 082（`docs/adr/082_claude_token_accounts_*`）
+- 漏れたとき: claude.ai の設定（`claude.ai/settings/claude-code` の Revoke Access。公式の文書には無い手順で、無ければすべての端末から
+  サインアウト）で取り消し、`claude setup-token` で出し直して `set-token` で入れ直す
+- token の会話の注意
+  - Remote Control と claude.ai の connector は使えない（推論だけ。手元の MCP は使える）
+  - `claude auth status` は `authMethod: "oauth_token"` を出し、メールは出さない（token が正しいかは確かめない）
+  - 会話で `/login` すると、その会話だけ新しいログインに替わり、ログインは `~/.claude-<名前>` に残る（次に起こすと token に戻る。
+    `~/.claude` のログインには触らない）
+  - Claude Code（2.1.327 で確かめた）は token を Bash・hook・MCP の process に渡さない。版が変わっても漏らさないよう、会話で
+    `env`・`printenv` を出さない。会話の中の素の `claude` は `CLAUDE_CONFIG_DIR` だけを受け継ぎ、token の無い claude になる
+  - 共有の `settings.json` の `apiKeyHelper`・env の `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN` は token より先に効く（今は無い）
 
 #### `~/.claude-<名前>/` の中身
 
@@ -4615,9 +4671,9 @@ Windows の Claude Code (herdr-app のハブなど) では、Windows の runner 
 - 薄い dir か `skills/` などが `~/.claude` へのリンクになっている（または `~/.claude` が
   薄い dir へのリンクになっている）と、張ったリンクが自分自身を指して `~/.claude` を壊すので、
   そのアカウント・その種類は飛ばして警告する
-- アカウントの一覧は `claude.nix` の `accounts` にだけある。`switch` がそこから
+- 既定のアカウントの一覧は `claude.nix` の `accounts` にだけある。`switch` がそこから
   `~/.local/state/dotfiles/claude-accounts.json`（`["personal","work"]`）を置き、
-  script はそれを読む
+  script はそれと、`claude-account` の登録（`~/.config/claude-accounts/accounts.json`）を読む
 
 #### 使い始める
 
@@ -4627,6 +4683,7 @@ ls -l ~/.claude-personal ~/.claude-work     # CLAUDE.md / settings.json / projec
 
 claude-personal                             # 初回は /login で個人のアカウント
 claude-work                                 # 初回は /login で会社のアカウント
+claude-account list                         # 既定と登録のアカウントと、その状態
 ```
 
 どのアカウントで動いているかは各セッションの `/status` で確かめる。
