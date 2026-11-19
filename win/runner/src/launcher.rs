@@ -1,8 +1,8 @@
 //! `claude-<名前>.exe` の launcher (claude-accounts の手順が `%LOCALAPPDATA%\dotfiles\bin\` に置く、この runner の exe の写し)。
 //!
 //! Linux の `nix/home/modules/claude.nix` の `claude-<名前>` に当たる (dotfiles-private の docs/adr/081_win_claude_accounts_*)。exe の名前
-//! (`claude-<名前>`) からアカウントを決め、`%USERPROFILE%\.claude-<名前>\settings.json` が `~/.claude/settings.json` への symlink になって
-//! いる (claude-accounts の手順が用意した) ことを確かめてから、`/login` の資格情報より優先される env を外し、`CLAUDE_CONFIG_DIR` を付けて
+//! (`claude-<名前>`) からアカウントを決め、`%USERPROFILE%\.claude-<名前>\settings.json` と `projects` が `~/.claude` の同じ名前へのリンクに
+//! なっている (claude-accounts の手順が用意した) ことを確かめてから、`/login` の資格情報より優先される env を外し、`CLAUDE_CONFIG_DIR` を付けて
 //! PATH の `claude.exe` を子 process で起こし、その終了コードで終わる (Windows に exec は無い)。用意を確かめるのは、Claude Code が空の
 //! `CLAUDE_CONFIG_DIR` に起動しただけで `projects/` などを実体で作り、runner がリンクを張れなくなるため。
 //!
@@ -78,38 +78,28 @@ pub fn prepare(
         ));
     };
     let dir = home.join(format!(".claude-{name}"));
-    let settings = dir.join("settings.json");
-    match link_target(&settings) {
-        Some(t) if same_path(&t, &home.join(".claude").join("settings.json")) => {}
-        Some(t) => {
-            return Err((
-                1,
-                format!(
-                    "{cmd}: {} が別の先 ({}) を指しています。dotfiles apply で ~/.claude/settings.json へ張り直してください (UAC の確認が 1 回出ます)。",
-                    settings.display(),
-                    t.display()
-                ),
-            ));
-        }
-        None if settings.symlink_metadata().is_ok() => {
-            return Err((
-                1,
-                format!(
-                    "{cmd}: {} が ~/.claude/settings.json へのリンクではありません (この dir で先に Claude Code を起動した、など)。win/README.md の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、dotfiles apply を打ってください。",
-                    settings.display()
-                ),
-            ));
-        }
-        None => {
-            return Err((
-                1,
-                format!(
-                    "{cmd}: {} がまだ用意されていません。dotfiles apply を打ってください (初回は UAC の確認が 1 回出ます)。",
-                    dir.display()
-                ),
-            ));
-        }
-    }
+    // settings.json (symlink) と projects (junction) が ~/.claude を指しているか。Claude Code は空の config dir に起動しただけで実体を作る
+    let base = home.join(".claude");
+    check_link(
+        &cmd,
+        &dir.join("settings.json"),
+        &base,
+        "settings.json",
+        format!(
+            "{cmd}: {} がまだ用意されていません。dotfiles apply を打ってください (初回は UAC の確認が 1 回出ます)。",
+            dir.display()
+        ),
+    )?;
+    check_link(
+        &cmd,
+        &dir.join("projects"),
+        &base,
+        "projects",
+        format!(
+            "{cmd}: {} がまだ用意されていません (~/.claude/projects への junction が無い)。dotfiles apply を打ってください。",
+            dir.join("projects").display()
+        ),
+    )?;
     // 空の要素・相対パスの要素は今の dir を探すことになるので見ない
     let program = path.and_then(|p| {
         std::env::split_paths(p)
@@ -129,6 +119,35 @@ pub fn prepare(
         program,
         config_dir: dir,
     })
+}
+
+/// `link` が `~/.claude` の中の `rel` へのリンクかを確かめる。違えば (終了コード, 断る文)。無いときの文は `missing`。
+fn check_link(
+    cmd: &str,
+    link: &Path,
+    base: &Path,
+    rel: &str,
+    missing: String,
+) -> Result<(), (i32, String)> {
+    match link_target(link) {
+        Some(t) if same_path(&t, &base.join(rel)) => Ok(()),
+        Some(t) => Err((
+            1,
+            format!(
+                "{cmd}: {} が別の先 ({}) を指しています。dotfiles apply で ~/.claude/{rel} へ張り直してください。",
+                link.display(),
+                t.display()
+            ),
+        )),
+        None if link.symlink_metadata().is_ok() => Err((
+            1,
+            format!(
+                "{cmd}: {} が ~/.claude/{rel} へのリンクではありません (この dir で先に Claude Code を起動した、など)。win/README.md の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、dotfiles apply を打ってください。",
+                link.display()
+            ),
+        )),
+        None => Err((1, missing)),
+    }
 }
 
 /// 起こして待ち、子の終了コードを返す。標準入出力は引き継ぐ。Windows では、子を起こす前に Ctrl+C・Ctrl+Break を受け流す handler を登録する
@@ -210,10 +229,11 @@ mod tests {
     //! - exe の名前 (拡張子を除き小文字にした名前が `claude-` で始まる) からアカウントの名前を取る。runner (`dotfiles-win`)・hook の口
     //!   (`dotfiles-claude`)・素の `claude` は launcher でない
     //! - 断り方: 名前が規則に合わない → 2・USERPROFILE が無い → 1・settings.json が無い (まだ用意されていない) → 1・実体 → 1 (片付け方)・
-    //!   別の先へのリンク → 1 (dotfiles apply で張り直す)・PATH に claude が無い → 127。通るときは PATH の最初の claude と薄い dir
+    //!   別の先へのリンク → 1 (dotfiles apply で張り直す)・projects が ~/.claude/projects へのリンクでない → 1・PATH に claude が無い → 127。
+    //!   通るときは PATH の最初の claude と薄い dir
 
     use super::*;
-    use crate::testutil::{TempDir, fake_file_symlink};
+    use crate::testutil::{FakeSys, TempDir, fake_file_symlink, fake_mklink};
 
     #[test]
     fn account_names() {
@@ -285,6 +305,19 @@ mod tests {
             }
             ok
         }
+
+        /// ~/.claude-<name>/projects を ~/.claude/projects への junction にする (試験の偽物は Unix の symlink)
+        fn link_projects(&self, name: &str) {
+            let target = self.home().join(".claude").join("projects");
+            std::fs::create_dir_all(&target).unwrap();
+            let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+            crate::link::create_junction(
+                &sys,
+                &self.home().join(format!(".claude-{name}")).join("projects"),
+                &target,
+            )
+            .unwrap();
+        }
     }
 
     #[test]
@@ -311,12 +344,32 @@ mod tests {
         assert!(msg.contains("既に ~/.claude-<名前> があるとき"), "{msg}");
     }
 
+    /// projects が ~/.claude/projects へのリンクでなければ起こさない (Claude Code が実体の projects\ を作り、履歴が分かれる)
+    #[test]
+    fn prepare_refuses_without_the_projects_link() {
+        let h = Home::new();
+        if !h.prepare_link("work", &h.home().join(".claude").join("settings.json")) {
+            return;
+        }
+        let path = h.path_var();
+        let (code, msg) = prepare("work", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(msg.contains("projects"), "{msg}");
+        assert!(msg.contains("dotfiles apply"), "{msg}");
+        // 実体の projects も断り、片付け方を出す
+        h.t.write("home/.claude-work/projects/x/s.jsonl", "{}\n");
+        let (code, msg) = prepare("work", &h.env(), Some(&path)).unwrap_err();
+        assert_eq!(code, 1, "{msg}");
+        assert!(msg.contains("既に ~/.claude-<名前> があるとき"), "{msg}");
+    }
+
     #[test]
     fn prepare_finds_claude_on_path() {
         let h = Home::new();
         if !h.prepare_link("work", &h.home().join(".claude").join("settings.json")) {
             return;
         }
+        h.link_projects("work");
         let path = h.path_var();
         let l = prepare("work", &h.env(), Some(&path)).unwrap();
         assert_eq!(

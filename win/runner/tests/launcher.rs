@@ -4,6 +4,7 @@
 //!
 //! - 用意されていない (`~/.claude-<名前>\settings.json` が無い) と、Claude Code を起こさずに 1 と「まだ用意されていません」・dotfiles apply
 //! - settings.json が実体なら 1 と「リンクではありません」(片付け方)
+//! - (Unix) settings.json がリンクでも、projects が ~/.claude/projects へのリンクでなければ 1
 //! - (Unix) 用意されていれば、PATH の claude に引数をそのまま渡し、CLAUDE_CONFIG_DIR を薄い dir にし、ANTHROPIC_API_KEY などを外し、
 //!   子の終了コードで終わる。PATH に claude が無ければ 127
 
@@ -80,6 +81,16 @@ fn passes_arguments_and_exit_code_to_claude() {
     std::os::unix::fs::symlink(
         w.home().join(".claude").join("settings.json"),
         w.home().join(".claude-tester").join("settings.json"),
+    )
+    .unwrap();
+    // projects の junction が無ければ起こさない
+    let (code, _, err) = w.run(&[]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("projects"), "{err}");
+    std::fs::create_dir_all(w.home().join(".claude").join("projects")).unwrap();
+    std::os::unix::fs::symlink(
+        w.home().join(".claude").join("projects"),
+        w.home().join(".claude-tester").join("projects"),
     )
     .unwrap();
     // PATH に claude が無い
