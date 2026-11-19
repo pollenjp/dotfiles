@@ -22,7 +22,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
-| `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・状況の説明・進み具合・図) ([後述](#herdr-app-の-mod)) |
+| `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・チケットと進み具合と PR の木・状況の説明・進み具合・一覧・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
@@ -589,7 +589,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・状況の説明 (markdown)・進み具合 (段の並び)・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・状況の説明 (markdown)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -686,6 +686,24 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   { "id": "TKT-n", "title": "panel の図を大きく見る", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "note": "PR はまだ" } ] }
 { "type": "prs", "id": "prs", "title": "PR", "rows": [
   { "id": "dotfiles#251", "title": "panel の文字を 1.2 倍に", "url": "https://github.com/pollenjp/dotfiles/pull/251", "state": "merged", "ci": "pass", "note": "当てた" } ] }
+```
+
+- チケット・進み具合・PR の木は、節の型 `work` で書く (ハブはまとめのペインの一番上に置く。panel は節を並べ替えない)。行は
+  `{ kind, id, title, url, status, state, ci, who, note, steps, children, related }` で、`kind` は `ticket` (省いてよい)・`pr`・`item`。チケットの行の
+  `children` に子のチケット・PR・item を入れると 1 段下げて出し、字下げに縦と横の線を引く (3 段まで)。行ごとに ID・状態の札・題・誰が (`who`。枠だけの札)
+  を並べ、その下に段 (`steps`。flow の段と同じ札)・一言 (`note`)・子を出す。ID か題を押すと `url` を開く (一覧と同じく http と https だけ)。
+  Done・Canceled のチケットで、下に動いているもの (active か blocked の段・open か draft の PR) が無ければ初め 1 行に畳み、下の PR の数を足す
+  (「PR 3 本 merged」。`▸` で開き、`▾` で畳む)。`related` が true の根の行は、点線の下に「関連」として出す。欄の意味・札の色・畳み方の正本は
+  `main.js` の頭のコメント:
+
+```json
+{ "type": "work", "id": "work", "title": "チケット・進み具合・PR", "rows": [
+  { "id": "TKT-n", "title": "ハブのチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "ハブ", "children": [
+    { "id": "TKT-m", "title": "子のチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "子 C · u24/t6v",
+      "steps": [ { "label": "spec", "state": "done" }, { "label": "実装", "state": "active" }, { "label": "PR", "state": "todo" } ] },
+    { "id": "TKT-k", "title": "済んだ子のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "who": "子 A", "children": [
+      { "kind": "pr", "id": "dotfiles#251", "title": "panel の文字を 1.2 倍に", "url": "https://github.com/pollenjp/dotfiles/pull/251", "state": "merged", "ci": "pass" } ] } ] },
+  { "id": "TKT-j", "title": "前の会話のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "note": "前の会話", "related": true } ] }
 ```
 
 - 節を消す印: まとめのペイン (role が `summary` か無い) の、`id` (空でない文字列) のある節の右上に `×` が出る。ユーザーが押すと印が付き (warn の

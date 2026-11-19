@@ -1,5 +1,6 @@
-// pjp-hub-panel: ハブの Claude がユーザーに見せる panel。質問 (選んで送る) と、今の状況の説明 (markdown)・
-// 進み具合 (flow)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
+// pjp-hub-panel: ハブの Claude がユーザーに見せる panel。質問 (選んで送る) と、チケット・進み具合・PR の木 (work。チケットの下に
+// 進み具合の段と PR を 1 段下げて並べる)・今の状況の説明 (markdown)・進み具合 (flow)・チケットと PR の一覧 (tickets・prs)・
+// 図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
 // 大きくし、クリックすると大きく見る小窓で開く (下の「図の大きさと、大きく見る小窓」)。
 // props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
 //   role で、1 つの panel.json を「まとめ」と「問い」の 2 つのペインに分けて出せる (ハブはまとめのペインをハブの端末の左に開いて
@@ -36,6 +37,33 @@
 //   state の札: open は ok (緑)・draft は muted・merged は ansi5 (紫)・closed は blocked (赤)。ci の札: pass は「CI ✓」(緑)・fail は
 //   「CI ✗」(赤)・pending は「CI …」(working)。どれも大文字小文字を問わず、知らない値は muted の札に字のまま (ci は「CI <値>」) 出し、
 //   無い・空なら札を出さない。rows が空なら「(行はありません)」と出す。
+//
+// チケット・進み具合・PR の木 (type "work"): チケットの下に、そのチケットの進み具合 (段) と PR・子のチケットを 1 段下げて並べる木。
+//   ハブはまとめのペインの一番上に置く (mod は節を並べ替えず、panel.json の順のまま出す)。行はハブが panel.json に書いたものを、そのまま
+//   出す (mod から gh や Notion を引かない)。行の形:
+//     { kind, id, title, url, status, state, ci, who, note, steps: [{ label, state }], children: [<行>…], related }
+//   - kind: "ticket" | "pr" | "item"。無い・空なら "ticket"。大文字小文字を問わず、知らない値は "item" と同じに出す。id は ticket が
+//     "TKT-n"・"WRK-TKT-n"、pr が "<repo>#<番号>" で、item は無くてよい。ticket の id は開け閉めを覚える鍵にもなる。
+//   - 上の段に、開け閉めの印の欄 (▸・▾)・ID・状態の札・題・who の札 (誰が・どこで。例 "子 C · u24/t6v"。ハブの行は "ハブ") を並べ、
+//     入らなければ札や題が次の段へ回る (長い ID・題・who は縮んで折り返す)。その下に steps の段 (flow の段と同じ札と ›。active は点滅)、
+//     その下に note (一言。小さく)、その下に children を 1 段下げて出す。ID と題は url を開く (一覧の行と同じく http と https だけ。
+//     ダブルクリックの 2 回目は数えない)。ID の無い行 (item など) は題を太字にする。
+//   - 札: ticket は status (色は tickets の行と同じ)、pr は state と ci (prs の行と同じ)。item には状態の札を出さない。who は枠だけの muted
+//     の札。id・url・status・state・ci・who が無い・空なら、そのリンク・札を出さない (子がチケットを切る前の行など)。
+//   - 字下げ: 根の行から 1 段ずつ下げ、3 段まで (4 段目からは 3 段目と同じ字下げで、線も引かない)。字下げには、親の印の欄のまん中に
+//     縦の線を引き、子の行の印の欄へ短い横の線を出す (最後の子で縦の線を止める。色は theme の border)。
+//   - 開け閉め: steps か children を持つ ticket の行の印の欄に ▸ (畳んである)・▾ (開いている) を出し、押すと開け閉めする (ダブルクリック
+//     の 2 回目は数えない)。初めは、status が Done か Canceled (大文字小文字を問わない。Cancelled も) で、下 (自分の steps と、深さを
+//     問わず children) に動いているもの (state が active か blocked の段・state が open か draft の PR) が無い行を畳み、ほかは開く。
+//     段の state は段の札と同じく字のまま比べる ("Active" は動いているとみない)。畳んだ行は上の段だけを出し、その後ろに、下 (深さを
+//     問わず) の PR の数を state ごとに足す (例「PR 3 本 merged」「PR 2 本 merged・1 本 closed」。open・draft・merged・closed の順で、
+//     知らない state は出てきた順に字のまま、state の無い PR は数だけ。大文字小文字の違う同じ state は 1 つに数え、初めに出てきた字で
+//     出す。PR が無ければ足さない)。手で開け閉めした行は、節の畳みと同じくペインの中で覚え (鍵は節の id と行の id。id の無い行は木の
+//     中の位置)、panel.json を書き直しても残し、version が変わると初めの形に戻す。
+//   - related が true の根の行は関連の行 (束ねていないチケット・親の無い PR)。ほかの根の行 (ふつうは 1 つ目がハブのチケットで、子の
+//     チケットはその children) を上から順に出した下に点線を引き、その下に「関連」の字と並べて出す (ほかの根の行が無ければ点線は
+//     引かない)。根でない行の related は見ない (その場に出す)。
+//   - rows が空・配列でないなら「(行はありません)」と出す。行・段・子が形の違うもの (null など) でも落ちず、中身の無い行として出す。
 //
 // 節を消す印: まとめのペイン (role が summary か無い) の、id (空でない文字列) のある節の右上に「×」を出す。押すと印が付き (枠が warn の
 //   点線になり、題に取り消し線が引かれ、中身が薄くなって「次の更新で消える」と出る)、「戻す」を押すと外れる (ダブルクリックの 2 回目は
@@ -91,6 +119,7 @@
 //   { version, title, updated,
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
+//       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」)
 //       { type: "markdown", id, title, text (リンクは上の「リンク」), collapsed },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
 //       { type: "tickets", id, title, rows: [{ id, title, url, status, note }] },   (チケットの一覧。上の「チケットと PR の一覧」)
@@ -227,12 +256,66 @@ const TICKET_COLOR = { todo: "muted", "in progress": "working", "in review": "ac
 const PR_COLOR = { open: "ok", draft: "muted", merged: "ansi5", closed: "blocked" };
 const CI_CHIP = { pass: ["ok", "CI ✓"], fail: ["blocked", "CI ✗"], pending: ["working", "CI …"] };
 
+// ---- チケット・進み具合・PR の木 (頭のコメントの「チケット・進み具合・PR の木」) ----
+// indent: 線を引いて字下げする段の数 (それより深い行は、その段と同じ字下げ)。gap: 兄弟の行の間 (px。一覧の行の間と同じく % に従わない)
+const TREE = { indent: 3, gap: 8 };
+const CLOSED_STATUS = new Set(["done", "canceled", "cancelled"]); // 初めに畳んでよい status (小文字にして比べる)
+const PR_ORDER = ["open", "draft", "merged", "closed"]; // 畳んだ行に足す PR の数の並び (知らない state はこの後ろ)
+// 形の違う行・段 (null・数・文字・配列) は中身の無いものとみる
+const objOr = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
+const listOf = (v) => (Array.isArray(v) ? v : []);
+// 段の札 (step) に渡す形。label は字にする (形の違う段でも落ちない)
+const stepOf = (v) => {
+  const o = objOr(v);
+  return { label: o.label == null ? "" : str(o.label), state: o.state };
+};
+// 行の種類。無い・空は ticket、知らない値は item (大文字小文字を問わない)
+const kindOf = (r) => {
+  const k = str(r.kind).trim().toLowerCase();
+  return k === "" ? "ticket" : k === "ticket" || k === "pr" ? k : "item";
+};
+const prStateOf = (r) => str(r.state).trim();
+// 下 (自分の steps と、深さを問わず children) に動いているもの (active か blocked の段・open か draft の PR) があるか。
+// 段の state は段の札 (step) と同じく字のまま比べ、PR の state は札の色と同じく大文字小文字を問わない
+const isMoving = (r) =>
+  listOf(r.steps).some((st) => {
+    const s = objOr(st).state;
+    return s === "active" || s === "blocked";
+  }) ||
+  listOf(r.children).some((ch) => {
+    const o = objOr(ch);
+    return (kindOf(o) === "pr" && ["open", "draft"].includes(prStateOf(o).toLowerCase())) || isMoving(o);
+  });
+// 下 (深さを問わず) の PR を state ごとに数える。鍵は小文字にした state で、字は初めに出てきたもの。出てきた順に並ぶ
+const tallyPrs = (r, out = new Map()) => {
+  for (const ch of listOf(r.children)) {
+    const o = objOr(ch);
+    if (kindOf(o) === "pr") {
+      const st = prStateOf(o);
+      const k = st.toLowerCase();
+      const e = out.get(k);
+      if (e) e.n++;
+      else out.set(k, { label: st, n: 1 });
+    }
+    tallyPrs(o, out);
+  }
+  return out;
+};
+// 畳んだ行に足す字 (「PR 2 本 merged・1 本 closed」)。PR が無ければ空の字
+const prSummary = (r) => {
+  const t = tallyPrs(r);
+  if (t.size === 0) return "";
+  const keys = [...PR_ORDER.filter((k) => t.has(k)), ...[...t.keys()].filter((k) => k !== "" && !PR_ORDER.includes(k)), ...(t.has("") ? [""] : [])];
+  return `PR ${keys.map((k) => (k === "" ? `${t.get(k).n} 本` : `${t.get(k).n} 本 ${t.get(k).label}`)).join("・")}`;
+};
+
 export default class HubPanel extends View {
   init(_props, cx) {
     this.data = null;
     this.error = null;
     this.picked = {};
     this.collapsed = {};
+    this.rowOpen = {}; // 木の行を手で開け閉めした形 (鍵は rowKey。無い行は初めの形)
     this.status = "";
     this.busy = false;
     this.width = null;
@@ -310,6 +393,7 @@ export default class HubPanel extends View {
       this.picked = {};
       this.status = "";
       this.collapsed = {};
+      this.rowOpen = {};
       for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
     }
     this.data = next.data;
@@ -574,6 +658,7 @@ export default class HubPanel extends View {
       else if (s.type === "image") body = this.picture(s, id, c);
       else if (s.type === "tickets") body = this.ticketList(s, id, c);
       else if (s.type === "prs") body = this.prList(s, id, c);
+      else if (s.type === "work") body = this.workTree(s, id, c);
       else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
     }
     return v_flex()
@@ -777,25 +862,31 @@ export default class HubPanel extends View {
 
   // チケットの一覧の節 (type "tickets")。行: { id, title, url, status, note }
   ticketList(s, id, c) {
-    return this.rowList(s, id, c, (r) => {
-      const st = str(r.status).trim();
-      return st === "" ? [] : [this.chip(st, this.paint(c, TICKET_COLOR[st.toLowerCase()] ?? "muted", c.muted))];
-    });
+    return this.rowList(s, id, c, (r) => this.ticketChips(r, c));
   }
 
   // PR の一覧の節 (type "prs")。行: { id, title, url, state, ci, note }
   prList(s, id, c) {
-    return this.rowList(s, id, c, (r) => {
-      const chips = [];
-      const st = str(r.state).trim();
-      if (st !== "") chips.push(this.chip(st, this.paint(c, PR_COLOR[st.toLowerCase()] ?? "muted", c.muted)));
-      const ci = str(r.ci).trim();
-      if (ci !== "") {
-        const [color, label] = CI_CHIP[ci.toLowerCase()] ?? ["muted", `CI ${ci}`];
-        chips.push(this.chip(label, this.paint(c, color, c.muted)));
-      }
-      return chips;
-    });
+    return this.rowList(s, id, c, (r) => this.prChips(r, c));
+  }
+
+  // チケットの行の札 (status)。一覧の tickets と木の ticket の行で使う
+  ticketChips(r, c) {
+    const st = str(r.status).trim();
+    return st === "" ? [] : [this.chip(st, this.paint(c, TICKET_COLOR[st.toLowerCase()] ?? "muted", c.muted))];
+  }
+
+  // PR の行の札 (state と ci)。一覧の prs と木の pr の行で使う
+  prChips(r, c) {
+    const chips = [];
+    const st = str(r.state).trim();
+    if (st !== "") chips.push(this.chip(st, this.paint(c, PR_COLOR[st.toLowerCase()] ?? "muted", c.muted)));
+    const ci = str(r.ci).trim();
+    if (ci !== "") {
+      const [color, label] = CI_CHIP[ci.toLowerCase()] ?? ["muted", `CI ${ci}`];
+      chips.push(this.chip(label, this.paint(c, color, c.muted)));
+    }
+    return chips;
   }
 
   // 一覧の行を並べる。上の段に ID・状態の札 (chipsOf)・題 (入らなければ題が次の段へ回って折り返す)、下に note
@@ -865,14 +956,200 @@ export default class HubPanel extends View {
       .child(text);
   }
 
-  flow(s, id, c) {
-    const rows = (s.rows ?? []).map((r, ri) => {
-      const steps = [];
-      (r.steps ?? []).forEach((st, si) => {
-        if (si > 0) steps.push(div().text_color(c.dim).text_size(this.fs(11)).child("›"));
-        steps.push(this.step(st, `${id}-${ri}-${si}`, c));
+  // 枠だけの札 (木の行の who)。地を塗らず、字は細いまま。入らなければ縮んで、札の中で折り返す
+  outlineChip(text, color) {
+    return div()
+      .min_w(0)
+      .px(this.fs(6))
+      .py(this.fs(1))
+      .rounded(this.fs(8))
+      .border_1()
+      .border_color(color)
+      .text_color(color)
+      .text_size(this.fs(10))
+      .child(text);
+  }
+
+  // ---- チケット・進み具合・PR の木 (頭のコメントの「チケット・進み具合・PR の木」) ----
+
+  // 木の寸法。S は開け閉めの印の欄の幅 (節の題の行の ▸ の欄と同じ fs(12))、gap は欄と ID の間、I は 1 段の字下げ (欄 + 間。子の
+  // 印の欄は親の ID の頭にそろう)、x0 は縦の線を引く所 (欄のまん中)
+  treeGeom() {
+    const S = this.fs(12);
+    const gap = 6;
+    return { S, gap, I: S + gap, x0: Math.floor(S / 2) };
+  }
+
+  // 木の節 (type "work")。根の行 (related でないもの) を上から順に出し、related が true の根の行は、その下の点線の下に「関連」の字と
+  // 並べて出す (ほかの根の行が無ければ点線は引かない)
+  workTree(s, id, c) {
+    const roots = listOf(s.rows).map((r, i) => ({ r: objOr(r), path: String(i) }));
+    if (roots.length === 0) return div().text_color(c.muted).child("(行はありません)");
+    const g = this.treeGeom();
+    const stack = (list) =>
+      v_flex()
+        .min_w(0)
+        .gap(TREE.gap)
+        .children(
+          list.map(({ r, path }) => {
+            const { top, rest } = this.workRow(r, path, 0, id, g, c, null);
+            return v_flex().min_w(0).child(top).when(!!rest, (el) => el.child(rest));
+          }),
+        );
+    const main = roots.filter(({ r }) => r.related !== true);
+    const related = roots.filter(({ r }) => r.related === true);
+    return v_flex()
+      .gap(TREE.gap)
+      .when(main.length > 0, (el) => el.child(stack(main)))
+      .when(related.length > 0, (el) =>
+        el
+          .when(main.length > 0, (e) => e.child(div().border_t_1().border_dashed().border_color(c.border)))
+          // 「関連」の字は行と同じ大きさにし、1 つ目の行の 1 行目とそろえる
+          .child(h_flex().items_start().gap(8).child(div().flex_none().text_color(c.muted).child("関連")).child(stack(related).flex_1())),
+      );
+  }
+
+  // 木の行。上の段 (top) と、その下 (rest: 段・一言・子。無ければ null) を分けて返す。親は子の top と rest の左に、それぞれ溝 (親の縦の
+  // 線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が続く)・"corner" (最後の子。親の縦の線をここで止める)
+  workRow(r, path, depth, id, g, c, tick) {
+    const kind = kindOf(r);
+    const steps = listOf(r.steps);
+    const kids = listOf(r.children).map((k, i) => ({ r: objOr(k), path: `${path}.${i}` }));
+    const foldable = kind === "ticket" && (steps.length > 0 || kids.length > 0);
+    const key = this.rowKey(id, r, path);
+    const open = !foldable || (this.rowOpen[key] ?? this.openByDefault(r));
+    // 子を出すか・子へ線を引いて字下げするか (TREE.indent 段まで。それより深い子は字下げも線もなしで、すぐ下に並べる)
+    const showKids = open && kids.length > 0;
+    const lined = showKids && depth < TREE.indent;
+    const note = str(r.note);
+    const rest = [];
+    if (open && steps.length > 0) rest.push(this.treePiece(g, lined, 4, this.stepRow(steps.map(stepOf), `w-${id}-${path}`, c), c));
+    if (open && note !== "") rest.push(this.treePiece(g, lined, 2, div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(note), c));
+    if (showKids) {
+      kids.forEach(({ r: k, path: kp }, i) => {
+        const last = i === kids.length - 1;
+        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null);
+        if (lined) {
+          rest.push(this.treeSpacer(g, c));
+          rest.push(this.treeWrap(g, !last, part.top, c));
+          if (part.rest) rest.push(this.treeWrap(g, !last, part.rest, c));
+        } else {
+          rest.push(div().h(TREE.gap));
+          rest.push(part.top);
+          if (part.rest) rest.push(part.rest);
+        }
       });
-      return v_flex()
+    }
+    return {
+      top: this.workTop(r, kind, path, id, g, c, { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r) }),
+      rest: rest.length > 0 ? v_flex().min_w(0).children(rest) : null,
+    };
+  }
+
+  // 木の行の初めの開け閉め: status が Done か Canceled で、下に動いているもの (isMoving) が無ければ畳む
+  openByDefault(r) {
+    return !(CLOSED_STATUS.has(str(r.status).trim().toLowerCase()) && !isMoving(r));
+  }
+
+  // 木の行の開け閉めを覚える鍵 (節の id と行の id。id の無い行は木の中の位置)
+  rowKey(id, r, path) {
+    const rid = str(r.id);
+    return `${id}\u0000${rid !== "" ? rid : `@${path}`}`;
+  }
+
+  // 行の上の段: 印の欄 | ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)
+  workTop(r, kind, path, id, g, c, o) {
+    const url = webUrl(r.url);
+    const rid = str(r.id);
+    const title = str(r.title);
+    const who = str(r.who).trim();
+    const chips = kind === "ticket" ? this.ticketChips(r, c) : kind === "pr" ? this.prChips(r, c) : [];
+    const head = h_flex()
+      .flex_1()
+      .min_w(0)
+      .flex_wrap()
+      .gap_x(6)
+      .gap_y(2)
+      .items_center()
+      .when(rid !== "", (el) => el.child(this.linkText(`hp-wid-${id}-${path}`, rid, url, c.accent, c).min_w(0).font_semibold()))
+      .children(chips)
+      // ID の無い行 (item など) は、題を太字にして行の名前にする
+      .when(title !== "", (el) => el.child(this.linkText(`hp-wtt-${id}-${path}`, title, url, c.fg, c).min_w(0).when(rid === "", (e) => e.font_semibold())))
+      .when(who !== "", (el) => el.child(this.outlineChip(who, c.muted)))
+      .when(o.summary !== "", (el) => el.child(div().flex_none().ml_auto().text_size(this.fs(11)).text_color(c.muted).child(o.summary)));
+    return h_flex().items_start().gap(g.gap).child(this.treeSlot(path, id, g, c, o)).child(head);
+  }
+
+  // 印の欄: 上に印 (▸・▾。畳めない行は空き) を 1 行の高さで置き、その下は上の段の高さまで伸ばす。tail なら印の下に縦の線 (この行から
+  // 子へ下りる線。上の段が折り返して高くなっても切れない)。親から来る横の線 (tick) は印の左に描く
+  treeSlot(path, id, g, c, o) {
+    const line = () => div().absolute().bg(c.border);
+    const left = g.x0 - g.I; // 親の縦の線の所 (印の欄の左の端から見て)
+    let mark = h_flex().relative().justify_center();
+    if (o.foldable) {
+      mark = mark
+        .id(`hp-wt-${id}-${path}`)
+        .cursor_pointer()
+        .tooltip(o.open ? "畳む" : "開く")
+        .on_click((e, cx) => {
+          // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
+          if ((e?.click_count ?? 1) > 1) return;
+          this.rowOpen[o.key] = !o.open;
+          cx.notify();
+        })
+        .child(div().text_color(c.dim).child(o.open ? "▾" : "▸"));
+    } else {
+      mark = mark.child(" "); // 空きでも 1 行の高さを取る (横の線を上の段の 1 行目のまん中に引くため)
+    }
+    if (o.tick) {
+      // 親の縦の線から印の欄の左の端まで (畳めない行は、空いた欄も通って ID の手前まで)。最後の子は、縦の線を欄の上からここまで引く
+      mark = mark.child(line().left(left).top("50%").w(-left + (o.foldable ? 0 : g.S - 1)).h(1));
+      if (o.tick === "corner") mark = mark.child(line().left(left).top(0).h("50%").w(1));
+    }
+    return v_flex()
+      .flex_none()
+      .w(g.S)
+      .self_stretch()
+      .child(mark)
+      .child(div().flex_1().relative().when(o.tail, (el) => el.child(this.vline(g.x0, c))));
+  }
+
+  // 行の下の段 (steps・note) を、印の欄と間 (I) だけ下げて置く。pass なら左の溝に、この行から子へ下りる縦の線を通す
+  treePiece(g, pass, padTop, content, c) {
+    return h_flex()
+      .items_start()
+      .child(this.treeGutter(g, pass, c))
+      .child(div().flex_1().min_w(0).pt(padTop).child(content));
+  }
+
+  // 子の行の段 (top か rest) の左に、親の溝を付ける。pass なら親の縦の線を通す (下に兄弟が続くとき)
+  treeWrap(g, pass, piece, c) {
+    return h_flex().items_start().child(this.treeGutter(g, pass, c)).child(piece.flex_1().min_w(0));
+  }
+
+  // 溝: 字下げの幅 (I) の空き。高さは並べた段に合わせ (self_stretch)、pass なら x0 に縦の線を上から下まで引く
+  treeGutter(g, pass, c) {
+    return div()
+      .flex_none()
+      .w(g.I)
+      .self_stretch()
+      .relative()
+      .when(pass, (el) => el.child(this.vline(g.x0, c)));
+  }
+
+  // 兄弟の行の間 (と、親の上の段・段・一言と 1 つ目の子の間)。親の縦の線を通す
+  treeSpacer(g, c) {
+    return h_flex().child(div().flex_none().w(g.I).h(TREE.gap).relative().child(this.vline(g.x0, c)));
+  }
+
+  // 縦の線 (置いた箱の上から下まで)
+  vline(x, c) {
+    return div().absolute().left(x).top(0).bottom(0).w(1).bg(c.border);
+  }
+
+  flow(s, id, c) {
+    const rows = (s.rows ?? []).map((r, ri) =>
+      v_flex()
         .id(`hp-fr-${id}-${ri}`)
         .gap(4)
         .child(
@@ -884,9 +1161,19 @@ export default class HubPanel extends View {
             .child(div().min_w(0).font_semibold().text_size(this.fs(12)).text_color(c.fg).child(r.label ?? ""))
             .when(!!r.sub, (el) => el.child(div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(r.sub))),
         )
-        .child(h_flex().flex_wrap().gap(4).items_center().children(steps));
-    });
+        .child(this.stepRow(r.steps ?? [], `${id}-${ri}`, c)),
+    );
     return v_flex().gap(10).children(rows);
+  }
+
+  // 段の並び (flow の行と木の行)。段の札を › でつなぎ、入らなければ折り返す。key は段の札の id の頭 (hp-st-<key>-<何番目>)
+  stepRow(steps, key, c) {
+    const items = [];
+    steps.forEach((st, si) => {
+      if (si > 0) items.push(div().text_color(c.dim).text_size(this.fs(11)).child("›"));
+      items.push(this.step(st, `${key}-${si}`, c));
+    });
+    return h_flex().flex_wrap().gap(4).items_center().children(items);
   }
 
   step(st, key, c) {
