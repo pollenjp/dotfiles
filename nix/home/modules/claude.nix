@@ -72,6 +72,8 @@
 #                    symlink を張る。詳細は nix/README.md
 #   ~/.claude-<名前>/ : 下の claude-<名前> コマンドが使う dir。中身の symlink と plugin は
 #                    scripts/bootstrap-claude-accounts.sh が用意する (次節)
+#   ~/.config/claude-accounts/ : claude-account add で足したアカウントの登録 (accounts.json) と token のファイル
+#                    (<名前>.env)。マシンごとに claude-account が書く (次節)
 #
 # ## Notion へ書く skill の宛先 (claude-notion.json)
 #
@@ -79,7 +81,7 @@
 # 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
 # (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
 #
-# ## ログインアカウントを分ける (claude-personal / claude-work)
+# ## ログインアカウントを分ける (claude-personal / claude-work と claude-account)
 #
 # `claude-<名前>` は CLAUDE_CONFIG_DIR=~/.claude-<名前> で claude を起動するコマンド。
 # 分けるのはログインだけで、~/.claude-<名前>/ は CLAUDE.md・settings.json・projects を
@@ -91,8 +93,13 @@
 # settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
 # dotfiles-private の docs/adr/009_claude_account_config_dirs_* を参照。
 #
-# アカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
+# 既定のアカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
 # ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
+#
+# コマンドは pkgs/claude-account の 1 本の script で、呼ばれた名前で振り分ける: claude-account はアカウントを足す・消す・確かめる
+# 管理のコマンド、claude-<名前> は launcher。既定の claude-<名前> は package の中の link で、claude-account add で足したアカウント
+# (subscription か、claude setup-token の token で動く token) の launcher は ~/.local/bin/claude-<名前> から profile の bin の
+# claude-account への link (package は後から足せないため)。dotfiles-private の docs/adr/082_claude_token_accounts_* を参照。
 #
 # ## Claude Code を入れるホストだけ (dotfiles.claude.enable)
 #
@@ -160,54 +167,20 @@ let
         "personal"
         "work"
       ];
-      valid = n: builtins.match "[a-z0-9][a-z0-9_-]*" n != null;
+      # account は管理のコマンド (claude-account) の名前なので使わない
+      valid = n: builtins.match "[a-z0-9][a-z0-9_-]*" n != null && n != "account";
     in
     assert lib.assertMsg (builtins.all valid names)
-      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにする (${builtins.toJSON names})";
+      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにし、account は使わない (${builtins.toJSON names})";
     names;
 
-  # claude-<名前> コマンド。シェル関数ではなく PATH に置くので、bash と fish の両方から、
-  # シェルを通さずに起動するもの (herdr や IDE の設定など) からも呼べる。
-  mkAccountCommand =
-    name:
-    pkgs.writeShellApplication {
-      name = "claude-${name}";
-      text = ''
-        dir="''${HOME}/.claude-${name}"
-
-        # bootstrap が済んでいなければ起動しない。起動すると Claude Code が空の dir を作り、
-        # CLAUDE.md も skill も無いまま動いてしまう (そうしてできた実体は bootstrap が触らない)。
-        if [[ ! -L "''${dir}/settings.json" ]]; then
-          if [[ -e "''${dir}/settings.json" ]]; then
-            echo "claude-${name}: ''${dir}/settings.json が実ファイルです (bootstrap より先に" >&2
-            echo "  この dir で Claude Code を起動した、など)。nix/README.md「Claude Code の" >&2
-            echo "  アカウントを分ける」の「既に ~/.claude-<名前> があるとき」の手順で片付けてから、" >&2
-            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
-          else
-            echo "claude-${name}: ''${dir} がまだ用意されていません。" >&2
-            echo "  ~/dotfiles/setup --steps bootstrap-claude-accounts を実行してください。" >&2
-          fi
-          exit 1
-        fi
-
-        # claude は mise 管理。`mise activate` したシェルなら PATH にあるが、シェルを
-        # 通さずに起動されたときは mise に実体を聞く (bootstrap-claude-plugins.sh と同じ)。
-        claude=$(command -v claude || true)
-        if [[ -z "''${claude}" ]] && command -v mise >/dev/null; then
-          claude=$(mise which claude 2>/dev/null || true)
-        fi
-        if [[ -z "''${claude}" ]]; then
-          echo "claude-${name}: claude が見つかりません (mise で入れる: ~/dotfiles/setup --steps bootstrap-mise)。" >&2
-          exit 127
-        fi
-
-        # この dir で /login したアカウントで動かす。/login の資格情報より優先される
-        # env (API キー・OAuth トークン) は外す
-        unset ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_AUTH_TOKEN
-        export CLAUDE_CONFIG_DIR="''${dir}"
-        exec "''${claude}" "$@"
-      '';
-    };
+  # claude-account と既定の claude-<名前> (pkgs/claude-account)。シェル関数ではなく PATH に置くので、bash と fish の両方から、
+  # シェルを通さずに起動するもの (herdr や IDE の設定・hc exec など) からも呼べる。add が張る link の先は profile の bin
+  # (世代を切り替えても変わらず、古い世代の GC でも消えない。CLAUDE_CODE_SHELL と同じ考え)。
+  claudeAccount = pkgs.callPackage ../../pkgs/claude-account {
+    defaults = accounts;
+    profileBin = "${config.home.profileDirectory}/bin";
+  };
 
   # <kind> 直下のエントリを 1 つずつ ~/.claude/<kind>/ へ配置する。
   #
@@ -270,7 +243,7 @@ lib.mkMerge [
       (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
     '';
 
-    home.packages = map mkAccountCommand accounts;
+    home.packages = [ claudeAccount ];
 
     home.file = lib.mkMerge [
       # 全セッションで読まれるユーザーレベルの指示。

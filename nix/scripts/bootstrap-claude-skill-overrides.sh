@@ -42,8 +42,9 @@
 #       frontmatter の metadata の pjp-pack (pack の割り当て。空白で区切って複数の pack を書ける)。yq の無いマシン (cloud の
 #       VM) でも読めるよう、決まった形だけを awk で読む (下の skill_pack)。pack の入口は ~/.claude/skills/pjp-pack-<pack>/SKILL.md
 #   ~/.claude/skills/synced/*/<名前>/SKILL.md と ~/.claude-<アカウント>/skills/synced/*/<名前>/SKILL.md
-#       claude.ai から同期された skill。アカウントは ~/.local/state/dotfiles/claude-accounts.json の一覧
-#       (bootstrap-claude-accounts.sh と同じ)。settings.json はアカウントの間で共有なので、どのアカウントの分も書く
+#       claude.ai から同期された skill。アカウントは ~/.local/state/dotfiles/claude-accounts.json の一覧と、claude-account add で
+#       足したアカウントの登録 (~/.config/claude-accounts/accounts.json。bootstrap-claude-accounts.sh と同じ)。settings.json は
+#       アカウントの間で共有なので、どのアカウントの分も書く
 #   ~/.local/state/dotfiles/claude-skill-overrides.applied.json
 #       この script が書いた key と値の控え ({"version":1,"keys":{"pjp-plantuml":"name-only",…}})
 #
@@ -142,6 +143,8 @@ skills_dir="${HOME}/.claude/skills"
 state_dir="${HOME}/.local/state/dotfiles"
 generated="${state_dir}/claude-skill-overrides.json"
 accounts_file="${state_dir}/claude-accounts.json"
+# claude-account add で足したアカウントの登録 (nix/pkgs/claude-account)
+registry_file="${HOME}/.config/claude-accounts/accounts.json"
 record_file="${state_dir}/claude-skill-overrides.applied.json"
 
 # pack の名前 (入口のディレクトリ名 pjp-pack-<pack> の後ろ)・同期された skill とアカウントの名前として受けるもの
@@ -378,6 +381,15 @@ fi
 config_dirs=("${HOME}/.claude")
 if [[ -r ${accounts_file} ]]; then
   accounts=$(jq -r 'if type == "array" then .[] | strings else empty end' "${accounts_file}" 2>/dev/null || true)
+  while IFS= read -r account; do
+    if [[ ${account} =~ ${plain_re} ]]; then
+      config_dirs+=("${HOME}/.claude-${account}")
+    fi
+  done <<<"${accounts}"
+fi
+# claude-account add で足したアカウント (nix/pkgs/claude-account の登録)。読めない形なら、その分は読まない
+if [[ -r ${registry_file} ]]; then
+  accounts=$(jq -r 'if (.accounts | type) == "object" then .accounts | keys[] else empty end' "${registry_file}" 2>/dev/null || true)
   while IFS= read -r account; do
     if [[ ${account} =~ ${plain_re} ]]; then
       config_dirs+=("${HOME}/.claude-${account}")

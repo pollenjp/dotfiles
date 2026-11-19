@@ -28,7 +28,8 @@
 #     外の pjp-pack・description の中の文字・metadata の下の深い字下げの pjp-pack・flow の形・frontmatter の後ろは読まない。
 #     複数の pack の間の空白の並びと、引用符で囲んだ複数の pack も受ける
 #   - claude.ai から同期された skill (~/.claude/skills/synced/*/<名前>/ と、claude-accounts.json のアカウントの
-#     ~/.claude-<アカウント>/skills/synced/*/<名前>/) を anthropic-skills:<名前> の user-invocable-only にする。重なりは 1 つ
+#     ~/.claude-<アカウント>/skills/synced/*/<名前>/) を anthropic-skills:<名前> の user-invocable-only にする。重なりは 1 つ。
+#     claude-account add で足したアカウント (~/.config/claude-accounts/accounts.json の登録) の dir も読む
 #   - host option の key と同じ名前の pack の skill は、host option の値だけを書き、控えない
 #   - frontmatter に disable-model-invocation: true (引用符・後ろのコメントも) がある pack の skill は名前だけにせず、前に
 #     書いて控えた name-only は戻す。false なら名前だけにする
@@ -633,6 +634,26 @@ if [[ -n ${mine} && ${mine} == "${theirs}" ]]; then
   ok "check-claude-frontmatter.sh の skill_pack は、bootstrap の skill_pack と同じ"
 else
   ng "skill_pack の写し" "$(diff <(printf '%s\n' "${mine}") <(printf '%s\n' "${theirs}") 2>&1 | head -20)"
+fi
+
+# 19. claude-account add で足したアカウント (~/.config/claude-accounts/accounts.json の登録) の dir の同期された skill も読む。登録の
+#     一覧が読めない形なら、その分は読まずに止まらない
+h=$(new_home t19)
+synced "${h}/.claude-tok" b5 pptx
+synced "${h}/.claude-nope" b6 xlsx
+printf '["work"]\n' >"${h}/.local/state/dotfiles/claude-accounts.json"
+mkdir -p "${h}/.config/claude-accounts"
+printf '{"version":1,"accounts":{"tok":{"mode":"token"}}}\n' >"${h}/.config/claude-accounts/accounts.json"
+run "${h}"
+r1=$(rc "${h}")
+o1=$(overrides "${h}")
+printf '{"version":1,"accounts":[' >"${h}/.config/claude-accounts/accounts.json"
+run "${h}"
+if [[ ${r1} == 0 && $(rc "${h}") == 0 ]] && same "${o1}" "{\"anthropic-skills:pptx\":\"${uio}\"}"; then
+  ok "claude-account で足したアカウントの dir の同期された skill も読み、登録の一覧が壊れていても止まらない"
+else
+  ng "登録のアカウントの同期された skill" "$(detail "${h}")
+1 回目: rc=${r1} ${o1}"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
