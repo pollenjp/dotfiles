@@ -26,6 +26,7 @@ pub mod pending;
 pub mod pjp;
 pub mod ps1;
 pub mod tool_skill;
+pub mod user_path;
 
 use crate::context::Ctx;
 use crate::host::HostValues;

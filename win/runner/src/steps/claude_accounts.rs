@@ -9,6 +9,10 @@
 //! | `projects` | `~/.claude/projects` への junction (履歴と auto memory) |
 //! | `skills\`・`agents\`・`commands\`・`rules\` | 実体の dir。`~/.claude/<種類>` の中身を 1 つずつ (dir は junction、ファイルは記録つきの写し。claude-skills の手順と同じ `Linker`)。skills はリンク・`pjp-*`・runner が書く実体 (hc・herdr-app) だけ、どの種類も `synced`・`manifest.json` は写さない |
 //! | `plugins\`・`.credentials.json`・`.claude.json` など | 実体。Claude Code が作る (触らない) |
+//! | `%LOCALAPPDATA%\dotfiles\bin\claude-<名前>.exe` | この runner の exe の写し (exe の名前で launcher として動く。`crate::launcher`)。動いている exe は上書きできないので、退けてから置く |
+//!
+//! launcher の置き場はユーザーの PATH の末尾に足す (`user_path`。値の型と、ほかの要素の `%VAR%` の書き方は変えない)。足しても、もう動いている
+//! process (herdr-app とその中の端末・Claude Code) には効かない。
 //!
 //! 張る場所の扱いは Linux と同じ: 無い → 張る・正しいリンク → そのまま・別の先のリンク → 張り直す・実体 → 触らずに ⚠ (片付け方は
 //! win/README.md の「既に ~/.claude-<名前> があるとき」)。`~/.claude-<名前>` か `~/.claude` がもう一方へのリンクなら、自分自身を指すリンクで
@@ -16,10 +20,11 @@
 //!
 //! 記録は `%LOCALAPPDATA%\dotfiles\state\claude-accounts.deployed.json` (写したファイル)。
 
+use super::claude_files::replace_file;
 use super::linker::{Linker, Source, Tally};
 use super::ps1::{find_powershell, run_streaming};
-use super::{Gate, Mode, Outcome, Step, StepInfo, tool_skill};
-use crate::context::Ctx;
+use super::{Gate, Mode, Outcome, Step, StepInfo, tool_skill, user_path};
+use crate::context::{Ctx, join_segments};
 use crate::fsutil;
 use crate::link::{
     check_cmd_specials, comspec, create_junction, create_symlink_file, is_link, link_target,
@@ -39,6 +44,11 @@ pub const KINDS: [&str; 4] = ["skills", "agents", "commands", "rules"];
 pub const SHARED_FILES: [&str; 2] = ["settings.json", "CLAUDE.md"];
 /// コピーの記録 (`%LOCALAPPDATA%\dotfiles\state\` の下)
 pub const RECORD_FILE: &str = "claude-accounts.deployed.json";
+/// launcher の置き場 (`%LOCALAPPDATA%` からの相対。`/` 区切り)。`%USERPROFILE%\.local\bin` は native の installer の claude.exe の置き場で、
+/// Install-ClaudeCode が「別の claude」と見る所なので使わない
+pub const BIN_DIR_REL: &str = "dotfiles/bin";
+/// PATH に足したときに添える文
+const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-personal・claude-work を打つ";
 /// 昇格を断られた・出せなかったときの終了コード (ERROR_CANCELLED)
 pub const ELEVATE_DECLINED: i32 = 1223;
 /// 昇格した cmd で mklink を打つ PowerShell (cmd と、その引数は env で渡す。Start-Process は昇格した process の出力を受けられないので、
@@ -168,7 +178,7 @@ impl Step for ClaudeAccounts {
             id: "claude-accounts",
             // ~/.claude の側を作る手順 (claude-files・claude-skills (50) と hc-skill・herdr-app-skill (98)) の後。初回の apply で全部写せるように
             order: 99,
-            title: "claude-personal・claude-work の ~/.claude-<名前> を用意する (settings.json と CLAUDE.md の symlink は、初回だけ UAC の確認が 1 回出る)",
+            title: "claude-personal・claude-work の ~/.claude-<名前> を用意し、claude-<名前>.exe を置いてユーザーの PATH に足す (settings.json と CLAUDE.md の symlink は、初回だけ UAC の確認が 1 回出る)",
             // Windows の Claude Code を入れないホストでは効かない (Nix の表の requires)
             gate: Gate::AllTools(&["windowsClaudeAccounts", "windowsClaudeCode"]),
             ported: true,
@@ -210,7 +220,8 @@ impl Step for ClaudeAccounts {
             acc.fail(ctx, why);
         }
         let links = sync_links(ctx, mode, &mut acc);
-        let mut out = vec![dirs_outcome(mode, &acc.tally), links];
+        let commands = sync_commands(ctx, mode);
+        let mut out = vec![dirs_outcome(mode, &acc.tally), links, commands];
         if !acc.tally.skipped.is_empty() {
             let mut o = Outcome::new(
                 Kind::Manual,
@@ -514,6 +525,160 @@ fn elevate(ctx: &mut Ctx, jobs: &[LinkJob]) -> Result<(), String> {
     }
 }
 
+/// ユーザーの PATH の様子。
+enum PathState {
+    Listed,
+    /// apply で足す (check・dry-run)
+    ToAdd,
+    /// 足した (apply)
+    Added,
+}
+
+/// launcher の置き場をユーザーの PATH の末尾に足す (入っていれば何もしない)。
+fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, String> {
+    let Some(shell) = find_powershell(ctx) else {
+        return Err(
+            "PowerShell が見つからない (pwsh・powershell) ので、ユーザーの PATH を確かめられない"
+                .to_string(),
+        );
+    };
+    let cur = user_path::read(ctx.sys, &shell)?;
+    let sys = ctx.sys;
+    let shown = bin.display();
+    if user_path::listed(&cur.raw, bin, &|n| sys.env(n)) {
+        ctx.say(format!("ユーザーの PATH に入っている: {shown}"));
+        return Ok(PathState::Listed);
+    }
+    match mode {
+        Mode::Check => {
+            ctx.say(format!("ユーザーの PATH の末尾に足す (apply で): {shown}"));
+            Ok(PathState::ToAdd)
+        }
+        Mode::DryRun { .. } => {
+            ctx.say(format!("[dry-run] ユーザーの PATH の末尾に足す: {shown}"));
+            Ok(PathState::ToAdd)
+        }
+        Mode::Apply { .. } => {
+            let new = user_path::with_entry(&cur.raw, bin);
+            user_path::write(ctx.sys, &shell, &cur.raw, &new)?;
+            ctx.say(format!("ユーザーの PATH の末尾に足しました: {shown}"));
+            Ok(PathState::Added)
+        }
+    }
+}
+
+/// launcher (`claude-<名前>.exe` = この runner の exe の写し) を置き、置き場をユーザーの PATH に足す。中身が違えば置き直す (動いていれば
+/// 退けてから置く。退けたものは次に置くときに消す)。
+fn sync_commands(ctx: &mut Ctx, mode: Mode) -> Outcome {
+    const LABEL: &str = "コマンド (claude-personal・claude-work)";
+    let bin = join_segments(&ctx.roots.local_app_data, BIN_DIR_REL);
+    ctx.say("");
+    ctx.say(format!("==> {} (launcher)", bin.display()));
+    let bytes = match ctx.sys.current_exe() {
+        None => Err("runner の exe の場所が分からない".to_string()),
+        Some(exe) => std::fs::read(&exe)
+            .map_err(|e| format!("runner の exe が読めない: {} ({e})", exe.display())),
+    };
+    let bytes = match bytes {
+        Ok(b) => b,
+        Err(why) => {
+            ctx.say(format!("!! {why}"));
+            return Outcome::new(
+                Kind::Failed,
+                format!("{LABEL}: {why} (claude-<名前>.exe を置けない)"),
+            );
+        }
+    };
+    let want = fsutil::sha256_bytes(&bytes);
+    let (mut add, mut update, mut same) = (0, 0, 0);
+    let mut errors = Vec::new();
+    for name in ACCOUNTS {
+        let dest = bin.join(format!("claude-{name}.exe"));
+        let stale = match std::fs::read(&dest) {
+            Ok(have) if fsutil::sha256_bytes(&have) == want => {
+                same += 1;
+                continue;
+            }
+            Ok(_) => true,
+            Err(_) => false,
+        };
+        let (todo, done) = if stale {
+            ("書き直す", "書き直しました")
+        } else {
+            ("置く", "置きました")
+        };
+        let shown = dest.display();
+        match mode {
+            Mode::Check => ctx.say(format!("{todo} (apply で): {shown}")),
+            Mode::DryRun { .. } => ctx.say(format!("[dry-run] {todo}: {shown}")),
+            Mode::Apply { .. } => {
+                if let Err(e) = replace_file(&bytes, &dest) {
+                    let why = format!("{shown} を書けない ({e})");
+                    ctx.say(format!("!! {why}"));
+                    errors.push(why);
+                    continue;
+                }
+                ctx.say(format!("{done}: {shown}"));
+            }
+        }
+        if stale {
+            update += 1;
+        } else {
+            add += 1;
+        }
+    }
+    let path = sync_user_path(ctx, mode, &bin);
+    let mut notes = Vec::new();
+    let path_text = match &path {
+        Ok(PathState::Listed) => "入っている",
+        Ok(PathState::ToAdd) => {
+            notes.push(format!(
+                "置き場 {} をユーザーの PATH の末尾に足す (値の型と、ほかの要素の %VAR% の書き方は変えない)",
+                bin.display()
+            ));
+            "足す"
+        }
+        Ok(PathState::Added) => {
+            notes.push(NEW_TERMINAL.to_string());
+            "足した"
+        }
+        Err(e) => {
+            ctx.say(format!("!! {e}"));
+            notes.push(e.clone());
+            "確かめられない"
+        }
+    };
+    notes.extend(errors.iter().cloned());
+    let to_add = matches!(path, Ok(PathState::ToAdd));
+    let mut text = if mode.writes() {
+        format!("{LABEL}: 置いた {add} / 書き直した {update} / 同じ {same} / PATH: {path_text}")
+    } else {
+        format!("{LABEL}: 置く {add} / 書き直す {update} / 同じ {same} / PATH: {path_text}")
+    };
+    if !mode.writes() && (add + update > 0 || to_add) {
+        text.push_str(" → dotfiles apply で揃える");
+    }
+    if matches!(mode, Mode::DryRun { .. }) {
+        text = format!("[dry-run] {text}");
+    }
+    let kind = if !errors.is_empty() || path.is_err() {
+        Kind::Failed
+    } else if mode.writes() {
+        Kind::Ok
+    } else if update > 0 {
+        Kind::Fix
+    } else if add > 0 || to_add {
+        Kind::Missing
+    } else {
+        Kind::Ok
+    };
+    let mut o = Outcome::new(kind, text);
+    for n in notes {
+        o = o.note(n);
+    }
+    o
+}
+
 /// 薄い dir の行 (junction・写し・`~/.claude` の側のリンク先)。
 fn dirs_outcome(mode: Mode, t: &Tally) -> Outcome {
     let names: Vec<String> = ACCOUNTS.iter().map(|n| format!("~/.claude-{n}")).collect();
@@ -566,6 +731,8 @@ mod tests {
     use crate::process::{Exit, RunResult};
     use crate::report::Kind;
     use crate::testutil::{FakeSys, TempDir, fake_file_symlink, fake_mklink};
+    use std::cell::RefCell;
+    use std::rc::Rc;
     use std::time::Duration;
 
     /// 昇格 (UAC) の偽物のふるまい
@@ -596,7 +763,9 @@ mod tests {
             .collect()
     }
 
-    fn fake(uac: Uac) -> FakeSys {
+    /// 偽の外のコマンド: mklink (junction とファイルの symlink)・昇格・ユーザーの PATH (`reg` を registry の Path の生の値として読み書き
+    /// する)。current_exe は `exe`、%LOCALAPPDATA% は `local`
+    fn fake(uac: Uac, reg: Rc<RefCell<String>>, exe: &Path, local: &Path) -> FakeSys {
         FakeSys::new(move |c| {
             let args = c.args_lossy();
             if args.len() == 4 && args[1] == "mklink" && uac != Uac::NotNeeded {
@@ -625,10 +794,38 @@ mod tests {
                     output: Vec::new(),
                 };
             }
+            if let Some(new) = c.env_value("DOTFILES_USER_PATH_NEW") {
+                let old = c.env_value("DOTFILES_USER_PATH_OLD").unwrap_or_default();
+                if *reg.borrow() != old {
+                    return RunResult {
+                        exit: Exit::Code(3),
+                        output: vec!["changed".to_string()],
+                    };
+                }
+                *reg.borrow_mut() = new;
+                return RunResult {
+                    exit: Exit::Code(0),
+                    output: Vec::new(),
+                };
+            }
+            if args
+                .last()
+                .is_some_and(|a| a.contains("DoNotExpandEnvironmentNames"))
+            {
+                return RunResult {
+                    exit: Exit::Code(0),
+                    output: vec![
+                        "kind=ExpandString".to_string(),
+                        format!("raw={}", reg.borrow()),
+                    ],
+                };
+            }
             panic!("知らないコマンド: {:?} {args:?}", c.program);
         })
         .with_program("pwsh", "pwsh")
         .with_env("ComSpec", "C:\\Windows\\system32\\cmd.exe")
+        .with_env("LOCALAPPDATA", &local.to_string_lossy())
+        .with_exe(exe)
     }
 
     /// ファイルの symlink を張れる環境か (Windows で開発者モードでも昇格もしていないと張れない。張れなければ試験を飛ばす)
@@ -646,9 +843,20 @@ mod tests {
 
     struct Env {
         t: TempDir,
+        /// registry のユーザーの PATH の生の値 (偽物が読み書きする)
+        reg: Rc<RefCell<String>>,
     }
 
     impl Env {
+        /// ~/.claude を作らない家 (runner の exe と、PATH が C:\Windows だけの registry を持つ)
+        fn bare(t: TempDir) -> Self {
+            t.write("exe/dotfiles-win.exe", "runner-v1");
+            Env {
+                t,
+                reg: Rc::new(RefCell::new("C:\\Windows".to_string())),
+            }
+        }
+
         fn new() -> Self {
             let t = TempDir::new("claude-accounts");
             t.write("home/.claude/settings.json", "{\"theme\":\"dark\"}\n");
@@ -661,7 +869,7 @@ mod tests {
             t.write("home/.claude/skills/synced/x/SKILL.md", "s\n");
             t.write("home/.claude/skills/manifest.json", "{}\n");
             t.write("home/.claude/rules/pjp-r.md", "rule\n");
-            let e = Env { t };
+            let e = Env::bare(t);
             let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
             create_junction(
                 &sys,
@@ -678,6 +886,26 @@ mod tests {
 
         fn home(&self) -> PathBuf {
             self.t.path().join("home")
+        }
+
+        fn fake(&self, uac: Uac) -> FakeSys {
+            fake(uac, self.reg.clone(), &self.exe(), &self.local())
+        }
+
+        fn exe(&self) -> PathBuf {
+            self.t.path().join("exe").join("dotfiles-win.exe")
+        }
+
+        /// %LOCALAPPDATA% (Roots::from_home と同じ)
+        fn local(&self) -> PathBuf {
+            self.home().join("AppData").join("Local")
+        }
+
+        fn bin(&self, name: &str) -> PathBuf {
+            self.local()
+                .join("dotfiles")
+                .join("bin")
+                .join(format!("claude-{name}.exe"))
         }
 
         fn claude(&self, rel: &str) -> PathBuf {
@@ -714,6 +942,15 @@ mod tests {
 
     const DIRS: &str = "~/.claude-personal・~/.claude-work:";
     const LINKS: &str = "symlink (settings.json・CLAUDE.md):";
+    const COMMANDS: &str = "コマンド (claude-personal・claude-work):";
+
+    fn path_writes(sys: &FakeSys) -> usize {
+        sys.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.env_value("DOTFILES_USER_PATH_NEW").is_some())
+            .count()
+    }
 
     fn elevated(sys: &FakeSys) -> usize {
         sys.calls
@@ -755,7 +992,7 @@ mod tests {
     fn check_and_dry_run_write_nothing() {
         let e = Env::new();
         for mode in [Mode::Check, Mode::DryRun { force: false }] {
-            let sys = fake(Uac::Accept);
+            let sys = e.fake(Uac::Accept);
             let (o, out) = e.run(mode, &sys);
             assert_eq!(row(&o, DIRS).kind, Kind::Missing, "{mode:?} {o:?}\n{out}");
             let links = row(&o, LINKS);
@@ -765,6 +1002,13 @@ mod tests {
             assert!(!e.dir("personal", "").exists());
             assert!(!e.dir("work", "").exists());
             assert_eq!((mklinks(&sys), elevated(&sys)), (0, 0), "{mode:?}");
+            let cmds = row(&o, COMMANDS);
+            assert_eq!(cmds.kind, Kind::Missing, "{cmds:?}");
+            assert!(cmds.text.contains("置く 2"), "{cmds:?}");
+            assert!(cmds.text.contains("PATH: 足す"), "{cmds:?}");
+            assert_eq!(path_writes(&sys), 0);
+            assert!(!e.bin("work").exists());
+            assert_eq!(*e.reg.borrow(), "C:\\Windows");
         }
     }
 
@@ -774,7 +1018,7 @@ mod tests {
         if !file_symlinks_work(&e.t) {
             return;
         }
-        let sys = fake(Uac::NotNeeded);
+        let sys = e.fake(Uac::NotNeeded);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         assert_eq!(row(&o, DIRS).kind, Kind::Ok, "{o:?}\n{out}");
         assert_eq!(row(&o, LINKS).kind, Kind::Ok, "{o:?}\n{out}");
@@ -826,7 +1070,7 @@ mod tests {
             "{\"theme\":\"dark\"}\n"
         );
 
-        let sys = fake(Uac::Accept);
+        let sys = e.fake(Uac::Accept);
         let (o, out) = e.run(Mode::Check, &sys);
         assert_eq!(row(&o, DIRS).kind, Kind::Ok, "{o:?}\n{out}");
         assert_eq!(row(&o, LINKS).kind, Kind::Ok, "{o:?}");
@@ -839,7 +1083,7 @@ mod tests {
         if !file_symlinks_work(&e.t) {
             return;
         }
-        let sys = fake(Uac::Accept);
+        let sys = e.fake(Uac::Accept);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         assert_eq!(row(&o, LINKS).kind, Kind::Ok, "{o:?}\n{out}");
         assert_eq!(elevated(&sys), 1);
@@ -861,7 +1105,7 @@ mod tests {
             }
         }
         // 2 回目の apply は昇格しない
-        let sys = fake(Uac::Accept);
+        let sys = e.fake(Uac::Accept);
         let (o, _) = e.run(Mode::Apply { force: false }, &sys);
         assert_eq!(row(&o, LINKS).kind, Kind::Ok);
         assert_eq!((elevated(&sys), mklinks(&sys)), (0, 0));
@@ -870,7 +1114,7 @@ mod tests {
     #[test]
     fn declined_uac_keeps_the_rest() {
         let e = Env::new();
-        let sys = fake(Uac::Decline);
+        let sys = e.fake(Uac::Decline);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         let links = row(&o, LINKS);
         assert_eq!(links.kind, Kind::Missing, "{o:?}\n{out}");
@@ -896,7 +1140,7 @@ mod tests {
         let e = Env::new();
         e.t.write("home/.claude-work/settings.json", "{\"mine\":1}\n");
         e.t.write("home/.claude-work/projects/q/s.jsonl", "{}\n");
-        let sys = fake(Uac::Decline);
+        let sys = e.fake(Uac::Decline);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         let manual = o
             .iter()
@@ -930,7 +1174,7 @@ mod tests {
         let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
         create_junction(&sys, &e.dir("work", ""), &e.claude("")).unwrap();
         let before: Vec<String> = names(&e.claude(""));
-        let sys = fake(Uac::Decline);
+        let sys = e.fake(Uac::Decline);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         let manual = o
             .iter()
@@ -962,8 +1206,8 @@ mod tests {
             &t.path().join("home").join(".claude-work"),
         )
         .unwrap();
-        let e = Env { t };
-        let sys = fake(Uac::Decline);
+        let e = Env::bare(t);
+        let sys = e.fake(Uac::Decline);
         let (o, out) = e.run(Mode::Apply { force: false }, &sys);
         let manual = o
             .iter()
@@ -994,7 +1238,7 @@ mod tests {
             &other.to_string_lossy(),
         );
         assert_eq!(r.exit, Exit::Code(0));
-        let sys = fake(Uac::Accept);
+        let sys = e.fake(Uac::Accept);
         let (o, _) = e.run(Mode::Check, &sys);
         let links = row(&o, LINKS);
         assert_eq!(links.kind, Kind::Fix, "{o:?}");
@@ -1011,7 +1255,7 @@ mod tests {
     #[test]
     fn prunes_mirrors_gone_from_base() {
         let e = Env::new();
-        let sys = fake(Uac::Decline);
+        let sys = e.fake(Uac::Decline);
         e.run(Mode::Apply { force: false }, &sys);
         assert!(is_link(&e.dir("work", "skills/pjp-a")));
         crate::link::remove_link(&e.claude("skills/pjp-a")).unwrap();
@@ -1035,7 +1279,7 @@ mod tests {
         let e = Env::new();
         std::fs::remove_dir_all(e.claude("projects")).unwrap();
         std::fs::remove_file(e.claude("settings.json")).unwrap();
-        let sys = fake(Uac::Decline);
+        let sys = e.fake(Uac::Decline);
         let (o, out) = e.run(Mode::Check, &sys);
         assert_eq!(row(&o, DIRS).kind, Kind::Missing, "{o:?}\n{out}");
         assert!(!e.claude("projects").exists() && !e.claude("settings.json").exists());
@@ -1055,8 +1299,8 @@ mod tests {
     fn missing_base_is_manual() {
         let t = TempDir::new("claude-accounts-no-base");
         std::fs::create_dir_all(t.path().join("home")).unwrap();
-        let e = Env { t };
-        let sys = fake(Uac::Decline);
+        let e = Env::bare(t);
+        let sys = e.fake(Uac::Decline);
         let (o, _) = e.run(Mode::Apply { force: false }, &sys);
         assert_eq!(o.len(), 1, "{o:?}");
         assert_eq!(o[0].kind, Kind::Manual);
@@ -1136,5 +1380,71 @@ mod tests {
             .collect();
         v.sort();
         v
+    }
+
+    #[test]
+    fn places_launchers_and_adds_path() {
+        let e = Env::new();
+        let sys = e.fake(Uac::Decline);
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        let cmds = row(&o, COMMANDS);
+        assert_eq!(cmds.kind, Kind::Ok, "{o:?}\n{out}");
+        assert!(cmds.text.contains("置いた 2"), "{cmds:?}");
+        assert!(cmds.text.contains("PATH: 足した"), "{cmds:?}");
+        assert!(
+            cmds.notes.iter().any(|n| n.contains("新しい端末から効く")),
+            "{cmds:?}"
+        );
+        for name in ACCOUNTS {
+            assert_eq!(std::fs::read(e.bin(name)).unwrap(), b"runner-v1", "{name}");
+        }
+        let bin_dir = e.local().join("dotfiles").join("bin");
+        assert_eq!(
+            *e.reg.borrow(),
+            format!("C:\\Windows;{}", bin_dir.display())
+        );
+        assert_eq!(path_writes(&sys), 1);
+        // 2 回目は同じ (PATH も書かない)
+        let sys = e.fake(Uac::Decline);
+        let (o, _) = e.run(Mode::Apply { force: false }, &sys);
+        let cmds = row(&o, COMMANDS);
+        assert_eq!(cmds.kind, Kind::Ok, "{cmds:?}");
+        assert!(cmds.text.contains("同じ 2"), "{cmds:?}");
+        assert!(cmds.text.contains("PATH: 入っている"), "{cmds:?}");
+        assert_eq!(path_writes(&sys), 0);
+    }
+
+    #[test]
+    fn rewrites_stale_launchers() {
+        let e = Env::new();
+        e.t.write(
+            "home/AppData/Local/dotfiles/bin/claude-work.exe",
+            "runner-v0",
+        );
+        // 別の書き方 (%VAR%・末尾の区切り) で入っていれば足さない
+        *e.reg.borrow_mut() = "C:\\Windows;%LOCALAPPDATA%\\dotfiles\\bin\\".to_string();
+        let sys = e.fake(Uac::Decline);
+        let (o, _) = e.run(Mode::Check, &sys);
+        let cmds = row(&o, COMMANDS);
+        assert_eq!(cmds.kind, Kind::Fix, "{cmds:?}");
+        assert!(cmds.text.contains("置く 1 / 書き直す 1"), "{cmds:?}");
+        assert!(cmds.text.contains("PATH: 入っている"), "{cmds:?}");
+        let (o, out) = e.run(Mode::Apply { force: false }, &sys);
+        assert_eq!(row(&o, COMMANDS).kind, Kind::Ok, "{o:?}\n{out}");
+        assert_eq!(std::fs::read(e.bin("work")).unwrap(), b"runner-v1");
+        assert_eq!(path_writes(&sys), 0);
+    }
+
+    #[test]
+    fn unreadable_exe_fails_the_commands_row() {
+        let e = Env::new();
+        std::fs::remove_file(e.exe()).unwrap();
+        let sys = e.fake(Uac::Decline);
+        let (o, _) = e.run(Mode::Apply { force: false }, &sys);
+        let cmds = row(&o, COMMANDS);
+        assert_eq!(cmds.kind, Kind::Failed, "{cmds:?}");
+        assert!(cmds.text.contains("runner の exe が読めない"), "{cmds:?}");
+        // ほかは用意する
+        assert_eq!(row(&o, DIRS).kind, Kind::Ok, "{o:?}");
     }
 }
