@@ -498,7 +498,9 @@ pub fn encode_command(script: &str) -> String {
 }
 
 /// Windows PowerShell (`powershell`。無ければ pwsh) で PowerShell の本文を流すコマンド (`-NoProfile -NonInteractive -OutputFormat Text
-/// -EncodedCommand`。`-OutputFormat Text` は、`-EncodedCommand` で起こしたときにエラーを CLIXML でなく平文で出すため)。
+/// -EncodedCommand`。WSL の fancyzones と同じ引数)。`-OutputFormat Text` で pwsh はエラーを平文で出すが、Windows PowerShell 5.1 は
+/// `-EncodedCommand` で起こして stderr を写すと、付けてもエラー・警告・進み具合を CLIXML で返す (Windows の CI で確かめた)。人に見せる行は
+/// [`plain_lines`] で平文に直す。
 pub fn encoded_command(shell: PathBuf, script: &str, timeout: Duration) -> CommandSpec {
     CommandSpec::new(shell)
         .arg("-NoProfile")
@@ -508,6 +510,118 @@ pub fn encoded_command(shell: PathBuf, script: &str, timeout: Duration) -> Comma
         .arg("-EncodedCommand")
         .arg(encode_command(script))
         .timeout(timeout)
+}
+
+/// PowerShell の出力の行のうち、Windows PowerShell 5.1 が stderr に返す CLIXML (`#< CLIXML` の行と、`<Objs …>` で始まる 1 行) を、平文の
+/// 行に直す (`-Command` で起こしたときに出る形。WSL の PowerToys の `2>&1` の写しに近づける)。エラーの文はそのまま、警告などは
+/// `WARNING: ` のような頭を付ける。進み具合 (`Preparing modules for first use.` など) は落とす (平文でも、写した出力には出ない)。ほかの行は
+/// そのまま。
+pub fn plain_lines(lines: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in lines {
+        let t = line.trim_end_matches('\r');
+        if t == "#< CLIXML" {
+            continue;
+        }
+        if t.starts_with("<Objs ") && t.contains("schemas.microsoft.com/powershell") {
+            let text = clixml_text(t);
+            if text.is_empty() {
+                continue;
+            }
+            let text = text.strip_suffix('\n').unwrap_or(&text);
+            out.extend(
+                text.split('\n')
+                    .map(|l| l.trim_end_matches('\r').to_string()),
+            );
+            continue;
+        }
+        out.push(line.clone());
+    }
+    out
+}
+
+/// CLIXML の 1 行から、流れ (`<S S="Error">` など) の文をつなげて取り出す。進み具合などの `<Obj>` は飛ばす。
+fn clixml_text(xml: &str) -> String {
+    let mut text = String::new();
+    let mut rest = xml;
+    while let Some(i) = rest.find("<S S=\"") {
+        rest = &rest[i + "<S S=\"".len()..];
+        let Some(q) = rest.find("\">") else { break };
+        let stream = &rest[..q];
+        rest = &rest[q + 2..];
+        let end = rest.find("</S>").unwrap_or(rest.len());
+        let mut s = clixml_unescape(&rest[..end]);
+        rest = &rest[(end + "</S>".len()).min(rest.len())..];
+        if !stream.eq_ignore_ascii_case("error") {
+            s = format!("{}: {s}", stream.to_ascii_uppercase());
+            if !s.ends_with('\n') {
+                s.push('\n');
+            }
+        }
+        text.push_str(&s);
+    }
+    text
+}
+
+/// CLIXML の文を戻す: XML の実体参照 (`&lt;`・`&#10;` など) と、PowerShell の `_xHHHH_` (UTF-16 の 1 単位。改行は `_x000D__x000A_`)。
+fn clixml_unescape(s: &str) -> String {
+    fn push(c: char, units: &mut Vec<u16>) {
+        let mut buf = [0u16; 2];
+        units.extend_from_slice(c.encode_utf16(&mut buf));
+    }
+    let mut units: Vec<u16> = Vec::new();
+    let mut rest = s;
+    while let Some(c) = rest.chars().next() {
+        if c == '&' {
+            let entity = rest[1..]
+                .find(';')
+                .filter(|&end| end <= 10)
+                .and_then(|end| {
+                    let name = &rest[1..1 + end];
+                    let ch = match name {
+                        "lt" => Some('<'),
+                        "gt" => Some('>'),
+                        "amp" => Some('&'),
+                        "quot" => Some('"'),
+                        "apos" => Some('\''),
+                        _ => name
+                            .strip_prefix("#x")
+                            .or_else(|| name.strip_prefix("#X"))
+                            .filter(|h| !h.is_empty() && h.bytes().all(|b| b.is_ascii_hexdigit()))
+                            .and_then(|h| u32::from_str_radix(h, 16).ok())
+                            .or_else(|| {
+                                name.strip_prefix('#')
+                                    .filter(|d| {
+                                        !d.is_empty() && d.bytes().all(|b| b.is_ascii_digit())
+                                    })
+                                    .and_then(|d| d.parse::<u32>().ok())
+                            })
+                            .and_then(char::from_u32),
+                    };
+                    ch.map(|ch| (ch, end + 2))
+                });
+            if let Some((ch, len)) = entity {
+                push(ch, &mut units);
+                rest = &rest[len..];
+                continue;
+            }
+        }
+        let b = rest.as_bytes();
+        if c == '_'
+            && b.get(1) == Some(&b'x')
+            && b.get(2..6)
+                .is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+            && b.get(6) == Some(&b'_')
+            && let Ok(u) = u16::from_str_radix(&rest[2..6], 16)
+        {
+            units.push(u);
+            rest = &rest[7..];
+            continue;
+        }
+        push(c, &mut units);
+        rest = &rest[c.len_utf8()..];
+    }
+    String::from_utf16_lossy(&units)
 }
 
 /// Windows PowerShell 5.1 (`powershell`)、無ければ pwsh。WSL が `powershell.exe` で流す本文 (PowerToys の停止・起動・イベント、FancyZones の
@@ -1630,13 +1744,14 @@ mod tests {
         assert_eq!(decode_command(&spec).as_deref(), Some(body));
     }
 
-    /// 本物の PowerShell が、" と改行を含む本文を -EncodedCommand でそのまま流す
+    /// 本物の PowerShell が、" と改行を含む本文を -EncodedCommand でそのまま流す。エラーは、Windows PowerShell 5.1 が -OutputFormat Text でも
+    /// CLIXML (#< CLIXML) で返すことがあるので、plain_lines で平文の行に直して読む (進み具合は落ちる)
     #[cfg(windows)]
     #[test]
     fn real_powershell_runs_an_encoded_command() {
         use crate::process::{RealSys, Sys};
         let body = "$ProgressPreference = 'SilentlyContinue'; $q = \"user32.dll\"\nWrite-Output \"q=$q\"\n'done'";
-        // -OutputFormat Text なので、エラーは CLIXML (#< CLIXML) でなく平文で出る
+        // $ProgressPreference を付けないので、初めて読むモジュールの進み具合も出うる
         let failing = "Write-Error 'boom'; 'after'";
         for shell in ["powershell", "pwsh"] {
             let Some(path) = RealSys.which(shell) else {
@@ -1652,22 +1767,65 @@ mod tests {
                 &encoded_command(path, failing, Duration::from_secs(60)),
                 &mut |_| {},
             );
+            let lines = plain_lines(&r.output);
             assert!(
-                r.output.iter().any(|l| l == "after"),
+                lines.iter().any(|l| l == "after"),
                 "{shell}: {:?}",
                 r.output
             );
             assert!(
-                r.output.iter().any(|l| l.contains("boom")),
+                lines.iter().any(|l| l.contains("boom")),
                 "{shell}: {:?}",
                 r.output
             );
             assert!(
-                !r.output.iter().any(|l| l.contains("CLIXML")),
-                "{shell}: {:?}",
-                r.output
+                !lines.iter().any(|l| l.contains("CLIXML")
+                    || l.contains("<Objs")
+                    || l.contains("Preparing modules")),
+                "{shell}: {lines:?}"
             );
         }
+    }
+
+    /// Windows PowerShell 5.1 の CLIXML (Windows の CI で -OutputFormat Text -EncodedCommand の Write-Error から返ったもの) を、平文の行に直す
+    #[test]
+    fn plain_lines_reads_clixml() {
+        let lines: Vec<String> = [
+            "#< CLIXML",
+            "after",
+            "<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\" RefId=\"0\"><TN RefId=\"0\"><T>System.Management.Automation.PSCustomObject</T><T>System.Object</T></TN><MS><I64 N=\"SourceId\">1</I64><PR N=\"Record\"><AV>Preparing modules for first use.</AV><AI>0</AI><Nil /><PI>-1</PI><PC>-1</PC><T>Completed</T><SR>-1</SR><SD> </SD></PR></MS></Obj><S S=\"Error\">Write-Error 'boom'; 'after' : boom_x000D__x000A_</S><S S=\"Error\">    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException_x000D__x000A_</S><S S=\"Error\">    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException_x000D__x000A_</S><S S=\"Error\"> _x000D__x000A_</S></Objs>",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        assert_eq!(
+            plain_lines(&lines),
+            vec![
+                "after",
+                "Write-Error 'boom'; 'after' : boom",
+                "    + CategoryInfo          : NotSpecified: (:) [Write-Error], WriteErrorException",
+                "    + FullyQualifiedErrorId : Microsoft.PowerShell.Commands.WriteErrorException",
+                " ",
+            ]
+        );
+        // 進み具合だけなら何も出さない。CLIXML でない行 (先頭が <Objs でも、PowerShell の名前空間が無いもの) はそのまま
+        let only_progress = vec![
+            "#< CLIXML".to_string(),
+            "<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><Obj S=\"progress\" RefId=\"0\"><MS><PR N=\"Record\"><AV>Preparing modules for first use.</AV></PR></MS></Obj></Objs>\r".to_string(),
+            "<Objs x>".to_string(),
+        ];
+        assert_eq!(plain_lines(&only_progress), vec!["<Objs x>"]);
+        // 警告などは頭を付ける。実体参照・_xHHHH_ (サロゲートの対も)・_x005F_ (字の _)・閉じていない (時間切れで切れた) もの
+        let mixed = vec![
+            "<Objs Version=\"1.1.0.1\" xmlns=\"http://schemas.microsoft.com/powershell/2004/04\"><S S=\"warning\">a &lt;b&gt; &amp; &quot;c&quot; &#x41;&#66; &amp;lt; _x005F_x0041_ _xD83D__xDE00_</S><S S=\"Error\">x &unknown; &; _x00_ _xZZZZ_ 末尾".to_string(),
+        ];
+        assert_eq!(
+            plain_lines(&mixed),
+            vec![
+                "WARNING: a <b> & \"c\" AB &lt; _x0041_ 😀",
+                "x &unknown; &; _x00_ _xZZZZ_ 末尾",
+            ]
+        );
     }
 
     /// 本物の PowerShell で、空白と ' を含むパスの ps1 を呼び、UTF-8 の ⚠️ と終了コードが届く (Windows の CI)

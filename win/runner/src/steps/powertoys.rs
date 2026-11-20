@@ -185,7 +185,8 @@ fn ps_event() -> String {
 }
 
 /// Windows PowerShell で本文を流す (WSL の `run_ps`。頭に `$ProgressPreference = 'SilentlyContinue'; ` を付ける)。終了コード (時間切れは 124、
-/// PowerShell が無い・起こせないのは 127) と、出力 (CR を落として行を改行でつなぎ、末尾の改行を落とす) を返す。
+/// PowerShell が無い・起こせないのは 127) と、出力 (stdout と stderr。CLIXML で返ったエラーは平文に直し、CR を落として行を改行でつなぎ、末尾の
+/// 改行を落とす。WSL の `-Command` と `2>&1` の写しに当たる) を返す。
 fn run_ps(ctx: &mut Ctx, body: &str) -> (i32, String) {
     let Some(shell) = ps1::find_windows_powershell(ctx) else {
         return (127, String::new());
@@ -202,8 +203,7 @@ fn run_ps(ctx: &mut Ctx, body: &str) -> (i32, String) {
         Exit::NoCode => 1,
         Exit::SpawnFailed(_) => 127,
     };
-    let out = r
-        .output
+    let out = ps1::plain_lines(&r.output)
         .iter()
         .map(|l| l.replace('\r', ""))
         .collect::<Vec<_>>()

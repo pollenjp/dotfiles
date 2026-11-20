@@ -533,7 +533,7 @@ pub(super) fn assign_layouts(ctx: &mut Ctx, fz: &mut Fz) {
             let mut lines = vec![format!(
                 "Windows PowerShell でディスプレイの解像度を読めませんでした ({code})。FancyZones のディスプレイへのレイアウトのあて方は書きません:"
             )];
-            lines.extend(all.iter().cloned());
+            lines.extend(ps1::plain_lines(&all));
             failed(
                 ctx,
                 fz,
@@ -553,7 +553,7 @@ pub(super) fn assign_layouts(ctx: &mut Ctx, fz: &mut Fz) {
         }
         _ => {
             let mut lines = vec!["Windows PowerShell の返りが、決めた形の JSON ではありません。FancyZones のディスプレイへのレイアウトのあて方は書きません:".to_string()];
-            lines.extend(all.iter().cloned());
+            lines.extend(ps1::plain_lines(&all));
             failed(
                 ctx,
                 fz,
