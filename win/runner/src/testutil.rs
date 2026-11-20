@@ -15,6 +15,8 @@ pub struct FakeSys {
     env: BTreeMap<String, String>,
     exe: Option<PathBuf>,
     pub calls: RefCell<Vec<CommandSpec>>,
+    /// 待った長さ (待たずに控える)
+    pub sleeps: RefCell<Vec<std::time::Duration>>,
 }
 
 impl FakeSys {
@@ -25,6 +27,7 @@ impl FakeSys {
             env: BTreeMap::new(),
             exe: None,
             calls: RefCell::new(Vec::new()),
+            sleeps: RefCell::new(Vec::new()),
         }
     }
 
@@ -75,6 +78,10 @@ impl Sys for FakeSys {
 
     fn current_exe(&self) -> Option<PathBuf> {
         self.exe.clone()
+    }
+
+    fn sleep(&self, d: std::time::Duration) {
+        self.sleeps.borrow_mut().push(d);
     }
 }
 

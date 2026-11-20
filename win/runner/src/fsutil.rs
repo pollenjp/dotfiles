@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -49,6 +50,81 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// UTC の年・月・日・時・分・秒 (1970-01-01 からの日数を暦の年月日にする。Howard Hinnant の civil_from_days)。
+pub fn utc_fields(t: SystemTime) -> [i64; 6] {
+    let secs = t
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (days, rem) = ((secs / 86_400) as i64, (secs % 86_400) as i64);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    [year, month, day, rem / 3_600, rem % 3_600 / 60, rem % 60]
+}
+
+/// 1 回の apply で書き換えるファイルを写すディレクトリ (`<root>\<UTC の YYYYMMDDThhmmssZ>-<pid>`) を作って返す。同じ名前があれば `-<nnn>` を
+/// 足す (名前の順が作った順になるよう 0 で埋める)。`root` の下のディレクトリは、作ったものを除き名前の順 (時刻の順) で古いものから消して、
+/// 作ったものを含めて `keep` 個を残す。WSL の terminal・fancyzones の退避 (`~/.local/state/dotfiles/windows-{terminal,fancyzones}/backup/
+/// <UTC の時刻>-<pid>/`。新しい方から 10 回分) と同じ形。
+pub fn backup_run_dir(root: &Path, keep: usize) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(root)?;
+    let [y, mo, d, h, mi, s] = utc_fields(SystemTime::now());
+    let base = format!(
+        "{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}Z-{}",
+        std::process::id()
+    );
+    let mut name = base.clone();
+    let mut n = 0;
+    let dir = loop {
+        let dir = root.join(&name);
+        match std::fs::create_dir(&dir) {
+            Ok(()) => break dir,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                n += 1;
+                name = format!("{base}-{n:03}");
+            }
+            Err(e) => return Err(e),
+        }
+    };
+    let mut olds: Vec<String> = std::fs::read_dir(root)?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| *n != name)
+        .collect();
+    olds.sort();
+    let keep_old = keep.saturating_sub(1);
+    if olds.len() > keep_old {
+        for old in &olds[..olds.len() - keep_old] {
+            let _ = std::fs::remove_dir_all(root.join(old));
+        }
+    }
+    Ok(dir)
+}
+
+/// `src` を `dir` に同じ名前で写し、写した先を返す (更新時刻も写す。WSL の `cp -p`)。
+pub fn copy_into(src: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let name = src.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "ファイルの名前が無い")
+    })?;
+    let dst = dir.join(name);
+    std::fs::copy(src, &dst)?;
+    if let Ok(modified) = std::fs::metadata(src).and_then(|m| m.modified()) {
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(&dst)
+            .and_then(|f| f.set_modified(modified));
+    }
+    Ok(dst)
+}
+
 /// 書く前のファイル `path` を `dir\<prefix>-<秒>-<ナノ秒>.json` に写し、写した先を返す (同じ時刻の写しは上書きせず `-<n>` を足す)。`dir` の
 /// `<prefix>-*.json` のうち、残すのは、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と、新しい方から `keep` 個。
 pub fn backup_copy(path: &Path, dir: &Path, prefix: &str, keep: usize) -> std::io::Result<PathBuf> {
@@ -86,9 +162,70 @@ mod tests {
     //! - sha256 が sha256sum と同じ値 (空と "abc" の既知の値)
     //! - 親を作って書き、あるファイルは置き換え、一時ファイルを残さない
     //! - 書く前の写し: 中身を写し、いちばん古いものと新しい方から N 個を残す。ほかの prefix のファイルには触らない
+    //! - 1 回ぶんの退避のディレクトリ: UTC の時刻と pid の名前・同じ名前なら -n・新しい方から N 個 (ファイルは数えず消さない)・写すと
+    //!   更新時刻も写る
+    //! - UTC の年月日 (うるう年)
 
     use super::*;
     use crate::testutil::TempDir;
+    use std::time::Duration;
+
+    #[test]
+    fn utc_fields_are_civil() {
+        let at = |secs: u64| utc_fields(SystemTime::UNIX_EPOCH + Duration::from_secs(secs));
+        assert_eq!(at(0), [1970, 1, 1, 0, 0, 0]);
+        // 2026-11-20 08:35:28 JST = 2026-11-19 23:35:28 UTC
+        assert_eq!(at(1_795_131_328), [2026, 11, 19, 23, 35, 28]);
+        assert_eq!(at(1_709_164_800), [2024, 2, 29, 0, 0, 0]);
+        assert_eq!(at(951_782_400), [2000, 2, 29, 0, 0, 0]);
+    }
+
+    #[test]
+    fn backup_run_dirs_keep_the_newest() {
+        let t = TempDir::new("fsutil-run-dir");
+        let root = t.path().join("backup");
+        t.write("backup/note.txt", "x");
+        // 古い名前のディレクトリ (前の回の退避)
+        for i in 0..3 {
+            std::fs::create_dir_all(root.join(format!("2000010{i}T000000Z-1"))).unwrap();
+        }
+        let src = t.write("settings.json", "{}\n");
+        let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&src)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        let a = backup_run_dir(&root, 3).unwrap();
+        let b = backup_run_dir(&root, 3).unwrap();
+        let name = a.file_name().unwrap().to_string_lossy().into_owned();
+        assert_eq!(
+            name.len(),
+            "20261120T031500Z-".len() + std::process::id().to_string().len(),
+            "{name}"
+        );
+        assert_eq!(&name[8..9], "T");
+        assert_eq!(&name[15..17], "Z-");
+        // 同じ秒・同じ pid なら -n を足す
+        assert!(
+            b.file_name().unwrap().to_string_lossy().starts_with(&name),
+            "{b:?}"
+        );
+        assert_ne!(a, b);
+        let copied = copy_into(&src, &b).unwrap();
+        assert_eq!(copied, b.join("settings.json"));
+        assert_eq!(std::fs::read_to_string(&copied).unwrap(), "{}\n");
+        assert_eq!(std::fs::metadata(&copied).unwrap().modified().unwrap(), old);
+        let mut dirs: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        dirs.sort();
+        assert_eq!(dirs.len(), 4, "{dirs:?}");
+        assert_eq!(dirs[0], "20000102T000000Z-1");
+        assert!(dirs.contains(&"note.txt".to_string()), "{dirs:?}");
+    }
 
     #[test]
     fn sha256_known_values() {

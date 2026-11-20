@@ -162,27 +162,8 @@ pub fn backup_copy(dst: &Path) -> std::io::Result<PathBuf> {
 
 /// UTC の `YYYYMMDD-hhmmssZ`。
 fn utc_stamp(t: SystemTime) -> String {
-    let secs = t
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
-    let (days, rem) = (secs / 86_400, secs % 86_400);
-    // 1970-01-01 からの日数を暦の年月日にする (Howard Hinnant の civil_from_days)
-    let z = days as i64 + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}Z",
-        rem / 3_600,
-        rem % 3_600 / 60,
-        rem % 60
-    )
+    let [year, month, day, h, m, s] = fsutil::utc_fields(t);
+    format!("{year:04}{month:02}{day:02}-{h:02}{m:02}{s:02}Z")
 }
 
 /// 衝突を上書きする (消した 1 行を足し直す) コマンド。受け持ちが WSL の間は、runner の apply はこの手順を流さないので、WSL の script の
