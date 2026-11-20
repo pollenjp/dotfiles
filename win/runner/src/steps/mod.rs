@@ -23,6 +23,7 @@ pub mod hc_hub;
 pub mod herdr_app_keys;
 pub mod herdr_app_mods;
 pub mod herdr_app_pjp_spaces;
+pub mod international;
 pub mod linker;
 pub mod pending;
 pub mod pjp;
@@ -207,6 +208,7 @@ pub fn all() -> Vec<Box<dyn Step>> {
         Box::new(ssh_config::SshConfig),
         Box::new(port_forward::PortForward),
         Box::new(terminal::Terminal),
+        Box::new(international::International),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -301,7 +303,7 @@ mod tests {
         assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
         assert!(from_wsl.contains(&"terminal") && from_wsl.contains(&"powertoys"));
-        assert!(from_wsl.contains(&"fancyzones"));
+        assert!(from_wsl.contains(&"fancyzones") && from_wsl.contains(&"international"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

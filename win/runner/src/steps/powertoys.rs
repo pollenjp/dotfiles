@@ -118,7 +118,7 @@ impl Step for PowerToys {
         // SSH の会話 (Win32-OpenSSH はセッション 0) からは、デスクトップの会話の PowerToys のプロセスも名前付きイベントも見えない。止める・
         // 起こすと 2 つ目の PowerToys をセッション 0 に起こし、イベントは「無い」と読んで読み直させないまま記録してしまうので、確かめるだけにする
         // (WSL の setup はデスクトップの端末からしか流れないので、この分かれ道は runner にだけある)
-        if mode.writes() && in_ssh(ctx) {
+        if mode.writes() && ctx.in_ssh() {
             ctx.say("SSH の会話の中なので、PowerToys に触ること (入れる・止める・起こす・読み直させる) はせず、確かめるだけにします (デスクトップの会話の PowerToys とイベントは、SSH の会話から見えないため)。");
             let mut rows = sync(ctx, Mode::Check);
             rows.push(
@@ -132,13 +132,6 @@ impl Step for PowerToys {
         }
         sync(ctx, mode)
     }
-}
-
-/// SSH の会話の中か (sshd が SSH_CONNECTION・SSH_CLIENT を渡す。win/openssh/Install-Sshd.ps1 と同じ見方)
-fn in_ssh(ctx: &Ctx) -> bool {
-    ["SSH_CONNECTION", "SSH_CLIENT"]
-        .iter()
-        .any(|k| ctx.sys.env(k).is_some_and(|v| !v.is_empty()))
 }
 
 /// 流している間の状態 (WSL の script の変数)。
