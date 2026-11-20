@@ -200,6 +200,8 @@ dotfiles check --steps files,ntn       # 手順を id で絞る (PowerShell が�
 dotfiles apply --dry-run               # apply がすることを出す (何も書かない。受け持ちによらず流せる)
 dotfiles apply                         # 揃える (受け持ちが WSL のホストでは Windows にしか無い手順だけ。ホストの値が無ければ止まって 1)
 dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
+dotfiles import terminal               # Windows Terminal の衝突したキーの値を managed.json へ取り込む (受け持ちが runner のホストだけ)
+dotfiles import fancyzones '4k-43inch' # PC の FancyZones のレイアウトを名前で選び、repo へ写す (同上。名前は繰り返せる)
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
 
@@ -210,7 +212,9 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
-  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` を出す)
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
+- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal` と `fancyzones`)。Windows 側の値を repo のファイルへ写し、Windows 側には
+  書かない。repo のファイルに commit していない変更があると止まる。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
 
 ### ホストの値
 
@@ -284,6 +288,16 @@ scanData = "https://app.notion.com/p/…"
   WSL と Windows の dotfiles-private の clone も同じ commit にしておく (違う中身は「置いた記録が無く」の衝突になる)。WSL の記録だけが知っている
   「前に置いた」は引き継げないので、WSL の setup が最後に流れた後で dotfiles-private の `ssh/` から消したファイルは、切り替えた後の runner が消さない
   (`config.d` に残ると ssh が読み続ける)。切り替える直前に WSL の `~/dotfiles/setup --update` を流しておく
+- `terminal`・`fancyzones`・`powertoys` も、初めての apply は記録が無い (WSL の記録 `~/.local/state/dotfiles/windows-terminal.applied.json`・
+  `windows-fancyzones.{applied,assigned}.json`・`powertoys-keyboard-manager.reloaded` は読まず、同じ名前と形の記録を `%LOCALAPPDATA%\dotfiles\state\` に作る)。
+  WSL の setup が書いた値・足したレイアウト・あてた組は「同じ」と見て記録だけ作り、Keyboard Manager には一度だけ読み直させる (PowerToys は止めない)。
+  WSL の記録だけが知っている「前に書いた」は引き継げないので、切り替える直前に WSL の `~/dotfiles/setup --update` を流し、次の ⚠ が出ていないことを
+  確かめる (出ていれば、切り替える前に WSL の `--import` か `--force` で解く):
+  - Windows Terminal の衝突 (特に「Windows 側で消えています」: runner は記録が無いので、消したキーを書き足し直す。`managed.json` の更新が WSL に
+    届く前に切り替えると、更新も「書いた記録が無く」の衝突になる)
+  - FancyZones の「PC から消えています」(runner はレイアウトを足し直す)・「PC のエディターで直されています」(runner は「足す前からあった」として
+    知らせる)。WSL が決まりであてた組は、runner の初めての apply が「同じ」と見て記録するので、その前に解像度や決まりを変えると、記録の無い
+    runner には見分けられず「手であてた組」として残る (`--force` で決まりのレイアウトにする)
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -303,9 +317,9 @@ scanData = "https://app.notion.com/p/…"
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
-| 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
+| 91 | `powertoys` | PowerToys を入れ (`Install-PowerToys.ps1 -IfMissing`)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、Keyboard Manager に `default.json` を読み直させる ([PowerToys](#powertoys) と同じ順と判定。check と dry-run は止めない・起こさない・イベントを送らない)。記録は `%LOCALAPPDATA%\dotfiles\state\powertoys-keyboard-manager.reloaded` | いつも | 有る |
 | 91 | `ssh-config` | dotfiles-private の `ssh/*.ssh_config` を `%USERPROFILE%\.ssh\config.d\` へ写し、`config` (Include の 1 行と SetEnv) を置く ([ssh の設定](#ssh-の設定)と同じ判定。正本から消えたファイルは消す。`--force` は元を `<名前>.dotfiles-bak-<日時>` に退避して上書き・削除)。apply は書いた後に `ssh -v -G` で読むファイルも確かめる (check は、apply で書く・消すものが無いときだけ)。dotfiles-private の clone の `core.autocrlf` が true なら ⚠ (files と同じ)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-ssh-config.deployed.json` | いつも | 有る |
-| 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
+| 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト (uuid ごとに足す)・横向きの既定・ディスプレイへのあて方 (解像度の決まり・組の無い仮想デスクトップに組を作る) を書く ([FancyZones](#fancyzones) と同じ判定・PowerToys の形のバイト列。`--force` は直した・消したレイアウトと手であてた組も上書き。取り込みは `dotfiles import fancyzones <名前>…`)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-fancyzones.{applied,assigned}.json`、退避は `…\state\windows-fancyzones\backup\` (10 回分) | いつも | 有る |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
@@ -324,8 +338,9 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
-| 99 | `international`・`terminal` | 日付と時刻の形式・Windows Terminal の持つキー | | まだ |
+| 99 | `international` | 日付と時刻の形式 | | まだ |
 | 99 | `port-forward` | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、`%USERPROFILE%\.config\port-forward\hosts.json` に置く ([port forwarding (pf)](#port-forwarding-pf) と同じ確かめ・中身・判定。`--force` は元を `hosts.json.dotfiles-bak-<日時>` に退避して上書き)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-port-forward.deployed.json` | いつも | 有る |
+| 99 | `terminal` | `windows-terminal/managed.json` のキーだけを Windows Terminal の `settings.json` へ書き足す ([Windows Terminal](#windows-terminal) と同じ判定・`jq --indent 4` と同じバイト列。衝突は触らない。`--force` は退避して書く。取り込みは `dotfiles import terminal`)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-terminal.applied.json`、退避は `…\state\windows-terminal\backup\` (10 回分) | いつも | 有る |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
   引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
@@ -333,7 +348,7 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
+  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -343,7 +358,9 @@ scanData = "https://app.notion.com/p/…"
    コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
    `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)。
    WSL の記録が版つき・入れ子 (`{"version":1,"files":{…}}`) なら `record::FileRecords`。置き先の中身と記録で書く・衝突を決めるコピー (files・ssh-config・
-   port-forward の形) は `steps/deploy.rs` の判定 (`judge`。退避・消すことと、受け持ちで替える `--force` の案内も) を使う
+   port-forward の形) は `steps/deploy.rs` の判定 (`judge`。退避・消すことと、受け持ちで替える `--force` の案内も) を使う。WSL が jq で書く JSON を
+   写すときは `runner/src/jv.rs` (数の字を保ち、jq と同じく比べて同じ形で書く) を使い、1 回ぶんの退避は `fsutil::backup_run_dir` (WSL の
+   `<UTC の時刻>-<pid>` のディレクトリと同じ形) を使う
 2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
@@ -382,7 +399,12 @@ gate が違うと、試験が落ちる
   (`src/steps/powershell_profile.rs`) は、`nix/scripts/bootstrap-windows-powershell-profile.sh` を偽の `pwsh.exe`・`wslpath` で流し、同じ `$PROFILE` から
   同じバイト列を書いて同じく記録するかを突き合わせる。`ssh-config`・`port-forward` (`src/steps/ssh_config.rs`・`port_forward.rs`) は、
   `bootstrap-windows-ssh-config.sh` (偽の `ssh.exe`)・`bootstrap-windows-port-forward.sh` (本物の `nix-instantiate` と jq。`DOTFILES_WIN_NIX_PARITY=1`) を同じ
-  状態から流し、同じファイルを書き・消し・退避して同じ記録を書くか、正本の誤りの文が同じかを突き合わせる。bash の版を直したら、Rust の写しも同じに直す
+  状態から流し、同じファイルを書き・消し・退避して同じ記録を書くか、正本の誤りの文が同じかを突き合わせる。`terminal`・`powertoys`・`fancyzones`
+  (`src/steps/terminal.rs`・`powertoys.rs`・`fancyzones/`) は、`bootstrap-windows-terminal.sh` (bash と jq)・`bootstrap-windows-powertoys.sh` (偽の
+  `powershell.exe`・`pwsh.exe`・`sleep`)・`bootstrap-windows-fancyzones.sh` (偽の `powershell.exe`・`sleep`) を同じ状態から流し、書く JSON のバイト列・
+  記録・退避・PowerToys を止める・起こす・イベントを送る順・計画の行と、取り込み (`--import`) が同じかを突き合わせる (偽の exe は要るコマンドだけを
+  並べた PATH で流し、本物の Windows の exe を見せない)。jq の数の書き方 (`1e2` → `1E+2` など) は、CI の Linux の jq (1.7) と手元の jq (1.8) で
+  違わない範囲の数で突き合わせ、jq 1.8 の書き方は `jv.rs` の単体の試験で比べる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -2060,6 +2082,12 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 手でオンにするときは、PowerToys の設定画面で「入出力」→「Keyboard Manager」と、「全般」→「起動時に実行」(Run at startup) を
 オンにしてから、`setup --update` (か `nix/scripts/bootstrap-windows-powertoys.sh`) を流し直す。
 
+受け持ちを runner に切り替えたホストでは、runner の手順 `powertoys` (order 91) が同じことを同じ順にする (`dotfiles apply --steps powertoys`。
+`--force` は変わっていなくても読み直させる)。入っているかは clone の `win/powertoys/Install-PowerToys.ps1 -Check` で見る。止める・起動する・待つ・
+イベントを送る PowerShell の本文は WSL と同じで、Windows PowerShell に `-EncodedCommand` で渡す。記録と印は `%LOCALAPPDATA%\dotfiles\state\`
+(`powertoys-keyboard-manager.reloaded`・`powertoys-enable.pending`)。`dotfiles check` と `apply --dry-run` は全体の設定・Keyboard Manager の
+`settings.json`・記録を読むだけで、PowerToys を止めない・起こさない・イベントを送らない・winget を打たない。
+
 ### FancyZones
 
 `powertoys/fancyzones/` は PowerToys の FancyZones の設定で、`windowsFiles` が有効なマシン全部に同じものを配る。PC ごとの切り替えは
@@ -2082,6 +2110,12 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 | `nix/scripts/bootstrap-windows-fancyzones.sh --force` | PC のエディターで直した・消したレイアウトも repo の中身にし、手であてたカスタムレイアウト・blank の組も決まりのレイアウトにする (書き換える前のファイルは退避する。先に `--dry-run --force` で見られる) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --import <名前>` | PC のレイアウトを名前で選び、repo の `custom-layouts.json` へ写す (繰り返せる。commit は自分で) |
 | `nix/scripts/bootstrap-windows-fancyzones.sh --check` | `managed.json`・`custom-layouts.json`・`layout-rules.json` の検証だけ (CI の lint でも走る) |
+
+受け持ちを runner に切り替えたホストでは、runner の手順 `fancyzones` (order 92) が同じことをする (同じ判定・PowerToys の形のバイト列)。打つものは
+`dotfiles apply --steps fancyzones` (`--dry-run`・`--force`)・`dotfiles import fancyzones <名前>…` (`--import <名前>` の代わり)。ディスプレイと
+仮想デスクトップは WSL と同じ PowerShell の本文を Windows PowerShell の `-EncodedCommand` で聞く (`dotfiles check` と `apply --dry-run` も聞く。
+読むだけ)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-fancyzones.{applied,assigned}.json`、退避は
+`%LOCALAPPDATA%\dotfiles\state\windows-fancyzones\backup\<UTC の時刻>-<pid>\` (10 回分)。
 
 持たないもの:
 
@@ -2521,6 +2555,10 @@ GUID は、distro を登録したときの ID から作られる)。
 - `settings.json` がまだ無い (Windows Terminal を一度も起動していない) ときと、JSON として読めない (手で書いた
   コメントや末尾のカンマがある) ときは、⚠ で知らせて書かずに進む
 - 見るのは Store 版だけ。Preview (`Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe`) と zip 版は見ない
+- 受け持ちを runner に切り替えたホストでは、runner の手順 `terminal` (order 99) が同じことをする (同じ判定・同じバイト列)。打つものは
+  `dotfiles apply --steps terminal` (`--dry-run`・`--force`)・`dotfiles import terminal` (`--import` の代わり)。記録は
+  `%LOCALAPPDATA%\dotfiles\state\windows-terminal.applied.json`、退避は `%LOCALAPPDATA%\dotfiles\state\windows-terminal\backup\<UTC の時刻>-<pid>\`
+  (10 回分)。`settings.json` が無い・JSON として読めないときは ⚠ (manual) で、書かずに進む
 
 ### 音のファイルは repo に入れない
 
@@ -2550,6 +2588,8 @@ commit しない。この repo は public で、Windows に付いてくる音は
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-terminal.sh --import
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-terminal.sh --force
 ```
+
+受け持ちを runner に切り替えたホストでは、PowerShell で `dotfiles import terminal` (1) か `dotfiles apply --steps terminal --force` (2)。
 
 中身が同じで形だけが違う (`"…"` と `["…"]` など) ときは、Windows Terminal が保存するときの形の方を残す。Windows 側が
 その形なら 1、`managed.json` がその形なら 2 で解く。逆にすると、次の保存でまた衝突する。
