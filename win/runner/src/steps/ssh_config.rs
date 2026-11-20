@@ -76,7 +76,7 @@ impl Step for SshConfig {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
-        vec![sync(ctx, mode)]
+        sync(ctx, mode)
     }
 }
 
@@ -91,9 +91,25 @@ struct Item {
 }
 
 /// 手順の中身。WSL の script と同じ順に確かめる (正本 → 記録 → 1 件ずつの判定 → 正本から消えたもの → 記録を書く → ssh で確かめる)。
-fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
-    let src_dir = ctx.sibling("dotfiles-private").join("ssh");
-    let srcs = sources(&src_dir);
+/// 行は 1 つ (dotfiles-private の clone の core.autocrlf が true なら、その行を前に足す)。
+fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
+    let private = ctx.sibling("dotfiles-private");
+    let src_dir = private.join("ssh");
+    let srcs =
+        match sources(&src_dir) {
+            Ok(s) => s,
+            Err(e) => {
+                ctx.say(format!(
+                    "!! 正本の一覧を読めません: {} ({e})。何も書かず、消しません。",
+                    src_dir.display()
+                ));
+                return vec![Outcome::new(
+                Kind::Failed,
+                "正本 (dotfiles-private の ssh/) の一覧を読めない (何も書かず、消していない)",
+            )
+            .note(e.to_string())];
+            }
+        };
     if srcs.is_empty() {
         ctx.say(format!(
             "!! Windows の ssh の設定を配りません: 正本の *.ssh_config がありません ({})。",
@@ -102,23 +118,27 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
         ctx.say(
             "   dotfiles-private を取れていないか、ssh/ が空です。Windows 側のファイルはそのまま残します。",
         );
-        return Outcome::new(
-            Kind::Info,
-            "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
-        )
-        .note(format!(
-            "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
-            src_dir.display()
-        ));
+        return vec![
+            Outcome::new(
+                Kind::Info,
+                "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
+            )
+            .note(format!(
+                "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
+                src_dir.display()
+            )),
+        ];
     }
     let record_path = ctx.state_dir.join(RECORD_FILE);
     let mut records = match FileRecords::load(&record_path, BROKEN_HINT) {
         Ok(r) => r,
         Err(e) => {
             ctx.say(format!("!! {e}"));
-            return Outcome::new(Kind::Failed, "配った記録が壊れている").note(e);
+            return vec![Outcome::new(Kind::Failed, "配った記録が壊れている").note(e)];
         }
     };
+    // clone の core.autocrlf が true だと、正本が CRLF で取り出され、WSL が置いた LF と中身が合わずに全部が衝突に見える (diff では見えない)
+    let crlf = deploy::autocrlf_outcome(ctx, &private, "dotfiles-private");
     let ssh_dir = join_segments(&ctx.roots.user_profile, ".ssh");
     let mut tally = Tally::default();
 
@@ -154,9 +174,19 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     for item in &items {
         place_one(ctx, mode, force, item, &mut records, &mut tally);
     }
+    let planned_files: Vec<PathBuf> = items.iter().map(|i| i.dst.clone()).collect();
     for key in records.keys() {
         if !planned.contains(&key) {
-            remove_gone(ctx, mode, force, &ssh_dir, &key, &mut records, &mut tally);
+            remove_gone(
+                ctx,
+                mode,
+                force,
+                &ssh_dir,
+                &key,
+                &planned_files,
+                &mut records,
+                &mut tally,
+            );
         }
     }
 
@@ -170,8 +200,13 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
         tally.errors += 1;
     }
 
-    // 書いたあとの確かめ: ssh に読ませて、読んだファイルを見る (dry-run は書かないので流さない。WSL と同じ)
+    // 書いたあとの確かめ: ssh に読ませて、読んだファイルを見る (dry-run は書かないので流さない。WSL と同じ)。check は今の状態を見るが、apply で
+    // 書く・消すものが残っていれば、apply の後に確かめる (旧経路の config や、まだ無い config を差と読まないため)
+    let pending = tally.copied + tally.updated + tally.removed > 0;
     let verified = if matches!(mode, Mode::DryRun { .. }) {
+        None
+    } else if mode == Mode::Check && pending {
+        ctx.say("ssh.exe で読むファイルの確かめは、apply で書く・消すものが無くなってから流す (今は流さない)。");
         None
     } else {
         let expect: Vec<String> = planned
@@ -208,7 +243,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     }
     let mut outcome = Outcome::new(kind, summary);
     outcome.notes = notes;
-    outcome
+    crlf.into_iter().chain(std::iter::once(outcome)).collect()
 }
 
 /// 1 件を判定して、mode のとおりに出す・書く (files と同じ形の出力)。
@@ -321,12 +356,14 @@ fn place_one(
 }
 
 /// 記録にあって正本から消えた鍵 `key` の置き先を、記録どおりなら消す (違えば衝突。`--force` なら退避して消す。もう無ければ記録から外すだけ)。
+#[allow(clippy::too_many_arguments)]
 fn remove_gone(
     ctx: &mut Ctx,
     mode: Mode,
     force: bool,
     ssh_dir: &Path,
     key: &str,
+    planned_files: &[PathBuf],
     records: &mut FileRecords,
     tally: &mut Tally,
 ) {
@@ -340,6 +377,14 @@ fn remove_gone(
         return;
     };
     let shown = dst.display().to_string();
+    // 正本で名前の大小文字だけを変えると、NTFS では旧い鍵の置き先が新しい鍵の置き先と同じファイルになる。消すと、いま置いたファイルを消すので、
+    // 記録から外すだけにする (WSL の script は消して、次の setup でコピーし直す)
+    if same_file_as_planned(&dst, planned_files) {
+        if mode.writes() {
+            records.remove(key);
+        }
+        return;
+    }
     let recorded = records.get(key).map(str::to_string);
     match deploy::judge_gone(&dst, recorded.as_deref(), force) {
         Ok(Gone::Missing) => {
@@ -390,6 +435,16 @@ fn remove_gone(
     }
 }
 
+/// `dst` が、計画の置き先のどれかと同じファイルか (どちらもあって、たどった先のパスが同じ。大小文字を区別しないファイルシステムの名前の違いを含む)。
+fn same_file_as_planned(dst: &Path, planned_files: &[PathBuf]) -> bool {
+    let Ok(real) = std::fs::canonicalize(dst) else {
+        return false;
+    };
+    planned_files
+        .iter()
+        .any(|p| std::fs::canonicalize(p).is_ok_and(|q| q == real))
+}
+
 /// 記録の鍵 (`.ssh` からの `/` 区切りの相対パス) の置き先。`.ssh` の外や別のドライブを指す鍵 (空の要素・`.`・`..`・`\`・`:`) は None。
 fn key_path(ssh_dir: &Path, key: &str) -> Option<PathBuf> {
     let ok = !key.is_empty()
@@ -400,31 +455,38 @@ fn key_path(ssh_dir: &Path, key: &str) -> Option<PathBuf> {
 }
 
 /// 正本の `*.ssh_config` (`ssh/` 直下の通常のファイル。symlink と `.` で始まる名前は読まない (WSL の bash の glob と `-f && ! -L`)。名前の順)。
-fn sources(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
+/// `ssh/` が無ければ空。一覧を読めなかったら誤り (欠けた一覧で、正本から消えたと読んで置き先を消さないため)。
+fn sources(dir: &Path) -> Result<Vec<PathBuf>, std::io::Error> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
-    let mut found: Vec<PathBuf> = entries
-        .flatten()
-        .filter(|e| {
-            let name = e.file_name();
-            let name = name.to_string_lossy();
-            name.ends_with(".ssh_config")
-                && !name.starts_with('.')
-                && e.file_type().is_ok_and(|t| t.is_file())
-        })
-        .map(|e| e.path())
-        .collect();
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name.ends_with(".ssh_config") && !name.starts_with('.') && entry.file_type()?.is_file() {
+            found.push(entry.path());
+        }
+    }
     found.sort();
-    found
+    Ok(found)
 }
 
 /// `config` が旧経路の Include の 1 行だけか (WSL の is_legacy_config: 頭の BOM・行末の CR・行の前後の空白・空の行は見ない)。
 fn is_legacy_config(bytes: &[u8]) -> bool {
     let text = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+    // sed の [[:space:]] (C の locale) と同じ空白 (Rust の trim_ascii は VT を落とさない)
+    let space = |b: &u8| matches!(b, b' ' | b'\t' | b'\n' | b'\x0b' | b'\x0c' | b'\r');
     let mut lines = text
         .split(|b| *b == b'\n')
-        .map(<[u8]>::trim_ascii)
+        .map(|l| {
+            let start = l.iter().position(|b| !space(b)).unwrap_or(l.len());
+            let end = l.iter().rposition(|b| !space(b)).map_or(start, |i| i + 1);
+            &l[start..end]
+        })
         .filter(|l| !l.is_empty());
     lines.next() == Some(LEGACY_LINE.as_bytes()) && lines.next().is_none()
 }
@@ -508,14 +570,17 @@ fn verify(ctx: &mut Ctx, ssh_dir: &Path, expect: &[String], n: usize) -> Verifie
             Exit::TimedOut => format!("{CHECK_SECS} 秒たっても終わらなかった"),
             Exit::SpawnFailed(e) => format!("起こせなかった: {e}"),
         };
+        let cause = if unrunnable {
+            "ssh.exe が応答しないか、起こせません"
+        } else {
+            "読んだ設定のファイルの行 (debug1: Reading configuration data) が出ていません"
+        };
         let head: Vec<String> = out.iter().take(5).map(|l| l.to_string()).collect();
         return unverified(
             ctx,
-            format!(
-                "ssh.exe で確かめられませんでした ({why}。ssh.exe が応答しないか、起こせません)。"
-            ),
+            format!("ssh.exe で確かめられませんでした ({why}。{cause})。"),
             &head,
-            format!("ssh.exe で読むファイルを確かめられなかった ({why})"),
+            format!("ssh.exe で読むファイルを確かめられなかった ({why}。{cause})"),
         );
     }
     if code != Some(0) {
@@ -652,6 +717,8 @@ mod tests {
         Hang,
         /// 起こせない
         Broken,
+        /// 0 で終わるが、読んだファイルの行を出さない
+        Silent,
     }
 
     struct Env {
@@ -731,8 +798,15 @@ mod tests {
         }
 
         fn run(&self, sys: &FakeSys, host: &str, mode: Mode) -> (Outcome, String) {
+            let (mut outcomes, out) = self.run_all(sys, host, mode);
+            assert_eq!(outcomes.len(), 1, "{outcomes:?}\n{out}");
+            (outcomes.remove(0), out)
+        }
+
+        /// 手順を流し、行を全部 (ふつうは 1 つ。dotfiles-private の clone の core.autocrlf が true なら 2 つ) と出力を返す
+        fn run_all(&self, sys: &FakeSys, host: &str, mode: Mode) -> (Vec<Outcome>, String) {
             let mut out = Vec::new();
-            let mut outcomes = {
+            let outcomes = {
                 let mut ctx = Ctx {
                     repo: self.t.path().join("dotfiles"),
                     roots: Roots::from_home(&self.home()),
@@ -743,9 +817,7 @@ mod tests {
                 };
                 SshConfig.run(&mut ctx, mode)
             };
-            let out = String::from_utf8(out).unwrap();
-            assert_eq!(outcomes.len(), 1, "{outcomes:?}\n{out}");
-            (outcomes.remove(0), out)
+            (outcomes, String::from_utf8(out).unwrap())
         }
 
         fn apply(&self) -> (Outcome, String) {
@@ -777,6 +849,12 @@ mod tests {
                     return RunResult {
                         exit: Exit::TimedOut,
                         output: vec!["debug1: Reading configuration data C:\\Users\\tester/.ssh/config".into()],
+                    };
+                }
+                Ssh::Silent => {
+                    return RunResult {
+                        exit: Exit::Code(0),
+                        output,
                     };
                 }
                 _ => {}
@@ -956,6 +1034,10 @@ mod tests {
         assert_eq!(o.kind, Kind::Manual);
         assert_eq!(e.read("config"), "Include ~/dotfiles/ssh_config\nHost x\n");
         assert!(is_legacy_config(b"Include ~/dotfiles/ssh_config"));
+        // sed の [[:space:]] と同じく、VT・FF も前後の空白として落とす
+        assert!(is_legacy_config(
+            b"\x0b\x0cInclude ~/dotfiles/ssh_config\x0b\r\n"
+        ));
         assert!(!is_legacy_config(b"Include ~/dotfiles/ssh_config2\n"));
         assert!(!is_legacy_config(b""));
     }
@@ -1188,14 +1270,141 @@ mod tests {
             assert_eq!(e.read("config"), "Host mine\n", "{mode:?}");
             assert!(!e.at("config.d").exists(), "{mode:?}");
             assert!(!e.record().exists(), "{mode:?}");
-            // dry-run は ssh で確かめない (WSL と同じ)
+            // dry-run は ssh で確かめない (WSL と同じ)。check も、apply で書く・消すものが残っている間は確かめない (apply の後に確かめる)
             let ssh_called = sys
                 .calls
                 .borrow()
                 .iter()
                 .any(|c| c.program == Path::new("/fake/ssh"));
-            assert_eq!(ssh_called, mode == Mode::Check, "{mode:?}: {out}");
+            assert!(!ssh_called, "{mode:?}: {out}");
+            if mode == Mode::Check {
+                assert!(
+                    out.contains("ssh.exe で読むファイルの確かめは、apply で書く・消すものが無くなってから流す"),
+                    "{out}"
+                );
+            }
         }
+    }
+
+    /// check は、apply で直る差 (旧経路の config・まだ無い config) を、ssh の確かめの差 (manual) にしない
+    #[test]
+    fn check_does_not_verify_what_apply_will_fix() {
+        let e = Env::new();
+        e.put("config", "Include ~/dotfiles/ssh_config\n");
+        let sys = e.sys(Ssh::Legacy);
+        let (o, out) = e.run(&sys, RUNNER_HOST, Mode::Check);
+        assert_eq!(o.kind, Kind::Fix, "{out}");
+        assert!(o.notes.is_empty(), "{o:?}");
+        assert!(
+            !sys.calls
+                .borrow()
+                .iter()
+                .any(|c| c.program == Path::new("/fake/ssh")),
+            "ssh を呼ばない"
+        );
+        // apply の後は確かめる
+        let (o, out) = e.run(&e.sys(Ssh::Ok), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Ok, "{out}");
+        assert!(
+            o.text.ends_with("(ssh.exe が読むことも確かめた)"),
+            "{}",
+            o.text
+        );
+    }
+
+    /// 正本の一覧を読めないときは、何も書かず消さない (欠けた一覧で、正本から消えたと読まない)
+    #[cfg(unix)]
+    #[test]
+    fn unreadable_source_list_changes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let e = Env::new();
+        e.apply();
+        let before = std::fs::read_to_string(e.record()).unwrap();
+        std::fs::set_permissions(e.private_ssh(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let readable = std::fs::read_dir(e.private_ssh()).is_ok();
+        let r = e.apply();
+        std::fs::set_permissions(e.private_ssh(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        if readable {
+            // root で流すと、権限を外しても読めるので確かめられない
+            return;
+        }
+        let (o, out) = r;
+        assert_eq!(o.kind, Kind::Failed, "{out}");
+        assert!(out.contains("!! 正本の一覧を読めません: "), "{out}");
+        assert_eq!(e.read("config.d/a.ssh_config"), A);
+        assert_eq!(e.read("config.d/b c.ssh_config"), B);
+        assert_eq!(std::fs::read_to_string(e.record()).unwrap(), before);
+    }
+
+    /// 正本から消えた鍵の置き先が、計画の置き先と同じファイル (NTFS で大小文字だけが違う名前。ここでは symlink で真似る) なら、消さずに記録から
+    /// 外すだけ
+    #[cfg(unix)]
+    #[test]
+    fn gone_key_pointing_at_a_planned_file_is_only_forgotten() {
+        let e = Env::new();
+        e.apply();
+        std::os::unix::fs::symlink(e.at("config.d/a.ssh_config"), e.at("config.d/A.ssh_config"))
+            .unwrap();
+        let mut r = FileRecords::load(&e.record(), "x").unwrap();
+        r.set("config.d/A.ssh_config", &fsutil::sha256_bytes(A.as_bytes()));
+        r.save_if_changed().unwrap();
+        let (o, out) = e.apply();
+        assert_eq!(o.kind, Kind::Ok, "{out}");
+        assert!(o.text.contains(" / 削除 0 / "), "{}", o.text);
+        assert_eq!(e.read("config.d/a.ssh_config"), A);
+        assert!(
+            e.record_json()["files"]
+                .get("config.d/A.ssh_config")
+                .is_none()
+        );
+        assert!(same_file_as_planned(
+            &e.at("config.d/A.ssh_config"),
+            &[e.at("config.d/a.ssh_config")]
+        ));
+        assert!(!same_file_as_planned(
+            &e.at("config.d/b c.ssh_config"),
+            &[e.at("config.d/a.ssh_config")]
+        ));
+        assert!(!same_file_as_planned(
+            &e.at("config.d/none.ssh_config"),
+            &[e.at("config.d/a.ssh_config")]
+        ));
+    }
+
+    /// dotfiles-private の clone の core.autocrlf が true なら、ssh-config の行の前に manual の行を出す (作業ツリーでなければ見ない)
+    #[test]
+    fn warns_when_the_private_clone_converts_line_endings() {
+        let e = Env::new();
+        let sys = FakeSys::new(|spec| {
+            let args = spec.args_lossy();
+            let code = if args.iter().any(|a| a == "rev-parse" || a == "config") {
+                0
+            } else {
+                1
+            };
+            RunResult {
+                exit: Exit::Code(code),
+                output: vec!["true".to_string()],
+            }
+        })
+        .with_program("git", "/fake/git");
+        let (o, out) = e.run_all(&sys, RUNNER_HOST, Mode::Check);
+        assert_eq!(o.len(), 2, "{o:?}");
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert!(
+            o[0].text
+                .starts_with("dotfiles-private の clone の core.autocrlf が true"),
+            "{:?}",
+            o[0]
+        );
+        assert!(
+            out.contains(&format!(
+                "!! dotfiles-private の clone の core.autocrlf が true です ({})。",
+                e.t.path().join("dotfiles-private").display()
+            )),
+            "{out}"
+        );
+        assert!(o[1].text.starts_with("コピー "), "{:?}", o[1]);
     }
 
     #[test]
@@ -1298,6 +1507,10 @@ mod tests {
             (e.sys(Ssh::Broken), "起こせなかった: Exec format error"),
             (e.sys(Ssh::Hang), "30 秒たっても終わらなかった"),
             (FakeSys::new(|_| unreachable!()), "ssh.exe が見つからない"),
+            (
+                e.sys(Ssh::Silent),
+                "終了コード 0。読んだ設定のファイルの行 (debug1: Reading configuration data) が出ていません",
+            ),
         ] {
             let (o, out) = e.run(&sys, RUNNER_HOST, Mode::Check);
             assert_eq!(o.kind, Kind::Ok, "{why}: {out}");

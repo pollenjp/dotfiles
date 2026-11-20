@@ -22,10 +22,8 @@ use super::{Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
 use crate::manifest;
-use crate::process::CommandSpec;
 use crate::record::Records;
 use crate::report::Kind;
-use std::time::Duration;
 
 pub const RECORD_FILE: &str = "windows-files.deployed.json";
 
@@ -64,7 +62,8 @@ impl Step for Files {
             }
         };
         // clone の core.autocrlf が true だと、テキストが CRLF で取り出され、WSL が配った LF と中身が合わずに全部が衝突に見える
-        let crlf = autocrlf_outcome(ctx);
+        let repo = ctx.repo.clone();
+        let crlf = deploy::autocrlf_outcome(ctx, &repo, "dotfiles");
         let force = mode.force();
         let mut tally = Tally::default();
         let mut hints = Vec::new();
@@ -196,46 +195,6 @@ impl Step for Files {
         }
         crlf.into_iter().chain(std::iter::once(outcome)).collect()
     }
-}
-
-/// dotfiles の clone の core.autocrlf が true なら、そう出して `manual` の行を返す (bootstrap の clone は false)。git が無い・clone が
-/// git の作業ツリーでない (試すときの一時ディレクトリ)・読めないときは何もしない。
-fn autocrlf_outcome(ctx: &mut Ctx) -> Option<Outcome> {
-    let git = ctx.sys.which("git")?;
-    let git_in_repo = |args: &[&str]| {
-        let mut spec = CommandSpec::new(&git)
-            .arg("-C")
-            .arg(ctx.repo.as_os_str())
-            .timeout(Duration::from_secs(10));
-        for a in args {
-            spec = spec.arg(*a);
-        }
-        ctx.sys.run(&spec, &mut |_| {})
-    };
-    // 作業ツリーの外では、system・global の値を読んでしまう (Git for Windows の system は true)
-    if git_in_repo(&["rev-parse", "--is-inside-work-tree"]).code() != Some(0) {
-        return None;
-    }
-    let r = git_in_repo(&["config", "--get", "core.autocrlf"]);
-    let value = r.output.first().map(|l| l.trim().to_ascii_lowercase());
-    if r.code() != Some(0) || value.as_deref() != Some("true") {
-        return None;
-    }
-    let repo = ps_quote(&ctx.repo.to_string_lossy());
-    ctx.say(format!(
-        "!! dotfiles の clone の core.autocrlf が true です ({})。テキストのファイルが CRLF で取り出され、WSL が配った LF と中身が合わずに衝突になります。",
-        ctx.repo.display()
-    ));
-    Some(
-        Outcome::new(
-            Kind::Manual,
-            "dotfiles の clone の core.autocrlf が true (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる)",
-        )
-        .note("bootstrap の clone は core.autocrlf=false (git clone -c core.autocrlf=false)。core.autocrlf=false で clone し直すのが確か")
-        .note(format!(
-            "この clone を直すなら、変更が無いことを確かめてから: git -C '{repo}' config core.autocrlf false → git -C '{repo}' rm --cached -r -q . → git -C '{repo}' reset --hard"
-        )),
-    )
 }
 
 #[cfg(test)]

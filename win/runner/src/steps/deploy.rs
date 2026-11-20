@@ -17,7 +17,8 @@
 //!
 //! 書く中身・記録の鍵・出力の文は手順が持ち、ここは判定・書き込み (退避・消す)・衝突の diff・受け持ちで替える `--force` の案内・締めの行の数を持つ。
 
-use super::Mode;
+use super::ps1::ps_quote;
+use super::{Mode, Outcome};
 use crate::context::Ctx;
 use crate::fsutil;
 use crate::process::CommandSpec;
@@ -196,6 +197,48 @@ pub fn force_command(ctx: &Ctx, id: &str) -> String {
     }
 }
 
+/// clone (`name` は出力に出す呼び名。`dotfiles`・`dotfiles-private`) の core.autocrlf が true なら、そう出して `manual` の行を返す (bootstrap の
+/// clone は false)。git が無い・clone が git の作業ツリーでない (試すときの一時ディレクトリ)・読めないときは何もしない。
+pub fn autocrlf_outcome(ctx: &mut Ctx, clone: &Path, name: &str) -> Option<Outcome> {
+    let git = ctx.sys.which("git")?;
+    let git_in_repo = |args: &[&str]| {
+        let mut spec = CommandSpec::new(&git)
+            .arg("-C")
+            .arg(clone.as_os_str())
+            .timeout(Duration::from_secs(10));
+        for a in args {
+            spec = spec.arg(*a);
+        }
+        ctx.sys.run(&spec, &mut |_| {})
+    };
+    // 作業ツリーの外では、system・global の値を読んでしまう (Git for Windows の system は true)
+    if git_in_repo(&["rev-parse", "--is-inside-work-tree"]).code() != Some(0) {
+        return None;
+    }
+    let r = git_in_repo(&["config", "--get", "core.autocrlf"]);
+    let value = r.output.first().map(|l| l.trim().to_ascii_lowercase());
+    if r.code() != Some(0) || value.as_deref() != Some("true") {
+        return None;
+    }
+    let quoted = ps_quote(&clone.to_string_lossy());
+    ctx.say(format!(
+        "!! {name} の clone の core.autocrlf が true です ({})。テキストのファイルが CRLF で取り出され、WSL が配った LF と中身が合わずに衝突になります。",
+        clone.display()
+    ));
+    Some(
+        Outcome::new(
+            Kind::Manual,
+            format!(
+                "{name} の clone の core.autocrlf が true (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる)"
+            ),
+        )
+        .note("bootstrap の clone は core.autocrlf=false (git clone -c core.autocrlf=false)。core.autocrlf=false で clone し直すのが確か")
+        .note(format!(
+            "この clone を直すなら、変更が無いことを確かめてから: git -C '{quoted}' config core.autocrlf false → git -C '{quoted}' rm --cached -r -q . → git -C '{quoted}' reset --hard"
+        )),
+    )
+}
+
 /// 衝突の行に添える ※ (受け持ちで替える)。`keep` は Windows 側の中身を残す道 (「Windows 側の中身を repo へ取り込む」)、`clone` は WSL が配った
 /// 中身と比べた clone の呼び名 (「この clone」)。
 pub fn conflict_note(ctx: &Ctx, id: &str, keep: &str, clone: &str) -> String {
@@ -232,19 +275,47 @@ pub fn show_diff(ctx: &mut Ctx, windows: &Path, ours: &Path) {
 
 /// 書く中身がファイルに無いとき (組み立てた中身) の diff。一時ディレクトリに `name` で書いてから `show_diff` し、消す。
 pub fn show_diff_bytes(ctx: &mut Ctx, windows: &Path, ours: &[u8], name: &str) {
-    let dir = std::env::temp_dir().join(format!(
-        "dotfiles-win-diff-{}-{}",
-        std::process::id(),
-        DIFF_COUNTER.fetch_add(1, Ordering::SeqCst)
-    ));
-    let file = dir.join(name);
-    match std::fs::create_dir_all(&dir).and_then(|()| std::fs::write(&file, ours)) {
-        Ok(()) => show_diff(ctx, windows, &file),
+    let written = fresh_temp_dir().and_then(|dir| {
+        let file = dir.join(name);
+        match std::fs::write(&file, ours) {
+            Ok(()) => Ok((dir, file)),
+            Err(e) => {
+                let _ = std::fs::remove_dir_all(&dir);
+                Err(e)
+            }
+        }
+    });
+    match written {
+        Ok((dir, file)) => {
+            show_diff(ctx, windows, &file);
+            let _ = std::fs::remove_dir_all(&dir);
+        }
         Err(e) => ctx.say(format!(
             "   (書く中身を一時ファイルに書けないので diff は出さない: {e})"
         )),
     }
-    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// 一時の場所に新しいディレクトリを作る (`create_dir` なので、既にある名前 (先に置かれた symlink も) は使わずに名前を替える)。
+fn fresh_temp_dir() -> std::io::Result<PathBuf> {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    let mut last = None;
+    for _ in 0..16 {
+        let dir = std::env::temp_dir().join(format!(
+            "dotfiles-win-diff-{}-{}-{nanos}",
+            std::process::id(),
+            DIFF_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => last = Some(e),
+            Err(e) => return Err(e),
+        }
+    }
+    Err(last.unwrap_or_else(|| std::io::Error::other("一時ディレクトリを作れない")))
 }
 
 /// 締めの行の数 (コピー・上書き・同じ・削除・衝突・エラー)。
