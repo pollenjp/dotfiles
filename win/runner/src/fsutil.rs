@@ -49,12 +49,6 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
-/// `src` の中身を `dst` に書く (`write_atomic`)。
-pub fn read_then_write(src: &Path, dst: &Path) -> std::io::Result<()> {
-    let bytes = std::fs::read(src)?;
-    write_atomic(dst, &bytes)
-}
-
 /// 書く前のファイル `path` を `dir\<prefix>-<秒>-<ナノ秒>.json` に写し、写した先を返す (同じ時刻の写しは上書きせず `-<n>` を足す)。`dir` の
 /// `<prefix>-*.json` のうち、残すのは、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と、新しい方から `keep` 個。
 pub fn backup_copy(path: &Path, dir: &Path, prefix: &str, keep: usize) -> std::io::Result<PathBuf> {

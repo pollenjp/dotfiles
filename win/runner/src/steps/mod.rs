@@ -14,6 +14,7 @@ pub mod claude_settings;
 pub mod claude_skill_overrides;
 pub mod claude_skills;
 pub mod claude_statusline;
+pub mod deploy;
 pub mod files;
 pub mod generated;
 pub mod git_config;
