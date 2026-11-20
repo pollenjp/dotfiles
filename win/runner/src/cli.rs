@@ -801,7 +801,10 @@ mod tests {
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("[90] files"));
-            assert!(out.contains("runner にまだ無い。WSL の bootstrap-windows-powertoys.sh"));
+            assert!(out.contains(&format!(
+                "runner にまだ無い。WSL の bootstrap-windows-{}.sh",
+                crate::steps::pending::PENDING[0].id
+            )));
             assert!(out.contains("[97] type-clipboard"));
             assert!(!out.contains("type-clipboard を固定した版で入れる (ずれていても入れ替えない) (windowsTypeClipboard"));
             // runner に移した powershell-profile は on の手順として出る (まだ無い手順の印は付かない)

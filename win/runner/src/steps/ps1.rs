@@ -472,6 +472,85 @@ pub fn powershell_command(
         .timeout(timeout)
 }
 
+/// PowerShell の本文を `-EncodedCommand` に渡す形 (UTF-16LE の base64) にする。複数行で `"` を含む本文 (C# の `DllImport("user32.dll")` など) を、
+/// コマンドラインの引用符の扱いに左右されずに渡すため (WSL の fancyzones・international も `-EncodedCommand`)。
+pub fn encode_command(script: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let mut out = String::with_capacity(bytes.len().div_ceil(3) * 4);
+    for chunk in bytes.chunks(3) {
+        let n = chunk.len();
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let v = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
+        for i in 0..4 {
+            if i <= n {
+                out.push(TABLE[((v >> (18 - 6 * i)) & 0x3f) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+/// Windows PowerShell (`powershell`。無ければ pwsh) で PowerShell の本文を流すコマンド (`-NoProfile -NonInteractive -OutputFormat Text
+/// -EncodedCommand`。`-OutputFormat Text` は、`-EncodedCommand` で起こしたときにエラーを CLIXML でなく平文で出すため)。
+pub fn encoded_command(shell: PathBuf, script: &str, timeout: Duration) -> CommandSpec {
+    CommandSpec::new(shell)
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-OutputFormat")
+        .arg("Text")
+        .arg("-EncodedCommand")
+        .arg(encode_command(script))
+        .timeout(timeout)
+}
+
+/// Windows PowerShell 5.1 (`powershell`)、無ければ pwsh。WSL が `powershell.exe` で流す本文 (PowerToys の停止・起動・イベント、FancyZones の
+/// ディスプレイ) を流す口。
+pub fn find_windows_powershell(ctx: &Ctx) -> Option<PathBuf> {
+    ctx.sys
+        .which("powershell")
+        .or_else(|| ctx.sys.which("pwsh"))
+}
+
+/// 試験で、`-EncodedCommand` の引数を本文に戻す。
+#[cfg(test)]
+pub fn decode_command(spec: &CommandSpec) -> Option<String> {
+    let args = spec.args_lossy();
+    let i = args.iter().position(|a| a == "-EncodedCommand")?;
+    let text = args.get(i + 1)?;
+    let val = |c: u8| -> Option<u32> {
+        Some(match c {
+            b'A'..=b'Z' => c - b'A',
+            b'a'..=b'z' => c - b'a' + 26,
+            b'0'..=b'9' => c - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            _ => return None,
+        } as u32)
+    };
+    let mut bytes = Vec::new();
+    for chunk in text.as_bytes().chunks(4) {
+        let pad = chunk.iter().filter(|&&c| c == b'=').count();
+        let mut v = 0u32;
+        for &c in chunk {
+            v = (v << 6) | if c == b'=' { 0 } else { val(c)? };
+        }
+        let three = [(v >> 16) as u8, (v >> 8) as u8, v as u8];
+        bytes.extend_from_slice(&three[..3 - pad]);
+    }
+    let units: Vec<u16> = bytes
+        .chunks(2)
+        .map(|c| u16::from_le_bytes([c[0], *c.get(1).unwrap_or(&0)]))
+        .collect();
+    String::from_utf16(&units).ok()
+}
+
 /// PATH の pwsh、無ければ Windows PowerShell。
 pub fn find_powershell(ctx: &Ctx) -> Option<PathBuf> {
     ctx.sys
@@ -871,6 +950,8 @@ mod tests {
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
+    //! - -EncodedCommand の本文 (UTF-16LE の base64。PowerShell の [Convert]::ToBase64String と同じ字。本物の PowerShell が " と改行を含む本文を
+    //!   そのまま流す (Windows))
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -1526,6 +1607,48 @@ mod tests {
     }
 
     /// 本物の PowerShell で、空白と ' を含むパスの ps1 を呼び、UTF-8 の ⚠️ と終了コードが届く (Windows の CI)
+    #[test]
+    fn encodes_commands_like_powershell() {
+        // [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('…')) と同じ字
+        assert_eq!(encode_command(""), "");
+        assert_eq!(encode_command("a"), "YQA=");
+        assert_eq!(encode_command("ab"), "YQBiAA==");
+        assert_eq!(encode_command("abc"), "YQBiAGMA");
+        assert_eq!(encode_command("日"), "5WU=");
+        let body = "$x = \"user32.dll\"\n'ok'; 'ä😀'";
+        let spec = encoded_command(PathBuf::from("powershell"), body, Duration::from_secs(5));
+        assert_eq!(
+            spec.args_lossy()[..5],
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-OutputFormat",
+                "Text",
+                "-EncodedCommand"
+            ]
+        );
+        assert_eq!(decode_command(&spec).as_deref(), Some(body));
+    }
+
+    /// 本物の PowerShell が、" と改行を含む本文を -EncodedCommand でそのまま流す
+    #[cfg(windows)]
+    #[test]
+    fn real_powershell_runs_an_encoded_command() {
+        use crate::process::{RealSys, Sys};
+        let body = "$ProgressPreference = 'SilentlyContinue'; $q = \"user32.dll\"\nWrite-Output \"q=$q\"\n'done'";
+        for shell in ["powershell", "pwsh"] {
+            let Some(path) = RealSys.which(shell) else {
+                continue;
+            };
+            let r = RealSys.run(
+                &encoded_command(path, body, Duration::from_secs(60)),
+                &mut |_| {},
+            );
+            assert_eq!(r.exit, Exit::Code(0), "{shell}: {:?}", r.output);
+            assert_eq!(r.output, vec!["q=user32.dll", "done"], "{shell}");
+        }
+    }
+
     #[cfg(windows)]
     #[test]
     fn real_powershell_runs_a_script_with_awkward_path() {

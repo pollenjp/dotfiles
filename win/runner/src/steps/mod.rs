@@ -27,6 +27,7 @@ pub mod pending;
 pub mod pjp;
 pub mod port_forward;
 pub mod powershell_profile;
+pub mod powertoys;
 pub mod ps1;
 pub mod ssh_config;
 pub mod terminal;
@@ -200,6 +201,7 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // WSL の setup の手順を写したもの (受け持ちを runner に切り替えたホストでだけ apply が書く。移す順と移し方は dotfiles-private の
         // docs/adr/060_win_runner_core_* の §2 A)
         Box::new(powershell_profile::PowershellProfile),
+        Box::new(powertoys::PowerToys),
         Box::new(ssh_config::SshConfig),
         Box::new(port_forward::PortForward),
         Box::new(terminal::Terminal),
@@ -296,7 +298,7 @@ mod tests {
             .collect();
         assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
-        assert!(from_wsl.contains(&"terminal"));
+        assert!(from_wsl.contains(&"terminal") && from_wsl.contains(&"powertoys"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

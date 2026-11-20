@@ -405,13 +405,14 @@ mod tests {
     fn off_and_pending_rows() {
         let (rows, out) = rows_for(Some(""));
         let kinds: Vec<(&str, Kind)> = rows.iter().map(|r| (r.id.as_str(), r.kind)).collect();
+        let pending = crate::steps::pending::PENDING[0].id;
         assert_eq!(
             kinds,
-            vec![("a", Kind::Ok), ("b", Kind::Off), ("powertoys", Kind::Info)]
+            vec![("a", Kind::Ok), ("b", Kind::Off), (pending, Kind::Info)]
         );
         assert_eq!(out.matches("ran").count(), 1);
         assert!(out.contains("━━ [97] a: x ━━"));
-        assert!(!out.contains("powertoys:"));
+        assert!(!out.contains(&format!("{pending}:")));
         assert_eq!(report::exit_code(&rows), 0);
     }
 
