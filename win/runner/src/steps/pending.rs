@@ -27,12 +27,6 @@ pub const PENDING: &[PendingSpec] = &[
         gate: Gate::Always,
     },
     PendingSpec {
-        id: "ssh-config",
-        order: 91,
-        title: "dotfiles-private の ssh の設定を %USERPROFILE%\\.ssh へ写す",
-        gate: Gate::Always,
-    },
-    PendingSpec {
         id: "fancyzones",
         order: 92,
         title: "FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方を書く",
@@ -60,12 +54,6 @@ pub const PENDING: &[PendingSpec] = &[
         id: "international",
         order: 99,
         title: "日付と時刻の形式 (HKCU\\Control Panel\\International) を書く",
-        gate: Gate::Always,
-    },
-    PendingSpec {
-        id: "port-forward",
-        order: 99,
-        title: "dotfiles-private の port forwarding の組を JSON にして置く",
         gate: Gate::Always,
     },
     PendingSpec {

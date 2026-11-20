@@ -25,8 +25,10 @@ pub mod herdr_app_pjp_spaces;
 pub mod linker;
 pub mod pending;
 pub mod pjp;
+pub mod port_forward;
 pub mod powershell_profile;
 pub mod ps1;
+pub mod ssh_config;
 pub mod tool_skill;
 pub mod user_path;
 
@@ -115,7 +117,8 @@ pub enum Mode {
     Check,
     /// apply がすることを出すだけ (何も書かない)。`force` は apply の --force のときと同じ予告を出す
     DryRun { force: bool },
-    /// 揃える。`force` は files などのコピーの衝突も上書きし、足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile)
+    /// 揃える。`force` は files などのコピーの衝突も上書きし (ssh-config・port-forward は元を退避してから。ssh-config は正本から消えたファイルも)、
+    /// 足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile)
     Apply { force: bool },
 }
 
@@ -196,6 +199,8 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // WSL の setup の手順を写したもの (受け持ちを runner に切り替えたホストでだけ apply が書く。移す順と移し方は dotfiles-private の
         // docs/adr/060_win_runner_core_* の §2 A)
         Box::new(powershell_profile::PowershellProfile),
+        Box::new(ssh_config::SshConfig),
+        Box::new(port_forward::PortForward),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -288,6 +293,7 @@ mod tests {
             .map(|i| i.id)
             .collect();
         assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
+        assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

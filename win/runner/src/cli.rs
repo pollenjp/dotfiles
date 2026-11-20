@@ -32,9 +32,10 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           同じ写し。アカウントを足す・消す・確かめる (claude-account.exe --help)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
-  --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・記録つきのコピーの手順 (claude-skills・
-                    claude-accounts など)・herdr-app-keys ほか。手順ごとの中身は win/README.md)。powershell-profile は、足した後で
-                    消した $PROFILE の読み込みの 1 行も足し直す。--steps で手順を絞って使う
+  --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・ssh-config・port-forward・記録つきのコピーの手順
+                    (claude-skills・claude-accounts など)・herdr-app-keys ほか。手順ごとの中身は win/README.md)。ssh-config・port-forward は
+                    元を <名前>.dotfiles-bak-<日時> に退避してから上書きし、ssh-config は、正本から消えたが Windows 側で変わっていた
+                    ファイルも退避して消す。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。--steps で手順を絞って使う
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
