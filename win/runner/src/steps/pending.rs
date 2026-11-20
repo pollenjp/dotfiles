@@ -56,12 +56,6 @@ pub const PENDING: &[PendingSpec] = &[
         title: "日付と時刻の形式 (HKCU\\Control Panel\\International) を書く",
         gate: Gate::Always,
     },
-    PendingSpec {
-        id: "terminal",
-        order: 99,
-        title: "Windows Terminal の settings.json に持つキーを書き足す",
-        gate: Gate::Always,
-    },
 ];
 
 pub struct Pending(pub &'static PendingSpec);

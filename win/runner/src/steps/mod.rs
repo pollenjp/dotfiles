@@ -29,6 +29,7 @@ pub mod port_forward;
 pub mod powershell_profile;
 pub mod ps1;
 pub mod ssh_config;
+pub mod terminal;
 pub mod tool_skill;
 pub mod user_path;
 
@@ -201,6 +202,7 @@ pub fn all() -> Vec<Box<dyn Step>> {
         Box::new(powershell_profile::PowershellProfile),
         Box::new(ssh_config::SshConfig),
         Box::new(port_forward::PortForward),
+        Box::new(terminal::Terminal),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -294,6 +296,7 @@ mod tests {
             .collect();
         assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
+        assert!(from_wsl.contains(&"terminal"));
         for id in from_wsl {
             let script = repo
                 .join("nix")
