@@ -2682,7 +2682,7 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
   代わり)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-international.applied.json`。`dotfiles check` と `apply --dry-run` は読むだけで、書かず、
   WM_SETTINGCHANGE も送らない。`pwsh` が無いときと読めないときは ⚠ で、書かずに進む (グループポリシーで止められた値も ⚠。runner には setup を
   止めることが無いので、警告の代わりに ⚠ の行で毎回知らせる)
-- SSH の会話 (`SSH_CONNECTION` がある) の runner の apply は、書く値があれば書かずに ⚠ を出す。Win32-OpenSSH の会話はセッション 0 で、WM_SETTINGCHANGE が
+- SSH の会話 (`SSH_CONNECTION`・`SSH_CLIENT` がある) の runner の apply は、書く値があれば書かずに ⚠ を出す (`apply --dry-run` はそう予告する)。Win32-OpenSSH の会話はセッション 0 で、WM_SETTINGCHANGE が
   デスクトップの会話のアプリ (タスクバーの時計など) に届かないため。PC のデスクトップの PowerShell で `dotfiles apply --steps international` を流す
 
 ### 日付と時刻の形式が衝突したら

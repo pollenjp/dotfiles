@@ -30,7 +30,8 @@
 //!   Windows には書かない)。managed.json に commit していない変更があると止まる
 //! - check と dry-run は読むだけで、何も書かない (レジストリも記録も。WM_SETTINGCHANGE も送らない)
 //! - SSH の会話の apply は、書く値があれば書かずに manual (Win32-OpenSSH の会話はセッション 0 で、WM_SETTINGCHANGE がデスクトップの会話の
-//!   アプリに届かない。WSL の setup はデスクトップの端末からしか流れないので、runner にだけある分かれ道。powertoys と同じ形)
+//!   アプリに届かない。WSL の setup はデスクトップの端末からしか流れないので、runner にだけある分かれ道。powertoys と同じ形)。dry-run は、SSH の
+//!   会話の中なら本番の apply が書かないことを予告する
 
 use super::ps1;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
@@ -845,6 +846,8 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     // SSH の会話 (Win32-OpenSSH はセッション 0) からは、WM_SETTINGCHANGE がデスクトップの会話のアプリに届かない。書いた値がデスクトップの
     // 会話にいつ効くかも確かめていないので、書く値があれば書かない (記録だけの更新はする)
     let held = !log.is_empty() && mode.writes() && ctx.in_ssh();
+    // dry-run は、SSH の会話の中なら本番の apply が書かないことを予告する (行の種類は、apply で書く値の種類のまま)
+    let held_ahead = !log.is_empty() && matches!(mode, Mode::DryRun { .. }) && ctx.in_ssh();
     let mut written = Written::default();
     if let Some(shell) = shell.as_deref()
         && !log.is_empty()
@@ -895,6 +898,9 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     if held {
         ctx.say("SSH の会話の中なので、日付と時刻の形式は書きません (Win32-OpenSSH の会話はセッション 0 で、WM_SETTINGCHANGE がデスクトップの会話のアプリに届かないため)。");
         ctx.say("   PC のデスクトップの PowerShell で dotfiles apply --steps international を流してください。");
+    }
+    if held_ahead {
+        ctx.say("※ SSH の会話の中なので、本番の apply は日付と時刻の形式を書きません (WM_SETTINGCHANGE がデスクトップの会話のアプリに届かないため)。PC のデスクトップの PowerShell で dotfiles apply --steps international を流してください。");
     }
     if !written.policy.is_empty() {
         ctx.say(format!(
@@ -996,6 +1002,9 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
         outcome = outcome.note(format!(
             "WM_SETTINGCHANGE を送れなかった (Win32 のエラー {err})。開いているアプリ (タスクバーの時計など) には、サインアウトしてサインインし直すと効く"
         ));
+    }
+    if held_ahead {
+        outcome = outcome.note("SSH の会話の中なので、本番の apply は書かない。PC のデスクトップの PowerShell で dotfiles apply --steps international を流す");
     }
     if held {
         outcome = outcome.note("SSH の会話の中なので書いていない。PC のデスクトップの PowerShell で dotfiles apply --steps international を流す (WM_SETTINGCHANGE は、SSH の会話からデスクトップの会話のアプリに届かない)");
@@ -1127,9 +1136,10 @@ mod tests {
     //! - 日本語や ' を含む形式も、そのまま届いて読み戻せる
     //! - managed.json から消した値は Windows では戻さず、記録からだけ消す。壊れた記録では止まる。持つ値が無ければ pwsh を呼ばない
     //! - 受け持ちが WSL のホストでは、記録が無いことと衝突の解き方を WSL の側で出す
-    //! - SSH の会話の apply は、書く値があれば書かずに manual (書く値が無ければ記録だけする)
+    //! - SSH の会話の apply は、書く値があれば書かずに manual (同じ値の記録だけする)。dry-run はそう予告する
     //! - WSL の script (bash と jq) を同じ状態から同じ偽の pwsh.exe で流し、同じ本文を渡して同じ値を書き、同じ記録と managed.json を書く。WSL が
-    //!   書いた値を、記録の無い runner が書き直さずに引き継ぐ (bash・jq がある Linux)
+    //!   書いた値を、記録の無い runner が書き直さずに引き継ぐ。引き継げない場面 (既定に戻した値・WSL の後に変えた値・WSL に届く前の managed.json の
+    //!   更新) も確かめる (bash・jq がある Linux)
 
     use super::*;
     use crate::context::join_segments;
@@ -1694,6 +1704,7 @@ mod tests {
         );
         assert!(out.contains("  [dry-run] sShortDate: \"M/d/yyyy\" → \"yyyy-MM-dd\" (初めて書く。今の値は地域の既定)\n"), "{out}");
         assert!(!out.contains("WM_SETTINGCHANGE"), "{out}");
+        assert!(!out.contains("SSH の会話"), "{out}");
         assert!(o.text.starts_with("[dry-run] 持つ値 3 件: "), "{}", o.text);
         let (o, out) = e.run(RUNNER_HOST, Mode::Check);
         assert_eq!(o.kind, Kind::Missing, "{out}");
@@ -2179,34 +2190,50 @@ mod tests {
     fn ssh_session_does_not_write() {
         let mut e = Env::new();
         e.ssh = true;
+        // 同じ値 (sShortDate) と書く値 (ほかの 2 つ) が混ざる。dry-run は本番の apply が書かないことを予告する
+        e.set_win("sShortDate", "yyyy-MM-dd");
+        let (o, out) = e.run(RUNNER_HOST, DRY);
+        assert_eq!(o.kind, Kind::Missing, "{out}");
+        assert!(
+            out.contains("※ SSH の会話の中なので、本番の apply は日付と時刻の形式を書きません"),
+            "{out}"
+        );
+        assert!(
+            o.notes
+                .iter()
+                .any(|n| n.contains("本番の apply は書かない")),
+            "{o:?}"
+        );
+        // apply は書かず (pwsh は読むだけ)、同じ値の記録だけを作る
         let (o, out) = e.run(RUNNER_HOST, APPLY);
         assert_eq!(o.kind, Kind::Manual, "{out}");
-        assert_eq!(e.modes(), vec!["read"]);
-        assert_eq!(e.win("sShortDate"), "M/d/yyyy");
+        assert_eq!(e.modes(), vec!["read", "read"]);
+        assert_eq!(e.win("sTimeFormat"), "h:mm:ss tt");
         assert!(
             out.contains("SSH の会話の中なので、日付と時刻の形式は書きません"),
             "{out}"
         );
-        assert!(out.contains("  sShortDate: \"M/d/yyyy\" → \"yyyy-MM-dd\" (初めて書く。今の値は地域の既定) … SSH の会話の中なので書いていません\n"), "{out}");
+        assert!(out.contains("  sTimeFormat: \"h:mm:ss tt\" → \"HH:mm:ss\" (初めて書く。今の値は地域の既定) … SSH の会話の中なので書いていません\n"), "{out}");
         assert!(
             o.notes.iter().any(|n| n.contains(
                 "PC のデスクトップの PowerShell で dotfiles apply --steps international を流す"
             )),
             "{o:?}"
         );
-        assert!(e.read_record().is_none());
+        assert_eq!(
+            e.read_record().as_deref(),
+            Some(
+                "{\n  \"values\": {\n    \"sShortDate\": \"yyyy-MM-dd\"\n  },\n  \"version\": 1\n}\n"
+            )
+        );
 
-        for (n, v) in [
-            ("sShortDate", "yyyy-MM-dd"),
-            ("sTimeFormat", "HH:mm:ss"),
-            ("sShortTime", "HH:mm"),
-        ] {
+        // 書く値が無ければ、いつもの apply と同じ (記録だけ作る)。check は SSH の会話でも読むだけ
+        for (n, v) in [("sTimeFormat", "HH:mm:ss"), ("sShortTime", "HH:mm")] {
             e.set_win(n, v);
         }
         let (o, out) = e.run(RUNNER_HOST, APPLY);
         assert_eq!(o.kind, Kind::Ok, "{out}");
         assert_eq!(e.read_record().as_deref(), Some(RECORD3));
-        // check は SSH の会話でも読むだけ (いつもと同じ)
         let (o, _) = e.run(RUNNER_HOST, Mode::Check);
         assert_eq!(o.kind, Kind::Ok);
     }
@@ -2306,8 +2333,13 @@ mod tests {
 
         assert_ne!(bad.exit, Exit::Code(0));
         let text = bad.shown.join("\n");
+        // PowerShell 7 のエラーの表示 (ConciseView) は、窓の幅で折り返して頭に `|` を付けうるので、空白と `|` を除いて探す
+        let flat: String = text
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '|')
+            .collect();
         assert!(
-            text.contains("GetLocaleInfoEx(0x7FFF) failed: Win32 error "),
+            flat.contains("GetLocaleInfoEx(0x7FFF)failed:Win32error"),
             "{text}"
         );
         assert!(
@@ -2318,78 +2350,41 @@ mod tests {
 
     // ---- WSL の script との突き合わせ (bash と jq がある Linux。CI の Linux の job は飛ばさない) ----
 
-    /// 偽の pwsh.exe (WSL の試験 nix/tests/bootstrap-windows-international.test.sh の make_fake_pwsh と同じ振る舞いに、受けた本文を
-    /// pwsh-codes に残す 1 行を足したもの)。WSL の script と runner の両方がこれを呼ぶ
+    /// 偽の pwsh.exe: WSL の試験 (nix/tests/bootstrap-windows-international.test.sh) の make_fake_pwsh の本体に、受けた本文を pwsh-codes に残す
+    /// 1 行を足したもの。写しを持たず毎回抜き出すので、WSL の試験の偽物とずれない。WSL の script と runner の両方がこれを呼ぶ
     #[cfg(unix)]
-    const FAKE_PWSH: &str = r##"set -u -o pipefail
-st="${HOME}/fake-windows.json"
-args=("$@")
-enc=${args[-1]}
-unset 'args[-1]'
-printf '%s\n' "${args[*]}" >>"${HOME}/pwsh-args"
-emit_err() {
-  if [[ " ${args[*]} " == *" -OutputFormat Text "* ]]; then
-    printf '\e[31;1m%s\e[0m\n' "$1" >&2
-  else
-    printf '#< CLIXML\n<Objs Version="1.1.0.1"><S S="Error">_x001B_[31;1m%s_x001B_[0m_x000D__x000A_</S></Objs>' "$1" >&2
-  fi
-}
-if [[ -n ${FAKE_PWSH_RC-} ]]; then
-  emit_err "${FAKE_PWSH_ERR-}"
-  exit "${FAKE_PWSH_RC}"
-fi
-if ! base64 -d <<<"${enc}" | od -An -v -tx1 | tr -s ' \n' '\n' | sed '/^$/d' \
-  | awk 'NR % 2 == 0 && $0 != "00" { bad = 1 } NR % 2 == 1 && $0 >= "80" { bad = 1 } END { exit (bad || NR % 2) }'; then
-  touch "${HOME}/bad-encoding"
-fi
-code=$(base64 -d <<<"${enc}" | tr -d '\0')
-printf '%s\n----\n' "${code}" >>"${HOME}/pwsh-codes"
-mode=""
-input=""
-while IFS= read -r line; do
-  case ${line} in
-    "\$Mode = '"*)
-      mode=${line#"\$Mode = '"}
-      mode=${mode%"'"}
-      ;;
-    "\$InputJson = '"*)
-      input=${line#"\$InputJson = '"}
-      input=${input%"'"}
-      input=${input//"''"/"'"}
-      ;;
-  esac
-done <<<"${code}"
-printf '%s\n' "${mode}" >>"${HOME}/pwsh-modes"
-if [[ ${mode} == write && -n ${FAKE_PWSH_WRITE_RC-} ]]; then
-  emit_err "write failed"
-  exit "${FAKE_PWSH_WRITE_RC}"
-fi
-if [[ -n ${FAKE_PWSH_RAW-} ]]; then
-  printf '%s\r\n' "${FAKE_PWSH_RAW}"
-  exit 0
-fi
-result=$(jq -c --argjson in "${input}" --arg mode "${mode}" '
-  . as $s
-  | [$in[] | select($mode == "write" and .write)] as $w
-  | [$w[] | .name as $n | select($s.deny | has($n)) | {name, error: $s.deny[$n]}] as $failed
-  | (reduce ($w[] | .name as $n | select(($s.deny | has($n)) | not) | select($n | IN($s.stuck[]) | not)) as $e
-      ($s; .values[$e.name].current = $e.value)) as $new
-  | {
-      state: $new,
-      reply: {
-        locale: $new.locale,
-        values: [$in[] | {name, current: $new.values[.name].current, default: $new.values[.name].default}],
-        failed: $failed,
-        broadcast: (if ($w | length) > ($failed | length)
-          then {ok: ($s.broadcast_error == 0), error: $s.broadcast_error} else null end)
-      }
-    }' "${st}") || exit 1
-jq '.state' <<<"${result}" >"${st}.tmp" && mv "${st}.tmp" "${st}"
-if [[ ${mode} == write ]]; then
-  jq -r '.[] | select(.write) | .name' <<<"${input}" >>"${HOME}/writes"
-fi
-printf '%s\r\n' "$(jq -c '.reply' <<<"${result}")"
-"##;
+    fn fake_pwsh() -> String {
+        let text = std::fs::read_to_string(parity::repo_file(
+            "nix/tests/bootstrap-windows-international.test.sh",
+        ))
+        .unwrap()
+        .replace("\r\n", "\n");
+        let func = text
+            .find("\nmake_fake_pwsh() {\n")
+            .expect("WSL の試験に make_fake_pwsh が無い");
+        let open = "    cat <<'EOF'\n";
+        let start = func
+            + text[func..]
+                .find(open)
+                .expect("make_fake_pwsh の heredoc が無い")
+            + open.len();
+        let end = start
+            + text[start..]
+                .find("\nEOF\n")
+                .expect("heredoc の終わりが無い")
+            + 1;
+        let body = &text[start..end];
+        let read = "code=$(base64 -d <<<\"${enc}\" | tr -d '\\0')\n";
+        assert_eq!(
+            body.matches(read).count(),
+            1,
+            "偽の pwsh.exe が本文を読む行が無い"
+        );
+        body.replace(
+            read,
+            &format!("{read}printf '%s\\n----\\n' \"${{code}}\" >>\"${{HOME}}/pwsh-codes\"\n"),
+        )
+    }
 
     /// 偽の Windows の初めの状態 (WSL の試験の fake_windows と同じ en-US の既定のまま)
     #[cfg(unix)]
@@ -2472,7 +2467,7 @@ printf '%s\r\n' "$(jq -c '.reply' <<<"${result}")"
                 let home = t.path().join(side).join("home");
                 std::fs::create_dir_all(home.join("bin")).unwrap();
                 let fake = home.join("bin").join("pwsh.exe");
-                std::fs::write(&fake, format!("#!{}\n{FAKE_PWSH}", bash.display())).unwrap();
+                std::fs::write(&fake, format!("#!{}\n{}", bash.display(), fake_pwsh())).unwrap();
                 std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
                 std::fs::write(home.join("fake-windows.json"), FAKE_WINDOWS).unwrap();
             }
@@ -2884,6 +2879,33 @@ printf '%s\r\n' "$(jq -c '.reply' <<<"${result}")"
             "{rout}"
         );
         assert_eq!(rn_home(&p, "writes"), None, "{rout}");
+
+        // managed.json の更新が WSL に届く前に切り替えた: WSL なら記録どおりに書き換えるが、記録の無い runner は「書いた記録が無く」の衝突にする
+        let p = Pair::new();
+        p.wsl(Run::Apply);
+        p.set_managed("{\n    \"sShortDate\": \"yyyy-MM-dd\",\n    \"sTimeFormat\": \"HH:mm:ss\",\n    \"sShortTime\": \"H:mm\"\n}\n");
+        p.copy_win_to_runner();
+        let (o, rout) = p.runner(Run::Apply);
+        assert_eq!(o.kind, Kind::Manual, "{rout}");
+        assert!(
+            rout.contains(
+                "!! 衝突: sShortTime は、書いた記録が無く、地域 (en-US) の既定とも違います"
+            ),
+            "{rout}"
+        );
+        assert!(
+            rout.contains(
+                "managed.json の値で書くなら: dotfiles apply --steps international --force"
+            ),
+            "{rout}"
+        );
+        assert_eq!(rn_home(&p, "writes"), None, "{rout}");
+        let (rc, wout) = p.wsl(Run::Apply);
+        assert_eq!(rc, 0, "{wout}");
+        assert!(
+            wout.contains("sShortTime: \"HH:mm\" → \"H:mm\" (managed.json が更新された)"),
+            "{wout}"
+        );
 
         // WSL が書いた後に地域の既定に戻した値: WSL は衝突、記録の無い runner は初めて書く (WSL の記録だけが知っている「前に書いた」は
         // 引き継げない。切り替える直前に WSL の setup を流して解いておく。win/README.md の「受け持ちを runner に切り替える」)
