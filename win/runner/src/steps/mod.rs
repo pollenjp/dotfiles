@@ -15,6 +15,7 @@ pub mod claude_skill_overrides;
 pub mod claude_skills;
 pub mod claude_statusline;
 pub mod deploy;
+pub mod fancyzones;
 pub mod files;
 pub mod generated;
 pub mod git_config;
@@ -202,6 +203,7 @@ pub fn all() -> Vec<Box<dyn Step>> {
         // docs/adr/060_win_runner_core_* の §2 A)
         Box::new(powershell_profile::PowershellProfile),
         Box::new(powertoys::PowerToys),
+        Box::new(fancyzones::FancyZones),
         Box::new(ssh_config::SshConfig),
         Box::new(port_forward::PortForward),
         Box::new(terminal::Terminal),
@@ -299,6 +301,7 @@ mod tests {
         assert!(from_wsl.contains(&"files") && from_wsl.contains(&"powershell-profile"));
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
         assert!(from_wsl.contains(&"terminal") && from_wsl.contains(&"powertoys"));
+        assert!(from_wsl.contains(&"fancyzones"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

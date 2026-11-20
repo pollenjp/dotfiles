@@ -21,12 +21,6 @@ pub struct PendingSpec {
 
 pub const PENDING: &[PendingSpec] = &[
     PendingSpec {
-        id: "fancyzones",
-        order: 92,
-        title: "FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方を書く",
-        gate: Gate::Always,
-    },
-    PendingSpec {
         id: "op-reason",
         order: 97,
         title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",

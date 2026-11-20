@@ -180,6 +180,7 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
     ctx.say("");
     let o = match id {
         "terminal" => crate::steps::terminal::import(ctx),
+        "fancyzones" => crate::steps::fancyzones::import(ctx, names),
         other => Outcome::new(Kind::Failed, format!("{other} は取り込めない")),
     };
     rows.push(Row::new(order, id, o.kind, o.text).with_notes(o.notes));
@@ -369,6 +370,14 @@ mod tests {
         assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"));
     }
 
+    /// いつも on の、runner にまだ無い手順
+    fn always_pending() -> &'static crate::steps::pending::PendingSpec {
+        crate::steps::pending::PENDING
+            .iter()
+            .find(|p| p.gate == Gate::Always)
+            .expect("いつも on のまだ無い手順がある")
+    }
+
     fn rows_for(host_text: Option<&str>) -> (Vec<Row>, String) {
         let g = Groups::embedded().unwrap();
         let host = match host_text {
@@ -383,9 +392,7 @@ mod tests {
                 info("b", Gate::Tool("windowsTypeClipboard"), true),
                 Kind::Ok,
             )),
-            Box::new(crate::steps::pending::Pending(
-                &crate::steps::pending::PENDING[0],
-            )),
+            Box::new(crate::steps::pending::Pending(always_pending())),
         ];
         let rows = {
             let mut ctx = Ctx {
@@ -405,7 +412,7 @@ mod tests {
     fn off_and_pending_rows() {
         let (rows, out) = rows_for(Some(""));
         let kinds: Vec<(&str, Kind)> = rows.iter().map(|r| (r.id.as_str(), r.kind)).collect();
-        let pending = crate::steps::pending::PENDING[0].id;
+        let pending = always_pending().id;
         assert_eq!(
             kinds,
             vec![("a", Kind::Ok), ("b", Kind::Off), (pending, Kind::Info)]

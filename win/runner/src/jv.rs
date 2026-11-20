@@ -451,6 +451,91 @@ impl Jv {
 
 static NULL: Jv = Jv::Null;
 
+impl Jv {
+    /// jq の `tostring` と文字列の中の `\(…)` (文字列はそのまま、ほかは `-c` の形)
+    pub fn tostring(&self) -> String {
+        match self {
+            Jv::String(s) => s.clone(),
+            other => other.compact(),
+        }
+    }
+
+    /// jq の並べ方での順位 (null < false < true < 数 < 文字列 < 配列 < object)
+    fn rank(&self) -> u8 {
+        match self {
+            Jv::Null => 0,
+            Jv::Bool(false) => 1,
+            Jv::Bool(true) => 2,
+            Jv::Number(_) => 3,
+            Jv::String(_) => 4,
+            Jv::Array(_) => 5,
+            Jv::Object(_) => 6,
+        }
+    }
+}
+
+/// jq の並べ方 (`sort`・`group_by`・`unique` の順): 型の順位、数は十進の値、文字列はバイト列、配列は前から、object はキーの並び (並べ替えた
+/// もの) を比べてから、そのキーの順に値を比べる。
+pub fn jq_cmp(a: &Jv, b: &Jv) -> Ordering {
+    match (a, b) {
+        (Jv::Number(x), Jv::Number(y)) => x.cmp_value(y),
+        (Jv::String(x), Jv::String(y)) => x.as_bytes().cmp(y.as_bytes()),
+        (Jv::Array(x), Jv::Array(y)) => {
+            for (p, q) in x.iter().zip(y) {
+                let o = jq_cmp(p, q);
+                if o != Ordering::Equal {
+                    return o;
+                }
+            }
+            x.len().cmp(&y.len())
+        }
+        (Jv::Object(x), Jv::Object(y)) => {
+            fn keys(o: &[(String, Jv)]) -> Vec<&String> {
+                let mut k: Vec<&String> = o.iter().map(|(k, _)| k).collect();
+                k.sort_by(|p, q| p.as_bytes().cmp(q.as_bytes()));
+                k
+            }
+            let (kx, ky) = (keys(x), keys(y));
+            let o = kx
+                .iter()
+                .map(|k| k.as_bytes())
+                .cmp(ky.iter().map(|k| k.as_bytes()));
+            if o != Ordering::Equal {
+                return o;
+            }
+            for k in kx {
+                let vx = a.get(k).expect("キーがある");
+                let vy = b.get(k).expect("同じキーの並び");
+                let o = jq_cmp(vx, vy);
+                if o != Ordering::Equal {
+                    return o;
+                }
+            }
+            Ordering::Equal
+        }
+        _ => a.rank().cmp(&b.rank()),
+    }
+}
+
+/// jq の `group_by(f)`: `f` の値で安定に並べ、同じ値の組に分ける (組の中は元の順)。
+pub fn group_by<T: Clone>(items: &[T], key: impl Fn(&T) -> Jv) -> Vec<Vec<T>> {
+    let mut keyed: Vec<(Jv, T)> = items.iter().map(|i| (key(i), i.clone())).collect();
+    keyed.sort_by(|a, b| jq_cmp(&a.0, &b.0));
+    let mut groups: Vec<(Jv, Vec<T>)> = Vec::new();
+    for (k, item) in keyed {
+        match groups.last_mut() {
+            Some((gk, g)) if jq_cmp(gk, &k) == Ordering::Equal => g.push(item),
+            _ => groups.push((k, vec![item])),
+        }
+    }
+    groups.into_iter().map(|(_, g)| g).collect()
+}
+
+/// jq の `test("^…$")` の `$` は、末尾の改行 1 つの前でも合う (Perl と同じ)。その改行を落とした中身。
+pub fn anchored(s: &str) -> &str {
+    s.strip_suffix('\n').unwrap_or(s)
+}
+
 /// jq の `==` と同じ比べ方 (object はキーの順を見ない、数は十進の値)。
 pub fn jq_eq(a: &Jv, b: &Jv) -> bool {
     match (a, b) {

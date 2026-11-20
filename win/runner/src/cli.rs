@@ -24,6 +24,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles import terminal [--host-file <path>]           Windows Terminal の settings.json の、衝突したキーの値を
                                                           win/windows-terminal/managed.json へ取り込む (Windows 側には書かない。
                                                           commit は自分で。受け持ちが runner のホストだけ)
+  dotfiles import fancyzones <名前>… [--host-file <path>] PC の FancyZones のカスタムレイアウトを名前で選び、
+                                                          win/powertoys/fancyzones/custom-layouts.json へ写す (同上)
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
@@ -57,7 +59,7 @@ pub enum Command {
 }
 
 /// 取り込める手順 (WSL の script の `--import` を写したもの)
-pub const IMPORTABLE: &[&str] = &["terminal"];
+pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -207,6 +209,11 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     "import terminal は名前を取りません: {}",
                     a.names.join(" ")
                 ));
+            }
+            Some("fancyzones") if a.names.is_empty() => {
+                return Err(
+                    "import fancyzones には、取り込むレイアウトの名前 (PC のエディターに出る名前) を付けてください".to_string(),
+                );
             }
             Some(_) => {}
         }
@@ -511,6 +518,9 @@ mod tests {
         assert_eq!(i.target.as_deref(), Some("terminal"));
         assert!(i.names.is_empty());
         assert_eq!(i.host_file, Some(PathBuf::from("h.toml")));
+        let f = p(&["import", "fancyzones", "4k-43inch", "1080p"]).unwrap();
+        assert_eq!(f.target.as_deref(), Some("fancyzones"));
+        assert_eq!(f.names, vec!["4k-43inch".to_string(), "1080p".to_string()]);
         assert_eq!(p(&["--help"]).unwrap().command, Command::Help);
         assert_eq!(p(&["check", "-h"]).unwrap().command, Command::Help);
     }
@@ -553,6 +563,7 @@ mod tests {
             &["import"][..],
             &["import", "files"][..],
             &["import", "terminal", "x"][..],
+            &["import", "fancyzones"][..],
             &["import", "terminal", "--force"][..],
             &["import", "terminal", "--steps", "terminal"][..],
             &["check", "terminal"][..],
