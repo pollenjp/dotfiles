@@ -49,8 +49,8 @@ in
       ff = "cd ../..";
       fff = "cd ../../..";
       ffff = "cd ../../../..";
-      # e は fish.nix の abbr と Windows の PowerShell (win/powershell/dotfiles.ps1) にも
-      # 置いている。直すときは 3 つをそろえる。
+      # e は fish.nix の abbr と Windows の PowerShell (win/powershell/dotfiles.ps1 の function と
+      # 略語の表) にも置いている。直すときは 3 つをそろえる。
       e = "exit";
       H = "head";
       show_ports_netstat = "netstat -tulpn";
@@ -192,7 +192,7 @@ in
       # 理由・落としたものは fish.nix の同じ節に書いてある。
       #
       # 同じ名前を fish (fish.nix の abbr) と Windows の PowerShell
-      # (win/powershell/dotfiles.ps1) にも置いている。足す・直すときは 3 つをそろえる。
+      # (win/powershell/dotfiles.ps1 の function・alias と略語の表) にも置いている。足す・直すときは 3 つをそろえる。
       #
       # 上の z* が `z` 経由なのは SHELL を差し替える必要があるからで、herdr は
       # config.toml の default_shell が同じ役目を果たす。なので `h` は挟まず
@@ -218,7 +218,7 @@ in
       #########################
       # 何をするか・末尾の --remote-control に = で空の値を渡す理由・以前の c (c-func) のことは
       # fish.nix の同じ節に書いてある。
-      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function と
+      # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function と略語の表と
       # win/herdr-app/mods/pjp-prefix/main.js の CLAUDE (herdr-app で Claude Code を起こす argv) の 4 つをそろえる。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
     };
