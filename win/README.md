@@ -37,9 +37,9 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `powertoys/Install-PowerToys.ps1` | `%USERPROFILE%\.config\powershell\Install-PowerToys.ps1` | Windows の PowerToys が入っていなければ winget で入れる。PowerShell の `Install-PowerToys` から呼ぶ ([後述](#powertoys-を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
 | `google-japanese-input/` | `%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input\` | Google 日本語入力の設定とキー設定のテキスト (`config.txtpb`・`keymap.tsv`)。manifest では配らず、組み立てて配る ([後述](#google-日本語入力)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
 | `google-japanese-input/Install-GoogleJapaneseInput.ps1` | `%USERPROFILE%\.config\powershell\Install-GoogleJapaneseInput.ps1` | Windows の Google 日本語入力を winget で固定した版に揃える。PowerShell の `Install-GoogleJapaneseInput` から呼ぶ ([後述](#google-日本語入力を入れる-winget)、[TKT-143](https://app.notion.com/p/winget-Windows-Google-PowerToys-Google-dotfiles-3f779149a66f817a8944c9e4e460383f)) |
-| (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
+| (dotfiles-private の `ssh/*.ssh_config`) | `%USERPROFILE%\.ssh\config` と `config.d\` | ssh の接続先。manifest では配らず、`bootstrap-windows-ssh-config.sh` (受け持ちを runner に切り替えたホストは runner の `ssh-config`) がコピーする ([後述](#ssh-の設定)、[TKT-145](https://app.notion.com/p/Windows-OS-Windows-ssh-3f779149a66f81c4a2cff0233027c26e)) |
 | `port-forward/Start-PortForward.ps1` | `%USERPROFILE%\.config\powershell\Start-PortForward.ps1` | ssh の Host と port の組を選んで port forwarding を張る。PowerShell 7 の `pf` から呼ぶ ([後述](#port-forwarding-pf)) |
-| (dotfiles-private の `ssh/port-forward.toml`) | `%USERPROFILE%\.config\port-forward\hosts.json` | `pf` が出す port の組 (共有の組)。manifest では配らず、`bootstrap-windows-port-forward.sh` が JSON にして置く ([後述](#port-forwarding-pf)) |
+| (dotfiles-private の `ssh/port-forward.toml`) | `%USERPROFILE%\.config\port-forward\hosts.json` | `pf` が出す port の組 (共有の組)。manifest では配らず、`bootstrap-windows-port-forward.sh` (受け持ちを runner に切り替えたホストは runner の `port-forward`) が JSON にして置く ([後述](#port-forwarding-pf)) |
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
 | `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 | `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
@@ -210,7 +210,7 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
-  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` を出す)
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` を出す)
 
 ### ホストの値
 
@@ -278,6 +278,12 @@ scanData = "https://app.notion.com/p/…"
   WSL の setup が「以前 `$PROFILE` に足した 1 行が見当たりません」と出していたホスト (Windows 側で行を消した) は、runner に足した記録が無いので、
   切り替えた後の apply が足し直す (受け持ちが WSL の間の check も、行が無ければそう添える)。消したままにするなら、切り替える前に、頭に `#` を
   付けた同じ行を `$PROFILE` に置く (`.config\powershell\dotfiles.ps1` を含む行があれば、WSL も runner も足さない)
+- `ssh-config`・`port-forward` も、初めての apply は記録が無いので、WSL の setup が置いた `.ssh\config`・`.ssh\config.d\<名前>.ssh_config`・
+  `.config\port-forward\hosts.json` を「同じ」と見て記録だけ作る (runner は WSL の記録 `~/.local/state/dotfiles/windows-{ssh-config,port-forward}.deployed.json`
+  を読まず、同じ名前・形・鍵 (`.ssh` からの相対パス・`hosts.json`) の記録を `%LOCALAPPDATA%\dotfiles\state\` に作る)。正本は dotfiles-private なので、
+  WSL と Windows の dotfiles-private の clone も同じ commit にしておく (違う中身は「置いた記録が無く」の衝突になる)。WSL の記録だけが知っている
+  「前に置いた」は引き継げないので、WSL の setup が最後に流れた後で dotfiles-private の `ssh/` から消したファイルは、切り替えた後の runner が消さない
+  (`config.d` に残ると ssh が読み続ける)。切り替える直前に WSL の `~/dotfiles/setup --update` を流しておく
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -298,7 +304,7 @@ scanData = "https://app.notion.com/p/…"
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 91 | `powertoys` | PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる | | まだ |
-| 91 | `ssh-config` | dotfiles-private の ssh の設定を `%USERPROFILE%\.ssh` へ写す | | まだ |
+| 91 | `ssh-config` | dotfiles-private の `ssh/*.ssh_config` を `%USERPROFILE%\.ssh\config.d\` へ写し、`config` (Include の 1 行と SetEnv) を置く ([ssh の設定](#ssh-の設定)と同じ判定。正本から消えたファイルは消す。`--force` は元を `<名前>.dotfiles-bak-<日時>` に退避して上書き・削除)。apply は書いた後に `ssh -v -G` で読むファイルも確かめる (check は、apply で書く・消すものが無いときだけ)。dotfiles-private の clone の `core.autocrlf` が true なら ⚠ (files と同じ)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-ssh-config.deployed.json` | いつも | 有る |
 | 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方 | | まだ |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
@@ -318,7 +324,8 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
-| 99 | `international`・`port-forward`・`terminal` | 日付と時刻の形式・port forwarding の組・Windows Terminal の持つキー | | まだ |
+| 99 | `international`・`terminal` | 日付と時刻の形式・Windows Terminal の持つキー | | まだ |
+| 99 | `port-forward` | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、`%USERPROFILE%\.config\port-forward\hosts.json` に置く ([port forwarding (pf)](#port-forwarding-pf) と同じ確かめ・中身・判定。`--force` は元を `hosts.json.dotfiles-bak-<日時>` に退避して上書き)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-port-forward.deployed.json` | いつも | 有る |
 
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
   引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
@@ -326,7 +333,7 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。powershell-profile は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
+  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -334,7 +341,9 @@ scanData = "https://app.notion.com/p/…"
 1. `runner/src/steps/<名前>.rs` に trait `Step` を書く (id・order・題・on/off (`Gate`)・`windows_only` (WSL の setup に同じ手順が無く、受け持ちによらず
    runner が流すなら true) と、`Mode` (check・dry-run・apply) ごとの中身)。外の
    コマンドは `ctx.sys` で打ち (試験で偽物に差し替えられる)、置き場所は `ctx` から引く (`ctx.repo_path(…)`・隣の clone の
-   `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)
+   `ctx.sibling("claude-skills")` (隣に無ければ bootstrap の置き場)・`ctx.roots`・記録の置き場の `ctx.state_dir`)。記録が要れば `record::Records` (files と同じ形の JSON)。
+   WSL の記録が版つき・入れ子 (`{"version":1,"files":{…}}`) なら `record::FileRecords`。置き先の中身と記録で書く・衝突を決めるコピー (files・ssh-config・
+   port-forward の形) は `steps/deploy.rs` の判定 (`judge`。退避・消すことと、受け持ちで替える `--force` の案内も) を使う
 2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
@@ -371,7 +380,9 @@ gate が違うと、試験が落ちる
   に exe の `claude-hook <名前>` を呼ぶ包みを渡して流し (`tests/guard_suites.rs`)、lexer (`src/hooks/guard/lex.rs`) は awk と突き合わせる。hook の
   登録 (`src/steps/claude_hook.rs` の `REGISTRATIONS`) は `bootstrap-claude-hook.sh` の同じ hook の行と突き合わせる。`powershell-profile`
   (`src/steps/powershell_profile.rs`) は、`nix/scripts/bootstrap-windows-powershell-profile.sh` を偽の `pwsh.exe`・`wslpath` で流し、同じ `$PROFILE` から
-  同じバイト列を書いて同じく記録するかを突き合わせる。bash の版を直したら、Rust の写しも同じに直す
+  同じバイト列を書いて同じく記録するかを突き合わせる。`ssh-config`・`port-forward` (`src/steps/ssh_config.rs`・`port_forward.rs`) は、
+  `bootstrap-windows-ssh-config.sh` (偽の `ssh.exe`)・`bootstrap-windows-port-forward.sh` (本物の `nix-instantiate` と jq。`DOTFILES_WIN_NIX_PARITY=1`) を同じ
+  状態から流し、同じファイルを書き・消し・退避して同じ記録を書くか、正本の誤りの文が同じかを突き合わせる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -1799,7 +1810,8 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 `ssh.exe` が読むのは Windows 側の `%USERPROFILE%\.ssh\config` なので、そこにも WSL と同じ形を置く
 (経緯は [ADR 016](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/016_ssh_config_from_dotfiles_private_20261012T131912JST/README.md))。
 `manifest.toml` では配らず、`nix/scripts/bootstrap-windows-ssh-config.sh` (order 91) が
-`setup --update` のたびにコピーする。
+`setup --update` のたびにコピーする。受け持ちを runner に切り替えたホストでは、runner の `ssh-config` (同じ order) が
+同じ中身・判定・記録の形で置く ([runner の手順](#runner-の手順)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-ssh-config.deployed.json`)。
 
 | Windows 側 | 中身 | 出所 |
 | --- | --- | --- |
@@ -1835,7 +1847,8 @@ Windows で `config` や dotfiles のファイルを直していたら、触ら�
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-ssh-config.sh --force
 ```
 
-判定だけ見るなら `--dry-run` を付ける。
+判定だけ見るなら `--dry-run` を付ける。受け持ちを runner に切り替えたホストでは、Windows の PowerShell で `dotfiles apply --steps ssh-config --force`
+(判定だけなら `dotfiles check --steps ssh-config`)。runner の退避の名前の日時は UTC (末尾に `Z`。`config.dotfiles-bak-20261120-003512Z` など)。
 
 ## port forwarding (pf)
 
@@ -1914,11 +1927,12 @@ Space 切り替え  a 足す  e 直す  d 消す  Enter つなぐ  Esc 戻る
 | ファイル | 中身 | 書くもの |
 | --- | --- | --- |
 | dotfiles-private の `ssh/port-forward.toml` | 共有の組の正本 (`[hosts]` の下に `<Host 名> = ["3000", …]`) | 手で書いて commit・push する |
-| `%USERPROFILE%\.config\port-forward\hosts.json` | 共有の組 (正本を JSON にしたもの) | `setup --update` の `bootstrap-windows-port-forward.sh` (order 99)。pf は書かない |
+| `%USERPROFILE%\.config\port-forward\hosts.json` | 共有の組 (正本を JSON にしたもの) | `setup --update` の `bootstrap-windows-port-forward.sh` (order 99。受け持ちを runner に切り替えたホストは runner の `port-forward`)。pf は書かない |
 | `%USERPROFILE%\.config\port-forward\local.json` | その PC で足した・直した・隠した組と、前回つないだ port・最近つないだ Host | pf |
 
 - 共有の組を足す・直すときは、dotfiles-private の `ssh/port-forward.toml` を直して `--check` で確かめ、commit・push して、
-  各 Windows の PC の WSL で `~/dotfiles/setup --update` を流す。Host 名は ssh の設定と同じ綴りで書き、`.` を含むときは
+  各 Windows の PC の WSL で `~/dotfiles/setup --update` を流す (受け持ちを runner に切り替えた PC は、dotfiles-private の clone を pull してから
+  `dotfiles apply`)。Host 名は ssh の設定と同じ綴りで書き、`.` を含むときは
   `"…"` で囲む (囲まないと TOML の入れ子の表になり、止まる):
 
   ```sh
@@ -1939,6 +1953,9 @@ Space 切り替え  a 足す  e 直す  d 消す  Enter つなぐ  Esc 戻る
 
 - 写すのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ。dotfiles-private が無い・正本が無いマシンでは何もしない
   (置いてある hosts.json も消さない)
+- 受け持ちを runner に切り替えたホストでは、runner の `port-forward` が同じ確かめ・中身 (バイト列まで)・判定・記録の形で置く (Windows の PowerShell で
+  `dotfiles apply --steps port-forward`。`--dry-run`・`--force` も同じ。正本の書き方は `dotfiles check --steps port-forward` でも確かめられる (Windows の
+  側も見る))。runner は正本を Nix ではなく Rust の TOML の読み手で読む (Nix が止める `\e` などの書き方も通す)。runner の退避の名前の日時は UTC (末尾に `Z`)
 - 正本に書き方の誤り・手元の port の重なりがあると、何も書かずに誤りを全部並べて止まる (exit 1)
 - 置いた中身の sha256 を `~/.local/state/dotfiles/windows-port-forward.deployed.json` に覚える。hosts.json を Windows で書き換えて
   いた (か、置く前からあった) ら、触らずに diff を出して止まる (衝突)。Windows 側の中身を正本へ取り込んで commit・push するか、`--force` で解く

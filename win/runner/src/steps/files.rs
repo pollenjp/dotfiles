@@ -12,30 +12,22 @@
 //!
 //! 衝突は 2 通りあり、文を分ける: 記録があれば Windows 側で変わった (アプリの設定画面で変えた、など)。記録が無ければ、置く前から
 //! Windows 側にあった。初めて流す Windows は記録が無いので、同じ commit から WSL が配った置き先は「同じ」(記録だけ作る) になる。
-//! manifest から消したファイルは Windows 側から消さない (アプリが持つファイルなので)。
+//! manifest から消したファイルは Windows 側から消さない (アプリが持つファイルなので)。`--force` の上書きは退避しない (WSL と同じ)。
+//!
+//! 判定は ssh-config・port-forward と共通の `deploy::judge` (書く中身を渡す形)。
 
+use super::deploy::{self, Action, Problem, Tally};
 use super::ps1::ps_quote;
 use super::{Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
 use crate::manifest;
-use crate::process::CommandSpec;
 use crate::record::Records;
 use crate::report::Kind;
-use std::time::Duration;
 
 pub const RECORD_FILE: &str = "windows-files.deployed.json";
 
 pub struct Files;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Action {
-    Copy,
-    Same,
-    Update,
-    Force,
-    Conflict,
-}
 
 impl Step for Files {
     fn info(&self) -> StepInfo {
@@ -70,55 +62,51 @@ impl Step for Files {
             }
         };
         // clone の core.autocrlf が true だと、テキストが CRLF で取り出され、WSL が配った LF と中身が合わずに全部が衝突に見える
-        let crlf = autocrlf_outcome(ctx);
+        let repo = ctx.repo.clone();
+        let crlf = deploy::autocrlf_outcome(ctx, &repo, "dotfiles");
         let force = mode.force();
-        let (mut copied, mut updated, mut unchanged, mut conflicts, mut errors) = (0, 0, 0, 0, 0);
+        let mut tally = Tally::default();
         let mut hints = Vec::new();
 
         for f in &plan.files {
             let dst_key = f.dst.to_string_lossy().into_owned();
-            let want = match fsutil::sha256_file(&f.src) {
-                Ok(h) => h,
+            let bytes = match std::fs::read(&f.src) {
+                Ok(b) => b,
                 Err(e) => {
                     ctx.say(format!(
                         "!! コピー元が読めません: {} ({e})",
                         f.src.display()
                     ));
-                    errors += 1;
+                    tally.errors += 1;
                     continue;
                 }
             };
+            let want = fsutil::sha256_bytes(&bytes);
             let recorded = records.get(&dst_key).map(str::to_string);
-            if f.dst.is_dir() {
-                ctx.say(format!("!! 置き先がディレクトリです: {dst_key}"));
-                errors += 1;
-                continue;
-            }
-            let action = if !f.dst.exists() {
-                Action::Copy
-            } else {
-                match fsutil::sha256_file(&f.dst) {
-                    Err(e) => {
-                        ctx.say(format!("!! 置き先が読めません: {dst_key} ({e})"));
-                        errors += 1;
+            let action =
+                match deploy::judge(&f.dst, &want, recorded.as_deref(), force, &deploy::never) {
+                    Ok(a) => a,
+                    Err(Problem::Directory) => {
+                        ctx.say(format!("!! 置き先がディレクトリです: {dst_key}"));
+                        tally.errors += 1;
                         continue;
                     }
-                    Ok(have) if have == want => Action::Same,
-                    Ok(have) if recorded.as_deref() == Some(have.as_str()) => Action::Update,
-                    Ok(_) if force => Action::Force,
-                    Ok(_) => Action::Conflict,
-                }
-            };
+                    Err(Problem::Unreadable(e)) => {
+                        ctx.say(format!("!! 置き先が読めません: {dst_key} ({e})"));
+                        tally.errors += 1;
+                        continue;
+                    }
+                };
             match action {
                 Action::Same => {
-                    unchanged += 1;
+                    tally.count(action);
                     ctx.say(format!("同じです: {dst_key}"));
                     if recorded.as_deref() != Some(want.as_str()) && mode.writes() {
                         records.set(&dst_key, &want);
                     }
                 }
                 Action::Conflict => {
-                    conflicts += 1;
+                    tally.count(action);
                     if recorded.is_some() {
                         ctx.say(format!(
                             "!! 衝突: {dst_key} は Windows 側で変わっています (前回ここへ置いた中身と違う)。"
@@ -128,26 +116,21 @@ impl Step for Files {
                             "!! 衝突: {dst_key} は、置いた記録が無く、repo と中身が違います (置く前から Windows 側にあった。アプリが作ったか、手で設定したもの。受け持ちを切り替える前なら、WSL が配った中身とこの clone の中身が違う)。"
                         ));
                     }
-                    show_diff(ctx, f);
+                    deploy::show_diff(ctx, &f.dst, &f.src);
                     let repo_file = ctx.repo_path(&f.repo_path);
                     ctx.say(format!(
                         "   Windows 側の中身を残すなら: Copy-Item -LiteralPath '{}' -Destination '{}' (PowerShell。取り込んだら repo で commit する)",
                         ps_quote(&dst_key),
                         ps_quote(&repo_file.to_string_lossy())
                     ));
-                    if ctx.host.runner_enable {
-                        ctx.say(
-                            "   repo 側で上書きするなら:   dotfiles apply --steps files --force",
-                        );
-                    } else {
-                        // 受け持ちが WSL の間は runner の apply は files を流さないので、WSL の手順を出す
-                        ctx.say("   repo 側で上書きするなら:   WSL で nix/scripts/bootstrap-windows-files.sh --force (受け持ちが WSL の setup の間。runner の apply は files を流さない)");
-                    }
+                    // 受け持ちが WSL の間は runner の apply は files を流さないので、WSL の手順を出す
+                    let again = deploy::force_command(ctx, "files");
+                    ctx.say(format!("   repo 側で上書きするなら:   {again}"));
                 }
-                Action::Copy | Action::Update | Action::Force => {
+                Action::Copy | Action::Update | Action::Replace | Action::Force => {
                     let label = match action {
                         Action::Copy => "コピー",
-                        Action::Update => "上書き (repo 側が更新された)",
+                        Action::Update | Action::Replace => "上書き (repo 側が更新された)",
                         _ => "上書き (--force)",
                     };
                     match mode {
@@ -159,8 +142,8 @@ impl Step for Files {
                             }
                         )),
                         Mode::DryRun { .. } => ctx.say(format!("[dry-run] {label}: {dst_key}")),
-                        Mode::Apply { .. } => match fsutil::read_then_write(&f.src, &f.dst) {
-                            Ok(()) => {
+                        Mode::Apply { .. } => match deploy::write(&f.dst, &bytes, false) {
+                            Ok(_) => {
                                 records.set(&dst_key, &want);
                                 ctx.say(format!("{label}: {dst_key}"));
                                 // 空の hint は出さない (WSL の [[ -n ${hint} ]] と同じ)
@@ -170,16 +153,12 @@ impl Step for Files {
                             }
                             Err(e) => {
                                 ctx.say(format!("!! 書けません: {dst_key} ({e})"));
-                                errors += 1;
+                                tally.errors += 1;
                                 continue;
                             }
                         },
                     }
-                    if action == Action::Copy {
-                        copied += 1;
-                    } else {
-                        updated += 1;
-                    }
+                    tally.count(action);
                 }
             }
         }
@@ -191,7 +170,7 @@ impl Step for Files {
                 "!! 配った記録を書けません: {} ({e})",
                 record_path.display()
             ));
-            errors += 1;
+            tally.errors += 1;
         }
         if !hints.is_empty() {
             ctx.say("");
@@ -201,101 +180,20 @@ impl Step for Files {
             }
         }
 
-        let mut summary =
-            format!("コピー {copied} / 上書き {updated} / 同じ {unchanged} / 衝突 {conflicts}");
-        if errors > 0 {
-            summary.push_str(&format!(" / エラー {errors}"));
-        }
-        if matches!(mode, Mode::DryRun { .. }) {
-            summary = format!("[dry-run] {summary}");
-        }
+        let summary = tally.summary(mode, false);
         ctx.say("");
         ctx.say(&summary);
 
-        let kind = if errors > 0 {
-            Kind::Failed
-        } else if conflicts > 0 {
-            Kind::Manual
-        } else if mode.writes() {
-            Kind::Ok
-        } else if updated > 0 {
-            Kind::Fix
-        } else if copied > 0 {
-            Kind::Missing
-        } else {
-            Kind::Ok
-        };
-        let mut outcome = Outcome::new(kind, summary);
-        if conflicts > 0 {
-            if ctx.host.runner_enable {
-                outcome = outcome.note("衝突は上の出力の解き方で直す (Windows 側の中身を repo へ取り込むか、dotfiles apply --steps files --force)");
-            } else {
-                outcome = outcome.note("受け持ちは WSL の setup (runner.enable が true でない)。WSL が配った中身とこの clone の中身が違うなら、clone を同じ commit にそろえて見直す。衝突を解くのは WSL の側 (bootstrap-windows-files.sh)");
-            }
+        let mut outcome = Outcome::new(tally.kind(mode), summary);
+        if tally.conflicts > 0 {
+            outcome = outcome.note(deploy::conflict_note(
+                ctx,
+                "files",
+                "Windows 側の中身を repo へ取り込む",
+                "この clone",
+            ));
         }
         crlf.into_iter().chain(std::iter::once(outcome)).collect()
-    }
-}
-
-/// dotfiles の clone の core.autocrlf が true なら、そう出して `manual` の行を返す (bootstrap の clone は false)。git が無い・clone が
-/// git の作業ツリーでない (試すときの一時ディレクトリ)・読めないときは何もしない。
-fn autocrlf_outcome(ctx: &mut Ctx) -> Option<Outcome> {
-    let git = ctx.sys.which("git")?;
-    let git_in_repo = |args: &[&str]| {
-        let mut spec = CommandSpec::new(&git)
-            .arg("-C")
-            .arg(ctx.repo.as_os_str())
-            .timeout(Duration::from_secs(10));
-        for a in args {
-            spec = spec.arg(*a);
-        }
-        ctx.sys.run(&spec, &mut |_| {})
-    };
-    // 作業ツリーの外では、system・global の値を読んでしまう (Git for Windows の system は true)
-    if git_in_repo(&["rev-parse", "--is-inside-work-tree"]).code() != Some(0) {
-        return None;
-    }
-    let r = git_in_repo(&["config", "--get", "core.autocrlf"]);
-    let value = r.output.first().map(|l| l.trim().to_ascii_lowercase());
-    if r.code() != Some(0) || value.as_deref() != Some("true") {
-        return None;
-    }
-    let repo = ps_quote(&ctx.repo.to_string_lossy());
-    ctx.say(format!(
-        "!! dotfiles の clone の core.autocrlf が true です ({})。テキストのファイルが CRLF で取り出され、WSL が配った LF と中身が合わずに衝突になります。",
-        ctx.repo.display()
-    ));
-    Some(
-        Outcome::new(
-            Kind::Manual,
-            "dotfiles の clone の core.autocrlf が true (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる)",
-        )
-        .note("bootstrap の clone は core.autocrlf=false (git clone -c core.autocrlf=false)。core.autocrlf=false で clone し直すのが確か")
-        .note(format!(
-            "この clone を直すなら、変更が無いことを確かめてから: git -C '{repo}' config core.autocrlf false → git -C '{repo}' rm --cached -r -q . → git -C '{repo}' reset --hard"
-        )),
-    )
-}
-
-/// 衝突の diff を `git diff --no-index` で出す (git が無ければ、そう出して進む)。
-fn show_diff(ctx: &mut Ctx, f: &manifest::PlanFile) {
-    let Some(git) = ctx.sys.which("git") else {
-        ctx.say("   (git が無いので diff は出さない)");
-        return;
-    };
-    let spec = CommandSpec::new(git)
-        .arg("diff")
-        .arg("--no-index")
-        .arg("--no-color")
-        .arg("--")
-        .arg(f.dst.as_os_str())
-        .arg(f.src.as_os_str())
-        .timeout(Duration::from_secs(30));
-    let sys = ctx.sys;
-    let mut lines = Vec::new();
-    sys.run(&spec, &mut |l| lines.push(format!("   {l}")));
-    for l in lines {
-        ctx.say(l);
     }
 }
 

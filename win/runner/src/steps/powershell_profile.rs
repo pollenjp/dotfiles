@@ -313,13 +313,9 @@ fn is_utf16(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff])
 }
 
-/// 足し直すコマンド。受け持ちが WSL の間は、runner の apply はこの手順を流さないので、WSL の script を出す。
-fn again_command(ctx: &Ctx) -> &'static str {
-    if ctx.host.runner_enable {
-        "dotfiles apply --steps powershell-profile --force"
-    } else {
-        "WSL で nix/scripts/bootstrap-windows-powershell-profile.sh --force (受け持ちが WSL の setup の間。runner の apply はこの手順を流さない)"
-    }
+/// 足し直すコマンド。受け持ちが WSL の間は、runner の apply はこの手順を流さないので、WSL の script を出す (files などと同じ `deploy::force_command`)。
+fn again_command(ctx: &Ctx) -> String {
+    super::deploy::force_command(ctx, "powershell-profile")
 }
 
 /// 手順を止めない警告を、WSL の script の warn と同じ形で出す (1 行目の頭に `!!`、続きの行は 3 字下げ)。

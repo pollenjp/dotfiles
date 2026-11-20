@@ -24,6 +24,8 @@ pub struct CommandSpec {
     pub envs: Vec<(OsString, Option<OsString>)>,
     /// stderr の行を写し (`RunResult::output`) に入れない。流す口 (`on_line`) には渡す
     pub stdout_only: bool,
+    /// stdout の行を写しに入れない (`ssh -v -G` は読んだファイルを stderr に、設定を stdout に書く)。流す口には渡す
+    pub stderr_only: bool,
 }
 
 impl CommandSpec {
@@ -35,6 +37,7 @@ impl CommandSpec {
             cwd: None,
             envs: Vec::new(),
             stdout_only: false,
+            stderr_only: false,
         }
     }
 
@@ -66,6 +69,20 @@ impl CommandSpec {
     pub fn stdout_only(mut self) -> Self {
         self.stdout_only = true;
         self
+    }
+
+    pub fn stderr_only(mut self) -> Self {
+        self.stderr_only = true;
+        self
+    }
+
+    /// その pipe の行を写しに入れるか
+    fn keeps(&self, is_err: bool) -> bool {
+        if is_err {
+            !self.stdout_only
+        } else {
+            !self.stderr_only
+        }
     }
 
     /// 足した env の値 (外したなら None。触っていなければ None)。試験で比べるため
@@ -199,7 +216,7 @@ impl Sys for RealSys {
                 if now >= d {
                     let _ = child.kill();
                     let _ = child.wait();
-                    drain_ready(&rx, on_line, &mut output, &mut open, spec.stdout_only);
+                    drain_ready(&rx, on_line, &mut output, &mut open, spec);
                     return RunResult {
                         exit: Exit::TimedOut,
                         output,
@@ -214,7 +231,7 @@ impl Sys for RealSys {
             } else {
                 match rx.recv_timeout(wait) {
                     Ok(Some((is_err, line))) => {
-                        accept(on_line, &mut output, spec.stdout_only, is_err, line);
+                        accept(on_line, &mut output, spec, is_err, line);
                         quiet_since = Instant::now();
                     }
                     Ok(None) => open -= 1,
@@ -230,7 +247,7 @@ impl Sys for RealSys {
             }
             if let Some((status, at)) = exited {
                 // 溜まっている行は待たずに全部受ける
-                if drain_ready(&rx, on_line, &mut output, &mut open, spec.stdout_only) {
+                if drain_ready(&rx, on_line, &mut output, &mut open, spec) {
                     quiet_since = Instant::now();
                 }
                 if open == 0
@@ -278,16 +295,16 @@ fn candidate_names(name: &str) -> Vec<String> {
 /// reader からの知らせ: 1 行 (stderr の行か・中身) か、その pipe が閉じた (`None`)。
 type Msg = Option<(bool, String)>;
 
-/// 受けた 1 行を流す口に渡し、写しに足す (`stdout_only` なら stderr の行は写しに入れない)。
+/// 受けた 1 行を流す口に渡し、写しに足す (`stdout_only` なら stderr の行、`stderr_only` なら stdout の行は写しに入れない)。
 fn accept(
     on_line: &mut dyn FnMut(&str),
     output: &mut Vec<String>,
-    stdout_only: bool,
+    spec: &CommandSpec,
     is_err: bool,
     line: String,
 ) {
     on_line(&line);
-    if !(stdout_only && is_err) {
+    if spec.keeps(is_err) {
         output.push(line);
     }
 }
@@ -298,13 +315,13 @@ fn drain_ready(
     on_line: &mut dyn FnMut(&str),
     output: &mut Vec<String>,
     open: &mut usize,
-    stdout_only: bool,
+    spec: &CommandSpec,
 ) -> bool {
     let mut got = false;
     loop {
         match rx.try_recv() {
             Ok(Some((is_err, line))) => {
-                accept(on_line, output, stdout_only, is_err, line);
+                accept(on_line, output, spec, is_err, line);
                 got = true;
             }
             Ok(None) => *open = open.saturating_sub(1),
@@ -438,6 +455,24 @@ mod tests {
         assert_eq!(r.exit, Exit::Code(0));
         let got: Vec<&str> = r.output.iter().map(|l| l.trim()).collect();
         assert_eq!(got, vec!["out"]);
+        seen.sort();
+        assert_eq!(seen, vec!["err", "out"]);
+    }
+
+    /// stderr だけを写しに入れる (`ssh -v -G` の読んだファイル)。stdout の行も流す口には渡す
+    #[test]
+    fn stderr_only_keeps_stdout_out_of_output() {
+        #[cfg(unix)]
+        let spec = shell("echo out; echo err >&2");
+        #[cfg(windows)]
+        let spec = powershell("Write-Output out; [Console]::Error.WriteLine('err')");
+        let mut seen = Vec::new();
+        let r = RealSys.run(&spec.stderr_only(), &mut |l| {
+            seen.push(l.trim().to_string())
+        });
+        assert_eq!(r.exit, Exit::Code(0));
+        let got: Vec<&str> = r.output.iter().map(|l| l.trim()).collect();
+        assert_eq!(got, vec!["err"]);
         seen.sort();
         assert_eq!(seen, vec!["err", "out"]);
     }
