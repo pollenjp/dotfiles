@@ -3,7 +3,7 @@
 use crate::context::Ctx;
 use crate::host::{HostValues, Source};
 use crate::report::{self, Kind, Row};
-use crate::steps::{Mode, Step};
+use crate::steps::{Mode, Outcome, Step};
 
 /// ホストの値と受け持ちを 2 行で出す (表の前)。
 pub fn describe_host(ctx: &mut Ctx) {
@@ -151,6 +151,48 @@ pub fn apply_blocker(host: &HostValues, steps: &[Box<dyn Step>]) -> Option<Row> 
         }
         Source::File(_) => None,
     }
+}
+
+/// 取り込み (`dotfiles import <id> [<名前>…]`。WSL の script の `--import`): Windows 側の値を repo のファイルへ写す。受け持ちが runner のホスト
+/// でだけ流す (受け持ちが WSL の間は WSL の script で取り込む。runner の記録を書かない)。
+pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
+    let mut rows = host_rows(&ctx.host);
+    let order = crate::steps::all()
+        .iter()
+        .map(|s| s.info())
+        .find(|i| i.id == id)
+        .map(|i| i.order);
+    if !ctx.host.runner_enable {
+        // WSL の script の --import は名前を 1 つずつ取る (fancyzones は --import <名前> を繰り返す。terminal は名前を取らない)
+        let args: String = if names.is_empty() {
+            " --import".to_string()
+        } else {
+            names
+                .iter()
+                .map(|n| format!(" --import {}", crate::steps::deploy::sh_quote(n)))
+                .collect()
+        };
+        rows.push(
+            Row::new(
+                order,
+                id,
+                Kind::Blocker,
+                "受け持ちは WSL の setup (runner.enable が true でない) なので取り込みは止めた",
+            )
+            .with_notes(vec![format!(
+                "受け持ちが WSL の間は、WSL で nix/scripts/bootstrap-windows-{id}.sh{args} を打つ"
+            )]),
+        );
+        return rows;
+    }
+    ctx.say("");
+    let o = match id {
+        "terminal" => crate::steps::terminal::import(ctx),
+        "fancyzones" => crate::steps::fancyzones::import(ctx, names),
+        other => Outcome::new(Kind::Failed, format!("{other} は取り込めない")),
+    };
+    rows.push(Row::new(order, id, o.kind, o.text).with_notes(o.notes));
+    rows
 }
 
 /// 手順の一覧 (list)。
@@ -336,6 +378,14 @@ mod tests {
         assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"));
     }
 
+    /// いつも on の、runner にまだ無い手順
+    fn always_pending() -> &'static crate::steps::pending::PendingSpec {
+        crate::steps::pending::PENDING
+            .iter()
+            .find(|p| p.gate == Gate::Always)
+            .expect("いつも on のまだ無い手順がある")
+    }
+
     fn rows_for(host_text: Option<&str>) -> (Vec<Row>, String) {
         let g = Groups::embedded().unwrap();
         let host = match host_text {
@@ -350,9 +400,7 @@ mod tests {
                 info("b", Gate::Tool("windowsTypeClipboard"), true),
                 Kind::Ok,
             )),
-            Box::new(crate::steps::pending::Pending(
-                &crate::steps::pending::PENDING[0],
-            )),
+            Box::new(crate::steps::pending::Pending(always_pending())),
         ];
         let rows = {
             let mut ctx = Ctx {
@@ -372,13 +420,14 @@ mod tests {
     fn off_and_pending_rows() {
         let (rows, out) = rows_for(Some(""));
         let kinds: Vec<(&str, Kind)> = rows.iter().map(|r| (r.id.as_str(), r.kind)).collect();
+        let pending = always_pending().id;
         assert_eq!(
             kinds,
-            vec![("a", Kind::Ok), ("b", Kind::Off), ("powertoys", Kind::Info)]
+            vec![("a", Kind::Ok), ("b", Kind::Off), (pending, Kind::Info)]
         );
         assert_eq!(out.matches("ran").count(), 1);
         assert!(out.contains("━━ [97] a: x ━━"));
-        assert!(!out.contains("powertoys:"));
+        assert!(!out.contains(&format!("{pending}:")));
         assert_eq!(report::exit_code(&rows), 0);
     }
 

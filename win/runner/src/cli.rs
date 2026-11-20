@@ -21,6 +21,12 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           手順を順に揃える (受け持ちが WSL のホスト (runner.enable が true でない) では、
                                                           Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
+  dotfiles import terminal [--host-file <path>]           Windows Terminal の settings.json の、衝突したキーの値を
+                                                          win/windows-terminal/managed.json へ取り込む (settings.json には書かない。
+                                                          commit は自分で。受け持ちが runner のホストだけ)
+  dotfiles import fancyzones <名前>… [--host-file <path>] PC の FancyZones のカスタムレイアウトを名前で選び、
+                                                          win/powertoys/fancyzones/custom-layouts.json へ写す (同上。- で始まる
+                                                          名前は -- の後ろに書く)
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
@@ -32,10 +38,13 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           同じ写し。アカウントを足す・消す・確かめる (claude-account.exe --help)
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
-  --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・ssh-config・port-forward・記録つきのコピーの手順
-                    (claude-skills・claude-accounts など)・herdr-app-keys ほか。手順ごとの中身は win/README.md)。ssh-config・port-forward は
-                    元を <名前>.dotfiles-bak-<日時> に退避してから上書きし、ssh-config は、正本から消えたが Windows 側で変わっていた
-                    ファイルも退避して消す。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。--steps で手順を絞って使う
+  --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・ssh-config・port-forward・terminal・fancyzones・
+                    記録つきのコピーの手順 (claude-skills・claude-accounts など)・herdr-app-keys ほか。手順ごとの中身は win/README.md)。
+                    ssh-config・port-forward は元を <名前>.dotfiles-bak-<日時> に退避してから上書きし、ssh-config は、正本から消えたが
+                    Windows 側で変わっていたファイルも退避して消す。terminal・fancyzones は元を %LOCALAPPDATA%\\dotfiles\\state\\ の下に退避
+                    してから書き、fancyzones は PC で直した・消したレイアウトと手であてた組も上書きする。powertoys は変わっていなくても
+                    Keyboard Manager に読み直させる。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。
+                    --steps で手順を絞って使う
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
@@ -49,8 +58,12 @@ pub enum Command {
     Apply,
     List,
     Manifest,
+    Import,
     Help,
 }
+
+/// 取り込める手順 (WSL の script の `--import` を写したもの)
+pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -62,6 +75,10 @@ pub struct Args {
     pub json: bool,
     pub windows_home: Option<PathBuf>,
     pub repo: Option<PathBuf>,
+    /// import の手順の id
+    pub target: Option<String>,
+    /// import の手順に渡す名前 (fancyzones のレイアウトの名前)
+    pub names: Vec<String>,
 }
 
 impl Args {
@@ -75,6 +92,8 @@ impl Args {
             json: false,
             windows_home: None,
             repo: None,
+            target: None,
+            names: Vec::new(),
         }
     }
 }
@@ -90,11 +109,25 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         "apply" => Command::Apply,
         "list" => Command::List,
         "manifest" => Command::Manifest,
+        "import" => Command::Import,
         "help" | "-h" | "--help" => return Ok(Args::new(Command::Help)),
         other => return Err(format!("知らないコマンドです: {other}")),
     };
     let mut a = Args::new(command);
+    // import の `--` の後ろは、- で始まっても名前として読む (- で始まるレイアウトの名前)
+    let mut names_only = false;
     while let Some(arg) = iter.next() {
+        if command == Command::Import && (names_only || arg == "--") {
+            if names_only {
+                if a.target.is_none() {
+                    a.target = Some(arg.clone());
+                } else {
+                    a.names.push(arg.clone());
+                }
+            }
+            names_only = true;
+            continue;
+        }
         let (name, inline) = match arg.split_once('=') {
             Some((n, v)) if n.starts_with("--") => (n, Some(v.to_string())),
             _ => (arg.as_str(), None),
@@ -147,7 +180,12 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 a.steps = Some(ids);
             }
             "--host-file" => {
-                allowed(&[Command::Check, Command::Apply, Command::List])?;
+                allowed(&[
+                    Command::Check,
+                    Command::Apply,
+                    Command::List,
+                    Command::Import,
+                ])?;
                 a.host_file = Some(PathBuf::from(value(name)?));
             }
             "--windows-home" => {
@@ -155,10 +193,46 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 a.windows_home = Some(PathBuf::from(value(name)?));
             }
             "--repo" => a.repo = Some(PathBuf::from(value(name)?)),
+            // import の手順の id と、その後ろの名前 (- で始まらない引数)
+            other if command == Command::Import && !other.starts_with('-') => {
+                if a.target.is_none() {
+                    a.target = Some(other.to_string());
+                } else {
+                    a.names.push(other.to_string());
+                }
+            }
             other => return Err(format!("知らない引数です: {other}")),
         }
         if inline.is_some() && matches!(name, "--dry-run" | "--force" | "--json") {
             return Err(format!("{name} は値を取りません"));
+        }
+    }
+    if command == Command::Import {
+        match a.target.as_deref() {
+            None => {
+                return Err(format!(
+                    "import には取り込む手順の id を付けてください ({})",
+                    IMPORTABLE.join("・")
+                ));
+            }
+            Some(t) if !IMPORTABLE.contains(&t) => {
+                return Err(format!(
+                    "{t} は取り込めません (取り込める手順: {})",
+                    IMPORTABLE.join("・")
+                ));
+            }
+            Some("terminal") if !a.names.is_empty() => {
+                return Err(format!(
+                    "import terminal は名前を取りません: {}",
+                    a.names.join(" ")
+                ));
+            }
+            Some("fancyzones") if a.names.is_empty() => {
+                return Err(
+                    "import fancyzones には、取り込むレイアウトの名前 (PC のエディターに出る名前) を付けてください".to_string(),
+                );
+            }
+            Some(_) => {}
         }
     }
     Ok(a)
@@ -170,6 +244,7 @@ fn command_name(c: Command) -> &'static str {
         Command::Apply => "apply",
         Command::List => "list",
         Command::Manifest => "manifest",
+        Command::Import => "import",
         Command::Help => "help",
     }
 }
@@ -297,7 +372,7 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             0
         }
         Command::Manifest => manifest_command(&a, &repo, sys, out, err),
-        Command::Check | Command::Apply | Command::List => {
+        Command::Check | Command::Apply | Command::List | Command::Import => {
             match steps_command(&a, repo, sys, out) {
                 Ok(code) => code,
                 Err(e) => {
@@ -396,6 +471,15 @@ fn steps_command(
             runner::list(&mut ctx, &selected);
             Ok(0)
         }
+        Command::Import => {
+            let target = a.target.as_deref().unwrap_or_default();
+            ctx.say(format!(
+                "==> dotfiles import {target} (Windows 側の値を repo のファイルへ取り込む。PC の設定のファイルには書かない)"
+            ));
+            runner::describe_host(&mut ctx);
+            let rows = runner::import(&mut ctx, target, &a.names);
+            Ok(runner::finish(&mut ctx, "import", &rows))
+        }
         Command::Check => {
             ctx.say("==> dotfiles check (確かめるだけ。何も書かない)");
             runner::describe_host(&mut ctx);
@@ -446,6 +530,30 @@ mod tests {
         assert_eq!(p(&["apply"]).unwrap().command, Command::Apply);
         assert_eq!(p(&["list"]).unwrap().command, Command::List);
         assert_eq!(p(&["manifest"]).unwrap().command, Command::Manifest);
+        let i = p(&["import", "terminal", "--host-file", "h.toml"]).unwrap();
+        assert_eq!(i.command, Command::Import);
+        assert_eq!(i.target.as_deref(), Some("terminal"));
+        assert!(i.names.is_empty());
+        assert_eq!(i.host_file, Some(PathBuf::from("h.toml")));
+        let f = p(&["import", "fancyzones", "4k-43inch", "1080p"]).unwrap();
+        assert_eq!(f.target.as_deref(), Some("fancyzones"));
+        assert_eq!(f.names, vec!["4k-43inch".to_string(), "1080p".to_string()]);
+        // -- の後ろは - で始まっても名前
+        let d = p(&[
+            "import",
+            "fancyzones",
+            "--host-file",
+            "h.toml",
+            "--",
+            "-x",
+            "--y",
+        ])
+        .unwrap();
+        assert_eq!(d.names, vec!["-x".to_string(), "--y".to_string()]);
+        assert_eq!(d.host_file, Some(PathBuf::from("h.toml")));
+        let d = p(&["import", "--", "fancyzones", "-x"]).unwrap();
+        assert_eq!(d.target.as_deref(), Some("fancyzones"));
+        assert_eq!(d.names, vec!["-x".to_string()]);
         assert_eq!(p(&["--help"]).unwrap().command, Command::Help);
         assert_eq!(p(&["check", "-h"]).unwrap().command, Command::Help);
     }
@@ -485,6 +593,13 @@ mod tests {
             &["check", "--what"][..],
             &["apply", "--dry-run=yes"][..],
             &["manifest", "--host-file", "x"][..],
+            &["import"][..],
+            &["import", "files"][..],
+            &["import", "terminal", "x"][..],
+            &["import", "fancyzones"][..],
+            &["import", "terminal", "--force"][..],
+            &["import", "terminal", "--steps", "terminal"][..],
+            &["check", "terminal"][..],
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }
@@ -730,7 +845,10 @@ mod tests {
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("[90] files"));
-            assert!(out.contains("runner にまだ無い。WSL の bootstrap-windows-powertoys.sh"));
+            assert!(out.contains(&format!(
+                "runner にまだ無い。WSL の bootstrap-windows-{}.sh",
+                crate::steps::pending::PENDING[0].id
+            )));
             assert!(out.contains("[97] type-clipboard"));
             assert!(!out.contains("type-clipboard を固定した版で入れる (ずれていても入れ替えない) (windowsTypeClipboard"));
             // runner に移した powershell-profile は on の手順として出る (まだ無い手順の印は付かない)
@@ -810,6 +928,54 @@ mod tests {
             );
             assert_eq!(pwsh_calls(&sys), 1);
             assert!(!profile.exists());
+        }
+
+        /// 取り込みは受け持ちが runner のホストだけ (WSL の間は WSL の script の --import を案内して止める)。Windows 側には書かず、repo のファイルを書く
+        #[test]
+        fn import_terminal_needs_the_runner() {
+            let w = World::new(Some(""));
+            let (code, out, _) = w.run(&["import", "terminal"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(out.contains("==> dotfiles import terminal"), "{out}");
+            assert!(out.contains("なので取り込みは止めた"), "{out}");
+            assert!(
+                out.contains("nix/scripts/bootstrap-windows-terminal.sh --import を打つ"),
+                "{out}"
+            );
+            // fancyzones は名前ごとに --import を付け、bash の一重引用符で囲む
+            let (code, out, _) = w.run(&["import", "fancyzones", "a b", "it's"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(
+                out.contains(
+                    "nix/scripts/bootstrap-windows-fancyzones.sh --import 'a b' --import 'it'\\''s' を打つ"
+                ),
+                "{out}"
+            );
+
+            let w = World::new(Some("[runner]\nenable = true\n"));
+            let managed = w.t.write(
+                "g/dotfiles/win/windows-terminal/managed.json",
+                "{\n    \"copyOnSelect\": true\n}\n",
+            );
+            let settings = w.t.write(
+                "home/AppData/Local/Packages/Microsoft.WindowsTerminal_8wekyb3d8bbwe/LocalState/settings.json",
+                "{\"copyOnSelect\": false}\n",
+            );
+            let sys = w.sys().with_program("git", "/fake/git");
+            let (code, out, _) = w.run_with(&sys, &["import", "terminal"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(out.contains("==> 結果 (import)"), "{out}");
+            assert_eq!(
+                std::fs::read_to_string(&managed).unwrap(),
+                "{\n    \"copyOnSelect\": false\n}\n"
+            );
+            assert_eq!(
+                std::fs::read_to_string(&settings).unwrap(),
+                "{\"copyOnSelect\": false}\n"
+            );
+            assert!(sys.call_args().iter().any(|a| a.contains(
+                "status --porcelain --untracked-files=normal -- win/windows-terminal/managed.json"
+            )));
         }
 
         #[test]

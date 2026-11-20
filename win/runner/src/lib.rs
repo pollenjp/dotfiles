@@ -11,6 +11,7 @@ pub mod context;
 pub mod fsutil;
 pub mod hooks;
 pub mod host;
+pub mod jv;
 pub mod launcher;
 pub mod link;
 pub mod manifest;

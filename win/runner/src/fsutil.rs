@@ -4,6 +4,7 @@ use sha2::{Digest, Sha256};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::SystemTime;
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -49,6 +50,136 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     result
 }
 
+/// UTC の年・月・日・時・分・秒 (1970-01-01 からの日数を暦の年月日にする。Howard Hinnant の civil_from_days)。
+pub fn utc_fields(t: SystemTime) -> [i64; 6] {
+    let secs = t
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let (days, rem) = ((secs / 86_400) as i64, (secs % 86_400) as i64);
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    [year, month, day, rem / 3_600, rem % 3_600 / 60, rem % 60]
+}
+
+/// 1 回の apply で書き換えるファイルの退避 (WSL の terminal・fancyzones の退避と同じ形: `<root>\<UTC の YYYYMMDDThhmmssZ>-<pid>\<ファイル名>`。
+/// 新しい方から `keep` 回分)。初めて写すときにディレクトリを作り、写せたら古いものを消す。写せなければ作ったディレクトリを消し、古いものは残す。
+pub struct RunBackup {
+    root: PathBuf,
+    keep: usize,
+    dir: Option<PathBuf>,
+}
+
+impl RunBackup {
+    pub fn new(root: PathBuf, keep: usize) -> RunBackup {
+        RunBackup {
+            root,
+            keep,
+            dir: None,
+        }
+    }
+
+    /// 退避の置き場 (`<root>`)
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    /// この回に写したディレクトリ (まだ写していなければ None)
+    pub fn dir(&self) -> Option<&Path> {
+        self.dir.as_deref()
+    }
+
+    /// 書き換える前の `path` を写す (無ければ何もしない)。同じ回に写すファイルは同じディレクトリに入る
+    pub fn copy(&mut self, path: &Path) -> std::io::Result<()> {
+        if !path.exists() {
+            return Ok(());
+        }
+        let fresh = self.dir.is_none();
+        let dir = match &self.dir {
+            Some(d) => d.clone(),
+            None => create_run_dir(&self.root)?,
+        };
+        if let Err(e) = copy_into(path, &dir) {
+            if fresh {
+                let _ = std::fs::remove_dir_all(&dir);
+            }
+            return Err(e);
+        }
+        if fresh {
+            prune_runs(&self.root, self.keep, &dir);
+            self.dir = Some(dir);
+        }
+        Ok(())
+    }
+}
+
+/// 1 回ぶんの退避のディレクトリを作る (同じ名前があれば `-<nnn>` を足す。名前の順が作った順になるよう 0 で埋める)
+fn create_run_dir(root: &Path) -> std::io::Result<PathBuf> {
+    std::fs::create_dir_all(root)?;
+    let [y, mo, d, h, mi, s] = utc_fields(SystemTime::now());
+    let base = format!(
+        "{y:04}{mo:02}{d:02}T{h:02}{mi:02}{s:02}Z-{}",
+        std::process::id()
+    );
+    let mut name = base.clone();
+    let mut n = 0;
+    loop {
+        let dir = root.join(&name);
+        match std::fs::create_dir(&dir) {
+            Ok(()) => return Ok(dir),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                n += 1;
+                name = format!("{base}-{n:03}");
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// `root` の下のディレクトリを、名前の順 (時刻の順) で古いものから消して、`made` を含めて `keep` 個を残す (`made` は消さない)
+fn prune_runs(root: &Path, keep: usize, made: &Path) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    let made_name = made.file_name().map(|n| n.to_os_string());
+    let mut olds: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter(|e| Some(e.file_name()) != made_name)
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    olds.sort();
+    let keep_old = keep.saturating_sub(1);
+    if olds.len() > keep_old {
+        for old in &olds[..olds.len() - keep_old] {
+            let _ = std::fs::remove_dir_all(root.join(old));
+        }
+    }
+}
+
+/// `src` を `dir` に同じ名前で写し、写した先を返す (更新時刻も写す。WSL の `cp -p`)。
+pub fn copy_into(src: &Path, dir: &Path) -> std::io::Result<PathBuf> {
+    let name = src.file_name().ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "ファイルの名前が無い")
+    })?;
+    let dst = dir.join(name);
+    std::fs::copy(src, &dst)?;
+    if let Ok(modified) = std::fs::metadata(src).and_then(|m| m.modified()) {
+        let _ = std::fs::File::options()
+            .write(true)
+            .open(&dst)
+            .and_then(|f| f.set_modified(modified));
+    }
+    Ok(dst)
+}
+
 /// 書く前のファイル `path` を `dir\<prefix>-<秒>-<ナノ秒>.json` に写し、写した先を返す (同じ時刻の写しは上書きせず `-<n>` を足す)。`dir` の
 /// `<prefix>-*.json` のうち、残すのは、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と、新しい方から `keep` 個。
 pub fn backup_copy(path: &Path, dir: &Path, prefix: &str, keep: usize) -> std::io::Result<PathBuf> {
@@ -86,9 +217,107 @@ mod tests {
     //! - sha256 が sha256sum と同じ値 (空と "abc" の既知の値)
     //! - 親を作って書き、あるファイルは置き換え、一時ファイルを残さない
     //! - 書く前の写し: 中身を写し、いちばん古いものと新しい方から N 個を残す。ほかの prefix のファイルには触らない
+    //! - 1 回ぶんの退避: UTC の時刻と pid の名前・名前の順が作った順・同じ回は同じディレクトリ・新しい方から N 回分 (ファイルは数えず消さない)・
+    //!   更新時刻も写る・無いファイルは写さない・写せなければ作ったディレクトリを消して古いものを残す
+    //! - UTC の年月日 (うるう年)
 
     use super::*;
     use crate::testutil::TempDir;
+    use std::time::Duration;
+
+    #[test]
+    fn utc_fields_are_civil() {
+        let at = |secs: u64| utc_fields(SystemTime::UNIX_EPOCH + Duration::from_secs(secs));
+        assert_eq!(at(0), [1970, 1, 1, 0, 0, 0]);
+        // 2026-11-20 08:35:28 JST = 2026-11-19 23:35:28 UTC
+        assert_eq!(at(1_795_131_328), [2026, 11, 19, 23, 35, 28]);
+        assert_eq!(at(1_709_164_800), [2024, 2, 29, 0, 0, 0]);
+        assert_eq!(at(951_782_400), [2000, 2, 29, 0, 0, 0]);
+    }
+
+    #[test]
+    fn run_backups_keep_the_newest() {
+        let t = TempDir::new("fsutil-run-dir");
+        let root = t.path().join("backup");
+        t.write("backup/note.txt", "x");
+        // 古い名前のディレクトリ (前の回の退避)
+        for i in 0..3 {
+            std::fs::create_dir_all(root.join(format!("2000010{i}T000000Z-1"))).unwrap();
+        }
+        let src = t.write("settings.json", "{}\n");
+        let other = t.write("other.json", "[]\n");
+        let old = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000);
+        std::fs::File::options()
+            .write(true)
+            .open(&src)
+            .unwrap()
+            .set_modified(old)
+            .unwrap();
+        // 無いファイルは写さず、ディレクトリも作らない
+        let mut b0 = RunBackup::new(root.clone(), 3);
+        b0.copy(&t.path().join("missing.json")).unwrap();
+        assert!(b0.dir().is_none());
+        // 1 回目: 同じ回のファイルは同じディレクトリに入る。更新時刻も写る
+        let mut b1 = RunBackup::new(root.clone(), 3);
+        b1.copy(&src).unwrap();
+        b1.copy(&other).unwrap();
+        let a = b1.dir().unwrap().to_path_buf();
+        assert_eq!(
+            std::fs::read_to_string(a.join("settings.json")).unwrap(),
+            "{}\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(a.join("other.json")).unwrap(),
+            "[]\n"
+        );
+        assert_eq!(
+            std::fs::metadata(a.join("settings.json"))
+                .unwrap()
+                .modified()
+                .unwrap(),
+            old
+        );
+        let name = a.file_name().unwrap().to_string_lossy().into_owned();
+        let pid = std::process::id().to_string();
+        assert!(name.len() >= 17 + pid.len(), "{name}");
+        assert!(
+            name[..8].bytes().all(|c| c.is_ascii_digit()) && &name[8..9] == "T",
+            "{name}"
+        );
+        assert!(
+            name[9..15].bytes().all(|c| c.is_ascii_digit()) && &name[15..17] == "Z-",
+            "{name}"
+        );
+        assert!(name[17..].starts_with(&pid), "{name}");
+        // 2 回目: 別のディレクトリで、名前の順は作った順 (同じ秒なら -001)
+        let mut b2 = RunBackup::new(root.clone(), 3);
+        b2.copy(&src).unwrap();
+        let b = b2.dir().unwrap().to_path_buf();
+        assert_ne!(a, b);
+        assert!(
+            b.file_name().unwrap() > a.file_name().unwrap(),
+            "{a:?} {b:?}"
+        );
+        let mut dirs: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        dirs.sort();
+        // 新しい方から 3 つ (作ったものを含む)。ファイルは数えず消さない
+        assert_eq!(dirs.len(), 4, "{dirs:?}");
+        assert_eq!(dirs[0], "20000102T000000Z-1");
+        assert!(dirs.contains(&"note.txt".to_string()), "{dirs:?}");
+        // 写せなければ (ディレクトリを写そうとした)、作ったディレクトリを消し、古いものは残す
+        let mut b3 = RunBackup::new(root.clone(), 1);
+        assert!(b3.copy(&root.join("20000102T000000Z-1")).is_err());
+        assert!(b3.dir().is_none());
+        let mut after: Vec<String> = std::fs::read_dir(&root)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        after.sort();
+        assert_eq!(after, dirs);
+    }
 
     #[test]
     fn sha256_known_values() {

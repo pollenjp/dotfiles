@@ -23,6 +23,7 @@ use super::deploy::{self, Action, Problem, Tally};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil;
+use crate::jv::jq_string;
 use crate::record::FileRecords;
 use crate::report::Kind;
 use std::path::Path;
@@ -470,29 +471,6 @@ fn render(hosts: &Hosts) -> String {
     }
     s.push_str("\n}\n");
     s
-}
-
-/// jq と同じ文字列の書き方: `"` と `\` は前に `\`、制御文字 (U+0000〜U+001F と U+007F) は `\b` `\t` `\n` `\f` `\r` か `\u00xx` (小文字)、ほかはそのまま。
-fn jq_string(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('"');
-    for c in s.chars() {
-        match c {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\u{8}' => out.push_str("\\b"),
-            '\t' => out.push_str("\\t"),
-            '\n' => out.push_str("\\n"),
-            '\u{c}' => out.push_str("\\f"),
-            '\r' => out.push_str("\\r"),
-            c if (c as u32) < 0x20 || c == '\u{7f}' => {
-                out.push_str(&format!("\\u{:04x}", c as u32))
-            }
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 /// Host と組の数 (WSL の counts と同じ字)。

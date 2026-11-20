@@ -15,6 +15,10 @@ pub struct FakeSys {
     env: BTreeMap<String, String>,
     exe: Option<PathBuf>,
     pub calls: RefCell<Vec<CommandSpec>>,
+    /// 待った長さ (待たずに控える)
+    pub sleeps: RefCell<Vec<std::time::Duration>>,
+    /// 待つたびに呼ぶもの (待つ間に、ほかのプロセスがファイルを書き終えるのを真似る)
+    on_sleep: Option<Box<dyn Fn(usize)>>,
 }
 
 impl FakeSys {
@@ -25,7 +29,15 @@ impl FakeSys {
             env: BTreeMap::new(),
             exe: None,
             calls: RefCell::new(Vec::new()),
+            sleeps: RefCell::new(Vec::new()),
+            on_sleep: None,
         }
+    }
+
+    /// 待つたびに `f(何回目か (1 から))` を呼ぶ
+    pub fn with_on_sleep(mut self, f: impl Fn(usize) + 'static) -> Self {
+        self.on_sleep = Some(Box::new(f));
+        self
     }
 
     /// `current_exe()` が返すパス (渡さなければ None)
@@ -75,6 +87,14 @@ impl Sys for FakeSys {
 
     fn current_exe(&self) -> Option<PathBuf> {
         self.exe.clone()
+    }
+
+    fn sleep(&self, d: std::time::Duration) {
+        self.sleeps.borrow_mut().push(d);
+        if let Some(f) = &self.on_sleep {
+            let n = self.sleeps.borrow().len();
+            f(n);
+        }
     }
 }
 

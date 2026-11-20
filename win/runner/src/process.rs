@@ -152,6 +152,10 @@ pub trait Sys {
     fn current_exe(&self) -> Option<PathBuf> {
         std::env::current_exe().ok()
     }
+    /// 待つ (読みかけのファイルを読み直す前・PowerToys の設定画面がファイルを作るのを待つ間。試験の偽物は待たずに控える)
+    fn sleep(&self, d: Duration) {
+        std::thread::sleep(d);
+    }
 }
 
 /// 本物の口。

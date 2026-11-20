@@ -21,18 +21,6 @@ pub struct PendingSpec {
 
 pub const PENDING: &[PendingSpec] = &[
     PendingSpec {
-        id: "powertoys",
-        order: 91,
-        title: "PowerToys を入れ、Keyboard Manager と自動起動をオンにして割り当てを読み直させる",
-        gate: Gate::Always,
-    },
-    PendingSpec {
-        id: "fancyzones",
-        order: 92,
-        title: "FancyZones の持つキー・カスタムレイアウト・ディスプレイへのあて方を書く",
-        gate: Gate::Always,
-    },
-    PendingSpec {
         id: "op-reason",
         order: 97,
         title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
@@ -54,12 +42,6 @@ pub const PENDING: &[PendingSpec] = &[
         id: "international",
         order: 99,
         title: "日付と時刻の形式 (HKCU\\Control Panel\\International) を書く",
-        gate: Gate::Always,
-    },
-    PendingSpec {
-        id: "terminal",
-        order: 99,
-        title: "Windows Terminal の settings.json に持つキーを書き足す",
         gate: Gate::Always,
     },
 ];
