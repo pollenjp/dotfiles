@@ -22,10 +22,11 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
   dotfiles import terminal [--host-file <path>]           Windows Terminal の settings.json の、衝突したキーの値を
-                                                          win/windows-terminal/managed.json へ取り込む (Windows 側には書かない。
+                                                          win/windows-terminal/managed.json へ取り込む (settings.json には書かない。
                                                           commit は自分で。受け持ちが runner のホストだけ)
   dotfiles import fancyzones <名前>… [--host-file <path>] PC の FancyZones のカスタムレイアウトを名前で選び、
-                                                          win/powertoys/fancyzones/custom-layouts.json へ写す (同上)
+                                                          win/powertoys/fancyzones/custom-layouts.json へ写す (同上。- で始まる
+                                                          名前は -- の後ろに書く)
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
@@ -113,7 +114,20 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         other => return Err(format!("知らないコマンドです: {other}")),
     };
     let mut a = Args::new(command);
+    // import の `--` の後ろは、- で始まっても名前として読む (- で始まるレイアウトの名前)
+    let mut names_only = false;
     while let Some(arg) = iter.next() {
+        if command == Command::Import && (names_only || arg == "--") {
+            if names_only {
+                if a.target.is_none() {
+                    a.target = Some(arg.clone());
+                } else {
+                    a.names.push(arg.clone());
+                }
+            }
+            names_only = true;
+            continue;
+        }
         let (name, inline) = match arg.split_once('=') {
             Some((n, v)) if n.starts_with("--") => (n, Some(v.to_string())),
             _ => (arg.as_str(), None),
@@ -460,7 +474,7 @@ fn steps_command(
         Command::Import => {
             let target = a.target.as_deref().unwrap_or_default();
             ctx.say(format!(
-                "==> dotfiles import {target} (Windows 側の値を repo のファイルへ取り込む。Windows 側には書かない)"
+                "==> dotfiles import {target} (Windows 側の値を repo のファイルへ取り込む。PC の設定のファイルには書かない)"
             ));
             runner::describe_host(&mut ctx);
             let rows = runner::import(&mut ctx, target, &a.names);
@@ -524,6 +538,22 @@ mod tests {
         let f = p(&["import", "fancyzones", "4k-43inch", "1080p"]).unwrap();
         assert_eq!(f.target.as_deref(), Some("fancyzones"));
         assert_eq!(f.names, vec!["4k-43inch".to_string(), "1080p".to_string()]);
+        // -- の後ろは - で始まっても名前
+        let d = p(&[
+            "import",
+            "fancyzones",
+            "--host-file",
+            "h.toml",
+            "--",
+            "-x",
+            "--y",
+        ])
+        .unwrap();
+        assert_eq!(d.names, vec!["-x".to_string(), "--y".to_string()]);
+        assert_eq!(d.host_file, Some(PathBuf::from("h.toml")));
+        let d = p(&["import", "--", "fancyzones", "-x"]).unwrap();
+        assert_eq!(d.target.as_deref(), Some("fancyzones"));
+        assert_eq!(d.names, vec!["-x".to_string()]);
         assert_eq!(p(&["--help"]).unwrap().command, Command::Help);
         assert_eq!(p(&["check", "-h"]).unwrap().command, Command::Help);
     }
@@ -910,6 +940,15 @@ mod tests {
             assert!(out.contains("なので取り込みは止めた"), "{out}");
             assert!(
                 out.contains("nix/scripts/bootstrap-windows-terminal.sh --import を打つ"),
+                "{out}"
+            );
+            // fancyzones は名前ごとに --import を付け、bash の一重引用符で囲む
+            let (code, out, _) = w.run(&["import", "fancyzones", "a b", "it's"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(
+                out.contains(
+                    "nix/scripts/bootstrap-windows-fancyzones.sh --import 'a b' --import 'it'\\''s' を打つ"
+                ),
                 "{out}"
             );
 

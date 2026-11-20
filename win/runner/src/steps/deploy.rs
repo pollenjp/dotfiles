@@ -166,6 +166,11 @@ fn utc_stamp(t: SystemTime) -> String {
     format!("{year:04}{month:02}{day:02}-{h:02}{m:02}{s:02}Z")
 }
 
+/// bash の一重引用符で囲む (`'` は `'\''` にする。jq の `@sh` と同じ形。WSL の script に渡す名前の案内)
+pub fn sh_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
+}
+
 /// 衝突を上書きする (消した 1 行を足し直す) コマンド。受け持ちが WSL の間は、runner の apply はこの手順を流さないので、WSL の script の
 /// `--force` を出す。
 pub fn force_command(ctx: &Ctx, id: &str) -> String {

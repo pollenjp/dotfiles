@@ -310,8 +310,11 @@ fn applied_value(pl: &Jv, uuid: &Jv) -> Jv {
     ])
 }
 
-/// `split("&") | last`
+/// `split("&") | last` を文字列の中に埋めた字 (jq は空の文字列を空の配列に分けるので、last は null で "null" になる)
 fn last_amp(s: &str) -> &str {
+    if s.is_empty() {
+        return "null";
+    }
     s.rsplit('&').next().unwrap_or(s)
 }
 
@@ -894,10 +897,10 @@ pub(super) fn assign_layouts(ctx: &mut Ctx, fz: &mut Fz) {
         .map(|(l, n)| if n > 1 { format!("{l} ({n} 組)") } else { l })
         .collect();
     if fz.mode.writes() {
-        if fz.backup.file(&fz.pc_applied.clone()).is_err() {
+        if fz.backup.copy(&fz.pc_applied.clone()).is_err() {
             let mut l = vec![format!(
                 "FancyZones の applied-layouts.json を退避できないので、ディスプレイへのレイアウトのあて方を書きません: {}",
-                fz.backup.root.display()
+                fz.backup.root().display()
             )];
             l.push(lines.join("\n"));
             failed(
@@ -962,7 +965,7 @@ pub(super) fn assign_layouts(ctx: &mut Ctx, fz: &mut Fz) {
         ctx.say(format!("  {nosrc_line}"));
     }
     if fz.mode.writes()
-        && let Some(dir) = &fz.backup.dir
+        && let Some(dir) = fz.backup.dir()
     {
         ctx.say(format!(
             "  書き換える前のファイルは {} に退避しました。",

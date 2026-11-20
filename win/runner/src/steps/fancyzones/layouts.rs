@@ -14,7 +14,7 @@
 //!
 //! PC にファイルが無ければ、記録によらず repo のレイアウトだけで作る。repo から消したレイアウトは PC から消さず、記録からだけ消す。
 
-use super::{Fz, LAYOUTS_REL, pt_form, read_retry, row, warn};
+use super::{Fz, LAYOUTS_REL, RULES_REL, pt_form, read_retry, row, warn};
 use crate::context::Ctx;
 use crate::jv::{self, Jv};
 use crate::report::Kind;
@@ -537,7 +537,11 @@ pub(super) fn sync_layouts(ctx: &mut Ctx, fz: &mut Fz) {
         ));
         return;
     }
-    let repo = layouts_of(&read_file(&fz.layouts).expect("確かめた"));
+    let Ok(repo_doc) = read_file(&fz.layouts) else {
+        super::reread_failed(ctx, fz, LAYOUTS_REL);
+        return;
+    };
+    let repo = layouts_of(&repo_doc);
     // repo にレイアウトが無ければ、PC のファイルは読まない (前に足した記録があれば消す)
     if repo.is_empty() {
         if fz.record.exists()
@@ -647,8 +651,8 @@ pub(super) fn sync_layouts(ctx: &mut Ctx, fz: &mut Fz) {
         .collect();
     let nwrite = lines.len();
     let nsame = entries.iter().filter(|e| e.action == Action::Same).count();
-    // dry-run では書かないので、後の段が「足したら PC にある」と見られるよう、足す・書き換えるものを渡す
-    if fz.dry() && nwrite > 0 {
+    // check と dry-run では書かないので、後の段が「足したら PC にある」と見られるよう、足す・書き換えるものを渡す
+    if !fz.mode.writes() && nwrite > 0 {
         fz.pending_layouts = entries
             .iter()
             .filter(|e| e.write())
@@ -659,7 +663,8 @@ pub(super) fn sync_layouts(ctx: &mut Ctx, fz: &mut Fz) {
     if nwrite == 0 {
         save_record(ctx, fz, &rec, &repo, &entries, false);
         if entries.iter().all(|e| e.action == Action::Same) {
-            let tail = if pc_only.is_empty() {
+            // WSL は名前を「、」でつないだ文字が空でないときだけ添える (名前が空のものだけなら添えない)
+            let tail = if pc_only.join("、").is_empty() {
                 String::new()
             } else {
                 format!("。PC にだけあるもの {} 件には触りません", pc_only.len())
@@ -702,14 +707,14 @@ pub(super) fn sync_layouts(ctx: &mut Ctx, fz: &mut Fz) {
             report_kept(ctx, fz, &entries);
             return;
         }
-        if fz.backup.file(&fz.pc_layouts.clone()).is_err() {
+        if fz.backup.copy(&fz.pc_layouts.clone()).is_err() {
             failed(
                 ctx,
                 fz,
                 vec![
                     format!(
                         "FancyZones の custom-layouts.json を退避できないので、カスタムレイアウトを書きません: {}",
-                        fz.backup.root.display()
+                        fz.backup.root().display()
                     ),
                     lines.join("\n"),
                 ],
@@ -764,13 +769,13 @@ pub(super) fn sync_layouts(ctx: &mut Ctx, fz: &mut Fz) {
     for l in &lines {
         ctx.say(l);
     }
-    if !pc_only.is_empty() {
+    if !pc_only.join("、").is_empty() {
         ctx.say(format!(
             "  PC にだけあるレイアウトには触りません: {}",
             pc_only.join("、")
         ));
     }
-    if let Some(dir) = &fz.backup.dir {
+    if let Some(dir) = fz.backup.dir() {
         ctx.say(format!(
             "  書き換える前のファイルは {} に退避しました。",
             dir.display()
@@ -896,8 +901,11 @@ pub(super) fn sync_default_layout(ctx: &mut Ctx, fz: &mut Fz) {
             }
         }
     };
-    let repo = layouts_of(&read_file(&fz.layouts).expect("確かめた"));
-    let rules = read_file(&fz.rules).expect("確かめた");
+    let (Ok(repo_doc), Ok(rules)) = (read_file(&fz.layouts), read_file(&fz.rules)) else {
+        super::reread_failed(ctx, fz, RULES_REL);
+        return;
+    };
+    let repo = layouts_of(&repo_doc);
     let tname = rules.get("default").cloned().unwrap_or(Jv::Null);
     let tl = repo
         .iter()
@@ -1034,14 +1042,14 @@ pub(super) fn sync_default_layout(ctx: &mut Ctx, fz: &mut Fz) {
             );
             return;
         }
-        if fz.backup.file(&fz.pc_defaults.clone()).is_err() {
+        if fz.backup.copy(&fz.pc_defaults.clone()).is_err() {
             failed(
                 ctx,
                 fz,
                 [
                     format!(
                         "FancyZones の default-layouts.json を退避できないので、横向きの既定を書きません: {}",
-                        fz.backup.root.display()
+                        fz.backup.root().display()
                     ),
                     format!("{before} → {tname_s}"),
                 ],
@@ -1075,7 +1083,7 @@ pub(super) fn sync_default_layout(ctx: &mut Ctx, fz: &mut Fz) {
     // 作った回は退避していない (同じ回にカスタムレイアウトの段が退避していても、そこに default-layouts.json は無い)
     if fz.mode.writes()
         && !fresh
-        && let Some(dir) = &fz.backup.dir
+        && let Some(dir) = fz.backup.dir()
     {
         ctx.say(format!(
             "  書き換える前のファイルは {} に退避しました。",
@@ -1145,7 +1153,15 @@ pub(super) fn import_layouts(ctx: &mut Ctx, fz: &mut Fz, names: &[String]) -> Ou
         );
     };
     let cur = layouts_of(&pc);
-    let mut doc = read_file(&fz.layouts).expect("確かめた");
+    let Ok(mut doc) = read_file(&fz.layouts) else {
+        return fail(
+            ctx,
+            vec![format!(
+                "{LAYOUTS_REL} を読み直せないので、取り込めません (確かめた後に変わったかもしれません)。"
+            )],
+            format!("{LAYOUTS_REL} を読み直せない"),
+        );
+    };
     let mut log = Vec::new();
     let mut errors = Vec::new();
     let mut changed = false;

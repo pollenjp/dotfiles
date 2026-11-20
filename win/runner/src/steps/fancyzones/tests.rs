@@ -1,19 +1,22 @@
-//! ## 確かめること (WSL の nix/tests/bootstrap-windows-fancyzones.test.sh のケースを、WSL の script との突き合わせと、runner だけの試験に分けたもの)
+//! ## 確かめること (WSL の nix/tests/bootstrap-windows-fancyzones.test.sh のケースを、runner だけの試験と WSL の script との突き合わせに分けたもの)
 //!
-//! - 設定: 値が違えば持つキーだけを書き (ほかのキーの値・順・1 行で末尾に改行なしの形は変えない)、同じなら書かない。無ければ持つキーと
-//!   name・version だけで作る。読めない・書けないときは書かずに知らせる。managed.json の誤りでは書かない
-//! - カスタムレイアウト: uuid で突き合わせて足す・同じなら記録だけ・記録どおりなら書き換える・PC で直した・足す前からあった・消えたものは残して
-//!   知らせる (--force で書き換える・足し直す)。PC にだけあるものには触らない。PowerToys の形 (字下げ 2・CRLF・末尾に改行なし) で書いて退避する
-//! - 横向きの既定: 決まりの default にそろえる (縦向きには触らない)。無ければ横向きの項目だけで作る
-//! - あて方: テンプレートの組を解像度の決まりのレイアウトにし、組の無い仮想デスクトップに組を作り、記録する。手であてた組は残す (--force で
-//!   上書き)。縦向き・つながっていないディスプレイの組には触らない。決まりや解像度が変われば、前にあてた組を移す。番号が振り直されたら、
-//!   同じ画面の組を写して今の番号の組を作る
-//! - 全体の設定で FancyZones がオフなら知らせる
-//! - check と dry-run は何も書かない (ディスプレイは聞く)
-//! - 取り込みは PC のレイアウトを名前で選んで repo へ写す (PC のファイルと記録には書かない)
-//! - PowerShell の本文・記録と退避の名前・待つ秒数が WSL の script と同じ
-//! - WSL の script (偽の powershell.exe・sleep と本物の bash・jq) と一続きの場面を同じ状態から流し、同じバイト列の settings.json・custom-layouts.json・
-//!   default-layouts.json・applied-layouts.json・記録を書き、同じ計画の行を出す (bash と jq がある Linux)
+//! runner だけの試験 (偽の Sys。Windows の CI でも流れる):
+//! - 何も無い PC で設定・カスタムレイアウト・横向きの既定を作り、次の回は揃っている (書かない)
+//! - 設定: 値が違えば持つキーだけを書き (ほかのキーの値・順・1 行で末尾に改行なしの形は変えない)、読めなければ 5 回読んでから知らせる
+//! - カスタムレイアウト: PC で直した・消したものは残して知らせ、--force で書き換える・足し直す (退避する)。取り込みは PC の名前で選んで repo へ写す
+//!   (誤りがあれば何も書かない。PC のファイルは変えない)
+//! - あて方: 解像度の決まりで埋め・組を作り・記録する。解像度が変われば前にあてた組を移す。手であてた組は残し、--force で上書きする。縦向きの
+//!   組には触らない。ディスプレイは -EncodedCommand で、WSL と同じ本文で聞く。PowerShell が無い・返りが決めた形でなければ書かない
+//! - check と dry-run は何も書かず、カスタムレイアウトの段が足すものを PC にあるものとして見る。FancyZones がオフなら知らせる
+//! - 書いた後に更新時刻を進める (touch)
+//! - PowerShell の本文・記録と退避の名前・待つ秒数・書く形が WSL の script の字と同じ
+//! - 本物の Windows PowerShell がディスプレイを聞く本文を流し、決めた形の JSON を返す (Windows の CI)
+//!
+//! WSL の script との突き合わせ (偽の powershell.exe・sleep と本物の bash・jq。要るコマンドだけの PATH): 一続きの場面 (作る・揃う・組をあてる・
+//! 解像度を変える・手であてた組・--force・番号の振り直し (手であてた古い組を写す分かれ道も)・横向きの既定の組・同じ画面の組が無い画面・番号で
+//! 合わせる・PC で直した/消したレイアウト・既定のレイアウトを消した・横向きの既定・repo の更新・オフ・PowerShell が無い・壊れた記録・変わった値・
+//! 設定の端・dry-run) で、4 つのファイル・記録・退避の数・計画の行 (--force の行も)・警告の頭の行が同じ。取り込み (誤りも) のバイト列と文が
+//! 同じ。WSL が書いたものを、記録の無い runner が変えずに引き継ぐ
 
 use super::*;
 use crate::hooks::parity;
@@ -45,6 +48,7 @@ const INST_B: &str = "4&22222222&0&UID202";
 const INST_C: &str = "4&33333333&0&UID303";
 const VD1: &str = "{11111111-1111-1111-1111-111111111111}";
 const VD2: &str = "{22222222-2222-2222-2222-222222222222}";
+#[cfg(unix)]
 const VD3: &str = "{33333333-3333-3333-3333-333333333333}";
 const UUID_4K: &str = "{67070A77-52EC-4EC3-9F63-DF5E58CD4400}";
 const UUID_1080: &str = "{E389FFDC-3BDD-48CB-B448-0672774C5997}";
@@ -595,6 +599,75 @@ fn reports_fancyzones_off() {
     assert!(!e.fz("custom-layouts.json").exists() && !e.state().exists());
 }
 
+/// 書いた後に更新時刻を今にする (FancyZones は LastWriteTime の変更しか見ない)
+#[test]
+fn touch_moves_the_write_time() {
+    let e = Env::new();
+    let p = e.fz("settings.json");
+    e.put(&p, "{}");
+    let old = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(946_684_800);
+    std::fs::File::options()
+        .write(true)
+        .open(&p)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+    touch(&p).unwrap();
+    let now = std::fs::metadata(&p).unwrap().modified().unwrap();
+    assert!(
+        now > old + std::time::Duration::from_secs(3600 * 24 * 365),
+        "{now:?}"
+    );
+    assert!(touch(&e.fz("missing.json")).is_err());
+}
+
+/// check も dry-run と同じく、カスタムレイアウトの段が足すレイアウトを PC にあるものとして見る (何も無い PC で、組にあてる・作ると出す)
+#[test]
+fn check_sees_layouts_it_would_add() {
+    let e = Env::new();
+    e.put(
+        &e.fz("applied-layouts.json"),
+        &applied(vec![
+            group(MON_A, INST_A, 1, "0", VD1, &template("priority-grid")),
+            group(MON_B, INST_B, 2, "0", VD1, &template("priority-grid")),
+        ]),
+    );
+    for mode in [Mode::Check, Mode::DryRun { force: false }] {
+        let (rows, out, _) = e.run(mode, Some(&two_displays()));
+        assert!(
+            rows.iter().all(|r| r.kind != Kind::Manual),
+            "{mode:?}: {rows:?}\n{out}"
+        );
+        assert!(
+            out.contains(
+                "AAA0001 (UID101)・3840x2160・仮想デスクトップ 11111111: priority-grid → 4k-43inch"
+            ),
+            "{mode:?}: {out}"
+        );
+        assert!(out.contains("組なし → 1080p"), "{mode:?}: {out}");
+        assert!(!e.fz("custom-layouts.json").exists() && !e.state().exists());
+    }
+    // 何も足さないなら、check も足りないと出す (PC で消したレイアウト)
+    let e = Env::new();
+    e.run(APPLY, None);
+    let mut pc = e.doc(&e.fz("custom-layouts.json"));
+    let mut list = pc
+        .get("custom-layouts")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
+    list.remove(1);
+    pc.set("custom-layouts", Jv::Array(list));
+    e.put(&e.fz("custom-layouts.json"), &pt_form(&pc));
+    let (rows, out, _) = e.run(Mode::Check, Some(&two_displays()));
+    assert!(
+        rows.iter()
+            .any(|r| r.kind == Kind::Manual && r.text.contains("1080p")),
+        "{rows:?}\n{out}"
+    );
+}
+
 /// PowerShell の本文・記録と退避の名前・待つ秒数・書く形が WSL の script と同じ (bash の版が流れない Windows の CI でも比べる)
 #[test]
 fn matches_the_wsl_script_text() {
@@ -632,6 +705,31 @@ fn matches_the_wsl_script_text() {
     assert!(text.contains("jq -ecj --slurpfile m \"${managed_file}\""));
     assert!(text.contains(r#"{uuid: $uuid, type: "custom", "show-spacing": false, spacing: 0, "zone-count": (.info.zones | length),"#));
     assert!(text.contains(r#"{uuid: $tl.uuid, type: "custom", "show-spacing": false, spacing: 0, "zone-count": 0, "sensitivity-radius": 0} as $want"#));
+}
+
+/// 本物の Windows PowerShell が、ディスプレイと仮想デスクトップを聞く本文を -EncodedCommand で流し、決めた形の JSON を返す (Windows。読むだけ)
+#[cfg(windows)]
+#[test]
+fn real_powershell_answers_displays() {
+    use crate::process::{RealSys, Sys};
+    let Some(shell) = RealSys.which("powershell") else {
+        return;
+    };
+    let spec = ps1::encoded_command(shell, assign::PS_BODY, std::time::Duration::from_secs(120))
+        .stdout_only();
+    let r = RealSys.run(&spec, &mut |_| {});
+    assert_eq!(r.exit, Exit::Code(0), "{:?}", r.output);
+    let v = Jv::parse(&r.output.join("\n")).unwrap_or_else(|e| panic!("{e}: {:?}", r.output));
+    assert!(
+        matches!(v.get("displays"), Some(Jv::Array(_))),
+        "{}",
+        v.compact()
+    );
+    assert!(
+        matches!(v.get("desktops"), Some(Jv::Array(_))),
+        "{}",
+        v.compact()
+    );
 }
 
 /// 突き合わせに使う、要るコマンドだけを並べた PATH (本物の powershell.exe を見せない)
@@ -730,7 +828,20 @@ fn wsl_run(e: &Env, args: &[&str], displays: Option<&str>) -> (i32, String) {
     )
 }
 
-/// 比べる出力の行 (段の見出し・計画の行・揃っている行。置き場所の頭は <root> に、コマンドと退避の行は除く)
+/// 打つコマンドを含む行 (受け持ちで替えるので、WSL と runner で字が違う)
+#[cfg(unix)]
+fn names_a_command(l: &str) -> bool {
+    [
+        "bootstrap-windows",
+        "dotfiles apply",
+        "dotfiles import",
+        "WSL で",
+    ]
+    .iter()
+    .any(|c| l.contains(c))
+}
+
+/// 比べる出力の行 (段の見出し・計画の行 (--force の行も)・揃っている行。置き場所の頭は <root> に、コマンドと退避の行は除く)
 #[cfg(unix)]
 fn plan_lines(out: &str, root: &Path) -> Vec<String> {
     let r = root.display().to_string();
@@ -741,11 +852,98 @@ fn plan_lines(out: &str, root: &Path) -> Vec<String> {
                 || (l.starts_with("  ") && !l.starts_with("   "))
                 || l.starts_with("FancyZones の"))
                 && !l.contains("退避しました")
-                && !l.contains("--force")
-                && !l.contains("bootstrap-windows")
-                && !l.contains("dotfiles apply")
+                && !names_a_command(l)
         })
         .collect()
+}
+
+/// 比べる警告の頭の行 (WSL は stderr に出すので、計画の行とは分けて、警告どうしの順で比べる。PowerShell の呼び名が違う警告 (powershell.exe と
+/// Windows PowerShell) は除く)
+#[cfg(unix)]
+fn warn_lines(out: &str, root: &Path) -> Vec<String> {
+    let r = root.display().to_string();
+    out.lines()
+        // 記録の置き場は WSL と runner で違う
+        .map(|l| {
+            l.replace(&format!("{r}/home/.local/state/dotfiles"), "<state>")
+                .replace(&format!("{r}/state"), "<state>")
+                .replace(&r, "<root>")
+        })
+        .filter(|l| {
+            l.starts_with("!! ") && !l.to_lowercase().contains("powershell") && !names_a_command(l)
+        })
+        .collect()
+}
+
+/// WSL の script と runner を同じ引数で 1 回ずつ流し、書いた 4 つのファイル・記録・退避の数・比べる出力の行が同じかを見る
+#[cfg(unix)]
+fn compare(name: &str, wsl: &Env, ours: &Env, args: &[&str], shows: Option<&str>) {
+    let (code, wsl_out) = wsl_run(wsl, args, shows);
+    assert_eq!(code, 0, "{name}: {wsl_out}");
+    let mode = if args.contains(&"--dry-run") {
+        Mode::DryRun {
+            force: args.contains(&"--force"),
+        }
+    } else {
+        Mode::Apply {
+            force: args.contains(&"--force"),
+        }
+    };
+    let (_, out, _) = ours.run(mode, shows);
+    let ctx = format!("{name}:\n--- WSL\n{wsl_out}\n--- runner\n{out}");
+    for f in [
+        "settings.json",
+        "custom-layouts.json",
+        "default-layouts.json",
+        "applied-layouts.json",
+    ] {
+        assert_eq!(ours.read(&ours.fz(f)), wsl.read(&wsl.fz(f)), "{f} {ctx}");
+    }
+    let wsl_state = wsl.root().join("home/.local/state/dotfiles");
+    for rec in [RECORD_FILE, ASSIGNED_FILE] {
+        assert_eq!(
+            ours.read(&ours.state().join(rec)),
+            wsl.read(&wsl_state.join(rec)),
+            "{rec} {ctx}"
+        );
+    }
+    assert_eq!(
+        ours.backups(&ours.state()),
+        wsl.backups(&wsl_state),
+        "退避 {ctx}"
+    );
+    assert_eq!(
+        plan_lines(&out, ours.root()),
+        plan_lines(&wsl_out, wsl.root()),
+        "{ctx}"
+    );
+    assert_eq!(
+        warn_lines(&out, ours.root()),
+        warn_lines(&wsl_out, wsl.root()),
+        "{ctx}"
+    );
+}
+
+/// 両方の場に同じ変更をする
+#[cfg(unix)]
+fn both(wsl: &Env, ours: &Env, f: impl Fn(&Env)) {
+    f(wsl);
+    f(ours);
+}
+
+/// PC のエディターで作ったレイアウトを足す
+#[cfg(unix)]
+fn add_mine(e: &Env) {
+    let mut pc = e.doc(&e.fz("custom-layouts.json"));
+    let mut list = pc
+        .get("custom-layouts")
+        .unwrap()
+        .as_array()
+        .unwrap()
+        .clone();
+    list.push(my_layout());
+    pc.set("custom-layouts", Jv::Array(list));
+    e.put(&e.fz("custom-layouts.json"), &pt_form(&pc));
 }
 
 /// WSL の script と runner を一続きの場面で同じ状態から流し、書いたファイル・記録・退避の数・計画の行が同じかを見る。bash・jq が無ければ飛ばし、
@@ -949,48 +1147,219 @@ fn does_what_the_wsl_script_does() {
             Some(shows_two.clone()),
         ),
     ];
-    let wsl_state = wsl.root().join("home/.local/state/dotfiles");
     for (name, change, args, shows) in &steps {
         change(&wsl);
         change(&ours);
-        let (code, wsl_out) = wsl_run(&wsl, args, shows.as_deref());
-        assert_eq!(code, 0, "{name}: {wsl_out}");
-        let mode = if args.contains(&"--dry-run") {
-            Mode::DryRun {
-                force: args.contains(&"--force"),
-            }
-        } else {
-            Mode::Apply {
-                force: args.contains(&"--force"),
-            }
-        };
-        let (_, out, _) = ours.run(mode, shows.as_deref());
-        let ctx = format!("{name}:\n--- WSL\n{wsl_out}\n--- runner\n{out}");
-        for f in [
-            "settings.json",
-            "custom-layouts.json",
-            "default-layouts.json",
-            "applied-layouts.json",
-        ] {
-            assert_eq!(ours.read(&ours.fz(f)), wsl.read(&wsl.fz(f)), "{f} {ctx}");
-        }
-        for rec in [RECORD_FILE, ASSIGNED_FILE] {
-            assert_eq!(
-                ours.read(&ours.state().join(rec)),
-                wsl.read(&wsl_state.join(rec)),
-                "{rec} {ctx}"
-            );
-        }
-        assert_eq!(
-            ours.backups(&ours.state()),
-            wsl.backups(&wsl_state),
-            "退避 {ctx}"
+        compare(name, &wsl, &ours, args, shows.as_deref());
+    }
+}
+
+/// 番号の振り直しの直後で、そのデスクトップの古い組が手であてたもの (カスタム・PC にだけあるレイアウト) なら、作る組はそのレイアウトを写して記録
+/// しない (--force なら決まりのレイアウトで作る)
+#[cfg(unix)]
+#[test]
+fn renumbering_keeps_hand_assigned_groups() {
+    if !parity::available() {
+        return;
+    }
+    let (wsl, ours) = (Env::new(), Env::new());
+    compare("はじめ", &wsl, &ours, &[], Some(&two_displays()));
+    both(&wsl, &ours, add_mine);
+    let other = "{12345678-1234-1234-1234-123456789ABC}";
+    both(&wsl, &ours, |e: &Env| {
+        e.put(
+            &e.fz("applied-layouts.json"),
+            &applied(vec![
+                group(MON_A, INST_A, 1, "0", VD1, &custom(UUID_MINE, 1)),
+                group(MON_A, INST_A, 1, "0", VD2, &template("grid")),
+                group(MON_B, INST_B, 2, "0", VD1, &template("grid")),
+                group(MON_B, INST_B, 2, "0", VD2, &custom(other, 2)),
+            ]),
+        )
+    });
+    let renumbered = displays_json(
+        &[
+            disp(MON_A, INST_A, 2, 3840, 2160),
+            disp(MON_B, INST_B, 1, 1920, 1080),
+        ],
+        &[VD1, VD2],
+    );
+    compare(
+        "振り直し (dry-run)",
+        &wsl,
+        &ours,
+        &["--dry-run"],
+        Some(&renumbered),
+    );
+    compare("振り直し", &wsl, &ours, &[], Some(&renumbered));
+    compare("もう一度", &wsl, &ours, &[], Some(&renumbered));
+    compare("--force", &wsl, &ours, &["--force"], Some(&renumbered));
+}
+
+/// 横向きの既定 (決まりの default) があたった 4K の組は目標にし、同じ画面の組がどこにも無い画面には作らず、instance が違えば番号で合わせる
+#[cfg(unix)]
+#[test]
+fn default_layout_groups_nosrc_and_number_fallback() {
+    if !parity::available() {
+        return;
+    }
+    let (wsl, ours) = (Env::new(), Env::new());
+    compare("はじめ", &wsl, &ours, &[], Some(&two_displays()));
+    both(&wsl, &ours, |e: &Env| {
+        e.put(
+            &e.fz("applied-layouts.json"),
+            &applied(vec![
+                group(MON_A, INST_A, 1, "0", VD1, &custom(UUID_1080, 3)),
+                group(MON_B, "4&99999999&0&UID999", 2, "0", VD1, &template("grid")),
+            ]),
+        )
+    });
+    let shows = displays_json(
+        &[
+            disp(MON_A, INST_A, 1, 3840, 2160),
+            disp(MON_B, INST_B, 2, 1920, 1080),
+            disp(MON_C, INST_C, 3, 1920, 1080),
+        ],
+        &[VD1, VD2],
+    );
+    compare(
+        "既定・組の無い画面・番号で合わせる",
+        &wsl,
+        &ours,
+        &[],
+        Some(&shows),
+    );
+    compare("もう一度", &wsl, &ours, &[], Some(&shows));
+}
+
+/// 何も無い PC (組はある) の dry-run は、カスタムレイアウトの段が足すものを PC にあるものとして見る。apply は足してからあてる
+#[cfg(unix)]
+#[test]
+fn fresh_pc_with_groups() {
+    if !parity::available() {
+        return;
+    }
+    let (wsl, ours) = (Env::new(), Env::new());
+    both(&wsl, &ours, |e: &Env| {
+        e.put(
+            &e.fz("applied-layouts.json"),
+            &applied(vec![
+                group(MON_A, INST_A, 1, "0", VD1, &template("priority-grid")),
+                group(MON_B, INST_B, 2, "0", VD1, &template("priority-grid")),
+            ]),
         );
-        assert_eq!(
-            plan_lines(&out, ours.root()),
-            plan_lines(&wsl_out, wsl.root()),
-            "{ctx}"
+        e.put(&e.fz("default-layouts.json"), "{\"default-layouts\":[]}");
+    });
+    compare(
+        "dry-run",
+        &wsl,
+        &ours,
+        &["--dry-run"],
+        Some(&two_displays()),
+    );
+    compare("apply", &wsl, &ours, &[], Some(&two_displays()));
+}
+
+/// 決まりの default のレイアウト (1080p) を PC で消した: 横向きの既定とあて方は飛ばして知らせ、--force で足し直してからあてる
+#[cfg(unix)]
+#[test]
+fn deleted_default_layout() {
+    if !parity::available() {
+        return;
+    }
+    let (wsl, ours) = (Env::new(), Env::new());
+    compare("はじめ", &wsl, &ours, &[], Some(&two_displays()));
+    both(&wsl, &ours, |e: &Env| {
+        e.put(
+            &e.fz("applied-layouts.json"),
+            &applied(vec![
+                group(MON_A, INST_A, 1, "0", VD1, &template("grid")),
+                group(MON_B, INST_B, 2, "0", VD1, &template("grid")),
+                group(MON_B, INST_B, 2, "9", VD1, &template("rows")),
+            ]),
         );
+        let mut pc = e.doc(&e.fz("custom-layouts.json"));
+        let mut list = pc
+            .get("custom-layouts")
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone();
+        list.remove(1);
+        pc.set("custom-layouts", Jv::Array(list));
+        e.put(&e.fz("custom-layouts.json"), &pt_form(&pc));
+    });
+    compare("1080p を消した", &wsl, &ours, &[], Some(&two_displays()));
+    compare(
+        "dry-run --force",
+        &wsl,
+        &ours,
+        &["--dry-run", "--force"],
+        Some(&two_displays()),
+    );
+    compare("--force", &wsl, &ours, &["--force"], Some(&two_displays()));
+}
+
+/// 変わった値 (小数の番号・null や空の値・重なった仮想デスクトップ・末尾の改行・形の合わない id)
+#[cfg(unix)]
+#[test]
+fn odd_values() {
+    if !parity::available() {
+        return;
+    }
+    let (wsl, ours) = (Env::new(), Env::new());
+    compare("はじめ", &wsl, &ours, &[], Some(&two_displays()));
+    let raw = r#"{"applied-layouts":[
+ {"device":{"monitor":"AAA0001","monitor-instance":"4&11111111&0&UID101","monitor-number":1.0,"virtual-desktop":"{11111111-1111-1111-1111-111111111111}"},"applied-layout":{"uuid":"{00000000-0000-0000-0000-000000000000}","type":"grid","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}},
+ {"device":{"monitor":"BBB0002","monitor-instance":"","monitor-number":2,"serial-number":null,"virtual-desktop":"{22222222-2222-2222-2222-222222222222}"},"applied-layout":{"uuid":"{00000000-0000-0000-0000-000000000000}","type":"grid","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}},
+ {"device":{"monitor":"BBB0002","monitor-instance":"","monitor-number":2,"serial-number":"x","virtual-desktop":"{11111111-1111-1111-1111-111111111111}"},"applied-layout":{"uuid":"{00000000-0000-0000-0000-000000000000}","type":"focus","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}}
+]}"#;
+    both(&wsl, &ours, |e: &Env| {
+        e.put(
+            &e.fz("applied-layouts.json"),
+            &pt_form(&Jv::parse(raw).unwrap()),
+        )
+    });
+    let shows = r#"{"displays":[{"device":"\\\\.\\DISPLAY1","id":"\\\\?\\DISPLAY#AAA0001#4&11111111&0&UID101#{e6f07b5f-ee97-4a90-b076-33f57bf4eaa7}","width":3840,"height":2160},{"device":"\\\\.\\DISPLAY2\n","id":"\\\\?\\DISPLAY#BBB0002##{e6f07b5f}","width":1920,"height":1080},{"device":"\\\\.\\DISPLAY3","id":"\\\\?\\DISPLAY#CCC#x","width":1920,"height":1080}],"desktops":["{11111111-1111-1111-1111-111111111111}","{22222222-2222-2222-2222-222222222222}","{22222222-2222-2222-2222-222222222222}","{00000000-0000-0000-0000-000000000000}","{33333333-3333-3333-3333-333333333333}\n","not-a-guid"]}"#;
+    compare("変わった値", &wsl, &ours, &[], Some(shows));
+    compare("もう一度", &wsl, &ours, &[], Some(shows));
+}
+
+/// 設定の端 (途中が object でない・値が null・逃がした字と数・properties が無い・最上位が配列)
+#[cfg(unix)]
+#[test]
+fn settings_edges() {
+    if !parity::available() {
+        return;
+    }
+    let cases: Vec<(&str, &str, &[&str])> = vec![
+        (
+            "途中が object でない (dry-run)",
+            r#"{"properties":5,"name":"FancyZones","version":"1.0"}"#,
+            &["--dry-run"],
+        ),
+        (
+            "途中が object でない",
+            r#"{"properties":5,"name":"FancyZones","version":"1.0"}"#,
+            &[],
+        ),
+        (
+            "値が null",
+            r#"{"properties":{"fancyzones_overrideSnapHotkeys":{"value":null}},"name":"FancyZones"}"#,
+            &[],
+        ),
+        (
+            "逃がした字と数",
+            "{\"properties\":{\"a\":{\"value\":\"\\u0026<>\\u00e9\\u007f\\/\"},\"b\":{\"value\":1.50},\"c\":{\"value\":1e2},\"fancyzones_overrideSnapHotkeys\":{\"value\":false}},\"name\":\"FancyZones\",\"version\":\"1.0\"}",
+            &[],
+        ),
+        ("properties が無い", r#"{"name":"FancyZones"}"#, &[]),
+        ("最上位が配列", r#"[1]"#, &[]),
+    ];
+    for (name, body, args) in cases {
+        let (wsl, ours) = (Env::new(), Env::new());
+        both(&wsl, &ours, |e: &Env| e.put(&e.fz("settings.json"), body));
+        compare(name, &wsl, &ours, args, None);
     }
 }
 
@@ -1076,6 +1445,143 @@ fn imports_the_same_bytes_as_the_wsl_script() {
         ours.read(&ours.repo_file(LAYOUTS_REL)),
         wsl.read(&wsl.repo_file(LAYOUTS_REL))
     );
+}
+
+/// 取り込みの誤りも WSL の --import と同じ (PC に同じ名前が 2 つ・小文字の uuid・repo の別のレイアウトと同じ名前・無い名前・repo と同じ・' を含む名前)。
+/// 誤りがあれば何も書かず、同じ文を出す
+#[cfg(unix)]
+#[test]
+fn import_errors_match_the_wsl_script() {
+    if !parity::available() {
+        return;
+    }
+    let git = |dir: &Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+    };
+    type Edit = Box<dyn Fn(&mut Vec<Jv>)>;
+    let cases: Vec<(&str, Edit, &[&str])> = vec![
+        (
+            "PC に同じ名前が 2 つ",
+            Box::new(|l: &mut Vec<Jv>| {
+                let mut a = my_layout();
+                a.set("uuid", Jv::from("{AAAAAAAA-0000-0000-0000-000000000001}"));
+                l.push(my_layout());
+                l.push(a);
+            }),
+            &["mine"],
+        ),
+        (
+            "小文字の uuid",
+            Box::new(|l: &mut Vec<Jv>| {
+                let mut a = my_layout();
+                a.set("uuid", Jv::from("{aaaaaaaa-0000-0000-0000-000000000001}"));
+                l.push(a);
+            }),
+            &["mine"],
+        ),
+        (
+            "repo の別のレイアウトと同じ名前",
+            Box::new(|l: &mut Vec<Jv>| {
+                l[1].set("name", Jv::from("4k-43inch"));
+                l[0].set("name", Jv::from("old4k"));
+            }),
+            &["4k-43inch"],
+        ),
+        (
+            "repo と同じと、無い名前",
+            Box::new(|_: &mut Vec<Jv>| {}),
+            &["1080p", "nothing"],
+        ),
+        ("repo と同じ", Box::new(|_: &mut Vec<Jv>| {}), &["1080p"]),
+        (
+            "' を含む名前",
+            Box::new(|l: &mut Vec<Jv>| {
+                let mut a = my_layout();
+                a.set("name", Jv::from("it's"));
+                l.push(a);
+            }),
+            &["it's"],
+        ),
+    ];
+    for (name, edit, names) in &cases {
+        let envs = [Env::new(), Env::new()];
+        for e in &envs {
+            e.run(APPLY, None);
+            let mut pc = e.doc(&e.fz("custom-layouts.json"));
+            let mut list = pc
+                .get("custom-layouts")
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .clone();
+            edit(&mut list);
+            pc.set("custom-layouts", Jv::Array(list));
+            e.put(&e.fz("custom-layouts.json"), &pt_form(&pc));
+            git(&e.root().join("repo"), &["init", "-q"]);
+            git(&e.root().join("repo"), &["add", "win"]);
+            git(
+                &e.root().join("repo"),
+                &[
+                    "-c",
+                    "user.name=t",
+                    "-c",
+                    "user.email=t@example.invalid",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "m",
+                ],
+            );
+        }
+        let (wsl, ours) = (&envs[0], &envs[1]);
+        let args: Vec<String> = names
+            .iter()
+            .flat_map(|n| ["--import".to_string(), n.to_string()])
+            .collect();
+        let argv: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (code, wsl_out) = wsl_run(wsl, &argv, None);
+        let mut buf = Vec::new();
+        let o = {
+            let mut ctx = Ctx {
+                repo: ours.root().join("repo"),
+                roots: Roots::from_home(&ours.root().join("win")),
+                state_dir: ours.state(),
+                host: parse(
+                    RUNNER_HOST,
+                    Path::new("h.toml"),
+                    Groups::embedded().unwrap(),
+                )
+                .unwrap(),
+                sys: &crate::process::RealSys,
+                out: &mut buf,
+            };
+            import(
+                &mut ctx,
+                &names.iter().map(|n| n.to_string()).collect::<Vec<_>>(),
+            )
+        };
+        let out = String::from_utf8(buf).unwrap();
+        let ctx = format!("{name}:\n--- WSL\n{wsl_out}\n--- runner\n{out}");
+        assert_eq!(code == 0, o.kind == Kind::Ok, "{ctx}");
+        assert_eq!(
+            ours.read(&ours.repo_file(LAYOUTS_REL)),
+            wsl.read(&wsl.repo_file(LAYOUTS_REL)),
+            "{ctx}"
+        );
+        assert_eq!(
+            warn_lines(&out, ours.root()),
+            warn_lines(&wsl_out, wsl.root()),
+            "{ctx}"
+        );
+    }
 }
 
 /// 受け持ちを切り替えた後の引き継ぎ: WSL の script が書いたものを、記録の無い runner が変えずに読み、記録は WSL の記録と同じになる

@@ -1,8 +1,9 @@
 //! jq と同じ読み書きをする JSON の値 (`Jv`)。WSL の jq で書く手順 (terminal・powertoys・fancyzones) を写すとき、WSL と同じバイト列を書き、jq と
 //! 同じく比べるため。
 //!
-//! - 読む (`Jv::parse`): RFC 8259 の JSON の値を 1 つ (頭の BOM は読み飛ばす。jq と同じ)。jq が JSON の外で受ける書き方 (`nan`・頭の 0・`+1`・
-//!   `.5`・続けて並べた 2 つ目の値) と、深すぎる入れ子は読めないものとする (どれも、書かずに知らせる側に倒れる)
+//! - 読む (`Jv::parse`): RFC 8259 の JSON の値を 1 つ (頭の BOM は読み飛ばす。jq と同じ)。jq が JSON の外で受ける書き方 (`nan`・`Infinity`・
+//!   頭の 0 (`012`・`-01`)・`+1`・`.5`・`5.`・続けて並べた 2 つ目の値・対の無いサロゲート (jq は U+FFFD にする)・指数が大きすぎる数) と、UTF-8 で
+//!   ないバイト列・512 段より深い入れ子は読めないものとする (どれも、書かずに知らせる側に倒れる)
 //! - 数は字のまま (係数の桁と指数) 持ち、jq (1.7 から。decNumber) と同じ形で書く: `1.50` はそのまま、`1e2` は `1E+2`、`0.0000001` は `1E-7`
 //! - 比べる (`jq_eq`) のは jq の `==` と同じ: object はキーの順を見ず、数は十進の値で比べる (`1` と `1.0` は同じ、`0.85` と
 //!   `0.84999999999999998` は違う)
@@ -52,7 +53,7 @@ impl Num {
     /// 整数として読めるならその値 (`20`・`2.0E+1` も 20。小数部の残るもの・i64 に収まらないものは None)
     pub fn as_i64(&self) -> Option<i64> {
         let (neg, coef, exp) = self.normalized();
-        if exp < 0 {
+        if !(0..=18).contains(&exp) {
             return None;
         }
         let mut digits = coef.to_string();
@@ -336,7 +337,8 @@ impl Jv {
         entries[i].1.set_path(rest, value)
     }
 
-    /// jq の `delpaths([path])` (途中が無ければ何もしない)
+    /// jq の `delpaths([path])` (途中が無い・object でなければ何もしない。jq は途中が object でも null でもなければエラー。呼ぶのは持つキーの
+    /// パスだけなので、途中はいつも object)
     pub fn del_path(&mut self, path: &[String]) {
         let Some((last, parents)) = path.split_last() else {
             *self = Jv::Null;
@@ -1039,6 +1041,47 @@ mod tests {
         let d = Jv::parse(r#"{"a":1}"#).unwrap();
         assert!(!jq_eq(&a, &d));
         assert!(!jq_eq(&d, &a));
+    }
+
+    /// jq の `sort`・`group_by`・`tostring`・`test("^…$")` と同じ (期待する値は jq 1.8.2 の出力)
+    #[test]
+    fn orders_groups_and_strings_like_jq() {
+        let mut v = Jv::parse(r#"[null, true, false, 1, "a", [1], {"a":1}, 0.5, "B", [0], {"a":0}, {"b":0}, -1, "", []]"#)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone();
+        v.sort_by(jq_cmp);
+        assert_eq!(
+            Jv::Array(v).compact(),
+            r#"[null,false,true,-1,0.5,1,"","B","a",[],[0],[1],{"a":0},{"a":1},{"b":0}]"#
+        );
+        let items = Jv::parse(r#"[{"k":"b","v":1},{"k":null,"v":2},{"k":"a","v":3},{"k":"b","v":4},{"k":1,"v":5},{"k":"a","v":6}]"#)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .clone();
+        let groups: Vec<Vec<String>> =
+            group_by(&items, |i| i.get("k").cloned().unwrap_or(Jv::Null))
+                .iter()
+                .map(|g| g.iter().map(|i| i.get("v").unwrap().compact()).collect())
+                .collect();
+        assert_eq!(
+            groups,
+            vec![vec!["2"], vec!["5"], vec!["3", "6"], vec!["1", "4"]]
+        );
+        let strs: Vec<String> = Jv::parse(r#"[1, "x", null, [1,"a"], {"a":[1]}]"#)
+            .unwrap()
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(Jv::tostring)
+            .collect();
+        assert_eq!(strs, vec!["1", "x", "null", "[1,\"a\"]", "{\"a\":[1]}"]);
+        assert_eq!(anchored("abc\n"), "abc");
+        assert_eq!(anchored("abc\r\n"), "abc\r");
+        assert_eq!(anchored("abc\n\n"), "abc\n");
+        assert_eq!(anchored("abc"), "abc");
     }
 
     fn p(keys: &[&str]) -> Vec<String> {

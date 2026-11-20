@@ -358,7 +358,6 @@ struct Tally {
     update: usize,
     conflicts: usize,
     blocked: usize,
-    errors: usize,
 }
 
 impl Tally {
@@ -370,9 +369,6 @@ impl Tally {
         if self.blocked > 0 {
             s.push_str(&format!(" / 書けない {}", self.blocked));
         }
-        if self.errors > 0 {
-            s.push_str(&format!(" / エラー {}", self.errors));
-        }
         if matches!(mode, Mode::DryRun { .. }) {
             s = format!("[dry-run] {s}");
         }
@@ -380,9 +376,7 @@ impl Tally {
     }
 
     fn kind(&self, mode: Mode) -> Kind {
-        if self.errors > 0 {
-            Kind::Failed
-        } else if self.conflicts > 0 || self.blocked > 0 {
+        if self.conflicts > 0 || self.blocked > 0 {
             Kind::Manual
         } else if mode.writes() {
             Kind::Ok
@@ -596,7 +590,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
             ));
         }
     }
-    let backup_root = ctx.state_dir.join(BACKUP_REL);
+    let backup_root = join_segments(&ctx.state_dir, BACKUP_REL);
     if !conflicts.is_empty() {
         ctx.say(format!(
             "!! Windows 側で変わっていた (か、書く前からあった) ので、次のキーには触っていません (値は上): {}",
@@ -649,10 +643,14 @@ fn write_settings(
     writes: &[&Entry],
 ) -> Result<PathBuf, Outcome> {
     let shown = settings_path.display().to_string();
-    let backup_root = ctx.state_dir.join(BACKUP_REL);
-    let dir = match fsutil::backup_run_dir(&backup_root, KEEP_BACKUPS)
-        .and_then(|d| fsutil::copy_into(settings_path, &d).map(|_| d))
-    {
+    let backup_root = join_segments(&ctx.state_dir, BACKUP_REL);
+    let mut backup = fsutil::RunBackup::new(backup_root.clone(), KEEP_BACKUPS);
+    let dir = match backup.copy(settings_path).and_then(|()| {
+        backup
+            .dir()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| std::io::Error::other("settings.json が無い"))
+    }) {
         Ok(d) => d,
         Err(e) => {
             ctx.say(format!(
@@ -1004,9 +1002,10 @@ mod tests {
         }
 
         fn backups(&self) -> Vec<PathBuf> {
-            let mut found: Vec<PathBuf> = std::fs::read_dir(self.state().join(BACKUP_REL))
-                .map(|es| es.flatten().map(|e| e.path()).collect())
-                .unwrap_or_default();
+            let mut found: Vec<PathBuf> =
+                std::fs::read_dir(join_segments(&self.state(), BACKUP_REL))
+                    .map(|es| es.flatten().map(|e| e.path()).collect())
+                    .unwrap_or_default();
             found.sort();
             found
         }
@@ -1636,12 +1635,33 @@ mod tests {
             )
             .unwrap();
         }
-        let o = std::process::Command::new("bash")
+        // 要るコマンドだけを並べた PATH と空の環境で流す (WSL の試験と同じ。本物の Windows の exe を見せず、手元の git の設定も読ませない)
+        let bin = root.join(format!("sys-bin-{}", std::process::id()));
+        std::fs::create_dir_all(&bin).unwrap();
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        for c in [
+            "bash", "jq", "git", "cat", "mkdir", "mktemp", "mv", "cp", "rm", "date", "find",
+            "sort", "sed", "cmp", "dirname",
+        ] {
+            let link = bin.join(c);
+            if link.exists() {
+                continue;
+            }
+            let found = std::env::split_paths(&path)
+                .filter(|d| !d.starts_with("/mnt"))
+                .map(|d| d.join(c))
+                .find(|p| p.is_file())
+                .unwrap_or_else(|| panic!("{c} が無い"));
+            std::os::unix::fs::symlink(found, link).unwrap();
+        }
+        let o = std::process::Command::new(bin.join("bash"))
             .arg(&script)
             .args(args)
+            .env_clear()
             .env("HOME", root.join("home"))
-            .env_remove("DOTFILES_SETUP_WARNINGS")
+            .env("PATH", &bin)
             .env("NO_COLOR", "1")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
             .stdin(std::process::Stdio::null())
             .output()
             .unwrap();

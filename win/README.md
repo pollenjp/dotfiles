@@ -213,8 +213,9 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
   あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
-- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal` と `fancyzones`)。Windows 側の値を repo のファイルへ写し、Windows 側には
-  書かない。repo のファイルに commit していない変更があると止まる。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
+- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal` と `fancyzones`)。Windows 側の値を repo のファイルへ写し、PC の設定の
+  ファイル (settings.json など) には書かない (terminal は runner の記録を取り込んだ値にする。WSL の `--import` も記録は書く)。repo のファイルに commit して
+  いない変更があると止まる。`-` で始まるレイアウトの名前は `--` の後ろに書く。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
 
 ### ホストの値
 
@@ -298,6 +299,9 @@ scanData = "https://app.notion.com/p/…"
   - FancyZones の「PC から消えています」(runner はレイアウトを足し直す)・「PC のエディターで直されています」(runner は「足す前からあった」として
     知らせる)。WSL が決まりであてた組は、runner の初めての apply が「同じ」と見て記録するので、その前に解像度や決まりを変えると、記録の無い
     runner には見分けられず「手であてた組」として残る (`--force` で決まりのレイアウトにする)
+  - PowerToys の「前の回は PowerToys の起動を確かめられなかった」(WSL の印 `~/.local/state/dotfiles/powertoys-enable.pending`)・「自動起動のタスクが
+    ありません」・「Keyboard Manager の設定 (settings.json) がまだ無い」。runner は WSL の印を読まないので、全体の設定が両方オンなら起動と確認を
+    やり直さず、そのまま読み直させて記録する
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -403,8 +407,8 @@ gate が違うと、試験が落ちる
   (`src/steps/terminal.rs`・`powertoys.rs`・`fancyzones/`) は、`bootstrap-windows-terminal.sh` (bash と jq)・`bootstrap-windows-powertoys.sh` (偽の
   `powershell.exe`・`pwsh.exe`・`sleep`)・`bootstrap-windows-fancyzones.sh` (偽の `powershell.exe`・`sleep`) を同じ状態から流し、書く JSON のバイト列・
   記録・退避・PowerToys を止める・起こす・イベントを送る順・計画の行と、取り込み (`--import`) が同じかを突き合わせる (偽の exe は要るコマンドだけを
-  並べた PATH で流し、本物の Windows の exe を見せない)。jq の数の書き方 (`1e2` → `1E+2` など) は、CI の Linux の jq (1.7) と手元の jq (1.8) で
-  違わない範囲の数で突き合わせ、jq 1.8 の書き方は `jv.rs` の単体の試験で比べる。bash の版を直したら、Rust の写しも同じに直す
+  並べた PATH で流し、本物の Windows の exe を見せない)。jq は 1.7 から数の字を保って書く (`1e2` → `1E+2`・`1.50` はそのまま。CI の Linux の
+  ubuntu の jq 1.7.1 も手元の 1.8.2 も同じ)。その書き方は `jv.rs` の単体の試験でも比べる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -2087,6 +2091,11 @@ Keyboard Manager は PowerToys の既定でオフで、オフだとエンジン�
 イベントを送る PowerShell の本文は WSL と同じで、Windows PowerShell に `-EncodedCommand` で渡す。記録と印は `%LOCALAPPDATA%\dotfiles\state\`
 (`powertoys-keyboard-manager.reloaded`・`powertoys-enable.pending`)。`dotfiles check` と `apply --dry-run` は全体の設定・Keyboard Manager の
 `settings.json`・記録を読むだけで、PowerToys を止めない・起こさない・イベントを送らない・winget を打たない。
+
+- SSH の会話の中 (`SSH_CONNECTION` がある) の `dotfiles apply` は、PowerToys に触らず (入れる・止める・起こす・読み直させるをせず)、確かめた結果と ⚠ を
+  出す。SSH の会話 (セッション 0) からは、デスクトップの会話の PowerToys のプロセスも Keyboard Manager のイベントも見えず、止める・起こすと別の
+  PowerToys を起こし、読み直させないまま記録してしまうため。PC のデスクトップの PowerShell で流す
+- 管理者の PowerShell から流さない。起動し直した PowerToys も管理者で動き、次にふつうの PowerShell から止められなくなる
 
 ### FancyZones
 

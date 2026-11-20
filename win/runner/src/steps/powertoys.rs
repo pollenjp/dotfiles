@@ -115,8 +115,30 @@ impl Step for PowerToys {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
+        // SSH の会話 (Win32-OpenSSH はセッション 0) からは、デスクトップの会話の PowerToys のプロセスも名前付きイベントも見えない。止める・
+        // 起こすと 2 つ目の PowerToys をセッション 0 に起こし、イベントは「無い」と読んで読み直させないまま記録してしまうので、確かめるだけにする
+        // (WSL の setup はデスクトップの端末からしか流れないので、この分かれ道は runner にだけある)
+        if mode.writes() && in_ssh(ctx) {
+            ctx.say("SSH の会話の中なので、PowerToys に触ること (入れる・止める・起こす・読み直させる) はせず、確かめるだけにします (デスクトップの会話の PowerToys とイベントは、SSH の会話から見えないため)。");
+            let mut rows = sync(ctx, Mode::Check);
+            rows.push(
+                Outcome::new(
+                    Kind::Manual,
+                    "SSH の会話の中なので PowerToys に触らなかった (上の行は確かめた結果)",
+                )
+                .note("PC のデスクトップの PowerShell (管理者でないもの) で dotfiles apply --steps powertoys を流す"),
+            );
+            return rows;
+        }
         sync(ctx, mode)
     }
+}
+
+/// SSH の会話の中か (sshd が SSH_CONNECTION・SSH_CLIENT を渡す。win/openssh/Install-Sshd.ps1 と同じ見方)
+fn in_ssh(ctx: &Ctx) -> bool {
+    ["SSH_CONNECTION", "SSH_CLIENT"]
+        .iter()
+        .any(|k| ctx.sys.env(k).is_some_and(|v| !v.is_empty()))
 }
 
 /// 流している間の状態 (WSL の script の変数)。
@@ -369,10 +391,13 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
                 ctx.say(
                     "今の default.json を読み直させた記録がありません (apply で読み直させる)。",
                 );
-                st.rows.push(Outcome::new(
-                    Kind::Fix,
-                    "今の default.json を Keyboard Manager に読み直させていない → apply で読み直させる (PowerToys は止めない)",
-                ));
+                // オンにする (起動し直す) 行があるときは、止めないとは言わない
+                let text = if st.rows.iter().any(|r| r.kind == Kind::Fix) {
+                    "今の default.json を Keyboard Manager に読み直させていない → apply で読み直させる"
+                } else {
+                    "今の default.json を Keyboard Manager に読み直させていない → apply で読み直させる (PowerToys は止めない)"
+                };
+                st.rows.push(Outcome::new(Kind::Fix, text));
             }
         }
         Mode::DryRun { .. } => {
@@ -541,18 +566,14 @@ fn install(ctx: &mut Ctx, st: &mut St) {
             }
         },
         (exit, _) => {
-            let headline = match exit {
-                Exit::TimedOut => format!(
-                    "PowerShell が {CHECK_SECS} 秒たっても終わりませんでした (時間切れ)。PowerToys が入っているかを確かめられません:"
-                ),
-                Exit::Code(c) => format!(
-                    "PowerShell で PowerToys が入っているかを確かめられませんでした (終了コード {c}):"
-                ),
-                Exit::NoCode => "PowerShell で PowerToys が入っているかを確かめられませんでした (終了コードが無い):".to_string(),
-                Exit::SpawnFailed(e) => format!(
-                    "PowerShell で PowerToys が入っているかを確かめられませんでした (起こせなかった: {e}):"
-                ),
+            let why = match exit {
+                Exit::TimedOut => format!("{CHECK_SECS} 秒たっても終わらない。時間切れ"),
+                Exit::Code(c) => format!("終了コード {c}"),
+                Exit::NoCode => "終了コードが無い".to_string(),
+                Exit::SpawnFailed(e) => format!("起こせなかった: {e}"),
             };
+            let headline =
+                format!("PowerShell で PowerToys が入っているかを確かめられませんでした ({why}):");
             let mut lines = vec![headline.clone()];
             if !out.is_empty() {
                 lines.push(out.join("\n"));
@@ -562,10 +583,7 @@ fn install(ctx: &mut Ctx, st: &mut St) {
             st.rows.push(
                 Outcome::new(
                     Kind::Failed,
-                    headline
-                        .trim_end_matches(':')
-                        .replace("ませんでした", "なかった")
-                        .replace("ません", "ない"),
+                    format!("PowerShell で PowerToys が入っているかを確かめられなかった ({why})"),
                 )
                 .note("PowerShell で Install-PowerToys を打つと、確かめて、入っていなければ入れられる"),
             );
@@ -839,7 +857,7 @@ fn start_and_confirm(ctx: &mut Ctx, st: &mut St, offs: &str, done: &str) {
             st,
             Kind::Failed,
             format!(
-                "PowerToys を起動できなかった (終了コード {rc}。設定には書いたので、スタートメニューから起動すると{offs}がオンになる)"
+                "PowerToys を起動できなかった (終了コード {rc}。設定には書いたので、スタートメニューから起動すると、{offs}がオンになる)"
             ),
             &lines,
         );
@@ -959,24 +977,30 @@ fn wait_km_settings(ctx: &mut Ctx, st: &mut St) {
 
 #[cfg(test)]
 mod tests {
-    //! ## 確かめること (WSL の nix/tests/bootstrap-windows-powertoys.test.sh と同じケースに、check・dry-run と受け持ちで替える案内を足したもの)
+    //! ## 確かめること (WSL の nix/tests/bootstrap-windows-powertoys.test.sh のケースを、runner だけの試験と WSL の script との突き合わせに分けたもの)
     //!
-    //! - default.json が無いときは、PowerShell の本文を流さずに飛ばす (入っているかは確かめる)
-    //! - 送れたら記録し、同じ default.json では送らない。変われば送る。--force なら変わらなくても送る。PowerToys が動いていない (absent) ときも
-    //!   記録する。PowerShell が無い・失敗する・知らない出力なら、手で読み直す方法を出して記録しない
-    //! - Keyboard Manager の settings.json が無い・有効なプロファイルが default でないときは、送らず記録もしない
-    //! - 入っているかは -Check (60 秒) で見て、3 なら -IfMissing (600 秒) で入れる。確かめられない・入れられないときも続きへ進む
+    //! runner だけの試験 (偽の Sys。Windows の CI でも流れる):
+    //! - 送れたら記録し、同じ default.json では送らない。変われば送る。--force なら変わらなくても送る。送る本文は WSL と同じ字
+    //! - PowerToys が動いていない (absent) ときも記録する。PowerShell が無い・失敗する・知らない出力なら、手で読み直す方法を出して記録しない
+    //! - Keyboard Manager の settings.json が無い・有効なプロファイルが default でないときは、送らず記録もしない (できた後の回で送る)
+    //! - 入っていない (-Check が 3) なら -IfMissing で入れる。入れられない・時間切れ・-Check が失敗する・見出しが無い・時間切れ・起こせないときも
+    //!   知らせて続きへ進む。default.json が無くても入っているかは確かめる
     //! - Keyboard Manager か自動起動がオフなら、止める → 両方を true に書く (ほかの項目とキーの順と 1 行の形は変えない) → 起動する → 確かめる。
-    //!   次の回は起動し直さない。全体の設定が無ければ 2 つだけで作る
-    //! - オンにできないとき (run_elevated・止められない・失敗する・PowerToys が無い・書けない・起動できない・エンジンが動かない・起動の後もオフ) は
-    //!   手順を出し、止めた後は起動し直す。Keyboard Manager がオフのままなら、記録もイベントも触らない
-    //! - 自動起動のタスクが無いと知らせる。全体の設定を読みかけても、読み直して確かめる。書いた後に起動や確認でつまずいたら印を残し、次の回が
-    //!   やり直す
-    //! - 入れた直後と起動した直後は、Keyboard Manager の settings.json ができるのを 30 秒まで待ち、待つときは記録を消す
-    //! - check と dry-run は何も書かず、PowerToys を止めない・起こさない・イベントを送らない・-IfMissing を打たない
-    //! - PowerShell の本文・記録と印の名前・待つ秒数が WSL の script と同じ
-    //! - WSL の script (偽の powershell.exe・pwsh.exe・sleep) と同じ状態から流し、同じ順に止める・起こす・待つ・送る、同じ全体の設定・記録・印を
-    //!   書く (bash と jq がある Linux)
+    //!   全体の設定が無ければ 2 つだけで作る。オンにできないとき (run_elevated・止められない・失敗する・起動できない・エンジンが動かない) は
+    //!   手順を出し、止めた後は起動する。書いた後につまずいたら印を残し、次の回が起動と確認をやり直す。自動起動のタスクが無いと知らせる
+    //! - 入れた直後と起動した直後は、Keyboard Manager の settings.json ができるのを 30 秒まで待つ (待つときは記録を消す)
+    //! - check と dry-run は、印・記録・settings.json の有無や全体の設定の形によらず何も書かず、-Check のほかの本文を流さない。受け持ちが WSL の
+    //!   間の check は、runner の記録が無いことを ✔ で知らせる。起動し直す行があるときは「止めない」と言わない
+    //! - SSH の会話の中の apply は、PowerToys に触らずに確かめるだけにして manual を足す
+    //! - PowerShell の本文・記録と印の名前・待つ秒数・判定の語が WSL の script の字と同じ
+    //! - 本物の Windows PowerShell が、PowerToys の入っていないマシンで本文を -EncodedCommand で流す (Windows の CI)
+    //!
+    //! WSL の script との突き合わせ (偽の powershell.exe・pwsh.exe・sleep と本物の bash・jq。要るコマンドだけの PATH):
+    //! - 40 を超える場面 (送れた・動いていない・送れない・オンにする・止められない・PowerToys が無い・書けない・起動できない・エンジンが動かない・
+    //!   タスクが無い・起動の後もオフ・印・run_elevated・入れる・入れられない・確かめられない・全体の設定と settings.json の形 (null・配列・空・
+    //!   BOM・CRLF・同じキー・数と逃がした字)・読みかけが書き終わる・--force) を同じ状態から 2 回ずつ流し、受けた本文の種類と本文 (バイト単位)・
+    //!   待った回数・全体の設定・記録・印が同じ。JSON の値が 2 つ並ぶ全体の設定は、runner は読めないものとする (WSL は 2 つをつないで書き戻す)
+    //!   ので比べない
 
     use super::*;
     use crate::hooks::parity;
@@ -1015,10 +1039,13 @@ mod tests {
         start_writes: Option<String>,
         wait: (i32, String),
         event: (i32, String),
-        /// n 回目に待ったときに、Keyboard Manager の settings.json をこの中身で書く
+        /// n 回目に待ったときに、Keyboard Manager の settings.json (`sleep_global` なら全体の設定) をこの中身で書く (書きかけが書き終わる)
         sleep_write: Option<(usize, String)>,
+        sleep_global: bool,
         /// PowerShell (powershell・pwsh) を置くか
         shells: bool,
+        /// SSH の会話の中 (SSH_CONNECTION がある) か
+        ssh: bool,
     }
 
     impl Default for Fake {
@@ -1032,7 +1059,9 @@ mod tests {
                 wait: (0, "ready task".into()),
                 event: (0, "set".into()),
                 sleep_write: None,
+                sleep_global: false,
                 shells: true,
+                ssh: false,
             }
         }
     }
@@ -1119,16 +1148,36 @@ mod tests {
             host: &str,
             mode: Mode,
         ) -> (Vec<Outcome>, String, Vec<String>, usize) {
+            let (rows, out, steps, sleeps, _) = self.run_full(fake, host, mode);
+            (rows, out, steps, sleeps)
+        }
+
+        /// `run` と同じに流し、Windows PowerShell に渡した本文 (-EncodedCommand を戻したもの) も順に返す
+        fn run_full(
+            &self,
+            fake: &Fake,
+            host: &str,
+            mode: Mode,
+        ) -> (Vec<Outcome>, String, Vec<String>, usize, Vec<String>) {
             let steps = Rc::new(RefCell::new(Vec::<String>::new()));
-            let (s, f, global, km) = (
+            let bodies = Rc::new(RefCell::new(Vec::<String>::new()));
+            let (s, b, f, global, km) = (
                 steps.clone(),
+                bodies.clone(),
                 fake.clone(),
                 self.global(),
-                self.km_settings(),
+                if fake.sleep_global {
+                    self.global()
+                } else {
+                    self.km_settings()
+                },
             );
             let mut sys = FakeSys::new(move |c| {
                 let kind = classify(c);
                 s.borrow_mut().push(kind.clone());
+                if let Some(body) = ps1::decode_command(c) {
+                    b.borrow_mut().push(body);
+                }
                 let (rc, out) = match kind.as_str() {
                     "check" => f.check.clone(),
                     "ifmissing" => f.install.clone(),
@@ -1152,6 +1201,9 @@ mod tests {
                     .with_program("pwsh", "/fake/pwsh")
                     .with_program("powershell", "/fake/powershell");
             }
+            if fake.ssh {
+                sys = sys.with_env("SSH_CONNECTION", "100.64.0.2 50000 100.64.0.1 22");
+            }
             if let Some((at, content)) = fake.sleep_write.clone() {
                 sys = sys.with_on_sleep(move |n| {
                     if n == at {
@@ -1173,7 +1225,8 @@ mod tests {
             };
             let sleeps = sys.sleeps.borrow().len();
             let steps = steps.borrow().clone();
-            (rows, String::from_utf8(out).unwrap(), steps, sleeps)
+            let bodies = bodies.borrow().clone();
+            (rows, String::from_utf8(out).unwrap(), steps, sleeps, bodies)
         }
 
         fn apply(&self, fake: &Fake) -> (Vec<Outcome>, String, Vec<String>, usize) {
@@ -1240,9 +1293,9 @@ mod tests {
         };
         run_ps(&mut ctx, &ps_event());
         let body = ps1::decode_command(&sys.calls.borrow()[0]).unwrap();
-        assert!(
-            body.starts_with("$ProgressPreference = 'SilentlyContinue'; $h = $null;"),
-            "{body}"
+        assert_eq!(
+            body,
+            format!("$ProgressPreference = 'SilentlyContinue'; {}", ps_event())
         );
         assert!(body.contains("TryOpenExisting('PowerToys_KeyboardManager_Event_Settings'"));
         assert_eq!(sys.calls.borrow()[0].program, PathBuf::from("C:/ps.exe"));
@@ -1627,6 +1680,219 @@ mod tests {
         );
     }
 
+    /// SSH の会話の中の apply は、PowerToys に触らない (入れない・止めない・起こさない・送らない) で確かめるだけにし、manual を足す
+    #[test]
+    fn ssh_session_only_checks() {
+        let e = Env::new();
+        let g = global_settings(false, false, false);
+        e.put(&e.global(), &g);
+        let f = Fake {
+            ssh: true,
+            check: (3, MISSING_OUT.into()),
+            ..Fake::default()
+        };
+        let (rows, out, steps, sleeps) = e.apply(&f);
+        assert_eq!(steps, vec!["check"], "{out}");
+        assert_eq!(sleeps, 0);
+        assert!(out.contains("SSH の会話の中なので"), "{out}");
+        let last = rows.last().unwrap();
+        assert_eq!(last.kind, Kind::Manual, "{rows:?}");
+        assert!(
+            last.notes[0].contains("デスクトップの PowerShell"),
+            "{:?}",
+            last.notes
+        );
+        assert_eq!(e.read(&e.global()).unwrap(), g);
+        assert!(!e.record().exists() && !e.pending().exists());
+        // 揃っていても、読み直させた記録が無ければ送らずに知らせる (SSH からはイベントが見えない)
+        let e = Env::new();
+        let f = Fake {
+            ssh: true,
+            ..Fake::default()
+        };
+        let (rows, out, steps, _) = e.apply(&f);
+        assert_eq!(steps, vec!["check"], "{out}");
+        assert_eq!(rows.last().unwrap().kind, Kind::Manual);
+        assert!(!e.record().exists());
+        // check は SSH の会話でも同じ (manual を足さない)
+        let (rows, _, _, _) = e.run(&f, RUNNER_HOST, Mode::Check);
+        assert!(rows.iter().all(|r| r.kind != Kind::Manual), "{rows:?}");
+    }
+
+    /// check と dry-run は、印・記録・Keyboard Manager の settings.json の有無や全体の設定の形によらず何も書かず、-Check のほかの本文を流さない
+    #[test]
+    fn check_and_dry_run_matrix() {
+        let sum = fsutil::sha256_bytes(DEFAULT_JSON.as_bytes());
+        type Prep = Box<dyn Fn(&Env)>;
+        let preps: Vec<(&str, Prep, Fake)> = vec![
+            (
+                "印 + 両方オン + 記録は同じ",
+                Box::new(move |e: &Env| {
+                    e.put(&e.pending(), "");
+                    e.put(&e.record(), &format!("{sum}\n"));
+                }),
+                Fake::default(),
+            ),
+            (
+                "印 + run_elevated",
+                Box::new(|e: &Env| {
+                    e.put(&e.pending(), "");
+                    e.put(&e.global(), &global_settings(true, true, true));
+                }),
+                Fake::default(),
+            ),
+            (
+                "印 + Keyboard Manager の settings.json が無い",
+                Box::new(|e: &Env| {
+                    e.put(&e.pending(), "");
+                    std::fs::remove_file(e.km_settings()).unwrap();
+                }),
+                Fake::default(),
+            ),
+            (
+                "入っていない + 全体の設定が無い",
+                Box::new(|e: &Env| std::fs::remove_file(e.global()).unwrap()),
+                Fake {
+                    check: (3, MISSING_OUT.into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "自動起動だけオフ + 記録が違う",
+                Box::new(|e: &Env| {
+                    e.put(&e.global(), &global_settings(true, false, false));
+                    e.put(&e.record(), "x\n");
+                }),
+                Fake::default(),
+            ),
+            (
+                "run_elevated + オフ",
+                Box::new(|e: &Env| e.put(&e.global(), &global_settings(false, true, true))),
+                Fake::default(),
+            ),
+            (
+                "全体の設定が読めない",
+                Box::new(|e: &Env| e.put(&e.global(), "{")),
+                Fake::default(),
+            ),
+        ];
+        for (name, prep, fake) in &preps {
+            for host in [RUNNER_HOST, WSL_HOST] {
+                for mode in [
+                    Mode::Check,
+                    Mode::DryRun { force: false },
+                    Mode::DryRun { force: true },
+                ] {
+                    let e = Env::new();
+                    prep(&e);
+                    let snap = |e: &Env| {
+                        (
+                            e.read(&e.global()),
+                            e.read(&e.km_settings()),
+                            e.read(&e.record()),
+                            e.pending().exists(),
+                        )
+                    };
+                    let before = snap(&e);
+                    let (rows, out, steps, _) = e.run(fake, host, mode);
+                    assert_eq!(snap(&e), before, "{name} {mode:?}\n{out}");
+                    assert_eq!(steps, vec!["check"], "{name} {mode:?}\n{out}");
+                    assert!(!rows.is_empty(), "{name} {mode:?}");
+                }
+            }
+        }
+        // 自動起動だけオフで記録も違うときは、起動し直す行があるので「止めない」とは言わない
+        let e = Env::new();
+        e.put(&e.global(), &global_settings(true, false, false));
+        let (rows, _, _, _) = e.run(&Fake::default(), RUNNER_HOST, Mode::Check);
+        assert_eq!(rows.len(), 2, "{rows:?}");
+        assert!(!rows[1].text.contains("止めない"), "{rows:?}");
+        let e = Env::new();
+        let (rows, _, _, _) = e.run(&Fake::default(), RUNNER_HOST, Mode::Check);
+        assert!(rows[0].text.contains("(PowerToys は止めない)"), "{rows:?}");
+    }
+
+    /// 時間切れ・起こせない PowerShell: -Check は確かめられなかったと出して進み、イベントは送れなかったとして記録しない
+    #[test]
+    fn timeouts_and_spawn_failures() {
+        let run_with = |e: &Env, sys: &FakeSys| {
+            let mut out = Vec::new();
+            let rows = {
+                let mut ctx = Ctx {
+                    repo: e.t.path().join("dotfiles"),
+                    roots: Roots::from_home(&e.t.path().join("win")),
+                    state_dir: e.state(),
+                    host: parse(
+                        RUNNER_HOST,
+                        Path::new("h.toml"),
+                        Groups::embedded().unwrap(),
+                    )
+                    .unwrap(),
+                    sys,
+                    out: &mut out,
+                };
+                PowerToys.run(&mut ctx, APPLY)
+            };
+            (rows, String::from_utf8(out).unwrap())
+        };
+        let e = Env::new();
+        let sys = FakeSys::new(|c| RunResult {
+            exit: if ps1::decode_command(c).is_some() {
+                Exit::SpawnFailed("見つからない".into())
+            } else {
+                Exit::TimedOut
+            },
+            output: vec![],
+        })
+        .with_program("pwsh", "/fake/pwsh")
+        .with_program("powershell", "/fake/powershell");
+        let (rows, out) = run_with(&e, &sys);
+        assert_eq!(rows[0].kind, Kind::Failed, "{rows:?}");
+        assert_eq!(
+            rows[0].text,
+            format!(
+                "PowerShell で PowerToys が入っているかを確かめられなかった ({CHECK_SECS} 秒たっても終わらない。時間切れ)"
+            )
+        );
+        assert_eq!(rows.last().unwrap().kind, Kind::Failed);
+        assert!(
+            rows.last().unwrap().text.contains("終了コード 127"),
+            "{rows:?}"
+        );
+        assert!(out.contains("オフにしてオンに戻す"), "{out}");
+        assert!(!e.record().exists());
+        // -IfMissing が時間切れ: 知らせて読み直しへ進む
+        let e = Env::new();
+        let sys = FakeSys::new(|c| {
+            let a = c.args_lossy().join(" ");
+            RunResult {
+                exit: if a.contains("-IfMissing") {
+                    Exit::TimedOut
+                } else if a.contains("-Check") {
+                    Exit::Code(3)
+                } else {
+                    Exit::Code(0)
+                },
+                output: if a.contains("-Check") {
+                    MISSING_OUT.lines().map(str::to_string).collect()
+                } else {
+                    vec!["set".into()]
+                },
+            }
+        })
+        .with_program("pwsh", "/fake/pwsh")
+        .with_program("powershell", "/fake/powershell");
+        let (rows, _) = run_with(&e, &sys);
+        assert_eq!(rows[0].kind, Kind::Failed, "{rows:?}");
+        assert!(
+            rows[0]
+                .text
+                .contains(&format!("{INSTALL_SECS} 秒待っても終わらない")),
+            "{rows:?}"
+        );
+        assert_eq!(rows.last().unwrap().kind, Kind::Ok, "{rows:?}");
+    }
+
     /// PowerShell の本文・記録と印の名前・待つ秒数・判定の語が WSL の script と同じ (bash の版が流れない Windows の CI でも比べる)
     #[test]
     fn matches_the_wsl_script_text() {
@@ -1670,6 +1936,44 @@ mod tests {
         assert!(text.contains("jq -r '.properties.activeConfiguration.value // empty'"));
         assert!(text.contains("for ((i = 0; i < 30; i++)); do"));
         assert!(text.contains("for ((i = 0; i < 5; i++)); do"));
+    }
+
+    /// 本物の Windows PowerShell が、止める・起動する・イベントを送る本文を -EncodedCommand で流す (CI の windows-latest だけ。PowerToys が入って
+    /// いるマシンでは流さない (止めてしまうため)。入っていなければ、本文は PowerToys.exe を探した所で no-exe で終わり、イベントも無い)
+    #[cfg(windows)]
+    #[test]
+    fn real_powershell_runs_the_bodies_without_powertoys() {
+        use crate::process::RealSys;
+        let exe_at = |var: &str| {
+            std::env::var(var)
+                .map(|v| {
+                    Path::new(&v)
+                        .join("PowerToys")
+                        .join("PowerToys.exe")
+                        .exists()
+                })
+                .unwrap_or(false)
+        };
+        if std::env::var("CI").is_err() || exe_at("LOCALAPPDATA") || exe_at("ProgramFiles") {
+            return;
+        }
+        let mut out = Vec::new();
+        let mut ctx = Ctx {
+            repo: "C:/r".into(),
+            roots: Roots::from_home(Path::new("C:/h")),
+            state_dir: "C:/s".into(),
+            host: parse(
+                RUNNER_HOST,
+                Path::new("h.toml"),
+                Groups::embedded().unwrap(),
+            )
+            .unwrap(),
+            sys: &RealSys,
+            out: &mut out,
+        };
+        assert_eq!(run_ps(&mut ctx, &ps_stop()), (0, "no-exe".to_string()));
+        assert_eq!(run_ps(&mut ctx, &ps_start()), (0, "no-exe".to_string()));
+        assert_eq!(run_ps(&mut ctx, &ps_event()), (0, "absent".to_string()));
     }
 
     /// 突き合わせに使う、要るコマンドだけを並べた PATH (本物の powershell.exe と pwsh.exe を見せない)
@@ -1718,7 +2022,8 @@ mod tests {
         let scripts = [
             (
                 "powershell.exe",
-                r#"case "$*" in
+                r#"mkdir -p "${FAKE_LOG}/bodies"; printf '%s' "$4" >"${FAKE_LOG}/bodies/$(grep -c '' "${FAKE_LOG}/steps" 2>/dev/null || echo 0)"
+case "$*" in
   *PToyTrayIconWindow*) step=stop; out=${FAKE_PS_STOP-stopped}; rc=${FAKE_PS_STOP_RC:-0} ;;
   *Start-Process*)
     step=start
@@ -1803,7 +2108,14 @@ printf 'C:\\fake\\%s\n' "${2##*/}"
         .env("PATH", format!("{}:{}", fakes.display(), sys.display()))
         .env("FAKE_LOG", &log)
         .env("FAKE_GLOBAL", e.global())
-        .env("FAKE_KM", e.km_settings())
+        .env(
+            "FAKE_KM",
+            if fake.sleep_global {
+                e.global()
+            } else {
+                e.km_settings()
+            },
+        )
         .env("FAKE_PWSH_OUT", &fake.check.1)
         .env("FAKE_PWSH_RC", fake.check.0.to_string())
         .env("FAKE_PWSH_OUT2", &fake.install.1)
@@ -1856,6 +2168,19 @@ printf 'C:\\fake\\%s\n' "${2##*/}"
             Box::new(move |e: &Env| e.put(&e.global(), &global_settings(km, startup, elevated)))
         };
         let on_after_start = Some(global_settings(true, true, false));
+        // 前の回が書いた後に起動や確認でつまずいた (印がある。WSL の印も置く)
+        let pending = |km: bool, startup: bool, elevated: bool| -> Prep {
+            Box::new(move |e: &Env| {
+                e.put(&e.global(), &global_settings(km, startup, elevated));
+                e.put(&e.pending(), "");
+                e.put(
+                    &e.t.path()
+                        .join("wsl/.local/state/dotfiles")
+                        .join(PENDING_FILE),
+                    "",
+                );
+            })
+        };
         let cases: Vec<(&str, Prep, Fake)> = vec![
             ("送れた", Box::new(|_| {}), Fake::default()),
             (
@@ -2007,66 +2332,287 @@ printf 'C:\\fake\\%s\n' "${2##*/}"
                     ..Fake::default()
                 },
             ),
+            (
+                "Keyboard Manager はオンで止められない",
+                off(true, false, false),
+                Fake {
+                    stop: (0, "still-running".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "Keyboard Manager はオンで止める途中で落ちる",
+                off(true, false, false),
+                Fake {
+                    stop: (1, "boom".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "PowerToys が見つからない",
+                off(false, false, false),
+                Fake {
+                    stop: (0, "no-exe".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "PowerToys が見つからない (Keyboard Manager はオン)",
+                off(true, false, false),
+                Fake {
+                    stop: (0, "no-exe".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "エンジンを確かめられない",
+                off(false, false, false),
+                Fake {
+                    wait: (1, "err".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "起動の後に Keyboard Manager がオフ",
+                off(false, false, false),
+                Fake {
+                    start_writes: Some(global_settings(false, true, false)),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "印と run_elevated",
+                pending(true, true, true),
+                Fake::default(),
+            ),
+            (
+                "印があって起動できない",
+                pending(true, true, false),
+                Fake {
+                    start: (1, "x".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "止める出力に余計な行",
+                off(false, false, false),
+                Fake {
+                    stop: (0, "WARNING: x\nstopped".into()),
+                    ..Fake::default()
+                },
+            ),
+            (
+                "全体の設定が null",
+                Box::new(|e: &Env| e.put(&e.global(), "null")),
+                Fake::default(),
+            ),
+            (
+                "全体の設定が配列",
+                Box::new(|e: &Env| e.put(&e.global(), "[]")),
+                Fake::default(),
+            ),
+            (
+                "enabled が文字列",
+                Box::new(|e: &Env| e.put(&e.global(), r#"{"enabled":"x","startup":true}"#)),
+                Fake::default(),
+            ),
+            (
+                "enabled が null",
+                Box::new(|e: &Env| e.put(&e.global(), r#"{"enabled":null,"startup":true}"#)),
+                Fake::default(),
+            ),
+            (
+                "全体の設定が空",
+                Box::new(|e: &Env| e.put(&e.global(), "")),
+                Fake::default(),
+            ),
+            (
+                "全体の設定が BOM つき",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.global(),
+                        &format!("\u{feff}{}", global_settings(false, true, false)),
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "全体の設定に同じキー",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.global(),
+                        r#"{"startup":true,"enabled":{"Keyboard Manager":true},"startup":false}"#,
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "全体の設定が CRLF つき",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.global(),
+                        &format!("{}\r\n", global_settings(false, true, false)),
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "全体の設定に数や逃がした字がある",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.global(),
+                        r#"{"startup":false,"enabled":{"AdvancedPaste":true,"Keyboard Manager":false},"run_elevated":false,"theme":"system","ratio":1.50,"big":12345678901234567890,"neg":-0,"exp":1e2,"small":0.0000001,"esc":"a\u002Bb&c\/d\u00e9日","ctl":"\u0001\t","empty_obj":{},"empty_arr":[]}"#,
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "KM の value が配列",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.km_settings(),
+                        r#"{"properties":{"activeConfiguration":{"value":["default"]}}}"#,
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "KM の properties が文字列",
+                Box::new(|e: &Env| e.put(&e.km_settings(), r#"{"properties":"x"}"#)),
+                Fake::default(),
+            ),
+            (
+                "KM の settings が BOM つき",
+                Box::new(|e: &Env| e.put(&e.km_settings(), &format!("\u{feff}{KM_SETTINGS}"))),
+                Fake::default(),
+            ),
+            (
+                "KM の value が空の文字列",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.km_settings(),
+                        r#"{"properties":{"activeConfiguration":{"value":""}}}"#,
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "KM の value が true",
+                Box::new(|e: &Env| {
+                    e.put(
+                        &e.km_settings(),
+                        r#"{"properties":{"activeConfiguration":{"value":true}}}"#,
+                    )
+                }),
+                Fake::default(),
+            ),
+            (
+                "入口で全体の設定を読みかけ",
+                Box::new(|e: &Env| e.put(&e.global(), "{\"startup\":tr")),
+                Fake {
+                    sleep_write: Some((1, global_settings(true, true, false))),
+                    sleep_global: true,
+                    ..Fake::default()
+                },
+            ),
+            (
+                "起動の後に全体の設定を読みかけ",
+                off(false, false, false),
+                Fake {
+                    start_writes: Some("{\"startup\":tr".into()),
+                    sleep_write: Some((1, global_settings(true, true, false))),
+                    sleep_global: true,
+                    ..Fake::default()
+                },
+            ),
+            (
+                "Keyboard Manager の settings.json が書きかけ",
+                Box::new(|e: &Env| {
+                    e.put(&e.km_settings(), "{\"properties\":");
+                    e.put(&e.global(), &global_settings(false, false, false));
+                }),
+                Fake {
+                    start_writes: Some(global_settings(true, true, false)),
+                    sleep_write: Some((5, KM_SETTINGS.into())),
+                    ..Fake::default()
+                },
+            ),
         ];
         for (name, prep, fake) in &cases {
             let wsl = Env::new();
             let ours = Env::new();
             prep(&wsl);
             prep(&ours);
-            let (code, wsl_out, wsl_steps, wsl_sleeps) = wsl_run(&wsl, fake, &[]);
-            assert_eq!(code, 0, "{name}: {wsl_out}");
-            let (_, out, steps, sleeps) = ours.apply(fake);
-            assert_eq!(
-                steps, wsl_steps,
-                "{name}:\n--- WSL\n{wsl_out}\n--- runner\n{out}"
-            );
-            assert_eq!(sleeps, wsl_sleeps, "{name}");
-            assert_eq!(ours.read(&ours.global()), wsl.read(&wsl.global()), "{name}");
-            assert_eq!(
-                ours.read(&ours.record()),
-                wsl.read(
-                    &wsl.t
-                        .path()
-                        .join("wsl/.local/state/dotfiles")
-                        .join(RECORD_FILE)
-                ),
-                "{name}"
-            );
-            assert_eq!(
-                ours.pending().exists(),
-                wsl.t
-                    .path()
-                    .join("wsl/.local/state/dotfiles")
-                    .join(PENDING_FILE)
-                    .exists(),
-                "{name}"
-            );
+            same_as_wsl(name, &wsl, &ours, fake, &[]);
             // 2 回目 (印が残った回のやり直し・読み直し済み) も同じ
-            let again = Fake::default();
-            let (_, wsl_out, wsl_steps, _) = wsl_run(&wsl, &again, &[]);
-            let (_, out, steps, _) = ours.apply(&again);
-            assert_eq!(
-                steps, wsl_steps,
-                "{name} (2 回目):\n--- WSL\n{wsl_out}\n--- runner\n{out}"
-            );
-            assert_eq!(
-                ours.read(&ours.record()),
-                wsl.read(
-                    &wsl.t
-                        .path()
-                        .join("wsl/.local/state/dotfiles")
-                        .join(RECORD_FILE)
-                ),
-                "{name} (2 回目)"
+            same_as_wsl(
+                &format!("{name} (2 回目)"),
+                &wsl,
+                &ours,
+                &Fake::default(),
+                &[],
             );
         }
         // --force も同じ
         let wsl = Env::new();
         let ours = Env::new();
-        wsl_run(&wsl, &Fake::default(), &[]);
-        ours.apply(&Fake::default());
-        let (_, _, wsl_steps, _) = wsl_run(&wsl, &Fake::default(), &["--force"]);
-        let (_, _, steps, _) = ours.run(&Fake::default(), RUNNER_HOST, Mode::Apply { force: true });
-        assert_eq!(steps, wsl_steps);
+        same_as_wsl("1 回目", &wsl, &ours, &Fake::default(), &[]);
+        same_as_wsl("--force", &wsl, &ours, &Fake::default(), &["--force"]);
+        // 書けない: 全体の設定の置き場を書けなくする
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let wsl = Env::new();
+            let ours = Env::new();
+            for e in [&wsl, &ours] {
+                e.put(&e.global(), &global_settings(false, false, false));
+                let dir = e.global().parent().unwrap().to_path_buf();
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+            }
+            same_as_wsl("書けない", &wsl, &ours, &Fake::default(), &[]);
+            for e in [&wsl, &ours] {
+                let dir = e.global().parent().unwrap().to_path_buf();
+                std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+        }
+    }
+
+    /// WSL の script と runner を同じ答えで 1 回ずつ流し、受けた本文の種類と本文 (バイト単位)・待った回数・全体の設定・記録・印が同じかを見る
+    #[cfg(unix)]
+    fn same_as_wsl(name: &str, wsl: &Env, ours: &Env, fake: &Fake, args: &[&str]) {
+        let (code, wsl_out, wsl_steps, wsl_sleeps) = wsl_run(wsl, fake, args);
+        assert!(code == 0, "{name}: {wsl_out}");
+        let mode = Mode::Apply {
+            force: args.contains(&"--force"),
+        };
+        let (_, out, steps, sleeps, bodies) = ours.run_full(fake, RUNNER_HOST, mode);
+        let ctx = format!("{name}:\n--- WSL\n{wsl_out}\n--- runner\n{out}");
+        assert_eq!(steps, wsl_steps, "{ctx}");
+        assert_eq!(sleeps, wsl_sleeps, "{ctx}");
+        // WSL が powershell.exe -Command に渡した本文と、runner が -EncodedCommand に渡した本文が同じ
+        let log = wsl.t.path().join("log").join("bodies");
+        let mut idx: Vec<usize> = std::fs::read_dir(&log)
+            .map(|d| {
+                d.map(|e| e.unwrap().file_name().to_string_lossy().parse().unwrap())
+                    .collect()
+            })
+            .unwrap_or_default();
+        idx.sort();
+        let wsl_bodies: Vec<String> = idx
+            .iter()
+            .map(|i| std::fs::read_to_string(log.join(i.to_string())).unwrap())
+            .collect();
+        assert_eq!(bodies, wsl_bodies, "{ctx}");
+        let wsl_state = wsl.t.path().join("wsl/.local/state/dotfiles");
+        assert_eq!(ours.read(&ours.global()), wsl.read(&wsl.global()), "{ctx}");
+        assert_eq!(
+            ours.read(&ours.record()),
+            wsl.read(&wsl_state.join(RECORD_FILE)),
+            "{ctx}"
+        );
+        assert_eq!(
+            ours.pending().exists(),
+            wsl_state.join(PENDING_FILE).exists(),
+            "{ctx}"
+        );
     }
 }

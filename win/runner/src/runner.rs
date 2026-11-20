@@ -163,7 +163,15 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
         .find(|i| i.id == id)
         .map(|i| i.order);
     if !ctx.host.runner_enable {
-        let args: String = names.iter().map(|n| format!(" '{n}'")).collect();
+        // WSL の script の --import は名前を 1 つずつ取る (fancyzones は --import <名前> を繰り返す。terminal は名前を取らない)
+        let args: String = if names.is_empty() {
+            " --import".to_string()
+        } else {
+            names
+                .iter()
+                .map(|n| format!(" --import {}", crate::steps::deploy::sh_quote(n)))
+                .collect()
+        };
         rows.push(
             Row::new(
                 order,
@@ -172,7 +180,7 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
                 "受け持ちは WSL の setup (runner.enable が true でない) なので取り込みは止めた",
             )
             .with_notes(vec![format!(
-                "受け持ちが WSL の間は、WSL で nix/scripts/bootstrap-windows-{id}.sh --import{args} を打つ"
+                "受け持ちが WSL の間は、WSL で nix/scripts/bootstrap-windows-{id}.sh{args} を打つ"
             )]),
         );
         return rows;

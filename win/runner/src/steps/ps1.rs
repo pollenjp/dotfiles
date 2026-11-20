@@ -1606,7 +1606,7 @@ mod tests {
         assert_eq!(ps_quote("C:\\Users\\a b"), "C:\\Users\\a b");
     }
 
-    /// 本物の PowerShell で、空白と ' を含むパスの ps1 を呼び、UTF-8 の ⚠️ と終了コードが届く (Windows の CI)
+    /// -EncodedCommand の本文を、PowerShell の [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes(…)) と同じ字にする
     #[test]
     fn encodes_commands_like_powershell() {
         // [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes('…')) と同じ字
@@ -1636,19 +1636,41 @@ mod tests {
     fn real_powershell_runs_an_encoded_command() {
         use crate::process::{RealSys, Sys};
         let body = "$ProgressPreference = 'SilentlyContinue'; $q = \"user32.dll\"\nWrite-Output \"q=$q\"\n'done'";
+        // -OutputFormat Text なので、エラーは CLIXML (#< CLIXML) でなく平文で出る
+        let failing = "Write-Error 'boom'; 'after'";
         for shell in ["powershell", "pwsh"] {
             let Some(path) = RealSys.which(shell) else {
                 continue;
             };
             let r = RealSys.run(
-                &encoded_command(path, body, Duration::from_secs(60)),
+                &encoded_command(path.clone(), body, Duration::from_secs(60)),
                 &mut |_| {},
             );
             assert_eq!(r.exit, Exit::Code(0), "{shell}: {:?}", r.output);
             assert_eq!(r.output, vec!["q=user32.dll", "done"], "{shell}");
+            let r = RealSys.run(
+                &encoded_command(path, failing, Duration::from_secs(60)),
+                &mut |_| {},
+            );
+            assert!(
+                r.output.iter().any(|l| l == "after"),
+                "{shell}: {:?}",
+                r.output
+            );
+            assert!(
+                r.output.iter().any(|l| l.contains("boom")),
+                "{shell}: {:?}",
+                r.output
+            );
+            assert!(
+                !r.output.iter().any(|l| l.contains("CLIXML")),
+                "{shell}: {:?}",
+                r.output
+            );
         }
     }
 
+    /// 本物の PowerShell で、空白と ' を含むパスの ps1 を呼び、UTF-8 の ⚠️ と終了コードが届く (Windows の CI)
     #[cfg(windows)]
     #[test]
     fn real_powershell_runs_a_script_with_awkward_path() {

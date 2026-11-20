@@ -91,8 +91,8 @@ struct Fz {
     global: PathBuf,
     record: PathBuf,
     assigned: PathBuf,
-    backup: Backup,
-    /// dry-run で、カスタムレイアウトの段が足す・書き換えるレイアウトの uuid (後の段は PC にあるものとして見る)
+    backup: fsutil::RunBackup,
+    /// check と dry-run で、カスタムレイアウトの段が足す・書き換えるレイアウトの uuid (書かないので、後の段は PC にあるものとして見る)
     pending_layouts: Vec<String>,
     /// カスタムレイアウトの段の後の PC の custom-layouts.json (後の段で 1 回だけ読む。読めなければ Err)
     pc_layouts_doc: Option<Result<Jv, ()>>,
@@ -120,10 +120,7 @@ impl Fz {
             global: join_segments(&ctx.roots.local_app_data, GLOBAL_REL),
             record: ctx.state_dir.join(RECORD_FILE),
             assigned: ctx.state_dir.join(ASSIGNED_FILE),
-            backup: Backup {
-                root: join_segments(&ctx.state_dir, BACKUP_REL),
-                dir: None,
-            },
+            backup: fsutil::RunBackup::new(join_segments(&ctx.state_dir, BACKUP_REL), KEEP_BACKUPS),
             pending_layouts: Vec::new(),
             pc_layouts_doc: None,
             rows: Vec::new(),
@@ -145,26 +142,6 @@ impl Fz {
             self.pc_layouts_doc = Some(doc);
         }
         self.pc_layouts_doc.clone().expect("読んだ")
-    }
-}
-
-/// 1 回の実行で書き換えるファイルを写す場所 (WSL の `backup_file`)。初めて写すときにディレクトリを作り、古いものを消す。
-struct Backup {
-    root: PathBuf,
-    dir: Option<PathBuf>,
-}
-
-impl Backup {
-    /// 書き換える前の `path` を写す (無ければ何もしない)
-    fn file(&mut self, path: &Path) -> std::io::Result<()> {
-        if !path.exists() {
-            return Ok(());
-        }
-        if self.dir.is_none() {
-            self.dir = Some(fsutil::backup_run_dir(&self.root, KEEP_BACKUPS)?);
-        }
-        fsutil::copy_into(path, self.dir.as_ref().expect("作った"))?;
-        Ok(())
     }
 }
 
@@ -247,16 +224,19 @@ fn dry_force_command(ctx: &Ctx) -> String {
     }
 }
 
-/// 取り込みのコマンド (受け持ちで替える。名前は PowerShell の一重引用符で囲む)
+/// 取り込みのコマンド (受け持ちで替える。runner は PowerShell の一重引用符、WSL の script は bash の一重引用符で名前を囲む)
 fn import_command(ctx: &Ctx, names: &[String]) -> String {
-    let quoted: Vec<String> = names
-        .iter()
-        .map(|n| format!("'{}'", super::ps1::ps_quote(n)))
-        .collect();
     if ctx.host.runner_enable {
+        let quoted: Vec<String> = names
+            .iter()
+            .map(|n| format!("'{}'", super::ps1::ps_quote(n)))
+            .collect();
         format!("dotfiles import fancyzones {}", quoted.join(" "))
     } else {
-        let args: Vec<String> = quoted.iter().map(|q| format!("--import {q}")).collect();
+        let args: Vec<String> = names
+            .iter()
+            .map(|n| format!("--import {}", super::deploy::sh_quote(n)))
+            .collect();
         format!(
             "WSL で nix/scripts/bootstrap-windows-fancyzones.sh {} (受け持ちが WSL の setup の間。runner の取り込みは止まる)",
             args.join(" ")
@@ -289,10 +269,14 @@ fn settings_stage(ctx: &mut Ctx, fz: &mut Fz) {
         ));
         return;
     }
-    let managed = std::fs::read_to_string(&fz.managed)
+    // 確かめた後に読み直す (間に pull などで変わって読めなければ、書かずに知らせる)
+    let Some(managed) = std::fs::read_to_string(&fz.managed)
         .ok()
         .and_then(|t| Jv::parse(&t).ok())
-        .expect("managed_problems が読めることを確かめた");
+    else {
+        reread_failed(ctx, fz, MANAGED_REL);
+        return;
+    };
     let n = managed.leaf_paths().len();
     let shown = fz.settings.display().to_string();
     let pre = fz.pre;
@@ -460,6 +444,20 @@ fn settings_stage(ctx: &mut Ctx, fz: &mut Fz) {
             ));
         }
     }
+}
+
+/// 確かめた repo のファイルを読み直せなかった (間に pull などで変わった) と知らせる
+fn reread_failed(ctx: &mut Ctx, fz: &mut Fz, rel: &str) {
+    let lines = [
+        format!("{rel} を読み直せないので、書きません (確かめた後に変わったかもしれません)。"),
+        "流し直してください。".to_string(),
+    ];
+    warn(ctx, &lines);
+    fz.rows.push(row(
+        Kind::Failed,
+        format!("{rel} を読み直せないので書いていない"),
+        &lines[1..],
+    ));
 }
 
 /// 書いた後に更新時刻を進めて、動いている FancyZones に読み直させる。進められなければ知らせる (書いたものは残る)
