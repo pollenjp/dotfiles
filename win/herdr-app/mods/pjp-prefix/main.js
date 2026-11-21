@@ -2,10 +2,10 @@
 // 次の 1 キーで命令を流して閉じる (herdr-app の keys.json には、2 回に分けて打つキーの仕組みが無いので、mod の小窓で次のキーを待つ)。
 //
 // prefix の後のキー (旧 herdr の win/herdr/config.toml の [keys] と同じ):
-//   Shift+C      worktree を作り、新しい space の最初のタブで Claude Code を起動する (下の CLAUDE)。名前は
-//                worktree/<形容詞>-<名詞>-<16 進 4 桁> (旧 herdr と同じ形) を自動で付け、同じ名前の branch があれば作り直す。herdr-app の
-//                worktree の小窓に branch を渡すと、Enter を待たずに今の space の checkout の HEAD から切り、新しい space を開く
-//   Shift+G      同じく worktree を作るだけ (Claude Code は起動しない)
+//   Shift+C      worktree を作る。名前は worktree/<形容詞>-<名詞>-<16 進 4 桁> (旧 herdr と同じ形) を自動で付け、同じ名前の branch が
+//                あれば作り直す。herdr-app の worktree の小窓に branch を渡すと、Enter を待たずに今の space の checkout の HEAD から切り、
+//                新しい space を開く
+//   Shift+G      同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する (下の CLAUDE)
 //   v |          右に分割 (pane.split right)          - Shift+S   下に分割 (pane.split down)
 //   n p          次・前のタブ                          Shift+T ,   タブの名前を変える (名前を訊く)
 //   Tab o        今のタブの次のペイン                  g "         端末の picker (mod.open:picker)
@@ -38,7 +38,7 @@ const NOUNS = [
 // 同じ名前の branch があったときに作り直す回数
 const TRIES = 8;
 
-// Shift+C で起動する Claude Code。c (nix/home/modules/fish.nix の abbr・bash.nix の alias・win/powershell/dotfiles.ps1 の function) と
+// Shift+G で起動する Claude Code。c (nix/home/modules/fish.nix の abbr・bash.nix の alias・win/powershell/dotfiles.ps1 の function) と
 // 同じ引数。argv が shell の abbr・alias・function を通るとは限らない (fish の abbr は打ったときだけ広がる) ので、c と書かずに中身を
 // 並べる。claude が PATH に無い machine では、herdr-app が端末のエラーを出し、shell が残る。4 か所が同じ引数かは、runner の試験
 // (win/runner/src/steps/herdr_app_keys.rs の claude_argv_matches_c) が突き合わせる
@@ -50,8 +50,8 @@ const MODIFIERS = new Set(["shift", "control", "ctrl", "alt", "platform", "cmd",
 
 // 押すキー (打った文字。Shift+C は "C"。文字を打たないキーはその名前) → 命令。label は小窓の一覧に出す
 const BINDINGS = [
-  { keys: ["C"], label: "worktree + Claude 起動", act: (p, cx) => p.worktree(cx, true) },
-  { keys: ["G"], label: "worktree (名前は自動)", act: (p, cx) => p.worktree(cx, false) },
+  { keys: ["C"], label: "worktree (名前は自動)", act: (p, cx) => p.worktree(cx, false) },
+  { keys: ["G"], label: "worktree + Claude 起動", act: (p, cx) => p.worktree(cx, true) },
   { keys: ["v", "|"], label: "右に分割", act: (p) => p.runClosed("pane.split", { direction: "right", ...p.paneArg() }) },
   { keys: ["-", "S"], label: "下に分割", act: (p) => p.runClosed("pane.split", { direction: "down", ...p.paneArg() }) },
   { keys: ["n"], label: "次のタブ", act: (p) => p.runClosed("tab.next") },
