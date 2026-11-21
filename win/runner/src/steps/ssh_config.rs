@@ -39,6 +39,8 @@
 //!
 //! - op-reason.exe が無いのも答えないとみなす。dotfiles-private の `ssh/` に同じ名前のファイルがあれば、中継のファイルは置かずに ⚠
 //! - check と dry-run は、中継が今は答えなくても、前に置いていなければ置くと予告する (apply では手順 op-reason が先に中継を起こす)
+//! - 正本 (`ssh/`) が空・読めないときは、中継のファイルも置かず消さない。switch が on なのに無い・off なのに残っているときは、黙らずに ⚠
+//!   (行は manual。読めないときは failed のまま注記に足す)
 //! - switch を切れば、記録にある中継のファイルを、正本から消えたものと同じく消す (Windows で変えていれば衝突)
 
 use super::deploy::{self, Action, Gone, Problem, Tally};
@@ -127,21 +129,25 @@ struct Item {
 fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
     let private = ctx.sibling("dotfiles-private");
     let src_dir = private.join("ssh");
-    let srcs =
-        match sources(&src_dir) {
-            Ok(s) => s,
-            Err(e) => {
-                ctx.say(format!(
-                    "!! 正本の一覧を読めません: {} ({e})。何も書かず、消しません。",
-                    src_dir.display()
-                ));
-                return vec![Outcome::new(
+    let srcs = match sources(&src_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            ctx.say(format!(
+                "!! 正本の一覧を読めません: {} ({e})。何も書かず、消しません。",
+                src_dir.display()
+            ));
+            let mut o = Outcome::new(
                 Kind::Failed,
                 "正本 (dotfiles-private の ssh/) の一覧を読めない (何も書かず、消していない)",
             )
-            .note(e.to_string())];
+            .note(e.to_string());
+            for l in relay_mismatch_without_sources(ctx) {
+                say_failed(ctx, std::slice::from_ref(&l));
+                o = o.note(l);
             }
-        };
+            return vec![o];
+        }
+    };
     if srcs.is_empty() {
         ctx.say(format!(
             "!! Windows の ssh の設定を配りません: 正本の *.ssh_config がありません ({})。",
@@ -150,16 +156,28 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
         ctx.say(
             "   dotfiles-private を取れていないか、ssh/ が空です。Windows 側のファイルはそのまま残します。",
         );
-        return vec![
-            Outcome::new(
-                Kind::Info,
-                "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
-            )
-            .note(format!(
-                "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
-                src_dir.display()
-            )),
-        ];
+        // 中継のファイルは正本から来ないので、正本が無くても食い違いを黙らない (置けない・消せないことを ⚠ にする)
+        let relay = relay_mismatch_without_sources(ctx);
+        for l in &relay {
+            say_failed(ctx, std::slice::from_ref(l));
+        }
+        let kind = if relay.is_empty() {
+            Kind::Info
+        } else {
+            Kind::Manual
+        };
+        let mut o = Outcome::new(
+            kind,
+            "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
+        )
+        .note(format!(
+            "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
+            src_dir.display()
+        ));
+        for l in relay {
+            o = o.note(l);
+        }
+        return vec![o];
     }
     let record_path = ctx.state_dir.join(RECORD_FILE);
     let mut records = match FileRecords::load(&record_path, BROKEN_HINT) {
@@ -806,6 +824,25 @@ fn relay_status(ctx: &Ctx) -> Result<(), String> {
     })
 }
 
+/// 正本 (ssh/) が空・読めないときの、中継のファイルの食い違い (正本が無いときは何も書かず消さないので、黙らずに ⚠ の文にする)。
+/// switch が on なのに置いていない (Windows の ssh は 1Password に直に行く)・switch が off なのに残っている (中継が止まると鍵を使えない)。
+/// 食い違いが無ければ空
+fn relay_mismatch_without_sources(ctx: &Ctx) -> Vec<String> {
+    let dst = join_segments(&ctx.roots.user_profile, ".ssh")
+        .join("config.d")
+        .join(RELAY_NAME);
+    match (ctx.host.ssh_relay().is_some(), dst.is_file()) {
+        (true, false) => vec![
+            "SSH の中継 (ホストの値の opReasonSshRelay) が on ですが、正本が無いので中継の IdentityAgent も置いていません (Windows と WSL の ssh は 1Password に直に行きます)。dotfiles-private の ssh/ を確かめてから流し直してください。".to_string(),
+        ],
+        (false, true) => vec![format!(
+            "SSH の中継を使わない (ホストの値の opReasonSshRelay が off) のに、正本が無いので中継のファイルを消していません ({})。中継が止まると Windows と WSL の ssh は鍵を使えません。dotfiles-private の ssh/ を確かめてから流し直すか、そのファイルを手で消してください。",
+            dst.display()
+        )],
+        _ => Vec::new(),
+    }
+}
+
 /// 確かめの差を出す (1 行目の頭に `!!`、続きの行は字下げ)。
 fn say_failed(ctx: &mut Ctx, lines: &[String]) {
     for (i, l) in lines.iter().enumerate() {
@@ -851,7 +888,8 @@ mod tests {
     //!   中継が --status に答えれば config.d/00-op-reason-ssh-relay.ssh_config (IdentityAgent が中継の pipe) を置いて記録し、config は変えない。
     //!   2 回目は揃っている。置いた後に答えなければ残して ⚠ (鍵は使えない)。off に戻すと記録どおりに消す。初めてで答えなければ置かずに ⚠。
     //!   op-reason.exe が無いのも答えないとみなす。dotfiles-private に同じ名前があれば置かずに ⚠。check と dry-run は書かず、中継が今は答えなくても
-    //!   置くと予告する (apply では op-reason の手順が先に中継を起こす)
+    //!   置くと予告する (apply では op-reason の手順が先に中継を起こす)。正本が空のときは中継のファイルも置かず消さないが、on なのに無い・
+    //!   off なのに残っているときは ⚠
 
     use super::*;
     use crate::hooks::parity;
@@ -1317,6 +1355,56 @@ mod tests {
         assert_eq!(e.read(RELAY), "Host same\n");
         assert!(has_note(&o, "同じ名前"), "{:?}", o.notes);
         assert!(relay_calls(&sys, &e.relay_exe()).is_empty());
+    }
+
+    /// 正本 (ssh/) が空・読めないときは何も書かず消さないが、中継のファイルの食い違いは黙らずに ⚠ にする: switch が on なのに置いていない
+    /// (Windows の ssh は 1Password に直に行く)・switch を切ったのに残っている (鍵を使えない)
+    #[test]
+    fn relay_mismatch_is_not_silent_without_sources() {
+        let empty_sources = |e: &Env| {
+            for entry in std::fs::read_dir(e.private_ssh()).unwrap() {
+                let p = entry.unwrap().path();
+                if p.to_string_lossy().ends_with(".ssh_config") && !p.is_dir() {
+                    std::fs::remove_file(p).unwrap();
+                }
+            }
+        };
+        // on で、まだ置いていない
+        let e = Env::new();
+        e.put_relay_exe();
+        empty_sources(&e);
+        let (o, out) = e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(
+            has_note(&o, "中継の IdentityAgent も置いていません"),
+            "{:?}",
+            o.notes
+        );
+        assert!(!e.at(RELAY).exists());
+        // on で、前に置いたものがある (そのまま。黙ってよい)
+        let e = Env::new();
+        e.put_relay_exe();
+        e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        empty_sources(&e);
+        let (o, out) = e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Info, "{out}");
+        assert_eq!(e.read(RELAY), RELAY_BODY);
+        // switch を切ったのに残っている: 消さずに ⚠ (正本が無いときは何も消さない)
+        let (o, out) = e.run(&e.relay_sys(true), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(
+            has_note(&o, "中継のファイルを消していません"),
+            "{:?}",
+            o.notes
+        );
+        assert!(has_note(&o, "鍵を使えません"), "{:?}", o.notes);
+        assert!(e.at(RELAY).exists());
+        // 中継を使わず、中継のファイルも無いホストは今までどおり Info
+        let e = Env::new();
+        empty_sources(&e);
+        let (o, _) = e.run(&e.relay_sys(true), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Info);
+        assert!(o.notes.iter().all(|n| !n.contains("中継")), "{:?}", o.notes);
     }
 
     /// check と dry-run は中継のファイルを書かない。中継が今は答えなくても、前に置いていなければ置くと予告する (apply では op-reason の手順 (90) が
