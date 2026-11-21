@@ -7,12 +7,16 @@
 //! - ファイルは UTF-8 で読み、改行を LF にそろえる (Python の `Path.read_text` と同じく、CRLF も単独の CR も LF にする)
 //! - 辞書の名前が UTF-8 でない・語に UTF-8 でない字がある `user_dictionary.db` は、テキストにできないものとして止める (Python は TypeError で
 //!   落ちる)。比べる digest は、名前が UTF-8 のものとそうでないものが混ざるときだけ出せない (Python の並べ替えが落ちる)
+//! - 辞書の名前は Windows のファイル名にできるものだけにする (google_ime.py の決まりに、`<>:"|?*`・制御文字・装置の名前 (CON・NUL・COM1 など) と、
+//!   大文字小文字だけが違う 2 つの名前を足して止める。`:` はドライブからの相対のパスや代替データストリームになり、置き場の外へ書いてしまう)
+//! - 取り込みは、書くものを全部決めてから書く (今のテキストが読めなければ何も書かない)。大文字小文字だけを変えた辞書の TSV は、名前を替えてから
+//!   比べる (Windows では同じファイルで、替えずに書くと古い名前のまま残り、「無くなった辞書」として消してしまう)
 
 use super::pb::{self, Message, Value};
 use super::textpb;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub const CONFIG_DB: &str = "config1.db";
 pub const DICTIONARY_DB: &str = "user_dictionary.db";
@@ -334,14 +338,66 @@ pub fn dictionary_id(name: &str) -> u64 {
     if id == 0 { 1 } else { id }
 }
 
+/// Windows が字の並びに関わらず装置の名前として読む名前 (拡張子の前がこれなら、どこに置いてもそのファイルにならない)
+const RESERVED_NAMES: &[&str] = &[
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "COM0",
+    "COM1",
+    "COM2",
+    "COM3",
+    "COM4",
+    "COM5",
+    "COM6",
+    "COM7",
+    "COM8",
+    "COM9",
+    "COM\u{b9}",
+    "COM\u{b2}",
+    "COM\u{b3}",
+    "LPT0",
+    "LPT1",
+    "LPT2",
+    "LPT3",
+    "LPT4",
+    "LPT5",
+    "LPT6",
+    "LPT7",
+    "LPT8",
+    "LPT9",
+    "LPT\u{b9}",
+    "LPT\u{b2}",
+    "LPT\u{b3}",
+];
+
+/// 辞書の名前が TSV のファイル名にできるか (google_ime.py の check_dictionary_name に、Windows のファイル名にできない字 (`<>:"|?*` と制御文字) と
+/// 装置の名前 (CON・NUL・COM1 など) を足したもの。`:` はドライブからの相対のパスや代替データストリームになり、置き場の外へ書いてしまう)
 pub fn check_dictionary_name(name: &str) -> Result<(), TextError> {
-    if name.is_empty() || name.starts_with('.') || name.chars().any(|c| "/\\\t\n\r\0".contains(c)) {
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .trim_end_matches([' ', '.']);
+    if name.is_empty()
+        || name.starts_with('.')
+        || name
+            .chars()
+            .any(|c| "/\\\t\n\r\0<>:\"|?*".contains(c) || (c as u32) < 0x20)
+        || RESERVED_NAMES.iter().any(|r| r.eq_ignore_ascii_case(stem))
+    {
         return err(format!(
             "辞書の名前 {} はファイル名にできない (画面で名前を変える)",
             py_repr(name)
         ));
     }
     Ok(())
+}
+
+/// 大文字小文字を区別しない比べ方の鍵 (Windows のファイル名は大文字小文字を区別しない)
+fn fold(name: &str) -> String {
+    name.to_lowercase()
 }
 
 /// {辞書の名前: TSV の中身} から UserDictionaryStorage を組み立てる。誤りの文には語 (セルの中身) を出さない
@@ -436,6 +492,14 @@ pub fn dictionaries_to_tsv(storage: &Message) -> Result<BTreeMap<String, String>
         if files.contains_key(name) {
             return err(format!(
                 "辞書の名前 {} が 2 つある (画面で名前を変える)",
+                py_repr(name)
+            ));
+        }
+        // Windows では大文字小文字だけが違う 2 つの TSV は同じファイルになり、片方が消える
+        if let Some(other) = files.keys().find(|k: &&String| fold(k) == fold(name)) {
+            return err(format!(
+                "辞書の名前 {} と {} は大文字小文字だけが違い、Windows では同じファイル名になる (画面で名前を変える)",
+                py_repr(other),
                 py_repr(name)
             ));
         }
@@ -617,56 +681,97 @@ fn read_db(desc: &'static pb::MsgDesc, path: &Path) -> Result<Message, TextError
     parse_db(desc, &bytes, &path.display().to_string())
 }
 
-/// 中身が同じでなければ書く (同じかは、読んだ字の改行を LF にそろえて比べる)。書いたら `changed` に「書いた: <パス>」
-fn write_if_changed(path: &Path, text: &str, changed: &mut Vec<String>) -> Result<(), TextError> {
+/// テキストのファイルへの書き込み 1 つ (取り込みは、読んで全部を決めてから書く)。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FileOp {
+    Write(PathBuf, String),
+    Remove(PathBuf),
+    /// 大文字小文字だけが違う名前に替える (Windows では同じファイル)
+    Rename(PathBuf, PathBuf),
+}
+
+/// 中身が違えば書く (同じかは、読んだ字の改行を LF にそろえて比べる。今のファイルが UTF-8 でなければ止める)
+fn plan_write(path: &Path, text: &str, ops: &mut Vec<FileOp>) -> Result<(), TextError> {
     if path.is_file() && read_text(path)? == text {
         return Ok(());
     }
-    crate::fsutil::write_atomic(path, text.as_bytes())
-        .map_err(|e| TextError(format!("{} に書けない ({e})", path.display())))?;
-    changed.push(format!("書いた: {}", path.display()));
+    ops.push(FileOp::Write(path.to_path_buf(), text.to_string()));
     Ok(())
 }
 
-fn remove_if_exists(path: &Path, changed: &mut Vec<String>) -> Result<(), TextError> {
-    if path.is_file() {
-        std::fs::remove_file(path)
-            .map_err(|e| TextError(format!("{} を消せない ({e})", path.display())))?;
-        changed.push(format!("消した: {}", path.display()));
-    }
-    Ok(())
-}
-
-/// 設定のテキストを書く。無い表のファイルは消す。書いた・消したファイルの行を返す
-pub fn write_config_texts(dir: &Path, texts: &ConfigTexts) -> Result<Vec<String>, TextError> {
-    let mut changed = Vec::new();
-    write_if_changed(&dir.join(TXTPB), &texts.txtpb, &mut changed)?;
+/// 設定のテキストを書く計画。無い表のファイルは消す
+pub fn plan_config_texts(dir: &Path, texts: &ConfigTexts) -> Result<Vec<FileOp>, TextError> {
+    let mut ops = Vec::new();
+    plan_write(&dir.join(TXTPB), &texts.txtpb, &mut ops)?;
     for (name, text) in [(KEYMAP, &texts.keymap), (ROMAJI, &texts.romaji)] {
         match text {
-            None => remove_if_exists(&dir.join(name), &mut changed)?,
-            Some(t) => write_if_changed(&dir.join(name), t, &mut changed)?,
+            None if dir.join(name).is_file() => ops.push(FileOp::Remove(dir.join(name))),
+            None => {}
+            Some(t) => plan_write(&dir.join(name), t, &mut ops)?,
         }
     }
-    Ok(changed)
+    Ok(ops)
 }
 
-/// 辞書の TSV を書く。無くなった辞書の TSV は消す。書いた・消したファイルの行を返す
-pub fn write_dictionary_texts(
+/// 辞書の TSV を書く計画。無くなった辞書の TSV は消す。今ある TSV が大文字小文字だけ違う名前なら、名前を替えてから比べる (Windows では同じファイルで、
+/// 替えずに書くと古い名前のまま残り、続く「無くなった辞書」で消してしまう)
+pub fn plan_dictionary_texts(
     dir: &Path,
     files: &BTreeMap<String, String>,
-) -> Result<Vec<String>, TextError> {
-    let mut changed = Vec::new();
+) -> Result<Vec<FileOp>, TextError> {
+    let existing = tsv_files(dir)?;
+    let mut claimed: Vec<&str> = Vec::new();
+    let mut ops = Vec::new();
     for (name, text) in files {
-        write_if_changed(&dir.join(format!("{name}.tsv")), text, &mut changed)?;
-    }
-    if dir.is_dir() {
-        for (name, path) in tsv_files(dir)? {
-            if !files.contains_key(&name) {
-                remove_if_exists(&path, &mut changed)?;
+        let target = dir.join(format!("{name}.tsv"));
+        if existing.iter().any(|(n, _)| n == name) {
+            claimed.push(name);
+            plan_write(&target, text, &mut ops)?;
+            continue;
+        }
+        let renamed = existing.iter().find(|(n, _)| {
+            fold(n) == fold(name) && !files.contains_key(n) && !claimed.contains(&n.as_str())
+        });
+        match renamed {
+            Some((n, path)) => {
+                claimed.push(n);
+                ops.push(FileOp::Rename(path.clone(), target.clone()));
+                if read_text(path)? != *text {
+                    ops.push(FileOp::Write(target, text.clone()));
+                }
             }
+            None => ops.push(FileOp::Write(target, text.clone())),
         }
     }
-    Ok(changed)
+    for (n, path) in &existing {
+        if !files.contains_key(n) && !claimed.contains(&n.as_str()) {
+            ops.push(FileOp::Remove(path.clone()));
+        }
+    }
+    Ok(ops)
+}
+
+/// 計画どおりに書く。書いた・消した・名前を替えたファイルの行を返す。途中で書けなければ、それまでの行と誤りを返す
+pub fn apply_ops(ops: &[FileOp]) -> Result<Vec<String>, (Vec<String>, TextError)> {
+    let mut lines = Vec::new();
+    for op in ops {
+        let r = match op {
+            FileOp::Write(p, text) => crate::fsutil::write_atomic(p, text.as_bytes())
+                .map(|()| format!("書いた: {}", p.display()))
+                .map_err(|e| format!("{} に書けない ({e})", p.display())),
+            FileOp::Remove(p) => std::fs::remove_file(p)
+                .map(|()| format!("消した: {}", p.display()))
+                .map_err(|e| format!("{} を消せない ({e})", p.display())),
+            FileOp::Rename(a, b) => std::fs::rename(a, b)
+                .map(|()| format!("名前を替えた: {} → {}", a.display(), b.display()))
+                .map_err(|e| format!("{} の名前を替えられない ({e})", a.display())),
+        };
+        match r {
+            Ok(l) => lines.push(l),
+            Err(e) => return Err((lines, TextError(e))),
+        }
+    }
+    Ok(lines)
 }
 
 // ------------------------------------------------------------------ 組み立てと検証
@@ -767,7 +872,8 @@ pub fn decode(kind: Db, bytes: &[u8], path: &str) -> Result<Decoded, TextError> 
     }
 }
 
-/// 取り込みの結果 (pjp-google-ime import の出力)。
+/// 取り込みの結果 (pjp-google-ime import の出力。試験で pjp-google-ime と比べる)。
+#[cfg(test)]
 #[derive(Debug)]
 pub struct Imported {
     /// 書いた・消したファイルの行 (無ければ「テキストは今のままで同じです。」)
@@ -776,13 +882,24 @@ pub struct Imported {
     pub notice: Option<String>,
 }
 
-/// Windows 側のファイルを読み、テキストを書き直す (pjp-google-ime import)。確かめが全部通ってから書く (途中で止まっても、テキストを半端に
-/// 書き換えない)
-pub fn import(
+/// 取り込みの計画: Windows 側の 2 つのファイルを読んでテキストに戻し、書くものを決めたもの (まだ何も書いていない)。
+#[derive(Debug)]
+pub struct ImportPlan {
+    /// テキストへ書く・消す・名前を替えるもの (設定が先、辞書が後)
+    pub ops: Vec<FileOp>,
+    pub notice: Option<String>,
+    /// 読んだ config1.db の digest (記録する。読み直さないので、取り込みの間に画面で保存されても、テキストと記録が食い違わない)
+    pub config_digest: String,
+    /// 読んだ user_dictionary.db の digest (辞書を取り込んだときだけ)
+    pub dictionary_digest: Option<String>,
+}
+
+/// Windows 側のファイルを読み、テキストを書き直す計画を作る (pjp-google-ime import の確かめの全部。何も書かない)
+pub fn plan_import(
     windows_dir: &Path,
     config_dir: &Path,
     dictionary_dir: Option<&Path>,
-) -> Result<Imported, TextError> {
+) -> Result<ImportPlan, TextError> {
     let config_path = windows_dir.join(CONFIG_DB);
     if !config_path.is_file() {
         return err(format!("{} が無い", config_path.display()));
@@ -801,17 +918,20 @@ pub fn import(
     }
     let mut files = None;
     let mut notice = None;
+    let mut dict_digest = None;
     let dict_path = windows_dir.join(DICTIONARY_DB);
-    if let Some(_d) = dictionary_dir {
+    if dictionary_dir.is_some() {
         if dict_path.is_file() {
             let storage = read_db(&pb::STORAGE, &dict_path)?;
             let tsv = dictionaries_to_tsv(&storage)?;
-            if dictionary_digest(&dictionaries_from_tsv(&tsv)?)? != dictionary_digest(&storage)? {
+            let have = dictionary_digest(&storage)?;
+            if dictionary_digest(&dictionaries_from_tsv(&tsv)?)? != have {
                 return err(format!(
                     "{DICTIONARY_DB} をテキストに戻すと中身が変わる (TSV で表せない項目がある)"
                 ));
             }
             files = Some(tsv);
+            dict_digest = Some(have);
         } else {
             // ファイルが無いのは、まだ辞書を作っていないか置き場所が違うかで、辞書を全部消したのとは違う。TSV は消さずに残す
             notice = Some(format!(
@@ -820,14 +940,34 @@ pub fn import(
             ));
         }
     }
-    let mut lines = write_config_texts(config_dir, &texts)?;
+    let mut ops = plan_config_texts(config_dir, &texts)?;
     if let (Some(files), Some(d)) = (&files, dictionary_dir) {
-        lines.extend(write_dictionary_texts(d, files)?);
+        ops.extend(plan_dictionary_texts(d, files)?);
     }
+    Ok(ImportPlan {
+        ops,
+        notice,
+        config_digest: config_digest(&cfg),
+        dictionary_digest: dict_digest,
+    })
+}
+
+/// Windows 側のファイルを読み、テキストを書き直す (pjp-google-ime import)。確かめが全部通ってから書く (確かめで止まれば、何も書かない)
+#[cfg(test)]
+pub fn import(
+    windows_dir: &Path,
+    config_dir: &Path,
+    dictionary_dir: Option<&Path>,
+) -> Result<Imported, TextError> {
+    let plan = plan_import(windows_dir, config_dir, dictionary_dir)?;
+    let mut lines = apply_ops(&plan.ops).map_err(|(_, e)| e)?;
     if lines.is_empty() {
         lines.push("テキストは今のままで同じです。".to_string());
     }
-    Ok(Imported { lines, notice })
+    Ok(Imported {
+        lines,
+        notice: plan.notice,
+    })
 }
 
 #[cfg(test)]
@@ -1316,6 +1456,122 @@ mod tests {
         assert_eq!(
             digest(Db::Dictionary, built.dictionary.as_ref().unwrap(), "x").unwrap(),
             dictionary_digest(&s).unwrap()
+        );
+    }
+
+    #[test]
+    fn dictionary_names_must_be_windows_file_names() {
+        for bad in [
+            "C:foo",
+            "a:b",
+            "a<b",
+            "a>b",
+            "a\"b",
+            "a|b",
+            "a?b",
+            "a*b",
+            "a\u{1}b",
+            "CON",
+            "con",
+            "nul.x",
+            "Com1",
+            "LPT\u{b9}",
+            "CON ",
+            "aux.",
+            "",
+        ] {
+            assert!(check_dictionary_name(bad).is_err(), "{bad:?}");
+        }
+        for ok in [
+            "a b",
+            "テスト辞書",
+            "😀",
+            "CONSOLE",
+            "x.con",
+            "COM10",
+            "名前.v2",
+        ] {
+            assert!(check_dictionary_name(ok).is_ok(), "{ok:?}");
+        }
+        // Windows では大文字小文字だけが違う 2 つの辞書は同じファイルになる: テキストにしない
+        let mut s = Message::new(&pb::STORAGE);
+        for n in ["Foo", "foo"] {
+            let mut d = Message::new(&pb::USER_DICTIONARY);
+            d.set("name", Value::Bytes(n.as_bytes().to_vec()));
+            s.push("dictionaries", Value::Msg(d));
+        }
+        let e = dictionaries_to_tsv(&s).unwrap_err();
+        assert!(e.0.contains("大文字小文字だけが違い"), "{e}");
+    }
+
+    /// 画面で辞書の名前の大文字小文字だけを替えた: TSV の名前を替える (Windows では同じファイルなので、書かずに消すと辞書が消える)
+    #[test]
+    fn import_renames_tsv_whose_name_differs_only_in_case() {
+        let t = TempDir::new("ime-import-case");
+        let (win, conf, dict) = import_dirs(&t);
+        std::fs::write(
+            win.join(CONFIG_DB),
+            cfg(TXTPB_MIN, Some(KEYMAP_MIN), None).encode(),
+        )
+        .unwrap();
+        let tsv = "あ\tア\t名詞\t\n";
+        std::fs::write(dict.join("Tech.tsv"), tsv).unwrap();
+        std::fs::write(dict.join("Other.tsv"), "い\tイ\t名詞\t\n").unwrap();
+        let s =
+            dictionaries_from_tsv(&files(&[("tech", tsv), ("other", "う\tウ\t名詞\t\n")])).unwrap();
+        std::fs::write(win.join(DICTIONARY_DB), s.encode()).unwrap();
+        let r = import(&win, &conf, Some(&dict)).unwrap();
+        assert!(
+            r.lines
+                .iter()
+                .any(|l| l.starts_with("名前を替えた: ") && l.ends_with("tech.tsv")),
+            "{:?}",
+            r.lines
+        );
+        let mut names: Vec<String> = std::fs::read_dir(&dict)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, vec!["other.tsv", "tech.tsv"]);
+        assert_eq!(std::fs::read_to_string(dict.join("tech.tsv")).unwrap(), tsv);
+        assert_eq!(
+            std::fs::read_to_string(dict.join("other.tsv")).unwrap(),
+            "う\tウ\t名詞\t\n"
+        );
+        // 組み立て直すと Windows 側と同じ
+        let built = build(&conf, Some(&dict)).unwrap();
+        assert_eq!(
+            digest(Db::Dictionary, built.dictionary.as_ref().unwrap(), "x").unwrap(),
+            dictionary_digest(&s).unwrap()
+        );
+    }
+
+    /// 書き直す前のテキストが読めない (UTF-8 でない) なら、何も書かずに止まる (確かめてから書く)
+    #[test]
+    fn import_checks_everything_before_writing() {
+        let t = TempDir::new("ime-import-plan");
+        let (win, conf, dict) = import_dirs(&t);
+        let gui_keymap = "status\tkey\tcommand\nDirectInput\tF13\tIMEOn\n";
+        std::fs::write(
+            win.join(CONFIG_DB),
+            cfg(TXTPB_MIN, Some(gui_keymap), None).encode(),
+        )
+        .unwrap();
+        let s = dictionaries_from_tsv(&files(&[("d", "あ\tア\t名詞\t\n")])).unwrap();
+        std::fs::write(win.join(DICTIONARY_DB), s.encode()).unwrap();
+        std::fs::write(conf.join(TXTPB), TXTPB_MIN).unwrap();
+        std::fs::write(conf.join(KEYMAP), KEYMAP_MIN).unwrap();
+        std::fs::write(dict.join("d.tsv"), [0xff, 0xfe]).unwrap();
+        let e = import(&win, &conf, Some(&dict)).unwrap_err();
+        assert!(e.0.contains("UTF-8"), "{e}");
+        assert_eq!(
+            std::fs::read_to_string(conf.join(KEYMAP)).unwrap(),
+            KEYMAP_MIN
+        );
+        assert_eq!(
+            std::fs::read_to_string(conf.join(TXTPB)).unwrap(),
+            TXTPB_MIN
         );
     }
 

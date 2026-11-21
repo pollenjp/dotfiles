@@ -2449,14 +2449,18 @@ WSL のホストでは `nix/scripts/bootstrap-windows-google-ime.sh` (order 98) 
 | `nix/scripts/bootstrap-windows-google-ime.sh --force` | 衝突でも repo の中身で置き直す |
 | `nix/scripts/bootstrap-windows-google-ime.sh --check` | テキストの検証だけ (CI の lint でも走る。`config.txtpb` が無ければ exit 1) |
 | `dotfiles apply --steps google-ime` (runner) | 組み立てて配る (受け持ちを runner に切り替えたホスト) |
-| `dotfiles check --steps google-ime` (runner) | 判定だけ見る (`apply --dry-run` も同じ。テキストの誤りも出す。受け持ちによらず流せる) |
+| `dotfiles check --steps google-ime` (runner) | 判定だけ見る (`apply --dry-run` も同じ。受け持ちによらず流せる) |
 | `dotfiles check --steps google-ime --show-words` (runner) | 辞書の衝突でも語の diff を出す。自分の端末で打つ (Claude などのログに残る場所では流さない) |
 | `dotfiles import google-ime` (runner) | 画面で変えた分を、テキストへ取り込む (受け持ちが runner のホストだけ) |
 | `dotfiles apply --steps google-ime --force` (runner) | 衝突でも repo の中身で置き直す |
 
-runner に `--check` は無い。runner の check と apply はテキストを組み立ててから判定するので、テキストの誤りはその行に出る。CI では
-`win/runner` の試験が repo のテキストを組み立てる (WSL の `--check` は、WSL の script を残す間は nix の CI の lint で流れ続ける)。
+runner に `--check` は無い。runner の check と apply は、置き先がある (Google 日本語入力を使っている) PC ではテキストを組み立ててから
+判定するので、テキストの誤りはその行に出る (入っていない・まだ使っていない PC と、apply で設定画面が開いている・`tasklist` で確かめられない
+ときは、組み立てる前に止まる)。CI では `win/runner` の試験が repo のテキストを組み立てる (WSL の `--check` は、WSL の script を残す間は nix の
+CI の lint で流れ続ける)。
 
+- 辞書の名前は、Windows のファイル名にできるものにする (runner は `<>:"|?*`・制御文字・`CON`・`NUL`・`COM1` などの名前と、大文字小文字だけが違う
+  2 つの名前を止める。画面で名前を変える)。画面で辞書の名前の大文字小文字だけを変えて取り込むと、runner は TSV の名前を替える
 - 比べるのは、時刻・版・OS (`general_config`) と辞書の id・並びを外した中身 (`pjp-google-ime digest`)。
   画面で OK を押しただけなら衝突にならない。空のコメントと空の表も「無い」と同じに扱う (単語登録
   ダイアログで足した語は、コメントが空だとコメントの項目を持たず、設定画面はカスタムしていない

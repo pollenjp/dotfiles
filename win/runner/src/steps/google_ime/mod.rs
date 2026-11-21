@@ -26,7 +26,8 @@
 //! - 辞書の語は出さない: 辞書の衝突は辞書ごとの行の数だけを出す。語の diff は `--show-words` (自分の端末で `dotfiles check --steps google-ime
 //!   --show-words`)
 //! - 取り込み (`dotfiles import google-ime`。WSL の `--import`): Windows 側の 2 つのファイルをテキストに戻して repo と dotfiles-private へ書き、記録を
-//!   合わせる。取り込みが書き換えるテキストに commit していない変更があれば止まる
+//!   取り込みで読んだときの digest に合わせる (読み直さない)。取り込みが書き換えるテキストに commit していない変更があれば止まる。確かめが全部
+//!   通ってから書く (途中で書けなくなったら、そう出す)
 //! - SSH の会話 (Windows のセッション 0) でも同じに流す: tasklist は全部のセッションのプロセスを数え、taskkill は同じユーザーの別のセッションの
 //!   プロセスも止められる見込み (実機では確かめていない。止められなければ印を残して ⚠ になり、次の apply が落とし直す)
 
@@ -271,8 +272,8 @@ fn tool_open(ctx: &mut Ctx) -> Result<bool, Outcome> {
                 "!! tasklist を呼べませんでした ({})。Google 日本語入力の設定は置きません。",
                 describe(&r.exit)
             ));
-            for l in r.output.iter().filter(|l| !l.trim().is_empty()) {
-                ctx.say(format!("   {}", l.trim_end_matches('\r')));
+            for l in readable(&r.output) {
+                ctx.say(format!("   {l}"));
             }
             describe(&r.exit)
         }
@@ -287,6 +288,31 @@ fn tool_open(ctx: &mut Ctx) -> Result<bool, Outcome> {
         Kind::Failed,
         format!("tasklist で設定画面が開いているかを確かめられない ({why})。何も置いていない"),
     ))
+}
+
+/// 人に見せる外のコマンドの行 (空の行を外す)。tasklist・taskkill は日本語の Windows ではコンソールの文字コード (CP932) で書き、UTF-8 として読むと
+/// 化けるので、読めない字の混じる行は出さずに 1 行で知らせる
+fn readable(lines: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut garbled = false;
+    for l in lines {
+        let l = l.trim_end_matches('\r');
+        if l.trim().is_empty() {
+            continue;
+        }
+        if l.contains('\u{fffd}') {
+            garbled = true;
+        } else {
+            out.push(l.to_string());
+        }
+    }
+    if garbled {
+        out.push(
+            "(UTF-8 で読めない行は出していない。PowerShell で同じコマンドを打つと読める)"
+                .to_string(),
+        );
+    }
+    out
 }
 
 /// 変換サーバーを落とした結果。
@@ -309,18 +335,15 @@ fn kill_converter(ctx: &mut Ctx) -> Killed {
         .arg(CONVERTER)
         .timeout(Duration::from_secs(TASK_SECS));
     let r = ctx.sys.run(&spec, &mut |_| {});
-    match r.exit {
-        Exit::Code(0) => Killed::Done,
-        Exit::Code(128) => Killed::NotRunning,
-        ref other => Killed::Failed(
-            format!("taskkill の{}", describe(other)),
-            r.output
-                .iter()
-                .map(|l| l.trim_end_matches('\r').to_string())
-                .filter(|l| !l.trim().is_empty())
-                .collect(),
-        ),
-    }
+    let why = match &r.exit {
+        Exit::Code(0) => return Killed::Done,
+        Exit::Code(128) => return Killed::NotRunning,
+        Exit::Code(c) => format!("taskkill の終了コード {c}"),
+        Exit::NoCode => "taskkill に終了コードが無い".to_string(),
+        Exit::TimedOut => format!("taskkill が {TASK_SECS} 秒たっても終わらなかった"),
+        Exit::SpawnFailed(e) => format!("taskkill を起こせなかった: {e}"),
+    };
+    Killed::Failed(why, readable(&r.output))
 }
 
 /// 取り込みのコマンド (受け持ちで替える)
@@ -913,16 +936,23 @@ fn uncommitted(ctx: &Ctx, dir: &Path, paths: &[&str]) -> Result<(), Vec<String>>
     for p in paths {
         spec = spec.arg(*p);
     }
-    let r = ctx
-        .sys
-        .run(&spec.timeout(Duration::from_secs(30)), &mut |_| {});
+    // 変更の行は stdout だけから読む (stderr の warning を数えない)。確かめられないときの文には stderr も出す
+    let mut all = Vec::new();
+    let r = ctx.sys.run(
+        &spec.timeout(Duration::from_secs(30)).stdout_only(),
+        &mut |l| all.push(l.to_string()),
+    );
     let lines: Vec<String> = r.output.iter().filter(|l| !l.is_empty()).cloned().collect();
     if r.code() != Some(0) {
         let mut out = vec![format!(
             "!! {} に commit していない変更が無いかを確かめられません (git が無いか、git の checkout ではない):",
             dir.display()
         )];
-        out.extend(lines.iter().map(|l| format!("   {l}")));
+        out.extend(
+            all.iter()
+                .filter(|l| !l.is_empty())
+                .map(|l| format!("   {l}")),
+        );
         out.push(stop.to_string());
         return Err(out);
     }
@@ -941,9 +971,10 @@ fn uncommitted(ctx: &Ctx, dir: &Path, paths: &[&str]) -> Result<(), Vec<String>>
     for p in paths {
         spec = spec.arg(*p);
     }
-    let short = ctx
-        .sys
-        .run(&spec.timeout(Duration::from_secs(30)), &mut |_| {});
+    let short = ctx.sys.run(
+        &spec.timeout(Duration::from_secs(30)).stdout_only(),
+        &mut |_| {},
+    );
     out.extend(
         short
             .output
@@ -971,9 +1002,10 @@ fn import_changed(ctx: &Ctx, dir: &Path, paths: &[&str]) -> bool {
     for p in paths {
         spec = spec.arg(*p);
     }
-    let r = ctx
-        .sys
-        .run(&spec.timeout(Duration::from_secs(30)), &mut |_| {});
+    let r = ctx.sys.run(
+        &spec.timeout(Duration::from_secs(30)).stdout_only(),
+        &mut |_| {},
+    );
     r.code() != Some(0) || r.output.iter().any(|l| !l.is_empty())
 }
 
@@ -1012,31 +1044,40 @@ pub fn import(ctx: &mut Ctx) -> Outcome {
             );
         }
     }
-    match ime::import(&paths.ime_dir, &paths.config_dir, dict.as_deref()) {
-        Ok(r) => {
-            if let Some(n) = &r.notice {
-                ctx.say(n);
-            }
-            for l in &r.lines {
-                ctx.say(l);
-            }
-        }
+    let plan = match ime::plan_import(&paths.ime_dir, &paths.config_dir, dict.as_deref()) {
+        Ok(p) => p,
         Err(e) => {
             ctx.say(format!("!! {e}"));
             return finish(Outcome::new(Kind::Failed, "取り込めない (何も書いていない)").note(e.0));
         }
+    };
+    if let Some(n) = &plan.notice {
+        ctx.say(n);
     }
-    let mut kinds = vec![Db::Config];
-    if dict.is_some() {
-        kinds.push(Db::Dictionary);
-    }
-    for kind in kinds {
-        let p = paths.ime_dir.join(kind.file_name());
-        if p.is_file()
-            && let Ok(d) = windows_digest(kind, &p)
-        {
-            records.set(kind.file_name(), &d);
+    match ime::apply_ops(&plan.ops) {
+        Ok(lines) if lines.is_empty() => ctx.say("テキストは今のままで同じです。"),
+        Ok(lines) => {
+            for l in &lines {
+                ctx.say(l);
+            }
         }
+        Err((lines, e)) => {
+            for l in &lines {
+                ctx.say(l);
+            }
+            ctx.say(format!("!! {e}"));
+            ctx.say("   途中まで書きました。git status で見て、戻すか、直してから流し直してください (記録は変えていません)。");
+            return finish(
+                Outcome::new(Kind::Failed, "取り込みの途中で書けなくなった (途中まで書いた)")
+                    .note(e.0)
+                    .note("書いたテキストを git status で見て、戻すか直してから流し直す (記録は変えていない)"),
+            );
+        }
+    }
+    // 記録は、取り込みで読んだときの digest (読み直さない。WSL は書いた後に読み直す)
+    records.set(Db::Config.file_name(), &plan.config_digest);
+    if let Some(d) = &plan.dictionary_digest {
+        records.set(Db::Dictionary.file_name(), d);
     }
     if let Err(e) = save_records(&records, &paths.record()) {
         ctx.say(format!(

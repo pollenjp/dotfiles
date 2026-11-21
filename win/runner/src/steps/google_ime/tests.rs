@@ -64,6 +64,10 @@ struct Fake {
     /// git の status を打った回数 (`dirty` は `dirty_from` 回目からだけ返す。取り込みの後でだけ変更があるように見せる)
     status_calls: usize,
     dirty_from: usize,
+    /// git が stderr に出す warning の行 (stdout だけを読むなら、写しに入らない)
+    git_warnings: Vec<String>,
+    /// taskkill が出す行
+    taskkill_out: Vec<String>,
     env: Vec<(String, String)>,
 }
 
@@ -87,7 +91,7 @@ impl Sys for TestSys {
             }
             "taskkill" => {
                 f.calls.push(format!("taskkill {}", args.join(" ")));
-                (f.taskkill_rc, Vec::new())
+                (f.taskkill_rc, f.taskkill_out.clone())
             }
             "git" => {
                 if f.git_fails {
@@ -112,7 +116,15 @@ impl Sys for TestSys {
                     if args.iter().any(|a| a == "diff") {
                         (1, vec!["--- Windows 側/x".to_string()])
                     } else {
-                        (0, lines)
+                        // stderr の warning は流す口には渡し、stdout だけを読むなら写しに入れない (本物の口と同じ)
+                        for w in &f.git_warnings {
+                            on_line(w);
+                        }
+                        let mut out = lines;
+                        if !spec.stdout_only {
+                            out.extend(f.git_warnings.iter().cloned());
+                        }
+                        (0, out)
                     }
                 }
             }
@@ -753,6 +765,38 @@ fn import_writes_texts_and_records_and_prompts_only_for_changed_repos() {
         assert_eq!(out.lines().last(), Some(want), "{out}");
         assert!(o.notes.iter().any(|n| n.contains("commit して push する")));
     }
+}
+
+/// git が stderr に warning を出しても、変更の行とは数えない (取り込みは止まらず、commit も促さない)
+#[test]
+fn git_warnings_are_not_changes() {
+    let pc = Pc::new(true);
+    pc.run(APPLY);
+    pc.fake.borrow_mut().git_warnings =
+        vec!["warning: unable to access '/x/.config/git/attributes'".to_string()];
+    let (o, out) = pc.import();
+    assert_eq!(o.kind, Kind::Ok, "{out}");
+    assert!(out.contains("commit するものはありません"), "{out}");
+}
+
+/// taskkill が UTF-8 でない文字コード (日本語の Windows の CP932) で書いた行は、化けたまま出さない
+#[test]
+fn garbled_taskkill_output_is_not_shown() {
+    let pc = Pc::new(true);
+    {
+        let mut f = pc.fake.borrow_mut();
+        f.taskkill_rc = 1;
+        f.taskkill_out = vec![
+            "\u{fffd}\u{fffd}: \u{fffd}\u{fffd}".to_string(),
+            "ERROR: access denied".to_string(),
+        ];
+    }
+    let (o, out) = pc.run(APPLY);
+    assert_eq!(o.kind, Kind::Failed, "{out}");
+    assert!(!out.contains('\u{fffd}') && out.contains("ERROR: access denied"));
+    assert!(
+        out.contains("UTF-8 で読めない行は出していない") && out.contains("taskkill の終了コード 1")
+    );
 }
 
 #[test]
