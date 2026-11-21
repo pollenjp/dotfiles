@@ -885,8 +885,18 @@ mod tests {
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("[90] files"));
-            // WSL の setup の Windows の手順は全部 runner に移した (まだ無い手順の印は無い)。op-reason は onePassword (グループの既定は off) で on/off
-            assert!(!out.contains("runner にまだ無い"), "{out}");
+            // まだ無い手順の印は、PENDING にある手順にだけ付く (今は空: WSL の setup の Windows の手順は全部 runner に移した)
+            match crate::steps::pending::PENDING.first() {
+                None => assert!(!out.contains("runner にまだ無い"), "{out}"),
+                Some(p) => assert!(
+                    out.contains(&format!(
+                        "runner にまだ無い。WSL の bootstrap-windows-{}.sh",
+                        p.id
+                    )),
+                    "{out}"
+                ),
+            }
+            // 移した op-reason は onePassword (どのグループも既定は off) で on/off
             let op_reason = out
                 .lines()
                 .find(|l| l.contains("] op-reason "))

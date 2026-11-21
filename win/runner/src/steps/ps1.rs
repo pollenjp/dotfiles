@@ -40,7 +40,7 @@ impl Header {
     }
 }
 
-/// 1 (揃っていない) のときの扱い。
+/// 1 (揃っていない) のときの扱い (`Replace` は、3 (入っていない) のときに `-IfMissing` を付けないことも決める)。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Policy {
     /// 知らせるだけ (※ の手順。入れ替えは人が決める)
