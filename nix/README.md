@@ -1256,7 +1256,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 | 道具の switch | 段 | 止めるもの |
 | --- | --- | --- |
-| `claude.enable` | ② | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・abbr / alias の `c`・setup の bootstrap-claude-*（7 本）と mise の claude |
+| `claude.enable` | ② | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）と mise の claude |
 | `dotfiles.herdr.enable` | ② | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
 | `dotfiles.herdrCore.enable` | ②（Linux だけ） | herdr-core（hc） |
 | `wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable` | ② | Windows の Claude Code・herdr と herdr-app（`windowsFiles.enable` のマシンだけで効く） |
@@ -1745,6 +1745,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-google-ime` (PATH) | `nix/pkgs/pjp-google-ime/` (`wsl.windowsFiles.enable` のマシンだけ。[後述](#windows-側のファイルを配る)) |
 | `pjp-pr-diff` (PATH) | `nix/pkgs/pjp-pr-diff/` (全ホスト。[後述](#pr-の差分からファイルを選んで見る-pjp-pr-diff)) |
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
+| `claude-selector` (PATH) | `nix/pkgs/claude-selector/` (`claude.enable` のマシン。Rust。略語は `cs`。[後述](#アカウントと-option-を矢印キーで選んで起こす-claude-selector)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
 | `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は core を立てたシェルに固有の env (旧 herdr の pane の印・`RUSTUP_TOOLCHAIN`) を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
 | `~/.claude/skills/hc/SKILL.md` | `nix/pkgs/herdr-core/claude-skill.nix` (生成。同じ package の `hc --skill` に `claude-skill-head.md` の frontmatter を足したもの。`dotfiles.herdrCore.enable` のマシン。[後述](#hc-の-skill-claudeskillshc)) |
@@ -4624,7 +4625,8 @@ claude-account help token [token1]             # token をこのマシンとほ�
   出す（起こすたびに 1Password の承認が出るので、子は起動の直後にその画面で止まって見えうる）。知らない名前の 2 は足す手（add）を出す
 - `remove` は `~/.claude-<名前>`（ログイン・履歴）と token のファイルを残す。`--purge` は両方を消すが、中のリンクは辿らない
   （`~/.claude` の中身は消えない）。登録から外したあとでも `--purge` で消せる
-- 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）で、32 字まで。`account`・既定の名前・`sk-ant-` で
+- 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）で、32 字まで。`account`・`selector`（`claude-selector` と
+  取り合う）・既定の名前・`sk-ant-` で
   始まるもの（token の頭）は使えない。規則に合わない文字列は文に出さない（token を名前の所に渡しても、画面に出さない）
 
 #### token のアカウント
@@ -4741,6 +4743,44 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 
 経緯と、採らなかった案（`~/.claude` をリンクにする、3 つの dir に一式を配る、など）は
 [ADR 009](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
+
+### アカウントと option を矢印キーで選んで起こす (claude-selector)
+
+`cs`（fish の abbr・bash の alias。中身は `claude-selector`）は、claude のアカウントと option を矢印キーで段ごとに選び、組み立てた
+コマンド行を見せてから Claude Code を起こす（実体は `nix/pkgs/claude-selector/`。Rust。`claude.enable` のホストの PATH に入る）。
+Windows の PowerShell にも同じ `cs` があり、同じ crate を runner が作って置く（`win/README.md` の「[claude-selector (cs)](../win/README.md#claude-selector-cs)」）。
+設計は dotfiles-private の ADR 087（`docs/adr/087_claude_selector_*`）。
+
+```sh
+cs              # 選んで起こす
+cs -c           # cs の後ろの引数は、組み立てた引数の後ろにそのまま付く (cs "質問" も)
+```
+
+| 段 | 選択肢 (太字が既定) |
+| --- | --- |
+| 1. アカウント | **`claude`**・`claude-<名前>`（既定の personal・work と `claude-account add` の登録。launcher が PATH に無いものは選べない） |
+| 2. 権限 | **`--dangerously-skip-permissions`**・`--permission-mode auto`・付けない（ふつうの確認）・`--permission-mode acceptEdits`・`--permission-mode plan` |
+| 3. effort | low・medium・high・xhigh・**max** |
+| 4. モデル | **claude-opus-5-5**・claude-sonnet-5-5・claude-haiku-5-5・claude-fable-5-2・claude-fable-5-1・手で打つ（別名の `opus` なども） |
+| 5. Remote Control | **付けない**・名前なしで付ける（`--remote-control=`）・名前を付ける（`--remote-control=<名前>`） |
+
+- どの段も既定に「(既定)」の印が付き、Enter だけで既定のまま進む（全部 Enter なら `c` から `--remote-control=` を外した中身）。どの段でも
+  一番下に、今のカーソルのまま進んだときのコマンド行が出る。最後の画面（これで起こす）で Enter を押すと起こし、起こしたコマンド行を
+  端末に 1 行残す（Linux は exec で置き換わる。終了コードは Claude Code のもの）
+- キー: ↑↓（k・j・Ctrl+P・Ctrl+N・Tab）で選ぶ、Enter（→）で決める、←（Backspace）で前の段へ戻る（決めたものは残る）、Esc・Ctrl+C で
+  やめる（起こさない。終了コード 130）。字を打つ間（モデルを手で打つ・Remote Control の名前）は Backspace で 1 字・Ctrl+U で全部消し、
+  空で Backspace なら一覧へ戻る。Remote Control の名前を空のまま決めると名前なし
+- `--remote-control` は `=` で値を閉じる（後ろの引数を名前として取らせない。理由は `c` と同じ。`nix/home/modules/fish.nix` の注記）
+- アカウントの並びは、既定（`~/.local/state/dotfiles/claude-accounts.json`）のあとに登録（`~/.config/claude-accounts/accounts.json`）を
+  名前の順。`~/.claude*` の dir は見ない（`~/.claude_credits` のようにアカウントでないものがある）。一覧が読めなければ上に知らせ、読めた方
+  だけを出す。`claude-<名前>` は PATH の launcher をそのまま起こす（`CLAUDE_CONFIG_DIR`・token は launcher が決める）。`CLAUDE_CONFIG_DIR`
+  が付いた端末では、素の `claude` の行にその値が出る（素の `claude` はそれを受け継ぐ）
+- `selector` はアカウントの名前に使えない（`claude-account add selector` は断り、登録にあれば一覧ごと読めない形。`claude-<名前>` の
+  launcher と `claude-selector` が同じ名前の空間に並ぶため）
+- 端末でなければ（パイプ・`hc exec` など）何もせずに 2 で止まる。選ばずに起こすなら `c`
+- 選択肢と既定を変えるときは `nix/pkgs/claude-selector/src/choice.rs`。試験は `nix/pkgs/claude-selector/tests/`（キーを並べて画面の
+  中身と起こす argv を見る。flake の checks の `claude-selector-test`・`claude-selector-lint`）。switch せずに端末で試すなら
+  `nix run ./nix#claude-selector -- -c`
 
 ### private な skill 置き場 (claude-skills)
 

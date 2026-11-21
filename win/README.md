@@ -411,6 +411,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
+| 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international` | `international/managed.json` の値だけを、日付と時刻の形式 (`HKCU\Control Panel\International`) へ書く ([日付と時刻の形式](#日付と時刻の形式) と同じ判定。WSL と同じ PowerShell の本文を `pwsh` (PowerShell 7) に `-EncodedCommand` で渡し、SetLocaleInfoW で書いて WM_SETTINGCHANGE を送り、読み戻す。衝突は触らない。`--force` は衝突も書く。取り込みは `dotfiles import international`。check と dry-run は読むだけ。SSH の会話の apply は書く値があれば書かずに ⚠)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-international.applied.json` | いつも | 有る |
 | 99 | `port-forward` | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、`%USERPROFILE%\.config\port-forward\hosts.json` に置く ([port forwarding (pf)](#port-forwarding-pf) と同じ確かめ・中身・判定。`--force` は元を `hosts.json.dotfiles-bak-<日時>` に退避して上書き)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-port-forward.deployed.json` | いつも | 有る |
@@ -711,9 +712,45 @@ dotfiles apply --steps claude-accounts
 `windowsClaudeAccounts = false` にしても、作ったものは消さない (runner が見なくなるだけ)。外すなら:
 
 - `%LOCALAPPDATA%\dotfiles\bin\claude-*.exe` (`claude-account.exe` も) を消し、ユーザーの PATH から `%LOCALAPPDATA%\dotfiles\bin` を外す
-  (`rundll32 sysdm.cpl,EditEnvironmentVariables` の「ユーザー環境変数」の Path)
+  (`rundll32 sysdm.cpl,EditEnvironmentVariables` の「ユーザー環境変数」の Path)。`claude-selector.exe` は手順 `claude-selector` のもの
+  (`windowsClaudeCode` で on/off。[claude-selector (cs)](#claude-selector-cs)) なので、cs を使い続けるなら残し、PATH も外さない
 - `~/.claude-<名前>` を消すと、そのアカウントのログインも消える。中の junction は `cmd /c rmdir` で外し (先は消えない)、Windows PowerShell 5.1 の
   `Remove-Item -Recurse` を junction に打たない (先の中身まで消すことがある)
+
+### claude-selector (cs)
+
+`cs` (PowerShell の function と略語。中身は `claude-selector`) は、claude のアカウントと option を矢印キーで段ごとに選び、組み立てた
+コマンド行を見せてから Claude Code を起こす。Linux の `cs` と同じ crate (`nix/pkgs/claude-selector`) の同じ画面で、選べるもの・既定・キーは
+nix/README.md の「[アカウントと option を矢印キーで選んで起こす (claude-selector)](../nix/README.md#アカウントと-option-を矢印キーで選んで起こす-claude-selector)」
+と同じ。設計は dotfiles-private の ADR 087 (`docs/adr/087_claude_selector_*`)。
+
+```powershell
+dotfiles check --steps claude-selector     # 置いた exe が今の元のものか (cargo を打たない。何も書かない)
+dotfiles apply --steps claude-selector     # 作って置く (初めては crossterm などの依存も作るので 1 分ほど)
+# 初めて PATH に足した後は、新しい PowerShell で (herdr-app の中の端末なら herdr-app を上げ直してから)
+cs                                         # 選んで起こす。cs -c・cs "質問" の後ろの引数は、組み立てた引数の後ろにそのまま付く
+```
+
+- runner の手順 `claude-selector` (order 99。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す。on/off は
+  `windowsClaudeCode`) が、clone の `nix/pkgs/claude-selector` を runner と同じ toolchain (`runner/rust-toolchain.toml` の版を
+  `RUSTUP_TOOLCHAIN` に付ける) で `cargo build --release --locked` し (置き場は crate の `target\`)、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe`
+  に置いて、置き場をユーザーの PATH の末尾に足す (claude-<名前>.exe と同じ置き場。動いていれば退けてから置く)
+- 作り直すかは、crate の元 (`Cargo.toml`・`Cargo.lock`・`src\` の下の全部) と toolchain の版の SHA-256 を、置いた exe の SHA-256 と組で
+  `%LOCALAPPDATA%\dotfiles\state\claude-selector.built.json` に控えて決める。元・toolchain・置いた exe のどれかが変わっていれば、`dotfiles check` が
+  「作り直して置く」と出し、`dotfiles apply` が作り直す。作れなければ (cargo が落ちた・cargo が無い) この手順だけが落ち、置いてある exe と控えは
+  そのまま
+- claude-<名前>.exe・claude-account.exe と違って runner の exe の写しにしないのは、画面の crate (crossterm とその依存) を runner に入れず、
+  selector の `Cargo.lock` を Linux の Nix と同じ 1 つにするため。`claude-accounts` の外に置くのは、company のグループ (`windowsClaudeAccounts` が
+  off) でも素の `claude` を選んで起こせるようにするため
+- アカウントの並びは、既定 (`personal`・`work`。runner の `claude-accounts` と同じ。試験が突き合わせる) のあとに `claude-account` の登録
+  (`%USERPROFILE%\.config\claude-accounts\accounts.json`) を名前の順。launcher (`claude-<名前>.exe`) が PATH に無いアカウントは選べない
+  (`windowsClaudeAccounts` が off のホストでは、素の `claude` だけを選べる)
+- 起こすときは、選んだ `claude.exe` か `claude-<名前>.exe` (launcher) を子 process で起こして待ち、その終了コードで終わる (Windows に exec が
+  無いため。launcher と同じ)。Ctrl+C は Claude Code に任せ、claude-selector は受け流すだけで、自分だけが先に落ちない。選ぶ画面の Esc・Ctrl+C は
+  何も起こさずに 130 で終わる
+- 見せるコマンド行は PowerShell の書き方で囲む (`'質問 です'`)。起こすのは argv のままなので、引用は見せるためだけ
+- `selector` はアカウントの名前に使えない (`claude-account add selector` は断る。`claude-<名前>.exe` の launcher が `claude-selector.exe` を
+  上書きするため)
 
 ### git の設定
 
@@ -1388,6 +1425,7 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 | `hsvstop` | `herdr server stop` |
 | `hr` | `herdr --remote` (`hr <ssh-target>`。SSH 越しに別のマシンの herdr server へ attach する) |
 | `c` | `claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=` (Claude Code。Remote Control を有効にして起動する。末尾の `=` は、後ろに続く語をセッションの名前として取らせないため) |
+| `cs` | `claude-selector` (claude のアカウントと option を矢印キーで選んでから起こす。runner の手順 `claude-selector` が置く exe。[claude-selector (cs)](#claude-selector-cs)) |
 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr`) で、WSL の herdr とは
 別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (WinGet の `Anthropic.ClaudeCode`。
