@@ -2471,15 +2471,17 @@ exit "${rc}"
         }
     }
 
-    /// 版の比べ方は sort -V (C の locale) と同じ
+    /// 版の比べ方は sort -V (C の locale) と同じ。比べるのは、WSL と runner が並べる形 (版の形の正規表現を通った、数と `.` だけの字。頭の 0 も
+    /// 欄の数の違いも) だけ。`.` で始まる名前・英字や `~` の拡張子の扱いは coreutils の版で違う (CI の ubuntu の sort と nix の sort でも違う) ので
+    /// 比べない
     #[test]
     fn version_cmp_matches_sort_v() {
         if !bash::available() {
             return;
         }
         let mut items: Vec<String> = Vec::new();
-        let alphabet = [
-            "0", "1", "2", "9", "10", "010", ".", ".", "a", "~", "-", "rc",
+        let parts = [
+            "0", "1", "2", "9", "10", "010", "00", "09", "100", "19", "2026", "0001",
         ];
         let mut seed: u64 = 0x9e37_79b9_7f4a_7c15;
         let mut next = || {
@@ -2489,11 +2491,11 @@ exit "${rc}"
             seed
         };
         for _ in 0..3000 {
-            let n = 1 + (next() % 7) as usize;
-            let s: String = (0..n)
-                .map(|_| alphabet[(next() % alphabet.len() as u64) as usize])
+            let n = 1 + (next() % 5) as usize;
+            let s: Vec<&str> = (0..n)
+                .map(|_| parts[(next() % parts.len() as u64) as usize])
                 .collect();
-            items.push(s);
+            items.push(s.join("."));
         }
         for v in [
             "1.104.6",

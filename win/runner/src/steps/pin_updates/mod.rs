@@ -460,7 +460,9 @@ pub fn newer_than(a: &str, b: &str) -> bool {
     a != b && version_cmp(a, b) == Ordering::Greater
 }
 
-/// GNU の `sort -V` の比べ方: gnulib の filevercmp で比べ、同じなら sort の最後の比べ方 (バイト列) で比べる。
+/// GNU の `sort -V` の比べ方: gnulib の filevercmp で比べ、同じなら sort の最後の比べ方 (バイト列) で比べる。並べるのは版の形の正規表現を通った
+/// 数と `.` だけの字で、その範囲では coreutils の版によらず同じ (`.` で始まる名前と、英字や `~` の拡張子の扱いは、新しい filevercmp に合わせた。
+/// 古い coreutils の sort とは違う)
 pub fn version_cmp(a: &str, b: &str) -> Ordering {
     match filevercmp(a.as_bytes(), b.as_bytes()) {
         Ordering::Equal => a.as_bytes().cmp(b.as_bytes()),
