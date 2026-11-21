@@ -1,4 +1,4 @@
-# WSL + 1Password のマシンにだけ入る op・op-reason・op-reason-log (home/modules/op-reason.nix が pkgs/op-reason を包んだもの) と、
+# WSL + 1Password のマシンにだけ入る op・op-reason・op-reason-log・op-reason-ssh (home/modules/op-reason.nix が pkgs/op-reason を包んだもの) と、
 # Claude の hook に知らせる claude-op-reason.json を確かめる。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、CI の `nix flake check --all-systems --no-build`
@@ -18,7 +18,8 @@
 #     - fish の op と op-reason の補完 (~/.config/fish/completions/op.fish・op-reason.fish) は入るマシンにだけ置き、中身は
 #       pkgs/op-reason が出したもの (ほかのマシンは fish に同梱の op の補完のまま)
 #   ビルド時 (このランナーの system だけ)
-#     - 入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log は、この包みのもの。入らないマシンの profile に bin/op は無い
+#     - 入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log・bin/op-reason-ssh は、この包みのもの。入らないマシンの
+#       profile に bin/op は無い
 #     - profile の op-reason --version は、呼ぶ側の PATH に何も無くても pkgs/op-reason の版を出す
 #     - profile の op は、op.exe が無ければ 127 で断り、op-reason の記録 (~/.local/state/op-reason/log.jsonl) に refused の
 #       no-op-exe を書く。包みは表示の言語を決めない (OPREASON_LANG が無ければ英語で、LANG=ja_JP.UTF-8 でも英語。
@@ -26,6 +27,8 @@
 #     - op.exe があって op-reason.exe が無ければ、既定の OPREASON_EXE の場所を断りの文に出して 127 (no-exe)。環境に
 #       OPREASON_EXE があれば、そちらを探す (既定は --set-default)
 #     - profile の op-reason-log は、呼び名どおり記録を見る道具として動き、上の断りを表に出す
+#     - profile の op-reason-ssh は、呼び名どおり ssh.exe (OPREASON_SSH_EXE の偽物) を引数そのままで起こしてその終了コードで終わり、
+#       呼び出しの事実 (OPREASON_SSH_CALL) を渡す。ssh.exe が無ければ 127 で断る。op の記録には書かない
 #     - 置いた補完を fish が読むと、op を呼ばずに op <Tab> の候補 (item など) と --reason を出す
 {
   lib,
@@ -159,14 +162,14 @@ pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks
   echo ${lib.escapeShellArg (lib.concatMapStringsSep "\n" (c: "ok   ${c.name}") cases)}
   ${lib.optionalString buildChecks ''
     profile=${wslOp.home.path}
-    for bin in op op-reason op-reason-log; do
+    for bin in op op-reason op-reason-log op-reason-ssh; do
       got=$(readlink -f "$profile/bin/$bin")
       if [[ $got != "$(readlink -f "${pkg}/bin/$bin")" ]]; then
         echo "op-reason-state: 入るマシンの profile の bin/$bin が ${pkg} のものでなく $got" >&2
         exit 1
       fi
     done
-    echo "ok   入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log は、この包みのもの"
+    echo "ok   入るマシンの profile の bin/op・bin/op-reason・bin/op-reason-log・bin/op-reason-ssh は、この包みのもの"
 
     if [[ -e ${plain.home.path}/bin/op ]]; then
       echo "op-reason-state: 入らないマシンの profile に bin/op がある" >&2
@@ -237,6 +240,31 @@ pkgs.runCommand "op-reason-state" { nativeBuildInputs = lib.optional buildChecks
       exit 1
     fi
     echo "ok   profile の op-reason-log は記録を見る道具として動き、上の断りを表に出す"
+
+    # op-reason-ssh: 偽の ssh.exe (引数と OPREASON_SSH_CALL の有る無しを書いて 7 で終わる) を引数そのままで起こす。無ければ 127
+    home=$TMPDIR/h2
+    mkdir -p "$home"
+    printf '#!%s\nprintf "%%s\\n" "$@" >"%s/ssh-args"\n[[ -n $OPREASON_SSH_CALL ]] && echo call >"%s/ssh-call"\nexit 7\n' \
+      "$BASH" "$TMPDIR" "$TMPDIR" >"$TMPDIR/ssh.exe"
+    chmod +x "$TMPDIR/ssh.exe"
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" OPREASON_SSH_EXE="$TMPDIR/ssh.exe" "$profile/bin/op-reason-ssh" -o "BatchMode yes" host true \
+      >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 7 ]] || [[ $(cat "$TMPDIR/ssh-args") != $'-o\nBatchMode yes\nhost\ntrue' ]] || [[ ! -e $TMPDIR/ssh-call ]]; then
+      echo "op-reason-state: profile の op-reason-ssh が ssh.exe を引数そのままで、OPREASON_SSH_CALL を付けて起こさない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    rc=0
+    env -i PATH=/nonexistent HOME="$home" "$profile/bin/op-reason-ssh" host >"$TMPDIR/out" 2>"$TMPDIR/err" || rc=$?
+    if [[ $rc != 127 ]] || ! grep -q 'ssh.exe was not found' "$TMPDIR/err"; then
+      echo "op-reason-state: ssh.exe の無い op-reason-ssh が 127 で断らない (rc=$rc): $(cat "$TMPDIR/err")" >&2
+      exit 1
+    fi
+    if [[ -e $home/.local/state/op-reason/log.jsonl ]]; then
+      echo "op-reason-state: op-reason-ssh が op の記録 (log.jsonl) に書いた" >&2
+      exit 1
+    fi
+    echo "ok   profile の op-reason-ssh は ssh.exe を引数そのままで OPREASON_SSH_CALL を付けて起こし、その終了コードで終わる。無ければ 127"
 
     # 置いた補完を fish の補完の置き場の頭に足し、偽の op (呼ばれたら印を書いて 2 で終わる) で op <Tab> の候補を見る
     mkdir -p "$TMPDIR/comp" "$TMPDIR/bin" "$TMPDIR/fish-home"

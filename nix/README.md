@@ -2691,10 +2691,10 @@ grep 'failed to open pane URL' ~/.config/herdr/herdr-client.log | tail -n 3   # 
 ## WSL の op を理由つきで呼ぶ (1Password CLI)
 
 WSL で 1Password を使うマシン（`wsl.enable` と `onePassword.enable` が両方 true。[ssh の wrapper](#wsl-では-ssh-自体を-windows-側に差し替える)
-と同じ）の PATH に、呼ぶ理由を必須にした `op` と、その記録を見る `op-reason-log` を置く。中身は自作の OSS の
-[op-reason](https://github.com/pollenjp/op-reason)（`nix/pkgs/op-reason/`。GitHub の Release の静的な実行ファイルを版と SHA-256 で
-固定したもの）で、Windows の側（`op-reason-windows.zip` の `op-reason.exe`・`launcher.ps1`）も同じ版を `setup --update` が入れる
-（[`win/README.md`「op-reason」](../win/README.md#op-reason)）。option は無い（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)。
+と同じ）の PATH に、呼ぶ理由を必須にした `op` と、その記録を見る `op-reason-log` と、SSH の中継の入口 `op-reason-ssh`
+（[後述](#dotfiles-が入れるもの)）を置く。中身は自作の OSS の [op-reason](https://github.com/pollenjp/op-reason)
+（`nix/pkgs/op-reason/`。GitHub の Release の静的な実行ファイルを版と SHA-256 で固定したもの）で、Windows の側（`op-reason-windows.zip` の `op-reason.exe`・
+`launcher.ps1`）も同じ版を `setup --update` が入れる（[`win/README.md`「op-reason」](../win/README.md#op-reason)）。option は無い（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)。
 dotfiles の中の wrapper（pjp-op）から op-reason へ移したときに決めたことは、dotfiles-private の
 `docs/superpowers/specs/2026-11-15-op-reason-switch-design.md`）。
 
@@ -2714,7 +2714,7 @@ WSL から `op.exe` を直に打つと、1Password の承認は `op.exe` の直�
 | --- | --- |
 | 理由を必須にする | `--reason "<理由>"`（`--reason=<理由>` も。`--` より前ならどこに置いてもよい）。人が打つときも要り、無ければ 2 で断る。理由なしで通すのは `--version` と help（`--help`・`-h`・`help`）だけ。引数なしの `op` は wrapper の使い方を出す |
 | 呼び出しごとの Windows のプロセス | 呼び出しのたびに Windows で新しい `op-reason.exe`（動かないときは `launcher.ps1` を新しい `powershell.exe` で）を起こし、その子として `op.exe` を起こす。承認はこのプロセスに付き、`op` が終わると `op.exe whoami` で確かめて `op.exe signout --all` で閉じる |
-| 窓 | 承認の画面と同時に、画面の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド・読む参照」の窓を出す（読む参照は[後述](#窓の読む参照)）。決めるのは 1Password の画面だけ |
+| 窓 | 承認の画面と同時に、使っている画面（前面の窓がある画面。0.5.0 から。それより前は主の画面）の右上に「時刻・呼び手（Claude Code か人・herdr の workspace と pane）・場所（repo・branch・cwd）・理由・コマンド・読む参照」の窓を出す（読む参照は[後述](#窓の読む参照)）。決めるのは 1Password の画面だけ |
 | 記録 | `~/.local/state/op-reason/log.jsonl` に 1 回 2 行（start・end）。op の出力と token は書かず、`--session`・`--secret-key` と `name=value` の値は伏せる。読む参照は start の `refs` に全部入る（値は入らない）。1 MiB で `log.1.jsonl` へ回す |
 | 1 つずつ | WSL と Windows の呼び出しを 1 つずつにし（WSL の flock と Windows の mutex `Local\op-reason`）、窓と承認の画面を 1 対 1 にする。前の呼び出しの承認待ちが 90 秒（`OPREASON_LOCK_WAIT`）で終わらなければ、待っている側は 75 で断る。`op … \| op …` は動く（後ろの op が、待つ前に前の op の出力を読み切る。後ろの op が先に lock を取ったときは、前の op が lock を待たずに打ち、窓が 2 つ出る。そのわけは前の op の窓の注意の行に、`op-reason-log` では結果の `(lock skipped)`（日本語なら `(lock を待たず)`）に出る） |
 | 共有の承認の見張り | 始まりと終わりに WSL から直の `op.exe whoami` を打ち、通れば（どの pane からも使える承認が残っている）`op.exe signout --all` で消し、記録と通知（Windows・herdr）で知らせる |
@@ -2727,8 +2727,9 @@ op の stdout（binary も）・stderr・終了コードは変えない。終了
 
 | もの | 中身 |
 | --- | --- |
-| `op`・`op-reason`・`op-reason-log`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具）。包みは `OPREASON_EXE` を既定にする（`--set-default`。環境に値があればそちらが勝つ）: Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`。表示の言語は決めない（[後述](#表示の言語)） |
+| `op`・`op-reason`・`op-reason-log`・`op-reason-ssh`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具。`op-reason-ssh` は下の行）。包みは `OPREASON_EXE` を既定にする（`--set-default`。環境に値があればそちらが勝つ）: Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`。表示の言語は決めない（[後述](#表示の言語)） |
 | Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
+| `op-reason-ssh`（0.4.0 から） | Windows の `ssh.exe` を、引数と stdin・stdout・stderr をそのままに、呼び出しの事実（Linux の側の根のプロセス・呼び手・herdr・場所・distro・理由。`OPREASON_SSH_CALL` に入れて `WSLENV` で渡す）を付けて起こす。Windows の SSH の中継（`op-reason.exe --ssh-agent`）が、見えない Linux のプロセスを窓に出すためのもの。dotfiles は名前を PATH に置くだけで、`ssh`・`git` をこれに向ける設定と、中継を起こす設定（logon の task・`SSH_AUTH_SOCK`）は入れない。中継が動いていなければ、ふつうの `ssh.exe` と同じに動く。`ssh.exe` は PATH（Windows の PATH を残した WSL の PATH）か `OPREASON_SSH_EXE` で探し、無ければ 127 で断る |
 | fish の補完 | `~/.config/fish/completions/op.fish`・`op-reason.fish`（op-reason が `--completion fish` で出した、op を呼ばない補完）。fish に同梱の op の補完は `op completion fish` を打ち、wrapper が理由なしとして断った文が端末に出るので、それより先に読まれる場所に置く |
 | `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか（`{"enable": <bool>}`）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
 
@@ -2738,7 +2739,7 @@ op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\o
 
 ### 窓の読む参照
 
-固定している op-reason 0.3.0 では、窓のコマンドの行の下に、その呼び出しが読む `op://` の参照を「読む参照 (N 件・… から)」（英語では
+op-reason 0.3.0 からは、窓のコマンドの行の下に、その呼び出しが読む `op://` の参照を「読む参照 (N 件・… から)」（英語では
 `References to read (N, from …)`）として並べる（細部は op-reason の README と、op-reason の repo の
 `docs/superpowers/specs/2026-11-17-refs-in-window-design.md`）。
 
@@ -2795,15 +2796,15 @@ home.sessionVariables.OPREASON_RUNNER = "launcher";   # exe を試さず launche
 ### 反映
 
 `~/dotfiles/setup --self-update --update` で入る（WSL の `op` は switch、Windows の zip は `bootstrap-windows-op-reason.sh`）。
-版を上げたときは、Windows の側を先に上げる版がある（0.3.0 がそれ。[後述](#op-reason-の新しい版を出したとき)）。
+版を上げたときは、Windows の側を先に上げる版がある（0.3.0 がそれ。0.5.0 はどちらが先でもよい。[後述](#op-reason-の新しい版を出したとき)）。
 Claude の hook の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く。前の wrapper
 （pjp-op）の記録 `~/.local/state/pjp-op/` は読まなくなる（要らなければ消してよい）。
 
 ### 確かめる
 
 ```sh
-command -v op op-reason-log                # ~/.nix-profile/bin/op・op-reason-log
-op-reason --version                        # op-reason 0.3.0 (Windows を起こさない)
+command -v op op-reason-log op-reason-ssh  # ~/.nix-profile/bin/op・op-reason-log・op-reason-ssh
+op-reason --version                        # op-reason 0.5.0 (Windows を起こさない)
 op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
@@ -2831,9 +2832,10 @@ op.exe whoami                              # WSL の直の op.exe は account is
 ### op-reason の新しい版を出したとき
 
 dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
-上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.3.0
-まで同じ取り決め）。自作のアプリの Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。
-依存の更新の skill `pjp-dotfiles-deps` も見ない）。
+上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.5.0
+まで同じ取り決め（版 1）。0.4.0 で足した `op-reason-ssh` が中継へ渡す `OPREASON_SSH_CALL` も、0.4.0 と 0.5.0 で同じ版 1）。自作のアプリの
+Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。依存の更新の skill
+`pjp-dotfiles-deps` も見ない）。
 
 1. Release の `op-reason-x86_64-linux`・`op-reason-aarch64-linux` を落とし、`sha256sum -c` で隣の `.sha256` と同じかを確かめる
 2. `nix/pkgs/op-reason/default.nix` の `version` と、`assets` の 2 つの `sha256` を新しい版にする（`installCheck` が `--version` を
@@ -2844,7 +2846,8 @@ dotfiles が入れる版は自動では上がらない。op-reason の repo で�
 5. merge したら `setup --update` で WSL と Windows が揃う。setup は WSL の側（switch）を先に、Windows の側（bootstrap の 97）を後に
    上げる。WSL の側で入るものが新しい版の窓に頼るときは、Windows の側を先に揃えてから switch する。0.3.0 がそれで、`pjp-op-env` が
    理由から読む参照を外し、その一覧は 0.3.0 の窓が出す（[前述](#窓の読む参照)。WSL の側だけ先に上がると、窓にも理由にも読む参照が
-   出ない）:
+   出ない）。0.5.0 は WSL の側で入るものが新しい窓に頼らない（足すのは `op-reason-ssh` の名前だけで、中継は使っていない）ので、
+   どちらが先でもよい:
 
    ```sh
    ~/dotfiles/setup --self-update --steps bootstrap-windows-files,bootstrap-windows-op-reason   # Windows の op-reason を上げる
@@ -2927,7 +2930,7 @@ program を `op run` で起こすと窓が出たままになり、ほかの pane
 | 端末・記録 | 値を表示しない。誤りの文はファイル名・行番号・名前・件数・終了コードだけ。`pjp-op-env` は記録を書かない。WSL の op の記録（`op-reason-log`）に入るのは理由と `inject` と読む参照（start の `refs`）だけ |
 | xtrace | 最初の行で `set +x +a +m`（呼び手の `SHELLOPTS`・`BASH_ENV` が xtrace や job control を付けていても外す。job control が付いていると op の出力を受け損なう） |
 | op の認証 | `OP_SERVICE_ACCOUNT_TOKEN`・`OP_CONNECT_HOST`・`OP_CONNECT_TOKEN`・`OP_SESSION_*` は op に渡し、program を起こす前に外す |
-| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op（op-reason 0.3.0）は stdin のテンプレートから参照を拾い、窓のコマンド（`op inject`）の下に「読む参照 (N 件・標準入力 から)」として 8 件まで並べる（9 件目からは「ほか N 件」。全部は記録の start の `refs` に入る。`op-reason-log --json`）。理由の頭には値を渡す program が付く（`[pjp-op-env: <program> に渡す]`） |
+| 承認の画面 | op を呼ぶのは何件でも 1 回。WSL の op（op-reason 0.3.0 から）は stdin のテンプレートから参照を拾い、窓のコマンド（`op inject`）の下に「読む参照 (N 件・標準入力 から)」として 8 件まで並べる（9 件目からは「ほか N 件」。全部は記録の start の `refs` に入る。`op-reason-log --json`）。理由の頭には値を渡す program が付く（`[pjp-op-env: <program> に渡す]`） |
 | lock と窓 | op の出力を読み切り、op が終わってから program を起こす。program が動いている間、ほかの pane の op は待たされない |
 
 守らないもの（op を素で使うとき・`op run` と同じで、`pjp-op-env` で増えも減りもしない）:

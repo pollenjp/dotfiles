@@ -1,5 +1,6 @@
-# WSL で 1Password を使うマシンの PATH に、理由 (--reason) が必須の op と、その記録を見る op-reason-log を入れる。中身は自作の OSS の
-# op-reason (pkgs/op-reason。GitHub の Release の静的な実行ファイルを版と SHA-256 で固定したもの)。
+# WSL で 1Password を使うマシンの PATH に、理由 (--reason) が必須の op と、その記録を見る op-reason-log と、SSH の中継の入口
+# op-reason-ssh を入れる。中身は自作の OSS の op-reason (pkgs/op-reason。GitHub の Release の静的な実行ファイルを版と SHA-256 で
+# 固定したもの)。
 #
 # WSL から直に op.exe を打つと、1Password の承認がどの pane にも共通の wslhost に付き、1 回の許可が後の呼び出しとほかの pane に
 # 効く。op は呼び出しごとに Windows の op-reason.exe (動かないときは launcher.ps1) を起こして承認を閉じ、承認の画面と一緒に呼び手と
@@ -12,9 +13,11 @@
 # この op があるかを ~/.local/state/dotfiles/claude-op-reason.json ({"enable": <bool>}) で知らせる。false でも必ず書く。
 # pjp-op-env・pjp-op-ref (home/modules/op-env.nix) と bootstrap-windows-op-reason.sh も、同じファイルを読む。
 #
-# op・op-reason・op-reason-log は、op-reason の実行ファイルを makeWrapper で包み、既定の環境変数を 1 つ足す (--set-default なので、
-# 環境に値があればそちらが勝つ)。home.sessionVariables にしないのは、ログインし直すまで今の shell に入らず、switch の直後の op が
-# op-reason.exe を見つけられないため。呼び名で動きが変わる (op-reason-log は記録を見る道具) ので、包みごとに argv[0] を渡す。
+# op・op-reason・op-reason-log・op-reason-ssh は、op-reason の実行ファイルを makeWrapper で包み、既定の環境変数を 1 つ足す
+# (--set-default なので、環境に値があればそちらが勝つ)。home.sessionVariables にしないのは、ログインし直すまで今の shell に入らず、switch の直後の op が
+# op-reason.exe を見つけられないため。呼び名で動きが変わる (op-reason-log は記録を見る道具、op-reason-ssh は Windows の ssh.exe を
+# 起こす) ので、包みごとに argv[0] を渡す。op-reason-ssh は名前を PATH に置くだけで、ssh や git をそれに向ける設定と、Windows で
+# SSH の中継 (op-reason.exe --ssh-agent) を起こす設定は入れない (nix/README.md の「dotfiles が入れるもの」)。
 #
 #   OPREASON_EXE   Windows の op-reason.exe の WSL のパス。Install-OpReason.ps1 の既定の置き場所 (%LOCALAPPDATA%\Programs\op-reason)
 #                  を、dotfiles.wsl.windowsUserName (無ければ wsl.onePassword.windowsUserName) で組み立てる。Windows の PATH に
@@ -63,7 +66,7 @@ let
       }
       ''
         mkdir -p "$out/bin" "$out/share"
-        for name in op op-reason op-reason-log; do
+        for name in op op-reason op-reason-log op-reason-ssh; do
           makeWrapper ${opReason}/bin/op-reason "$out/bin/$name" --argv0 "$name" ${
             lib.optionalString (exePath != null) "--set-default OPREASON_EXE ${lib.escapeShellArg exePath}"
           }

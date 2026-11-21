@@ -3,7 +3,7 @@
 # GitHub の Release に置いた静的な実行ファイル (musl。op-reason-<arch>-linux) を、版と system ごとの SHA-256 で固定して入れる。
 # SHA-256 は Release の隣の .sha256 の値。Windows の側 (op-reason-windows.zip の op-reason.exe と launcher.ps1) は
 # win/op-reason/Install-OpReason.ps1 が同じ版で入れ、WSL の実行ファイルはそれを起こして窓を出す。呼び出しの取り決め (payload の版。
-# 0.1.0 から 0.3.0 まで同じ 1) が変わった版どうしでは断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ
+# 0.1.0 から 0.5.0 まで同じ 1) が変わった版どうしでは断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ
 # PR で上げる (手順は nix/README.md の「op-reason の新しい版を出したとき」)。
 #
 # op-reason の flake (packages.op) を input にしないのは、flake-lock-age.sh が github の input に commit から 7 日の猶予を課すため
@@ -11,8 +11,10 @@
 # アプリの Release なので、type-clipboard (win/README.md の「type-clipboard」) と同じく公開からの猶予は置かず、中身を SHA-256 で
 # 固定する。依存の更新 (.claude/skills/pjp-dotfiles-deps) も、ここは見ない (deps.toml の skip)。
 #
-# 1 つの実行ファイルを呼び名で切り替える: op と op-reason は wrapper、op-reason-log は記録を見る道具。bin/op と bin/op-reason-log は
-# bin/op-reason への symlink。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
+# 1 つの実行ファイルを呼び名で切り替える: op と op-reason は wrapper、op-reason-log は記録を見る道具、op-reason-ssh (0.4.0 から) は
+# Windows の ssh.exe を呼び出しの事実 (OPREASON_SSH_CALL) を付けて起こす入口 (op-reason.exe --ssh-agent の SSH の中継に呼び手を
+# 知らせる。引数と stdin・stdout・stderr はそのまま)。bin/op・bin/op-reason-log・bin/op-reason-ssh は bin/op-reason への symlink。
+# op-reason-ssh は名前を置くだけで、ssh や git をそれに向ける設定と中継を起こす設定は dotfiles に無い。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
 # 出させて share/fish/vendor_completions.d に置く。マシンごとの既定 (Windows の op-reason.exe の場所 OPREASON_EXE) は、ここには
 # 入れず home/modules/op-reason.nix が包む。
 {
@@ -22,17 +24,17 @@
 }:
 
 let
-  version = "0.3.0";
+  version = "0.5.0";
   # system → Release の asset の名前と、その .sha256 の値
   # (https://github.com/pollenjp/op-reason/releases/download/v<version>/<name>.sha256)
   assets = {
     x86_64-linux = {
       name = "op-reason-x86_64-linux";
-      sha256 = "9f38127d58c46e29b43b97b6e2f151f524e591c0be23de4adb90d77a73240624";
+      sha256 = "797b0b4928c53ebe78a3414e448177b2038e8bb0fe9445d8be8424b3a025f32a";
     };
     aarch64-linux = {
       name = "op-reason-aarch64-linux";
-      sha256 = "938844a2932b654087db9e4330c1a002439c47af6a1a241ad68da6df2627856d";
+      sha256 = "a87ec0091cc9d4e642e243f0687b8c5a4cff42fa53f7791f3de8cdb052bcfa0c";
     };
   };
   system = stdenvNoCC.hostPlatform.system;
@@ -62,6 +64,7 @@ stdenvNoCC.mkDerivation {
     install -Dm755 "$src" "$out/bin/op-reason"
     ln -s op-reason "$out/bin/op"
     ln -s op-reason "$out/bin/op-reason-log"
+    ln -s op-reason "$out/bin/op-reason-ssh"
     # 補完を出すのは op-reason --completion で、op.exe も記録も触らない。念のため HOME を build の一時ディレクトリへ向ける
     export HOME=$TMPDIR
     mkdir -p "$out/share/fish/vendor_completions.d"
@@ -78,6 +81,16 @@ stdenvNoCC.mkDerivation {
     got=$("$out/bin/op-reason" --version)
     if [[ $got != "op-reason ${version}" ]]; then
       echo "op-reason --version が「op-reason ${version}」でなく「$got」 (Release の asset と version が食い違う)" >&2
+      exit 1
+    fi
+
+    # op-reason-ssh の名で起こすと、OPREASON_SSH_EXE の ssh.exe (ここでは偽物) を引数そのままで起こし、その終了コードで終わる
+    printf '#!%s\nprintf "%%s\\n" "$@" >"%s/ssh-args"\nexit 7\n' "$BASH" "$TMPDIR" >"$TMPDIR/ssh.exe"
+    chmod +x "$TMPDIR/ssh.exe"
+    rc=0
+    OPREASON_SSH_EXE="$TMPDIR/ssh.exe" "$out/bin/op-reason-ssh" -o "BatchMode yes" host true || rc=$?
+    if [[ $rc != 7 ]] || [[ $(cat "$TMPDIR/ssh-args") != $'-o\nBatchMode yes\nhost\ntrue' ]]; then
+      echo "op-reason-ssh が OPREASON_SSH_EXE の ssh.exe を引数そのままで起こさない (rc=$rc): $(cat "$TMPDIR/ssh-args" 2>/dev/null)" >&2
       exit 1
     fi
 
