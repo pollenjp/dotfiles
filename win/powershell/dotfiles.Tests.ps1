@@ -1,7 +1,7 @@
 ﻿# win/powershell/dotfiles.ps1 の runner の関数 (dotfiles・ConvertTo-DotfilesRunnerArgs) と、略語の展開 (略語の表・判定の関数・
-# PSReadLine の割り当て) と、bash に似たキーの PSReadLine の割り当てのテスト。Pester は使わない。
+# PSReadLine の割り当て) と、Vi モード (EditMode・挿入モードの bash に似たキー・モードの印) のテスト。Pester は使わない。
 # dotfiles 関数は cargo を打つので、HOME を一時ディレクトリにした子の pwsh で、cargo を関数の偽物に替えて流す (本物の cargo も
-# ホームの clone も触らない)。略語と bash に似たキーの割り当ても子の pwsh で確かめる (このテストの PowerShell の PSReadLine には触らない)。
+# ホームの clone も触らない)。略語と Vi モードの割り当ても子の pwsh で確かめる (このテストの PowerShell の PSReadLine には触らない)。
 #
 # WSL から流す (Linux の pwsh で動かすので、Windows 側には触らない):
 #   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/powershell/dotfiles.Tests.ps1
@@ -19,11 +19,15 @@
 #     (exit がコマンドの名前として読まれる) では広げない
 #   - 略語の表は大文字小文字を区別し、中身は e・h・hss … c・cs の function・alias と同じ (function は「表の中身 @args」、h は alias の先、
 #     e は exit)。1 つのコマンドに @args を渡すだけの function はどれも表にある
-#   - PSReadLine を読み込んでいない PowerShell (script・CI) で読んでも PSReadLine を読み込まない。読み込んだ PowerShell では、
-#     Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar・Ctrl+@・Shift+Spacebar を「広げずに空白を
-#     入れる」に割り当て (Shift+Spacebar は Spacebar と別のキー)、> と < には割り当てない
-#   - Windows の既定の EditMode (Windows) で読むと、Alt+f・Alt+b・Ctrl+w・Alt+d を ForwardWord・BackwardWord・UnixWordRubout・KillWord に
-#     割り当て (4 つの既定の割り当てを外してから読んでも)、EditMode は Windows のまま、WordDelimiters は替えない
+#   - PSReadLine を読み込んでいない PowerShell (script・CI) で読んでも PSReadLine を読み込まない。読み込んだ PowerShell では EditMode を
+#     Vi にし、挿入モードの Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar・Ctrl+@・Shift+Spacebar を
+#     「広げずに空白を入れる」に割り当て (Shift+Spacebar は Spacebar と別のキー)、> と < には割り当てない
+#   - 挿入モードの Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u を ForwardWord・BackwardWord・UnixWordRubout・KillWord・
+#     BeginningOfLine・EndOfLine・KillLine・BackwardKillInput (2.2.0 より前の PSReadLine は BackwardKillLine) に割り当てる。Vi の既定から
+#     替わるのは、このキーと略語のキーだけ (コマンドモードは替えない)。WordDelimiters は替えない
+#   - モードの印: コマンドモードに入るとカーソルをブロックに、挿入モードに入ると縦棒にする列を書く。端末に向いた PowerShell で読むと縦棒にし
+#     (Linux で script の擬似端末の下で見る)、出力をパイプで受けるなら何も書かない。先に置かれた handler (starship の init) を包まず、
+#     読み直しても handler は入れ子にならない
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
 $ErrorActionPreference = 'Stop'
@@ -245,12 +249,83 @@ Test-Case '略語の割り当て: PSReadLine を読み込んでいなければ�
     Invoke-AbbrChild -Body ". `$Dotfiles`n`"psreadline=`$([bool](Get-Module -Name PSReadLine))`""
 }
 
-# PSReadLine を読み込んだ PowerShell では、広げるキー・実行するキー・広げずに空白を入れるキーを割り当てる (> と < には割り当てない)
-$bound = @(Invoke-AbbrChild -Body @'
+# 読んだ先 (パイプ) に何も書かない (モードの印のカーソルの形の列は、端末に向いた PowerShell でだけ書く)。PSReadLine の警告も出さない
+Test-Case 'Vi モード: 出力をパイプで受けるなら、読んでも何も書かない' 'end' {
+    Invoke-AbbrChild -Body "Import-Module PSReadLine`n. `$Dotfiles`n'end'"
+}
+
+# 端末に向いた PowerShell (出力がパイプでない) では、読んだときにカーソルを挿入モードの形 (縦棒) にする (最初のプロンプトは挿入モードだが、
+# PSReadLine はモードが替わるまで handler を呼ばない)。子の pwsh を script (util-linux) の擬似端末の下で起こし、書いた列を見る。script -c の
+# 無い所 (Windows・macOS) では飛ばす。5.1 には $IsLinux が無い (StrictMode では読むと落ちる) ので、先に版を見る
+if ($PSVersionTable.PSVersion.Major -ge 6 -and $IsLinux -and (Get-Command -Name script -CommandType Application -ErrorAction SilentlyContinue)) {
+    $ttyDir = Join-Path ([IO.Path]::GetTempPath()) ("dotfiles-tests-" + [Guid]::NewGuid())
+    $null = New-Item -ItemType Directory -Force -Path $ttyDir
+    try {
+        $ttyChild = Join-Path $ttyDir 'child.ps1'
+        Set-Content -LiteralPath $ttyChild -Value "param([string]`$Dotfiles)`nImport-Module PSReadLine`n. `$Dotfiles`n'end'" -Encoding utf8
+        $ttyPwsh = (Get-Process -Id $PID).Path
+        $ttyOut = @(& script -qec "'$ttyPwsh' -NoProfile -NonInteractive -File '$ttyChild' -Dotfiles '$dotfiles'" /dev/null) -join "`n"
+    } finally {
+        Remove-Item -LiteralPath $ttyDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    Test-Case 'Vi モード: 端末に向いた PowerShell で読むと、カーソルを縦棒 (挿入モード) にする' 'ESC[6 q' {
+        @([regex]::Matches($ttyOut, "$([char]27)\[\d* q") | ForEach-Object { $_.Value.Replace([string][char]27, 'ESC') }) -join ' '
+    }
+} else {
+    Write-Host 'skip Vi モード: 端末に向いた PowerShell で読むとカーソルを縦棒にする (擬似端末を作る script -c が無い)'
+}
+
+# PSReadLine を読み込んだ PowerShell で、dotfiles.ps1 を読む前と後の割り当てを「キー=関数」で出す。読む前は Vi モードの既定 (EditMode を
+# Vi にした直後)。dotfiles.ps1 は Windows の既定の EditMode (Windows) から読む (Linux の pwsh の既定は Emacs)。コマンドモードの割り当ては、
+# キーが <> で囲まれて出る (<Ctrl+w>・<d,w> など)。モードの印 (ViModeChangeHandler) が書く字は、[Console]::Out を差し替えて受ける。
+# 5.1 の PSReadLine 2.0.0 の Get-PSReadLineKeyHandler には -Chord が無いので、-Bound の全部を出す
+$viOut = @(Invoke-AbbrChild -Body @'
 Import-Module PSReadLine
+"PSReadLine=$((Get-Module -Name PSReadLine).Version)"
+Set-PSReadLineOption -EditMode Vi
+Get-PSReadLineKeyHandler -Bound | ForEach-Object { "before:$($_.Key)=$($_.Function)" }
+Set-PSReadLineOption -EditMode Windows
+$delimiters = (Get-PSReadLineOption).WordDelimiters
 . $Dotfiles
-Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Function -like 'DotfilesAbbr*' } | ForEach-Object { "$($_.Key)=$($_.Function)" }
-'@ | Sort-Object)
+$option = Get-PSReadLineOption
+"EditMode=$($option.EditMode)"
+"WordDelimiters=$($option.WordDelimiters -ceq $delimiters)"
+"ViModeIndicator=$($option.ViModeIndicator)"
+Get-PSReadLineKeyHandler -Bound | ForEach-Object { "after:$($_.Key)=$($_.Function)" }
+foreach ($mode in 'Command', 'Insert') {
+    $writer = [System.IO.StringWriter]::new()
+    $saved = [Console]::Out
+    [Console]::SetOut($writer)
+    try { & $option.ViModeChangeHandler ([Microsoft.PowerShell.ViMode]$mode) } finally { [Console]::SetOut($saved) }
+    "cursor:$mode=$($writer.ToString().Replace([string][char]27, 'ESC'))"
+}
+'@)
+$viBefore = @($viOut | Where-Object { $_ -clike 'before:*' } | ForEach-Object { $_.Substring('before:'.Length) })
+$viAfter = @($viOut | Where-Object { $_ -clike 'after:*' } | ForEach-Object { $_.Substring('after:'.Length) })
+$psReadLineVersion = [version](@($viOut | Where-Object { $_ -clike 'PSReadLine=*' })[0].Substring('PSReadLine='.Length))
+
+Test-Case 'Vi モード: EditMode を Vi にする' 'EditMode=Vi' { $viOut | Where-Object { $_ -clike 'EditMode=*' } }
+
+# bash に似たキー: 挿入モードの 8 つを、bash (readline) の forward-word・backward-word・unix-word-rubout・kill-word・beginning-of-line・
+# end-of-line・kill-line・unix-line-discard に当たる関数 (PSReadLine の Emacs モードと同じ関数) にする。Ctrl+u は、入力の頭まで消して
+# kill ring に入れる関数の名前が版で違う (2.2.0 から BackwardKillInput。5.1 の 2.0.0 と 2.1 は BackwardKillLine)。キーは大文字小文字を区別して
+# 選ぶ (Alt+F は Alt+Shift+f で別のキー)
+$ctrlU = if ($psReadLineVersion -lt [version]'2.2.0') { 'BackwardKillLine' } else { 'BackwardKillInput' }
+$wantedViKeys = @(
+    'Alt+f=ForwardWord'
+    'Alt+b=BackwardWord'
+    'Ctrl+w=UnixWordRubout'
+    'Alt+d=KillWord'
+    'Ctrl+a=BeginningOfLine'
+    'Ctrl+e=EndOfLine'
+    'Ctrl+k=KillLine'
+    "Ctrl+u=$ctrlU"
+) | Sort-Object
+Test-Case "Vi モード: 挿入モードの Alt+f Alt+b Ctrl+w Alt+d Ctrl+a Ctrl+e Ctrl+k Ctrl+u を bash と同じ動きの関数に割り当てる (Ctrl+u は $ctrlU)" $wantedViKeys {
+    $viAfter | Where-Object { ($_ -split '=', 2)[0] -cin 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d', 'Ctrl+a', 'Ctrl+e', 'Ctrl+k', 'Ctrl+u' } | Sort-Object
+}
+
+# 略語: 挿入モードで、広げるキー・実行するキー・広げずに空白を入れるキーを割り当てる (> と < には割り当てない。コマンドモードには割り当てない)
 $wanted = @(
     'Spacebar=DotfilesAbbrExpandAndInsert'
     ';=DotfilesAbbrExpandAndInsert'
@@ -262,32 +337,48 @@ $wanted = @(
     'Ctrl+@=DotfilesAbbrInsertSpace'
     'Shift+Spacebar=DotfilesAbbrInsertSpace'
 ) | Sort-Object
-Test-Case '略語の割り当て: Space ; | & ) Enter Ctrl+Spacebar Ctrl+@ Shift+Spacebar に割り当てる' $wanted { $bound }
+Test-Case '略語の割り当て: 挿入モードの Space ; | & ) Enter Ctrl+Spacebar Ctrl+@ Shift+Spacebar に割り当てる' $wanted {
+    $viAfter | Where-Object { $_ -clike '*=DotfilesAbbr*' } | Sort-Object
+}
 
-# bash に似たキー: Windows の既定の EditMode (Windows) で読むと、Alt+f・Alt+b・Ctrl+w・Alt+d を bash の forward-word・backward-word・
-# unix-word-rubout・kill-word に当たる関数に割り当てる。4 つとも外してから読み、PSReadLine の既定によらず dotfiles.ps1 が自分で割り当てることを
-# 見る (Alt+d は今の Windows モードの既定でも KillWord)。EditMode (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる) と
-# WordDelimiters (ほかのキーの語の区切りにも効く) は替えない。キーは大文字小文字を区別して選ぶ (Alt+F は Alt+Shift+f で別のキー)。
-# 5.1 の PSReadLine 2.0.0 の Get-PSReadLineKeyHandler には -Chord が無い
-$wordOut = @(Invoke-AbbrChild -Body @'
+# Vi の既定から割り当てが替わるのは、挿入モードの bash に似たキーと略語のキーだけ。コマンドモードの割り当て (<> で囲まれたキー) と、
+# 挿入モードのほかのキー (Esc・Tab・Ctrl+v など) は Vi の既定のまま
+$wantedChangedKeys = @(
+    'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d', 'Ctrl+a', 'Ctrl+e', 'Ctrl+k', 'Ctrl+u'
+    'Spacebar', ';', '|', '&', ')', 'Enter', 'Ctrl+Spacebar', 'Ctrl+@', 'Shift+Spacebar'
+) | Sort-Object -CaseSensitive
+Test-Case 'Vi モード: Vi の既定から替わるのは、挿入モードの bash に似たキーと略語のキーだけ' $wantedChangedKeys {
+    Compare-Object -CaseSensitive $viBefore $viAfter | ForEach-Object { ($_.InputObject -split '=', 2)[0] } | Sort-Object -Unique -CaseSensitive
+}
+
+# 語の区切り (WordDelimiters) はほかのキー (Ctrl+←→・コマンドモードの w・b など) にも効くので替えない
+Test-Case 'Vi モード: WordDelimiters は替えない' 'WordDelimiters=True' { $viOut | Where-Object { $_ -clike 'WordDelimiters=*' } }
+
+# 今のモードを、カーソルの形で示す (コマンドモードはブロック、挿入モードは縦棒)。PSReadLine はモードが替わるたびに ViModeChangeHandler を
+# 呼び、handler はカーソルの形を替える列 (DECSCUSR: ESC [ 2 SP q がブロック、ESC [ 6 SP q が縦棒。どちらも点滅しない) を書く
+Test-Case 'Vi モード: モードの印は ViModeChangeHandler で書く (Script)' 'ViModeIndicator=Script' { $viOut | Where-Object { $_ -clike 'ViModeIndicator=*' } }
+Test-Case 'Vi モード: コマンドモードに入るとカーソルをブロックにする' 'cursor:Command=ESC[2 q' { $viOut | Where-Object { $_ -clike 'cursor:Command=*' } }
+Test-Case 'Vi モード: 挿入モードに入るとカーソルを縦棒にする' 'cursor:Insert=ESC[6 q' { $viOut | Where-Object { $_ -clike 'cursor:Insert=*' } }
+
+# starship の init は、$PROFILE で dotfiles.ps1 より先に ViModeChangeHandler (プロンプトを描き直す) を置き、$PROFILE を読み直すと、そのときの
+# handler を包んだ handler を置く。dotfiles.ps1 は先の handler を包まずに置き換える (プロンプトは自分で描き直す。出力がパイプの子では描き直さない)
+# ので、読み直しても handler は入れ子にならない (モードが替わるたびに、カーソルの形を書くのも描き直すのも 1 回)
+$reloadOut = @(Invoke-AbbrChild -Body @'
 Import-Module PSReadLine
-Set-PSReadLineOption -EditMode Windows
-Remove-PSReadLineKeyHandler -Chord 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d'
-$delimiters = (Get-PSReadLineOption).WordDelimiters
+Set-PSReadLineOption -ViModeIndicator Script -ViModeChangeHandler { [Console]::Write('previous') }
 . $Dotfiles
-"EditMode=$((Get-PSReadLineOption).EditMode)"
-"WordDelimiters=$((Get-PSReadLineOption).WordDelimiters -ceq $delimiters)"
-Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -cin 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d' } | ForEach-Object { "$($_.Key)=$($_.Function)" }
+& {
+    $inner = (Get-PSReadLineOption).ViModeChangeHandler
+    Set-PSReadLineOption -ViModeChangeHandler { [Console]::Write('wrapper'); & $inner @args }.GetNewClosure()
+}
+. $Dotfiles
+$writer = [System.IO.StringWriter]::new()
+$saved = [Console]::Out
+[Console]::SetOut($writer)
+try { & (Get-PSReadLineOption).ViModeChangeHandler ([Microsoft.PowerShell.ViMode]::Command) } finally { [Console]::SetOut($saved) }
+"cursor=$($writer.ToString().Replace([string][char]27, 'ESC'))"
 '@)
-$wantedWordKeys = @(
-    'Alt+f=ForwardWord'
-    'Alt+b=BackwardWord'
-    'Ctrl+w=UnixWordRubout'
-    'Alt+d=KillWord'
-) | Sort-Object
-Test-Case 'bash に似たキー: Alt+f Alt+b Ctrl+w Alt+d を ForwardWord BackwardWord UnixWordRubout KillWord に割り当てる' $wantedWordKeys { $wordOut | Where-Object { $_ -notmatch '^(EditMode|WordDelimiters)=' } | Sort-Object }
-Test-Case 'bash に似たキー: EditMode は Windows のまま (Emacs モードにしない)' 'EditMode=Windows' { $wordOut | Where-Object { $_ -like 'EditMode=*' } }
-Test-Case 'bash に似たキー: WordDelimiters は替えない' 'WordDelimiters=True' { $wordOut | Where-Object { $_ -like 'WordDelimiters=*' } }
+Test-Case 'Vi モード: 先に置かれた handler (starship の init) を包まず、読み直しても入れ子にならない' 'cursor=ESC[2 q' { $reloadOut | Where-Object { $_ -clike 'cursor=*' } }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"

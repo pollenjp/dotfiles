@@ -126,10 +126,39 @@ function Invoke-DotfilesAbbrExpansion {
     }
 }
 
+# Vi モードの今のモードを、カーソルの形で示す (下の割り当てから呼ぶ)。コマンドモードはブロック、挿入モードは縦棒 (どちらも点滅しない)。
+# カーソルの形を替える列 (DECSCUSR: ESC [ N SP q) を端末へ書く。$Mode は PSReadLine の ViMode (Command・Insert) か、その名前
+function Set-DotfilesViModeCursor {
+    param([Parameter(Mandatory)]$Mode)
+    if ("$Mode" -eq 'Command') { [Console]::Write("$([char]27)[2 q") } else { [Console]::Write("$([char]27)[6 q") }
+}
+
 # 割り当ては、PSReadLine を読み込んだ対話の PowerShell でだけする。script・CI (-File・-NonInteractive) の PowerShell は PSReadLine を
 # 読み込まないので、割り当てずに抜ける (Get-Module は読み込まないが、Set-PSReadLineKeyHandler は打つと PSReadLine を読み込む)。
 # 広げるところで落ちても、打ったキーの字を入れる・実行するところは流す (Space や Enter を打てなくしない)。
 if (Get-Module -Name PSReadLine) {
+    # 入力行を Vi の流儀で編集する (win/README.md の「Vi モード」)。挿入モードで始まり、Esc でコマンドモードに入り、i・a などで挿入モードに
+    # 戻る。EditMode を替えると PSReadLine はそのモードの既定の割り当てに戻すので、下の割り当てより前に置く。EditMode が Vi の間の
+    # Set-PSReadLineKeyHandler は、-ViMode を付けなければ挿入モードに割り当てる (下の割り当てはどれも挿入モード。コマンドモードは Vi の既定のまま)
+    Set-PSReadLineOption -EditMode Vi
+
+    # 今のモードをカーソルの形で示す (Set-DotfilesViModeCursor)。PSReadLine はモードが替わるたびに handler を呼ぶ。-ViModeIndicator Cursor は、
+    # 5.1 の PSReadLine 2.0.0 ではカーソルの形を替える列を書かず (コンソールの API でカーソルの大きさを替えるだけ)、ConPTY を通る端末 (herdr-app・
+    # Windows Terminal) では形が替わらないので、handler で自分で書く。
+    # handler はプロンプトも描き直す (InvokePrompt)。starship の init ($PROFILE で dotfiles.ps1 より先に読む) は、モードが替わるたびにプロンプトを
+    # 描き直す handler (starship はコマンドモードでプロンプトの記号を ❮ に替える) を置くが、ここで置き換えるので、同じく描き直す。先の handler を
+    # 包まずに置き換えるので、$PROFILE を読み直しても handler は入れ子にならない。出力がパイプなら描き直さない (描く画面が無い)。
+    # 最初のプロンプトは挿入モードだが、PSReadLine はモードが替わるまで handler を呼ばないので、読んだときに挿入モードの形にしておく (出力をパイプで
+    # 受ける PowerShell には書かない。プロンプトはまだ無いので描き直さない)。
+    # プロンプトの色で示すなら、この 2 つの命令を Set-PSReadLineOption -ViModeIndicator Prompt の 1 行に替える (PSReadLine が描き直す。
+    # dotfiles.Tests.ps1 のモードの印の試験 (ViModeIndicator・handler・読んだときの縦棒) も直す)
+    Set-PSReadLineOption -ViModeIndicator Script -ViModeChangeHandler {
+        param($mode)
+        Set-DotfilesViModeCursor $mode
+        if (-not [Console]::IsOutputRedirected) { [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt() }
+    }
+    if (-not [Console]::IsOutputRedirected) { Set-DotfilesViModeCursor Insert }
+
     # Space ; | & ) は、広げてから打った字を入れる。fish の abbr は > と < でも広げるが、PowerShell では > が前の語にくっつき
     # (Write-Output x> $null は x> を出す)、広げると最後の語が変わる。< は PowerShell で使えない。どちらも割り当てない
     Set-PSReadLineKeyHandler -Chord 'Spacebar', ';', '|', '&', ')' -BriefDescription DotfilesAbbrExpandAndInsert -Description '略語を広げてから字を入れる (dotfiles.ps1)' -ScriptBlock {
@@ -145,28 +174,43 @@ if (Get-Module -Name PSReadLine) {
     }
     # Ctrl+Space と Shift+Space は、広げずに空白を入れる (Ctrl+Space は fish の ctrl-space と同じ)。
     # Ctrl+Space は、端末が NUL の字で送ると (herdr・hc の端末・WSL から開いたとき) Ctrl+@ として届くので、Ctrl+Spacebar と Ctrl+@ の両方に
-    # 割り当てる。PSReadLine の Ctrl+Space の補完メニュー (MenuComplete) は使えなくなる。
+    # 割り当てる。PSReadLine の Ctrl+Space の補完 (Vi モードの既定は PossibleCompletions) は使えなくなる。
     # Shift+Space は、IME の切り替えに Ctrl+Space を割り当てた PC (Ctrl+Space を IME が先に取り、PowerShell に届かない) で使う。Windows Terminal・
     # conhost は Shift+Space を Shift 付きの Space のキーで送るので、ここに当たる (割り当てが無くても PSReadLine は字だけを入れて広げないが、
     # 割り当ててキーの一覧 (Get-PSReadLineKeyHandler) に出し、PSReadLine のその振る舞いに頼らない)。herdr・hc の端末は Shift+Space をただの
     # 空白の字で送るので、Shift の無い Space として届き、Space と同じに広がる。
-    # 空白は Space のキーとして入れる (Space と同じく、選んだ字を置き換え、数引数 (Alt+3 など) の数だけ入れる)
+    # 空白は Space のキーとして入れる (Space と同じく、選んだ字を置き換え、数引数の数だけ入れる)
     Set-PSReadLineKeyHandler -Chord 'Ctrl+Spacebar', 'Ctrl+@', 'Shift+Spacebar' -BriefDescription DotfilesAbbrInsertSpace -Description '略語を広げずに空白を入れる (dotfiles.ps1)' -ScriptBlock {
         param($key, $arg)
         [Microsoft.PowerShell.PSConsoleReadLine]::SelfInsert([System.ConsoleKeyInfo]::new(' ', [System.ConsoleKey]::Spacebar, $false, $false, $false), $arg)
     }
 
-    # bash (readline) でよく使う語の移動と消し方の 4 つを、bash と同じ動きにする (win/README.md の「bash に似たキー」)。EditMode は Windows
-    # (Windows の既定) のままにし、この 4 つだけを Emacs モードと同じ関数に割り当てる (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる)。
-    # - Alt+f・Alt+b: 語の終わりへ・語の頭へ (bash の forward-word・backward-word。Windows モードには割り当てが無い)
-    # - Ctrl+w: 前の空白まで消す (unix-word-rubout。cd foo/bar なら foo/bar を丸ごと。Windows モードの既定は記号でも止まる BackwardKillWord)
-    # - Alt+d: 語の終わりまで消す (kill-word。Windows モードの既定も KillWord だが、PSReadLine の既定が変わっても同じに動くよう書く)
+    # bash (readline) でよく使う行の中の移動と消し方を、挿入モードで bash と同じ動きにする (win/README.md の「bash に似たキー」)。
+    # PSReadLine の Emacs モードと同じ関数に割り当てる。Vi の挿入モードの既定では、Ctrl+u (BackwardDeleteInput。5.1 の 2.0.0 は BackwardDeleteLine)
+    # のほかは割り当てが無い。
+    # - Alt+f・Alt+b: 語の終わりへ・語の頭へ (bash の forward-word・backward-word)
+    # - Ctrl+w: 前の空白まで消す (unix-word-rubout。cd foo/bar なら foo/bar を丸ごと)
+    # - Alt+d: 語の終わりまで消す (kill-word)
+    # - Ctrl+a・Ctrl+e: 行の頭へ・行の終わりへ (beginning-of-line・end-of-line)
+    # - Ctrl+k: カーソルから入力の終わりまで消す (kill-line)
+    # - Ctrl+u: 入力の頭からカーソルまで消す (unix-line-discard)。Vi の既定の BackwardDeleteInput も同じ所を消すが、消した字を Vi のレジスタに入れる。
+    #   ほかの消すキーとそろえて kill ring に入れる関数にする。その関数は PSReadLine 2.2.0 からは BackwardKillInput で、5.1 の 2.0.0 では
+    #   BackwardKillLine (2.2.0 からの BackwardKillLine は今の行の頭までを消す別の関数) なので、BackwardKillInput が有るかで選ぶ
+    # 消した字はどれも kill ring に入る (bash と同じ。Vi モードには kill ring から貼るキーが無い。win/README.md)。
     # herdr-app の端末は Ctrl+←・Ctrl+→・Ctrl+Backspace を ESC b・ESC f・^W で送り (herdr-app の既定の keys.json の terminal の節)、PowerShell には
     # Alt+b・Alt+f・Ctrl+w として届くので、herdr-app ではこの割り当てがそのキーにも効く。語の区切り (WordDelimiters) はほかのキーにも効くので替えない
     Set-PSReadLineKeyHandler -Chord 'Alt+f' -Function ForwardWord
     Set-PSReadLineKeyHandler -Chord 'Alt+b' -Function BackwardWord
     Set-PSReadLineKeyHandler -Chord 'Ctrl+w' -Function UnixWordRubout
     Set-PSReadLineKeyHandler -Chord 'Alt+d' -Function KillWord
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+a' -Function BeginningOfLine
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+e' -Function EndOfLine
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+k' -Function KillLine
+    if ([Microsoft.PowerShell.PSConsoleReadLine].GetMethod('BackwardKillInput')) {
+        Set-PSReadLineKeyHandler -Chord 'Ctrl+u' -Function BackwardKillInput
+    } else {
+        Set-PSReadLineKeyHandler -Chord 'Ctrl+u' -Function BackwardKillLine
+    }
 }
 
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) を、dotfiles で固定した版に揃える。

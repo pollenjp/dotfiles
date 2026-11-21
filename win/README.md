@@ -23,7 +23,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d)、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -1399,7 +1399,9 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
 - dot-source (`.`) で読む。`&` で呼ぶと子の scope で定義され、呼び終わりに消える
 - 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
 - `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
-  そこに置いたままでよい
+  そこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
+  (`dotfiles.ps1` が EditMode を Vi に替え、PSReadLine は EditMode を替えるとそのモードの既定の割り当てに戻すので、前に置いた割り当ては消える。
+  [Vi モード](#vi-モード))
 - 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
   `nix/scripts/bootstrap-windows-powershell-profile.sh --force` (受け持ちを runner に切り替えたホストでは
   `dotfiles apply --steps powershell-profile --force`)
@@ -1440,6 +1442,7 @@ dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WS
 上の表の略語は、打った所 (入力行の中) で中身に広げてから実行する (WSL の fish の abbr と同じ)。`hr` と打って Space を押すと、
 入力行が `herdr --remote ` になる。何が動くかを打つ前に見られ、履歴にも広げた行が残る。`dotfiles.ps1` の略語の表 (`$DotfilesAbbr`)・
 広げる所を決める関数 (`Get-DotfilesAbbrExpansion`)・PSReadLine のキーの割り当てでしていて、`$PROFILE` で読んだ対話の PowerShell で効く。
+キーは [Vi モード](#vi-モード)の挿入モードに割り当てる。
 
 | キー | すること |
 | --- | --- |
@@ -1458,6 +1461,8 @@ dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WS
     後と閉じていない `(` の中では、`exit` がコマンドの名前として読まれ、`exit` というコマンドは無いので落ちる (function の `e` なら
     シェルを抜ける)。そこでは広げずに function に任せる
 - 広げた後に Ctrl+Z を 2 回押すと略語に戻る (1 回目で打った字を、2 回目で広げたのを戻す)。字を選んでいる間は広げない
+- コマンドモードの Enter (`ViAcceptLine`) と、挿入モードの Ctrl+d (`ViAcceptLineOrExit`) で実行したときは広げない。略語の function・alias が
+  そのまま動くので結果は同じで、履歴には略語のまま残る
 - 略語の function・alias は残してある。script や PSReadLine の無い所 (`pwsh -File`・`-NonInteractive`・ISE) では今までどおり
   function・alias が動く (割り当ては PSReadLine を読み込んだ PowerShell でだけする)
 - 広げた行は、function・alias を呼んだときと同じに動く。違うのはパイプの後に置いたときで、function (`hst` など) は前のコマンドの
@@ -1469,7 +1474,7 @@ fish の abbr との違い:
 
 - 端末から貼り付けた文字でも広がる。端末の貼り付け (Windows Terminal の Ctrl+V・右クリックなど) は文字を 1 字ずつキーとして
   PSReadLine に送るので、貼り付けた行の中の略語も広がる (fish は bracketed paste の間は広げない)。PSReadLine の `Paste` (端末が
-  Ctrl+V・Shift+Insert をそのまま PSReadLine に渡したとき) は、まとめて入れるので広がらない
+  Ctrl+V をそのまま PSReadLine に渡したとき。Vi モードの Shift+Insert は `Paste` ではない) は、まとめて入れるので広がらない
 - `>` と `<` では広げない。PowerShell では `>` が前の語にくっつき (`Write-Output x> $null` は `x>` を出す)、広げると最後の語が
   変わる。`<` は PowerShell では使えない
 - 広げずに空白を入れるキーは、fish の Ctrl+Space に Shift+Space を足した 2 つ。IME の切り替えに Ctrl+Space を割り当てた PC では、
@@ -1484,53 +1489,130 @@ fish の abbr との違い:
 
 気をつけること:
 
-- PSReadLine の Ctrl+Space の補完メニュー (`MenuComplete`。Windows Terminal などで効いていた) は使えなくなる (Tab の補完はそのまま)。
-  Shift+Space には PSReadLine の既定の割り当てが無い (PSReadLine 2.4.5 で確かめた) ので、使えなくなるものは無い
+- PSReadLine の Ctrl+Space の補完 (Vi モードの既定は候補を並べる `PossibleCompletions`。Windows モードの既定は補完メニューの `MenuComplete`) は
+  使えなくなる (Tab の補完はそのまま)。Shift+Space には PSReadLine の既定の割り当てが無い (PSReadLine 2.4.5 で確かめた) ので、使えなくなるものは無い
 - 割り当てが消える場合がある
-  - `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、割り当てが既定に戻る。EditMode を
-    変えるなら、`dotfiles.ps1` を読む行より前に置く
+  - `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、割り当てが既定に戻る
+    ([Windows モードに戻す](#windows-モードに戻す))
   - starship の `Enable-TransientPrompt` は Enter の割り当てを上書きする (Enter では広がらなくなる。Space などでは広がる)。
     今の `$PROFILE` では使っていない
 
-### bash に似たキー
+### Vi モード
 
-bash (readline) でよく使う語の移動と消し方の 4 つのキーを、bash と同じ動きにする。`dotfiles.ps1` が PSReadLine の関数に割り当て、
-`$PROFILE` で読んだ対話の PowerShell で効く。EditMode は Windows (Windows の既定) のままにし、この 4 つだけを Emacs モードと同じ関数に
-割り当てる (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる)。
+`dotfiles.ps1` は、入力行の編集を Vi の流儀にする (PSReadLine の EditMode を `Vi` にする。Windows の PowerShell の既定は `Windows`)。
+`$PROFILE` で読んだ対話の PowerShell で効く。入力行は挿入モードで始まる。Esc でコマンドモード (Vim のノーマルモード) に入り、`h`・`l`・`w`・
+`b`・`0`・`$` で動き、`x`・`dw`・`D` で消し、`i`・`a`・`I`・`A` などで挿入モードに戻る。コマンドモードの割り当ては PSReadLine の Vi の
+既定のまま。挿入モードには、[略語を広げる](#略語を広げる-fish-の-abbr-に似せる)キーと、下の bash に似たキーを割り当てる。
+`dotfiles.ps1` が割り当てるキーは、Windows PowerShell 5.1 (PSReadLine 2.0.0) でも同じに動く (Ctrl+u の関数の名前だけが違う。Vi モードの既定の
+割り当ての違いは下の「Windows モードから替わるキー」)。
 
-| キー | PSReadLine の関数 | bash (readline) | Windows モードの既定 (今までの割り当て) |
+EditMode を替えると、PSReadLine はそのモードの既定の割り当てに戻す (同じモードを選び直しても戻す)。`$PROFILE` で `dotfiles.ps1` を読む行より
+前に置いたキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は消えるので、`dotfiles.ps1` を読む行より後に置く。
+
+#### bash に似たキー
+
+bash (readline) でよく使う行の中の移動と消し方を、挿入モードで bash と同じ動きにする。PSReadLine の Emacs モードと同じ関数に割り当てる。
+
+| キー | PSReadLine の関数 | bash (readline) | Vi の挿入モードの既定 |
 | --- | --- | --- | --- |
-| Alt+f | `ForwardWord` (語の終わりへ) | `forward-word` | 無い (`f` の字が入る) |
-| Alt+b | `BackwardWord` (語の頭へ) | `backward-word` | 無い (`b` の字が入る) |
-| Ctrl+w | `UnixWordRubout` (前の空白まで消す) | `unix-word-rubout` | `BackwardKillWord` (語の区切りの記号でも止まる) |
-| Alt+d | `KillWord` (語の終わりまで消す) | `kill-word` | `KillWord` (同じ。PSReadLine の既定が変わっても同じに動くよう割り当てを書く) |
+| Alt+f | `ForwardWord` (語の終わりへ) | `forward-word` | 無い |
+| Alt+b | `BackwardWord` (語の頭へ) | `backward-word` | 無い |
+| Ctrl+w | `UnixWordRubout` (前の空白まで消す) | `unix-word-rubout` | 無い |
+| Alt+d | `KillWord` (語の終わりまで消す) | `kill-word` | 無い |
+| Ctrl+a | `BeginningOfLine` (行の頭へ) | `beginning-of-line` | 無い |
+| Ctrl+e | `EndOfLine` (行の終わりへ) | `end-of-line` | 無い |
+| Ctrl+k | `KillLine` (カーソルから入力の終わりまで消す) | `kill-line` | 無い |
+| Ctrl+u | `BackwardKillInput` (入力の頭からカーソルまで消す。PSReadLine 2.2.0 より前 (5.1 の 2.0.0) は同じ動きの `BackwardKillLine`) | `unix-line-discard` | `BackwardDeleteInput` (2.0.0 は `BackwardDeleteLine`。同じ所を消すが、消した字を Vi のレジスタに入れる) |
 
 - `cd foo/bar baz` のような行では、止まる所は bash と同じ。行末から Alt+b で `baz` の頭、もう一度で `bar` の頭 (`/` で止まる)。
-  Ctrl+w は空白だけを区切りにし、`cd foo/bar` の行末で押すと `foo/bar` を丸ごと消す (今までの `BackwardKillWord` は `bar` だけを消した)
-- herdr-app の中の PowerShell では、Ctrl+←・Ctrl+→・Ctrl+Backspace にもこの割り当てが効く。herdr-app は既定の keys.json の `terminal`
-  の節で Ctrl+← を `ESC b`、Ctrl+→ を `ESC f`、Ctrl+Backspace を `^W` として送り (readline では Alt+b・Alt+f・Ctrl+w に当たるバイト)、
-  PowerShell にはそれが Alt+b・Alt+f・Ctrl+w として届く。この 3 つは herdr-app の既定のキーで、dotfiles の
-  [`herdr-app/keys.json`](#herdr-app-のキー) は持っていない
-  - Ctrl+←・Ctrl+→ で語を移れる (今までは `b`・`f` の字が入った)。Ctrl+→ は語の終わりへ移る (Windows Terminal などの Ctrl+→ は
-    `NextWord` で、次の語の頭へ)
-  - Ctrl+Backspace は Ctrl+w と同じく前の空白まで消す (今までは Ctrl+w と同じ `BackwardKillWord` で、記号でも止まった)。Windows の
-    キーの形で送る端末 (Windows Terminal など) の Ctrl+Backspace は、今までどおり `BackwardKillWord`
+  Ctrl+w は空白だけを区切りにし、`cd foo/bar` の行末で押すと `foo/bar` を丸ごと消す
+- 複数行の入力では、Ctrl+a・Ctrl+e はカーソルのある行の頭・終わりへ動き、もう一度押すと入力の頭・終わりへ動く。Ctrl+k・Ctrl+u は
+  入力の終わり・頭まで消す (ほかの行も消える)
+- Ctrl+k は、herdr-app・旧 herdr・tmux・zellij の中ではそれぞれの prefix に取られる。Ctrl+k を 2 回押すと PowerShell に届く
+  (行の終わりまで消す。herdr-app は [herdr-app のキー](#herdr-app-のキー)の prefix → `Ctrl+K`)
+- 消した字 (Ctrl+w・Alt+d・Ctrl+k・Ctrl+u) は、bash と同じく PSReadLine の kill ring に入る (続けて消すとつながる。クリップボードとは別)。
+  ただし bash と違い、Vi モードには kill ring から貼るキー (bash の Ctrl+y の `yank`。PSReadLine の `Yank`) が無く、貼り戻せない
+  (Ctrl+y は Vi の既定の `Redo` のまま)。コマンドモードの `p`・`P` が貼るのは Vi のレジスタ (コマンドモードの `x`・`dw`・`yw` などが
+  入れた字) で、この 4 つで消した字ではない。消しすぎたら、挿入モードの Ctrl+z (`Undo`) かコマンドモードの `u` で戻す
+- herdr-app の中の PowerShell では、Ctrl+←・Ctrl+→・Ctrl+Backspace にも Alt+b・Alt+f・Ctrl+w の割り当てが効く。herdr-app は既定の
+  keys.json の `terminal` の節で Ctrl+← を `ESC b`、Ctrl+→ を `ESC f`、Ctrl+Backspace を `^W` として送り (readline では Alt+b・Alt+f・
+  Ctrl+w に当たるバイト)、PowerShell にはそれが Alt+b・Alt+f・Ctrl+w として届く (`ESC` と字が一緒に届くので、Esc (コマンドモードに入る)
+  にはならない)。この 3 つは herdr-app の既定のキーで、dotfiles の [`herdr-app/keys.json`](#herdr-app-のキー) は持っていない
+  - Ctrl+→ は語の終わりへ移る。Windows のキーの形で送る端末 (Windows Terminal など) の Ctrl+←・Ctrl+→ は Vi の挿入モードの既定の
+    `BackwardWord`・`NextWord` (次の語の頭へ) で、Ctrl+Backspace は `BackwardKillWord` (語の区切りの記号でも止まる)
 - 語の区切りは空白と、PSReadLine の `WordDelimiters` の記号 (`/`・`-`・`.`・`;` など。字は `(Get-PSReadLineOption).WordDelimiters` で
   見られる。5.1 の PSReadLine 2.0.0 の既定には `!`・`?` が無い) で、英数字だけを語にする bash と違う。`_`・`$` などは語の中に入る
   (`echo $foo_bar` の行末から Alt+b で `$foo_bar` の頭へ。bash は `bar` の頭へ)。`WordDelimiters` はほかのキー (Ctrl+←→・
-  Ctrl+Backspace・Ctrl+Delete など) にも効くので替えない
-- 消した字は PSReadLine の kill ring に入る (クリップボードではない)。Windows モードには bash の Ctrl+y (`Yank`) に当たる割り当てが
-  無い (Ctrl+y は `Redo`) ので、消しすぎたら Ctrl+z (`Undo`) で戻す
+  Ctrl+Backspace・コマンドモードの `w`・`b` など) にも効くので替えない
 - 今の割り当ては次で見られる (Windows PowerShell 5.1 の PSReadLine 2.0.0 の `Get-PSReadLineKeyHandler` には `-Chord` が無いので、
-  `-Bound` から選ぶ。`-CIn` は大文字小文字を区別する。`Alt+F` は Alt+Shift+f で別のキー)
+  `-Bound` から選ぶ。`-CIn` は大文字小文字を区別する。`Alt+F` は Alt+Shift+f で別のキー)。コマンドモードの割り当ては、キーが
+  `<Ctrl+w>` のように `<>` で囲まれて出る
 
   ```powershell
-  Get-PSReadLineKeyHandler -Bound | Where-Object Key -CIn 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d'
+  Get-PSReadLineKeyHandler -Bound | Where-Object Key -CIn 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d', 'Ctrl+a', 'Ctrl+e', 'Ctrl+k', 'Ctrl+u'
   ```
 
-- `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、この割り当ても既定に戻る
-  ([略語を広げる](#略語を広げる-fish-の-abbr-に似せる)の割り当てと同じ)。EditMode を変えるなら、`dotfiles.ps1` を読む行より前に置く
-- Windows PowerShell 5.1 (PSReadLine 2.0.0) でも同じに動く
+#### Windows モードから替わるキー
+
+Vi モードにすると、挿入モードの次のキーが Windows モード (今までの既定) から替わる (主なもの。`dotfiles.ps1` が割り当てるキーは、上の表と
+[略語を広げる](#略語を広げる-fish-の-abbr-に似せる)のとおり)。
+
+| キー | Windows モード | Vi モード (挿入モード) |
+| --- | --- | --- |
+| Esc | `RevertLine` (入力行を消す) | `ViCommandMode` (コマンドモードに入る)。入力行を捨てるのは Ctrl+c (`CancelLine`) |
+| Ctrl+a | `SelectAll` (全部を選ぶ) | `BeginningOfLine` (上の表) |
+| Shift+←・Shift+→・Shift+Ctrl+←・Shift+Ctrl+→・Shift+Home・Shift+End | 字や語を選ぶ | 無い (挿入モードには字を選ぶ操作が無い) |
+| Ctrl+c | `CopyOrCancelLine` (選んでいれば写し、いなければ入力行を捨てる) | `CancelLine` (入力行を捨てる) |
+| Ctrl+x・Ctrl+Shift+c | `Cut`・`Copy` | 無い |
+| Ctrl+v | `Paste` | `Paste` (同じ)。Shift+Insert の `Paste` は無い |
+| Ctrl+d | 無い | `ViAcceptLineOrExit` (空の行では PowerShell を抜け、字があれば実行する) |
+| Alt+. | `YankLastArg` (前の行の最後の引数を入れる) | 無い |
+| Ctrl+h | `BackwardDeleteChar` | 無い |
+| F8・Shift+F8 | `HistorySearchBackward`・`HistorySearchForward` (打った字で始まる履歴を探す) | 無い (↑・↓ の履歴はそのまま) |
+| Ctrl+Enter・Ctrl+Shift+Enter | `InsertLineAbove`・`InsertLineBelow` | 無い |
+| Tab・Shift+Tab | `TabCompleteNext`・`TabCompletePrevious` | `ViTabCompleteNext`・`ViTabCompletePrevious` (同じく候補を順に入れる) |
+| Ctrl+Space | `MenuComplete` | `PossibleCompletions`。どちらも `dotfiles.ps1` の略語の割り当て (広げずに空白を入れる) が上書きする |
+| Ctrl+r・Ctrl+s | `ReverseSearchHistory`・`ForwardSearchHistory` | 同じ。5.1 の PSReadLine 2.0.0 では別の関数 (`ViSearchHistoryBackward`・`SearchForward`) |
+
+Ctrl+z (`Undo`)・Ctrl+y (`Redo`)・↑・↓ (履歴)・Home・End・Delete・Backspace は Windows モードと同じ。全部の割り当ては
+`Get-PSReadLineKeyHandler` で見られる。
+
+#### モードの印 (カーソルの形)
+
+今のモードをカーソルの形で示す。挿入モードは縦棒、コマンドモードはブロック (どちらも点滅しない)。PSReadLine がモードを替えるたびに
+`dotfiles.ps1` の handler (`Set-PSReadLineOption -ViModeIndicator Script -ViModeChangeHandler`) が呼ばれ、カーソルの形を替える列
+(DECSCUSR。縦棒は `ESC [ 6 SP q`、ブロックは `ESC [ 2 SP q`。`Set-DotfilesViModeCursor` が書く) を端末へ書き、プロンプトを描き直す
+(`InvokePrompt`)。`dotfiles.ps1` を読んだときにも縦棒にする (最初のプロンプトは挿入モードだが、PSReadLine はモードが替わるまで handler を
+呼ばない)。
+
+- 形が替わるのは、DECSCUSR を受ける端末。herdr-app・Windows Terminal と PowerShell の間の ConPTY は列を端末へ渡す (WSL から起こした
+  PowerShell 7 と 5.1 の ConPTY で確かめた)
+- starship のプロンプトは、描き直したときのモードで記号を替える (starship の既定の設定では、挿入モードで `❯`、コマンドモードで `❮`)。
+  形が替わらない端末でも、プロンプトの記号でモードが分かる。starship の init (`$PROFILE` で `dotfiles.ps1` より先に読む) もモードが替わるたびに
+  描き直す handler を置くが、`dotfiles.ps1` はそれを包まずに置き換えて自分で描き直す (`. $PROFILE` で読み直しても、描き直しは 1 回)
+- PSReadLine の `-ViModeIndicator Cursor` を使わないのは、5.1 の PSReadLine 2.0.0 の `Cursor` が Windows のコンソールの API でカーソルの
+  大きさを替えるだけで列を書かず、ConPTY を通る端末では形が替わらないため (2.4.5 の `Cursor` は列も書くが、挿入モードは点滅する下線になる)
+- 形を替えるのは handler と読んだときだけなので、プログラム (Vim など) がカーソルの形を替えて終わると、次のプロンプトはその形のままのことがある。
+  Esc と `i` でモードを行き来すると直る。逆に、コマンドを流している間と、PowerShell を抜けた後も、カーソルは最後に書いた形 (多くは縦棒) の
+  まま (端末の既定の形には戻さない)。戻すなら `[Console]::Write("$([char]27)[0 q")`
+- プロンプトの色で示す形にも替えられる: `dotfiles.ps1` の handler の 2 つの命令を `Set-PSReadLineOption -ViModeIndicator Prompt` の 1 行に替える
+  (コマンドモードの間、プロンプトを背景の色を替えて描き直す。starship の記号も替わる)。`dotfiles.Tests.ps1` のモードの印の試験
+  (ViModeIndicator・handler・読んだときの縦棒) も直す。手元で試すだけなら、`$PROFILE` で `dotfiles.ps1` を読む行より後に同じ 1 行を置く
+  (EditMode ではないので、割り当ては残る)
+
+#### Windows モードに戻す
+
+```powershell
+# $PROFILE で、dotfiles.ps1 を読む行より後に置く
+Set-PSReadLineOption -EditMode Windows
+[Console]::Write("$([char]27)[0 q")   # dotfiles.ps1 が読んだときに縦棒にしたカーソルを、端末の既定の形に戻す
+```
+
+- EditMode を替えると、PSReadLine はそのモードの既定の割り当てに戻す。`dotfiles.ps1` の割り当て (略語を広げるキー・bash に似たキー) も
+  無くなり、Windows モードの既定のキーになる (Ctrl+w は `BackwardKillWord`、Alt+f・Alt+b は割り当てが無いなど)。モードの印の handler は
+  Vi モードでしか呼ばれない
+- `dotfiles.ps1` を読む行より前に EditMode を替えても、`dotfiles.ps1` が Vi に替える
+- 開いている PowerShell で試すだけなら、上の 2 行をそのまま打つ (`. $PROFILE` で Vi モードに戻る)
 
 ### dotfiles.ps1 を書くときの注意
 
@@ -1550,6 +1632,11 @@ bash (readline) でよく使う語の移動と消し方の 4 つのキーを、b
   AllScope が付いていて、`-Option AllScope` が無いと上書きできない
 - PSReadLine の命令 (`Set-PSReadLineKeyHandler` など) は `if (Get-Module -Name PSReadLine)` の中に書く。`dotfiles.ps1` は
   PSReadLine を読み込まない PowerShell (script・`dotfiles.Tests.ps1`・CI) でも読まれ、そこで打つと PSReadLine を読み込んでしまう
+- キーの割り当ては `Set-PSReadLineOption -EditMode Vi` より後に書く (EditMode を替えると、PSReadLine はそのモードの既定の割り当てに戻す)。
+  EditMode が Vi の間は、`-ViMode` を付けない `Set-PSReadLineKeyHandler` が挿入モードに割り当てる (コマンドモードに割り当てるなら
+  `-ViMode Command`)
+- 5.1 の PSReadLine 2.0.0 に無い関数・引数を使うなら、有るかを見て分ける (Ctrl+u の `BackwardKillInput` のように。`-Function` に無い名前を
+  渡すと落ちる)。`dotfiles.Tests.ps1` は 5.1 でも流す (Windows で `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …\dotfiles.Tests.ps1`)
 
 ### Windows PowerShell 5.1 でも使うなら
 
