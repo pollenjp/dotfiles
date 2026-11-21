@@ -173,7 +173,7 @@ fn reads_the_state_table_of_the_real_ps1() {
     assert_eq!(runner_planned(&rows), Planned::Install, "{out:?}");
     assert_eq!(
         (rows[0].order, rows[0].id.as_str()),
-        (Some(97), "op-reason")
+        (Some(90), "op-reason")
     );
     assert!(!local.join("Programs").exists(), "置き場所を作った");
 

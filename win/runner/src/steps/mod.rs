@@ -280,6 +280,7 @@ mod tests {
                 (60, "claude-skill-overrides"),
                 (60, "hc-hub"),
                 (90, "files"),
+                (90, "op-reason"),
                 (91, "powertoys"),
                 (91, "ssh-config"),
                 (92, "fancyzones"),
@@ -292,7 +293,6 @@ mod tests {
                 (97, "herdr-app"),
                 (97, "herdr"),
                 (97, "ntn"),
-                (97, "op-reason"),
                 (97, "pin-updates"),
                 (97, "type-clipboard"),
                 (98, "google-ime"),
@@ -423,7 +423,7 @@ mod tests {
         }
         assert_eq!(
             tooled,
-            vec!["sshd", "tailscale", "herdr-app", "herdr", "op-reason"]
+            vec!["op-reason", "sshd", "tailscale", "herdr-app", "herdr"]
         );
     }
 

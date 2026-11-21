@@ -408,7 +408,9 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "op-reason",
-        order: 97,
+        // WSL の script と同じ 90 (files の後・ssh-config (91) の前)。SSH の中継を使うホストでは、ここで起こした中継が答えるのを
+        // 手順 ssh-config が見てから IdentityAgent を書く
+        order: 90,
         title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
         // WSL の script の `# tool: onePassword`。WSL の script は、さらに WSL の op の wrapper を入れるマシン (claude-op-reason.json の enable。
         // wsl.enable と onePassword.enable が両方 true) に絞るが、runner は WSL の記録を読まず、ホストの値の onePassword で決める (Windows の
@@ -1578,7 +1580,7 @@ mod tests {
     fn op_reason_installs_and_replaces_without_arguments() {
         let s = spec("op-reason");
         assert_eq!(s.gate, Gate::Tool("onePassword"));
-        assert_eq!(s.order, 97);
+        assert_eq!(s.order, 90);
         assert_eq!(s.script, "win/op-reason/Install-OpReason.ps1");
         let install_notice = s.install_notice.unwrap();
         let sync_notice = s.sync_notice.unwrap();
