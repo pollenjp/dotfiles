@@ -1,8 +1,8 @@
 //! ホストの値 (dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml`) と、設定グループの写し (`groups.json`)。
 //!
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
-//! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の
-//! `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
+//! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
+//! Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。
 //!
@@ -14,6 +14,9 @@
 //!
 //! [runner]
 //! enable = false                # true で apply を許す (WSL の windowsFiles.enable = false と同じ PR で変える)
+//!
+//! [opReason]
+//! sshRelayMode = "per-call"     # SSH の中継のモード (per-call・show-only。書かなければ per-call)。効くのは [tools] opReasonSshRelay = true のとき
 //!
 //! [claude.notion]
 //! profile = "personal"          # Notion へ書く skill がこのマシンで既定に使うプロファイル (書かなければ null)
@@ -267,6 +270,9 @@ pub struct HostValues {
     pub group: String,
     pub overrides: BTreeMap<String, bool>,
     pub runner_enable: bool,
+    /// op-reason の SSH の中継のモード (`[opReason] sshRelayMode`。`SSH_RELAY_MODES` のどれか。書かなければ per-call)。
+    /// 効くかは `ssh_relay` で引く
+    ssh_relay_mode: String,
     /// Notion へ書く skill の宛先 (`[claude.notion]`)
     pub notion: NotionValues,
     pub source: Source,
@@ -280,6 +286,7 @@ impl HostValues {
             group: groups.default.clone(),
             overrides: BTreeMap::new(),
             runner_enable: false,
+            ssh_relay_mode: SSH_RELAY_MODES[0].to_string(),
             notion: NotionValues::default(),
             source: Source::Missing(path.to_path_buf()),
             groups,
@@ -298,12 +305,54 @@ impl HostValues {
             .unwrap_or(false)
     }
 
+    /// op-reason の SSH の中継 (道具の switch `opReasonSshRelay` と `[opReason] sshRelayMode`)。on ならモード (`per-call`・`show-only`)、
+    /// off なら None。1Password (`onePassword`) が off なら効かない (Nix の groups.nix の requires と同じ。op-reason の手順も走らない)
+    pub fn ssh_relay(&self) -> Option<&str> {
+        (self.tool("onePassword") && self.tool("opReasonSshRelay"))
+            .then_some(self.ssh_relay_mode.as_str())
+    }
+
     /// 道具の switch の値がどこで決まったか (一覧と off の行に添える)。
     pub fn tool_origin(&self, key: &str) -> String {
         if self.overrides.contains_key(key) {
             "ホストの値".to_string()
         } else {
             format!("グループ {} の既定", self.group)
+        }
+    }
+}
+
+/// op-reason の SSH の中継のモード (`op-reason.exe --ssh-agent --mode` の値。先頭が書かなかったときの既定)
+pub const SSH_RELAY_MODES: [&str; 2] = ["per-call", "show-only"];
+
+/// `[opReason]` を読む (中継のモード)。書けるのは sshRelayMode だけ
+fn parse_op_reason(v: &toml::Value) -> Result<String, String> {
+    let toml::Value::Table(t) = v else {
+        return Err("opReason は [opReason] の表で書いてください".to_string());
+    };
+    let unknown: Vec<&str> = t
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k != "sshRelayMode")
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "[opReason] に知らないキーがあります: {} (書けるのは sshRelayMode だけ)",
+            unknown.join(", ")
+        ));
+    }
+    match t.get("sshRelayMode") {
+        None => Ok(SSH_RELAY_MODES[0].to_string()),
+        Some(toml::Value::String(m)) if SSH_RELAY_MODES.contains(&m.as_str()) => Ok(m.clone()),
+        Some(other) => {
+            let shown = match other {
+                toml::Value::String(s) => s.clone(),
+                other => format!("{other:?}"),
+            };
+            Err(format!(
+                "[opReason] の sshRelayMode は {} で書いてください: {shown}",
+                SSH_RELAY_MODES.join(" か ")
+            ))
         }
     }
 }
@@ -335,11 +384,11 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
     let unknown: Vec<&str> = t
         .keys()
         .map(String::as_str)
-        .filter(|k| !["group", "tools", "runner", "claude"].contains(k))
+        .filter(|k| !["group", "tools", "runner", "opReason", "claude"].contains(k))
         .collect();
     if !unknown.is_empty() {
         return Err(fail(format!(
-            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[claude.notion])",
+            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[claude.notion])",
             unknown.join(", ")
         )));
     }
@@ -401,6 +450,10 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         }
         Some(_) => return Err(fail("runner は [runner] の表で書いてください".to_string())),
     };
+    let ssh_relay_mode = match t.get("opReason") {
+        None => SSH_RELAY_MODES[0].to_string(),
+        Some(v) => parse_op_reason(v).map_err(fail)?,
+    };
     let notion = match t.get("claude") {
         None => NotionValues::default(),
         Some(v) => parse_claude(v).map_err(fail)?,
@@ -409,6 +462,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         group,
         overrides,
         runner_enable,
+        ssh_relay_mode,
         notion,
         source: Source::File(path.to_path_buf()),
         groups,
@@ -423,6 +477,8 @@ mod tests {
     //!   ② ③ の両方の claude-personal・claude-work が off・client は全部 off。type-clipboard はどれも off)
     //! - group を書かなければ personal、上書きはグループの既定より先に効く、runner.enable の既定は false
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
+    //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。どのグループでも既定は off) は、on なら [opReason] sshRelayMode のモード
+    //!   (書かなければ per-call)、off か 1Password (onePassword) が off なら無し。sshRelayMode の知らない値・[opReason] の知らないキーは誤り
 
     use super::*;
     use crate::testutil::TempDir;
@@ -459,7 +515,49 @@ mod tests {
             assert!(!tool(group, "windowsTailscale"), "{group}");
             // sshd は PC に外から入る口で、どのグループでも既定は off (入れるホストが [tools] に書く)
             assert!(!tool(group, "windowsSshd"), "{group}");
+            // op-reason の SSH の中継は鍵を使う ssh の通り道を替えるので、どのグループでも既定は off (入れるホストが [tools] に書く)
+            assert!(!tool(group, "opReasonSshRelay"), "{group}");
         }
+    }
+
+    #[test]
+    fn ssh_relay_follows_the_switch_and_the_mode() {
+        // 書かなければ off (モードを書いても、switch が off なら無し)
+        assert_eq!(host("").unwrap().ssh_relay(), None);
+        assert_eq!(
+            host("[opReason]\nsshRelayMode = \"show-only\"\n")
+                .unwrap()
+                .ssh_relay(),
+            None
+        );
+        // on ならモード。書かなければ per-call (1Password の switch は、どのグループでも既定が off なので、入れるホストが一緒に書く)
+        let h = host("[tools]\nonePassword = true\nopReasonSshRelay = true\n").unwrap();
+        assert_eq!(h.ssh_relay(), Some("per-call"));
+        assert_eq!(h.tool_origin("opReasonSshRelay"), "ホストの値");
+        assert_eq!(
+            host("[tools]\nonePassword = true\nopReasonSshRelay = true\n[opReason]\nsshRelayMode = \"show-only\"\n")
+                .unwrap()
+                .ssh_relay(),
+            Some("show-only")
+        );
+        assert_eq!(
+            host("[tools]\nonePassword = true\nopReasonSshRelay = true\n[opReason]\nsshRelayMode = \"per-call\"\n")
+                .unwrap()
+                .ssh_relay(),
+            Some("per-call")
+        );
+        // 1Password が off なら効かない (groups.nix の requires。op-reason の手順も走らない)
+        assert_eq!(
+            host("[tools]\nopReasonSshRelay = true\nonePassword = false\n")
+                .unwrap()
+                .ssh_relay(),
+            None
+        );
+        // ファイルが無いときも off
+        assert_eq!(
+            HostValues::missing(Path::new("h.toml"), groups()).ssh_relay(),
+            None
+        );
     }
 
     #[test]
@@ -578,7 +676,7 @@ mod tests {
         for (text, want) in [
             (
                 "grop = \"x\"",
-                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[claude.notion])",
+                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[claude.notion])",
             ),
             (
                 "group = \"home\"",
@@ -603,6 +701,22 @@ mod tests {
                 "[runner] の enable は true か false で書いてください",
             ),
             ("runner = true", "runner は [runner] の表で書いてください"),
+            (
+                "[opReason]\nsshRelayMode = \"always\"",
+                "[opReason] の sshRelayMode は per-call か show-only で書いてください: always",
+            ),
+            (
+                "[opReason]\nsshRelayMode = 1",
+                "[opReason] の sshRelayMode は per-call か show-only で書いてください",
+            ),
+            (
+                "[opReason]\nmode = \"per-call\"",
+                "[opReason] に知らないキーがあります: mode (書けるのは sshRelayMode だけ)",
+            ),
+            (
+                "opReason = \"per-call\"",
+                "opReason は [opReason] の表で書いてください",
+            ),
             ("= broken", "TOML として読めません"),
         ] {
             let e = host(text).unwrap_err();

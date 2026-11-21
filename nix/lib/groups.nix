@@ -174,6 +174,22 @@ let
     (tool "onePassword" "1Password" [ "onePassword" "enable" ] [ "personalAccounts" ] {
       derived = false;
     })
+    # op-reason の SSH の中継 (Windows の logon の task と、ssh の設定の IdentityAgent・WSL の ssh の向け先)。鍵を使う ssh の通り道を
+    # 替えるので、personal でも既定で入れない (入れるホストが足す)。Windows の runner の手順 op-reason・ssh-config と、WSL の option
+    # (home/modules/op-reason.nix。Windows の受け持ちを runner に切り替えたマシンだけ) が同じ名前で引く
+    (tool "opReasonSshRelay" "op-reason の SSH の中継"
+      [ "opReason" "sshRelay" "enable" ]
+      [ "personalAccounts" ]
+      {
+        derived = false;
+        requires = [
+          [
+            "onePassword"
+            "enable"
+          ]
+        ];
+      }
+    )
     (tool "ntn" "ntn (Notion の CLI)" [ "ntn" "enable" ] [ "personalAccounts" ] { })
     (tool "windowsNtn" "Windows の ntn" [ "wsl" "windowsFiles" "ntn" "enable" ] [ "personalAccounts" ] {
       requires = [ windowsFiles ];

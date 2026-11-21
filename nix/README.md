@@ -803,6 +803,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
+| `bootstrap-windows-op-reason.sh` | 90 | `bootstrap-windows-files.sh` (同じ 90。辞書順でこちらが後) が置いた `Install-OpReason.ps1` で、Windows の op-reason (WSL の op の Windows の部品。自作の OSS) を固定した版に揃える (WSL の op の wrapper を入れ (`# tool: onePassword`)、win/ を配るマシンだけ。入っていなければ GitHub の Release から入れ、版がずれていれば入れ替える。WSL の実行ファイルと版が違うと op が断るため)。Windows の runner の手順 `op-reason` と同じ 90 で、ssh の設定 (91) より前 (runner は、SSH の中継を使うホストで、ここで起こした中継が答えるのを手順 `ssh-config` が見てから `IdentityAgent` を書く。WSL の setup は中継に触らない)。衝突で exit 1 しうる `bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より前 |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
 | `bootstrap-windows-ssh-config.sh` | 91 | dotfiles-private（50）の `ssh/*.ssh_config` を Windows の `%USERPROFILE%\.ssh` へコピーし、`config` を置く。衝突や、書いたあとの確かめの失敗で exit 1 する（後ろの 92〜99 と wsl-mtu-guard・exe-exec-trace は、直して流し直すまで走らない） |
 | `bootstrap-windows-fancyzones.sh` | 92 | `bootstrap-windows-powertoys.sh` (91) が PowerToys を入れた後に、`win/powertoys/fancyzones/managed.json` のキーだけを FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを uuid ごとに PC の `custom-layouts.json` へ足し、PC の `default-layouts.json` の横向きの既定を `layout-rules.json` の `default` にそろえ、PC の `applied-layouts.json` のうちテンプレートのままのディスプレイの組を `layout-rules.json` の決まり (解像度で決める。`powershell.exe` で聞く) のレイアウトで埋め、つながっている横向きのディスプレイの組を Windows にある全部の仮想デスクトップへ作る。91 は Keyboard Manager が使えないと早く抜けるので、別の script にしてある (exit 1 にしない。PC のエディターで直したレイアウトも、手であてたレイアウトも、知らせて先へ進む) |
@@ -816,7 +817,6 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
 | `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core と、Windows の ghq に dotfiles の clone があるマシンでは bootstrap の Git for Windows・gh・Visual Studio Build Tools・rustup) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す (herdr-app の新しい版には、keys.json に新しい既定のキーを足す注意も添える)。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
 | `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
-| `bootstrap-windows-op-reason.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-OpReason.ps1` で、Windows の op-reason (WSL の op の Windows の部品。自作の OSS) を固定した版に揃える (WSL の op の wrapper を入れ (`# tool: onePassword`)、win/ を配るマシンだけ。入っていなければ GitHub の Release から入れ、版がずれていれば入れ替える。WSL の実行ファイルと版が違うと op が断るため)。衝突で exit 1 しうる `bootstrap-windows-google-ime.sh` (98) より前。同じ 97 は辞書順 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -1734,7 +1734,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.config/git/ignore` | 同上 (`programs.git.ignores`。中身は `git.toml` の `ignores`) |
 | `~/.config/direnv/direnv.toml`・`~/.config/direnv/lib/hm-nix-direnv.sh` | `nix/home/modules/direnv.nix` (生成。lib は nix-direnv の direnvrc。[後述](#direnv)) |
 | `~/.config/uv/uv.toml` | `nix/home/modules/python.nix` (生成。`programs.uv` の settings。uv 本体は入れない。[後述](#python3-と-uv)) |
-| `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
+| `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` (WSL + 1Password のマシンだけ。SSH の中継を使うマシン (`dotfiles.opReason.sshRelay.enable`) は `nix/files/bin/ssh-wsl-op-reason.sh`。[後述](#wsl-では-ssh-自体を-windows-側に差し替える)) |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` (同上) |
 | `pjp-who-is-asking` (PATH) | `nix/pkgs/pjp-who-is-asking/` (WSL のマシンだけ。[後述](#wsl-の-exe-の起動を常時記録する)) |
 | `pjp-exe-exec-trace` (PATH) | `nix/pkgs/pjp-exe-exec-trace/` (`wsl.exeExecTrace.enable` のマシンだけ。同上) |
@@ -2286,6 +2286,7 @@ socat で `SSH_AUTH_SOCK` を橋渡ししていないので、WSL 側の Linux s
 | 配置先 | 実体 | 何をする |
 | --- | --- | --- |
 | `~/.local/bin/ssh` | `nix/files/bin/ssh-wsl.sh` | `exec ssh.exe "$@"` |
+| `~/.local/bin/ssh`（SSH の中継を使うマシン） | `nix/files/bin/ssh-wsl-op-reason.sh` | `exec op-reason-ssh "$@"`（`op-reason-ssh` が呼び出しの事実を付けて `ssh.exe` を起こす。[後述](#ssh-の中継を使う)） |
 | `~/.local/bin/ssh-add` | `nix/files/bin/ssh-add-wsl.sh` | `exec ssh-add.exe "$@"` |
 
 置かれるのは **WSL で `onePassword.enable = true` のマシンだけ**（レガシーの
@@ -2696,7 +2697,7 @@ WSL で 1Password を使うマシン（`wsl.enable` と `onePassword.enable` が
 と同じ）の PATH に、呼ぶ理由を必須にした `op` と、その記録を見る `op-reason-log` と、SSH の中継の入口 `op-reason-ssh`
 （[後述](#dotfiles-が入れるもの)）を置く。中身は自作の OSS の [op-reason](https://github.com/pollenjp/op-reason)
 （`nix/pkgs/op-reason/`。GitHub の Release の静的な実行ファイルを版と SHA-256 で固定したもの）で、Windows の側（`op-reason-windows.zip` の `op-reason.exe`・
-`launcher.ps1`）も同じ版を `setup --update` が入れる（[`win/README.md`「op-reason」](../win/README.md#op-reason)）。option は無い（[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)。
+`launcher.ps1`）も同じ版を `setup --update` が入れる（[`win/README.md`「op-reason」](../win/README.md#op-reason)）。op の option は無い（SSH の中継は[後述](#ssh-の中継を使う)の `dotfiles.opReason.sshRelay`。[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-op-wrapper-reason-design.md)・[ADR 044](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/044_op_reason_wrapper_20261108T010145JST/README.md)。
 dotfiles の中の wrapper（pjp-op）から op-reason へ移したときに決めたことは、dotfiles-private の
 `docs/superpowers/specs/2026-11-15-op-reason-switch-design.md`）。
 
@@ -2731,15 +2732,38 @@ op の stdout（binary も）・stderr・終了コードは変えない。終了
 | --- | --- |
 | `op`・`op-reason`・`op-reason-log`・`op-reason-ssh`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具。`op-reason-ssh` は下の行）。包みは `OPREASON_EXE` を既定にする（`--set-default`。環境に値があればそちらが勝つ）: Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`。表示の言語は決めない（[後述](#表示の言語)） |
 | Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。受け持ちを Windows の runner に切り替えたホストでは、Windows の `dotfiles apply` の手順 `op-reason` が同じく揃える。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
-| `op-reason-ssh`（0.4.0 から） | Windows の `ssh.exe` を、引数と stdin・stdout・stderr をそのままに、呼び出しの事実（Linux の側の根のプロセス・呼び手・herdr・場所・distro・理由。`OPREASON_SSH_CALL` に入れて `WSLENV` で渡す）を付けて起こす。Windows の SSH の中継（`op-reason.exe --ssh-agent`）が、見えない Linux のプロセスを窓に出すためのもの。dotfiles は名前を PATH に置くだけで、`ssh`・`git` をこれに向ける設定と、中継を起こす設定（logon の task・`SSH_AUTH_SOCK`）は入れない。中継が動いていなければ、ふつうの `ssh.exe` と同じに動く。`ssh.exe` は PATH（Windows の PATH を残した WSL の PATH）か `OPREASON_SSH_EXE` で探し、無ければ 127 で断る |
+| `op-reason-ssh`（0.4.0 から） | Windows の `ssh.exe` を、引数と stdin・stdout・stderr をそのままに、呼び出しの事実（Linux の側の根のプロセス・呼び手・herdr・場所・distro・理由。`OPREASON_SSH_CALL` に入れて `WSLENV` で渡す）を付けて起こす。Windows の SSH の中継（`op-reason.exe --ssh-agent`）が、見えない Linux のプロセスを窓に出すためのもの。SSH の中継を使うマシン（`dotfiles.opReason.sshRelay.enable`。[後述](#ssh-の中継を使う)）では WSL の `ssh` の wrapper がこれを起こし（`git`・`rsync` も PATH の `ssh` なので通る）、ほかのマシンでは名前を PATH に置くだけ。中継へ向けるのは Windows の ssh の設定の `IdentityAgent` で、`op-reason-ssh` 自身は向けない（中継を使わないマシンでは、ふつうの `ssh.exe` と同じに動く）。`ssh.exe` は PATH（Windows の PATH を残した WSL の PATH）か `OPREASON_SSH_EXE` で探し、無ければ 127 で断る |
 | fish の補完 | `~/.config/fish/completions/op.fish`・`op-reason.fish`（op-reason が `--completion fish` で出した、op を呼ばない補完）。fish に同梱の op の補完は `op completion fish` を打ち、wrapper が理由なしとして断った文が端末に出るので、それより先に読まれる場所に置く |
-| `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか（`{"enable": <bool>}`）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
+| `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか・`op-reason.exe` の WSL のパス・SSH の中継を使うか（`{"enable": <bool>, "exe": "<パス>" \| null, "sshRelay": {"enable": <bool>, "mode": "<モード>"}}`。`exe` は上の `OPREASON_EXE` の既定と同じ）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)・[ssh-agent-notice](#1password-の-ssh-承認を知らせるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
 
 win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Windows の側を setup が入れない。受け持ちを Windows の runner に切り替えた
 ホストでは、Windows の `dotfiles apply` の手順 `op-reason` が同じ場所に入れて揃える（Windows のホストの値の `[tools]` に `onePassword = true`。
 [`win/README.md`「op-reason」](../win/README.md#op-reason)）。ほかのマシンで `op` を使うなら、op-reason の README の「Windows で」の手順で
 `%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` をそこへ向ける）。入っていない間の `op` は 127 で断る
 （refused の `no-exe`）。
+
+### SSH の中継を使う
+
+op-reason の SSH の中継（`op-reason.exe --ssh-agent`。1Password の SSH agent の前に立ち、鍵を使う呼び出しごとに「誰が・何のために」を
+窓に出して許可させる）を、Windows の受け持ちを runner に切り替えたホストで使う（dotfiles-private の ADR 089）。switch は 2 つで、
+同じ PC で両方を on にする。Windows の側（logon の task・中継を指す `IdentityAgent` のファイル）と、毎日の見え方・1Password の承認・止まったとき・
+やめ方は [`win/README.md`「SSH の中継」](../win/README.md#ssh-の中継)。
+
+| option | 中身 |
+| --- | --- |
+| `dotfiles.opReason.sshRelay.enable` | WSL の側で中継を使うか（既定 false）。on にできるのは `wsl.enable`・`onePassword.enable` が true で `wsl.windowsFiles.enable` が false（受け持ちが runner）のホストだけ（ほかでは評価で止まる）。ホストは `modules` に書く（`modules = [ { dotfiles.opReason.sshRelay.enable = true; } ];`） |
+| `dotfiles.opReason.sshRelay.mode` | `per-call`（既定。許可は op-reason の窓で押す）か `show-only`（決めるのは 1Password の画面で、窓は誰が・何のためにを並べる）。Windows のホストの値の `[opReason] sshRelayMode` と同じ値にする |
+
+on のマシンでは:
+
+- `~/.local/bin/ssh` が `ssh-wsl-op-reason.sh`（`exec op-reason-ssh "$@"`）になる（[前述](#wsl-では-ssh-自体を-windows-側に差し替える)）。`USE_LINUX_SSH=1` の道と
+  `ssh-add`（`ssh-add.exe`）は今のまま。git・rsync は PATH の `ssh` を使うので通る。`scp`・`sftp` は `/usr/bin/ssh` を起こすので通らない
+- `claude-op-reason.json` の `sshRelay` が on になり、Claude の hook（[ssh-agent-notice](#1password-の-ssh-承認を知らせるフック)）が、ssh を打つ前に
+  「op-reason の窓が出るかも」と知らせ、理由（`OPREASON_SSH_REASON`）を付けさせる
+- Windows の側は、Windows のホストの値の `[tools] opReasonSshRelay = true` で runner が置く。WSL の setup は Windows に触らない（`bootstrap-windows-op-reason.sh`
+  は中継の引数を渡さない）。当てる順は Windows の `dotfiles apply` が先で、WSL の `setup --update` が後
+- 中継が動いていなければ鍵は使えない（黙って 1Password に直に回らない）。1 回だけ直につなぐ書き方は
+  `ssh -o 'IdentityAgent=\\\\.\pipe\openssh-ssh-agent' <接続先>`
 
 ### 窓の読む参照
 
@@ -3646,6 +3670,13 @@ herdr の中の agent は手元の PC から転送された接続のもので（
   打って、どこからを「hc の端末 <address>「<名前>」」にし、親の端末がいる（`hc run` で立てた）か label `pjp.role=child`（claude-skills の
   `pjp child new` が付ける）なら hc の指揮役の子だと言い切る。hc は 2 秒で切って呼び、落ちたら env の address だけにして条件つきで書く。
   下の `op-reason-guard.sh` も同じ見分け方をする
+- SSH の中継を使うマシン（`claude-op-reason.json` の `sshRelay` が on の WSL で、`SSH_AUTH_SOCK` が空。[前述](#ssh-の中継を使う)）では、PATH の `ssh` を
+  通る接続と設定の一覧の道具の知らせを「🔑 op-reason の窓が出るかも」（show-only は「1Password の承認と op-reason の窓」）にし、理由
+  （`OPREASON_SSH_REASON`。コマンドの頭・`env`・`export`・この会話の環境）と、1Password の画面が出なければアイコンの「SSHリクエストを待機中……」から
+  承認する手を添える。理由が無ければ、次から付けるよう Claude に 1 文足す（止めない）。断られたら op-reason の窓か 1Password に断られた
+  （1Password が画面を伏せたまま約 60 秒で時間切れになったのかもしれない）と言う。鍵の認証の失敗は、`op-reason.exe --ssh-agent --status`
+  （`op-reason.exe` は `claude-op-reason.json` の `exe`）が答えなければ中継に届かないとして、logon の task が 1 分のうちに起こし直すと言う。
+  どちらも、中継を通さずに 1Password に直につなぐ回り道をユーザーが言わない限り使わないよう言う。`scp`・`sftp`・`autossh` と署名は今の文のまま
 - 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
   しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）
 - 登録は上と同じ `./nix/scripts/bootstrap-claude-hook.sh` が `hooks` の `PreToolUse`・`PostToolUse`・`PostToolUseFailure`

@@ -201,7 +201,9 @@ function Install-TypeClipboard { & "$HOME\.config\powershell\Install-TypeClipboa
 # Windows の op-reason (WSL の op の Windows の部品。1Password CLI の wrapper の自作の OSS) を、dotfiles で固定した版に揃える。
 # 中身は同じ場所へ配る Install-OpReason.ps1 (win/README.md の「op-reason」)。-Check なら確かめるだけ。
 # GitHub の Release の zip を、SHA-256 が合うときだけ %LOCALAPPDATA%\Programs\op-reason に展開する。op の呼び出しの途中
-# (op-reason.exe が動いている) なら止まるので、終わってから打ち直す。setup --update でも揃える。
+# (op-reason.exe が動いている) なら止まるので、終わってから打ち直す。setup --update (受け持ちを runner に切り替えたホストは
+# dotfiles apply) でも揃える。-SshRelay per-call|show-only|off で SSH の中継の logon の task も揃える (runner はホストの値から渡す。
+# 動いているのが task の中継だけなら、止めて入れ替えて起こし直す。win/README.md の「SSH の中継」)。
 function Install-OpReason { & "$HOME\.config\powershell\Install-OpReason.ps1" @args }
 
 # Windows の ntn (Notion の CLI。winget の Notion.ntn) を、dotfiles で固定した版に揃える。

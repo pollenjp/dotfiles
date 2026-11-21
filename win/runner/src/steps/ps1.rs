@@ -89,6 +89,9 @@ pub struct Ps1Spec {
     pub sync_fix: &'static [&'static str],
     /// `-ReleasesFile` に clone の nix/pkgs/herdr-core/releases.json を渡す (herdr-app。配った写しは隣の herdr-releases.json を読む)
     pub releases_file: bool,
+    /// `-SshRelay` に、ホストの値の SSH の中継 (道具の switch opReasonSshRelay と `[opReason] sshRelayMode`) のモードを渡す。off なら
+    /// `off` (残った task を止めて消す)。-Check にも揃える流れにも渡す (op-reason。WSL の script は渡さない)
+    pub ssh_relay: bool,
     /// 3 でも、出力にこれがあれば入れられないので打たない (google-ime-install の「固定した版が winget に無い」)
     pub missing_blocked: Option<&'static str>,
     /// 出力の印ごとの直し方 (上から見て最初に当たったもの)。当たれば `manual_fix`・`sync_fix` の代わりに出す (google-ime-install の
@@ -102,6 +105,12 @@ pub struct Ps1Spec {
     /// `-Check` が時間切れのときに添える見込み (無ければ「winget の応答が止まっているかもしれない」)
     pub check_hang: Option<&'static str>,
 }
+
+/// SSH の中継を渡す手順 (`ssh_relay`。op-reason) で、版は揃っていて中継だけが違うときの ps1 の締めの行と、そのときの字
+const RELAY_ONLY_MARK: &str = "⚠️ SSH の中継が揃っていない";
+const RELAY_PENDING: &str = "SSH の中継が揃っていない";
+const RELAY_NOTICE: &str = "Windows の op-reason の SSH の中継 (logon の task) が揃っていないので、揃えます (Install-OpReason.ps1)。";
+const RELAY_SYNCED: &str = "Windows の op-reason の SSH の中継を揃えました。";
 
 const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから流し直す (残ったまま流し直すと、別のインストールが進行中 (1618) で落ちる)";
 
@@ -132,6 +141,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "入れるには PowerShell で Install-GoogleJapaneseInput を打つか、dotfiles apply --steps google-ime-install を流し直す (Windows に UAC の確認が出る)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -178,6 +188,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "入れ直すには PowerShell で Install-OpenSSH -IfMissing を打つ (Windows に UAC が 1 回出る)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -214,6 +225,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "揃えるには PowerShell で Install-Sshd を打つ (Windows に UAC の確認が 1 回出る。入れかけで止まったときも、これで続きを揃える)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         // 揃える前に人が直すこと (Install-Sshd.ps1 の締めの行の文言)。揃えるコマンドを打っても直らない
         output_fixes: &[
@@ -272,6 +284,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "入れるには PowerShell で Install-Tailscale を打つか、dotfiles apply --steps tailscale を流し直す (Windows に UAC の確認が出る)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -312,6 +325,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "揃えるには PowerShell で Install-ClaudeCode を打つか、dotfiles apply --steps claude-code を流し直す (入れ替えるときは、Windows で開いている Claude Code の会話を先に閉じる)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -342,6 +356,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "揃えるには PowerShell で Install-HerdrApp を打つか、dotfiles apply --steps herdr-app を流し直す (固定より新しい版が入っているときは下げない。上の出力を見る)",
         ],
         releases_file: true,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -370,6 +385,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         sync_fix: &["入れ直すには PowerShell で Install-Herdr -IfMissing を打つ"],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -400,6 +416,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "揃えるには PowerShell で Install-Ntn を打つか、dotfiles apply --steps ntn を流し直す (入れ替えるときは、動いている ntn を先に終わらせる)",
         ],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -408,7 +425,9 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "op-reason",
-        order: 97,
+        // WSL の script と同じ 90 (files の後・ssh-config (91) の前)。SSH の中継を使うホストでは、ここで起こした中継が答えるのを
+        // 手順 ssh-config が見てから IdentityAgent を書く
+        order: 90,
         title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
         // WSL の script の `# tool: onePassword`。WSL の script は、さらに WSL の op の wrapper を入れるマシン (claude-op-reason.json の enable。
         // wsl.enable と onePassword.enable が両方 true) に絞るが、runner は WSL の記録を読まず、ホストの値の onePassword で決める (Windows の
@@ -437,6 +456,7 @@ pub const SPECS: &[Ps1Spec] = &[
             "揃えるには PowerShell で Install-OpReason を打つか、dotfiles apply --steps op-reason を流し直す (op-reason.exe が動いているときは、op の呼び出しが終わってから)",
         ],
         releases_file: false,
+        ssh_relay: true,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: Some(
@@ -471,6 +491,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         sync_fix: &["入れ直すには PowerShell で Install-TypeClipboard -IfMissing を打つ"],
         releases_file: false,
+        ssh_relay: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -495,6 +516,8 @@ struct Verdict {
     sync: bool,
     path: bool,
     preview: bool,
+    /// 版は揃っていて、SSH の中継だけが違う (`ssh_relay` の手順の「⚠️ SSH の中継が揃っていない」)
+    relay: bool,
 }
 
 fn read_verdict(spec: &Ps1Spec, lines: &[String]) -> Verdict {
@@ -504,6 +527,7 @@ fn read_verdict(spec: &Ps1Spec, lines: &[String]) -> Verdict {
         sync: has(&format!("→ {} で揃える", spec.command)),
         path: has("→ ※ の手順で直す"),
         preview: has("⚠️ Herdr.Herdr.Preview が残っている"),
+        relay: spec.ssh_relay && has(RELAY_ONLY_MARK),
     };
     if spec.policy == Policy::Herdr {
         // WSL の wrapper と同じく、⚠️ で始まる締めの行の「→ Install-Herdr で揃える・入れる」だけを差として読む
@@ -768,15 +792,21 @@ impl Ps1Step {
     }
 
     fn args(&self, ctx: &Ctx, base: &str) -> String {
+        let mut a = base.to_string();
         if self.0.releases_file {
             let rel = ctx.repo_path("nix/pkgs/herdr-core/releases.json");
-            format!(
-                "{base} -ReleasesFile '{}'",
+            a.push_str(&format!(
+                " -ReleasesFile '{}'",
                 ps_quote(&rel.to_string_lossy())
-            )
-        } else {
-            base.to_string()
+            ));
         }
+        if self.0.ssh_relay {
+            a.push_str(&format!(
+                " -SshRelay '{}'",
+                ctx.host.ssh_relay().unwrap_or("off")
+            ));
+        }
+        a
     }
 
     /// 直し方: 出力の印 (`output_fixes`) に当たればそれ、無ければ `default`。
@@ -789,9 +819,14 @@ impl Ps1Step {
         default.iter().map(|n| n.to_string()).collect()
     }
 
-    fn manual_command(&self) -> String {
+    /// 手で打つ -Check (SSH の中継を渡す手順で中継が on なら、そのモードも添える)
+    fn manual_command(&self, ctx: &Ctx) -> String {
+        let relay = match ctx.host.ssh_relay() {
+            Some(m) if self.0.ssh_relay => format!(" -SshRelay {m}"),
+            _ => String::new(),
+        };
         format!(
-            "PowerShell で {} -Check を打つと、同じことを確かめられる",
+            "PowerShell で {} -Check{relay} を打つと、同じことを確かめられる",
             self.0.command
         )
     }
@@ -876,7 +911,7 @@ impl Step for Ps1Step {
             ctx.say("!! pwsh も powershell も PATH に見つかりません");
             return vec![
                 Outcome::new(Kind::Failed, "PowerShell が見つからない (pwsh・powershell)")
-                    .note(self.manual_command()),
+                    .note(self.manual_command(ctx)),
             ];
         };
         let script_str = script.to_string_lossy().into_owned();
@@ -901,7 +936,7 @@ impl Step for Ps1Step {
                             .unwrap_or("winget の応答が止まっているかもしれない")
                     ),
                 )
-                .note(self.manual_command()),
+                .note(self.manual_command(ctx)),
             ];
         }
         let plan = self.plan(r.code(), header, v, &r.output);
@@ -923,7 +958,7 @@ impl Step for Ps1Step {
                         Kind::Failed,
                         format!("{name} -Check で確かめられなかった ({why})"),
                     )
-                    .note(self.manual_command()),
+                    .note(self.manual_command(ctx)),
                 ]
             }
             Plan::Blocked => {
@@ -951,13 +986,15 @@ impl Step for Ps1Step {
                     _ => (" -IfMissing", "揃える"),
                 };
                 let shown = format!("{name}{args}");
+                // 版は揃っていて SSH の中継だけが違う (入れ替えずに task と中継を揃える)
+                let relay_only = plan == Plan::Sync && v.relay;
                 match mode {
-                    Mode::Check => vec![self.pending_outcome(plan, &shown)],
+                    Mode::Check => vec![self.pending_outcome(plan, relay_only, &shown)],
                     Mode::DryRun { .. } => {
                         ctx.say(format!("[dry-run] {shown} を流す ({label})"));
-                        vec![self.pending_outcome(plan, &shown)]
+                        vec![self.pending_outcome(plan, relay_only, &shown)]
                     }
-                    Mode::Apply { .. } => self.act(ctx, shell, &script_str, plan, args),
+                    Mode::Apply { .. } => self.act(ctx, shell, &script_str, plan, relay_only, args),
                 }
             }
         }
@@ -966,11 +1003,15 @@ impl Step for Ps1Step {
 
 impl Ps1Step {
     /// apply の前の行 (check・dry-run)
-    fn pending_outcome(&self, plan: Plan, shown: &str) -> Outcome {
+    fn pending_outcome(&self, plan: Plan, relay_only: bool, shown: &str) -> Outcome {
         match plan {
             Plan::Install => Outcome::new(
                 Kind::Missing,
                 format!("入っていない → apply で入れる ({shown})"),
+            ),
+            _ if relay_only => Outcome::new(
+                Kind::Fix,
+                format!("{RELAY_PENDING} → apply で揃える ({shown})"),
             ),
             _ => Outcome::new(
                 Kind::Fix,
@@ -1031,12 +1072,14 @@ impl Ps1Step {
         shell: PathBuf,
         script: &str,
         plan: Plan,
+        relay_only: bool,
         args: &str,
     ) -> Vec<Outcome> {
         let s = self.0;
         let name = self.script_name();
         let installing = plan == Plan::Install;
         match (installing, s.install_notice, s.sync_notice) {
+            _ if relay_only => ctx.say(RELAY_NOTICE),
             (true, Some(n), _) | (false, _, Some(n)) => ctx.say(n),
             (true, None, _) => ctx.say(format!(
                 "Windows に {} が入っていないので、固定した版を入れます ({name}{args}。{} 秒まで待ちます)。",
@@ -1082,8 +1125,12 @@ impl Ps1Step {
         let herdr_preview_only =
             s.policy == Policy::Herdr && code == Some(1) && v.preview && !v.sync;
         if code == Some(0) || herdr_preview_only {
-            for l in if installing { s.installed } else { s.synced } {
-                ctx.say(*l);
+            if relay_only {
+                ctx.say(RELAY_SYNCED);
+            } else {
+                for l in if installing { s.installed } else { s.synced } {
+                    ctx.say(*l);
+                }
             }
             let mut out = vec![Outcome::new(Kind::Ok, format!("{did}た"))];
             if herdr_preview_only {
@@ -1145,9 +1192,11 @@ mod tests {
     //! - sshd は道具の switch (windowsSshd) で on/off し、3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
     //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行・拒否の規則が効かない
     //!   プロファイル・サービスの無い sshd.exe) はその直し方を出す。入れかけで止まったら、引数なしの Install-Sshd を案内する
-    //! - op-reason は道具の switch (onePassword) で on/off し、3 も 1 (締めの行を見ない) も引数なしで流す (ps1 は -IfMissing を持たない)。
-    //!   前に出す行は手順の字 (無い手順は型の字と待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは
-    //!   `op_reason_parity`
+    //! - op-reason は道具の switch (onePassword) で on/off し、3 も 1 (締めの行を見ない) も -SshRelay だけで流す (ps1 は -IfMissing を持たない)。
+    //!   -SshRelay は、-Check にも揃える流れにも、SSH の中継の switch (opReasonSshRelay) が on ならモード (per-call・show-only)、off なら off を
+    //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
+    //!   揃っていない」)、行と前に出す行を中継の字にする。手で打つ -Check にも中継のモードを添える。前に出す行は手順の字 (無い手順は型の字と
+    //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1194,15 +1243,30 @@ mod tests {
     }
 
     fn run(id: &str, sys: &FakeSys, mode: Mode) -> (Vec<Outcome>, String, Vec<String>) {
+        run_host(id, sys, mode, None)
+    }
+
+    /// `host` はホストの値の文 (None ならファイルが無いときの値)
+    fn run_host(
+        id: &str,
+        sys: &FakeSys,
+        mode: Mode,
+        host: Option<&str>,
+    ) -> (Vec<Outcome>, String, Vec<String>) {
         let t = TempDir::new("ps1");
         t.write(spec(id).script, "# ps1\n");
         let mut out = Vec::new();
+        let groups = Groups::embedded().unwrap();
+        let host = match host {
+            Some(text) => crate::host::parse(text, Path::new("h.toml"), groups).unwrap(),
+            None => HostValues::missing(Path::new("h.toml"), groups),
+        };
         let outcomes = {
             let mut ctx = Ctx {
                 repo: t.path().to_path_buf(),
                 roots: Roots::from_home(Path::new("/h")),
                 state_dir: t.path().join("state"),
-                host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                host,
                 sys,
                 out: &mut out,
             };
@@ -1575,10 +1639,10 @@ mod tests {
     /// いない。締めの行は見ない) も引数なしで流す (WSL の bootstrap-windows-op-reason.sh と同じ)。前に出す行は手順の字 (WSL と同じ字かは
     /// op_reason_parity が WSL の script を流して比べる)
     #[test]
-    fn op_reason_installs_and_replaces_without_arguments() {
+    fn op_reason_installs_and_replaces_with_only_the_relay_argument() {
         let s = spec("op-reason");
         assert_eq!(s.gate, Gate::Tool("onePassword"));
-        assert_eq!(s.order, 97);
+        assert_eq!(s.order, 90);
         assert_eq!(s.script, "win/op-reason/Install-OpReason.ps1");
         let install_notice = s.install_notice.unwrap();
         let sync_notice = s.sync_notice.unwrap();
@@ -1589,7 +1653,7 @@ mod tests {
                 "⚠️ op-reason が入っていない → Install-OpReason で入れる ⚠️".into(),
             ],
         );
-        // 3: check は -Check だけで missing、dry-run は打つはずのもの (引数なし) を出す
+        // 3: check は -Check (と中継の -SshRelay) だけで missing、dry-run は打つはずのもの (ps1 の名前) を出す
         let sys1 = sys(missing.clone(), (9, vec![]));
         let (o, _, calls) = run("op-reason", &sys1, Mode::Check);
         assert_eq!(
@@ -1599,7 +1663,7 @@ mod tests {
                 "入っていない → apply で入れる (Install-OpReason.ps1)"
             )]
         );
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(ends(&calls), vec![OFF_CHECK]);
         let sys2 = sys(missing.clone(), (9, vec![]));
         let (o, out, calls) = run("op-reason", &sys2, Mode::DryRun { force: false });
         assert_eq!(o[0].kind, Kind::Missing);
@@ -1607,19 +1671,19 @@ mod tests {
             out.contains("[dry-run] Install-OpReason.ps1 を流す (入れる)\n"),
             "{out}"
         );
-        assert_eq!(ends(&calls), vec!["-Check"]);
-        // 3 → apply は引数なしで入れ、手順の字の前置きと入れた後の行を出す
+        assert_eq!(ends(&calls), vec![OFF_CHECK]);
+        // 3 → apply は -SshRelay だけで入れ、手順の字の前置きと入れた後の行を出す
         let sys3 = sys(missing.clone(), (0, vec!["揃った".into()]));
         let (o, out, calls) = run("op-reason", &sys3, APPLY);
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
-        assert_eq!(ends(&calls), vec!["-Check", ""]);
-        assert!(calls[1].contains("Install-OpReason.ps1'; exit $LASTEXITCODE"));
+        assert_eq!(ends(&calls), vec![OFF_CHECK, OFF]);
+        assert!(calls[1].contains("Install-OpReason.ps1' -SshRelay 'off'; exit $LASTEXITCODE"));
         assert!(out.contains(&format!("{install_notice}\n")), "{out}");
         assert!(!out.contains("秒まで待ちます"), "{out}");
         for l in s.installed {
             assert!(out.contains(&format!("{l}\n")), "{out}");
         }
-        // 1: 締めの行が無くても (WSL は見ない) 引数なしで入れ替える。check は fix
+        // 1: 締めの行が無くても (WSL は見ない) -SshRelay だけで入れ替える。check は fix
         let drift = (
             1,
             vec![
@@ -1636,11 +1700,11 @@ mod tests {
                 "固定した版と揃っていない → apply で揃える (Install-OpReason.ps1)"
             )]
         );
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(ends(&calls), vec![OFF_CHECK]);
         let sys5 = sys(drift.clone(), (0, vec!["揃った".into()]));
         let (o, out, calls) = run("op-reason", &sys5, APPLY);
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
-        assert_eq!(ends(&calls), vec!["-Check", ""]);
+        assert_eq!(ends(&calls), vec![OFF_CHECK, OFF]);
         assert!(out.contains(&format!("{sync_notice}\n")), "{out}");
         for l in s.synced {
             assert!(out.contains(&format!("{l}\n")), "{out}");
@@ -1659,7 +1723,7 @@ mod tests {
             assert_eq!(o.len(), 1);
             assert_eq!(o[0].kind, Kind::Failed);
             assert_eq!(o[0].text, format!("{did} (終了コード 1。上の出力を見る)"));
-            assert_eq!(ends(&calls), vec!["-Check", ""]);
+            assert_eq!(ends(&calls), vec![OFF_CHECK, OFF]);
             assert!(
                 o[0].notes
                     .iter()
@@ -1674,7 +1738,7 @@ mod tests {
         let sys7 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
         let (o, out, calls) = run("op-reason", &sys7, APPLY);
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(ends(&calls), vec![OFF_CHECK]);
         assert!(out.contains(&format!("{}\n", s.ok_text)), "{out}");
         // -Check の時間切れ: -Check はネットワークも winget も使わないので、winget の見込みは添えない
         let sys8 = sys((-1, vec![]), (9, vec![]));
@@ -1686,7 +1750,150 @@ mod tests {
             o[0].text
         );
         assert!(!o[0].text.contains("winget"), "{}", o[0].text);
+        assert_eq!(ends(&calls), vec![OFF_CHECK]);
+    }
+
+    /// 中継の switch が off のホスト (ファイルが無いときも) の op-reason の引数
+    const OFF_CHECK: &str = "-Check -SshRelay 'off'";
+    const OFF: &str = "-SshRelay 'off'";
+    /// 中継を使うホスト (1Password の switch も要る)
+    const RELAY_ON: &str =
+        "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
+
+    /// op-reason は、中継の switch が on ならモードを、off なら off を、-Check にも揃える流れにも -SshRelay で渡す
+    #[test]
+    fn op_reason_passes_the_ssh_relay_switch() {
+        let s = spec("op-reason");
+        let drift = (
+            1,
+            vec![
+                header_line(s),
+                "⚠ 固定した版 : 0.3.0 → 入れ替える (上げる)".into(),
+            ],
+        );
+        let show_only = format!("{RELAY_ON}[opReason]\nsshRelayMode = \"show-only\"\n");
+        let off_switch =
+            "[tools]\nonePassword = true\nopReasonSshRelay = false\n[runner]\nenable = true\n";
+        for (host, mode) in [
+            (RELAY_ON, "per-call"),
+            (show_only.as_str(), "show-only"),
+            (off_switch, "off"),
+            // 1Password が off なら中継は効かない (groups.nix の requires)。手順そのものは走らせて確かめる
+            (
+                "[tools]\nopReasonSshRelay = true\n[runner]\nenable = true\n",
+                "off",
+            ),
+        ] {
+            let sys1 = sys(drift.clone(), (0, vec!["揃った".into()]));
+            let (o, _, calls) = run_host("op-reason", &sys1, APPLY, Some(host));
+            assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")], "{host}");
+            assert_eq!(
+                ends(&calls),
+                vec![
+                    format!("-Check -SshRelay '{mode}'"),
+                    format!("-SshRelay '{mode}'")
+                ],
+                "{host}"
+            );
+            // check と dry-run も、-Check に同じ -SshRelay を渡す
+            for m in [Mode::Check, Mode::DryRun { force: false }] {
+                let sys2 = sys(drift.clone(), (9, vec![]));
+                let (_, _, calls) = run_host("op-reason", &sys2, m, Some(host));
+                assert_eq!(
+                    ends(&calls),
+                    vec![format!("-Check -SshRelay '{mode}'")],
+                    "{host} {m:?}"
+                );
+            }
+        }
+        // 受け持ちが WSL のホスト (runner は check だけ) も、同じ引数で確かめる
+        let sys3 = sys(drift.clone(), (9, vec![]));
+        let (_, _, calls) = run_host(
+            "op-reason",
+            &sys3,
+            Mode::Check,
+            Some("[tools]\nonePassword = true\nopReasonSshRelay = true\n"),
+        );
+        assert_eq!(ends(&calls), vec!["-Check -SshRelay 'per-call'"]);
+        // ほかの手順には渡さない
+        let n = spec("ntn");
+        let sys4 = sys((0, vec![header_line(n)]), (9, vec![]));
+        let (_, _, calls) = run_host("ntn", &sys4, Mode::Check, Some(RELAY_ON));
         assert_eq!(ends(&calls), vec!["-Check"]);
+        // 確かめられないときに手で打つ -Check にも、中継のモードを添える
+        let sys5 = sys((-1, vec![]), (9, vec![]));
+        let (o, _, _) = run_host("op-reason", &sys5, Mode::Check, Some(RELAY_ON));
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n
+                    .contains("PowerShell で Install-OpReason -Check -SshRelay per-call を打つ")),
+            "{:?}",
+            o[0].notes
+        );
+        let sys6 = sys((-1, vec![]), (9, vec![]));
+        let (o, _, _) = run_host("op-reason", &sys6, Mode::Check, Some(off_switch));
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("PowerShell で Install-OpReason -Check を打つ")),
+            "{:?}",
+            o[0].notes
+        );
+    }
+
+    /// 版は揃っていて SSH の中継だけが違う (ps1 の締めの行「SSH の中継が揃っていない」) なら、行と前に出す行を中継の字にする
+    #[test]
+    fn op_reason_names_the_relay_when_only_the_relay_differs() {
+        let s = spec("op-reason");
+        let relay_only = (
+            1,
+            vec![
+                header_line(s),
+                "  固定した版       : 0.5.0 → そのまま".into(),
+                "SSH の中継 (logon の task \\pjp\\op-reason-ssh-relay)".into(),
+                "⚠ task             : 無い → 置いて起こす".into(),
+                "⚠️ SSH の中継が揃っていない → Install-OpReason -SshRelay per-call で揃える ⚠️"
+                    .into(),
+            ],
+        );
+        let sys1 = sys(relay_only.clone(), (9, vec![]));
+        let (o, _, _) = run_host("op-reason", &sys1, Mode::Check, Some(RELAY_ON));
+        assert_eq!(
+            o,
+            vec![Outcome::new(
+                Kind::Fix,
+                "SSH の中継が揃っていない → apply で揃える (Install-OpReason.ps1)"
+            )]
+        );
+        let sys2 = sys(relay_only.clone(), (0, vec!["揃った".into()]));
+        let (o, out, calls) = run_host("op-reason", &sys2, APPLY, Some(RELAY_ON));
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
+        assert_eq!(
+            ends(&calls),
+            vec!["-Check -SshRelay 'per-call'", "-SshRelay 'per-call'"]
+        );
+        assert!(
+            out.contains("Windows の op-reason の SSH の中継 (logon の task) が揃っていないので、揃えます (Install-OpReason.ps1)。\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("Windows の op-reason の SSH の中継を揃えました。\n"),
+            "{out}"
+        );
+        assert!(!out.contains(s.sync_notice.unwrap()), "{out}");
+        // 揃えられない (中継が窓を開いている・答えない): 版の字のまま failed (直し方は上の出力と、op の呼び出しが終わってから)
+        let sys3 = sys(
+            relay_only,
+            (
+                1,
+                vec!["SSH の中継が窓を開いている (か、1Password の確認を待っている) ので、中継を止めない。".into()],
+            ),
+        );
+        let (o, _, _) = run_host("op-reason", &sys3, APPLY, Some(RELAY_ON));
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert_eq!(o[0].text, "揃えられなかった (終了コード 1。上の出力を見る)");
     }
 
     /// 前に出す行を持たない手順は、ps1 の手順の型の字 (どの手順の前置きか・待つ秒数) を出す

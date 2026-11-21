@@ -6,12 +6,14 @@
 # (~/.local/state/dotfiles/claude-op-reason.json の enable が true) のうち、win/ を配るマシンだけが対象。
 # 入っていなければ GitHub の Release から入れ、版がずれていれば入れ替える。
 #
-# order: 97
+# order: 90
 # tool: onePassword (dotfiles.onePassword.enable)
 #
-# ^ setup.sh が読む実行順と、設定グループで飛ばす道具。bootstrap-windows-files.sh (order: 90) が Install-OpReason.ps1 を
-#   置いた後に走らせる。衝突で exit 1 しうる bootstrap-windows-google-ime.sh (98) より前に置く。bootstrap-windows-herdr.sh などと
-#   同じ 97 で、同じ値は辞書順 (どれも相手を使わない)。1Password を入れないホスト (tools.onePassword が false) では
+# ^ setup.sh が読む実行順と、設定グループで飛ばす道具。bootstrap-windows-files.sh (同じ 90。同じ値は辞書順なので、こちらが後)
+#   が Install-OpReason.ps1 を置いた後に走らせる。Windows の runner の手順 op-reason (同じ 90) は、SSH の中継を使うホストで
+#   起こした中継が答えるのを手順 ssh-config (91) が見てから IdentityAgent を書くので、ssh の設定より前に置く (runner の手順の
+#   順は WSL の # order: と同じに保つ)。WSL の setup は中継に触らない。衝突で exit 1 しうる bootstrap-windows-ssh-config.sh (91)・
+#   bootstrap-windows-google-ime.sh (98) より前でもある。1Password を入れないホスト (tools.onePassword が false) では
 #   setup が流さない。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために

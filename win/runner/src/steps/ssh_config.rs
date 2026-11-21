@@ -23,6 +23,25 @@
 //! - check と apply は `ssh -v -G nonexistent.invalid` を流し、読んだファイルを確かめる (WSL は書いた後にいつも流す。dry-run は流さない)。アクセス権で
 //!   弾かれる・読み終えられない・置いたファイルが読まれない・旧 clone の `ssh_config` を読んだ、なら manual。ssh を呼べない・応答しないときは、手で
 //!   打つコマンドを添えて進む
+//!
+//! ## SSH の中継 (ホストの値の `[tools] opReasonSshRelay`。1Password の switch も要る)
+//!
+//! on なら `config.d\00-op-reason-ssh-relay.ssh_config` (中継のファイル) に、どの接続先にも効く `IdentityAgent` (op-reason の中継の pipe
+//! `\\.\pipe\op-reason-ssh-agent`) を書き、ほかの config.d のファイルと同じく記録で管理する。名前の頭の `00-` で config.d の最初に読ませ、接続先ごとの
+//! `IdentityAgent` より先に効かせる (ssh は最初に得た値を採る)。`config` は変えない (WSL の script と同じ字のまま)。中継は手順 op-reason (90) が
+//! logon の task で起こす。置く前に `%LOCALAPPDATA%\Programs\op-reason\op-reason.exe --ssh-agent --status` で答えるかを見る:
+//!
+//! | 中継 | すること |
+//! | --- | --- |
+//! | 答える | 置く (記録どおりに上書きもする) |
+//! | 答えない・前に置いていない | 置かずに ⚠ (初めての apply で ssh が全部失敗するのを避ける。ssh は今までどおり 1Password に直に行く) |
+//! | 答えない・前に置いたものがある | 消さずに ⚠ (中継が落ちている間に、黙って 1Password へ直に回さない。鍵は使えない) |
+//!
+//! - op-reason.exe が無いのも答えないとみなす。dotfiles-private の `ssh/` に同じ名前のファイルがあれば、中継のファイルは置かずに ⚠
+//! - check と dry-run は、中継が今は答えなくても、前に置いていなければ置くと予告する (apply では手順 op-reason が先に中継を起こす)
+//! - 正本 (`ssh/`) が空・読めないときは、中継のファイルも置かず消さない。switch が on なのに無い・off なのに残っているときは、黙らずに ⚠
+//!   (行は manual。読めないときは failed のまま注記に足す)
+//! - switch を切れば、記録にある中継のファイルを、正本から消えたものと同じく消す (Windows で変えていれば衝突)
 
 use super::deploy::{self, Action, Gone, Problem, Tally};
 use super::ps1::ps_quote;
@@ -58,6 +77,21 @@ const CHECK_SECS: u64 = 30;
 /// 確かめを手で打つコマンド (WSL の script の manual_check と同じ)
 const MANUAL_CHECK: &str =
     "ssh -v -G nonexistent.invalid 2>&1 | Select-String 'Reading configuration'";
+/// SSH の中継のファイルの名前と記録の鍵 (`.ssh` からの相対パス。上の「SSH の中継」)
+const RELAY_NAME: &str = "00-op-reason-ssh-relay.ssh_config";
+const RELAY_KEY: &str = "config.d/00-op-reason-ssh-relay.ssh_config";
+/// 中継のファイルの中身。中継の pipe は op-reason の既定 (`\\.\pipe\op-reason-ssh-agent`)。OpenSSH は設定の `\\` を 1 つの `\` と読むので、頭の 2 つを
+/// 重ねる (op-reason の README)。置き主・中継が止まると鍵が使えないこと・1 回だけ直につなぐ書き方をコメントに書く
+const RELAY_BODY: &str = r"# dotfiles の Windows の runner (dotfiles apply の手順 ssh-config) が置く (ホストの値の [tools] opReasonSshRelay のときだけ。手で直すと次の apply で衝突になる)。
+# どの接続先でも、ssh の鍵は op-reason の SSH の中継 (op-reason.exe --ssh-agent。logon の task が起こす) を通す。
+# config.d の最初に読まれるので、接続先ごとの IdentityAgent より先に効く。中継が動いていなければ鍵は使えない。
+# 1 回だけ 1Password に直につなぐ: ssh -o 'IdentityAgent=\\\\.\pipe\openssh-ssh-agent' <接続先> (dotfiles の win/README.md の「SSH の中継」)。
+IdentityAgent \\\\.\pipe\op-reason-ssh-agent
+";
+/// 1 回だけ 1Password に直につなぐ書き方 (OpenSSH は -o の `\\` も 1 つの `\` と読むので、頭の 2 つを重ねる)
+const RELAY_DIRECT: &str = r"ssh -o 'IdentityAgent=\\\\.\pipe\openssh-ssh-agent' <接続先>";
+/// 中継の --status を待つ秒数 (WSL の script の timeout 15 と同じ)
+const RELAY_STATUS_SECS: u64 = 15;
 /// 記録が壊れていたときの直し方 (WSL と同じ)
 const BROKEN_HINT: &str = "消してから流し直すと、Windows 側に既にあるファイルは衝突として扱われます (中身を確かめて、dotfiles-private へ取り込むか --force)";
 
@@ -95,21 +129,25 @@ struct Item {
 fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
     let private = ctx.sibling("dotfiles-private");
     let src_dir = private.join("ssh");
-    let srcs =
-        match sources(&src_dir) {
-            Ok(s) => s,
-            Err(e) => {
-                ctx.say(format!(
-                    "!! 正本の一覧を読めません: {} ({e})。何も書かず、消しません。",
-                    src_dir.display()
-                ));
-                return vec![Outcome::new(
+    let srcs = match sources(&src_dir) {
+        Ok(s) => s,
+        Err(e) => {
+            ctx.say(format!(
+                "!! 正本の一覧を読めません: {} ({e})。何も書かず、消しません。",
+                src_dir.display()
+            ));
+            let mut o = Outcome::new(
                 Kind::Failed,
                 "正本 (dotfiles-private の ssh/) の一覧を読めない (何も書かず、消していない)",
             )
-            .note(e.to_string())];
+            .note(e.to_string());
+            for l in relay_mismatch_without_sources(ctx) {
+                say_failed(ctx, std::slice::from_ref(&l));
+                o = o.note(l);
             }
-        };
+            return vec![o];
+        }
+    };
     if srcs.is_empty() {
         ctx.say(format!(
             "!! Windows の ssh の設定を配りません: 正本の *.ssh_config がありません ({})。",
@@ -118,16 +156,28 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
         ctx.say(
             "   dotfiles-private を取れていないか、ssh/ が空です。Windows 側のファイルはそのまま残します。",
         );
-        return vec![
-            Outcome::new(
-                Kind::Info,
-                "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
-            )
-            .note(format!(
-                "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
-                src_dir.display()
-            )),
-        ];
+        // 中継のファイルは正本から来ないので、正本が無くても食い違いを黙らない (置けない・消せないことを ⚠ にする)
+        let relay = relay_mismatch_without_sources(ctx);
+        for l in &relay {
+            say_failed(ctx, std::slice::from_ref(l));
+        }
+        let kind = if relay.is_empty() {
+            Kind::Info
+        } else {
+            Kind::Manual
+        };
+        let mut o = Outcome::new(
+            kind,
+            "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
+        )
+        .note(format!(
+            "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
+            src_dir.display()
+        ));
+        for l in relay {
+            o = o.note(l);
+        }
+        return vec![o];
     }
     let record_path = ctx.state_dir.join(RECORD_FILE);
     let mut records = match FileRecords::load(&record_path, BROKEN_HINT) {
@@ -167,6 +217,77 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
                 ctx.say(format!("!! 正本が読めません: {} ({e})", src.display()));
                 tally.errors += 1;
             }
+        }
+    }
+
+    // SSH の中継のファイル (上の「SSH の中継」)。ほかの config.d のファイルと同じく計画に足す (計画の並びは置く順だけで、ssh が読む順は名前の順)
+    let mut relay_notes = Vec::new();
+    let mut relay_manual = false;
+    if let Some(relay_mode) = ctx.host.ssh_relay().map(str::to_string) {
+        let dst = ssh_dir.join("config.d").join(RELAY_NAME);
+        let mut warn = |ctx: &mut Ctx, lines: &[String]| {
+            say_failed(ctx, lines);
+            relay_notes.extend(lines.iter().cloned());
+            relay_manual = true;
+        };
+        let place = if planned.iter().any(|k| k == RELAY_KEY) {
+            warn(
+                ctx,
+                &[
+                    format!(
+                        "dotfiles-private の ssh/ に、SSH の中継のファイルと同じ名前 ({RELAY_NAME}) があるので、中継の IdentityAgent を置けません。"
+                    ),
+                    "dotfiles-private のそのファイルの名前を替えてください (それまで Windows と WSL の ssh は、中継を通らずに 1Password に直に行きます)。".to_string(),
+                ],
+            );
+            false
+        } else {
+            match relay_status(ctx) {
+                Ok(()) => true,
+                Err(why) if records.get(RELAY_KEY).is_some() && dst.is_file() => {
+                    warn(
+                        ctx,
+                        &[
+                            "SSH の中継 (ホストの値の opReasonSshRelay) が答えません。Windows の ssh の設定の IdentityAgent は中継を指したままなので、中継が起きるまで Windows と WSL の ssh は鍵を使えません。".to_string(),
+                            format!("中継: {why}"),
+                            "logon の task が 1 分のうちに中継を起こし直します。待てなければ Windows の PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay' (答えるかは op-reason.exe --ssh-agent --status)".to_string(),
+                            format!("1 回だけ 1Password に直につなぐ: {RELAY_DIRECT}"),
+                        ],
+                    );
+                    true
+                }
+                Err(why) if !mode.writes() => {
+                    // check と dry-run: apply では手順 op-reason (90) が先に中継を起こすので、置くと予告する
+                    let line = format!(
+                        "SSH の中継が今は答えません ({why})。apply では手順 op-reason (90) が中継を起こしてから置きます (起きなければ置かずに知らせます)。"
+                    );
+                    ctx.say(&line);
+                    relay_notes.push(line);
+                    true
+                }
+                Err(why) => {
+                    warn(
+                        ctx,
+                        &[
+                            "SSH の中継 (ホストの値の opReasonSshRelay) が答えないので、Windows の ssh の設定に IdentityAgent を書いていません (Windows と WSL の ssh は、今までどおり 1Password に直に行きます)。".to_string(),
+                            format!("中継: {why}"),
+                            format!(
+                                "上の手順 op-reason の出力を見て中継を起こしてから (dotfiles apply --steps op-reason。PowerShell なら Install-OpReason -SshRelay {relay_mode})、dotfiles apply --steps ssh-config を流し直してください。"
+                            ),
+                        ],
+                    );
+                    false
+                }
+            }
+        };
+        if place {
+            planned.push(RELAY_KEY.to_string());
+            items.push(Item {
+                key: RELAY_KEY.to_string(),
+                dst,
+                bytes: RELAY_BODY.as_bytes().to_vec(),
+                src: None,
+            });
         }
     }
 
@@ -214,7 +335,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
             .filter(|k| join_segments(&ssh_dir, k).is_file())
             .cloned()
             .collect();
-        Some(verify(ctx, &ssh_dir, &expect, srcs.len()))
+        Some(verify(ctx, &ssh_dir, &expect, planned.len() - 1))
     };
 
     let mut summary = tally.summary(mode, true);
@@ -233,6 +354,10 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
         }
         notes.extend(v.unverified);
     }
+    if relay_manual && kind != Kind::Failed {
+        kind = Kind::Manual;
+    }
+    notes.extend(relay_notes);
     if tally.conflicts > 0 {
         notes.push(deploy::conflict_note(
             ctx,
@@ -303,6 +428,10 @@ fn place_one(
                         ps_quote(&shown),
                         ps_quote(&src.to_string_lossy())
                     ));
+                }
+                None if item.key == RELAY_KEY => {
+                    deploy::show_diff_bytes(ctx, &item.dst, &item.bytes, RELAY_NAME);
+                    ctx.say("   Windows 側の中身を残すなら: 中継のファイルは runner が置くので、手で書いた行は dotfiles-private の ssh/ の別の名前のファイルへ移し、commit して push する");
                 }
                 None => {
                     deploy::show_diff_bytes(ctx, &item.dst, &item.bytes, "config");
@@ -386,6 +515,8 @@ fn remove_gone(
         return;
     }
     let recorded = records.get(key).map(str::to_string);
+    // 中継のファイルは、正本からではなく SSH の中継を使わなくなって (switch を切って) 消える
+    let relay = key == RELAY_KEY;
     match deploy::judge_gone(&dst, recorded.as_deref(), force) {
         Ok(Gone::Missing) => {
             if mode.writes() {
@@ -394,18 +525,29 @@ fn remove_gone(
         }
         Ok(Gone::Conflict) => {
             tally.conflicts += 1;
-            ctx.say(format!(
-                "!! 衝突: {shown} は正本から消えましたが、Windows 側で変わっているので消していません。"
-            ));
+            if relay {
+                ctx.say(format!(
+                    "!! 衝突: {shown} は消すもの (SSH の中継を使わない) ですが、Windows 側で変わっているので消していません。"
+                ));
+            } else {
+                ctx.say(format!(
+                    "!! 衝突: {shown} は正本から消えましたが、Windows 側で変わっているので消していません。"
+                ));
+            }
             let again = deploy::force_command(ctx, "ssh-config");
             ctx.say(format!(
                 "   消してよいなら:   {again} (元は <名前>.dotfiles-bak-<日時> に残る)"
             ));
         }
         Ok(gone @ (Gone::Remove | Gone::Force)) => {
-            let label = "削除 (正本から消えた)";
+            let why = if relay {
+                "SSH の中継を使わない"
+            } else {
+                "正本から消えた"
+            };
+            let label = format!("削除 ({why})");
             match mode {
-                Mode::Check => ctx.say(format!("正本から消えた (apply で消す): {shown}")),
+                Mode::Check => ctx.say(format!("{why} (apply で消す): {shown}")),
                 Mode::DryRun { .. } => ctx.say(format!("[dry-run] {label}: {shown}")),
                 Mode::Apply { .. } => match deploy::remove(&dst, gone == Gone::Force) {
                     Ok(bak) => {
@@ -642,6 +784,65 @@ fn verify(ctx: &mut Ctx, ssh_dir: &Path, expect: &[String], n: usize) -> Verifie
     }
 }
 
+/// 置き場所 (`%LOCALAPPDATA%\Programs\op-reason`。Install-OpReason.ps1 の既定) の op-reason.exe で、SSH の中継が既定の pipe で答えるかを見る
+/// (`op-reason.exe --ssh-agent --status`)。答えれば Ok。答えなければわけ (出力の頭の 3 行か、無ければ終わり方。op-reason.exe が無いのも答えない)
+fn relay_status(ctx: &Ctx) -> Result<(), String> {
+    let exe = join_segments(
+        &ctx.roots.local_app_data,
+        "Programs/op-reason/op-reason.exe",
+    );
+    if !exe.is_file() {
+        return Err(format!("op-reason.exe が無い ({})", exe.display()));
+    }
+    let spec = CommandSpec::new(exe)
+        .arg("--ssh-agent")
+        .arg("--status")
+        .timeout(Duration::from_secs(RELAY_STATUS_SECS));
+    let r = ctx.sys.run(&spec, &mut |_| {});
+    if r.code() == Some(0) {
+        return Ok(());
+    }
+    let head: Vec<&str> = r
+        .output
+        .iter()
+        .map(|l| l.trim_end_matches(['\r', '\n']))
+        .filter(|l| !l.is_empty())
+        .take(3)
+        .collect();
+    if !head.is_empty() {
+        return Err(head.join(" / "));
+    }
+    Err(match &r.exit {
+        Exit::Code(c) => format!("op-reason.exe --ssh-agent --status が終了コード {c} で終わった"),
+        Exit::NoCode => "op-reason.exe --ssh-agent --status の終了コードが無い".to_string(),
+        Exit::TimedOut => {
+            format!(
+                "op-reason.exe --ssh-agent --status が {RELAY_STATUS_SECS} 秒たっても答えなかった"
+            )
+        }
+        Exit::SpawnFailed(e) => format!("op-reason.exe を起こせなかった: {e}"),
+    })
+}
+
+/// 正本 (ssh/) が空・読めないときの、中継のファイルの食い違い (正本が無いときは何も書かず消さないので、黙らずに ⚠ の文にする)。
+/// switch が on なのに置いていない (Windows の ssh は 1Password に直に行く)・switch が off なのに残っている (中継が止まると鍵を使えない)。
+/// 食い違いが無ければ空
+fn relay_mismatch_without_sources(ctx: &Ctx) -> Vec<String> {
+    let dst = join_segments(&ctx.roots.user_profile, ".ssh")
+        .join("config.d")
+        .join(RELAY_NAME);
+    match (ctx.host.ssh_relay().is_some(), dst.is_file()) {
+        (true, false) => vec![
+            "SSH の中継 (ホストの値の opReasonSshRelay) が on ですが、正本が無いので中継の IdentityAgent も置いていません (Windows と WSL の ssh は 1Password に直に行きます)。dotfiles-private の ssh/ を確かめてから流し直してください。".to_string(),
+        ],
+        (false, true) => vec![format!(
+            "SSH の中継を使わない (ホストの値の opReasonSshRelay が off) のに、正本が無いので中継のファイルを消していません ({})。中継が止まると Windows と WSL の ssh は鍵を使えません。dotfiles-private の ssh/ を確かめてから流し直すか、そのファイルを手で消してください。",
+            dst.display()
+        )],
+        _ => Vec::new(),
+    }
+}
+
 /// 確かめの差を出す (1 行目の頭に `!!`、続きの行は字下げ)。
 fn say_failed(ctx: &mut Ctx, lines: &[String]) {
     for (i, l) in lines.iter().enumerate() {
@@ -683,6 +884,12 @@ mod tests {
     //! - 順番・on/off・config の中身・旧経路の 1 行・記録の名前・確かめのコマンドと秒数が WSL の script と同じ
     //! - WSL の script と同じ状態から、同じファイルを書き・消し・退避して同じく記録する。WSL の script が置いたものを、記録の無い runner が変えずに
     //!   引き継ぐ (bash の版と突き合わせる。bash と jq がある Linux)
+    //! - SSH の中継 (ホストの値の opReasonSshRelay。1Password の switch も要る): off なら中継のファイルを置かず、op-reason.exe も呼ばない。on で
+    //!   中継が --status に答えれば config.d/00-op-reason-ssh-relay.ssh_config (IdentityAgent が中継の pipe) を置いて記録し、config は変えない。
+    //!   2 回目は揃っている。置いた後に答えなければ残して ⚠ (鍵は使えない)。off に戻すと記録どおりに消す。初めてで答えなければ置かずに ⚠。
+    //!   op-reason.exe が無いのも答えないとみなす。dotfiles-private に同じ名前があれば置かずに ⚠。check と dry-run は書かず、中継が今は答えなくても
+    //!   置くと予告する (apply では op-reason の手順が先に中継を起こす)。正本が空のときは中継のファイルも置かず消さないが、on なのに無い・
+    //!   off なのに残っているときは ⚠
 
     use super::*;
     use crate::hooks::parity;
@@ -692,6 +899,9 @@ mod tests {
     use crate::testutil::{FakeSys, TempDir};
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
+    /// SSH の中継を使うホスト (1Password の switch も要る)
+    const RELAY_HOST: &str =
+        "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
     const WSL_HOST: &str = "group = \"personal\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const FORCE: Mode = Mode::Apply { force: true };
@@ -797,6 +1007,27 @@ mod tests {
             fake_sys(self.ssh(), mode)
         }
 
+        /// 置き場所 (%LOCALAPPDATA%\Programs\op-reason) の op-reason.exe (中身は使わない。答えは `relay_sys` が返す)
+        fn relay_exe(&self) -> PathBuf {
+            self.home()
+                .join("AppData")
+                .join("Local")
+                .join("Programs")
+                .join("op-reason")
+                .join("op-reason.exe")
+        }
+
+        fn put_relay_exe(&self) {
+            let exe = self.relay_exe();
+            std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+            std::fs::write(exe, "").unwrap();
+        }
+
+        /// 偽の ssh (Ok) と、中継の --status に答えるか (`answers`) を決めた偽の op-reason.exe
+        fn relay_sys(&self, answers: bool) -> FakeSys {
+            relay_fake_sys(self.ssh(), self.relay_exe(), Ssh::Ok, answers)
+        }
+
         fn run(&self, sys: &FakeSys, host: &str, mode: Mode) -> (Outcome, String) {
             let (mut outcomes, out) = self.run_all(sys, host, mode);
             assert_eq!(outcomes.len(), 1, "{outcomes:?}\n{out}");
@@ -827,7 +1058,27 @@ mod tests {
 
     /// 偽の ssh (読んだファイルを stderr に出す ssh -v -G の形) と git (diff の行を返す)。`ssh` は Windows のホームの .ssh
     fn fake_sys(ssh: PathBuf, mode: Ssh) -> FakeSys {
+        relay_fake_sys(ssh, PathBuf::from("/fake/op-reason.exe"), mode, true)
+    }
+
+    /// `fake_sys` に、`relay_exe` の op-reason.exe --ssh-agent --status (答えるなら 0 と pid の文、答えないなら 1。行の終わりは CRLF) を足したもの
+    fn relay_fake_sys(ssh: PathBuf, relay_exe: PathBuf, mode: Ssh, answers: bool) -> FakeSys {
         FakeSys::new(move |c| {
+            if c.program == relay_exe {
+                return if answers {
+                    RunResult {
+                        exit: Exit::Code(0),
+                        output: vec![
+                            "the SSH relay answers on \\\\.\\pipe\\op-reason-ssh-agent (pid 42)\r".into(),
+                        ],
+                    }
+                } else {
+                    RunResult {
+                        exit: Exit::Code(1),
+                        output: vec!["nothing answers on \\\\.\\pipe\\op-reason-ssh-agent\r".into()],
+                    }
+                };
+            }
             if c.program == Path::new("/fake/git") {
                 return RunResult {
                     exit: Exit::Code(1),
@@ -917,6 +1168,274 @@ mod tests {
 
     fn has_note(o: &Outcome, part: &str) -> bool {
         o.notes.iter().any(|n| n.contains(part))
+    }
+
+    /// 中継のファイルの記録の鍵と、その置き先の中身
+    const RELAY: &str = "config.d/00-op-reason-ssh-relay.ssh_config";
+
+    /// op-reason.exe を呼んだ引数 (1 回 1 行)
+    fn relay_calls(sys: &FakeSys, exe: &Path) -> Vec<String> {
+        sys.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.program == exe)
+            .map(|c| c.args_lossy().join(" "))
+            .collect()
+    }
+
+    /// 中継の switch が off (書かない・false・1Password が off) なら、中継のファイルを置かず、op-reason.exe も呼ばない
+    #[test]
+    fn relay_off_places_nothing_and_does_not_call_op_reason() {
+        for host in [
+            RUNNER_HOST,
+            "[tools]\nonePassword = true\nopReasonSshRelay = false\n[runner]\nenable = true\n",
+            "[tools]\nopReasonSshRelay = true\n[runner]\nenable = true\n",
+        ] {
+            let e = Env::new();
+            e.put_relay_exe();
+            let sys = e.relay_sys(true);
+            let (o, out) = e.run(&sys, host, APPLY);
+            assert_eq!(o.kind, Kind::Ok, "{host}: {out}");
+            assert!(!e.at(RELAY).exists(), "{host}");
+            assert!(relay_calls(&sys, &e.relay_exe()).is_empty(), "{host}");
+            assert_eq!(e.read("config"), CONFIG_BODY, "{host}");
+        }
+    }
+
+    /// 中継が答えれば、config.d の最初に読まれる中継のファイルを置いて記録し、config は変えない。2 回目は揃っている
+    #[test]
+    fn relay_on_places_the_relay_file_first_in_config_d() {
+        let e = Env::new();
+        e.put_relay_exe();
+        let sys = e.relay_sys(true);
+        let (o, out) = e.run(&sys, RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Ok, "{out}");
+        assert_eq!(
+            o.text,
+            "コピー 4 / 上書き 0 / 同じ 0 / 削除 0 / 衝突 0 (ssh.exe が読むことも確かめた)"
+        );
+        assert_eq!(e.read(RELAY), RELAY_BODY);
+        assert!(
+            RELAY_BODY.ends_with("\nIdentityAgent \\\\\\\\.\\pipe\\op-reason-ssh-agent\n"),
+            "{RELAY_BODY}"
+        );
+        assert_eq!(e.read("config"), CONFIG_BODY);
+        assert_eq!(
+            e.record_json()["files"][RELAY],
+            serde_json::json!(fsutil::sha256_bytes(RELAY_BODY.as_bytes()))
+        );
+        assert_eq!(
+            relay_calls(&sys, &e.relay_exe()),
+            vec!["--ssh-agent --status"]
+        );
+        assert!(
+            out.contains(&format!("コピー: {}", e.at(RELAY).display())),
+            "{out}"
+        );
+        assert!(
+            out.contains("確かめ: ssh.exe が config と config.d の 3 件を読んだ"),
+            "{out}"
+        );
+        // 2 回目は全部同じ
+        let (o, out) = e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Ok, "{out}");
+        assert!(
+            o.text
+                .starts_with("コピー 0 / 上書き 0 / 同じ 4 / 削除 0 / 衝突 0"),
+            "{}",
+            o.text
+        );
+        assert!(o.notes.is_empty(), "{o:?}");
+    }
+
+    /// 置いた後に中継が答えなくなった: 消さずに残し (1Password に直に戻さない)、鍵が使えないことと起こし直し方を ⚠ で出す。off に戻すと記録どおりに消す
+    #[test]
+    fn relay_down_after_placing_keeps_the_file_until_turned_off() {
+        let e = Env::new();
+        e.put_relay_exe();
+        e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        let (o, out) = e.run(&e.relay_sys(false), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert_eq!(e.read(RELAY), RELAY_BODY);
+        for part in [
+            "鍵を使えません",
+            "中継: nothing answers on",
+            "1 分のうちに",
+            "Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'",
+            "ssh -o 'IdentityAgent=\\\\\\\\.\\pipe\\openssh-ssh-agent' <接続先>",
+        ] {
+            assert!(has_note(&o, part), "{part}: {:?}", o.notes);
+            assert!(out.contains(part), "{part}: {out}");
+        }
+        assert!(!o.notes.iter().any(|n| n.contains('\r')), "{:?}", o.notes);
+        assert!(!out.contains('\r'), "{out}");
+        // check も同じく残して ⚠ (書かない)
+        let (o, _) = e.run(&e.relay_sys(false), RELAY_HOST, Mode::Check);
+        assert_eq!(o.kind, Kind::Manual);
+        assert!(has_note(&o, "鍵を使えません"), "{:?}", o.notes);
+
+        // off に戻すと、記録どおりに消す (check は予告だけ)
+        let (o, out) = e.run(&e.relay_sys(true), RUNNER_HOST, Mode::Check);
+        assert_eq!(o.kind, Kind::Fix, "{out}");
+        assert!(
+            out.contains("SSH の中継を使わない (apply で消す): "),
+            "{out}"
+        );
+        assert!(e.at(RELAY).exists());
+        let sys = e.relay_sys(true);
+        let (o, out) = e.run(&sys, RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Ok, "{out}");
+        assert!(
+            out.contains(&format!(
+                "削除 (SSH の中継を使わない): {}",
+                e.at(RELAY).display()
+            )),
+            "{out}"
+        );
+        assert!(!e.at(RELAY).exists());
+        assert!(e.record_json()["files"].get(RELAY).is_none());
+        assert!(relay_calls(&sys, &e.relay_exe()).is_empty());
+        // Windows で変えた中継のファイルは、off に戻しても消さない (衝突)
+        e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        e.put(RELAY, "IdentityAgent mine\n");
+        let (o, out) = e.run(&e.relay_sys(true), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(
+            out.contains("は消すもの (SSH の中継を使わない) ですが、Windows 側で変わっているので消していません。"),
+            "{out}"
+        );
+        assert_eq!(e.read(RELAY), "IdentityAgent mine\n");
+    }
+
+    /// 初めて on にしたのに中継が答えない (op-reason.exe が無いときも): 置かずに ⚠ (ssh は今までどおり 1Password に直に行く)
+    #[test]
+    fn relay_down_on_first_apply_places_nothing() {
+        let e = Env::new();
+        e.put_relay_exe();
+        let (o, out) = e.run(&e.relay_sys(false), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(!e.at(RELAY).exists());
+        assert_eq!(e.read("config"), CONFIG_BODY);
+        assert!(e.record_json()["files"].get(RELAY).is_none());
+        for part in [
+            "IdentityAgent を書いていません",
+            "1Password に直に行きます",
+            "中継: nothing answers on",
+            "dotfiles apply --steps op-reason",
+        ] {
+            assert!(has_note(&o, part), "{part}: {:?}", o.notes);
+        }
+        // op-reason.exe が無い: 答えないとみなし、呼ばない
+        let e = Env::new();
+        let sys = e.relay_sys(true);
+        let (o, out) = e.run(&sys, RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(!e.at(RELAY).exists());
+        assert!(
+            has_note(&o, "IdentityAgent を書いていません"),
+            "{:?}",
+            o.notes
+        );
+        assert!(has_note(&o, "op-reason.exe が無い"), "{:?}", o.notes);
+        assert!(relay_calls(&sys, &e.relay_exe()).is_empty());
+    }
+
+    /// dotfiles-private の ssh/ に同じ名前のファイルがある: 中継のファイルは置かずに ⚠ (dotfiles-private のファイルはふつうに配る)
+    #[test]
+    fn relay_yields_to_a_private_file_of_the_same_name() {
+        let e = Env::new();
+        e.put_relay_exe();
+        e.t.write(
+            "dotfiles-private/ssh/00-op-reason-ssh-relay.ssh_config",
+            "Host same\n",
+        );
+        let sys = e.relay_sys(true);
+        let (o, out) = e.run(&sys, RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert_eq!(e.read(RELAY), "Host same\n");
+        assert!(has_note(&o, "同じ名前"), "{:?}", o.notes);
+        assert!(relay_calls(&sys, &e.relay_exe()).is_empty());
+    }
+
+    /// 正本 (ssh/) が空・読めないときは何も書かず消さないが、中継のファイルの食い違いは黙らずに ⚠ にする: switch が on なのに置いていない
+    /// (Windows の ssh は 1Password に直に行く)・switch を切ったのに残っている (鍵を使えない)
+    #[test]
+    fn relay_mismatch_is_not_silent_without_sources() {
+        let empty_sources = |e: &Env| {
+            for entry in std::fs::read_dir(e.private_ssh()).unwrap() {
+                let p = entry.unwrap().path();
+                if p.to_string_lossy().ends_with(".ssh_config") && !p.is_dir() {
+                    std::fs::remove_file(p).unwrap();
+                }
+            }
+        };
+        // on で、まだ置いていない
+        let e = Env::new();
+        e.put_relay_exe();
+        empty_sources(&e);
+        let (o, out) = e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(
+            has_note(&o, "中継の IdentityAgent も置いていません"),
+            "{:?}",
+            o.notes
+        );
+        assert!(!e.at(RELAY).exists());
+        // on で、前に置いたものがある (そのまま。黙ってよい)
+        let e = Env::new();
+        e.put_relay_exe();
+        e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        empty_sources(&e);
+        let (o, out) = e.run(&e.relay_sys(true), RELAY_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Info, "{out}");
+        assert_eq!(e.read(RELAY), RELAY_BODY);
+        // switch を切ったのに残っている: 消さずに ⚠ (正本が無いときは何も消さない)
+        let (o, out) = e.run(&e.relay_sys(true), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Manual, "{out}");
+        assert!(
+            has_note(&o, "中継のファイルを消していません"),
+            "{:?}",
+            o.notes
+        );
+        assert!(has_note(&o, "鍵を使えません"), "{:?}", o.notes);
+        assert!(e.at(RELAY).exists());
+        // 中継を使わず、中継のファイルも無いホストは今までどおり Info
+        let e = Env::new();
+        empty_sources(&e);
+        let (o, _) = e.run(&e.relay_sys(true), RUNNER_HOST, APPLY);
+        assert_eq!(o.kind, Kind::Info);
+        assert!(o.notes.iter().all(|n| !n.contains("中継")), "{:?}", o.notes);
+    }
+
+    /// check と dry-run は中継のファイルを書かない。中継が今は答えなくても、前に置いていなければ置くと予告する (apply では op-reason の手順 (90) が
+    /// 先に中継を起こす)
+    #[test]
+    fn relay_check_and_dry_run_write_nothing() {
+        let e = Env::new();
+        e.put_relay_exe();
+        for answers in [true, false] {
+            let (o, out) = e.run(&e.relay_sys(answers), RELAY_HOST, Mode::Check);
+            assert_eq!(o.kind, Kind::Missing, "{answers}: {out}");
+            assert!(
+                out.contains(&format!(
+                    "無い (apply でコピーする): {}",
+                    e.at(RELAY).display()
+                )),
+                "{out}"
+            );
+            assert_eq!(has_note(&o, "今は答えません"), !answers, "{:?}", o.notes);
+            let (_, out) = e.run(
+                &e.relay_sys(answers),
+                RELAY_HOST,
+                Mode::DryRun { force: false },
+            );
+            assert!(
+                out.contains(&format!("[dry-run] コピー: {}", e.at(RELAY).display())),
+                "{out}"
+            );
+            assert!(!e.at(RELAY).exists());
+            assert!(!e.record().exists());
+        }
     }
 
     #[test]
