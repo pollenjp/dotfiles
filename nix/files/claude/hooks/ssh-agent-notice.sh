@@ -54,6 +54,24 @@
 # 言い (WSL の ssh は Windows の ssh.exe へのラッパーで、要求元は「Windows Terminal」としか出ない)、ほかでは分から
 # ないと言う (ssh の設定の IdentityAgent で agent を使うことがある)。
 #
+# ## op-reason の SSH の中継 (dotfiles.opReason.sshRelay)
+#
+# 中継を使うマシン (~/.local/state/dotfiles/claude-op-reason.json の sshRelay.enable が true) の WSL では、WSL の ssh は
+# op-reason-ssh を通って Windows の op-reason の中継に届き、ユーザーが op-reason の窓で呼び出しを許可する (per-call。show-only は
+# 1Password の画面が決め、窓は誰が・何のためにを並べる)。SSH_AUTH_SOCK が空で、PATH の ssh を使う接続 (ssh・git・rsync・
+# ssh-copy-id・sshfs・mosh・nixos-rebuild・nix-copy-closure・nix の ssh://) と設定の一覧の道具は中継を通るものとして:
+#
+#   打つ前      「🔑 op-reason の窓が出るかも」(show-only は「1Password の承認と op-reason の窓が出るかも」) に、理由
+#               (OPREASON_SSH_REASON。コマンドの頭・env・export のどれか、無ければこの会話の環境) を添える。理由が無ければ、
+#               次から付けるよう Claude に 1 文足す (PreToolUse の additionalContext。tool の結果と一緒に届く。止めない)
+#   断られたあと 断り (agent refused operation) は op-reason の窓か 1Password に断られたと言う。鍵の認証の失敗は、
+#               op-reason.exe --ssh-agent --status (Windows のホームは ~/.local/state/dotfiles/windows-files.json。5 秒で切る) が
+#               答えなければ中継に届かないとして、① を中継を起こし直すことにする。答えれば黙る (たいてい相手に鍵が無いだけ)
+#
+# どちらも、中継を通さずに 1Password に直につなぐ書き方 (-o IdentityAgent=…openssh-ssh-agent) を、ユーザーが言わない限り
+# 使わないよう Claude に言う (中継が止まっていると鍵が使えないので、エージェントが自分で回り道をしない)。scp・sftp・autossh は
+# /usr/bin/ssh を起こして中継を通らず、署名 (op-ssh-sign-wsl.exe・ssh-add -T) も 1Password と直に話すので、今の文のまま。
+#
 # ## 断られたあと (PostToolUse・PostToolUseFailure・matcher Bash)
 #
 # 0 以外で終わった Bash には PostToolUse が来ず、PostToolUseFailure が来る (入力の error に出力が入る。Claude Code
@@ -650,6 +668,100 @@ match_simple() {
   hit_kind=${kind}
   hit_head=${w[*]}
   hit_sock=${sock}
+  hit_base=${base}
+  return 0
+}
+
+# load_relay: op-reason の SSH の中継 (dotfiles.opReason.sshRelay。home-manager が claude-op-reason.json の sshRelay に書く) を
+# relay_mode に読む。WSL で on ならモード (per-call・show-only)、ほかは空
+relay_mode=""
+load_relay() {
+  local f="${HOME}/.local/state/dotfiles/claude-op-reason.json" m
+  relay_mode=""
+  [[ -n ${WSL_DISTRO_NAME:-} && -f ${f} ]] || return 0
+  m=$(jq -r 'if (.sshRelay | type) == "object" and .sshRelay.enable == true then (.sshRelay.mode // "per-call") else "" end' "${f}" 2>/dev/null) || m=""
+  case ${m} in
+    per-call | show-only) relay_mode=${m} ;;
+  esac
+  return 0
+}
+
+# via_relay: 当たったコマンドが中継を通るか。中継が on の WSL で SSH_AUTH_SOCK が空 (ssh は op-reason-ssh を通る wrapper) の、
+# PATH の ssh を使う接続と設定の一覧の道具。scp・sftp・autossh は /usr/bin/ssh を起こすので通らない
+via_relay() {
+  [[ -n ${relay_mode} && -z ${hit_sock:-${SSH_AUTH_SOCK:-}} ]] || return 1
+  case ${hit_kind} in
+    "ssh の接続")
+      case ${hit_base:-} in
+        scp | sftp | autossh) return 1 ;;
+      esac
+      return 0
+      ;;
+    "設定の一覧") return 0 ;;
+  esac
+  return 1
+}
+
+# reason_of <コマンド>: 中継の窓に出る理由 (OPREASON_SSH_REASON) を出す。コマンドの文字の VAR=・env・export のどれか (bash -c の
+# 中も) を先に見て、無ければこの会話の環境。空なら 1
+reason_of() {
+  local re="(^|[^A-Za-z0-9_])OPREASON_SSH_REASON=('([^']*)'|\"([^\"]*)\"|([^[:space:];&|)]*))" v=""
+  if [[ $1 =~ ${re} ]]; then
+    v="${BASH_REMATCH[3]}${BASH_REMATCH[4]}${BASH_REMATCH[5]}"
+  elif [[ -n ${OPREASON_SSH_REASON:-} ]]; then
+    v=${OPREASON_SSH_REASON}
+  fi
+  [[ -n ${v} ]] || return 1
+  printf '%s' "${v}"
+}
+
+# relay_down: 中継が答えないか (op-reason.exe --ssh-agent --status。5 秒で切る)。Windows のホームは windows-files.json。
+# op-reason.exe が見つからないのも答えないとみなす
+relay_down() {
+  local wh exe
+  wh=$(jq -r '.windowsHome // empty' "${HOME}/.local/state/dotfiles/windows-files.json" 2>/dev/null) || wh=""
+  exe="${wh}/AppData/Local/Programs/op-reason/op-reason.exe"
+  [[ -n ${wh} && -f ${exe} ]] || return 0
+  if command -v timeout &>/dev/null; then
+    timeout 5 "${exe}" --ssh-agent --status </dev/null &>/dev/null && return 1
+  else
+    "${exe}" --ssh-agent --status </dev/null &>/dev/null && return 1
+  fi
+  return 0
+}
+
+# 中継を通さない回り道を使わせない 1 文 (打つ前と断られたあとの Claude への指示に添える)
+relay_detour='中継を通さずに 1Password に直につなぐ書き方 (-o IdentityAgent=…openssh-ssh-agent) は、ユーザーが言わない限り使わない。'
+
+# relay_before <頭>: 中継を通る接続を打つ前の知らせ (会話の 1 行・理由が無ければ Claude への 1 文・herdr の通知)
+relay_before() {
+  local head=$1 reason reason_text msg note rctx
+  if reason=$(reason_of "${cmd}"); then
+    reason_text="理由: $(clip "${reason}")"
+  else
+    reason=""
+    reason_text="理由なし"
+  fi
+  if [[ ${relay_mode} == show-only ]]; then
+    note="🔑 1Password の承認と op-reason の窓が出るかも"
+    msg="${note} (${hit_kind}): ${head} — 決めるのは 1Password の画面。op-reason の窓は誰が・何のためにを並べる (${reason_text})"
+  else
+    note="🔑 op-reason の窓が出るかも"
+    msg="${note} (${hit_kind}): ${head} — 許可はユーザーが op-reason の窓で押す (${reason_text})"
+  fi
+  if [[ -n ${reason} ]]; then
+    jq -cn --arg m "${msg}" '{systemMessage: $m}' || true
+  else
+    rctx="[ssh-agent] このコマンドの ssh は op-reason の SSH の中継を通り、ユーザーが op-reason の窓で呼び出しを許可する (理由が無いと窓に「理由なし」と出る)。"
+    rctx+="次から ssh を使うコマンド (ssh・git の push / fetch / clone・rsync など) は、頭に OPREASON_SSH_REASON='<何のための ssh か>' を付けて打つ (例: OPREASON_SSH_REASON='lavie の herdr の様子を見る' ssh lavie.local …)。"
+    rctx+=${relay_detour}
+    jq -cn --arg m "${msg}" --arg c "${rctx}" \
+      '{systemMessage: $m, hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $c}}' || true
+  fi
+  if herdr_ready && notify_due; then
+    where_desc
+    herdr_notify "${note}" "${where}"$'\n'"${head}"$'\n'"${reason_text}" && touch_stamp
+  fi
   return 0
 }
 
@@ -1155,9 +1267,15 @@ before() {
   hit_kind=""
   hit_head=""
   hit_sock=""
+  hit_base=""
   match_command "${cwd}" 0 "${cmd}" || return 0
-  conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
   head=$(clip "${hit_head}")
+  load_relay
+  if via_relay; then
+    relay_before "${head}"
+    return 0
+  fi
+  conn=$(conn_desc "${hit_sock:-${SSH_AUTH_SOCK:-}}")
   jq -cn --arg m "🔑 1Password の承認が出るかも (${hit_kind}): ${head} — ${conn}" '{systemMessage: $m}' || true
   if herdr_ready && notify_due; then
     where_desc
@@ -1220,7 +1338,7 @@ refusal_reason() {
 }
 
 after() {
-  local text reason head conn title desc first rule sock
+  local text reason head conn title desc first rule sock relay
   text=$(jq -r '[.error, .tool_response.stdout, .tool_response.stderr] | map(strings) | join("\n")' <<<"${input}" 2>/dev/null) || return 0
   case ${text} in
     *agent* | *publickey* | *git_signing_key*) ;;
@@ -1233,38 +1351,66 @@ after() {
   hit_kind=""
   hit_head=""
   hit_sock=""
+  hit_base=""
   if [[ -n ${cmd} ]] && match_command "${cwd}" 0 "${cmd}"; then
     head=${hit_head}
   else
     head=${cmd%%$'\n'*}
   fi
   sock=${hit_sock:-${SSH_AUTH_SOCK:-}}
+  relay=0
+  load_relay
+  if via_relay; then
+    relay=1
+  fi
   # 鍵の認証の失敗は、agent の口があって、その先が無いときだけ agent に届かないとみなす。口が生きていれば鍵が相手に
-  # 無いだけで、空なら agent を使っていない (WSL の ssh.exe など)
+  # 無いだけで、空なら agent を使っていない (WSL の ssh.exe など)。中継を通る接続は、中継が答えないときだけ中継に届かないとみなす
   if [[ ${reason} == publickey ]]; then
-    [[ -n ${sock} && ! -e ${sock} ]] || return 0
-    reason=unreachable
+    if ((relay)); then
+      relay_down || return 0
+      reason=relay
+    else
+      [[ -n ${sock} && ! -e ${sock} ]] || return 0
+      reason=unreachable
+    fi
   fi
   head=$(clip "${head}")
-  conn=$(conn_desc "${sock}")
+  if ((relay)); then
+    conn='許可の窓は Windows の op-reason の中継が出す'
+  else
+    conn=$(conn_desc "${sock}")
+  fi
 
   case ${reason} in
     refused)
-      title="🔑 1Password に断られた"
-      desc='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
+      if ((relay)); then
+        title="🔑 op-reason の窓か 1Password に断られた"
+        desc='op-reason の窓で拒否されたか、窓が時間切れ (60 秒) になったか、1Password に断られた'
+      else
+        title="🔑 1Password に断られた"
+        desc='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
+      fi
       ;;
     broken)
       title="🔑 SSH agent との通信が切れた"
       desc='agent との通信が切れた (agent への接続が途中で閉じた)'
+      ;;
+    relay)
+      title="🔑 op-reason の SSH の中継に届かない"
+      desc='op-reason の SSH の中継が答えない (Windows の ssh は中継を指しているので、中継が起きるまで鍵を使えない)'
       ;;
     *)
       title="🔑 SSH agent に届かない"
       desc='agent に届かない (SSH_AUTH_SOCK の先に agent がいない)'
       ;;
   esac
-  # 1 つ目の選択肢: 断られたら承認する。通信が切れた・届かないなら、agent の口の種類ごとの直し方
-  if [[ ${reason} == refused ]]; then
+  # 1 つ目の選択肢: 断られたら承認する。通信が切れた・届かないなら、agent の口の種類ごとの直し方 (中継なら中継を起こし直す)
+  if [[ ${reason} == refused ]] && ((relay)); then
+    first='op-reason の窓で許可する (コマンドの頭に OPREASON_SSH_REASON を付けて理由を出す) ので、打ち直す'
+  elif [[ ${reason} == refused ]]; then
     first='1Password を開いて承認するので、打ち直す'
+  elif ((relay)); then
+    first="Windows で中継を起こし直す (PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'。答えるかは op-reason.exe --ssh-agent --status) ので、打ち直す"
   else
     case $(agent_kind "${sock}") in
       forwarded) first='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す' ;;
@@ -1275,8 +1421,15 @@ after() {
   fi
 
   where_desc
-  local ctx="[ssh-agent] 直前の Bash は SSH agent (1Password) を使えずに失敗した: ${desc}。"$'\n'
+  local agent_name='1Password'
+  if ((relay)); then
+    agent_name='op-reason の中継'
+  fi
+  local ctx="[ssh-agent] 直前の Bash は SSH agent (${agent_name}) を使えずに失敗した: ${desc}。"$'\n'
   ctx+="同じコマンドを打ち直さない (承認されないまま同じ失敗を繰り返す)。"$'\n'
+  if ((relay)); then
+    ctx+=${relay_detour}$'\n'
+  fi
   if [[ -n $(field '.agent_id') ]]; then
     ctx+="subagent の中なので、ユーザーには聞かない。ここまでの結果と、失敗したこと (何を: ${head} の接続先や署名する対象。"
     ctx+="どこから: ${where}。${conn}) を報告に書いて作業を終える。問いは呼び出した会話が出す。"
