@@ -40,6 +40,7 @@
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | off | off |  |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | off | off |  |
 | ③ | 1Password | `onePassword.enable` | off | off | off |  |
+| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | off | off | `onePassword.enable` |
 | ③ | ntn (Notion の CLI) | `ntn.enable` | on | off | off |  |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | off | off | `wsl.windowsFiles.enable` |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | off | off | `wsl.windowsFiles.enable` |
@@ -83,6 +84,7 @@ flowchart LR
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
+  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
   ntn["ntn (Notion の CLI)<br/>on"]
   windowsNtn["Windows の ntn<br/>on"]
   windowsTailscale["Windows の Tailscale<br/>off"]
@@ -114,6 +116,7 @@ flowchart LR
   t2 --> devTrackerInbox
   t3 --> devTrackerInbox
   t3 --> onePassword
+  t3 --> opReasonSshRelay
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
@@ -126,7 +129,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,ntn,windowsNtn,gitIdentity on
-  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,windowsTailscale,windowsSshd off
+  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,windowsTailscale,windowsSshd off
   class wsl,windowsFiles onHost
 ```
 
@@ -158,6 +161,7 @@ flowchart LR
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
+| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
 | ③ | ntn (Notion の CLI) | `ntn.enable` | on | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
@@ -197,6 +201,7 @@ flowchart LR
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
+  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
@@ -228,6 +233,7 @@ flowchart LR
   t2 --> devTrackerInbox
   t3 --> devTrackerInbox
   t3 --> onePassword
+  t3 --> opReasonSshRelay
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
@@ -240,7 +246,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr on
-  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -272,6 +278,7 @@ flowchart LR
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
+| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
@@ -311,6 +318,7 @@ flowchart LR
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
+  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
@@ -342,6 +350,7 @@ flowchart LR
   t2 --> devTrackerInbox
   t3 --> devTrackerInbox
   t3 --> onePassword
+  t3 --> opReasonSshRelay
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
@@ -354,7 +363,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -386,6 +395,7 @@ flowchart LR
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
+| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
@@ -425,6 +435,7 @@ flowchart LR
   devTracker["Notion Dev Tracker<br/>off"]
   devTrackerInbox["Dev Tracker の見回り役<br/>off"]
   onePassword["1Password<br/>off"]
+  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
   ntn["ntn (Notion の CLI)<br/>off"]
   windowsNtn["Windows の ntn<br/>off"]
   windowsTailscale["Windows の Tailscale<br/>off"]
@@ -456,6 +467,7 @@ flowchart LR
   t2 --> devTrackerInbox
   t3 --> devTrackerInbox
   t3 --> onePassword
+  t3 --> opReasonSshRelay
   t3 --> ntn
   t3 --> windowsNtn
   t3 --> windowsTailscale
@@ -468,7 +480,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles,claude onHost
 ```
 
@@ -500,6 +512,7 @@ flowchart LR
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
 | ③ | 1Password | `onePassword.enable` | off | 既定 |
+| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
 | ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
