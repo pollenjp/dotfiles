@@ -2728,14 +2728,16 @@ op の stdout（binary も）・stderr・終了コードは変えない。終了
 | もの | 中身 |
 | --- | --- |
 | `op`・`op-reason`・`op-reason-log`・`op-reason-ssh`（PATH） | `nix/pkgs/op-reason/` を `nix/home/modules/op-reason.nix` が包んだもの。1 つの実行ファイルを呼び名で切り替える（`op-reason-log` は記録を見る道具。`op-reason-ssh` は下の行）。包みは `OPREASON_EXE` を既定にする（`--set-default`。環境に値があればそちらが勝つ）: Windows の `op-reason.exe` の WSL のパス。`Install-OpReason.ps1` の既定の置き場所 `%LOCALAPPDATA%\Programs\op-reason` を `wsl.windowsUserName` で組み立てた `/mnt/c/Users/<名前>/AppData/Local/Programs/op-reason/op-reason.exe`。表示の言語は決めない（[後述](#表示の言語)） |
-| Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
+| Windows の `op-reason.exe`・`launcher.ps1`・`powershell-entry\` | `%LOCALAPPDATA%\Programs\op-reason`。`setup --update` の `nix/scripts/bootstrap-windows-op-reason.sh` が `Install-OpReason.ps1` で、WSL と同じ版を Release から落として SHA-256 を確かめて入れ、版がずれていれば入れ替える（win/ を配るマシンだけ。受け持ちを Windows の runner に切り替えたホストでは、Windows の `dotfiles apply` の手順 `op-reason` が同じく揃える。[`win/README.md`「op-reason」](../win/README.md#op-reason)）。Windows の PATH には足さない（WSL は `OPREASON_EXE` で見つけ、`launcher.ps1` はその隣から探す） |
 | `op-reason-ssh`（0.4.0 から） | Windows の `ssh.exe` を、引数と stdin・stdout・stderr をそのままに、呼び出しの事実（Linux の側の根のプロセス・呼び手・herdr・場所・distro・理由。`OPREASON_SSH_CALL` に入れて `WSLENV` で渡す）を付けて起こす。Windows の SSH の中継（`op-reason.exe --ssh-agent`）が、見えない Linux のプロセスを窓に出すためのもの。dotfiles は名前を PATH に置くだけで、`ssh`・`git` をこれに向ける設定と、中継を起こす設定（logon の task・`SSH_AUTH_SOCK`）は入れない。中継が動いていなければ、ふつうの `ssh.exe` と同じに動く。`ssh.exe` は PATH（Windows の PATH を残した WSL の PATH）か `OPREASON_SSH_EXE` で探し、無ければ 127 で断る |
 | fish の補完 | `~/.config/fish/completions/op.fish`・`op-reason.fish`（op-reason が `--completion fish` で出した、op を呼ばない補完）。fish に同梱の op の補完は `op completion fish` を打ち、wrapper が理由なしとして断った文が端末に出るので、それより先に読まれる場所に置く |
 | `~/.local/state/dotfiles/claude-op-reason.json` | この `op` があるマシンか（`{"enable": <bool>}`）。Claude の hook（[後述](#opexe-の直打ちを止め承認の拒否のあとは問いを出させるフック)）・`pjp-op-env`・`pjp-op-ref`・`bootstrap-windows-op-reason.sh` が読む |
 
-win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Windows の側を setup が入れない。そのマシンで `op` を使うなら、
-op-reason の README の「Windows で」の手順で `%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` を
-そこへ向ける）。入っていない間の `op` は 127 で断る（refused の `no-exe`）。
+win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Windows の側を setup が入れない。受け持ちを Windows の runner に切り替えた
+ホストでは、Windows の `dotfiles apply` の手順 `op-reason` が同じ場所に入れて揃える（Windows のホストの値の `[tools]` に `onePassword = true`。
+[`win/README.md`「op-reason」](../win/README.md#op-reason)）。ほかのマシンで `op` を使うなら、op-reason の README の「Windows で」の手順で
+`%LOCALAPPDATA%\Programs\op-reason` に入れる（別の場所に入れたら `OPREASON_EXE` をそこへ向ける）。入っていない間の `op` は 127 で断る
+（refused の `no-exe`）。
 
 ### 窓の読む参照
 
@@ -2857,7 +2859,8 @@ Release なので、依存の公開からの猶予（7 日）は置かず、中�
    1 行目のあと、Windows の PowerShell の `Install-OpReason -Check` で、固定した版の行が「そのまま」（入っている版が固定した版。
    終了コード 0）と出ることを確かめてから 2 行目を打つ。`op-reason.exe` が動いていて入れ替えられなかったら（op の呼び出しの途中）、
    その呼び出しが終わってから 1 行目を打ち直す。win/ を配らないマシン（Windows の runner に受け持ちを切り替えたホストなど）では
-   setup が Windows の側を揃えないので、1 行目の代わりに Windows で `Install-OpReason` を手で流して新しい版にしてから 2 行目を打つ
+   setup が Windows の側を揃えないので、1 行目の代わりに Windows の側を新しい版にしてから 2 行目を打つ（受け持ちを runner に切り替えた
+   ホストは、新しい版を pull した Windows の clone で `dotfiles apply`。ほかは `Install-OpReason` を手で流す）
    （[`win/README.md`「op-reason」](../win/README.md#op-reason)）
 
 ## シークレットを .env の参照から渡す (pjp-op-env)

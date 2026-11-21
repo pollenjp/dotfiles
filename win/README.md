@@ -246,7 +246,7 @@ scanData = "https://app.notion.com/p/…"
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
-  runner にまだ無い `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
+  `op-reason` の on/off の `onePassword`)。知らないキー・名前は runner が止める (終了コード 2)
 - `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
   出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
@@ -254,7 +254,7 @@ scanData = "https://app.notion.com/p/…"
 - `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
   書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
-  (書かなければ `op-reason` の行は off になり、受け持ちを切り替えても ⚠ に出ない)
+  (書かなければ `op-reason` の行は off になり、runner は Windows の op-reason を確かめも入れもしない。[後述](#op-reason))
 - `windowsTailscale` もどのグループでも既定が false。Tailscale を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.tailscale.enable = true`) は、同じ値を
   `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
 - `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
@@ -278,8 +278,9 @@ scanData = "https://app.notion.com/p/…"
 1. そのホストの Nix の値 (`nix/hosts/<user>@<hostname>.nix`) を `wsl.windowsFiles.enable = false` にする (WSL が Windows に触らない)
 2. Windows のホストの値を `[runner] enable = true` にする (runner の apply を許す)
 
-- 切り替える前に `dotfiles check` を流し、runner にまだ無い手順 (下の表の「まだ」) をどうするかを決める。切り替えたホストでは、まだ無い手順は
-  誰も流さないので ⚠ (runner では直らない差) になる。切り替えるのは、そのホストで on の手順を全部移してから (ADR 060)
+- WSL の setup の Windows の手順は、後から足した `op-reason` まで全部 runner に移した (下の表に「まだ」の行は無い)。WSL の側に手順を足して runner に
+  まだ無い間は「まだ」の行になり、切り替えたホストでは誰も流さないので ⚠ (runner では直らない差) になる。切り替えるのは、そのホストで on の手順を
+  全部移してから (ADR 060)。切り替える前に `dotfiles check` を流し、WSL の setup と同じ判定になっていることを確かめる
 - Windows にしか無い手順 (下の表の「有る (Windows だけ)」) は、切り替える前から apply で流れる (ホストの値は要る。`runner.enable = false` のままでよい)
 - 初めて apply するときは記録が無いので、中身が repo と同じファイルは「同じ」(記録だけ作る) になる。WSL と Windows の clone を同じ commit に
   しておく。違う中身は「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら)と同じ解き方。PowerShell では `Copy-Item` か `--force`)
@@ -329,6 +330,10 @@ scanData = "https://app.notion.com/p/…"
   WSL の `setup --update` の警告のまとめの代わりに、`dotfiles check`・`dotfiles apply` の締めの表の `pin-updates` の行 (`·` と ※) に出る。Windows の gh が
   ログインしている要がある (bootstrap がログインする)。依存の更新の skill が読む JSON の口 (`nix/scripts/bootstrap-windows-pin-updates.sh --list --json`・
   `--candidates --json`) と `--candidates` は WSL の script のまま (Linux の repo で打つ。WSL の記録を見ないので、切り替えた後も動く)
+- `op-reason` も記録を持たない (入っている版は、置き場所 `%LOCALAPPDATA%\Programs\op-reason` の中身の値で `Install-OpReason.ps1` が決める) ので、
+  引き継ぐものは無い (切り替える直前に WSL の setup を流す要も無い)。切り替えた後は、WSL の `setup --update` が WSL の op の実行ファイルを上げても
+  Windows の部品は揃わない (WSL の `bootstrap-windows-op-reason.sh` は Windows に配らないマシンとして飛ばす) ので、Windows でも同じ commit の clone で
+  `dotfiles apply` を流す。WSL の側が新しい版の窓に頼る版では、switch の前に流す ([op-reason の新しい版を出したとき](#op-reason-の新しい版を出したとき))
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -360,7 +365,7 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
-| 97 | `op-reason` | WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える ([op-reason](#op-reason)) | `onePassword` | まだ |
+| 97 | `op-reason` | `Install-OpReason.ps1`: WSL の op の Windows の部品 (op-reason の zip) を、入っていなければ入れ、版がずれていれば入れ替える (どちらも引数なし。ps1 は `-IfMissing` を持たない)。`op-reason.exe` が動いていれば ps1 が何も変えずに止まる ([op-reason](#op-reason)) | `onePassword` | 有る |
 | 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone) | 有る |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
@@ -379,8 +384,10 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。9 つとも移した。`op-reason` はその後に足したもので、この順には入っておらず、まだ無い
-- まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
+  fancyzones → international → google-ime → pin-updates)。9 つとも移し、その後に足した `op-reason` も ps1 の手順として移した。WSL の setup の
+  Windows の手順は、全部 runner にある (まだ無い手順は無い)
+- まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)。`# tool:` のある手順は、移した後も同じ道具の
+  switch で on/off する (試験が突き合わせる)
 
 ### runner の手順を足す
 
@@ -448,7 +455,11 @@ gate が違うと、試験が落ちる
   `check-herdr-app-version.sh --json` と `bootstrap-windows-pin-updates.sh` (setup の手順) を runner と同じ偽の `gh`・`curl` と同じ repo のファイルで流し、
   新しい版と見送り・確かめられなかったときの stderr の行・知らせる文・打った gh と curl の引数と順が同じかを突き合わせる (作り物の repo と、本物の
   ps1・見送りの一覧・`releases.json`)。版の並べ方は `sort -V` と比べる。名前ごとの題・ps1・param・変数・版の形・知らせる文は、bash の版が流れない
-  Windows の CI でも WSL の script の字と比べる。bash の版を直したら、Rust の写しも同じに直す
+  Windows の CI でも WSL の script の字と比べる。`op-reason` (ps1 の手順の型の `src/steps/ps1.rs`。突き合わせは `src/steps/op_reason_parity.rs`) は、
+  `bootstrap-windows-op-reason.sh` と runner を同じ偽の `pwsh.exe` (`-Check` と揃える流れに、決めた出力と終了コードを返す) で流し、同じ判定と終了コード・
+  打った pwsh の引数と順・手順の行・見せた pwsh の出力・直し方が同じかを突き合わせる。PATH に `pwsh` があれば、本物の `Install-OpReason.ps1` の
+  `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。bash の版を
+  直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -2959,10 +2970,11 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
-  win/ を配らないマシンでは setup がそう 1 行出すので、op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の
-  既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
-- Windows 側の runner にはまだ無い ([runner の手順](#runner-の手順)の `op-reason`)。受け持ちを runner に切り替えたホストでは setup も
-  runner も揃えないので、`Install-OpReason` を手で流す
+  win/ を配らないマシンでは setup がそう 1 行出す。受け持ちを runner に切り替えたホストでは runner が入れる (次の箇条)。ほかは
+  op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
+- Windows 側の runner の手順 `op-reason` ([runner の手順](#runner-の手順)) も、同じ判断で入れて揃える (同じ `Install-OpReason.ps1` を clone から呼ぶ。
+  on/off はホストの値の `onePassword` で、WSL の記録 `claude-op-reason.json` は読まない)。受け持ちが WSL のホストでは `dotfiles check` で確かめる
+  だけで、受け持ちを runner に切り替えたホストでは `dotfiles apply` が揃える (WSL の setup は Windows に配らないので揃えない)
 - 置き場所は `%LOCALAPPDATA%\Programs\op-reason`。WSL の op は、ここの `op-reason.exe` を `OPREASON_EXE`
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
@@ -2990,6 +3002,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 | `Install-OpReason` (PowerShell) | 揃える (入れる・入れ替える) |
 | `nix/scripts/bootstrap-windows-op-reason.sh` (WSL) | `setup --update` でも毎回走る (order 97)。WSL の op を入れて win/ を配るマシンだけ、入っていなければ入れ、差があれば入れ替える。揃えられなければ ⚠ で囲んで知らせる |
 | `nix/scripts/bootstrap-windows-op-reason.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
+| `dotfiles check --steps op-reason` (PowerShell。runner) | `-Check` だけを流し、締めの表に揃っている・入っていない (apply で入れる)・揃っていない (apply で揃える) を出す (何も変えない) |
+| `dotfiles apply --steps op-reason` (PowerShell。runner) | 受け持ちを runner に切り替えたホストで、WSL の setup と同じ判断で入れる・入れ替える (揃えられなければ締めの表の ⚠ に直し方を出す) |
 
 揃えるときにすること:
 
@@ -3038,7 +3052,7 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
    途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える。WSL の側で入るものが新しい
    版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した。0.5.0 は頼らない) では、Windows の部品を先に揃えてから switch する
    ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)。setup が揃えない
-   ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に `Install-OpReason` を手で流す
+   ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に Windows で揃える (受け持ちを runner に切り替えたホストは `dotfiles apply`、ほかは `Install-OpReason`)
 
 ### Install-OpReason.ps1 を書くときの注意
 
@@ -3060,6 +3074,9 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
   & "$HOME\.config\powershell\Install-OpReason.ps1" -InstallDir "$t\Programs\op-reason"
   Remove-Item -Recurse -Force $t
   ```
+
+- `bootstrap-windows-op-reason.sh` と runner の `runner/src/steps/ps1.rs` は、終了コード (0・1・3) と、状態の表の見出し (`op-reason (GitHub の Release`)
+  で分かれる (締めの行は見ない)。変えるときは向こうも直す (runner の試験が本物の ps1 の `-Check` を流して確かめる)
 
 ## ntn
 

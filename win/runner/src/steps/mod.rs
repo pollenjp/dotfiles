@@ -26,6 +26,8 @@ pub mod herdr_app_mods;
 pub mod herdr_app_pjp_spaces;
 pub mod international;
 pub mod linker;
+#[cfg(test)]
+mod op_reason_parity;
 pub mod pending;
 pub mod pin_updates;
 pub mod pjp;
@@ -249,7 +251,7 @@ mod tests {
     //!
     //! - 一覧の順番が WSL の setup と同じ (order・同じ order は script の名前の辞書順)・id が重ならない
     //! - 移した手順と、まだ無い手順の id が WSL の bootstrap-windows-*.sh の名前と同じ
-    //! - まだ無い手順の on/off が、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
+    //! - WSL の script に `# tool:` があれば、写した手順もまだ無い手順も gate がその道具の switch (まだ無い手順は、行が無ければいつも)
     //! - on/off の決め方 (道具の switch・グループ)
 
     use super::*;
@@ -380,36 +382,49 @@ mod tests {
         }
     }
 
+    /// WSL の script に `# tool:` (setup.sh が読む道具の switch) があれば、写した手順もまだ無い手順も、gate の頭がその道具 (op-reason の
+    /// onePassword・herdr の windowsHerdr など)。行が無いまだ無い手順はいつも on (移した手順は windows-files.json の欄に当たる switch でもよい)
     #[test]
-    fn pending_gates_follow_wsl_tool_lines() {
+    fn gates_follow_wsl_tool_lines() {
         let scripts = Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("..")
             .join("..")
             .join("nix")
             .join("scripts");
-        for p in pending::PENDING {
-            let path = scripts.join(format!("bootstrap-windows-{}.sh", p.id));
+        let mut tooled = Vec::new();
+        for info in all().iter().map(|s| s.info()).filter(|i| !i.windows_only) {
+            let path = scripts.join(format!("bootstrap-windows-{}.sh", info.id));
             let text = std::fs::read_to_string(&path).unwrap();
-            // 「# tool: onePassword (dotfiles.onePassword.enable)」の道具の名前 (setup.sh が読む行)
+            // 「# tool: onePassword (dotfiles.onePassword.enable)」の道具の名前
             let tool = text
                 .lines()
                 .find_map(|l| l.strip_prefix("# tool: "))
                 .and_then(|t| t.split_whitespace().next());
-            match p.gate {
-                Gate::Always => {
-                    assert_eq!(tool, None, "{} の # tool: が gate に無い", path.display())
+            match (tool, info.gate) {
+                (Some(t), Gate::Tool(key)) => {
+                    assert_eq!(key, t, "{} の # tool: と gate が違う", path.display());
+                    tooled.push(info.id);
                 }
-                Gate::Tool(key) => assert_eq!(
-                    tool,
-                    Some(key),
-                    "{} の # tool: と gate が違う",
-                    path.display()
+                (Some(t), Gate::AllTools(keys)) => {
+                    assert_eq!(keys[0], t, "{} の # tool: と gate が違う", path.display());
+                    tooled.push(info.id);
+                }
+                (Some(_), gate) => {
+                    panic!("{}: # tool: があるのに gate が {gate:?}", path.display())
+                }
+                (None, gate) if !info.ported => assert_eq!(
+                    gate,
+                    Gate::Always,
+                    "{}: まだ無い手順は WSL の # tool: で決める",
+                    info.id
                 ),
-                Gate::Groups(_) | Gate::AllTools(_) => {
-                    panic!("{}: まだ無い手順は WSL の # tool: で決める", p.id)
-                }
+                (None, _) => {}
             }
         }
+        assert_eq!(
+            tooled,
+            vec!["sshd", "tailscale", "herdr-app", "herdr", "op-reason"]
+        );
     }
 
     #[test]

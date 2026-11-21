@@ -885,10 +885,26 @@ mod tests {
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("[90] files"));
-            assert!(out.contains(&format!(
-                "runner にまだ無い。WSL の bootstrap-windows-{}.sh",
-                crate::steps::pending::PENDING[0].id
-            )));
+            // まだ無い手順の印は、PENDING にある手順にだけ付く (今は空: WSL の setup の Windows の手順は全部 runner に移した)
+            match crate::steps::pending::PENDING.first() {
+                None => assert!(!out.contains("runner にまだ無い"), "{out}"),
+                Some(p) => assert!(
+                    out.contains(&format!(
+                        "runner にまだ無い。WSL の bootstrap-windows-{}.sh",
+                        p.id
+                    )),
+                    "{out}"
+                ),
+            }
+            // 移した op-reason は onePassword (どのグループも既定は off) で on/off
+            let op_reason = out
+                .lines()
+                .find(|l| l.contains("] op-reason "))
+                .unwrap_or_else(|| panic!("{out}"));
+            assert!(
+                op_reason.contains("  off  WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える (onePassword = false。グループ personal の既定)"),
+                "{op_reason}"
+            );
             assert!(out.contains("[97] type-clipboard"));
             assert!(!out.contains("type-clipboard を固定した版で入れる (ずれていても入れ替えない) (windowsTypeClipboard"));
             // runner に移した powershell-profile は on の手順として出る (まだ無い手順の印は付かない)

@@ -355,6 +355,7 @@ mod tests {
         let steps: Vec<Box<dyn Step>> = vec![
             Box::new(Fixed(windows_only("w"), Kind::Ok)),
             Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
+            Box::new(crate::steps::pending::Pending(always_pending())),
         ];
         let sys = FakeSys::new(|_| unreachable!());
         let mut out = Vec::new();
@@ -378,6 +379,12 @@ mod tests {
         };
         assert!(line("w").ends_with("x (Windows だけ)"), "{out}");
         assert!(line("s").ends_with(" x"), "{out}");
+        // まだ無い手順は on/off の代わりに — と、受け持つ WSL の script を出す (今の PENDING は空なので、作り物で見る)
+        assert!(
+            line("x-pending")
+                .ends_with("  —    x (runner にまだ無い。WSL の bootstrap-windows-x-pending.sh)"),
+            "{out}"
+        );
         assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"));
     }
 

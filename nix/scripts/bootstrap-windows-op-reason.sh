@@ -29,7 +29,8 @@
 # ## 何をするか
 #
 # 1. ~/.local/state/dotfiles/windows-files.json (home-manager が置く) を読み、配らないマシンなら飛ばす (WSL の op を入れる
-#    マシンなら、Windows に手で入れるよう 1 行添える)。~/.local/state/dotfiles/claude-op-reason.json の enable が true でない
+#    マシンなら、Windows の入れ方を 1 行添える。受け持ちを Windows の runner に切り替えたホストは、Windows の dotfiles apply の
+#    手順 op-reason が入れる。ほかは手で)。~/.local/state/dotfiles/claude-op-reason.json の enable が true でない
 #    (WSL の op の wrapper を入れない) マシンも飛ばす。<windowsHome>/.config/powershell/Install-OpReason.ps1 が無いときも飛ばす
 # 2. pwsh.exe で Install-OpReason.ps1 -Check を流す (何も変えない。ネットワークも使わない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
@@ -126,7 +127,7 @@ fi
 if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
   if [[ ${op_reason} == true ]]; then
-    echo "Windows 側へ配らないので op-reason の zip は入れません。WSL の op を使うなら、Windows に手で入れます (nix/README.md の「WSL の op を理由つきで呼ぶ」)。"
+    echo "Windows 側へ配らないので op-reason の zip は入れません。WSL の op を使うなら、受け持ちを Windows の runner に切り替えたホストでは Windows の dotfiles apply が入れ (Windows のホストの値に onePassword = true)、ほかは Windows に手で入れます (nix/README.md の「WSL の op を理由つきで呼ぶ」)。"
   fi
   exit 0
 fi

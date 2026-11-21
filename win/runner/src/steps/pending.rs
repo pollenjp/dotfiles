@@ -19,12 +19,9 @@ pub struct PendingSpec {
     pub gate: Gate,
 }
 
-pub const PENDING: &[PendingSpec] = &[PendingSpec {
-    id: "op-reason",
-    order: 97,
-    title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
-    gate: Gate::Tool("onePassword"),
-}];
+/// 今は空 (WSL の setup の Windows の手順は、後から足した op-reason まで全部 runner に移した)。WSL の側に Windows の手順を足したら、runner に
+/// 移すまでここに足す (win/README.md の「runner の手順を足す」)
+pub const PENDING: &[PendingSpec] = &[];
 
 pub struct Pending(pub &'static PendingSpec);
 
