@@ -10,6 +10,7 @@ pub mod claude_files;
 pub mod claude_footer_links;
 pub mod claude_hook;
 pub mod claude_notion;
+pub mod claude_selector;
 pub mod claude_settings;
 pub mod claude_skill_overrides;
 pub mod claude_skills;
@@ -215,6 +216,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         // Windows の claude-personal・claude-work の ~/.claude-<名前> と launcher (Windows にしか無い手順。dotfiles-private の
         // docs/adr/081_win_claude_accounts_*)
         Box::new(claude_accounts::ClaudeAccounts),
+        // claude-selector (cs) を Linux と同じ crate から作って claude-<名前> と同じ置き場に置く (Windows にしか無い手順。
+        // dotfiles-private の docs/adr/087_claude_selector_*)
+        Box::new(claude_selector::ClaudeSelector),
         Box::new(files::Files),
         // WSL の setup の手順を写したもの (受け持ちを runner に切り替えたホストでだけ apply が書く。移す順と移し方は dotfiles-private の
         // docs/adr/060_win_runner_core_* の §2 A)
@@ -301,6 +305,7 @@ mod tests {
                 (98, "herdr-app-pjp-spaces"),
                 (98, "herdr-app-skill"),
                 (99, "claude-accounts"),
+                (99, "claude-selector"),
                 (99, "herdr-app-keys"),
                 (99, "international"),
                 (99, "port-forward"),
@@ -346,7 +351,7 @@ mod tests {
     }
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキーと
-    /// claude-personal・claude-work だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// claude-personal・claude-work と claude-selector だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -374,6 +379,7 @@ mod tests {
                 "herdr-app-pjp-spaces",
                 "herdr-app-skill",
                 "claude-accounts",
+                "claude-selector",
                 "herdr-app-keys",
             ]
         );

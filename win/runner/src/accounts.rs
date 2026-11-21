@@ -2,7 +2,7 @@
 //!
 //! | | 既定 | 登録 (`claude-account add` で足す) |
 //! | --- | --- | --- |
-//! | 名前 | `personal`・`work` (`steps::claude_accounts::DEFAULT_ACCOUNTS`) | 名前の規則に合い、`account` と既定の名前でないもの |
+//! | 名前 | `personal`・`work` (`steps::claude_accounts::DEFAULT_ACCOUNTS`) | 名前の規則に合い、[`RESERVED`] (`account`・`selector`) と既定の名前でないもの |
 //! | 種類 | subscription | subscription か token |
 //! | 置き場 | runner の手順 `claude-accounts` が作る | `%USERPROFILE%\.config\claude-accounts\accounts.json` (マシンごと) |
 //!
@@ -14,6 +14,13 @@ use std::path::{Path, PathBuf};
 
 /// 管理のコマンドの名前 (`claude-account`)。アカウントの名前には使えない
 pub const MANAGER: &str = "account";
+
+/// claude-selector (cs) の名前 (`claude-selector`。runner の手順 claude-selector が launcher と同じ置き場に置く別の exe)。アカウントの
+/// 名前には使えない (`claude-<名前>.exe` の launcher が claude-selector.exe を上書きする)
+pub const SELECTOR: &str = "selector";
+
+/// アカウントの名前に使えない名前 (claude-selector の crate の `accounts::RESERVED` と同じ。tests/claude_parity.rs が突き合わせる)
+pub const RESERVED: [&str; 2] = [MANAGER, SELECTOR];
 
 /// アカウントの種類。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -152,7 +159,7 @@ fn parse(text: &str) -> Result<Registry, String> {
     };
     let mut out = BTreeMap::new();
     for (name, entry) in accounts {
-        if !name_ok(name) || name == MANAGER {
+        if !name_ok(name) || RESERVED.contains(&name.as_str()) {
             return Err(format!("{name} はアカウントの名前に使えない"));
         }
         let mode = entry
@@ -192,7 +199,7 @@ mod tests {
     //! ## 確かめること
     //!
     //! - 名前の形 (英小文字・数字で始まり、英小文字・数字・- と _ だけ)
-    //! - 登録: 無ければ空・書いて読み直すと同じ・version・accounts・mode が違う形と、使えない名前 (account も) は Err (パスを出す)
+    //! - 登録: 無ければ空・書いて読み直すと同じ・version・accounts・mode が違う形と、使えない名前 (account・selector も) は Err (パスを出す)
     //! - 種類と元: 既定は subscription、登録はその種類、どちらでもなければ None。名前の並び (既定のあとに登録)
 
     use super::*;
@@ -249,6 +256,7 @@ mod tests {
             "{\"version\":1,\"accounts\":{\"t\":\"token\"}}",
             "{\"version\":1,\"accounts\":{\"Bad\":{\"mode\":\"token\"}}}",
             "{\"version\":1,\"accounts\":{\"account\":{\"mode\":\"token\"}}}",
+            "{\"version\":1,\"accounts\":{\"selector\":{\"mode\":\"subscription\"}}}",
         ] {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, bad).unwrap();

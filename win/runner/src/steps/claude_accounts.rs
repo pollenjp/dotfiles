@@ -53,8 +53,8 @@ pub const RECORD_FILE: &str = "claude-accounts.deployed.json";
 /// launcher の置き場 (`%LOCALAPPDATA%` からの相対。`/` 区切り)。`%USERPROFILE%\.local\bin` は native の installer の claude.exe の置き場で、
 /// Install-ClaudeCode が「別の claude」と見る所なので使わない
 pub const BIN_DIR_REL: &str = "dotfiles/bin";
-/// PATH に足したときに添える文
-const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-<名前>・claude-account を打つ";
+/// PATH に足したときに添える文 (claude-selector の手順も使う)
+pub(super) const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で claude-<名前>・claude-account を打つ";
 /// 昇格を断られた・出せなかったときの終了コード (ERROR_CANCELLED)
 pub const ELEVATE_DECLINED: i32 = 1223;
 /// 昇格した cmd で mklink を打つ PowerShell (cmd の引数は env で渡す。cmd は System32 のもの: 同じユーザーが差し替えられる %ComSpec% を、
@@ -577,7 +577,7 @@ fn elevate(ctx: &mut Ctx, jobs: &[&LinkJob]) -> Result<(), String> {
 }
 
 /// ユーザーの PATH の様子。
-enum PathState {
+pub(super) enum PathState {
     Listed,
     /// apply で足す (check・dry-run)
     ToAdd,
@@ -585,8 +585,8 @@ enum PathState {
     Added,
 }
 
-/// launcher の置き場をユーザーの PATH の末尾に足す (入っていれば何もしない)。
-fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, String> {
+/// launcher の置き場をユーザーの PATH の末尾に足す (入っていれば何もしない)。claude-selector の手順も同じ置き場で使う。
+pub(super) fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, String> {
     let Some(shell) = find_powershell(ctx) else {
         return Err(
             "PowerShell が見つからない (pwsh・powershell) ので、ユーザーの PATH を確かめられない"
