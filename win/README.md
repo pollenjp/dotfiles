@@ -203,6 +203,8 @@ dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わ�
 dotfiles import terminal               # Windows Terminal の衝突したキーの値を managed.json へ取り込む (受け持ちが runner のホストだけ)
 dotfiles import fancyzones '4k-43inch' # PC の FancyZones のレイアウトを名前で選び、repo へ写す (同上。名前は繰り返せる)
 dotfiles import international          # 日付と時刻の形式の衝突した値を managed.json へ取り込む (同上)
+dotfiles import google-ime             # Google 日本語入力の設定と辞書をテキストへ取り込む (同上)
+dotfiles check --steps google-ime --show-words  # Google 日本語入力の辞書の衝突で語の diff も出す (自分の端末で打つ)
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
 
@@ -213,10 +215,12 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
-  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones・international の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
-- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal`・`fancyzones`・`international`)。Windows 側の値を repo のファイルへ写し、PC の設定の
-  ファイル (settings.json など) やレジストリには書かない (terminal・international は runner の記録を取り込んだ値にする。WSL の `--import` も記録は書く)。repo のファイルに commit して
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones・international・google-ime の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
+- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal`・`fancyzones`・`international`・`google-ime`)。Windows 側の値を repo のファイルへ写し、PC の設定の
+  ファイル (settings.json など) やレジストリには書かない (terminal・international・google-ime は runner の記録を取り込んだ値にする。WSL の `--import` も記録は書く)。repo のファイルに commit して
   いない変更があると止まる。`-` で始まるレイアウトの名前は `--` の後ろに書く。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
+- `--show-words` (check と apply) は、google-ime の辞書の衝突で語の diff も出す (付けなければ辞書ごとの行の数だけ)。辞書の語が出るので、自分の端末で打つ
+  (Claude などのログに残る場所では流さない)
 
 ### ホストの値
 
@@ -311,6 +315,16 @@ scanData = "https://app.notion.com/p/…"
     値で書き直す
   - `managed.json` の更新が WSL に届く前に切り替えると、更新も「書いた記録が無く」の衝突になる (`dotfiles apply --steps international --force` で書く)
   - WSL が書いた後に設定画面で変えた値は、runner でも衝突になる (WSL の「Windows 側で変わっています」の代わりに「書いた記録が無く」と出る)
+- `google-ime` も、初めての apply は記録が無い (WSL の記録 `~/.local/state/dotfiles/google-japanese-input/deployed.json` と落とし直しの印 `restart-pending` は
+  読まず、同じ名前と形の記録と印を `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` に作る)。WSL の setup が置いた `config1.db`・`user_dictionary.db` は、
+  中身 (時刻などを外した digest) が repo のテキストから組み立てたものと同じなら「同じ」と見て記録だけ作る (置き直さない・変換サーバーも落とさない)。WSL と
+  Windows の dotfiles と dotfiles-private の clone を同じ commit にしておく。WSL の記録だけが知っている「前に置いた」は引き継げないので、切り替える直前に
+  WSL の `~/dotfiles/setup --update` を流し、Google 日本語入力の ⚠ が出ていないことを確かめる (出ていれば、切り替える前に WSL の
+  `bootstrap-windows-google-ime.sh --import` か `--force` で解く)。特に:
+  - テキストの更新が WSL に届く前に切り替えると、更新も「前回置いた記録が無い」の衝突になる (`dotfiles apply --steps google-ime --force` で置く)
+  - WSL が置いた後に設定画面で変えた (単語を登録した) ものは、runner でも衝突になる (`dotfiles import google-ime` で取り込む)
+  - WSL が「変換サーバーを落とせませんでした」と出したまま切り替えると、runner は WSL の印を読まないので落とし直さない。WSL の setup を流し直して落とせた
+    ことを確かめるか、タスクマネージャーで `GoogleIMEJaConverter.exe` を終了してから切り替える
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -345,7 +359,7 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `op-reason` | WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える ([op-reason](#op-reason)) | `onePassword` | まだ |
 | 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
-| 98 | `google-ime` | Google 日本語入力の設定とユーザー辞書を組み立てて置く | | まだ |
+| 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
@@ -361,7 +375,7 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones・international は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
+  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones・international・google-ime は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -421,7 +435,11 @@ gate が違うと、試験が落ちる
   `bootstrap-windows-international.sh` と runner を同じ偽の `pwsh.exe` (WSL の試験の偽物と同じ振る舞い) で同じ状態から流し、pwsh に渡す本文 (バイト単位)・
   書く値とその順・Windows の値・記録・取り込んだ `managed.json` が同じかと、WSL が書いた値を記録の無い runner が書き直さずに引き継ぐかを突き合わせる。
   PowerShell の本文と表 (`table`) は、bash の版が流れない Windows の CI でも WSL の script の字と比べ、Windows の CI では本物の `pwsh` に本文を流して
-  読む (書かない)。bash の版を直したら、Rust の写しも同じに直す
+  読む (書かない)。`google-ime` (`src/steps/google_ime/`) は、組み立てたバイト列・digest・テキストへ戻したもの・取り込みが pjp-google-ime と 1 バイトも
+  違わないかと、`bootstrap-windows-google-ime.sh` と runner を同じ偽の `tasklist.exe`・`taskkill.exe` (WSL の試験から抜き出す) で同じ状態から流し、置いた
+  ファイル・記録・印・退避・打った引数・取り込んだテキストが同じかを突き合わせる。pjp-google-ime は、`PJP_GOOGLE_IME` (exe のパス) が無ければ nix で
+  repo の flake (`nix/`) から作る (`DOTFILES_WIN_NIX_PARITY=1` なら作れないと落ちる)。protobuf の型の表 (`pb.rs`) は `nix/pkgs/pjp-google-ime/proto/` の
+  .proto の写しと突き合わせるので、.proto を写し直したら表も直す。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -2405,8 +2423,9 @@ PowerToys は winget の `Microsoft.PowerToys` を user スコープ (`PowerToys
 ## Google 日本語入力
 
 `google-japanese-input/` は Google 日本語入力の設定とキー設定のテキストで、manifest では配らない。
-Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに時刻が入るので、
-`nix/scripts/bootstrap-windows-google-ime.sh` (order 98) がテキストから組み立てて配る
+Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに時刻が入るので、テキストから組み立てて配る。受け持ちが
+WSL のホストでは `nix/scripts/bootstrap-windows-google-ime.sh` (order 98) が、受け持ちを runner に切り替えたホストでは runner の手順
+`google-ime` (同じ order。[runner の手順](#runner-の手順)) が、同じ判定・同じバイト列・同じ形の記録で配る
 ([ADR 015](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/015_win_google_ime_powertoys_20261011T234247JST/README.md)、
 [TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b))。
 
@@ -2429,6 +2448,14 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
 | `nix/scripts/bootstrap-windows-google-ime.sh --import` | 画面で変えた分を、テキストへ取り込む |
 | `nix/scripts/bootstrap-windows-google-ime.sh --force` | 衝突でも repo の中身で置き直す |
 | `nix/scripts/bootstrap-windows-google-ime.sh --check` | テキストの検証だけ (CI の lint でも走る。`config.txtpb` が無ければ exit 1) |
+| `dotfiles apply --steps google-ime` (runner) | 組み立てて配る (受け持ちを runner に切り替えたホスト) |
+| `dotfiles check --steps google-ime` (runner) | 判定だけ見る (`apply --dry-run` も同じ。テキストの誤りも出す。受け持ちによらず流せる) |
+| `dotfiles check --steps google-ime --show-words` (runner) | 辞書の衝突でも語の diff を出す。自分の端末で打つ (Claude などのログに残る場所では流さない) |
+| `dotfiles import google-ime` (runner) | 画面で変えた分を、テキストへ取り込む (受け持ちが runner のホストだけ) |
+| `dotfiles apply --steps google-ime --force` (runner) | 衝突でも repo の中身で置き直す |
+
+runner に `--check` は無い。runner の check と apply はテキストを組み立ててから判定するので、テキストの誤りはその行に出る。CI では
+`win/runner` の試験が repo のテキストを組み立てる (WSL の `--check` は、WSL の script を残す間は nix の CI の lint で流れ続ける)。
 
 - 比べるのは、時刻・版・OS (`general_config`) と辞書の id・並びを外した中身 (`pjp-google-ime digest`)。
   画面で OK を押しただけなら衝突にならない。空のコメントと空の表も「無い」と同じに扱う (単語登録
@@ -2445,28 +2472,32 @@ Windows 側の `config1.db` は protobuf のバイナリで、保存のたびに
   OK を押すと、置いた設定が古い設定で上書きされるため
 - 落とせなかったら exit 1 にし、落とし直しの印 (`~/.local/state/dotfiles/google-japanese-input/restart-pending`)
   を残す。次の `setup --update` は、置くものが無くても印があれば落とし直し、落とせたら印を消す。
-  印がある回の衝突は、古い設定が書き戻されたものかもしれない (repo 側を残すなら `--force`)
+  印がある回の衝突は、古い設定が書き戻されたものかもしれない (repo 側を残すなら `--force`)。runner は ⚠ の行にし、印は
+  `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\restart-pending` (次の `dotfiles apply` が落とし直す。check と dry-run は落とし直すと出すだけ)
+- runner は SSH の会話 (Windows のセッション 0) からもデスクトップと同じに流す。`tasklist` は全部のセッションのプロセスを数え、`taskkill` は同じ
+  ユーザーの別のセッションの変換サーバーも止められる見込み (実機では確かめていない。止められなければ上の印が残り、次の apply が落とし直す)
 - 直接入力モードのキー (F13 → IMEOn など) を変えたときは、アプリを起動し直すと効く
 - 設定画面か辞書ツール (`GoogleIMEJaTool.exe`) が開いていると、閉じるよう出して止まる (exit 1)。
   interop が落ちていると置かない (exit 0。落とし直しの印は残る)。`--import` と `--dry-run` は一緒に
-  使えない (exit 2)
+  使えない (exit 2)。runner は `tasklist` で見て、開いていれば ⚠ (何も置かない)、`tasklist` が無い・落ちたときも置かずに ⚠ にする
 - Google 日本語入力は入っているが置き先 (`%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input`) がまだ無い
   (入れただけで一度も使っていない) ときは、一度使ってから流し直すよう出して飛ばす (exit 0)。置き先は Google 日本語入力が
   初めて起動したときに作るので、先に作って置くことはしない (作るときの権限と揃わないおそれがある)。新しいマシンの流れは
   [Google 日本語入力を入れる](#google-日本語入力を入れる-winget)
 - 置き換える前のファイルは `~/.local/state/dotfiles/google-japanese-input/backup/<UTC の時刻>-<pid>/` に
-  退避する (新しい方から 10 回分)。退避から戻すときは:
+  退避する (新しい方から 10 回分。runner は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\backup\<UTC の時刻>-<pid>\`)。退避から戻すときは:
   1. 設定画面と辞書ツールを閉じる
   2. 退避したファイルを IME のディレクトリ (`%USERPROFILE%\AppData\LocalLow\Google\Google Japanese Input`。
      WSL からは `/mnt/c/Users/<名前>/AppData/LocalLow/Google/Google Japanese Input`) へ `cp` する
   3. `taskkill.exe /F /IM GoogleIMEJaConverter.exe` で変換サーバーを落とす (次のキー入力で起き直して読む)
 
-  戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`)
+  戻すと repo のテキストと違うので、次の `setup --update` は衝突になる (戻した中身を残すなら `--import`。runner は `dotfiles import google-ime`)
 - 画面で変えたら、次の `setup --update` がこの手順 (order 98) で衝突として止まる。98 より前の bootstrap は
   済んでいるが、後ろの [日付と時刻の形式](#日付と時刻の形式)・[port forwarding の組](#port-forwarding-pf)・[Windows Terminal](#windows-terminal) の手順 (どれも order 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、解いて流し直すまで走らない。衝突で
   出すのは、設定は diff、辞書は辞書ごとの行の数 (「Windows 側にだけある行 N・repo 側にだけある行 M」
-  など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`
-- `--import` で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
+  など) だけで、辞書の語は setup の出力に出さない。語の diff は、自分の端末で `--dry-run --show-words`。runner は ⚠ の行を出して
+  ほかの手順を流し続け、語の diff は自分の端末で `dotfiles check --steps google-ime --show-words`
+- `--import` (runner は `dotfiles import google-ime`) で取り込み、最後の行に出た repo (テキストが変わった側。dotfiles・dotfiles-private・両方) で `git diff` を見て commit する (dotfiles-private の diff には辞書の語が出るので、自分の端末で見る)。どちらも変わらなければ「取り込みの分で commit するものはありません」と出る
   - `--import` は repo のテキストを Windows 側の中身で置き換える (diff の + の行は消える)。両方を
     残すなら、テキストを手で直してから `--force`
   - repo 側 (`win/google-japanese-input/` の `config.txtpb`・`keymap.tsv`・`romaji.tsv` と dotfiles-private の辞書) に
@@ -2507,7 +2538,7 @@ UAC の確認が出る) で入れ、版を `google-japanese-input/Install-Google
 - setup が待つ上限は、`-Check` が 120 秒、入れる `-IfMissing` が 600 秒。時間切れになったらそう出して先へ進む (setup は止めない)。
   入れるときに UAC の確認を押さないまま 600 秒たった場合は、⚠ で囲んで、手で打つコマンドも出す
 
-新しいマシンでは、98 の置き先がまだ無ければ setup を 2 回流す (置き先は、Google 日本語入力が初めて起動したときにできる。
+新しいマシンでは、98 の置き先がまだ無ければ setup を 2 回流す (受け持ちが runner のホストでは `dotfiles apply` を 2 回。置き先は、Google 日本語入力が初めて起動したときにできる。
 固定した版の MSI は入れる途中で作る見込みで、そのときは 1 回で済む。ADR 017 §1 の 8):
 
 1. `~/dotfiles/setup --update` を流す。UAC の確認が出たら「はい」を押す
