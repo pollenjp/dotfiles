@@ -577,7 +577,7 @@ fn elevate(ctx: &mut Ctx, jobs: &[&LinkJob]) -> Result<(), String> {
 }
 
 /// ユーザーの PATH の様子。
-enum PathState {
+pub(super) enum PathState {
     Listed,
     /// apply で足す (check・dry-run)
     ToAdd,
@@ -585,8 +585,8 @@ enum PathState {
     Added,
 }
 
-/// launcher の置き場をユーザーの PATH の末尾に足す (入っていれば何もしない)。
-fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, String> {
+/// launcher の置き場をユーザーの PATH の末尾に足す (入っていれば何もしない)。claude-selector の手順も同じ置き場で使う。
+pub(super) fn sync_user_path(ctx: &mut Ctx, mode: Mode, bin: &Path) -> Result<PathState, String> {
     let Some(shell) = find_powershell(ctx) else {
         return Err(
             "PowerShell が見つからない (pwsh・powershell) ので、ユーザーの PATH を確かめられない"

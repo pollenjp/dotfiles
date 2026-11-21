@@ -45,8 +45,8 @@ pub fn shim_path(ctx: &Ctx) -> PathBuf {
         .join(format!("pjp{}", std::env::consts::EXE_SUFFIX))
 }
 
-/// 使う cargo (`CARGO_HOME\bin` → `%USERPROFILE%\.cargo\bin` → PATH。shim の locate_cargo と同じ順)。
-fn locate_cargo(ctx: &Ctx) -> Option<PathBuf> {
+/// 使う cargo (`CARGO_HOME\bin` → `%USERPROFILE%\.cargo\bin` → PATH。shim の locate_cargo と同じ順)。claude-selector の手順も使う。
+pub(super) fn locate_cargo(ctx: &Ctx) -> Option<PathBuf> {
     let exe = format!("cargo{}", std::env::consts::EXE_SUFFIX);
     let homes = [
         ctx.sys
@@ -83,8 +83,8 @@ fn installed_version(ctx: &Ctx, shim: &Path) -> Option<String> {
         .find_map(|l| l.trim().strip_prefix("pjp ").map(|v| v.trim().to_string()))
 }
 
-/// `^[A-Za-z0-9][A-Za-z0-9._-]*$` (rust-toolchain.toml の channel。Linux の bootstrap-pjp.sh と同じ確かめ)
-fn channel_ok(s: &str) -> bool {
+/// `^[A-Za-z0-9][A-Za-z0-9._-]*$` (rust-toolchain.toml の channel。Linux の bootstrap-pjp.sh と同じ確かめ。claude-selector の手順も使う)
+pub(super) fn channel_ok(s: &str) -> bool {
     let mut c = s.chars();
     c.next().is_some_and(|x| x.is_ascii_alphanumeric())
         && c.all(|x| x.is_ascii_alphanumeric() || matches!(x, '.' | '_' | '-'))

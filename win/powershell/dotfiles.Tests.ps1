@@ -17,7 +17,7 @@
 #     リダイレクトの先・カーソルが語の後ろの空白の後や後ろの語の上・カーソルが行の外・空の行では広げない
 #   - 中身の頭がキーワードの略語 (e の exit) は、広げた後もキーワードとして読まれる所 (文の頭) でだけ広げ、| && || の後と ( の中
 #     (exit がコマンドの名前として読まれる) では広げない
-#   - 略語の表は大文字小文字を区別し、中身は e・h・hss … c の function・alias と同じ (function は「表の中身 @args」、h は alias の先、
+#   - 略語の表は大文字小文字を区別し、中身は e・h・hss … c・cs の function・alias と同じ (function は「表の中身 @args」、h は alias の先、
 #     e は exit)。1 つのコマンドに @args を渡すだけの function はどれも表にある
 #   - PSReadLine を読み込んでいない PowerShell (script・CI) で読んでも PSReadLine を読み込まない。読み込んだ PowerShell では、
 #     Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar・Ctrl+@・Shift+Spacebar を「広げずに空白を
@@ -208,7 +208,7 @@ if ($PSVersionTable.PSVersion.Major -ge 7) {
 # hr があると HR もあることになり、H と h を両方は足せない)
 Test-Case '略語: 本物の表は大文字小文字を区別する (HR は hr と別の名前)' $false { $DotfilesAbbr.ContainsKey('HR') }
 
-# 本物の表と、e・h・hss … c の function・alias が食い違わない (広げてから打っても、略語のまま打っても、同じ中身が動く)。
+# 本物の表と、e・h・hss … c・cs の function・alias が食い違わない (広げてから打っても、略語のまま打っても、同じ中身が動く)。
 # ループの変数を $name にしない (Test-Case の中で Actual を流すと、$name は Test-Case の引数 $Name を指す)
 foreach ($abbrName in @($DotfilesAbbr.Keys)) {
     $text = $DotfilesAbbr[$abbrName]

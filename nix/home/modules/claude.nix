@@ -93,7 +93,7 @@
 # settings.json へ書けなくなるため (readlink を 1 回しか辿らない)。経緯は
 # dotfiles-private の docs/adr/009_claude_account_config_dirs_* を参照。
 #
-# 既定のアカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap が読む
+# 既定のアカウントの一覧は下の accounts にだけ書く。コマンドと、bootstrap と claude-selector が読む
 # ~/.local/state/dotfiles/claude-accounts.json の両方がここから作られる。
 #
 # コマンドは pkgs/claude-account の 1 本の script で、呼ばれた名前で振り分ける: claude-account はアカウントを足す・消す・確かめる
@@ -167,11 +167,17 @@ let
         "personal"
         "work"
       ];
-      # account は管理のコマンド (claude-account) の名前なので使わない
-      valid = n: builtins.match "[a-z0-9][a-z0-9_-]*" n != null && n != "account";
+      # account・selector は管理のコマンド (claude-account) と claude-selector の名前なので使わない
+      valid =
+        n:
+        builtins.match "[a-z0-9][a-z0-9_-]*" n != null
+        && !(builtins.elem n [
+          "account"
+          "selector"
+        ]);
     in
     assert lib.assertMsg (builtins.all valid names)
-      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにし、account は使わない (${builtins.toJSON names})";
+      "claude.nix: accounts の名前は英小文字・数字・- と _ だけにし、account・selector は使わない (${builtins.toJSON names})";
     names;
 
   # claude-account と既定の claude-<名前> (pkgs/claude-account)。シェル関数ではなく PATH に置くので、bash と fish の両方から、
@@ -181,6 +187,10 @@ let
     defaults = accounts;
     profileBin = "${config.home.profileDirectory}/bin";
   };
+
+  # claude のアカウント (素の claude と上の claude-<名前>) と option を矢印キーで選んで起こす claude-selector (pkgs/claude-selector。
+  # 略語 cs は modules/fish.nix の abbr・modules/bash.nix の alias)。既定のアカウントは下の claude-accounts.json から読む
+  claudeSelector = pkgs.callPackage ../../pkgs/claude-selector { };
 
   # <kind> 直下のエントリを 1 つずつ ~/.claude/<kind>/ へ配置する。
   #
@@ -243,7 +253,10 @@ lib.mkMerge [
       (nix/README.md「Notion の宛先を host ごとに選ぶ」)。
     '';
 
-    home.packages = [ claudeAccount ];
+    home.packages = [
+      claudeAccount
+      claudeSelector
+    ];
 
     home.file = lib.mkMerge [
       # 全セッションで読まれるユーザーレベルの指示。
@@ -284,7 +297,8 @@ lib.mkMerge [
       }
 
       # claude-<名前> のアカウント一覧。bootstrap-claude-accounts.sh がこれを読んで
-      # ~/.claude-<名前>/ を用意する。置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
+      # ~/.claude-<名前>/ を用意する。claude-selector も既定のアカウントの並びとして読む。
+      # 置き場は skill-overrides と同じ ~/.local/state/dotfiles/。
       {
         ".local/state/dotfiles/claude-accounts.json".text = builtins.toJSON accounts + "\n";
       }

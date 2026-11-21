@@ -10,6 +10,10 @@
 //!
 //! - 既定のアカウントの名前 (steps::claude_accounts::DEFAULT_ACCOUNTS) が、Linux の claude.nix が sandbox のホストに書く claude-accounts.json と
 //!   同じ並び (claude-account の既定の personal・work)
+//! - claude-selector (nix/pkgs/claude-selector) が Windows で並べる既定のアカウント (WINDOWS_DEFAULT_ACCOUNTS) とアカウントに使えない名前
+//!   (RESERVED) が、runner の DEFAULT_ACCOUNTS・accounts::RESERVED と同じ並び (selector は別の crate なので、源の const の行を読む。nix は要らない)
+//! - 略語 cs の中身が、fish の abbr (nix/home/modules/fish.nix)・bash の alias (bash.nix)・PowerShell の function (win/powershell/dotfiles.ps1)
+//!   で同じ (claude-selector)。PowerShell の略語の表と function は win/powershell/dotfiles.Tests.ps1 が突き合わせる
 //!
 //! nix-instantiate か nix が PATH に無ければ飛ばす (Windows の CI など)。`DOTFILES_WIN_NIX_PARITY=1` なら飛ばさずに落ちる (CI の Linux の job)。
 
@@ -107,6 +111,65 @@ fn default_accounts_match_claude_nix() {
         linux,
         dotfiles_win::steps::claude_accounts::DEFAULT_ACCOUNTS.to_vec()
     );
+}
+
+/// claude-selector が Windows で並べる既定のアカウントと、アカウントに使えない名前が、runner のものと同じ並び
+#[test]
+fn claude_selector_accounts_match_runner() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("nix")
+        .join("pkgs")
+        .join("claude-selector")
+        .join("src")
+        .join("accounts.rs");
+    let src = std::fs::read_to_string(&path).unwrap();
+    // `pub const <name>: [&str; N] = ["…", "…"];` の "…" を並びのまま拾う (Windows の checkout の CRLF は lines が外す)
+    let names = |name: &str| -> Vec<String> {
+        let head = format!("pub const {name}: ");
+        let line = src
+            .lines()
+            .find(|l| l.starts_with(&head))
+            .unwrap_or_else(|| panic!("{} に {name} が無い", path.display()));
+        let (_, value) = line.split_once('=').unwrap();
+        value
+            .split('"')
+            .skip(1)
+            .step_by(2)
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(
+        names("WINDOWS_DEFAULT_ACCOUNTS"),
+        dotfiles_win::steps::claude_accounts::DEFAULT_ACCOUNTS.to_vec()
+    );
+    assert_eq!(names("RESERVED"), dotfiles_win::accounts::RESERVED.to_vec());
+}
+
+/// 略語 cs の中身が fish・bash・PowerShell で同じ (claude-selector)
+#[test]
+fn cs_is_the_same_everywhere() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+    let read = |rel: &[&str]| {
+        let path = rel.iter().fold(repo.clone(), |p, s| p.join(s));
+        std::fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("{} が読めない ({e})", path.display()))
+    };
+    for file in ["fish.nix", "bash.nix"] {
+        let text = read(&["nix", "home", "modules", file]);
+        let cs: Vec<&str> = text
+            .lines()
+            .filter_map(|l| l.trim().strip_prefix("cs = \"")?.strip_suffix("\";"))
+            .collect();
+        assert_eq!(cs, ["claude-selector"], "{file} の cs");
+    }
+    let ps = read(&["win", "powershell", "dotfiles.ps1"]);
+    let cs: Vec<&str> = ps
+        .lines()
+        .filter_map(|l| l.strip_prefix("function cs { ")?.strip_suffix(" @args }"))
+        .collect();
+    assert_eq!(cs, ["claude-selector"], "dotfiles.ps1 の function cs");
 }
 
 fn nix_available() -> bool {

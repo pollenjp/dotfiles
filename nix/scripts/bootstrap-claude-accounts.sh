@@ -210,7 +210,8 @@ else
   while IFS= read -r a; do
     accounts+=("${a}")
   done < <(jq -r '.[]' "${generated}")
-  # 既定に加えて、claude-account で足したアカウントも保つ (既定と同じ名前・管理のコマンドの名前 account は足さない)
+  # 既定に加えて、claude-account で足したアカウントも保つ (既定と同じ名前・管理のコマンドの名前 account と claude-selector の
+  # 名前 selector は足さない)
   for a in ${reg_names[@]+"${reg_names[@]}"}; do
     dup=0
     for b in ${accounts[@]+"${accounts[@]}"}; do
@@ -218,7 +219,7 @@ else
         dup=1
       fi
     done
-    if [[ ${dup} -eq 0 && ${a} != account ]]; then
+    if [[ ${dup} -eq 0 && ${a} != account && ${a} != selector ]]; then
       accounts+=("${a}")
     fi
   done

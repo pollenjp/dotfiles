@@ -221,6 +221,9 @@ in
       # 直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function と略語の表と
       # win/herdr-app/mods/pjp-prefix/main.js の CLAUDE (herdr-app で Claude Code を起こす argv) の 4 つをそろえる。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
+      # claude のアカウントと option を矢印キーで選んで起こす claude-selector の略語。何をするかは fish.nix の同じ節に
+      # 書いてある。直すときは fish.nix の abbr と win/powershell/dotfiles.ps1 の function と略語の表の 3 つをそろえる。
+      cs = "claude-selector";
     };
 
     initExtra = ''

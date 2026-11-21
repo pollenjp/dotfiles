@@ -19,7 +19,9 @@ name: win-runner
 # prefix の mod が Claude Code を起こす argv と突き合わせる)・Google 日本語入力の pjp-google-ime (nix/pkgs/pjp-google-ime/ の .proto の写しと
 # Python の版。Linux の CI で repo の flake から nix で作って突き合わせる。nixpkgs の protobuf の版で振る舞いが変わりうるので nix/flake.lock も) と
 # WSL の試験 (nix/tests/bootstrap-windows-google-ime.test.sh。偽の tasklist.exe・taskkill.exe を抜き出す)・固定した版より新しい版の知らせの口
-# (nix/scripts/check-winget-version.sh・check-herdr-app-version.sh。pin-updates を Linux の CI で突き合わせ、本物の releases.json・見送りの一覧でも流す) を
+# (nix/scripts/check-winget-version.sh・check-herdr-app-version.sh。pin-updates を Linux の CI で突き合わせ、本物の releases.json・見送りの一覧でも流す)・
+# claude-selector の crate (nix/pkgs/claude-selector。runner の手順 claude-selector が Windows で作る。Windows の既定のアカウントと使えない名前を
+# 突き合わせる。crate 自身の clippy と test も Windows でここが流す。Linux は nix の checks の claude-selector-test・claude-selector-lint) を
 # 読むので、それらを変えた PR でも流す。
 on:
   push:
@@ -46,6 +48,7 @@ on:
       - "nix/scripts/check-herdr-app-version.sh"
       - "nix/pkgs/herdr-core/releases.json"
       - "nix/pkgs/herdr-core/skipped-versions.txt"
+      - "nix/pkgs/claude-selector/**"
       - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   pull_request:
@@ -71,6 +74,7 @@ on:
       - "nix/scripts/check-herdr-app-version.sh"
       - "nix/pkgs/herdr-core/releases.json"
       - "nix/pkgs/herdr-core/skipped-versions.txt"
+      - "nix/pkgs/claude-selector/**"
       - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   workflow_dispatch:
@@ -128,3 +132,14 @@ jobs:
           DOTFILES_WIN_NIX_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
           DOTFILES_WIN_BASH_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: cargo test --locked --no-fail-fast
+
+      # claude-selector (nix/pkgs/claude-selector) を、runner の手順 claude-selector が作るのと同じ toolchain (この dir の rust-toolchain.toml)
+      # で Windows でも確かめる (cfg(windows) の起こし方と Ctrl+C の handler・PowerShell の引用・.exe の探し方)。Linux は nix の checks
+      - name: claude-selector (clippy)
+        # runner の段が落ちても流す (1 回の run で selector の落ち方も見る)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo clippy --locked --all-targets --manifest-path ../../nix/pkgs/claude-selector/Cargo.toml -- -D warnings
+
+      - name: claude-selector (test)
+        if: ${{ !cancelled() && runner.os == 'Windows' }}
+        run: cargo test --locked --no-fail-fast --manifest-path ../../nix/pkgs/claude-selector/Cargo.toml

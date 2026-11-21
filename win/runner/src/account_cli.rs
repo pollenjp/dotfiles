@@ -12,7 +12,7 @@
 //!
 //! 終了コード: 0 = 済んだ・使える / 1 = できなかった・用意が無い / 2 = 使い方の誤り・知らない名前 (set-token は PowerShell が無ければ 127)。
 
-use crate::accounts::{self, MANAGER, Mode, Origin, Registry};
+use crate::accounts::{self, MANAGER, Mode, Origin, Registry, SELECTOR};
 use crate::context::Ctx;
 use crate::host::{Groups, HostValues};
 use crate::link::{is_link, link_target, remove_link, same_path};
@@ -36,7 +36,7 @@ pub fn usage() -> String {
         "  remove <名前> [--purge]                登録のアカウントを消す (--purge なら ~/.claude-<名前> と token のファイルも消す)",
         "  help token [<名前>]                    token をこの PC とほかのマシンに置く手順",
         "",
-        "既定のアカウント: personal work (dotfiles apply が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account は使えない)。",
+        "既定のアカウント: personal work (dotfiles apply が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account・selector は使えない)。",
         "使い方の詳細は dotfiles の win/README.md「claude-personal・claude-work」。",
     ]
     .join("\n")
@@ -346,6 +346,11 @@ fn new_name_ok(name: &str) -> Result<(), String> {
             "claude-account: account は管理のコマンド (claude-account) の名前なので、アカウントには使えません。".to_string(),
         );
     }
+    if name == SELECTOR {
+        return Err(
+            "claude-account: selector は claude-selector (cs) の名前なので、アカウントには使えません。".to_string(),
+        );
+    }
     if claude_accounts::DEFAULT_ACCOUNTS.contains(&name) {
         return Err(format!(
             "claude-account: {name} は既定のアカウントです (dotfiles apply が作るので、足さなくてよい)。"
@@ -614,10 +619,12 @@ fn remove(args: &[String], io: &mut Io) -> i32 {
     if !accounts::name_ok(name) {
         return bad_name(io);
     }
-    if name == MANAGER {
+    if accounts::RESERVED.contains(&name) {
         say_err(
             io,
-            "claude-account: account は管理のコマンドの名前で、アカウントではありません。",
+            &format!(
+                "claude-account: {name} は管理のコマンド・claude-selector の名前で、アカウントではありません。"
+            ),
         );
         return 2;
     }
@@ -867,6 +874,7 @@ mod tests {
         for args in [
             ["add", "Bad", "--mode", "token"],
             ["add", "account", "--mode", "token"],
+            ["add", "selector", "--mode", "subscription"],
             ["add", "personal", "--mode", "subscription"],
             ["add", "x", "--mode", "foo"],
         ] {
@@ -1008,6 +1016,7 @@ mod tests {
         assert!(err.contains("dotfiles apply"), "{err}");
         assert_eq!(w.run(&["remove", "work"]).0, 2);
         assert_eq!(w.run(&["remove", "nosuch"]).0, 2);
+        assert_eq!(w.run(&["remove", "selector"]).0, 2);
         assert_eq!(w.run(&["set-token", "work"]).0, 2);
         assert_eq!(w.run(&["set-token", "nosuch"]).0, 2);
         assert_eq!(w.run(&["set-token", "a", "b"]).0, 2);
