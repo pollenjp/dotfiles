@@ -2,9 +2,9 @@
 // 次の 1 キーで命令を流して閉じる (herdr-app の keys.json には、2 回に分けて打つキーの仕組みが無いので、mod の小窓で次のキーを待つ)。
 //
 // prefix の後のキー (旧 herdr の win/herdr/config.toml の [keys] と同じ):
-//   Shift+C      worktree を作る。名前は worktree/<形容詞>-<名詞>-<16 進 4 桁> (旧 herdr と同じ形) を自動で付け、同じ名前の branch が
-//                あれば作り直す。herdr-app の worktree の小窓に branch を渡すと、Enter を待たずに今の space の checkout の HEAD から切り、
-//                新しい space を開く
+//   Shift+C      worktree を作る。名前は hc/<形容詞>-<名詞>-<16 進 4 桁> (頭は旧 herdr の worktree/ とずらす。下の worktreeName) を自動で
+//                付け、同じ名前の branch があれば作り直す。herdr-app の worktree の小窓に branch を渡すと、Enter を待たずに今の space の checkout の
+//                HEAD から切り、新しい space を開く
 //   Shift+G      同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する (下の CLAUDE)
 //   v |          右に分割 (pane.split right)          - Shift+S   下に分割 (pane.split down)
 //   n p          次・前のタブ                          Shift+T ,   タブの名前を変える (名前を訊く)
@@ -23,7 +23,7 @@ import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, notify, theme, spaces, panes, focused, exec, hc, keys, nextCommand } from "herdr";
 
-// worktree の名前に使う語 (worktree/brave-cloud-7d08 の形)
+// worktree の名前に使う語 (hc/brave-cloud-7d08 の形)
 const ADJECTIVES = [
   "amber", "bold", "brave", "bright", "brisk", "calm", "clear", "cool", "crisp", "deep", "eager", "fair",
   "fresh", "gentle", "glad", "golden", "grand", "green", "happy", "keen", "kind", "light", "lively", "lucky",
@@ -66,7 +66,10 @@ const BINDINGS = [
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
 const hex4 = () => Math.floor(Math.random() * 0x10000).toString(16).padStart(4, "0");
-const worktreeName = () => `worktree/${pick(ADJECTIVES)}-${pick(NOUNS)}-${hex4()}`;
+// worktree の名前。頭の hc/ (herdr-app と hc の世代の印) は、旧 herdr が付ける worktree/<形容詞>-<名詞>-<16 進 4 桁> とずらすため。同じ形だと、
+// Windows のハブの worktree の branch が WSL の旧 herdr のハブのものと丸ごと重なりうる。重なると、両方のマシンの見回り役が同じハブのチケットを読む
+// (win/README.md の「herdr-app のキー」)
+const worktreeName = () => `hc/${pick(ADJECTIVES)}-${pick(NOUNS)}-${hex4()}`;
 
 // 一覧に出すキーの名前 ("C" → "Shift+C"、"tab" → "Tab")
 const keyLabel = (k) => (k === "tab" ? "Tab" : /^[A-Z]$/.test(k) ? `Shift+${k}` : k);
