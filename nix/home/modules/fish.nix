@@ -70,7 +70,7 @@ in
       fff = "cd ../../..";
       ffff = "cd ../../../..";
       # e は bash (bash.nix の shellAliases) と Windows の PowerShell
-      # (win/powershell/dotfiles.ps1) にも置いている。直すときは 3 つをそろえる。
+      # (win/powershell/dotfiles.ps1 の function と略語の表) にも置いている。直すときは 3 つをそろえる。
       e = "exit";
       H = "head";
       show_ports_netstat = "netstat -tulpn";
@@ -229,7 +229,7 @@ in
       #                         session 系だけを入れている
       #
       # 同じ名前を bash (bash.nix の shellAliases) と Windows の PowerShell
-      # (win/powershell/dotfiles.ps1) にも置いている。足す・直すときは 3 つをそろえる。
+      # (win/powershell/dotfiles.ps1 の function・alias と略語の表) にも置いている。足す・直すときは 3 つをそろえる。
       h = "herdr";
       # 無ければ作る / 在れば繋ぐ (`--session` の "Use or create")。zss にあった
       # EXITED 判定と作り直しは herdr 側が面倒を見るので要らない。
@@ -271,10 +271,11 @@ in
       # ログインしていない・組織のポリシーで無効など) では警告を出して無視し、そのまま起動する。
       # c は以前 c-func (git commit -m "$*") を呼んでいた。git commit -m は gcm で打てる。
       # 同じ名前・同じ中身を bash (bash.nix の shellAliases) と Windows の PowerShell
-      # (win/powershell/dotfiles.ps1) にも置き、herdr-app の prefix の mod
+      # (win/powershell/dotfiles.ps1 の function と略語の表) にも置き、herdr-app の prefix の mod
       # (win/herdr-app/mods/pjp-prefix/main.js の CLAUDE。worktree を作って Claude Code を起こす argv。
       # argv では abbr が広がらないので中身を並べる) にも同じ引数を並べている。直すときは 4 つをそろえる
-      # (Windows の runner の試験 claude_argv_matches_c が 4 つを突き合わせる)。
+      # (Windows の runner の試験 claude_argv_matches_c が 4 つを突き合わせる。dotfiles.ps1 の略語の表は
+      # win/powershell/dotfiles.Tests.ps1 が function と突き合わせる)。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
     };
 

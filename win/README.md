@@ -17,7 +17,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -1253,8 +1253,9 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
   ```
 
 alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) と bash の alias
-(`nix/home/modules/bash.nix`) とそろえてある。
-足す・直すときは 3 つを変える。
+(`nix/home/modules/bash.nix`) とそろえてある。`dotfiles.ps1` は、同じ名前と中身を略語の表 (`$DotfilesAbbr`。
+[略語を広げる](#略語を広げる-fish-の-abbr-に似せる)) にも持つ。
+足す・直すときは 3 つを変える (`dotfiles.ps1` では function・alias と略語の表の両方。食い違いは `dotfiles.Tests.ps1` が見つける)。
 
 | 名前 | 中身 |
 | --- | --- |
@@ -1275,6 +1276,56 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (WinGet の `Anthropic.ClaudeCode`。
 dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WSL の claude とは別のもの。
 
+### 略語を広げる (fish の abbr に似せる)
+
+上の表の略語は、打った所 (入力行の中) で中身に広げてから実行する (WSL の fish の abbr と同じ)。`hr` と打って Space を押すと、
+入力行が `herdr --remote ` になる。何が動くかを打つ前に見られ、履歴にも広げた行が残る。`dotfiles.ps1` の略語の表 (`$DotfilesAbbr`)・
+広げる所を決める関数 (`Get-DotfilesAbbrExpansion`)・PSReadLine のキーの割り当てでしていて、`$PROFILE` で読んだ対話の PowerShell で効く。
+
+| キー | すること |
+| --- | --- |
+| Space・`;`・`\|`・`&`・`)` | 略語を広げてから、打った字を入れる |
+| Enter | 略語を広げてから実行する (行が閉じていなければ、いつもどおり次の行へ進む) |
+| Ctrl+Space | 広げずに空白を入れる (fish の Ctrl+Space と同じ。略語の名前のまま打ちたいときに使う) |
+
+- 広げるのは、カーソルの直前で終わる語がコマンドの名前の位置にあり、表にあるときだけ。コマンドの位置かは PowerShell の構文で見る
+  (入力行を Parser で読む)
+  - 広げる: 行頭 (先頭の空白の後も)、`|`・`;`・`&&`・`||` の後、閉じていない `(`・`{`・`$(`・`@(` の中、`$x = hr` の右、2 行目、
+    文字列の中の `$(` の中 (`"$(hr`。構文ではコマンドの位置)
+  - 広げない: 引数 (`git hr`)・`-hr`、引用符の中、`& hr`・`. hr`、長い語 (`hrx`)、大文字小文字が違う語 (`HR`。表は区別する)、
+    `$hr`、コメント、`--%` の後、function の名前・ハッシュテーブルのキー・リダイレクトの先、カーソルが語の後ろの空白の後や
+    後ろの語の上にあるとき
+  - `e` (中身の `exit` はキーワード) は、文の頭 (行頭・`;` の後・`$(`・`@(`・`{` の中・`$x = e` の右) でだけ広げる。`|`・`&&`・`||` の
+    後と閉じていない `(` の中では、`exit` がコマンドの名前として読まれ、`exit` というコマンドは無いので落ちる (function の `e` なら
+    シェルを抜ける)。そこでは広げずに function に任せる
+- 広げた後に Ctrl+Z を 2 回押すと略語に戻る (1 回目で打った字を、2 回目で広げたのを戻す)。字を選んでいる間は広げない
+- 略語の function・alias は残してある。script や PSReadLine の無い所 (`pwsh -File`・`-NonInteractive`・ISE) では今までどおり
+  function・alias が動く (割り当ては PSReadLine を読み込んだ PowerShell でだけする)
+- 広げた行は、function・alias を呼んだときと同じに動く。違うのはパイプの後に置いたときで、function (`hst` など) は前のコマンドの
+  出力を中のコマンドへ渡さないが、広げた行 (`… | herdr status`) は渡す (fish の abbr と同じ)
+- 今の割り当ては `Get-PSReadLineKeyHandler | Where-Object Function -like 'DotfilesAbbr*'` で見られる
+- Windows PowerShell 5.1 (PSReadLine 2.0.0) でも同じに動く (`&&`・`||` は 5.1 に無い)
+
+fish の abbr との違い:
+
+- 端末から貼り付けた文字でも広がる。端末の貼り付け (Windows Terminal の Ctrl+V・右クリックなど) は文字を 1 字ずつキーとして
+  PSReadLine に送るので、貼り付けた行の中の略語も広がる (fish は bracketed paste の間は広げない)。PSReadLine の `Paste` (端末が
+  Ctrl+V・Shift+Insert をそのまま PSReadLine に渡したとき) は、まとめて入れるので広がらない
+- `>` と `<` では広げない。PowerShell では `>` が前の語にくっつき (`Write-Output x> $null` は `x>` を出す)、広げると最後の語が
+  変わる。`<` は PowerShell では使えない
+- Ctrl+Space は `Ctrl+Spacebar` と `Ctrl+@` の両方に割り当てている。herdr・hc の端末や WSL から開いた PowerShell のように、
+  端末が Ctrl+Space を NUL の字で送ると PSReadLine には `Ctrl+@` として届く (Windows Terminal のように Windows のキーの形で送る
+  端末では `Ctrl+Spacebar`)。Shift+Space は herdr の端末ではただの Space として届くので、広げずに空白を入れるのには使えない
+
+気をつけること:
+
+- PSReadLine の Ctrl+Space の補完メニュー (`MenuComplete`。Windows Terminal などで効いていた) は使えなくなる (Tab の補完はそのまま)
+- 割り当てが消える場合がある
+  - `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、割り当てが既定に戻る。EditMode を
+    変えるなら、`dotfiles.ps1` を読む行より前に置く
+  - starship の `Enable-TransientPrompt` は Enter の割り当てを上書きする (Enter では広がらなくなる。Space などでは広がる)。
+    今の `$PROFILE` では使っていない
+
 ### dotfiles.ps1 を書くときの注意
 
 - **BOM 付きの UTF-8 で保存する** (`.editorconfig` も `*.ps1` を `utf-8-bom` にしている)。
@@ -1291,6 +1342,8 @@ dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WS
 - 既定の alias と同じ名前は `Set-Alias -Option AllScope -Force` で上書きする。alias は function
   より先に引かれるので、function を書いても既定の alias が当たる。5.1 の既定の alias には
   AllScope が付いていて、`-Option AllScope` が無いと上書きできない
+- PSReadLine の命令 (`Set-PSReadLineKeyHandler` など) は `if (Get-Module -Name PSReadLine)` の中に書く。`dotfiles.ps1` は
+  PSReadLine を読み込まない PowerShell (script・`dotfiles.Tests.ps1`・CI) でも読まれ、そこで打つと PSReadLine を読み込んでしまう
 
 ### Windows PowerShell 5.1 でも使うなら
 
