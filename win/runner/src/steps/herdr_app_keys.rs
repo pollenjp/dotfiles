@@ -660,7 +660,8 @@ mod tests {
     //! - keys.error (herdr-app が keys.json を読めなかった) があれば ※ で知らせる。その apply で書いたときは、前の中身のものなので知らせず、
     //!   後で check で見るよう出す
     //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。space は Ctrl+PageUp/Down
-    //!   (herdr-app の既定のタブの移動を keys.defaults.json で上書きする) と Ctrl+Shift+↑↓・タブは Ctrl+↑↓ で、Ctrl+Alt+↑↓ は割り当てない。
+    //!   (herdr-app の既定のタブの移動を keys.defaults.json で上書きする) と Ctrl+Alt+↑↓ (旧 herdr と同じ)・タブは Ctrl+↑↓ で、Ctrl+Shift+↑↓ は
+    //!   割り当てない。
     //!   prefix の mod が worktree と一緒に Claude Code を起こす argv (main.js の CLAUDE) が c の 3 か所 (fish・bash・PowerShell) と同じ引数
 
     use super::*;
@@ -1522,7 +1523,7 @@ mod tests {
                 "main.js が {command} を受けない"
             );
         }
-        // ほかに要る形: global に space (Ctrl+PageUp/Down と Ctrl+Shift+↑↓) と tab (Ctrl+↑↓) の移動
+        // ほかに要る形: global に space (Ctrl+PageUp/Down と、旧 herdr と同じ Ctrl+Alt+↑↓) と tab (Ctrl+↑↓) の移動
         let has = |keys: &[(String, OValue)], key: &str, action: &str| {
             keys.iter()
                 .any(|(k, v)| k == key && *v == OValue::String(action.to_string()))
@@ -1530,8 +1531,8 @@ mod tests {
         for (key, action) in [
             ("ctrl-pageup", "space.prev"),
             ("ctrl-pagedown", "space.next"),
-            ("ctrl-shift-up", "space.prev"),
-            ("ctrl-shift-down", "space.next"),
+            ("ctrl-alt-up", "space.prev"),
+            ("ctrl-alt-down", "space.next"),
             ("ctrl-up", "tab.prev"),
             ("ctrl-down", "tab.next"),
         ] {
@@ -1540,8 +1541,8 @@ mod tests {
                 "global の {key} が {action} でない"
             );
         }
-        // Ctrl+Alt+↑↓ は割り当てない (端末のプログラムに返す)
-        for key in ["ctrl-alt-up", "ctrl-alt-down"] {
+        // 前に space の移動に使った Ctrl+Shift+↑↓ は割り当てず、端末のプログラムに返す (dotfiles-private の ADR 085)
+        for key in ["ctrl-shift-up", "ctrl-shift-down"] {
             assert!(
                 global.iter().all(|(k, _)| k != key),
                 "global に {key} がある"
