@@ -8,6 +8,7 @@
 //   Shift+G      同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する (下の CLAUDE)
 //   v |          右に分割 (pane.split right)          - Shift+S   下に分割 (pane.split down)
 //   n p          次・前のタブ                          Shift+T ,   タブの名前を変える (名前を訊く)
+//   c            新しいタブ (tab.new。Ctrl+Shift+T と同じく、開く前の space の focus のペインのフォルダで開く)
 //   Tab o        今のタブの次のペイン                  g "         端末の picker (mod.open:picker)
 //   Shift+O      次のエージェント (agent.next。旧 herdr の open_notification_target の代わり)
 //   Esc          取り消す。割り当てに無いキーは、何もせずに閉じる
@@ -56,6 +57,7 @@ const BINDINGS = [
   { keys: ["-", "S"], label: "下に分割", act: (p) => p.runClosed("pane.split", { direction: "down", ...p.paneArg() }) },
   { keys: ["n"], label: "次のタブ", act: (p) => p.runClosed("tab.next") },
   { keys: ["p"], label: "前のタブ", act: (p) => p.runClosed("tab.prev") },
+  { keys: ["c"], label: "新しいタブ", act: (p) => p.runClosed("tab.new", p.spaceArg()) },
   { keys: ["T", ","], label: "タブの名前を変える", act: (p) => p.runClosed("tab.rename", p.origin.tab ? { id: p.origin.tab } : {}) },
   { keys: ["tab", "o"], label: "次のペイン", act: (p) => p.nextPane() },
   { keys: ["g", "\""], label: "端末を選ぶ (picker)", act: (p) => p.runClosed("mod.open", { name: "picker" }) },
@@ -137,6 +139,12 @@ export default class Prefix extends View {
 
   paneArg() {
     return this.origin.pane ? { pane: this.origin.pane } : {};
+  }
+
+  // 新しいタブを開く space。フォルダは渡さない: herdr-app は space の focus のペインの今のフォルダで新しいタブを開き (Ctrl+Shift+T と同じ)、
+  // そこで開けなければ machine の home で開き直す (フォルダを渡すと、開けないときに失敗する)
+  spaceArg() {
+    return this.origin.space ? { space: this.origin.space } : {};
   }
 
   // 今のタブの端末のペインを順に回す (最後の次は最初)
