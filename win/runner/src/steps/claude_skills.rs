@@ -7,7 +7,8 @@
 //! で判定する: 置き先が無い → コピー・同じ中身 → 何もしない・記録と同じ中身 → 上書き・ほか → 衝突 (`--force` で上書き)。clone を pull したら
 //! `dotfiles apply` で写し直す (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)。つなぎ方は claude-files と共有 (`linker`)。
 //!
-//! clone は runner の clone の隣、無ければ bootstrap の置き場 (`ctx.sibling`)。取得はしない (bootstrap が clone し、更新は人か self-update)。
+//! clone は runner の clone の隣、無ければ bootstrap の置き場 (`ctx.sibling`)。取得はしない (bootstrap が clone し、更新は人の
+//! `git pull`。runner の `self-update` はまだ無い (続きの PR に回した))。
 
 use super::linker::{Linker, Source};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
