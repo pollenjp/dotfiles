@@ -379,7 +379,7 @@ pub fn plan(
             None => Err((
                 127,
                 format!(
-                    "{cmd}: token のファイルは 1Password の参照ですが、{OP_REASON_EXE} が見つかりません (PATH と %LOCALAPPDATA%\\Programs\\op-reason)。\n  1Password の承認に理由の窓を出すために要ります (op.exe には落としません)。WSL の setup (bootstrap-windows-op-reason。\n  受け持ちを runner に切り替えたホストは dotfiles apply) か Install-OpReason で入れるか、claude-account set-token {name} でこの PC に token を置いてください。"
+                    "{cmd}: token のファイルは 1Password の参照ですが、{OP_REASON_EXE} が見つかりません (PATH と %LOCALAPPDATA%\\Programs\\op-reason)。\n  1Password の承認に理由の窓を出すために要ります (op.exe には落としません)。WSL の setup (bootstrap-windows-op-reason。\n  受け持ちを runner に切り替えたホストは、ホストの値の [tools] に onePassword = true を書いて dotfiles apply) か Install-OpReason で入れるか、claude-account set-token {name} でこの PC に token を置いてください。"
                 ),
             )),
         },

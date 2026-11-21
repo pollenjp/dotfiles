@@ -2970,8 +2970,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
-  win/ を配らないマシンでは setup がそう 1 行出すので、op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の
-  既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
+  win/ を配らないマシンでは setup がそう 1 行出す。受け持ちを runner に切り替えたホストでは runner が入れる (次の箇条)。ほかは
+  op-reason の README の「Windows で」の手順で手で入れる (置き場所を下の既定にすれば、WSL の op の既定の `OPREASON_EXE` のまま使える)
 - Windows 側の runner の手順 `op-reason` ([runner の手順](#runner-の手順)) も、同じ判断で入れて揃える (同じ `Install-OpReason.ps1` を clone から呼ぶ。
   on/off はホストの値の `onePassword` で、WSL の記録 `claude-op-reason.json` は読まない)。受け持ちが WSL のホストでは `dotfiles check` で確かめる
   だけで、受け持ちを runner に切り替えたホストでは `dotfiles apply` が揃える (WSL の setup は Windows に配らないので揃えない)

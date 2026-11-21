@@ -13,7 +13,8 @@
 #
 #   - 配らないマシン (windows-files.json が無い・enable が false)・WSL の op の wrapper を入れないマシン
 #     (claude-op-reason.json の enable が false か、そのファイルが無い)・Install-OpReason.ps1 が無いときは pwsh.exe を呼ばずに
-#     飛ばす。配らないのに WSL の op を入れるマシンでだけ、Windows に手で入れるよう 1 行添える (まとめ用には残さない)
+#     飛ばす。配らないのに WSL の op を入れるマシンでだけ、Windows の入れ方 (受け持ちを Windows の runner に切り替えたホストは
+#     Windows の dotfiles apply、ほかは手で) を 1 行添える (まとめ用には残さない)
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ。1 (差がある) でも 3 (入っていない) でも、引数なしで流して揃え、揃えば ⚠ は出さない
 #   - 揃える流れが失敗したら、⚠ で囲んだ注意・pwsh.exe の出力・揃えるコマンド (op の呼び出しが終わってから) を出す
@@ -219,11 +220,13 @@ else
   ng "windows-files.json が無い" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
 
-# 2. enable = false で WSL の op を入れるマシン: 飛ばし、Windows に手で入れるよう 1 行添える
+# 2. enable = false で WSL の op を入れるマシン: 飛ばし、Windows の入れ方 (受け持ちを runner に切り替えたホストは Windows の
+#    dotfiles apply、ほかは手で) を 1 行添える
 h=$(new_home t2 "${state_off}" "${op_on}" 1)
 run "${h}" 0
-if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '配りません' && seen "${h}" -F '手で入れます'; then
-  ok "enable = false でも WSL の op を入れるマシンなら、飛ばして Windows に手で入れるよう添える"
+if [[ $(rc "${h}") == 0 ]] && ! pwsh_called "${h}" && seen "${h}" '配りません' && seen "${h}" -F '手で入れます' \
+  && seen "${h}" -F 'Windows の dotfiles apply' && seen "${h}" -F 'onePassword = true'; then
+  ok "enable = false でも WSL の op を入れるマシンなら、飛ばして Windows の入れ方 (runner の dotfiles apply か手で) を添える"
 else
   ng "enable = false (op あり)" "rc=$(rc "${h}") $(outerr "${h}")"
 fi
