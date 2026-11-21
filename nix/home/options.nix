@@ -6,6 +6,8 @@
 #   dotfiles.aiTools.enable                      ② AI の道具の段を入れるか (既定はグループから。personal・company は true)
 #   dotfiles.personalAccounts.enable             ③ 個人のアカウントにつながるものの段を入れるか (既定はグループから。personal だけ true)
 #   dotfiles.onePassword.enable                  1Password を使うか (WSL ならホスト側 Windows の、それ以外はこのマシンの)
+#   dotfiles.opReason.sshRelay.enable            op-reason の SSH の中継を使うか (logon の task で起こし、WSL と Windows の ssh を向ける。既定 false)
+#   dotfiles.opReason.sshRelay.mode              その中継のモード (per-call・show-only。既定 per-call)
 #   dotfiles.git.identity.enable                 git の名前とメールを個人のアカウント (pollenjp・pollenjp-sub) にするか (既定は ③)
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
@@ -173,6 +175,52 @@ in
       `commit.gpgSign = true` だけが残ると、署名鍵が見つからず `git commit`
       そのものが失敗するため。
     '';
+  };
+
+  options.dotfiles.opReason.sshRelay = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        op-reason (自作の OSS。WSL の op の wrapper) の SSH の中継 (`op-reason.exe --ssh-agent`。1Password の SSH agent の前に
+        立ち、鍵を使う呼び出しごとに「誰が・何のために」を窓に出して許可させる) を使うマシンか。既定は false (今までどおり、
+        ssh は 1Password の agent に直に行く)。使えるのは、WSL が Windows へ win/ を配る 1Password のマシン (`wsl.enable`・
+        `onePassword.enable`・`wsl.windowsFiles.enable` がどれも true) だけ (ほかで true にすると評価で止まる)。
+
+        true のマシンでは:
+
+        - `~/dotfiles/setup --update` の nix/scripts/bootstrap-windows-op-reason.sh が、`Install-OpReason.ps1 -SshRelay <mode>`
+          で Windows に logon の task (`\pjp\op-reason-ssh-relay`) を置いて中継を起こす。版を上げるときは中継を止めて入れ替え、
+          起こし直す (中継が窓を開いている間は止めない)
+        - nix/scripts/bootstrap-windows-ssh-config.sh が、中継が答えるのを見てから、Windows の `%USERPROFILE%\.ssh\config.d\`
+          の最初に読まれるファイル (`00-op-reason-ssh-relay.ssh_config`) に、どの接続先にも効く `IdentityAgent` (中継の pipe)
+          を書く。Windows の ssh.exe (herdr-app の lavie へのつなぎ・pf も) は中継を通る
+        - WSL の `ssh` の wrapper (`~/.local/bin/ssh`) は `ssh.exe` でなく `op-reason-ssh` を起こす (呼び出しの事実を中継へ渡す。
+          git・rsync も PATH の ssh なので通る)。`ssh-add` は今のまま
+        - Claude の hook (ssh-agent-notice) は、ssh の前に「op-reason の窓が出る」と知らせ、理由 (`OPREASON_SSH_REASON`) を
+          付けるよう Claude に言う
+
+        中継が動いていなければ、ssh は鍵を使えない (黙って 1Password に直に回らない)。1 回だけ 1Password に直につなぐ書き方と、
+        中継の起こし直し方は win/README.md の「SSH の中継」。false に戻すと、次の setup が task と `IdentityAgent` のファイルを
+        消し、wrapper を `ssh.exe` に戻す。
+      '';
+    };
+
+    mode = lib.mkOption {
+      type = lib.types.enum [
+        "per-call"
+        "show-only"
+      ];
+      default = "per-call";
+      example = "show-only";
+      description = ''
+        中継のモード (`op-reason.exe --ssh-agent --mode <mode>`)。`per-call` は op-reason の窓で呼び出しごとに許可する
+        (1Password はロックを解いた後に中継を 1 回承認するだけ。1Password の設定は「アプリケーションおよびターミナルセッション」
+        のまま)。`show-only` は決めるのが 1Password の画面のままで、op-reason の窓は誰が・何のためにを並べて見せるだけ
+        (1Password を「リクエストごと」にする人向け)。替えると、次の setup が task を置き直して中継を起こし直す。
+      '';
+    };
   };
 
   options.dotfiles.claude = {
