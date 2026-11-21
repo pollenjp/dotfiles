@@ -8,7 +8,17 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 type Responder = Box<dyn Fn(&CommandSpec) -> RunResult>;
 
-/// 外のコマンドの偽の口。打たれたコマンドを控え、`responder` が返す結果を返す (出力の行は `on_line` にも流す)。
+/// 偽の口の答えの行を stderr の行にする印 (`stderr_line` が付ける)。
+const STDERR_MARK: &str = "\u{0}stderr\u{0}";
+
+/// 偽の口の答えの、stderr に出す行。`FakeSys` は印を外して流す口へ渡し、`stdout_only` のコマンドなら写しに入れない (本物の口と同じ)。
+/// 印の無い行は今までどおり (stdout の行として写しに入れる)。
+pub fn stderr_line(line: &str) -> String {
+    format!("{STDERR_MARK}{line}")
+}
+
+/// 外のコマンドの偽の口。打たれたコマンドを控え、`responder` が返す結果を返す (出力の行は `on_line` にも流す。`stderr_line` で印を付けた行は
+/// stderr の行として扱う)。
 pub struct FakeSys {
     responder: Responder,
     programs: BTreeMap<String, PathBuf>,
@@ -71,10 +81,25 @@ impl Sys for FakeSys {
     fn run(&self, spec: &CommandSpec, on_line: &mut dyn FnMut(&str)) -> RunResult {
         self.calls.borrow_mut().push(spec.clone());
         let r = (self.responder)(spec);
+        let mut output = Vec::with_capacity(r.output.len());
         for l in &r.output {
-            on_line(l);
+            match l.strip_prefix(STDERR_MARK) {
+                Some(err) => {
+                    on_line(err);
+                    if !spec.stdout_only {
+                        output.push(err.to_string());
+                    }
+                }
+                None => {
+                    on_line(l);
+                    output.push(l.clone());
+                }
+            }
         }
-        r
+        RunResult {
+            exit: r.exit,
+            output,
+        }
     }
 
     fn which(&self, name: &str) -> Option<PathBuf> {

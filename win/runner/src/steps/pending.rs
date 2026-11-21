@@ -19,20 +19,12 @@ pub struct PendingSpec {
     pub gate: Gate,
 }
 
-pub const PENDING: &[PendingSpec] = &[
-    PendingSpec {
-        id: "op-reason",
-        order: 97,
-        title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
-        gate: Gate::Tool("onePassword"),
-    },
-    PendingSpec {
-        id: "pin-updates",
-        order: 97,
-        title: "固定した版より新しい版が出ていないかを知らせる",
-        gate: Gate::Always,
-    },
-];
+pub const PENDING: &[PendingSpec] = &[PendingSpec {
+    id: "op-reason",
+    order: 97,
+    title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
+    gate: Gate::Tool("onePassword"),
+}];
 
 pub struct Pending(pub &'static PendingSpec);
 
