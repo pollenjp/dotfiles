@@ -106,7 +106,8 @@ merge の後に、ユーザーが各マシンで打つ。Claude は打たない 
 
 - flake.lock・`nix/pkgs/ntn`・Linux の herdr-core は switch で入る (`--self-update` が本体を pull し、switch が `~/dotfiles` の
   lock も張り直す)
-- Windows に固定した版は、名前ごとに揃い方が違う (`references/windows-pins.md` の「merge の後」)
+- Windows に固定した版は、名前ごとに揃い方が違う (`references/windows-pins.md` の「merge の後」)。受け持ちを Windows の runner に切り替えた
+  ホストでは setup は Windows に触らないので、Windows で clone を pull して `dotfiles apply` を流す (同じ節)
 - mise のグローバルの go・node は setup が上げない (`bootstrap-mise.sh` は claude だけを猶予 1 日で上げ、go・node・usage は入っている
   版のまま)。依存の更新の skill の PC の範囲の案 (上げ先と打つコマンド) を見せ、ユーザーの了承を得てから `mise up go node` を
   打つ (mise の猶予 `dotfiles.mise.minimumReleaseAge` が効く)。了承が無ければ打たない

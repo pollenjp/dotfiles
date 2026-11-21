@@ -1824,7 +1824,9 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 
 - 配るのは `dotfiles.wsl.windowsFiles.enable = true` のマシンだけ（dotfiles-private に登録したファイルか、
   `~/dotfiles/flake.nix` に足したホストで書く）。
-  それ以外は「このマシンは Windows 側へ配りません」と言って exit 0
+  それ以外は「このマシンは Windows 側へ配りません」と言って exit 0。受け持ちを Windows の runner に切り替えたホストも false で、
+  Windows の手順はどれもそう言って飛ばす (道具の switch が off の手順は、setup が ↷ で飛ばす)。Windows の側は Windows の `dotfiles apply` が
+  揃える ([`win/README.md`「受け持ちを runner に切り替える」](../win/README.md#受け持ちを-runner-に切り替える))
 - 配るのは setup を走らせた checkout の `win/` の作業ツリー。commit していない変更も配られる
 - 置き先の中身が「前回置いた中身」（`~/.local/state/dotfiles/windows-files.deployed.json` の
   sha256）と違えば **衝突**。上書きせずに diff を出して exit 1（setup はこの手順で止まり、後ろの

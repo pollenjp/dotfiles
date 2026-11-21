@@ -150,7 +150,7 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 | --- | --- |
 | `group = "company";` (か `"client"`) | 個人の PC なら書かない (既定の `personal`。① ② ③ の段を全部入れる)。自社の PC は `"company"` (① ②) にし、要る ③ の道具 (`onePassword.enable`・`claude.privateSkills.enable`・`modules` の `dotfiles.ntn.enable`・`dotfiles.git.identity.enable`・`dotfiles.ccPages.enable`・`dotfiles.herdr.hub.enable`・`wsl.windowsFiles.ntn.enable`) を 1 つずつ聞いて足す。客先の PC は dotfiles-private を読めないので登録しない (`~/dotfiles/flake.nix` の `tmp` に `group = "client";`)。本体の `nix/README.md`「設定グループ」・`nix/groups.md` |
 | `wsl = { enable = true; windowsUserName = "<inspect の値>"; };` | WSL の PC (inspect の「WSL: はい」)。Windows のユーザー名は inspect が出す |
-| `wsl.windowsFiles.enable = true;`・`wsl.exeExecTrace.enable = true;` | WSL の PC で、win/ を Windows へ配る・.exe の起動を記録する (ADR 010・012。exeExecTrace は setup が sudo を呼ぶ) か聞く |
+| `wsl.windowsFiles.enable = true;`・`wsl.exeExecTrace.enable = true;` | WSL の PC で、win/ を Windows へ配る・.exe の起動を記録する (ADR 010・012。exeExecTrace は setup が sudo を呼ぶ) か聞く。Windows の受け持ちを runner に切り替えた PC (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) は `wsl.windowsFiles.enable = false` のままにし、Windows の道具の switch (`wsl.windowsFiles.*`) は書かない (本体の `win/README.md`「受け持ちを runner に切り替える」) |
 | `wsl.mtuGuard.enable = true;` | WSL の PC で、VPN をつないでいる間に小さい通信は通るのに大きな送信 (Claude Code の API など) だけが止まる (PMTU ブラックホール) か聞く。eth0 の MTU を上限 (`wsl.mtuGuard.maxMtu`。既定 1350) まで下げ続ける。setup が sudo を呼ぶ |
 | `onePassword.enable = true;` | 1Password で git の署名をする PC か聞く (WSL なら Windows 側の 1Password。`windowsUserName` が要る) |
 | `claude.devTracker.enable = true;` | Notion Dev Tracker を使う PC (本体の既定は使わない)。使うなら `claude.notion.profile` も |
