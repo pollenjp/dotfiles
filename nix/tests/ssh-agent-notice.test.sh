@@ -58,8 +58,8 @@
 #     知らせる。理由が無ければ、次から付けるよう Claude に足し (PreToolUse の additionalContext)、中継を通さない回り道を使わないよう
 #     言う。scp・sftp・autossh (/usr/bin/ssh を起こす) と署名は今の文のまま。WSL でない・off・欄が無いときも今の文のまま
 #   - 断られたら、op-reason の窓か 1Password に断られたと言い、許可して打ち直す選択肢と回り道を使わない指示を足す。鍵の認証の失敗は、
-#     op-reason.exe --ssh-agent --status (Windows のホームは windows-files.json) が答えなければ中継に届かないとして、中継を起こし直す
-#     選択肢にする。答えれば (たいてい相手に鍵が無いだけ) 黙る
+#     op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。windows-files.json は読まない) が答えなければ
+#     中継に届かないとして、中継を起こし直す選択肢にする。答えれば (たいてい相手に鍵が無いだけ) 黙る。exe が無ければ答えないとみなす
 #
 #   - Bash 以外・壊れた入力・空の入力・jq が無いときは黙り、いつも exit 0
 
@@ -817,18 +817,18 @@ relay_state() {
   mkdir -p "${f%/*}"
   if [[ -n $1 ]]; then printf '%s\n' "$1" >"${f}"; else rm -f "${f}"; fi
 }
-# Windows のホームに見立てた dir と、そこの偽の op-reason.exe。$1: 1 なら --status に答える (0)、0 なら答えない (1)
-relay_win="${work}/relay-win"
+# 偽の op-reason.exe と、それを exe に書いた claude-op-reason.json (中継は on・per-call)。$1: 1 なら --status に答える (0)、
+# 0 なら答えない (1)。windows-files.json は置かない (Windows の受け持ちが runner のマシンでは、そこに Windows のホームが無い)
+relay_exe="${work}/relay-win/AppData/Local/Programs/op-reason/op-reason.exe"
 relay_exe_set() {
-  local d="${relay_win}/AppData/Local/Programs/op-reason"
-  mkdir -p "${d}" "${HOME}/.local/state/dotfiles"
-  printf '{"enable":true,"version":1,"windowsHome":"%s"}\n' "${relay_win}" >"${HOME}/.local/state/dotfiles/windows-files.json"
+  mkdir -p "${relay_exe%/*}"
+  relay_state "$(jq -cn --arg exe "${relay_exe}" '{enable: true, exe: $exe, sshRelay: {enable: true, mode: "per-call"}}')"
   {
     printf '#!%s\n' "${BASH}"
     printf 'printf "%%s\\n" "$*" >>%q\n' "${work}/relay-calls"
     if [[ $1 == 1 ]]; then printf '%s\n' 'echo "the SSH relay answers (pid 42)"' 'exit 0'; else printf '%s\n' 'echo "nothing answers"' 'exit 1'; fi
-  } >"${d}/op-reason.exe"
-  chmod +x "${d}/op-reason.exe"
+  } >"${relay_exe}"
+  chmod +x "${relay_exe}"
 }
 relay_on='{"enable":true,"sshRelay":{"enable":true,"mode":"per-call"}}'
 relay_so='{"enable":true,"sshRelay":{"enable":true,"mode":"show-only"}}'
@@ -911,8 +911,15 @@ expect_quiet "中継が答えるときの鍵の認証の失敗は黙る (たい�
 relay_exe_set 0
 expect_quiet "中継を通らない scp の鍵の認証の失敗は、中継が答えなくても黙る" PostToolUseFailure \
   'scp a h:b' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
+relay_state '{"enable":true,"exe":null,"sshRelay":{"enable":true,"mode":"per-call"}}'
+rm -f "${work}/relay-calls"
+post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
+if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す' && ! -e "${work}/relay-calls" ]]; then
+  ok "claude-op-reason.json に exe が無ければ (Windows のユーザー名の無いマシン)、中継に届かないとみなす"
+else
+  ng "exe が無い" "$(detail) calls=$(cat "${work}/relay-calls" 2>/dev/null)"
+fi
 relay_state ""
-rm -f "${HOME}/.local/state/dotfiles/windows-files.json"
 
 echo "== ${pass} passed, ${fail} failed"
 [[ ${fail} == 0 ]]

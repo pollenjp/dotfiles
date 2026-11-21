@@ -11,13 +11,14 @@
 # 入る条件は ssh.nix の ssh・ssh-add の wrapper と同じ (dotfiles.wsl.enable と dotfiles.onePassword.enable が両方 true)。
 # op そのものの option は持たない。Claude の hook (files/claude/hooks/op-reason-guard.sh・ssh-agent-notice.sh) はどのマシンにも
 # 置くので (claude.nix)、この op があるかと SSH の中継を使うかを ~/.local/state/dotfiles/claude-op-reason.json
-# ({"enable": <bool>, "sshRelay": {"enable": <bool>, "mode": "<モード>"}}) で知らせる。false でも必ず書く。
-# pjp-op-env・pjp-op-ref (home/modules/op-env.nix) と bootstrap-windows-op-reason.sh・bootstrap-windows-ssh-config.sh も、
-# 同じファイルを読む。
+# ({"enable": <bool>, "exe": "<op-reason.exe の WSL のパス>" | null, "sshRelay": {"enable": <bool>, "mode": "<モード>"}}) で
+# 知らせる。false でも必ず書く。exe は下の OPREASON_EXE と同じ (Windows のユーザー名が無ければ null。hook が中継の --status を
+# 打つ)。pjp-op-env・pjp-op-ref (home/modules/op-env.nix) と bootstrap-windows-op-reason.sh も、同じファイルを読む。
 #
 # SSH の中継 (dotfiles.opReason.sshRelay。Windows の op-reason.exe --ssh-agent を logon の task で起こし、WSL と Windows の
-# ssh を向ける) は、win/ を配る WSL + 1Password のマシンでだけ使える (下の assertion)。task を置くのと IdentityAgent を書くのは
-# setup の bootstrap、WSL の ssh の wrapper を op-reason-ssh に向けるのは ssh.nix (win/README.md の「SSH の中継」)。
+# ssh を向ける) は、Windows の受け持ちを runner に切り替えた (win/ を配らない) WSL + 1Password のマシンでだけ使える (下の
+# assertion)。task を置くのと IdentityAgent を書くのは Windows の runner (dotfiles apply の手順 op-reason・ssh-config。ホストの値の
+# [tools] opReasonSshRelay)、WSL の ssh の wrapper を op-reason-ssh に向けるのは ssh.nix (win/README.md の「SSH の中継」)。
 #
 # op・op-reason・op-reason-log・op-reason-ssh は、op-reason の実行ファイルを makeWrapper で包み、既定の環境変数を 1 つ足す
 # (--set-default なので、環境に値があればそちらが勝つ)。home.sessionVariables にしないのは、ログインし直すまで今の shell に入らず、switch の直後の op が
@@ -82,14 +83,16 @@ let
       '';
 in
 {
-  # 中継は Windows の op-reason.exe と、WSL の setup が Windows へ配る Install-OpReason.ps1・ssh の設定に頼る
+  # 中継の Windows の側 (logon の task・IdentityAgent のファイル) は Windows の runner だけが置く。WSL の setup は置かないので、
+  # Windows の受け持ちが WSL (win/ を配る) のマシンで on にすると、wrapper だけが中継に向いて鍵が使えなくなる
   assertions = [
     {
-      assertion = relay.enable -> (enable && cfg.wsl.windowsFiles.enable);
+      assertion = relay.enable -> (enable && !cfg.wsl.windowsFiles.enable);
       message = ''
-        dotfiles.opReason.sshRelay.enable が true ですが、dotfiles.wsl.enable・dotfiles.onePassword.enable・
-        dotfiles.wsl.windowsFiles.enable のどれかが false です。op-reason の SSH の中継は、WSL の setup が Windows に
-        logon の task と ssh の設定を置くので、win/ を配る WSL + 1Password のマシンでだけ有効にしてください。
+        dotfiles.opReason.sshRelay.enable が true ですが、dotfiles.wsl.enable・dotfiles.onePassword.enable のどれかが false か、
+        dotfiles.wsl.windowsFiles.enable が true です。op-reason の SSH の中継の Windows の側 (logon の task と ssh の設定) は
+        Windows の runner (dotfiles apply。ホストの値の [tools] opReasonSshRelay) が置くので、Windows の受け持ちを runner に
+        切り替えた (win/ を配らない) WSL + 1Password のマシンでだけ有効にしてください。
       '';
     }
   ];
@@ -102,13 +105,14 @@ in
       "${opReason}/share/fish/vendor_completions.d/op-reason.fish";
   };
 
-  # sshRelay は中継を使わないマシンにも書く (bootstrap-windows-op-reason.sh が off を渡し、残った task を消す)。
+  # sshRelay は中継を使わないマシンにも書く (hook は enable が true のときだけ中継の文にする)。
   # pjp-op-env・pjp-op-ref は "enable": true をファイルのどこかに探す (jq を使わない) が、sshRelay.enable が true なら上の
   # assertion で enable も true なので、取り違えない
 
   home.file.".local/state/dotfiles/claude-op-reason.json".text =
     builtins.toJSON {
       inherit enable;
+      exe = exePath;
       sshRelay = {
         enable = relay.enable;
         inherit (relay) mode;

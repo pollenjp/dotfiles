@@ -65,8 +65,8 @@
 #               (OPREASON_SSH_REASON。コマンドの頭・env・export のどれか、無ければこの会話の環境) を添える。理由が無ければ、
 #               次から付けるよう Claude に 1 文足す (PreToolUse の additionalContext。tool の結果と一緒に届く。止めない)
 #   断られたあと 断り (agent refused operation) は op-reason の窓か 1Password に断られたと言う。鍵の認証の失敗は、
-#               op-reason.exe --ssh-agent --status (Windows のホームは ~/.local/state/dotfiles/windows-files.json。5 秒で切る) が
-#               答えなければ中継に届かないとして、① を中継を起こし直すことにする。答えれば黙る (たいてい相手に鍵が無いだけ)
+#               op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。5 秒で切る) が答えなければ
+#               中継に届かないとして、① を中継を起こし直すことにする。答えれば黙る (たいてい相手に鍵が無いだけ)
 #
 # どちらも、中継を通さずに 1Password に直につなぐ書き方 (-o IdentityAgent=…openssh-ssh-agent) を、ユーザーが言わない限り
 # 使わないよう Claude に言う (中継が止まっていると鍵が使えないので、エージェントが自分で回り道をしない)。scp・sftp・autossh は
@@ -715,13 +715,13 @@ reason_of() {
   printf '%s' "${v}"
 }
 
-# relay_down: 中継が答えないか (op-reason.exe --ssh-agent --status。5 秒で切る)。Windows のホームは windows-files.json。
-# op-reason.exe が見つからないのも答えないとみなす
+# relay_down: 中継が答えないか (op-reason.exe --ssh-agent --status。5 秒で切る)。op-reason.exe は claude-op-reason.json の exe
+# (home-manager が書く WSL のパス。windows-files.json の Windows のホームは、Windows の受け持ちが runner のマシンでは null)。
+# exe が無い・op-reason.exe が見つからないのも答えないとみなす
 relay_down() {
-  local wh exe
-  wh=$(jq -r '.windowsHome // empty' "${HOME}/.local/state/dotfiles/windows-files.json" 2>/dev/null) || wh=""
-  exe="${wh}/AppData/Local/Programs/op-reason/op-reason.exe"
-  [[ -n ${wh} && -f ${exe} ]] || return 0
+  local exe
+  exe=$(jq -r '.exe // empty' "${HOME}/.local/state/dotfiles/claude-op-reason.json" 2>/dev/null) || exe=""
+  [[ -n ${exe} && -f ${exe} ]] || return 0
   if command -v timeout &>/dev/null; then
     timeout 5 "${exe}" --ssh-agent --status </dev/null &>/dev/null && return 1
   else
