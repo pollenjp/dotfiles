@@ -136,10 +136,15 @@ if (Get-Module -Name PSReadLine) {
         try { Invoke-DotfilesAbbrExpansion } catch { }
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine($key, $arg)
     }
-    # Ctrl+Space は、広げずに空白を入れる (fish の ctrl-space と同じ)。端末が Ctrl+Space を NUL の字で送ると (herdr・hc の端末・
-    # WSL から開いたとき) Ctrl+@ として届くので、両方に割り当てる。PSReadLine の Ctrl+Space の補完メニュー (MenuComplete) は使えなくなる。
+    # Ctrl+Space と Shift+Space は、広げずに空白を入れる (Ctrl+Space は fish の ctrl-space と同じ)。
+    # Ctrl+Space は、端末が NUL の字で送ると (herdr・hc の端末・WSL から開いたとき) Ctrl+@ として届くので、Ctrl+Spacebar と Ctrl+@ の両方に
+    # 割り当てる。PSReadLine の Ctrl+Space の補完メニュー (MenuComplete) は使えなくなる。
+    # Shift+Space は、IME の切り替えに Ctrl+Space を割り当てた PC (Ctrl+Space を IME が先に取り、PowerShell に届かない) で使う。Windows Terminal・
+    # conhost は Shift+Space を Shift 付きの Space のキーで送るので、ここに当たる (割り当てが無くても PSReadLine は字だけを入れて広げないが、
+    # 割り当ててキーの一覧 (Get-PSReadLineKeyHandler) に出し、PSReadLine のその振る舞いに頼らない)。herdr・hc の端末は Shift+Space をただの
+    # 空白の字で送るので、Shift の無い Space として届き、Space と同じに広がる。
     # 空白は Space のキーとして入れる (Space と同じく、選んだ字を置き換え、数引数 (Alt+3 など) の数だけ入れる)
-    Set-PSReadLineKeyHandler -Chord 'Ctrl+Spacebar', 'Ctrl+@' -BriefDescription DotfilesAbbrInsertSpace -Description '略語を広げずに空白を入れる (dotfiles.ps1)' -ScriptBlock {
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+Spacebar', 'Ctrl+@', 'Shift+Spacebar' -BriefDescription DotfilesAbbrInsertSpace -Description '略語を広げずに空白を入れる (dotfiles.ps1)' -ScriptBlock {
         param($key, $arg)
         [Microsoft.PowerShell.PSConsoleReadLine]::SelfInsert([System.ConsoleKeyInfo]::new(' ', [System.ConsoleKey]::Spacebar, $false, $false, $false), $arg)
     }

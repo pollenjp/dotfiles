@@ -1286,7 +1286,7 @@ dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WS
 | --- | --- |
 | Space・`;`・`\|`・`&`・`)` | 略語を広げてから、打った字を入れる |
 | Enter | 略語を広げてから実行する (行が閉じていなければ、いつもどおり次の行へ進む) |
-| Ctrl+Space | 広げずに空白を入れる (fish の Ctrl+Space と同じ。略語の名前のまま打ちたいときに使う) |
+| Ctrl+Space・Shift+Space | 広げずに空白を入れる (略語の名前のまま打ちたいときに使う。Ctrl+Space は fish と同じ。Shift+Space は Windows Terminal などで効き、herdr・hc の端末ではただの Space として届いて広がる) |
 
 - 広げるのは、カーソルの直前で終わる語がコマンドの名前の位置にあり、表にあるときだけ。コマンドの位置かは PowerShell の構文で見る
   (入力行を Parser で読む)
@@ -1313,13 +1313,20 @@ fish の abbr との違い:
   Ctrl+V・Shift+Insert をそのまま PSReadLine に渡したとき) は、まとめて入れるので広がらない
 - `>` と `<` では広げない。PowerShell では `>` が前の語にくっつき (`Write-Output x> $null` は `x>` を出す)、広げると最後の語が
   変わる。`<` は PowerShell では使えない
-- Ctrl+Space は `Ctrl+Spacebar` と `Ctrl+@` の両方に割り当てている。herdr・hc の端末や WSL から開いた PowerShell のように、
-  端末が Ctrl+Space を NUL の字で送ると PSReadLine には `Ctrl+@` として届く (Windows Terminal のように Windows のキーの形で送る
-  端末では `Ctrl+Spacebar`)。Shift+Space は herdr の端末ではただの Space として届くので、広げずに空白を入れるのには使えない
+- 広げずに空白を入れるキーは、fish の Ctrl+Space に Shift+Space を足した 2 つ。IME の切り替えに Ctrl+Space を割り当てた PC では、
+  Ctrl+Space を IME が先に取って PowerShell に届かない (広げないキーが使えないだけで、害は無い) ので、Shift+Space を使う
+  - Ctrl+Space は `Ctrl+Spacebar` と `Ctrl+@` の両方に割り当てている。herdr・hc の端末や WSL から開いた PowerShell のように、
+    端末が Ctrl+Space を NUL の字で送ると PSReadLine には `Ctrl+@` として届く (Windows Terminal のように Windows のキーの形で送る
+    端末では `Ctrl+Spacebar`)
+  - Shift+Space は `Shift+Spacebar` に割り当てている。Windows Terminal などの Windows のキーの形で送る端末では Shift 付きの Space として
+    届き、広げずに空白が入る。herdr・hc の端末は Shift+Space をただの空白の字で送るので、PSReadLine には Shift の無い Space として届き、
+    Space と同じに広がる。herdr-app の中では Ctrl+Space を使う (IME が Ctrl+Space を取る PC の herdr-app では、広げずに空白を入れる
+    キーが無い)
 
 気をつけること:
 
-- PSReadLine の Ctrl+Space の補完メニュー (`MenuComplete`。Windows Terminal などで効いていた) は使えなくなる (Tab の補完はそのまま)
+- PSReadLine の Ctrl+Space の補完メニュー (`MenuComplete`。Windows Terminal などで効いていた) は使えなくなる (Tab の補完はそのまま)。
+  Shift+Space には PSReadLine の既定の割り当てが無い (PSReadLine 2.4.5 で確かめた) ので、使えなくなるものは無い
 - 割り当てが消える場合がある
   - `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、割り当てが既定に戻る。EditMode を
     変えるなら、`dotfiles.ps1` を読む行より前に置く
