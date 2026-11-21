@@ -62,7 +62,12 @@ Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core 
 
 ユーザーが各マシンで `~/dotfiles/setup --self-update --update` を流す。名前ごとに揃い方が違うので、PR を返すときに添える。
 
-| 名前 | setup --update のあと |
+受け持ちを Windows の runner に切り替えたホスト (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) では、WSL の setup は Windows に
+触らない。そのホストでは、Windows で 3 つの clone を pull して PowerShell の `dotfiles apply` を流す (`win/README.md` の「受け持ちを runner に切り替える」)。
+下の表の「setup」は、そのホストでは `dotfiles apply` と読む (runner の ps1 の手順は WSL の setup と同じ判断で揃える・知らせる)。
+`bootstrap-windows-*.sh --apply` は PowerShell の `Install-*` と読む。PR を返すときは、両方の道を添える。
+
+| 名前 | setup --update (切り替えたホストは dotfiles apply) のあと |
 | --- | --- |
 | `ntn`・`claude-code` | setup が揃える。exe が動いていると (Windows の Claude Code の会話を開いている・ntn が動いている) ⚠ で止まるので、閉じてから `Install-Ntn`・`Install-ClaudeCode` か `bootstrap-windows-*.sh --apply` |
 | `herdr` | 差が ⚠ で出る。herdr の外の PowerShell で `hsvstop` を打ち、`herdr --remote` の窓も閉じてから `Install-Herdr` |
@@ -70,7 +75,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core 
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で clone (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) を pull し、`dotfiles apply --steps herdr-app-keys` を流す (受け持ちが WSL のホストでも流す) |
-| `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (Rust の runner ができたら runner が揃える) |
+| `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
   `enable` が false。herdr-app・herdr-core は `herdr` の値。`tailscale` はどのグループでも既定が false) では、setup はその名前を確かめも
