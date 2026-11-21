@@ -1235,7 +1235,8 @@ Windows に固定した版で入れているものに新しい版が出たら、
 ### runner の pin-updates
 
 Windows の runner の手順 `pin-updates` (`runner/src/steps/pin_updates/`) も、同じ名前・判定・文で知らせる。受け持ちを runner に切り替えたホストでは
-`dotfiles check`・`dotfiles apply` が流し、受け持ちが WSL の間も `dotfiles check` で同じものを見られる (WSL の setup と同じ名前と版が出る)。
+`dotfiles check`・`dotfiles apply` が流し、受け持ちが WSL の間も `dotfiles check` で同じものを見られる (Windows のホストの値と WSL の記録、Windows の
+dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setup と同じ名前と版が出る)。
 
 ```text
 ━━ [97] pin-updates: 固定した版より新しい版が出ていないかを知らせる ━━
@@ -1250,11 +1251,14 @@ Windows の runner の手順 `pin-updates` (`runner/src/steps/pin_updates/`) も
   herdr-app・herdr-core は `windowsHerdr`、Tailscale は `windowsTailscale`。それを入れる手順と同じ switch) と、Windows の ghq の dotfiles の clone
   (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つ) で決める
 - GitHub は Windows の gh (`gh api`。bootstrap が入れてログインする) で読む。herdr-app・herdr-core の版ごとの Windows の成果物があるかは、WSL と
-  同じ引数の `curl.exe` (Windows の System32 のもの。`Install-HerdrApp.ps1` も同じ取得元を落とす) の HEAD で見る (runner に HTTP の crate を足さない)
+  同じ引数の curl (PATH で最初に見つかるもの。ふつうは System32 の `curl.exe`。`Install-HerdrApp.ps1` も同じ探し方で同じ取得元を落とす) の HEAD で
+  見る (runner に HTTP の crate を足さない)
 - 締めの表の行: 見送っていない新しい版があれば `·` (知らせるだけで、終了コードに数えない。上げるのは repo の PR なので、`dotfiles apply` では直らない)。
   無ければ ✔。gh が無い・ログインしていない・確かめられなかった名前があれば ⚠ (出力の `!!` の行がわけ)。何も書かず、check・dry-run・apply は同じ
-- 手順の出力は WSL の script と同じ字。違うのは、gh が無いときの直し方 (WSL は home-manager switch、runner は bootstrap) と、確かめられなかったときに
-  「setup は続けます。」を書かないことだけ
+- 手順の出力は WSL の script と同じ字。違うのは、gh が無いときの直し方 (WSL は home-manager switch、runner は bootstrap)・確かめられなかったときに
+  「setup は続けます。」を書かないこと・`releases.json` の誤りの文のパス (runner の clone の Windows のパス)・runner にしか無い失敗の文 (見送りの一覧が
+  読めない・gh や curl を起こせない・curl が無い)。空白は WSL の setup が流れる C.UTF-8 の bash の `[[:space:]]` と同じに読む (見送りの一覧の全角の
+  空白だけの行も読み飛ばす)
 - SSH の会話 (鍵で入った会話) では、gh の資格情報 (Windows の資格情報マネージャー) を読めず、gh がログインしていないように見えるかもしれない
   (確かめていない)。そのときは ⚠ の行にその旨を添える。デスクトップの端末で流す
 - `--candidates` と JSON の口は runner に写していない。依存の更新の skill は今までどおり Linux の repo で WSL の script の口を打つ
