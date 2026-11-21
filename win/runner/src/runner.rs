@@ -75,7 +75,7 @@ pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
                 info.id,
                 Kind::Info,
                 format!(
-                    "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-{}.sh が配る)",
+                    "受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-{}.sh が流す)",
                     info.id
                 ),
             ));
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(rows[1].kind, Kind::Info);
         assert_eq!(
             rows[1].text,
-            "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-s.sh が配る)"
+            "受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-s.sh が流す)"
         );
         assert_eq!(report::exit_code(&rows), 0);
 
@@ -381,12 +381,17 @@ mod tests {
         assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"));
     }
 
-    /// いつも on の、runner にまだ無い手順
+    /// いつも on の、runner にまだ無い手順 (試験のための作り物。今の PENDING に、いつも on のものが残っているとは限らない)
+    static ALWAYS_PENDING: crate::steps::pending::PendingSpec =
+        crate::steps::pending::PendingSpec {
+            id: "x-pending",
+            order: 97,
+            title: "x",
+            gate: Gate::Always,
+        };
+
     fn always_pending() -> &'static crate::steps::pending::PendingSpec {
-        crate::steps::pending::PENDING
-            .iter()
-            .find(|p| p.gate == Gate::Always)
-            .expect("いつも on のまだ無い手順がある")
+        &ALWAYS_PENDING
     }
 
     fn rows_for(host_text: Option<&str>) -> (Vec<Row>, String) {

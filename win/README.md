@@ -208,7 +208,7 @@ dotfiles check --steps google-ime --show-words  # Google 日本語入力の辞�
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
 
-- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = 知らせるだけ (runner にまだ無い・受け持ちは WSL の setup・前提がまだ無いので流さない)) と、種類ごとの締めの行を出す
+- 最後に手順ごとの表 (⚠ = 直すことがある・✔ = 揃っている・↷ = このホストでは off・· = 知らせるだけ (runner にまだ無い・受け持ちは WSL の setup・前提がまだ無いので流さない・固定した版より新しい版がある (`pin-updates`))) と、種類ごとの締めの行を出す
 - 終了コードは bootstrap と同じ: 0 = 直すことが無い・3 = 入っていない・無いものだけ (apply で揃う)・1 = ほかに直すことがある (足りない・
   ずれている・runner では直らない差・落ちた手順・apply を止めた)・2 = runner が動けない (引数・ホストの値・`groups.json` の誤り、Windows の
   環境変数が無い)
@@ -325,6 +325,10 @@ scanData = "https://app.notion.com/p/…"
   - WSL が置いた後に設定画面で変えた (単語を登録した) ものは、runner でも衝突になる (`dotfiles import google-ime` で取り込む)
   - WSL が「変換サーバーを落とせませんでした」と出したまま切り替えると、runner は WSL の印を読まないので落とし直さない。WSL の setup を流し直して落とせた
     ことを確かめるか、タスクマネージャーで `GoogleIMEJaConverter.exe` を終了してから切り替える
+- `pin-updates` は記録を持たない (GitHub を読んで知らせるだけ) ので、引き継ぐものは無い (切り替える直前に WSL の setup を流す要も無い)。切り替えた後は、
+  WSL の `setup --update` の警告のまとめの代わりに、`dotfiles check`・`dotfiles apply` の締めの表の `pin-updates` の行 (`·` と ※) に出る。Windows の gh が
+  ログインしている要がある (bootstrap がログインする)。依存の更新の skill が読む JSON の口 (`nix/scripts/bootstrap-windows-pin-updates.sh --list --json`・
+  `--candidates --json`) と `--candidates` は WSL の script のまま (Linux の repo で打つ。WSL の記録を見ないので、切り替えた後も動く)
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -357,7 +361,7 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
 | 97 | `op-reason` | WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える ([op-reason](#op-reason)) | `onePassword` | まだ |
-| 97 | `pin-updates` | 固定した版より新しい版の知らせ | | まだ |
+| 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone) | 有る |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
@@ -375,7 +379,7 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones・international・google-ime は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
+  fancyzones → international → google-ime → pin-updates)。9 つとも移した。`op-reason` はその後に足したもので、この順には入っておらず、まだ無い
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -390,7 +394,8 @@ scanData = "https://app.notion.com/p/…"
    `<UTC の時刻>-<pid>` のディレクトリと同じ形) を使う
 2. `runner/src/steps/mod.rs` の `all()` に 1 行足す (order と script の名前の順に並ぶ)。同じファイルの試験 (`order_matches_wsl_setup`) の並びにも
    足す。Windows にしか無い手順 (W0-2 など) は WSL の script を持たなくてよい (試験が WSL の script を求めるのは、WSL から写した手順とまだ無い手順だけ)
-3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す
+3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す (偽のコマンドの stderr の行は `testutil::stderr_line` で印を付ける。`stdout_only` の写しに入らず、
+   流す口には届く本物の口と同じになる)
 4. この節の表に行を足す
 
 WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
@@ -439,7 +444,11 @@ gate が違うと、試験が落ちる
   違わないかと、`bootstrap-windows-google-ime.sh` と runner を同じ偽の `tasklist.exe`・`taskkill.exe` (WSL の試験から抜き出す) で同じ状態から流し、置いた
   ファイル・記録・印・退避・打った引数・取り込んだテキストが同じかを突き合わせる。pjp-google-ime は、`PJP_GOOGLE_IME` (exe のパス) が無ければ nix で
   repo の flake (`nix/`) から作る (`DOTFILES_WIN_NIX_PARITY=1` なら作れないと落ちる)。protobuf の型の表 (`pb.rs`) は `nix/pkgs/pjp-google-ime/proto/` の
-  .proto の写しと突き合わせるので、.proto を写し直したら表も直す。bash の版を直したら、Rust の写しも同じに直す
+  .proto の写しと突き合わせるので、.proto を写し直したら表も直す。`pin-updates` (`src/steps/pin_updates/`) は、`check-winget-version.sh --json <名前>`・
+  `check-herdr-app-version.sh --json` と `bootstrap-windows-pin-updates.sh` (setup の手順) を runner と同じ偽の `gh`・`curl` と同じ repo のファイルで流し、
+  新しい版と見送り・確かめられなかったときの stderr の行・知らせる文・打った gh と curl の引数と順が同じかを突き合わせる (作り物の repo と、本物の
+  ps1・見送りの一覧・`releases.json`)。版の並べ方は `sort -V` と比べる。名前ごとの題・ps1・param・変数・版の形・知らせる文は、bash の版が流れない
+  Windows の CI でも WSL の script の字と比べる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -1222,6 +1231,37 @@ Windows に固定した版で入れているものに新しい版が出たら、
 - 対象の外: type-clipboard と op-reason (どちらも自作のアプリで、公開からの猶予を置かない。版は Release を出す流れで上げる。
   [後述](#type-clipboard-の新しい版を出したとき)・[後述](#op-reason-の新しい版を出したとき)) と PowerToys (版を固定しない)
 - 週 1 回の CI (`winget-versions`・`herdr-app-installers`) は今までどおり、猶予 (30 日・7 日) がたつと落ちて知らせる
+
+### runner の pin-updates
+
+Windows の runner の手順 `pin-updates` (`runner/src/steps/pin_updates/`) も、同じ名前・判定・文で知らせる。受け持ちを runner に切り替えたホストでは
+`dotfiles check`・`dotfiles apply` が流し、受け持ちが WSL の間も `dotfiles check` で同じものを見られる (Windows のホストの値と WSL の記録、Windows の
+dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setup と同じ名前と版が出る)。
+
+```text
+━━ [97] pin-updates: 固定した版より新しい版が出ていないかを知らせる ━━
+!! Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める
+   Windows の GitHub CLI: 2.103.3 → 2.104.0・2.105.0
+…
+  · [97] pin-updates          Windows に固定した版より新しい版があります → Claude Code に「dotfiles の Windows に固定した版を上げて」と頼み、上げるか (どの版か) を決める
+      ※ Windows の GitHub CLI: 2.103.3 → 2.104.0・2.105.0
+```
+
+- 名前の on/off は、WSL の記録の代わりに Windows のホストの値の道具の switch (ntn は `windowsNtn`、Claude Code は `windowsClaudeCode`、herdr・
+  herdr-app・herdr-core は `windowsHerdr`、Tailscale は `windowsTailscale`。それを入れる手順と同じ switch) と、Windows の ghq の dotfiles の clone
+  (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つ) で決める
+- GitHub は Windows の gh (`gh api`。bootstrap が入れてログインする) で読む。herdr-app・herdr-core の版ごとの Windows の成果物があるかは、WSL と
+  同じ引数の curl (PATH で最初に見つかるもの。ふつうは System32 の `curl.exe`。`Install-HerdrApp.ps1` も同じ探し方で同じ取得元を落とす) の HEAD で
+  見る (runner に HTTP の crate を足さない)
+- 締めの表の行: 見送っていない新しい版があれば `·` (知らせるだけで、終了コードに数えない。上げるのは repo の PR なので、`dotfiles apply` では直らない)。
+  無ければ ✔。gh が無い・ログインしていない・確かめられなかった名前があれば ⚠ (出力の `!!` の行がわけ)。何も書かず、check・dry-run・apply は同じ
+- 手順の出力は WSL の script と同じ字。違うのは、gh が無いときの直し方 (WSL は home-manager switch、runner は bootstrap)・確かめられなかったときに
+  「setup は続けます。」を書かないこと・`releases.json` の誤りの文のパス (runner の clone の Windows のパス)・runner にしか無い失敗の文 (見送りの一覧が
+  読めない・gh や curl を起こせない・curl が無い)。空白は WSL の setup が流れる C.UTF-8 の bash の `[[:space:]]` と同じに読む (見送りの一覧の全角の
+  空白だけの行も読み飛ばす)
+- SSH の会話 (鍵で入った会話) では、gh の資格情報 (Windows の資格情報マネージャー) を読めず、gh がログインしていないように見えるかもしれない
+  (確かめていない)。そのときは ⚠ の行にその旨を添える。デスクトップの端末で流す
+- `--candidates` と JSON の口は runner に写していない。依存の更新の skill は今までどおり Linux の repo で WSL の script の口を打つ
 
 ## PowerShell のテスト
 

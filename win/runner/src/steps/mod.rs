@@ -27,6 +27,7 @@ pub mod herdr_app_pjp_spaces;
 pub mod international;
 pub mod linker;
 pub mod pending;
+pub mod pin_updates;
 pub mod pjp;
 pub mod port_forward;
 pub mod powershell_profile;
@@ -225,6 +226,7 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         Box::new(google_ime::GoogleIme {
             show_words: options.show_words,
         }),
+        Box::new(pin_updates::PinUpdates),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -320,7 +322,7 @@ mod tests {
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
         assert!(from_wsl.contains(&"terminal") && from_wsl.contains(&"powertoys"));
         assert!(from_wsl.contains(&"fancyzones") && from_wsl.contains(&"international"));
-        assert!(from_wsl.contains(&"google-ime"));
+        assert!(from_wsl.contains(&"google-ime") && from_wsl.contains(&"pin-updates"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

@@ -18,7 +18,9 @@ name: win-runner
 # git.nix と direnv.nix が作る home-manager の programs.git と突き合わせる)・c の中身 (nix/home/modules/fish.nix・bash.nix。herdr-app の
 # prefix の mod が Claude Code を起こす argv と突き合わせる)・Google 日本語入力の pjp-google-ime (nix/pkgs/pjp-google-ime/ の .proto の写しと
 # Python の版。Linux の CI で repo の flake から nix で作って突き合わせる。nixpkgs の protobuf の版で振る舞いが変わりうるので nix/flake.lock も) と
-# WSL の試験 (nix/tests/bootstrap-windows-google-ime.test.sh。偽の tasklist.exe・taskkill.exe を抜き出す) を読むので、それらを変えた PR でも流す。
+# WSL の試験 (nix/tests/bootstrap-windows-google-ime.test.sh。偽の tasklist.exe・taskkill.exe を抜き出す)・固定した版より新しい版の知らせの口
+# (nix/scripts/check-winget-version.sh・check-herdr-app-version.sh。pin-updates を Linux の CI で突き合わせ、本物の releases.json・見送りの一覧でも流す) を
+# 読むので、それらを変えた PR でも流す。
 on:
   push:
     branches: [main]
@@ -40,6 +42,10 @@ on:
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - "nix/pkgs/pjp-google-ime/**"
       - "nix/tests/bootstrap-windows-google-ime.test.sh"
+      - "nix/scripts/check-winget-version.sh"
+      - "nix/scripts/check-herdr-app-version.sh"
+      - "nix/pkgs/herdr-core/releases.json"
+      - "nix/pkgs/herdr-core/skipped-versions.txt"
       - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   pull_request:
@@ -61,6 +67,10 @@ on:
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - "nix/pkgs/pjp-google-ime/**"
       - "nix/tests/bootstrap-windows-google-ime.test.sh"
+      - "nix/scripts/check-winget-version.sh"
+      - "nix/scripts/check-herdr-app-version.sh"
+      - "nix/pkgs/herdr-core/releases.json"
+      - "nix/pkgs/herdr-core/skipped-versions.txt"
       - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   workflow_dispatch:
