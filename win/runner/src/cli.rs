@@ -841,7 +841,7 @@ mod tests {
             let (code, out, _) = w.run(&["apply", "--steps", "files,claude-notion"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("受け持ち: WSL の setup (runner.enable が true でない。apply は Windows にしか無い手順だけを流す)"), "{out}");
-            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-files.sh が配る)"), "{out}");
+            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-files.sh が流す)"), "{out}");
             assert_eq!(
                 std::fs::read_to_string(&notion).unwrap(),
                 "{\"override\":{},\"profile\":\"personal\",\"routes\":{}}\n"
@@ -950,7 +950,7 @@ mod tests {
                 &["apply", "--steps", "claude-notion,powershell-profile"],
             );
             assert_eq!(code, 0, "{out}");
-            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-powershell-profile.sh が配る)"), "{out}");
+            assert!(out.contains("受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-powershell-profile.sh が流す)"), "{out}");
             assert!(!profile.exists());
             assert_eq!(pwsh_calls(&sys), 0);
 

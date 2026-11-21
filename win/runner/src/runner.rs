@@ -75,7 +75,7 @@ pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
                 info.id,
                 Kind::Info,
                 format!(
-                    "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-{}.sh が配る)",
+                    "受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-{}.sh が流す)",
                     info.id
                 ),
             ));
@@ -331,7 +331,7 @@ mod tests {
         assert_eq!(rows[1].kind, Kind::Info);
         assert_eq!(
             rows[1].text,
-            "受け持ちは WSL の setup なので apply では流さない (WSL の bootstrap-windows-s.sh が配る)"
+            "受け持ちは WSL の setup なので apply では流さない (WSL の setup の bootstrap-windows-s.sh が流す)"
         );
         assert_eq!(report::exit_code(&rows), 0);
 
