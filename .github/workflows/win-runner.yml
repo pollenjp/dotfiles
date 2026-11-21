@@ -4,7 +4,8 @@ name: win-runner
 # docs/adr/060_win_runner_core_*)。
 #
 # - Linux: Nix も入れて、runner の manifest の読み方を WSL が使う nix/lib/windows-files.nix (nix-instantiate) と突き合わせる
-#   (tests/manifest_parity.rs。DOTFILES_WIN_NIX_PARITY=1 で、nix-instantiate が無ければ飛ばさずに落ちる)。fmt もここだけ
+#   (tests/manifest_parity.rs。DOTFILES_WIN_NIX_PARITY=1 で、nix-instantiate が無ければ飛ばさずに落ちる)。google-ime は pjp-google-ime を
+#   試験の中で nix build (repo の flake) で作って突き合わせる (同じく、作れなければ落ちる)。fmt もここだけ
 # - Windows: MSVC (windows-latest の既定の host。bootstrap が入れるのと同じ) で、Windows のパスと外のコマンド (PowerShell・hostname・git)
 #   の口を確かめる
 #
@@ -15,7 +16,9 @@ name: win-runner
 # skill・footer-links.json と、Rust に写した hook・status line の bash の版。Linux の CI で bash の版と突き合わせる。hook の登録と skillOverrides
 # は nix/scripts/bootstrap-claude-hook.sh・bootstrap-claude-skill-overrides.sh と突き合わせる)・git の設定の正本 (nix/home/modules/git.toml。Linux の CI で
 # git.nix と direnv.nix が作る home-manager の programs.git と突き合わせる)・c の中身 (nix/home/modules/fish.nix・bash.nix。herdr-app の
-# prefix の mod が Claude Code を起こす argv と突き合わせる) を読むので、それらを変えた PR でも流す。
+# prefix の mod が Claude Code を起こす argv と突き合わせる)・Google 日本語入力の pjp-google-ime (nix/pkgs/pjp-google-ime/ の .proto の写しと
+# Python の版。Linux の CI で repo の flake から nix で作って突き合わせる。nixpkgs の protobuf の版で振る舞いが変わりうるので nix/flake.lock も) と
+# WSL の試験 (nix/tests/bootstrap-windows-google-ime.test.sh。偽の tasklist.exe・taskkill.exe を抜き出す) を読むので、それらを変えた PR でも流す。
 on:
   push:
     branches: [main]
@@ -35,6 +38,9 @@ on:
       - "nix/files/claude/**"
       - "nix/scripts/bootstrap-claude-hook.sh"
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
+      - "nix/pkgs/pjp-google-ime/**"
+      - "nix/tests/bootstrap-windows-google-ime.test.sh"
+      - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   pull_request:
     paths:
@@ -53,6 +59,9 @@ on:
       - "nix/files/claude/**"
       - "nix/scripts/bootstrap-claude-hook.sh"
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
+      - "nix/pkgs/pjp-google-ime/**"
+      - "nix/tests/bootstrap-windows-google-ime.test.sh"
+      - "nix/flake.lock"
       - ".github/workflows/win-runner.yml"
   workflow_dispatch:
 
@@ -102,7 +111,8 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
 
       # 1 つの test の束が落ちても、残りの束も流す (Windows の落ち方は手元で流せないので、1 回の run で全部を見る)。Linux では、Rust に写した
-      # Claude Code の hook・status line・skillOverrides を bash の版 (bash と jq。ubuntu の image に入っている) と突き合わせる (飛ばさずに落ちる)
+      # Claude Code の hook・status line・skillOverrides と WSL の手順を bash の版 (bash と jq。ubuntu の image に入っている) と突き合わせる
+      # (飛ばさずに落ちる)
       - name: test
         env:
           DOTFILES_WIN_NIX_PARITY: ${{ runner.os == 'Linux' && '1' || '0' }}
