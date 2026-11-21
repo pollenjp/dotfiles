@@ -854,7 +854,8 @@ $panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnoti
 旧 herdr ([`herdr/config.toml`](#herdr) の `[keys]`) と同じ手で herdr-app を操るキー。herdr-app の `keys.json` には 2 回に分けて打つキー (prefix) の
 仕組みが無いので、prefix は自作の mod `pjp-prefix` (小窓) で作る。keys.json に dotfiles のキーを書き足すのは runner の手順 `herdr-app-keys` (order 99)、
 mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちらも Windows にしか無い手順で、受け持ちが WSL のホストでも `dotfiles apply` が流す
-(on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`)。
+(on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`) と、space の移動を `Ctrl+PageUp/Down` と
+`Ctrl+Alt+↑↓` にした ADR 085 (`docs/adr/085_win_herdr_app_space_ctrl_alt_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
@@ -865,7 +866,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | キー | herdr-app ですること | 旧 herdr |
 | --- | --- | --- |
 | `Ctrl+PageUp`・`Ctrl+PageDown` | 前・次の space (`space.prev`・`space.next`。herdr-app の既定ではタブの移動) | `previous_workspace`・`next_workspace` (旧 herdr は `Ctrl+Alt+↑↓`。旧 herdr は PageUp・PageDown をキーに使えない) |
-| `Ctrl+Shift+↑`・`Ctrl+Shift+↓` | 同じく前・次の space | (旧 herdr は `Ctrl+Alt+↑↓`) |
+| `Ctrl+Alt+↑`・`Ctrl+Alt+↓` | 同じく前・次の space | 同じキー (`previous_workspace`・`next_workspace`) |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
 | prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
@@ -885,14 +886,19 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
   取るかを伝えるよう書いている)。端末のプログラムに送るときは、prefix の後にもう一度 `Ctrl+K`。小窓に focus がある間の `Ctrl+K` を mod に
   渡すのは keys.json の section `mod:pjp-prefix` (細かい section が `global` より勝つ。無いと `global` の `Ctrl+K` が小窓を閉じるだけになる)
-- space の移動は `Ctrl+PageUp`・`Ctrl+PageDown` と `Ctrl+Shift+↑↓` の両方。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定ではタブの移動
+- space の移動は `Ctrl+PageUp`・`Ctrl+PageDown` と `Ctrl+Alt+↑↓` の両方。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定ではタブの移動
   (`tab.prev`・`tab.next`) に使うキーなので、repo の `herdr-app/keys.defaults.json` にその既定の値を書いて上書きする (下の「書き足し方」)。タブの移動は
   `Ctrl+↑↓` と、herdr-app の既定の `Ctrl+Tab`・`Ctrl+Shift+Tab`・`Alt+]`・`Alt+[` が残る。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定でも取って
-  いるキーで、端末のプログラムに届かないのは前と同じ。`Ctrl+Shift+↑↓` も herdr-app が取るので、端末のプログラムには届かない
+  いるキーで、端末のプログラムに届かないのは前と同じ。`Ctrl+Alt+↑↓` も herdr-app が取るので、端末のプログラムには届かない
+- `Ctrl+Alt+↑↓` は旧 herdr の workspace の移動と同じキー。Windows では Ctrl+Alt が AltGr として読まれるので、herdr-app の案内 (home の `AGENTS.md` の
+  Keys の節) は、Ctrl+Alt のキーを自分からは選ばず、頼まれて割り当てるときは打てなくなる字を伝えるよう書いている。矢印は AltGr を足しても字を打たない
+  ので、打てなくなる字は無い。グラフィックのドライバーなどが `Ctrl+Alt+矢印` を global hotkey に取っている PC (画面を回すキーなど) では、herdr-app に
+  届かず space が移らない。前に space の移動に使った `Ctrl+Shift+↑↓` は割り当てない (当てると、記録どおりの値なら keys.json から外れ、端末のプログラムに
+  届く)
 - 旧 herdr は PageUp・PageDown をキーの名前に持たない (0.9.5 でも、どう綴っても `herdr config check` が invalid keybinding にする。
   [`nix/files/herdr/config.toml`](../nix/files/herdr/config.toml) のコメント) ので、旧 herdr の workspace の移動は `Ctrl+Alt+↑↓` のまま。herdr-app の中で
-  旧 herdr を動かすと、`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app が先に取り (旧 herdr には届かない)、`Ctrl+Alt+↑↓` は herdr-app が割り当てないので
-  旧 herdr に届く
+  旧 herdr を動かすと、`Ctrl+Alt+↑↓` も `Ctrl+PageUp`・`Ctrl+PageDown` も herdr-app が先に取り (herdr-app の space が移る)、旧 herdr には届かない。
+  旧 herdr の workspace を `Ctrl+Alt+↑↓` で移るなら、herdr-app の外 (Windows Terminal など) で旧 herdr を開く
 - worktree の名前は `worktree/<形容詞>-<名詞>-<16 進 4 桁>` (旧 herdr と同じ形。例 `worktree/calm-river-8281`。フォルダは
   `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
   作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
