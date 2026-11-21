@@ -17,7 +17,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d)、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -1409,6 +1409,46 @@ fish の abbr との違い:
     変えるなら、`dotfiles.ps1` を読む行より前に置く
   - starship の `Enable-TransientPrompt` は Enter の割り当てを上書きする (Enter では広がらなくなる。Space などでは広がる)。
     今の `$PROFILE` では使っていない
+
+### bash に似たキー
+
+bash (readline) でよく使う語の移動と消し方の 4 つのキーを、bash と同じ動きにする。`dotfiles.ps1` が PSReadLine の関数に割り当て、
+`$PROFILE` で読んだ対話の PowerShell で効く。EditMode は Windows (Windows の既定) のままにし、この 4 つだけを Emacs モードと同じ関数に
+割り当てる (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる)。
+
+| キー | PSReadLine の関数 | bash (readline) | Windows モードの既定 (今までの割り当て) |
+| --- | --- | --- | --- |
+| Alt+f | `ForwardWord` (語の終わりへ) | `forward-word` | 無い (`f` の字が入る) |
+| Alt+b | `BackwardWord` (語の頭へ) | `backward-word` | 無い (`b` の字が入る) |
+| Ctrl+w | `UnixWordRubout` (前の空白まで消す) | `unix-word-rubout` | `BackwardKillWord` (語の区切りの記号でも止まる) |
+| Alt+d | `KillWord` (語の終わりまで消す) | `kill-word` | `KillWord` (同じ。PSReadLine の既定が変わっても同じに動くよう割り当てを書く) |
+
+- `cd foo/bar baz` のような行では、止まる所は bash と同じ。行末から Alt+b で `baz` の頭、もう一度で `bar` の頭 (`/` で止まる)。
+  Ctrl+w は空白だけを区切りにし、`cd foo/bar` の行末で押すと `foo/bar` を丸ごと消す (今までの `BackwardKillWord` は `bar` だけを消した)
+- herdr-app の中の PowerShell では、Ctrl+←・Ctrl+→・Ctrl+Backspace にもこの割り当てが効く。herdr-app は既定の keys.json の `terminal`
+  の節で Ctrl+← を `ESC b`、Ctrl+→ を `ESC f`、Ctrl+Backspace を `^W` として送り (readline では Alt+b・Alt+f・Ctrl+w に当たるバイト)、
+  PowerShell にはそれが Alt+b・Alt+f・Ctrl+w として届く。この 3 つは herdr-app の既定のキーで、dotfiles の
+  [`herdr-app/keys.json`](#herdr-app-のキー) は持っていない
+  - Ctrl+←・Ctrl+→ で語を移れる (今までは `b`・`f` の字が入った)。Ctrl+→ は語の終わりへ移る (Windows Terminal などの Ctrl+→ は
+    `NextWord` で、次の語の頭へ)
+  - Ctrl+Backspace は Ctrl+w と同じく前の空白まで消す (今までは Ctrl+w と同じ `BackwardKillWord` で、記号でも止まった)。Windows の
+    キーの形で送る端末 (Windows Terminal など) の Ctrl+Backspace は、今までどおり `BackwardKillWord`
+- 語の区切りは空白と、PSReadLine の `WordDelimiters` の記号 (`/`・`-`・`.`・`;` など。字は `(Get-PSReadLineOption).WordDelimiters` で
+  見られる。5.1 の PSReadLine 2.0.0 の既定には `!`・`?` が無い) で、英数字だけを語にする bash と違う。`_`・`$` などは語の中に入る
+  (`echo $foo_bar` の行末から Alt+b で `$foo_bar` の頭へ。bash は `bar` の頭へ)。`WordDelimiters` はほかのキー (Ctrl+←→・
+  Ctrl+Backspace・Ctrl+Delete など) にも効くので替えない
+- 消した字は PSReadLine の kill ring に入る (クリップボードではない)。Windows モードには bash の Ctrl+y (`Yank`) に当たる割り当てが
+  無い (Ctrl+y は `Redo`) ので、消しすぎたら Ctrl+z (`Undo`) で戻す
+- 今の割り当ては次で見られる (Windows PowerShell 5.1 の PSReadLine 2.0.0 の `Get-PSReadLineKeyHandler` には `-Chord` が無いので、
+  `-Bound` から選ぶ。`-CIn` は大文字小文字を区別する。`Alt+F` は Alt+Shift+f で別のキー)
+
+  ```powershell
+  Get-PSReadLineKeyHandler -Bound | Where-Object Key -CIn 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d'
+  ```
+
+- `$PROFILE` で、`dotfiles.ps1` を読む行より後に `Set-PSReadLineOption -EditMode …` を打つと、この割り当ても既定に戻る
+  ([略語を広げる](#略語を広げる-fish-の-abbr-に似せる)の割り当てと同じ)。EditMode を変えるなら、`dotfiles.ps1` を読む行より前に置く
+- Windows PowerShell 5.1 (PSReadLine 2.0.0) でも同じに動く
 
 ### dotfiles.ps1 を書くときの注意
 
