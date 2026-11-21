@@ -48,8 +48,9 @@ task の形: 動作は <置き場所>\op-reason.exe --ssh-agent (show-only は -
 置いた時刻から 1 分ごと (期限なし。中継が落ちても次の 1 分で起き直る)・Interactive・Limited・時間の上限なし・電池でも起こして
 止めない・2 つ目を起こさない (中継が動いている間の 1 分ごとの trigger は何もしない)・隠す・優先度 5。失敗したら起こし直す設定は
 置かない (0 でない終わり方では効かない)。
-WSL の setup (bootstrap-windows-op-reason.sh) が dotfiles.opReason.sshRelay から渡す。渡さなければ (Windows の runner) task を置きも
-消しもしない (task の中継を止めて入れ替えて起こし直すのは同じ)。
+Windows の runner の手順 op-reason が、ホストの値の道具の switch opReasonSshRelay と [opReason] sshRelayMode から渡す (switch が off
+なら off)。渡さなければ (WSL の setup の bootstrap-windows-op-reason.sh・手で打つ Install-OpReason) task を置きも消しもしない (task の
+中継を止めて入れ替えて起こし直すのは同じ)。
 #>
 [CmdletBinding()]
 param(
@@ -304,7 +305,7 @@ function ConvertFrom-OpReasonRelayStatus {
     $null
 }
 
-# 中継にすること。Want は -SshRelay の値 ('' は runner: task に触らない)
+# 中継にすること。Want は -SshRelay の値 ('' は -SshRelay なし (WSL の setup・手で打つとき): task に触らない)
 #   none 何もしない・register task を置いて起こす・update 置き直して起こし直す・start 起こす・restart 止めて起こし直す
 #   (動いているのに答えない)・remove 止めて消す
 function Get-OpReasonRelayPlan {
@@ -638,7 +639,9 @@ function Get-OpReasonRelayView {
         Diff  = $diff
         Pid   = $relayPid
         Plan  = (Get-OpReasonRelayPlan -Want $Want -Task $task -Diff $diff -RelayPid $relayPid)
-        Shown = [bool]($Want -or $task)
+        # 中継の行は、モードを望むときか task があるときだけ出す (runner は中継を使わないホストにも -SshRelay off を渡すので、
+        # off で task が無ければ今までどおり何も出さない)
+        Shown = [bool](($Want -in 'per-call', 'show-only') -or $task)
     }
 }
 

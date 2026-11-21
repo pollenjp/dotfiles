@@ -291,7 +291,7 @@ Test-Case '終了コードが 0 でなければ PID のある文でも空' '' { 
 # Get-OpReasonRelayPlan: 中継にすること
 $TaskRunning = New-TaskShape
 $TaskReady = New-TaskShape @{ State = 'Ready' }
-Test-Case '引数なし (runner) は task があっても none (task に触らない)' 'none' { Get-OpReasonRelayPlan -Want '' -Task $TaskRunning -Diff @('Arguments') -RelayPid $null }
+Test-Case '引数なし (WSL の setup・手で打つとき) は task があっても none (task に触らない)' 'none' { Get-OpReasonRelayPlan -Want '' -Task $TaskRunning -Diff @('Arguments') -RelayPid $null }
 Test-Case 'off で task があれば remove' 'remove' { Get-OpReasonRelayPlan -Want 'off' -Task $TaskRunning -Diff @() -RelayPid 4242 }
 Test-Case 'off で task が無ければ none' 'none' { Get-OpReasonRelayPlan -Want 'off' -Task $null -Diff @() -RelayPid $null }
 Test-Case 'モードで task が無ければ register' 'register' { Get-OpReasonRelayPlan -Want 'per-call' -Task $null -Diff @() -RelayPid $null }
@@ -713,7 +713,7 @@ Test-Case '表に無い版を渡すと、表にある版を出す' $true { $r = 
 $PCReg = 'Register --ssh-agent'
 $Stop4242 = "Lock Enabled False Stop WaitExit $RelayOldPid"
 
-# -SshRelay を渡さず task も無いホスト (runner と、中継を使ったことの無いホスト) は今までどおり
+# -SshRelay を渡さず task も無いホスト (WSL の setup と、中継を使ったことの無いホスト) は今までどおり
 Test-Case '-SshRelay も task も無ければ、中継の行を出さず、--status も task も呼ばない' $true {
     $r = Invoke-Flow -Have Old
     ($r.Code -eq 0) -and ($r.Calls -eq 'Download') -and ($r.Text -notlike '*SSH の中継*')
@@ -773,7 +773,7 @@ Test-Case '版上げでほかの op-reason.exe (op の呼び出し) も動いて
     $r = Invoke-Flow -Have Old -SshRelay per-call -Task running -Busy 1
     ($r.Code -eq 1) -and ($r.Calls -eq 'Status') -and ($r.Text -like '*1001*') -and ($r.Exe -eq $exeOld)
 }
-Test-Case 'runner (引数なし) の版上げでも、task の中継だけなら止めて入れ替えて起こし直す (task は置き直さない)' "0 Status Download $Stop4242 Enabled True Start Wait Unlock Status $exeV --ssh-agent Running" {
+Test-Case '引数なし (WSL の setup・手で打つとき) の版上げでも、task の中継だけなら止めて入れ替えて起こし直す (task は置き直さない)' "0 Status Download $Stop4242 Enabled True Start Wait Unlock Status $exeV --ssh-agent Running" {
     $r = Invoke-Flow -Have Old -Task running; "$($r.Code) $($r.Calls) $($r.Exe) $($r.TaskAfter)"
 }
 Test-Case '中継のプロセスが止まらなければ、入れ替えず、task を有効に戻して 1' "1 Status Download $Stop4242 Enabled True Unlock $exeOld" {
@@ -814,6 +814,13 @@ Test-Case '-Check は中継の行を出す (見出し・望む形・task・中�
 Test-Case '引数なしでも task があれば、中継の行を出す (task には触らない)' $true {
     $r = Invoke-Flow -Have V -Task running -Check
     ($r.Code -eq 0) -and ($r.Text -like '*決めない (-SshRelay なし。task には触らない)*')
+}
+Test-Case 'off で task が無ければ中継の行を出さない (runner はいつも -SshRelay を渡すので、中継を使わないホストの出力は今までどおり)' $true {
+    $r = Invoke-Flow -Have V -SshRelay off -Check
+    ($r.Code -eq 0) -and ($r.Text -notlike '*SSH の中継*')
+}
+Test-Case 'off でも task が残っていれば中継の行を出す (止めて消す)' $true {
+    (Invoke-Flow -Have V -SshRelay off -Task running -Check).Text -like '*SSH の中継 (logon の task \pjp\op-reason-ssh-relay)*'
 }
 
 # パイプラインに出すのは終了コードの 1 つだけ

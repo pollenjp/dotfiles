@@ -6,7 +6,9 @@
 //! - WSL の script (setup の手順。引数なし) と runner の手順を、同じ偽の pwsh (`-Check` と揃える流れに、決めた出力と終了コードを返す) で流し、
 //!   同じ判定 (揃っている・入れた・入れ替えた・入れられない・揃えられない・確かめられない) と終了コードになる。runner の check と dry-run は、WSL が
 //!   `-Check` の後に進んだ道 (入れる・入れ替える) を missing・fix で出す
-//! - 打った pwsh の引数と順が同じ (ps1 のパスのほかは 1 字も違わない)。check と dry-run は `-Check` だけを打つ。runner は記録を書かない
+//! - 打った pwsh の引数と順が同じ (ps1 のパスと、runner だけが渡す SSH の中継の ` -SshRelay '<モード|off>'` のほかは 1 字も違わない)。check と
+//!   dry-run は `-Check` だけを打つ。runner は記録を書かない
+//! - SSH の中継を使うホスト (opReasonSshRelay = true) でも、runner は ` -SshRelay 'per-call'` を渡すほかは同じ判定・同じ知らせ・同じ呼び出し
 //! - 手順の出力の行 (pwsh の出力を除く) が同じ字。揃えたときに見せる pwsh の出力も同じ (CRLF と色を落とす)
 //! - 揃えられないときの直し方 (op の呼び出しが終わってから・PowerShell の Install-OpReason) と、確かめられないときに手で打つコマンドが同じ
 //! - 対象の決め方: WSL の op の wrapper を入れないマシン (claude-op-reason.json の enable が false) と、ホストの値の onePassword が false の runner は、
@@ -208,11 +210,12 @@ mod wsl {
     use std::os::unix::fs::PermissionsExt;
     use std::process::{Command, Stdio};
 
-    /// 偽の pwsh (WSL の pwsh.exe と runner の pwsh)。引数を FAKE_LOG に 1 行で足し、-Command の中の `' -Check;` の有無で、FAKE_DIR の
-    /// check.{out,rc} (-Check) か apply.{out,rc} (揃える流れ) から答える (出力は行ごとに CRLF。無ければ何も出さず 0)
+    /// 偽の pwsh (WSL の pwsh.exe と runner の pwsh)。引数を FAKE_LOG に 1 行で足し、-Command の中の `' -Check;` (runner は
+    /// `' -Check -SshRelay `) の有無で、FAKE_DIR の check.{out,rc} (-Check) か apply.{out,rc} (揃える流れ) から答える (出力は行ごとに
+    /// CRLF。無ければ何も出さず 0)
     const FAKE_PWSH: &str = r#"printf '%s\n' "$*" >>"${FAKE_LOG}"
 case $* in
-  *"' -Check; exit "*) f=${FAKE_DIR}/check ;;
+  *"' -Check; exit "* | *"' -Check -SshRelay "*) f=${FAKE_DIR}/check ;;
   *) f=${FAKE_DIR}/apply ;;
 esac
 if [[ -e ${f}.out ]]; then
@@ -243,6 +246,28 @@ exit "${rc}"
 
     /// 揃えられないときの直し方で、WSL と runner が同じ字で添えること
     const WHILE_BUSY: &str = "(op-reason.exe が動いているときは、op の呼び出しが終わってから)";
+
+    /// runner のホストの値の SSH の中継の switch (opReasonSshRelay)
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Relay {
+        Off,
+        On,
+    }
+
+    /// runner だけが渡す SSH の中継の引数 (WSL の script は渡さない)。どの呼び出しにもあることを確かめてから外す
+    fn without_relay(calls: Vec<String>, relay: Relay) -> Vec<String> {
+        let arg = match relay {
+            Relay::Off => " -SshRelay 'off'",
+            Relay::On => " -SshRelay 'per-call'",
+        };
+        calls
+            .into_iter()
+            .map(|c| {
+                assert!(c.contains(arg), "runner が{arg} を渡していない: {c}");
+                c.replacen(arg, "", 1)
+            })
+            .collect()
+    }
 
     /// 手順が最後にどうなったか
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -363,7 +388,7 @@ exit "${rc}"
                     std::fs::copy(&real_ps1, &deployed).unwrap();
                     let repo = std::fs::canonicalize(bash::repo_file("")).unwrap();
                     let body = format!(
-                        "printf '%s\\n' \"$*\" >>\"${{FAKE_LOG}}\"\ncase $* in\n  *\"' -Check; exit \"*) exec '{}' \"$@\" ;;\nesac\nprintf '%s\\n' '(試験のため、揃える流れは打たない)'\nexit 1\n",
+                        "printf '%s\\n' \"$*\" >>\"${{FAKE_LOG}}\"\ncase $* in\n  *\"' -Check; exit \"* | *\"' -Check -SshRelay \"*) exec '{}' \"$@\" ;;\nesac\nprintf '%s\\n' '(試験のため、揃える流れは打たない)'\nexit 1\n",
                         pwsh.display()
                     );
                     (repo, deployed.display().to_string(), body)
@@ -475,8 +500,13 @@ exit "${rc}"
             (stdout, stderr, self.calls("wsl", &self.wsl_ps1))
         }
 
-        /// runner の手順を流す (締めの表の行・出力の行・打った pwsh の引数)
-        fn runner(&self, mode: Mode, one_password: bool) -> (Vec<Row>, Vec<String>, Vec<String>) {
+        /// runner の手順を流す (締めの表の行・出力の行・打った pwsh の引数。runner だけが渡す -SshRelay は外して返す)
+        fn runner(
+            &self,
+            mode: Mode,
+            one_password: bool,
+            relay: Relay,
+        ) -> (Vec<Row>, Vec<String>, Vec<String>) {
             let mut envs = self.envs.clone();
             envs.push((
                 "FAKE_LOG".to_string(),
@@ -490,11 +520,19 @@ exit "${rc}"
                 pwsh: Some(self.fake_bin.join("pwsh")),
                 envs,
             };
-            let (rows, out) = run_runner(&self.repo, &self.root, &sys, &host(one_password), mode);
+            let host_text = match relay {
+                Relay::Off => host(one_password),
+                Relay::On => host(one_password).replacen(
+                    "[tools]\n",
+                    "[tools]\nopReasonSshRelay = true\n",
+                    1,
+                ),
+            };
+            let (rows, out) = run_runner(&self.repo, &self.root, &sys, &host_text, mode);
             let ps1 = crate::context::join_segments(&self.repo, spec().script)
                 .display()
                 .to_string();
-            (rows, out, self.calls("rn", &ps1))
+            (rows, out, without_relay(self.calls("rn", &ps1), relay))
         }
     }
 
@@ -546,6 +584,11 @@ exit "${rc}"
 
     /// 1 つの答えで WSL と runner (check・dry-run・apply) を流して突き合わせ、判定を返す
     fn same(w: &World, name: &str) -> Verdict {
+        same_on(w, name, Relay::Off)
+    }
+
+    /// `same` を、runner のホストの値の SSH の中継の switch を決めて流す
+    fn same_on(w: &World, name: &str, relay: Relay) -> Verdict {
         let (stdout, stderr, wsl_calls) = w.wsl();
         let v = wsl_verdict(&stdout, &stderr);
         let want_calls: Vec<&str> = match v {
@@ -555,7 +598,8 @@ exit "${rc}"
         };
         assert_eq!(wsl_calls, want_calls, "{name}: WSL が打った pwsh");
 
-        let (rows, out, calls) = w.runner(Mode::Apply { force: false }, v != Verdict::Skipped);
+        let (rows, out, calls) =
+            w.runner(Mode::Apply { force: false }, v != Verdict::Skipped, relay);
         assert_eq!(runner_verdict(&rows), v, "{name}: {rows:?}\n{out:?}");
         assert_eq!(calls, wsl_calls, "{name}: runner の apply が打った pwsh");
         if v != Verdict::Skipped {
@@ -612,7 +656,7 @@ exit "${rc}"
 
         // check と dry-run は -Check だけを打ち、WSL が進んだ道を出す
         for mode in [Mode::Check, Mode::DryRun { force: false }] {
-            let (rows, out, calls) = w.runner(mode, v != Verdict::Skipped);
+            let (rows, out, calls) = w.runner(mode, v != Verdict::Skipped, relay);
             assert_eq!(
                 runner_planned(&rows),
                 v.planned(),
@@ -801,7 +845,7 @@ exit "${rc}"
             "揃った".to_string(),
         ];
         assert_eq!(shown(&stdout, "  "), want);
-        let (_, out, _) = w.runner(Mode::Apply { force: false }, true);
+        let (_, out, _) = w.runner(Mode::Apply { force: false }, true, Relay::Off);
         assert!(shown(&out, "    ").ends_with(&want), "{out:?}");
         assert!(!out.iter().any(|l| l.contains('\u{1b}') || l.contains('\r')));
 
@@ -809,6 +853,49 @@ exit "${rc}"
         w.op_reason(false);
         w.answer((0, &synced), (0, &applied()));
         assert_eq!(same(&w, "対象の外"), Verdict::Skipped);
+    }
+
+    /// SSH の中継を使うホストでも、runner は ` -SshRelay 'per-call'` を渡すほかは WSL の script と同じ (WSL の setup は中継に触らない)
+    #[test]
+    fn matches_the_wsl_script_with_the_relay_on() {
+        let Some(w) = World::new(None) else {
+            return;
+        };
+        let synced = table(
+            "0.3.0",
+            "  固定した版       : 0.3.0 → そのまま",
+            &["揃っている"],
+        );
+        let cases: Vec<(&str, Answer, Answer, Verdict)> = vec![
+            (
+                "中継: 揃っている",
+                (0, synced),
+                (9, String::new()),
+                Verdict::Ok,
+            ),
+            (
+                "中継: 差 → 入れ替えた",
+                (1, drift(&[SYNC_LINE])),
+                (0, applied()),
+                Verdict::Synced,
+            ),
+            (
+                "中継: 無い → 入れた",
+                (3, missing()),
+                (0, applied()),
+                Verdict::Installed,
+            ),
+            (
+                "中継: 動いている → 入れ替えられない",
+                (1, drift(&[BUSY, SYNC_LINE])),
+                (1, drift(&[BUSY])),
+                Verdict::SyncFailed(1),
+            ),
+        ];
+        for (name, check, apply, want) in cases {
+            w.answer((check.0, &check.1), (apply.0, &apply.1));
+            assert_eq!(same_on(&w, name, Relay::On), want, "{name}");
+        }
     }
 
     /// 本物の Install-OpReason.ps1 の -Check で、WSL の script と runner が同じ判定になる (揃える流れは偽物が打たずに断る)。PATH に pwsh が
