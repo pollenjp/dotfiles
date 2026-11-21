@@ -21,6 +21,12 @@ WSL の op は、この置き場所の op-reason.exe を OPREASON_EXE で指す 
 何も変えずに止まって知らせる (止めはしない。承認を待っている途中かもしれないため)。記録 (%LOCALAPPDATA%\op-reason) には
 触らない。
 
+SSH の中継 (op-reason.exe --ssh-agent。1Password の SSH agent の前に立ち、鍵を使う呼び出しごとに窓を出す) は、-SshRelay で
+logon の task (\pjp\op-reason-ssh-relay) として置いて起こす (win/README.md の「SSH の中継」)。動いている op-reason.exe が
+その task の中継だけなら、入れ替えのときに中継を止め、入れ替えてから起こし直す。止めるのは op-reason の lock (Local\op-reason。
+中継は窓を開いている間と、呼び出しの最初の依頼が 1Password を待つ間に持つ) を取れたときだけで、取れなければ (窓が開いている)
+今までどおり何も変えずに止まる。lock は止めてから起こし直すまで持つ (その間に窓が開かない)。
+
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
 .PARAMETER Version
@@ -34,12 +40,22 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 .PARAMETER InstallDir
 展開した中身を置くディレクトリ。既定は %LOCALAPPDATA%\Programs\op-reason (WSL の OPREASON_EXE の既定が指す場所)。
 試すときだけ一時ディレクトリへ向ける。落とした zip と途中の物は、その隣 (同じ親ディレクトリ) に置く。
+
+.PARAMETER SshRelay
+SSH の中継の logon の task をどうするか。per-call・show-only (中継のモード) なら、task を置き (形が違えば置き直し)、中継が
+答えなければ起こして、--status が答えるのを 15 秒待つ。off なら、task を止めて消す。どちらも中継が窓を開いている間は止めない。
+task の形: 動作は <置き場所>\op-reason.exe --ssh-agent (show-only は --mode show-only を足す)・今のユーザーの logon・Interactive・
+Limited・時間の上限なし・電池でも起こして止めない・2 つ目を起こさない・失敗したら 1 分後に起こし直す (999 回まで)・隠す・優先度 5。
+WSL の setup (bootstrap-windows-op-reason.sh) が dotfiles.opReason.sshRelay から渡す。渡さなければ (Windows の runner) task を置きも
+消しもしない (task の中継を止めて入れ替えて起こし直すのは同じ)。
 #>
 [CmdletBinding()]
 param(
     [string]$Version = '0.5.0',
     [switch]$Check,
-    [string]$InstallDir = ''
+    [string]$InstallDir = '',
+    [ValidateSet('per-call', 'show-only', 'off')]
+    [string]$SshRelay
 )
 
 # ---------------------------------------------------------------------------
@@ -151,20 +167,12 @@ function Test-OpReasonBusyPath {
     $Path.StartsWith($InstallDir.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
-# 終了コード。入っていなければ 3、版が揃っていれば 0、ほかは 1
+# 終了コード。入っていなければ 3、版と SSH の中継 (Get-OpReasonRelayPlan) が揃っていれば 0、ほかは 1
 function Get-OpReasonExitCode {
-    param($State)
+    param($State, [string]$RelayPlan = 'none')
     if ($State.Plan -eq 'install') { return 3 }
-    if ($State.Plan -eq 'none') { return 0 }
+    if (($State.Plan -eq 'none') -and ((-not $RelayPlan) -or ($RelayPlan -eq 'none'))) { return 0 }
     1
-}
-
-# 揃える前に止める理由。無ければ $null
-#   busy: 入れ替えるのに、置き場所の op-reason.exe が動いている (op の呼び出しの途中で、置き場所を入れ替えられない)
-function Get-OpReasonApplyBlocker {
-    param([string]$Plan, [int]$BusyCount)
-    if (($Plan -eq 'change') -and ($BusyCount -gt 0)) { return 'busy' }
-    $null
 }
 
 # 前の実行が残した途中の物か (置き場所の隣の <置き場所の名前>.download-*・.new-*・.old-*)
@@ -177,9 +185,10 @@ function Test-OpReasonLeftoverName {
 }
 
 # 状態の表の行 (Text と、直すことがあるかの Warn)。直すことがある行だけ先頭に ⚠ を付け、
-# ほかは 2 字下げる。ずれそのものではないこと (動いている op-reason.exe がある) は ※ で添える
+# ほかは 2 字下げる。ずれそのものではないこと (動いている op-reason.exe がある) は ※ で添える。
+# BusyNote が relay なら、動いているのは task の SSH の中継だけ (入れ替えるときに止めて起こし直す。Get-OpReasonSwapAction)
 function Format-OpReasonState {
-    param($State, [string]$Target, [string]$InstallDir)
+    param($State, [string]$Target, [string]$InstallDir, [string]$BusyNote = '')
     $direction = if ($State.Direction -eq 'up') { ' (上げる)' } elseif ($State.Direction -eq 'down') { ' (下げる)' } else { '' }
     $planText = switch ($State.Plan) {
         'install' { '入れる' }
@@ -200,7 +209,137 @@ function Format-OpReasonState {
         [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
     }
     if (($State.Plan -eq 'change') -and ($State.BusyCount -gt 0)) {
-        [pscustomobject]@{ Text = "※ op-reason.exe が $($State.BusyCount) 個動いている (op の呼び出しの途中)。入れ替えるには、その呼び出しが終わってから打ち直す (このスクリプトは止めない)"; Warn = $false }
+        if ($BusyNote -eq 'relay') {
+            [pscustomobject]@{ Text = '※ 動いている op-reason.exe は SSH の中継だけ。入れ替えるときは中継を止め、入れ替えてから起こし直す (中継が窓を開いていれば止めない)'; Warn = $false }
+        } else {
+            [pscustomobject]@{ Text = "※ op-reason.exe が $($State.BusyCount) 個動いている (op の呼び出しの途中)。入れ替えるには、その呼び出しが終わってから打ち直す (このスクリプトは止めない)"; Warn = $false }
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# SSH の中継 (logon の task) の副作用の無い関数 (Install-OpReason.Tests.ps1 で確かめる)
+# ---------------------------------------------------------------------------
+
+# 中継の logon の task の場所と名前
+function Get-OpReasonRelayTaskId {
+    [pscustomobject]@{ Path = '\pjp\'; Name = 'op-reason-ssh-relay' }
+}
+
+# モードごとの中継の引数 (op-reason の README の「Starting it」。per-call は op-reason の既定のモード)
+function Get-OpReasonRelayArguments {
+    param([string]$Mode)
+    if ($Mode -eq 'show-only') { return '--ssh-agent --mode show-only' }
+    '--ssh-agent'
+}
+
+# 置きたい task の形 (Get-OpReasonRelayTask が読む今の形と同じ欄。Compare-OpReasonRelayTask で比べる)。
+#   Trigger   今のユーザーの logon の trigger 1 つなら logon
+#   Batteries 電池でも起こし、電池に替わっても止めない
+#   Priority  task の既定 (7) は通常より下なので、窓が遅れないよう通常 (5) にする
+function Get-OpReasonRelayWant {
+    param([string]$Mode, [string]$Exe)
+    [pscustomobject]@{
+        Execute         = $Exe
+        Arguments       = (Get-OpReasonRelayArguments -Mode $Mode)
+        Trigger         = 'logon'
+        LogonType       = 'Interactive'
+        RunLevel        = 'Limited'
+        TimeLimit       = 'PT0S'
+        Multiple        = 'IgnoreNew'
+        RestartCount    = 999
+        RestartInterval = 'PT1M'
+        Batteries       = $true
+        Hidden          = $true
+        Priority        = 5
+    }
+}
+
+# 今の task の形と置きたい形の、違う欄の名前 (欄の順)。無効なら Enabled も。置き場所 (Execute) は大文字小文字を問わない
+function Compare-OpReasonRelayTask {
+    param($Have, $Want)
+    $diff = @()
+    foreach ($name in 'Execute', 'Arguments', 'Trigger', 'LogonType', 'RunLevel', 'TimeLimit', 'Multiple', 'RestartCount', 'RestartInterval', 'Batteries', 'Hidden', 'Priority') {
+        $h = "$($Have.$name)"
+        $w = "$($Want.$name)"
+        $same = if ($name -eq 'Execute') { $h -eq $w } else { $h -ceq $w }
+        if (-not $same) { $diff += $name }
+    }
+    if (-not $Have.Enabled) { $diff += 'Enabled' }
+    $diff
+}
+
+# --status の出力から、答えた中継の PID。答えていなければ (終了コード 0 でない・PID の無い文) $null
+function ConvertFrom-OpReasonRelayStatus {
+    param([int]$Code, [string]$Text)
+    if ($Code -ne 0) { return $null }
+    if ($Text -match '\(pid (\d+)\)') { return [int]$Matches[1] }
+    $null
+}
+
+# 中継にすること。Want は -SshRelay の値 ('' は runner: task に触らない)
+#   none 何もしない・register task を置いて起こす・update 置き直して起こし直す・start 起こす・restart 止めて起こし直す
+#   (動いているのに答えない)・remove 止めて消す
+function Get-OpReasonRelayPlan {
+    param([string]$Want, $Task, [string[]]$Diff, $RelayPid)
+    if (-not $Want) { return 'none' }
+    if ($Want -eq 'off') {
+        if ($Task) { return 'remove' }
+        return 'none'
+    }
+    if (-not $Task) { return 'register' }
+    if (@($Diff).Count -gt 0) { return 'update' }
+    if (-not $RelayPid) {
+        if ($Task.State -eq 'Running') { return 'restart' }
+        return 'start'
+    }
+    'none'
+}
+
+# 置き場所を入れ替える前にすること。swap 止めるものが無い・stop-relay 動いている op-reason.exe が task の中継 (--status の PID) だけ
+# (lock を取れたら止める)・busy ほかの op-reason.exe か、task の外の中継が動いている (止めずに知らせる)
+function Get-OpReasonSwapAction {
+    param([string]$Plan, [int[]]$Busy, $RelayPid, [bool]$TaskRunning)
+    if ($Plan -ne 'change') { return 'swap' }
+    $ids = @($Busy)
+    if ($ids.Count -eq 0) { return 'swap' }
+    if ($RelayPid -and $TaskRunning -and ($ids.Count -eq 1) -and ($ids[0] -eq $RelayPid)) { return 'stop-relay' }
+    'busy'
+}
+
+# 状態の表の中継の行 (見出し・望む形・task・中継)。中継の行は、モードを望むときか task があるときだけ
+function Format-OpReasonRelayState {
+    param([string]$Want, $Task, [string[]]$Diff, $RelayPid, [string]$Plan)
+    $id = Get-OpReasonRelayTaskId
+    $wantText = switch ($Want) {
+        'per-call' { 'per-call (op-reason.exe --ssh-agent)' }
+        'show-only' { 'show-only (op-reason.exe --ssh-agent --mode show-only)' }
+        'off' { '置かない (-SshRelay off)' }
+        default { '決めない (-SshRelay なし。task には触らない)' }
+    }
+    $taskState = if (-not $Task) { '無い' }
+    elseif ($Task.State -eq 'Running') { 'ある (動いている)' }
+    elseif ($Task.State -eq 'Disabled') { 'ある (無効)' }
+    else { 'ある (止まっている)' }
+    $taskWarn = $false
+    switch ($Plan) {
+        'register' { $taskState = '無い → 置いて起こす'; $taskWarn = $true }
+        'update' { $taskState = "形が違う ($(@($Diff) -join '・')) → 置き直して起こし直す"; $taskWarn = $true }
+        'remove' { $taskState = "$taskState → 止めて消す"; $taskWarn = $true }
+    }
+    $relayWarn = $Plan -in 'start', 'restart'
+    $relayState = if ($RelayPid) { "答えている (pid $RelayPid)" } elseif ($Plan -eq 'start') { '答えない → 起こす' } elseif ($Plan -eq 'restart') { '答えない → 起こし直す' } else { '答えない' }
+    $rows = @(
+        @{ Text = "SSH の中継 (logon の task $($id.Path)$($id.Name))"; Warn = $false; Indent = $false }
+        @{ Text = "望む形           : $wantText"; Warn = $false; Indent = $true }
+        @{ Text = "task             : $taskState"; Warn = $taskWarn; Indent = $true }
+    )
+    if (($Want -in 'per-call', 'show-only') -or $Task) {
+        $rows += @{ Text = "中継             : $relayState"; Warn = $relayWarn; Indent = $true }
+    }
+    foreach ($row in $rows) {
+        $prefix = if (-not $row.Indent) { '' } elseif ($row.Warn) { '⚠ ' } else { '  ' }
+        [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
     }
 }
 
@@ -284,6 +423,150 @@ function Get-OpReasonBusyProcess {
         })
 }
 
+# 中継の task の今の形 (Get-OpReasonRelayWant と同じ欄に Enabled と State を足したもの)。無ければ $null。
+# ScheduledTasks の module が無い (Linux の pwsh の試験) ときも $null
+function Get-OpReasonRelayTask {
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) { return $null }
+    $id = Get-OpReasonRelayTaskId
+    $t = Get-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -ErrorAction SilentlyContinue
+    if (-not $t) { return $null }
+    $action = @($t.Actions)[0]
+    $triggers = @($t.Triggers)
+    # logon の trigger 1 つで、今のユーザーのもの (DOMAIN\ の有る無しは問わない) なら logon。ほかは trigger の種類を並べる
+    $me = ([Security.Principal.WindowsIdentity]::GetCurrent().Name -split '\\')[-1]
+    $trigger = (@($triggers | ForEach-Object { $_.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', '' }) -join '+')
+    if (($triggers.Count -eq 1) -and ($triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger') -and
+        (("$($triggers[0].UserId)" -split '\\')[-1] -eq $me)) {
+        $trigger = 'logon'
+    }
+    $s = $t.Settings
+    [pscustomobject]@{
+        Execute         = "$($action.Execute)"
+        Arguments       = "$($action.Arguments)"
+        Trigger         = $trigger
+        LogonType       = "$($t.Principal.LogonType)"
+        RunLevel        = "$($t.Principal.RunLevel)"
+        TimeLimit       = "$($s.ExecutionTimeLimit)"
+        Multiple        = "$($s.MultipleInstances)"
+        RestartCount    = [int]$s.RestartCount
+        RestartInterval = "$($s.RestartInterval)"
+        Batteries       = (-not $s.DisallowStartIfOnBatteries) -and (-not $s.StopIfGoingOnBatteries)
+        Hidden          = [bool]$s.Hidden
+        Priority        = [int]$s.Priority
+        Enabled         = [bool]$s.Enabled
+        State           = "$($t.State)"
+    }
+}
+
+# 中継の task を置きたい形で置く (あれば置き直す)。権限は上げない (今のユーザーの Interactive・Limited)
+function Register-OpReasonRelayTask {
+    param($Want)
+    $id = Get-OpReasonRelayTaskId
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $action = New-ScheduledTaskAction -Execute $Want.Execute -Argument $Want.Arguments
+    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+    $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
+    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
+        -RestartCount $Want.RestartCount -RestartInterval ([Xml.XmlConvert]::ToTimeSpan($Want.RestartInterval)) `
+        -Hidden -Priority $Want.Priority
+    Register-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -Action $action -Trigger $trigger -Principal $principal `
+        -Settings $settings -Force `
+        -Description 'op-reason の SSH の中継 (dotfiles の Install-OpReason.ps1 -SshRelay が置く。-SshRelay off で消す。win/README.md の「SSH の中継」)' |
+        Out-Null
+}
+
+function Unregister-OpReasonRelayTask {
+    $id = Get-OpReasonRelayTaskId
+    Unregister-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -Confirm:$false
+}
+
+function Start-OpReasonRelayTask {
+    $id = Get-OpReasonRelayTaskId
+    Start-ScheduledTask -TaskPath $id.Path -TaskName $id.Name
+}
+
+function Stop-OpReasonRelayTask {
+    $id = Get-OpReasonRelayTaskId
+    Stop-ScheduledTask -TaskPath $id.Path -TaskName $id.Name
+}
+
+# task を有効・無効にする (無効の間は、失敗したときの起こし直しも trigger も起こさない)
+function Set-OpReasonRelayTaskEnabled {
+    param([bool]$Enabled)
+    $id = Get-OpReasonRelayTaskId
+    if ($Enabled) {
+        Enable-ScheduledTask -TaskPath $id.Path -TaskName $id.Name | Out-Null
+    } else {
+        Disable-ScheduledTask -TaskPath $id.Path -TaskName $id.Name | Out-Null
+    }
+}
+
+# 既定の pipe で答える中継の PID (op-reason.exe --ssh-agent --status)。答えない・起こせないときは $null
+function Get-OpReasonRelayPid {
+    param([string]$Exe)
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return $null }
+    try {
+        $text = (& $Exe '--ssh-agent' '--status' 2>&1 | Out-String)
+        ConvertFrom-OpReasonRelayStatus -Code $LASTEXITCODE -Text $text
+    } catch {
+        $null
+    }
+}
+
+# 中継が答えるのを、最大 Seconds 秒待つ。答えた PID か $null
+function Wait-OpReasonRelayPid {
+    param([string]$Exe, [int]$Seconds)
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    while ($true) {
+        $found = Get-OpReasonRelayPid -Exe $Exe
+        if ($found) { return $found }
+        if ((Get-Date) -ge $deadline) { return $null }
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+# プロセスが終わるのを最大 Seconds 秒待つ。終わった (か、もう無い) なら $true
+function Wait-OpReasonProcessExit {
+    param([int]$Id, [int]$Seconds)
+    $p = Get-Process -Id $Id -ErrorAction SilentlyContinue
+    if (-not $p) { return $true }
+    $p.WaitForExit($Seconds * 1000)
+}
+
+# op-reason の lock (名前付き mutex Local\op-reason。op-reason.exe・launcher.ps1・中継が窓を出す間に持つ) を待たずに取る。
+# 取れたら mutex、ほかが持っていれば $null。前の持ち主が放さずに終わっていたら (AbandonedMutexException) 取れたとみなす
+function Enter-OpReasonLock {
+    $m = [Threading.Mutex]::new($false, 'Local\op-reason')
+    try {
+        if ($m.WaitOne(0)) { return $m }
+    } catch [Threading.AbandonedMutexException] {
+        return $m
+    }
+    $m.Dispose()
+    $null
+}
+
+function Exit-OpReasonLock {
+    param($Lock)
+    if (-not $Lock) { return }
+    try { $Lock.ReleaseMutex() } catch { }
+    $Lock.Dispose()
+}
+
+# task の中継を止める (lock を持っている前提)。task を無効にしてから止め (起こし直しを起こさない)、プロセスが終わるのを
+# 10 秒待つ。終われば $true。終わらなければ task を有効に戻して $false
+function Stop-OpReasonRelay {
+    param($RelayPid)
+    Set-OpReasonRelayTaskEnabled -Enabled $false
+    Stop-OpReasonRelayTask
+    if ($RelayPid -and -not (Wait-OpReasonProcessExit -Id $RelayPid -Seconds 10)) {
+        Set-OpReasonRelayTaskEnabled -Enabled $true
+        return $false
+    }
+    $true
+}
+
 # 今の状態を読む (何も変えない。管理者は要らない)
 function Get-OpReasonState {
     param([string]$InstallDir, [string]$Target, $Releases)
@@ -301,18 +584,63 @@ function Get-OpReasonState {
     }
 }
 
-# 状態の表を出す。直すことがある行 (⚠) は黄色にする
-function Write-OpReasonState {
-    param($State, [string]$Target, [string]$InstallDir)
-    foreach ($row in (Format-OpReasonState -State $State -Target $Target -InstallDir $InstallDir)) {
+# 状態の表の行を出す。直すことがある行 (⚠) は黄色にする
+function Write-OpReasonRows {
+    param($Rows)
+    foreach ($row in $Rows) {
         if ($row.Warn) { Write-Host $row.Text -ForegroundColor Yellow } else { Write-Host $row.Text }
     }
 }
 
+# 状態の表を出す
+function Write-OpReasonState {
+    param($State, [string]$Target, [string]$InstallDir, [string]$BusyNote = '')
+    Write-OpReasonRows -Rows (Format-OpReasonState -State $State -Target $Target -InstallDir $InstallDir -BusyNote $BusyNote)
+}
+
+# 中継の今の様子 (task・答える PID・計画)。Want は -SshRelay の値
+function Get-OpReasonRelayView {
+    param([string]$Want, $State, [string]$Exe)
+    $task = Get-OpReasonRelayTask
+    $wantShape = $null
+    if ($Want -in 'per-call', 'show-only') { $wantShape = Get-OpReasonRelayWant -Mode $Want -Exe $Exe }
+    $diff = @()
+    if ($task -and $wantShape) { $diff = @(Compare-OpReasonRelayTask -Have $task -Want $wantShape) }
+    # --status は置き場所の op-reason.exe で聞く。task も望む形も無ければ聞かない (中継を使わないホストでは今までどおり)
+    $relayPid = $null
+    if (($task -or $wantShape) -and $State.Exists) { $relayPid = Get-OpReasonRelayPid -Exe $Exe }
+    [pscustomobject]@{
+        Task  = $task
+        Want  = $wantShape
+        Diff  = $diff
+        Pid   = $relayPid
+        Plan  = (Get-OpReasonRelayPlan -Want $Want -Task $task -Diff $diff -RelayPid $relayPid)
+        Shown = [bool]($Want -or $task)
+    }
+}
+
+# task の中継を、lock を取ってから止める。止めたら $true (lock は $Ctx.Lock に残し、起こし直すまで持つ)。
+# lock を取れない (中継が窓を開いている・1Password の確認を待っている) か、止まらなければ、わけを出して $false
+function Stop-OpReasonRelayLocked {
+    param($Ctx, $RelayPid)
+    if (-not $Ctx.Lock) { $Ctx.Lock = Enter-OpReasonLock }
+    if (-not $Ctx.Lock) {
+        Write-Host 'SSH の中継が窓を開いている (か、1Password の確認を待っている) ので、中継を止めない。窓に答えてから打ち直す (このスクリプトは止めない)'
+        return $false
+    }
+    if (-not (Stop-OpReasonRelay -RelayPid $RelayPid)) {
+        Write-Host "SSH の中継 (pid $RelayPid) が 10 秒たっても止まらなかった。中継は動いたまま (task は有効に戻した)"
+        return $false
+    }
+    $Ctx.Stopped = $true
+    $true
+}
+
 # 固定した版の zip を落として確かめ、展開した中身で置き場所を入れ替える。置けたら $true。
-# 置けないときは、わけを出して $false を返し、何も変えない (落とした物と展開した物は消す。入れ替えの途中で落ちたら前の中身に戻す)
+# 置けないときは、わけを出して $false を返し、何も変えない (落とした物と展開した物は消す。入れ替えの途中で落ちたら前の中身に戻す)。
+# BeforeSwap は、確かめた後・前の中身をよける前に呼ぶ (task の SSH の中継を止める)。$true を返さなければ、何も変えずに $false
 function Save-OpReason {
-    param([string]$Url, [string]$ExpectedZip, [string]$ExpectedTree, [string]$InstallDir)
+    param([string]$Url, [string]$ExpectedZip, [string]$ExpectedTree, [string]$InstallDir, [scriptblock]$BeforeSwap)
     $parent = Split-Path -Parent $InstallDir
     $leaf = Split-Path -Leaf $InstallDir
     $createdParent = $false
@@ -369,6 +697,10 @@ function Save-OpReason {
             Write-Host 'zip の中の並びが変わったか、表の値の書き誤り。どちらかを確かめるまで入れない'
             return $false
         }
+        if ($BeforeSwap -and -not [bool](@(& $BeforeSwap)[-1])) {
+            Write-Host '置き場所は何も変えていない'
+            return $false
+        }
         $existed = Test-Path -LiteralPath $InstallDir
         if ($existed) {
             try {
@@ -410,7 +742,7 @@ function Save-OpReason {
 }
 
 function Invoke-InstallOpReason {
-    param([string]$Version, [switch]$Check, [string]$InstallDir)
+    param([string]$Version, [switch]$Check, [string]$InstallDir, [string]$SshRelay = '')
     $releases = Get-OpReasonReleases
     if (-not $releases.Contains($Version)) {
         Write-Host "版 $Version の SHA-256 が Install-OpReason.ps1 の表 (Get-OpReasonReleases) に無い。表にある版: $(@($releases.Keys) -join ', ')"
@@ -420,17 +752,36 @@ function Invoke-InstallOpReason {
     # 相対パスで渡されても、今の場所 (PowerShell の location) から解いた絶対パスにする。
     # [IO.File] などの .NET はプロセスの作業ディレクトリで解くので、相対のまま渡すと別の所を見る
     $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir).TrimEnd('\', '/')
+    $exe = Join-Path $InstallDir 'op-reason.exe'
+    $fix = if ($SshRelay) { "Install-OpReason -SshRelay $SshRelay" } else { 'Install-OpReason' }
 
     $state = Get-OpReasonState -InstallDir $InstallDir -Target $Version -Releases $releases
-    Write-OpReasonState -State $state -Target $Version -InstallDir $InstallDir
-    $code = Get-OpReasonExitCode -State $state
+    $relay = Get-OpReasonRelayView -Want $SshRelay -State $state -Exe $exe
+    # 入れ替えの前に止めるもの。動いている op-reason.exe が task の SSH の中継だけなら、止めて入れ替えて起こし直す
+    $swap = 'swap'
+    if ($state.Plan -eq 'change') {
+        $busyIds = @(Get-OpReasonBusyProcess -InstallDir $InstallDir | ForEach-Object { $_.Id })
+        $taskRunning = [bool]($relay.Task -and ($relay.Task.State -eq 'Running'))
+        $swap = Get-OpReasonSwapAction -Plan $state.Plan -Busy $busyIds -RelayPid $relay.Pid -TaskRunning $taskRunning
+    }
+    Write-OpReasonState -State $state -Target $Version -InstallDir $InstallDir -BusyNote $(if ($swap -eq 'stop-relay') { 'relay' } else { '' })
+    if ($relay.Shown) {
+        Write-OpReasonRows -Rows (Format-OpReasonRelayState -Want $SshRelay -Task $relay.Task -Diff $relay.Diff -RelayPid $relay.Pid -Plan $relay.Plan)
+    }
+    $code = Get-OpReasonExitCode -State $state -RelayPlan $relay.Plan
 
-    # -Check は何も変えない
+    # -Check は何も変えない (task と --status を見るだけ)
     if ($Check) {
         switch ($code) {
             0 { Write-Host '揃っている' }
-            3 { Write-Host '⚠️ op-reason が入っていない → Install-OpReason で入れる ⚠️' -ForegroundColor Yellow }
-            default { Write-Host '⚠️ 固定した版と揃っていない → Install-OpReason で揃える ⚠️' -ForegroundColor Yellow }
+            3 { Write-Host "⚠️ op-reason が入っていない → $fix で入れる ⚠️" -ForegroundColor Yellow }
+            default {
+                if ($state.Plan -eq 'none') {
+                    Write-Host "⚠️ SSH の中継が揃っていない → $fix で揃える ⚠️" -ForegroundColor Yellow
+                } else {
+                    Write-Host "⚠️ 固定した版と揃っていない → $fix で揃える ⚠️" -ForegroundColor Yellow
+                }
+            }
         }
         return $code
     }
@@ -439,7 +790,7 @@ function Invoke-InstallOpReason {
         return 0
     }
 
-    if ((Get-OpReasonApplyBlocker -Plan $state.Plan -BusyCount $state.BusyCount) -eq 'busy') {
+    if ($swap -eq 'busy') {
         Write-Host 'op-reason.exe が動いていて置き場所を入れ替えられない。op の呼び出しが終わってから打ち直す (このスクリプトは止めない):'
         foreach ($p in @(Get-OpReasonBusyProcess -InstallDir $InstallDir)) {
             Write-Host "  $($p.Id)  $($p.Path)"
@@ -447,14 +798,74 @@ function Invoke-InstallOpReason {
         return 1
     }
 
-    $saved = Save-OpReason -Url (Get-OpReasonDownloadUrl -Version $Version) -ExpectedZip $releases[$Version].Zip -ExpectedTree $releases[$Version].Tree -InstallDir $InstallDir
-    if (-not $saved) { return 1 }
+    # 中継を止めたら (lock を取り、task を無効にした)、起こし直すまで lock を持つ
+    $relayCtx = @{ Lock = $null; Stopped = $false }
+    $relayPid = $relay.Pid
+    $relayUp = [bool]($relayPid -or ($relay.Task -and ($relay.Task.State -eq 'Running')))
+    $result = 0
+    $start = $false
+    try {
+        if ($state.Plan -ne 'none') {
+            # 落として確かめてから止める (落とす間は lock を持たず、op の呼び出しを待たせない)
+            $before = $null
+            if ($swap -eq 'stop-relay') { $before = { Stop-OpReasonRelayLocked -Ctx $relayCtx -RelayPid $relayPid } }
+            $saved = Save-OpReason -Url (Get-OpReasonDownloadUrl -Version $Version) -ExpectedZip $releases[$Version].Zip -ExpectedTree $releases[$Version].Tree -InstallDir $InstallDir -BeforeSwap $before
+            if (-not $saved) { $result = 1 }
+        }
+
+        if (($result -eq 0) -and ($SshRelay -in 'per-call', 'show-only')) {
+            # 形が替わった・動いているのに答えない中継は、止めてから置き直して起こす (動いている中継はモードが替わらない)
+            if (($relay.Plan -in 'update', 'restart') -and $relayUp -and -not $relayCtx.Stopped) {
+                if (-not (Stop-OpReasonRelayLocked -Ctx $relayCtx -RelayPid $relayPid)) { $result = 1 }
+            }
+            if ($result -eq 0) {
+                if ($relay.Plan -in 'register', 'update') {
+                    Register-OpReasonRelayTask -Want $relay.Want
+                    $id = Get-OpReasonRelayTaskId
+                    Write-Host "logon の task を置いた: $($id.Path)$($id.Name) ($($relay.Want.Execute) $($relay.Want.Arguments))"
+                }
+                $start = $true
+            }
+        } elseif (($result -eq 0) -and ($SshRelay -eq 'off') -and $relay.Task) {
+            if ($relayUp -and -not $relayCtx.Stopped) {
+                if (-not (Stop-OpReasonRelayLocked -Ctx $relayCtx -RelayPid $relayPid)) { $result = 1 }
+            }
+            if ($result -eq 0) {
+                Unregister-OpReasonRelayTask
+                $relayCtx.Stopped = $false
+                Write-Host 'logon の task を消した (SSH の中継は止まっている)'
+            }
+        }
+
+        # 止めた中継 (入れ替えが落ちたときも、前の中身のまま) と、置いた task を起こし、答えるのを見る
+        if ($relayCtx.Stopped -or $start) {
+            if ($relayCtx.Stopped) { Set-OpReasonRelayTaskEnabled -Enabled $true }
+            $id = Get-OpReasonRelayTaskId
+            Write-Host "SSH の中継を起こす (task $($id.Path)$($id.Name))"
+            Start-OpReasonRelayTask
+            $relayCtx.Stopped = $false
+            $answered = Wait-OpReasonRelayPid -Exe $exe -Seconds 15
+            if ($answered) {
+                Write-Host "SSH の中継が答えた (pid $answered)"
+            } else {
+                Write-Host "SSH の中継が答えない (15 秒待った)。op-reason.exe が止められていないか (Smart App Control など)、task の最後の結果 (Get-ScheduledTaskInfo -TaskPath '$($id.Path)' -TaskName '$($id.Name)') を見る"
+                $result = 1
+            }
+        }
+    } finally {
+        Exit-OpReasonLock -Lock $relayCtx.Lock
+    }
+    if ($result -ne 0) { return $result }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
     $after = Get-OpReasonState -InstallDir $InstallDir -Target $Version -Releases $releases
+    $relayAfter = Get-OpReasonRelayView -Want $SshRelay -State $after -Exe $exe
     Write-OpReasonState -State $after -Target $Version -InstallDir $InstallDir
-    if ((Get-OpReasonExitCode -State $after) -eq 0) {
+    if ($relayAfter.Shown) {
+        Write-OpReasonRows -Rows (Format-OpReasonRelayState -Want $SshRelay -Task $relayAfter.Task -Diff $relayAfter.Diff -RelayPid $relayAfter.Pid -Plan $relayAfter.Plan)
+    }
+    if ((Get-OpReasonExitCode -State $after -RelayPlan $relayAfter.Plan) -eq 0) {
         Write-Host '揃った'
         return 0
     }
@@ -468,7 +879,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        exit (Invoke-InstallOpReason -Version $Version -Check:$Check -InstallDir $InstallDir)
+        exit (Invoke-InstallOpReason -Version $Version -Check:$Check -InstallDir $InstallDir -SshRelay $SshRelay)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace
