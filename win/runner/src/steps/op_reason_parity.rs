@@ -105,19 +105,6 @@ fn code_in(s: &str) -> Option<i32> {
         .ok()
 }
 
-/// 手順が最後にどうなったか
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Verdict {
-    /// 流さなかった (対象の外・off)
-    Skipped,
-    Ok,
-    Installed,
-    Synced,
-    InstallFailed(i32),
-    SyncFailed(i32),
-    CheckFailed(i32),
-}
-
 /// `-Check` の後に進む道 (runner の check と dry-run が出すもの)
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Planned {
@@ -126,43 +113,6 @@ enum Planned {
     Install,
     Sync,
     CheckFailed(i32),
-}
-
-impl Verdict {
-    fn planned(self) -> Planned {
-        match self {
-            Verdict::Skipped => Planned::Skipped,
-            Verdict::Ok => Planned::Ok,
-            Verdict::Installed | Verdict::InstallFailed(_) => Planned::Install,
-            Verdict::Synced | Verdict::SyncFailed(_) => Planned::Sync,
-            Verdict::CheckFailed(c) => Planned::CheckFailed(c),
-        }
-    }
-}
-
-/// runner の apply の行から
-fn runner_verdict(rows: &[Row]) -> Verdict {
-    assert_eq!(rows.len(), 1, "{rows:?}");
-    let r = &rows[0];
-    let t = r.text.as_str();
-    match r.kind {
-        Kind::Off => Verdict::Skipped,
-        Kind::Ok if t == "揃っている" => Verdict::Ok,
-        Kind::Ok if t == "入れた" => Verdict::Installed,
-        Kind::Ok if t == "揃えた" => Verdict::Synced,
-        Kind::Failed if t.starts_with("入れられなかった (終了コード ") => {
-            Verdict::InstallFailed(code_in(t).unwrap())
-        }
-        Kind::Failed if t.starts_with("揃えられなかった (終了コード ") => {
-            Verdict::SyncFailed(code_in(t).unwrap())
-        }
-        Kind::Failed
-            if t.starts_with("Install-OpReason.ps1 -Check で確かめられなかった (終了コード ") =>
-        {
-            Verdict::CheckFailed(code_in(t).unwrap())
-        }
-        _ => panic!("知らない行: {r:?}"),
-    }
 }
 
 /// runner の check・dry-run の行から
@@ -188,11 +138,23 @@ fn runner_planned(rows: &[Row]) -> Planned {
     }
 }
 
+/// PATH の本物の pwsh (PowerShell 7)。無ければ None (試験を飛ばす)。WSL で流しても /mnt の下 (本物の Windows の pwsh) は探さない
+fn real_pwsh() -> Option<PathBuf> {
+    if cfg!(windows) {
+        return RealSys.which("pwsh");
+    }
+    let path = std::env::var_os("PATH")?;
+    std::env::split_paths(&path)
+        .filter(|d| !d.starts_with("/mnt"))
+        .map(|d| d.join("pwsh"))
+        .find(|p| p.is_file())
+}
+
 /// 本物の Install-OpReason.ps1 の `-Check` を、置き場所を一時ディレクトリに向けて流す (PATH に pwsh が無ければ飛ばす。GitHub Actions の
 /// ubuntu と windows の image にはある)。置き場所が無ければ missing、表のどの版とも合わない中身なら fix。落とさない・置き場所に書かない
 #[test]
 fn reads_the_state_table_of_the_real_ps1() {
-    let Some(pwsh) = RealSys.which("pwsh") else {
+    let Some(pwsh) = real_pwsh() else {
         return;
     };
     let t = TempDir::new("op-reason-real");
@@ -208,15 +170,10 @@ fn reads_the_state_table_of_the_real_ps1() {
         ],
     };
     let (rows, out) = run_runner(&repo, &root, &sys, &host(true), Mode::Check);
+    assert_eq!(runner_planned(&rows), Planned::Install, "{out:?}");
     assert_eq!(
-        rows,
-        vec![Row::new(
-            Some(97),
-            "op-reason",
-            Kind::Missing,
-            "入っていない → apply で入れる (Install-OpReason.ps1)"
-        )],
-        "{out:?}"
+        (rows[0].order, rows[0].id.as_str()),
+        (Some(97), "op-reason")
     );
     assert!(!local.join("Programs").exists(), "置き場所を作った");
 
@@ -231,16 +188,7 @@ fn reads_the_state_table_of_the_real_ps1() {
         &host(true),
         Mode::DryRun { force: false },
     );
-    assert_eq!(
-        rows,
-        vec![Row::new(
-            Some(97),
-            "op-reason",
-            Kind::Fix,
-            "固定した版と揃っていない → apply で揃える (Install-OpReason.ps1)"
-        )],
-        "{out:?}"
-    );
+    assert_eq!(runner_planned(&rows), Planned::Sync, "{out:?}");
     assert!(
         out.iter()
             .any(|l| l == "[dry-run] Install-OpReason.ps1 を流す (揃える)"),
@@ -295,6 +243,58 @@ exit "${rc}"
 
     /// 揃えられないときの直し方で、WSL と runner が同じ字で添えること
     const WHILE_BUSY: &str = "(op-reason.exe が動いているときは、op の呼び出しが終わってから)";
+
+    /// 手順が最後にどうなったか
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Verdict {
+        /// 流さなかった (対象の外・off)
+        Skipped,
+        Ok,
+        Installed,
+        Synced,
+        InstallFailed(i32),
+        SyncFailed(i32),
+        CheckFailed(i32),
+    }
+
+    impl Verdict {
+        fn planned(self) -> Planned {
+            match self {
+                Verdict::Skipped => Planned::Skipped,
+                Verdict::Ok => Planned::Ok,
+                Verdict::Installed | Verdict::InstallFailed(_) => Planned::Install,
+                Verdict::Synced | Verdict::SyncFailed(_) => Planned::Sync,
+                Verdict::CheckFailed(c) => Planned::CheckFailed(c),
+            }
+        }
+    }
+
+    /// runner の apply の行から
+    fn runner_verdict(rows: &[Row]) -> Verdict {
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        let r = &rows[0];
+        let t = r.text.as_str();
+        match r.kind {
+            Kind::Off => Verdict::Skipped,
+            Kind::Ok if t == "揃っている" => Verdict::Ok,
+            Kind::Ok if t == "入れた" => Verdict::Installed,
+            Kind::Ok if t == "揃えた" => Verdict::Synced,
+            Kind::Failed if t.starts_with("入れられなかった (終了コード ") => {
+                Verdict::InstallFailed(code_in(t).unwrap())
+            }
+            Kind::Failed if t.starts_with("揃えられなかった (終了コード ") => {
+                Verdict::SyncFailed(code_in(t).unwrap())
+            }
+            Kind::Failed
+                if t.starts_with(
+                    "Install-OpReason.ps1 -Check で確かめられなかった (終了コード ",
+                ) =>
+            {
+                Verdict::CheckFailed(code_in(t).unwrap())
+            }
+            _ => panic!("知らない行: {r:?}"),
+        }
+    }
 
     /// 偽の pwsh の答え (終了コードと、行ごとの出力)
     type Answer = (i32, String);
@@ -815,7 +815,7 @@ exit "${rc}"
     /// 無ければ飛ばす
     #[test]
     fn matches_the_wsl_script_with_the_real_check() {
-        let Some(pwsh) = RealSys.which("pwsh") else {
+        let Some(pwsh) = real_pwsh() else {
             return;
         };
         let Some(w) = World::new(Some(&pwsh)) else {
