@@ -148,6 +148,18 @@ if (Get-Module -Name PSReadLine) {
         param($key, $arg)
         [Microsoft.PowerShell.PSConsoleReadLine]::SelfInsert([System.ConsoleKeyInfo]::new(' ', [System.ConsoleKey]::Spacebar, $false, $false, $false), $arg)
     }
+
+    # bash (readline) でよく使う語の移動と消し方の 4 つを、bash と同じ動きにする (win/README.md の「bash に似たキー」)。EditMode は Windows
+    # (Windows の既定) のままにし、この 4 つだけを Emacs モードと同じ関数に割り当てる (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる)。
+    # - Alt+f・Alt+b: 語の終わりへ・語の頭へ (bash の forward-word・backward-word。Windows モードには割り当てが無い)
+    # - Ctrl+w: 前の空白まで消す (unix-word-rubout。cd foo/bar なら foo/bar を丸ごと。Windows モードの既定は記号でも止まる BackwardKillWord)
+    # - Alt+d: 語の終わりまで消す (kill-word。Windows モードの既定も KillWord だが、PSReadLine の既定が変わっても同じに動くよう書く)
+    # herdr-app の端末は Ctrl+←・Ctrl+→・Ctrl+Backspace を ESC b・ESC f・^W で送り (herdr-app の既定の keys.json の terminal の節)、PowerShell には
+    # Alt+b・Alt+f・Ctrl+w として届くので、herdr-app ではこの割り当てがそのキーにも効く。語の区切り (WordDelimiters) はほかのキーにも効くので替えない
+    Set-PSReadLineKeyHandler -Chord 'Alt+f' -Function ForwardWord
+    Set-PSReadLineKeyHandler -Chord 'Alt+b' -Function BackwardWord
+    Set-PSReadLineKeyHandler -Chord 'Ctrl+w' -Function UnixWordRubout
+    Set-PSReadLineKeyHandler -Chord 'Alt+d' -Function KillWord
 }
 
 # Windows の OpenSSH (winget の Microsoft.OpenSSH.Preview) を、dotfiles で固定した版に揃える。

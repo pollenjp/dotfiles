@@ -1,7 +1,7 @@
 ﻿# win/powershell/dotfiles.ps1 の runner の関数 (dotfiles・ConvertTo-DotfilesRunnerArgs) と、略語の展開 (略語の表・判定の関数・
-# PSReadLine の割り当て) のテスト。Pester は使わない。
+# PSReadLine の割り当て) と、bash に似たキーの PSReadLine の割り当てのテスト。Pester は使わない。
 # dotfiles 関数は cargo を打つので、HOME を一時ディレクトリにした子の pwsh で、cargo を関数の偽物に替えて流す (本物の cargo も
-# ホームの clone も触らない)。略語の割り当ても子の pwsh で確かめる (このテストの PowerShell の PSReadLine には触らない)。
+# ホームの clone も触らない)。略語と bash に似たキーの割り当ても子の pwsh で確かめる (このテストの PowerShell の PSReadLine には触らない)。
 #
 # WSL から流す (Linux の pwsh で動かすので、Windows 側には触らない):
 #   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/powershell/dotfiles.Tests.ps1
@@ -22,6 +22,8 @@
 #   - PSReadLine を読み込んでいない PowerShell (script・CI) で読んでも PSReadLine を読み込まない。読み込んだ PowerShell では、
 #     Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar・Ctrl+@・Shift+Spacebar を「広げずに空白を
 #     入れる」に割り当て (Shift+Spacebar は Spacebar と別のキー)、> と < には割り当てない
+#   - Windows の既定の EditMode (Windows) で読むと、Alt+f・Alt+b・Ctrl+w・Alt+d を ForwardWord・BackwardWord・UnixWordRubout・KillWord に
+#     割り当て (4 つの既定の割り当てを外してから読んでも)、EditMode は Windows のまま、WordDelimiters は替えない
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
 $ErrorActionPreference = 'Stop'
@@ -261,6 +263,31 @@ $wanted = @(
     'Shift+Spacebar=DotfilesAbbrInsertSpace'
 ) | Sort-Object
 Test-Case '略語の割り当て: Space ; | & ) Enter Ctrl+Spacebar Ctrl+@ Shift+Spacebar に割り当てる' $wanted { $bound }
+
+# bash に似たキー: Windows の既定の EditMode (Windows) で読むと、Alt+f・Alt+b・Ctrl+w・Alt+d を bash の forward-word・backward-word・
+# unix-word-rubout・kill-word に当たる関数に割り当てる。4 つとも外してから読み、PSReadLine の既定によらず dotfiles.ps1 が自分で割り当てることを
+# 見る (Alt+d は今の Windows モードの既定でも KillWord)。EditMode (Emacs モードにすると Ctrl+a・Ctrl+v・Tab などほかのキーも替わる) と
+# WordDelimiters (ほかのキーの語の区切りにも効く) は替えない。キーは大文字小文字を区別して選ぶ (Alt+F は Alt+Shift+f で別のキー)。
+# 5.1 の PSReadLine 2.0.0 の Get-PSReadLineKeyHandler には -Chord が無い
+$wordOut = @(Invoke-AbbrChild -Body @'
+Import-Module PSReadLine
+Set-PSReadLineOption -EditMode Windows
+Remove-PSReadLineKeyHandler -Chord 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d'
+$delimiters = (Get-PSReadLineOption).WordDelimiters
+. $Dotfiles
+"EditMode=$((Get-PSReadLineOption).EditMode)"
+"WordDelimiters=$((Get-PSReadLineOption).WordDelimiters -ceq $delimiters)"
+Get-PSReadLineKeyHandler -Bound | Where-Object { $_.Key -cin 'Alt+f', 'Alt+b', 'Ctrl+w', 'Alt+d' } | ForEach-Object { "$($_.Key)=$($_.Function)" }
+'@)
+$wantedWordKeys = @(
+    'Alt+f=ForwardWord'
+    'Alt+b=BackwardWord'
+    'Ctrl+w=UnixWordRubout'
+    'Alt+d=KillWord'
+) | Sort-Object
+Test-Case 'bash に似たキー: Alt+f Alt+b Ctrl+w Alt+d を ForwardWord BackwardWord UnixWordRubout KillWord に割り当てる' $wantedWordKeys { $wordOut | Where-Object { $_ -notmatch '^(EditMode|WordDelimiters)=' } | Sort-Object }
+Test-Case 'bash に似たキー: EditMode は Windows のまま (Emacs モードにしない)' 'EditMode=Windows' { $wordOut | Where-Object { $_ -like 'EditMode=*' } }
+Test-Case 'bash に似たキー: WordDelimiters は替えない' 'WordDelimiters=True' { $wordOut | Where-Object { $_ -like 'WordDelimiters=*' } }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
