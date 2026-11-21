@@ -79,7 +79,8 @@ Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core 
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
   `enable` が false。herdr-app・herdr-core は `herdr` の値。`tailscale` はどのグループでも既定が false) では、setup はその名前を確かめも
-  揃えもしない (`nix/README.md` の「設定グループ」)
+  揃えもしない (`nix/README.md` の「設定グループ」)。受け持ちを runner に切り替えたホストでは、Nix の値でなく、Windows のホストの値の `[tools]`
+  (`windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale`) と `win/runner/groups.json` の既定で決まる (`win/README.md` の「ホストの値」)
 
 ## 対象の外
 

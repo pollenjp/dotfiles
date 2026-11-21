@@ -349,22 +349,28 @@ scanData = "https://app.notion.com/p/…"
   `dotfiles apply` を流す。WSL の側が新しい版の窓に頼る版では、switch の前に流す ([op-reason の新しい版を出したとき](#op-reason-の新しい版を出したとき))
 - 切り替える日の順。WSL が最後に配る中身と、runner が初めて apply する中身を、同じ commit にそろえるのが要 (runner は記録が無いので、repo と違う
   中身を「置いた記録が無く」の衝突と見る。WSL が古い commit のまま配った後に切り替えると、その後に repo で変わったファイルが衝突になる):
-  1. WSL と Windows の dotfiles・dotfiles-private の clone を、どちらも main の同じ commit にする (WSL は 2 の `--self-update` が本体を進め、`--update` が
-     dotfiles-private を進める。Windows は 3 つの clone を `pull --ff-only`)
-  2. WSL の `~/dotfiles/setup --self-update --update` で配り、上の項の ⚠ (衝突) が出ていないことを確かめる。Windows の `dotfiles check` が 0 になること
-  3. PR を merge し、両方の clone を進める。1 の commit から、配るもの (dotfiles の `win/` の配るファイル・`nix/pkgs/herdr-core/releases.json`、
-     dotfiles-private の `ssh/`・`google-japanese-input/`) が変わっていないかを `git diff --stat` で見る (README・runner・試験は配らない)。変わって
-     いれば、そのファイルは 5 で「置いた記録が無く」の衝突になる (中身が repo のものなら `dotfiles apply --steps <id> --force` で置く)
+  1. merge の前に、WSL の `~/dotfiles/setup --self-update --update` で最後に配る (`--self-update` が dotfiles を、`--update` の手順 private-fetch が
+     dotfiles-private を main へ進める)。上の項の ⚠ (衝突) が出ていないことを確かめ、2 つの clone の commit を控える
+  2. Windows の 3 つの clone を `pull --ff-only` し、dotfiles・dotfiles-private の commit が 1 と同じかを見て、`dotfiles check` が 0 になること
+  3. PR を merge し、両方の clone を進める。1 の commit から入った merge が切り替えの PR だけか (`git log --first-parent`) と、配るもの (dotfiles の
+     `win/` の配るファイル・runner のコード・`nix/pkgs/herdr-core/releases.json`、dotfiles-private の `ssh/`・`google-japanese-input/`) が変わっていないか
+     (`git diff --stat`) を見る。配るファイルが変わっていれば、そのファイルは 5 で「置いた記録が無く」の衝突になる (中身が repo のものなら
+     `dotfiles apply --steps <id> --force` で置く)。1 より先に merge しない (WSL の `setup --update` は dotfiles-private を自分で進めるので、merge の後に流した
+     回から Windows の手順を飛ばす)
   4. WSL の `~/dotfiles/setup --update`。Windows の手順は「このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。」と出して ✔ に
      なり、1 で外した道具の switch を `# tool:` に持つ手順 (`tailscale`・`sshd` など) は ↷ (このホストでは off) になる。Windows の exe は呼ばない
-  5. Windows の `dotfiles apply --dry-run`。WSL と同じ手順は「同じ」(記録だけ作る) になり、直すことの行は `powertoys` の「Keyboard Manager に
-     default.json を読み直させる」1 つだけ (記録が無いので一度読み直させる。終了コードは 1)。ps1 の手順は入っていれば何もしない (入っていない道具が
-     あれば入れる。Google 日本語入力・OpenSSH・Tailscale を入れるときは UAC の確認が出る)。見てから `dotfiles apply`
+  5. Windows の `dotfiles apply --dry-run`。WSL と同じ手順は ✔ (「同じです」「揃っています」、記録がまだ無い手順は「記録だけ作ります」を添える) になり、
+     直すことの行は `powertoys` の「Keyboard Manager に default.json を読み直させる」1 つだけ (記録が無いので一度読み直させる。終了コードは 1)。ps1 の
+     手順は、入っていて固定した版なら何もしない (版がずれていれば揃える・知らせる。入っていない道具は入れ、Google 日本語入力・OpenSSH・Tailscale を
+     入れるときは UAC の確認が出る)。見てから `dotfiles apply`
   6. `dotfiles check` が 0 (直すことはありません) になること。記録は `%LOCALAPPDATA%\dotfiles\state\` に、WSL と同じ名前と形でできる
-- 戻すとき: 切り替えた PR を revert して merge し、両方の clone を同じ commit に進めてから、WSL の `~/dotfiles/setup --update` (WSL がまた配る。中身が
-  その commit の repo と同じなら「同じ」) → Windows の `dotfiles check` (受け持ちが WSL の setup に戻る)。runner が作った記録 (`%LOCALAPPDATA%\dotfiles\state\`
-  の WSL と同じ手順の分) は、受け持ちが WSL の間の apply では使わないので、残してよい
+- 戻すとき: 切り替えた PR のうち、ホストの値の commit (と、それに合わせて出し直した生成物の commit) だけを revert する PR を merge する (PR 全体を戻すと、
+  同じ PR に入れた文書や古さの直しまで戻る)。両方の clone を同じ commit に進め、Windows で runner が作った記録 (`%LOCALAPPDATA%\dotfiles\state\` の WSL と
+  同じ手順の分) を別のディレクトリへ退けてから (残すと、受け持ちが WSL の間の `dotfiles check` が古い記録と比べて直すことを出し続ける)、WSL の
+  `~/dotfiles/setup --update` (WSL がまた配る。中身がその commit の repo と同じなら「同じ」) → Windows の `dotfiles check` (受け持ちが WSL の setup に戻る)
 - 切り替えた後は、Windows の手順を揃えるのは Windows の `dotfiles apply` だけ (clone を pull したら流す)。WSL の setup は Windows の手順をどれも飛ばす。
+  全部を流す `dotfiles apply` は、WSL の `setup --update` と同じく、道具の入れ替え・設定とレジストリの書き込み・入っていない道具を入れるときの UAC を
+  含む。先に `dotfiles apply --dry-run` で、WSL と同じ手順に直すことがあるかを見る (Windows にしか無い手順だけを当てるなら `--steps` で絞る)。
   版の知らせは上の `pin-updates` の項、op-reason の版を上げた後は上の `op-reason` の項、依存の更新の PR を merge した後も Windows で `dotfiles apply`
 - WSL の無い Windows は、はじめから 2 だけを書く
 
