@@ -44,8 +44,10 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 .PARAMETER SshRelay
 SSH の中継の logon の task をどうするか。per-call・show-only (中継のモード) なら、task を置き (形が違えば置き直し)、中継が
 答えなければ起こして、--status が答えるのを 15 秒待つ。off なら、task を止めて消す。どちらも中継が窓を開いている間は止めない。
-task の形: 動作は <置き場所>\op-reason.exe --ssh-agent (show-only は --mode show-only を足す)・今のユーザーの logon・Interactive・
-Limited・時間の上限なし・電池でも起こして止めない・2 つ目を起こさない・失敗したら 1 分後に起こし直す (999 回まで)・隠す・優先度 5。
+task の形: 動作は <置き場所>\op-reason.exe --ssh-agent (show-only は --mode show-only を足す)・trigger は今のユーザーの logon と、
+置いた時刻から 1 分ごと (期限なし。中継が落ちても次の 1 分で起き直る)・Interactive・Limited・時間の上限なし・電池でも起こして
+止めない・2 つ目を起こさない (中継が動いている間の 1 分ごとの trigger は何もしない)・隠す・優先度 5。失敗したら起こし直す設定は
+置かない (0 でない終わり方では効かない)。
 WSL の setup (bootstrap-windows-op-reason.sh) が dotfiles.opReason.sshRelay から渡す。渡さなければ (Windows の runner) task を置きも
 消しもしない (task の中継を止めて入れ替えて起こし直すのは同じ)。
 #>
@@ -234,7 +236,10 @@ function Get-OpReasonRelayArguments {
 }
 
 # 置きたい task の形 (Get-OpReasonRelayTask が読む今の形と同じ欄。Compare-OpReasonRelayTask で比べる)。
-#   Trigger   今のユーザーの logon の trigger 1 つなら logon
+#   Trigger   今のユーザーの logon と、置いた時刻から 1 分ごと (期限なし) の 2 つ (Get-OpReasonRelayTriggerText の字)。
+#             中継が落ちる・止められると次の 1 分で起き直り、動いている間は 2 つ目を起こさない (IgnoreNew) ので何もしない
+#   Restart*  失敗したら起こし直す設定は置かない (0 と空)。0 でない終わり方 (止められた中継) では起こし直さないので、
+#             起こし直すのは 1 分ごとの trigger に任せる
 #   Batteries 電池でも起こし、電池に替わっても止めない
 #   Priority  task の既定 (7) は通常より下なので、窓が遅れないよう通常 (5) にする
 function Get-OpReasonRelayWant {
@@ -242,17 +247,39 @@ function Get-OpReasonRelayWant {
     [pscustomobject]@{
         Execute         = $Exe
         Arguments       = (Get-OpReasonRelayArguments -Mode $Mode)
-        Trigger         = 'logon'
+        Trigger         = 'logon+every PT1M'
         LogonType       = 'Interactive'
         RunLevel        = 'Limited'
         TimeLimit       = 'PT0S'
         Multiple        = 'IgnoreNew'
-        RestartCount    = 999
-        RestartInterval = 'PT1M'
+        RestartCount    = 0
+        RestartInterval = ''
         Batteries       = $true
         Hidden          = $true
         Priority        = 5
     }
+}
+
+# 読んだ trigger (Get-ScheduledTask の Triggers) を、置きたい形の Trigger と比べられる字にする。trigger の順に + でつなぐ。
+#   今のユーザー (Me。DOMAIN\ の有る無しは問わない) の logon の trigger は logon、ほかは種類の名前 (Logon・Time・Daily など)。
+#   繰り返す trigger は every <間隔> を足し (1 回の trigger の繰り返しは every <間隔> だけ)、期限があれば for <期限> も足す。
+#   1 回の trigger の始まりの時刻 (置いた時刻) は見ない (置くたびに変わるので、見ると apply のたびに置き直してしまう)
+function Get-OpReasonRelayTriggerText {
+    param([object[]]$Triggers, [string]$Me)
+    $parts = foreach ($t in @($Triggers)) {
+        $kind = $t.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', ''
+        $text = $kind
+        # UserId は logon の trigger にだけある (ほかの種類で読むと StrictMode で例外になる)
+        if (($kind -eq 'Logon') -and ((("$($t.UserId)" -split '\\')[-1]) -eq $Me)) { $text = 'logon' }
+        $rep = $t.Repetition
+        if ($rep -and "$($rep.Interval)") {
+            $every = "every $($rep.Interval)"
+            if ("$($rep.Duration)") { $every += " for $($rep.Duration)" }
+            $text = if ($kind -eq 'Time') { $every } else { "$text $every" }
+        }
+        $text
+    }
+    @($parts) -join '+'
 }
 
 # 今の task の形と置きたい形の、違う欄の名前 (欄の順)。無効なら Enabled も。置き場所 (Execute) は大文字小文字を問わない
@@ -431,19 +458,12 @@ function Get-OpReasonRelayTask {
     $t = Get-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -ErrorAction SilentlyContinue
     if (-not $t) { return $null }
     $action = @($t.Actions)[0]
-    $triggers = @($t.Triggers)
-    # logon の trigger 1 つで、今のユーザーのもの (DOMAIN\ の有る無しは問わない) なら logon。ほかは trigger の種類を並べる
     $me = ([Security.Principal.WindowsIdentity]::GetCurrent().Name -split '\\')[-1]
-    $trigger = (@($triggers | ForEach-Object { $_.CimClass.CimClassName -replace '^MSFT_Task', '' -replace 'Trigger$', '' }) -join '+')
-    if (($triggers.Count -eq 1) -and ($triggers[0].CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger') -and
-        (("$($triggers[0].UserId)" -split '\\')[-1] -eq $me)) {
-        $trigger = 'logon'
-    }
     $s = $t.Settings
     [pscustomobject]@{
         Execute         = "$($action.Execute)"
         Arguments       = "$($action.Arguments)"
-        Trigger         = $trigger
+        Trigger         = (Get-OpReasonRelayTriggerText -Triggers @($t.Triggers) -Me $me)
         LogonType       = "$($t.Principal.LogonType)"
         RunLevel        = "$($t.Principal.RunLevel)"
         TimeLimit       = "$($s.ExecutionTimeLimit)"
@@ -464,13 +484,16 @@ function Register-OpReasonRelayTask {
     $id = Get-OpReasonRelayTaskId
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     $action = New-ScheduledTaskAction -Execute $Want.Execute -Argument $Want.Arguments
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $me
+    # 今のユーザーの logon と、置いた時刻から 1 分ごと (Get-OpReasonRelayWant の Trigger の logon+every PT1M)。
+    # -RepetitionDuration は付けない (付けなければ期限なしで繰り返す)
+    $triggers = @(
+        (New-ScheduledTaskTrigger -AtLogOn -User $me)
+        (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Minutes 1))
+    )
     $principal = New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew `
-        -RestartCount $Want.RestartCount -RestartInterval ([Xml.XmlConvert]::ToTimeSpan($Want.RestartInterval)) `
-        -Hidden -Priority $Want.Priority
-    Register-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -Action $action -Trigger $trigger -Principal $principal `
+        -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -Hidden -Priority $Want.Priority
+    Register-ScheduledTask -TaskPath $id.Path -TaskName $id.Name -Action $action -Trigger $triggers -Principal $principal `
         -Settings $settings -Force `
         -Description 'op-reason の SSH の中継 (dotfiles の Install-OpReason.ps1 -SshRelay が置く。-SshRelay off で消す。win/README.md の「SSH の中継」)' |
         Out-Null
@@ -491,7 +514,7 @@ function Stop-OpReasonRelayTask {
     Stop-ScheduledTask -TaskPath $id.Path -TaskName $id.Name
 }
 
-# task を有効・無効にする (無効の間は、失敗したときの起こし直しも trigger も起こさない)
+# task を有効・無効にする (無効の間は、logon の trigger も 1 分ごとの trigger も起こさない)
 function Set-OpReasonRelayTaskEnabled {
     param([bool]$Enabled)
     $id = Get-OpReasonRelayTaskId
@@ -554,7 +577,7 @@ function Exit-OpReasonLock {
     $Lock.Dispose()
 }
 
-# task の中継を止める (lock を持っている前提)。task を無効にしてから止め (起こし直しを起こさない)、プロセスが終わるのを
+# task の中継を止める (lock を持っている前提)。task を無効にしてから止め (1 分ごとの trigger に起こさせない)、プロセスが終わるのを
 # 10 秒待つ。終われば $true。終わらなければ task を有効に戻して $false
 function Stop-OpReasonRelay {
     param($RelayPid)

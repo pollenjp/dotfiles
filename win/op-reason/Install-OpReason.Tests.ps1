@@ -224,8 +224,10 @@ Test-Case 'show-only の引数は --mode show-only を足す' '--ssh-agent --mod
 # Get-OpReasonRelayWant: 置きたい task の形
 $WantPC = Get-OpReasonRelayWant -Mode 'per-call' -Exe $Exe
 Test-Case '置きたい task の動作は置き場所の op-reason.exe' $Exe { $WantPC.Execute }
-Test-Case '置きたい task は今のユーザーの logon・Interactive (窓を出す)・Limited (権限を上げない)' 'logon Interactive Limited' { "$($WantPC.Trigger) $($WantPC.LogonType) $($WantPC.RunLevel)" }
-Test-Case '時間の上限なし・2 つ目を起こさない・失敗したら 1 分後に 999 回まで起こし直す' 'PT0S IgnoreNew 999 PT1M' { "$($WantPC.TimeLimit) $($WantPC.Multiple) $($WantPC.RestartCount) $($WantPC.RestartInterval)" }
+Test-Case '置きたい task の trigger は今のユーザーの logon と、置いた時刻から 1 分ごと (期限なし)' 'logon+every PT1M' { $WantPC.Trigger }
+Test-Case '置きたい task は Interactive (窓を出す)・Limited (権限を上げない)' 'Interactive Limited' { "$($WantPC.LogonType) $($WantPC.RunLevel)" }
+Test-Case '時間の上限なし・2 つ目を起こさない (動いている間の 1 分ごとの trigger は何もしない)' 'PT0S IgnoreNew' { "$($WantPC.TimeLimit) $($WantPC.Multiple)" }
+Test-Case '失敗したら起こし直す設定は置かない (0 でない終わり方では効かない。1 分ごとの trigger が起こし直す)' '0 []' { "$($WantPC.RestartCount) [$($WantPC.RestartInterval)]" }
 Test-Case '電池でも起こして止めない・隠す・優先度は通常 (5)' 'True True 5' { "$($WantPC.Batteries) $($WantPC.Hidden) $($WantPC.Priority)" }
 
 # 今の task の形 (Get-OpReasonRelayTask の値)。置きたい形に Enabled と State を足し、一部を差し替える
@@ -245,7 +247,39 @@ Test-Case '同じ形なら違いは無い' '' { Compare-OpReasonRelayTask -Have 
 Test-Case '置き場所は大文字小文字を問わない (Windows のパス)' '' { Compare-OpReasonRelayTask -Have (New-TaskShape @{ Execute = $Exe.ToUpperInvariant() }) -Want $WantPC }
 Test-Case 'モードが違えば Arguments' 'Arguments' { Compare-OpReasonRelayTask -Have (New-TaskShape -Mode 'show-only') -Want $WantPC }
 Test-Case '無効なら Enabled' 'Enabled' { Compare-OpReasonRelayTask -Have (New-TaskShape @{ Enabled = $false; State = 'Disabled' }) -Want $WantPC }
-Test-Case '手で直された欄を並べる (欄の順)' 'Trigger RestartCount Hidden' { Compare-OpReasonRelayTask -Have (New-TaskShape @{ Trigger = 'logon+MSFT_TaskTimeTrigger'; RestartCount = 3; Hidden = $false }) -Want $WantPC }
+Test-Case '手で直された欄を並べる (欄の順)' 'Trigger RestartCount Hidden' { Compare-OpReasonRelayTask -Have (New-TaskShape @{ Trigger = 'logon+Time'; RestartCount = 3; Hidden = $false }) -Want $WantPC }
+Test-Case '前の形 (logon だけ・失敗したら 1 分後に起こし直す設定つき) なら、Trigger と起こし直しの欄が違う (置き直す)' 'Trigger RestartCount RestartInterval' {
+    Compare-OpReasonRelayTask -Have (New-TaskShape @{ Trigger = 'logon'; RestartCount = 999; RestartInterval = 'PT1M' }) -Want $WantPC
+}
+
+# Get-OpReasonRelayTriggerText: 読んだ trigger を、置きたい形の Trigger と比べる字にする。
+# 偽の trigger は Get-ScheduledTask の Triggers (CIM) の形にする。UserId は logon の trigger にだけある (本物も、ほかの種類には無い)
+function New-TestTrigger {
+    param([string]$Kind, $UserId = $null, $Interval = $null, $Duration = $null, [string]$Start = '2026-11-22T10:00:00+09:00')
+    $h = [ordered]@{
+        CimClass      = [pscustomobject]@{ CimClassName = "MSFT_Task${Kind}Trigger" }
+        StartBoundary = $Start
+        Repetition    = [pscustomobject]@{ Interval = $Interval; Duration = $Duration; StopAtDurationEnd = $false }
+    }
+    if ($Kind -eq 'Logon') { $h['UserId'] = $UserId }
+    [pscustomobject]$h
+}
+$LogonMe = New-TestTrigger -Kind 'Logon' -UserId 'PJP-RAIDEN\polle'
+$EveryMinute = New-TestTrigger -Kind 'Time' -Interval 'PT1M'
+Test-Case '今のユーザーの logon と 1 分ごと (期限なし) は、置きたい形と同じ字' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, $EveryMinute) -Me 'polle' }
+Test-Case '1 分ごとの trigger の始まりの時刻 (置いた時刻) は見ない (apply のたびに置き直さない)' 'logon+every PT1M' {
+    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Start '2026-12-01T09:30:00+09:00')) -Me 'polle'
+}
+Test-Case 'DOMAIN\ の無い UserId も今のユーザーの logon' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'polle'), $EveryMinute) -Me 'polle' }
+Test-Case '間隔が違えば字も違う (置き直す)' 'logon+every PT5M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT5M')) -Me 'polle' }
+Test-Case '期限があれば for を足す (置き直す)' 'logon+every PT1M for P1D' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Duration 'P1D')) -Me 'polle' }
+Test-Case '前の形 (logon の trigger だけ) は logon' 'logon' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe) -Me 'polle' }
+Test-Case 'ほかのユーザーの logon は種類の名前' 'Logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'PJP-RAIDEN\alice'), $EveryMinute) -Me 'polle' }
+Test-Case 'ユーザーを決めない logon (だれの logon でも) は種類の名前' 'Logon' { Get-OpReasonRelayTriggerText -Triggers @(New-TestTrigger -Kind 'Logon' -UserId $null) -Me 'polle' }
+Test-Case '繰り返さない 1 回の trigger と、ほかの種類は種類の名前' 'logon+Time+Daily' {
+    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time'), (New-TestTrigger -Kind 'Daily')) -Me 'polle'
+}
+Test-Case 'trigger が無ければ空' '' { Get-OpReasonRelayTriggerText -Triggers @() -Me 'polle' }
 
 # ConvertFrom-OpReasonRelayStatus: --status の出力の PID (op-reason の relay_status の文。英語と日本語)
 Test-Case '英語の出力から PID' 4242 { ConvertFrom-OpReasonRelayStatus -Code 0 -Text 'the SSH relay answers on \\.\pipe\op-reason-ssh-agent (pid 4242)' }
