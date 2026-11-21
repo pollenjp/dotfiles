@@ -71,7 +71,7 @@ usage() {
     '  remove <名前> [--purge]                登録のアカウントを消す (--purge なら ~/.claude-<名前> と token のファイルも消す)' \
     '  help token [<名前>]                    token をこのマシンとほかのマシンに置く手順' \
     '' \
-    "既定のアカウント: ${defaults[*]} (dotfiles が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account は使えない)。" \
+    "既定のアカウント: ${defaults[*]} (dotfiles が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account・selector は使えない)。" \
     '使い方の詳細は dotfiles の nix/README.md「Claude Code のアカウントを分ける」。'
 }
 
@@ -159,7 +159,7 @@ registry_ok() {
   [[ -e ${registry} ]] || return 0
   if "${jq}" -e '(.version == 1) and (.accounts | type == "object")
       and (.accounts | to_entries | all(.value | type == "object" and (.mode == "subscription" or .mode == "token")))
-      and (.accounts | keys | all(test("^[a-z0-9][a-z0-9_-]{0,31}$") and . != "account" and (startswith("sk-ant-") | not)))' \
+      and (.accounts | keys | all(test("^[a-z0-9][a-z0-9_-]{0,31}$") and . != "account" and . != "selector" and (startswith("sk-ant-") | not)))' \
     "${registry}" >/dev/null 2>&1; then
     return 0
   fi
@@ -491,6 +491,10 @@ cmd_add() {
     err "claude-account: account は管理のコマンド (claude-account) の名前なので、アカウントには使えません。"
     return 2
   fi
+  if [[ ${name} == selector ]]; then
+    err "claude-account: selector は claude-selector (cs) の名前なので、アカウントには使えません。"
+    return 2
+  fi
   if is_default "${name}"; then
     err "claude-account: ${name} は既定のアカウントです (dotfiles が作るので、足さなくてよい)。"
     return 2
@@ -701,8 +705,8 @@ cmd_remove() {
     bad_name
     return 2
   fi
-  if [[ ${name} == account ]]; then
-    err "claude-account: account は管理のコマンドの名前で、アカウントではありません。"
+  if [[ ${name} == account || ${name} == selector ]]; then
+    err "claude-account: ${name} は管理のコマンド・claude-selector の名前で、アカウントではありません。"
     return 2
   fi
   if is_default "${name}"; then

@@ -39,6 +39,8 @@
 #     - 引用符の中の前後の空白は値の一部 (" op://…" は op の参照でなく、token の形でもない) で、check も launcher も止まる
 #     - add は用意が済まなければ (settings.json が実体) 1。token のファイルがリンクなら止まり、set-token を出す
 #     - 登録の一覧の規則外の名前・account は読めない形。list は読めない形を 1 回だけ出す
+#   claude-selector (cs)
+#     - selector は claude-selector の名前なので、add・remove は 2 で断り、登録の一覧にあれば読めない形
 #     - help token の 1 行は chmod 600 も打つ。add は ~/.config/claude-accounts を 700 で作る
 #   bootstrap
 #     - --account <名前> は、そのアカウントの dir だけを用意する
@@ -201,7 +203,7 @@ if [[ $(rc) == 2 ]]; then ok "知らない help は 2"; else ng "知らない he
 
 # --- add の断り
 bad=0
-for args in "add Bad --mode token" "add account --mode token" "add personal --mode subscription" "add x --mode foo" "add x" "add"; do
+for args in "add Bad --mode token" "add account --mode token" "add selector --mode subscription" "add personal --mode subscription" "add x --mode foo" "add x" "add"; do
   # shellcheck disable=SC2086 # 引数を空白で分ける
   run claude-account ${args}
   [[ $(rc) == 2 ]] || {
@@ -210,7 +212,7 @@ for args in "add Bad --mode token" "add account --mode token" "add personal --mo
   }
 done
 if [[ ! -e ${home}/.config/claude-accounts/accounts.json ]] && ((bad == 0)); then
-  ok "add は規則外の名前・account・既定の名前・知らない種類・種類なしを 2 で断り、登録しない"
+  ok "add は規則外の名前・account・selector・既定の名前・知らない種類・種類なしを 2 で断り、登録しない"
 fi
 
 # --- add token1 --mode token
@@ -597,6 +599,13 @@ if [[ $(rc) == 1 && $(grep -c 'accounts.json' "${work}/err") == 1 ]] && grep -Eq
 else
   ng "規則外の名前の登録" "$(detail)"
 fi
+printf '{"version":1,"accounts":{"selector":{"mode":"subscription"}}}\n' >"${home}/.config/claude-accounts/accounts.json"
+run claude-account list
+if [[ $(rc) == 1 && $(grep -c 'accounts.json' "${work}/err") == 1 ]] && grep -Eq '^personal ' "${work}/out"; then
+  ok "登録の selector (claude-selector の名前) は読めない形"
+else
+  ng "selector の登録" "$(detail)"
+fi
 cp "${work}/accounts.bak" "${home}/.config/claude-accounts/accounts.json"
 
 # --- remove
@@ -604,7 +613,13 @@ run claude-account remove personal
 r1=$(rc)
 run claude-account remove nosuch
 r2=$(rc)
-if [[ ${r1}/${r2} == 2/2 ]]; then ok "remove: 既定と知らない名前は 2"; else ng "remove の断り (${r1}/${r2})" "$(detail)"; fi
+run claude-account remove selector
+r3=$(rc)
+if [[ ${r1}/${r2}/${r3} == 2/2/2 ]]; then
+  ok "remove: 既定・知らない名前・selector は 2"
+else
+  ng "remove の断り (${r1}/${r2}/${r3})" "$(detail)"
+fi
 run claude-account remove sub2
 if [[ $(rc) == 0 && $(mode_of sub2) == '<none>' && ! -e ${home}/.local/bin/claude-sub2 && ! -L ${home}/.local/bin/claude-sub2 ]] \
   && [[ -d ${home}/.claude-sub2 ]] && grep -Fq -- '--purge' "${work}/out"; then
