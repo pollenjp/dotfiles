@@ -12,11 +12,15 @@
 //! - Esc・Ctrl+C はどこでもやめる (起こさない)
 //! - cs の後ろの引数は最後にそのまま付き、見せる行では引用する
 //! - 描く中身: 既定の印「(既定)」・カーソルの行の「> 」・一番下のコマンド行・キーの案内・一覧が読めなかった知らせ・確かめる画面の段ごとの値
+//!   (cs の後ろの引数があればその行も)
+//! - コマンド行は端末の幅で折り返し、字を落とさない (確かめる画面でも全部見える)。引数の制御文字は `\n` などの形で見せ、起こすのは argv のまま
+//! - Remote Control の名前を打ち始めて字が空なら、下のコマンド行は名前なし (`--remote-control=`)
+//! - 端末の行が足りなければ、一覧はカーソルの行が見える所だけを出し、確かめる画面は段ごとの値を外す (見出し・コマンド行・案内は残す)
 
 use claude_selector::accounts::{Account, Found, Mode};
 use claude_selector::app::claude_note;
 use claude_selector::launch::Plan;
-use claude_selector::ui::{Key, Outcome, Ui};
+use claude_selector::ui::{Key, Outcome, Style, Ui};
 use std::ffi::OsString;
 use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
@@ -77,6 +81,9 @@ fn strs(args: &[OsString]) -> Vec<String> {
 }
 
 const ENTER6: [Key; 6] = [Key::Enter; 6];
+/// 広い端末 (折り返さない・一覧を削らない)
+const COLS: usize = 200;
+const ROWS: usize = 60;
 
 #[test]
 fn enter_only_launches_the_defaults() {
@@ -103,24 +110,24 @@ fn enter_only_launches_the_defaults() {
 fn accounts_skip_missing_launchers() {
     let mut u = ui();
     press(&mut u, &[Key::Down]);
-    assert!(u.frame().text().contains("> claude-personal"));
+    assert!(u.frame(COLS, ROWS).text().contains("> claude-personal"));
     // work は launcher が無いので飛ばして token1
     press(&mut u, &[Key::Down]);
     assert!(
-        u.frame().text().contains("> claude-token1"),
+        u.frame(COLS, ROWS).text().contains("> claude-token1"),
         "{}",
-        u.frame().text()
+        u.frame(COLS, ROWS).text()
     );
     // 端では止まる
     press(&mut u, &[Key::Down, Key::Down]);
-    assert!(u.frame().text().contains("> claude-token1"));
+    assert!(u.frame(COLS, ROWS).text().contains("> claude-token1"));
     let plan = launched(press(&mut u, &ENTER6));
     assert_eq!(plan.program, PathBuf::from("/bin/claude-token1"));
     assert!(
         plan.shown
             .starts_with("claude-token1 --dangerously-skip-permissions")
     );
-    let text = ui().frame().text();
+    let text = ui().frame(COLS, ROWS).text();
     assert!(text.contains("claude-work"), "{text}");
     assert!(text.contains("launcher が PATH に無い"), "{text}");
     assert!(text.contains("~/.claude-token1 (token)"), "{text}");
@@ -135,7 +142,7 @@ fn nothing_to_launch_without_claude_and_launchers() {
     };
     let mut u = Ui::new(&f, "~/.claude", Vec::new());
     assert_eq!(press(&mut u, &[Key::Enter]), Outcome::Continue);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("claude は選べません"), "{text}");
     assert!(text.contains("PATH に claude が無い"), "{text}");
     // 段は進んでいない
@@ -147,7 +154,7 @@ fn first_usable_account_when_claude_is_missing() {
     let mut f = found();
     f.claude = None;
     let mut u = Ui::new(&f, "~/.claude", Vec::new());
-    assert!(u.frame().text().contains("> claude-personal"));
+    assert!(u.frame(COLS, ROWS).text().contains("> claude-personal"));
     let plan = launched(press(&mut u, &ENTER6));
     assert_eq!(plan.program, PathBuf::from("/bin/claude-personal"));
 }
@@ -167,14 +174,14 @@ fn back_keeps_the_choices() {
             Key::Enter,
         ],
     );
-    assert!(u.frame().text().contains("[3/5] effort"));
+    assert!(u.frame(COLS, ROWS).text().contains("[3/5] effort"));
     press(&mut u, &[Key::Left]);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("[2/5] 権限"), "{text}");
     assert!(text.contains("> --permission-mode plan"), "{text}");
     // Backspace・h も戻る。最初の段ではそれ以上戻らない
     press(&mut u, &[Key::Backspace, Key::Char('h'), Key::Left]);
-    assert!(u.frame().text().contains("[1/5] アカウント"));
+    assert!(u.frame(COLS, ROWS).text().contains("[1/5] アカウント"));
     let plan = launched(press(&mut u, &ENTER6));
     assert_eq!(strs(&plan.args)[..2], ["--permission-mode", "plan"]);
 }
@@ -184,17 +191,17 @@ fn vim_keys_home_end() {
     let mut u = ui();
     press(&mut u, &[Key::Enter, Key::Enter]);
     // effort は既定の max から
-    assert!(u.frame().text().contains("> max"));
+    assert!(u.frame(COLS, ROWS).text().contains("> max"));
     press(&mut u, &[Key::Home]);
-    assert!(u.frame().text().contains("> low"));
+    assert!(u.frame(COLS, ROWS).text().contains("> low"));
     press(&mut u, &[Key::Char('j'), Key::Char('j')]);
-    assert!(u.frame().text().contains("> high"));
+    assert!(u.frame(COLS, ROWS).text().contains("> high"));
     press(&mut u, &[Key::Char('k')]);
-    assert!(u.frame().text().contains("> medium"));
+    assert!(u.frame(COLS, ROWS).text().contains("> medium"));
     press(&mut u, &[Key::End]);
-    assert!(u.frame().text().contains("> max"));
+    assert!(u.frame(COLS, ROWS).text().contains("> max"));
     press(&mut u, &[Key::Up, Key::Char('l')]);
-    assert!(u.frame().text().contains("[4/5] モデル"));
+    assert!(u.frame(COLS, ROWS).text().contains("[4/5] モデル"));
     let plan = launched(press(&mut u, &[Key::Enter, Key::Enter, Key::Enter]));
     assert_eq!(strs(&plan.args)[1..3], ["--effort", "xhigh"]);
 }
@@ -203,13 +210,13 @@ fn vim_keys_home_end() {
 fn typed_model() {
     let mut u = ui();
     press(&mut u, &[Key::Enter, Key::Enter, Key::Enter, Key::End]);
-    assert!(u.frame().text().contains("> 手で打つ"));
+    assert!(u.frame(COLS, ROWS).text().contains("> 手で打つ"));
     press(&mut u, &[Key::Enter]);
-    let f = u.frame();
+    let f = u.frame(COLS, ROWS);
     assert!(f.cursor.is_some(), "打つ間はカーソルを出す");
     assert!(f.text().contains("モデルの名前: "), "{}", f.text());
     typed(&mut u, "fable");
-    let f = u.frame();
+    let f = u.frame(COLS, ROWS);
     assert!(f.text().contains("--model fable"), "{}", f.text());
     let (row, col) = f.cursor.unwrap();
     assert!(f.lines[row].text().ends_with("fable"));
@@ -222,8 +229,8 @@ fn typed_model() {
     );
     // Enter で決まり、Remote Control の段へ
     press(&mut u, &[Key::Enter]);
-    assert!(u.frame().text().contains("[5/5] Remote Control"));
-    assert_eq!(u.frame().cursor, None);
+    assert!(u.frame(COLS, ROWS).text().contains("[5/5] Remote Control"));
+    assert_eq!(u.frame(COLS, ROWS).cursor, None);
     let plan = launched(press(&mut u, &[Key::Enter, Key::Enter]));
     assert_eq!(strs(&plan.args)[3..5], ["--model", "fable"]);
 }
@@ -237,22 +244,26 @@ fn typed_model_must_be_a_name() {
     );
     // 空では決まらない
     press(&mut u, &[Key::Enter]);
-    assert!(u.frame().text().contains("モデルの名前を入れてください"));
+    assert!(
+        u.frame(COLS, ROWS)
+            .text()
+            .contains("モデルの名前を入れてください")
+    );
     typed(&mut u, "-x");
     press(&mut u, &[Key::Enter]);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("- で始まる名前は使えません"), "{text}");
     assert!(text.contains("[4/5] モデル"), "{text}");
     // Ctrl+U で消し、空で Backspace なら一覧へ戻る
     press(&mut u, &[Key::ClearLine, Key::Backspace]);
-    let f = u.frame();
+    let f = u.frame(COLS, ROWS);
     assert_eq!(f.cursor, None);
     assert!(f.text().contains("> 手で打つ"), "{}", f.text());
     // 戻ってきたら決めた名前を打ちかけの字にする
     press(&mut u, &[Key::Enter]);
     typed(&mut u, "opus");
     press(&mut u, &[Key::Enter, Key::Left, Key::Enter]);
-    assert!(u.frame().text().contains("モデルの名前: opus"));
+    assert!(u.frame(COLS, ROWS).text().contains("モデルの名前: opus"));
 }
 
 #[test]
@@ -262,7 +273,7 @@ fn remote_control_names() {
     let mut u = ui();
     press(&mut u, &to_rc);
     press(&mut u, &[Key::Down]);
-    assert!(u.frame().text().contains("--remote-control="));
+    assert!(u.frame(COLS, ROWS).text().contains("--remote-control="));
     let plan = launched(press(&mut u, &[Key::Enter, Key::Enter]));
     assert_eq!(strs(&plan.args).last().unwrap(), "--remote-control=");
     // 名前を付ける
@@ -271,7 +282,7 @@ fn remote_control_names() {
     press(&mut u, &[Key::End, Key::Enter]);
     typed(&mut u, " 作業 1 ");
     press(&mut u, &[Key::Enter]);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("これで起こす"), "{text}");
     assert!(text.contains("名前を付ける (作業 1)"), "{text}");
     let plan = launched(press(&mut u, &[Key::Enter]));
@@ -280,7 +291,7 @@ fn remote_control_names() {
     let mut u = ui();
     press(&mut u, &to_rc);
     press(&mut u, &[Key::End, Key::Enter, Key::Enter]);
-    assert!(u.frame().text().contains("名前なしで付ける"));
+    assert!(u.frame(COLS, ROWS).text().contains("名前なしで付ける"));
     let plan = launched(press(&mut u, &[Key::Enter]));
     assert_eq!(strs(&plan.args).last().unwrap(), "--remote-control=");
 }
@@ -321,7 +332,7 @@ fn esc_and_ctrl_c_cancel_everywhere() {
 fn extra_args_go_last() {
     let extra: Vec<OsString> = vec!["-c".into(), "質問 です".into()];
     let mut u = Ui::new(&found(), "~/.claude", extra);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("claude-opus-5-5 -c '質問 です'"), "{text}");
     let plan = launched(press(&mut u, &ENTER6));
     assert_eq!(strs(&plan.args)[5..], ["-c", "質問 です"]);
@@ -330,7 +341,7 @@ fn extra_args_go_last() {
 #[test]
 fn frame_marks_defaults_and_shows_the_command() {
     let u = ui();
-    let f = u.frame();
+    let f = u.frame(COLS, ROWS);
     let lines: Vec<String> = f.lines.iter().map(|l| l.text()).collect();
     assert!(
         lines[0].starts_with("claude-selector  [1/5] アカウント"),
@@ -364,7 +375,7 @@ fn frame_marks_defaults_and_shows_the_command() {
     // 権限の段: 既定は --dangerously-skip-permissions、カーソルを動かすと下の行が変わる
     let mut u = ui();
     press(&mut u, &[Key::Enter, Key::Down]);
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(
         text.contains("--dangerously-skip-permissions  (既定)  確認をすべて飛ばす"),
         "{text}"
@@ -390,7 +401,7 @@ fn confirm_screen_lists_the_choices() {
             Key::Enter,
         ],
     );
-    let text = u.frame().text();
+    let text = u.frame(COLS, ROWS).text();
     assert!(text.contains("これで起こす"), "{text}");
     for want in [
         "アカウント      claude-personal",
@@ -404,7 +415,7 @@ fn confirm_screen_lists_the_choices() {
     }
     // ← で Remote Control の段へ戻る
     press(&mut u, &[Key::Left]);
-    assert!(u.frame().text().contains("[5/5] Remote Control"));
+    assert!(u.frame(COLS, ROWS).text().contains("[5/5] Remote Control"));
 }
 
 #[test]
@@ -412,7 +423,11 @@ fn warnings_are_shown() {
     let mut f = found();
     f.warnings.push("登録の一覧が読めない".to_string());
     let u = Ui::new(&f, "~/.claude", Vec::new());
-    assert!(u.frame().text().contains("! 登録の一覧が読めない"));
+    assert!(
+        u.frame(COLS, ROWS)
+            .text()
+            .contains("! 登録の一覧が読めない")
+    );
 }
 
 #[test]
@@ -424,5 +439,153 @@ fn claude_note_follows_claude_config_dir() {
         "CLAUDE_CONFIG_DIR=/home/u/.claude-work"
     );
     let u = Ui::new(&found(), &claude_note(Some("/x".into())), Vec::new());
-    assert!(u.frame().text().contains("CLAUDE_CONFIG_DIR=/x"));
+    assert!(u.frame(COLS, ROWS).text().contains("CLAUDE_CONFIG_DIR=/x"));
+}
+
+/// コマンド行の行 (Style::Command の塊を持つ行) の字
+fn command_parts(f: &claude_selector::ui::Frame) -> Vec<String> {
+    f.lines
+        .iter()
+        .filter(|l| l.spans.iter().any(|s| s.style == Style::Command))
+        .map(|l| l.text())
+        .collect()
+}
+
+#[test]
+fn command_line_wraps_to_the_width() {
+    let extra: Vec<OsString> = vec!["-c".into(), "質問 です".into()];
+    let mut u = Ui::new(&found(), "~/.claude", extra);
+    press(
+        &mut u,
+        &[
+            Key::Down,
+            Key::Enter,
+            Key::Enter,
+            Key::Enter,
+            Key::Enter,
+            Key::Enter,
+        ],
+    );
+    let full = "claude-personal --dangerously-skip-permissions --effort max --model claude-opus-5-5 -c '質問 です'";
+    for cols in [12, 20, 40, 80, 200] {
+        let f = u.frame(cols, ROWS);
+        let parts = command_parts(&f);
+        assert!(parts[0].starts_with("$ "), "{cols}: {parts:?}");
+        for p in &parts[1..] {
+            assert!(p.starts_with("  "), "{cols}: {parts:?}");
+        }
+        // どの行も幅に収まり、字を落とさない (空白で切ったところは空白が消える)
+        for p in &parts {
+            assert!(UnicodeWidthStr::width(p.as_str()) <= cols, "{cols}: {p:?}");
+        }
+        let joined: String = parts.iter().map(|p| &p[2..]).collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            joined.replace(' ', ""),
+            full.replace(' ', ""),
+            "{cols}: {parts:?}"
+        );
+    }
+    assert_eq!(command_parts(&u.frame(200, ROWS)), [format!("$ {full}")]);
+}
+
+#[test]
+fn confirm_screen_shows_the_extra_args() {
+    let extra: Vec<OsString> = vec!["-c".into(), "質問 です".into()];
+    let mut u = Ui::new(&found(), "~/.claude", extra);
+    press(&mut u, &[Key::Enter; 5]);
+    let text = u.frame(COLS, ROWS).text();
+    assert!(text.contains("後ろの引数      -c '質問 です'"), "{text}");
+    // 後ろの引数が無ければ行も無い
+    let mut u = ui();
+    press(&mut u, &[Key::Enter; 5]);
+    assert!(!u.frame(COLS, ROWS).text().contains("後ろの引数"));
+}
+
+#[test]
+fn control_characters_are_shown_escaped() {
+    let extra: Vec<OsString> = vec!["a\nb".into(), "\u{1b}[31m".into()];
+    let mut u = Ui::new(&found(), "~/.claude", extra);
+    for keys in [&[][..], &[Key::Enter; 5][..]] {
+        press(&mut u, keys);
+        let f = u.frame(COLS, ROWS);
+        for l in &f.lines {
+            let t = l.text();
+            assert!(!t.chars().any(char::is_control), "{t:?}");
+        }
+        let text = f.text();
+        assert!(text.contains("a\\nb"), "{text}");
+        assert!(text.contains("\\u{1b}[31m"), "{text}");
+    }
+    // 起こすのは argv のまま
+    let plan = launched(press(&mut u, &[Key::Enter]));
+    assert_eq!(strs(&plan.args)[5..], ["a\nb", "\u{1b}[31m"]);
+}
+
+#[test]
+fn empty_remote_control_name_previews_unnamed() {
+    let mut u = ui();
+    press(
+        &mut u,
+        &[Key::Enter, Key::Enter, Key::Enter, Key::Enter, Key::End],
+    );
+    // 打つ前は名前の形を見せる
+    let before = command_parts(&u.frame(COLS, ROWS)).join("\n");
+    assert!(before.contains("<名前>"), "{before}");
+    // 打ち始めて字が空なら、Enter で決まる名前なし
+    press(&mut u, &[Key::Enter]);
+    let typing = command_parts(&u.frame(COLS, ROWS)).join("\n");
+    assert!(typing.ends_with("--remote-control="), "{typing}");
+    typed(&mut u, "x");
+    let named = command_parts(&u.frame(COLS, ROWS)).join("\n");
+    assert!(named.ends_with("--remote-control=x"), "{named}");
+}
+
+#[test]
+fn small_terminal_keeps_the_cursor_row_visible() {
+    let mut f = found();
+    f.accounts = (0..20)
+        .map(|i| account(&format!("a{i:02}"), Mode::Subscription, true))
+        .collect();
+    let mut u = Ui::new(&f, "~/.claude", Vec::new());
+    let rows = 8;
+    let check = |u: &Ui, want: &str| {
+        let f = u.frame(80, rows);
+        assert!(f.lines.len() <= rows, "{}", f.text());
+        assert!(
+            f.lines[0].text().starts_with("claude-selector  [1/5]"),
+            "{}",
+            f.text()
+        );
+        let current: Vec<String> = f
+            .lines
+            .iter()
+            .map(|l| l.text())
+            .filter(|t| t.starts_with("> "))
+            .collect();
+        assert_eq!(current.len(), 1, "{}", f.text());
+        assert!(current[0].contains(want), "{want}: {}", f.text());
+    };
+    check(&u, "claude ");
+    press(&mut u, &[Key::End]);
+    check(&u, "claude-a19");
+    press(&mut u, &[Key::Up, Key::Up, Key::Up]);
+    check(&u, "claude-a16");
+    press(&mut u, &[Key::Home]);
+    check(&u, "claude ");
+}
+
+#[test]
+fn small_terminal_drops_the_summary_on_confirm() {
+    let mut u = ui();
+    press(&mut u, &[Key::Enter; 5]);
+    let f = u.frame(80, 4);
+    assert!(f.lines.len() <= 4, "{}", f.text());
+    let text = f.text();
+    assert!(text.contains("これで起こす"), "{text}");
+    assert!(
+        text.contains("$ claude --dangerously-skip-permissions"),
+        "{text}"
+    );
+    assert!(text.contains("Enter 起こす"), "{text}");
+    assert!(!text.contains("アカウント      claude"), "{text}");
 }

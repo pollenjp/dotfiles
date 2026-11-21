@@ -39,9 +39,9 @@
 #     - 引用符の中の前後の空白は値の一部 (" op://…" は op の参照でなく、token の形でもない) で、check も launcher も止まる
 #     - add は用意が済まなければ (settings.json が実体) 1。token のファイルがリンクなら止まり、set-token を出す
 #     - 登録の一覧の規則外の名前・account は読めない形。list は読めない形を 1 回だけ出す
+#     - help token の 1 行は chmod 600 も打つ。add は ~/.config/claude-accounts を 700 で作る
 #   claude-selector (cs)
 #     - selector は claude-selector の名前なので、add・remove は 2 で断り、登録の一覧にあれば読めない形
-#     - help token の 1 行は chmod 600 も打つ。add は ~/.config/claude-accounts を 700 で作る
 #   bootstrap
 #     - --account <名前> は、そのアカウントの dir だけを用意する
 #     - 引数なしは、既定に加えて登録のアカウントの dir も用意し、launcher の link が無ければ警告する

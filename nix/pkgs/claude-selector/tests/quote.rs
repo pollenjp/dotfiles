@@ -6,7 +6,8 @@
 //!
 //! - POSIX: 囲まなくてよい字 (英数字と `_@%+=:,./-`) だけならそのまま。空・空白・日本語・`'`・`$`・`~` は '…' で囲み、`'` は `'\''`
 //! - PowerShell: `,` (配列)・`@` (splat)・`$`・空白は '…' で囲み、`'` は `''`。`\` はそのまま
-//! - command_line は OS の書き方で 1 行にする
+//! - command_line・word は OS の書き方で囲む
+//! - visible は制御文字 (C0・DEL・C1) を `\n`・`\u{1b}` の形にし、ほかの字 (日本語も) はそのまま
 
 use claude_selector::quote::{command_line, posix, powershell};
 use std::ffi::OsString;
@@ -67,4 +68,26 @@ fn command_line_uses_the_os_quoting() {
         "claude 'it'\\''s'"
     };
     assert_eq!(command_line("claude", &quote_args), expected);
+}
+
+#[test]
+fn visible_escapes_control_characters() {
+    use claude_selector::quote::visible;
+    assert_eq!(visible("plain 質問"), "plain 質問");
+    assert_eq!(visible("a\nb\tc\r"), "a\\nb\\tc\\r");
+    assert_eq!(
+        visible("\u{1b}[31m\u{7f}\u{9b}"),
+        "\\u{1b}[31m\\u{7f}\\u{9b}"
+    );
+}
+
+#[test]
+fn word_uses_the_os_quoting() {
+    use claude_selector::quote::word;
+    if cfg!(windows) {
+        assert_eq!(word("a,b"), "'a,b'");
+    } else {
+        assert_eq!(word("a,b"), "a,b");
+    }
+    assert_eq!(word("-c"), "-c");
 }

@@ -1,14 +1,15 @@
 //! 選ぶ画面の状態機械と、描く中身 (`Frame`)。端末には触らない (描くのは `term`。試験は tests/ui.rs がキーを並べて流す)。
 //!
-//! 段: アカウント → 権限 → effort → モデル → Remote Control → 確かめる (組み立てたコマンド行を見せ、Enter で起こす)。どの段も既定に
-//! 「(既定)」の印を付け、カーソルの初めの位置は既定 (戻ってきたときは決めた選択肢) なので、Enter だけで既定のまま進める。どの段でも
-//! 一番下に、今のカーソルのまま Enter で進んだときのコマンド行を出す。
+//! 段: アカウント → 権限 → effort → モデル → Remote Control → 確かめる (段ごとの値と組み立てたコマンド行を見せ、Enter で起こす)。
+//! どの段も既定に「(既定)」の印を付け、カーソルの初めの位置は既定 (戻ってきたときは決めた選択肢) なので、Enter だけで既定のまま進める。
+//! どの段でも一番下に、今のカーソルのまま Enter で進んだときのコマンド行を、端末の幅で折り返して全部出す。
 //!
 //! | キー | 一覧 | 字を打つ間 (モデルを手で打つ・Remote Control の名前) | 確かめる |
 //! | --- | --- | --- | --- |
 //! | ↑↓ (k・j・Ctrl+P・Ctrl+N・Tab・Shift+Tab)・Home・End | 選ぶ (選べない行は飛ばす) | - | - |
-//! | Enter (→・l) | 決めて次の段へ | 決める | 起こす |
-//! | ← (Backspace・h) | 前の段へ | 字が空なら一覧へ戻る (Backspace は 1 字消す。Ctrl+U は全部消す) | 前の段へ |
+//! | Enter | 決めて次の段へ | 決める | 起こす |
+//! | →・l | 決めて次の段へ | (l は字) | 起こす |
+//! | ←・Backspace (Ctrl+H)・h | 前の段へ | Backspace は 1 字消し、字が空なら一覧へ戻る (← も)。Ctrl+U は全部消す。h は字 | 前の段へ |
 //! | Esc・Ctrl+C | やめる (起こさない) | やめる | やめる |
 
 use crate::accounts::{Found, Mode};
@@ -492,10 +493,13 @@ impl Ui {
             i if i < MODELS.len() => MODELS[i].to_string(),
             _ => self.typed(MODEL, &self.model_text, "<モデル名>"),
         };
+        // 名前を打っている間に字が空なら、Enter で決まる名前なしを見せる (打つ前は名前の形を見せる)
+        let typing_name = self.at == REMOTE_CONTROL && self.input.is_some();
         let remote_control = match self.index(REMOTE_CONTROL) {
             RC_OFF => RemoteControl::Off,
             RC_UNNAMED => RemoteControl::Unnamed,
             _ => match self.typed(REMOTE_CONTROL, &self.rc_name, "") {
+                n if n.is_empty() && typing_name => RemoteControl::Unnamed,
                 n if n.is_empty() => RemoteControl::Named("<名前>".to_string()),
                 n => RemoteControl::Named(n),
             },
@@ -552,112 +556,214 @@ impl Ui {
         }
     }
 
-    /// 描く中身
-    pub fn frame(&self) -> Frame {
-        let total = self.stages.len();
+    /// 一覧の段の行 (`range` の選択肢だけ)
+    fn item_lines(&self, stage: &Stage, range: std::ops::Range<usize>) -> Vec<Line> {
+        let label_width = stage
+            .items
+            .iter()
+            .map(|i| width(&i.label))
+            .max()
+            .unwrap_or(0);
         let mut lines = Vec::new();
-        let mut cursor = None;
+        for (i, item) in stage
+            .items
+            .iter()
+            .enumerate()
+            .take(range.end)
+            .skip(range.start)
+        {
+            let current = i == stage.cursor;
+            let label_style = match (item.enabled, current) {
+                (false, _) => Style::Disabled,
+                (true, true) => Style::Current,
+                (true, false) => Style::Plain,
+            };
+            let marker_style = if current {
+                Style::Current
+            } else {
+                Style::Plain
+            };
+            let mut spans = vec![
+                span(if current { "> " } else { "  " }, marker_style),
+                span(pad(&item.label, label_width), label_style),
+            ];
+            // 既定の印は説明より前に置く (狭い端末で行の後ろが切れても見える)。説明のそろえのため、ほかの行は同じ幅の空白
+            if i == stage.default {
+                spans.push(span(DEFAULT_MARK, Style::DefaultMark));
+            } else if !item.note.is_empty() {
+                spans.push(span(" ".repeat(width(DEFAULT_MARK)), Style::Plain));
+            }
+            if !item.note.is_empty() {
+                let note_style = if item.enabled {
+                    Style::Dim
+                } else {
+                    Style::Disabled
+                };
+                spans.push(span(format!("  {}", item.note), note_style));
+            }
+            lines.push(Line::of(spans));
+        }
+        lines
+    }
+
+    /// 確かめる画面の段ごとの値 (cs の後ろの引数があれば、その行も)
+    fn summary_lines(&self) -> Vec<Line> {
+        let selection = self.selection();
+        let rest = "後ろの引数";
+        let title_width = self
+            .stages
+            .iter()
+            .map(|s| width(s.title))
+            .chain([width(rest)])
+            .max()
+            .unwrap_or(0);
+        let row = |title: &str, value: String| {
+            Line::of(vec![
+                span(format!("  {}", pad(title, title_width)), Style::Dim),
+                span("  ", Style::Plain),
+                span(value, Style::Plain),
+            ])
+        };
+        let mut lines: Vec<Line> = self
+            .stages
+            .iter()
+            .enumerate()
+            .map(|(i, stage)| row(stage.title, self.chosen_label(i, &selection)))
+            .collect();
+        if !self.extra.is_empty() {
+            let shown: Vec<String> = self
+                .extra
+                .iter()
+                .map(|a| quote::word(&a.to_string_lossy()))
+                .collect();
+            lines.push(row(rest, quote::visible(&shown.join(" "))));
+        }
+        lines
+    }
+
+    /// 描く中身。`cols` は 1 行に書ける桁 (コマンド行はこの幅で折り返す。ほかの行は term が切る)、`rows` は端末の行の数
+    /// (収まらなければ、一覧はカーソルの行が見える所だけ・確かめる画面は段ごとの値を外す・知らせを外す、の順に減らす)
+    pub fn frame(&self, cols: usize, rows: usize) -> Frame {
+        let cols = cols.max(4);
+        let rows = rows.max(1);
+        let total = self.stages.len();
         let title = match self.stages.get(self.at) {
             Some(stage) => format!("[{}/{total}] {}", self.at + 1, stage.title),
             None => "これで起こす".to_string(),
         };
-        lines.push(Line::of(vec![
+        let mut head = vec![Line::of(vec![
             span("claude-selector", Style::Title),
             span("  ", Style::Plain),
             span(title, Style::Title),
-        ]));
-        for w in &self.warnings {
-            lines.push(Line::of(vec![span(format!("  ! {w}"), Style::Warn)]));
+        ])];
+        let warnings: Vec<Line> = self
+            .warnings
+            .iter()
+            .map(|w| {
+                Line::of(vec![span(
+                    format!("  ! {}", quote::visible(w)),
+                    Style::Warn,
+                )])
+            })
+            .collect();
+        // 下: 1 回だけの知らせ・コマンド行 (折り返す)・キーの案内
+        let mut tail = Vec::new();
+        if let Some(n) = &self.notice {
+            tail.push(Line::of(vec![span(format!("  {n}"), Style::Warn)]));
         }
-        match (self.stages.get(self.at), &self.input) {
+        let selection = self.selection();
+        let command = quote::visible(&quote::command_line(
+            &selection.target.command(),
+            &selection.args(&self.extra),
+        ));
+        for (i, part) in wrap(&command, cols - 2).into_iter().enumerate() {
+            let lead = if i == 0 { "$ " } else { "  " };
+            tail.push(Line::of(vec![
+                span(lead, Style::Dim),
+                span(part, Style::Command),
+            ]));
+        }
+        tail.push(Line::of(vec![span(self.help(), Style::Dim)]));
+        let room = |head: &[Line], tail: &[Line]| rows.saturating_sub(head.len() + tail.len());
+        // 収まらなければ、知らせ (一覧が読めない) を外す
+        if room(&head, &tail) > warnings.len() {
+            head.extend(warnings);
+        }
+        let avail = room(&head, &tail);
+        let mut cursor = None;
+        let body = match (self.stages.get(self.at), &self.input) {
             (Some(stage), Some(text)) => {
                 let prompt = match stage.kind {
                     Kind::Model => "  モデルの名前: ",
                     _ => "  Remote Control の名前: ",
                 };
-                cursor = Some((lines.len(), width(prompt) + width(text)));
-                lines.push(Line::of(vec![
+                let shown = quote::visible(text);
+                cursor = Some((head.len(), (width(prompt) + width(&shown)).min(cols)));
+                let mut body = vec![Line::of(vec![
                     span(prompt, Style::Plain),
-                    span(text.clone(), Style::Current),
-                ]));
+                    span(shown, Style::Current),
+                ])];
                 let hint = match stage.kind {
                     Kind::Model => {
                         "  claude --model に渡す名前 (claude-opus-5-5・別名の opus など)"
                     }
                     _ => "  空のまま Enter で名前なし (--remote-control=)",
                 };
-                lines.push(Line::of(vec![span(hint, Style::Dim)]));
+                if avail >= 2 {
+                    body.push(Line::of(vec![span(hint, Style::Dim)]));
+                }
+                body
             }
             (Some(stage), None) => {
-                let label_width = stage
-                    .items
-                    .iter()
-                    .map(|i| width(&i.label))
-                    .max()
-                    .unwrap_or(0);
-                for (i, item) in stage.items.iter().enumerate() {
-                    let current = i == stage.cursor;
-                    let label_style = match (item.enabled, current) {
-                        (false, _) => Style::Disabled,
-                        (true, true) => Style::Current,
-                        (true, false) => Style::Plain,
-                    };
-                    let mut spans = vec![
-                        span(
-                            if current { "> " } else { "  " },
-                            if current {
-                                Style::Current
-                            } else {
-                                Style::Plain
-                            },
-                        ),
-                        span(pad(&item.label, label_width), label_style),
-                    ];
-                    // 既定の印は説明より前に置く (狭い端末で行の後ろが切れても見える)。説明のそろえのため、ほかの行は同じ幅の空白
-                    if i == stage.default {
-                        spans.push(span(DEFAULT_MARK, Style::DefaultMark));
-                    } else if !item.note.is_empty() {
-                        spans.push(span(" ".repeat(width(DEFAULT_MARK)), Style::Plain));
-                    }
-                    if !item.note.is_empty() {
-                        let note_style = if item.enabled {
-                            Style::Dim
-                        } else {
-                            Style::Disabled
-                        };
-                        spans.push(span(format!("  {}", item.note), note_style));
-                    }
-                    lines.push(Line::of(spans));
-                }
+                let shown = avail.max(1).min(stage.items.len());
+                // カーソルの行が見える所 (下へ動かしたらカーソルを一番下に)
+                let start = (stage.cursor + 1)
+                    .saturating_sub(shown)
+                    .min(stage.items.len() - shown);
+                self.item_lines(stage, start..start + shown)
             }
             (None, _) => {
-                let selection = self.selection();
-                let title_width = self
-                    .stages
-                    .iter()
-                    .map(|s| width(s.title))
-                    .max()
-                    .unwrap_or(0);
-                for (i, stage) in self.stages.iter().enumerate() {
-                    lines.push(Line::of(vec![
-                        span(format!("  {}", pad(stage.title, title_width)), Style::Dim),
-                        span("  ", Style::Plain),
-                        span(self.chosen_label(i, &selection), Style::Plain),
-                    ]));
+                let summary = self.summary_lines();
+                if summary.len() <= avail {
+                    summary
+                } else {
+                    Vec::new()
                 }
             }
-        }
-        if let Some(n) = &self.notice {
-            lines.push(Line::of(vec![span(format!("  {n}"), Style::Warn)]));
-        }
-        let selection = self.selection();
-        let command =
-            quote::command_line(&selection.target.command(), &selection.args(&self.extra));
-        lines.push(Line::of(vec![
-            span("$ ", Style::Dim),
-            span(command, Style::Command),
-        ]));
-        lines.push(Line::of(vec![span(self.help(), Style::Dim)]));
+        };
+        let mut lines = head;
+        lines.extend(body);
+        lines.extend(tail);
         Frame { lines, cursor }
     }
+}
+
+/// `text` を `width` 桁ずつの行に分ける (空白で切れるなら空白で。1 語が幅を超えれば字の境で切る。日本語の字は 2 桁)
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in text.split(' ') {
+        let need = UnicodeWidthStr::width(word);
+        if !line.is_empty() && UnicodeWidthStr::width(line.as_str()) + 1 + need <= width {
+            line.push(' ');
+            line.push_str(word);
+            continue;
+        }
+        if !line.is_empty() {
+            lines.push(std::mem::take(&mut line));
+        }
+        // 1 語が幅を超えれば字の境で切る
+        for c in word.chars() {
+            let w = unicode_width::UnicodeWidthChar::width(c).unwrap_or(0);
+            if UnicodeWidthStr::width(line.as_str()) + w > width && !line.is_empty() {
+                lines.push(std::mem::take(&mut line));
+            }
+            line.push(c);
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    lines
 }

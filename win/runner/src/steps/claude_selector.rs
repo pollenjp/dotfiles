@@ -17,7 +17,7 @@
 //! company のグループ (windowsClaudeAccounts が off) でも素の claude を選んで起こせるようにするため (Linux の cs も dotfiles.claude.enable
 //! のホスト全部にある)。PATH は claude-accounts と同じく、もう動いている process (herdr-app とその中の端末) には効かない。
 
-use super::claude_accounts::{BIN_DIR_REL, NEW_TERMINAL, PathState, sync_user_path};
+use super::claude_accounts::{BIN_DIR_REL, PathState, sync_user_path};
 use super::claude_files::replace_file;
 use super::pjp::{channel_ok, locate_cargo, read_toml_string};
 use super::ps1::run_streaming;
@@ -37,19 +37,28 @@ pub const TOOLCHAIN_REL: &str = "win/runner/rust-toolchain.toml";
 pub const RECORD_FILE: &str = "claude-selector.built.json";
 /// cargo build の待ちの上限 (初めては crossterm などの依存も作る)
 const BUILD_SECS: u64 = 1800;
+/// PATH に足したときに添える文 (claude-accounts の文と違い、claude-<名前> を出さない。company のグループでは無いため)
+const NEW_TERMINAL: &str = "PATH は新しい端末から効く。herdr-app とその中の端末・動いている Claude Code には効かないので、herdr-app を上げ直すか、新しい PowerShell で cs (claude-selector) を打つ";
 
 /// 置く exe の名前 (Windows は claude-selector.exe。ほかの OS の名前は試験のため)
 pub fn exe_name() -> String {
     format!("claude-selector{}", std::env::consts::EXE_SUFFIX)
 }
 
-/// crate の元 (Cargo.toml・Cargo.lock・src の下の全部。相対パスの順) と toolchain の channel の SHA-256。読めなければわけ
+/// crate の元 (Cargo.toml・Cargo.lock・src の下の全部と、あれば build.rs・.cargo の下の全部。相対パスの順) と toolchain の channel の
+/// SHA-256。読めなければわけ (tests の下は exe に入らないので数えない)
 pub fn source_digest(crate_dir: &Path, channel: &str) -> Result<String, String> {
     let mut files = vec![
         ("Cargo.toml".to_string(), crate_dir.join("Cargo.toml")),
         ("Cargo.lock".to_string(), crate_dir.join("Cargo.lock")),
     ];
     collect(&crate_dir.join("src"), "src", &mut files)?;
+    if crate_dir.join("build.rs").is_file() {
+        files.push(("build.rs".to_string(), crate_dir.join("build.rs")));
+    }
+    if crate_dir.join(".cargo").is_dir() {
+        collect(&crate_dir.join(".cargo"), ".cargo", &mut files)?;
+    }
     files.sort();
     let mut buf = format!("channel={channel}\n").into_bytes();
     for (rel, path) in files {
@@ -395,7 +404,8 @@ mod tests {
     //! - 元 (src の下・Cargo.lock)・toolchain の channel が変わる・置いた exe が控えと違う・控えが無い → fix。apply で作り直す
     //! - cargo が落ちる → failed で、置いた exe と控えはそのまま。cargo が無い → failed
     //! - crate が無い・channel が読めない → failed。控えが壊れていれば、作り直す (知らせる)
-    //! - 元の SHA-256 は src の下のファイルの並び (読む順) に依らない
+    //! - 元の SHA-256 は src の下のファイルの並び (読む順) に依らない。build.rs・.cargo の下を足すと変わり、tests の下では変わらない
+    //! - PATH に足したときの知らせは cs を出し、claude-<名前> を出さない (company のグループには無い)
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -585,6 +595,13 @@ mod tests {
         assert_eq!(rec.source, source_digest(&w.crate_dir(), "1.99.1").unwrap());
         let bin = join_segments(&w.home(), "AppData/Local/dotfiles/bin");
         assert_eq!(*w.reg.borrow(), format!("C:\\Windows;{}", bin.display()));
+        let note = o
+            .notes
+            .iter()
+            .find(|n| n.contains("新しい端末から効く"))
+            .unwrap();
+        assert!(note.contains("cs"), "{note}");
+        assert!(!note.contains("claude-<名前>"), "{note}");
 
         // 2 回目は作らない
         let sys = w.sys(0, "selector-v2");
@@ -731,6 +748,17 @@ mod tests {
         b.write("c/src/a2.rs", "1");
         std::fs::remove_file(b.path().join("c").join("src").join("a.rs")).unwrap();
         assert_ne!(da, source_digest(&b.path().join("c"), "1.99.1").unwrap());
+        // build.rs・.cargo の下を足すと変わり、tests の下では変わらない
+        a.write("c/tests/t.rs", "#[test] fn t() {}");
+        assert_eq!(da, source_digest(&a.path().join("c"), "1.99.1").unwrap());
+        a.write("c/build.rs", "fn main() {}");
+        let with_build = source_digest(&a.path().join("c"), "1.99.1").unwrap();
+        assert_ne!(da, with_build);
+        a.write("c/.cargo/config.toml", "[build]\n");
+        assert_ne!(
+            with_build,
+            source_digest(&a.path().join("c"), "1.99.1").unwrap()
+        );
         // src が無ければわけ
         std::fs::remove_dir_all(b.path().join("c").join("src")).unwrap();
         assert!(source_digest(&b.path().join("c"), "1.99.1").is_err());

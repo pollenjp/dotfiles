@@ -6,8 +6,9 @@
 //! (nix/README.md の「claude-selector (cs)」に、手で確かめる手順がある)。
 //!
 //! - 行を端末の幅に収める: 収まる行はそのまま。はみ出す行は収まる所まで残して「…」を付け、幅を超えない (日本語の字は 2 桁で数え、
-//!   字の途中で切らない)。見せ方は塊ごとに残す
-//! - キーの写し方: Ctrl+C → やめる、Ctrl+U → 字を消す、Ctrl+P・Ctrl+N・Tab・Shift+Tab → 上下、ほかの Ctrl+字・F キーは使わない
+//!   字の途中で切らない)。見せ方は塊ごとに残す。制御文字は `\n`・`\u{1b}` の形にしてから数える
+//! - キーの写し方: Ctrl+C → やめる、Ctrl+U → 字を消す、Ctrl+P・Ctrl+N・Tab・Shift+Tab → 上下、Ctrl+H → Backspace、Ctrl+Alt+字
+//!   (Windows の AltGr) → 字。ほかの Ctrl+字・F キーは使わない
 
 use claude_selector::term::{clip, map_key};
 use claude_selector::ui::{Key, Line, Span, Style};
@@ -83,4 +84,31 @@ fn keys() {
     assert_eq!(key(KeyCode::Backspace, none), Some(Key::Backspace));
     assert_eq!(key(KeyCode::Left, none), Some(Key::Left));
     assert_eq!(key(KeyCode::F(1), none), None);
+}
+
+#[test]
+fn clip_shows_control_characters() {
+    let l = line(&[("a\nb", Style::Plain), ("\u{1b}[31m", Style::Command)]);
+    let c = clip(&l, 80);
+    assert_eq!(c.text(), "a\\nb\\u{1b}[31m");
+    assert!(!c.text().chars().any(char::is_control));
+    // 見える形にしてから幅を数える
+    let c = clip(&l, 6);
+    assert_eq!(c.text(), "a\\nb\\…");
+    assert!(width(&c) <= 6);
+}
+
+#[test]
+fn keys_ctrl_h_and_altgr() {
+    let ctrl = KeyModifiers::CONTROL;
+    assert_eq!(key(KeyCode::Char('h'), ctrl), Some(Key::Backspace));
+    // Windows は AltGr で打った字を Ctrl+Alt で届ける
+    assert_eq!(
+        key(KeyCode::Char('@'), ctrl | KeyModifiers::ALT),
+        Some(Key::Char('@'))
+    );
+    assert_eq!(
+        key(KeyCode::Char('c'), ctrl | KeyModifiers::ALT),
+        Some(Key::Char('c'))
+    );
 }

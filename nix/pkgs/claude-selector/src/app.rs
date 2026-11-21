@@ -5,7 +5,7 @@
 
 use crate::accounts::{self, Defaults};
 use crate::launch;
-use crate::term::Term;
+use crate::term::{self, Term};
 use crate::ui::{Outcome, Ui};
 use std::ffi::OsString;
 use std::io::IsTerminal;
@@ -34,6 +34,7 @@ pub fn main() -> i32 {
     let note = claude_note(std::env::var_os("CLAUDE_CONFIG_DIR"));
     let mut ui = Ui::new(&found, &note, extra);
     let color = std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+    term::install_panic_hook();
     let mut term = match Term::start(color) {
         Ok(t) => t,
         Err(e) => {
@@ -42,13 +43,16 @@ pub fn main() -> i32 {
         }
     };
     loop {
-        let key = term.draw(&ui.frame()).and_then(|()| term.read_key());
+        let (cols, rows) = term.size();
+        let key = term
+            .draw(&ui.frame(cols, rows))
+            .and_then(|()| term.read_key());
         let key = match key {
             Ok(Some(k)) => k,
             Ok(None) => continue,
             Err(e) => {
-                drop(term);
-                eprintln!("claude-selector: 端末を読めません ({e})");
+                let _ = term.finish(None);
+                eprintln!("claude-selector: 端末を読み書きできません ({e})");
                 return 1;
             }
         };
