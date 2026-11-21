@@ -24,6 +24,9 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles import terminal [--host-file <path>]           Windows Terminal の settings.json の、衝突したキーの値を
                                                           win/windows-terminal/managed.json へ取り込む (settings.json には書かない。
                                                           commit は自分で。受け持ちが runner のホストだけ)
+  dotfiles import international [--host-file <path>]      Windows の日付と時刻の形式の、衝突した値を
+                                                          win/international/managed.json へ取り込む (Windows には書かない。commit は
+                                                          自分で。受け持ちが runner のホストだけ)
   dotfiles import fancyzones <名前>… [--host-file <path>] PC の FancyZones のカスタムレイアウトを名前で選び、
                                                           win/powertoys/fancyzones/custom-layouts.json へ写す (同上。- で始まる
                                                           名前は -- の後ろに書く)
@@ -44,6 +47,7 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                     Windows 側で変わっていたファイルも退避して消す。terminal・fancyzones は元を %LOCALAPPDATA%\\dotfiles\\state\\ の下に退避
                     してから書き、fancyzones は PC で直した・消したレイアウトと手であてた組も上書きする。powertoys は変わっていなくても
                     Keyboard Manager に読み直させる。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。
+                    international は、Windows 側で変わっていた日付と時刻の形式も managed.json の値で書く (退避は無い)。
                     --steps で手順を絞って使う
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
@@ -63,7 +67,7 @@ pub enum Command {
 }
 
 /// 取り込める手順 (WSL の script の `--import` を写したもの)
-pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones"];
+pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones", "international"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -221,9 +225,9 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     IMPORTABLE.join("・")
                 ));
             }
-            Some("terminal") if !a.names.is_empty() => {
+            Some(t @ ("terminal" | "international")) if !a.names.is_empty() => {
                 return Err(format!(
-                    "import terminal は名前を取りません: {}",
+                    "import {t} は名前を取りません: {}",
                     a.names.join(" ")
                 ));
             }
@@ -535,6 +539,9 @@ mod tests {
         assert_eq!(i.target.as_deref(), Some("terminal"));
         assert!(i.names.is_empty());
         assert_eq!(i.host_file, Some(PathBuf::from("h.toml")));
+        let n = p(&["import", "international"]).unwrap();
+        assert_eq!(n.target.as_deref(), Some("international"));
+        assert!(n.names.is_empty());
         let f = p(&["import", "fancyzones", "4k-43inch", "1080p"]).unwrap();
         assert_eq!(f.target.as_deref(), Some("fancyzones"));
         assert_eq!(f.names, vec!["4k-43inch".to_string(), "1080p".to_string()]);
@@ -596,6 +603,7 @@ mod tests {
             &["import"][..],
             &["import", "files"][..],
             &["import", "terminal", "x"][..],
+            &["import", "international", "x"][..],
             &["import", "fancyzones"][..],
             &["import", "terminal", "--force"][..],
             &["import", "terminal", "--steps", "terminal"][..],
@@ -976,6 +984,19 @@ mod tests {
             assert!(sys.call_args().iter().any(|a| a.contains(
                 "status --porcelain --untracked-files=normal -- win/windows-terminal/managed.json"
             )));
+        }
+
+        /// international も、受け持ちが WSL の間は WSL の script の --import を案内して止める (名前は取らない)
+        #[test]
+        fn import_international_needs_the_runner() {
+            let w = World::new(Some(""));
+            let (code, out, _) = w.run(&["import", "international"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(out.contains("==> dotfiles import international"), "{out}");
+            assert!(
+                out.contains("nix/scripts/bootstrap-windows-international.sh --import を打つ"),
+                "{out}"
+            );
         }
 
         #[test]

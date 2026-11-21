@@ -163,7 +163,7 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
         .find(|i| i.id == id)
         .map(|i| i.order);
     if !ctx.host.runner_enable {
-        // WSL の script の --import は名前を 1 つずつ取る (fancyzones は --import <名前> を繰り返す。terminal は名前を取らない)
+        // WSL の script の --import は名前を 1 つずつ取る (fancyzones は --import <名前> を繰り返す。terminal・international は名前を取らない)
         let args: String = if names.is_empty() {
             " --import".to_string()
         } else {
@@ -189,6 +189,7 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
     let o = match id {
         "terminal" => crate::steps::terminal::import(ctx),
         "fancyzones" => crate::steps::fancyzones::import(ctx, names),
+        "international" => crate::steps::international::import(ctx),
         other => Outcome::new(Kind::Failed, format!("{other} は取り込めない")),
     };
     rows.push(Row::new(order, id, o.kind, o.text).with_notes(o.notes));

@@ -41,7 +41,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `port-forward/Start-PortForward.ps1` | `%USERPROFILE%\.config\powershell\Start-PortForward.ps1` | ssh の Host と port の組を選んで port forwarding を張る。PowerShell 7 の `pf` から呼ぶ ([後述](#port-forwarding-pf)) |
 | (dotfiles-private の `ssh/port-forward.toml`) | `%USERPROFILE%\.config\port-forward\hosts.json` | `pf` が出す port の組 (共有の組)。manifest では配らず、`bootstrap-windows-port-forward.sh` (受け持ちを runner に切り替えたホストは runner の `port-forward`) が JSON にして置く ([後述](#port-forwarding-pf)) |
 | `windows-terminal/managed.json` | Store 版の `settings.json` (`%LOCALAPPDATA%\Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\`) の一部のキー | Windows Terminal の設定のうち、dotfiles が持つキーだけ (今は bell の音)。manifest では配らず、`bootstrap-windows-terminal.sh` がキーごとに書き足す ([後述](#windows-terminal)、[TKT-167](https://app.notion.com/p/Windows-Terminal-settings-json-dotfiles-bell-3fb79149a66f81e6a695c581b5ab5cef)) |
-| `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
+| `international/managed.json` | ユーザーのレジストリ `HKCU\Control Panel\International` の一部の値 | Windows の日付と時刻の形式のうち、dotfiles が持つ値だけ (短い日付・長い時刻・短い時刻)。manifest では配らず、`bootstrap-windows-international.sh` (受け持ちを runner に切り替えたホストは runner の `international`) が SetLocaleInfoW で書く ([後述](#日付と時刻の形式)) |
 | `type-clipboard/Install-TypeClipboard.ps1` | `%USERPROFILE%\.config\powershell\Install-TypeClipboard.ps1` | 自作の type-clipboard を、GitHub の Release から固定した版 (SHA-256 も固定) で入れる。PowerShell の `Install-TypeClipboard` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ ([後述](#type-clipboard)) |
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
@@ -202,6 +202,7 @@ dotfiles apply                         # 揃える (受け持ちが WSL のホ�
 dotfiles apply --steps files --force   # files の衝突 (Windows 側で変わっていた) も上書きする
 dotfiles import terminal               # Windows Terminal の衝突したキーの値を managed.json へ取り込む (受け持ちが runner のホストだけ)
 dotfiles import fancyzones '4k-43inch' # PC の FancyZones のレイアウトを名前で選び、repo へ写す (同上。名前は繰り返せる)
+dotfiles import international          # 日付と時刻の形式の衝突した値を managed.json へ取り込む (同上)
 dotfiles manifest                      # manifest.toml を検証する (--json は置き先を解いた計画)
 ```
 
@@ -212,9 +213,9 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 - 1 つの手順が落ちても、残りの手順も流す (ps1 は clone の中のものを呼ぶので、files に頼らない。WSL の setup は files の衝突で後ろを止める)
 - 受け持ちが WSL のホストの apply は、Windows にしか無い手順 (`dotfiles list` の「(Windows だけ)」) だけを流し、WSL の setup と同じ手順は流さずに
   `·` の行 (受け持ちは WSL の setup) を出す。選んだ手順 (`--steps`) に Windows にしか無い手順が無ければ止まる (1)。WSL の setup と同じ手順に直すことが
-  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
-- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal` と `fancyzones`)。Windows 側の値を repo のファイルへ写し、PC の設定の
-  ファイル (settings.json など) には書かない (terminal は runner の記録を取り込んだ値にする。WSL の `--import` も記録は書く)。repo のファイルに commit して
+  あれば、締めの行の下に WSL の `~/dotfiles/setup --update` で揃える道を添える (files・ssh-config・port-forward・terminal・fancyzones・international の衝突の解き方と、powershell-profile の消した 1 行の足し直しも、WSL の `bootstrap-windows-*.sh --force` (取り込みは `--import`) を出す)
+- `dotfiles import <id>` は、WSL の script の `--import` を写したもの (`terminal`・`fancyzones`・`international`)。Windows 側の値を repo のファイルへ写し、PC の設定の
+  ファイル (settings.json など) やレジストリには書かない (terminal・international は runner の記録を取り込んだ値にする。WSL の `--import` も記録は書く)。repo のファイルに commit して
   いない変更があると止まる。`-` で始まるレイアウトの名前は `--` の後ろに書く。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
 
 ### ホストの値
@@ -302,6 +303,14 @@ scanData = "https://app.notion.com/p/…"
   - PowerToys の「前の回は PowerToys の起動を確かめられなかった」(WSL の印 `~/.local/state/dotfiles/powertoys-enable.pending`)・「自動起動のタスクが
     ありません」・「Keyboard Manager の設定 (settings.json) がまだ無い」。runner は WSL の印を読まないので、全体の設定が両方オンなら起動と確認を
     やり直さず、そのまま読み直させて記録する
+- `international` も、初めての apply は記録が無い (WSL の記録 `~/.local/state/dotfiles/windows-international.applied.json` は読まず、同じ名前と形の
+  記録を `%LOCALAPPDATA%\dotfiles\state\` に作る)。WSL の setup が書いた日付と時刻の形式は「同じ」と見て記録だけ作る (書き直さない)。WSL の記録だけが
+  知っている「前に書いた」は引き継げないので、切り替える直前に WSL の `~/dotfiles/setup --update` を流し、日付と時刻の形式の ⚠ (衝突) が出ていない
+  ことを確かめる (出ていれば、切り替える前に WSL の `bootstrap-windows-international.sh --import` か `--force` で解く)。特に:
+  - 「前回書いた値から地域の既定に戻っています」(設定画面で既定に戻した・地域を変えた): runner は記録が無いので、初めて書く値と見て `managed.json` の
+    値で書き直す
+  - `managed.json` の更新が WSL に届く前に切り替えると、更新も「書いた記録が無く」の衝突になる (`dotfiles apply --steps international --force` で書く)
+  - WSL が書いた後に設定画面で変えた値は、runner でも衝突になる (WSL の「Windows 側で変わっています」の代わりに「書いた記録が無く」と出る)
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -342,7 +351,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
-| 99 | `international` | 日付と時刻の形式 | | まだ |
+| 99 | `international` | `international/managed.json` の値だけを、日付と時刻の形式 (`HKCU\Control Panel\International`) へ書く ([日付と時刻の形式](#日付と時刻の形式) と同じ判定。WSL と同じ PowerShell の本文を `pwsh` (PowerShell 7) に `-EncodedCommand` で渡し、SetLocaleInfoW で書いて WM_SETTINGCHANGE を送り、読み戻す。衝突は触らない。`--force` は衝突も書く。取り込みは `dotfiles import international`。check と dry-run は読むだけ。SSH の会話の apply は書く値があれば書かずに ⚠)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-international.applied.json` | いつも | 有る |
 | 99 | `port-forward` | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、`%USERPROFILE%\.config\port-forward\hosts.json` に置く ([port forwarding (pf)](#port-forwarding-pf) と同じ確かめ・中身・判定。`--force` は元を `hosts.json.dotfiles-bak-<日時>` に退避して上書き)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-port-forward.deployed.json` | いつも | 有る |
 | 99 | `terminal` | `windows-terminal/managed.json` のキーだけを Windows Terminal の `settings.json` へ書き足す ([Windows Terminal](#windows-terminal) と同じ判定・`jq --indent 4` と同じバイト列。衝突は触らない。`--force` は退避して書く。取り込みは `dotfiles import terminal`)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-terminal.applied.json`、退避は `…\state\windows-terminal\backup\` (10 回分) | いつも | 有る |
 
@@ -352,7 +361,7 @@ scanData = "https://app.notion.com/p/…"
 - 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
-  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
+  fancyzones → international → google-ime → pin-updates)。powershell-profile・ssh-config・port-forward・terminal・powertoys・fancyzones・international は移した。`op-reason` はその後に足したもので、この順にはまだ入っていない
 - まだ無い手順の on/off は、WSL の script の `# tool:` と同じ道具の switch (行が無ければいつも)
 
 ### runner の手順を足す
@@ -408,7 +417,11 @@ gate が違うと、試験が落ちる
   `powershell.exe`・`pwsh.exe`・`sleep`)・`bootstrap-windows-fancyzones.sh` (偽の `powershell.exe`・`sleep`) を同じ状態から流し、書く JSON のバイト列・
   記録・退避・PowerToys を止める・起こす・イベントを送る順・計画の行と、取り込み (`--import`) が同じかを突き合わせる (偽の exe は要るコマンドだけを
   並べた PATH で流し、本物の Windows の exe を見せない)。jq は 1.7 から数の字を保って書く (`1e2` → `1E+2`・`1.50` はそのまま。CI の Linux の
-  ubuntu の jq 1.7.1 も手元の 1.8.2 も同じ)。その書き方は `jv.rs` の単体の試験でも比べる。bash の版を直したら、Rust の写しも同じに直す
+  ubuntu の jq 1.7.1 も手元の 1.8.2 も同じ)。その書き方は `jv.rs` の単体の試験でも比べる。`international` (`src/steps/international.rs`) は、
+  `bootstrap-windows-international.sh` と runner を同じ偽の `pwsh.exe` (WSL の試験の偽物と同じ振る舞い) で同じ状態から流し、pwsh に渡す本文 (バイト単位)・
+  書く値とその順・Windows の値・記録・取り込んだ `managed.json` が同じかと、WSL が書いた値を記録の無い runner が書き直さずに引き継ぐかを突き合わせる。
+  PowerShell の本文と表 (`table`) は、bash の版が流れない Windows の CI でも WSL の script の字と比べ、Windows の CI では本物の `pwsh` に本文を流して
+  読む (書かない)。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -2664,6 +2677,13 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
   飛ばす (setup は止めない。毎回同じ警告が出る)
 - `managed.json` から消した値は、Windows では戻さない (記録からだけ消す)
 - `pwsh.exe` が無い・WSL の interop が落ちていて読めないときは、⚠ で知らせて書かずに進む
+- 受け持ちを runner に切り替えたホストでは、runner の手順 `international` (order 99) が同じことをする (同じ判定・同じ PowerShell の本文を `pwsh` に
+  `-EncodedCommand` で渡す)。打つものは `dotfiles apply --steps international` (`--dry-run`・`--force`)・`dotfiles import international` (`--import` の
+  代わり)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-international.applied.json`。`dotfiles check` と `apply --dry-run` は読むだけで、書かず、
+  WM_SETTINGCHANGE も送らない。`pwsh` が無いときと読めないときは ⚠ で、書かずに進む (グループポリシーで止められた値も ⚠。runner には setup を
+  止めることが無いので、警告の代わりに ⚠ の行で毎回知らせる)
+- SSH の会話 (`SSH_CONNECTION`・`SSH_CLIENT` がある) の runner の apply は、書く値があれば書かずに ⚠ を出す (`apply --dry-run` はそう予告する)。Win32-OpenSSH の会話はセッション 0 で、WM_SETTINGCHANGE が
+  デスクトップの会話のアプリ (タスクバーの時計など) に届かないため。PC のデスクトップの PowerShell で `dotfiles apply --steps international` を流す
 
 ### 日付と時刻の形式が衝突したら
 
@@ -2682,12 +2702,14 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
 ~/ghq/github.com/pollenjp/dotfiles/nix/scripts/bootstrap-windows-international.sh --force
 ```
 
+受け持ちを runner に切り替えたホストでは、PowerShell で `dotfiles import international` (1) か `dotfiles apply --steps international --force` (2)。
+
 ### 形式の値を足す
 
 持てる名前は script の表 (`table`) にあるものだけ (今は上の 3 つ)。長い日付 (`sLongDate`) などを持つときは:
 
 1. `nix/scripts/bootstrap-windows-international.sh` の `table` に、名前と LCType (winnls.h の `LOCALE_*` の値) を 1 行足す。
-   書く順も表の順
+   書く順も表の順。runner の `runner/src/steps/international.rs` の `TABLE` にも同じ順で足す (試験が WSL の script の表と突き合わせる)
 2. `managed.json` に同じ名前で値を書き、`--check` で検証して `--dry-run` で判定を見る
 3. commit して `~/dotfiles/setup --update`
 

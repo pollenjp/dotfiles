@@ -38,12 +38,6 @@ pub const PENDING: &[PendingSpec] = &[
         title: "Google 日本語入力の設定とユーザー辞書を組み立てて置く",
         gate: Gate::Always,
     },
-    PendingSpec {
-        id: "international",
-        order: 99,
-        title: "日付と時刻の形式 (HKCU\\Control Panel\\International) を書く",
-        gate: Gate::Always,
-    },
 ];
 
 pub struct Pending(pub &'static PendingSpec);

@@ -35,6 +35,14 @@ impl Ctx<'_> {
     pub fn sibling(&self, name: &str) -> PathBuf {
         clone_dir(&self.repo, Some(&self.roots.user_profile), name)
     }
+
+    /// SSH の会話の中か (sshd が SSH_CONNECTION・SSH_CLIENT を渡す。win/openssh/Install-Sshd.ps1 と同じ見方)。Win32-OpenSSH の会話は
+    /// セッション 0 で、デスクトップの会話の窓・プロセス・名前付きイベントが見えない (powertoys・international が書くのを止める)
+    pub fn in_ssh(&self) -> bool {
+        ["SSH_CONNECTION", "SSH_CLIENT"]
+            .iter()
+            .any(|k| self.sys.env(k).is_some_and(|v| !v.is_empty()))
+    }
 }
 
 /// bootstrap が 3 つの repo を clone する ghq の owner のディレクトリ (`%USERPROFILE%\ghq\github.com\pollenjp`)。
