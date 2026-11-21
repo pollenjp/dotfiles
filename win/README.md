@@ -12,6 +12,12 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 (`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`)・ADR 070
 (`docs/adr/070_win_herdr_app_keys_*`)・ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`))。
 
+受け持ちを runner に切り替えたホスト (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) では、WSL の setup は Windows に触らない。
+この README で「`~/dotfiles/setup --update` で配る・入れる・揃える」と書いた Windows の手順は、そのホストでは Windows の clone を pull してから
+PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (固定した版より新しい版の知らせもここに出る)。WSL の `bootstrap-windows-*.sh` を
+手で打つ手順は、`dotfiles apply --steps <id> --force` (`--force`)・`dotfiles import <id>` (`--import`)・PowerShell の `Install-*` (`--apply`) に
+読み替える ([受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))。
+
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
@@ -259,7 +265,12 @@ scanData = "https://app.notion.com/p/…"
   `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
 - `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
   書く (書かなければ `sshd` の行は off。[後述](#sshd))。鍵 (`wsl.windowsFiles.sshd.authorizedKeys`) は TOML には書かない。runner の `sshd` の手順は、
-  WSL の setup が Windows に置く鍵の写しを読む (受け持ちを runner に切り替えるホストが出たら、鍵の置き方を足す)
+  WSL の setup が Windows に置く鍵の写し (`%LOCALAPPDATA%\dotfiles\sshd\authorized_keys`) を読む。受け持ちを runner に切り替えたホストでは WSL が
+  写しを置かないので、そのホストで `windowsSshd` を on にする前に、runner が写しを置く形を足す (まだ無い。写しが無い間の `Install-Sshd.ps1` は鍵を
+  置かず、`administrators_authorized_keys` が無ければ空で作るだけ)
+- 上の「WSL の Nix の値と同じ値を書く」は、受け持ちが WSL のホストのこと。受け持ちを runner に切り替えたホストでは、Windows の道具の値
+  (`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd` など) は TOML にだけ書き、WSL の Nix の値の `wsl.windowsFiles.*` は外す
+  ([受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))
 - `[claude.notion]` は `claude-notion` の手順が `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` に書く (Linux の home-manager が書くのと同じ中身)。
   runner が確かめるのは Nix の option と同じ型だけ (`profile` は `[a-z0-9][a-z0-9_-]*`・`routes` は文字列の表・`override` は表。日時は書けない)。
   プロファイルの名前やキーの綴りは、claude-skills の pjp-notion-profile が使うときに確かめる。TOML に null は無いので、`override` で値を消す形
@@ -275,7 +286,9 @@ scanData = "https://app.notion.com/p/…"
 
 ホストごとに、dotfiles-private の同じ PR で 2 つを変える (同じものを WSL と Windows の両方が配らないように):
 
-1. そのホストの Nix の値 (`nix/hosts/<user>@<hostname>.nix`) を `wsl.windowsFiles.enable = false` にする (WSL が Windows に触らない)
+1. そのホストの Nix の値 (`nix/hosts/<user>@<hostname>.nix`) を `wsl.windowsFiles.enable = false` にする (WSL が Windows に触らない)。同じファイルの
+   Windows の道具の switch (`wsl.windowsFiles.typeClipboard.enable`・`tailscale.enable`・`sshd.enable` など) は外し、値は 2 のファイルの `[tools]` にだけ
+   書く。`typeClipboard.enable = true` を残すと、`windowsFiles.enable = false` では評価が止まる (assertion)。ほかは残しても効かない
 2. Windows のホストの値を `[runner] enable = true` にする (runner の apply を許す)
 
 - WSL の setup の Windows の手順は、後から足した `op-reason` まで全部 runner に移した (下の表に「まだ」の行は無い)。WSL の側に手順を足して runner に
@@ -334,6 +347,25 @@ scanData = "https://app.notion.com/p/…"
   引き継ぐものは無い (切り替える直前に WSL の setup を流す要も無い)。切り替えた後は、WSL の `setup --update` が WSL の op の実行ファイルを上げても
   Windows の部品は揃わない (WSL の `bootstrap-windows-op-reason.sh` は Windows に配らないマシンとして飛ばす) ので、Windows でも同じ commit の clone で
   `dotfiles apply` を流す。WSL の側が新しい版の窓に頼る版では、switch の前に流す ([op-reason の新しい版を出したとき](#op-reason-の新しい版を出したとき))
+- 切り替える日の順。WSL が最後に配る中身と、runner が初めて apply する中身を、同じ commit にそろえるのが要 (runner は記録が無いので、repo と違う
+  中身を「置いた記録が無く」の衝突と見る。WSL が古い commit のまま配った後に切り替えると、その後に repo で変わったファイルが衝突になる):
+  1. WSL と Windows の dotfiles・dotfiles-private の clone を、どちらも main の同じ commit にする (WSL は 2 の `--self-update` が本体を進め、`--update` が
+     dotfiles-private を進める。Windows は 3 つの clone を `pull --ff-only`)
+  2. WSL の `~/dotfiles/setup --self-update --update` で配り、上の項の ⚠ (衝突) が出ていないことを確かめる。Windows の `dotfiles check` が 0 になること
+  3. PR を merge し、両方の clone を進める。1 の commit から、配るもの (dotfiles の `win/` の配るファイル・`nix/pkgs/herdr-core/releases.json`、
+     dotfiles-private の `ssh/`・`google-japanese-input/`) が変わっていないかを `git diff --stat` で見る (README・runner・試験は配らない)。変わって
+     いれば、そのファイルは 5 で「置いた記録が無く」の衝突になる (中身が repo のものなら `dotfiles apply --steps <id> --force` で置く)
+  4. WSL の `~/dotfiles/setup --update`。Windows の手順は「このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。」と出して ✔ に
+     なり、1 で外した道具の switch を `# tool:` に持つ手順 (`tailscale`・`sshd` など) は ↷ (このホストでは off) になる。Windows の exe は呼ばない
+  5. Windows の `dotfiles apply --dry-run`。WSL と同じ手順は「同じ」(記録だけ作る) になり、直すことの行は `powertoys` の「Keyboard Manager に
+     default.json を読み直させる」1 つだけ (記録が無いので一度読み直させる。終了コードは 1)。ps1 の手順は入っていれば何もしない (入っていない道具が
+     あれば入れる。Google 日本語入力・OpenSSH・Tailscale を入れるときは UAC の確認が出る)。見てから `dotfiles apply`
+  6. `dotfiles check` が 0 (直すことはありません) になること。記録は `%LOCALAPPDATA%\dotfiles\state\` に、WSL と同じ名前と形でできる
+- 戻すとき: 切り替えた PR を revert して merge し、両方の clone を同じ commit に進めてから、WSL の `~/dotfiles/setup --update` (WSL がまた配る。中身が
+  その commit の repo と同じなら「同じ」) → Windows の `dotfiles check` (受け持ちが WSL の setup に戻る)。runner が作った記録 (`%LOCALAPPDATA%\dotfiles\state\`
+  の WSL と同じ手順の分) は、受け持ちが WSL の間の apply では使わないので、残してよい
+- 切り替えた後は、Windows の手順を揃えるのは Windows の `dotfiles apply` だけ (clone を pull したら流す)。WSL の setup は Windows の手順をどれも飛ばす。
+  版の知らせは上の `pin-updates` の項、op-reason の版を上げた後は上の `op-reason` の項、依存の更新の PR を merge した後も Windows で `dotfiles apply`
 - WSL の無い Windows は、はじめから 2 だけを書く
 
 ### runner の手順
@@ -1057,6 +1089,8 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
   `~/dotfiles/flake.nix` に足したホストで書く。公開の登録簿の型には入らない)。SSH 鍵も gh のログインもまだの新しい
   WSL の PC は、`setup-local-flake.sh --initial` が書く初期用のホスト `initial` が有効にするので、1 回目の setup から配って
   Windows のアプリも入れる ([`nix/README.md`「新しい WSL の PC」](../nix/README.md#新しい-wsl-の-pc))
+- 受け持ちを runner に切り替えたホストは `windowsFiles.enable = false` で、WSL は配らない。配るのは Windows の `dotfiles apply` の手順 `files` (同じ判定。
+  記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`。[受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))
 - 配り先の `/mnt/c/Users/<名前>` は `dotfiles.wsl.windowsUserName` で決まる
 - 配るのは setup を流した checkout の作業ツリー。commit していない変更も配られる
 - 置いたファイルをアプリが読み直すとは限らない。書き換えたときは manifest の `hint` が出る
@@ -2715,7 +2749,8 @@ PowerToys の割り当ては、これとは別に、91 が Keyboard Manager と�
 ### pjp-google-ime
 
 テキストとバイナリを行き来させる CLI (`nix/pkgs/pjp-google-ime/`)。`windowsFiles.enable` のマシンでは
-home-manager が PATH に入れる。Windows には触らない。
+home-manager が PATH に入れる。Windows には触らない。受け持ちを runner に切り替えたホストでは PATH に入らない (runner の `google-ime` は
+同じバイト列を Rust で組み立てる)。そのホストで使うなら、dotfiles の root で `nix run ./nix#pjp-google-ime -- <引数>`。
 
 ```sh
 pjp-google-ime check --config-dir win/google-japanese-input     # 検証だけ
