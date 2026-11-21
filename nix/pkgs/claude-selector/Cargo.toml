@@ -1,0 +1,23 @@
+[package]
+name = "claude-selector"
+version = "0.1.0"
+edition = "2024"
+# nixpkgs (nix/flake.lock) の rustc に合わせる。Windows では runner の手順 claude-selector が runner の toolchain
+# (win/runner/rust-toolchain.toml) で作る
+rust-version = "1.98"
+description = "claude のアカウントと option を矢印キーで選んで Claude Code を起こす (cs)"
+publish = false
+
+# 版は公開から 7 日以上経ったものに限る (Cargo.lock も。nix/pkgs/claude-selector/default.nix の冒頭)。Linux (Nix) と Windows
+# (runner の手順 claude-selector) が同じ Cargo.lock で作る
+[dependencies]
+# 端末 (raw mode・キー・描画)。既定の features の derive-more (derive_more と syn を引く) と bracketed-paste は使わない
+crossterm = { version = "0.29.0", default-features = false, features = ["events", "windows"] }
+# 既定のアカウントの一覧 (claude-accounts.json) と claude-account の登録 (accounts.json) を読む
+serde_json = "1.0.154"
+# 行を端末の幅で切る (日本語の字は 2 桁)
+unicode-width = "0.2.2"
+
+[lints.rust]
+# Windows の Ctrl+C の handler (src/launch.rs の console_ctrl) のほかに unsafe を書かない
+unsafe_code = "deny"

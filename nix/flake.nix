@@ -192,6 +192,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           googleIme = pkgs.callPackage ./pkgs/pjp-google-ime { };
           ghqPull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
+          claudeSelector = pkgs.callPackage ./pkgs/claude-selector { };
           # WSL の op (1Password CLI の wrapper。自作の OSS の op-reason を Release の版と SHA-256 で固定したもの)。配布物は Linux だけ
           opReason = pkgs.callPackage ./pkgs/op-reason { };
           unittest =
@@ -632,6 +633,25 @@
               touch $out
             '';
           });
+          # claude-selector の cargo fmt --check と cargo clippy --all-targets -- -D warnings (pjp-ghq-pull-lint と同じ形)。
+          # Windows の側 (cfg(windows) の起こし方) の clippy は CI の win-runner が windows-latest で流す
+          claude-selector-lint = claudeSelector.overrideAttrs (old: {
+            pname = "claude-selector-lint";
+            nativeBuildInputs = old.nativeBuildInputs ++ [
+              pkgs.clippy
+              pkgs.rustfmt
+            ];
+            buildPhase = ''
+              runHook preBuild
+              cargo fmt --check
+              cargo clippy --all-targets --offline -- -D warnings
+              runHook postBuild
+            '';
+            doCheck = false;
+            installPhase = ''
+              touch $out
+            '';
+          });
           # 包む前の script を、偽の ssh-add と python3 で bind した本物の unix socket で流す。flock は script が
           # PATH から使う (Linux の system と同じ util-linux のもの)。starship.toml の警告も本物の starship で読ませる
           pjp-agent-link-test =
@@ -652,6 +672,9 @@
           # pjp-ghq-pull の package そのもの。build の中で cargo test を流す (何を確かめるかは
           # pkgs/pjp-ghq-pull/tests/*.rs の先頭)。macOS (aarch64-darwin) でも build と test を通すので全 system
           pjp-ghq-pull-test = ghqPull;
+          # claude-selector (cs) の package そのもの。build の中で cargo test を流す (何を確かめるかは
+          # pkgs/claude-selector/tests/*.rs の先頭)。macOS (aarch64-darwin) でも build と test を通すので全 system
+          claude-selector-test = claudeSelector;
           # ntn (pkgs/ntn) の package そのもの。build の installCheck が `ntn --version` を版と照らす。配布物は system
           # ごとに違うので、macOS (aarch64-darwin) でも build する (全 system)
           ntn-test = pkgs.callPackage ./pkgs/ntn { };
@@ -1059,6 +1082,12 @@
           #   nix run ./nix#pjp-ghq-pull -- --root <一時の ghq root>
           pjp-ghq-pull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
 
+          # claude のアカウントと option を矢印キーで選んで Claude Code を起こす claude-selector (略語 cs。Rust)。
+          # home には modules/claude.nix が dotfiles.claude.enable のホストに入れる。switch せずに試すなら (端末で):
+          #
+          #   nix run ./nix#claude-selector -- -c
+          claude-selector = pkgs.callPackage ./pkgs/claude-selector { };
+
           # Notion の CLI (ntn)。nixpkgs に無いので、公式の配布物を版と sha256 で固定する (pkgs/ntn)。
           # home には modules/packages.nix が入れる。switch せずに試すなら:
           #
@@ -1155,6 +1184,19 @@
               # テストが bare の remote と clone を作る git と、repo の一覧を読む ghq
               pkgs.git
               pkgs.ghq
+            ];
+          };
+
+          # claude-selector (pkgs/claude-selector。Rust) を直すときの道具 (pjp-ghq-pull と同じく mkShell)。
+          # nix/pkgs/claude-selector の中で:
+          #
+          #   nix develop ../..#claude-selector --command cargo test
+          claude-selector = pkgs.mkShell {
+            packages = [
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.clippy
+              pkgs.rustfmt
             ];
           };
         }
