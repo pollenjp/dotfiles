@@ -873,7 +873,8 @@ $panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnoti
 仕組みが無いので、prefix は自作の mod `pjp-prefix` (小窓) で作る。keys.json に dotfiles のキーを書き足すのは runner の手順 `herdr-app-keys` (order 99)、
 mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちらも Windows にしか無い手順で、受け持ちが WSL のホストでも `dotfiles apply` が流す
 (on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`) と、space の移動を `Ctrl+PageUp/Down` と
-`Ctrl+Alt+↑↓` にした ADR 085 (`docs/adr/085_win_herdr_app_space_ctrl_alt_*`)。
+`Ctrl+Alt+↑↓` にした ADR 085 (`docs/adr/085_win_herdr_app_space_ctrl_alt_*`)、prefix の後の `c` (新しいタブ) を足した ADR 086
+(`docs/adr/086_win_herdr_app_prefix_c_new_tab_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
@@ -892,6 +893,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | prefix → `v`・`\|` | 右に分割 (`pane.split` の right) | `split_vertical` |
 | prefix → `-`・`Shift+S` | 下に分割 (`pane.split` の down) | `split_horizontal` |
 | prefix → `n`・`p` | 次・前のタブ | `next_tab`・`previous_tab` |
+| prefix → `c` | 新しいタブ (`tab.new`。`Ctrl+Shift+T` (herdr-app の既定) と同じく、今の space の focus のペインのフォルダで開く) | (無い) |
 | prefix → `Shift+T`・`,` | タブの名前を変える (名前を訊く) | `rename_tab` |
 | prefix → `Tab`・`o` | 今のタブの次のペイン (端末のペインを順に回る) | `cycle_pane_next` |
 | prefix → `g`・`"` | 端末の picker (`mod.open:picker`) | `goto` |
