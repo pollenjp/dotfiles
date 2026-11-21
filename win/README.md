@@ -932,7 +932,8 @@ $panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnoti
 mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちらも Windows にしか無い手順で、受け持ちが WSL のホストでも `dotfiles apply` が流す
 (on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`) と、space の移動を `Ctrl+PageUp/Down` と
 `Ctrl+Alt+↑↓` にした ADR 085 (`docs/adr/085_win_herdr_app_space_ctrl_alt_*`)、prefix の後の `c` (新しいタブ) を足した ADR 086
-(`docs/adr/086_win_herdr_app_prefix_c_new_tab_*`)。
+(`docs/adr/086_win_herdr_app_prefix_c_new_tab_*`)、`Shift+C`・`Shift+G` の worktree の名前の頭を `hc/` にした ADR 088
+(`docs/adr/088_win_herdr_app_worktree_hc_prefix_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
@@ -977,10 +978,13 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   [`nix/files/herdr/config.toml`](../nix/files/herdr/config.toml) のコメント) ので、旧 herdr の workspace の移動は `Ctrl+Alt+↑↓` のまま。herdr-app の中で
   旧 herdr を動かすと、`Ctrl+Alt+↑↓` も `Ctrl+PageUp`・`Ctrl+PageDown` も herdr-app が先に取り (herdr-app の space が移る)、旧 herdr には届かない。
   旧 herdr の workspace を `Ctrl+Alt+↑↓` で移るなら、herdr-app の外 (Windows Terminal など) で旧 herdr を開く
-- worktree の名前は `worktree/<形容詞>-<名詞>-<16 進 4 桁>` (旧 herdr と同じ形。例 `worktree/calm-river-8281`。フォルダは
-  `~/.herdr/worktrees/<repo>/worktree-calm-river-8281`)。prefix を開く前に focus があったペインのフォルダの repo に、同じ名前の branch があれば名前を
-  作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その checkout の HEAD から branch を切って worktree を作り、新しい space を
-  開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
+- worktree の名前は `hc/<形容詞>-<名詞>-<16 進 4 桁>` (例 `hc/calm-river-8281`。フォルダは `~/.herdr/worktrees/<repo>/hc-calm-river-8281`)。
+  頭の `hc/` (herdr-app と hc の世代の印) は、旧 herdr が付ける `worktree/<形容詞>-<名詞>-<16 進 4 桁>` とずらすため。同じ形だと、Windows のハブ
+  (`%USERPROFILE%\h`) の worktree の branch が WSL の旧 herdr のハブ (`~/h`) のものと丸ごと重なりうる。重なると、両方のマシンの見回り役が同じハブの
+  チケットを読む (claude-skills の spec `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.10)。prefix を開く前に focus があった
+  ペインのフォルダの repo に、同じ名前の branch があれば名前を作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その
+  checkout の HEAD から branch を切って worktree を作り、新しい space を開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space
+  なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
 - `Shift+G` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
   `c` は fish では abbr、bash では alias で、herdr-app が argv で起こすときに広がるとは限らないので、中身を並べている。machine の space でも同じ argv で、
   claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる (runner の試験
