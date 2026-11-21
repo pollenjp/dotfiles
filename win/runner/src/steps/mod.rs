@@ -19,6 +19,7 @@ pub mod fancyzones;
 pub mod files;
 pub mod generated;
 pub mod git_config;
+pub mod google_ime;
 pub mod hc_hub;
 pub mod herdr_app_keys;
 pub mod herdr_app_mods;
@@ -169,8 +170,20 @@ pub trait Step {
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome>;
 }
 
+/// 手順に渡す引数 (手順が 1 つだけで使うもの)。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Options {
+    /// google-ime の辞書の衝突で、語の diff も出す (`--show-words`)
+    pub show_words: bool,
+}
+
 /// 手順の一覧 (順番どおり)。
 pub fn all() -> Vec<Box<dyn Step>> {
+    all_with(Options::default())
+}
+
+/// 手順の一覧 (順番どおり。`options` を手順に渡す)。
+pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
     let mut steps: Vec<Box<dyn Step>> = vec![
         Box::new(bootstrap::Bootstrap),
         // W0-2 の Windows の側 (Windows にしか無い手順。dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)
@@ -209,6 +222,9 @@ pub fn all() -> Vec<Box<dyn Step>> {
         Box::new(port_forward::PortForward),
         Box::new(terminal::Terminal),
         Box::new(international::International),
+        Box::new(google_ime::GoogleIme {
+            show_words: options.show_words,
+        }),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -304,6 +320,7 @@ mod tests {
         assert!(from_wsl.contains(&"ssh-config") && from_wsl.contains(&"port-forward"));
         assert!(from_wsl.contains(&"terminal") && from_wsl.contains(&"powertoys"));
         assert!(from_wsl.contains(&"fancyzones") && from_wsl.contains(&"international"));
+        assert!(from_wsl.contains(&"google-ime"));
         for id in from_wsl {
             let script = repo
                 .join("nix")

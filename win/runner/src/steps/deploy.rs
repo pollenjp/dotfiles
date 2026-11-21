@@ -283,7 +283,7 @@ pub fn show_diff_bytes(ctx: &mut Ctx, windows: &Path, ours: &[u8], name: &str) {
 }
 
 /// 一時の場所に新しいディレクトリを作る (`create_dir` なので、既にある名前 (先に置かれた symlink も) は使わずに名前を替える)。
-fn fresh_temp_dir() -> std::io::Result<PathBuf> {
+pub(crate) fn fresh_temp_dir() -> std::io::Result<PathBuf> {
     let nanos = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())

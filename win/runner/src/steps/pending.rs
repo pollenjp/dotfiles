@@ -32,12 +32,6 @@ pub const PENDING: &[PendingSpec] = &[
         title: "固定した版より新しい版が出ていないかを知らせる",
         gate: Gate::Always,
     },
-    PendingSpec {
-        id: "google-ime",
-        order: 98,
-        title: "Google 日本語入力の設定とユーザー辞書を組み立てて置く",
-        gate: Gate::Always,
-    },
 ];
 
 pub struct Pending(pub &'static PendingSpec);
