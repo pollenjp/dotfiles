@@ -474,10 +474,56 @@ fn token_never_reaches_the_output() {
             |o| !o.text.contains("gho_fake") && o.notes.iter().all(|n| !n.contains("gho_fake"))
         )
     );
+    // token (stdout) は写しに取らない
     let auth = &r.specs[0];
     assert_eq!(auth.args_lossy(), vec!["auth", "token"]);
-    assert!(auth.stdout_only);
+    assert!(auth.stderr_only && !auth.stdout_only);
     assert_eq!(auth.timeout, Some(Duration::from_secs(30)));
+}
+
+/// gh api と curl は、名前ごとの上限 (WSL の timeout 60) の残りまでしか待たない。上限を過ぎていれば打たずに「60 秒で返らなかった」
+#[test]
+fn every_call_waits_at_most_the_wsl_limit() {
+    let mut w = World::new();
+    w.set_tags("herdr-app", &["v0.1.15", "v0.1.16"]);
+    w.set_tags("herdr-core", &["v0.1.21", "v0.1.22"]);
+    let r = w.run(CHECK);
+    let limit = Duration::from_secs(LIMIT_SECS);
+    assert_eq!(LIMIT_SECS, 60);
+    let net: Vec<&CommandSpec> = r.specs.iter().skip(1).collect();
+    assert_eq!(net.len(), 5 + 2 + 2, "{:?}", r.calls);
+    for c in net {
+        let t = c
+            .timeout
+            .unwrap_or_else(|| panic!("待つ上限が無い: {:?}", c.args_lossy()));
+        assert!(
+            t <= limit && t > limit - Duration::from_secs(10),
+            "{t:?}: {:?}",
+            c.args_lossy()
+        );
+    }
+    // 上限を過ぎていれば打たない
+    let sys = w.net.sys();
+    let (repo, roots, state_dir, host) = w.ctx_parts();
+    let mut out = Vec::new();
+    let ctx = Ctx {
+        repo,
+        roots,
+        state_dir,
+        host,
+        sys: &sys,
+        out: &mut out,
+    };
+    let past = std::time::Instant::now();
+    assert_eq!(
+        winget::check(&ctx, Path::new(GH), spec_of("ntn"), past).unwrap_err(),
+        vec!["60 秒で返らなかった"]
+    );
+    assert_eq!(
+        herdr::check(&ctx, Path::new(GH), Some(Path::new(CURL)), past).unwrap_err(),
+        vec!["60 秒で返らなかった"]
+    );
+    assert!(sys.calls.borrow().is_empty());
 }
 
 // ------------------------------------------------------------------ 新しい版
@@ -929,6 +975,53 @@ fn winget_versions_are_ordered_and_filtered() {
         ]
     );
     assert_eq!(found.line().unwrap(), "Windows の herdr: 0.9.5 → 0.9.7");
+}
+
+/// 空白は C.UTF-8 の bash の [[:space:]] と同じに読む: 全角の空白などだけの行・その後ろの注釈は見送りの一覧で読み飛ばし、ps1 の行頭と `=` の前後も
+/// 空白。改行しない空白 (U+00A0) は空白でない (書き損じの行)
+#[test]
+fn unicode_spaces_follow_bash_in_c_utf8() {
+    let mut w = World::new();
+    w.set_contents("herdr", dirs(&["0.9.5", "0.9.6", "0.9.7"]));
+    w.write(
+        "win/herdr/skipped-versions.txt",
+        "\u{3000}\n\u{3000}# 全角の空白の後ろの注釈\n\u{2003}\u{205f}\t\n0.9.6 試したら設定が読めなかった\n",
+    );
+    w.write(
+        herdr::SKIPPED_REL,
+        "\u{3000}\n\u{2028}# 注釈\napp 0.1.16 窓が開かなかった\n",
+    );
+    w.set_tags("herdr-app", &["v0.1.15", "v0.1.16"]);
+    w.write(
+        "win/ntn/Install-Ntn.ps1",
+        "\u{3000}[string]$Version\u{2003}=\u{3000}'0.23.28'\n\u{1680}$packageId = 'Notion.ntn'\n",
+    );
+    w.set_contents("ntn", dirs(&["0.23.28", "0.23.29"]));
+    let r = w.run(CHECK);
+    assert_eq!(
+        r.out,
+        vec![
+            format!("!! {HEADING}"),
+            "   Windows の herdr: 0.9.5 → 0.9.7".to_string(),
+            "   Windows の ntn: 0.23.28 → 0.23.29".to_string(),
+        ]
+    );
+    w.write("win/herdr/skipped-versions.txt", "\u{a0}\n");
+    let r = w.run(CHECK);
+    let failed = r.outcomes.iter().find(|o| o.kind == Kind::Failed).unwrap();
+    assert!(failed.notes[0].starts_with(
+        "herdr: 見送りの一覧の 1 行目が読めません (win/herdr/skipped-versions.txt): \u{a0}"
+    ));
+    // わけの行頭の空白も同じ
+    assert_eq!(
+        reason_of(&["!! \u{3000}a".into(), "\u{2003}b".into()]),
+        "a / b"
+    );
+    for c in [
+        '\u{a0}', '\u{2007}', '\u{202f}', '\u{85}', '\u{200b}', '\u{feff}',
+    ] {
+        assert!(!is_space(c), "{:04X}", c as u32);
+    }
 }
 
 /// winget の 1 つの名前を確かめた結果 (手順を通さずに口を呼ぶ)
@@ -2075,9 +2168,21 @@ exit "${rc}"
         p.write("win/herdr/skipped-versions.txt", "\u{feff}# 見送った版\r\n\r\n  0.9.6   試したら  設定が読めなかった \r\n0.9.6 後の行\r\n");
         p.write(
             "win/bootstrap/skipped-versions/git.txt",
-            "2.56.1 速すぎた\n",
+            "\u{3000}\n\u{3000}# 全角の空白の後ろの注釈\n\u{2003}\u{205f}\t\n2.56.1 速すぎた\n",
         );
-        for n in ["herdr", "openssh", "tailscale", "git"] {
+        // ps1 の行頭と = の前後の Unicode の空白 (C.UTF-8 の [[:space:]])
+        p.write(
+            "win/google-japanese-input/Install-GoogleJapaneseInput.ps1",
+            "\u{3000}[string]$Version\u{2003}=\u{3000}'3.35.6300.0'\n\u{1680}$packageId = 'Google.JapaneseIME'\n",
+        );
+        p.contents("google-japanese-input", &["3.35.6300.0", "3.35.6301.0"]);
+        for n in [
+            "herdr",
+            "openssh",
+            "tailscale",
+            "git",
+            "google-japanese-input",
+        ] {
             p.same_winget(n);
         }
         // 確かめられない: 404・版のディレクトリが無い・Preview だけ・API の失敗 (stderr が空のときも)・一覧でない応答
@@ -2188,7 +2293,7 @@ exit "${rc}"
         p.head(&artifact_url("core", "0.1.22"), "HTTP/2 500\r\n\r\n", 0, "");
         p.write(
             herdr::SKIPPED_REL,
-            "# 見送った版\napp 0.1.20 窓が開かなかった\ncore 0.1.23 一つ目\ncore 0.1.23 後の理由\n",
+            "# 見送った版\n\u{3000}\n\u{2028}# 注釈\napp 0.1.20 窓が開かなかった\ncore 0.1.23 一つ目\ncore 0.1.23 後の理由\n",
         );
         p.same_herdr();
         // core の tag を読めない: app の curl の stderr と gh の stderr が先に来る
@@ -2332,6 +2437,38 @@ exit "${rc}"
             p.same_winget(s.name);
         }
         p.same_herdr();
+    }
+
+    /// is_space は、C.UTF-8 の bash の `[[:space:]]` (正規表現と glob) と同じ字を空白と読む (Unicode の空白とその近くの字で比べる)
+    #[test]
+    fn is_space_matches_bash_space_class() {
+        if !bash::available() {
+            return;
+        }
+        let mut cands: Vec<u32> = (1..=0x20).collect();
+        cands.extend([
+            0x7f, 0x85, 0xa0, 0x1680, 0x180e, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005,
+            0x2006, 0x2007, 0x2008, 0x2009, 0x200a, 0x200b, 0x200c, 0x200d, 0x2028, 0x2029, 0x202f,
+            0x205f, 0x2060, 0x3000, 0x3001, 0xfeff,
+        ]);
+        let script = r#"for cp in "$@"; do printf -v c "\\U$(printf '%08x' "$cp")"; r=0; g=0; [[ $c =~ ^[[:space:]]$ ]] && r=1; case $c in [[:space:]]) g=1 ;; esac; echo "$cp $r $g"; done"#;
+        let o = Command::new("bash")
+            .arg("-c")
+            .arg(script)
+            .arg("bash")
+            .args(cands.iter().map(|c| c.to_string()))
+            .env("LC_ALL", "C.UTF-8")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        let out = String::from_utf8(o.stdout).unwrap();
+        assert_eq!(out.lines().count(), cands.len(), "{out}");
+        for l in out.lines() {
+            let f: Vec<&str> = l.split(' ').collect();
+            let c = char::from_u32(f[0].parse().unwrap()).unwrap();
+            assert_eq!(f[1], f[2], "正規表現と glob が違う: U+{:04X}", c as u32);
+            assert_eq!(is_space(c), f[1] == "1", "U+{:04X}", c as u32);
+        }
     }
 
     /// 版の比べ方は sort -V (C の locale) と同じ

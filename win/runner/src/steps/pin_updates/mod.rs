@@ -9,15 +9,18 @@
 //!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 4 つ (git・gh・vs-buildtools・rustup) は、WSL と同じく Windows の
 //!   ghq に dotfiles の clone がある (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap を流した) ときだけ
 //! - GitHub は Windows の gh で読む (`gh api`。HTTP の crate を足さない)。herdr-app・herdr-core は、版ごとの Windows の成果物が releases.herdr.dev に
-//!   あるかを HEAD で見る (無い版は数えない)。gh では読めない所なので、WSL と同じ引数の curl (Windows の System32 の curl.exe。Install-HerdrApp.ps1 も
-//!   同じ取得元を curl.exe で落とす) を打つ
-//! - 待つ上限は WSL と同じく名前ごとに 60 秒 (herdr-app と herdr-core は 2 つで 1 回)。gh が無い・ログインしていない (`gh auth token`。token は
-//!   流す口にも写しにも残さない) ときは、名前を確かめずに知らせる
+//!   あるかを HEAD で見る (無い版は数えない)。gh では読めない所なので、WSL と同じ引数の curl (PATH で最初に見つかるもの。Windows はふつう System32 の
+//!   curl.exe。Install-HerdrApp.ps1 も同じ探し方で、同じ取得元を落とす) を打つ
+//! - 待つ上限は WSL と同じく名前ごとに 60 秒 (herdr-app と herdr-core は 2 つで 1 回)。gh が無い・ログインしていない (`gh auth token` の終了コード。
+//!   token は写しに取らず、流す口は受けた行を捨てる) ときは、名前を確かめずに知らせる
 //! - 行: 見送っていない新しい版があれば · (知らせるだけ。終了コードに数えない。ps1 の手順が winget の新しい版を ✔ の行の ※ で出すのと同じく、
 //!   直すことではない)、無ければ ✔。gh が無い・ログインしていない → manual、確かめられなかった名前がある → failed (WSL はどれも警告して exit 0。
 //!   runner には setup を止めることが無いので、前の手順と同じく ⚠ の行にした)
 //! - 出力 (手順の見出しの下) は WSL の script の出力と同じ字 (`!!` の行と字下げした続き)。違うのは、gh が無いときの直し方 (WSL は home-manager
-//!   switch、runner は bootstrap) と、確かめられなかったときの「setup は続けます。」を書かないことだけ
+//!   switch、runner は bootstrap)・確かめられなかったときの「setup は続けます。」を書かないこと・releases.json の誤りの文のパス (runner の clone の
+//!   Windows のパス)・runner にしか無い失敗の文 (見送りの一覧が読めない・gh や curl を起こせない・curl が無い)
+//! - 空白の読み方 (見送りの一覧の注釈と空行・ps1 の行頭と `=` の前後・わけの行頭) は、WSL の setup が流れる C.UTF-8 の bash の `[[:space:]]` と同じ
+//!   (`is_space`。全角の空白なども数える)
 //! - 依存の更新の skill が読む JSON の口 (`--list --json`・`--candidates --json`) と、人が読む `--candidates` は写さない (WSL の script に残す)。
 //!   読む側は Linux の会話から repo の root で打ち、口は WSL の記録を見ないので、受け持ちを runner に切り替えた後も Linux で動く
 //! - Windows にも記録の置き場にも何も書かない。check・dry-run・apply は同じことをする (GitHub を読んで知らせるだけ)
@@ -196,13 +199,13 @@ fn warn(ctx: &mut Ctx, lines: &[String]) {
     }
 }
 
-/// gh が github.com にログインしているか (WSL と同じく `gh auth token` の終了コードで見る。手元の資格情報を読むだけ)。token は流す口に渡さず、
-/// 写しは読まずにすぐ捨てる。
+/// gh が github.com にログインしているか (WSL と同じく `gh auth token` の終了コードで見る。手元の資格情報を読むだけ)。token (stdout) は写しに
+/// 取らず (`stderr_only`)、流す口は受けた行を捨てる。
 fn logged_in(ctx: &Ctx, gh: &Path) -> bool {
     let spec = CommandSpec::new(gh)
         .arg("auth")
         .arg("token")
-        .stdout_only()
+        .stderr_only()
         .timeout(Duration::from_secs(AUTH_SECS));
     ctx.sys.run(&spec, &mut |_| {}).code() == Some(0)
 }
@@ -371,7 +374,8 @@ pub struct Split {
 }
 
 /// コマンドを打ち、stdout と stderr を分けて受ける (gh api は失敗したときも stdout に応答の本文を、stderr にわけを書く)。stdout だけを写しに取り、
-/// 流す口で受けた全部の行から写しの行を順に除いたものを stderr とする (流す口には届いた順に全部が来る)。
+/// 流す口で受けた全部の行から写しの行を順に除いたものを stderr とする (流す口には届いた順に全部が来る)。同じ字の行が stdout と stderr の両方に
+/// あると、stderr の中の並びが入れ替わりうる (中身は変わらない)。gh・curl の stdout (JSON・ヘッダ) と stderr (わけ) は同じ字にならない。
 pub fn run_split(ctx: &Ctx, spec: CommandSpec) -> Split {
     let mut all = Vec::new();
     let r = ctx
@@ -393,9 +397,22 @@ pub fn run_split(ctx: &Ctx, spec: CommandSpec) -> Split {
     }
 }
 
-/// bash の `[[:space:]]` (WSL の script の正規表現と `reason_of` の空白)
+/// bash の `[[:space:]]` (WSL の script の正規表現・注釈の行・`reason_of` の空白)。WSL の setup が流れる C.UTF-8 の glibc の space の字: ASCII の空白
+/// (タブ〜CR と空白) と U+1680・U+2000〜U+2006・U+2008〜U+200A・U+2028・U+2029・U+205F・U+3000 (全角の空白)。改行しない空白 (U+00A0・U+2007・
+/// U+202F) と U+0085 は入らない (C.UTF-8 の bash で確かめた。試験も比べる)
 pub fn is_space(c: char) -> bool {
-    matches!(c, ' ' | '\t' | '\n' | '\x0b' | '\x0c' | '\r')
+    matches!(
+        c,
+        '\t'..='\r'
+            | ' '
+            | '\u{1680}'
+            | '\u{2000}'..='\u{2006}'
+            | '\u{2008}'..='\u{200a}'
+            | '\u{2028}'
+            | '\u{2029}'
+            | '\u{205f}'
+            | '\u{3000}'
+    )
 }
 
 /// bash の `while IFS= read -r line || [[ -n ${line} ]]` が読む行 (改行で区切る。最後の改行の後ろの空は読まない。CR は残す)
