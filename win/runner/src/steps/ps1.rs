@@ -111,7 +111,7 @@ pub const SPECS: &[Ps1Spec] = &[
         uac: true,
         ok_text: "Windows の Google 日本語入力は、dotfiles で固定した版に揃っています。",
         installed: &[
-            "設定を置く手順 (google-ime。runner にまだ無く、WSL の bootstrap-windows-google-ime.sh) が「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから流し直す",
+            "設定を置く手順 (google-ime。受け持ちが WSL の間は WSL の bootstrap-windows-google-ime.sh) が「まだ使われていません」と出したら、Google 日本語入力で一度何か打ってから流し直す",
         ],
         synced: &[],
         manual_fix: &[

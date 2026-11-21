@@ -16,8 +16,9 @@ pub const USAGE: &str = "\
 dotfiles の Windows 側の runner (win/README.md の「runner」)。
 
 使い方:
-  dotfiles check   [--steps <id>,…] [--host-file <path>]   手順を順に確かめる (何も書かない)
-  dotfiles apply   [--dry-run] [--force] [--steps <id>,…] [--host-file <path>]
+  dotfiles check   [--steps <id>,…] [--show-words] [--host-file <path>]
+                                                          手順を順に確かめる (何も書かない)
+  dotfiles apply   [--dry-run] [--force] [--steps <id>,…] [--show-words] [--host-file <path>]
                                                           手順を順に揃える (受け持ちが WSL のホスト (runner.enable が true でない) では、
                                                           Windows にしか無い手順だけ。ホストの値が無ければ止まる)
   dotfiles list    [--host-file <path>]                   手順と、このホストでの on/off・受け持ちを出す
@@ -30,6 +31,10 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   dotfiles import fancyzones <名前>… [--host-file <path>] PC の FancyZones のカスタムレイアウトを名前で選び、
                                                           win/powertoys/fancyzones/custom-layouts.json へ写す (同上。- で始まる
                                                           名前は -- の後ろに書く)
+  dotfiles import google-ime [--host-file <path>]         Google 日本語入力の設定と辞書を、win/google-japanese-input/ と
+                                                          dotfiles-private の google-japanese-input/dictionaries/ のテキストへ
+                                                          取り込む (Google 日本語入力のファイルには書かない。commit は自分で。
+                                                          dotfiles-private の diff には辞書の語が出るので自分の端末で見る。同上)
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
@@ -48,7 +53,10 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                     してから書き、fancyzones は PC で直した・消したレイアウトと手であてた組も上書きする。powertoys は変わっていなくても
                     Keyboard Manager に読み直させる。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。
                     international は、Windows 側で変わっていた日付と時刻の形式も managed.json の値で書く (退避は無い)。
-                    --steps で手順を絞って使う
+                    google-ime は、画面で変えていた (読めない) 設定と辞書も、元を %LOCALAPPDATA%\\dotfiles\\state\\ の下に退避して
+                    から置き直す。--steps で手順を絞って使う
+  --show-words      google-ime の辞書の衝突で、語の diff も出す (出さなければ辞書ごとの行の数だけ)。自分の端末で打つ (Claude などの
+                    ログに残る場所では流さない)
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
   --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
@@ -67,13 +75,15 @@ pub enum Command {
 }
 
 /// 取り込める手順 (WSL の script の `--import` を写したもの)
-pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones", "international"];
+pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones", "international", "google-ime"];
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
     pub command: Command,
     pub dry_run: bool,
     pub force: bool,
+    /// google-ime の辞書の衝突で語の diff も出す
+    pub show_words: bool,
     pub steps: Option<Vec<String>>,
     pub host_file: Option<PathBuf>,
     pub json: bool,
@@ -91,6 +101,7 @@ impl Args {
             command,
             dry_run: false,
             force: false,
+            show_words: false,
             steps: None,
             host_file: None,
             json: false,
@@ -165,6 +176,10 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                 allowed(&[Command::Apply])?;
                 a.force = true;
             }
+            "--show-words" => {
+                allowed(&[Command::Check, Command::Apply])?;
+                a.show_words = true;
+            }
             "--json" => {
                 allowed(&[Command::Manifest])?;
                 a.json = true;
@@ -207,7 +222,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             }
             other => return Err(format!("知らない引数です: {other}")),
         }
-        if inline.is_some() && matches!(name, "--dry-run" | "--force" | "--json") {
+        if inline.is_some() && matches!(name, "--dry-run" | "--force" | "--json" | "--show-words") {
             return Err(format!("{name} は値を取りません"));
         }
     }
@@ -225,7 +240,7 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
                     IMPORTABLE.join("・")
                 ));
             }
-            Some(t @ ("terminal" | "international")) if !a.names.is_empty() => {
+            Some(t @ ("terminal" | "international" | "google-ime")) if !a.names.is_empty() => {
                 return Err(format!(
                     "import {t} は名前を取りません: {}",
                     a.names.join(" ")
@@ -422,7 +437,9 @@ fn steps_command(
     sys: &dyn Sys,
     out: &mut dyn Write,
 ) -> Result<i32, String> {
-    let all = steps::all();
+    let all = steps::all_with(steps::Options {
+        show_words: a.show_words,
+    });
     let selected: Vec<Box<dyn Step>> = match &a.steps {
         None => all,
         Some(ids) => {
@@ -542,6 +559,9 @@ mod tests {
         let n = p(&["import", "international"]).unwrap();
         assert_eq!(n.target.as_deref(), Some("international"));
         assert!(n.names.is_empty());
+        let g = p(&["import", "google-ime"]).unwrap();
+        assert_eq!(g.target.as_deref(), Some("google-ime"));
+        assert!(g.names.is_empty() && !g.show_words);
         let f = p(&["import", "fancyzones", "4k-43inch", "1080p"]).unwrap();
         assert_eq!(f.target.as_deref(), Some("fancyzones"));
         assert_eq!(f.names, vec!["4k-43inch".to_string(), "1080p".to_string()]);
@@ -582,6 +602,14 @@ mod tests {
         assert_eq!(a.steps, Some(vec!["files".to_string(), "ntn".to_string()]));
         assert_eq!(a.host_file, Some(PathBuf::from("h.toml")));
         assert_eq!(a.repo, Some(PathBuf::from("/r")));
+        assert!(!a.show_words);
+        // --show-words は check と apply (dry-run も) に付けられる
+        assert!(p(&["check", "--show-words"]).unwrap().show_words);
+        assert!(
+            p(&["apply", "--dry-run", "--show-words"])
+                .unwrap()
+                .show_words
+        );
         let m = p(&["manifest", "--json", "--windows-home", "/mnt/c/Users/x"]).unwrap();
         assert!(m.json);
         assert_eq!(m.windows_home, Some(PathBuf::from("/mnt/c/Users/x")));
@@ -604,6 +632,10 @@ mod tests {
             &["import", "files"][..],
             &["import", "terminal", "x"][..],
             &["import", "international", "x"][..],
+            &["import", "google-ime", "x"][..],
+            &["import", "google-ime", "--show-words"][..],
+            &["list", "--show-words"][..],
+            &["check", "--show-words=yes"][..],
             &["import", "fancyzones"][..],
             &["import", "terminal", "--force"][..],
             &["import", "terminal", "--steps", "terminal"][..],
@@ -995,6 +1027,19 @@ mod tests {
             assert!(out.contains("==> dotfiles import international"), "{out}");
             assert!(
                 out.contains("nix/scripts/bootstrap-windows-international.sh --import を打つ"),
+                "{out}"
+            );
+        }
+
+        /// google-ime も、受け持ちが WSL の間は WSL の script の --import を案内して止める (名前は取らない)
+        #[test]
+        fn import_google_ime_needs_the_runner() {
+            let w = World::new(Some(""));
+            let (code, out, _) = w.run(&["import", "google-ime"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(out.contains("==> dotfiles import google-ime"), "{out}");
+            assert!(
+                out.contains("nix/scripts/bootstrap-windows-google-ime.sh --import を打つ"),
                 "{out}"
             );
         }
