@@ -55,11 +55,14 @@
 #   SSH の中継 (claude-op-reason.json の sshRelay が on の WSL で、SSH_AUTH_SOCK が空):
 #   - PATH の ssh を通る接続 (ssh・rsync の <host>:・ssh-copy-id など) と設定の一覧の道具は「🔑 op-reason の窓が出るかも」(show-only
 #     は「1Password の承認と op-reason の窓」) と、理由 (OPREASON_SSH_REASON。コマンドの頭・env・export・この会話の環境) を添えて
-#     知らせる。理由が無ければ、次から付けるよう Claude に足し (PreToolUse の additionalContext)、中継を通さない回り道を使わないよう
-#     言う。scp・sftp・autossh (/usr/bin/ssh を起こす) と署名は今の文のまま。WSL でない・off・欄が無いときも今の文のまま
-#   - 断られたら、op-reason の窓か 1Password に断られたと言い、許可して打ち直す選択肢と回り道を使わない指示を足す。鍵の認証の失敗は、
+#     知らせ、1Password の画面が出なければアイコンの「SSHリクエストを待機中……」から承認する手を添える。理由が無ければ、次から付ける
+#     よう Claude に足し (PreToolUse の additionalContext)、中継を通さない回り道を使わないよう言う。scp・sftp・autossh
+#     (/usr/bin/ssh を起こす) と署名は今の文のまま。WSL でない・off・欄が無いときも今の文のまま
+#   - 断られたら、op-reason の窓か 1Password に断られた (1Password が画面を伏せたまま約 60 秒で時間切れになったのかもしれない) と言い、
+#     許可して、1Password の画面が出なければアイコンから承認して打ち直す選択肢と回り道を使わない指示を足す。鍵の認証の失敗は、
 #     op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。windows-files.json は読まない) が答えなければ
-#     中継に届かないとして、中継を起こし直す選択肢にする。答えれば (たいてい相手に鍵が無いだけ) 黙る。exe が無ければ答えないとみなす
+#     中継に届かないとして、logon の task が 1 分のうちに起こし直すと言い、待つか起こし直してから (起き直った中継の最初の署名は
+#     1Password の承認がもう一度要る) 打ち直す選択肢にする。答えれば (たいてい相手に鍵が無いだけ) 黙る。exe が無ければ答えないとみなす
 #
 #   - Bash 以外・壊れた入力・空の入力・jq が無いときは黙り、いつも exit 0
 
@@ -835,6 +838,7 @@ relay_so='{"enable":true,"sshRelay":{"enable":true,"mode":"show-only"}}'
 relay_off='{"enable":true,"sshRelay":{"enable":false,"mode":"per-call"}}'
 relay_title='🔑 op-reason の窓が出るかも'
 relay_hint="OPREASON_SSH_REASON='<何のための ssh か>'"
+relay_tray='1Password の画面が出なければ、タスクバーの 1Password のアイコンから「SSHリクエストを待機中……」を開いて承認'
 detour='ユーザーが言わない限り使わない'
 # 知らせと、Claude に足した文 (PreToolUse の additionalContext。無ければ空)
 pre_ctx() { jq -r 'if .hookSpecificOutput.hookEventName == "PreToolUse" then .hookSpecificOutput.additionalContext else empty end' "${work}/stdout" 2>/dev/null; }
@@ -842,25 +846,25 @@ pre_ctx() { jq -r 'if .hookSpecificOutput.hookEventName == "PreToolUse" then .ho
 relay_state "${relay_on}"
 pre 'ssh lavie.local true' "${work}" WSL_DISTRO_NAME=Ubuntu
 if [[ $(cat "${work}/rc") == 0 && $(wc -l <"${work}/stdout") == 1 ]] \
-  && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由なし)" ]] \
+  && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由なし)。${relay_tray}" ]] \
   && [[ $(pre_ctx) == *"${relay_hint}"* && $(pre_ctx) == *"${detour}"* ]]; then
-  ok "中継が on の WSL の ssh は、op-reason の窓が出ると知らせ、理由が無ければ次から付けるよう Claude に足す"
+  ok "中継が on の WSL の ssh は、op-reason の窓が出ると知らせて 1Password の画面が出ないときのトレイの手を添え、理由が無ければ次から付けるよう Claude に足す"
 else
   ng "中継 on の ssh (理由なし)" "$(detail)"
 fi
 
 pre "OPREASON_SSH_REASON='lavie の herdr を見る' ssh lavie.local true" "${work}" WSL_DISTRO_NAME=Ubuntu
-if noticed && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由: lavie の herdr を見る)" ]]; then
+if noticed && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由: lavie の herdr を見る)。${relay_tray}" ]]; then
   ok "コマンドの頭の OPREASON_SSH_REASON は理由として出し、Claude には足さない"
 else
   ng "頭の理由" "$(detail)"
 fi
 pre 'env OPREASON_SSH_REASON=push ssh h' "${work}" WSL_DISTRO_NAME=Ubuntu
-s1=$(noticed && [[ $(notice) == *'(理由: push)' ]] && echo yes)
+s1=$(noticed && [[ $(notice) == *"(理由: push)。${relay_tray}" ]] && echo yes)
 pre 'export OPREASON_SSH_REASON="同期する"; rsync -a a h:b' "${work}" WSL_DISTRO_NAME=Ubuntu
-s2=$(noticed && [[ $(notice) == "${relay_title} (ssh の接続): rsync -a a h:b — "*'(理由: 同期する)' ]] && echo yes)
+s2=$(noticed && [[ $(notice) == "${relay_title} (ssh の接続): rsync -a a h:b — "*"(理由: 同期する)。${relay_tray}" ]] && echo yes)
 pre 'ssh h' "${work}" WSL_DISTRO_NAME=Ubuntu OPREASON_SSH_REASON=会話の環境
-s3=$(noticed && [[ $(notice) == *'(理由: 会話の環境)' ]] && echo yes)
+s3=$(noticed && [[ $(notice) == *"(理由: 会話の環境)。${relay_tray}" ]] && echo yes)
 if [[ ${s1} == yes && ${s2} == yes && ${s3} == yes ]]; then
   ok "env・export・この会話の環境の OPREASON_SSH_REASON も理由として出す (rsync の <host>: も中継を通る)"
 else
@@ -869,8 +873,8 @@ fi
 
 relay_state "${relay_so}"
 pre 'ssh h' "${work}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(notice) == '🔑 1Password の承認と op-reason の窓が出るかも (ssh の接続): ssh h — '*'(理由なし)' && $(pre_ctx) == *"${relay_hint}"* ]]; then
-  ok "show-only では、1Password の承認と op-reason の窓が出ると知らせる"
+if [[ $(notice) == '🔑 1Password の承認と op-reason の窓が出るかも (ssh の接続): ssh h — '*"(理由なし)。${relay_tray}" && $(pre_ctx) == *"${relay_hint}"* ]]; then
+  ok "show-only では、1Password の承認と op-reason の窓が出ると知らせ、トレイの手も添える"
 else
   ng "show-only" "$(detail)"
 fi
@@ -888,9 +892,11 @@ expect_hit "署名" 'ssh-keygen -Y sign -n git -f k x' "${work}" WSL_DISTRO_NAME
 
 # 断られたあと
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${ssh_refused}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(cat "${work}/rc") == 0 && $(notice) == '🔑 op-reason の窓か 1Password に断られた: ssh h true — 許可の窓は Windows の op-reason の中継が出す' ]] \
-  && [[ $(ctx) == *'op-reason の窓で許可する'* && $(ctx) == *"${detour}"* && $(ctx) == *'同じコマンドを打ち直さない'* ]]; then
-  ok "中継が断ったら、op-reason の窓か 1Password に断られたと言い、許可して打ち直す選択肢と回り道を使わない指示を足す"
+if [[ $(cat "${work}/rc") == 0 && $(notice) == "🔑 op-reason の窓か 1Password に断られた: ssh h true — 許可の窓は Windows の op-reason の中継が出す。${relay_tray}" ]] \
+  && [[ $(ctx) == *'1Password が画面を伏せたまま、約 60 秒で時間切れになったのかもしれない'* ]] \
+  && [[ $(ctx) == *'① op-reason の窓で許可し、1Password の画面が出なければ'*'「SSHリクエストを待機中……」(英語の表示では "SSH request waiting") を開いて約 60 秒のうちに承認する'* ]] \
+  && [[ $(ctx) == *"${detour}"* && $(ctx) == *'同じコマンドを打ち直さない'* ]]; then
+  ok "中継が断ったら、op-reason の窓か 1Password に断られた (1Password が伏せたまま時間切れかも) と言い、許可してトレイから承認して打ち直す選択肢と回り道を使わない指示を足す"
 else
   ng "中継で断られた" "$(detail)"
 fi
@@ -898,10 +904,11 @@ fi
 relay_exe_set 0
 rm -f "${work}/relay-calls"
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す' ]] \
-  && [[ $(ctx) == *"Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'"* && $(ctx) == *"${detour}"* ]] \
+if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は logon の task が 1 分のうちに起こし直す' ]] \
+  && [[ $(ctx) == *'① 1 分ほど待つ (logon の task が 1 分のうちに中継を起こし直す。待てなければ'*"Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'"* ]] \
+  && [[ $(ctx) == *'起き直った中継の最初の署名は、1Password の承認がもう一度要る'* && $(ctx) == *"${detour}"* ]] \
   && [[ $(cat "${work}/relay-calls") == '--ssh-agent --status' ]]; then
-  ok "中継が答えないときの鍵の認証の失敗は、中継に届かないとして、中継を起こし直す選択肢にする"
+  ok "中継が答えないときの鍵の認証の失敗は、中継に届かない (task が 1 分のうちに起こし直す) と言い、待つか起こし直してから打ち直す選択肢にする"
 else
   ng "中継が答えない" "$(detail) calls=$(cat "${work}/relay-calls" 2>/dev/null)"
 fi
@@ -914,7 +921,7 @@ expect_quiet "中継を通らない scp の鍵の認証の失敗は、中継が�
 relay_state '{"enable":true,"exe":null,"sshRelay":{"enable":true,"mode":"per-call"}}'
 rm -f "${work}/relay-calls"
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す' && ! -e "${work}/relay-calls" ]]; then
+if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は logon の task が 1 分のうちに起こし直す' && ! -e "${work}/relay-calls" ]]; then
   ok "claude-op-reason.json に exe が無ければ (Windows のユーザー名の無いマシン)、中継に届かないとみなす"
 else
   ng "exe が無い" "$(detail) calls=$(cat "${work}/relay-calls" 2>/dev/null)"

@@ -62,11 +62,18 @@
 # ssh-copy-id・sshfs・mosh・nixos-rebuild・nix-copy-closure・nix の ssh://) と設定の一覧の道具は中継を通るものとして:
 #
 #   打つ前      「🔑 op-reason の窓が出るかも」(show-only は「1Password の承認と op-reason の窓が出るかも」) に、理由
-#               (OPREASON_SSH_REASON。コマンドの頭・env・export のどれか、無ければこの会話の環境) を添える。理由が無ければ、
-#               次から付けるよう Claude に 1 文足す (PreToolUse の additionalContext。tool の結果と一緒に届く。止めない)
-#   断られたあと 断り (agent refused operation) は op-reason の窓か 1Password に断られたと言う。鍵の認証の失敗は、
+#               (OPREASON_SSH_REASON。コマンドの頭・env・export のどれか、無ければこの会話の環境) と、1Password の画面が出なければ
+#               アイコンの「SSHリクエストを待機中……」から承認する手を添える。理由が無ければ、次から付けるよう Claude に 1 文足す
+#               (PreToolUse の additionalContext。tool の結果と一緒に届く。止めない)
+#   断られたあと 断り (agent refused operation) は op-reason の窓か 1Password に断られたと言い、1Password が画面を伏せたまま
+#               約 60 秒で時間切れになったのかもしれないことと、アイコンから承認する手を添える。鍵の認証の失敗は、
 #               op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。5 秒で切る) が答えなければ
-#               中継に届かないとして、① を中継を起こし直すことにする。答えれば黙る (たいてい相手に鍵が無いだけ)
+#               中継に届かないとして、logon の task が 1 分のうちに起こし直すと言い、① を待つか起こし直すことにする。答えれば
+#               黙る (たいてい相手に鍵が無いだけ)
+#
+# 1Password は、求めの出どころ (中継の op-reason.exe) が前面にないと画面を伏せ、アイコンに点を付けて待つ。承認が要るのは、
+# 中継が起き直った後 (logon・版上げ・落ちた後) と 1Password をロックした後の最初の署名だけ (win/README.md の「SSH の中継」)。
+# 文は「画面が出なければ」とし、op-reason が窓を前面に出して 1Password の画面が出る版でも誤りにならないようにする。
 #
 # どちらも、中継を通さずに 1Password に直につなぐ書き方 (-o IdentityAgent=…openssh-ssh-agent) を、ユーザーが言わない限り
 # 使わないよう Claude に言う (中継が止まっていると鍵が使えないので、エージェントが自分で回り道をしない)。scp・sftp・autossh は
@@ -732,6 +739,8 @@ relay_down() {
 
 # 中継を通さない回り道を使わせない 1 文 (打つ前と断られたあとの Claude への指示に添える)
 relay_detour='中継を通さずに 1Password に直につなぐ書き方 (-o IdentityAgent=…openssh-ssh-agent) は、ユーザーが言わない限り使わない。'
+# 1Password が伏せた求めをトレイから承認する手 (中継の知らせの会話の 1 行に添える)
+relay_tray='1Password の画面が出なければ、タスクバーの 1Password のアイコンから「SSHリクエストを待機中……」を開いて承認'
 
 # relay_before <頭>: 中継を通る接続を打つ前の知らせ (会話の 1 行・理由が無ければ Claude への 1 文・herdr の通知)
 relay_before() {
@@ -744,10 +753,10 @@ relay_before() {
   fi
   if [[ ${relay_mode} == show-only ]]; then
     note="🔑 1Password の承認と op-reason の窓が出るかも"
-    msg="${note} (${hit_kind}): ${head} — 決めるのは 1Password の画面。op-reason の窓は誰が・何のためにを並べる (${reason_text})"
+    msg="${note} (${hit_kind}): ${head} — 決めるのは 1Password の画面。op-reason の窓は誰が・何のためにを並べる (${reason_text})。${relay_tray}"
   else
     note="🔑 op-reason の窓が出るかも"
-    msg="${note} (${hit_kind}): ${head} — 許可はユーザーが op-reason の窓で押す (${reason_text})"
+    msg="${note} (${hit_kind}): ${head} — 許可はユーザーが op-reason の窓で押す (${reason_text})。${relay_tray}"
   fi
   if [[ -n ${reason} ]]; then
     jq -cn --arg m "${msg}" '{systemMessage: $m}' || true
@@ -1338,7 +1347,7 @@ refusal_reason() {
 }
 
 after() {
-  local text reason head conn title desc first rule sock relay
+  local text reason head conn title desc first rule sock relay hint
   text=$(jq -r '[.error, .tool_response.stdout, .tool_response.stderr] | map(strings) | join("\n")' <<<"${input}" 2>/dev/null) || return 0
   case ${text} in
     *agent* | *publickey* | *git_signing_key*) ;;
@@ -1385,7 +1394,7 @@ after() {
     refused)
       if ((relay)); then
         title="🔑 op-reason の窓か 1Password に断られた"
-        desc='op-reason の窓で拒否されたか、窓が時間切れ (60 秒) になったか、1Password に断られた'
+        desc='op-reason の窓で拒否されたか、窓が時間切れ (60 秒) になったか、1Password に断られた (1Password が画面を伏せたまま、約 60 秒で時間切れになったのかもしれない)'
       else
         title="🔑 1Password に断られた"
         desc='1Password に断られた (承認の画面で断られたか、応えないまま時間切れになったか、1Password がロック中だった)'
@@ -1406,17 +1415,26 @@ after() {
   esac
   # 1 つ目の選択肢: 断られたら承認する。通信が切れた・届かないなら、agent の口の種類ごとの直し方 (中継なら中継を起こし直す)
   if [[ ${reason} == refused ]] && ((relay)); then
-    first='op-reason の窓で許可する (コマンドの頭に OPREASON_SSH_REASON を付けて理由を出す) ので、打ち直す'
+    first='op-reason の窓で許可し、1Password の画面が出なければタスクバーの 1Password のアイコンから「SSHリクエストを待機中……」(英語の表示では "SSH request waiting") を開いて約 60 秒のうちに承認する (コマンドの頭に OPREASON_SSH_REASON を付けて理由を出す) ので、打ち直す'
   elif [[ ${reason} == refused ]]; then
     first='1Password を開いて承認するので、打ち直す'
   elif ((relay)); then
-    first="Windows で中継を起こし直す (PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'。答えるかは op-reason.exe --ssh-agent --status) ので、打ち直す"
+    first="1 分ほど待つ (logon の task が 1 分のうちに中継を起こし直す。待てなければ Windows の PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'。答えるかは op-reason.exe --ssh-agent --status。起き直った中継の最初の署名は、1Password の承認がもう一度要る: ${relay_tray}) ので、打ち直す"
   else
     case $(agent_kind "${sock}") in
       forwarded) first='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す' ;;
       local) first='1Password を起動してロックを解除するので、打ち直す' ;;
       windows) first='Windows の 1Password を起動してロックを解除するので、打ち直す' ;;
       *) first='agent を使えるようにする (SSH_AUTH_SOCK を設定する) ので、打ち直す' ;;
+    esac
+  fi
+
+  # 中継の会話の 1 行と herdr の通知に添える手 (断られた: トレイからの承認。届かない: task の起こし直し)
+  hint=""
+  if ((relay)); then
+    case ${reason} in
+      refused) hint="。${relay_tray}" ;;
+      relay) hint='。中継は logon の task が 1 分のうちに起こし直す' ;;
     esac
   fi
 
@@ -1446,9 +1464,9 @@ after() {
     ctx+=${rule}
   fi
 
-  jq -cn --arg m "${title}: ${head} — ${conn}" --arg ev "${event}" --arg c "${ctx}" \
+  jq -cn --arg m "${title}: ${head} — ${conn}${hint}" --arg ev "${event}" --arg c "${ctx}" \
     '{systemMessage: $m, hookSpecificOutput: {hookEventName: $ev, additionalContext: $c}}' || true
-  herdr_notify "${title}" "${where}"$'\n'"${head}"$'\n'"${conn}" || true
+  herdr_notify "${title}" "${where}"$'\n'"${head}"$'\n'"${conn}${hint}" || true
   return 0
 }
 
