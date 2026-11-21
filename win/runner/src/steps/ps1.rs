@@ -8,8 +8,9 @@
 //!
 //! - 0: 揃っている
 //! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる。sshd は
-//!   入れられないとき (OpenSSH が無いなど) は ps1 が 1 を返す)
-//! - 1 (揃っていない): 手順の `Policy` で、揃える (引数なし・`-IfMissing`)・知らせるだけ (※ の手順)
+//!   入れられないとき (OpenSSH が無いなど) は ps1 が 1 を返す。op-reason は ps1 が `-IfMissing` を持たないので引数なし)
+//! - 1 (揃っていない): 手順の `Policy` で、揃える (引数なし・`-IfMissing`)・知らせるだけ (※ の手順)。op-reason は締めの行を見ずに引数なしで
+//!   入れ替える (動いている op-reason.exe があれば、ps1 が何も変えずに止まる)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
@@ -50,6 +51,9 @@ pub enum Policy {
     IfMissing,
     /// herdr: 知らせるだけで、Herdr.Herdr.Preview が残っていれば外す手順も出す。入れた後が 1 でも、残りが Preview のことだけなら入った扱い
     Herdr,
+    /// 締めの行を見ずに引数なしで揃え、3 (入っていない) も引数なしで入れる (op-reason。ps1 は `-IfMissing` を持たない。WSL の wrapper は
+    /// 状態の表の見出しがあれば 1 も 3 も引数なしで流す。動いている op-reason.exe があれば ps1 が何も変えずに止まる)
+    Replace,
 }
 
 /// ps1 の手順の表の 1 行。
@@ -90,6 +94,13 @@ pub struct Ps1Spec {
     /// 出力の印ごとの直し方 (上から見て最初に当たったもの)。当たれば `manual_fix`・`sync_fix` の代わりに出す (google-ime-install の
     /// 「下げない」「winget に無い」「比べられない」。揃えるコマンドを打っても直らないとき)
     pub output_fixes: &'static [(&'static str, &'static str)],
+    /// 入れる前に出す 1 行 (WSL の wrapper の字にするとき。無ければ「Windows に <package> が入っていないので、固定した版を入れます
+    /// (<ps1><引数>。<秒> 秒まで待ちます)。」)
+    pub install_notice: Option<&'static str>,
+    /// 揃える前に出す 1 行 (同じく。無ければ「<subject> が固定した版と揃っていないので、揃えます (<ps1><引数>。<秒> 秒まで待ちます)。」)
+    pub sync_notice: Option<&'static str>,
+    /// `-Check` が時間切れのときに添える見込み (無ければ「winget の応答が止まっているかもしれない」)
+    pub check_hang: Option<&'static str>,
 }
 
 const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから流し直す (残ったまま流し直すと、別のインストールが進行中 (1618) で落ちる)";
@@ -136,6 +147,9 @@ pub const SPECS: &[Ps1Spec] = &[
                 "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で winget list --id Google.JapaneseIME を打って入っている版を確かめる",
             ),
         ],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "openssh",
@@ -166,6 +180,9 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "sshd",
@@ -225,6 +242,9 @@ pub const SPECS: &[Ps1Spec] = &[
                 "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\authorized_keys) の元、ホストの値の wsl.windowsFiles.sshd.authorizedKeys の、authorized_keys の行として読めない値を直す",
             ),
         ],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "tailscale",
@@ -263,6 +283,9 @@ pub const SPECS: &[Ps1Spec] = &[
                 "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で winget list --id Tailscale.Tailscale を打って入っている版を確かめる",
             ),
         ],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "claude-code",
@@ -291,6 +314,9 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "herdr-app",
@@ -318,6 +344,9 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: true,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "herdr",
@@ -343,6 +372,9 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
     Ps1Spec {
         id: "ntn",
@@ -370,6 +402,50 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+    },
+    Ps1Spec {
+        id: "op-reason",
+        order: 97,
+        title: "WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える",
+        // WSL の script の `# tool: onePassword`。WSL の script は、さらに WSL の op の wrapper を入れるマシン (claude-op-reason.json の enable。
+        // wsl.enable と onePassword.enable が両方 true) に絞るが、runner は WSL の記録を読まず、ホストの値の onePassword で決める (Windows の
+        // claude-<名前> の op の token も op-reason.exe で読む)
+        gate: Gate::Tool("onePassword"),
+        script: "win/op-reason/Install-OpReason.ps1",
+        command: "Install-OpReason",
+        subject: "Windows の op-reason",
+        package: "op-reason (GitHub の Release)",
+        header: Header::Contains("op-reason (GitHub の Release"),
+        // -Check はネットワークを使わない。落とすのは 500 KB ほどの zip 1 つ (中の Invoke-WebRequest は 120 秒で切る)
+        check_secs: 60,
+        install_secs: 300,
+        // WSL の op の実行ファイルは switch で上がり、呼び出しの取り決め (payload の版) が変わった版どうしでは断られるので、版のずれも
+        // 入れ替える (type-clipboard と違う)。op-reason.exe は op の呼び出しの間しか動かない
+        policy: Policy::Replace,
+        uac: false,
+        // 前に出す行・揃ったときの行・揃っているときの行は WSL の bootstrap-windows-op-reason.sh と同じ字 (op_reason_parity が突き合わせる)
+        ok_text: "Windows の op-reason は、dotfiles で固定した版に揃っています。",
+        installed: &[
+            "Windows に op-reason を入れました (%LOCALAPPDATA%\\Programs\\op-reason。WSL の op が OPREASON_EXE で使う)。",
+        ],
+        synced: &["Windows の op-reason を、dotfiles で固定した版に揃えました。"],
+        manual_fix: &[],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-OpReason を打つか、dotfiles apply --steps op-reason を流し直す (op-reason.exe が動いているときは、op の呼び出しが終わってから)",
+        ],
+        releases_file: false,
+        missing_blocked: None,
+        output_fixes: &[],
+        install_notice: Some(
+            "Windows に op-reason が入っていないので、GitHub の Release から固定した版を入れます (Install-OpReason.ps1)。",
+        ),
+        sync_notice: Some(
+            "Windows の op-reason が dotfiles で固定した版と揃っていないので、入れ替えます (Install-OpReason.ps1)。",
+        ),
+        check_hang: Some("-Check はネットワークを使わないので、pwsh が止まっているかもしれない"),
     },
     Ps1Spec {
         id: "type-clipboard",
@@ -397,6 +473,9 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
     },
 ];
 
@@ -735,6 +814,7 @@ impl Ps1Step {
                 Policy::Warn => Plan::Warn,
                 Policy::Herdr => Plan::HerdrWarn,
                 Policy::IfMissing => Plan::SyncIfMissing,
+                Policy::Replace => Plan::Sync,
                 Policy::Sync => {
                     if v.sync {
                         Plan::Sync
@@ -752,7 +832,7 @@ impl Ps1Step {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Plan {
     Ok,
-    /// `-IfMissing` で入れる
+    /// 入れる (`-IfMissing`。op-reason は引数なし)
     Install,
     /// 入っていないが、入れられない (固定した版が winget に無い)
     Blocked,
@@ -814,9 +894,11 @@ impl Step for Ps1Step {
                 Outcome::new(
                     Kind::Failed,
                     format!(
-                        "{} -Check が {} 秒たっても終わらなかった (時間切れ。winget の応答が止まっているかもしれない)",
+                        "{} -Check が {} 秒たっても終わらなかった (時間切れ。{})",
                         self.script_name(),
-                        s.check_secs
+                        s.check_secs,
+                        s.check_hang
+                            .unwrap_or("winget の応答が止まっているかもしれない")
                     ),
                 )
                 .note(self.manual_command()),
@@ -862,6 +944,8 @@ impl Step for Ps1Step {
             Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => self.warn(plan, v, &r.output),
             Plan::Install | Plan::Sync | Plan::SyncIfMissing => {
                 let (args, label) = match plan {
+                    // Install-OpReason.ps1 は -IfMissing を持たない (引数なしで入れる)
+                    Plan::Install if s.policy == Policy::Replace => ("", "入れる"),
                     Plan::Install => (" -IfMissing", "入れる"),
                     Plan::Sync => ("", "揃える"),
                     _ => (" -IfMissing", "揃える"),
@@ -952,16 +1036,16 @@ impl Ps1Step {
         let s = self.0;
         let name = self.script_name();
         let installing = plan == Plan::Install;
-        if installing {
-            ctx.say(format!(
+        match (installing, s.install_notice, s.sync_notice) {
+            (true, Some(n), _) | (false, _, Some(n)) => ctx.say(n),
+            (true, None, _) => ctx.say(format!(
                 "Windows に {} が入っていないので、固定した版を入れます ({name}{args}。{} 秒まで待ちます)。",
                 s.package, s.install_secs
-            ));
-        } else {
-            ctx.say(format!(
+            )),
+            (false, _, None) => ctx.say(format!(
                 "{} が固定した版と揃っていないので、揃えます ({name}{args}。{} 秒まで待ちます)。",
                 s.subject, s.install_secs
-            ));
+            )),
         }
         if s.uac {
             ctx.say(
@@ -1061,6 +1145,9 @@ mod tests {
     //! - sshd は道具の switch (windowsSshd) で on/off し、3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
     //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行・拒否の規則が効かない
     //!   プロファイル・サービスの無い sshd.exe) はその直し方を出す。入れかけで止まったら、引数なしの Install-Sshd を案内する
+    //! - op-reason は道具の switch (onePassword) で on/off し、3 も 1 (締めの行を見ない) も引数なしで流す (ps1 は -IfMissing を持たない)。
+    //!   前に出す行は手順の字 (無い手順は型の字と待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは
+    //!   `op_reason_parity`
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1482,6 +1569,161 @@ mod tests {
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
         assert_eq!(ends(&calls), vec!["-Check"]);
         assert!(out.contains("Windows の sshd は、dotfiles の形"));
+    }
+
+    /// op-reason: 道具の switch (onePassword) で on/off。Install-OpReason.ps1 は -IfMissing を持たないので、3 (入っていない) も 1 (揃って
+    /// いない。締めの行は見ない) も引数なしで流す (WSL の bootstrap-windows-op-reason.sh と同じ)。前に出す行は手順の字 (WSL と同じ字かは
+    /// op_reason_parity が WSL の script を流して比べる)
+    #[test]
+    fn op_reason_installs_and_replaces_without_arguments() {
+        let s = spec("op-reason");
+        assert_eq!(s.gate, Gate::Tool("onePassword"));
+        assert_eq!(s.order, 97);
+        assert_eq!(s.script, "win/op-reason/Install-OpReason.ps1");
+        let install_notice = s.install_notice.unwrap();
+        let sync_notice = s.sync_notice.unwrap();
+        let missing = (
+            3,
+            vec![
+                header_line(s),
+                "⚠️ op-reason が入っていない → Install-OpReason で入れる ⚠️".into(),
+            ],
+        );
+        // 3: check は -Check だけで missing、dry-run は打つはずのもの (引数なし) を出す
+        let sys1 = sys(missing.clone(), (9, vec![]));
+        let (o, _, calls) = run("op-reason", &sys1, Mode::Check);
+        assert_eq!(
+            o,
+            vec![Outcome::new(
+                Kind::Missing,
+                "入っていない → apply で入れる (Install-OpReason.ps1)"
+            )]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        let sys2 = sys(missing.clone(), (9, vec![]));
+        let (o, out, calls) = run("op-reason", &sys2, Mode::DryRun { force: false });
+        assert_eq!(o[0].kind, Kind::Missing);
+        assert!(
+            out.contains("[dry-run] Install-OpReason.ps1 を流す (入れる)\n"),
+            "{out}"
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 3 → apply は引数なしで入れ、手順の字の前置きと入れた後の行を出す
+        let sys3 = sys(missing.clone(), (0, vec!["揃った".into()]));
+        let (o, out, calls) = run("op-reason", &sys3, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", ""]);
+        assert!(calls[1].contains("Install-OpReason.ps1'; exit $LASTEXITCODE"));
+        assert!(out.contains(&format!("{install_notice}\n")), "{out}");
+        assert!(!out.contains("秒まで待ちます"), "{out}");
+        for l in s.installed {
+            assert!(out.contains(&format!("{l}\n")), "{out}");
+        }
+        // 1: 締めの行が無くても (WSL は見ない) 引数なしで入れ替える。check は fix
+        let drift = (
+            1,
+            vec![
+                header_line(s),
+                "⚠ 固定した版 : 0.3.0 → 入れ替える (上げる)".into(),
+            ],
+        );
+        let sys4 = sys(drift.clone(), (9, vec![]));
+        let (o, _, calls) = run("op-reason", &sys4, Mode::Check);
+        assert_eq!(
+            o,
+            vec![Outcome::new(
+                Kind::Fix,
+                "固定した版と揃っていない → apply で揃える (Install-OpReason.ps1)"
+            )]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        let sys5 = sys(drift.clone(), (0, vec!["揃った".into()]));
+        let (o, out, calls) = run("op-reason", &sys5, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
+        assert_eq!(ends(&calls), vec!["-Check", ""]);
+        assert!(out.contains(&format!("{sync_notice}\n")), "{out}");
+        for l in s.synced {
+            assert!(out.contains(&format!("{l}\n")), "{out}");
+        }
+        // 揃えられない (動いている op-reason.exe で止まった・落とせない): failed。直し方は PowerShell と apply で、op の呼び出しが終わってから
+        for (check, did) in [(missing, "入れられなかった"), (drift, "揃えられなかった")]
+        {
+            let sys6 = sys(
+                check,
+                (
+                    1,
+                    vec!["op-reason.exe が動いていて置き場所を入れ替えられない。".into()],
+                ),
+            );
+            let (o, _, calls) = run("op-reason", &sys6, APPLY);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Failed);
+            assert_eq!(o[0].text, format!("{did} (終了コード 1。上の出力を見る)"));
+            assert_eq!(ends(&calls), vec!["-Check", ""]);
+            assert!(
+                o[0].notes
+                    .iter()
+                    .any(|n| n.contains("PowerShell で Install-OpReason を打つ")
+                        && n.contains("dotfiles apply --steps op-reason")
+                        && n.contains("op の呼び出しが終わってから")),
+                "{:?}",
+                o[0].notes
+            );
+        }
+        // 0: 揃っている
+        let sys7 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, out, calls) = run("op-reason", &sys7, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert!(out.contains(&format!("{}\n", s.ok_text)), "{out}");
+        // -Check の時間切れ: -Check はネットワークも winget も使わないので、winget の見込みは添えない
+        let sys8 = sys((-1, vec![]), (9, vec![]));
+        let (o, _, calls) = run("op-reason", &sys8, APPLY);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(
+            o[0].text.contains("60 秒たっても終わらなかった"),
+            "{}",
+            o[0].text
+        );
+        assert!(!o[0].text.contains("winget"), "{}", o[0].text);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+    }
+
+    /// 前に出す行を持たない手順は、ps1 の手順の型の字 (どの手順の前置きか・待つ秒数) を出す
+    #[test]
+    fn generic_notices_name_the_package_and_the_wait() {
+        let s = spec("type-clipboard");
+        assert_eq!(s.install_notice, None);
+        let sys1 = sys((3, vec![header_line(s)]), (0, vec![]));
+        let (_, out, _) = run("type-clipboard", &sys1, APPLY);
+        assert!(
+            out.contains("Windows に type-clipboard (GitHub の Release) が入っていないので、固定した版を入れます (Install-TypeClipboard.ps1 -IfMissing。300 秒まで待ちます)。\n"),
+            "{out}"
+        );
+        let s = spec("ntn");
+        assert_eq!(s.sync_notice, None);
+        let sys2 = sys(
+            (
+                1,
+                vec![
+                    header_line(s),
+                    "⚠️ 固定した版と揃っていない → Install-Ntn で揃える ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (_, out, _) = run("ntn", &sys2, APPLY);
+        assert!(
+            out.contains("Windows の ntn が固定した版と揃っていないので、揃えます (Install-Ntn.ps1。600 秒まで待ちます)。\n"),
+            "{out}"
+        );
+        // -Check の時間切れ: winget の見込みを添える
+        let sys3 = sys((-1, vec![]), (0, vec![]));
+        let (o, _, _) = run("ntn", &sys3, Mode::Check);
+        assert_eq!(
+            o[0].text,
+            "Install-Ntn.ps1 -Check が 120 秒たっても終わらなかった (時間切れ。winget の応答が止まっているかもしれない)"
+        );
     }
 
     #[test]
