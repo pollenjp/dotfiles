@@ -20,8 +20,8 @@
 #   - 略語の表は大文字小文字を区別し、中身は e・h・hss … c の function・alias と同じ (function は「表の中身 @args」、h は alias の先、
 #     e は exit)。1 つのコマンドに @args を渡すだけの function はどれも表にある
 #   - PSReadLine を読み込んでいない PowerShell (script・CI) で読んでも PSReadLine を読み込まない。読み込んだ PowerShell では、
-#     Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar と Ctrl+@ を「広げずに空白を入れる」に
-#     割り当て、> と < には割り当てない
+#     Space ; | & ) を「広げてから字を入れる」、Enter を「広げてから実行する」、Ctrl+Spacebar・Ctrl+@・Shift+Spacebar を「広げずに空白を
+#     入れる」に割り当て (Shift+Spacebar は Spacebar と別のキー)、> と < には割り当てない
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
 $ErrorActionPreference = 'Stop'
@@ -258,8 +258,9 @@ $wanted = @(
     'Enter=DotfilesAbbrExpandAndAcceptLine'
     'Ctrl+Spacebar=DotfilesAbbrInsertSpace'
     'Ctrl+@=DotfilesAbbrInsertSpace'
+    'Shift+Spacebar=DotfilesAbbrInsertSpace'
 ) | Sort-Object
-Test-Case '略語の割り当て: Space ; | & ) Enter Ctrl+Spacebar Ctrl+@ に割り当てる' $wanted { $bound }
+Test-Case '略語の割り当て: Space ; | & ) Enter Ctrl+Spacebar Ctrl+@ Shift+Spacebar に割り当てる' $wanted { $bound }
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
