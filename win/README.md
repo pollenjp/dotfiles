@@ -54,6 +54,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 | `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
+| `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 | (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
@@ -250,6 +251,9 @@ authorizedKeys = [            # authorized_keys の 1 行を 1 つの文字列�
   'from="100.64.0.1,fd7a:115c:a1e0::1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... herdr@phone',
 ]
 
+[t3Code]                      # T3 Code の Claude の手当て (効くのは [tools] windowsT3Code = true のとき)
+clearClaudeEntrypoint = true  # CLAUDE_CODE_ENTRYPOINT="" を渡す (既定 false。クレジットを使う間だけ)
+
 [claude.notion]               # Notion へ書く skill の宛先 (Nix の dotfiles.claude.notion と同じ名前と形)
 profile = "personal"          # このマシンの既定のプロファイル (書かなければ null)
 routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の規則 (書かなければ空)
@@ -258,8 +262,8 @@ routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の
 scanData = "https://app.notion.com/p/…"
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd] authorizedKeys`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd] authorizedKeys`・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
+  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値は
   runner が止める (終了コード 2)
 - `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
@@ -283,6 +287,9 @@ scanData = "https://app.notion.com/p/…"
   置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
   authorized_keys の行として読めない値 (鍵の種類と base64 が無い・`#` で始まる) は runner が止める。受け持ちが WSL のホストは WSL の setup が
   Nix の値から写しを置くので、TOML に書いても使わない (`sshd` の手順がそう 1 行出す)。実機の鍵と `from=` の IP は dotfiles-private にだけ書く
+- `windowsT3Code` もどのグループでも既定が false。T3 Code を入れるホストは `[tools]` に `windowsT3Code = true` を書く (WSL の setup には T3 Code の
+  手順が無いので、受け持ちによらず TOML にだけ書く。書かなければ `t3-code`・`t3-code-settings` の行は off。[後述](#t3-code))。Claude に
+  `CLAUDE_CODE_ENTRYPOINT=""` を渡すかは `[t3Code] clearClaudeEntrypoint` (書かなければ false で、`t3-code-settings` が settings.json からその要素を外す)
 - 上の「WSL の Nix の値と同じ値を書く」は、受け持ちが WSL のホストのこと。受け持ちを runner に切り替えたホストでは、Windows の道具の値
   (`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd` など) は TOML にだけ書き、WSL の Nix の値の `wsl.windowsFiles.*` は外す
   ([受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))
@@ -420,11 +427,13 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
 | 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone) | 有る |
+| 97 | `t3-code` | `Install-T3Code.ps1`: 入っていなければ入れる (user スコープ。UAC は出ない)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsT3Code` | 有る (Windows だけ) |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
+| 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
@@ -3673,6 +3682,75 @@ winget に載らないので、GitHub とは比べない)。猶予・落ちる�
   締めの行 (`⚠️ ` で始まる行) は、WSL の wrapper が枠に入れるときに落とす (下に出す揃えるコマンドと重なるので)
 - tailnet へのログインの案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)
 - winget やファイルに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+
+## T3 Code
+
+`t3-code/Install-T3Code.ps1` は、T3 Code (pingdotgg/t3code の desktop app。Claude Code などの会話を別の UI と端末から使う) を winget の
+`T3Tools.T3Code` (user スコープの nullsoft。`%LOCALAPPDATA%\Programs\t3code`) で入れる。版は `Install-T3Code.ps1` の `-Version` の既定値 (今は 0.1.11) と、
+Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする。固定した版は新しく入れるときの版で、入れた後の更新は T3 Code の自動更新に任せる
+(dotfiles-private の ADR 091 (`docs/adr/091_t3_code_opt_in_*`))。
+
+- 入れるのは Windows の runner だけ (手順 `t3-code` と `t3-code-settings`。WSL の setup には無い)。どのグループでも既定で入れず、入れるホストは
+  dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`) に書く:
+
+  ```toml
+  [tools]
+  windowsT3Code = true
+
+  [t3Code]
+  clearClaudeEntrypoint = true   # クレジットを使う間だけ (下の「CLAUDE_CODE_ENTRYPOINT」)
+  ```
+
+- `t3-code-settings` が合わせるもの (T3 Code も書くので、決めたキーだけ。値は repo の `nix/files/t3-code/managed-settings.json` の 1 か所で、Linux の setup と共有):
+
+  | 所 | 値 |
+  | --- | --- |
+  | ユーザー環境変数 `T3CODE_TELEMETRY_ENABLED` | `false` (テレメトリを切る。ブラウザ版・モバイル版の relay tracing と T3 Connect の Publish agent activity は、これでは止まらない) |
+  | `providerInstances.claudeAgent` の `driver`・`config.homePath` | `claudeAgent`・`~/.claude-t3` (T3 の Claude は `CLAUDE_CONFIG_DIR=~/.claude-t3` で動く。`config` のほかのキー (Launch arguments の `launchArgs` など) は残す) |
+  | `providerInstances.claudeAgent.environment` の `CLAUDE_CODE_ENTRYPOINT` | `[t3Code] clearClaudeEntrypoint = true` なら空の値の要素 (ほかの要素は残す)。false なら外す |
+  | `defaultModelSelection` | Claude の Opus 5.5 (`claude-opus-5-5`)・effort high |
+  | `defaultThreadEnvMode` | `worktree` (新しいスレッドを新しい worktree で始める) |
+
+  UI で変えても、次の `dotfiles apply` で戻る (dotfiles が持つキー)。書いたら T3 Code を開き直す (タスクトレイからも終える)
+
+### T3 Code を入れる
+
+| コマンド | すること |
+| --- | --- |
+| `dotfiles apply --steps t3-code,t3-code-settings` | 入っていなければ入れ (UAC は出ない)、環境変数と settings.json を合わせる。入っていれば上げない (古ければ知らせる) |
+| `Install-T3Code -Check` (PowerShell) | 固定した版との差を出すだけ |
+| `Install-T3Code` (PowerShell) | 固定した版に揃える (上げるときは T3 Code を閉じてから。pin も足す) |
+
+入れた後に手でするもの (dotfiles は扱わない。`dotfiles check` の `t3-code-settings` の行が、claude-t3 のログインが無ければ ※ で知らせる):
+
+1. Claude のログイン: T3 の Settings → Providers → Claude からログインする (資格情報は `%USERPROFILE%\.claude-t3\` に入る)
+2. T3 Connect: T3 の Settings から T3 のアカウントでサインインする (Linux のマシンの T3 とつなぐのに使う。Linux 側は
+   nix/README.md の「T3 Code」の `t3 connect`)
+
+- **Linux のマシンに、この app から ssh でつながない**。ssh 側が `t3 serve --host 127.0.0.1 --port 3773` を起こして Linux の `~/.t3/userdata` を
+  握り、Linux の service (`t3code.service`) が `ServerAlreadyRunningError` で起きなくなる (T3 Connect は `Environment link: pending server startup` の
+  まま)。Linux の T3 には T3 Connect でつなぐ。ssh でつないでしまったら、Linux で `t3 serve` を止めて `systemctl --user restart t3code`
+
+### CLAUDE_CODE_ENTRYPOINT
+
+T3 は Claude に `CLAUDE_CODE_ENTRYPOINT=t3-code` を渡す。claude-t3 のアカウントでクレジットを使う間は、これだと `Credit balance is too low` で止まる
+(ターミナルの `claude-t3` は動く)。空にすると Claude からは `sdk-cli` に見えて通るので、`[t3Code] clearClaudeEntrypoint = true` で空の値を渡す。
+クレジットの期限 (2026-11-25) の後は、ホストの値から外す (次の `dotfiles apply` が settings.json から要素を外す)。
+
+### T3 Code の新しい版が出たとき
+
+新しい版の知らせ (`pin-updates`・`winget-versions`) にはまだ載せていない。上げるときは、winget に載った版を `winget show --id T3Tools.T3Code --versions`
+で見て、`Install-T3Code.ps1` の `-Version` の既定値と、Linux の `nix/pkgs/t3-code` の `version` と sha256 (GitHub の release の asset の digest) を同じ PR で
+変える。`Install-T3Code.Tests.ps1` を流す:
+
+```sh
+nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code.Tests.ps1
+```
+
+- `Install-T3Code.ps1` は副作用の無い関数 (版の読み方・Uninstall キーの選び方・plan・winget の引数・状態の表) を `Install-T3Code.Tests.ps1` で確かめる。
+  入っている版は、winget の manifest の ProductCode (`e9197887-efb3-55e0-985e-d6d3b5dd594a`) の HKCU の Uninstall キーの `DisplayVersion` で読む
+- runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`T3 Code (winget の T3Tools.T3Code)`) と印 (`winget show --versions に無い`・
+  `比べられない`) で分かれる。変えるときは向こうも直す
 
 ## sshd
 
