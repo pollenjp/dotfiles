@@ -86,6 +86,9 @@ $script:RuleGroup = 'dotfiles (sshd)'
 $script:PackageId = 'Microsoft.OpenSSH.Preview'
 # C:\ProgramData\ssh の権限 (sshd が自分で作るときと同じ。Win32-OpenSSH の wmain_sshd.c の create_prgdata_ssh_folder)
 $script:SshDirSddl = 'O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;AU)'
+# 取り直した MSI を落とすディレクトリの権限 (SYSTEM と管理者だけが全部。親から継がず、中に落ちるファイルには継がせる)。winget download は
+# 管理者の PowerShell (BA) が書き、msiexec の install は Windows Installer のサービス (SY) が読む。利用者 (AU) には読ませもしない
+$script:AdminDirSddl = 'O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
 # 管理者 (BUILTIN\Administrators) と SYSTEM の SID (表示の言語によらない)
 $script:AdminSids = @('S-1-5-32-544', 'S-1-5-18')
 # 鍵の種類 (authorized_keys の行で、オプションの後ろに来る語)
@@ -984,14 +987,22 @@ function New-SshProgramDataDir {
     Write-Step "$Path を作った (sshd が作るときと同じ権限)"
 }
 
-# 管理者と SYSTEM だけが書けるディレクトリを、空で作り直す (取り直した MSI を、msiexec の前に利用者の権限で差し替えられないように)
+# 管理者と SYSTEM だけが読み書きできる空のディレクトリを、新しく作る (取り直した MSI を、msiexec の前に利用者の権限で差し替えられない
+# ように)。成功なら $true。在る名前には作らない (-Force を付けない。利用者の権限で前もって置かれたディレクトリやジャンクションを使わず、
+# 消しもしない。Windows PowerShell 5.1 の Remove-Item -Recurse はジャンクションの先まで消す)。作ってから権限を替えるまでの間は親
+# (ProgramData) の権限を継ぎ、利用者も中に置けるので、替えた後に権限と、空かどうかを確かめる
 function New-AdminOnlyDir {
     param([string]$Path)
-    Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction SilentlyContinue
-    $null = New-Item -ItemType Directory -Force -Path $Path
+    $null = New-Item -ItemType Directory -Path $Path -ErrorAction Stop
     $acl = Get-Acl -LiteralPath $Path
     $acl.SetSecurityDescriptorSddlForm($script:AdminDirSddl)
     Set-Acl -LiteralPath $Path -AclObject $acl
+    $facts = Read-AclFacts -Path $Path
+    $placed = @(Get-ChildItem -LiteralPath $Path -Force)
+    if ($facts.Readable -and (Test-AdminOnlyAcl -Acl $facts.Value) -and ($placed.Count -eq 0)) { return $true }
+    # 消さずに残す (中に置かれたものがジャンクションでも、たどらない)
+    Write-Step "$Path を、管理者と SYSTEM だけが読み書きできる空のディレクトリにできなかった (中に $($placed.Count) 個)。MSI を落とさない。中を確かめてから手で消す"
+    $false
 }
 
 # Install-OpenSSH が入れた MSI に Server の機能を足す。入っている版と同じ版の MSI を winget download で取り直し、msiexec で
@@ -1008,29 +1019,35 @@ function Invoke-MsiAddServer {
         Write-Step 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
         return $false
     }
-    # 落とす先は、管理者と SYSTEM だけが書ける場所 (利用者の %LOCALAPPDATA% だと、winget が sha256 を照らした後に差し替えられうる)
-    $dir = Join-Path $env:ProgramData 'dotfiles\sshd-msi'
-    New-AdminOnlyDir -Path $dir
-    $arguments = Get-WingetDownloadArgs -PackageId $script:PackageId -Version $version -Directory $dir
-    Write-Step "winget $($arguments -join ' ')"
-    $download = Invoke-Winget -Arguments $arguments
-    $download.Lines | Select-Object -Last 3 | ForEach-Object { Write-Step "  $_" }
-    $msi = @(Get-ChildItem -LiteralPath $dir -Filter '*.msi' -File -ErrorAction SilentlyContinue)
-    if (($download.ExitCode -ne 0) -or ($msi.Count -ne 1)) {
-        Write-Step ('winget download で {0} の MSI を取れなかった (終了コード 0x{1:X8}・MSI {2} 個)。winget に入っている版が無いなら、先に Install-OpenSSH で固定した版に揃える' -f $version, $download.ExitCode, $msi.Count)
-        return $false
+    # 落とす先は、管理者と SYSTEM だけが書ける場所 (利用者の %LOCALAPPDATA% だと、winget が sha256 を照らした後に差し替えられうる)。
+    # 名前は毎回新しくする (利用者は ProgramData の下にディレクトリを作れるので、決まった名前だと前もって置かれうる)
+    $dir = Join-Path $env:ProgramData ('dotfiles-sshd-msi-' + [guid]::NewGuid().ToString('N'))
+    if (-not (New-AdminOnlyDir -Path $dir)) { return $false }
+    try {
+        $arguments = Get-WingetDownloadArgs -PackageId $script:PackageId -Version $version -Directory $dir
+        Write-Step "winget $($arguments -join ' ')"
+        $download = Invoke-Winget -Arguments $arguments
+        $download.Lines | Select-Object -Last 3 | ForEach-Object { Write-Step "  $_" }
+        $msi = @(Get-ChildItem -LiteralPath $dir -Filter '*.msi' -File -ErrorAction SilentlyContinue)
+        if (($download.ExitCode -ne 0) -or ($msi.Count -ne 1)) {
+            Write-Step ('winget download で {0} の MSI を取れなかった (終了コード 0x{1:X8}・MSI {2} 個)。winget に入っている版が無いなら、先に Install-OpenSSH で固定した版に揃える' -f $version, $download.ExitCode, $msi.Count)
+            return $false
+        }
+        $log = Join-Path $StateDir 'msiexec-add-server.log'
+        $arguments = Get-MsiAddServerArgs -Msi $msi[0].FullName -Log $log
+        Write-Step "msiexec $($arguments -join ' ')"
+        $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Wait -PassThru
+        $exitCode = $process.ExitCode
+    } finally {
+        # 落ちたときも残さない (中は管理者と SYSTEM だけが書けるので、winget が落としたものしか無い)
+        Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
     }
-    $log = Join-Path $StateDir 'msiexec-add-server.log'
-    $arguments = Get-MsiAddServerArgs -Msi $msi[0].FullName -Log $log
-    Write-Step "msiexec $($arguments -join ' ')"
-    $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Wait -PassThru
-    $why = Get-MsiexecResultText -ExitCode $process.ExitCode
-    Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue
+    $why = Get-MsiexecResultText -ExitCode $exitCode
     if ($why) {
         Write-Step "msiexec が失敗した ($why。ログ: $log)"
         return $false
     }
-    if ($process.ExitCode -eq 3010) { Write-Step 'msiexec: 再起動が要ると返した' }
+    if ($exitCode -eq 3010) { Write-Step 'msiexec: 再起動が要ると返した' }
     if (-not (Test-Path -LiteralPath (Join-Path $InstallDir 'sshd.exe'))) {
         Write-Step "msiexec は通ったが、$InstallDir\sshd.exe が無い (ログ: $log)"
         return $false

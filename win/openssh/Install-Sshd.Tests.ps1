@@ -27,6 +27,15 @@
 #   - BOM の付いたファイルを見分け、一時ファイルから差し替える (元を退避し、無ければそのまま置く)
 #   - 鍵のファイルの権限は、継承を切り、管理者と SYSTEM だけに FullControl を許す形だけを通す
 #   - Server を足すときの winget download と msiexec の引数 (同じ版を取り直し、ADDLOCAL=Client,Server。--include-pinned は付けない)
+#   - MSI を落とすディレクトリの権限 (AdminDirSddl) は、継承を切り、管理者と SYSTEM だけに FullControl で、中のファイルにも継ぐ
+#     (Linux の .NET は SDDL を読めないので、使う形だけを読む読み手で Test-AdminOnlyAcl に通す)
+#   - Install-Sshd.ps1 が読む $script: の変数は、どれも script のどこかで代入されている (構文木で見る。本体は StrictMode で流すので、
+#     代入の無い変数を読むとそこで止まる)
+#   - 管理者の段 (Invoke-SshdFix) を、Windows に触る cmdlet と関数を偽物に替えて StrictMode のまま流す。拒否の規則・sshd_config・空の鍵は
+#     揃い sshd.exe とサービスが無い形 (MSI を落とす前に止まった後) から: 規則・設定・鍵には触らず、毎回新しい名前の管理者と SYSTEM だけの
+#     ディレクトリに MSI を落として msiexec の後に消し、22 番の許可を無効にし、ssh-agent を止めて無効にし、sshd を自動で起こす。揃えた後の
+#     判定は 0。msiexec が落ちたらサービスに触らず止まり、ディレクトリは消す。権限を替えるまでに何か置かれたら MSI を落とさずに止まり、
+#     ディレクトリは消さない。在るディレクトリには作らない
 #   - 判定: 揃っていれば 0、server が無ければ 3、ずれていれば 1。OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けない
 #     ユーザー名・鍵の写しの読めない行・拒否の規則が効かないプロファイル・サービスの無い sshd.exe は、揃えずに 1 で止まり、締めの行で
 #     先に直すことを出す。BOM の付いた sshd_config・鍵はずれ。鍵のファイルを読めるときは足す鍵と消す鍵を、読めないとき (管理者でない) は
@@ -333,6 +342,73 @@ Test-Case '継承している・持ち主がユーザー・ユーザーにも許
         ))
 }
 Test-Case '権限が読めなかった ($null) は断る' 'False' { Test-AdminOnlyAcl -Acl $null }
+
+# AdminDirSddl: 取り直した MSI を落とすディレクトリの権限。Linux の .NET は SDDL を読めない (ACL の API が Windows だけ) ので、
+# 使っている形 (持ち主・継承を切る P・ACE の並び) だけを読む小さな読み手で、Test-AdminOnlyAcl に渡す形にする
+function ConvertFrom-TestSddl {
+    param([string]$Sddl)
+    $sids = @{ SY = 'S-1-5-18'; BA = 'S-1-5-32-544'; AU = 'S-1-5-11' }
+    if (-not ($Sddl -cmatch '^O:([A-Z]{2})D:(P?)(?:AI)?((?:\([^()]*\))+)$')) { throw "読めない SDDL: $Sddl" }
+    $owner = $sids[$Matches[1]]
+    $protected = $Matches[2] -ceq 'P'
+    $aces = $Matches[3]
+    $rules = @(foreach ($m in [regex]::Matches($aces, '\(([^()]*)\)')) {
+            # 種類;フラグ;権利;オブジェクト;継ぐオブジェクト;SID
+            $f = $m.Groups[1].Value -split ';'
+            if ($f.Count -ne 6) { throw "読めない ACE: $($m.Value)" }
+            $rights = $f[2]
+            if ($rights -ceq 'FA') { $rights = 'FullControl' }
+            $type = $f[0]
+            if ($type -ceq 'A') { $type = 'Allow' }
+            [pscustomobject]@{ Sid = $sids[$f[5]]; Rights = $rights; Type = $type; Inherited = $f[1].Contains('ID'); Flags = $f[1] }
+        })
+    [pscustomobject]@{ Protected = $protected; Owner = $owner; Rules = $rules }
+}
+Test-Case 'MSI を落とすディレクトリの SDDL は、継承を切り、管理者と SYSTEM だけに FullControl (鍵のファイルと同じ判定を通る)' 'True' {
+    Test-AdminOnlyAcl -Acl (ConvertFrom-TestSddl -Sddl $script:AdminDirSddl)
+}
+Test-Case 'その 2 つは中に落ちるファイルにも継ぐ (OICI)。持ち主は管理者で、グループと SACL は書かない' 'OICI OICI S-1-5-32-544 False' {
+    $a = ConvertFrom-TestSddl -Sddl $script:AdminDirSddl
+    @($a.Rules | ForEach-Object { $_.Flags }); $a.Owner; ($script:AdminDirSddl -cmatch 'G:|S:')
+}
+Test-Case '読み手の確かめ: C:\ProgramData\ssh の SDDL (認証したユーザーも読める) は通さない' 'False' {
+    Test-AdminOnlyAcl -Acl (ConvertFrom-TestSddl -Sddl $script:SshDirSddl)
+}
+
+# $script: の変数の代入漏れ: 本体は Set-StrictMode -Version Latest で流すので、代入の無い $script: の変数を読むと、そこで止まる
+# (管理者の段で $script:AdminDirSddl が無く、MSI を落とす前に止まった)。構文木で、読んでいる $script: の変数がどれも script の
+# どこかで代入されているかを見る。script の一番外での代入と param も script の変数になる。関数の中の $script: の無い代入は数えない
+function Get-UnassignedScriptVariables {
+    param([System.Management.Automation.Language.ScriptBlockAst]$Ast)
+    $assigned = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    if ($Ast.ParamBlock) {
+        foreach ($p in $Ast.ParamBlock.Parameters) { [void]$assigned.Add($p.Name.VariablePath.UserPath) }
+    }
+    foreach ($a in $Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+        $left = $a.Left
+        while ($left -is [System.Management.Automation.Language.AttributedExpressionAst]) { $left = $left.Child }
+        if ($left -isnot [System.Management.Automation.Language.VariableExpressionAst]) { continue }
+        $inFunction = $false
+        for ($q = $a.Parent; $null -ne $q; $q = $q.Parent) {
+            if ($q -is [System.Management.Automation.Language.FunctionDefinitionAst]) { $inFunction = $true; break }
+        }
+        if ($left.VariablePath.IsScript) {
+            [void]$assigned.Add(($left.VariablePath.UserPath -replace '^script:', ''))
+        } elseif ((-not $inFunction) -and $left.VariablePath.IsUnqualified) {
+            [void]$assigned.Add($left.VariablePath.UserPath)
+        }
+    }
+    @($Ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.VariableExpressionAst]) -and $n.VariablePath.IsScript }, $true) |
+            ForEach-Object { $_.VariablePath.UserPath -replace '^script:', '' } |
+            Where-Object { -not $assigned.Contains($_) } | Sort-Object -Unique)
+}
+Test-Case '読み手の確かめ: 代入の無い $script: の変数と、関数の中だけで代入した変数を拾う (一番外・$script: の代入・param は拾わない)' 'D Missing' {
+    $text = 'param($P) $script:A = 1; $B = 2; [int]$E = 5; function f { $script:C = 3; $D = 4; $script:A; $script:B; $script:C; $script:D; $script:E; $script:P; $script:Missing }'
+    Get-UnassignedScriptVariables -Ast ([System.Management.Automation.Language.Parser]::ParseInput($text, [ref]$null, [ref]$null))
+}
+Test-Case 'Install-Sshd.ps1 が読む $script: の変数は、どれも代入されている' '' {
+    Get-UnassignedScriptVariables -Ast ([System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'Install-Sshd.ps1'), [ref]$null, [ref]$null))
+}
 
 # Get-IneffectiveFirewallProfiles: 拒否の規則が効かないプロファイル
 function New-Profiles {
@@ -677,6 +753,189 @@ Test-Case 'sshd.exe はあるがサービスが無ければ 1 で止まり、Ser
     Get-SshdExitCode -Verdict $v
     (Get-SshdCheckMessage -Verdict $v).Contains('sshd.exe はあるがサービス sshd が無い')
     [bool](@(Get-Notes $f | Where-Object { $_.Contains('sshd を止める・外す') }).Count -eq 1)
+}
+
+# Invoke-SshdFix (管理者の段) を、Windows に触る cmdlet と関数を偽物に替えて流す (StrictMode のまま、実機で通っていない行も通す)。
+# 始めの形は、管理者の段が MSI を落とす前に止まった後: 拒否の規則・sshd_config・空の鍵 (管理者と SYSTEM だけ) は揃い、sshd.exe と
+# サービス sshd が無い。ファイルは一時のディレクトリに置き、ProgramData をそこへ向ける。偽物は Invoke-FixScenario の中で定義する
+# (PowerShell は呼んだ側のスコープから名前を引くので、Invoke-SshdFix の中の呼び出しにも効き、外には残らない)
+$fixRoot = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-fix-$PID"
+function Invoke-FixScenario {
+    param([int]$MsiExit = 0, [switch]$Plant)
+    Remove-Item -LiteralPath $fixRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $pd = Join-Path $fixRoot 'ProgramData'
+    $sshDir = Join-Path $pd 'ssh'
+    $install = Join-Path $fixRoot 'OpenSSH'
+    $state = Join-Path $fixRoot 'state'
+    $null = New-Item -ItemType Directory -Force -Path $sshDir, $install
+    [IO.File]::WriteAllText((Join-Path $install 'ssh.exe'), '')
+    Write-TextNoBom -Path (Join-Path $sshDir 'sshd_config') -Text (Get-SshdConfigText -AllowUser 'alice')
+    Write-TextNoBom -Path (Join-Path $sshDir 'administrators_authorized_keys') -Text (Get-AdminKeysText -KeyLines @() -Managed $false)
+    $world = @{
+        Steps    = [System.Collections.Generic.List[string]]::new()
+        Calls    = [System.Collections.Generic.List[string]]::new()
+        Acls     = @{}
+        Services = @{ 'ssh-agent' = [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+        FwRules  = [System.Collections.Generic.List[object]]::new()
+        Result   = $null
+    }
+
+    function Write-Step { param([string]$Message) $world.Steps.Add($Message) }
+    function Test-InSshSession { $false }
+    function Get-NetFirewallProfile {
+        [CmdletBinding()] param($PolicyStore)
+        foreach ($n in @('Domain', 'Private', 'Public')) { [pscustomobject]@{ Name = $n; Enabled = 'True'; AllowLocalFirewallRules = 'True' } }
+    }
+    function Read-FirewallRuleFacts {
+        param([string]$Name)
+        New-RuleFacts -Spec (@(Get-SshdFirewallSpecs) | Where-Object { $_.Name -eq $Name })
+    }
+    function Get-Acl {
+        [CmdletBinding()] param([string]$LiteralPath)
+        $o = [pscustomobject]@{ Sddl = $null }
+        $o | Add-Member -MemberType ScriptMethod -Name SetSecurityDescriptorSddlForm -Value { param($s) $this.Sddl = $s }
+        $o
+    }
+    function Set-Acl {
+        [CmdletBinding()] param([string]$LiteralPath, $AclObject)
+        $world.Acls[$LiteralPath] = $AclObject.Sddl
+        # 作ってから権限を替えるまでの間に、利用者の権限で何かが置かれた形
+        if ($Plant) { [IO.File]::WriteAllText((Join-Path $LiteralPath 'planted.msi'), '') }
+    }
+    function Read-AclFacts {
+        param([string]$Path)
+        if ($world.Acls.ContainsKey($Path)) { return [pscustomobject]@{ Readable = $true; Value = (ConvertFrom-TestSddl -Sddl $world.Acls[$Path]) } }
+        [pscustomobject]@{ Readable = $true; Value = (New-Acl) }
+    }
+    function Get-Item {
+        [CmdletBinding()] param([string]$LiteralPath)
+        if ($LiteralPath -eq (Join-Path $install 'ssh.exe')) { return [pscustomobject]@{ VersionInfo = [pscustomobject]@{ FileVersion = '10.4.0.0' } } }
+        Microsoft.PowerShell.Management\Get-Item -LiteralPath $LiteralPath -ErrorAction Stop
+    }
+    function Get-Command {
+        [CmdletBinding()] param([string]$Name)
+        if ($Name -eq 'winget') { return [pscustomobject]@{ Name = 'winget' } }
+        Microsoft.PowerShell.Core\Get-Command -Name $Name
+    }
+    function Invoke-Winget {
+        param([string[]]$Arguments)
+        $dir = $Arguments[$Arguments.IndexOf('--download-directory') + 1]
+        $world.Calls.Add("winget の時の落とす先の権限: $($world.Acls[$dir])")
+        [IO.File]::WriteAllText((Join-Path $dir 'OpenSSH-Win64-v10.4.0.0.msi'), '')
+        [pscustomobject]@{ ExitCode = 0; Lines = @('Installer downloaded') }
+    }
+    function Start-Process {
+        param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
+        $world.Calls.Add("$FilePath の時に MSI がある: $(Test-Path -LiteralPath $ArgumentList[1].Trim('"'))")
+        if ($MsiExit -eq 0) {
+            # MSI が Server を足すと、sshd.exe とサービス (手動・止まっている) と 22 番の許可ができ、ssh-agent は動いたまま
+            [IO.File]::WriteAllText((Join-Path $install 'sshd.exe'), '')
+            $world.Services['sshd'] = [pscustomobject]@{ Status = 'Stopped'; StartType = 'Manual' }
+            $world.FwRules.Add((New-ComRule -Name 'OpenSSH SSH Server Preview (sshd)' -Change @{ ApplicationName = (Join-Path $install 'sshd.exe') }))
+        }
+        [pscustomobject]@{ ExitCode = $MsiExit }
+    }
+    function Get-SshdAllowRules { @(Select-SshdAllowRules -Rules @($world.FwRules)) }
+    function Get-Service {
+        [CmdletBinding()] param([string]$Name)
+        $s = $world.Services[$Name]
+        if (-not $s) { return }
+        $o = [pscustomobject]@{ Name = $Name; Status = $s.Status; StartType = $s.StartType }
+        $o | Add-Member -MemberType ScriptMethod -Name WaitForStatus -Value { param($want, $timeout) if ("$($this.Status)" -ne "$want") { throw "$($this.Name) が $want にならない" } }
+        $o
+    }
+    function Set-Service { param([string]$Name, [string]$StartupType) $world.Services[$Name].StartType = $StartupType }
+    function Stop-Service { param([string]$Name, [switch]$Force) $world.Services[$Name].Status = 'Stopped' }
+    function Start-Service { param([string]$Name) $world.Services[$Name].Status = 'Running' }
+    function Restart-Service { param([string]$Name, [switch]$Force) $world.Calls.Add("Restart-Service $Name") }
+
+    $saved = $env:ProgramData
+    $env:ProgramData = $pd
+    try {
+        $world.Result = Invoke-SshdFix -InstallDir $install -User 'alice' -CopyPath (Join-Path $state 'authorized_keys') -StateDir $state
+    } catch {
+        $world.Result = "ERROR: $($_.Exception.Message)"
+    } finally {
+        $env:ProgramData = $saved
+    }
+    # 一時のディレクトリと、毎回変わる名前を伏せる (Windows で流しても同じ文になるよう、区切りも / にそろえる)
+    $mask = { param($s) ("$s".Replace($fixRoot, '<tmp>') -replace 'dotfiles-sshd-msi-[0-9a-f]{32}', 'dotfiles-sshd-msi-<guid>').Replace('\', '/') }
+    [pscustomobject]@{
+        Result   = $world.Result
+        Steps    = @($world.Steps | ForEach-Object { & $mask $_ })
+        Calls    = @($world.Calls | ForEach-Object { & $mask $_ })
+        Left     = @(Get-ChildItem -LiteralPath $pd -Filter 'dotfiles-sshd-msi-*' | ForEach-Object { & $mask $_.Name })
+        Services = $world.Services
+        FwRules  = @($world.FwRules)
+        Record   = Read-SshdRecord -Dir $state
+        Keys     = Read-TextFile -Path (Join-Path $sshDir 'administrators_authorized_keys')
+    }
+}
+try {
+    $run = Invoke-FixScenario
+    $msiDir = '<tmp>/ProgramData/dotfiles-sshd-msi-<guid>'
+    Test-Case '途中で止まった形から: 規則・設定・鍵には触らず、MSI で Server を足し、22 番の許可を無効にし、ssh-agent を戻し、sshd を自動で起こす' @(
+        'True'
+        "winget download --id Microsoft.OpenSSH.Preview --exact --source winget --version 10.4.0.0 --download-directory $msiDir --accept-source-agreements --accept-package-agreements --disable-interactivity"
+        '  Installer downloaded'
+        "msiexec /i `"$msiDir/OpenSSH-Win64-v10.4.0.0.msi`" ADDLOCAL=Client,Server /qn /norestart /l*v `"<tmp>/state/msiexec-add-server.log`""
+        'MSI に Server の機能を足した (10.4.0.0)'
+        '22 番の受信の許可を無効にした: OpenSSH SSH Server Preview (sshd)'
+        'ssh-agent を止めた (MSI が起こした)'
+        'ssh-agent を無効にした (MSI が戻した)'
+        'sshd を自動で起こすようにした'
+        'sshd を起こした'
+    ) { $run.Result; $run.Steps }
+    Test-Case 'MSI は毎回新しい名前の、管理者と SYSTEM だけのディレクトリに落とし、msiexec の後に消す (起こし直しはしない)' @(
+        "winget の時の落とす先の権限: $script:AdminDirSddl"
+        'msiexec.exe の時に MSI がある: True'
+    ) { $run.Calls; $run.Left }
+    Test-Case '揃えた後: sshd は動いて自動、ssh-agent は止まって無効、22 番の許可は無効、記録は sshd_config だけ、空の鍵はそのまま' @(
+        'Running Automatic Stopped Disabled False True True'
+    ) {
+        $s = $run.Services
+        "$($s['sshd'].Status) $($s['sshd'].StartType) $($s['ssh-agent'].Status) $($s['ssh-agent'].StartType) $($run.FwRules[0].Enabled) $($run.Record.ConfigSha -eq (Get-TextSha256 (Get-SshdConfigText -AllowUser 'alice'))) $($run.Keys.Text -ceq (Get-AdminKeysText -KeyLines @() -Managed $false))"
+    }
+    Test-Case '揃えた後の -Check の判定は 0 (揃っている)' '0' {
+        $f = New-Facts -Change @{
+            Copy       = $unmanaged
+            Keys       = $run.Keys
+            Service    = [pscustomobject]@{ Exists = $true; Status = $run.Services['sshd'].Status; StartType = $run.Services['sshd'].StartType }
+            AllowRules = @(Select-SshdAllowRules -Rules $run.FwRules)
+            Record     = [pscustomobject]@{ ConfigSha = $run.Record.ConfigSha; KeysSha = $run.Record.KeysSha }
+        }
+        Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
+    }
+
+    $failed = Invoke-FixScenario -MsiExit 1603
+    Test-Case 'msiexec が落ちたら $false で止まり (サービスに触らない)、落とした MSI のディレクトリは消す' @(
+        'False'
+        'msiexec が失敗した (終了コード 1603。ログ: <tmp>/state/msiexec-add-server.log)'
+        '|'
+    ) { $failed.Result; @($failed.Steps | Select-Object -Last 1); '|'; $failed.Left }
+
+    $planted = Invoke-FixScenario -Plant
+    Test-Case '権限を替えるまでの間にディレクトリへ何か置かれたら、MSI を落とさずに $false で止まり、消さずに残す (ジャンクションをたどらない)' @(
+        'False'
+        "$msiDir を、管理者と SYSTEM だけが読み書きできる空のディレクトリにできなかった (中に 1 個)。MSI を落とさない。中を確かめてから手で消す"
+        '|'
+        'dotfiles-sshd-msi-<guid>'
+    ) { $planted.Result; @($planted.Steps); '|'; $planted.Left; $planted.Calls }
+
+    Test-Case 'New-AdminOnlyDir は在るディレクトリには作らない (New-Item で止まり、前もって置かれたものを使わず、中も消さない)' 'New-Item True' {
+        $d = Join-Path $fixRoot 'existing'
+        $null = New-Item -ItemType Directory -Force -Path $d
+        [IO.File]::WriteAllText((Join-Path $d 'keep.msi'), '')
+        try {
+            $null = New-AdminOnlyDir -Path $d
+            'New-AdminOnlyDir が止まらなかった'
+        } catch {
+            "$($_.InvocationInfo.MyCommand.Name)"
+        }
+        Test-Path -LiteralPath (Join-Path $d 'keep.msi')
+    }
+} finally {
+    Remove-Item -LiteralPath $fixRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。

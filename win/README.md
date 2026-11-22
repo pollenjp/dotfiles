@@ -3692,7 +3692,7 @@ SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-c
 
 | もの | 揃える形 |
 | --- | --- |
-| server | OpenSSH の MSI の Server の機能。入っている版と同じ版の MSI を `winget download` で取り直し (winget が manifest の sha256 と照らす)、`msiexec /i <MSI> ADDLOCAL=Client,Server` で足す (同じ ProductCode なので保守の install)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。MSI は管理者と SYSTEM だけが書ける `C:\ProgramData\dotfiles\sshd-msi` に落とす (利用者の権限で動くものが、msiexec の前に差し替えられない) |
+| server | OpenSSH の MSI の Server の機能。入っている版と同じ版の MSI を `winget download` で取り直し (winget が manifest の sha256 と照らす)、`msiexec /i <MSI> ADDLOCAL=Client,Server` で足す (同じ ProductCode なので保守の install)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。MSI は管理者と SYSTEM だけが読み書きできるディレクトリ (`C:\ProgramData\dotfiles-sshd-msi-<毎回新しい GUID>`) に落とし、msiexec の後に消す (利用者の権限で動くものが、msiexec の前に差し替えられない。名前を毎回新しくし、在る名前には作らないので、利用者が前もって置いたディレクトリやジャンクションも使わない) |
 | `C:\ProgramData\ssh\sshd_config` | dotfiles が書く中身 (下の表)。違えば (先頭に BOM が付いているときも) `sshd_config.dotfiles-bak-<日時>` に退避し、一時ファイルから差し替える (書けずに消えたままにならない)。MSI は Server を足した時点で sshd を起こし、sshd は sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく |
 | Windows Firewall | 拒否の規則を 3 つ置き (グループ `dotfiles (sshd)`。下の表)、22 番を許す受信の規則 (MSI が作る `OpenSSH SSH Server Preview (sshd)` など) を無効にする |
 | `C:\ProgramData\ssh\administrators_authorized_keys` | 管理者のユーザーの鍵の置き場 (Win32-OpenSSH は管理者の鍵をユーザーの `.ssh` から読まない)。鍵の写し (下の「鍵の置き方」) があれば、その中身どおりに書く (写しに無い鍵は消す。元は `.dotfiles-bak-<日時>` に退避する)。写しが無ければ中身に触らず、ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする (Microsoft の文書の `icacls` と同じ形を、表示の言語によらない SID で書く) |
