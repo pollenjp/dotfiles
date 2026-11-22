@@ -16,7 +16,9 @@
 #     ListenAddress は書かない。改行は LF で、BOM も CR も無く、ASCII だけ。PATH に sshd があれば sshd -G が読め、AllowUsers が 1 つ。
 #     PATH に sshd と ssh-keygen があれば、使い捨ての host 鍵で sshd -T -C を流し、tailnet と localhost から来たときだけ DenyUsers が付かない
 #   - 鍵の写しの読み方: コメントと空の行を除き、authorized_keys の行として読めない行は分ける。from= の有無を見分ける。名札はコメント
-#     (無ければ base64 の末尾) と鍵の種類
+#     (無ければ base64 の末尾) と鍵の種類。写しを置く受け持ち (-KeysFrom が先。無ければ写しの頭の runner の印で runner、印の無い写しは
+#     wsl、写しが無ければ分からない) を見分け、鍵が 0 本・写しが無い・読めない行の案内を、runner なら TOML の [sshd] authorizedKeys と
+#     dotfiles apply、wsl なら Nix の値と setup にする (分からなければ両方)。runner の写しの管理者の鍵のファイルの見出しは TOML を指す
 #   - administrators_authorized_keys に書く中身 (鍵の行と ASCII の見出し) と、鍵の行の差 (足す・消す・並びも同じか)
 #   - Windows Firewall のアドレスを数の区間にそろえて比べる (マスク表記・範囲・サブネットのどれで返っても同じ。隣り合う区間はつなぐ)。
 #     外のアドレスは、tailnet・localhost と合わせて全部の空間をちょうど覆う。拒否の規則は 3 つで、読んだ規則が同じかを、有効・向き・
@@ -230,6 +232,29 @@ Test-Case '写しが見出しだけなら鍵は 0 本 (読めない行も 0)' '0
     @($c.Lines).Count; @($c.Bad).Count
 }
 
+# Resolve-KeysFrom・Read-KeysCopy: 写しを置く受け持ち
+Test-Case '受け持ちは -KeysFrom が先、無ければ写しの頭の runner の印、印が無ければ wsl、写しが無ければ分からない' 'wsl runner wsl runner <>' {
+    Resolve-KeysFrom -KeysFrom 'wsl' -Exists $true -Lines @($script:RunnerCopyMark)
+    Resolve-KeysFrom -KeysFrom '' -Exists $true -Lines @('# x', "  $($script:RunnerCopyMark) ", $key1)
+    Resolve-KeysFrom -KeysFrom '' -Exists $true -Lines @('# dotfiles の写し (nix/scripts/bootstrap-windows-sshd.sh が書く)', $key1)
+    Resolve-KeysFrom -KeysFrom 'runner' -Exists $false
+    "<$(Resolve-KeysFrom -KeysFrom '' -Exists $false)>"
+}
+Test-Case 'runner の印は鍵の行に数えず、runner が書いた写しを runner と読む' "runner 1 0 $key1 <>" {
+    $dir = Join-Path ([IO.Path]::GetTempPath()) ("sshd-copy-" + [guid]::NewGuid())
+    $null = New-Item -ItemType Directory -Path $dir
+    try {
+        $path = Join-Path $dir 'authorized_keys'
+        # win/runner/src/steps/sshd_keys.rs の copy_text と同じ形
+        [IO.File]::WriteAllText($path, "# dotfiles の写し (Windows の runner の手順 sshd が書く。手で直さない)。`n$($script:RunnerCopyMark)`n$key1`n")
+        $c = Read-KeysCopy -Path $path
+        $c.From; @($c.Lines).Count; @($c.Bad).Count; $c.Lines[0]
+        "<$((Read-KeysCopy -Path (Join-Path $dir 'none')).From)>"
+    } finally {
+        Remove-Item -LiteralPath $dir -Recurse -Force
+    }
+}
+
 # Get-KeyLabel・Test-KeyWithoutFrom: 表に出す名札と from= の有無
 Test-Case '名札はコメントと鍵の種類 (from= があれば何も添えない)' 'phone (Herdr) (ssh-ed25519)' { Get-KeyLabel -Line $key1 }
 Test-Case 'コメントが無ければ base64 の末尾 8 字。from= が無ければ添える' '…xample02 (ssh-ed25519・from= 無し)' { Get-KeyLabel -Line $key2 }
@@ -250,9 +275,16 @@ Test-Case '写しが無いときに空で作る中身は、見出しだけ (鍵�
     $t = Get-AdminKeysText -KeyLines @() -Managed $false
     $t.StartsWith('# Created empty by dotfiles'); @(Get-KeyLines -Lines ($t -split "`n")).Count
 }
-Test-Case '見出しは ASCII だけ' 'True True' {
+Test-Case '見出しは ASCII だけ' 'True True True' {
     (Get-AdminKeysText -KeyLines @($key1)) -cmatch '^[\x00-\x7F]*$'
     (Get-AdminKeysText -KeyLines @() -Managed $false) -cmatch '^[\x00-\x7F]*$'
+    (Get-AdminKeysText -KeyLines @($key1) -From 'runner') -cmatch '^[\x00-\x7F]*$'
+}
+Test-Case 'runner の写しなら見出しは TOML の [sshd] authorizedKeys を指し、ほかは前からの見出しのまま (揃えたときの記録が変わらない)' "True False $key1 True" {
+    $r = Get-AdminKeysText -KeyLines @($key1) -From 'runner'
+    $r.Contains('[sshd] authorizedKeys'); $r.Contains('wsl.windowsFiles')
+    @(Get-KeyLines -Lines ($r -split "`n")) -join ' '
+    (Get-AdminKeysText -KeyLines @($key1) -From 'wsl') -ceq (Get-AdminKeysText -KeyLines @($key1))
 }
 
 # Compare-KeyLines: 鍵の行の差
@@ -655,7 +687,7 @@ function New-Facts {
         Keys             = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @($key1)) }
         Acl              = [pscustomobject]@{ Readable = $true; Value = (New-Acl) }
         Record           = [pscustomobject]@{ ConfigSha = $null; KeysSha = $null }
-        Copy             = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @(); Path = $copyPath }
+        Copy             = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @(); Path = $copyPath; From = 'wsl' }
         FirewallReadable = $true
         FirewallError    = $null
         FirewallProfiles = @(New-Profiles)
@@ -727,10 +759,10 @@ Test-Case '別のユーザーの AllowUsers の sshd_config は違う' 1 {
     Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-SshdConfigText -AllowUser 'bob') } }))
 }
 Test-Case '鍵が写しと違えば、足す・消す本数を出す' '⚠ 鍵              : 写しと違う (足す 1 本・消す 1 本) → 写しどおりに書く' {
-    Get-WarnRows (New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key3); Bad = @(); Path = $copyPath } })
+    Get-WarnRows (New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key3); Bad = @(); Path = $copyPath; From = 'wsl' } })
 }
 Test-Case '鍵が写しと違えば、足す鍵と消す鍵を ※ で名札と指紋つきで出す (UAC の前に見分ける)' "※ 鍵を足す: test-phone (ssh-ed25519 $realFp・from= 無し)|※ 鍵を消す: phone (Herdr) (ssh-ed25519)" {
-    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($realKey); Bad = @(); Path = $copyPath } }
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($realKey); Bad = @(); Path = $copyPath; From = 'wsl' } }
     @(Get-Notes $f | Where-Object { $_ -like '※ 鍵を*' }) -join '|'
 }
 Test-Case 'BOM の付いた sshd_config はずれ (sshd は読めずに起きない)' '⚠ sshd_config     : 先頭に BOM が付いている (sshd は読めずに起きない) → 退避して書き直す' {
@@ -786,10 +818,10 @@ Test-Case '読めないファイルは、揃えたときの記録と同じなら
     Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Config = $unreadable; Keys = $unreadable; Acl = $noAcl; Record = $record }))
 }
 Test-Case '読めない鍵は、写しが変わって記録と違えば ⚠' '⚠ 鍵              : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 写しどおりに書く' {
-    Get-WarnRows (New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key3); Bad = @(); Path = $copyPath } })
+    Get-WarnRows (New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key3); Bad = @(); Path = $copyPath; From = 'wsl' } })
 }
 Test-Case '鍵のファイルを読めない (管理者でない) ときは、足す・消すに分けず、写しの鍵を全部 ※ で名札と指紋つきで出す (UAC の前の表)' "※ 鍵: phone (Herdr) (ssh-ed25519)|※ 鍵: test-phone (ssh-ed25519 $realFp・from= 無し) 0" {
-    $f = New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $realKey); Bad = @(); Path = $copyPath } }
+    $f = New-Facts -Change @{ Keys = $unreadable; Acl = $noAcl; Record = $record; Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $realKey); Bad = @(); Path = $copyPath; From = 'wsl' } }
     @(Get-Notes $f | Where-Object { $_ -like '※ 鍵: *' }) -join '|'
     @(Get-Notes $f | Where-Object { $_ -like '※ 鍵を*' }).Count
 }
@@ -798,7 +830,14 @@ Test-Case '記録が無ければ、読めない sshd_config は ⚠' '⚠ sshd_c
 }
 
 # 鍵の写しが無い (ホストの値が null): 鍵の中身は見ない
-$unmanaged = [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $copyPath }
+$unmanaged = [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $copyPath; From = 'wsl' }
+Test-Case '写しが無いとき、鍵を置かない ※ は受け持ちごとに足し方を出す (分からなければ両方)' 'True True True True' {
+    $hint = { param($from) @(Get-Notes (New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $copyPath; From = $from } }) | Where-Object { $_.Contains('dotfiles は鍵を置かない') })[0] }
+    (& $hint 'wsl').Contains('wsl.windowsFiles.sshd.authorizedKeys が null')
+    (& $hint 'runner').Contains('[sshd] authorizedKeys が無い。書いて dotfiles apply を流すと runner が写しを置く')
+    (& $hint '').Contains('[sshd] authorizedKeys が無い。WSL の setup')
+    -not (& $hint 'runner').Contains('wsl.windowsFiles')
+}
 Test-Case '写しが無ければ、鍵のファイルの中身が何でも揃っている扱い (※ で、鍵を置かないと添える)' "0 True" {
     $f = New-Facts -Change @{ Copy = $unmanaged; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = "$key2`n$key3`n" } }
     Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
@@ -810,12 +849,17 @@ Test-Case '写しが無く鍵のファイルも無ければ、空で作る ⚠' 
 
 # ※ の補足
 Test-Case '鍵が 0 本なら ※ で、誰も入れないことと足し方を添える (揃っている扱い)' '0 True' {
-    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @(); Bad = @(); Path = $copyPath }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @()) } }
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @(); Bad = @(); Path = $copyPath; From = 'wsl' }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @()) } }
     Get-SshdExitCode -Verdict (Get-SshdVerdict -Facts $f)
     [bool](@(Get-Notes $f | Where-Object { $_.Contains('鍵が 0 本 (誰も入れない)') }).Count -eq 1)
 }
+Test-Case '鍵が 0 本の ※ は、runner の写しなら TOML の [sshd] authorizedKeys と dotfiles apply・Install-Sshd を案内する' 'True False' {
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @(); Bad = @(); Path = $copyPath; From = 'runner' }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @() -From 'runner') } }
+    $n = @(Get-Notes $f | Where-Object { $_.Contains('鍵が 0 本 (誰も入れない)') })[0]
+    $n.Contains('[sshd] authorizedKeys) に足して dotfiles apply を流し、Install-Sshd で揃える'); $n.Contains('setup')
+}
 Test-Case 'from= の無い鍵があれば ※ で本数を添える' 'True' {
-    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key2); Bad = @(); Path = $copyPath }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @($key1, $key2)) } }
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1, $key2); Bad = @(); Path = $copyPath; From = 'wsl' }; Keys = [pscustomobject]@{ Exists = $true; Readable = $true; HasBom = $false; Text = (Get-AdminKeysText -KeyLines @($key1, $key2)) } }
     [bool](@(Get-Notes $f | Where-Object { $_.Contains('from= の無い鍵が 1 本ある') }).Count -eq 1)
 }
 Test-Case 'Tailscale が無ければ ※ で添える (揃っている扱いのまま)' '0 True' {
@@ -844,11 +888,16 @@ Test-Case 'AllowUsers に書けないユーザー名なら 1 (server が無く�
     (Get-SshdCheckMessage -Verdict $v).Contains('-AllowUser')
 }
 Test-Case '鍵の写しに読めない行があれば 1 で、ホストの値を直させる' '1 True True' {
-    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @('garbage line'); Path = $copyPath } }
+    $f = New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @('garbage line'); Path = $copyPath; From = 'wsl' } }
     $v = Get-SshdVerdict -Facts $f
     Get-SshdExitCode -Verdict $v
     (Get-SshdCheckMessage -Verdict $v).Contains('鍵の写しに読めない行がある → ホストの値')
     [bool](@(Get-Notes $f | Where-Object { $_.Contains('鍵の写しの読めない行: garbage line') }).Count -eq 1)
+}
+Test-Case '鍵の写しの読めない行の締めの行は、runner の写しなら TOML と dotfiles apply、wsl なら Nix の値と setup' 'True True' {
+    $msg = { param($from) Get-SshdCheckMessage -Verdict (Get-SshdVerdict -Facts (New-Facts -Change @{ Copy = [pscustomobject]@{ Managed = $true; Lines = @($key1); Bad = @('garbage line'); Path = $copyPath; From = $from } })) }
+    (& $msg 'runner') -ceq '⚠️ 鍵の写しに読めない行がある → ホストの値 (dotfiles-private の win/hosts の TOML の [sshd] authorizedKeys) を直して dotfiles apply を流し直す ⚠️'
+    (& $msg 'wsl') -ceq '⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️'
 }
 
 Test-Case '拒否の規則が効かないプロファイルがあれば 1 で止まり (server が無くても 3 にしない)、有効にするコマンドを ※ で出す' '1 True True' {
