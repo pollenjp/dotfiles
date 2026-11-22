@@ -15,6 +15,8 @@
 #   - 客先で道具を 1 つ足せる (group = "client" と claude.enable = true で、claude だけが on)
 #   - windowsClaudeAccounts (Windows の claude-personal・claude-work) は personal だけ既定で on (初回の apply で UAC の確認が出る
 #     手順なので、company・client では既定で走らせない)
+#   - opReasonSshRelay (op-reason の SSH の中継。Windows の runner と WSL の option が同じ名前で引く) は表にあり、どのグループでも
+#     既定で off (鍵を使う ssh の通り道を替えるので、入れるホストが書く)
 #   - 依存の assertion: client で devTracker.enable = true だけを書くと評価で止まり、claude.privateSkills.enable と
 #     claude.enable も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る
 #   - 知らないグループ ("customer") は評価で止まる
@@ -190,6 +192,15 @@ let
         (json personal).tools.windowsClaudeAccounts
         && !(json company).tools.windowsClaudeAccounts
         && !(json client).tools.windowsClaudeAccounts;
+    }
+    {
+      name = "opReasonSshRelay は表にあり、どのグループでも既定で off (入れるホストが書く)";
+      ok = builtins.all (cfg: (json cfg).tools ? opReasonSshRelay && !(json cfg).tools.opReasonSshRelay) [
+        unset
+        personal
+        company
+        client
+      ];
     }
     {
       name = "client で devTracker.enable = true だけを書くと評価で止まる";

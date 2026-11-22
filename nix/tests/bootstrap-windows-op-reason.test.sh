@@ -21,7 +21,7 @@
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けず、CRLF と色を落とす
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド
 #     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
-#   - 冒頭の見出しに setup が読む order (97) と tool (onePassword) がある
+#   - 冒頭の見出しに setup が読む order (90。ssh の設定 (91) より前) と tool (onePassword) がある
 #
 # ## 本物の pwsh.exe を見せない
 #
@@ -204,9 +204,9 @@ op_off='{"enable":false}'
 echo "== bootstrap-windows-op-reason.sh: ${script}"
 
 # 0. 見出しに setup が読む order と tool がある (setup.sh の script_order・script_tool が先頭 40 行から読む)
-if head -n 40 "${script}" >"${work}/head" && grep -qxF '# order: 97' "${work}/head" \
+if head -n 40 "${script}" >"${work}/head" && grep -qxF '# order: 90' "${work}/head" \
   && grep -qxF '# tool: onePassword (dotfiles.onePassword.enable)' "${work}/head"; then
-  ok "見出しに order: 97 と tool: onePassword がある"
+  ok "見出しに order: 90 (ssh の設定 91 より前) と tool: onePassword がある"
 else
   ng "見出しの order・tool" "$(cat "${work}/head")"
 fi

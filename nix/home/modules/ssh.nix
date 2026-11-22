@@ -104,6 +104,14 @@ in
   # USE_LINUX_SSH=1 を渡すと Linux 側 (/usr/bin/ssh) に落ちる。ラッパー側の
   # 分岐なのでここでは何もしない。
   #
+  # ## op-reason の SSH の中継を使うマシン
+  #
+  # dotfiles.opReason.sshRelay.enable が true なら、ssh は ssh.exe でなく op-reason-ssh を起こす
+  # (files/bin/ssh-wsl-op-reason.sh。op-reason-ssh は呼び出しの事実を中継へ渡して ssh.exe を起こし、
+  # ssh.exe は Windows の ~/.ssh/config.d の IdentityAgent で中継へつなぐ)。ssh-add は ssh-add.exe の
+  # まま (鍵の一覧は中継でも窓なしで通り、git の署名は op-ssh-sign-wsl.exe が 1Password と直に話す)。
+  # 中継を使わないマシンの wrapper は 1 字も変えない。
+  #
   # ## 移行時の注意
   #
   # main.bash 経路が張った同じパスの symlink は scripts/preflight-unlink.sh が外す。
@@ -114,7 +122,11 @@ in
   # (home-manager の check-link-targets.sh で実測)。先に外しておく方が安全。
   home.file = lib.mkIf useOnePassword {
     ".local/bin/ssh" = {
-      source = ../../files/bin/ssh-wsl.sh;
+      source =
+        if config.dotfiles.opReason.sshRelay.enable then
+          ../../files/bin/ssh-wsl-op-reason.sh
+        else
+          ../../files/bin/ssh-wsl.sh;
 
       # 実行ビットは複製元 (git の mode 100755) から引き継がれるが、落ちていても
       # 壊れないよう明示する。exec できないと ssh が丸ごと使えなくなるため。

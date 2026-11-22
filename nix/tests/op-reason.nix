@@ -12,7 +12,15 @@
 #     - WSL だけ・1Password だけ・どちらも無しのマシンには入らない
 #     - 包みが既定にする OPREASON_EXE は、Install-OpReason.ps1 の既定の置き場所 (%LOCALAPPDATA%\Programs\op-reason) の op-reason.exe
 #       を、wsl.windowsUserName (無ければ wsl.onePassword.windowsUserName) で組み立てた WSL のパス
-#     - claude-op-reason.json は、入るマシンで {"enable":true}、ほかで {"enable":false}。どちらも改行で終わる
+#     - claude-op-reason.json は、入るマシンで enable が true、ほかで false。どちらも改行で終わる。SSH の中継の欄 sshRelay
+#       ({"enable": <bool>, "mode": "<モード>"}) はどのマシンにも書き、既定は enable が false・mode が per-call
+#     - claude-op-reason.json の exe は、包みが既定にする OPREASON_EXE と同じ op-reason.exe の WSL のパス (Windows のユーザー名の
+#       無いマシンは null。hook が中継の --status を打つ op-reason.exe)
+#     - SSH の中継 (dotfiles.opReason.sshRelay) を使うマシンの sshRelay は enable が true で、mode は option の値 (show-only も)
+#     - 中継を使うマシンの ~/.local/bin/ssh は op-reason-ssh を起こす files/bin/ssh-wsl-op-reason.sh、使わない WSL + 1Password の
+#       マシンは今の files/bin/ssh-wsl.sh のまま (WSL + 1Password でないマシンには置かない)
+#     - 中継は、Windows の受け持ちを runner に切り替えた (win/ を配らない) WSL + 1Password のマシンでだけ使える (win/ を配る WSL・
+#       1Password の無い WSL・WSL でないマシンで on にすると評価で止まる)
 #     - Claude の hook (op-reason-guard.sh) は、入らないマシンにも repo の script から実行できるファイルとして置かれる
 #       (hook は claude-op-reason.json を読んで黙る)
 #     - fish の op と op-reason の補完 (~/.config/fish/completions/op.fish・op-reason.fish) は入るマシンにだけ置き、中身は
@@ -67,6 +75,44 @@ let
   opOnly = configWith { onePassword.enable = true; };
   plain = configWith { };
 
+  # op-reason の SSH の中継を使うマシン (Windows の受け持ちを runner に切り替えた WSL + 1Password。win/ は配らない。
+  # dotfiles.opReason.sshRelay。ホストは modules で書く)
+  relayWsl = {
+    enable = true;
+    windowsUserName = "alice";
+    windowsFiles.enable = false;
+  };
+  relayWith =
+    sshRelay:
+    configWith {
+      wsl = relayWsl;
+      onePassword.enable = true;
+      modules = [ { dotfiles.opReason.sshRelay = sshRelay; } ];
+    };
+  wslRelay = relayWith { enable = true; };
+  wslRelayShowOnly = relayWith {
+    enable = true;
+    mode = "show-only";
+  };
+  # Windows の受け持ちが runner の WSL + 1Password で、中継を使わないマシン
+  wslRunnerNoRelay = relayWith { };
+  # home-manager は assertion が落ちていると config を読んだ時点で throw する ("Failed assertions")。評価で止まれば success が false
+  relayRefused =
+    args:
+    builtins.tryEval
+      (configWith (args // { modules = [ { dotfiles.opReason.sshRelay.enable = true; } ]; }))
+      .home.username;
+  # win/ を配る (Windows の受け持ちが WSL の) WSL・1Password の無い WSL・WSL でないマシンで中継を on にする
+  relayWithFiles = relayRefused {
+    wsl = relayWsl // {
+      windowsFiles.enable = true;
+    };
+    onePassword.enable = true;
+  };
+  relayWithoutOp = relayRefused { wsl = relayWsl; };
+  relayNotWsl = relayRefused { onePassword.enable = true; };
+  sshWrapper = cfg: cfg.home.file.".local/bin/ssh" or null;
+
   isOp = p: (p.meta.mainProgram or null) == "op";
   opOf = cfg: builtins.filter isOp cfg.home.packages;
   state = cfg: cfg.home.file.".local/state/dotfiles/claude-op-reason.json".text;
@@ -103,16 +149,80 @@ let
         && (opPkg wslOpOnly1p).exePath == exeFor "bob";
     }
     {
-      name = "claude-op-reason.json は入るマシンで {\"enable\":true}";
-      ok = builtins.fromJSON (state wslOp) == { enable = true; };
+      name = "claude-op-reason.json は入るマシンで enable が true、中継は既定で使わない (sshRelay の enable が false・mode が per-call)";
+      ok =
+        lib.all
+          (
+            cfg:
+            builtins.fromJSON (state cfg) == {
+              enable = true;
+              exe = exeFor "alice";
+              sshRelay = {
+                enable = false;
+                mode = "per-call";
+              };
+            }
+          )
+          [
+            wslOp
+            wslRunnerNoRelay
+          ];
     }
     {
-      name = "claude-op-reason.json は入らないマシンで {\"enable\":false}";
-      ok = lib.all (cfg: builtins.fromJSON (state cfg) == { enable = false; }) [
-        wslOnly
-        opOnly
-        plain
-      ];
+      name = "claude-op-reason.json は入らないマシンで enable が false、中継も false (Windows のユーザー名が無いので exe は null)";
+      ok =
+        lib.all
+          (
+            cfg:
+            builtins.fromJSON (state cfg) == {
+              enable = false;
+              exe = null;
+              sshRelay = {
+                enable = false;
+                mode = "per-call";
+              };
+            }
+          )
+          [
+            wslOnly
+            opOnly
+            plain
+          ];
+    }
+    {
+      name = "中継を使うマシンの claude-op-reason.json の sshRelay は enable が true で、mode は option の値 (既定 per-call)";
+      ok =
+        (builtins.fromJSON (state wslRelay)).sshRelay == {
+          enable = true;
+          mode = "per-call";
+        }
+        &&
+          (builtins.fromJSON (state wslRelayShowOnly)).sshRelay == {
+            enable = true;
+            mode = "show-only";
+          };
+    }
+    {
+      name = "claude-op-reason.json の exe は包みの OPREASON_EXE と同じ (wsl.onePassword.windowsUserName だけのマシンも。中継を使うマシンも)";
+      ok =
+        (builtins.fromJSON (state wslOpOnly1p)).exe == exeFor "bob"
+        && (builtins.fromJSON (state wslRelay)).exe == exeFor "alice"
+        && pkg != null
+        && (builtins.fromJSON (state wslOp)).exe == pkg.exePath;
+    }
+    {
+      name = "中継を使うマシンの ~/.local/bin/ssh は files/bin/ssh-wsl-op-reason.sh (実行できる)、使わないマシンは files/bin/ssh-wsl.sh のまま";
+      ok =
+        "${(sshWrapper wslRelay).source}" == "${../files/bin/ssh-wsl-op-reason.sh}"
+        && (sshWrapper wslRelay).executable
+        && "${(sshWrapper wslRelayShowOnly).source}" == "${../files/bin/ssh-wsl-op-reason.sh}"
+        && "${(sshWrapper wslOp).source}" == "${../files/bin/ssh-wsl.sh}"
+        && "${(sshWrapper wslRunnerNoRelay).source}" == "${../files/bin/ssh-wsl.sh}"
+        && sshWrapper plain == null;
+    }
+    {
+      name = "win/ を配る WSL・1Password の無い WSL・WSL でないマシンで中継を on にすると、評価で止まる";
+      ok = !relayWithFiles.success && !relayWithoutOp.success && !relayNotWsl.success;
     }
     {
       name = "claude-op-reason.json は改行で終わる";
