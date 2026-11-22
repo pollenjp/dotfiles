@@ -3339,7 +3339,8 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 - 1Password が承認するのは中継の process (画面の名前も op-reason)。要るのは、中継が起き直った後 (logon・版上げ・落ちた後の 1 分ごとの
   trigger) と、1Password をロックした後の最初の署名。その後は、ロックするか中継が起き直るまで 1Password の画面は出ない
 - 1Password は、求めの出どころのアプリか窓が前面にないと画面を伏せ、アイコンに点を付ける
-  ([1Password の文書](https://www.1password.dev/ssh/agent/authorization))。op-reason の窓で許可した後に 1Password の画面が出なければ、
+  ([1Password の文書](https://www.1password.dev/ssh/agent/authorization))。op-reason は 0.6.0 から、許可を押すと 1Password が答えるまで
+  中継の窓を前に出すので、1Password の画面はすぐ出る。それでも出なければ、
   タスクバーの 1Password のアイコンから「SSHリクエストを待機中……」(英語の表示では "SSH request waiting") を開いて、約 60 秒のうちに
   承認する (過ぎると 1Password が依頼を閉じ、ssh は断られる)
 - 1Password の画面の「すべてのアプリケーションで承認」には印を付けない (付けると、中継を通らずに 1Password に直につなぐ道 (上の 1 回
