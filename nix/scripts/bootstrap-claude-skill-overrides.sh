@@ -23,7 +23,9 @@
 #
 #   host option の skill  使う skill はマシンごとに違う (例: 会社のマシンでは Notion Dev Tracker の pjp-dev-tracker を
 #                         発火させない) ので、その宣言は host option (dotfiles.claude.devTracker.enable) に置き、ここで
-#                         写す。user の settings.json では option が正で、手で変えても次の実行で戻る
+#                         写す。user の settings.json では option が正で、手で変えても次の実行で戻る。同じファイルの
+#                         pjp-t3-hub はどのホストでもいつも off (Windows の T3 Code の会話だけが、T3 の Launch arguments の
+#                         --settings で on にする)
 #   pack の skill         Claude Code は skill の名前と説明の一覧を毎ターン context に入れ、一覧は context の 1% の枠に
 #                         収められる (あふれると、呼ばれた回数の少ない skill から説明が落ちる)。話題ごとの skill の組
 #                         (pack) は "name-only" (一覧に名前だけ。Skill tool で名前を指せば呼べる) にし、どの会話でも要る
@@ -36,7 +38,7 @@
 #
 #   ~/.local/state/dotfiles/claude-skill-overrides.json
 #       home-manager が置く host option の値 (nix/home/modules/claude.nix)。skillOverrides に merge する map そのもの
-#       ({"pjp-dev-tracker":"off"})。無ければ、option を含む世代へまだ switch していないので、警告してこの分だけ飛ばす。
+#       ({"pjp-dev-tracker":"off","pjp-t3-hub":"off"})。無ければ、option を含む世代へまだ switch していないので、警告してこの分だけ飛ばす。
 #       --no-host-option では読まない (home-manager の無い cloud の VM。claude-cloud/bootstrap-claude-cloud.sh が渡す)
 #   ~/.claude/skills/*/SKILL.md
 #       frontmatter の metadata の pjp-pack (pack の割り当て。空白で区切って複数の pack を書ける)。yq の無いマシン (cloud の
@@ -112,6 +114,7 @@ Claude Code の skill の見え方 (skillOverrides) を ~/.claude/settings.json 
 
 書く key と値:
   host option の skill (pjp-dev-tracker)        on / off (dotfiles.claude.devTracker.enable)
+  host option の skill (pjp-t3-hub)             off (どのホストでも。Windows の T3 Code の会話だけが T3 の --settings で on にする)
   pack の skill (SKILL.md の metadata.pjp-pack)  name-only (書いた pack のどれかの入口 pjp-pack-<pack> があるときだけ)
   claude.ai から同期された skill                anthropic-skills:<名前> を user-invocable-only
 
@@ -257,7 +260,7 @@ if [[ ${host_option} == 1 ]]; then
   if [[ ! -r ${generated} ]]; then
     warn "生成ファイルがありません: ${generated}" \
       "dotfiles.claude.devTracker.enable を持つ世代へ先に home-manager switch してください。" \
-      "host option の skill (pjp-dev-tracker) の分は飛ばします。"
+      "host option の skill (pjp-dev-tracker・pjp-t3-hub) の分は飛ばします。"
   elif ! host_values=$(jq -c -e 'if type == "object" then . else error("not an object") end' "${generated}" 2>/dev/null); then
     echo "${generated} が skillOverrides の map (JSON object) ではありません。" >&2
     exit 1

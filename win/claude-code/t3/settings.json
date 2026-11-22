@@ -1,0 +1,9 @@
+{
+  "skillOverrides": {
+    "herdr-app": "off",
+    "pjp-herdr-hub": "off",
+    "pjp-herdr-other-repo": "off",
+    "pjp-hc-hub": "off",
+    "pjp-t3-hub": "on"
+  }
+}

@@ -4370,6 +4370,12 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 探しに行き（off の skill を呼ぶと「override を外せ」というエラー文が返る）、skill だけ
 残ると節が無くても description で発火する。
 
+同じ生成 JSON に、option を持たない key **`pjp-t3-hub`**（claude-skills の T3 Code のハブの skill）も載せ、どのホストでも
+いつも `"off"` にする。Linux の会話と herdr-app の会話には出さず、Windows の T3 Code の会話だけが、T3 の Launch arguments の
+`--settings`（`win/claude-code/t3/settings.json`）で on にする（flag settings は user の settings.json より強い。
+[win/README.md の「Claude Code の設定」](../win/README.md#claude-code-の設定)）。Windows の runner の `claude-skill-overrides` も
+同じ key と値を書く。
+
 #### 値の置き場
 
 - 本体の既定は false（使わない）。**Dev Tracker を使うマシンだけ** `mkHome` に `claude.devTracker.enable = true;` を書く:
@@ -4386,14 +4392,14 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 ```
 
 `switch` が置くのは 2 つ。連結済みの `~/.claude/CLAUDE.md` と、skillOverrides に流す値を
-書いた `~/.local/state/dotfiles/claude-skill-overrides.json`（`{"pjp-dev-tracker":"off"}`）。
+書いた `~/.local/state/dotfiles/claude-skill-overrides.json`（`{"pjp-dev-tracker":"off","pjp-t3-hub":"off"}`）。
 settings.json は Claude Code 自身が書き換えるので Nix では置けず（フック / statusLine /
 env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` が jq で
 `.skillOverrides` へ merge する。
 
 - **`switch` だけでは settings.json に届かない。** CLAUDE.md だけ変わった状態が一時的に
   あり得る。`setup --update` なら bootstrap まで走るので揃う
-- 生成 JSON に載っている key（今は `pjp-dev-tracker`）だけ上書きし、他は残す。user の settings.json の
+- 生成 JSON に載っている key（今は `pjp-dev-tracker` と `pjp-t3-hub`）だけ上書きし、他は残す。user の settings.json の
   この key は option が正で、手で書き換えても次の update で戻る。同じ script が書くほかの key（pack の skill・
   claude.ai から同期された skill）は[次節](#skill-の一覧を枠に収める-pack-と同期された-skill)
 - `/skills` での切り替えは、その project の `.claude/settings.local.json` に保存され、user の
@@ -4405,7 +4411,7 @@ env と同じ事情）、この JSON を `bootstrap-claude-skill-overrides.sh` �
 #### 確認
 
 ```sh
-jq .skillOverrides ~/.claude/settings.json      # {"pjp-dev-tracker":"off"} なら止まっている
+jq .skillOverrides ~/.claude/settings.json      # "pjp-dev-tracker": "off" なら止まっている
 grep -c 'タスク管理' ~/.claude/CLAUDE.md          # 0 なら節が無い
 ```
 
@@ -5190,7 +5196,7 @@ nix develop ./nix --no-write-lock-file --override-input home-manager \
 Anthropic 配信 skill、`plugins/`、実行時の状態（`projects/` `sessions/` など）、
 `claude-skills` の中身（上記のとおり作業クローンへの symlink で繋ぐ）。
 `settings.json` のうち `bootstrap-claude-*.sh` が書くキー（フック / statusLine / `env` の
-`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL`・`CLAUDE_CODE_PLUGIN_PREFER_HTTPS` / `skillOverrides.pjp-dev-tracker` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
+`GIT_CONFIG_*` と `CLAUDE_CODE_SHELL`・`CLAUDE_CODE_PLUGIN_PREFER_HTTPS` / `skillOverrides.pjp-dev-tracker`・`skillOverrides.pjp-t3-hub` / `footerLinksRegexes`）だけは、script が冪等に上書きする。
 `skillOverrides` の pack の skill と claude.ai から同期された skill の key は、控えと比べて書き・戻す（手で書いた値は残す。[前述](#書いた-key-の控えと戻し)）。
 
 ## mise との役割分担

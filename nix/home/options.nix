@@ -283,7 +283,9 @@ in
         - `~/.local/state/dotfiles/claude-skill-overrides.json` の値 ("on" / "off")。
           nix/scripts/bootstrap-claude-skill-overrides.sh がこれを
           `~/.claude/settings.json` の skillOverrides へ写し、false なら skill が
-          Claude の一覧からも `/` メニューからも消える
+          Claude の一覧からも `/` メニューからも消える (同じファイルの `pjp-t3-hub` は
+          この値によらずいつも "off"。Windows の T3 Code の会話だけが、T3 の Launch arguments の
+          `--settings` で on にする)
 
         settings.json は Claude Code 自身が書き換えるので Nix では置けない。
         そのため反映は 2 段で、`home-manager switch` だけでは skillOverrides に

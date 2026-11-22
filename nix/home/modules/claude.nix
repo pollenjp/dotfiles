@@ -291,10 +291,16 @@ lib.mkMerge [
       # 中身は skillOverrides に merge する map そのもの。"on" は書かないのと同じだが、
       # この key は option が正だと settings.json 側からも読めるよう、enable = true
       # でも明示して書く。
+      #
+      # pjp-t3-hub (claude-skills の T3 Code のハブの skill) は、どのホストでもいつも "off"。
+      # Windows の T3 Code の会話だけが、T3 の Launch arguments の --settings
+      # (win/claude-code/t3/settings.json) で on にする。Linux の会話と herdr-app の会話には出さない。
+      # Windows の runner の claude-skill-overrides も同じ key と値を書く。
       {
         ".local/state/dotfiles/claude-skill-overrides.json".text =
           builtins.toJSON {
             "pjp-dev-tracker" = if cfg.devTracker.enable then "on" else "off";
+            "pjp-t3-hub" = "off";
           }
           + "\n";
       }
