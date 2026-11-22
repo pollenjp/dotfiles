@@ -137,6 +137,23 @@ let
       }
     )
     (tool "cursorAgent" "cursor-agent" [ "cursorAgent" "enable" ] [ "aiTools" ] { derived = false; })
+    # T3 Code (CLI と常駐の service・設定)。Claude の会話を別の UI と端末から使う道具で、どのグループでも既定で入れない (入れるホストが
+    # 足す)。claude のアカウント t3 と Claude の設定を前提にするので、claude が off なら効かない
+    (tool "t3Code" "T3 Code (t3 と t3code.service)" [ "t3Code" "enable" ] [ "aiTools" ] {
+      derived = false;
+      requires = [
+        [
+          "claude"
+          "enable"
+        ]
+      ];
+    })
+    # Windows の T3 Code (desktop app と設定)。Windows の runner の手順 t3-code・t3-code-settings だけが読む switch (WSL の setup に同じ
+    # 手順は無い)。どのグループでも既定で入れない (入れるホストが足す)
+    (tool "windowsT3Code" "Windows の T3 Code" [ "wsl" "windowsFiles" "t3Code" "enable" ] [ "aiTools" ] {
+      derived = false;
+      requires = [ windowsFiles ];
+    })
 
     # ② と ③ の両方 (両方が on のときだけ入る)
     (tool "claudePrivateSkills" "private な skill (claude-skills の clone)" [

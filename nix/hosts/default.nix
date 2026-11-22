@@ -59,6 +59,8 @@
 # ntn と Claude Code は既定で入れる (winget で固定した版。入れないマシンは wsl.windowsFiles.ntn.enable = false・
 # wsl.windowsFiles.claudeCode.enable = false。win/README.md の「ntn」「Claude Code」)。
 # Tailscale は既定で入れない (VPN の道具。入れるマシンは wsl.windowsFiles.tailscale.enable = true。win/README.md の「Tailscale」)。
+# T3 Code は既定で入れない (入れるのは Windows の runner だけ。入れるマシンは Windows のホストの値の [tools] windowsT3Code = true。
+# win/README.md の「T3 Code」)。
 # sshd (OpenSSH Server) も既定で入れない (PC に外から入る口。入れるマシンは wsl.windowsFiles.sshd.enable = true と、鍵の
 # wsl.windowsFiles.sshd.authorizedKeys。Tailscale と localhost からだけ、鍵でだけ入れる。win/README.md の「sshd」)。
 { mkHome }:
