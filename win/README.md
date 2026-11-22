@@ -3188,7 +3188,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ([`nix/README.md`「WSL の op を理由つきで呼ぶ (1Password CLI)」](../nix/README.md#wsl-の-op-を理由つきで呼ぶ-1password-cli)) は、
 呼び出しごとに Windows の `op-reason.exe` (動かないときは隣の `launcher.ps1`) を起こして承認の窓を出す。zip の中身は
 `op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版にそろえる
-(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.5.0 まで同じ取り決め)。
+(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.6.0 まで同じ取り決め)。
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
@@ -3201,7 +3201,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
   待たずに済む)
-- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.5.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
+- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.6.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
   中身の値 (`Tree`) を同じファイルの表 (`Get-OpReasonReleases`) で固定する。`Zip` は Release に置いた `op-reason-windows.zip.sha256`
   の中身と同じ。WSL の実行ファイルの版 (`nix/pkgs/op-reason/default.nix` の `version`) と同じにする (テストが突き合わせる)
 - 自作のアプリの Release なので、type-clipboard と同じく依存の公開からの猶予 (7 日) は置かない。中身は SHA-256 で固定する
@@ -3339,7 +3339,8 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 - 1Password が承認するのは中継の process (画面の名前も op-reason)。要るのは、中継が起き直った後 (logon・版上げ・落ちた後の 1 分ごとの
   trigger) と、1Password をロックした後の最初の署名。その後は、ロックするか中継が起き直るまで 1Password の画面は出ない
 - 1Password は、求めの出どころのアプリか窓が前面にないと画面を伏せ、アイコンに点を付ける
-  ([1Password の文書](https://www.1password.dev/ssh/agent/authorization))。op-reason の窓で許可した後に 1Password の画面が出なければ、
+  ([1Password の文書](https://www.1password.dev/ssh/agent/authorization))。op-reason は 0.6.0 から、許可を押すと 1Password が答えるまで
+  中継の窓を前に出すので、1Password の画面はすぐ出る。それでも出なければ、
   タスクバーの 1Password のアイコンから「SSHリクエストを待機中……」(英語の表示では "SSH request waiting") を開いて、約 60 秒のうちに
   承認する (過ぎると 1Password が依頼を閉じ、ssh は断られる)
 - 1Password の画面の「すべてのアプリケーションで承認」には印を付けない (付けると、中継を通らずに 1Password に直につなぐ道 (上の 1 回
@@ -3383,7 +3384,7 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 5. `Install-OpReason.Tests.ps1` を流して PR を出す
 6. merge したら、入れるマシンで `setup --update` を流す (WSL の実行ファイルが上がり、Windows の部品も入れ替わる)。op の呼び出しの
    途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える。WSL の側で入るものが新しい
-   版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した。0.5.0 は頼らない) では、Windows の部品を先に揃えてから switch する
+   版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した。0.5.0・0.6.0 は頼らない) では、Windows の部品を先に揃えてから switch する
    ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)。setup が揃えない
    ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に Windows で揃える (受け持ちを runner に切り替えたホストは `dotfiles apply`、ほかは `Install-OpReason`)
 

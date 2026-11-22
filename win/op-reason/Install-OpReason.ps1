@@ -9,7 +9,7 @@ PowerShell では dotfiles.ps1 の Install-OpReason から呼ぶ (win/README.md 
 op-reason は 1Password CLI (op) の wrapper (自作の OSS)。WSL の op (dotfiles の home/modules/op-reason.nix が入れる、Release の
 Linux の実行ファイル) は、呼び出しごとに Windows の op-reason.exe (動かないときは隣の launcher.ps1) を起こして承認の窓を出す。
 その Windows の部品が op-reason-windows.zip (op-reason.exe・launcher.ps1・powershell-entry\・SKILL.md・README・ライセンス) で、
-WSL の実行ファイルと同じ版にそろえる (呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.5.0 まで同じ取り決め)。
+WSL の実行ファイルと同じ版にそろえる (呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.6.0 まで同じ取り決め)。
 
 固定した版の zip を GitHub の Release から落とし、SHA-256 が表 (Get-OpReasonReleases) の Zip と合うときだけ隣に展開し、
 展開した中身が表の Tree と合えば %LOCALAPPDATA%\Programs\op-reason と入れ替える。合わなければ何も変えずに止まる。
@@ -54,7 +54,7 @@ Windows の runner の手順 op-reason が、ホストの値の道具の switch 
 #>
 [CmdletBinding()]
 param(
-    [string]$Version = '0.5.0',
+    [string]$Version = '0.6.0',
     [switch]$Check,
     [string]$InstallDir = '',
     [ValidateSet('per-call', 'show-only', 'off')]
@@ -90,6 +90,10 @@ function Get-OpReasonReleases {
         '0.5.0' = @{
             Zip  = 'ff7c40063b0201e5d0e66c1ed495047c479d5c5eaad21ce1c42889328b15826e'
             Tree = '7d72ad737aa4b9c87ed325b969fba1f9761cf0fa6cdddbff12edc197e5f20d66'
+        }
+        '0.6.0' = @{
+            Zip  = '0a0ee1e06e3be572a2fc7b4e3e8eea199484410f063a992a4ed6d48581e14c41'
+            Tree = '1a3d3ff97d38f7a2056b1295c5d62320e61dcb3f9b3ef8ea3061344a7eec4141'
         }
     }
 }
