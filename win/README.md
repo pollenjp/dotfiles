@@ -3328,6 +3328,12 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 
 - 鍵は使えない (ssh が失敗する)。logon の task が 1 分のうちに起こし直す。待てなければ
   `Start-ScheduledTask -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'` (答えるかは `op-reason.exe --ssh-agent --status`)
+- task の最後の結果 (`Get-ScheduledTaskInfo -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'` の `LastTaskResult`。10 進で出る) は、
+  中継が動いている間は `0x800710E0` (2147946720。1 分ごとの起動を、動いている中継があるので「新しいインスタンスを開始しない」で
+  退けた。「要求を拒否した」と読めるが失敗ではない) か `0x00041301` (267009。task が起こした中継が動いている)。中継が終わった直後は、
+  ほかの値 (中継の終了コード) のことがある (task の動作が終わると、その終了コードが入る見込み。次の 1 分ごとの起動で中継が起き直れば
+  `0x00041301` に戻る)。1 分を過ぎてもほかの値のままなら、task が中継を起こせていない (Smart App Control など。`Install-OpReason` の
+  「SSH の中継が答えない」の案内が見るのもこの値)
 - 1 回だけ 1Password に直につなぐ: `ssh -o 'IdentityAgent=\\\\.\pipe\openssh-ssh-agent' <接続先>` (WSL でも PowerShell でも `\` を
   4 つ。`-o` は設定より先に効く)
 - 手で中継を起こして試すときは、先に task を無効にする (`Disable-ScheduledTask -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'`。
