@@ -18,7 +18,7 @@
 #
 # iPhone の Herdr のアプリや hc は、各マシンの herdr-core に SSH で直につなぐ。Tailscale SSH のサーバーに Windows はなれないので、
 # Windows には sshd を入れる。sshd は win/openssh/Install-Sshd.ps1 が、dotfiles が winget で固定した OpenSSH の MSI に Server を
-# 足して入れ、鍵だけ・AllowUsers で tailnet と localhost に限る sshd_config と、Windows Firewall の拒否の規則 (tailnet からは 22 番
+# 足して入れ、鍵だけ・AllowUsers と Match Address で tailnet と localhost に限る sshd_config と、Windows Firewall の拒否の規則 (tailnet からは 22 番
 # だけ、22 番には tailnet と localhost からだけ) と、鍵 (administrators_authorized_keys) と、自動の起動を揃える
 # (win/README.md の「sshd」、dotfiles-private の ADR 078)。PC に外から入る口を開けるので、道具の switch
 # (dotfiles.wsl.windowsFiles.sshd.enable) はどのグループでも既定で off にしてある。

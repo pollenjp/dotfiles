@@ -1909,7 +1909,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   （[`win/README.md`](../win/README.md#tailscale)、dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`)）
 - sshd (OpenSSH Server) は、`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシン (どのグループでも既定は false。PC に外から入る口を開け
   るので、会社の PC などに勝手に入れない) だけ、`bootstrap-windows-sshd.sh` (order 96) が鍵の写しを置いてから、配った `Install-Sshd.ps1` を
-  `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers で tailnet と localhost に
+  `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers と Match Address で tailnet と localhost に
   限る `sshd_config`、Windows Firewall の拒否の規則 (tailnet からは 22 番だけ、22 番には tailnet と localhost からだけ)、鍵
   (`administrators_authorized_keys`)、自動の起動を揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせ、揃えるのは `--apply` か
   PowerShell の `Install-Sshd`。鍵はホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) に書く
