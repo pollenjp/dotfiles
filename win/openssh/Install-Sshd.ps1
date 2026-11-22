@@ -17,7 +17,8 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
    (SourceList の PackageName) で原本を探すので、取り直した MSI をその名前に写してから渡す (製品や PackageCode が違えば流さずに
    止まる)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。winget の install と pin には
    触らない。Windows の機能 (System32) の OpenSSH Server とは二重にしない
-2. C:\ProgramData\ssh\sshd_config: dotfiles が書く中身 (Get-SshdConfigText。鍵だけ・AllowUsers で tailnet と localhost に限る) に
+2. C:\ProgramData\ssh\sshd_config: dotfiles が書く中身 (Get-SshdConfigText。鍵だけ・AllowUsers でユーザーを限り、Match Address の
+   DenyUsers で tailnet と localhost の外を断る) に
    する。違えば sshd_config.dotfiles-bak-<日時> に退避して書き直す。MSI は Server を足した時点で sshd を起こし、sshd は
    sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく (ディレクトリが無ければ、sshd が作るのと
    同じ権限で作る)
@@ -113,11 +114,16 @@ function ConvertTo-Lf {
     "$Text" -replace "`r`n", "`n"
 }
 
-# dotfiles が書く sshd_config の中身 (改行は LF)。$AllowUser だけを、tailnet と localhost から来たときだけ入れる
+# dotfiles が書く sshd_config の中身 (改行は LF)。$AllowUser だけを、tailnet と localhost から来たときだけ入れる。
+# 接続元は AllowUsers の user@CIDR でなく、Match Address で絞る。Win32-OpenSSH は sshd_config を読んだ後、AllowUsers・DenyUsers・
+# AllowGroups・DenyGroups の語ごとに最初の / を \ に替える (domain/user を domain\user と読むため。PowerShell/openssh-portable の
+# servconf.c の parse_server_config の WINDOWS の分岐)。user@100.64.0.0/10 は user@100.64.0.0\10 になって CIDR として読めず、文字の
+# パターンとしても当たらないので、tailnet からのログインを全部断る。Match Address はこの読み替えを通らず、CIDR がそのまま効く。
+# sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る (auth.c の getpwnamallow)
 function Get-SshdConfigText {
     param([string]$AllowUser)
-    $from = @($script:TailnetAddresses) + @('127.0.0.1', '::1')
-    $allow = @($from | ForEach-Object { "$AllowUser@$_" }) -join ' '
+    $notFrom = @(@($script:TailnetAddresses) + @('127.0.0.1', '::1') | ForEach-Object { "!$_" })
+    $outside = (@('*') + $notFrom) -join ','
     $lines = @(
         '# Written by dotfiles (Install-Sshd.ps1). Do not edit by hand: Install-Sshd -Check reports the difference,'
         '# and Install-Sshd moves this file to sshd_config.dotfiles-bak-<time> and writes it again.'
@@ -125,7 +131,8 @@ function Get-SshdConfigText {
         '#'
         '# Public-key logins only, and only from Tailscale (the tailnet) and localhost. sshd listens on all'
         '# addresses (with ListenAddress bound to the Tailscale IP, sshd fails at boot when that IP is not up yet).'
-        '# AllowUsers and the Windows Firewall block rules limit where logins can come from.'
+        '# AllowUsers (this user only), Match Address + DenyUsers and the Windows Firewall block rules limit who and'
+        '# where logins can come from.'
         ''
         'Port 22'
         ''
@@ -135,12 +142,18 @@ function Get-SshdConfigText {
         'KbdInteractiveAuthentication no'
         'AuthenticationMethods publickey'
         ''
-        '# Only this user, and only from the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48) and localhost'
-        "AllowUsers $allow"
+        '# Only this user. Where it may come from is limited by "Match Address" below, not by user@CIDR here:'
+        '# Win32-OpenSSH turns the first "/" of each AllowUsers word into "\" (for domain/user), so CIDR never matches.'
+        "AllowUsers $AllowUser"
         ''
         'AuthorizedKeysFile .ssh/authorized_keys'
         ''
         'Subsystem sftp sftp-server.exe'
+        ''
+        '# Deny everyone unless the connection comes from the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48) or localhost.'
+        '# Match Address reads CIDR as written (also on Windows), and sshd applies Match before AllowUsers/DenyUsers.'
+        "Match Address $outside"
+        '       DenyUsers *'
         ''
         '# Administrators read their keys from ProgramData, not from the user profile (the Win32-OpenSSH default)'
         'Match Group administrators'

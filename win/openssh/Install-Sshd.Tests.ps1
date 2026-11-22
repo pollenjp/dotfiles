@@ -10,8 +10,11 @@
 #
 #   - AllowUsers に書けるユーザー名 (英小文字・数字・. _ -) だけを通す
 #   - 作る sshd_config: 鍵だけ (PasswordAuthentication no・KbdInteractiveAuthentication no・AuthenticationMethods publickey)、AllowUsers は
-#     ユーザーを tailnet (100.64.0.0/10・fd7a:115c:a1e0::/48) と localhost からに限り、Match Group administrators より前に書く。
-#     ListenAddress は書かない。改行は LF で、BOM も CR も無く、ASCII だけ。PATH に sshd があれば sshd -G が読め、AllowUsers が 4 つ並ぶ
+#     ユーザーだけ (接続元を書かない) で、最初の Match より前に書く。接続元は Match Address で絞り、tailnet (100.64.0.0/10・
+#     fd7a:115c:a1e0::/48) と localhost の外から来たら DenyUsers * にする。AllowUsers・DenyUsers・AllowGroups・DenyGroups の語に / を
+#     書かない (Win32-OpenSSH は語の最初の / を \ に替えるので、user@CIDR は Windows で当たらない)。
+#     ListenAddress は書かない。改行は LF で、BOM も CR も無く、ASCII だけ。PATH に sshd があれば sshd -G が読め、AllowUsers が 1 つ。
+#     PATH に sshd と ssh-keygen があれば、使い捨ての host 鍵で sshd -T -C を流し、tailnet と localhost から来たときだけ DenyUsers が付かない
 #   - 鍵の写しの読み方: コメントと空の行を除き、authorized_keys の行として読めない行は分ける。from= の有無を見分ける。名札はコメント
 #     (無ければ base64 の末尾) と鍵の種類
 #   - administrators_authorized_keys に書く中身 (鍵の行と ASCII の見出し) と、鍵の行の差 (足す・消す・並びも同じか)
@@ -99,14 +102,33 @@ Test-Case 'CRLF を LF にする' "a`nb`n" { ConvertTo-Lf "a`r`nb`r`n" }
 # Get-SshdConfigText: 作る sshd_config
 $config = Get-SshdConfigText -AllowUser 'alice'
 $configLines = @($config -split "`n")
-Test-Case 'AllowUsers はユーザーを tailnet と localhost からに限る' 'AllowUsers alice@100.64.0.0/10 alice@fd7a:115c:a1e0::/48 alice@127.0.0.1 alice@::1' {
+Test-Case 'AllowUsers はユーザーだけ (接続元は Match Address で絞る)' 'AllowUsers alice' {
     $configLines | Where-Object { $_ -like 'AllowUsers *' }
+}
+# Win32-OpenSSH は sshd_config を読んだ後、AllowUsers・DenyUsers・AllowGroups・DenyGroups の語ごとに最初の / を \ に替える (domain/user の
+# ため)。前に書いた alice@100.64.0.0/10 は alice@100.64.0.0\10 になり、tailnet からのログインを全部断った (Windows の実機の sshd -T で
+# 見た)。Linux の sshd はこれを再現しないので、語に / と \ が無いことをここで見る
+Test-Case 'AllowUsers・DenyUsers・AllowGroups・DenyGroups の語に / も \ も無い (Windows の sshd が / を \ に替える)' 0 {
+    $words = @($configLines | Where-Object { $_ -match '^\s*(AllowUsers|DenyUsers|AllowGroups|DenyGroups)\s' } | ForEach-Object { @($_.Trim() -split '\s+' | Select-Object -Skip 1) })
+    @($words | Where-Object { $_.Contains('/') -or $_.Contains('\') }).Count
+}
+Test-Case 'Match Address は tailnet と localhost の外に当たり、中は DenyUsers * だけ' 'Match Address *,!100.64.0.0/10,!fd7a:115c:a1e0::/48,!127.0.0.1,!::1|       DenyUsers *' {
+    $i = [array]::FindIndex([string[]]$configLines, [Predicate[string]] { param($l) $l -like 'Match Address *' })
+    $block = @($configLines[$i..($configLines.Count - 1)] | Select-Object -Skip 1)
+    $end = [array]::FindIndex([string[]]$block, [Predicate[string]] { param($l) $l -like 'Match *' })
+    $body = @($block[0..($end - 1)] | Where-Object { $_ -and -not $_.TrimStart().StartsWith('#') })
+    (@($configLines[$i]) + $body) -join '|'
+}
+Test-Case 'Match Address は Match Group administrators より前 (Match は 2 つ)' 'True 2' {
+    $configLines.IndexOf(($configLines | Where-Object { $_ -like 'Match Address *' })) -lt $configLines.IndexOf('Match Group administrators')
+    @($configLines | Where-Object { $_ -match '^Match ' }).Count
 }
 Test-Case '鍵だけで入れる (パスワードとキーボード対話を止め、認証の方法を publickey に限る)' 'PubkeyAuthentication yes|PasswordAuthentication no|KbdInteractiveAuthentication no|AuthenticationMethods publickey' {
     ($configLines | Where-Object { $_ -match '^(PubkeyAuthentication|PasswordAuthentication|KbdInteractiveAuthentication|AuthenticationMethods) ' }) -join '|'
 }
-Test-Case 'AllowUsers は Match Group administrators より前 (Match の中に入れない)' 'True' {
-    $configLines.IndexOf(($configLines | Where-Object { $_ -like 'AllowUsers *' })) -lt $configLines.IndexOf('Match Group administrators')
+Test-Case 'AllowUsers は最初の Match より前 (Match の中に入れない)' 'True' {
+    $firstMatch = [array]::FindIndex([string[]]$configLines, [Predicate[string]] { param($l) $l -like 'Match *' })
+    $configLines.IndexOf(($configLines | Where-Object { $_ -like 'AllowUsers *' })) -lt $firstMatch
 }
 Test-Case '管理者の鍵は administrators_authorized_keys から読む (Win32-OpenSSH の既定)' '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys' {
     $configLines[$configLines.IndexOf('Match Group administrators') + 1]
@@ -125,7 +147,9 @@ Test-Case '改行は LF で、CR は無く、末尾は改行' 'False True' { $co
 Test-Case 'ASCII だけ (sshd は設定を byte のまま読む)' 'True' { $config -cmatch '^[\x00-\x7F]*$' }
 
 # PATH に sshd があれば、作る sshd_config を sshd -G (host の鍵が要らない、設定を読んで出すだけの形) で読ませる。
-# AllowUsers の CIDR の書き方の誤りは sshd が読む時点で落とす (起動しなくなる誤りを、ここで見つける)
+# Match Address の CIDR の書き方の誤りは sshd が読む時点で落とす (起動しなくなる誤りを、ここで見つける)。
+# ssh-keygen もあれば、使い捨ての host 鍵で sshd -T -C (接続元を与えて Match を当てた結果を出す形) を流し、どこから来たときに DenyUsers が
+# 付くかを見る。Match Address の照らし方は Windows の sshd も同じ (AllowUsers の / の読み替えを通らない)
 $sshd = Get-Command sshd -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($sshd) {
     $tmp = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-test-$PID"
@@ -137,16 +161,43 @@ if ($sshd) {
             $null = & $sshd.Source -G -f $cfg 2>&1
             $LASTEXITCODE
         }
-        Test-Case 'sshd -G が読んだ AllowUsers は 4 つで、パスワードの認証は no' '4 True' {
+        Test-Case 'sshd -G が読んだ AllowUsers は 1 つで、パスワードの認証は no' '1 True' {
             $out = @(& $sshd.Source -G -f $cfg 2>&1 | ForEach-Object { "$_" })
-            @($out | Where-Object { $_ -match '^(?i)allowusers alice@' }).Count
+            @($out | Where-Object { $_ -match '^(?i)allowusers alice$' }).Count
             [bool](@($out | Where-Object { $_ -match '^(?i)passwordauthentication no$' }).Count -eq 1)
         }
         $bad = Join-Path $tmp 'bad_config'
-        [IO.File]::WriteAllText($bad, "AllowUsers alice@100.64.0.0/33`n", [Text.UTF8Encoding]::new($false))
-        Test-Case 'sshd -G は書き方の誤った AllowUsers の CIDR を断る (確かめ方が効いている)' 'True' {
+        [IO.File]::WriteAllText($bad, "AllowUsers alice`nMatch Address *,!100.64.0.0/33`n       DenyUsers *`n", [Text.UTF8Encoding]::new($false))
+        Test-Case 'sshd -G は書き方の誤った Match Address の CIDR を断る (確かめ方が効いている)' 'True' {
             $null = & $sshd.Source -G -f $bad 2>&1
             $LASTEXITCODE -ne 0
+        }
+        $keygen = Get-Command ssh-keygen -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($keygen) {
+            $hostKey = Join-Path $tmp 'host_key'
+            $null = & $keygen.Source -q -t ed25519 -N '' -f $hostKey 2>&1
+            # 接続元ごとに、sshd -T -C の出す DenyUsers (Match Address が当たったときだけ付く)
+            $denied = {
+                param([string]$Addr)
+                $out = @(& $sshd.Source -T -f $cfg -h $hostKey -C "user=alice,host=$Addr,addr=$Addr" 2>&1 | ForEach-Object { "$_" })
+                if ($LASTEXITCODE -ne 0) { return "rc=$LASTEXITCODE $($out -join ' ')" }
+                [bool](@($out | Where-Object { $_ -match '^(?i)denyusers \*$' }).Count -eq 1)
+            }
+            Test-Case 'sshd -T -C: tailnet (/10 の端と中・/48 の中) と localhost から来たら DenyUsers は付かない' 'False False False False False False False' {
+                foreach ($a in @('100.64.0.0', '100.100.1.1', '100.127.255.255', 'fd7a:115c:a1e0::1234', 'fd7a:115c:a1e0:ab12:4843:cd96:6258:b240', '127.0.0.1', '::1')) {
+                    & $denied $a
+                }
+            }
+            Test-Case 'sshd -T -C: tailnet と localhost の外 (/10 のすぐ外・100/8 の外側・LAN・ほかの IPv6) から来たら DenyUsers *' 'True True True True True True True' {
+                foreach ($a in @('100.63.255.255', '100.128.0.0', '100.200.1.1', '192.168.1.10', '127.0.0.2', 'fd7a:115c:a1e1::1', '2001:db8::1')) {
+                    & $denied $a
+                }
+            }
+            Test-Case 'sshd -T -C: AllowUsers はどこから来てもユーザーだけ' 'allowusers alice' {
+                @(& $sshd.Source -T -f $cfg -h $hostKey -C 'user=alice,host=100.100.1.1,addr=100.100.1.1' 2>&1 | ForEach-Object { "$_" } | Where-Object { $_ -match '^(?i)allowusers ' }) | ForEach-Object { $_.ToLowerInvariant() }
+            }
+        } else {
+            Write-Host 'skip sshd -T -C で Match Address を照らす確かめ (PATH に ssh-keygen が無い)'
         }
     } finally {
         Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue

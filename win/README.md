@@ -3703,12 +3703,20 @@ sshd_config の中身 (`Install-Sshd.ps1` の `Get-SshdConfigText`):
 | 設定 | わけ |
 | --- | --- |
 | `PubkeyAuthentication yes`・`PasswordAuthentication no`・`KbdInteractiveAuthentication no`・`AuthenticationMethods publickey` | 鍵だけで入れる |
-| `AllowUsers <ユーザー>@100.64.0.0/10 <ユーザー>@fd7a:115c:a1e0::/48 <ユーザー>@127.0.0.1 <ユーザー>@::1` | 入れるのはスクリプトを流したユーザー (小文字。`-AllowUser` で変えられる) だけで、tailnet と localhost から来たときだけ。末尾の `Match` より前に書く (後ろに書くと Match の中に入る) |
-| `ListenAddress` は書かない | Tailscale の IP に縛ると、起動のときに Tailscale の IP がまだ無いと sshd が落ちる。入れる元は AllowUsers と拒否の規則で絞る |
+| `AllowUsers <ユーザー>` | 入れるのはスクリプトを流したユーザー (小文字。`-AllowUser` で変えられる) だけ。接続元はここに書かず、下の `Match Address` で絞る (下の注)。最初の `Match` より前に書く (後ろに書くと Match の中に入る) |
+| `Match Address *,!100.64.0.0/10,!fd7a:115c:a1e0::/48,!127.0.0.1,!::1` の `DenyUsers *` | tailnet と localhost の外から来たら、誰も入れない。sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る。`Match Group administrators` より前に置く |
+| `ListenAddress` は書かない | Tailscale の IP に縛ると、起動のときに Tailscale の IP がまだ無いと sshd が落ちる。入れる元は Match Address の DenyUsers と拒否の規則で絞る |
 | `Match Group administrators` の `AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys` | Win32-OpenSSH の既定のまま (管理者の鍵は ProgramData から読む) |
 | `Subsystem sftp sftp-server.exe` | 既定のまま (`hc machine add` が hc を入れるときの scp が使う) |
 
 sshd が読むファイル (sshd_config・administrators_authorized_keys) のコメントは ASCII にする (sshd は設定を byte のまま読む。BOM も付けない)。
+
+AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_config を読んだ後、`AllowUsers`・`DenyUsers`・`AllowGroups`・`DenyGroups` の語ごとに、
+最初の `/` を `\` に替える (`domain/user` を `domain\user` と読むため。`PowerShell/openssh-portable` の `servconf.c` の `parse_server_config` の
+`WINDOWS` の分岐)。`<ユーザー>@100.64.0.0/10` は `<ユーザー>@100.64.0.0\10` になって CIDR として読めず、文字のパターンとしても当たらないので、tailnet
+からのログインを全部断る (Windows の `sshd -T` に `\10`・`\48` で出る。OpenSSH の Operational のログには `not allowed because not listed in AllowUsers`。
+`/` の無い `127.0.0.1`・`::1` は当たる)。Linux の sshd は CIDR をそのまま読むので、Linux の `sshd -G` では見つからない。`Match Address` の CIDR は
+この読み替えを通らないので、接続元はそこで絞る。鍵の行の `from="…"` も読み替えを通らない (sshd が鍵の行から直に読む)
 
 拒否の規則 (どれも受信・拒否・すべてのプロファイル。block は allow より強いので、Tailscale が入れる許可 `Tailscale-In` (Tailscale の IP 宛てを
 全ポートで許す) や、MSI が有効に戻す 22 番の許可があっても効く):
@@ -3780,7 +3788,7 @@ PR に残る。
 
 - 配った `Install-Sshd.ps1` と鍵の写しは、利用者が書けるファイル。同じユーザーの権限で動く悪いコードは、UAC の確認より前にそれらを書き換えられる
   (repo のほかの `Install-*.ps1` と同じ形。UAC は守りの境ではない)。揃える前の ※ の行 (写しの鍵の全部) に、覚えのない鍵が無いかを見る
-- 送り元のアドレスで絞っているので、100.64.0.0/10 を使う LAN (ISP の CGNAT の内側など) からは、拒否の規則と AllowUsers を通る。残る壁は鍵と `from=`
+- 送り元のアドレスで絞っているので、100.64.0.0/10 を使う LAN (ISP の CGNAT の内側など) からは、拒否の規則と Match Address を通る。残る壁は鍵と `from=`
 
 ### Herdr のアプリと hc からつなぐ
 
@@ -3809,8 +3817,10 @@ PR に残る。
   外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・22 番を許す受信の規則の選び方・例外を 1 行にする形・鍵のファイルの権限・
   winget download と msiexec の引数・判定と状態の表) と、
   BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
-  Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、AllowUsers の CIDR の書き方の誤り (sshd が起動しなくなる) を
-  ここで見つける (CI は `nixpkgs#openssh` を足して流す):
+  Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、Match Address の CIDR の書き方の誤り (sshd が起動しなくなる) を
+  ここで見つけ、使い捨ての host 鍵で `sshd -T -C` を流して、どこから来たときに `DenyUsers *` が付くかを見る (Match Address の照らし方は Windows の
+  sshd も同じ)。Win32-OpenSSH が AllowUsers の `/` を `\` に替えることは Linux の sshd で再現しないので、AllowUsers などの語に `/` が無いことを別に
+  見る (CI は `nixpkgs#openssh` を足して流す):
 
   ```sh
   nix shell nixpkgs#powershell nixpkgs#openssh -c pwsh -NoProfile -File win/openssh/Install-Sshd.Tests.ps1

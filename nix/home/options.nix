@@ -1062,7 +1062,7 @@ in
         switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsSshd` に落ち (home/modules/group.nix)、
         `~/dotfiles/setup --update` は false なら bootstrap-windows-sshd.sh を飛ばす (script の冒頭の `# tool: windowsSshd`)。true の
         マシンでは、配った `Install-Sshd.ps1` (win/openssh/) が、dotfiles が winget で固定した OpenSSH (`Install-OpenSSH.ps1` が入れる
-        `C:\Program Files\OpenSSH`) に server を足して入れ、sshd の設定 (鍵だけ・AllowUsers で tailnet と localhost に限る)・Windows Firewall の
+        `C:\Program Files\OpenSSH`) に server を足して入れ、sshd の設定 (鍵だけ・AllowUsers と Match Address で tailnet と localhost に限る)・Windows Firewall の
         拒否の規則・自動起動を揃える (入っていないときだけ setup が入れる。UAC の確認が出る。ずれていれば ⚠ で知らせ、揃えはしない)。
         Windows の機能 (System32) の OpenSSH Server とは二重にしない (win/README.md の「sshd」)。
 
