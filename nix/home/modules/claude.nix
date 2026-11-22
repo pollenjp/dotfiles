@@ -163,10 +163,13 @@ let
   # 合わない名前を足したときはコマンドだけできて永遠に「未準備」になる前に、ここで止める。
   accounts =
     let
+      # t3 は T3 Code の Claude が使うアカウント (~/.claude-t3。T3 の settings.json の homePath)。T3 Code を入れるホストだけ
+      # (dotfiles.t3Code.enable。home/modules/t3-code.nix)
       names = [
         "personal"
         "work"
-      ];
+      ]
+      ++ lib.optional config.dotfiles.t3Code.enable "t3";
       # account・selector は管理のコマンド (claude-account) と claude-selector の名前なので使わない
       valid =
         n:

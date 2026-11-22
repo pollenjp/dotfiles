@@ -32,6 +32,7 @@
     ./modules/cursor-agent.nix
     ./modules/ntn.nix
     ./modules/herdr-core.nix
+    ./modules/t3-code.nix
   ];
 
   # 初回導入時の home-manager リリースに固定する。
