@@ -27,15 +27,17 @@
 #   - BOM の付いたファイルを見分け、一時ファイルから差し替える (元を退避し、無ければそのまま置く)
 #   - 鍵のファイルの権限は、継承を切り、管理者と SYSTEM だけに FullControl を許す形だけを通す
 #   - Server を足すときの winget download と msiexec の引数 (同じ版を取り直し、ADDLOCAL=Client,Server。--include-pinned は付けない)
+#   - 保守の install に渡す MSI の名前: GUID をレジストリの詰めた形にし、登録された PackageName (ディレクトリの中に置ける名前だけ) に
+#     写して渡す (名前が同じなら写さない)。ProductCode が読めない・製品が入っていない・PackageName が読めない・PackageCode が違うときは止まる
 #   - MSI を落とすディレクトリの権限 (AdminDirSddl) は、継承を切り、管理者と SYSTEM だけに FullControl で、中のファイルにも継ぐ
 #     (Linux の .NET は SDDL を読めないので、使う形だけを読む読み手で Test-AdminOnlyAcl に通す)
 #   - Install-Sshd.ps1 が読む $script: の変数は、どれも script のどこかで代入されている (構文木で見る。本体は StrictMode で流すので、
 #     代入の無い変数を読むとそこで止まる)
 #   - 管理者の段 (Invoke-SshdFix) を、Windows に触る cmdlet と関数を偽物に替えて StrictMode のまま流す。拒否の規則・sshd_config・空の鍵は
 #     揃い sshd.exe とサービスが無い形 (MSI を落とす前に止まった後) から: 規則・設定・鍵には触らず、毎回新しい名前の管理者と SYSTEM だけの
-#     ディレクトリに MSI を落として msiexec の後に消し、22 番の許可を無効にし、ssh-agent を止めて無効にし、sshd を自動で起こす。揃えた後の
+#     ディレクトリに MSI を落とし、登録された PackageName に写して msiexec に渡して後で消し、22 番の許可を無効にし、ssh-agent を止めて無効にし、sshd を自動で起こす。揃えた後の
 #     判定は 0。msiexec が落ちたらサービスに触らず止まり、ディレクトリは消す。権限を替えるまでに何か置かれたら MSI を落とさずに止まり、
-#     ディレクトリは消さない。在るディレクトリには作らない
+#     ディレクトリは消さない。PackageName が読めない・製品が入っていないときは msiexec を流さずに止まる。在るディレクトリには作らない
 #   - 判定: 揃っていれば 0、server が無ければ 3、ずれていれば 1。OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けない
 #     ユーザー名・鍵の写しの読めない行・拒否の規則が効かないプロファイル・サービスの無い sshd.exe は、揃えずに 1 で止まり、締めの行で
 #     先に直すことを出す。BOM の付いた sshd_config・鍵はずれ。鍵のファイルを読めるときは足す鍵と消す鍵を、読めないとき (管理者でない) は
@@ -508,6 +510,64 @@ Test-Case 'msiexec の 0 と 3010 は足せた、1618 は別のインストー�
     (Get-MsiexecResultText -ExitCode 1618).Contains('別のインストール')
 }
 
+# ConvertTo-PackedGuid・Test-MsiPackageName・Get-MsiSourcePlan: 保守の install に渡す MSI の名前
+Test-Case 'GUID を Windows Installer のレジストリの詰めた形にする ({} の有無・大文字小文字によらない)' '68AB67CA7DA73301B7449A0000000010 76543210BA98FEDC1032547698BADCFE 76543210BA98FEDC1032547698BADCFE' {
+    ConvertTo-PackedGuid -Guid '{AC76BA86-7AD7-1033-7B44-A90000000001}'
+    ConvertTo-PackedGuid -Guid '{01234567-89AB-CDEF-0123-456789ABCDEF}'
+    ConvertTo-PackedGuid -Guid '01234567-89ab-cdef-0123-456789abcdef'
+}
+Test-Case 'GUID として読めなければ $null' 'True True' {
+    $null -eq (ConvertTo-PackedGuid -Guid '')
+    $null -eq (ConvertTo-PackedGuid -Guid '{C3DFF1A5-DB4C-4B49-9FC7}')
+}
+Test-Case 'MSI の名前はディレクトリの中に置ける名前だけ (区切り・ドライブ・.msi で終わらない名前は断る)' 'True True False False False False False' {
+    Test-MsiPackageName -Name 'OpenSSH-Win64-v10.4.0.0.msi'
+    Test-MsiPackageName -Name 'OpenSSH Preview_10.4.0.0_Machine_X64_msi_en-US.msi'
+    Test-MsiPackageName -Name '..\x.msi'
+    Test-MsiPackageName -Name 'C:x.msi'
+    Test-MsiPackageName -Name 'a/b.msi'
+    Test-MsiPackageName -Name 'x.exe'
+    Test-MsiPackageName -Name ''
+}
+$pc = '{C3DFF1A5-DB4C-4B49-9FC7-346BAA182D99}'
+$pkg = '{01234567-89AB-CDEF-0123-456789ABCDEF}'
+$pkgPacked = '76543210BA98FEDC1032547698BADCFE'
+function New-MsiFacts {
+    param([string]$Name = 'OpenSSH Preview_10.4.0.0_Machine_X64_msi_en-US.msi', $ProductCode = $pc, $PackageCode = $pkg)
+    [pscustomobject]@{ Name = $Name; ProductCode = $ProductCode; PackageCode = $PackageCode }
+}
+function New-InstalledFacts {
+    param([bool]$Exists = $true, $PackageName = 'OpenSSH-Win64-v10.4.0.0.msi', $PackageCode = $pkgPacked)
+    [pscustomobject]@{ Exists = $Exists; PackageName = $PackageName; PackageCode = $PackageCode }
+}
+function Format-Plan { param($Plan) "$($Plan.Name)|$($Plan.Copy)|$($Plan.Error)" }
+Test-Case 'winget download が別の名前で保存した MSI は、登録された PackageName に写して渡す' 'OpenSSH-Win64-v10.4.0.0.msi|True|' {
+    Format-Plan (Get-MsiSourcePlan -Msi (New-MsiFacts) -Installed (New-InstalledFacts))
+}
+Test-Case '名前が同じ (大文字小文字だけ違う) なら写さない' 'OpenSSH-Win64-v10.4.0.0.msi|False| OpenSSH-Win64-v10.4.0.0.msi|False|' {
+    Format-Plan (Get-MsiSourcePlan -Msi (New-MsiFacts -Name 'OpenSSH-Win64-v10.4.0.0.msi') -Installed (New-InstalledFacts))
+    Format-Plan (Get-MsiSourcePlan -Msi (New-MsiFacts -Name 'openssh-win64-v10.4.0.0.MSI') -Installed (New-InstalledFacts))
+}
+Test-Case '入れたときの PackageCode が登録に無ければ、PackageCode は照らさない' 'OpenSSH-Win64-v10.4.0.0.msi|True|' {
+    Format-Plan (Get-MsiSourcePlan -Msi (New-MsiFacts -PackageCode $null) -Installed (New-InstalledFacts -PackageCode $null))
+}
+Test-Case 'ProductCode が読めない・製品が入っていない・PackageName が読めない・PackageCode が違うときは止まる' @(
+    '||落とした MSI の ProductCode が読めない'
+    "||落とした MSI の製品 ($pc) がこの PC に入っていない (入っている OpenSSH と製品が違う)"
+    "||入っている製品 ($pc) の、登録された MSI の名前 (SourceList の PackageName) が読めない ()"
+    "||入っている製品 ($pc) の、登録された MSI の名前 (SourceList の PackageName) が読めない (..\OpenSSH.msi)"
+    "||落とした MSI のパッケージ (PackageCode {11111111-89AB-CDEF-0123-456789ABCDEF}) が、入れたときのものと違う (同じ版を作り直した MSI は、保守の install の原本にならない)"
+    "||落とした MSI のパッケージ (PackageCode ) が、入れたときのものと違う (同じ版を作り直した MSI は、保守の install の原本にならない)"
+) {
+    $bad = { param($p) (Format-Plan $p) -replace '\|False\|', '||' }
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts -ProductCode $null) -Installed (New-InstalledFacts))
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts) -Installed (New-InstalledFacts -Exists $false))
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts) -Installed (New-InstalledFacts -PackageName $null))
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts) -Installed (New-InstalledFacts -PackageName '..\OpenSSH.msi'))
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts -PackageCode '{11111111-89AB-CDEF-0123-456789ABCDEF}') -Installed (New-InstalledFacts))
+    & $bad (Get-MsiSourcePlan -Msi (New-MsiFacts -PackageCode $null) -Installed (New-InstalledFacts))
+}
+
 # Read-TextFile・Write-TextReplacing: BOM を見分ける・一時ファイルから差し替える (一時のディレクトリで流す)
 $ftmp = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-files-$PID"
 $null = New-Item -ItemType Directory -Force -Path $ftmp
@@ -761,7 +821,7 @@ Test-Case 'sshd.exe はあるがサービスが無ければ 1 で止まり、Ser
 # (PowerShell は呼んだ側のスコープから名前を引くので、Invoke-SshdFix の中の呼び出しにも効き、外には残らない)
 $fixRoot = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-fix-$PID"
 function Invoke-FixScenario {
-    param([int]$MsiExit = 0, [switch]$Plant)
+    param([int]$MsiExit = 0, [switch]$Plant, $Installed = (New-InstalledFacts))
     Remove-Item -LiteralPath $fixRoot -Recurse -Force -ErrorAction SilentlyContinue
     $pd = Join-Path $fixRoot 'ProgramData'
     $sshDir = Join-Path $pd 'ssh'
@@ -821,12 +881,23 @@ function Invoke-FixScenario {
         param([string[]]$Arguments)
         $dir = $Arguments[$Arguments.IndexOf('--download-directory') + 1]
         $world.Calls.Add("winget の時の落とす先の権限: $($world.Acls[$dir])")
-        [IO.File]::WriteAllText((Join-Path $dir 'OpenSSH-Win64-v10.4.0.0.msi'), '')
+        # winget download は、入れたときの名前 (PackageName) とは違う名前で保存する
+        [IO.File]::WriteAllText((Join-Path $dir 'OpenSSH Preview_10.4.0.0_Machine_X64_msi_en-US.msi'), 'msi')
         [pscustomobject]@{ ExitCode = 0; Lines = @('Installer downloaded') }
+    }
+    function Read-MsiPackageFacts {
+        param([string]$Path)
+        $world.Calls.Add("MSI を読んだ: $(Split-Path -Leaf $Path)")
+        [pscustomobject]@{ ProductCode = $pc; PackageCode = $pkg }
+    }
+    function Read-InstalledMsiProduct {
+        param([string]$ProductCode)
+        $world.Calls.Add("登録を読んだ: $ProductCode")
+        $Installed
     }
     function Start-Process {
         param([string]$FilePath, [string[]]$ArgumentList, [switch]$Wait, [switch]$PassThru)
-        $world.Calls.Add("$FilePath の時に MSI がある: $(Test-Path -LiteralPath $ArgumentList[1].Trim('"'))")
+        $world.Calls.Add("$FilePath の時に MSI がある: $(Split-Path -Leaf $ArgumentList[1].Trim('"')) $(Test-Path -LiteralPath $ArgumentList[1].Trim('"'))")
         if ($MsiExit -eq 0) {
             # MSI が Server を足すと、sshd.exe とサービス (手動・止まっている) と 22 番の許可ができ、ssh-agent は動いたまま
             [IO.File]::WriteAllText((Join-Path $install 'sshd.exe'), '')
@@ -878,6 +949,7 @@ try {
         'True'
         "winget download --id Microsoft.OpenSSH.Preview --exact --source winget --version 10.4.0.0 --download-directory $msiDir --accept-source-agreements --accept-package-agreements --disable-interactivity"
         '  Installer downloaded'
+        'MSI を、入っている製品の登録された名前 (OpenSSH-Win64-v10.4.0.0.msi) に写した (保守の install は、この名前で原本を探す)'
         "msiexec /i `"$msiDir/OpenSSH-Win64-v10.4.0.0.msi`" ADDLOCAL=Client,Server /qn /norestart /l*v `"<tmp>/state/msiexec-add-server.log`""
         'MSI に Server の機能を足した (10.4.0.0)'
         '22 番の受信の許可を無効にした: OpenSSH SSH Server Preview (sshd)'
@@ -886,9 +958,11 @@ try {
         'sshd を自動で起こすようにした'
         'sshd を起こした'
     ) { $run.Result; $run.Steps }
-    Test-Case 'MSI は毎回新しい名前の、管理者と SYSTEM だけのディレクトリに落とし、msiexec の後に消す (起こし直しはしない)' @(
+    Test-Case 'MSI は毎回新しい名前の、管理者と SYSTEM だけのディレクトリに落とし、登録された名前に写して msiexec に渡し、後で消す (起こし直しはしない)' @(
         "winget の時の落とす先の権限: $script:AdminDirSddl"
-        'msiexec.exe の時に MSI がある: True'
+        'MSI を読んだ: OpenSSH Preview_10.4.0.0_Machine_X64_msi_en-US.msi'
+        "登録を読んだ: $pc"
+        'msiexec.exe の時に MSI がある: OpenSSH-Win64-v10.4.0.0.msi True'
     ) { $run.Calls; $run.Left }
     Test-Case '揃えた後: sshd は動いて自動、ssh-agent は止まって無効、22 番の許可は無効、記録は sshd_config だけ、空の鍵はそのまま' @(
         'Running Automatic Stopped Disabled False True True'
@@ -913,6 +987,18 @@ try {
         'msiexec が失敗した (終了コード 1603。ログ: <tmp>/state/msiexec-add-server.log)'
         '|'
     ) { $failed.Result; @($failed.Steps | Select-Object -Last 1); '|'; $failed.Left }
+
+    $noName = Invoke-FixScenario -Installed (New-InstalledFacts -PackageName $null)
+    Test-Case '登録された PackageName が読めなければ、msiexec を流さずに $false で止まり (サービスに触らない)、ディレクトリは消す' @(
+        'False'
+        "入っている製品 ($pc) の、登録された MSI の名前 (SourceList の PackageName) が読めない ()。msiexec を流さない"
+        '|'
+    ) { $noName.Result; @($noName.Steps | Select-Object -Last 1); '|'; $noName.Left; @($noName.Calls | Where-Object { $_.StartsWith('msiexec') }) }
+    $otherProduct = Invoke-FixScenario -Installed (New-InstalledFacts -Exists $false)
+    Test-Case '落とした MSI の製品が入っていなければ、msiexec を流さずに $false で止まる' @(
+        'False'
+        "落とした MSI の製品 ($pc) がこの PC に入っていない (入っている OpenSSH と製品が違う)。msiexec を流さない"
+    ) { $otherProduct.Result; @($otherProduct.Steps | Select-Object -Last 1); @($otherProduct.Calls | Where-Object { $_.StartsWith('msiexec') }) }
 
     $planted = Invoke-FixScenario -Plant
     Test-Case '権限を替えるまでの間にディレクトリへ何か置かれたら、MSI を落とさずに $false で止まり、消さずに残す (ジャンクションをたどらない)' @(

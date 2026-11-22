@@ -13,8 +13,10 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
 
 1. server: Install-OpenSSH.ps1 が winget (Microsoft.OpenSSH.Preview) で入れた MSI に、Server の機能を足す。入っている版と同じ
    版の MSI を winget download で取り直し (winget が manifest の sha256 と照らす)、msiexec /i <MSI> ADDLOCAL=Client,Server で流す
-   (同じ ProductCode なので保守の install になり、Server が足される)。Windows Installer の手元の写しは cab が抜かれているので、
-   ProductCode だけでは足せない。winget の install と pin には触らない。Windows の機能 (System32) の OpenSSH Server とは二重にしない
+   (同じ ProductCode なので保守の install になり、Server が足される)。保守の install は、入れたときに登録した MSI の名前
+   (SourceList の PackageName) で原本を探すので、取り直した MSI をその名前に写してから渡す (製品や PackageCode が違えば流さずに
+   止まる)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。winget の install と pin には
+   触らない。Windows の機能 (System32) の OpenSSH Server とは二重にしない
 2. C:\ProgramData\ssh\sshd_config: dotfiles が書く中身 (Get-SshdConfigText。鍵だけ・AllowUsers で tailnet と localhost に限る) に
    する。違えば sshd_config.dotfiles-bak-<日時> に退避して書き直す。MSI は Server を足した時点で sshd を起こし、sshd は
    sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく (ディレクトリが無ければ、sshd が作るのと
@@ -456,6 +458,50 @@ function Get-WingetDownloadArgs {
 function Get-MsiAddServerArgs {
     param([string]$Msi, [string]$Log)
     @('/i', ('"{0}"' -f $Msi), 'ADDLOCAL=Client,Server', '/qn', '/norestart', '/l*v', ('"{0}"' -f $Log))
+}
+
+# Windows Installer がレジストリ (HKLM:\SOFTWARE\Classes\Installer\Products\<これ> など) で使う、詰めた GUID の形 (大文字の 32 字)。
+# {} と - を除き、頭の 3 つの組は字を逆に並べ、残りの 8 byte は byte ごとに 2 字を入れ替える。GUID として読めなければ $null
+function ConvertTo-PackedGuid {
+    param([string]$Guid)
+    if (-not ("$Guid" -match '^\{?([0-9A-Fa-f]{8})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{12})\}?$')) { return $null }
+    $groups = @($Matches[1], $Matches[2], $Matches[3])
+    $tail = $Matches[4] + $Matches[5]
+    $head = -join @($groups | ForEach-Object { -join ($_.ToCharArray()[($_.Length - 1)..0]) })
+    $swapped = -join @(0..7 | ForEach-Object { $tail[2 * $_ + 1]; $tail[2 * $_] })
+    ($head + $swapped).ToUpperInvariant()
+}
+
+# MSI の名前として、そのままディレクトリの中に置けるか (区切りやドライブを含まず、.msi で終わる)。登録された PackageName をパスに使う前に確かめる
+function Test-MsiPackageName {
+    param([string]$Name)
+    ("$Name" -match '^[^\\/:*?"<>|\x00-\x1f]+\.msi$') -and ("$Name" -notmatch '^\.')
+}
+
+# 取り直した MSI を、msiexec の保守の install に渡す形を決める。入っている製品に保守の install を流すと、Windows Installer は SOURCEDIR
+# (渡した MSI のあるディレクトリ) の下で、入れたときに登録した名前 (SourceList の PackageName) のファイルを原本として探す (無いと
+# 2203・1316 で SecureRepair が落ち、1603 になる)。winget download は別の名前で保存するので、その名前に写してから渡す。
+# $Msi は落とした MSI (Name・ProductCode・PackageCode。PackageCode は要約情報の {GUID})、$Installed は入っている製品の登録 (Exists・
+# PackageName・PackageCode。PackageCode は詰めた形)。返すのは Name (msiexec に渡す MSI の名前)・Copy (その名前に写すか)・Error (止まる理由)。
+# PackageCode が違う MSI (同じ版でも作り直されたもの) は、保守の install の原本にならない (SecureRepair も入れたときの原本の hash と照らす)
+function Get-MsiSourcePlan {
+    param($Msi, $Installed)
+    $fail = { param($why) [pscustomobject]@{ Name = $null; Copy = $false; Error = $why } }
+    if (-not $Msi.ProductCode) { return (& $fail '落とした MSI の ProductCode が読めない') }
+    if (-not $Installed.Exists) {
+        return (& $fail "落とした MSI の製品 ($($Msi.ProductCode)) がこの PC に入っていない (入っている OpenSSH と製品が違う)")
+    }
+    $name = "$($Installed.PackageName)"
+    if (-not (Test-MsiPackageName -Name $name)) {
+        return (& $fail "入っている製品 ($($Msi.ProductCode)) の、登録された MSI の名前 (SourceList の PackageName) が読めない ($name)")
+    }
+    if ($Installed.PackageCode) {
+        $want = ConvertTo-PackedGuid -Guid $Msi.PackageCode
+        if ($want -ne "$($Installed.PackageCode)".ToUpperInvariant()) {
+            return (& $fail "落とした MSI のパッケージ (PackageCode $($Msi.PackageCode)) が、入れたときのものと違う (同じ版を作り直した MSI は、保守の install の原本にならない)")
+        }
+    }
+    [pscustomobject]@{ Name = $name; Copy = ("$($Msi.Name)" -ne $name); Error = $null }
 }
 
 # msiexec の終了コードの読み方。0 と 3010 (再起動が要る) は足せた。1618 は別のインストールが進んでいる
@@ -1005,6 +1051,52 @@ function New-AdminOnlyDir {
     $false
 }
 
+# MSI の Property 表の ProductCode と、要約情報の PackageCode (Revision Number) を読む (WindowsInstaller.Installer の COM。型の情報が
+# 無いので InvokeMember で呼ぶ)。行が無ければ ProductCode は $null。読み終えたら COM を放す (MSI を開いたまま msiexec に渡さない)
+function Read-MsiPackageFacts {
+    param([string]$Path)
+    $invoke = { param($o, [string]$name, [System.Reflection.BindingFlags]$kind, [object[]]$a) $o.GetType().InvokeMember($name, $kind, $null, $o, $a) }
+    $installer = New-Object -ComObject WindowsInstaller.Installer
+    $db = $null
+    $view = $null
+    $record = $null
+    $summary = $null
+    try {
+        $db = & $invoke $installer 'OpenDatabase' 'InvokeMethod' @($Path, 0)
+        $view = & $invoke $db 'OpenView' 'InvokeMethod' @("SELECT ``Value`` FROM ``Property`` WHERE ``Property`` = 'ProductCode'")
+        $null = & $invoke $view 'Execute' 'InvokeMethod' @()
+        $record = & $invoke $view 'Fetch' 'InvokeMethod' @()
+        $productCode = $null
+        if ($null -ne $record) { $productCode = "$(& $invoke $record 'StringData' 'GetProperty' @(1))" }
+        $null = & $invoke $view 'Close' 'InvokeMethod' @()
+        $summary = & $invoke $db 'SummaryInformation' 'GetProperty' @(0)
+        $packageCode = "$(& $invoke $summary 'Property' 'GetProperty' @(9))"
+        [pscustomobject]@{ ProductCode = $productCode; PackageCode = $packageCode }
+    } finally {
+        foreach ($o in @($summary, $record, $view, $db, $installer)) {
+            if ($null -ne $o) { [void][System.Runtime.InteropServices.Marshal]::ReleaseComObject($o) }
+        }
+    }
+}
+
+# マシンに入れた製品の登録 (HKLM:\SOFTWARE\Classes\Installer\Products\<詰めた ProductCode>)。PackageCode は詰めた形のまま、
+# PackageName (入れたときの MSI の名前) は SourceList の値。製品が無ければ Exists が偽
+function Read-InstalledMsiProduct {
+    param([string]$ProductCode)
+    $none = [pscustomobject]@{ Exists = $false; PackageName = $null; PackageCode = $null }
+    $packed = ConvertTo-PackedGuid -Guid $ProductCode
+    if (-not $packed) { return $none }
+    $key = "HKLM:\SOFTWARE\Classes\Installer\Products\$packed"
+    if (-not (Test-Path -LiteralPath $key)) { return $none }
+    $product = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+    $source = Get-ItemProperty -LiteralPath "$key\SourceList" -ErrorAction SilentlyContinue
+    $packageName = $null
+    if ($source -and $source.PSObject.Properties['PackageName']) { $packageName = "$($source.PackageName)" }
+    $packageCode = $null
+    if ($product -and $product.PSObject.Properties['PackageCode']) { $packageCode = "$($product.PackageCode)" }
+    [pscustomobject]@{ Exists = $true; PackageName = $packageName; PackageCode = $packageCode }
+}
+
 # Install-OpenSSH が入れた MSI に Server の機能を足す。入っている版と同じ版の MSI を winget download で取り直し、msiexec で
 # ADDLOCAL=Client,Server を流す (保守の install)。MSI は sshd のサービスを自動で作って起こし、22 番の受信の許可を作る。成功なら $true
 function Invoke-MsiAddServer {
@@ -1033,8 +1125,28 @@ function Invoke-MsiAddServer {
             Write-Step ('winget download で {0} の MSI を取れなかった (終了コード 0x{1:X8}・MSI {2} 個)。winget に入っている版が無いなら、先に Install-OpenSSH で固定した版に揃える' -f $version, $download.ExitCode, $msi.Count)
             return $false
         }
+        # 保守の install の原本にするため、入っている製品の登録された名前 (PackageName) に写す (Get-MsiSourcePlan)
+        try {
+            $msiFacts = Read-MsiPackageFacts -Path $msi[0].FullName
+        } catch {
+            Write-Step "落とした MSI を読めなかった ($(Get-ErrorSummary -ErrorRecord $_ -Fallback 'WindowsInstaller.Installer'))"
+            $msiFacts = [pscustomobject]@{ ProductCode = $null; PackageCode = $null }
+        }
+        $installed = Read-InstalledMsiProduct -ProductCode $msiFacts.ProductCode
+        $plan = Get-MsiSourcePlan -Installed $installed -Msi ([pscustomobject]@{
+                Name = $msi[0].Name; ProductCode = $msiFacts.ProductCode; PackageCode = $msiFacts.PackageCode
+            })
+        if ($plan.Error) {
+            Write-Step "$($plan.Error)。msiexec を流さない"
+            return $false
+        }
+        $source = Join-Path $dir $plan.Name
+        if ($plan.Copy) {
+            [IO.File]::Copy($msi[0].FullName, $source)
+            Write-Step "MSI を、入っている製品の登録された名前 ($($plan.Name)) に写した (保守の install は、この名前で原本を探す)"
+        }
         $log = Join-Path $StateDir 'msiexec-add-server.log'
-        $arguments = Get-MsiAddServerArgs -Msi $msi[0].FullName -Log $log
+        $arguments = Get-MsiAddServerArgs -Msi $source -Log $log
         Write-Step "msiexec $($arguments -join ' ')"
         $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $arguments -Wait -PassThru
         $exitCode = $process.ExitCode
