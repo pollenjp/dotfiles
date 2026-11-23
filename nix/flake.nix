@@ -69,10 +69,23 @@
       # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (ADR 030)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
 
-      # ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか。ADR 057)。mkHome が組み立てたホストに
-      # hostSummary として足す。ここの組は、dotfiles-private の nix/hosts/ に書くファイル (files。private-host.sh summaries) と
-      # nix/groups.md (groupsDoc) を作るのに使う
-      hostSummary = import ./lib/host-summary.nix { inherit lib; };
+      # ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか。ADR 057・093)。mkHome が組み立てたホストに
+      # hostSummary として足す。ここの組は、dotfiles-private の docs/hosts/ に書くファイル (files。private-host.sh summaries が
+      # hostSummaryFiles で呼ぶ) と nix/groups.md (groupsDoc) を作るのに使う
+      hostSummary = import ./lib/host-summary { inherit lib; };
+
+      # dotfiles-private の win/hosts/*.toml (Windows の runner が読むホストの値) を読む。名前 → TOML の中身 (lib/windows-hosts.nix)
+      windowsHosts = import ./lib/windows-hosts.nix { inherit lib; };
+
+      # dotfiles-private の docs/hosts/ に書くファイルの全部 (path の組)。privateNix は dotfiles-private の nix/ (privateHosts と同じ)、
+      # winHostsDir は dotfiles-private の win/hosts/ (無ければ空の dir)。private-host.sh summaries が nix eval --write-to で書き出す
+      hostSummaryFiles =
+        privateNix: winHostsDir:
+        hostSummary.files {
+          hosts = privateHosts privateNix;
+          winHosts = windowsHosts winHostsDir;
+          inherit windowsGroups;
+        };
 
       # nix/groups.md の中身。グループごとの素のホスト (グループだけを書いたもの) と、作り物のホスト (lib/group-examples.nix) の
       # 要約から作る。どの system でも同じ文になるので x86_64-linux で評価する。古いかは checks の groups-doc が見る
@@ -88,6 +101,7 @@
           examples = import ./lib/group-examples.nix { inherit mkHome; };
           example = name: title: {
             inherit title;
+            head = name;
             inherit (examples.${name}.hostSummary) data;
           };
         in
@@ -109,7 +123,9 @@
       # home/modules/group.nix) を集める。Windows の runner が、ホストの値 (dotfiles-private の win/hosts/*.toml) に書いていない道具の
       # 既定を引くのに使う (dotfiles-private の docs/adr/060_win_runner_core_*)。flake からは win/ が見えないので、古いかは CI の lint が見る。
       # 出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json`
-      windowsGroupsJson =
+      windowsGroupsJson = builtins.toJSON windowsGroups + "\n";
+      # その中身 (attrset)。ホストの要約の Windows のホストのページ (hostSummaryFiles) も、書いていない道具の既定をここから引く
+      windowsGroups =
         let
           plainGroupJson =
             group:
@@ -121,7 +137,7 @@
               }).config.home.file.".local/state/dotfiles/group.json".text;
           names = map (g: g.name) (import ./lib/groups.nix).groups;
         in
-        builtins.toJSON {
+        {
           version = 1;
           # ホストの値に group を書かなかったときのグループ (options.nix の dotfiles.group の既定)
           default = "personal";
@@ -134,8 +150,7 @@
               inherit (j) tiers tools;
             }
           );
-        }
-        + "\n";
+        };
     in
     {
       homeConfigurations = hostsWith [ ];
@@ -162,7 +177,10 @@
           hostsWith
           privateHosts
           hostSummary
+          windowsHosts
+          hostSummaryFiles
           groupsDoc
+          windowsGroups
           windowsGroupsJson
           ;
       };
@@ -267,7 +285,7 @@
               }
               ''
                 if ! diff -u ${./groups.md} "$wantPath"; then
-                  echo "nix/groups.md が古い (nix/lib/groups.nix・host-summary.nix・option の既定が変わった)。dotfiles の root で出し直す:" >&2
+                  echo "nix/groups.md が古い (nix/lib/groups.nix・host-summary/・option の既定が変わった)。dotfiles の root で出し直す:" >&2
                   echo "  nix eval --raw ./nix#lib.groupsDoc > nix/groups.md" >&2
                   exit 1
                 fi
@@ -327,6 +345,21 @@
                 touch $out
               '';
           footer-links-archive-gate-test = scriptTest "footer-links-archive-gate" ./files/claude/hooks/footer-links-archive.sh;
+          # ホストの要約の HTML 版の図を描く JS (lib/host-summary/page.js) の、並び・配置・囲みを node で確かめる (ADR 093)。作り物の
+          # ホスト (tests/fixtures/host-summary) から作ったページの組を JSON にして渡す。ブラウザの見た目は PR を出す前に撮って見る
+          host-summary-page-test =
+            pkgs.runCommand "host-summary-page-test"
+              {
+                nativeBuildInputs = [ pkgs.nodejs ];
+                passAsFile = [ "pages" ];
+                pages = builtins.toJSON (
+                  hostSummaryFiles ./tests/fixtures/host-summary ./tests/fixtures/host-summary/win-hosts
+                );
+              }
+              ''
+                node ${./tests/host-summary-page.test.mjs} ${./lib/host-summary/page.js} "$pagesPath"
+                touch $out
+              '';
           # status line (files/claude/statusline-command.sh) は 📄top の port を home の設定で埋めるので、home から作った
           # script (既定の port 7777) を渡す
           statusline-command-test = scriptTest "statusline-command" (
@@ -929,6 +962,8 @@
               system
               hostSummary
               privateHosts
+              windowsHosts
+              windowsGroups
               ;
           };
           groups-state = import ./tests/groups.nix {

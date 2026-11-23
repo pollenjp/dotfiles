@@ -51,12 +51,16 @@
 #     clone には書かない。inspect は clone の shared/ の module を出す
 #   - compare の --out が作業ツリーの nix/ やローカル flake の読む dotfiles-private の nix/ の中なら、作る前に 2
 #   - summary (偽の nix) は、既定で setup.sh --which-host のホストを、ローカル flake の写しで hostSummary.text として評価して出す
-#     (頭に「==> ホスト <名前> の要約」)。--markdown は hostSummary.file "<名前>" だけを出す。--host で選べる。ホストが決まらなければ 2、
-#     評価が落ちれば原因の行を出して 3。ユーザーの flake.nix と flake.lock は変えない
-#   - summaries (偽の nix・jq) は、作業ツリーの nix/hosts/ の全ホストの要約 (privateHosts だけの flake の summaryFiles。本体は --nix-dir) を
-#     <名前>.md と README.md に書き、ホストのファイルの無い <名前>.md を消す。同じなら書かない (2 回目は「書き換えたファイルは無い」)。
-#     --check は書かずに、違うファイルを出して 1 (同じなら 0)。ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す。
-#     jq が無ければ 2、評価が落ちれば 3。nix/hosts/ の外には書かない
+#     (頭に「==> ホスト <名前> の要約」)。--out <dir> は hostSummary.pages "<名前>" を nix eval --write-to で一時の場所に書き出してから
+#     <dir> に移し、書いたファイルを出す (<dir> が在れば nix を呼ばずに 2。評価が落ちれば <dir> を作らない)。--host で選べる。ホストが
+#     決まらなければ 2、評価が落ちれば原因の行を出して 3。ユーザーの flake.nix と flake.lock は変えない
+#   - summaries (偽の nix) は、作業ツリーの nix/hosts/*.nix と win/hosts/*.toml の全ホストの要約 (privateHosts と windowsHosts だけの
+#     flake の summaryFiles。本体は --nix-dir) を nix eval --write-to で書き出し、docs/hosts/ に書く (入口・nix/・win/ のページと
+#     html/)。作らなくなったファイル (ホストの無いページ) は消し、空になった dir も消す。同じなら書かない (2 回目は「書き換えたファイル
+#     は無い」)。md の 3 行目の「📝 [Notion で開く](…)」の行と空行は残して書き、その行の有る無しは違いに数えない。--check は書かずに、
+#     違うファイルを出して 1 (同じなら 0)。win/hosts/ が無くても Nix のホストだけで書き、nix/hosts/ も win/hosts/ も無ければ 2。
+#     評価が落ちれば 3 で何も書かない。docs/hosts/ (か docs/) かその中に symlink があれば 2 で何も書かない (外を辿らない)。jq は
+#     要らない。docs/hosts/ の外 (nix/hosts/ の前の要約など) には書かない
 
 set -u -o pipefail
 
@@ -91,7 +95,7 @@ ng() {
 # 要るコマンドだけを並べた PATH (nix・jq・ghq・scutil・hostname は入れない)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env awk sed grep sort head tail tr cat dirname basename readlink mktemp mkdir rm cp mv ls chmod cmp diff cksum ln date; do
+for c in env awk sed grep sort head tail tr cat dirname basename readlink mktemp mkdir rm cp mv ls chmod cmp diff cksum ln date find; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -439,11 +443,13 @@ fi
 #       tryEval (inspect)        F の「# FAKE_OUT: <h> <outPath>」ごとに「out<TAB><h><TAB><outPath>」(options.dotfiles を含む式は下)
 #       options.dotfiles         F (と shared/) の「# FAKE_DOTFILES: <パス> <値>」ごとに「<パス><TAB><値>」
 #       drvPath (compare)        F の「# FAKE_DRV: [<h>] <drvPath>」と「# FAKE_OUT: [<h>] <outPath>」を 2 行で
-#   nix eval --raw path:<d>#homeConfigurations."<h>".hostSummary --apply <式>   (summary) <d>/flake.nix に「# FAKE_EVAL_ERROR: <文>」が
-#                                      あれば落ちる。式が s.file なら「FILE <h>」、s.text なら「TEXT <h>」を出す
-#   nix eval --json path:<d>#summaryFiles   (summaries) <d>/flake.nix の dotfiles-private の入力の hosts/*.nix から、
-#                                      {"README.md": "README <名前>…\n", "<名前>.md": "SUMMARY <名前>\n", …} を出す。入力の
-#                                      hosts/ のどれかに「# FAKE_EVAL_ERROR: <文>」があれば落ちる
+#   nix eval [--write-to <dir>] path:<d>#homeConfigurations."<h>".hostSummary --apply <式>   (summary) <d>/flake.nix に
+#                                      「# FAKE_EVAL_ERROR: <文>」があれば落ちる。--write-to なら <dir>/nix/<h>.md と <dir>/nix/html/<h>.html
+#                                      に「PAGE <h>」「PAGEHTML <h>」を書く (<dir> が在れば落ちる)。ほかは「TEXT <h>」を出す
+#   nix eval --write-to <dir> path:<d>#summaryFiles   (summaries) <d>/flake.nix の dotfiles-private の入力の hosts/*.nix と win-hosts の
+#                                      入力の *.toml から、<dir> に README.md (「README <Nix の名前…> | <Windows の名前…>」)・html/hosts.html・
+#                                      nix/<名前>.md (h1・空行・跡の行・空行・「SUMMARY <名前>」の 5 行)・nix/html/<名前>.html・win/ の同じ組を
+#                                      書く。入力のホストのファイルのどれかに「# FAKE_EVAL_ERROR: <文>」があれば落ちる (<dir> が在っても落ちる)
 fake_nix_bin="${work}/fake-nix-bin"
 mkdir -p "${fake_nix_bin}"
 {
@@ -488,36 +494,67 @@ case $1 in
       cat "${PJP_NOTES}"
       exit 0
     fi
-    case $3 in
+    # --write-to <dir> と、path: で始まる installable
+    wt=""
+    inst=""
+    prev=""
+    for a in "$@"; do
+      [[ ${prev} != --write-to ]] || wt=$a
+      [[ -n ${inst} || ${a} != path:* ]] || inst=$a
+      prev=$a
+    done
+    if [[ -n ${wt} && -e ${wt} ]]; then
+      printf "error: path '%s' already exists\n" "${wt}" >&2
+      exit 1
+    fi
+    case ${inst} in
       *'#summaryFiles')
-        d=${3#path:}
+        d=${inst#path:}
         d=${d%%#*}
         p=$(sed -n 's|.*inputs\.dotfiles-private\.url = "path:\([^"]*\)".*|\1|p' "${d}/flake.nix")
-        e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${p}"/hosts/*.nix)
+        w=$(sed -n 's|.*inputs\.win-hosts\.url = "path:\([^"]*\)".*|\1|p' "${d}/flake.nix")
+        e=$(cat /dev/null "${p}"/hosts/*.nix "${w}"/*.toml 2>/dev/null | sed -n 's/^# FAKE_EVAL_ERROR: //p')
         [[ -z ${e} ]] || fail_with "${e}" >&2
         names=()
+        wnames=()
         for h in "${p}"/hosts/*.nix; do
           [[ -f ${h} ]] || continue
           h=${h##*/}
           names+=("${h%.nix}")
         done
-        printf '{"README.md":"README %s\\n"' "${names[*]}"
-        for h in "${names[@]}"; do
-          printf ',"%s.md":"SUMMARY %s\\n"' "${h}" "${h}"
+        for h in "${w}"/*.toml; do
+          [[ -f ${h} ]] || continue
+          h=${h##*/}
+          wnames+=("${h%.toml}")
         done
-        printf '}'
+        mkdir -p "${wt}/html"
+        printf 'README %s | %s\n' "${names[*]}" "${wnames[*]}" >"${wt}/README.md"
+        printf 'INDEX\n' >"${wt}/html/hosts.html"
+        for h in ${names[@]+"${names[@]}"}; do
+          mkdir -p "${wt}/nix/html"
+          printf '# `%s`\n\nHTML\n\nSUMMARY %s\n' "${h}" "${h}" >"${wt}/nix/${h}.md"
+          printf 'HTML %s\n' "${h}" >"${wt}/nix/html/${h}.html"
+        done
+        for h in ${wnames[@]+"${wnames[@]}"}; do
+          mkdir -p "${wt}/win/html"
+          printf '# `%s`\n\nHTML\n\nWIN %s\n' "${h}" "${h}" >"${wt}/win/${h}.md"
+          printf 'WINHTML %s\n' "${h}" >"${wt}/win/html/${h}.html"
+        done
         exit 0
         ;;
       *.hostSummary)
-        d=${3#path:}
+        d=${inst#path:}
         d=${d%%#*}
         e=$(sed -n 's/^# FAKE_EVAL_ERROR: //p' "${d}/flake.nix")
         [[ -z ${e} ]] || fail_with "${e}" >&2
-        h=$(sed -n 's/.*homeConfigurations\."\([^"]*\)"\.hostSummary$/\1/p' <<<"$3")
-        case $5 in
-          *s.file*) printf 'FILE %s\n' "${h}" ;;
-          *) printf 'TEXT %s\n' "${h}" ;;
-        esac
+        h=$(sed -n 's/.*homeConfigurations\."\([^"]*\)"\.hostSummary$/\1/p' <<<"${inst}")
+        if [[ -n ${wt} ]]; then
+          mkdir -p "${wt}/nix/html"
+          printf 'PAGE %s\n' "${h}" >"${wt}/nix/${h}.md"
+          printf 'PAGEHTML %s\n' "${h}" >"${wt}/nix/html/${h}.html"
+        else
+          printf 'TEXT %s\n' "${h}"
+        fi
         exit 0
         ;;
     esac
@@ -1030,13 +1067,31 @@ else
   ng "summary" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cat "${c}/nix-calls")"
 fi
 
-# 31. summary --host --markdown: hostSummary.file "<名前>" だけを出す
-run_nix "${c}" summary --flake "${c}/local" --host bob@other --markdown
-if [[ $(rc "${c}") == 0 && $(out "${c}") == 'FILE bob@other' ]] \
-  && grep -qF 'homeConfigurations."bob@other".hostSummary --apply s: s.file "bob@other"' "${c}/nix-calls"; then
-  ok "summary --host <名前> --markdown: hostSummary.file \"<名前>\" だけを出す"
+# 31. summary --host --out <dir>: hostSummary.pages "<名前>" を nix eval --write-to で <dir> に書き、書いたファイルを出す。<dir> が在れば
+#     nix を呼ばずに 2
+run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages"
+rc_out=$(rc "${c}")
+out_ok=0
+if [[ ${rc_out} == 0 && $(cat "${c}/pages/nix/bob@other.md") == 'PAGE bob@other' && $(cat "${c}/pages/nix/html/bob@other.html") == 'PAGEHTML bob@other' ]] \
+  && grep -qF -- "--write-to ${work}/" "${c}/nix-calls" && grep -qF 's: s.pages "bob@other"' "${c}/nix-calls" \
+  && grep -qxF '  nix/bob@other.md' "${c}/out" && grep -qxF '  nix/html/bob@other.html' "${c}/out"; then
+  out_ok=1
+fi
+run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages"
+rc_exists=$(rc "${c}")
+exists_ok=0
+if [[ ${rc_exists} == 2 ]] && grep -qF -- '--out は無い場所を渡してください' "${c}/err" && ! grep -qF 'eval' "${c}/nix-calls"; then
+  exists_ok=1
+fi
+cp -p "${c}/local/flake.nix" "${c}/flake.keep"
+printf '# FAKE_EVAL_ERROR: 書きかけのページ\n' >>"${c}/local/flake.nix"
+run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages2"
+rc_fail=$(rc "${c}")
+cp -p "${c}/flake.keep" "${c}/local/flake.nix"
+if ((out_ok && exists_ok)) && [[ ${rc_fail} == 3 && ! -e ${c}/pages2 ]]; then
+  ok "summary --host <名前> --out <dir>: そのホストのページ (md と HTML 版) を <dir>/nix/ に書き、在る <dir> には書かず (2)、評価が落ちれば <dir> を作らない (3)"
 else
-  ng "summary --markdown" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cat "${c}/nix-calls")"
+  ng "summary --out" "rc=${rc_out}/${rc_exists}/${rc_fail} $(out "${c}") $(err "${c}") $(cat "${c}/nix-calls")"
 fi
 
 # 32. summary: ホストが決まらなければ 2 (今の雛形の形で手で足したホストが無い)・評価が落ちれば 3
@@ -1053,88 +1108,136 @@ else
   ng "summary (断る・落ちる)" "nohost=${rc_nohost} rc=$(rc "${c}") $(err "${c}")"
 fi
 
-# summaries の作業ツリー: <ケース>/wt/nix/hosts/ に bob@other・carol@x と、ホストの無い old@gone.md・古い README.md
+# summaries の作業ツリー: <ケース>/wt/nix/hosts/ に bob@other・carol@x、wt/win/hosts/ に dave@x、前の要約の nix/hosts/README.md、
+# docs/hosts/ にホストの無い nix/old@gone.md (と html) と古い README.md
 summaries_case() {
   local c
   c=$(new_case "$1")
-  mkdir -p "${c}/wt/nix/hosts" "${c}/body/nix"
+  mkdir -p "${c}/wt/nix/hosts" "${c}/wt/win/hosts" "${c}/wt/docs/hosts/nix/html" "${c}/body/nix"
   printf '{ mkHome, ... }: mkHome { username = "bob"; }\n' >"${c}/wt/nix/hosts/bob@other.nix"
   printf '{ mkHome, ... }: mkHome { username = "carol"; }\n' >"${c}/wt/nix/hosts/carol@x.nix"
-  printf 'old\n' >"${c}/wt/nix/hosts/old@gone.md"
-  printf 'old readme\n' >"${c}/wt/nix/hosts/README.md"
+  printf 'group = "personal"\n' >"${c}/wt/win/hosts/dave@x.toml"
+  printf 'old summary\n' >"${c}/wt/nix/hosts/README.md"
+  printf 'old\n' >"${c}/wt/docs/hosts/nix/old@gone.md"
+  printf 'old\n' >"${c}/wt/docs/hosts/nix/html/old@gone.html"
+  printf 'old readme\n' >"${c}/wt/docs/hosts/README.md"
   printf 'keep\n' >"${c}/wt/README.md"
   echo "${c}"
 }
-jq_bin="${work}/jq-bin"
-mkdir -p "${jq_bin}"
-if p=$(command -v jq); then
-  ln -s "${p}" "${jq_bin}/jq"
-fi
 run_summaries() {
   local c=$1
   shift
   : >"${c}/nix-calls"
-  USER=alice PATH_EXTRA="${fake_nix_bin}:${jq_bin}" FAKE_NIX_LOG="${c}/nix-calls" run "${c}" summaries "$@"
+  USER=alice PATH_EXTRA="${fake_nix_bin}" FAKE_NIX_LOG="${c}/nix-calls" run "${c}" summaries "$@"
 }
+# docs/hosts/ の外のファイルの一覧と中身 (書いていないかを見る)
+outside() { (cd "$1/wt" && find . -path ./docs/hosts -prune -o -type f -print | LC_ALL=C sort | xargs cat); }
 
-# 33. summaries: 全ホストの <名前>.md と README.md を書き、ホストの無い .md を消す。nix/hosts/ の外は触らない
+# 33. summaries: docs/hosts/ に入口・Nix と Windows のページを書き、作らないファイルと空の dir を消す。docs/hosts/ の外は触らない
 c=$(summaries_case r33)
+outside "${c}" >"${c}/outside.before"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
-h="${c}/wt/nix/hosts"
-if [[ $(rc "${c}") == 0 && $(cat "${h}/bob@other.md") == 'SUMMARY bob@other' && $(cat "${h}/carol@x.md") == 'SUMMARY carol@x' ]] \
-  && [[ $(cat "${h}/README.md") == 'README bob@other carol@x' && ! -e ${h}/old@gone.md ]] \
-  && [[ $(cat "${c}/wt/README.md") == keep ]] && grep -qF '書いた: README.md' "${c}/out" && grep -qF '消した: old@gone.md' "${c}/out"; then
-  ok "summaries: 全ホストの <名前>.md と README.md を書き、ホストの無い .md を消す (nix/hosts/ の外は触らない)"
+h="${c}/wt/docs/hosts"
+if [[ $(rc "${c}") == 0 && $(tail -n 1 "${h}/nix/bob@other.md") == 'SUMMARY bob@other' && $(cat "${h}/nix/html/carol@x.html") == 'HTML carol@x' ]] \
+  && [[ $(tail -n 1 "${h}/win/dave@x.md") == 'WIN dave@x' && $(cat "${h}/README.md") == 'README bob@other carol@x | dave@x' ]] \
+  && [[ $(cat "${h}/html/hosts.html") == INDEX && ! -e ${h}/nix/old@gone.md && ! -e ${h}/nix/html/old@gone.html ]] \
+  && outside "${c}" | cmp -s - "${c}/outside.before" \
+  && grep -qF '書いた: nix/bob@other.md' "${c}/out" && grep -qF '消した: nix/old@gone.md (作らないファイル)' "${c}/out" \
+  && grep -qF -- "--write-to ${work}/" "${c}/nix-calls"; then
+  ok "summaries: docs/hosts/ に入口・Nix と Windows のページを書き、作らないファイルを消す (docs/hosts/ の外は触らない)"
 else
-  ng "summaries" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(ls "${h}")"
+  ng "summaries" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cd "${h}" && find . -type f | LC_ALL=C sort)"
 fi
 
 # 33b. 2 回目 (--check なし): 同じなので書かない
-cp -p "${h}/bob@other.md" "${c}/bob.before"
+cp -p "${h}/nix/bob@other.md" "${c}/bob.before"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
 if [[ $(rc "${c}") == 0 ]] && grep -qF '書き換えたファイルは無い' "${c}/out" && ! grep -qF '書いた:' "${c}/out" \
-  && [[ ! "${h}/bob@other.md" -nt "${c}/bob.before" ]]; then
+  && [[ ! "${h}/nix/bob@other.md" -nt "${c}/bob.before" ]]; then
   ok "summaries: 2 回目は同じなので書かない (「書き換えたファイルは無い」)"
 else
   ng "summaries (2 回目)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
 fi
 
+# 33c. md の 3 行目の「📝 [Notion で開く](…)」の行は残し、違いに数えない。中身が変われば、その行を残して書き直す
+notion='📝 [Notion で開く](https://app.notion.com/p/0123456789abcdef0123456789abcdef)'
+{
+  sed -n '1,2p' "${h}/nix/bob@other.md"
+  printf '%s\n\n' "${notion}"
+  sed -n '3,$p' "${h}/nix/bob@other.md"
+} >"${c}/with-notion.md"
+cp "${c}/with-notion.md" "${h}/nix/bob@other.md"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix" --check
+rc_n_check=$(rc "${c}")
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+same_n=0
+if [[ $(rc "${c}") == 0 ]] && grep -qF '書き換えたファイルは無い' "${c}/out" && cmp -s "${c}/with-notion.md" "${h}/nix/bob@other.md"; then
+  same_n=1
+fi
+sed -i 's/^SUMMARY bob@other$/hand edit/' "${h}/nix/bob@other.md"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+if [[ ${rc_n_check} == 0 ]] && ((same_n)) && [[ $(rc "${c}") == 0 ]] && cmp -s "${c}/with-notion.md" "${h}/nix/bob@other.md" \
+  && grep -qF '書いた: nix/bob@other.md' "${c}/out"; then
+  ok "summaries: md の 3 行目の「📝 Notion で開く」の行は残し (--check も違いに数えない)、中身が変わればその行を残して書き直す"
+else
+  ng "summaries (Notion の行)" "check=${rc_n_check} same=${same_n} rc=$(rc "${c}") $(out "${c}") $(cat "${h}/nix/bob@other.md")"
+fi
+
 # 34. summaries --check: 同じなら 0 で書かない。違えば違うファイルを出して 1 (書かない)
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix" --check
 rc_same=$(rc "${c}")
-printf 'hand edit\n' >"${h}/bob@other.md"
+printf 'hand edit\n' >"${h}/win/html/dave@x.html"
+printf 'extra\n' >"${h}/nix/extra.md"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix" --check
-if [[ ${rc_same} == 0 && $(rc "${c}") == 1 ]] && grep -qxF '  bob@other.md' "${c}/out" \
-  && [[ $(cat "${h}/bob@other.md") == 'hand edit' ]]; then
-  ok "summaries --check: 同じなら 0、違えば違うファイルを出して 1 (どちらも書かない)"
+if [[ ${rc_same} == 0 && $(rc "${c}") == 1 ]] && grep -qxF '  win/html/dave@x.html' "${c}/out" \
+  && grep -qxF '  nix/extra.md (作らないファイル)' "${c}/out" && [[ $(cat "${h}/win/html/dave@x.html") == 'hand edit' && -f ${h}/nix/extra.md ]]; then
+  ok "summaries --check: 同じなら 0、違えば違うファイル (作らないファイルも) を出して 1 (どちらも書かない)"
 else
   ng "summaries --check" "same=${rc_same} rc=$(rc "${c}") $(out "${c}") $(err "${c}")"
 fi
 
-# 34b. summaries: ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す
+# 34b. summaries: win/hosts/ が無くても Nix のホストだけで書く。Nix のホストが 0 台なら入口だけを書き、残ったページと空の dir を消す
 c=$(summaries_case r34b)
+rm -rf "${c}/wt/win"
 rm -f "${c}/wt/nix/hosts/"*.nix
-printf 'old\n' >"${c}/wt/nix/hosts/bob@other.md"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
-if [[ $(rc "${c}") == 0 && ! -e ${c}/wt/nix/hosts/bob@other.md && ! -e ${c}/wt/nix/hosts/old@gone.md ]] \
-  && [[ $(cat "${c}/wt/nix/hosts/README.md") == 'README ' ]]; then
-  ok "summaries: ホストが 0 台なら README.md だけを書き、残った <名前>.md を消す"
+if [[ $(rc "${c}") == 0 && ! -e ${c}/wt/docs/hosts/nix ]] && [[ $(cat "${c}/wt/docs/hosts/README.md") == 'README  | ' ]] \
+  && [[ -f ${c}/wt/docs/hosts/html/hosts.html ]]; then
+  ok "summaries: win/hosts/ が無くても書き、ホストが 0 台なら入口だけを書いて残ったページと空の dir を消す"
 else
-  ng "summaries (0 台)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(ls "${c}/wt/nix/hosts")"
+  ng "summaries (0 台)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cd "${c}/wt/docs/hosts" && find . | LC_ALL=C sort)"
 fi
 
-# 35. summaries: jq が無ければ 2、評価が落ちれば 3
-c=$(summaries_case r35)
-: >"${c}/nix-calls"
-USER=alice PATH_EXTRA="${fake_nix_bin}" FAKE_NIX_LOG="${c}/nix-calls" run "${c}" summaries --private "${c}/wt" --nix-dir "${c}/body/nix"
-rc_nojq=$(rc "${c}")
-printf '# FAKE_EVAL_ERROR: 壊れたホストのファイル\n' >>"${c}/wt/nix/hosts/carol@x.nix"
+# 34c. summaries: docs/hosts/ の中 (か docs/hosts/ そのもの) が symlink なら、外を辿らずに 2 (何も書かない)
+c=$(summaries_case r34c)
+mkdir -p "${c}/elsewhere"
+ln -s "${c}/elsewhere" "${c}/wt/docs/hosts/win"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
-if [[ ${rc_nojq} == 2 && $(rc "${c}") == 3 ]] && grep -qF '壊れたホストのファイル' "${c}/err" \
-  && [[ $(cat "${c}/wt/nix/hosts/README.md") == 'old readme' ]]; then
-  ok "summaries: jq が無ければ 2、評価が落ちれば原因の行を出して 3 (何も書かない)"
+rc_inner=$(rc "${c}")
+c2=$(summaries_case r34c2)
+mkdir -p "${c2}/elsewhere"
+rm -rf "${c2}/wt/docs/hosts"
+ln -s "${c2}/elsewhere" "${c2}/wt/docs/hosts"
+run_summaries "${c2}" --private "${c2}/wt" --nix-dir "${c2}/body/nix"
+if [[ ${rc_inner} == 2 && $(rc "${c2}") == 2 ]] && grep -qF 'symlink があります' "${c2}/err" \
+  && [[ -z $(ls -A "${c}/elsewhere") && -z $(ls -A "${c2}/elsewhere") && $(cat "${c}/wt/docs/hosts/README.md") == 'old readme' ]]; then
+  ok "summaries: docs/hosts/ の中か docs/hosts/ そのものが symlink なら、外を辿らずに 2 (何も書かない)"
 else
-  ng "summaries (断る・落ちる)" "nojq=${rc_nojq} rc=$(rc "${c}") $(err "${c}")"
+  ng "summaries (symlink)" "inner=${rc_inner} rc=$(rc "${c2}") $(err "${c2}") $(ls -A "${c}/elsewhere" "${c2}/elsewhere")"
+fi
+
+# 35. summaries: nix/hosts/ も win/hosts/ も無ければ 2、評価が落ちれば 3 (何も書かない)。jq の無い PATH で動く
+c=$(summaries_case r35)
+mkdir -p "${c}/empty"
+run_summaries "${c}" --private "${c}/empty" --nix-dir "${c}/body/nix"
+rc_nohosts=$(rc "${c}")
+printf '# FAKE_EVAL_ERROR: 壊れたホストのファイル\n' >>"${c}/wt/win/hosts/dave@x.toml"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+if [[ ${rc_nohosts} == 2 && $(rc "${c}") == 3 ]] && grep -qF '壊れたホストのファイル' "${c}/err" \
+  && [[ $(cat "${c}/wt/docs/hosts/README.md") == 'old readme' && -f ${c}/wt/docs/hosts/nix/old@gone.md ]]; then
+  ok "summaries: nix/hosts/ も win/hosts/ も無ければ 2、評価が落ちれば原因の行を出して 3 (何も書かない)"
+else
+  ng "summaries (断る・落ちる)" "nohosts=${rc_nohosts} rc=$(rc "${c}") $(err "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

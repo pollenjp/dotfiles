@@ -53,17 +53,26 @@
 #
 # ## ホストの要約 (summary・summaries)
 #
-# ホストの設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles-private の docs/adr/057_host_setting_groups_*)。
-# 中身は mkHome が組み立てたホストに足す hostSummary (nix/lib/host-summary.nix) で、ここは評価して出す・書くだけ。
+# ホストの設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles-private の docs/adr/057_host_setting_groups_*。
+# 図の HTML にしたのは docs/adr/093_host_summary_html_*)。中身は nix/lib/host-summary/ (mkHome が組み立てたホストに足す
+# hostSummary と、flake の lib.hostSummaryFiles) で、ここは評価して出す・書くだけ。
 #
 #   summary     1 ホストの要約を stdout に出す (既定は setup が --host なしで選ぶホスト。客先の PC の tmp でも)。ローカル flake の
-#               写しで評価する (--nix-dir を渡したときだけ写しの本体を替える)。--markdown なら <ホスト>.md の全文
-#   summaries   dotfiles-private の作業ツリーの nix/hosts/*.nix の全ホストを、compare の新しい形と同じく privateHosts だけの flake で
-#               評価し、nix/hosts/<ホスト>.md と nix/hosts/README.md を書く (ホストのファイルが無くなった .md は消す)。--check は
-#               書かずに、古い・足りない・余るファイルを出して 1。作業ツリーに書くのは nix/hosts/ の中だけ
+#               写しで評価する (--nix-dir を渡したときだけ写しの本体を替える)。--out <dir> なら、そのホストのページ (md と HTML 版。
+#               <dir>/nix/<ホスト>.md・<dir>/nix/html/<ホスト>.html) を書く (登録しない PC でもブラウザで図を見られる)
+#   summaries   dotfiles-private の作業ツリーの nix/hosts/*.nix と win/hosts/*.toml の全ホストを、compare の新しい形と同じく
+#               privateHosts (と windowsHosts) だけの flake で評価し、docs/hosts/ にページを書く (入口の README.md と html/hosts.html、
+#               ホストごとの nix/<ホスト>.md・win/<ホスト>.md と、それぞれの html/<ホスト>.html)。作らなくなったファイル
+#               (ホストのファイルが無くなったページ) は消す。--check は書かずに、古い・足りない・余るファイルを出して 1。
+#               作業ツリーに書くのは docs/hosts/ の中だけ (docs/hosts/ は全部この生成物。手で書いたファイルを置かない)
+#
+# docs/hosts/ の md は、dotfiles-private の docs/ を Notion に写す道具 (claude-skills の pjp-docs-to-notion) がページを作ると、
+# h1 の下 (3 行目) に「📝 [Notion で開く](https://app.notion.com/p/…)」の行と空行を足す。summaries はその行を残して書き直し、
+# --check と setup.sh はその行を外して比べる (行の有る無しでは古いと言わない)。
 #
 # 並びは毎回同じ (要約は日時・store のパス・dotfiles の版を持たない) なので、同じ本体とホストのファイルなら出し直しても差が
-# 出ない。setup.sh も、この PC の <ホスト>.md を同じ hostSummary.file で作り直して比べる (古ければ警告のまとめに出す)。
+# 出ない。setup.sh も、この PC のホストのページ (docs/hosts/nix/<ホスト>.md と HTML 版) を同じ hostSummary.pages で作り直して
+# 比べる (古ければ警告のまとめに出す)。
 
 set -eu -o pipefail
 
@@ -104,14 +113,16 @@ usage() {
       shared/ が同じかを出す)。--out は作業ツリーの nix/・ローカル flake・その dotfiles-private の nix/ の外に置く。
       0 = 同じ (shared/ を外すと同じ = shared/ の値だけ違うときも)、1 = 違う (config.dotfiles の違いを出す)、
       2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形 (shared/ を足した形) が評価できない
-  private-host.sh summary [--host <ホスト>] [--flake <dir>] [--nix-dir <本体の nix>] [--markdown]
+  private-host.sh summary [--host <ホスト>] [--flake <dir>] [--nix-dir <本体の nix>] [--out <dir>]
       ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか) を出す。既定のホストは setup が --host なしで
-      選ぶもの (決まらなければ 2)。ローカル flake の写しで評価し、--nix-dir を渡せば写しの本体をそこに替える。--markdown なら
-      dotfiles-private の nix/hosts/<ホスト>.md に置く全文。ホストを評価できなければ 3
+      選ぶもの (決まらなければ 2)。ローカル flake の写しで評価し、--nix-dir を渡せば写しの本体をそこに替える。--out なら、
+      そのホストのページ (dotfiles-private の docs/hosts/ に置くのと同じ md と HTML 版) を <dir>/nix/ に書く (<dir> は無い場所。
+      在れば 2)。ホストを評価できなければ 3
   private-host.sh summaries --private <dotfiles-private の作業ツリー> [--nix-dir <本体の nix>] [--check]
-      作業ツリーの nix/hosts/*.nix の全ホストの要約を、nix/hosts/<ホスト>.md と nix/hosts/README.md に書く (本体は --nix-dir。既定は
-      この script の repo の nix/)。ホストのファイルが無い <名前>.md は消す。--check は書かずに、違うファイルを出して 1 (同じなら 0)。
-      2 = 使い方の誤り・jq が無い、3 = 評価できない
+      作業ツリーの nix/hosts/*.nix と win/hosts/*.toml の全ホストの要約を、docs/hosts/ に書く (入口の README.md と html/hosts.html・
+      nix/<ホスト>.md・win/<ホスト>.md と、それぞれの html/<ホスト>.html。本体は --nix-dir。既定はこの script の repo の nix/)。
+      作らなくなったファイルは消す。md の 3 行目の「📝 [Notion で開く](…)」の行 (Notion に写す道具が書く) は残す。--check は書かずに、
+      違うファイルを出して 1 (同じなら 0。その行の有る無しは違いに数えない)。2 = 使い方の誤り、3 = 評価できない
   private-host.sh -h, --help
       これ
 
@@ -1018,23 +1029,26 @@ cmd_compare() {
 
 # summary: 1 ホストの要約を出す (冒頭の「ホストの要約」)
 cmd_summary() {
-  local flake_dir=${default_flake_dir} host="" nd="" markdown=0 which text expr
+  local flake_dir=${default_flake_dir} host="" nd="" out="" which text
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --host | --flake | --nix-dir)
+      --host | --flake | --nix-dir | --out)
         [[ $# -ge 2 ]] || die "$1 に値を渡してください"
         case $1 in
           --host) host=$2 ;;
           --flake) flake_dir=${2%/} ;;
           --nix-dir) nd=${2%/} ;;
+          --out) out=${2%/} ;;
         esac
         shift
         ;;
-      --markdown) markdown=1 ;;
       *) die "summary の知らない引数です: $1 (--help)" ;;
     esac
     shift
   done
+  if [[ -n ${out} && (-e ${out} || -L ${out}) ]]; then
+    die "--out は無い場所を渡してください (在るものは書き換えない): ${out}"
+  fi
   [[ -f ${flake_dir}/flake.nix ]] || die "ローカル flake がありません: ${flake_dir}/flake.nix"
   if [[ -z ${host} ]]; then
     if ! which=$(DOTFILES_LOCAL_DIR="${flake_dir}" "${BASH}" "${script_dir}/setup.sh" --which-host 2>/dev/null </dev/null) \
@@ -1057,49 +1071,76 @@ cmd_summary() {
     eval_error_excerpt "${tmp}/cur.lock.log" >&2
     exit 2
   fi
-  expr='s: s.text'
-  if ((markdown)); then
-    expr="s: s.file \"${host}\""
-  fi
-  if ! text=$(nix eval --raw "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" --apply "${expr}" \
-    2>"${tmp}/summary.err" </dev/null); then
-    {
-      printf '!! ホスト %s の要約を、ローカル flake (%s) の写しで評価できません (ホストの名前が違う・本体が設定グループより前、など):\n' \
-        "${host}" "${flake_dir}"
-      eval_error_excerpt "${tmp}/summary.err"
-    } >&2
-    exit 3
-  fi
-  # $(…) は末尾の改行を落とすので、出すときに 1 つ足す (要約の文は改行で終わる)
-  if ((markdown)); then
-    printf '%s\n' "${text}"
+  if [[ -n ${out} ]]; then
+    # 一時の場所に書き出してから移す (評価が途中で落ちても、<dir> に書きかけを残さない)
+    if ! nix eval --write-to "${tmp}/pages" "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" \
+      --apply "s: s.pages \"${host}\"" 2>"${tmp}/summary.err" </dev/null; then
+      summary_eval_failed "${host}" "${flake_dir}"
+    fi
+    mv "${tmp}/pages" "${out}" || die "--out に書けません: ${out}"
+    printf '==> ホスト %s のページを %s に書きました (ローカル flake %s で評価):\n' "${host}" "${out}" "${flake_dir}"
+    (cd "${out}" && find . -type f | sed 's|^\./|  |' | LC_ALL=C sort)
+    printf '  (図は HTML 版をブラウザで開く。dotfiles-private に登録したホストなら、docs/hosts/ の同じ名前のファイルと同じ中身)\n'
     return 0
   fi
+  if ! text=$(nix eval --raw "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" --apply 's: s.text' \
+    2>"${tmp}/summary.err" </dev/null); then
+    summary_eval_failed "${host}" "${flake_dir}"
+  fi
+  # $(…) は末尾の改行を落とすので、出すときに 1 つ足す (要約の文は改行で終わる)
   printf '==> ホスト %s の要約 (設定グループ。ローカル flake %s で評価)\n%s\n' "${host}" "${flake_dir}" "${text}"
-  echo "  (段・道具の switch の直し方は本体の nix/README.md「設定グループ」。グループごとの既定は nix/groups.md)"
+  echo "  (段・道具の switch の直し方は本体の nix/README.md「設定グループ」。グループごとの既定は nix/groups.md。図は --out <dir> で書く HTML 版)"
 }
 
-# summaries の flake: dotfiles-private の nix/ ($3) のホストと、その要約のファイル (名前 → 中身) を出す (本体は $2)
+summary_eval_failed() {
+  {
+    printf '!! ホスト %s の要約を、ローカル flake (%s) の写しで評価できません (ホストの名前が違う・本体が設定グループより前、など):\n' \
+      "$1" "$2"
+    eval_error_excerpt "${tmp}/summary.err"
+  } >&2
+  exit 3
+}
+
+# summaries の flake: dotfiles-private の nix/ ($3) と win/hosts/ ($4) のホストから、docs/hosts/ に書くファイルの組を出す (本体は $2)
 summaries_flake() {
   mkdir -p "$1"
   cat >"$1/flake.nix" <<EOS
-# private-host.sh summaries が作った、dotfiles-private の nix/ のホストの要約を出す flake (書き出すための写し)
+# private-host.sh summaries が作った、dotfiles-private のホストの要約 (docs/hosts/ に書くファイル) を出す flake (書き出すための写し)
 {
   inputs.dotfiles.url = "path:$2";
   inputs.dotfiles-private.url = "path:$3";
   inputs.dotfiles-private.flake = false;
+  inputs.win-hosts.url = "path:$4";
+  inputs.win-hosts.flake = false;
   outputs =
-    { dotfiles, dotfiles-private, ... }:
+    { dotfiles, dotfiles-private, win-hosts, ... }:
     {
-      summaryFiles = dotfiles.lib.hostSummary.files (dotfiles.lib.privateHosts dotfiles-private);
+      summaryFiles = dotfiles.lib.hostSummaryFiles dotfiles-private win-hosts;
     };
 }
 EOS
 }
 
-# summaries: dotfiles-private の作業ツリーの nix/hosts/ に、全ホストの要約と README を書く (冒頭の「ホストの要約」)
+# md の 3 行目 (h1 と空行の後ろ) が、Notion に写す道具の書いた「📝 [Notion で開く](https://app.notion.com/p/…)」の行で、4 行目が
+# 空なら、その行を出す (無ければ何も出さない)。setup.sh の strip_notion_line と同じ行を見る
+notion_line() {
+  local l3 l4
+  l3=$(sed -n '3p' "$1")
+  l4=$(sed -n '4p' "$1")
+  if [[ ${l3} == '📝 [Notion で開く](https://app.notion.com/p/'*')' && -z ${l4} ]]; then
+    printf '%s' "${l3}"
+  fi
+}
+
+# $1 のファイル (生成した md) の 2 行目 (h1 の後ろの空行) の後ろに、$2 の行と空行を入れて出す (行は awk -v で渡さない。
+# -v はバックスラッシュをエスケープとして解く)
+with_notion_line() {
+  NOTION_LINE=$2 awk 'NR == 3 { print ENVIRON["NOTION_LINE"]; print "" } { print }' "$1"
+}
+
+# summaries: dotfiles-private の作業ツリーの docs/hosts/ に、全ホストの要約のページを書く (冒頭の「ホストの要約」)
 cmd_summaries() {
-  local private="" nd=${nix_dir} check=0 pnix work json name f base differ=() wrote=() removed=()
+  local private="" nd=${nix_dir} check=0 pnix whosts work want out rel f page line differ=() wrote=() removed=()
   while [[ $# -gt 0 ]]; do
     case $1 in
       --private | --nix-dir)
@@ -1116,77 +1157,100 @@ cmd_summaries() {
     shift
   done
   [[ -n ${private} ]] || die "summaries には --private <dotfiles-private の作業ツリー> が要ります"
-  if [[ -d ${private}/nix/hosts ]]; then
-    pnix=${private}/nix
-  elif [[ -d ${private}/hosts ]]; then
-    pnix=${private}
-  else
-    die "dotfiles-private の作業ツリーに nix/hosts/ がありません: ${private}"
+  [[ -d ${private} ]] || die "dotfiles-private の作業ツリーがありません: ${private}"
+  private=$(cd -P -- "${private}" && pwd)
+  if [[ ! -d ${private}/nix/hosts && ! -d ${private}/win/hosts ]]; then
+    die "dotfiles-private の作業ツリーに nix/hosts/ も win/hosts/ もありません (作業ツリーの root を渡す): ${private}"
   fi
-  pnix=$(cd -P -- "${pnix}" && pwd)
   nd=$(cd -P -- "${nd}" && pwd) || die "--nix-dir がありません: ${nd}"
   check_path "${nd}"
-  check_path "${pnix}"
-  command -v jq &>/dev/null || die "jq がありません (要約のファイルの組を読むのに使う。home-manager switch の後に流す)。"
+  check_path "${private}"
   need_nix
   need_tmp
+  # nix/ か win/hosts/ が無ければ、空の dir を渡す (path: の入力は在る場所しか取れない)
+  pnix=${private}/nix
+  if [[ ! -d ${pnix} ]]; then
+    pnix="${tmp}/no-private-nix"
+    mkdir -p "${pnix}"
+  fi
+  whosts=${private}/win/hosts
+  if [[ ! -d ${whosts} ]]; then
+    whosts="${tmp}/no-win-hosts"
+    mkdir -p "${whosts}"
+  fi
   work="${tmp}/summaries"
-  summaries_flake "${work}" "${nd}" "${pnix}"
+  summaries_flake "${work}" "${nd}" "${pnix}" "${whosts}"
   if ! lock_sync "${work}"; then
     echo "!! 要約を出す flake の lock を作れません:" >&2
     eval_error_excerpt "${work}.lock.log" >&2
     exit 2
   fi
-  if ! json=$(nix eval --json "path:${work}#summaryFiles" 2>"${work}.err" </dev/null); then
+  want="${tmp}/summaries-out"
+  if ! nix eval --write-to "${want}" "path:${work}#summaryFiles" 2>"${work}.err" </dev/null; then
     {
-      printf '!! %s/hosts/ のホストの要約を評価できません (ホストのファイルの誤り・本体が設定グループより前、など。本体: %s):\n' \
-        "${pnix}" "${nd}"
+      printf '!! %s のホストの要約を評価できません (ホストのファイルの誤り・本体が設定グループより前、など。本体: %s):\n' \
+        "${private}" "${nd}"
       eval_error_excerpt "${work}.err"
     } >&2
     exit 3
   fi
-  printf '%s' "${json}" >"${work}.json"
-  while IFS= read -r name; do
-    [[ -n ${name} ]] || continue
-    check_host "${name%.md}"
-    jq -j --arg k "${name}" '.[$k]' "${work}.json" >"${work}.want" || die "要約の ${name} を読めません"
-    f="${pnix}/hosts/${name}"
-    if [[ -f ${f} ]] && cmp -s "${work}.want" "${f}"; then
+  out=${private}/docs/hosts
+  # docs/hosts/ の外に書かないよう、docs/・docs/hosts/ とその中に symlink があれば書かずに止める
+  if [[ -L ${private}/docs || -L ${out} ]] || { [[ -d ${out} ]] && [[ -n $(find "${out}" -type l -print 2>/dev/null) ]]; }; then
+    die "${private}/docs/hosts/ (か docs/) に symlink があります。summaries は docs/hosts/ の中だけに書くので、symlink を外してから流してください"
+  fi
+  while IFS= read -r rel; do
+    [[ -n ${rel} ]] || continue
+    f="${out}/${rel}"
+    page="${want}/${rel}"
+    # Notion に写す道具が書いた行は残す (無ければ生成したまま)
+    if [[ ${rel} == *.md && -f ${f} ]]; then
+      line=$(notion_line "${f}")
+      if [[ -n ${line} ]]; then
+        with_notion_line "${page}" "${line}" >"${work}.page"
+        page="${work}.page"
+      fi
+    fi
+    if [[ -f ${f} ]] && cmp -s "${page}" "${f}"; then
       continue
     fi
-    differ+=("${name}")
+    differ+=("${rel}")
     if ((check == 0)); then
-      cp "${work}.want" "${f}"
-      wrote+=("${name}")
+      mkdir -p "${f%/*}"
+      cp "${page}" "${f}"
+      wrote+=("${rel}")
     fi
-  done < <(jq -r 'keys[]' "${work}.json")
-  # ホストのファイルが無くなった <名前>.md (README.md は除く)
-  for f in "${pnix}"/hosts/*.md; do
-    [[ -f ${f} ]] || continue
-    base=${f##*/}
-    [[ ${base} != README.md && ! -f ${pnix}/hosts/${base%.md}.nix ]] || continue
-    differ+=("${base} (ホストのファイルが無い)")
+  done < <(cd "${want}" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
+  # 作らなくなったファイル (ホストのファイルが無くなったページなど)
+  if [[ -d ${out} ]]; then
+    while IFS= read -r rel; do
+      [[ -n ${rel} && ! -f ${want}/${rel} ]] || continue
+      differ+=("${rel} (作らないファイル)")
+      if ((check == 0)); then
+        rm -f -- "${out:?}/${rel}"
+        removed+=("${rel}")
+      fi
+    done < <(cd "${out}" && find . -type f | sed 's|^\./||' | LC_ALL=C sort)
     if ((check == 0)); then
-      rm -f -- "${f}"
-      removed+=("${base}")
+      find "${out}" -mindepth 1 -type d -empty -delete
     fi
-  done
+  fi
   if ((check)); then
     if ((${#differ[@]} == 0)); then
-      printf '==> %s/hosts/ の要約は今の設定と同じ (本体: %s)\n' "${pnix}" "${nd}"
+      printf '==> %s の要約は今の設定と同じ (本体: %s)\n' "${out}" "${nd}"
       return 0
     fi
-    printf '==> %s/hosts/ の要約が今の設定と違う (本体: %s。出し直すなら --check を外す):\n' "${pnix}" "${nd}"
+    printf '==> %s の要約が今の設定と違う (本体: %s。出し直すなら --check を外す):\n' "${out}" "${nd}"
     printf '  %s\n' "${differ[@]}"
     return 1
   fi
   if ((${#wrote[@]} == 0 && ${#removed[@]} == 0)); then
-    printf '==> %s/hosts/ の要約は今の設定と同じ (書き換えたファイルは無い。本体: %s)\n' "${pnix}" "${nd}"
+    printf '==> %s の要約は今の設定と同じ (書き換えたファイルは無い。本体: %s)\n' "${out}" "${nd}"
     return 0
   fi
-  printf '==> %s/hosts/ の要約を出し直しました (本体: %s)\n' "${pnix}" "${nd}"
+  printf '==> %s の要約を出し直しました (本体: %s)\n' "${out}" "${nd}"
   ((${#wrote[@]} == 0)) || printf '  書いた: %s\n' "${wrote[@]}"
-  ((${#removed[@]} == 0)) || printf '  消した: %s (ホストのファイルが無い)\n' "${removed[@]}"
+  ((${#removed[@]} == 0)) || printf '  消した: %s (作らないファイル)\n' "${removed[@]}"
 }
 
 if [[ $# -eq 0 ]]; then

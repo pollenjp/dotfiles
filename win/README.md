@@ -312,6 +312,11 @@ scanData = "https://app.notion.com/p/…"
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
+- ホストの値から作った図のページ (グループ・段・道具の on/off と、その値がホストの値とグループの既定のどちらで決まったか。段の入れ子の領域と
+  ホストの囲みの線の HTML 版) は dotfiles-private の `docs/hosts/win/<ユーザー>@<PC>.md` にある (Notion にも写る)。ホストの値を足す・直すときは、
+  同じ PR で WSL の `nix/scripts/private-host.sh summaries --private <dotfiles-private の作業ツリー>` を流して出し直す
+  ([`nix/README.md`「ホストの要約」](../nix/README.md#ホストの要約)・skill `pjp-dotfiles-register-host`)。図に出す道具は、上の runner が使う道具
+  (`nix/lib/groups.nix` の `runnerTools`。runner に道具を足したら、そこにも足す)
 - `runner/groups.json` は生成物 (グループごとの道具の既定。Nix がグループごとの素のホストの `group.json` を集める)。`nix/lib/groups.nix` や
   option の既定を変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
   CI の `lint` が落ちる)

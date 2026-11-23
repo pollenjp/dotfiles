@@ -14,7 +14,7 @@
 # 4 つの組み合わせで確かめる。道具の switch を足す・段を変えるときは、ここと options.nix の両方を直す。
 #
 # 表を読むもの: home/modules/group.nix (~/.local/state/dotfiles/group.json。setup が読んで手順を飛ばす)・
-# lib/host-summary.nix (ホストの要約)・tests/groups.nix・tests/group-client.nix。
+# lib/host-summary/ (ホストの要約)・tests/groups.nix・tests/group-client.nix。
 #
 #   groups   グループ。tiers は on にする段 (① は全グループが入れるので書かない)。並びは既定の personal から
 #   tiers    段。option は段の switch の dotfiles からの path (① は switch を持たないので null)
@@ -24,6 +24,8 @@
 #     tiers     その道具が属する段 (① の道具は [ ])
 #     derived   既定が段から決まるか。false は既定が段によらない (false の既定のまま、ホストが入れる option)
 #     requires  効くための条件 (どれかが false なら値によらず効かない。要約は「–」と出す)
+#     short     ホストの要約の図の箱に出す短い名前 (下の shorts。無ければ label)
+#     runner    Windows の runner (win/runner/) が手順の gate で読む道具か (下の runnerTools)
 let
   # win/ を配るマシンでだけ効く Windows のアプリの switch の条件
   windowsFiles = [
@@ -94,8 +96,59 @@ let
         ;
       derived = true;
       requires = [ ];
+      short = shorts.${key} or label;
+      runner = builtins.elem key runnerTools;
     }
     // extra;
+
+  # ホストの要約の図 (lib/host-summary/ の HTML) の箱に出す短い名前。箱の幅に収まる長さにし、label (表とポップアップに出す) と
+  # 同じ道具だと分かる名前にする
+  shorts = {
+    wsl = "WSL の手当て";
+    windowsFiles = "win/ の配布";
+    windowsTypeClipboard = "Win の type-clipboard";
+    exeExecTrace = ".exe の起動の記録";
+    mtuGuard = "MTU の見張り";
+    osCaBundle = "証明書の束 (OS)";
+    cleanup = "store・mise の掃除";
+    claude = "Claude Code";
+    herdrCore = "herdr-core (hc)";
+    windowsClaudeCode = "Win の Claude Code";
+    windowsHerdr = "Win の herdr";
+    t3Code = "T3 Code";
+    windowsT3Code = "Win の T3 Code";
+    claudePrivateSkills = "private な skill";
+    herdrHub = "集約ハブ ~/h";
+    windowsClaudeAccounts = "Win の claude アカウント";
+    devTracker = "Dev Tracker";
+    devTrackerInbox = "Dev Tracker の見回り";
+    onePassword = "1Password";
+    opReasonSshRelay = "SSH の中継";
+    ntn = "ntn";
+    windowsNtn = "Win の ntn";
+    windowsTailscale = "Win の Tailscale";
+    windowsSshd = "Win の sshd";
+    gitIdentity = "git の名前とメール";
+  };
+
+  # Windows の runner が手順の gate で読む道具 (win/README.md の「ホストの値」の一覧と同じ)。ホストの要約は、dotfiles-private の
+  # win/hosts/*.toml (Windows のホストの値) のページに、この道具だけを箱にして出す。runner に道具を足したら、ここにも足す
+  runnerTools = [
+    "windowsTypeClipboard"
+    "windowsClaudeCode"
+    "windowsHerdr"
+    "windowsT3Code"
+    "claudePrivateSkills"
+    "herdrHub"
+    "windowsClaudeAccounts"
+    "devTracker"
+    "onePassword"
+    "opReasonSshRelay"
+    "windowsNtn"
+    "windowsTailscale"
+    "windowsSshd"
+    "gitIdentity"
+  ];
 
   both = [
     "aiTools"
@@ -246,7 +299,12 @@ let
     if found == [ ] then throw "groups.nix: そんなグループは無い: ${name}" else builtins.head found;
 in
 {
-  inherit groups tiers tools;
+  inherit
+    groups
+    tiers
+    tools
+    runnerTools
+    ;
 
   groupNames = map (g: g.name) groups;
 

@@ -1,0 +1,16 @@
+# nix/tests/host-summary.nix の作り物 (dotfiles-private の win/hosts/<Windows のユーザー名>@<PC の名前>.toml の形)。
+# hosts/carol@three.nix と同じ PC (three) の Windows。自社のグループを選び、Windows の ntn を足し、1Password を足さずに
+# SSH の中継を on にした (効く条件の onePassword が off なので効かない)。鍵とアドレスは作り物
+group = "company"
+
+[tools]
+windowsNtn = true
+opReasonSshRelay = true
+
+[runner]
+enable = true
+
+[sshd]
+authorizedKeys = ['from="192.0.2.1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKEKEYFAKE dave@example']
+allowUsers = ["dave"]
+allowFrom = ["192.0.2.1"]
