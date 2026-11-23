@@ -305,6 +305,8 @@ mod tests {
                 (96, "sshd"),
                 (96, "tailscale"),
                 (97, "claude-code"),
+                (97, "fzf"),
+                (97, "ghq"),
                 (97, "herdr-app"),
                 (97, "herdr"),
                 (97, "ntn"),
@@ -364,8 +366,8 @@ mod tests {
     }
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定と herdr-app の mod
-    /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) だけ (WSL から写した
-    /// 手順・まだ無い手順は受け持ちに従う)
+    /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
+    /// 使う。入れる ps1 の手順) だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -389,6 +391,8 @@ mod tests {
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",
+                "fzf",
+                "ghq",
                 "t3-code",
                 "hc-skill",
                 "herdr-app-mods",
