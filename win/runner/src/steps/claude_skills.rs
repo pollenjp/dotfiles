@@ -455,7 +455,7 @@ mod tests {
                 roots: Roots::from_home(&e.t.path().join("home")),
                 state_dir: e.t.path().join("state"),
                 host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
-                sys: &crate::process::RealSys,
+                sys: &crate::testutil::RealSysPlain,
                 out: &mut out,
             };
             let o = ClaudeSkills.run(&mut ctx, mode);

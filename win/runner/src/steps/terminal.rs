@@ -1821,7 +1821,7 @@ mod tests {
         }
         let (c, out) = wsl_run(wsl.t.path(), &["--import"]);
         assert_eq!(c, 0, "{out}");
-        let (o, out) = ours.ctx_run(&crate::process::RealSys, RUNNER_HOST, import);
+        let (o, out) = ours.ctx_run(&crate::testutil::RealSysPlain, RUNNER_HOST, import);
         assert_eq!(o.kind, Kind::Ok, "{out}");
         assert_eq!(read(&ours.managed()), read(&wsl.managed()));
         assert_eq!(read(&ours.managed()), "{\n    \"copyOnSelect\": false\n}\n");

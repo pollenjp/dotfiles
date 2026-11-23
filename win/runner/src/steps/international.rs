@@ -2305,7 +2305,7 @@ mod tests {
                     Groups::embedded().unwrap(),
                 )
                 .unwrap(),
-                sys: &RealSys,
+                sys: &crate::testutil::RealSysPlain,
                 out: &mut out,
             };
             let read = read_windows(&mut ctx, &pwsh, &Jv::parse(MANAGED3).unwrap());

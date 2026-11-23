@@ -1,10 +1,13 @@
 //! 手順に渡す文脈 (置き場所・ホストの値・外のコマンドの口・出力)。
 //!
-//! 手順は置き場所をここから引き、外のコマンドは `sys` で打ち、出力は `say` で出す。W0-2 などで手順を足すときも同じ。
+//! 手順は置き場所をここから引き、外のコマンドは `sys` で打ち、出力は `say` (見出しは `heading`) で出す。W0-2 などで手順を足すときも同じ。
+//! 色は出すときに付ける (`color`。出力が端末で NO_COLOR が無いときだけ)。
 
+use crate::color::Paint;
 use crate::host::HostValues;
 use crate::manifest::Roots;
-use crate::process::Sys;
+use crate::process::{Stream, Sys};
+use std::borrow::Cow;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -21,9 +24,27 @@ pub struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
-    /// 1 行出す (書けなくても止めない)。
+    /// 1 行出す (書けなくても止めない)。`!! ` で始まる行 (手順の途中で知らせる警告や誤り。setup.sh の `warn` と同じ印) は、出力が端末なら
+    /// 黄にする (包むのはその 1 行だけで、続きの行は包まない)。
     pub fn say(&mut self, line: impl AsRef<str>) {
-        let _ = writeln!(self.out, "{}", line.as_ref());
+        let line = line.as_ref();
+        let shown = if line.starts_with("!! ") {
+            Cow::Owned(self.paint().yellow(line))
+        } else {
+            Cow::Borrowed(line)
+        };
+        let _ = writeln!(self.out, "{shown}");
+    }
+
+    /// 見出し (`==> …`・`━━ [n] id: 題 ━━`) を出す。出力が端末なら太字 (setup.sh の見出しと同じ)。
+    pub fn heading(&mut self, line: impl AsRef<str>) {
+        let shown = self.paint().bold(line.as_ref());
+        let _ = writeln!(self.out, "{shown}");
+    }
+
+    /// 出力 (`out`。cli は stdout を渡す) の色。端末で NO_COLOR が無いときだけ付ける (`color`)。
+    pub fn paint(&self) -> Paint {
+        Paint::detect(self.sys, Stream::Stdout)
     }
 
     /// dotfiles の clone の中のパス (`rel` は `/` 区切り)。
@@ -80,9 +101,51 @@ mod tests {
     //! ## 確かめること
     //!
     //! - 隣の clone は、dotfiles の clone の隣 → bootstrap の置き場 (%USERPROFILE%\ghq\github.com\pollenjp) の順に探し、どちらにも無ければ隣
+    //! - 出力が端末で NO_COLOR が無ければ、見出しは太字・`!!` で始まる行は黄にする。ほかの行と、端末でないときは字のまま
 
     use super::*;
-    use crate::testutil::TempDir;
+    use crate::host::Groups;
+    use crate::testutil::{FakeSys, TempDir};
+
+    /// `f` で出した字
+    fn said(sys: &FakeSys, f: impl FnOnce(&mut Ctx)) -> String {
+        let mut out = Vec::new();
+        {
+            let mut ctx = Ctx {
+                repo: "/r".into(),
+                roots: Roots::from_home(Path::new("/h")),
+                state_dir: "/s".into(),
+                host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                sys,
+                out: &mut out,
+            };
+            f(&mut ctx);
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn headings_and_warnings_are_colored_on_a_terminal() {
+        let lines = |ctx: &mut Ctx| {
+            ctx.heading("━━ [90] files: x ━━");
+            ctx.say("!! 書けません: a");
+            ctx.say("途中の !! は印にしない");
+            ctx.say("");
+        };
+        let sys = || FakeSys::new(|_| unreachable!());
+        assert_eq!(
+            said(&sys().with_terminal(Stream::Stdout), lines),
+            "\u{1b}[1m━━ [90] files: x ━━\u{1b}[0m\n\u{1b}[33m!! 書けません: a\u{1b}[0m\n途中の !! は印にしない\n\n"
+        );
+        let plain = "━━ [90] files: x ━━\n!! 書けません: a\n途中の !! は印にしない\n\n";
+        assert_eq!(said(&sys(), lines), plain);
+        let no_color = sys()
+            .with_terminal(Stream::Stdout)
+            .with_env("NO_COLOR", "1");
+        assert_eq!(said(&no_color, lines), plain);
+        // 端末なのが stderr だけなら、stdout の行には付けない
+        assert_eq!(said(&sys().with_terminal(Stream::Stderr), lines), plain);
+    }
 
     #[test]
     fn clone_dir_prefers_sibling_then_bootstrap_place() {
