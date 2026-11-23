@@ -1,6 +1,6 @@
 // pjp-hub-panel: ハブの Claude がユーザーに見せる panel。質問 (選んで送る) と、チケット・進み具合・PR の木 (work。チケットの下に
-// 進み具合の段と PR を 1 段下げて並べる)・今の状況の説明 (markdown)・進み具合 (flow)・チケットと PR の一覧 (tickets・prs)・
-// 図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
+// 進み具合の段と PR を 1 段下げて並べる)・ユーザーの問いへの答え (qa。問いごとに開け閉めする)・今の状況の説明 (markdown)・
+// 進み具合 (flow)・チケットと PR の一覧 (tickets・prs)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
 // 大きくし、クリックすると大きく見る小窓で開く (下の「図の大きさと、大きく見る小窓」)。
 // props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
 //   role で、1 つの panel.json を「まとめ」と「問い」の 2 つのペインに分けて出せる (ハブはまとめのペインをハブの端末の左に開いて
@@ -87,21 +87,43 @@
 //     引かない)。根でない行の related は見ない (その場に出す)。
 //   - rows が空・配列でないなら「(行はありません)」と出す。行・段・子が形の違うもの (null など) でも落ちず、中身の無い行として出す。
 //
+// Q&A (type "qa"): ユーザーの問いと、ハブの答えを 1 つの項目にして、問いごとに開け閉めする (アコーディオン)。答えがほかの子の返答に
+//   紛れないように、ハブはユーザーに問われたら答えをこの節の項目に書く。節の形は { type: "qa", id, title, items: [<項目>…], collapsed }、
+//   項目の形は { id, q, at, a, open }:
+//   - id: 項目の名前 (空でない文字列)。開け閉めを覚える鍵と、消す印の鍵 (下の「節を消す印」)。ハブは、panel の節の id ともほかの項目の id
+//     とも重ならない値を付ける (例 "qa-1123-1412")。
+//   - q: ユーザーの問い (素の字。長ければ折り返す)。頭に「Q.」を付け、太字で出す。
+//   - at: 時刻の字 (例 "11/23 14:12")。項目の頭の行の右に、小さく薄く出す。無い・空なら出さない。
+//   - a: 答え (markdown)。markdown の節の text と同じに出す (上の「リンク」と「ミニ絵」・入れ子の箇条書き。ミニ絵を大きく見る小窓の題は
+//     「Q. <問い>」)。無い・空 (空白だけも) なら、薄い字で「(まだ答えていない)」と出す。
+//   - open: 初めに開くか。boolean でなければ、items の 1 つ目だけを開き、ほかは畳む (ハブは新しい問いを items の頭に足す)。
+//   ほかの節と同じカード (節の頭の ▸・▾ と節の ×) の中に、items を panel.json の順に縦に並べ、節の題の後ろに、出している項目の数を
+//   「(N)」で足す (消す印で隠した項目は数えない)。項目は枠のついた小さなカードで、頭の行に開け閉めの印 (▸・▾)・「Q. <q>」・時刻・
+//   項目の × を並べる。頭の行を押すと開け閉めする (ダブルクリックの 2 回目は数えない。× と「戻す」を押しても開け閉めしない)。開いた
+//   項目は、頭の行の下に答えを 1 段 (印の欄と間の幅) 下げて出す。手で開け閉めした形は、work の行と同じくペインの中で覚え (鍵は節の id と
+//   項目の id。id の無い項目は items の中の位置)、panel.json を書き直しても残し、version が変わると初めの形に戻す。items が空・配列で
+//   ないなら「(項目はありません)」と出す。形の違う項目 (null・数など) でも落ちず、中身の無い項目として出す。
+//
 // 節を消す印: まとめのペイン (role が summary か無い) の、id (空でない文字列) のある節の右上に「×」を出す。押すと印が付き (枠が warn の
 //   点線になり、題に取り消し線が引かれ、中身が薄くなって「次の更新で消える」と出る)、「戻す」を押すと外れる (ダブルクリックの 2 回目は
-//   数えない)。問いのペインには出さない。
+//   数えない)。問いのペインには出さない。Q&A の節の項目 (id のあるもの) にも、項目の頭の行の右に同じ「×」を 1 つずつ出す。押すと項目の
+//   枠が warn の点線になり、問いに取り消し線が引かれ、答えが薄くなって「次の更新で消える」と出る (「戻す」で外れる)。
 //   印は mod が panel.json の隣のファイルに書く。名前は panel.json の名前の .json を .dismiss.json に替えたもの (panel.json → panel.dismiss.json):
 //     { "file": "panel.json", "dismissed": [{ "id": "<節の id>", "title": "<印を付けたときの題>", "at": "<印を付けた時刻 (ISO 8601 の UTC)>",
 //       "base": "<印を付けたときの panel.json の指紋>" }] }
+//   項目の印も同じ dismissed に、項目の id で書く。形は節の印に、どの節の項目かの section (節の id。節に id が無ければ空の字) を足したもの:
+//     { "id": "<項目の id>", "title": "<印を付けたときの q>", "at": "…", "base": "…", "section": "<節の id>" }
 //   panel.json はハブだけが書き、印のファイルは mod だけが書く (ハブは読むだけ)。写しのペインどうしの書き違いは writeTextFile の expected
 //   (読んだときの中身と今の中身が合うときだけ書く) で防ぎ、合わずに断られたら読み直してやり直す。
-//   印を付けた後に panel.json の中身が変わったら、その節を出さない。変わったかは、キーの順と空白によらない指紋 (base) で比べる (印のファイルの
-//   書き込みや、同じ中身での書き直しは変わったと数えない。ConvertTo-Json の @{} はキーの順が書くたびに替わりうる)。ハブが外さずに同じ id で
-//   書き続けても、印がある間は出さない。panel.json の節から消えた id の印は、mod が panel.json を読めた読み直しのたびに印のファイルから外す
-//   (panel.json が無い・読めない間は外さない)。印はファイルに残るので、まとめのペインを開き直しても (herdr-app を上げ直しても) 同じに出す
-//   (印の後に panel.json が変わっていれば出さず、変わっていなければ印つきで出す)。
-//   ハブがすること: panel.json を書く前に印のファイルを読み (無ければ印は無い)、dismissed の id の節を外して書く。同じ話を続けて出すなら
-//   別の id (next-2 など) にする (印の付いた id を使う間は出ない)。印のファイルは書き換えない (要らなくなった印は、節を外せば mod が消す)。
+//   印を付けた後に panel.json の中身が変わったら、その節 (項目の印なら、その項目) を出さない。変わったかは、キーの順と空白によらない指紋
+//   (base) で比べる (印のファイルの書き込みや、同じ中身での書き直しは変わったと数えない。ConvertTo-Json の @{} はキーの順が書くたびに
+//   替わりうる)。ハブが外さずに同じ id で書き続けても、印がある間は出さない。panel.json の節の id にも Q&A の節の項目の id にも無くなった
+//   id の印は、mod が panel.json を読めた読み直しのたびに印のファイルから外す (panel.json が無い・読めない間は外さない)。印はファイルに
+//   残るので、まとめのペインを開き直しても (herdr-app を上げ直しても) 同じに出す (印の後に panel.json が変わっていれば出さず、変わって
+//   いなければ印つきで出す)。印は id だけで引く (節の印と項目の印を分けない) ので、節と項目の id を重ねない。
+//   ハブがすること: panel.json を書く前に印のファイルを読み (無ければ印は無い)、dismissed の id を、節の id と Q&A の節の項目の id の両方に
+//   当てて外して書く。同じ話を続けて出すなら別の id (next-2 など) にする (印の付いた id を使う間は出ない)。印のファイルは書き換えない
+//   (要らなくなった印は、節や項目を外せば mod が消す)。
 //
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、panel (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
@@ -142,6 +164,7 @@
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
 //       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」)
+//       { type: "qa", id, title, items: [{ id, q, at, a (markdown), open }], collapsed },   (ユーザーの問いと答え。上の「Q&A」)
 //       { type: "markdown", id, title, text (リンクは上の「リンク」、絵だけの行は上の「ミニ絵」), collapsed },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
 //       { type: "tickets", id, title, rows: [{ id, title, url, status, note }] },   (チケットの一覧。上の「チケットと PR の一覧」)
@@ -261,7 +284,11 @@ const parseMarks = (text) => {
   }
   for (const e of Array.isArray(o?.dismissed) ? o.dismissed : []) {
     const id = markKey(e);
-    if (id != null && !marks.has(id)) marks.set(id, { id, title: str(e.title), at: str(e.at), base: str(e.base) });
+    if (id == null || marks.has(id)) continue;
+    // 項目の印 (Q&A の節の項目) は、どの節の項目かの section を持つ。節の印は持たない (持たないまま書き戻す)
+    const m = { id, title: str(e.title), at: str(e.at), base: str(e.base) };
+    if (typeof e.section === "string") m.section = e.section;
+    marks.set(id, m);
   }
   return marks;
 };
@@ -329,6 +356,32 @@ const prSummary = (r) => {
   if (t.size === 0) return "";
   const keys = [...PR_ORDER.filter((k) => t.has(k)), ...[...t.keys()].filter((k) => k !== "" && !PR_ORDER.includes(k)), ...(t.has("") ? [""] : [])];
   return `PR ${keys.map((k) => (k === "" ? `${t.get(k).n} 本` : `${t.get(k).n} 本 ${t.get(k).label}`)).join("・")}`;
+};
+
+// ---- Q&A (頭のコメントの「Q&A」) ----
+// Q&A の節の項目。形の違う項目 (null・数など) は中身の無い項目とみる。i は items の中の位置 (id の無い項目の鍵と、初めの開け閉めに使う)
+const qaItemsOf = (s) => listOf(s?.type === "qa" ? s.items : null).map((v, i) => ({ it: objOr(v), i }));
+// 印を外すかを決めるときの、panel.json にある id (節の id と、Q&A の節の項目の id)
+const liveIds = (secs) => {
+  const ids = new Set();
+  for (const s of secs) {
+    const k = markKey(s);
+    if (k != null) ids.add(k);
+    for (const { it } of qaItemsOf(s)) {
+      const ik = markKey(it);
+      if (ik != null) ids.add(ik);
+    }
+  }
+  return ids;
+};
+// markdown として出す文 (markdown の節の text と、Q&A の節の項目の a)。ミニ絵の図を確かめるのに使う
+const markdownTexts = (secs) => {
+  const out = [];
+  for (const s of secs) {
+    if (s?.type === "markdown" && typeof s.text === "string") out.push(s.text);
+    for (const { it } of qaItemsOf(s)) if (typeof it.a === "string") out.push(it.a);
+  }
+  return out;
 };
 
 // ---- ミニ絵 (頭のコメントの「ミニ絵」) ----
@@ -464,6 +517,7 @@ export default class HubPanel extends View {
     this.picked = {};
     this.collapsed = {};
     this.rowOpen = {}; // 木の行を手で開け閉めした形 (鍵は rowKey。無い行は初めの形)
+    this.qaOpen = {}; // Q&A の項目を手で開け閉めした形 (鍵は qaKey。無い項目は初めの形)
     this.miniCheck = new Map(); // ミニ絵の図を確かめた結果 (図のパス → { why } か { ok })。panel.json を読み直すたびに作り直す
     this.probe = {}; // ミニ絵の物差しで測った記号の欄の幅 ("c:<記号の欄の字>" → zoom を掛けた後の logical px)
     this.status = "";
@@ -539,13 +593,14 @@ export default class HubPanel extends View {
     }
     // 印のファイルも読み直し、panel.json の節から消えた id の印を外す (印のファイルの書き込みでも、ここへ来る)
     const marks = await this.syncMarks(fresh);
-    // ミニ絵の図を確かめる (読めた panel.json の markdown の節の分。問いのペインは節を出さないので見ない)
+    // ミニ絵の図を確かめる (読めた panel.json の markdown の節と Q&A の節の答えの分。問いのペインは節を出さないので見ない)
     const minis = fresh && this.role() !== "questions" ? await this.checkMinis(fresh) : null;
     if (fresh && this.data?.version !== fresh.version) {
       this.picked = {};
       this.status = "";
       this.collapsed = {};
       this.rowOpen = {};
+      this.qaOpen = {};
       for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
     }
     this.data = next.data;
@@ -567,9 +622,8 @@ export default class HubPanel extends View {
       base = null;
     }
     if (typeof base !== "string" || base === "") return out;
-    for (const s of Array.isArray(data?.sections) ? data.sections : []) {
-      if (s?.type !== "markdown" || typeof s.text !== "string") continue;
-      for (const p of splitMinis(s.text)) {
+    for (const text of markdownTexts(Array.isArray(data?.sections) ? data.sections : [])) {
+      for (const p of splitMinis(text)) {
         if (p.kind !== "mini" || p.why || out.has(p.path)) continue;
         const rel = this.imagePath(p.path);
         const svg = /\.svg$/i.test(p.path);
@@ -834,11 +888,12 @@ export default class HubPanel extends View {
           .font_semibold()
           .text_color(marked ? c.muted : c.fg)
           .when(marked, (el) => el.line_through())
-          .child(s.title ?? ""),
+          .child(s.type === "qa" ? this.qaTitle(s) : (s.title ?? "")),
       );
     let body = null;
     if (!closed) {
       if (s.type === "markdown") body = this.markdownBody(s, id, c);
+      else if (s.type === "qa") body = this.qaBody(s, id, c);
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
       else if (s.type === "tickets") body = this.ticketList(s, id, c);
@@ -856,7 +911,19 @@ export default class HubPanel extends View {
       .border_color(marked ? c.warn : c.border)
       .bg(c.surface)
       // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
-      .child(h_flex().gap(6).items_center().child(head).when(key != null, (el) => el.child(this.markButton(key, s, marked, c))))
+      .child(
+        h_flex()
+          .gap(6)
+          .items_center()
+          .child(head)
+          .when(key != null, (el) =>
+            el.child(
+              this.markButton(`hp-dm-${key}`, marked, c, ["印を外す (この節を残す)", "次の更新でこの節を消す (もう一度押すと戻せる)"], (cx) =>
+                this.toggleMark(key, { title: str(s.title) }, cx),
+              ),
+            ),
+          ),
+      )
       .when(marked, (el) => el.child(div().text_size(this.fs(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
       .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
   }
@@ -936,12 +1003,12 @@ export default class HubPanel extends View {
     }
   }
 
-  // 読み直したとき: 印のファイルを読み、この読み直しで読めた panel.json (fresh) の節に無い id の印を外す。fresh が無い (panel.json が
-  // 無い・読めない) ときは外さない (前の中身から外すと、ほかの写しが新しい中身の節に付けた印を消しうる)。問いのペインは null
+  // 読み直したとき: 印のファイルを読み、この読み直しで読めた panel.json (fresh) の節にも Q&A の節の項目にも無い id の印を外す。fresh が
+  // 無い (panel.json が無い・読めない) ときは外さない (前の中身から外すと、ほかの写しが新しい中身の節に付けた印を消しうる)。問いのペインは null
   syncMarks(fresh) {
     if (!this.marksOn()) return Promise.resolve(null);
     const secs = Array.isArray(fresh?.sections) ? fresh.sections : [];
-    const ids = fresh ? new Set(secs.map(markKey).filter((k) => k != null)) : null;
+    const ids = fresh ? liveIds(secs) : null;
     return this.serial(() =>
       this.editMarks((m) => {
         if (!ids) return null;
@@ -951,11 +1018,12 @@ export default class HubPanel extends View {
     );
   }
 
-  // 節の印を付け外しする。見た目はすぐに変え、ファイルへは後で書く (書けなければファイルの中身に戻し、わけを出す)。印は今の panel.json の
-  // 指紋 (base) と組で残し、panel.json の中身がこれと違えば出さない
-  toggleMark(key, s, cx) {
+  // 節 (か Q&A の項目) の印を付け外しする。見た目はすぐに変え、ファイルへは後で書く (書けなければファイルの中身に戻し、わけを出す)。印は
+  // 今の panel.json の指紋 (base) と組で残し、panel.json の中身がこれと違えば出さない。info は印に書く title と、項目なら section (節の id)
+  toggleMark(key, info, cx) {
     const on = !this.marks.has(key);
-    const entry = { id: key, title: str(s.title), at: new Date().toISOString(), base: this.hash ?? "" };
+    const entry = { id: key, title: info.title, at: new Date().toISOString(), base: this.hash ?? "" };
+    if (info.section != null) entry.section = info.section;
     const op = (m) => {
       if (on === m.has(key)) return null;
       const next = new Map(m);
@@ -981,10 +1049,11 @@ export default class HubPanel extends View {
     });
   }
 
-  // 節の右上の印のボタン。「×」で次の更新で消す印を付け、「戻す」で外す
-  markButton(key, s, marked, c) {
+  // 印のボタン (節の右上と、Q&A の項目の頭の行の右)。「×」で次の更新で消す印を付け、「戻す」で外す。tips は [印があるとき, 無いとき] の
+  // ヒント、onToggle は押したときにすること (cx を受ける)
+  markButton(eid, marked, c, tips, onToggle) {
     return h_flex()
-      .id(`hp-dm-${key}`)
+      .id(eid)
       .flex_none()
       .h(this.fs(20))
       .min_w(this.fs(20))
@@ -998,12 +1067,12 @@ export default class HubPanel extends View {
       .text_color(marked ? c.warn : c.dim)
       .cursor_pointer()
       .hover((st) => st.bg(c.raised))
-      .tooltip(marked ? "印を外す (この節を残す)" : "次の更新でこの節を消す (もう一度押すと戻せる)")
+      .tooltip(marked ? tips[0] : tips[1])
       .on_click((e, cx) => {
         cx.stop_propagation();
         // ダブルクリックの 2 回目は数えない (付けてすぐ外さない)
         if ((e?.click_count ?? 1) > 1) return;
-        this.toggleMark(key, s, cx);
+        onToggle(cx);
       })
       .child(marked ? "戻す" : "×");
   }
@@ -1068,8 +1137,9 @@ export default class HubPanel extends View {
     if (why) return div().pl(x).text_size(this.fs(11)).text_color(c.dim).child(`ミニ絵を出せない: ${why}`);
     const W = this.fs(MINI.w);
     const H = this.fs(MINI.h);
-    // ペインの幅 (zoom で割った px) から一覧と節のカードの余白 (PIC.pad) と左の空きを引いた幅。幅を知るまで (最初の描画) は等倍
-    const avail = this.width == null ? null : this.width / appZoom() - PIC.pad - x;
+    // ペインの幅 (zoom で割った px) から一覧と節のカードの余白 (PIC.pad)・節の中の箱の余白 (s.inset。Q&A の項目のカードと答えの字下げ)・
+    // 左の空きを引いた幅。幅を知るまで (最初の描画) は等倍
+    const avail = this.width == null ? null : this.width / appZoom() - PIC.pad - (s.inset ?? 0) - x;
     const r = avail == null ? 1 : clamp(avail / W, PIC.min, 1);
     const fig = { title: s.title, src: p.path, width: MINI.w, height: MINI.h, caption: p.alt };
     const hint = "クリックで大きく見る (Esc で閉じる)";
@@ -1134,6 +1204,111 @@ export default class HubPanel extends View {
     if (this.probe[key] != null && Math.abs(this.probe[key] - w) < 0.25) return;
     this.probe[key] = w;
     cx.notify();
+  }
+
+  // ---- Q&A (頭のコメントの「Q&A」) ----
+
+  // 出す項目 (消す印を付けた後に panel.json が変わった項目を除く)
+  qaShown(s) {
+    return qaItemsOf(s).filter(({ it }) => this.markState(it) !== "hidden");
+  }
+
+  // Q&A の節の題。後ろに、出している項目の数を「(N)」で足す
+  qaTitle(s) {
+    const t = str(s.title);
+    const n = `(${this.qaShown(s).length})`;
+    return t === "" ? n : `${t} ${n}`;
+  }
+
+  // 項目の開け閉めを覚える鍵 (節の id と項目の id。id の無い項目は items の中の位置)
+  qaKey(id, it, i) {
+    const k = markKey(it);
+    return `${id}\u0000${k != null ? k : `@${i}`}`;
+  }
+
+  // 項目の初めの開け閉め: open が boolean ならそれ、ほかは items の 1 つ目だけを開く
+  qaOpenByDefault(it, i) {
+    return typeof it.open === "boolean" ? it.open : i === 0;
+  }
+
+  // Q&A の節の中身。項目を panel.json の順に縦に並べる
+  qaBody(s, id, c) {
+    const shown = this.qaShown(s);
+    if (shown.length === 0) return div().text_color(c.muted).child("(項目はありません)");
+    return v_flex()
+      .gap(8)
+      .children(shown.map(({ it, i }) => this.qaItem(s, it, i, id, c)));
+  }
+
+  // 項目: 枠のついた小さなカード。頭の行 (印・「Q. <q>」・時刻・×) と、開いていれば、その下に 1 段下げた答え
+  qaItem(s, it, i, id, c) {
+    const key = this.qaKey(id, it, i);
+    const open = this.qaOpen[key] ?? this.qaOpenByDefault(it, i);
+    const mkey = this.marksOn() ? markKey(it) : null; // × を出すのは、まとめのペインの id のある項目だけ
+    const marked = this.markState(it) === "marked";
+    const q = str(it.q);
+    const at = str(it.at).trim();
+    const S = this.fs(12); // 開け閉めの印の欄の幅 (節の題の行の ▸ の欄と同じ)
+    const gap = 6;
+    const head = h_flex()
+      .id(`hp-qh-${id}-${i}`)
+      .flex_1()
+      .min_w(0)
+      .gap(gap)
+      .items_start()
+      .cursor_pointer()
+      .tooltip(open ? "畳む" : "開く")
+      .on_click((e, cx) => {
+        // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.qaOpen[key] = !open;
+        cx.notify();
+      })
+      .child(div().flex_none().w(S).text_color(c.dim).child(open ? "▾" : "▸"))
+      .child(
+        div()
+          .flex_1()
+          .min_w(0)
+          .font_semibold()
+          .text_color(marked ? c.muted : c.fg)
+          .when(marked, (el) => el.line_through())
+          .child(`Q. ${q}`),
+      )
+      .when(at !== "", (el) => el.child(div().flex_none().text_size(this.fs(10)).text_color(c.dim).child(at)));
+    let answer = null;
+    if (open) {
+      const a = str(it.a);
+      answer =
+        a.trim() === ""
+          ? div().text_size(this.fs(12)).text_color(c.dim).child("(まだ答えていない)")
+          : // inset: 項目のカードの左右の余白と枠 (px(10)・border_1) と答えの字下げ。ミニ絵がカードからはみ出さない幅を決める
+            this.markdownBody({ title: `Q. ${q}`, text: a, inset: 22 + S + gap }, `${id}-qa-${i}`, c);
+    }
+    return v_flex()
+      .id(`hp-qa-${id}-${i}`)
+      .px(10)
+      .py(8)
+      .gap(6)
+      .rounded(8)
+      .border_1()
+      .when(marked, (el) => el.border_dashed())
+      .border_color(marked ? c.warn : c.border)
+      .text_size(this.fs(12))
+      .child(
+        h_flex()
+          .gap(6)
+          .items_start()
+          .child(head)
+          .when(mkey != null, (el) =>
+            el.child(
+              this.markButton(`hp-qm-${id}-${i}`, marked, c, ["印を外す (この項目を残す)", "次の更新でこの項目を消す (もう一度押すと戻せる)"], (cx) =>
+                this.toggleMark(mkey, { title: q, section: markKey(s) ?? "" }, cx),
+              ),
+            ),
+          ),
+      )
+      .when(marked, (el) => el.child(div().pl(S + gap).text_size(this.fs(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
+      .when(!!answer, (el) => el.child(div().pl(S + gap).min_w(0).when(marked, (e) => e.opacity(0.45)).child(answer)));
   }
 
   // ---- チケットと PR の一覧 (頭のコメントの「チケットと PR の一覧」) ----
