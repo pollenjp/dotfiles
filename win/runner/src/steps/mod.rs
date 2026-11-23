@@ -38,6 +38,7 @@ pub mod powertoys;
 pub mod ps1;
 pub mod ssh_config;
 pub mod sshd_keys;
+pub mod t3_code_settings;
 pub mod terminal;
 pub mod tool_skill;
 pub mod user_path;
@@ -234,6 +235,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
             show_words: options.show_words,
         }),
         Box::new(pin_updates::PinUpdates),
+        // T3 Code のテレメトリの環境変数と settings.json (Windows にしか無い手順。T3 Code を入れるのは ps1 の手順 t3-code。dotfiles-private の
+        // docs/adr/091_t3_code_opt_in_*)
+        Box::new(t3_code_settings::T3CodeSettings),
     ];
     for spec in tool_skill::SPECS {
         steps.push(Box::new(tool_skill::ToolSkill(spec)));
@@ -299,12 +303,14 @@ mod tests {
                 (97, "herdr"),
                 (97, "ntn"),
                 (97, "pin-updates"),
+                (97, "t3-code"),
                 (97, "type-clipboard"),
                 (98, "google-ime"),
                 (98, "hc-skill"),
                 (98, "herdr-app-mods"),
                 (98, "herdr-app-pjp-spaces"),
                 (98, "herdr-app-skill"),
+                (98, "t3-code-settings"),
                 (99, "claude-accounts"),
                 (99, "claude-selector"),
                 (99, "herdr-app-keys"),
@@ -352,7 +358,7 @@ mod tests {
     }
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキーと
-    /// claude-personal・claude-work と claude-selector だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -375,10 +381,12 @@ mod tests {
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",
+                "t3-code",
                 "hc-skill",
                 "herdr-app-mods",
                 "herdr-app-pjp-spaces",
                 "herdr-app-skill",
+                "t3-code-settings",
                 "claude-accounts",
                 "claude-selector",
                 "herdr-app-keys",

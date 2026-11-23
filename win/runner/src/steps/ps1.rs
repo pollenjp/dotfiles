@@ -109,6 +109,8 @@ pub struct Ps1Spec {
     pub sync_notice: Option<&'static str>,
     /// `-Check` が時間切れのときに添える見込み (無ければ「winget の応答が止まっているかもしれない」)
     pub check_hang: Option<&'static str>,
+    /// Windows にしか無い手順か (WSL の `bootstrap-windows-<id>.sh` を持たない。`StepInfo::windows_only`。受け持ちによらず runner が受け持つ)
+    pub windows_only: bool,
 }
 
 /// SSH の中継を渡す手順 (`ssh_relay`。op-reason) で、版は揃っていて中継だけが違うときの ps1 の締めの行と、そのときの字
@@ -127,6 +129,7 @@ const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っ�
 pub const SPECS: &[Ps1Spec] = &[
     Ps1Spec {
         id: "google-ime-install",
+        windows_only: false,
         order: 95,
         title: "Google 日本語入力を固定した版で入れる (ずれていても上げない)",
         gate: Gate::Always,
@@ -174,6 +177,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "openssh",
+        windows_only: false,
         order: 96,
         title: "OpenSSH を固定した版で入れる (ずれていても揃えない)",
         gate: Gate::Always,
@@ -209,6 +213,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "sshd",
+        windows_only: false,
         order: 96,
         title: "sshd を OpenSSH の MSI に足し、Tailscale と localhost からだけ鍵で入れる形に揃える (ずれていても揃えない)",
         gate: Gate::Tool("windowsSshd"),
@@ -274,6 +279,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "tailscale",
+        windows_only: false,
         order: 96,
         title: "Tailscale を固定した版で入れる (ずれていても上げない)",
         gate: Gate::Tool("windowsTailscale"),
@@ -317,6 +323,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "claude-code",
+        windows_only: false,
         order: 97,
         title: "Claude Code を固定した版に揃える",
         gate: Gate::Tool("windowsClaudeCode"),
@@ -350,6 +357,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "herdr-app",
+        windows_only: false,
         order: 97,
         title: "herdr-app と herdr-core を固定した版と取得元 (手元のフィード) に揃える",
         gate: Gate::Tool("windowsHerdr"),
@@ -382,6 +390,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "herdr",
+        windows_only: false,
         order: 97,
         title: "herdr を固定した版で入れる (ずれていても入れ替えない)",
         gate: Gate::Tool("windowsHerdr"),
@@ -412,6 +421,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "ntn",
+        windows_only: false,
         order: 97,
         title: "ntn (Notion の CLI) を固定した版に揃える",
         gate: Gate::Tool("windowsNtn"),
@@ -444,6 +454,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "op-reason",
+        windows_only: false,
         // WSL の script と同じ 90 (files の後・ssh-config (91) の前)。SSH の中継を使うホストでは、ここで起こした中継が答えるのを
         // 手順 ssh-config が見てから IdentityAgent を書く
         order: 90,
@@ -489,6 +500,7 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     Ps1Spec {
         id: "type-clipboard",
+        windows_only: false,
         order: 97,
         title: "type-clipboard を固定した版で入れる (ずれていても入れ替えない)",
         gate: Gate::Tool("windowsTypeClipboard"),
@@ -515,6 +527,53 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+    },
+    // T3 Code (Windows にしか無い手順。WSL の setup には無い。dotfiles-private の docs/adr/091_t3_code_opt_in_*)。テレメトリの環境変数と
+    // settings.json は t3-code-settings が合わせる
+    Ps1Spec {
+        id: "t3-code",
+        windows_only: true,
+        order: 97,
+        title: "T3 Code を固定した版で入れる (ずれていても上げない)",
+        gate: Gate::Tool("windowsT3Code"),
+        script: "win/t3-code/Install-T3Code.ps1",
+        command: "Install-T3Code",
+        subject: "Windows の T3 Code",
+        package: "T3 Code (winget の T3Tools.T3Code)",
+        header: Header::Contains("T3 Code (winget の T3Tools.T3Code"),
+        check_secs: 120,
+        install_secs: 600,
+        // 入っている版の方が新しいとき (T3 Code の自動更新で上がった) は ps1 が 0 を返す。1 は古い・pin が無い・版が読めない
+        policy: Policy::Warn,
+        // user スコープの nullsoft の installer で、UAC の確認は出ない
+        uac: false,
+        ok_text: "Windows の T3 Code は、dotfiles で固定した版以上で入っています。",
+        // サインインとログインは手でする、の案内は ps1 の出力 (上に流れている) に入っている (重ねて出さない)
+        installed: &["Windows に T3 Code を入れました。"],
+        synced: &[],
+        manual_fix: &[
+            "揃えるには PowerShell で Install-T3Code を打つ (上げるときは先に T3 Code を閉じる。pin を足すだけなら閉じなくてよい。runner は上げない: T3 Code は自動更新で自分で上がる)",
+        ],
+        sync_fix: &[
+            "入れるには PowerShell で Install-T3Code を打つか、dotfiles apply --steps t3-code を流し直す",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        missing_blocked: Some("winget show --versions に無い"),
+        output_fixes: &[
+            (
+                "winget show --versions に無い",
+                "固定した版が winget に無いので、入れることも上げることもできない。repo の版 (Install-T3Code.ps1 の -Version と nix/pkgs/t3-code の version) を winget show --id T3Tools.T3Code --versions にある版へ変える",
+            ),
+            (
+                "比べられない",
+                "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で winget list --id T3Tools.T3Code を打って入っている版を確かめる",
+            ),
+        ],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -924,7 +983,7 @@ impl Step for Ps1Step {
             title: self.0.title,
             gate: self.0.gate,
             ported: true,
-            windows_only: false,
+            windows_only: self.0.windows_only,
         }
     }
 
@@ -2233,7 +2292,8 @@ mod tests {
     #[test]
     fn timeouts_match_wsl_wrappers() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-        for s in SPECS {
+        // Windows にしか無い手順 (t3-code) は WSL の wrapper を持たない
+        for s in SPECS.iter().filter(|s| !s.windows_only) {
             let script = repo
                 .join("nix")
                 .join("scripts")

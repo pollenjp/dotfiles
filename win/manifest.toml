@@ -99,3 +99,8 @@ hint = "PowerShell で Install-Sshd -Check を打つと、sshd (Tailscale と lo
 src = "tailscale/Install-Tailscale.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Tailscale.ps1"
 hint = "PowerShell で Install-Tailscale -Check を打つと、固定した版との差が分かる (setup --update が入れるのは dotfiles.wsl.windowsFiles.tailscale.enable = true のマシンだけで、入っていないときだけ入れる (UAC の確認が出る)。入っていれば上げない。ログインは手でする)"
+
+[[files]]
+src = "t3-code/Install-T3Code.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-T3Code.ps1"
+hint = "PowerShell で Install-T3Code -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsT3Code = true のマシンだけで、入っていないときだけ入れる。入っていれば上げない。サインインとログインは手でする)"

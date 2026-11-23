@@ -802,6 +802,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
+| `bootstrap-t3-code.sh` | 70 | `bootstrap-claude-accounts.sh`（60）が claude のアカウント `t3`（`~/.claude-t3`）を用意した後に、T3 Code の settings.json の決めたキーを合わせ、状態（service・nix-ld・linger・claude-t3 のログイン・T3 Connect）を出す（`dotfiles.t3Code.enable = true` のマシンだけ（`# tool: t3Code`。どのグループでも既定は false）。[後述](#t3-code)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-op-reason.sh` | 90 | `bootstrap-windows-files.sh` (同じ 90。辞書順でこちらが後) が置いた `Install-OpReason.ps1` で、Windows の op-reason (WSL の op の Windows の部品。自作の OSS) を固定した版に揃える (WSL の op の wrapper を入れ (`# tool: onePassword`)、win/ を配るマシンだけ。入っていなければ GitHub の Release から入れ、版がずれていれば入れ替える。WSL の実行ファイルと版が違うと op が断るため)。Windows の runner の手順 `op-reason` と同じ 90 で、ssh の設定 (91) より前 (runner は、SSH の中継を使うホストで、ここで起こした中継が答えるのを手順 `ssh-config` が見てから `IdentityAgent` を書く。WSL の setup は中継に触らない)。衝突で exit 1 しうる `bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より前 |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
@@ -927,6 +928,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
+| 6.7.2 | `./nix/scripts/bootstrap-t3-code.sh` | `bootstrap-t3-code` | T3 Code の settings.json の決めたキーを合わせ、状態を出す（`dotfiles.t3Code.enable = true` のマシンだけ。[後述](#t3-code)） |
 | 6.8 | `./nix/scripts/bootstrap-windows-files.sh` | `bootstrap-windows-files` | repo 直下の `win/` を Windows 側へ配る（[後述](#windows-側のファイルを配る)） |
 | 6.8.1 | `./nix/scripts/bootstrap-windows-powertoys.sh` | `bootstrap-windows-powertoys` | PowerToys が入っていなければ winget で入れ、Keyboard Manager と自動起動がオフならオンにして起動し直し、配った割り当てを Keyboard Manager に読み直させる（[`win/README.md`](../win/README.md#keyboard-manager-と自動起動をオンにする)） |
 | 6.8.2 | `./nix/scripts/bootstrap-windows-fancyzones.sh` | `bootstrap-windows-fancyzones` | FancyZones の `settings.json` に、dotfiles が持つキー (Windows スナップのオーバーライドなど) だけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定を決まりの `default` にそろえ、テンプレートのままのディスプレイの組に解像度の決まりのレイアウトをあて、組の無い仮想デスクトップに組を作る。設定画面で変えたキーは戻し、PC のエディターで直したレイアウトと手であてたレイアウトは書き換えずに知らせる（[`win/README.md`](../win/README.md#fancyzones)） |
@@ -1761,6 +1763,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `~/.config/systemd/user/cc-pages.service` | `nix/home/modules/cc-pages.nix` (生成。バイナリの `~/bin/cc-pages` は `bootstrap-cc-pages.sh` が置く。[後述](#長い応答を読む-web-ビューア-cc-pages)) |
 | `~/.config/cc-pages/config.toml` | 同上 (生成。`dotfiles.ccPages.port` を選んだマシンだけ。[後述](#待ち受けの-port-を変える)) |
 | `~/.config/systemd/user/pjp-dev-tracker-inbox.service` | `nix/home/modules/dev-tracker-inbox.nix` (生成。`dotfiles.claude.devTracker.inbox.enable` のマシンだけ。本体の `ticket.sh` は claude-skills にある。[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)) |
+| `~/.config/systemd/user/t3code.service`・`~/.local/bin/t3` | `nix/home/modules/t3-code.nix` (生成。t3 が書くものと同じ中身。`dotfiles.t3Code.enable` のマシンだけ。[後述](#t3-code)) |
 
 複製時に `~/dotfiles/...` への参照を書き換えている（store 管理では解決できないため）。
 
@@ -5540,6 +5543,63 @@ store の binary は書き換えられないので、端末で `ntn update` を�
 
 cloud の VM は home-manager を通らないので、ntn は環境の setup script の install script で入れる（[前述](#環境を作る)。
 版は固定されず、その時の最新）。
+
+## T3 Code
+
+T3 Code (pingdotgg/t3code) の CLI `t3` と、そのサーバーを常駐させる systemd の user service (`t3code.service`) を、`dotfiles.t3Code.enable = true`
+のマシンにだけ入れる (どのグループでも既定は false。効くのは Linux で `claude.enable` も true のマシン。dotfiles-private の ADR 091
+(`docs/adr/091_t3_code_opt_in_*`))。Windows の desktop app は Windows の runner が入れる (win/README.md の「T3 Code」)。入れるホストは、そのホストの
+modules に書く:
+
+```nix
+modules = [
+  {
+    dotfiles.t3Code = {
+      enable = true;
+      clearClaudeEntrypoint = true;   # クレジットを使う間だけ (win/README.md の「CLAUDE_CODE_ENTRYPOINT」)
+    };
+  }
+];
+```
+
+| 置くもの | 置き方 |
+| --- | --- |
+| `~/.t3/runtime/versions/<版>/` | 公式の配布物 (GitHub の release の `t3-<版>-linux-<arch>.tar.gz`) を `pkgs/t3-code` が版と sha256 で固定して取り、activation が写す (`.install-complete` が版と違うときだけ。公式の installer と同じ置き場所と中身) |
+| `~/.local/bin/t3` | t3 の launcher (`exec '<runtime>/t3' "$@"`)。公式の installer が書くものと同じ中身 |
+| `~/.config/systemd/user/t3code.service` (と `default.target.wants`) | t3 0.1.11 の `t3 up` が書く unit と同じ文字列。t3 は unit の中身を自分の書くものと比べ、同じなら書き換えない (`t3 up`・`t3 connect` も) |
+| `~/.t3/userdata/settings.json` の決めたキー | setup の `bootstrap-t3-code.sh` が合わせる (Claude の home `~/.claude-t3`・新しいスレッドの既定 (Opus 5.5 の effort high・新しい worktree)・`CLAUDE_CODE_ENTRYPOINT`。値は `nix/files/t3-code/managed-settings.json` で Windows と共有。ほかのキーと順は残す) |
+| claude のアカウント `t3` | claude-account の既定のアカウントに足す (`claude-t3`・`~/.claude-t3`。[前述](#claude-code-のアカウントを分ける-claude-personal--claude-work)) |
+
+- 配布物は `/lib64/ld-linux-x86-64.so.2` を使う動的リンクの実行ファイル (Bun でまとめたもの。中身を書き換えると壊れうるので patchelf しない)。
+  NixOS では `programs.nix-ld.enable = true` が要る。setup が `t3 --version` を打って確かめ、起きなければ知らせる
+- service がログインの外でも動くよう、linger を有効にする (`sudo loginctl enable-linger <名前>`。NixOS は `users.users.<名前>.linger = true`)。setup が
+  確かめて知らせる
+- 前に `t3 up` が書いた unit・launcher (ふつうのファイル) は、switch が消して dotfiles のものに置き換える。中身は同じなので、service は起こし直さない
+- `claude-account add t3` で前に登録したマシンは、`t3` が既定のアカウントになった後に `claude-account remove t3` を打つと、登録と
+  `~/.local/bin/claude-t3` の link だけが外れる (`~/.claude-t3` のログインは残る。打たなくても動く)
+
+### T3 Code の手で打つもの
+
+dotfiles は対話の要るものに触らない。`~/dotfiles/setup --update` の `bootstrap-t3-code.sh` が、足りないものを警告で知らせる:
+
+1. claude-t3 のログイン: 端末で `claude-t3` を起こし、`/login` を打つ (T3 の会話は `~/.claude-t3` の資格情報で動く)
+2. T3 Connect: `t3 connect` (device code でサインイン。表示の URL を別の端末で開く) → `systemctl --user restart t3code` → `t3 connect status` の
+   `Environment link:` が provisioned になったかを見る (relay の cloudflared は t3 が `~/.t3/tools/` に自分で入れる)
+3. 端末どうしのリンク: `t3 pair` (QR か code を、つなぐ側の T3 で読む)
+
+- Windows の T3 Code の app から ssh でこのマシンにつながない (win/README.md の「T3 Code を入れる」)。T3 Connect でつなぐ
+
+### T3 Code の版を上げる
+
+`t3 update` は打たない (unit と launcher が t3 の書いたものに変わり、次の switch で dotfiles の版に戻る)。版は Windows と同じ PR で上げる
+(win/README.md の「T3 Code の新しい版が出たとき」):
+
+1. `pkgs/t3-code/default.nix` の `version` と、system ごとの `sha256` (GitHub の release の asset の digest。
+   `gh api repos/pingdotgg/t3code/releases/tags/v<版> --jq '.assets[] | select(.name | startswith("t3-")) | [.name, .digest] | @tsv'`) を変える
+2. t3 の書く unit が変わっていないかを、新しい版の `t3 up` が書くもの (別の HOME で打つ) と `home/modules/t3-code.nix` の `unit` を見比べる。変わって
+   いれば `unit` と `tests/t3-code.nix` を合わせる
+3. merge の後、`~/dotfiles/setup --update` で新しい runtime が入り、service は新しい launcher で起き直す。続けて `t3 service install` を打ち、t3 の
+   状態 (`~/.t3/runtime/service-state.json`) を新しい版に揃える (`t3 service status` の `Status: installed · t3@<版>` で確かめる。setup も知らせる)
 
 ## claude-skills の Rust の道具 (shim の pjp)
 

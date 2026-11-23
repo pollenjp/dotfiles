@@ -273,6 +273,10 @@ function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1
 # (Tailscale が自分で上がる)。tailnet へのログインは、入れた後にタスクトレイの Tailscale のアイコンから手でする。
 function Install-Tailscale { & "$HOME\.config\powershell\Install-Tailscale.ps1" @args }
 
+# Windows の T3 Code (winget の T3Tools.T3Code) を固定した版で入れる。中身は同じ場所へ配る Install-T3Code.ps1 (win/README.md の
+# 「T3 Code」)。-Check なら確かめるだけ。user スコープなので UAC の確認は出ない。上げるときは T3 Code を閉じてから打つ。
+function Install-T3Code { & "$HOME\.config\powershell\Install-T3Code.ps1" @args }
+
 # Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ、鍵でだけ SSH で入れる形に揃える。
 # 中身は同じ場所へ配る Install-Sshd.ps1 (win/README.md の「sshd」)。-Check なら確かめるだけ。揃えるときは Windows に UAC の確認が
 # 1 回出る (sshd を起こし直すと、つないでいる SSH が切れることがある)。鍵は setup が置く写し (%LOCALAPPDATA%\dotfiles\sshd\authorized_keys)

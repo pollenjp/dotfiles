@@ -630,8 +630,9 @@ cmd_list() {
   if ! reg=$(registry_names); then
     reg="" bad_registry=1
   fi
+  # 既定になった名前 (前に add で登録してから、dotfiles が既定に足したもの。t3) は 2 度出さない
   while IFS= read -r n; do
-    if [[ -n ${n} ]]; then
+    if [[ -n ${n} ]] && ! is_default "${n}"; then
       names+=("${n}")
     fi
   done <<<"${reg}"
@@ -709,11 +710,26 @@ cmd_remove() {
     err "claude-account: ${name} は管理のコマンド・claude-selector の名前で、アカウントではありません。"
     return 2
   fi
-  if is_default "${name}"; then
-    err "claude-account: ${name} は既定のアカウントなので消せません (dotfiles が作る)。"
-    return 2
-  fi
   cur=$(registry_mode "${name}") || return 1
+  if is_default "${name}"; then
+    # 前に add で登録してから dotfiles が既定に足した名前 (t3) は、登録と add の張った link だけを外す (~/.claude-<名前> は既定の
+    # アカウントのものなので、--purge でも消さない)
+    if [[ -z ${cur} ]]; then
+      err "claude-account: ${name} は既定のアカウントなので消せません (dotfiles が作る)。"
+      return 2
+    fi
+    link="${bin_dir}/claude-${name}"
+    if [[ $("${cu}/readlink" -- "${link}" 2>/dev/null) == "${launcher_target}" ]]; then
+      "${cu}/rm" -f -- "${link}" || return 1
+      echo "消しました: $(shown "${link}")"
+    fi
+    if ! registry_put "${name}" ""; then
+      err "claude-account: 登録の一覧 ($(shown "${registry}")) に書けません。"
+      return 1
+    fi
+    echo "登録から外しました: ${name} (既定のアカウントになったので。$(shown "${HOME}/.claude-${name}") は既定のアカウントのものとして残します)"
+    return 0
+  fi
   dir="${HOME}/.claude-${name}"
   file="${conf_dir}/${name}.env"
   link="${bin_dir}/claude-${name}"

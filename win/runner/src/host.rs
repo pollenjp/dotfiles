@@ -3,7 +3,7 @@
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
 //! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・
-//! Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
+//! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。
 //!
@@ -21,6 +21,9 @@
 //!
 //! [sshd]
 //! authorizedKeys = ["from=\"100.64.0.1\" ssh-ed25519 AAAA… iphone"]   # sshd に入れる公開鍵 (1 つが authorized_keys の 1 行)。書かなければ null
+//!
+//! [t3Code]
+//! clearClaudeEntrypoint = true  # T3 Code の Claude に CLAUDE_CODE_ENTRYPOINT="" を渡す (書かなければ false)。効くのは [tools] windowsT3Code = true のとき
 //!
 //! [claude.notion]
 //! profile = "personal"          # Notion へ書く skill がこのマシンで既定に使うプロファイル (書かなければ null)
@@ -280,6 +283,9 @@ pub struct HostValues {
     /// sshd に入れる公開鍵 (`[sshd] authorizedKeys`。1 つが authorized_keys の 1 行)。None は書いていない (dotfiles は鍵を置かない。Nix の
     /// null と同じ)、空の Vec は鍵 0 本。使うのは受け持ちが runner のホストの手順 sshd だけ (`steps::sshd_keys`)
     pub sshd_keys: Option<Vec<String>>,
+    /// T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code] clearClaudeEntrypoint`。書かなければ false)。クレジットを使う間
+    /// だけの手当て (dotfiles-private の docs/adr/091_t3_code_opt_in_*)。Linux の `dotfiles.t3Code.clearClaudeEntrypoint` と同じ
+    pub t3_clear_claude_entrypoint: bool,
     /// Notion へ書く skill の宛先 (`[claude.notion]`)
     pub notion: NotionValues,
     pub source: Source,
@@ -295,6 +301,7 @@ impl HostValues {
             runner_enable: false,
             ssh_relay_mode: SSH_RELAY_MODES[0].to_string(),
             sshd_keys: None,
+            t3_clear_claude_entrypoint: false,
             notion: NotionValues::default(),
             source: Source::Missing(path.to_path_buf()),
             groups,
@@ -458,6 +465,30 @@ fn shorten(s: &str) -> String {
     }
 }
 
+/// `[t3Code]` を読む (Claude の CLAUDE_CODE_ENTRYPOINT を空にするか)。書けるのは clearClaudeEntrypoint だけ
+fn parse_t3_code(v: &toml::Value) -> Result<bool, String> {
+    let toml::Value::Table(t) = v else {
+        return Err("t3Code は [t3Code] の表で書いてください".to_string());
+    };
+    let unknown: Vec<&str> = t
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k != "clearClaudeEntrypoint")
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "[t3Code] に知らないキーがあります: {} (書けるのは clearClaudeEntrypoint だけ)",
+            unknown.join(", ")
+        ));
+    }
+    match t.get("clearClaudeEntrypoint") {
+        None => Ok(false),
+        Some(v) => v.as_bool().ok_or_else(|| {
+            "[t3Code] の clearClaudeEntrypoint は true か false で書いてください".to_string()
+        }),
+    }
+}
+
 /// ホストの値の既定の置き場所: dotfiles-private の clone の `win/hosts/<user>@<pc>.toml`。dotfiles-private は dotfiles の clone の隣、
 /// 無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`) で探す (`context::clone_dir`)。
 pub fn default_path(repo: &Path, user_profile: Option<&Path>, user: &str, pc: &str) -> PathBuf {
@@ -485,11 +516,16 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
     let unknown: Vec<&str> = t
         .keys()
         .map(String::as_str)
-        .filter(|k| !["group", "tools", "runner", "opReason", "sshd", "claude"].contains(k))
+        .filter(|k| {
+            ![
+                "group", "tools", "runner", "opReason", "sshd", "t3Code", "claude",
+            ]
+            .contains(k)
+        })
         .collect();
     if !unknown.is_empty() {
         return Err(fail(format!(
-            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[claude.notion])",
+            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion])",
             unknown.join(", ")
         )));
     }
@@ -559,6 +595,10 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         None => None,
         Some(v) => parse_sshd(v).map_err(fail)?,
     };
+    let t3_clear_claude_entrypoint = match t.get("t3Code") {
+        None => false,
+        Some(v) => parse_t3_code(v).map_err(fail)?,
+    };
     let notion = match t.get("claude") {
         None => NotionValues::default(),
         Some(v) => parse_claude(v).map_err(fail)?,
@@ -569,6 +609,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         runner_enable,
         ssh_relay_mode,
         sshd_keys,
+        t3_clear_claude_entrypoint,
         notion,
         source: Source::File(path.to_path_buf()),
         groups,
@@ -625,7 +666,32 @@ mod tests {
             assert!(!tool(group, "windowsSshd"), "{group}");
             // op-reason の SSH の中継は鍵を使う ssh の通り道を替えるので、どのグループでも既定は off (入れるホストが [tools] に書く)
             assert!(!tool(group, "opReasonSshRelay"), "{group}");
+            // T3 Code はどのグループでも既定は off (入れるホストが [tools] に書く)
+            assert!(!tool(group, "windowsT3Code"), "{group}");
         }
+    }
+
+    #[test]
+    fn t3_code_is_a_known_tool_and_the_entrypoint_value_defaults_to_false() {
+        let h = host("[tools]\nwindowsT3Code = true\n[t3Code]\nclearClaudeEntrypoint = true\n")
+            .unwrap();
+        assert!(h.tool("windowsT3Code"));
+        assert_eq!(h.tool_origin("windowsT3Code"), "ホストの値");
+        assert!(h.t3_clear_claude_entrypoint);
+        let h = host("").unwrap();
+        assert!(!h.tool("windowsT3Code"));
+        assert!(!h.t3_clear_claude_entrypoint);
+        assert!(!HostValues::missing(Path::new("h.toml"), groups()).t3_clear_claude_entrypoint);
+        assert!(!host("[t3Code]\n").unwrap().t3_clear_claude_entrypoint);
+        let e = host("[t3Code]\nclearClaudeEntrypoint = \"yes\"\n").unwrap_err();
+        assert!(e.contains("true か false"), "{e}");
+        let e = host("[t3Code]\nentrypoint = true\n").unwrap_err();
+        assert!(
+            e.contains("[t3Code] に知らないキーがあります: entrypoint"),
+            "{e}"
+        );
+        let e = host("t3Code = true\n").unwrap_err();
+        assert!(e.contains("[t3Code] の表"), "{e}");
     }
 
     #[test]
@@ -784,7 +850,7 @@ mod tests {
         for (text, want) in [
             (
                 "grop = \"x\"",
-                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[claude.notion])",
+                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion])",
             ),
             (
                 "group = \"home\"",

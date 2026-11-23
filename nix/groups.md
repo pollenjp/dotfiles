@@ -33,6 +33,8 @@
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | on | off | `wsl.windowsFiles.enable` |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | on | off | `wsl.windowsFiles.enable` |
 | ② | cursor-agent | `cursorAgent.enable` | off | off | off |  |
+| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | off | off | `claude.enable` |
+| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | off | off |  |
 | ②③ | cc-pages | `ccPages.enable` | on | off | off |  |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | off | off |  |
@@ -77,6 +79,8 @@ flowchart LR
   windowsClaudeCode["Windows の Claude Code<br/>on"]
   windowsHerdr["Windows の herdr・herdr-app<br/>on"]
   cursorAgent["cursor-agent<br/>off"]
+  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
+  windowsT3Code["Windows の T3 Code<br/>off"]
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>on"]
   ccPages["cc-pages<br/>on"]
   herdrHub["集約ハブ ~/h<br/>on"]
@@ -103,6 +107,8 @@ flowchart LR
   t2 --> windowsClaudeCode
   t2 --> windowsHerdr
   t2 --> cursorAgent
+  t2 --> t3Code
+  t2 --> windowsT3Code
   t2 --> claudePrivateSkills
   t3 --> claudePrivateSkills
   t2 --> ccPages
@@ -129,7 +135,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,ntn,windowsNtn,gitIdentity on
-  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,windowsTailscale,windowsSshd off
+  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,t3Code,windowsT3Code,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,windowsTailscale,windowsSshd off
   class wsl,windowsFiles onHost
 ```
 
@@ -154,6 +160,8 @@ flowchart LR
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | 段 (②) の既定 |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | 段 (②) の既定 |
 | ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
+| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
+| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | on | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | 段 (② と ③) の既定 |
@@ -194,6 +202,8 @@ flowchart LR
   windowsClaudeCode["Windows の Claude Code<br/>on"]
   windowsHerdr["Windows の herdr・herdr-app<br/>on"]
   cursorAgent["cursor-agent<br/>off"]
+  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
+  windowsT3Code["Windows の T3 Code<br/>off"]
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
@@ -220,6 +230,8 @@ flowchart LR
   t2 --> windowsClaudeCode
   t2 --> windowsHerdr
   t2 --> cursorAgent
+  t2 --> t3Code
+  t2 --> windowsT3Code
   t2 --> claudePrivateSkills
   t3 --> claudePrivateSkills
   t2 --> ccPages
@@ -246,7 +258,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,t2,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr on
-  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -271,6 +283,8 @@ flowchart LR
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | 段 (②) の既定 |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | 段 (②) の既定 |
 | ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
+| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
+| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
@@ -311,6 +325,8 @@ flowchart LR
   windowsClaudeCode["Windows の Claude Code<br/>off"]
   windowsHerdr["Windows の herdr・herdr-app<br/>off"]
   cursorAgent["cursor-agent<br/>off"]
+  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
+  windowsT3Code["Windows の T3 Code<br/>off"]
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
@@ -337,6 +353,8 @@ flowchart LR
   t2 --> windowsClaudeCode
   t2 --> windowsHerdr
   t2 --> cursorAgent
+  t2 --> t3Code
+  t2 --> windowsT3Code
   t2 --> claudePrivateSkills
   t3 --> claudePrivateSkills
   t2 --> ccPages
@@ -363,7 +381,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles onHost
 ```
 
@@ -388,6 +406,8 @@ flowchart LR
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | off | 段 (②) の既定 |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | off | 段 (②) の既定 |
 | ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
+| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
+| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
@@ -428,6 +448,8 @@ flowchart LR
   windowsClaudeCode["Windows の Claude Code<br/>off"]
   windowsHerdr["Windows の herdr・herdr-app<br/>off"]
   cursorAgent["cursor-agent<br/>off"]
+  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
+  windowsT3Code["Windows の T3 Code<br/>off"]
   claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
   ccPages["cc-pages<br/>off"]
   herdrHub["集約ハブ ~/h<br/>off"]
@@ -454,6 +476,8 @@ flowchart LR
   t2 --> windowsClaudeCode
   t2 --> windowsHerdr
   t2 --> cursorAgent
+  t2 --> t3Code
+  t2 --> windowsT3Code
   t2 --> claudePrivateSkills
   t3 --> claudePrivateSkills
   t2 --> ccPages
@@ -480,7 +504,7 @@ flowchart LR
   classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
   classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
   class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
+  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
   class wsl,windowsFiles,claude onHost
 ```
 
@@ -505,6 +529,8 @@ flowchart LR
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | off | 段 (②) の既定 |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | off | 段 (②) の既定 |
 | ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
+| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
+| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
 | ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
 | ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |

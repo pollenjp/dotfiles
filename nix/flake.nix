@@ -513,6 +513,13 @@
                 touch $out
               '';
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
+          # settings.json に合わせる値の 1 か所 (nix/files/t3-code/managed-settings.json。Windows の runner と共有) も渡す
+          bootstrap-t3-code-test =
+            pkgs.runCommand "bootstrap-t3-code-test" { nativeBuildInputs = [ pkgs.jq ]; }
+              ''
+                bash ${./tests/bootstrap-t3-code.test.sh} ${./scripts/bootstrap-t3-code.sh} ${./files/t3-code/managed-settings.json}
+                touch $out
+              '';
           # setup.sh の手順の並び (bootstrap-claude-skills の後) も見るので、scripts/ を丸ごと渡す
           bootstrap-herdr-hub-test = scriptTest "bootstrap-herdr-hub" ./scripts;
           # setup.sh の手順の並び (bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前) も見るので、scripts/ を丸ごと渡す
@@ -589,7 +596,17 @@
                     ];
                     inherit profileBin;
                   }
-                } ${profileBin} ${./scripts/bootstrap-claude-accounts.sh}
+                } ${profileBin} ${./scripts/bootstrap-claude-accounts.sh} ${
+                  # 既定に t3 を足したもの (T3 Code を入れるホスト。home/modules/claude.nix)
+                  pkgs.callPackage ./pkgs/claude-account {
+                    defaults = [
+                      "personal"
+                      "work"
+                      "t3"
+                    ];
+                    inherit profileBin;
+                  }
+                }
                 touch $out
               '';
           # 1Password の名前の参照を ID の参照に直す pjp-op-ref (pkgs/pjp-op-ref) を、偽の op と偽の項目 (op item get --format json
@@ -614,6 +631,8 @@
           # installCheck が `herdr-core --version`・`hc --version` を版と照らし、包みが core を立てたシェルに固有の env (旧 herdr の
           # pane の印・RUSTUP_TOOLCHAIN) を外して、ほかの env (hc が読む HERDR_RELEASES_URL も) を残すことを確かめる。配布物は Linux だけ
           herdr-core-test = pkgs.callPackage ./pkgs/herdr-core { };
+          # T3 Code の配布物を落とし、runtime の形を見る (起こすのは build の sandbox では無理。nix/pkgs/t3-code の冒頭)
+          t3-code-test = pkgs.callPackage ./pkgs/t3-code { };
           # pjp-ghq-pull の cargo fmt --check と cargo clippy --all-targets -- -D warnings。package と同じ vendor した
           # crate で流す (buildPhase を差し替え、test と install はしない)。指摘は system によらないので Linux だけ
           pjp-ghq-pull-lint = ghqPull.overrideAttrs (old: {
@@ -847,6 +866,14 @@
               ;
           };
           herdr-core-state = import ./tests/herdr-core.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          t3-code-state = import ./tests/t3-code.nix {
             inherit
               lib
               pkgs

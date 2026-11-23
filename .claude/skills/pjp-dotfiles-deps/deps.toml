@@ -12,7 +12,9 @@ flake_lock_age = ["nix/scripts/flake-lock-age.sh"]
 # - nix/pkgs/herdr-core/: 版は [[pins]] の windows (releases.json の herdr-app・herdr-core) で見る
 # - nix/pkgs/op-reason/: 自作のアプリ (WSL の op の wrapper) の Release。公開からの猶予を置かず、Release を出す流れで
 #   win/op-reason/ と同じ PR で上げる (nix/README.md の「op-reason の新しい版を出したとき」)。印 # release-source: も置かない
-skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/", "nix/pkgs/op-reason/"]
+# - nix/pkgs/t3-code/: T3 Code の CLI。Windows の win/t3-code/Install-T3Code.ps1 と同じ版にし、同じ PR で手で上げる (新しい版の知らせには
+#   まだ載せていない。nix/README.md の「T3 Code の版を上げる」)。印 # release-source: も置かない
+skip = ["nix/pkgs/upstream/", "nix/pkgs/herdr-core/", "nix/pkgs/op-reason/", "nix/pkgs/t3-code/"]
 
 # release-age.nix の fromUpstream の消し時を見る (dotfiles だけの仕組み。nix/README.md の「猶予の日数と例外」)
 [upstream_cleanup]
@@ -72,6 +74,16 @@ when = ["win/ntn/"]
 name = "win-claude-code"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/claude-code/Install-ClaudeCode.Tests.ps1"]
 when = ["win/claude-code/"]
+
+[[checks]]
+name = "t3-code"
+run = ["nix", "build", "--no-link", "-L", "./nix#checks.x86_64-linux.t3-code-test"]
+when = ["nix/pkgs/t3-code/"]
+
+[[checks]]
+name = "win-t3-code"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/t3-code/Install-T3Code.Tests.ps1"]
+when = ["win/t3-code/"]
 
 [[checks]]
 name = "win-tailscale"

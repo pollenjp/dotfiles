@@ -4,7 +4,8 @@
 # nix/pkgs/claude-account (アカウントを足す管理のコマンド claude-account と、launcher claude-<名前> を兼ねる 1 本の script) を、
 # 一時の HOME・偽の claude・偽の op で確かめる。
 #
-#   bash nix/tests/claude-account.test.sh <claude-account の package> <package に埋めた profileBin> <bootstrap-claude-accounts.sh>
+#   bash nix/tests/claude-account.test.sh <claude-account の package> <package に埋めた profileBin> <bootstrap-claude-accounts.sh> \
+#     [<既定に t3 を足した package>]
 #
 # flake の checks (claude-account-test) が Nix のサンドボックスで流す。本物の claude・op・1Password は使わない。token の値はどれも
 # ダミー (dummy- で始まる) で、launcher と管理のコマンドの stdout・stderr に出ないことを見る (値を受けた偽の claude だけが控えに書く)。
@@ -24,6 +25,8 @@
 #     - list: 既定と登録のアカウントを種類と元と一緒に並べる
 #     - remove: 既定と知らない名前は 2。登録から外して launcher を消し、dir と token のファイルを残す。--purge なら両方を消すが、
 #       dir の中のリンクの先 (~/.claude の settings.json・projects・skills) は残る。登録から外したあとの --purge でも消せる
+#     - 既定に足した名前 (前に add で登録してから dotfiles が既定に足した t3。4 つ目の引数の package): list は 1 度だけ既定として出し、
+#       remove は登録と add の張った launcher の link だけを外して dir を残す (2 度目は既定なので 2)
 #   launcher
 #     - 既定 (claude-personal): 用意が無ければ 1 で setup を出す。用意されていれば env を外し CLAUDE_CONFIG_DIR を付け、引数と終了
 #       コードを渡す
@@ -55,6 +58,7 @@ set -u -o pipefail
 pkg=${1:?claude-account の package を渡す}
 profile_bin=${2:?package に埋めた profileBin を渡す}
 bootstrap=${3:?bootstrap-claude-accounts.sh を渡す}
+pkg_t3=${4:-}
 work=$(mktemp -d "${TMPDIR:-/tmp}/claude-account-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
@@ -642,6 +646,36 @@ if [[ $(rc) == 0 && $(mode_of token1) == '<none>' && ! -e ${token_file} && ! -e 
   ok "remove --purge: 登録・launcher・dir・token のファイルを消す"
 else
   ng "remove --purge" "$(detail)"
+fi
+
+# --- 既定に足した名前 (前に add で登録してから、dotfiles が既定に足した t3)
+if [[ -n ${pkg_t3} ]]; then
+  reset_home
+  ln -s "${pkg}/bin/claude-account" "${linkbin}/claude-t3"
+  run claude-account add t3 --mode subscription
+  r1=$(rc)
+  ln -sfn "${pkg_t3}/bin/claude-account" "${linkbin}/claude-account"
+  run claude-account list
+  if [[ ${r1} == 0 && $(rc) == 0 && $(grep -Ec '^t3 ' "${work}/out") == 1 ]] && grep -Eq '^t3 +subscription +既定' "${work}/out"; then
+    ok "既定に足した名前は、登録にあっても list に 1 度だけ既定として出る"
+  else
+    ng "既定と登録の重なりの list (${r1})" "$(detail)"
+  fi
+  run claude-account remove t3 --purge
+  if [[ $(rc) == 0 && $(mode_of t3) == '<none>' && ! -e ${home}/.local/bin/claude-t3 && ! -L ${home}/.local/bin/claude-t3 ]] \
+    && [[ -d ${home}/.claude-t3 ]] && grep -Fq '登録から外しました: t3' "${work}/out"; then
+    ok "既定に足した名前の remove は、登録と launcher の link だけを外し、--purge でも dir を残す"
+  else
+    ng "既定と登録の重なりの remove" "$(detail)"
+  fi
+  run claude-account remove t3
+  if [[ $(rc) == 2 ]] && grep -Fq '既定のアカウントなので消せません' "${work}/err"; then
+    ok "登録から外した後の既定の名前の remove は 2"
+  else
+    ng "既定の名前の remove の打ち直し" "$(detail)"
+  fi
+  ln -sfn "${pkg}/bin/claude-account" "${linkbin}/claude-account"
+  rm -f "${linkbin}/claude-t3"
 fi
 
 echo

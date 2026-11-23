@@ -20,6 +20,7 @@
 #   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定 false。どのグループでも)
 #   dotfiles.wsl.windowsFiles.sshd.enable        Windows に sshd (OpenSSH Server) を入れ、Tailscale から鍵でだけ入れるようにするか (既定 false。どのグループでも)
 #   dotfiles.wsl.windowsFiles.sshd.authorizedKeys  その sshd に入れる公開鍵 (authorized_keys の行。既定 null: dotfiles は鍵を置かない)
+#   dotfiles.wsl.windowsFiles.t3Code.enable      Windows に T3 Code を winget で固定した版で入れ、設定を合わせるか (runner だけ。既定 false。どのグループでも)
 #   dotfiles.wsl.onePassword.windowsUserName     WSL で 1Password のパスに要る Windows ユーザー名 (既定は上の windowsUserName)
 #   dotfiles.wsl.exeExecTrace.enable             WSL から起動された .exe を祖先付きで常時記録するか (ADR 012)
 #   dotfiles.wsl.mtuGuard.enable                 WSL の eth0 の MTU を上限まで下げ続ける見張り (system の unit) を置くか
@@ -39,6 +40,8 @@
 #   dotfiles.mise.minimumReleaseAge              mise が入れる版の遅延 (既定 9d。setup が ~/.config/mise/config.toml に書く)
 #   dotfiles.mise.releaseAgeOverrides            期間を区切って遅延を緩める上書きの list (from・zeroDays・reason。日付は Asia/Tokyo)
 #   dotfiles.cursorAgent.enable                  cursor-agent (Cursor の CLI) を mise で入れるか (既定 false。setup が入れた版に固定する)
+#   dotfiles.t3Code.enable                       T3 Code の CLI (t3) と service (t3code.service) を固定した版で入れ、設定を合わせるか (既定 false。どのグループでも)
+#   dotfiles.t3Code.clearClaudeEntrypoint        T3 Code の Claude に CLAUDE_CODE_ENTRYPOINT="" を渡すか (クレジットを使う間だけの手当て。既定 false)
 #   dotfiles.cleanup.enable                      使わなくなった Nix の store path・世代と mise の版を週 1 回消すか
 #   dotfiles.ccPages.enable                      cc-pages (clone と build・常駐のビューア) を入れるか (既定は ② と ③)
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
@@ -116,8 +119,8 @@ in
       ② AI の道具の段を入れるか。既定はグループから決まる (personal・company は true、client は false)。この段の道具の switch
       (`claude.enable`・`herdr.enable`・`herdrCore.enable`・`wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable`) の
       既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`・
-      `wsl.windowsFiles.claudeAccounts.enable`) は、`personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable` は
-      既定が false のまま (段によらない)。
+      `wsl.windowsFiles.claudeAccounts.enable`) は、`personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable`・
+      `t3Code.enable`・`wsl.windowsFiles.t3Code.enable` は既定が false のまま (段によらない)。
     '';
   };
 
@@ -686,6 +689,42 @@ in
     '';
   };
 
+  options.dotfiles.t3Code = {
+    enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        T3 Code の CLI (`t3`) と、そのサーバーを常駐させる systemd の user service (`t3code.service`) を、dotfiles が固定した版で入れ、
+        `~/.t3/userdata/settings.json` の決めたキー (Claude の home・新しいスレッドの既定) を合わせるマシンか。どのグループでも既定は
+        false (② の段に置くが、段からは決めない。入れるホストが、そのホストの modules (dotfiles-private の `nix/hosts/<ホスト>.nix` か、
+        ローカル flake の tmp。mkHome の引数ではない) で true を書く)。効くのは Linux で `claude.enable` も true のマシンだけ (claude の
+        アカウント `t3` を前提にする)。
+
+        true のとき home/modules/t3-code.nix が、公式の配布物 (nix/pkgs/t3-code。版と sha256 を固定) を t3 の公式の installer と同じ
+        置き場所 `~/.t3/runtime/versions/<版>/` へ写し、`~/.local/bin/t3` の launcher と `~/.config/systemd/user/t3code.service` を、
+        t3 が自分で書くものと同じ中身で置く (`t3 up`・`t3 connect` が書き換えない)。claude-account の既定のアカウントに `t3`
+        (`claude-t3`・`~/.claude-t3`) を足す。settings.json のキーは setup の手順 bootstrap-t3-code.sh (`# tool: t3Code`) が合わせ、
+        状態 (service・nix-ld・linger・claude-t3 のログイン・T3 Connect) を出す。NixOS では `programs.nix-ld.enable` が要る
+        (配布物は FHS の動的リンクの実行ファイル)。ログインと T3 Connect のサインインは手で打つ (nix/README.md の「T3 Code」)。
+
+        false に戻しても、`~/.t3` (runtime・userdata) は消さない。unit と launcher は home-manager が外す。
+      '';
+    };
+
+    clearClaudeEntrypoint = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        T3 Code の Claude (settings.json の `providerInstances.claudeAgent.environment`) に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか。
+        T3 は既定で `t3-code` を渡し、Claude はそれを課金の向きに使う。クレジットを使う間 (2026-11-25 まで) だけ空にして通す手当てで、
+        期限の後は false に戻す。false のときは、setup がその要素を settings.json から外す。効くのは `t3Code.enable` のマシンだけ。
+        Windows の側はホストの値の `[t3Code] clearClaudeEntrypoint`。
+      '';
+    };
+  };
+
   options.dotfiles.ccPages.enable = lib.mkOption {
     type = lib.types.bool;
     default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
@@ -1090,6 +1129,24 @@ in
 
         公開鍵と、from= に書く端末の IP は public な dotfiles には書かず、dotfiles-private のホストの値に書く (端末の足し引きが PR に
         残る)。1 行に改行は入れられない (評価で止まる)。
+      '';
+    };
+
+    windowsFiles.t3Code.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      example = true;
+      description = ''
+        Windows に T3 Code (winget の `T3Tools.T3Code`。user スコープ) を dotfiles が固定した版で入れ、テレメトリを切るユーザー環境変数
+        (`T3CODE_TELEMETRY_ENABLED=false`) と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・新しいスレッドの
+        既定) を合わせるマシンか。どのグループでも既定は false (② の段に置くが、段からは決めない。入れるホストが true を書く)。
+
+        読むのは Windows の runner だけ (手順 `t3-code` と `t3-code-settings`。WSL の setup に同じ手順は無い)。値は
+        `~/.local/state/dotfiles/group.json` の `tools.windowsT3Code` に落ちるが、WSL の setup は使わない。Windows の runner では、
+        ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsT3Code = true` を書く。Claude に
+        `CLAUDE_CODE_ENTRYPOINT=""` を渡すかはホストの値の `[t3Code] clearClaudeEntrypoint` (win/README.md の「T3 Code」)。
+
+        false に戻しても、入れたものと書いた設定は消さない (runner が見なくなるだけ)。
       '';
     };
 
