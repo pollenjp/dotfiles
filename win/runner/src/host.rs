@@ -2,6 +2,7 @@
 //!
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
+//! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・
 //! Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。
@@ -17,6 +18,9 @@
 //!
 //! [opReason]
 //! sshRelayMode = "per-call"     # SSH の中継のモード (per-call・show-only。書かなければ per-call)。効くのは [tools] opReasonSshRelay = true のとき
+//!
+//! [sshd]
+//! authorizedKeys = ["from=\"100.64.0.1\" ssh-ed25519 AAAA… iphone"]   # sshd に入れる公開鍵 (1 つが authorized_keys の 1 行)。書かなければ null
 //!
 //! [claude.notion]
 //! profile = "personal"          # Notion へ書く skill がこのマシンで既定に使うプロファイル (書かなければ null)
@@ -273,6 +277,9 @@ pub struct HostValues {
     /// op-reason の SSH の中継のモード (`[opReason] sshRelayMode`。`SSH_RELAY_MODES` のどれか。書かなければ per-call)。
     /// 効くかは `ssh_relay` で引く
     ssh_relay_mode: String,
+    /// sshd に入れる公開鍵 (`[sshd] authorizedKeys`。1 つが authorized_keys の 1 行)。None は書いていない (dotfiles は鍵を置かない。Nix の
+    /// null と同じ)、空の Vec は鍵 0 本。使うのは受け持ちが runner のホストの手順 sshd だけ (`steps::sshd_keys`)
+    pub sshd_keys: Option<Vec<String>>,
     /// Notion へ書く skill の宛先 (`[claude.notion]`)
     pub notion: NotionValues,
     pub source: Source,
@@ -287,6 +294,7 @@ impl HostValues {
             overrides: BTreeMap::new(),
             runner_enable: false,
             ssh_relay_mode: SSH_RELAY_MODES[0].to_string(),
+            sshd_keys: None,
             notion: NotionValues::default(),
             source: Source::Missing(path.to_path_buf()),
             groups,
@@ -357,6 +365,99 @@ fn parse_op_reason(v: &toml::Value) -> Result<String, String> {
     }
 }
 
+/// authorized_keys の鍵の種類 (win/openssh/Install-Sshd.ps1 の `$script:KeyTypePattern` と同じ)
+pub const SSH_KEY_TYPES: [&str; 7] = [
+    "ssh-ed25519",
+    "ssh-rsa",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+    "sk-ssh-ed25519@openssh.com",
+    "sk-ecdsa-sha2-nistp256@openssh.com",
+];
+
+/// authorized_keys の 1 行として読めるか (Install-Sshd.ps1 の `Test-AuthorizedKeyLine` と、コメントの行として読み飛ばされない
+/// こと)。改行を含まず、`#` で始まらず、鍵の種類と base64 (16 字以上と `=` 3 つまで) が空白を挟んで並ぶ。前にオプション (`from="…"`
+/// など) が付いてよい
+pub fn authorized_key_line_ok(line: &str) -> bool {
+    if line.contains(['\r', '\n']) || line.trim_start().starts_with('#') {
+        return false;
+    }
+    let base64_ok = |t: &str| {
+        let body = t.trim_end_matches('=');
+        t.len() - body.len() <= 3
+            && body.len() >= 16
+            && body
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+    };
+    let tokens: Vec<&str> = line.split_whitespace().collect();
+    tokens
+        .windows(2)
+        .any(|w| SSH_KEY_TYPES.contains(&w[0]) && base64_ok(w[1]))
+}
+
+/// `[sshd]` を読む (公開鍵)。書けるのは authorizedKeys だけ。書かなければ None
+fn parse_sshd(v: &toml::Value) -> Result<Option<Vec<String>>, String> {
+    let toml::Value::Table(t) = v else {
+        return Err("sshd は [sshd] の表で書いてください".to_string());
+    };
+    let unknown: Vec<&str> = t
+        .keys()
+        .map(String::as_str)
+        .filter(|k| *k != "authorizedKeys")
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "[sshd] に知らないキーがあります: {} (書けるのは authorizedKeys だけ)",
+            unknown.join(", ")
+        ));
+    }
+    let Some(keys) = t.get("authorizedKeys") else {
+        return Ok(None);
+    };
+    let toml::Value::Array(items) = keys else {
+        return Err(
+            "[sshd] の authorizedKeys は文字列の配列で書いてください (鍵 0 本なら [])".to_string(),
+        );
+    };
+    let mut out = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let toml::Value::String(line) = item else {
+            return Err(format!(
+                "[sshd] の authorizedKeys の {} 番目が文字列ではありません",
+                i + 1
+            ));
+        };
+        if line.contains(['\r', '\n']) {
+            return Err(format!(
+                "[sshd] の authorizedKeys の {} 番目が改行を含みます (1 つの文字列が authorized_keys の 1 行。鍵ごとに分けて書く)",
+                i + 1
+            ));
+        }
+        if !authorized_key_line_ok(line) {
+            return Err(format!(
+                "[sshd] の authorizedKeys の {} 番目を authorized_keys の行として読めません (鍵の種類と base64 が要る。# で始めない): {}",
+                i + 1,
+                shorten(line)
+            ));
+        }
+        out.push(line.clone());
+    }
+    Ok(Some(out))
+}
+
+/// 誤りの文に添える値 (長ければ 40 字で切る)
+fn shorten(s: &str) -> String {
+    let mut it = s.chars();
+    let head: String = it.by_ref().take(40).collect();
+    if it.next().is_some() {
+        format!("{head}…")
+    } else {
+        head
+    }
+}
+
 /// ホストの値の既定の置き場所: dotfiles-private の clone の `win/hosts/<user>@<pc>.toml`。dotfiles-private は dotfiles の clone の隣、
 /// 無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`) で探す (`context::clone_dir`)。
 pub fn default_path(repo: &Path, user_profile: Option<&Path>, user: &str, pc: &str) -> PathBuf {
@@ -384,11 +485,11 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
     let unknown: Vec<&str> = t
         .keys()
         .map(String::as_str)
-        .filter(|k| !["group", "tools", "runner", "opReason", "claude"].contains(k))
+        .filter(|k| !["group", "tools", "runner", "opReason", "sshd", "claude"].contains(k))
         .collect();
     if !unknown.is_empty() {
         return Err(fail(format!(
-            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[claude.notion])",
+            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[claude.notion])",
             unknown.join(", ")
         )));
     }
@@ -454,6 +555,10 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         None => SSH_RELAY_MODES[0].to_string(),
         Some(v) => parse_op_reason(v).map_err(fail)?,
     };
+    let sshd_keys = match t.get("sshd") {
+        None => None,
+        Some(v) => parse_sshd(v).map_err(fail)?,
+    };
     let notion = match t.get("claude") {
         None => NotionValues::default(),
         Some(v) => parse_claude(v).map_err(fail)?,
@@ -463,6 +568,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         overrides,
         runner_enable,
         ssh_relay_mode,
+        sshd_keys,
         notion,
         source: Source::File(path.to_path_buf()),
         groups,
@@ -479,6 +585,8 @@ mod tests {
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
     //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。どのグループでも既定は off) は、on なら [opReason] sshRelayMode のモード
     //!   (書かなければ per-call)、off か 1Password (onePassword) が off なら無し。sshRelayMode の知らない値・[opReason] の知らないキーは誤り
+    //! - sshd の公開鍵 ([sshd] authorizedKeys) は、書かなければ None (null)、[] は鍵 0 本、list はその行のまま。改行を含む値・
+    //!   authorized_keys の行として読めない値 (鍵の種類か base64 が無い・# で始まる)・文字列でない値・[sshd] の知らないキーは誤り
 
     use super::*;
     use crate::testutil::TempDir;
@@ -676,7 +784,7 @@ mod tests {
         for (text, want) in [
             (
                 "grop = \"x\"",
-                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[claude.notion])",
+                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[claude.notion])",
             ),
             (
                 "group = \"home\"",
@@ -717,11 +825,83 @@ mod tests {
                 "opReason = \"per-call\"",
                 "opReason は [opReason] の表で書いてください",
             ),
+            ("sshd = 1", "sshd は [sshd] の表で書いてください"),
+            (
+                "[sshd]\nkeys = []",
+                "[sshd] に知らないキーがあります: keys (書けるのは authorizedKeys だけ)",
+            ),
+            (
+                "[sshd]\nauthorizedKeys = \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE\"",
+                "[sshd] の authorizedKeys は文字列の配列で書いてください",
+            ),
+            (
+                "[sshd]\nauthorizedKeys = [1]",
+                "[sshd] の authorizedKeys の 1 番目が文字列ではありません",
+            ),
+            (
+                "[sshd]\nauthorizedKeys = [\"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE a\", \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE b\\nssh-rsa AAAAB3NzaC1yc2EAAAADFAKEFAKE c\"]",
+                "[sshd] の authorizedKeys の 2 番目が改行を含みます",
+            ),
+            (
+                "[sshd]\nauthorizedKeys = [\"from=\\\"100.64.0.1\\\" AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE herdr\"]",
+                "[sshd] の authorizedKeys の 1 番目を authorized_keys の行として読めません",
+            ),
             ("= broken", "TOML として読めません"),
         ] {
             let e = host(text).unwrap_err();
             assert!(e.starts_with("h.toml: "), "{e}");
             assert!(e.contains(want), "{text}: {e}");
+        }
+    }
+
+    /// [sshd] authorizedKeys: 書かなければ None、[] は鍵 0 本、list はその行のまま (from= のオプションが付いてよい)
+    #[test]
+    fn sshd_keys_follow_the_null_and_list_meanings() {
+        assert_eq!(host("").unwrap().sshd_keys, None);
+        assert_eq!(host("[sshd]\n").unwrap().sshd_keys, None);
+        assert_eq!(
+            HostValues::missing(Path::new("h.toml"), groups()).sshd_keys,
+            None
+        );
+        assert_eq!(
+            host("[sshd]\nauthorizedKeys = []\n").unwrap().sshd_keys,
+            Some(vec![])
+        );
+        let a = r#"from="100.64.0.1,fd7a:115c:a1e0::1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKEFAKEFAKEFAKE herdr@phone"#;
+        let b = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABFAKE==";
+        let text = format!("[sshd]\nauthorizedKeys = [\n  '{a}',\n  '{b}',\n]\n");
+        assert_eq!(
+            host(&text).unwrap().sshd_keys,
+            Some(vec![a.to_string(), b.to_string()])
+        );
+    }
+
+    /// authorized_keys の 1 行として読めるか (Install-Sshd.ps1 の Test-AuthorizedKeyLine と同じ見方に、# の行を足したもの)
+    #[test]
+    fn authorized_key_lines() {
+        for ok in [
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE herdr@phone",
+            r#"from="100.64.0.1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE"#,
+            "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAy= x",
+            "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9w x",
+        ] {
+            assert!(authorized_key_line_ok(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            "   ",
+            "AAAAC3NzaC1lZDI1NTE5AAAAIFAKE",
+            "ssh-ed25519",
+            "ssh-ed25519 short",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE====",
+            "ssh-dss AAAAB3NzaC1kc3MAAACBAFAKE",
+            "# ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE",
+            "  # ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE",
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKE\r",
+        ] {
+            assert!(!authorized_key_line_ok(bad), "{bad:?}");
         }
     }
 

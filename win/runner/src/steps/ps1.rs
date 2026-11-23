@@ -13,6 +13,8 @@
 //!   入れ替える (動いている op-reason.exe があれば、ps1 が何も変えずに止まる)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
+//! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写しを置く (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段)。
+//!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
 
 use super::{Gate, Mode, Outcome, Step, StepInfo};
@@ -92,6 +94,9 @@ pub struct Ps1Spec {
     /// `-SshRelay` に、ホストの値の SSH の中継 (道具の switch opReasonSshRelay と `[opReason] sshRelayMode`) のモードを渡す。off なら
     /// `off` (残った task を止めて消す)。-Check にも揃える流れにも渡す (op-reason。WSL の script は渡さない)
     pub ssh_relay: bool,
+    /// sshd の鍵の写し (`sshd_keys`) を、ps1 を流す前に揃え (受け持ちが runner のホストだけ)、`-KeysFrom` に受け持ち (runner・wsl) を
+    /// 渡す (Install-Sshd.ps1 が鍵の直し方を、TOML の値と dotfiles apply か、Nix の値と WSL の setup で案内する)。sshd だけ
+    pub sshd_keys: bool,
     /// 3 でも、出力にこれがあれば入れられないので打たない (google-ime-install の「固定した版が winget に無い」)
     pub missing_blocked: Option<&'static str>,
     /// 出力の印ごとの直し方 (上から見て最初に当たったもの)。当たれば `manual_fix`・`sync_fix` の代わりに出す (google-ime-install の
@@ -111,6 +116,11 @@ const RELAY_ONLY_MARK: &str = "⚠️ SSH の中継が揃っていない";
 const RELAY_PENDING: &str = "SSH の中継が揃っていない";
 const RELAY_NOTICE: &str = "Windows の op-reason の SSH の中継 (logon の task) が揃っていないので、揃えます (Install-OpReason.ps1)。";
 const RELAY_SYNCED: &str = "Windows の op-reason の SSH の中継を揃えました。";
+
+/// Install-Sshd.ps1 の締めの行「鍵の写しに読めない行がある」と、受け持ちが runner のホストでの直し方 (runner は TOML の読めない値を
+/// 読む時点で止め、apply は -Check の前に写しを置き直すので、出るのは写しを手で書き換えた後の check)
+const SSHD_BAD_KEYS: &str = "鍵の写しに読めない行がある";
+const SSHD_BAD_KEYS_RUNNER: &str = "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\authorized_keys) を手で書き換えていれば、dotfiles apply でホストの値 (dotfiles-private の win/hosts/<ユーザー>@<PC>.toml) の [sshd] authorizedKeys どおりに置き直す";
 
 const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから流し直す (残ったまま流し直すと、別のインストールが進行中 (1618) で落ちる)";
 
@@ -142,6 +152,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -189,6 +200,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -226,6 +238,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: true,
         missing_blocked: None,
         // 揃える前に人が直すこと (Install-Sshd.ps1 の締めの行の文言)。揃えるコマンドを打っても直らない
         output_fixes: &[
@@ -249,8 +262,9 @@ pub const SPECS: &[Ps1Spec] = &[
                 "sshd.exe はあるがサービス sshd が無い",
                 "MSI の入り方が崩れている。win/README.md の「sshd を止める・外す」の手順で Server の機能を外してから、PowerShell で Install-Sshd を打つ",
             ),
+            // 受け持ちが runner のホストでは SSHD_BAD_KEYS_RUNNER に替える (`fixes`)
             (
-                "鍵の写しに読めない行がある",
+                SSHD_BAD_KEYS,
                 "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\authorized_keys) の元、ホストの値の wsl.windowsFiles.sshd.authorizedKeys の、authorized_keys の行として読めない値を直す",
             ),
         ],
@@ -285,6 +299,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -326,6 +341,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -357,6 +373,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: true,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -386,6 +403,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sync_fix: &["入れ直すには PowerShell で Install-Herdr -IfMissing を打つ"],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -417,6 +435,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -457,6 +476,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
         releases_file: false,
         ssh_relay: true,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: Some(
@@ -492,6 +512,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sync_fix: &["入れ直すには PowerShell で Install-TypeClipboard -IfMissing を打つ"],
         releases_file: false,
         ssh_relay: false,
+        sshd_keys: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -806,25 +827,35 @@ impl Ps1Step {
                 ctx.host.ssh_relay().unwrap_or("off")
             ));
         }
+        if self.0.sshd_keys {
+            a.push_str(&format!(" -KeysFrom '{}'", keys_from(ctx)));
+        }
         a
     }
 
-    /// 直し方: 出力の印 (`output_fixes`) に当たればそれ、無ければ `default`。
-    fn fixes(&self, lines: &[String], default: &[&'static str]) -> Vec<String> {
+    /// 直し方: 出力の印 (`output_fixes`) に当たればそれ、無ければ `default`。sshd の鍵の写しの読めない行は、受け持ちが runner の
+    /// ホスト (`runner_host`) なら TOML の値と dotfiles apply で直す
+    fn fixes(&self, runner_host: bool, lines: &[String], default: &[&'static str]) -> Vec<String> {
         for (marker, fix) in self.0.output_fixes {
             if lines.iter().any(|l| l.contains(marker)) {
+                if self.0.sshd_keys && runner_host && *marker == SSHD_BAD_KEYS {
+                    return vec![SSHD_BAD_KEYS_RUNNER.to_string()];
+                }
                 return vec![fix.to_string()];
             }
         }
         default.iter().map(|n| n.to_string()).collect()
     }
 
-    /// 手で打つ -Check (SSH の中継を渡す手順で中継が on なら、そのモードも添える)
+    /// 手で打つ -Check (SSH の中継を渡す手順で中継が on なら、そのモードも添える。sshd は受け持ちが runner なら -KeysFrom runner も)
     fn manual_command(&self, ctx: &Ctx) -> String {
-        let relay = match ctx.host.ssh_relay() {
+        let mut relay = match ctx.host.ssh_relay() {
             Some(m) if self.0.ssh_relay => format!(" -SshRelay {m}"),
             _ => String::new(),
         };
+        if self.0.sshd_keys && ctx.host.runner_enable {
+            relay.push_str(" -KeysFrom runner");
+        }
         format!(
             "PowerShell で {} -Check{relay} を打つと、同じことを確かめられる",
             self.0.command
@@ -898,6 +929,28 @@ impl Step for Ps1Step {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
+        // sshd: ps1 を流す前に鍵の写しを揃える (PowerShell が無いときも。WSL の wrapper と同じ)。-Check は写しの今の中身で確かめる
+        let mut out = if self.0.sshd_keys {
+            super::sshd_keys::sync(ctx, mode)
+        } else {
+            Vec::new()
+        };
+        out.extend(self.run_ps1(ctx, mode));
+        out
+    }
+}
+
+/// sshd の鍵の写しをどの受け持ちが置くか (Install-Sshd.ps1 の -KeysFrom)
+fn keys_from(ctx: &Ctx) -> &'static str {
+    if ctx.host.runner_enable {
+        "runner"
+    } else {
+        "wsl"
+    }
+}
+
+impl Ps1Step {
+    fn run_ps1(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
         let s = self.0;
         let script = ctx.repo_path(s.script);
         if !script.is_file() {
@@ -969,6 +1022,7 @@ impl Step for Ps1Step {
                     ),
                 );
                 for n in self.fixes(
+                    ctx.host.runner_enable,
                     &r.output,
                     &["上の出力の ⚠️ の行の手順で -Version を winget にある版へ変える"],
                 ) {
@@ -976,7 +1030,9 @@ impl Step for Ps1Step {
                 }
                 vec![o]
             }
-            Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => self.warn(plan, v, &r.output),
+            Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => {
+                self.warn(ctx.host.runner_enable, plan, v, &r.output)
+            }
             Plan::Install | Plan::Sync | Plan::SyncIfMissing => {
                 let (args, label) = match plan {
                     // Install-OpReason.ps1 は -IfMissing を持たない (引数なしで入れる)
@@ -1021,7 +1077,7 @@ impl Ps1Step {
     }
 
     /// 知らせるだけの行
-    fn warn(&self, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
+    fn warn(&self, runner_host: bool, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
         let s = self.0;
         match plan {
             Plan::PathOnly => {
@@ -1057,7 +1113,7 @@ impl Ps1Step {
                         o = o.note(*n);
                     }
                 }
-                for n in self.fixes(lines, s.manual_fix) {
+                for n in self.fixes(runner_host, lines, s.manual_fix) {
                     o = o.note(n);
                 }
                 vec![o]
@@ -1115,7 +1171,7 @@ impl Ps1Step {
             if s.uac {
                 o = o.note(UAC_LEFT);
             }
-            for n in self.fixes(&r.output, s.sync_fix) {
+            for n in self.fixes(ctx.host.runner_enable, &r.output, s.sync_fix) {
                 o = o.note(n);
             }
             return vec![o];
@@ -1168,7 +1224,7 @@ impl Ps1Step {
             Kind::Failed,
             format!("{did}られなかった ({why}。上の出力を見る)"),
         );
-        for n in self.fixes(&r.output, s.sync_fix) {
+        for n in self.fixes(ctx.host.runner_enable, &r.output, s.sync_fix) {
             o = o.note(n);
         }
         if v.path && s.policy == Policy::Sync {
@@ -1192,6 +1248,9 @@ mod tests {
     //! - sshd は道具の switch (windowsSshd) で on/off し、3 は UAC を先に知らせて -IfMissing で入れる。1 は知らせるだけで、揃える前に人が
     //!   直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・書けないユーザー名・鍵の写しの読めない行・拒否の規則が効かない
     //!   プロファイル・サービスの無い sshd.exe) はその直し方を出す。入れかけで止まったら、引数なしの Install-Sshd を案内する
+    //! - sshd は -KeysFrom に受け持ち (runner・wsl) を渡す。受け持ちが runner のホストでは、ps1 を流す前にホストの値の [sshd] authorizedKeys
+    //!   から鍵の写しを置き (apply。PowerShell が無くても)、check は差の行を前に足す。鍵の写しの読めない行の直し方は TOML と dotfiles apply、
+    //!   手で打つ -Check に -KeysFrom runner を添える。受け持ちが WSL のホストでは写しに触らない (写しの置き方は `sshd_keys`)
     //! - op-reason は道具の switch (onePassword) で on/off し、3 も 1 (締めの行を見ない) も -SshRelay だけで流す (ps1 は -IfMissing を持たない)。
     //!   -SshRelay は、-Check にも揃える流れにも、SSH の中継の switch (opReasonSshRelay) が on ならモード (per-call・show-only)、off なら off を
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
@@ -1438,7 +1497,13 @@ mod tests {
             let sys1 = sys((1, vec![header_line(s)]), (0, vec![]));
             let (o, _, calls) = run(id, &sys1, APPLY);
             assert_eq!(o[0].kind, Kind::Manual, "{id}");
-            assert_eq!(ends(&calls), vec!["-Check"], "{id}");
+            // sshd は受け持ち (ファイルが無いホストは WSL) も渡す
+            let check = if id == "sshd" {
+                "-Check -KeysFrom 'wsl'"
+            } else {
+                "-Check"
+            };
+            assert_eq!(ends(&calls), vec![check], "{id}");
             assert!(!o[0].notes.is_empty(), "{id}");
         }
     }
@@ -1561,7 +1626,10 @@ mod tests {
         );
         let (o, out, calls) = run("sshd", &sys1, APPLY);
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
-        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert_eq!(
+            ends(&calls),
+            vec!["-Check -KeysFrom 'wsl'", "-IfMissing -KeysFrom 'wsl'"]
+        );
         assert!(out.contains("UAC の確認が出ます"));
         assert!(out.contains("Windows に sshd を入れて揃えました"));
         // check では -Check だけを打ち、apply で入れると出す
@@ -1572,7 +1640,7 @@ mod tests {
             o[0].text,
             "入っていない → apply で入れる (Install-Sshd.ps1 -IfMissing)"
         );
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(ends(&calls), vec!["-Check -KeysFrom 'wsl'"]);
         // 1: ずれは Install-Sshd を案内する (runner は揃えない)。揃える前に人が直すことは、その直し方
         for (line, want) in [
             (
@@ -1607,7 +1675,7 @@ mod tests {
             let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
             let (o, _, calls) = run("sshd", &sys2, APPLY);
             assert_eq!(o[0].kind, Kind::Manual, "{line}");
-            assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+            assert_eq!(ends(&calls), vec!["-Check -KeysFrom 'wsl'"], "{line}");
             assert_eq!(o[0].notes.len(), 1, "{line}");
             assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
         }
@@ -1618,7 +1686,10 @@ mod tests {
         );
         let (o, _, calls) = run("sshd", &sys4, APPLY);
         assert_eq!(o[0].kind, Kind::Failed);
-        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert_eq!(
+            ends(&calls),
+            vec!["-Check -KeysFrom 'wsl'", "-IfMissing -KeysFrom 'wsl'"]
+        );
         assert!(
             o[0].notes
                 .iter()
@@ -1631,8 +1702,111 @@ mod tests {
         let sys3 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
         let (o, out, calls) = run("sshd", &sys3, APPLY);
         assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(ends(&calls), vec!["-Check -KeysFrom 'wsl'"]);
         assert!(out.contains("Windows の sshd は、dotfiles の形"));
+    }
+
+    /// sshd の鍵の写し: 受け持ちが runner のホストでは、ps1 を流す前に TOML の [sshd] authorizedKeys から写しを置き (apply)、check は
+    /// 差の行を前に足す。-KeysFrom は runner を渡し、手で打つ -Check にも添える。鍵の写しの読めない行の直し方は TOML と dotfiles apply。
+    /// PowerShell が無くても写しは先に揃える。受け持ちが WSL のホストでは写しに触らず、-KeysFrom wsl
+    #[test]
+    fn sshd_places_the_keys_copy_on_runner_hosts() {
+        let s = spec("sshd");
+        let key =
+            r#"from="100.64.0.1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE herdr@phone"#;
+        let runner_host = format!(
+            "[runner]\nenable = true\n[tools]\nwindowsSshd = true\n[sshd]\nauthorizedKeys = ['{key}']\n"
+        );
+        let go = |sys: &FakeSys, mode: Mode, host: &str, home: &Path| {
+            let t = TempDir::new("ps1");
+            t.write(s.script, "# ps1\n");
+            let mut out = Vec::new();
+            let host =
+                crate::host::parse(host, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap();
+            let o = {
+                let mut ctx = Ctx {
+                    repo: t.path().to_path_buf(),
+                    roots: Roots::from_home(home),
+                    state_dir: t.path().join("state"),
+                    host,
+                    sys,
+                    out: &mut out,
+                };
+                Ps1Step(s).run(&mut ctx, mode)
+            };
+            (o, String::from_utf8(out).unwrap())
+        };
+        let home = TempDir::new("ps1-home");
+        let copy = Roots::from_home(home.path())
+            .local_app_data
+            .join("dotfiles/sshd/authorized_keys");
+        let drift = "⚠️ dotfiles の形と揃っていない → Install-Sshd で揃える (UAC の確認が 1 回出る。sshd を起こし直すと、つないでいる SSH が切れることがある) ⚠️";
+        // check: 写しの差の行が前に付き、写しは置かない
+        let sys0 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, _) = go(&sys0, Mode::Check, &runner_host, home.path());
+        assert_eq!(o.len(), 2, "{o:?}");
+        assert_eq!(o[0].kind, Kind::Fix);
+        assert!(o[0].text.starts_with("鍵の写しが無い → apply で置く"));
+        assert_eq!(o[1], Outcome::new(Kind::Ok, "揃っている"));
+        assert!(!copy.exists());
+        let calls: Vec<String> = sys0.call_args();
+        assert!(
+            calls
+                .iter()
+                .any(|c| c.contains("-Check -KeysFrom 'runner'")),
+            "{calls:?}"
+        );
+        // apply: 写しを置いてから -Check (ずれは Install-Sshd を案内するだけ)
+        let sys1 = sys((1, vec![header_line(s), drift.into()]), (0, vec![]));
+        let (o, out) = go(&sys1, APPLY, &runner_host, home.path());
+        assert_eq!(o.len(), 1, "{o:?}");
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert!(o[0].notes[0].contains("PowerShell で Install-Sshd を打つ"));
+        assert!(out.contains("鍵の写しを置きました (1 本"));
+        assert_eq!(
+            std::fs::read_to_string(&copy).unwrap(),
+            super::super::sshd_keys::copy_text(&[key.to_string()])
+        );
+        // 鍵の写しの読めない行: 受け持ちが runner なら TOML と dotfiles apply で直す
+        let bad = "⚠️ 鍵の写しに読めない行がある → ホストの値 (dotfiles-private の win/hosts の TOML の [sshd] authorizedKeys) を直して dotfiles apply を流し直す ⚠️";
+        let sys2 = sys((1, vec![header_line(s), bad.into()]), (0, vec![]));
+        let (o, _) = go(&sys2, Mode::Check, &runner_host, home.path());
+        assert_eq!(o.len(), 1);
+        assert!(
+            o[0].notes[0].contains("[sshd] authorizedKeys どおりに置き直す"),
+            "{:?}",
+            o[0].notes
+        );
+        // -Check の時間切れ: 手で打つ -Check に -KeysFrom runner
+        let sys3 = sys((-1, vec![]), (0, vec![]));
+        let (o, _) = go(&sys3, Mode::Check, &runner_host, home.path());
+        assert!(
+            o[0].notes[0].contains("Install-Sshd -Check -KeysFrom runner"),
+            "{:?}",
+            o[0].notes
+        );
+        // PowerShell が無くても、写しは先に揃える (鍵を外すと写しを消す)
+        let nopwsh = FakeSys::new(|_| unreachable!());
+        let (o, out) = go(
+            &nopwsh,
+            APPLY,
+            "[runner]\nenable = true\n[tools]\nwindowsSshd = true\n",
+            home.path(),
+        );
+        assert!(out.contains("鍵の写しを消しました"), "{out}");
+        assert!(!copy.exists());
+        assert_eq!(o.last().unwrap().kind, Kind::Failed);
+        // 受け持ちが WSL のホスト: 写しに触らず、-KeysFrom wsl
+        std::fs::write(&copy, "x\n").unwrap();
+        let sys4 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, _) = go(&sys4, APPLY, "[tools]\nwindowsSshd = true\n", home.path());
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert_eq!(std::fs::read_to_string(&copy).unwrap(), "x\n");
+        assert!(
+            sys4.call_args()
+                .iter()
+                .any(|c| c.contains("-Check -KeysFrom 'wsl'"))
+        );
     }
 
     /// op-reason: 道具の switch (onePassword) で on/off。Install-OpReason.ps1 は -IfMissing を持たないので、3 (入っていない) も 1 (揃って

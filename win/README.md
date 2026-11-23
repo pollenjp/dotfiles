@@ -52,7 +52,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
-| `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#sshd)) |
+| `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
@@ -245,6 +245,11 @@ enable = false                # 受け持ちの印。true で WSL の setup と�
 [opReason]                    # op-reason の SSH の中継のモード (効くのは [tools] opReasonSshRelay = true のとき)
 sshRelayMode = "per-call"     # per-call (既定)・show-only
 
+[sshd]                        # sshd に入れる公開鍵 (使うのは受け持ちが runner で [tools] windowsSshd = true のホストだけ)
+authorizedKeys = [            # authorized_keys の 1 行を 1 つの文字列で。書かなければ null (鍵を置かない)・[] は 0 本
+  'from="100.64.0.1,fd7a:115c:a1e0::1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... herdr@phone',
+]
+
 [claude.notion]               # Notion へ書く skill の宛先 (Nix の dotfiles.claude.notion と同じ名前と形)
 profile = "personal"          # このマシンの既定のプロファイル (書かなければ null)
 routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の規則 (書かなければ空)
@@ -253,9 +258,10 @@ routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の
 scanData = "https://app.notion.com/p/…"
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd] authorizedKeys`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
-  `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値は runner が止める (終了コード 2)
+  `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値は
+  runner が止める (終了コード 2)
 - `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
   出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
@@ -271,10 +277,12 @@ scanData = "https://app.notion.com/p/…"
 - `windowsTailscale` もどのグループでも既定が false。Tailscale を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.tailscale.enable = true`) は、同じ値を
   `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
 - `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
-  書く (書かなければ `sshd` の行は off。[後述](#sshd))。鍵 (`wsl.windowsFiles.sshd.authorizedKeys`) は TOML には書かない。runner の `sshd` の手順は、
-  WSL の setup が Windows に置く鍵の写し (`%LOCALAPPDATA%\dotfiles\sshd\authorized_keys`) を読む。受け持ちを runner に切り替えたホストでは WSL が
-  写しを置かないので、そのホストで `windowsSshd` を on にする前に、runner が写しを置く形を足す (まだ無い。写しが無い間の `Install-Sshd.ps1` は鍵を
-  置かず、`administrators_authorized_keys` が無ければ空で作るだけ)
+  書く (書かなければ `sshd` の行は off。[後述](#sshd))
+- `[sshd] authorizedKeys` は sshd に入れる公開鍵 (Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味。[鍵の置き方](#鍵の置き方))。使うのは受け持ちが
+  runner のホストだけで、runner の手順 `sshd` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを置く。書かなければ null で、写しを
+  置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
+  authorized_keys の行として読めない値 (鍵の種類と base64 が無い・`#` で始まる) は runner が止める。受け持ちが WSL のホストは WSL の setup が
+  Nix の値から写しを置くので、TOML に書いても使わない (`sshd` の手順がそう 1 行出す)。実機の鍵と `from=` の IP は dotfiles-private にだけ書く
 - 上の「WSL の Nix の値と同じ値を書く」は、受け持ちが WSL のホストのこと。受け持ちを runner に切り替えたホストでは、Windows の道具の値
   (`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd` など) は TOML にだけ書き、WSL の Nix の値の `wsl.windowsFiles.*` は外す
   ([受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))
@@ -405,7 +413,7 @@ scanData = "https://app.notion.com/p/…"
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
-| 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ (鍵の写しは WSL の setup が置く) | `windowsSshd` | 有る |
+| 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを置く (受け持ちが WSL のホストは WSL の setup が置く) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
@@ -3689,7 +3697,8 @@ SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-c
   };
   ```
 
-  Windows の runner では、ホストの値の `[tools]` に `windowsSshd = true` を書く ([ホストの値](#ホストの値))
+  Windows の runner では、ホストの値の `[tools]` に `windowsSshd = true` を書き、受け持ちを runner に切り替えたホストでは鍵を `[sshd] authorizedKeys` に
+  書く ([ホストの値](#ホストの値))
 - sshd は、dotfiles が winget で固定した OpenSSH (`Install-OpenSSH.ps1` が入れる `C:\Program Files\OpenSSH`。[OpenSSH](#openssh)) の MSI に、Server の
   機能を足して入れる。Windows の機能 (System32) の OpenSSH Server とは二重にしない (入っていれば揃えずに止まり、外し方を出す)
 - false に戻しても setup は消さない (見なくなるだけ)。止め方・消し方は[後述](#sshd-を止める外す)
@@ -3746,20 +3755,30 @@ AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_c
 
 ### 鍵の置き方
 
-鍵の足し引きは、ホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) でする。端末の足し引きが dotfiles-private の
-PR に残る。
+鍵の足し引きは、dotfiles-private のホストの値でする。端末の足し引きが dotfiles-private の PR に残る。書く所は Windows の受け持ちで違う:
+
+| 受け持ち | 書く所 | 写しを置くもの |
+| --- | --- | --- |
+| WSL の setup | Nix の値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` | WSL の `bootstrap-windows-sshd.sh` (`setup --update`) |
+| runner | Windows のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`) の `[sshd] authorizedKeys` ([ホストの値](#ホストの値)) | runner の手順 `sshd` (`dotfiles apply`) |
 
 1. 端末で鍵を作る (iPhone の Herdr のアプリは、アプリの中で鍵を作って公開鍵を出す)
-2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、ホストの値の list に足して PR を出す (鍵が漏れても、
-   その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る)
-3. merge したら `~/dotfiles/setup --update` を流す。`bootstrap-windows-sshd.sh` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを
-   置き、`Install-Sshd -Check` が写しとの差を ⚠ で出す。写しの鍵は全部、※ の行にコメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
-   (setup の `-Check` は管理者でなく、今の鍵のファイルを読めないので、足す鍵と消す鍵には分けない。管理者の PowerShell の `-Check` は分けて出す)
-4. ※ の行に覚えのない鍵が無いのを見てから、`bootstrap-windows-sshd.sh --apply` か PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る)。
-   端末を失くしたら、その行を消して同じ手順を流し、Tailscale の管理画面からも端末を消す
+2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、上の list に足して PR を出す (鍵が漏れても、
+   その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る。CIDR の `/` は使わない)
+3. merge したら、受け持ちが WSL なら `~/dotfiles/setup --update`、runner なら Windows で dotfiles-private の clone を pull して `dotfiles apply` (鍵だけなら
+   `dotfiles apply --steps sshd`) を流す。Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しが置かれ (中身が同じなら書かない)、
+   `Install-Sshd -Check` が写しとの差を ⚠ で出す。写しの鍵は全部、※ の行にコメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
+   (setup・runner の `-Check` は管理者でなく、今の鍵のファイルを読めないので、足す鍵と消す鍵には分けない。管理者の PowerShell の `-Check` は分けて出す)
+4. ※ の行に覚えのない鍵が無いのを見てから、PowerShell の `Install-Sshd` (受け持ちが WSL なら `bootstrap-windows-sshd.sh --apply` でもよい) で揃える
+   (UAC の確認が 1 回出る)。端末を失くしたら、その行を消して同じ手順を流し、Tailscale の管理画面からも端末を消す
+
+- `dotfiles check` は、写しがホストの値と違えば `sshd` の手順に「鍵の写しが … → apply で置く」の行を出す (その下の sshd の行は、写しの今の中身で
+  確かめた結果)。`dotfiles apply` は写しを置いてから `-Check` を流すので、鍵を足した後は「揃っていない → Install-Sshd」を出す (runner は揃えない)
+- 写しの頭には、どちらが書いたかの行がある。runner は `# dotfiles-keys-from: runner` を書き、`Install-Sshd` はそれ (か runner が渡す `-KeysFrom`) で、
+  鍵が 0 本・写しが無い・読めない行の案内を TOML の値と `dotfiles apply` にする (印の無い写しは Nix の値と setup。写しが無く `-KeysFrom` も無ければ両方を出す)
 
 - 写しは利用者が書けるファイル (administrators_authorized_keys は管理者でないと書けないので、間に挟む)。sshd は写しを読まない
-- `authorizedKeys` が null (既定) のホストでは写しを置かず (前に置いた写しは消す)、`Install-Sshd` は鍵の中身に触らない (鍵は管理者のメモ帳などで
+- `authorizedKeys` が null (既定。TOML では書かない) のホストでは写しを置かず (前に置いた写しは消す)、`Install-Sshd` は鍵の中身に触らない (鍵は管理者のメモ帳などで
   `administrators_authorized_keys` に手で書く。権限だけ揃える)
 - 管理者でない PowerShell (setup・runner) の `-Check` は administrators_authorized_keys を読めないので、揃えたときに書いた中身の sha256 の記録
   (`%LOCALAPPDATA%\dotfiles\sshd\deployed.json`) と比べる。管理者の PowerShell で `Install-Sshd -Check` を打つと、中身そのものと比べる

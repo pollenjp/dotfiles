@@ -25,9 +25,9 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
 3. Windows Firewall: 拒否の規則を 3 つ置き (Get-SshdFirewallSpecs)、22 番を許す受信の規則 (MSI が作るものなど) を無効にする。
    block は allow より強いので、Tailscale の ACL を誤っても、tailnet からは 22 番にしか届かず、22 番には tailnet と localhost
    からしか届かない
-4. C:\ProgramData\ssh\administrators_authorized_keys (Windows の管理者の鍵の置き場): 鍵の写し (-KeysCopy。setup が置く) が
-   あれば、その中身どおりに書く (写しに無い鍵は消す。元は .dotfiles-bak-<日時> に退避する)。写しが無ければ中身に触らず、
-   ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする
+4. C:\ProgramData\ssh\administrators_authorized_keys (Windows の管理者の鍵の置き場): 鍵の写し (-KeysCopy。受け持ちが WSL の
+   ホストは WSL の setup が、runner のホストは runner の手順 sshd が置く) があれば、その中身どおりに書く (写しに無い鍵は消す。
+   元は .dotfiles-bak-<日時> に退避する)。写しが無ければ中身に触らず、ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする
 5. サービス sshd: 自動で起こし、動かす。sshd_config を書き直したら起こし直す (つないでいる SSH が切れることがある)
 
 管理者が要るのは揃える段だけで、そのときだけ UAC で自分を起動し直す。-Check は何も変えない。管理者でないと
@@ -47,8 +47,13 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 sshd が入っていなければ入れて揃える (UAC の確認が 1 回出る)。入っていれば -Check と同じ (何も変えない)。setup が使う。
 
 .PARAMETER KeysCopy
-鍵の写し。既定は %LOCALAPPDATA%\dotfiles\sshd\authorized_keys (setup の bootstrap-windows-sshd.sh が、ホストの値の
-wsl.windowsFiles.sshd.authorizedKeys から置く。null のホストでは置かない)。
+鍵の写し。既定は %LOCALAPPDATA%\dotfiles\sshd\authorized_keys。受け持ちが WSL のホストは setup の bootstrap-windows-sshd.sh が
+ホストの値の wsl.windowsFiles.sshd.authorizedKeys から、受け持ちが runner のホストは runner の手順 sshd が dotfiles-private の
+win/hosts/<ユーザー>@<PC>.toml の [sshd] authorizedKeys から置く (どちらも null・書かないホストでは置かない)。
+
+.PARAMETER KeysFrom
+鍵の写しを置く受け持ち (runner・wsl)。鍵の足し方・直し方の案内 (※ の行と締めの行) を、TOML の値と dotfiles apply か、Nix の値と
+WSL の setup にする。runner の手順 sshd が渡す。渡さなければ写しの頭の印 (runner が書く) で見分け、写しが無ければ両方を出す。
 
 .PARAMETER AllowUser
 AllowUsers に書く Windows のユーザー。既定はこのスクリプトを流しているユーザー (小文字にする)。
@@ -64,6 +69,8 @@ param(
     [switch]$Check,
     [switch]$IfMissing,
     [string]$KeysCopy,
+    [ValidateSet('runner', 'wsl')]
+    [string]$KeysFrom,
     [string]$AllowUser,
     [string]$StateDir,
     [string]$LogPath
@@ -94,6 +101,8 @@ $script:SshDirSddl = 'O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;
 $script:AdminDirSddl = 'O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)'
 # 管理者 (BUILTIN\Administrators) と SYSTEM の SID (表示の言語によらない)
 $script:AdminSids = @('S-1-5-32-544', 'S-1-5-18')
+# runner の手順 sshd が鍵の写しの頭に書く印 (win/runner/src/steps/sshd_keys.rs の RUNNER_MARK と同じ字)
+$script:RunnerCopyMark = '# dotfiles-keys-from: runner'
 # 鍵の種類 (authorized_keys の行で、オプションの後ろに来る語)
 $script:KeyTypePattern = 'ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com'
 
@@ -228,10 +237,40 @@ function Test-KeyWithoutFrom {
     -not ("$Line" -match '(^|[\s,])from="')
 }
 
-# administrators_authorized_keys に書く中身 (改行は LF)。$Managed が偽なら、鍵の写しが無いときに空で作る中身
+# 鍵の写しを置く受け持ち: -KeysFrom があればそれ、無ければ写しの頭の印 (runner が書く) で runner、印の無い写しは wsl、写しが無ければ
+# '' (分からない)
+function Resolve-KeysFrom {
+    param([string]$KeysFrom, [bool]$Exists, [string[]]$Lines)
+    if ($KeysFrom) { return $KeysFrom }
+    if (-not $Exists) { return '' }
+    if (@($Lines | Where-Object { "$_".Trim() -ceq $script:RunnerCopyMark }).Count -gt 0) { return 'runner' }
+    'wsl'
+}
+
+# 鍵の足し方・直し方の案内 (受け持ちごと)。Kind は zero (鍵が 0 本)・null (写しが無い)・bad (写しに読めない行がある)
+function Get-KeysHint {
+    param([string]$Kind, [string]$From, [string]$CopyPath)
+    switch ("$Kind/$From") {
+        'zero/runner' { return '※ 鍵が 0 本 (誰も入れない)。入れる端末の公開鍵は、ホストの値 (dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [sshd] authorizedKeys) に足して dotfiles apply を流し、Install-Sshd で揃える' }
+        'null/runner' { return "※ 鍵の写し ($CopyPath) が無いので、dotfiles は鍵を置かない (ホストの値の win/hosts/<ユーザー>@<PC>.toml に [sshd] authorizedKeys が無い。書いて dotfiles apply を流すと runner が写しを置く)" }
+        'null/' { return "※ 鍵の写し ($CopyPath) が無いので、dotfiles は鍵を置かない (受け持ちが runner なら dotfiles-private の win/hosts/<ユーザー>@<PC>.toml に [sshd] authorizedKeys が無い。WSL の setup ならホストの値の wsl.windowsFiles.sshd.authorizedKeys が null)" }
+        'bad/runner' { return '⚠️ 鍵の写しに読めない行がある → ホストの値 (dotfiles-private の win/hosts の TOML の [sshd] authorizedKeys) を直して dotfiles apply を流し直す ⚠️' }
+        { $_ -like 'zero/*' } { return '※ 鍵が 0 本 (誰も入れない)。入れる端末の公開鍵は、ホストの値 (dotfiles-private の wsl.windowsFiles.sshd.authorizedKeys) に足して setup を流す' }
+        { $_ -like 'null/*' } { return "※ 鍵の写し ($CopyPath) が無いので、dotfiles は鍵を置かない (ホストの値の wsl.windowsFiles.sshd.authorizedKeys が null)" }
+        default { return '⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️' }
+    }
+}
+
+# administrators_authorized_keys に書く中身 (改行は LF)。$Managed が偽なら、鍵の写しが無いときに空で作る中身。$From は写しを置く受け持ち
+# (runner なら見出しに TOML の値を書く。ほかは前からの見出しのまま。揃えたときの記録の sha256 が変わらないように)
 function Get-AdminKeysText {
-    param([string[]]$KeyLines, [bool]$Managed = $true)
-    if ($Managed) {
+    param([string[]]$KeyLines, [bool]$Managed = $true, [string]$From = 'wsl')
+    if ($Managed -and $From -eq 'runner') {
+        $head = @(
+            '# Written by dotfiles (Install-Sshd.ps1) from the keys copy that the Windows runner puts in %LOCALAPPDATA%\dotfiles\sshd\authorized_keys.'
+            '# Add or remove keys in the host values (dotfiles-private, win/hosts/<user>@<pc>.toml [sshd] authorizedKeys), not here.'
+        )
+    } elseif ($Managed) {
         $head = @(
             '# Written by dotfiles (Install-Sshd.ps1) from the keys copy that setup puts in %LOCALAPPDATA%\dotfiles\sshd\authorized_keys.'
             '# Add or remove keys in the host values (dotfiles-private, wsl.windowsFiles.sshd.authorizedKeys), not here.'
@@ -601,7 +640,7 @@ function Get-SshdVerdict {
     $keys = $Facts.Keys
     $wantLines = @($copy.Lines)
     if ($copy.Managed) {
-        $keysText = Get-AdminKeysText -KeyLines $wantLines
+        $keysText = Get-AdminKeysText -KeyLines $wantLines -From $copy.From
         if (-not $keys.Exists) {
             & $add 'keys' $false "鍵              : ファイルが無い → 写しの $($wantLines.Count) 本を書く"
         } elseif ($keys.Readable) {
@@ -626,7 +665,7 @@ function Get-SshdVerdict {
         # 分けられないので、ここで覚えのない鍵が無いかを見る (揃えたときの記録は利用者が書けるので、記録と比べて分けることはしない)
         foreach ($line in $wantLines) { $notes.Add("※ 鍵: $(Get-KeyLabel -Line $line)") }
         if ($wantLines.Count -eq 0) {
-            $notes.Add('※ 鍵が 0 本 (誰も入れない)。入れる端末の公開鍵は、ホストの値 (dotfiles-private の wsl.windowsFiles.sshd.authorizedKeys) に足して setup を流す')
+            $notes.Add((Get-KeysHint -Kind 'zero' -From $copy.From))
         }
         $noFrom = @($wantLines | Where-Object { Test-KeyWithoutFrom -Line $_ })
         if ($noFrom.Count -gt 0) {
@@ -640,7 +679,7 @@ function Get-SshdVerdict {
         } else {
             & $add 'keys' $true '鍵              : ある (読めない。鍵の写しが無いので、中身は見ない)'
         }
-        $notes.Add("※ 鍵の写し ($($copy.Path)) が無いので、dotfiles は鍵を置かない (ホストの値の wsl.windowsFiles.sshd.authorizedKeys が null)")
+        $notes.Add((Get-KeysHint -Kind 'null' -From $copy.From -CopyPath $copy.Path))
     }
 
     # 5. 鍵の権限 (ファイルがあるときだけ。無ければ作るときに揃える)
@@ -705,6 +744,7 @@ function Get-SshdVerdict {
 
     [pscustomobject]@{
         InstallDir = $Facts.InstallDir
+        KeysFrom   = $Facts.Copy.From
         Blocked    = $blocked
         Installed  = [bool]($Facts.OpenSsh -and (-not $Facts.Inbox) -and $Facts.Server)
         Items      = @($items)
@@ -754,7 +794,7 @@ function Get-SshdCheckMessage {
         return '⚠️ sshd.exe はあるがサービス sshd が無い → Server の機能を外してから入れ直す (上の ※ の行) ⚠️'
     }
     if ($Verdict.Blocked -eq 'bad-keys') {
-        return '⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️'
+        return (Get-KeysHint -Kind 'bad' -From $Verdict.KeysFrom)
     }
     switch (Get-SshdExitCode -Verdict $Verdict) {
         0 { '揃っている' }
@@ -834,14 +874,15 @@ function Write-TextReplacing {
     }
 }
 
-# 鍵の写しを読む。無ければ Managed が偽 (dotfiles は鍵を置かない)
+# 鍵の写しを読む。無ければ Managed が偽 (dotfiles は鍵を置かない)。From は写しを置く受け持ち (Resolve-KeysFrom)
 function Read-KeysCopy {
-    param([string]$Path)
+    param([string]$Path, [string]$KeysFrom)
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
-        return [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $Path }
+        return [pscustomobject]@{ Managed = $false; Lines = @(); Bad = @(); Path = $Path; From = (Resolve-KeysFrom -KeysFrom $KeysFrom -Exists $false) }
     }
-    $parsed = ConvertFrom-KeysCopy -Lines @([IO.File]::ReadAllLines($Path))
-    [pscustomobject]@{ Managed = $true; Lines = @($parsed.Lines); Bad = @($parsed.Bad); Path = $Path }
+    $raw = @([IO.File]::ReadAllLines($Path))
+    $parsed = ConvertFrom-KeysCopy -Lines $raw
+    [pscustomobject]@{ Managed = $true; Lines = @($parsed.Lines); Bad = @($parsed.Bad); Path = $Path; From = (Resolve-KeysFrom -KeysFrom $KeysFrom -Exists $true -Lines $raw) }
 }
 
 # ファイルの権限を読む (Get-Acl。管理者でないと読めないことがある)
@@ -956,7 +997,7 @@ function Write-SshdRecord {
 
 # 今の状態を読む (何も変えない。管理者は要らない)
 function Get-SshdFacts {
-    param([string]$InstallDir, [string]$CopyPath, [string]$StateDir, [string]$User)
+    param([string]$InstallDir, [string]$CopyPath, [string]$StateDir, [string]$User, [string]$KeysFrom)
     $sshDir = Join-Path $env:ProgramData 'ssh'
     $keysPath = Join-Path $sshDir 'administrators_authorized_keys'
     $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
@@ -1004,7 +1045,7 @@ function Get-SshdFacts {
         Keys             = $keys
         Acl              = $acl
         Record           = Read-SshdRecord -Dir $StateDir
-        Copy             = Read-KeysCopy -Path $CopyPath
+        Copy             = Read-KeysCopy -Path $CopyPath -KeysFrom $KeysFrom
         FirewallReadable = $firewallReadable
         FirewallError    = $firewallError
         FirewallProfiles = $profiles
@@ -1185,12 +1226,12 @@ function Invoke-MsiAddServer {
 # MSI は Server を足した時点で sshd を起こし、22 番の受信の許可も作るので、拒否の規則と sshd_config と鍵は server より先に置く
 # (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
 function Invoke-SshdFix {
-    param([string]$InstallDir, [string]$User, [string]$CopyPath, [string]$StateDir)
+    param([string]$InstallDir, [string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom)
     if (-not (Test-SshdUserName -Name $User)) {
         Write-Step "AllowUsers に書けないユーザー名: $User。何もしない"
         return $false
     }
-    $copy = Read-KeysCopy -Path $CopyPath
+    $copy = Read-KeysCopy -Path $CopyPath -KeysFrom $KeysFrom
     if (@($copy.Bad).Count -gt 0) {
         Write-Step "鍵の写し ($CopyPath) に読めない行がある。何もしない"
         return $false
@@ -1205,7 +1246,7 @@ function Invoke-SshdFix {
     }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $configText = Get-SshdConfigText -AllowUser $User
-    $keysText = if ($copy.Managed) { Get-AdminKeysText -KeyLines @($copy.Lines) } else { Get-AdminKeysText -KeyLines @() -Managed $false }
+    $keysText = if ($copy.Managed) { Get-AdminKeysText -KeyLines @($copy.Lines) -From $copy.From } else { Get-AdminKeysText -KeyLines @() -Managed $false }
     $sshDir = Join-Path $env:ProgramData 'ssh'
     $configPath = Join-Path $sshDir 'sshd_config'
     $keysPath = Join-Path $sshDir 'administrators_authorized_keys'
@@ -1336,7 +1377,7 @@ function Invoke-SshdFix {
 
 # 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true
 function Invoke-Elevated {
-    param([string]$User, [string]$CopyPath, [string]$StateDir)
+    param([string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom)
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $log = Join-Path $StateDir 'Install-Sshd.log'
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
@@ -1345,6 +1386,7 @@ function Invoke-Elevated {
     $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
         '-LogPath', ('"{0}"' -f $log), '-KeysCopy', ('"{0}"' -f $CopyPath), '-AllowUser', $User,
         '-StateDir', ('"{0}"' -f $StateDir))
+    if ($KeysFrom) { $argumentList += @('-KeysFrom', $KeysFrom) }
     Write-Host 'UAC で管理者の PowerShell を起動する (終わると閉じる)。Windows のデスクトップに UAC の確認が出たら「はい」を押す'
     try {
         $process = Start-Process -FilePath $hostExe -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
@@ -1359,7 +1401,7 @@ function Invoke-Elevated {
 }
 
 function Invoke-InstallSshd {
-    param([switch]$Check, [switch]$IfMissing, [string]$KeysCopy, [string]$AllowUser, [string]$StateDir, [string]$LogPath)
+    param([switch]$Check, [switch]$IfMissing, [string]$KeysCopy, [string]$KeysFrom, [string]$AllowUser, [string]$StateDir, [string]$LogPath)
     $installDir = Join-Path $env:ProgramFiles 'OpenSSH'
     if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'dotfiles\sshd' }
     if (-not $KeysCopy) { $KeysCopy = Join-Path $env:LOCALAPPDATA 'dotfiles\sshd\authorized_keys' }
@@ -1368,11 +1410,11 @@ function Invoke-InstallSshd {
     if ($LogPath) {
         # 管理者で起動し直された子: 揃える段だけをして、結果を $LogPath に書く
         $script:StepLog = $LogPath
-        if (Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir) { return 0 }
+        if (Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom) { return 0 }
         return 1
     }
 
-    $facts = Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser
+    $facts = Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom
     $verdict = Get-SshdVerdict -Facts $facts
     Write-SshdState -Verdict $verdict
     $code = Get-SshdExitCode -Verdict $verdict
@@ -1393,14 +1435,14 @@ function Invoke-InstallSshd {
 
     if (Test-IsAdmin) {
         $script:StepLog = $null
-        [void](Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir)
+        [void](Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom)
     } else {
-        [void](Invoke-Elevated -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir)
+        [void](Invoke-Elevated -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom)
     }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-SshdVerdict -Facts (Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser)
+    $after = Get-SshdVerdict -Facts (Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom)
     Write-SshdState -Verdict $after
     if ((Get-SshdExitCode -Verdict $after) -eq 0) {
         if ($code -eq 3) { Write-Host '入れた' } else { Write-Host '揃った' }
@@ -1418,7 +1460,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        exit (Invoke-InstallSshd -Check:$Check -IfMissing:$IfMissing -KeysCopy $KeysCopy -AllowUser $AllowUser -StateDir $StateDir -LogPath $LogPath)
+        exit (Invoke-InstallSshd -Check:$Check -IfMissing:$IfMissing -KeysCopy $KeysCopy -KeysFrom $KeysFrom -AllowUser $AllowUser -StateDir $StateDir -LogPath $LogPath)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

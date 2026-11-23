@@ -37,6 +37,7 @@ pub mod powershell_profile;
 pub mod powertoys;
 pub mod ps1;
 pub mod ssh_config;
+pub mod sshd_keys;
 pub mod terminal;
 pub mod tool_skill;
 pub mod user_path;
