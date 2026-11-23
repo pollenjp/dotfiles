@@ -4,7 +4,7 @@
 //!
 //! | 置くもの | 中身 |
 //! | --- | --- |
-//! | `config` | git.toml の `[settings]`・(道具 `gitIdentity` が true なら) `[user]`・`[filter "lfs"]` (PATH の git-lfs) を home-manager と同じ形 (`lib.generators.toGitINI`) で並べ、`gitIdentity` なら後ろに owner ごとの `[includeIf "gitdir/i:~/ghq/github.com/<owner>/"]` |
+//! | `config` | git.toml の `[settings]`・(道具 `gitIdentity` が true なら) `[user]`・`[filter "lfs"]` (PATH の git-lfs)・`core.sshCommand` (Windows の OpenSSH の ssh.exe。下) を home-manager と同じ形 (`lib.generators.toGitINI`) で並べ、`gitIdentity` なら後ろに owner ごとの `[includeIf "gitdir/i:~/ghq/github.com/<owner>/"]` |
 //! | `config.<owner>` | owner ごとの `[user]` (`gitIdentity` のときだけ。上の includeIf が読む) |
 //! | `ignore` | git.toml の `ignores` (1 行 1 つ) |
 //!
@@ -12,6 +12,12 @@
 //! `interactive.diffFilter`・`[delta]`)・direnv の module が足す `.direnv/`。credential helper はどこにも書かない (bootstrap が gh に書かせない
 //! 決まりと、claude-env が settings.json の env に足す組を壊さない)。includeIf の条件は Windows の ghq の root (bootstrap の置き場
 //! `%USERPROFILE%\ghq`) の下で、末尾の `/` でその下の repo に当て、`/i` で大文字小文字を区別しない (WSL の条件は旧い `~/workdir` のまま)。
+//!
+//! `core.sshCommand` は Windows だけの値 (git.toml には書かない。書けば止まる)。無いと git は Git for Windows 付属の MSYS の ssh を使い、MSYS の ssh は
+//! Windows の named pipe の agent (1Password の `\\.\pipe\openssh-ssh-agent`・op-reason の中継) に届かず、ssh の remote が `Permission denied (publickey)`
+//! で落ちる。`win/openssh/Install-OpenSSH.ps1` が winget で入れる版 (`%ProgramFiles%\OpenSSH\ssh.exe`) があればそれ、無ければ Windows の機能の版
+//! (`%SystemRoot%\System32\OpenSSH\ssh.exe`) を書く。git は値を shell で起こすので、`/` 区切りにして `'…'` で囲む。どちらも無ければ書かずに知らせる
+//! (無い exe を書くと ssh の remote が全部起こせなくなる。OpenSSH が無いことは手順 openssh が知らせる)。中継を使わないホストにも書く。
 //!
 //! どれも記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\git-config.deployed.json`。CLAUDE.md と同じ `linker` の判定)。Windows 側で変わった・
 //! 記録の無い違う中身は衝突で飛ばして知らせる (`~/.gitconfig` が無いと、`git config --global` はここの config に書く)。書かなくなった
@@ -38,6 +44,11 @@ pub const GHQ_ROOT: &str = "~/ghq";
 /// git.toml の `[settings]` に書かない節 (名前とメールは `[identity]`・道具 `gitIdentity` で、署名は WSL だけ、include は owner ごとに
 /// 切り替えるので、`[settings]` にあると切り替えの外で書き出される。git.nix の assertion と同じ)
 const RESERVED: [&str; 4] = ["user", "gpg", "include", "includeif"];
+/// Windows の OpenSSH の ssh.exe の置き場 (見る順。環境変数・その下の相対パス)。前が `Install-OpenSSH.ps1` の入れる winget の版、後ろが Windows の機能の版
+pub const SSH_EXES: [(&str, &str); 2] = [
+    ("ProgramFiles", "OpenSSH/ssh.exe"),
+    ("SystemRoot", "System32/OpenSSH/ssh.exe"),
+];
 
 /// git config の値。home-manager の toGitINI と同じ書き方: 文字列は `"…"` で囲んで `\`・`"`・改行・タブを escape し、真偽値と整数は素のまま。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -186,6 +197,15 @@ pub fn parse(text: &str) -> Result<GitData, String> {
                 };
                 flatten(&mut vec![section.clone()], keys, &mut settings)?;
             }
+            if settings.iter().any(|(section, keys)| {
+                section.eq_ignore_ascii_case("core")
+                    && keys.keys().any(|k| k.eq_ignore_ascii_case("sshCommand"))
+            }) {
+                return Err(
+                    "[settings.core] に sshCommand は書けません (OS で違う。Windows は runner の git-config が Windows の OpenSSH の ssh.exe を書く)"
+                        .to_string(),
+                );
+            }
         }
         Some(_) => return Err("settings は [settings.<節>] の表で書いてください".to_string()),
     }
@@ -291,8 +311,8 @@ fn user(name: &str, email: &str) -> BTreeMap<String, Vec<IniValue>> {
     ])
 }
 
-/// Windows の config の includeIf より前の節 (`identity` は道具 `gitIdentity`)。
-pub fn main_ini(data: &GitData, identity: bool) -> Ini {
+/// Windows の config の includeIf より前の節 (`identity` は道具 `gitIdentity`、`ssh_command` は `core.sshCommand` の値 ([`ssh_command`]))。
+pub fn main_ini(data: &GitData, identity: bool, ssh_command: Option<&str>) -> Ini {
     let mut ini = data.settings.clone();
     if identity {
         ini.insert("user".to_string(), user(&data.name, &data.email));
@@ -300,7 +320,29 @@ pub fn main_ini(data: &GitData, identity: bool) -> Ini {
     ini.entry("filter.lfs".to_string())
         .or_default()
         .extend(lfs());
+    if let Some(cmd) = ssh_command {
+        ini.entry("core".to_string()).or_default().insert(
+            "sshCommand".to_string(),
+            vec![IniValue::Str(cmd.to_string())],
+        );
+    }
     ini
+}
+
+/// git に使わせる Windows の OpenSSH の ssh.exe ([`SSH_EXES`] の順で、ファイルのある最初のもの)。どれも無ければ None
+pub fn windows_ssh(ctx: &Ctx) -> Option<PathBuf> {
+    SSH_EXES.iter().find_map(|(var, rel)| {
+        let root = ctx.sys.env(var).filter(|v| !v.trim().is_empty())?;
+        let exe = join_segments(Path::new(&root), rel);
+        exe.is_file().then_some(exe)
+    })
+}
+
+/// `core.sshCommand` の値。git は値を shell (Git for Windows の sh) で起こすので、`\` を `/` にし (sh の `\` の解釈を避ける)、空白を含む
+/// `Program Files` のために `'…'` で囲む (中の `'` は `'\''`)
+pub fn ssh_command(exe: &Path) -> String {
+    let path = exe.to_string_lossy().replace('\\', "/");
+    format!("'{}'", path.replace('\'', "'\\''"))
 }
 
 /// owner の includeIf の条件 (Windows の ghq の root の下。末尾の `/` でその下の repo に当て、`/i` で大文字小文字を区別しない)。
@@ -315,8 +357,8 @@ pub fn include_file(owner: &str) -> String {
 
 /// 置くファイル (`~/.config/git/` の下の名前と中身)。config・owner ごとの include (gitIdentity のときだけ)・ignore (ignores が空なら無し) の順。
 /// config は home-manager と同じく、includeIf より前の節の後ろに、include ごとに空行を挟んで足す。
-pub fn render(data: &GitData, identity: bool) -> Vec<(String, String)> {
-    let mut config = to_git_ini(&main_ini(data, identity));
+pub fn render(data: &GitData, identity: bool, ssh_command: Option<&str>) -> Vec<(String, String)> {
+    let mut config = to_git_ini(&main_ini(data, identity, ssh_command));
     let mut includes = Vec::new();
     if identity {
         for o in &data.owners {
@@ -378,6 +420,17 @@ impl Step for GitConfig {
                 ctx.host.tool_origin("gitIdentity")
             ));
         }
+        let ssh = windows_ssh(ctx);
+        match &ssh {
+            Some(exe) => ctx.say(format!(
+                "git の ssh (core.sshCommand): {} (Windows の OpenSSH。1Password・中継の agent に届く)",
+                exe.display()
+            )),
+            None => ctx.say(format!(
+                "!! {}",
+                no_ssh_note()
+            )),
+        }
         let dir = join_segments(&ctx.roots.user_profile, DIR);
         let record_path = ctx.state_dir.join(RECORD_FILE);
         let records = match Records::load(&record_path) {
@@ -401,7 +454,7 @@ impl Step for GitConfig {
             step: "git-config",
         };
         let mut w = Linker::new(src, dir.clone(), mode, records);
-        let files = render(&data, identity);
+        let files = render(&data, identity, ssh.as_deref().map(ssh_command).as_deref());
         for (name, text) in &files {
             w.copy_bytes(ctx, text.as_bytes(), &dir.join(name), &label(name));
         }
@@ -423,9 +476,17 @@ impl Step for GitConfig {
                 gitconfig.display()
             ));
         }
+        if ssh.is_none() {
+            outcomes[0].notes.push(no_ssh_note());
+        }
         outcomes.extend(where_git_reads(ctx, &dir));
         outcomes
     }
+}
+
+/// Windows の OpenSSH の ssh.exe が無いときの行
+fn no_ssh_note() -> String {
+    "Windows の OpenSSH の ssh.exe (%ProgramFiles%\\OpenSSH・%SystemRoot%\\System32\\OpenSSH) が無いので core.sshCommand を書かない (git は Git for Windows の ssh を使い、1Password・中継の agent に届かない)。PowerShell で Install-OpenSSH -IfMissing を打ってから dotfiles apply".to_string()
 }
 
 /// 出力と締めの表に出す名前
@@ -532,6 +593,9 @@ mod tests {
     //!   ものは衝突 (--force で上書き)
     //! - gitIdentity を外すと、記録どおりの include のファイルを消す (変えていれば残して知らせる)
     //! - ~/.gitconfig があれば添える。XDG_CONFIG_HOME か HOME で git が別の場所を読むなら manual
+    //! - core.sshCommand: %ProgramFiles%\OpenSSH\ssh.exe があればそれ、無ければ %SystemRoot%\System32\OpenSSH\ssh.exe を、`/` 区切りで `'…'` に囲んで
+    //!   [core] に書く。どちらも無ければ書かずに知らせる。ssh.exe が増えた・減ったときは、記録どおりの config を書き換える (衝突にしない)。
+    //!   git.toml の [settings.core] の sshCommand は文を返す
     //! - repo の git.toml を読める (本物の repo)
 
     use super::*;
@@ -568,6 +632,8 @@ postBuffer = 524288000
     fn data() -> GitData {
         parse(TOML).unwrap()
     }
+
+    const SAMPLE_SSH: &str = "'C:/Program Files/OpenSSH/ssh.exe'";
 
     #[test]
     fn parses_the_data() {
@@ -624,6 +690,13 @@ postBuffer = 524288000
             with("[settings.core]\nx = 1.5\n").contains("settings.core.x は文字列・真偽値・整数")
         );
         assert!(with("[settings]\ncore = 1\n").contains("settings.core は表"));
+        for key in ["sshCommand", "sshcommand"] {
+            assert!(
+                with(&format!("[settings.core]\n{key} = \"ssh\"\n"))
+                    .contains("[settings.core] に sshCommand は書けません"),
+                "{key}"
+            );
+        }
         assert!(
             with("[[identity.owners]]\nowner = \"a b\"\nname = \"n\"\nemail = \"e\"\n")
                 .contains("owner は英数字で始まり")
@@ -632,7 +705,7 @@ postBuffer = 524288000
 
     #[test]
     fn renders_like_home_manager() {
-        let files = render(&data(), true);
+        let files = render(&data(), true, None);
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["config", "config.me-sub", "ignore"]);
         assert_eq!(
@@ -672,7 +745,7 @@ postBuffer = 524288000
         );
         assert_eq!(files[2].1, ".env\nnode_modules/\n");
         // gitIdentity でなければ [user] も includeIf も include のファイルも無い
-        let files = render(&data(), false);
+        let files = render(&data(), false, None);
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(names, vec!["config", "ignore"]);
         assert!(!files[0].1.contains("[user]") && !files[0].1.contains("includeIf"));
@@ -680,6 +753,35 @@ postBuffer = 524288000
             files[0]
                 .1
                 .ends_with("\tinsteadOf = \"ssh://git@example.com/\"\n")
+        );
+    }
+
+    #[test]
+    fn ssh_command_is_quoted_for_the_shell() {
+        assert_eq!(
+            ssh_command(Path::new("C:\\Program Files\\OpenSSH\\ssh.exe")),
+            SAMPLE_SSH
+        );
+        assert_eq!(
+            ssh_command(Path::new("C:\\Windows\\System32\\OpenSSH\\ssh.exe")),
+            "'C:/Windows/System32/OpenSSH/ssh.exe'"
+        );
+        assert_eq!(
+            ssh_command(Path::new("C:/it's/ssh.exe")),
+            "'C:/it'\\''s/ssh.exe'"
+        );
+        // [core] の中に、名前の順で書く (値の ' は escape しない)
+        let files = render(&data(), false, Some(SAMPLE_SSH));
+        assert!(
+            files[0].1.contains(concat!(
+                "[core]\n",
+                "\tautocrlf = false\n",
+                "\teditor = \"vim\"\n",
+                "\tsshCommand = \"'C:/Program Files/OpenSSH/ssh.exe'\"\n",
+                "\n",
+            )),
+            "{}",
+            files[0].1
         );
     }
 
@@ -902,6 +1004,62 @@ postBuffer = 524288000
     }
 
     #[test]
+    fn writes_the_windows_ssh() {
+        let e = Env::new();
+        let pf = e.t.path().join("pf");
+        let sysroot = e.t.path().join("windows");
+        let sys = || {
+            FakeSys::new(|_| unreachable!())
+                .with_env("ProgramFiles", &pf.to_string_lossy())
+                .with_env("SystemRoot", &sysroot.to_string_lossy())
+        };
+        let config = || std::fs::read_to_string(e.git("config")).unwrap();
+        let line = |exe: &Path| format!("\tsshCommand = \"{}\"\n", ssh_command(exe));
+
+        // どちらも無い: 書かずに知らせる
+        let (o, out) = e.run_with(Mode::Apply { force: false }, "", sys());
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("core.sshCommand を書かない")
+                    && n.contains("Install-OpenSSH -IfMissing")),
+            "{o:?}"
+        );
+        assert!(out.contains("!! Windows の OpenSSH の ssh.exe"), "{out}");
+        assert!(!config().contains("sshCommand"));
+
+        // Windows の機能の版だけ: それを書く。前に置いた config (記録どおり) を書き換え、衝突にしない
+        let inbox = join_segments(&sysroot, "System32/OpenSSH/ssh.exe");
+        e.t.write("windows/System32/OpenSSH/ssh.exe", "");
+        let (o, out) = e.run_with(Mode::Check, "", sys());
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(out.contains("git の ssh (core.sshCommand): "), "{out}");
+        let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        assert!(
+            o[0].notes.iter().all(|n| !n.contains("core.sshCommand")),
+            "{o:?}"
+        );
+        assert!(config().contains(&line(&inbox)), "{}", config());
+
+        // winget の版もある: そちらが先
+        let winget = join_segments(&pf, "OpenSSH/ssh.exe");
+        e.t.write("pf/OpenSSH/ssh.exe", "");
+        let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        assert!(config().contains(&line(&winget)), "{}", config());
+        assert_eq!(config().matches("sshCommand").count(), 1);
+
+        // 無くなった: 記録どおりの config から外す
+        std::fs::remove_file(&winget).unwrap();
+        std::fs::remove_file(&inbox).unwrap();
+        let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        assert!(!config().contains("sshCommand"));
+    }
+
+    #[test]
     fn broken_data_fails() {
         let e = Env::new();
         e.t.write(
@@ -920,10 +1078,15 @@ postBuffer = 524288000
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
         let d = parse(&std::fs::read_to_string(join_segments(&repo, DATA)).unwrap()).unwrap();
         assert!(!d.owners.is_empty() && !d.ignores.is_empty());
-        let files = render(&d, true);
+        let files = render(&d, true, Some(SAMPLE_SSH));
         assert!(files[0].1.contains("[core]\n") && files[0].1.contains("autocrlf = false"));
         assert!(!files[0].1.contains("gpgSign") && !files[0].1.contains("delta"));
         assert!(!files[0].1.contains("credential"));
+        assert!(
+            files[0]
+                .1
+                .contains(&format!("\tsshCommand = \"{SAMPLE_SSH}\"\n"))
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@
 //!   同じバイト列 (書き方の写しが合っている)
 //! - Windows の config の includeIf より前の節が、WSL の iniContent から Windows に入れないもの (1Password の署名・delta) を除き、lfs の filter の
 //!   git-lfs のパスをそろえたものと同じ。名前とメールのあるホスト (sandbox・1Password の WSL) と無いホスト (client の 1Password)
+//!   (Windows だけの core.sshCommand は除いて比べ、WSL に無いことを見る)
 //! - owner ごとの include の名前とメールが WSL の includes の contents と同じ。条件は WSL が `~/workdir` の下 (末尾の / なし。変えていない)、
 //!   Windows が `~/ghq` の下 (末尾の /・/i)
 //! - Windows の ignore が、WSL の ignore から direnv の `.direnv/` を除いたものと同じ
@@ -226,8 +227,14 @@ fn matches_home_manager() {
 
         // 値: Windows に入れないものと lfs のパスの外は同じ
         assert_eq!(w.ini.contains_key("user"), identity, "{name}");
+        // core.sshCommand は Windows だけ (runner が Windows の OpenSSH の ssh.exe を書く)。WSL には無い
+        assert!(
+            !w.ini.iter().any(|(s, k)| s.eq_ignore_ascii_case("core")
+                && k.keys().any(|k| k.eq_ignore_ascii_case("sshCommand"))),
+            "{name}: WSL に core.sshCommand がある"
+        );
         assert_eq!(
-            git_config::main_ini(&d, identity),
+            git_config::main_ini(&d, identity, None),
             windows_view(&w.ini),
             "{name}: Windows の config と WSL の config の値が違う (どの OS でも同じにする値は git.toml に書く)"
         );
@@ -260,7 +267,7 @@ fn matches_home_manager() {
         }
 
         // ignore: WSL の ignore から direnv の .direnv/ を除いたもの
-        let files = git_config::render(&d, identity);
+        let files = git_config::render(&d, identity, None);
         let ignore = &files.iter().find(|(n, _)| n == "ignore").unwrap().1;
         let direnv = w.ignore.lines().filter(|l| *l == ".direnv/").count();
         assert_eq!(

@@ -421,7 +421,7 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
-| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
+| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
@@ -622,7 +622,7 @@ Linux の CI が同じ入力で突き合わせる)。Windows の Claude Code は
 | `nix-managed-guard.sh` | 入れない | `/nix/store` が無い。runner が置くのはコピー (変えると次の apply が衝突で知らせる) と clone への junction で、直し方は `CLAUDE.md` の冒頭に書いた |
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
 | `footer-links-archive.sh` | 入れない | cc-pages が Windows に無い (claude-skills の spec も Windows の cc-pages は扱わない) |
-| `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない。承認の画面は、ユーザーが見ている Windows の画面に出る |
+| `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない (git だけは `git-config` が書く `core.sshCommand` で Windows の OpenSSH の ssh を使う。[git の設定](#git-の設定))。承認の画面は、ユーザーが見ている Windows の画面に出る |
 
 #### T3 Code の会話だけの設定
 
@@ -840,7 +840,7 @@ git config --list --show-origin --show-scope       # どのファイルのどの
 
 | 置くもの | 中身 |
 | --- | --- |
-| `config` | git.toml の `[settings]`・`[user]` (`gitIdentity` が true のとき)・`[filter "lfs"]` を home-manager と同じ形 (節とキーは名前の順) で並べ、`gitIdentity` なら後ろに owner ごとの `[includeIf "gitdir/i:~/ghq/github.com/<owner>/"]` |
+| `config` | git.toml の `[settings]`・`[user]` (`gitIdentity` が true のとき)・`[filter "lfs"]`・`core.sshCommand` (下の表) を home-manager と同じ形 (節とキーは名前の順) で並べ、`gitIdentity` なら後ろに owner ごとの `[includeIf "gitdir/i:~/ghq/github.com/<owner>/"]` |
 | `config.<owner>` | owner (今は pollenjp-sub) の `[user]`。上の includeIf が読む (`gitIdentity` のときだけ) |
 | `ignore` | git.toml の `ignores` (git が既定で読む全体の ignore) |
 
@@ -853,6 +853,7 @@ WSL と違うもの:
 | `[filter "lfs"]` の git-lfs | `/nix/store` のパス | PATH の `git-lfs` | Git for Windows に同梱 (system の設定にも同じ 4 つがある) |
 | pollenjp-sub の includeIf の条件 | `gitdir:~/workdir/github.com/pollenjp-sub` | `gitdir/i:~/ghq/github.com/pollenjp-sub/` | Windows の ghq の root は `%USERPROFILE%\ghq`。末尾の `/` でその下の repo に当て、`/i` で大文字小文字を区別しない。WSL の条件は旧い ghq の root (`~/workdir`) の写しで末尾に `/` が無く、今は何にも当たらない (WSL のふるまいは変えていない) |
 | ignore の `.direnv/` | direnv の module が足す | 足さない | Windows に direnv が無い |
+| `core.sshCommand` | 書かない | Windows の OpenSSH の `ssh.exe`。`%ProgramFiles%\OpenSSH\ssh.exe` (`Install-OpenSSH` が winget で入れる版) があればそれ、無ければ `%SystemRoot%\System32\OpenSSH\ssh.exe` (Windows の機能の版) を、`'C:/Program Files/OpenSSH/ssh.exe'` の形 (`/` 区切りで `'…'` に囲む。git は値を shell で起こす) で書く。どちらも無ければ書かずに ⚠ で知らせる (無い exe を書くと ssh の remote が全部起こせなくなる) | 無いと git は Git for Windows 付属の MSYS の ssh (`C:\Program Files\Git\usr\bin\ssh.exe`) を使う。MSYS の ssh は Windows の named pipe の agent (1Password の `\\.\pipe\openssh-ssh-agent`・op-reason の中継 `\\.\pipe\op-reason-ssh-agent`) に届かず、`ssh-add -l` では鍵が見えるのに `git pull` (`git@github.com:…` の remote) が `Permission denied (publickey)` で落ちる。中継を使わないホスト (`opReasonSshRelay` が off) にも書く。git.toml には書けない (Linux の git に効かせない。書けば runner が止まる) |
 | credential helper | 書かない | 書かない | bootstrap が gh に書かせない決まりと、`claude-env` が settings.json の env に足す組を壊さない |
 
 - 置き方は `CLAUDE.md` と同じ記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\git-config.deployed.json`)。git.toml が変われば `dotfiles apply` で書き直す。
@@ -861,6 +862,9 @@ WSL と違うもの:
 - `~/.gitconfig` が無いと、`git config --global` (gh の `auth setup-git` なども) はここの `config` に書き、次の `dotfiles check` が衝突で知らせる。Windows だけの
   設定は `~/.gitconfig` に書く (`git config --file "$HOME\.gitconfig" <キー> <値>`)。git は `~/.config/git/config` の後に `~/.gitconfig` を読むので同じキーは
   `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
+- `core.sshCommand` を書くようになる前に置いた `config` も、中身が記録どおりなら次の `dotfiles apply` で書き換わる (衝突にならない)。`OpenSSH` を後から入れた・
+  消したときも同じく書き換える。Claude Code の会話の git は `claude-env` の env (`GIT_CONFIG_*`) で GitHub の ssh の URL を https に読み替えるので、GitHub
+  には ssh を使わない (この値に左右されない。GitHub の外の ssh の remote にはこの値が効く)
 - `gitIdentity` が false のホスト (自社・客先) には名前もメールも書かない (WSL と同じ。git は commit の前に止まる)。そのホストで使う名前とメールは `~/.gitconfig` に書く
 - `core.autocrlf = false` が Git for Windows の system の `true` より先に効く (WSL と同じく、取り出すときに LF を CRLF にしない)。repo に `core.autocrlf` を
   書いていない既にある clone のうち、作業ツリーが CRLF で取り出されたものは、触ったファイルが変わったように見えることがある (`git ls-files --eol` の
@@ -3479,6 +3483,9 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 
 commit の署名 (`op-ssh-sign-wsl.exe`。1Password と直に話す)・`ssh-add` (鍵の一覧。`ssh-add.exe` のまま)・Git for Windows の同梱の ssh
 (MSYS2)・WSL の Linux の ssh (`USE_LINUX_SSH=1`)・`scp`・`sftp` (WSL では `/usr/bin/ssh` を起こす)。
+
+Git for Windows の同梱の ssh は、中継にも 1Password の pipe にも届かない (MSYS2 の ssh は Windows の named pipe の agent を使えない)。Windows の
+git は、`git-config` の手順が書く `core.sshCommand` で Windows の OpenSSH の ssh を使うので、中継を通る ([git の設定](#git-の設定))。
 
 ### op-reason の新しい版を出したとき
 
