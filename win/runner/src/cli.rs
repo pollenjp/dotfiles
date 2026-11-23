@@ -719,7 +719,7 @@ mod tests {
                 );
                 t.write("g/dotfiles/win/app/a.json", "A\n");
                 if let Some(h) = host {
-                    t.write("g/dotfiles-private/win/hosts/polle@pjp-raiden.toml", h);
+                    t.write("g/dotfiles-private/win/hosts/alice@example-host.toml", h);
                 }
                 World { t }
             }
@@ -730,7 +730,7 @@ mod tests {
                     if c.program == Path::new("hostname") {
                         RunResult {
                             exit: Exit::Code(0),
-                            output: vec!["PJP-Raiden".into()],
+                            output: vec!["Example-Host".into()],
                         }
                     } else {
                         RunResult {
@@ -739,7 +739,7 @@ mod tests {
                         }
                     }
                 })
-                .with_env("USERNAME", "polle")
+                .with_env("USERNAME", "alice")
                 .with_env("USERPROFILE", &home.to_string_lossy())
                 .with_env(
                     "APPDATA",
@@ -797,7 +797,7 @@ mod tests {
             let (code, out, _) = w.run(&["check", "--steps", "files"]);
             assert_eq!(code, 3, "{out}");
             assert!(out.contains("==> dotfiles check"));
-            assert!(out.contains("polle@pjp-raiden.toml (グループ personal)"));
+            assert!(out.contains("alice@example-host.toml (グループ personal)"));
             assert!(out.contains("受け持ち: WSL の setup"));
             assert!(out.contains("⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️"));
             assert!(!w.dst().exists());
@@ -879,9 +879,9 @@ mod tests {
             let w = World::new(Some("[tools]\nwindowsTypeClipboard = true\n"));
             let sys = FakeSys::new(|_| RunResult {
                 exit: Exit::Code(0),
-                output: vec!["pjp-raiden".into()],
+                output: vec!["example-host".into()],
             })
-            .with_env("USERNAME", "polle");
+            .with_env("USERNAME", "alice");
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0, "{out}");
             assert!(out.contains("[90] files"));
@@ -933,7 +933,7 @@ mod tests {
             let answer = profile.to_string_lossy().into_owned();
             let sys = FakeSys::new(move |c| {
                 let output = if c.program == Path::new("hostname") {
-                    vec!["PJP-Raiden".to_string()]
+                    vec!["Example-Host".to_string()]
                 } else {
                     vec![answer.clone()]
                 };
@@ -943,7 +943,7 @@ mod tests {
                 }
             })
             .with_program("pwsh", "/fake/pwsh")
-            .with_env("USERNAME", "polle")
+            .with_env("USERNAME", "alice")
             .with_env("USERPROFILE", &home.to_string_lossy())
             .with_env(
                 "APPDATA",
@@ -1102,7 +1102,7 @@ mod tests {
         fn host_file_falls_back_to_bootstrap_place() {
             let w = World::new(None);
             w.t.write(
-                "home/ghq/github.com/pollenjp/dotfiles-private/win/hosts/polle@pjp-raiden.toml",
+                "home/ghq/github.com/pollenjp/dotfiles-private/win/hosts/alice@example-host.toml",
                 "group = \"company\"\n",
             );
             let (code, out, _) = w.run(&["list"]);
@@ -1116,7 +1116,7 @@ mod tests {
                     .join("dotfiles-private")
                     .join("win")
                     .join("hosts")
-                    .join("polle@pjp-raiden.toml");
+                    .join("alice@example-host.toml");
             assert!(
                 out.contains(&format!(
                     "ホストの値: {} (グループ company)",
@@ -1131,9 +1131,9 @@ mod tests {
         fn relative_repo_becomes_absolute() {
             let sys = FakeSys::new(|_| RunResult {
                 exit: Exit::Code(0),
-                output: vec!["pjp-raiden".into()],
+                output: vec!["example-host".into()],
             })
-            .with_env("USERNAME", "polle");
+            .with_env("USERNAME", "alice");
             let args: Vec<String> = ["list", "--repo", "../.."]
                 .iter()
                 .map(|s| s.to_string())
@@ -1158,12 +1158,12 @@ mod tests {
                 exit: Exit::SpawnFailed("x".into()),
                 output: vec![],
             })
-            .with_env("USERNAME", "polle")
-            .with_env("COMPUTERNAME", "PJP-RAIDEN");
+            .with_env("USERNAME", "alice")
+            .with_env("COMPUTERNAME", "EXAMPLE-HOST");
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0);
             assert!(
-                out.contains("polle@pjp-raiden.toml (グループ personal)"),
+                out.contains("alice@example-host.toml (グループ personal)"),
                 "{out}"
             );
         }

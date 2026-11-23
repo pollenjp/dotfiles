@@ -81,7 +81,7 @@ function Test-WingetPinned {
 # plan ごとに打つ winget の引数 (配列の配列)。下げるときは、新しい版が入っていると
 # MSI が止める (LaunchCondition) ので、先に外してから入れる。
 # 上げる upgrade には --include-pinned を付ける。版を名指しした upgrade は、付けないとこの script が足した pin (Pinning) に
-# 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は --include-pinned を
+# 止められる (0x8A150068。2026-11-16 に example-host で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は --include-pinned を
 # 受け付けないので付けない (下げるときの install は、uninstall で入っていない形にしてからなので pin を見ない)
 function Get-WingetCommands {
     param([string]$Plan, [string]$PackageId, [string]$Version, [switch]$Server)

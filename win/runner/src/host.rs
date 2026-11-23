@@ -915,7 +915,7 @@ mod tests {
     #[test]
     fn missing_file_is_not_an_error() {
         let t = TempDir::new("host");
-        let path = t.path().join("polle@pjp-raiden.toml");
+        let path = t.path().join("alice@example-host.toml");
         let h = load(&path, groups()).unwrap();
         assert_eq!(h.source, Source::Missing(path.clone()));
         assert_eq!(h.group, "personal");
@@ -928,11 +928,11 @@ mod tests {
     fn default_path_is_next_to_the_clone() {
         let repo = Path::new("/g/github.com/pollenjp/dotfiles");
         assert_eq!(
-            default_path(repo, None, "polle", "pjp-raiden"),
+            default_path(repo, None, "alice", "example-host"),
             Path::new("/g/github.com/pollenjp/dotfiles-private")
                 .join("win")
                 .join("hosts")
-                .join("polle@pjp-raiden.toml")
+                .join("alice@example-host.toml")
         );
     }
 

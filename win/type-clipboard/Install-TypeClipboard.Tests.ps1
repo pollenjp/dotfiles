@@ -183,7 +183,7 @@ $sample = Join-Path $work 'sample.bin'
 Test-Case 'ファイルの SHA-256 を小文字で出す' $HashV { Get-TypeClipboardFileHash -Path $sample }
 Test-Case '無いファイルなら空' '' { Get-TypeClipboardFileHash -Path (Join-Path $work 'nothing.bin') }
 # PowerShell 7 から起こした Windows PowerShell 5.1 は PSModulePath を継いで 7 の Microsoft.PowerShell.Utility を読み、
-# Get-FileHash (5.1 では script の関数) が見つからない (2026-11-10 に pjp-raiden で踏んだ)。その形を偽の関数で作る
+# Get-FileHash (5.1 では script の関数) が見つからない (2026-11-10 に example-host で踏んだ)。その形を偽の関数で作る
 Test-Case 'Get-FileHash が見つからない PowerShell でも SHA-256 を出す' $HashV {
     function Get-FileHash { throw "The term 'Get-FileHash' is not recognized as the name of a cmdlet" }
     Get-TypeClipboardFileHash -Path $sample

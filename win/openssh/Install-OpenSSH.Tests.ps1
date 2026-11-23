@@ -113,7 +113,7 @@ Test-Case 'Server があれば、下げるときの install も Client と Serve
 }
 
 # winget の pin と打つ引数: 版を名指しした upgrade は、--include-pinned が無いと、この script が足した pin (Pinning) に
-# 止められる (0x8A150068。2026-11-16 に pjp-raiden で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は
+# 止められる (0x8A150068。2026-11-16 に example-host で 10.4.0.0 へ上げるときに落ちた)。install と uninstall は
 # --include-pinned を受け付けない (下げるときの install は、uninstall で入っていない形にしてからなので pin を見ない)
 Test-Case 'upgrade は自分の pin を越える (--include-pinned)' 'True' {
     @(Get-WingetCommands -Plan 'upgrade' -PackageId $Id -Version '10.0.0.0')[0] -contains '--include-pinned'

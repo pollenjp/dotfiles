@@ -316,7 +316,7 @@ Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
 }
 # 版を名指しした winget upgrade は、--include-pinned が無いと bootstrap が足した pin (Pinning) に止められる (0x8A150068。
-# 2026-11-16 に pjp-raiden の OpenSSH で起きた形)。4 つの道具のどれの上げ方にも付ける
+# 2026-11-16 に example-host の OpenSSH で起きた形)。4 つの道具のどれの上げ方にも付ける
 Test-Case '4 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
     $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
     $notes = @(Get-Lines $s | Where-Object { $_ -like '※*' })
