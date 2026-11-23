@@ -1228,14 +1228,23 @@ impl Ps1Step {
         let s = self.0;
         match plan {
             Plan::PathOnly => {
-                let mut o = Outcome::new(
-                    Kind::Manual,
-                    format!(
+                // 出力の印 (fzf の「MSI の fzf (machine スコープ) が入っている」) に当たれば、その印を見出しにして直し方を出す。
+                // 無ければ PATH のずれの見出しと manual_fix
+                let text = match s
+                    .output_fixes
+                    .iter()
+                    .find(|(m, _)| lines.iter().any(|l| l.contains(m)))
+                {
+                    Some((marker, _)) => format!(
+                        "{marker} ({} -Check の ※ の行。runner は直さない)",
+                        s.command
+                    ),
+                    None => format!(
                         "PATH で引かれるものが winget のものではない ({} -Check の ※ の行)",
                         s.command
                     ),
-                );
-                // 出力の印 (fzf の「MSI の fzf が入っている」) に当たればその直し方、無ければ manual_fix
+                };
+                let mut o = Outcome::new(Kind::Manual, text);
                 for n in self.fixes(runner_host, lines, s.manual_fix) {
                     o = o.note(n);
                 }
@@ -1626,7 +1635,10 @@ mod tests {
     /// ghq・fzf: Windows にしか無い手順で、いつも on。ntn と同じく入れる・揃える・PATH のずれは知らせる
     #[test]
     fn ghq_and_fzf_sync_like_ntn() {
-        for (id, command, name) in [("ghq", "Install-Ghq", "ghq"), ("fzf", "Install-Fzf", "fzf")] {
+        for (id, command, name, path_owner) in [
+            ("ghq", "Install-Ghq", "ghq", "winget のもの"),
+            ("fzf", "Install-Fzf", "fzf", "winget の portable のもの"),
+        ] {
             let s = spec(id);
             assert!(s.windows_only, "{id}");
             assert_eq!(s.gate, Gate::Always, "{id}");
@@ -1682,7 +1694,7 @@ mod tests {
                     1,
                     vec![
                         header_line(s),
-                        format!("⚠️ PATH の {name} が winget のものではない → ※ の手順で直す ⚠️"),
+                        format!("⚠️ PATH の {name} が {path_owner}ではない → ※ の手順で直す ⚠️"),
                     ],
                 ),
                 (0, vec![]),
@@ -1690,6 +1702,11 @@ mod tests {
             let (o, _, calls) = run(id, &sys3, APPLY);
             assert_eq!(o[0].kind, Kind::Manual, "{id}");
             assert_eq!(ends(&calls), vec!["-Check"], "{id}");
+            assert_eq!(
+                o[0].text,
+                format!("PATH で引かれるものが winget のものではない ({command} -Check の ※ の行)"),
+                "{id}"
+            );
             assert_eq!(
                 o[0].notes,
                 vec![
@@ -1718,6 +1735,10 @@ mod tests {
             let (o, _, calls) = run("fzf", &sys1, mode);
             assert_eq!(o.len(), 1);
             assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(
+                o[0].text,
+                "MSI の fzf (machine スコープ) が入っている (Install-Fzf -Check の ※ の行。runner は直さない)"
+            );
             assert_eq!(ends(&calls), vec!["-Check"]);
             assert_eq!(o[0].notes.len(), 1);
             assert!(
@@ -1729,8 +1750,40 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順の ps1 は、runner が読む締めの行の文言と出力の印を持つ (WSL の wrapper との突き合わせの代わり。文言を変えたら
-    /// 両方を直す)
+    /// ps1 の字からコメント (`<# … #>` の塊と、`#` で始まる行) を除く。突き合わせを、コメントに写した文言で通さないため
+    fn ps1_code(text: &str) -> String {
+        let mut out = String::new();
+        let mut in_block = false;
+        for line in text.lines() {
+            let t = line.trim_start_matches('\u{feff}').trim_start();
+            if in_block {
+                in_block = !t.contains("#>");
+                continue;
+            }
+            if t.starts_with("<#") {
+                in_block = !t.contains("#>");
+                continue;
+            }
+            if t.starts_with('#') {
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn ps1_code_drops_comments() {
+        let text = "\u{feff}<#\n.SYNOPSIS\n→ Install-X で揃える\n#>\nparam()\n  # → Install-X で入れる\n'⚠️ → Install-X で揃える ⚠️'\n<# 1 行 #>\nx # 行末\n";
+        assert_eq!(
+            ps1_code(text),
+            "param()\n'⚠️ → Install-X で揃える ⚠️'\nx # 行末\n"
+        );
+    }
+
+    /// Windows にしか無い手順の ps1 は、runner が読む締めの行の文言と出力の印を、コメントでない行に持つ (WSL の wrapper との突き合わせの
+    /// 代わり。文言を変えたら両方を直す)
     #[test]
     fn windows_only_scripts_carry_the_phrases_the_runner_reads() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
@@ -1740,7 +1793,7 @@ mod tests {
             vec!["t3-code", "ghq", "fzf"]
         );
         for s in only {
-            let text = std::fs::read_to_string(repo.join(s.script)).unwrap();
+            let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());
             if s.policy == Policy::Sync {
                 for phrase in [
                     format!("→ {} で入れる", s.command),
