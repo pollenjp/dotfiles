@@ -5,8 +5,9 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
   dotfiles-private に登録して」「--host を付け忘れる」「PC ごとに ~/dotfiles/flake.nix を切り替えるのが面倒」「ホストの値を private に
   置きたい」「この PC を自社 (company)・客先 (client) のグループにして」と言われたとき、setup が「dotfiles-private に、この PC の
   ホスト … があります」「この PC は dotfiles-private に … として登録されていますが」「dotfiles-private のこの PC のホストの要約
-  (nix/hosts/<ホスト>.md) が今の設定と違います / がありません」と知らせたとき、ホストの要約 (nix/hosts/<ホスト>.md・
-  nix/hosts/README.md) を出し直すとき、登録の PR が merge されて ~/dotfiles/flake.nix を仕上げるとき、新しい PC を登録するときに読む。
+  (docs/hosts/nix/<ホスト>.md と HTML 版) が今の設定と違います / がありません」と知らせたとき、ホストの要約 (dotfiles-private の
+  docs/hosts/ の md と図の HTML 版。win/hosts/ の Windows のホストの分も) を出し直すとき、登録の PR が merge されて ~/dotfiles/flake.nix を
+  仕上げるとき、新しい PC を登録するときに読む。
   ローカル flake を今の雛形へ移すだけの話は pjp-dotfiles-local-flake-migrate の側。
 metadata:
   pjp-pack: machine
@@ -27,10 +28,13 @@ shared/ が足す値は compare が別に出す (dotfiles の ADR 031)。
 (型には WSL・1Password の署名・Dev Tracker などの PC の値が無い。WSL や 1Password を使う PC では、当て続けるとそれらが外れる
 (WSL の ssh のラッパー・署名・exe-exec-trace の unit など) ので、すぐ登録する)。
 
-ホストのファイルの隣には、そのホストの要約 `nix/hosts/<名前>.md` (設定グループ・段・道具の on/off と、その値がどこで決まったか。
-dotfiles の ADR 057) を置き、`nix/hosts/README.md` に全ホストの一覧 (目次・一覧表・ホストごとの図) を置く。どちらも生成物で、
-**ホストのファイルを足す・直すときは、同じ PR で出し直す** (下の手順 3)。本体の変更 (段の割り当て・既定) でも古くなるので、setup は
-switch のたびにこの PC の `<名前>.md` を比べ、違えば警告のまとめに出す (そのときは下の「要約だけを出し直す」)。
+dotfiles-private の `docs/hosts/` には、ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか。dotfiles の ADR 057・
+ADR 093) を置く: ホストごとの `nix/<名前>.md` と図の HTML 版 `nix/html/<名前>.html` (段の入れ子の領域・道具の箱・ホストの囲みの線)、
+Windows のホスト (`win/hosts/<ユーザー>@<PC>.toml`) の `win/<名前>.md` と HTML 版、全ホストの入口 `README.md` と `html/hosts.html`。
+どれも生成物で、**ホストのファイル (`nix/hosts/` の `.nix`・`win/hosts/` の `.toml`) を足す・直すときは、同じ PR で出し直す** (下の手順 3)。
+本体の変更 (段の割り当て・既定・図の作り) でも古くなるので、setup は switch のたびにこの PC の `docs/hosts/nix/<名前>.md` と HTML 版を比べ、
+違えば警告のまとめに出す (そのときは下の「要約だけを出し直す」)。md の 3 行目の「📝 [Notion で開く](…)」の行は、`docs/` を Notion に写す
+道具が書くもので、`summaries` は残して書き直す (比べるときは外す)。
 
 決まった処理 (名前・調べる・下書き・比べる・要約) は本体の `nix/scripts/private-host.sh` が持つ。この skill は手順・判断・確認の取り方を教える。
 
@@ -176,10 +180,11 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 - **要約を出し直す**: 本体を dotfiles の origin/main にそろえて `summaries` を流す。本体の checkout が origin/main より古いと、ほかの
   ホストの新しい要約まで古い形に戻す。`git -C <本体> fetch origin` のあと `git -C <本体> archive origin/main nix | tar -x -C <scratchpad>/body`
   で写し、`bash <scratchpad>/body/nix/scripts/private-host.sh summaries --private <worktree> --nix-dir <scratchpad>/body/nix` (本体の
-  option を足す PR と一緒に出すときだけ、その PR の branch の本体)。全ホストの `nix/hosts/<名前>.md` と `nix/hosts/README.md` を
-  書き直す (ホストのファイルの無い `.md` は消す)。書いたファイルを `git -C <worktree> diff` で見て、このホストの `<名前>.md` (グループ・
-  道具の on/off・どこで決まったか) が下書きの意図と合うかを確かめる。ほかのホストの `.md` も変わっていたら、本体の変更で古くなっていた分
-  (この PR に入れてよい。PR の本文にそう書く)。`--check` は書かずに違いだけを出す
+  option を足す PR と一緒に出すときだけ、その PR の branch の本体)。`docs/hosts/` の全ホストのページ (入口・`nix/<名前>.md`・
+  `win/<名前>.md` と、それぞれの `html/`) を書き直す (作らなくなったページは消す)。書いたファイルを `git -C <worktree> diff` で見て、
+  このホストの `docs/hosts/nix/<名前>.md` (グループ・ホストのファイルで決めた値・効かない道具) が下書きの意図と合うかを確かめる (図は
+  `docs/hosts/nix/html/<名前>.html` をブラウザで開く)。ほかのホストのページも変わっていたら、本体の変更で古くなっていた分 (この PR に
+  入れてよい。PR の本文にそう書く)。`--check` は書かずに違いだけを出す
 - dotfiles-private の README の決まりで、ホストの値を直す PR では hostmap (`docs/architecture/hosts/`) も
   `python3 docs/architecture/hosts/hostmap/build.py --private-ref HEAD` で作り直す (本体の option を足した直後で、本体の origin/main に
   まだ無ければ `--dotfiles <本体の checkout> --dotfiles-ref <その branch>`)
@@ -212,7 +217,7 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
 
 ### 5. commit・push・PR (dotfiles-private の worktree)
 
-`nix/hosts/<名前>.nix` (と README)・出し直した要約 (`nix/hosts/*.md`・`nix/hosts/README.md`)・hostmap を commit して PR を出す。merge は
+`nix/hosts/<名前>.nix` (と README)・出し直した要約 (`docs/hosts/` の md と HTML 版)・hostmap を commit して PR を出す。merge は
 ユーザー。PR の本文に元にしたホストと compare の結果 (drvPath が同じ。「同じ (shared/ の値だけ違う)」なら、そう書いて shared/ が足す値を
 並べる) を書く。グループや道具の switch を変えた (group を書いた・③ の道具を足した、など) なら、要約の何が変わったかも書く。
 
@@ -256,14 +261,14 @@ dotfiles 本体が ADR 026 の版 (`nix/scripts/private-host.sh` と `lib.privat
   どうしだけ。shared/ は clone と作業ツリーで同じかが 1 行で出る (手順 4 の表の下)。今と同じなら何もしない
 - **設定グループを変える** (`group` を書く・変える) ときは、そのグループで off になる段の道具のうち、今使っているもの (Dev Tracker・
   1Password・ntn・claude-skills・cc-pages・`~/h`・git の名前とメールなど) を 1 つずつ足すか聞く (足さなければ、その PC から外れる)。
-  `compare` は drvPath だけを見るので、何が外れるかは `bash <p> summary --host <名前> --markdown` (今の値) と、出し直した `<名前>.md`
-  を比べて見せる。足して今と同じものにそろえたなら、`compare` は 0 にはならない (`group.json` が変わる)。`config.dotfiles` の違いが
+  `compare` は drvPath だけを見るので、何が外れるかは `bash <p> summary --host <名前>` (今の値) と、出し直した
+  `docs/hosts/nix/<名前>.md` を比べて見せる (図で見せるなら、HTML 版の「重ねて比べる」のタブ)。足して今と同じものにそろえたなら、`compare` は 0 にはならない (`group.json` が変わる)。`config.dotfiles` の違いが
   `group` と段の switch (`personalAccounts.enable` など) だけであることを見る (足し戻した道具の値は今と同じ on なので、違いに出ない)
 - どの場合も、手順 3 の「要約を出し直す」を同じ PR に入れる
 
 ## 要約だけを出し直す
 
-setup の警告のまとめに「dotfiles-private のこの PC のホストの要約 (`nix/hosts/<名前>.md`) が今の設定と違います」(か「がありません」) が
+setup の警告のまとめに「dotfiles-private のこの PC のホストの要約 (`docs/hosts/nix/<名前>.md` と HTML 版) が今の設定と違います」(か「がありません」) が
 出たとき・本体の段の割り当てや既定を変えたとき。ホストのファイルは触らない。
 
 - 警告に「本体 … が upstream より … commit 遅れているので、まだ出し直さない」と出ていたら、出し直さない。その PC の本体が古いだけで、
@@ -317,8 +322,8 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | ファイル名を好きな名前にする | `private-host.sh name` の名前 (setup がその名前を探す) |
 | 一致するホストが無いのに、setup が選ぶホストや型で黙って進める | 前に決めた値と候補を並べてユーザーに確かめる (署名の有無などで値が変わる) |
 | 移したあとも local に値を残す (既定と同じ明示の値も) | 登録したファイルが持つので外す。残すと 2 か所に同じ値が並び、片方だけ直してずれる |
-| ホストのファイルを足す・直したのに、要約 (`<名前>.md`・`README.md`) を出し直さない | 同じ PR で `summaries` を流す。出し直さないと、merge のあと各 PC の setup が「要約が今の設定と違います」と出し続ける |
-| 要約の `.md` を手で直す | 生成物 (先頭に印がある)。ホストのファイルか本体を直して `summaries` で出し直す |
+| ホストのファイルを足す・直したのに、要約 (`docs/hosts/` のページ) を出し直さない | 同じ PR で `summaries` を流す。出し直さないと、merge のあと各 PC の setup が「要約が今の設定と違います」と出し続ける |
+| 要約の md・HTML 版を手で直す | 生成物 (md の末尾に断りがある)。ホストのファイルか本体を直して `summaries` で出し直す (md の「📝 Notion で開く」の行だけは Notion に写す道具が書く) |
 | 古い本体 (その PC の checkout) で `summaries` を流す | 新しい本体が書いた要約を古い形に戻す。dotfiles の origin/main を写した本体を `--nix-dir` に渡す |
 | 自社のグループにして、使っていた ③ の道具 (Dev Tracker・1Password・ntn など) を足し忘れる | グループを変えると ③ の既定が off になる。今使っているものを 1 つずつ聞いて足し、要約で on/off を確かめる (Dev Tracker を足して claude-skills を足し忘れると、評価で止まる) |
 | 登録したのに `tmp` を残す | `tmp` が登録したホストより先に選ばれる (ローカル flake のホストが先)。外す |
@@ -333,7 +338,8 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 ## 関連
 
 - dotfiles の `nix/README.md`「dotfiles-private に登録したホスト」「設定グループ」「新規マシンの手順」・`nix/groups.md`・ADR 026・ADR 027・
-  ADR 030 (`nix/shared/`)・ADR 031 (登録の compare と draft の shared/ の扱い)・ADR 057 (設定グループとホストの要約)
+  ADR 030 (`nix/shared/`)・ADR 031 (登録の compare と draft の shared/ の扱い)・ADR 057 (設定グループとホストの要約)・
+  ADR 093 (要約を `docs/hosts/` の図の HTML にする)
 - pjp-dotfiles-local-flake-migrate — 手順 6 の、ローカル flake を今の雛形へ移す側
 - pjp-herdr-other-repo — dotfiles-private の worktree を作る・子に任せる
 - pjp-dev-tracker — PR とチケットを結ぶ
