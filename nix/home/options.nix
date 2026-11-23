@@ -198,7 +198,7 @@ in
           開いている間は止めない)
         - runner の手順 ssh-config が、中継が答えるのを見てから、Windows の `%USERPROFILE%\.ssh\config.d\` の最初に読まれる
           ファイル (`00-op-reason-ssh-relay.ssh_config`) に、どの接続先にも効く `IdentityAgent` (中継の pipe) を書く。Windows の
-          ssh.exe (herdr-app の lavie へのつなぎ・pf も) は中継を通る
+          ssh.exe (herdr-app の example-laptop へのつなぎ・pf も) は中継を通る
 
         この option が true のマシンでは:
 

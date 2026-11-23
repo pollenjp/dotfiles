@@ -844,17 +844,17 @@ detour='ユーザーが言わない限り使わない'
 pre_ctx() { jq -r 'if .hookSpecificOutput.hookEventName == "PreToolUse" then .hookSpecificOutput.additionalContext else empty end' "${work}/stdout" 2>/dev/null; }
 
 relay_state "${relay_on}"
-pre 'ssh lavie.local true' "${work}" WSL_DISTRO_NAME=Ubuntu
+pre 'ssh example-laptop.local true' "${work}" WSL_DISTRO_NAME=Ubuntu
 if [[ $(cat "${work}/rc") == 0 && $(wc -l <"${work}/stdout") == 1 ]] \
-  && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由なし)。${relay_tray}" ]] \
+  && [[ $(notice) == "${relay_title} (ssh の接続): ssh example-laptop.local true — 許可はユーザーが op-reason の窓で押す (理由なし)。${relay_tray}" ]] \
   && [[ $(pre_ctx) == *"${relay_hint}"* && $(pre_ctx) == *"${detour}"* ]]; then
   ok "中継が on の WSL の ssh は、op-reason の窓が出ると知らせて 1Password の画面が出ないときのトレイの手を添え、理由が無ければ次から付けるよう Claude に足す"
 else
   ng "中継 on の ssh (理由なし)" "$(detail)"
 fi
 
-pre "OPREASON_SSH_REASON='lavie の herdr を見る' ssh lavie.local true" "${work}" WSL_DISTRO_NAME=Ubuntu
-if noticed && [[ $(notice) == "${relay_title} (ssh の接続): ssh lavie.local true — 許可はユーザーが op-reason の窓で押す (理由: lavie の herdr を見る)。${relay_tray}" ]]; then
+pre "OPREASON_SSH_REASON='example-laptop の herdr を見る' ssh example-laptop.local true" "${work}" WSL_DISTRO_NAME=Ubuntu
+if noticed && [[ $(notice) == "${relay_title} (ssh の接続): ssh example-laptop.local true — 許可はユーザーが op-reason の窓で押す (理由: example-laptop の herdr を見る)。${relay_tray}" ]]; then
   ok "コマンドの頭の OPREASON_SSH_REASON は理由として出し、Claude には足さない"
 else
   ng "頭の理由" "$(detail)"

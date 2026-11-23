@@ -6,7 +6,7 @@
 # OpenSSL と Go はもともと OS の束を読むので、OS の束から危ない CA を外せば (NixOS は nixos-config の
 # security.pki.caCertificateBlacklist、Ubuntu は ca-certificates の更新) 揃って拒否するようになる。
 # 次のツールは自前の束を持つので、OS の束を直しても信頼したまま残る。2026-10 の eMudhra の中間 CA の侵害
-# (CVE-2026-111943) では、OS の束を直した lavie でもテスト用ホストに繋がった。
+# (CVE-2026-111943) では、OS の束を直した example-laptop でもテスト用ホストに繋がった。
 #
 #   NIX_SSL_CERT_FILE                   nixpkgs の python の certifi (nixpkgs の certifi は、この変数があればその束を返す)
 #   SSL_CERT_FILE                       uv (既定は中に持つ webpki-roots)

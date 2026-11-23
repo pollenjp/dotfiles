@@ -762,7 +762,7 @@ relay_before() {
     jq -cn --arg m "${msg}" '{systemMessage: $m}' || true
   else
     rctx="[ssh-agent] このコマンドの ssh は op-reason の SSH の中継を通り、ユーザーが op-reason の窓で呼び出しを許可する (理由が無いと窓に「理由なし」と出る)。"
-    rctx+="次から ssh を使うコマンド (ssh・git の push / fetch / clone・rsync など) は、頭に OPREASON_SSH_REASON='<何のための ssh か>' を付けて打つ (例: OPREASON_SSH_REASON='lavie の herdr の様子を見る' ssh lavie.local …)。"
+    rctx+="次から ssh を使うコマンド (ssh・git の push / fetch / clone・rsync など) は、頭に OPREASON_SSH_REASON='<何のための ssh か>' を付けて打つ (例: OPREASON_SSH_REASON='example-laptop の herdr の様子を見る' ssh example-laptop.local …)。"
     rctx+=${relay_detour}
     jq -cn --arg m "${msg}" --arg c "${rctx}" \
       '{systemMessage: $m, hookSpecificOutput: {hookEventName: "PreToolUse", additionalContext: $c}}' || true

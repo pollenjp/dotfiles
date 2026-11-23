@@ -671,7 +671,7 @@ claude-account remove token1 [--purge]         # 登録と claude-token1.exe を
 claude-account help token [token1]             # token をこの PC とほかのマシンに置く手順
 ```
 
-- 登録は**マシンごと** (`%USERPROFILE%\.config\claude-accounts\accounts.json`。Linux と同じ形)。u24・lavie などの子でも使うなら、そのマシンで
+- 登録は**マシンごと** (`%USERPROFILE%\.config\claude-accounts\accounts.json`。Linux と同じ形)。Linux のマシンの子でも使うなら、そのマシンで
   add と set-token を打つ
 - add は登録に書いたあと、手順 `claude-accounts` をそのアカウントのぶんだけ流す (dir・symlink・`claude-<名前>.exe`。足りない symlink は
   `dotfiles apply` と同じく、1 つ目を直に張ってみて落ちたら UAC の確認 1 回で張る)。UAC を断った・出せない (SSH の会話) ときは ⚠ を出して 1 で
@@ -949,7 +949,7 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 ```json
 { "type": "work", "id": "work", "title": "チケット・進み具合・PR", "rows": [
   { "id": "TKT-n", "title": "ハブのチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "ハブ", "children": [
-    { "id": "TKT-m", "title": "子のチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "子 C · u24/t6v",
+    { "id": "TKT-m", "title": "子のチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "子 C · example-wsl/t6v",
       "steps": [ { "label": "spec", "state": "done" }, { "label": "実装", "state": "active" }, { "label": "PR", "state": "todo" } ] },
     { "id": "TKT-k", "title": "済んだ子のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "who": "子 A", "children": [
       { "kind": "pr", "id": "dotfiles#251", "title": "panel の文字を 1.2 倍に", "url": "https://github.com/pollenjp/dotfiles/pull/251", "state": "merged", "ci": "pass" } ] } ] },
@@ -3363,7 +3363,7 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 #### 毎日の見え方
 
 - WSL の ssh・git push・pf のたびに、op-reason の窓で許可を押す。端末で打った ssh の仲間のコマンドは「この端末を 60 分」も選べる
-- herdr-app の lavie へのつなぎは、herdr-app を起こしたときと、許可から 60 分たってつなぎ直すときに窓が出る。lavie から転送された
+- herdr-app の example-laptop へのつなぎは、herdr-app を起こしたときと、許可から 60 分たってつなぎ直すときに窓が出る。example-laptop から転送された
   署名 (agent の転送) は 1 つずつ窓が出る
 - Claude の git は gh の HTTPS なので、窓は出ない。Claude が打つ ssh には、hook (ssh-agent-notice) が理由 (`OPREASON_SSH_REASON`) を
   付けさせる

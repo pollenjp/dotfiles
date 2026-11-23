@@ -1746,7 +1746,7 @@ mod tests {
         assert!(deny("@'\nNixOS/nixpkgs#4\n'@ | gh pr create -t x -F -").is_some());
         assert!(deny("Set-Location ..; git -C repo push").is_some());
         assert!(deny("pwsh -NoProfile -Command \"git push\"").is_some());
-        let why = deny("wsl -d u24 -- git push").expect("WSL の中の push は止める");
+        let why = deny("wsl -d example-wsl -- git push").expect("WSL の中の push は止める");
         assert!(why.contains("WSL の中の repo"), "{why}");
         let why = deny("wsl gh pr create -t x --body-file body.md")
             .expect("WSL の中の本文のファイルは読めないので止める");

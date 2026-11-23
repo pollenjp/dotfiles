@@ -66,7 +66,7 @@
 //     { kind, id, title, url, status, state, ci, who, note, steps: [{ label, state }], children: [<行>…], related }
 //   - kind: "ticket" | "pr" | "item"。無い・空なら "ticket"。大文字小文字を問わず、知らない値は "item" と同じに出す。id は ticket が
 //     "TKT-n"・"WRK-TKT-n"、pr が "<repo>#<番号>" で、item は無くてよい。ticket の id は開け閉めを覚える鍵にもなる。
-//   - 上の段に、開け閉めの印の欄 (▸・▾)・ID・状態の札・題・who の札 (誰が・どこで。例 "子 C · u24/t6v"。ハブの行は "ハブ") を並べ、
+//   - 上の段に、開け閉めの印の欄 (▸・▾)・ID・状態の札・題・who の札 (誰が・どこで。例 "子 C · example-wsl/t6v"。ハブの行は "ハブ") を並べ、
 //     入らなければ札や題が次の段へ回る (長い ID・題・who は縮んで折り返す)。その下に steps の段 (flow の段と同じ札と ›。active は点滅)、
 //     その下に note (一言。小さく)、その下に children を 1 段下げて出す。ID と題は url を開く (一覧の行と同じく http と https だけ。
 //     ダブルクリックの 2 回目は数えない)。ID の無い行 (item など) は題を太字にする。

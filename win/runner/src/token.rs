@@ -279,7 +279,7 @@ pub fn help_text(name: Option<&str>) -> String {
             "    見えない入力で token を貼る (DPAPI で暗号化して %USERPROFILE%\\.config\\claude-accounts\\{n}.env に書く。このユーザーとこの PC でだけ読める)"
         ),
         String::new(),
-        "ほかのマシン (子を立てる u24・lavie など。登録はマシンごと):".to_string(),
+        "ほかのマシン (子を立てる Linux のマシンなど。登録はマシンごと):".to_string(),
         "  そのマシンの端末 (ssh か herdr-app の端末。Claude Code の ! は使わない) で打つ:".to_string(),
         format!("    claude-account add {n} --mode token"),
         format!("    claude-account set-token {n}"),

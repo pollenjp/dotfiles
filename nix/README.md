@@ -4644,7 +4644,7 @@ claude-account remove token1 [--purge]         # 登録と launcher を消す (-
 claude-account help token [token1]             # token をこのマシンとほかのマシンに置く手順
 ```
 
-- 登録は**マシンごと**（`~/.config/claude-accounts/accounts.json`）。子を立てる u24・lavie などで使うなら、そのマシンの端末で
+- 登録は**マシンごと**（`~/.config/claude-accounts/accounts.json`）。子を立てる Linux のマシンなどで使うなら、そのマシンの端末で
   add と set-token を打つ（`claude-account help token <名前>` が手順と、claude-account の無い古いマシンで同じ形のファイルを置く 1 行を出す）
 - add は、launcher `~/.local/bin/claude-<名前>` を profile の bin の `claude-account` への link にし（home-manager の package は後から
   足せないため。`~/.local/bin` は `home.sessionPath` で PATH にあり、link の先は世代を切り替えても変わらない）、package に写した
@@ -5447,7 +5447,7 @@ uv の振る舞いはこう変わる（uv 0.13.0・0.11.3 で確かめた）。
 
 - 版を決めるなら、プロジェクトに `.python-version` を置く（`uv python pin 3.13`）。プロジェクトの外の既定は
   `uv python pin --global 3.13`（`~/.config/uv/.python-version` に書く。`uv.toml` は 1 ファイルの symlink なので、隣に書ける）
-- uv が落とす python は、汎用の Linux 向けの動的リンクのバイナリ。NixOS では nix-ld が要る（lavie は nixos-config で
+- uv が落とす python は、汎用の Linux 向けの動的リンクのバイナリ。NixOS では nix-ld が要る（NixOS のマシンは nixos-config で
   有効にしてある。mise の prebuilt のため）
 
 **反映。** `~/dotfiles/setup --update` の switch の直後から、今のシェルでも `python3` が替わる（`~/.nix-profile/bin` は
@@ -5566,7 +5566,7 @@ personal) に 3 つ置く。
   `RUSTUP_TOOLCHAIN` や cwd に引きずられない)。入れ先は `--root ${CARGO_HOME:-~/.cargo}` で固め、使い捨ての `--target-dir` で毎回作り直して
   link する (`cargo install --path` は既定で workspace の `target/` を使い、前に作った exe を link し直さずに写すことがあるため)。入れた後に
   shim が起きなければ警告して止まる。`pjp --build` は毎回流す (clone が変わっていなければ cargo の確かめだけで終わる)
-- リンカの `cc` の無い Linux (u24 など) と cargo の無いマシンでは、claude-skills の nix の devShell (`path:<clone>/nix`。rustup と cc がある)
+- リンカの `cc` の無い Linux (example-wsl など) と cargo の無いマシンでは、claude-skills の nix の devShell (`path:<clone>/nix`。rustup と cc がある)
   の中で `cargo install` を打つ。devShell の cc で作った exe は devShell の glibc に結ばれるので、devShell を
   `~/.local/state/dotfiles/pjp-shim-devshell` の profile に残す (nix の GC root)。入れられたら、その profile の前の世代は消す。道具の方は
   shim が同じ判断をする (GC root は clone の `target/pjp-devshell`)
@@ -5617,7 +5617,7 @@ Windows は `win/herdr-app/Install-HerdrApp.ps1` が入れる ([`win/README.md`]
 hc の core は、立てた hc の process の env を写して動き (Linux では systemd の user の transient unit `hc-serve-*`・`hc-hold-*`)、hc の子
 (端末と `hc exec` のコマンド) をその env で起こす。SSH で立った Linux の core は、アカウントの shell の非対話の login 環境を 1 回読んで使う
 (`hc --skill` の「Status, recovery, and cleanup」)。`--via` の machine は、`--via` のコマンドが login のシェルなら同じになる (Windows の hc が
-`wsl.exe -d u24 --cd ~ -e bash -lc` でつなぐ u24 の形)。hc の手引きの例の `--via 'wsl.exe -d <distro> -e sh -c'` で足した machine は login の
+`wsl.exe -d example-wsl --cd ~ -e bash -lc` でつなぐ example-wsl の形)。hc の手引きの例の `--via 'wsl.exe -d <distro> -e sh -c'` で足した machine は login の
 環境を読まないので、`bash -lc` で足し直す。
 
 - login の環境の PATH (`home/modules/shell-common.nix`。`~/.profile` が読む hm-session-vars と、fish の config.fish が読む同じ中身) に、
@@ -5634,11 +5634,11 @@ hc の core は、立てた hc の process の env を写して動き (Linux で
   ([前述](#1password-の-ssh-承認を知らせるフック))
 - 包みが外すのは上の名前だけ。対話のシェルや Claude Code の会話から core を立てると、ほかの固有の値 (mise の go の `GOROOT`・会話の
   `CLAUDECODE` など) は子に付くので、core は login の環境で立てる・立て直す (下)
-- 立っている core の env は、立て直すまで変わらない。setup で login の PATH が変わったら、login の環境で core を立て直す。WSL (u24) の core は
+- 立っている core の env は、立て直すまで変わらない。setup で login の PATH が変わったら、login の環境で core を立て直す。WSL (example-wsl) の core は
   Windows の PowerShell から (`--fresh` は、そのシェルの env を新しい端末に使う):
 
   ```powershell
-  wsl.exe -d u24 --cd '~' -e bash -lc 'hc server restart --fresh'
+  wsl.exe -d example-wsl --cd '~' -e bash -lc 'hc server restart --fresh'
   ```
 
   SSH 先の Linux は、herdr の外の素の SSH のログインで `hc server restart --fresh` (hc の文書の勧め)。立っている端末 (会話) は残り、
