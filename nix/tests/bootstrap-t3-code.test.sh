@@ -15,7 +15,7 @@
 #     ENTRYPOINT が on なら同じ名前の要素を最初の位置で置き換え (重なりは 1 つにまとめ)、無ければ末尾に足す。off なら外し、
 #     environment が無ければ作らない
 #   - そろっていれば書かない (inode が変わらない)。書くときは元の mode を保つ
-#   - lavie の手で書いた settings.json (2026-11-22) に on で当てると、足すのは defaultModelSelection・defaultThreadEnvMode だけ
+#   - 手で書いた settings.json (example-host で 2026-11-22 に書いたもの) に on で当てると、足すのは defaultModelSelection・defaultThreadEnvMode だけ
 #   - 壊れた JSON・合わせるキーの型が違う (environment が object)・symlink なら、書き換えずに警告して exit 0
 #   - 状態ファイルが無い・形が違うなら、警告して exit 0 (settings.json を作らない)
 #   - 状態: runtime の .install-complete が無ければ警告して止まる。t3 --version が落ちれば nix-ld の案内。linger が no・service が
@@ -159,17 +159,17 @@ else
   ng "ENTRYPOINT が off" "$(log "${h}") / $(log "${h2}")"
 fi
 
-# 5. lavie の手で書いた settings.json に on で当てると、足すのは defaultModelSelection・defaultThreadEnvMode だけ
-h=$(new_home lavie true)
-lavie='{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}'
-put_settings "${h}" "${lavie}"
+# 5. 手で書いた settings.json (example-host のもの) に on で当てると、足すのは defaultModelSelection・defaultThreadEnvMode だけ
+h=$(new_home hand-written true)
+hand_written='{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}'
+put_settings "${h}" "${hand_written}"
 run "${h}"
 s=$(settings_of "${h}")
-want=$(jq -c --argjson d "${dms}" --argjson e "${entry}" '.providerInstances.claudeAgent.environment = [$e] | .defaultModelSelection = $d | .defaultThreadEnvMode = "worktree"' <<<"${lavie}")
+want=$(jq -c --argjson d "${dms}" --argjson e "${entry}" '.providerInstances.claudeAgent.environment = [$e] | .defaultModelSelection = $d | .defaultThreadEnvMode = "worktree"' <<<"${hand_written}")
 if [[ $(rc "${h}") == 0 && $(jq -c . "${s}") == "${want}" ]] && quiet "${h}"; then
-  ok "lavie の settings.json には defaultModelSelection・defaultThreadEnvMode を足し、ENTRYPOINT の要素に sensitive を足すだけ"
+  ok "手で書いた settings.json には defaultModelSelection・defaultThreadEnvMode を足し、ENTRYPOINT の要素に sensitive を足すだけ"
 else
-  ng "lavie の settings.json" "$(log "${h}") settings=$(cat "${s}")"
+  ng "手で書いた settings.json" "$(log "${h}") settings=$(cat "${s}")"
 fi
 
 # 6. 壊れた JSON・型が違う・symlink は書き換えずに警告して exit 0

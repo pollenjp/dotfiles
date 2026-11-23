@@ -10,7 +10,7 @@
 #   - enable と clearClaudeEntrypoint の既定は false (どのグループでも。personal でも入らない)。off なら launcher・unit・状態ファイル・
 #     activation を置かず、claude の既定のアカウントに t3 が無い
 #   - Linux で on なら:
-#     - unit (~/.config/systemd/user/t3code.service) は t3 0.1.11 が書く unit と同じ文字列 (lavie で `t3 up` が書いたものを tester の home に
+#     - unit (~/.config/systemd/user/t3code.service) は t3 0.1.11 が書く unit と同じ文字列 (example-host で `t3 up` が書いたものを tester の home に
 #       置き換えたもの)。default.target.wants にも同じものを置く。どちらも force
 #     - ~/.local/bin/t3 は t3 の launcher と同じ中身で、実行でき、force
 #     - 状態ファイル ~/.local/state/dotfiles/t3-code.json は、版・runtime・clearClaudeEntrypoint と、nix/files/t3-code/managed-settings.json の値
@@ -61,7 +61,7 @@ let
   managed = lib.importJSON ../files/t3-code/managed-settings.json;
   pkg = pkgs.callPackage ../pkgs/t3-code { };
 
-  # lavie で t3 0.1.11 の `t3 up` が書いた ~/.config/systemd/user/t3code.service の home を /home/tester に置き換えたもの
+  # example-host で t3 0.1.11 の `t3 up` が書いた ~/.config/systemd/user/t3code.service の home を /home/tester に置き換えたもの
   wantUnit = ''
     [Unit]
     Description=T3 Code server

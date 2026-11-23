@@ -388,7 +388,7 @@ mod tests {
     //!
     //! - 合わせ方 (Linux の bootstrap-t3-code.sh と同じ決まり): 無ければ合わせるキーだけ。ほかのキーと順、config と environment のほかの
     //!   要素を残す。ENTRYPOINT が on なら同じ名前の要素を最初の位置で 1 つに置き換え (無ければ末尾に足す)、off なら外し、配列が無ければ
-    //!   作らない。lavie の手で書いた settings.json には defaultModelSelection・defaultThreadEnvMode を足すだけ。型が違えば誤り
+    //!   作らない。手で書いた settings.json (example-host のもの) には defaultModelSelection・defaultThreadEnvMode を足すだけ。型が違えば誤り
     //! - managed-settings.json の値 (Claude の home・Opus 5.5 の effort high・新しい worktree)
     //! - 手順: そろっていれば書かない。check と dry-run は書かない。apply は前の中身を写してから書く (無かったら写さない)。壊れた JSON は書かない。
     //!   claude-t3 のログインが無ければ ※ を添える
@@ -472,9 +472,9 @@ mod tests {
     }
 
     #[test]
-    fn merge_on_the_hand_written_lavie_settings() {
-        let lavie = r#"{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}"#;
-        let got = merged(&j(lavie), true).unwrap();
+    fn merge_on_the_hand_written_settings() {
+        let hand_written = r#"{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}"#;
+        let got = merged(&j(hand_written), true).unwrap();
         assert_eq!(
             compact(&got),
             format!(
