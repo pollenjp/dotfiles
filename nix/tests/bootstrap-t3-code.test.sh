@@ -19,7 +19,8 @@
 #   - 壊れた JSON・合わせるキーの型が違う (environment が object)・symlink なら、書き換えずに警告して exit 0
 #   - 状態ファイルが無い・形が違うなら、警告して exit 0 (settings.json を作らない)
 #   - 状態: runtime の .install-complete が無ければ警告して止まる。t3 --version が落ちれば nix-ld の案内。linger が no・service が
-#     動いていない・t3 が current と読まない・claude-t3 にログインしていない・T3 Connect が NOT reachable なら、それぞれ警告 (exit 0)。
+#     動いていない・起動で起きる形でない (is-enabled が enabled でなく、WantedBy に default.target も無い)・起動で起きても is-enabled が
+#     alias (t3 が not enabled と読む。switch を勧め、t3 service install は勧めない)・t3 が current と読まない・claude-t3 にログインしていない・T3 Connect が NOT reachable なら、それぞれ警告 (exit 0)。
 #     どれもそろっていれば警告を出さず、版・service・claude-t3・T3 Connect の行を出す
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、警告をまとめ用のファイルにも残す
 
@@ -58,6 +59,7 @@ write_fake loginctl 'cat "${HOME}/fake/linger" 2>/dev/null || echo yes'
 write_fake systemctl 'case "$2" in
   is-enabled) cat "${HOME}/fake/enabled" 2>/dev/null || echo enabled ;;
   is-active) cat "${HOME}/fake/active" 2>/dev/null || echo active ;;
+  show) cat "${HOME}/fake/wanted-by" 2>/dev/null || echo default.target ;;
 esac'
 # shellcheck disable=SC2016
 write_fake claude-account '[[ -e ${HOME}/fake/no-login ]] && exit 1
@@ -219,6 +221,19 @@ else
   ng "状態がそろっている" "$(log "${h}")"
 fi
 
+# 8b. 前の世代の unit は is-enabled が alias になる。default.target に wanted されていれば「動いていない」とは言わず、t3 が not enabled と
+#     読むわけと switch を勧める (t3 service install は勧めない)
+h=$(new_home status-alias true)
+printf 'alias\n' >"${h}/fake/enabled"
+printf 'default.target\n' >"${h}/fake/wanted-by"
+run "${h}"
+if [[ $(rc "${h}") == 0 ]] && warned "${h}" && grep -Fq 'is-enabled が alias なので、t3 は service を「not enabled」と読みます' "${h}/err" \
+  && grep -Fq 'home-manager switch (' "${h}/warnings" && ! grep -Fq '動いていないか' "${h}/err" && ! grep -Fq 't3 service install' "${h}/err"; then
+  ok "is-enabled が alias で WantedBy に default.target があれば、動いていないとは言わず switch を勧める"
+else
+  ng "is-enabled が alias" "$(log "${h}")"
+fi
+
 # 9. 状態の警告 (それぞれ exit 0)
 check_warn() { # $1: 名前、$2: 印のファイル、$3: 中身、$4: 警告に出る文字
   local h
@@ -234,6 +249,20 @@ check_warn() { # $1: 名前、$2: 印のファイル、$3: 中身、$4: 警告�
 check_warn "t3 が起きなければ nix-ld の案内" t3-broken x 'programs.nix-ld.enable'
 check_warn "linger が no" linger no 'loginctl enable-linger'
 check_warn "service が動いていない" active inactive 'systemctl --user daemon-reload && systemctl --user start t3code'
+check_warn_both() { # $1: 名前、$2: is-enabled、$3: WantedBy、$4: 警告に出る文字
+  local h
+  h=$(new_home "warn-$1" true)
+  printf '%s\n' "$2" >"${h}/fake/enabled"
+  printf '%s\n' "$3" >"${h}/fake/wanted-by"
+  run "${h}"
+  if [[ $(rc "${h}") == 0 ]] && warned "${h}" && grep -Fq -- "$4" "${h}/err" && grep -Fq -- "$4" "${h}/warnings"; then
+    ok "状態の警告: $1"
+  else
+    ng "状態の警告: $1" "$(log "${h}")"
+  fi
+}
+check_warn_both "is-enabled が alias で WantedBy も無い" alias '' 'is-enabled: alias・WantedBy: なし'
+check_warn_both "is-enabled が disabled で WantedBy がほかの target" disabled 'multi-user.target' 'is-enabled: disabled・WantedBy: multi-user.target'
 check_warn "t3 が current と読まない" service-status $'T3 Code service\n  Status: needs an update or repair' 't3 service install'
 check_warn "claude-t3 にログインしていない" no-login x 'claude-t3 を起こして /login'
 check_warn "T3 Connect が NOT reachable" connect-status $'T3 Connect\n  Environment link: pending server startup\n✕ T3 Connect is NOT reachable from other devices' 'Environment link: pending server startup'

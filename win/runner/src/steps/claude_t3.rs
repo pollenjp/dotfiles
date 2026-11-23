@@ -15,7 +15,8 @@
 //!   `.json` は JSON の object と読めなければ置かない (T3 は `--settings` のファイルが読めないと、メッセージの送信が失敗する)
 //! - `FILES` から外したファイルは、中身が記録どおりなら消す。置き先の `~/.claude/t3` がリンク (手でつないだ場所) なら触らない
 //!
-//! 記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json`。T3 は `--settings` のファイルを見張らないので、置き直したら T3 の会話を開き直す
+//! 記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json`。T3 は `--settings` のファイルを見張らないので、`settings.json` を置き直したら
+//! T3 の会話を開き直す。`CLAUDE.t3.md` は新しい会話から効く (今ある会話は次の compaction まで前の system prompt のまま。`EFFECT_NOTE`)
 //! (dotfiles-private の docs/adr/090_win_claude_t3_launch_args_*)。
 
 use super::linker::{Linker, Source};
@@ -100,17 +101,28 @@ impl Step for ClaudeT3 {
         ctx.say("");
         if ctx.host.tool("windowsT3Code") {
             ctx.say(
-                "T3 の Launch arguments は、手順 t3-code-settings が T3 の settings.json に書く (手で書かなくてよい。書いた後は T3 Code を開き直し、置き直した後は T3 の会話を開き直す):",
+                "T3 の Launch arguments は、手順 t3-code-settings が T3 の settings.json に書く (手で書かなくてよい。書いた後は T3 Code を開き直す):",
             );
         } else {
             ctx.say(
-                "T3 の Settings → Providers → Claude → Launch arguments に書く文 (ファイルを置いてから書く。書いた後と、置き直した後は T3 の会話を開き直す):",
+                "T3 の Settings → Providers → Claude → Launch arguments に書く文 (ファイルを置いてから書く):",
             );
         }
         ctx.say(format!("  {}", launch_args(&dir)));
+        for line in EFFECT_NOTE {
+            ctx.say(*line);
+        }
         w.finish(ctx, &record_path, None)
     }
 }
+
+/// Launch arguments を書いた後・ファイルを置き直した後に、いつから効くか (2 つのファイルで違う)。`--settings` は claude の起動の flag なので、
+/// 会話を開き直せば効く。`--append-system-prompt-file` は T3 がターンごとに読み直して system prompt に足すが、Claude Code は会話の
+/// system prompt を最初の要求で記録し、resume でも次の compaction まで同じものを送る (claude の `systemPromptSnapshot` の既定)。
+const EFFECT_NOTE: &[&str] = &[
+    "  効く時: settings.json (--settings) は、T3 の会話を開き直すと効く",
+    "          CLAUDE.t3.md (--append-system-prompt-file) は、新しい会話から効く (今ある会話には、開き直しても次の compaction まで入らない)",
+];
 
 /// 置き先 (`%USERPROFILE%\.claude\t3`)
 pub fn t3_dir(ctx: &Ctx) -> PathBuf {
@@ -530,6 +542,10 @@ mod tests {
             out.contains(&format!("  {}\n", launch_args(&e.dir()))),
             "{out}"
         );
+        // 効く時は 2 つのファイルで違う (--settings は会話を開き直すと、CLAUDE.t3.md は新しい会話から)
+        for line in EFFECT_NOTE {
+            assert!(out.contains(&format!("{line}\n")), "{out}");
+        }
         // windowsT3Code のホストは、t3-code-settings が書く同じ文を出す
         let host = crate::host::parse(
             "[tools]\nwindowsT3Code = true\n",
@@ -547,6 +563,8 @@ mod tests {
             out.contains(&format!("  {}\n", launch_args(&e.dir()))),
             "{out}"
         );
+        assert!(out.contains("新しい会話から効く"), "{out}");
+        assert!(!out.contains("置き直した後は T3 の会話を開き直す"), "{out}");
         let plain = Path::new("/home/a/.claude/t3");
         assert_eq!(
             launch_args(plain),

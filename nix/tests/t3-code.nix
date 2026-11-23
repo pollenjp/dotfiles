@@ -11,7 +11,8 @@
 #     activation を置かず、claude の既定のアカウントに t3 が無い
 #   - Linux で on なら:
 #     - unit (~/.config/systemd/user/t3code.service) は t3 0.1.11 が書く unit と同じ文字列 (example-host で `t3 up` が書いたものを tester の home に
-#       置き換えたもの)。default.target.wants にも同じものを置く。どちらも force
+#       置き換えたもの)。default.target.wants にも同じものを置く。どちらも force。どちらも名前が t3code.service の store のファイルを指す
+#       (link の先の名前が違うと systemd が is-enabled に alias を返す)
 #     - ~/.local/bin/t3 は t3 の launcher と同じ中身で、実行でき、force
 #     - 状態ファイル ~/.local/state/dotfiles/t3-code.json は、版・runtime・clearClaudeEntrypoint と、nix/files/t3-code/managed-settings.json の値
 #     - runtime を写す activation (writeBoundary の後) と、前に t3 が書いたふつうのファイルを消す activation (writeBoundary の後・
@@ -128,6 +129,13 @@ let
       {
         name = "unit は t3 0.1.11 が書く unit と同じ文字列で、default.target.wants にも同じものを置き、どちらも force";
         ok = unit.text == wantUnit && wants.text == wantUnit && unit.force && wants.force;
+      }
+      {
+        # systemd は link の先のファイル名が unit の名前と違うと is-enabled に alias を返し、t3 は service-disabled と読む
+        name = "unit と wants は、名前が t3code.service の同じ store のファイルを指す (is-enabled を alias にしない)";
+        ok =
+          baseNameOf (toString unit.source) == "t3code.service"
+          && toString wants.source == toString unit.source;
       }
       {
         name = "~/.local/bin/t3 は t3 の launcher と同じ中身で、実行でき、force";
