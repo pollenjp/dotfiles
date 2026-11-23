@@ -30,7 +30,7 @@
   # hc 0.1.21 は、SSH で立った Linux の core に、アカウントの shell の非対話の login 環境を 1 回読ませ、hc の子 (端末と hc exec の
   # コマンド) をその env で起こす (hc --skill の「A new Linux core started over SSH loads the account shell's non-interactive login
   # environment once」)。--via の machine は、--via のコマンドが login のシェルなら同じになる (Windows の hc が
-  # wsl.exe -d u24 --cd ~ -e bash -lc でつなぐ u24 の形。hc の手引きの例の `-e sh -c` で足した machine は login の環境を読まない)。
+  # wsl.exe -d example-wsl --cd ~ -e bash -lc でつなぐ example-wsl の形。hc の手引きの例の `-e sh -c` で足した machine は login の環境を読まない)。
   # 下の mise activate は対話のシェルだけで効く (home-manager は ~/.bashrc の対話の部分と config.fish の is-interactive に置く) ので、
   # mise で入れる claude (bootstrap-mise.sh) が hc の子から名前で引けなかった。shim なら、版を上げても dir が変わらず、cwd の
   # mise.toml の版も選ぶ。

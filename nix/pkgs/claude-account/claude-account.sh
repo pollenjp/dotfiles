@@ -75,7 +75,7 @@ usage() {
     '使い方の詳細は dotfiles の nix/README.md「Claude Code のアカウントを分ける」。'
 }
 
-# token をこのマシンとほかのマシン (子を立てる u24・lavie など) に置く手順 ($1: 名前。無ければ <名前>)。add --mode token の後と
+# token をこのマシンとほかのマシン (子を立てる Linux のマシンなど) に置く手順 ($1: 名前。無ければ <名前>)。add --mode token の後と
 # help token が出す。ほかのマシンの手は Linux の形 (Windows の claude-account.exe も同じ文を出す)
 token_help() {
   local n=${1:-<名前>}
@@ -86,7 +86,7 @@ token_help() {
     "  claude-account set-token ${n}" \
     "    見えない入力で token を貼る (~/.config/claude-accounts/${n}.env に権限 600 で書く)" \
     "" \
-    "ほかのマシン (子を立てる u24・lavie など。登録はマシンごと):" \
+    "ほかのマシン (子を立てる Linux のマシンなど。登録はマシンごと):" \
     "  そのマシンの端末 (ssh か herdr-app の端末。Claude Code の ! は使わない) で打つ:" \
     "    claude-account add ${n} --mode token" \
     "    claude-account set-token ${n}" \

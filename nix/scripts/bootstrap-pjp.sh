@@ -33,7 +33,7 @@
 # 対話のシェルに入れる RUSTUP_TOOLCHAIN や、cwd の設定に引きずられない)。cargo は $CARGO_HOME/bin → ~/.cargo/bin → PATH の順に探す
 # (shim の locate_cargo と同じ。bootstrap-mise.sh の mise の rust が入れた rustup の proxy を、mise の shim より先に使う)。
 #
-# cargo が無い、または Linux でリンカの cc が無い (u24 など) ときは、claude-skills の nix の devShell (path:<clone>/nix。rustup と
+# cargo が無い、または Linux でリンカの cc が無い (example-wsl など) ときは、claude-skills の nix の devShell (path:<clone>/nix。rustup と
 # cc がある) の中で cargo install を打つ (shim が道具を作るときと同じ判断)。devShell の cc で作った exe は devShell の glibc に
 # 結ばれるので、devShell を ~/.local/state/dotfiles/pjp-shim-devshell の profile に残す (nix develop --profile が nix の GC root に
 # 足す)。nix の GC で glibc が消えると shim が起きなくなるため。入れられたら、その profile の前の世代 (前の glibc の GC root) は

@@ -745,7 +745,7 @@ mod tests {
             Some("git push")
         );
         assert_eq!(
-            wsl_command(&s(&["-d", "u24", "--", "git", "push"])),
+            wsl_command(&s(&["-d", "example-wsl", "--", "git", "push"])),
             s(&["git", "push"])
         );
         assert_eq!(wsl_command(&s(&["git", "push"])), s(&["git", "push"]));

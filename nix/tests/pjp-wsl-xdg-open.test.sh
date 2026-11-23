@@ -42,7 +42,7 @@
 # ## 作り
 #
 # 偽の rundll32.exe は cwd と引数を FAKE_DIR/calls に書く (PJP_WSL_XDG_OPEN_RUNDLL32 で差し替える)。FAKE_RUNDLL32_RC で
-# 終了コードを変える。偽の wslpath は本物の変換の一部を真似る: -w の絶対パスは \\wsl.localhost\u24\…、相対パスは相対のまま
+# 終了コードを変える。偽の wslpath は本物の変換の一部を真似る: -w の絶対パスは \\wsl.localhost\example-wsl\…、相対パスは相対のまま
 # (本物も -a が無ければそう返す)、改行は U+F00A (本物は : や \ なども U+F0xx に変えるが、それは真似ない)。
 # FAKE_WSLPATH_RC があれば失敗する。shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
 
@@ -100,7 +100,7 @@ if [[ $# != 2 || $1 != -w ]]; then
 fi
 p=${2//$'\n'/$'\xef\x80\x8a'}
 case ${p} in
-  /*) printf '\\\\wsl.localhost\\u24%s\n' "${p//\//\\}" ;;
+  /*) printf '\\\\wsl.localhost\\example-wsl%s\n' "${p//\//\\}" ;;
   *) printf '%s\n' "${p//\//\\}" ;;
 esac
 EOF
@@ -128,10 +128,10 @@ exec_exts=(
   theme themepack deskthemepack sh py pyw pyz pl rb
 )
 
-# このテストの files の下のパスが Windows でどう見えるか (偽の wslpath と同じ形。本物は wslpath -w /tmp が \\wsl.localhost\u24\tmp)
+# このテストの files の下のパスが Windows でどう見えるか (偽の wslpath と同じ形。本物は wslpath -w /tmp が \\wsl.localhost\example-wsl\tmp)
 win_path() {
   local p=${files}/$1
-  printf '\\\\wsl.localhost\\u24%s' "${p//\//\\}"
+  printf '\\\\wsl.localhost\\example-wsl%s' "${p//\//\\}"
 }
 
 case_no=0

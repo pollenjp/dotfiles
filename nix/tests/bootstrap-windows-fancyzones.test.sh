@@ -907,7 +907,7 @@ newest_backup() {
 # stderr が警告の形 (!! の行と、3 つの空白で始まる続きの行) だけか (jq・mv などの素のエラーを混ぜていないか)
 err_only_warnings() { ! grep -qvE '^(!! |   )' "$1/err"; }
 
-# 30. この PC (PF5XF47R) の形: PC にだけあるレイアウトが 2 つある。repo の 2 つを末尾に足し、PC のものと applied-layouts.json には
+# 30. この PC (EXAMPLE-PC) の形: PC にだけあるレイアウトが 2 つある。repo の 2 つを末尾に足し、PC のものと applied-layouts.json には
 #     触らない。PowerToys の形で書き、mv の後に touch する。書き換える前のファイルを退避し、記録を書く。警告は出さない
 h=$(new_home t30 "${state_on}")
 put_fz "${h}" "$(fz_settings true)"
