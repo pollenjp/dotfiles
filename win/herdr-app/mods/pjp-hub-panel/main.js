@@ -1,12 +1,13 @@
 // pjp-hub-panel: ハブの Claude がユーザーに見せる panel。質問 (選んで送る) と、チケット・進み具合・PR の木 (work。チケットの下に
-// 進み具合の段と PR を 1 段下げて並べる)・ユーザーの問いへの答え (qa。問いごとに開け閉めする)・今の状況の説明 (markdown)・
-// 進み具合 (flow)・チケットと PR の一覧 (tickets・prs)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横のペインに出す。図はペインの幅に合わせて縮め・
-// 大きくし、クリックすると大きく見る小窓で開く (下の「図の大きさと、大きく見る小窓」)。
+// 進み具合の段と PR を 1 段下げて並べる。answer のある段は押してハブへ送れる)・ユーザーの問いへの答え (qa。問いごとに開け閉めする)・
+// 今の状況の説明 (markdown)・進み具合 (flow)・チケットと PR の一覧 (tickets・prs)・図 (SVG などの画像に、点滅や動く点を重ねる) を、端末の横の
+// ペインに出す。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く (下の「図の大きさと、大きく見る小窓」)。
 // props: { file: "<panel.json の絶対パス>", terminal: "<答えを送る端末。例 t1m>", role: "summary" | "questions" (省いてよい) }
 //   role で、1 つの panel.json を「まとめ」と「問い」の 2 つのペインに分けて出せる (ハブはまとめのペインをハブの端末の左に開いて
 //   おき、問いを出すときだけ、ハブの端末を右に分けて問いのペインを開く。並べ方は win/README.md の「herdr-app の mod」)。
 //   - 無い: 問いと状況の節を 1 つのペインに出す (role を足す前の形)
-//   - "summary" (まとめ): title・updated・sections だけを出す。questions は出さない (送信の UI も、Enter で送ることもしない)
+//   - "summary" (まとめ): title・updated・sections だけを出す。questions は出さない (問いの送信の UI も、Enter で送ることもしない。
+//     チケットの木の段の answer は、下の「段の answer」の確かめの「送る」で送る)
 //   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。title・updated・
 //     sections は出さない。questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
 //   - ほかの値: わけを出し、無いときと同じに出す
@@ -63,12 +64,13 @@
 // チケット・進み具合・PR の木 (type "work"): チケットの下に、そのチケットの進み具合 (段) と PR・子のチケットを 1 段下げて並べる木。
 //   ハブはまとめのペインの一番上に置く (mod は節を並べ替えず、panel.json の順のまま出す)。行はハブが panel.json に書いたものを、そのまま
 //   出す (mod から gh や Notion を引かない)。行の形:
-//     { kind, id, title, url, status, state, ci, who, note, steps: [{ label, state }], children: [<行>…], related }
+//     { kind, id, title, url, status, state, ci, who, note, steps: [{ label, state, answer }], children: [<行>…], related }
 //   - kind: "ticket" | "pr" | "item"。無い・空なら "ticket"。大文字小文字を問わず、知らない値は "item" と同じに出す。id は ticket が
 //     "TKT-n"・"WRK-TKT-n"、pr が "<repo>#<番号>" で、item は無くてよい。ticket の id は開け閉めを覚える鍵にもなる。
 //   - 上の段に、開け閉めの印の欄 (▸・▾)・ID・状態の札・題・who の札 (誰が・どこで。例 "子 C · example-wsl/t6v"。ハブの行は "ハブ") を並べ、
-//     入らなければ札や題が次の段へ回る (長い ID・題・who は縮んで折り返す)。その下に steps の段 (flow の段と同じ札と ›。active は点滅)、
-//     その下に note (一言。小さく)、その下に children を 1 段下げて出す。ID と題は url を開く (一覧の行と同じく http と https だけ。
+//     入らなければ札や題が次の段へ回る (長い ID・題・who は縮んで折り返す)。その下に steps の段 (flow の段と同じ札と ›。active は点滅。
+//     answer のある段は押せる札で、押すと answer をハブへ送れる。下の「段の answer」)、その下に note (一言。小さく)、その下に children を
+//     1 段下げて出す。ID と題は url を開く (一覧の行と同じく http と https だけ。
 //     ダブルクリックの 2 回目は数えない)。ID の無い行 (item など) は題を太字にする。
 //   - 札: ticket は status (色は tickets の行と同じ)、pr は state と ci (prs の行と同じ)。item には状態の札を出さない。who は枠だけの muted
 //     の札。id・url・status・state・ci・who が無い・空なら、そのリンク・札を出さない (子がチケットを切る前の行など)。
@@ -125,6 +127,40 @@
 //   当てて外して書く。同じ話を続けて出すなら別の id (next-2 など) にする (印の付いた id を使う間は出ない)。印のファイルは書き換えない
 //   (要らなくなった印は、節や項目を外せば mod が消す)。
 //
+// 段の answer: チケット・進み具合・PR の木 (type "work") の行の段に answer があれば、その段を押せる札にし、押すとハブの端末へ answer を
+//   送れる (ユーザーの番の段。解説動画の「見る」・ユーザーが手で確かめる段など。ユーザーが panel から「見た」「済んだ」をハブへ伝える)。段の形は
+//   { label, state, answer } で、answer はそれだけで読める 1 行の字 (問いの answer と同じ。例 "TKT-n 解説動画 (短尺 2:41) -> 見た")。空白だけで
+//   なく、改行と制御文字を含まない字のときだけ押せる札にし、ほかの値 (無い・空・字でない・改行を含む) の段は今までどおり押せない。flow の節の
+//   段の answer は見ない。問いのペインは木を出さないので、押せる札も、押した印のファイルの読み書きも無い。
+//   - 札: 押せる段に、ポインタの形・hover (地を raised に)・ヒントを付ける。色・印 (✓・●・■)・点滅は今までの札のまま。
+//   - 押す (①): 押した印 (下) を書き、その行の段の並びのすぐ下に、枠のついた小さな確かめ「「<answer>」を送る?」と「送る」「やめる」を出す (②)。
+//     押した段が 2 つあれば、段の順に 1 つずつ出す。もう一度その段を押すと「やめる」と同じ。ダブルクリックの 2 回目は数えない。
+//   - 「送る」: 問いの「送信」と同じ手 (下の「答えの送り方」。クリップボード → props.terminal の端末に terminal.paste → hc keys で Enter を
+//     1 回) で answer を送る。Enter まで押せたら印の sent を true にし、確かめの代わりに「「<answer>」を送った」と出して、段を押せない札に戻す
+//     (印が外れるまで。下)。送れなかったら (クリップボードに入れられない・props.terminal が無い・端末が無い・端末が確かめの画面で止まっている・
+//     Enter を押せない)、確かめの中にわけを出し、印は sent が false のまま残す (もう一度「送る」か「やめる」)。送っている間は、同じペインのどの段の
+//     「送る」も問いの「送信」も押せず、送っている段は押しても閉じない。ほかの写しのペイン (問いのペインなど) が送っている間に押すと、送らずに
+//     わけを出す (1 つずつ送る。下の「答えの送り方」)。
+//   - 「やめる」: 何も送らず、印を外して確かめを閉じる。
+//   押した印は mod が panel.json の隣のファイルに書く。名前は panel.json の名前の .json を .steps.json に替えたもの (panel.json →
+//   panel.steps.json)。押したときに書くので、確かめの「送る」を押さずに置いた印もハブが読める:
+//     { "file": "panel.json", "pressed": [{ "section": "<work の節の id>", "row": "<行の名前>", "label": "<段の label>",
+//       "answer": "<押したときの answer>", "at": "<押した時刻 (ISO 8601 の UTC)>", "sent": false }] }
+//   - section は work の節の id (id の無い節は空の字)。row は行の id (数なら字にしたもの)。id の無い・空の行は、木の中の位置を "@" の後ろに
+//     書いた字 (rows の何番目から children の何番目へ、0 から数えて . でつなぐ。例 rows[0].children[2] は "@0.2")。label は段の label (無い段は
+//     空の字)。印は section・row・label・answer の組で引く (同じ組の段が 2 つあれば、一緒に押される)。
+//   - 書き方は消す印と同じ: 印のファイルは mod だけが書き、ハブは読むだけ。写しのペインどうしの書き違いは writeTextFile の expected で防ぎ、
+//     断られたら読み直してやり直す。押した見た目はすぐ変え、書けなければファイルの中身に戻してわけを出す。印はファイルに残るので、まとめの
+//     ペインを開き直しても、写しのペインでも同じに出る。
+//   - panel.json の work の節に、同じ section・row・label で answer の同じ段が無くなった印は、mod が panel.json を読めた読み直しのたびに外す
+//     (段や行が消えた・answer が外れた・替わった・id の無い行の位置が動いた。sent が true の印も同じ。panel.json が無い・読めない間は外さない)。
+//   ハブがすること: panel.json を書く前に (消す印を読むのと同じ時に) 押した印のファイルを読み (無ければ印は無い)、sent が false の印を
+//   「ユーザーがその answer を送った」とみなして、端末で answer が届いたときと同じに扱う。sent が true の印は端末に届いているので数えない (届いた
+//   発言の方で扱う)。数えるのは、今の panel.json の、印の section と同じ id の work の節の木 (深さを問わず) に、label と answer の同じ段がある
+//   印だけ (row は見なくてよい。無い印は、もう扱って answer を外した段のもので、まとめのペインが閉じている間は mod が外せずに残る)。扱ったら、
+//   その段の answer を外し、state を done にして書く (mod がその印を外す)。印のファイルは書き換えない。この「段の answer:」の字の無い mod は
+//   answer を読まず、段を押せないだけ (answer を書いても害は無い)。
+//
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、panel (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
 //   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
@@ -163,7 +199,8 @@
 //   { version, title, updated,
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
-//       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」)
+//       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」、
+//                                                              段の answer は上の「段の answer」)
 //       { type: "qa", id, title, items: [{ id, q, at, a (markdown), open }], collapsed },   (ユーザーの問いと答え。上の「Q&A」)
 //       { type: "markdown", id, title, text (リンクは上の「リンク」、絵だけの行は上の「ミニ絵」), collapsed },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
@@ -183,14 +220,21 @@
 //   SVG の font-family は名前を引用符で囲む ('Yu Gothic UI', 'Meiryo UI', Meiryo, sans-serif)。囲まないと日本語を
 //   混ぜた行が BIZ UDGothic などに落ち、~ が ‾ に、\ が ¥ に化ける。色は暗い theme 向きに描く (SVG は theme に従わない)。
 //
-// 答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないでクリップボードに入れてから、端末に 1 回で貼る (terminal.paste)。「送信」
-// (このペインで Enter も) は、貼ったあと hc keys で Enter を 1 回押す。改行を含む文が Claude Code の入力欄に 1 つの入力として入るのは、
-// terminal.paste が bracketed paste で渡すことを当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は
-// 1 行目で送ってしまう)。panel の下の行にも、答えを 1 行ずつ出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の
-// 札が付き、ユーザーの発言と見分けられなくなる)。ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら選んだものを消す)。
+// 答えの送り方: 問いの答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないでクリップボードに入れてから、端末に 1 回で貼る (terminal.paste)。
+// 「送信」(このペインで Enter も) は、貼ったあと hc keys で Enter を 1 回押す。段の answer (上の「段の answer」) の「送る」も同じ手で、1 行を
+// 貼って Enter を 1 回押す。改行を含む文が Claude Code の入力欄に 1 つの入力として入るのは、terminal.paste が bracketed paste で渡すことを
+// 当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は 1 行目で送ってしまう)。panel の下の行にも、答えを 1 行ずつ
+// 出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の札が付き、ユーザーの発言と見分けられなくなる)。
+//   - 貼る前に hc get --json で端末を見て、エージェントが人を待っている (status が blocked。許可・問いの画面) なら、クリップボードにも入れずに
+//     止めてわけを出す (貼った字は画面に無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる。hc send も blocked の端末には送らない。
+//     「入力欄に入れる」も同じ)。貼った後の hc get で blocked になっていれば、Enter を押さない。hc get を読めなければ止めない (今までどおり)。
+//   - 写しのペイン (まとめと問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。送っている間は shared の
+//     "pjp-hub-panel.sendingUntil" (名前は MOD から作る) にこの時刻 (Date.now() の ms) までは送らないという値を置き、ほかの写しはその時刻まで
+//     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、30 秒で送れるようになる)。
+// ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す)。
 
 import { View, div, image, svg } from "gpui-kit";
-import { writeTextFile } from "herdr"; // 節を消す印のファイル (panel.json の隣) を書く
+import { writeTextFile } from "herdr"; // 節を消す印・段の押した印のファイル (panel.json の隣) を書く
 import { v_flex, h_flex, TextView } from "gpui-base";
 import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared, settings, openOverlay, closeOverlay, appHome } from "herdr";
 
@@ -313,10 +357,18 @@ const PR_ORDER = ["open", "draft", "merged", "closed"]; // 畳んだ行に足す
 // 形の違う行・段 (null・数・文字・配列) は中身の無いものとみる
 const objOr = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
 const listOf = (v) => (Array.isArray(v) ? v : []);
-// 段の札 (step) に渡す形。label は字にする (形の違う段でも落ちない)
+// 段の answer (頭のコメントの「段の answer」)。空白だけでない 1 行の字 (改行・制御文字を含まない) ならその字のまま、ほかは null (押せない段)
+const answerOf = (v) => (typeof v === "string" && v.trim() !== "" && !/[\u0000-\u001f\u007f\u0085\u2028\u2029]/.test(v) ? v : null);
+// 段の札 (step) に渡す形。label は字にする (形の違う段でも落ちない)。answer は押せる字か null
 const stepOf = (v) => {
   const o = objOr(v);
-  return { label: o.label == null ? "" : str(o.label), state: o.state };
+  return { label: o.label == null ? "" : str(o.label), state: o.state, answer: answerOf(o.answer) };
+};
+// 木の行の名前 (開け閉めを覚える鍵と、押した印の row)。行の id (数なら字にしたもの)。id の無い・空の行は木の中の位置 (path。rows の何番目から
+// children の何番目へ、0 から数えて . でつないだ字) の頭に "@" を付けたもの
+const rowName = (r, path) => {
+  const rid = str(r.id);
+  return rid !== "" ? rid : `@${path}`;
 };
 // 行の種類。無い・空は ticket、知らない値は item (大文字小文字を問わない)
 const kindOf = (r) => {
@@ -356,6 +408,70 @@ const prSummary = (r) => {
   if (t.size === 0) return "";
   const keys = [...PR_ORDER.filter((k) => t.has(k)), ...[...t.keys()].filter((k) => k !== "" && !PR_ORDER.includes(k)), ...(t.has("") ? [""] : [])];
   return `PR ${keys.map((k) => (k === "" ? `${t.get(k).n} 本` : `${t.get(k).n} 本 ${t.get(k).label}`)).join("・")}`;
+};
+
+// ---- 段の押した印 (頭のコメントの「段の answer」) ----
+// 押した印のファイル: panel.json の隣に、名前の末尾の .json を .steps.json に替えて置く (.json で終わらなければ足す)
+const stepsPathOf = (file) => file.replace(/(\.json)?$/i, ".steps.json");
+// 押した印の鍵 (work の節の id・行の名前・段の label・answer の組)
+const pressKey = (section, row, label, answer) => [section, row, label, answer].join("\u0000");
+// 押した印のファイルの中身 (鍵 → 印)。無い・読めない・形の違うもの (section・row・label が字でない・answer が押せる字でない) は印の無いものと
+// みる (次に書くときに正しい形で書き直る)。sent は true のときだけ true。同じ鍵の印が 2 つあれば前のもの
+const parsePresses = (text) => {
+  const marks = new Map();
+  let o = null;
+  try {
+    o = text == null ? null : JSON.parse(text);
+  } catch {
+    o = null;
+  }
+  for (const v of Array.isArray(o?.pressed) ? o.pressed : []) {
+    const e = objOr(v);
+    const { section, row, label, answer } = e;
+    if (typeof section !== "string" || typeof row !== "string" || typeof label !== "string" || answerOf(answer) == null) continue;
+    const k = pressKey(section, row, label, answer);
+    if (!marks.has(k)) marks.set(k, { section, row, label, answer, at: str(e.at), sent: e.sent === true });
+  }
+  return marks;
+};
+const pressJson = (file, marks) => `${JSON.stringify({ file: baseName(file), pressed: [...marks.values()] }, null, 2)}\n`;
+// 押した印を外すかを決めるときの、panel.json にある押せる段の鍵 (work の節の木を深さを問わずたどる。行の名前は木を描くときと同じ)
+const liveSteps = (secs) => {
+  const keys = new Set();
+  const walk = (sec, rows, path) =>
+    listOf(rows).forEach((v, i) => {
+      const r = objOr(v);
+      const p = path === "" ? String(i) : `${path}.${i}`;
+      const row = rowName(r, p);
+      for (const st of listOf(r.steps)) {
+        const { label, answer } = stepOf(st);
+        if (answer != null) keys.add(pressKey(sec, row, label, answer));
+      }
+      walk(sec, r.children, p);
+    });
+  for (const s of secs) if (s?.type === "work") walk(markKey(s) ?? "", s.rows, "");
+  return keys;
+};
+
+// 印のファイルの種類 (節を消す印と、段の押した印)。what はわけの頭に出す名前、pathOf は panel.json のパスから印のファイルのパス、parse は中身の
+// 字 (無ければ null) から印 (鍵 → 印)、json は印から書く字
+const DISMISS = { what: "消す印", pathOf: dismissPathOf, parse: parseMarks, json: marksJson };
+const PRESS = { what: "押した印", pathOf: stepsPathOf, parse: parsePresses, json: pressJson };
+
+// ---- 答えの送り方 (頭のコメントの「答えの送り方」) ----
+// 送っている印: shared に、この時刻 (Date.now() の ms) まで、ほかの写しのペインは送らない、という値を置く (送り終えたら 0)。写しのペイン (まとめと
+// 問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。herdr-app が送る途中で落ちても、時刻を過ぎれば送れる
+const SEND_KEY = `${NAME}.sendingUntil`;
+const SEND_LOCK_MS = 30000;
+// hc get --json の出力から、端末のエージェントが人を待っている (status が blocked。許可・問いの画面) かを読む。status は平らな字でも
+// { state, … } の形でも読む (pjp-spaces と同じ)。読めなければ false
+const blockedOf = (out) => {
+  try {
+    const j = JSON.parse(out);
+    return (typeof j?.status === "string" ? j.status : j?.status?.state) === "blocked";
+  } catch {
+    return false;
+  }
 };
 
 // ---- Q&A (頭のコメントの「Q&A」) ----
@@ -524,14 +640,17 @@ export default class HubPanel extends View {
     this.busy = false;
     this.width = null;
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
-    // 節を消す印: 印 (id → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)・まだ書いていない押下 (op の並び)・
-    // 読み書きできなかったわけ・読み書きを 1 つずつ流す鎖と、今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (下の行に出したもの)
-    this.marks = new Map();
-    this.pending = [];
-    this.markError = null;
+    // 印のファイルの控え: 節を消す印 (dm) と段の押した印 (sp)。cur は印 (鍵 → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)、
+    // pending はまだ書いていない押下 (op の並び)、error は読み書きできなかったわけ。markTail は 2 つのファイルの読み書きを 1 つずつ流す鎖、
+    // hash は今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (下の行に出したもの)
+    this.dm = { kind: DISMISS, cur: new Map(), pending: [], error: null };
+    this.sp = { kind: PRESS, cur: new Map(), pending: [], error: null };
     this.markTail = Promise.resolve();
     this.hash = null;
     this.linkMsg = null;
+    // 段の answer: 押した段の確かめに出すわけ (押した印の鍵 → 字。「送っています…」と送れなかったわけ) と、送っている段の印の鍵
+    this.stepMsg = {};
+    this.sending = null;
     this.handle = cx.focus_handle();
     // 図を大きく見る小窓 (panel の図のクリックで、この mod が自分を開いたもの)。panel.json は読まず見張らず、渡された図だけを出す
     this.big = bigOf(props());
@@ -591,23 +710,36 @@ export default class HubPanel extends View {
     } catch (e) {
       next.error = `読めない: ${e}`;
     }
-    // 印のファイルも読み直し、panel.json の節から消えた id の印を外す (印のファイルの書き込みでも、ここへ来る)
-    const marks = await this.syncMarks(fresh);
     // ミニ絵の図を確かめる (読めた panel.json の markdown の節と Q&A の節の答えの分。問いのペインは節を出さないので見ない)
     const minis = fresh && this.role() !== "questions" ? await this.checkMinis(fresh) : null;
-    if (fresh && this.data?.version !== fresh.version) {
-      this.picked = {};
-      this.status = "";
-      this.collapsed = {};
-      this.rowOpen = {};
-      this.qaOpen = {};
-      for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
-    }
-    this.data = next.data;
-    this.hash = next.hash;
-    this.error = next.error;
-    if (marks) this.takeMarks(marks);
-    if (minis) this.miniCheck = minis;
+    // 印のファイル (消す印・押した印) も読み直し、panel.json から消えた節・項目・段の印を外して、panel.json の中身とまとめて入れる (印のファイル
+    // の書き込みでも、ここへ来る)。読んでから入れるまでを、印のファイルの読み書きの鎖 (serial) の中でする。鎖の外で入れると、読んだ後に押下の
+    // 書き込みが済んで、まだ書いていない押下から外れた印を古い中身で上書きし、押した見た目が戻る
+    await this.serial(async () => {
+      const marks = await this.syncMarks(this.dm, fresh, liveIds);
+      const presses = await this.syncMarks(this.sp, fresh, liveSteps);
+      if (fresh && this.data?.version !== fresh.version) {
+        this.picked = {};
+        this.status = "";
+        this.collapsed = {};
+        this.rowOpen = {};
+        this.qaOpen = {};
+        // 確かめのわけの字は消す (送っている段の「送っています…」は残す)
+        const keep = this.sending != null && this.sending in this.stepMsg ? { [this.sending]: this.stepMsg[this.sending] } : {};
+        this.stepMsg = keep;
+        for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
+      }
+      this.data = next.data;
+      this.hash = next.hash;
+      this.error = next.error;
+      if (marks) this.takeMarks(this.dm, marks);
+      if (presses) {
+        this.takeMarks(this.sp, presses);
+        // 外れた印の確かめのわけは消す (送っている段のものは残す)
+        for (const k of Object.keys(this.stepMsg)) if (!this.sp.cur.has(k) && k !== this.sending) delete this.stepMsg[k];
+      }
+      if (minis) this.miniCheck = minis;
+    });
     cx.notify();
   }
 
@@ -702,6 +834,45 @@ export default class HubPanel extends View {
       .children(String(text).split(/\r?\n/).map((t) => div().min_w(0).child(t)));
   }
 
+  // 字をクリップボードに入れて props.terminal の端末に 1 回で貼り (terminal.paste)、submit なら hc keys で Enter を 1 回押す (頭のコメントの
+  // 「答えの送り方」。問いの送信と段の answer の「送る」で使う)。返すのは { ok: 貼れた (submit なら Enter まで押せた) か, term: 端末, msg: 止まった
+  // わけ }。cx は使わない (await をまたぐので、呼ぶ側が cx.spawn の中で待つ)。exec などが投げたら、呼ぶ側が受ける
+  async pasteToTerminal(text, submit) {
+    // ほかの写しのペインが送っている間は送らない (クリップボードと端末への貼り付けは 1 つずつ)
+    const until = shared(SEND_KEY);
+    if (typeof until === "number" && until > Date.now()) return { ok: false, msg: "ほかの panel のペインが送っている。少し待ってから送る" };
+    const lock = Date.now() + SEND_LOCK_MS;
+    setShared(SEND_KEY, lock);
+    try {
+      const term = props()?.terminal;
+      // 端末のエージェントが人を待っている (許可・問いの画面。hc の status が blocked) 間は、クリップボードにも入れずに止める。貼った字は画面に
+      // 無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる (hc send も blocked の端末には送らない)。確かめられなければ止めない
+      if (term) {
+        const g0 = await hc(["get", term, "--json"]);
+        if (g0.code === 0 && blockedOf(g0.stdout)) return { ok: false, term, msg: `端末 ${term} が確かめの画面で止まっている (blocked)。端末で答えてから送る` };
+      }
+      // 字を code point の並びで渡す (改行・引用符・日本語を PowerShell の引用の外に置く)。改行は LF のまま入れる
+      const codes = Array.from(text).map((ch) => ch.codePointAt(0));
+      const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
+      const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
+      if (r.code !== 0) return { ok: false, msg: `クリップボードに入れられない: ${r.stderr.trim()}` };
+      if (!term) return { ok: false, msg: "クリップボードに入れた (props.terminal が無い)" };
+      run("pane.focus", { terminal: term });
+      run("terminal.paste");
+      if (!submit) return { ok: true, term };
+      // 貼った文が届いてから Enter を押す。端末がいるかの確かめを兼ねて hc get を 1 回挟んで間を置く。その間に確かめの画面になったら押さない
+      const g = await hc(["get", term, "--json"]);
+      if (g.code !== 0) return { ok: false, term, msg: `端末 ${term} が見つからない。入力欄に入れたところで止めた` };
+      if (blockedOf(g.stdout)) return { ok: false, term, msg: `端末 ${term} が確かめの画面で止まったので、Enter を押さなかった` };
+      const k = await hc(["keys", term, "enter"]);
+      if (k.code !== 0) return { ok: false, term, msg: `Enter を押せなかった: ${k.stderr.trim()}。入力欄で Enter を押して送る` };
+      return { ok: true, term };
+    } finally {
+      // 送っている印を戻す (ほかの写しが後から置いた印は消さない)
+      if (shared(SEND_KEY) === lock) setShared(SEND_KEY, 0);
+    }
+  }
+
   deliver(cx, submit) {
     const text = this.answerText();
     if (!text || this.busy) return;
@@ -715,34 +886,14 @@ export default class HubPanel extends View {
     cx.spawn(async (cx) => {
       let closed = false;
       try {
-        // 字を code point の並びで渡す (改行・引用符・日本語を PowerShell の引用の外に置く)。改行は LF のまま入れる
-        const codes = Array.from(text).map((ch) => ch.codePointAt(0));
-        const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
-        const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
-        if (r.code !== 0) {
-          this.status = `クリップボードに入れられない: ${r.stderr.trim()}`;
+        const res = await this.pasteToTerminal(text, submit);
+        if (!res.ok) {
+          this.status = res.msg;
           return;
         }
-        const term = props()?.terminal;
-        if (!term) {
-          this.status = "クリップボードに入れた (props.terminal が無い)";
-          return;
-        }
-        run("pane.focus", { terminal: term });
-        run("terminal.paste");
+        const term = res.term;
         if (!submit) {
           this.status = `${term} の入力欄に入れた。Enter で送る`;
-          return;
-        }
-        // 貼った文が届いてから Enter を押す。端末がいるかの確かめを兼ねて hc get を 1 回挟んで間を置く
-        const g = await hc(["get", term, "--json"]);
-        if (g.code !== 0) {
-          this.status = `端末 ${term} が見つからない。入力欄に入れたところで止めた`;
-          return;
-        }
-        const k = await hc(["keys", term, "enter"]);
-        if (k.code !== 0) {
-          this.status = `Enter を押せなかった: ${k.stderr.trim()}。入力欄で Enter を押して送る`;
           return;
         }
         this.status = `${term} に送った:\n${text}`;
@@ -928,9 +1079,9 @@ export default class HubPanel extends View {
       .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
   }
 
-  // ---- 節を消す印 (頭のコメントの「節を消す印」) ----
+  // ---- 節を消す印 (頭のコメントの「節を消す印」) と、印のファイルの読み書き (段の押した印も同じ手。頭のコメントの「段の answer」) ----
 
-  // 印を扱うペインか。問いのペインは節を出さないので、印のファイルを読みも書きもしない
+  // 印を扱うペインか。問いのペインは節を出さないので、印のファイル (消す印・押した印) を読みも書きもしない
   marksOn() {
     return this.role() !== "questions" && !!props()?.file;
   }
@@ -939,7 +1090,7 @@ export default class HubPanel extends View {
   // "hidden": 印あり・印の後に panel.json の中身が変わった (出さない)
   markState(s) {
     const key = markKey(s);
-    const m = key != null && this.marksOn() ? this.marks.get(key) : undefined;
+    const m = key != null && this.marksOn() ? this.dm.cur.get(key) : undefined;
     if (!m) return null;
     return m.base === this.hash ? "marked" : "hidden";
   }
@@ -949,7 +1100,8 @@ export default class HubPanel extends View {
     return (Array.isArray(secs) ? secs : []).map((s, i) => ({ s, i })).filter(({ s }) => this.markState(s) !== "hidden");
   }
 
-  // 印のファイルの読み書きを、この写しの中で 1 つずつ流す (前の書き換えが済んでから次を読む。続けて押したら、後に押した方が残る)
+  // 印のファイルの読み書きを、この写しの中で 1 つずつ流す (2 つの印のファイルとも同じ鎖。前の書き換えが済んでから次を読む。続けて押したら、
+  // 後に押した方が残る)
   async serial(fn) {
     const prev = this.markTail;
     let release;
@@ -964,12 +1116,12 @@ export default class HubPanel extends View {
     }
   }
 
-  // 印のファイルを読み、op (今の印 → 新しい印。変えないなら null) で書き換える。読んでから書くまでにほかの写しが書いていたら
-  // (writeTextFile の expected が合わずに断られたら) 読み直してやり直す。返すのは { marks: 書いた (か読んだ) 印 } か、読み書き
+  // 印のファイル (kind は DISMISS か PRESS) を読み、op (今の印 → 新しい印。変えないなら null) で書き換える。読んでから書くまでにほかの写しが
+  // 書いていたら (writeTextFile の expected が合わずに断られたら) 読み直してやり直す。返すのは { marks: 書いた (か読んだ) 印 } か、読み書き
   // できなければ { error: わけ }。this には入れない (入れるのは takeMarks。reload は panel.json とまとめて入れる)
-  async editMarks(op) {
+  async editMarks(op, kind) {
     const file = props().file;
-    const path = dismissPathOf(file);
+    const path = kind.pathOf(file);
     let err = null;
     for (let i = 0; i < 4; i++) {
       let text;
@@ -979,74 +1131,91 @@ export default class HubPanel extends View {
         err = e;
         break;
       }
-      const cur = parseMarks(text);
+      const cur = kind.parse(text);
       const next = op(cur);
       if (next == null) return { marks: cur };
       try {
-        await writeTextFile(path, marksJson(file, next), text ?? null);
+        await writeTextFile(path, kind.json(file, next), text ?? null);
         return { marks: next };
       } catch (e) {
         err = e;
       }
     }
-    return { error: `消す印のファイル (${baseName(path)}) を読み書きできない: ${err}` };
+    return { error: `${kind.what}のファイル (${baseName(path)}) を読み書きできない: ${err}` };
   }
 
-  // editMarks の結果を入れる。まだ書いていない押下 (pending) を当て直すので、ほかの読み書きが先に済んでも、押した見た目が戻らない
-  // (op は「付ける」「外す」の形なので、2 度当てても同じ)
-  takeMarks(res) {
+  // editMarks の結果を book (印のファイルの控え。this.dm か this.sp) に入れる。まだ書いていない押下 (pending) を当て直すので、ほかの読み書きが
+  // 先に済んでも、押した見た目が戻らない (op は「付ける」「外す」「送った」の形なので、2 度当てても同じ)
+  takeMarks(book, res) {
     if (res.marks) {
-      this.marks = this.pending.reduce((m, op) => op(m) ?? m, res.marks);
-      this.markError = null;
+      book.cur = book.pending.reduce((m, op) => op(m) ?? m, res.marks);
+      book.error = null;
     } else {
-      this.markError = res.error;
+      book.error = res.error;
     }
   }
 
-  // 読み直したとき: 印のファイルを読み、この読み直しで読めた panel.json (fresh) の節にも Q&A の節の項目にも無い id の印を外す。fresh が
-  // 無い (panel.json が無い・読めない) ときは外さない (前の中身から外すと、ほかの写しが新しい中身の節に付けた印を消しうる)。問いのペインは null
-  syncMarks(fresh) {
+  // 読み直したとき: book の印のファイルを読み、この読み直しで読めた panel.json (fresh) にもう無い鍵の印を外す (liveOf は sections から、
+  // 印を残す鍵の Set を作る。消す印は節と Q&A の項目の id、押した印は押せる段の鍵)。fresh が無い (panel.json が無い・読めない) ときは外さない
+  // (前の中身から外すと、ほかの写しが新しい中身に付けた印を消しうる)。問いのペインは null。reload が serial の中で呼ぶ (ここでは鎖に並ばない)
+  syncMarks(book, fresh, liveOf) {
     if (!this.marksOn()) return Promise.resolve(null);
-    const secs = Array.isArray(fresh?.sections) ? fresh.sections : [];
-    const ids = fresh ? liveIds(secs) : null;
-    return this.serial(() =>
-      this.editMarks((m) => {
-        if (!ids) return null;
-        const next = new Map([...m].filter(([id]) => ids.has(id)));
-        return next.size === m.size ? null : next;
-      }),
-    );
+    const keys = fresh ? liveOf(Array.isArray(fresh.sections) ? fresh.sections : []) : null;
+    return this.editMarks((m) => {
+      if (!keys) return null;
+      const next = new Map([...m].filter(([k]) => keys.has(k)));
+      return next.size === m.size ? null : next;
+    }, book.kind);
   }
 
-  // 節 (か Q&A の項目) の印を付け外しする。見た目はすぐに変え、ファイルへは後で書く (書けなければファイルの中身に戻し、わけを出す)。印は
-  // 今の panel.json の指紋 (base) と組で残し、panel.json の中身がこれと違えば出さない。info は印に書く title と、項目なら section (節の id)
-  toggleMark(key, info, cx) {
-    const on = !this.marks.has(key);
-    const entry = { id: key, title: info.title, at: new Date().toISOString(), base: this.hash ?? "" };
-    if (info.section != null) entry.section = info.section;
-    const op = (m) => {
-      if (on === m.has(key)) return null;
-      const next = new Map(m);
-      if (on) next.set(key, entry);
-      else next.delete(key);
-      return next;
-    };
-    this.pending.push(op);
-    this.marks = op(this.marks) ?? this.marks;
+  // 押下の op を book の見た目にすぐ当て、まだ書いていない押下に積む (印のファイルへ書くのは writeMarks)
+  stageMarks(book, op) {
+    book.pending.push(op);
+    book.cur = op(book.cur) ?? book.cur;
+  }
+
+  // stageMarks で積んだ op を印のファイルへ書く (cx.spawn の中で待つ)。書けなければわけを残し、見た目をファイルの中身 (に、ほかのまだ書いて
+  // いない押下を当てたもの) へ戻す。書けたら true
+  async writeMarks(book, op) {
+    const res = await this.serial(() => this.editMarks(op, book.kind));
+    book.pending = book.pending.filter((o) => o !== op);
+    if (res.marks) {
+      this.takeMarks(book, res);
+      return true;
+    }
+    book.error = res.error;
+    const back = await this.serial(() => this.editMarks(() => null, book.kind));
+    if (back.marks) book.cur = book.pending.reduce((m, o) => o(m) ?? m, back.marks);
+    return false;
+  }
+
+  // 押下 (クリック) の op を印のファイルに当てる。見た目はすぐに変え、ファイルへは後で書く (書けなければファイルの中身に戻し、わけを出す)
+  commitMarks(book, op, cx) {
+    this.stageMarks(book, op);
     cx.notify();
     cx.spawn(async (cx) => {
-      const res = await this.serial(() => this.editMarks(op));
-      this.pending = this.pending.filter((o) => o !== op);
-      if (res.marks) {
-        this.takeMarks(res);
-      } else {
-        // 書けなかった: わけを残し、見た目をファイルの中身 (に、ほかのまだ書いていない押下を当てたもの) へ戻す
-        this.markError = res.error;
-        const back = await this.serial(() => this.editMarks(() => null));
-        if (back.marks) this.marks = this.pending.reduce((m, o) => o(m) ?? m, back.marks);
-      }
+      await this.writeMarks(book, op);
       cx.notify();
     });
+  }
+
+  // 節 (か Q&A の項目) の印を付け外しする。印は今の panel.json の指紋 (base) と組で残し、panel.json の中身がこれと違えば出さない。info は
+  // 印に書く title と、項目なら section (節の id)
+  toggleMark(key, info, cx) {
+    const on = !this.dm.cur.has(key);
+    const entry = { id: key, title: info.title, at: new Date().toISOString(), base: this.hash ?? "" };
+    if (info.section != null) entry.section = info.section;
+    this.commitMarks(
+      this.dm,
+      (m) => {
+        if (on === m.has(key)) return null;
+        const next = new Map(m);
+        if (on) next.set(key, entry);
+        else next.delete(key);
+        return next;
+      },
+      cx,
+    );
   }
 
   // 印のボタン (節の右上と、Q&A の項目の頭の行の右)。「×」で次の更新で消す印を付け、「戻す」で外す。tips は [印があるとき, 無いとき] の
@@ -1439,13 +1608,14 @@ export default class HubPanel extends View {
     const roots = listOf(s.rows).map((r, i) => ({ r: objOr(r), path: String(i) }));
     if (roots.length === 0) return div().text_color(c.muted).child("(行はありません)");
     const g = this.treeGeom();
+    const sec = markKey(s) ?? ""; // 押した印の section (頭のコメントの「段の answer」。id の無い節は空の字)
     const stack = (list) =>
       v_flex()
         .min_w(0)
         .gap(TREE.gap)
         .children(
           list.map(({ r, path }) => {
-            const { top, rest } = this.workRow(r, path, 0, id, g, c, null);
+            const { top, rest } = this.workRow(r, path, 0, id, g, c, null, sec);
             return v_flex().min_w(0).child(top).when(!!rest, (el) => el.child(rest));
           }),
         );
@@ -1463,8 +1633,9 @@ export default class HubPanel extends View {
   }
 
   // 木の行。上の段 (top) と、その下 (rest: 段・一言・子。無ければ null) を分けて返す。親は子の top と rest の左に、それぞれ溝 (親の縦の
-  // 線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が続く)・"corner" (最後の子。親の縦の線をここで止める)
-  workRow(r, path, depth, id, g, c, tick) {
+  // 線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が続く)・"corner" (最後の子。親の縦の線をここで止める)。
+  // sec は押した印の section (節の id か空の字)
+  workRow(r, path, depth, id, g, c, tick, sec) {
     const kind = kindOf(r);
     const steps = listOf(r.steps);
     const kids = listOf(r.children).map((k, i) => ({ r: objOr(k), path: `${path}.${i}` }));
@@ -1476,12 +1647,15 @@ export default class HubPanel extends View {
     const lined = showKids && depth < TREE.indent;
     const note = str(r.note);
     const rest = [];
-    if (open && steps.length > 0) rest.push(this.treePiece(g, lined, 4, this.stepRow(steps.map(stepOf), `w-${id}-${path}`, c), c));
+    if (open && steps.length > 0) {
+      const at = { section: sec, row: rowName(r, path) }; // 押した印の section と row (頭のコメントの「段の answer」)
+      rest.push(this.treePiece(g, lined, 4, this.workSteps(steps.map(stepOf), `w-${id}-${path}`, at, c), c));
+    }
     if (open && note !== "") rest.push(this.treePiece(g, lined, 2, div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(note), c));
     if (showKids) {
       kids.forEach(({ r: k, path: kp }, i) => {
         const last = i === kids.length - 1;
-        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null);
+        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null, sec);
         if (lined) {
           rest.push(this.treeSpacer(g, c));
           rest.push(this.treeWrap(g, !last, part.top, c));
@@ -1504,10 +1678,9 @@ export default class HubPanel extends View {
     return !(CLOSED_STATUS.has(str(r.status).trim().toLowerCase()) && !isMoving(r));
   }
 
-  // 木の行の開け閉めを覚える鍵 (節の id と行の id。id の無い行は木の中の位置)
+  // 木の行の開け閉めを覚える鍵 (節の id と行の名前。行の id か、id の無い行は木の中の位置)
   rowKey(id, r, path) {
-    const rid = str(r.id);
-    return `${id}\u0000${rid !== "" ? rid : `@${path}`}`;
+    return `${id}\u0000${rowName(r, path)}`;
   }
 
   // 行の上の段: 印の欄 | ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)
@@ -1620,21 +1793,22 @@ export default class HubPanel extends View {
     return v_flex().gap(10).children(rows);
   }
 
-  // 段の並び (flow の行と木の行)。段の札を › でつなぎ、入らなければ折り返す。key は段の札の id の頭 (hp-st-<key>-<何番目>)
-  stepRow(steps, key, c) {
+  // 段の並び (flow の行と木の行)。段の札を › でつなぎ、入らなければ折り返す。key は段の札の id の頭 (hp-st-<key>-<何番目>)。at は木の行の
+  // 押した印の { section, row } (flow の行は null。answer を見ない)
+  stepRow(steps, key, c, at = null) {
     const items = [];
     steps.forEach((st, si) => {
       if (si > 0) items.push(div().text_color(c.dim).text_size(this.fs(11)).child("›"));
-      items.push(this.step(st, `${key}-${si}`, c));
+      items.push(this.step(st, `${key}-${si}`, c, at));
     });
     return h_flex().flex_wrap().gap(4).items_center().children(items);
   }
 
-  step(st, key, c) {
+  step(st, key, c, at = null) {
     const state = st.state ?? "todo";
     const label = st.label ?? ""; // label の無い段は印だけにする (undefined・null を字にしない)
     const tail = label === "" ? "" : ` ${label}`; // 印の後ろに付ける字
-    const base = h_flex()
+    let base = h_flex()
       .id(`hp-st-${key}`)
       .px(this.fs(7))
       .py(this.fs(2))
@@ -1643,6 +1817,8 @@ export default class HubPanel extends View {
       .text_size(this.fs(11))
       .gap(this.fs(4))
       .items_center();
+    // answer のある木の段は押せる札にする (頭のコメントの「段の answer」。色・印・点滅は下のまま)
+    if (at && st.answer != null && this.marksOn()) base = this.pressable(base, st, at, c);
     if (state === "done") return base.border_color(c.ok).text_color(c.ok).child(`✓${tail}`);
     // いまの段: working の枠と字に、同じ色を薄く敷いて点滅させる
     if (state === "active")
@@ -1654,6 +1830,157 @@ export default class HubPanel extends View {
         .child(`●${tail}`);
     if (state === "blocked") return base.border_color(c.blocked).text_color(c.blocked).child(`■${tail}`);
     return base.border_color(c.border).text_color(c.dim).child(label);
+  }
+
+  // ---- 段の answer (頭のコメントの「段の answer」) ----
+
+  // 押した段の印 (無ければ undefined)。問いのペインは印を扱わない
+  pressOf(pk) {
+    return this.marksOn() ? this.sp.cur.get(pk) : undefined;
+  }
+
+  // 木の行の段の並びと、そのすぐ下に、押した段の確かめか「送った」の行 (段の順に、印ごとに 1 つ)。at は行の { section, row }
+  workSteps(steps, key, at, c) {
+    const line = this.stepRow(steps, key, c, at);
+    const boxes = [];
+    const seen = new Set(); // 同じ鍵の段 (label と answer の同じ段) が 2 つあっても、確かめは 1 つ
+    steps.forEach((st, si) => {
+      if (st.answer == null) return;
+      const pk = pressKey(at.section, at.row, st.label, st.answer);
+      const m = this.pressOf(pk);
+      if (!m || seen.has(pk)) return;
+      seen.add(pk);
+      boxes.push(this.pressBox(pk, m, `${key}-${si}`, c));
+    });
+    return boxes.length === 0 ? line : v_flex().min_w(0).gap(4).child(line).children(boxes);
+  }
+
+  // 押せる段の札: ポインタの形・hover・ヒントと、押したときの振る舞い (押すと確かめを出し、もう一度押すと「やめる」と同じ)。送った段と
+  // 送っている段は押せない (ヒントだけ)。el は段の札 (id を付けたもの)
+  pressable(el, st, at, c) {
+    const info = { section: at.section, row: at.row, label: st.label, answer: st.answer };
+    const pk = pressKey(info.section, info.row, info.label, info.answer);
+    const m = this.pressOf(pk);
+    if (m?.sent) return el.tooltip("送った (ハブが段を進めるまで、下に「送った」と出す)");
+    if (this.sending === pk) return el.tooltip("送っています…");
+    return el
+      .cursor_pointer()
+      .hover((s) => s.bg(c.raised))
+      .tooltip(m ? "もう一度押すと、送らずに閉じる" : `押すと「${info.answer}」をハブに送る (送る前に確かめる)`)
+      .on_click((e, cx) => {
+        // ダブルクリックの 2 回目は数えない (開いてすぐ閉じない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.pressStep(info, cx);
+      });
+  }
+
+  // 押した段の確かめ (印の sent が false): 枠のついた小さな箱に「「<answer>」を送る?」と「送る」「やめる」、その下に送れなかったわけ。送った
+  // (sent が true) なら「「<answer>」を送った」の 1 行。key は段の札の id の後ろ (確かめは hp-sp-<key>、ボタンは hp-sps-<key>・hp-spc-<key>)
+  pressBox(pk, m, key, c) {
+    if (m.sent) return div().min_w(0).text_size(this.fs(11)).text_color(c.ok).child(`✓ 「${m.answer}」を送った`);
+    const sending = this.sending === pk;
+    const msg = str(this.stepMsg[pk]);
+    // ダブルクリックの 2 回目は数えない (2 度送らない)
+    const once = (fn) => (e, cx) => {
+      if ((e?.click_count ?? 1) > 1) return;
+      fn(cx);
+    };
+    return v_flex()
+      .id(`hp-sp-${key}`)
+      .min_w(0)
+      .gap(this.fs(4))
+      .px(this.fs(8))
+      .py(this.fs(5))
+      .rounded(this.fs(6))
+      .border_1()
+      .border_color(c.accent)
+      .text_size(this.fs(11))
+      .child(
+        // 狭いときはボタンの組が字の次の行へ回る (右寄せ。ボタンは縮めない。字は縮んで折り返す)
+        h_flex()
+          .flex_wrap()
+          .gap_x(8)
+          .gap_y(4)
+          .items_center()
+          .child(div().flex_auto().min_w(0).text_color(c.fg).child(`「${m.answer}」を送る?`))
+          .child(
+            h_flex()
+              .flex_none()
+              .ml_auto()
+              .gap(6)
+              .items_center()
+              .child(this.button(`hp-sps-${key}`, "送る", true, !this.busy, c, once((cx) => this.sendStep(pk, cx)), true))
+              .child(this.button(`hp-spc-${key}`, "やめる", false, !sending, c, once((cx) => this.cancelStep(pk, cx)), true)),
+          ),
+      )
+      .when(msg !== "", (el) => el.child(div().min_w(0).text_color(sending ? c.dim : c.warn).child(this.lines(msg))));
+  }
+
+  // 段を押した (①): 押した印を書いて確かめを出す。もう一度押すと「やめる」と同じ。送った段・送っている段は何もしない
+  pressStep(info, cx) {
+    const pk = pressKey(info.section, info.row, info.label, info.answer);
+    if (this.sending === pk) return;
+    const cur = this.sp.cur.get(pk);
+    if (cur?.sent) return;
+    if (cur) {
+      this.cancelStep(pk, cx);
+      return;
+    }
+    const entry = { section: info.section, row: info.row, label: info.label, answer: info.answer, at: new Date().toISOString(), sent: false };
+    this.commitMarks(this.sp, (m) => (m.has(pk) ? null : new Map(m).set(pk, entry)), cx);
+  }
+
+  // 「やめる」: 何も送らず、押した印を外して確かめを閉じる (送った印は外さない。送っている段は何もしない)
+  cancelStep(pk, cx) {
+    if (this.sending === pk) return;
+    delete this.stepMsg[pk];
+    this.commitMarks(
+      this.sp,
+      (m) => {
+        const e = m.get(pk);
+        if (!e || e.sent) return null;
+        const next = new Map(m);
+        next.delete(pk);
+        return next;
+      },
+      cx,
+    );
+  }
+
+  // 「送る」: 押した段の answer を、問いの「送信」と同じ手 (pasteToTerminal) で送り、Enter まで押せたら印の sent を true にする。送れなければ
+  // 確かめの中にわけを出し、印は sent が false のまま残す。送るのは 1 つずつ (問いの送信とも。busy)
+  sendStep(pk, cx) {
+    const m = this.sp.cur.get(pk);
+    if (!m || m.sent || this.busy) return;
+    this.busy = true;
+    this.sending = pk;
+    this.stepMsg[pk] = "送っています…";
+    // await をまたぐ仕事は cx.spawn の cx でする (クリックの cx は、await の後には使えない)
+    cx.spawn(async (cx) => {
+      try {
+        const res = await this.pasteToTerminal(m.answer, true);
+        if (!res.ok) {
+          this.stepMsg[pk] = res.msg;
+          return;
+        }
+        delete this.stepMsg[pk];
+        const op = (cur) => {
+          const e = cur.get(pk);
+          return !e || e.sent ? null : new Map(cur).set(pk, { ...e, sent: true });
+        };
+        this.stageMarks(this.sp, op);
+        cx.notify();
+        // 送ったことを書けなければ、印は sent が false に戻る (ハブは押した印からも数える)。わけは上の行 (印のファイルのわけ) にも出る
+        if (!(await this.writeMarks(this.sp, op))) this.stepMsg[pk] = `${res.term} に送ったが、押した印に送ったことを書けない`;
+      } catch (e) {
+        this.stepMsg[pk] = `止まった: ${e}`;
+      } finally {
+        this.busy = false;
+        this.sending = null;
+        cx.notify();
+      }
+    });
+    cx.notify();
   }
 
   // 図の場所: "mods/" で始まるものはそのまま (herdr-app の home から)、ほかは MEDIA の下から。
@@ -1873,19 +2200,20 @@ export default class HubPanel extends View {
     return null;
   }
 
-  button(id, label, primary, enabled, c, onClick) {
+  // ボタン。small は段の確かめの小さなボタン (高さ・余白・角・字を小さく)
+  button(id, label, primary, enabled, c, onClick, small = false) {
     return h_flex()
       .id(id)
       .flex_none()
-      .h(this.fs(30))
-      .px(this.fs(12))
+      .h(this.fs(small ? 22 : 30))
+      .px(this.fs(small ? 8 : 12))
       .items_center()
-      .rounded(this.fs(8))
+      .rounded(this.fs(small ? 6 : 8))
       .border_1()
       .border_color(primary && enabled ? c.solid : c.border)
       .bg(primary && enabled ? c.solid : c.raised)
       .text_color(enabled ? (primary ? c.solidFg : c.fg) : c.dim)
-      .text_size(this.fs(12))
+      .text_size(this.fs(small ? 11 : 12))
       .when(enabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click(onClick))
       .child(label);
   }
@@ -1953,7 +2281,8 @@ export default class HubPanel extends View {
     const body = [];
     if (!known) body.push(div().text_color(c.blocked).child(`props.role が分からない: ${JSON.stringify(role)} (summary か questions。無ければ両方を出す)`));
     if (this.error) body.push(div().text_color(c.blocked).child(this.error));
-    if (this.markError && this.marksOn()) body.push(div().text_color(c.blocked).child(this.markError));
+    // 印のファイル (消す印・押した印) を読み書きできなかったわけ
+    if (this.marksOn()) for (const b of [this.dm, this.sp]) if (b.error) body.push(div().text_color(c.blocked).child(b.error));
     if (r === "questions") {
       qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
       if (!this.error && d && qs.length === 0) body.push(div().text_color(c.muted).child("問いはありません"));
