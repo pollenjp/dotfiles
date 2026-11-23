@@ -5591,7 +5591,15 @@ modules = [
   NixOS では `programs.nix-ld.enable = true` が要る。setup が `t3 --version` を打って確かめ、起きなければ知らせる
 - service がログインの外でも動くよう、linger を有効にする (`sudo loginctl enable-linger <名前>`。NixOS は `users.users.<名前>.linger = true`)。setup が
   確かめて知らせる
-- 前に `t3 up` が書いた unit・launcher (ふつうのファイル) は、switch が消して dotfiles のものに置き換える。中身は同じなので、service は起こし直さない
+- 前に `t3 up` が書いた unit・launcher (ふつうのファイル) は、switch が消して dotfiles のものに置き換える
+- switch で service が起き直るのは、unit の中身が前の世代と変わったときと、unit が世代に初めて入るとき。初めて入る switch では、中身が前に t3 の
+  書いたものと同じでも、home-manager (sd-switch) が新しい unit として起こし直す (`Stopping units: t3code.service` → `Starting units: t3code.service`)。
+  起き直ると動いている T3 のスレッドは止まるので、`dotfiles.t3Code.enable` を初めて当てる switch・版を上げる switch は、スレッドが動いていない
+  時に当てる
+- `~/dotfiles/setup --update` は switch の後に `bootstrap-t3-code.sh` で settings.json のキーを合わせる。switch で起き直った T3 は、合わせる前の
+  settings.json を読んでいる。setup がキーを書き換えたと出したら、`systemctl --user restart t3code` で読ませる (これもスレッドを止める)
+- unit と `default.target.wants` の link は、名前が `t3code.service` の store のファイルを指す。link の先の名前が unit の名前と違うと、systemd は
+  `systemctl --user is-enabled` に `alias` を返し、t3 は service を「not enabled」(`t3 service status` の `needs an update or repair`) と読む
 - `claude-account add t3` で前に登録したマシンは、`t3` が既定のアカウントになった後に `claude-account remove t3` を打つと、登録と
   `~/.local/bin/claude-t3` の link だけが外れる (`~/.claude-t3` のログインは残る。打たなくても動く)
 

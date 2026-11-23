@@ -658,7 +658,11 @@ Launch arguments の文 (T3 の `%USERPROFILE%\.t3\userdata\settings.json` の `
   [T3 Code](#t3-code) のほかの決めたキーと同じ)
 - ほかのホスト: T3 の Settings → Providers → Claude → Launch arguments に、`claude-t3` が出した文を写して貼る。書くのは `dotfiles apply` で
   `claude-t3` がファイルを置いてから
-- Launch arguments が変わった後と、`claude-t3` がファイルを置き直した後は、T3 の会話を開き直す (開いている会話には効かない)
+- Launch arguments が変わった後と、`claude-t3` がファイルを置き直した後に効く時は、2 つのファイルで違う (`claude-t3` の check・apply も出す):
+  - `settings.json` (`--settings`): claude の起動の flag なので、T3 の会話を開き直すと効く (開いている会話には効かない)
+  - `CLAUDE.t3.md` (`--append-system-prompt-file`): T3 はターンごとにファイルを読み直して system prompt の後ろに足すが、Claude Code は会話の
+    system prompt を最初の要求で記録し、resume でも次の compaction まで同じものを送る (claude の `systemPromptSnapshot` の既定)。そのため
+    新しい会話から効く。今ある会話には、開き直しても次の compaction の後まで入らない
 - 直すのは dotfiles の `win/claude-code/t3/` (置き先の写しを変えると、次の `dotfiles apply` が衝突として知らせる)
 - 確かめるのは T3 の会話の skill の一覧 (herdr と hc の子の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
 - T3 のハブの子は、つないだ Linux の環境に T3 のスレッドとして立てる (`pjp child new` は使わない。手順は claude-skills の `pjp-t3-hub`)。`CLAUDE.t3.md` もその向きで書く
@@ -3895,7 +3899,7 @@ Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする�
   | --- | --- |
   | ユーザー環境変数 `T3CODE_TELEMETRY_ENABLED` | `false` (テレメトリを切る。ブラウザ版・モバイル版の relay tracing と T3 Connect の Publish agent activity は、これでは止まらない) |
   | `providerInstances.claudeAgent` の `driver`・`config.homePath` | `claudeAgent`・`~/.claude-t3` (T3 の Claude は `CLAUDE_CONFIG_DIR=~/.claude-t3` で動く。`config` のほかのキーは残す) |
-  | `providerInstances.claudeAgent.config.launchArgs` (Launch arguments) | `claude-t3` が出す文 ([T3 Code の会話だけの設定](#t3-code-の会話だけの設定))。`claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く (そろっていなければ今の値を残し、※ で知らせる) |
+  | `providerInstances.claudeAgent.config.launchArgs` (Launch arguments) | `claude-t3` が出す文 ([T3 Code の会話だけの設定](#t3-code-の会話だけの設定))。`claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く (そろっていなければ今の値を残し、※ で知らせる)。書いた後、`settings.json` は T3 の会話を開き直すと、`CLAUDE.t3.md` は新しい会話から効く (同じ節) |
   | `providerInstances.claudeAgent.environment` の `CLAUDE_CODE_ENTRYPOINT` | `[t3Code] clearClaudeEntrypoint = true` なら空の値の要素 (ほかの要素は残す)。false なら外す |
   | `defaultModelSelection` | Claude の Opus 5.5 (`claude-opus-5-5`)・effort high |
   | `defaultThreadEnvMode` | `worktree` (新しいスレッドを新しい worktree で始める) |

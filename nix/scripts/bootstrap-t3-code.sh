@@ -33,14 +33,17 @@
 # ほかのキーと順は残す (jq は書き換えたキーの位置を保ち、新しいキーを末尾に足す)。同じなら書かない。書くときは同じ dir の一時ファイルから
 # mv で置き換え、元の mode を保つ。無ければ (T3 を一度も起こしていない) 合わせるキーだけで作る (dir も)。次のときは書き換えずに警告して
 # exit 0 で終わる: jq が無い、状態ファイルが無い・形が違う、settings.json が JSON の object として読めない・symlink・合わせるキーの型が違う、
-# 書けない。動いている T3 の server が読み直すとは限らないので、書いたら service を起こし直す案内を出す。
+# 書けない。動いている T3 の server が読み直すとは限らず、setup の流れでは switch (unit が世代に初めて入ると service が起き直る) の後に
+# 合わせるので起き直った T3 もまだ読んでいない。そのため書いたら service を起こし直す案内を出す。
 #
 # ## 状態 (直さない。警告だけ)
 #
 #   runtime     <runtime>/.install-complete が版でない → home-manager switch (activation が写す)
 #   起動        <runtime>/t3 --version が落ちる → NixOS なら programs.nix-ld.enable (配布物は /lib64 の loader を使う)
 #   linger      loginctl の Linger が yes でない → service がログインの外で止まる。sudo loginctl enable-linger
-#   service     systemctl --user の t3code.service が enabled・active でない
+#   service     systemctl --user の t3code.service が active でない・起動で起きる形でない (is-enabled が enabled でなく、WantedBy に
+#               default.target も無い)。起動で起きても is-enabled が enabled でなければ (前の世代の unit は alias)、t3 が not enabled と
+#               読むので switch を勧める (下の判定のコメント)
 #   t3 の見方   t3 service status の Status: が installed でない → t3 service install (t3 の service-state.json を版に揃える)
 #   claude-t3   claude-account check t3 が 0 でない → claude-t3 で /login
 #   T3 Connect  t3 connect status の Environment link: を出し、NOT reachable なら t3 connect と再起動の手を出す
@@ -164,7 +167,8 @@ sync_settings() {
     return 0
   fi
   echo "T3 Code の settings.json の決めたキーを合わせました: ${settings}"
-  echo "  (Claude の home・新しいスレッドの既定・CLAUDE_CODE_ENTRYPOINT。動いている T3 に読ませるには systemctl --user restart t3code)"
+  echo "  (Claude の home・新しいスレッドの既定・CLAUDE_CODE_ENTRYPOINT。動いている T3 は、直前の switch で起き直っていてもまだ読んでいません。"
+  echo "   読ませるには、スレッドが動いていない時に systemctl --user restart t3code)"
 }
 
 sync_settings
@@ -190,11 +194,29 @@ if [[ ${linger} != yes ]]; then
     "sudo loginctl enable-linger $(id -un) (NixOS なら users.users.<名前>.linger = true) を打ってください。"
 fi
 
+# 起動で起きるかは is-enabled だけで決めない。systemd は ~/.config/systemd/user/t3code.service の link をたどった先のファイル名が
+# unit の名前と違うと、その unit を別の unit の別名と見て is-enabled に alias を返す。前の dotfiles の世代 (xdg.configFile の text だけで
+# 置き、先が /nix/store/<hash>-hm_systemdusert3code.service) がそうで、default.target.wants の link があって起動では起きていても alias と
+# 出た。そのため、is-enabled が enabled か、WantedBy に default.target があれば、起動で起きる形と読む。
+#
+# ただし t3 は is-enabled が enabled でないと「service-disabled」(t3 service status の needs an update or repair) と読むので、起動で
+# 起きる形でも enabled でなければ、そのわけと直し方 (今の dotfiles の世代へ switch。unit は名前が t3code.service の store のファイルを
+# 指す。nix/home/modules/t3-code.nix) を出す。t3 service install は勧めない (直すのは dotfiles の unit の置き方の側で、t3 の状態ではない)。
 enabled=$(systemctl --user is-enabled t3code.service 2>/dev/null || true)
+wanted_by=$(systemctl --user show t3code.service --property=WantedBy --value 2>/dev/null || true)
 active=$(systemctl --user is-active t3code.service 2>/dev/null || true)
-if [[ ${enabled} != enabled || ${active} != active ]]; then
-  warn "T3 Code の service (t3code.service) が動いていません (is-enabled: ${enabled:-不明}・is-active: ${active:-不明})。" \
+if [[ ${enabled} == enabled || " ${wanted_by} " == *" default.target "* ]]; then
+  on_boot=yes
+else
+  on_boot=no
+fi
+if [[ ${on_boot} != yes || ${active} != active ]]; then
+  warn "T3 Code の service (t3code.service) が動いていないか、起動で起きる形になっていません (is-enabled: ${enabled:-不明}・WantedBy: ${wanted_by:-なし}・is-active: ${active:-不明})。" \
     "systemctl --user daemon-reload && systemctl --user start t3code で起こし、journalctl --user -u t3code と ~/.t3/userdata/logs/boot-service.log を見てください。"
+elif [[ ${enabled} != enabled ]]; then
+  warn "T3 Code の service は動いていて起動でも起きます (default.target に wanted) が、is-enabled が ${enabled:-不明} なので、t3 は service を「not enabled」と読みます。" \
+    "unit (~/.config/systemd/user/t3code.service) の link の先のファイル名が t3code.service でないと、systemd は alias と出します。" \
+    "home-manager switch (~/dotfiles/setup --update) で今の dotfiles の unit に置き直してください (中身が同じなら service は起き直りません)。"
 else
   status_line=$(timeout 30 "${runtime}/t3" service status 2>/dev/null | grep -m1 'Status:' || true)
   status_line=${status_line#"${status_line%%[![:space:]]*}"}
