@@ -11,11 +11,21 @@
 #                                          読んで書き換えない (`t3 up`・`t3 connect` も)。home-manager の systemd.user.services で書くと
 #                                          書式が変わり、t3 が書き換える
 #   ~/.config/systemd/user/default.target.wants/t3code.service  `systemctl --user enable` の代わり
+#
+# unit と wants の link は、名前が t3code.service の store のファイル (unitFile) を指させる。xdg.configFile の text だけで置くと、
+# home-manager は /nix/store/<hash>-hm_systemdusert3code.service に書き、systemd は link をたどった先のファイル名が unit の名前と
+# 違うので別の unit の別名と見て、is-enabled に alias を返す (起動では default.target.wants から起きる)。t3 は is-enabled が enabled で
+# ないと「service-disabled」(t3 service status の needs an update or repair) と読むので、名前をそろえて enabled にする。
 #   ~/.local/state/dotfiles/t3-code.json   setup の手順 bootstrap-t3-code.sh が読む値 (settings.json に合わせる値・ENTRYPOINT・版・runtime)
 #
 # launcher・unit・wants は force で置き、前に t3 が書いたふつうのファイル (と、wants の home-manager のものでない link) は、link を張る前に
 # 消す (中身が同じだと home-manager は置き換えない)。t3 が後から書き換えても (`t3 update`・`t3 service install` で中身が変わったとき)、
-# 次の switch で dotfiles のものに戻る。unit が変わった世代へ切り替えると、home-manager (sd-switch) が service を起こし直す。
+# 次の switch で dotfiles のものに戻る。
+#
+# switch で service が起き直る (home-manager の reloadSystemd の sd-switch が Stopping・Starting units: t3code.service と出す) のは、
+# 前の世代の home-manager の unit と中身が変わったときと、unit が世代に初めて入るとき (前の世代に無い unit は、中身が前に t3 の書いた
+# ものと同じでも、新しい unit として起こし直す)。link の先が変わっても中身が同じなら起き直らない (sd-switch は中身で比べる)。起き直ると
+# 動いている T3 のスレッドは止まるので、そうなる switch はスレッドが動いていない時に当てる。
 #
 # settings.json (~/.t3/userdata/settings.json) は t3 も書くので、ここでは置かず、bootstrap-t3-code.sh が決めたキーだけを合わせる (値は
 # nix/files/t3-code/managed-settings.json。Windows の runner の t3-code-settings と同じ 1 か所)。claude のアカウント t3 は home/modules/claude.nix が
@@ -74,6 +84,8 @@ let
   ];
   # t3 0.1.11 の posixLauncherScript と同じ中身
   launcher = "#!/bin/sh\nexec '${entry}' \"$@\"\n";
+  # 名前が t3code.service の store のファイル (冒頭のコメント。systemd に alias と読ませない)
+  unitFile = "${pkgs.writeTextDir "t3code.service" unit}/t3code.service";
 
   managed = lib.importJSON ../../files/t3-code/managed-settings.json;
 in
@@ -96,12 +108,15 @@ in
       force = true;
     };
 
+    # text は中身の印 (tests/t3-code.nix が照らす)。置くのは source の unitFile (text から作る既定の source は mkDefault なので、こちらが勝つ)
     xdg.configFile."systemd/user/t3code.service" = {
       text = unit;
+      source = unitFile;
       force = true;
     };
     xdg.configFile."systemd/user/default.target.wants/t3code.service" = {
       text = unit;
+      source = unitFile;
       force = true;
     };
 

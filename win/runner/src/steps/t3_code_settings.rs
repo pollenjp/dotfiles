@@ -79,7 +79,7 @@ impl Step for T3CodeSettings {
             .join(".credentials.json");
         if !creds.is_file() {
             settings = settings.note(format!(
-                "※ T3 Code の Claude (CLAUDE_CONFIG_DIR = {}) にログインしていない。T3 の Settings → Providers → Claude からログインする (win/README.md の「T3 Code」)",
+                "T3 Code の Claude (CLAUDE_CONFIG_DIR = {}) にログインしていない。T3 の Settings → Providers → Claude からログインする (win/README.md の「T3 Code」)",
                 ctx.roots.user_profile.join(".claude-t3").display()
             ));
         }
@@ -705,6 +705,12 @@ mod tests {
         assert_eq!(o[0].kind, Kind::Ok, "環境変数はそろっている");
         assert_eq!(o[1].kind, Kind::Missing);
         assert!(o[1].notes.iter().any(|n| n.contains("ログインしていない")));
+        // ※ は締めの表 (report) が付ける。note の頭に書くと「※ ※」と二重に出る
+        assert!(
+            o[1].notes.iter().all(|n| !n.starts_with('※')),
+            "{:?}",
+            o[1].notes
+        );
         assert!(!p.exists());
         let (o, _) = run_step(&t, &sys, Mode::DryRun { force: false }, ON);
         assert_eq!(o[1].kind, Kind::Missing);
