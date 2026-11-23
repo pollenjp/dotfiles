@@ -83,7 +83,7 @@ pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
         }
         if info.ported {
             ctx.say("");
-            ctx.say(format!(
+            ctx.heading(format!(
                 "━━ [{}] {}: {} ━━",
                 info.order, info.id, info.title
             ));
@@ -95,14 +95,15 @@ pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
     rows
 }
 
-/// 締めの表と締めの行を出し、終了コードを返す。
+/// 締めの表と締めの行を出し、終了コードを返す。出力が端末なら、表と締めの行に行の種類の色を付ける (`report::paint_table`)。
 pub fn finish(ctx: &mut Ctx, title: &str, rows: &[Row]) -> i32 {
+    let paint = ctx.paint();
     ctx.say("");
-    ctx.say(format!("==> 結果 ({title})"));
-    for l in report::format_table(rows) {
+    ctx.heading(format!("==> 結果 ({title})"));
+    for l in report::paint_table(rows, paint) {
         ctx.say(l);
     }
-    for l in report::verdict_lines(rows) {
+    for l in report::paint_verdict(rows, paint) {
         ctx.say(l);
     }
     // 受け持ちが WSL のホストでは、WSL の setup と同じ手順は apply で流さないので、締めの行の「dotfiles apply で揃える・直す」の代わりの
@@ -200,7 +201,7 @@ pub fn import(ctx: &mut Ctx, id: &str, names: &[String]) -> Vec<Row> {
 
 /// 手順の一覧 (list)。
 pub fn list(ctx: &mut Ctx, steps: &[Box<dyn Step>]) {
-    ctx.say("==> 手順");
+    ctx.heading("==> 手順");
     describe_host(ctx);
     ctx.say("");
     let width = steps.iter().map(|s| s.info().id.len()).max().unwrap_or(0);
@@ -248,10 +249,12 @@ mod tests {
     //!
     //! - off の手順は流さずに ↷、まだ無い手順は受け持ちで info と manual、ホストの値が無ければ host の行
     //! - apply は、ホストの値が無い・runner.enable が true でないなら止める
+    //! - 出力が端末なら、見出しは太字、締めの表と締めの行は行の種類の色。色を落とすと端末でないときと同じ字
 
     use super::*;
     use crate::host::{Groups, parse};
     use crate::manifest::Roots;
+    use crate::process::Stream;
     use crate::steps::{Gate, Outcome, StepInfo};
     use crate::testutil::FakeSys;
     use std::path::Path;
@@ -348,6 +351,53 @@ mod tests {
             assert_eq!(out.matches("ran").count(), 2, "{mode:?}: {out}");
             assert!(rows.iter().all(|r| r.kind == Kind::Ok), "{mode:?}");
         }
+    }
+
+    /// `f` に受け持ちが runner のホストの文脈を渡し、出した字を返す
+    fn output_of(sys: &FakeSys, f: impl FnOnce(&mut Ctx)) -> String {
+        let mut out = Vec::new();
+        {
+            let mut ctx = Ctx {
+                repo: "/r".into(),
+                roots: Roots::from_home(Path::new("/h")),
+                state_dir: "/s".into(),
+                host: host_of(Some("[runner]\nenable = true\n")),
+                sys,
+                out: &mut out,
+            };
+            f(&mut ctx);
+        }
+        String::from_utf8(out).unwrap()
+    }
+
+    /// 出力が端末なら、手順と結果の見出しは太字、締めの表と締めの行は行の種類の色 (✔ は印だけ緑・直すことがある行は太い黄)。
+    /// 端末でなければ色の字を出さず、色を落とすと同じ字
+    #[test]
+    fn terminal_output_is_colored() {
+        let steps: Vec<Box<dyn Step>> = vec![
+            Box::new(Fixed(info("a", Gate::Always, true), Kind::Ok)),
+            Box::new(Fixed(info("m", Gate::Always, true), Kind::Missing)),
+        ];
+        let check = |ctx: &mut Ctx| {
+            let rows = execute(ctx, Mode::Check, &steps);
+            assert_eq!(finish(ctx, "check", &rows), 3);
+            list(ctx, &steps);
+        };
+        let sys = || FakeSys::new(|_| unreachable!());
+        let out = output_of(&sys().with_terminal(Stream::Stdout), check);
+        for want in [
+            "\n\u{1b}[1m━━ [97] a: x ━━\u{1b}[0m\n",
+            "\n\u{1b}[1m==> 結果 (check)\u{1b}[0m\n",
+            "\n  \u{1b}[32m✔\u{1b}[0m [97] a               t\n",
+            "\n  \u{1b}[1;33m⚠ [97] m               t\u{1b}[0m\n",
+            "\n\u{1b}[1;33m⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️\u{1b}[0m\n",
+            "\n\u{1b}[1m==> 手順\u{1b}[0m\n",
+        ] {
+            assert!(out.contains(want), "{want:?} が無い: {out:?}");
+        }
+        let plain = output_of(&sys(), check);
+        assert!(!plain.contains('\u{1b}'), "{plain:?}");
+        assert_eq!(crate::process::strip_ansi(&out), plain);
     }
 
     #[test]

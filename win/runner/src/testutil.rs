@@ -1,8 +1,8 @@
 //! 単体の試験で使う道具: 一時ディレクトリ (crate を足さない。drop で消す) と、外のコマンドの偽の口 (`FakeSys`)。
 
-use crate::process::{CommandSpec, RunResult, Sys};
+use crate::process::{CommandSpec, RealSys, RunResult, Stream, Sys};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -23,6 +23,8 @@ pub struct FakeSys {
     responder: Responder,
     programs: BTreeMap<String, PathBuf>,
     env: BTreeMap<String, String>,
+    /// 端末として見せる出す先 (`with_terminal`。既定は空で、どこにも色を付けない)
+    terminals: BTreeSet<Stream>,
     exe: Option<PathBuf>,
     pub calls: RefCell<Vec<CommandSpec>>,
     /// 待った長さ (待たずに控える)
@@ -37,6 +39,7 @@ impl FakeSys {
             responder: Box::new(responder),
             programs: BTreeMap::new(),
             env: BTreeMap::new(),
+            terminals: BTreeSet::new(),
             exe: None,
             calls: RefCell::new(Vec::new()),
             sleeps: RefCell::new(Vec::new()),
@@ -64,6 +67,12 @@ impl FakeSys {
 
     pub fn with_env(mut self, name: &str, value: &str) -> Self {
         self.env.insert(name.to_string(), value.to_string());
+        self
+    }
+
+    /// `is_terminal(stream)` を true にする (出す先が端末のときの色を試す)
+    pub fn with_terminal(mut self, stream: Stream) -> Self {
+        self.terminals.insert(stream);
         self
     }
 
@@ -114,12 +123,43 @@ impl Sys for FakeSys {
         self.exe.clone()
     }
 
+    fn is_terminal(&self, stream: Stream) -> bool {
+        self.terminals.contains(&stream)
+    }
+
     fn sleep(&self, d: std::time::Duration) {
         self.sleeps.borrow_mut().push(d);
         if let Some(f) = &self.on_sleep {
             let n = self.sleeps.borrow().len();
             f(n);
         }
+    }
+}
+
+/// 本物の口 (`RealSys`) で、出す先を端末と見ないもの (`is_terminal` は既定の false)。本物のコマンドを打つ試験 (WSL の script との突き合わせ
+/// など) が `Ctx` に渡す。`RealSys` を渡すと、試験を端末で流したときに `Ctx::say` が `!!` の行を色の字で包み、出力を比べる試験が端末でだけ
+/// 落ちる
+pub struct RealSysPlain;
+
+impl Sys for RealSysPlain {
+    fn run(&self, spec: &CommandSpec, on_line: &mut dyn FnMut(&str)) -> RunResult {
+        RealSys.run(spec, on_line)
+    }
+
+    fn which(&self, name: &str) -> Option<PathBuf> {
+        RealSys.which(name)
+    }
+
+    fn env(&self, name: &str) -> Option<String> {
+        RealSys.env(name)
+    }
+
+    fn current_exe(&self) -> Option<PathBuf> {
+        RealSys.current_exe()
+    }
+
+    fn sleep(&self, d: std::time::Duration) {
+        RealSys.sleep(d);
     }
 }
 

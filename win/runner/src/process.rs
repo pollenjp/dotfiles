@@ -141,6 +141,13 @@ impl RunResult {
     }
 }
 
+/// runner が字を出す先 (色を付けるかを、出す先ごとに決める。`color::Paint::detect`)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Stream {
+    Stdout,
+    Stderr,
+}
+
 pub trait Sys {
     /// コマンドを打つ。出力の行は届いたそばから `on_line` に渡す。
     fn run(&self, spec: &CommandSpec, on_line: &mut dyn FnMut(&str)) -> RunResult;
@@ -155,6 +162,10 @@ pub trait Sys {
     /// 待つ (読みかけのファイルを読み直す前・PowerToys の設定画面がファイルを作るのを待つ間。試験の偽物は待たずに控える)
     fn sleep(&self, d: Duration) {
         std::thread::sleep(d);
+    }
+    /// 出す先が端末か (色を付けるかを決める。`color::Paint::detect`)。試験の偽物は端末でない (`FakeSys::with_terminal` で端末にする)
+    fn is_terminal(&self, _stream: Stream) -> bool {
+        false
     }
 }
 
@@ -280,6 +291,14 @@ impl Sys for RealSys {
 
     fn env(&self, name: &str) -> Option<String> {
         std::env::var(name).ok()
+    }
+
+    fn is_terminal(&self, stream: Stream) -> bool {
+        use std::io::IsTerminal;
+        match stream {
+            Stream::Stdout => std::io::stdout().is_terminal(),
+            Stream::Stderr => std::io::stderr().is_terminal(),
+        }
     }
 }
 

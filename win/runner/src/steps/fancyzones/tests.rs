@@ -1429,7 +1429,7 @@ fn imports_the_same_bytes_as_the_wsl_script() {
                 Groups::embedded().unwrap(),
             )
             .unwrap(),
-            sys: &crate::process::RealSys,
+            sys: &crate::testutil::RealSysPlain,
             out: &mut buf,
         };
         import(&mut ctx, &["1080p".to_string(), "mine".to_string()])
@@ -1560,7 +1560,7 @@ fn import_errors_match_the_wsl_script() {
                     Groups::embedded().unwrap(),
                 )
                 .unwrap(),
-                sys: &crate::process::RealSys,
+                sys: &crate::testutil::RealSysPlain,
                 out: &mut buf,
             };
             import(

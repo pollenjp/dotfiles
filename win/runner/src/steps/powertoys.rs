@@ -1936,7 +1936,7 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn real_powershell_runs_the_bodies_without_powertoys() {
-        use crate::process::RealSys;
+        use crate::testutil::RealSysPlain;
         let exe_at = |var: &str| {
             std::env::var(var)
                 .map(|v| {
@@ -1961,7 +1961,7 @@ mod tests {
                 Groups::embedded().unwrap(),
             )
             .unwrap(),
-            sys: &RealSys,
+            sys: &RealSysPlain,
             out: &mut out,
         };
         assert_eq!(run_ps(&mut ctx, &ps_stop()), (0, "no-exe".to_string()));

@@ -4,6 +4,8 @@
 //! 種類ごとに分ける。終了コードは 0 (直すことが無い)・3 (入っていない・無いものだけ)・1 (ほかに直すことがある)。2 (runner が
 //! 動けない) は行にせず、cli が返す。
 
+use crate::color::Paint;
+
 /// 行の種類。`Ok`・`Info`・`Off` は終了コードに数えない。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -41,6 +43,16 @@ impl Kind {
             Kind::Info => "·",
             Kind::Off => "↷",
             _ => "⚠",
+        }
+    }
+
+    /// 端末に出すときの色で包む (nix の setup.sh の結果と警告のまとめにそろえる。`color`)
+    fn paint(self, paint: Paint, text: &str) -> String {
+        match self {
+            Kind::Ok => paint.green(text),
+            Kind::Info | Kind::Off => paint.dim(text),
+            Kind::Missing | Kind::Fix | Kind::Manual => paint.warn(text),
+            Kind::Failed | Kind::Blocker => paint.red(text),
         }
     }
 }
@@ -89,8 +101,14 @@ pub fn exit_code(rows: &[Row]) -> i32 {
     }
 }
 
-/// 締めの表。行ごとに「頭の 2 字・印・順番・id・文」を並べ、※ の行は字下げして続ける。
+/// 締めの表。行ごとに「頭の 2 字・印・順番・id・文」を並べ、※ の行は字下げして続ける (色なし。端末に出すときは `paint_table`)。
 pub fn format_table(rows: &[Row]) -> Vec<String> {
+    paint_table(rows, Paint::OFF)
+}
+
+/// 端末に出す締めの表 (字は `format_table` と同じ)。✔ の行は印だけを緑にし、ほかの行は印から行の終わりまでを種類の色にする (直すことが
+/// ある ⚠ は太い黄・落ちた・止めた ⚠ は赤・↷ と · は薄く)。※ の行は色を付けない (直し方を読ませる)。
+pub fn paint_table(rows: &[Row], paint: Paint) -> Vec<String> {
     let width = rows.iter().map(|r| r.id.len()).max().unwrap_or(0).max(14);
     let mut lines = Vec::new();
     for r in rows {
@@ -98,13 +116,13 @@ pub fn format_table(rows: &[Row]) -> Vec<String> {
             Some(n) => format!("[{n:>2}]"),
             None => "    ".to_string(),
         };
-        lines.push(format!(
-            "  {} {} {:<width$}  {}",
-            r.kind.mark(),
-            order,
-            r.id,
-            r.text
-        ));
+        let body = format!("{order} {:<width$}  {}", r.id, r.text);
+        let line = match r.kind {
+            // 揃っている行は数が多いので、印だけを緑にして、直すことがある行を目立たせる (setup.sh の結果の ✔ と同じ)
+            Kind::Ok => format!("{} {body}", r.kind.paint(paint, r.kind.mark())),
+            k => k.paint(paint, &format!("{} {body}", k.mark())),
+        };
+        lines.push(format!("  {line}"));
         for n in &r.notes {
             lines.push(format!("      ※ {n}"));
         }
@@ -112,29 +130,53 @@ pub fn format_table(rows: &[Row]) -> Vec<String> {
     lines
 }
 
-/// 締めの行 (⚠️ で始めて ⚠️ で終える)。直すことが無ければ「直すことはありません」の 1 行。止めた行があれば、それだけを返す。
+/// 締めの行 (⚠️ で始めて ⚠️ で終える)。直すことが無ければ「直すことはありません」の 1 行。止めた行があれば、それだけを返す
+/// (色なし。端末に出すときは `paint_verdict`)。
 pub fn verdict_lines(rows: &[Row]) -> Vec<String> {
+    paint_verdict(rows, Paint::OFF)
+}
+
+/// 端末に出す締めの行 (字は `verdict_lines` と同じ)。行を出させた種類の色で行ごと包む (止めた・落ちたは赤・ほかの ⚠️ は太い黄・直すことが
+/// 無ければ緑)。
+pub fn paint_verdict(rows: &[Row], paint: Paint) -> Vec<String> {
+    verdicts(rows)
+        .into_iter()
+        .map(|(kind, line)| kind.paint(paint, line))
+        .collect()
+}
+
+/// 締めの行と、それを出させた行の種類 (直すことが無いときの行は `Ok`)。
+fn verdicts(rows: &[Row]) -> Vec<(Kind, &'static str)> {
     let has = |k: Kind| rows.iter().any(|r| r.kind == k);
     if has(Kind::Blocker) {
-        return vec![
-            "⚠️ 止めたので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️".to_string(),
-        ];
+        return vec![(
+            Kind::Blocker,
+            "⚠️ 止めたので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️",
+        )];
     }
-    let mut lines = Vec::new();
-    if has(Kind::Missing) {
-        lines.push("⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️".to_string());
-    }
-    if has(Kind::Fix) {
-        lines.push("⚠️ 足りないもの・ずれているものがある → dotfiles apply で直す ⚠️".to_string());
-    }
-    if has(Kind::Manual) {
-        lines.push("⚠️ runner では直らない差がある → ※ の手順で直す ⚠️".to_string());
-    }
-    if has(Kind::Failed) {
-        lines.push("⚠️ 確かめられなかった・落ちた手順がある → 上の出力を見る ⚠️".to_string());
-    }
+    let lines: Vec<(Kind, &'static str)> = [
+        (
+            Kind::Missing,
+            "⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️",
+        ),
+        (
+            Kind::Fix,
+            "⚠️ 足りないもの・ずれているものがある → dotfiles apply で直す ⚠️",
+        ),
+        (
+            Kind::Manual,
+            "⚠️ runner では直らない差がある → ※ の手順で直す ⚠️",
+        ),
+        (
+            Kind::Failed,
+            "⚠️ 確かめられなかった・落ちた手順がある → 上の出力を見る ⚠️",
+        ),
+    ]
+    .into_iter()
+    .filter(|(k, _)| has(*k))
+    .collect();
     if lines.is_empty() {
-        lines.push("✔ 直すことはありません".to_string());
+        return vec![(Kind::Ok, "✔ 直すことはありません")];
     }
     lines
 }
@@ -146,6 +188,7 @@ mod tests {
     //! - 終了コード: 行が無い・ok/info/off だけなら 0、missing だけなら 3、ほかが混ざれば 1
     //! - 締めの行: 種類ごとに 1 行・混ざれば並べる・止めた行があればそれだけ・直すことが無ければ 1 行
     //! - 締めの表: 直すことがあれば ⚠、順番の無い行は欄を空け、※ の行を字下げして続ける
+    //! - 端末に出す表と締めの行の色: 行の種類で色を付け、色を落とすと色なしの字と同じ
 
     use super::*;
 
@@ -225,5 +268,76 @@ mod tests {
         assert_eq!(lines[2], "      ※ Install-Ntn で入れる");
         assert_eq!(lines[3], "  ⚠      host            無い");
         assert_eq!(lines[4], "  ↷ [ 5] bootstrap       off");
+    }
+
+    /// 端末に出す締めの表: ✔ は印だけ緑、直すことがある行は太い黄、落ちた・止めた行は赤、↷ と · は薄く、※ の行は色なし。色を落とすと
+    /// 色なしの表と同じ字
+    #[test]
+    fn painted_table_colors_by_kind() {
+        let rows = vec![
+            Row::new(Some(90), "files", Kind::Ok, "同じ 13"),
+            Row::new(Some(97), "ntn", Kind::Missing, "入っていない")
+                .with_notes(vec!["Install-Ntn で入れる".to_string()]),
+            Row::new(None, "host", Kind::Manual, "無い"),
+            Row::new(Some(5), "bootstrap", Kind::Off, "off"),
+            Row::new(Some(98), "x-pending", Kind::Info, "まだ無い"),
+            Row::new(Some(91), "ps1", Kind::Failed, "落ちた"),
+            Row::new(Some(92), "fix", Kind::Fix, "ずれている"),
+            Row::new(None, "apply", Kind::Blocker, "止めた"),
+        ];
+        let lines = paint_table(&rows, Paint::ON);
+        assert_eq!(
+            lines,
+            vec![
+                "  \u{1b}[32m✔\u{1b}[0m [90] files           同じ 13",
+                "  \u{1b}[1;33m⚠ [97] ntn             入っていない\u{1b}[0m",
+                "      ※ Install-Ntn で入れる",
+                "  \u{1b}[1;33m⚠      host            無い\u{1b}[0m",
+                "  \u{1b}[2m↷ [ 5] bootstrap       off\u{1b}[0m",
+                "  \u{1b}[2m· [98] x-pending       まだ無い\u{1b}[0m",
+                "  \u{1b}[31m⚠ [91] ps1             落ちた\u{1b}[0m",
+                "  \u{1b}[1;33m⚠ [92] fix             ずれている\u{1b}[0m",
+                "  \u{1b}[31m⚠      apply           止めた\u{1b}[0m",
+            ]
+        );
+        let plain: Vec<String> = lines
+            .iter()
+            .map(|l| crate::process::strip_ansi(l))
+            .collect();
+        assert_eq!(plain, format_table(&rows));
+        assert_eq!(paint_table(&rows, Paint::OFF), format_table(&rows));
+    }
+
+    /// 端末に出す締めの行: 止めた・落ちたは赤、ほかの ⚠️ は太い黄、直すことが無ければ緑。色を付けなければ色なしの締めの行と同じ字
+    #[test]
+    fn painted_verdict_colors_by_kind() {
+        let all = [
+            row(Kind::Missing),
+            row(Kind::Fix),
+            row(Kind::Manual),
+            row(Kind::Failed),
+        ];
+        assert_eq!(
+            paint_verdict(&all, Paint::ON),
+            vec![
+                "\u{1b}[1;33m⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️\u{1b}[0m",
+                "\u{1b}[1;33m⚠️ 足りないもの・ずれているものがある → dotfiles apply で直す ⚠️\u{1b}[0m",
+                "\u{1b}[1;33m⚠️ runner では直らない差がある → ※ の手順で直す ⚠️\u{1b}[0m",
+                "\u{1b}[31m⚠️ 確かめられなかった・落ちた手順がある → 上の出力を見る ⚠️\u{1b}[0m",
+            ]
+        );
+        assert_eq!(
+            paint_verdict(&[row(Kind::Missing), row(Kind::Blocker)], Paint::ON),
+            vec![
+                "\u{1b}[31m⚠️ 止めたので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️\u{1b}[0m"
+            ]
+        );
+        assert_eq!(
+            paint_verdict(&[row(Kind::Ok), row(Kind::Off), row(Kind::Info)], Paint::ON),
+            vec!["\u{1b}[32m✔ 直すことはありません\u{1b}[0m"]
+        );
+        for rows in [&all[..], &[row(Kind::Blocker)][..], &[row(Kind::Ok)][..]] {
+            assert_eq!(paint_verdict(rows, Paint::OFF), verdict_lines(rows));
+        }
     }
 }

@@ -2,10 +2,11 @@
 //!
 //! 引数は手で読む (clap を足さない)。誤りは使い方と一緒に stderr へ出し、終了コード 2。
 
+use crate::color::Paint;
 use crate::context::Ctx;
 use crate::host::{self, Groups};
 use crate::manifest::{self, Roots};
-use crate::process::{CommandSpec, RealSys, Sys};
+use crate::process::{CommandSpec, RealSys, Stream, Sys};
 use crate::runner;
 use crate::steps::{self, Mode, Step};
 use std::io::Write;
@@ -371,12 +372,17 @@ fn pc_name(sys: &dyn Sys) -> Option<String> {
         .map(|s| s.to_lowercase())
 }
 
+/// stderr に出す誤りの行 (`!! …`)。stderr が端末で NO_COLOR が無ければ赤にする (setup.sh の `ERROR` と同じ。`color`)。
+fn error_line(sys: &dyn Sys, e: impl std::fmt::Display) -> String {
+    Paint::detect(sys, Stream::Stderr).red(&format!("!! {e}"))
+}
+
 /// 引数・環境・出力を受けて流す (試験はここを呼ぶ)。
 pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Write) -> i32 {
     let a = match parse(args) {
         Ok(a) => a,
         Err(e) => {
-            let _ = writeln!(err, "!! {e}\n\n{USAGE}");
+            let _ = writeln!(err, "{}\n\n{USAGE}", error_line(sys, e));
             return 2;
         }
     };
@@ -395,7 +401,7 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             match steps_command(&a, repo, sys, out) {
                 Ok(code) => code,
                 Err(e) => {
-                    let _ = writeln!(err, "!! {e}");
+                    let _ = writeln!(err, "{}", error_line(sys, e));
                     2
                 }
             }
@@ -425,7 +431,7 @@ fn manifest_command(
             0
         }
         Err(e) => {
-            let _ = writeln!(err, "!! {e}");
+            let _ = writeln!(err, "{}", error_line(sys, e));
             1
         }
     }
@@ -494,7 +500,7 @@ fn steps_command(
         }
         Command::Import => {
             let target = a.target.as_deref().unwrap_or_default();
-            ctx.say(format!(
+            ctx.heading(format!(
                 "==> dotfiles import {target} (Windows 側の値を repo のファイルへ取り込む。PC の設定のファイルには書かない)"
             ));
             runner::describe_host(&mut ctx);
@@ -502,13 +508,13 @@ fn steps_command(
             Ok(runner::finish(&mut ctx, "import", &rows))
         }
         Command::Check => {
-            ctx.say("==> dotfiles check (確かめるだけ。何も書かない)");
+            ctx.heading("==> dotfiles check (確かめるだけ。何も書かない)");
             runner::describe_host(&mut ctx);
             let rows = runner::execute(&mut ctx, Mode::Check, &selected);
             Ok(runner::finish(&mut ctx, "check", &rows))
         }
         _ if a.dry_run => {
-            ctx.say("==> dotfiles apply --dry-run (することを出すだけ。何も書かない)");
+            ctx.heading("==> dotfiles apply --dry-run (することを出すだけ。何も書かない)");
             runner::describe_host(&mut ctx);
             if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 ctx.say(format!("※ 本番の apply は止まる: {}", b.text));
@@ -519,7 +525,7 @@ fn steps_command(
             Ok(runner::finish(&mut ctx, "apply --dry-run", &rows))
         }
         _ => {
-            ctx.say("==> dotfiles apply");
+            ctx.heading("==> dotfiles apply");
             runner::describe_host(&mut ctx);
             if let Some(b) = runner::apply_blocker(&ctx.host, &selected) {
                 let mut rows = runner::host_rows(&ctx.host);
@@ -701,9 +707,10 @@ mod tests {
         //! - 相対パスの --repo は絶対パスにしてから使う (隣の clone と控えに相対パスを書かない)
         //! - ホストの値の既定の場所は、USERNAME と hostname (小文字) から。list は環境変数が無くても流せる
         //! - 知らない手順・ホストの値の誤り・環境変数が無いのは 2。manifest の誤りは 1
+        //! - 色は出す先が端末で NO_COLOR が無いときだけ: stdout は見出しと締めの行、stderr は `!!` の誤りの行 (赤)
 
         use super::super::*;
-        use crate::process::{Exit, RunResult};
+        use crate::process::{Exit, RunResult, Stream};
         use crate::testutil::{FakeSys, TempDir};
 
         struct World {
@@ -1079,6 +1086,76 @@ mod tests {
             let (code, _, err) = w.run_with(&no_env, &["check"]);
             assert_eq!(code, 2);
             assert!(err.contains("USERNAME"));
+        }
+
+        /// 出す先が端末で NO_COLOR が無いときだけ色を付ける。stdout は見出しと締めの行、stderr は runner が動けない・manifest の誤りの
+        /// `!!` の行 (赤)。端末かは出す先ごとに見る
+        #[test]
+        fn colors_only_terminals_without_no_color() {
+            let w = World::new(Some("group = \"personal\"\n"));
+            let tty = || {
+                w.sys()
+                    .with_terminal(Stream::Stdout)
+                    .with_terminal(Stream::Stderr)
+            };
+            let (code, out, _) = w.run_with(&tty(), &["check", "--steps", "files"]);
+            assert_eq!(code, 3, "{out}");
+            assert!(
+                out.starts_with(
+                    "\u{1b}[1m==> dotfiles check (確かめるだけ。何も書かない)\u{1b}[0m\n"
+                ),
+                "{out:?}"
+            );
+            assert!(
+                out.contains(
+                    "\n\u{1b}[1;33m⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️\u{1b}[0m\n"
+                ),
+                "{out:?}"
+            );
+            let (code, out, _) = w.run_with(&tty(), &["apply", "--dry-run", "--steps", "files"]);
+            assert_eq!(code, 3, "{out}");
+            assert!(
+                out.starts_with(
+                    "\u{1b}[1m==> dotfiles apply --dry-run (することを出すだけ。何も書かない)\u{1b}[0m\n"
+                ),
+                "{out:?}"
+            );
+            let (code, _, err) = w.run_with(&tty(), &["check", "--steps", "nope"]);
+            assert_eq!(code, 2);
+            assert_eq!(
+                err,
+                "\u{1b}[31m!! 知らない手順です: nope (dotfiles list で見る)\u{1b}[0m\n"
+            );
+            let (code, _, err) = w.run_with(&tty(), &["frobnicate"]);
+            assert_eq!(code, 2);
+            assert!(
+                err.starts_with(
+                    "\u{1b}[31m!! 知らないコマンドです: frobnicate\u{1b}[0m\n\ndotfiles の Windows 側の runner"
+                ),
+                "{err:?}"
+            );
+            w.t.write("g/dotfiles/win/manifest.toml", "x = 1\n");
+            let (code, _, err) = w.run_with(&tty(), &["manifest"]);
+            assert_eq!(code, 1);
+            assert!(
+                err.starts_with("\u{1b}[31m!! ") && err.ends_with("\u{1b}[0m\n"),
+                "{err:?}"
+            );
+
+            // 端末でない・NO_COLOR があるなら、どちらにも色の字を出さない
+            for sys in [w.sys(), tty().with_env("NO_COLOR", "1")] {
+                let (_, out, err) = w.run_with(&sys, &["manifest"]);
+                assert!(
+                    !out.contains('\u{1b}') && !err.contains('\u{1b}'),
+                    "{err:?}"
+                );
+                let (_, _, err) = w.run_with(&sys, &["check", "--steps", "nope"]);
+                assert_eq!(err, "!! 知らない手順です: nope (dotfiles list で見る)\n");
+            }
+            // stdout だけが端末なら stderr には付けない
+            let out_only = w.sys().with_terminal(Stream::Stdout);
+            let (_, _, err) = w.run_with(&out_only, &["check", "--steps", "nope"]);
+            assert_eq!(err, "!! 知らない手順です: nope (dotfiles list で見る)\n");
         }
 
         #[test]

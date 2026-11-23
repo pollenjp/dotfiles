@@ -7,6 +7,7 @@
 pub mod account_cli;
 pub mod accounts;
 pub mod cli;
+pub mod color;
 pub mod context;
 pub mod fsutil;
 pub mod hooks;
