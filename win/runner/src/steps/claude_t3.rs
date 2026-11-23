@@ -7,8 +7,9 @@
 //! | `CLAUDE.t3.md` | T3 の会話の決まり (herdr-app を前提にした指示の読み替え) | `--append-system-prompt-file <パス>` (T3 の指示の後ろに足す) |
 //!
 //! - T3 の Claude の設定のディレクトリ (claude-account の `~/.claude-t3`) は、中身を `~/.claude` へのリンクのまま herdr-app と共有する。T3 だけの
-//!   違いは、この 2 つを T3 の Settings → Providers → Claude → Launch arguments で渡す。Launch arguments はユーザーが書く (runner は T3 の設定を
-//!   書かない)。書く文 (置き先の絶対パス) はこの手順が出す
+//!   違いは、この 2 つを T3 の Settings → Providers → Claude → Launch arguments で渡す。この手順は T3 の設定を書かない。T3 Code を dotfiles で
+//!   入れたホスト (道具の switch `windowsT3Code`) では、手順 t3-code-settings が T3 の settings.json の `launchArgs` に `launch_args` の文を書く。
+//!   ほかのホストはユーザーが書き、書く文 (置き先の絶対パス) はこの手順が出す
 //! - 置き方は herdr-app-mods と同じ記録つきのコピー (`linker`): 無い → コピー・同じ → 記録だけ (手で置いた同じ中身も引き取る)・記録どおり →
 //!   上書き・ほか → 衝突 (`--force` で上書き)。改行は LF にそろえて置く (clone の取り出し方によらず同じバイト列。claude-files の CLAUDE.md と同じ)。
 //!   `.json` は JSON の object と読めなければ置かない (T3 は `--settings` のファイルが読めないと、メッセージの送信が失敗する)
@@ -97,9 +98,15 @@ impl Step for ClaudeT3 {
         }
         prune(ctx, &mut w, &dir);
         ctx.say("");
-        ctx.say(
-            "T3 の Settings → Providers → Claude → Launch arguments に書く文 (ファイルを置いてから書く。書いた後と、置き直した後は T3 の会話を開き直す):",
-        );
+        if ctx.host.tool("windowsT3Code") {
+            ctx.say(
+                "T3 の Launch arguments は、手順 t3-code-settings が T3 の settings.json に書く (手で書かなくてよい。書いた後は T3 Code を開き直し、置き直した後は T3 の会話を開き直す):",
+            );
+        } else {
+            ctx.say(
+                "T3 の Settings → Providers → Claude → Launch arguments に書く文 (ファイルを置いてから書く。書いた後と、置き直した後は T3 の会話を開き直す):",
+            );
+        }
         ctx.say(format!("  {}", launch_args(&dir)));
         w.finish(ctx, &record_path, None)
     }
@@ -128,8 +135,9 @@ pub fn launch_args(dir: &Path) -> String {
     )
 }
 
-/// repo のファイルの中身 (改行を LF にそろえる)。`.json` は JSON の object と読めなければ Err (置かない)。
-fn read_source(root: &Path, name: &str) -> Result<Vec<u8>, String> {
+/// repo のファイルの中身 (改行を LF にそろえる)。`.json` は JSON の object と読めなければ Err (置かない)。t3-code-settings も、同じ apply で
+/// この手順が置けるかを見るのに使う。
+pub fn read_source(root: &Path, name: &str) -> Result<Vec<u8>, String> {
     let p = root.join(name);
     let text = std::fs::read_to_string(&p)
         .map_err(|e| format!("コピー元 {} が読めない ({e})", p.display()))?
@@ -216,7 +224,7 @@ mod tests {
     //! - 置き先で変えたもの・記録の無い違う中身は衝突 (manual。apply も書かない) で、--force で上書きする。手で置いた同じ中身は引き取る
     //! - repo のファイルが読めない・`.json` が JSON の object でないときは、そのファイルを置かない (failed。ほかのファイルは置く)
     //! - FILES から外したファイルは、中身が記録どおりなら消す (変えてあれば残して知らせる)。置き先の外の記録には触らない。置き先がリンクなら触らない
-    //! - Launch arguments に書く文 (置き先の絶対パス。空白を含めば引用符で囲む) を出す
+    //! - Launch arguments に書く文 (置き先の絶対パス。空白を含めば引用符で囲む) を出す。windowsT3Code のホストでは t3-code-settings が書くと出す
     //! - 本物の repo のファイル: 置き場にあるのは FILES だけで、どれも読め、settings.json は herdr と hc の子の skill を off・pjp-t3-hub を on に
     //!   する (hc は残す)。CLAUDE.t3.md は子を T3 のスレッドとして立てる向き
 
@@ -267,6 +275,13 @@ mod tests {
         }
 
         fn run(&self, mode: Mode) -> (Vec<Outcome>, String) {
+            self.run_on(
+                mode,
+                HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+            )
+        }
+
+        fn run_on(&self, mode: Mode, host: HostValues) -> (Vec<Outcome>, String) {
             let sys = FakeSys::new(|_| unreachable!("コマンドは打たない"));
             let mut out = Vec::new();
             let o = {
@@ -274,7 +289,7 @@ mod tests {
                     repo: self.t.path().join("dotfiles"),
                     roots: Roots::from_home(&self.t.path().join("home")),
                     state_dir: self.t.path().join("state"),
-                    host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                    host,
                     sys: &sys,
                     out: &mut out,
                 };
@@ -508,8 +523,26 @@ mod tests {
     #[test]
     fn prints_launch_arguments() {
         let e = Env::new();
+        // T3 Code を dotfiles で入れていないホストは、手で書く文を出す
         let (_, out) = e.run(Mode::Check);
         assert!(out.contains("Launch arguments に書く文"), "{out}");
+        assert!(
+            out.contains(&format!("  {}\n", launch_args(&e.dir()))),
+            "{out}"
+        );
+        // windowsT3Code のホストは、t3-code-settings が書く同じ文を出す
+        let host = crate::host::parse(
+            "[tools]\nwindowsT3Code = true\n",
+            Path::new("h.toml"),
+            Groups::embedded().unwrap(),
+        )
+        .unwrap();
+        let (_, out) = e.run_on(Mode::Check, host);
+        assert!(
+            out.contains("t3-code-settings が T3 の settings.json に書く"),
+            "{out}"
+        );
+        assert!(!out.contains("Launch arguments に書く文"), "{out}");
         assert!(
             out.contains(&format!("  {}\n", launch_args(&e.dir()))),
             "{out}"
