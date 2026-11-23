@@ -28,7 +28,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
-| `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・チケットと進み具合と PR の木・状況の説明・進み具合・一覧・図) ([後述](#herdr-app-の-mod)) |
+| `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・チケットと進み具合と PR の木・問いへの答え (Q&A)・状況の説明・進み具合・一覧・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
@@ -878,7 +878,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -1009,16 +1009,32 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   { "id": "TKT-j", "title": "前の会話のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "note": "前の会話", "related": true } ] }
 ```
 
+- ユーザーの問いへの答えは、節の型 `qa` (Q&A) で書く。答えがほかの子の返答に紛れて、どこで答えたか分からなくならないように、ハブはユーザーに問われたら
+  答えをこの節の項目に書く。項目は `{ id, q, at, a, open }` で、1 つの項目がユーザーの問い 1 つとハブの答え 1 つ。panel は項目を枠のついた小さなカードで
+  panel.json の順に縦に並べ、節の題の後ろに項目の数を `(N)` で足す。項目の頭の行に `▸`・`▾`・`Q. <q>` (太字)・時刻 (`at`。小さく薄く)・項目の `×` を
+  並べ、頭の行を押すと開け閉めする。開いた項目は答え (`a`。markdown の節の `text` と同じく、リンク・ミニ絵・入れ子の箇条書き) を 1 段下げて出す (無い・空
+  なら「(まだ答えていない)」)。初めは `open` (boolean) のとおりで、無ければ 1 つ目の項目だけを開く (ハブは新しい問いを `items` の頭に足す)。手で開け閉め
+  した形は panel.json を書き直しても残り、`version` が変わると初めに戻る。`id` は節の id ともほかの項目の id とも重ならない値にする (開け閉めと消す印の鍵)。
+  欄の意味と出し方の正本は `main.js` の頭のコメントの「Q&A」:
+
+```json
+{ "type": "qa", "id": "qa", "title": "Q&A", "items": [
+  { "id": "qa-1123-1412", "q": "panel の Q&A はどこに出る?", "at": "11/23 14:12", "a": "- まとめのペインの節に出す\n  - 新しい問いは頭に足す" },
+  { "id": "qa-1123-1350", "q": "前の問い", "at": "11/23 13:50", "a": "前の答え" } ] }
+```
+
 - 節を消す印: まとめのペイン (role が `summary` か無い) の、`id` (空でない文字列) のある節の右上に `×` が出る。ユーザーが押すと印が付き (warn の
-  点線の枠・題の取り消し線・薄い中身と「次の更新で消える」)、`戻す` で外れる。問いのペインには出ない。印は panel が panel.json の隣の
+  点線の枠・題の取り消し線・薄い中身と「次の更新で消える」)、`戻す` で外れる。問いのペインには出ない。Q&A の節の項目 (`id` のあるもの) にも、
+  項目の頭の行の右に同じ `×` が 1 つずつ出る (印が付くと、項目の枠が warn の点線になり、問いに取り消し線が引かれ、答えが薄くなる)。印は panel が panel.json の隣の
   `<名前>.dismiss.json` (panel.json の名前の `.json` を `.dismiss.json` に替えたもの。`panel.json` なら `panel.dismiss.json`) に書く:
   `{ "file": "panel.json", "dismissed": [{ "id": "<節の id>", "title": "<印を付けたときの題>", "at": "<時刻 (UTC)>", "base": "<panel が使う指紋>" }] }`。
+  項目の印も同じ `dismissed` に項目の `id` で書き、`title` は印を付けたときの `q`、どの節の項目かを `section` (節の id) で足す。
   panel.json はハブだけが書き、印のファイルは panel だけが書く (写しのペインどうしは `writeTextFile` の expected で書き違いを防ぐ)
-- 印を付けた後に panel.json の中身が変わると、panel はその節を出さない (キーの順と空白は比べないので、同じ中身の書き直しは変わったと数えない)。ハブが
-  同じ id で書き続けても、印がある間は出さない。panel.json から外れた id の印は、panel が印のファイルから消す。印はファイルに残るので、まとめのペインを
+- 印を付けた後に panel.json の中身が変わると、panel はその節 (項目の印なら、その項目) を出さない (キーの順と空白は比べないので、同じ中身の書き直しは
+  変わったと数えない)。ハブが同じ id で書き続けても、印がある間は出さない。panel.json の節にも Q&A の節の項目にも無くなった id の印は、panel が印のファイルから消す。印はファイルに残るので、まとめのペインを
   開き直しても (herdr-app を上げ直しても) 同じに出る (印の後に panel.json が変わっていれば出さず、変わっていなければ印つきで出す)
-- ハブは panel.json を書く前に印のファイルを読み (無ければ印は無い)、印の付いた id の節を外して書く。同じ話を続けて出すなら別の id (`next-2` など)
-  にする。印のファイルは書き換えない (要らなくなった印は、節を外せば panel が消す):
+- ハブは panel.json を書く前に印のファイルを読み (無ければ印は無い)、印の付いた id を、節の id と Q&A の節の項目の id の両方に当てて外して書く。同じ話を
+  続けて出すなら別の id (`next-2` など) にする。印のファイルは書き換えない (要らなくなった印は、節や項目を外せば panel が消す):
 
 ```powershell
 # panel.json を書く前に (PowerShell 7。$panel は書く中身、$panelPath は panel.json の絶対パス)
@@ -1028,6 +1044,10 @@ if (Test-Path $dismiss) { $ids = @((Get-Content $dismiss -Raw | ConvertFrom-Json
 # id の無い節は残す (dismissed が空のとき、$x.dismissed.id は $null になり、$null -notin @($null) は偽になるので、-notin だけでは外れる)。
 # panel は id の大文字小文字を区別するので -cnotin で比べる
 $panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnotin $ids })
+# Q&A の節の項目も、印の付いた id の項目を外す (id の無い項目は残す)
+foreach ($s in $panel.sections) {
+    if ($s.type -eq 'qa' -and $null -ne $s.items) { $s.items = @($s.items | Where-Object { -not $_.id -or $_.id -cnotin $ids }) }
+}
 ```
 
 ### herdr-app のキー
