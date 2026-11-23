@@ -627,10 +627,11 @@ ADR 090 (`docs/adr/090_win_claude_t3_launch_args_*`))。
 T3 の Settings → Providers → Claude → Launch arguments に書く文:
 
 ```text
---settings C:\Users\<名前>\.claude\t3\settings.json --append-system-prompt-file C:\Users\<名前>\.claude\t3\CLAUDE.t3.md
+--settings <ホーム>\.claude\t3\settings.json --append-system-prompt-file <ホーム>\.claude\t3\CLAUDE.t3.md
 ```
 
-- `claude-t3` の check・apply が、この PC のパスで同じ文を出す (パスに空白があれば `"` で囲む)。それを写して貼る
+- `<ホーム>` は `%USERPROFILE%` の絶対パス。`claude-t3` の check・apply が、この PC のパスで同じ文を出す (パスに空白があれば `"` で囲む)。
+  それを写して貼る
 - 書くのは、`dotfiles apply` で `claude-t3` がファイルを置いてから。書いたファイルが読めないと、T3 はその会話の送信を失敗にする
 - 書いた値は T3 の `%USERPROFILE%\.t3\userdata\settings.json` (`providerInstances.claudeAgent.config.launchArgs`) に残る
 - Launch arguments を書いた・変えた後と、`claude-t3` がファイルを置き直した後は、T3 の会話を開き直す (開いている会話には効かない)
