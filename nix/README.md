@@ -1791,7 +1791,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap (type-clipboard) | `windows-files.json` の `typeClipboard` が true のマシンだけ、配った `Install-TypeClipboard.ps1` で、固定した版の exe が入っているかを確かめる (無ければ GitHub の Release から落とし、SHA-256 が合えば置く) | `scripts/bootstrap-windows-type-clipboard.sh` |
 | bootstrap (ntn・Claude Code) | `windows-files.json` の `ntn`・`claudeCode` が true (欄が無ければ true) のマシンだけ、配った `Install-Ntn.ps1`・`Install-ClaudeCode.ps1` で確かめ、無ければ winget で入れ、版か pin がずれていれば固定した版に揃える | `scripts/bootstrap-windows-ntn.sh`・`scripts/bootstrap-windows-claude-code.sh` |
 | bootstrap (Tailscale) | `group.json` の `tools.windowsTailscale` が true (欄・ファイルが無ければ false) のマシンだけ、配った `Install-Tailscale.ps1` で確かめ、無ければ winget で入れる (UAC の確認が出る)。入っていれば上げない (古ければ ⚠ で知らせ、新しいのは Tailscale の自動更新で揃っている扱い) | `scripts/bootstrap-windows-tailscale.sh` |
-| bootstrap (sshd) | `group.json` の `tools.windowsSshd` が true (欄・ファイルが無ければ false) のマシンだけ、`windows-sshd.json` の鍵の list を Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写し (null なら写しを消す)、配った `Install-Sshd.ps1` で確かめる。sshd が無ければ OpenSSH の MSI に Server を足して揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせる (揃えない) | `scripts/bootstrap-windows-sshd.sh` |
+| bootstrap (sshd) | `group.json` の `tools.windowsSshd` が true (欄・ファイルが無ければ false) のマシンだけ、`windows-sshd.json` の鍵の list を Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写し (null なら写しを消す)、受け持ちが runner だったときのユーザーと送り元の写し (`allow.json`) が残っていれば消し、配った `Install-Sshd.ps1` で確かめる。sshd が無ければ OpenSSH の MSI に Server を足して揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせる (揃えない) | `scripts/bootstrap-windows-sshd.sh` |
 
 **`win/` は home-manager からは読まない。** ローカル flake は本体を `path:<repo>/nix` で
 読むので、その評価から repo 直下は見えない（`/nix/store/win/...` への access が
@@ -1915,7 +1915,8 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers と Match Address で tailnet と localhost に
   限る `sshd_config`、Windows Firewall の拒否の規則 (tailnet からは 22 番だけ、22 番には tailnet と localhost からだけ)、鍵
   (`administrators_authorized_keys`)、自動の起動を揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせ、揃えるのは `--apply` か
-  PowerShell の `Install-Sshd`。鍵はホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) に書く
+  PowerShell の `Install-Sshd`。鍵はホストの値の `dotfiles.wsl.windowsFiles.sshd.authorizedKeys` (dotfiles-private) に書く。AllowUsers のユーザーと
+  入ってよい送り元は既定 (流したユーザーと、tailnet と localhost) のまま (ホストの値で持つのは、受け持ちが runner のホストだけ)
   （[`win/README.md`](../win/README.md#sshd)、dotfiles-private の ADR 078 (`docs/adr/078_win_sshd_tailscale_*`)）
 
 経緯は [ADR 010](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/010_win_files_from_wsl_20260928T003933JST/README.md)。

@@ -18,10 +18,12 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
    止まる)。Windows Installer の手元の写しは cab が抜かれているので、ProductCode だけでは足せない。winget の install と pin には
    触らない。Windows の機能 (System32) の OpenSSH Server とは二重にしない
 2. C:\ProgramData\ssh\sshd_config: dotfiles が書く中身 (Get-SshdConfigText。鍵だけ・AllowUsers でユーザーを限り、Match Address の
-   DenyUsers で tailnet と localhost の外を断る) に
+   DenyUsers で入ってよい送り元の外を断る) に
    する。違えば sshd_config.dotfiles-bak-<日時> に退避して書き直す。MSI は Server を足した時点で sshd を起こし、sshd は
    sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく (ディレクトリが無ければ、sshd が作るのと
-   同じ権限で作る)
+   同じ権限で作る)。AllowUsers のユーザーと入ってよい送り元は、ユーザーと送り元の写し (-AllowCopy。受け持ちが runner のホストで、
+   runner の手順 sshd がホストの値の [sshd] allowUsers・allowFrom から置く) があればその値、無ければ既定 (このスクリプトを流したユーザーと、
+   tailnet と localhost)
 3. Windows Firewall: 拒否の規則を 3 つ置き (Get-SshdFirewallSpecs)、22 番を許す受信の規則 (MSI が作るものなど) を無効にする。
    block は allow より強いので、Tailscale の ACL を誤っても、tailnet からは 22 番にしか届かず、22 番には tailnet と localhost
    からしか届かない
@@ -55,8 +57,15 @@ win/hosts/<ユーザー>@<PC>.toml の [sshd] authorizedKeys から置く (ど�
 鍵の写しを置く受け持ち (runner・wsl)。鍵の足し方・直し方の案内 (※ の行と締めの行) を、TOML の値と dotfiles apply か、Nix の値と
 WSL の setup にする。runner の手順 sshd が渡す。渡さなければ写しの頭の印 (runner が書く) で見分け、写しが無ければ両方を出す。
 
+.PARAMETER AllowCopy
+ユーザーと送り元の写し (JSON)。既定は %LOCALAPPDATA%\dotfiles\sshd\allow.json。受け持ちが runner のホストで、runner の手順 sshd が
+dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [sshd] allowUsers・allowFrom から置く (どちらも書かないホストでは置かない)。
+欄が null (書いていない) なら既定 (-AllowUser と、tailnet と localhost)、[] なら誰も・どこからも入れない。管理者で起動し直した子には、
+親の場所を渡す。
+
 .PARAMETER AllowUser
-AllowUsers に書く Windows のユーザー。既定はこのスクリプトを流しているユーザー (小文字にする)。
+ユーザーと送り元の写しに allowUsers が無いときに AllowUsers に書く Windows のユーザー。既定はこのスクリプトを流しているユーザー
+(小文字にする)。管理者で起動し直した子に、親のユーザーを渡す内部の引数 (sshd はログインした本当の名前と比べるので、別の名前は渡せない)。
 
 .PARAMETER StateDir
 揃えたときの記録の置き場。既定は %LOCALAPPDATA%\dotfiles\sshd。管理者で起動し直した子には、親の場所を渡す。
@@ -71,6 +80,7 @@ param(
     [string]$KeysCopy,
     [ValidateSet('runner', 'wsl')]
     [string]$KeysFrom,
+    [string]$AllowCopy,
     [string]$AllowUser,
     [string]$StateDir,
     [string]$LogPath
@@ -80,8 +90,11 @@ param(
 # 決まり
 # ---------------------------------------------------------------------------
 
-# tailnet のアドレス (Tailscale が端末に配る CGNAT の範囲と ULA の範囲)
+# tailnet のアドレス (Tailscale が端末に配る CGNAT の範囲と ULA の範囲)。拒否の規則の LocalAddress (この PC の側のアドレス) に使う
 $script:TailnetAddresses = @('100.64.0.0/10', 'fd7a:115c:a1e0::/48')
+# 入ってよい送り元の既定 (ユーザーと送り元の写しに allowFrom が無いとき): tailnet と localhost。tailnet の 2 つは上と同じ範囲だが、こちらは
+# 相手の側のアドレス (sshd_config の Match Address)。ホストの値で変えるのはこちらだけで、拒否の規則には混ぜない (win/README.md の「sshd」)
+$script:DefaultAllowFrom = @('100.64.0.0/10', 'fd7a:115c:a1e0::/48', '127.0.0.1', '::1')
 # tailnet と localhost の外のアドレス (上の 2 つと 127.0.0.0/8・::1・:: を除いた全部)
 $script:OutsideAddresses = @(
     '0.0.0.0-100.63.255.255'
@@ -117,30 +130,89 @@ function Test-SshdUserName {
     "$Name" -cmatch '^[a-z0-9][a-z0-9._-]*$'
 }
 
+# sshd_config の Match Address に書ける送り元か: IPv4・IPv6 のアドレスか CIDR (<アドレス>/<長さ>) だけ。IPv4 は 10 進の 4 つの組 (頭に 0 を
+# 付けない)、長さは IPv4 で 0〜32・IPv6 で 0〜128 (頭に 0 を付けない)、CIDR のアドレスは範囲の頭 (長さより後ろのビットが 0)。sshd は長さの
+# 誤りと後ろのビットが立った CIDR を Match Address の書き方の誤りとして断り、起動しなくなる (OpenSSH の addr.c の addr_pton_cidr)。
+# ! * , と空白・ゾーン (%) は書けない (sshd のパターン・否定・区切りにしない)。win/runner/src/host.rs の sshd_from_check と同じ見方
+function Test-SshdFromAddress {
+    param([string]$Address)
+    if (-not ("$Address" -cmatch '^([0-9A-Fa-f:.]+)(?:/(0|[1-9][0-9]{0,2}))?$')) { return $false }
+    $addr = $Matches[1]
+    $lenText = $Matches[2]
+    $octet = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
+    $ip = $null
+    if ($addr -cmatch "^$octet(?:\.$octet){3}$") {
+        $bits = 32
+    } elseif ($addr.Contains(':') -and [System.Net.IPAddress]::TryParse($addr, [ref]$ip) -and ("$($ip.AddressFamily)" -eq 'InterNetworkV6')) {
+        $bits = 128
+    } else {
+        return $false
+    }
+    if (-not $lenText) { return $true }
+    if ([int]$lenText -gt $bits) { return $false }
+    # 範囲の頭のアドレスか (範囲の区間の下の端が、書いたアドレスと同じ)
+    $range = ConvertTo-AddressInterval -Address "$addr/$lenText"
+    $one = ConvertTo-AddressInterval -Address $addr
+    ($null -ne $range) -and ($null -ne $one) -and ($range.Lo -eq $one.Lo)
+}
+
 # CRLF を LF にそろえる (メモ帳で保存し直すと CRLF になる。sshd はどちらでも読むので、改行の違いはずれと数えない)
 function ConvertTo-Lf {
     param([string]$Text)
     "$Text" -replace "`r`n", "`n"
 }
 
-# dotfiles が書く sshd_config の中身 (改行は LF)。$AllowUser だけを、tailnet と localhost から来たときだけ入れる。
+# dotfiles が書く sshd_config の中身 (改行は LF)。$AllowUsers (無ければ誰も) だけを、$AllowFrom (無ければどこからも) から来たときだけ入れる。
+# 既定の値 (ユーザー 1 人と $script:DefaultAllowFrom の並び) では、値をホストの値で持つ前の中身と 1 バイトも違わない (コメントも。揃えたときの
+# 記録の sha256 が変わらず、Install-Sshd を流し直さずに済む)。ほかの値のときだけ、コメントの言い方を値に合わせる。
 # 接続元は AllowUsers の user@CIDR でなく、Match Address で絞る。Win32-OpenSSH は sshd_config を読んだ後、AllowUsers・DenyUsers・
 # AllowGroups・DenyGroups の語ごとに最初の / を \ に替える (domain/user を domain\user と読むため。PowerShell/openssh-portable の
 # servconf.c の parse_server_config の WINDOWS の分岐)。user@100.64.0.0/10 は user@100.64.0.0\10 になって CIDR として読めず、文字の
 # パターンとしても当たらないので、tailnet からのログインを全部断る。Match Address はこの読み替えを通らず、CIDR がそのまま効く。
-# sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る (auth.c の getpwnamallow)
+# sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る (auth.c の getpwnamallow)。AllowUsers は引数の無い行を書けない
+# (sshd が起動しない) ので、ユーザーが 0 人なら代わりに DenyUsers * を書く。送り元が 0 なら Match Address * (どこから来ても DenyUsers *)
 function Get-SshdConfigText {
-    param([string]$AllowUser)
-    $notFrom = @(@($script:TailnetAddresses) + @('127.0.0.1', '::1') | ForEach-Object { "!$_" })
-    $outside = (@('*') + $notFrom) -join ','
+    param([Alias('AllowUser')][string[]]$AllowUsers, [string[]]$AllowFrom = $script:DefaultAllowFrom)
+    $users = @($AllowUsers | Where-Object { $_ })
+    $from = @($AllowFrom | Where-Object { $_ })
+    $defaultFrom = ($from -join ',') -ceq (@($script:DefaultAllowFrom) -join ',')
+    $outside = (@('*') + @($from | ForEach-Object { "!$_" })) -join ','
+    if ($defaultFrom) {
+        $where = 'Tailscale (the tailnet) and localhost'
+        $matchNote = '# Deny everyone unless the connection comes from the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48) or localhost.'
+    } elseif ($from.Count -gt 0) {
+        $where = 'the addresses that the host values allow'
+        $matchNote = '# Deny everyone unless the connection comes from one of the addresses that the host values allow.'
+    } else {
+        $where = 'nowhere (the host values allow no address)'
+        $matchNote = '# Deny everyone from every address (the host values allow no address).'
+    }
+    switch ($users.Count) {
+        0 {
+            $who = 'nobody: DenyUsers * instead'
+            $userLines = @(
+                '# Nobody: the host values list no user (an AllowUsers line needs at least one name, so deny everyone).'
+                'DenyUsers *'
+            )
+        }
+        default {
+            $who = if ($users.Count -eq 1) { 'this user only' } else { 'these users only' }
+            $only = if ($users.Count -eq 1) { 'this user. Where it may' } else { 'these users. Where they may' }
+            $userLines = @(
+                "# Only $only come from is limited by `"Match Address`" below, not by user@CIDR here:"
+                '# Win32-OpenSSH turns the first "/" of each AllowUsers word into "\" (for domain/user), so CIDR never matches.'
+                "AllowUsers $($users -join ' ')"
+            )
+        }
+    }
     $lines = @(
         '# Written by dotfiles (Install-Sshd.ps1). Do not edit by hand: Install-Sshd -Check reports the difference,'
         '# and Install-Sshd moves this file to sshd_config.dotfiles-bak-<time> and writes it again.'
         '# Why it looks like this: dotfiles win/README.md, section "sshd".'
         '#'
-        '# Public-key logins only, and only from Tailscale (the tailnet) and localhost. sshd listens on all'
+        "# Public-key logins only, and only from $where. sshd listens on all"
         '# addresses (with ListenAddress bound to the Tailscale IP, sshd fails at boot when that IP is not up yet).'
-        '# AllowUsers (this user only), Match Address + DenyUsers and the Windows Firewall block rules limit who and'
+        "# AllowUsers ($who), Match Address + DenyUsers and the Windows Firewall block rules limit who and"
         '# where logins can come from.'
         ''
         'Port 22'
@@ -151,15 +223,13 @@ function Get-SshdConfigText {
         'KbdInteractiveAuthentication no'
         'AuthenticationMethods publickey'
         ''
-        '# Only this user. Where it may come from is limited by "Match Address" below, not by user@CIDR here:'
-        '# Win32-OpenSSH turns the first "/" of each AllowUsers word into "\" (for domain/user), so CIDR never matches.'
-        "AllowUsers $AllowUser"
+    ) + $userLines + @(
         ''
         'AuthorizedKeysFile .ssh/authorized_keys'
         ''
         'Subsystem sftp sftp-server.exe'
         ''
-        '# Deny everyone unless the connection comes from the tailnet (100.64.0.0/10, fd7a:115c:a1e0::/48) or localhost.'
+        $matchNote
         '# Match Address reads CIDR as written (also on Windows), and sshd applies Match before AllowUsers/DenyUsers.'
         "Match Address $outside"
         '       DenyUsers *'
@@ -169,6 +239,100 @@ function Get-SshdConfigText {
         '       AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys'
     )
     ($lines -join "`n") + "`n"
+}
+
+# ユーザーと送り元の写し (JSON を ConvertFrom-Json で読んだもの) を、AllowUsers のユーザー (Users) と入ってよい送り元 (Addresses) と、読めない
+# 値の理由 (Bad) に分ける。Users・Addresses は、欄が無いか null なら $null (ホストの値に書いていない)、list ならその値 ([] は 0)。書ける値は
+# Test-SshdUserName と Test-SshdFromAddress (runner がホストの値を読む時点で止めるので、Bad になるのは写しを手で書き換えたとき)
+function ConvertFrom-AllowCopy {
+    param($Json)
+    if (($null -eq $Json) -or ($Json -isnot [System.Management.Automation.PSCustomObject])) {
+        return [pscustomobject]@{ Users = $null; Addresses = $null; Bad = @('JSON の object でない') }
+    }
+    $version = $Json.PSObject.Properties['version']
+    if ((-not $version) -or ("$($version.Value)" -ne '1')) {
+        return [pscustomobject]@{ Users = $null; Addresses = $null; Bad = @('version が 1 でない') }
+    }
+    $bad = [System.Collections.Generic.List[string]]::new()
+    $read = {
+        param([string]$Key, [scriptblock]$Ok, [string]$Hint)
+        $p = $Json.PSObject.Properties[$Key]
+        if ((-not $p) -or ($null -eq $p.Value)) { return [pscustomobject]@{ Set = $false; Items = @() } }
+        if ($p.Value -isnot [array]) {
+            $bad.Add("$Key が list でも null でもない")
+            return [pscustomobject]@{ Set = $true; Items = @() }
+        }
+        $items = @($p.Value)
+        foreach ($item in $items) {
+            if (($item -isnot [string]) -or (-not (& $Ok $item))) { $bad.Add("$Key の $item ($Hint)") }
+        }
+        [pscustomobject]@{ Set = $true; Items = $items }
+    }
+    $u = & $read 'allowUsers' { param($v) Test-SshdUserName -Name $v } '英小文字・数字・. _ - の名前だけ'
+    $a = & $read 'allowFrom' { param($v) Test-SshdFromAddress -Address $v } 'IPv4・IPv6 のアドレスか、範囲の頭のアドレスで書いた CIDR だけ'
+    # 代入で受ける (if の出力にすると、空の list が $null に崩れる)
+    $users = $null
+    if ($u.Set) { $users = @($u.Items) }
+    $addresses = $null
+    if ($a.Set) { $addresses = @($a.Items) }
+    [pscustomobject]@{ Users = $users; Addresses = $addresses; Bad = @($bad) }
+}
+
+# sshd_config に書くユーザーと送り元を決める。写し ($Allow。Read-AllowCopy) の値があればそれ、無ければ既定 ($User と $script:DefaultAllowFrom)。
+# UsersSet・AddressesSet はホストの値に書いてあるか
+function Resolve-SshdAccess {
+    param($Allow, [string]$User)
+    $usersSet = $null -ne $Allow.Users
+    $addressesSet = $null -ne $Allow.Addresses
+    [pscustomobject]@{
+        Users        = @(if ($usersSet) { $Allow.Users } else { $User })
+        UsersSet     = $usersSet
+        Addresses    = @(if ($addressesSet) { $Allow.Addresses } else { $script:DefaultAllowFrom })
+        AddressesSet = $addressesSet
+    }
+}
+
+# 送り元が、拒否の規則 dotfiles-sshd-outside-tcp22 の止める範囲 ($script:OutsideAddresses。tailnet と localhost の外) にかかるか。かかる分の
+# 22 番は拒否の規則が止めるので、sshd_config に書いても届かない (送り元の値で広げられるのは、tailnet と localhost の中だけ)
+function Test-SshdFromOutside {
+    param([string]$Address)
+    $iv = ConvertTo-AddressInterval -Address $Address
+    if ($null -eq $iv) { return $false }
+    foreach ($o in @($script:OutsideAddresses)) {
+        $ov = ConvertTo-AddressInterval -Address $o
+        if (($ov.Family -eq $iv.Family) -and ($iv.Lo -le $ov.Hi) -and ($ov.Lo -le $iv.Hi)) { return $true }
+    }
+    $false
+}
+
+# ユーザーと送り元の ※ の行 (鍵の ※ の行と同じく、使う値をいつも出す)。$Access は Resolve-SshdAccess、$From は受け持ち (runner・wsl・'')。
+# ホストの値に書いていない (既定の) 値があれば、変え方を受け持ちごとに添える
+function Get-SshdAccessNotes {
+    param($Access, [string]$From)
+    $users = @($Access.Users)
+    $addresses = @($Access.Addresses)
+    $why = {
+        param([bool]$Set, [int]$Count, [string]$Default, [string]$Zero)
+        if (-not $Set) { return "ホストの値に書いていない。既定: $Default" }
+        if ($Count -eq 0) { return "ホストの値が []。$Zero" }
+        'ホストの値'
+    }
+    $usersText = if ($users.Count -gt 0) { $users -join '・' } else { '無し' }
+    $addressesText = if ($addresses.Count -gt 0) { $addresses -join '・' } else { '無し' }
+    "※ AllowUsers: $usersText ($(& $why $Access.UsersSet $users.Count 'Install-Sshd を流したユーザー' '誰も入れない'))"
+    "※ 送り元: $addressesText ($(& $why $Access.AddressesSet $addresses.Count 'tailnet と localhost' 'どこからも入れない'))"
+    if ((-not $Access.UsersSet) -or (-not $Access.AddressesSet)) {
+        switch ($From) {
+            'runner' { '※ ユーザー・送り元を変えるなら、ホストの値 (dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [sshd] allowUsers・allowFrom) に書いて dotfiles apply を流し、Install-Sshd で揃える' }
+            'wsl' { '※ 受け持ちが WSL の setup のホストでは、ユーザー・送り元は既定のまま (ホストの値の [sshd] allowUsers・allowFrom で変えられるのは、受け持ちが runner のホストだけ)' }
+            default { '※ ユーザー・送り元は、受け持ちが runner のホストなら、ホストの値 (dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [sshd] allowUsers・allowFrom) で変えられる (受け持ちが WSL の setup のホストは既定のまま)' }
+        }
+    }
+    if ($Access.AddressesSet) {
+        foreach ($a in @($addresses | Where-Object { Test-SshdFromOutside -Address $_ })) {
+            "※ 送り元 $a は tailnet と localhost の外を含む。外から来る 22 番は拒否の規則 (dotfiles-sshd-outside-tcp22) が止めるので、sshd に届かない"
+        }
+    }
 }
 
 # authorized_keys の書き方の行のうち、鍵の行 (# で始まる行と空の行を除き、前後の空白を落としたもの)
@@ -569,7 +733,8 @@ function Get-MsiexecResultText {
 }
 
 # 読んだ事実 ($Facts。Get-SshdFacts) から、項目ごとの判定と表の行を作る。Blocked は揃える前に人が直すこと
-# (no-openssh: OpenSSH が無い / inbox: Windows の機能の OpenSSH Server がある / bad-user: AllowUsers に書けない名前 /
+# (no-openssh: OpenSSH が無い / inbox: Windows の機能の OpenSSH Server がある / bad-allow: ユーザーと送り元の写しに読めない値がある /
+# bad-user: AllowUsers に書けない名前 (写しに allowUsers が無く、流したユーザーを書くとき) /
 # bad-keys: 鍵の写しに読めない行がある / firewall-off: 拒否の規則が効かないプロファイルがある / no-service: sshd.exe はあるが
 # サービスが無い)。Items は Key・Ok・Text の並び、Notes は ※ の行
 function Get-SshdVerdict {
@@ -577,13 +742,17 @@ function Get-SshdVerdict {
     $items = [System.Collections.Generic.List[object]]::new()
     $notes = [System.Collections.Generic.List[string]]::new()
     $add = { param($key, $ok, $text) $items.Add([pscustomobject]@{ Key = $key; Ok = [bool]$ok; Text = $text }) }
+    $allowBad = @($Facts.Allow.Bad).Count -gt 0
+    $access = Resolve-SshdAccess -Allow $Facts.Allow -User $Facts.User
 
     $blocked = $null
     if (-not $Facts.OpenSsh) {
         $blocked = 'no-openssh'
     } elseif ($Facts.Inbox) {
         $blocked = 'inbox'
-    } elseif (-not (Test-SshdUserName -Name $Facts.User)) {
+    } elseif ($allowBad) {
+        $blocked = 'bad-allow'
+    } elseif ((-not $access.UsersSet) -and (-not (Test-SshdUserName -Name $Facts.User))) {
         $blocked = 'bad-user'
     } elseif (@($Facts.Copy.Bad).Count -gt 0) {
         $blocked = 'bad-keys'
@@ -616,10 +785,12 @@ function Get-SshdVerdict {
         & $add 'service' $false 'サービス        : 無い → server を足した後に、自動で起こし、動かす'
     }
 
-    # 3. sshd_config
-    $configText = Get-SshdConfigText -AllowUser $Facts.User
+    # 3. sshd_config (AllowUsers と Match Address は、ユーザーと送り元の写しの値か既定。読めない値があれば比べない)
+    $configText = Get-SshdConfigText -AllowUsers $access.Users -AllowFrom $access.Addresses
     $config = $Facts.Config
-    if (-not $config.Exists) {
+    if ($allowBad) {
+        & $add 'config' $false 'sshd_config     : ユーザーと送り元の写しに読めない値があるので、比べない'
+    } elseif (-not $config.Exists) {
         & $add 'config' $false 'sshd_config     : 無い → dotfiles の中身を書く'
     } elseif ($config.Readable -and $config.HasBom) {
         & $add 'config' $false 'sshd_config     : 先頭に BOM が付いている (sshd は読めずに起きない) → 退避して書き直す'
@@ -633,6 +804,12 @@ function Get-SshdVerdict {
         & $add 'config' $true 'sshd_config     : 読めない (管理者だけが読める)。揃えたときの記録と同じ'
     } else {
         & $add 'config' $false 'sshd_config     : 読めない (管理者だけが読める)。揃えたときの記録と違う (か記録が無い) → 退避して書き直す'
+    }
+    # 使うユーザーと送り元は、いつも ※ で出す (ホストの値か既定か。UAC の前に、覚えのない値が無いかを見る)
+    if ($allowBad) {
+        foreach ($why in @($Facts.Allow.Bad)) { $notes.Add("※ ユーザーと送り元の写し ($($Facts.Allow.Path)) の読めない値: $why") }
+    } else {
+        foreach ($line in @(Get-SshdAccessNotes -Access $access -From $Facts.Copy.From)) { $notes.Add($line) }
     }
 
     # 4. 鍵 (administrators_authorized_keys)
@@ -784,6 +961,9 @@ function Get-SshdCheckMessage {
     if ($Verdict.Blocked -eq 'inbox') {
         return '⚠️ Windows の機能の OpenSSH Server が入っている → 先に外す (二重にしない。上の ※ の行) ⚠️'
     }
+    if ($Verdict.Blocked -eq 'bad-allow') {
+        return '⚠️ ユーザーと送り元の写しに読めない値がある → ホストの値 (dotfiles-private の win/hosts の TOML の [sshd] allowUsers・allowFrom) を直して dotfiles apply を流し直す ⚠️'
+    }
     if ($Verdict.Blocked -eq 'bad-user') {
         return '⚠️ AllowUsers に書けないユーザー名 → このユーザーでは dotfiles の sshd を使えない (上の ※ の行) ⚠️'
     }
@@ -883,6 +1063,21 @@ function Read-KeysCopy {
     $raw = @([IO.File]::ReadAllLines($Path))
     $parsed = ConvertFrom-KeysCopy -Lines $raw
     [pscustomobject]@{ Managed = $true; Lines = @($parsed.Lines); Bad = @($parsed.Bad); Path = $Path; From = (Resolve-KeysFrom -KeysFrom $KeysFrom -Exists $true -Lines $raw) }
+}
+
+# ユーザーと送り元の写し (JSON) を読む。無ければ Managed が偽で、ユーザーも送り元も既定 (Users・Addresses が $null)。読めない JSON は Bad に理由
+function Read-AllowCopy {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [pscustomobject]@{ Managed = $false; Users = $null; Addresses = $null; Bad = @(); Path = $Path }
+    }
+    try {
+        $json = [IO.File]::ReadAllText($Path, [Text.UTF8Encoding]::new($false)).TrimStart([char]0xFEFF) | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        return [pscustomobject]@{ Managed = $true; Users = $null; Addresses = $null; Bad = @("JSON として読めない ($(Get-ErrorSummary -ErrorRecord $_ -Fallback 'ConvertFrom-Json'))"); Path = $Path }
+    }
+    $parsed = ConvertFrom-AllowCopy -Json $json
+    [pscustomobject]@{ Managed = $true; Users = $parsed.Users; Addresses = $parsed.Addresses; Bad = @($parsed.Bad); Path = $Path }
 }
 
 # ファイルの権限を読む (Get-Acl。管理者でないと読めないことがある)
@@ -997,7 +1192,7 @@ function Write-SshdRecord {
 
 # 今の状態を読む (何も変えない。管理者は要らない)
 function Get-SshdFacts {
-    param([string]$InstallDir, [string]$CopyPath, [string]$StateDir, [string]$User, [string]$KeysFrom)
+    param([string]$InstallDir, [string]$CopyPath, [string]$StateDir, [string]$User, [string]$KeysFrom, [string]$AllowPath)
     $sshDir = Join-Path $env:ProgramData 'ssh'
     $keysPath = Join-Path $sshDir 'administrators_authorized_keys'
     $svc = Get-Service -Name sshd -ErrorAction SilentlyContinue
@@ -1046,6 +1241,7 @@ function Get-SshdFacts {
         Acl              = $acl
         Record           = Read-SshdRecord -Dir $StateDir
         Copy             = Read-KeysCopy -Path $CopyPath -KeysFrom $KeysFrom
+        Allow            = Read-AllowCopy -Path $AllowPath
         FirewallReadable = $firewallReadable
         FirewallError    = $firewallError
         FirewallProfiles = $profiles
@@ -1226,8 +1422,14 @@ function Invoke-MsiAddServer {
 # MSI は Server を足した時点で sshd を起こし、22 番の受信の許可も作るので、拒否の規則と sshd_config と鍵は server より先に置く
 # (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
 function Invoke-SshdFix {
-    param([string]$InstallDir, [string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom)
-    if (-not (Test-SshdUserName -Name $User)) {
+    param([string]$InstallDir, [string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom, [string]$AllowPath)
+    $allow = Read-AllowCopy -Path $AllowPath
+    if (@($allow.Bad).Count -gt 0) {
+        Write-Step "ユーザーと送り元の写し ($AllowPath) に読めない値がある。何もしない"
+        return $false
+    }
+    $access = Resolve-SshdAccess -Allow $allow -User $User
+    if ((-not $access.UsersSet) -and (-not (Test-SshdUserName -Name $User))) {
         Write-Step "AllowUsers に書けないユーザー名: $User。何もしない"
         return $false
     }
@@ -1245,7 +1447,7 @@ function Invoke-SshdFix {
         return $false
     }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
-    $configText = Get-SshdConfigText -AllowUser $User
+    $configText = Get-SshdConfigText -AllowUsers $access.Users -AllowFrom $access.Addresses
     $keysText = if ($copy.Managed) { Get-AdminKeysText -KeyLines @($copy.Lines) -From $copy.From } else { Get-AdminKeysText -KeyLines @() -Managed $false }
     $sshDir = Join-Path $env:ProgramData 'ssh'
     $configPath = Join-Path $sshDir 'sshd_config'
@@ -1273,6 +1475,11 @@ function Invoke-SshdFix {
         Write-TextReplacing -Path $configPath -Text $configText -Backup "$configPath.dotfiles-bak-$stamp"
         if ($current.Exists) { Write-Step "sshd_config を退避した: sshd_config.dotfiles-bak-$stamp" }
         Write-Step 'sshd_config を dotfiles の中身にした'
+        # 書いたユーザーと送り元 (管理者の子のログは親が出す。UAC の前の表の ※ の行と同じ値か)
+        $users = @($access.Users)
+        $addresses = @($access.Addresses)
+        Write-Step "  AllowUsers: $(if ($users.Count -gt 0) { $users -join '・' } else { '無し (DenyUsers *)' })"
+        Write-Step "  送り元: $(if ($addresses.Count -gt 0) { $addresses -join '・' } else { '無し' })"
         $configChanged = $true
     }
 
@@ -1377,15 +1584,16 @@ function Invoke-SshdFix {
 
 # 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true
 function Invoke-Elevated {
-    param([string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom)
+    param([string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom, [string]$AllowPath)
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $log = Join-Path $StateDir 'Install-Sshd.log'
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
     $hostExe = (Get-Process -Id $PID).Path
-    # Start-Process は配列を空白でつなぐだけなので、パスは自分で "" で囲む (どれも \ で終わらない)
+    # Start-Process は配列を空白でつなぐだけなので、パスは自分で "" で囲む (どれも \ で終わらない)。ユーザーと送り元の写しも、親の場所を
+    # 渡す (別の管理者のアカウントで昇格すると、子の LOCALAPPDATA は親と違う)
     $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
-        '-LogPath', ('"{0}"' -f $log), '-KeysCopy', ('"{0}"' -f $CopyPath), '-AllowUser', $User,
-        '-StateDir', ('"{0}"' -f $StateDir))
+        '-LogPath', ('"{0}"' -f $log), '-KeysCopy', ('"{0}"' -f $CopyPath), '-AllowCopy', ('"{0}"' -f $AllowPath),
+        '-AllowUser', $User, '-StateDir', ('"{0}"' -f $StateDir))
     if ($KeysFrom) { $argumentList += @('-KeysFrom', $KeysFrom) }
     Write-Host 'UAC で管理者の PowerShell を起動する (終わると閉じる)。Windows のデスクトップに UAC の確認が出たら「はい」を押す'
     try {
@@ -1401,20 +1609,21 @@ function Invoke-Elevated {
 }
 
 function Invoke-InstallSshd {
-    param([switch]$Check, [switch]$IfMissing, [string]$KeysCopy, [string]$KeysFrom, [string]$AllowUser, [string]$StateDir, [string]$LogPath)
+    param([switch]$Check, [switch]$IfMissing, [string]$KeysCopy, [string]$KeysFrom, [string]$AllowCopy, [string]$AllowUser, [string]$StateDir, [string]$LogPath)
     $installDir = Join-Path $env:ProgramFiles 'OpenSSH'
     if (-not $StateDir) { $StateDir = Join-Path $env:LOCALAPPDATA 'dotfiles\sshd' }
     if (-not $KeysCopy) { $KeysCopy = Join-Path $env:LOCALAPPDATA 'dotfiles\sshd\authorized_keys' }
+    if (-not $AllowCopy) { $AllowCopy = Join-Path $env:LOCALAPPDATA 'dotfiles\sshd\allow.json' }
     if (-not $AllowUser) { $AllowUser = "$env:USERNAME".ToLowerInvariant() }
 
     if ($LogPath) {
         # 管理者で起動し直された子: 揃える段だけをして、結果を $LogPath に書く
         $script:StepLog = $LogPath
-        if (Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom) { return 0 }
+        if (Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom -AllowPath $AllowCopy) { return 0 }
         return 1
     }
 
-    $facts = Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom
+    $facts = Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom -AllowPath $AllowCopy
     $verdict = Get-SshdVerdict -Facts $facts
     Write-SshdState -Verdict $verdict
     $code = Get-SshdExitCode -Verdict $verdict
@@ -1435,14 +1644,14 @@ function Invoke-InstallSshd {
 
     if (Test-IsAdmin) {
         $script:StepLog = $null
-        [void](Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom)
+        [void](Invoke-SshdFix -InstallDir $installDir -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom -AllowPath $AllowCopy)
     } else {
-        [void](Invoke-Elevated -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom)
+        [void](Invoke-Elevated -User $AllowUser -CopyPath $KeysCopy -StateDir $StateDir -KeysFrom $KeysFrom -AllowPath $AllowCopy)
     }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-SshdVerdict -Facts (Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom)
+    $after = Get-SshdVerdict -Facts (Get-SshdFacts -InstallDir $installDir -CopyPath $KeysCopy -StateDir $StateDir -User $AllowUser -KeysFrom $KeysFrom -AllowPath $AllowCopy)
     Write-SshdState -Verdict $after
     if ((Get-SshdExitCode -Verdict $after) -eq 0) {
         if ($code -eq 3) { Write-Host '入れた' } else { Write-Host '揃った' }
@@ -1460,7 +1669,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        exit (Invoke-InstallSshd -Check:$Check -IfMissing:$IfMissing -KeysCopy $KeysCopy -KeysFrom $KeysFrom -AllowUser $AllowUser -StateDir $StateDir -LogPath $LogPath)
+        exit (Invoke-InstallSshd -Check:$Check -IfMissing:$IfMissing -KeysCopy $KeysCopy -KeysFrom $KeysFrom -AllowCopy $AllowCopy -AllowUser $AllowUser -StateDir $StateDir -LogPath $LogPath)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

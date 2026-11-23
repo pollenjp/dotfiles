@@ -17,6 +17,8 @@
 #   - 鍵の写し (%LOCALAPPDATA%\dotfiles\sshd\authorized_keys): windows-sshd.json の authorizedKeys が list なら、見出しの後ろに
 #     その行を書き、-Check より前に置く (空の list なら見出しだけ)。中身が同じなら書き直さない。null なら消す。windows-sshd.json が
 #     無い前の世代では触らない。--apply でも先に置き、pwsh.exe を呼べないときも先に揃える
+#   - ユーザーと送り元の写し (%LOCALAPPDATA%\dotfiles\sshd\allow.json。受け持ちが runner のホストで runner が置く): 受け持ちが WSL の
+#     ホストでは、残っていれば -Check より前に消す (pwsh.exe を呼べないときも)。無ければ何も出さない
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #     (-Check が時間切れ (124) のときは、時間切れと出す)
 #   - -Check が 0 なら 1 行 (※ の補足があれば添える)。1 なら ⚠ で囲んだ注意・状態・揃えるコマンド (--apply と Install-Sshd) を出す
@@ -182,6 +184,7 @@ new_home() {
 printf '%s\n' "$*" >>"${HOME}/pwsh-calls"
 copy="${HOME}/win/AppData/Local/dotfiles/sshd/authorized_keys"
 if [[ -f ${copy} ]]; then cat "${copy}" >"${HOME}/copy-at-pwsh"; else printf 'none\n' >"${HOME}/copy-at-pwsh"; fi
+if [[ -e ${HOME}/win/AppData/Local/dotfiles/sshd/allow.json ]]; then echo yes >"${HOME}/allow-at-pwsh"; else echo no >"${HOME}/allow-at-pwsh"; fi
 case "$*" in
   *-IfMissing*)
     cat "${HOME}/out" >"${HOME}/out-at-ifmissing"
@@ -261,6 +264,7 @@ called_last() {
 ncalls() { calls "$1" | grep -c ''; }
 warn_lines() { outerr "$1" | grep -c '⚠️'; }
 copy_of() { printf '%s' "$1/win/AppData/Local/dotfiles/sshd/authorized_keys"; }
+allow_of() { printf '%s' "$1/win/AppData/Local/dotfiles/sshd/allow.json"; }
 # 鍵の写しの鍵の行 (# で始まる見出しを除く)
 copy_keys() { grep -v '^#' "$(copy_of "$1")" 2>/dev/null; }
 
@@ -413,6 +417,26 @@ if [[ $(rc "${h}") == 0 && $(copy_keys "${h}") == "${key1}" ]] && seen "${h}" -F
   ok "windows-sshd.json が無い前の世代では、写しに触らない"
 else
   ng "windows-sshd.json が無い" "copy=$(cat "$(copy_of "${h}")" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 8f. ユーザーと送り元の写し (受け持ちが runner だったときに runner が置いた allow.json) が残っていれば、-Check より前に消す
+#     (pwsh.exe が無くても)。無ければ何も出さない
+h=$(new_home t8f "${state_on}" 1)
+mkdir -p "$(dirname "$(allow_of "${h}")")"
+printf '{"version":1,"allowUsers":["alice"],"allowFrom":null}\n' >"$(allow_of "${h}")"
+FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}" run "${h}" 0
+h2=$(new_home t8f-nopwsh "${state_on}" 1)
+mkdir -p "$(dirname "$(allow_of "${h2}")")"
+printf '{"version":1,"allowUsers":["alice"],"allowFrom":null}\n' >"$(allow_of "${h2}")"
+run "${h2}" 1
+h3=$(new_home t8f-none "${state_on}" 1)
+FAKE_PWSH_RC=0 FAKE_PWSH_OUT="${synced_out}" run "${h3}" 0
+if [[ $(rc "${h}") == 0 && ! -e $(allow_of "${h}") && $(cat "${h}/allow-at-pwsh") == no ]] \
+  && seen "${h}" -F 'ユーザーと送り元の写しを消しました (受け持ちが WSL のホストはホストの値で持たない' \
+  && [[ ! -e $(allow_of "${h2}") ]] && ! seen "${h3}" -F 'ユーザーと送り元の写し'; then
+  ok "受け持ちが runner だったときのユーザーと送り元の写しは、-Check より前に消す (pwsh.exe が無くても。無ければ何も出さない)"
+else
+  ng "ユーザーと送り元の写し" "$(outerr "${h}") | $(outerr "${h2}") | $(outerr "${h3}")"
 fi
 
 # 9. ずれている (-Check が 1): ⚠ で上下を囲み、状態と揃えるコマンドを出す。揃えはしない

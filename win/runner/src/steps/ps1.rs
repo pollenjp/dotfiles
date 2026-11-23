@@ -13,7 +13,8 @@
 //!   入れ替える (動いている op-reason.exe があれば、ps1 が何も変えずに止まる)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
-//! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写しを置く (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段)。
+//! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
+//! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
 
@@ -94,8 +95,9 @@ pub struct Ps1Spec {
     /// `-SshRelay` に、ホストの値の SSH の中継 (道具の switch opReasonSshRelay と `[opReason] sshRelayMode`) のモードを渡す。off なら
     /// `off` (残った task を止めて消す)。-Check にも揃える流れにも渡す (op-reason。WSL の script は渡さない)
     pub ssh_relay: bool,
-    /// sshd の鍵の写し (`sshd_keys`) を、ps1 を流す前に揃え (受け持ちが runner のホストだけ)、`-KeysFrom` に受け持ち (runner・wsl) を
-    /// 渡す (Install-Sshd.ps1 が鍵の直し方を、TOML の値と dotfiles apply か、Nix の値と WSL の setup で案内する)。sshd だけ
+    /// sshd の鍵の写し (`sshd_keys`) とユーザーと送り元の写し (`sshd_allow`) を、ps1 を流す前に揃え (受け持ちが runner のホストだけ)、
+    /// `-KeysFrom` に受け持ち (runner・wsl) を渡す (Install-Sshd.ps1 が鍵とユーザー・送り元の直し方を、TOML の値と dotfiles apply か、Nix の値と
+    /// WSL の setup で案内する)。sshd だけ
     pub sshd_keys: bool,
     /// 3 でも、出力にこれがあれば入れられないので打たない (google-ime-install の「固定した版が winget に無い」)
     pub missing_blocked: Option<&'static str>,
@@ -271,6 +273,12 @@ pub const SPECS: &[Ps1Spec] = &[
             (
                 SSHD_BAD_KEYS,
                 "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\authorized_keys) の元、ホストの値の wsl.windowsFiles.sshd.authorizedKeys の、authorized_keys の行として読めない値を直す",
+            ),
+            // ユーザーと送り元の写しは runner だけが置く (runner は TOML の書けない値を読む時点で止め、apply は -Check の前に写しを置き直すので、
+            // 出るのは写しを手で書き換えた後の check)
+            (
+                "ユーザーと送り元の写しに読めない値がある",
+                "ユーザーと送り元の写し (%LOCALAPPDATA%\\dotfiles\\sshd\\allow.json) を手で書き換えていれば、dotfiles apply でホストの値 (dotfiles-private の win/hosts/<ユーザー>@<PC>.toml) の [sshd] allowUsers・allowFrom どおりに置き直す (受け持ちが WSL のホストなら、WSL の setup が消す)",
             ),
         ],
         install_notice: None,
@@ -988,9 +996,12 @@ impl Step for Ps1Step {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
-        // sshd: ps1 を流す前に鍵の写しを揃える (PowerShell が無いときも。WSL の wrapper と同じ)。-Check は写しの今の中身で確かめる
+        // sshd: ps1 を流す前に鍵の写しとユーザーと送り元の写しを揃える (PowerShell が無いときも。WSL の wrapper と同じ)。-Check は写しの今の
+        // 中身で確かめる
         let mut out = if self.0.sshd_keys {
-            super::sshd_keys::sync(ctx, mode)
+            let mut o = super::sshd_keys::sync(ctx, mode);
+            o.extend(super::sshd_allow::sync(ctx, mode));
+            o
         } else {
             Vec::new()
         };
@@ -1310,6 +1321,9 @@ mod tests {
     //! - sshd は -KeysFrom に受け持ち (runner・wsl) を渡す。受け持ちが runner のホストでは、ps1 を流す前にホストの値の [sshd] authorizedKeys
     //!   から鍵の写しを置き (apply。PowerShell が無くても)、check は差の行を前に足す。鍵の写しの読めない行の直し方は TOML と dotfiles apply、
     //!   手で打つ -Check に -KeysFrom runner を添える。受け持ちが WSL のホストでは写しに触らない (写しの置き方は `sshd_keys`)
+    //! - sshd は、受け持ちが runner のホストでは、ps1 を流す前にホストの値の [sshd] allowUsers・allowFrom からユーザーと送り元の写しも置き
+    //!   (apply。PowerShell が無くても。鍵の写しの後)、check は差の行を前に足す。写しの読めない値の直し方は、写しを置き直す dotfiles apply
+    //!   (写しの置き方は `sshd_allow`)
     //! - op-reason は道具の switch (onePassword) で on/off し、3 も 1 (締めの行を見ない) も -SshRelay だけで流す (ps1 は -IfMissing を持たない)。
     //!   -SshRelay は、-Check にも揃える流れにも、SSH の中継の switch (opReasonSshRelay) が on ならモード (per-call・show-only)、off なら off を
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
@@ -1730,6 +1744,10 @@ mod tests {
                 "⚠️ 鍵の写しに読めない行がある → ホストの値 (wsl.windowsFiles.sshd.authorizedKeys) を直して setup を流し直す ⚠️",
                 "wsl.windowsFiles.sshd.authorizedKeys",
             ),
+            (
+                "⚠️ ユーザーと送り元の写しに読めない値がある → ホストの値 (dotfiles-private の win/hosts の TOML の [sshd] allowUsers・allowFrom) を直して dotfiles apply を流し直す ⚠️",
+                "[sshd] allowUsers・allowFrom どおりに置き直す",
+            ),
         ] {
             let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
             let (o, _, calls) = run("sshd", &sys2, APPLY);
@@ -1866,6 +1884,96 @@ mod tests {
                 .iter()
                 .any(|c| c.contains("-Check -KeysFrom 'wsl'"))
         );
+    }
+
+    /// sshd のユーザーと送り元の写し: 受け持ちが runner のホストでは、ps1 を流す前に TOML の [sshd] allowUsers・allowFrom から写しを置き
+    /// (apply。鍵の写しの後。PowerShell が無くても)、check は差の行を鍵の写しの行の後ろ・ps1 の行の前に足す。受け持ちが WSL のホストでは
+    /// 写しに触らない
+    #[test]
+    fn sshd_places_the_allow_copy_on_runner_hosts() {
+        let s = spec("sshd");
+        let key =
+            r#"from="100.64.0.1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE herdr@phone"#;
+        let runner_host = format!(
+            "[runner]\nenable = true\n[tools]\nwindowsSshd = true\n[sshd]\nauthorizedKeys = ['{key}']\nallowUsers = [\"alice\"]\nallowFrom = [\"100.64.0.1\", \"::1\"]\n"
+        );
+        let go = |sys: &FakeSys, mode: Mode, host: &str, home: &Path| {
+            let t = TempDir::new("ps1");
+            t.write(s.script, "# ps1\n");
+            let mut out = Vec::new();
+            let host =
+                crate::host::parse(host, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap();
+            let o = {
+                let mut ctx = Ctx {
+                    repo: t.path().to_path_buf(),
+                    roots: Roots::from_home(home),
+                    state_dir: t.path().join("state"),
+                    host,
+                    sys,
+                    out: &mut out,
+                };
+                Ps1Step(s).run(&mut ctx, mode)
+            };
+            (o, String::from_utf8(out).unwrap())
+        };
+        let home = TempDir::new("ps1-home");
+        let allow = Roots::from_home(home.path())
+            .local_app_data
+            .join("dotfiles/sshd/allow.json");
+        // check: 鍵の写しの行・ユーザーと送り元の写しの行・ps1 の行の順。写しは置かない
+        let sys0 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, _) = go(&sys0, Mode::Check, &runner_host, home.path());
+        assert_eq!(o.len(), 3, "{o:?}");
+        assert!(o[0].text.starts_with("鍵の写しが無い → apply で置く"));
+        assert!(
+            o[1].text
+                .starts_with("ユーザーと送り元の写しが無い → apply で置く"),
+            "{}",
+            o[1].text
+        );
+        assert_eq!(o[2], Outcome::new(Kind::Ok, "揃っている"));
+        assert!(!allow.exists());
+        // apply: 写しを置いてから -Check
+        let sys1 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, out) = go(&sys1, APPLY, &runner_host, home.path());
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert!(
+            out.contains("ユーザーと送り元の写しを置きました (allowUsers = alice・allowFrom = 100.64.0.1・::1)"),
+            "{out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&allow).unwrap(),
+            super::super::sshd_allow::copy_text(
+                Some(&["alice".to_string()]),
+                Some(&["100.64.0.1".to_string(), "::1".to_string()])
+            )
+        );
+        // PowerShell が無くても、写しは先に揃える (値を外すと写しを消す)
+        let nopwsh = FakeSys::new(|_| unreachable!());
+        let (o, out) = go(
+            &nopwsh,
+            APPLY,
+            "[runner]\nenable = true\n[tools]\nwindowsSshd = true\n",
+            home.path(),
+        );
+        assert!(out.contains("ユーザーと送り元の写しを消しました"), "{out}");
+        assert!(!allow.exists());
+        assert_eq!(o.last().unwrap().kind, Kind::Failed);
+        // 受け持ちが WSL のホスト: 写しに触らない (TOML の値は使わないと出す)
+        std::fs::write(&allow, "x\n").unwrap();
+        let sys2 = sys((0, vec![header_line(s), "揃っている".into()]), (9, vec![]));
+        let (o, out) = go(
+            &sys2,
+            APPLY,
+            "[tools]\nwindowsSshd = true\n[sshd]\nallowUsers = [\"alice\"]\n",
+            home.path(),
+        );
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃っている")]);
+        assert!(
+            out.contains("[sshd] allowUsers・allowFrom は使わない"),
+            "{out}"
+        );
+        assert_eq!(std::fs::read_to_string(&allow).unwrap(), "x\n");
     }
 
     /// op-reason: 道具の switch (onePassword) で on/off。Install-OpReason.ps1 は -IfMissing を持たないので、3 (入っていない) も 1 (揃って

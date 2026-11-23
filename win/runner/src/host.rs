@@ -2,7 +2,8 @@
 //!
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
-//! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・
+//! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・sshd の AllowUsers のユーザーと
+//! 入ってよい送り元 (`[sshd] allowUsers`・`allowFrom`。Nix には無い)・
 //! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。
@@ -21,6 +22,8 @@
 //!
 //! [sshd]
 //! authorizedKeys = ["from=\"100.64.0.1\" ssh-ed25519 AAAA… iphone"]   # sshd に入れる公開鍵 (1 つが authorized_keys の 1 行)。書かなければ null
+//! allowUsers = ["alice"]        # AllowUsers に書くユーザー。書かなければ null (Install-Sshd を流したユーザー)、[] は誰も入れない
+//! allowFrom = ["100.64.0.0/10", "127.0.0.1"]   # 入ってよい送り元 (IPv4・IPv6 のアドレスか CIDR)。書かなければ null (tailnet と localhost)、[] はどこからも入れない
 //!
 //! [t3Code]
 //! clearClaudeEntrypoint = true  # T3 Code の Claude に CLAUDE_CODE_ENTRYPOINT="" を渡す (書かなければ false)。効くのは [tools] windowsT3Code = true のとき
@@ -283,6 +286,12 @@ pub struct HostValues {
     /// sshd に入れる公開鍵 (`[sshd] authorizedKeys`。1 つが authorized_keys の 1 行)。None は書いていない (dotfiles は鍵を置かない。Nix の
     /// null と同じ)、空の Vec は鍵 0 本。使うのは受け持ちが runner のホストの手順 sshd だけ (`steps::sshd_keys`)
     pub sshd_keys: Option<Vec<String>>,
+    /// sshd_config の AllowUsers に書くユーザー (`[sshd] allowUsers`)。None は書いていない (Install-Sshd.ps1 の既定: 流したユーザー)、空の Vec は
+    /// 誰も入れない。使うのは受け持ちが runner のホストの手順 sshd だけ (`steps::sshd_allow`)
+    pub sshd_allow_users: Option<Vec<String>>,
+    /// 入ってよい送り元 (`[sshd] allowFrom`。sshd_config の Match Address に書く IPv4・IPv6 のアドレスか CIDR)。None は書いていない
+    /// (Install-Sshd.ps1 の既定: tailnet と localhost)、空の Vec はどこからも入れない。使うのは `allow_users` と同じ
+    pub sshd_allow_from: Option<Vec<String>>,
     /// T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code] clearClaudeEntrypoint`。書かなければ false)。クレジットを使う間
     /// だけの手当て (dotfiles-private の docs/adr/091_t3_code_opt_in_*)。Linux の `dotfiles.t3Code.clearClaudeEntrypoint` と同じ
     pub t3_clear_claude_entrypoint: bool,
@@ -301,6 +310,8 @@ impl HostValues {
             runner_enable: false,
             ssh_relay_mode: SSH_RELAY_MODES[0].to_string(),
             sshd_keys: None,
+            sshd_allow_users: None,
+            sshd_allow_from: None,
             t3_clear_claude_entrypoint: false,
             notion: NotionValues::default(),
             source: Source::Missing(path.to_path_buf()),
@@ -404,22 +415,119 @@ pub fn authorized_key_line_ok(line: &str) -> bool {
         .any(|w| SSH_KEY_TYPES.contains(&w[0]) && base64_ok(w[1]))
 }
 
-/// `[sshd]` を読む (公開鍵)。書けるのは authorizedKeys だけ。書かなければ None
-fn parse_sshd(v: &toml::Value) -> Result<Option<Vec<String>>, String> {
-    let toml::Value::Table(t) = v else {
-        return Err("sshd は [sshd] の表で書いてください".to_string());
+/// sshd_config の AllowUsers に書けるユーザー名か (Install-Sshd.ps1 の `Test-SshdUserName` と同じ見方): 英小文字・数字で始まり、英小文字・
+/// 数字・`.` `_` `-` だけ。空白・パターンの字 (`*` `?` `!` `,`)・`@`・`"`・`/` を含む名前は sshd_config の 1 語に書けない (Windows の sshd は
+/// ログインの名前を小文字にして比べるので、大文字は小文字にして書く)
+pub fn sshd_user_ok(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
+}
+
+/// sshd_config の Match Address に書ける送り元か (Install-Sshd.ps1 の `Test-SshdFromAddress` と同じ見方)。IPv4・IPv6 のアドレスか CIDR
+/// (`<アドレス>/<長さ>`) だけ。IPv4 は 10 進の 4 つの組 (頭に 0 を付けない)、長さは IPv4 で 0〜32・IPv6 で 0〜128 (頭に 0 を付けない)、
+/// CIDR のアドレスは範囲の頭 (長さより後ろのビットが 0)。sshd は長さの誤りと後ろのビットが立った CIDR を Match Address の書き方の誤りとして
+/// 断り、起動しなくなる (OpenSSH の addr.c の `addr_pton_cidr`)。`!` `*` `,` と空白・ゾーン (`%`) は書けない (sshd のパターン・否定・区切りに
+/// しない)。誤りなら、そのわけ
+pub fn sshd_from_check(s: &str) -> Result<(), &'static str> {
+    const NOT_AN_ADDRESS: &str =
+        "IPv4・IPv6 のアドレスか CIDR として読めない (! * , と空白・% は書けない。名前も書けない)";
+    let (addr, len) = match s.split_once('/') {
+        Some((a, l)) => (a, Some(l)),
+        None => (s, None),
     };
-    let unknown: Vec<&str> = t
-        .keys()
-        .map(String::as_str)
-        .filter(|k| *k != "authorizedKeys")
-        .collect();
-    if !unknown.is_empty() {
-        return Err(format!(
-            "[sshd] に知らないキーがあります: {} (書けるのは authorizedKeys だけ)",
-            unknown.join(", ")
-        ));
+    // 字の形 (Install-Sshd.ps1 の正規表現と同じ): 16 進の字・: と . だけ
+    if addr.is_empty()
+        || !addr
+            .bytes()
+            .all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.')
+    {
+        return Err(NOT_AN_ADDRESS);
     }
+    // std の Ipv4Addr は頭に 0 の付いた組を断る (8 進と読み違えない)。Ipv6Addr は % (ゾーン) を断る
+    let (bits, value): (u32, u128) = if let Ok(v4) = addr.parse::<std::net::Ipv4Addr>() {
+        (32, u128::from(u32::from(v4)))
+    } else if addr.contains(':')
+        && let Ok(v6) = addr.parse::<std::net::Ipv6Addr>()
+    {
+        (128, u128::from(v6))
+    } else {
+        return Err(NOT_AN_ADDRESS);
+    };
+    let Some(len) = len else {
+        return Ok(());
+    };
+    let digits_ok = !len.is_empty()
+        && len.len() <= 3
+        && len.bytes().all(|b| b.is_ascii_digit())
+        && (len == "0" || !len.starts_with('0'));
+    let Some(len) = digits_ok.then(|| len.parse::<u32>().ok()).flatten() else {
+        return Err("CIDR の長さは、頭に 0 を付けない 10 進の数で書く");
+    };
+    if len > bits {
+        return Err(if bits == 32 {
+            "CIDR の長さは IPv4 で 0〜32"
+        } else {
+            "CIDR の長さは IPv6 で 0〜128"
+        });
+    }
+    let host_bits = bits - len;
+    let mask = if host_bits >= 128 {
+        u128::MAX
+    } else {
+        (1u128 << host_bits) - 1
+    };
+    if value & mask != 0 {
+        return Err(
+            "CIDR のアドレスに、長さより後ろのビットが立っている (範囲の頭のアドレスで書く。sshd が起動しなくなる)",
+        );
+    }
+    Ok(())
+}
+
+/// `[sshd]` の値 (公開鍵・AllowUsers のユーザー・入ってよい送り元)。どれも書かなければ None
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct SshdValues {
+    keys: Option<Vec<String>>,
+    allow_users: Option<Vec<String>>,
+    allow_from: Option<Vec<String>>,
+}
+
+/// `[sshd]` の文字列の配列の欄を読む。書かなければ None。`check` は 1 つの値の検め (誤りなら、そのわけ)、`empty` は配列の形の誤りに添える
+/// 0 のときの書き方
+fn parse_sshd_list(
+    t: &toml::Table,
+    key: &str,
+    empty: &str,
+    check: impl Fn(&str) -> Result<(), String>,
+) -> Result<Option<Vec<String>>, String> {
+    let Some(v) = t.get(key) else {
+        return Ok(None);
+    };
+    let toml::Value::Array(items) = v else {
+        return Err(format!(
+            "[sshd] の {key} は文字列の配列で書いてください ({empty})"
+        ));
+    };
+    let mut out = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        let toml::Value::String(s) = item else {
+            return Err(format!(
+                "[sshd] の {key} の {} 番目が文字列ではありません",
+                i + 1
+            ));
+        };
+        check(s).map_err(|why| format!("[sshd] の {key} の {} 番目: {why}", i + 1))?;
+        out.push(s.clone());
+    }
+    Ok(Some(out))
+}
+
+/// `[sshd] authorizedKeys` を読む (公開鍵)。書かなければ None
+fn parse_sshd_keys(t: &toml::Table) -> Result<Option<Vec<String>>, String> {
     let Some(keys) = t.get("authorizedKeys") else {
         return Ok(None);
     };
@@ -452,6 +560,46 @@ fn parse_sshd(v: &toml::Value) -> Result<Option<Vec<String>>, String> {
         out.push(line.clone());
     }
     Ok(Some(out))
+}
+
+/// `[sshd]` を読む (公開鍵・AllowUsers のユーザー・入ってよい送り元)。書けるのは authorizedKeys・allowUsers・allowFrom だけ。書かなければ None
+fn parse_sshd(v: &toml::Value) -> Result<SshdValues, String> {
+    let toml::Value::Table(t) = v else {
+        return Err("sshd は [sshd] の表で書いてください".to_string());
+    };
+    let unknown: Vec<&str> = t
+        .keys()
+        .map(String::as_str)
+        .filter(|k| !["authorizedKeys", "allowUsers", "allowFrom"].contains(k))
+        .collect();
+    if !unknown.is_empty() {
+        return Err(format!(
+            "[sshd] に知らないキーがあります: {} (書けるのは authorizedKeys・allowUsers・allowFrom)",
+            unknown.join(", ")
+        ));
+    }
+    let keys = parse_sshd_keys(t)?;
+    let allow_users = parse_sshd_list(t, "allowUsers", "誰も入れないなら []", |name| {
+        if sshd_user_ok(name) {
+            Ok(())
+        } else {
+            Err(format!(
+                "英小文字・数字で始まり英小文字・数字・. _ - だけの Windows のユーザー名で書いてください (Windows の sshd はログインの名前を小文字にして比べる): {}",
+                shorten(name)
+            ))
+        }
+    })?;
+    let allow_from = parse_sshd_list(
+        t,
+        "allowFrom",
+        "どこからも入れないなら []",
+        |addr| sshd_from_check(addr).map_err(|why| format!("{why}: {}", shorten(addr))),
+    )?;
+    Ok(SshdValues {
+        keys,
+        allow_users,
+        allow_from,
+    })
 }
 
 /// 誤りの文に添える値 (長ければ 40 字で切る)
@@ -591,8 +739,8 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         None => SSH_RELAY_MODES[0].to_string(),
         Some(v) => parse_op_reason(v).map_err(fail)?,
     };
-    let sshd_keys = match t.get("sshd") {
-        None => None,
+    let sshd = match t.get("sshd") {
+        None => SshdValues::default(),
         Some(v) => parse_sshd(v).map_err(fail)?,
     };
     let t3_clear_claude_entrypoint = match t.get("t3Code") {
@@ -608,7 +756,9 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         overrides,
         runner_enable,
         ssh_relay_mode,
-        sshd_keys,
+        sshd_keys: sshd.keys,
+        sshd_allow_users: sshd.allow_users,
+        sshd_allow_from: sshd.allow_from,
         t3_clear_claude_entrypoint,
         notion,
         source: Source::File(path.to_path_buf()),
@@ -628,6 +778,10 @@ mod tests {
     //!   (書かなければ per-call)、off か 1Password (onePassword) が off なら無し。sshRelayMode の知らない値・[opReason] の知らないキーは誤り
     //! - sshd の公開鍵 ([sshd] authorizedKeys) は、書かなければ None (null)、[] は鍵 0 本、list はその行のまま。改行を含む値・
     //!   authorized_keys の行として読めない値 (鍵の種類か base64 が無い・# で始まる)・文字列でない値・[sshd] の知らないキーは誤り
+    //! - sshd の AllowUsers のユーザーと入ってよい送り元 ([sshd] allowUsers・allowFrom) も、書かなければ None (null)、[] は 0、list はその値の
+    //!   まま。ユーザー名は英小文字・数字・. _ - だけ (Install-Sshd.ps1 の Test-SshdUserName と同じ)。送り元は IPv4・IPv6 のアドレスか CIDR だけ
+    //!   (IPv4 の組と CIDR の長さは頭に 0 を付けない・長さは 32 と 128 まで・CIDR のアドレスは範囲の頭。Install-Sshd.ps1 の
+    //!   Test-SshdFromAddress と同じ例で確かめる)。! * , と空白・ゾーン・名前は誤り。配列でない値・文字列でない値は誤り
 
     use super::*;
     use crate::testutil::TempDir;
@@ -894,7 +1048,51 @@ mod tests {
             ("sshd = 1", "sshd は [sshd] の表で書いてください"),
             (
                 "[sshd]\nkeys = []",
-                "[sshd] に知らないキーがあります: keys (書けるのは authorizedKeys だけ)",
+                "[sshd] に知らないキーがあります: keys (書けるのは authorizedKeys・allowUsers・allowFrom)",
+            ),
+            (
+                "[sshd]\nallowUsers = \"alice\"",
+                "[sshd] の allowUsers は文字列の配列で書いてください (誰も入れないなら [])",
+            ),
+            (
+                "[sshd]\nallowUsers = [1]",
+                "[sshd] の allowUsers の 1 番目が文字列ではありません",
+            ),
+            (
+                "[sshd]\nallowUsers = [\"alice\", \"Alice\"]",
+                "[sshd] の allowUsers の 2 番目: 英小文字・数字で始まり英小文字・数字・. _ - だけの Windows のユーザー名で書いてください (Windows の sshd はログインの名前を小文字にして比べる): Alice",
+            ),
+            (
+                "[sshd]\nallowUsers = [\"john doe\"]",
+                "[sshd] の allowUsers の 1 番目: 英小文字・数字で始まり",
+            ),
+            (
+                "[sshd]\nallowFrom = \"100.64.0.0/10\"",
+                "[sshd] の allowFrom は文字列の配列で書いてください (どこからも入れないなら [])",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"100.64.0.0/10\", \"!127.0.0.1\"]",
+                "[sshd] の allowFrom の 2 番目: IPv4・IPv6 のアドレスか CIDR として読めない (! * , と空白・% は書けない。名前も書けない): !127.0.0.1",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"100.64.0.0/33\"]",
+                "[sshd] の allowFrom の 1 番目: CIDR の長さは IPv4 で 0〜32: 100.64.0.0/33",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"fd7a:115c:a1e0::/129\"]",
+                "[sshd] の allowFrom の 1 番目: CIDR の長さは IPv6 で 0〜128",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"100.64.0.1/10\"]",
+                "[sshd] の allowFrom の 1 番目: CIDR のアドレスに、長さより後ろのビットが立っている (範囲の頭のアドレスで書く。sshd が起動しなくなる): 100.64.0.1/10",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"100.64.0.0/010\"]",
+                "[sshd] の allowFrom の 1 番目: CIDR の長さは、頭に 0 を付けない 10 進の数で書く",
+            ),
+            (
+                "[sshd]\nallowFrom = [true]",
+                "[sshd] の allowFrom の 1 番目が文字列ではありません",
             ),
             (
                 "[sshd]\nauthorizedKeys = \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE\"",
@@ -940,6 +1138,103 @@ mod tests {
             host(&text).unwrap().sshd_keys,
             Some(vec![a.to_string(), b.to_string()])
         );
+    }
+
+    /// [sshd] allowUsers・allowFrom: 書かなければ None、[] は 0、list はその値のまま (authorizedKeys と同じ流儀)。片方だけ書いてよい
+    #[test]
+    fn sshd_allow_values_follow_the_null_and_list_meanings() {
+        let h = host("").unwrap();
+        assert_eq!((h.sshd_allow_users, h.sshd_allow_from), (None, None));
+        let h = host("[sshd]\nauthorizedKeys = []\n").unwrap();
+        assert_eq!((h.sshd_allow_users, h.sshd_allow_from), (None, None));
+        let h = HostValues::missing(Path::new("h.toml"), groups());
+        assert_eq!((h.sshd_allow_users, h.sshd_allow_from), (None, None));
+        let h = host("[sshd]\nallowUsers = []\nallowFrom = []\n").unwrap();
+        assert_eq!(
+            (h.sshd_allow_users, h.sshd_allow_from),
+            (Some(vec![]), Some(vec![]))
+        );
+        let h = host(
+            "[sshd]\nallowUsers = [\"alice\", \"b.o_b-2\"]\nallowFrom = [\"100.64.0.0/10\", \"fd7a:115c:a1e0::/48\", \"127.0.0.1\", \"::1\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            h.sshd_allow_users,
+            Some(vec!["alice".to_string(), "b.o_b-2".to_string()])
+        );
+        assert_eq!(
+            h.sshd_allow_from,
+            Some(
+                ["100.64.0.0/10", "fd7a:115c:a1e0::/48", "127.0.0.1", "::1"]
+                    .map(String::from)
+                    .to_vec()
+            )
+        );
+        // 片方だけ書けば、もう片方は None (既定)
+        let h = host("[sshd]\nallowFrom = [\"100.64.0.1\"]\n").unwrap();
+        assert_eq!(h.sshd_allow_users, None);
+        assert_eq!(h.sshd_allow_from, Some(vec!["100.64.0.1".to_string()]));
+    }
+
+    /// AllowUsers に書けるユーザー名 (Install-Sshd.ps1 の Test-SshdUserName と同じ例)
+    #[test]
+    fn sshd_user_names() {
+        for ok in ["alice", "a.b_c-1", "0day"] {
+            assert!(sshd_user_ok(ok), "{ok}");
+        }
+        for bad in [
+            "Alice", "john doe", "a@b", "a*", "", "-a", ".a", "a/b", "a\\b", "ä",
+        ] {
+            assert!(!sshd_user_ok(bad), "{bad}");
+        }
+    }
+
+    /// Match Address に書ける送り元 (Install-Sshd.ps1 の Test-SshdFromAddress と同じ例)
+    #[test]
+    fn sshd_from_addresses() {
+        for ok in [
+            "100.64.0.0/10",
+            "fd7a:115c:a1e0::/48",
+            "127.0.0.1",
+            "::1",
+            "192.0.2.10",
+            "192.0.2.0/24",
+            "2001:db8::1",
+            "2001:db8::/32",
+            "0.0.0.0/0",
+            "::ffff:192.0.2.1",
+            "100.64.0.1/32",
+            "fd7a:115c:a1e0::1/128",
+            "FD7A:115C:A1E0::/48",
+        ] {
+            assert_eq!(sshd_from_check(ok), Ok(()), "{ok}");
+        }
+        for bad in [
+            // 長さの誤り・頭の 0
+            "100.64.0.0/33",
+            "fd7a:115c:a1e0::/129",
+            "100.64.0.0/010",
+            "010.0.0.1",
+            "100.64.0.0/",
+            "100.64.0.0/+10",
+            // 範囲の頭でない CIDR
+            "100.64.0.1/10",
+            "fd7a:115c:a1e0::1/48",
+            // 否定・パターン・区切り・空白・ゾーン・名前・欠けた形・空
+            "!100.64.0.0/10",
+            "*",
+            "100.64.*",
+            "127.0.0.1,::1",
+            " 127.0.0.1",
+            "127.0.0.1 ",
+            "fe80::1%eth0",
+            "example.com",
+            "1.2.3",
+            "",
+            "::ffff:01.2.3.4",
+        ] {
+            assert!(sshd_from_check(bad).is_err(), "{bad}");
+        }
     }
 
     /// authorized_keys の 1 行として読めるか (Install-Sshd.ps1 の Test-AuthorizedKeyLine と同じ見方に、# の行を足したもの)
