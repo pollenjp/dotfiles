@@ -23,7 +23,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -52,6 +52,8 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `op-reason/Install-OpReason.ps1` | `%USERPROFILE%\.config\powershell\Install-OpReason.ps1` | WSL の op (自作の OSS の op-reason。1Password CLI の wrapper) の Windows の部品 `op-reason-windows.zip` を、GitHub の Release から固定した版 (SHA-256 も固定) で `%LOCALAPPDATA%\Programs\op-reason` に入れる。PowerShell の `Install-OpReason` から呼ぶ。setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true) だけ ([後述](#op-reason)) |
 | `ntn/Install-Ntn.ps1` | `%USERPROFILE%\.config\powershell\Install-Ntn.ps1` | Notion の CLI の ntn を winget の `Notion.ntn` で固定した版に揃える。PowerShell の `Install-Ntn` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` (既定は設定グループで決まる) のマシン ([後述](#ntn)) |
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
+| `ghq/Install-Ghq.ps1` | `%USERPROFILE%\.config\powershell\Install-Ghq.ps1` | ghq を winget の `x-motemen.ghq` で固定した版に揃える。PowerShell の `Install-Ghq` から呼ぶ。入れて揃えるのは runner の `ghq` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
+| `fzf/Install-Fzf.ps1` | `%USERPROFILE%\.config\powershell\Install-Fzf.ps1` | fzf を winget の `junegunn.fzf` の portable で固定した版に揃える (MSI の fzf が入っていれば、何も入れずに外し方を出す)。PowerShell の `Install-Fzf` から呼ぶ。入れて揃えるのは runner の `fzf` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
 | `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
@@ -434,10 +436,12 @@ scanData = "https://app.notion.com/p/…"
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
+| 97 | `fzf` | `Install-Fzf.ps1`: 入れる・揃える (winget の portable。PATH のずれは知らせるだけ。MSI の fzf が入っていれば入れずに、外し方を知らせる。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
+| 97 | `ghq` | `Install-Ghq.ps1`: 入れる・揃える (PATH のずれは知らせるだけ。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
-| 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone) | 有る |
+| 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone (bootstrap の 4 つと ghq・fzf)) | 有る |
 | 97 | `t3-code` | `Install-T3Code.ps1`: 入っていなければ入れる (user スコープ。UAC は出ない)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsT3Code` | 有る (Windows だけ) |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
@@ -1280,7 +1284,7 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の pin
 
-winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる 4 つ) は、入れた後に `winget pin add --id <ID> --exact` で pin (種類は Pinning) を足し、`winget upgrade --all` から外す。版を変えるときに
 自分の pin に止められない打ち方は、winget の作り (`microsoft/winget-cli` の `WorkflowBase.cpp`・`PinningData.cpp`) に合わせて決めてある
 ([ADR 063](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/063_win_winget_pin_include_pinned_20261116T132001JST/README.md)):
@@ -1292,7 +1296,7 @@ winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語�
 | 入っているものへの `winget install --version <版>` | 止められる (upgrade の道に移る。install は `--include-pinned` を受け付けない) |
 | 入っていないものへの `winget install`・`winget uninstall`・`winget download` | pin を見ない (pin が残っていても) |
 
-- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力・Tailscale)、入れ替える道は uninstall → install (herdr・ntn・Claude Code。
+- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力・Tailscale)、入れ替える道は uninstall → install (herdr・ntn・Claude Code・ghq・fzf。
   入っていない形にしてから入れるので pin を見ない)。どちらも `*.Tests.ps1` が確かめる (upgrade には `--include-pinned` を付け、install・
   uninstall には付けない)
 - 手で揃えるときも、版を名指しした upgrade に `--include-pinned` を付ける (bootstrap の ※ の行と[版のずれを手で揃える](#版のずれを手で揃える))。
@@ -1302,7 +1306,7 @@ winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語�
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) は、新しい版が出ると `setup --update` が
 短く知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)。上げるかは Claude Code に聞かれて決める)。
 それとは別に、流さない間も気付けるよう、GitHub Actions の
@@ -1320,6 +1324,8 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `ntn` | `ntn/Install-Ntn.ps1`・`ntn/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release が無い。配布物は ntn.dev) | [ntn の新しい版が出たとき](#ntn-の新しい版が出たとき) |
 | `claude-code` | `claude-code/Install-ClaudeCode.ps1`・`claude-code/skipped-versions.txt` | GitHub の release (`anthropics/claude-code` の `vX.Y.Z`) が出た日 | [Claude Code の新しい版が出たとき](#claude-code-の新しい版が出たとき) |
 | `tailscale` | `tailscale/Install-Tailscale.ps1`・`tailscale/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | [Tailscale の新しい版が出たとき](#tailscale-の新しい版が出たとき) |
+| `ghq` | `ghq/Install-Ghq.ps1`・`ghq/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release の多くが winget に載らないので比べない) | [ghq・fzf の新しい版が出たとき](#ghqfzf-の新しい版が出たとき) |
+| `fzf` | `fzf/Install-Fzf.ps1`・`fzf/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | 同じ |
 | `git` | `bootstrap/Install-Bootstrap.ps1` の `-GitVersion`・`bootstrap/skipped-versions/git.txt` | GitHub の release (`git-for-windows/git` の `v<X.Y.Z>.windows.<N>`。winget の版は N が 1 なら `X.Y.Z`、ほかは `X.Y.Z.N`) が出た日 | [bootstrap の固定した版の新しい版が出たとき](#bootstrap-の固定した版の新しい版が出たとき) |
 | `gh` | `bootstrap/Install-Bootstrap.ps1` の `-GhVersion`・`bootstrap/skipped-versions/gh.txt` | GitHub の release (`cli/cli` の `vX.Y.Z`) が出た日 | 同じ |
 | `vs-buildtools` | `bootstrap/Install-Bootstrap.ps1` の `-VsBuildToolsVersion`・`bootstrap/skipped-versions/vs-buildtools.txt` | winget-pkgs に載った日 (GitHub の release が無い) | 同じ |
@@ -1351,7 +1357,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
     → 下の「パッケージ ID を確かめる」
   - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
     ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Tailscale`・`Git.Git`・`GitHub.cli`・
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Tailscale`・`ghq`・`fzf`・`Git.Git`・`GitHub.cli`・
   `BuildTools`・`Rustup`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
@@ -1381,14 +1387,15 @@ Windows に固定した版で入れているものに新しい版が出たら、
 
 | 名前 | 固定した版 | 新しい版の一覧と出た日 | 見送りの一覧 |
 | --- | --- | --- | --- |
-| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code`・`tailscale` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
+| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code`・`tailscale`・`ghq`・`fzf` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion` など) の既定値 | `nix/scripts/check-winget-version.sh --json` (出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/bootstrap/skipped-versions/<名前>.txt` (「版 理由」) |
 
 - 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も)・Tailscale は、
   入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`・`windowsFiles.tailscale.enable`) でだけ確かめる。bootstrap の
   4 つ (git・gh・vs-buildtools・rustup) は、Windows の ghq に dotfiles の clone がある (`<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git`
-  がある。bootstrap を流した) マシンでだけ確かめる。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
+  がある。bootstrap を流した) マシンでだけ確かめる。ghq・fzf も同じマシンでだけ確かめる (入れるのは bootstrap の clone の runner の手順 `ghq`・`fzf`
+  だけで、WSL の setup は入れない)。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
   1 行だけ (警告のまとめには載らない)
 - herdr-app に見送っていない新しい版があるときは、続きの行の末尾に keys.json の注意を 2 行添える (上の例の ※ と →)。dotfiles がキーを
@@ -1429,7 +1436,7 @@ dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setu
 
 - 名前の on/off は、WSL の記録の代わりに Windows のホストの値の道具の switch (ntn は `windowsNtn`、Claude Code は `windowsClaudeCode`、herdr・
   herdr-app・herdr-core は `windowsHerdr`、Tailscale は `windowsTailscale`。それを入れる手順と同じ switch) と、Windows の ghq の dotfiles の clone
-  (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つ) で決める
+  (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つと、その clone の runner の手順 `ghq`・`fzf` が入れる ghq・fzf) で決める
 - GitHub は Windows の gh (`gh api`。bootstrap が入れてログインする) で読む。herdr-app・herdr-core の版ごとの Windows の成果物があるかは、WSL と
   同じ引数の curl (PATH で最初に見つかるもの。ふつうは System32 の `curl.exe`。`Install-HerdrApp.ps1` も同じ探し方で同じ取得元を落とす) の HEAD で
   見る (runner に HTTP の crate を足さない)
@@ -1448,10 +1455,11 @@ dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setu
 `win/*/*.Tests.ps1` (`Install-OpenSSH.Tests.ps1`・`Install-Herdr.Tests.ps1` など) は、`*.ps1` の副作用の無い関数を確かめる。
 Linux の pwsh で流すので Windows には触らない。CI の `lint` ([`.github/workflows/nix.yml`](../.github/workflows/nix.yml)) が、
 flake が固定している nixpkgs の pwsh で全部を流す (`Start-PortForward.Tests.ps1` は PATH の ssh を引くので、nixpkgs の
-openssh も渡す)。手元で同じことをするには、repo の root で:
+openssh も渡す。`dotfiles.Tests.ps1` は PATH に ghq と fzf があれば cdrepo を本物でも流すので、nixpkgs の ghq と fzf も渡す)。手元で同じことを
+するには、repo の root で:
 
 ```sh
-nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh --command bash -c '
+nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh nixpkgs#ghq nixpkgs#fzf --command bash -c '
   rc=0; for t in win/*/*.Tests.ps1; do pwsh -NoProfile -NonInteractive -File "$t" || rc=1; done; exit "$rc"'
 ```
 
@@ -1524,6 +1532,21 @@ alias の名前と中身は WSL の fish の abbr (`nix/home/modules/fish.nix`) 
 叩くのは Windows に入れた `herdr.exe` (WinGet の `Herdr.Herdr`) で、WSL の herdr とは
 別の server (session を共有しない)。`c` も Windows に入れた `claude.exe` (WinGet の `Anthropic.ClaudeCode`。
 dotfiles が固定した版で入れる。[後述](#claude-code)) を叩き、WSL の claude とは別のもの。
+
+### cdrepo (ghq の repo を選んで移る)
+
+`cdrepo` は、ghq の repo の一覧 (`ghq list`) を fzf で絞り込んで 1 つ選び、`ghq root` の下のその repo へ移る。WSL の fish と bash の `cdrepo`
+(`nix/home/modules/fish.nix`・`bash.nix` の function) と同じ動きにそろえてある (知らせる文と fzf の引数は `dotfiles.Tests.ps1` が突き合わせる)。
+PowerShell 7 と Windows PowerShell 5.1 のどちらでも動く。
+
+- fzf は `-1 +m` で起こす (候補が 1 つならそのまま選び、選べるのは 1 つ)。Enter で選ぶと移り、Esc・Ctrl+C で選ばずに抜けると移らない
+  (そのときの `$LASTEXITCODE` は fzf の 130)
+- ghq と fzf は、Windows の runner の手順 `ghq`・`fzf` (`dotfiles apply`) か `Install-Ghq`・`Install-Fzf` が winget で入れる ([ghq・fzf](#ghqfzf))。
+  どちらかが無ければ、fish・bash と同じ `ghq is not installed`・`fzf is not installed` を出して止まる。PowerShell の function は終了ステータスを
+  返せないので、止めたときは `$LASTEXITCODE` を 1 にする (fish・bash の `return 1` に当たる。`dotfiles` 関数と同じ)
+- ghq の root は ghq の既定の `%USERPROFILE%\ghq` (bootstrap が dotfiles などを clone する所)。`ghq list` は `/` で区切って出すが、移った後の
+  場所は `\` にそろう
+- 略語ではない (fish でも function) ので、上の表と略語の表 (`$DotfilesAbbr`) には入れていない
 
 ### 略語を広げる (fish の abbr に似せる)
 
@@ -3653,6 +3676,84 @@ setup が下げる。
   ```
 
 - 締めの行の文言は `bootstrap-windows-claude-code.sh` が読む。変えるときは向こうも直す
+- winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+
+## ghq・fzf
+
+`ghq/Install-Ghq.ps1` と `fzf/Install-Fzf.ps1` は、PowerShell の [cdrepo](#cdrepo-ghq-の-repo-を選んで移る) が使う ghq (repo の clone を決まった木に
+並べる CLI) と fzf (行を絞り込んで選ぶ CLI) を winget で入れ、版を `-Version` の既定値の 1 か所で固定する (dotfiles-private の ADR 092
+(`docs/adr/092_win_cdrepo_ghq_fzf_*`))。形は [ntn](#ntn) と同じ (zip の中の portable。管理者は要らない。常駐も UAC も無いので、版のずれも揃える)。
+WSL・Linux の ghq と fzf は別に home-manager (`nix/home/modules/packages.nix`) が入れる。
+
+| 道具 | winget の ID | 固定した版 (`-Version` の既定値) | 置き場所 (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\` の下) |
+| --- | --- | --- | --- |
+| ghq | `x-motemen.ghq` | `1.12.0` | `x-motemen.ghq_Microsoft.Winget.Source_8wekyb3d8bbwe\ghq_windows_amd64\ghq.exe` (zip の中のディレクトリの下) |
+| fzf | `junegunn.fzf` | `0.75.0` | `junegunn.fzf_Microsoft.Winget.Source_8wekyb3d8bbwe\fzf.exe` |
+
+- 入れて揃えるのは Windows の runner の手順 `ghq`・`fzf` (order 97。Windows にしか無い手順で、WSL の setup には無い)。① エンジニアの道具の CLI で、
+  Linux もどのグループでも入れるので、道具の switch は持たない (どのホストでもいつも on)。受け持ちが WSL のホストでも `dotfiles apply` が入れる
+- ghq の設定 (git config の `ghq.*`) と fzf の設定 (環境変数 `FZF_DEFAULT_OPTS` など) は dotfiles では扱わない。ghq の root は既定の
+  `%USERPROFILE%\ghq` で、bootstrap が clone する所と同じ
+- 消すなら PowerShell で `winget pin remove --id <ID> --exact` の後に `winget uninstall --id <ID> --exact` を打つ (runner の手順はいつも on なので、
+  次の `dotfiles apply` で入れ直す)
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Ghq -Check`・`Install-Fzf -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (fzf は、MSI の fzf が入っていれば 1) |
+| `Install-Ghq`・`Install-Fzf` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
+| `dotfiles apply --steps ghq,fzf` (PowerShell) | runner の手順で揃える (入っていなければ入れ、版か pin がずれていれば揃える。PATH のずれと MSI の fzf は知らせるだけ) |
+| `nix/scripts/check-winget-version.sh ghq`・`fzf` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#ghqfzf-の新しい版が出たとき)) |
+
+揃えるときにすることは [ntn](#ntn) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うところ:
+
+- 入れる・取得を確かめるときは `--installer-type portable` で portable を名指しする。winget の `junegunn.fzf` は 0.75.0 から portable の zip と
+  machine スコープの MSI (`%ProgramFiles%\fzf\bin`。UAC が要る) を並べ、名指ししないと winget は MSI を選ぶ。ghq の manifest は今は portable
+  だけだが、MSI が足されても portable のままにするため同じく付ける
+- MSI の fzf (手で `winget install junegunn.fzf` を打つと入る) が入っていると、portable と二重になり、winget の install と pin がどちらを指すかが
+  決まらない。そのため `Install-Fzf` は何も入れずに止まり、`-Check` は 1 を返して外し方を出す (runner は知らせるだけ)。PowerShell で
+  `winget uninstall --id junegunn.fzf --exact --scope machine` を打って外し (UAC の確認が出る)、`Install-Fzf` か `dotfiles apply --steps fzf` を
+  打ち直す
+- 入れ替えるときに置き場所の exe が動いている (別の端末の cdrepo の選ぶ画面・`ghq get` など) と、置き換えられないので何も変えずに止まり、
+  PID とコマンドラインを出す。終わらせてから打ち直す
+- PATH で別の ghq・fzf (scoop・`go install` のものなど) が先に引かれると、`-Check` の「PATH の ghq」「PATH の fzf」が ⚠ になる。揃える手順では
+  直らないので、※ の行の手順でその置き場所を外す
+- winget が portable の置き場所をユーザーの PATH に足すマシンと、`%LOCALAPPDATA%\Microsoft\WinGet\Links` に symlink を置くマシン (開発者
+  モードなど) がある (ntn と同じく、どちらも winget のものとして読む)。fzf の 0.75.0 の release notes によると、Links の symlink は管理者の SSH の
+  会話からは辿れない (PATH に足すマシンでは当たらない)
+
+### ghq・fzf の新しい版が出たとき
+
+固定した版より新しい版が winget に載って 30 日たつと、GitHub Actions の `winget-versions` の `Windows の ghq`・`Windows の fzf` の job が落ちて
+知らせる。出た日は winget-pkgs に載った日 (どちらも GitHub に release を出すが、winget に載らない版がある (ghq は 1.9.x・1.10.0・1.11.x、fzf は
+0.65.2・0.66.1) ので、GitHub とは比べない)。固定した版より新しい版の知らせ (runner の `pin-updates`。WSL の setup では、Windows の ghq に
+dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる場合・見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+上げるとき:
+
+1. release notes で、cdrepo が使うもの (`ghq list`・`ghq root` の出力、fzf の `-1`・`+m` と選ぶ画面) と Windows に触る変更が無いかを見る。fzf は
+   winget の manifest にまだ portable の zip があるか (`winget show --id junegunn.fzf --version <版> --installer-type portable`) も見る
+2. `ghq/Install-Ghq.ps1`・`fzf/Install-Fzf.ps1` の `-Version` の既定値と、上の道具の表の版を新しい版にし、`Install-Ghq.Tests.ps1`・
+   `Install-Fzf.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
+3. merge したら、Windows で clone を pull して `dotfiles apply` (`--steps ghq,fzf` で絞れる) を流す (runner が揃える)。exe が動いていて止まったら、
+   終わらせてから `Install-Ghq`・`Install-Fzf`
+4. `-Check` が「揃っている」になり、`ghq --version`・`fzf --version` が新しい版を出すことを確かめる
+
+見送るとき: `ghq/skipped-versions.txt`・`fzf/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版を戻すときは `-Version` を前の版に
+すれば、runner が下げる。
+
+### Install-Ghq.ps1・Install-Fzf.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `ghq/Install-Ghq.Tests.ps1`・`fzf/Install-Fzf.Tests.ps1` で確かめる (Linux の pwsh):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/ghq/Install-Ghq.Tests.ps1
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/fzf/Install-Fzf.Tests.ps1
+  ```
+
+- runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`ghq (winget の x-motemen.ghq`・`fzf (winget の junegunn.fzf`) と、
+  締めの行の文言 (`→ Install-Ghq で入れる`・`→ Install-Ghq で揃える`・`→ ※ の手順で直す`。fzf は `MSI の fzf (machine スコープ) が入っている` も)
+  で分かれる。変えるときは向こうも直す (WSL の wrapper は無いので、runner の試験が ps1 の字と突き合わせる)
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## Tailscale
