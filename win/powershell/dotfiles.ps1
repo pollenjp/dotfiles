@@ -296,10 +296,32 @@ function cdrepo {
         $global:LASTEXITCODE = 1
         return
     }
-    $repo = ghq list | fzf -1 +m
-    if (($LASTEXITCODE -ne 0) -or (-not $repo)) { return }
-    $root = ghq root
-    if (($LASTEXITCODE -ne 0) -or (-not $root)) { return }
+    # ghq と fzf (Go) は UTF-8 で書き・読む。PowerShell は外のコマンドの出力を [Console]::OutputEncoding (日本語の Windows の既定は CP932) で
+    # 読み、外のコマンドどうしのパイプは $OutputEncoding (5.1 の既定は ASCII) で書き直すので、ASCII でない repo のパスや ghq の root が化けて
+    # 移れない。呼ぶ間だけどちらも BOM の無い UTF-8 にし、終わったら戻す (BOM 付きの UTF-8 だと、fzf の入力の頭に BOM が付く)。
+    # $OutputEncoding は global を替える: 5.1 は外のコマンドに渡す文字コードを、関数の中で替えた $OutputEncoding からは読まない (5.1 と 7 で
+    # 確かめた)。コンソールの無い host で [Console]::OutputEncoding を替えられなければ、替えずに流す
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $pipeEncoding = $global:OutputEncoding
+    $consoleEncoding = $null
+    try {
+        $global:OutputEncoding = $utf8
+        try {
+            $consoleEncoding = [Console]::OutputEncoding
+            [Console]::OutputEncoding = $utf8
+        } catch {
+            $consoleEncoding = $null
+        }
+        $repo = ghq list | fzf -1 +m
+        if (($LASTEXITCODE -ne 0) -or (-not $repo)) { return }
+        $root = ghq root
+        if (($LASTEXITCODE -ne 0) -or (-not $root)) { return }
+    } finally {
+        $global:OutputEncoding = $pipeEncoding
+        if ($null -ne $consoleEncoding) {
+            try { [Console]::OutputEncoding = $consoleEncoding } catch { }
+        }
+    }
     # ghq list は / で区切って出す。Windows の Set-Location は \ にそろえる (5.1 と 7 で確かめた)
     Set-Location -LiteralPath (Join-Path "$root" "$repo")
 }

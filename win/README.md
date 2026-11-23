@@ -1546,6 +1546,12 @@ PowerShell 7 と Windows PowerShell 5.1 のどちらでも動く。
   返せないので、止めたときは `$LASTEXITCODE` を 1 にする (fish・bash の `return 1` に当たる。`dotfiles` 関数と同じ)
 - ghq の root は ghq の既定の `%USERPROFILE%\ghq` (bootstrap が dotfiles などを clone する所)。`ghq list` は `/` で区切って出すが、移った後の
   場所は `\` にそろう
+- ghq と fzf (Go) は UTF-8 で読み書きするので、cdrepo は 2 つを呼ぶ間だけ `[Console]::OutputEncoding` と `$OutputEncoding` を BOM の無い UTF-8 に
+  し、終わったら戻す。日本語の Windows の既定 (`[Console]::OutputEncoding` は CP932、5.1 の `$OutputEncoding` は ASCII) のままだと、ASCII でない
+  repo のパスや ghq の root が化けて移れない。Windows PowerShell 5.1 は関数の中で替えた `$OutputEncoding` を外のコマンドへのパイプに使わないので、
+  global の値を替えて戻す (5.1 と 7 で確かめた)
+- ghq と fzf を入れた直後は、新しい PowerShell を開く。winget は置き場所をユーザーの PATH に足すだけなので、`dotfiles apply` を流した PowerShell
+  のままでは `ghq is not installed` になる
 - 略語ではない (fish でも function) ので、上の表と略語の表 (`$DotfilesAbbr`) には入れていない
 
 ### 略語を広げる (fish の abbr に似せる)
@@ -3694,6 +3700,7 @@ WSL・Linux の ghq と fzf は別に home-manager (`nix/home/modules/packages.n
   Linux もどのグループでも入れるので、道具の switch は持たない (どのホストでもいつも on)。受け持ちが WSL のホストでも `dotfiles apply` が入れる
 - ghq の設定 (git config の `ghq.*`) と fzf の設定 (環境変数 `FZF_DEFAULT_OPTS` など) は dotfiles では扱わない。ghq の root は既定の
   `%USERPROFILE%\ghq` で、bootstrap が clone する所と同じ
+- 入れた後は、新しい PowerShell を開くと使える (winget がユーザーの PATH に足すのは、これから開く PowerShell の分)
 - 消すなら PowerShell で `winget pin remove --id <ID> --exact` の後に `winget uninstall --id <ID> --exact` を打つ (runner の手順はいつも on なので、
   次の `dotfiles apply` で入れ直す)
 

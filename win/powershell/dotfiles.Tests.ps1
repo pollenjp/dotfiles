@@ -31,7 +31,9 @@
 #   - cdrepo: ghq か fzf が無ければ、fish・bash の cdrepo と同じ文を出して $LASTEXITCODE を 1 にし、移らない (ghq が無ければ fzf も確かめない)。
 #     ghq list を fzf に渡し、fzf には fish・bash の cdrepo と同じ引数 (-1 +m) を渡す。fzf が 0 で選んだ行を返したときだけ ghq root の下の
 #     その repo へ移る (ghq list の / 区切りのまま)。fzf が 0 でない (選ばずに抜けた 130)・空を返した・ghq root が落ちたら移らない。
-#     ghq と fzf が PATH にあれば、本物でも 1 回流す (repo が 1 つの ghq の root で、fzf -1 が選ぶ画面を出さずに返す形)
+#     ghq と fzf を呼ぶ間だけ [Console]::OutputEncoding と global の $OutputEncoding を BOM の無い UTF-8 にし、終わったらどちらも元に戻す
+#     (移らずに抜けるときも)。ghq と fzf が PATH にあれば、本物でも 1 回流す (ASCII でない名前の repo が 1 つの ghq の root で、
+#     fzf -1 が選ぶ画面を出さずに返す形)
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
 $ErrorActionPreference = 'Stop'
@@ -119,10 +121,13 @@ try {
 
 # cdrepo を子の pwsh で打つ。$Fakes は cdrepo の前に置く文 (偽の ghq・fzf の function)。PATH は $PathValue (省けば空のディレクトリ。
 # 本物の ghq・fzf を見せない)。$GhqRoot があれば、子の環境変数 GHQ_ROOT にする (本物の ghq の root)。子は一時ディレクトリから
-# cdrepo を打ち、移った先・$LASTEXITCODE・偽の fzf が受けた引数と入力・偽の ghq を呼んだ引数を出す。偽物の中の $Root は、repo を
-# 並べた一時の ghq の root ($CdrepoRoot。github.com/a/b と github.com/c/d がある)
+# cdrepo を打ち、移った先・$LASTEXITCODE・偽の fzf が受けた引数と入力と、呼ばれたときの文字コード・偽の ghq を呼んだ引数・cdrepo の前と後の
+# [Console]::OutputEncoding と global の $OutputEncoding を出す。偽物の中の $Root は、repo を並べた一時の ghq の root ($CdrepoRoot。
+# github.com/a/b と github.com/c/d がある)。$Latin1 なら、cdrepo の前に [Console]::OutputEncoding を ISO-8859-1 に、$OutputEncoding を ASCII に
+# しておき、最後に戻す (Linux の pwsh の既定はどちらも UTF-8 で、戻したかが見分けられないため。Windows ではコンソールの文字コードが親と共有
+# なので使わない)
 function Invoke-CdrepoChild {
-    param([string]$Fakes = '', [string]$PathValue = '', [string]$GhqRoot = '')
+    param([string]$Fakes = '', [string]$PathValue = '', [string]$GhqRoot = '', [switch]$Latin1)
     if (-not $PathValue) { $PathValue = $cdrepoEmptyPath }
     $child = Join-Path $cdrepoDir 'child.ps1'
     $body = @(
@@ -133,14 +138,21 @@ function Invoke-CdrepoChild {
         '$global:FzfArgs = $null'
         '$global:FzfInput = @()'
         '$global:GhqCalls = @()'
+        '$global:FzfEnc = $null'
         $Fakes
         'Set-Location -LiteralPath $Start'
+        '$savedEnc = $null'
+        $(if ($Latin1) { '$savedEnc = [Console]::OutputEncoding; [Console]::OutputEncoding = [Text.Encoding]::GetEncoding(28591); $global:OutputEncoding = [Text.Encoding]::ASCII' } else { '' })
+        '"enc-before=$([Console]::OutputEncoding.WebName) $($global:OutputEncoding.WebName)"'
         '$global:LASTEXITCODE = 0'
         'cdrepo'
         '"code=$LASTEXITCODE"'
+        '"enc-after=$([Console]::OutputEncoding.WebName) $($global:OutputEncoding.WebName)"'
+        'if ($null -ne $savedEnc) { [Console]::OutputEncoding = $savedEnc }'
         '"pwd=$((Get-Location).Path)"'
         '"fzf-args=$global:FzfArgs"'
         '"fzf-input=$(@($global:FzfInput) -join ''|'')"'
+        '"fzf-enc=$global:FzfEnc"'
         '"ghq-calls=$(@($global:GhqCalls) -join ''|'')"'
     ) -join "`n"
     Set-Content -LiteralPath $child -Value $body -Encoding utf8
@@ -162,7 +174,8 @@ function Get-ChildValue {
 }
 
 # 偽の ghq (list は 2 つの repo を出し、root は一時の ghq の root を出す。$RootCode で root の終了コードを替える) と偽の fzf ($Pick を出し、
-# $FzfCode を $LASTEXITCODE にする。受けた引数と入力を控える)。function は終了コードを持たないので、$LASTEXITCODE を自分で書く
+# $FzfCode を $LASTEXITCODE にする。受けた引数と入力と、呼ばれたときの [Console]::OutputEncoding・$OutputEncoding・BOM の長さを控える)。
+# function は終了コードを持たないので、$LASTEXITCODE を自分で書く
 function New-CdrepoFakes {
     param([string]$Pick = 'github.com/a/b', [int]$FzfCode = 0, [int]$RootCode = 0, [switch]$NoFzf)
     $ghq = @"
@@ -176,6 +189,7 @@ function ghq {
 function fzf {
     `$global:FzfArgs = `$args -join ' '
     `$global:FzfInput = @(`$input)
+    `$global:FzfEnc = "`$([Console]::OutputEncoding.WebName) `$(`$OutputEncoding.WebName) `$(`$OutputEncoding.GetPreamble().Length)"
     if ('$Pick') { '$Pick' }
     `$global:LASTEXITCODE = $FzfCode
 }
@@ -209,6 +223,9 @@ try {
     Test-Case 'cdrepo: 選んだら ghq root の下のその repo へ移る' $cdrepoRepo { Get-ChildValue $picked 'pwd' }
     Test-Case 'cdrepo: ghq は list と root を打つ' 'list|root' { Get-ChildValue $picked 'ghq-calls' }
     Test-Case 'cdrepo: 移った後の $LASTEXITCODE は 0' '0' { Get-ChildValue $picked 'code' }
+    # ghq と fzf (Go) は UTF-8 で書き・読むので、呼ぶ間だけ BOM の無い UTF-8 にし、[Console]::OutputEncoding は終わったら戻す
+    Test-Case 'cdrepo: ghq と fzf を呼ぶ間は [Console]::OutputEncoding と $OutputEncoding を BOM の無い UTF-8 にする' 'utf-8 utf-8 0' { Get-ChildValue $picked 'fzf-enc' }
+    Test-Case 'cdrepo: 終わったら [Console]::OutputEncoding と global の $OutputEncoding を元に戻す' (Get-ChildValue $picked 'enc-before') { Get-ChildValue $picked 'enc-after' }
 
     # 選ばずに抜けた・何も返さなかった・ghq root が落ちたなら移らない
     $cancelled = @(Invoke-CdrepoChild -Fakes (New-CdrepoFakes -Pick '' -FzfCode 130))
@@ -219,6 +236,17 @@ try {
     Test-Case 'cdrepo: fzf が 0 でも空を返したら移らない' "0 $cdrepoDir list" { "$(Get-ChildValue $empty 'code') $(Get-ChildValue $empty 'pwd') $(Get-ChildValue $empty 'ghq-calls')" }
     $noRoot = @(Invoke-CdrepoChild -Fakes (New-CdrepoFakes -RootCode 1))
     Test-Case 'cdrepo: ghq root が落ちたら移らない' "1 $cdrepoDir" { "$(Get-ChildValue $noRoot 'code') $(Get-ChildValue $noRoot 'pwd')" }
+    Test-Case 'cdrepo: 移らずに抜けるときも [Console]::OutputEncoding と global の $OutputEncoding を元に戻す' (Get-ChildValue $cancelled 'enc-before') { Get-ChildValue $cancelled 'enc-after' }
+    # Linux の pwsh の既定はどちらも UTF-8 なので、ISO-8859-1 と ASCII にしておいて戻したかを見分ける (Windows はコンソールの文字コードが親と
+    # 共有なので流さない。Windows の既定 (CP932・5.1 の ASCII) からは、上の 2 つが戻したかを見る)
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and $IsLinux) {
+        $latin1 = @(Invoke-CdrepoChild -Fakes (New-CdrepoFakes) -Latin1)
+        Test-Case 'cdrepo: 前の文字コードが UTF-8 でなくても、呼ぶ間は UTF-8 にして元 (ISO-8859-1・ASCII) に戻す' 'iso-8859-1 us-ascii | utf-8 utf-8 0 | iso-8859-1 us-ascii' {
+            "$(Get-ChildValue $latin1 'enc-before') | $(Get-ChildValue $latin1 'fzf-enc') | $(Get-ChildValue $latin1 'enc-after')"
+        }
+    } else {
+        Write-Host 'skip cdrepo: 文字コードを ISO-8859-1・ASCII にしてから戻したかを見る (Linux の pwsh だけで流す)'
+    }
 
     # Linux の cdrepo (fish の function と bash の function) と、知らせる文と fzf の引数を突き合わせる (どちらかを直したら、もう一方も直す)
     $modules = Join-Path (Join-Path (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'nix') 'home') 'modules'
@@ -233,15 +261,16 @@ try {
     Test-Case 'cdrepo: fzf の引数は bash.nix の cdrepo (fzf … <<<) と同じ' $(if ($bashBody -match 'fzf (?<a>[^<\n]*?) *<<<') { $Matches['a'] } else { '(bash.nix に fzf … <<< が無い)' }) { Get-ChildValue $picked 'fzf-args' }
 
     # 本物の ghq と fzf が PATH にあれば、本物でも 1 回流す。repo が 1 つの ghq の root (GHQ_ROOT) なら、fzf -1 は選ぶ画面を出さずに
-    # その行を返す (端末を開かないので、CI でも手元の端末でも止まらない)。ネイティブのコマンドのパイプと $LASTEXITCODE の扱いを見る
+    # その行を返す (端末を開かないので、CI でも手元の端末でも止まらない)。ネイティブのコマンドのパイプと $LASTEXITCODE の扱いと、ASCII でない
+    # repo の名前 (Windows では文字コードを UTF-8 にしないと化ける) を見る
     $realGhq = Get-Command -Name ghq -CommandType Application -ErrorAction SilentlyContinue
     $realFzf = Get-Command -Name fzf -CommandType Application -ErrorAction SilentlyContinue
     if ($realGhq -and $realFzf) {
         $realRoot = Join-Path $cdrepoDir 'real-root'
-        $realRepo = Join-Path (Join-Path (Join-Path $realRoot 'github.com') 'x') 'y'
+        $realRepo = Join-Path (Join-Path (Join-Path $realRoot 'github.com') 'x') '日本語'
         $null = New-Item -ItemType Directory -Force -Path (Join-Path $realRepo '.git')
         $real = @(Invoke-CdrepoChild -PathValue $env:PATH -GhqRoot $realRoot)
-        Test-Case 'cdrepo: 本物の ghq と fzf でも、repo が 1 つならそこへ移る' "0 $realRepo" { "$(Get-ChildValue $real 'code') $(Get-ChildValue $real 'pwd')" }
+        Test-Case 'cdrepo: 本物の ghq と fzf でも、repo が 1 つならそこへ移る (ASCII でない名前の repo)' "0 $realRepo" { "$(Get-ChildValue $real 'code') $(Get-ChildValue $real 'pwd')" }
     } else {
         Write-Host 'skip cdrepo: 本物の ghq と fzf で流す (ghq か fzf が PATH に無い)'
     }
