@@ -824,7 +824,7 @@ fi
 
 # ---- カスタムレイアウト (custom-layouts.json) ----
 
-# レイアウト。この PC と pjp-raiden の custom-layouts.json の形から、ゾーンを減らして写した (canvas と grid)
+# レイアウト。この PC と example-host の custom-layouts.json の形から、ゾーンを減らして写した (canvas と grid)
 lay_a='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-43inch","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234},{"X":0,"Y":297,"width":1374,"height":1055}],"sensitivity-radius":20}}'
 # 4k-43inch を PC のエディターで直したもの (2 つ目のゾーンを動かした)
 lay_a_edited='{"uuid":"{67070A77-52EC-4EC3-9F63-DF5E58CD4400}","name":"4k-43inch","type":"canvas","info":{"ref-width":2560,"ref-height":1392,"zones":[{"X":0,"Y":54,"width":1846,"height":1234},{"X":10,"Y":297,"width":1374,"height":1055}],"sensitivity-radius":20}}'
@@ -848,7 +848,7 @@ pcl_json() { echo "$(fz_dir "$1")/custom-layouts.json"; }
 record_json() { echo "$1/.local/state/dotfiles/windows-fancyzones.applied.json"; }
 backup_root() { echo "$1/.local/state/dotfiles/windows-fancyzones/backup"; }
 # PowerToys の形 (字下げ 2・CRLF・末尾に改行なし) の custom-layouts.json の中身を出す。引数はレイアウト。
-# この形は、この PC と pjp-raiden の custom-layouts.json (エディターが書いたもの) のバイト列と同じだった
+# この形は、この PC と example-host の custom-layouts.json (エディターが書いたもの) のバイト列と同じだった
 pt_layouts() {
   local body
   body=$(jq -n --indent 2 '{"custom-layouts": $ARGS.positional}' --jsonargs "$@")
@@ -943,7 +943,7 @@ else
   ng "レイアウトが揃っている" "rc=$(rc "${h}") calls=$(fs_calls "${h}") $(outerr "${h}")"
 fi
 
-# 32. pjp-raiden の形: PC が repo と同じ中身 (キーの順・字下げ・改行が違う)。書かずに記録だけする
+# 32. example-host の形: PC が repo と同じ中身 (キーの順・字下げ・改行が違う)。書かずに記録だけする
 h=$(new_home t32 "${state_on}")
 put_fz "${h}" "$(fz_settings true)"
 put_repo_layouts "${h}" "$(pt_layouts "${lay_a}" "${lay_b}")"
@@ -1648,7 +1648,7 @@ put_dl() {
   mkdir -p "$(fz_dir "$1")"
   printf '%s' "$2" >"$(dl_json "$1")"
 }
-# PC の既定の形 (pjp-raiden の元の値): 縦向きは rows、横向きは priority-grid
+# PC の既定の形 (example-host の元の値): 縦向きは rows、横向きは priority-grid
 dl_vertical=$(dl_entry vertical '{"uuid":"","type":"rows","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
 dl_horizontal_pg=$(dl_entry horizontal '{"uuid":"","type":"priority-grid","show-spacing":true,"spacing":16,"zone-count":3,"sensitivity-radius":20}')
 # エディターがカスタムレイアウト (1080p) を横向きの既定にしたときに書く値 (zone-count と sensitivity-radius は 0)
@@ -1670,7 +1670,7 @@ fz3_home() {
   echo "${h}"
 }
 
-# pjp-raiden のディスプレイ (4K が 1 台、1920x1080 が 3 台) と、縦向きのディスプレイ
+# example-host のディスプレイ (4K が 1 台、1920x1080 が 3 台) と、縦向きのディスプレイ
 d_4k=$(disp 1 XXX0020 '5&61cfcb&0&UID8449' 3840 2160)
 d_ivm48=$(disp 2 IVM562D '5&61cfcb&0&UID8448' 1920 1080)
 d_ivm55=$(disp 3 IVM562D '5&61cfcb&0&UID8455' 1920 1080)
@@ -1682,7 +1682,7 @@ k_aus_a="AUS23CC|5&61cfcb&0&UID8453|4|${vd_a}"
 k_ivm48_a="IVM562D|5&61cfcb&0&UID8448|2|${vd_a}"
 k_ivm55_a="IVM562D|5&61cfcb&0&UID8455|3|${vd_a}"
 
-# pjp-raiden の形の組: 4K に 4k-43inch、1920x1080 の 2 台に 1080p があたり、AUS23CC の組 (エディターで選んだテンプレート) と
+# example-host の形の組: 4K に 4k-43inch、1920x1080 の 2 台に 1080p があたり、AUS23CC の組 (エディターで選んだテンプレート) と
 # UID8448 のシリアル違いの組 (FancyZones の既定のテンプレート) が残っている。つながっていない UID8451 の組 (番号 1 は別の型の
 # ディスプレイ) と、縦向きのディスプレイの組もある
 e0=$(apl_entry XXX0020 '5&61cfcb&0&UID8449' 1 "${vd_a}" custom "${uuid_a}" "${serial_1}")
@@ -1693,7 +1693,7 @@ e4=$(apl_entry IVM562D '5&61cfcb&0&UID8451' 1 "${vd_b}" priority-grid "${null_uu
 e5=$(apl_entry IVM562D '5&61cfcb&0&UID8455' 3 "${vd_a}" custom "${uuid_b}" "${serial_2}")
 e6=$(apl_entry DEL4321 '5&61cfcb&0&UID8460' 5 "${vd_a}" priority-grid "${null_uuid}")
 
-# 60. pjp-raiden の形: テンプレートの 2 組だけを 1080p にし、ほかの組・device (シリアルも)・並びは変えない。PowerToys の形で書いて
+# 60. example-host の形: テンプレートの 2 組だけを 1080p にし、ほかの組・device (シリアルも)・並びは変えない。PowerToys の形で書いて
 #     mv の後に touch し、書き換える前を退避する。記録はシリアルなしのキーで、埋めた組と目標と同じ組を持つ。出力は 1 組 1 行で、
 #     シリアルを出さない
 h=$(fz3_home t60)
@@ -1715,7 +1715,7 @@ if [[ $(rc "${h}") == 0 && $(doc_of "${apl}") == "$(want_doc "${before_apl}" 1,3
   && no_serial "${h}" && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
   ok "あて方: テンプレートの組だけを解像度の決まりのレイアウトにし、ほかの組・device・並びを変えず、退避・touch・記録 (シリアルなし) をする"
 else
-  ng "あて方 (pjp-raiden の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
+  ng "あて方 (example-host の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
 fi
 # shellcheck disable=SC2016 # PowerShell の変数の名前を文字のまま探す
 if ps_called "${h}" && [[ $(cat "${h}/ps-args") == '-NoProfile -NonInteractive -OutputFormat Text -EncodedCommand' ]] \
@@ -2174,7 +2174,7 @@ want_doc_add() {
   jq -c -S '.["applied-layouts"] += $ARGS.positional' --jsonargs "$@" <<<"${doc}"
 }
 
-# 80. pjp-raiden の形 (仮想デスクトップ 3 つ): 1 つのデスクトップにだけ組がある横向きの 2 台へ、残りの 2 つのデスクトップの組を作る。
+# 80. example-host の形 (仮想デスクトップ 3 つ): 1 つのデスクトップにだけ組がある横向きの 2 台へ、残りの 2 つのデスクトップの組を作る。
 #     device は同じ画面の組から写し (シリアルもそのまま。キーの並びも同じ)、virtual-desktop だけを替え、決まりのレイアウトをあてて末尾に足す。
 #     同じ回に埋める組 (テンプレート) と一緒に書き、記録はシリアルなしのキー。作る組は 1 組 1 行「組なし → …」で、シリアルを出さない
 h=$(fz3_home t80)
@@ -2203,7 +2203,7 @@ if [[ $(rc "${h}") == 0 && $(doc_of "${apl}") == "${want}" ]] && pt_form "${apl}
   && [[ $(grep -c ' → ' "${h}/out") == 5 ]] && no_serial "${h}" && [[ ! -s ${h}/err && ! -s ${h}/warnings ]]; then
   ok "C: 組の無い仮想デスクトップへ、同じ画面の組の device を写して (virtual-desktop だけ替えて) 組を作り、決まりのレイアウトをあてて記録する"
 else
-  ng "C (pjp-raiden の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
+  ng "C (example-host の形)" "rc=$(rc "${h}") calls=$(fs_calls "${h}") asg=$(asg_of "${h}") doc=$(doc_of "${apl}") $(outerr "${h}")"
 fi
 
 # 81. 次の回: 作る組も変える組も無いので書かず、揃っていると出す (作った組も決まりのレイアウトの組に数える)

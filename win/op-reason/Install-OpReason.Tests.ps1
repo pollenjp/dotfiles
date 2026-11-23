@@ -266,22 +266,22 @@ function New-TestTrigger {
     if ($Kind -eq 'Logon') { $h['UserId'] = $UserId }
     [pscustomobject]$h
 }
-$LogonMe = New-TestTrigger -Kind 'Logon' -UserId 'PJP-RAIDEN\polle'
+$LogonMe = New-TestTrigger -Kind 'Logon' -UserId 'EXAMPLE-HOST\alice'
 $EveryMinute = New-TestTrigger -Kind 'Time' -Interval 'PT1M'
-Test-Case '今のユーザーの logon と 1 分ごと (期限なし) は、置きたい形と同じ字' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, $EveryMinute) -Me 'polle' }
+Test-Case '今のユーザーの logon と 1 分ごと (期限なし) は、置きたい形と同じ字' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, $EveryMinute) -Me 'alice' }
 Test-Case '1 分ごとの trigger の始まりの時刻 (置いた時刻) は見ない (apply のたびに置き直さない)' 'logon+every PT1M' {
-    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Start '2026-12-01T09:30:00+09:00')) -Me 'polle'
+    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Start '2026-12-01T09:30:00+09:00')) -Me 'alice'
 }
-Test-Case 'DOMAIN\ の無い UserId も今のユーザーの logon' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'polle'), $EveryMinute) -Me 'polle' }
-Test-Case '間隔が違えば字も違う (置き直す)' 'logon+every PT5M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT5M')) -Me 'polle' }
-Test-Case '期限があれば for を足す (置き直す)' 'logon+every PT1M for P1D' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Duration 'P1D')) -Me 'polle' }
-Test-Case '前の形 (logon の trigger だけ) は logon' 'logon' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe) -Me 'polle' }
-Test-Case 'ほかのユーザーの logon は種類の名前' 'Logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'PJP-RAIDEN\alice'), $EveryMinute) -Me 'polle' }
-Test-Case 'ユーザーを決めない logon (だれの logon でも) は種類の名前' 'Logon' { Get-OpReasonRelayTriggerText -Triggers @(New-TestTrigger -Kind 'Logon' -UserId $null) -Me 'polle' }
+Test-Case 'DOMAIN\ の無い UserId も今のユーザーの logon' 'logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'alice'), $EveryMinute) -Me 'alice' }
+Test-Case '間隔が違えば字も違う (置き直す)' 'logon+every PT5M' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT5M')) -Me 'alice' }
+Test-Case '期限があれば for を足す (置き直す)' 'logon+every PT1M for P1D' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time' -Interval 'PT1M' -Duration 'P1D')) -Me 'alice' }
+Test-Case '前の形 (logon の trigger だけ) は logon' 'logon' { Get-OpReasonRelayTriggerText -Triggers @($LogonMe) -Me 'alice' }
+Test-Case 'ほかのユーザーの logon は種類の名前' 'Logon+every PT1M' { Get-OpReasonRelayTriggerText -Triggers @((New-TestTrigger -Kind 'Logon' -UserId 'EXAMPLE-HOST\bob'), $EveryMinute) -Me 'alice' }
+Test-Case 'ユーザーを決めない logon (だれの logon でも) は種類の名前' 'Logon' { Get-OpReasonRelayTriggerText -Triggers @(New-TestTrigger -Kind 'Logon' -UserId $null) -Me 'alice' }
 Test-Case '繰り返さない 1 回の trigger と、ほかの種類は種類の名前' 'logon+Time+Daily' {
-    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time'), (New-TestTrigger -Kind 'Daily')) -Me 'polle'
+    Get-OpReasonRelayTriggerText -Triggers @($LogonMe, (New-TestTrigger -Kind 'Time'), (New-TestTrigger -Kind 'Daily')) -Me 'alice'
 }
-Test-Case 'trigger が無ければ空' '' { Get-OpReasonRelayTriggerText -Triggers @() -Me 'polle' }
+Test-Case 'trigger が無ければ空' '' { Get-OpReasonRelayTriggerText -Triggers @() -Me 'alice' }
 
 # ConvertFrom-OpReasonRelayStatus: --status の出力の PID (op-reason の relay_status の文。英語と日本語)
 Test-Case '英語の出力から PID' 4242 { ConvertFrom-OpReasonRelayStatus -Code 0 -Text 'the SSH relay answers on \\.\pipe\op-reason-ssh-agent (pid 4242)' }

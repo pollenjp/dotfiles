@@ -287,10 +287,10 @@ record() {
   printf 'sock=%s\nclient=%s\nopened=%s000000000\n' "${agent}/$1" "$2" "$3" >"${conn}/$1"
 }
 : >"${agent}/s.k.sshd.A"
-record s.k.sshd.A polle@pjp-raiden "${t0859}"
+record s.k.sshd.A alice@example-host "${t0859}"
 ln -s "${agent}/s.k.sshd.A" "${HOME}/.ssh/agent.a.sock"
 expect_notice "記録のある接続は、記録の時刻と値で出す" \
-  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る" \
   'ssh h' "${work}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.a.sock"
 
 mkdir -p "${HOME}/b/agent"
@@ -301,9 +301,9 @@ expect_notice "記録の無い接続は、ファイルの時刻で出す" \
   'ssh h' "${work}" "SSH_AUTH_SOCK=${HOME}/b/agent/s.k.sshd.B"
 
 : >"${agent}/s.k.sshd.C"
-record s.k.sshd.C polle@pjp-raiden "${t1154}"
+record s.k.sshd.C alice@example-host "${t1154}"
 expect_notice "より新しい接続があれば添える" \
-  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る (より新しい接続: 10/22 11:54 alice@example-host)" \
   'ssh h' "${work}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.a.sock"
 
 : >"${HOME}/.1password/agent.sock"
@@ -320,11 +320,11 @@ expect_notice "コマンドの頭の SSH_AUTH_SOCK= が env より勝つ" \
   "${title} (ssh の接続): ssh h — 承認の画面はこのマシンの agent (~/.1password/agent.sock) が出す" \
   "SSH_AUTH_SOCK=${HOME}/.1password/agent.sock ssh h" "${work}" "SSH_AUTH_SOCK=${HOME}/.ssh/agent.dead.sock"
 expect_notice "コマンドの頭の SSH_AUTH_SOCK= の ~ を置き換える" \
-  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る (より新しい接続: 10/22 11:54 alice@example-host)" \
   'SSH_AUTH_SOCK=~/.ssh/agent.a.sock ssh h'
 # shellcheck disable=SC2016 # hook に渡すコマンドの文字 ($HOME は hook が置き換える)
 expect_notice "コマンドの頭の SSH_AUTH_SOCK= の \$HOME を置き換える" \
-  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)" \
+  "${title} (ssh の接続): ssh h — 承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る (より新しい接続: 10/22 11:54 alice@example-host)" \
   'SSH_AUTH_SOCK=$HOME/.ssh/agent.a.sock ssh h'
 
 # --- herdr の通知
@@ -516,7 +516,7 @@ child_hc='この端末は hc の指揮役の子 (hc の親の端末がいるか�
 outside='herdr の外の会話'
 # 接続の文 (fwd_sock は「承認の画面の接続」の節で作った、記録のある転送された agent と、より新しい接続のある口)
 fwd_sock="${HOME}/.ssh/agent.a.sock"
-fwd_conn='承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: 10/22 11:54 polle@pjp-raiden)'
+fwd_conn='承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る (より新しい接続: 10/22 11:54 alice@example-host)'
 local_sock="${HOME}/.1password/agent.sock"
 local_conn='承認の画面はこのマシンの agent (~/.1password/agent.sock) が出す'
 dead_conn='承認の画面は出ない (agent の口 ~/.ssh/agent.dead.sock の先が無い)'

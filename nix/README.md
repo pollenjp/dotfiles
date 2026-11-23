@@ -3643,7 +3643,7 @@ herdr の中の agent は手元の PC から転送された接続のもので（
 
 | いつ | すること |
 | --- | --- |
-| 打つ前（PreToolUse） | 一覧に当たれば、会話の画面に「🔑 1Password の承認が出るかも (<種類>): <コマンドの頭> — 承認の画面は 10/22 08:59 に polle@pjp-raiden から入った接続の端末に出る (より新しい接続: …)」を出す（WSL で `SSH_AUTH_SOCK` が空なら「Windows の 1Password が出す」）。herdr の pane なら、herdr の通知（どこから・頭・接続の 3 行、音つき）も出す。同じ pane からの通知は 10 分に 1 回。コマンドは止めない |
+| 打つ前（PreToolUse） | 一覧に当たれば、会話の画面に「🔑 1Password の承認が出るかも (<種類>): <コマンドの頭> — 承認の画面は 10/22 08:59 に alice@example-host から入った接続の端末に出る (より新しい接続: …)」を出す（WSL で `SSH_AUTH_SOCK` が空なら「Windows の 1Password が出す」）。herdr の pane なら、herdr の通知（どこから・頭・接続の 3 行、音つき）も出す。同じ pane からの通知は 10 分に 1 回。コマンドは止めない |
 | 断られたあと（PostToolUse・PostToolUseFailure） | 出力に agent の断り・agent との通信が切れた・agent に届かない（git の署名で口が無い・口の先が無いときの鍵の認証の失敗）があれば、Claude に「同じコマンドを打ち直さない。何をとどこからを書いてから、① 直し方（承認する・接続し直す・1Password を起動するなど）で打ち直す（推奨）② 飛ばして進める ③ 止める の問いを出す」と足す。herdr の指揮役の子は AskUserQuestion を使わずに問いを書いて終え、subagent は報告に書く。herdr の通知（理由ごとの title）も出す |
 
 | 種類 | 打つ前に当てるもの |

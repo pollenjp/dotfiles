@@ -80,7 +80,7 @@ Test-Case '入っている版の方が新しければ down (0.23.30 → 0.23.28)
 Test-Case '入っている版が一覧に無ければ unknown' 'unknown' { Get-NtnDirection -Versions $showVersions -Installed '0.23.24' -Target $V }
 Test-Case '一覧が読めなければ unknown' 'unknown' { Get-NtnDirection -Versions @() -Installed $Older -Target $V }
 
-# Test-WingetPinned: winget pin list の出力に、その Id の行があるか。2026-11-14 に pjp-raiden の
+# Test-WingetPinned: winget pin list の出力に、その Id の行があるか。2026-11-14 に example-host の
 # winget pin list が出したもの (Notion.ntn の pin はまだ無い)
 $pinsNow = @(
     'Name              Id                        Version     Source Pin type'
@@ -139,7 +139,7 @@ function New-State {
     [pscustomobject]$s
 }
 $missing = @{ Exists = $false; Installed = $null; Plan = 'install'; Direction = 'unknown'; Pinned = $false; PathKind = 'none'; PathResolved = $null }
-# 手で入れた新しい版 (pjp-raiden の 2026-11-14 の今。pin も無い)
+# 手で入れた新しい版 (example-host の 2026-11-14 の今。pin も無い)
 $handNewer = @{ Installed = $Newer; Plan = 'change'; Direction = 'down'; Pinned = $false; Versions = @($Newer, $V, $Older); Latest = $Newer }
 
 # Test-NtnDrift / Test-NtnPathDrift: 揃える手順で直る差と、直らない PATH のずれ

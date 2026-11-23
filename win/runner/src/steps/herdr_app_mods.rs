@@ -445,7 +445,7 @@ mod tests {
         assert_eq!(e.read("mods/pjp-hub-panel/main.js"), "// v2\n");
     }
 
-    /// pjp-raiden の初めての apply: 手で置いた同じ 3 つと、herdr-app が書いた 2 つがある
+    /// example-host の初めての apply: 手で置いた同じ 3 つと、herdr-app が書いた 2 つがある
     #[test]
     fn adopts_identical_hand_placed_files() {
         let e = Env::new();

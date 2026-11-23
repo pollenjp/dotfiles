@@ -318,7 +318,7 @@ mod tests {
     #[test]
     fn ok_when_the_hub_matches() {
         let w = World::new();
-        let sys = w.sys((0, vec!["C:\\Users\\polle\\h: 差は無い"]), 0);
+        let sys = w.sys((0, vec!["C:\\Users\\alice\\h: 差は無い"]), 0);
         let o = w.run(&sys, Mode::Apply { force: false });
         assert_eq!(o.kind, Kind::Ok, "{o:?}");
         assert_eq!(inits(&sys), 0);
@@ -337,8 +337,8 @@ mod tests {
     fn creates_a_missing_hub() {
         let w = World::new();
         for diff in [
-            "差: C:\\Users\\polle\\h は git repo でない",
-            "差: C:\\Users\\polle\\h が無い",
+            "差: C:\\Users\\alice\\h は git repo でない",
+            "差: C:\\Users\\alice\\h が無い",
         ] {
             let sys = w.sys((1, vec![diff]), 0);
             let o = w.run(&sys, Mode::Check);
@@ -375,7 +375,7 @@ mod tests {
                 "差: まだハブでない。雛形の外のものがある: notes.txt。このままでは pjp hub init は止まる",
             ],
             vec![
-                "pjp hub check: C:\\Users\\polle\\h は repo C:\\Users\\polle の中。ハブは repo の外に作る",
+                "pjp hub check: C:\\Users\\alice\\h は repo C:\\Users\\alice の中。ハブは repo の外に作る",
             ],
         ] {
             let sys = w.sys((1, lines.clone()), 0);

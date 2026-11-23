@@ -67,7 +67,7 @@ Test-Case '版の行だけを拾う (見出し・区切りは拾わない)' "$V 
 
 # Get-ClaudeCodePlan: することを決める
 Test-Case '入っていなければ install' 'install' { Get-ClaudeCodePlan -Exists $false -Installed $null -Target $V }
-Test-Case '同じ版なら none (pjp-raiden の 2026-11-14 の今)' 'none' { Get-ClaudeCodePlan -Exists $true -Installed $V -Target $V }
+Test-Case '同じ版なら none (example-host の 2026-11-14 の今)' 'none' { Get-ClaudeCodePlan -Exists $true -Installed $V -Target $V }
 Test-Case '違う版なら change' 'change' { Get-ClaudeCodePlan -Exists $true -Installed $Older -Target $V }
 Test-Case 'claude.exe があるのに版が読めなければ change' 'change' { Get-ClaudeCodePlan -Exists $true -Installed $null -Target $V }
 
@@ -125,7 +125,7 @@ function New-State {
     [pscustomobject]$s
 }
 $missing = @{ Exists = $false; Installed = $null; Plan = 'install'; Direction = 'unknown'; Pinned = $false; PathKind = 'none'; PathResolved = $null }
-# 手で入れた固定した版 (pjp-raiden の 2026-11-14 の今。pin だけが無い)
+# 手で入れた固定した版 (example-host の 2026-11-14 の今。pin だけが無い)
 $handSame = @{ Pinned = $false }
 $changeUp = @{ Installed = $Older; Plan = 'change'; Direction = 'up' }
 

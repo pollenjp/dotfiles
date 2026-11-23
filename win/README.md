@@ -230,8 +230,8 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 
 ### ホストの値
 
-dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml` (`<PC の名前>` は `hostname` を小文字にしたもの。pjp-raiden なら
-`polle@pjp-raiden.toml`)。WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。
+dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml` (`<PC の名前>` は `hostname` を小文字にしたもの。example-host なら
+`alice@example-host.toml`)。WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。
 
 ```toml
 group = "personal"            # personal (既定)・company・client (nix/README.md の「設定グループ」)
@@ -3475,7 +3475,7 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 - PATH で別の ntn (npm の global の `ntn.cmd`・cargo で入れた `ntn.exe` など) が先に引かれると、`-Check` の「PATH の ntn」が ⚠ に
   なり、外すディレクトリが ※ の行に出る。揃える手順では直らない (setup は揃えずに ⚠ で知らせる)。PATH は `.exe` のほか `.cmd`・
   `.bat`・`.ps1` も、PowerShell と同じくディレクトリの順に見る
-- winget が置き場所をユーザーの PATH に足すマシン (pjp-raiden) と、`%LOCALAPPDATA%\Microsoft\WinGet\Links` に symlink を置くマシン
+- winget が置き場所をユーザーの PATH に足すマシン (example-host) と、`%LOCALAPPDATA%\Microsoft\WinGet\Links` に symlink を置くマシン
   (開発者モードなど) がある。どちらも winget のものとして読む
 - 入れ替えの途中で `winget install` が落ちると、ntn が入っていない状態で止まることがある (取得は先に確かめてあるので稀)。そのときは
   `Install-Ntn` を打ち直す (`setup --update` でも入る)
