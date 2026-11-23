@@ -4,7 +4,7 @@
 #   - Windows: runner の git-config の手順 (win/runner/src/steps/git_config.rs) が clone の中のこのファイルを読み、
 #     %USERPROFILE%\.config\git\config・ignore に書く (win/README.md の「git の設定」)
 #
-# OS で違うもの (1Password の署名・delta・lfs の filter の git-lfs のパス・pollenjp-sub の includeIf の条件) はここに書かず、
+# OS で違うもの (1Password の署名・delta・lfs の filter の git-lfs のパス・pollenjp-sub の includeIf の条件・Windows の core.sshCommand) はここに書かず、
 # git.nix と runner が持つ。どの OS でも同じにする値を足す・変えるときは、ここだけを直す (Linux の CI の
 # win/runner/tests/git_parity.rs が、WSL の home-manager の設定と Windows に書く中身を突き合わせる)。
 #
