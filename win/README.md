@@ -10,7 +10,7 @@ Claude Code で使う W0-2 の手順・Windows の Claude Code に dotfiles の�
 runner が流す (経緯は [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md) と
 dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)・ADR 065
 (`docs/adr/065_win_claude_config_*`)・ADR 066 (`docs/adr/066_win_git_config_*`)・ADR 068 (`docs/adr/068_win_herdr_app_mods_*`)・ADR 070
-(`docs/adr/070_win_herdr_app_keys_*`)・ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`))。
+(`docs/adr/070_win_herdr_app_keys_*`)・ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`)・ADR 090 (`docs/adr/090_win_claude_t3_launch_args_*`))。
 
 受け持ちを runner に切り替えたホスト (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) では、WSL の setup は Windows に触らない。
 この README で「`~/dotfiles/setup --update` で配る・入れる・揃える」と書いた Windows の手順は、そのホストでは Windows の clone を pull してから
@@ -57,6 +57,8 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
+| `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc の子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
+| `claude-code/t3/CLAUDE.t3.md` | `%USERPROFILE%\.claude\t3\CLAUDE.t3.md` (`claude-t3` の手順が置く) | T3 Code の会話だけの指示。T3 の Launch arguments の `--append-system-prompt-file` が system prompt の後ろに足す (herdr-app を前提にした指示の読み替え) ([後述](#claude-code-の設定)) |
 | (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
 
 ## bootstrap (新しい Windows で最初に流す)
@@ -408,9 +410,10 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-notion` | ホストの値の `[claude.notion]` から `%USERPROFILE%\.local\state\dotfiles\claude-notion.json` を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
+| 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
-| 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
+| 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 90 | `op-reason` | `Install-OpReason.ps1 -SshRelay <モード\|off>`: WSL の op の Windows の部品 (op-reason の zip) を、入っていなければ入れ、版がずれていれば入れ替える (ps1 は `-IfMissing` を持たない)。`-SshRelay` は `-Check` にも揃える流れにも渡し、ホストの値の `opReasonSshRelay` が on なら `[opReason] sshRelayMode` のモード (SSH の中継の logon の task を置いて起こす)、off なら `off` (残った task を止めて消す)。動いている `op-reason.exe` が task の中継だけなら、中継を止めて入れ替えて起こし直す (ほかの `op-reason.exe` が動いている・中継が窓を開いていれば、ps1 が何も変えずに止まる) ([op-reason](#op-reason)・[SSH の中継](#ssh-の中継)) | `onePassword` | 有る |
@@ -433,7 +436,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
-| 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
+| 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・Launch arguments・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。Launch arguments は `claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
@@ -563,13 +566,14 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 Windows の Claude Code (herdr-app のハブ) に、WSL の Claude Code と同じ決まり (dotfiles の `nix/files/claude/` の `CLAUDE.md`・skill と、settings.json の
 hook・status line・skillOverrides・footer のリンク) を配る手順。Linux では `nix/home/modules/claude.nix` (home-manager) がファイルを置き、
 `nix/scripts/bootstrap-claude-{hook,statusline,footer-links,skill-overrides}.sh` が settings.json に書く。Windows では runner の 5 つの手順が同じことをする
-(経緯は dotfiles-private の ADR 065 (`docs/adr/065_win_claude_config_*`))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも
+(経緯は dotfiles-private の ADR 065 (`docs/adr/065_win_claude_config_*`))。T3 Code の会話だけに足す設定は、Linux に無い手順 `claude-t3` が置く
+([T3 Code の会話だけの設定](#t3-code-の会話だけの設定))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも
 `dotfiles apply` が流す (ホストの値は要る)。
 
 ```powershell
-dotfiles check --steps claude-files,claude-hook,claude-statusline,claude-footer-links,claude-skill-overrides   # 差を見る (何も書かない)
-dotfiles apply --dry-run                                                                                      # することを出す
-dotfiles apply                                                                                                # 揃える
+dotfiles check --steps claude-files,claude-hook,claude-statusline,claude-footer-links,claude-skill-overrides,claude-t3   # 差を見る (何も書かない)
+dotfiles apply --dry-run                                                                                                 # することを出す
+dotfiles apply                                                                                                           # 揃える
 ```
 
 | 手順 | すること | 気をつけること |
@@ -578,7 +582,8 @@ dotfiles apply                                                                  
 | `claude-hook` | `settings.json` の `hooks` に、hook の口を exec form (`command` に exe の絶対パス、`args` に `claude-hook <名前>`) で登録する。event・matcher・if は Linux の `bootstrap-claude-hook.sh` の同じ hook の行と同じ。ただしコマンドを読む hook は PowerShell の tool にも登録する (matcher の `Bash` は `Bash\|PowerShell`、if で絞る pr-assignee-nudge は `PowerShell(gh pr create *)` の組も足す) | shell を通さないので、Git Bash が見つからない会話でも PowerShell が command を読まない (shell form の PreToolUse の hook は、Git Bash が無いと失敗が tool を止めうる)。この手順の口 (`dotfiles-claude.exe`) の登録で今は入れない組は外す。ほかの hook (ハブの `pjp hub guard` などのプロジェクトの hook は別のファイル) とキーの順は残す |
 | `claude-statusline` | `settings.json` の `statusLine` を `~/.claude/hooks/dotfiles-claude.exe claude-statusline` にする (別の値は置き換える) | status line は Git Bash (無ければ PowerShell) が読む shell の文なので、Claude Code の docs のとおり `~` と `/` で書く |
 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` で丸ごと置き換える (cc-page の規則の port は cc-pages の既定の 7777) | 手で足した項目も消える (Linux と同じ。足すなら repo の `footer-links.json`) |
-| `claude-skill-overrides` | `settings.json` の `skillOverrides` に、`pjp-dev-tracker` (ホストの値の `devTracker` で on / off)・pack の skill (入口 `pjp-pack-<pack>` があれば `name-only`)・claude.ai から同期された skill (`anthropic-skills:<名前>` を `user-invocable-only`) を書く。選び方は Linux の `bootstrap-claude-skill-overrides.sh` と同じ | 書いた key は `%LOCALAPPDATA%\dotfiles\state\claude-skill-overrides.applied.json` に控え、書かなくなったら戻す。手で別の値を書いた key には触らない。order は 60 (claude-files と claude-skills が skill をつないだ後) |
+| `claude-skill-overrides` | `settings.json` の `skillOverrides` に、`pjp-dev-tracker` (ホストの値の `devTracker` で on / off)・`pjp-t3-hub` (いつも off。T3 Code の会話だけが `--settings` で on にする)・pack の skill (入口 `pjp-pack-<pack>` があれば `name-only`)・claude.ai から同期された skill (`anthropic-skills:<名前>` を `user-invocable-only`) を書く。選び方は Linux の `bootstrap-claude-skill-overrides.sh` と同じ | 書いた key は `%LOCALAPPDATA%\dotfiles\state\claude-skill-overrides.applied.json` に控え、書かなくなったら戻す (`pjp-dev-tracker`・`pjp-t3-hub` は控えずにいつも書く)。手で別の値を書いた key には触らない。order は 60 (claude-files と claude-skills が skill をつないだ後) |
+| `claude-t3` | `claude-code/t3/` の `settings.json`・`CLAUDE.t3.md` を `%USERPROFILE%\.claude\t3\` に置き (改行は LF。JSON は object かを確かめてから置く)、T3 の Launch arguments の文を出す (`windowsT3Code` のホストでは `t3-code-settings` が書く。[T3 Code の会話だけの設定](#t3-code-の会話だけの設定)) | 記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json`)。Windows 側で変えた・記録の無い違う中身は衝突で飛ばす (dotfiles の `win/claude-code/t3/` に取り込むか、`dotfiles apply --steps claude-t3 --force` で上書き)。置くファイルから外したものは、置いたままなら消す。T3 の設定は書かない |
 
 - settings.json を書く手順 (`claude-env` も) は、どれも自分の持つキーだけを直し、ほかのキーと順を残す。キーの順を見ずに同じなら書かない。書く前の中身を
   `%LOCALAPPDATA%\dotfiles\state\claude-settings\backup\` に写す (手順をまたいで、いちばん古いもの (dotfiles の手順が初めて書く前の中身) と新しい方から 10 個)
@@ -606,6 +611,37 @@ Linux の CI が同じ入力で突き合わせる)。Windows の Claude Code は
 | `op-reason-guard.sh` | 入れない | WSL の op の包み (op-reason) を守るもの。Windows の op は op.exe そのもの |
 | `footer-links-archive.sh` | 入れない | cc-pages が Windows に無い (claude-skills の spec も Windows の cc-pages は扱わない) |
 | `ssh-agent-notice.sh` | 入れない (前提が違う) | WSL の ssh は Windows の ssh.exe を包み、承認の画面がどこに出るかを知らせる hook。Windows の Claude の git は gh の HTTPS (`claude-env`) で SSH の鍵を使わず、Git Bash の ssh は 1Password の agent (Windows の named pipe) を使わない。承認の画面は、ユーザーが見ている Windows の画面に出る |
+
+#### T3 Code の会話だけの設定
+
+T3 Code (desktop app) の Claude の会話も、herdr-app のハブと同じ `~/.claude` (CLAUDE.md・skill・settings.json) を読む。T3 の会話だけに
+足すもの (herdr-app を前提にした指示の読み替えと、skill の見え方) は、T3 の Launch arguments で Claude Code に渡す。ファイルは runner の
+`claude-t3` が `%USERPROFILE%\.claude\t3\` に置く。Launch arguments は、T3 Code を dotfiles で入れたホスト (道具の switch `windowsT3Code`) では
+`t3-code-settings` が T3 の settings.json に書き、ほかのホストは人が T3 に書く (経緯は dotfiles-private の ADR 090
+(`docs/adr/090_win_claude_t3_launch_args_*`))。
+
+| ファイル | 渡す引数 | 効き方 |
+| --- | --- | --- |
+| `settings.json` | `--settings` | T3 が読み、T3 自身の設定の下に重ねて渡す。flag settings なので user の `settings.json` より強く、`skillOverrides` は skill ごとに勝つ。herdr と hc の子の skill (`herdr-app`・`pjp-herdr-hub`・`pjp-herdr-other-repo`・`pjp-hc-hub`・`pjp-hc-child`) を off、`pjp-t3-hub` (ほかの会話では `claude-skill-overrides` がいつも off にする) を on にする。`hc` は残す |
+| `CLAUDE.t3.md` | `--append-system-prompt-file` | T3 の指示の後ろ (system prompt の末尾) に足す。`~/.claude/CLAUDE.md` は置き換えず、そのまま読まれる |
+
+Launch arguments の文 (T3 の `%USERPROFILE%\.t3\userdata\settings.json` の `providerInstances.claudeAgent.config.launchArgs` に入る):
+
+```text
+--settings <ホーム>\.claude\t3\settings.json --append-system-prompt-file <ホーム>\.claude\t3\CLAUDE.t3.md
+```
+
+- `<ホーム>` は `%USERPROFILE%` の絶対パス。`claude-t3` の check・apply が、この PC のパスで同じ文を出す (パスに空白があれば `"` で囲む)
+- `windowsT3Code` のホスト: `dotfiles apply` で、`t3-code-settings` (order 98) がこの文を `launchArgs` に書く。値ごと合わせるので、T3 の画面で
+  変えても次の apply で戻る。書くのは `claude-t3` (order 50) の置いた 2 つのファイルがそろっているときだけで、そろっていなければ今の値を残し、
+  ※ で知らせる (読めないファイルを渡すと、T3 はその会話の送信を失敗にする)。書いた後は T3 Code を開き直す (タスクトレイからも終える。
+  [T3 Code](#t3-code) のほかの決めたキーと同じ)
+- ほかのホスト: T3 の Settings → Providers → Claude → Launch arguments に、`claude-t3` が出した文を写して貼る。書くのは `dotfiles apply` で
+  `claude-t3` がファイルを置いてから
+- Launch arguments が変わった後と、`claude-t3` がファイルを置き直した後は、T3 の会話を開き直す (開いている会話には効かない)
+- 直すのは dotfiles の `win/claude-code/t3/` (置き先の写しを変えると、次の `dotfiles apply` が衝突として知らせる)
+- 確かめるのは T3 の会話の skill の一覧 (herdr と hc の子の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
+- T3 のハブの子は、つないだ Linux の環境に T3 のスレッドとして立てる (`pjp child new` は使わない。手順は claude-skills の `pjp-t3-hub`)。`CLAUDE.t3.md` もその向きで書く
 
 ### claude-personal・claude-work
 
@@ -3701,12 +3737,14 @@ Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする�
   clearClaudeEntrypoint = true   # クレジットを使う間だけ (下の「CLAUDE_CODE_ENTRYPOINT」)
   ```
 
-- `t3-code-settings` が合わせるもの (T3 Code も書くので、決めたキーだけ。値は repo の `nix/files/t3-code/managed-settings.json` の 1 か所で、Linux の setup と共有):
+- `t3-code-settings` が合わせるもの (T3 Code も書くので、決めたキーだけ。値は repo の `nix/files/t3-code/managed-settings.json` の 1 か所で、Linux の setup と共有。
+  `launchArgs` だけは Windows だけで、値はこの PC の置き先で決まる):
 
   | 所 | 値 |
   | --- | --- |
   | ユーザー環境変数 `T3CODE_TELEMETRY_ENABLED` | `false` (テレメトリを切る。ブラウザ版・モバイル版の relay tracing と T3 Connect の Publish agent activity は、これでは止まらない) |
-  | `providerInstances.claudeAgent` の `driver`・`config.homePath` | `claudeAgent`・`~/.claude-t3` (T3 の Claude は `CLAUDE_CONFIG_DIR=~/.claude-t3` で動く。`config` のほかのキー (Launch arguments の `launchArgs` など) は残す) |
+  | `providerInstances.claudeAgent` の `driver`・`config.homePath` | `claudeAgent`・`~/.claude-t3` (T3 の Claude は `CLAUDE_CONFIG_DIR=~/.claude-t3` で動く。`config` のほかのキーは残す) |
+  | `providerInstances.claudeAgent.config.launchArgs` (Launch arguments) | `claude-t3` が出す文 ([T3 Code の会話だけの設定](#t3-code-の会話だけの設定))。`claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く (そろっていなければ今の値を残し、※ で知らせる) |
   | `providerInstances.claudeAgent.environment` の `CLAUDE_CODE_ENTRYPOINT` | `[t3Code] clearClaudeEntrypoint = true` なら空の値の要素 (ほかの要素は残す)。false なら外す |
   | `defaultModelSelection` | Claude の Opus 5.5 (`claude-opus-5-5`)・effort high |
   | `defaultThreadEnvMode` | `worktree` (新しいスレッドを新しい worktree で始める) |
@@ -3717,7 +3755,7 @@ Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする�
 
 | コマンド | すること |
 | --- | --- |
-| `dotfiles apply --steps t3-code,t3-code-settings` | 入っていなければ入れ (UAC は出ない)、環境変数と settings.json を合わせる。入っていれば上げない (古ければ知らせる) |
+| `dotfiles apply --steps t3-code,t3-code-settings` | 入っていなければ入れ (UAC は出ない)、環境変数と settings.json を合わせる。入っていれば上げない (古ければ知らせる)。Launch arguments は `claude-t3` が置いたファイルがあるときだけ書く (無ければ `--steps` に `claude-t3` も足す) |
 | `Install-T3Code -Check` (PowerShell) | 固定した版との差を出すだけ |
 | `Install-T3Code` (PowerShell) | 固定した版に揃える (上げるときは T3 Code を閉じてから。pin も足す) |
 

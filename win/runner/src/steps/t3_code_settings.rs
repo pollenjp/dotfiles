@@ -11,9 +11,16 @@
 //! ## settings.json
 //!
 //! T3 Code も書くファイルなので、決めたキーだけを合わせ、ほかのキーと順を残す (順を保つ JSON の型 `ojson`)。決まりは Linux の
-//! `nix/scripts/bootstrap-t3-code.sh` と同じで、値は 1 か所 (`nix/files/t3-code/managed-settings.json`) から読む:
+//! `nix/scripts/bootstrap-t3-code.sh` と同じで、値は 1 か所 (`nix/files/t3-code/managed-settings.json`) から読む (`launchArgs` だけは Windows
+//! だけの決まりで、値はこの PC の置き先で決まる):
 //!
-//! - `providerInstances.claudeAgent.driver` と `config.homePath` を上書きする (`config` のほかのキー (`launchArgs` など) は残す)
+//! - `providerInstances.claudeAgent.driver` と `config.homePath` を上書きする (`config` のほかのキーは残す)
+//! - `providerInstances.claudeAgent.config.launchArgs` (T3 の Launch arguments): 手順 claude-t3 が出す文 (`claude_t3::launch_args`。claude-t3 の
+//!   置き先 `%USERPROFILE%\.claude\t3\` の 2 つのファイルを指す) に合わせる。値ごと合わせるので、T3 の画面で変えても次の apply で戻る。置き先に
+//!   2 つのファイルがそろっていなければ書かず、今の値を残して締めの行の ※ で知らせる (T3 は読めないファイルを渡されると送信を失敗にする)。
+//!   check と dry-run は、置き先にまだ無くても、同じ apply で claude-t3 (order 50) が置けるなら (道具の switch `windowsClaudeCode` が on で、repo の
+//!   ファイルが読める) 置いた後の値で比べる (dotfiles-private の docs/adr/090_win_claude_t3_launch_args_*。Linux に claude-t3 は無いので、Linux の
+//!   setup は書かない)
 //! - `providerInstances.claudeAgent.environment`: ホストの値の `[t3Code] clearClaudeEntrypoint` が true なら、`entrypointEnvironment` と
 //!   同じ名前の要素を、最初の位置で 1 つに置き換える (無ければ末尾に足す)。false なら同じ名前の要素を外す (配列が無ければ作らない)
 //! - `defaultModelSelection` (丸ごと)・`defaultThreadEnvMode` を上書きする
@@ -23,6 +30,7 @@
 //!
 //! claude-t3 のログイン (`%USERPROFILE%\.claude-t3\.credentials.json`) が無ければ、手でログインする案内を添える (中身は読まない)。
 
+use super::claude_t3;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
@@ -55,7 +63,7 @@ impl Step for T3CodeSettings {
         StepInfo {
             id: "t3-code-settings",
             order: 98,
-            title: "T3 Code のテレメトリを切る環境変数と、settings.json の Claude の home・新しいスレッドの既定を合わせる",
+            title: "T3 Code のテレメトリを切る環境変数と、settings.json の Claude の home・Launch arguments・新しいスレッドの既定を合わせる",
             gate: Gate::Tool("windowsT3Code"),
             ported: true,
             windows_only: true,
@@ -229,15 +237,101 @@ fn settings_row(ctx: &mut Ctx, mode: Mode) -> Outcome {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (OValue::Object(Vec::new()), false),
         Err(e) => return Outcome::new(Kind::Failed, format!("{shown} が読めない ({e})")),
     };
-    let after = match merged(&before, ctx.host.t3_clear_claude_entrypoint) {
+    let launch = launch_args_plan(ctx, mode);
+    let after = match merged(&before, ctx.host.t3_clear_claude_entrypoint, launch.value()) {
         Ok(v) => v,
         Err(why) => return Outcome::new(Kind::Failed, format!("{shown}: {why} → 手で直す")),
     };
+    let row = write_settings(ctx, mode, &path, &before, existed, &after);
+    match launch.note() {
+        Some(n) => row.note(n),
+        None => row,
+    }
+}
+
+/// `launchArgs` (T3 の Launch arguments) の合わせ方 (dotfiles-private の docs/adr/090_win_claude_t3_launch_args_*)
+enum LaunchArgs {
+    /// claude-t3 の置き先に 2 つのファイルがそろっている: この値に合わせる
+    Set(String),
+    /// check・dry-run で、置き先にはまだ無いが、同じ apply で claude-t3 (order 50) が先に置ける: 置いた後の値で比べる (知らせる文つき)
+    AfterPlace(String, String),
+    /// 置き先に 2 つのファイルがそろっていない: 書かない (今の値を残す)。知らせる文つき
+    Keep(String),
+}
+
+impl LaunchArgs {
+    /// 合わせる値 (None は今の値を残す)
+    fn value(&self) -> Option<&str> {
+        match self {
+            LaunchArgs::Set(v) | LaunchArgs::AfterPlace(v, _) => Some(v),
+            LaunchArgs::Keep(_) => None,
+        }
+    }
+
+    /// 締めの行に添える文
+    fn note(&self) -> Option<&str> {
+        match self {
+            LaunchArgs::Set(_) => None,
+            LaunchArgs::AfterPlace(_, n) | LaunchArgs::Keep(n) => Some(n),
+        }
+    }
+}
+
+/// `launchArgs` をどう合わせるか。値は claude-t3 が出す文 (置き先の絶対パス)。置き先に 2 つのファイルがそろっていなければ書かない (T3 は読めない
+/// ファイルを渡されると送信を失敗にする)。check と dry-run は、まだ無くても、同じ apply で claude-t3 が置けるなら (道具の switch
+/// `windowsClaudeCode` が on で、repo のファイルが読める) 置いた後の値で比べる。
+fn launch_args_plan(ctx: &Ctx, mode: Mode) -> LaunchArgs {
+    let dir = claude_t3::t3_dir(ctx);
+    let value = claude_t3::launch_args(&dir);
+    let missing: Vec<&str> = claude_t3::FILES
+        .into_iter()
+        .filter(|f| !dir.join(f).is_file())
+        .collect();
+    if missing.is_empty() {
+        return LaunchArgs::Set(value);
+    }
+    let missing = missing.join("・");
+    let claude_code = ctx.host.tool("windowsClaudeCode");
+    let root = ctx.repo_path(claude_t3::SOURCE);
+    let placeable = claude_code
+        && claude_t3::FILES
+            .into_iter()
+            .all(|f| claude_t3::read_source(&root, f).is_ok());
+    if !mode.writes() && placeable {
+        return LaunchArgs::AfterPlace(
+            value,
+            format!(
+                "launchArgs (T3 の Launch arguments) は、claude-t3 が {} に {missing} を置いてから書く (apply では claude-t3 が先に流れる)",
+                dir.display()
+            ),
+        );
+    }
+    let how = if claude_code {
+        "dotfiles apply で claude-t3 が置いてから、もう一度 apply する"
+    } else {
+        "置くのは道具の switch windowsClaudeCode の手順 claude-t3"
+    };
+    LaunchArgs::Keep(format!(
+        "{} に {missing} が無いので、launchArgs (T3 の Launch arguments) は書かない (今の値を残す)。{how}",
+        dir.display()
+    ))
+}
+
+/// 合わせた中身を書く (check と dry-run は書かない)。
+fn write_settings(
+    ctx: &mut Ctx,
+    mode: Mode,
+    path: &Path,
+    before: &OValue,
+    existed: bool,
+    after: &OValue,
+) -> Outcome {
+    let shown = path.display().to_string();
     if existed && before.to_value() == after.to_value() {
         ctx.say(format!("登録済みです: {shown} の決めたキー"));
         return Outcome::new(
             Kind::Ok,
-            "T3 Code の settings.json の決めたキー (Claude の home・新しいスレッドの既定) は登録済み",
+            "T3 Code の settings.json の決めたキー (Claude の home・Launch arguments・新しいスレッドの既定) は登録済み",
         );
     }
     let kind = if existed { Kind::Fix } else { Kind::Missing };
@@ -259,7 +353,7 @@ fn settings_row(ctx: &mut Ctx, mode: Mode) -> Outcome {
         Mode::Apply { .. } => {
             if existed {
                 let dir = ctx.state_dir.join("t3-code-settings").join("backup");
-                match fsutil::backup_copy(&path, &dir, "settings", BACKUPS) {
+                match fsutil::backup_copy(path, &dir, "settings", BACKUPS) {
                     Ok(copied) => ctx.say(format!("前の中身を写しました: {}", copied.display())),
                     Err(e) => {
                         return Outcome::new(
@@ -269,7 +363,7 @@ fn settings_row(ctx: &mut Ctx, mode: Mode) -> Outcome {
                     }
                 }
             }
-            match fsutil::write_atomic(&path, after.to_pretty().as_bytes()) {
+            match fsutil::write_atomic(path, after.to_pretty().as_bytes()) {
                 Ok(()) => {
                     ctx.say(format!("登録しました: {shown} の決めたキー"));
                     ctx.say("動いている T3 Code が読み直さないことがある。T3 Code を開き直す");
@@ -324,18 +418,27 @@ fn name_of(v: &OValue) -> Option<&str> {
     }
 }
 
-/// settings.json に決めたキーを合わせた値 (`before` は object)。合わせるキーの型が違えば誤り。
-pub fn merged(before: &OValue, clear_entrypoint: bool) -> Result<OValue, String> {
+/// settings.json に決めたキーを合わせた値 (`before` は object)。`launch_args` が Some なら `config.launchArgs` もその値にする (None なら今の値を
+/// 残す)。合わせるキーの型が違えば誤り。
+pub fn merged(
+    before: &OValue,
+    clear_entrypoint: bool,
+    launch_args: Option<&str>,
+) -> Result<OValue, String> {
     let m = managed();
     let mut after = before.clone();
     {
         let providers = child_object(&mut after, "providerInstances", "providerInstances")?;
         let claude = child_object(providers, "claudeAgent", "providerInstances.claudeAgent")?;
         claude.set("driver", managed_at(&m, &["claudeAgent", "driver"]).clone());
-        child_object(claude, "config", "providerInstances.claudeAgent.config")?.set(
+        let config = child_object(claude, "config", "providerInstances.claudeAgent.config")?;
+        config.set(
             "homePath",
             managed_at(&m, &["claudeAgent", "homePath"]).clone(),
         );
+        if let Some(args) = launch_args {
+            config.set("launchArgs", OValue::String(args.to_string()));
+        }
         let entry = managed_at(&m, &["entrypointEnvironment"]).clone();
         let entry_name = name_of(&entry)
             .expect("entrypointEnvironment の name")
@@ -389,9 +492,13 @@ mod tests {
     //! - 合わせ方 (Linux の bootstrap-t3-code.sh と同じ決まり): 無ければ合わせるキーだけ。ほかのキーと順、config と environment のほかの
     //!   要素を残す。ENTRYPOINT が on なら同じ名前の要素を最初の位置で 1 つに置き換え (無ければ末尾に足す)、off なら外し、配列が無ければ
     //!   作らない。手で書いた settings.json (example-host のもの) には defaultModelSelection・defaultThreadEnvMode を足すだけ。型が違えば誤り
+    //! - launchArgs: 値を渡せばその値にし (今の値も上書き)、config のほかのキーと順を残す。渡さなければ今の値を残す (無ければ作らない)
     //! - managed-settings.json の値 (Claude の home・Opus 5.5 の effort high・新しい worktree)
     //! - 手順: そろっていれば書かない。check と dry-run は書かない。apply は前の中身を写してから書く (無かったら写さない)。壊れた JSON は書かない。
     //!   claude-t3 のログインが無ければ ※ を添える
+    //! - 手順の launchArgs: claude-t3 の置き先に 2 つのファイルがそろっていれば claude-t3 の出す文に合わせ、T3 の画面で変えても apply で戻す。
+    //!   そろっていなければ書かず (今の値を残す) ※ を添える。check と dry-run は、同じ apply で claude-t3 が置けるなら置いた後の値で比べる
+    //!   (windowsClaudeCode が off・repo にファイルが無いなら比べない)
     //! - 環境変数: 偽の PowerShell の none・value= を読み、違えば apply で名前と値を env で渡して書く。check は書かない。落ちたら誤り
 
     use super::*;
@@ -428,14 +535,14 @@ mod tests {
 
     #[test]
     fn merge_creates_only_the_managed_keys() {
-        let got = merged(&j("{}"), true).unwrap();
+        let got = merged(&j("{}"), true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
                 r#"{{"providerInstances":{{"claudeAgent":{{"driver":"claudeAgent","config":{{"homePath":"~/.claude-t3"}},"environment":[{ENTRY}]}}}},"defaultModelSelection":{DMS},"defaultThreadEnvMode":"worktree"}}"#
             )
         );
-        let got = merged(&j("{}"), false).unwrap();
+        let got = merged(&j("{}"), false, None).unwrap();
         assert!(
             got.get("providerInstances")
                 .and_then(|p| p.get("claudeAgent"))
@@ -449,7 +556,7 @@ mod tests {
         let before = j(
             r#"{"idleCompaction":"onReturn","providerInstances":{"codex":{"driver":"codex"},"claudeAgent":{"driver":"old","config":{"launchArgs":"--x","homePath":"~/.claude"},"environment":[{"name":"A","value":"1","sensitive":false},{"name":"CLAUDE_CODE_ENTRYPOINT","value":"","sensitive":true,"secret":{"provider":"p","reference":"r"}},{"name":"B","value":"2","sensitive":false},{"name":"CLAUDE_CODE_ENTRYPOINT","value":"x","sensitive":false}]}},"defaultThreadEnvMode":"local","linkedEnvironmentsEnabled":true}"#,
         );
-        let got = merged(&before, true).unwrap();
+        let got = merged(&before, true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
@@ -457,7 +564,7 @@ mod tests {
             )
         );
         // off なら同じ名前の要素を全部外す
-        let got = merged(&before, false).unwrap();
+        let got = merged(&before, false, None).unwrap();
         assert_eq!(
             compact(
                 got.get("providerInstances")
@@ -474,7 +581,7 @@ mod tests {
     #[test]
     fn merge_on_the_hand_written_settings() {
         let hand_written = r#"{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}"#;
-        let got = merged(&j(hand_written), true).unwrap();
+        let got = merged(&j(hand_written), true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
@@ -492,10 +599,52 @@ mod tests {
             r#"{"providerInstances":{"claudeAgent":{"environment":{"name":"x"}}}}"#,
             r#"{"providerInstances":{"claudeAgent":{"environment":["x"]}}}"#,
         ] {
-            assert!(merged(&j(bad), true).is_err(), "{bad}");
+            assert!(merged(&j(bad), true, None).is_err(), "{bad}");
         }
         // null は無いのと同じ
-        assert!(merged(&j(r#"{"providerInstances":null}"#), true).is_ok());
+        assert!(merged(&j(r#"{"providerInstances":null}"#), true, None).is_ok());
+    }
+
+    /// claudeAgent の config を compact に
+    fn config_of(v: &OValue) -> String {
+        compact(
+            v.get("providerInstances")
+                .and_then(|p| p.get("claudeAgent"))
+                .and_then(|c| c.get("config"))
+                .unwrap(),
+        )
+    }
+
+    const ARGS: &str = r"--settings C:\h\.claude\t3\settings.json --append-system-prompt-file C:\h\.claude\t3\CLAUDE.t3.md";
+
+    #[test]
+    fn merge_sets_launch_args_and_keeps_other_config_keys() {
+        // 今の値を上書きし、config のほかのキーと順を残す
+        let before = j(
+            r#"{"providerInstances":{"claudeAgent":{"config":{"launchArgs":"--x","homePath":"~/.claude","binaryPath":"claude"}}}}"#,
+        );
+        let got = merged(&before, false, Some(ARGS)).unwrap();
+        let want_args = serde_json::to_string(ARGS).unwrap();
+        assert_eq!(
+            config_of(&got),
+            format!(
+                r#"{{"launchArgs":{want_args},"homePath":"~/.claude-t3","binaryPath":"claude"}}"#
+            )
+        );
+        // 無ければ homePath の後ろに足す
+        let got = merged(&j("{}"), false, Some(ARGS)).unwrap();
+        assert_eq!(
+            config_of(&got),
+            format!(r#"{{"homePath":"~/.claude-t3","launchArgs":{want_args}}}"#)
+        );
+        // 渡さなければ今の値を残し、無ければ作らない
+        let got = merged(&before, false, None).unwrap();
+        assert_eq!(
+            config_of(&got),
+            r#"{"launchArgs":"--x","homePath":"~/.claude-t3","binaryPath":"claude"}"#
+        );
+        let got = merged(&j("{}"), false, None).unwrap();
+        assert_eq!(config_of(&got), r#"{"homePath":"~/.claude-t3"}"#);
     }
 
     /// 偽の PowerShell: 読む script には `read` の行を、書く script には 0 を返す
@@ -564,7 +713,10 @@ mod tests {
         let (o, _) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
         assert_eq!(o[1].kind, Kind::Ok);
         let written = j(&std::fs::read_to_string(&p).unwrap());
-        assert_eq!(compact(&written), compact(&merged(&j("{}"), true).unwrap()));
+        assert_eq!(
+            compact(&written),
+            compact(&merged(&j("{}"), true, None).unwrap())
+        );
         assert!(!t.path().join("state").join("t3-code-settings").exists());
         // そろっていれば書かない
         let (o, out) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
@@ -605,7 +757,131 @@ mod tests {
         std::fs::create_dir_all(&creds).unwrap();
         std::fs::write(creds.join(".credentials.json"), "{}").unwrap();
         let (o, _) = run_step(&t, &sys, Mode::Check, "[tools]\nwindowsT3Code = true\n");
-        assert!(o[1].notes.is_empty(), "{:?}", o[1].notes);
+        assert!(
+            !o[1].notes.iter().any(|n| n.contains("ログインしていない")),
+            "{:?}",
+            o[1].notes
+        );
+    }
+
+    /// claude-t3 の置き先 (`<home>/.claude/t3`)
+    fn t3_dir(t: &TempDir) -> PathBuf {
+        t.path().join("home").join(".claude").join("t3")
+    }
+
+    fn launch_args_in(p: &Path) -> Option<String> {
+        let v = j(&std::fs::read_to_string(p).unwrap());
+        match v
+            .get("providerInstances")
+            .and_then(|x| x.get("claudeAgent"))
+            .and_then(|x| x.get("config"))
+            .and_then(|x| x.get("launchArgs"))
+        {
+            Some(OValue::String(s)) => Some(s.clone()),
+            None => None,
+            Some(other) => panic!("{other:?}"),
+        }
+    }
+
+    fn set_launch_args(p: &Path, args: &str) {
+        let mut v = j(&std::fs::read_to_string(p).unwrap());
+        child_object(
+            child_object(
+                child_object(&mut v, "providerInstances", "p").unwrap(),
+                "claudeAgent",
+                "c",
+            )
+            .unwrap(),
+            "config",
+            "config",
+        )
+        .unwrap()
+        .set("launchArgs", OValue::String(args.to_string()));
+        std::fs::write(p, v.to_pretty()).unwrap();
+    }
+
+    #[test]
+    fn step_writes_launch_args_only_when_the_files_are_placed() {
+        let t = TempDir::new("t3-code-settings-launch-args");
+        let sys = pwsh(&["value=false"]);
+        let p = settings_file(&t);
+        let want = claude_t3::launch_args(&t3_dir(&t));
+        // 置き先にも repo にも無い: check も apply も書かず (今の値を残す)、※ で知らせる
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "{}").unwrap();
+        run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        set_launch_args(&p, "--old");
+        let (o, _) = run_step(&t, &sys, Mode::Check, ON);
+        assert_eq!(o[1].kind, Kind::Ok, "{:?}", o[1]);
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("launchArgs") && n.contains("書かない")),
+            "{:?}",
+            o[1].notes
+        );
+        let (o, _) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        assert_eq!(o[1].kind, Kind::Ok);
+        assert_eq!(launch_args_in(&p).as_deref(), Some("--old"));
+        // repo にあり置き先に無い: check と dry-run は claude-t3 が置いた後の値で比べる (書かない)。apply では置き先に無ければ書かない
+        t.write("dotfiles/win/claude-code/t3/settings.json", "{}\n");
+        t.write("dotfiles/win/claude-code/t3/CLAUDE.t3.md", "# T3\n");
+        for mode in [Mode::Check, Mode::DryRun { force: false }] {
+            let (o, _) = run_step(&t, &sys, mode, ON);
+            assert_eq!(o[1].kind, Kind::Fix, "{mode:?} {:?}", o[1]);
+            assert!(
+                o[1].notes
+                    .iter()
+                    .any(|n| n.contains("claude-t3 が") && n.contains("置いてから書く")),
+                "{mode:?} {:?}",
+                o[1].notes
+            );
+            assert_eq!(launch_args_in(&p).as_deref(), Some("--old"), "{mode:?}");
+        }
+        let (o, _) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        assert_eq!(o[1].kind, Kind::Ok);
+        assert!(
+            o[1].notes.iter().any(|n| n.contains("もう一度 apply")),
+            "{:?}",
+            o[1].notes
+        );
+        assert_eq!(launch_args_in(&p).as_deref(), Some("--old"));
+        // windowsClaudeCode が off なら claude-t3 は置かないので、check も比べない
+        let (o, _) = run_step(
+            &t,
+            &sys,
+            Mode::Check,
+            "[tools]\nwindowsT3Code = true\nwindowsClaudeCode = false\n",
+        );
+        assert_eq!(o[1].kind, Kind::Fix, "ENTRYPOINT を外すので fix");
+        assert!(
+            o[1].notes.iter().any(|n| n.contains("windowsClaudeCode")),
+            "{:?}",
+            o[1].notes
+        );
+        // 置き先にそろえば、claude-t3 の出す文に合わせる (知らせる文は添えない)
+        std::fs::create_dir_all(t3_dir(&t)).unwrap();
+        for name in claude_t3::FILES {
+            std::fs::write(t3_dir(&t).join(name), "{}").unwrap();
+        }
+        let (o, _) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        assert_eq!(o[1].kind, Kind::Ok);
+        assert!(
+            !o[1].notes.iter().any(|n| n.contains("launchArgs")),
+            "{:?}",
+            o[1].notes
+        );
+        assert_eq!(launch_args_in(&p), Some(want.clone()));
+        // T3 の画面で変えても、次の apply で戻す
+        set_launch_args(&p, "--settings other.json");
+        let (o, _) = run_step(&t, &sys, Mode::Check, ON);
+        assert_eq!(o[1].kind, Kind::Fix);
+        let (o, _) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        assert_eq!(o[1].kind, Kind::Ok);
+        assert_eq!(launch_args_in(&p), Some(want));
+        let (o, out) = run_step(&t, &sys, Mode::Apply { force: false }, ON);
+        assert_eq!(o[1].kind, Kind::Ok);
+        assert!(out.contains("登録済みです"), "{out}");
     }
 
     #[test]

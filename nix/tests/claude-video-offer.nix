@@ -11,8 +11,9 @@
 #   - claude-video-offer.json は {"autoStart": <option の値>} で、改行で終わる。hook (video-offer-nudge.sh) と
 #     claude-skills の pjp-video-explainer-offer がこれを読み、true のときだけ答えを待たずに作り始める
 #   - CLAUDE.md の「解説動画を作るか聞く」の節は option によらず同じで、いつもある (作るかを聞く文を持つ)
-#   - claude-skill-overrides.json は pjp-dev-tracker だけを持ち、解説動画の skill を隠さない。値は既定 (devTracker.enable が
-#     false) で "off"、true で "on"。「タスク管理」の節は devTracker.enable = true のときだけ
+#   - claude-skill-overrides.json は pjp-dev-tracker と pjp-t3-hub だけを持ち、解説動画の skill を隠さない。pjp-dev-tracker は
+#     既定 (devTracker.enable が false) で "off"、true で "on"。pjp-t3-hub はいつも "off" (Windows の T3 Code の会話だけが
+#     T3 の Launch arguments の --settings で on にする)。「タスク管理」の節は devTracker.enable = true のときだけ
 {
   lib,
   pkgs,
@@ -75,12 +76,17 @@ let
       ];
     }
     {
-      name = "claude-skill-overrides.json は pjp-dev-tracker だけで、解説動画の skill を隠さない (既定は off、true で on)";
+      name = "claude-skill-overrides.json は pjp-dev-tracker と pjp-t3-hub だけで、解説動画の skill を隠さない (pjp-dev-tracker は既定で off・true で on、pjp-t3-hub はいつも off)";
       ok =
         builtins.fromJSON (overrides byDefault) == {
           "pjp-dev-tracker" = "off";
+          "pjp-t3-hub" = "off";
         }
-        && builtins.fromJSON (overrides tracker) == { "pjp-dev-tracker" = "on"; };
+        &&
+          builtins.fromJSON (overrides tracker) == {
+            "pjp-dev-tracker" = "on";
+            "pjp-t3-hub" = "off";
+          };
     }
     {
       name = "「タスク管理」の節は devTracker.enable = true のときだけ (既定には無い)";

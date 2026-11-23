@@ -15,6 +15,7 @@ pub mod claude_settings;
 pub mod claude_skill_overrides;
 pub mod claude_skills;
 pub mod claude_statusline;
+pub mod claude_t3;
 pub mod deploy;
 pub mod fancyzones;
 pub mod files;
@@ -204,6 +205,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         Box::new(claude_statusline::ClaudeStatusline),
         Box::new(claude_footer_links::ClaudeFooterLinks),
         Box::new(claude_skill_overrides::ClaudeSkillOverrides),
+        // T3 Code の会話だけの Claude の設定 (T3 の Launch arguments が読むファイル) を ~/.claude/t3/ へ置く (Windows にしか無い手順。
+        // dotfiles-private の docs/adr/090_win_claude_t3_launch_args_*)
+        Box::new(claude_t3::ClaudeT3),
         // git の設定を WSL の home-manager と同じ git.toml から置く (Windows にしか無い手順。dotfiles-private の docs/adr/066_win_git_config_*)
         Box::new(git_config::GitConfig),
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
@@ -284,6 +288,7 @@ mod tests {
                 (50, "claude-notion"),
                 (50, "claude-skills"),
                 (50, "claude-statusline"),
+                (50, "claude-t3"),
                 (50, "git-config"),
                 (55, "pjp"),
                 (60, "claude-skill-overrides"),
@@ -357,8 +362,9 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順と git の設定と herdr-app の mod (pjp-spaces と layout も) とキーと
-    /// claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定と herdr-app の mod
+    /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) だけ (WSL から写した
+    /// 手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -377,6 +383,7 @@ mod tests {
                 "claude-notion",
                 "claude-skills",
                 "claude-statusline",
+                "claude-t3",
                 "git-config",
                 "pjp",
                 "claude-skill-overrides",

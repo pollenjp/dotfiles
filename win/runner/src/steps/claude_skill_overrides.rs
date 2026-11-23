@@ -1,8 +1,9 @@
 //! claude-skill-overrides (order 60): Windows の Claude Code の settings.json の `skillOverrides` (skill を一覧に説明つきで出すか・名前だけか・
 //! 出さないか) を書く。Linux の `nix/scripts/bootstrap-claude-skill-overrides.sh` の写しで、選び方・書き方・控えの扱いは同じ:
 //!
-//! - host option の skill: `pjp-dev-tracker` を、ホストの値の道具 `devTracker` (Linux の `dotfiles.claude.devTracker.enable`) で on / off にする
-//!   (いつも上書き)
+//! - host option の skill: `pjp-dev-tracker` を、ホストの値の道具 `devTracker` (Linux の `dotfiles.claude.devTracker.enable`) で on / off にする。
+//!   `pjp-t3-hub` (T3 Code の会話だけで使う skill) はいつも off (T3 の会話では、T3 の Launch arguments の `--settings` が on にする。手順
+//!   `claude-t3`)。どちらもいつも上書き
 //! - pack の skill: `~/.claude/skills/<名前>/SKILL.md` の frontmatter の `metadata.pjp-pack` に書いた pack のどれかの入口 (`pjp-pack-<pack>`) が
 //!   あれば `name-only` (一覧に名前だけ。Skill tool で名前を指せば呼べる)
 //! - claude.ai から同期された skill (`~/.claude/skills/synced/*/<名前>/`): `anthropic-skills:<名前>` を `user-invocable-only`
@@ -30,7 +31,7 @@ impl Step for ClaudeSkillOverrides {
         StepInfo {
             id: "claude-skill-overrides",
             order: 60,
-            title: "Claude Code の settings.json の skillOverrides (pjp-dev-tracker の on/off・pack の skill を名前だけ・同期された skill を隠す) を書く",
+            title: "Claude Code の settings.json の skillOverrides (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く",
             gate: Gate::Tool("windowsClaudeCode"),
             ported: true,
             windows_only: true,
@@ -58,15 +59,20 @@ impl Step for ClaudeSkillOverrides {
                 return vec![Outcome::new(Kind::Failed, why)];
             }
         };
-        let host = vec![(
-            "pjp-dev-tracker".to_string(),
-            if ctx.host.tool("devTracker") {
-                "on"
-            } else {
-                "off"
-            }
-            .to_string(),
-        )];
+        // Linux の claude.nix が書く host option のファイルと同じ key と並び (Nix の attrset の toJSON は key の順)
+        let host = vec![
+            (
+                "pjp-dev-tracker".to_string(),
+                if ctx.host.tool("devTracker") {
+                    "on"
+                } else {
+                    "off"
+                }
+                .to_string(),
+            ),
+            // T3 Code の会話だけで使う skill。herdr-app と Linux の会話には出さない (T3 の会話は Launch arguments の --settings が on にする)
+            ("pjp-t3-hub".to_string(), "off".to_string()),
+        ];
         let record_path = ctx.state_dir.join(RECORD_FILE);
         let mut warnings = Vec::new();
         let record = load_record(&record_path, &mut warnings);
@@ -595,7 +601,8 @@ mod tests {
     //!
     //! - frontmatter の読み方 (metadata の直下の pjp-pack・引用符・コメント・CRLF・字下げの違う行・囲みの無いファイル・disable-model-invocation)
     //! - pack の skill は入口があれば name-only、入口の無い pack を知らせ、入口・mod・読めない名前・disable-model-invocation は名前だけにしない
-    //! - 同期された skill は user-invocable-only。pjp-dev-tracker はホストの値の devTracker で on / off
+    //! - 同期された skill は user-invocable-only。pjp-dev-tracker はホストの値の devTracker で on / off。pjp-t3-hub はいつも off (手で on にしても
+    //!   戻す。どちらの key も控えない)
     //! - 控えの扱い (書いた・控えた値から書き換えた・手で書いた値を残した・書かなくなった key を戻した)。2 回目は何も変わらない
     //! - bash の版 (nix/scripts/bootstrap-claude-skill-overrides.sh) と同じ skill の並びで、同じ skillOverrides と控え (bash と jq がある Linux)
 
@@ -766,6 +773,10 @@ mod tests {
             out.contains("host option の値を書く (on): pjp-dev-tracker (apply で)"),
             "{out}"
         );
+        assert!(
+            out.contains("host option の値を書く (off): pjp-t3-hub (apply で)"),
+            "{out}"
+        );
         let (_, out) = e.run(Mode::DryRun { force: false }, true);
         assert!(
             out.contains("[dry-run] 戻す (name-only を消した): pjp-old"),
@@ -783,6 +794,7 @@ mod tests {
         assert_eq!(so["pjp-upd"], "name-only", "控えた値から書き換える");
         assert_eq!(so["pjp-gone-manual"], "off");
         assert_eq!(so["pjp-dev-tracker"], "on");
+        assert_eq!(so["pjp-t3-hub"], "off", "T3 の会話だけの skill は隠す");
         assert_eq!(so["anthropic-skills:my-skill"], "user-invocable-only");
         for k in [
             "pjp-lonely",
@@ -841,6 +853,10 @@ mod tests {
         let rec = e.record();
         assert_eq!(rec["version"], 1);
         assert!(rec["keys"].get("pjp-old").is_none() && rec["keys"].get("pjp-plantuml").is_none());
+        assert!(
+            rec["keys"].get("pjp-dev-tracker").is_none() && rec["keys"].get("pjp-t3-hub").is_none(),
+            "host option の key は控えない"
+        );
         assert_eq!(rec["keys"]["pjp-upd"], "name-only");
         // 2 回目は同じ
         let (o, _) = e.run(Mode::Check, true);
@@ -849,6 +865,21 @@ mod tests {
         let (o, _) = e.run(Mode::Apply { force: false }, false);
         assert_eq!(o.kind, Kind::Ok);
         assert_eq!(e.settings()["skillOverrides"]["pjp-dev-tracker"], "off");
+        assert_eq!(e.settings()["skillOverrides"]["pjp-t3-hub"], "off");
+        // 手で on にしても off に戻す (T3 の会話で on にするのは T3 の Launch arguments の --settings)
+        let mut s = e.settings();
+        s["skillOverrides"]["pjp-t3-hub"] = "on".into();
+        e.t.write(
+            "home/.claude/settings.json",
+            &serde_json::to_string_pretty(&s).unwrap(),
+        );
+        let (o, out) = e.run(Mode::Apply { force: false }, false);
+        assert_eq!(o.kind, Kind::Ok, "{o:?}");
+        assert!(
+            out.contains("host option の値を書きました (off): pjp-t3-hub"),
+            "{out}"
+        );
+        assert_eq!(e.settings()["skillOverrides"]["pjp-t3-hub"], "off");
     }
 
     #[test]
@@ -889,10 +920,11 @@ mod tests {
             let state = bash_home.join(".local/state/dotfiles");
             std::fs::create_dir_all(&state).unwrap();
             std::fs::write(state.join(RECORD_FILE), RECORD).unwrap();
+            // Linux の claude.nix が書く形 (key の順)
             std::fs::write(
                 state.join("claude-skill-overrides.json"),
                 format!(
-                    "{{\"pjp-dev-tracker\":\"{}\"}}\n",
+                    "{{\"pjp-dev-tracker\":\"{}\",\"pjp-t3-hub\":\"off\"}}\n",
                     if dev_tracker { "on" } else { "off" }
                 ),
             )
