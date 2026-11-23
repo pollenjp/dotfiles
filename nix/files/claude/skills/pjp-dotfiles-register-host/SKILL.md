@@ -324,6 +324,7 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 移したあとも local に値を残す (既定と同じ明示の値も) | 登録したファイルが持つので外す。残すと 2 か所に同じ値が並び、片方だけ直してずれる |
 | ホストのファイルを足す・直したのに、要約 (`docs/hosts/` のページ) を出し直さない | 同じ PR で `summaries` を流す。出し直さないと、merge のあと各 PC の setup が「要約が今の設定と違います」と出し続ける |
 | 要約の md・HTML 版を手で直す | 生成物 (md の末尾に断りがある)。ホストのファイルか本体を直して `summaries` で出し直す (md の「📝 Notion で開く」の行だけは Notion に写す道具が書く) |
+| 前の置き場 (`nix/hosts/<名前>.md`・`nix/hosts/README.md`) に要約を出す・残す | 要約は `docs/hosts/` に移した (ADR 093。dotfiles-private の main では消してある)。移す前に切った branch に残っていたら消し、新しい本体で `summaries` を流し直す (`nix/hosts/README.md` は `docs/hosts/` への案内だけの手書きのファイル) |
 | 古い本体 (その PC の checkout) で `summaries` を流す | 新しい本体が書いた要約を古い形に戻す。dotfiles の origin/main を写した本体を `--nix-dir` に渡す |
 | 自社のグループにして、使っていた ③ の道具 (Dev Tracker・1Password・ntn など) を足し忘れる | グループを変えると ③ の既定が off になる。今使っているものを 1 つずつ聞いて足し、要約で on/off を確かめる (Dev Tracker を足して claude-skills を足し忘れると、評価で止まる) |
 | 登録したのに `tmp` を残す | `tmp` が登録したホストより先に選ばれる (ローカル flake のホストが先)。外す |

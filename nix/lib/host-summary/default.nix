@@ -38,9 +38,11 @@
 #   tier     道具の switch が段の既定のまま
 #   default  ほかの既定のまま (① の道具・既定が段によらない道具)
 #
-# 「既定」(default・defaultEffective) は、その option をホストで書かなかったときの値 (option の default の式をホストの文脈で
-# 読んだもの)。段の switch はグループで決まり、道具の switch は段の switch で決まるので、段の switch を書いていないホストでは
-# グループの既定と同じになる。
+# 「既定」(default・defaultEffective) は、ホストで何も書かなかったときの値。段の switch は option の既定 (グループで決まる)。
+# 段から既定が決まる道具 (derived で段を持つもの) は、その段のどれかのグループの既定が off なら off、全部 on なら option の既定
+# (ホストが段の switch を書いていなければ、ホストの文脈で読んだ option の既定がそのまま当たる。書いていれば段の既定の積で、
+# herdrCore の Linux だけのような段の外の条件は読めないので on とみなす)。ほかの道具は option の既定 (段によらない)。効く条件も
+# 同じ既定で見る。
 #
 # 文は毎回同じになるようにする (並びは表の順・ホストは名前の順。日時・store のパス・dotfiles の版は書かない)。setup が
 # この PC のページを作り直して比べ、違えば古いと知らせるため。ホストのページは、そのホストの値と表だけから作る (ほかの
@@ -132,8 +134,26 @@ let
       opts = hc.options.dotfiles;
       get = path: lib.getAttrFromPath path cfg;
       opt = path: lib.getAttrFromPath path opts;
-      # ホストで書かなかったときの値 (option の default の式。ホストの文脈で読む)
-      defaultOf = path: (opt path).default or false;
+      # option の default の式 (ホストの文脈で読む)
+      optDefault = path: (opt path).default or false;
+      # 段の既定 (グループで決まる) と、ホストの値がその既定のままか
+      tierDefault = name: optDefault (tierOf name).option;
+      tierAsDefault = name: get (tierOf name).option == tierDefault name;
+      # ホストで何も書かなかったときの値 (冒頭の「既定」)。path は道具の option か、効く条件の option
+      defaultOf =
+        path:
+        let
+          found = builtins.filter (t: t.option == path) groups.tools;
+          t = builtins.head found;
+        in
+        if found == [ ] || !(t.derived && t.tiers != [ ]) then
+          optDefault path
+        else if !(builtins.all tierDefault t.tiers) then
+          false
+        else if builtins.all tierAsDefault t.tiers then
+          optDefault path
+        else
+          true;
       group = cfg.group;
     in
     {
@@ -156,7 +176,7 @@ let
             inherit (t) name mark label;
             option = dotted t.option;
             value = get t.option;
-            default = defaultOf t.option;
+            default = optDefault t.option;
             source = sourceOf (opt t.option) "group";
           }
       ) groups.tiers;
@@ -318,8 +338,10 @@ let
       map (
         t:
         let
+          # ① は段の switch が無く、どのグループでも入る (Windows のホストは段の option を持たないので、表の段で見る)
+          fixed = (tierOf t.name).option == null;
           src =
-            if t.option == null then
+            if fixed then
               "default"
             else if useDefault then
               "group"
@@ -329,7 +351,7 @@ let
         lib.nameValuePair t.name {
           value = if useDefault then t.default else t.value;
           source = src;
-          text = if t.option == null then "どのグループでも" else srcLabel d.group.value (t // { source = src; });
+          text = if fixed then "どのグループでも" else srcLabel d.group.value (t // { source = src; });
           inherit (t) option;
         }
       ) d.tiers

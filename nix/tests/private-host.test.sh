@@ -51,15 +51,16 @@
 #     clone には書かない。inspect は clone の shared/ の module を出す
 #   - compare の --out が作業ツリーの nix/ やローカル flake の読む dotfiles-private の nix/ の中なら、作る前に 2
 #   - summary (偽の nix) は、既定で setup.sh --which-host のホストを、ローカル flake の写しで hostSummary.text として評価して出す
-#     (頭に「==> ホスト <名前> の要約」)。--out <dir> は hostSummary.pages "<名前>" を nix eval --write-to で <dir> に書き、書いた
-#     ファイルを出す (<dir> が在れば nix を呼ばずに 2)。--host で選べる。ホストが決まらなければ 2、評価が落ちれば原因の行を出して 3。
-#     ユーザーの flake.nix と flake.lock は変えない
+#     (頭に「==> ホスト <名前> の要約」)。--out <dir> は hostSummary.pages "<名前>" を nix eval --write-to で一時の場所に書き出してから
+#     <dir> に移し、書いたファイルを出す (<dir> が在れば nix を呼ばずに 2。評価が落ちれば <dir> を作らない)。--host で選べる。ホストが
+#     決まらなければ 2、評価が落ちれば原因の行を出して 3。ユーザーの flake.nix と flake.lock は変えない
 #   - summaries (偽の nix) は、作業ツリーの nix/hosts/*.nix と win/hosts/*.toml の全ホストの要約 (privateHosts と windowsHosts だけの
 #     flake の summaryFiles。本体は --nix-dir) を nix eval --write-to で書き出し、docs/hosts/ に書く (入口・nix/・win/ のページと
 #     html/)。作らなくなったファイル (ホストの無いページ) は消し、空になった dir も消す。同じなら書かない (2 回目は「書き換えたファイル
 #     は無い」)。md の 3 行目の「📝 [Notion で開く](…)」の行と空行は残して書き、その行の有る無しは違いに数えない。--check は書かずに、
 #     違うファイルを出して 1 (同じなら 0)。win/hosts/ が無くても Nix のホストだけで書き、nix/hosts/ も win/hosts/ も無ければ 2。
-#     評価が落ちれば 3 で何も書かない。jq は要らない。docs/hosts/ の外 (nix/hosts/ の前の要約など) には書かない
+#     評価が落ちれば 3 で何も書かない。docs/hosts/ (か docs/) かその中に symlink があれば 2 で何も書かない (外を辿らない)。jq は
+#     要らない。docs/hosts/ の外 (nix/hosts/ の前の要約など) には書かない
 
 set -u -o pipefail
 
@@ -1072,15 +1073,25 @@ run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages"
 rc_out=$(rc "${c}")
 out_ok=0
 if [[ ${rc_out} == 0 && $(cat "${c}/pages/nix/bob@other.md") == 'PAGE bob@other' && $(cat "${c}/pages/nix/html/bob@other.html") == 'PAGEHTML bob@other' ]] \
-  && grep -qF -- "--write-to ${c}/pages" "${c}/nix-calls" && grep -qF 's: s.pages "bob@other"' "${c}/nix-calls" \
+  && grep -qF -- "--write-to ${work}/" "${c}/nix-calls" && grep -qF 's: s.pages "bob@other"' "${c}/nix-calls" \
   && grep -qxF '  nix/bob@other.md' "${c}/out" && grep -qxF '  nix/html/bob@other.html' "${c}/out"; then
   out_ok=1
 fi
 run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages"
-if ((out_ok)) && [[ $(rc "${c}") == 2 ]] && grep -qF -- '--out は無い場所を渡してください' "${c}/err" && ! grep -qF 'eval' "${c}/nix-calls"; then
-  ok "summary --host <名前> --out <dir>: そのホストのページ (md と HTML 版) を <dir>/nix/ に書き、在る <dir> には書かない (2)"
+rc_exists=$(rc "${c}")
+exists_ok=0
+if [[ ${rc_exists} == 2 ]] && grep -qF -- '--out は無い場所を渡してください' "${c}/err" && ! grep -qF 'eval' "${c}/nix-calls"; then
+  exists_ok=1
+fi
+cp -p "${c}/local/flake.nix" "${c}/flake.keep"
+printf '# FAKE_EVAL_ERROR: 書きかけのページ\n' >>"${c}/local/flake.nix"
+run_nix "${c}" summary --flake "${c}/local" --host bob@other --out "${c}/pages2"
+rc_fail=$(rc "${c}")
+cp -p "${c}/flake.keep" "${c}/local/flake.nix"
+if ((out_ok && exists_ok)) && [[ ${rc_fail} == 3 && ! -e ${c}/pages2 ]]; then
+  ok "summary --host <名前> --out <dir>: そのホストのページ (md と HTML 版) を <dir>/nix/ に書き、在る <dir> には書かず (2)、評価が落ちれば <dir> を作らない (3)"
 else
-  ng "summary --out" "rc=${rc_out}/$(rc "${c}") $(out "${c}") $(err "${c}") $(cat "${c}/nix-calls")"
+  ng "summary --out" "rc=${rc_out}/${rc_exists}/${rc_fail} $(out "${c}") $(err "${c}") $(cat "${c}/nix-calls")"
 fi
 
 # 32. summary: ホストが決まらなければ 2 (今の雛形の形で手で足したホストが無い)・評価が落ちれば 3
@@ -1195,6 +1206,24 @@ if [[ $(rc "${c}") == 0 && ! -e ${c}/wt/docs/hosts/nix ]] && [[ $(cat "${c}/wt/d
   ok "summaries: win/hosts/ が無くても書き、ホストが 0 台なら入口だけを書いて残ったページと空の dir を消す"
 else
   ng "summaries (0 台)" "rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cd "${c}/wt/docs/hosts" && find . | LC_ALL=C sort)"
+fi
+
+# 34c. summaries: docs/hosts/ の中 (か docs/hosts/ そのもの) が symlink なら、外を辿らずに 2 (何も書かない)
+c=$(summaries_case r34c)
+mkdir -p "${c}/elsewhere"
+ln -s "${c}/elsewhere" "${c}/wt/docs/hosts/win"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+rc_inner=$(rc "${c}")
+c2=$(summaries_case r34c2)
+mkdir -p "${c2}/elsewhere"
+rm -rf "${c2}/wt/docs/hosts"
+ln -s "${c2}/elsewhere" "${c2}/wt/docs/hosts"
+run_summaries "${c2}" --private "${c2}/wt" --nix-dir "${c2}/body/nix"
+if [[ ${rc_inner} == 2 && $(rc "${c2}") == 2 ]] && grep -qF 'symlink があります' "${c2}/err" \
+  && [[ -z $(ls -A "${c}/elsewhere") && -z $(ls -A "${c2}/elsewhere") && $(cat "${c}/wt/docs/hosts/README.md") == 'old readme' ]]; then
+  ok "summaries: docs/hosts/ の中か docs/hosts/ そのものが symlink なら、外を辿らずに 2 (何も書かない)"
+else
+  ng "summaries (symlink)" "inner=${rc_inner} rc=$(rc "${c2}") $(err "${c2}") $(ls -A "${c}/elsewhere" "${c2}/elsewhere")"
 fi
 
 # 35. summaries: nix/hosts/ も win/hosts/ も無ければ 2、評価が落ちれば 3 (何も書かない)。jq の無い PATH で動く

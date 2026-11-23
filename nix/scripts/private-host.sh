@@ -1072,10 +1072,12 @@ cmd_summary() {
     exit 2
   fi
   if [[ -n ${out} ]]; then
-    if ! nix eval --write-to "${out}" "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" \
+    # 一時の場所に書き出してから移す (評価が途中で落ちても、<dir> に書きかけを残さない)
+    if ! nix eval --write-to "${tmp}/pages" "path:${tmp}/cur#homeConfigurations.\"${host}\".hostSummary" \
       --apply "s: s.pages \"${host}\"" 2>"${tmp}/summary.err" </dev/null; then
       summary_eval_failed "${host}" "${flake_dir}"
     fi
+    mv "${tmp}/pages" "${out}" || die "--out に書けません: ${out}"
     printf '==> ホスト %s のページを %s に書きました (ローカル flake %s で評価):\n' "${host}" "${out}" "${flake_dir}"
     (cd "${out}" && find . -type f | sed 's|^\./|  |' | LC_ALL=C sort)
     printf '  (図は HTML 版をブラウザで開く。dotfiles-private に登録したホストなら、docs/hosts/ の同じ名前のファイルと同じ中身)\n'
@@ -1130,9 +1132,10 @@ notion_line() {
   fi
 }
 
-# $1 のファイル (生成した md) の 2 行目 (h1 の後ろの空行) の後ろに、$2 の行と空行を入れて出す
+# $1 のファイル (生成した md) の 2 行目 (h1 の後ろの空行) の後ろに、$2 の行と空行を入れて出す (行は awk -v で渡さない。
+# -v はバックスラッシュをエスケープとして解く)
 with_notion_line() {
-  awk -v l="$2" 'NR == 3 { print l; print "" } { print }' "$1"
+  NOTION_LINE=$2 awk 'NR == 3 { print ENVIRON["NOTION_LINE"]; print "" } { print }' "$1"
 }
 
 # summaries: dotfiles-private の作業ツリーの docs/hosts/ に、全ホストの要約のページを書く (冒頭の「ホストの要約」)
@@ -1192,6 +1195,10 @@ cmd_summaries() {
     exit 3
   fi
   out=${private}/docs/hosts
+  # docs/hosts/ の外に書かないよう、docs/・docs/hosts/ とその中に symlink があれば書かずに止める
+  if [[ -L ${private}/docs || -L ${out} ]] || { [[ -d ${out} ]] && [[ -n $(find "${out}" -type l -print 2>/dev/null) ]]; }; then
+    die "${private}/docs/hosts/ (か docs/) に symlink があります。summaries は docs/hosts/ の中だけに書くので、symlink を外してから流してください"
+  fi
   while IFS= read -r rel; do
     [[ -n ${rel} ]] || continue
     f="${out}/${rel}"

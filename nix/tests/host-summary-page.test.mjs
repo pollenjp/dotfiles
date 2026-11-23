@@ -18,6 +18,8 @@
 //   - どのタブの囲みの矩形の組も、線の太さぶん広げても入らない箱に重ならない (線が入らない箱に触れない)。線 (箱からの間 d と太さ t) は、
 //     箱と箱の隙間の中に収まる (重ねるタブでは、重ねる線の数ごとに全部の線が収まる)
 //   - 入る箱の列が途中で空く (② の列に入る箱が無い) と、一番上の行の水路で空いた列の箱の上を渡り、その箱を囲まずに 1 つの島になる
+//   - 重ねる線が 1〜30 本のどれでも、どの線 (箱からの間 d と太さ t) も箱と箱の隙間に収まり、水路の下の縁の線が空いた列の箱に
+//     触れない (d > t + 1)。線は外ほど箱から離れる
 //   - 入口 (order "count") の箱の並びは、入るホストの多い順 (同じなら表の順)
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -164,6 +166,19 @@ ok("入る箱の列が途中で空くと、一番上の行の水路で空いた�
     const rects = unionRects(lay, isOn, d, t);
     assert.ok(rects.some((r) => r.y + r.h < y1.y && r.x < y1.x && r.x + r.w > y1.x + y1.w), `水路が無い (d ${d})`);
     for (const r of rects) assert.ok(!overlap(grow(r, t), y1), `空いた列の箱に線が触れる (d ${d})`);
+  }
+});
+
+ok("重ねる線が 1〜30 本のどれでも、どの線も隙間に収まり、水路の線が空いた列の箱に触れず、外の線ほど箱から離れる", () => {
+  for (let n = 1; n <= 30; n++) {
+    let prev = -1;
+    for (let k = 0; k < n; k++) {
+      const { d, t } = outlineSpec(n, k);
+      assert.ok(d + t < gapMin - 1, `${n} 本の ${k} 本目 (d ${d}・t ${t}) が隙間 ${gapMin} に収まらない`);
+      assert.ok(d > t + 1, `${n} 本の ${k} 本目 (d ${d}・t ${t}) の水路の線が箱に触れる`);
+      assert.ok(d > prev, `${n} 本の ${k} 本目が内の線より外にない`);
+      prev = d;
+    }
   }
 });
 

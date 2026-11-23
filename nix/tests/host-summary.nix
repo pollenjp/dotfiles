@@ -10,7 +10,9 @@
 #     off、② の道具は段の既定 (tier)、ホストのファイルで書いた道具はホスト (host)、dotfiles-private の nix/shared/ の module で
 #     書いた値は shared。既定が段によらない道具と ① の道具は既定 (default)
 #   - 既定 (書かなかったときの値): ホストで on にした ③ の道具の既定は company なら off。Windows の道具は、段の既定が on でも
-#     効く条件 (wsl.windowsFiles.enable) の既定が off なので、既定では効かない (defaultEffective が false)
+#     効く条件 (wsl.windowsFiles.enable) の既定が off なので、既定では効かない (defaultEffective が false)。段の switch をホストで
+#     書いても、段から決まる道具の既定はグループの段の既定で決まる (company で ③ の段を on にしたホストの ntn の既定は off、
+#     personal で ② の段を off にしたホストの claude の既定は on)
 #   - 効く条件 (wsl.windowsFiles.enable) が off の Windows の道具は、値が on でも「–」(効かない) で、off の条件の名前を持つ
 #   - 図の列: ① の道具は c1、② は c2、② と ③ の両方は c23、③ は c3。どの道具も箱に出す短い名前を持つ。groups.nix の runnerTools
 #     は全部が表の道具で、runner の印の数と同じ
@@ -22,7 +24,8 @@
 #     タブ (このホスト・既定・重ねて比べる)・列・28 の道具・option の頭 (dotfiles.) を持つ。リンクは新しいタブで開く GitHub の URL
 #   - winData: グループ・[tools] の上書き (host) とグループの既定 (group)・効く条件 (opReasonSshRelay は onePassword) で効かない道具・
 #     runner の道具だけ・図に描けない値 (受け持ち・鍵の本数とコメント (鍵そのものは出さない)・ユーザー・送り元の数)。group を書かない
-#     ホストは personal で unset。知らないグループ・知らない道具・bool でない道具の値は評価で止める
+#     ホストは personal で unset。知らないグループ・知らない道具・bool でない道具の値は評価で止める。図の段の説明は、① が「どのグループ
+#     でも」、② ③ はグループの既定 (Windows のホストは段の option を持たないが、① と取り違えない)
 #   - files: 入口 (README.md と html/hosts.html)・Nix と Windows のホストのページを出し、入口の表で同じ PC (@ の後ろを小文字で比べる)
 #     の Nix と Windows のホストを結ぶ。入口の図は Nix と Windows の 2 つで、重ねるタブは 2 台以上のときだけ。ホストが 0 台でも
 #     README.md と html/hosts.html だけを出す (「ありません」)
@@ -56,6 +59,12 @@ let
 
   unset = dataOf { };
   company = dataOf { group = "company"; };
+  # 段の switch をホストで書いたホスト
+  companyTier3 = dataOf {
+    group = "company";
+    modules = [ { dotfiles.personalAccounts.enable = true; } ];
+  };
+  personalNoAi = dataOf { modules = [ { dotfiles.aiTools.enable = false; } ]; };
 
   # ホストのファイルと shared/ (fixtures/host-summary) から組み立てた、自社のホスト
   private = privateHosts ./fixtures/host-summary;
@@ -143,6 +152,22 @@ let
         && (rowOf carolData "windowsClaudeCode").default
         && !(rowOf carolData "windowsClaudeCode").defaultEffective
         && (rowOf carolData "cleanup").default;
+    }
+    {
+      name = "段の switch をホストで書いても、段から決まる道具の既定はグループの段の既定 (company の ③ の道具は off、personal の ② の道具は on)";
+      ok =
+        (tierOf companyTier3 "personalAccounts").value
+        && (tierOf companyTier3 "personalAccounts").source == "host"
+        && (tierOf companyTier3 "personalAccounts").default == false
+        && (rowOf companyTier3 "ntn").value
+        && (rowOf companyTier3 "ntn").source == "tier"
+        && (rowOf companyTier3 "ntn").default == false
+        && !(rowOf companyTier3 "ntn").defaultEffective
+        && (rowOf companyTier3 "claudePrivateSkills").default == false
+        && (rowOf companyTier3 "claude").default
+        && (rowOf personalNoAi "claude").value == false
+        && (rowOf personalNoAi "claude").default
+        && (rowOf personalNoAi "claude").defaultEffective;
     }
     {
       name = "windowsFiles が off の Windows の道具は、値が on でも「–」(効かない) で、off の条件の名前を持つ";
@@ -281,6 +306,17 @@ let
           }
         && (rowOf erin "windowsTypeClipboard").source == "host"
         && !erin.runner;
+    }
+    {
+      name = "Windows のホストの図の段の説明は、① が「どのグループでも」、② ③ はグループの既定";
+      ok =
+        let
+          host = builtins.head (builtins.head (dataOfHtml files.win.html."dave@three.html").figures).views;
+        in
+        host.tiers.engineer.text == "どのグループでも"
+        && host.tiers.aiTools.text == "グループ (company) の既定"
+        && host.tiers.personalAccounts.text == "グループ (company) の既定"
+        && host.tiers.personalAccounts.source == "group";
     }
     {
       name = "winData: 知らないグループ・知らない道具・bool でない道具の値は評価で止める";

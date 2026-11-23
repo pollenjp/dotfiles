@@ -171,13 +171,14 @@ const HostMap = (() => {
     return new Set(on.map((_, i) => find(i))).size;
   }
 
-  // 囲みの線の、箱からの間 (d) と太さ (t)。n は同じタブに重ねる線の数、k はその中の何本目
+  // 囲みの線の、箱からの間 (d) と太さ (t)。n は同じタブに重ねる線の数、k はその中の何本目。どの本数でも、いちばん外の線
+  // (d + t) が箱と箱の隙間に収まるように間を割る (多いほど線どうしが詰まる。線を見分けるのはタブの色とタブにのせたときの強調)
   function outlineSpec(n, k) {
     if (n <= 1) return { d: 8, t: 2.6 };
-    if (n <= 3) return { d: 5 + 6 * k, t: 2.2 };
+    if (n <= 3) return { d: 5 + 5 * k, t: 2.2 };
     const t = 1.6;
     const maxD = Math.min(L.gx, L.gy) - t - 2;
-    const step = Math.min(2.2, Math.max(1.2, (maxD - 4) / (n - 1)));
+    const step = Math.min(2.2, (maxD - 4) / (n - 1));
     return { d: 4 + step * k, t };
   }
 
@@ -678,6 +679,8 @@ const HostMap = (() => {
         olSets.forEach((g, j) => {
           g.classList.toggle("hide", j !== i);
           g.setAttribute("aria-hidden", String(j !== i));
+          g.classList.remove("dim");   // 前のタブでのせた強調を残さない
+          g.querySelectorAll(".olg.hi").forEach((x) => x.classList.remove("hi"));
         });
         tabs.forEach((b, j) => { b.setAttribute("aria-selected", String(j === i)); b.tabIndex = j === i ? 0 : -1; });
         view.setAttribute("aria-labelledby", tabs[i].id);
@@ -708,12 +711,13 @@ const HostMap = (() => {
       });
       document.addEventListener("visibilitychange", () => { if (document.hidden) stopAuto(); });
       // 重ねるタブを見ている間、ホストのタブにのせる (フォーカスする) と、そのホストの線だけを濃くする
+      // 強調は今のタブの線の組にだけ付け、ほかのタブの組からは外す (タブを移ったあとに強調が残らないように)
       const hilite = (id) => {
-        const set = olSets[cur];
-        if (!set) return;
-        const has = id && views[cur].kind === "overlay" && views[cur].members.includes(id);
-        set.classList.toggle("dim", !!has);
-        set.querySelectorAll(".olg").forEach((g) => g.classList.toggle("hi", !!has && g.getAttribute("data-view") === id));
+        olSets.forEach((set, j) => {
+          const has = !!id && j === cur && views[j].kind === "overlay" && views[j].members.includes(id);
+          set.classList.toggle("dim", has);
+          set.querySelectorAll(".olg").forEach((g) => g.classList.toggle("hi", has && g.getAttribute("data-view") === id));
+        });
       };
       tabs.forEach((b, i) => {
         b.addEventListener("mouseenter", () => hilite(views[i].id));
