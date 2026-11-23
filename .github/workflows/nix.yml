@@ -272,10 +272,11 @@ jobs:
       # win/ の PowerShell の副作用の無い関数のテスト (win/*/*.Tests.ps1。Install-OpenSSH・Install-Herdr など)。
       # Linux の pwsh で流すので Windows には触らない。flake からは win/ が見えないので、上と同じく checkout の上で
       # 流す。pwsh と ssh は flake が固定している nixpkgs から借りる (Start-PortForward のテストは PATH の ssh を引く。
-      # ランナーの ssh に頼らない)。1 本が落ちても残りを流し、最後にまとめて落とす
+      # ランナーの ssh に頼らない)。ghq と fzf も借りる (dotfiles.Tests.ps1 が cdrepo を本物の ghq・fzf でも流す。無ければ
+      # その 1 件を飛ばす)。1 本が落ちても残りを流し、最後にまとめて落とす
       - name: win/ の PowerShell のテスト
         run: |
-          nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh --command bash -c '
+          nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh nixpkgs#ghq nixpkgs#fzf --command bash -c '
             set -uo pipefail
             rc=0
             for t in win/*/*.Tests.ps1; do
