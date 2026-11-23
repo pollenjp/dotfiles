@@ -248,10 +248,12 @@ enable = false                # 受け持ちの印。true で WSL の setup と�
 [opReason]                    # op-reason の SSH の中継のモード (効くのは [tools] opReasonSshRelay = true のとき)
 sshRelayMode = "per-call"     # per-call (既定)・show-only
 
-[sshd]                        # sshd に入れる公開鍵 (使うのは受け持ちが runner で [tools] windowsSshd = true のホストだけ)
-authorizedKeys = [            # authorized_keys の 1 行を 1 つの文字列で。書かなければ null (鍵を置かない)・[] は 0 本
+[sshd]                        # sshd の値 (使うのは受け持ちが runner で [tools] windowsSshd = true のホストだけ)
+authorizedKeys = [            # 入れる公開鍵。authorized_keys の 1 行を 1 つの文字列で。書かなければ null (鍵を置かない)・[] は 0 本
   'from="100.64.0.1,fd7a:115c:a1e0::1" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAI... herdr@phone',
 ]
+allowUsers = ["alice"]        # AllowUsers に書くユーザー。書かなければ null (Install-Sshd を流したユーザー)・[] は誰も入れない
+allowFrom = ["100.64.0.0/10", "fd7a:115c:a1e0::/48", "127.0.0.1", "::1"]   # 入ってよい送り元。書かなければ null (tailnet と localhost)・[] はどこからも入れない
 
 [t3Code]                      # T3 Code の Claude の手当て (効くのは [tools] windowsT3Code = true のとき)
 clearClaudeEntrypoint = true  # CLAUDE_CODE_ENTRYPOINT="" を渡す (既定 false。クレジットを使う間だけ)
@@ -264,10 +266,10 @@ routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の
 scanData = "https://app.notion.com/p/…"
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd] authorizedKeys`・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
-  `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値は
-  runner が止める (終了コード 2)
+  `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
+  `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
 - `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
   出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
@@ -289,6 +291,12 @@ scanData = "https://app.notion.com/p/…"
   置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
   authorized_keys の行として読めない値 (鍵の種類と base64 が無い・`#` で始まる) は runner が止める。受け持ちが WSL のホストは WSL の setup が
   Nix の値から写しを置くので、TOML に書いても使わない (`sshd` の手順がそう 1 行出す)。実機の鍵と `from=` の IP は dotfiles-private にだけ書く
+- `[sshd] allowUsers`・`allowFrom` は、sshd_config の `AllowUsers` に書くユーザーと、入ってよい送り元 (`Match Address` で絞る相手のアドレス)
+  ([ユーザーと送り元](#ユーザーと送り元))。使うのは受け持ちが runner のホストだけで、runner の手順 `sshd` が Windows の
+  `%LOCALAPPDATA%\dotfiles\sshd\allow.json` に写しを置き、`Install-Sshd` がそれを読む。書かなければ null で既定 (`Install-Sshd` を流したユーザー・
+  tailnet と localhost)、`[]` は誰も・どこからも入れない。どちらも書かなければ写しを置かない (前の写しは消す)。`allowUsers` は英小文字・数字・`. _ -` の
+  名前、`allowFrom` は IPv4・IPv6 のアドレスか CIDR (範囲の頭のアドレスで書く) だけで、ほかは runner が止める。受け持ちが WSL のホストは既定のまま
+  (TOML に書いても使わない。Nix の値には無い)。実機のユーザー名と端末の IP は dotfiles-private にだけ書く
 - `windowsT3Code` もどのグループでも既定が false。T3 Code を入れるホストは `[tools]` に `windowsT3Code = true` を書く (WSL の setup には T3 Code の
   手順が無いので、受け持ちによらず TOML にだけ書く。書かなければ `t3-code`・`t3-code-settings` の行は off。[後述](#t3-code))。Claude に
   `CLAUDE_CODE_ENTRYPOINT=""` を渡すかは `[t3Code] clearClaudeEntrypoint` (書かなければ false で、`t3-code-settings` が settings.json からその要素を外す)
@@ -423,7 +431,7 @@ scanData = "https://app.notion.com/p/…"
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
-| 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを置く (受け持ちが WSL のホストは WSL の setup が置く) | `windowsSshd` | 有る |
+| 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
@@ -3834,8 +3842,8 @@ sshd_config の中身 (`Install-Sshd.ps1` の `Get-SshdConfigText`):
 | 設定 | わけ |
 | --- | --- |
 | `PubkeyAuthentication yes`・`PasswordAuthentication no`・`KbdInteractiveAuthentication no`・`AuthenticationMethods publickey` | 鍵だけで入れる |
-| `AllowUsers <ユーザー>` | 入れるのはスクリプトを流したユーザー (小文字。`-AllowUser` で変えられる) だけ。接続元はここに書かず、下の `Match Address` で絞る (下の注)。最初の `Match` より前に書く (後ろに書くと Match の中に入る) |
-| `Match Address *,!100.64.0.0/10,!fd7a:115c:a1e0::/48,!127.0.0.1,!::1` の `DenyUsers *` | tailnet と localhost の外から来たら、誰も入れない。sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る。`Match Group administrators` より前に置く |
+| `AllowUsers <ユーザー>` | 入れるのはホストの値の `[sshd] allowUsers` のユーザー (書いていなければ、スクリプトを流したユーザー (小文字)) だけ。接続元はここに書かず、下の `Match Address` で絞る (下の注)。最初の `Match` より前に書く (後ろに書くと Match の中に入る)。`allowUsers = []` なら代わりに `DenyUsers *` (引数の無い `AllowUsers` は sshd が起動しない) |
+| `Match Address *,!100.64.0.0/10,!fd7a:115c:a1e0::/48,!127.0.0.1,!::1` の `DenyUsers *` | 入ってよい送り元 (ホストの値の `[sshd] allowFrom`。書いていなければ tailnet と localhost。左は既定の形) の外から来たら、誰も入れない。sshd はログインのたびに Match を当ててから AllowUsers・DenyUsers を見る。`Match Group administrators` より前に置く。`allowFrom = []` なら `Match Address *` (どこから来ても入れない) |
 | `ListenAddress` は書かない | Tailscale の IP に縛ると、起動のときに Tailscale の IP がまだ無いと sshd が落ちる。入れる元は Match Address の DenyUsers と拒否の規則で絞る |
 | `Match Group administrators` の `AuthorizedKeysFile __PROGRAMDATA__/ssh/administrators_authorized_keys` | Win32-OpenSSH の既定のまま (管理者の鍵は ProgramData から読む) |
 | `Subsystem sftp sftp-server.exe` | 既定のまま (`hc machine add` が hc を入れるときの scp が使う) |
@@ -3900,6 +3908,36 @@ AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_c
   (`%LOCALAPPDATA%\dotfiles\sshd\deployed.json`) と比べる。管理者の PowerShell で `Install-Sshd -Check` を打つと、中身そのものと比べる
 - 鍵が 0 本でも揃っている扱い (※ で、誰も入れないと添える)。from= の無い鍵は ※ で本数を添える
 
+### ユーザーと送り元
+
+sshd_config の `AllowUsers` に書くユーザーと、入ってよい送り元 (`Match Address` の否定に並べる相手のアドレス) は、受け持ちが runner のホストでは
+Windows のホストの値の `[sshd] allowUsers`・`allowFrom` に書く ([ホストの値](#ホストの値))。ホストごとの値なので、ユーザー名と端末の IP は
+dotfiles-private にだけ置く。
+
+| ホストの値 | `allowUsers` | `allowFrom` |
+| --- | --- | --- |
+| 書かない (null) | 既定: `Install-Sshd` を流したユーザー (小文字) | 既定: tailnet (`100.64.0.0/10`・`fd7a:115c:a1e0::/48`) と localhost (`127.0.0.1`・`::1`) |
+| `[]` | 誰も入れない (`AllowUsers` の代わりに `DenyUsers *`) | どこからも入れない (`Match Address *`) |
+| list | そのユーザーだけ (英小文字・数字・`. _ -` の名前) | そのアドレスからだけ (IPv4・IPv6 のアドレスか CIDR。CIDR は範囲の頭のアドレスで書く。長さは 32 と 128 まで) |
+
+1. 値を書いて (鍵と同じく dotfiles-private の PR)、merge したら Windows で dotfiles-private の clone を pull して `dotfiles apply --steps sshd` を流す。
+   runner の手順 `sshd` が、鍵の写しの後に `%LOCALAPPDATA%\dotfiles\sshd\allow.json` へ写しを置き (中身が同じなら書かない。どちらも書かなければ
+   消す)、`Install-Sshd -Check` が、写しの値で作る sshd_config との差を ⚠ で出す
+2. `Install-Sshd -Check` は、使う値をいつも ※ の行に出す (`※ AllowUsers: alice (ホストの値)`・`※ 送り元: … (ホストの値に書いていない。既定: tailnet と
+   localhost)`)。覚えのない値が無いかを見てから、PowerShell の `Install-Sshd` で揃える (UAC の確認が 1 回出る。sshd を起こし直す)。管理者で起動し直した
+   子にも写しの場所を渡し、子は書いたユーザーと送り元をログに出す
+
+- 写しは JSON (`version`・`note`・`allowUsers`・`allowFrom`。書かない欄は null)。runner だけが書き、`Install-Sshd` は手で打たれたときも既定で読む
+  (引数で値を渡すだけにすると、手で打つ `Install-Sshd` が値を知らず、既定に書き戻す)。写しを手で書き換えて読めない値があると、`Install-Sshd` は揃えずに
+  1 で止まり、読めない値と、ホストの値を直して `dotfiles apply` を流し直す締めの行を出す
+- 既定と同じ値 (ユーザー 1 人と、既定の送り元を同じ並びで) を書いたときの sshd_config は、書かないときと 1 バイトも違わない (揃えたときの記録も同じ)。
+  値を書かないホストから同じ値に移しても、`Install-Sshd` を流し直さずに済む
+- 送り元の値は sshd_config の `Match Address` にだけ効き、拒否の規則 ([sshd で揃えるもの](#sshd-で揃えるもの) の表) には混ぜない。拒否の規則の `LocalAddress` は、この PC の側の tailnet の
+  アドレス (送り元とは別の意味) で、`dotfiles-sshd-outside-tcp22` は tailnet と localhost の外から来る 22 番を止めたまま。送り元の値で絞れるのは
+  tailnet と localhost の中で、外を含む値には ※ で「拒否の規則が止めるので、sshd に届かない」と添える
+- 受け持ちが WSL の setup のホストは、ユーザーと送り元をホストの値で持たない (Nix の値には無い。`Install-Sshd` は既定で書く)。受け持ちを runner から
+  WSL に戻したときは、WSL の `bootstrap-windows-sshd.sh` が残った写しを消す
+
 ### sshd を入れる・揃える
 
 | 打つもの | すること |
@@ -3907,17 +3945,22 @@ AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_c
 | `Install-Sshd -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、sshd が入っていなければ 3、ほかの差があれば (先に直すことがあって揃えられないときも) 1 |
 | `Install-Sshd -IfMissing` (PowerShell) | sshd が入っていなければ入れて揃える (UAC の確認が 1 回出る)。入っていれば `-Check` と同じ |
 | `Install-Sshd` (PowerShell) | 揃える (直すことがあるときだけ UAC の確認が 1 回出る) |
-| `nix/scripts/bootstrap-windows-sshd.sh` (WSL) | `setup --update` でも毎回走る (order 96。`windowsFiles.sshd.enable = true` のマシンだけ)。鍵の写しを置いてから `-Check` を流し、sshd が入っていなければ `-IfMissing` で入れて揃える (UAC の確認が出る。待つのは 600 秒まで)。入っていてずれていれば ⚠ で囲んで知らせる (揃えはしない) |
+| `nix/scripts/bootstrap-windows-sshd.sh` (WSL) | `setup --update` でも毎回走る (order 96。`windowsFiles.sshd.enable = true` のマシンだけ)。鍵の写しを置き、受け持ちが runner だったときのユーザーと送り元の写しが残っていれば消してから `-Check` を流し、sshd が入っていなければ `-IfMissing` で入れて揃える (UAC の確認が出る。待つのは 600 秒まで)。入っていてずれていれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-sshd.sh --apply` (WSL) | 鍵の写しを置いてから揃える。UAC の確認は Windows のデスクトップに出る |
 
 - setup はずれを揃えない。揃えるには UAC の確認が要り (外の端末から setup を流すと、押す人がいないまま待つ)、sshd を起こし直すと、つないでいる SSH が
   切れることがあるため (runner も同じ)
 - 揃える順は、拒否の規則 → sshd_config → 鍵 → server → 22 番の許可を無効にする → ssh-agent → サービス。MSI は Server を足した時点で sshd を起こし、
   22 番の許可も作るので、その前に拒否の規則と sshd_config と鍵を置く (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
+- sshd_config は、書き換える前に作った中身を `sshd -t` で試す (`Invoke-SshdConfigTest`)。書くのと同じ中身の一時のファイルと、使い捨てのホストの鍵 (ed25519。
+  `-h` で渡すので、sshd は既定のホストの鍵を読まず、ホストの鍵がまだ無い・読めないことを設定の誤りと取り違えない) を、管理者だけが書ける
+  `%ProgramData%\ssh` に置き、試した後に消す (利用者が書ける TEMP などに置くと、試してから書くまでの間に差し替えられる)。断られたら書き換えず・起こし直さずに
+  1 で止まり、`[管理者]` の行に sshd -t の出力を出す (今の sshd_config と sshd はそのまま)。sshd.exe がまだ無い (server を足す前) ときは試せないと出して書く。
+  中身が今と同じなら試さない
 - MSI を流すと ssh-agent のサービスが自動・実行中に戻りうるので、`Install-OpenSSH` と同じく停止・無効に戻す (1Password の agent と pipe を取り合う)
-- 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・AllowUsers に書けないユーザー名・鍵の写しの読めない行・
-  拒否の規則が効かない Windows Firewall のプロファイル・サービスの無い `sshd.exe`) があれば、揃えずに 1 で止まり、締めの行と ※ で直し方を出す
-  (setup と runner もその直し方を出す)
+- 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・ユーザーと送り元の写しの読めない値・AllowUsers に書けない
+  ユーザー名・鍵の写しの読めない行・拒否の規則が効かない Windows Firewall のプロファイル・サービスの無い `sshd.exe`) があれば、揃えずに 1 で止まり、
+  締めの行と ※ で直し方を出す (setup と runner もその直し方を出す)
 - SSH の会話の中 (`SSH_CONNECTION` がある) で揃えるときは、sshd を起こし直さない (起こし直すと会話ごと切れ、止めてから起こす間に落ちると sshd が
   止まったままになる)。書き直した sshd_config を効かせるには、PC の管理者の PowerShell で `Restart-Service sshd` を打つ
 - 管理者で起動し直した子の思わぬ失敗も、親が `[管理者]` の行で出す (子の窓はすぐ閉じる)
@@ -3954,19 +3997,23 @@ AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_c
 ### Install-Sshd.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (sshd_config の中身・鍵の行の読み方と指紋・administrators_authorized_keys の中身・Windows Firewall のアドレスの区間と規則の比べ方・
+- 副作用の無い関数 (sshd_config の中身 (ユーザーと送り元を渡した形と、既定の値で前の中身と 1 バイトも違わないこと)・送り元の検め・ユーザーと送り元の
+  写しの読み方と使う値の決め方・鍵の行の読み方と指紋・administrators_authorized_keys の中身・Windows Firewall のアドレスの区間と規則の比べ方・
   外のアドレスが tailnet と localhost のちょうど補集合か・効かないプロファイル・22 番を許す受信の規則の選び方・例外を 1 行にする形・鍵のファイルの権限・
   winget download と msiexec の引数・判定と状態の表) と、
   BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
   Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、Match Address の CIDR の書き方の誤り (sshd が起動しなくなる) を
   ここで見つけ、使い捨ての host 鍵で `sshd -T -C` を流して、どこから来たときに `DenyUsers *` が付くかを見る (Match Address の照らし方は Windows の
-  sshd も同じ)。Win32-OpenSSH が AllowUsers の `/` を `\` に替えることは Linux の sshd で再現しないので、AllowUsers などの語に `/` が無いことを別に
+  sshd も同じ)。書き換える前の試し (`Invoke-SshdConfigTest`) も本物の sshd で流し、作った中身が通り、改行で割れた中身が断られることを見る。Win32-OpenSSH が AllowUsers の `/` を `\` に替えることは Linux の sshd で再現しないので、AllowUsers などの語に `/` が無いことを別に
   見る (CI は `nixpkgs#openssh` を足して流す):
 
   ```sh
   nix shell nixpkgs#powershell nixpkgs#openssh -c pwsh -NoProfile -File win/openssh/Install-Sshd.Tests.ps1
   ```
 
+- 外から読んだ値 (ユーザーと送り元の写しの JSON・レジストリ・MSI) を検める正規表現は、`$` でなく `\z` で終える (.NET の `$` は末尾の改行の前でも
+  当たる。写しの JSON に `"alice\n"` と書くと `$` で終える検めは通し、sshd_config の行が割れて sshd が起動しなくなる)。runner の検め (`runner/src/host.rs`) と
+  同じ例 (末尾の改行) を両方の試験に置く
 - `bootstrap-windows-sshd.sh` と runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`sshd (OpenSSH Server`) と、締めの行の文言
   (`→ Install-Sshd で揃える`・`→ Install-Sshd -IfMissing で入れる`・揃える前に人が直すことの文言) で分かれる。変えるときは向こうも直す
 - Herdr を開いたままにする案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)

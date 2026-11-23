@@ -38,6 +38,7 @@ pub mod powershell_profile;
 pub mod powertoys;
 pub mod ps1;
 pub mod ssh_config;
+pub mod sshd_allow;
 pub mod sshd_keys;
 pub mod t3_code_settings;
 pub mod terminal;

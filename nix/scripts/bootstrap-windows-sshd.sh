@@ -33,7 +33,11 @@
 #    が list なら、Windows の %LOCALAPPDATA%\dotfiles\sshd\authorized_keys にその行を書く (中身が同じなら書かない)。null なら
 #    写しを消す (Install-Sshd は写しが無ければ鍵の中身に触らない)。windows-sshd.json が無い前の世代では写しに触らない。
 #    Install-Sshd.ps1 がこの写しどおりに administrators_authorized_keys を書く (管理者の鍵のファイルは管理者でないと書けないので、
-#    利用者が書ける写しを挟む。手で打つ Install-Sshd も同じ鍵を置ける)
+#    利用者が書ける写しを挟む。手で打つ Install-Sshd も同じ鍵を置ける)。
+#    ユーザーと送り元の写し (%LOCALAPPDATA%\dotfiles\sshd\allow.json。受け持ちが runner のホストで、runner の手順 sshd が Windows の
+#    ホストの値の [sshd] allowUsers・allowFrom から置く) が残っていれば消す。受け持ちが WSL のホストは、ユーザーと送り元を
+#    ホストの値で持たず、Install-Sshd の既定 (流したユーザーと、tailnet と localhost) で書く (受け持ちを runner から WSL に戻したホストで、
+#    runner のときの値が効き続けないように)
 # 3. pwsh.exe で Install-Sshd.ps1 -Check を流す (何も変えない)。WSL の interop を通るので、落ちていたら手で打つコマンドを出して
 #    飛ばす (exit 0)
 # 4. 終了コード 0 なら 1 行を出す (※ の補足があれば添える)。1 なら ⚠ で囲んだ注意と状態の表と揃えるコマンドを出す (揃える前に
@@ -213,8 +217,21 @@ sync_keys_copy() {
   fi
 }
 
+# ユーザーと送り元の写し (Install-Sshd.ps1 の -AllowCopy の既定と同じ場所。上の「何をするか」の 2)。受け持ちが WSL のホストでは置かず、
+# 残っていれば消す。消せなければ警告して先へ進む (-Check は、写しの今の中身で確かめる)
+allow_file="${windows_home}/AppData/Local/dotfiles/sshd/allow.json"
+remove_allow_copy() {
+  [[ -e ${allow_file} ]] || return 0
+  if rm -f -- "${allow_file}"; then
+    echo "ユーザーと送り元の写しを消しました (受け持ちが WSL のホストはホストの値で持たない。Install-Sshd は既定 (流したユーザーと、tailnet と localhost) で書く): ${allow_file}"
+  else
+    warn "ユーザーと送り元の写しを消せませんでした: ${allow_file}"
+  fi
+}
+
 # 写しは pwsh.exe を呼べないときも先に揃える (外した鍵が写しに残ると、後で PowerShell から打つ Install-Sshd が書き戻す)
 sync_keys_copy
+remove_allow_copy
 
 if ! command -v pwsh.exe &>/dev/null; then
   warn "pwsh.exe が見つかりません (PowerShell 7 が無いか、WSL の PATH に Windows の PATH が入っていない)。" "$(manual)"
