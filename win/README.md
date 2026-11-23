@@ -3952,6 +3952,11 @@ dotfiles-private にだけ置く。
   切れることがあるため (runner も同じ)
 - 揃える順は、拒否の規則 → sshd_config → 鍵 → server → 22 番の許可を無効にする → ssh-agent → サービス。MSI は Server を足した時点で sshd を起こし、
   22 番の許可も作るので、その前に拒否の規則と sshd_config と鍵を置く (sshd は最初から dotfiles の設定で起き、LAN からの 22 番は拒否の規則が止める)
+- sshd_config は、書き換える前に作った中身を `sshd -t` で試す (`Invoke-SshdConfigTest`)。書くのと同じ中身の一時のファイルと、使い捨てのホストの鍵 (ed25519。
+  `-h` で渡すので、sshd は既定のホストの鍵を読まず、ホストの鍵がまだ無い・読めないことを設定の誤りと取り違えない) を、管理者だけが書ける
+  `%ProgramData%\ssh` に置き、試した後に消す (利用者が書ける TEMP などに置くと、試してから書くまでの間に差し替えられる)。断られたら書き換えず・起こし直さずに
+  1 で止まり、`[管理者]` の行に sshd -t の出力を出す (今の sshd_config と sshd はそのまま)。sshd.exe がまだ無い (server を足す前) ときは試せないと出して書く。
+  中身が今と同じなら試さない
 - MSI を流すと ssh-agent のサービスが自動・実行中に戻りうるので、`Install-OpenSSH` と同じく停止・無効に戻す (1Password の agent と pipe を取り合う)
 - 揃える前に人が直すこと (OpenSSH が無い・Windows の機能の OpenSSH Server がある・ユーザーと送り元の写しの読めない値・AllowUsers に書けない
   ユーザー名・鍵の写しの読めない行・拒否の規則が効かない Windows Firewall のプロファイル・サービスの無い `sshd.exe`) があれば、揃えずに 1 で止まり、
@@ -3999,7 +4004,7 @@ dotfiles-private にだけ置く。
   BOM の見分けと一時ファイルからの差し替えは `openssh/Install-Sshd.Tests.ps1` で確かめる。Linux の pwsh で流すので
   Windows には触らない。PATH に sshd があれば、作る sshd_config を `sshd -G` で読ませ、Match Address の CIDR の書き方の誤り (sshd が起動しなくなる) を
   ここで見つけ、使い捨ての host 鍵で `sshd -T -C` を流して、どこから来たときに `DenyUsers *` が付くかを見る (Match Address の照らし方は Windows の
-  sshd も同じ)。Win32-OpenSSH が AllowUsers の `/` を `\` に替えることは Linux の sshd で再現しないので、AllowUsers などの語に `/` が無いことを別に
+  sshd も同じ)。書き換える前の試し (`Invoke-SshdConfigTest`) も本物の sshd で流し、作った中身が通り、改行で割れた中身が断られることを見る。Win32-OpenSSH が AllowUsers の `/` を `\` に替えることは Linux の sshd で再現しないので、AllowUsers などの語に `/` が無いことを別に
   見る (CI は `nixpkgs#openssh` を足して流す):
 
   ```sh

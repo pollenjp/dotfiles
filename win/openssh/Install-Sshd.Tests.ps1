@@ -70,6 +70,10 @@
 #   - 管理者の段は、写しのユーザーと送り元で sshd_config を書き、書いた値をログに出す。写しに読めない値 (末尾の改行も) があれば何も変えずに
 #     止まる
 #   - MSI から読む GUID と、レジストリから読む MSI の名前の検めも、末尾に改行の付いた値を断る
+#   - 書き換える前の sshd -t の試し: 管理者の段は、中身を書き換えるときだけ試す (ProgramData の ssh の下で)。断られたら書き換えず・起こし直さず
+#     ・記録も書かずに止まり、sshd -t の出力を出す。通れば書き換えて起こし直す。sshd.exe がまだ無ければ試せないと出し、止めずに書く。
+#     PATH に sshd と ssh-keygen があれば、Invoke-SshdConfigTest を本物の sshd で流し (使い捨てのホストの鍵を -h で渡す)、作った中身が通り、
+#     改行で割れた中身 (ユーザー・送り元) が断られ、一時のファイルが残らないことを見る。sshd が無ければ試せない
 #   - 本体の入口: 思わぬ例外では終了コード 2 で止まる
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -370,6 +374,27 @@ if ($sshd) {
                 foreach ($k in @('nobody', 'nowhere')) {
                     foreach ($a in @('100.100.1.1', '127.0.0.1')) { & $deniedIn $variant[$k] $a }
                 }
+            }
+            # Invoke-SshdConfigTest を本物の sshd で流す (書き換える前の試し。使い捨てのホストの鍵を -h で渡すので、ホストの鍵の無い所でも試せる)。
+            # 改行で割れた中身 (写しの JSON の \n を検めずに通した形) は断る
+            $testDir = Join-Path $tmp 'config-test'
+            $null = New-Item -ItemType Directory -Force -Path $testDir
+            $tried = [ordered]@{
+                good       = Invoke-SshdConfigTest -SshdExe $sshd.Source -Text $config -Directory $testDir
+                multi      = Invoke-SshdConfigTest -SshdExe $sshd.Source -Text $configMulti -Directory $testDir
+                brokenUser = Invoke-SshdConfigTest -SshdExe $sshd.Source -Text (Get-SshdConfigText -AllowUsers @("alice`n", 'bob')) -Directory $testDir
+                brokenFrom = Invoke-SshdConfigTest -SshdExe $sshd.Source -Text (Get-SshdConfigText -AllowUsers @('alice') -AllowFrom @("100.64.0.0/10`n", '127.0.0.1')) -Directory $testDir
+            }
+            Test-Case 'sshd -t で試す: 作った中身は通り、改行で割れた中身 (ユーザー・送り元) は断る。一時のファイルは残さない' 'True True|True True|True False|True False|True|0' {
+                @(
+                    foreach ($k in $tried.Keys) { "$($tried[$k].Tested) $($tried[$k].Ok)" }
+                    "$((@($tried['brokenUser'].Lines) -join ' ').Contains('bob'))"
+                    "$(@(Get-ChildItem -LiteralPath $testDir -Force).Count)"
+                ) -join '|'
+            }
+            Test-Case 'sshd -t で試す: sshd が無ければ試せない (Tested が偽で、わけを返す)' 'False True' {
+                $r = Invoke-SshdConfigTest -SshdExe (Join-Path $tmp 'none/sshd') -Text $config -Directory $testDir
+                $r.Tested; $r.Why.EndsWith('が無い (server を足す前)')
             }
         } else {
             Write-Host 'skip sshd -T -C で Match Address を照らす確かめ (PATH に ssh-keygen が無い)'
@@ -1246,7 +1271,9 @@ Test-Case 'sshd.exe はあるがサービスが無ければ 1 で止まり、Ser
 # (PowerShell は呼んだ側のスコープから名前を引くので、Invoke-SshdFix の中の呼び出しにも効き、外には残らない)
 $fixRoot = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-fix-$PID"
 function Invoke-FixScenario {
-    param([int]$MsiExit = 0, [switch]$Plant, $Installed = (New-InstalledFacts), [string]$AllowJson)
+    # $ServerInstalled: 始めから sshd.exe とサービス sshd (動いていて自動) がある形 (入った後に値を変えて揃え直す)。$ConfigTest: sshd -t の試し
+    # (Invoke-SshdConfigTest) を偽物にして、ok (通す)・reject (断る) を返す。空なら本物 (sshd.exe が無ければ試せないと返す)
+    param([int]$MsiExit = 0, [switch]$Plant, $Installed = (New-InstalledFacts), [string]$AllowJson, [switch]$ServerInstalled, [string]$ConfigTest)
     Remove-Item -LiteralPath $fixRoot -Recurse -Force -ErrorAction SilentlyContinue
     $pd = Join-Path $fixRoot 'ProgramData'
     $sshDir = Join-Path $pd 'ssh'
@@ -1254,6 +1281,7 @@ function Invoke-FixScenario {
     $state = Join-Path $fixRoot 'state'
     $null = New-Item -ItemType Directory -Force -Path $sshDir, $install, $state
     [IO.File]::WriteAllText((Join-Path $install 'ssh.exe'), '')
+    if ($ServerInstalled) { [IO.File]::WriteAllText((Join-Path $install 'sshd.exe'), '') }
     # ユーザーと送り元の写し (渡したときだけ置く)
     if ($AllowJson) { [IO.File]::WriteAllText((Join-Path $state 'allow.json'), $AllowJson, [Text.UTF8Encoding]::new($false)) }
     Write-TextNoBom -Path (Join-Path $sshDir 'sshd_config') -Text (Get-SshdConfigText -AllowUser 'alice')
@@ -1266,7 +1294,18 @@ function Invoke-FixScenario {
         FwRules  = [System.Collections.Generic.List[object]]::new()
         Result   = $null
     }
+    if ($ServerInstalled) { $world.Services['sshd'] = [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
 
+    if ($ConfigTest) {
+        function Invoke-SshdConfigTest {
+            param([string]$SshdExe, [string]$Text, [string]$Directory)
+            $world.Calls.Add("sshd -t で試した: $(Split-Path -Leaf $SshdExe) $(Split-Path -Leaf $Directory)")
+            if ($ConfigTest -eq 'reject') {
+                return [pscustomobject]@{ Tested = $true; Ok = $false; Lines = @('sshd_config line 21: no argument after keyword "bob"'); Why = $null }
+            }
+            [pscustomobject]@{ Tested = $true; Ok = $true; Lines = @(); Why = $null }
+        }
+    }
     function Write-Step { param([string]$Message) $world.Steps.Add($Message) }
     function Test-InSshSession { $false }
     function Get-NetFirewallProfile {
@@ -1456,6 +1495,33 @@ try {
     $newlineFrom = Invoke-FixScenario -AllowJson '{"version":1,"allowFrom":["100.64.0.0/10\n","127.0.0.1"]}'
     Test-Case '写しのユーザー・送り元に末尾の改行があれば、sshd_config を書かずに $false で止まる' 'False True 0|False True 0' {
         @($newlineUser, $newlineFrom | ForEach-Object { "$($_.Result) $($_.Config.Text -ceq $beforeHostValues) $(@($_.Calls).Count)" }) -join '|'
+    }
+
+    # 書き換える前の sshd -t の試し (Invoke-SshdConfigTest)。sshd.exe が入った後に値を変えて揃え直す形で、試しを偽物にする
+    $rejected = Invoke-FixScenario -ServerInstalled -ConfigTest reject -AllowJson '{"version":1,"allowUsers":["alice","bob"]}'
+    Test-Case 'sshd -t が断ったら、sshd_config を書き換えず・起こし直さずに $false で止まり、sshd -t の出力を出す (記録も書かない)' @(
+        'False'
+        'sshd_config の中身を sshd -t が断った。sshd_config を書き換えずに止める (今の sshd_config と sshd はそのまま)'
+        '  sshd -t: sshd_config line 21: no argument after keyword "bob"'
+        '|'
+        'sshd -t で試した: sshd.exe ssh'
+        '|'
+        'True True Running'
+    ) {
+        $rejected.Result; $rejected.Steps; '|'; $rejected.Calls; '|'
+        "$($rejected.Config.Text -ceq $beforeHostValues) $($null -eq $rejected.Record.ConfigSha) $($rejected.Services['sshd'].Status)"
+    }
+    $accepted = Invoke-FixScenario -ServerInstalled -ConfigTest ok -AllowJson '{"version":1,"allowUsers":["alice","bob"],"allowFrom":["100.64.0.1","fd7a:115c:a1e0:ab12::/64"]}'
+    Test-Case 'sshd -t が通したら、書き換えて起こし直す (試すのは管理者だけが書ける ProgramData の ssh の下)' 'True|sshd_config の中身を sshd -t で試した (通った)|sshd_config を dotfiles の中身にした|sshd -t で試した: sshd.exe ssh|Restart-Service sshd|True' {
+        @(
+            "$($accepted.Result)"
+            @($accepted.Steps | Where-Object { $_ -like 'sshd_config の中身を*' -or $_ -eq 'sshd_config を dotfiles の中身にした' })
+            @($accepted.Calls)
+            "$($accepted.Config.Text -ceq $configMulti)"
+        ) -join '|'
+    }
+    Test-Case 'sshd.exe がまだ無い (server を足す前) ときは試せないと出し、止めずに書く' 'True|sshd_config の中身を sshd -t で試せなかった (<tmp>/OpenSSH/sshd.exe が無い (server を足す前))。試さずに書く|sshd_config を dotfiles の中身にした' {
+        (@("$($withAllow.Result)") + @($withAllow.Steps | Where-Object { $_ -like 'sshd_config の中身を*' -or $_ -eq 'sshd_config を dotfiles の中身にした' })) -join '|'
     }
 
     $planted = Invoke-FixScenario -Plant

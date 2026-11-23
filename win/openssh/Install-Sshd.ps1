@@ -23,7 +23,8 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
    sshd_config が無ければ既定 (パスワードでも入れる) を写すので、server を足す前に書いておく (ディレクトリが無ければ、sshd が作るのと
    同じ権限で作る)。AllowUsers のユーザーと入ってよい送り元は、ユーザーと送り元の写し (-AllowCopy。受け持ちが runner のホストで、
    runner の手順 sshd がホストの値の [sshd] allowUsers・allowFrom から置く) があればその値、無ければ既定 (このスクリプトを流したユーザーと、
-   tailnet と localhost)
+   tailnet と localhost)。書き換える前に、作った中身を sshd -t (使い捨てのホストの鍵を -h で渡す。Invoke-SshdConfigTest) で試し、断られたら
+   書き換えずに止まる (sshd.exe がまだ無い、server を足す前は試せないので、そう出して書く)
 3. Windows Firewall: 拒否の規則を 3 つ置き (Get-SshdFirewallSpecs)、22 番を許す受信の規則 (MSI が作るものなど) を無効にする。
    block は allow より強いので、Tailscale の ACL を誤っても、tailnet からは 22 番にしか届かず、22 番には tailnet と localhost
    からしか届かない
@@ -1137,6 +1138,51 @@ function Set-AdminOnlyAcl {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
+# 作った sshd_config の中身 ($Text) を、書き換える前に sshd の -t で試す。書くのと同じ文字列 (BOM の無い UTF-8・LF) を $Directory の一時の
+# ファイルに書き、使い捨てのホストの鍵 (ed25519) を作って -h で渡す (-h があると sshd は既定のホストの鍵を読まないので、ホストの鍵がまだ無い・
+# 読めないことを設定の誤りと取り違えない。断るのは設定の誤りだけ)。$Directory は管理者だけが書ける所 (%ProgramData%\ssh) にする (利用者が書ける
+# TEMP や LOCALAPPDATA だと、試してから書くまでの間に差し替えられる)。一時のファイルは、試した後にいつも消す。
+# 返すのは Tested (試せたか)・Ok (sshd が通したか。終了コード 0)・Lines (sshd -t の出力)・Why (試せなかったわけ)。sshd・ssh-keygen が無い・鍵を
+# 作れないときは Tested が偽 (止めずに進める側が決める)。Windows では鍵の権限を管理者と SYSTEM だけにする (Win32-OpenSSH はほかの人が読める
+# ホストの鍵を読まない)。Linux の sshd でも同じに流れる (ssh-keygen が 0600 で作る。Install-Sshd.Tests.ps1 が nixpkgs の sshd で確かめる)
+function Invoke-SshdConfigTest {
+    param([string]$SshdExe, [string]$Text, [string]$Directory)
+    $result = { param($tested, $ok, $lines, $why) [pscustomobject]@{ Tested = [bool]$tested; Ok = [bool]$ok; Lines = @($lines); Why = $why } }
+    if (-not (Test-Path -LiteralPath $SshdExe -PathType Leaf)) {
+        return (& $result $false $false @() "$SshdExe が無い (server を足す前)")
+    }
+    # ssh-keygen は sshd の隣 (Windows は ssh-keygen.exe、Linux は ssh-keygen)
+    $keygen = Join-Path (Split-Path -Parent $SshdExe) ('ssh-keygen' + [IO.Path]::GetExtension($SshdExe))
+    if (-not (Test-Path -LiteralPath $keygen -PathType Leaf)) {
+        return (& $result $false $false @() "$keygen が無い (使い捨てのホストの鍵を作れない)")
+    }
+    $id = [guid]::NewGuid().ToString('N')
+    $config = Join-Path $Directory "sshd_config.dotfiles-test-$id"
+    $key = Join-Path $Directory "ssh_host_ed25519_key.dotfiles-test-$id"
+    try {
+        Write-TextNoBom -Path $config -Text $Text
+        # 空のパスフレーズは Start-Process で "" と書いて渡す (Windows PowerShell 5.1 は、外のコマンドに渡す空の引数を落とす)。名前は毎回新しい
+        # ので、ssh-keygen が上書きを聞いて止まることはない
+        $gen = Start-Process -FilePath $keygen -ArgumentList @('-q', '-t', 'ed25519', '-N', '""', '-C', 'dotfiles-sshd-test', '-f', ('"{0}"' -f $key)) -Wait -PassThru -NoNewWindow
+        if (($gen.ExitCode -ne 0) -or (-not (Test-Path -LiteralPath $key -PathType Leaf))) {
+            return (& $result $false $false @() "使い捨てのホストの鍵を作れなかった (ssh-keygen の終了コード $($gen.ExitCode))")
+        }
+        if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT) {
+            try {
+                Set-AdminOnlyAcl -Path $key
+            } catch {
+                return (& $result $false $false @() "使い捨てのホストの鍵の権限を、管理者と SYSTEM だけにできなかった ($(Get-ErrorSummary -ErrorRecord $_ -Fallback 'Set-Acl'))")
+            }
+        }
+        # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
+        $ErrorActionPreference = 'Continue'
+        $lines = @(& $SshdExe -t -f $config -h $key 2>&1 | ForEach-Object { "$_" })
+        & $result $true ($LASTEXITCODE -eq 0) $lines $null
+    } finally {
+        foreach ($p in @($config, $key, "$key.pub")) { Remove-Item -LiteralPath $p -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 # 拒否の規則を 1 つ読む (無ければ $null)。無い (ObjectNotFound) 以外の失敗は例外にする (読めないのを「無い」と読まない)
 function Read-FirewallRuleFacts {
     param([string]$Name)
@@ -1489,6 +1535,19 @@ function Invoke-SshdFix {
     $configChanged = $false
     $current = Read-TextFile -Path $configPath
     if (-not ($current.Readable -and (-not $current.HasBom) -and ((ConvertTo-Lf $current.Text) -ceq $configText))) {
+        # 書き換える前に、作った中身を sshd -t で試す (一時のファイルは管理者だけが書ける %ProgramData%\ssh に置く)。断られたら書き換えずに
+        # 止まる (今の sshd_config と sshd はそのまま。起こし直してから落ちると、sshd が止まったままになる)。sshd.exe がまだ無い (MSI で server を
+        # 足す前) ときは試せないので、そう出して今までどおり書く
+        $test = Invoke-SshdConfigTest -SshdExe $sshdExe -Text $configText -Directory $sshDir
+        if (-not $test.Tested) {
+            Write-Step "sshd_config の中身を sshd -t で試せなかった ($($test.Why))。試さずに書く"
+        } elseif (-not $test.Ok) {
+            Write-Step 'sshd_config の中身を sshd -t が断った。sshd_config を書き換えずに止める (今の sshd_config と sshd はそのまま)'
+            foreach ($line in @($test.Lines)) { Write-Step "  sshd -t: $line" }
+            return $false
+        } else {
+            Write-Step 'sshd_config の中身を sshd -t で試した (通った)'
+        }
         # 一時ファイルから差し替える (書けずに消えると、sshd は次に起きるときに既定を写す)
         Write-TextReplacing -Path $configPath -Text $configText -Backup "$configPath.dotfiles-bak-$stamp"
         if ($current.Exists) { Write-Step "sshd_config を退避した: sshd_config.dotfiles-bak-$stamp" }
