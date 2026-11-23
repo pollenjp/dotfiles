@@ -894,7 +894,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む。`answer` のある段は押してハブへ送れる)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
@@ -966,6 +966,10 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   入れ、端末に 1 回で貼る (`terminal.paste`)。「送信」かペインの Enter では `hc keys` で Enter も 1 回押す (powershell.exe を使うので Windows だけ)。
   複数行の答えが Claude Code の入力欄に 1 つの入力として入るのは、`terminal.paste` が bracketed paste で渡すことを当てにしている (herdr-app の
   文書には書かれていない)
+- 貼る前に `hc get --json` で端末を見て、エージェントが人を待っている (status が `blocked`。許可・問いの画面) なら、クリップボードにも入れずに止めて
+  わけを出す (貼った字は画面に無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる。`hc send` も blocked の端末には送らない)。貼った後に
+  blocked になっていれば Enter を押さない。写しのペイン (まとめと問いのペイン) が同時に送らないよう、送っている間は herdr-app の shared の
+  `pjp-hub-panel.sendingUntil` に時刻を置き、ほかのペインはその間は送らずにわけを出す (送り終えたら外す。herdr-app が途中で落ちても 30 秒で外れる)
 - 図はペインの幅 (一覧とカードの余白を引いた幅) に合わせて縮め・大きくする (0.1〜2 倍。ペインの境を動かすと追う)。幅はアプリの zoom
   (`settings.json` の `zoom`) で割ってから合わせるので、zoom が 1 でなくてもペインの端で切れない。図は panel の文字の % には従わない
 - 図をクリックすると、その図だけを大きく出す小窓 (dialog。窓の幅の 92%・高さの 90%) が開く。図は小窓に縦横とも収め (4 倍まで)、marks の
@@ -1010,7 +1014,8 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 - チケット・進み具合・PR の木は、節の型 `work` で書く (ハブはまとめのペインの一番上に置く。panel は節を並べ替えない)。行は
   `{ kind, id, title, url, status, state, ci, who, note, steps, children, related }` で、`kind` は `ticket` (省いてよい)・`pr`・`item`。チケットの行の
   `children` に子のチケット・PR・item を入れると 1 段下げて出し、字下げに縦と横の線を引く (3 段まで)。行ごとに ID・状態の札・題・誰が (`who`。枠だけの札)
-  を並べ、その下に段 (`steps`。flow の段と同じ札)・一言 (`note`)・子を出す。ID か題を押すと `url` を開く (一覧と同じく http と https だけ)。
+  を並べ、その下に段 (`steps` の `{ label, state, answer }`。flow の段と同じ札で、`answer` のある段は押せる。下の「段の answer」)・一言 (`note`)・子を出す。
+  ID か題を押すと `url` を開く (一覧と同じく http と https だけ)。
   Done・Canceled のチケットで、下に動いているもの (active か blocked の段・open か draft の PR) が無ければ初め上の段だけに畳み、下の PR の数を足す
   (「PR 3 本 merged」。`▸` で開き、`▾` で畳む)。`related` が true の根の行は、点線の下に「関連」として出す。欄の意味・札の色・畳み方の正本は
   `main.js` の頭のコメント:
@@ -1019,7 +1024,9 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
 { "type": "work", "id": "work", "title": "チケット・進み具合・PR", "rows": [
   { "id": "TKT-n", "title": "ハブのチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "ハブ", "children": [
     { "id": "TKT-m", "title": "子のチケット", "url": "https://app.notion.com/p/<…>", "status": "In Progress", "who": "子 C · example-wsl/t6v",
-      "steps": [ { "label": "spec", "state": "done" }, { "label": "実装", "state": "active" }, { "label": "PR", "state": "todo" } ] },
+      "steps": [ { "label": "spec", "state": "done" }, { "label": "実装", "state": "active" }, { "label": "PR", "state": "todo" } ], "children": [
+      { "kind": "item", "title": "解説動画 (短尺)", "who": "子 D",
+        "steps": [ { "label": "作る", "state": "done" }, { "label": "見る", "state": "active", "answer": "TKT-m 解説動画 (短尺 2:41) -> 見た" } ] } ] },
     { "id": "TKT-k", "title": "済んだ子のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "who": "子 A", "children": [
       { "kind": "pr", "id": "dotfiles#251", "title": "panel の文字を 1.2 倍に", "url": "https://github.com/pollenjp/dotfiles/pull/251", "state": "merged", "ci": "pass" } ] } ] },
   { "id": "TKT-j", "title": "前の会話のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "note": "前の会話", "related": true } ] }
@@ -1064,6 +1071,44 @@ $panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnoti
 foreach ($s in $panel.sections) {
     if ($s.type -eq 'qa' -and $null -ne $s.items) { $s.items = @($s.items | Where-Object { -not $_.id -or $_.id -cnotin $ids }) }
 }
+```
+
+- 段の answer: チケットの木 (`work`) の行の段に `answer` (1 行の字。問いの `answer` と同じく、それだけで読める「何を -> どうした」) を書くと、panel はその段を
+  押せる札にする (ポインタの形・hover・ヒント。色と点滅は今の札のまま)。ハブはユーザーの番の段 (解説動画の「見る」・手で確かめる段) に書き、ユーザーは
+  panel を押して「見た」「済んだ」をハブに伝える。押すと (①) 段の並びのすぐ下に「「<answer>」を送る?」と `送る`・`やめる` の小さな確かめが出る (②。もう
+  一度段を押すと `やめる` と同じ)。`送る` は問いの「送信」と同じ手 (クリップボード → `terminal.paste` → `hc keys` の Enter) で `answer` をハブの端末へ送り、
+  送れたら確かめの代わりに「「<answer>」を送った」と出す (ハブの端末が確かめの画面で止まっているときは送らず、わけを出す)。`やめる` は何も送らない。
+  空・改行を含む `answer` の段は押せないまま。flow の節の段の `answer` は見ない
+- 段を押すと、panel は panel.json の隣の `<名前>.steps.json` (panel.json の名前の `.json` を `.steps.json` に替えたもの。`panel.json` なら
+  `panel.steps.json`) に押した印を書く。`送る` を押さずに置いた印もハブが拾えるように、押した時に書く:
+  `{ "file": "panel.json", "pressed": [{ "section": "<work の節の id>", "row": "<行の id。id の無い行は @ と木の中の位置 (例 @0.2)>", "label": "<段の label>", "answer": "<押したときの answer>", "at": "<時刻 (UTC)>", "sent": false }] }`。
+  `送る` で送れたら `sent` が true になり、`やめる` で印が外れる。同じ section・row・label で `answer` の同じ段が panel.json から無くなると、panel が
+  印を外す。消す印と同じく、印のファイルは panel だけが書く。欄の意味の正本は `main.js` の頭のコメントの「段の answer」
+- ハブは panel.json を書く前に (消す印を読むのと同じ時に) 押した印のファイルを読み、`sent` が false の印を「ユーザーがその `answer` を送った」とみなして、
+  端末で `answer` が届いたときと同じに扱う (`sent` が true の印は端末に届いているので数えない)。数えるのは、今の panel.json の、印の `section` と同じ id の
+  work の節の木 (深さを問わず) に、`label` と `answer` の同じ段がある印だけ (無い印は、もう扱って `answer` を外した段のもの。まとめのペインが閉じている
+  間は、panel が印を外せずに残る)。扱ったら、その段の `answer` を外し、`state` を `done` にして書く (panel が印を外す)。手順の正本は claude-skills の
+  pjp-hc-hub の `references/panel.md`:
+
+```powershell
+# panel.json を書く前に (PowerShell 7。$panel は今の panel.json を ConvertFrom-Json で読んだもの、$panelPath は panel.json の絶対パス)
+$steps = Join-Path (Split-Path $panelPath) 'panel.steps.json'
+$pressed = @()
+if (Test-Path $steps) { $pressed = @((Get-Content $steps -Raw | ConvertFrom-Json).pressed | Where-Object { $_ -and $_.sent -ne $true }) }
+# 今の panel.json の work の節の木 (深さを問わず) にある段の「節の id・label・answer」の組。組が今の段に無い印は数えない
+$live = [System.Collections.Generic.HashSet[string]]::new()
+$walk = {
+    param($sec, $rows)
+    foreach ($r in @($rows)) {
+        if (-not $r) { continue }
+        foreach ($st in @($r.steps)) { if ($st -and $st.answer) { [void]$live.Add("$sec`n$($st.label)`n$($st.answer)") } }
+        & $walk $sec $r.children
+    }
+}
+foreach ($s in @($panel.sections | Where-Object { $_ -and $_.type -eq 'work' })) { & $walk $(if ($s.id -is [string]) { $s.id } else { '' }) $s.rows }
+$pressed = @($pressed | Where-Object { $live.Contains("$($_.section)`n$($_.label)`n$($_.answer)") })
+# 押したが、送ったと書かれていない answer。端末で届いた answer と同じに扱う
+$pressed | ForEach-Object { "押した: $($_.answer)" }
 ```
 
 ### herdr-app のキー
