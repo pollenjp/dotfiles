@@ -26,9 +26,11 @@
 #     (local-flake-migrate.sh prepare・pjp-dotfiles-local-flake-migrate) を出す
 #   - --dry-run では、決め直しに頼る実行 (取得・ローカル flake の手順が流れない) は switch で ✖ にせず、決め直せないことを
 #     出して 0
-#   - switch のあと、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むなら、ホストの要約
-#     (hostSummary.file) を clone の nix/hosts/<ホスト>.md と比べ、無ければ・違えば警告のまとめに [switch] で skill の名前
-#     (pjp-dotfiles-register-host) つきの 1 件を出す。同じなら出さない。登録簿のホスト (--host) では比べない。評価が空なら黙る。
+#   - switch のあと、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むなら、ホストのページ
+#     (hostSummary.pages を nix eval --write-to で書き出したもの) を clone の docs/hosts/nix/<ホスト>.md と HTML 版
+#     (docs/hosts/nix/html/<ホスト>.html) と比べ、無ければ・違えば (md でも HTML 版でも) 警告のまとめに [switch] で skill の名前
+#     (pjp-dotfiles-register-host) つきの 1 件を出す。同じなら出さない。md の 3 行目の「📝 [Notion で開く](…)」の行 (Notion に写す道具が
+#     書く) の有る無しは違いに数えない。登録簿のホスト (--host) では比べない。評価が空 (書き出すものが無い) なら黙る。
 #     本体 (repo) が upstream より遅れていれば、出し直さずに先に本体を進める (--self-update) よう出す (古い本体で出し直すと、
 #     新しい要約を古い形に戻すため)
 #   - 最初から決まっておらず、取得しても登録が来ないときは、取得のあと switch の頭で止まる (home-manager を呼ばない)。
@@ -98,7 +100,7 @@ ng() {
 # 要るコマンドだけを並べた PATH (git・gh・nix・home-manager・ghq は入れない。uname は偽物)
 sys_bin="${work}/sys-bin"
 mkdir -p "${sys_bin}"
-for c in env awk sed grep sort head tail tr cat dirname basename readlink id mktemp mkdir rm cp mv chmod cksum cmp ln; do
+for c in env awk sed grep sort head tail tr cat dirname basename readlink id mktemp mkdir rm cp mv chmod cksum cmp ln find; do
   if ! p=$(command -v "${c}"); then
     echo "見つからない: ${c}" >&2
     exit 1
@@ -119,8 +121,9 @@ chmod +x "${sys_bin}/uname"
 
 # 偽の home-manager と nix を置いた bin を作り、その場所を出す。home-manager は引数を <HOME>/hm-calls に書いて 0 を返す。
 # nix は引数を <HOME>/nix-calls に書き、`hash path <dir>` なら sha256-<dir/.fakehash の中身> (無ければ sha256-FAKE) を
-# 出す。ホストの要約 (hostSummary) の eval なら <HOME>/fake-summary の中身を出す (無ければ空)。ほかは何も出さずに 0
-# (eval の warnings は空)
+# 出す。ホストの要約 (hostSummary) を --write-to <dir> で書き出す eval なら、<HOME>/fake-summary があるときだけ、その中身を
+# <dir>/nix/<ホスト>.md に、<HOME>/fake-summary-html (無ければ「HTML」) を <dir>/nix/html/<ホスト>.html に書く (無ければ何も
+# 書かない)。ほかは何も出さずに 0 (eval の warnings は空)
 fake_hm_bin() {
   local b="$1/fake-bin"
   mkdir -p "${b}"
@@ -141,7 +144,18 @@ if [[ $1 == hash ]]; then
   if [[ -f ${last}/.fakehash ]]; then echo "sha256-$(cat "${last}/.fakehash")"; else echo sha256-FAKE; fi
 fi
 if [[ $1 == eval && $* == *.hostSummary* && -f ${HOME}/fake-summary ]]; then
-  cat "${HOME}/fake-summary"
+  wt=""
+  prev=""
+  for a in "$@"; do
+    [[ ${prev} != --write-to ]] || wt=$a
+    prev=$a
+  done
+  h=$(printf '%s\n' "$@" | sed -n 's/.*homeConfigurations\."\([^"]*\)"\.hostSummary$/\1/p')
+  if [[ -n ${wt} && -n ${h} ]]; then
+    mkdir -p "${wt}/nix/html"
+    cat "${HOME}/fake-summary" >"${wt}/nix/${h}.md"
+    if [[ -f ${HOME}/fake-summary-html ]]; then cat "${HOME}/fake-summary-html"; else echo HTML; fi >"${wt}/nix/html/${h}.html"
+  fi
 fi
 exit 0
 EOF
@@ -641,19 +655,39 @@ else
   ng "選べる道 (--initial)" "rc=$(rc "${c}") $(err "${c}")"
 fi
 
-# 30. 要約の古さ: 登録したホストで switch したら、clone の nix/hosts/<ホスト>.md と hostSummary.file を比べる。無い・違うなら警告の
-#     まとめに [switch] で 1 件 (skill の名前つき)。同じなら出さない。登録簿のホストを --host で当てたら比べない。評価が空なら黙る
+# 30. 要約の古さ: 登録したホストで switch したら、clone の docs/hosts/nix/<ホスト>.md と HTML 版を hostSummary.pages と比べる。無い・違う
+#     なら警告のまとめに [switch] で 1 件 (skill の名前つき)。同じなら出さない (md の「📝 Notion で開く」の行の有る無しは数えない)。
+#     登録簿のホストを --host で当てたら比べない。評価が空なら黙る
+summary_md='# alice@box
+
+HTML
+
+SUMMARY alice@box'
 c=$(new_case t30)
 local_flake "${c}" "${c}/private/nix"
 b=$(fake_hm_bin "${c}")
-printf 'SUMMARY alice@box\n' >"${c}/home/fake-summary"
+printf '%s\n' "${summary_md}" >"${c}/home/fake-summary"
+pages="${c}/private/docs/hosts/nix"
 PATH_EXTRA=${b} run "${c}" --steps switch
 s_missing=$(after_result "${c}")
 rc_missing=$(rc "${c}")
-printf 'SUMMARY alice@box\n' >"${c}/private/nix/hosts/alice@box.md"
+mkdir -p "${pages}/html"
+printf '%s\n' "${summary_md}" >"${pages}/alice@box.md"
+echo HTML >"${pages}/html/alice@box.html"
 PATH_EXTRA=${b} run "${c}" --steps switch
 s_same=$(after_result "${c}")
-printf 'SUMMARY old\n' >"${c}/private/nix/hosts/alice@box.md"
+{
+  printf '# alice@box\n\n'
+  printf '📝 [Notion で開く](https://app.notion.com/p/0123456789abcdef0123456789abcdef)\n\n'
+  printf 'HTML\n\nSUMMARY alice@box\n'
+} >"${pages}/alice@box.md"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_notion=$(after_result "${c}")
+echo 'HTML old' >"${pages}/html/alice@box.html"
+PATH_EXTRA=${b} run "${c}" --steps switch
+s_html=$(after_result "${c}")
+echo HTML >"${pages}/html/alice@box.html"
+printf '# alice@box\n\nHTML\n\nSUMMARY old\n' >"${pages}/alice@box.md"
 PATH_EXTRA=${b} run "${c}" --steps switch
 s_differ=$(after_result "${c}")
 PATH_EXTRA=${b} run "${c}" --steps switch --host alice@x86_64-linux
@@ -662,14 +696,15 @@ rm -f "${c}/home/fake-summary"
 PATH_EXTRA=${b} run "${c}" --steps switch
 s_empty=$(after_result "${c}")
 if [[ ${rc_missing} == 0 ]] \
-  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (nix/hosts/alice@box.md) がありません → Claude Code の pjp-dotfiles-register-host skill' <<<"${s_missing}" \
+  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (docs/hosts/nix/alice@box.md と HTML 版) がありません → Claude Code の pjp-dotfiles-register-host skill' <<<"${s_missing}" \
   && grep -qF 'private-host.sh summaries --private' <<<"${s_missing}" \
-  && ! grep -qF 'ホストの要約' <<<"${s_same}" \
-  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (nix/hosts/alice@box.md) が今の設定と違います' <<<"${s_differ}" \
+  && ! grep -qF 'ホストの要約' <<<"${s_same}" && ! grep -qF 'ホストの要約' <<<"${s_notion}" \
+  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (docs/hosts/nix/alice@box.md と HTML 版) が今の設定と違います' <<<"${s_html}" \
+  && grep -qF '[switch] dotfiles-private のこの PC のホストの要約 (docs/hosts/nix/alice@box.md と HTML 版) が今の設定と違います' <<<"${s_differ}" \
   && ! grep -qF 'ホストの要約' <<<"${s_registry}" && ! grep -qF 'ホストの要約' <<<"${s_empty}"; then
-  ok "switch のあと、登録したホストの要約が clone の <ホスト>.md と無い・違うなら skill の名前つきで警告し、同じ・登録簿のホスト・評価が空なら出さない"
+  ok "switch のあと、登録したホストのページ (md・HTML 版) が clone の docs/hosts/ と無い・違うなら skill の名前つきで警告し、同じ・Notion の行だけ違う・登録簿のホスト・評価が空なら出さない"
 else
-  ng "要約の古さ" "missing=${s_missing}"$'\n'"same=${s_same}"$'\n'"differ=${s_differ}"$'\n'"registry=${s_registry}"$'\n'"empty=${s_empty}"
+  ng "要約の古さ" "missing=${s_missing}"$'\n'"same=${s_same}"$'\n'"notion=${s_notion}"$'\n'"html=${s_html}"$'\n'"differ=${s_differ}"$'\n'"registry=${s_registry}"$'\n'"empty=${s_empty}"
 fi
 
 # 31. 要約が違っても、本体が upstream より遅れていれば、出し直さずに --self-update で本体を進めるよう出す (偽の git が 3 commit
@@ -688,14 +723,16 @@ exit 0
 GITEOF
 } >"${b}/git"
 chmod +x "${b}/git"
-printf 'SUMMARY alice@box\n' >"${c}/home/fake-summary"
-printf 'SUMMARY old\n' >"${c}/private/nix/hosts/alice@box.md"
+printf '%s\n' "${summary_md}" >"${c}/home/fake-summary"
+mkdir -p "${c}/private/docs/hosts/nix/html"
+printf '# alice@box\n\nHTML\n\nSUMMARY old\n' >"${c}/private/docs/hosts/nix/alice@box.md"
+echo HTML >"${c}/private/docs/hosts/nix/html/alice@box.html"
 PATH_EXTRA=${b} run "${c}" --steps switch
 s_behind=$(after_result "${c}")
 if [[ $(rc "${c}") == 0 ]] \
   && grep -qF 'が今の設定と違います。ただし本体 ('"${c}"'/repo) が upstream より 3 commit 遅れているので、まだ出し直さない' <<<"${s_behind}" \
   && grep -qF -- 'dotfiles/setup --self-update --update' <<<"${s_behind}" \
-  && ! grep -qF '要約と README を出し直す PR を作る' <<<"${s_behind}"; then
+  && ! grep -qF 'docs/hosts/ を出し直す PR を作る' <<<"${s_behind}"; then
   ok "要約が違っても、本体が upstream より遅れていれば、出し直さずに --self-update で本体を進めるよう出す"
 else
   ng "要約の古さ (本体が遅れている)" "rc=$(rc "${c}") ${s_behind} $(err "${c}")"
