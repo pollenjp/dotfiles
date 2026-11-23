@@ -123,25 +123,41 @@ $script:KeyTypePattern = 'ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk
 # 副作用の無い関数 (Install-Sshd.Tests.ps1 で確かめる)
 # ---------------------------------------------------------------------------
 
-# AllowUsers に書けるユーザー名か (小文字にした後の名前)。空白・パターンの文字 (* ? ! ,)・@・" を含む名前は、sshd_config の
-# 1 語に書けないので断る
+# AllowUsers に書けるユーザー名か (小文字にした後の名前)。空白・パターンの文字 (* ? ! ,)・@・" と改行を含む名前は、sshd_config の
+# 1 語に書けないので断る。外から読んだ値 (写しの JSON など) を検める正規表現は \z で終える (.NET の $ は末尾の改行の前でも当たり、
+# "alice`n" を通す。通すと sshd_config の行が割れ、sshd が起動しなくなる)
 function Test-SshdUserName {
     param([string]$Name)
-    "$Name" -cmatch '^[a-z0-9][a-z0-9._-]*$'
+    "$Name" -cmatch '^[a-z0-9][a-z0-9._-]*\z'
+}
+
+# 表に出す値 (写しを手で書き換えた値)。制御文字を \n・\r・\t・\xNN の字にする (※ の行が割れないように)
+function ConvertTo-ShownValue {
+    param([string]$Value)
+    [regex]::Replace("$Value", '[\x00-\x1f\x7f]', {
+            param($m)
+            switch ([int][char]$m.Value) {
+                10 { '\n' }
+                13 { '\r' }
+                9 { '\t' }
+                default { '\x{0:x2}' -f [int][char]$m.Value }
+            }
+        })
 }
 
 # sshd_config の Match Address に書ける送り元か: IPv4・IPv6 のアドレスか CIDR (<アドレス>/<長さ>) だけ。IPv4 は 10 進の 4 つの組 (頭に 0 を
 # 付けない)、長さは IPv4 で 0〜32・IPv6 で 0〜128 (頭に 0 を付けない)、CIDR のアドレスは範囲の頭 (長さより後ろのビットが 0)。sshd は長さの
 # 誤りと後ろのビットが立った CIDR を Match Address の書き方の誤りとして断り、起動しなくなる (OpenSSH の addr.c の addr_pton_cidr)。
-# ! * , と空白・ゾーン (%) は書けない (sshd のパターン・否定・区切りにしない)。win/runner/src/host.rs の sshd_from_check と同じ見方
+# ! * , と空白・改行・ゾーン (%) は書けない (sshd のパターン・否定・区切りにしない。改行は行を割る)。正規表現は Test-SshdUserName と同じく
+# \z で終える。win/runner/src/host.rs の sshd_from_check と同じ見方
 function Test-SshdFromAddress {
     param([string]$Address)
-    if (-not ("$Address" -cmatch '^([0-9A-Fa-f:.]+)(?:/(0|[1-9][0-9]{0,2}))?$')) { return $false }
+    if (-not ("$Address" -cmatch '^([0-9A-Fa-f:.]+)(?:/(0|[1-9][0-9]{0,2}))?\z')) { return $false }
     $addr = $Matches[1]
     $lenText = $Matches[2]
     $octet = '(?:25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])'
     $ip = $null
-    if ($addr -cmatch "^$octet(?:\.$octet){3}$") {
+    if ($addr -cmatch "^$octet(?:\.$octet){3}\z") {
         $bits = 32
     } elseif ($addr.Contains(':') -and [System.Net.IPAddress]::TryParse($addr, [ref]$ip) -and ("$($ip.AddressFamily)" -eq 'InterNetworkV6')) {
         $bits = 128
@@ -264,7 +280,7 @@ function ConvertFrom-AllowCopy {
         }
         $items = @($p.Value)
         foreach ($item in $items) {
-            if (($item -isnot [string]) -or (-not (& $Ok $item))) { $bad.Add("$Key の $item ($Hint)") }
+            if (($item -isnot [string]) -or (-not (& $Ok $item))) { $bad.Add("$Key の $(ConvertTo-ShownValue $item) ($Hint)") }
         }
         [pscustomobject]@{ Set = $true; Items = $items }
     }
@@ -678,9 +694,10 @@ function Get-MsiAddServerArgs {
 
 # Windows Installer がレジストリ (HKLM:\SOFTWARE\Classes\Installer\Products\<これ> など) で使う、詰めた GUID の形 (大文字の 32 字)。
 # {} と - を除き、頭の 3 つの組は字を逆に並べ、残りの 8 byte は byte ごとに 2 字を入れ替える。GUID として読めなければ $null
+# (MSI から読んだ値を検めるので、Test-SshdUserName と同じく \z で終える)
 function ConvertTo-PackedGuid {
     param([string]$Guid)
-    if (-not ("$Guid" -match '^\{?([0-9A-Fa-f]{8})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{12})\}?$')) { return $null }
+    if (-not ("$Guid" -match '^\{?([0-9A-Fa-f]{8})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{4})-([0-9A-Fa-f]{12})\}?\z')) { return $null }
     $groups = @($Matches[1], $Matches[2], $Matches[3])
     $tail = $Matches[4] + $Matches[5]
     $head = -join @($groups | ForEach-Object { -join ($_.ToCharArray()[($_.Length - 1)..0]) })
@@ -689,9 +706,10 @@ function ConvertTo-PackedGuid {
 }
 
 # MSI の名前として、そのままディレクトリの中に置けるか (区切りやドライブを含まず、.msi で終わる)。登録された PackageName をパスに使う前に確かめる
+# (レジストリから読んだ値を検めるので、Test-SshdUserName と同じく \z で終える。$ だと末尾の改行を通す)
 function Test-MsiPackageName {
     param([string]$Name)
-    ("$Name" -match '^[^\\/:*?"<>|\x00-\x1f]+\.msi$') -and ("$Name" -notmatch '^\.')
+    ("$Name" -match '^[^\\/:*?"<>|\x00-\x1f]+\.msi\z') -and ("$Name" -notmatch '^\.')
 }
 
 # 取り直した MSI を、msiexec の保守の install に渡す形を決める。入っている製品に保守の install を流すと、Windows Installer は SOURCEDIR

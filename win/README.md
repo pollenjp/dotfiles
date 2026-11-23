@@ -4006,6 +4006,9 @@ dotfiles-private にだけ置く。
   nix shell nixpkgs#powershell nixpkgs#openssh -c pwsh -NoProfile -File win/openssh/Install-Sshd.Tests.ps1
   ```
 
+- 外から読んだ値 (ユーザーと送り元の写しの JSON・レジストリ・MSI) を検める正規表現は、`$` でなく `\z` で終える (.NET の `$` は末尾の改行の前でも
+  当たる。写しの JSON に `"alice\n"` と書くと `$` で終える検めは通し、sshd_config の行が割れて sshd が起動しなくなる)。runner の検め (`runner/src/host.rs`) と
+  同じ例 (末尾の改行) を両方の試験に置く
 - `bootstrap-windows-sshd.sh` と runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`sshd (OpenSSH Server`) と、締めの行の文言
   (`→ Install-Sshd で揃える`・`→ Install-Sshd -IfMissing で入れる`・揃える前に人が直すことの文言) で分かれる。変えるときは向こうも直す
 - Herdr を開いたままにする案内は、入れ終えたときに ps1 が 1 行出す (wrapper と runner は重ねて出さない)

@@ -585,7 +585,7 @@ fn parse_sshd(v: &toml::Value) -> Result<SshdValues, String> {
         } else {
             Err(format!(
                 "英小文字・数字で始まり英小文字・数字・. _ - だけの Windows のユーザー名で書いてください (Windows の sshd はログインの名前を小文字にして比べる): {}",
-                shorten(name)
+                shorten_escaped(name)
             ))
         }
     })?;
@@ -593,13 +593,18 @@ fn parse_sshd(v: &toml::Value) -> Result<SshdValues, String> {
         t,
         "allowFrom",
         "どこからも入れないなら []",
-        |addr| sshd_from_check(addr).map_err(|why| format!("{why}: {}", shorten(addr))),
+        |addr| sshd_from_check(addr).map_err(|why| format!("{why}: {}", shorten_escaped(addr))),
     )?;
     Ok(SshdValues {
         keys,
         allow_users,
         allow_from,
     })
+}
+
+/// 誤りの文に添える値で、改行などの制御文字を `\n` の字にしてから 40 字で切る (値の改行で誤りの文が割れないように)
+fn shorten_escaped(s: &str) -> String {
+    shorten(&s.escape_debug().to_string())
 }
 
 /// 誤りの文に添える値 (長ければ 40 字で切る)
@@ -781,7 +786,8 @@ mod tests {
     //! - sshd の AllowUsers のユーザーと入ってよい送り元 ([sshd] allowUsers・allowFrom) も、書かなければ None (null)、[] は 0、list はその値の
     //!   まま。ユーザー名は英小文字・数字・. _ - だけ (Install-Sshd.ps1 の Test-SshdUserName と同じ)。送り元は IPv4・IPv6 のアドレスか CIDR だけ
     //!   (IPv4 の組と CIDR の長さは頭に 0 を付けない・長さは 32 と 128 まで・CIDR のアドレスは範囲の頭。Install-Sshd.ps1 の
-    //!   Test-SshdFromAddress と同じ例で確かめる)。! * , と空白・ゾーン・名前は誤り。配列でない値・文字列でない値は誤り
+    //!   Test-SshdFromAddress と同じ例で確かめる)。! * , と空白・末尾や頭の改行・ゾーン・名前は誤り (誤りの文の値は改行を \n の字にする)。
+    //!   配列でない値・文字列でない値は誤り
 
     use super::*;
     use crate::testutil::TempDir;
@@ -1094,6 +1100,19 @@ mod tests {
                 "[sshd]\nallowFrom = [true]",
                 "[sshd] の allowFrom の 1 番目が文字列ではありません",
             ),
+            // 末尾の改行 (Install-Sshd.ps1 の検めも \z で終えて断る。値の改行は \n の字にして出す)
+            (
+                "[sshd]\nallowUsers = [\"alice\\n\", \"bob\"]",
+                "[sshd] の allowUsers の 1 番目: 英小文字・数字で始まり英小文字・数字・. _ - だけの Windows のユーザー名で書いてください (Windows の sshd はログインの名前を小文字にして比べる): alice\\n",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"100.64.0.0/10\\n\", \"127.0.0.1\"]",
+                "[sshd] の allowFrom の 1 番目: CIDR の長さは、頭に 0 を付けない 10 進の数で書く: 100.64.0.0/10\\n",
+            ),
+            (
+                "[sshd]\nallowFrom = [\"127.0.0.1\\n\"]",
+                "[sshd] の allowFrom の 1 番目: IPv4・IPv6 のアドレスか CIDR として読めない (! * , と空白・% は書けない。名前も書けない): 127.0.0.1\\n",
+            ),
             (
                 "[sshd]\nauthorizedKeys = \"ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEFAKEFAKE\"",
                 "[sshd] の authorizedKeys は文字列の配列で書いてください",
@@ -1187,6 +1206,10 @@ mod tests {
         ] {
             assert!(!sshd_user_ok(bad), "{bad}");
         }
+        // 末尾・頭の改行 (Install-Sshd.ps1 の Test-SshdUserName も \z で終えて断る。.NET の $ は末尾の改行の前でも当たる)
+        for bad in ["alice\n", "alice\r\n", "\nalice"] {
+            assert!(!sshd_user_ok(bad), "{bad:?}");
+        }
     }
 
     /// Match Address に書ける送り元 (Install-Sshd.ps1 の Test-SshdFromAddress と同じ例)
@@ -1232,8 +1255,13 @@ mod tests {
             "1.2.3",
             "",
             "::ffff:01.2.3.4",
+            // 末尾の改行 (Install-Sshd.ps1 の Test-SshdFromAddress も \z で終えて断る)
+            "100.64.0.0/10\n",
+            "127.0.0.1\n",
+            "::1\n",
+            "fd7a:115c:a1e0::/48\r\n",
         ] {
-            assert!(sshd_from_check(bad).is_err(), "{bad}");
+            assert!(sshd_from_check(bad).is_err(), "{bad:?}");
         }
     }
 

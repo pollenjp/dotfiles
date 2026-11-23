@@ -8,9 +8,10 @@
 #
 # ## 確かめること
 #
-#   - AllowUsers に書けるユーザー名 (英小文字・数字・. _ -) だけを通す
+#   - AllowUsers に書けるユーザー名 (英小文字・数字・. _ -) だけを通す。末尾・頭の改行も断る (検めは \z で終える。.NET の $ は末尾の
+#     改行の前でも当たる)
 #   - Match Address に書ける送り元: IPv4・IPv6 のアドレスか CIDR だけ (IPv4 の組と CIDR の長さは頭に 0 を付けない・長さは 32 と 128 まで・
-#     CIDR のアドレスは範囲の頭)。! * , と空白・ゾーン・名前・欠けた形は断る
+#     CIDR のアドレスは範囲の頭)。! * , と空白・末尾の改行・ゾーン・名前・欠けた形は断る
 #   - 作る sshd_config: 鍵だけ (PasswordAuthentication no・KbdInteractiveAuthentication no・AuthenticationMethods publickey)、AllowUsers は
 #     ユーザーだけ (接続元を書かない) で、最初の Match より前に書く。接続元は Match Address で絞り、既定では tailnet (100.64.0.0/10・
 #     fd7a:115c:a1e0::/48) と localhost の外から来たら DenyUsers * にする。AllowUsers・DenyUsers・AllowGroups・DenyGroups の語に / を
@@ -22,7 +23,8 @@
 #     DenyUsers * を最初の Match より前に書く。送り元は Match Address の否定に並べ、0 なら Match Address * にする。どれも ASCII と LF だけで、
 #     sshd -G が読み、sshd -T -C で、書いた送り元から来たときだけ DenyUsers が付かない (0 人・0 のときはどこから来ても付く)
 #   - ユーザーと送り元の写し (JSON) の読み方: 欄が無い・null は書いていない ($null)、[] は 0、list はその値。version が 1 でない・object で
-#     ない・list でも null でもない・書けない値 (ユーザー名と送り元の検め) は読めない値として理由を出す。runner の手順 sshd が書く形
+#     ない・list でも null でもない・書けない値 (ユーザー名と送り元の検め。JSON の \n で末尾に改行を入れた値も) は読めない値として理由を
+#     出す (値の制御文字は \n などの字にして出す)。runner の手順 sshd が書く形
 #     (win/runner/src/steps/sshd_allow.rs の copy_text と同じ) を読める。使う値は、写しの値があればそれ、無ければ既定 (流したユーザーと、
 #     tailnet と localhost)
 #   - 管理者で起動し直すとき (Invoke-Elevated)、子にユーザーと送り元の写しの場所と流したユーザーと受け持ちを渡す
@@ -65,7 +67,9 @@
 #     添える。写しの値で作る sshd_config と比べる (既定と同じ値なら、写しが無いときと同じく揃っている)。0 人・0 なら誰も・どこからも
 #     入れないと出し、tailnet と localhost の外にかかる送り元は拒否の規則が止めると添える。写しに読めない値があれば、揃えずに 1 で止まり、
 #     sshd_config は比べず、読めない値と、ホストの値を直す締めの行を出す。写しに allowUsers があれば、流したユーザーの名前は検めない
-#   - 管理者の段は、写しのユーザーと送り元で sshd_config を書き、書いた値をログに出す。写しに読めない値があれば何も変えずに止まる
+#   - 管理者の段は、写しのユーザーと送り元で sshd_config を書き、書いた値をログに出す。写しに読めない値 (末尾の改行も) があれば何も変えずに
+#     止まる
+#   - MSI から読む GUID と、レジストリから読む MSI の名前の検めも、末尾に改行の付いた値を断る
 #   - 本体の入口: 思わぬ例外では終了コード 2 で止まる
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -113,6 +117,11 @@ Test-Case '空白・@・* を含む名前は断る' 'False False False' {
     Test-SshdUserName -Name 'john doe'; Test-SshdUserName -Name 'a@b'; Test-SshdUserName -Name 'a*'
 }
 Test-Case '空の名前は断る' 'False' { Test-SshdUserName -Name '' }
+# .NET の正規表現の $ は末尾の改行の前でも当たる。写しの JSON に "alice\n" と書くと、$ で終える検めは通し、sshd_config の行が割れて
+# sshd が起動しなくなる (Windows の sshd -T で exit 255)。検めは \z で終える
+Test-Case '末尾・頭に改行の付いた名前は断る (改行の前で当たる $ でなく \z で終える)' 'False False False' {
+    Test-SshdUserName -Name "alice`n"; Test-SshdUserName -Name "alice`r`n"; Test-SshdUserName -Name "`nalice"
+}
 
 # Test-SshdFromAddress: Match Address に書ける送り元か (win/runner/src/host.rs の sshd_from_check と同じ見方)
 Test-Case 'IPv4・IPv6 のアドレスと、範囲の頭で書いた CIDR は書ける' 'True True True True True True True True True True' {
@@ -135,6 +144,11 @@ Test-Case 'CIDR のアドレスに、長さより後ろのビットが立って�
 }
 Test-Case '否定・パターン・区切り・空白・ゾーン・名前・欠けた形・空は断る' 'False False False False False False False False False False' {
     foreach ($a in @('!100.64.0.0/10', '*', '100.64.*', '127.0.0.1,::1', ' 127.0.0.1', '127.0.0.1 ', 'fe80::1%eth0', 'example.com', '1.2.3', '')) {
+        Test-SshdFromAddress -Address $a
+    }
+}
+Test-Case '末尾に改行の付いた送り元は断る (CIDR・IPv4・IPv6 とも。\z で終える)' 'False False False False' {
+    foreach ($a in @("100.64.0.0/10`n", "127.0.0.1`n", "::1`n", "fd7a:115c:a1e0::/48`r`n")) {
         Test-SshdFromAddress -Address $a
     }
 }
@@ -437,6 +451,11 @@ Test-Case '1 つだけの list も list のまま (崩れて文字列になら�
 Test-Case '書けない値は、欄と値と理由を読めない値に出す' 'allowUsers の Alice (英小文字・数字・. _ - の名前だけ)|allowFrom の 100.64.0.1/10 (IPv4・IPv6 のアドレスか、範囲の頭のアドレスで書いた CIDR だけ)|allowFrom の !127.0.0.1 (IPv4・IPv6 のアドレスか、範囲の頭のアドレスで書いた CIDR だけ)' {
     @((Get-Allow '{"version":1,"allowUsers":["alice","Alice"],"allowFrom":["100.64.0.1/10","!127.0.0.1"]}').Bad) -join '|'
 }
+Test-Case '写しの JSON の末尾の改行 (\n) は、ユーザー・送り元のどちらでも読めない値にし、値は改行を \n の字にして出す (※ の行を割らない)' '2|allowUsers の alice\n (英小文字・数字・. _ - の名前だけ)|allowFrom の 100.64.0.0/10\n (IPv4・IPv6 のアドレスか、範囲の頭のアドレスで書いた CIDR だけ)' {
+    $bad = @((Get-Allow '{"version":1,"allowUsers":["alice\n","bob"],"allowFrom":["100.64.0.0/10\n","127.0.0.1"]}').Bad)
+    (@("$($bad.Count)") + $bad) -join '|'
+}
+Test-Case '表に出す値は、制御文字を \n・\r・\t・\xNN の字にする' 'a\nb\r\tc\x07d' { ConvertTo-ShownValue "a`nb`r`tc$([char]7)d" }
 Test-Case 'version が 1 でない・object でない・list でも null でもない・文字列でない値は読めない' 'version が 1 でない|JSON の object でない|allowUsers が list でも null でもない|allowFrom の 1 (IPv4・IPv6 のアドレスか、範囲の頭のアドレスで書いた CIDR だけ)' {
     @(
         (Get-Allow '{"version":2,"allowUsers":["alice"]}').Bad
@@ -835,11 +854,12 @@ Test-Case 'GUID を Windows Installer のレジストリの詰めた形にする
     ConvertTo-PackedGuid -Guid '{01234567-89AB-CDEF-0123-456789ABCDEF}'
     ConvertTo-PackedGuid -Guid '01234567-89ab-cdef-0123-456789abcdef'
 }
-Test-Case 'GUID として読めなければ $null' 'True True' {
+Test-Case 'GUID として読めなければ $null (末尾に改行が付いた値も。.NET の $ は末尾の改行の前でも当たるので \z で終える)' 'True True True' {
     $null -eq (ConvertTo-PackedGuid -Guid '')
     $null -eq (ConvertTo-PackedGuid -Guid '{C3DFF1A5-DB4C-4B49-9FC7}')
+    $null -eq (ConvertTo-PackedGuid -Guid "{01234567-89AB-CDEF-0123-456789ABCDEF}`n")
 }
-Test-Case 'MSI の名前はディレクトリの中に置ける名前だけ (区切り・ドライブ・.msi で終わらない名前は断る)' 'True True False False False False False' {
+Test-Case 'MSI の名前はディレクトリの中に置ける名前だけ (区切り・ドライブ・.msi で終わらない名前・末尾の改行は断る)' 'True True False False False False False False' {
     Test-MsiPackageName -Name 'OpenSSH-Win64-v10.4.0.0.msi'
     Test-MsiPackageName -Name 'OpenSSH Preview_10.4.0.0_Machine_X64_msi_en-US.msi'
     Test-MsiPackageName -Name '..\x.msi'
@@ -847,6 +867,7 @@ Test-Case 'MSI の名前はディレクトリの中に置ける名前だけ (区
     Test-MsiPackageName -Name 'a/b.msi'
     Test-MsiPackageName -Name 'x.exe'
     Test-MsiPackageName -Name ''
+    Test-MsiPackageName -Name "OpenSSH-Win64-v10.4.0.0.msi`n"
 }
 $pc = '{C3DFF1A5-DB4C-4B49-9FC7-346BAA182D99}'
 $pkg = '{01234567-89AB-CDEF-0123-456789ABCDEF}'
@@ -1429,6 +1450,12 @@ try {
         $badAllow.Result
         $badAllow.Steps
         "$($badAllow.Config.Text -ceq $beforeHostValues) $(@($badAllow.Calls).Count)"
+    }
+    # 写しの JSON に末尾の改行 (\n) を入れた値も同じ (通すと sshd_config の行が割れ、sshd が起動しなくなる)
+    $newlineUser = Invoke-FixScenario -AllowJson '{"version":1,"allowUsers":["alice\n","bob"]}'
+    $newlineFrom = Invoke-FixScenario -AllowJson '{"version":1,"allowFrom":["100.64.0.0/10\n","127.0.0.1"]}'
+    Test-Case '写しのユーザー・送り元に末尾の改行があれば、sshd_config を書かずに $false で止まる' 'False True 0|False True 0' {
+        @($newlineUser, $newlineFrom | ForEach-Object { "$($_.Result) $($_.Config.Text -ceq $beforeHostValues) $(@($_.Calls).Count)" }) -join '|'
     }
 
     $planted = Invoke-FixScenario -Plant
