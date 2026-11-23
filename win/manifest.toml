@@ -104,3 +104,13 @@ hint = "PowerShell で Install-Tailscale -Check を打つと、固定した版�
 src = "t3-code/Install-T3Code.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-T3Code.ps1"
 hint = "PowerShell で Install-T3Code -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsT3Code = true のマシンだけで、入っていないときだけ入れる。入っていれば上げない。サインインとログインは手でする)"
+
+[[files]]
+src = "ghq/Install-Ghq.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Ghq.ps1"
+hint = "PowerShell で Install-Ghq -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が入れて揃える。cdrepo が使う。ghq.exe が動いていれば揃えずに知らせる)"
+
+[[files]]
+src = "fzf/Install-Fzf.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Fzf.ps1"
+hint = "PowerShell で Install-Fzf -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が winget の portable を入れて揃える。cdrepo が使う。MSI の fzf が入っていれば何も入れずに外し方を出す)"
