@@ -57,7 +57,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
-| `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr 専用の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
+| `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc の子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
 | `claude-code/t3/CLAUDE.t3.md` | `%USERPROFILE%\.claude\t3\CLAUDE.t3.md` (`claude-t3` の手順が置く) | T3 Code の会話だけの指示。T3 の Launch arguments の `--append-system-prompt-file` が system prompt の後ろに足す (herdr-app を前提にした指示の読み替え) ([後述](#claude-code-の設定)) |
 | (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
 
@@ -621,7 +621,7 @@ ADR 090 (`docs/adr/090_win_claude_t3_launch_args_*`))。
 
 | ファイル | 渡す引数 | 効き方 |
 | --- | --- | --- |
-| `settings.json` | `--settings` | T3 が読み、T3 自身の設定の下に重ねて渡す。flag settings なので user の `settings.json` より強く、`skillOverrides` は skill ごとに勝つ。herdr 専用の skill (`herdr-app`・`pjp-herdr-hub`・`pjp-herdr-other-repo`・`pjp-hc-hub`) を off、`pjp-t3-hub` (ほかの会話では `claude-skill-overrides` がいつも off にする) を on にする |
+| `settings.json` | `--settings` | T3 が読み、T3 自身の設定の下に重ねて渡す。flag settings なので user の `settings.json` より強く、`skillOverrides` は skill ごとに勝つ。herdr と hc の子の skill (`herdr-app`・`pjp-herdr-hub`・`pjp-herdr-other-repo`・`pjp-hc-hub`・`pjp-hc-child`) を off、`pjp-t3-hub` (ほかの会話では `claude-skill-overrides` がいつも off にする) を on にする。`hc` は残す |
 | `CLAUDE.t3.md` | `--append-system-prompt-file` | T3 の指示の後ろ (system prompt の末尾) に足す。`~/.claude/CLAUDE.md` は置き換えず、そのまま読まれる |
 
 T3 の Settings → Providers → Claude → Launch arguments に書く文:
@@ -635,7 +635,8 @@ T3 の Settings → Providers → Claude → Launch arguments に書く文:
 - 書いた値は T3 の `%USERPROFILE%\.t3\userdata\settings.json` (`providerInstances.claudeAgent.config.launchArgs`) に残る
 - Launch arguments を書いた・変えた後と、`claude-t3` がファイルを置き直した後は、T3 の会話を開き直す (開いている会話には効かない)
 - 直すのは dotfiles の `win/claude-code/t3/` (置き先の写しを変えると、次の `dotfiles apply` が衝突として知らせる)
-- 確かめるのは T3 の会話の skill の一覧 (herdr 専用の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
+- 確かめるのは T3 の会話の skill の一覧 (herdr と hc の子の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
+- T3 のハブの子は、つないだ Linux の環境に T3 のスレッドとして立てる (`pjp child new` は使わない。手順は claude-skills の `pjp-t3-hub`)。`CLAUDE.t3.md` もその向きで書く
 
 ### claude-personal・claude-work
 

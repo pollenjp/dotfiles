@@ -3,7 +3,7 @@
 //!
 //! | 置くもの | 中身 | T3 の Launch arguments |
 //! | --- | --- | --- |
-//! | `settings.json` | T3 の会話で一覧から外す skill (herdr 専用) と出す skill (`pjp-t3-hub`) の `skillOverrides` | `--settings <パス>` (flag settings。user の settings.json より強い) |
+//! | `settings.json` | T3 の会話で一覧から外す skill (herdr と hc の子のもの) と出す skill (`pjp-t3-hub`) の `skillOverrides` | `--settings <パス>` (flag settings。user の settings.json より強い) |
 //! | `CLAUDE.t3.md` | T3 の会話の決まり (herdr-app を前提にした指示の読み替え) | `--append-system-prompt-file <パス>` (T3 の指示の後ろに足す) |
 //!
 //! - T3 の Claude の設定のディレクトリ (claude-account の `~/.claude-t3`) は、中身を `~/.claude` へのリンクのまま herdr-app と共有する。T3 だけの
@@ -217,7 +217,8 @@ mod tests {
     //! - repo のファイルが読めない・`.json` が JSON の object でないときは、そのファイルを置かない (failed。ほかのファイルは置く)
     //! - FILES から外したファイルは、中身が記録どおりなら消す (変えてあれば残して知らせる)。置き先の外の記録には触らない。置き先がリンクなら触らない
     //! - Launch arguments に書く文 (置き先の絶対パス。空白を含めば引用符で囲む) を出す
-    //! - 本物の repo のファイル: 置き場にあるのは FILES だけで、どれも読め、settings.json は herdr 専用の skill を off・pjp-t3-hub を on にする
+    //! - 本物の repo のファイル: 置き場にあるのは FILES だけで、どれも読め、settings.json は herdr と hc の子の skill を off・pjp-t3-hub を on に
+    //!   する (hc は残す)。CLAUDE.t3.md は子を T3 のスレッドとして立てる向き
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -533,8 +534,8 @@ mod tests {
         );
     }
 
-    /// 本物の repo の置き場: FILES だけがあり、settings.json は herdr 専用の skill を off・pjp-t3-hub を on にする (hc と pjp-hc-child は T3 でも
-    /// 使うので触らない)
+    /// 本物の repo の置き場: FILES だけがあり、settings.json は herdr と hc の子の skill を off・pjp-t3-hub を on にする (hc は T3 でも使うので
+    /// 触らない)。CLAUDE.t3.md は、子を T3 のスレッドとして立てる (t3_thread_launch) 向きで書く
     #[test]
     fn real_repo_files() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
@@ -561,18 +562,21 @@ mod tests {
             "pjp-herdr-hub",
             "pjp-herdr-other-repo",
             "pjp-hc-hub",
+            "pjp-hc-child",
         ] {
             assert_eq!(so.get(off).and_then(|x| x.as_str()), Some("off"), "{off}");
         }
         assert_eq!(so.get("pjp-t3-hub").and_then(|x| x.as_str()), Some("on"));
-        for kept in ["hc", "pjp-hc-child"] {
-            assert!(so.get(kept).is_none(), "{kept} は T3 でも使う");
-        }
+        assert!(so.get("hc").is_none(), "hc は T3 でも使う");
         let prompt = String::from_utf8(read_source(&root, PROMPT).unwrap()).unwrap();
         assert!(prompt.starts_with("# "), "{prompt}");
-        for word in ["T3CODE_THREAD_ID", "pjp child new", "pjp-t3-hub"] {
+        for word in ["T3CODE_THREAD_ID", "t3_thread_launch", "pjp-t3-hub"] {
             assert!(prompt.contains(word), "{word} が無い");
         }
+        assert!(
+            !prompt.contains("<hc from"),
+            "hc の受け口の札の話は書かない"
+        );
     }
 
     #[test]
