@@ -6,7 +6,7 @@
 # home-manager の warnings に出す (releaseAge は flake.nix が lib/release-age.nix を inputs で呼んだもの。ADR 032)。
 #
 # 組み立てたホスト (homeManagerConfiguration の結果) には hostSummary を足す: 設定グループ・段・道具の on/off と、その値が
-# どこで決まったかの要約 (lib/host-summary.nix。ADR 057)。nix/scripts/private-host.sh (summary・summaries) と setup.sh
+# どこで決まったかの要約 (lib/host-summary/。ADR 057)。nix/scripts/private-host.sh (summary・summaries) と setup.sh
 # (この PC の要約の古さ) が `homeConfigurations.<ホスト>.hostSummary` を評価して使う。足すのは attr 1 つで、activationPackage
 # は変えない (読まれたときだけ評価する)。
 { inputs, releaseAge }:
@@ -75,7 +75,7 @@
 let
   exceptions = releaseAge system;
   pkgs = inputs.nixpkgs.legacyPackages.${system};
-  summary = import ./host-summary.nix { inherit (inputs.nixpkgs) lib; };
+  summary = import ./host-summary { inherit (inputs.nixpkgs) lib; };
   hc = inputs.home-manager.lib.homeManagerConfiguration {
     # 効いている一部の例外が無ければ、素の pkgs のまま (普段の評価を変えない)
     pkgs = if exceptions.replaced == [ ] then pkgs else pkgs.appendOverlays exceptions.overlays;
@@ -101,7 +101,6 @@ hc
     inherit data;
     line = summary.line data;
     text = summary.text data;
-    markdown = summary.markdown data;
-    file = name: summary.file name data;
+    pages = name: summary.pages name data;
   };
 }

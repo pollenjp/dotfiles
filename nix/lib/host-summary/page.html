@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<!-- 生成物 (dotfiles の nix/lib/host-summary/ の page.html・page.css・page.js と、ホストの値の JSON)。手で直さない -->
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>@@TITLE@@</title>
+<style>
+@@STYLE@@
+</style>
+</head>
+<body>
+<main>
+@@BODY@@
+</main>
+
+<!-- 箱の詳細のポップアップ: main の外に置き、開いている間は main を inert にする。
+     dialog 要素の showModal は、Notion などの埋め込みで使えるか確かめられないので使わない (pjp-diagram-motion の選択モード) -->
+<div id="vp" aria-hidden="true"></div>
+<div class="popup-veil" id="popup-veil" hidden></div>
+<div class="popup" id="popup" role="dialog" aria-modal="true" aria-labelledby="popup-title" hidden>
+  <div class="popup-in">
+    <div class="popup-head">
+      <h3 class="popup-title" id="popup-title" tabindex="-1"></h3>
+      <button type="button" class="popup-x" id="popup-x" aria-label="閉じる">×</button>
+    </div>
+    <div class="popup-body" id="popup-body"></div>
+  </div>
+  <span class="popup-arrow" aria-hidden="true"></span>
+</div>
+
+<script type="application/json" id="data">@@DATA@@</script>
+<script>
+@@SCRIPT@@
+</script>
+</body>
+</html>

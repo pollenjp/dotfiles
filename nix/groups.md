@@ -1,10 +1,10 @@
-<!-- 生成物 (dotfiles の nix/lib/host-summary.nix)。手で直さない -->
+<!-- 生成物 (dotfiles の nix/lib/host-summary/)。手で直さない -->
 
 > 生成物。手で直さない。出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.groupsDoc > nix/groups.md`。古ければ CI (flake の checks の groups-doc) が落ちる。
 
 # 設定グループ
 
-ホストは設定グループを 1 つ選び (`mkHome` の `group`)、グループは「どの段の道具まで入れるか」で決まる (dotfiles-private の ADR 057)。選び方・直し方・setup の振る舞いは [README の「設定グループ」](./README.md#設定グループ)。ここは `nix/lib/groups.nix` の表と、作り物のホストの要約から作った生成物。
+ホストは設定グループを 1 つ選び (`mkHome` の `group`)、グループは「どの段の道具まで入れるか」で決まる (dotfiles-private の ADR 057)。選び方・直し方・setup の振る舞いは [README の「設定グループ」](./README.md#設定グループ)。ここは `nix/lib/groups.nix` の表と、作り物のホストの値から作った生成物。登録したホストごとの図 (段の入れ子の領域と、ホストごとの囲みの線) は dotfiles-private の `docs/hosts/` にある (dotfiles-private の ADR 093)。
 
 ## グループ
 
@@ -49,498 +49,46 @@
 | ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | off | off |  |
 
-## 作り物のホストの要約
+## 作り物のホストの値
 
-`nix/lib/group-examples.nix` のホスト (どれも WSL で `win/` を配る。値は作り物)。
+`nix/lib/group-examples.nix` のホスト (どれも WSL で `win/` を配る。値は作り物)。**太字**はホストで決めた値。「–」は値は on だが、効く条件が off で効かない。
 
-### personal (個人の PC。グループの既定のまま)
+- `personal`: personal (個人の PC。グループの既定のまま)
+- `company`: company (自社の PC。③ の道具を足していない)
+- `client`: client (客先の PC)
+- `client-claude`: client に Claude Code だけを足したホスト (`claude.enable = true`)
 
-グループ: **personal** (ホストで選んだ) · ① on · ② on · ③ on
-
-```mermaid
-flowchart LR
-  g["グループ: personal<br/>ホストで選んだ"]
-  t1["① エンジニアの道具<br/>on<br/>どのグループでも"]
-  t2["② AI の道具<br/>on<br/>グループの既定"]
-  t3["③ 個人のアカウント<br/>on<br/>グループの既定"]
-  g --> t1
-  g --> t2
-  g --> t3
-  wsl["WSL の手当て<br/>on<br/>ホストで決めた"]
-  windowsFiles["Windows のアプリと設定 (win/)<br/>on<br/>ホストで決めた"]
-  windowsTypeClipboard["Windows の type-clipboard<br/>off"]
-  exeExecTrace[".exe の起動の記録 (WSL)<br/>off"]
-  mtuGuard["eth0 の MTU の見張り (WSL)<br/>off"]
-  osCaBundle["証明書の束を OS の信頼ストアに寄せる<br/>on"]
-  cleanup["使わない store path・mise の版の掃除<br/>on"]
-  claude["Claude Code 一式<br/>on"]
-  herdr["herdr<br/>on"]
-  herdrCore["herdr-core (hc)<br/>on"]
-  windowsClaudeCode["Windows の Claude Code<br/>on"]
-  windowsHerdr["Windows の herdr・herdr-app<br/>on"]
-  cursorAgent["cursor-agent<br/>off"]
-  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
-  windowsT3Code["Windows の T3 Code<br/>off"]
-  claudePrivateSkills["private な skill (claude-skills の clone)<br/>on"]
-  ccPages["cc-pages<br/>on"]
-  herdrHub["集約ハブ ~/h<br/>on"]
-  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>on"]
-  devTracker["Notion Dev Tracker<br/>off"]
-  devTrackerInbox["Dev Tracker の見回り役<br/>off"]
-  onePassword["1Password<br/>off"]
-  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
-  ntn["ntn (Notion の CLI)<br/>on"]
-  windowsNtn["Windows の ntn<br/>on"]
-  windowsTailscale["Windows の Tailscale<br/>off"]
-  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
-  gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>on"]
-  t1 --> wsl
-  t1 --> windowsFiles
-  t1 --> windowsTypeClipboard
-  t1 --> exeExecTrace
-  t1 --> mtuGuard
-  t1 --> osCaBundle
-  t1 --> cleanup
-  t2 --> claude
-  t2 --> herdr
-  t2 --> herdrCore
-  t2 --> windowsClaudeCode
-  t2 --> windowsHerdr
-  t2 --> cursorAgent
-  t2 --> t3Code
-  t2 --> windowsT3Code
-  t2 --> claudePrivateSkills
-  t3 --> claudePrivateSkills
-  t2 --> ccPages
-  t3 --> ccPages
-  t2 --> herdrHub
-  t3 --> herdrHub
-  t2 --> windowsClaudeAccounts
-  t3 --> windowsClaudeAccounts
-  t2 --> devTracker
-  t3 --> devTracker
-  t2 --> devTrackerInbox
-  t3 --> devTrackerInbox
-  t3 --> onePassword
-  t3 --> opReasonSshRelay
-  t3 --> ntn
-  t3 --> windowsNtn
-  t3 --> windowsTailscale
-  t3 --> windowsSshd
-  t3 --> gitIdentity
-  classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
-  classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
-  classDef na fill:#ffffff,stroke:#bdc1c6,color:#9aa0a6,stroke-dasharray:4 3
-  classDef onHost fill:#e6f4ea,stroke:#d93025,stroke-width:3px,color:#0d652d
-  classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
-  classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
-  class t1,t2,t3,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,ntn,windowsNtn,gitIdentity on
-  class windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,t3Code,windowsT3Code,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,windowsTailscale,windowsSshd off
-  class wsl,windowsFiles onHost
-```
-
-**太字**と赤い枠は、ホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが、効く条件 (`wsl.windowsFiles.enable` など) が off で効かない。
-
-| 段 | 道具 | option (`dotfiles.…`) | 値 | どこで決まったか |
+| 道具 | `personal` | `company` | `client` | `client-claude` |
 | --- | --- | --- | --- | --- |
-| — | グループ | `group` | **`personal`** | ホストのファイル |
-| ① | （段） | — | on | どのグループでも |
-| ② | （段） | `aiTools.enable` | on | グループ (personal) の既定 |
-| ③ | （段） | `personalAccounts.enable` | on | グループ (personal) の既定 |
-| ① | WSL の手当て | `wsl.enable` | **on** | ホストのファイル |
-| ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | **on** | ホストのファイル |
-| ① | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | 既定 |
-| ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | 既定 |
-| ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | 既定 |
-| ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | 既定 |
-| ① | 使わない store path・mise の版の掃除 | `cleanup.enable` | on | 既定 |
-| ② | Claude Code 一式 | `claude.enable` | on | 段 (②) の既定 |
-| ② | herdr | `herdr.enable` | on | 段 (②) の既定 |
-| ② | herdr-core (hc) | `herdrCore.enable` | on | 段 (②) の既定 |
-| ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | 段 (②) の既定 |
-| ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | 段 (②) の既定 |
-| ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
-| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
-| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
-| ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | 段 (② と ③) の既定 |
-| ②③ | cc-pages | `ccPages.enable` | on | 段 (② と ③) の既定 |
-| ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | 段 (② と ③) の既定 |
-| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | on | 段 (② と ③) の既定 |
-| ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
-| ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
-| ③ | 1Password | `onePassword.enable` | off | 既定 |
-| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
-| ③ | ntn (Notion の CLI) | `ntn.enable` | on | 段 (③) の既定 |
-| ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | 段 (③) の既定 |
-| ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
-| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
-| ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | 段 (③) の既定 |
-
-### company (自社の PC。③ の道具を足していない)
-
-グループ: **company** (ホストで選んだ) · ① on · ② on · ③ off
-
-```mermaid
-flowchart LR
-  g["グループ: company<br/>ホストで選んだ"]
-  t1["① エンジニアの道具<br/>on<br/>どのグループでも"]
-  t2["② AI の道具<br/>on<br/>グループの既定"]
-  t3["③ 個人のアカウント<br/>off<br/>グループの既定"]
-  g --> t1
-  g --> t2
-  g --> t3
-  wsl["WSL の手当て<br/>on<br/>ホストで決めた"]
-  windowsFiles["Windows のアプリと設定 (win/)<br/>on<br/>ホストで決めた"]
-  windowsTypeClipboard["Windows の type-clipboard<br/>off"]
-  exeExecTrace[".exe の起動の記録 (WSL)<br/>off"]
-  mtuGuard["eth0 の MTU の見張り (WSL)<br/>off"]
-  osCaBundle["証明書の束を OS の信頼ストアに寄せる<br/>on"]
-  cleanup["使わない store path・mise の版の掃除<br/>on"]
-  claude["Claude Code 一式<br/>on"]
-  herdr["herdr<br/>on"]
-  herdrCore["herdr-core (hc)<br/>on"]
-  windowsClaudeCode["Windows の Claude Code<br/>on"]
-  windowsHerdr["Windows の herdr・herdr-app<br/>on"]
-  cursorAgent["cursor-agent<br/>off"]
-  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
-  windowsT3Code["Windows の T3 Code<br/>off"]
-  claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
-  ccPages["cc-pages<br/>off"]
-  herdrHub["集約ハブ ~/h<br/>off"]
-  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
-  devTracker["Notion Dev Tracker<br/>off"]
-  devTrackerInbox["Dev Tracker の見回り役<br/>off"]
-  onePassword["1Password<br/>off"]
-  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
-  ntn["ntn (Notion の CLI)<br/>off"]
-  windowsNtn["Windows の ntn<br/>off"]
-  windowsTailscale["Windows の Tailscale<br/>off"]
-  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
-  gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
-  t1 --> wsl
-  t1 --> windowsFiles
-  t1 --> windowsTypeClipboard
-  t1 --> exeExecTrace
-  t1 --> mtuGuard
-  t1 --> osCaBundle
-  t1 --> cleanup
-  t2 --> claude
-  t2 --> herdr
-  t2 --> herdrCore
-  t2 --> windowsClaudeCode
-  t2 --> windowsHerdr
-  t2 --> cursorAgent
-  t2 --> t3Code
-  t2 --> windowsT3Code
-  t2 --> claudePrivateSkills
-  t3 --> claudePrivateSkills
-  t2 --> ccPages
-  t3 --> ccPages
-  t2 --> herdrHub
-  t3 --> herdrHub
-  t2 --> windowsClaudeAccounts
-  t3 --> windowsClaudeAccounts
-  t2 --> devTracker
-  t3 --> devTracker
-  t2 --> devTrackerInbox
-  t3 --> devTrackerInbox
-  t3 --> onePassword
-  t3 --> opReasonSshRelay
-  t3 --> ntn
-  t3 --> windowsNtn
-  t3 --> windowsTailscale
-  t3 --> windowsSshd
-  t3 --> gitIdentity
-  classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
-  classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
-  classDef na fill:#ffffff,stroke:#bdc1c6,color:#9aa0a6,stroke-dasharray:4 3
-  classDef onHost fill:#e6f4ea,stroke:#d93025,stroke-width:3px,color:#0d652d
-  classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
-  classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
-  class t1,t2,osCaBundle,cleanup,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr on
-  class t3,windowsTypeClipboard,exeExecTrace,mtuGuard,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
-  class wsl,windowsFiles onHost
-```
-
-**太字**と赤い枠は、ホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが、効く条件 (`wsl.windowsFiles.enable` など) が off で効かない。
-
-| 段 | 道具 | option (`dotfiles.…`) | 値 | どこで決まったか |
-| --- | --- | --- | --- | --- |
-| — | グループ | `group` | **`company`** | ホストのファイル |
-| ① | （段） | — | on | どのグループでも |
-| ② | （段） | `aiTools.enable` | on | グループ (company) の既定 |
-| ③ | （段） | `personalAccounts.enable` | off | グループ (company) の既定 |
-| ① | WSL の手当て | `wsl.enable` | **on** | ホストのファイル |
-| ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | **on** | ホストのファイル |
-| ① | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | 既定 |
-| ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | 既定 |
-| ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | 既定 |
-| ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | 既定 |
-| ① | 使わない store path・mise の版の掃除 | `cleanup.enable` | on | 既定 |
-| ② | Claude Code 一式 | `claude.enable` | on | 段 (②) の既定 |
-| ② | herdr | `herdr.enable` | on | 段 (②) の既定 |
-| ② | herdr-core (hc) | `herdrCore.enable` | on | 段 (②) の既定 |
-| ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | 段 (②) の既定 |
-| ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | 段 (②) の既定 |
-| ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
-| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
-| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
-| ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
-| ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
-| ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
-| ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
-| ③ | 1Password | `onePassword.enable` | off | 既定 |
-| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
-| ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
-| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
-| ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
-
-### client (客先の PC)
-
-グループ: **client** (ホストで選んだ) · ① on · ② off · ③ off
-
-```mermaid
-flowchart LR
-  g["グループ: client<br/>ホストで選んだ"]
-  t1["① エンジニアの道具<br/>on<br/>どのグループでも"]
-  t2["② AI の道具<br/>off<br/>グループの既定"]
-  t3["③ 個人のアカウント<br/>off<br/>グループの既定"]
-  g --> t1
-  g --> t2
-  g --> t3
-  wsl["WSL の手当て<br/>on<br/>ホストで決めた"]
-  windowsFiles["Windows のアプリと設定 (win/)<br/>on<br/>ホストで決めた"]
-  windowsTypeClipboard["Windows の type-clipboard<br/>off"]
-  exeExecTrace[".exe の起動の記録 (WSL)<br/>off"]
-  mtuGuard["eth0 の MTU の見張り (WSL)<br/>off"]
-  osCaBundle["証明書の束を OS の信頼ストアに寄せる<br/>on"]
-  cleanup["使わない store path・mise の版の掃除<br/>on"]
-  claude["Claude Code 一式<br/>off"]
-  herdr["herdr<br/>off"]
-  herdrCore["herdr-core (hc)<br/>off"]
-  windowsClaudeCode["Windows の Claude Code<br/>off"]
-  windowsHerdr["Windows の herdr・herdr-app<br/>off"]
-  cursorAgent["cursor-agent<br/>off"]
-  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
-  windowsT3Code["Windows の T3 Code<br/>off"]
-  claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
-  ccPages["cc-pages<br/>off"]
-  herdrHub["集約ハブ ~/h<br/>off"]
-  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
-  devTracker["Notion Dev Tracker<br/>off"]
-  devTrackerInbox["Dev Tracker の見回り役<br/>off"]
-  onePassword["1Password<br/>off"]
-  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
-  ntn["ntn (Notion の CLI)<br/>off"]
-  windowsNtn["Windows の ntn<br/>off"]
-  windowsTailscale["Windows の Tailscale<br/>off"]
-  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
-  gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
-  t1 --> wsl
-  t1 --> windowsFiles
-  t1 --> windowsTypeClipboard
-  t1 --> exeExecTrace
-  t1 --> mtuGuard
-  t1 --> osCaBundle
-  t1 --> cleanup
-  t2 --> claude
-  t2 --> herdr
-  t2 --> herdrCore
-  t2 --> windowsClaudeCode
-  t2 --> windowsHerdr
-  t2 --> cursorAgent
-  t2 --> t3Code
-  t2 --> windowsT3Code
-  t2 --> claudePrivateSkills
-  t3 --> claudePrivateSkills
-  t2 --> ccPages
-  t3 --> ccPages
-  t2 --> herdrHub
-  t3 --> herdrHub
-  t2 --> windowsClaudeAccounts
-  t3 --> windowsClaudeAccounts
-  t2 --> devTracker
-  t3 --> devTracker
-  t2 --> devTrackerInbox
-  t3 --> devTrackerInbox
-  t3 --> onePassword
-  t3 --> opReasonSshRelay
-  t3 --> ntn
-  t3 --> windowsNtn
-  t3 --> windowsTailscale
-  t3 --> windowsSshd
-  t3 --> gitIdentity
-  classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
-  classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
-  classDef na fill:#ffffff,stroke:#bdc1c6,color:#9aa0a6,stroke-dasharray:4 3
-  classDef onHost fill:#e6f4ea,stroke:#d93025,stroke-width:3px,color:#0d652d
-  classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
-  classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
-  class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,claude,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
-  class wsl,windowsFiles onHost
-```
-
-**太字**と赤い枠は、ホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが、効く条件 (`wsl.windowsFiles.enable` など) が off で効かない。
-
-| 段 | 道具 | option (`dotfiles.…`) | 値 | どこで決まったか |
-| --- | --- | --- | --- | --- |
-| — | グループ | `group` | **`client`** | ホストのファイル |
-| ① | （段） | — | on | どのグループでも |
-| ② | （段） | `aiTools.enable` | off | グループ (client) の既定 |
-| ③ | （段） | `personalAccounts.enable` | off | グループ (client) の既定 |
-| ① | WSL の手当て | `wsl.enable` | **on** | ホストのファイル |
-| ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | **on** | ホストのファイル |
-| ① | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | 既定 |
-| ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | 既定 |
-| ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | 既定 |
-| ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | 既定 |
-| ① | 使わない store path・mise の版の掃除 | `cleanup.enable` | on | 既定 |
-| ② | Claude Code 一式 | `claude.enable` | off | 段 (②) の既定 |
-| ② | herdr | `herdr.enable` | off | 段 (②) の既定 |
-| ② | herdr-core (hc) | `herdrCore.enable` | off | 段 (②) の既定 |
-| ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | off | 段 (②) の既定 |
-| ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | off | 段 (②) の既定 |
-| ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
-| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
-| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
-| ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
-| ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
-| ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
-| ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
-| ③ | 1Password | `onePassword.enable` | off | 既定 |
-| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
-| ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
-| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
-| ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
-
-### client に Claude Code だけを足したホスト (`claude.enable = true`)
-
-グループ: **client** (ホストで選んだ) · ① on · ② off · ③ off
-
-```mermaid
-flowchart LR
-  g["グループ: client<br/>ホストで選んだ"]
-  t1["① エンジニアの道具<br/>on<br/>どのグループでも"]
-  t2["② AI の道具<br/>off<br/>グループの既定"]
-  t3["③ 個人のアカウント<br/>off<br/>グループの既定"]
-  g --> t1
-  g --> t2
-  g --> t3
-  wsl["WSL の手当て<br/>on<br/>ホストで決めた"]
-  windowsFiles["Windows のアプリと設定 (win/)<br/>on<br/>ホストで決めた"]
-  windowsTypeClipboard["Windows の type-clipboard<br/>off"]
-  exeExecTrace[".exe の起動の記録 (WSL)<br/>off"]
-  mtuGuard["eth0 の MTU の見張り (WSL)<br/>off"]
-  osCaBundle["証明書の束を OS の信頼ストアに寄せる<br/>on"]
-  cleanup["使わない store path・mise の版の掃除<br/>on"]
-  claude["Claude Code 一式<br/>on<br/>ホストで決めた"]
-  herdr["herdr<br/>off"]
-  herdrCore["herdr-core (hc)<br/>off"]
-  windowsClaudeCode["Windows の Claude Code<br/>off"]
-  windowsHerdr["Windows の herdr・herdr-app<br/>off"]
-  cursorAgent["cursor-agent<br/>off"]
-  t3Code["T3 Code (t3 と t3code.service)<br/>off"]
-  windowsT3Code["Windows の T3 Code<br/>off"]
-  claudePrivateSkills["private な skill (claude-skills の clone)<br/>off"]
-  ccPages["cc-pages<br/>off"]
-  herdrHub["集約ハブ ~/h<br/>off"]
-  windowsClaudeAccounts["Windows の claude-personal・claude-work<br/>off"]
-  devTracker["Notion Dev Tracker<br/>off"]
-  devTrackerInbox["Dev Tracker の見回り役<br/>off"]
-  onePassword["1Password<br/>off"]
-  opReasonSshRelay["op-reason の SSH の中継<br/>off"]
-  ntn["ntn (Notion の CLI)<br/>off"]
-  windowsNtn["Windows の ntn<br/>off"]
-  windowsTailscale["Windows の Tailscale<br/>off"]
-  windowsSshd["Windows の sshd (Tailscale から鍵で入る)<br/>off"]
-  gitIdentity["git の名前とメール (pollenjp・pollenjp-sub)<br/>off"]
-  t1 --> wsl
-  t1 --> windowsFiles
-  t1 --> windowsTypeClipboard
-  t1 --> exeExecTrace
-  t1 --> mtuGuard
-  t1 --> osCaBundle
-  t1 --> cleanup
-  t2 --> claude
-  t2 --> herdr
-  t2 --> herdrCore
-  t2 --> windowsClaudeCode
-  t2 --> windowsHerdr
-  t2 --> cursorAgent
-  t2 --> t3Code
-  t2 --> windowsT3Code
-  t2 --> claudePrivateSkills
-  t3 --> claudePrivateSkills
-  t2 --> ccPages
-  t3 --> ccPages
-  t2 --> herdrHub
-  t3 --> herdrHub
-  t2 --> windowsClaudeAccounts
-  t3 --> windowsClaudeAccounts
-  t2 --> devTracker
-  t3 --> devTracker
-  t2 --> devTrackerInbox
-  t3 --> devTrackerInbox
-  t3 --> onePassword
-  t3 --> opReasonSshRelay
-  t3 --> ntn
-  t3 --> windowsNtn
-  t3 --> windowsTailscale
-  t3 --> windowsSshd
-  t3 --> gitIdentity
-  classDef on fill:#e6f4ea,stroke:#34a853,color:#0d652d
-  classDef off fill:#f1f3f4,stroke:#9aa0a6,color:#5f6368
-  classDef na fill:#ffffff,stroke:#bdc1c6,color:#9aa0a6,stroke-dasharray:4 3
-  classDef onHost fill:#e6f4ea,stroke:#d93025,stroke-width:3px,color:#0d652d
-  classDef offHost fill:#f1f3f4,stroke:#d93025,stroke-width:3px,color:#5f6368
-  classDef naHost fill:#ffffff,stroke:#d93025,stroke-width:3px,color:#9aa0a6,stroke-dasharray:4 3
-  class t1,osCaBundle,cleanup on
-  class t2,t3,windowsTypeClipboard,exeExecTrace,mtuGuard,herdr,herdrCore,windowsClaudeCode,windowsHerdr,cursorAgent,t3Code,windowsT3Code,claudePrivateSkills,ccPages,herdrHub,windowsClaudeAccounts,devTracker,devTrackerInbox,onePassword,opReasonSshRelay,ntn,windowsNtn,windowsTailscale,windowsSshd,gitIdentity off
-  class wsl,windowsFiles,claude onHost
-```
-
-**太字**と赤い枠は、ホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが、効く条件 (`wsl.windowsFiles.enable` など) が off で効かない。
-
-| 段 | 道具 | option (`dotfiles.…`) | 値 | どこで決まったか |
-| --- | --- | --- | --- | --- |
-| — | グループ | `group` | **`client`** | ホストのファイル |
-| ① | （段） | — | on | どのグループでも |
-| ② | （段） | `aiTools.enable` | off | グループ (client) の既定 |
-| ③ | （段） | `personalAccounts.enable` | off | グループ (client) の既定 |
-| ① | WSL の手当て | `wsl.enable` | **on** | ホストのファイル |
-| ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | **on** | ホストのファイル |
-| ① | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | 既定 |
-| ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | 既定 |
-| ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | 既定 |
-| ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | 既定 |
-| ① | 使わない store path・mise の版の掃除 | `cleanup.enable` | on | 既定 |
-| ② | Claude Code 一式 | `claude.enable` | **on** | ホストのファイル |
-| ② | herdr | `herdr.enable` | off | 段 (②) の既定 |
-| ② | herdr-core (hc) | `herdrCore.enable` | off | 段 (②) の既定 |
-| ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | off | 段 (②) の既定 |
-| ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | off | 段 (②) の既定 |
-| ② | cursor-agent | `cursorAgent.enable` | off | 既定 |
-| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | 既定 |
-| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | 既定 |
-| ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | 段 (② と ③) の既定 |
-| ②③ | cc-pages | `ccPages.enable` | off | 段 (② と ③) の既定 |
-| ②③ | 集約ハブ ~/h | `herdr.hub.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | 段 (② と ③) の既定 |
-| ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | 既定 |
-| ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | 既定 |
-| ③ | 1Password | `onePassword.enable` | off | 既定 |
-| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | 既定 |
-| ③ | ntn (Notion の CLI) | `ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | 段 (③) の既定 |
-| ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | 既定 |
-| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | 既定 |
-| ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | 段 (③) の既定 |
+| グループ | **`personal`** | **`company`** | **`client`** | **`client`** |
+| ① エンジニアの道具 | on | on | on | on |
+| ② AI の道具 | on | on | off | off |
+| ③ 個人のアカウント | on | off | off | off |
+| ① WSL の手当て | **on** | **on** | **on** | **on** |
+| ① Windows のアプリと設定 (win/) | **on** | **on** | **on** | **on** |
+| ① Windows の type-clipboard | off | off | off | off |
+| ① .exe の起動の記録 (WSL) | off | off | off | off |
+| ① eth0 の MTU の見張り (WSL) | off | off | off | off |
+| ① 証明書の束を OS の信頼ストアに寄せる | on | on | on | on |
+| ① 使わない store path・mise の版の掃除 | on | on | on | on |
+| ② Claude Code 一式 | on | on | off | **on** |
+| ② herdr | on | on | off | off |
+| ② herdr-core (hc) | on | on | off | off |
+| ② Windows の Claude Code | on | on | off | off |
+| ② Windows の herdr・herdr-app | on | on | off | off |
+| ② cursor-agent | off | off | off | off |
+| ② T3 Code (t3 と t3code.service) | off | off | off | off |
+| ② Windows の T3 Code | off | off | off | off |
+| ②③ private な skill (claude-skills の clone) | on | off | off | off |
+| ②③ cc-pages | on | off | off | off |
+| ②③ 集約ハブ ~/h | on | off | off | off |
+| ②③ Windows の claude-personal・claude-work | on | off | off | off |
+| ②③ Notion Dev Tracker | off | off | off | off |
+| ②③ Dev Tracker の見回り役 | off | off | off | off |
+| ③ 1Password | off | off | off | off |
+| ③ op-reason の SSH の中継 | off | off | off | off |
+| ③ ntn (Notion の CLI) | on | off | off | off |
+| ③ Windows の ntn | on | off | off | off |
+| ③ Windows の Tailscale | off | off | off | off |
+| ③ Windows の sshd (Tailscale から鍵で入る) | off | off | off | off |
+| ③ git の名前とメール (pollenjp・pollenjp-sub) | on | off | off | off |
