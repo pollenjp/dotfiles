@@ -8,8 +8,9 @@
 //! - herdr-app に見送っていない新しい版があれば、続きの行の末尾に keys.json の注意を 2 行。herdr-core だけ・herdr-app は見送った版だけ・windowsHerdr が
 //!   false なら添えない
 //! - 新しい版が無い・見送った版だけなら「無い」の 1 行で ✔
-//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsTailscale (既定は off) と、bootstrap の 4 つは
-//!   Windows の ghq に dotfiles の clone があるときだけ。同じものを入れる手順と同じ switch
+//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsTailscale (既定は off) と、bootstrap の 4 つと
+//!   ghq・fzf は Windows の ghq に dotfiles の clone があるときだけ。同じものを入れる手順と同じ switch (ghq・fzf を入れる手順はいつも on の
+//!   Windows にしか無い手順で、bootstrap の clone の runner が流す)
 //! - 確かめられない名前はわけを添えて 1 行出して failed (ほかの名前の新しい版は知らせる。わけは最初の名前のもの): API の失敗 (gh の stderr)・404・一覧で
 //!   ない応答・版のディレクトリが無い (herdr の Preview だけも)・上限を過ぎた・ps1 と見送りの一覧の誤り
 //! - winget-pkgs の版: 固定した版より新しい版を sort -V の古い順に、見送った版は理由つきで (知らせない)。版の形でないディレクトリ・ファイル・herdr の
@@ -53,6 +54,8 @@ fn pinned_of(name: &str) -> &'static str {
         "ntn" => "0.23.28",
         "claude-code" => "2.1.318",
         "tailscale" => "1.104.5",
+        "ghq" => "1.12.0",
+        "fzf" => "0.75.0",
         "git" => "2.56.0.4",
         "gh" => "2.103.3",
         "vs-buildtools" => "17.14.44",
@@ -71,6 +74,8 @@ fn id_of(name: &str) -> &'static str {
         "ntn" => "Notion.ntn",
         "claude-code" => "Anthropic.ClaudeCode",
         "tailscale" => "Tailscale.Tailscale",
+        "ghq" => "x-motemen.ghq",
+        "fzf" => "junegunn.fzf",
         "git" => "Git.Git",
         "gh" => "GitHub.cli",
         "vs-buildtools" => "Microsoft.VisualStudio.2022.BuildTools",
@@ -680,8 +685,8 @@ fn nothing_newer_is_ok() {
 
 // ------------------------------------------------------------------ 名前の on/off
 
-/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。tailscale は windowsTailscale が true のときだけ。bootstrap の 4 つは
-/// Windows の ghq に dotfiles の clone があるときだけ
+/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。tailscale は windowsTailscale が true のときだけ。bootstrap の 4 つと
+/// ghq・fzf は Windows の ghq に dotfiles の clone があるときだけ
 #[test]
 fn names_follow_the_host_switches() {
     let checked = |w: &World| -> Vec<String> {
@@ -764,6 +769,17 @@ fn name_switches_match_the_install_steps() {
     }
     for name in ["git", "gh", "vs-buildtools", "rustup"] {
         assert_eq!(name_gate(name), NameGate::Bootstrapped);
+    }
+    // ghq・fzf を入れる手順はいつも on の Windows にしか無い手順で、bootstrap が clone した dotfiles の runner が流す。知らせるのも、bootstrap の
+    // 4 つと同じく clone があるときだけ (WSL の setup も同じ)
+    for name in ["ghq", "fzf"] {
+        let step = crate::steps::ps1::SPECS
+            .iter()
+            .find(|s| s.id == name)
+            .unwrap_or_else(|| panic!("{name} の手順が無い"));
+        assert_eq!(step.gate, Gate::Always, "{name}");
+        assert!(step.windows_only, "{name}");
+        assert_eq!(name_gate(name), NameGate::Bootstrapped, "{name}");
     }
 }
 
@@ -1363,7 +1379,9 @@ fn notice_texts_match_the_wsl_script() {
         "herdr | herdr-app | herdr-core)\n      [[ ${windows_herdr} != false ]] || continue"
     ));
     assert!(s.contains("tailscale)\n      [[ ${windows_tailscale} == true ]] || continue"));
-    assert!(s.contains("git | gh | vs-buildtools | rustup)\n      ((bootstrapped)) || continue"));
+    assert!(s.contains(
+        "git | gh | vs-buildtools | rustup | ghq | fzf)\n      ((bootstrapped)) || continue"
+    ));
     assert!(s.contains("${windows_home}/ghq/github.com/pollenjp/dotfiles/.git"));
     // reason_of は空でない最初の 2 行を「 / 」でつなぐ
     assert!(
