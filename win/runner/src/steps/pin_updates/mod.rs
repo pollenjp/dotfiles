@@ -6,8 +6,9 @@
 //!
 //! - 確かめる名前は WSL と同じ順 (`NAMES`)。on/off は、WSL の記録 (windows-files.json の ntn・claudeCode、group.json の tools.windowsHerdr・
 //!   windowsTailscale) の代わりに、同じものを入れる手順と同じ道具の switch (ntn は windowsNtn、claude-code は windowsClaudeCode、herdr・herdr-app・
-//!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 4 つ (git・gh・vs-buildtools・rustup) は、WSL と同じく Windows の
-//!   ghq に dotfiles の clone がある (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap を流した) ときだけ
+//!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 4 つ (git・gh・vs-buildtools・rustup) と、runner の手順 ghq・fzf が
+//!   入れる ghq・fzf は、WSL と同じく Windows の ghq に dotfiles の clone がある (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。
+//!   bootstrap を流した) ときだけ
 //! - GitHub は Windows の gh で読む (`gh api`。HTTP の crate を足さない)。herdr-app・herdr-core は、版ごとの Windows の成果物が releases.herdr.dev に
 //!   あるかを HEAD で見る (無い版は数えない)。gh では読めない所なので、WSL と同じ引数の curl (PATH で最初に見つかるもの。Windows はふつう System32 の
 //!   curl.exe。Install-HerdrApp.ps1 も同じ探し方で、同じ取得元を落とす) を打つ
@@ -47,6 +48,8 @@ pub const NAMES: &[&str] = &[
     "ntn",
     "claude-code",
     "tailscale",
+    "ghq",
+    "fzf",
     "git",
     "gh",
     "vs-buildtools",
@@ -88,7 +91,7 @@ pub enum NameGate {
     Always,
     /// 道具の switch が true なら (同じものを入れる手順と同じ switch)
     Tool(&'static str),
-    /// Windows の ghq に dotfiles の clone がある (bootstrap を流した) なら
+    /// Windows の ghq に dotfiles の clone がある (bootstrap を流した) なら (bootstrap の 4 つと、bootstrap の clone の runner が入れる ghq・fzf)
     Bootstrapped,
 }
 
@@ -99,7 +102,7 @@ pub fn name_gate(name: &str) -> NameGate {
         "claude-code" => NameGate::Tool("windowsClaudeCode"),
         "herdr" | "herdr-app" | "herdr-core" => NameGate::Tool("windowsHerdr"),
         "tailscale" => NameGate::Tool("windowsTailscale"),
-        "git" | "gh" | "vs-buildtools" | "rustup" => NameGate::Bootstrapped,
+        "git" | "gh" | "vs-buildtools" | "rustup" | "ghq" | "fzf" => NameGate::Bootstrapped,
         _ => NameGate::Always,
     }
 }

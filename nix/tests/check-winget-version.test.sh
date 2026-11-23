@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -68,6 +68,12 @@
 #   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL を添える
 #   - --json --offline は、パッケージ ID Tailscale.Tailscale と出た日の取り方 winget を出す
 #   - 固定した版は X.Y.Z だけを受ける (Install-Tailscale.ps1 の読める形。4 つ区切りなら gh を呼ばずに exit 2)
+#
+#   ghq・fzf (出た日は winget-pkgs に載った日):
+#   - Install-Ghq.ps1・Install-Fzf.ps1 の形から読み、winget-pkgs の manifests/x/x-motemen/ghq・manifests/j/junegunn/fzf を見る。GitHub の
+#     release は引かない (どちらも winget に載らない GitHub の release を出すので、比べない)
+#   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL と手順の節 (ghq・fzf の新しい版が出たとき) を添える
+#   - --json --offline は、パッケージ ID (x-motemen.ghq・junegunn.fzf) と出た日の取り方 winget を出す
 #
 #   bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
 #   - 名前ごとの param (-GitVersion・-GhVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
@@ -179,6 +185,8 @@ manifest_dir_of() {
     ntn) echo manifests/n/Notion/ntn ;;
     claude-code) echo manifests/a/Anthropic/ClaudeCode ;;
     tailscale) echo manifests/t/Tailscale/Tailscale ;;
+    ghq) echo manifests/x/x-motemen/ghq ;;
+    fzf) echo manifests/j/junegunn/fzf ;;
     git) echo manifests/g/Git/Git ;;
     gh) echo manifests/g/GitHub/cli ;;
     vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
@@ -193,6 +201,8 @@ ps1_of() {
     ntn) echo Install-Ntn.ps1 ;;
     claude-code) echo Install-ClaudeCode.ps1 ;;
     tailscale) echo Install-Tailscale.ps1 ;;
+    ghq) echo Install-Ghq.ps1 ;;
+    fzf) echo Install-Fzf.ps1 ;;
     git | gh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
@@ -542,6 +552,29 @@ write_tailscale_ps1() {
   } >"$1"
 }
 
+# Install-Ghq.ps1・Install-Fzf.ps1 の形 (Install-Ntn.ps1 と同じ作り。$packageId は関数の中)。$1・$2・$3 は write_openssh_ps1 と同じ。
+# $4: 道具の名前 (Ghq・Fzf。関数の名前の後ろ)
+write_portable_ps1() {
+  {
+    printf '\xef\xbb\xbf<#\n.SYNOPSIS\nWindows の %s を、決めた版に揃える。\n#>\n' "$4"
+    printf '[CmdletBinding()]\nparam(\n'
+    if [[ -n $2 ]]; then
+      printf "    [string]\$Version = '%s',\n" "$2"
+    fi
+    # shellcheck disable=SC2016
+    printf '    [switch]$Check,\n    [switch]$IfMissing\n)\n\n'
+    # shellcheck disable=SC2016
+    printf 'function Get-WingetCommands {\n    param([string]$Plan, [string]$PackageId, [string]$Version)\n}\n\n'
+    printf 'function Invoke-Install%s {\n' "$4"
+    # shellcheck disable=SC2016
+    printf '    param([string]$Version, [switch]$Check, [switch]$IfMissing)\n'
+    if [[ $3 != - ]]; then
+      printf "    \$packageId = '%s'\n" "$3"
+    fi
+    printf '}\n'
+  } >"$1"
+}
+
 # win/bootstrap/Install-Bootstrap.ps1 の形 (param に 4 つの版が並び、ID の変数は関数の中に 4 つ並ぶ)。$1: 書き先、
 # $2: 今の pkg の固定した版 (空ならその param の行を書かない)、$3: 今の pkg のパッケージ ID (- ならその変数の行を書かない)。
 # ほかの道具の行は本物の値で書く
@@ -590,6 +623,8 @@ new_case() {
     ntn) write_ntn_ps1 "${d}/Install-Ntn.ps1" "$2" "${id:-Notion.ntn}" ;;
     claude-code) write_claude_code_ps1 "${d}/Install-ClaudeCode.ps1" "$2" "${id:-Anthropic.ClaudeCode}" ;;
     tailscale) write_tailscale_ps1 "${d}/Install-Tailscale.ps1" "$2" "${id:-Tailscale.Tailscale}" ;;
+    ghq) write_portable_ps1 "${d}/Install-Ghq.ps1" "$2" "${id:-x-motemen.ghq}" Ghq ;;
+    fzf) write_portable_ps1 "${d}/Install-Fzf.ps1" "$2" "${id:-junegunn.fzf}" Fzf ;;
     git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
     gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
     vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
@@ -1484,6 +1519,65 @@ else
   ng "tailscale: 4 つ区切りの固定した版" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
+echo "-- ghq・fzf"
+
+# 名前|固定した版|新しい版|manifest のディレクトリ (manifests/ の後ろ)|パッケージ ID|固定した版より古い版 (空白区切り)。2026-11-23 の
+# winget-pkgs の manifests/x/x-motemen/ghq (1.9.x・1.10.0・1.11.x は無い) と manifests/j/junegunn/fzf の新しい方
+for spec in \
+  'ghq|1.12.0|1.12.1|x/x-motemen/ghq|x-motemen.ghq|1.7.1 1.8.0 1.10.1' \
+  'fzf|0.75.0|0.76.0|j/junegunn/fzf|junegunn.fzf|0.74.3 0.74.4 0.74.5'; do
+  IFS='|' read -r pkg p_pin p_next p_dir p_id p_old <<<"${spec}"
+  read -r -a p_olds <<<"${p_old}"
+  p_winget_now=$(contents_json "${p_olds[@]}" "${p_pin}")
+  p_winget_next=$(contents_json "${p_olds[@]}" "${p_pin}" "${p_next}")
+
+  # pf1. 固定した版が winget の最新: exit 0。ps1 の形から読み、manifests/<ディレクトリ> を見る。GitHub の release は引かない
+  #      (どちらも winget に載らない GitHub の release を出すので、比べない)
+  d=$(new_case "pf1-${pkg}" "${p_pin}" -)
+  FAKE_GH_CONTENTS="${p_winget_now}" run "${d}" 0
+  if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F "Windows の ${pkg} (winget の ${p_id})" \
+    && called "${d}" -xF "api repos/microsoft/winget-pkgs/contents/manifests/${p_dir}" && ! called "${d}" -F 'releases'; then
+    ok "${pkg}: 固定した版が最新なら exit 0 (manifests/${p_dir} を見て、GitHub の release は引かない)"
+  else
+    ng "${pkg}: 最新" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+  fi
+
+  # pf2. 新しい版が winget-pkgs に載って 29 日: exit 0 で、版・載った日・あと 1 日を 1 行に出す
+  d=$(new_case "pf2-${pkg}" "${p_pin}" -)
+  put_commits "${d}" "${p_next}" "${at29}"
+  FAKE_GH_CONTENTS="${p_winget_next}" run "${d}" 0
+  if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" "${p_next//./\\.}.*winget に載ったのは.*${at29:0:10}.*あと 1 日" \
+    && called "${d}" -F "commits?path=manifests/${p_dir}/${p_next}"; then
+    ok "${pkg}: 新しい版が載って 29 日なら exit 0 で待ち、載った日とあと 1 日を出す"
+  else
+    ng "${pkg}: 猶予の中" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
+  fi
+
+  # pf3. 新しい版が載って 31 日: exit 1 で、manifest の URL と手順の節と見送りの一覧の場所を出す
+  d=$(new_case "pf3-${pkg}" "${p_pin}" -)
+  put_commits "${d}" "${p_next}" "$(ago 31)"
+  FAKE_GH_CONTENTS="${p_winget_next}" run "${d}" 0
+  if [[ $(rc "${d}") == 1 ]] && seen "${d}" "⚠ 固定した版 ${p_pin//./\\.} より新しい版が winget にある: ${p_next//./\\.}" \
+    && seen "${d}" -F "https://github.com/microsoft/winget-pkgs/tree/master/manifests/${p_dir}/${p_next}" \
+    && seen "${d}" -F 'ghq・fzf の新しい版が出たとき' && seen "${d}" -F 'skipped-versions.txt'; then
+    ok "${pkg}: 新しい版が載って 31 日なら exit 1 で、manifest の URL と手順の節と見送りの一覧の場所を出す"
+  else
+    ng "${pkg}: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
+  fi
+
+  # pf4. --json --offline: gh を呼ばずに、パッケージ ID・固定した版・出た日の取り方 (winget)・手順の節を出す
+  d=$(new_case "pf4-${pkg}" "${p_pin}" -)
+  run_args "${d}" 1 --json --offline "${pkg}" "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt"
+  if [[ $(rc "${d}") == 0 ]] && ! gh_called "${d}" \
+    && jq -e --arg name "${pkg}" --arg id "${p_id}" --arg pin "${p_pin}" \
+      '.name == $name and .title == "Windows の \($name)" and .packageId == $id and .pinned == $pin
+      and .datesFrom == "winget" and .readmeSection == "ghq・fzf の新しい版が出たとき"' "${d}/out" >/dev/null; then
+    ok "${pkg}: --json --offline は gh を呼ばずに、ID・固定した版・出た日の取り方 (winget)・手順の節を出す"
+  else
+    ng "${pkg}: --json --offline" "rc=$(rc "${d}") $(outerr "${d}")"
+  fi
+done
+
 echo "-- claude-code"
 pkg=claude-code
 
@@ -1794,6 +1888,8 @@ for spec in \
   'ntn|win/ntn|0.23.28|0.23.29' \
   'claude-code|win/claude-code|2.1.318|2.1.321' \
   'tailscale|win/tailscale|1.104.5|1.104.6' \
+  'ghq|win/ghq|1.12.0|1.12.1' \
+  'fzf|win/fzf|0.75.0|0.76.0' \
   'git|win/bootstrap|2.56.0.4|2.56.1' \
   'gh|win/bootstrap|2.103.3|2.104.0' \
   'vs-buildtools|win/bootstrap|17.14.44|17.14.45' \

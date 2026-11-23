@@ -16,6 +16,9 @@
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
+//! Windows にしか無い手順 (t3-code・ghq・fzf。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で決め、ps1 の締めの行の
+//! 文言と出力の印は試験が ps1 の字と突き合わせる。
+//!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
 
 use super::{Gate, Mode, Outcome, Step, StepInfo};
@@ -586,6 +589,80 @@ pub const SPECS: &[Ps1Spec] = &[
         sync_notice: None,
         check_hang: None,
     },
+    // ghq と fzf (Windows にしか無い手順。WSL の setup には無い。dotfiles.ps1 の cdrepo が使う。dotfiles-private の
+    // docs/adr/092_win_cdrepo_ghq_fzf_*)。どちらも ① エンジニアの道具の CLI で、Linux はどのグループでも入れるので、いつも on。ntn と同じく
+    // 常駐も UAC も無いので、版のずれも揃える (Policy::Sync)
+    Ps1Spec {
+        id: "ghq",
+        windows_only: true,
+        order: 97,
+        title: "ghq (cdrepo が使う) を固定した版に揃える",
+        gate: Gate::Always,
+        script: "win/ghq/Install-Ghq.ps1",
+        command: "Install-Ghq",
+        subject: "Windows の ghq",
+        package: "ghq (winget の x-motemen.ghq)",
+        header: Header::Contains("ghq (winget の x-motemen.ghq"),
+        check_secs: 120,
+        install_secs: 600,
+        policy: Policy::Sync,
+        uac: false,
+        ok_text: "Windows の ghq は、dotfiles で固定した版に揃っています。",
+        installed: &["Windows の ghq を入れました (固定した版と pin が揃っています)。"],
+        synced: &["Windows の ghq を揃えました (固定した版と pin が揃っています)。"],
+        manual_fix: &[
+            "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「ghq・fzf」)",
+        ],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-Ghq を打つか、dotfiles apply --steps ghq を流し直す (入れ替えるときは、動いている ghq を先に終わらせる)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        missing_blocked: None,
+        output_fixes: &[],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+    },
+    // fzf は winget の既定の installer (machine スコープの MSI) を避けて portable を入れる。MSI の fzf が入っていれば、ps1 は portable を
+    // 入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる (PATH のずれと同じく知らせるだけ)。その行の印で外し方を出す
+    Ps1Spec {
+        id: "fzf",
+        windows_only: true,
+        order: 97,
+        title: "fzf (cdrepo が使う) を固定した版 (portable) に揃える",
+        gate: Gate::Always,
+        script: "win/fzf/Install-Fzf.ps1",
+        command: "Install-Fzf",
+        subject: "Windows の fzf",
+        package: "fzf (winget の junegunn.fzf)",
+        header: Header::Contains("fzf (winget の junegunn.fzf"),
+        check_secs: 120,
+        install_secs: 600,
+        policy: Policy::Sync,
+        uac: false,
+        ok_text: "Windows の fzf は、dotfiles で固定した版に揃っています。",
+        installed: &["Windows の fzf を入れました (固定した版と pin が揃っています)。"],
+        synced: &["Windows の fzf を揃えました (固定した版と pin が揃っています)。"],
+        manual_fix: &[
+            "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「ghq・fzf」)",
+        ],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-Fzf を打つか、dotfiles apply --steps fzf を流し直す (入れ替えるときは、動いている fzf を先に終わらせる)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        missing_blocked: None,
+        output_fixes: &[(
+            "MSI の fzf (machine スコープ) が入っている",
+            "MSI の fzf (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id junegunn.fzf --exact --scope machine を打って外し (UAC の確認が出る)、dotfiles apply --steps fzf を流し直す (win/README.md の「ghq・fzf」)",
+        )],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+    },
 ];
 
 /// herdr の Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)
@@ -1151,15 +1228,25 @@ impl Ps1Step {
         let s = self.0;
         match plan {
             Plan::PathOnly => {
-                let mut o = Outcome::new(
-                    Kind::Manual,
-                    format!(
+                // 出力の印 (fzf の「MSI の fzf (machine スコープ) が入っている」) に当たれば、その印を見出しにして直し方を出す。
+                // 無ければ PATH のずれの見出しと manual_fix
+                let text = match s
+                    .output_fixes
+                    .iter()
+                    .find(|(m, _)| lines.iter().any(|l| l.contains(m)))
+                {
+                    Some((marker, _)) => format!(
+                        "{marker} ({} -Check の ※ の行。runner は直さない)",
+                        s.command
+                    ),
+                    None => format!(
                         "PATH で引かれるものが winget のものではない ({} -Check の ※ の行)",
                         s.command
                     ),
-                );
-                for n in s.manual_fix {
-                    o = o.note(*n);
+                };
+                let mut o = Outcome::new(Kind::Manual, text);
+                for n in self.fixes(runner_host, lines, s.manual_fix) {
+                    o = o.note(n);
                 }
                 vec![o]
             }
@@ -1280,8 +1367,8 @@ impl Ps1Step {
                     s.command
                 ),
             );
-            for n in s.manual_fix {
-                o = o.note(*n);
+            for n in self.fixes(ctx.host.runner_enable, &r.output, s.manual_fix) {
+                o = o.note(n);
             }
             return vec![o];
         }
@@ -1329,6 +1416,10 @@ mod tests {
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
     //!   揃っていない」)、行と前に出す行を中継の字にする。手で打つ -Check にも中継のモードを添える。前に出す行は手順の字 (無い手順は型の字と
     //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
+    //! - ghq・fzf は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、PATH の
+    //!   ずれだけなら知らせる。fzf は MSI の fzf の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
+    //! - Windows にしか無い手順の ps1 は、runner が読む締めの行の文言 (Sync は「→ … で入れる」「→ … で揃える」「→ ※ の手順で直す」) と、
+    //!   出力の印 (output_fixes・missing_blocked) を持つ (WSL の wrapper との突き合わせの代わり)
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1539,6 +1630,188 @@ mod tests {
         assert_eq!(o[0].kind, Kind::Failed);
         assert!(o[0].text.starts_with("揃えられなかった (終了コード 1"));
         assert!(o[0].notes[0].contains("Install-Ntn"));
+    }
+
+    /// ghq・fzf: Windows にしか無い手順で、いつも on。ntn と同じく入れる・揃える・PATH のずれは知らせる
+    #[test]
+    fn ghq_and_fzf_sync_like_ntn() {
+        for (id, command, name, path_owner) in [
+            ("ghq", "Install-Ghq", "ghq", "winget のもの"),
+            ("fzf", "Install-Fzf", "fzf", "winget の portable のもの"),
+        ] {
+            let s = spec(id);
+            assert!(s.windows_only, "{id}");
+            assert_eq!(s.gate, Gate::Always, "{id}");
+            assert_eq!(s.order, 97, "{id}");
+            assert_eq!(s.policy, Policy::Sync, "{id}");
+            // 3: -IfMissing で入れる (UAC は出ない)
+            let sys1 = sys(
+                (
+                    3,
+                    vec![
+                        header_line(s),
+                        format!("⚠️ {name} が入っていない → {command} で入れる ⚠️"),
+                    ],
+                ),
+                (0, vec![]),
+            );
+            let (o, out, calls) = run(id, &sys1, APPLY);
+            assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")], "{id}");
+            assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"], "{id}");
+            assert!(
+                out.contains(&format!(
+                    "Windows に {} が入っていないので、固定した版を入れます ({command}.ps1 -IfMissing。600 秒まで待ちます)。",
+                    s.package
+                )),
+                "{out}"
+            );
+            assert!(!out.contains("UAC"), "{id}");
+            assert!(
+                out.contains(&format!("Windows の {name} を入れました")),
+                "{id}"
+            );
+            // 1 (版か pin のずれ): 引数なしで揃える
+            let sys2 = sys(
+                (
+                    1,
+                    vec![
+                        header_line(s),
+                        format!("⚠️ 固定した版と揃っていない → {command} で揃える ⚠️"),
+                    ],
+                ),
+                (0, vec![]),
+            );
+            let (o, out, calls) = run(id, &sys2, APPLY);
+            assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")], "{id}");
+            assert_eq!(ends(&calls), vec!["-Check", ""], "{id}");
+            assert!(
+                out.contains(&format!("Windows の {name} を揃えました")),
+                "{id}"
+            );
+            // 1 (PATH のずれだけ): 知らせるだけ
+            let sys3 = sys(
+                (
+                    1,
+                    vec![
+                        header_line(s),
+                        format!("⚠️ PATH の {name} が {path_owner}ではない → ※ の手順で直す ⚠️"),
+                    ],
+                ),
+                (0, vec![]),
+            );
+            let (o, _, calls) = run(id, &sys3, APPLY);
+            assert_eq!(o[0].kind, Kind::Manual, "{id}");
+            assert_eq!(ends(&calls), vec!["-Check"], "{id}");
+            assert_eq!(
+                o[0].text,
+                format!("PATH で引かれるものが winget のものではない ({command} -Check の ※ の行)"),
+                "{id}"
+            );
+            assert_eq!(
+                o[0].notes,
+                vec![
+                    "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「ghq・fzf」)"
+                ],
+                "{id}"
+            );
+        }
+    }
+
+    /// fzf: MSI の fzf が入っていると ps1 は portable を入れずに 1 を返す (締めの行は「→ ※ の手順で直す」だけ)。runner は打たずに
+    /// 知らせ、MSI の外し方を出す (PATH のずれの直し方の代わり)
+    #[test]
+    fn fzf_msi_is_manual_with_the_uninstall_fix() {
+        let s = spec("fzf");
+        let msi = (
+            1,
+            vec![
+                header_line(s),
+                "⚠ MSI の fzf (machine スコープ。winget の既定の installer) が入っている: C:\\Program Files\\fzf\\bin\\fzf.exe".into(),
+                "⚠️ MSI の fzf (machine スコープ) が入っている → ※ の手順で直す ⚠️".into(),
+            ],
+        );
+        for mode in [Mode::Check, APPLY] {
+            let sys1 = sys(msi.clone(), (0, vec![]));
+            let (o, _, calls) = run("fzf", &sys1, mode);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(
+                o[0].text,
+                "MSI の fzf (machine スコープ) が入っている (Install-Fzf -Check の ※ の行。runner は直さない)"
+            );
+            assert_eq!(ends(&calls), vec!["-Check"]);
+            assert_eq!(o[0].notes.len(), 1);
+            assert!(
+                o[0].notes[0]
+                    .contains("winget uninstall --id junegunn.fzf --exact --scope machine"),
+                "{:?}",
+                o[0].notes
+            );
+        }
+    }
+
+    /// ps1 の字からコメント (`<# … #>` の塊と、`#` で始まる行) を除く。突き合わせを、コメントに写した文言で通さないため
+    fn ps1_code(text: &str) -> String {
+        let mut out = String::new();
+        let mut in_block = false;
+        for line in text.lines() {
+            let t = line.trim_start_matches('\u{feff}').trim_start();
+            if in_block {
+                in_block = !t.contains("#>");
+                continue;
+            }
+            if t.starts_with("<#") {
+                in_block = !t.contains("#>");
+                continue;
+            }
+            if t.starts_with('#') {
+                continue;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test]
+    fn ps1_code_drops_comments() {
+        let text = "\u{feff}<#\n.SYNOPSIS\n→ Install-X で揃える\n#>\nparam()\n  # → Install-X で入れる\n'⚠️ → Install-X で揃える ⚠️'\n<# 1 行 #>\nx # 行末\n";
+        assert_eq!(
+            ps1_code(text),
+            "param()\n'⚠️ → Install-X で揃える ⚠️'\nx # 行末\n"
+        );
+    }
+
+    /// Windows にしか無い手順の ps1 は、runner が読む締めの行の文言と出力の印を、コメントでない行に持つ (WSL の wrapper との突き合わせの
+    /// 代わり。文言を変えたら両方を直す)
+    #[test]
+    fn windows_only_scripts_carry_the_phrases_the_runner_reads() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let only: Vec<&Ps1Spec> = SPECS.iter().filter(|s| s.windows_only).collect();
+        assert_eq!(
+            only.iter().map(|s| s.id).collect::<Vec<_>>(),
+            vec!["t3-code", "ghq", "fzf"]
+        );
+        for s in only {
+            let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());
+            if s.policy == Policy::Sync {
+                for phrase in [
+                    format!("→ {} で入れる", s.command),
+                    format!("→ {} で揃える", s.command),
+                    "→ ※ の手順で直す".to_string(),
+                ] {
+                    assert!(text.contains(&phrase), "{} に「{phrase}」が無い", s.script);
+                }
+            }
+            for marker in s
+                .output_fixes
+                .iter()
+                .map(|(m, _)| *m)
+                .chain(s.missing_blocked)
+            {
+                assert!(text.contains(marker), "{} に「{marker}」が無い", s.script);
+            }
+        }
     }
 
     #[test]

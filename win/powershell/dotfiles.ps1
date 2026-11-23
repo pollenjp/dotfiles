@@ -267,6 +267,65 @@ function Install-Ntn { & "$HOME\.config\powershell\Install-Ntn.ps1" @args }
 # 入れ替えが要るときは、Windows で開いている Claude Code の会話を先に閉じる (動いていると止まる)。setup --update でも揃える。
 function Install-ClaudeCode { & "$HOME\.config\powershell\Install-ClaudeCode.ps1" @args }
 
+# Windows の ghq (winget の x-motemen.ghq) を、dotfiles で固定した版に揃える。下の cdrepo が使う。
+# 中身は同じ場所へ配る Install-Ghq.ps1 (win/README.md の「ghq・fzf」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、動いている ghq を先に終わらせる (動いていると止まる)。dotfiles apply (runner の手順 ghq) でも揃える。
+function Install-Ghq { & "$HOME\.config\powershell\Install-Ghq.ps1" @args }
+
+# Windows の fzf (winget の junegunn.fzf の portable) を、dotfiles で固定した版に揃える。下の cdrepo が使う。
+# 中身は同じ場所へ配る Install-Fzf.ps1 (win/README.md の「ghq・fzf」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、動いている fzf を先に終わらせる (動いていると止まる)。MSI の fzf が入っていれば、外し方を出して何も入れない。
+# dotfiles apply (runner の手順 fzf) でも揃える。
+function Install-Fzf { & "$HOME\.config\powershell\Install-Fzf.ps1" @args }
+
+# ghq の repo を fzf で選び、その repo へ移る。WSL の fish の function と bash の function の cdrepo (nix/home/modules/fish.nix・bash.nix) と
+# 同じ動きにそろえる: ghq・fzf が無ければ同じ文で知らせて止まり、ghq list を fzf -1 +m (候補が 1 つならそのまま選ぶ。選べるのは 1 つ) で
+# 選び、fzf が 0 で返ったときだけ ghq root の下のその repo へ移る (Esc・Ctrl+C で選ばずに抜けたら移らない)。ghq と fzf は Install-Ghq・
+# Install-Fzf (runner の手順 ghq・fzf) が winget で入れる (win/README.md の「cdrepo」)。
+# PowerShell の function は終了ステータスを返せない (return 1 は 1 を出力に流す) ので、止めたときは dotfiles 関数と同じく $LASTEXITCODE を
+# 1 にする (fish・bash の return 1 に当たる)。fzf で抜けたときの $LASTEXITCODE は fzf のもの (選ばずに抜けると 130)。
+# 知らせる文と fzf の引数は、dotfiles.Tests.ps1 が fish.nix・bash.nix の cdrepo と突き合わせる
+function cdrepo {
+    if (-not (Get-Command -Name ghq -ErrorAction SilentlyContinue)) {
+        Write-Host 'ghq is not installed'
+        $global:LASTEXITCODE = 1
+        return
+    }
+    if (-not (Get-Command -Name fzf -ErrorAction SilentlyContinue)) {
+        Write-Host 'fzf is not installed'
+        $global:LASTEXITCODE = 1
+        return
+    }
+    # ghq と fzf (Go) は UTF-8 で書き・読む。PowerShell は外のコマンドの出力を [Console]::OutputEncoding (日本語の Windows の既定は CP932) で
+    # 読み、外のコマンドどうしのパイプは $OutputEncoding (5.1 の既定は ASCII) で書き直すので、ASCII でない repo のパスや ghq の root が化けて
+    # 移れない。呼ぶ間だけどちらも BOM の無い UTF-8 にし、終わったら戻す (BOM 付きの UTF-8 だと、fzf の入力の頭に BOM が付く)。
+    # $OutputEncoding は global を替える: 5.1 は外のコマンドに渡す文字コードを、関数の中で替えた $OutputEncoding からは読まない (5.1 と 7 で
+    # 確かめた)。コンソールの無い host で [Console]::OutputEncoding を替えられなければ、替えずに流す
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    $pipeEncoding = $global:OutputEncoding
+    $consoleEncoding = $null
+    try {
+        $global:OutputEncoding = $utf8
+        try {
+            $consoleEncoding = [Console]::OutputEncoding
+            [Console]::OutputEncoding = $utf8
+        } catch {
+            $consoleEncoding = $null
+        }
+        $repo = ghq list | fzf -1 +m
+        if (($LASTEXITCODE -ne 0) -or (-not $repo)) { return }
+        $root = ghq root
+        if (($LASTEXITCODE -ne 0) -or (-not $root)) { return }
+    } finally {
+        $global:OutputEncoding = $pipeEncoding
+        if ($null -ne $consoleEncoding) {
+            try { [Console]::OutputEncoding = $consoleEncoding } catch { }
+        }
+    }
+    # ghq list は / で区切って出す。Windows の Set-Location は \ にそろえる (5.1 と 7 で確かめた)
+    Set-Location -LiteralPath (Join-Path "$root" "$repo")
+}
+
 # Windows の Tailscale (winget の Tailscale.Tailscale。machine スコープの MSI) を、dotfiles で固定した版で入れる。
 # 中身は同じ場所へ配る Install-Tailscale.ps1 (win/README.md の「Tailscale」)。-Check なら確かめるだけ。
 # 入れる・上げるときは Windows に UAC の確認が出る (上げる間、Tailscale の接続が少しの間切れる)。入っている版の方が新しければ下げない
