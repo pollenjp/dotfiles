@@ -14,7 +14,8 @@
 # 1 つの実行ファイルを呼び名で切り替える: op と op-reason は wrapper、op-reason-log は記録を見る道具、op-reason-ssh (0.4.0 から) は
 # Windows の ssh.exe を呼び出しの事実 (OPREASON_SSH_CALL) を付けて起こす入口 (op-reason.exe --ssh-agent の SSH の中継に呼び手を
 # 知らせる。引数と stdin・stdout・stderr はそのまま)。bin/op・bin/op-reason-log・bin/op-reason-ssh は bin/op-reason への symlink。
-# op-reason-ssh は名前を置くだけで、ssh や git をそれに向ける設定と中継を起こす設定は dotfiles に無い。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
+# SSH の中継を使うホスト (dotfiles.opReason.sshRelay) では WSL の ssh の wrapper が op-reason-ssh を起こし、中継は Windows の op-reason 自身の
+# task が起こす (Windows の runner が op-reason.exe --settings で揃える)。ほかのホストでは op-reason-ssh は名前を置くだけ。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
 # 出させて share/fish/vendor_completions.d に置く。マシンごとの既定 (Windows の op-reason.exe の場所 OPREASON_EXE) は、ここには
 # 入れず home/modules/op-reason.nix が包む。
 {

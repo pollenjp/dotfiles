@@ -449,7 +449,7 @@ scanData = "https://app.notion.com/p/…"
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
-| 90 | `op-reason` | `Install-OpReason.ps1 -SshRelay <モード\|off>`: WSL の op の Windows の部品 (op-reason の zip) を、入っていなければ入れ、版がずれていれば入れ替える (ps1 は `-IfMissing` を持たない)。`-SshRelay` は `-Check` にも揃える流れにも渡し、ホストの値の `opReasonSshRelay` が on なら `[opReason] sshRelayMode` のモード (SSH の中継の logon の task を置いて起こす)、off なら `off` (残った task を止めて消す)。動いている `op-reason.exe` が task の中継だけなら、中継を止めて入れ替えて起こし直す (ほかの `op-reason.exe` が動いている・中継が窓を開いていれば、ps1 が何も変えずに止まる) ([op-reason](#op-reason)・[SSH の中継](#ssh-の中継)) | `onePassword` | 有る |
+| 90 | `op-reason` | `Install-OpReason.ps1 -SshRelay <モード\|off>`: WSL の op の Windows の部品 (op-reason の zip) を、入っていなければ入れ、版がずれていれば入れ替える (ps1 は `-IfMissing` を持たない)。`-SshRelay` は `-Check` にも揃える流れにも渡し、ホストの値の `opReasonSshRelay` が on なら `[opReason] sshRelayMode` のモード (op-reason の CLI で op-reason 自身の task と中継を揃える。0.6.0 までの task `\pjp\op-reason-ssh-relay` は 1 回だけ消して移す)、off なら `off` (残った task を止めて消す。どちらの task も無ければ `op-reason.exe` を起こさない)。動いている `op-reason.exe` が中継だけなら、中継を止めて入れ替えて起こし直す (ほかの `op-reason.exe` が動いている・中継が窓を開いていれば、ps1 が何も変えずに止まる) ([op-reason](#op-reason)・[SSH の中継](#ssh-の中継)) | `onePassword` | 有る |
 | 91 | `powertoys` | PowerToys を入れ (`Install-PowerToys.ps1 -IfMissing`)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、Keyboard Manager に `default.json` を読み直させる ([PowerToys](#powertoys) と同じ順と判定。check と dry-run は止めない・起こさない・イベントを送らない)。記録は `%LOCALAPPDATA%\dotfiles\state\powertoys-keyboard-manager.reloaded` | いつも | 有る |
 | 91 | `ssh-config` | dotfiles-private の `ssh/*.ssh_config` を `%USERPROFILE%\.ssh\config.d\` へ写し、`config` (Include の 1 行と SetEnv) を置く ([ssh の設定](#ssh-の設定)と同じ判定。正本から消えたファイルは消す。`--force` は元を `<名前>.dotfiles-bak-<日時>` に退避して上書き・削除)。apply は書いた後に `ssh -v -G` で読むファイルも確かめる (check は、apply で書く・消すものが無いときだけ)。dotfiles-private の clone の `core.autocrlf` が true なら ⚠ (files と同じ)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-ssh-config.deployed.json`。SSH の中継の switch (`opReasonSshRelay`) が on なら、中継が答えるのを見てから `config.d\00-op-reason-ssh-relay.ssh_config` (中継を指す `IdentityAgent`) も置く ([SSH の中継](#ssh-の中継)) | いつも | 有る |
 | 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト (uuid ごとに足す)・横向きの既定・ディスプレイへのあて方 (解像度の決まり・組の無い仮想デスクトップに組を作る) を書く ([FancyZones](#fancyzones) と同じ判定・PowerToys の形のバイト列。`--force` は直した・消したレイアウトと手であてた組も上書き。取り込みは `dotfiles import fancyzones <名前>…`)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-fancyzones.{applied,assigned}.json`、退避は `…\state\windows-fancyzones\backup\` (10 回分) | いつも | 有る |
@@ -3399,7 +3399,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 ([`nix/README.md`「WSL の op を理由つきで呼ぶ (1Password CLI)」](../nix/README.md#wsl-の-op-を理由つきで呼ぶ-1password-cli)) は、
 呼び出しごとに Windows の `op-reason.exe` (動かないときは隣の `launcher.ps1`) を起こして承認の窓を出す。zip の中身は
 `op-reason.exe`・`launcher.ps1`・`powershell-entry\`・`SKILL.md`・README・ライセンスで、WSL の実行ファイルと同じ版にそろえる
-(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.6.0 まで同じ取り決め)。
+(呼び出しの取り決め (payload の版) が変わった版どうしでは断られる。0.1.0 から 0.7.0 まで同じ取り決め)。
 
 - setup が入れて揃えるのは、WSL の op の wrapper を入れるマシン (`dotfiles.wsl.enable` と `dotfiles.onePassword.enable` が両方 true。
   home-manager が書く `~/.local/state/dotfiles/claude-op-reason.json` の `enable`) のうち、win/ を配るマシン。option は無い。
@@ -3412,7 +3412,7 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   (`/mnt/c/Users/<windowsUserName>/AppData/Local/Programs/op-reason/op-reason.exe`。`home/modules/op-reason.nix` が包みに入れる既定)
   で見つけ、`launcher.ps1` はその隣から探す。Windows の PATH には足さない (WSL が Windows の PATH を読み直す `wsl --shutdown` も
   待たずに済む)
-- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.6.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
+- 版は `Install-OpReason.ps1` の `-Version` の既定値 (今は `0.7.0`) の 1 か所で、その版の zip の SHA-256 (`Zip`) と、展開した
   中身の値 (`Tree`) を同じファイルの表 (`Get-OpReasonReleases`) で固定する。`Zip` は Release に置いた `op-reason-windows.zip.sha256`
   の中身と同じ。WSL の実行ファイルの版 (`nix/pkgs/op-reason/default.nix` の `version`) と同じにする (テストが突き合わせる)
 - 自作のアプリの Release なので、type-clipboard と同じく依存の公開からの猶予 (7 日) は置かない。中身は SHA-256 で固定する
@@ -3420,21 +3420,23 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
   入れ替えまでする)。`op-reason.exe` は op の呼び出しの間しか動かない
 - 0.4.0 からの `op-reason.exe` は SSH の中継 (`op-reason.exe --ssh-agent`。1Password の SSH agent の前に立ち、鍵を使うたびに呼び手と
   理由を窓に出す) にもなる。中継を使うホスト (受け持ちを runner に切り替え、ホストの値の `opReasonSshRelay` が on) では、runner が
-  logon の task で中継を常に動かし、Windows と WSL の ssh を中継へ向ける。そのホストでは上の「op の呼び出しの間しか動かない」が
-  崩れるので、入れ替えるときは task の中継を止めて入れ替え、起こし直す ([SSH の中継](#ssh-の中継))。中継を使わないホストでは、
+  op-reason 自身の task (0.7.0 から。op-reason の CLI で揃える) で中継を常に動かし、Windows と WSL の ssh を中継へ向ける。そのホストでは
+  上の「op の呼び出しの間しか動かない」が崩れるので、入れ替えるときは中継を止めて入れ替え、起こし直す ([SSH の中継](#ssh-の中継))。中継を使わないホストでは、
   dotfiles は中継を起こさず、ssh をそこへ向けもしない (WSL の側の入口 `op-reason-ssh` は名前を PATH に置くだけ)
 - `op-reason.exe` には署名が無い。Smart App Control に止められると、WSL からの呼び出しはひとりでに `launcher.ps1` に回り、
   そのたびに stderr に 1 行出る (止められる間は、窓が launcher の窓になる)。毎回の試しをやめるなら、そのホストの WSL の環境に
-  `OPREASON_RUNNER=launcher` を置く (nix/README.md)。`Install-OpReason.ps1` は exe を起こさないので、止められても入れて揃えられる
+  `OPREASON_RUNNER=launcher` を置く (nix/README.md)。`Install-OpReason.ps1` は、中継を使わないホスト (`-SshRelay` を渡さないか `off` で、
+  中継の task が無い) では exe を起こさないので、止められても入れて揃えられる (中継を使うホストでは `op-reason.exe --settings` を打つ。
+  中継そのものが exe を動かすので、止められるホストでは中継を使えない)
 - Windows から直に呼ぶ (Windows の Claude Code など) ときは、op-reason の README の「Windows で」のとおり置き場所を Windows の
   PATH に足す。Smart App Control に止められるマシンでは、`<置き場所>\powershell-entry` を置き場所より前に足す。dotfiles はどちらも
   足さない
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-OpReason -Check` (PowerShell) | 差を出すだけ (ネットワークも使わない)。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-OpReason -Check` (PowerShell) | 差を出すだけ (ネットワークも使わない)。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (`-SshRelay` で中継を確かめられなければ 2) |
 | `Install-OpReason` (PowerShell) | 揃える (入れる・入れ替える) |
-| `Install-OpReason [-Check] -SshRelay per-call\|show-only\|off` (PowerShell) | SSH の中継の logon の task も揃える (モードなら置いて起こし、`off` なら止めて消す。[SSH の中継](#ssh-の中継))。`-SshRelay` を渡さなければ task を置きも消しもしない |
+| `Install-OpReason [-Check] -SshRelay per-call\|show-only\|off` (PowerShell) | SSH の中継も揃える (モードなら op-reason の CLI で op-reason 自身の task と中継を揃え、`off` なら残った task を消す。0.6.0 までの task は 1 回だけ移す。[SSH の中継](#ssh-の中継))。`-SshRelay` を渡さなければ task を置きも消しもしない |
 | `nix/scripts/bootstrap-windows-op-reason.sh` (WSL) | `setup --update` でも毎回走る (order 90)。WSL の op を入れて win/ を配るマシンだけ、入っていなければ入れ、差があれば入れ替える。揃えられなければ ⚠ で囲んで知らせる |
 | `nix/scripts/bootstrap-windows-op-reason.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
 | `dotfiles check --steps op-reason` (PowerShell。runner) | `-Check` だけを流し、締めの表に揃っている・入っていない (apply で入れる)・揃っていない (apply で揃える) を出す (何も変えない) |
@@ -3469,8 +3471,8 @@ dotfiles が入れる版は自動では上がらない (setup は差を知らせ
 
 0.4.0 からの `op-reason.exe` は SSH の中継 (`op-reason.exe --ssh-agent`) にもなる。1Password の SSH agent (`\\.\pipe\openssh-ssh-agent`)
 の前に立ち、鍵を使う呼び出しごとに、呼び手と理由を op-reason の窓に出す (op-reason の README の「SSH keys: the relay」)。dotfiles は、
-受け持ちを runner に切り替えたホストでだけ、中継を logon の task で起こし、Windows と WSL の ssh を中継へ向ける
-(dotfiles-private の ADR 089)。
+受け持ちを runner に切り替えたホストでだけ、中継を op-reason 自身の task (logon と 1 分ごと) で起こし、Windows と WSL の ssh を中継へ向ける
+(dotfiles-private の ADR 089・ADR 098)。
 
 - per-call (既定) では、鍵を使ってよいかを決めるのが 1Password の画面から op-reason の窓に移る。1Password は中継 (op-reason) を
   1 回承認するだけになり、呼び出しごとの許可は op-reason の窓が受け持つ。show-only では決めるのは 1Password の画面のままで、
@@ -3484,7 +3486,7 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 
 | 側 | 書く所 (dotfiles-private) | 効くもの |
 | --- | --- | --- |
-| Windows | `win/hosts/<user>@<pc>.toml` の `[tools]` に `opReasonSshRelay = true` (`onePassword = true` も要る)。モードは `[opReason] sshRelayMode` (`per-call`・`show-only`。書かなければ per-call) | runner の手順 `op-reason` が logon の task を置いて中継を起こし、手順 `ssh-config` が中継を指す `IdentityAgent` のファイルを置く |
+| Windows | `win/hosts/<user>@<pc>.toml` の `[tools]` に `opReasonSshRelay = true` (`onePassword = true` も要る)。モードは `[opReason] sshRelayMode` (`per-call`・`show-only`。書かなければ per-call) | runner の手順 `op-reason` が op-reason の CLI で op-reason 自身の task を作って中継を起こし、手順 `ssh-config` が中継を指す `IdentityAgent` のファイルを置く |
 | WSL | `nix/hosts/<user>@<hostname>.nix` の `modules` に `{ dotfiles.opReason.sshRelay.enable = true; }` (モードは `.mode`。Windows と同じ値にする) | WSL の `ssh` の wrapper が `op-reason-ssh` を起こす・Claude の hook (ssh-agent-notice) の知らせ ([`nix/README.md`「SSH の中継を使う」](../nix/README.md#ssh-の中継を使う)) |
 
 - 使えるのは、受け持ちを runner に切り替えたホストだけ (WSL の option は `wsl.windowsFiles.enable = false` のホストでだけ on にでき、
@@ -3492,27 +3494,56 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 - dotfiles の変更が main に入ってから dotfiles-private で on にする (先に on にすると、runner は知らないキーで、setup は評価で止まる)。
   当てるのは Windows の `dotfiles apply` (task・中継・`IdentityAgent`) が先で、WSL の `setup --update` (wrapper) が後
 
-#### task の形
+#### op-reason の task
 
-`Install-OpReason.ps1 -SshRelay <モード>` が `\pjp\op-reason-ssh-relay` に置く。runner は switch が on ならモード、off なら `off` を
-いつも渡す (WSL の setup と、手で打つ `Install-OpReason` は渡さない。渡さなければ task を置きも消しもしない)。
+0.7.0 から、中継の task は op-reason 自身が持つ (root のフォルダの `\op-reason-ssh-relay-<SID>`。`<SID>` はユーザーの SID)。
+`Install-OpReason.ps1 -SshRelay <モード>` は task を自分で置かず、op-reason の CLI で比べて揃える (dotfiles-private の ADR 098。op-reason の
+設計の §18)。runner は switch が on ならモード、off なら `off` をいつも渡す (WSL の setup と、手で打つ `Install-OpReason` は渡さない。
+渡さなければ task を作りも消しもしない)。
 
-- 動作は `%LOCALAPPDATA%\Programs\op-reason\op-reason.exe --ssh-agent` (show-only は `--mode show-only` を足す)
-- trigger は今のユーザーの logon と、置いた時刻から 1 分ごと (期限なし) の 2 つ。中継が落ちる・止められると、次の 1 分で起き直る。
-  動いている間は 2 つ目を起こさない (IgnoreNew) ので、1 分ごとの trigger は何もしない。Task Scheduler の「失敗したら起こし直す」は、
-  0 でない終わり方 (止められた中継) では起こし直さないので使わない
-- 今のユーザーの対話のセッション (Interactive。窓を出す)・権限を上げない (Limited)・時間の上限なし・電池でも起こして止めない・隠す・
-  優先度 5
-- 置いたらすぐ起こし、`--status` が答えるのを 15 秒待つ (答えなければ ⚠ と終了コード 1)。形が違えば (モードを替えた・前の形の task)
-  置き直して起こし直す。1 分ごとの trigger の始まりの時刻は比べない (置くたびに変わる)。`-SshRelay off` は task を止めて消す
+- モード: `op-reason.exe --settings check relay.autostart=on relay.mode=<モード> relay.running=on --json` で比べ (0 同じ・1 違う・2 読めない)、
+  違えば同じ値の `set` で揃える。op-reason が task を作り、`settings.json` に `relay.mode` を書き、中継を起こして答えるのを 15 秒待つ。中継の
+  モードは task の引数でなく `settings.json` から読む (task の動作は `op-reason.exe --ssh-agent --task <名前>`)。モードを替えると op-reason が
+  中継を起こし直す。止めた中継 (`relay stop` で task が無効) も起こす
+- `off`: op-reason の task があれば `set relay.autostart=off` (op-reason が中継を止めて task を消す)。どちらの task も無ければ `op-reason.exe`
+  を起こさない (中継を使わないホストで Smart App Control に当たらないように。task の有る無しは `Get-ScheduledTask` で読む)
+- task の形 (logon と 1 分ごとの trigger・2 つ目を起こさない・隠す・優先度 5・失敗したら起こし直す設定は無い) は op-reason が決める
+  (op-reason の README の「起こし方」)。0.6.0 までの dotfiles の task と同じ形
+- 確かめられない (`check` が 2・`op-reason.exe` を起こせない・JSON を読めない) ときは、`-Check` も揃える流れも終了コード 2 で何も変えない
+- `--settings` は 0.7.0 からの `op-reason.exe` にだけ渡す (入れ替えが要れば、入れ替えた後の exe で打つ)。`-SshRelay` は 0.7.0 より前の
+  `-Version` には渡せない
+- 置き場所が既定 (`%LOCALAPPDATA%\Programs\op-reason`) でなければ、`-SshRelay` を渡しても task にも中継にも触らない (一時の置き場所で
+  試すときに、本物の task をその置き場所の exe に向けない。op-reason の `set` は打った exe を task の動作にする)
+
+#### 前の task からの移し (1 回だけ)
+
+0.6.0 までの dotfiles は task `\pjp\op-reason-ssh-relay` を自分で置いていた。`-SshRelay` を渡されてそれが残っていれば、op-reason の設計の
+§18 の順で 1 回だけ移す:
+
+1. 前の task の中継を、op-reason の lock を取ってから止める (task を無効にし、0.7.0 の中継には stop event で止まるよう頼み、残っていれば
+   `Stop-ScheduledTask`)。lock を取れなければ (窓が開いている) 何も変えずに止まる。前の task が一瞬だけ動いて見えても、答えている中継が
+   op-reason の task のものなら止めない (どの中継かは op-reason に聞く)
+2. 入れ替えが要れば入れ替え、lock を放して `set relay.autostart=on …` (op-reason が自分の task を作って中継を起こす)
+3. `set` が通ったら前の task を消す。通らなくても op-reason の task ができていれば消し (task を 2 つ残さない)、できていなければ前の task を
+   有効に戻して中継を起こし直す (次の apply がまた移す)
+
+逆の順 (前の中継が動いている間に `set`) だと、op-reason は自分の task を無効で作る。`-SshRelay off` なら 1 の後に前の task を消すだけ。
+入れ替えが落ちたときは、前の task を有効に戻して中継を起こし直す (0.6.0 の exe では op-reason の task を作れない)。
 
 #### 版上げ
 
-- 置き場所を入れ替えるときに、動いている `op-reason.exe` が task の中継だけなら、op-reason の lock (`Local\op-reason`。中継は窓を
-  開いている間と、1Password の確認を待つ間に持つ) を取ってから task を無効にして中継を止め、入れ替え、有効に戻して起こし直す
-  (無効の間は 1 分ごとの trigger も起こさない)。lock は起こし直すまで持つ
-- lock を取れない (中継が窓を開いている・1Password の確認を待っている)・ほかの `op-reason.exe` (op の呼び出し) も動いているときは、
-  今までどおり何も変えずに止まる。答えてから `dotfiles apply` を打ち直す
+- 置き場所を入れ替えるときに、動いている `op-reason.exe` が中継だけなら、止めて入れ替え、起こし直す。どの中継かは op-reason に聞く
+  (`op-reason.exe --settings get relay.running --json` の `ours`・`by`。0.6.0 の exe なら `--ssh-agent --status` と前の task の様子)
+  - op-reason の task の中継: 入れ替える前に `op-reason.exe --settings relay stop` (op-reason が task を無効にし、lock を取って止める)、
+    入れ替えた後に新しい exe で `set …` (モードのとき) か `relay start` (`-SshRelay` なし)。何も動いていなくても op-reason の task が有効
+    なら止めておく (1 分ごとの trigger が入れ替えの途中に古い exe を起こさないように)。`relay stop` で止めていた中継 (task が無効) は、
+    `-SshRelay` なしでは起こさない
+  - 前の task の中継: lock を取ってから task を無効にして止め、入れ替えてから、移す (`-SshRelay` つき) か、有効に戻して起こし直す (なし)
+- lock を取れない・`relay stop` が断る (中継が窓を開いている・1Password の確認を待っている)・ほかの `op-reason.exe` (op の呼び出し・task の
+  外で起こした中継) も動いているときは、今までどおり何も変えずに止まる。答えてから `dotfiles apply` を打ち直す
+- 入れ替えが落ちて前の中身に戻したら、止めた中継を前の exe で起こし直す
+- op-reason の task がある間は、0.7.0 より前の版に入れ替えない (その版は task の動作の `--task` を知らない)。下げるなら先に
+  `op-reason.exe --settings set relay.autostart=off`
 - 起こし直した中継の最初の署名では、1Password の承認がもう一度要る (下の「1Password の承認」)
 
 #### IdentityAgent のファイル
@@ -3530,16 +3561,18 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 
 | 打つもの (Windows の PowerShell) | 見るもの |
 | --- | --- |
-| `Install-OpReason -Check -SshRelay per-call` | 版と中継の行 (task・中継)。揃っていれば終了コード 0 |
+| `Install-OpReason -Check -SshRelay per-call` | 版と中継の行 (task・前の task・`relay.autostart`・`relay.mode`・`relay.running`)。揃っていれば終了コード 0、確かめられなければ 2 |
+| `& "$env:LOCALAPPDATA\Programs\op-reason\op-reason.exe" --settings list` | op-reason の設定の全部 (中継の task・答えている中継とその持ち主・ほかに中継を起こす task) |
 | `& "$env:LOCALAPPDATA\Programs\op-reason\op-reason.exe" --ssh-agent --status` | 中継が答えれば `(pid N)` と終了コード 0 |
-| `Get-ScheduledTask -TaskPath '\pjp\'` | task (`op-reason-ssh-relay`) の有る無しと状態 (`Running`) |
-| `dotfiles check --steps op-reason,ssh-config` | runner の判定 (中継だけが違えば「SSH の中継が揃っていない」) |
+| `Get-ScheduledTask -TaskName 'op-reason-ssh-relay*'` | op-reason の task (`\` の `op-reason-ssh-relay-<SID>`) の有る無しと状態 (`Running`)。前の task (`\pjp\`) が残っていないこと |
+| `dotfiles check --steps op-reason,ssh-config` | runner の判定 (中継だけが違えば「SSH の中継が揃っていない」、確かめられなければ ⚠ の「確かめられなかった (終了コード 2)」) |
 
 #### 中継が止まったとき
 
-- 鍵は使えない (ssh が失敗する)。logon の task が 1 分のうちに起こし直す。待てなければ
-  `Start-ScheduledTask -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'` (答えるかは `op-reason.exe --ssh-agent --status`)
-- task の最後の結果 (`Get-ScheduledTaskInfo -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'` の `LastTaskResult`。10 進で出る) は、
+- 鍵は使えない (ssh が失敗する)。op-reason の task が 1 分のうちに起こし直す。中継を止めた (通知領域の鍵のアイコンの「止める」・
+  `relay stop`) ときは task が無効になっているので起き直らない。`op-reason --settings relay start` (WSL でも打てる。Windows では置き場所の
+  `op-reason.exe`) で起こす (答えるかは `op-reason.exe --ssh-agent --status`)
+- task の最後の結果 (`Get-ScheduledTaskInfo -TaskPath '\' -TaskName "op-reason-ssh-relay-<SID>"` の `LastTaskResult`。10 進で出る) は、
   中継が動いている間は `0x800710E0` (2147946720。1 分ごとの起動を、動いている中継があるので「新しいインスタンスを開始しない」で
   退けた。「要求を拒否した」と読めるが失敗ではない) か `0x00041301` (267009。task が起こした中継が動いている)。中継が終わった直後は、
   ほかの値 (中継の終了コード) のことがある (task の動作が終わると、その終了コードが入る見込み。次の 1 分ごとの起動で中継が起き直れば
@@ -3547,8 +3580,7 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
   「SSH の中継が答えない」の案内が見るのもこの値)
 - 1 回だけ 1Password に直につなぐ: `ssh -o 'IdentityAgent=\\\\.\pipe\openssh-ssh-agent' <接続先>` (WSL でも PowerShell でも `\` を
   4 つ。`-o` は設定より先に効く)
-- 手で中継を起こして試すときは、先に task を無効にする (`Disable-ScheduledTask -TaskPath '\pjp\' -TaskName 'op-reason-ssh-relay'`。
-  終わったら `Enable-ScheduledTask` で戻す)。中継は 1 つのログオンに 1 つで、task の外で中継が動いていると、1 分ごとの trigger が
+- 手で中継を起こして試すときは、先に `op-reason --settings relay stop` で止める (task も無効になる。終わったら `relay start` で戻す)。中継は 1 つのログオンに 1 つで、task の外で中継が動いていると、1 分ごとの trigger が
   毎分 `op-reason.exe` を起こしては「もう動いている」で終わらせる
 
 #### 1Password の承認
@@ -3574,7 +3606,7 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 #### やめ方
 
 2 つの switch を外す (ホストの値の `opReasonSshRelay` と、WSL の `dotfiles.opReason.sshRelay.enable`)。Windows で `dotfiles apply` を
-流すと task を止めて消し、`IdentityAgent` のファイルを消す。WSL で `setup --update` を流すと、wrapper が `ssh.exe` に戻る。
+流すと op-reason の task を消し (`set relay.autostart=off`。op-reason が中継を止める)、`IdentityAgent` のファイルを消す。WSL で `setup --update` を流すと、wrapper が `ssh.exe` に戻る。
 
 #### 中継を通らないもの
 
@@ -3604,7 +3636,7 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 5. `Install-OpReason.Tests.ps1` を流して PR を出す
 6. merge したら、入れるマシンで `setup --update` を流す (WSL の実行ファイルが上がり、Windows の部品も入れ替わる)。op の呼び出しの
    途中で止まったら、終わってから `Install-OpReason` か `bootstrap-windows-op-reason.sh --apply` で揃える。WSL の側で入るものが新しい
-   版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した。0.5.0・0.6.0 は頼らない) では、Windows の部品を先に揃えてから switch する
+   版の窓に頼る版 (0.3.0。`pjp-op-env` が理由から読む参照を外した。0.5.0〜0.7.0 は頼らない) では、Windows の部品を先に揃えてから switch する
    ([`nix/README.md`「op-reason の新しい版を出したとき」](../nix/README.md#op-reason-の新しい版を出したとき)の 5.)。setup が揃えない
    ホスト (win/ を配らない・受け持ちを runner に切り替えた) では、switch の前に Windows で揃える (受け持ちを runner に切り替えたホストは `dotfiles apply`、ほかは `Install-OpReason`)
 
@@ -3632,9 +3664,10 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 - `bootstrap-windows-op-reason.sh` と runner の `runner/src/steps/ps1.rs` は、終了コード (0・1・3) と、状態の表の見出し (`op-reason (GitHub の Release`)
   で分かれる (締めの行は見ない。runner は、版は揃っていて SSH の中継だけが違うときの「⚠️ SSH の中継が揃っていない」を、行の字を替えるのに
   だけ見る)。変えるときは向こうも直す (runner の試験が本物の ps1 の `-Check` を流して確かめる)
-- SSH の中継の task の形・版上げで中継を止めて起こし直す流れは、偽の task と偽の lock で `Install-OpReason.Tests.ps1` が確かめる。本物の
-  Task Scheduler での読み戻し (trigger の `Repetition` の `Interval` が `PT1M`・`Duration` が空) は実機で `Install-OpReason -Check -SshRelay per-call`
-  が 0 を返すことで見る ([SSH の中継](#ssh-の中継))
+- SSH の中継の流れ (前の task からの移し・版上げで止めて起こし直す・off) は、偽の task と偽の lock と、op-reason の CLI (check・set・
+  relay stop/start・get の終了コードと JSON) を真似る偽物で `Install-OpReason.Tests.ps1` が確かめる。本物の op-reason の CLI と Task Scheduler
+  では、実機で `Install-OpReason -Check -SshRelay per-call` が 0 を返すことで見る ([SSH の中継](#ssh-の中継)。手順は dotfiles-private の ADR 098 の §7)
+- 一時の置き場所 (`-InstallDir`) では `-SshRelay` は効かない (task と中継に触らない)
 
 ## ntn
 

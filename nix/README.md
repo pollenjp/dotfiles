@@ -2833,7 +2833,7 @@ win/ を配らないマシン（`wsl.windowsFiles.enable = false`）では、Win
 
 op-reason の SSH の中継（`op-reason.exe --ssh-agent`。1Password の SSH agent の前に立ち、鍵を使う呼び出しごとに「誰が・何のために」を
 窓に出して許可させる）を、Windows の受け持ちを runner に切り替えたホストで使う（dotfiles-private の ADR 089）。switch は 2 つで、
-同じ PC で両方を on にする。Windows の側（logon の task・中継を指す `IdentityAgent` のファイル）と、毎日の見え方・1Password の承認・止まったとき・
+同じ PC で両方を on にする。Windows の側（op-reason 自身の task・中継を指す `IdentityAgent` のファイル）と、毎日の見え方・1Password の承認・止まったとき・
 やめ方は [`win/README.md`「SSH の中継」](../win/README.md#ssh-の中継)。
 
 | option | 中身 |
@@ -2947,8 +2947,8 @@ op.exe whoami                              # WSL の直の op.exe は account is
 ### op-reason の新しい版を出したとき
 
 dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
-上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.6.0
-まで同じ取り決め（版 1）。0.4.0 で足した `op-reason-ssh` が中継へ渡す `OPREASON_SSH_CALL` も、0.4.0 から 0.6.0 まで同じ版 1）。自作のアプリの
+上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.7.0
+まで同じ取り決め（版 1）。0.4.0 で足した `op-reason-ssh` が中継へ渡す `OPREASON_SSH_CALL` も、0.4.0 から 0.7.0 まで同じ版 1）。自作のアプリの
 Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。依存の更新の skill
 `pjp-dotfiles-deps` も見ない）。
 
@@ -2962,7 +2962,8 @@ Release なので、依存の公開からの猶予（7 日）は置かず、中�
    上げる。WSL の側で入るものが新しい版の窓に頼るときは、Windows の側を先に揃えてから switch する。0.3.0 がそれで、`pjp-op-env` が
    理由から読む参照を外し、その一覧は 0.3.0 の窓が出す（[前述](#窓の読む参照)。WSL の側だけ先に上がると、窓にも理由にも読む参照が
    出ない）。0.5.0 は WSL の側で入るものが新しい窓に頼らない（足すのは `op-reason-ssh` の名前だけで、中継は使っていない）ので、
-   どちらが先でもよい（0.6.0 も同じ。変わったのは Windows の SSH の中継の窓と、その記録だけ）:
+   どちらが先でもよい（0.6.0 も同じ。変わったのは Windows の SSH の中継の窓と、その記録だけ。0.7.0 も同じで、足したのは Windows の
+   `op-reason.exe --settings` と中継の task。WSL の `op-reason --settings` は `op-reason.exe` に回すだけ）:
 
    ```sh
    ~/dotfiles/setup --self-update --steps bootstrap-windows-files,bootstrap-windows-op-reason   # Windows の op-reason を上げる
@@ -3762,7 +3763,7 @@ herdr の中の agent は手元の PC から転送された接続のもので（
   （`OPREASON_SSH_REASON`。コマンドの頭・`env`・`export`・この会話の環境）と、1Password の画面が出なければアイコンの「SSHリクエストを待機中……」から
   承認する手を添える。理由が無ければ、次から付けるよう Claude に 1 文足す（止めない）。断られたら op-reason の窓か 1Password に断られた
   （1Password が画面を伏せたまま約 60 秒で時間切れになったのかもしれない）と言う。鍵の認証の失敗は、`op-reason.exe --ssh-agent --status`
-  （`op-reason.exe` は `claude-op-reason.json` の `exe`）が答えなければ中継に届かないとして、logon の task が 1 分のうちに起こし直すと言う。
+  （`op-reason.exe` は `claude-op-reason.json` の `exe`）が答えなければ中継に届かないとして、op-reason の task が 1 分のうちに起こし直す（止めた中継は `op-reason --settings relay start` で起こす）と言う。
   どちらも、中継を通さずに 1Password に直につなぐ回り道をユーザーが言わない限り使わないよう言う。`scp`・`sftp`・`autossh` と署名は今の文のまま
 - 64 KB（gawk・mawk の無いマシンでは 16 KB）を超えるコマンドは読まない。herdr は 2 秒で切って呼び、落ちた・返事を
   しないときは続く 60 秒は呼ばない（どちらも Bash を待たせないため）

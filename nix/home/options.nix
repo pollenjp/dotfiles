@@ -198,9 +198,10 @@ in
         で置く (win/README.md の「SSH の中継」)。同じ PC で両方を on にする (片方だけだと、中継を通らないのに窓の知らせが出る・
         WSL の ssh だけが中継に向くなど食い違う):
 
-        - runner の手順 op-reason が、`Install-OpReason.ps1 -SshRelay <モード>` で logon の task (`\pjp\op-reason-ssh-relay`。
-          trigger は logon と 1 分ごと) を置いて中継を起こす。版を上げるときは中継を止めて入れ替え、起こし直す (中継が窓を
-          開いている間は止めない)
+        - runner の手順 op-reason が、`Install-OpReason.ps1 -SshRelay <モード>` で、op-reason 0.7.0 の CLI
+          (`op-reason.exe --settings check`・`set`) を打ち、op-reason 自身の task (`\op-reason-ssh-relay-<SID>`。trigger は logon と
+          1 分ごと) で中継を起こす。0.6.0 までの task (`\pjp\op-reason-ssh-relay`) は 1 回だけ消して移す。版を上げるときは中継を
+          止めて入れ替え、起こし直す (中継が窓を開いている間は止めない)
         - runner の手順 ssh-config が、中継が答えるのを見てから、Windows の `%USERPROFILE%\.ssh\config.d\` の最初に読まれる
           ファイル (`00-op-reason-ssh-relay.ssh_config`) に、どの接続先にも効く `IdentityAgent` (中継の pipe) を書く。Windows の
           ssh.exe (herdr-app の example-laptop へのつなぎ・pf も) は中継を通る
