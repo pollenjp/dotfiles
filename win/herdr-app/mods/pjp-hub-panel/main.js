@@ -11,6 +11,11 @@
 //   - "questions" (問い): questions だけを出す (見出し「問い (件数)」・問いと選択肢・送信。Enter でも送る)。title・updated・
 //     sections は出さない。questions が空なら「問いはありません」と出す (問いのペインを閉じるのはハブ)
 //   - ほかの値: わけを出し、無いときと同じに出す
+//   答えの欄: 問いがあるとき (role が questions か、無い) は、答えの欄を上の帯 (題と更新の時刻の欄 | 文字の大きさの組) のすぐ下に置く。
+//   欄の 1 行目はわけの字 | ボタンの組 (「入力欄に入れる」「送信」。右寄せで、欄の右上)、その下に答えの文。その下の一覧だけがスクロールし、
+//   答えの欄は隠れない。ペインの下端に置かないのは、herdr-app の通知 (toast) が窓の右下に出て、問いのペイン (端末の右に開く) の下端の
+//   「送信」と重なるため。
+//   わけの行: 送った・止まったわけや開かなかったリンクのわけ (status) は、問いがあれば答えの欄のわけの字に、無ければペインの一番下の行に出す。
 //   どの role のペインも、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
 //   ユーザーが選択肢をクリックしたときだけ。図を大きく見る小窓は別で、開いたときに focus する)。
 //   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
@@ -25,7 +30,7 @@
 //
 // リンク: markdown の文 (markdown の節の text と、問いの body) の [字](URL)・<URL>・素の URL は、TextView がリンクにする (色・下線・
 //   ポインタの形は TextView が theme から決める)。押すと http と https の URL (host のあるもの。user@host の形は除く) だけを既定のブラウザで
-//   開き (cx.open_url)、ほかの scheme (file:・mailto: など) やパスは開かずに、下の行にわけを出す (開けたら、そのわけは消す)。TextView の既定の
+//   開き (cx.open_url)、ほかの scheme (file:・mailto: など) やパスは開かずに、わけの行にわけを出す (開けたら、そのわけは消す)。TextView の既定の
 //   開き方は scheme を確かめないので、on_link_click で替える。図の説明 (caption) の TextView はこの扱いの外 (既定の開き方のまま)。
 //
 // ミニ絵: markdown の節の text に、絵だけの行 ![<説明>](<図のパス>) を 1 行書くと、その行で text を切り、前の文・小さな絵 (ミニ絵)・後ろの文の
@@ -174,8 +179,8 @@
 //   使わない)。数でない値は既定、範囲の外は端に寄せ、整数に丸めて出す。
 //   アプリの zoom (settings.json の zoom・app.zoom_in) は端末もほかの mod も大きくするので使わない (panel の px もアプリの zoom には従う)。
 //   キーでは変えない (Ctrl+= などはアプリの zoom のキー)。上の行の組は折り返さずに右上に留まり、ペインが狭いときは、左の欄の中で
-//   更新の時刻が次の行へ回り、題は縮んで折り返す。下の行の「入力欄に入れる」「送信」は、わけの字の横に入らなければ次の行へ回り、
-//   2 つが並ばない幅では「送信」がさらに次の行へ回る (どちらも右寄せで、ボタンは縮めない)。
+//   更新の時刻が次の行へ回り、題は縮んで折り返す。上の帯のすぐ下の答えの欄の「入力欄に入れる」「送信」は、わけの字の横に入らなければ
+//   次の行へ回り、2 つが並ばない幅では「送信」がさらに次の行へ回る (どちらも右寄せで、ボタンは縮めない)。
 //
 // 図の大きさと、大きく見る小窓:
 //   panel のペインの図は、ペインの幅から一覧と節のカードの余白 (50 px) を引いた幅に合わせて縮め・大きくする (0.1〜2 倍。width と height の
@@ -223,8 +228,8 @@
 // 答えの送り方: 問いの答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないでクリップボードに入れてから、端末に 1 回で貼る (terminal.paste)。
 // 「送信」(このペインで Enter も) は、貼ったあと hc keys で Enter を 1 回押す。段の answer (上の「段の answer」) の「送る」も同じ手で、1 行を
 // 貼って Enter を 1 回押す。改行を含む文が Claude Code の入力欄に 1 つの入力として入るのは、terminal.paste が bracketed paste で渡すことを
-// 当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は 1 行目で送ってしまう)。panel の下の行にも、答えを 1 行ずつ
-// 出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の札が付き、ユーザーの発言と見分けられなくなる)。
+// 当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は 1 行目で送ってしまう)。panel の答えの欄 (上の帯のすぐ下) にも、
+// 答えを 1 行ずつ出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の札が付き、ユーザーの発言と見分けられなくなる)。
 //   - 貼る前に hc get --json で端末を見て、エージェントが人を待っている (status が blocked。許可・問いの画面) なら、クリップボードにも入れずに
 //     止めてわけを出す (貼った字は画面に無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる。hc send も blocked の端末には送らない。
 //     「入力欄に入れる」も同じ)。貼った後の hc get で blocked になっていれば、Enter を押さない。hc get を読めなければ止めない (今までどおり)。
@@ -642,7 +647,7 @@ export default class HubPanel extends View {
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
     // 印のファイルの控え: 節を消す印 (dm) と段の押した印 (sp)。cur は印 (鍵 → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)、
     // pending はまだ書いていない押下 (op の並び)、error は読み書きできなかったわけ。markTail は 2 つのファイルの読み書きを 1 つずつ流す鎖、
-    // hash は今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (下の行に出したもの)
+    // hash は今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (わけの行に出したもの)
     this.dm = { kind: DISMISS, cur: new Map(), pending: [], error: null };
     this.sp = { kind: PRESS, cur: new Map(), pending: [], error: null };
     this.markTail = Promise.resolve();
@@ -1255,7 +1260,7 @@ export default class HubPanel extends View {
       .on_link_click((url, cx) => this.openLink(url, cx));
   }
 
-  // url を既定のブラウザで開く。http と https (webUrl) だけで、ほかは開かずに下の行にわけを出す。開けたら、前に出した開かなかった
+  // url を既定のブラウザで開く。http と https (webUrl) だけで、ほかは開かずにわけの行にわけを出す。開けたら、前に出した開かなかった
   // わけを消す (ほかのわけは残す)
   openLink(url, cx) {
     const u = webUrl(url);
@@ -2303,20 +2308,20 @@ export default class HubPanel extends View {
     const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");
 
     const hint = this.status || (text ? "Enter (このペインで) か「送信」で送る" : "");
-    const footer =
+    // 答えの欄: 上の帯のすぐ下に置き、下の区切りで一覧と分ける (頭のコメントの role の「答えの欄」。下端は herdr-app の通知と重なる)
+    const answerBar =
       qs.length === 0
         ? null
         : v_flex()
+            .flex_none()
             .px(14)
             .py(10)
             .gap(8)
-            .border_t_1()
+            .border_b_1()
             .border_color(c.border)
-            // 答えは問いごとに 1 行 (貼る文と同じく改行で区切る)
-            .child(div().text_size(this.fs(12)).text_color(text ? c.fg : c.dim).child(text ? this.lines(text) : "選択肢を選ぶと、ここに答えの文が出ます"))
             .child(
-              // 狭いときはボタンの組がわけの字の次の行へ回り、組も入らなければ「送信」が次の行へ回る (どちらも右寄せ。ボタンは
-              // 縮めない。わけの字は縮んで折り返す)
+              // 1 行目: わけの字 | ボタンの組 (右寄せで、欄の右上)。狭いときはボタンの組がわけの字の次の行へ回り、組も入らなければ
+              // 「送信」が次の行へ回る (どちらも右寄せ。ボタンは縮めない。わけの字は縮んで折り返す)
               h_flex()
                 .flex_wrap()
                 .gap(8)
@@ -2333,7 +2338,9 @@ export default class HubPanel extends View {
                     .child(this.button("hp-paste", "入力欄に入れる", false, ready, c, (_, cx) => this.deliver(cx, false)))
                     .child(this.button("hp-send", "送信", true, ready, c, (_, cx) => this.deliver(cx, true))),
                 ),
-            );
+            )
+            // その下に答えの文。答えは問いごとに 1 行 (貼る文と同じく改行で区切る)
+            .child(div().text_size(this.fs(12)).text_color(text ? c.fg : c.dim).child(text ? this.lines(text) : "選択肢を選ぶと、ここに答えの文が出ます"));
 
     return v_flex()
       .id("hp")
@@ -2381,9 +2388,10 @@ export default class HubPanel extends View {
           )
           .child(this.zoomControls(z, c)),
       )
+      .when(!!answerBar, (el) => el.child(answerBar))
       .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))
-      .when(!!footer, (el) => el.child(footer))
-      .when(!footer && !!this.status, (el) =>
+      // 答えの欄が無いとき (問いが無い・まとめのペイン) のわけの行は、今までどおり一番下に出す
+      .when(!answerBar && !!this.status, (el) =>
         el.child(div().px(14).py(6).border_t_1().border_color(c.border).text_size(this.fs(11)).text_color(c.dim).child(this.lines(this.status))),
       );
   }
