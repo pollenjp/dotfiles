@@ -594,6 +594,73 @@ nix flake update dotfiles-private --flake ~/dotfiles   # dotfiles-private の ni
 >   --override-input home-manager "git+https://github.com/nix-community/home-manager?shallow=1"
 > ```
 
+### Cargo.lock の既知の脆弱性 (osv-scanner)
+
+dotfiles が build する Rust の道具は、どれも git が追う `Cargo.lock` に書いた版で作る（Windows の runner と runner の手順
+`claude-selector` は cargo の `--locked`、Linux の `pjp-ghq-pull` と `claude-selector` は Nix の `cargoLock.lockFile`）。crate の版は
+公開から 7 日以上たったものに限る（cargo には猶予の設定が無い。[pjp-ghq-pull](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)・
+[`win/README.md`「runner を直すとき」](../win/README.md#runner-を直すとき)）ので、flake.lock と同じく、届け出の済んだ脆弱性のある版を
+lock に持ち続けることがある。それを照らすのが [`check-cargo-lock-vulns.sh`](./scripts/check-cargo-lock-vulns.sh) で、git が追う
+`Cargo.lock` の全部（今は `win/runner`・`nix/pkgs/claude-selector`・`nix/pkgs/pjp-ghq-pull`。足した lock も git に入れれば拾う）を
+osv-scanner で OSV（RustSec と GitHub の advisory を含む）と照らす（dotfiles-private の ADR 097（`docs/adr/097_cargo_lock_osv_scan_*`））。
+
+```sh
+./nix/scripts/check-cargo-lock-vulns.sh   # CI と同じ (受け入れていない advisory があれば 1、照らせなければ 2)
+```
+
+| いつ | 何が照らす |
+| --- | --- |
+| `Cargo.lock`・`Cargo.toml`・受け入れ（`osv-scanner.toml`）・`nix/flake.lock` を変える PR と、main への push | CI の `cargo-lock-vulns`（[`.github/workflows/cargo-lock-vulns.yml`](../.github/workflows/cargo-lock-vulns.yml)）。落ちれば PR が赤くなる |
+| 毎朝 6:17 (JST) | 同じ workflow の定期実行（advisory は lock より後から出る）。落ちた定期実行の通知は GitHub から届く |
+| 月 1 回 | 依存の更新（`pjp-dep-update`）。git が追う lockfile を同じ osv-scanner で照らし、要対応だけを上げる |
+
+- 受け入れていない advisory があれば、重大度を問わず落ちる（RustSec の advisory は CVSS を持たないものが多い。unsound・unmaintained の
+  印のものも出る）
+- osv-scanner は repo の flake が固定している nixpkgs のもの（2026-11 は 2.7.0）。スキャナの版も `flake.lock` の遅延に従う。PATH に無ければ、
+  script が `nix shell --inputs-from ./nix nixpkgs#osv-scanner` で入り直す
+- osv-scanner が落ちた（osv.dev に届かないなど）ときは 2 で落ちる。打ち直す
+- 照らせるのは届け出の済んだ脆弱性だけ。届け出の無い悪い版（乗っ取られた crate・build script の悪さ）は、公開から 7 日の猶予・`Cargo.lock`
+  の checksum・PR の lock の差分が受け持つ
+
+#### 落ちたら
+
+job の summary（手元では出力。`--out-dir` を渡せば `report.md` にも）に、照らした `Cargo.lock`・受け入れ・osv-scanner の表（OSV の URL・
+crate・今の版・直した版 (Fixed Version)・どの `Cargo.lock` か (Source)）が出る。advisory ごとに、どちらかを PR にする。
+
+1. **直した版へ上げる** — その `Cargo.lock` のディレクトリで、直した版のうち公開から 7 日以上たったものへ
+   `cargo update -p <crate>@<今の版> --precise <直した版>` で上げる（公開日時は crates.io で見る。ほかの crate も動いたら、それも 7 日以上
+   たった版か見る）。build と試験を流し、`Cargo.lock` の差分を PR にする。依存の更新の skill（「脆弱性のある依存だけ急いで上げて」）に
+   任せてもよい
+
+   | `Cargo.lock` | cargo を打つ所 | 確かめる |
+   | --- | --- | --- |
+   | `win/runner` | そのディレクトリの `cargo`（`rust-toolchain.toml` の版） | `cargo test --locked`（C のリンカが無ければ `nix shell --inputs-from ../../nix nixpkgs#gcc --command cargo test --locked`）。Windows は CI の `win-runner` |
+   | `nix/pkgs/pjp-ghq-pull` | そのディレクトリで `nix develop ../..#pjp-ghq-pull --command cargo update …` | repo の root で `nix build --no-link -L './nix#checks.x86_64-linux.pjp-ghq-pull-test' './nix#checks.x86_64-linux.pjp-ghq-pull-lint'` |
+   | `nix/pkgs/claude-selector` | そのディレクトリで `nix develop ../..#claude-selector --command cargo update …` | repo の root で `nix build --no-link -L './nix#checks.x86_64-linux.claude-selector-test' './nix#checks.x86_64-linux.claude-selector-lint'`。Windows は CI の `win-runner` |
+
+2. **直せないなら受け入れる** — 直した版が無い（unmaintained など）・直した版が猶予の内側にしか無い・直すと semver の major をまたいで
+   手が要る、のどれかなら、その `Cargo.lock` と同じディレクトリの `osv-scanner.toml` に、理由と期限をつけて足して PR にする。受け入れるかは
+   人が決める（依存の更新の skill も自分の判断では足さない）
+
+```toml
+# <Cargo.lock のディレクトリ>/osv-scanner.toml (例。値は作り物)
+# ignoreUntil は今日 (UTC) から 90 日先まで。その日の 0 時 (UTC) から再び出て落ちる
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0000"
+ignoreUntil = 2027-01-31
+reason = "直した版が無い (unmaintained)。代わりの crate へ移すまで受け入れる"
+```
+
+- 書けるのは `[[IgnoredVulns]]` の表と、その中の `id`（引用符で囲んだ advisory の ID）・`ignoreUntil`（引用符の無い日付）・`reason`
+  （引用符で囲んだ、空白だけでない文字列）を 1 つずつと、`#` の行と空行だけ（行末のコメントも書かない）。osv-scanner は `reason` と
+  `ignoreUntil` が無くても読み（期限の無い受け入れになる）、読めない書き方のファイルは黙って捨てるので、script が osv-scanner に渡す前に
+  書き方を確かめ、外れていれば照らさずに 2 で止める（`PackageOverrides` などほかの表も止める）
+- osv-scanner は、照らす `Cargo.lock` と同じディレクトリの `osv-scanner.toml` だけを読む（`.osv-scanner.toml` も、ほかのディレクトリのものも
+  読まない）。ほかの場所に置いたもの・git が追っていないもの（手元の osv-scanner は読むが、CI の checkout には無い）も止める
+- 期限の日から、その advisory は再び出て落ちる。まだ直せないなら、理由と期限を書き直して PR にする。直したら項目を消す（項目が無くなれば
+  ファイルも消す）。期限を過ぎた項目は落とさずに知らせる（CI では `::warning`）
+- 依存の更新（`pjp-dep-update`）も同じ osv-scanner に lock を `-L` で渡すので、受け入れた advisory は定期の点検にも出ない
+
 ## 適用
 
 ### まとめて実行する
@@ -2233,7 +2300,8 @@ Windows のネイティブ（WSL と macOS は対象）。
 （`cargo fmt --check`・`cargo clippy --all-targets -- -D warnings`。Linux だけ）が流す。直すときの道具は
 `nix/pkgs/pjp-ghq-pull` の中で `nix develop ../..#pjp-ghq-pull`（cargo・rustc・clippy・rustfmt・git・ghq）。
 crate の版は公開から 7 日以上経ったものに限る（cargo には猶予の設定が無いので、`Cargo.lock` を作り直したら
-crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で下げる）。
+crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で下げる）。`Cargo.lock` の版に届け出の済んだ
+脆弱性が無いかは、CI の `cargo-lock-vulns` が PR と毎朝照らす（[前述](#cargolock-の既知の脆弱性-osv-scanner)）。
 
 ## ssh について
 
@@ -5808,6 +5876,10 @@ workflow `.github/workflows/winget-versions.yml` が週 1 回と PR で確かめ
 新しい版があるかは、別の workflow `.github/workflows/herdr-app-installers.yml` が週 1 回と PR で確かめる (`check-herdr-app-installers.sh`・
 `check-herdr-app-version.sh`。[`win/README.md`](../win/README.md#固定した版を上げる))。Linux の herdr-core の package の build
 (固定した sha256 で落とし、`hc --version` を版と照らす) は、`check` の `herdr-core-test` が見る ([前述](#herdr-core-hc-を-nix-で入れる))。
+
+git が追う `Cargo.lock` の既知の脆弱性は、別の workflow `.github/workflows/cargo-lock-vulns.yml` が、`Cargo.lock`・`Cargo.toml`・受け入れ・
+`nix/flake.lock` を変える PR と main への push、毎朝 6:17 (JST) の定期実行で確かめる (`check-cargo-lock-vulns.sh`。
+[前述](#cargolock-の既知の脆弱性-osv-scanner))。
 
 ## 検証
 

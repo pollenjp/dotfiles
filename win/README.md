@@ -520,6 +520,9 @@ gate が違うと、試験が落ちる
   依存も。cargo には猶予の設定が無いので、作り直したら crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で
   下げる)。C のコンパイラが要る crate と HTTP の crate は足さない。serde_json の `preserve_order` は足さない (foldhash を引き、`Map` の並びを crate
   全体で変える)
+- `Cargo.lock` (runner と claude-selector の) の版に届け出の済んだ脆弱性が無いかは、CI の `cargo-lock-vulns`
+  ([`.github/workflows/cargo-lock-vulns.yml`](../.github/workflows/cargo-lock-vulns.yml)) が PR と毎朝照らす。落ちたときの直し方 (直した版へ上げる・
+  理由と期限をつけて受け入れる) は [`nix/README.md`「Cargo.lock の既知の脆弱性 (osv-scanner)」](../nix/README.md#cargolock-の既知の脆弱性-osv-scanner)
 - `manifest.toml` の書き方の決まりを変えるときは、`nix/lib/windows-files.nix` と `runner/src/manifest.rs` の両方を直す (CI が突き合わせる)
 - settings.json の env に足す git の組と claude-notion.json の中身も、Linux の CI が `tests/claude_parity.rs` で、Linux の
   `nix/home/modules/claude.nix` が sandbox のホストに書く claude-env.json・claude-notion.json (`nix eval`) と突き合わせる

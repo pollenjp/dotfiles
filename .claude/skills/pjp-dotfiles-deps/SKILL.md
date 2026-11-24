@@ -23,9 +23,9 @@ dotfiles の依存の更新の、この repo 固有の手順と設定 (repo の�
   反映は merge の後にユーザーが打つ (「反映」)
 - 長い中身は `references/` に分けた: `closure-scan.md` (閉包スキャンの findings の切り分けと 2 択)・`windows-pins.md`
   (Windows に固定した版の問い・直す所・merge の後の揃え方)
-- 関連: `nix/README.md` の「依存 (flake.lock) の更新」「猶予の日数と例外」「閉包のスキャンと pin↔先端の差分」、`win/README.md` の
-  「固定した版より新しい版の知らせ」、ADR 005 (遅延)・006 (閉包スキャン)・032 (猶予の日数と例外)・055 (Windows の固定の知らせ)・
-  056 (この拡張)
+- 関連: `nix/README.md` の「依存 (flake.lock) の更新」「猶予の日数と例外」「閉包のスキャンと pin↔先端の差分」「Cargo.lock の既知の
+  脆弱性 (osv-scanner)」、`win/README.md` の「固定した版より新しい版の知らせ」、ADR 005 (遅延)・006 (閉包スキャン)・032 (猶予の日数と
+  例外)・055 (Windows の固定の知らせ)・056 (この拡張)・097 (Cargo.lock の脆弱性の CI)
 
 ## 範囲
 
@@ -73,6 +73,17 @@ flake.lock を上げる `update` (`deps.toml` の `flake_lock_age`) の最後に
   内側の新しい版は PR の本文に候補として並べる
 - 猶予より新しい版を黙って選ばない。どの版を入れるか (上げないかも) はユーザーが決めること
 
+### Cargo.lock の advisory の受け入れ
+
+git が追う `Cargo.lock` (win/runner・nix/pkgs/claude-selector・nix/pkgs/pjp-ghq-pull) は、CI の `cargo-lock-vulns` が依存の更新と同じ
+osv-scanner で照らし、受け入れていない advisory があれば重大度を問わず落ちる (要対応の線より広い)。受け入れはその `Cargo.lock` の隣の
+`osv-scanner.toml` の `[[IgnoredVulns]]` (id・ignoreUntil (90 日先まで)・reason。書き方は `nix/README.md` の「Cargo.lock の既知の
+脆弱性 (osv-scanner)」) で、依存の更新の osv-scanner も同じファイルを読む。
+
+- 直した版が猶予の内側にしか無い・無い・major をまたぐ advisory を、直さずに受け入れるか (期限と理由) は人が決める。会話では、
+  直した版と公開日・猶予が明ける日を並べて聞く。定期実行では聞かず、足さない (PR の本文とチケットに案を書く)
+- 受け入れを足す・延ばすときは、ほかと混ぜない人の判断の PR (`Dependency-Refresh` の trailer なし) にする。直したら同じ PR で項目を消す
+
 ## 上げ方
 
 | 対象 | すること |
@@ -94,7 +105,8 @@ flake.lock を上げる `update` (`deps.toml` の `flake_lock_age`) の最後に
   上げた PR の本文に書いて人に任せる
 - 閉包スキャンは、flake.lock を上げる `update` が挟むゲート。別には流さない (落ちたら「人が決めること」)
 - PR を出すと、CI の `nix` (lint・lock-age・閉包スキャン) と、`win/` を触った PR なら `winget-versions`・`herdr-app-installers`
-  (書いた版が winget にあるか・成果物の sha256) が走る。落ちたら直すか、直せなければ PR の本文に書く
+  (書いた版が winget にあるか・成果物の sha256)、`Cargo.lock`・`Cargo.toml`・`nix/flake.lock` を触った PR なら `cargo-lock-vulns`
+  (Cargo.lock の既知の脆弱性) が走る。落ちたら直すか、直せなければ PR の本文に書く
 
 ## 反映
 
