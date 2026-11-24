@@ -3522,7 +3522,7 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
 
 1. 前の task の中継を、op-reason の lock を取ってから止める (task を無効にし、0.7.0 の中継には stop event で止まるよう頼み、残っていれば
    `Stop-ScheduledTask`)。lock を取れなければ (窓が開いている) 何も変えずに止まる。前の task が一瞬だけ動いて見えても、答えている中継が
-   op-reason の task のものなら止めない (どの中継かは op-reason に聞く)
+   op-reason の task のものなら止めない (どの中継かは op-reason に聞く)。ほかで起こした中継が答えていれば、lock を取ってから前の task だけを止める
 2. 入れ替えが要れば入れ替え、lock を放して `set relay.autostart=on …` (op-reason が自分の task を作って中継を起こす)
 3. `set` が通ったら前の task を消す。通らなくても op-reason の task ができていれば消し (task を 2 つ残さない)、できていなければ前の task を
    有効に戻して中継を起こし直す (次の apply がまた移す)
@@ -3536,8 +3536,9 @@ switch は 2 つ。どちらも既定は off で、同じ PC で両方を on に
   (`op-reason.exe --settings get relay.running --json` の `ours`・`by`。0.6.0 の exe なら `--ssh-agent --status` と前の task の様子)
   - op-reason の task の中継: 入れ替える前に `op-reason.exe --settings relay stop` (op-reason が task を無効にし、lock を取って止める)、
     入れ替えた後に新しい exe で `set …` (モードのとき) か `relay start` (`-SshRelay` なし)。何も動いていなくても op-reason の task が有効
-    なら止めておく (1 分ごとの trigger が入れ替えの途中に古い exe を起こさないように)。`relay stop` で止めていた中継 (task が無効) は、
-    `-SshRelay` なしでは起こさない
+    なら止めておく (1 分ごとの trigger が入れ替えの途中に古い exe を起こさないように)。ただし、ほかで起こした中継が答えていれば `relay stop` を
+    打たない (持ち主の違う中継には、op-reason の task を無効にしてから断る)。`relay stop` で止めていた中継 (task が無効) は、`-SshRelay` なしでは
+    起こさない
   - 前の task の中継: lock を取ってから task を無効にして止め、入れ替えてから、移す (`-SshRelay` つき) か、有効に戻して起こし直す (なし)
 - lock を取れない・`relay stop` が断る (中継が窓を開いている・1Password の確認を待っている)・ほかの `op-reason.exe` (op の呼び出し・task の
   外で起こした中継) も動いているときは、今までどおり何も変えずに止まる。答えてから `dotfiles apply` を打ち直す

@@ -451,9 +451,10 @@ function Get-OpReasonRelayPlan {
 # Capable は入っている op-reason.exe が --settings を持つか。
 #   swap         止めるものが無い (入れるだけ・揃っている・何も動いておらず op-reason の task も有効でない)
 #   stop-legacy  動いている op-reason.exe が前の task の中継だけ。lock を取って前の task を無効にし、中継を止める
-#   stop-own     動いているのが op-reason の task の中継だけか、何も動いておらず op-reason の task が有効。op-reason.exe --settings relay stop
-#                (op-reason が task を無効にし、lock を取って中継を止める)。何も動いていなくても止めておく (1 分ごとの trigger が入れ替えの
-#                途中に古い exe を起こさないよう)
+#   stop-own     動いているのが op-reason の task の中継だけか、何も動いておらず op-reason の task が有効 (答えている中継が無いか、
+#                op-reason の task のもの)。op-reason.exe --settings relay stop (op-reason が task を無効にし、lock を取って中継を止める)。
+#                何も動いていなくても止めておく (1 分ごとの trigger が入れ替えの途中に古い exe を起こさないよう)。ほかで起こした中継が
+#                答えていれば打たない (relay stop は持ち主の違う中継には op-reason の task を無効にしてから 1 で終わる)
 #   busy         ほかの op-reason.exe (op の呼び出し) も動いている・中継の持ち主がほか (task の外で起こした) か分からない・止める手が
 #                無い。止めずに知らせる
 function Get-OpReasonSwapAction {
@@ -467,7 +468,7 @@ function Get-OpReasonSwapAction {
         if (($Owner -eq 'own') -and $Capable) { return 'stop-own' }
         return 'busy'
     }
-    if ($OwnActive -and $Capable) { return 'stop-own' }
+    if ($OwnActive -and $Capable -and ($Owner -in 'own', 'none')) { return 'stop-own' }
     'swap'
 }
 
@@ -774,6 +775,13 @@ function Request-OpReasonRelayStop {
     $true
 }
 
+# 前の task がまだ動いていれば止める (読み直して Running のときだけ Stop-ScheduledTask を打つ。終わった task には打たない)
+function Stop-OpReasonLegacyTaskIfRunning {
+    $id = Get-OpReasonLegacyTaskId
+    $t = Get-OpReasonTask -Path $id.Path -Name $id.Name
+    if ($t -and ($t.State -eq 'Running')) { Stop-OpReasonLegacyTask }
+}
+
 # 前の task の中継を止める (lock を持っている前提)。task を無効にしてから (1 分ごとの trigger に起こさせない)、0.7.0 からの中継には
 # 止まるよう頼んで 30 秒待ち (op-reason が自分の中継を止めるのと同じ)、残っていれば task ごと止め、プロセスが終わるのを 10 秒待つ。
 # 終われば $true。終わらなければ task を有効に戻して $false
@@ -783,7 +791,7 @@ function Stop-OpReasonLegacyRelay {
     if ($RelayPid -and (Request-OpReasonRelayStop -RelayPid $RelayPid)) {
         [void](Wait-OpReasonProcessExit -Id $RelayPid -Seconds 30)
     }
-    Stop-OpReasonLegacyTask
+    Stop-OpReasonLegacyTaskIfRunning
     if ($RelayPid -and -not (Wait-OpReasonProcessExit -Id $RelayPid -Seconds 10)) {
         Set-OpReasonLegacyTaskEnabled -Enabled $true
         return $false
@@ -917,31 +925,48 @@ function Get-OpReasonRelayOwnerNow {
     [pscustomobject]@{ Owner = $owner; Pid = $relayId }
 }
 
-# 移すために、前の task を無効にして中継を止める (消すのは呼ぶ側。モードなら op-reason の set が通った後)。前の task が答えて
-# いる中継の持ち主 (か、持ち主を読めない) なら lock を取って止め、ほかの中継 (op-reason の task のもの) なら止めない (前の task の
-# 1 分ごとの起動が一瞬だけ Running に見えているだけ)。止めた・無効にしたら $true ($Ctx.LegacyStopped)。lock を取れなければ、
-# 無効にする前に戻して $false
+# 動いている前の task を止める (持ち主は Get-OpReasonRelayOwnerNow の値)。legacy (前の task の中継)・unknown (持ち主を読めない) は、
+# lock を取って中継を止める (unknown の PID は --status。0.7.0 の中継なら stop event で止める)。own (答えている中継は op-reason の
+# task のもの) なら、前の task の 1 分ごとの起動が一瞬だけ Running に見えているだけなので、lock を取らずに task を止める。other・
+# none は、op-reason が持ち主を見落としても窓を開いている中継を止めないよう、lock を取ってから task だけを止める。止めたら $true
+function Stop-OpReasonLegacyInstance {
+    param($Ctx, [string]$Exe, $Owner)
+    if ($Owner.Owner -in 'legacy', 'unknown') {
+        $relayId = if ($Owner.Pid) { $Owner.Pid } else { Get-OpReasonRelayPid -Exe $Exe }
+        return (Stop-OpReasonLegacyRelayLocked -Ctx $Ctx -RelayPid $relayId)
+    }
+    if ($Owner.Owner -ne 'own') {
+        if (-not $Ctx.Lock) { $Ctx.Lock = Enter-OpReasonLock }
+        if (-not $Ctx.Lock) {
+            Write-Host 'SSH の中継が窓を開いている (か、1Password の確認を待っている) ので、前の task を止めない。窓に答えてから打ち直す (このスクリプトは止めない)'
+            return $false
+        }
+    }
+    Set-OpReasonLegacyTaskEnabled -Enabled $false
+    Stop-OpReasonLegacyTaskIfRunning
+    $true
+}
+
+# 移すために、前の task を無効にして中継を止める (消すのは呼ぶ側。モードなら op-reason の set が通った後)。動いていなければ先に
+# 無効にし、その間に 1 分ごとの trigger が起こしていれば止める。動いていれば、答えている中継の持ち主ごとに止める
+# (Stop-OpReasonLegacyInstance)。止めた・無効にしたら $true ($Ctx.LegacyStopped)。止められなければ、無効にする前に戻して $false
 function Stop-OpReasonLegacyForMove {
     param($Ctx, [string]$Exe, [bool]$Capable)
     if ($Ctx.LegacyStopped) { return $true }
     $id = Get-OpReasonLegacyTaskId
     $t = Get-OpReasonTask -Path $id.Path -Name $id.Name
     if (-not $t) { return $true }
-    $wasEnabled = [bool]$t.Enabled
-    if ($t.State -eq 'Running') {
-        $o = Get-OpReasonRelayOwnerNow -Exe $Exe -Capable $Capable -LegacyRunning $true
-        if ($o.Owner -in 'legacy', 'unknown') {
-            return (Stop-OpReasonLegacyRelayLocked -Ctx $Ctx -RelayPid $o.Pid)
-        }
+    # ここで無効にしたか (止められなければ有効に戻す。止める関数は、止めかけて落ちたときに自分で戻す)
+    $disabledHere = $false
+    if ($t.State -ne 'Running') {
+        $disabledHere = [bool]$t.Enabled
+        Set-OpReasonLegacyTaskEnabled -Enabled $false
+        $t = Get-OpReasonTask -Path $id.Path -Name $id.Name
     }
-    Set-OpReasonLegacyTaskEnabled -Enabled $false
-    if ($t.State -eq 'Running') { Stop-OpReasonLegacyTask }
-    # 無効にする前に 1 分ごとの trigger が中継を起こしていたら、lock を取って止める
-    $t = Get-OpReasonTask -Path $id.Path -Name $id.Name
     if ($t -and ($t.State -eq 'Running')) {
         $o = Get-OpReasonRelayOwnerNow -Exe $Exe -Capable $Capable -LegacyRunning $true
-        if (($o.Owner -in 'legacy', 'unknown') -and -not (Stop-OpReasonLegacyRelayLocked -Ctx $Ctx -RelayPid $o.Pid)) {
-            if ($wasEnabled) { Set-OpReasonLegacyTaskEnabled -Enabled $true }
+        if (-not (Stop-OpReasonLegacyInstance -Ctx $Ctx -Exe $Exe -Owner $o)) {
+            if ($disabledHere) { Set-OpReasonLegacyTaskEnabled -Enabled $true }
             return $false
         }
     }
@@ -1109,7 +1134,7 @@ function Invoke-InstallOpReason {
         $legacyRunning = [bool]($relay.Legacy -and ($relay.Legacy.State -eq 'Running'))
         $ownActive = [bool]($relay.Own -and ($relay.Own.Enabled -or ($relay.Own.State -eq 'Running')))
         $owner = 'none'
-        if (($busyIds.Count -gt 0) -and ($relay.Own -or $relay.Legacy)) {
+        if ((($busyIds.Count -gt 0) -and ($relay.Own -or $relay.Legacy)) -or ($ownActive -and $relay.Capable)) {
             $o = Get-OpReasonRelayOwnerNow -Exe $exe -Capable $relay.Capable -LegacyRunning $legacyRunning
             $owner = $o.Owner
             $relayPid = $o.Pid

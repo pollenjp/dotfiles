@@ -334,8 +334,13 @@ Test-Case '入れ替えで何も動いておらず、op-reason の task も有�
 }
 Test-Case '動いているのが前の task の中継だけなら stop-legacy' 'stop-legacy' { Get-OpReasonSwapAction -Plan 'change' -Busy @(4242) -RelayPid 4242 -Owner 'legacy' -Capable $false }
 Test-Case '動いているのが op-reason の task の中継だけなら stop-own' 'stop-own' { Get-OpReasonSwapAction -Plan 'change' -Busy @(4242) -RelayPid 4242 -Owner 'own' -OwnActive $true -Capable $true }
-Test-Case '何も動いていなくても op-reason の task が有効なら stop-own (1 分ごとの trigger に古い exe を起こさせない)' 'stop-own' {
-    Get-OpReasonSwapAction -Plan 'change' -Busy @() -Owner 'none' -OwnActive $true -Capable $true
+Test-Case '何も動いていなくても op-reason の task が有効なら stop-own (1 分ごとの trigger に古い exe を起こさせない)' 'stop-own stop-own' {
+    (Get-OpReasonSwapAction -Plan 'change' -Busy @() -Owner 'none' -OwnActive $true -Capable $true),
+    (Get-OpReasonSwapAction -Plan 'change' -Busy @() -Owner 'own' -OwnActive $true -Capable $true)
+}
+Test-Case '何も動いていなくても、ほかで起こした中継・持ち主の分からない中継が答えていれば relay stop を打たない (swap)' 'swap swap' {
+    (Get-OpReasonSwapAction -Plan 'change' -Busy @() -Owner 'other' -OwnActive $true -Capable $true),
+    (Get-OpReasonSwapAction -Plan 'change' -Busy @() -Owner 'unknown' -OwnActive $true -Capable $true)
 }
 Test-Case 'ほかの op-reason.exe (op の呼び出し) も動いていれば busy' 'busy busy' {
     (Get-OpReasonSwapAction -Plan 'change' -Busy @(4242, 77) -RelayPid 4242 -Owner 'own' -OwnActive $true -Capable $true),
@@ -583,6 +588,8 @@ function Get-OpReasonTask {
 }
 function Stop-FakeRelay {
     $script:Busy = @($script:Busy | Where-Object { $_.Id -ne $script:RelayPid })
+    if (($script:RelayOwner -eq 'legacy') -and $script:Legacy) { $script:Legacy.State = $(if ($script:Legacy.Enabled) { 'Ready' } else { 'Disabled' }) }
+    if (($script:RelayOwner -eq 'own') -and $script:Own) { $script:Own.State = $(if ($script:Own.Enabled) { 'Ready' } else { 'Disabled' }) }
     $script:RelayPid = $null
     $script:RelayOwner = $null
 }
@@ -774,14 +781,15 @@ function Invoke-OpReasonSettings {
 #   -SshRelay: スクリプトに渡す値 (per-call・show-only・off。'' なら渡さない)。-Legacy・-Own: 前の task・op-reason の task (running は
 #   その task の中継が答えていて、入っていればそのプロセスも動いている op-reason.exe に数える。ready は止まっている・disabled は無効。
 #   '' なら無い。両方 running なら答えている中継は op-reason の task のもの)。-FileMode・-RelayMode: settings.json の relay.mode と、
-#   op-reason の task の中継が動いているモード。-RelayElsewhere: 中継のプロセスを置き場所のものに数えない。-NotDefault: 置き場所を
+#   op-reason の task の中継が動いているモード。-Terminal: task の外で起こした中継が答えている (両方の task の中継より後に決める)。
+#   -RelayElsewhere: 中継のプロセスを置き場所のものに数えない。-NotDefault: 置き場所を
 #   既定でないものにする。-LockHeld・-NoAnswer・-StopHangs・-CheckFails・-Blocked・-RegisterFails・-Drains は上の偽物の説明
 function Invoke-Flow {
     param(
         [string]$Have = '', [byte[]]$Serve = $FixV.Bytes, [int]$Busy = 0, [string]$DownloadError = '',
         [string]$Version = $V, [switch]$Check, [switch]$ServeNothing, [switch]$NoParent, [switch]$Stale, [switch]$Fresh,
         [string]$SshRelay = '', [string]$Legacy = '', [string]$Own = '', [string]$FileMode = '', [string]$RelayMode = '',
-        [switch]$RelayElsewhere, [switch]$NotDefault, [switch]$LockHeld, [switch]$NoAnswer, [switch]$StopHangs, [switch]$CheckFails,
+        [switch]$Terminal, [switch]$RelayElsewhere, [switch]$NotDefault, [switch]$LockHeld, [switch]$NoAnswer, [switch]$StopHangs, [switch]$CheckFails,
         [switch]$Blocked, [switch]$RegisterFails, [switch]$Drains
     )
     Remove-Item -LiteralPath $FlowParent -Recurse -Force -ErrorAction SilentlyContinue
@@ -828,6 +836,10 @@ function Invoke-Flow {
             $script:RelayOwner = 'own'
             $script:RelayMode = $(if ($RelayMode) { $RelayMode } elseif ($FileMode) { $FileMode } else { 'per-call' })
         }
+    }
+    if ($Terminal) {
+        $script:RelayPid = $RelayOldPid
+        $script:RelayOwner = 'other'
     }
     # 置き場所から動いている中継は、入れ替えの邪魔になる op-reason.exe でもある
     if ($script:RelayPid -and $from -and -not $RelayElsewhere) { $script:Busy = @([pscustomobject]@{ Id = $RelayOldPid; Path = $FlowExe }) + @($script:Busy) }
@@ -1055,11 +1067,20 @@ Test-Case 'set が落ちたら、op-reason の行とわけを見せる' $true {
 Test-Case '版が揃っていて前の task が動いていれば、check の後に持ち主を読み、lock を取って止めて移す' "0 Check@0.7.0 Get@0.7.0 $StopLegacy Unlock Set@0.7.0 LegacyUnregister Check@0.7.0" {
     $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy running -Version '0.7.0'; "$($r.Code) $($r.Calls)"
 }
-Test-Case '0.7.0 の中継を前の task で動かしていれば、stop event で止まるのを待ってから task を止める' "0 Check@0.7.0 Get@0.7.0 Lock LegacyEnabled False Drain $RelayOldPid WaitExit $RelayOldPid LegacyStop WaitExit $RelayOldPid Unlock Set@0.7.0 LegacyUnregister Check@0.7.0" {
+Test-Case '0.7.0 の中継を前の task で動かしていれば、stop event で止まるのを待つ (止まれば終わった task に Stop-ScheduledTask を打たない)' "0 Check@0.7.0 Get@0.7.0 Lock LegacyEnabled False Drain $RelayOldPid WaitExit $RelayOldPid WaitExit $RelayOldPid Unlock Set@0.7.0 LegacyUnregister Check@0.7.0" {
     $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy running -Drains -Version '0.7.0'; "$($r.Code) $($r.Calls)"
 }
 Test-Case '前の task が一瞬 Running に見えても、答えている中継が op-reason の task のものなら止めない (lock も取らない)' "0 Check@0.7.0 Get@0.7.0 LegacyEnabled False LegacyStop Set@0.7.0 LegacyUnregister Check@0.7.0 / $RelayOldPid/own" {
     $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy running -Own running -Version '0.7.0'; "$($r.Code) $($r.Calls) / $($r.RelayAfter)"
+}
+Test-Case '前の task が動いていても、答えている中継がほかで起こしたものなら、lock を取ってから前の task だけを止める' "0 Check@0.7.0 Get@0.7.0 Lock LegacyEnabled False LegacyStop Unlock Set@0.7.0 LegacyUnregister Check@0.7.0 / $RelayOldPid/other Ready/False" {
+    $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy running -Terminal -RelayElsewhere -Version '0.7.0'; "$($r.Code) $($r.Calls) / $($r.RelayAfter) $($r.OwnAfter)"
+}
+Test-Case '前の task が動いていて、ほかで起こした中継が答えていても、窓が開いていれば (lock を取れない) 何も変えずに 1' "1 Check@0.7.0 Get@0.7.0 Lock / Running/True none" {
+    $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy running -Terminal -RelayElsewhere -LockHeld -Version '0.7.0'; "$($r.Code) $($r.Calls) / $($r.LegacyAfter) $($r.OwnAfter)"
+}
+Test-Case 'off で前の task の 0.7.0 の中継は、stop event で止まるのを待ってから消す' "0 Get@0.7.0 Lock LegacyEnabled False Drain $RelayOldPid WaitExit $RelayOldPid WaitExit $RelayOldPid LegacyUnregister Unlock none" {
+    $r = Invoke-Flow -Have R7 -SshRelay off -Legacy running -Drains -Version '0.7.0'; "$($r.Code) $($r.Calls) $($r.LegacyAfter)"
 }
 Test-Case '前の task が止まっていれば、無効にしてから消す (lock を取らない)' "0 Check@0.7.0 LegacyEnabled False Set@0.7.0 LegacyUnregister Check@0.7.0" {
     $r = Invoke-Flow -Have R7 -SshRelay per-call -Legacy ready -Version '0.7.0'; "$($r.Code) $($r.Calls)"
@@ -1089,8 +1110,14 @@ Test-Case '版上げで動いているのが op-reason の task の中継だけ�
 Test-Case '版上げで op-reason の task の中継が窓を開いていれば (relay stop が 1)、入れ替えず 1' "1 Get@0.7.0 Download Stop@0.7.0 / $exe7 Running/True []" {
     $r = Invoke-Flow -Have R7 -Version '0.8.0' -Serve $S8 -SshRelay per-call -Own running -LockHeld; "$($r.Code) $($r.Calls) / $($r.Exe) $($r.OwnAfter) [$($r.Leftover)]"
 }
-Test-Case '版上げで何も動いていなくても op-reason の task が有効なら、relay stop で止めてから入れ替える' "0 Download Stop@0.7.0 Set@0.8.0 Check@0.8.0" {
+Test-Case '版上げで何も動いていなくても op-reason の task が有効なら、持ち主を読み、relay stop で止めてから入れ替える' "0 Get@0.7.0 Download Stop@0.7.0 Set@0.8.0 Check@0.8.0" {
     $r = Invoke-Flow -Have R7 -Version '0.8.0' -Serve $S8 -SshRelay per-call -Own ready; "$($r.Code) $($r.Calls)"
+}
+Test-Case '版上げで置き場所に何も動いておらず、ほかで起こした中継が答えていれば、relay stop を打たずに入れ替える (op-reason の task を無効にしない)' "0 Get@0.7.0 Download Set@0.8.0 Check@0.8.0 / Ready/True $RelayOldPid/other" {
+    $r = Invoke-Flow -Have R7 -Version '0.8.0' -Serve $S8 -SshRelay per-call -Own ready -Terminal -RelayElsewhere; "$($r.Code) $($r.Calls) / $($r.OwnAfter) $($r.RelayAfter)"
+}
+Test-Case '引数なしの版上げでも、ほかで起こした中継が答えていれば relay stop を打たない' "0 Get@0.7.0 Download / Ready/True" {
+    $r = Invoke-Flow -Have R7 -Version '0.8.0' -Serve $S8 -Own ready -Terminal -RelayElsewhere; "$($r.Code) $($r.Calls) / $($r.OwnAfter)"
 }
 Test-Case '引数なしの版上げは、relay stop・入れ替え・新しい exe で relay start (task は作り直さない)' "0 Get@0.7.0 Download Stop@0.7.0 Start@0.8.0 / Running/True" {
     $r = Invoke-Flow -Have R7 -Version '0.8.0' -Serve $S8 -Own running; "$($r.Code) $($r.Calls) / $($r.OwnAfter)"
