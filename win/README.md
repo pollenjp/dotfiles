@@ -4034,7 +4034,7 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
 
 `claude-desktop/Install-ClaudeDesktop.ps1` は、Claude Desktop (Claude のデスクトップ版。Cowork (VM の中で動くエージェント) も使う) を winget の
 `Anthropic.Claude` の MSIX で入れる。版は `-Version` の既定値 (今は `5.11492.5`) の 1 か所で固定する。固定した版は新しく入れるときの版で、入れた後の
-更新は Claude Desktop の自動更新 (約 4 時間ごと) に任せる (dotfiles-private の ADR 098 (`docs/adr/098_win_claude_desktop_msix_*`))。
+更新は Claude Desktop の自動更新 (約 4 時間ごと) に任せる (dotfiles-private の ADR 099 (`docs/adr/099_win_claude_desktop_msix_*`))。
 
 - 入れるのは Windows の runner だけ (手順 `claude-desktop`。WSL の setup には無い)。既定は設定グループ personal だけ on で、入れるときに UAC の確認が
   出る手順なので、company・client では既定で入れない。company・client で入れるホストは、dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`)

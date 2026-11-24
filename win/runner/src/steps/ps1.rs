@@ -644,7 +644,7 @@ pub const SPECS: &[Ps1Spec] = &[
     // Claude Desktop (Windows にしか無い手順。WSL の setup には無い)。winget の Anthropic.Claude の MSIX を、昇格した Windows PowerShell の winget で
     // 入れる (Cowork の常駐 CoworkVMService は管理者の権限で入れたときだけ登録される。UAC の確認が 1 回出る)。版の扱いは T3 Code と同じ
     // (入っていないときだけ入れ、自動更新で上がった版は下げない)。旧来の exe の Claude が残っていれば、入れずに外し方を (ps1 は入っていなくても
-    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/098_win_claude_desktop_msix_*)
+    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/099_win_claude_desktop_msix_*)
     Ps1Spec {
         id: "claude-desktop",
         windows_only: true,
