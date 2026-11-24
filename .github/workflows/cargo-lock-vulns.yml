@@ -1,0 +1,79 @@
+name: cargo-lock-vulns
+
+# git が追う Cargo.lock (今は win/runner・nix/pkgs/claude-selector・nix/pkgs/pjp-ghq-pull) を、osv-scanner で OSV (RustSec・GHSA を
+# 含む) の既知の脆弱性と照らす (nix/scripts/check-cargo-lock-vulns.sh。dotfiles-private の docs/adr/097_cargo_lock_osv_scan_*)。
+# dotfiles が build する Rust の道具は、どれも Cargo.lock に書いた版で作る (Windows の cargo の --locked・Linux の Nix の
+# cargoLock.lockFile) ので、lock を照らせば入るものを照らせる。Cargo.lock を足しても、ここも script も直さずに拾う。
+#
+# - PR と main への push: Cargo.lock・Cargo.toml・受け入れ (Cargo.lock の隣の osv-scanner.toml)・スキャナの版 (nix/flake.lock) を
+#   変えたときに流し、既知の脆弱性のある版を入れる PR を赤くする
+# - 毎朝の定期実行: advisory は lock より後から出るので、lock が変わらない間も照らし続ける (月 1 回の依存の更新 pjp-dep-update
+#   より早く気づく)。落ちた定期実行の通知は、closure-scan (nix.yml) と同じく GitHub から届く
+# - 手で流す (workflow_dispatch)
+#
+# 受け入れていない advisory があれば落ちる (重大度を問わない。CVSS の無い RustSec の unsound・unmaintained も)。直し方 (直した版へ
+# 上げる・理由と期限をつけて受け入れる) は nix/README.md の「Cargo.lock の既知の脆弱性 (osv-scanner)」。
+#
+# osv-scanner は repo の flake (nix/) が固定している nixpkgs のものを借りる (スキャナの版も flake.lock の遅延に従う)。依存の更新も
+# 同じ osv-scanner で lockfile を照らすので、同じ DB と同じ受け入れになる。
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - "**/osv-scanner.toml"
+      - "nix/flake.lock"
+      - "nix/scripts/check-cargo-lock-vulns.sh"
+      - ".github/workflows/cargo-lock-vulns.yml"
+  pull_request:
+    paths:
+      - "**/Cargo.lock"
+      - "**/Cargo.toml"
+      - "**/osv-scanner.toml"
+      - "nix/flake.lock"
+      - "nix/scripts/check-cargo-lock-vulns.sh"
+      - ".github/workflows/cargo-lock-vulns.yml"
+  # 毎朝 JST 6:17。毎時 0 分は混んで遅れたり飛ばされたりするのでずらす (closure-scan は 6:00)
+  schedule:
+    - cron: "17 21 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # event_name を含めるのは schedule と push が同じ ref (main) を共有するため。無いと定期実行と push の実行が互いを取り消す
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Cargo.lock の既知の脆弱性 (osv-scanner)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # osv-scanner を repo の flake が固定している nixpkgs から借りる
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+
+      - name: 照らす
+        run: nix shell --inputs-from ./nix nixpkgs#osv-scanner --command ./nix/scripts/check-cargo-lock-vulns.sh --out-dir ./cargo-lock-vulns-out
+
+      # 落ちた実行でも、何が出たかを summary で読めるようにする (::error の行は実行の画面の先頭に出る)。report.md は script が書く
+      # 照らした Cargo.lock・受け入れ・osv-scanner の表 (受け入れの書き損じで止めたなら、その一覧)
+      - name: レポートを summary へ
+        if: always()
+        run: |
+          {
+            echo "## Cargo.lock の既知の脆弱性 (osv-scanner)"
+            echo
+            cat ./cargo-lock-vulns-out/report.md 2>/dev/null \
+              || echo "(report.md なし: 照らす前に失敗。「照らす」のログを見る)"
+            echo
+            echo "手順: [nix/README.md の「Cargo.lock の既知の脆弱性 (osv-scanner)」](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/blob/${GITHUB_SHA}/nix/README.md#cargolock-の既知の脆弱性-osv-scanner)"
+          } >>"$GITHUB_STEP_SUMMARY"
