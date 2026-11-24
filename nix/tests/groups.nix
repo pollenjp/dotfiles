@@ -17,6 +17,8 @@
 #     手順なので、company・client では既定で走らせない)
 #   - opReasonSshRelay (op-reason の SSH の中継。Windows の runner と WSL の option が同じ名前で引く) は表にあり、どのグループでも
 #     既定で off (鍵を使う ssh の通り道を替えるので、入れるホストが書く)
+#   - windowsTypeClipboard (Windows の type-clipboard。自作のアプリで、個人の GitHub の repo の Release から入れる) は ③ の道具で、
+#     既定は段によらず (derived = false)、どのグループでも off (入れるホストが書く)
 #   - 依存の assertion: client で devTracker.enable = true だけを書くと評価で止まり、claude.privateSkills.enable と
 #     claude.enable も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る
 #   - 知らないグループ ("customer") は評価で止まる
@@ -201,6 +203,21 @@ let
         company
         client
       ];
+    }
+    {
+      name = "windowsTypeClipboard は ③ の道具で、既定は段によらず、どのグループでも off (入れるホストが書く)";
+      ok =
+        let
+          t = builtins.head (builtins.filter (t: t.key == "windowsTypeClipboard") groups.tools);
+        in
+        t.tiers == [ "personalAccounts" ]
+        && !t.derived
+        && builtins.all (cfg: !(json cfg).tools.windowsTypeClipboard) [
+          unset
+          personal
+          company
+          client
+        ];
     }
     {
       name = "client で devTracker.enable = true だけを書くと評価で止まる";

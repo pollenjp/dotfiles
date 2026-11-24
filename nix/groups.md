@@ -8,7 +8,7 @@
 
 ## グループ
 
-| グループ | 使う PC と何を入れるか | ① エンジニアの道具 | ② AI の道具 | ③ 個人のアカウント |
+| グループ | 使う PC と何を入れるか | ① エンジニアの道具 | ② AI の道具 | ③ 個人の道具 |
 | --- | --- | --- | --- | --- |
 | `personal` | 個人の開発用の PC。① ② ③ を全部入れる (グループを選ばないホストもこれ) | on | on | on |
 | `company` | 自社の PC。① と ② を入れ、③ は要るものだけをホストで足す | on | on | off |
@@ -22,7 +22,6 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | ① | WSL の手当て | `wsl.enable` | off | off | off |  |
 | ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | off | off | off |  |
-| ① | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | off | off |  |
 | ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | off | off |  |
 | ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | on | on |  |
@@ -47,6 +46,7 @@
 | ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | off | off | `wsl.windowsFiles.enable` |
 | ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | off | off | `wsl.windowsFiles.enable` |
+| ③ | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | off | off | `wsl.windowsFiles.enable` |
 | ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | off | off |  |
 
 ## 作り物のホストの値
@@ -63,10 +63,9 @@
 | グループ | **`personal`** | **`company`** | **`client`** | **`client`** |
 | ① エンジニアの道具 | on | on | on | on |
 | ② AI の道具 | on | on | off | off |
-| ③ 個人のアカウント | on | off | off | off |
+| ③ 個人の道具 | on | off | off | off |
 | ① WSL の手当て | **on** | **on** | **on** | **on** |
 | ① Windows のアプリと設定 (win/) | **on** | **on** | **on** | **on** |
-| ① Windows の type-clipboard | off | off | off | off |
 | ① .exe の起動の記録 (WSL) | off | off | off | off |
 | ① eth0 の MTU の見張り (WSL) | off | off | off | off |
 | ① 証明書の束を OS の信頼ストアに寄せる | on | on | on | on |
@@ -91,4 +90,5 @@
 | ③ Windows の ntn | on | off | off | off |
 | ③ Windows の Tailscale | off | off | off | off |
 | ③ Windows の sshd (Tailscale から鍵で入る) | off | off | off | off |
+| ③ Windows の type-clipboard | off | off | off | off |
 | ③ git の名前とメール (pollenjp・pollenjp-sub) | on | off | off | off |

@@ -199,7 +199,7 @@ fi
 
 # 5. 対象ホストが決まっていれば、実行の頭にグループを 1 行出す (1 回だけ)。nix eval が落ちれば黙って進む
 c=$(new_case group-line "${all_on}")
-FAKE_GROUP_LINE='client (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 off · ③ 個人のアカウント off' \
+FAKE_GROUP_LINE='client (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 off · ③ 個人の道具 off' \
   run "${c}" --host testhost --steps bootstrap-plain
 lines=$(grep -c '^  グループ: client (ホストで選んだ)' "${c}/out" || true)
 evals=$(grep -c '^eval --raw --no-write-lock-file .*homeConfigurations\."testhost"' "${c}/home/nix-calls" 2>/dev/null || true)
@@ -217,13 +217,13 @@ fi
 
 # 6. switch の頭でもう一度評価し、同じ行なら出さない (1 回だけ)。変わっていれば「前に出したものから変わった」と出し直す
 c=$(new_case group-switch "${all_on}")
-FAKE_GROUP_LINE='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント off' \
+FAKE_GROUP_LINE='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 off' \
   run "${c}" --host testhost --steps switch
 same_lines=$(grep -c 'グループ' "${c}/out" || true)
 same_evals=$(grep -c -- '--apply hc:' "${c}/home/nix-calls" 2>/dev/null || true)
 c2=$(new_case group-switch-changed "${all_on}")
-FAKE_GROUP_LINE='personal (選んでいない。既定) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント on' \
-  FAKE_GROUP_LINE2='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人のアカウント off' \
+FAKE_GROUP_LINE='personal (選んでいない。既定) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 on' \
+  FAKE_GROUP_LINE2='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 off' \
   run "${c2}" --host testhost --steps switch
 if [[ $(rc "${c}") == 0 && ${same_lines} == 1 && ${same_evals} == 2 && $(rc "${c2}") == 0 ]] \
   && grep -Fq '  グループ: personal (選んでいない。既定)' "${c2}/out" \

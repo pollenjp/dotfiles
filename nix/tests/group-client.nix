@@ -1,5 +1,5 @@
-# 客先のグループの作り物のホスト (lib/group-examples.nix の client と client-claude) に、② AI の道具と ③ 個人のアカウントに
-# つながるものが入らないことを、評価時に確かめる (dotfiles-private の docs/adr/057_host_setting_groups_*)。
+# 客先のグループの作り物のホスト (lib/group-examples.nix の client と client-claude) に、② AI の道具と ③ 個人の道具が
+# 入らないことを、評価時に確かめる (dotfiles-private の docs/adr/057_host_setting_groups_*)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。flake.nix の checks (group-client-state。x86_64-linux) から呼ぶ。
 # client の build は別の check (home-group-client-example) が見る。

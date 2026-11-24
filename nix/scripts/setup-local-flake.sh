@@ -325,7 +325,7 @@ group_example_block() {
   cat <<'EOB'
         #
         #   # 設定グループ (本体の nix/README.md「設定グループ」と nix/groups.md)。書かなければ "personal" (個人の PC。
-        #   # ① エンジニアの道具・② AI の道具・③ 個人のアカウントにつながるものの段を全部入れる)。ほかは:
+        #   # ① エンジニアの道具・② AI の道具・③ 個人の道具の段を全部入れる)。ほかは:
         #   #   "company"  自社の PC。① と ② を入れ、③ (1Password・ntn・private な repo・git の名前とメール) は要るものを
         #   #              下で 1 つずつ足す
         #   #   "client"   客先の PC。① だけを入れ、許可の出た道具を下で 1 つずつ足す (claude.enable = true; など)。git の

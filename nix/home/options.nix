@@ -4,7 +4,7 @@
 #
 #   dotfiles.group                               設定グループ (personal・company・client。既定 personal)。段の switch の既定を決める
 #   dotfiles.aiTools.enable                      ② AI の道具の段を入れるか (既定はグループから。personal・company は true)
-#   dotfiles.personalAccounts.enable             ③ 個人のアカウントにつながるものの段を入れるか (既定はグループから。personal だけ true)
+#   dotfiles.personalAccounts.enable             ③ 個人の道具の段を入れるか (既定はグループから。personal だけ true)
 #   dotfiles.onePassword.enable                  1Password を使うか (WSL ならホスト側 Windows の、それ以外はこのマシンの)
 #   dotfiles.opReason.sshRelay.enable            op-reason の SSH の中継を WSL の側で使うか (WSL の ssh を op-reason-ssh に向ける。Windows の側は runner のホストの値。既定 false)
 #   dotfiles.opReason.sshRelay.mode              その中継のモード (per-call・show-only。既定 per-call)
@@ -12,7 +12,7 @@
 #   dotfiles.wsl.enable                          WSL か
 #   dotfiles.wsl.windowsUserName                 ホスト側 Windows のユーザー名 (/mnt/c/Users/<名前>)
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
-#   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false)
+#   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定 false。どのグループでも)
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は ③)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は ② と ③。UAC の確認が出る)
@@ -95,7 +95,7 @@ in
       決まり、段の switch (`aiTools.enable`・`personalAccounts.enable`) の既定になる。段の switch は、その段の道具の switch
       (`claude.enable`・`ntn.enable` など) の既定になる。表は lib/groups.nix。
 
-      | グループ | ① エンジニアの道具 | ② AI の道具 | ③ 個人のアカウント |
+      | グループ | ① エンジニアの道具 | ② AI の道具 | ③ 個人の道具 |
       | --- | --- | --- | --- |
       | personal (個人の PC。既定) | on | on | on |
       | company (自社の PC) | on | on | off |
@@ -130,10 +130,10 @@ in
     defaultText = lib.literalExpression ''config.dotfiles.group == "personal"'';
     example = false;
     description = ''
-      ③ 個人のアカウントにつながるものの段を入れるか。既定はグループから決まる (personal だけ true)。この段の道具の switch
+      ③ 個人の道具 (個人のアカウントにつながるもの) の段を入れるか。既定はグループから決まる (personal だけ true)。この段の道具の switch
       (`ntn.enable`・`wsl.windowsFiles.ntn.enable`・`git.identity.enable`) の既定になる。② と ③ の両方に当たる道具
-      (`wsl.windowsFiles.claudeAccounts.enable` など) は `aiTools.enable` も true のときだけ既定で入る。`onePassword.enable`・`claude.devTracker.enable` は既定が false のまま
-      (段によらず、使うホストが入れる)。
+      (`wsl.windowsFiles.claudeAccounts.enable` など) は `aiTools.enable` も true のときだけ既定で入る。`onePassword.enable`・`claude.devTracker.enable`・
+      `wsl.windowsFiles.typeClipboard.enable` などは既定が false のまま (段によらず、使うホストが入れる)。
 
       自社の PC (company) は ③ を段ごと戻さず、要る道具を 1 つずつ足す (何に頼っているかがホストのファイルで分かるように)。
     '';
@@ -969,7 +969,8 @@ in
       description = ''
         Windows に type-clipboard (クリップボードの文字を選んだ窓へキー入力として打ち込む自作のアプリ。
         pollenjp/type-clipboard の GitHub の Release の exe) を入れるマシンか。`windowsFiles.enable = true` の
-        マシンでだけ使える (false のマシンで true にすると評価時に止まる)。
+        マシンでだけ使える (false のマシンで true にすると評価時に止まる)。どのグループでも既定は false (③ 個人の道具の段に
+        置くが、段からは決めない。入れるホストが true を書く)。
 
         switch は Windows 側に触らない。値は `~/.local/state/dotfiles/windows-files.json` の `typeClipboard` に
         落ち、`~/dotfiles/setup --update` で走る nix/scripts/bootstrap-windows-type-clipboard.sh が読む。

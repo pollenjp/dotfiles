@@ -5,7 +5,8 @@
 #
 #   ① エンジニアの道具              shell・git・ssh・vim・tmux・CLI・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ
 #   ② AI の道具                     Claude Code 一式・herdr・cursor-agent・Windows の Claude Code と herdr
-#   ③ 個人のアカウントにつながるもの  1Password・Notion (ntn・Dev Tracker)・private な repo の clone・個人の git の名前とメール
+#   ③ 個人の道具                    個人のアカウントにつながるもの。1Password・Notion (ntn・Dev Tracker)・private な repo の clone・
+#                                   個人の git の名前とメール・自作の type-clipboard (個人の GitHub の repo の Release)
 #
 # ② と ③ の両方に当たるもの (claude-skills の clone・cc-pages・~/h・Dev Tracker) は、両方が on のときだけ入る。
 #
@@ -77,7 +78,7 @@ let
     {
       name = "personalAccounts";
       mark = "③";
-      label = "個人のアカウント";
+      label = "個人の道具";
       option = [
         "personalAccounts"
         "enable"
@@ -134,7 +135,6 @@ let
   # Windows の runner が手順の gate で読む道具 (win/README.md の「ホストの値」の一覧と同じ)。ホストの要約は、dotfiles-private の
   # win/hosts/*.toml (Windows のホストの値) のページに、この道具だけを箱にして出す。runner に道具を足したら、ここにも足す
   runnerTools = [
-    "windowsTypeClipboard"
     "windowsClaudeCode"
     "windowsHerdr"
     "windowsT3Code"
@@ -147,6 +147,7 @@ let
     "windowsNtn"
     "windowsTailscale"
     "windowsSshd"
+    "windowsTypeClipboard"
     "gitIdentity"
   ];
 
@@ -159,13 +160,6 @@ let
     # ① エンジニアの道具 (段の switch は無い。既定は今のまま)
     (tool "wsl" "WSL の手当て" [ "wsl" "enable" ] [ ] { })
     (tool "windowsFiles" "Windows のアプリと設定 (win/)" [ "wsl" "windowsFiles" "enable" ] [ ] { })
-    (tool "windowsTypeClipboard" "Windows の type-clipboard"
-      [ "wsl" "windowsFiles" "typeClipboard" "enable" ]
-      [ ]
-      {
-        requires = [ windowsFiles ];
-      }
-    )
     (tool "exeExecTrace" ".exe の起動の記録 (WSL)" [ "wsl" "exeExecTrace" "enable" ] [ ] { })
     (tool "mtuGuard" "eth0 の MTU の見張り (WSL)" [ "wsl" "mtuGuard" "enable" ] [ ] { })
     (tool "osCaBundle" "証明書の束を OS の信頼ストアに寄せる" [ "osCaBundle" "enable" ] [ ] { })
@@ -240,7 +234,7 @@ let
       derived = false;
     })
 
-    # ③ 個人のアカウントにつながるもの
+    # ③ 個人の道具 (個人のアカウントにつながるもの)
     (tool "onePassword" "1Password" [ "onePassword" "enable" ] [ "personalAccounts" ] {
       derived = false;
     })
@@ -276,6 +270,16 @@ let
     # tailnet から鍵でだけ入れる sshd。PC に外から入る口を開けるので、personal でも既定で入れない (入れるホストが足す)
     (tool "windowsSshd" "Windows の sshd (Tailscale から鍵で入る)"
       [ "wsl" "windowsFiles" "sshd" "enable" ]
+      [ "personalAccounts" ]
+      {
+        derived = false;
+        requires = [ windowsFiles ];
+      }
+    )
+    # 自作のアプリ type-clipboard (個人の GitHub の repo の Release の exe)。使うマシンでだけ入れる道具で、personal でも既定で入れない
+    # (入れるホストが足す)
+    (tool "windowsTypeClipboard" "Windows の type-clipboard"
+      [ "wsl" "windowsFiles" "typeClipboard" "enable" ]
       [ "personalAccounts" ]
       {
         derived = false;

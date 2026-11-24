@@ -37,7 +37,7 @@ ignores = [
 ]
 
 # 個人のアカウントの名前とメール。書くのは dotfiles.git.identity.enable (Windows はホストの値の道具 gitIdentity) が true の
-# ホストだけ (既定は設定グループの ③ 個人のアカウント)。false のホスト (自社・客先) には名前もメールも書かない
+# ホストだけ (既定は設定グループの ③ 個人の道具)。false のホスト (自社・客先) には名前もメールも書かない
 [identity]
 name = "pollenjp"
 email = "polleninjp@gmail.com"

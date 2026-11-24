@@ -2541,7 +2541,7 @@ group_noted=""
 group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; onoff = b: if b then "on" else "off"; in
   d.group + (if o.group.highestPrio < 1500 then " (ホストで選んだ)" else " (選んでいない。既定)")
   + " · ① エンジニアの道具 on · ② AI の道具 " + onoff d.aiTools.enable
-  + " · ③ 個人のアカウント " + onoff d.personalAccounts.enable'
+  + " · ③ 個人の道具 " + onoff d.personalAccounts.enable'
 note_group() {
   local line
   if [[ -z ${host} ]] || ! have nix; then
