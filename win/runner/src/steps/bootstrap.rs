@@ -2,8 +2,10 @@
 //! gh のログイン・3 つの clone・Smart App Control) を runner の出力にも出す (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H)。
 //!
 //! 確かめるだけ。apply でも bootstrap は流さない (UAC と gh のログインを runner の中で待たない。揃えるのは人が bootstrap を流す)。
-//! on はグループ personal のホストだけ (bootstrap の対象。個人の gh のアカウントで private な repo を取るため)。SAC は bootstrap の
-//! 行で見せ、runner で重ねて読まない (オンなら runner の exe はそもそも動かない)。
+//! on は claudePrivateSkills のホストだけ。bootstrap の対象と同じで、個人の gh のアカウントでログインして private な repo
+//! (dotfiles-private・claude-skills) を取ってよいホスト = グループ personal の既定と、③ を足して `[tools]` に書いた company のホスト
+//! (win/README.md の「bootstrap (新しい Windows で最初に流す)」・dotfiles-private の docs/adr/094_win_bootstrap_private_skills_hosts_*)。
+//! SAC は bootstrap の行で見せ、runner で重ねて読まない (オンなら runner の exe はそもそも動かない)。
 
 use super::ps1::{find_powershell, powershell_command, run_streaming};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
@@ -25,7 +27,7 @@ impl Step for Bootstrap {
             id: "bootstrap",
             order: 5,
             title: "bootstrap の道具と clone を確かめる (Install-Bootstrap.ps1 -Check。揃えるのは人)",
-            gate: Gate::Groups(&["personal"]),
+            gate: Gate::Tool("claudePrivateSkills"),
             ported: true,
             // 確かめるだけで書かない。WSL の setup に同じ手順は無い
             windows_only: true,
@@ -81,7 +83,7 @@ mod tests {
     //! ## 確かめること
     //!
     //! - -Check だけを打ち (apply でも)、0 は揃っている、1・3 は人が bootstrap を流す差、見出しが無い・2 は確かめられなかった
-    //! - グループ personal のホストだけ on
+    //! - claudePrivateSkills のホストだけ on (personal の既定と、③ を足して書いた company。ホストの値が無いときも personal の既定で on)
 
     use super::*;
     use crate::host::{Groups, HostValues, parse};
@@ -148,11 +150,34 @@ mod tests {
     }
 
     #[test]
-    fn personal_only() {
+    fn on_where_claude_skills_are_used() {
         let g = Groups::embedded().unwrap();
-        let company = parse("group = \"company\"", Path::new("h"), g.clone()).unwrap();
-        assert!(Bootstrap.info().gate.off_reason(&company).is_some());
-        let personal = parse("", Path::new("h"), g).unwrap();
-        assert!(Bootstrap.info().gate.off_reason(&personal).is_none());
+        let off_reason = |toml: &str| {
+            let host = parse(toml, Path::new("h"), g.clone()).unwrap();
+            Bootstrap.info().gate.off_reason(&host)
+        };
+        assert_eq!(Bootstrap.info().gate, Gate::Tool("claudePrivateSkills"));
+        // personal は既定で on (グループ personal の既定の claudePrivateSkills が true)
+        assert_eq!(off_reason(""), None);
+        // ③ を足していない company・client は off
+        assert_eq!(
+            off_reason("group = \"company\"").unwrap(),
+            "このホストでは off (claudePrivateSkills = false。グループ company の既定)"
+        );
+        assert!(off_reason("group = \"client\"").is_some());
+        // ③ を足して claude-skills を使う company のホストは on
+        assert_eq!(
+            off_reason("group = \"company\"\n[tools]\nclaudePrivateSkills = true"),
+            None
+        );
+        // personal でも claude-skills を外したホストは off
+        assert!(off_reason("[tools]\nclaudePrivateSkills = false").is_some());
+    }
+
+    /// ホストの値が無いとき (check はグループ personal の既定で確かめる) は on
+    #[test]
+    fn on_without_host_values() {
+        let host = HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap());
+        assert_eq!(Bootstrap.info().gate.off_reason(&host), None);
     }
 }
