@@ -29,6 +29,9 @@
 #   - files: 入口 (README.md と html/hosts.html)・Nix と Windows のホストのページを出し、入口の表で同じ PC (@ の後ろを小文字で比べる)
 #     の Nix と Windows のホストを結ぶ。入口の図は Nix と Windows の 2 つで、重ねるタブは 2 台以上のときだけ。ホストが 0 台でも
 #     README.md と html/hosts.html だけを出す (「ありません」)
+#   - 名前に空白を含むホスト (Windows のユーザー名の空白が、runner の読むファイル名に入る): md のリンク先 (HTML 版の跡の行・ホストの
+#     値・入口の表のホストのページ) と HTML 版の href (blob の URL) は空白を %20 にし、@ はそのまま。リンクの字 (h1・リンクの字・
+#     code) は空白のまま。files の md のリンク先と HTML 版の href に空白は無い (GitHub でも Notion に写す道具でもリンクになる)
 #   - line は グループと段を 1 行にし、text は効かない道具に off の条件を添える
 {
   lib,
@@ -103,6 +106,32 @@ let
     builtins.filter (s: s != "") (
       map (x: builtins.head (lib.splitString "\"" x)) (builtins.tail (lib.splitString "href=\"" html))
     );
+  # md のリンク先 (`](` の後ろから `)` まで)
+  mdDests =
+    md: map (x: builtins.head (lib.splitString ")" x)) (builtins.tail (lib.splitString "](" md));
+  # files の葉 (docs/hosts/ からの path と中身)
+  leaves =
+    prefix: attrs:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        n: v:
+        if builtins.isString v then
+          [
+            {
+              path = prefix + n;
+              text = v;
+            }
+          ]
+        else
+          leaves "${prefix}${n}/" v
+      ) attrs
+    );
+  mdFiles = builtins.filter (f: lib.hasSuffix ".md" f.path) (leaves "" files);
+  htmlFiles = builtins.filter (f: lib.hasSuffix ".html" f.path) (leaves "" files);
+
+  # 名前に空白を含む Windows のホスト (fixtures/host-summary/win-hosts/Frank Example@three.toml)
+  frankMd = files.win."Frank Example@three.md";
+  frankHtml = files.win.html."Frank Example@three.html";
 
   cases = [
     {
@@ -337,6 +366,7 @@ let
         && builtins.attrNames files.html == [ "hosts.html" ]
         &&
           builtins.attrNames files.win == [
+            "Frank Example@three.md"
             "dave@three.md"
             "erin@four.md"
             "html"
@@ -367,9 +397,40 @@ let
           map (v: v.kind) (builtins.elemAt indexFigs 1).views == [
             "host"
             "host"
+            "host"
             "overlay"
           ]
         && (builtins.elemAt indexFigs 1).order == "count";
+    }
+    {
+      name = "名前に空白を含むホスト: md と HTML 版のリンク先は空白を %20 にし (@ はそのまま)、リンクの字は空白のまま";
+      ok =
+        builtins.elemAt (lines frankMd) 0 == "# `Frank Example@three`"
+        &&
+          builtins.elemAt (lines frankMd) 2
+          == "🌐 [HTML 版: Frank Example@three の道具 (Windows)](./html/Frank%20Example@three.html)"
+        && lib.hasInfix "[`win/hosts/Frank Example@three.toml`](../../../win/hosts/Frank%20Example@three.toml)" frankMd
+        &&
+          lib.hasInfix
+            "| [`Frank Example@three`](./win/Frank%20Example@three.md) | `company` (ホストで選んだ) | WSL の setup |"
+            files."README.md"
+        &&
+          lib.hasInfix
+            "| [`Frank Example@three`](./win/Frank%20Example@three.md)・[`dave@three`](./win/dave@three.md) |\n"
+            files."README.md"
+        && lib.hasInfix ''<a href="https://github.com/pollenjp/dotfiles-private/blob/main/win/hosts/Frank%20Example@three.toml" target="_blank" rel="noopener"><code>win/hosts/Frank Example@three.toml</code></a>'' frankHtml
+        &&
+          lib.hasInfix
+            ''<a href="https://github.com/pollenjp/dotfiles-private/blob/main/docs/hosts/win/Frank%20Example@three.md" target="_blank" rel="noopener"><code>Frank Example@three</code></a>''
+            files.html."hosts.html";
+    }
+    {
+      name = "files の md のリンク先と HTML 版の href に空白は無い";
+      ok =
+        builtins.any (f: builtins.any (lib.hasInfix "%20") (mdDests f.text)) mdFiles
+        && builtins.all (f: builtins.all (u: !(lib.hasInfix " " u)) (mdDests f.text)) mdFiles
+        && builtins.any (f: builtins.any (lib.hasInfix "%20") (hrefs f.text)) htmlFiles
+        && builtins.all (f: builtins.all (u: !(lib.hasInfix " " u)) (hrefs f.text)) htmlFiles;
     }
     {
       name = "ホストが 0 台でも、files は README.md と html/hosts.html だけを出す (「ありません」)";

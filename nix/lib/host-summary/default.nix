@@ -28,6 +28,15 @@
 # h1 の下 (3 行目) に「📝 [Notion で開く](…)」の行と空行を書く。private-host.sh summaries はその行を残して書き、setup.sh と
 # summaries --check は外して比べる。
 #
+# ## リンク
+#
+# md のリンク先 (HTML 版の跡の行・ホストの値・入口の表のホストのページ) と、HTML 版の a の href (dotfiles-private の blob の URL) は、
+# path を urlPath に通して書く (空白や記号を %XX にする)。Windows のホストの名前は Windows のユーザー名を含み (runner が読む
+# <ユーザー名>@<PC>.toml)、空白が入りうる。空白をそのまま書いた md のリンク先は CommonMark のリンクにならず、GitHub でも Notion に
+# 写す道具 (md を markdown-it で読み、リンク先の %XX を戻してファイルと突き合わせる) でもリンクにならない (Notion ではホストの
+# ページに HTML 版が埋め込まれない)。リンクの字 (h1・リンクの字・code) は名前のまま見せる。名前が英数字と - . _ ~ @ だけなら、
+# リンク先も名前のまま (逃がす字が無い)。
+#
 # ## どこで決まったか (source)
 #
 #   host     優先度が option の既定 (1500) より強い定義がある (mkHome の引数・ホストのファイルの modules・ローカル flake の tmp)。
@@ -278,9 +287,16 @@ let
         esc c
     ) (lib.stringToCharacters s)
     + "</code>";
+  # リンク先 (md の相対パス・HTML 版の blob の URL) に書く path。空白や記号を %XX にする (冒頭の「リンク」)。lib.escapeURL は ASCII の
+  # 印字できる字とタブ・LF・CR のうち、英数字と - . _ ~ の外を %XX にする (ほかの制御文字は Windows のファイル名に使えないので見ない)。
+  # ASCII の外の字 (UTF-8 のバイト) はそのまま残す。そこから区切りの / と、ホストの名前の @ を戻す (lib.escapeURL の出す %XX は大文字で、
+  # %2F・%40 は / と @ からしか出ない)
+  urlPath = s: builtins.replaceStrings [ "%2F" "%40" ] [ "/" "@" ] (lib.escapeURL s);
+  # md のリンク。字はそのまま、path (# 以降を持たない) は urlPath に通す
+  mdLink = label: path: "[${label}](${urlPath path})";
   privateRepo = "https://github.com/pollenjp/dotfiles-private";
   bodyRepo = "https://github.com/pollenjp/dotfiles";
-  blob = repo: path: "${repo}/blob/main/${path}";
+  blob = repo: path: "${repo}/blob/main/${urlPath path}";
 
   genWhat = "生成物 (dotfiles の nix/lib/host-summary/)。手で直さない。出し直すのは dotfiles の";
   genCmd = "nix/scripts/private-host.sh summaries --private <dotfiles-private の作業ツリー>";
@@ -621,15 +637,15 @@ let
       f = nixFacts name d;
     in
     "# `${name}`\n\n"
-    + "🌐 [HTML 版: ${name} の道具](./html/${name}.html)\n\n"
+    + "🌐 ${mdLink "HTML 版: ${name} の道具" "./html/${name}.html"}\n\n"
     + "設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 057・ADR 093)。図 (段の入れ子の領域・道具の箱・このホストの囲み) は HTML 版にある。\n\n"
-    + "- ホストの値: [`nix/hosts/${name}.nix`](../../../nix/hosts/${name}.nix)\n"
+    + "- ホストの値: ${mdLink "`nix/hosts/${name}.nix`" "../../../nix/hosts/${name}.nix"}\n"
     + "- グループ: `${d.group.value}` (${groupSource d}) · ${tierLine d}\n"
     + "- 入る道具: ${toString (countOn d.tools)} / ${toString (builtins.length d.tools)}\n"
     + "- ホストのファイルで決めた値: ${f.setText}\n"
     + lib.optionalString (f.shared != [ ]) "- dotfiles-private の `nix/shared/` で決めた値: ${f.sharedText}\n"
     + lib.optionalString (f.blocked != [ ]) "- 効かない道具 (値は on だが、効く条件が off): ${f.blockedMd}\n"
-    + "\n全ホストの図と一覧は [入口](../README.md)。\n\n"
+    + "\n全ホストの図と一覧は ${mdLink "入口" "../README.md"}。\n\n"
     + mdGen;
 
   nixBody =
@@ -861,9 +877,9 @@ let
       blocked = builtins.filter (r: r.blocked) wd.tools;
     in
     "# `${name}`\n\n"
-    + "🌐 [HTML 版: ${name} の道具 (Windows)](./html/${name}.html)\n\n"
+    + "🌐 ${mdLink "HTML 版: ${name} の道具 (Windows)" "./html/${name}.html"}\n\n"
     + "Windows の runner が読むホストの値から、設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 093)。図は HTML 版にある。\n\n"
-    + "- ホストの値: [`win/hosts/${name}.toml`](../../../win/hosts/${name}.toml) (書き方は dotfiles の `win/README.md` の「ホストの値」)\n"
+    + "- ホストの値: ${mdLink "`win/hosts/${name}.toml`" "../../../win/hosts/${name}.toml"} (書き方は dotfiles の `win/README.md` の「ホストの値」)\n"
     + "- グループ: `${wd.group.value}` (${groupSource wd}) · ${tierLine wd}\n"
     + "- 入る道具: ${toString (countOn wd.tools)} / ${toString (builtins.length wd.tools)}\n"
     + "- ホストの値 ([tools]) で決めた値: ${listOr "なし" (map (r: "${r.label} ${onoff r.value}") set)}\n"
@@ -875,7 +891,7 @@ let
           ) blocked
         }\n"
     + lib.concatMapStrings (x: "- ${x.k}: ${x.v}\n") wd.extras
-    + "\n全ホストの図と一覧は [入口](../README.md)。\n\n"
+    + "\n全ホストの図と一覧は ${mdLink "入口" "../README.md"}。\n\n"
     + mdGen;
 
   winBody =
@@ -947,23 +963,25 @@ let
     let
       winOf = n: builtins.filter (e: pcOf e.name == pcOf n) winEntries;
       nixOf = n: builtins.filter (e: pcOf e.name == pcOf n) nixEntries;
+      # ホストのページへのリンク (dir は nix か win)
+      page' = dir: n: mdLink "`${n}`" "./${dir}/${n}.md";
       nixRow =
         e:
-        "| [`${e.name}`](./nix/${e.name}.md) | `${e.d.group.value}` (${groupSource e.d}) | ${
+        "| ${page' "nix" e.name} | `${e.d.group.value}` (${groupSource e.d}) | ${
           lib.concatMapStringsSep " · " (t: onoff t.value) e.d.tiers
         } | ${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)} | ${
-          listOr "—" (map (w: "[`${w.name}`](./win/${w.name}.md)") (winOf e.name))
+          listOr "—" (map (w: page' "win" w.name) (winOf e.name))
         } |\n";
       winRow =
         e:
-        "| [`${e.name}`](./win/${e.name}.md) | `${e.d.group.value}` (${groupSource e.d}) | ${
+        "| ${page' "win" e.name} | `${e.d.group.value}` (${groupSource e.d}) | ${
           if e.d.runner then "runner" else "WSL の setup"
         } | ${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)} | ${
-          listOr "—" (map (x: "[`${x.name}`](./nix/${x.name}.md)") (nixOf e.name))
+          listOr "—" (map (x: page' "nix" x.name) (nixOf e.name))
         } |\n";
     in
     "# 登録したホストの道具\n\n"
-    + "🌐 [HTML 版: 登録したホストの道具](./html/hosts.html)\n\n"
+    + "🌐 ${mdLink "HTML 版: 登録したホストの道具" "./html/hosts.html"}\n\n"
     + "登録したホストごとに、どの道具が入るかを見せる (dotfiles の ADR 057・ADR 093)。"
     + "段 (① エンジニアの道具 ⊂ ② AI の道具 ⊂ ③ 個人のアカウント) を入れ子の領域に、道具を箱に、ホストを「入る道具だけを囲む色の線」に描いた図は HTML 版にある "
     + "(タブでホストを切り替え、全部を重ねても比べられる。箱を押すと option・値・どこで決まったかが出る)。\n\n"
