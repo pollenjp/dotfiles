@@ -38,6 +38,7 @@
 | ②③ | cc-pages | `ccPages.enable` | on | off | off |  |
 | ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | off | off |  |
 | ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | on | off | off | `wsl.windowsFiles.enable`・`wsl.windowsFiles.claudeCode.enable` |
+| ②③ | Windows の Claude Desktop (MSIX) | `wsl.windowsFiles.claudeDesktop.enable` | on | off | off | `wsl.windowsFiles.enable` |
 | ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | off | off |  |
 | ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | off | off |  |
 | ③ | 1Password | `onePassword.enable` | off | off | off |  |
@@ -82,6 +83,7 @@
 | ②③ cc-pages | on | off | off | off |
 | ②③ 集約ハブ ~/h | on | off | off | off |
 | ②③ Windows の claude-personal・claude-work | on | off | off | off |
+| ②③ Windows の Claude Desktop (MSIX) | on | off | off | off |
 | ②③ Notion Dev Tracker | off | off | off | off |
 | ②③ Dev Tracker の見回り役 | off | off | off | off |
 | ③ 1Password | off | off | off | off |

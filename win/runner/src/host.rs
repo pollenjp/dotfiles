@@ -776,7 +776,7 @@ mod tests {
     //! ## 確かめること
     //!
     //! - 埋めた groups.json が読め、グループごとの Windows の道具の既定が Nix の段の決まりどおり (personal は全部・company は ③ の ntn と
-    //!   ② ③ の両方の claude-personal・claude-work が off・client は全部 off。type-clipboard はどれも off)
+    //!   ② ③ の両方の claude-personal・claude-work・Claude Desktop が off・client は全部 off。type-clipboard はどれも off)
     //! - group を書かなければ personal、上書きはグループの既定より先に効く、runner.enable の既定は false
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
     //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。どのグループでも既定は off) は、on なら [opReason] sshRelayMode のモード
@@ -818,6 +818,10 @@ mod tests {
         assert!(tool("personal", "windowsClaudeAccounts"));
         assert!(!tool("company", "windowsClaudeAccounts"));
         assert!(!tool("client", "windowsClaudeAccounts"));
+        // Claude Desktop も ② と ③ の両方 (入れるときに UAC の確認が出るので、company・client では既定で入れない)
+        assert!(tool("personal", "windowsClaudeDesktop"));
+        assert!(!tool("company", "windowsClaudeDesktop"));
+        assert!(!tool("client", "windowsClaudeDesktop"));
         for group in ["personal", "company", "client"] {
             assert!(!tool(group, "windowsTypeClipboard"), "{group}");
             // Tailscale は VPN の道具で、どのグループでも既定は off (入れるホストが [tools] に書く)

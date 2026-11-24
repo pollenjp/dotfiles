@@ -58,6 +58,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
+| `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定は personal だけ) のマシンだけ ([後述](#claude-desktop)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 | `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc の子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
@@ -278,11 +279,14 @@ scanData = "https://app.notion.com/p/…"
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
   `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
 - `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
   出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
+- `windowsClaudeDesktop` (Claude Desktop) の既定も、② と ③ の両方を入れるグループだけ true (personal)。入れるときに UAC の確認が出る手順なので、
+  company・client では既定で入れない。使うホストは `[tools]` に `windowsClaudeDesktop = true` を書く (WSL の setup には Claude Desktop の手順が無いので、
+  受け持ちによらず TOML にだけ書く。[後述](#claude-desktop))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
   WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
 - `claudePrivateSkills` (claude-skills の clone を Windows の Claude Code で使うか) の既定は、② と ③ の両方を入れるグループだけ true (personal)。
@@ -455,6 +459,7 @@ scanData = "https://app.notion.com/p/…"
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
+| 97 | `claude-desktop` | `Install-ClaudeDesktop.ps1`: 入っていなければ MSIX を入れる (昇格した Windows PowerShell の winget で。UAC の確認が 1 回出る)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い)。旧来の exe の Claude が残っていれば、入れずに外し方を知らせ (UAC も出さない)、仮想マシン プラットフォームが off なら Cowork が使えないことを `·` で知らせる ([Claude Desktop](#claude-desktop)) | `windowsClaudeDesktop` | 有る (Windows だけ) |
 | 97 | `fzf` | `Install-Fzf.ps1`: 入れる・揃える (winget の portable。PATH のずれは知らせるだけ。MSI の fzf が入っていれば入れずに、外し方を知らせる。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
 | 97 | `ghq` | `Install-Ghq.ps1`: 入れる・揃える (PATH のずれは知らせるだけ。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
@@ -478,7 +483,8 @@ scanData = "https://app.notion.com/p/…"
 - ps1 は clone の中のものを、PATH の `pwsh` (無ければ Windows PowerShell) で `-Check` してから、WSL の wrapper と同じ判断で `-IfMissing` か
   引数なしで流す (出力は UTF-8 にしてから流す)。ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは
   `runner/src/steps/ps1.rs` も直す (WSL の wrapper と同じ約束)
-- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code だけは 1800 秒 (約 340 MB を 2 回落とす))。
+- 待つ上限も WSL と同じ (`-Check` は 60〜120 秒、入れる・揃えるのは 300〜600 秒。Claude Code は 1800 秒 (約 340 MB を 2 回落とす)。Windows にしか
+  無い Claude Desktop も 1800 秒 (約 300 MB の MSIX と、UAC の確認を押すまでの間))。
   時間切れなら pwsh を止める (子の winget までは止めない)。秒数は試験が WSL の wrapper の `timeout` と突き合わせる
 - WSL にしか無かった手順のうち 9 つは、移す順と移し方を ADR 060 に決めてある (powershell-profile → ssh-config・port-forward → terminal・powertoys・
   fancyzones → international → google-ime → pin-updates)。9 つとも移し、その後に足した `op-reason` も ps1 の手順として移した。WSL の setup の
@@ -4023,6 +4029,100 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
   入っている版は、winget の manifest の ProductCode (`e9197887-efb3-55e0-985e-d6d3b5dd594a`) の HKCU の Uninstall キーの `DisplayVersion` で読む
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`T3 Code (winget の T3Tools.T3Code)`) と印 (`winget show --versions に無い`・
   `比べられない`) で分かれる。変えるときは向こうも直す
+
+## Claude Desktop
+
+`claude-desktop/Install-ClaudeDesktop.ps1` は、Claude Desktop (Claude のデスクトップ版。Cowork (VM の中で動くエージェント) も使う) を winget の
+`Anthropic.Claude` の MSIX で入れる。版は `-Version` の既定値 (今は `5.11492.5`) の 1 か所で固定する。固定した版は新しく入れるときの版で、入れた後の
+更新は Claude Desktop の自動更新 (約 4 時間ごと) に任せる (dotfiles-private の ADR 099 (`docs/adr/099_win_claude_desktop_msix_*`))。
+
+- 入れるのは Windows の runner だけ (手順 `claude-desktop`。WSL の setup には無い)。既定は設定グループ personal だけ on で、入れるときに UAC の確認が
+  出る手順なので、company・client では既定で入れない。company・client で入れるホストは、dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`)
+  に書く ([ホストの値](#ホストの値)):
+
+  ```toml
+  [tools]
+  windowsClaudeDesktop = true
+  ```
+
+- winget の manifest は MSIX (x64・arm64) と旧来の exe (Squirrel。user スコープで `%LOCALAPPDATA%\AnthropicClaude` に入る) を並べ、winget は名指し
+  しないと exe を選ぶ。Cowork は MSIX でしか動かないので、`--installer-type msix` で名指しする
+- MSIX は Cowork の常駐 (`CoworkVMService`。localSystem で動く Windows のサービス) を持ち、Windows はそれを管理者の権限で入れたときだけ登録する
+  (管理者の権限の無い登録は `0x80073D28` で断られる)。そこで ps1 は、winget を昇格した Windows PowerShell (System32 のもの) で流す。UAC の確認は入れる・
+  上げるときの 1 回だけ (pin を足すだけなら出ない。昇格した会話から打てば出ない)。昇格した側の出力は受け取れないので、昇格した側が winget の出力を
+  一時ファイル (`%TEMP%\dotfiles-claude-desktop-*.log`) に書いて winget の終了コードで終わり、ps1 がそのファイルを読んで出して消す
+- MSIX は打ったユーザーに入る (UAC で昇格しても同じユーザー)。UAC の確認で別の管理者の資格情報を入れると、そのユーザーに入る (ps1 は入れた後に
+  このユーザーの `Get-AppxPackage` に出なければ、そう ※ で知らせる)。この入れ方 (そのユーザーのまま昇格して入れる) で Cowork まで使うには、Claude を
+  使うユーザーが管理者 (UAC で自分を昇格できる) であることが要る
+- 入っている版は `Get-AppxPackage -Name Claude` の `Version` で読む (PackageFamilyName が `Claude_pzs8sxrjxfjjc` のもの)。MSIX の版は `5.11492.5.0` の
+  4 つ組で、winget の版の末尾に `.0` を足したものなので、4 つ組にそろえて比べる。PowerShell 7 の Appx は読めないことがあるので、PowerShell 7 から打った
+  ときは Windows PowerShell 5.1 に読ませる
+- 入れた後に `winget pin add` で `winget upgrade --all` から外す (版は Claude Desktop の自動更新と `Install-ClaudeDesktop` で動かし、管理者の権限の無い
+  `winget upgrade --all` に MSIX を上げさせない)。Claude Desktop の自動更新は止めない (`disableAutoUpdates` は書かない)
+- `-Check` は Cowork の常駐の有無と状態 (`Get-Service CoworkVMService`)、仮想マシン プラットフォームの on・off (`Win32_OptionalFeature` の `InstallState`。
+  管理者の権限は要らない) も出す。どちらも知らせるだけで、終了コードには数えない
+- false に戻しても runner は消さない (見なくなるだけ)。消すなら Claude を終えてから (☰ > File > Exit)、PowerShell で
+  `winget pin remove --id Anthropic.Claude --exact` の後に `winget uninstall --id Anthropic.Claude --exact` を打つ
+
+### Claude Desktop を入れる
+
+| 打つもの | すること |
+| --- | --- |
+| `dotfiles apply --steps claude-desktop` | 入っていなければ MSIX を入れる (UAC の確認が 1 回出る。SSH の会話では出せないので、デスクトップの端末で流す)。入っていれば上げない (古ければ知らせる)。旧来の exe の Claude が残っていれば、入れずに外し方を出す |
+| `Install-ClaudeDesktop -Check` (PowerShell) | 固定した版との差を出すだけ。揃っていれば (入っている版の方が新しいときも) 終了コード 0、差があれば 1、入っていなければ 3。旧来の exe の Claude が残っていれば、入っていなくても 1 |
+| `Install-ClaudeDesktop` (PowerShell) | 揃える (入れる・古ければ上げる・pin を足す)。入れる・上げるときは UAC の確認が 1 回出る (上げるときは先に Claude を終える) |
+
+入れた後に手でするもの (dotfiles は扱わない): スタートメニューの Claude を開いてサインインする。Cowork は Claude の中で始める (初めて使うときに、
+Cowork の workspace (VM) を落とす)。
+
+#### 旧来の exe の Claude
+
+`claude.com/download` の `Claude Setup.exe` は、管理者の承認が無いと旧来の exe (Squirrel) で入れる。旧来の exe の Claude を開くと Cowork が無い。
+ps1 は旧来の exe (`%LOCALAPPDATA%\AnthropicClaude\Update.exe` か、HKCU の Uninstall の `AnthropicClaude`) を見つけたら ⚠ の行と外し方を出し、終了コードを
+1 にする (MSIX が入っていなくても 3 にしない)。外すのは人で、外すまで MSIX は入れない・上げない: winget は旧来の exe も manifest の ProductCode
+(`AnthropicClaude`) で `Anthropic.Claude` と数え、入れる手を上げる手に切り替えるので、MSIX が入らないまま落ちる見込み (winget のソースを読んだ見立て。
+実機では確かめていない)。runner は「旧来の exe の Claude が残っている」の行にし、UAC も出さない。外したら `dotfiles apply` (か `Install-ClaudeDesktop`) で
+MSIX を入れる。外し方 (Anthropic の案内のとおり、管理者でない会話で):
+
+1. Claude を終える (☰ > File > Exit)
+2. 管理者でない PowerShell で `& "$env:LOCALAPPDATA\AnthropicClaude\Update.exe" --uninstall -s` を打つ
+3. 終わったら `%LOCALAPPDATA%\AnthropicClaude` と、スタートメニューの `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Claude.lnk` を消す
+
+MSIX を入れた後に旧来の exe を入れた PC などで、両方が入っていると、`winget pin add` が相手を決められないことがある。そのときは旧来の exe を外してから
+`Install-ClaudeDesktop` を打ち直す。
+
+#### 仮想マシン プラットフォーム
+
+Cowork には Windows の仮想マシン プラットフォーム (`VirtualMachinePlatform`) も要る。on にするには Windows の再起動が要るので、runner は on にしない。
+off なら ps1 が ※ の行で、runner が `·` の行 (終了コードに数えない) で知らせる。on にするには、管理者の PowerShell で
+`Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All` を打ち、Windows を再起動する (シャットダウンでなく再起動。高速
+スタートアップでは仮想化の機能が起きないことがある)。
+
+### Claude Desktop の新しい版が出たとき
+
+新しい版の知らせ (`pin-updates`・`winget-versions`) には載せていない (T3 Code と同じ)。Claude Desktop は入れた後に自分で上がり (約 4 時間ごと)、
+版がよく出る (公開 (winget の manifest の `ReleaseDate`) が 2026-10-23〜11-20 の版が 13) ので、固定した版が上げ遅れて困るのは新しく入れるマシンだけで、
+それも入れた後すぐ自動更新で上がる。上げるときは、`winget show --id Anthropic.Claude --versions` に載った版のうち、公開から 7 日を過ぎた版を選び
+(公開日は `winget show --id Anthropic.Claude --version <版>` の `Release Date`)、
+`Install-ClaudeDesktop.ps1` の `-Version` の既定値と上の「今は」を変えて、`Install-ClaudeDesktop.Tests.ps1` を流す:
+
+```sh
+nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-desktop/Install-ClaudeDesktop.Tests.ps1
+```
+
+固定した版が winget から消えると、新しいマシンでは入れられない。そのときは ps1 が ⚠ の行と直し方を出し、runner も打たずに知らせる。
+
+### Install-ClaudeDesktop.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数 (版の読み方・`Get-AppxPackage` の行の読み方と選び方・plan・winget の引数・状態の表・締めの行・昇格した側に渡す本文) は
+  `Install-ClaudeDesktop.Tests.ps1` で確かめる。昇格した側に渡す本文は、偽の winget を置いて今の PowerShell で実際に流し、出力と終了コードを読めるかを
+  確かめる (昇格はしない)。入れる流れ (`Invoke-InstallClaudeDesktop`) は、Windows に触る関数を同じ名前の偽物に差し替えて流し、打つ winget・昇格・締めの行・
+  終了コードを確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない)
+- runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`Claude Desktop (winget の Anthropic.Claude`) と印 (`winget show --versions に無い`・
+  `比べられない`・`UAC の確認を断った`・`旧来の exe の Claude が残っている`・`仮想マシン プラットフォーム (VirtualMachinePlatform) が off`) で分かれる。
+  変えるときは向こうも直す (runner の試験が、ps1 のコメントでない行にこれらの印があるかを突き合わせる)
+- winget・Appx・サービス・レジストリ・UAC に触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## sshd
 

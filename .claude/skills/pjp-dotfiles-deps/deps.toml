@@ -86,6 +86,11 @@ run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--comman
 when = ["win/t3-code/"]
 
 [[checks]]
+name = "win-claude-desktop"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/claude-desktop/Install-ClaudeDesktop.Tests.ps1"]
+when = ["win/claude-desktop/"]
+
+[[checks]]
 name = "win-tailscale"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/tailscale/Install-Tailscale.Tests.ps1"]
 when = ["win/tailscale/"]

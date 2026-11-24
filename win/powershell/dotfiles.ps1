@@ -336,6 +336,11 @@ function Install-Tailscale { & "$HOME\.config\powershell\Install-Tailscale.ps1" 
 # 「T3 Code」)。-Check なら確かめるだけ。user スコープなので UAC の確認は出ない。上げるときは T3 Code を閉じてから打つ。
 function Install-T3Code { & "$HOME\.config\powershell\Install-T3Code.ps1" @args }
 
+# Windows の Claude Desktop (winget の Anthropic.Claude の MSIX) を固定した版で入れる。中身は同じ場所へ配る Install-ClaudeDesktop.ps1
+# (win/README.md の「Claude Desktop」)。-Check なら確かめるだけ。入れる・上げるときは Windows に UAC の確認が 1 回出る (管理者の権限で
+# 入れないと Cowork が使えない)。上げるときは Claude を終えてから打つ。
+function Install-ClaudeDesktop { & "$HOME\.config\powershell\Install-ClaudeDesktop.ps1" @args }
+
 # Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ、鍵でだけ SSH で入れる形に揃える。
 # 中身は同じ場所へ配る Install-Sshd.ps1 (win/README.md の「sshd」)。-Check なら確かめるだけ。揃えるときは Windows に UAC の確認が
 # 1 回出る (sshd を起こし直すと、つないでいる SSH が切れることがある)。鍵は setup が置く写し (%LOCALAPPDATA%\dotfiles\sshd\authorized_keys)

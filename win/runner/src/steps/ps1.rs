@@ -16,8 +16,8 @@
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
-//! Windows にしか無い手順 (t3-code・ghq・fzf。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で決め、ps1 の締めの行の
-//! 文言と出力の印は試験が ps1 の字と突き合わせる。
+//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
+//! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
 
@@ -116,6 +116,36 @@ pub struct Ps1Spec {
     pub check_hang: Option<&'static str>,
     /// Windows にしか無い手順か (WSL の `bootstrap-windows-<id>.sh` を持たない。`StepInfo::windows_only`。受け持ちによらず runner が受け持つ)
     pub windows_only: bool,
+    /// ps1 も runner も直さず、残っている間は揃わないもの (claude-desktop の旧来の exe の Claude)。ps1 は、それが残っているとき締めの行に
+    /// `mark` を書いて 1 を返す (入っていなくても 3 にしない。入れられないので)。check も apply も、その 1 を「固定した版と揃っていない」の
+    /// 代わりにこの行にし、何も打たない (人が外すまで知らせる)
+    pub leftover: Option<Marked>,
+    /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off)。
+    /// ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
+    pub notices: &'static [Marked],
+}
+
+/// ps1 の出力の印と、それが当たったときに締めの表へ出す行。
+#[derive(Clone, Copy, Debug)]
+pub struct Marked {
+    /// 出力のどこかの行がこれを含めば当たり
+    pub mark: &'static str,
+    /// 行の文
+    pub text: &'static str,
+    /// 行の下に出す ※ の行
+    pub notes: &'static [&'static str],
+}
+
+impl Marked {
+    fn found(&self, lines: &[String]) -> bool {
+        lines.iter().any(|l| l.contains(self.mark))
+    }
+
+    fn outcome(&self, kind: Kind) -> Outcome {
+        self.notes
+            .iter()
+            .fold(Outcome::new(kind, self.text), |o, n| o.note(*n))
+    }
 }
 
 /// SSH の中継を渡す手順 (`ssh_relay`。op-reason) で、版は揃っていて中継だけが違うときの ps1 の締めの行と、そのときの字
@@ -179,6 +209,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "openssh",
@@ -215,6 +247,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "sshd",
@@ -287,6 +321,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "tailscale",
@@ -331,6 +367,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "claude-code",
@@ -365,6 +403,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "herdr-app",
@@ -398,6 +438,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "herdr",
@@ -429,6 +471,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "ntn",
@@ -462,6 +506,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "op-reason",
@@ -508,6 +554,8 @@ pub const SPECS: &[Ps1Spec] = &[
             "Windows の op-reason が dotfiles で固定した版と揃っていないので、入れ替えます (Install-OpReason.ps1)。",
         ),
         check_hang: Some("-Check はネットワークを使わないので、pwsh が止まっているかもしれない"),
+        leftover: None,
+        notices: &[],
     },
     Ps1Spec {
         id: "type-clipboard",
@@ -541,6 +589,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     // T3 Code (Windows にしか無い手順。WSL の setup には無い。dotfiles-private の docs/adr/091_t3_code_opt_in_*)。テレメトリの環境変数と
     // settings.json は t3-code-settings が合わせる
@@ -588,6 +638,77 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
+    },
+    // Claude Desktop (Windows にしか無い手順。WSL の setup には無い)。winget の Anthropic.Claude の MSIX を、昇格した Windows PowerShell の winget で
+    // 入れる (Cowork の常駐 CoworkVMService は管理者の権限で入れたときだけ登録される。UAC の確認が 1 回出る)。版の扱いは T3 Code と同じ
+    // (入っていないときだけ入れ、自動更新で上がった版は下げない)。旧来の exe の Claude が残っていれば、入れずに外し方を (ps1 は入っていなくても
+    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/099_win_claude_desktop_msix_*)
+    Ps1Spec {
+        id: "claude-desktop",
+        windows_only: true,
+        order: 97,
+        title: "Claude Desktop (MSIX) を固定した版で入れる (ずれていても上げない)",
+        gate: Gate::Tool("windowsClaudeDesktop"),
+        script: "win/claude-desktop/Install-ClaudeDesktop.ps1",
+        command: "Install-ClaudeDesktop",
+        subject: "Windows の Claude Desktop",
+        package: "Claude Desktop (winget の Anthropic.Claude の MSIX)",
+        header: Header::Contains("Claude Desktop (winget の Anthropic.Claude"),
+        check_secs: 120,
+        // MSIX は約 300 MB。UAC の確認を押すまでの間も待つ
+        install_secs: 1800,
+        // 入っている版の方が新しいとき (Claude Desktop の自動更新で上がった) は ps1 が 0 を返す。1 は古い・pin が無い・版が読めない・旧来の
+        // exe の Claude が残っている (入っていなくても)
+        policy: Policy::Warn,
+        uac: true,
+        ok_text: "Windows の Claude Desktop は、dotfiles で固定した版以上で入っています。",
+        // サインインは手でする、の案内は ps1 の出力 (上に流れている) に入っている (重ねて出さない)
+        installed: &["Windows に Claude Desktop (MSIX) を入れました。"],
+        synced: &[],
+        manual_fix: &[
+            "揃えるには PowerShell で Install-ClaudeDesktop を打つ (上げるときは先に Claude を終え (☰ > File > Exit)、UAC の確認が 1 回出る。pin を足すだけなら UAC は出ない。runner は上げない: Claude Desktop は自動更新で自分で上がる)",
+        ],
+        sync_fix: &[
+            "入れるには PowerShell で Install-ClaudeDesktop を打つか、dotfiles apply --steps claude-desktop を流し直す (Windows のデスクトップに UAC の確認が出る。SSH の会話では出せないので、デスクトップの端末で流す)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        missing_blocked: Some("winget show --versions に無い"),
+        output_fixes: &[
+            (
+                "winget show --versions に無い",
+                "固定した版が winget に無いので、入れることも上げることもできない。repo の版 (Install-ClaudeDesktop.ps1 の -Version) を winget show --id Anthropic.Claude --versions にある版 (7 日の猶予を過ぎたもの) へ変える",
+            ),
+            (
+                "比べられない",
+                "入っている版が読めないので、揃えられない。上の ※ のとおり、PowerShell で Get-AppxPackage -Name Claude を打って入っている版を確かめる",
+            ),
+            (
+                "UAC の確認を断った",
+                "UAC の確認で「はい」を押さなかったか、出せなかった (SSH の会話など)。デスクトップの PowerShell で Install-ClaudeDesktop を打つか、dotfiles apply --steps claude-desktop を流し直して「はい」を押す",
+            ),
+        ],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+        leftover: Some(Marked {
+            mark: "旧来の exe の Claude が残っている",
+            text: "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。MSIX が入っていなければ、外した後の dotfiles apply で入れる)",
+            notes: &[
+                "旧来の exe の Claude を開くと Cowork が無い。外すには、Claude を終えてから (☰ > File > Exit)、管理者でない PowerShell で & \"$env:LOCALAPPDATA\\AnthropicClaude\\Update.exe\" --uninstall -s を打つ",
+                "終わったら %LOCALAPPDATA%\\AnthropicClaude と、スタートメニューの %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Claude.lnk を消す (win/README.md の「Claude Desktop」)",
+            ],
+        }),
+        notices: &[Marked {
+            mark: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off",
+            text: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork は使えない (runner は on にしない)",
+            notes: &[
+                "on にするには、管理者の PowerShell で Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All を打ち、Windows を再起動する (シャットダウンでなく再起動。win/README.md の「Claude Desktop」)",
+            ],
+        }],
     },
     // ghq と fzf (Windows にしか無い手順。WSL の setup には無い。dotfiles.ps1 の cdrepo が使う。dotfiles-private の
     // docs/adr/092_win_cdrepo_ghq_fzf_*)。どちらも ① エンジニアの道具の CLI で、Linux はどのグループでも入れるので、いつも on。ntn と同じく
@@ -624,6 +745,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
     // fzf は winget の既定の installer (machine スコープの MSI) を避けて portable を入れる。MSI の fzf が入っていれば、ps1 は portable を
     // 入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる (PATH のずれと同じく知らせるだけ)。その行の印で外し方を出す
@@ -662,6 +785,8 @@ pub const SPECS: &[Ps1Spec] = &[
         install_notice: None,
         sync_notice: None,
         check_hang: None,
+        leftover: None,
+        notices: &[],
     },
 ];
 
@@ -1020,6 +1145,8 @@ impl Ps1Step {
                     Plan::Install
                 }
             }
+            // ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude) が残っている。手順の Policy によらず、その行を出す
+            (Some(1), true) if s.leftover.is_some_and(|m| m.found(lines)) => Plan::Leftover,
             (Some(1), true) => match s.policy {
                 Policy::Warn => Plan::Warn,
                 Policy::Herdr => Plan::HerdrWarn,
@@ -1056,6 +1183,8 @@ enum Plan {
     HerdrWarn,
     /// PATH のずれだけ (知らせるだけ)
     PathOnly,
+    /// ps1 も runner も直さないもの (`Ps1Spec::leftover`) が残っている (知らせるだけ)
+    Leftover,
     /// 確かめられなかった
     CheckFailed,
 }
@@ -1141,11 +1270,14 @@ impl Ps1Step {
         }
         let plan = self.plan(r.code(), header, v, &r.output);
         let name = self.script_name();
-        match plan {
+        let mut out = match plan {
             Plan::Ok => {
                 ctx.say(s.ok_text);
                 vec![Outcome::new(Kind::Ok, "揃っている")]
             }
+            Plan::Leftover => s
+                .leftover
+                .map_or_else(Vec::new, |m| vec![m.outcome(Kind::Manual)]),
             Plan::CheckFailed => {
                 let why = match &r.exit {
                     Exit::SpawnFailed(e) => format!("起こせなかった: {e}"),
@@ -1200,7 +1332,17 @@ impl Ps1Step {
                     Mode::Apply { .. } => self.act(ctx, shell, &script_str, plan, relay_only, args),
                 }
             }
+        };
+        // 知らせるだけの印 (claude-desktop の仮想マシン プラットフォームが off)。ps1 が動いて状態の表が出たときだけ
+        if header && plan != Plan::CheckFailed {
+            out.extend(
+                s.notices
+                    .iter()
+                    .filter(|m| m.found(&r.output))
+                    .map(|m| m.outcome(Kind::Info)),
+            );
         }
+        out
     }
 }
 
@@ -1418,8 +1560,12 @@ mod tests {
     //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
     //! - ghq・fzf は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、PATH の
     //!   ずれだけなら知らせる。fzf は MSI の fzf の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
+    //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
+    //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
+    //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
+    //!   知らせるだけの行 (·) を後ろに足す。ほかの手順は残りものと知らせの印を持たない
     //! - Windows にしか無い手順の ps1 は、runner が読む締めの行の文言 (Sync は「→ … で入れる」「→ … で揃える」「→ ※ の手順で直す」) と、
-    //!   出力の印 (output_fixes・missing_blocked) を持つ (WSL の wrapper との突き合わせの代わり)
+    //!   出力の印 (output_fixes・missing_blocked・leftover・notices) を持つ (WSL の wrapper との突き合わせの代わり)
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1790,7 +1936,7 @@ mod tests {
         let only: Vec<&Ps1Spec> = SPECS.iter().filter(|s| s.windows_only).collect();
         assert_eq!(
             only.iter().map(|s| s.id).collect::<Vec<_>>(),
-            vec!["t3-code", "ghq", "fzf"]
+            vec!["t3-code", "claude-desktop", "ghq", "fzf"]
         );
         for s in only {
             let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());
@@ -1808,9 +1954,206 @@ mod tests {
                 .iter()
                 .map(|(m, _)| *m)
                 .chain(s.missing_blocked)
+                .chain(s.leftover.map(|m| m.mark))
+                .chain(s.notices.iter().map(|m| m.mark))
             {
                 assert!(text.contains(marker), "{} に「{marker}」が無い", s.script);
             }
+        }
+    }
+
+    /// claude-desktop: 道具の switch (windowsClaudeDesktop) で on/off の Windows にしか無い手順。3 は UAC を先に知らせて -IfMissing で入れ、
+    /// 固定した版が winget に無ければ打たない。1 は知らせるだけで、旧来の exe の Claude が残っている (締めの行) ならその外し方の行にして何も
+    /// 打たない (入っていなくても)。仮想マシン プラットフォームが off なら、状態の表が出たときだけ知らせるだけの行 (·) を足す
+    #[test]
+    fn claude_desktop_installs_with_uac_and_reports_leftovers_and_notices() {
+        let s = spec("claude-desktop");
+        assert!(s.windows_only);
+        assert_eq!(s.gate, Gate::Tool("windowsClaudeDesktop"));
+        assert_eq!(s.order, 97);
+        assert_eq!(s.policy, Policy::Warn);
+        assert!(s.uac);
+        assert_eq!(s.install_secs, 1800);
+        let legacy = "⚠️ 旧来の exe の Claude が残っている → ※ の手順で外す (Install-ClaudeDesktop は外さない) ⚠️";
+        let vm_off = "※ 仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork (VM の中で動くエージェント) は使えない。on にするには…";
+
+        // 3: UAC を先に知らせてから -IfMissing。サインインの案内は ps1 が出す 1 行だけ (重ねて出さない)
+        let signin = "Claude のサインインは手でする (スタートメニューの Claude を開く。dotfiles はサインインに触らない)";
+        let sys1 = sys(
+            (3, vec![header_line(s)]),
+            (0, vec![signin.to_string(), "揃った".into()]),
+        );
+        let (o, out, calls) = run("claude-desktop", &sys1, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            out.contains(
+                "Windows に Claude Desktop (winget の Anthropic.Claude の MSIX) が入っていないので、固定した版を入れます (Install-ClaudeDesktop.ps1 -IfMissing。1800 秒まで待ちます)。"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("UAC の確認が出ます"));
+        assert!(out.contains("Windows に Claude Desktop (MSIX) を入れました。"));
+        assert_eq!(
+            out.matches("Claude のサインインは手でする").count(),
+            1,
+            "{out}"
+        );
+
+        // check の 3 は入れる見込み (打つのは -Check だけ)
+        let sys1c = sys((3, vec![header_line(s)]), (9, vec![]));
+        let (o, _, calls) = run("claude-desktop", &sys1c, Mode::Check);
+        assert_eq!(
+            o,
+            vec![Outcome::new(
+                Kind::Missing,
+                "入っていない → apply で入れる (Install-ClaudeDesktop.ps1 -IfMissing)"
+            )]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+
+        // 3 でも固定した版が winget に無ければ打たない
+        let blocked = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠ 固定した版が winget show --versions に無い (書き間違いか、winget から消えた) ので入れられない"
+                        .into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, _, calls) = run("claude-desktop", &blocked, APPLY);
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert!(o[0].notes[0].contains("winget show --id Anthropic.Claude --versions"));
+
+        // 1 で旧来の exe の Claude が残っている: 外し方の行 (「固定した版と揃っていない」にしない)。MSIX が揃っていて残りがそれだけの
+        // 締めの行も、入っていない・古いのに旧来の exe があるので入れない締めの行も同じ。check も apply も打つのは -Check だけ (UAC を出さない)
+        let blocks = "⚠️ 旧来の exe の Claude が残っている → ※ の手順で外してから、Install-ClaudeDesktop で入れる・揃える (外すまで MSIX は入れない) ⚠️";
+        for line in [legacy, blocks] {
+            for mode in [Mode::Check, APPLY] {
+                let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+                let (o, out, calls) = run("claude-desktop", &sys2, mode);
+                assert_eq!(o.len(), 1, "{line}");
+                assert_eq!(o[0].kind, Kind::Manual, "{line}");
+                assert_eq!(
+                    o[0].text,
+                    "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。MSIX が入っていなければ、外した後の dotfiles apply で入れる)",
+                    "{line}"
+                );
+                assert_eq!(o[0].notes.len(), 2, "{line}");
+                assert!(o[0].notes[0].contains("Update.exe\" --uninstall -s"));
+                assert!(o[0].notes[1].contains("Claude.lnk"));
+                assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+                assert!(!out.contains("UAC の確認が出ます"), "{line}");
+            }
+        }
+
+        // 入れた後の 1 は、旧来の exe の印があっても入った扱いにしない (ps1 は旧来の exe があるうちは入れないので、そこには来ない)
+        let sys3 = sys(
+            (3, vec![header_line(s)]),
+            (1, vec![header_line(s), legacy.to_string()]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys3, APPLY);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(o[0].text.starts_with("入れられなかった (終了コード 1"));
+
+        // 3 → 入れた後が 1 で、ほかのわけ (UAC を断った): 入れられなかった。直し方は UAC の印のもの
+        let sys4 = sys(
+            (3, vec![header_line(s)]),
+            (
+                1,
+                vec![
+                    "UAC の確認を断った・出せなかった (SSH の会話では出せない)。デスクトップの PowerShell で Install-ClaudeDesktop を打ち直す"
+                        .into(),
+                ],
+            ),
+        );
+        let (o, _, _) = run("claude-desktop", &sys4, APPLY);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(o[0].text.starts_with("入れられなかった (終了コード 1"));
+        assert_eq!(o[0].notes.len(), 1);
+        assert!(o[0].notes[0].contains("「はい」を押す"), "{:?}", o[0].notes);
+        // 時間切れには、UAC の確認が残っているかもしれないことを添える
+        let sys5 = sys((3, vec![header_line(s)]), (-1, vec![]));
+        let (o, _, _) = run("claude-desktop", &sys5, APPLY);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("UAC の確認が残っていれば")),
+            "{:?}",
+            o[0].notes
+        );
+
+        // 1 (古い・pin が無い): 知らせるだけで、Install-ClaudeDesktop を案内する。版が読めなければ確かめ方
+        for (line, want) in [
+            (
+                "⚠ 固定した版                  : 5.11492.5 → 上げる",
+                "PowerShell で Install-ClaudeDesktop を打つ",
+            ),
+            (
+                "⚠ 固定した版                  : 5.11492.5 → 比べられない",
+                "Get-AppxPackage -Name Claude",
+            ),
+        ] {
+            let sys6 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+            let (o, _, calls) = run("claude-desktop", &sys6, APPLY);
+            assert_eq!(o.len(), 1, "{line}");
+            assert_eq!(o[0].kind, Kind::Manual, "{line}");
+            assert_eq!(
+                o[0].text, "固定した版と揃っていない → ※ の手順で直す (runner は揃えない)",
+                "{line}"
+            );
+            assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+            assert_eq!(o[0].notes.len(), 1, "{line}");
+            assert!(o[0].notes[0].contains(want), "{line}: {:?}", o[0].notes);
+        }
+
+        // 仮想マシン プラットフォームが off: 行の後ろに知らせるだけの行 (·) を足す (0・3 の apply と check)
+        let sys7 = sys((0, vec![header_line(s), vm_off.to_string()]), (9, vec![]));
+        let (o, out, _) = run("claude-desktop", &sys7, APPLY);
+        assert_eq!(o.len(), 2);
+        assert_eq!(o[0], Outcome::new(Kind::Ok, "揃っている"));
+        assert_eq!(o[1].kind, Kind::Info);
+        assert!(
+            o[1].text
+                .starts_with("仮想マシン プラットフォーム (VirtualMachinePlatform) が off")
+        );
+        assert!(o[1].notes[0].contains(
+            "Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All"
+        ));
+        assert!(
+            out.contains("Windows の Claude Desktop は、dotfiles で固定した版以上で入っています。")
+        );
+        for mode in [APPLY, Mode::Check] {
+            let sys8 = sys((3, vec![header_line(s), vm_off.to_string()]), (0, vec![]));
+            let (o, _, _) = run("claude-desktop", &sys8, mode);
+            let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+            let first = if mode == APPLY {
+                Kind::Ok
+            } else {
+                Kind::Missing
+            };
+            assert_eq!(kinds, vec![first, Kind::Info], "{mode:?}");
+        }
+        // 状態の表が出ていない (ps1 が動いていない) ときは、印があっても足さない
+        let sys9 = sys((2, vec![vm_off.to_string()]), (0, vec![]));
+        let (o, _, _) = run("claude-desktop", &sys9, Mode::Check);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+
+        // ほかの手順は残りものと知らせの印を持たない
+        for other in SPECS.iter().filter(|x| x.id != "claude-desktop") {
+            assert!(
+                other.leftover.is_none() && other.notices.is_empty(),
+                "{}",
+                other.id
+            );
         }
     }
 
