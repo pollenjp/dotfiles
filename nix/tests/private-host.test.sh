@@ -60,7 +60,8 @@
 #     は無い」)。md の 3 行目の「📝 [Notion で開く](…)」の行と空行は残して書き、その行の有る無しは違いに数えない。--check は書かずに、
 #     違うファイルを出して 1 (同じなら 0)。win/hosts/ が無くても Nix のホストだけで書き、nix/hosts/ も win/hosts/ も無ければ 2。
 #     評価が落ちれば 3 で何も書かない。docs/hosts/ (か docs/) かその中に symlink があれば 2 で何も書かない (外を辿らない)。jq は
-#     要らない。docs/hosts/ の外 (nix/hosts/ の前の要約など) には書かない
+#     要らない。docs/hosts/ の外 (nix/hosts/ の前の要約など) には書かない。名前に空白を含むホスト (Windows のユーザー名の空白が
+#     win/hosts/ のファイル名に入る) のページも書き、--check は同じと見て、ホストのファイルが無くなれば消す
 
 set -u -o pipefail
 
@@ -1224,6 +1225,30 @@ if [[ ${rc_inner} == 2 && $(rc "${c2}") == 2 ]] && grep -qF 'symlink があり�
   ok "summaries: docs/hosts/ の中か docs/hosts/ そのものが symlink なら、外を辿らずに 2 (何も書かない)"
 else
   ng "summaries (symlink)" "inner=${rc_inner} rc=$(rc "${c2}") $(err "${c2}") $(ls -A "${c}/elsewhere" "${c2}/elsewhere")"
+fi
+
+# 34d. summaries: 名前に空白を含むホスト (Windows のユーザー名の空白が win/hosts/ のファイル名に入る) のページも書き、--check は同じと
+#      見て、ホストのファイルが無くなればページを消す
+c=$(summaries_case r34d)
+printf 'group = "company"\n' >"${c}/wt/win/hosts/Frank Example@x.toml"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+h="${c}/wt/docs/hosts"
+rc_sp_write=$(rc "${c}")
+sp_wrote=0
+if [[ $(tail -n 1 "${h}/win/Frank Example@x.md") == 'WIN Frank Example@x' && $(cat "${h}/win/html/Frank Example@x.html") == 'WINHTML Frank Example@x' ]] \
+  && grep -qF '書いた: win/Frank Example@x.md' "${c}/out" && grep -qF '書いた: win/html/Frank Example@x.html' "${c}/out"; then
+  sp_wrote=1
+fi
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix" --check
+rc_sp_check=$(rc "${c}")
+rm -f "${c}/wt/win/hosts/Frank Example@x.toml"
+run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
+if [[ ${rc_sp_write} == 0 && ${sp_wrote} == 1 && ${rc_sp_check} == 0 && $(rc "${c}") == 0 ]] \
+  && [[ ! -e "${h}/win/Frank Example@x.md" && ! -e "${h}/win/html/Frank Example@x.html" && -f ${h}/win/dave@x.md ]] \
+  && grep -qF '消した: win/Frank Example@x.md (作らないファイル)' "${c}/out"; then
+  ok "summaries: 名前に空白を含むホストのページも書き、--check は同じと見て、ホストのファイルが無くなれば消す"
+else
+  ng "summaries (名前に空白)" "write=${rc_sp_write} wrote=${sp_wrote} check=${rc_sp_check} rc=$(rc "${c}") $(out "${c}") $(err "${c}") $(cd "${h}" && find . -type f | LC_ALL=C sort)"
 fi
 
 # 35. summaries: nix/hosts/ も win/hosts/ も無ければ 2、評価が落ちれば 3 (何も書かない)。jq の無い PATH で動く

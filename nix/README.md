@@ -1357,6 +1357,9 @@ bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホス�
   作らなくなったページは `summaries` が消す
 - md の 3 行目の「📝 [Notion で開く](…)」の行（Notion に写す道具がページを作ると書く）は、`summaries` が残して書き直し、`--check` と setup は
   外して比べる
+- md と HTML 版のリンク先（相対パス・GitHub の blob の URL）は、ホストの名前の空白や記号（`#`・`%` など。`/` と `@` は残す）を `%XX` に
+  して書く（Windows のユーザー名の空白は `win/hosts/` のファイル名に入る）。GitHub でも Notion に写す道具でもリンクになり、Notion ではホストのページに
+  HTML 版が埋め込まれる。リンクの字は名前のまま
 - setup は switch のたびに、この PC のホスト（dotfiles-private に登録したもの）のページ（`docs/hosts/nix/<ホスト>.md` と HTML 版）を作り直して
   clone のものと比べ、違えば・無ければ警告のまとめに 1 件出す（`pjp-dotfiles-register-host` skill の名前と出し直すコマンドつき）。dotfiles-private
   には CI が無く、本体の変更（段の割り当て・既定・図の作り）でもページは古くなるため。本体の checkout が upstream より遅れていれば、出し直さずに

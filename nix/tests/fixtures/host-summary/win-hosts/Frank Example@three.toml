@@ -1,0 +1,3 @@
+# nix/tests/host-summary.nix の作り物 (Windows のホストの値)。Windows のユーザー名に空白を含むホストで、runner が読むファイル名
+# (<ユーザー名>@<PC の名前>.toml) に空白が入る。hosts/carol@three.nix・dave@three.toml と同じ PC (three) で、自社のグループを選んだ
+group = "company"
