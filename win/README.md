@@ -74,7 +74,7 @@ GitHub CLI・Visual Studio Build Tools・rustup と、dotfiles・dotfiles-privat
 (`docs/adr/094_win_bootstrap_private_skills_hosts_*`)。
 
 - 対象は、claude-skills (private な repo) を使う Windows (ホストの値の `claudePrivateSkills` が on のもの。[ホストの値](#ホストの値))。
-  設定グループ personal の Windows (ハブにする PC) は既定で当たり、company のホストは ③ (個人のアカウントにつながるもの) を足して `[tools]` に
+  設定グループ personal の Windows (ハブにする PC) は既定で当たり、company のホストは ③ (個人の道具) を足して `[tools]` に
   `claudePrivateSkills = true` を書いたものが当たる。個人の gh のアカウントでログインして private な repo (dotfiles-private・claude-skills) を
   取るので、③ を足していない (`claudePrivateSkills` が off の) company・client の Windows では流さない
   - bootstrap はホストの値を読まない (dotfiles-private を clone する前に流すので)。流すかは人がこの対象で決める。runner の手順 `bootstrap`
@@ -299,6 +299,8 @@ scanData = "https://app.notion.com/p/…"
   `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
 - `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
   書く (書かなければ `sshd` の行は off。[後述](#sshd))
+- `windowsTypeClipboard` (type-clipboard) もどのグループでも既定が false (③ 個人の道具の段に置くが、段からは決めない)。入れるホスト (WSL の Nix の値で
+  `wsl.windowsFiles.typeClipboard.enable = true`) は、同じ値を `[tools]` に書く (書かなければ `type-clipboard` の行は off。[後述](#type-clipboard))
 - `[sshd] authorizedKeys` は sshd に入れる公開鍵 (Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味。[鍵の置き方](#鍵の置き方))。使うのは受け持ちが
   runner のホストだけで、runner の手順 `sshd` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを置く。書かなければ null で、写しを
   置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
@@ -3277,8 +3279,9 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
 type-clipboard はクリップボードの文字を、選んだ窓へキー入力として 1 文字ずつ打ち込む (Hyper-V の VMConnect や RDP の
 サインイン画面など、貼り付けが効かない所にパスワードを入れるため)。単一の exe で、インストーラも署名も無く、winget にも無い。
 
-- setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ (既定は false)。値は dotfiles-private に
-  登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
+- setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ (既定は false。設定グループの ③ 個人の道具の
+  段に置くが、段からは決めず、どのグループでも入れない)。値は dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に
+  足したホストの `wsl` に書く:
 
   ```nix
   wsl = {
@@ -3613,8 +3616,8 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 (install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 
-- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定は設定グループで決まり、③ 個人のアカウントに
-  つながるものの段が on のホスト (グループ `personal`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定は設定グループで決まり、③ 個人の道具の段が
+  on のホスト (グループ `personal`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   既定と違う値にするなら、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
 
   ```nix

@@ -13,7 +13,7 @@
 }:
 
 {
-  # ntn だけは dotfiles.ntn.enable のホストに入れる (既定は設定グループの ③ 個人のアカウント)。並びは今までと同じ所に置く
+  # ntn だけは dotfiles.ntn.enable のホストに入れる (既定は設定グループの ③ 個人の道具)。並びは今までと同じ所に置く
   # (home.packages の順は home-path の derivation に入るので、personal のホストの世代を変えないため)
   home.packages =
     with pkgs;

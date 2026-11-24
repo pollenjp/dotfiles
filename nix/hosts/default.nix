@@ -14,7 +14,7 @@
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
 #   group           設定グループ。personal (個人の PC。既定)・company (自社の PC)・client (客先の PC)。どの段の道具まで
-#                   入れるか (② AI の道具・③ 個人のアカウントにつながるもの) の既定を決める。段・道具の switch
+#                   入れるか (② AI の道具・③ 個人の道具) の既定を決める。段・道具の switch
 #                   (claude.enable・dotfiles.ntn.enable など) で上書きできる (nix/README.md「設定グループ」)
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
 #                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を

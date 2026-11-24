@@ -1235,7 +1235,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 （[ADR 057](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/057_host_setting_groups_20261115T111656JST/README.md)）。
 選んだ時点でそのグループの既定が入り、そのあとはホストのファイルで道具ごとに直す。グループを書かないホストは `personal`。
 
-| グループ | 使う PC | ① エンジニアの道具 | ② AI の道具 | ③ 個人のアカウント |
+| グループ | 使う PC | ① エンジニアの道具 | ② AI の道具 | ③ 個人の道具 |
 | --- | --- | --- | --- | --- |
 | `personal`（既定） | 個人の開発用の PC | on | on | on |
 | `company` | 自社の PC（個人ほどではないが、ある程度自由） | on | on | off |
@@ -1245,7 +1245,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | --- | --- | --- |
 | ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
 | ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
-| ③ 個人のアカウントにつながるもの | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
+| ③ 個人の道具（個人のアカウントにつながるもの） | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・Windows の type-clipboard（自作のアプリ。個人の GitHub の repo の Release）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
 | ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
 
 既定は 3 つの高さで決まり、どれも option の既定（優先度 1500）なので、ホストのファイルは今と同じ素の値でどの高さでも上書きできる
@@ -1267,12 +1267,13 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | `dotfiles.herdr.hub.enable` | ② と ③ | setup の bootstrap-herdr-hub（`~/h`） |
 | `dotfiles.ntn.enable` | ③ | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
 | `wsl.windowsFiles.ntn.enable` | ③ | Windows の ntn |
-| `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable` | ③ (既定は off) | Windows の Tailscale・sshd（`windowsFiles.enable` のマシンだけで効く。どのグループでも既定は false） |
+| `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` | ③ (既定は off) | Windows の Tailscale・sshd・type-clipboard（`windowsFiles.enable` のマシンだけで効く。どのグループでも既定は false） |
 | `dotfiles.git.identity.enable` | ③ | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
 
 既定が `false` の option（`onePassword.enable`・`claude.devTracker.enable`・`cursorAgent.enable`・`wsl.windowsFiles.enable`・
-`wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable` など）は今のまま（段によらず、使うホストが入れる。Windows の Tailscale は
-VPN の道具、Windows の sshd は PC に外から入る口で、`personal` でも既定で入れない）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
+`wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` など）は今のまま（段によらず、使うホストが
+入れる。Windows の Tailscale は VPN の道具、Windows の sshd は PC に外から入る口で、`personal` でも既定で入れない。Windows の type-clipboard も
+`personal` で既定で入れず、使う PC が入れる）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
 flake の checks の `groups-state` が段の on/off の 4 通りで確かめる。
 
 ```nix
@@ -1345,7 +1346,7 @@ bash $p summary --out <無い dir>                  # そのホストのペー�
 bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホストのページを docs/hosts/ に書く (--check は違いだけ)
 ```
 
-- 要約は図の HTML 版にして見る: 段（① エンジニアの道具 ⊂ ② AI の道具 ⊂ ③ 個人のアカウント）を入れ子の領域に、道具を箱に、ホストを
+- 要約は図の HTML 版にして見る: 段（① エンジニアの道具 ⊂ ② AI の道具 ⊂ ③ 個人の道具）を入れ子の領域に、道具を箱に、ホストを
   「入る道具だけを囲む色の線」に描く。タブで「このホスト」「既定（ホストで何も書かなかったとき）」「重ねて比べる」を切り替え、箱を押すと
   option・値・どこで決まったかが出る。HTML 版は 1 ファイルで完結し（外のファイルを読まない）、明るい色と暗い色を OS の設定で選ぶ。
   雛形は `nix/lib/host-summary/` の `page.html`・`page.css`・`page.js`、並び・配置・囲みは node のテスト（`host-summary-page-test`）が見る

@@ -452,7 +452,7 @@ let
       name = "line はグループと段を 1 行にし、text は効かない道具に off の条件を添える";
       ok =
         (hostWith { group = "client"; }).hostSummary.line
-        == "client (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 off · ③ 個人のアカウント off"
+        == "client (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 off · ③ 個人の道具 off"
         &&
           lib.hasInfix "Windows の Claude Code: – (wsl.windowsFiles.enable が off なので効かない)"
             (hostWith { }).hostSummary.text;
