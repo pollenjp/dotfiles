@@ -164,7 +164,7 @@ Test-Case '版が読めなければ unknown' 'unknown' { Get-ClaudeDesktopApplyB
 Test-Case '入れるのに固定した版が winget に無ければ not-listed' 'not-listed' { Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @('6.28899.6') -Target $V }
 Test-Case '版の一覧が読めなければ止めない' '' { Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @() -Target $V }
 Test-Case 'newer は止めない' '' { Get-ClaudeDesktopApplyBlocker -Plan 'newer' -Versions @('6.28899.6') -Target $V }
-Test-Case '入れる・上げるのに旧来の exe の Claude があれば legacy (固定した版が無いときは not-listed を先に)' @('legacy', 'legacy', 'not-listed', '') {
+Test-Case '入れる・上げるのに旧来の exe の Claude があれば legacy (固定した版が無いときも legacy を先に)' @('legacy', 'legacy', 'legacy', '') {
     Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @($V) -Target $V -Legacy $true
     Get-ClaudeDesktopApplyBlocker -Plan 'upgrade' -Versions @($V) -Target $V -Legacy $true
     Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @('6.28899.6') -Target $V -Legacy $true
@@ -227,9 +227,12 @@ Test-Case '状態の表: 旧来の exe の Claude が残っていれば ⚠ の�
     @($rows | Where-Object { $_.Text.StartsWith('※ ') -and ($_.Text.Contains('Update.exe') -or $_.Text.Contains('Claude.lnk')) }).Count
     @($rows | Where-Object { $_.Text.Contains('& "$env:LOCALAPPDATA\AnthropicClaude\Update.exe" --uninstall -s') }).Count -eq 1
 }
-Test-Case '状態の表: 入っていなくて旧来の exe の Claude があれば、入れないことも ※ で添える' 3 {
+Test-Case '状態の表: 入っていなくて旧来の exe の Claude があれば、入れないことも ※ で添える (古いときは上げないこと)' @(3, $true, $true) {
     $missing = New-State @{ Exists = $false; Plan = 'install'; Installed = $null; InstalledText = $null; Location = $null; Pinned = $false; Service = $null; Legacy = $true }
-    @((Format-ClaudeDesktopState -State $missing -Target $V) | Where-Object { $_.Text.StartsWith('※ ') -and ($_.Text.Contains('Update.exe') -or $_.Text.Contains('Claude.lnk') -or $_.Text.Contains('MSIX を入れない')) }).Count
+    $rows = @(Format-ClaudeDesktopState -State $missing -Target $V)
+    @($rows | Where-Object { $_.Text.StartsWith('※ ') -and ($_.Text.Contains('Update.exe') -or $_.Text.Contains('Claude.lnk') -or $_.Text.Contains('MSIX を入れない')) }).Count
+    @($rows | Where-Object { $_.Text -eq '※ 旧来の exe の Claude があるうちは、MSIX を入れない (外した後に dotfiles apply か Install-ClaudeDesktop で入れる)' }).Count -eq 1
+    @((Format-ClaudeDesktopState -State (New-State @{ Plan = 'upgrade'; Legacy = $true }) -Target $V) | Where-Object { $_.Text -eq '※ 旧来の exe の Claude があるうちは、MSIX を上げない (外した後に Install-ClaudeDesktop で上げる)' }).Count -eq 1
 }
 Test-Case '状態の表: 旧来の exe の Claude の版が読めなければ、版を書かない' @("⚠ 旧来の exe の Claude$(' ' * 8): 入っている (%LOCALAPPDATA%\AnthropicClaude) → ※ の手順で外す") {
     @((Format-ClaudeDesktopState -State (New-State @{ Legacy = $true }) -Target $V) | Where-Object { $_.Warn }).Text
@@ -272,6 +275,9 @@ Test-Case '締めの行: 旧来の exe の Claude が残っていれば、pin �
 Test-Case '締めの行: 入っていない・古いのに旧来の exe の Claude があれば、外してから入れると出す (runner が読む文言を含む)' @($legacyBlocks, $legacyBlocks) {
     (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'install'; Exists = $false; Legacy = $true }) -Code 1 -Blocker 'legacy' -Target $V -PackageId $Id).Text
     (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'upgrade'; Legacy = $true }) -Code 1 -Blocker 'legacy' -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: 固定した版が winget に無くても、旧来の exe の Claude が残っていればそちらを先に出す' $legacyBlocks {
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'install'; Exists = $false; Legacy = $true; Versions = @('6.28899.6') }) -Code 1 -Blocker 'legacy' -Target $V -PackageId $Id).Text
 }
 Test-Case '締めの行: 旧来の exe の行は、どちらも runner の印「旧来の exe の Claude が残っている」を含む' @($true, $true) {
     $legacyOnly.Contains('旧来の exe の Claude が残っている')
@@ -463,6 +469,24 @@ Test-Case '流れ: 旧来の exe があれば、-IfMissing も引数なしも入
         $r.Code
         @($r.Calls | Where-Object { $_.StartsWith('elevated') }).Count
     }
+}
+Test-Case '流れ: 古くて旧来の exe もあれば、引数なしでも pin を外さず、上げずに 1' @(1, $false, 0, $legacyBlocks) {
+    $r = Invoke-Flow @{ Legacy = $true; Msix = '5.11492.2.0'; Pinned = $true }
+    $r.Code
+    Test-Called $r 'winget pin remove'
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') }).Count
+    $r.Lines[-1]
+}
+Test-Case '流れ: 旧来の exe があり、固定した版が winget に無くても、-Check は 1 で締めの行は旧来の exe のこと' @(1, $legacyBlocks) {
+    $saved = $show
+    try {
+        $show = @('Found Claude [Anthropic.Claude]', 'Version', '-------', '6.28899.6')
+        $r = Invoke-Flow @{ Legacy = $true } -Check
+    } finally {
+        $show = $saved
+    }
+    $r.Code
+    $r.Lines[-1]
 }
 Test-Case '流れ: MSIX が揃っていて旧来の exe だけが残っていれば、何も打たずに 1' @(1, 0, $false, $legacyOnly) {
     $r = Invoke-Flow @{ Legacy = $true; Msix = '5.11492.5.0'; Pinned = $true }

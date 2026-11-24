@@ -696,7 +696,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: Some(Marked {
             mark: "旧来の exe の Claude が残っている",
-            text: "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。外すまで MSIX は入れない)",
+            text: "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。MSIX が入っていなければ、外した後の dotfiles apply で入れる)",
             notes: &[
                 "旧来の exe の Claude を開くと Cowork が無い。外すには、Claude を終えてから (☰ > File > Exit)、管理者でない PowerShell で & \"$env:LOCALAPPDATA\\AnthropicClaude\\Update.exe\" --uninstall -s を打つ",
                 "終わったら %LOCALAPPDATA%\\AnthropicClaude と、スタートメニューの %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Claude.lnk を消す (win/README.md の「Claude Desktop」)",
@@ -2040,7 +2040,7 @@ mod tests {
                 assert_eq!(o[0].kind, Kind::Manual, "{line}");
                 assert_eq!(
                     o[0].text,
-                    "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。外すまで MSIX は入れない)",
+                    "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。MSIX が入っていなければ、外した後の dotfiles apply で入れる)",
                     "{line}"
                 );
                 assert_eq!(o[0].notes.len(), 2, "{line}");
