@@ -11,6 +11,9 @@
 //   c            新しいタブ (tab.new。Ctrl+Shift+T と同じく、開く前の space の focus のペインのフォルダで開く)
 //   Tab o        今のタブの次のペイン                  g "         端末の picker (mod.open:picker)
 //   Shift+O      次のエージェント (agent.next。旧 herdr の open_notification_target の代わり)
+//   Shift+Q      今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す。開く前の space で確かめの小窓 (自作の mod
+//                pjp-worktree-remove) を開き、止める端末と警告を見せて Enter を待つ (branch は残す)。消す命令なので、一覧ではほかの行と並べず、
+//                下に 1 行で分けて出す (BINDINGS の wide)
 //   Esc          取り消す。割り当てに無いキーは、何もせずに閉じる
 //   Ctrl+K       (prefix のキーをもう 1 回) 開く前に focus があった端末へ Ctrl+K を送る (hc keys)。keys.json の section mod:pjp-prefix が、
 //                小窓に focus がある間の Ctrl+K を pjp-prefix.literal (nextCommand の "literal") にする。無いと、global の Ctrl+K
@@ -49,7 +52,8 @@ const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", 
 // 押しても次のキーとして読まないもの (修飾キーだけ)
 const MODIFIERS = new Set(["shift", "control", "ctrl", "alt", "platform", "cmd", "super", "function", "fn", "capslock"]);
 
-// 押すキー (打った文字。Shift+C は "C"。文字を打たないキーはその名前) → 命令。label は小窓の一覧に出す
+// 押すキー (打った文字。Shift+C は "C"。文字を打たないキーはその名前) → 命令。label は小窓の一覧に出す。wide の行は 2 列の一覧に入れず、その下に
+// 1 行で出す (note は行の右に添える一言)
 const BINDINGS = [
   { keys: ["C"], label: "worktree (名前は自動)", act: (p, cx) => p.worktree(cx, false) },
   { keys: ["G"], label: "worktree + Claude 起動", act: (p, cx) => p.worktree(cx, true) },
@@ -62,6 +66,7 @@ const BINDINGS = [
   { keys: ["tab", "o"], label: "次のペイン", act: (p) => p.nextPane() },
   { keys: ["g", "\""], label: "端末を選ぶ (picker)", act: (p) => p.runClosed("mod.open", { name: "picker" }) },
   { keys: ["O"], label: "次のエージェント", act: (p) => p.runClosed("agent.next") },
+  { keys: ["Q"], label: "space の端末を閉じて worktree を消す", note: "確かめてから", wide: true, act: (p) => p.removeWorktree() },
 ];
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];
@@ -183,6 +188,14 @@ export default class Prefix extends View {
     this.dismiss();
   }
 
+  // 今の space の端末を止めて worktree を消す確かめの小窓 (自作の mod pjp-worktree-remove)。開く前の space を渡す (無ければ小窓が focus のある
+  // space を使う)。止める・消すは小窓の側で、Enter を待ってから。window で開く: 外を押しても閉じず、Esc は mod に届くので、止めて消している間は
+  // 閉じないでいられる (dialog は Esc を herdr-app が取って閉じ、閉じると小窓の仕事が打ち切られる)
+  removeWorktree() {
+    this.dismiss();
+    openOverlay({ mod: "pjp-worktree-remove", kind: "window", width: 560, height: 440, props: this.spaceArg() });
+  }
+
   // 名前を自動で付けた worktree。今の space の machine で、開く前のペインのフォルダの repo に同じ名前の branch が無いかを見てから、
   // herdr-app の worktree の小窓に渡す (git の repo でない・machine に届かないときは確かめずに渡し、小窓にわけを出させる)
   worktree(cx, withClaude) {
@@ -255,9 +268,13 @@ export default class Prefix extends View {
           if (!this.busy && !this.closed) b.act(this, cx);
         })
         .child(h_flex().w(104).flex_none().gap(4).children(b.keys.map(chip)))
-        .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(b.label));
-    const half = Math.ceil(BINDINGS.length / 2);
-    const col = (from, to) => v_flex().flex_1().min_w(0).gap(2).children(BINDINGS.slice(from, to).map((b, i) => row(b, from + i)));
+        .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(b.label))
+        .when(Boolean(b.note), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(b.note)));
+    // 2 列に並べる行と、その下に 1 行で出す行 (wide)。行の id は BINDINGS の中の位置
+    const grid = BINDINGS.filter((b) => !b.wide);
+    const wide = BINDINGS.filter((b) => b.wide);
+    const half = Math.ceil(grid.length / 2);
+    const col = (list) => v_flex().flex_1().min_w(0).gap(2).children(list.map((b) => row(b, BINDINGS.indexOf(b))));
     const prefix = showKey(this.prefix);
     return v_flex()
       .id("pjp-prefix")
@@ -279,7 +296,10 @@ export default class Prefix extends View {
       .child(
         this.busy
           ? h_flex().gap(8).items_center().text_color(t.muted).child(div().frames(SPINNER, 90)).child("同じ名前の branch が無いかを見ています")
-          : h_flex().gap(16).child(col(0, half)).child(col(half, BINDINGS.length)),
+          : v_flex()
+              .gap(10)
+              .child(h_flex().gap(16).child(col(grid.slice(0, half))).child(col(grid.slice(half))))
+              .children(wide.map((b) => row(b, BINDINGS.indexOf(b)))),
       )
       .when(this.literal && !this.busy, (el) => el.child(div().text_size(11).text_color(t.dim).child(`${prefix} をもう一度: 開く前の端末へ ${prefix} を送る`)));
   }
