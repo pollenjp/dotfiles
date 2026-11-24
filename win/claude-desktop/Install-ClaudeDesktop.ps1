@@ -21,9 +21,10 @@ runner (手順 claude-desktop。ホストの値の [tools] windowsClaudeDesktop 
 入っている版は Get-AppxPackage -Name Claude の Version で読む (Anthropic の案内の検出の手。PackageFamilyName が Claude_pzs8sxrjxfjjc の
 もの)。PowerShell 7 の Appx は読めないことがあるので、PowerShell 7 から打ったときは Windows PowerShell 5.1 に読ませる。
 
-旧来の exe の Claude (%LOCALAPPDATA%\AnthropicClaude) は、MSIX を入れても残り、そちらを開くと Cowork が無い。見つけたら外し方を出す
-(外すのは人。このスクリプトは外さない)。Cowork には Windows の仮想マシン プラットフォーム (VirtualMachinePlatform) も要る。off なら
-そう知らせる (on にするのは人。Windows の再起動が要る)。
+旧来の exe の Claude (%LOCALAPPDATA%\AnthropicClaude) は、そちらを開くと Cowork が無い。見つけたら外し方を出す (外すのは人。この
+スクリプトは外さない)。旧来の exe があるうちは MSIX を入れない (winget は旧来の exe も Anthropic.Claude と数え、入れる手を上げる手に
+切り替えるので、MSIX が入らないまま落ちる見込み)。Cowork には Windows の仮想マシン プラットフォーム (VirtualMachinePlatform) も要る。
+off ならそう知らせる (on にするのは人。Windows の再起動が要る)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
@@ -33,11 +34,12 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 
 .PARAMETER Check
 今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば (入っている版の方が新しいときも) 終了コード 0、
-差があれば 1 (旧来の exe の Claude が残っているときも)、入っていなければ 3、確かめられなければ 2。
+差があれば 1、入っていなければ 3、確かめられなければ 2。旧来の exe の Claude が残っていれば、MSIX が入っていなくても 1 (締めの行は
+旧来の exe のこと。runner が UAC を出して入れにいかないように)。
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す (UAC の確認が 1 回出る)。入っていれば -Check と同じで、上げはしない (runner が使う)。
-入れた後も旧来の exe の Claude が残っていれば 1 を返す (締めの行がそのことだけなら、MSIX の Claude Desktop は揃っている)。
+旧来の exe の Claude が残っていれば、入れずに -Check と同じ (1)。
 #>
 [CmdletBinding()]
 param(
@@ -146,17 +148,19 @@ function Get-WingetPinnedHint {
     "※ winget の pin に止められた。winget pin list --id $PackageId --exact で pin を確かめ、winget pin remove --id $PackageId --exact で外してから打ち直す (打ち直すと、揃えた後に pin を足し直す)"
 }
 
-# 終了コード。入っていなければ 3 (旧来の exe の Claude があっても)、版 (入っている版の方が新しいときも) と pin が揃っていて旧来の exe の
-# Claude も無ければ 0、ほかは 1
+# 終了コード。入っていなければ 3 (旧来の exe の Claude があれば 1。入れられないので、runner が -IfMissing で入れにいかないように)、版
+# (入っている版の方が新しいときも) と pin が揃っていて旧来の exe の Claude も無ければ 0、ほかは 1
 function Get-ClaudeDesktopExitCode {
     param($State)
-    if ($State.Plan -eq 'install') { return 3 }
+    if ($State.Plan -eq 'install') {
+        if ($State.Legacy) { return 1 }
+        return 3
+    }
     if ((@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and (-not $State.Legacy)) { return 0 }
     1
 }
 
-# MSIX の Claude Desktop の側 (版と pin) は揃っていて、残っているのが旧来の exe の Claude だけか (締めの行をそのことにする。runner は
-# その行で、入れた後の 1 を入った扱いにする)
+# MSIX の Claude Desktop の側 (版と pin) は揃っていて、残っているのが旧来の exe の Claude だけか (揃えるときに、することが無い)
 function Test-ClaudeDesktopLegacyOnly {
     param($State)
     (@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and $State.Legacy
@@ -165,11 +169,14 @@ function Test-ClaudeDesktopLegacyOnly {
 # 揃える前に止める理由。無ければ $null
 #   unknown:    版が読めないので比べられない
 #   not-listed: 入れる・上げるのに、固定した版が winget に無い (版の一覧が読めたときだけ判断する)
+#   legacy:     入れる・上げるのに、旧来の exe の Claude が残っている (winget は旧来の exe も Anthropic.Claude と数え、入れる手を上げる手に
+#               切り替えるので、MSIX が入らないまま落ちる見込み。外してから入れる)
 function Get-ClaudeDesktopApplyBlocker {
-    param([string]$Plan, [string[]]$Versions, [string]$Target)
+    param([string]$Plan, [string[]]$Versions, [string]$Target, [bool]$Legacy = $false)
     if ($Plan -eq 'unknown') { return 'unknown' }
     $known = @($Versions | Where-Object { $_ })
     if ((@('install', 'upgrade') -contains $Plan) -and ($known.Count -gt 0) -and ($known -cnotcontains $Target)) { return 'not-listed' }
+    if ((@('install', 'upgrade') -contains $Plan) -and $Legacy) { return 'legacy' }
     $null
 }
 
@@ -274,10 +281,14 @@ function Format-ClaudeDesktopState {
         foreach ($step in (Format-ClaudeLegacySteps)) {
             [pscustomobject]@{ Text = "※ $step"; Warn = $false }
         }
+        if (@('install', 'upgrade') -contains $State.Plan) {
+            [pscustomobject]@{ Text = '※ 旧来の exe の Claude があるうちは、MSIX を入れない・上げない (外した後に Install-ClaudeDesktop か dotfiles apply で入れる)'; Warn = $false }
+        }
     }
 }
 
-# 締めの行 (-Check と、-IfMissing で入っていたとき・揃えた後に読み直したとき)。Text と、直すことがあるかの Warn (黄色にする)。
+# 締めの行 (-Check と、-IfMissing で入っていたとき・揃えた後に読み直したとき)。Text と、直すことがあるかの Warn (黄色にする)。旧来の
+# exe の Claude が残っていれば、pin などより先にそのことを出す (外すまで入れない・上げない。pin を足すのは外した後でよい)。
 # runner (win/runner/src/steps/ps1.rs) は、終了コードと「旧来の exe の Claude が残っている」の文言で行を決める (文言を変えるときは向こうも直す)
 function Get-ClaudeDesktopVerdict {
     param($State, [int]$Code, [string]$Blocker, [string]$Target, [string]$PackageId)
@@ -287,12 +298,14 @@ function Get-ClaudeDesktopVerdict {
         '揃っている'
     } elseif ($Blocker -eq 'not-listed') {
         "⚠️ 固定した版 $Target が winget に無い → Install-ClaudeDesktop.ps1 の -Version を winget show --id $PackageId --versions にある版へ変える ⚠️"
+    } elseif ($State.Legacy -and (@('install', 'upgrade') -contains $State.Plan)) {
+        '⚠️ 旧来の exe の Claude が残っている → ※ の手順で外してから、Install-ClaudeDesktop で入れる・揃える (外すまで MSIX は入れない) ⚠️'
+    } elseif ($State.Legacy) {
+        '⚠️ 旧来の exe の Claude が残っている → ※ の手順で外す (Install-ClaudeDesktop は外さない) ⚠️'
     } elseif ($Code -eq 3) {
         '⚠️ Claude Desktop (MSIX) が入っていない → Install-ClaudeDesktop で入れる (UAC の確認が 1 回出る) ⚠️'
     } elseif ($State.Plan -eq 'unknown') {
         '⚠️ 入っている版が読めない → Get-AppxPackage -Name Claude で入っている版を確かめる ⚠️'
-    } elseif (Test-ClaudeDesktopLegacyOnly -State $State) {
-        '⚠️ 旧来の exe の Claude が残っている → ※ の手順で外す (Install-ClaudeDesktop は外さない) ⚠️'
     } elseif (@('none', 'newer') -contains $State.Plan) {
         '⚠️ winget pin が無い → Install-ClaudeDesktop で足す (UAC の確認は出ない) ⚠️'
     } else {
@@ -360,6 +373,19 @@ function Invoke-Winget {
     $ErrorActionPreference = 'Continue'
     $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" }
     [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @(Select-WingetOutputLines -Lines $lines) }
+}
+
+# 昇格して打つ winget.exe の絶対パス。アプリ インストーラーの実行エイリアス (%LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe) があれば
+# それ、無ければ PATH の winget のうち .exe の実行ファイルだけ (関数・alias・PATH の先の winget.cmd や winget.ps1 は、管理者の権限で
+# 流さない)。無ければ $null
+function Resolve-WingetExe {
+    if ($env:LOCALAPPDATA) {
+        $alias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'
+        if (Test-Path -LiteralPath $alias) { return $alias }
+    }
+    $app = @(Get-Command -Name winget -CommandType Application -ErrorAction SilentlyContinue | Where-Object { "$($_.Source)" -like '*.exe' })
+    if ($app.Count -gt 0) { return $app[0].Source }
+    $null
 }
 
 # 今の PowerShell が管理者の権限で動いているか (昇格した会話なら、UAC を出さずにそのまま winget を打つ)
@@ -500,8 +526,8 @@ function Invoke-InstallClaudeDesktop {
     $target = ConvertTo-ClaudeDesktopVersion -Text $Version
     if (-not $target) { throw "-Version の形が違う: $Version" }
 
-    $wingetCommand = Get-Command winget -ErrorAction SilentlyContinue
-    if (-not $wingetCommand) {
+    $wingetExe = Resolve-WingetExe
+    if (-not $wingetExe) {
         Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
         return 2
     }
@@ -509,7 +535,7 @@ function Invoke-InstallClaudeDesktop {
     $state = Get-ClaudeDesktopState -PackageId $packageId -FamilyName $familyName -Target $target
     Write-ClaudeDesktopRows -Rows @(Format-ClaudeDesktopState -State $state -Target $Version)
     $code = Get-ClaudeDesktopExitCode -State $state
-    $blocker = Get-ClaudeDesktopApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version
+    $blocker = Get-ClaudeDesktopApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version -Legacy $state.Legacy
 
     # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
     if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
@@ -529,8 +555,9 @@ function Invoke-InstallClaudeDesktop {
         Write-Host "固定した版 $Version が winget に無いので入れられない。-Version を winget show --id $packageId --versions にある版へ変える"
         return 1
     }
-    # MSIX の側は揃っていて、残りが旧来の exe の Claude だけなら、することが無い (外すのは人。上の ※ の手順)
-    if (Test-ClaudeDesktopLegacyOnly -State $state) {
+    # 旧来の exe の Claude が残っていれば、MSIX を入れない・上げない。MSIX の側が揃っていて残りがそれだけなら、することが無い
+    # (どちらも外すのは人。上の ※ の手順)
+    if (($blocker -eq 'legacy') -or (Test-ClaudeDesktopLegacyOnly -State $state)) {
         Write-ClaudeDesktopRows -Rows @(Get-ClaudeDesktopVerdict -State $state -Code $code -Blocker $blocker -Target $Version -PackageId $packageId)
         return $code
     }
@@ -550,9 +577,11 @@ function Invoke-InstallClaudeDesktop {
         } else {
             Write-Host 'Windows のデスクトップに UAC の確認が 1 回出る (Windows PowerShell が winget で Claude Desktop を管理者の権限で入れる)。「はい」を押す'
         }
+        # 昇格した側の窓は隠すので、終わるまで winget の出力は出ない
+        Write-Host 'winget の出力は、入れ終わってからまとめて出す (MSIX は約 300 MB。数分かかる)'
         foreach ($arguments in @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)) {
             Write-Host "winget $($arguments -join ' ') (管理者の権限で)"
-            $result = Invoke-ElevatedWinget -Winget $wingetCommand.Source -Arguments $arguments
+            $result = Invoke-ElevatedWinget -Winget $wingetExe -Arguments $arguments
             $result.Lines | Select-Object -Last 8 | ForEach-Object { Write-Host "  $_" }
             if ($result.Declined) {
                 Write-Host 'UAC の確認を断った・出せなかった (SSH の会話では出せない)。デスクトップの PowerShell で Install-ClaudeDesktop を打ち直す'
@@ -598,7 +627,7 @@ function Invoke-InstallClaudeDesktop {
         Write-Host '揃った'
         return 0
     }
-    Write-ClaudeDesktopRows -Rows @(Get-ClaudeDesktopVerdict -State $after -Code $afterCode -Blocker (Get-ClaudeDesktopApplyBlocker -Plan $after.Plan -Versions $after.Versions -Target $Version) -Target $Version -PackageId $packageId)
+    Write-ClaudeDesktopRows -Rows @(Get-ClaudeDesktopVerdict -State $after -Code $afterCode -Blocker (Get-ClaudeDesktopApplyBlocker -Plan $after.Plan -Versions $after.Versions -Target $Version -Legacy $after.Legacy) -Target $Version -PackageId $packageId)
     return 1
 }
 

@@ -40,7 +40,7 @@ $Family = 'Claude_pzs8sxrjxfjjc'
 $V = '5.11492.5'
 $Loc = 'C:\Program Files\WindowsApps\Claude_5.11492.5.0_x64__pzs8sxrjxfjjc'
 
-# 2026-11-24 の winget-pkgs の manifests/a/Anthropic/Claude の版 (新しいものから)を、winget show --versions の形にしたもの
+# 2026-11-24 の winget-pkgs の manifests/a/Anthropic/Claude の版の、新しいものから一部を、winget show --versions の形にしたもの
 $show = @(
     'Found Claude [Anthropic.Claude]'
     'Version'
@@ -146,7 +146,8 @@ Test-Case 'pin に止められた (0x8A150068) なら外し方を添える' $tru
 Test-Case 'ほかの終了コードなら何も添えない' '' { Get-WingetPinnedHint -ExitCode 1 -PackageId $Id }
 
 # Get-ClaudeDesktopExitCode・Test-ClaudeDesktopLegacyOnly
-Test-Case '入っていなければ 3 (旧来の exe の Claude があっても)' 3 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'install'; Pinned = $false; Legacy = $true }) }
+Test-Case '入っていなければ 3' 3 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'install'; Pinned = $false }) }
+Test-Case '入っていなくても、旧来の exe の Claude があれば 1 (入れられないので、runner が入れにいかない)' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'install'; Pinned = $false; Legacy = $true }) }
 Test-Case '同じで pin があれば 0' 0 { Get-ClaudeDesktopExitCode -State (New-State) }
 Test-Case '新しくて pin があれば 0' 0 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'newer' }) }
 Test-Case '同じでも pin が無ければ 1' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Pinned = $false }) }
@@ -163,6 +164,12 @@ Test-Case '版が読めなければ unknown' 'unknown' { Get-ClaudeDesktopApplyB
 Test-Case '入れるのに固定した版が winget に無ければ not-listed' 'not-listed' { Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @('6.28899.6') -Target $V }
 Test-Case '版の一覧が読めなければ止めない' '' { Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @() -Target $V }
 Test-Case 'newer は止めない' '' { Get-ClaudeDesktopApplyBlocker -Plan 'newer' -Versions @('6.28899.6') -Target $V }
+Test-Case '入れる・上げるのに旧来の exe の Claude があれば legacy (固定した版が無いときは not-listed を先に)' @('legacy', 'legacy', 'not-listed', '') {
+    Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @($V) -Target $V -Legacy $true
+    Get-ClaudeDesktopApplyBlocker -Plan 'upgrade' -Versions @($V) -Target $V -Legacy $true
+    Get-ClaudeDesktopApplyBlocker -Plan 'install' -Versions @('6.28899.6') -Target $V -Legacy $true
+    Get-ClaudeDesktopApplyBlocker -Plan 'none' -Versions @($V) -Target $V -Legacy $true
+}
 
 # ConvertFrom-VmPlatformState
 Test-Case 'InstallState 1 は on・2 と 3 は off・ほかは unknown' @('on', 'off', 'off', 'unknown', 'unknown') {
@@ -220,6 +227,10 @@ Test-Case '状態の表: 旧来の exe の Claude が残っていれば ⚠ の�
     @($rows | Where-Object { $_.Text.StartsWith('※ ') -and ($_.Text.Contains('Update.exe') -or $_.Text.Contains('Claude.lnk')) }).Count
     @($rows | Where-Object { $_.Text.Contains('& "$env:LOCALAPPDATA\AnthropicClaude\Update.exe" --uninstall -s') }).Count -eq 1
 }
+Test-Case '状態の表: 入っていなくて旧来の exe の Claude があれば、入れないことも ※ で添える' 3 {
+    $missing = New-State @{ Exists = $false; Plan = 'install'; Installed = $null; InstalledText = $null; Location = $null; Pinned = $false; Service = $null; Legacy = $true }
+    @((Format-ClaudeDesktopState -State $missing -Target $V) | Where-Object { $_.Text.StartsWith('※ ') -and ($_.Text.Contains('Update.exe') -or $_.Text.Contains('Claude.lnk') -or $_.Text.Contains('MSIX を入れない')) }).Count
+}
 Test-Case '状態の表: 旧来の exe の Claude の版が読めなければ、版を書かない' @("⚠ 旧来の exe の Claude$(' ' * 8): 入っている (%LOCALAPPDATA%\AnthropicClaude) → ※ の手順で外す") {
     @((Format-ClaudeDesktopState -State (New-State @{ Legacy = $true }) -Target $V) | Where-Object { $_.Warn }).Text
 }
@@ -238,6 +249,7 @@ Test-Case '状態の表: 版が読めなければ「比べられない」と ※
 
 # Get-ClaudeDesktopVerdict
 $legacyOnly = '⚠️ 旧来の exe の Claude が残っている → ※ の手順で外す (Install-ClaudeDesktop は外さない) ⚠️'
+$legacyBlocks = '⚠️ 旧来の exe の Claude が残っている → ※ の手順で外してから、Install-ClaudeDesktop で入れる・揃える (外すまで MSIX は入れない) ⚠️'
 Test-Case '締めの行: 揃っている (新しい版なら下げないと添える)' @('揃っている', '揃っている (入っている版の方が新しい。下げない)') {
     (Get-ClaudeDesktopVerdict -State (New-State) -Code 0 -Blocker $null -Target $V -PackageId $Id).Text
     (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'newer' }) -Code 0 -Blocker $null -Target $V -PackageId $Id).Text
@@ -254,8 +266,16 @@ Test-Case '締めの行: 版が読めない' '⚠️ 入っている版が読め
 Test-Case '締めの行: 残りが旧来の exe の Claude だけ (runner が読む文言)' $legacyOnly {
     (Get-ClaudeDesktopVerdict -State (New-State @{ Legacy = $true }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
 }
-Test-Case '締めの行: pin も無ければ pin のことを先に出す (旧来の exe の Claude の行にしない)' '⚠️ winget pin が無い → Install-ClaudeDesktop で足す (UAC の確認は出ない) ⚠️' {
+Test-Case '締めの行: 旧来の exe の Claude が残っていれば、pin より先にそのことを出す' $legacyOnly {
     (Get-ClaudeDesktopVerdict -State (New-State @{ Legacy = $true; Pinned = $false }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: 入っていない・古いのに旧来の exe の Claude があれば、外してから入れると出す (runner が読む文言を含む)' @($legacyBlocks, $legacyBlocks) {
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'install'; Exists = $false; Legacy = $true }) -Code 1 -Blocker 'legacy' -Target $V -PackageId $Id).Text
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'upgrade'; Legacy = $true }) -Code 1 -Blocker 'legacy' -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: 旧来の exe の行は、どちらも runner の印「旧来の exe の Claude が残っている」を含む' @($true, $true) {
+    $legacyOnly.Contains('旧来の exe の Claude が残っている')
+    $legacyBlocks.Contains('旧来の exe の Claude が残っている')
 }
 Test-Case '締めの行: 古い' '⚠️ 固定した版より古い → Install-ClaudeDesktop で揃える (Claude を終えてから。UAC の確認が 1 回出る) ⚠️' {
     (Get-ClaudeDesktopVerdict -State (New-State @{ Plan = 'upgrade' }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
@@ -333,6 +353,166 @@ try {
     }
 } finally {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# ---------------------------------------------------------------------------
+# Invoke-InstallClaudeDesktop の流れ。Windows に触る関数を差し替えて流し、打った winget・昇格・締めの行・終了コードを見る
+# (dot-source の後に同じ名前の関数を定義し直すと差し替わる。上の試験はもう流れたので、ここが最後)
+# ---------------------------------------------------------------------------
+$script:W = $null
+function Reset-World {
+    param([hashtable]$Values = @{})
+    $script:W = [ordered]@{
+        Msix        = $null
+        Legacy      = $false
+        Pinned      = $false
+        Elevated    = $false
+        Declined    = $false
+        InstallExit = 0
+        InstallAdds = $true
+        PinAddExit  = 0
+        WingetExe   = 'C:\Users\a\AppData\Local\Microsoft\WindowsApps\winget.exe'
+        Calls       = New-Object System.Collections.ArrayList
+    }
+    foreach ($k in $Values.Keys) { $script:W[$k] = $Values[$k] }
+}
+function Resolve-WingetExe { $script:W.WingetExe }
+function Get-ClaudeAppxLines { if ($script:W.Msix) { "Claude`t$Family`t$($script:W.Msix)`t$Loc" } }
+function Invoke-Winget {
+    param([string[]]$Arguments)
+    $verb = @($Arguments[0..1]) -join ' '
+    [void]$script:W.Calls.Add("winget $verb")
+    switch ($verb) {
+        'pin list' {
+            $lines = @('Name   Id               Version')
+            if ($script:W.Pinned) { $lines += "Claude Anthropic.Claude $($script:W.Msix)" }
+            return [pscustomobject]@{ ExitCode = 0; Lines = $lines }
+        }
+        'pin add' {
+            if ($script:W.PinAddExit -eq 0) { $script:W.Pinned = $true }
+            return [pscustomobject]@{ ExitCode = $script:W.PinAddExit; Lines = @() }
+        }
+        'pin remove' {
+            $script:W.Pinned = $false
+            return [pscustomobject]@{ ExitCode = 0; Lines = @() }
+        }
+    }
+    if ($Arguments[0] -eq 'show') { return [pscustomobject]@{ ExitCode = 0; Lines = $show } }
+    throw "思わぬ winget: $($Arguments -join ' ')"
+}
+function Invoke-ElevatedWinget {
+    param([string]$Winget, [string[]]$Arguments)
+    [void]$script:W.Calls.Add("elevated $($Arguments[0])$(if ($Arguments -contains '--include-pinned') { ' --include-pinned' })")
+    if ($script:W.Declined) { return [pscustomobject]@{ ExitCode = 1223; Lines = @('UAC: The operation was canceled by the user.'); Declined = $true } }
+    if (($script:W.InstallExit -eq 0) -and $script:W.InstallAdds) { $script:W.Msix = '5.11492.5.0' }
+    [pscustomobject]@{ ExitCode = $script:W.InstallExit; Lines = @('winget の出力'); Declined = $false }
+}
+function Test-Elevated { $script:W.Elevated }
+function Get-ClaudeLegacyState { [pscustomobject]@{ Exists = $script:W.Legacy; Dir = 'C:\Users\a\AppData\Local\AnthropicClaude'; Version = $null } }
+function Get-CoworkServiceStatus { if ($script:W.Msix) { 'Running' } else { $null } }
+function Get-VmPlatformInstallState { 1 }
+
+# 流して、終了コード・出した行 (Write-Host)・打ったものを返す
+function Invoke-Flow {
+    param([hashtable]$World = @{}, [switch]$Check, [switch]$IfMissing)
+    Reset-World $World
+    $items = @(& { Invoke-InstallClaudeDesktop -Version $V -Check:$Check -IfMissing:$IfMissing } 6>&1)
+    [pscustomobject]@{
+        Code  = @($items | Where-Object { $_ -is [int] })[-1]
+        Lines = @($items | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | ForEach-Object { "$($_.MessageData)" })
+        Calls = @($script:W.Calls)
+    }
+}
+function Test-Called {
+    param($Run, [string]$Call)
+    @($Run.Calls | Where-Object { $_ -eq $Call }).Count -gt 0
+}
+
+$notInstalled = '⚠️ Claude Desktop (MSIX) が入っていない → Install-ClaudeDesktop で入れる (UAC の確認が 1 回出る) ⚠️'
+Test-Case '流れ: 入っていなければ昇格して入れ、pin を足して揃う (UAC の前置き・待つ間の文・サインインの案内)' @(0, 'elevated install', $true, $true, $true, $true) {
+    $r = Invoke-Flow -IfMissing
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') }) -join ','
+    (Test-Called $r 'winget pin add') -and ([array]::IndexOf($r.Calls, 'winget pin add') -gt [array]::IndexOf($r.Calls, 'elevated install'))
+    @($r.Lines | Where-Object { $_.StartsWith('Windows のデスクトップに UAC の確認が 1 回出る') }).Count -eq 1
+    @($r.Lines | Where-Object { $_.StartsWith('winget の出力は、入れ終わってからまとめて出す') }).Count -eq 1
+    @($r.Lines | Where-Object { $_.StartsWith('Claude のサインインは手でする') }).Count -eq 1 -and ($r.Lines[-1] -eq '揃った')
+}
+Test-Case '流れ: -Check は何も変えず、入っていなければ 3' @(3, $false, $false, $notInstalled) {
+    $r = Invoke-Flow -Check
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') }).Count -gt 0
+    Test-Called $r 'winget pin add'
+    $r.Lines[-1]
+}
+Test-Case '流れ: UAC を断ったら 1 で、pin を足さず、断ったと出す (runner が読む印)' @(1, $false, $true, $notInstalled) {
+    $r = Invoke-Flow @{ Declined = $true } -IfMissing
+    $r.Code
+    Test-Called $r 'winget pin add'
+    @($r.Lines | Where-Object { $_.StartsWith('UAC の確認を断った') }).Count -eq 1
+    $r.Lines[-1]
+}
+Test-Case '流れ: 旧来の exe があれば、入っていなくても -Check は 1 で、締めの行は旧来の exe のこと' @(1, $legacyBlocks) {
+    $r = Invoke-Flow @{ Legacy = $true } -Check
+    $r.Code
+    $r.Lines[-1]
+}
+Test-Case '流れ: 旧来の exe があれば、-IfMissing も引数なしも入れずに 1 (UAC を出さない)' @(1, 0, 1, 0) {
+    foreach ($ifMissing in @($true, $false)) {
+        $r = Invoke-Flow @{ Legacy = $true } -IfMissing:$ifMissing
+        $r.Code
+        @($r.Calls | Where-Object { $_.StartsWith('elevated') }).Count
+    }
+}
+Test-Case '流れ: MSIX が揃っていて旧来の exe だけが残っていれば、何も打たずに 1' @(1, 0, $false, $legacyOnly) {
+    $r = Invoke-Flow @{ Legacy = $true; Msix = '5.11492.5.0'; Pinned = $true }
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') }).Count
+    Test-Called $r 'winget pin add'
+    $r.Lines[-1]
+}
+Test-Case '流れ: MSIX は入っていて pin が無く、旧来の exe もあれば、pin だけ足して 1 (締めの行は旧来の exe のこと)' @(1, $true, $legacyOnly) {
+    $r = Invoke-Flow @{ Legacy = $true; Msix = '5.11492.5.0' }
+    $r.Code
+    Test-Called $r 'winget pin add'
+    $r.Lines[-1]
+}
+Test-Case '流れ: 古ければ (引数なし) pin を外し、--include-pinned で昇格して上げ、pin を足し直して揃う' @(0, $true, $true) {
+    $r = Invoke-Flow @{ Msix = '5.11492.2.0'; Pinned = $true }
+    $r.Code
+    ([array]::IndexOf($r.Calls, 'winget pin remove') -lt [array]::IndexOf($r.Calls, 'elevated upgrade --include-pinned')) -and ([array]::IndexOf($r.Calls, 'elevated upgrade --include-pinned') -lt [array]::IndexOf($r.Calls, 'winget pin add'))
+    @($r.Lines | Where-Object { $_.StartsWith('上げる前に Claude を終える') }).Count -eq 1
+}
+Test-Case '流れ: -IfMissing は入っていれば上げない (古くても 1 で、何も打たない)' @(1, 0) {
+    $r = Invoke-Flow @{ Msix = '5.11492.2.0'; Pinned = $true } -IfMissing
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') -or $_.StartsWith('winget pin add') -or $_.StartsWith('winget pin remove') }).Count
+}
+Test-Case '流れ: 入っている版の方が新しければ 0 で、下げない' @(0, '揃っている (入っている版の方が新しい。下げない)') {
+    $r = Invoke-Flow @{ Msix = '6.28899.6.0'; Pinned = $true } -Check
+    $r.Code
+    $r.Lines[-1]
+}
+Test-Case '流れ: winget は終わったのにこのユーザーに出なければ、別のユーザーに入ったかもしれないと出して 1' @(1, $true) {
+    $r = Invoke-Flow @{ InstallAdds = $false } -IfMissing
+    $r.Code
+    @($r.Lines | Where-Object { $_.StartsWith('※ winget は終わったが、このユーザーの Get-AppxPackage に Claude が出ない') }).Count -eq 1
+}
+Test-Case '流れ: winget が落ちたら 1 で、終了コードを出す' @(1, $true, $false) {
+    $r = Invoke-Flow @{ InstallExit = -1978335189 } -IfMissing
+    $r.Code
+    @($r.Lines | Where-Object { $_.StartsWith('winget が失敗した (終了コード 0x8A15002B)') }).Count -eq 1
+    Test-Called $r 'winget pin add'
+}
+Test-Case '流れ: 昇格した会話なら UAC を出さないと出す' @(0, $true) {
+    $r = Invoke-Flow @{ Elevated = $true } -IfMissing
+    $r.Code
+    @($r.Lines | Where-Object { $_ -eq '管理者の権限で動いているので、UAC の確認を出さずに winget を打つ' }).Count -eq 1
+}
+Test-Case '流れ: winget (の exe) が見つからなければ 2' @(2, 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる') {
+    $r = Invoke-Flow @{ WingetExe = $null } -Check
+    $r.Code
+    $r.Lines[-1]
 }
 
 if ($script:Failures -gt 0) {

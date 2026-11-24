@@ -116,9 +116,9 @@ pub struct Ps1Spec {
     pub check_hang: Option<&'static str>,
     /// Windows にしか無い手順か (WSL の `bootstrap-windows-<id>.sh` を持たない。`StepInfo::windows_only`。受け持ちによらず runner が受け持つ)
     pub windows_only: bool,
-    /// 入れた後も残る、ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude)。ps1 は、ほかが揃っていて残りがそれだけのとき、
-    /// 締めの行に `mark` を書いて 1 を返す。check はその 1 を「固定した版と揃っていない」の代わりにこの行にし、apply は入れた後のその 1 を
-    /// 入った扱いにしてこの行を足す (herdr の Herdr.Herdr.Preview と同じ形を、表の値にしたもの)
+    /// ps1 も runner も直さず、残っている間は揃わないもの (claude-desktop の旧来の exe の Claude)。ps1 は、それが残っているとき締めの行に
+    /// `mark` を書いて 1 を返す (入っていなくても 3 にしない。入れられないので)。check も apply も、その 1 を「固定した版と揃っていない」の
+    /// 代わりにこの行にし、何も打たない (人が外すまで知らせる)
     pub leftover: Option<Marked>,
     /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off)。
     /// ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
@@ -643,8 +643,8 @@ pub const SPECS: &[Ps1Spec] = &[
     },
     // Claude Desktop (Windows にしか無い手順。WSL の setup には無い)。winget の Anthropic.Claude の MSIX を、昇格した Windows PowerShell の winget で
     // 入れる (Cowork の常駐 CoworkVMService は管理者の権限で入れたときだけ登録される。UAC の確認が 1 回出る)。版の扱いは T3 Code と同じ
-    // (入っていないときだけ入れ、自動更新で上がった版は下げない)。旧来の exe の Claude が残っていれば外し方を、仮想マシン プラットフォームが
-    // off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/098_win_claude_desktop_msix_*)
+    // (入っていないときだけ入れ、自動更新で上がった版は下げない)。旧来の exe の Claude が残っていれば、入れずに外し方を (ps1 は入っていなくても
+    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/098_win_claude_desktop_msix_*)
     Ps1Spec {
         id: "claude-desktop",
         windows_only: true,
@@ -660,7 +660,7 @@ pub const SPECS: &[Ps1Spec] = &[
         // MSIX は約 300 MB。UAC の確認を押すまでの間も待つ
         install_secs: 1800,
         // 入っている版の方が新しいとき (Claude Desktop の自動更新で上がった) は ps1 が 0 を返す。1 は古い・pin が無い・版が読めない・旧来の
-        // exe の Claude が残っている
+        // exe の Claude が残っている (入っていなくても)
         policy: Policy::Warn,
         uac: true,
         ok_text: "Windows の Claude Desktop は、dotfiles で固定した版以上で入っています。",
@@ -696,7 +696,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: Some(Marked {
             mark: "旧来の exe の Claude が残っている",
-            text: "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない)",
+            text: "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。外すまで MSIX は入れない)",
             notes: &[
                 "旧来の exe の Claude を開くと Cowork が無い。外すには、Claude を終えてから (☰ > File > Exit)、管理者でない PowerShell で & \"$env:LOCALAPPDATA\\AnthropicClaude\\Update.exe\" --uninstall -s を打つ",
                 "終わったら %LOCALAPPDATA%\\AnthropicClaude と、スタートメニューの %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Claude.lnk を消す (win/README.md の「Claude Desktop」)",
@@ -1145,7 +1145,7 @@ impl Ps1Step {
                     Plan::Install
                 }
             }
-            // 残りが ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude) だけ。手順の Policy によらず、その行を出す
+            // ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude) が残っている。手順の Policy によらず、その行を出す
             (Some(1), true) if s.leftover.is_some_and(|m| m.found(lines)) => Plan::Leftover,
             (Some(1), true) => match s.policy {
                 Policy::Warn => Plan::Warn,
@@ -1183,7 +1183,7 @@ enum Plan {
     HerdrWarn,
     /// PATH のずれだけ (知らせるだけ)
     PathOnly,
-    /// 残りが、ps1 も runner も直さないもの (`Ps1Spec::leftover`) だけ (知らせるだけ)
+    /// ps1 も runner も直さないもの (`Ps1Spec::leftover`) が残っている (知らせるだけ)
     Leftover,
     /// 確かめられなかった
     CheckFailed,
@@ -1479,9 +1479,7 @@ impl Ps1Step {
         // herdr: Preview が残っていると -IfMissing は 1 を返す。締めの行が Preview のことだけなら入った扱い
         let herdr_preview_only =
             s.policy == Policy::Herdr && code == Some(1) && v.preview && !v.sync;
-        // 入れた後に残ったのが、ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude) だけなら、入った扱いにしてその行を足す
-        let leftover = s.leftover.filter(|m| code == Some(1) && m.found(&r.output));
-        if code == Some(0) || herdr_preview_only || leftover.is_some() {
+        if code == Some(0) || herdr_preview_only {
             if relay_only {
                 ctx.say(RELAY_SYNCED);
             } else {
@@ -1499,9 +1497,6 @@ impl Ps1Step {
                     o = o.note(*n);
                 }
                 out.push(o);
-            }
-            if let Some(m) = leftover {
-                out.push(m.outcome(Kind::Manual));
             }
             return out;
         }
@@ -1566,8 +1561,8 @@ mod tests {
     //! - ghq・fzf は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、PATH の
     //!   ずれだけなら知らせる。fzf は MSI の fzf の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
-    //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。残りが旧来の exe の Claude だけ (締めの行) なら、check はその外し方の
-    //!   行にし、入れた後のその 1 は入った扱いにして同じ行を足す。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
+    //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
+    //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
     //!   知らせるだけの行 (·) を後ろに足す。ほかの手順は残りものと知らせの印を持たない
     //! - Windows にしか無い手順の ps1 は、runner が読む締めの行の文言 (Sync は「→ … で入れる」「→ … で揃える」「→ ※ の手順で直す」) と、
     //!   出力の印 (output_fixes・missing_blocked・leftover・notices) を持つ (WSL の wrapper との突き合わせの代わり)
@@ -1968,8 +1963,8 @@ mod tests {
     }
 
     /// claude-desktop: 道具の switch (windowsClaudeDesktop) で on/off の Windows にしか無い手順。3 は UAC を先に知らせて -IfMissing で入れ、
-    /// 固定した版が winget に無ければ打たない。1 は知らせるだけで、残りが旧来の exe の Claude だけ (締めの行) ならその外し方の行にし、入れた
-    /// 後のその 1 は入った扱いにして同じ行を足す。仮想マシン プラットフォームが off なら、状態の表が出たときだけ知らせるだけの行 (·) を足す
+    /// 固定した版が winget に無ければ打たない。1 は知らせるだけで、旧来の exe の Claude が残っている (締めの行) ならその外し方の行にして何も
+    /// 打たない (入っていなくても)。仮想マシン プラットフォームが off なら、状態の表が出たときだけ知らせるだけの行 (·) を足す
     #[test]
     fn claude_desktop_installs_with_uac_and_reports_leftovers_and_notices() {
         let s = spec("claude-desktop");
@@ -2034,36 +2029,37 @@ mod tests {
         assert_eq!(ends(&calls), vec!["-Check"]);
         assert!(o[0].notes[0].contains("winget show --id Anthropic.Claude --versions"));
 
-        // 1 で残りが旧来の exe の Claude だけ: 外し方の行 (「固定した版と揃っていない」にしない)。check も apply も打つのは -Check だけ
-        for mode in [Mode::Check, APPLY] {
-            let sys2 = sys((1, vec![header_line(s), legacy.to_string()]), (0, vec![]));
-            let (o, _, calls) = run("claude-desktop", &sys2, mode);
-            assert_eq!(o.len(), 1);
-            assert_eq!(o[0].kind, Kind::Manual);
-            assert!(
-                o[0].text.starts_with(
-                    "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている"
-                ),
-                "{}",
-                o[0].text
-            );
-            assert_eq!(o[0].notes.len(), 2);
-            assert!(o[0].notes[0].contains("Update.exe\" --uninstall -s"));
-            assert!(o[0].notes[1].contains("Claude.lnk"));
-            assert_eq!(ends(&calls), vec!["-Check"]);
+        // 1 で旧来の exe の Claude が残っている: 外し方の行 (「固定した版と揃っていない」にしない)。MSIX が揃っていて残りがそれだけの
+        // 締めの行も、入っていない・古いのに旧来の exe があるので入れない締めの行も同じ。check も apply も打つのは -Check だけ (UAC を出さない)
+        let blocks = "⚠️ 旧来の exe の Claude が残っている → ※ の手順で外してから、Install-ClaudeDesktop で入れる・揃える (外すまで MSIX は入れない) ⚠️";
+        for line in [legacy, blocks] {
+            for mode in [Mode::Check, APPLY] {
+                let sys2 = sys((1, vec![header_line(s), line.to_string()]), (0, vec![]));
+                let (o, out, calls) = run("claude-desktop", &sys2, mode);
+                assert_eq!(o.len(), 1, "{line}");
+                assert_eq!(o[0].kind, Kind::Manual, "{line}");
+                assert_eq!(
+                    o[0].text,
+                    "旧来の exe の Claude (Squirrel。%LOCALAPPDATA%\\AnthropicClaude) が残っている → ※ の手順で外す (runner は外さない。外すまで MSIX は入れない)",
+                    "{line}"
+                );
+                assert_eq!(o[0].notes.len(), 2, "{line}");
+                assert!(o[0].notes[0].contains("Update.exe\" --uninstall -s"));
+                assert!(o[0].notes[1].contains("Claude.lnk"));
+                assert_eq!(ends(&calls), vec!["-Check"], "{line}");
+                assert!(!out.contains("UAC の確認が出ます"), "{line}");
+            }
         }
 
-        // 3 → 入れた後が 1 で、残りが旧来の exe の Claude だけ: 入った扱いにして、外し方の行を足す
+        // 入れた後の 1 は、旧来の exe の印があっても入った扱いにしない (ps1 は旧来の exe があるうちは入れないので、そこには来ない)
         let sys3 = sys(
             (3, vec![header_line(s)]),
             (1, vec![header_line(s), legacy.to_string()]),
         );
-        let (o, out, _) = run("claude-desktop", &sys3, APPLY);
-        assert_eq!(o.len(), 2);
-        assert_eq!(o[0], Outcome::new(Kind::Ok, "入れた"));
-        assert_eq!(o[1].kind, Kind::Manual);
-        assert!(o[1].text.contains("旧来の exe の Claude"));
-        assert!(out.contains("Windows に Claude Desktop (MSIX) を入れました。"));
+        let (o, _, _) = run("claude-desktop", &sys3, APPLY);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(o[0].text.starts_with("入れられなかった (終了コード 1"));
 
         // 3 → 入れた後が 1 で、ほかのわけ (UAC を断った): 入れられなかった。直し方は UAC の印のもの
         let sys4 = sys(

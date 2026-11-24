@@ -16,6 +16,7 @@
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は ③)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は ② と ③。UAC の確認が出る)
+#   dotfiles.wsl.windowsFiles.claudeDesktop.enable  Windows に Claude Desktop を winget の MSIX で入れるか (runner だけ。既定は ② と ③。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は ②)
 #   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定 false。どのグループでも)
 #   dotfiles.wsl.windowsFiles.sshd.enable        Windows に sshd (OpenSSH Server) を入れ、Tailscale から鍵でだけ入れるようにするか (既定 false。どのグループでも)
@@ -119,7 +120,8 @@ in
       ② AI の道具の段を入れるか。既定はグループから決まる (personal・company は true、client は false)。この段の道具の switch
       (`claude.enable`・`herdr.enable`・`herdrCore.enable`・`wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable`) の
       既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`・
-      `wsl.windowsFiles.claudeAccounts.enable`) は、`personalAccounts.enable` も true のときだけ既定で入る。`cursorAgent.enable`・
+      `wsl.windowsFiles.claudeAccounts.enable`・`wsl.windowsFiles.claudeDesktop.enable`) は、`personalAccounts.enable` も true のときだけ既定で
+      入る。`cursorAgent.enable`・
       `t3Code.enable`・`wsl.windowsFiles.t3Code.enable` は既定が false のまま (段によらない)。
     '';
   };
