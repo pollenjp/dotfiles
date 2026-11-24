@@ -30,6 +30,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `herdr-app/claude-skill-head.md` | (配らない。runner の `herdr-app-skill` の手順が、`herdr-app --skill` の頭に足して `%USERPROFILE%\.claude\skills\herdr-app\SKILL.md` を作る) | herdr-app の Claude Code の skill の frontmatter と、作った版を書くコメント。hc の skill の頭は Linux と同じ `nix/pkgs/herdr-core/claude-skill-head.md` ([後述](#claude-skills-と-windows-のハブ-w0-2)) |
 | `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・チケットと進み具合と PR の木・問いへの答え (Q&A)・状況の説明・進み具合・一覧・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
+| `herdr-app/mods/pjp-worktree-remove/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-worktree-remove\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。prefix の後の `Shift+Q` が開く小窓で、今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
 | (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替えた layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
@@ -913,6 +914,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 | --- | --- | --- |
 | `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む。`answer` のある段は押してハブへ送れる)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
+| `pjp-worktree-remove` | `main.js`・`mod.json` | prefix の後の `Shift+Q` が開く確かめの小窓 (window)。今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([次節](#herdr-app-のキー))。止める端末・待つ上限・やり直し・残ったフォルダの扱いの正本は `main.js` の頭のコメント |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
   置き場所と同じ)。どれにしたかは手順の出力の頭に出る
@@ -1138,7 +1140,8 @@ mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちら�
 (on/off は `windowsHerdr`)。経緯は dotfiles-private の ADR 070 (`docs/adr/070_win_herdr_app_keys_*`) と、space の移動を `Ctrl+PageUp/Down` と
 `Ctrl+Alt+↑↓` にした ADR 085 (`docs/adr/085_win_herdr_app_space_ctrl_alt_*`)、prefix の後の `c` (新しいタブ) を足した ADR 086
 (`docs/adr/086_win_herdr_app_prefix_c_new_tab_*`)、`Shift+C`・`Shift+G` の worktree の名前の頭を `hc/` にした ADR 088
-(`docs/adr/088_win_herdr_app_worktree_hc_prefix_*`)。
+(`docs/adr/088_win_herdr_app_worktree_hc_prefix_*`)、prefix の後の `Shift+Q` (端末を止めてから space を閉じて worktree を消す) を足した ADR 100
+(`docs/adr/100_win_herdr_app_prefix_worktree_remove_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
@@ -1162,6 +1165,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | prefix → `Tab`・`o` | 今のタブの次のペイン (端末のペインを順に回る) | `cycle_pane_next` |
 | prefix → `g`・`"` | 端末の picker (`mod.open:picker`) | `goto` |
 | prefix → `Shift+O` | 次のエージェント (`agent.next`) | `open_notification_target` の代わり |
+| prefix → `Shift+Q` | 今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す (確かめの小窓 `pjp-worktree-remove` で Enter を待つ。branch は残す) | (無い) |
 | prefix → `Ctrl+K` | prefix を開く前の端末へ `Ctrl+K` を送る (shell の行末まで消すなど、端末のプログラムの `Ctrl+K` を使うとき) | (無い) |
 
 - 割り当てないもの: detach (`q`・`d`) と設定の読み直し (`Shift+R`)。herdr-app は窓を閉じても端末が止まらず、設定は保存するとすぐ読み直す
@@ -1190,6 +1194,20 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   ペインのフォルダの repo に、同じ名前の branch があれば名前を作り直してから、herdr-app の worktree の小窓に渡す。小窓は Enter を待たずに、その
   checkout の HEAD から branch を切って worktree を作り、新しい space を開く (sidebar では repo の space の下に並ぶ)。machine (WSL・SSH の先) の space
   なら、その machine で作る。git の repo でないフォルダでは、小窓がわけを出す
+- `Shift+Q` は、ゴミ箱の印 (🗑️) の付いた space などを片付けるキー。herdr-app の同梱の Remove worktree (space の menu) は `space.close` を打ってすぐ
+  `git worktree remove` を打つので、Windows では space の shell や Claude Code がまだ worktree のフォルダを今のフォルダにしている間に git が消しに行き、
+  `failed to delete '…': Permission denied` で落ちる (git は登録を消してから落ちるので、空のフォルダだけが残る)。`Shift+Q` は確かめの小窓
+  (`pjp-worktree-remove`。外を押しても閉じない window) を開き、Enter (か「止めて消す」) で次の順に進める。進めた後は、済むまで Esc で閉じない
+  (小窓を閉じると、小窓の仕事は herdr-app に打ち切られる)。済めば小窓は自分で閉じ、済んだ・止まったは通知で出る。layout の切り替えなどで閉じられたら、
+  どこで止まったかを通知で出す (残っていれば、もう一度 `Shift+Q` で続きを流す)
+  1. 止める端末: space の全タブの端末 (ペインの無い space の端末も) と、同じ machine の生きた端末のうちフォルダが worktree の中のもの (ほかの space の
+     端末・`hc run` の手伝いの端末。小窓では分けて出し、ほかの space の端末は赤い警告にも出す)。全部に `hc kill` を打ち、`hc` で全部が finished に
+     なるまで待つ。60 秒で止まらなければ、space と worktree に触らずに止まり、残った端末を出す (小窓で Enter を押すとやり直す)
+  2. space を閉じる (`space.close`)。`git worktree remove` は、同梱の Remove と同じく未 commit の変更か submodule があるときだけ `--force`
+     (小窓が警告を出す)。git の登録が残ったまま落ちる間は、間を置いてやり直す。git が登録を消してフォルダだけが残ったら、中身が空のフォルダだけを
+     消す (ファイル・symlink・junction が残っていれば消さずに知らせる)。`git worktree prune` は打たない (repo の全部の worktree に効くため)
+  3. branch は消さない。linked worktree でない (repo の main の checkout・git の外)・`git worktree lock` があるときは、わけを出して何もしない。
+     WSL・SSH の先の machine の space でも同じに動く (git はその machine で打つ)
 - `Shift+G` で起動するのは `c` と同じ引数の claude (`claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=`)。
   `c` は fish では abbr、bash では alias で、herdr-app が argv で起こすときに広がるとは限らないので、中身を並べている。machine の space でも同じ argv で、
   claude が PATH に無ければ herdr-app が端末のエラーを出し、shell が残る。`c` を直すときは `pjp-prefix/main.js` の `CLAUDE` もそろえる (runner の試験

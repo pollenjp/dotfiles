@@ -317,6 +317,7 @@ mod tests {
     //! - サブディレクトリの中のファイルも同じパスへ置く。mod の置き場が無ければ何もしない
     //! - home は HERDR_APP_HOME → XDG_CONFIG_HOME の下 → %USERPROFILE%\.config\herdr-app (空の値は無いものとして読む)
     //! - 本物の repo の mod (pjp-hub-panel) と .gitignore (herdr-app が書くファイルを入れない)
+    //! - 本物の repo の mod が開く自作の mod (`openOverlay` の `mod: "pjp-…"`。prefix の小窓の Shift+Q が開く pjp-worktree-remove) が repo の mod にある
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -802,6 +803,38 @@ mod tests {
                 ".gitignore に {name} が無い"
             );
         }
+    }
+
+    /// 本物の repo の mod が `openOverlay({ mod: "pjp-…" })` で開く自作の mod が、repo の mod にある (開く側か開かれる側の名前だけを
+    /// 替えると、herdr-app-mods が配らない mod を開こうとして何も出ない)。prefix の小窓の Shift+Q は pjp-worktree-remove を開く
+    #[test]
+    fn real_repo_mods_open_mods_in_the_repo() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let root = join_segments(&repo, MODS);
+        let mods = list_mods(&root).unwrap();
+        let names: Vec<&str> = mods.iter().map(|m| m.name.as_str()).collect();
+        let head = "mod: \"";
+        let mut opened = Vec::new();
+        for m in &mods {
+            let main = std::fs::read_to_string(root.join(&m.name).join("main.js"))
+                .unwrap_or_else(|e| panic!("{} の main.js が読めない ({e})", m.name));
+            for (at, _) in main.match_indices("mod: \"pjp-") {
+                let rest = &main[at + head.len()..];
+                let name = &rest[..rest.find('"').expect("閉じる \" がある")];
+                assert!(
+                    names.contains(&name),
+                    "{} の main.js が開く mod {name} が {MODS} に無い",
+                    m.name
+                );
+                opened.push((m.name.clone(), name.to_string()));
+            }
+        }
+        assert!(
+            opened
+                .iter()
+                .any(|(from, to)| from == "pjp-prefix" && to == "pjp-worktree-remove"),
+            "{opened:?}"
+        );
     }
 
     #[test]
