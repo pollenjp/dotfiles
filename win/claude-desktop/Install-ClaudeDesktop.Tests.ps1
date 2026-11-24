@@ -309,11 +309,17 @@ try {
     }
     $self = (Get-Process -Id $PID).Path
     $log = Join-Path $work 'out.log'
+    # 子は一時ディレクトリで起こす (WSL から流すと今の場所が \\wsl.localhost\… になり、cmd が UNC の警告を stderr に足す)
     $run = {
         param([string]$Winget, [string]$LogPath)
         $encoded = ConvertTo-EncodedCommand -Script (Get-ElevatedWingetScript -Winget $Winget -Arguments @('install', '--id', $Id) -LogPath $LogPath)
-        & $self -NoProfile -NonInteractive -EncodedCommand $encoded | Out-Null
-        $LASTEXITCODE
+        Push-Location -LiteralPath $work
+        try {
+            & $self -NoProfile -NonInteractive -EncodedCommand $encoded | Out-Null
+            $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
     }
     # stdout と stderr の行の順は、2 本の pipe のどちらが先に届くかで変わるので、並べ替えて比べる
     Test-Case '偽の winget: 出力 (stderr も) がファイルに入り、終了コードは winget のもの (7)' @(7, 'line one install', 'line two') {
@@ -334,3 +340,5 @@ if ($script:Failures -gt 0) {
     exit 1
 }
 Write-Host '全部通った'
+# 明示して 0 で終える (-Command から呼ぶと、上の試験の子の終了コード ($LASTEXITCODE の 2) を拾ってしまう)
+exit 0
