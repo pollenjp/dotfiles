@@ -58,8 +58,6 @@ pub enum Gate {
     Tool(&'static str),
     /// 道具の switch がどれも true のとき (Nix の表で効く条件 (requires) のある道具。先頭がその道具、後ろが Windows でも効く条件)
     AllTools(&'static [&'static str]),
-    /// 設定グループがこのどれかのとき
-    Groups(&'static [&'static str]),
 }
 
 /// 道具の switch が off ならそのわけ。
@@ -81,17 +79,6 @@ impl Gate {
             Gate::Always => None,
             Gate::Tool(key) => tool_off_reason(host, key),
             Gate::AllTools(keys) => keys.iter().find_map(|key| tool_off_reason(host, key)),
-            Gate::Groups(groups) => {
-                if groups.contains(&host.group.as_str()) {
-                    None
-                } else {
-                    Some(format!(
-                        "このホストでは off (グループ {}。この手順は {} だけ)",
-                        host.group,
-                        groups.join("・")
-                    ))
-                }
-            }
         }
     }
 
@@ -101,7 +88,6 @@ impl Gate {
             Gate::Always => "いつも".to_string(),
             Gate::Tool(key) => key.to_string(),
             Gate::AllTools(keys) => keys.join("・"),
-            Gate::Groups(groups) => format!("グループ {}", groups.join("・")),
         }
     }
 }
@@ -467,10 +453,6 @@ mod tests {
         assert_eq!(
             Gate::Tool("windowsNtn").off_reason(&h).unwrap(),
             "このホストでは off (windowsNtn = false。グループ company の既定)"
-        );
-        assert_eq!(
-            Gate::Groups(&["personal"]).off_reason(&h).unwrap(),
-            "このホストでは off (グループ company。この手順は personal だけ)"
         );
         // 効く条件のある道具: どれも true のときだけ on。off のわけは最初の false の道具
         assert_eq!(

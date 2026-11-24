@@ -70,10 +70,15 @@ GitHub CLI・Visual Studio Build Tools・rustup と、dotfiles・dotfiles-privat
 環境を Windows 側の runner で作る最初の段で、その後は runner (`runner/`。[後述](#runner-windows-の側で確かめて揃える)) が受け持つ。ホストごとに
 受け持ちを runner に切り替えるまで、Windows のアプリと設定を配るのは今までどおり WSL の setup ([配る](#配る))。経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md)
-(ADR 010 の前提「WSL のある Windows だけ」を改めた)。
+(ADR 010 の前提「WSL のある Windows だけ」を改めた) と、対象を ③ を足した company のホストにも広げた dotfiles-private の ADR 094
+(`docs/adr/094_win_bootstrap_private_skills_hosts_*`)。
 
-- 対象は設定グループ personal の Windows (ハブにする PC)。個人の gh のアカウントでログインして private な repo を取るので、自社・客先の
-  Windows では流さない
+- 対象は、claude-skills (private な repo) を使う Windows (ホストの値の `claudePrivateSkills` が on のもの。[ホストの値](#ホストの値))。
+  設定グループ personal の Windows (ハブにする PC) は既定で当たり、company のホストは ③ (個人のアカウントにつながるもの) を足して `[tools]` に
+  `claudePrivateSkills = true` を書いたものが当たる。個人の gh のアカウントでログインして private な repo (dotfiles-private・claude-skills) を
+  取るので、③ を足していない (`claudePrivateSkills` が off の) company・client の Windows では流さない
+  - bootstrap はホストの値を読まない (dotfiles-private を clone する前に流すので)。流すかは人がこの対象で決める。runner の手順 `bootstrap`
+    (`-Check` で確かめるだけ) は、同じ `claudePrivateSkills` のホストでだけ on ([runner の手順](#runner-の手順))
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
   権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る
 - 対象の CPU は x64 だけ (ARM64 の Windows は今は対象外)
@@ -279,6 +284,9 @@ scanData = "https://app.notion.com/p/…"
   出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
 - `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
   WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
+- `claudePrivateSkills` (claude-skills の clone を Windows の Claude Code で使うか) の既定は、② と ③ の両方を入れるグループだけ true (personal)。
+  ③ を足して claude-skills を使う company のホスト (WSL の Nix の値で `claude.privateSkills.enable = true`) は、同じ値を `[tools]` に書く (手順
+  `claude-skills`・`pjp` と、bootstrap を確かめる手順 `bootstrap` が on になり、bootstrap を流す対象にもなる。[bootstrap](#bootstrap-新しい-windows-で最初に流す))
 - `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
   書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
 - `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
@@ -420,7 +428,7 @@ scanData = "https://app.notion.com/p/…"
 
 | order | id | すること | on/off | runner |
 | --- | --- | --- | --- | --- |
-| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す) | グループ personal | 有る (Windows だけ) |
+| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す。on/off は bootstrap の対象と同じ。[bootstrap](#bootstrap-新しい-windows-で最初に流す)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-env` | Claude Code の `%USERPROFILE%\.claude\settings.json` の `env` に、Claude の git を無署名・GitHub は gh の資格情報 (HTTPS) で通す設定を足す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-files` | dotfiles の `CLAUDE.md` (冒頭を Windows のものに)・skill・agent・command を `%USERPROFILE%\.claude\` へ置き (ディレクトリは junction、ファイルはコピー)、hook の口 (runner の exe の写し `hooks\dotfiles-claude.exe`) を写す ([後述](#claude-code-の設定)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` にする | `windowsClaudeCode` | 有る (Windows だけ) |
