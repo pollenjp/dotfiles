@@ -61,6 +61,8 @@
 # Tailscale は既定で入れない (VPN の道具。入れるマシンは wsl.windowsFiles.tailscale.enable = true。win/README.md の「Tailscale」)。
 # T3 Code は既定で入れない (入れるのは Windows の runner だけ。入れるマシンは Windows のホストの値の [tools] windowsT3Code = true。
 # win/README.md の「T3 Code」)。
+# Claude Desktop (MSIX) は personal だけ既定で入れる (入れるのは Windows の runner だけ。入れるときに UAC の確認が出る。company・client で
+# 入れるマシンは Windows のホストの値の [tools] windowsClaudeDesktop = true。win/README.md の「Claude Desktop」)。
 # sshd (OpenSSH Server) も既定で入れない (PC に外から入る口。入れるマシンは wsl.windowsFiles.sshd.enable = true と、鍵の
 # wsl.windowsFiles.sshd.authorizedKeys。Tailscale と localhost からだけ、鍵でだけ入れる。win/README.md の「sshd」)。
 { mkHome }:

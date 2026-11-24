@@ -15,6 +15,8 @@
 #   - 客先で道具を 1 つ足せる (group = "client" と claude.enable = true で、claude だけが on)
 #   - windowsClaudeAccounts (Windows の claude-personal・claude-work) は personal だけ既定で on (初回の apply で UAC の確認が出る
 #     手順なので、company・client では既定で走らせない)
+#   - windowsClaudeDesktop (Windows の Claude Desktop の MSIX) も ② と ③ の両方の道具で、personal だけ既定で on (入れるときに UAC の
+#     確認が出る手順なので、company・client では既定で走らせない)
 #   - opReasonSshRelay (op-reason の SSH の中継。Windows の runner と WSL の option が同じ名前で引く) は表にあり、どのグループでも
 #     既定で off (鍵を使う ssh の通り道を替えるので、入れるホストが書く)
 #   - windowsTypeClipboard (Windows の type-clipboard。自作のアプリで、個人の GitHub の repo の Release から入れる) は ③ の道具で、
@@ -194,6 +196,22 @@ let
         (json personal).tools.windowsClaudeAccounts
         && !(json company).tools.windowsClaudeAccounts
         && !(json client).tools.windowsClaudeAccounts;
+    }
+    {
+      name = "windowsClaudeDesktop は ② と ③ の両方の道具で、personal だけ既定で on (UAC の確認が出る手順なので company・client は off)";
+      ok =
+        let
+          t = builtins.head (builtins.filter (t: t.key == "windowsClaudeDesktop") groups.tools);
+        in
+        t.tiers == [
+          "aiTools"
+          "personalAccounts"
+        ]
+        && t.derived
+        && (json unset).tools.windowsClaudeDesktop
+        && (json personal).tools.windowsClaudeDesktop
+        && !(json company).tools.windowsClaudeDesktop
+        && !(json client).tools.windowsClaudeDesktop;
     }
     {
       name = "opReasonSshRelay は表にあり、どのグループでも既定で off (入れるホストが書く)";

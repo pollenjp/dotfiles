@@ -8,7 +8,8 @@
 #   ③ 個人の道具                    個人のアカウントにつながるもの。1Password・Notion (ntn・Dev Tracker)・private な repo の clone・
 #                                   個人の git の名前とメール・自作の type-clipboard (個人の GitHub の repo の Release)
 #
-# ② と ③ の両方に当たるもの (claude-skills の clone・cc-pages・~/h・Dev Tracker) は、両方が on のときだけ入る。
+# ② と ③ の両方に当たるもの (claude-skills の clone・cc-pages・~/h・Dev Tracker と、初回に UAC の確認が出る Windows の claude-personal・
+# claude-work と Claude Desktop) は、両方が on のときだけ入る。
 #
 # ここは表 (data) だけを持つ。option の既定は home/options.nix に素の式で書く (段の switch は dotfiles.group から、道具の
 # switch は段の switch から)。表と既定が合っていることは tests/groups.nix (flake の checks の groups-state) が、段の on/off の
@@ -121,6 +122,7 @@ let
     claudePrivateSkills = "private な skill";
     herdrHub = "集約ハブ ~/h";
     windowsClaudeAccounts = "Win の claude アカウント";
+    windowsClaudeDesktop = "Win の Claude Desktop";
     devTracker = "Dev Tracker";
     devTrackerInbox = "Dev Tracker の見回り";
     onePassword = "1Password";
@@ -141,6 +143,7 @@ let
     "claudePrivateSkills"
     "herdrHub"
     "windowsClaudeAccounts"
+    "windowsClaudeDesktop"
     "devTracker"
     "onePassword"
     "opReasonSshRelay"
@@ -225,6 +228,16 @@ let
             "enable"
           ]
         ];
+      }
+    )
+    # Windows の Claude Desktop (winget の Anthropic.Claude の MSIX。Cowork も使う)。入れるときに UAC の確認 (管理者の権限) が出る手順なので、
+    # 会社や客先の PC では既定で走らせない (personal だけ既定で on。windowsClaudeAccounts と同じ形)。Windows の runner の手順 claude-desktop
+    # だけが読む switch (WSL の setup に同じ手順は無い)
+    (tool "windowsClaudeDesktop" "Windows の Claude Desktop (MSIX)"
+      [ "wsl" "windowsFiles" "claudeDesktop" "enable" ]
+      both
+      {
+        requires = [ windowsFiles ];
       }
     )
     (tool "devTracker" "Notion Dev Tracker" [ "claude" "devTracker" "enable" ] both {

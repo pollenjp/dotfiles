@@ -1047,6 +1047,27 @@ in
       '';
     };
 
+    windowsFiles.claudeDesktop.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable;
+      defaultText = lib.literalExpression "config.dotfiles.aiTools.enable && config.dotfiles.personalAccounts.enable";
+      example = false;
+      description = ''
+        Windows に Claude Desktop (Claude のデスクトップ版。winget の `Anthropic.Claude` の MSIX) を、dotfiles が固定した版で入れるマシンか。
+        Cowork (VM の中で動くエージェント) は MSIX でしか動かないので、winget に `--installer-type msix` で名指しし、管理者の権限で入れる
+        (Cowork の常駐 `CoworkVMService` は管理者の権限で入れたときだけ登録される)。そのため入れるときに UAC の確認が 1 回出る。既定は
+        ② と ③ の段が両方 on のとき (personal だけ true) で、会社や客先の PC (company・client) では既定で走らせない
+        (`windowsFiles.claudeAccounts.enable` と同じ形)。
+
+        読むのは Windows の runner だけ (手順 `claude-desktop`。WSL の setup に同じ手順は無い)。値は `~/.local/state/dotfiles/group.json` の
+        `tools.windowsClaudeDesktop` と、Windows の runner が読むグループの既定 (win/runner/groups.json) に落ちる。Windows の runner では、
+        ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsClaudeDesktop = true` (か false) を書く。入れるのは入って
+        いないときだけで、入れた後の更新は Claude Desktop の自動更新に任せる (win/README.md の「Claude Desktop」)。
+
+        false に戻しても、入れたものは消さない (runner が見なくなるだけ)。
+      '';
+    };
+
     windowsFiles.herdr.enable = lib.mkOption {
       type = lib.types.bool;
       default = config.dotfiles.aiTools.enable;
