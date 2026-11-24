@@ -151,7 +151,7 @@ impl Marked {
 /// SSH の中継を渡す手順 (`ssh_relay`。op-reason) で、版は揃っていて中継だけが違うときの ps1 の締めの行と、そのときの字
 const RELAY_ONLY_MARK: &str = "⚠️ SSH の中継が揃っていない";
 const RELAY_PENDING: &str = "SSH の中継が揃っていない";
-const RELAY_NOTICE: &str = "Windows の op-reason の SSH の中継 (logon の task) が揃っていないので、揃えます (Install-OpReason.ps1)。";
+const RELAY_NOTICE: &str = "Windows の op-reason の SSH の中継 (op-reason の task) が揃っていないので、揃えます (Install-OpReason.ps1)。";
 const RELAY_SYNCED: &str = "Windows の op-reason の SSH の中継を揃えました。";
 
 /// Install-Sshd.ps1 の締めの行「鍵の写しに読めない行がある」と、受け持ちが runner のホストでの直し方 (runner は TOML の読めない値を
@@ -2808,8 +2808,8 @@ mod tests {
             vec![
                 header_line(s),
                 "  固定した版       : 0.5.0 → そのまま".into(),
-                "SSH の中継 (logon の task \\pjp\\op-reason-ssh-relay)".into(),
-                "⚠ task             : 無い → 置いて起こす".into(),
+                "SSH の中継 (op-reason の task \\op-reason-ssh-relay-S-1-5-21-1-2-3-1001)".into(),
+                "⚠ relay.autostart  : off → on".into(),
                 "⚠️ SSH の中継が揃っていない → Install-OpReason -SshRelay per-call で揃える ⚠️"
                     .into(),
             ],
@@ -2831,7 +2831,7 @@ mod tests {
             vec!["-Check -SshRelay 'per-call'", "-SshRelay 'per-call'"]
         );
         assert!(
-            out.contains("Windows の op-reason の SSH の中継 (logon の task) が揃っていないので、揃えます (Install-OpReason.ps1)。\n"),
+            out.contains("Windows の op-reason の SSH の中継 (op-reason の task) が揃っていないので、揃えます (Install-OpReason.ps1)。\n"),
             "{out}"
         );
         assert!(

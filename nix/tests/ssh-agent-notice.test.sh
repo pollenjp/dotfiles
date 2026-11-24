@@ -61,7 +61,7 @@
 #   - 断られたら、op-reason の窓か 1Password に断られた (1Password が画面を伏せたまま約 60 秒で時間切れになったのかもしれない) と言い、
 #     許可して、1Password の画面が出なければアイコンから承認して打ち直す選択肢と回り道を使わない指示を足す。鍵の認証の失敗は、
 #     op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。windows-files.json は読まない) が答えなければ
-#     中継に届かないとして、logon の task が 1 分のうちに起こし直すと言い、待つか起こし直してから (起き直った中継の最初の署名は
+#     中継に届かないとして、op-reason の task が 1 分のうちに起こし直すと言い、待つか起こし直してから (起き直った中継の最初の署名は
 #     1Password の承認がもう一度要る) 打ち直す選択肢にする。答えれば (たいてい相手に鍵が無いだけ) 黙る。exe が無ければ答えないとみなす
 #
 #   - Bash 以外・壊れた入力・空の入力・jq が無いときは黙り、いつも exit 0
@@ -904,8 +904,8 @@ fi
 relay_exe_set 0
 rm -f "${work}/relay-calls"
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は logon の task が 1 分のうちに起こし直す' ]] \
-  && [[ $(ctx) == *'① 1 分ほど待つ (logon の task が 1 分のうちに中継を起こし直す。待てなければ'*"Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'"* ]] \
+if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は op-reason の task が 1 分のうちに起こし直す' ]] \
+  && [[ $(ctx) == *'① 1 分ほど待つ (op-reason の task が 1 分のうちに中継を起こし直す。中継を止めた (通知領域の鍵のアイコンの「止める」・relay stop) ときは起き直らないので、op-reason --settings relay start で起こす。'* ]] \
   && [[ $(ctx) == *'起き直った中継の最初の署名は、1Password の承認がもう一度要る'* && $(ctx) == *"${detour}"* ]] \
   && [[ $(cat "${work}/relay-calls") == '--ssh-agent --status' ]]; then
   ok "中継が答えないときの鍵の認証の失敗は、中継に届かない (task が 1 分のうちに起こし直す) と言い、待つか起こし直してから打ち直す選択肢にする"
@@ -921,7 +921,7 @@ expect_quiet "中継を通らない scp の鍵の認証の失敗は、中継が�
 relay_state '{"enable":true,"exe":null,"sshRelay":{"enable":true,"mode":"per-call"}}'
 rm -f "${work}/relay-calls"
 post PostToolUseFailure 'ssh h true' "Exit code 255"$'\n'"${denied}" WSL_DISTRO_NAME=Ubuntu
-if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は logon の task が 1 分のうちに起こし直す' && ! -e "${work}/relay-calls" ]]; then
+if [[ $(notice) == '🔑 op-reason の SSH の中継に届かない: ssh h true — 許可の窓は Windows の op-reason の中継が出す。中継は op-reason の task が 1 分のうちに起こし直す' && ! -e "${work}/relay-calls" ]]; then
   ok "claude-op-reason.json に exe が無ければ (Windows のユーザー名の無いマシン)、中継に届かないとみなす"
 else
   ng "exe が無い" "$(detail) calls=$(cat "${work}/relay-calls" 2>/dev/null)"

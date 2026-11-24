@@ -3,7 +3,7 @@
 # GitHub の Release に置いた静的な実行ファイル (musl。op-reason-<arch>-linux) を、版と system ごとの SHA-256 で固定して入れる。
 # SHA-256 は Release の隣の .sha256 の値。Windows の側 (op-reason-windows.zip の op-reason.exe と launcher.ps1) は
 # win/op-reason/Install-OpReason.ps1 が同じ版で入れ、WSL の実行ファイルはそれを起こして窓を出す。呼び出しの取り決め (payload の版。
-# 0.1.0 から 0.6.0 まで同じ 1) が変わった版どうしでは断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ
+# 0.1.0 から 0.7.0 まで同じ 1) が変わった版どうしでは断るので、版を上げるときは version とこの表を、Install-OpReason.ps1 の表と同じ
 # PR で上げる (手順は nix/README.md の「op-reason の新しい版を出したとき」)。
 #
 # op-reason の flake (packages.op) を input にしないのは、flake-lock-age.sh が github の input に commit から 7 日の猶予を課すため
@@ -14,7 +14,8 @@
 # 1 つの実行ファイルを呼び名で切り替える: op と op-reason は wrapper、op-reason-log は記録を見る道具、op-reason-ssh (0.4.0 から) は
 # Windows の ssh.exe を呼び出しの事実 (OPREASON_SSH_CALL) を付けて起こす入口 (op-reason.exe --ssh-agent の SSH の中継に呼び手を
 # 知らせる。引数と stdin・stdout・stderr はそのまま)。bin/op・bin/op-reason-log・bin/op-reason-ssh は bin/op-reason への symlink。
-# op-reason-ssh は名前を置くだけで、ssh や git をそれに向ける設定と中継を起こす設定は dotfiles に無い。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
+# SSH の中継を使うホスト (dotfiles.opReason.sshRelay) では WSL の ssh の wrapper が op-reason-ssh を起こし、中継は Windows の op-reason 自身の
+# task が起こす (Windows の runner が op-reason.exe --settings で揃える)。ほかのホストでは op-reason-ssh は名前を置くだけ。fish の補完 (op と op-reason の 2 つ。op を呼ばない) は、入れた実行ファイルに --completion fish で
 # 出させて share/fish/vendor_completions.d に置く。マシンごとの既定 (Windows の op-reason.exe の場所 OPREASON_EXE) は、ここには
 # 入れず home/modules/op-reason.nix が包む。
 {
@@ -24,17 +25,17 @@
 }:
 
 let
-  version = "0.6.0";
+  version = "0.7.0";
   # system → Release の asset の名前と、その .sha256 の値
   # (https://github.com/pollenjp/op-reason/releases/download/v<version>/<name>.sha256)
   assets = {
     x86_64-linux = {
       name = "op-reason-x86_64-linux";
-      sha256 = "abd755392e7ac1a05ef62f4bc678ec6ffdd4038b8544a65ce59b30c593282487";
+      sha256 = "7f7aa4e1bc02b25db6cd5f41d0d5b9b3bf11498d4206442f7411d85a8e7da30a";
     };
     aarch64-linux = {
       name = "op-reason-aarch64-linux";
-      sha256 = "2c9598b209379f02ff85a8f0bb3754dbfa076599dbff56f191e0b6a3344f3edc";
+      sha256 = "6fa07dd6676fa44f39b9a83699b85cfb196ce002019944b710de20053e4d0e2d";
     };
   };
   system = stdenvNoCC.hostPlatform.system;

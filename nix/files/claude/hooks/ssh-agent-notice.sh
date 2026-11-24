@@ -68,7 +68,7 @@
 #   断られたあと 断り (agent refused operation) は op-reason の窓か 1Password に断られたと言い、1Password が画面を伏せたまま
 #               約 60 秒で時間切れになったのかもしれないことと、アイコンから承認する手を添える。鍵の認証の失敗は、
 #               op-reason.exe --ssh-agent --status (op-reason.exe は claude-op-reason.json の exe。5 秒で切る) が答えなければ
-#               中継に届かないとして、logon の task が 1 分のうちに起こし直すと言い、① を待つか起こし直すことにする。答えれば
+#               中継に届かないとして、op-reason の task が 1 分のうちに起こし直すと言い、① を待つか起こし直すことにする。答えれば
 #               黙る (たいてい相手に鍵が無いだけ)
 #
 # 1Password は、求めの出どころ (中継の op-reason.exe) が前面にないと画面を伏せ、アイコンに点を付けて待つ。承認が要るのは、
@@ -1419,7 +1419,7 @@ after() {
   elif [[ ${reason} == refused ]]; then
     first='1Password を開いて承認するので、打ち直す'
   elif ((relay)); then
-    first="1 分ほど待つ (logon の task が 1 分のうちに中継を起こし直す。待てなければ Windows の PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'。答えるかは op-reason.exe --ssh-agent --status。起き直った中継の最初の署名は、1Password の承認がもう一度要る: ${relay_tray}) ので、打ち直す"
+    first="1 分ほど待つ (op-reason の task が 1 分のうちに中継を起こし直す。中継を止めた (通知領域の鍵のアイコンの「止める」・relay stop) ときは起き直らないので、op-reason --settings relay start で起こす。答えるかは op-reason.exe --ssh-agent --status。起き直った中継の最初の署名は、1Password の承認がもう一度要る: ${relay_tray}) ので、打ち直す"
   else
     case $(agent_kind "${sock}") in
       forwarded) first='手元の PC からこのマシンへ接続し直す (agent の口を張り替える) ので、打ち直す' ;;
@@ -1434,7 +1434,7 @@ after() {
   if ((relay)); then
     case ${reason} in
       refused) hint="。${relay_tray}" ;;
-      relay) hint='。中継は logon の task が 1 分のうちに起こし直す' ;;
+      relay) hint='。中継は op-reason の task が 1 分のうちに起こし直す' ;;
     esac
   fi
 

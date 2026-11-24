@@ -250,7 +250,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
                         &[
                             "SSH の中継 (ホストの値の opReasonSshRelay) が答えません。Windows の ssh の設定の IdentityAgent は中継を指したままなので、中継が起きるまで Windows と WSL の ssh は鍵を使えません。".to_string(),
                             format!("中継: {why}"),
-                            "logon の task が 1 分のうちに中継を起こし直します。待てなければ Windows の PowerShell で Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay' (答えるかは op-reason.exe --ssh-agent --status)".to_string(),
+                            "op-reason の task が 1 分のうちに中継を起こし直します。中継を止めた (通知領域の鍵のアイコンの「止める」・relay stop) ときは起き直らないので、op-reason.exe --settings relay start で起こす (答えるかは op-reason.exe --ssh-agent --status)".to_string(),
                             format!("1 回だけ 1Password に直につなぐ: {RELAY_DIRECT}"),
                         ],
                     );
@@ -1261,7 +1261,7 @@ mod tests {
             "鍵を使えません",
             "中継: nothing answers on",
             "1 分のうちに",
-            "Start-ScheduledTask -TaskPath '\\pjp\\' -TaskName 'op-reason-ssh-relay'",
+            "op-reason.exe --settings relay start",
             "ssh -o 'IdentityAgent=\\\\\\\\.\\pipe\\openssh-ssh-agent' <接続先>",
         ] {
             assert!(has_note(&o, part), "{part}: {:?}", o.notes);
