@@ -64,7 +64,8 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・herdr-app�
 ユーザーが各マシンで `~/dotfiles/setup --self-update --update` を流す。名前ごとに揃い方が違うので、PR を返すときに添える。
 
 受け持ちを Windows の runner に切り替えたホスト (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) では、WSL の setup は Windows に
-触らない。そのホストでは、Windows で 3 つの clone を pull して PowerShell の `dotfiles apply` を流す (`win/README.md` の「受け持ちを runner に切り替える」)。
+触らない。そのホストでは、Windows で PowerShell の `dotfiles --self-update apply` (3 つの clone を進めてから `dotfiles apply`) を流す (`win/README.md` の
+「受け持ちを runner に切り替える」・「clone を進める (dotfiles --self-update)」)。
 下の表の「setup」は、そのホストでは `dotfiles apply` と読む (runner の ps1 の手順は WSL の setup と同じ判断で揃える・知らせる)。
 `bootstrap-windows-*.sh --apply` は PowerShell の `Install-*` と読む。PR を返すときは、両方の道を添える。
 
@@ -75,8 +76,8 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・herdr-app�
 | `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る)。sshd を入れたマシン (`windowsSshd`) では Server も一緒に入れ直るので、続けて `Install-Sshd` か `bootstrap-windows-sshd.sh --apply` で揃える (上げ直した MSI が 22 番の受信の許可を有効に戻す。SSH でつないだ会話は入れ直す間に切れる) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
-| `ghq`・`fzf` | WSL の setup は入れない (Windows の runner の手順 `ghq`・`fzf` だけが入れる)。受け持ちによらず、Windows で clone を pull して `dotfiles apply` (`--steps ghq,fzf` で絞れる) を流すと揃える。exe が動いていると (別の端末の cdrepo の選ぶ画面など) ⚠ で止まるので、閉じてから `Install-Ghq`・`Install-Fzf` |
-| `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で clone (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) を pull し、`dotfiles apply --steps herdr-app-keys` を流す (受け持ちが WSL のホストでも流す) |
+| `ghq`・`fzf` | WSL の setup は入れない (Windows の runner の手順 `ghq`・`fzf` だけが入れる)。受け持ちによらず、Windows で `dotfiles --self-update apply` (clone を進めてから流す。`--steps ghq,fzf` で絞れる) を流すと揃える。exe が動いていると (別の端末の cdrepo の選ぶ画面など) ⚠ で止まるので、閉じてから `Install-Ghq`・`Install-Fzf` |
+| `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で `dotfiles --self-update apply --steps herdr-app-keys` (clone を進めてから流す) を流す (受け持ちが WSL のホストでも流す) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の

@@ -194,6 +194,9 @@ https で clone した本体は、今までどおり `git` で取る。
 `git pull` は未 commit の変更があると止まるので、**両方やるなら pull が先**
 （`--self-update` は手順の実行より前に走るため、`--self-update --flake-update` の順序は勝手に合う）。
 
+Windows の clone（dotfiles・dotfiles-private・claude-skills）は、PowerShell の `dotfiles --self-update` が同じ扱いで進める
+（[`win/README.md`「clone を進める」](../win/README.md#clone-を進める-dotfiles---self-update)）。
+
 ### 依存 (flake.lock) の更新
 
 ```sh
