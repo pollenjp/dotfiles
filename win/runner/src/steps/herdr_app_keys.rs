@@ -662,6 +662,7 @@ mod tests {
     //! - 本物の repo のキー: prefix の mod を開くキーと、mod に渡す命令が、repo の mod (pjp-prefix) とそろっている。space は Ctrl+PageUp/Down
     //!   (herdr-app の既定のタブの移動を keys.defaults.json で上書きする) と Ctrl+Alt+↑↓ (旧 herdr と同じ)・タブは Ctrl+↑↓ で、Ctrl+Shift+↑↓ は
     //!   割り当てない。
+    //!   prefix なしの Ctrl+Q が worktree を消す確かめの小窓 (pjp-worktree-remove) を開き、小窓の section の Ctrl+Q をその mod が受ける。
     //!   prefix の mod が worktree と一緒に Claude Code を起こす argv (main.js の CLAUDE) が c の 3 か所 (fish・bash・PowerShell) と同じ引数
 
     use super::*;
@@ -1559,6 +1560,50 @@ mod tests {
             assert!(
                 has(default_global, key, action),
                 "keys.defaults.json の global の {key} が {action} でない"
+            );
+        }
+    }
+
+    /// 本物の repo のキー: prefix なしの Ctrl+Q が worktree を消す確かめの小窓 (pjp-worktree-remove) を開き、小窓に focus がある間の Ctrl+Q は
+    /// その mod の命令にする (無いと、global の Ctrl+Q (mod.open の 2 回目) が小窓を閉じ、流している仕事を打ち切る)。命令はその mod が受ける
+    #[test]
+    fn real_repo_keys_open_the_worktree_remove_mod() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let wanted = load_wanted(&join_segments(&repo, KEYS)).unwrap();
+        let section = |name: &str| {
+            wanted
+                .iter()
+                .find(|(s, _)| s == name)
+                .unwrap_or_else(|| panic!("{name} が無い"))
+                .1
+                .clone()
+        };
+        let action = |keys: &[(String, OValue)], key: &str| {
+            keys.iter().find(|(k, _)| k == key).map(|(_, v)| v.clone())
+        };
+        assert_eq!(
+            action(&section("global"), "ctrl-q"),
+            Some(OValue::String("mod.open:pjp-worktree-remove".to_string()))
+        );
+        let main = std::fs::read_to_string(
+            join_segments(&repo, "win/herdr-app/mods/pjp-worktree-remove").join("main.js"),
+        )
+        .unwrap();
+        let own = section("mod:pjp-worktree-remove");
+        assert!(
+            action(&own, "ctrl-q").is_some(),
+            "mod:pjp-worktree-remove に ctrl-q が無い"
+        );
+        for (key, action) in &own {
+            let OValue::String(a) = action else {
+                panic!("{key}: {action:?}")
+            };
+            let command = a
+                .strip_prefix("pjp-worktree-remove.")
+                .unwrap_or_else(|| panic!("{key} の {a} が pjp-worktree-remove の命令でない"));
+            assert!(
+                main.contains(&format!("\"{command}\"")),
+                "main.js が {command} を受けない"
             );
         }
     }

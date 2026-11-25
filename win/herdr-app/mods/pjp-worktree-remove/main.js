@@ -1,5 +1,6 @@
 // pjp-worktree-remove: 今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す小窓。prefix の小窓 (pjp-prefix) の d が、
-// 開く前の space を props の space に入れて開く (mod.open:pjp-worktree-remove や palette から開くと、focus のある space)。
+// 開く前の space を props の space に入れて開く。keys.json の global の Ctrl+Q (mod.open:pjp-worktree-remove) や palette から開くと、focus のある
+// space (形は mod.json の overlay。window・560×440 で、d と同じ)。
 //
 // なぜ: herdr-app 0.1.16 の同梱の mod worktree の Remove worktree は、space.close を打ってすぐ git worktree remove を打つ。space.close (run) は端末が
 // 終わるのを待たないので、Windows では shell や agent がまだ worktree のフォルダを今のフォルダにしている間に git が消しに行き、
@@ -11,9 +12,9 @@
 //           警告は、未 commit の変更と、どこにも push していない submodule の commit (同梱の mod と同じ判定)・作業中か答え待ちのエージェント・ほかの
 //           space の端末も止めること。linked worktree でない (main の checkout・git の外)・git worktree lock がある・端末の住所の machine が space と
 //           合わないときは、わけを出して進めない。Enter (か「止めて消す」) で進む。開いてから未 commit の変更などが増えていたら、もう一度 Enter を
-//           求める (同梱の mod と同じ)。開いてから文字のキー (typedKey) が 1 つでも届いた小窓では、Enter で進めない (やり直しも)。prefix の小窓の d の
-//           後に、端末へ打つつもりの語を打ち続けて Enter まで押しても消さないため。わけを notice に出し、進めるのはボタン (マウスで押す) か、Esc で
-//           閉じて開き直した小窓の Enter。わざと消す Ctrl+K → d → Enter は、確かめの小窓に Enter しか届かないので、そのまま進む
+//           求める (同梱の mod と同じ)。開いてから文字のキー (typedKey) が 1 つでも届いた小窓では、Enter で進めない (やり直しも)。prefix の小窓の d や
+//           Ctrl+Q の後に、端末へ打つつもりの語を打ち続けて Enter まで押しても消さないため。わけを notice に出し、進めるのはボタン (マウスで押す) か、
+//           Esc で閉じて開き直した小窓の Enter。わざと消す Ctrl+K → d → Enter と Ctrl+Q → Enter は、確かめの小窓に Enter しか届かないので、そのまま進む
 //   1. 端末を止める  (a) space の全タブのペインの端末と、label herdr.space がその space の生きた端末 (ペインの無いもの)。(b) 同じ machine の生きた
 //           端末のうち、フォルダが worktree の中のもの (ほかの space のペインは今のフォルダ、ペインの無い端末 (hc run の手伝いなど) は起こしたフォルダか
 //           今のフォルダで見る。Windows では消すのを止めるので止める。一覧では分け、ほかの space のものは警告にも出す)。全部に hc kill を打ち、hc get で
@@ -29,7 +30,10 @@
 // 小窓は window (kind: "window") で開く。仕事 (hc・exec・sleep) はこの小窓の copy の task で流れ、copy を閉じると owner: null の task も一緒に
 // 打ち切られる (gpui-kit の scheduler は task を copy の寿命 (application generation) に結び、閉じると全部を止める)。dialog は Esc を herdr-app が
 // 先に取って閉じるが、window は Esc が mod に届き、外を押しても閉じないので、流している間は Esc を受けずに最後まで流す。それでも閉じたら (layout の
-// 切り替え・mod.open の 2 回目・herdr-app を閉じる)、close() が「途中で止まった」を通知する。済めば小窓は自分で閉じる。
+// 切り替え・mod.open の 2 回目・herdr-app を閉じる)、close() が「途中で止まった」を通知する。済めば小窓は自分で閉じる。小窓に focus がある間の
+// Ctrl+Q は、keys.json の section mod:pjp-worktree-remove が pjp-worktree-remove.again (nextCommand の "again") にし、Esc と同じに扱う (流して
+// いる間は閉じない)。section が無いと、global の Ctrl+Q (mod.open の 2 回目) が小窓を閉じ、流している仕事を打ち切る。focus が小窓の外 (端末を
+// 押した後など) にあると、Ctrl+Q は global のまま小窓を閉じる。
 // 同じ space の仕事は 1 つだけ (JOBS)。開き直した小窓は流れている仕事の進み具合を出し (Esc で閉じても仕事は止まらない)、止まった仕事は小窓の
 // Enter でやり直せる。machine の space (WSL・SSH の先) でも同じに動く: git とフォルダの片付けはその machine で (exec の on)、端末は machine/t7 の
 // 住所で止める。
@@ -39,7 +43,7 @@
 
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, notify, theme, spaces, panes, terminals, focused, exec, hc, home, checking } from "herdr";
+import { run, props, closeOverlay, notify, theme, spaces, panes, terminals, focused, exec, hc, home, checking, nextCommand } from "herdr";
 
 // 端末が終わるのを待つ上限 (hc kill を打ってから)。hc kill は hangup から始めて段を上げる (hc 0.1.21 の Linux の試しでは、hangup も TERM も無視する
 // program も約 1 秒で SIGKILL まで上げて終わらせ、kill は終わるまで返らなかった)。Claude Code の後始末と machine の遅れのぶんを見込む
@@ -472,7 +476,7 @@ function typedKey(e) {
 }
 
 // 開いてから文字のキーが届いた小窓で、Enter を受けなかったときに出す
-const TYPED_NOTICE = "開いてから文字のキーが届いたので、この小窓では Enter で進めない (打ち続けた字の後の Enter で消さないため)。進めるならボタンを押すか、Esc で閉じて prefix の後の d で開き直す";
+const TYPED_NOTICE = "開いてから文字のキーが届いたので、この小窓では Enter で進めない (打ち続けた字の後の Enter で消さないため)。進めるならボタンを押すか、Esc で閉じて開き直す (prefix の後の d か Ctrl+Q)";
 
 export default class WorktreeRemove extends View {
   init(_props, cx) {
@@ -494,6 +498,13 @@ export default class WorktreeRemove extends View {
     // window は開いてもキーボードを取らないので、自分で取る。開いた直後に focus が端末へ戻ることがあるので、少し後にもう一度取る
     cx.timer.after(50, () => {
       if (!this.closed) this.handle.focus();
+    });
+    // 小窓に focus がある間の Ctrl+Q (keys.json の section mod:pjp-worktree-remove の pjp-worktree-remove.again)。Esc と同じに扱う
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "again" && !this.closed) this.escape(cx);
+      }
     });
     if (this.job) this.tick(cx);
     if (!this.snap || this.job || checking()) return;
@@ -522,7 +533,7 @@ export default class WorktreeRemove extends View {
     this.closed = true;
     const j = this.job;
     if (j && !j.done && j.runner === this) {
-      finish(j, false, `小窓が閉じたので「${PHASE_NAMES[j.phase] ?? j.phase}」の途中で止まった。残っていれば prefix の後の d でやり直す`);
+      finish(j, false, `小窓が閉じたので「${PHASE_NAMES[j.phase] ?? j.phase}」の途中で止まった。残っていれば prefix の後の d か Ctrl+Q でやり直す`);
     }
   }
 
@@ -652,15 +663,17 @@ export default class WorktreeRemove extends View {
     }
     cx.stop_propagation();
     if (e.is_held) return;
-    if (k === "escape") {
-      // 流している間は閉じない (閉じると仕事が打ち切られる)
-      if (this.running()) {
-        this.notice = "止めている間は閉じない。済めば自分で閉じる";
-        return cx.notify();
-      }
-      return this.dismiss();
-    }
+    if (k === "escape") return this.escape(cx);
     this.go(cx, true);
+  }
+
+  // Esc と、小窓に focus がある間の Ctrl+Q: 閉じる。流している間は閉じない (閉じると仕事が打ち切られる)
+  escape(cx) {
+    if (this.running()) {
+      this.notice = "止めている間は閉じない。済めば自分で閉じる";
+      return cx.notify();
+    }
+    this.dismiss();
   }
 
   render(cx) {
