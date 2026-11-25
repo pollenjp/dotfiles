@@ -493,6 +493,7 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
+| 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
@@ -612,7 +613,9 @@ gate が違うと、試験が落ちる
   Windows の CI でも WSL の script の字と比べる。`op-reason` (ps1 の手順の型の `src/steps/ps1.rs`。突き合わせは `src/steps/op_reason_parity.rs`) は、
   `bootstrap-windows-op-reason.sh` と runner を同じ偽の `pwsh.exe` (`-Check` と揃える流れに、決めた出力と終了コードを返す) で流し、同じ判定と終了コード・
   打った pwsh の引数と順・手順の行・見せた pwsh の出力・直し方が同じかを突き合わせる。PATH に `pwsh` があれば、本物の `Install-OpReason.ps1` の
-  `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。bash の版を
+  `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。`local-env`
+  (`src/steps/local_env.rs`) は、`nix/scripts/bootstrap-local-env.sh` を同じ skill の断片と同じ env のファイルから流し、何をしたか・欄の外のバイト・
+  skill の節・欄に入れなかった断片・移した名前・印の行番号が同じかを突き合わせる (欄の前置きと dotfiles の節は Windows のものなので比べない)。bash の版を
   直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
@@ -642,9 +645,49 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 - junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
   打たない (先の中身まで消すことがある)
 - dotfiles の `CLAUDE.md`・skill・hook・status line・skillOverrides は次の節 ([Claude Code の設定](#claude-code-の設定))
-- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外・
-  `~/.config/pjp/env`。pjp-spaces (W2-4) は [herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces)。clone の更新は、runner ではなく PowerShell の
-  `dotfiles --self-update` が受け持つ ([clone を進める](#clone-を進める-dotfiles---self-update))
+- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外。pjp-spaces (W2-4) は
+  [herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces)、pjp が読む API キーの置き場 `~/.config/pjp/env` は
+  [マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)。clone の更新は、runner ではなく PowerShell の `dotfiles --self-update` が受け持つ
+  ([clone を進める](#clone-を進める-dotfiles---self-update))
+
+### マシンローカルの環境変数 (`~/.config/pjp/env`)
+
+そのマシンでしか使わない API キー (Notion の `PJP_NOTION_TOKEN_<名前>` など) の置き場。Windows では `%USERPROFILE%\.config\pjp\env`
+(`XDG_CONFIG_HOME` があれば `<XDG_CONFIG_HOME>\pjp\env`) で、claude-skills の pjp がこのファイルを直に読む (Windows ではシェルが環境へ読み込まない)。
+runner の手順 `local-env` (`claudePrivateSkills` のホスト) がファイルを置き、頭の「dotfiles が書く欄」を書き直す。Linux の `bootstrap-local-env`
+([`nix/README.md`「マシンローカルの環境変数」](../nix/README.md#マシンローカルの環境変数-configpjpenv)) と同じ印と書き直し方で、Windows で変えたところと
+その経緯は dotfiles-private の ADR 105 (`docs/adr/105_win_local_env_*`)。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す。
+
+```powershell
+dotfiles check --steps local-env              # 差を見る (何も書かない)
+dotfiles apply --steps local-env              # 無ければ作り、欄を書き直す
+notepad "$env:USERPROFILE\.config\pjp\env"     # 値は欄より下に書く
+```
+
+値は欄 (`# >>> dotfiles` で始まる行から `# <<< dotfiles` で始まる行まで) より下に、行頭から `KEY=VALUE` で書く (例: `PJP_NOTION_TOKEN_PERSONAL=ntn_…`)。
+クォートも展開もしない。pjp は打つたびに読むので、書いた後に開き直すものは無い。
+
+| ファイルの様子 | すること |
+| --- | --- |
+| 無い | 欄だけのファイルを作る (UTF-8・改行は LF) |
+| 印が 1 組 | 印の間を新しい欄に替える。印より上と下は 1 バイトも変えない |
+| 印の間に `#` で始まらない行がある | その行を元の順のまま終わりの印のすぐ下へ移し、変数名を `!!` で知らせる (値は出さない) |
+| 印が無い (空のファイルも) | 欄を頭に足す。今の行は 1 行も消さない (頭の UTF-8 の BOM は外す) |
+| 印が壊れている・symlink・普通のファイルでない・NUL を含む (UTF-16 で保存した・UTF-16 の行を足した)・`env.bak` がディレクトリ・読み取り専用 (書き直すことがあるとき)・`XDG_CONFIG_HOME` が相対パス | 書かずに ⚠ で知らせる |
+
+- 書き上がりが今と同じなら何も書かない。違えば前の版を同じディレクトリの `env.bak` (1 世代) に写し、一時ファイルから置き換える
+- 欄の節は、`%USERPROFILE%\.claude\skills\*\pjp-env.txt` (`claude-files` と `claude-skills` がつないだ skill の断片) から名前の順に組む。Linux の欄にある
+  dotfiles の節 (`nix/pjp-env/dotfiles.txt`) は入れない (Linux の setup が環境変数として読むもので、Windows では読むものが無い)。Windows で効くのは、
+  pjp がこのファイルから読む変数だけ
+- 印に化ける行・行の途中の制御文字を持つ断片と、名前に英数字と `. _ -` 以外の字がある skill は欄に入れず、⚠ で知らせる (欄はほかの断片で書く。
+  断片の書き方は [`nix/files/claude/skills/README.md`「環境変数を受け取るとき」](../nix/files/claude/skills/README.md#環境変数を受け取るとき-pjp-envtxt))
+- 文字コードは UTF-8 (BOM は無くても有ってもよい)。改行はファイルに合わせる (CR があれば CRLF、無い・新しいファイルは LF)。メモ帳はどちらの改行も
+  そのまま保つ。Windows PowerShell 5.1 のリダイレクト (`>`・`>>`) と `Out-File` は既定で UTF-16 で書く (`>>` は UTF-8 のファイルに UTF-16 の行を
+  足す) ので、このファイルに使わない (pjp も読めない)。足してしまったら、その行を消して書き直す
+- 権限は締めない (`%USERPROFILE%` の下は、継いだ ACL で本人と SYSTEM・Administrators だけが読める)。書き直すたびに、env と `env.bak` は置き場所の
+  ディレクトリの ACL を継ぐ (ファイルにだけ付けた ACL は残らない)。`XDG_CONFIG_HOME` で `%USERPROFILE%` の外に置くなら、そのディレクトリの ACL を確かめる
+- 値を守るために読み取り専用にしたファイルは、欄が最新のうちはそのまま ✔ で、欄を書き直すことがあるときだけ ⚠ になる (`attrib -r` で外してから流し、
+  要れば `attrib +r` で付け直す。書き直したファイルは読み取り専用でなくなる)
 
 ### Claude Code の設定
 
