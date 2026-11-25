@@ -431,6 +431,8 @@
           # setup.sh と、その隣の private-host.sh を使う
           setup-host-test = scriptTest "setup-host" ./scripts;
           setup-system-units-test = scriptTest "setup-system-units" ./scripts;
+          # 手順 linger (systemd の linger)。setup.sh を写した checkout に偽の sudo・loginctl を置く
+          setup-linger-test = scriptTest "setup-linger" ./scripts;
           # 設定グループで off の道具の手順を飛ばす・グループの 1 行。setup.sh を写した checkout に偽の bootstrap を置く
           setup-tools-test = scriptTest "setup-tools" ./scripts;
           # 雛形の tmp の例 (fixtures/local-flake-tmp/tmp.nix) も渡し、雛形の本文と同じかを見る (評価は local-flake-tmp-state)。
