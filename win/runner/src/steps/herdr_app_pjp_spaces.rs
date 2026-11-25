@@ -199,7 +199,7 @@ fn missing_source(ctx: &mut Ctx, clone: &Path, src: &Path, placed: bool) -> Outc
         ctx,
         Kind::Info,
         format!(
-            "claude-skills の clone に {MOD} がまだ無い ({}。claude-skills の PR の merge 前) → 何もしない (merge の後に clone を pull して dotfiles apply)",
+            "claude-skills の clone に {MOD} がまだ無い ({}。claude-skills の PR の merge 前) → 何もしない (merge の後に dotfiles --self-update apply)",
             src.display()
         ),
     )

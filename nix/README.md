@@ -194,6 +194,9 @@ https で clone した本体は、今までどおり `git` で取る。
 `git pull` は未 commit の変更があると止まるので、**両方やるなら pull が先**
 （`--self-update` は手順の実行より前に走るため、`--self-update --flake-update` の順序は勝手に合う）。
 
+Windows の clone（dotfiles・dotfiles-private・claude-skills）は、PowerShell の `dotfiles --self-update` が同じ扱いで進める
+（[`win/README.md`「clone を進める」](../win/README.md#clone-を進める-dotfiles---self-update)）。
+
 ### 依存 (flake.lock) の更新
 
 ```sh
@@ -1808,7 +1811,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 
 | 配置先 | 実体 |
 | --- | --- |
-| `~/.config/starship.toml` | `nix/files/starship.toml` |
+| `~/.config/starship.toml` | `nix/files/starship.toml` (Windows へも `win/manifest.toml` の `base = "nix"` で `%USERPROFILE%\.config\starship.toml` に配る。[`win/README.md`「starship」](../win/README.md#starship)) |
 | `~/.config/zellij/config.kdl` | `nix/files/zellij/config.kdl` |
 | `~/.config/herdr/config.toml` | `nix/files/herdr/config.toml` |
 | `~/.config/nvim/init.vim` | `nix/files/nvim/init.vim` |
@@ -3357,6 +3360,9 @@ home-manager は作りも消しもしない（秘密情報なので store には
 ./nix/scripts/bootstrap-local-env.sh          # 実体
 ~/dotfiles/setup --steps bootstrap-local-env  # これだけ走らせる場合
 ```
+
+Windows では `%USERPROFILE%\.config\pjp\env` で、runner の手順 `local-env` が同じ印と書き直し方で置く（読むのは claude-skills の pjp だけで、
+欄に dotfiles の節は入れない。[`win/README.md`「マシンローカルの環境変数」](../win/README.md#マシンローカルの環境変数-configpjpenv)）。
 
 ファイルの頭には、dotfiles と skill が受け取る環境変数の一覧を「dotfiles が書く欄」として置き、
 手順 6.6 が流れるたびに書き直す（[後述](#一覧の欄-adr-021)）。**書き換えるのは欄の中だけで、欄の外は

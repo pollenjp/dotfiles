@@ -1,3 +1,8 @@
+# starship のプロンプトの設定。同じファイルを、Linux は home-manager (nix/home/modules/files.nix) が ~/.config/starship.toml に、
+# Windows は win/manifest.toml (runner の手順 files か、WSL の setup) が %USERPROFILE%\.config\starship.toml に置く。
+# sh などの shell で判定・出力する custom module は、os = 'unix' で Windows では出さない (win/runner の steps/files.rs の
+# 試験 real_repo_starship_toml が確かめる。win/README.md の「starship」)。
+
 # format = """
 # $all
 # $character"""
@@ -70,9 +75,13 @@ format = '[$user]($style)'
 #       PJP_SSH_CLIENT が空か、% を含む (OpenSSH 10.0 より古い ssh は %u@%L を展開せずに送る) とき
 #
 # プロンプトのたびに走るので、sh で外のコマンドを呼ばずに判定する (ssh-add で agent に問い合わせない)。
+#
+# 判定は sh と Linux の herdr・ssh-agent の仕組みに頼るので、Windows の starship では判定しない (os = 'unix'。sh を PATH から
+# 探しもしない。Linux・macOS ではこれまでどおり判定する)。
 [custom.pjp_ssh_client]
 description = 'PJP_SSH_CLIENT が届いていない ssh の shell と herdr の pane で警告する'
 shell = ['sh']
+os = 'unix'
 when = '''
 s=${SSH_AUTH_SOCK-}
 case $s in

@@ -13,8 +13,9 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 (`docs/adr/070_win_herdr_app_keys_*`)・ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`)・ADR 090 (`docs/adr/090_win_claude_t3_launch_args_*`))。
 
 受け持ちを runner に切り替えたホスト (dotfiles-private の `win/hosts/*.toml` で `[runner] enable = true`) では、WSL の setup は Windows に触らない。
-この README で「`~/dotfiles/setup --update` で配る・入れる・揃える」と書いた Windows の手順は、そのホストでは Windows の clone を pull してから
-PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (固定した版より新しい版の知らせもここに出る)。WSL の `bootstrap-windows-*.sh` を
+この README で「`~/dotfiles/setup --update` で配る・入れる・揃える」と書いた Windows の手順は、そのホストでは PowerShell の
+`dotfiles --self-update apply` (Windows の 3 つの clone を進めてから `dotfiles apply`。[clone を進める](#clone-を進める-dotfiles---self-update)) で揃え、
+`dotfiles check` で確かめる (固定した版より新しい版の知らせもここに出る)。WSL の `bootstrap-windows-*.sh` を
 手で打つ手順は、`dotfiles apply --steps <id> --force` (`--force`)・`dotfiles import <id>` (`--import`)・PowerShell の `Install-*` (`--apply`) に
 読み替える ([受け持ちを runner に切り替える](#受け持ちを-runner-に切り替える))。
 
@@ -23,7 +24,9 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、dotfiles・dotfiles-private・claude-skills を Windows の ghq に clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
-| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles`)。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles` (`dotfiles --self-update` は 3 つの clone を進めてから))。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| (`nix/files/starship.toml`) | `%USERPROFILE%\.config\starship.toml` | starship のプロンプトの設定。Linux の home-manager も同じファイルを `~/.config/starship.toml` に置くので `nix/` に置き、manifest の `base = "nix"` で配る。sh で判定する custom module は Windows では出さない。starship 本体と `$PROFILE` の初期化の 1 行は配らない ([後述](#starship)) |
+| `powershell/Invoke-DotfilesSelfUpdate.ps1` | (配らない。`dotfiles --self-update` が clone の中のものを呼ぶ) | `dotfiles --self-update` の中身。dotfiles・dotfiles-private・claude-skills の clone を gh の資格情報で fetch して fast-forward し、後ろの引数があればその後に runner に渡す ([後述](#clone-を進める-dotfiles---self-update)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
 | `herdr/Install-Herdr.ps1` | `%USERPROFILE%\.config\powershell\Install-Herdr.ps1` | Windows の herdr を winget で固定した版に揃える。PowerShell の `Install-Herdr` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` (既定は設定グループで決まる) のマシン ([後述](#herdr-を入れる-winget)、[TKT-112](https://app.notion.com/p/winget-Windows-herdr-Herdr-Herdr-Preview-dotfiles-3f179149a66f81858e0cf4555c9c598f)) |
@@ -61,7 +64,7 @@ PowerShell の `dotfiles apply` で揃え、`dotfiles check` で確かめる (�
 | `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定は personal だけ) のマシンだけ ([後述](#claude-desktop)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
-| `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc の子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
+| `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc のハブ・子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
 | `claude-code/t3/CLAUDE.t3.md` | `%USERPROFILE%\.claude\t3\CLAUDE.t3.md` (`claude-t3` の手順が置く) | T3 Code の会話だけの指示。T3 の Launch arguments の `--append-system-prompt-file` が system prompt の後ろに足す (herdr-app を前提にした指示の読み替え) ([後述](#claude-code-の設定)) |
 | (`nix/home/modules/git.toml`) | `%USERPROFILE%\.config\git\config`・`ignore`・`config.<owner>` | git の設定のうち、どの OS でも同じにする値 (名前とメール・pollenjp-sub の名前とメール・alias・core など・ignore) の正本。WSL の home-manager (`nix/home/modules/git.nix`) と runner の `git-config` の手順が同じファイルを読む ([後述](#git-の設定)) |
 
@@ -207,11 +210,13 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
   は、WSL の setup が Windows に配らないので、受け持ちによらず runner の `dotfiles apply` が流す (dotfiles-private の ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))
 - 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
   (`powershell/dotfiles.ps1`) が `win\runner` に入って `cargo run --quiet --release --locked` を打つ (rustup は `rust-toolchain.toml` を今の
-  ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く
+  ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く。runner は clone を
+  取得しない。3 つの clone を進めるのは `dotfiles --self-update` ([後述](#clone-を進める-dotfiles---self-update))
 
 ### runner を流す
 
 ```powershell
+dotfiles --self-update apply           # 3 つの clone を進めてから揃える (後ろの引数は runner に渡す。下の「clone を進める」)
 dotfiles list                          # 手順と、このホストでの on/off・runner に移したか
 dotfiles check                         # 手順を順に確かめる (何も書かない)
 dotfiles check --steps files,ntn       # 手順を id で絞る (PowerShell が配列にした files,ntn は dotfiles 関数が , でつなぎ直す)
@@ -242,6 +247,49 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
   いない変更があると止まる。`-` で始まるレイアウトの名前は `--` の後ろに書く。受け持ちが WSL のホストでは止まり (1)、WSL の script の `--import` を出す
 - `--show-words` (check と apply) は、google-ime の辞書の衝突で語の diff も出す (付けなければ辞書ごとの行の数だけ)。辞書の語が出るので、自分の端末で打つ
   (Claude などのログに残る場所では流さない)
+
+### clone を進める (`dotfiles --self-update`)
+
+runner は clone を取得しない。dotfiles・dotfiles-private・claude-skills の 3 つの clone を進めるのは、PowerShell の `dotfiles --self-update`
+(Linux の `~/dotfiles/setup --self-update` に当たる。経緯は dotfiles-private の ADR 104 (`docs/adr/104_win_dotfiles_self_update_*`))。
+
+```powershell
+dotfiles --self-update                          # 3 つの clone を fetch して fast-forward する
+dotfiles --self-update apply                    # 進めてから dotfiles apply (後ろの引数は、そのまま runner に渡す)
+dotfiles --self-update check --steps files,ntn  # 進めてから dotfiles check --steps files,ntn
+dotfiles --self-update --dry-run                # fetch して、進める commit を出すだけ (fast-forward も runner もしない)
+dotfiles --self-update apply --dry-run          # 進めてから dotfiles apply --dry-run (後ろの --dry-run は runner のもの)
+```
+
+- 進めるのは `%USERPROFILE%\ghq\github.com\pollenjp\` の 3 つの clone (bootstrap が clone する所)。今の branch を upstream から fetch して fast-forward し、
+  clone ごとに進めた commit を出す (新しい順に 15 まで)。GitHub の remote は gh の資格情報 (HTTPS) で通し (bootstrap の clone と同じ組。SSH の鍵は使わず、
+  origin の URL も git の設定も書き換えない)、git にも Git Credential Manager にも対話のプロンプトを出させない (資格情報が無ければ、待たずに ⚠ になる)
+- 未 commit の変更がある (未追跡のファイルは数えない)・detached HEAD・upstream が無い・fetch が落ちた・fast-forward できない (ローカルにだけ commit が
+  ある・進めると上書きされる未追跡のファイルがある)・clone が無い・git の repo でない clone は、⚠ で直し方を出して進めず、ほかの clone と runner は続ける
+  (Linux の setup と同じ扱い)。runner を流したら、⚠ は runner の出力の後にもう一度出す
+- `--self-update` は最初の引数に書く。`--dry-run` (と `-h`・`--help`) は `--self-update` の直後に書き、runner のコマンド (`apply` など) から後ろはそのまま
+  runner に渡す (runner の option を runner のコマンドより前に書くと、何もせずに止まる)。`--self-update --dry-run` も fetch はする (remote-tracking の ref
+  だけが進み、branch と作業ツリーは動かない)
+- 終了コード: runner の終了コード (runner の引数が無ければ 0)。進めなかった clone があれば、0 と 3 を 1 にする。引数の誤り・runner が無いときは 2
+- `dotfiles.ps1` が変わったら、締めに新しい PowerShell を開くよう出す (開いている PowerShell の関数・略語・キーの割り当ては、開いたときに読んだ古いまま)。
+  配った写し (`%USERPROFILE%\.config\powershell\dotfiles.ps1`) がまだ古ければ、先に配るよう添える (受け持ちが runner のホストは `dotfiles apply`、WSL の
+  ホストは WSL の `~/dotfiles/setup --self-update --update`。WSL は WSL の clone から配る)
+- 中身は clone の中の `powershell/Invoke-DotfilesSelfUpdate.ps1` (配らない)。`dotfiles` 関数は配った写しでなく clone の中のものを呼ぶので、更新の処理を直した
+  pull は、開いている PowerShell の関数が古いままでも、次の `dotfiles --self-update` から効く (その回は、pull する前に読み込んだ script のまま流れる)。runner は
+  clone から作り直すので、進めた後のコードで動く
+
+`--self-update` を知らない古い `dotfiles` 関数 (この節を足す前に開いた PowerShell・配った写しがまだ古い PC) では、runner が「`--self-update` は PowerShell の
+dotfiles 関数が受け持つが、…古いもの」(runner も古ければ「知らないコマンドです: --self-update」) で止まる。そのときは一度だけ手で進めて配る:
+
+```powershell
+foreach ($r in 'dotfiles', 'dotfiles-private', 'claude-skills') {
+    git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= -c 'credential.helper=!gh auth git-credential' `
+        -C "$HOME\ghq\github.com\pollenjp\$r" pull --ff-only
+}
+dotfiles apply                     # dotfiles.ps1 を配る (受け持ちが WSL のホストは、WSL で ~/dotfiles/setup --self-update --update)
+# 新しい PowerShell を開いて
+dotfiles --self-update --dry-run   # 3 つの clone が最新と出る
+```
 
 ### ホストの値
 
@@ -408,7 +456,7 @@ scanData = "https://app.notion.com/p/…"
   中身を「置いた記録が無く」の衝突と見る。WSL が古い commit のまま配った後に切り替えると、その後に repo で変わったファイルが衝突になる):
   1. merge の前に、WSL の `~/dotfiles/setup --self-update --update` で最後に配る (`--self-update` が dotfiles を、`--update` の手順 private-fetch が
      dotfiles-private を main へ進める)。上の項の ⚠ (衝突) が出ていないことを確かめ、2 つの clone の commit を控える
-  2. Windows の 3 つの clone を `pull --ff-only` し、dotfiles・dotfiles-private の commit が 1 と同じかを見て、`dotfiles check` が 0 になること
+  2. Windows の 3 つの clone を `dotfiles --self-update` で進め、dotfiles・dotfiles-private の commit が 1 と同じかを見て、`dotfiles check` が 0 になること
   3. PR を merge し、両方の clone を進める。1 の commit から入った merge が切り替えの PR だけか (`git log --first-parent`) と、配るもの (dotfiles の
      `win/` の配るファイル・runner のコード・`nix/pkgs/herdr-core/releases.json`、dotfiles-private の `ssh/`・`google-japanese-input/`) が変わっていないか
      (`git diff --stat`) を見る。配るファイルが変わっていれば、そのファイルは 5 で「置いた記録が無く」の衝突になる (中身が repo のものなら
@@ -425,7 +473,7 @@ scanData = "https://app.notion.com/p/…"
   同じ PR に入れた文書や古さの直しまで戻る)。両方の clone を同じ commit に進め、Windows で runner が作った記録 (`%LOCALAPPDATA%\dotfiles\state\` の WSL と
   同じ手順の分) を別のディレクトリへ退けてから (残すと、受け持ちが WSL の間の `dotfiles check` が古い記録と比べて直すことを出し続ける)、WSL の
   `~/dotfiles/setup --update` (WSL がまた配る。中身がその commit の repo と同じなら「同じ」) → Windows の `dotfiles check` (受け持ちが WSL の setup に戻る)
-- 切り替えた後は、Windows の手順を揃えるのは Windows の `dotfiles apply` だけ (clone を pull したら流す)。WSL の setup は Windows の手順をどれも飛ばす。
+- 切り替えた後は、Windows の手順を揃えるのは Windows の `dotfiles apply` だけ (`dotfiles --self-update apply` で、clone を進めてから流す)。WSL の setup は Windows の手順をどれも飛ばす。
   全部を流す `dotfiles apply` は、WSL の `setup --update` と同じく、道具の入れ替え・設定とレジストリの書き込み・入っていない道具を入れるときの UAC を
   含む。先に `dotfiles apply --dry-run` で、WSL と同じ手順に直すことがあるかを見る (Windows にしか無い手順だけを当てるなら `--steps` で絞る)。
   版の知らせは上の `pin-updates` の項、op-reason の版を上げた後は上の `op-reason` の項、依存の更新の PR を merge した後も Windows で `dotfiles apply`
@@ -445,6 +493,7 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
+| 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
@@ -564,7 +613,9 @@ gate が違うと、試験が落ちる
   Windows の CI でも WSL の script の字と比べる。`op-reason` (ps1 の手順の型の `src/steps/ps1.rs`。突き合わせは `src/steps/op_reason_parity.rs`) は、
   `bootstrap-windows-op-reason.sh` と runner を同じ偽の `pwsh.exe` (`-Check` と揃える流れに、決めた出力と終了コードを返す) で流し、同じ判定と終了コード・
   打った pwsh の引数と順・手順の行・見せた pwsh の出力・直し方が同じかを突き合わせる。PATH に `pwsh` があれば、本物の `Install-OpReason.ps1` の
-  `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。bash の版を
+  `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。`local-env`
+  (`src/steps/local_env.rs`) は、`nix/scripts/bootstrap-local-env.sh` を同じ skill の断片と同じ env のファイルから流し、何をしたか・欄の外のバイト・
+  skill の節・欄に入れなかった断片・移した名前・印の行番号が同じかを突き合わせる (欄の前置きと dotfiles の節は Windows のものなので比べない)。bash の版を
   直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
@@ -575,11 +626,7 @@ ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。どれも Windows にし
 (ホストの値は要る)。Linux の側は `nix/README.md` の「claude-skills の Rust の道具 (shim の pjp)」と「hc の skill」。
 
 ```powershell
-# runner は clone を取得しない。先に 3 つの clone を進める (gh の資格情報で HTTPS を通す。SSH の鍵を使わない)
-foreach ($r in 'dotfiles', 'dotfiles-private', 'claude-skills') {
-    git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= -c 'credential.helper=!gh auth git-credential' `
-        -C "$HOME\ghq\github.com\pollenjp\$r" pull --ff-only
-}
+dotfiles --self-update             # runner は clone を取得しない。先に 3 つの clone を進める (gh の資格情報で HTTPS を通す。上の「clone を進める」)
 dotfiles check                     # W0-2 の手順の差も出る (何も書かない)
 dotfiles apply --dry-run           # することを出す
 dotfiles apply                     # 受け持ちが WSL なら、Windows にしか無い手順だけを流す
@@ -598,8 +645,49 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 - junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
   打たない (先の中身まで消すことがある)
 - dotfiles の `CLAUDE.md`・skill・hook・status line・skillOverrides は次の節 ([Claude Code の設定](#claude-code-の設定))
-- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外・
-  `~/.config/pjp/env`・runner の `self-update`。pjp-spaces (W2-4) は [herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces)
+- まだ後の PR: ハブの見回り役 `pjp-hubd` を立てる (claude-skills の W2-3 の後)・plugin・`c` の `--no-chrome`・Defender の除外。pjp-spaces (W2-4) は
+  [herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces)、pjp が読む API キーの置き場 `~/.config/pjp/env` は
+  [マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)。clone の更新は、runner ではなく PowerShell の `dotfiles --self-update` が受け持つ
+  ([clone を進める](#clone-を進める-dotfiles---self-update))
+
+### マシンローカルの環境変数 (`~/.config/pjp/env`)
+
+そのマシンでしか使わない API キー (Notion の `PJP_NOTION_TOKEN_<名前>` など) の置き場。Windows では `%USERPROFILE%\.config\pjp\env`
+(`XDG_CONFIG_HOME` があれば `<XDG_CONFIG_HOME>\pjp\env`) で、claude-skills の pjp がこのファイルを直に読む (Windows ではシェルが環境へ読み込まない)。
+runner の手順 `local-env` (`claudePrivateSkills` のホスト) がファイルを置き、頭の「dotfiles が書く欄」を書き直す。Linux の `bootstrap-local-env`
+([`nix/README.md`「マシンローカルの環境変数」](../nix/README.md#マシンローカルの環境変数-configpjpenv)) と同じ印と書き直し方で、Windows で変えたところと
+その経緯は dotfiles-private の ADR 105 (`docs/adr/105_win_local_env_*`)。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す。
+
+```powershell
+dotfiles check --steps local-env              # 差を見る (何も書かない)
+dotfiles apply --steps local-env              # 無ければ作り、欄を書き直す
+notepad "$env:USERPROFILE\.config\pjp\env"     # 値は欄より下に書く
+```
+
+値は欄 (`# >>> dotfiles` で始まる行から `# <<< dotfiles` で始まる行まで) より下に、行頭から `KEY=VALUE` で書く (例: `PJP_NOTION_TOKEN_PERSONAL=ntn_…`)。
+クォートも展開もしない。pjp は打つたびに読むので、書いた後に開き直すものは無い。
+
+| ファイルの様子 | すること |
+| --- | --- |
+| 無い | 欄だけのファイルを作る (UTF-8・改行は LF) |
+| 印が 1 組 | 印の間を新しい欄に替える。印より上と下は 1 バイトも変えない |
+| 印の間に `#` で始まらない行がある | その行を元の順のまま終わりの印のすぐ下へ移し、変数名を `!!` で知らせる (値は出さない) |
+| 印が無い (空のファイルも) | 欄を頭に足す。今の行は 1 行も消さない (頭の UTF-8 の BOM は外す) |
+| 印が壊れている・symlink・普通のファイルでない・NUL を含む (UTF-16 で保存した・UTF-16 の行を足した)・`env.bak` がディレクトリ・読み取り専用 (書き直すことがあるとき)・`XDG_CONFIG_HOME` が相対パス | 書かずに ⚠ で知らせる |
+
+- 書き上がりが今と同じなら何も書かない。違えば前の版を同じディレクトリの `env.bak` (1 世代) に写し、一時ファイルから置き換える
+- 欄の節は、`%USERPROFILE%\.claude\skills\*\pjp-env.txt` (`claude-files` と `claude-skills` がつないだ skill の断片) から名前の順に組む。Linux の欄にある
+  dotfiles の節 (`nix/pjp-env/dotfiles.txt`) は入れない (Linux の setup が環境変数として読むもので、Windows では読むものが無い)。Windows で効くのは、
+  pjp がこのファイルから読む変数だけ
+- 印に化ける行・行の途中の制御文字を持つ断片と、名前に英数字と `. _ -` 以外の字がある skill は欄に入れず、⚠ で知らせる (欄はほかの断片で書く。
+  断片の書き方は [`nix/files/claude/skills/README.md`「環境変数を受け取るとき」](../nix/files/claude/skills/README.md#環境変数を受け取るとき-pjp-envtxt))
+- 文字コードは UTF-8 (BOM は無くても有ってもよい)。改行はファイルに合わせる (CR があれば CRLF、無い・新しいファイルは LF)。メモ帳はどちらの改行も
+  そのまま保つ。Windows PowerShell 5.1 のリダイレクト (`>`・`>>`) と `Out-File` は既定で UTF-16 で書く (`>>` は UTF-8 のファイルに UTF-16 の行を
+  足す) ので、このファイルに使わない (pjp も読めない)。足してしまったら、その行を消して書き直す
+- 権限は締めない (`%USERPROFILE%` の下は、継いだ ACL で本人と SYSTEM・Administrators だけが読める)。書き直すたびに、env と `env.bak` は置き場所の
+  ディレクトリの ACL を継ぐ (ファイルにだけ付けた ACL は残らない)。`XDG_CONFIG_HOME` で `%USERPROFILE%` の外に置くなら、そのディレクトリの ACL を確かめる
+- 値を守るために読み取り専用にしたファイルは、欄が最新のうちはそのまま ✔ で、欄を書き直すことがあるときだけ ⚠ になる (`attrib -r` で外してから流し、
+  要れば `attrib +r` で付け直す。書き直したファイルは読み取り専用でなくなる)
 
 ### Claude Code の設定
 
@@ -662,7 +750,7 @@ T3 Code (desktop app) の Claude の会話も、herdr-app のハブと同じ `~/
 
 | ファイル | 渡す引数 | 効き方 |
 | --- | --- | --- |
-| `settings.json` | `--settings` | T3 が読み、T3 自身の設定の下に重ねて渡す。flag settings なので user の `settings.json` より強く、`skillOverrides` は skill ごとに勝つ。herdr と hc の子の skill (`herdr-app`・`pjp-herdr-hub`・`pjp-herdr-other-repo`・`pjp-hc-hub`・`pjp-hc-child`) を off、`pjp-t3-hub` (ほかの会話では `claude-skill-overrides` がいつも off にする) を on にする。`hc` は残す |
+| `settings.json` | `--settings` | T3 が読み、T3 自身の設定の下に重ねて渡す。flag settings なので user の `settings.json` より強く、`skillOverrides` は skill ごとに勝つ。herdr と hc のハブ・子の skill (`herdr-app`・`pjp-herdr-hub`・`pjp-herdr-other-repo`・`pjp-hc-hub`・`pjp-hc-hub-panel`・`pjp-pack-hc`・`pjp-hc-child`。T3 では hc のハブの panel を使わないので、hc の pack の入口 `pjp-pack-hc` も) を off、`pjp-t3-hub` (ほかの会話では `claude-skill-overrides` がいつも off にする) を on にする。`hc` は残す |
 | `CLAUDE.t3.md` | `--append-system-prompt-file` | T3 の指示の後ろ (system prompt の末尾) に足す。`~/.claude/CLAUDE.md` は置き換えず、そのまま読まれる |
 
 Launch arguments の文 (T3 の `%USERPROFILE%\.t3\userdata\settings.json` の `providerInstances.claudeAgent.config.launchArgs` に入る):
@@ -684,7 +772,7 @@ Launch arguments の文 (T3 の `%USERPROFILE%\.t3\userdata\settings.json` の `
     system prompt を最初の要求で記録し、resume でも次の compaction まで同じものを送る (claude の `systemPromptSnapshot` の既定)。そのため
     新しい会話から効く。今ある会話には、開き直しても次の compaction の後まで入らない
 - 直すのは dotfiles の `win/claude-code/t3/` (置き先の写しを変えると、次の `dotfiles apply` が衝突として知らせる)
-- 確かめるのは T3 の会話の skill の一覧 (herdr と hc の子の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
+- 確かめるのは T3 の会話の skill の一覧 (herdr と hc のハブ・子の skill が無く、`pjp-t3-hub` がある)。herdr-app の会話の一覧には `pjp-t3-hub` が出ない
 - T3 のハブの子は、つないだ Linux の環境に T3 のスレッドとして立てる (`pjp child new` は使わない。手順は claude-skills の `pjp-t3-hub`)。`CLAUDE.t3.md` もその向きで書く
 
 ### claude-personal・claude-work
@@ -1370,7 +1458,9 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 - `dst` は `%USERPROFILE%` / `%APPDATA%` / `%LOCALAPPDATA%` のどれかで始める。区切りは `/`
 - 書けるキーは `src` / `dst` / `hint` / `base` だけ。`..` と `\` は書けない
 - `base = "nix"` の表だけ、`src` は repo 直下の `nix/` からの相対パスになる (既定は `"win"`)。Linux の home-manager も同じファイルを
-  読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json`)
+  読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json` と、
+  [starship](#starship) の `starship.toml`)。`src` は `win/` の外なので、[`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml) の
+  `paths` にも足す (runner が読むファイルを変えた PR で、runner の CI を流す)
 - 大文字小文字だけが違う `dst` は重複として止まる (Windows では同じファイル)
 - 今の設定をそのまま取り込んだなら、1 回目は「同じです」になり記録だけが作られる
 - manifest から消したファイルは Windows 側から消さない
@@ -1573,8 +1663,9 @@ dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setu
 `win/*/*.Tests.ps1` (`Install-OpenSSH.Tests.ps1`・`Install-Herdr.Tests.ps1` など) は、`*.ps1` の副作用の無い関数を確かめる。
 Linux の pwsh で流すので Windows には触らない。CI の `lint` ([`.github/workflows/nix.yml`](../.github/workflows/nix.yml)) が、
 flake が固定している nixpkgs の pwsh で全部を流す (`Start-PortForward.Tests.ps1` は PATH の ssh を引くので、nixpkgs の
-openssh も渡す。`dotfiles.Tests.ps1` は PATH に ghq と fzf があれば cdrepo を本物でも流すので、nixpkgs の ghq と fzf も渡す)。手元で同じことを
-するには、repo の root で:
+openssh も渡す。`dotfiles.Tests.ps1` は PATH に ghq と fzf があれば cdrepo を本物でも流すので、nixpkgs の ghq と fzf も渡す。
+`Invoke-DotfilesSelfUpdate.Tests.ps1` は PATH の git で一時の repo と手元の remote を作って `dotfiles --self-update` を流す。git の設定は一時の空のファイルに
+し、git が無ければその試験を飛ばす)。手元で同じことをするには、repo の root で:
 
 ```sh
 nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh nixpkgs#ghq nixpkgs#fzf --command bash -c '
@@ -1595,7 +1686,8 @@ jq --indent 2 . win/orca/keybindings.json | cmp - win/orca/keybindings.json   # 
 
 ## PowerShell
 
-配るのは共有設定の `powershell/dotfiles.ps1` だけで、`$PROFILE` そのものは配らない。
+配るのは共有設定の `powershell/dotfiles.ps1` だけで、`$PROFILE` そのものは配らない (`dotfiles --self-update` の中身の
+`powershell/Invoke-DotfilesSelfUpdate.ps1` も配らず、`dotfiles` 関数が clone の中のものを呼ぶ。[clone を進める](#clone-を進める-dotfiles---self-update))。
 `$PROFILE` はドキュメントの下にあり、ドキュメントの位置は OneDrive の設定でマシンごとに
 変わる (この PC では `OneDrive\ドキュメント`) ので、manifest の `dst` に書けない。
 
@@ -1612,8 +1704,8 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
   配っていない PC でも、起動のたびにエラーを出さずに済む
 - dot-source (`.`) で読む。`&` で呼ぶと子の scope で定義され、呼び終わりに消える
 - 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
-- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
-  そこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
+- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化 (設定の `starship.toml` は manifest で配る。[starship](#starship)) や、
+  そのマシンだけの設定はそこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
   (`dotfiles.ps1` が EditMode を Vi に替え、PSReadLine は EditMode を替えるとそのモードの既定の割り当てに戻すので、前に置いた割り当ては消える。
   [Vi モード](#vi-モード))
 - 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
@@ -1822,7 +1914,8 @@ Ctrl+z (`Undo`)・Ctrl+y (`Redo`)・↑・↓ (履歴)・Home・End・Delete・B
 
 - 形が替わるのは、DECSCUSR を受ける端末。herdr-app・Windows Terminal と PowerShell の間の ConPTY は列を端末へ渡す (WSL から起こした
   PowerShell 7 と 5.1 の ConPTY で確かめた)
-- starship のプロンプトは、描き直したときのモードで記号を替える (starship の既定の設定では、挿入モードで `❯`、コマンドモードで `❮`)。
+- starship のプロンプトは、描き直したときのモードで記号を替える (dotfiles の `starship.toml` は記号 (`character`) を替えていないので、starship の
+  既定のまま挿入モードで `❯`、コマンドモードで `❮`)。
   形が替わらない端末でも、プロンプトの記号でモードが分かる。starship の init (`$PROFILE` で `dotfiles.ps1` より先に読む) もモードが替わるたびに
   描き直す handler を置くが、`dotfiles.ps1` はそれを包まずに置き換えて自分で描き直す (`. $PROFILE` で読み直しても、描き直しは 1 回)
 - PSReadLine の `-ViModeIndicator Cursor` を使わないのは、5.1 の PSReadLine 2.0.0 の `Cursor` が Windows のコンソールの API でカーソルの
@@ -1872,6 +1965,11 @@ Set-PSReadLineOption -EditMode Windows
   `-ViMode Command`)
 - 5.1 の PSReadLine 2.0.0 に無い関数・引数を使うなら、有るかを見て分ける (Ctrl+u の `BackwardKillInput` のように。`-Function` に無い名前を
   渡すと落ちる)。`dotfiles.Tests.ps1` は 5.1 でも流す (Windows で `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …\dotfiles.Tests.ps1`)
+- `dotfiles` 関数の runner の流し方 (`cargo run …` の行) を直すときは、`Invoke-DotfilesSelfUpdate.ps1` の末尾の cargo の行も同じに直す (`dotfiles --self-update`
+  は進めた後に、その行で runner を流す。`Invoke-DotfilesSelfUpdate.Tests.ps1` が、同じ場所で同じ引数を渡すかを突き合わせる)。`Invoke-DotfilesSelfUpdate.ps1` も
+  5.1 で動かす (同じ Tests が、7 にしか無い書き方を見る)
+- 関数の引数をほかの script に渡すときは、配列を変数に入れてから `@変数` で広げる (`& $script @(…)` は配列を 1 つの引数で渡し、script の側で空白で
+  つながった 1 つの字になる)
 
 ### Windows PowerShell 5.1 でも使うなら
 
@@ -1882,6 +1980,29 @@ Set-PSReadLineOption -EditMode Windows
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
 ```
+
+## starship
+
+starship (プロンプト) の設定 `starship.toml` を、Linux と同じファイル (`nix/files/starship.toml`。Linux は home-manager が `~/.config/starship.toml` に
+置く) から `%USERPROFILE%\.config\starship.toml` に配る。starship は環境変数 `STARSHIP_CONFIG` が無ければここを読む。配るのは manifest の
+`base = "nix"` の表 ([ファイルを足す](#ファイルを足す)) で、受け持ちを runner に切り替えたホストは `dotfiles apply` の手順 `files`、ほかは WSL の
+`~/dotfiles/setup --update` ([配る](#配る))。初めて配るときは、`dotfiles apply --dry-run` に `[dry-run] コピー: …\.config\starship.toml`、`dotfiles check` に
+`無い (apply でコピーする): …\.config\starship.toml` と出る。
+
+- starship 本体と、`$PROFILE` の初期化の 1 行 (`Invoke-Expression (&starship init powershell)`) は配らない (手で入れたもののまま。[PowerShell](#powershell))。
+  starship の無い PC に置いても、読むものがいないだけ
+- starship はプロンプトのたびに設定を読むので、置いたら次のプロンプトから効く (読み直しは要らない)
+- 置き先に手で書いた `starship.toml` があると、初めて配るときに「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら))。Windows の中身を
+  残すなら `nix/files/starship.toml` に取り込む (Linux の見た目も変わる)。`STARSHIP_CONFIG` で別のファイルを指している PC では、置いたファイルは読まれない
+- 同じファイルを Linux (bash・fish) と Windows (PowerShell) の starship が読む。sh などの shell で判定・出力する custom module は `os = 'unix'` で
+  Windows では出さない。Windows の starship は `shell` を PATH から引くので、sh を PATH に足した PC (Git for Windows の `usr\bin` など) ではプロンプトの
+  たびに sh を起こし、bash は WSL の `bash.exe` (WindowsApps) に当たって WSL を起こす。`os = 'unix'` なら Windows では shell を探さずに飛ばし、Linux と
+  macOS ではこれまでどおり判定する。runner の試験 (`runner/src/steps/files.rs` の `real_repo_starship_toml`) が、Unix の shell の custom module に
+  `os` があるかを確かめる
+- 今の custom module は `custom.pjp_ssh_client` (ssh で入った shell と herdr の pane で、`PJP_SSH_CLIENT` が届いていないことを出す。Linux の herdr と
+  ssh-agent の仕組み) だけで、Windows では出ない
+- ほかの module は Windows でもそのまま使える (`sudo` は starship の既定の `allow_windows = false` で、Windows では出ない)。罫線 (`┌`・`│`・`└`) と
+  絵文字 (`🕙`・`🌏`・`⚠`) は Linux と同じ字で、字体に無い字が □ で出るなら端末の字体を見る
 
 ## herdr
 
@@ -2556,8 +2677,8 @@ Space 切り替え  a 足す  e 直す  d 消す  Enter つなぐ  Esc 戻る
 | `%USERPROFILE%\.config\port-forward\local.json` | その PC で足した・直した・隠した組と、前回つないだ port・最近つないだ Host | pf |
 
 - 共有の組を足す・直すときは、dotfiles-private の `ssh/port-forward.toml` を直して `--check` で確かめ、commit・push して、
-  各 Windows の PC の WSL で `~/dotfiles/setup --update` を流す (受け持ちを runner に切り替えた PC は、dotfiles-private の clone を pull してから
-  `dotfiles apply`)。Host 名は ssh の設定と同じ綴りで書き、`.` を含むときは
+  各 Windows の PC の WSL で `~/dotfiles/setup --update` を流す (受け持ちを runner に切り替えた PC は、`dotfiles --self-update apply` で dotfiles-private の
+  clone を進めてから `dotfiles apply`)。Host 名は ssh の設定と同じ綴りで書き、`.` を含むときは
   `"…"` で囲む (囲まないと TOML の入れ子の表になり、止まる):
 
   ```sh
@@ -3897,7 +4018,7 @@ dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる�
    winget の manifest にまだ portable の zip があるか (`winget show --id junegunn.fzf --version <版> --installer-type portable`) も見る
 2. `ghq/Install-Ghq.ps1`・`fzf/Install-Fzf.ps1` の `-Version` の既定値と、上の道具の表の版を新しい版にし、`Install-Ghq.Tests.ps1`・
    `Install-Fzf.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
-3. merge したら、Windows で clone を pull して `dotfiles apply` (`--steps ghq,fzf` で絞れる) を流す (runner が揃える)。exe が動いていて止まったら、
+3. merge したら、Windows で `dotfiles --self-update apply` (clone を進めてから流す。`--steps ghq,fzf` で絞れる) を流す (runner が揃える)。exe が動いていて止まったら、
    終わらせてから `Install-Ghq`・`Install-Fzf`
 4. `-Check` が「揃っている」になり、`ghq --version`・`fzf --version` が新しい版を出すことを確かめる
 
@@ -4291,8 +4412,8 @@ AllowUsers に `<ユーザー>@<CIDR>` を書かない: Win32-OpenSSH は sshd_c
 1. 端末で鍵を作る (iPhone の Herdr のアプリは、アプリの中で鍵を作って公開鍵を出す)
 2. 公開鍵の行の先頭に `from="<端末の Tailscale の IP (IPv4 と IPv6 を , でつなぐ)>"` を付け、上の list に足して PR を出す (鍵が漏れても、
    その端末の IP からしか使えない。IP は Tailscale の管理画面か `tailscale status` で見る。CIDR の `/` は使わない)
-3. merge したら、受け持ちが WSL なら `~/dotfiles/setup --update`、runner なら Windows で dotfiles-private の clone を pull して `dotfiles apply` (鍵だけなら
-   `dotfiles apply --steps sshd`) を流す。Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しが置かれ (中身が同じなら書かない)、
+3. merge したら、受け持ちが WSL なら `~/dotfiles/setup --update`、runner なら Windows で `dotfiles --self-update apply` (dotfiles-private の clone を進めてから
+   流す。鍵だけなら `dotfiles --self-update apply --steps sshd`) を流す。Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しが置かれ (中身が同じなら書かない)、
    `Install-Sshd -Check` が写しとの差を ⚠ で出す。写しの鍵は全部、※ の行にコメントと鍵の種類と指紋 (`ssh-keygen -l` と同じ `SHA256:…`) で出る
    (setup・runner の `-Check` は管理者でなく、今の鍵のファイルを読めないので、足す鍵と消す鍵には分けない。管理者の PowerShell の `-Check` は分けて出す)
 4. ※ の行に覚えのない鍵が無いのを見てから、PowerShell の `Install-Sshd` (受け持ちが WSL なら `bootstrap-windows-sshd.sh --apply` でもよい) で揃える
@@ -4322,7 +4443,7 @@ dotfiles-private にだけ置く。
 | `[]` | 誰も入れない (`AllowUsers` の代わりに `DenyUsers *`) | どこからも入れない (`Match Address *`) |
 | list | そのユーザーだけ (英小文字・数字・`. _ -` の名前) | そのアドレスからだけ (IPv4・IPv6 のアドレスか CIDR。CIDR は範囲の頭のアドレスで書く。長さは 32 と 128 まで) |
 
-1. 値を書いて (鍵と同じく dotfiles-private の PR)、merge したら Windows で dotfiles-private の clone を pull して `dotfiles apply --steps sshd` を流す。
+1. 値を書いて (鍵と同じく dotfiles-private の PR)、merge したら Windows で `dotfiles --self-update apply --steps sshd` (dotfiles-private の clone を進めてから流す) を流す。
    runner の手順 `sshd` が、鍵の写しの後に `%LOCALAPPDATA%\dotfiles\sshd\allow.json` へ写しを置き (中身が同じなら書かない。どちらも書かなければ
    消す)、`Install-Sshd -Check` が、写しの値で作る sshd_config との差を ⚠ で出す
 2. `Install-Sshd -Check` は、使う値をいつも ※ の行に出す (`※ AllowUsers: alice (ホストの値)`・`※ 送り元: … (ホストの値に書いていない。既定: tailnet と

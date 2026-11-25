@@ -28,6 +28,7 @@ pub mod herdr_app_mods;
 pub mod herdr_app_pjp_spaces;
 pub mod international;
 pub mod linker;
+pub mod local_env;
 #[cfg(test)]
 mod op_reason_parity;
 pub mod pending;
@@ -197,6 +198,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         Box::new(claude_t3::ClaudeT3),
         // git の設定を WSL の home-manager と同じ git.toml から置く (Windows にしか無い手順。dotfiles-private の docs/adr/066_win_git_config_*)
         Box::new(git_config::GitConfig),
+        // マシンローカルの環境変数のファイル (~/.config/pjp/env) の頭の欄を、Linux の bootstrap-local-env と同じ印と規則で書き直す (Windows に
+        // しか無い手順。dotfiles-private の docs/adr/105_win_local_env_*)
+        Box::new(local_env::LocalEnv),
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
         // docs/adr/068_win_herdr_app_mods_*)
         Box::new(herdr_app_mods::HerdrAppMods),
@@ -277,6 +281,7 @@ mod tests {
                 (50, "claude-statusline"),
                 (50, "claude-t3"),
                 (50, "git-config"),
+                (50, "local-env"),
                 (55, "pjp"),
                 (60, "claude-skill-overrides"),
                 (60, "hc-hub"),
@@ -352,7 +357,8 @@ mod tests {
         }
     }
 
-    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定と herdr-app の mod
+    /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定とマシンローカルの
+    /// 環境変数のファイル (local-env) と herdr-app の mod
     /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
     /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
@@ -375,6 +381,7 @@ mod tests {
                 "claude-statusline",
                 "claude-t3",
                 "git-config",
+                "local-env",
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",

@@ -208,6 +208,11 @@ mod tests {
     //! - --force は衝突でも上書きして記録する。--dry-run と check は置き先も記録も書かない
     //! - 置き先がディレクトリならエラー、記録が壊れていれば止める、manifest の誤りは止める
     //! - hint は書いたときだけ出す。締めの行の数と行の種類
+    //!
+    //! runner だけで確かめること (本物の repo):
+    //!
+    //! - starship.toml (Linux の home-manager と同じ `nix/files/starship.toml`) を、starship が読む `%USERPROFILE%\.config\starship.toml` に
+    //!   置く。Unix の shell で判定・出力する custom module は `os` で Windows では出さない
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -550,5 +555,67 @@ mod tests {
         let (o, out) = e.run(APPLY);
         assert_eq!(o[0].kind, Kind::Ok);
         assert!(out.contains("配るファイルはありません"));
+    }
+
+    /// custom module の `shell` に書くと、Windows の starship が PATH から引いてしまう Unix の shell (拡張子を除いた名前を小文字で比べる)
+    const UNIX_SHELLS: [&str; 8] = ["sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish"];
+
+    /// 本物の manifest の starship.toml: Linux の home-manager (`nix/home/modules/files.nix`) と同じ `nix/files/starship.toml` を、
+    /// STARSHIP_CONFIG の無い starship が読む `<home>\.config\starship.toml` (starship 1.27 の `dirs::home_dir()` の下) に置く。
+    /// 同じファイルを Windows の starship も読むので、Unix の shell で判定・出力する custom module は `os` で Windows を外す。Windows の
+    /// starship は `shell` を PATH から引くので、sh を PATH に足した PC ではプロンプトのたびに起こし、bash は WSL の `bash.exe`
+    /// (WindowsApps) に当たって WSL を起こす。`os = 'unix'` なら Windows では shell を探さずに飛ばし、Linux と macOS ではこれまでどおり判定する
+    #[test]
+    fn real_repo_starship_toml() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let home = Path::new("/mnt/c/Users/u");
+        let plan = manifest::load(&repo, &Roots::from_home(home)).unwrap();
+        let f = plan
+            .files
+            .iter()
+            .find(|f| f.repo_path == "nix/files/starship.toml")
+            .expect("manifest に nix/files/starship.toml がある");
+        assert_eq!(f.dst, home.join(".config").join("starship.toml"));
+
+        let config: toml::Table = std::fs::read_to_string(&f.src)
+            .unwrap()
+            .parse()
+            .expect("starship.toml が TOML として読める");
+        let custom = config
+            .get("custom")
+            .and_then(toml::Value::as_table)
+            .expect("[custom.*] がある");
+        let mut unix_only = Vec::new();
+        for (name, m) in custom {
+            let m = m
+                .as_table()
+                .unwrap_or_else(|| panic!("custom.{name} が表でない"));
+            if m.get("disabled").and_then(toml::Value::as_bool) == Some(true) {
+                continue;
+            }
+            // shell は文字列 1 つか、文字列の並び (頭が shell の実行ファイル)
+            let shell = match m.get("shell") {
+                Some(toml::Value::String(s)) => Some(s.as_str()),
+                Some(toml::Value::Array(a)) => a.first().and_then(toml::Value::as_str),
+                _ => None,
+            };
+            let Some(stem) = shell
+                .and_then(|s| Path::new(s).file_stem())
+                .map(|s| s.to_string_lossy().to_lowercase())
+            else {
+                continue;
+            };
+            if !UNIX_SHELLS.contains(&stem.as_str()) {
+                continue;
+            }
+            let os = m.get("os").and_then(toml::Value::as_str);
+            assert!(
+                os.is_some_and(|os| !os.is_empty() && os != "windows"),
+                "custom.{name} は {stem} で判定するので、os で Windows を外す (os = 'unix')。今は {os:?}"
+            );
+            unix_only.push(name.as_str());
+        }
+        // 今の custom module は、ssh と herdr の pane で PJP_SSH_CLIENT が届いていないことを出す 1 つ (sh で判定する)
+        assert_eq!(unix_only, ["pjp_ssh_client"]);
     }
 }
