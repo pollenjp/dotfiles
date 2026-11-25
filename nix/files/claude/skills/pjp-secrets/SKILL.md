@@ -4,7 +4,7 @@ description: >-
   シークレット (API キー・パスワード・token・秘密鍵) を扱うときに読む。値が要る program を起こす・試すとき、
   .env・設定ファイル・CI・cron・systemd に認証情報を書くとき、ユーザーにパスワードや token を設定・入力して
   もらいたくなったとき、ユーザーが会話に値を貼ったとき、.env の中身を確かめたくなったとき、平文のシークレットを
-  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get を打とうとしたとき、
+  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get・item delete を打とうとしたとき、
   1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいときに使う
 ---
 
@@ -35,6 +35,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 1. program が読む環境変数の名前を決める (program は環境変数を読むだけで、op を呼ばない)
 2. ユーザーに 1Password のアプリで項目を作り、値をアプリに直に入れてもらう。外のサービスが発行する値 (API キーなど) はこれ。
    cron などで無人で動かす見込みがあれば、最初から専用の vault に作ってもらう (下の「人が承認できない処理」)。
+   用が済んだら消す項目は、題の頭に `🚧 ` を付ける (下の「一時的な項目」)。
    Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの名前で作るかを伝えてから、1Password の中で生む:
    `printf '%s' '{"title":"<名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" - --generate-password=letters,digits,32 >/dev/null`
    (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
@@ -63,6 +64,26 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
    `--env-file <path>`)。Bash の timeout は 600000 にし (承認を待つ間に止められないよう)、常駐する program は `run_in_background`
    で起こし、出力を読んで承認が通ったか (pjp-op-env の 1 行か、op の誤りと終了コード) を確かめる
 7. 確かめるときも値は出さない (下の表)
+
+## 一時的な項目 (題の頭に 🚧)
+
+用が済んだら消す項目 (使い切りの key・作業の間だけ使う値・試しの値など) は、題の頭に `🚧 ` (🚧 と半角の空白) を付ける。
+例: `🚧 deploy-token-staging`・`🚧 tailscale-auth-key-<machine>`。program がずっと読む値 (常駐する bot の API キー・使い続ける DB の
+パスワードなど) には付けない。
+
+- わけ: 1Password の一覧で一時的なものと分かり、片付けやすい (検索に 🚧 を打てば、一時的な項目だけが並ぶ)
+- Claude が op で作るときは、JSON の `title` を `🚧 <名前>` にする (上の 2 の形)。ユーザーにアプリで作ってもらうときは、題を
+  `🚧 <名前>` にするよう、そのまま写せる字面で伝える
+- 参照は ID の形で書く・渡す。参照の名前に使える字は英数字・`-`・`_`・`.`・空白だけで、ほかの字を含む部分は ID で書くので、
+  題に 🚧 があると名前の形 (`op://<vault>/🚧 <名前>/<欄>`) は op で解けない。ユーザーが作った項目は Copy Secret Reference
+  (🚧 のある題の部分は自動で ID になる) を、Claude が作った項目は vault・題・欄の名前で書いた参照を、上の 4 の pjp-op-ref に通す
+  (pjp-op-ref は題で項目を引くので、🚧 のある題のままでよい)。pjp-op-ref が無いマシン (下の「マシンの違い」) では、Claude が
+  作った項目もユーザーに Copy Secret Reference で参照をもらい、そのまま書く (🚧 のある題の部分は ID になっているので解ける)
+- 一時的のつもりがずっと使うことになったら、題から 🚧 を外す (アプリで題を変えてもらう)。ID の参照は題を変えても切れない
+- 用が済んだら (key を使い終えた・作業や試しが済んだ)、その項目を消すかをユーザーに聞く。`.env` などに書いた参照の行も、
+  一緒に消すかを聞く。消すのは、消すと答えをもらってから。アプリで消してもらうか、Claude が ID で消す:
+  `op --reason "<理由>" item delete <項目の ID> --vault <vault>` (項目の ID と vault は、参照の 2 つ目と 1 つ目の部分。素の op の
+  マシンでは `--reason` を外す)
 
 ## 既にある `.env` の名前の参照を ID に直す
 
@@ -119,7 +140,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | WSL の op が wrapper (op-reason) | `~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true | pjp-op-env を使う (pjp-op-env が op に `--reason` を付ける)。op を自分で打つ前に、初めてなら `op-reason --skill` で wrapper の手引き (理由の書き方・拒否・時間切れのあとにすること) を読む |
 | 素の op のマシン | `enable` が true でなく、`command -v op` がある | pjp-op-env を使う (pjp-op-env は op に `--reason` を付けない) |
 | pjp-op-env が無い | `command -v pjp-op-env` が無い | 平文に逃げず、ユーザーに渡し方を聞く |
-| pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く)。`op item get` を素で打って ID を探さない |
+| pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く。題に 🚧 のある項目は上の「一時的な項目」)。`op item get` を素で打って ID を探さない |
 | op が無い | `command -v op` が無い | 平文に逃げず、ユーザーに渡し方を聞く (op を入れる・下の「自分の端末で入れる」) |
 
 `pjp-op-env --reason` はどのマシンでも受けるので、手順や script に書いてよい (書いてはいけないのは `op --reason`)。
@@ -179,3 +200,4 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 - ID を探すのに `op item get … --format json` を素で打とうとした (pjp-op-ref を使う)
 - `.env` に触れる `git diff`・`git show`・`git log -p`、`.env.local` などほかの env のファイルを Read で開く
 - 値を crontab・unit・script・引数に書こうとした
+- ユーザーの答えを待たずに 1Password の項目を消そうとした (`op item delete`)
