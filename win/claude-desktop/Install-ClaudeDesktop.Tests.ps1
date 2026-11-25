@@ -154,7 +154,7 @@ Test-Case 'none・newer では何も打たない' 0 { @(Get-WingetCommands -Plan
 Test-Case 'pin に止められた (0x8A150068) なら外し方を添える' $true { (Get-WingetPinnedHint -ExitCode -1978335128 -PackageId $Id).Contains('winget pin remove --id Anthropic.Claude --exact') }
 Test-Case 'ほかの終了コードなら何も添えない' '' { Get-WingetPinnedHint -ExitCode 1 -PackageId $Id }
 
-# Get-ClaudeDesktopExitCode・Test-ClaudeDesktopLegacyOnly
+# Get-ClaudeDesktopExitCode・Test-ClaudeDesktopManualOnly
 Test-Case '入っていなければ 3' 3 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'install'; Pinned = $false }) }
 Test-Case '入っていなくても、旧来の exe の Claude があれば 1 (入れられないので、runner が入れにいかない)' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'install'; Pinned = $false; Legacy = $true }) }
 Test-Case '同じで pin があれば 0' 0 { Get-ClaudeDesktopExitCode -State (New-State) }
@@ -236,13 +236,14 @@ Test-Case 'システムトレイ: 読めない JSON・オブジェクトでな�
 }
 
 # ConvertFrom-ClaudeStartupTaskState
-Test-Case 'スタートアップ: State の 2 (Enabled)・4 (EnabledByPolicy) は on、0・1・3 は off、無ければ unset、ほかは unknown' @('off', 'off', 'on', 'off', 'on', 'unset', 'unknown', 'unknown') {
+Test-Case 'スタートアップ: State の 2 (Enabled)・4 (EnabledByPolicy) は on、0・1・3 は off、無ければ unset、読めない鍵とほかの値は unknown' @('off', 'off', 'on', 'off', 'on', 'unset', 'unknown', 'unknown', 'unknown') {
     ConvertFrom-ClaudeStartupTaskState -State 0
     ConvertFrom-ClaudeStartupTaskState -State 1
     ConvertFrom-ClaudeStartupTaskState -State 2
     ConvertFrom-ClaudeStartupTaskState -State 3
     ConvertFrom-ClaudeStartupTaskState -State 4
     ConvertFrom-ClaudeStartupTaskState -State $null
+    ConvertFrom-ClaudeStartupTaskState -State 'unreadable'
     ConvertFrom-ClaudeStartupTaskState -State 5
     ConvertFrom-ClaudeStartupTaskState -State 'x'
 }
@@ -504,6 +505,23 @@ try {
     Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+# Read-ClaudeDesktopConfigText (ファイルを読むだけなので、一時ファイルで今の PowerShell に読ませる。下の流れの試験は差し替える)
+$configWork = Join-Path ([IO.Path]::GetTempPath()) ('claude-desktop-config-tests-{0}' -f [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $configWork | Out-Null
+try {
+    $withBom = Join-Path $configWork 'claude_desktop_config.json'
+    [IO.File]::WriteAllText($withBom, '{"preferences":{"menuBarEnabled":false}}', (New-Object System.Text.UTF8Encoding $true))
+    Test-Case '設定のファイル: 無ければ $null (unopened)・BOM 付きは BOM を除いた中身・場所が空なら空の字 (unknown)' @($true, '{"preferences":{"menuBarEnabled":false}}', 'off', $true) {
+        $null -eq (Read-ClaudeDesktopConfigText -Path (Join-Path $configWork 'no-such.json'))
+        Read-ClaudeDesktopConfigText -Path $withBom
+        ConvertFrom-ClaudeTrayConfig -Text (Read-ClaudeDesktopConfigText -Path $withBom)
+        $empty = Read-ClaudeDesktopConfigText -Path ''
+        ($null -ne $empty) -and ($empty -eq '')
+    }
+} finally {
+    Remove-Item -LiteralPath $configWork -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 # ---------------------------------------------------------------------------
 # Invoke-InstallClaudeDesktop の流れ。Windows に触る関数を差し替えて流し、打った winget・昇格・締めの行・終了コードを見る
 # (dot-source の後に同じ名前の関数を定義し直すと差し替わる。上の試験はもう流れたので、ここが最後)
@@ -721,12 +739,13 @@ Test-Case '流れ: スタートアップ時に実行が on (startup task ClaudeS
     $r.Code
     $r.Lines[-1]
 }
-Test-Case '流れ: 入れた直後で設定のファイルがまだ無ければ、入れたうえで 1 (締めの行は、Claude を開いてからトレイを off にすること)' @(1, $true, $true, $false, $trayUnopenedVerdict) {
+Test-Case '流れ: 入れた直後で設定のファイルがまだ無ければ、入れたうえで 1 (版と pin は揃ったと先に書き、締めの行は、Claude を開いてからトレイを off にすること)' @(1, $true, $true, $false, '版と pin は揃った。残りは人が直すもの (下の ⚠️ の行)', $trayUnopenedVerdict) {
     $r = Invoke-Flow @{ TrayText = $null } -IfMissing
     $r.Code
     Test-Called $r 'elevated install'
     @($r.Lines | Where-Object { $_.StartsWith('Claude のサインインは手でする') }).Count -eq 1
     @($r.Lines | Where-Object { $_ -eq '揃った' }).Count -gt 0
+    $r.Lines[-2]
     $r.Lines[-1]
 }
 Test-Case '流れ: pin が無くてシステムトレイも on なら、引数なしは pin を足し、読み直した締めの行はトレイのこと (1)' @(1, $true, $trayVerdict) {

@@ -4109,7 +4109,8 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
 | `Install-ClaudeDesktop` (PowerShell) | 揃える (入れる・古ければ上げる・pin を足す)。入れる・上げるときは UAC の確認が 1 回出る (上げるときは先に Claude を終える) |
 
 入れた後に手でするもの (dotfiles は扱わない): スタートメニューの Claude を開いてサインインし、設定 > デスクトップアプリ の「システムトレイ」を off に
-する (既定で on)。Cowork は Claude の中で始める (初めて使うときに、Cowork の workspace (VM) を落とす)。
+する (既定で on。off にするまで、`Install-ClaudeDesktop -Check` は終了コード 1 で、runner は入った扱いにして ⚠ の行を出す)。Cowork は Claude の中で
+始める (初めて使うときに、Cowork の workspace (VM) を落とす)。
 
 #### 旧来の exe の Claude
 
@@ -4148,7 +4149,9 @@ Claude の設定 > デスクトップアプリ の「システムトレイ」(Cl
 - スタートアップ時に実行: MSIX の startup task `ClaudeStartup` の状態。
   `HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\Claude_pzs8sxrjxfjjc\ClaudeStartup` の `State`
   (`StartupTaskState` と同じ数で、2 と 4 が on)。鍵か値が無ければ、manifest の既定の off
-- 読めないとき (JSON が壊れている・知らない値) は「不明」と出して ⚠ にしない (Claude の設定画面で確かめる)
+- 読めないとき (JSON が壊れている・知らない値・鍵が読めない) は「不明」と出して ⚠ にしない (runner は `·` の行で知らせる。Claude の設定画面で確かめる)
+- 置き場 (設定のファイルの場所・startup task の TaskId と既定の off) は 5.11492.5 と 6.28899.6 の MSIX の manifest で、システムトレイの既定の on は
+  6.28899.6 で確かめた。off にしたのに ⚠ が消えなければ、Claude の更新で置き場が変わったかもしれない (`-Check` の表の行を見る)
 
 ### Claude Desktop の新しい版が出たとき
 
@@ -4173,7 +4176,9 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-desktop/Install
   終了コードを確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない)
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`Claude Desktop (winget の Anthropic.Claude`) と印 (`winget show --versions に無い`・
   `比べられない`・`UAC の確認を断った`・`旧来の exe の Claude が残っている`・`仮想マシン プラットフォーム (VirtualMachinePlatform) が off`・
-  `Claude Desktop のシステムトレイが on`・`Claude Desktop のスタートアップ時に実行が on`) で分かれる。変えるときは向こうも直す (runner の試験が、ps1 の
+  `Claude Desktop のシステムトレイが on`・`Claude Desktop のスタートアップ時に実行が on`・
+  `システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない`・
+  `スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない`) で分かれる。変えるときは向こうも直す (runner の試験が、ps1 の
   コメントでない行にこれらの印があるかを突き合わせる)
 - winget・Appx・サービス・レジストリ・UAC に触る本物の部分は、実機で `-Check` と本番を打って確かめる
 

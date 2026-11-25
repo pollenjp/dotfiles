@@ -47,7 +47,8 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す (UAC の確認が 1 回出る)。入っていれば -Check と同じで、上げはしない (runner が使う)。
-旧来の exe の Claude が残っていれば、入れずに -Check と同じ (1)。
+旧来の exe の Claude が残っていれば、入れずに -Check と同じ (1)。入れた直後は Claude をまだ開いていないので、システムトレイが既定の on として
+1 で終わる (runner は入った扱いにして、⚠ の行を出す)。
 #>
 [CmdletBinding()]
 param(
@@ -210,8 +211,8 @@ function ConvertFrom-VmPlatformState {
 }
 
 # Claude Desktop (MSIX) の設定のファイル (Claude の設定 > デスクトップアプリ の「システムトレイ」の値を持つ)。Claude は
-# %LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\ にデータを置く (MSIX の manifest が、この folder を書き込みの仮想化から外している)。
-# %LOCALAPPDATA% が無ければ $null。同じ folder の config.json (サインインの token を持つ) は読まない
+# %LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\ にデータを置く (MSIX の manifest が、この folder を書き込みの仮想化から外している。
+# 5.11492.5 と 6.28899.6 で確かめた)。%LOCALAPPDATA% が無ければ $null。同じ folder の config.json (サインインの token を持つ) は読まない
 function Get-ClaudeDesktopConfigPath {
     param([string]$LocalAppData, [string]$FamilyName)
     if (-not $LocalAppData) { return $null }
@@ -231,7 +232,8 @@ function Get-ClaudeJsonMember {
 # 設定のファイルの中身から、システムトレイ (preferences.menuBarEnabled) を読む
 #   on・off: 値のとおり / unset: 値が無い (Claude の既定の on) / unopened: 設定のファイルが無い (Claude をまだ開いていない。開くと既定の on) /
 #   unknown: 読めない (JSON でない・オブジェクトでない・真偽値でない)
-# 既定の on は、Claude Desktop 6.28899.6 の既定値の表 (menuBarEnabled: true) と、保存した値が無ければそれを使う読み方で確かめた
+# 既定の on は、Claude Desktop 6.28899.6 の既定値の表 (menuBarEnabled: true) と、保存した値が無ければそれを使う読み方で確かめた。
+# このファイルは mcpServers の env に API キーなどを持ちうるので、中身も ConvertFrom-Json の例外の文も出さない (返すのは上の 5 つの字だけ)
 function ConvertFrom-ClaudeTrayConfig {
     param($Text)
     if ($null -eq $Text) { return 'unopened' }
@@ -606,7 +608,7 @@ function Get-ClaudeLegacyState {
 }
 
 # 設定のファイルの中身 (ConvertFrom-ClaudeTrayConfig が読む)。ファイルが無ければ $null、場所が無い・読めなければ空の字 (開いている Claude が
-# 書いている途中などで読めなければ、次の -Check で読み直す)
+# 書いている途中などで読めなければ、次の -Check で読み直す)。中身は秘密を持ちうるので、出さない
 function Read-ClaudeDesktopConfigText {
     param([string]$Path)
     if (-not $Path) { return '' }
@@ -618,11 +620,17 @@ function Read-ClaudeDesktopConfigText {
     }
 }
 
-# startup task の State (HKCU の SystemAppData\<PackageFamilyName>\<TaskId> の DWORD。MSIX を入れたときに Windows が作る)。鍵か値が無ければ $null
+# startup task の State (HKCU の SystemAppData\<PackageFamilyName>\<TaskId> の DWORD。MSIX を入れたときに Windows が作る)。鍵か値が無ければ $null、
+# 鍵があるのに読めなければ 'unreadable' (ConvertFrom-ClaudeStartupTaskState が不明にする。無いのと分け、読めないのに off と言い切らない)
 function Get-ClaudeStartupTaskState {
     param([string]$Key)
-    $p = Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue
-    if ($p -and (@($p.PSObject.Properties.Name) -contains 'State')) { return $p.State }
+    if (-not (Test-Path -LiteralPath $Key)) { return $null }
+    try {
+        $p = Get-ItemProperty -LiteralPath $Key -ErrorAction Stop
+    } catch {
+        return 'unreadable'
+    }
+    if (@($p.PSObject.Properties.Name) -contains 'State') { return $p.State }
     $null
 }
 
@@ -786,6 +794,11 @@ function Invoke-InstallClaudeDesktop {
     if ($afterCode -eq 0) {
         Write-Host '揃った'
         return 0
+    }
+    # MSIX の側は揃ったのに、人の直すもの (on の設定・旧来の exe の Claude) だけが残った (入れた直後のシステムトレイの既定の on など)。
+    # 入れ損ねたと読まれないよう、先に書く
+    if (Test-ClaudeDesktopManualOnly -State $after) {
+        Write-Host '版と pin は揃った。残りは人が直すもの (下の ⚠️ の行)'
     }
     Write-ClaudeDesktopRows -Rows @(Get-ClaudeDesktopVerdict -State $after -Code $afterCode -Blocker (Get-ClaudeDesktopApplyBlocker -Plan $after.Plan -Versions $after.Versions -Target $Version -Legacy $after.Legacy) -Target $Version -PackageId $packageId)
     return 1

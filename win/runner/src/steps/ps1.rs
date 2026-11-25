@@ -121,8 +121,8 @@ pub struct Ps1Spec {
     /// `mark` を書いて 1 を返す (入っていなくても 3 にしない。入れられないので)。check も apply も、その 1 を「固定した版と揃っていない」の
     /// 代わりにこの行にし、何も打たない (人が外すまで知らせる)
     pub leftover: Option<Marked>,
-    /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off)。
-    /// ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
+    /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off・
+    /// システムトレイとスタートアップ時に実行が読めない)。ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
     pub notices: &'static [Marked],
     /// ps1 も runner も直さない、人が切り替える設定 (claude-desktop のシステムトレイ・スタートアップ時に実行が on)。ps1 は当たっているとき、
     /// 締めの行 (⚠️ で始まる行) に `mark` を書き、版が揃っていても 1 を返す。状態の表が出たとき、当たった印ごとに直すことがある行 (⚠。
@@ -720,13 +720,30 @@ pub const SPECS: &[Ps1Spec] = &[
                 "終わったら %LOCALAPPDATA%\\AnthropicClaude と、スタートメニューの %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Claude.lnk を消す (win/README.md の「Claude Desktop」)",
             ],
         }),
-        notices: &[Marked {
-            mark: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off",
-            text: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork は使えない (runner は on にしない)",
-            notes: &[
-                "on にするには、管理者の PowerShell で Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All を打ち、Windows を再起動する (シャットダウンでなく再起動。win/README.md の「Claude Desktop」)",
-            ],
-        }],
+        notices: &[
+            Marked {
+                mark: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off",
+                text: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork は使えない (runner は on にしない)",
+                notes: &[
+                    "on にするには、管理者の PowerShell で Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All を打ち、Windows を再起動する (シャットダウンでなく再起動。win/README.md の「Claude Desktop」)",
+                ],
+            },
+            // 下の 2 つの設定が読めない (書いている途中など。⚠ にはしないが、締めの表で無事に見えないように知らせる)
+            Marked {
+                mark: "システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない",
+                text: "Claude Desktop のシステムトレイの設定が読めない (claude_desktop_config.json の preferences.menuBarEnabled)",
+                notes: &[
+                    "Claude の設定 > デスクトップアプリ で確かめる (on なら off にする。runner は書き換えない)",
+                ],
+            },
+            Marked {
+                mark: "スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない",
+                text: "Claude Desktop のスタートアップ時に実行の状態が読めない (startup task ClaudeStartup の State)",
+                notes: &[
+                    "Claude の設定 > デスクトップアプリ で確かめる (on なら off にする。runner は書き換えない)",
+                ],
+            },
+        ],
         // Claude の設定 > デスクトップアプリ の 2 つの切り替え。runner は書き換えない (システムトレイの値は、開いている Claude が自分で書き直す
         // ファイルにある)
         alerts: &[
@@ -1631,8 +1648,9 @@ mod tests {
     //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
     //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
     //!   知らせるだけの行 (·) を後ろに足す。Claude の設定のシステムトレイ・スタートアップ時に実行が on (締めの行の印。ps1 は版が揃って
-    //!   いても 1 を返す) なら、印ごとの直すことがある行 (⚠) を足して何も打たず、締めの行がそれだけなら揃っている扱い (入れた後の 1 も
-    //!   入った扱い)。ほかの手順は残りもの・知らせ・設定の印を持たない
+    //!   いても 1 を返す) なら、印ごとの直すことがある行 (⚠) を足して何も打たず (dry-run も)、締めの行がそれだけなら揃っている扱い
+    //!   (入れた後の 1 も入った扱い)。2 つの設定が読めなければ、知らせるだけの行 (·) を足す。ほかの手順は残りもの・知らせ・設定の印を
+    //!   持たない
     //! - Windows にしか無い手順の ps1 は、runner が読む締めの行の文言 (Sync は「→ … で入れる」「→ … で揃える」「→ ※ の手順で直す」) と、
     //!   出力の印 (output_fixes・missing_blocked・leftover・notices・alerts) を持つ (WSL の wrapper との突き合わせの代わり)
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
@@ -2368,6 +2386,59 @@ mod tests {
         let (o, _, _) = run("claude-desktop", &sys8, Mode::Check);
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].kind, Kind::Failed);
+
+        // dry-run も打たずに同じ行を出す。入れる見込み (3) のときも、-Check の出力の設定の行を出す (打つのは apply だけで、そのときは
+        // 打った後の出力から足す)
+        let dry = Mode::DryRun { force: false };
+        let sys9 = sys((1, vec![header_line(s), tray.into()]), (9, vec![]));
+        let (o, _, calls) = run("claude-desktop", &sys9, dry);
+        assert_eq!(
+            lines(&o),
+            vec![
+                (Kind::Ok, "揃っている".to_string()),
+                (Kind::Manual, tray_line.to_string()),
+            ]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        for mode in [Mode::Check, dry] {
+            let sys10 = sys((3, vec![header_line(s), startup.into()]), (9, vec![]));
+            let (o, _, calls) = run("claude-desktop", &sys10, mode);
+            let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+            assert_eq!(kinds, vec![Kind::Missing, Kind::Manual], "{mode:?}");
+            assert_eq!(o[1].text, startup_line, "{mode:?}");
+            assert_eq!(ends(&calls), vec!["-Check"], "{mode:?}");
+        }
+
+        // 設定が読めない (ps1 の ※ の行): 数えない知らせの行 (·) を、トレイ・スタートアップの順に足す
+        let tray_unknown = "※ システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない。Claude の設定 > デスクトップアプリ で確かめる";
+        let startup_unknown = "※ スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない。Claude の設定 > デスクトップアプリ で確かめる";
+        let sys11 = sys(
+            (
+                0,
+                vec![header_line(s), tray_unknown.into(), startup_unknown.into()],
+            ),
+            (9, vec![]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys11, Mode::Check);
+        let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, vec![Kind::Ok, Kind::Info, Kind::Info]);
+        assert!(
+            o[1].text
+                .starts_with("Claude Desktop のシステムトレイの設定が読めない"),
+            "{}",
+            o[1].text
+        );
+        assert!(
+            o[2].text
+                .starts_with("Claude Desktop のスタートアップ時に実行の状態が読めない"),
+            "{}",
+            o[2].text
+        );
+        assert!(
+            o[1].notes[0].contains("Claude の設定 > デスクトップアプリ で確かめる"),
+            "{:?}",
+            o[1].notes
+        );
     }
 
     #[test]
