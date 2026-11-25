@@ -22,6 +22,9 @@
 # - store の core は `hc update` が「nix のもの」として断る (実行ファイルの実体が /nix/store/ の下)。dotfiles が入れたホストへは
 #   `hc machine update` を打たない (~/.local/bin/herdr-core を落とした binary に置き換え、次の switch でリンクに戻る)。版は
 #   releases.json を上げる PR で、Windows と一緒に上げる
+# - server は user の service (hc-serve-<id>.service) で、systemd の linger が無いとログアウトで user manager ごと止まる。linger は
+#   この module ではなく setup の手順 linger が有効にする (dotfiles.linger.enable。既定はこの option と同じ。nix/README.md の
+#   「ログアウトしても止めない (linger)」)
 {
   config,
   lib,

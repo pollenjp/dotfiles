@@ -42,7 +42,8 @@
 #                   claude.iacGuard.enable = false で、Claude が打つ terraform・tofu・terragrunt の apply など (実物を
 #                   変える操作) を止める hook を外す (既定は止める。agent が sandbox で自分で apply するマシンだけ)。
 #   modules         mkHome の引数に無い option (home/options.nix の dotfiles.ccPages.port など) と、
-#                   home-manager の設定
+#                   home-manager の設定。dotfiles.linger.enable (既定は herdr-core と同じ) は、systemd の linger を
+#                   `~/dotfiles/setup --update` の手順 linger が有効にするか (中で sudo を呼ぶ。要らないホストは false)
 #
 # wsl は入れ子の attrset。親が有効なときだけ子が意味を持つ、という関係を
 # そのまま構造にしてある。git の署名で見ると、組み合わせは次の 4 通り:

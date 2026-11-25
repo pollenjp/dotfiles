@@ -72,8 +72,9 @@
 #
 # ## SSH を全部切っても止まらないか (linger)
 #
-# このユーザーは linger しない (Linger=no)。それでも、herdr の server が動いている間は止まらない: logind は
-# KillUserProcesses=false で、SSH を切っても server の残る login session は closing のまま残り、その session が
+# herdr-core を入れるホストでは systemd の linger も既定で有効 (dotfiles.linger.enable。setup の手順 linger が有効にする) なので、
+# SSH を全部切っても、再起動してログインする前でも動く。linger の無いホストでも、旧 herdr (TUI) の server が動いている間は
+# 止まらない: logind は KillUserProcesses=false で、SSH を切っても server の残る login session は closing のまま残り、その session が
 # user manager (user@<uid>.service) を生かす。2026-10-21 の GCP の VM では、SSH が 1 本も無い 10 時間あまりの間、
 # 同じ形の cc-pages.service が止まらなかった (TKT-306)。止まるのは server が落ちて SSH も無いときだけで、その間は
 # 届ける先の会話も無い (次に SSH で入ると user manager とともに上がり、溜まったコメントを拾う)。

@@ -688,14 +688,14 @@ reason = "直した版が無い (unmaintained)。代わりの crate へ移すま
 | 選択肢 | 実行される手順 |
 | --- | --- |
 | 新しいマシン適用 | 1 → 2 → 2.4 → 2.5 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 |
-| 既存マシン更新 | 2.4 → 3 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 7.5 → 8（**冪等な手順は全部走る**。下記） |
+| 既存マシン更新 | 2.4 → 3 → 3.5 → 4 → 4.1 → 6 → 6.1 → 6.2 → 6.3 → 6.5 → 6.6 → 6.7 → 6.8 → 6.9 → 7.5 → 8（**冪等な手順は全部走る**。下記） |
 | カスタム | 手順を 1 つずつチェックして選ぶ |
 
 2.4 `private-fetch` は dotfiles-private を **switch の前に** 取る（clone があれば取得して fast-forward する。clone が無ければ何もせず、
 switch のあとの `bootstrap-dotfiles-private` が clone する）。登録したホストの値を直して push したあと、`--update` 1 回でその値で
 switch させるため（[後述](#dotfiles-private-に登録したホスト)）。取れなくても止めない。
 
-「既存マシン更新」は `switch` に加えて `bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` を
+「既存マシン更新」は `switch` に加えて `linger` と `bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` を
 毎回走らせる。どれも冪等（「既に同じなら何もしない」「既に在れば中身に触らない」）なので、
 繰り返しても状態は変わらない。走らせないと、スクリプトを足したときや別マシンで変えたとき
 （`claude-skills` など）にそのマシンだけ取り残され、取り込むには `--steps` に名前を
@@ -708,6 +708,10 @@ switch させるため（[後述](#dotfiles-private-に登録したホスト)）
 ツールから打ったときなど）は失敗にせず飛ばし、最後の「残りの手作業」がずれを知らせる
 （[後述](#wsl-の-eth0-の-mtu-を上限まで下げ続ける)・[後述](#wsl-の-exe-の起動を常時記録する)）。
 setup は失敗した手順で止まるので、7.5 を 8 より前に置いている（トレーサが起動に失敗しても、MTU の見張りは入れ替わる）。
+
+3.5 `linger` も中で `sudo` を呼ぶが、呼ぶのは systemd の linger が有効でないときだけで、有効なら（option が無効なマシンも）呼ばない。
+`sudo` がパスワードを訊けないときと、`sudo loginctl enable-linger` が落ちたときは、手順を止めずに飛ばし、最後の「残りの手作業」が
+ずれを知らせる（bootstrap の前に走るので、止めると bootstrap が全部走らなくなるため。[後述](#ログアウトしても止めない-linger)）。
 
 入っていないのは、冪等でないか更新時には有害な手順。
 
@@ -981,6 +985,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
+| 3.5 | systemd の linger を有効にする | `linger` | `dotfiles.linger.enable = true`（既定は herdr-core と同じ。② の段で Linux なら true）のマシンで、linger が有効でなければ `sudo loginctl enable-linger` を打つ（ほかのマシンでは何もしない。NixOS では打たずに nixos-config を案内する。[後述](#ログアウトしても止めない-linger)） |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（`dotfiles.cursorAgent.enable` のホストだけ。[後述](#cursor-agent-も-mise-に置いている理由)）・rust（rustup。`claude.privateSkills.enable` のホストだけ。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
@@ -1194,7 +1199,7 @@ home-manager switch --flake ~/dotfiles#<ホスト>
 ```
 
 `~/dotfiles/setup --update`（メニューの「既存マシン更新」）は、これに加えて
-`bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
+`linger` と `bootstrap-*` と `wsl-mtu-guard`・`exe-exec-trace` も走らせる（[前述](#まとめて実行する)。どれも冪等）。ホスト名を
 覚えていなくてよく、スクリプトが増えていても取りこぼさないのでこちらが楽。dotfiles-private に登録した PC では
 `--host` を付けない（setup が登録したホストを選ぶ。[後述](#dotfiles-private-に登録したホスト)）。登録していない PC では、
 `~/dotfiles/flake.nix` に足した `tmp` が選ばれる（どちらも無ければ止まる）。
@@ -1311,7 +1316,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | 段 | 入るもの | 段の switch |
 | --- | --- | --- |
 | ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
-| ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
+| ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core と systemd の linger・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
 | ③ 個人の道具（個人のアカウントにつながるもの） | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・Windows の type-clipboard（自作のアプリ。個人の GitHub の repo の Release）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
 | ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
 
@@ -1328,6 +1333,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | `claude.enable` | ② | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）と mise の claude |
 | `dotfiles.herdr.enable` | ② | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
 | `dotfiles.herdrCore.enable` | ②（Linux だけ） | herdr-core（hc） |
+| `dotfiles.linger.enable` | ②（既定は `herdrCore.enable` と同じ） | setup の手順 linger（`sudo loginctl enable-linger`。有効にした linger は外さない。[後述](#ログアウトしても止めない-linger)） |
 | `wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable` | ② | Windows の Claude Code・herdr と herdr-app（`windowsFiles.enable` のマシンだけで効く） |
 | `claude.privateSkills.enable` | ② と ③ | setup の bootstrap-claude-skills（claude-skills の clone） |
 | `dotfiles.ccPages.enable` | ② と ③ | cc-pages の unit と config.toml・setup の bootstrap-cc-pages |
@@ -5098,22 +5104,26 @@ Notion の API キーは `ticket.sh` が自分で `~/.config/pjp/env` から読�
 unit の環境変数では渡さないので、キーを足した・替えたときに unit は直さなくてよい（動いている見回り役に読み直させるなら
 `systemctl --user restart pjp-dev-tracker-inbox`）。
 
-#### SSH を全部切っても止まらない（linger は要らない）
+#### SSH を全部切っても止まらない（linger）
 
-このユーザーは linger しない（`loginctl show-user` の `Linger=no`）が、herdr の server が動いている間は見回り役も止まらない。
-logind は `KillUserProcesses=no` なので、SSH を切っても server の残る login session は closing のまま残り、その session が
-user manager（`user@<uid>.service`）とその上の user service を生かす。2026-10-21 に GCP の VM で、SSH が 1 本も無い
+herdr-core を入れるホストでは、systemd の linger も既定で有効になる（`dotfiles.linger.enable`。setup の手順 `linger` が有効にする。
+[後述](#ログアウトしても止めない-linger)）。linger があれば、user manager（`user@<uid>.service`）とその上の user service（見回り役も）は、
+SSH を全部切っても、マシンを再起動してログインする前でも動く（ログインする前から返事（「会話が止まっています」）も返す）。
+
+linger の無いホスト（`dotfiles.linger.enable = false`・NixOS で nixos-config に書いていない）でも、旧 herdr（TUI）の server が
+動いている間は見回り役も止まらない。logind は `KillUserProcesses=no` なので、SSH を切っても server の残る login session は
+closing のまま残り、その session が user manager とその上の user service を生かす。2026-10-21 に GCP の VM で、SSH が 1 本も無い
 10 時間あまり（12:51〜23:35 UTC）の間、同じ形の常駐の `cc-pages.service` が止まらなかったのを journal で確かめた（TKT-306）。
 
 ```sh
-loginctl list-sessions                         # herdr の server の session が closing で残っている
+loginctl show-user "$USER" --property=Linger   # Linger=yes なら、ログインの外でも動く
+loginctl list-sessions                         # linger の無いホスト: herdr の server の session が closing で残っている
 systemctl --user show pjp-dev-tracker-inbox -p ActiveEnterTimestamp -p NRestarts
                                                # SSH で入り直したとき、切る前と同じ時刻なら、切っている間も動いていた
 ```
 
-止まるのは herdr の server が落ちて SSH も 1 本も無いときだけで、その間は届ける先の会話も無い。次に SSH で入ると user manager と
-ともに上がり、止まっていた間のコメントも拾う。マシンの再起動の後、ログインする前から返事（「会話が止まっています」）まで
-させたいときだけ `sudo loginctl enable-linger "$USER"` を打つ（今は要らない）。
+linger の無いホストで止まるのは、旧 herdr の server が落ちて SSH も 1 本も無いときだけで、その間は届ける先の会話も無い。次に SSH で
+入ると user manager とともに上がり、止まっていた間のコメントも拾う。
 
 ### 長い応答を読む web ビューア (cc-pages)
 
@@ -5662,8 +5672,9 @@ modules = [
 
 - 配布物は `/lib64/ld-linux-x86-64.so.2` を使う動的リンクの実行ファイル (Bun でまとめたもの。中身を書き換えると壊れうるので patchelf しない)。
   NixOS では `programs.nix-ld.enable = true` が要る。setup が `t3 --version` を打って確かめ、起きなければ知らせる
-- service がログインの外でも動くよう、linger を有効にする (`sudo loginctl enable-linger <名前>`。NixOS は `users.users.<名前>.linger = true`)。setup が
-  確かめて知らせる
+- service がログインの外でも動くよう、linger を有効にする。herdr-core を入れるホストでは既定で、setup の手順 `linger` が
+  `bootstrap-t3-code.sh` より前に有効にする ([後述](#ログアウトしても止めない-linger)。NixOS は nixos-config の `users.users.<名前>.linger = true`)。
+  `bootstrap-t3-code.sh` も確かめ、有効でなければ `~/dotfiles/setup --steps linger` を勧める
 - 前に `t3 up` が書いた unit・launcher (ふつうのファイル) は、switch が消して dotfiles のものに置き換える
 - switch で service が起き直るのは、unit の中身が前の世代と変わったときと、unit が世代に初めて入るとき。初めて入る switch では、中身が前に t3 の
   書いたものと同じでも、home-manager (sd-switch) が新しい unit として起こし直す (`Stopping units: t3code.service` → `Starting units: t3code.service`)。
@@ -5823,6 +5834,45 @@ remote の探し先の 1 つ目 (`command -v herdr-core`) は、非対話の SSH
 - single-user の Nix は `~/.profile` にしか足さず、home-manager の `~/.bashrc` は先頭で非対話を返すので、入らない
 
 どちらでも見つかるよう、2 つ目の `~/.local/bin/herdr-core` もリンクにしている (実体は store の binary)。
+
+### ログアウトしても止めない (linger)
+
+herdr-core の server は、user の service (`hc-serve-<id>.service`) として user manager (`user@<uid>.service`) の中で動く。systemd の linger が
+無いと、最後の login session が消えてから logind の `UserStopDelaySec` (既定 10 秒) で user manager ごと止まり、server と agent も止まる。
+Windows の herdr-app は、linger の無い Linux のホストを machine add すると「Agents on <ホスト> stop when you disconnect」と警告する。
+そこで、herdr-core を入れるホストでは linger も既定で有効にする (`dotfiles.linger.enable`。既定は `dotfiles.herdrCore.enable` と同じで、
+② の段で Linux なら true。[ADR 101](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/101_linger_with_herdr_core_20261125T152150JST/README.md))。
+有効にすると、user manager と user の service はマシンの起動の時から動く (ログインを待たない)。cc-pages・Dev Tracker の見回り役・T3 Code
+なども、同じわけでログアウトしても止まらなくなる。
+
+有効にするのは setup の手順 `linger` (3.5。switch の直後・bootstrap の前。「既存マシン更新」にも入る)。値は switch が置く
+`~/.local/state/dotfiles/group.json` の `tools.linger` から読む。
+
+| ホスト | 手順 `linger` がすること |
+| --- | --- |
+| option が true で Linger が yes でない | `sudo loginctl enable-linger <ユーザー>` を打つ (sudo を呼ぶのはこのときだけ) |
+| Linger が yes | 何もしない (sudo を呼ばない) |
+| option が false | 飛ばす (結果に `↷ … (このホストでは off)`)。有効にした linger は外さない (外すなら `sudo loginctl disable-linger <ユーザー>` を手で打つ) |
+| NixOS (`/etc/NIXOS` がある) | loginctl を打たない。nixos-config に `users.users.<名前>.linger = true;` を書いて `nixos-rebuild switch` する (NixOS では linger は system の設定が正で、手で打った linger を activation が戻しうる) |
+| systemd が動いていない (systemd の無い WSL・macOS)・`loginctl` が無い | 何もしない |
+| この手順を持つ世代へまだ switch していない (`tools.linger` が無い) | 何もしない |
+
+- sudo がパスワードを訊けない (パスワード無しで通らず、端末も無い。Claude の Bash tool から打ったときなど) ときと、`enable-linger` が
+  落ちたときは、手順を止めずに飛ばす (落ちたときは警告のまとめにも出す)。最後の「残りの手作業」が「systemd の linger が有効でない
+  (Linger=no)」と直し方 (`--steps linger`・NixOS は nixos-config) を出す。手順を選ばなかった回 (「新しいマシン適用」・`--steps`) も同じ
+- 手順は bootstrap の前に走るので、`bootstrap-t3-code.sh` が同じ実行の中で linger を確かめるときには揃っている
+- WSL でも既定で有効にする。WSL の distro は、wsl.exe から入った会話の process が無くなると止まり、user manager はそれに数えないので、
+  linger で distro が止まらなくなることは無い
+- 要らないホストは、そのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする:
+
+  ```nix
+  modules = [ { dotfiles.linger.enable = false; } ];
+  ```
+
+```sh
+loginctl show-user "$USER" --property=Linger   # Linger=yes なら有効
+~/dotfiles/setup --steps linger                 # この手順だけ流す (中で sudo を呼ぶ)
+```
 
 ### hc update と hc machine update を打たない
 
