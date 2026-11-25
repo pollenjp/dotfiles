@@ -344,17 +344,27 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
         layout: wanted,
         tabs,
     };
-    let o = match std::fs::read(&dest) {
-        Ok(bytes) => match update_layout(ctx, w, &dest, &label, wanted, &bytes) {
-            (o, _) if o.kind == Kind::Failed => o,
-            (o, wrote) => annotate(home, o, wrote),
-        },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            create_layout(ctx, w, home, &dest, &label, wanted, mod_ok)
+    let (o, stuck) = match std::fs::read(&dest) {
+        Ok(bytes) => {
+            let pointed = points_to_tabs(&bytes);
+            match update_layout(ctx, w, &dest, &label, wanted, &bytes) {
+                (o, _) if o.kind == Kind::Failed => (o, pointed),
+                (o, wrote) => {
+                    let stuck = pointed && !wrote && o.kind == Kind::Manual;
+                    (annotate(home, o, wrote), stuck)
+                }
+            }
         }
-        Err(e) => say_out(ctx, Kind::Failed, format!("{label} が読めない ({e})")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            create_layout(ctx, w, home, &dest, &label, wanted, mod_ok),
+            false,
+        ),
+        Err(e) => (
+            say_out(ctx, Kind::Failed, format!("{label} が読めない ({e})")),
+            false,
+        ),
     };
-    tabs_note(o, unfit.as_deref())
+    tabs_note(o, unfit.as_deref(), stuck)
 }
 
 /// 書きたい layout (今の main に、この手順の差し替えをした形。cloned_from は除く) と、sidebar-lists をタブの stack にしたか。
@@ -559,6 +569,12 @@ fn update_layout(
         // 差し替えると今の形になる: 人が clone し直した (逃げ道のキーの後など)・clone の後で書けなかった・保存し直した
         Some(c) if same(&shaped(c, tabs), &desired_value) => Some(if same(c, &desired_value) {
             "中身は同じで書き方だけが違う (保存し直された) ので、runner の形に書き直す".to_string()
+        } else if same(&shaped(c, false), c) {
+            // spaces はもう pjp-spaces: 前の runner が書いた column の形 (記録が消えた・別の綴りの home)
+            format!(
+                "前に runner が書いた形 ({SHIPPED} → {MOD}) を引き取り、差し替える ({})",
+                shape_label(tabs)
+            )
         } else {
             format!(
                 "{BASE} の写し (layout.clone) を引き取り、差し替える ({})",
@@ -832,14 +848,32 @@ fn tabs_unfit(home: &Path) -> Option<String> {
     }
 }
 
-/// タブにしなかった行に、わけと戻し方を ※ で添える。
-fn tabs_note(o: Outcome, unfit: Option<&str>) -> Outcome {
+/// タブにしなかった行に、わけと戻し方を ※ で添える。`stuck` は、書かなかった (衝突・書けない) ので、今のファイルが header に無い mod を
+/// 指したままのとき。
+fn tabs_note(o: Outcome, unfit: Option<&str>, stuck: bool) -> Outcome {
     match unfit {
+        Some(why) if stuck => o.note(format!(
+            "layouts/{LAYOUT}.json は {LISTS} の header に今も {TABS} を指したまま ({why}。上の行のとおり書かなかった) → {TABS} を置き直すか (dotfiles apply --steps herdr-app-mods)、dotfiles apply --steps herdr-app-pjp-spaces --force で column に戻す"
+        )),
         Some(why) => o.note(format!(
-            "{LISTS} はタブにしない ({why}。layout から無い mod を指すと sidebar が壊れるので column のまま) → herdr-app-mods (windowsHerdr) が {TABS} を置いた後の dotfiles apply で、{LISTS} を {TABS} のタブにする"
+            "{LISTS} をタブにしない ({why}。layout から無い mod を header に指すと sidebar が壊れるので column にする) → herdr-app-mods (windowsHerdr) が {TABS} を置けば、同じ dotfiles apply の続きでタブにする (check と dry-run は、今の置き先で出す)"
         )),
         None => o,
     }
+}
+
+/// layout のファイルの中身が、sidebar-lists の header に TABS を指しているか。
+fn points_to_tabs(bytes: &[u8]) -> bool {
+    let Ok(v) = OValue::parse(&String::from_utf8_lossy(bytes)) else {
+        return false;
+    };
+    let lists = nodes(&v).remove(LISTS);
+    let header_mod = lists
+        .as_ref()
+        .and_then(|n| n.get("header"))
+        .and_then(|h| h.get("content"))
+        .and_then(|c| c.get("mod"));
+    matches!(header_mod, Some(OValue::String(m)) if m == TABS)
 }
 
 /// JSON の値が同じか (object はキーの順を見ない。数は値で比べ、herdr-app が書く `268.0` と main の `268` を同じにする)。
@@ -949,6 +983,9 @@ mod tests {
     //! - ユーザーが選んだタブ (clicks) を壊さない: main が変わって書き直しても (子の並びが替わっても) ファイルの active は spaces のまま、
     //!   layouts\.state\ に触らない
     //! - sidebar-lists をタブにする所 (stack_lists) は、spaces と agents を子に持つ column だけを替える
+    //! - 手で直した pjp-main (衝突で書かない) がタブの mod を失ったら、※ は「header が無い mod を指したまま」と言い、--force で column に戻る。
+    //!   記録が消えた前の column の形は「前に runner が書いた形」として引き取ってタブにする
+    //! - herdr-app-mods (タブの mod を置く) が、手順の並びでこの手順より先に流れる
     //! - dotfiles の repo の pjp-sidebar-tabs: main.js・place が none の mod.json・main.js が使うアイコンがあり、既定の stack が LISTS
 
     use super::*;
@@ -1724,7 +1761,8 @@ mod tests {
         assert!(
             o[1].notes.iter().any(
                 |n| n.contains("pjp-sidebar-tabs が herdr-app の home に無い")
-                    && n.contains("sidebar-lists はタブにしない")
+                    && n.contains("sidebar-lists をタブにしない")
+                    && n.contains("同じ dotfiles apply の続きでタブにする")
             ),
             "{o:?}"
         );
@@ -1782,6 +1820,63 @@ mod tests {
         e.place_tabs(TABS_MOD_JSON);
         e.run(APPLY);
         assert_eq!(e.layout(), expected(TABBED_JSON));
+    }
+
+    /// 手で直した pjp-main は書かない (衝突) ので、タブの mod が無くなっても header は無い mod を指したまま。※ はそう言い (column にしたとは
+    /// 言わない)、--force で column に戻す
+    #[test]
+    fn notes_a_header_left_pointing_at_a_missing_mod() {
+        let e = Env::new();
+        e.run(APPLY);
+        let mut edited = e.layout();
+        edited.set("theme", OValue::String("graphite".into()));
+        std::fs::write(e.home("layouts/pjp-main.json"), edited.to_pretty()).unwrap();
+        e.remove_tabs();
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}\n{out}");
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("pjp-sidebar-tabs を指したまま") && n.contains("--force")),
+            "{o:?}"
+        );
+        assert!(
+            !o[1].notes.iter().any(|n| n.contains("column にする")),
+            "{o:?}"
+        );
+        assert_eq!(e.layout(), edited, "衝突したら書かない");
+        let (o, out, _) = e.run(FORCE);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(e.layout(), expected(COLUMN_JSON));
+    }
+
+    /// 記録が消えても、前の runner が書いた column の形 (spaces → pjp-spaces だけ) は引き取ってタブにする (main の写しとは分けて言う)
+    #[test]
+    fn adopts_the_earlier_column_layout_without_a_record() {
+        let e = Env::new();
+        e.remove_tabs();
+        e.run(APPLY);
+        std::fs::remove_file(e.t.path().join("state").join(RECORD_FILE)).unwrap();
+        e.place_tabs(TABS_MOD_JSON);
+        let (o, out, calls) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            o[1].text
+                .contains("前に runner が書いた形 (spaces → pjp-spaces) を引き取り"),
+            "{o:?}"
+        );
+        assert!(calls.is_empty());
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(e.layout(), expected(TABBED_JSON));
+    }
+
+    /// 置き先の pjp-sidebar-tabs は herdr-app-mods が置くので、手順の並びでこの手順より先に流れる (同じ apply の続きでタブにするため)
+    #[test]
+    fn runs_after_herdr_app_mods() {
+        let ids: Vec<&str> = crate::steps::all().iter().map(|s| s.info().id).collect();
+        let at = |id: &str| ids.iter().position(|x| *x == id).unwrap();
+        assert!(at("herdr-app-mods") < at("herdr-app-pjp-spaces"), "{ids:?}");
     }
 
     /// main が変わって書き直しても (子の並びが替わっても)、ファイルの active は spaces のまま、clicks (layouts\.state\) に触らない。herdr-app

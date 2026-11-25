@@ -16,6 +16,10 @@
 //   書き直し) で替わっても、描き直しで追いつく。agents() も同じ (agent の状態が変わると描き直る)。なので timer は回さない
 // - 押すと layout.select {stack, child}。選んだ子は herdr-app が clicks (layouts\.state\) に残し、再起動をまたぐ。layout のファイルの active
 //   (runner が書く spaces) が前と変わらない限り、ファイルを書き直しても clicks の選んだ子が残る
+// - herdr-app は出ていない slot の copy を描かない (一度も出していなければ起こしもしない)。同梱の agents は描くときにだけ setAgentOrder を呼んで
+//   agent.next・agent.prev が辿る順 (一覧の順) を渡すので、agents の子を隠している間は順が届かず、space・tab の順に落ちる (prefix の小窓の
+//   Shift+O = agent.next が、確認待ちを先に辿らなくなる)。そこで stack に agents の子があって出ていない間は、この mod が同梱の agents の並べ方に
+//   寄せた順を渡す (agentOrder。Agents を出している間は同梱の agents が渡すので渡さない)
 //
 // 見た目: 色は theme() の名前 (帯は chrome、選んだタブの地は selected、hover は hover、数の印の地は blocked)。数の印の数字は、blocked の地の
 // 上で theme の foreground と background のうち明るさの差 (コントラスト比) が大きい方。sidebar が 160px 未満 (rail。同梱の spaces・agents と
@@ -28,7 +32,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { agents, layout, props, run, theme } from "herdr";
+import { agents, layout, props, run, setAgentOrder, shared, theme } from "herdr";
 
 // props の stack が無いときの stack の id (runner の herdr_app_pjp_spaces.rs の LISTS と同じ)
 const STACK = "sidebar-lists";
@@ -45,6 +49,8 @@ const FALLBACK = [{ id: "spaces" }, { id: "agents" }];
 const MAX_COUNT = 99;
 // rail (sidebar の幅が 160px 未満) のときのタブの一辺 (px)。折りたたんだ sidebar (44px) に 2 つと間が収まる大きさ
 const RAIL_CELL = 20;
+// 同梱の agents の急ぎ順 (大きいほど先)
+const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -63,6 +69,14 @@ function tabsOf(node) {
   const kids = node ? (node.children ?? []).filter((c) => !c.hidden) : FALLBACK;
   const active = kids.some((c) => c.id === node?.active) ? node.active : (kids[0]?.id ?? null);
   return { kids, active };
+}
+
+// agents の一覧 (同梱の mod agents) の並べ方に寄せた、agent の address の順 (agent.next・agent.prev が辿る順)。shared の agents.sort が grouped
+// なら agents() の順、ほか (同梱の既定の priority) は急ぎ順で、同じなら新しく変わった順 (seq の大きい順)。どちらもピン留めが先。同梱との違い:
+// sub-agent の急ぎを親に寄せない・変わった時刻 (同梱が自分の localStorage に持つ) の代わりに seq を使う
+function agentOrder(list, sort) {
+  const sorted = sort === "grouped" ? list : [...list].sort((x, y) => (RANK[y.status] ?? 0) - (RANK[x.status] ?? 0) || (y.seq ?? 0) - (x.seq ?? 0));
+  return [...sorted.filter((a) => a.pinned), ...sorted.filter((a) => !a.pinned)].map((a) => a.address);
 }
 
 // #rrggbb (後ろの aa は見ない) の相対輝度 (WCAG 2)。読めない色なら null
@@ -90,8 +104,12 @@ export default class SidebarTabs extends View {
     const t = theme();
     const root = layout();
     const stack = props()?.stack ?? STACK;
-    const { kids, active } = tabsOf(find(root, stack));
-    const blocked = agents().filter((a) => a.status === "blocked").length;
+    const node = find(root, stack);
+    const { kids, active } = tabsOf(node);
+    const list = agents();
+    const blocked = list.filter((a) => a.status === "blocked").length;
+    // agents の子を隠している間は、同梱の agents の代わりに一覧の順を渡す (頭のコメント)
+    if (node && active !== COUNTED && (node.children ?? []).some((c) => c.id === COUNTED)) setAgentOrder(agentOrder(list, shared("agents.sort")));
     const rail = narrow(root);
     return h_flex()
       .id("pjp-sidebar-tabs")
