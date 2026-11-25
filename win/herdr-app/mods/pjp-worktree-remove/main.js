@@ -1,4 +1,4 @@
-// pjp-worktree-remove: 今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す小窓。prefix の小窓 (pjp-prefix) の Shift+D が、
+// pjp-worktree-remove: 今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す小窓。prefix の小窓 (pjp-prefix) の d が、
 // 開く前の space を props の space に入れて開く (mod.open:pjp-worktree-remove や palette から開くと、focus のある space)。
 //
 // なぜ: herdr-app 0.1.16 の同梱の mod worktree の Remove worktree は、space.close を打ってすぐ git worktree remove を打つ。space.close (run) は端末が
@@ -499,7 +499,7 @@ export default class WorktreeRemove extends View {
     this.closed = true;
     const j = this.job;
     if (j && !j.done && j.runner === this) {
-      finish(j, false, `小窓が閉じたので「${PHASE_NAMES[j.phase] ?? j.phase}」の途中で止まった。残っていれば Shift+D でやり直す`);
+      finish(j, false, `小窓が閉じたので「${PHASE_NAMES[j.phase] ?? j.phase}」の途中で止まった。残っていれば prefix の後の d でやり直す`);
     }
   }
 
