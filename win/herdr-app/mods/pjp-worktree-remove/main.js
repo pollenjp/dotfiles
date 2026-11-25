@@ -12,9 +12,14 @@
 //           警告は、未 commit の変更と、どこにも push していない submodule の commit (同梱の mod と同じ判定)・作業中か答え待ちのエージェント・ほかの
 //           space の端末も止めること。linked worktree でない (main の checkout・git の外)・git worktree lock がある・端末の住所の machine が space と
 //           合わないときは、わけを出して進めない。Enter (か「止めて消す」) で進む。開いてから未 commit の変更などが増えていたら、もう一度 Enter を
-//           求める (同梱の mod と同じ)。開いてから文字のキー (typedKey) が 1 つでも届いた小窓では、Enter で進めない (やり直しも)。prefix の小窓の d や
-//           Ctrl+Q の後に、端末へ打つつもりの語を打ち続けて Enter まで押しても消さないため。わけを notice に出し、進めるのはボタン (マウスで押す) か、
-//           Esc で閉じて開き直した小窓の Enter。わざと消す Ctrl+K → d → Enter と Ctrl+Q → Enter は、確かめの小窓に Enter しか届かないので、そのまま進む
+//           求める (同梱の mod と同じ)。Enter の守りは 2 つ (どちらもボタンには効かない):
+//           - 開いてからキー (typedKey。字と、Ctrl・Alt・Win を足したキー) が 1 つでも届いた小窓では、Enter で進めない (やり直しも)。prefix の小窓の d や
+//             Ctrl+Q の後に、端末へ打つつもりのキーを打ち続けて Enter まで押しても消さないため。進めるのはボタン (マウスで押す) か、Esc で閉じて
+//             開き直した小窓の Enter
+//           - 開いてから QUIET_MS の間の Enter は受けず、受けなかった Enter からも QUIET_MS を数え直す。Ctrl+Q を押し違えた直後の Enter と、続けて
+//             押す Enter で消さないため。小窓を見てから間を置いて押せば進む
+//           受けなかったわけは notice に出す。わざと消す Ctrl+K → d → Enter と Ctrl+Q → Enter は、確かめの小窓に Enter しか届かないので、開いて
+//           QUIET_MS が過ぎていれば進む
 //   1. 端末を止める  (a) space の全タブのペインの端末と、label herdr.space がその space の生きた端末 (ペインの無いもの)。(b) 同じ machine の生きた
 //           端末のうち、フォルダが worktree の中のもの (ほかの space のペインは今のフォルダ、ペインの無い端末 (hc run の手伝いなど) は起こしたフォルダか
 //           今のフォルダで見る。Windows では消すのを止めるので止める。一覧では分け、ほかの space のものは警告にも出す)。全部に hc kill を打ち、hc get で
@@ -50,6 +55,8 @@ import { run, props, closeOverlay, notify, theme, spaces, panes, terminals, focu
 const STOP_LIMIT_MS = 60_000;
 // 端末が終わったか・仕事の進み具合を見る間
 const POLL_MS = 500;
+// 開いてから Enter を受けない長さ。受けなかった Enter からも、この長さを数え直す (Ctrl+Q を押し違えた直後の Enter と、続けて押す Enter で消さない)
+const QUIET_MS = 1000;
 // hc の 1 回の呼び出しを待つ上限 (hc() には時間切れの引数が無い。超えたら答えを待たずに次へ進む)
 const HC_LIMIT_MS = 10_000;
 // space を閉じてから git を打つまでの間 (herdr-app が space のペインの mod と、フォルダの見張りを放すのを待つ)
@@ -458,12 +465,18 @@ async function work(job, cx) {
 
 // ---- 小窓 ----
 
-// 字を打つキーか: 打った文字 (key_char) に制御文字 (U+0000〜U+001F・U+007F〜U+009F) でない字がある (空白も数える。Tab の \t などは数えない)。
-// key_char の無いイベントは、key が 1 字か space のとき。Ctrl・Alt・Win を足したキー・押しっぱなしの繰り返し・修飾キーだけ・Enter・Esc は数えない
+// 押しても数えないもの (修飾キーだけ)
+const MODIFIERS = new Set(["shift", "control", "ctrl", "alt", "platform", "cmd", "super", "function", "fn", "capslock"]);
+
+// 端末へ打つつもりだったとみるキーか: Ctrl・Alt・Win を足したキー (Ctrl+C・Ctrl+R など)。ほかは、打った文字 (key_char) に制御文字 (U+0000〜U+001F・
+// U+007F〜U+009F) でない字があるキー (空白も数える。Tab の \t などは数えない)。key_char の無いイベントは、key が 1 字か space のとき。修飾キーだけ・
+// 押しっぱなしの繰り返し・Enter・Esc は数えない。キーの割り当てが受けるキー (Ctrl+K・Ctrl+Q・space とタブの移動) は、小窓の on_key_down に届かない
 function typedKey(e) {
   if (e.is_held) return false;
+  const k = e.key ?? "";
+  if (MODIFIERS.has(k) || k === "enter" || k === "escape") return false;
   const m = e.modifiers ?? {};
-  if (m.control || m.alt || m.platform) return false;
+  if (k !== "" && (m.control || m.alt || m.platform)) return true;
   const ch = e.key_char;
   if (typeof ch === "string" && ch !== "") {
     return [...ch].some((c) => {
@@ -471,12 +484,12 @@ function typedKey(e) {
       return n > 0x1f && (n < 0x7f || n > 0x9f);
     });
   }
-  const k = e.key ?? "";
   return [...k].length === 1 || k === "space";
 }
 
-// 開いてから文字のキーが届いた小窓で、Enter を受けなかったときに出す
-const TYPED_NOTICE = "開いてから文字のキーが届いたので、この小窓では Enter で進めない (打ち続けた字の後の Enter で消さないため)。進めるならボタンを押すか、Esc で閉じて開き直す (prefix の後の d か Ctrl+Q)";
+// Enter を受けなかったときに出す: 開いてからキーが届いた小窓 (typedKey) と、開いてすぐ・受けなかった Enter から間を置かない Enter (QUIET_MS)
+const TYPED_NOTICE = "開いてからキー (字・Ctrl 付きのキー) が届いたので、この小窓では Enter で進めない (端末へ打つつもりのキーの後の Enter で消さないため)。進めるならボタンを押すか、Esc で閉じて開き直す (prefix の後の d か Ctrl+Q)";
+const EARLY_NOTICE = `開いてすぐの Enter は受けない (押し違えて開いた直後の Enter で消さないため)。小窓を見てから、${QUIET_MS / 1000} 秒あけて Enter を押す`;
 
 export default class WorktreeRemove extends View {
   init(_props, cx) {
@@ -488,7 +501,9 @@ export default class WorktreeRemove extends View {
     this.error = "";
     this.notice = ""; // Enter をもう一度求めるわけなど
     this.busy = false; // Enter の後に確かめ直している間
-    this.typed = false; // 開いてから文字のキーが届いたか (届いたら、この小窓では Enter で進めない)
+    this.typed = false; // 開いてからキー (typedKey) が届いたか (届いたら、この小窓では Enter で進めない)
+    this.opened = Date.now(); // 開いた時刻と、受けなかった Enter の時刻 (どちらかから QUIET_MS の間の Enter は受けない)
+    this.earlyAt = 0;
     this.closed = false;
     this.ticker = null;
     this.drawn = false;
@@ -569,11 +584,8 @@ export default class WorktreeRemove extends View {
     // ほかの小窓がこの space の仕事を始めていたら、その進み具合を出す (済んだ仕事は JOBS に残らない)
     if (this.attach(cx)) return;
     if (!j && this.blocker()) return;
-    // 開いてから文字のキーが届いた小窓の Enter では、止めることも、やり直すことも始めない (ボタンは押せる)
-    if (enter && this.typed) {
-      this.notice = TYPED_NOTICE;
-      return cx.notify();
-    }
+    // 開いてからキーが届いた小窓の Enter では、止めることも、やり直すことも始めない (ボタンは押せる)
+    if (enter && this.typed) return this.refuse(cx, TYPED_NOTICE);
     const i = j ? j.info : this.info;
     this.busy = true;
     this.notice = "";
@@ -654,7 +666,7 @@ export default class WorktreeRemove extends View {
   key(e, cx) {
     const k = e.key ?? "";
     if (k !== "enter" && k !== "escape") {
-      // 字を打つキーは読み捨てるが、届いたことは覚える (この小窓では、この後の Enter で進めない。footer の一言も替える)
+      // 端末へ打つつもりのキーは読み捨てるが、届いたことは覚える (この小窓では、この後の Enter で進めない。footer の一言も替える)
       if (!this.typed && typedKey(e)) {
         this.typed = true;
         cx.notify();
@@ -664,7 +676,23 @@ export default class WorktreeRemove extends View {
     cx.stop_propagation();
     if (e.is_held) return;
     if (k === "escape") return this.escape(cx);
+    // 開いてすぐ・受けなかった Enter から QUIET_MS の間の Enter は受けず、数え直す (キーが届いた小窓なら、go がそのわけを出す)
+    const now = Date.now();
+    if (!this.typed && now - Math.max(this.opened, this.earlyAt) < QUIET_MS) {
+      this.earlyAt = now;
+      return this.refuse(cx, EARLY_NOTICE);
+    }
     this.go(cx, true);
+  }
+
+  // Enter を受けなかったわけを出す。Enter で進める形のときだけ (流している・済んだ・進めない・調べている間は、前と同じく何も出さない)
+  refuse(cx, text) {
+    if (this.closed || this.busy || !this.snap) return;
+    const j = this.job;
+    if (j && (!j.done || j.ok)) return;
+    if (!j && (JOBS.has(this.snap.id) || this.blocker())) return;
+    this.notice = text;
+    cx.notify();
   }
 
   // Esc と、小窓に focus がある間の Ctrl+Q: 閉じる。流している間は閉じない (閉じると仕事が打ち切られる)
@@ -804,7 +832,7 @@ export default class WorktreeRemove extends View {
         return h_flex()
           .gap(8)
           .items_center()
-          .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "字を打ったので ↵ では進めない · esc 閉じる" : "↵ やり直す · esc 閉じる"))
+          .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "キーを打ったので ↵ では進めない · esc 閉じる" : "↵ やり直す · esc 閉じる"))
           .child(button("pwr-close", "閉じる", false, () => this.dismiss()))
           .child(button("pwr-retry", "やり直す", true, (cx) => this.go(cx)));
       }
@@ -813,7 +841,7 @@ export default class WorktreeRemove extends View {
       return h_flex()
         .gap(8)
         .items_center()
-        .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "字を打ったので ↵ では進めない · esc 取り消す" : "↵ 止めて消す · esc 取り消す"))
+        .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "キーを打ったので ↵ では進めない · esc 取り消す" : "↵ 止めて消す · esc 取り消す"))
         .child(button("pwr-cancel", "取り消す", false, () => this.dismiss()))
         .child(button("pwr-go", "止めて消す", true, (cx) => this.go(cx)));
     };
