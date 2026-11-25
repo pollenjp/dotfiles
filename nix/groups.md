@@ -29,6 +29,7 @@
 | ② | Claude Code 一式 | `claude.enable` | on | on | off |  |
 | ② | herdr | `herdr.enable` | on | on | off |  |
 | ② | herdr-core (hc) | `herdrCore.enable` | on | on | off |  |
+| ② | systemd の linger (ログアウトしても user の service を止めない) | `linger.enable` | on | on | off |  |
 | ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | on | off | `wsl.windowsFiles.enable` |
 | ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | on | off | `wsl.windowsFiles.enable` |
 | ② | cursor-agent | `cursorAgent.enable` | off | off | off |  |
@@ -74,6 +75,7 @@
 | ② Claude Code 一式 | on | on | off | **on** |
 | ② herdr | on | on | off | off |
 | ② herdr-core (hc) | on | on | off | off |
+| ② systemd の linger (ログアウトしても user の service を止めない) | on | on | off | off |
 | ② Windows の Claude Code | on | on | off | off |
 | ② Windows の herdr・herdr-app | on | on | off | off |
 | ② cursor-agent | off | off | off | off |

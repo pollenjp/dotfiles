@@ -17,6 +17,7 @@
 #   `# tool: <key> (<option>)` から取り、off かは home-manager が置く ~/.local/state/dotfiles/group.json を
 #   jq なしで読む (tool_off)。実行の頭には、対象ホストのグループを 1 行出す (note_group)。switch のあとは、この PC の
 #   ホストの要約 (dotfiles-private の docs/hosts/nix/<ホスト>.md と HTML 版) が今の設定と同じかを見る (check_host_summary)。
+#   中で sudo を呼ぶ手順 linger (systemd の linger) は逆に、group.json の tools.linger が true のときだけ動く (tool_on)。
 # - `set -e` は関数を if の条件に置くと **その中で無効になる**。手順の関数は
 #   失敗しうるコマンドを必ず `|| return 1` で受けること。
 # - **実行中にこのファイル自身が書き換わると挙動が混ざる**。bash はスクリプトを
@@ -440,6 +441,13 @@ add_step switch \
   '手順 3。初回は home-manager コマンドがまだ無いので nix run 経由で実行する。' \
   step 0
 
+# switch の直後・bootstrap の前に置く。option の値は switch が置く group.json から読み、bootstrap-t3-code.sh (order 70) が
+# 同じ実行の中で linger を確かめる前に揃える (step_linger)
+add_step linger \
+  'systemd の linger を有効にする (ログアウトしても user の service を止めない)' \
+  '手順 3.5。dotfiles.linger.enable (既定は herdr-core と同じ) のホストで、Linger が yes でなければ sudo loginctl enable-linger を打つ。「既存マシン更新」にも入る。sudo は有効でないときだけ呼ぶ。外しはしない。NixOS では打たずに nixos-config を案内する。' \
+  step 0 'linger (dotfiles.linger.enable)'
+
 add_step bootstrap \
   'bootstrap (マシンごとの初期化)' \
   '下のスクリプトをまとめて選ぶ。いずれも冪等なので「既存マシン更新」にも入る。' \
@@ -572,6 +580,10 @@ apply_preset() {
       # ときは飛ばし、ずれは post_notes が知らせる。手順は表の並び (wsl-mtu-guard が先) で
       # 走るので、トレーサが起動に失敗して setup が止まっても、見張りは入れ替わっている。
       #
+      # linger (systemd の linger。dotfiles.linger.enable) も同じ理由で入れる。中で sudo を呼ぶが、呼ぶのは linger が有効で
+      # ないときだけで、有効なら (option が off のマシンも) 呼ばない。sudo を訊けないとき・打てなかったときは飛ばし、
+      # ずれは post_notes が知らせる (bootstrap の前に走るので、ここで止めない)。
+      #
       # 入れていないのは、冪等でないか ここでは有害なもの:
       #
       #   nix-install       既にあれば飛ばすだけ。足しても何も起きない
@@ -589,7 +601,7 @@ apply_preset() {
       # 直して push したあと、--update 1 回でその値で switch させるため。clone が無ければ何もしない。
       #
       # 外したいときは「カスタム」か --steps で選び直す。
-      ids=(private-fetch switch)
+      ids=(private-fetch switch linger)
       while IFS= read -r id; do
         ids+=("${id}")
       done < <(child_ids)
@@ -2075,7 +2087,7 @@ systemd_running() { [[ -d ${system_root}/run/systemd/system ]]; }
 # sudo を呼ぶとその場で失敗し、setup はそこで止まって残りの手作業も出さなくなる
 # (Claude の Bash ツールから --update を打ったときなど)。訊けなければ飛ばすと言って偽を
 # 返す。揃っていないことは post_notes が知らせる。--dry-run では打つコマンドを見せたいので
-# 確かめない。$1: 手順の id、$2: unit
+# 確かめない。手順 linger も使う。$1: 手順の id、$2: 揃えるもの (unit・systemd の linger)
 system_unit_can_sudo() {
   if [[ ${dry_run} == 1 ]] || sudo -n true 2>/dev/null || [[ -t 0 ]]; then
     return 0
@@ -2191,6 +2203,80 @@ system_unit_drift() {
   fi
 }
 
+# 手順 linger (dotfiles.linger.enable。dotfiles-private の docs/adr/101_linger_with_herdr_core_*) が見る systemd の linger。
+#
+# herdr-core の server は user の service として user manager (user@<uid>.service) の中で動く。linger が無いと、最後の login
+# session が消えてから logind の UserStopDelaySec (既定 10 秒) で user manager ごと止まり、server と agent も止まる。option が
+# true のホストで Linger が yes でなければ sudo loginctl enable-linger を打つ。「既存マシン更新」で毎回走るので、sudo は yes で
+# ないときだけ呼ぶ。option が false でも外さない (手で有効にしたものを消さない)。
+
+# loginctl に渡すユーザーの名前 (bootstrap-t3-code.sh と同じく id で引く)
+linger_user() { id -un; }
+
+# 今の Linger (yes・no)。logind がそのユーザーを知らない (ログインしておらず linger もしていない) などで読めなければ空
+linger_state() { loginctl show-user "$(linger_user)" --property=Linger --value 2>/dev/null || true; }
+
+# NixOS か。NixOS では linger は system の設定 (nixos-config の users.users.<名前>.linger) が正で、loginctl で手で変えても
+# activation が戻しうる (nixpkgs 25.05 より前の既定・古い system.stateVersion のホスト)
+is_nixos() { [[ -e ${system_root}/etc/NIXOS ]]; }
+
+# 手順 linger。switch の直後・bootstrap の前に走る (手順表の add_step のコメント)。option が off のホストは、run_step が
+# skip_off_tool で先に飛ばす。sudo loginctl enable-linger が落ちても警告だけにして 0 を返す: bootstrap の前なので、止めると
+# bootstrap が全部走らない。linger が無くても今と同じに動く (ログアウトで止まるだけ) ので、警告のまとめと post_notes で知らせる
+step_linger() {
+  local user state
+  # sudo を付けて打つと HOME が root のものになり、group.json を見失う (step_system_unit と同じ)
+  if [[ ${EUID} -eq 0 ]]; then
+    warn 'root (sudo) では打たないでください。この手順は中で sudo を呼びます。'
+    return 1
+  fi
+  if ! tool_on linger; then
+    note "${group_state_file} に tools.linger が無い (この手順を持つ世代へまだ switch していない・読めない) ので何もしない。"
+    return 0
+  fi
+  if ! systemd_running; then
+    note 'systemd が動いていないので飛ばします (WSL なら /etc/wsl.conf の [boot] に systemd=true)。'
+    return 0
+  fi
+  if ! have loginctl; then
+    note 'loginctl が見つからないので飛ばします。'
+    return 0
+  fi
+  user=$(linger_user) || return 1
+  state=$(linger_state)
+  if [[ ${state} == yes ]]; then
+    note "${user} の linger は有効です (Linger=yes)。"
+    return 0
+  fi
+  if is_nixos; then
+    note "${user} の linger が有効でない (Linger=${state:-読めない}) が、NixOS では loginctl を打たない。nixos-config に書く (残りの手作業)。"
+    return 0
+  fi
+  system_unit_can_sudo linger 'systemd の linger' || return 0
+  if ! run sudo loginctl enable-linger "${user}"; then
+    warn "${user} の linger を有効にできませんでした (sudo loginctl enable-linger ${user})。" \
+      "ログアウトすると herdr-core の server と user の service が止まります。端末から ~/dotfiles/setup --steps linger を打ち直してください。" \
+      "sudo を使えないホストでは、そのホストの modules で dotfiles.linger.enable = false にしてください (この手順を飛ばすようになる)。"
+    return 0
+  fi
+  [[ ${dry_run} == 1 ]] && return 0
+  note "${user} の linger を有効にした。ログアウトしても herdr-core の server と user の service は止まらない。"
+}
+
+# dotfiles.linger.enable が true なのに Linger が yes でないときの今の値 (読めなければ「読めない」)。揃っていれば (option が
+# off・systemd が動いていない・loginctl が無いホストも) 何も出さない。post_notes の案内にだけ使う (手順を選ばなかった・sudo を
+# 訊けずに飛ばした・打てなかった・NixOS)
+linger_drift() {
+  local state
+  tool_on linger || return 0
+  systemd_running || return 0
+  have loginctl || return 0
+  state=$(linger_state)
+  if [[ ${state} != yes ]]; then
+    printf '%s' "${state:-読めない}"
+  fi
+}
+
 # 設定グループ (ADR 057) で off の道具か。~/.local/state/dotfiles/group.json (home/modules/group.nix) の tools で <key> が
 # false なら 0。ファイルが無い (この仕組みの前の世代へ switch したまま)・読めない・key が無い・true なら 1 (流す)。
 # setup.sh は Nix より前にも走るので jq は使わない。group.json は builtins.toJSON の出力で空白を持たないので、
@@ -2201,6 +2287,15 @@ tool_off() {
   [[ -r ${group_state_file} ]] || return 1
   text=$(<"${group_state_file}") || return 1
   [[ ${text} == *"\"$1\":false"* ]]
+}
+
+# tool_off の逆向き: group.json の tools で <key> が true なら 0。ファイルが無い・読めない・key が無い・false なら 1 (何もしない)。
+# 中で sudo を呼ぶ手順 (linger) が使う。この手順を持つ世代へまだ switch していないホストで、option を読まずに sudo を呼ばないため
+tool_on() {
+  local text
+  [[ -r ${group_state_file} ]] || return 1
+  text=$(<"${group_state_file}") || return 1
+  [[ ${text} == *"\"$1\":true"* ]]
 }
 
 # 手順 $1 の道具 (bootstrap-*.sh の `# tool:`) がこのホストで off なら、そう出して 0 を返し、step_skipped を 1 にする
@@ -2235,6 +2330,12 @@ run_step() {
     local-flake) step_local_flake ;;
     flake-update) step_flake_update ;;
     switch) step_switch ;;
+    linger)
+      if skip_off_tool linger; then
+        return 0
+      fi
+      step_linger
+      ;;
     chsh) step_chsh ;;
     wsl-mtu-guard) step_wsl_mtu_guard ;;
     exe-exec-trace) step_exe_exec_trace ;;
@@ -2311,6 +2412,17 @@ mise_extra_tools() {
 post_notes() {
   local extra own drift initial_selected=0
   printf '\n%s==> 残りの手作業%s\n' "${c_bold}" "${c_reset}"
+  # 手順 linger (3.5) を選んでいても、sudo を訊けずに飛ばした・打てなかった・NixOS なら、linger は有効になっていない
+  drift=$(linger_drift || true)
+  if [[ -n ${drift} ]]; then
+    note "systemd の linger が有効でない (Linger=${drift})。ログアウトすると herdr-core の server と user の service が止まる。"
+    if is_nixos; then
+      note "        NixOS では nixos-config に users.users.$(linger_user).linger = true; を書いて nixos-rebuild switch する。"
+    else
+      note '        --steps linger で有効にする (中で sudo を呼ぶ)。'
+    fi
+    note '        要らないホスト (sudo を使えないホストも) は、そのホストの modules で dotfiles.linger.enable = false にする。'
+  fi
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)
     if [[ -n ${extra} ]]; then

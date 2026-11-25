@@ -51,6 +51,7 @@
 #   dotfiles.herdr.enable                        herdr (包み・ssh 先の agent の固定名・設定・abbr) を入れるか (既定は ②)
 #   dotfiles.herdr.hub.enable                    herdr の集約ハブ ~/h を setup が作るか (既定は ② と ③)
 #   dotfiles.herdrCore.enable                    herdr-core (hc) を入れるか (既定は ② で Linux なら true。herdr-app が SSH でつなぐ machine の側に要る)
+#   dotfiles.linger.enable                       systemd の linger を setup が有効にするか (既定は herdrCore.enable と同じ。ログアウトしても user の service を止めない)
 #   dotfiles.osCaBundle.enable                   自前の証明書の束を持つツールを、環境変数で OS の信頼ストアに寄せるか (Linux)
 #   dotfiles.osCaBundle.requestsCaBundle.enable  そのうち REQUESTS_CA_BUNDLE も入れるか
 #
@@ -122,7 +123,8 @@ in
       既定になる。② と ③ の両方に当たる道具 (`claude.privateSkills.enable`・`ccPages.enable`・`herdr.hub.enable`・
       `wsl.windowsFiles.claudeAccounts.enable`・`wsl.windowsFiles.claudeDesktop.enable`) は、`personalAccounts.enable` も true のときだけ既定で
       入る。`cursorAgent.enable`・
-      `t3Code.enable`・`wsl.windowsFiles.t3Code.enable` は既定が false のまま (段によらない)。
+      `t3Code.enable`・`wsl.windowsFiles.t3Code.enable` は既定が false のまま (段によらない)。② の道具の `linger.enable` は、既定が
+      `herdrCore.enable` の値に従う。
     '';
   };
 
@@ -865,8 +867,34 @@ in
       前に `hc machine add --install` などで写した `~/.local/bin/herdr-core`・`hc` は、リンクに置き換わる。
       store の core は `hc update` が「nix のもの」として断る。このホストへは `hc machine update` を打たず、版は
       releases.json を上げる PR で上げる (nix/README.md の「herdr-core (hc) を Nix で入れる」)。
+      systemd の linger (`linger.enable`) の既定もこの値に従う (ログアウトしても server を止めない)。
 
       入れないホストは、そのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
+    '';
+  };
+
+  options.dotfiles.linger.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.dotfiles.herdrCore.enable;
+    defaultText = lib.literalExpression "config.dotfiles.herdrCore.enable";
+    example = false;
+    description = ''
+      systemd の linger (ユーザーの user manager を、ログインしていない間も動かしておく) を setup が有効にするか
+      (dotfiles-private の docs/adr/101_linger_with_herdr_core_*)。既定は herdr-core と同じ (`herdrCore.enable`。② の段で Linux なら true)。
+
+      herdr-core の server は user の service (`hc-serve-<id>.service`) として user manager (`user@<uid>.service`) の中で動く。linger が
+      無いと、最後の login session が消えてから logind の `UserStopDelaySec` (既定 10 秒) で user manager ごと止まり、server と agent も
+      止まる (herdr-app は machine add のときに「Agents on <ホスト> stop when you disconnect」と警告する)。ほかの user の service
+      (cc-pages・Dev Tracker の見回り役・T3 Code) も、同じわけで止まらなくなる。
+
+      true のとき、setup の手順 `linger` (「既存マシン更新」(`--update`) にも入る) が、Linger が yes でなければ
+      `sudo loginctl enable-linger <ユーザー>` を打つ (sudo を呼ぶのはそのときだけ)。sudo がパスワードを訊けなければ飛ばし、最後の
+      「残りの手作業」が知らせる。NixOS では loginctl を打たず、nixos-config の `users.users.<名前>.linger = true;` を案内する。
+      systemd の動いていないホスト (systemd の無い WSL・macOS) では何もしない。
+
+      false のホストでは何もしない (有効にした linger を外さない。外すなら `sudo loginctl disable-linger <ユーザー>` を手で打つ)。
+      要らないホストは、そのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする。
+      書き方は nix/README.md の「ログアウトしても止めない (linger)」。
     '';
   };
 

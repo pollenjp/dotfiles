@@ -40,7 +40,8 @@
 #
 #   runtime     <runtime>/.install-complete が版でない → home-manager switch (activation が写す)
 #   起動        <runtime>/t3 --version が落ちる → NixOS なら programs.nix-ld.enable (配布物は /lib64 の loader を使う)
-#   linger      loginctl の Linger が yes でない → service がログインの外で止まる。sudo loginctl enable-linger
+#   linger      loginctl の Linger が yes でない → service がログインの外で止まる。setup の手順 linger (--steps linger。
+#               dotfiles.linger.enable。--update では、この手順より前に走って有効にする)。NixOS は nixos-config
 #   service     systemctl --user の t3code.service が active でない・起動で起きる形でない (is-enabled が enabled でなく、WantedBy に
 #               default.target も無い)。起動で起きても is-enabled が enabled でなければ (前の世代の unit は alias)、t3 が not enabled と
 #               読むので switch を勧める (下の判定のコメント)
@@ -191,7 +192,8 @@ echo "T3 Code: ${t3_version}"
 linger=$(loginctl show-user "$(id -un)" --property=Linger --value 2>/dev/null || true)
 if [[ ${linger} != yes ]]; then
   warn "T3 Code の service がログインの外で止まります (systemd の linger が ${linger:-読めない})。" \
-    "sudo loginctl enable-linger $(id -un) (NixOS なら users.users.<名前>.linger = true) を打ってください。"
+    "setup の手順 linger で有効にしてください: ~/dotfiles/setup --steps linger (中で sudo を呼ぶ。dotfiles.linger.enable が false のホストでは、先に true にする)。" \
+    "NixOS では nixos-config に users.users.$(id -un).linger = true; を書いてください。"
 fi
 
 # 起動で起きるかは is-enabled だけで決めない。systemd は ~/.config/systemd/user/t3code.service の link をたどった先のファイル名が

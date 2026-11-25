@@ -18,7 +18,8 @@
 #   - 手で書いた settings.json (example-host で 2026-11-22 に書いたもの) に on で当てると、足すのは defaultModelSelection・defaultThreadEnvMode だけ
 #   - 壊れた JSON・合わせるキーの型が違う (environment が object)・symlink なら、書き換えずに警告して exit 0
 #   - 状態ファイルが無い・形が違うなら、警告して exit 0 (settings.json を作らない)
-#   - 状態: runtime の .install-complete が無ければ警告して止まる。t3 --version が落ちれば nix-ld の案内。linger が no・service が
+#   - 状態: runtime の .install-complete が無ければ警告して止まる。t3 --version が落ちれば nix-ld の案内。linger が no (setup の
+#     手順 linger (~/dotfiles/setup --steps linger) を案内する)・service が
 #     動いていない・起動で起きる形でない (is-enabled が enabled でなく、WantedBy に default.target も無い)・起動で起きても is-enabled が
 #     alias (t3 が not enabled と読む。switch を勧め、t3 service install は勧めない)・t3 が current と読まない・claude-t3 にログインしていない・T3 Connect が NOT reachable なら、それぞれ警告 (exit 0)。
 #     どれもそろっていれば警告を出さず、版・service・claude-t3・T3 Connect の行を出す
@@ -247,7 +248,7 @@ check_warn() { # $1: 名前、$2: 印のファイル、$3: 中身、$4: 警告�
   fi
 }
 check_warn "t3 が起きなければ nix-ld の案内" t3-broken x 'programs.nix-ld.enable'
-check_warn "linger が no" linger no 'loginctl enable-linger'
+check_warn "linger が no なら setup の手順 linger を案内する" linger no 'dotfiles/setup --steps linger'
 check_warn "service が動いていない" active inactive 'systemctl --user daemon-reload && systemctl --user start t3code'
 check_warn_both() { # $1: 名前、$2: is-enabled、$3: WantedBy、$4: 警告に出る文字
   local h
