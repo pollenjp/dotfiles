@@ -3361,6 +3361,9 @@ home-manager は作りも消しもしない（秘密情報なので store には
 ~/dotfiles/setup --steps bootstrap-local-env  # これだけ走らせる場合
 ```
 
+Windows では `%USERPROFILE%\.config\pjp\env` で、runner の手順 `local-env` が同じ印と書き直し方で置く（読むのは claude-skills の pjp だけで、
+欄に dotfiles の節は入れない。[`win/README.md`「マシンローカルの環境変数」](../win/README.md#マシンローカルの環境変数-configpjpenv)）。
+
 ファイルの頭には、dotfiles と skill が受け取る環境変数の一覧を「dotfiles が書く欄」として置き、
 手順 6.6 が流れるたびに書き直す（[後述](#一覧の欄-adr-021)）。**書き換えるのは欄の中だけで、欄の外は
 1 バイトも変えない。** 実際の API キーが入っているファイルなので、値は欄より下に書く。group と other の

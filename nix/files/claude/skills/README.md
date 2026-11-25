@@ -202,7 +202,9 @@ skill の script が環境変数を読み、それを「そのマシンで常に
 マシンごとの切り替え）なら、skill のディレクトリに `pjp-env.txt` を置く。`setup --update` の
 `bootstrap-local-env` が `~/.claude/skills/*/pjp-env.txt` を集め、`~/.config/pjp/env` の頭の欄に
 `# ---- skill: <名前> ----` の節として並べる（[ADR 021](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/021_local_env_header_20261017T224146JST/README.md)、
-[`nix/README.md`「一覧の欄」](../../../README.md#一覧の欄-adr-021)）。
+[`nix/README.md`「一覧の欄」](../../../README.md#一覧の欄-adr-021)）。Windows では runner の手順 `local-env` が、同じ断片を
+`%USERPROFILE%\.config\pjp\env` の欄に並べる（Windows で効くのは、pjp がそのファイルから読む変数だけ。
+[`win/README.md`「マシンローカルの環境変数」](../../../../win/README.md#マシンローカルの環境変数-configpjpenv)）。
 
 ```
 <何のための変数か>。取り得る値: <値>。

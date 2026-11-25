@@ -31,7 +31,8 @@
 #   - 印が 1 組なら印の間だけが替わる。始まりの印より上 (値・CRLF の行) と、終わりの印より下 (メモ・
 #     コメントアウトした値・CRLF の行・末尾に改行の無い行) はバイトで同じ
 #   - 印の間の # でない行は、元の順・元のバイトのまま終わりの印のすぐ下へ移り、変数名を warn で知らせる
-#     (KEY=VALUE の形でない行は数だけ。= だけで終わる行 (パディング付きの base64 の値) も名前として出さない)
+#     (KEY=VALUE の形でない行は数だけ。= だけで終わる行 (パディング付きの base64 の値) も、その後ろに空白・タブ・CR が
+#     続く行も、名前として出さない)
 #   - 書き上がりが今と同じなら何も書かない (更新時刻も env.bak も変わらない)
 #   - ファイルの頭の UTF-8 BOM があっても、古いテンプレートと印を見分け、書き直した欄の頭に BOM は付かない
 #   - 空のファイルは欄だけになる
@@ -421,6 +422,21 @@ if [[ $(rc t10b) == 0 ]] && same "${work}/t10b/got_below" "${work}/t10b/want_bel
   ok "= だけで終わる行は欄の下へ移すが、名前として出さず、形でない行として数える"
 else
   ng "= だけで終わる行" "rc=$(rc t10b)"$'\n'"$(odump "${work}/t10b/got_below" 10)"
+fi
+
+# T10c. = の後ろに空白・タブ・CR が続く行 (ブラウザから写した値の行末の空白) も、名前として出さない
+new_case t10c
+put t10c "${begin_text}"$'\n'"${secret}= "$'\t\n'"${secret}=="$' \r\n'"${end_text}"$'\n''MINE=1'$'\n'
+run t10c
+check_leak t10c
+f=$(envf t10c)
+below_end "${f}" >"${work}/t10c/got_below"
+printf '%s\n' "${secret}= "$'\t' "${secret}=="$' \r' 'MINE=1' >"${work}/t10c/want_below"
+if [[ $(rc t10c) == 0 ]] && same "${work}/t10c/got_below" "${work}/t10c/want_below" \
+  && grep -qF 'KEY=VALUE の形でない行 2 行' "${work}/t10c/err"; then
+  ok "= の後ろに空白・タブ・CR しか無い行も、名前として出さず、形でない行として数える"
+else
+  ng "= の後ろが空白だけの行" "rc=$(rc t10c)"$'\n'"$(outerr t10c)"$'\n'"$(odump "${work}/t10c/got_below" 10)"
 fi
 
 # T12. 頭の BOM
