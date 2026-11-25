@@ -38,6 +38,8 @@ subagent は自分への依頼に従う。
 - 止まるのは、取り消せない操作・セキュリティに関わる操作・merge や共有 branch への push・
   方針を覆す発見・PR に今回の作業でない commit が載るとき・この CLAUDE.md の他の節や
   superpowers 以外の skill が確認を求める操作のとき。ユーザーがその会話で別の進め方を言えば従う
+- 例外: `pjp-docs-to-notion` の sync が書き換えた対応表だけの PR は、止まらずにすぐ merge する
+  (対象の PR と repo の条件はその skill の決まり。この節の「merge はしない」より先に効く)
 - 自分で決めたこと (builder check の判断・実行中の ruling) は、PR を返すときに並べる
 
 skill を読んだ直後には hook (`~/.claude/hooks/run-through-nudge.sh`) も念を押してくる。
