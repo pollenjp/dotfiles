@@ -1,6 +1,7 @@
 {
   "global": {
     "ctrl-k": "mod.open:pjp-prefix",
+    "ctrl-q": "mod.open:pjp-worktree-remove",
     "ctrl-up": "tab.prev",
     "ctrl-down": "tab.next",
     "ctrl-alt-up": "space.prev",
@@ -10,5 +11,8 @@
   },
   "mod:pjp-prefix": {
     "ctrl-k": "pjp-prefix.literal"
+  },
+  "mod:pjp-worktree-remove": {
+    "ctrl-q": "pjp-worktree-remove.again"
   }
 }
