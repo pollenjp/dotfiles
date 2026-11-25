@@ -1178,8 +1178,8 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 
 - 割り当てないもの: detach (`q`) と設定の読み直し (`Shift+R`)。herdr-app は窓を閉じても端末が止まらず、設定は保存するとすぐ読み直す。
   旧 herdr で detach のもう 1 つのキーだった `d` は、herdr-app では worktree を消すキー (上の表) にした。旧 herdr の detach のつもりで押しても、
-  確かめの小窓が開くだけで、Enter を押すまで端末も space も worktree も触らない (Esc で何もせずに閉じる)。小窓は Enter と Esc のほかのキーを
-  読み捨てるので、`Ctrl+K` の後に `d` で始まる語を打ち続けて Enter まで押すと、消しに進む (小窓が worktree を調べ終える前の Enter は読まない)
+  確かめの小窓が開くだけで、Enter を押すまで端末も space も worktree も触らない (Esc で何もせずに閉じる)。`Ctrl+K` の後に `d` で始まる語を
+  打ち続けて Enter まで押しても、小窓は字が届いた後の Enter で進まない (下の `d` の説明)
 - prefix の小窓は窓の上の方に出て、押せるキーの一覧を出す (行を押しても同じ命令)。`Esc` で取り消し、割り当てに無いキーは何もせずに閉じる。キーは打った
   文字で見るので、日本語の配列でも `"` (Shift+2)・`|` (Shift+¥) で届く
 - `Ctrl+K` は shell などのプログラムが使うキー (bash・fish の行末まで消すなど) で、herdr-app に取られる (herdr-app の案内も、prefix に使うと何を
@@ -1208,9 +1208,12 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 - prefix の後の `d` は、ゴミ箱の印 (🗑️) の付いた space などを片付けるキー。herdr-app の同梱の Remove worktree (space の menu) は `space.close` を打ってすぐ
   `git worktree remove` を打つので、Windows では space の shell や Claude Code がまだ worktree のフォルダを今のフォルダにしている間に git が消しに行き、
   `failed to delete '…': Permission denied` で落ちる (git は登録を消してから落ちるので、空のフォルダだけが残る)。`d` は確かめの小窓
-  (`pjp-worktree-remove`。外を押しても閉じない window) を開き、Enter (か「止めて消す」) で次の順に進める。進めた後は、済むまで Esc で閉じない
-  (小窓を閉じると、小窓の仕事は herdr-app に打ち切られる)。済めば小窓は自分で閉じ、済んだ・止まったは通知で出る。layout の切り替えなどで閉じられたら、
-  どこで止まったかを通知で出す (残っていれば、もう一度 prefix の後の `d` で続きを流す)
+  (`pjp-worktree-remove`。外を押しても閉じない window) を開き、Enter (か「止めて消す」) で次の順に進める。小窓が開いてから文字のキー (空白も。
+  Ctrl・Alt・Win を足したキーと押しっぱなしの繰り返しは数えない) が 1 つでも届いたら、その小窓では Enter で進めない (止めたときのやり直しも)。
+  `d` の後に、端末へ打つつもりの語を打ち続けて Enter まで押しても消さないため。Enter を受けなかったときは小窓にわけが出る。それでも進めるなら
+  ボタン (「止めて消す」・「やり直す」) を押すか、Esc で閉じて prefix の後の `d` で開き直す。わざと消すときの `Ctrl+K` → `d` → Enter は、
+  そのまま進む。進めた後は、済むまで Esc で閉じない (小窓を閉じると、小窓の仕事は herdr-app に打ち切られる)。済めば小窓は自分で閉じ、済んだ・
+  止まったは通知で出る。layout の切り替えなどで閉じられたら、どこで止まったかを通知で出す (残っていれば、もう一度 prefix の後の `d` で続きを流す)
   1. 止める端末: space の全タブの端末 (ペインの無い space の端末も) と、同じ machine の生きた端末のうちフォルダが worktree の中のもの (ほかの space の
      端末・`hc run` の手伝いの端末。小窓では分けて出し、ほかの space の端末は赤い警告にも出す)。全部に `hc kill` を打ち、`hc` で全部が finished に
      なるまで待つ。60 秒で止まらなければ、space と worktree に触らずに止まり、残った端末を出す (小窓で Enter を押すとやり直す)

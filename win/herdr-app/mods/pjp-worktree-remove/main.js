@@ -11,7 +11,9 @@
 //           警告は、未 commit の変更と、どこにも push していない submodule の commit (同梱の mod と同じ判定)・作業中か答え待ちのエージェント・ほかの
 //           space の端末も止めること。linked worktree でない (main の checkout・git の外)・git worktree lock がある・端末の住所の machine が space と
 //           合わないときは、わけを出して進めない。Enter (か「止めて消す」) で進む。開いてから未 commit の変更などが増えていたら、もう一度 Enter を
-//           求める (同梱の mod と同じ)
+//           求める (同梱の mod と同じ)。開いてから文字のキー (typedKey) が 1 つでも届いた小窓では、Enter で進めない (やり直しも)。prefix の小窓の d の
+//           後に、端末へ打つつもりの語を打ち続けて Enter まで押しても消さないため。わけを notice に出し、進めるのはボタン (マウスで押す) か、Esc で
+//           閉じて開き直した小窓の Enter。わざと消す Ctrl+K → d → Enter は、確かめの小窓に Enter しか届かないので、そのまま進む
 //   1. 端末を止める  (a) space の全タブのペインの端末と、label herdr.space がその space の生きた端末 (ペインの無いもの)。(b) 同じ machine の生きた
 //           端末のうち、フォルダが worktree の中のもの (ほかの space のペインは今のフォルダ、ペインの無い端末 (hc run の手伝いなど) は起こしたフォルダか
 //           今のフォルダで見る。Windows では消すのを止めるので止める。一覧では分け、ほかの space のものは警告にも出す)。全部に hc kill を打ち、hc get で
@@ -452,6 +454,26 @@ async function work(job, cx) {
 
 // ---- 小窓 ----
 
+// 字を打つキーか: 打った文字 (key_char) に制御文字 (U+0000〜U+001F・U+007F〜U+009F) でない字がある (空白も数える。Tab の \t などは数えない)。
+// key_char の無いイベントは、key が 1 字か space のとき。Ctrl・Alt・Win を足したキー・押しっぱなしの繰り返し・修飾キーだけ・Enter・Esc は数えない
+function typedKey(e) {
+  if (e.is_held) return false;
+  const m = e.modifiers ?? {};
+  if (m.control || m.alt || m.platform) return false;
+  const ch = e.key_char;
+  if (typeof ch === "string" && ch !== "") {
+    return [...ch].some((c) => {
+      const n = c.codePointAt(0);
+      return n > 0x1f && (n < 0x7f || n > 0x9f);
+    });
+  }
+  const k = e.key ?? "";
+  return [...k].length === 1 || k === "space";
+}
+
+// 開いてから文字のキーが届いた小窓で、Enter を受けなかったときに出す
+const TYPED_NOTICE = "開いてから文字のキーが届いたので、この小窓では Enter で進めない (打ち続けた字の後の Enter で消さないため)。進めるならボタンを押すか、Esc で閉じて prefix の後の d で開き直す";
+
 export default class WorktreeRemove extends View {
   init(_props, cx) {
     this.overlay = props()?.overlay ?? null;
@@ -462,6 +484,7 @@ export default class WorktreeRemove extends View {
     this.error = "";
     this.notice = ""; // Enter をもう一度求めるわけなど
     this.busy = false; // Enter の後に確かめ直している間
+    this.typed = false; // 開いてから文字のキーが届いたか (届いたら、この小窓では Enter で進めない)
     this.closed = false;
     this.ticker = null;
     this.drawn = false;
@@ -526,8 +549,8 @@ export default class WorktreeRemove extends View {
     return "";
   }
 
-  // Enter・「止めて消す」・「やり直す」
-  go(cx) {
+  // Enter (enter が true)・「止めて消す」・「やり直す」
+  go(cx, enter = false) {
     if (this.closed || this.busy || !this.snap) return;
     const j = this.job;
     if (j && !j.done) return;
@@ -535,6 +558,11 @@ export default class WorktreeRemove extends View {
     // ほかの小窓がこの space の仕事を始めていたら、その進み具合を出す (済んだ仕事は JOBS に残らない)
     if (this.attach(cx)) return;
     if (!j && this.blocker()) return;
+    // 開いてから文字のキーが届いた小窓の Enter では、止めることも、やり直すことも始めない (ボタンは押せる)
+    if (enter && this.typed) {
+      this.notice = TYPED_NOTICE;
+      return cx.notify();
+    }
     const i = j ? j.info : this.info;
     this.busy = true;
     this.notice = "";
@@ -614,7 +642,14 @@ export default class WorktreeRemove extends View {
 
   key(e, cx) {
     const k = e.key ?? "";
-    if (k !== "enter" && k !== "escape") return;
+    if (k !== "enter" && k !== "escape") {
+      // 字を打つキーは読み捨てるが、届いたことは覚える (この小窓では、この後の Enter で進めない。footer の一言も替える)
+      if (!this.typed && typedKey(e)) {
+        this.typed = true;
+        cx.notify();
+      }
+      return;
+    }
     cx.stop_propagation();
     if (e.is_held) return;
     if (k === "escape") {
@@ -625,7 +660,7 @@ export default class WorktreeRemove extends View {
       }
       return this.dismiss();
     }
-    this.go(cx);
+    this.go(cx, true);
   }
 
   render(cx) {
@@ -756,7 +791,7 @@ export default class WorktreeRemove extends View {
         return h_flex()
           .gap(8)
           .items_center()
-          .child(div().flex_1().text_size(11.5).text_color(t.dim).child("↵ やり直す · esc 閉じる"))
+          .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "字を打ったので ↵ では進めない · esc 閉じる" : "↵ やり直す · esc 閉じる"))
           .child(button("pwr-close", "閉じる", false, () => this.dismiss()))
           .child(button("pwr-retry", "やり直す", true, (cx) => this.go(cx)));
       }
@@ -765,7 +800,7 @@ export default class WorktreeRemove extends View {
       return h_flex()
         .gap(8)
         .items_center()
-        .child(div().flex_1().text_size(11.5).text_color(t.dim).child("↵ 止めて消す · esc 取り消す"))
+        .child(div().flex_1().text_size(11.5).text_color(t.dim).child(this.typed ? "字を打ったので ↵ では進めない · esc 取り消す" : "↵ 止めて消す · esc 取り消す"))
         .child(button("pwr-cancel", "取り消す", false, () => this.dismiss()))
         .child(button("pwr-go", "止めて消す", true, (cx) => this.go(cx)));
     };
