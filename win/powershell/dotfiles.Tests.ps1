@@ -72,12 +72,15 @@ Test-Case '--steps= の形の配列も , でつなぐ' 'check|--steps=files,ntn'
 Test-Case '配列でない引数はそのまま' 'apply|--dry-run' { (ConvertTo-DotfilesRunnerArgs -Arguments @('apply', '--dry-run')) -join '|' }
 Test-Case '引数が無ければ何も渡さない' 0 { @(ConvertTo-DotfilesRunnerArgs -Arguments @()).Count }
 
-# HOME を一時ディレクトリにした子の pwsh で dotfiles を打つ。cargo は打たれた場所と引数を出す偽物の関数
+# HOME を一時ディレクトリにした子の pwsh で dotfiles を打つ。cargo は打たれた場所と引数を出す偽物の関数。
+# Windows PowerShell 5.1 は $HOME を HOMEDRIVE と HOMEPATH から引くので、Windows ではその 2 つも一時ディレクトリにする。子の $HOME が一時ディレクトリで
+# なければ、何も流さずに止める (dotfiles は $HOME の下の clone を使い、--self-update はその clone を進めるので、本物の clone に触らない)
 function Invoke-Child {
     param([string]$TempHome, [string]$Command)
     $child = Join-Path $TempHome 'child.ps1'
     $body = @(
-        'param([string]$Dotfiles)'
+        'param([string]$Dotfiles, [string]$ExpectedHome)'
+        'if ($HOME -ne $ExpectedHome) { "home-mismatch=$HOME"; exit 99 }'
         '. $Dotfiles'
         'function cargo { "cwd=$((Get-Location).Path)"; "args=$($args -join ''|'')" }'
         "Set-Location -LiteralPath `$HOME"
@@ -86,15 +89,22 @@ function Invoke-Child {
         '"code=$LASTEXITCODE"'
     ) -join "`n"
     Set-Content -LiteralPath $child -Value $body -Encoding utf8
-    $saved = @{ HOME = $env:HOME; USERPROFILE = $env:USERPROFILE }
+    $saved = @{ HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; HOMEDRIVE = $env:HOMEDRIVE; HOMEPATH = $env:HOMEPATH }
     try {
         $env:HOME = $TempHome
         $env:USERPROFILE = $TempHome
+        if ([IO.Path]::DirectorySeparatorChar -eq '\') {
+            $drive = ([IO.Path]::GetPathRoot($TempHome)).TrimEnd('\')
+            $env:HOMEDRIVE = $drive
+            $env:HOMEPATH = $TempHome.Substring($drive.Length)
+        }
         $pwsh = (Get-Process -Id $PID).Path
-        & $pwsh -NoProfile -NonInteractive -File $child -Dotfiles $dotfiles 2>&1 | ForEach-Object { "$_" }
+        & $pwsh -NoProfile -NonInteractive -File $child -Dotfiles $dotfiles -ExpectedHome $TempHome 2>&1 | ForEach-Object { "$_" }
     } finally {
         $env:HOME = $saved.HOME
         $env:USERPROFILE = $saved.USERPROFILE
+        $env:HOMEDRIVE = $saved.HOMEDRIVE
+        $env:HOMEPATH = $saved.HOMEPATH
     }
 }
 
@@ -106,6 +116,7 @@ $withoutRunner = Join-Path ([IO.Path]::GetTempPath()) ("dotfiles-tests-" + [Guid
 $null = New-Item -ItemType Directory -Force -Path $withoutRunner
 try {
     $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles check --steps files,ntn')
+    Test-Case '子の pwsh の $HOME は一時ディレクトリ (本物の clone に触らない)' $false { [bool]($out | Where-Object { $_ -like 'home-mismatch=*' }) }
     Test-Case 'win/runner に入って cargo を打つ' "cwd=$runnerDir" { $out | Where-Object { $_ -like 'cwd=*' } }
     Test-Case 'cargo run --quiet --release --locked -- に引数を , でつないで渡す' 'args=run|--quiet|--release|--locked|--|check|--steps|files,ntn' { $out | Where-Object { $_ -like 'args=*' } }
     Test-Case '終わったら元の場所に戻る' "after=$withRunner" { $out | Where-Object { $_ -like 'after=*' } }

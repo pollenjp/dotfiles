@@ -296,12 +296,15 @@ if ($realGit.Count -eq 0) {
 
     # 子の pwsh で $Command を流す (HOME・USERPROFILE は fixture の home、NO_COLOR は 1)。cargo は、打たれた場所と引数を出して
     # -CargoExit を終了コードにする偽物の関数。$Command の中では $Script が script のパス、$Dotfiles が dotfiles.ps1 のパス。git に渡す
-    # 環境変数は印の値にしておき、戻したかを見る。-PathPrefix は PATH の前に足すディレクトリ (git を包む偽物)
+    # 環境変数は印の値にしておき、戻したかを見る。-PathPrefix は PATH の前に足すディレクトリ (git を包む偽物)。
+    # Windows PowerShell 5.1 は $HOME を HOMEDRIVE と HOMEPATH から引くので、Windows ではその 2 つも fixture の home にする。子の $HOME が fixture の
+    # home でなければ、何も流さずに止める (script は $HOME の下の clone を進めるので、本物の clone に触らない)
     function Invoke-SelfUpdateChild {
         param($Fixture, [string]$Command, [int]$CargoExit = 0, [string]$PathPrefix = '')
         $child = Join-Path $Fixture.Root 'child.ps1'
         $body = @(
-            'param([string]$Script, [string]$Dotfiles, [string]$PathPrefix)'
+            'param([string]$Script, [string]$Dotfiles, [string]$PathPrefix, [string]$ExpectedHome)'
+            'if ($HOME -ne $ExpectedHome) { "home-mismatch=$HOME"; exit 99 }'
             'if ($PathPrefix) { $env:PATH = $PathPrefix + [IO.Path]::PathSeparator + $env:PATH }'
             'function cargo { "cargo-cwd=$((Get-Location).Path)"; "cargo-args=$($args -join ''|'')"; $global:LASTEXITCODE = [int]$env:FAKE_CARGO_EXIT }'
             '$env:GIT_TERMINAL_PROMPT = ''sentinel-prompt'''
@@ -314,22 +317,32 @@ if ($realGit.Count -eq 0) {
             '"env-after=$env:GIT_TERMINAL_PROMPT $env:GCM_INTERACTIVE"'
         ) -join "`n"
         Set-Content -LiteralPath $child -Value $body -Encoding utf8
-        $saved = @{ HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; NO_COLOR = $env:NO_COLOR; FAKE_CARGO_EXIT = $env:FAKE_CARGO_EXIT }
+        $saved = @{
+            HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; HOMEDRIVE = $env:HOMEDRIVE; HOMEPATH = $env:HOMEPATH
+            NO_COLOR = $env:NO_COLOR; FAKE_CARGO_EXIT = $env:FAKE_CARGO_EXIT
+        }
         # Windows PowerShell 5.1 は外のコマンドに空の文字列の引数を渡さないので、空の -PathPrefix は渡さない。Stop のままだと、子の stderr の
         # 1 行目で止まる
         $ErrorActionPreference = 'Continue'
         try {
             $env:HOME = $Fixture.Home
             $env:USERPROFILE = $Fixture.Home
+            if ([IO.Path]::DirectorySeparatorChar -eq '\') {
+                $drive = ([IO.Path]::GetPathRoot($Fixture.Home)).TrimEnd('\')
+                $env:HOMEDRIVE = $drive
+                $env:HOMEPATH = $Fixture.Home.Substring($drive.Length)
+            }
             $env:NO_COLOR = '1'
             $env:FAKE_CARGO_EXIT = "$CargoExit"
-            $childArgs = @('-NoProfile', '-NonInteractive', '-File', $child, '-Script', $Script, '-Dotfiles', $dotfiles)
+            $childArgs = @('-NoProfile', '-NonInteractive', '-File', $child, '-Script', $Script, '-Dotfiles', $dotfiles, '-ExpectedHome', $Fixture.Home)
             if ($PathPrefix) { $childArgs += @('-PathPrefix', $PathPrefix) }
             $pwsh = (Get-Process -Id $PID).Path
             & $pwsh @childArgs 2>&1 | ForEach-Object { "$_" }
         } finally {
             $env:HOME = $saved.HOME
             $env:USERPROFILE = $saved.USERPROFILE
+            $env:HOMEDRIVE = $saved.HOMEDRIVE
+            $env:HOMEPATH = $saved.HOMEPATH
             $env:NO_COLOR = $saved.NO_COLOR
             $env:FAKE_CARGO_EXIT = $saved.FAKE_CARGO_EXIT
         }
@@ -382,6 +395,7 @@ if ($realGit.Count -eq 0) {
         $c1 = Add-RemoteCommit $fx 'claude-skills' 'README.md' "v2`n" 'skills 2'
         Write-TestFile (Join-Path (Join-Path $fx.Clones 'dotfiles-private') 'untracked.txt') "x`n"
         $out = @(Invoke-SelfUpdateChild -Fixture $fx -Command '& $Script')
+        Test-Case '子の pwsh の $HOME は一時の HOME (本物の clone に触らない)' '(home-mismatch= の行が無い)' { Get-ChildValue $out 'home-mismatch' }
         Test-Case '進める: 見出し' $heading { $out | Where-Object { $_ -clike '==> *' } }
         Test-Case '進める: dotfiles を 2 commit 進め、進めた commit を新しい順に出す' (@(
                 "✔ dotfiles (main): 2 commit 進めた ($(Get-Short $start['dotfiles']) → $(Get-Short $d2))"
