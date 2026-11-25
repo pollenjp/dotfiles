@@ -2255,7 +2255,8 @@ step_linger() {
   system_unit_can_sudo linger 'systemd の linger' || return 0
   if ! run sudo loginctl enable-linger "${user}"; then
     warn "${user} の linger を有効にできませんでした (sudo loginctl enable-linger ${user})。" \
-      "ログアウトすると herdr-core の server と user の service が止まります。端末から ~/dotfiles/setup --steps linger を打ち直してください。"
+      "ログアウトすると herdr-core の server と user の service が止まります。端末から ~/dotfiles/setup --steps linger を打ち直してください。" \
+      "sudo を使えないホストでは、そのホストの modules で dotfiles.linger.enable = false にしてください (この手順を飛ばすようになる)。"
     return 0
   fi
   [[ ${dry_run} == 1 ]] && return 0
@@ -2420,6 +2421,7 @@ post_notes() {
     else
       note '        --steps linger で有効にする (中で sudo を呼ぶ)。'
     fi
+    note '        要らないホスト (sudo を使えないホストも) は、そのホストの modules で dotfiles.linger.enable = false にする。'
   fi
   if is_selected bootstrap-mise; then
     extra=$(mise_extra_tools || true)

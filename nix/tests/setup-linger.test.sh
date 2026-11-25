@@ -17,14 +17,15 @@
 #   - Linger を読めない (logind がそのユーザーを知らず、loginctl show-user が落ちる) なら、yes でないとみなして有効にする
 #   - tools.linger が false なら、loginctl も sudo も呼ばずに「dotfiles.linger.enable が off なので飛ばします」と出し、結果に
 #     「↷ … (このホストでは off)」を出す (手で有効にした linger を外さない)。残りの手作業にも出さない
-#   - group.json が無い・tools.linger が無い (この手順を持つ世代へまだ switch していない) なら、loginctl も sudo も呼ばない
+#   - group.json が無い・tools.linger が無い (この手順を持つ世代へまだ switch していない) なら、loginctl も sudo も呼ばない。
+#     前の世代の group.json のまま --update --dry-run を流しても同じ
 #   - systemd が動いていない (/run/systemd/system が無い) なら呼び出しなしで、loginctl が PATH に無いなら sudo を呼ばずに飛ばす
 #   - NixOS (/etc/NIXOS がある) では loginctl enable-linger を打たず、残りの手作業に nixos-config の
-#     users.users.<名前>.linger = true; と nixos-rebuild switch を出す
+#     users.users.<名前>.linger = true; と nixos-rebuild switch と、止め方 (dotfiles.linger.enable = false) を出す
 #   - sudo がパスワードを訊けず端末も無ければ、打たずに 0 で終わり、残りの手作業に「linger が有効でない (Linger=no)」と
-#     --steps linger を出す
-#   - sudo loginctl enable-linger が落ちても手順は ✔ で終わり (後ろの手順を止めない)、警告のまとめに [linger] で出し、
-#     残りの手作業にも出す
+#     --steps linger と止め方を出す
+#   - sudo loginctl enable-linger が落ちても手順は ✔ で終わり (後ろの手順を止めない)、警告のまとめに [linger] で出し
+#     (sudo を使えないホストは dotfiles.linger.enable = false にする、とも出す)、残りの手作業にも出す
 #   - --dry-run では打つコマンド (+ sudo loginctl enable-linger …) を見せるだけで、sudo を呼ばない
 #   - 手順の並びで linger は switch の直後 (bootstrap の手順より前)。「既存マシン更新」(--update) にも同じ並びで入る
 #
@@ -259,8 +260,9 @@ group_json "${c}" "${on}"
 run "${c}" --steps linger
 notes=$(after_post_notes "${c}")
 if [[ $(rc "${c}") == 0 ]] && ! grep -q 'enable-linger' "${c}/state/calls" \
-  && grep -qF "users.users.${user}.linger = true;" <<<"${notes}" && grep -q 'nixos-rebuild switch' <<<"${notes}"; then
-  ok "NixOS では enable-linger を打たず、残りの手作業に nixos-config の users.users.<名前>.linger = true; を出す"
+  && grep -qF "users.users.${user}.linger = true;" <<<"${notes}" && grep -q 'nixos-rebuild switch' <<<"${notes}" \
+  && grep -qF 'dotfiles.linger.enable = false' <<<"${notes}"; then
+  ok "NixOS では enable-linger を打たず、残りの手作業に nixos-config の users.users.<名前>.linger = true; と止め方を出す"
 else
   ng "NixOS" "$(show "${c}")"
 fi
@@ -271,8 +273,9 @@ group_json "${c}" "${on}"
 FAKE_SUDO_ASKS=1 run "${c}" --steps linger
 notes=$(after_post_notes "${c}")
 if [[ $(rc "${c}") == 0 ]] && ! grep -q 'enable-linger' "${c}/state/calls" && grep -q 'sudo がパスワードを訊けない' "${c}/out" \
-  && grep -qF 'linger が有効でない (Linger=no)' <<<"${notes}" && grep -qF -- '--steps linger で有効にする' <<<"${notes}"; then
-  ok "sudo を訊けなければ打たずに 0 で終わり、残りの手作業にずれと --steps linger を出す"
+  && grep -qF 'linger が有効でない (Linger=no)' <<<"${notes}" && grep -qF -- '--steps linger で有効にする' <<<"${notes}" \
+  && grep -qF 'dotfiles.linger.enable = false' <<<"${notes}"; then
+  ok "sudo を訊けなければ打たずに 0 で終わり、残りの手作業にずれと --steps linger と止め方を出す"
 else
   ng "sudo を訊けない" "$(show "${c}")"
 fi
@@ -284,8 +287,9 @@ FAKE_ENABLE_FAIL=1 run "${c}" --steps linger
 notes=$(after_post_notes "${c}")
 if [[ $(rc "${c}") == 0 ]] && grep -qF "✔ ${label}" "${c}/out" \
   && grep -qF "[linger] ${user} の linger を有効にできませんでした" "${c}/out" \
+  && grep -qF 'sudo を使えないホストでは、そのホストの modules で dotfiles.linger.enable = false' "${c}/err" \
   && grep -qF 'linger が有効でない (Linger=no)' <<<"${notes}"; then
-  ok "enable-linger が落ちても手順は ✔ で、警告のまとめに [linger] で出し、残りの手作業にも出す"
+  ok "enable-linger が落ちても手順は ✔ で、警告のまとめに [linger] で出し (sudo を使えないホストの止め方も)、残りの手作業にも出す"
 else
   ng "打てない" "$(show "${c}")"
 fi
@@ -313,6 +317,8 @@ else
   ng "手順の並び" "${listed}"
 fi
 
+# 前の世代の group.json (tools.linger が無い) のまま --update --dry-run を流す
+group_json "${c}" '"herdrCore":true'
 run "${c}" --update --dry-run --host testhost
 planned=$(sed -n '/^==> 実行する手順/,/^$/p' "${c}/out")
 switch_n=$(grep -n '\. home-manager switch$' <<<"${planned}" | cut -d: -f1)
@@ -321,6 +327,11 @@ if [[ -n ${switch_n} && -n ${linger_n} ]] && ((switch_n + 1 == linger_n)); then
   ok "既存マシン更新 (--update) にも、switch の直後に入る"
 else
   ng "--update の並び" "$(show "${c}")"
+fi
+if [[ ! -s ${c}/state/calls ]] && grep -q 'まだ switch していない' "${c}/out"; then
+  ok "前の世代の group.json のまま --update --dry-run を流しても、loginctl も sudo も呼ばない"
+else
+  ng "--update --dry-run (前の世代)" "$(show "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

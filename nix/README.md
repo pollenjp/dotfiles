@@ -5863,7 +5863,8 @@ Windows の herdr-app は、linger の無い Linux のホストを machine add �
 - 手順は bootstrap の前に走るので、`bootstrap-t3-code.sh` が同じ実行の中で linger を確かめるときには揃っている
 - WSL でも既定で有効にする。WSL の distro は、wsl.exe から入った会話の process が無くなると止まり、user manager はそれに数えないので、
   linger で distro が止まらなくなることは無い
-- 要らないホストは、そのホストの modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする:
+- 要らないホストと、sudo を使えないホスト (sudoers に居ないユーザー。訊かれたパスワードが通らず、`--update` のたびに落ちる) は、そのホストの
+  modules (dotfiles-private に登録したファイルか、ローカル flake の tmp) で false にする (警告と「残りの手作業」もそう案内する):
 
   ```nix
   modules = [ { dotfiles.linger.enable = false; } ];
