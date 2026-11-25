@@ -1,14 +1,14 @@
 name: winget-versions
 
-# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf と、bootstrap が入れる
-# Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる (TKT-110・TKT-156)。
+# Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship と、bootstrap が
+# 入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる (TKT-110・TKT-156)。
 # 固定した版は win/<名前>/Install-*.ps1 の -Version の既定値 (bootstrap の 4 つは win/bootstrap/Install-Bootstrap.ps1 の
 # -GitVersion などの既定値)。
 #
 # 新しい版が出ても、手元では setup --update の ※ の 1 行でしか見えず、流さない間は気付けない。
 # そこで週 1 回ここで確かめ、固定した版より新しい版 (見送りの一覧に無いもの) が出て 30 日たつと
 # 落ちて知らせる。30 日の間は落ちず、版・出た日・あと何日で知らせるかを ::notice の行と summary に出す。
-# 出た日は、OpenSSH・herdr・Claude Code は GitHub の release、Google 日本語入力・ntn・Tailscale・ghq・fzf は winget-pkgs に載った日
+# 出た日は、OpenSSH・herdr・Claude Code は GitHub の release、Google 日本語入力・ntn・Tailscale・ghq・fzf・starship は winget-pkgs に載った日
 # (nix/scripts/check-winget-version.sh の先頭)。GitHub に出た版が 30 日たっても winget に載らないとき
 # (パッケージ ID が移ったなど)・固定した版やパッケージが winget に無いときと、確かめられなかったとき
 # (API の失敗など) も落ちる。何で落ちたかは summary と ::error の行に出る。
@@ -46,6 +46,8 @@ on:
       - "win/ghq/skipped-versions.txt"
       - "win/fzf/Install-Fzf.ps1"
       - "win/fzf/skipped-versions.txt"
+      - "win/starship/Install-Starship.ps1"
+      - "win/starship/skipped-versions.txt"
       - "win/bootstrap/Install-Bootstrap.ps1"
       - "win/bootstrap/skipped-versions/**"
       - "nix/scripts/check-winget-version.sh"
@@ -103,6 +105,11 @@ jobs:
             title: Windows の fzf
             section: ghq・fzf の新しい版が出たとき
             anchor: ghqfzf-の新しい版が出たとき
+          # プロンプト (Windows の runner が入れる。$PROFILE の init の 1 行も runner が足す)
+          - package: starship
+            title: Windows の starship
+            section: starship の新しい版が出たとき
+            anchor: starship-の新しい版が出たとき
           # bootstrap (win/bootstrap/Install-Bootstrap.ps1) が入れる 4 つ。手順の節は 1 つにまとめてある
           - package: git
             title: Windows の Git for Windows

@@ -1,4 +1,5 @@
-//! winget で入れるもの (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf と、bootstrap の git・gh・vs-buildtools・rustup) の、
+//! winget で入れるもの (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship と、bootstrap の git・gh・vs-buildtools・
+//! rustup) の、
 //! 固定した版より新しい版。WSL の `nix/scripts/check-winget-version.sh --json` (出た日を引かない形。setup が使うもの) を写した: ps1 から固定した版と
 //! パッケージ ID を、隣の見送りの一覧から見送った版を読み、winget-pkgs の manifest のディレクトリの一覧 (`gh api repos/microsoft/winget-pkgs/contents/…`)
 //! の版のうち固定した版より新しいものを、古い順に出す。確かめられなければ、WSL の口が stderr に出す行を返す (文も同じ)。
@@ -137,6 +138,18 @@ pub const SPECS: &[WingetSpec] = &[
         version_parts: PARTS_3,
         pinned_parts: None,
         version_example: "0.75.0",
+        nested_dirs: &[],
+    },
+    WingetSpec {
+        name: "starship",
+        title: "Windows の starship",
+        ps1: "win/starship/Install-Starship.ps1",
+        skipped: "win/starship/skipped-versions.txt",
+        version_param: "Version",
+        id_var: "packageId",
+        version_parts: PARTS_3,
+        pinned_parts: None,
+        version_example: "1.27.0",
         nested_dirs: &[],
     },
     WingetSpec {

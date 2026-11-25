@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -69,11 +69,12 @@
 #   - --json --offline は、パッケージ ID Tailscale.Tailscale と出た日の取り方 winget を出す
 #   - 固定した版は X.Y.Z だけを受ける (Install-Tailscale.ps1 の読める形。4 つ区切りなら gh を呼ばずに exit 2)
 #
-#   ghq・fzf (出た日は winget-pkgs に載った日):
-#   - Install-Ghq.ps1・Install-Fzf.ps1 の形から読み、winget-pkgs の manifests/x/x-motemen/ghq・manifests/j/junegunn/fzf を見る。GitHub の
-#     release は引かない (どちらも winget に載らない GitHub の release を出すので、比べない)
-#   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL と手順の節 (ghq・fzf の新しい版が出たとき) を添える
-#   - --json --offline は、パッケージ ID (x-motemen.ghq・junegunn.fzf) と出た日の取り方 winget を出す
+#   ghq・fzf・starship (出た日は winget-pkgs に載った日):
+#   - Install-Ghq.ps1・Install-Fzf.ps1・Install-Starship.ps1 の形から読み、winget-pkgs の manifests/x/x-motemen/ghq・manifests/j/junegunn/fzf・
+#     manifests/s/Starship/Starship を見る。GitHub の release は引かない (どれも winget に載らない GitHub の release を出すので、比べない)
+#   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL と手順の節 (ghq・fzf の新しい版が出たとき・starship の
+#     新しい版が出たとき) を添える
+#   - --json --offline は、パッケージ ID (x-motemen.ghq・junegunn.fzf・Starship.Starship) と出た日の取り方 winget を出す
 #
 #   bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
 #   - 名前ごとの param (-GitVersion・-GhVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
@@ -187,6 +188,7 @@ manifest_dir_of() {
     tailscale) echo manifests/t/Tailscale/Tailscale ;;
     ghq) echo manifests/x/x-motemen/ghq ;;
     fzf) echo manifests/j/junegunn/fzf ;;
+    starship) echo manifests/s/Starship/Starship ;;
     git) echo manifests/g/Git/Git ;;
     gh) echo manifests/g/GitHub/cli ;;
     vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
@@ -203,6 +205,7 @@ ps1_of() {
     tailscale) echo Install-Tailscale.ps1 ;;
     ghq) echo Install-Ghq.ps1 ;;
     fzf) echo Install-Fzf.ps1 ;;
+    starship) echo Install-Starship.ps1 ;;
     git | gh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
@@ -625,6 +628,7 @@ new_case() {
     tailscale) write_tailscale_ps1 "${d}/Install-Tailscale.ps1" "$2" "${id:-Tailscale.Tailscale}" ;;
     ghq) write_portable_ps1 "${d}/Install-Ghq.ps1" "$2" "${id:-x-motemen.ghq}" Ghq ;;
     fzf) write_portable_ps1 "${d}/Install-Fzf.ps1" "$2" "${id:-junegunn.fzf}" Fzf ;;
+    starship) write_portable_ps1 "${d}/Install-Starship.ps1" "$2" "${id:-Starship.Starship}" Starship ;;
     git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
     gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
     vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
@@ -1519,14 +1523,16 @@ else
   ng "tailscale: 4 つ区切りの固定した版" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-echo "-- ghq・fzf"
+echo "-- ghq・fzf・starship"
 
-# 名前|固定した版|新しい版|manifest のディレクトリ (manifests/ の後ろ)|パッケージ ID|固定した版より古い版 (空白区切り)。2026-11-23 の
-# winget-pkgs の manifests/x/x-motemen/ghq (1.9.x・1.10.0・1.11.x は無い) と manifests/j/junegunn/fzf の新しい方
+# 名前|固定した版|新しい版|manifest のディレクトリ (manifests/ の後ろ)|パッケージ ID|固定した版より古い版 (空白区切り)|手順の節。2026-11-23 の
+# winget-pkgs の manifests/x/x-motemen/ghq (1.9.x・1.10.0・1.11.x は無い) と manifests/j/junegunn/fzf の新しい方、2026-11-25 の
+# manifests/s/Starship/Starship の新しい方
 for spec in \
-  'ghq|1.12.0|1.12.1|x/x-motemen/ghq|x-motemen.ghq|1.7.1 1.8.0 1.10.1' \
-  'fzf|0.75.0|0.76.0|j/junegunn/fzf|junegunn.fzf|0.74.3 0.74.4 0.74.5'; do
-  IFS='|' read -r pkg p_pin p_next p_dir p_id p_old <<<"${spec}"
+  'ghq|1.12.0|1.12.1|x/x-motemen/ghq|x-motemen.ghq|1.7.1 1.8.0 1.10.1|ghq・fzf の新しい版が出たとき' \
+  'fzf|0.75.0|0.76.0|j/junegunn/fzf|junegunn.fzf|0.74.3 0.74.4 0.74.5|ghq・fzf の新しい版が出たとき' \
+  'starship|1.27.0|1.28.0|s/Starship/Starship|Starship.Starship|1.25.0 1.25.1 1.26.0|starship の新しい版が出たとき'; do
+  IFS='|' read -r pkg p_pin p_next p_dir p_id p_old p_section <<<"${spec}"
   read -r -a p_olds <<<"${p_old}"
   p_winget_now=$(contents_json "${p_olds[@]}" "${p_pin}")
   p_winget_next=$(contents_json "${p_olds[@]}" "${p_pin}" "${p_next}")
@@ -1559,7 +1565,7 @@ for spec in \
   FAKE_GH_CONTENTS="${p_winget_next}" run "${d}" 0
   if [[ $(rc "${d}") == 1 ]] && seen "${d}" "⚠ 固定した版 ${p_pin//./\\.} より新しい版が winget にある: ${p_next//./\\.}" \
     && seen "${d}" -F "https://github.com/microsoft/winget-pkgs/tree/master/manifests/${p_dir}/${p_next}" \
-    && seen "${d}" -F 'ghq・fzf の新しい版が出たとき' && seen "${d}" -F 'skipped-versions.txt'; then
+    && seen "${d}" -F "${p_section}" && seen "${d}" -F 'skipped-versions.txt'; then
     ok "${pkg}: 新しい版が載って 31 日なら exit 1 で、manifest の URL と手順の節と見送りの一覧の場所を出す"
   else
     ng "${pkg}: 猶予がたった" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -1569,9 +1575,9 @@ for spec in \
   d=$(new_case "pf4-${pkg}" "${p_pin}" -)
   run_args "${d}" 1 --json --offline "${pkg}" "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt"
   if [[ $(rc "${d}") == 0 ]] && ! gh_called "${d}" \
-    && jq -e --arg name "${pkg}" --arg id "${p_id}" --arg pin "${p_pin}" \
+    && jq -e --arg name "${pkg}" --arg id "${p_id}" --arg pin "${p_pin}" --arg section "${p_section}" \
       '.name == $name and .title == "Windows の \($name)" and .packageId == $id and .pinned == $pin
-      and .datesFrom == "winget" and .readmeSection == "ghq・fzf の新しい版が出たとき"' "${d}/out" >/dev/null; then
+      and .datesFrom == "winget" and .readmeSection == $section' "${d}/out" >/dev/null; then
     ok "${pkg}: --json --offline は gh を呼ばずに、ID・固定した版・出た日の取り方 (winget)・手順の節を出す"
   else
     ng "${pkg}: --json --offline" "rc=$(rc "${d}") $(outerr "${d}")"
@@ -1890,6 +1896,7 @@ for spec in \
   'tailscale|win/tailscale|1.104.5|1.104.6' \
   'ghq|win/ghq|1.12.0|1.12.1' \
   'fzf|win/fzf|0.75.0|0.76.0' \
+  'starship|win/starship|1.27.0|1.28.0' \
   'git|win/bootstrap|2.56.0.4|2.56.1' \
   'gh|win/bootstrap|2.103.3|2.104.0' \
   'vs-buildtools|win/bootstrap|17.14.44|17.14.45' \
