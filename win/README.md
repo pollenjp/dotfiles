@@ -4095,6 +4095,8 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
   `winget upgrade --all` に MSIX を上げさせない)。Claude Desktop の自動更新は止めない (`disableAutoUpdates` は書かない)
 - `-Check` は Cowork の常駐の有無と状態 (`Get-Service CoworkVMService`)、仮想マシン プラットフォームの on・off (`Win32_OptionalFeature` の `InstallState`。
   管理者の権限は要らない) も出す。どちらも知らせるだけで、終了コードには数えない
+- `-Check` は Claude の設定の「システムトレイ」と「スタートアップ時に実行」も見張り、on なら ⚠ と直し方を出して終了コードを 1 にする (設定は書き換え
+  ない。[システムトレイとスタートアップ時に実行](#システムトレイとスタートアップ時に実行))
 - false に戻しても runner は消さない (見なくなるだけ)。消すなら Claude を終えてから (☰ > File > Exit)、PowerShell で
   `winget pin remove --id Anthropic.Claude --exact` の後に `winget uninstall --id Anthropic.Claude --exact` を打つ
 
@@ -4102,12 +4104,12 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
 
 | 打つもの | すること |
 | --- | --- |
-| `dotfiles apply --steps claude-desktop` | 入っていなければ MSIX を入れる (UAC の確認が 1 回出る。SSH の会話では出せないので、デスクトップの端末で流す)。入っていれば上げない (古ければ知らせる)。旧来の exe の Claude が残っていれば、入れずに外し方を出す |
-| `Install-ClaudeDesktop -Check` (PowerShell) | 固定した版との差を出すだけ。揃っていれば (入っている版の方が新しいときも) 終了コード 0、差があれば 1、入っていなければ 3。旧来の exe の Claude が残っていれば、入っていなくても 1 |
+| `dotfiles apply --steps claude-desktop` | 入っていなければ MSIX を入れる (UAC の確認が 1 回出る。SSH の会話では出せないので、デスクトップの端末で流す)。入っていれば上げない (古ければ知らせる)。旧来の exe の Claude が残っていれば、入れずに外し方を出す。システムトレイ・スタートアップ時に実行が on なら ⚠ で知らせる (書き換えない) |
+| `Install-ClaudeDesktop -Check` (PowerShell) | 固定した版との差を出すだけ。揃っていれば (入っている版の方が新しいときも) 終了コード 0、差があれば 1、入っていなければ 3。旧来の exe の Claude が残っていれば、入っていなくても 1。システムトレイかスタートアップ時に実行が on なら、版が揃っていても 1 |
 | `Install-ClaudeDesktop` (PowerShell) | 揃える (入れる・古ければ上げる・pin を足す)。入れる・上げるときは UAC の確認が 1 回出る (上げるときは先に Claude を終える) |
 
-入れた後に手でするもの (dotfiles は扱わない): スタートメニューの Claude を開いてサインインする。Cowork は Claude の中で始める (初めて使うときに、
-Cowork の workspace (VM) を落とす)。
+入れた後に手でするもの (dotfiles は扱わない): スタートメニューの Claude を開いてサインインし、設定 > デスクトップアプリ の「システムトレイ」を off に
+する (既定で on)。Cowork は Claude の中で始める (初めて使うときに、Cowork の workspace (VM) を落とす)。
 
 #### 旧来の exe の Claude
 
@@ -4132,6 +4134,22 @@ off なら ps1 が ※ の行で、runner が `·` の行 (終了コードに数
 `Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All` を打ち、Windows を再起動する (シャットダウンでなく再起動。高速
 スタートアップでは仮想化の機能が起きないことがある)。
 
+#### システムトレイとスタートアップ時に実行
+
+Claude の設定 > デスクトップアプリ の「システムトレイ」(Claude をシステムトレイで実行し続ける) と「スタートアップ時に実行」(Windows にサインイン
+したときに Claude を起こす) は off にしておく。システムトレイが on だと、窓を閉じても Claude は終わらずにトレイで動き続ける (開いていないつもりでも、
+リモートから操作できるまま)。ps1 は MSIX が入っているときにこの 2 つを読み、on なら ⚠ の行と直し方 (その切り替えを off にする) を出して、版と pin が
+揃っていても終了コードを 1 にする。runner も直すことがある行 (⚠) で知らせ、何も打たない。
+
+- dotfiles は設定を書き換えない (システムトレイの値は、開いている Claude が自分で書き直すファイルにある)
+- システムトレイ: `%LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\claude_desktop_config.json` (`claude_pzs8sxrjxfjjc`) の
+  `preferences.menuBarEnabled`。値もファイルも無ければ、Claude の既定の on として ⚠ にする (入れた直後は、Claude を開いてから off にする)。同じ folder の
+  `config.json` (サインインの token を持つ) は読まない
+- スタートアップ時に実行: MSIX の startup task `ClaudeStartup` の状態。
+  `HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\Claude_pzs8sxrjxfjjc\ClaudeStartup` の `State`
+  (`StartupTaskState` と同じ数で、2 と 4 が on)。鍵か値が無ければ、manifest の既定の off
+- 読めないとき (JSON が壊れている・知らない値) は「不明」と出して ⚠ にしない (Claude の設定画面で確かめる)
+
 ### Claude Desktop の新しい版が出たとき
 
 新しい版の知らせ (`pin-updates`・`winget-versions`) には載せていない (T3 Code と同じ)。Claude Desktop は入れた後に自分で上がり (約 4 時間ごと)、
@@ -4149,13 +4167,14 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-desktop/Install
 ### Install-ClaudeDesktop.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (版の読み方・`Get-AppxPackage` の行の読み方と選び方・plan・winget の引数・状態の表・締めの行・昇格した側に渡す本文) は
-  `Install-ClaudeDesktop.Tests.ps1` で確かめる。昇格した側に渡す本文は、偽の winget を置いて今の PowerShell で実際に流し、出力と終了コードを読めるかを
+- 副作用の無い関数 (版の読み方・`Get-AppxPackage` の行の読み方と選び方・plan・winget の引数・システムトレイとスタートアップ時に実行の読み方・状態の表・
+  締めの行・昇格した側に渡す本文) は `Install-ClaudeDesktop.Tests.ps1` で確かめる。昇格した側に渡す本文は、偽の winget を置いて今の PowerShell で実際に流し、出力と終了コードを読めるかを
   確かめる (昇格はしない)。入れる流れ (`Invoke-InstallClaudeDesktop`) は、Windows に触る関数を同じ名前の偽物に差し替えて流し、打つ winget・昇格・締めの行・
   終了コードを確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない)
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`Claude Desktop (winget の Anthropic.Claude`) と印 (`winget show --versions に無い`・
-  `比べられない`・`UAC の確認を断った`・`旧来の exe の Claude が残っている`・`仮想マシン プラットフォーム (VirtualMachinePlatform) が off`) で分かれる。
-  変えるときは向こうも直す (runner の試験が、ps1 のコメントでない行にこれらの印があるかを突き合わせる)
+  `比べられない`・`UAC の確認を断った`・`旧来の exe の Claude が残っている`・`仮想マシン プラットフォーム (VirtualMachinePlatform) が off`・
+  `Claude Desktop のシステムトレイが on`・`Claude Desktop のスタートアップ時に実行が on`) で分かれる。変えるときは向こうも直す (runner の試験が、ps1 の
+  コメントでない行にこれらの印があるかを突き合わせる)
 - winget・Appx・サービス・レジストリ・UAC に触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## sshd

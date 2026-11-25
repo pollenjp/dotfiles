@@ -67,9 +67,18 @@ function New-State {
         VmPlatform    = 'on'
         Legacy        = $false
         LegacyVersion = $null
+        Tray          = 'off'
+        Startup       = 'off'
     }
     foreach ($k in $Values.Keys) { $base[$k] = $Values[$k] }
     [pscustomobject]$base
+}
+
+# 項目の並びを 1 つの字にする (空なら -。何も返さない関数の結果は、引数に渡すと $null 1 つになるので除く)
+function Show-List {
+    param($Items)
+    $a = @($Items | Where-Object { $null -ne $_ })
+    if ($a.Count -gt 0) { $a -join '+' } else { '-' }
 }
 
 # ConvertTo-ClaudeDesktopVersion
@@ -153,10 +162,24 @@ Test-Case '新しくて pin があれば 0' 0 { Get-ClaudeDesktopExitCode -State
 Test-Case '同じでも pin が無ければ 1' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Pinned = $false }) }
 Test-Case '古ければ 1' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Plan = 'upgrade' }) }
 Test-Case '揃っていても旧来の exe の Claude が残っていれば 1' 1 { Get-ClaudeDesktopExitCode -State (New-State @{ Legacy = $true }) }
-Test-Case '残りが旧来の exe の Claude だけなら LegacyOnly' @($true, $false, $false) {
-    Test-ClaudeDesktopLegacyOnly -State (New-State @{ Legacy = $true })
-    Test-ClaudeDesktopLegacyOnly -State (New-State @{ Legacy = $true; Pinned = $false })
-    Test-ClaudeDesktopLegacyOnly -State (New-State)
+Test-Case 'システムトレイかスタートアップ時に実行が on なら、ほかが揃っていても 1 (不明・既定の off は数えない)' @(1, 1, 1, 1, 0, 0) {
+    Get-ClaudeDesktopExitCode -State (New-State @{ Tray = 'on' })
+    Get-ClaudeDesktopExitCode -State (New-State @{ Tray = 'unset' })
+    Get-ClaudeDesktopExitCode -State (New-State @{ Tray = 'unopened'; Plan = 'newer' })
+    Get-ClaudeDesktopExitCode -State (New-State @{ Startup = 'on' })
+    Get-ClaudeDesktopExitCode -State (New-State @{ Tray = 'unknown'; Startup = 'unknown' })
+    Get-ClaudeDesktopExitCode -State (New-State @{ Startup = 'unset' })
+}
+Test-Case '入っていなければ、設定によらず 3 (runner が入れにいく)' 3 {
+    Get-ClaudeDesktopExitCode -State (New-State @{ Exists = $false; Plan = 'install'; Pinned = $false; Tray = 'on'; Startup = 'on' })
+}
+Test-Case '残りが人の直すもの (旧来の exe の Claude・on の設定) だけなら ManualOnly' @($true, $true, $true, $false, $false, $false) {
+    Test-ClaudeDesktopManualOnly -State (New-State @{ Legacy = $true })
+    Test-ClaudeDesktopManualOnly -State (New-State @{ Tray = 'on' })
+    Test-ClaudeDesktopManualOnly -State (New-State @{ Startup = 'on'; Legacy = $true })
+    Test-ClaudeDesktopManualOnly -State (New-State @{ Tray = 'on'; Pinned = $false })
+    Test-ClaudeDesktopManualOnly -State (New-State @{ Legacy = $true; Pinned = $false })
+    Test-ClaudeDesktopManualOnly -State (New-State)
 }
 
 # Get-ClaudeDesktopApplyBlocker
@@ -180,6 +203,65 @@ Test-Case 'InstallState 1 は on・2 と 3 は off・ほかは unknown' @('on', 
     ConvertFrom-VmPlatformState -InstallState $null
 }
 
+# Get-ClaudeDesktopConfigPath
+Test-Case '設定のファイルは %LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\claude_desktop_config.json' 'C:\Users\a\AppData\Local\Claude-Data\claude_pzs8sxrjxfjjc\claude_desktop_config.json' {
+    Get-ClaudeDesktopConfigPath -LocalAppData 'C:\Users\a\AppData\Local' -FamilyName $Family
+}
+Test-Case '%LOCALAPPDATA% が空なら、設定のファイルの場所も空' '' { Get-ClaudeDesktopConfigPath -LocalAppData '' -FamilyName $Family }
+
+# ConvertFrom-ClaudeTrayConfig
+Test-Case 'システムトレイ: preferences.menuBarEnabled の true は on・false は off (ほかの鍵は見ない)' @('on', 'off') {
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"sidebarMode":"chat","menuBarEnabled":true}}'
+    ConvertFrom-ClaudeTrayConfig -Text "{`r`n  `"coworkUserFilesPath`": `"C:\\x`",`r`n  `"preferences`": {`r`n    `"menuBarEnabled`": false`r`n  }`r`n}"
+}
+Test-Case 'システムトレイ: 値が無ければ unset (Claude の既定の on)・設定のファイルが無ければ unopened' @('unset', 'unset', 'unset', 'unset', 'unopened') {
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"sidebarMode":"chat"}}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{}}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"mcpServers":{}}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":null}'
+    ConvertFrom-ClaudeTrayConfig -Text $null
+}
+Test-Case 'システムトレイ: 鍵の大文字小文字は Claude と同じく区別する (Preferences・MenuBarEnabled は値が無いのと同じ)' @('unset', 'unset') {
+    ConvertFrom-ClaudeTrayConfig -Text '{"Preferences":{"menuBarEnabled":false}}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"MenuBarEnabled":false}}'
+}
+Test-Case 'システムトレイ: 読めない JSON・オブジェクトでないもの・真偽値でない値は unknown' @('unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown') {
+    ConvertFrom-ClaudeTrayConfig -Text ''
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"menuBarEnabled":fal'
+    ConvertFrom-ClaudeTrayConfig -Text 'null'
+    ConvertFrom-ClaudeTrayConfig -Text '[1,2]'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":[1]}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"menuBarEnabled":"false"}}'
+    ConvertFrom-ClaudeTrayConfig -Text '{"preferences":{"menuBarEnabled":null}}'
+}
+
+# ConvertFrom-ClaudeStartupTaskState
+Test-Case 'スタートアップ: State の 2 (Enabled)・4 (EnabledByPolicy) は on、0・1・3 は off、無ければ unset、ほかは unknown' @('off', 'off', 'on', 'off', 'on', 'unset', 'unknown', 'unknown') {
+    ConvertFrom-ClaudeStartupTaskState -State 0
+    ConvertFrom-ClaudeStartupTaskState -State 1
+    ConvertFrom-ClaudeStartupTaskState -State 2
+    ConvertFrom-ClaudeStartupTaskState -State 3
+    ConvertFrom-ClaudeStartupTaskState -State 4
+    ConvertFrom-ClaudeStartupTaskState -State $null
+    ConvertFrom-ClaudeStartupTaskState -State 5
+    ConvertFrom-ClaudeStartupTaskState -State 'x'
+}
+
+# Get-ClaudeDesktopOnSettings
+Test-Case 'on の設定: システムトレイは on・unset・unopened、スタートアップ時に実行は on (off・不明・既定の off は数えない)' @('-', 'tray', 'tray', 'tray', '-', 'startup', '-', 'tray+startup') {
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Tray = 'on' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Tray = 'unset' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Tray = 'unopened' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Tray = 'unknown'; Startup = 'unknown' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Startup = 'on' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Startup = 'unset' }))
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Tray = 'on'; Startup = 'on' }))
+}
+Test-Case 'on の設定: MSIX が入っていなければ数えない' '-' {
+    Show-List (Get-ClaudeDesktopOnSettings -State (New-State @{ Exists = $false; Plan = 'install'; Tray = 'on'; Startup = 'on' }))
+}
+
 # Format-ClaudeDesktopLabel
 Test-Case '見出しは表示の幅 (全角を 2) でそろえる' @('[abc  ]', '[仮想マシン プラットフォーム ]', '[長すぎる見出し]') {
     "[$(Format-ClaudeDesktopLabel -Label 'abc' -Width 5)]"
@@ -195,9 +277,46 @@ Test-Case '状態の表: 見出し・揃っている行・winget の新しい版
     "  winget の最新版$(' ' * 13): 6.28899.6"
     "  winget pin$(' ' * 18): あり"
     "  Cowork の常駐$(' ' * 15): CoworkVMService (Running)"
+    "  システムトレイ$(' ' * 14): off"
+    "  スタートアップ時に実行$(' ' * 6): off"
     '  仮想マシン プラットフォーム : on'
     '※ winget に固定した版より新しい 6.28899.6 がある。上げるなら Install-ClaudeDesktop.ps1 の -Version の既定値を変える (7 日の猶予を過ぎた版。入っている Claude Desktop は、自動更新で自分で上がる)'
 ) { (Format-ClaudeDesktopState -State (New-State) -Target $V).Text }
+Test-Case '状態の表: システムトレイ・スタートアップ時に実行が on なら ⚠ の行 (Warn はその 2 行だけ) と、わけの ※ を 1 行ずつ' @(
+    "⚠ システムトレイ$(' ' * 14): on → 設定 > デスクトップアプリ で off にする"
+    "⚠ スタートアップ時に実行$(' ' * 6): on → 設定 > デスクトップアプリ で off にする"
+    1
+    1
+) {
+    $rows = @(Format-ClaudeDesktopState -State (New-State @{ Tray = 'on'; Startup = 'on' }) -Target $V)
+    @($rows | Where-Object { $_.Warn }).Text
+    @($rows | Where-Object { $_.Text.StartsWith('※ システムトレイが on だと') }).Count
+    @($rows | Where-Object { $_.Text.StartsWith('※ スタートアップ時に実行が on だと') }).Count
+}
+Test-Case '状態の表: システムトレイの値が無ければ既定の on (⚠)。設定のファイルが無ければ、Claude を開いてから off にすると出す' @(
+    "⚠ システムトレイ$(' ' * 14): on (既定のまま) → 設定 > デスクトップアプリ で off にする"
+    "⚠ システムトレイ$(' ' * 14): on (既定。設定のファイルがまだ無い) → Claude を開いたら、設定 > デスクトップアプリ で off にする"
+) {
+    @((Format-ClaudeDesktopState -State (New-State @{ Tray = 'unset' }) -Target $V) | Where-Object { $_.Warn }).Text
+    @((Format-ClaudeDesktopState -State (New-State @{ Tray = 'unopened' }) -Target $V) | Where-Object { $_.Warn }).Text
+}
+Test-Case '状態の表: 設定が読めなければ不明と出して ⚠ にせず、確かめ方の ※ を 1 行ずつ。スタートアップの鍵が無ければ既定の off' @(
+    "  システムトレイ$(' ' * 14): 不明 (claude_desktop_config.json が読めない)"
+    "  スタートアップ時に実行$(' ' * 6): 不明 (startup task の State が読めない)"
+    0
+    2
+    "  スタートアップ時に実行$(' ' * 6): off (既定)"
+) {
+    $rows = @(Format-ClaudeDesktopState -State (New-State @{ Tray = 'unknown'; Startup = 'unknown' }) -Target $V)
+    @($rows | Where-Object { $_.Text.StartsWith('  システムトレイ') -or $_.Text.StartsWith('  スタートアップ') }).Text
+    @($rows | Where-Object { $_.Warn }).Count
+    @($rows | Where-Object { $_.Text.StartsWith('※ ') -and $_.Text.Contains('Claude の設定 > デスクトップアプリ で確かめる') }).Count
+    @((Format-ClaudeDesktopState -State (New-State @{ Startup = 'unset' }) -Target $V) | Where-Object { $_.Text.StartsWith('  スタートアップ') }).Text
+}
+Test-Case '状態の表: 入っていなければシステムトレイ・スタートアップ時に実行の行も ※ も出さない' 0 {
+    $missing = New-State @{ Exists = $false; Plan = 'install'; Installed = $null; InstalledText = $null; Location = $null; Pinned = $false; Service = $null; Tray = $null; Startup = $null }
+    @((Format-ClaudeDesktopState -State $missing -Target $V) | Where-Object { $_.Text.Contains('システムトレイ') -or $_.Text.Contains('スタートアップ') }).Count
+}
 Test-Case '状態の表: pin が無い行だけ ⚠ (Warn)' @("⚠ winget pin$(' ' * 18): 無し → 足す") {
     @((Format-ClaudeDesktopState -State (New-State @{ Pinned = $false }) -Target $V) | Where-Object { $_.Warn }).Text
 }
@@ -290,6 +409,30 @@ Test-Case '締めの行: 揃っていれば Warn でない・ほかは Warn' @($
     (Get-ClaudeDesktopVerdict -State (New-State) -Code 0 -Blocker $null -Target $V -PackageId $Id).Warn
     (Get-ClaudeDesktopVerdict -State (New-State @{ Legacy = $true }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Warn
 }
+$trayVerdict = '⚠️ Claude Desktop のシステムトレイが on → Claude の設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+$trayUnopenedVerdict = '⚠️ Claude Desktop のシステムトレイが on (既定) → Claude を開いたら、設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+$startupVerdict = '⚠️ Claude Desktop のスタートアップ時に実行が on → Claude の設定 > デスクトップアプリ の「スタートアップ時に実行」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+Test-Case '締めの行: MSIX の側が揃っていて設定だけが on なら、設定の行だけ (トレイ・スタートアップの順。どれも Warn)' @($trayVerdict, $startupVerdict, 0) {
+    $rows = @(Get-ClaudeDesktopVerdict -State (New-State @{ Tray = 'on'; Startup = 'on' }) -Code 1 -Blocker $null -Target $V -PackageId $Id)
+    $rows.Text
+    @($rows | Where-Object { -not $_.Warn }).Count
+}
+Test-Case '締めの行: トレイの値が無ければ on と同じ行・設定のファイルが無ければ Claude を開いてから off にする行' @($trayVerdict, $trayUnopenedVerdict) {
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Tray = 'unset' }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Tray = 'unopened' }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: pin が無い・旧来の exe と設定が重なれば、その行の後に設定の行' @('⚠️ winget pin が無い → Install-ClaudeDesktop で足す (UAC の確認は出ない) ⚠️', $trayVerdict, $legacyOnly, $startupVerdict) {
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Pinned = $false; Tray = 'on' }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Legacy = $true; Startup = 'on' }) -Code 1 -Blocker $null -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: 設定が不明なだけなら揃っている' '揃っている' {
+    (Get-ClaudeDesktopVerdict -State (New-State @{ Tray = 'unknown'; Startup = 'unknown' }) -Code 0 -Blocker $null -Target $V -PackageId $Id).Text
+}
+Test-Case '締めの行: 設定の行は runner の印「Claude Desktop のシステムトレイが on」「Claude Desktop のスタートアップ時に実行が on」を含む' @($true, $true, $true) {
+    $trayVerdict.Contains('Claude Desktop のシステムトレイが on')
+    $trayUnopenedVerdict.Contains('Claude Desktop のシステムトレイが on')
+    $startupVerdict.Contains('Claude Desktop のスタートアップ時に実行が on')
+}
 
 # Select-WingetOutputLines
 Test-Case 'winget の進み具合の表示 (回る棒・帯・空行) を除く' @('Found Claude [Anthropic.Claude] Version 5.11492.5', '正常にインストールされました') {
@@ -378,9 +521,26 @@ function Reset-World {
         InstallAdds = $true
         PinAddExit  = 0
         WingetExe   = 'C:\Users\a\AppData\Local\Microsoft\WindowsApps\winget.exe'
+        # 設定のファイルの中身 ($null は無い) と、startup task の State ($null は無い)
+        TrayText    = '{"preferences":{"menuBarEnabled":false}}'
+        StartupState = 0
         Calls       = New-Object System.Collections.ArrayList
     }
     foreach ($k in $Values.Keys) { $script:W[$k] = $Values[$k] }
+}
+# 設定のファイルと startup task の鍵は、この場所でだけ読める (場所を書き間違えると、ファイルも鍵も無いのと同じになる)
+$LocalAppData = 'C:\Users\a\AppData\Local'
+$ConfigPath = 'C:\Users\a\AppData\Local\Claude-Data\claude_pzs8sxrjxfjjc\claude_desktop_config.json'
+$StartupKey = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\Claude_pzs8sxrjxfjjc\ClaudeStartup'
+function Read-ClaudeDesktopConfigText {
+    param([string]$Path)
+    if ($Path -ceq $ConfigPath) { return $script:W.TrayText }
+    $null
+}
+function Get-ClaudeStartupTaskState {
+    param([string]$Key)
+    if ($Key -ceq $StartupKey) { return $script:W.StartupState }
+    $null
 }
 function Resolve-WingetExe { $script:W.WingetExe }
 function Get-ClaudeAppxLines { if ($script:W.Msix) { "Claude`t$Family`t$($script:W.Msix)`t$Loc" } }
@@ -422,7 +582,13 @@ function Get-VmPlatformInstallState { 1 }
 function Invoke-Flow {
     param([hashtable]$World = @{}, [switch]$Check, [switch]$IfMissing)
     Reset-World $World
-    $items = @(& { Invoke-InstallClaudeDesktop -Version $V -Check:$Check -IfMissing:$IfMissing } 6>&1)
+    $savedLocalAppData = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = $LocalAppData
+    try {
+        $items = @(& { Invoke-InstallClaudeDesktop -Version $V -Check:$Check -IfMissing:$IfMissing } 6>&1)
+    } finally {
+        $env:LOCALAPPDATA = $savedLocalAppData
+    }
     [pscustomobject]@{
         Code  = @($items | Where-Object { $_ -is [int] })[-1]
         Lines = @($items | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } | ForEach-Object { "$($_.MessageData)" })
@@ -536,6 +702,37 @@ Test-Case '流れ: 昇格した会話なら UAC を出さないと出す' @(0, $
 Test-Case '流れ: winget (の exe) が見つからなければ 2' @(2, 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる') {
     $r = Invoke-Flow @{ WingetExe = $null } -Check
     $r.Code
+    $r.Lines[-1]
+}
+Test-Case '流れ: MSIX が揃っていてシステムトレイが on なら、-Check も引数なしも何も打たずに 1 (締めの行はトレイのこと。引数なしも読み直さない)' @(1, 0, $trayVerdict, 1, 0, 1, $trayVerdict) {
+    $tray = @{ Msix = '5.11492.5.0'; Pinned = $true; TrayText = '{"preferences":{"menuBarEnabled":true}}' }
+    $r = Invoke-Flow $tray -Check
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') -or ($_ -eq 'winget pin add') }).Count
+    $r.Lines[-1]
+    $r = Invoke-Flow $tray
+    $r.Code
+    @($r.Calls | Where-Object { $_.StartsWith('elevated') -or ($_ -eq 'winget pin add') }).Count
+    @($r.Calls | Where-Object { $_ -eq 'winget show --id' }).Count
+    $r.Lines[-1]
+}
+Test-Case '流れ: スタートアップ時に実行が on (startup task ClaudeStartup の State 2) なら、-Check は 1' @(1, $startupVerdict) {
+    $r = Invoke-Flow @{ Msix = '5.11492.5.0'; Pinned = $true; StartupState = 2 } -Check
+    $r.Code
+    $r.Lines[-1]
+}
+Test-Case '流れ: 入れた直後で設定のファイルがまだ無ければ、入れたうえで 1 (締めの行は、Claude を開いてからトレイを off にすること)' @(1, $true, $true, $false, $trayUnopenedVerdict) {
+    $r = Invoke-Flow @{ TrayText = $null } -IfMissing
+    $r.Code
+    Test-Called $r 'elevated install'
+    @($r.Lines | Where-Object { $_.StartsWith('Claude のサインインは手でする') }).Count -eq 1
+    @($r.Lines | Where-Object { $_ -eq '揃った' }).Count -gt 0
+    $r.Lines[-1]
+}
+Test-Case '流れ: pin が無くてシステムトレイも on なら、引数なしは pin を足し、読み直した締めの行はトレイのこと (1)' @(1, $true, $trayVerdict) {
+    $r = Invoke-Flow @{ Msix = '5.11492.5.0'; TrayText = '{"preferences":{}}' }
+    $r.Code
+    Test-Called $r 'winget pin add'
     $r.Lines[-1]
 }
 

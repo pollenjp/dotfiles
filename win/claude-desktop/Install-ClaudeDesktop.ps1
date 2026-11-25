@@ -26,6 +26,13 @@ runner (手順 claude-desktop。ホストの値の [tools] windowsClaudeDesktop 
 切り替えるので、MSIX が入らないまま落ちる見込み)。Cowork には Windows の仮想マシン プラットフォーム (VirtualMachinePlatform) も要る。
 off ならそう知らせる (on にするのは人。Windows の再起動が要る)。
 
+Claude の設定 > デスクトップアプリ の「システムトレイ」と「スタートアップ時に実行」は見張る (MSIX が入っているときだけ)。on なら ⚠ と直し方
+(その切り替えを off に) を出し、版と pin が揃っていても終了コードを 1 にする (アプリを開いていないときに、トレイに残った Claude をリモートから
+操作されないように)。設定は書き換えない (システムトレイの値は、開いている Claude が自分で書き直すファイルにある)。システムトレイは
+%LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\claude_desktop_config.json の preferences.menuBarEnabled (値もファイルも無ければ Claude の
+既定の on)、スタートアップ時に実行は MSIX の startup task ClaudeStartup の State (HKCU の SystemAppData の下。2 と 4 が on。無ければ manifest の
+既定の off) で読む。
+
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
 .PARAMETER Version
@@ -35,7 +42,8 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 .PARAMETER Check
 今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば (入っている版の方が新しいときも) 終了コード 0、
 差があれば 1、入っていなければ 3、確かめられなければ 2。旧来の exe の Claude が残っていれば、MSIX が入っていなくても 1 (締めの行は
-旧来の exe のこと。runner が UAC を出して入れにいかないように)。
+旧来の exe のこと。runner が UAC を出して入れにいかないように)。システムトレイかスタートアップ時に実行が on なら、版と pin が揃っていても 1
+(締めの行はその切り替えのこと)。
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す (UAC の確認が 1 回出る)。入っていれば -Check と同じで、上げはしない (runner が使う)。
@@ -148,22 +156,32 @@ function Get-WingetPinnedHint {
     "※ winget の pin に止められた。winget pin list --id $PackageId --exact で pin を確かめ、winget pin remove --id $PackageId --exact で外してから打ち直す (打ち直すと、揃えた後に pin を足し直す)"
 }
 
+# on の設定 (tray: システムトレイ・startup: スタートアップ時に実行)。MSIX が入っているときだけ数える。システムトレイは、値が無い・設定の
+# ファイルが無いときも Claude の既定の on として数える
+function Get-ClaudeDesktopOnSettings {
+    param($State)
+    if (-not $State.Exists) { return }
+    if (@('on', 'unset', 'unopened') -contains $State.Tray) { 'tray' }
+    if ($State.Startup -eq 'on') { 'startup' }
+}
+
 # 終了コード。入っていなければ 3 (旧来の exe の Claude があれば 1。入れられないので、runner が -IfMissing で入れにいかないように)、版
-# (入っている版の方が新しいときも) と pin が揃っていて旧来の exe の Claude も無ければ 0、ほかは 1
+# (入っている版の方が新しいときも) と pin が揃っていて、旧来の exe の Claude も on の設定も無ければ 0、ほかは 1
 function Get-ClaudeDesktopExitCode {
     param($State)
     if ($State.Plan -eq 'install') {
         if ($State.Legacy) { return 1 }
         return 3
     }
-    if ((@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and (-not $State.Legacy)) { return 0 }
+    if ((@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and (-not $State.Legacy) -and (@(Get-ClaudeDesktopOnSettings -State $State).Count -eq 0)) { return 0 }
     1
 }
 
-# MSIX の Claude Desktop の側 (版と pin) は揃っていて、残っているのが旧来の exe の Claude だけか (揃えるときに、することが無い)
-function Test-ClaudeDesktopLegacyOnly {
+# MSIX の Claude Desktop の側 (版と pin) は揃っていて、残っているのが人の直すもの (旧来の exe の Claude・on の設定) だけか (揃えるときに、
+# することが無い)
+function Test-ClaudeDesktopManualOnly {
     param($State)
-    (@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and $State.Legacy
+    (@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and ($State.Legacy -or (@(Get-ClaudeDesktopOnSettings -State $State).Count -gt 0))
 }
 
 # 揃える前に止める理由。無ければ $null
@@ -187,6 +205,67 @@ function ConvertFrom-VmPlatformState {
         '1' { 'on' }
         '2' { 'off' }
         '3' { 'off' }
+        default { 'unknown' }
+    }
+}
+
+# Claude Desktop (MSIX) の設定のファイル (Claude の設定 > デスクトップアプリ の「システムトレイ」の値を持つ)。Claude は
+# %LOCALAPPDATA%\Claude-Data\<PackageFamilyName の小文字>\ にデータを置く (MSIX の manifest が、この folder を書き込みの仮想化から外している)。
+# %LOCALAPPDATA% が無ければ $null。同じ folder の config.json (サインインの token を持つ) は読まない
+function Get-ClaudeDesktopConfigPath {
+    param([string]$LocalAppData, [string]$FamilyName)
+    if (-not $LocalAppData) { return $null }
+    '{0}\Claude-Data\{1}\claude_desktop_config.json' -f $LocalAppData, $FamilyName.ToLowerInvariant()
+}
+
+# JSON のオブジェクトの鍵を、大文字小文字まで合う名前で引く (Claude と同じく区別する)。Found と Value を返す。PSObject.Properties.Name は、
+# 鍵の無いオブジェクトで StrictMode に止められるので、1 つずつ見る
+function Get-ClaudeJsonMember {
+    param($Object, [string]$Name)
+    foreach ($p in $Object.PSObject.Properties) {
+        if ($p.Name -ceq $Name) { return [pscustomobject]@{ Found = $true; Value = $p.Value } }
+    }
+    [pscustomobject]@{ Found = $false; Value = $null }
+}
+
+# 設定のファイルの中身から、システムトレイ (preferences.menuBarEnabled) を読む
+#   on・off: 値のとおり / unset: 値が無い (Claude の既定の on) / unopened: 設定のファイルが無い (Claude をまだ開いていない。開くと既定の on) /
+#   unknown: 読めない (JSON でない・オブジェクトでない・真偽値でない)
+# 既定の on は、Claude Desktop 6.28899.6 の既定値の表 (menuBarEnabled: true) と、保存した値が無ければそれを使う読み方で確かめた
+function ConvertFrom-ClaudeTrayConfig {
+    param($Text)
+    if ($null -eq $Text) { return 'unopened' }
+    if ([string]::IsNullOrWhiteSpace([string]$Text)) { return 'unknown' }
+    try {
+        $config = ConvertFrom-Json -InputObject ([string]$Text) -ErrorAction Stop
+    } catch {
+        return 'unknown'
+    }
+    if ($config -isnot [System.Management.Automation.PSCustomObject]) { return 'unknown' }
+    $preferences = Get-ClaudeJsonMember -Object $config -Name 'preferences'
+    if ((-not $preferences.Found) -or ($null -eq $preferences.Value)) { return 'unset' }
+    if ($preferences.Value -isnot [System.Management.Automation.PSCustomObject]) { return 'unknown' }
+    $menuBar = Get-ClaudeJsonMember -Object $preferences.Value -Name 'menuBarEnabled'
+    if (-not $menuBar.Found) { return 'unset' }
+    if ($menuBar.Value -is [bool]) {
+        if ($menuBar.Value) { return 'on' }
+        return 'off'
+    }
+    'unknown'
+}
+
+# MSIX の startup task (Claude の TaskId は ClaudeStartup) の State を、スタートアップ時に実行の on・off にする。State は StartupTaskState と同じ数
+# (0 Disabled・1 DisabledByUser・2 Enabled・3 DisabledByPolicy・4 EnabledByPolicy。Claude も 2 と 4 を on と数える)。無ければ unset (manifest の
+# 既定の off。Enabled="false")、ほかの値は unknown
+function ConvertFrom-ClaudeStartupTaskState {
+    param($State)
+    if ($null -eq $State) { return 'unset' }
+    switch ("$State") {
+        '0' { 'off' }
+        '1' { 'off' }
+        '2' { 'on' }
+        '3' { 'off' }
+        '4' { 'on' }
         default { 'unknown' }
     }
 }
@@ -240,10 +319,26 @@ function Format-ClaudeDesktopState {
         @{ Label = 'winget の最新版'; Text = $latestText; Warn = $false }
         @{ Label = 'winget pin'; Text = $pinText; Warn = (-not $State.Pinned) }
     )
-    # Cowork の常駐は、MSIX が入っているときだけ見せる (入っていないときは無くて当たり前)
+    # Cowork の常駐と、Claude の設定 > デスクトップアプリ の 2 つの切り替えは、MSIX が入っているときだけ見せる (入っていないときは無くて当たり前)
+    $on = @(Get-ClaudeDesktopOnSettings -State $State)
     if ($State.Exists) {
         $serviceText = if ($State.Service) { "CoworkVMService ($($State.Service))" } else { '無い (CoworkVMService が無い)' }
         $rows += @{ Label = 'Cowork の常駐'; Text = $serviceText; Warn = $false }
+        $trayText = switch ($State.Tray) {
+            'on' { 'on → 設定 > デスクトップアプリ で off にする' }
+            'unset' { 'on (既定のまま) → 設定 > デスクトップアプリ で off にする' }
+            'unopened' { 'on (既定。設定のファイルがまだ無い) → Claude を開いたら、設定 > デスクトップアプリ で off にする' }
+            'off' { 'off' }
+            default { '不明 (claude_desktop_config.json が読めない)' }
+        }
+        $startupText = switch ($State.Startup) {
+            'on' { 'on → 設定 > デスクトップアプリ で off にする' }
+            'off' { 'off' }
+            'unset' { 'off (既定)' }
+            default { '不明 (startup task の State が読めない)' }
+        }
+        $rows += @{ Label = 'システムトレイ'; Text = $trayText; Warn = ($on -contains 'tray') }
+        $rows += @{ Label = 'スタートアップ時に実行'; Text = $startupText; Warn = ($on -contains 'startup') }
     }
     $rows += @{ Label = '仮想マシン プラットフォーム'; Text = $vmText; Warn = $false }
     if ($State.Legacy) {
@@ -274,6 +369,18 @@ function Format-ClaudeDesktopState {
     if ($State.Exists -and (-not $State.Service)) {
         [pscustomobject]@{ Text = '※ MSIX は入っているが、Cowork の常駐 (CoworkVMService) が無い。Cowork は使えない (管理者の権限で入れていないかもしれない。win/README.md の「Claude Desktop」)'; Warn = $false }
     }
+    if ($on -contains 'tray') {
+        [pscustomobject]@{ Text = '※ システムトレイが on だと、窓を閉じても Claude は終わらずにトレイで動き続ける。開いていないときにリモートから操作されないよう、off にしておく (dotfiles は設定を書き換えない。開いている Claude が自分で書き直すファイルなので)'; Warn = $false }
+    }
+    if ($on -contains 'startup') {
+        [pscustomobject]@{ Text = '※ スタートアップ時に実行が on だと、Windows にサインインしたときに Claude が起きる'; Warn = $false }
+    }
+    if ($State.Exists -and ($State.Tray -eq 'unknown')) {
+        [pscustomobject]@{ Text = '※ システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない。Claude の設定 > デスクトップアプリ で確かめる'; Warn = $false }
+    }
+    if ($State.Exists -and ($State.Startup -eq 'unknown')) {
+        [pscustomobject]@{ Text = '※ スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない。Claude の設定 > デスクトップアプリ で確かめる'; Warn = $false }
+    }
     if ($State.VmPlatform -eq 'off') {
         [pscustomobject]@{ Text = "※ 仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork (VM の中で動くエージェント) は使えない。$(Format-VmPlatformSteps)"; Warn = $false }
     }
@@ -291,8 +398,30 @@ function Format-ClaudeDesktopState {
 
 # 締めの行 (-Check と、-IfMissing で入っていたとき・揃えた後に読み直したとき)。Text と、直すことがあるかの Warn (黄色にする)。旧来の
 # exe の Claude が残っていれば、固定した版が winget に無いことや pin より先にそのことを出す (外すまで入れない・上げない。人が今すぐ直せる)。
-# runner (win/runner/src/steps/ps1.rs) は、終了コードと「旧来の exe の Claude が残っている」の文言で行を決める (文言を変えるときは向こうも直す)
+# on の設定 (システムトレイ・スタートアップ時に実行) は、その後ろに 1 つ 1 行で足す (MSIX の側 (版・pin・旧来の exe) が揃っていれば設定の行だけ)。
+# runner (win/runner/src/steps/ps1.rs) は、終了コードと「旧来の exe の Claude が残っている」「Claude Desktop のシステムトレイが on」
+# 「Claude Desktop のスタートアップ時に実行が on」の文言で行を決める (文言を変えるときは向こうも直す)
 function Get-ClaudeDesktopVerdict {
+    param($State, [int]$Code, [string]$Blocker, [string]$Target, [string]$PackageId)
+    $on = @(Get-ClaudeDesktopOnSettings -State $State)
+    $settingsOnly = ($on.Count -gt 0) -and (@('none', 'newer') -contains $State.Plan) -and $State.Pinned -and (-not $State.Legacy)
+    if (-not $settingsOnly) {
+        Get-ClaudeDesktopMainVerdict -State $State -Code $Code -Blocker $Blocker -Target $Target -PackageId $PackageId
+    }
+    foreach ($setting in $on) {
+        $text = if ($setting -eq 'startup') {
+            '⚠️ Claude Desktop のスタートアップ時に実行が on → Claude の設定 > デスクトップアプリ の「スタートアップ時に実行」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+        } elseif ($State.Tray -eq 'unopened') {
+            '⚠️ Claude Desktop のシステムトレイが on (既定) → Claude を開いたら、設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+        } else {
+            '⚠️ Claude Desktop のシステムトレイが on → Claude の設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️'
+        }
+        [pscustomobject]@{ Text = $text; Warn = $true }
+    }
+}
+
+# 締めの行のうち、MSIX の側 (入れる・版・pin・旧来の exe) の 1 行
+function Get-ClaudeDesktopMainVerdict {
     param($State, [int]$Code, [string]$Blocker, [string]$Target, [string]$PackageId)
     $text = if (($Code -eq 0) -and ($State.Plan -eq 'newer')) {
         '揃っている (入っている版の方が新しい。下げない)'
@@ -476,6 +605,27 @@ function Get-ClaudeLegacyState {
     [pscustomobject]@{ Exists = ($updateExists -or $keyExists); Dir = $dir; Version = $legacyVersion }
 }
 
+# 設定のファイルの中身 (ConvertFrom-ClaudeTrayConfig が読む)。ファイルが無ければ $null、場所が無い・読めなければ空の字 (開いている Claude が
+# 書いている途中などで読めなければ、次の -Check で読み直す)
+function Read-ClaudeDesktopConfigText {
+    param([string]$Path)
+    if (-not $Path) { return '' }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    try {
+        return [IO.File]::ReadAllText($Path)
+    } catch {
+        return ''
+    }
+}
+
+# startup task の State (HKCU の SystemAppData\<PackageFamilyName>\<TaskId> の DWORD。MSIX を入れたときに Windows が作る)。鍵か値が無ければ $null
+function Get-ClaudeStartupTaskState {
+    param([string]$Key)
+    $p = Get-ItemProperty -LiteralPath $Key -ErrorAction SilentlyContinue
+    if ($p -and (@($p.PSObject.Properties.Name) -contains 'State')) { return $p.State }
+    $null
+}
+
 # 今の状態を読む (何も変えない)
 function Get-ClaudeDesktopState {
     param([string]$PackageId, [string]$FamilyName, [version]$Target)
@@ -490,10 +640,16 @@ function Get-ClaudeDesktopState {
     $installed = $null
     $installedText = $null
     $location = $null
+    $tray = $null
+    $startup = $null
     if ($exists) {
         $installedText = "$($entry.Version)"
         $installed = ConvertTo-ClaudeDesktopVersion -Text $installedText
         $location = $entry.InstallLocation
+        # Claude の設定 > デスクトップアプリ の「システムトレイ」と「スタートアップ時に実行」。どちらの置き場も PackageFamilyName から作る
+        $tray = ConvertFrom-ClaudeTrayConfig -Text (Read-ClaudeDesktopConfigText -Path (Get-ClaudeDesktopConfigPath -LocalAppData $env:LOCALAPPDATA -FamilyName $entry.PackageFamilyName))
+        $startupKey = 'HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\CurrentVersion\AppModel\SystemAppData\{0}\ClaudeStartup' -f $entry.PackageFamilyName
+        $startup = ConvertFrom-ClaudeStartupTaskState -State (Get-ClaudeStartupTaskState -Key $startupKey)
     }
     $legacy = Get-ClaudeLegacyState
     [pscustomobject]@{
@@ -509,6 +665,8 @@ function Get-ClaudeDesktopState {
         VmPlatform    = ConvertFrom-VmPlatformState -InstallState (Get-VmPlatformInstallState)
         Legacy        = [bool]$legacy.Exists
         LegacyVersion = $legacy.Version
+        Tray          = $tray
+        Startup       = $startup
     }
 }
 
@@ -557,9 +715,9 @@ function Invoke-InstallClaudeDesktop {
         Write-Host "固定した版 $Version が winget に無いので入れられない。-Version を winget show --id $packageId --versions にある版へ変える"
         return 1
     }
-    # 旧来の exe の Claude が残っていれば、MSIX を入れない・上げない。MSIX の側が揃っていて残りがそれだけなら、することが無い
-    # (どちらも外すのは人。上の ※ の手順)
-    if (($blocker -eq 'legacy') -or (Test-ClaudeDesktopLegacyOnly -State $state)) {
+    # 旧来の exe の Claude が残っていれば、MSIX を入れない・上げない。MSIX の側が揃っていて、残りが人の直すもの (旧来の exe の Claude・on の
+    # 設定) だけなら、することが無い (どれも直すのは人。上の ※ の手順と締めの行)
+    if (($blocker -eq 'legacy') -or (Test-ClaudeDesktopManualOnly -State $state)) {
         Write-ClaudeDesktopRows -Rows @(Get-ClaudeDesktopVerdict -State $state -Code $code -Blocker $blocker -Target $Version -PackageId $packageId)
         return $code
     }
