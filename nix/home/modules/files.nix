@@ -23,6 +23,8 @@
   };
 
   xdg.configFile = {
+    # Windows にも同じファイルを win/manifest.toml (base = "nix") で %USERPROFILE%\.config\starship.toml に配る
+    # (win/README.md の「starship」。Windows で使えない custom module は os = 'unix' で外す)
     "starship.toml".source = ../../files/starship.toml;
     "zellij/config.kdl".source = ../../files/zellij/config.kdl;
 

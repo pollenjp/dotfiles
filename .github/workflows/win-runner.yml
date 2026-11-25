@@ -9,7 +9,9 @@ name: win-runner
 # - Windows: MSVC (windows-latest の既定の host。bootstrap が入れるのと同じ) で、Windows のパスと外のコマンド (PowerShell・hostname・git)
 #   の口を確かめる
 #
-# runner は win/ のファイル (manifest.toml とその src・Install-*.ps1・groups.json)・nix/lib/windows-files.nix・WSL の手順の一覧
+# runner は win/ のファイル (manifest.toml とその src・Install-*.ps1・groups.json)・manifest の base = "nix" の src (nix/ の下にあるので
+# 1 つずつ並べる。nix/files/starship.toml は Windows の starship で使えるかも試験が見る。nix/pkgs/herdr-core/releases.json は下の版の
+# 知らせと共通)・nix/lib/windows-files.nix・WSL の手順の一覧
 # (nix/scripts/bootstrap-windows-*.sh。手順の id を突き合わせる)・hc の skill の頭 (nix/pkgs/herdr-core/claude-skill-head.md。Linux と
 # 共有)・Claude の settings.json の env と claude-notion.json の元 (nix/home/modules/claude.nix・nix/lib/git-via-gh.nix と、突き合わせに使う
 # sandbox のホストの nix/hosts/default.nix。Linux の CI で突き合わせる)・Windows の Claude Code に配る設定の元 (nix/files/claude/ の CLAUDE.md・
@@ -28,6 +30,7 @@ on:
     branches: [main]
     paths:
       - "win/**"
+      - "nix/files/starship.toml"
       - "nix/lib/windows-files.nix"
       - "nix/lib/git-via-gh.nix"
       - "nix/home/modules/claude.nix"
@@ -54,6 +57,7 @@ on:
   pull_request:
     paths:
       - "win/**"
+      - "nix/files/starship.toml"
       - "nix/lib/windows-files.nix"
       - "nix/lib/git-via-gh.nix"
       - "nix/home/modules/claude.nix"
