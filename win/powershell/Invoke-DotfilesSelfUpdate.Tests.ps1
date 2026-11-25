@@ -21,6 +21,7 @@
 #   - dotfiles.ps1 が変わったら、締めに新しい PowerShell を開くよう出す (配った写しが古い・無ければ、配ってから)。変わらなければ出さない
 #   - 引数の誤りと --help では、何も fetch しない
 #   - git に渡す環境変数 (GIT_TERMINAL_PROMPT・GCM_INTERACTIVE) と、今いる場所を戻す
+#   - pwsh 7.4 からの $PSNativeCommandUseErrorActionPreference を $true にした PowerShell でも、出す行と終了コードは変わらない
 #   - GitHub の remote の fetch には gh の資格情報の組を、どの git にもプロンプトを出させない環境変数を渡す (Linux だけ。git を包む偽物で、
 #     打った引数と環境変数を見る)
 #
@@ -493,6 +494,18 @@ if ($realGit.Count -eq 0) {
         Test-Case '進めない: fast-forward できなかった clone の HEAD は動かないが、fetch はしてある' "$startPrivate $p1" { "$(Get-Rev $private) $(Get-Rev $private 'origin/main')" }
         Test-Case '進めない: clone が無ければ進めない' "⚠ claude-skills: clone が無い ($skills) → win\bootstrap\Install-Bootstrap.ps1 で clone する" { Get-CloneLines $out 'claude-skills' }
         Test-Case '進めない: 終了コードは 1' '1' { Get-ChildValue $out 'code' }
+
+        # pwsh 7.4 からの $PSNativeCommandUseErrorActionPreference を $true にした PowerShell (profile で置ける) でも、git の 0 でない終了コードで
+        # 止めず (Stop と組むと例外になる)、出す行 (⚠ の下の git の出力の終わりも) と終了コードは変わらない
+        $psVersion = $PSVersionTable.PSVersion
+        if (($psVersion.Major -gt 7) -or (($psVersion.Major -eq 7) -and ($psVersion.Minor -ge 4))) {
+            $resultLines = { param($Lines) @($Lines | Where-Object { $_ -match '^(✔|·|⚠)|^    ' }) -join '|' }
+            $strict = @(Invoke-SelfUpdateChild -Fixture $fx -Command '$PSNativeCommandUseErrorActionPreference = $true; & $Script')
+            Test-Case '進めない: $PSNativeCommandUseErrorActionPreference が $true でも、出す行は変わらない' (& $resultLines $out) { & $resultLines $strict }
+            Test-Case '進めない: $PSNativeCommandUseErrorActionPreference が $true でも、終了コードは 1' '1' { Get-ChildValue $strict 'code' }
+        } else {
+            Write-Host 'skip 進めない: $PSNativeCommandUseErrorActionPreference が $true のとき (pwsh 7.4 から)'
+        }
     } finally {
         Remove-Fixture $fx
     }

@@ -491,6 +491,10 @@ function Complete-DotfilesSelfUpdate {
 # (bootstrap と同じ。git に渡した環境変数とコンソールの文字コードは Invoke-DotfilesGit の finally が戻し、今いる場所は下の finally が戻す)
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
+    # 外のコマンド (git・cargo) の終了コードは自分で読む。pwsh 7.4 からの $PSNativeCommandUseErrorActionPreference を profile で $true にしていると、
+    # 0 でない終了コードが誤りの行になって git の出力に混ざり、Stop と組んだ cargo では例外になって締めが飛ぶ。この script の段で $false にする
+    # (この script の関数にも効く。5.1 には無い変数で、置いても何も起きない)
+    $PSNativeCommandUseErrorActionPreference = $false
     Set-StrictMode -Version Latest
     $exitCode = $null
     try {
