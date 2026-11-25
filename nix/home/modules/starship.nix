@@ -12,6 +12,10 @@
 # Stage 3 で入れた xdg.configFile による素のファイル配置がそのまま残る。
 # それでいて enable = true にしておけば starship 本体が入り、
 # Stage 5 でシェル統合を有効にするときはフラグを反転するだけで済む。
+#
+# Windows は、ここで入る starship (flake.lock の nixpkgs) と同じ版を win/starship/Install-Starship.ps1 が
+# winget で入れ、$PROFILE の init の 1 行も Windows の runner が足す。flake.lock を上げて starship の版が
+# 変わったら、Windows の固定した版も揃える (win/README.md の「starship の新しい版が出たとき」)。
 { ... }:
 
 {

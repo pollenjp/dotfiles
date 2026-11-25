@@ -133,8 +133,10 @@ function Set-DotfilesViModeCursor {
     if ("$Mode" -eq 'Command') { [Console]::Write("$([char]27)[2 q") } else { [Console]::Write("$([char]27)[6 q") }
 }
 
-# 割り当ては、PSReadLine を読み込んだ対話の PowerShell でだけする。script・CI (-File・-NonInteractive) の PowerShell は PSReadLine を
+# 割り当ては、PSReadLine を読み込んだ PowerShell でだけする。script・CI (-File・-NonInteractive) の PowerShell はふつう PSReadLine を
 # 読み込まないので、割り当てずに抜ける (Get-Module は読み込まないが、Set-PSReadLineKeyHandler は打つと PSReadLine を読み込む)。
+# ただし $PROFILE でこの前に読む starship の init は Set-PSReadLineOption を打って PSReadLine を読み込むので、-NoProfile の無い script の
+# PowerShell でも、starship が PATH にあれば割り当てる (プロンプトが無いので効かない。カーソルの形は、出力をパイプで受けていなければ書く)。
 # 広げるところで落ちても、打ったキーの字を入れる・実行するところは流す (Space や Enter を打てなくしない)。
 if (Get-Module -Name PSReadLine) {
     # 入力行を Vi の流儀で編集する (win/README.md の「Vi モード」)。挿入モードで始まり、Esc でコマンドモードに入り、i・a などで挿入モードに
@@ -278,6 +280,12 @@ function Install-Ghq { & "$HOME\.config\powershell\Install-Ghq.ps1" @args }
 # 入れ替えが要るときは、動いている fzf を先に終わらせる (動いていると止まる)。MSI の fzf が入っていれば、外し方を出して何も入れない。
 # dotfiles apply (runner の手順 fzf) でも揃える。
 function Install-Fzf { & "$HOME\.config\powershell\Install-Fzf.ps1" @args }
+
+# Windows の starship (winget の Starship.Starship の portable) を、dotfiles で固定した版に揃える。$PROFILE の init の 1 行 (runner の手順
+# starship-init が足す) が起こすプロンプト。中身は同じ場所へ配る Install-Starship.ps1 (win/README.md の「starship」)。-Check なら確かめるだけ。
+# 入れ替えが要るときは、動いている starship を先に終わらせる (動いていると止まる)。MSI の starship が入っていれば、外し方を出して何も入れない。
+# dotfiles apply (runner の手順 starship) でも揃える。
+function Install-Starship { & "$HOME\.config\powershell\Install-Starship.ps1" @args }
 
 # ghq の repo を fzf で選び、その repo へ移る。WSL の fish の function と bash の function の cdrepo (nix/home/modules/fish.nix・bash.nix) と
 # 同じ動きにそろえる: ghq・fzf が無ければ同じ文で知らせて止まり、ghq list を fzf -1 +m (候補が 1 つならそのまま選ぶ。選べるのは 1 つ) で

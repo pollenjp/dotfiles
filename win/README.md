@@ -25,7 +25,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles` (`dotfiles --self-update` は 3 つの clone を進めてから))。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
-| (`nix/files/starship.toml`) | `%USERPROFILE%\.config\starship.toml` | starship のプロンプトの設定。Linux の home-manager も同じファイルを `~/.config/starship.toml` に置くので `nix/` に置き、manifest の `base = "nix"` で配る。sh で判定する custom module は Windows では出さない。starship 本体と `$PROFILE` の初期化の 1 行は配らない ([後述](#starship)) |
+| (`nix/files/starship.toml`) | `%USERPROFILE%\.config\starship.toml` | starship のプロンプトの設定。Linux の home-manager も同じファイルを `~/.config/starship.toml` に置くので `nix/` に置き、manifest の `base = "nix"` で配る。sh で判定する custom module は Windows では出さない。starship 本体は下の `starship/Install-Starship.ps1` (runner の `starship`) が、`$PROFILE` の init の 1 行は runner の `starship-init` が入れる ([後述](#starship)) |
 | `powershell/Invoke-DotfilesSelfUpdate.ps1` | (配らない。`dotfiles --self-update` が clone の中のものを呼ぶ) | `dotfiles --self-update` の中身。dotfiles・dotfiles-private・claude-skills の clone を gh の資格情報で fetch して fast-forward し、後ろの引数があればその後に runner に渡す ([後述](#clone-を進める-dotfiles---self-update)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
@@ -58,6 +58,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `claude-code/Install-ClaudeCode.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeCode.ps1` | Claude Code を winget の `Anthropic.ClaudeCode` で固定した版に揃える。PowerShell の `Install-ClaudeCode` から呼ぶ。setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定は設定グループで決まる) のマシン ([後述](#claude-code)) |
 | `ghq/Install-Ghq.ps1` | `%USERPROFILE%\.config\powershell\Install-Ghq.ps1` | ghq を winget の `x-motemen.ghq` で固定した版に揃える。PowerShell の `Install-Ghq` から呼ぶ。入れて揃えるのは runner の `ghq` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
 | `fzf/Install-Fzf.ps1` | `%USERPROFILE%\.config\powershell\Install-Fzf.ps1` | fzf を winget の `junegunn.fzf` の portable で固定した版に揃える (MSI の fzf が入っていれば、何も入れずに外し方を出す)。PowerShell の `Install-Fzf` から呼ぶ。入れて揃えるのは runner の `fzf` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
+| `starship/Install-Starship.ps1` | `%USERPROFILE%\.config\powershell\Install-Starship.ps1` | starship (プロンプト) を winget の `Starship.Starship` の portable で、Linux と同じ固定した版に揃える (MSI の starship が入っていれば、何も入れずに外し方を出す)。PowerShell の `Install-Starship` から呼ぶ。入れて揃えるのは runner の `starship` (いつも。WSL の setup は入れない)。`$PROFILE` の init の 1 行は runner の `starship-init` が足す ([後述](#starship)) |
 | `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
@@ -502,6 +503,7 @@ scanData = "https://app.notion.com/p/…"
 | 91 | `powertoys` | PowerToys を入れ (`Install-PowerToys.ps1 -IfMissing`)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、Keyboard Manager に `default.json` を読み直させる ([PowerToys](#powertoys) と同じ順と判定。check と dry-run は止めない・起こさない・イベントを送らない)。記録は `%LOCALAPPDATA%\dotfiles\state\powertoys-keyboard-manager.reloaded` | いつも | 有る |
 | 91 | `ssh-config` | dotfiles-private の `ssh/*.ssh_config` を `%USERPROFILE%\.ssh\config.d\` へ写し、`config` (Include の 1 行と SetEnv) を置く ([ssh の設定](#ssh-の設定)と同じ判定。正本から消えたファイルは消す。`--force` は元を `<名前>.dotfiles-bak-<日時>` に退避して上書き・削除)。apply は書いた後に `ssh -v -G` で読むファイルも確かめる (check は、apply で書く・消すものが無いときだけ)。dotfiles-private の clone の `core.autocrlf` が true なら ⚠ (files と同じ)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-ssh-config.deployed.json`。SSH の中継の switch (`opReasonSshRelay`) が on なら、中継が答えるのを見てから `config.d\00-op-reason-ssh-relay.ssh_config` (中継を指す `IdentityAgent`) も置く ([SSH の中継](#ssh-の中継)) | いつも | 有る |
 | 92 | `fancyzones` | FancyZones の持つキー・カスタムレイアウト (uuid ごとに足す)・横向きの既定・ディスプレイへのあて方 (解像度の決まり・組の無い仮想デスクトップに組を作る) を書く ([FancyZones](#fancyzones) と同じ判定・PowerToys の形のバイト列。`--force` は直した・消したレイアウトと手であてた組も上書き。取り込みは `dotfiles import fancyzones <名前>…`)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-fancyzones.{applied,assigned}.json`、退避は `…\state\windows-fancyzones\backup\` (10 回分) | いつも | 有る |
+| 94 | `starship-init` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に、starship を起こす 1 行 (`Get-Command starship` で囲む) を、`dotfiles.ps1` を読む行より前に足す (無ければ末尾に。新しい PC では、続く `powershell-profile` がその後ろに足す)。starship の init の行 (手で書いた行も) があれば何もせず、`dotfiles.ps1` を読む行より後ろにあれば前へ移すよう知らせる。足した後で消した 1 行は足し直さない (`--force` で足す)。差し込むときは前の中身を `%LOCALAPPDATA%\dotfiles\state\starship-init\backup\` へ写す。記録は `%LOCALAPPDATA%\dotfiles\state\starship-init.added.json` ([starship](#starship)) | いつも | 有る (Windows だけ) |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
 | 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
@@ -514,7 +516,8 @@ scanData = "https://app.notion.com/p/…"
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
 | 97 | `herdr` | `Install-Herdr.ps1`: 入っていなければ入れる。ずれと Herdr.Herdr.Preview は知らせるだけ | `windowsHerdr` | 有る |
 | 97 | `ntn` | `Install-Ntn.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsNtn` | 有る |
-| 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone (bootstrap の 4 つと ghq・fzf)) | 有る |
+| 97 | `pin-updates` | Windows に固定した版 (`Install-*.ps1`・bootstrap の 4 つ・herdr-app と herdr-core の `releases.json`) より新しい版 (見送っていないもの) が出ていないかを、Windows の gh (`gh api`) で GitHub を読んで知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)と同じ名前・判定・文。herdr-app・herdr-core の版ごとの Windows の成果物は `curl.exe` の HEAD で見る)。新しい版は `·` (終了コードに数えない)、確かめられなければ ⚠。何も書かない (check・dry-run・apply は同じ) | いつも (名前ごとに `windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale` と、Windows の ghq の dotfiles の clone (bootstrap の 4 つと ghq・fzf・starship)) | 有る |
+| 97 | `starship` | `Install-Starship.ps1`: 入れる・揃える (winget の portable。PATH のずれは知らせるだけ。MSI の starship が入っていれば入れずに、外し方を知らせる。[starship](#starship)) | いつも | 有る (Windows だけ) |
 | 97 | `t3-code` | `Install-T3Code.ps1`: 入っていなければ入れる (user スコープ。UAC は出ない)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsT3Code` | 有る (Windows だけ) |
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
@@ -1492,7 +1495,7 @@ nix/scripts/bootstrap-windows-files.sh --force
 
 ## winget の pin
 
-winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる 4 つ) は、入れた後に `winget pin add --id <ID> --exact` で pin (種類は Pinning) を足し、`winget upgrade --all` から外す。版を変えるときに
 自分の pin に止められない打ち方は、winget の作り (`microsoft/winget-cli` の `WorkflowBase.cpp`・`PinningData.cpp`) に合わせて決めてある
 ([ADR 063](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/063_win_winget_pin_include_pinned_20261116T132001JST/README.md)):
@@ -1504,7 +1507,7 @@ winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語�
 | 入っているものへの `winget install --version <版>` | 止められる (upgrade の道に移る。install は `--include-pinned` を受け付けない) |
 | 入っていないものへの `winget install`・`winget uninstall`・`winget download` | pin を見ない (pin が残っていても) |
 
-- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力・Tailscale)、入れ替える道は uninstall → install (herdr・ntn・Claude Code・ghq・fzf。
+- 上げる道は `--include-pinned` を付けた upgrade (OpenSSH・Google 日本語入力・Tailscale)、入れ替える道は uninstall → install (herdr・ntn・Claude Code・ghq・fzf・starship。
   入っていない形にしてから入れるので pin を見ない)。どちらも `*.Tests.ps1` が確かめる (upgrade には `--include-pinned` を付け、install・
   uninstall には付けない)
 - 手で揃えるときも、版を名指しした upgrade に `--include-pinned` を付ける (bootstrap の ※ の行と[版のずれを手で揃える](#版のずれを手で揃える))。
@@ -1514,7 +1517,7 @@ winget で版を固定して入れるもの (OpenSSH・herdr・Google 日本語�
 
 ## winget の新しい版を確かめる
 
-winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
+winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship と、[bootstrap](#bootstrap-新しい-windows-で最初に流す) が
 入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) は、新しい版が出ると `setup --update` が
 短く知らせる ([固定した版より新しい版の知らせ](#固定した版より新しい版の知らせ)。上げるかは Claude Code に聞かれて決める)。
 それとは別に、流さない間も気付けるよう、GitHub Actions の
@@ -1534,6 +1537,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `tailscale` | `tailscale/Install-Tailscale.ps1`・`tailscale/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | [Tailscale の新しい版が出たとき](#tailscale-の新しい版が出たとき) |
 | `ghq` | `ghq/Install-Ghq.ps1`・`ghq/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release の多くが winget に載らないので比べない) | [ghq・fzf の新しい版が出たとき](#ghqfzf-の新しい版が出たとき) |
 | `fzf` | `fzf/Install-Fzf.ps1`・`fzf/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | 同じ |
+| `starship` | `starship/Install-Starship.ps1`・`starship/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | [starship の新しい版が出たとき](#starship-の新しい版が出たとき) |
 | `git` | `bootstrap/Install-Bootstrap.ps1` の `-GitVersion`・`bootstrap/skipped-versions/git.txt` | GitHub の release (`git-for-windows/git` の `v<X.Y.Z>.windows.<N>`。winget の版は N が 1 なら `X.Y.Z`、ほかは `X.Y.Z.N`) が出た日 | [bootstrap の固定した版の新しい版が出たとき](#bootstrap-の固定した版の新しい版が出たとき) |
 | `gh` | `bootstrap/Install-Bootstrap.ps1` の `-GhVersion`・`bootstrap/skipped-versions/gh.txt` | GitHub の release (`cli/cli` の `vX.Y.Z`) が出た日 | 同じ |
 | `vs-buildtools` | `bootstrap/Install-Bootstrap.ps1` の `-VsBuildToolsVersion`・`bootstrap/skipped-versions/vs-buildtools.txt` | winget-pkgs に載った日 (GitHub の release が無い) | 同じ |
@@ -1565,7 +1569,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
     → 下の「パッケージ ID を確かめる」
   - 版の形でないディレクトリがある・GitHub の最新の release から版が読めない・取った release に winget に載る側の
     ものが無い (版や名前の付け方、出し方が変わった) → script の読み方を直す
-- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Tailscale`・`ghq`・`fzf`・`Git.Git`・`GitHub.cli`・
+- パッケージ ID を確かめる: job が出す `winget search …` (`OpenSSH`・`herdr`・`JapaneseIME`・`ntn`・`ClaudeCode`・`Tailscale`・`ghq`・`fzf`・`starship`・`Git.Git`・`GitHub.cli`・
   `BuildTools`・`Rustup`) で今のパッケージ ID を
   確かめる。移るなら `git grep <今の ID>` で出る所 (ps1 の `$packageId` と状態の表・bootstrap の見分け・テスト) と
   固定した版を直す
@@ -1595,15 +1599,15 @@ Windows に固定した版で入れているものに新しい版が出たら、
 
 | 名前 | 固定した版 | 新しい版の一覧と出た日 | 見送りの一覧 |
 | --- | --- | --- | --- |
-| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code`・`tailscale`・`ghq`・`fzf` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
+| `openssh`・`herdr`・`google-japanese-input`・`ntn`・`claude-code`・`tailscale`・`ghq`・`fzf`・`starship` | `win/<名前>/Install-*.ps1` の `-Version` の既定値 | `nix/scripts/check-winget-version.sh --json` (winget-pkgs の版。出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/<名前>/skipped-versions.txt` (「版 理由」) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` | `nix/scripts/check-herdr-app-version.sh --json` (GitHub の tag のうち Windows の成果物があるもの。出た日は成果物の Last-Modified) | `nix/pkgs/herdr-core/skipped-versions.txt` (「app か core・版・理由」) |
 | `git`・`gh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion` など) の既定値 | `nix/scripts/check-winget-version.sh --json` (出た日は [winget の新しい版を確かめる](#winget-の新しい版を確かめる) の表と同じ) | `win/bootstrap/skipped-versions/<名前>.txt` (「版 理由」) |
 
 - 対象は Windows へ配るマシン (`dotfiles.wsl.windowsFiles.enable = true`) だけ。ntn・Claude Code・herdr (herdr-app・herdr-core も)・Tailscale は、
   入れるマシン (`windowsFiles.ntn.enable`・`windowsFiles.claudeCode.enable`・`windowsFiles.herdr.enable`・`windowsFiles.tailscale.enable`) でだけ確かめる。bootstrap の
   4 つ (git・gh・vs-buildtools・rustup) は、Windows の ghq に dotfiles の clone がある (`<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git`
-  がある。bootstrap を流した) マシンでだけ確かめる。ghq・fzf も同じマシンでだけ確かめる (入れるのは bootstrap の clone の runner の手順 `ghq`・`fzf`
-  だけで、WSL の setup は入れない)。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
+  がある。bootstrap を流した) マシンでだけ確かめる。ghq・fzf・starship も同じマシンでだけ確かめる (入れるのは bootstrap の clone の runner の手順
+  `ghq`・`fzf`・`starship` だけで、WSL の setup は入れない)。下の `--candidates` と JSON の口は、このマシンで入れるかによらず全部を出す
 - 知らせるのは、固定した版より新しく、見送っていない版。新しい版の数が 4 つ以上なら、頭と末尾と個数だけを出す。無ければ「無い」の
   1 行だけ (警告のまとめには載らない)
 - herdr-app に見送っていない新しい版があるときは、続きの行の末尾に keys.json の注意を 2 行添える (上の例の ※ と →)。dotfiles がキーを
@@ -1644,7 +1648,7 @@ dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setu
 
 - 名前の on/off は、WSL の記録の代わりに Windows のホストの値の道具の switch (ntn は `windowsNtn`、Claude Code は `windowsClaudeCode`、herdr・
   herdr-app・herdr-core は `windowsHerdr`、Tailscale は `windowsTailscale`。それを入れる手順と同じ switch) と、Windows の ghq の dotfiles の clone
-  (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つと、その clone の runner の手順 `ghq`・`fzf` が入れる ghq・fzf) で決める
+  (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。bootstrap の 4 つと、その clone の runner の手順 `ghq`・`fzf`・`starship` が入れる ghq・fzf・starship) で決める
 - GitHub は Windows の gh (`gh api`。bootstrap が入れてログインする) で読む。herdr-app・herdr-core の版ごとの Windows の成果物があるかは、WSL と
   同じ引数の curl (PATH で最初に見つかるもの。ふつうは System32 の `curl.exe`。`Install-HerdrApp.ps1` も同じ探し方で同じ取得元を落とす) の HEAD で
   見る (runner に HTTP の crate を足さない)
@@ -1704,8 +1708,8 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
   配っていない PC でも、起動のたびにエラーを出さずに済む
 - dot-source (`.`) で読む。`&` で呼ぶと子の scope で定義され、呼び終わりに消える
 - 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
-- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化 (設定の `starship.toml` は manifest で配る。[starship](#starship)) や、
-  そのマシンだけの設定はそこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
+- `$PROFILE` は手元のファイルのまま残る。dotfiles が足すのは、この 1 行と、その前に置く starship の init の 1 行 (runner の `starship-init`。
+  [starship](#starship)) だけ。そのマシンだけの設定はそこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
   (`dotfiles.ps1` が EditMode を Vi に替え、PSReadLine は EditMode を替えるとそのモードの既定の割り当てに戻すので、前に置いた割り当ては消える。
   [Vi モード](#vi-モード))
 - 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
@@ -1916,7 +1920,7 @@ Ctrl+z (`Undo`)・Ctrl+y (`Redo`)・↑・↓ (履歴)・Home・End・Delete・B
   PowerShell 7 と 5.1 の ConPTY で確かめた)
 - starship のプロンプトは、描き直したときのモードで記号を替える (dotfiles の `starship.toml` は記号 (`character`) を替えていないので、starship の
   既定のまま挿入モードで `❯`、コマンドモードで `❮`)。
-  形が替わらない端末でも、プロンプトの記号でモードが分かる。starship の init (`$PROFILE` で `dotfiles.ps1` より先に読む) もモードが替わるたびに
+  形が替わらない端末でも、プロンプトの記号でモードが分かる。starship の init (`$PROFILE` で `dotfiles.ps1` より先に読む。runner の `starship-init` がその順に足す) もモードが替わるたびに
   描き直す handler を置くが、`dotfiles.ps1` はそれを包まずに置き換えて自分で描き直す (`. $PROFILE` で読み直しても、描き直しは 1 回)
 - PSReadLine の `-ViModeIndicator Cursor` を使わないのは、5.1 の PSReadLine 2.0.0 の `Cursor` が Windows のコンソールの API でカーソルの
   大きさを替えるだけで列を書かず、ConPTY を通る端末では形が替わらないため (2.4.5 の `Cursor` は列も書くが、挿入モードは点滅する下線になる)
@@ -1983,14 +1987,87 @@ Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfi
 
 ## starship
 
-starship (プロンプト) の設定 `starship.toml` を、Linux と同じファイル (`nix/files/starship.toml`。Linux は home-manager が `~/.config/starship.toml` に
-置く) から `%USERPROFILE%\.config\starship.toml` に配る。starship は環境変数 `STARSHIP_CONFIG` が無ければここを読む。配るのは manifest の
-`base = "nix"` の表 ([ファイルを足す](#ファイルを足す)) で、受け持ちを runner に切り替えたホストは `dotfiles apply` の手順 `files`、ほかは WSL の
-`~/dotfiles/setup --update` ([配る](#配る))。初めて配るときは、`dotfiles apply --dry-run` に `[dry-run] コピー: …\.config\starship.toml`、`dotfiles check` に
-`無い (apply でコピーする): …\.config\starship.toml` と出る。
+Windows の starship (プロンプト) を、Linux と同じ形に揃える (dotfiles-private の `docs/superpowers/specs/2026-11-25-win-starship-install-design.md`)。
+入れるものは 3 つで、どれも Linux の home-manager (`nix/home/modules/starship.nix`) が入れるものに当たる:
 
-- starship 本体と、`$PROFILE` の初期化の 1 行 (`Invoke-Expression (&starship init powershell)`) は配らない (手で入れたもののまま。[PowerShell](#powershell))。
-  starship の無い PC に置いても、読むものがいないだけ
+| もの | Windows で入れる手順 | Linux では |
+| --- | --- | --- |
+| starship 本体 (`starship.exe`) | runner の `starship` (`starship/Install-Starship.ps1`。order 97。[後述](#starship-を入れる-winget)) | `programs.starship.enable` が nixpkgs の starship を入れる |
+| init の 1 行 | runner の `starship-init` (`$PROFILE`。order 94。[後述](#profile-の-init-の-1-行)) | home-manager が fish・bash の init を書く |
+| 設定 `starship.toml` | manifest の `base = "nix"` の表 (手順 `files`。[後述](#starshiptoml)) | home-manager が同じ `nix/files/starship.toml` を `~/.config/starship.toml` に置く |
+
+本体と init の 1 行は Windows にしか無い手順 (WSL の setup には無い) で、① エンジニアの道具 (Linux もどのグループでも入れる) なので道具の switch を
+持たない (どのホストでもいつも on。受け持ちが WSL のホストでも `dotfiles apply` が入れる)。
+
+### starship を入れる (winget)
+
+`starship/Install-Starship.ps1` は starship を winget で入れ、版を `-Version` の既定値の 1 か所で固定する。版は Linux の home-manager が入れる starship
+(`nix/flake.lock` の nixpkgs) と同じにする。形は [ghq・fzf](#ghqfzf) の fzf と同じ (zip の中の portable。管理者は要らない。常駐も UAC も無いので、
+版のずれも揃える)。
+
+| winget の ID | 固定した版 (`-Version` の既定値) | 置き場所 (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\` の下) |
+| --- | --- | --- |
+| `Starship.Starship` | `1.27.0` | `Starship.Starship_Microsoft.Winget.Source_8wekyb3d8bbwe\starship.exe` |
+
+| 打つもの | すること |
+| --- | --- |
+| `Install-Starship -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (MSI の starship が入っていれば 1) |
+| `Install-Starship` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
+| `dotfiles apply --steps starship` (PowerShell) | runner の手順で揃える (入っていなければ入れ、版か pin がずれていれば揃える。PATH のずれと MSI の starship は知らせるだけ) |
+| `nix/scripts/check-winget-version.sh starship` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#starship-の新しい版が出たとき)) |
+
+揃えるときにすることは [ntn](#ntn) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うところ:
+
+- 入れる・取得を確かめるときは `--installer-type portable` で portable を名指しする。winget の `Starship.Starship` は portable の zip と
+  machine スコープの MSI (`%ProgramFiles%\starship\bin`。UAC が要る) を並べ、名指ししないと winget は MSI を選ぶ
+- MSI の starship (手で `winget install Starship.Starship` を打つと入る。x86 の MSI は `%ProgramFiles(x86)%\starship\bin`) が入っていると、portable と
+  二重になり、winget の install と pin がどちらを指すかが決まらない (PATH ではマシンの MSI が先に引かれる)。そのため `Install-Starship` は何も入れずに
+  止まり、`-Check` は 1 を返して外し方を出す (runner は知らせるだけ)。PowerShell で `winget uninstall --id Starship.Starship --exact --scope machine` を
+  打って外し (UAC の確認が出る)、続けて `Install-Starship` か `dotfiles apply --steps starship` を打つ。外してから入れるまでの間に開いた PowerShell では、
+  `Get-Command` で囲んでいない手書きの init の行がエラーを出すので、間を空けずに打つ
+- 入れた後は、新しい PowerShell を開くと starship のプロンプトになる (winget がユーザーの PATH に足すのは、これから開く PowerShell の分。herdr-app の
+  中の端末は herdr-app が起きたときの PATH を受け継ぐので、herdr-app を上げ直してから)
+- 入れ替えるときに置き場所の starship.exe が動いている (描き終わらないプロンプトなど) と、置き換えられないので何も変えずに止まり、PID と
+  コマンドラインを出す。終わらせてから打ち直す
+- PATH で別の starship (scoop・`cargo install` のものなど) が先に引かれると、`-Check` の「PATH の starship」が ⚠ になる。揃える手順では直らないので、
+  ※ の行の手順でその置き場所を外す
+- 消すなら PowerShell で `winget pin remove --id Starship.Starship --exact` の後に `winget uninstall --id Starship.Starship --exact` を打つ (runner の手順は
+  いつも on なので、次の `dotfiles apply` で入れ直す)
+
+### $PROFILE の init の 1 行
+
+runner の `starship-init` が、PowerShell 7 の `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`。[PowerShell](#powershell) と同じ) に次の 1 行を足す:
+
+```powershell
+if (Get-Command starship -CommandType Application -ErrorAction SilentlyContinue) { Invoke-Expression (&starship init powershell) }
+```
+
+- 置くのは `dotfiles.ps1` を読む行より前。starship の init は先に置かれた Vi モードの handler (`ViModeChangeHandler`) を包み、`dotfiles.ps1` は init の
+  後に読まれる前提で、その handler を包まずに置き換える ([モードの印](#モードの印-カーソルの形))。逆の順だと、モードが替わるたびにプロンプトを 2 回描き直す
+  - `dotfiles.ps1` を読む行があれば、そのすぐ前に差し込む。書き直す前の中身は `%LOCALAPPDATA%\dotfiles\state\starship-init\backup\` へ写す (10 回分)。
+    書き直しは同じファイルへの上書き (OneDrive が同期するファイルを置き換えない)
+  - 無ければ末尾に足す。新しい PC では、続く `powershell-profile` (order 95) がその後ろに `dotfiles.ps1` を読む行を足す
+- `Get-Command` で囲むのは、starship の無い PC (入れる前・OneDrive の同期で `$PROFILE` だけが届いた PC) でも起動のたびにエラーを出さないため
+  (`dotfiles.ps1` の行の `Test-Path` と同じ)。`-CommandType Application` は PATH の exe だけを引き、モジュールを探さない
+- starship の init の行 (`starship` と `init powershell` を含む行。大文字小文字を問わず、頭に `#` を付けた行も) が既にあれば、足さずに記録だけする
+  (手で書いた `Invoke-Expression (&starship init powershell)` と二重に init しない)。その行が `dotfiles.ps1` を読む行より後ろにあれば (どちらも頭に `#` の
+  無い行のとき)、runner は動かさずに ⚠ で前へ移すよう知らせる
+- 足した 1 行 (記録した手書きの行も) を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら `dotfiles apply --steps starship-init --force`。
+  手書きの行を、`Get-Command` で囲んだこの 1 行に替えるときも、手書きの行を消してから同じく `--force` で流す
+- 記録は PC ごと (`%LOCALAPPDATA%\dotfiles\state\starship-init.added.json`) なので、`$PROFILE` を OneDrive で同期している PC では、消した行を記録の
+  無い別の PC の apply が足し直し、同期で戻ってくることがある。止めたいときは消さずに頭に `#` を付ける (`#` を付けた行は、どの PC でも足さない印になる)
+- runner が見るのは `$PROFILE` (CurrentUserCurrentHost) だけ。starship の init を別のファイル (`$PROFILE.CurrentUserAllHosts` の `profile.ps1`・`$PROFILE` から
+  読むファイル) に書いている PC では二重になるので、`$PROFILE` に頭に `#` を付けた `# starship init powershell` の 1 行を置く (足さなくなる)
+- 差し込む所の前の行が行末の `` ` `` (次の行へ続く印) で終わるときと、`$PROFILE` が UTF-16 のときは書かずに、同じ 1 行を手で足す道を出す (UTF-16 でも、
+  init の行があるかは読む)。pwsh が無いときも同じ
+
+### starship.toml
+
+starship の設定 `starship.toml` を、Linux と同じファイル (`nix/files/starship.toml`) から `%USERPROFILE%\.config\starship.toml` に配る。starship は環境変数
+`STARSHIP_CONFIG` が無ければここを読む。配るのは manifest の `base = "nix"` の表 ([ファイルを足す](#ファイルを足す)) で、受け持ちを runner に切り替えた
+ホストは `dotfiles apply` の手順 `files`、ほかは WSL の `~/dotfiles/setup --update` ([配る](#配る))。初めて配るときは、`dotfiles apply --dry-run` に
+`[dry-run] コピー: …\.config\starship.toml`、`dotfiles check` に `無い (apply でコピーする): …\.config\starship.toml` と出る。
+
 - starship はプロンプトのたびに設定を読むので、置いたら次のプロンプトから効く (読み直しは要らない)
 - 置き先に手で書いた `starship.toml` があると、初めて配るときに「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら))。Windows の中身を
   残すなら `nix/files/starship.toml` に取り込む (Linux の見た目も変わる)。`STARSHIP_CONFIG` で別のファイルを指している PC では、置いたファイルは読まれない
@@ -2003,6 +2080,41 @@ starship (プロンプト) の設定 `starship.toml` を、Linux と同じファ
   ssh-agent の仕組み) だけで、Windows では出ない
 - ほかの module は Windows でもそのまま使える (`sudo` は starship の既定の `allow_windows = false` で、Windows では出ない)。罫線 (`┌`・`│`・`└`) と
   絵文字 (`🕙`・`🌏`・`⚠`) は Linux と同じ字で、字体に無い字が □ で出るなら端末の字体を見る
+
+### starship の新しい版が出たとき
+
+固定した版より新しい版が winget に載って 30 日たつと、GitHub Actions の `winget-versions` の `Windows の starship` の job が落ちて知らせる。出た日は
+winget-pkgs に載った日 (GitHub にも release を出すが、winget に載らない版 (1.10.0・1.20.0 など) があるので、GitHub とは比べない)。固定した版より
+新しい版の知らせ (runner の `pin-updates`。WSL の setup では、Windows の ghq に dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる場合・
+見送りの一覧は [winget の新しい版を確かめる](#winget-の新しい版を確かめる)。
+
+上げるとき:
+
+1. 上げる版は、Linux の home-manager が入れる starship と同じにする (`nix/flake.lock` を上げて nixpkgs の starship が上がったら、Windows も同じ版に
+   上げる。今の nixpkgs の版は `nix eval --raw --inputs-from ./nix nixpkgs#starship.version`)。その版が winget に載っていない・猶予の中なら、載るまで待つ
+2. release notes で、PowerShell の init (`src/init/starship.ps1`。先に置かれた `ViModeChangeHandler` を包む形。`dotfiles.ps1` の Vi モードが前提にする) と、
+   設定の読み方 (`nix/files/starship.toml` が警告なしで読めるか) に触る変更が無いかを見る。winget の manifest にまだ portable の zip があるか
+   (`winget show --id Starship.Starship --version <版> --installer-type portable`) も見る
+3. `starship/Install-Starship.ps1` の `-Version` の既定値と、上の表の版を新しい版にし、`Install-Starship.Tests.ps1` を流して PR を出す (`winget-versions` が、
+   書いた版が winget にあるかを確かめる)
+4. merge したら、Windows で `dotfiles --self-update apply` (clone を進めてから流す。`--steps starship` で絞れる) を流す (runner が揃える)
+5. `Install-Starship -Check` が「揃っている」になり、`starship --version` が新しい版を出すことを確かめる
+
+見送るとき: `starship/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版を戻すときは `-Version` を前の版にすれば、runner が下げる。
+
+### Install-Starship.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
+- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `starship/Install-Starship.Tests.ps1` で確かめる (Linux の pwsh):
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/starship/Install-Starship.Tests.ps1
+  ```
+
+- runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`starship (winget の Starship.Starship`) と、締めの行の文言
+  (`→ Install-Starship で入れる`・`→ Install-Starship で揃える`・`→ ※ の手順で直す`・`MSI の starship (machine スコープ) が入っている`) で分かれる。
+  変えるときは向こうも直す (WSL の wrapper は無いので、runner の試験が ps1 の字と突き合わせる)
+- winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## herdr
 

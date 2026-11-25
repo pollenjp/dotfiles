@@ -17,7 +17,7 @@
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
-//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
+//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf・starship。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
 //! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
@@ -843,6 +843,51 @@ pub const SPECS: &[Ps1Spec] = &[
         notices: &[],
         alerts: &[],
     },
+    // starship (プロンプト。Windows にしか無い手順。WSL の setup には無い。$PROFILE の init の 1 行は手順 starship-init が足す)。① エンジニアの
+    // 道具で、Linux はどのグループでも home-manager が入れるので、いつも on。fzf と同じく winget の既定の installer (machine スコープの MSI) を
+    // 避けて portable を入れ、版のずれも揃える (Policy::Sync)。MSI の starship が入っていれば、ps1 は portable を入れずに 1 を返し、締めの行は
+    // 「→ ※ の手順で直す」だけになる。その行の印で外し方を出す
+    Ps1Spec {
+        id: "starship",
+        windows_only: true,
+        order: 97,
+        title: "starship (プロンプト) を固定した版 (portable) に揃える",
+        gate: Gate::Always,
+        script: "win/starship/Install-Starship.ps1",
+        command: "Install-Starship",
+        subject: "Windows の starship",
+        package: "starship (winget の Starship.Starship)",
+        header: Header::Contains("starship (winget の Starship.Starship"),
+        check_secs: 120,
+        install_secs: 600,
+        policy: Policy::Sync,
+        uac: false,
+        ok_text: "Windows の starship は、dotfiles で固定した版に揃っています。",
+        installed: &[
+            "Windows の starship を入れました (固定した版と pin が揃っています)。新しい PowerShell から starship のプロンプトになります (herdr-app の中の端末なら herdr-app を上げ直してから)。",
+        ],
+        synced: &["Windows の starship を揃えました (固定した版と pin が揃っています)。"],
+        manual_fix: &[
+            "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「starship」)",
+        ],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-Starship を打つか、dotfiles apply --steps starship を流し直す (入れ替えるときは、動いている starship を先に終わらせる)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        missing_blocked: None,
+        output_fixes: &[(
+            "MSI の starship (machine スコープ) が入っている",
+            "MSI の starship (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id Starship.Starship --exact --scope machine を打って外し (UAC の確認が出る)、続けて dotfiles apply --steps starship を流す (win/README.md の「starship」)",
+        )],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+        leftover: None,
+        notices: &[],
+        alerts: &[],
+    },
 ];
 
 /// herdr の Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)
@@ -1642,8 +1687,8 @@ mod tests {
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
     //!   揃っていない」)、行と前に出す行を中継の字にする。手で打つ -Check にも中継のモードを添える。前に出す行は手順の字 (無い手順は型の字と
     //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
-    //! - ghq・fzf は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、PATH の
-    //!   ずれだけなら知らせる。fzf は MSI の fzf の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
+    //! - ghq・fzf・starship は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、
+    //!   PATH のずれだけなら知らせる。fzf・starship は MSI の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
     //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
     //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
@@ -1865,12 +1910,25 @@ mod tests {
         assert!(o[0].notes[0].contains("Install-Ntn"));
     }
 
-    /// ghq・fzf: Windows にしか無い手順で、いつも on。ntn と同じく入れる・揃える・PATH のずれは知らせる
+    /// ghq・fzf・starship: Windows にしか無い手順で、いつも on。ntn と同じく入れる・揃える・PATH のずれは知らせる
     #[test]
-    fn ghq_and_fzf_sync_like_ntn() {
-        for (id, command, name, path_owner) in [
-            ("ghq", "Install-Ghq", "ghq", "winget のもの"),
-            ("fzf", "Install-Fzf", "fzf", "winget の portable のもの"),
+    fn ghq_fzf_and_starship_sync_like_ntn() {
+        for (id, command, name, path_owner, section) in [
+            ("ghq", "Install-Ghq", "ghq", "winget のもの", "ghq・fzf"),
+            (
+                "fzf",
+                "Install-Fzf",
+                "fzf",
+                "winget の portable のもの",
+                "ghq・fzf",
+            ),
+            (
+                "starship",
+                "Install-Starship",
+                "starship",
+                "winget の portable のもの",
+                "starship",
+            ),
         ] {
             let s = spec(id);
             assert!(s.windows_only, "{id}");
@@ -1942,10 +2000,48 @@ mod tests {
             );
             assert_eq!(
                 o[0].notes,
-                vec![
-                    "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「ghq・fzf」)"
-                ],
+                vec![format!(
+                    "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「{section}」)"
+                )],
                 "{id}"
+            );
+        }
+    }
+
+    /// starship: fzf と同じく、MSI の starship が入っていると ps1 は portable を入れずに 1 を返す (締めの行は「→ ※ の手順で直す」だけ)。
+    /// runner は打たずに知らせ、MSI の外し方を出す (PATH のずれの直し方の代わり)
+    #[test]
+    fn starship_msi_is_manual_with_the_uninstall_fix() {
+        let s = spec("starship");
+        let msi = (
+            1,
+            vec![
+                header_line(s),
+                "⚠ MSI の starship (machine スコープ。winget の既定の installer) が入っている: C:\\Program Files\\starship\\bin\\starship.exe".into(),
+                "⚠️ MSI の starship (machine スコープ) が入っている → ※ の手順で直す ⚠️".into(),
+            ],
+        );
+        for mode in [Mode::Check, APPLY] {
+            let sys1 = sys(msi.clone(), (0, vec![]));
+            let (o, _, calls) = run("starship", &sys1, mode);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(
+                o[0].text,
+                "MSI の starship (machine スコープ) が入っている (Install-Starship -Check の ※ の行。runner は直さない)"
+            );
+            assert_eq!(ends(&calls), vec!["-Check"]);
+            assert_eq!(o[0].notes.len(), 1);
+            assert!(
+                o[0].notes[0]
+                    .contains("winget uninstall --id Starship.Starship --exact --scope machine"),
+                "{:?}",
+                o[0].notes
+            );
+            assert!(
+                o[0].notes[0].contains("dotfiles apply --steps starship"),
+                "{:?}",
+                o[0].notes
             );
         }
     }
@@ -2023,7 +2119,7 @@ mod tests {
         let only: Vec<&Ps1Spec> = SPECS.iter().filter(|s| s.windows_only).collect();
         assert_eq!(
             only.iter().map(|s| s.id).collect::<Vec<_>>(),
-            vec!["t3-code", "claude-desktop", "ghq", "fzf"]
+            vec!["t3-code", "claude-desktop", "ghq", "fzf", "starship"]
         );
         for s in only {
             let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());

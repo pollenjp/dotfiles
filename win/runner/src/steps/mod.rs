@@ -41,6 +41,7 @@ pub mod ps1;
 pub mod ssh_config;
 pub mod sshd_allow;
 pub mod sshd_keys;
+pub mod starship_init;
 pub mod t3_code_settings;
 pub mod terminal;
 pub mod tool_skill;
@@ -118,7 +119,7 @@ pub enum Mode {
     /// apply がすることを出すだけ (何も書かない)。`force` は apply の --force のときと同じ予告を出す
     DryRun { force: bool },
     /// 揃える。`force` は files などのコピーの衝突も上書きし (ssh-config・port-forward は元を退避してから。ssh-config は正本から消えたファイルも)、
-    /// 足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile)
+    /// 足した後で消した `$PROFILE` の 1 行も足し直す (powershell-profile・starship-init)
     Apply { force: bool },
 }
 
@@ -217,6 +218,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         // dotfiles-private の docs/adr/087_claude_selector_*)
         Box::new(claude_selector::ClaudeSelector),
         Box::new(files::Files),
+        // $PROFILE に starship の init の 1 行を、dotfiles.ps1 を読む行より前に足す (Windows にしか無い手順。starship を入れるのは ps1 の手順
+        // starship。dotfiles-private の docs/superpowers/specs/2026-11-25-win-starship-install-design.md)
+        Box::new(starship_init::StarshipInit),
         // WSL の setup の手順を写したもの (受け持ちを runner に切り替えたホストでだけ apply が書く。移す順と移し方は dotfiles-private の
         // docs/adr/060_win_runner_core_* の §2 A)
         Box::new(powershell_profile::PowershellProfile),
@@ -290,6 +294,7 @@ mod tests {
                 (91, "powertoys"),
                 (91, "ssh-config"),
                 (92, "fancyzones"),
+                (94, "starship-init"),
                 (95, "google-ime-install"),
                 (95, "powershell-profile"),
                 (96, "openssh"),
@@ -303,6 +308,7 @@ mod tests {
                 (97, "herdr"),
                 (97, "ntn"),
                 (97, "pin-updates"),
+                (97, "starship"),
                 (97, "t3-code"),
                 (97, "type-clipboard"),
                 (98, "google-ime"),
@@ -360,7 +366,8 @@ mod tests {
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定とマシンローカルの
     /// 環境変数のファイル (local-env) と herdr-app の mod
     /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
-    /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) だけ (WSL から写した手順・まだ無い手順は受け持ちに従う)
+    /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) と starship (入れる ps1 の手順と、$PROFILE の init の 1 行の starship-init) だけ
+    /// (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
         let only: Vec<&str> = all()
@@ -385,9 +392,11 @@ mod tests {
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",
+                "starship-init",
                 "claude-desktop",
                 "fzf",
                 "ghq",
+                "starship",
                 "t3-code",
                 "hc-skill",
                 "herdr-app-mods",
