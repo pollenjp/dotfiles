@@ -353,14 +353,33 @@ function Install-Sshd { & "$HOME\.config\powershell\Install-Sshd.ps1" @args }
 # dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で
 # build して起こす。cargo は win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は
 # 既定の toolchain を入れていないので、--manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
+#
+# dotfiles --self-update [--dry-run] [<runner の引数>…] は、dotfiles・dotfiles-private・claude-skills の clone を gh の資格情報で fetch して
+# fast-forward し、runner の引数があればその後に runner に渡す (Linux の ~/dotfiles/setup --self-update に当たる。win/README.md の「clone を進める
+# (dotfiles --self-update)」)。中身は clone の中の win\powershell\Invoke-DotfilesSelfUpdate.ps1 で、ここはそれを呼ぶだけにする (配った写しでなく
+# clone のものを呼ぶので、$PROFILE で読んだこの関数が古いままでも、pull した更新の処理が次の呼び出しから効く。runner の流し方を直すときは、
+# その script の末尾の cargo の行も直す)。--self-update は最初の引数に書く。
 function dotfiles {
-    $runner = [IO.Path]::Combine($HOME, 'ghq', 'github.com', 'pollenjp', 'dotfiles', 'win', 'runner')
+    $clone = [IO.Path]::Combine($HOME, 'ghq', 'github.com', 'pollenjp', 'dotfiles')
+    $runnerArgs = @(ConvertTo-DotfilesRunnerArgs -Arguments $args)
+    if (($runnerArgs.Count -gt 0) -and ($runnerArgs[0] -ceq '--self-update')) {
+        $selfUpdate = [IO.Path]::Combine($clone, 'win', 'powershell', 'Invoke-DotfilesSelfUpdate.ps1')
+        if (-not (Test-Path -LiteralPath $selfUpdate -PathType Leaf)) {
+            Write-Host "dotfiles の clone に --self-update の中身がありません: $selfUpdate (clone が無ければ win\bootstrap\Install-Bootstrap.ps1 で clone する。clone が古ければ、win/README.md の「clone を進める」の手で一度だけ手で pull する)" -ForegroundColor Yellow
+            $global:LASTEXITCODE = 2
+            return
+        }
+        # 変数に入れてから @ で広げる (& $selfUpdate @(…) は配列を 1 つの引数で渡し、script の側で空白でつながった 1 つの字になる)
+        $selfUpdateArgs = @($runnerArgs | Select-Object -Skip 1)
+        & $selfUpdate @selfUpdateArgs
+        return
+    }
+    $runner = [IO.Path]::Combine($clone, 'win', 'runner')
     if (-not (Test-Path -LiteralPath (Join-Path $runner 'Cargo.toml'))) {
         Write-Host "dotfiles の runner がありません: $runner (先に win\bootstrap\Install-Bootstrap.ps1 で clone する)" -ForegroundColor Yellow
         $global:LASTEXITCODE = 2
         return
     }
-    $runnerArgs = @(ConvertTo-DotfilesRunnerArgs -Arguments $args)
     Push-Location -LiteralPath $runner
     try {
         # '--' は引用符で囲む。素の -- は PowerShell が引数の終わりの印として読み、版や呼び先によっては cargo に届かない
@@ -371,9 +390,9 @@ function dotfiles {
     }
 }
 
-# dotfiles 関数が runner に渡す引数。PowerShell は `--steps files,ntn` の `files,ntn` を配列にし (`--steps=files,ntn` も
-# `--steps=files` と `ntn` の配列にする)、関数の @args はそれを別々の引数に広げるので、配列は , でつなぎ直して 1 つの引数にする
-# (runner は `--steps a,b` の形で受ける)。
+# dotfiles 関数が runner (--self-update なら、その script) に渡す引数。PowerShell は `--steps files,ntn` の `files,ntn` を配列にし
+# (`--steps=files,ntn` も `--steps=files` と `ntn` の配列にする)、関数の @args はそれを別々の引数に広げるので、配列は , でつなぎ直して
+# 1 つの引数にする (runner は `--steps a,b` の形で受ける)。
 function ConvertTo-DotfilesRunnerArgs {
     param([object[]]$Arguments)
     foreach ($a in $Arguments) {

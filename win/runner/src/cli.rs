@@ -37,6 +37,9 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           取り込む (Google 日本語入力のファイルには書かない。commit は自分で。
                                                           dotfiles-private の diff には辞書の語が出るので自分の端末で見る。同上)
   dotfiles manifest [--json] [--windows-home <path>]      win/manifest.toml を検証する (--json は置き先を解いた計画)
+  dotfiles --self-update [--dry-run] [<上の引数>…]        dotfiles・dotfiles-private・claude-skills の clone を fetch して fast-forward し、
+                                                          上の引数があれば、その後にこの runner を流す (PowerShell の dotfiles 関数が
+                                                          受け持ち、runner には来ない。win/README.md の「clone を進める」)
   dotfiles-win claude-hook <名前>                         Claude Code の hook (stdin の JSON を読む。claude-files が写した
                                                           %USERPROFILE%\\.claude\\hooks\\dotfiles-claude.exe を settings.json が呼ぶ口)
   dotfiles-win claude-statusline                          Claude Code の status line (同じ口)
@@ -77,6 +80,11 @@ pub enum Command {
 
 /// 取り込める手順 (WSL の script の `--import` を写したもの)
 pub const IMPORTABLE: &[&str] = &["terminal", "fancyzones", "international", "google-ime"];
+
+/// `--self-update` が runner に来たときの誤り (開いている PowerShell の dotfiles 関数が古い)
+const SELF_UPDATE_OLD_FUNCTION: &str = "--self-update は PowerShell の dotfiles 関数が受け持つが、この PowerShell の dotfiles 関数は --self-update を\
+知らない古いもの → dotfiles apply で dotfiles.ps1 を配ってから (受け持ちが WSL のホストは WSL の ~/dotfiles/setup --self-update --update)、\
+新しい PowerShell を開く。clone も古ければ、先に一度だけ手で pull する (win/README.md の「clone を進める (dotfiles --self-update)」)";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Args {
@@ -127,6 +135,9 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         "manifest" => Command::Manifest,
         "import" => Command::Import,
         "help" | "-h" | "--help" => return Ok(Args::new(Command::Help)),
+        // --self-update は PowerShell の dotfiles 関数 (win/powershell/dotfiles.ps1) が受け持ち、runner には渡さない。ここに来たのは、開いている
+        // PowerShell の dotfiles 関数が --self-update を知らない古いもの
+        "--self-update" => return Err(SELF_UPDATE_OLD_FUNCTION.to_string()),
         other => return Err(format!("知らないコマンドです: {other}")),
     };
     let mut a = Args::new(command);
@@ -646,9 +657,24 @@ mod tests {
             &["import", "terminal", "--force"][..],
             &["import", "terminal", "--steps", "terminal"][..],
             &["check", "terminal"][..],
+            &["--self-update"][..],
         ] {
             assert!(p(args).is_err(), "{args:?}");
         }
+    }
+
+    /// --self-update は PowerShell の dotfiles 関数が受け持つ。runner に来たら、関数が古いことと直し方を出す (知らないコマンドとは出さない)
+    #[test]
+    fn self_update_is_for_the_powershell_function() {
+        for args in [&["--self-update"][..], &["--self-update", "apply"][..]] {
+            let e = p(args).unwrap_err();
+            assert!(
+                e.starts_with("--self-update は PowerShell の dotfiles 関数が受け持つ"),
+                "{e}"
+            );
+            assert!(e.contains("新しい PowerShell を開く"), "{e}");
+        }
+        assert!(USAGE.contains("dotfiles --self-update [--dry-run]"));
     }
 
     /// hook と status line の口: stdin を読んで答え、いつも 0。hook の口の写しは runner のコマンドを流さない (0)。ほかは runner へ (None)

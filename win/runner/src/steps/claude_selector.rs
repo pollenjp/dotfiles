@@ -195,7 +195,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
         return failed(
             ctx,
             format!(
-                "crate が無い ({}。dotfiles の clone を pull する)",
+                "crate が無い ({}。dotfiles の clone を進める: dotfiles --self-update apply)",
                 crate_dir.display()
             ),
         );
