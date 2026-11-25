@@ -120,12 +120,12 @@ impl Step for Pjp {
                 Outcome::new(
                     Kind::Manual,
                     format!(
-                        "claude-skills の clone に Rust の道具 (crates/pjp-shim) がまだ無い ({}) → clone を pull する",
+                        "claude-skills の clone に Rust の道具 (crates/pjp-shim) がまだ無い ({}) → clone を進める (dotfiles --self-update apply)",
                         clone.display()
                     ),
                 )
                 .note(format!(
-                    "pull の例 (gh の資格情報で HTTPS を通す): git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= -c 'credential.helper=!gh auth git-credential' -C '{}' pull --ff-only",
+                    "dotfiles 関数が --self-update を知らない古いものなら、手で pull する (gh の資格情報で HTTPS を通す): git -c url.https://github.com/.insteadOf=git@github.com: -c credential.helper= -c 'credential.helper=!gh auth git-credential' -C '{}' pull --ff-only",
                     super::ps1::ps_quote(&clone.to_string_lossy())
                 )),
             ];

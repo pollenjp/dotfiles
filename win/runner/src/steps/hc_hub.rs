@@ -153,7 +153,7 @@ impl Step for HcHub {
             return vec![Outcome::new(
                 Kind::Manual,
                 format!(
-                    "claude-skills の clone に pjp-hc-hub の道具がまだ無い ({}) → clone を pull する",
+                    "claude-skills の clone に pjp-hc-hub の道具がまだ無い ({}) → clone を進める (dotfiles --self-update apply)",
                     clone.display()
                 ),
             )];

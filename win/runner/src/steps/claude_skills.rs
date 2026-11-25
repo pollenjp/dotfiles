@@ -7,8 +7,9 @@
 //! で判定する: 置き先が無い → コピー・同じ中身 → 何もしない・記録と同じ中身 → 上書き・ほか → 衝突 (`--force` で上書き)。clone を pull したら
 //! `dotfiles apply` で写し直す (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*)。つなぎ方は claude-files と共有 (`linker`)。
 //!
-//! clone は runner の clone の隣、無ければ bootstrap の置き場 (`ctx.sibling`)。取得はしない (bootstrap が clone し、更新は人の
-//! `git pull`。runner の `self-update` はまだ無い (続きの PR に回した))。
+//! clone は runner の clone の隣、無ければ bootstrap の置き場 (`ctx.sibling`)。runner は取得しない (bootstrap が clone し、進めるのは人が
+//! 打つ PowerShell の `dotfiles --self-update`。dotfiles 関数が clone の中の `win/powershell/Invoke-DotfilesSelfUpdate.ps1` を呼び、3 つの clone を
+//! fast-forward してから runner を流す。dotfiles-private の docs/adr/101_win_dotfiles_self_update_*)。
 
 use super::linker::{Linker, Source};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
