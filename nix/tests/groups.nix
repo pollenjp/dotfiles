@@ -21,6 +21,8 @@
 #     既定で off (鍵を使う ssh の通り道を替えるので、入れるホストが書く)
 #   - windowsTypeClipboard (Windows の type-clipboard。自作のアプリで、個人の GitHub の repo の Release から入れる) は ③ の道具で、
 #     既定は段によらず (derived = false)、どのグループでも off (入れるホストが書く)
+#   - linger (systemd の linger。setup の手順 linger が有効にする) は ② の道具で、既定はどのグループでも herdrCore と同じ値。
+#     herdrCore.enable = false のホストでは off。client で linger.enable = true だけを書けば、herdrCore は off のまま linger だけ on
 #   - 依存の assertion: client で devTracker.enable = true だけを書くと評価で止まり、claude.privateSkills.enable と
 #     claude.enable も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る
 #   - 知らないグループ ("customer") は評価で止まる
@@ -236,6 +238,29 @@ let
           company
           client
         ];
+    }
+    {
+      name = "linger は ② の道具で、既定は herdrCore.enable に従う (herdrCore を false にすると off。linger だけ書くこともできる)";
+      ok =
+        let
+          t = builtins.head (builtins.filter (t: t.key == "linger") groups.tools);
+          noCore = cfgOf { modules = [ { dotfiles.herdrCore.enable = false; } ]; };
+          clientLinger = cfgOf {
+            group = "client";
+            modules = [ { dotfiles.linger.enable = true; } ];
+          };
+        in
+        t.tiers == [ "aiTools" ]
+        && t.derived
+        && builtins.all (cfg: (json cfg).tools.linger == (json cfg).tools.herdrCore) [
+          unset
+          personal
+          company
+          client
+        ]
+        && !(json noCore).tools.linger
+        && (json clientLinger).tools.linger
+        && !(json clientLinger).tools.herdrCore;
     }
     {
       name = "client で devTracker.enable = true だけを書くと評価で止まる";

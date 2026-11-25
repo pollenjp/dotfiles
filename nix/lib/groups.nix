@@ -4,7 +4,7 @@
 # 入れるか」で決まる。
 #
 #   ① エンジニアの道具              shell・git・ssh・vim・tmux・CLI・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ
-#   ② AI の道具                     Claude Code 一式・herdr・cursor-agent・Windows の Claude Code と herdr
+#   ② AI の道具                     Claude Code 一式・herdr・herdr-core と systemd の linger・cursor-agent・Windows の Claude Code と herdr
 #   ③ 個人の道具                    個人のアカウントにつながるもの。1Password・Notion (ntn・Dev Tracker)・private な repo の clone・
 #                                   個人の git の名前とメール・自作の type-clipboard (個人の GitHub の repo の Release)
 #
@@ -115,6 +115,7 @@ let
     cleanup = "store・mise の掃除";
     claude = "Claude Code";
     herdrCore = "herdr-core (hc)";
+    linger = "systemd の linger";
     windowsClaudeCode = "Win の Claude Code";
     windowsHerdr = "Win の herdr";
     t3Code = "T3 Code";
@@ -172,6 +173,14 @@ let
     (tool "claude" "Claude Code 一式" [ "claude" "enable" ] [ "aiTools" ] { })
     (tool "herdr" "herdr" [ "herdr" "enable" ] [ "aiTools" ] { })
     (tool "herdrCore" "herdr-core (hc)" [ "herdrCore" "enable" ] [ "aiTools" ] { })
+    # systemd の linger (setup の手順 linger が sudo loginctl enable-linger で有効にする)。herdr-core の server (user の service) を
+    # ログアウトで止めないための道具なので、既定は herdrCore.enable に従う (Linux だけの条件も herdrCore の既定が持つ。
+    # dotfiles-private の docs/adr/101_linger_with_herdr_core_*)
+    (tool "linger" "systemd の linger (ログアウトしても user の service を止めない)"
+      [ "linger" "enable" ]
+      [ "aiTools" ]
+      { }
+    )
     (tool "windowsClaudeCode" "Windows の Claude Code"
       [ "wsl" "windowsFiles" "claudeCode" "enable" ]
       [ "aiTools" ]

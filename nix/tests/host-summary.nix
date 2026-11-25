@@ -21,7 +21,7 @@
 #   - md は h1 (code span のホスト名) から始まり、3 行目が HTML 版の跡の行 (Notion に写す道具が h1 の下に行を足せるように)、
 #     ホストの値のファイルへの相対のリンク・グループ・ホストで決めた値・効かない道具の理由・生成物の断り (末尾) を持つ
 #   - HTML 版は doctype と charset から始まる 1 ファイルで、外のファイルを読まない。#data の JSON は < を逃がしてあり、読み直すと
-#     タブ (このホスト・既定・重ねて比べる)・列・28 の道具・option の頭 (dotfiles.) を持つ。リンクは新しいタブで開く GitHub の URL
+#     タブ (このホスト・既定・重ねて比べる)・列・表の全部の道具・option の頭 (dotfiles.) を持つ。リンクは新しいタブで開く GitHub の URL
 #   - winData: グループ・[tools] の上書き (host) とグループの既定 (group)・効く条件 (opReasonSshRelay は onePassword) で効かない道具・
 #     runner の道具だけ・図に描けない値 (受け持ち・鍵の本数とコメント (鍵そのものは出さない)・ユーザー・送り元の数)。group を書かない
 #     ホストは personal で unset。知らないグループ・知らない道具・bool でない道具の値は評価で止める。図の段の説明は、① が「どのグループ
@@ -263,7 +263,7 @@ let
         && lib.hasInfix "https://github.com/pollenjp/dotfiles-private/blob/main/nix/hosts/carol@three.nix" carolHtml;
     }
     {
-      name = "#data の JSON は < を逃がしてあり、タブ・列・28 の道具・dotfiles. の頭の option を持つ";
+      name = "#data の JSON は < を逃がしてあり、タブ・列・表の全部の道具・dotfiles. の頭の option を持つ";
       ok =
         !(lib.hasInfix "</" (
           builtins.head (
