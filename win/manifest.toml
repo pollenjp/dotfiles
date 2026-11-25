@@ -17,6 +17,15 @@ src = "powershell/dotfiles.ps1"
 dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
 hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、WSL の setup の bootstrap-windows-powershell-profile.sh か、受け持ちを切り替えたホストでは runner の powershell-profile が足す)"
 
+# starship のプロンプトの設定。Linux の home-manager (nix/home/modules/files.nix) も同じファイルを ~/.config/starship.toml に置くので、
+# nix/ に置いて base = "nix" で配る。starship は環境変数 STARSHIP_CONFIG が無ければ %USERPROFILE%\.config\starship.toml を読む。
+# starship 本体と $PROFILE の初期化の 1 行は配らない (README.md の「starship」)
+[[files]]
+base = "nix"
+src = "files/starship.toml"
+dst = "%USERPROFILE%/.config/starship.toml"
+hint = "starship はプロンプトのたびに読むので、読み直しは要らない (次のプロンプトから効く。starship 本体と $PROFILE の初期化の 1 行は dotfiles では入れない)"
+
 [[files]]
 src = "herdr/config.toml"
 dst = "%APPDATA%/herdr/config.toml"
