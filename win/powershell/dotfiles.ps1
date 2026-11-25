@@ -133,8 +133,10 @@ function Set-DotfilesViModeCursor {
     if ("$Mode" -eq 'Command') { [Console]::Write("$([char]27)[2 q") } else { [Console]::Write("$([char]27)[6 q") }
 }
 
-# 割り当ては、PSReadLine を読み込んだ対話の PowerShell でだけする。script・CI (-File・-NonInteractive) の PowerShell は PSReadLine を
+# 割り当ては、PSReadLine を読み込んだ PowerShell でだけする。script・CI (-File・-NonInteractive) の PowerShell はふつう PSReadLine を
 # 読み込まないので、割り当てずに抜ける (Get-Module は読み込まないが、Set-PSReadLineKeyHandler は打つと PSReadLine を読み込む)。
+# ただし $PROFILE でこの前に読む starship の init は Set-PSReadLineOption を打って PSReadLine を読み込むので、-NoProfile の無い script の
+# PowerShell でも、starship が PATH にあれば割り当てる (プロンプトが無いので効かない。カーソルの形は、出力をパイプで受けていなければ書く)。
 # 広げるところで落ちても、打ったキーの字を入れる・実行するところは流す (Space や Enter を打てなくしない)。
 if (Get-Module -Name PSReadLine) {
     # 入力行を Vi の流儀で編集する (win/README.md の「Vi モード」)。挿入モードで始まり、Esc でコマンドモードに入り、i・a などで挿入モードに

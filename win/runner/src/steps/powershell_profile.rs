@@ -39,7 +39,7 @@ pub const RECORD_FILE: &str = "windows-powershell-profile.json";
 /// 展開する
 const LINE: &str = r#"if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }"#;
 /// 「読む行がある」の判定 (WSL の script の `marker`)。書き方が違っても dotfiles.ps1 を指していればよい
-const MARKER: &str = r".config\powershell\dotfiles.ps1";
+pub(crate) const MARKER: &str = r".config\powershell\dotfiles.ps1";
 /// files の手順が配る dotfiles.ps1 (ホームからの相対)
 const DEPLOYED: &str = ".config/powershell/dotfiles.ps1";
 /// pwsh に `$PROFILE` の場所を聞く式 (WSL と同じ。出力は UTF-8 にする (ドキュメントが化けないよう))
@@ -94,71 +94,11 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
             return Outcome::new(Kind::Failed, "足した記録が壊れている").note(e);
         }
     };
-    let Some(pwsh) = ctx.sys.which("pwsh") else {
-        warn(
-            ctx,
-            &with_manual(vec![
-                "pwsh が見つかりません (PowerShell 7 が無いか、PATH に入っていない)。".to_string(),
-            ]),
-        );
-        return Outcome::new(
-            Kind::Manual,
-            "PowerShell 7 (pwsh) が見つからないので $PROFILE の場所を聞けない",
-        )
-        .note(manual_note());
+    let manual = manual();
+    let (win_profile, profile) = match locate(ctx, &manual) {
+        Ok(found) => found,
+        Err(outcome) => return outcome,
     };
-    let r = ctx.sys.run(&query_command(pwsh), &mut |_| {});
-    // 警告の続きの行に並べる pwsh の出力 (空の行は出さない)
-    let shown = r.output.iter().filter(|l| !l.trim().is_empty()).cloned();
-    let failure = match &r.exit {
-        Exit::Code(0) => None,
-        Exit::Code(c) => Some(format!("終了コード {c}")),
-        Exit::NoCode => Some("終了コードが無い".to_string()),
-        Exit::TimedOut => Some(format!("{QUERY_SECS} 秒たっても終わらなかった")),
-        Exit::SpawnFailed(e) => Some(format!("起こせなかった: {e}")),
-    };
-    if let Some(why) = failure {
-        let mut lines = vec![format!(
-            "pwsh に $PROFILE の場所を聞けませんでした ({why}):"
-        )];
-        lines.extend(shown);
-        warn(ctx, &with_manual(lines));
-        return Outcome::new(
-            Kind::Failed,
-            format!("pwsh に $PROFILE の場所を聞けなかった ({why})"),
-        )
-        .note(manual_note());
-    }
-    let Some(win_profile) = profile_path(&r.output) else {
-        let mut lines = vec!["pwsh が $PROFILE の場所を返しませんでした:".to_string()];
-        lines.extend(shown);
-        warn(ctx, &with_manual(lines));
-        return Outcome::new(Kind::Failed, "pwsh が $PROFILE の場所を返さなかった")
-            .note(manual_note());
-    };
-    // 出力が UTF-8 として読めなかった (置き換えの文字が混じる) 場所には書かない (化けたフォルダに足して記録し、以後ずっと揃っていると読まないよう)
-    if win_profile.contains('\u{fffd}') {
-        warn(
-            ctx,
-            &with_manual(vec![format!(
-                "pwsh が返した $PROFILE の場所に、読めない文字があります: {win_profile}"
-            )]),
-        );
-        return Outcome::new(
-            Kind::Failed,
-            "pwsh が返した $PROFILE の場所に読めない文字がある (出力を UTF-8 で読めなかった)",
-        )
-        .note(manual_note());
-    }
-    let profile = PathBuf::from(&win_profile);
-    if profile.is_dir() {
-        ctx.say(format!(
-            "!! $PROFILE の場所がディレクトリです: {win_profile}"
-        ));
-        return Outcome::new(Kind::Failed, "$PROFILE の場所がディレクトリ").note(format!(
-            "{win_profile} を確かめる (PowerShell 7 で $PROFILE を打つと、同じ場所が出る)"
-        ));
-    }
     let current = match std::fs::read(&profile) {
         Ok(b) => Some(b),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
@@ -211,12 +151,12 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     {
         warn(
             ctx,
-            &with_manual(vec![format!(
+            &manual.after(vec![format!(
                 "$PROFILE が UTF-16 なので書き足しません: {win_profile}"
             )]),
         );
         return Outcome::new(Kind::Manual, "$PROFILE が UTF-16 なので書き足さない")
-            .note(manual_note());
+            .note(manual.note.clone());
     }
 
     // runner は WSL の記録を読まないので、受け持ちが WSL の間は、Windows 側で消した行と初めから無い行を見分けられない。WSL の setup は消した
@@ -244,7 +184,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
             if let Err(e) = append_line(&profile, current.as_deref()) {
                 ctx.say(format!("!! $PROFILE に書けません: {win_profile} ({e})"));
                 return Outcome::new(Kind::Failed, format!("$PROFILE に書けない ({e})"))
-                    .note(manual_note());
+                    .note(manual.note.clone());
             }
             ctx.say(format!("足しました: {win_profile}"));
             records.set(&win_profile, ADDED);
@@ -255,6 +195,97 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
             Outcome::new(Kind::Ok, "$PROFILE に読み込みの 1 行を足した")
         }
     }
+}
+
+/// 自動で足せないときに添える、手で足す道 (警告の続きの行と、締めの表の ※ の行)。starship-init も使う。
+pub(crate) struct Manual {
+    /// 警告の続きに並べる行
+    pub lines: Vec<String>,
+    /// 締めの表の ※ の行
+    pub note: String,
+}
+
+impl Manual {
+    /// 警告の行に、手で足す道の行を続ける (WSL の script の manual と同じ)。
+    pub(crate) fn after(&self, mut lines: Vec<String>) -> Vec<String> {
+        lines.extend(self.lines.iter().cloned());
+        lines
+    }
+}
+
+/// pwsh に `$PROFILE` (CurrentUserCurrentHost) の場所を聞き、Windows のパスの字とパスを返す。pwsh が無い・聞けない・書いてはいけない場所 (読めない
+/// 文字が混じる・ディレクトリ) なら、手で足す道を添えた警告を出し、締めの行を返す。starship-init も使う。
+pub(crate) fn locate(ctx: &mut Ctx, manual: &Manual) -> Result<(String, PathBuf), Outcome> {
+    let Some(pwsh) = ctx.sys.which("pwsh") else {
+        warn(
+            ctx,
+            &manual.after(vec![
+                "pwsh が見つかりません (PowerShell 7 が無いか、PATH に入っていない)。".to_string(),
+            ]),
+        );
+        return Err(Outcome::new(
+            Kind::Manual,
+            "PowerShell 7 (pwsh) が見つからないので $PROFILE の場所を聞けない",
+        )
+        .note(manual.note.clone()));
+    };
+    let r = ctx.sys.run(&query_command(pwsh), &mut |_| {});
+    // 警告の続きの行に並べる pwsh の出力 (空の行は出さない)
+    let shown = r.output.iter().filter(|l| !l.trim().is_empty()).cloned();
+    let failure = match &r.exit {
+        Exit::Code(0) => None,
+        Exit::Code(c) => Some(format!("終了コード {c}")),
+        Exit::NoCode => Some("終了コードが無い".to_string()),
+        Exit::TimedOut => Some(format!("{QUERY_SECS} 秒たっても終わらなかった")),
+        Exit::SpawnFailed(e) => Some(format!("起こせなかった: {e}")),
+    };
+    if let Some(why) = failure {
+        let mut lines = vec![format!(
+            "pwsh に $PROFILE の場所を聞けませんでした ({why}):"
+        )];
+        lines.extend(shown);
+        warn(ctx, &manual.after(lines));
+        return Err(Outcome::new(
+            Kind::Failed,
+            format!("pwsh に $PROFILE の場所を聞けなかった ({why})"),
+        )
+        .note(manual.note.clone()));
+    }
+    let Some(win_profile) = profile_path(&r.output) else {
+        let mut lines = vec!["pwsh が $PROFILE の場所を返しませんでした:".to_string()];
+        lines.extend(shown);
+        warn(ctx, &manual.after(lines));
+        return Err(
+            Outcome::new(Kind::Failed, "pwsh が $PROFILE の場所を返さなかった")
+                .note(manual.note.clone()),
+        );
+    };
+    // 出力が UTF-8 として読めなかった (置き換えの文字が混じる) 場所には書かない (化けたフォルダに足して記録し、以後ずっと揃っていると読まないよう)
+    if win_profile.contains('\u{fffd}') {
+        warn(
+            ctx,
+            &manual.after(vec![format!(
+                "pwsh が返した $PROFILE の場所に、読めない文字があります: {win_profile}"
+            )]),
+        );
+        return Err(Outcome::new(
+            Kind::Failed,
+            "pwsh が返した $PROFILE の場所に読めない文字がある (出力を UTF-8 で読めなかった)",
+        )
+        .note(manual.note.clone()));
+    }
+    let profile = PathBuf::from(&win_profile);
+    if profile.is_dir() {
+        ctx.say(format!(
+            "!! $PROFILE の場所がディレクトリです: {win_profile}"
+        ));
+        return Err(
+            Outcome::new(Kind::Failed, "$PROFILE の場所がディレクトリ").note(format!(
+                "{win_profile} を確かめる (PowerShell 7 で $PROFILE を打つと、同じ場所が出る)"
+            )),
+        );
+    }
+    Ok((win_profile, profile))
 }
 
 /// pwsh に `$PROFILE` の場所を聞くコマンド (WSL と同じ式。-NoProfile: これから書き換える `$PROFILE` を読ませない)。
@@ -304,12 +335,12 @@ fn append_line(profile: &Path, current: Option<&[u8]>) -> std::io::Result<()> {
 }
 
 /// `haystack` に `needle` があるか (WSL の `grep -qF`。バイト列で比べる)。
-fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+pub(crate) fn contains(haystack: &[u8], needle: &[u8]) -> bool {
     haystack.windows(needle.len()).any(|w| w == needle)
 }
 
 /// UTF-16 の BOM で始まるか (WSL の script と同じく、頭の 2 バイトで見る)。
-fn is_utf16(bytes: &[u8]) -> bool {
+pub(crate) fn is_utf16(bytes: &[u8]) -> bool {
     bytes.starts_with(&[0xff, 0xfe]) || bytes.starts_with(&[0xfe, 0xff])
 }
 
@@ -319,7 +350,7 @@ fn again_command(ctx: &Ctx) -> String {
 }
 
 /// 手順を止めない警告を、WSL の script の warn と同じ形で出す (1 行目の頭に `!!`、続きの行は 3 字下げ)。
-fn warn(ctx: &mut Ctx, lines: &[String]) {
+pub(crate) fn warn(ctx: &mut Ctx, lines: &[String]) {
     for (i, l) in lines.iter().enumerate() {
         if i == 0 {
             ctx.say(format!("!! {l}"));
@@ -329,23 +360,22 @@ fn warn(ctx: &mut Ctx, lines: &[String]) {
     }
 }
 
-/// 警告の行に、同じ 1 行を手で足すコマンドを続ける (WSL の script の manual と同じ)。
-fn with_manual(mut lines: Vec<String>) -> Vec<String> {
-    lines.push("PowerShell 7 で次を 1 回打つと、同じ 1 行が足されます:".to_string());
-    lines.push(format!("  {}", manual_command()));
-    lines
+/// 同じ 1 行を手で足す道 (WSL の script の manual と同じ。警告の続きの行は、同じ 1 行を足すコマンド)。
+fn manual() -> Manual {
+    Manual {
+        lines: vec![
+            "PowerShell 7 で次を 1 回打つと、同じ 1 行が足されます:".to_string(),
+            format!("  {}", manual_command()),
+        ],
+        note: format!(
+            "PowerShell 7 で {} を 1 回打つと、同じ 1 行が足される",
+            manual_command()
+        ),
+    }
 }
 
 fn manual_command() -> String {
     format!("Add-Content -Path $PROFILE -Value '{LINE}'")
-}
-
-/// 締めの表の ※ の行に出す、手で足す道。
-fn manual_note() -> String {
-    format!(
-        "PowerShell 7 で {} を 1 回打つと、同じ 1 行が足される",
-        manual_command()
-    )
 }
 
 fn record_failed(ctx: &mut Ctx, path: &Path, e: std::io::Error) -> Outcome {

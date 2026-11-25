@@ -55,7 +55,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                     ssh-config・port-forward は元を <名前>.dotfiles-bak-<日時> に退避してから上書きし、ssh-config は、正本から消えたが
                     Windows 側で変わっていたファイルも退避して消す。terminal・fancyzones は元を %LOCALAPPDATA%\\dotfiles\\state\\ の下に退避
                     してから書き、fancyzones は PC で直した・消したレイアウトと手であてた組も上書きする。powertoys は変わっていなくても
-                    Keyboard Manager に読み直させる。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直す。
+                    Keyboard Manager に読み直させる。powershell-profile は、足した後で消した $PROFILE の読み込みの 1 行も足し直し、
+                    starship-init は、足した後で消した (記録した手書きの行も) $PROFILE の starship の init の 1 行も足し直す。
                     international は、Windows 側で変わっていた日付と時刻の形式も managed.json の値で書く (退避は無い)。
                     google-ime は、画面で変えていた (読めない) 設定と辞書も、元を %LOCALAPPDATA%\\dotfiles\\state\\ の下に退避して
                     から置き直す。--steps で手順を絞って使う
