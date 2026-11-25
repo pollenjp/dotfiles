@@ -19,12 +19,13 @@ hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE へ�
 
 # starship のプロンプトの設定。Linux の home-manager (nix/home/modules/files.nix) も同じファイルを ~/.config/starship.toml に置くので、
 # nix/ に置いて base = "nix" で配る。starship は環境変数 STARSHIP_CONFIG が無ければ %USERPROFILE%\.config\starship.toml を読む。
-# starship 本体と $PROFILE の初期化の 1 行は配らない (README.md の「starship」)
+# starship 本体は下の Install-Starship.ps1 (runner の手順 starship) が、$PROFILE の init の 1 行は runner の手順 starship-init が入れる
+# (README.md の「starship」)
 [[files]]
 base = "nix"
 src = "files/starship.toml"
 dst = "%USERPROFILE%/.config/starship.toml"
-hint = "starship はプロンプトのたびに読むので、読み直しは要らない (次のプロンプトから効く。starship 本体と $PROFILE の初期化の 1 行は dotfiles では入れない)"
+hint = "starship はプロンプトのたびに読むので、読み直しは要らない (次のプロンプトから効く。starship 本体と $PROFILE の init の 1 行は、Windows の runner の dotfiles apply が入れる)"
 
 [[files]]
 src = "herdr/config.toml"
@@ -128,3 +129,8 @@ hint = "PowerShell で Install-Ghq -Check を打つと、固定した版との�
 src = "fzf/Install-Fzf.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Fzf.ps1"
 hint = "PowerShell で Install-Fzf -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が winget の portable を入れて揃える。cdrepo が使う。MSI の fzf が入っていれば何も入れずに外し方を出す)"
+
+[[files]]
+src = "starship/Install-Starship.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Starship.ps1"
+hint = "PowerShell で Install-Starship -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が winget の portable を入れて揃える。MSI の starship が入っていれば何も入れずに外し方を出す)"
