@@ -205,8 +205,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
         // docs/adr/068_win_herdr_app_mods_*)
         Box::new(herdr_app_mods::HerdrAppMods),
-        // claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替える (Windows にしか
-        // 無い手順。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*)
+        // claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替え、sidebar の
+        // Spaces と Agents を dotfiles の mod pjp-sidebar-tabs のタブで切り替える形にする (Windows にしか無い手順。dotfiles-private の
+        // docs/adr/072_win_herdr_app_pjp_spaces_*・106_win_herdr_app_sidebar_tabs_*)
         Box::new(herdr_app_pjp_spaces::HerdrAppPjpSpaces),
         // dotfiles の herdr-app のキーを herdr-app の home の keys.json に書き足す (Windows にしか無い手順。dotfiles-private の
         // docs/adr/070_win_herdr_app_keys_*)

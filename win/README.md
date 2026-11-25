@@ -34,9 +34,10 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr-app/mods/pjp-hub-panel/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-hub-panel\` (herdr-app の home の `mods\`。manifest では配らず、runner の `herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。ハブの Claude がユーザーに見せる panel (質問・チケットと進み具合と PR の木・問いへの答え (Q&A)・状況の説明・進み具合・一覧・図) ([後述](#herdr-app-の-mod)) |
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
 | `herdr-app/mods/pjp-worktree-remove/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-worktree-remove\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。prefix の後の `d` と `Ctrl+Q` が開く小窓で、今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([後述](#herdr-app-のキー)) |
+| `herdr-app/mods/pjp-sidebar-tabs/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-sidebar-tabs\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。左のサイドパネルの上端に、Spaces と Agents を切り替えるアイコンのタブを描く (layout pjp-main の stack `sidebar-lists` の header。[後述](#サイドパネルのタブ-pjp-sidebar-tabs)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`・worktree を消す確かめの小窓の `Ctrl+Q`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
-| (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替えた layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
+| (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替え、Spaces と Agents を上端のタブ (`pjp-sidebar-tabs`) で切り替える layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -523,7 +524,7 @@ scanData = "https://app.notion.com/p/…"
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも | 有る |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
 | 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
-| 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替える (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
+| 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替え、`pjp-sidebar-tabs` が置けていれば sidebar の Spaces と Agents をタブで切り替える stack にする (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・Launch arguments・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。Launch arguments は `claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
@@ -1012,6 +1013,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 | `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む。`answer` のある段は押してハブへ送れる)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って貼る。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 | `pjp-worktree-remove` | `main.js`・`mod.json` | prefix の後の `d` と `Ctrl+Q` が開く確かめの小窓 (window)。今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([次節](#herdr-app-のキー))。止める端末・待つ上限・やり直し・残ったフォルダの扱いの正本は `main.js` の頭のコメント |
+| `pjp-sidebar-tabs` | `main.js`・`mod.json`・`spaces.svg`・`agents.svg` | 左のサイドパネルの Spaces と Agents を切り替える、上端のアイコンのタブ (layout pjp-main の stack `sidebar-lists` の header。layout に置くのは `herdr-app-pjp-spaces`)。選んでいるタブはアイコン + 名前、ほかはアイコンだけで、Agents のタブに blocked の agent の数の印を出す。Agents を出していない間は、agents の一覧の順 (`agent.next` の順) を代わりに渡す ([サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs))。herdr-app の決まりと見た目の正本は `main.js` の頭のコメント |
 
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
   置き場所と同じ)。どれにしたかは手順の出力の頭に出る
@@ -1374,7 +1376,7 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
 | 置くもの | 置き先 (herdr-app の home の下) | 置き方 |
 | --- | --- | --- |
 | claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` | `mods\pjp-spaces\` | `herdr-app-mods` と同じ記録つきのコピー (記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`) |
-| 同梱の `layouts\main.json` の、spaces を指す block (`content.mod` が `spaces`) を `pjp-spaces` に替えたもの | `layouts\pjp-main.json` | 初めては `herdr-app do layout.clone '{"name":"main","as":"pjp-main"}'` で写してから替える。その後は runner が今の main から作り直す (同じ記録) |
+| 同梱の `layouts\main.json` の、spaces を指す block (`content.mod` が `spaces`) を `pjp-spaces` に替え、`pjp-sidebar-tabs` が置けていれば `sidebar-lists` をタブの stack にしたもの ([サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs)) | `layouts\pjp-main.json` | 初めては `herdr-app do layout.clone '{"name":"main","as":"pjp-main"}'` で写してから替える。その後は runner が今の main から作り直す (同じ記録) |
 
 - **初めて置く apply は、表示する layout を main から pjp-main に替える** (`layout.clone` は写した layout へ表示を替える)。sidebar の幅などの clicks
   (`layouts\.state\`) は herdr-app が clone で写すので、main で広げた幅のまま。表示を替えるのはこの 1 回だけ。表示が main でない (ほかの layout を
@@ -1421,6 +1423,52 @@ dotfiles check --steps herdr-app-pjp-spaces             # · で「mod も layou
   外したものとして扱う。戻すときは上の写し直しか、`layouts\pjp-main.json.reset-<時刻>` の名前を `pjp-main.json` に戻す (中身が記録どおりなら揃う)。
   dotfiles のキーは [herdr-app のキー](#herdr-app-のキー) のとおり `dotfiles apply --steps herdr-app-keys` で足し直す
 - `layouts\.state\pjp-main.json` (pjp-main の clicks) は herdr-app のファイルなので消さない (herdr-app の決まり)。写し直すと main の clicks で写し直される
+
+#### サイドパネルのタブ (pjp-sidebar-tabs)
+
+pjp-main の左のサイドパネルの Spaces と Agents を、上端のアイコンのタブで切り替える (出すのはどちらか 1 つで、縦いっぱいに出す)。選んでいる
+タブはアイコン + 名前 (薄い地の角丸)、ほかはアイコンだけ (hover で名前)。Agents のタブには、確認の画面で止まっている (status が `blocked` の)
+agent の数を赤い丸の数の印で出す (0 なら出さない)。タブを描くのは dotfiles の mod `pjp-sidebar-tabs` (`herdr-app-mods` が置く)、layout を直すのは
+`herdr-app-pjp-spaces`。経緯は dotfiles-private の ADR 106 (`docs/adr/106_win_herdr_app_sidebar_tabs_*`)。
+
+```powershell
+dotfiles check --steps herdr-app-mods,herdr-app-pjp-spaces   # 差を見る (何も書かない)
+dotfiles apply --steps herdr-app-mods,herdr-app-pjp-spaces   # mod を置き、pjp-main の sidebar-lists をタブの stack にする
+```
+
+pjp-main の `sidebar-lists` (同梱の main では spaces と agents を縦に並べる column) を、herdr-app の layout の `stack` (子を 1 つだけ出し、上端に
+header の mod を置く) にする。子 (spaces・agents の block) はそのまま:
+
+```json
+{ "id": "sidebar-lists", "type": "stack", "active": "spaces",
+  "header": { "content": { "mod": "pjp-sidebar-tabs", "props": { "stack": "sidebar-lists" } }, "height": 36 },
+  "children": [ { "id": "spaces", "…": "…", "content": { "mod": "pjp-spaces" } }, { "id": "agents", "…": "…", "content": { "mod": "agents" } } ] }
+```
+
+- タブを押すと `layout.select {stack: "sidebar-lists", child}` で出す子を替える。選んだ子は herdr-app が clicks (`layouts\.state\pjp-main.json`) に
+  残し、herdr-app を上げ直しても残る。runner はファイルの `active` をいつも `spaces` にし (main の子の並びが替わっても)、clicks に触らない。
+  herdr-app はファイルの `active` が前と同じなら clicks の選んだ子を残すので、main が変わって pjp-main を書き直しても、選んだタブはそのまま
+- タブにするのは、herdr-app の home に `mods\pjp-sidebar-tabs\` が置けている (`main.js` があり、`mod.json` の `place` が `none`) ときだけ。置くのは
+  `herdr-app-mods` (同じ order 98 で、名前の辞書順で `herdr-app-pjp-spaces` より先に流れる。on/off は `windowsHerdr`)。置けていなければ column の
+  まま、pjp-main の行に ※ でわけを添える (layout から無い mod を指すと sidebar が壊れる)。check と dry-run は今の置き先で判定するので、まだ
+  置いていない PC の初めの `dotfiles check` は ※ を出す (apply では、herdr-app-mods が mod を置いた後の続きでタブにする)
+- 前に作った pjp-main (column の形) も、次の apply でタブにする (`変わった node: sidebar-lists`。clone し直さない・表示は替えない)。mod が無く
+  なれば column に戻す。pjp-main を手で直していて書き直せない (衝突) ときに mod が無くなると、header は無い mod を指したままになるので、※ が
+  そう言う (mod を置き直すか、`dotfiles apply --steps herdr-app-pjp-spaces --force` で column に戻す)
+- タブにするとき、同梱の main に `sidebar-lists` (spaces と agents を子に持つ column) が無くなったら (herdr-app の形が変わった)、pjp-main は前の
+  まま ⚠ で知らせる。タブにする所を決め直す
+- 今どちらが出ているかは layout から読むので、ほかの手 (コマンドの `layout.select`・clicks の復元) で替わっても描き直しで追いつく。blocked の
+  数も agent の状態が変わるたびに描き直る (timer は回さない)。sidebar を 160px 未満 (rail) に細めると、タブは小さなアイコンだけになり、数の印は
+  点になる (数は hover で出る。rail から広げるのは brand の行の sidebar のボタン)。キーでの切り替えは無い
+- Agents のタブを出していない間は、`pjp-sidebar-tabs` が agents の一覧の順 (`agent.next`・`agent.prev` が辿る順。prefix の小窓の `Shift+O`) を
+  代わりに渡す。herdr-app は出ていない slot の mod を描かず、同梱の agents は描くときにだけ順を渡すため。並べ方は同梱の agents の既定 (ピン留め →
+  blocked → done → working → idle、同じなら新しく変わった順。並べ方を grouped にしていれば一覧の順) に寄せた (sub-agent の急ぎは親に寄せない)
+- 置いた後は `herdr-app status | Out-String` で errors が無いか、mod は `herdr-app check <mod のフォルダ>` ([herdr-app の mod](#herdr-app-の-mod)
+  の見方) で確かめ、`herdr-app shot <png> | Out-Null` で見た目を見る
+- やめるときは、dotfiles の `herdr-app/mods/pjp-sidebar-tabs/` を外す PR を出す (merge の後の apply で、`herdr-app-mods` が置き先のファイルを消し、
+  同じ apply の続きで `herdr-app-pjp-spaces` が `sidebar-lists` を column に戻す)。`--steps herdr-app-mods` だけを流さない (mod だけが消え、pjp-main が
+  無い mod を指したまま残る)。`herdr-app-pjp-spaces` が途中で止まる (pjp-spaces が無い・`herdrHub` が off など) ホストでは、先に表示を main に戻して
+  おく (上の切り戻しの 1)。すぐ見えなくするだけなら、表示を main に戻す
 
 ## 配る
 
