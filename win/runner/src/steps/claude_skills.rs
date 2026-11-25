@@ -9,7 +9,7 @@
 //!
 //! clone は runner の clone の隣、無ければ bootstrap の置き場 (`ctx.sibling`)。runner は取得しない (bootstrap が clone し、進めるのは人が
 //! 打つ PowerShell の `dotfiles --self-update`。dotfiles 関数が clone の中の `win/powershell/Invoke-DotfilesSelfUpdate.ps1` を呼び、3 つの clone を
-//! fast-forward してから runner を流す。dotfiles-private の docs/adr/101_win_dotfiles_self_update_*)。
+//! fast-forward してから runner を流す。dotfiles-private の docs/adr/104_win_dotfiles_self_update_*)。
 
 use super::linker::{Linker, Source};
 use super::{Gate, Mode, Outcome, Step, StepInfo};

@@ -250,7 +250,7 @@ dotfiles manifest                      # manifest.toml を検証する (--json �
 ### clone を進める (`dotfiles --self-update`)
 
 runner は clone を取得しない。dotfiles・dotfiles-private・claude-skills の 3 つの clone を進めるのは、PowerShell の `dotfiles --self-update`
-(Linux の `~/dotfiles/setup --self-update` に当たる。経緯は dotfiles-private の ADR 101 (`docs/adr/101_win_dotfiles_self_update_*`))。
+(Linux の `~/dotfiles/setup --self-update` に当たる。経緯は dotfiles-private の ADR 104 (`docs/adr/104_win_dotfiles_self_update_*`))。
 
 ```powershell
 dotfiles --self-update                          # 3 つの clone を fetch して fast-forward する

@@ -1,4 +1,4 @@
-﻿# dotfiles --self-update の中身 (win/README.md の「clone を進める (dotfiles --self-update)」。dotfiles-private の ADR 101)。
+﻿# dotfiles --self-update の中身 (win/README.md の「clone を進める (dotfiles --self-update)」。dotfiles-private の ADR 104)。
 # PowerShell の dotfiles 関数 (win/powershell/dotfiles.ps1) が、配った写しでなく clone の中のこの script を呼ぶ。この script を直した pull は、
 # $PROFILE で読んだ関数が古いままでも、次の dotfiles --self-update から効く (今回の分は、pull する前に読み込んだこの script のまま流れる)。
 #
