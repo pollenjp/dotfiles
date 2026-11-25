@@ -1,8 +1,9 @@
 //! herdr-app-pjp-spaces (order 98): claude-skills の herdr-app の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ置き、同梱の
 //! layout `main` を写した自分の layout `pjp-main` の spaces の block を pjp-spaces に替える。pjp-spaces は herdr-app の spaces の mod を写し、
 //! space の行の 2 行目にハブと子の印 (🌱・🌳[N]・🔄・👀・🗑️・↑ TKT-n) を足したもの (claude-skills の spec
-//! `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・§9 の W2-4)。herdr-app は Windows だけなので、WSL の setup に同じ
-//! 手順は無い (Windows にしか無い手順)。
+//! `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・§9 の W2-4)。あわせて、sidebar の spaces と agents を縦に並べる
+//! `sidebar-lists` を stack にし、dotfiles の mod `pjp-sidebar-tabs` のアイコンのタブで Spaces と Agents を切り替える形にする。herdr-app は
+//! Windows だけなので、WSL の setup に同じ手順は無い (Windows にしか無い手順)。
 //!
 //! - mod の元は claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` (claude-skills と決めた置き場)。置き方は herdr-app-mods と
 //!   同じ記録つきのコピー (herdr-app が書くファイルと名前が `.` で始まるものは配らない。元から消えたファイルは記録どおりなら消す。mod.json を
@@ -23,9 +24,19 @@
 //!   (ほかの手順の衝突を解く `dotfiles apply --force` で、表示を替えない)
 //! - layout を書かなかった実行で、herdr-app が layout を読めなかった理由のファイルがあれば ※ で添える
 //! - herdr-app に打つのは `herdr-app do layout.clone` だけ (止めない・立て直さない)。表示中の layout は `shared.json` の `layout` で読む
+//! - タブ: herdr-app の home に `mods\pjp-sidebar-tabs\` が置けている (main.js があり、mod.json の place が none) ときだけ、`sidebar-lists`
+//!   (spaces と agents を子に持つ column) を stack にする (type を stack に、active は spaces、header は mod pjp-sidebar-tabs (props の stack に
+//!   sidebar-lists)、子はそのまま)。置くのは herdr-app-mods (dotfiles の `win/herdr-app/mods/`。同じ order 98 で、名前の辞書順でこの手順より
+//!   先に流れる)。置けていなければ column のまま ※ でわけを添える (layout から無い mod を指すと sidebar が壊れる)。前に作った pjp-main も、
+//!   次の apply でタブにする・column に戻す (記録どおりなら書き直し、column の形のままのものは引き取る)。タブにするとき、main に sidebar-lists
+//!   が無ければ (herdr-app の形が変わった) pjp-main は前のまま ⚠
+//! - タブの選んだ子は herdr-app が clicks (`layouts\.state\`) に残す。runner はファイルの active をいつも spaces にし (子の並びが替わっても)、
+//!   clicks に触らない。herdr-app はファイルの active が前と同じなら clicks の active を残すので、main が変わって書き直してもユーザーが選んだ
+//!   タブが残る (herdr-app 0.1.16 の src/layout_sync.rs の forget_edited)
 //!
 //! 記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json` (mod のファイルと layout の sha256)。layout の記録は home の綴りの
-//! 違い (`/` と `\`・Windows の大文字小文字) を見ずに引く。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*。
+//! 違い (`/` と `\`・Windows の大文字小文字) を見ずに引く。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*。タブは
+//! docs/adr/106_win_herdr_app_sidebar_tabs_*。
 
 use super::claude_skills::clone_dir;
 use super::herdr_app_mods::{Keep, app_home, copy_mod, list_mod, prune};
@@ -54,6 +65,14 @@ pub const SHIPPED: &str = "spaces";
 pub const LAYOUT: &str = "pjp-main";
 /// 記録 (`%LOCALAPPDATA%\dotfiles\state\` の下)
 pub const RECORD_FILE: &str = "herdr-app-pjp-spaces.deployed.json";
+/// タブで切り替える node (同梱の main の sidebar の、spaces と agents を縦に並べる column)。stack にして header に TABS を置く
+pub const LISTS: &str = "sidebar-lists";
+/// sidebar-lists の上端に Spaces と Agents のタブを描く mod (dotfiles の `win/herdr-app/mods/pjp-sidebar-tabs/`。herdr-app-mods が置く)
+pub const TABS: &str = "pjp-sidebar-tabs";
+/// タブで切り替える子 (sidebar-lists の子の id)。最初の子を、ファイルに書く stack の active にする
+const TAB_CHILDREN: [&str; 2] = ["spaces", "agents"];
+/// タブの帯の高さ (px。herdr-app の header の既定は 30)
+const TABS_HEIGHT: u32 = 36;
 /// herdr-app do の待ちの上限
 const DO_SECS: u64 = 60;
 /// clone の後、herdr-app が layout のファイルを書き終えるのを待つ上限
@@ -71,7 +90,7 @@ impl Step for HerdrAppPjpSpaces {
             id: "herdr-app-pjp-spaces",
             // herdr-app を入れる手順 (97) の後。dotfiles の mod を置く herdr-app-mods と並べる
             order: 98,
-            title: "claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替える",
+            title: "claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替え、sidebar の Spaces と Agents をタブ (pjp-sidebar-tabs) で切り替える形にする",
             // 印はハブの道具 (pjp child・pjp mark) が付ける label を読む。claude-skills の clone を使うハブの手順 (hc-hub) と同じ switch
             gate: Gate::Tool("herdrHub"),
             ported: true,
@@ -214,22 +233,24 @@ fn check_mod(src: &Path) -> Result<(), String> {
             src.display()
         ));
     }
-    let path = src.join("mod.json");
-    let text = std::fs::read_to_string(&path).map_err(|e| {
-        format!(
-            "{MOD} の mod.json が読めない ({}: {e}) → 置かない",
-            path.display()
-        )
-    })?;
-    let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
-        .map_err(|e| format!("{MOD} の mod.json が JSON として読めない ({e}) → 置かない"))?;
-    match v.get("place").and_then(|p| p.as_str()) {
+    let place = read_place(MOD, src).map_err(|why| format!("{why} → 置かない"))?;
+    match place.as_deref() {
         Some("none") => Ok(()),
         other => Err(format!(
             "{MOD} の mod.json の place が none でない ({}) → 置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。claude-skills の mod を直す",
             other.unwrap_or("書いていない")
         )),
     }
+}
+
+/// mod のフォルダ `dir` の mod.json の place (書いていなければ None)。読めない・JSON でなければ、そのわけ。
+fn read_place(name: &str, dir: &Path) -> Result<Option<String>, String> {
+    let path = dir.join("mod.json");
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("{name} の mod.json が読めない ({}: {e})", path.display()))?;
+    let v: serde_json::Value = serde_json::from_str(text.trim_start_matches('\u{feff}'))
+        .map_err(|e| format!("{name} の mod.json が JSON として読めない ({e})"))?;
+    Ok(v.get("place").and_then(|p| p.as_str()).map(str::to_string))
 }
 
 /// パスを比べる要素 (区切りの `/` と `\`・重なった区切りを見ない。Windows は大文字小文字も見ない)。
@@ -265,7 +286,8 @@ fn set_record(w: &mut Linker, found: Option<&str>, key_now: &str, sha: &str) {
     w.records.set(key_now, sha);
 }
 
-/// layout `pjp-main` を揃え、その行を返す。`mod_ok` は mod を置けたか (置けなければ layout を作らない)。
+/// layout `pjp-main` を揃え、その行を返す。`mod_ok` は mod を置けたか (置けなければ layout を作らない)。タブの mod (pjp-sidebar-tabs) を指して
+/// よければ sidebar-lists をタブの stack にし、指せなければ column のまま ※ でわけを添える。
 fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outcome {
     let layouts = home.join("layouts");
     let base_path = layouts.join(format!("{BASE}.json"));
@@ -306,7 +328,23 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
             ),
         );
     }
-    match std::fs::read(&dest) {
+    let unfit = tabs_unfit(home);
+    let tabs = unfit.is_none();
+    if tabs && !stack_lists(&mut wanted) {
+        return say_out(
+            ctx,
+            Kind::Manual,
+            format!(
+                "同梱の layout {BASE} に {LISTS} ({} を縦に並べる column) が無い (herdr-app の形が変わった) → {label} は前のまま。タブにする所を決め直す",
+                TAB_CHILDREN.join(" と ")
+            ),
+        );
+    }
+    let wanted = Wanted {
+        layout: wanted,
+        tabs,
+    };
+    let o = match std::fs::read(&dest) {
         Ok(bytes) => match update_layout(ctx, w, &dest, &label, wanted, &bytes) {
             (o, _) if o.kind == Kind::Failed => o,
             (o, wrote) => annotate(home, o, wrote),
@@ -315,20 +353,28 @@ fn sync_layout(ctx: &mut Ctx, w: &mut Linker, home: &Path, mod_ok: bool) -> Outc
             create_layout(ctx, w, home, &dest, &label, wanted, mod_ok)
         }
         Err(e) => say_out(ctx, Kind::Failed, format!("{label} が読めない ({e})")),
-    }
+    };
+    tabs_note(o, unfit.as_deref())
+}
+
+/// 書きたい layout (今の main に、この手順の差し替えをした形。cloned_from は除く) と、sidebar-lists をタブの stack にしたか。
+struct Wanted {
+    layout: OValue,
+    tabs: bool,
 }
 
 /// layout が無いとき (初めて。前に作って外したものは run が先に止める): main を clone して表示を替え、spaces を指す block を pjp-spaces に
-/// 替えて書く。
+/// 替え (タブの mod を指せれば sidebar-lists をタブの stack にし) て書く。
 fn create_layout(
     ctx: &mut Ctx,
     w: &mut Linker,
     home: &Path,
     dest: &Path,
     label: &str,
-    wanted: OValue,
+    wanted: Wanted,
     mod_ok: bool,
 ) -> Outcome {
+    let shape = shape_label(wanted.tabs);
     let mode = w.mode;
     match shown_layout(home) {
         Ok(name) if name == BASE => {}
@@ -363,7 +409,7 @@ fn create_layout(
         }
     };
     let todo = format!(
-        "{label} (herdr-app do layout.clone で {BASE} を写して表示を {LAYOUT} に替え、{SHIPPED} を指す block を {MOD} に替える)"
+        "{label} (herdr-app do layout.clone で {BASE} を写して表示を {LAYOUT} に替え、差し替える: {shape})"
     );
     match mode {
         Mode::Check => {
@@ -393,8 +439,15 @@ fn create_layout(
             format!("mod {MOD} を置けていないので、{label} は作らない (上の mod の行を見る)"),
         );
     }
+    let effect = if wanted.tabs {
+        format!(
+            "画面の sidebar の spaces が {MOD} になり、Spaces と Agents が上端のタブで切り替わる"
+        )
+    } else {
+        format!("画面の sidebar の spaces が {MOD} になる")
+    };
     ctx.say(format!(
-        "表示する layout を {BASE} から {LAYOUT} に替えます (herdr-app do layout.clone。画面の sidebar の spaces が {MOD} になる)"
+        "表示する layout を {BASE} から {LAYOUT} に替えます (herdr-app do layout.clone。{effect})"
     ));
     let args = format!("{{\"name\":\"{BASE}\",\"as\":\"{LAYOUT}\"}}");
     let r = ctx.sys.run(
@@ -428,7 +481,7 @@ fn create_layout(
             ),
         );
     };
-    let desired = with_cloned_from(wanted, &cloned).to_pretty();
+    let desired = with_cloned_from(wanted.layout, &cloned).to_pretty();
     if let Err(e) = fsutil::write_atomic(dest, desired.as_bytes()) {
         return say_out(
             ctx,
@@ -450,22 +503,23 @@ fn create_layout(
     ));
     Outcome::new(
         Kind::Ok,
-        format!("layout {LAYOUT} を作り、表示を {LAYOUT} に替えた ({SHIPPED} → {MOD})"),
+        format!("layout {LAYOUT} を作り、表示を {LAYOUT} に替えた ({shape})"),
     )
 }
 
 /// layout があるとき: 今の main に同じ差し替えをした形 (cloned_from は今のファイルのまま) にそろえ、行と、書いたかを返す。runner が書いたまま
-/// (記録どおり) なら書き直し、spaces を pjp-spaces に替えると今の形になるもの (clone の写し・保存し直したもの) は記録によらず引き取り、
-/// ほかは衝突 (`--force` で上書き)。
+/// (記録どおり) なら書き直し (タブにする・やめるときも)、同じ差し替え (spaces → pjp-spaces と、タブにするなら sidebar-lists → stack) をすると
+/// 今の形になるもの (clone の写し・前の runner が書いた column の形・保存し直したもの) は記録によらず引き取り、ほかは衝突 (`--force` で上書き)。
 fn update_layout(
     ctx: &mut Ctx,
     w: &mut Linker,
     dest: &Path,
     label: &str,
-    wanted: OValue,
+    wanted: Wanted,
     bytes: &[u8],
 ) -> (Outcome, bool) {
     let mode = w.mode;
+    let tabs = wanted.tabs;
     let key_now = dest.to_string_lossy().into_owned();
     let found = record_key(&w.records, dest);
     let have = fsutil::sha256_bytes(bytes);
@@ -475,8 +529,8 @@ fn update_layout(
         .map(str::to_string);
     let current = OValue::parse(&String::from_utf8_lossy(bytes)).ok();
     let desired_value = match &current {
-        Some(c) => with_cloned_from(wanted, c),
-        None => wanted,
+        Some(c) => with_cloned_from(wanted.layout, c),
+        None => wanted.layout,
     };
     let desired = desired_value.to_pretty();
     let want = fsutil::sha256_bytes(desired.as_bytes());
@@ -489,22 +543,26 @@ fn update_layout(
         }
         let o = Outcome::new(
             Kind::Ok,
-            format!("layout {LAYOUT} は今の {BASE} と同じ形 ({SHIPPED} → {MOD})"),
+            format!(
+                "layout {LAYOUT} は今の {BASE} と同じ形 ({})",
+                shape_label(tabs)
+            ),
         );
         return (o, false);
     }
     let reason = match &current {
-        // runner が書いたまま: main (か差し替え方) が変わった
+        // runner が書いたまま: main か差し替え方 (タブにする・やめる) が変わった
         Some(c) if recorded.as_deref() == Some(have.as_str()) => Some(format!(
             "同梱の {BASE} から作り直す。{}",
             changed_nodes(c, &desired_value)
         )),
         // 差し替えると今の形になる: 人が clone し直した (逃げ道のキーの後など)・clone の後で書けなかった・保存し直した
-        Some(c) if same(&pointed(c), &desired_value) => Some(if same(c, &desired_value) {
+        Some(c) if same(&shaped(c, tabs), &desired_value) => Some(if same(c, &desired_value) {
             "中身は同じで書き方だけが違う (保存し直された) ので、runner の形に書き直す".to_string()
         } else {
             format!(
-                "{BASE} の写し (layout.clone) を引き取り、{SHIPPED} を指す block を {MOD} に替える"
+                "{BASE} の写し (layout.clone) を引き取り、差し替える ({})",
+                shape_label(tabs)
             )
         }),
         _ if mode.force() => Some("--force で上書き (Windows 側の中身は残らない)".to_string()),
@@ -666,11 +724,122 @@ fn point_to(v: &mut OValue, from: &str, to: &str) -> usize {
     }
 }
 
-/// spaces を指す block を pjp-spaces に替えた写し。
-fn pointed(v: &OValue) -> OValue {
+/// `v` の sidebar-lists (spaces と agents を子に持つ column) を、タブで切り替える stack にする: type を stack に替え、その後ろに active (spaces)
+/// と header (mod pjp-sidebar-tabs) を入れる。子とほかのキーはそのまま。替えたら true。無い・column でない・子が揃わないなら何もせずに false。
+///
+/// active は、ファイルに書く値をいつも spaces にする (子の並びが替わっても)。herdr-app はファイルの active が前と同じなら、ユーザーが選んだ子
+/// (clicks の active) を残す。header の mod は layout に書いた props しか受けないので、props の stack でどの stack の header かを渡す。
+fn stack_lists(v: &mut OValue) -> bool {
+    let Some(OValue::Object(entries)) = find_node_mut(v, LISTS) else {
+        return false;
+    };
+    let get = |key: &str| entries.iter().find(|(k, _)| k == key).map(|(_, v)| v);
+    if !matches!(get("type"), Some(OValue::String(t)) if t == "column") {
+        return false;
+    }
+    let ids: Vec<&str> = match get("children") {
+        Some(OValue::Array(items)) => items
+            .iter()
+            .filter_map(|c| match c.get("id") {
+                Some(OValue::String(id)) => Some(id.as_str()),
+                _ => None,
+            })
+            .collect(),
+        _ => return false,
+    };
+    if !TAB_CHILDREN.iter().all(|want| ids.contains(want)) {
+        return false;
+    }
+    // column には無い欄だが、あれば二重にしない
+    entries.retain(|(k, _)| k != "active" && k != "header");
+    let Some(at) = entries.iter().position(|(k, _)| k == "type") else {
+        return false;
+    };
+    entries[at].1 = OValue::String("stack".to_string());
+    let header = OValue::parse(&format!(
+        r#"{{"content":{{"mod":"{TABS}","props":{{"stack":"{LISTS}"}}}},"height":{TABS_HEIGHT}}}"#
+    ))
+    .expect("header の JSON");
+    entries.insert(
+        at + 1,
+        (
+            "active".to_string(),
+            OValue::String(TAB_CHILDREN[0].to_string()),
+        ),
+    );
+    entries.insert(at + 2, ("header".to_string(), header));
+    true
+}
+
+/// layout の木 (`children` をたどる) の、id が `id` の node。
+fn find_node_mut<'a>(v: &'a mut OValue, id: &str) -> Option<&'a mut OValue> {
+    if matches!(v.get("id"), Some(OValue::String(s)) if s == id) {
+        return Some(v);
+    }
+    let OValue::Object(entries) = v else {
+        return None;
+    };
+    for (k, child) in entries.iter_mut() {
+        if k == "children"
+            && let OValue::Array(items) = child
+        {
+            for item in items.iter_mut() {
+                if let Some(found) = find_node_mut(item, id) {
+                    return Some(found);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// 同梱の main の写しに、この手順の差し替えをした写し: spaces を指す block を pjp-spaces に替え、`tabs` なら sidebar-lists をタブの stack にする。
+fn shaped(v: &OValue, tabs: bool) -> OValue {
     let mut p = v.clone();
     point_to(&mut p, SHIPPED, MOD);
+    if tabs {
+        stack_lists(&mut p);
+    }
     p
+}
+
+/// 差し替えの中身 (行に出す)。
+fn shape_label(tabs: bool) -> String {
+    if tabs {
+        format!("{SHIPPED} → {MOD}・{LISTS} → {TABS} のタブ")
+    } else {
+        format!("{SHIPPED} → {MOD}")
+    }
+}
+
+/// タブの mod (pjp-sidebar-tabs) を layout から指してよいか: herdr-app の home に置けていて (main.js がある)、mod.json の place が none。置くのは
+/// herdr-app-mods (同じ order 98 で、名前の辞書順でこの手順より先に流れる)。指せなければ、そのわけ。
+fn tabs_unfit(home: &Path) -> Option<String> {
+    let dir = home.join("mods").join(TABS);
+    if !dir.join("main.js").is_file() {
+        return Some(format!(
+            "{TABS} が herdr-app の home に無い ({})",
+            dir.display()
+        ));
+    }
+    match read_place(TABS, &dir) {
+        Ok(Some(place)) if place == "none" => None,
+        Ok(other) => Some(format!(
+            "置いた {TABS} の mod.json の place が none でない ({})",
+            other.as_deref().unwrap_or("書いていない")
+        )),
+        Err(why) => Some(why),
+    }
+}
+
+/// タブにしなかった行に、わけと戻し方を ※ で添える。
+fn tabs_note(o: Outcome, unfit: Option<&str>) -> Outcome {
+    match unfit {
+        Some(why) => o.note(format!(
+            "{LISTS} はタブにしない ({why}。layout から無い mod を指すと sidebar が壊れるので column のまま) → herdr-app-mods (windowsHerdr) が {TABS} を置いた後の dotfiles apply で、{LISTS} を {TABS} のタブにする"
+        )),
+        None => o,
+    }
 }
 
 /// JSON の値が同じか (object はキーの順を見ない。数は値で比べ、herdr-app が書く `268.0` と main の `268` を同じにする)。
@@ -773,6 +942,14 @@ mod tests {
     //! - layout の記録は home の綴りの違いを見ずに引く (作り直さない・外したままも保つ。記録の鍵は今の綴りに寄る)
     //! - 差し替え (point_to) と node の違い (changed_nodes)・数を値で比べる (same)
     //! - dotfiles の repo に pjp-spaces を置いていない (claude-skills のもの。herdr-app-mods と二重に配らない)
+    //! - タブ: herdr-app の home に pjp-sidebar-tabs が置けていれば (herdr-app-mods が先に置く)、sidebar-lists を stack (active は spaces、
+    //!   header は mod pjp-sidebar-tabs、子はそのまま) にする。置けていない・place が none でなければ column のまま ※ で知らせ、前に作った
+    //!   pjp-main も次の apply で揃う (column ⇄ stack。herdr-app を打たない・cloned_from は残す)。main に sidebar-lists (spaces と agents を
+    //!   持つ column) が無ければ、タブにするときだけ pjp-main を前のままにして ⚠
+    //! - ユーザーが選んだタブ (clicks) を壊さない: main が変わって書き直しても (子の並びが替わっても) ファイルの active は spaces のまま、
+    //!   layouts\.state\ に触らない
+    //! - sidebar-lists をタブにする所 (stack_lists) は、spaces と agents を子に持つ column だけを替える
+    //! - dotfiles の repo の pjp-sidebar-tabs: main.js・place が none の mod.json・main.js が使うアイコンがあり、既定の stack が LISTS
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -782,7 +959,10 @@ mod tests {
 
     const MAIN_JS: &str = "// pjp-spaces\n";
     const MOD_JSON: &str = "{ \"place\": \"none\", \"title\": \"Spaces\" }\n";
-    /// 同梱の main を縮めたもの (sidebar の spaces・agents と、pane の header の mod)
+    /// herdr-app-mods が herdr-app の home に置いた pjp-sidebar-tabs (中身は見ない)
+    const TABS_MAIN_JS: &str = "// pjp-sidebar-tabs\n";
+    const TABS_MOD_JSON: &str = "{ \"place\": \"none\" }\n";
+    /// 同梱の main (0.1.16) を縮めたもの (sidebar の brand と、spaces・agents を縦に並べる sidebar-lists と、pane の header の mod)
     const BASE_JSON: &str = r#"{
   "id": "root",
   "type": "row",
@@ -793,8 +973,15 @@ mod tests {
       "type": "column",
       "size": { "px": 268 },
       "children": [
-        { "id": "spaces", "type": "block", "size": { "weight": 1 }, "content": { "mod": "spaces" } },
-        { "id": "agents", "type": "block", "content": { "mod": "agents" } }
+        { "id": "brand", "type": "block", "size": { "px": 46 }, "content": { "mod": "workspace-chrome" } },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            { "id": "spaces", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "spaces" } },
+            { "id": "agents", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "agents" } }
+          ]
+        }
       ]
     },
     {
@@ -805,6 +992,69 @@ mod tests {
   ]
 }
 "#;
+    /// BASE_JSON に、この手順の差し替え (spaces → pjp-spaces、sidebar-lists → タブの stack) をした形 (手で書いた期待値。cloned_from は除く)
+    const TABBED_JSON: &str = r#"{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": { "px": 268 },
+      "children": [
+        { "id": "brand", "type": "block", "size": { "px": 46 }, "content": { "mod": "workspace-chrome" } },
+        {
+          "id": "sidebar-lists",
+          "type": "stack",
+          "active": "spaces",
+          "header": { "content": { "mod": "pjp-sidebar-tabs", "props": { "stack": "sidebar-lists" } }, "height": 36 },
+          "children": [
+            { "id": "spaces", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "pjp-spaces" } },
+            { "id": "agents", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "agents" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "type": "block",
+      "content": { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
+    }
+  ]
+}
+"#;
+    /// タブにしないとき (pjp-sidebar-tabs が置けていない) の形: spaces → pjp-spaces だけ (手で書いた期待値。cloned_from は除く)
+    const COLUMN_JSON: &str = r#"{
+  "id": "root",
+  "type": "row",
+  "titlebar": "none",
+  "children": [
+    {
+      "id": "sidebar",
+      "type": "column",
+      "size": { "px": 268 },
+      "children": [
+        { "id": "brand", "type": "block", "size": { "px": 46 }, "content": { "mod": "workspace-chrome" } },
+        {
+          "id": "sidebar-lists",
+          "type": "column",
+          "children": [
+            { "id": "spaces", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "pjp-spaces" } },
+            { "id": "agents", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "agents" } }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "main",
+      "type": "block",
+      "content": { "tab": "active", "pane": { "header": { "content": { "mod": "pane" } } } }
+    }
+  ]
+}
+"#;
+    const CLONED_FROM: &str = r#"{"name":"main","version":"0.1.15"}"#;
     const CLONE_ARGS: &str = "do layout.clone {\"name\":\"main\",\"as\":\"pjp-main\"}";
     const SRC: &str = "claude-skills/skills/pjp-hc-hub/herdr-app/mods/pjp-spaces";
 
@@ -821,7 +1071,26 @@ mod tests {
             t.write("home/.config/herdr-app/layouts/main.json", BASE_JSON);
             let e = Env { t };
             e.show("main");
+            // herdr-app-mods (同じ order 98 で先に流れる) が dotfiles の pjp-sidebar-tabs を置いた後
+            e.place_tabs(TABS_MOD_JSON);
             e
+        }
+
+        /// herdr-app の home に pjp-sidebar-tabs を置く (herdr-app-mods の代わり)
+        fn place_tabs(&self, mod_json: &str) {
+            self.t.write(
+                "home/.config/herdr-app/mods/pjp-sidebar-tabs/main.js",
+                TABS_MAIN_JS,
+            );
+            self.t.write(
+                "home/.config/herdr-app/mods/pjp-sidebar-tabs/mod.json",
+                mod_json,
+            );
+        }
+
+        /// herdr-app の home から pjp-sidebar-tabs を外す (herdr-app-mods が流れていない・repo から消えた)
+        fn remove_tabs(&self) {
+            std::fs::remove_dir_all(self.home("mods/pjp-sidebar-tabs")).unwrap();
         }
 
         /// 既定の home の下のパス
@@ -945,6 +1214,24 @@ mod tests {
         o.iter().map(|x| x.kind).collect()
     }
 
+    /// 手で書いた期待値の layout に、偽の clone が残す cloned_from を足したもの (runner は cloned_from を末尾に残す)
+    fn expected(json: &str) -> OValue {
+        let mut v = OValue::parse(json).unwrap();
+        v.set("cloned_from", OValue::parse(CLONED_FROM).unwrap());
+        v
+    }
+
+    /// layout の中の、ある id の node (子も含めて)
+    fn node(layout: &OValue, id: &str) -> Option<OValue> {
+        if matches!(layout.get("id"), Some(OValue::String(s)) if s == id) {
+            return Some(layout.clone());
+        }
+        match layout.get("children") {
+            Some(OValue::Array(items)) => items.iter().find_map(|c| node(c, id)),
+            _ => None,
+        }
+    }
+
     /// layout の中の、ある id の node の content.mod
     fn mod_of(layout: &OValue, id: &str) -> Option<String> {
         let found = nodes(layout).remove(id)?;
@@ -973,7 +1260,7 @@ mod tests {
                 calls.is_empty(),
                 "{mode:?} は herdr-app を打たない: {calls:?}"
             );
-            assert!(!e.home("mods").exists(), "{mode:?} は書かない");
+            assert!(!e.home("mods/pjp-spaces").exists(), "{mode:?} は書かない");
             assert!(!e.home("layouts/pjp-main.json").exists());
             assert!(o[1].text.contains("画面が替わる"), "{o:?}");
         }
@@ -998,18 +1285,13 @@ mod tests {
         assert_eq!(e.read("mods/pjp-spaces/main.js"), MAIN_JS);
         assert_eq!(e.read("mods/pjp-spaces/mod.json"), MOD_JSON);
         assert!(!e.home("mods/pjp-spaces/gpui-kit.d.ts").exists());
-        // clone の写しを、main の spaces を pjp-spaces に替えた形 + cloned_from に書き直す (数は main のまま)
+        // clone の写しを、main の spaces を pjp-spaces に替え、sidebar-lists をタブの stack にした形 + cloned_from に書き直す (数は main のまま)
         let layout = e.layout();
         assert_eq!(mod_of(&layout, "spaces").as_deref(), Some("pjp-spaces"));
         assert_eq!(mod_of(&layout, "agents").as_deref(), Some("agents"));
-        let mut expected = OValue::parse(BASE_JSON).unwrap();
-        assert_eq!(point_to(&mut expected, "spaces", "pjp-spaces"), 1);
-        expected.set(
-            "cloned_from",
-            OValue::parse(r#"{"name":"main","version":"0.1.15"}"#).unwrap(),
-        );
-        assert_eq!(layout, expected);
-        assert_eq!(e.read("layouts/pjp-main.json"), expected.to_pretty());
+        let want = expected(TABBED_JSON);
+        assert_eq!(layout, want);
+        assert_eq!(e.read("layouts/pjp-main.json"), want.to_pretty());
         assert_eq!(
             e.read("layouts/main.json"),
             BASE_JSON,
@@ -1019,7 +1301,7 @@ mod tests {
         assert_eq!(rec.len(), 3, "{rec:?}");
         assert_eq!(
             rec.get(&e.layout_key()).and_then(|v| v.as_str()),
-            Some(fsutil::sha256_bytes(expected.to_pretty().as_bytes()).as_str())
+            Some(fsutil::sha256_bytes(want.to_pretty().as_bytes()).as_str())
         );
         // 2 回目は揃っていて、herdr-app を打たない
         for mode in [Mode::Check, APPLY] {
@@ -1040,7 +1322,7 @@ mod tests {
             assert!(o[0].text.contains("まだ無い"), "{o:?}");
             assert!(calls.is_empty());
         }
-        assert!(!e.home("mods").exists());
+        assert!(!e.home("mods/pjp-spaces").exists());
         assert!(!e.t.path().join("state").join(RECORD_FILE).exists());
         // clone そのものが無い
         std::fs::remove_dir_all(e.t.path().join("claude-skills")).unwrap();
@@ -1072,13 +1354,13 @@ mod tests {
         assert_eq!(kinds(&o), vec![Kind::Manual], "{o:?}\n{out}");
         assert!(o[0].text.contains("place が none でない (left)"), "{o:?}");
         assert!(calls.is_empty());
-        assert!(!e.home("mods").exists());
+        assert!(!e.home("mods/pjp-spaces").exists());
         e.t.write(&format!("{SRC}/mod.json"), MOD_JSON);
         std::fs::remove_file(e.t.path().join(SRC).join("main.js")).unwrap();
         let (o, _, _) = e.run(APPLY);
         assert_eq!(kinds(&o), vec![Kind::Manual], "{o:?}");
         assert!(o[0].text.contains("main.js が無い"), "{o:?}");
-        assert!(!e.home("mods").exists());
+        assert!(!e.home("mods/pjp-spaces").exists());
     }
 
     #[test]
@@ -1125,7 +1407,7 @@ mod tests {
             assert!(calls.is_empty());
         }
         assert!(
-            !e.home("mods").exists(),
+            !e.home("mods/pjp-spaces").exists(),
             "herdr-app の home に mod を作らない"
         );
         assert!(!e.home("layouts/pjp-main.json").exists());
@@ -1422,8 +1704,223 @@ mod tests {
         let gone = OValue::parse(r#"{"id":"root","children":[]}"#).unwrap();
         assert_eq!(
             changed_nodes(&before, &gone),
-            "変わった node: root / 消えた node: agents・main・sidebar・spaces"
+            "変わった node: root / 消えた node: agents・brand・main・sidebar・sidebar-lists・spaces"
         );
+    }
+
+    /// herdr-app-mods が pjp-sidebar-tabs を置くまでは column のまま ※ で知らせ、置いた後の apply で前に作った pjp-main もタブにする
+    #[test]
+    fn tabs_wait_for_the_placed_mod() {
+        let e = Env::new();
+        e.remove_tabs();
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(calls, vec![CLONE_ARGS.to_string()]);
+        assert_eq!(
+            e.layout(),
+            expected(COLUMN_JSON),
+            "タブの mod が無ければ column のまま"
+        );
+        assert!(
+            o[1].notes.iter().any(
+                |n| n.contains("pjp-sidebar-tabs が herdr-app の home に無い")
+                    && n.contains("sidebar-lists はタブにしない")
+            ),
+            "{o:?}"
+        );
+        // herdr-app-mods が置いた: check は変わる node を出し、apply がタブにする (clone し直さない・cloned_from は残る)
+        e.place_tabs(TABS_MOD_JSON);
+        let (o, out, calls) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Fix], "{o:?}\n{out}");
+        assert!(o[1].text.contains("変わった node: sidebar-lists"), "{o:?}");
+        assert!(calls.is_empty());
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(calls.is_empty(), "{calls:?}");
+        assert_eq!(e.layout(), expected(TABBED_JSON));
+        assert!(o[1].notes.is_empty(), "{o:?}");
+        let (o, _, _) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}");
+        assert!(
+            o[1].text
+                .contains("sidebar-lists → pjp-sidebar-tabs のタブ"),
+            "{o:?}"
+        );
+    }
+
+    /// タブの mod が無くなった・place が none でないなら、layout から指さない (column に戻す)。置き直せばタブに戻る
+    #[test]
+    fn goes_back_to_a_column_without_a_fit_tabs_mod() {
+        let e = Env::new();
+        e.run(APPLY);
+        assert_eq!(e.layout(), expected(TABBED_JSON));
+        e.remove_tabs();
+        let (o, out, _) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Fix], "{o:?}\n{out}");
+        assert!(o[1].text.contains("変わった node: sidebar-lists"), "{o:?}");
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(calls.is_empty());
+        assert_eq!(e.layout(), expected(COLUMN_JSON));
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("pjp-sidebar-tabs が herdr-app の home に無い")),
+            "{o:?}"
+        );
+        // place が none でない mod は指さない (herdr-app は初めて見た mod を place に従って表示中の layout へ差し込む)
+        e.place_tabs("{ \"place\": \"left\" }\n");
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(e.layout(), expected(COLUMN_JSON));
+        assert!(
+            o[1].notes
+                .iter()
+                .any(|n| n.contains("place が none でない (left)")),
+            "{o:?}"
+        );
+        e.place_tabs(TABS_MOD_JSON);
+        e.run(APPLY);
+        assert_eq!(e.layout(), expected(TABBED_JSON));
+    }
+
+    /// main が変わって書き直しても (子の並びが替わっても)、ファイルの active は spaces のまま、clicks (layouts\.state\) に触らない。herdr-app
+    /// はファイルの active が前と同じなら、ユーザーが選んだタブ (clicks の active) を残す
+    #[test]
+    fn keeps_the_tab_the_person_chose() {
+        let e = Env::new();
+        e.run(APPLY);
+        let clicks = "{\"nodes\":{\"sidebar-lists\":{\"active\":\"agents\"},\"sidebar\":{\"size\":{\"px\":406}}}}\n";
+        e.t.write(
+            "home/.config/herdr-app/layouts/.state/pjp-main.json",
+            clicks,
+        );
+        let spaces = r#"{ "id": "spaces", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "spaces" } }"#;
+        let agents = r#"{ "id": "agents", "type": "block", "size": { "weight": 1 }, "min": 90, "content": { "mod": "agents" } }"#;
+        let pair = format!("{spaces},\n            {agents}");
+        assert!(BASE_JSON.contains(&pair));
+        let changed = BASE_JSON
+            .replace(&pair, &format!("{agents},\n            {spaces}"))
+            .replace("\"px\": 268", "\"px\": 300");
+        e.t.write("home/.config/herdr-app/layouts/main.json", &changed);
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert!(o[1].text.contains("書き直した"), "{o:?}");
+        assert!(calls.is_empty());
+        let lists = node(&e.layout(), "sidebar-lists").unwrap();
+        assert_eq!(lists.get("active"), Some(&OValue::String("spaces".into())));
+        let ids: Vec<OValue> = match lists.get("children") {
+            Some(OValue::Array(items)) => {
+                items.iter().filter_map(|c| c.get("id").cloned()).collect()
+            }
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(
+            ids,
+            vec![
+                OValue::String("agents".into()),
+                OValue::String("spaces".into())
+            ],
+            "子の並びは main に合わせる"
+        );
+        assert_eq!(
+            e.read("layouts/.state/pjp-main.json"),
+            clicks,
+            "clicks は herdr-app のもの"
+        );
+    }
+
+    /// タブにするとき、main に sidebar-lists (spaces と agents を持つ column) が無ければ、pjp-main は前のまま ⚠ (作るときも作らない)。タブの
+    /// mod が無ければ、タブにしないので今までどおり main から作る
+    #[test]
+    fn keeps_the_layout_when_main_has_no_lists_column() {
+        let e = Env::new();
+        e.run(APPLY);
+        for (from, to) in [
+            ("\"id\": \"sidebar-lists\"", "\"id\": \"lists\""),
+            ("\"id\": \"agents\"", "\"id\": \"agents2\""),
+            (
+                "\"id\": \"sidebar-lists\",\n          \"type\": \"column\"",
+                "\"id\": \"sidebar-lists\",\n          \"type\": \"row\"",
+            ),
+        ] {
+            assert!(BASE_JSON.contains(from), "{from}");
+            e.t.write(
+                "home/.config/herdr-app/layouts/main.json",
+                &BASE_JSON.replace(from, to),
+            );
+            for mode in [Mode::Check, APPLY] {
+                let (o, out, calls) = e.run(mode);
+                assert_eq!(
+                    kinds(&o),
+                    vec![Kind::Ok, Kind::Manual],
+                    "{to} {mode:?} {o:?}\n{out}"
+                );
+                assert!(
+                    o[1].text.contains("sidebar-lists") && o[1].text.contains("前のまま"),
+                    "{o:?}"
+                );
+                assert!(calls.is_empty());
+            }
+            assert_eq!(e.layout(), expected(TABBED_JSON), "{to}");
+        }
+        // 初めて作るときも作らない
+        let lone = BASE_JSON.replace("\"id\": \"sidebar-lists\"", "\"id\": \"lists\"");
+        let e = Env::new();
+        e.t.write("home/.config/herdr-app/layouts/main.json", &lone);
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}\n{out}");
+        assert!(calls.is_empty());
+        assert!(!e.home("layouts/pjp-main.json").exists());
+        // タブの mod が無ければタブにしないので作る
+        e.remove_tabs();
+        let (o, out, calls) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Ok], "{o:?}\n{out}");
+        assert_eq!(calls, vec![CLONE_ARGS.to_string()]);
+        assert_eq!(mod_of(&e.layout(), "spaces").as_deref(), Some("pjp-spaces"));
+    }
+
+    #[test]
+    fn stack_lists_turns_only_the_lists_column() {
+        let mut v = OValue::parse(
+            r#"{"id":"root","children":[{"id":"sidebar-lists","type":"column","size":{"weight":1},"children":[{"id":"spaces"},{"id":"agents"}]}]}"#,
+        )
+        .unwrap();
+        assert!(stack_lists(&mut v));
+        assert_eq!(
+            v,
+            OValue::parse(
+                r#"{"id":"root","children":[{"id":"sidebar-lists","type":"stack","active":"spaces","header":{"content":{"mod":"pjp-sidebar-tabs","props":{"stack":"sidebar-lists"}},"height":36},"size":{"weight":1},"children":[{"id":"spaces"},{"id":"agents"}]}]}"#,
+            )
+            .unwrap()
+        );
+        let once = v.clone();
+        assert!(!stack_lists(&mut v), "もう stack");
+        assert_eq!(v, once);
+        // column に active・header の欄があっても二重にしない
+        let mut v = OValue::parse(
+            r#"{"id":"sidebar-lists","type":"column","active":"agents","header":"tabs","children":[{"id":"spaces"},{"id":"agents"}]}"#,
+        )
+        .unwrap();
+        assert!(stack_lists(&mut v));
+        assert_eq!(
+            v,
+            OValue::parse(
+                r#"{"id":"sidebar-lists","type":"stack","active":"spaces","header":{"content":{"mod":"pjp-sidebar-tabs","props":{"stack":"sidebar-lists"}},"height":36},"children":[{"id":"spaces"},{"id":"agents"}]}"#,
+            )
+            .unwrap()
+        );
+        for json in [
+            r#"{"id":"root","children":[{"id":"lists","type":"column","children":[{"id":"spaces"},{"id":"agents"}]}]}"#,
+            r#"{"id":"root","children":[{"id":"sidebar-lists","type":"row","children":[{"id":"spaces"},{"id":"agents"}]}]}"#,
+            r#"{"id":"root","children":[{"id":"sidebar-lists","type":"column","children":[{"id":"spaces"}]}]}"#,
+            r#"{"id":"root","children":[{"id":"sidebar-lists","type":"column"}]}"#,
+        ] {
+            let mut v = OValue::parse(json).unwrap();
+            let before = v.clone();
+            assert!(!stack_lists(&mut v), "{json}");
+            assert_eq!(v, before, "{json}");
+        }
     }
 
     #[test]
@@ -1433,6 +1930,30 @@ mod tests {
         assert!(
             !dotfiles_mods.join(MOD).exists(),
             "pjp-spaces は claude-skills のもの (herdr-app-mods と二重に配らない)"
+        );
+    }
+
+    /// dotfiles の repo の pjp-sidebar-tabs (herdr-app-mods が置く): layout から指せる形 (main.js と place が none の mod.json)・main.js が
+    /// 使うアイコンが mod のフォルダにある・props の stack が無いときに切り替える stack が、runner が header を置く LISTS
+    #[test]
+    fn real_repo_carries_the_tabs_mod() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let dir = join_segments(&repo, crate::steps::herdr_app_mods::MODS).join(TABS);
+        let main = std::fs::read_to_string(dir.join("main.js")).expect("main.js がある");
+        let place = read_place(TABS, &dir).unwrap();
+        assert_eq!(place.as_deref(), Some("none"));
+        let head = format!("\"mods/{TABS}/");
+        let mut icons = 0;
+        for (at, _) in main.match_indices(&head) {
+            let rest = &main[at + head.len()..];
+            let file = &rest[..rest.find('"').expect("閉じる \" がある")];
+            assert!(dir.join(file).is_file(), "main.js が使う {file} が無い");
+            icons += 1;
+        }
+        assert!(icons >= 2, "Spaces と Agents のアイコン: {icons}");
+        assert!(
+            main.contains(&format!("const STACK = \"{LISTS}\";")),
+            "main.js の既定の stack が {LISTS} でない"
         );
     }
 
