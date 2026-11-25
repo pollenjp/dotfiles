@@ -11,6 +11,9 @@
 #   - PowerShell が配列にした `--steps files,ntn` (`--steps=files,ntn` も) を、runner には , でつないだ 1 つの引数で渡す
 #   - dotfiles は win/runner に入って cargo run --quiet --release --locked -- <引数> を打ち、終わったら元の場所に戻る
 #   - clone に runner が無ければ、知らせて $LASTEXITCODE を 2 にする (cargo は打たない)
+#   - dotfiles --self-update は、clone の中の Invoke-DotfilesSelfUpdate.ps1 に後ろの引数を 1 つずつの文字列で (配列は , でつないで) 渡し、
+#     $LASTEXITCODE はその終了コードにする (cargo は自分で打たない)。script が無ければ知らせて 2。--self-update が最初の引数でなければ runner に渡す
+#     (script の中身は Invoke-DotfilesSelfUpdate.Tests.ps1)
 #   - 略語は、カーソルの直前で終わる語がコマンドの位置 (行頭・| ; && || の後・( $( @( { の中・= の右・2 行目・文字列の中の $( ))
 #     にあり、表にあるときだけ広げる。引数・パラメーター・引用符の中・& と . の後・長い語・長い略語の途中・大文字小文字の違い・
 #     ` を挟んだ語・変数・コメント・--% の後・function の名前・ハッシュテーブルのキー・switch の節・enum と class のメンバー・
@@ -114,6 +117,33 @@ try {
     Test-Case 'runner が無ければ cargo を打たない' 0 { @($out | Where-Object { $_ -like 'args=*' }).Count }
     Test-Case 'runner が無ければ知らせる' $true { [bool]($out | Where-Object { $_ -like '*dotfiles の runner がありません*' }) }
     Test-Case 'runner が無ければ $LASTEXITCODE は 2' 'code=2' { $out | Where-Object { $_ -like 'code=*' } }
+
+    # dotfiles --self-update は、clone の中の Invoke-DotfilesSelfUpdate.ps1 を呼ぶだけ (中身は Invoke-DotfilesSelfUpdate.Tests.ps1 が確かめる)。
+    # ここでは、引数と終了コードを控える偽の script を clone に置き、渡し方を見る
+    $out = @(Invoke-Child -TempHome $withoutRunner -Command 'dotfiles --self-update apply')
+    Test-Case '--self-update: clone に script が無ければ知らせて、cargo を打たない' 'True 0' {
+        "$([bool]($out | Where-Object { $_ -like '*--self-update の中身がありません*' })) $(@($out | Where-Object { $_ -like 'args=*' }).Count)"
+    }
+    Test-Case '--self-update: clone に script が無ければ $LASTEXITCODE は 2' 'code=2' { $out | Where-Object { $_ -like 'code=*' } }
+
+    $selfUpdateDir = [IO.Path]::Combine($withRunner, 'ghq', 'github.com', 'pollenjp', 'dotfiles', 'win', 'powershell')
+    $null = New-Item -ItemType Directory -Force -Path $selfUpdateDir
+    Set-Content -LiteralPath (Join-Path $selfUpdateDir 'Invoke-DotfilesSelfUpdate.ps1') -Encoding utf8 -Value @(
+        '"self-update-args=$($args -join ''|'')"'
+        '"self-update-types=$(@($args | ForEach-Object { $_.GetType().Name }) -join '','')"'
+        'exit 5'
+    )
+    $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles --self-update --dry-run check --steps files,ntn')
+    Test-Case '--self-update: 後ろの引数を clone の中の script に渡す (配列は , でつなぐ)' 'self-update-args=--dry-run|check|--steps|files,ntn' { $out | Where-Object { $_ -like 'self-update-args=*' } }
+    Test-Case '--self-update: script には 1 つずつの文字列で渡す' 'self-update-types=String,String,String,String' { $out | Where-Object { $_ -like 'self-update-types=*' } }
+    Test-Case '--self-update: cargo は自分で打たない' 0 { @($out | Where-Object { $_ -like 'args=*' }).Count }
+    Test-Case '--self-update: $LASTEXITCODE は script の終了コード' 'code=5' { $out | Where-Object { $_ -like 'code=*' } }
+    Test-Case '--self-update: 今いる場所は動かない' "after=$withRunner" { $out | Where-Object { $_ -like 'after=*' } }
+    $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles --self-update')
+    Test-Case '--self-update だけなら、script に何も渡さない' 'self-update-args=' { $out | Where-Object { $_ -like 'self-update-args=*' } }
+    # --self-update は最初の引数のときだけ。ほかの位置なら runner の引数のまま渡す (runner が知らない option として断る)
+    $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles apply --self-update')
+    Test-Case '--self-update が最初の引数でなければ、runner の引数のまま' 'args=run|--quiet|--release|--locked|--|apply|--self-update' { $out | Where-Object { $_ -like 'args=*' } }
 } finally {
     Remove-Item -LiteralPath $withRunner -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $withoutRunner -Recurse -Force -ErrorAction SilentlyContinue
