@@ -1811,7 +1811,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 
 | 配置先 | 実体 |
 | --- | --- |
-| `~/.config/starship.toml` | `nix/files/starship.toml` |
+| `~/.config/starship.toml` | `nix/files/starship.toml` (Windows へも `win/manifest.toml` の `base = "nix"` で `%USERPROFILE%\.config\starship.toml` に配る。[`win/README.md`「starship」](../win/README.md#starship)) |
 | `~/.config/zellij/config.kdl` | `nix/files/zellij/config.kdl` |
 | `~/.config/herdr/config.toml` | `nix/files/herdr/config.toml` |
 | `~/.config/nvim/init.vim` | `nix/files/nvim/init.vim` |

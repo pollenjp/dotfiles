@@ -25,6 +25,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles` (`dotfiles --self-update` は 3 つの clone を進めてから))。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
+| (`nix/files/starship.toml`) | `%USERPROFILE%\.config\starship.toml` | starship のプロンプトの設定。Linux の home-manager も同じファイルを `~/.config/starship.toml` に置くので `nix/` に置き、manifest の `base = "nix"` で配る。sh で判定する custom module は Windows では出さない。starship 本体と `$PROFILE` の初期化の 1 行は配らない ([後述](#starship)) |
 | `powershell/Invoke-DotfilesSelfUpdate.ps1` | (配らない。`dotfiles --self-update` が clone の中のものを呼ぶ) | `dotfiles --self-update` の中身。dotfiles・dotfiles-private・claude-skills の clone を gh の資格情報で fetch して fast-forward し、後ろの引数があればその後に runner に渡す ([後述](#clone-を進める-dotfiles---self-update)) |
 | `herdr/config.toml` | `%APPDATA%\herdr\config.toml` | Windows の herdr の設定。キーバインドと sidebar の行は WSL と同じ ([後述](#herdr)、[TKT-92](https://app.notion.com/p/herdr-Windows-win-herdr-config-toml-3f079149a66f819fb49ef2d13e6a76f5)) |
 | `openssh/Install-OpenSSH.ps1` | `%USERPROFILE%\.config\powershell\Install-OpenSSH.ps1` | Windows の OpenSSH を winget で固定した版に揃える。PowerShell の `Install-OpenSSH` から呼ぶ ([後述](#openssh)、[TKT-109](https://app.notion.com/p/winget-Windows-OpenSSH-win-3f179149a66f812fba25c6b2d6ce5d31)) |
@@ -1397,7 +1398,9 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 - `dst` は `%USERPROFILE%` / `%APPDATA%` / `%LOCALAPPDATA%` のどれかで始める。区切りは `/`
 - 書けるキーは `src` / `dst` / `hint` / `base` だけ。`..` と `\` は書けない
 - `base = "nix"` の表だけ、`src` は repo 直下の `nix/` からの相対パスになる (既定は `"win"`)。Linux の home-manager も同じファイルを
-  読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json`)
+  読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json` と、
+  [starship](#starship) の `starship.toml`)。`src` は `win/` の外なので、[`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml) の
+  `paths` にも足す (runner が読むファイルを変えた PR で、runner の CI を流す)
 - 大文字小文字だけが違う `dst` は重複として止まる (Windows では同じファイル)
 - 今の設定をそのまま取り込んだなら、1 回目は「同じです」になり記録だけが作られる
 - manifest から消したファイルは Windows 側から消さない
@@ -1641,8 +1644,8 @@ if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powers
   配っていない PC でも、起動のたびにエラーを出さずに済む
 - dot-source (`.`) で読む。`&` で呼ぶと子の scope で定義され、呼び終わりに消える
 - 直して配ったら、開いている PowerShell では `. $PROFILE` で読み直す
-- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化や、そのマシンだけの設定は
-  そこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
+- `$PROFILE` は手元のファイルのまま残る。今ある starship の初期化 (設定の `starship.toml` は manifest で配る。[starship](#starship)) や、
+  そのマシンだけの設定はそこに置いたままでよい。ただしキーの割り当て (`Set-PSReadLineKeyHandler`。PSFzf など) は、`dotfiles.ps1` を読む行より後に置く
   (`dotfiles.ps1` が EditMode を Vi に替え、PSReadLine は EditMode を替えるとそのモードの既定の割り当てに戻すので、前に置いた割り当ては消える。
   [Vi モード](#vi-モード))
 - 足した 1 行を消すと、次からは足し直さない (Windows 側で外したものとして扱う)。戻すなら
@@ -1851,7 +1854,8 @@ Ctrl+z (`Undo`)・Ctrl+y (`Redo`)・↑・↓ (履歴)・Home・End・Delete・B
 
 - 形が替わるのは、DECSCUSR を受ける端末。herdr-app・Windows Terminal と PowerShell の間の ConPTY は列を端末へ渡す (WSL から起こした
   PowerShell 7 と 5.1 の ConPTY で確かめた)
-- starship のプロンプトは、描き直したときのモードで記号を替える (starship の既定の設定では、挿入モードで `❯`、コマンドモードで `❮`)。
+- starship のプロンプトは、描き直したときのモードで記号を替える (dotfiles の `starship.toml` は記号 (`character`) を替えていないので、starship の
+  既定のまま挿入モードで `❯`、コマンドモードで `❮`)。
   形が替わらない端末でも、プロンプトの記号でモードが分かる。starship の init (`$PROFILE` で `dotfiles.ps1` より先に読む) もモードが替わるたびに
   描き直す handler を置くが、`dotfiles.ps1` はそれを包まずに置き換えて自分で描き直す (`. $PROFILE` で読み直しても、描き直しは 1 回)
 - PSReadLine の `-ViModeIndicator Cursor` を使わないのは、5.1 の PSReadLine 2.0.0 の `Cursor` が Windows のコンソールの API でカーソルの
@@ -1916,6 +1920,29 @@ Set-PSReadLineOption -EditMode Windows
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 Add-Content -Path $PROFILE -Value 'if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }'
 ```
+
+## starship
+
+starship (プロンプト) の設定 `starship.toml` を、Linux と同じファイル (`nix/files/starship.toml`。Linux は home-manager が `~/.config/starship.toml` に
+置く) から `%USERPROFILE%\.config\starship.toml` に配る。starship は環境変数 `STARSHIP_CONFIG` が無ければここを読む。配るのは manifest の
+`base = "nix"` の表 ([ファイルを足す](#ファイルを足す)) で、受け持ちを runner に切り替えたホストは `dotfiles apply` の手順 `files`、ほかは WSL の
+`~/dotfiles/setup --update` ([配る](#配る))。初めて配るときは、`dotfiles apply --dry-run` に `[dry-run] コピー: …\.config\starship.toml`、`dotfiles check` に
+`無い (apply でコピーする): …\.config\starship.toml` と出る。
+
+- starship 本体と、`$PROFILE` の初期化の 1 行 (`Invoke-Expression (&starship init powershell)`) は配らない (手で入れたもののまま。[PowerShell](#powershell))。
+  starship の無い PC に置いても、読むものがいないだけ
+- starship はプロンプトのたびに設定を読むので、置いたら次のプロンプトから効く (読み直しは要らない)
+- 置き先に手で書いた `starship.toml` があると、初めて配るときに「置いた記録が無く」の衝突になる ([衝突したら](#衝突したら))。Windows の中身を
+  残すなら `nix/files/starship.toml` に取り込む (Linux の見た目も変わる)。`STARSHIP_CONFIG` で別のファイルを指している PC では、置いたファイルは読まれない
+- 同じファイルを Linux (bash・fish) と Windows (PowerShell) の starship が読む。sh などの shell で判定・出力する custom module は `os = 'unix'` で
+  Windows では出さない。Windows の starship は `shell` を PATH から引くので、sh を PATH に足した PC (Git for Windows の `usr\bin` など) ではプロンプトの
+  たびに sh を起こし、bash は WSL の `bash.exe` (WindowsApps) に当たって WSL を起こす。`os = 'unix'` なら Windows では shell を探さずに飛ばし、Linux と
+  macOS ではこれまでどおり判定する。runner の試験 (`runner/src/steps/files.rs` の `real_repo_starship_toml`) が、Unix の shell の custom module に
+  `os` があるかを確かめる
+- 今の custom module は `custom.pjp_ssh_client` (ssh で入った shell と herdr の pane で、`PJP_SSH_CLIENT` が届いていないことを出す。Linux の herdr と
+  ssh-agent の仕組み) だけで、Windows では出ない
+- ほかの module は Windows でもそのまま使える (`sudo` は starship の既定の `allow_windows = false` で、Windows では出ない)。罫線 (`┌`・`│`・`└`) と
+  絵文字 (`🕙`・`🌏`・`⚠`) は Linux と同じ字で、字体に無い字が □ で出るなら端末の字体を見る
 
 ## herdr
 
