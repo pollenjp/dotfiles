@@ -11,7 +11,7 @@
 //   c            新しいタブ (tab.new。Ctrl+Shift+T と同じく、開く前の space の focus のペインのフォルダで開く)
 //   Tab o        今のタブの次のペイン                  g "         端末の picker (mod.open:picker)
 //   Shift+O      次のエージェント (agent.next。旧 herdr の open_notification_target の代わり)
-//   Shift+Q      今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す。開く前の space で確かめの小窓 (自作の mod
+//   Shift+D      今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す。開く前の space で確かめの小窓 (自作の mod
 //                pjp-worktree-remove) を開き、止める端末と警告を見せて Enter を待つ (branch は残す)。消す命令なので、一覧ではほかの行と並べず、
 //                下に 1 行で分けて出す (BINDINGS の wide)
 //   Esc          取り消す。割り当てに無いキーは、何もせずに閉じる
@@ -66,7 +66,7 @@ const BINDINGS = [
   { keys: ["tab", "o"], label: "次のペイン", act: (p) => p.nextPane() },
   { keys: ["g", "\""], label: "端末を選ぶ (picker)", act: (p) => p.runClosed("mod.open", { name: "picker" }) },
   { keys: ["O"], label: "次のエージェント", act: (p) => p.runClosed("agent.next") },
-  { keys: ["Q"], label: "space の端末を閉じて worktree を消す", note: "確かめてから", wide: true, act: (p) => p.removeWorktree() },
+  { keys: ["D"], label: "space の端末を閉じて worktree を消す", note: "確かめてから", wide: true, act: (p) => p.removeWorktree() },
 ];
 
 const pick = (list) => list[Math.floor(Math.random() * list.length)];

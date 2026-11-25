@@ -317,7 +317,7 @@ mod tests {
     //! - サブディレクトリの中のファイルも同じパスへ置く。mod の置き場が無ければ何もしない
     //! - home は HERDR_APP_HOME → XDG_CONFIG_HOME の下 → %USERPROFILE%\.config\herdr-app (空の値は無いものとして読む)
     //! - 本物の repo の mod (pjp-hub-panel) と .gitignore (herdr-app が書くファイルを入れない)
-    //! - 本物の repo の mod が開く自作の mod (`openOverlay` の `mod: "pjp-…"`。prefix の小窓の Shift+Q が開く pjp-worktree-remove) が repo の mod にある
+    //! - 本物の repo の mod が開く自作の mod (`openOverlay` の `mod: "pjp-…"`。prefix の小窓の Shift+D が開く pjp-worktree-remove) が repo の mod にある
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -806,7 +806,7 @@ mod tests {
     }
 
     /// 本物の repo の mod が `openOverlay({ mod: "pjp-…" })` で開く自作の mod が、repo の mod にある (開く側か開かれる側の名前だけを
-    /// 替えると、herdr-app-mods が配らない mod を開こうとして何も出ない)。prefix の小窓の Shift+Q は pjp-worktree-remove を開く
+    /// 替えると、herdr-app-mods が配らない mod を開こうとして何も出ない)。prefix の小窓の Shift+D は pjp-worktree-remove を開く
     #[test]
     fn real_repo_mods_open_mods_in_the_repo() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
