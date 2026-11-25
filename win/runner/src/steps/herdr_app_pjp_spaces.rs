@@ -70,7 +70,7 @@ pub const LISTS: &str = "sidebar-lists";
 /// sidebar-lists の上端に Spaces と Agents のタブを描く mod (dotfiles の `win/herdr-app/mods/pjp-sidebar-tabs/`。herdr-app-mods が置く)
 pub const TABS: &str = "pjp-sidebar-tabs";
 /// タブで切り替える子 (sidebar-lists の子の id)。最初の子を、ファイルに書く stack の active にする
-const TAB_CHILDREN: [&str; 2] = ["spaces", "agents"];
+pub const TAB_CHILDREN: [&str; 2] = ["spaces", "agents"];
 /// タブの帯の高さ (px。herdr-app の header の既定は 30)
 const TABS_HEIGHT: u32 = 36;
 /// herdr-app do の待ちの上限
