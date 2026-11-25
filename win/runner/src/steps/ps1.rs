@@ -10,7 +10,8 @@
 //! - 3 (入っていない): `-IfMissing` で入れる (google-ime-install・tailscale は、固定した版が winget に無ければ打たずに知らせる。sshd は
 //!   入れられないとき (OpenSSH が無いなど) は ps1 が 1 を返す。op-reason は ps1 が `-IfMissing` を持たないので引数なし)
 //! - 1 (揃っていない): 手順の `Policy` で、揃える (引数なし・`-IfMissing`)・知らせるだけ (※ の手順)。op-reason は締めの行を見ずに引数なしで
-//!   入れ替える (動いている op-reason.exe があれば、ps1 が何も変えずに止まる)
+//!   入れ替える (動いている op-reason.exe があれば、ps1 が何も変えずに止まる)。claude-desktop は Policy より先に、ps1 も runner も直さない
+//!   もの (`leftover`) の印を見て、締めの行が人の切り替える設定 (`alerts`) だけなら揃っている扱いにする (設定の行は後ろに足す)
 //! - 出力に状態の表の見出しが無い・ほかの終了コード: ps1 が動いていない (確かめられなかった)
 //!
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
@@ -120,9 +121,14 @@ pub struct Ps1Spec {
     /// `mark` を書いて 1 を返す (入っていなくても 3 にしない。入れられないので)。check も apply も、その 1 を「固定した版と揃っていない」の
     /// 代わりにこの行にし、何も打たない (人が外すまで知らせる)
     pub leftover: Option<Marked>,
-    /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off)。
-    /// ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
+    /// `-Check` の出力にあれば、知らせるだけの行 (·。終了コードに数えない) を足す印 (claude-desktop の仮想マシン プラットフォームが off・
+    /// システムトレイとスタートアップ時に実行が読めない)。ps1 が動いて状態の表が出たときだけ見る (check・dry-run・apply のどれでも)
     pub notices: &'static [Marked],
+    /// ps1 も runner も直さない、人が切り替える設定 (claude-desktop のシステムトレイ・スタートアップ時に実行が on)。ps1 は当たっているとき、
+    /// 締めの行 (⚠️ で始まる行) に `mark` を書き、版が揃っていても 1 を返す。状態の表が出たとき、当たった印ごとに直すことがある行 (⚠。
+    /// `Kind::Manual`) を足す (check・dry-run・apply のどれでも。何も打たない)。1 の締めの行がどれもこの印のものなら、版は揃っている扱い
+    /// (入れた後の 1 も入った扱い)
+    pub alerts: &'static [Marked],
 }
 
 /// ps1 の出力の印と、それが当たったときに締めの表へ出す行。
@@ -211,6 +217,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "openssh",
@@ -249,6 +256,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "sshd",
@@ -323,6 +331,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "tailscale",
@@ -369,6 +378,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "claude-code",
@@ -405,6 +415,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "herdr-app",
@@ -440,6 +451,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "herdr",
@@ -473,6 +485,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "ntn",
@@ -508,6 +521,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "op-reason",
@@ -556,6 +570,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: Some("-Check はネットワークを使わないので、pwsh が止まっているかもしれない"),
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     Ps1Spec {
         id: "type-clipboard",
@@ -591,6 +606,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     // T3 Code (Windows にしか無い手順。WSL の setup には無い。dotfiles-private の docs/adr/091_t3_code_opt_in_*)。テレメトリの環境変数と
     // settings.json は t3-code-settings が合わせる
@@ -640,11 +656,13 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     // Claude Desktop (Windows にしか無い手順。WSL の setup には無い)。winget の Anthropic.Claude の MSIX を、昇格した Windows PowerShell の winget で
     // 入れる (Cowork の常駐 CoworkVMService は管理者の権限で入れたときだけ登録される。UAC の確認が 1 回出る)。版の扱いは T3 Code と同じ
     // (入っていないときだけ入れ、自動更新で上がった版は下げない)。旧来の exe の Claude が残っていれば、入れずに外し方を (ps1 は入っていなくても
-    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせる (dotfiles-private の docs/adr/099_win_claude_desktop_msix_*)
+    // 1 を返す)、仮想マシン プラットフォームが off なら Cowork が使えないことを知らせ、Claude の設定のシステムトレイ・スタートアップ時に実行が
+    // on なら直すことがある行で off にする手を出す (dotfiles-private の docs/adr/099_win_claude_desktop_msix_*)
     Ps1Spec {
         id: "claude-desktop",
         windows_only: true,
@@ -702,13 +720,48 @@ pub const SPECS: &[Ps1Spec] = &[
                 "終わったら %LOCALAPPDATA%\\AnthropicClaude と、スタートメニューの %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Claude.lnk を消す (win/README.md の「Claude Desktop」)",
             ],
         }),
-        notices: &[Marked {
-            mark: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off",
-            text: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork は使えない (runner は on にしない)",
-            notes: &[
-                "on にするには、管理者の PowerShell で Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All を打ち、Windows を再起動する (シャットダウンでなく再起動。win/README.md の「Claude Desktop」)",
-            ],
-        }],
+        notices: &[
+            Marked {
+                mark: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off",
+                text: "仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork は使えない (runner は on にしない)",
+                notes: &[
+                    "on にするには、管理者の PowerShell で Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All を打ち、Windows を再起動する (シャットダウンでなく再起動。win/README.md の「Claude Desktop」)",
+                ],
+            },
+            // 下の 2 つの設定が読めない (書いている途中など。⚠ にはしないが、締めの表で無事に見えないように知らせる)
+            Marked {
+                mark: "システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない",
+                text: "Claude Desktop のシステムトレイの設定が読めない (claude_desktop_config.json の preferences.menuBarEnabled)",
+                notes: &[
+                    "Claude の設定 > デスクトップアプリ で確かめる (on なら off にする。runner は書き換えない)",
+                ],
+            },
+            Marked {
+                mark: "スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない",
+                text: "Claude Desktop のスタートアップ時に実行の状態が読めない (startup task ClaudeStartup の State)",
+                notes: &[
+                    "Claude の設定 > デスクトップアプリ で確かめる (on なら off にする。runner は書き換えない)",
+                ],
+            },
+        ],
+        // Claude の設定 > デスクトップアプリ の 2 つの切り替え。runner は書き換えない (システムトレイの値は、開いている Claude が自分で書き直す
+        // ファイルにある)
+        alerts: &[
+            Marked {
+                mark: "Claude Desktop のシステムトレイが on",
+                text: "Claude Desktop のシステムトレイが on → Claude の設定 > デスクトップアプリ の「システムトレイ」を off にする (runner は設定を書き換えない)",
+                notes: &[
+                    "窓を閉じても Claude は終わらずにトレイで動き続ける。開いていないときにリモートから操作されないよう、off にしておく (win/README.md の「Claude Desktop」)",
+                ],
+            },
+            Marked {
+                mark: "Claude Desktop のスタートアップ時に実行が on",
+                text: "Claude Desktop のスタートアップ時に実行が on → Claude の設定 > デスクトップアプリ の「スタートアップ時に実行」を off にする (runner は設定を書き換えない)",
+                notes: &[
+                    "Windows にサインインしたときに Claude が起きる (win/README.md の「Claude Desktop」)",
+                ],
+            },
+        ],
     },
     // ghq と fzf (Windows にしか無い手順。WSL の setup には無い。dotfiles.ps1 の cdrepo が使う。dotfiles-private の
     // docs/adr/092_win_cdrepo_ghq_fzf_*)。どちらも ① エンジニアの道具の CLI で、Linux はどのグループでも入れるので、いつも on。ntn と同じく
@@ -747,6 +800,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
     // fzf は winget の既定の installer (machine スコープの MSI) を避けて portable を入れる。MSI の fzf が入っていれば、ps1 は portable を
     // 入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる (PATH のずれと同じく知らせるだけ)。その行の印で外し方を出す
@@ -787,6 +841,7 @@ pub const SPECS: &[Ps1Spec] = &[
         check_hang: None,
         leftover: None,
         notices: &[],
+        alerts: &[],
     },
 ];
 
@@ -1116,6 +1171,23 @@ impl Ps1Step {
         default.iter().map(|n| n.to_string()).collect()
     }
 
+    /// 締めの行 (⚠️ で始まる行) があり、どれも人が切り替える設定 (`alerts`) の印のものか (1 のわけが、それだけ)
+    fn alerts_only(&self, lines: &[String]) -> bool {
+        let mut verdicts = lines.iter().filter(|l| l.starts_with("⚠️")).peekable();
+        verdicts.peek().is_some()
+            && verdicts.all(|l| self.0.alerts.iter().any(|m| l.contains(m.mark)))
+    }
+
+    /// 出力に当たった、人が切り替える設定 (`alerts`) の印ごとの直すことがある行 (⚠)
+    fn alert_outcomes(&self, lines: &[String]) -> Vec<Outcome> {
+        self.0
+            .alerts
+            .iter()
+            .filter(|m| m.found(lines))
+            .map(|m| m.outcome(Kind::Manual))
+            .collect()
+    }
+
     /// 手で打つ -Check (SSH の中継を渡す手順で中継が on なら、そのモードも添える。sshd は受け持ちが runner なら -KeysFrom runner も)
     fn manual_command(&self, ctx: &Ctx) -> String {
         let mut relay = match ctx.host.ssh_relay() {
@@ -1147,6 +1219,9 @@ impl Ps1Step {
             }
             // ps1 も runner も直さないもの (claude-desktop の旧来の exe の Claude) が残っている。手順の Policy によらず、その行を出す
             (Some(1), true) if s.leftover.is_some_and(|m| m.found(lines)) => Plan::Leftover,
+            // 1 のわけが、人が切り替える設定 (claude-desktop のシステムトレイ・スタートアップ時に実行) だけ。版は揃っている (設定の行は
+            // run_ps1 が後ろに足す)
+            (Some(1), true) if self.alerts_only(lines) => Plan::Ok,
             (Some(1), true) => match s.policy {
                 Policy::Warn => Plan::Warn,
                 Policy::Herdr => Plan::HerdrWarn,
@@ -1333,8 +1408,14 @@ impl Ps1Step {
                 }
             }
         };
-        // 知らせるだけの印 (claude-desktop の仮想マシン プラットフォームが off)。ps1 が動いて状態の表が出たときだけ
+        // 人が切り替える設定 (claude-desktop のシステムトレイ・スタートアップ時に実行が on) と、知らせるだけの印 (仮想マシン プラットフォームが
+        // off)。ps1 が動いて状態の表が出たときだけ。入れた・揃えたときの設定の行は、打った後の出力から act が足す
         if header && plan != Plan::CheckFailed {
+            let acted = matches!(mode, Mode::Apply { .. })
+                && matches!(plan, Plan::Install | Plan::Sync | Plan::SyncIfMissing);
+            if !acted {
+                out.extend(self.alert_outcomes(&r.output));
+            }
             out.extend(
                 s.notices
                     .iter()
@@ -1479,7 +1560,9 @@ impl Ps1Step {
         // herdr: Preview が残っていると -IfMissing は 1 を返す。締めの行が Preview のことだけなら入った扱い
         let herdr_preview_only =
             s.policy == Policy::Herdr && code == Some(1) && v.preview && !v.sync;
-        if code == Some(0) || herdr_preview_only {
+        // 1 のわけが人の切り替える設定 (`alerts`) だけなら入った扱い (claude-desktop の、まだ開いていない Claude のシステムトレイは既定で on)
+        let alerts_only = code == Some(1) && self.alerts_only(&r.output);
+        if code == Some(0) || herdr_preview_only || alerts_only {
             if relay_only {
                 ctx.say(RELAY_SYNCED);
             } else {
@@ -1498,6 +1581,7 @@ impl Ps1Step {
                 }
                 out.push(o);
             }
+            out.extend(self.alert_outcomes(&r.output));
             return out;
         }
         // Sync: 版と pin は揃ったが、PATH のずれだけが残った
@@ -1563,9 +1647,12 @@ mod tests {
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
     //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
     //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
-    //!   知らせるだけの行 (·) を後ろに足す。ほかの手順は残りものと知らせの印を持たない
+    //!   知らせるだけの行 (·) を後ろに足す。Claude の設定のシステムトレイ・スタートアップ時に実行が on (締めの行の印。ps1 は版が揃って
+    //!   いても 1 を返す) なら、印ごとの直すことがある行 (⚠) を足して何も打たず (dry-run も)、締めの行がそれだけなら揃っている扱い
+    //!   (入れた後の 1 も入った扱い)。2 つの設定が読めなければ、知らせるだけの行 (·) を足す。ほかの手順は残りもの・知らせ・設定の印を
+    //!   持たない
     //! - Windows にしか無い手順の ps1 は、runner が読む締めの行の文言 (Sync は「→ … で入れる」「→ … で揃える」「→ ※ の手順で直す」) と、
-    //!   出力の印 (output_fixes・missing_blocked・leftover・notices) を持つ (WSL の wrapper との突き合わせの代わり)
+    //!   出力の印 (output_fixes・missing_blocked・leftover・notices・alerts) を持つ (WSL の wrapper との突き合わせの代わり)
     //! - 入れた後が 1 でも、herdr は残りが Preview だけなら入った扱い。ntn は PATH のずれだけなら知らせる
     //! - 見出しが無い・時間切れ・PowerShell が無い・ps1 が無いのは確かめられなかった
     //! - PowerShell のコマンドの組み立て (UTF-8・$LASTEXITCODE = 2・' の重ね・herdr-app の -ReleasesFile・pwsh が無ければ powershell)
@@ -1956,6 +2043,7 @@ mod tests {
                 .chain(s.missing_blocked)
                 .chain(s.leftover.map(|m| m.mark))
                 .chain(s.notices.iter().map(|m| m.mark))
+                .chain(s.alerts.iter().map(|m| m.mark))
             {
                 assert!(text.contains(marker), "{} に「{marker}」が無い", s.script);
             }
@@ -2147,14 +2235,210 @@ mod tests {
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].kind, Kind::Failed);
 
-        // ほかの手順は残りものと知らせの印を持たない
+        // ほかの手順は残りもの・知らせ・人が切り替える設定の印を持たない
         for other in SPECS.iter().filter(|x| x.id != "claude-desktop") {
             assert!(
-                other.leftover.is_none() && other.notices.is_empty(),
+                other.leftover.is_none() && other.notices.is_empty() && other.alerts.is_empty(),
                 "{}",
                 other.id
             );
         }
+    }
+
+    /// claude-desktop: Claude の設定のシステムトレイ・スタートアップ時に実行が on (締めの行の印。ps1 は版が揃っていても 1) なら、check も
+    /// apply も、印ごとの直すことがある行 (⚠) を足して何も打たない。版が揃っていれば揃っている行の後ろに、版のずれ・旧来の exe と重なれば
+    /// その行の後ろに足す。入れた後の 1 のわけがそれだけ (まだ開いていない Claude のトレイは既定で on) なら、入った扱い
+    #[test]
+    fn claude_desktop_reports_tray_and_startup_settings() {
+        let s = spec("claude-desktop");
+        let tray = "⚠️ Claude Desktop のシステムトレイが on → Claude の設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️";
+        let tray_unopened = "⚠️ Claude Desktop のシステムトレイが on (既定) → Claude を開いたら、設定 > デスクトップアプリ の「システムトレイ」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️";
+        let startup = "⚠️ Claude Desktop のスタートアップ時に実行が on → Claude の設定 > デスクトップアプリ の「スタートアップ時に実行」を off にする (Install-ClaudeDesktop は設定を書き換えない) ⚠️";
+        let tray_line = "Claude Desktop のシステムトレイが on → Claude の設定 > デスクトップアプリ の「システムトレイ」を off にする (runner は設定を書き換えない)";
+        let startup_line = "Claude Desktop のスタートアップ時に実行が on → Claude の設定 > デスクトップアプリ の「スタートアップ時に実行」を off にする (runner は設定を書き換えない)";
+        let lines = |o: &[Outcome]| -> Vec<(Kind, String)> {
+            o.iter().map(|x| (x.kind, x.text.clone())).collect()
+        };
+
+        // 1 のわけが設定だけ: 揃っている行の後ろに、印ごとの ⚠ の行 (トレイ・スタートアップの順)。check も apply も打つのは -Check だけ
+        for mode in [Mode::Check, APPLY] {
+            let sys1 = sys(
+                (1, vec![header_line(s), tray.into(), startup.into()]),
+                (9, vec![]),
+            );
+            let (o, out, calls) = run("claude-desktop", &sys1, mode);
+            assert_eq!(
+                lines(&o),
+                vec![
+                    (Kind::Ok, "揃っている".to_string()),
+                    (Kind::Manual, tray_line.to_string()),
+                    (Kind::Manual, startup_line.to_string()),
+                ],
+                "{mode:?}"
+            );
+            assert!(
+                o[1].notes[0].contains("リモートから操作されない"),
+                "{:?}",
+                o[1].notes
+            );
+            assert!(
+                o[2].notes[0].contains("サインインしたときに Claude が起きる"),
+                "{:?}",
+                o[2].notes
+            );
+            assert_eq!(ends(&calls), vec!["-Check"], "{mode:?}");
+            assert!(
+                out.contains(
+                    "Windows の Claude Desktop は、dotfiles で固定した版以上で入っています。"
+                ),
+                "{out}"
+            );
+        }
+        // まだ開いていない Claude のトレイ (既定で on) も、同じ印の行
+        let sys2 = sys((1, vec![header_line(s), tray_unopened.into()]), (9, vec![]));
+        let (o, _, _) = run("claude-desktop", &sys2, Mode::Check);
+        assert_eq!(
+            lines(&o),
+            vec![
+                (Kind::Ok, "揃っている".to_string()),
+                (Kind::Manual, tray_line.to_string()),
+            ]
+        );
+
+        // 版のずれ (pin が無い) と重なれば、知らせるだけの行の後ろに足す
+        let pin = "⚠️ winget pin が無い → Install-ClaudeDesktop で足す (UAC の確認は出ない) ⚠️";
+        let sys3 = sys(
+            (1, vec![header_line(s), pin.into(), tray.into()]),
+            (9, vec![]),
+        );
+        let (o, _, calls) = run("claude-desktop", &sys3, APPLY);
+        assert_eq!(
+            lines(&o),
+            vec![
+                (
+                    Kind::Manual,
+                    "固定した版と揃っていない → ※ の手順で直す (runner は揃えない)".to_string()
+                ),
+                (Kind::Manual, tray_line.to_string()),
+            ]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 旧来の exe と重なれば、外し方の行の後ろに足す
+        let legacy = "⚠️ 旧来の exe の Claude が残っている → ※ の手順で外す (Install-ClaudeDesktop は外さない) ⚠️";
+        let sys4 = sys(
+            (1, vec![header_line(s), legacy.into(), startup.into()]),
+            (9, vec![]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys4, Mode::Check);
+        let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, vec![Kind::Manual, Kind::Manual]);
+        assert!(
+            o[0].text.starts_with("旧来の exe の Claude (Squirrel。"),
+            "{}",
+            o[0].text
+        );
+        assert_eq!(o[1].text, startup_line);
+        // 知らせるだけの行 (仮想マシン プラットフォームが off) は、設定の行の後ろ
+        let vm_off = "※ 仮想マシン プラットフォーム (VirtualMachinePlatform) が off なので、Cowork (VM の中で動くエージェント) は使えない。on にするには…";
+        let sys5 = sys(
+            (1, vec![header_line(s), vm_off.into(), tray.into()]),
+            (9, vec![]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys5, Mode::Check);
+        let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, vec![Kind::Ok, Kind::Manual, Kind::Info]);
+
+        // 入れた後の 1 のわけが設定だけ (まだ開いていない Claude のトレイ): 入った扱いにして、設定の行を足す
+        let sys6 = sys(
+            (3, vec![header_line(s)]),
+            (1, vec![header_line(s), tray_unopened.into()]),
+        );
+        let (o, out, calls) = run("claude-desktop", &sys6, APPLY);
+        assert_eq!(
+            lines(&o),
+            vec![
+                (Kind::Ok, "入れた".to_string()),
+                (Kind::Manual, tray_line.to_string()),
+            ]
+        );
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            out.contains("Windows に Claude Desktop (MSIX) を入れました。"),
+            "{out}"
+        );
+        // 入れた後の 1 に、設定のほかの締めの行もあれば、入れられなかった (設定の行は足さない)
+        let missing = "⚠️ Claude Desktop (MSIX) が入っていない → Install-ClaudeDesktop で入れる (UAC の確認が 1 回出る) ⚠️";
+        let sys7 = sys(
+            (3, vec![header_line(s)]),
+            (1, vec![header_line(s), missing.into(), tray.into()]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys7, APPLY);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+        assert!(
+            o[0].text.starts_with("入れられなかった (終了コード 1"),
+            "{}",
+            o[0].text
+        );
+
+        // 状態の表が出ていない 1 は、設定の印があっても確かめられなかった
+        let sys8 = sys((1, vec![tray.into()]), (9, vec![]));
+        let (o, _, _) = run("claude-desktop", &sys8, Mode::Check);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Failed);
+
+        // dry-run も打たずに同じ行を出す。入れる見込み (3) のときも、-Check の出力の設定の行を出す (打つのは apply だけで、そのときは
+        // 打った後の出力から足す)
+        let dry = Mode::DryRun { force: false };
+        let sys9 = sys((1, vec![header_line(s), tray.into()]), (9, vec![]));
+        let (o, _, calls) = run("claude-desktop", &sys9, dry);
+        assert_eq!(
+            lines(&o),
+            vec![
+                (Kind::Ok, "揃っている".to_string()),
+                (Kind::Manual, tray_line.to_string()),
+            ]
+        );
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        for mode in [Mode::Check, dry] {
+            let sys10 = sys((3, vec![header_line(s), startup.into()]), (9, vec![]));
+            let (o, _, calls) = run("claude-desktop", &sys10, mode);
+            let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+            assert_eq!(kinds, vec![Kind::Missing, Kind::Manual], "{mode:?}");
+            assert_eq!(o[1].text, startup_line, "{mode:?}");
+            assert_eq!(ends(&calls), vec!["-Check"], "{mode:?}");
+        }
+
+        // 設定が読めない (ps1 の ※ の行): 数えない知らせの行 (·) を、トレイ・スタートアップの順に足す
+        let tray_unknown = "※ システムトレイの設定 (claude_desktop_config.json の preferences.menuBarEnabled) が読めない。Claude の設定 > デスクトップアプリ で確かめる";
+        let startup_unknown = "※ スタートアップ時に実行の状態 (startup task ClaudeStartup の State) が読めない。Claude の設定 > デスクトップアプリ で確かめる";
+        let sys11 = sys(
+            (
+                0,
+                vec![header_line(s), tray_unknown.into(), startup_unknown.into()],
+            ),
+            (9, vec![]),
+        );
+        let (o, _, _) = run("claude-desktop", &sys11, Mode::Check);
+        let kinds: Vec<Kind> = o.iter().map(|x| x.kind).collect();
+        assert_eq!(kinds, vec![Kind::Ok, Kind::Info, Kind::Info]);
+        assert!(
+            o[1].text
+                .starts_with("Claude Desktop のシステムトレイの設定が読めない"),
+            "{}",
+            o[1].text
+        );
+        assert!(
+            o[2].text
+                .starts_with("Claude Desktop のスタートアップ時に実行の状態が読めない"),
+            "{}",
+            o[2].text
+        );
+        assert!(
+            o[1].notes[0].contains("Claude の設定 > デスクトップアプリ で確かめる"),
+            "{:?}",
+            o[1].notes
+        );
     }
 
     #[test]
