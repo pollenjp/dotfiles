@@ -4,6 +4,8 @@
     "pjp-herdr-hub": "off",
     "pjp-herdr-other-repo": "off",
     "pjp-hc-hub": "off",
+    "pjp-hc-hub-panel": "off",
+    "pjp-pack-hc": "off",
     "pjp-hc-child": "off",
     "pjp-t3-hub": "on"
   }
