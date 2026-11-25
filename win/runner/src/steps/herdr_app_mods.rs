@@ -787,9 +787,17 @@ mod tests {
         for m in &mods {
             let text = std::fs::read_to_string(root.join(&m.name).join("mod.json"))
                 .unwrap_or_else(|e| panic!("{} の mod.json が読めない ({e})", m.name));
+            let v = serde_json::from_str::<serde_json::Value>(&text);
             assert!(
-                serde_json::from_str::<serde_json::Value>(&text).is_ok_and(|v| v.is_object()),
+                v.as_ref().is_ok_and(|v| v.is_object()),
                 "{} の mod.json が JSON の object でない",
+                m.name
+            );
+            // herdr-app は初めて見た mod を place に従って表示中の layout へ差し込むので、dotfiles の mod は layout・ほかの mod が置く所にだけ出す
+            assert_eq!(
+                v.ok().and_then(|v| v.get("place").cloned()),
+                Some(serde_json::Value::from("none")),
+                "{} の mod.json の place が none でない",
                 m.name
             );
         }
