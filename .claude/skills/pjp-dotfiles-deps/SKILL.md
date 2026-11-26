@@ -123,6 +123,6 @@ merge の後に、ユーザーが各マシンで打つ。Claude は打たない 
 - mise のグローバルの go・node は setup が上げない (`bootstrap-mise.sh` は claude だけを猶予 1 日で上げ、go・node・usage は入っている
   版のまま)。依存の更新の skill の PC の範囲の案 (上げ先と打つコマンド) を見せ、ユーザーの了承を得てから `mise up go node` を
   打つ (mise の猶予 `dotfiles.mise.minimumReleaseAge` が効く)。了承が無ければ打たない
-- 設定グループ・道具の switch で入れないホスト (客先の PC など。`nix/README.md` の「設定グループ」) では、入れていないもの (ntn・
+- 設定グループ・道具の switch で入れないホスト (グループ minimum でその道具を足していないホストなど。`nix/README.md` の「設定グループ」) では、入れていないもの (ntn・
   herdr-core・mise の claude・Windows の Claude Code と herdr など) を setup も switch も揃えず、上げもしない。この節と
   `references/windows-pins.md` の「merge の後」は、入れているホストでのこと

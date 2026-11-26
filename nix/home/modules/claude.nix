@@ -103,8 +103,8 @@
 #
 # ## Claude Code を入れるホストだけ (dotfiles.claude.enable)
 #
-# ここで置くものは、dotfiles.claude.enable のホスト (既定は設定グループの ② AI の道具) にだけ置く。false のホスト (客先の PC
-# など) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
+# ここで置くものは、dotfiles.claude.enable のホスト (既定はグループ all だけ on) にだけ置く。false のホスト (Claude Code を
+# 足していない minimum のホストなど) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
 # ただし git-via-gh.json (gitViaGh.enable の値) は Claude Code によらず置く (setup の取得と fetch 系の abbr / alias が読む)。
 # herdr の skill は herdr も入れるホスト (dotfiles.herdr.enable) だけ。hc の skill は herdr-core も入れるホスト
 # (dotfiles.herdrCore.enable) だけ。

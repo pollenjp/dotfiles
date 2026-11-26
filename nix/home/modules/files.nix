@@ -37,7 +37,7 @@
     # これを参照する tss() 自体は Stage 5 (shell) で移行する。
     "tmux/interactive_shell.tmux.conf".source = ../../files/tmux/interactive_shell.tmux.conf;
   }
-  # herdr を入れるホスト (dotfiles.herdr.enable。既定は設定グループの ② AI の道具) だけに置く
+  # herdr を入れるホスト (dotfiles.herdr.enable。既定はグループ all だけ on) だけに置く
   // lib.optionalAttrs config.dotfiles.herdr.enable {
     # herdr。zellij / tmux と指の動きを揃えたキーバインドを入れてある。
     #

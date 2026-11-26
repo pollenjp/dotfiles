@@ -10,7 +10,7 @@
 #
 #   {"keyring": false}
 #
-# ntn を入れないホスト (dotfiles.ntn.enable が false。既定は設定グループの ③ 個人の道具が off のとき) には置かない
+# ntn を入れないホスト (dotfiles.ntn.enable が false。既定はグループ all だけ on) には置かない
 # (setup は bootstrap-ntn を飛ばす)。
 { config, lib, ... }:
 

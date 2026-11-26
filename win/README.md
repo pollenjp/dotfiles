@@ -60,10 +60,10 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `ghq/Install-Ghq.ps1` | `%USERPROFILE%\.config\powershell\Install-Ghq.ps1` | ghq を winget の `x-motemen.ghq` で固定した版に揃える。PowerShell の `Install-Ghq` から呼ぶ。入れて揃えるのは runner の `ghq` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
 | `fzf/Install-Fzf.ps1` | `%USERPROFILE%\.config\powershell\Install-Fzf.ps1` | fzf を winget の `junegunn.fzf` の portable で固定した版に揃える (MSI の fzf が入っていれば、何も入れずに外し方を出す)。PowerShell の `Install-Fzf` から呼ぶ。入れて揃えるのは runner の `fzf` (いつも。WSL の setup は入れない)。`cdrepo` が使う ([後述](#ghqfzf)) |
 | `starship/Install-Starship.ps1` | `%USERPROFILE%\.config\powershell\Install-Starship.ps1` | starship (プロンプト) を winget の `Starship.Starship` の portable で、Linux と同じ固定した版に揃える (MSI の starship が入っていれば、何も入れずに外し方を出す)。PowerShell の `Install-Starship` から呼ぶ。入れて揃えるのは runner の `starship` (いつも。WSL の setup は入れない)。`$PROFILE` の init の 1 行は runner の `starship-init` が足す ([後述](#starship)) |
-| `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (どのグループでも既定は false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
-| `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (どのグループでも既定は false) のマシンだけ ([後述](#tailscale)) |
-| `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (どのグループでも既定は false) のマシンだけ ([後述](#t3-code)) |
-| `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定は personal だけ) のマシンだけ ([後述](#claude-desktop)) |
+| `openssh/Install-Sshd.ps1` | `%USERPROFILE%\.config\powershell\Install-Sshd.ps1` | dotfiles が winget で固定した OpenSSH の MSI に sshd (Server の機能) を足し、Tailscale (tailnet) と localhost からだけ、鍵でだけ SSH で入れる形 (sshd_config・Windows Firewall の拒否の規則・`administrators_authorized_keys`・自動の起動) に揃える。PowerShell の `Install-Sshd` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` (minimum では既定で false) のマシンだけ (runner はホストの値の `windowsSshd`。[後述](#sshd)) |
+| `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (minimum では既定で false) のマシンだけ ([後述](#tailscale)) |
+| `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (minimum では既定で false) のマシンだけ ([後述](#t3-code)) |
+| `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定はグループ all だけ) のマシンだけ ([後述](#claude-desktop)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 | `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc のハブ・子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
@@ -77,13 +77,12 @@ GitHub CLI・Visual Studio Build Tools・rustup と、dotfiles・dotfiles-privat
 環境を Windows 側の runner で作る最初の段で、その後は runner (`runner/`。[後述](#runner-windows-の側で確かめて揃える)) が受け持つ。ホストごとに
 受け持ちを runner に切り替えるまで、Windows のアプリと設定を配るのは今までどおり WSL の setup ([配る](#配る))。経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md)
-(ADR 010 の前提「WSL のある Windows だけ」を改めた) と、対象を ③ を足した company のホストにも広げた dotfiles-private の ADR 094
+(ADR 010 の前提「WSL のある Windows だけ」を改めた) と、対象を claude-skills を足したホストにも広げた dotfiles-private の ADR 094
 (`docs/adr/094_win_bootstrap_private_skills_hosts_*`)。
 
 - 対象は、claude-skills (private な repo) を使う Windows (ホストの値の `claudePrivateSkills` が on のもの。[ホストの値](#ホストの値))。
-  設定グループ personal の Windows (ハブにする PC) は既定で当たり、company のホストは ③ (個人の道具) を足して `[tools]` に
-  `claudePrivateSkills = true` を書いたものが当たる。個人の gh のアカウントでログインして private な repo (dotfiles-private・claude-skills) を
-  取るので、③ を足していない (`claudePrivateSkills` が off の) company・client の Windows では流さない
+  グループ minimum のホストは `[tools]` に `claudePrivateSkills = true` を書いたものが当たり、グループ all のホストは既定で当たる。個人の gh の
+  アカウントでログインして private な repo (dotfiles-private・claude-skills) を取るので、`claudePrivateSkills` が off の Windows では流さない
   - bootstrap はホストの値を読まない (dotfiles-private を clone する前に流すので)。流すかは人がこの対象で決める。runner の手順 `bootstrap`
     (`-Check` で確かめるだけ) は、同じ `claudePrivateSkills` のホストでだけ on ([runner の手順](#runner-の手順))
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
@@ -299,9 +298,10 @@ dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml
 `alice@example-host.toml`)。WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。
 
 ```toml
-group = "personal"            # personal (既定)・company・client (nix/README.md の「設定グループ」)
+group = "minimum"             # minimum (既定)・all (nix/README.md の「設定グループ」)
 
-[tools]                       # 道具の switch の上書き。書かなければグループの既定 (runner/groups.json)
+[tools]                       # 道具の switch。書かなければグループの既定 (runner/groups.json。minimum では false)
+windowsClaudeCode = true
 windowsTypeClipboard = true
 
 [runner]
@@ -332,30 +332,27 @@ scanData = "https://app.notion.com/p/…"
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
   `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
-- `windowsClaudeAccounts` (claude-personal・claude-work) の既定は、② と ③ の両方を入れるグループだけ true (personal)。初回の apply で UAC の確認が
-  出る手順なので、company・client では既定で走らせない。使うホストは `[tools]` に `windowsClaudeAccounts = true` を書く ([後述](#claude-personalclaude-work))
-- `windowsClaudeDesktop` (Claude Desktop) の既定も、② と ③ の両方を入れるグループだけ true (personal)。入れるときに UAC の確認が出る手順なので、
-  company・client では既定で入れない。使うホストは `[tools]` に `windowsClaudeDesktop = true` を書く (WSL の setup には Claude Desktop の手順が無いので、
-  受け持ちによらず TOML にだけ書く。[後述](#claude-desktop))
-- `gitIdentity` (git の名前とメールを個人のアカウントにするか) の既定は、WSL の Nix の `git.identity.enable` と同じくグループで決まる (personal が true)。
-  WSL の Nix の値で `git.identity.enable` を変えたホストは、同じ値を `[tools]` に書く ([後述](#git-の設定))
-- `claudePrivateSkills` (claude-skills の clone を Windows の Claude Code で使うか) の既定は、② と ③ の両方を入れるグループだけ true (personal)。
-  ③ を足して claude-skills を使う company のホスト (WSL の Nix の値で `claude.privateSkills.enable = true`) は、同じ値を `[tools]` に書く (手順
-  `claude-skills`・`pjp` と、bootstrap を確かめる手順 `bootstrap` が on になり、bootstrap を流す対象にもなる。[bootstrap](#bootstrap-新しい-windows-で最初に流す))
-- `devTracker` はどのグループでも既定が false。Dev Tracker を使うホスト (WSL の Nix の値で `claude.devTracker.enable = true`) は、同じ値を `[tools]` に
-  書く (Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる。[後述](#claude-code-の設定))
-- `onePassword` はどのグループでも既定が false。1Password を使うホスト (WSL の Nix の値で `onePassword.enable = true`) は、同じ値を `[tools]` に書く
-  (書かなければ `op-reason` の行は off になり、runner は Windows の op-reason を確かめも入れもしない。[後述](#op-reason))
-- `opReasonSshRelay` (op-reason の SSH の中継) もどのグループでも既定が false。中継を使うホスト (受け持ちを runner に切り替えたホストだけ) は、
-  `[tools]` に `opReasonSshRelay = true` を書き (1Password の `onePassword = true` も要る)、WSL の Nix の値にも `dotfiles.opReason.sshRelay.enable = true` を
-  書く。モードは `[opReason] sshRelayMode` (書かなければ per-call。WSL の `dotfiles.opReason.sshRelay.mode` と同じ値にする)。書かなければ、runner は
-  中継の task と `IdentityAgent` のファイルを置かない (前に置いたものは消す。[後述](#ssh-の中継))
-- `windowsTailscale` もどのグループでも既定が false。Tailscale を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.tailscale.enable = true`) は、同じ値を
-  `[tools]` に書く (書かなければ `tailscale` の行は off。[後述](#tailscale))
-- `windowsSshd` もどのグループでも既定が false。sshd を入れるホスト (WSL の Nix の値で `wsl.windowsFiles.sshd.enable = true`) は、同じ値を `[tools]` に
-  書く (書かなければ `sshd` の行は off。[後述](#sshd))
-- `windowsTypeClipboard` (type-clipboard) もどのグループでも既定が false (③ 個人の道具の段に置くが、段からは決めない)。入れるホスト (WSL の Nix の値で
-  `wsl.windowsFiles.typeClipboard.enable = true`) は、同じ値を `[tools]` に書く (書かなければ `type-clipboard` の行は off。[後述](#type-clipboard))
+- 道具の既定は設定グループで決まる (dotfiles-private の ADR 109)。グループは道具の集合で、`minimum` (既定) では runner が使う道具は全部 false、
+  `all` では全部 true。ほとんどのホストは `group = "minimum"` にして、使う道具を `[tools]` に 1 つずつ `true` で書く (何に頼っているかが TOML で分かる)。
+  前のグループ (`personal`・`company`・`client`) は、書き直すよう案内して runner が止める (終了コード 2)。前と同じにする行は、`personal` なら
+  `windowsClaudeCode`・`windowsHerdr`・`windowsNtn`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`claudePrivateSkills`・`herdrHub`・`gitIdentity`、
+  `company` なら `windowsClaudeCode`・`windowsHerdr` と、足していた道具 ([`nix/README.md` の「前のグループから移す」](../nix/README.md#前のグループから移す))
+- 受け持ちが WSL のホストは、WSL の Nix の値で on にした道具と同じ値を `[tools]` に書く (Nix の `wsl.windowsFiles.claudeCode.enable` なら
+  `windowsClaudeCode`、`claude.privateSkills.enable` なら `claudePrivateSkills`、`claude.devTracker.enable` なら `devTracker`、`onePassword.enable` なら
+  `onePassword`、`git.identity.enable` なら `gitIdentity`、`wsl.windowsFiles.tailscale.enable` なら `windowsTailscale` など)
+- `windowsClaudeAccounts` (claude-personal・claude-work) は初回の apply で UAC の確認が出る手順 ([後述](#claude-personalclaude-work))。
+  `windowsClaudeDesktop` (Claude Desktop) も入れるときに UAC の確認が出る (WSL の setup には Claude Desktop の手順が無いので、受け持ちによらず
+  TOML にだけ書く。[後述](#claude-desktop))
+- `claudePrivateSkills` (claude-skills の clone を Windows の Claude Code で使うか) を書くと、手順 `claude-skills`・`pjp` と、bootstrap を確かめる手順
+  `bootstrap` が on になり、bootstrap を流す対象にもなる ([bootstrap](#bootstrap-新しい-windows-で最初に流す))
+- `devTracker` を書くと、Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる ([後述](#claude-code-の設定))
+- `onePassword` を書かなければ `op-reason` の行は off になり、runner は Windows の op-reason を確かめも入れもしない ([後述](#op-reason))
+- `opReasonSshRelay` (op-reason の SSH の中継) を使うホスト (受け持ちを runner に切り替えたホストだけ) は、`[tools]` に `opReasonSshRelay = true` を
+  書き (1Password の `onePassword = true` も要る)、WSL の Nix の値にも `dotfiles.opReason.sshRelay.enable = true` を書く。モードは
+  `[opReason] sshRelayMode` (書かなければ per-call。WSL の `dotfiles.opReason.sshRelay.mode` と同じ値にする)。書かなければ、runner は中継の task と
+  `IdentityAgent` のファイルを置かない (前に置いたものは消す。[後述](#ssh-の中継))
+- `windowsTailscale`・`windowsSshd`・`windowsTypeClipboard` を書かなければ、`tailscale`・`sshd`・`type-clipboard` の行は off
+  ([Tailscale](#tailscale)・[sshd](#sshd)・[type-clipboard](#type-clipboard))
 - `[sshd] authorizedKeys` は sshd に入れる公開鍵 (Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味。[鍵の置き方](#鍵の置き方))。使うのは受け持ちが
   runner のホストだけで、runner の手順 `sshd` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを置く。書かなければ null で、写しを
   置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
@@ -367,7 +364,7 @@ scanData = "https://app.notion.com/p/…"
   tailnet と localhost)、`[]` は誰も・どこからも入れない。どちらも書かなければ写しを置かない (前の写しは消す)。`allowUsers` は英小文字・数字・`. _ -` の
   名前、`allowFrom` は IPv4・IPv6 のアドレスか CIDR (範囲の頭のアドレスで書く) だけで、ほかは runner が止める。受け持ちが WSL のホストは既定のまま
   (TOML に書いても使わない。Nix の値には無い)。実機のユーザー名と端末の IP は dotfiles-private にだけ書く
-- `windowsT3Code` もどのグループでも既定が false。T3 Code を入れるホストは `[tools]` に `windowsT3Code = true` を書く (WSL の setup には T3 Code の
+- `windowsT3Code` は、T3 Code を入れるホストが `[tools]` に `windowsT3Code = true` を書く (WSL の setup には T3 Code の
   手順が無いので、受け持ちによらず TOML にだけ書く。書かなければ `t3-code`・`t3-code-settings` の行は off。[後述](#t3-code))。Claude に
   `CLAUDE_CODE_ENTRYPOINT=""` を渡すかは `[t3Code] clearClaudeEntrypoint` (書かなければ false で、`t3-code-settings` が settings.json からその要素を外す)
 - 上の「WSL の Nix の値と同じ値を書く」は、受け持ちが WSL のホストのこと。受け持ちを runner に切り替えたホストでは、Windows の道具の値
@@ -379,14 +376,14 @@ scanData = "https://app.notion.com/p/…"
   (Nix の `null`) は書けない
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
-- ファイルが無ければ、`check` は ⚠ を出してグループ personal の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
-- ホストの値から作った図のページ (グループ・段・道具の on/off と、その値がホストの値とグループの既定のどちらで決まったか。段の入れ子の領域と
+- ファイルが無ければ、`check` は ⚠ を出してグループ minimum の既定で確かめ、`apply` は止まる。別のファイルを使うなら `--host-file <path>`
+- ホストの値から作った図のページ (グループ・道具の on/off と、その値がホストの値とグループの既定のどちらで決まったか。グループの入れ子の領域と
   ホストの囲みの線の HTML 版) は dotfiles-private の `docs/hosts/win/<ユーザー>@<PC>.md` にある (Notion にも写る)。ホストの値を足す・直すときは、
   同じ PR で WSL の `nix/scripts/private-host.sh summaries --private <dotfiles-private の作業ツリー>` を流して出し直す
   ([`nix/README.md`「ホストの要約」](../nix/README.md#ホストの要約)・skill `pjp-dotfiles-register-host`)。図に出す道具は、上の runner が使う道具
   (`nix/lib/groups.nix` の `runnerTools`。runner に道具を足したら、そこにも足す)
-- `runner/groups.json` は生成物 (グループごとの道具の既定。Nix がグループごとの素のホストの `group.json` を集める)。`nix/lib/groups.nix` や
-  option の既定を変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
+- `runner/groups.json` は生成物 (version 2。グループごとの道具の既定で、Nix が `nix/lib/groups.nix` の表から作る。`all` は全部 true)。表を
+  変えたら、dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json` で出し直す (古ければ
   CI の `lint` が落ちる)
 
 ### 受け持ちを runner に切り替える
@@ -785,7 +782,7 @@ Claude Code のログインを個人と会社のアカウントで分けるコ�
 「[Claude Code のアカウントを分ける](../nix/README.md#claude-code-のアカウントを分ける-claude-personal--claude-work)」)。**分かれるのはログインだけ**で、
 CLAUDE.md・skill・hook・設定・履歴と auto memory は素の `claude` (`%USERPROFILE%\.claude`) と同じものが効く。runner の手順 `claude-accounts`
 (order 99。Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す) が用意する。on/off は道具の switch
-`windowsClaudeAccounts` (personal は既定で on、company・client は off。初回の apply で UAC の確認が出るため) と `windowsClaudeCode` の両方
+`windowsClaudeAccounts` (グループ all なら既定で on、minimum では使うホストが書く。初回の apply で UAC の確認が出る) と `windowsClaudeCode` の両方
 (経緯は dotfiles-private の ADR 081 (`docs/adr/081_win_claude_accounts_*`))。
 
 | コマンド | 使う config dir | ログイン |
@@ -936,8 +933,8 @@ cs                                         # 選んで起こす。cs -c・cs "�
   「作り直して置く」と出し、`dotfiles apply` が作り直す。作れなければ (cargo が落ちた・cargo が無い) この手順だけが落ち、置いてある exe と控えは
   そのまま
 - claude-<名前>.exe・claude-account.exe と違って runner の exe の写しにしないのは、画面の crate (crossterm とその依存) を runner に入れず、
-  selector の `Cargo.lock` を Linux の Nix と同じ 1 つにするため。`claude-accounts` の外に置くのは、company のグループ (`windowsClaudeAccounts` が
-  off) でも素の `claude` を選んで起こせるようにするため
+  selector の `Cargo.lock` を Linux の Nix と同じ 1 つにするため。`claude-accounts` の外に置くのは、`windowsClaudeAccounts` が
+  off のホストでも素の `claude` を選んで起こせるようにするため
 - アカウントの並びは、既定 (`personal`・`work`。runner の `claude-accounts` と同じ。試験が突き合わせる) のあとに `claude-account` の登録
   (`%USERPROFILE%\.config\claude-accounts\accounts.json`) を名前の順。launcher (`claude-<名前>.exe`) が PATH に無いアカウントは選べない
   (`windowsClaudeAccounts` が off のホストでは、素の `claude` だけを選べる)
@@ -2054,7 +2051,7 @@ Windows の starship (プロンプト) を、Linux と同じ形に揃える (dot
 | init の 1 行 | runner の `starship-init` (`$PROFILE`。order 94。[後述](#profile-の-init-の-1-行)) | home-manager が fish・bash の init を書く |
 | 設定 `starship.toml` | manifest の `base = "nix"` の表 (手順 `files`。[後述](#starshiptoml)) | home-manager が同じ `nix/files/starship.toml` を `~/.config/starship.toml` に置く |
 
-本体と init の 1 行は Windows にしか無い手順 (WSL の setup には無い) で、① エンジニアの道具 (Linux もどのグループでも入れる) なので道具の switch を
+本体と init の 1 行は Windows にしか無い手順 (WSL の setup には無い) で、minimum の基本の道具 (Linux もどのグループでも入れる) なので道具の switch を
 持たない (どのホストでもいつも on。受け持ちが WSL のホストでも `dotfiles apply` が入れる)。
 
 ### starship を入れる (winget)
@@ -2269,7 +2266,7 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
   Windows に UAC が出る
 - setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン (herdr-app と herdr-core も同じ値)。既定は設定
-  グループで決まり、② AI の道具の段が on のホスト (グループ `personal`・`company`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+  グループで決まり、グループ all の win/ を配るマシンで true (minimum では使うホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   false のマシンでは `bootstrap-windows-herdr.sh`・`bootstrap-windows-herdr-app.sh` を飛ばし (setup の結果に `↷`)、新しい版の知らせ
   も herdr・herdr-app・herdr-core を確かめない。false に戻しても setup は消さない。設定 (`%APPDATA%\herdr\config.toml`) と PowerShell の
   関数は、この値によらず配る
@@ -3615,8 +3612,8 @@ SetLocaleInfoW を呼んで書き、WM_SETTINGCHANGE (`"intl"`) を送る
 type-clipboard はクリップボードの文字を、選んだ窓へキー入力として 1 文字ずつ打ち込む (Hyper-V の VMConnect や RDP の
 サインイン画面など、貼り付けが効かない所にパスワードを入れるため)。単一の exe で、インストーラも署名も無く、winget にも無い。
 
-- setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ (既定は false。設定グループの ③ 個人の道具の
-  段に置くが、段からは決めず、どのグループでも入れない)。値は dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に
+- setup が入れるのは `dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ (既定は設定グループで決まり、グループ all の win/ を
+  配るマシンで true。minimum では入れるホストが書く)。値は dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に
   足したホストの `wsl` に書く:
 
   ```nix
@@ -3986,8 +3983,8 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 (install script は Windows に対応しない)。WSL・Linux の ntn は別に `nix/pkgs/ntn` が入れる
 ([`nix/README.md`「ntn (Notion CLI) を Nix で入れる」](../nix/README.md#ntn-notion-cli-を-nix-で入れる))。
 
-- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定は設定グループで決まり、③ 個人の道具の段が
-  on のホスト (グループ `personal`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定は設定グループで決まり、グループ all の win/ を
+  配るマシンで true (minimum では使うホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   既定と違う値にするなら、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
 
   ```nix
@@ -4073,8 +4070,8 @@ x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の
   `%USERPROFILE%\.claude\settings.json` の `env` で有効になっていれば、`-Check` が ※ の行で知らせる (固定した版から外れうるので消す)
 - Git for Windows は入れない。無ければ Claude Code は Bash tool の代わりに PowerShell tool で動く (公式)
 - Claude Code の設定 (`%USERPROFILE%\.claude`) とログインは dotfiles では扱わない
-- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン。既定は設定グループで決まり、② AI の道具の
-  段が on のホスト (グループ `personal`・`company`) で true ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
+- setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン。既定は設定グループで決まり、グループ all の
+  win/ を配るマシンで true (minimum では使うホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   既定と違う値にするなら `wsl` に `windowsFiles.claudeCode.enable = false;` (か `true`) を書く ([ntn](#ntn) と同じ)。false に戻しても
   setup は消さない。消すなら PowerShell で
   `winget pin remove --id Anthropic.ClaudeCode --exact` の後に `winget uninstall --id Anthropic.ClaudeCode --exact`
@@ -4143,7 +4140,7 @@ WSL・Linux の ghq と fzf は別に home-manager (`nix/home/modules/packages.n
 | ghq | `x-motemen.ghq` | `1.12.0` | `x-motemen.ghq_Microsoft.Winget.Source_8wekyb3d8bbwe\ghq_windows_amd64\ghq.exe` (zip の中のディレクトリの下) |
 | fzf | `junegunn.fzf` | `0.75.0` | `junegunn.fzf_Microsoft.Winget.Source_8wekyb3d8bbwe\fzf.exe` |
 
-- 入れて揃えるのは Windows の runner の手順 `ghq`・`fzf` (order 97。Windows にしか無い手順で、WSL の setup には無い)。① エンジニアの道具の CLI で、
+- 入れて揃えるのは Windows の runner の手順 `ghq`・`fzf` (order 97。Windows にしか無い手順で、WSL の setup には無い)。minimum の基本の道具の CLI で、
   Linux もどのグループでも入れるので、道具の switch は持たない (どのホストでもいつも on)。受け持ちが WSL のホストでも `dotfiles apply` が入れる
 - ghq の設定 (git config の `ghq.*`) と fzf の設定 (環境変数 `FZF_DEFAULT_OPTS` など) は dotfiles では扱わない。ghq の root は既定の
   `%USERPROFILE%\ghq` で、bootstrap が clone する所と同じ
@@ -4217,8 +4214,8 @@ MSI。入れる・上げるときは Windows のデスクトップに UAC の確
 の 1 か所で固定する (dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`))。固定した版は新しく入れるときの版で、入れた後の更新は
 Tailscale の自動更新に任せる ([Tailscale を入れる](#tailscale-を入れる-winget))。
 
-- setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ。tailnet にログインして使う VPN の道具で、会社の PC などに
-  勝手に入れないよう、どのグループでも既定は false ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入れるホストは、
+- setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ。tailnet にログインして使う VPN の道具で、既定は
+  グループ all の win/ を配るマシンだけ true (minimum では入れるホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入れるホストは、
   dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く:
 
   ```nix
@@ -4309,7 +4306,7 @@ winget に載らないので、GitHub とは比べない)。猶予・落ちる�
 Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする。固定した版は新しく入れるときの版で、入れた後の更新は T3 Code の自動更新に任せる
 (dotfiles-private の ADR 091 (`docs/adr/091_t3_code_opt_in_*`))。
 
-- 入れるのは Windows の runner だけ (手順 `t3-code` と `t3-code-settings`。WSL の setup には無い)。どのグループでも既定で入れず、入れるホストは
+- 入れるのは Windows の runner だけ (手順 `t3-code` と `t3-code-settings`。WSL の setup には無い)。minimum では既定で入れず、入れるホストは
   dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`) に書く:
 
   ```toml
@@ -4379,8 +4376,8 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/t3-code/Install-T3Code
 `Anthropic.Claude` の MSIX で入れる。版は `-Version` の既定値 (今は `5.11492.5`) の 1 か所で固定する。固定した版は新しく入れるときの版で、入れた後の
 更新は Claude Desktop の自動更新 (約 4 時間ごと) に任せる (dotfiles-private の ADR 099 (`docs/adr/099_win_claude_desktop_msix_*`))。
 
-- 入れるのは Windows の runner だけ (手順 `claude-desktop`。WSL の setup には無い)。既定は設定グループ personal だけ on で、入れるときに UAC の確認が
-  出る手順なので、company・client では既定で入れない。company・client で入れるホストは、dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`)
+- 入れるのは Windows の runner だけ (手順 `claude-desktop`。WSL の setup には無い)。既定はグループ all だけ on (入れるときに UAC の確認が
+  出る手順)。minimum のホストで入れるなら、dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`)
   に書く ([ホストの値](#ホストの値)):
 
   ```toml
@@ -4497,8 +4494,8 @@ nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-desktop/Install
 する (dotfiles-private の ADR 078 (`docs/adr/078_win_sshd_tailscale_*`))。iPhone の Herdr のアプリや hc (`hc machine add`) が、この PC の herdr-core に
 SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-core に SSH でつなぎ、Tailscale SSH のサーバーに Windows はなれない)。
 
-- setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ。PC に外から入る口を開けるので、会社の PC などに勝手に入れないよう、
-  どのグループでも既定は false ([`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入る経路の Tailscale も入れる
+- setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ。PC に外から入る口を開ける。既定は
+  グループ all の win/ を配るマシンだけ true (minimum では入れるホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入る経路の Tailscale も入れる
   ([Tailscale](#tailscale))。入れるホストは、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く
   (鍵の例は作り物。実機の鍵と IP は dotfiles-private に書く):
 

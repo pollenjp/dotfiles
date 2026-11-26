@@ -29,8 +29,8 @@
 #
 # ## herdr を入れるホストだけ
 #
-# どれも herdr の session の固定名のための仕組みなので、herdr を入れるホスト (dotfiles.herdr.enable。既定は設定グループの
-# ② AI の道具) にだけ置く。このマシンを名乗る SetEnv PJP_SSH_CLIENT (modules/ssh.nix) も同じ条件。
+# どれも herdr の session の固定名のための仕組みなので、herdr を入れるホスト (dotfiles.herdr.enable。既定はグループ all だけ on)
+# にだけ置く。このマシンを名乗る SetEnv PJP_SSH_CLIENT (modules/ssh.nix) も同じ条件。
 {
   config,
   lib,

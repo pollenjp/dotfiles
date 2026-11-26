@@ -10,8 +10,8 @@
 #      bootstrap-windows-type-clipboard.sh が読み、欄の無い前の世代のファイルは false と読む。
 #      ntn・claudeCode は Windows に ntn・Claude Code を入れるか (windowsFiles.ntn.enable・windowsFiles.claudeCode.enable)。
 #      bootstrap-windows-ntn.sh・bootstrap-windows-claude-code.sh が読み、欄の無い前の世代のファイルは option の既定
-#      どおり true と読む。どれも win/ を配らないマシンでは false にする。ntn・claudeCode の既定は設定グループの段
-#      (ntn は ③、claudeCode は ②) から決まる。Windows の herdr (windowsFiles.herdr.enable) はここに入れず、group.json
+#      どおり true と読む。どれも win/ を配らないマシンでは false にする。ntn・claudeCode の既定は設定グループ
+#      (グループ all の、win/ を配るマシンだけ on) から決まる。Windows の herdr (windowsFiles.herdr.enable) はここに入れず、group.json
 #      (modules/group.nix) の tools.windowsHerdr を setup と bootstrap-windows-pin-updates.sh が読む (欄を足すと、今までの
 #      ホストのこのファイルの中身まで変わるため)
 #
