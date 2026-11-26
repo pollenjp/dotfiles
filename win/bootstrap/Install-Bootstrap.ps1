@@ -1,27 +1,41 @@
 ﻿<#
 .SYNOPSIS
-新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・GitHub CLI・Visual Studio Build Tools・
-rustup と、dotfiles・dotfiles-private・claude-skills の clone) を揃える。
+新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・PowerShell 7・Visual Studio Build Tools・rustup と、
+dotfiles の clone) を揃える。-Private では、GitHub CLI とそのログイン・dotfiles-private・claude-skills の clone も揃える。
 
 .DESCRIPTION
 dotfiles の win/bootstrap/Install-Bootstrap.ps1。新しい Windows では GitHub の raw の URL からファイルに落として流し、clone した後は
 clone の中のものを流す (win/README.md の「bootstrap (新しい Windows で最初に流す)」。経緯は dotfiles-private の
-docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
+docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。manifest では配らない。
+
+形は 2 つ:
+  既定 (引数なし)  gh を入れず、ログインもしない (gh にログインできない PC・pollenjp の private な repo を取れない PC でも流せる)。public な
+                   dotfiles だけを匿名の HTTPS で clone し (origin は https://github.com/pollenjp/dotfiles.git)、雛形
+                   win/templates/host.minimum.toml を %USERPROFILE%\.config\dotfiles\host.toml に写す (あれば上書きしない。dotfiles-private の
+                   clone がある PC でも写さない: ホストの値はそこから引く)
+  -Private         gh を入れて github.com にログインし、dotfiles・dotfiles-private・claude-skills を gh の資格情報で clone する (origin は
+                   WSL と同じ ssh の URL)。ホストの値は dotfiles-private の win/hosts/ から引くので、雛形は写さない。ホストの値の道具の switch
+                   privateRepos を on にした PC で流す
 
 すること (この順):
   0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと cargo が
      作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
   1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)
-  2. Git for Windows → GitHub CLI → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で winget から入れ、pin を
-     足す (winget upgrade --all から外す)。Build Tools には C++ のワークロード・MSVC (x64)・Windows SDK を入れ、入っている Build Tools に
-     足りないものは Visual Studio Installer で足す。rustup は MSVC の host (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を
-     止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に入れる)。GNU の host にしないのは、windows-sys 0.61
-     (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の toolchain に同梱のものだけでは作れないため
-  3. gh が github.com にログインしていなければ gh auth login を流す (一回限りのコードはクリップボードに入る。ブラウザーで認める)。
-     ログインの途中で Ctrl+C を押すと gh は止まるが、この script は止まらずに締めの表まで出し、終了コード 1 で終える
-  4. dotfiles・dotfiles-private・claude-skills を %USERPROFILE%\ghq\github.com\pollenjp\ に clone する。gh の資格情報で HTTPS を通す組
-     (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡し、origin は WSL と同じ ssh の URL のまま。core.autocrlf=false で、WSL が配った
-     ものとバイト列をそろえる。~/.gitconfig は書かない
+  2. Git for Windows → (-Private なら GitHub CLI →) PowerShell 7 → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で
+     winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は MSI (machine の scope) で入れ、Microsoft Update の自動更新には
+     入れない (USE_MU=0 ENABLE_MU=0)。7.7 から MSI が無いので 7.6 (LTS) の版にする。Build Tools には C++ のワークロード・MSVC (x64)・
+     Windows SDK を入れ、入っている Build Tools に足りないものは Visual Studio Installer で足す。rustup は MSVC の host
+     (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より
+     先に入れる)。GNU の host にしないのは、windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の
+     toolchain に同梱のものだけでは作れないため
+  3. (-Private だけ) gh が github.com にログインしていなければ gh auth login を流す (一回限りのコードはクリップボードに入る。ブラウザーで
+     認める)。ログインの途中で Ctrl+C を押すと gh は止まるが、この script は止まらずに締めの表まで出し、終了コード 1 で終える
+  4. clone する。既定の形は dotfiles を資格情報なしの HTTPS で、-Private は dotfiles・dotfiles-private・claude-skills を gh の資格情報で
+     HTTPS を通す組 (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡して (origin は ssh の URL のまま)、%USERPROFILE%\ghq\github.com\pollenjp\ に
+     clone する。core.autocrlf=false で、WSL が配ったものとバイト列をそろえる。~/.gitconfig は書かない
+  5. (既定の形だけ) 雛形を手元のホストの値に写す (上の「形は 2 つ」)
+  6. 揃え終えたら (終了コード 0)、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) を出す。-Check では出さない (runner の
+     手順 bootstrap が毎回 -Check を流すので)
 
 入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち)。※ の上げ方の
 winget upgrade には --include-pinned を付ける (付けないと、bootstrap が足した pin に止められる)。あるディレクトリと clone には触らない
@@ -38,7 +52,10 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 Git for Windows (winget の Git.Git) の固定する版。版を変えるときはここの既定値を変える (nix/scripts/check-winget-version.sh git が読む)。
 
 .PARAMETER GhVersion
-GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。
+GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。入れるのは -Private のときだけ。
+
+.PARAMETER PwshVersion
+PowerShell 7 (winget の Microsoft.PowerShell) の固定する版 (check-winget-version.sh pwsh が読む)。MSI のある 7.6 (LTS) の線の版にする。
 
 .PARAMETER VsBuildToolsVersion
 Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools) の固定する版 (check-winget-version.sh vs-buildtools が読む)。
@@ -46,6 +63,10 @@ Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTool
 .PARAMETER RustupVersion
 rustup (winget の Rustlang.Rustup) の固定する版 (check-winget-version.sh rustup が読む)。toolchain は入れない (Rust の runner の
 rust-toolchain.toml が決める)。
+
+.PARAMETER Private
+gh を入れて github.com にログインし、pollenjp の private な repo (dotfiles-private・claude-skills) も clone する形にする。ホストの値の
+道具の switch privateRepos を on にした PC で使う (runner の手順 bootstrap も、そのホストでは -Check -Private を流す)。
 
 .PARAMETER Check
 今の状態を出すだけで、何も変えない (SAC の警告は同じく最初に出す)。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ
@@ -55,8 +76,10 @@ rust-toolchain.toml が決める)。
 param(
     [string]$GitVersion = '2.56.0.4',
     [string]$GhVersion = '2.103.3',
+    [string]$PwshVersion = '7.6.10.0',
     [string]$VsBuildToolsVersion = '17.14.44',
     [string]$RustupVersion = '1.29.3',
+    [switch]$Private,
     [switch]$Check
 )
 
@@ -94,6 +117,16 @@ function Get-GhVersionFromOutput {
     param([string[]]$Lines)
     foreach ($line in $Lines) {
         if ("$line".Trim() -match '^gh version (\d+\.\d+\.\d+)(\s|$)') { return $Matches[1] }
+    }
+    $null
+}
+
+# pwsh --version の出力 ("PowerShell 7.6.10") を winget の Microsoft.PowerShell の版 (4 つの数。7.6.10.0) にする。preview などは読まない。
+# 無ければ $null
+function Get-PwshVersionFromOutput {
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        if ("$line".Trim() -match '^PowerShell (\d+\.\d+\.\d+)$') { return "$($Matches[1]).0" }
     }
     $null
 }
@@ -244,33 +277,47 @@ function Get-RustupInitArgument {
     "--default-host $script:RustHost --default-toolchain none"
 }
 
-# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)
+# PowerShell 7 の MSI に渡す property (winget の --custom。msiexec の引数の後ろに足される)。Microsoft Update の自動更新に入れない
+# (固定した版から動かさない。Windows Update の「ほかの Microsoft 製品」の設定にも触らない)
+function Get-PwshInstallCustomArgument {
+    'USE_MU=0 ENABLE_MU=0'
+}
+
+# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)。gh は -Private のときだけ
 function Get-BootstrapPackages {
-    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private)
     # パッケージ ID は 1 行ずつの変数に書く (nix/scripts/check-winget-version.sh がこの行を読む)
     $gitPackageId = 'Git.Git'
     $ghPackageId = 'GitHub.cli'
+    $pwshPackageId = 'Microsoft.PowerShell'
     $vsBuildToolsPackageId = 'Microsoft.VisualStudio.2022.BuildTools'
     $rustupPackageId = 'Rustlang.Rustup'
     $vsCustom = Get-VsInstallCustomArgument -Components @(Get-VsRequiredComponents)
     # Git は machine の scope (C:\Program Files\Git。インストーラーの選択肢は既定のまま)、gh は MSI (C:\Program Files\GitHub CLI。
-    # zip の portable もある)、rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
-    # Silent: gh の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに落ちる
-    # (Error 1925)。gh は --silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
+    # zip の portable もある)、PowerShell 7 は MSI (C:\Program Files\PowerShell\7。7.6 の winget の版は MSIX もあるので、wix を名指しする)、
+    # rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
+    # Silent: gh と PowerShell 7 の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに
+    # 落ちる (Error 1925)。--silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
     # 数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。Git の installer は自分で昇格し、rustup は
     # user に入るので --silent でよい
-    @(
+    $all = @(
         [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
         [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
+        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $false; Args = @('--installer-type', 'wix', '--custom', (Get-PwshInstallCustomArgument)) }
         [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom) }
         [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
     )
+    $all | Where-Object { $Private -or ($_.Name -ne 'gh') }
 }
 
-# clone する repo と置き場 (ghq の既定の root の下。後で ghq を入れても ghq root は同じ所を指す)
+# clone する repo と置き場 (ghq の既定の root の下。後で ghq を入れても ghq root は同じ所を指す)。既定の形は public な dotfiles だけを
+# 資格情報なしの HTTPS の URL で、-Private は 3 つを WSL と同じ ssh の URL で
 function Get-RepoTargets {
-    param([string]$GhqRoot)
+    param([string]$GhqRoot, [switch]$Private)
     $root = $GhqRoot.TrimEnd('\')
+    if (-not $Private) {
+        return [pscustomobject]@{ Name = 'dotfiles'; Url = 'https://github.com/pollenjp/dotfiles.git'; Directory = "$root\github.com\pollenjp\dotfiles" }
+    }
     foreach ($name in @('dotfiles', 'dotfiles-private', 'claude-skills')) {
         [pscustomobject]@{ Name = $name; Url = "git@github.com:pollenjp/$name.git"; Directory = "$root\github.com\pollenjp\$name" }
     }
@@ -298,6 +345,34 @@ function Get-GitCloneArguments {
         '-c', "credential.https://github.com.helper=!'$gh' auth git-credential",
         '-c', 'url.https://github.com/.insteadOf=git@github.com:',
         'clone', '-c', 'core.autocrlf=false', $Url, $Directory)
+}
+
+# 既定の形の clone の git の引数。github.com の credential helper を空にし (Git Credential Manager を呼ばない。public な repo は資格情報を
+# 求められない)、HTTPS の URL のまま clone する。clone -c core.autocrlf=false は、その repo の設定に残る
+function Get-GitAnonymousCloneArguments {
+    param([string]$Url, [string]$Directory)
+    @('-c', 'credential.https://github.com.helper=', 'clone', '-c', 'core.autocrlf=false', $Url, $Directory)
+}
+
+# 揃え終えたときに出す、次に打つコマンド (runner の dotfiles 関数を clone から読み込み、dotfiles apply を流す)。dotfiles apply の手順
+# powershell-profile が $PROFILE に読み込みの 1 行を足すので、2 回目からは新しい PowerShell で dotfiles を打てる。HostFile は手元の
+# ホストの値の置き場、HostFileExists はそれがあるか
+function Format-BootstrapNextSteps {
+    param([string]$DotfilesDir, [switch]$Private, [string]$HostFile, [bool]$HostFileExists)
+    # Windows のパスは字でつなぐ (Join-Path は、テストを流す Linux の pwsh で C: のドライブを探しに行く)
+    $ps1 = "$($DotfilesDir.TrimEnd('\'))\win\powershell\dotfiles.ps1" -replace "'", "''"
+    ''
+    '次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):'
+    "  . '$ps1'"
+    '  dotfiles apply'
+    if ($Private) {
+        'ホストの値は dotfiles-private の win\hosts\<ユーザー>@<PC>.toml。無ければ dotfiles check が ⚠ を出し、apply は止まる (先に書く。書き方は dotfiles の win\README.md の「ホストの値」)'
+        if ($HostFileExists) {
+            "※ 手元のホストの値 ($HostFile) もある。dotfiles-private の win\hosts\ のファイルもあると、dotfiles apply は止まる (どちらを使うか決まらない)。dotfiles-private の値を使うなら、手元の host.toml を退ける"
+        }
+    } else {
+        "ホストの値は $HostFile (minimum の雛形を写したもの)。使う道具は [tools] に 1 行ずつ足す (書き方は dotfiles の win\README.md の「ホストの値」)"
+    }
 }
 
 # gh auth login の引数。ブラウザーで認める。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
@@ -367,12 +442,15 @@ function Get-BootstrapRows {
             }
         }
     }
-    if ($null -eq $State.GhLoggedIn) {
-        New-BootstrapRow 'gh のログイン' 'gh を入れた後にログインする (ブラウザーで認める)' 'missing' ''
-    } elseif (-not $State.GhLoggedIn) {
-        New-BootstrapRow 'gh のログイン' 'していない → gh auth login で github.com にログインする (ブラウザーで認める)' 'fix' ''
-    } else {
-        New-BootstrapRow 'gh のログイン' 'github.com にログインしている' '' ''
+    # gh のログインは -Private の形だけ (既定の形は gh を使わない)
+    if ($State.Private) {
+        if ($null -eq $State.GhLoggedIn) {
+            New-BootstrapRow 'gh のログイン' 'gh を入れた後にログインする (ブラウザーで認める)' 'missing' ''
+        } elseif (-not $State.GhLoggedIn) {
+            New-BootstrapRow 'gh のログイン' 'していない → gh auth login で github.com にログインする (ブラウザーで認める)' 'fix' ''
+        } else {
+            New-BootstrapRow 'gh のログイン' 'github.com にログインしている' '' ''
+        }
     }
     foreach ($r in @($State.Repos)) {
         switch ($r.State) {
@@ -382,6 +460,16 @@ function Get-BootstrapRows {
             'other-origin' { New-BootstrapRow $r.Name "origin が $($r.Origin) ($($r.Url) ではない)" 'manual' "※ $($r.Directory) は別の repo の clone。退けて流し直すと clone する" }
             'autocrlf' { New-BootstrapRow $r.Name "core.autocrlf が $($r.AutoCrlf) (false でないと、WSL が配ったものとバイト列がずれる)" 'manual' "※ $($r.Directory) を退けて流し直すと、core.autocrlf=false で clone し直す" }
             default { New-BootstrapRow $r.Name $r.Directory '' '' }
+        }
+    }
+    # 手元のホストの値 (既定の形だけ。-Private はホストの値を dotfiles-private から引く)
+    if ((-not $State.Private) -and $State.HostFile) {
+        if ($State.HostFile.Exists) {
+            New-BootstrapRow 'ホストの値 (手元)' $State.HostFile.Path '' ''
+        } elseif ($State.HostFile.PrivateClone) {
+            New-BootstrapRow 'ホストの値 (手元)' '写さない (dotfiles-private の clone がある。ホストの値はそこから引く)' '' ''
+        } else {
+            New-BootstrapRow 'ホストの値 (手元)' "無い → 雛形 (win\templates\host.minimum.toml) を $($State.HostFile.Path) に写す" 'missing' ''
         }
     }
 }
@@ -454,8 +542,8 @@ function Get-OsArchitecture {
     "$a".ToUpperInvariant()
 }
 
-# 道具の置き場所。Git と gh は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、
-# vswhere と Visual Studio Installer は Program Files (x86) の下。
+# 道具の置き場所。Git・gh・PowerShell 7 は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、
+# vswhere と Visual Studio Installer は Program Files (x86) の下。手元のホストの値は %USERPROFILE%\.config\dotfiles\host.toml。
 # 32 ビットの PowerShell では ProgramFiles が (x86) を指すので、64 ビットの方 (ProgramW6432) を先に見る
 function Get-BootstrapPaths {
     $cargoHome = $env:CARGO_HOME
@@ -470,11 +558,13 @@ function Get-BootstrapPaths {
     [pscustomobject]@{
         Git            = Join-Path $programFiles 'Git\cmd\git.exe'
         Gh             = Join-Path $programFiles 'GitHub CLI\gh.exe'
+        Pwsh           = Join-Path $programFiles 'PowerShell\7\pwsh.exe'
         Rustup         = Join-Path $cargoHome 'bin\rustup.exe'
         RustupSettings = Join-Path $rustupHome 'settings.toml'
         VsWhere        = Join-Path $installer 'vswhere.exe'
         VsSetup        = Join-Path $installer 'setup.exe'
         GhqRoot        = Join-Path $env:USERPROFILE 'ghq'
+        HostFile       = Join-Path $env:USERPROFILE '.config\dotfiles\host.toml'
     }
 }
 
@@ -626,6 +716,22 @@ function Invoke-GhLogin {
     }
 }
 
+# 雛形 (clone の win\templates\host.minimum.toml) を手元のホストの値に写す (親のディレクトリを作る)。copied (写した)・no-template (clone に
+# 雛形が無い。古い clone)・failed (写せなかった) を返す
+function Copy-HostTemplate {
+    param([string]$Template, [string]$Destination)
+    if (-not (Test-Path -LiteralPath $Template -PathType Leaf)) { return 'no-template' }
+    try {
+        $parent = Split-Path -Parent $Destination
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        Copy-Item -LiteralPath $Template -Destination $Destination -ErrorAction Stop
+        return 'copied'
+    } catch {
+        Write-Host "雛形を写せなかった ($Destination): $($_.Exception.Message)"
+        return 'failed'
+    }
+}
+
 # clone の置き場の親ディレクトリを作る (%USERPROFILE%\ghq\github.com\pollenjp)
 function New-CloneParent {
     param([string]$Directory)
@@ -711,9 +817,9 @@ function Get-RepoState {
     [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf }
 }
 
-# 今の状態を読む (何も変えない。管理者は要らない)
+# 今の状態を読む (何も変えない。管理者は要らない)。-Private なら gh のログインを、既定の形なら手元のホストの値を読む
 function Get-BootstrapState {
-    param([object[]]$Packages, $Paths, [string]$Arch)
+    param([object[]]$Packages, $Paths, [string]$Arch, [switch]$Private)
     $states = foreach ($p in $Packages) {
         $exists = $false
         $installed = $null
@@ -729,6 +835,10 @@ function Get-BootstrapState {
             'gh' {
                 $exists = Test-Path -LiteralPath $Paths.Gh -PathType Leaf
                 if ($exists) { $installed = Get-GhVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Gh -Arguments @('--version')).Lines }
+            }
+            'pwsh' {
+                $exists = Test-Path -LiteralPath $Paths.Pwsh -PathType Leaf
+                if ($exists) { $installed = Get-PwshVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Pwsh -Arguments @('--version')).Lines }
             }
             'vs-buildtools' {
                 $instance = Get-VsBuildToolsInstance -Json (Read-VsWhere -VsWhere $Paths.VsWhere) -Major 17
@@ -764,18 +874,29 @@ function Get-BootstrapState {
     }
     $states = @($states)
     $git = @($states | Where-Object { $_.Name -eq 'git' })[0]
-    $gh = @($states | Where-Object { $_.Name -eq 'gh' })[0]
-    # gh が無ければ $null (入れた後にログインする)。gh auth status は token を GitHub に確かめる (0 = ログインしている)
+    # gh のログインは -Private の形だけ読む。gh が無ければ $null (入れた後にログインする)。gh auth status は token を GitHub に確かめる
+    # (0 = ログインしている)
     $loggedIn = $null
-    if ($gh.Exists) { $loggedIn = ((Invoke-Native -FilePath $Paths.Gh -Arguments @('auth', 'status', '--hostname', 'github.com')).ExitCode -eq 0) }
-    $repos = foreach ($t in @(Get-RepoTargets -GhqRoot $Paths.GhqRoot)) { Get-RepoState -Target $t -GitPath $Paths.Git -HaveGit $git.Exists }
+    if ($Private) {
+        $gh = @($states | Where-Object { $_.Name -eq 'gh' })[0]
+        if ($gh.Exists) { $loggedIn = ((Invoke-Native -FilePath $Paths.Gh -Arguments @('auth', 'status', '--hostname', 'github.com')).ExitCode -eq 0) }
+    }
+    # 手元のホストの値と、dotfiles-private の clone があるか (既定の形は、どちらも無ければ雛形を写す。-Private は、手元の値があれば締めで知らせる)
+    $hostFile = [pscustomobject]@{
+        Path         = $Paths.HostFile
+        Exists       = [bool](Test-Path -LiteralPath $Paths.HostFile)
+        PrivateClone = [bool](Test-Path -LiteralPath (Join-Path $Paths.GhqRoot 'github.com\pollenjp\dotfiles-private'))
+    }
+    $repos = foreach ($t in @(Get-RepoTargets -GhqRoot $Paths.GhqRoot -Private:$Private)) { Get-RepoState -Target $t -GitPath $Paths.Git -HaveGit $git.Exists }
     [pscustomobject]@{
         Elevated   = [bool](Test-Elevated)
         Arch       = $Arch
         Sac        = Get-BootstrapSac
+        Private    = [bool]$Private
         Packages   = $states
         GhLoggedIn = $loggedIn
         Repos      = @($repos)
+        HostFile   = $hostFile
     }
 }
 
@@ -799,8 +920,17 @@ function Write-Tail {
     $Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
 }
 
+# 揃え終えたときの、次に打つコマンドを出す (dotfiles の clone の場所と、手元のホストの値は状態から引く)
+function Write-BootstrapNextSteps {
+    param($State)
+    $dotfiles = @($State.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
+    foreach ($line in @(Format-BootstrapNextSteps -DotfilesDir $dotfiles.Directory -Private:$State.Private -HostFile $State.HostFile.Path -HostFileExists $State.HostFile.Exists)) {
+        Write-Host $line
+    }
+}
+
 function Invoke-InstallBootstrap {
-    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Check)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [switch]$Check)
     # 最初に SAC を確かめ、オフでなければ警告して続ける (止めない。オフにするのはユーザー)
     $sacWarning = @(Format-SacWarning -Sac (Get-BootstrapSac))
     if ($sacWarning.Count -gt 0) {
@@ -812,11 +942,15 @@ function Invoke-InstallBootstrap {
         return 2
     }
     $arch = Get-OsArchitecture
-    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion)
+    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private)
     $paths = Get-BootstrapPaths
-    Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1)'
+    if ($Private) {
+        Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1 -Private。gh で github.com にログインし、dotfiles・dotfiles-private・claude-skills を clone する)'
+    } else {
+        Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1。gh を使わず、public な dotfiles だけを clone する。private な repo も使う PC は -Private)'
+    }
 
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
     $rows = @(Get-BootstrapRows -State $state)
     Write-BootstrapRows -Rows $rows
     $code = Get-BootstrapExitCode -Rows $rows
@@ -829,6 +963,7 @@ function Invoke-InstallBootstrap {
     }
     if ($code -eq 0) {
         Write-Host '揃っている。何もしない'
+        Write-BootstrapNextSteps -State $state
         return 0
     }
     # 止める理由 (管理者の PowerShell・x64 でない CPU) があれば、何も変えない
@@ -858,7 +993,7 @@ function Invoke-InstallBootstrap {
     }
 
     # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
     foreach ($s in @($state.Packages)) {
         if (-not $s.Exists) { continue }
         if (-not $s.Pinned) {
@@ -885,48 +1020,83 @@ function Invoke-InstallBootstrap {
         }
     }
 
-    # 3. gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す。
+    # 3. (-Private だけ) gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す。
     # 途中で止めても (Ctrl+C)、ここで止まらずに読み直しと締めの表まで流し、終了コード 1 で終える
-    $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
-    if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
-        Write-Host ''
-        Write-Host 'gh を github.com にログインさせる。一回限りのコードはクリップボードに入るので、Enter で開いたブラウザーに貼り付けて認める (Ctrl+C は押さない。gh が止まる)'
-        $login = Invoke-GhLogin -GhPath $paths.Gh
-        if ($login -ne 0) {
-            Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
+    if ($Private) {
+        $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+        if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
+            Write-Host ''
+            Write-Host 'gh を github.com にログインさせる。一回限りのコードはクリップボードに入るので、Enter で開いたブラウザーに貼り付けて認める (Ctrl+C は押さない。gh が止まる)'
+            $login = Invoke-GhLogin -GhPath $paths.Gh
+            if ($login -ne 0) {
+                Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
+            }
+            $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
         }
-        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
     }
 
-    # 4. 無い repo を clone する (gh の資格情報で HTTPS。origin は ssh の URL のまま)
+    # 4. 無い repo を clone する。-Private は gh の資格情報で HTTPS を通し (origin は ssh の URL のまま)、既定の形は public な dotfiles を
+    # 資格情報なしの HTTPS で
     $missingRepos = @($state.Repos | Where-Object { $_.State -eq 'missing' })
     if ($missingRepos.Count -gt 0) {
         $git = @($state.Packages | Where-Object { $_.Name -eq 'git' })[0]
-        $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
-        if (-not ($git.Exists -and $gh.Exists -and ($state.GhLoggedIn -eq $true))) {
+        $ready = $git.Exists
+        if ($Private) {
+            $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+            $ready = $git.Exists -and $gh.Exists -and ($state.GhLoggedIn -eq $true)
+        }
+        if (-not $ready) {
             Write-Host ''
-            Write-Host 'Git for Windows か gh が入っていない・gh が github.com にログインしていないので、clone しない'
+            if ($Private) {
+                Write-Host 'Git for Windows か gh が入っていない・gh が github.com にログインしていないので、clone しない'
+            } else {
+                Write-Host 'Git for Windows が入っていないので、clone しない'
+            }
         } else {
             foreach ($r in $missingRepos) {
                 New-CloneParent -Directory $r.Directory
                 Write-Host ''
                 Write-Host "clone: $($r.Url) → $($r.Directory)"
-                $result = Invoke-GitClone -GitPath $paths.Git -Arguments @(Get-GitCloneArguments -GhPath $paths.Gh -Url $r.Url -Directory $r.Directory)
+                if ($Private) {
+                    $cloneArgs = @(Get-GitCloneArguments -GhPath $paths.Gh -Url $r.Url -Directory $r.Directory)
+                } else {
+                    $cloneArgs = @(Get-GitAnonymousCloneArguments -Url $r.Url -Directory $r.Directory)
+                }
+                $result = Invoke-GitClone -GitPath $paths.Git -Arguments $cloneArgs
                 if ($result.ExitCode -ne 0) {
                     Write-Tail -Lines $result.Lines
-                    Write-Host "clone が失敗した (終了コード $($result.ExitCode))。gh auth status で、この repo を読めるアカウントか確かめる"
+                    if ($Private) {
+                        Write-Host "clone が失敗した (終了コード $($result.ExitCode))。gh auth status で、この repo を読めるアカウントか確かめる"
+                    } else {
+                        Write-Host "clone が失敗した (終了コード $($result.ExitCode))。github.com につながるか確かめる (プロキシの内側なら、git の http.proxy)"
+                    }
                 }
+            }
+        }
+    }
+
+    # 5. (既定の形だけ) 手元のホストの値が無く、dotfiles-private の clone も無ければ、clone の雛形を写す (あれば上書きしない)
+    if (-not $Private) {
+        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
+        $dotfiles = @($state.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
+        if ((-not $state.HostFile.Exists) -and (-not $state.HostFile.PrivateClone) -and ($dotfiles.State -eq 'ok')) {
+            $template = "$($dotfiles.Directory.TrimEnd('\'))\win\templates\host.minimum.toml"
+            Write-Host ''
+            switch (Copy-HostTemplate -Template $template -Destination $state.HostFile.Path) {
+                'copied' { Write-Host "ホストの値の雛形を写した: $template → $($state.HostFile.Path) (設定グループ minimum。使う道具は [tools] に足す)" }
+                'no-template' { Write-Host "dotfiles の clone に雛形が無い ($template)。clone が古いなら進めてから流し直す" -ForegroundColor Yellow }
             }
         }
     }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
     $rows = @(Get-BootstrapRows -State $after)
     Write-BootstrapRows -Rows $rows
     if ((Get-BootstrapExitCode -Rows $rows) -eq 0) {
         Write-Host '揃った'
+        Write-BootstrapNextSteps -State $after
         return 0
     }
     Write-BootstrapVerdict -Rows $rows
@@ -943,7 +1113,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     Set-StrictMode -Version Latest
     $exitCode = $null
     try {
-        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Check:$Check
+        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -Check:$Check
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

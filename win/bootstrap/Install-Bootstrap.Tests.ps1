@@ -77,17 +77,17 @@ Test-Case 'Start-Process に -Wait を付けていない (gh のログインの�
             }, $true) | ForEach-Object { $_.Extent.StartLineNumber }) -join ' '
 }
 
-Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 17.14.44 1.29.3' {
+Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 7.6.10.0 17.14.44 1.29.3' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
-    foreach ($p in @('GitVersion', 'GhVersion', 'VsBuildToolsVersion', 'RustupVersion')) {
+    foreach ($p in @('GitVersion', 'GhVersion', 'PwshVersion', 'VsBuildToolsVersion', 'RustupVersion')) {
         $line = @($text | Where-Object { $_ -match "^\s*\[string\]\`$$p\s*=\s*'([^']*)'" })[0]
         if ($line -match "'([^']*)'") { $Matches[1] }
     }
 }
 
-Test-Case 'パッケージ ID は 1 行ずつの変数 (check-winget-version.sh が読む行の形)' 'Git.Git GitHub.cli Microsoft.VisualStudio.2022.BuildTools Rustlang.Rustup' {
+Test-Case 'パッケージ ID は 1 行ずつの変数 (check-winget-version.sh が読む行の形)' 'Git.Git GitHub.cli Microsoft.PowerShell Microsoft.VisualStudio.2022.BuildTools Rustlang.Rustup' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
-    foreach ($v in @('gitPackageId', 'ghPackageId', 'vsBuildToolsPackageId', 'rustupPackageId')) {
+    foreach ($v in @('gitPackageId', 'ghPackageId', 'pwshPackageId', 'vsBuildToolsPackageId', 'rustupPackageId')) {
         $line = @($text | Where-Object { $_ -match "^\s*\`$$v\s*=\s*'[A-Za-z0-9][A-Za-z0-9.-]*'" })[0]
         if ($line -match "'([^']*)'") { $Matches[1] }
     }
@@ -106,6 +106,11 @@ Test-Case 'git: 版の行が無ければ空' '' { Get-GitVersionFromOutput -Line
 # Get-GhVersionFromOutput: gh --version の 1 行目から版を拾う
 Test-Case 'gh: 1 行目の版を拾う' '2.103.3' { Get-GhVersionFromOutput -Lines @('gh version 2.103.3 (2026-10-26)', 'https://github.com/cli/cli/releases/tag/v2.103.3') }
 Test-Case 'gh: 版の行が無ければ空' '' { Get-GhVersionFromOutput -Lines @('gh: command failed') }
+
+# Get-PwshVersionFromOutput: pwsh --version の出力を winget の Microsoft.PowerShell の版 (4 つの数) にする
+Test-Case 'pwsh: PowerShell 7.6.10 は winget の 7.6.10.0' '7.6.10.0' { Get-PwshVersionFromOutput -Lines @('PowerShell 7.6.10') }
+Test-Case 'pwsh: 行末の CR と前後の空白を落とす' '7.6.10.0' { Get-PwshVersionFromOutput -Lines @("  PowerShell 7.6.10`r") }
+Test-Case 'pwsh: preview とほかの行は版と読まない' '' { Get-PwshVersionFromOutput -Lines @('PowerShell 7.7.0-preview.5', 'error') }
 
 # Get-RustupVersionFromOutput: rustup --version の出力から版を拾う (info の行や rustc の行が混ざる)
 Test-Case 'rustup: 版を拾う (ほかの行が先にあっても)' '1.29.3' { Get-RustupVersionFromOutput -Lines @('info: This is the version for the rustup toolchain manager, not the rustc compiler.', 'rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
@@ -186,24 +191,31 @@ Test-Case 'winget が 0 で終わったら取り消しではない' 'False' { Te
 Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ' }
 Test-Case '--silent を付けないとき (winget の既定の、進み具合の窓が出る形)' 'install --id GitHub.cli --exact --source winget --accept-source-agreements --disable-interactivity --version 2.103.3 --accept-package-agreements --installer-type wix' { (Get-WingetInstallArguments -PackageId 'GitHub.cli' -Version '2.103.3' -Silent $false -Extra @('--installer-type', 'wix')) -join ' ' }
 
-# Get-BootstrapPackages: 入れる順と、道具ごとの引数
-$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
-Test-Case '入れる順は Git・gh・Build Tools・rustup (rustup-init が MSVC を見るので Build Tools を先に)' 'git gh vs-buildtools rustup' { ($packages | ForEach-Object { $_.Name }) -join ' ' }
-Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
+# Get-BootstrapPackages: 入れる順と、道具ごとの引数。gh は -Private のときだけ
+$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Private)
+$publicPackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+Test-Case '-Private の入れる順は Git・gh・PowerShell 7・Build Tools・rustup (rustup-init が MSVC を見るので Build Tools を先に)' 'git gh pwsh vs-buildtools rustup' { ($packages | ForEach-Object { $_.Name }) -join ' ' }
+Test-Case '既定の形は gh を入れない (Git・PowerShell 7・Build Tools・rustup)' 'git pwsh vs-buildtools rustup' { ($publicPackages | ForEach-Object { $_.Name }) -join ' ' }
+Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.PowerShell=7.6.10.0 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
-Test-Case 'Build Tools は C++ のワークロード・x64 の MSVC・Windows SDK を入れる' '--custom|--norestart --addProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100' { $packages[2].Args -join '|' }
-Test-Case 'rustup は MSVC の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-msvc --default-toolchain none' { $packages[3].Args -join '|' }
-# per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
+# 7.6 の winget の版は MSIX もあるので wix を名指しする。Microsoft Update の自動更新に入れない (固定した版から動かさない)
+Test-Case 'PowerShell 7 は MSI (wix) で、Microsoft Update の自動更新に入れない' '--installer-type|wix|--custom|USE_MU=0 ENABLE_MU=0' { $packages[2].Args -join '|' }
+Test-Case 'Build Tools は C++ のワークロード・x64 の MSVC・Windows SDK を入れる' '--custom|--norestart --addProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100' { $packages[3].Args -join '|' }
+Test-Case 'rustup は MSVC の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-msvc --default-toolchain none' { $packages[4].Args -join '|' }
+# per-machine の MSI (gh・PowerShell 7) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
 # かかるので進み具合の窓を出す。Git は installer が自分で昇格し、rustup は user に入るので --silent でよい
-Test-Case 'gh と Build Tools は --silent を付けない (UAC と進み具合の窓を出す)' 'git=True gh=False vs-buildtools=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
+Test-Case 'gh・PowerShell 7・Build Tools は --silent を付けない (UAC と進み具合の窓を出す)' 'git=True gh=False pwsh=False vs-buildtools=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
 
 # ---------------------------------------------------------------------------
 # clone
 # ---------------------------------------------------------------------------
 
 # Get-RepoTargets: clone する repo と置き場 (ghq の既定の root の下)
-Test-Case 'clone するのは dotfiles・dotfiles-private・claude-skills' 'dotfiles|git@github.com:pollenjp/dotfiles.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles dotfiles-private|git@github.com:pollenjp/dotfiles-private.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles-private claude-skills|git@github.com:pollenjp/claude-skills.git|C:\Users\u\ghq\github.com\pollenjp\claude-skills' {
+Test-Case '-Private で clone するのは dotfiles・dotfiles-private・claude-skills (ssh の URL)' 'dotfiles|git@github.com:pollenjp/dotfiles.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles dotfiles-private|git@github.com:pollenjp/dotfiles-private.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles-private claude-skills|git@github.com:pollenjp/claude-skills.git|C:\Users\u\ghq\github.com\pollenjp\claude-skills' {
+    (Get-RepoTargets -GhqRoot 'C:\Users\u\ghq' -Private | ForEach-Object { "$($_.Name)|$($_.Url)|$($_.Directory)" }) -join ' '
+}
+Test-Case '既定の形で clone するのは public な dotfiles だけ (資格情報なしの HTTPS の URL)' 'dotfiles|https://github.com/pollenjp/dotfiles.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles' {
     (Get-RepoTargets -GhqRoot 'C:\Users\u\ghq' | ForEach-Object { "$($_.Name)|$($_.Url)|$($_.Directory)" }) -join ' '
 }
 
@@ -213,6 +225,11 @@ Test-Case 'origin: https の URL (.git なし) と ssh:// の URL' 'True True' {
 Test-Case 'origin: 大文字小文字は問わない' 'True' { Test-RepoOrigin -Url 'git@github.com:PollenJP/Dotfiles.git' -Owner 'pollenjp' -Repo 'dotfiles' }
 Test-Case 'origin: 別の owner・別の repo は偽' 'False False' { "$(Test-RepoOrigin -Url 'git@github.com:someone/dotfiles.git' -Owner 'pollenjp' -Repo 'dotfiles') $(Test-RepoOrigin -Url 'git@github.com:pollenjp/dotfiles-private.git' -Owner 'pollenjp' -Repo 'dotfiles')" }
 Test-Case 'origin: 空は偽' 'False' { Test-RepoOrigin -Url '' -Owner 'pollenjp' -Repo 'dotfiles' }
+
+# Get-GitAnonymousCloneArguments: 既定の形の clone は github.com の credential helper を空にし (Git Credential Manager を呼ばない)、HTTPS の URL のまま
+Test-Case '既定の形の clone は helper を空にし、HTTPS の URL のまま clone する' '-c|credential.https://github.com.helper=|clone|-c|core.autocrlf=false|https://github.com/pollenjp/dotfiles.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles' {
+    (Get-GitAnonymousCloneArguments -Url 'https://github.com/pollenjp/dotfiles.git' -Directory 'C:\Users\u\ghq\github.com\pollenjp\dotfiles') -join '|'
+}
 
 # Get-GitCloneArguments: gh の資格情報で HTTPS を通す組 (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡す。~/.gitconfig は書かない
 Test-Case 'clone の組は gh のパスを / にして一重引用符で囲む' '-c|credential.https://github.com.helper=|-c|credential.https://github.com.helper=!''C:/Program Files/GitHub CLI/gh.exe'' auth git-credential|-c|url.https://github.com/.insteadOf=git@github.com:|clone|-c|core.autocrlf=false|git@github.com:pollenjp/dotfiles.git|C:\Users\u\ghq\github.com\pollenjp\dotfiles' {
@@ -246,20 +263,54 @@ function New-Repo {
     foreach ($k in $Change.Keys) { $r[$k] = $Change[$k] }
     [pscustomobject]$r
 }
+$HostFilePath = 'C:\Users\u\.config\dotfiles\host.toml'
+function New-HostFile {
+    param([hashtable]$Change = @{})
+    $h = [ordered]@{ Path = $HostFilePath; Exists = $true; PrivateClone = $false }
+    foreach ($k in $Change.Keys) { $h[$k] = $Change[$k] }
+    [pscustomobject]$h
+}
+# -Private の形で揃っている状態 (gh とログイン・3 つの clone)。手元のホストの値は無い (ホストの値は dotfiles-private から引く)
 function New-State {
-    param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Gh = @{}, [hashtable]$Vs = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$Private = @{})
+    param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Gh = @{}, [hashtable]$Pwsh = @{}, [hashtable]$Vs = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$Private = @{})
     $s = [ordered]@{
         Elevated   = $false
         Arch       = 'AMD64'
         Sac        = 'off'
+        Private    = $true
         Packages   = @(
             (New-Package 'git' 'Git for Windows' 'Git.Git' '2.56.0.4' $Git)
             (New-Package 'gh' 'GitHub CLI' 'GitHub.cli' '2.103.3' $Gh)
+            (New-Package 'pwsh' 'PowerShell 7' 'Microsoft.PowerShell' '7.6.10.0' $Pwsh)
             (New-Package 'vs-buildtools' 'Visual Studio Build Tools 2022' 'Microsoft.VisualStudio.2022.BuildTools' '17.14.44' $Vs)
             (New-Package 'rustup' 'rustup' 'Rustlang.Rustup' '1.29.3' $Rustup)
         )
         GhLoggedIn = $true
         Repos      = @((New-Repo 'dotfiles' $Dotfiles), (New-Repo 'dotfiles-private' $Private), (New-Repo 'claude-skills'))
+        HostFile   = (New-HostFile @{ Exists = $false; PrivateClone = $true })
+    }
+    foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
+    [pscustomobject]$s
+}
+# 既定の形 (gh なし) で揃っている状態: gh を入れず、dotfiles を https の URL で clone し、手元のホストの値がある
+function New-PublicState {
+    param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Pwsh = @{}, [hashtable]$Vs = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$HostFile = @{})
+    $repo = @{ Url = 'https://github.com/pollenjp/dotfiles.git'; Origin = 'https://github.com/pollenjp/dotfiles.git' }
+    foreach ($k in $Dotfiles.Keys) { $repo[$k] = $Dotfiles[$k] }
+    $s = [ordered]@{
+        Elevated   = $false
+        Arch       = 'AMD64'
+        Sac        = 'off'
+        Private    = $false
+        Packages   = @(
+            (New-Package 'git' 'Git for Windows' 'Git.Git' '2.56.0.4' $Git)
+            (New-Package 'pwsh' 'PowerShell 7' 'Microsoft.PowerShell' '7.6.10.0' $Pwsh)
+            (New-Package 'vs-buildtools' 'Visual Studio Build Tools 2022' 'Microsoft.VisualStudio.2022.BuildTools' '17.14.44' $Vs)
+            (New-Package 'rustup' 'rustup' 'Rustlang.Rustup' '1.29.3' $Rustup)
+        )
+        GhLoggedIn = $null
+        Repos      = @((New-Repo 'dotfiles' $repo))
+        HostFile   = (New-HostFile $HostFile)
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
@@ -267,17 +318,25 @@ function New-State {
 $fresh = @{ Exists = $false; Installed = $null; Pinned = $false }
 $freshRepo = @{ State = 'missing'; Origin = $null; AutoCrlf = $null }
 function New-FreshState {
-    $s = New-State -Git $fresh -Gh $fresh -Vs $fresh -Rustup ($fresh + @{ SelfUpdateDisabled = $false; DefaultHost = $null }) -Dotfiles $freshRepo -Private $freshRepo
+    $s = New-State -Git $fresh -Gh $fresh -Pwsh $fresh -Vs $fresh -Rustup ($fresh + @{ SelfUpdateDisabled = $false; DefaultHost = $null }) -Dotfiles $freshRepo -Private $freshRepo
     $s.GhLoggedIn = $null
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
+    $s.HostFile = New-HostFile @{ Exists = $false; PrivateClone = $false }
     $s
+}
+# まっさらな PC の既定の形 (手元のホストの値も dotfiles-private の clone も無い)
+function New-FreshPublicState {
+    New-PublicState -Git $fresh -Pwsh $fresh -Vs $fresh -Rustup ($fresh + @{ SelfUpdateDisabled = $false; DefaultHost = $null }) -Dotfiles $freshRepo -HostFile @{ Exists = $false }
 }
 
 # 行のうち、直すことがあるもの (Kind が空でない) を「ラベル=種類」で並べる
 function Get-Kinds { param($State) (@(Get-BootstrapRows -State $State | Where-Object { $_.Kind }) | ForEach-Object { "$($_.Label)=$($_.Kind)" }) -join ' ' }
 
 Test-Case '揃っていれば直すことは無い' '' { Get-Kinds (New-State) }
-Test-Case 'まっさらな PC は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing Visual Studio Build Tools 2022=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
+Test-Case 'まっさらな PC (-Private) は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing PowerShell 7=missing Visual Studio Build Tools 2022=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
+Test-Case 'まっさらな PC (既定の形) は gh の行が無く、手元のホストの値を写す' 'Git for Windows=missing PowerShell 7=missing Visual Studio Build Tools 2022=missing rustup=missing dotfiles=missing ホストの値 (手元)=missing' { Get-Kinds (New-FreshPublicState) }
+Test-Case '既定の形で揃っていれば直すことは無い' '' { Get-Kinds (New-PublicState) }
+Test-Case 'PowerShell 7 の版のずれは bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = '7.6.9.0' }) }
 Test-Case 'SAC がオンでも止める理由にはせず、bootstrap では直らない差 (警告して続ける)' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'on' }) }
 Test-Case 'SAC が評価モードなら bootstrap では直らない差' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'eval' }) }
 Test-Case 'SAC の無い Windows は直すことが無い' '' { Get-Kinds (New-State @{ Sac = 'unavailable' }) }
@@ -316,11 +375,11 @@ Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
 }
 # 版を名指しした winget upgrade は、--include-pinned が無いと bootstrap が足した pin (Pinning) に止められる (0x8A150068。
-# 2026-11-16 に example-host の OpenSSH で起きた形)。4 つの道具のどれの上げ方にも付ける
-Test-Case '4 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
-    $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
+# 2026-11-16 に example-host の OpenSSH で起きた形)。5 つの道具のどれの上げ方にも付ける
+Test-Case '5 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.PowerShell=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
+    $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Pwsh @{ Installed = '7.6.9.0' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
     $notes = @(Get-Lines $s | Where-Object { $_ -like '※*' })
-    @('Git.Git', 'GitHub.cli', 'Microsoft.VisualStudio.2022.BuildTools', 'Rustlang.Rustup') | ForEach-Object {
+    @('Git.Git', 'GitHub.cli', 'Microsoft.PowerShell', 'Microsoft.VisualStudio.2022.BuildTools', 'Rustlang.Rustup') | ForEach-Object {
         $id = $_
         $note = @($notes | Where-Object { $_.Contains("winget upgrade --id $id ") })[0]
         "$id=$("$note".Contains("winget upgrade --id $id --exact --version") -and "$note".Contains('--include-pinned'))"
@@ -339,6 +398,16 @@ Test-Case 'SAC がオンなら、オフにする場所と戻せないことが�
     $l = Get-Lines (New-State @{ Sac = 'on' }); "$(@($l | Where-Object { $_ -like '*Smart App Control :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
 Test-Case 'clone が無ければ置き場を出す' "⚠ dotfiles : 無い → $Ghq\dotfiles に clone する" { @(Get-Lines (New-State -Dotfiles $freshRepo) | Where-Object { $_ -like '*dotfiles :*' })[0] }
+Test-Case 'PowerShell 7 の行は winget の版を出す' '  PowerShell 7 : 7.6.10.0' { @(Get-Lines (New-State) | Where-Object { $_ -like '*PowerShell 7 :*' })[0] }
+Test-Case '既定の形は gh の行を出さない' '0' { @(Get-Lines (New-PublicState) | Where-Object { $_ -like '*gh のログイン*' }).Count }
+Test-Case '-Private は手元のホストの値の行を出さない' '0' { @(Get-Lines (New-State) | Where-Object { $_ -like '*ホストの値 (手元)*' }).Count }
+Test-Case '既定の形で手元のホストの値があれば、置き場を出す' "  ホストの値 (手元) : $HostFilePath" { @(Get-Lines (New-PublicState) | Where-Object { $_ -like '*ホストの値 (手元)*' })[0] }
+Test-Case '既定の形で dotfiles-private の clone があれば、雛形を写さない (直すことは無い)' '  ホストの値 (手元) : 写さない (dotfiles-private の clone がある。ホストの値はそこから引く)' {
+    @(Get-Lines (New-PublicState -HostFile @{ Exists = $false; PrivateClone = $true }) | Where-Object { $_ -like '*ホストの値 (手元)*' })[0]
+}
+Test-Case '既定の形で手元のホストの値が無ければ、雛形を写すと出す' "⚠ ホストの値 (手元) : 無い → 雛形 (win\templates\host.minimum.toml) を $HostFilePath に写す" {
+    @(Get-Lines (New-PublicState -HostFile @{ Exists = $false }) | Where-Object { $_ -like '*ホストの値 (手元)*' })[0]
+}
 
 # Format-BootstrapVerdict: 締めの行 (⚠️ で始めて ⚠️ で終える)
 function Get-Verdict { param($State) (@(Format-BootstrapVerdict -Rows @(Get-BootstrapRows -State $State)) | ForEach-Object { "$_" }) -join '|' }
@@ -352,6 +421,20 @@ Test-Case '入っていないものと host のずれが混ざれば、2 つの�
 }
 Test-Case '止める理由があれば、何も変えていないことと、直してから流し直すことだけを出す' '⚠️ 止める理由があるので何も変えていない → ⚠ の行と ※ の手順で直してから流し直す ⚠️' { Get-Verdict (New-State @{ Elevated = $true } -Gh @{ Pinned = $false }) }
 Test-Case '版のずれだけなら、※ の手順で直すと出す' '⚠️ bootstrap では直らない差がある → ※ の手順で直す ⚠️' { Get-Verdict (New-State -Git @{ Installed = '2.55.0.5' }) }
+
+# Format-BootstrapNextSteps: 揃え終えたときに出す、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) とホストの値の行
+$nextDir = 'C:\Users\u\ghq\github.com\pollenjp\dotfiles'
+Test-Case '次に打つのは、PowerShell 7 の新しい窓で dotfiles.ps1 を読み込んで dotfiles apply (既定の形は手元のホストの値を出す)' "|次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):|  . '$nextDir\win\powershell\dotfiles.ps1'|  dotfiles apply|ホストの値は $HostFilePath (minimum の雛形を写したもの)。使う道具は [tools] に 1 行ずつ足す (書き方は dotfiles の win\README.md の「ホストの値」)" {
+    (@(Format-BootstrapNextSteps -DotfilesDir $nextDir -HostFile $HostFilePath -HostFileExists $true) | ForEach-Object { "$_" }) -join '|'
+}
+Test-Case '-Private は dotfiles-private のホストの値を出し、手元のホストの値があれば両方で止まることを足す' 'ホストの値は dotfiles-private の win\hosts\<ユーザー>@<PC>.toml。無ければ dotfiles check が ⚠ を出し、apply は止まる (先に書く。書き方は dotfiles の win\README.md の「ホストの値」)|False|True' {
+    $plain = @(Format-BootstrapNextSteps -DotfilesDir $nextDir -Private -HostFile $HostFilePath -HostFileExists $false)
+    $both = @(Format-BootstrapNextSteps -DotfilesDir $nextDir -Private -HostFile $HostFilePath -HostFileExists $true)
+    "$($plain[-1])|$(@($plain | Where-Object { $_ -like '※*' }).Count -gt 0)|$("$($both[-1])".StartsWith("※ 手元のホストの値 ($HostFilePath) もある。"))"
+}
+Test-Case '置き場の一重引用符は重ねる (空白と一緒に、PowerShell にそのまま打てる形)' "  . 'C:\Users\o''brien x\ghq\github.com\pollenjp\dotfiles\win\powershell\dotfiles.ps1'" {
+    @(Format-BootstrapNextSteps -DotfilesDir "C:\Users\o'brien x\ghq\github.com\pollenjp\dotfiles" -HostFile $HostFilePath -HostFileExists $true)[2]
+}
 
 # Format-SacWarning: 最初に出す SAC の警告 (オフでなければ出し、bootstrap は続ける)
 $sacWhere = '   オフにする場所: Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 (Windows によっては、戻すのに再インストールが要る)'
@@ -378,14 +461,16 @@ Test-Case 'Ctrl+C を受け止める handler の C# を読め、足す・外す�
 
 $stateRoot = Join-Path ([IO.Path]::GetTempPath()) ('install-bootstrap-tests-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $stateRoot | Out-Null
-foreach ($f in @('git.exe', 'gh.exe', 'rustup.exe')) { Set-Content -LiteralPath (Join-Path $stateRoot $f) -Value '' }
+foreach ($f in @('git.exe', 'gh.exe', 'pwsh.exe', 'rustup.exe')) { Set-Content -LiteralPath (Join-Path $stateRoot $f) -Value '' }
 # settings.toml の既定の host は GNU のまま。rustup show が MSVC を出せば、host は rustup show から読んでいる
 Set-Content -LiteralPath (Join-Path $stateRoot 'settings.toml') -Value "version = `"12`"`ndefault_host_tuple = `"x86_64-pc-windows-gnu`"`nauto_self_update = `"disable`"`n"
 $statePaths = [pscustomobject]@{
-    Git = (Join-Path $stateRoot 'git.exe'); Gh = (Join-Path $stateRoot 'gh.exe'); Rustup = (Join-Path $stateRoot 'rustup.exe')
+    Git = (Join-Path $stateRoot 'git.exe'); Gh = (Join-Path $stateRoot 'gh.exe'); Pwsh = (Join-Path $stateRoot 'pwsh.exe'); Rustup = (Join-Path $stateRoot 'rustup.exe')
     RustupSettings = (Join-Path $stateRoot 'settings.toml'); VsWhere = (Join-Path $stateRoot 'vswhere.exe'); VsSetup = (Join-Path $stateRoot 'setup.exe')
-    GhqRoot = (Join-Path $stateRoot 'ghq')
+    GhqRoot = (Join-Path $stateRoot 'ghq'); HostFile = (Join-Path $stateRoot 'host.toml')
 }
+# 手元のホストの値はある。dotfiles-private の clone は無い
+Set-Content -LiteralPath $statePaths.HostFile -Value 'group = "minimum"'
 $script:NativeLog = [System.Collections.Generic.List[string]]::new()
 # MSVC とワークロードはあるが、SDK は版の付かない UCRT だけの Build Tools 2022
 $script:VsJson = '[{"productId":"Microsoft.VisualStudio.Product.BuildTools","installationPath":"C:\\BT","catalog":{"productDisplayVersion":"17.14.44"},"packages":[{"id":"Microsoft.VisualStudio.Workload.VCTools","type":"Workload"},{"id":"Microsoft.VisualStudio.Component.VC.Tools.x86.x64","type":"Component"},{"id":"Microsoft.VisualStudio.Component.Windows10SDK","type":"Component"}]}]'
@@ -402,22 +487,25 @@ function Invoke-Native {
     switch ("$leaf $($Arguments -join ' ')") {
         'git.exe --version' { $lines = @('git version 2.56.0.windows.4') }
         'gh.exe --version' { $lines = @('gh version 2.103.3 (2026-10-26)') }
+        'pwsh.exe --version' { $lines = @('PowerShell 7.6.10') }
         'rustup.exe --version' { $lines = @('rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
         'rustup.exe show' { $lines = @('Default host: x86_64-pc-windows-msvc', 'rustup home:  C:\Users\u\.rustup', '', 'no active toolchain') }
     }
     [pscustomobject]@{ ExitCode = 0; Lines = $lines }
 }
-$statePackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+$statePackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
 $env:RUSTUP_AUTO_INSTALL = 'keep'
 try {
     $readState = Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64'
     $afterEnv = $env:RUSTUP_AUTO_INSTALL
+    $readNative = @($script:NativeLog)
 } finally {
     $env:RUSTUP_AUTO_INSTALL = $null
     Remove-Item -LiteralPath $stateRoot -Recurse -Force
 }
 $readRustup = @($readState.Packages | Where-Object { $_.Name -eq 'rustup' })[0]
 $readVs = @($readState.Packages | Where-Object { $_.Name -eq 'vs-buildtools' })[0]
+$readPwsh = @($readState.Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
 
 # rustup 1.29.3 は --version・show でも、cwd の rust-toolchain.toml の入っていない toolchain を入れにいく。-Check は何も変えない
 Test-Case 'rustup は --version も show も RUSTUP_AUTO_INSTALL=0 で打つ (toolchain を入れさせない)' 'rustup.exe --version [RUSTUP_AUTO_INSTALL=0]|rustup.exe show [RUSTUP_AUTO_INSTALL=0]' {
@@ -425,6 +513,10 @@ Test-Case 'rustup は --version も show も RUSTUP_AUTO_INSTALL=0 で打つ (to
 }
 Test-Case '打った後は RUSTUP_AUTO_INSTALL を元の値に戻す' 'keep' { $afterEnv }
 Test-Case '既定の host は rustup show から読む (settings.toml の default_host_tuple は読まない)' 'x86_64-pc-windows-msvc|1.29.3|True' { "$($readRustup.DefaultHost)|$($readRustup.Installed)|$($readRustup.SelfUpdateDisabled)" }
+Test-Case 'PowerShell 7 は pwsh --version を winget の版にして読む' 'True|7.6.10.0' { "$($readPwsh.Exists)|$($readPwsh.Installed)" }
+Test-Case '既定の形は gh を読まず (auth status も打たない)、手元のホストの値と dotfiles-private の clone の有無を読む' 'False|False|True|False' {
+    "$($readState.Private)|$(@($readNative | Where-Object { $_ -like 'gh.exe *' }).Count -gt 0)|$($readState.HostFile.Exists)|$($readState.HostFile.PrivateClone)"
+}
 Test-Case 'Build Tools は vswhere から版・置き場所・足りないもの (版の付いた SDK) を読む' 'True|17.14.44|C:\BT|Microsoft.VisualStudio.Component.Windows11SDK.26100' {
     "$($readVs.Exists)|$($readVs.Installed)|$($readVs.InstallPath)|$(@($readVs.MissingComponents) -join ',')"
 }
@@ -439,8 +531,9 @@ function Get-OsArchitecture { 'AMD64' }
 function Get-BootstrapSac { $script:Sac }
 function Get-BootstrapPaths {
     [pscustomobject]@{
-        Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'
-        RustupSettings = 'C:\Users\u\.rustup\settings.toml'; VsWhere = 'C:\vswhere.exe'; VsSetup = 'C:\setup.exe'; GhqRoot = 'C:\Users\u\ghq'
+        Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Pwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+        Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'; RustupSettings = 'C:\Users\u\.rustup\settings.toml'; VsWhere = 'C:\vswhere.exe'
+        VsSetup = 'C:\setup.exe'; GhqRoot = 'C:\Users\u\ghq'; HostFile = $HostFilePath
     }
 }
 function Invoke-Winget {
@@ -461,10 +554,18 @@ function Invoke-Native {
     $script:Calls.Add("native $($Arguments -join ' ')")
     [pscustomobject]@{ ExitCode = 0; Lines = @() }
 }
+# gh の資格情報で通す clone は「clone <名前>」、資格情報なしの clone (既定の形) は「clone-anon <名前>」
 function Invoke-GitClone {
     param([string]$GitPath, [string[]]$Arguments)
-    $script:Calls.Add("clone $($Arguments[-1] -replace '^.*\\', '')")
+    $verb = 'clone-anon'
+    if (@($Arguments | Where-Object { "$_" -like '*auth git-credential' }).Count -gt 0) { $verb = 'clone' }
+    $script:Calls.Add("$verb $($Arguments[-1] -replace '^.*\\', '')")
     [pscustomobject]@{ ExitCode = 0; Lines = @() }
+}
+function Copy-HostTemplate {
+    param([string]$Template, [string]$Destination)
+    $script:Calls.Add("copy-template $($Template -replace '^.*\\pollenjp\\', '') -> $Destination")
+    'copied'
 }
 function Invoke-VsModify {
     param([string]$VsSetup, [string]$InstallPath, [string[]]$Components)
@@ -480,13 +581,14 @@ function Update-ProcessPath { }
 function New-CloneParent { param([string]$Directory) }
 # 状態は渡した順に返し、最後の 1 つは何度でも返す (読み直す回数に縛られない)
 function Get-BootstrapState {
-    param([object[]]$Packages, $Paths, [string]$Arch)
+    param([object[]]$Packages, $Paths, [string]$Arch, [switch]$Private)
     if ($script:States.Count -gt 1) { return $script:States.Dequeue() }
     $script:States.Peek()
 }
 
+# 流れを流す。-Public $true は既定の形 (gh なし)、ほかは -Private の形 (状態は New-State・New-FreshState の -Private の形)
 function Invoke-Flow {
-    param([object[]]$States, [switch]$Check, [hashtable]$Fail = @{}, [hashtable]$FailLines = @{}, [int]$LoginCode = 0, [bool]$Winget = $true)
+    param([object[]]$States, [switch]$Check, [hashtable]$Fail = @{}, [hashtable]$FailLines = @{}, [int]$LoginCode = 0, [bool]$Winget = $true, [bool]$Public = $false)
     $script:Calls = [System.Collections.Generic.List[string]]::new()
     $script:States = [System.Collections.Generic.Queue[object]]::new()
     foreach ($s in $States) { $script:States.Enqueue($s) }
@@ -496,7 +598,7 @@ function Invoke-Flow {
     $script:HaveWinget = $Winget
     # 最初に確かめる SAC は、最初の状態と同じ値にする
     $script:Sac = $States[0].Sac
-    $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Check:$Check 6>&1)
+    $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Private:(-not $Public) -Check:$Check 6>&1)
     [pscustomobject]@{
         Calls = ($script:Calls -join ' | ')
         Text  = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
@@ -506,7 +608,7 @@ function Invoke-Flow {
 
 # 道具が入ったが、pin が無く、rustup の自己更新が止まっておらず、gh はログインしていない・clone は無い状態 (入れた直後)
 function New-InstalledState {
-    $s = New-State -Git @{ Pinned = $false } -Gh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -Private $freshRepo
+    $s = New-State -Git @{ Pinned = $false } -Gh @{ Pinned = $false } -Pwsh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -Private $freshRepo
     $s.GhLoggedIn = $false
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
@@ -516,7 +618,12 @@ function New-LoggedInState {
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
 }
-$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
+$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install-with-progress Microsoft.PowerShell | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.PowerShell | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
+# 既定の形の、道具が入ったが pin が無く、rustup の自己更新が止まっておらず、clone も手元のホストの値も無い状態 (入れた直後)
+function New-PublicInstalledState {
+    New-PublicState -Git @{ Pinned = $false } -Pwsh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -HostFile @{ Exists = $false }
+}
+$freshPublicCalls = 'install Git.Git | install-with-progress Microsoft.PowerShell | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add Microsoft.PowerShell | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | clone-anon dotfiles | copy-template dotfiles\win\templates\host.minimum.toml -> C:\Users\u\.config\dotfiles\host.toml'
 
 Test-Case '-Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -States @((New-FreshState)) -Check; "$($r.Code) [$($r.Calls)]" }
 Test-Case '-Check で揃っていれば 0' '0 []' { $r = Invoke-Flow -States @((New-State)) -Check; "$($r.Code) [$($r.Calls)]" }
@@ -584,6 +691,45 @@ Test-Case 'git の repo でないディレクトリは clone せず、ほかの�
     $r = Invoke-Flow -States @($s, $s, (New-State -Dotfiles @{ State = 'not-git' })); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case 'winget が無ければ、何も読まずに 2' '2 [] True' { $r = Invoke-Flow -States @((New-State)) -Winget $false; "$($r.Code) [$($r.Calls)] $($r.Text -like '*アプリ インストーラー*')" }
+
+# 既定の形 (gh なし): gh を入れず、ログインせず、dotfiles を資格情報なしで clone し、手元のホストの値に雛形を写す
+Test-Case '既定の形のまっさらな PC は、4 つを入れ、ログインせずに dotfiles を匿名で clone し、雛形を写して 0' "0 [$freshPublicCalls] True" {
+    $cloned = New-PublicState -HostFile @{ Exists = $false }
+    $r = Invoke-Flow -Public $true -States @((New-FreshPublicState), (New-PublicInstalledState), $cloned, (New-PublicState))
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*gh を使わず、public な dotfiles だけを clone する*')"
+}
+Test-Case '既定の形の -Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -Public $true -States @((New-FreshPublicState)) -Check; "$($r.Code) [$($r.Calls)]" }
+Test-Case '既定の形で dotfiles-private の clone があれば、雛形を写さない' '0 [clone-anon dotfiles]' {
+    $noClone = New-PublicState -Dotfiles $freshRepo -HostFile @{ Exists = $false; PrivateClone = $true }
+    $cloned = New-PublicState -HostFile @{ Exists = $false; PrivateClone = $true }
+    $r = Invoke-Flow -Public $true -States @($noClone, $noClone, $cloned, $cloned); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case '既定の形で手元のホストの値があれば、上書きしない' '0 [clone-anon dotfiles]' {
+    $noClone = New-PublicState -Dotfiles $freshRepo
+    $r = Invoke-Flow -Public $true -States @($noClone, $noClone, (New-PublicState), (New-PublicState)); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case '既定の形で Git が入らなければ、clone も雛形もせずに 1 (gh のことは言わない)' '1 [install Git.Git] True False' {
+    $s = New-FreshPublicState
+    $r = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = 1 } -FailLines @{}
+    "$($r.Code) [$(@($r.Calls -split ' \| ' | Where-Object { $_ -notlike 'install-with-progress*' -and $_ -notlike 'install Rustlang*' -and $_ -notlike 'pin-add*' -and $_ -notlike 'native*' }) -join ' | ')] $($r.Text -like '*Git for Windows が入っていないので、clone しない*') $($r.Text -like '*gh*ログイン*')"
+}
+
+# 締めの案内: 揃え終えたとき (初めから揃っていたときも) に、次に打つコマンドとホストの値の行を出す。-Check と 1 で終えたときは出さない
+Test-Case '揃え終えたら、PowerShell 7 の新しい窓で dotfiles.ps1 を読み込んで dotfiles apply と出す (既定の形は手元のホストの値)' 'True True True' {
+    $r = Invoke-Flow -Public $true -States @((New-PublicState))
+    "$($r.Text -like '*次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):*') $($r.Text -like "*  . 'C:\Users\u\ghq\github.com\pollenjp\dotfiles\win\powershell\dotfiles.ps1'*") $($r.Text -like "*ホストの値は $HostFilePath (minimum の雛形を写したもの)*")"
+}
+Test-Case '-Private で揃え終えたら dotfiles-private のホストの値を出し、手元のホストの値もあれば両方で止まることを足す' 'True False True' {
+    $plain = Invoke-Flow -States @((New-State))
+    $both = Invoke-Flow -States @((New-State @{ HostFile = (New-HostFile @{ Exists = $true; PrivateClone = $true }) }))
+    "$($plain.Text -like '*ホストの値は dotfiles-private の win\hosts\*') $($plain.Text -like '*※ 手元のホストの値*') $($both.Text -like "*※ 手元のホストの値 ($HostFilePath) もある。*")"
+}
+Test-Case '-Check と、揃いきらずに 1 で終えたときは、次に打つコマンドを出さない' 'False False' {
+    $check = Invoke-Flow -Public $true -States @((New-PublicState)) -Check
+    $s = New-State -Git $fresh -Dotfiles $freshRepo
+    $failed = Invoke-Flow -States @($s, $s) -Fail @{ 'install Git.Git' = 1 }
+    "$($check.Text -like '*次に打つ*') $($failed.Text -like '*次に打つ*')"
+}
 
 if ($script:Failures -gt 0) {
     Write-Host "$($script:Failures) 件失敗"
