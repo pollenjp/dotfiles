@@ -2969,7 +2969,7 @@ home.sessionVariables.OPREASON_RUNNER = "launcher";   # exe を試さず launche
 ### 反映
 
 `~/dotfiles/setup --self-update --update` で入る（WSL の `op` は switch、Windows の zip は `bootstrap-windows-op-reason.sh`）。
-版を上げたときは、Windows の側を先に上げる版がある（0.3.0 がそれ。0.5.0〜0.8.0 はどちらが先でもよい。[後述](#op-reason-の新しい版を出したとき)）。
+版を上げたときは、Windows の側を先に上げる版がある（0.3.0 がそれ。0.5.0〜0.8.1 はどちらが先でもよい。[後述](#op-reason-の新しい版を出したとき)）。
 Claude の hook の登録も同じコマンドが行う（Claude Code を起こし直すと効く）。fish の補完は新しく起こした fish から効く。前の wrapper
 （pjp-op）の記録 `~/.local/state/pjp-op/` は読まなくなる（要らなければ消してよい）。
 
@@ -2977,7 +2977,7 @@ Claude の hook の登録も同じコマンドが行う（Claude Code を起こ�
 
 ```sh
 command -v op op-reason-log op-reason-ssh  # ~/.nix-profile/bin/op・op-reason-log・op-reason-ssh
-op-reason --version                        # op-reason 0.8.0 (Windows を起こさない)
+op-reason --version                        # op-reason 0.8.1 (Windows を起こさない)
 op                                         # wrapper の使い方 (Windows を起こさない)
 fish -c 'complete -C "op "'                # fish の op の補完の候補。op を呼ばず、断りの文も出ない
 op --reason "動くかを確かめる" vault list  # 窓と承認の画面が出る。許可すると vault の一覧が出る
@@ -3005,8 +3005,8 @@ op.exe whoami                              # WSL の直の op.exe は account is
 ### op-reason の新しい版を出したとき
 
 dotfiles が入れる版は自動では上がらない。op-reason の repo で新しい版の Release を出したら、WSL と Windows の両方を **同じ PR で**
-上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.8.0
-まで同じ取り決め（版 1）。0.4.0 で足した `op-reason-ssh` が中継へ渡す `OPREASON_SSH_CALL` も、0.4.0 から 0.8.0 まで同じ版 1）。自作のアプリの
+上げる（呼び出しの取り決め（payload の版）が変わった版どうしでは、WSL の `op` が Windows の `op-reason.exe` に断られる。0.1.0 から 0.8.1
+まで同じ取り決め（版 1）。0.4.0 で足した `op-reason-ssh` が中継へ渡す `OPREASON_SSH_CALL` も、0.4.0 から 0.8.1 まで同じ版 1）。自作のアプリの
 Release なので、依存の公開からの猶予（7 日）は置かず、中身を SHA-256 で固定する（type-clipboard と同じ。依存の更新の skill
 `pjp-dotfiles-deps` も見ない）。
 
@@ -3022,7 +3022,8 @@ Release なので、依存の公開からの猶予（7 日）は置かず、中�
    出ない）。0.5.0 は WSL の側で入るものが新しい窓に頼らない（足すのは `op-reason-ssh` の名前だけで、中継は使っていない）ので、
    どちらが先でもよい（0.6.0 も同じ。変わったのは Windows の SSH の中継の窓と、その記録だけ。0.7.0 も同じで、足したのは Windows の
    `op-reason.exe --settings` と中継の task。WSL の `op-reason --settings` は `op-reason.exe` に回すだけ。0.8.0 も同じで、変わったのは
-   Windows の窓（見た目と、中継の許可の後の案内）と、中継の記録だけ）:
+   Windows の窓（見た目と、中継の許可の後の案内）と、中継の記録だけ。0.8.1 も同じで、変わったのは Windows の Claude Code の
+   PowerShell の道具からの呼び出しで出る中継の窓（箱に ssh のコマンドを出す）だけ）:
 
    ```sh
    ~/dotfiles/setup --self-update --steps bootstrap-windows-files,bootstrap-windows-op-reason   # Windows の op-reason を上げる
