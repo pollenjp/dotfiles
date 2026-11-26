@@ -1318,7 +1318,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 | 段 | 入るもの | 段の switch |
 | --- | --- | --- |
-| ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
+| ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・glab・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
 | ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core と systemd の linger・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
 | ③ 個人の道具（個人のアカウントにつながるもの） | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・Windows の type-clipboard（自作のアプリ。個人の GitHub の repo の Release）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
 | ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
@@ -2311,6 +2311,46 @@ Windows のネイティブ（WSL と macOS は対象）。
 crate の版は公開から 7 日以上経ったものに限る（cargo には猶予の設定が無いので、`Cargo.lock` を作り直したら
 crates.io の公開日時を見て、新しすぎる版は `cargo update -p <名前> --precise <前の版>` で下げる）。`Cargo.lock` の版に届け出の済んだ
 脆弱性が無いかは、CI の `cargo-lock-vulns` が PR と毎朝照らす（[前述](#cargolock-の既知の脆弱性-osv-scanner)）。
+
+### GitLab の CLI (glab)
+
+`glab` は GitLab の公式の CLI で、merge request・issue・CI・API を端末から扱う（gh の GitLab 版）。nixpkgs の package を
+`home/modules/packages.nix` で全ホストに入れ（[設定グループ](#設定グループ)の ①）、版は `nix/flake.lock` の nixpkgs の pin で決まる。
+設定ファイルは置かない。token と設定は glab 自身が `~/.config/glab-cli/config.yml` に書くので、store の読み取り専用のファイルに
+すると glab が書けなくなる（`programs.gh` を使わないのと同じわけ。home-manager の `programs.glab` も、宣言の設定と glab が書く
+状態を混ぜられずに外された）。
+
+ログインは自分の端末で、GitLab のホストごとに 1 回打つ。
+
+```sh
+glab auth login --hostname <ホスト> --insecure-storage   # Token を選び、Personal Access Token を貼る
+glab auth status                                          # 確かめる
+```
+
+- token は GitLab の画面で作る Personal Access Token（scope は `api`。personal access token の `api` は、git の HTTPS の読み書きも含む）
+- token は `~/.config/glab-cli/config.yml`（mode 0600）に平文で入る。gh の token が `~/.config/gh/hosts.yml` に入るのと同じ扱い。
+  `--insecure-storage` は OS の keyring を探さずに設定ファイルへ書く（付けないと、keyring のあるマシンでは keyring に入る。WSL には
+  keyring が無く、警告を出して設定ファイルに書く）
+- 貼る代わりに `--stdin` で渡すと、問いを出さずにログインする（git の protocol は `--git-protocol https` で渡す）
+- 「Choose default Git protocol」で HTTPS を選ぶと、続けて「Authenticate Git with your GitLab credentials?」と聞かれる。**No** で
+  答える。Yes は `git config --global` で credential helper を書こうとして、読み取り専用の `~/.config/git/config`
+  （[前述](#git-について)）で落ちる（token はその前に書かれる）。書けても、helper は glab の store のパス（版を上げると消える）を指す
+
+HTTPS の remote の fetch・push に glab の token を使わせる git の credential helper（`glab auth git-credential`）は、dotfiles に
+書かない。使う GitLab のホスト名をこの public な repo に書かないため。clone ごとに、その `.git/config` に書く。
+
+```sh
+# clone の -c は、新しい .git/config に書いてから取るので、clone の取得にも効く
+git clone -c 'credential.https://<ホスト>.helper=!glab auth git-credential' 'https://<ホスト>/<group>/<repo>.git'
+# 前に clone した repo には後から書く
+git -C <repo> config --local 'credential.https://<ホスト>.helper' '!glab auth git-credential'
+```
+
+- `!` を含む値は一重引用符で囲む（bash の対話の shell では、二重引用符の中の `!` が履歴の展開になる）
+- helper は `glab` を PATH から引く形で書く（store のパスは版を上げると変わる）
+- SSH の remote（GitLab に SSH 鍵を登録して使う）なら helper は要らない
+- github.com だけを gh に向ける仕組み（`git gh` と Claude のセッションの設定。[前述](#fetch-系を-gh-の資格情報で通す-git-gh)）は、
+  GitLab の remote を読み替えない
 
 ## ssh について
 
