@@ -37,6 +37,12 @@
       # (gh に向けるのは fetch 系の abbr / alias だけで、それは git gh が受け持つ)。
       gh
       ghq
+      # GitLab の CLI (MR・CI・API を端末から扱う。nix/README.md の「GitLab の CLI (glab)」)。package だけを入れ、
+      # 設定ファイルは置かない。token と設定は glab 自身が ~/.config/glab-cli/config.yml に書くため (programs.gh を
+      # 使わないのと同じわけ。home-manager の programs.glab も、宣言の設定と glab が書く状態を混ぜられずに外された)。
+      # git の credential helper (glab auth git-credential) もここでは足さない。使う GitLab のホスト名をこの public な
+      # repo に書かないため、clone ごとに .git/config に書く。
+      glab
       jq
       watchexec
       zellij
