@@ -97,17 +97,21 @@
 //   - rows が空・配列でないなら「(行はありません)」と出す。行・段・子が形の違うもの (null など) でも落ちず、中身の無い行として出す。
 //
 // ID を写すボタン: チケットの行 (tickets の一覧の行と、木の kind が ticket の行) の ID の右に、小さなコピーのボタン (mod のフォルダの copy.svg を
-//   字の色で塗ったアイコン) を出す。押すと ID の字 (前後の空白を除いたもの) だけをクリップボードに入れる (下の「答えの送り方」と同じ
-//   Set-Clipboard。端末には貼らず、Enter も押さない)。ID を押すと url を開くのは今までどおり。ID の無い・空白だけの行と、PR・item の行 (prs の
-//   一覧の行も) には出さない。ID とボタンは 1 つの組で、狭いときもボタンだけが次の段へ回らない (ID は縮んで折り返す)。
-//   - 写している間は「…」、写せたら 1.5 秒 (COPY_MARK_MS) ✓ (ok の色)、写せなければ 1.5 秒 ✗ (blocked の色) にし、写せなかったわけ
-//     (「<ID> を写せない: <わけ>」) をわけの行に出す (次に写せたら、そのわけは消す。ほかのわけは残す)。✓・✗ は最後に押したボタンにだけ出す。
-//     ダブルクリックの 2 回目は数えない。ボタンの大きさは panel の文字の % に従う。
-//   - この panel が送っている・写している間は、どの写すボタンも押せない (薄く出す。写している間は、送信・Enter と段の「送る」も効かない)。
-//     写している間は送るときと同じ送っている印 (下の「答えの送り方」) を置き、ほかの写しのペインが印を置いている間は写さずにわけを出す。
-//     送る途中 (答えをクリップボードに入れてから端末に貼るまで) にクリップボードを ID に替えると、答えの代わりに ID が貼られて Enter で
-//     送られるため。写している途中で herdr-app がペインを閉じると (閉じた写しの task は打ち切られ、印を外す所まで進まない)、印は置いた
-//     時刻から 30 秒 (SEND_LOCK_MS) で切れるまで残る (送る途中で閉じたときと同じ)。
+//   字の色で塗ったアイコン) を出す。押すと ID の字 (前後の空白を除いたもの) だけを、herdr-app のクリックの cx の write_to_clipboard で
+//   クリップボードに入れる (押した中ですぐ入れる。powershell は起こさない。端末には貼らず、Enter も押さない)。ID を押すと url を開くのは
+//   今までどおり。ID の無い・空白だけの行と、PR・item の行 (prs の一覧の行も) には出さない。ID とボタンは 1 つの組で、狭いときもボタンだけが
+//   次の段へ回らない (ID は縮んで折り返す)。
+//   - 入れたら 1.5 秒 (COPY_MARK_MS) ✓ (ok の色) にする。write_to_clipboard は入ったかを返さない (GPUI 本家は、Windows でクリップボードを
+//     開けなかったときもログに出すだけ) ので、✓ は入れるよう頼めたことを示す (ほかのアプリがクリップボードを開いていた瞬間などに入らなくても
+//     分からない)。写さなかったら (下の送っている間・write_to_clipboard が投げたとき) 1.5 秒 ✗ (blocked の色) にし、わけ (「<ID> を写せない:
+//     <わけ>」) をわけの行に出す (次に写せたら、そのわけは消す。ほかのわけは残す)。✓・✗ は最後に押したボタンにだけ出す。ダブルクリックの
+//     2 回目は数えない。ボタンの大きさは panel の文字の % に従う。
+//   - panel のペインが答えを送っている間 (下の「答えの送り方」の送っている印がある間) は写さない。送る途中 (答えをクリップボードに入れてから
+//     端末に貼るまで) にクリップボードを ID に替えると、答えの代わりに ID が貼られて Enter で送られるため。この panel が送っている間は、どの
+//     写すボタンも押せない (薄く出す)。ほかの写しのペインが送っている間に押すと、写さずに ✗ とわけを出す。写す側は印を置かない (写すのは
+//     押した中で済み、送信を待たせない)。送る途中で herdr-app がペインを閉じて印が残ると、印が切れるまで (30 秒) 写せない (送信と同じ)。
+//     逆に、送る仕事が 30 秒を超える (hc get や powershell が止まった) と、端末に貼る前に印が切れ、ほかのペインの写しが入り込みうる (ほかの
+//     ペインの送信と同じ、印の限界。同じペインの写しは busy で止まる)。
 //   - アイコンのパスは MOD から作る (MOD を書き換えた写しは、写しのフォルダの copy.svg を読む)。
 //
 // Q&A (type "qa"): ユーザーの問いと、ハブの答えを 1 つの項目にして、問いごとに開け閉めする (アコーディオン)。答えがほかの子の返答に
@@ -252,7 +256,7 @@
 //   - 写しのペイン (まとめと問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。送っている間は shared の
 //     "pjp-hub-panel.sendingUntil" (名前は MOD から作る) にこの時刻 (Date.now() の ms) までは送らないという値を置き、ほかの写しはその時刻まで
 //     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、30 秒で送れるようになる)。ID を写すボタン (上の「ID を写す
-//     ボタン」) も、写している間は同じ印を置き、印のある間は写さない。
+//     ボタン」) は、印のある間は写さない (写す側は印を置かない)。
 // ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す)。
 
 import { View, div, image, svg } from "gpui-kit";
@@ -483,7 +487,7 @@ const PRESS = { what: "押した印", pathOf: stepsPathOf, parse: parsePresses, 
 // ---- 答えの送り方 (頭のコメントの「答えの送り方」) ----
 // 送っている印: shared に、この時刻 (Date.now() の ms) まで、ほかの写しのペインは送らない、という値を置く (送り終えたら 0)。写しのペイン (まとめと
 // 問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。herdr-app が送る途中で落ちても、時刻を過ぎれば送れる。
-// ID を写すボタン (copyText) も、写している間は同じ印を置き、印のある間は写さない
+// ID を写すボタン (copyId) は、この印のある間は写さない (写す側は印を置かない)
 const SEND_KEY = `${NAME}.sendingUntil`;
 const SEND_LOCK_MS = 30000;
 // hc get --json の出力から、端末のエージェントが人を待っている (status が blocked。許可・問いの画面) かを読む。status は平らな字でも
@@ -496,18 +500,9 @@ const blockedOf = (out) => {
     return false;
   }
 };
-// 字をクリップボードに入れる (powershell.exe の Set-Clipboard。Windows だけ)。字は code point の並びで渡す (改行・引用符・日本語を PowerShell の
-// 引用の外に置く)。改行は LF のまま入れる。返すのは入れられなかったわけ (入れられたら null)。exec が投げたら、呼ぶ側が受ける。問いの送信と段の
-// answer の「送る」(pasteToTerminal) と、ID を写すボタン (copyText) が使う
-const setClipboard = async (text) => {
-  const codes = Array.from(text).map((ch) => ch.codePointAt(0));
-  const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
-  const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
-  return r.code === 0 ? null : `クリップボードに入れられない: ${r.stderr.trim()}`;
-};
 
 // ---- ID を写すボタン (頭のコメントの「ID を写すボタン」) ----
-// 写せた ✓・写せなかった ✗ を出しておく長さ (ms)
+// 写せた ✓・写さなかった ✗ を出しておく長さ (ms)
 const COPY_MARK_MS = 1500;
 // ボタンのアイコン (この mod のフォルダの SVG。字の色で塗る)。MOD から作るので、MOD を書き換えた写しは写しのフォルダのものを読む
 const COPY_ICON = `${MOD}/copy.svg`;
@@ -675,7 +670,7 @@ export default class HubPanel extends View {
     this.miniCheck = new Map(); // ミニ絵の図を確かめた結果 (図のパス → { why } か { ok })。panel.json を読み直すたびに作り直す
     this.probe = {}; // ミニ絵の物差しで測った記号の欄の幅 ("c:<記号の欄の字>" → zoom を掛けた後の logical px)
     this.status = "";
-    this.busy = false; // この panel が送っている・ID を写している間 true (送信・段の「送る」・ID を写すボタンを 1 つずつにする)
+    this.busy = false;
     this.width = null;
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
     // 印のファイルの控え: 節を消す印 (dm) と段の押した印 (sp)。cur は印 (鍵 → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)、
@@ -689,7 +684,7 @@ export default class HubPanel extends View {
     // 段の answer: 押した段の確かめに出すわけ (押した印の鍵 → 字。「送っています…」と送れなかったわけ) と、送っている段の印の鍵
     this.stepMsg = {};
     this.sending = null;
-    // ID を写すボタン: 最後に押したボタン ({ eid, text, state: "busy" | "ok" | "fail", why }。✓・✗ を出し終えたら null) と、写せなかったわけ
+    // ID を写すボタン: 最後に押したボタン ({ eid, text, state: "ok" | "fail", why }。✓・✗ を出し終えたら null) と、写さなかったわけ
     // (わけの行に出したもの。次に写せたら消す)。closed は、herdr-app がこの写しを閉じたか (閉じた後は描き直さない)
     this.copied = null;
     this.copyMsg = null;
@@ -881,9 +876,9 @@ export default class HubPanel extends View {
   // 「答えの送り方」。問いの送信と段の answer の「送る」で使う)。返すのは { ok: 貼れた (submit なら Enter まで押せた) か, term: 端末, msg: 止まった
   // わけ }。cx は使わない (await をまたぐので、呼ぶ側が cx.spawn の中で待つ)。exec などが投げたら、呼ぶ側が受ける
   async pasteToTerminal(text, submit) {
-    // ほかの写しのペインが送っている・ID を写している間は送らない (クリップボードと端末への貼り付けは 1 つずつ)
+    // ほかの写しのペインが送っている間は送らない (クリップボードと端末への貼り付けは 1 つずつ)
     const until = shared(SEND_KEY);
-    if (typeof until === "number" && until > Date.now()) return { ok: false, msg: "ほかの panel のペインが送っている (か ID を写している)。少し待ってから送る" };
+    if (typeof until === "number" && until > Date.now()) return { ok: false, msg: "ほかの panel のペインが送っている。少し待ってから送る" };
     const lock = Date.now() + SEND_LOCK_MS;
     setShared(SEND_KEY, lock);
     try {
@@ -894,9 +889,11 @@ export default class HubPanel extends View {
         const g0 = await hc(["get", term, "--json"]);
         if (g0.code === 0 && blockedOf(g0.stdout)) return { ok: false, term, msg: `端末 ${term} が確かめの画面で止まっている (blocked)。端末で答えてから送る` };
       }
-      // 字をクリップボードに入れる (改行は LF のまま)
-      const why = await setClipboard(text);
-      if (why) return { ok: false, msg: why };
+      // 字を code point の並びで渡す (改行・引用符・日本語を PowerShell の引用の外に置く)。改行は LF のまま入れる
+      const codes = Array.from(text).map((ch) => ch.codePointAt(0));
+      const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
+      const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
+      if (r.code !== 0) return { ok: false, msg: `クリップボードに入れられない: ${r.stderr.trim()}` };
       if (!term) return { ok: false, msg: "クリップボードに入れた (props.terminal が無い)" };
       run("pane.focus", { terminal: term });
       run("terminal.paste");
@@ -1614,20 +1611,18 @@ export default class HubPanel extends View {
     return h_flex().min_w(0).gap(4).items_center().child(link).child(this.copyButton(copyEid, text, c));
   }
 
-  // ID を写すボタン。アイコン (COPY_ICON) を字の色で塗り、写している間は「…」、写せたら ✓ (ok の色)・写せなければ ✗ (blocked の色) を
-  // COPY_MARK_MS の間出す (最後に押したボタンだけ)。この panel が送っている・写している間 (busy) は押せず、印の無いボタンは薄く出す
+  // ID を写すボタン。アイコン (COPY_ICON) を字の色で塗り、入れたら ✓ (ok の色)・写さなかったら ✗ (blocked の色) を COPY_MARK_MS の間出す
+  // (最後に押したボタンだけ)。この panel が送っている間 (busy) は押せず、印の無いボタンは薄く出す
   copyButton(eid, text, c) {
     const m = this.copied?.eid === eid && this.copied.text === text ? this.copied : null;
     const state = m?.state ?? null;
     const color = state === "ok" ? c.ok : state === "fail" ? c.blocked : c.dim;
     let tip = `${text} をクリップボードに写す`;
-    if (state === "busy") tip = `${text} を写しています…`;
-    else if (state === "ok") tip = `${text} をクリップボードに写した`;
+    if (state === "ok") tip = `${text} をクリップボードに写した`;
     else if (state === "fail") tip = `${text} を写せない: ${m.why}`;
-    else if (this.busy) tip = "送っている・写している間は押せない";
+    else if (this.busy) tip = "送っている間は押せない";
     let body = svg(COPY_ICON).flex_none().size(this.fs(12)).text_color(color);
-    if (state === "busy") body = "…";
-    else if (state === "ok") body = "✓";
+    if (state === "ok") body = "✓";
     else if (state === "fail") body = "✗";
     return h_flex()
       .id(eid)
@@ -1657,56 +1652,39 @@ export default class HubPanel extends View {
       .child(body);
   }
 
-  // ID を写すボタンを押した: text (ID の字) だけをクリップボードに入れる (copyText。端末には貼らない)。写している間は busy にして、この panel の
-  // 送信・段の「送る」・ほかの写すボタンを止める。写せたら ✓、写せなければ ✗ を COPY_MARK_MS の間出し、写せなかったわけはわけの行に出す (次に
-  // 写せたら消す。ほかのわけは残す)
+  // ID を写すボタンを押した: text (ID の字) だけを、クリックの cx の write_to_clipboard でクリップボードに入れる (押した中ですぐ入れる。端末には
+  // 貼らない)。panel のペインが送っている間 (この panel の busy か、shared の送っている印がある間) は入れない (送る途中でクリップボードを ID に
+  // 替えると、答えの代わりに ID が貼られて Enter で送られる)。印は置かない。入れたら ✓ (入ったかは write_to_clipboard が返さない)、写さなかったら
+  // ✗ を COPY_MARK_MS の間出し、写さなかったわけはわけの行に出す (次に写せたら消す。ほかのわけは残す)
   copyId(eid, text, cx) {
-    if (this.busy) return;
-    this.busy = true;
-    this.copied = { eid, text, state: "busy" };
-    cx.notify();
-    // await をまたぐ仕事は cx.spawn の cx でする (クリックの cx は、await の後には使えない)
-    cx.spawn(async (cx) => {
-      let why = null;
+    const until = shared(SEND_KEY);
+    let why = null;
+    if (this.busy || (typeof until === "number" && until > Date.now())) {
+      why = "panel のペインが送っている。送り終えてから押す";
+    } else {
       try {
-        why = await this.copyText(text);
+        cx.write_to_clipboard(text);
       } catch (e) {
         why = `止まった: ${e}`;
-      } finally {
-        this.busy = false;
       }
-      const done = { eid, text, state: why ? "fail" : "ok", why };
-      this.copied = done;
-      if (why) {
-        this.status = `${text} を写せない: ${why}`;
-        this.copyMsg = this.status;
-      } else if (this.status !== "" && this.status === this.copyMsg) {
-        this.status = "";
-      }
-      if (this.closed) return;
-      cx.notify();
+    }
+    const done = { eid, text, state: why ? "fail" : "ok", why };
+    this.copied = done;
+    if (why) {
+      this.status = `${text} を写せない: ${why}`;
+      this.copyMsg = this.status;
+    } else if (this.status !== "" && this.status === this.copyMsg) {
+      this.status = "";
+    }
+    cx.notify();
+    // ✓・✗ を出し終えたらアイコンに戻す。待つのは cx.spawn の cx でする (クリックの cx は、await の後には使えない)
+    cx.spawn(async (cx) => {
       await cx.sleep(COPY_MARK_MS);
       // 待つ間に閉じた・ほかのボタンを押したなら、そのまま
       if (this.closed || this.copied !== done) return;
       this.copied = null;
       cx.notify();
     });
-  }
-
-  // 字だけをクリップボードに入れる (ID を写すボタン。端末には貼らない)。ほかの写しのペインが送っている・写している間 (shared の送っている印) は
-  // 入れずにわけを返し、入れている間は送っている印を置く (pasteToTerminal と同じ印。送る途中でクリップボードを ID に替えると、答えの代わりに
-  // ID が貼られて Enter で送られる)。返すのは入れられなかったわけ (入れられたら null)。exec が投げたら、呼ぶ側が受ける
-  async copyText(text) {
-    const until = shared(SEND_KEY);
-    if (typeof until === "number" && until > Date.now()) return "ほかの panel のペインが送っている (か ID を写している)。少し待ってから押す";
-    const lock = Date.now() + SEND_LOCK_MS;
-    setShared(SEND_KEY, lock);
-    try {
-      return await setClipboard(text);
-    } finally {
-      // 送っている印を戻す (ほかの写しが後から置いた印は消さない)
-      if (shared(SEND_KEY) === lock) setShared(SEND_KEY, 0);
-    }
   }
 
   // 状態の札。枠と字を color で、地を同じ色の薄い色で塗る (地は color が #rrggbb のときだけ)
