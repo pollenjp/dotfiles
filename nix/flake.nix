@@ -122,8 +122,11 @@
           version = 2;
           # ホストの値に group を書かなかったときのグループ (options.nix の dotfiles.group の既定)
           default = "minimum";
+          # 道具の表 (tools) と、Windows の runner だけが読む道具 (runnerOnlyTools。Nix の option が無い。ADR 111) の両方
           groups = lib.genAttrs table.groupNames (group: {
-            tools = builtins.listToAttrs (map (t: lib.nameValuePair t.key (table.inGroup group t)) table.tools);
+            tools = builtins.listToAttrs (
+              map (t: lib.nameValuePair t.key (table.inGroup group t)) (table.tools ++ table.runnerOnlyTools)
+            );
           });
         };
     in
@@ -967,6 +970,7 @@
               pkgs
               mkHome
               system
+              windowsGroups
               ;
           };
           windows-files-state = import ./tests/windows-files.nix {

@@ -262,7 +262,8 @@ initial_values() {
   fi
   if ! command -v pwsh.exe &>/dev/null; then
     warn "pwsh.exe (PowerShell 7) が見つかりません。setup の Windows の手順 (bootstrap-windows-*) は pwsh.exe で流すので、先に Windows で入れてください:" \
-      "winget install --id Microsoft.PowerShell --exact --source winget"
+      "winget install --id Microsoft.PowerShell --exact --source winget" \
+      "(普段のアカウントが管理者でない PC は MSI で入れる。win/README.md の「PowerShell 7 の MSIX の限り」のコマンド)"
   fi
 }
 

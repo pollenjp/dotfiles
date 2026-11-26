@@ -8,7 +8,11 @@
 #    fetch して fast-forward する。remote が GitHub なら gh の資格情報 (HTTPS) で通す (bootstrap の clone と同じ組。nix/pkgs/git-gh)。git にも
 #    Git Credential Manager にも対話のプロンプトを出させない (資格情報が無ければ、待たずに落ちて ⚠ になる)
 # 2. clone が無い・git の repo でない・未 commit の変更がある・detached HEAD・upstream が無い・fetch が落ちた・fast-forward できないものは、⚠ を
-#    出して飛ばし、ほかの clone と runner は続ける (Linux の nix/scripts/setup.sh の --self-update と同じ扱い。未追跡のファイルは数えない)
+#    出して飛ばし、ほかの clone と runner は続ける (Linux の nix/scripts/setup.sh の --self-update と同じ扱い。未追跡のファイルは数えない)。
+#    ただし private な repo (dotfiles-private・claude-skills) の clone が無いのは「このホストでは使わない」の · にし、終了コードを変えない (gh に
+#    ログインできない PC は -Private でない bootstrap で dotfiles だけを clone する。dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
+#    gh が無ければ GitHub の remote を資格情報なしの HTTPS で取る (public な dotfiles は取れる。gh があってログインしていなくても、public な repo は
+#    資格情報を求められないので gh の helper は呼ばれない)
 # 3. 後ろに runner の引数があれば、進めた後に runner に渡す (dotfiles 関数と同じく win\runner で cargo run。runner は clone から作り直すので、
 #    進めた後のコードで動く)
 # 4. 締めに、進めなかった clone と、dotfiles.ps1 が変わったら新しい PowerShell を開くことを出す (今の PowerShell の関数は古いまま)
@@ -21,9 +25,14 @@
 # BOM 付きの UTF-8 で保存すること。Windows PowerShell 5.1 でも動かす (7 にしか無い書き方を使わない。Invoke-DotfilesSelfUpdate.Tests.ps1 が見る)。
 # dot-source したとき (テスト) は関数だけを読み、本体は走らせない (末尾)。
 
-# 進める clone (bootstrap の Get-RepoTargets と同じ 3 つ。runner と pjp が読む)。進める順に並べる
+# 進める clone (bootstrap の Get-RepoTargets -Private と同じ 3 つ。runner と pjp が読む)。進める順に並べる
 function Get-DotfilesCloneNames {
     @('dotfiles', 'dotfiles-private', 'claude-skills')
+}
+
+# private な repo の clone (無ければ「このホストでは使わない」。gh にログインできない PC には無い)
+function Get-DotfilesPrivateCloneNames {
+    @('dotfiles-private', 'claude-skills')
 }
 
 # 使い方 (--help と、引数の誤りで出す)
@@ -193,7 +202,8 @@ function Set-DotfilesCloneFailure {
 }
 
 # clone を 1 つ進める (-DryRun なら fetch して、進める commit を数えるだけ)。結果の State は updated (進めた)・current (最新)・would-update
-# (--dry-run で、進められる)・skipped (⚠。Message に、わけと直し方)。-WatchPath のファイルが進める commit で変わるなら WatchChanged
+# (--dry-run で、進められる)・unused (private な repo の clone が無い。このホストでは使わない · で、終了コードに数えない)・skipped (⚠。Message に、
+# わけと直し方)。-WatchPath のファイルが進める commit で変わるなら WatchChanged
 # (dotfiles の clone の win/powershell/dotfiles.ps1)。順と飛ばす条件は Linux の setup.sh の pull_repo と同じ
 function Update-DotfilesClone {
     param([string]$Name, [string]$Directory, [string]$Git, [string]$GhPath, [switch]$DryRun, [string]$WatchPath = '')
@@ -202,6 +212,11 @@ function Update-DotfilesClone {
         Log = @(); Message = ''; Detail = @(); WatchChanged = $false
     }
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) {
+        if (@(Get-DotfilesPrivateCloneNames) -ccontains $Name) {
+            $r.State = 'unused'
+            $r.Message = 'clone が無い (このホストでは使わない。使うホストは win\bootstrap\Install-Bootstrap.ps1 -Private で clone する)'
+            return $r
+        }
         $r.Message = "clone が無い ($Directory) → win\bootstrap\Install-Bootstrap.ps1 で clone する"
         return $r
     }
@@ -337,7 +352,7 @@ function New-DotfilesLine {
     [pscustomobject]@{ Text = $Text; Color = $Color }
 }
 
-# clone 1 つの結果の行。頭の印は runner の締めの表と同じ (✔ 揃っている・· 知らせるだけ・⚠ 直すことがある)。進める commit は下に 1 行ずつ
+# clone 1 つの結果の行。頭の印は runner の締めの表と同じ (✔ 揃っている・· 知らせるだけ (使わない clone も)・⚠ 直すことがある)。進める commit は下に 1 行ずつ
 function Format-DotfilesCloneResult {
     param($Result)
     $label = $Result.Name
@@ -352,6 +367,7 @@ function Format-DotfilesCloneResult {
             if ($Result.Ahead -gt 0) { $text = "$text (push していない commit が $($Result.Ahead))" }
             $lines += New-DotfilesLine $text 'Green'
         }
+        'unused' { $lines += New-DotfilesLine "· $($label): $($Result.Message)" }
         default { $lines += New-DotfilesLine "⚠ $($label): $($Result.Message)" 'Yellow' }
     }
     if (($Result.State -eq 'updated') -or ($Result.State -eq 'would-update')) {
@@ -396,6 +412,15 @@ function Get-DotfilesProfileNotice {
     "※ dotfiles.ps1 が変わった。配った写し ($DeployedFile) はまだ古いので、$deploy、新しい PowerShell を開く (今の PowerShell の dotfiles 関数などは古いまま)"
 }
 
+# 進めるときの見出し。gh が無ければ、GitHub の remote は資格情報なしの HTTPS で取る (public な repo だけ取れる)
+function Get-DotfilesSelfUpdateHeading {
+    param([bool]$HaveGh)
+    if ($HaveGh) {
+        return '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。GitHub の remote は gh の資格情報で HTTPS を通す)'
+    }
+    '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。gh が無いので、GitHub の remote は資格情報なしの HTTPS で取る。public な repo だけ取れる)'
+}
+
 # 引数を読み、3 つの clone を進めて、行を出す。runner を流すかと、締めに使うものを返す (ExitCode が $null でなければ、引数の誤りか --help で、
 # そこで終わる)。runner は呼び出し元 (末尾) が流す: ここで流すと、この関数の戻り値を受けるために PowerShell が cargo の出力をパイプで受け、
 # runner が端末を見られない (色が付かない・出力が戻り値に混ざる)
@@ -427,7 +452,7 @@ function Invoke-DotfilesSelfUpdate {
     if ($state.DryRun) {
         Write-DotfilesLine '==> dotfiles --self-update --dry-run: 3 つの clone の進める commit を出す (fetch だけ。fast-forward も runner もしない)'
     } else {
-        Write-DotfilesLine '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。GitHub の remote は gh の資格情報で HTTPS を通す)'
+        Write-DotfilesLine (Get-DotfilesSelfUpdateHeading -HaveGh ([bool]$gh))
     }
     $results = @()
     foreach ($name in @(Get-DotfilesCloneNames)) {

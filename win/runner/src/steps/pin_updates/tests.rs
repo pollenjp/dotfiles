@@ -59,6 +59,7 @@ fn pinned_of(name: &str) -> &'static str {
         "starship" => "1.27.0",
         "git" => "2.56.0.4",
         "gh" => "2.103.3",
+        "pwsh" => "7.6.10.0",
         "vs-buildtools" => "17.14.44",
         "rustup" => "1.29.3",
         "herdr-app" => "0.1.15",
@@ -80,6 +81,7 @@ fn id_of(name: &str) -> &'static str {
         "starship" => "Starship.Starship",
         "git" => "Git.Git",
         "gh" => "GitHub.cli",
+        "pwsh" => "Microsoft.PowerShell",
         "vs-buildtools" => "Microsoft.VisualStudio.2022.BuildTools",
         "rustup" => "Rustlang.Rustup",
         other => panic!("winget でない名前: {other}"),
@@ -773,7 +775,7 @@ fn name_switches_match_the_install_steps() {
     for name in ["openssh", "google-japanese-input"] {
         assert_eq!(name_gate(name), NameGate::Always);
     }
-    for name in ["git", "gh", "vs-buildtools", "rustup"] {
+    for name in ["git", "gh", "pwsh", "vs-buildtools", "rustup"] {
         assert_eq!(name_gate(name), NameGate::Bootstrapped);
     }
     // ghq・fzf・starship を入れる手順はいつも on の Windows にしか無い手順で、bootstrap が clone した dotfiles の runner が流す。知らせるのも、bootstrap の
@@ -997,6 +999,38 @@ fn winget_versions_are_ordered_and_filtered() {
         ]
     );
     assert_eq!(found.line().unwrap(), "Windows の herdr: 0.9.5 → 0.9.7");
+}
+
+/// 候補の線を決めた名前 (pwsh の 7.6 の線) は、その線の版だけを新しい版にする (7.7 の版と Preview のディレクトリは数えない)
+#[test]
+fn series_limits_the_candidates() {
+    let mut w = World::new();
+    w.bootstrapped();
+    w.set_contents(
+        "pwsh",
+        dirs(&[
+            "7.6.9.0", "7.6.10.0", "7.7.0.0", "Preview", "7.6.11.0", "7.7.1.0",
+        ]),
+    );
+    let found = found_of(&w, "pwsh");
+    assert_eq!(found.title, "Windows の PowerShell 7");
+    assert_eq!(found.pinned, "7.6.10.0");
+    assert_eq!(
+        found.newer,
+        vec![Newer {
+            version: "7.6.11.0".into(),
+            skipped: None
+        }]
+    );
+    assert_eq!(
+        found.line().unwrap(),
+        "Windows の PowerShell 7: 7.6.10.0 → 7.6.11.0"
+    );
+    // 7.6 の線に新しい版が無ければ、7.7 の版があっても知らせない
+    let mut w = World::new();
+    w.bootstrapped();
+    w.set_contents("pwsh", dirs(&["7.6.10.0", "7.7.0.0", "Preview"]));
+    assert!(found_of(&w, "pwsh").newer.is_empty());
 }
 
 /// 空白は C.UTF-8 の bash の [[:space:]] と同じに読む: 全角の空白などだけの行・その後ろの注釈は見送りの一覧で読み飛ばし、ps1 の行頭と `=` の前後も
@@ -1231,7 +1265,7 @@ fn every_mode_only_reads() {
             info.ported,
             info.windows_only
         ),
-        ("pin-updates", 97, Gate::Always, true, false)
+        ("pin-updates", 97, Gate::Tool("privateRepos"), true, false)
     );
 }
 
@@ -1386,7 +1420,7 @@ fn notice_texts_match_the_wsl_script() {
     ));
     assert!(s.contains("tailscale)\n      [[ ${windows_tailscale} == true ]] || continue"));
     assert!(s.contains(
-        "git | gh | vs-buildtools | rustup | ghq | fzf | starship)\n      ((bootstrapped)) || continue"
+        "git | gh | pwsh | vs-buildtools | rustup | ghq | fzf | starship)\n      ((bootstrapped)) || continue"
     ));
     assert!(s.contains("${windows_home}/ghq/github.com/pollenjp/dotfiles/.git"));
     // reason_of は空でない最初の 2 行を「 / 」でつなぐ
@@ -1403,6 +1437,7 @@ fn parts_of(re: &str) -> (usize, usize) {
         r"^[0-9]+(\.[0-9]+){1,3}$" => (2, 4),
         r"^[0-9]+\.[0-9]+\.[0-9]+$" => (3, 3),
         r"^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$" => (3, 4),
+        r"^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$" => (4, 4),
         other => panic!("知らない版の形: {other} (runner の version_parts に写す)"),
     }
 }
@@ -1483,6 +1518,10 @@ fn winget_specs_match_the_wsl_script() {
             })
             .unwrap_or_default();
         assert_eq!(nested, spec.nested_dirs, "{}", spec.name);
+        // 候補の線は正規表現の `^7\.6\.` を頭の字の `7.6.` にしたもの
+        let series =
+            value(block, "series_re").map(|r| r.trim_start_matches('^').replace("\\.", "."));
+        assert_eq!(series.as_deref(), spec.series, "{}", spec.name);
     }
     // case の名前は SPECS と同じ並び (WSL の all_names の winget の名前)
     let names: Vec<&str> = body
@@ -1510,6 +1549,7 @@ fn winget_specs_match_the_wsl_script() {
         r#"gone_why="${manifest_dir} に版のディレクトリが無い""#,
         r#"cannot_check "${package_id} が winget-pkgs に無い (${gone_why})。新しい版を出せない""#,
         r#"versions=$(grep -E "${version_re}" <<<"${names}" | sort -V -r || true)"#,
+        r#"versions=$(grep -E "${series_re}" <<<"${versions}" || true)"#,
     ] {
         assert!(
             s.contains(needle),
@@ -1575,6 +1615,11 @@ fn reads_the_real_repo_files() {
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         let output = match a.as_slice() {
             ["auth", "token"] => vec!["gho_fake".to_string()],
+            // pwsh は 7.6 の線の 4 つの数の版だけを読む (7.7 の版と Preview は数えない)
+            ["api", ep] if *ep == format!("{CONTENTS}manifests/m/Microsoft/PowerShell") => vec![
+                json!([{"name": "7.6.99.0", "type": "dir"}, {"name": "7.7.0.0", "type": "dir"}, {"name": "Preview", "type": "dir"}])
+                    .to_string(),
+            ],
             ["api", ep] if ep.starts_with(CONTENTS) => vec![
                 json!([{"name": "99.0.0", "type": "dir"}, {"name": "0.0.1", "type": "dir"}])
                     .to_string(),
@@ -1611,8 +1656,13 @@ fn reads_the_real_repo_files() {
     assert_eq!(outcomes[0].kind, Kind::Info, "{out}");
     assert_eq!(outcomes[0].notes.len(), NAMES.len() + 2, "{out}");
     for spec in SPECS {
+        let want = if spec.name == "pwsh" {
+            "7.6.99.0"
+        } else {
+            "99.0.0"
+        };
         assert!(
-            out.contains(&format!("   {}: ", spec.title)) && out.contains(" → 99.0.0\n"),
+            out.contains(&format!("   {}: ", spec.title)) && out.contains(&format!(" → {want}\n")),
             "{}: {out}",
             spec.name
         );
@@ -2110,7 +2160,7 @@ exit "${rc}"
                 .map(|l| {
                     l.replace(
                         "gh が見つからない。home-manager switch の後に流し直す",
-                        "gh が見つからない。gh は bootstrap (win/bootstrap/Install-Bootstrap.ps1) が入れる。入れた後に流し直す",
+                        "gh が見つからない。gh は -Private の bootstrap (win/bootstrap/Install-Bootstrap.ps1 -Private) が入れる。入れた後に流し直す",
                     )
                 })
                 .collect();
@@ -2450,12 +2500,19 @@ exit "${rc}"
             0,
             "",
         );
+        // pwsh は 7.6 の線の 4 つの数の版だけを読む (7.7 の版と Preview は数えない)
+        p.contents("pwsh", &["7.6.9.0", "7.6.99.0", "7.7.0.0", "Preview"]);
         // 作り物の名前は default のファイルを指す (偽の gh が default-contents.json・default-tags.json を読む)
         let rn = p.same_setup(true, true, true, true, true, true);
         assert_eq!(rn[0], format!("!! {HEADING}"));
         assert_eq!(rn.len(), 1 + NAMES.len() + 2, "{rn:?}");
         for l in &rn[1..=NAMES.len()] {
-            assert!(l.ends_with(" → 99.0.0"), "{l}");
+            let want = if l.contains("PowerShell 7") {
+                " → 7.6.99.0"
+            } else {
+                " → 99.0.0"
+            };
+            assert!(l.ends_with(want), "{l}");
         }
         for s in SPECS {
             p.same_winget(s.name);

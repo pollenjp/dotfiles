@@ -891,7 +891,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン。既定はグループで決まり、`all` の `win/` を配るマシンで on。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
-| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core と、Windows の ghq に dotfiles の clone があるマシンでは bootstrap の Git for Windows・gh・Visual Studio Build Tools・rustup と、Windows の runner が入れる ghq・fzf・starship) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す (herdr-app の新しい版には、keys.json に新しい既定のキーを足す注意も添える)。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
+| `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core と、Windows の ghq に dotfiles の clone があるマシンでは bootstrap の Git for Windows・gh・PowerShell 7・Visual Studio Build Tools・rustup と、Windows の runner が入れる ghq・fzf・starship) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す (herdr-app の新しい版には、keys.json に新しい既定のキーを足す注意も添える)。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
 | `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定はグループで決まり、`all` の `win/` を配るマシンで on。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -1037,7 +1037,8 @@ Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh �
 `initial` は dotfiles-private に登録するまでの踏み台で、登録したら外す (登録しない PC は [`tmp`](#登録簿に載せずにマシンを足す) を使う。
 [ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
 
-前提: Windows に PowerShell 7 (`winget install --id Microsoft.PowerShell --exact --source winget`) と WSL を入れてある。
+前提: Windows に PowerShell 7 (入れ方は問わない。7.6 より古くないもの。例: `winget install --id Microsoft.PowerShell --exact --source winget`
+で MSIX が入る。普段のアカウントが管理者でない PC は MSI で入れる: [`win/README.md`](../win/README.md#powershell-7-の-msix-の限り)) と WSL を入れてある。
 
 ```sh
 # 1. SSH 鍵も gh のログインも無いうちに
@@ -1945,7 +1946,7 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
 ./nix/scripts/bootstrap-windows-files.sh --check    # manifest の検証だけ（CI の lint でも走る）
 ./nix/scripts/bootstrap-windows-powershell-profile.sh  # $PROFILE に読み込みの 1 行を足す部分だけ
 ./nix/scripts/check-herdr-keys.sh                    # herdr のキーバインドと [ui]（sidebar の幅と行・toast）が WSL と Windows で同じか（CI の lint でも走る）
-./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship と bootstrap の git・gh・vs-buildtools・rustup。CI の winget-versions が週 1 回流す。gh のログインが要る）
+./nix/scripts/check-winget-version.sh herdr         # winget で固定した版が winget の最新か（名前は openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship と bootstrap の git・gh・pwsh・vs-buildtools・rustup。CI の winget-versions が週 1 回流す。gh のログインが要る）
 ./nix/scripts/bootstrap-windows-herdr-app.sh        # herdr-app と herdr-core を固定した版とフィードに揃える部分だけ（--apply は確かめずに揃える）
 ./nix/scripts/check-herdr-app-version.sh            # herdr-app と herdr-core の固定した版の成果物 (core は Windows と Linux) が変わっていないかと、7 日たった新しい版（CI の herdr-app-installers が週 1 回流す。gh のログインが要る）
 ./nix/scripts/check-herdr-app-installers.sh         # herdr-app の公式の install.ps1 が、写したときから変わっていないか（CI の herdr-app-installers が週 1 回流す）

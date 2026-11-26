@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # Windows で winget の版を固定しているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship と、bootstrap が
-# 入れる Git for Windows・GitHub CLI・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる。
+# 入れる Git for Windows・GitHub CLI・PowerShell 7・Visual Studio Build Tools・rustup) が、winget の最新に追いついているかを確かめる。
 #
 #   check-winget-version.sh <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 #   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
@@ -20,6 +20,7 @@
 #   starship                starship/Install-Starship.ps1                            winget-pkgs に載った日
 #   git                     bootstrap/Install-Bootstrap.ps1 (-GitVersion)            GitHub (git-for-windows/git) の release
 #   gh                      bootstrap/Install-Bootstrap.ps1 (-GhVersion)             GitHub (cli/cli) の release
+#   pwsh                    bootstrap/Install-Bootstrap.ps1 (-PwshVersion)           winget-pkgs に載った日 (7.6 の線の版だけを読む)
 #   vs-buildtools           bootstrap/Install-Bootstrap.ps1 (-VsBuildToolsVersion)   winget-pkgs に載った日
 #   rustup                  bootstrap/Install-Bootstrap.ps1 (-RustupVersion)         winget-pkgs に載った日
 #
@@ -27,8 +28,13 @@
 # 書くのはそこ 1 か所だけ。それを winget-pkgs (winget の索引の元) の manifests/<頭文字>/<ID の . を / に>/<版>/
 # の並びと比べる。GitHub API で読むので、Windows も winget も要らない。見送りの一覧は ps1 の隣の
 # skipped-versions.txt。
-# bootstrap の 4 つは 1 つの ps1 (win/bootstrap/Install-Bootstrap.ps1) で持つので、読む param と ID の変数の名前が名前ごとに
+# bootstrap の 5 つは 1 つの ps1 (win/bootstrap/Install-Bootstrap.ps1) で持つので、読む param と ID の変数の名前が名前ごとに
 # 違い (-GitVersion と $gitPackageId など。下の version_param・id_var)、見送りの一覧は win/bootstrap/skipped-versions/<名前>.txt。
+#
+# 候補の線 (series_re) を決めた名前は、winget-pkgs の版のうち、その線の版だけを読む (線の外の版は、新しい版にも版の形の誤りにも
+# 数えない)。pwsh は 7.6 の線 (^7\.6\.): bootstrap が入れる 7.6 (LTS) は、管理者の PC の MSIX が package Microsoft.PowerShell-LTS で、
+# 管理者でない PC は MSI。7.7 からは MSI が無く、MSIX は別の package (Microsoft.PowerShell) なので、どちらの上げ先にもならない
+# (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。次の線に移すときは、series_re と固定した版を一緒に上げる。
 #
 # GitHub Actions の winget-versions (.github/workflows/winget-versions.yml) が週 1 回と PR で、名前ごとの
 # job で流し、落ちることで知らせる (TKT-110・TKT-156)。win/ は flake からは見えない (ADR 010) ので、
@@ -61,6 +67,8 @@
 # - gh: GitHub (cli/cli) の release (tag が v<X.Y.Z> で、prerelease でないもの) が出た日。tag の v の後ろで突き合わせる
 # - vs-buildtools・rustup: winget-pkgs に足した commit の日 (Build Tools は GitHub の release が無く、rustup は tag だけで release を
 #   出さない)
+# - pwsh: winget-pkgs に足した commit の日。GitHub (PowerShell/PowerShell) の release には、読まない線 (7.4・7.5・7.7 など) の版も並ぶので
+#   比べない
 #
 # ## 知らせるもの (exit 1)
 #
@@ -76,7 +84,7 @@
 #   openssh・herdr・claude-code・git・gh だけ)。パッケージ ID が移ると、古い ID には新しい版が来ないまま残る (2024-10 に
 #   Microsoft.OpenSSH.Preview ができてから、Beta には 9.5.0.0 より新しい版が来なかった)。比べるのは winget に
 #   載る側の release だけ (どれも prerelease を除く)。新しいかは版で比べる。google-japanese-input と ntn は比べる
-#   相手が無く、ID が移っても気付けない (vs-buildtools・rustup・tailscale・ghq・fzf・starship も同じ)
+#   相手が無く、ID が移っても気付けない (vs-buildtools・rustup・tailscale・ghq・fzf・starship・pwsh も同じ)
 #
 # 次は新しい版の知らせではなく、壊れていることの知らせなので、猶予を置かない。
 #
@@ -142,8 +150,8 @@ Windows で winget の版を固定しているものが、winget の最新に追
   check-winget-version.sh --json [--dates] <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
   check-winget-version.sh --json --offline <名前> [<Install-*.ps1> [<skipped-versions.txt>]]
 
-  名前: openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・vs-buildtools・rustup
-  ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。git・gh・vs-buildtools・rustup は
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・pwsh・vs-buildtools・rustup
+  ps1 と見送りの一覧の既定は、repo の win/<名前>/ の Install-*.ps1 と skipped-versions.txt。git・gh・pwsh・vs-buildtools・rustup は
   win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt。
 
   --json:     固定した版より新しい winget の版を JSON で出す (知らせるかは決めない。--dates で出た日も引く)
@@ -209,7 +217,10 @@ key_missing=''
 moved_example=''
 # 固定した版に許す形 (空なら version_re。winget-pkgs の版より狭くしたい名前だけが書く)
 pinned_version_re=''
-# ps1 の中の、固定した版の param の名前と、パッケージ ID の変数の名前 (bootstrap の 4 つは名前ごとに違う)。ps1 と見送りの一覧の
+# 候補の線 (空ならどの版も読む)。決めた名前は、winget-pkgs の版のうち、これに合う版だけを読む (series_desc は「winget の版」の行に添える文)
+series_re=''
+series_desc=''
+# ps1 の中の、固定した版の param の名前と、パッケージ ID の変数の名前 (bootstrap の 5 つは名前ごとに違う)。ps1 と見送りの一覧の
 # 既定の場所は、repo の win/ からのパス
 version_param=Version
 id_var=packageId
@@ -399,6 +410,29 @@ case ${name} in
     key_missing='の tag が v<X.Y.Z> の形でない'
     moved_example='winget に載らなくなった・別の ID へ移った、など'
     ;;
+  pwsh)
+    title='Windows の PowerShell 7'
+    ps1_name=Install-Bootstrap.ps1
+    ps1_rel=bootstrap/Install-Bootstrap.ps1
+    skipped_rel=bootstrap/skipped-versions/pwsh.txt
+    version_param=PwshVersion
+    id_var=pwshPackageId
+    # winget の Microsoft.PowerShell の版は 4 つの数 (7.6.10.0)
+    version_re='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+    version_example=7.6.10.0
+    readme_section='bootstrap の固定した版の新しい版が出たとき'
+    search_word=PowerShell
+    upgrade_before='変更点を読み、'
+    upgrade_after=''
+    # manifests/m/Microsoft/PowerShell には、版と並んで Microsoft.PowerShell.Preview のディレクトリ (Preview) がある
+    nested_dirs=(Preview)
+    # bootstrap が入れる 7.6 (LTS) は、管理者の PC の MSIX (Microsoft.PowerShell-LTS) も管理者でない PC の MSI も、7.7 (MSI が無く、MSIX は
+    # 別の package の Microsoft.PowerShell) へ上がらないので、7.6 の線の版だけを読む
+    series_re='^7\.6\.'
+    series_desc='7.6 の線だけを読む (7.7 は別の package の MSIX)'
+    # GitHub の release には読まない線の版も並ぶので比べず、winget-pkgs に載った日から数える
+    dates_from=winget
+    ;;
   vs-buildtools)
     title='Windows の Visual Studio Build Tools 2022'
     ps1_name=Install-Bootstrap.ps1
@@ -432,7 +466,7 @@ case ${name} in
     dates_from=winget
     ;;
   *)
-    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・vs-buildtools・rustup のどれか)" >&2
+    echo "知らない名前です: ${name} (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・pwsh・vs-buildtools・rustup のどれか)" >&2
     usage >&2
     exit 2
     ;;
@@ -728,6 +762,10 @@ else
   fi
   versions=$(grep -E "${version_re}" <<<"${names}" | sort -V -r || true)
   odd=$(grep -vE "${version_re}" <<<"${names}" || true)
+  # 候補の線を決めた名前は、その線の版だけを読む (線の外の版は、新しい版にも版の形の誤りにも数えない)
+  if [[ -n ${series_re} ]]; then
+    versions=$(grep -E "${series_re}" <<<"${versions}" || true)
+  fi
 fi
 
 # --json: 固定した版より新しい winget の版を JSON で出して終わる (ふだんの出力はしない)
@@ -824,6 +862,9 @@ if grep -qxF "${pinned}" <<<"${versions}"; then
 else
   list=$(tr '\n' ' ' <<<"${versions}")
   list=${list% }
+fi
+if [[ -n ${series_desc} ]]; then
+  list+=" (${series_desc})"
 fi
 echo "  winget の版   : ${list}"
 winget_latest=$(head -n 1 <<<"${versions}")

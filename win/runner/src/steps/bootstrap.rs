@@ -1,15 +1,18 @@
-//! bootstrap (order 5): `win/bootstrap/Install-Bootstrap.ps1 -Check` を流し、runner の前提 (Git for Windows・gh・Build Tools・rustup・
-//! gh のログイン・3 つの clone・Smart App Control) を runner の出力にも出す (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H)。
+//! bootstrap (order 5): `win/bootstrap/Install-Bootstrap.ps1 -Check` を流し、runner の前提 (Git for Windows・PowerShell 7・Build Tools・rustup・
+//! clone・Smart App Control と、`-Private` の形では gh とそのログイン) を runner の出力にも出す (dotfiles-private の
+//! docs/adr/058_win_runner_bootstrap_* §2 H)。
 //!
 //! 確かめるだけ。apply でも bootstrap は流さない (UAC と gh のログインを runner の中で待たない。揃えるのは人が bootstrap を流す)。
-//! on は claudePrivateSkills のホストだけ。bootstrap の対象と同じで、個人の gh のアカウントでログインして private な repo
-//! (dotfiles-private・claude-skills) を取ってよいホスト = グループ all の既定と、claude-skills を `[tools]` に書いた minimum のホスト
-//! (win/README.md の「bootstrap (新しい Windows で最初に流す)」・dotfiles-private の docs/adr/094_win_bootstrap_private_skills_hosts_*)。
+//! どのホストでも on。道具の switch `privateRepos` (pollenjp の private な repo と gh のログインを使うホスト) が on なら `-Private` を付けて、
+//! gh とそのログイン・dotfiles-private・claude-skills の clone も確かめる。off なら gh を使わない既定の形 (public な dotfiles の clone と、
+//! 手元のホストの値 `%USERPROFILE%\.config\dotfiles\host.toml`) を確かめる (win/README.md の「bootstrap (新しい Windows で最初に流す)」・
+//! dotfiles-private の docs/adr/111_win_runner_without_gh_*。前は claudePrivateSkills のホストだけ on だった: ADR 094)。
 //! SAC は bootstrap の行で見せ、runner で重ねて読まない (オンなら runner の exe はそもそも動かない)。
 
 use super::ps1::{find_powershell, powershell_command, run_streaming};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
+use crate::host::PRIVATE_REPOS;
 use crate::process::Exit;
 use crate::report::Kind;
 use std::time::Duration;
@@ -26,8 +29,8 @@ impl Step for Bootstrap {
         StepInfo {
             id: "bootstrap",
             order: 5,
-            title: "bootstrap の道具と clone を確かめる (Install-Bootstrap.ps1 -Check。揃えるのは人)",
-            gate: Gate::Tool("claudePrivateSkills"),
+            title: "bootstrap の道具と clone を確かめる (Install-Bootstrap.ps1 -Check。privateRepos のホストは -Private も。揃えるのは人)",
+            gate: Gate::Always,
             ported: true,
             // 確かめるだけで書かない。WSL の setup に同じ手順は無い
             windows_only: true,
@@ -42,8 +45,14 @@ impl Step for Bootstrap {
                 format!("{SCRIPT} が clone に無い"),
             )];
         }
+        // private な repo と gh を使うホストは -Private の形 (gh とそのログイン・3 つの clone) を確かめる
+        let private = if ctx.host.tool(PRIVATE_REPOS) {
+            " -Private"
+        } else {
+            ""
+        };
         let rerun = format!(
-            "揃えるには、普通の (管理者でない) PowerShell で: powershell -NoProfile -ExecutionPolicy Bypass -File '{}'",
+            "揃えるには、普通の (管理者でない) PowerShell で: powershell -NoProfile -ExecutionPolicy Bypass -File '{}'{private}",
             super::ps1::ps_quote(&script.to_string_lossy())
         );
         let Some(shell) = find_powershell(ctx) else {
@@ -55,7 +64,7 @@ impl Step for Bootstrap {
         let spec = powershell_command(
             shell,
             &script.to_string_lossy(),
-            " -Check",
+            &format!(" -Check{private}"),
             Duration::from_secs(CHECK_SECS),
         );
         let r = run_streaming(ctx, &spec);
@@ -83,7 +92,8 @@ mod tests {
     //! ## 確かめること
     //!
     //! - -Check だけを打ち (apply でも)、0 は揃っている、1・3 は人が bootstrap を流す差、見出しが無い・2 は確かめられなかった
-    //! - claudePrivateSkills のホストだけ on (all の既定と、[tools] に書いた minimum。ホストの値が無いときは minimum の既定で off)
+    //! - どのホストでも on (ホストの値が無いときも)。privateRepos のホスト (all の既定と、[tools] に書いた minimum) は -Check -Private を打ち、
+    //!   ※ の流し直しのコマンドにも -Private を付ける。ほかは -Check だけ
 
     use super::*;
     use crate::host::{Groups, HostValues, parse};
@@ -93,6 +103,20 @@ mod tests {
     use std::path::Path;
 
     fn run(code: i32, lines: &[&str], mode: Mode) -> (Vec<Outcome>, Vec<String>) {
+        run_on(
+            HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+            code,
+            lines,
+            mode,
+        )
+    }
+
+    fn run_on(
+        host: HostValues,
+        code: i32,
+        lines: &[&str],
+        mode: Mode,
+    ) -> (Vec<Outcome>, Vec<String>) {
         let t = TempDir::new("bootstrap");
         t.write(SCRIPT, "# ps1\n");
         let lines: Vec<String> = lines.iter().map(|s| s.to_string()).collect();
@@ -107,7 +131,7 @@ mod tests {
                 repo: t.path().to_path_buf(),
                 roots: Roots::from_home(Path::new("/h")),
                 state_dir: t.path().join("s"),
-                host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                host,
                 sys: &sys,
                 out: &mut out,
             };
@@ -149,35 +173,50 @@ mod tests {
         assert_eq!(o[0].kind, Kind::Failed);
     }
 
+    /// どのホストでも on。privateRepos のホストは -Check -Private を打ち、流し直しのコマンドにも -Private を付ける
     #[test]
-    fn on_where_claude_skills_are_used() {
+    fn always_on_and_passes_private_only_for_private_repos_hosts() {
         let g = Groups::embedded().unwrap();
-        let off_reason = |toml: &str| {
-            let host = parse(toml, Path::new("h"), g.clone()).unwrap();
-            Bootstrap.info().gate.off_reason(&host)
-        };
-        assert_eq!(Bootstrap.info().gate, Gate::Tool("claudePrivateSkills"));
-        // all は既定で on (グループ all の既定の claudePrivateSkills が true)
-        assert_eq!(off_reason("group = \"all\""), None);
-        // 道具を足していない minimum (書かないホストも) は off
-        assert_eq!(
-            off_reason("group = \"minimum\"").unwrap(),
-            "このホストでは off (claudePrivateSkills = false。グループ minimum の既定)"
-        );
-        assert!(off_reason("").is_some());
-        // claude-skills を足して使う minimum のホストは on
-        assert_eq!(
-            off_reason("group = \"minimum\"\n[tools]\nclaudePrivateSkills = true"),
-            None
-        );
-        // all でも claude-skills を外したホストは off
-        assert!(off_reason("group = \"all\"\n[tools]\nclaudePrivateSkills = false").is_some());
-    }
-
-    /// ホストの値が無いとき (check はグループ minimum の既定で確かめる) は off
-    #[test]
-    fn off_without_host_values() {
-        let host = HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap());
-        assert!(Bootstrap.info().gate.off_reason(&host).is_some());
+        let host = |toml: &str| parse(toml, Path::new("h"), g.clone()).unwrap();
+        assert_eq!(Bootstrap.info().gate, Gate::Always);
+        for toml in ["", "group = \"minimum\"", "group = \"all\""] {
+            assert_eq!(
+                Bootstrap.info().gate.off_reason(&host(toml)),
+                None,
+                "{toml}"
+            );
+        }
+        let missing = HostValues::missing(Path::new("h.toml"), g.clone());
+        assert_eq!(Bootstrap.info().gate.off_reason(&missing), None);
+        let gap = ["⚠ Git for Windows : 入っていない → 2.56.0.4 を入れる"];
+        // privateRepos のホスト (all の既定・[tools] に書いた minimum) は -Private の形を確かめる
+        for toml in ["group = \"all\"", "[tools]\nprivateRepos = true"] {
+            let (o, calls) = run_on(host(toml), 3, &gap, Mode::Check);
+            assert_eq!(calls.len(), 1);
+            assert!(
+                calls[0].contains("Install-Bootstrap.ps1' -Check -Private;"),
+                "{toml}: {}",
+                calls[0]
+            );
+            assert!(
+                o[0].notes[0].ends_with("Install-Bootstrap.ps1' -Private"),
+                "{:?}",
+                o[0].notes
+            );
+        }
+        // ほか (道具を足していない minimum・ホストの値が無い) は gh を使わない既定の形
+        for h in [host("group = \"minimum\""), missing] {
+            let (o, calls) = run_on(h, 3, &gap, Mode::Check);
+            assert!(
+                calls[0].contains("Install-Bootstrap.ps1' -Check;"),
+                "{}",
+                calls[0]
+            );
+            assert!(
+                o[0].notes[0].ends_with("Install-Bootstrap.ps1'"),
+                "{:?}",
+                o[0].notes
+            );
+        }
     }
 }

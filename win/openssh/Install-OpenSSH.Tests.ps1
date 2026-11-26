@@ -219,6 +219,140 @@ Test-Case '-IfMissing の締め: 入れられなければ -IfMissing で打ち�
 Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃っている' { Get-OpenSshCheckMessage -State $inSync }
 Test-Case '-Check の締め: ずれていれば「揃っていない」' 'True' { (Get-OpenSshCheckMessage -State $drift).Contains('固定した版と揃っていない') }
 
+# 普段のアカウントが管理者か (Install-Bootstrap.ps1 と同じ形): トークンのグループの SID (WindowsIdentity の Claims の groupsid と denyonlysid) に
+# BUILTIN\Administrators (S-1-5-32-544) があるか。UAC で権限を落とした管理者のトークンでは deny-only のグループで入る
+function New-Claim { param([string]$Type, [string]$Value) [pscustomobject]@{ Type = $Type; Value = $Value } }
+$filteredAdminClaims = @(
+    (New-Claim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid' 'S-1-5-21-1-2-3-1001')
+    (New-Claim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid' 'S-1-1-0')
+    (New-Claim 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/denyonlysid' 'S-1-5-32-544')
+)
+$standardUserClaims = @(
+    (New-Claim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid' 'S-1-1-0')
+    (New-Claim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid' 'S-1-5-32-545')
+)
+Test-Case 'トークンのグループの SID は groupsid と denyonlysid の値 (primarysid は拾わない)' 'S-1-1-0 S-1-5-32-544' { @(Select-TokenGroupSids -Claims $filteredAdminClaims) -join ' ' }
+Test-Case 'UAC で権限を落とした管理者 (deny-only の S-1-5-32-544) は管理者、普通のユーザー・空は管理者でない' 'True False False' {
+    "$(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $filteredAdminClaims)) $(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $standardUserClaims)) $(Test-AdministratorsSid -Sids @())"
+}
+Test-Case '今のトークンを読む関数は、例外を出さずに真偽を返す (Windows でなければ読めないので管理者でない)' 'True True' {
+    $admin = Test-AccountAdmin
+    "$($admin -is [bool]) $(if ($IsWindows) { $true } else { -not $admin })"
+}
+
+# Select-ElevationHost: 自分を管理者で起動し直す host。今の pwsh が MSIX (WindowsApps の下) なら、MSI の pwsh があればそれを使い、無ければ
+# 管理者の PC は MSIX のまま (同じアカウントで昇格する)、管理者でない PC は止める (UAC で別の管理者のアカウントに昇格した側では、MSIX の pwsh を
+# 起こせない)。ほかは今の host
+$msixPwsh = 'C:\Program Files\WindowsApps\Microsoft.PowerShell-LTS_7.6.10.0_x64__8wekyb3d8bbwe\pwsh.exe'
+$msiPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+$winPs = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
+Test-Case '今の pwsh が MSIX で MSI の pwsh があれば、管理者かを問わず MSI の pwsh で昇格し直す' "$msiPwsh|$msiPwsh" {
+    "$(Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $true -AccountAdmin $true)|$(Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $true -AccountAdmin $false)"
+}
+Test-Case '今の pwsh が MSIX で MSI の pwsh が無ければ、管理者の PC は MSIX のまま、管理者でない PC は止める (空)' "$msixPwsh|" {
+    "$(Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $true)|$(Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $false)"
+}
+Test-Case 'MSI・Windows PowerShell 5.1・ほかの pwsh は、管理者でない PC で MSI が無くても今の host' "$msiPwsh|$winPs|C:\tools\pwsh\pwsh.exe" {
+    (@($msiPwsh, $winPs, 'C:\tools\pwsh\pwsh.exe') | ForEach-Object { Select-ElevationHost -CurrentHost $_ -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $false }) -join '|'
+}
+
+# Format-ElevationStopNote: 止めるとき (Select-ElevationHost が空) は、UAC を出さずに止めたことと、bootstrap を流し直すと MSI が入ることを出す
+Test-Case '止めるときは UAC を出さずに止めたことと、わけ・bootstrap を流し直すと MSI の PowerShell 7 が入ることを ※ で出す' "UAC は出さずに止めた (この pwsh は MSIX: $msixPwsh)|True|True|True" {
+    $lines = @(Format-ElevationStopNote -CurrentHost $msixPwsh -MsiPwsh $msiPwsh)
+    $why = $lines[1].StartsWith('※ 普段のアカウントが管理者でない PC では')
+    $noMsi = $lines[1].Contains("MSI の PowerShell 7 ($msiPwsh) も無い")
+    $bootstrap = $lines[1].Contains('win\bootstrap\Install-Bootstrap.ps1) を普通の PowerShell で流し直すと、管理者でない PC には MSI の PowerShell 7 が入る')
+    "$($lines[0])|$why|$noMsi|$bootstrap"
+}
+
+# Format-WingetMissingNote: 昇格した側で winget が見つからないとき。別の管理者のアカウントには App Installer (winget) が登録されていないことがある
+# (その PC に一度もサインインしていない)。登録はこちらではせず、手を ※ で出す (Microsoft の winget の文書の手)
+Test-Case '昇格した側で winget が見つからなければ、そのアカウントと、サインインするか Add-AppxPackage で登録する手を ※ で出す' 'winget が見つからない (昇格した側のアカウント: it-admin)|True|True' {
+    $lines = @(Format-WingetMissingNote -Account 'it-admin')
+    "$($lines[0])|$($lines[1].StartsWith('※ UAC で別の管理者のアカウントの資格情報を入れたなら'))|$($lines[1].Contains('Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'))"
+}
+
+# Invoke-Elevated: 選んだ host で起動し直す・止める・子がログを書かずに落ちたときの行。Get-Process・Test-AccountAdmin・Start-Process・Write-Host を
+# 偽物に替え、LOCALAPPDATA と ProgramFiles (MSI の pwsh の置き場所) は一時ディレクトリにする
+function Invoke-ElevatedScenario {
+    param([string]$HostExe, [bool]$Admin = $true, [bool]$Msi = $false, [bool]$Throw = $false, [int]$ExitCode = 0)
+    $said = [System.Collections.Generic.List[string]]::new()
+    $started = [System.Collections.Generic.List[string]]::new()
+    function Get-Process { param($Id) [pscustomobject]@{ Path = $HostExe } }
+    function Test-AccountAdmin { $Admin }
+    function Start-Process {
+        param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$Wait, [switch]$PassThru)
+        $started.Add($FilePath)
+        if ($Throw) { throw 'アクセスが拒否されました。' }
+        [pscustomobject]@{ ExitCode = $ExitCode }
+    }
+    function Write-Host { param($Object, $ForegroundColor) $said.Add("$Object") }
+    $savedLocal = $env:LOCALAPPDATA
+    $savedPf = $env:ProgramFiles
+    $root = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-elevated-$PID"
+    $env:LOCALAPPDATA = Join-Path $root 'local'
+    $env:ProgramFiles = Join-Path $root 'pf'
+    $msiPath = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    if ($Msi) {
+        New-Item -ItemType Directory -Force -Path (Join-Path (Join-Path $env:ProgramFiles 'PowerShell') '7') | Out-Null
+        Set-Content -LiteralPath $msiPath -Value ''
+    }
+    try {
+        $result = Invoke-Elevated -Version '10.4.0.0'
+    } finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        $env:LOCALAPPDATA = $savedLocal
+        $env:ProgramFiles = $savedPf
+    }
+    [pscustomobject]@{ Result = $result; Started = (@($started) -join ','); Said = @($said); MsiPath = $msiPath }
+}
+Test-Case '管理者でない PC で今の pwsh が MSIX でも、MSI の pwsh があればそれで昇格し直し、そう出す' 'True|True|True' {
+    $r = Invoke-ElevatedScenario -HostExe $msixPwsh -Admin $false -Msi $true
+    "$($r.Result)|$($r.Started -eq $r.MsiPath)|$(@($r.Said | Where-Object { $_.StartsWith('昇格した側は MSI の PowerShell 7') }).Count -eq 1)"
+}
+Test-Case '管理者でない PC で今の pwsh が MSIX で MSI の pwsh が無ければ、UAC を出さずに止め、※ を出す' 'False||True|True' {
+    $r = Invoke-ElevatedScenario -HostExe $msixPwsh -Admin $false -Msi $false
+    "$($r.Result)|$($r.Started)|$(@($r.Said | Where-Object { $_.StartsWith('UAC は出さずに止めた') }).Count -eq 1)|$(@($r.Said | Where-Object { $_.StartsWith('※ 普段のアカウントが管理者でない PC では') }).Count -eq 1)"
+}
+Test-Case '管理者の PC は、MSI の pwsh が無ければ MSIX の pwsh のまま昇格し直す (同じアカウントで昇格する)' "True|$msixPwsh" {
+    $r = Invoke-ElevatedScenario -HostExe $msixPwsh -Admin $true -Msi $false; "$($r.Result)|$($r.Started)"
+}
+Test-Case 'MSI の pwsh は、管理者でない PC でもそのまま使う' "True|$msiPwsh" { $r = Invoke-ElevatedScenario -HostExe $msiPwsh -Admin $false -Msi $false; "$($r.Result)|$($r.Started)" }
+Test-Case '子がログを書かずに落ちたら、終了コードを出して失敗にする (MSIX の ※ は出さない)' 'False|True|0' {
+    $r = Invoke-ElevatedScenario -HostExe $msiPwsh -ExitCode -1073741515
+    "$($r.Result)|$(@($r.Said | Where-Object { $_ -eq '管理者の PowerShell がログを書く前に終わった (終了コード 0xC0000135)' }).Count -eq 1)|$(@($r.Said | Where-Object { $_.StartsWith('※') }).Count)"
+}
+Test-Case '昇格を起こせなければ (UAC で断った)、そう出して失敗にする' 'False|True' {
+    $r = Invoke-ElevatedScenario -HostExe $msixPwsh -Admin $true -Throw $true
+    "$($r.Result)|$(@($r.Said | Where-Object { $_.StartsWith('管理者で起動できなかった (UAC で断った?)') }).Count -eq 1)"
+}
+
+# Invoke-OpenSshFix: 昇格した側で winget が見つからなければ、winget を打たずに ※ を書いて失敗にする (ssh-agent の後始末は winget が要らないので
+# する)。Get-Command・Invoke-Winget・Write-Step・サービスの cmdlet を偽物に替える
+function Invoke-FixScenario {
+    param([string]$Plan, [bool]$HaveWinget)
+    $fixSteps = [System.Collections.Generic.List[string]]::new()
+    $fixWinget = [System.Collections.Generic.List[string]]::new()
+    $fixAgent = [System.Collections.Generic.List[string]]::new()
+    function Get-Command { param($Name, $ErrorAction) if ($HaveWinget) { [pscustomobject]@{ Name = 'winget' } } }
+    function Invoke-Winget { param([string[]]$Arguments) $fixWinget.Add($Arguments[0]); [pscustomobject]@{ ExitCode = 0; Lines = @() } }
+    function Write-Step { param([string]$Message) $fixSteps.Add($Message) }
+    function Get-Service { param($Name, $ErrorAction) [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+    function Stop-Service { param($Name, [switch]$Force) $fixAgent.Add('stop') }
+    function Set-Service { param($Name, $StartupType) $fixAgent.Add("set-$StartupType") }
+    $saved = $env:USERNAME
+    $env:USERNAME = 'it-admin'
+    try {
+        $ok = Invoke-OpenSshFix -Plan $Plan -PackageId $Id -Version '10.4.0.0'
+    } finally {
+        $env:USERNAME = $saved
+    }
+    "$ok|$($fixWinget -join ',')|$($fixAgent -join ',')|$(@($fixSteps | Where-Object { $_ -eq 'winget が見つからない (昇格した側のアカウント: it-admin)' }).Count)"
+}
+Test-Case '昇格した側で winget が見つからなければ、winget を打たずに ※ を書いて失敗にし、ssh-agent の後始末はする' 'False||stop,set-Disabled|1' { Invoke-FixScenario -Plan 'install' -HaveWinget $false }
+Test-Case '揃えるのが ssh-agent だけなら、winget が無くても ssh-agent を止めて成功にする' 'True||stop,set-Disabled|0' { Invoke-FixScenario -Plan 'none' -HaveWinget $false }
+Test-Case 'winget があれば打つ' 'True|install|stop,set-Disabled|0' { Invoke-FixScenario -Plan 'install' -HaveWinget $true }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)

@@ -110,7 +110,7 @@ name = "win-starship"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/starship/Install-Starship.Tests.ps1"]
 when = ["win/starship/"]
 
-# bootstrap の 4 つ (git・gh・vs-buildtools・rustup) の版は、どれも win/bootstrap/Install-Bootstrap.ps1 の param の既定値
+# bootstrap の 5 つ (git・gh・pwsh・vs-buildtools・rustup) の版は、どれも win/bootstrap/Install-Bootstrap.ps1 の param の既定値
 [[checks]]
 name = "win-bootstrap"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/bootstrap/Install-Bootstrap.Tests.ps1"]

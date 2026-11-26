@@ -15,6 +15,9 @@
 #   - 3 つの clone を fetch して fast-forward し、進めた commit を新しい順に出す。最新なら最新と出す。未追跡のファイルは数えない
 #   - clone が無い・git の repo でない・未 commit の変更 (作業ツリー・index)・detached HEAD・upstream が無い・fetch が落ちた・fast-forward できない
 #     (分かれた・進めると上書きされる未追跡のファイル) ものは ⚠ を出して進めず、ほかの clone は続け、終了コードは 1
+#   - private な repo (dotfiles-private・claude-skills) の clone が無いのは「このホストでは使わない」の · (色なし) で、終了コードを変えず、締めの
+#     ⚠️ の行にも runner の後の繰り返しにも出さない。dotfiles の clone が無いのは今までどおり ⚠
+#   - 見出しは gh の有無で替える (gh が無ければ、GitHub の remote は資格情報なしの HTTPS で取ると出す)
 #   - --dry-run は fetch だけして (remote-tracking の ref は進む)、進める commit を出し、HEAD も runner も動かさない
 #   - runner の引数があれば、進めた後に dotfiles 関数と同じ場所 (win\runner) で同じ引数の cargo を打ち、終了コードは runner のもの (⚠ があれば
 #     0 と 3 を 1 に)。⚠ は runner の出力の後にもう一度出す。runner が無ければ 2
@@ -173,6 +176,27 @@ Test-Case '結果の行: ⚠ は黄で、下に git の出力の終わりを出�
     "$(@($l | ForEach-Object { $_.Text }) -join '|')|$($l[0].Color)"
 }
 Test-Case '結果の行: branch が分かる前の ⚠ は名前だけ' '⚠ dotfiles: clone が無い' { @(Format-DotfilesCloneResult -Result (New-Result -State 'skipped' -Message 'clone が無い' -Branch ''))[0].Text }
+Test-Case '結果の行: 使わない clone は · で、色なし' '· claude-skills: clone が無い (このホストでは使わない)|' {
+    $line = @(Format-DotfilesCloneResult -Result ([pscustomobject]@{
+                Name = 'claude-skills'; Directory = 'x'; State = 'unused'; Branch = ''; Before = ''; After = ''; Count = 0; Ahead = 0
+                Log = @(); Message = 'clone が無い (このホストでは使わない)'; Detail = @(); WatchChanged = $false
+            }))[0]
+    "$($line.Text)|$($line.Color)"
+}
+
+# Update-DotfilesClone: private な repo の clone が無いのは使わない (unused)、dotfiles の clone が無いのは ⚠ (skipped)
+$noDir = Join-Path ([IO.Path]::GetTempPath()) ('self-update-none-' + [guid]::NewGuid())
+Test-Case 'clone が無い: dotfiles-private と claude-skills は使わない clone (unused)' 'unused unused' {
+    "$((Update-DotfilesClone -Name 'dotfiles-private' -Directory $noDir -Git 'git' -GhPath '').State) $((Update-DotfilesClone -Name 'claude-skills' -Directory $noDir -Git 'git' -GhPath '').State)"
+}
+Test-Case 'clone が無い: 使わない clone の文は -Private の bootstrap を指す' 'clone が無い (このホストでは使わない。使うホストは win\bootstrap\Install-Bootstrap.ps1 -Private で clone する)' {
+    (Update-DotfilesClone -Name 'claude-skills' -Directory $noDir -Git 'git' -GhPath '').Message
+}
+Test-Case 'clone が無い: dotfiles は ⚠ (skipped) のまま' 'skipped' { (Update-DotfilesClone -Name 'dotfiles' -Directory $noDir -Git 'git' -GhPath '').State }
+
+# Get-DotfilesSelfUpdateHeading: gh の有無で見出しを替える
+Test-Case '見出し: gh があれば gh の資格情報で通す' '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。GitHub の remote は gh の資格情報で HTTPS を通す)' { Get-DotfilesSelfUpdateHeading -HaveGh $true }
+Test-Case '見出し: gh が無ければ資格情報なしの HTTPS で取る' '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。gh が無いので、GitHub の remote は資格情報なしの HTTPS で取る。public な repo だけ取れる)' { Get-DotfilesSelfUpdateHeading -HaveGh $false }
 
 $noticeDir = Join-Path ([IO.Path]::GetTempPath()) ("dotfiles-self-update-tests-" + [Guid]::NewGuid())
 $null = New-Item -ItemType Directory -Force -Path $noticeDir
@@ -382,7 +406,8 @@ if ($realGit.Count -eq 0) {
         -1
     }
 
-    $heading = '==> dotfiles --self-update: 3 つの clone を進める (fetch して fast-forward。GitHub の remote は gh の資格情報で HTTPS を通す)'
+    # 子の pwsh は同じ PATH を継ぐので、見出しは gh の有無で決まる
+    $heading = Get-DotfilesSelfUpdateHeading -HaveGh ([bool](Find-DotfilesApplication -Name 'gh'))
 
     # --- 3 つとも遅れている: 進め、進めた commit を出す。dotfiles.ps1 が変わり、配った写しが無いので、配ってから新しい PowerShell を開く
     $fx = New-Fixture
@@ -506,7 +531,8 @@ if ($realGit.Count -eq 0) {
             @(Get-CloneLines $out 'dotfiles-private') -split '\|' | Select-Object -First 1
         }
         Test-Case '進めない: fast-forward できなかった clone の HEAD は動かないが、fetch はしてある' "$startPrivate $p1" { "$(Get-Rev $private) $(Get-Rev $private 'origin/main')" }
-        Test-Case '進めない: clone が無ければ進めない' "⚠ claude-skills: clone が無い ($skills) → win\bootstrap\Install-Bootstrap.ps1 で clone する" { Get-CloneLines $out 'claude-skills' }
+        Test-Case '進めない: private な repo の clone が無いのは、このホストでは使わない (·)' '· claude-skills: clone が無い (このホストでは使わない。使うホストは win\bootstrap\Install-Bootstrap.ps1 -Private で clone する)' { Get-CloneLines $out 'claude-skills' }
+        Test-Case '進めない: 締めの ⚠️ の行に、使わない clone は入れない' '⚠️ 進めなかった clone がある (dotfiles・dotfiles-private) → ⚠ の行のとおりに直して、dotfiles --self-update を打ち直す ⚠️' { $out | Where-Object { $_ -clike '⚠️ 進めなかった*' } }
         Test-Case '進めない: 終了コードは 1' '1' { Get-ChildValue $out 'code' }
 
         # pwsh 7.4 からの $PSNativeCommandUseErrorActionPreference を $true にした PowerShell (profile で置ける) でも、git の 0 でない終了コードで
@@ -519,6 +545,33 @@ if ($realGit.Count -eq 0) {
             Test-Case '進めない: $PSNativeCommandUseErrorActionPreference が $true でも、終了コードは 1' '1' { Get-ChildValue $strict 'code' }
         } else {
             Write-Host 'skip 進めない: $PSNativeCommandUseErrorActionPreference が $true のとき (pwsh 7.4 から)'
+        }
+    } finally {
+        Remove-Fixture $fx
+    }
+
+    # --- gh にログインできない PC の形: dotfiles だけがあり、private な repo の clone は無い。· で知らせ、終了コードは runner のもの (runner の後に
+    # 繰り返さない)。dotfiles の clone が無いのは ⚠ で 1
+    $fx = New-Fixture
+    try {
+        Remove-Item -LiteralPath (Join-Path $fx.Clones 'dotfiles-private') -Recurse -Force
+        Remove-Item -LiteralPath (Join-Path $fx.Clones 'claude-skills') -Recurse -Force
+        $d1 = Add-RemoteCommit $fx 'dotfiles' 'docs.txt' "docs`n" 'dotfiles 2'
+        $out = @(Invoke-SelfUpdateChild -Fixture $fx -Command '& $Script apply')
+        Test-Case '使わない clone: dotfiles は進める' $true { [bool](@((Get-CloneLines $out 'dotfiles') -split '\|') | Where-Object { $_ -clike '✔ dotfiles (main): 1 commit 進めた *' }) }
+        Test-Case '使わない clone: dotfiles-private と claude-skills は · で知らせる' '2' { @($out | Where-Object { $_ -clike '· dotfiles-private: clone が無い (このホストでは使わない。*' -or $_ -clike '· claude-skills: clone が無い (このホストでは使わない。*' }).Count }
+        Test-Case '使わない clone: 締めの ⚠️ の行も、runner の後の繰り返しも出さない' '0 0' {
+            $verdict = @($out | Where-Object { $_ -clike '⚠️*' }).Count
+            $again = @($out | Where-Object { $_ -clike '==> 進めなかった clone*' }).Count
+            "$verdict $again"
+        }
+        Test-Case '使わない clone: 終了コードは runner のもの (0)' '0' { Get-ChildValue $out 'code' }
+        Remove-Item -LiteralPath (Join-Path $fx.Clones 'dotfiles') -Recurse -Force
+        $out = @(Invoke-SelfUpdateChild -Fixture $fx -Command '& $Script')
+        Test-Case '使わない clone: dotfiles の clone が無いのは ⚠ で 1' '1 1' {
+            $missing = @($out | Where-Object { $_ -clike '⚠ dotfiles: clone が無い *' }).Count
+            $code = Get-ChildValue $out 'code'
+            "$missing $code"
         }
     } finally {
         Remove-Fixture $fx

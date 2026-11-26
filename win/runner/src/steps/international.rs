@@ -562,7 +562,7 @@ fn prepare(ctx: &mut Ctx) -> Result<(Jv, Record, Option<PathBuf>), Outcome> {
             Kind::Manual,
             "PowerShell 7 (pwsh) が見つからないので、日付と時刻の形式を確かめられない",
         )
-        .note("PowerShell 7 を入れてから流し直す (winget install --id Microsoft.PowerShell --exact --source winget)"));
+        .note("PowerShell 7 を入れてから流し直す (bootstrap の win/bootstrap/Install-Bootstrap.ps1 が入れる。普段のアカウントが管理者の PC は MSIX、管理者でない PC は MSI)"));
     };
     Ok((managed, record, Some(shell)))
 }
@@ -2105,11 +2105,12 @@ mod tests {
             ),
             "{out}"
         );
+        // 入れ方は bootstrap に任せる (普段のアカウントが管理者でない PC は MSI。素の winget install は 7.7 の MSIX を入れる)
         assert!(
             o.notes
                 .iter()
-                .any(|n| n
-                    .contains("winget install --id Microsoft.PowerShell --exact --source winget")),
+                .any(|n| n.contains("win/bootstrap/Install-Bootstrap.ps1")
+                    && n.contains("管理者でない PC は MSI")),
             "{o:?}"
         );
         assert!(e.read_record().is_none());

@@ -28,6 +28,9 @@
 #     (win/runner/src/steps/sshd_allow.rs の copy_text と同じ) を読める。使う値は、写しの値があればそれ、無ければ既定 (流したユーザーと、
 #     tailnet と localhost)
 #   - 管理者で起動し直すとき (Invoke-Elevated)、子にユーザーと送り元の写しの場所と流したユーザーと受け持ちを渡す
+#   - 起動し直す host: 今の pwsh が MSIX なら MSI の pwsh を使い、それも無く普段のアカウントが管理者でなければ UAC を出さずに止めて ※ を出す
+#     (管理者かはトークンのグループの SID の BUILTIN\Administrators。deny-only でも管理者)。子がログを書かずに落ちたら終了コードを出す。
+#     昇格した側で winget が無ければ、そのアカウントと登録の手 (Add-AppxPackage -RegisterByFamilyName) を書き、Server を足さずに止まる
 #   - 鍵の写しの読み方: コメントと空の行を除き、authorized_keys の行として読めない行は分ける。from= の有無を見分ける。名札はコメント
 #     (無ければ base64 の末尾) と鍵の種類。写しを置く受け持ち (-KeysFrom が先。無ければ写しの頭の runner の印で runner、印の無い写しは
 #     wsl、写しが無ければ分からない) を見分け、鍵が 0 本・写しが無い・読めない行の案内を、runner なら TOML の [sshd] authorizedKeys と
@@ -1273,7 +1276,8 @@ $fixRoot = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-fix-$PID"
 function Invoke-FixScenario {
     # $ServerInstalled: 始めから sshd.exe とサービス sshd (動いていて自動) がある形 (入った後に値を変えて揃え直す)。$ConfigTest: sshd -t の試し
     # (Invoke-SshdConfigTest) を偽物にして、ok (通す)・reject (断る) を返す。空なら本物 (sshd.exe が無ければ試せないと返す)
-    param([int]$MsiExit = 0, [switch]$Plant, $Installed = (New-InstalledFacts), [string]$AllowJson, [switch]$ServerInstalled, [string]$ConfigTest)
+    # $NoWinget: 昇格した側に winget が無い形 (UAC で資格情報を入れた別の管理者のアカウントに App Installer が登録されていない)
+    param([int]$MsiExit = 0, [switch]$Plant, $Installed = (New-InstalledFacts), [string]$AllowJson, [switch]$ServerInstalled, [string]$ConfigTest, [switch]$NoWinget)
     Remove-Item -LiteralPath $fixRoot -Recurse -Force -ErrorAction SilentlyContinue
     $pd = Join-Path $fixRoot 'ProgramData'
     $sshDir = Join-Path $pd 'ssh'
@@ -1340,7 +1344,10 @@ function Invoke-FixScenario {
     }
     function Get-Command {
         [CmdletBinding()] param([string]$Name)
-        if ($Name -eq 'winget') { return [pscustomobject]@{ Name = 'winget' } }
+        if ($Name -eq 'winget') {
+            if ($NoWinget) { return }
+            return [pscustomobject]@{ Name = 'winget' }
+        }
         Microsoft.PowerShell.Core\Get-Command -Name $Name
     }
     function Invoke-Winget {
@@ -1454,6 +1461,26 @@ try {
         'msiexec が失敗した (終了コード 1603。ログ: <tmp>/state/msiexec-add-server.log)'
         '|'
     ) { $failed.Result; @($failed.Steps | Select-Object -Last 1); '|'; $failed.Left }
+
+    # 昇格した側 (UAC で資格情報を入れた別の管理者のアカウント) に winget が無ければ、そのわけと登録の手を書いて止まる (登録はしない)
+    $savedUser = $env:USERNAME
+    $env:USERNAME = 'it-admin'
+    try {
+        $noWinget = Invoke-FixScenario -NoWinget
+    } finally {
+        $env:USERNAME = $savedUser
+    }
+    Test-Case '昇格した側で winget が見つからなければ、そのアカウントと登録の手を書き、winget download も msiexec も打たずに $false で止まる' @(
+        'False'
+        'winget が見つからない (昇格した側のアカウント: it-admin)'
+        'True'
+        '0'
+    ) {
+        $noWinget.Result
+        @($noWinget.Steps | Select-Object -Last 2)[0]
+        @($noWinget.Steps | Select-Object -Last 1)[0].Contains('Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe')
+        @($noWinget.Calls | Where-Object { $_.StartsWith('winget の時') -or $_.StartsWith('msiexec') }).Count
+    }
 
     $noName = Invoke-FixScenario -Installed (New-InstalledFacts -PackageName $null)
     Test-Case '登録された PackageName が読めなければ、msiexec を流さずに $false で止まり (サービスに触らない)、ディレクトリは消す' @(
@@ -1571,6 +1598,81 @@ Test-Case '管理者の子に、鍵の写し・ユーザーと送り元の写し
     $a = @($elevated.Args)
     $elevated.Result
     $a[$a.IndexOf('-KeysCopy') + 1]; $a[$a.IndexOf('-AllowCopy') + 1]; $a[$a.IndexOf('-AllowUser') + 1]; $a[$a.IndexOf('-KeysFrom') + 1]
+}
+
+# 普段のアカウントが管理者か・昇格し直す host・止めるときの行・昇格した側で winget が無いときの行 (Install-OpenSSH.ps1 と同じ形。細かい場合分けは
+# Install-OpenSSH.Tests.ps1 で見る)
+function New-TokenClaim { param([string]$Type, [string]$Value) [pscustomobject]@{ Type = $Type; Value = $Value } }
+Test-Case 'UAC で権限を落とした管理者 (deny-only の S-1-5-32-544) は管理者、普通のユーザーは管理者でない' 'True False' {
+    $admin = @((New-TokenClaim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid' 'S-1-1-0'), (New-TokenClaim 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/denyonlysid' 'S-1-5-32-544'))
+    $user = @((New-TokenClaim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid' 'S-1-5-32-545'), (New-TokenClaim 'http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid' 'S-1-5-32-544'))
+    "$(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $admin)) $(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $user))"
+}
+Test-Case '今のトークンを読む関数は、例外を出さずに真偽を返す (Windows でなければ読めないので管理者でない)' 'True True' {
+    $admin = Test-AccountAdmin
+    "$($admin -is [bool]) $(if ($IsWindows) { $true } else { -not $admin })"
+}
+$msixPwsh = 'C:\Program Files\WindowsApps\Microsoft.PowerShell_7.7.0.0_x64__8wekyb3d8bbwe\pwsh.exe'
+$msiPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+Test-Case '昇格し直す host: MSIX は MSI があれば MSI、無ければ管理者の PC は MSIX のまま・管理者でない PC は止める (空)。MSI はそのまま' "$msiPwsh|$msixPwsh||$msiPwsh" {
+    @(
+        (Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $true -AccountAdmin $false)
+        (Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $true)
+        (Select-ElevationHost -CurrentHost $msixPwsh -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $false)
+        (Select-ElevationHost -CurrentHost $msiPwsh -MsiPwsh $msiPwsh -MsiPwshExists $false -AccountAdmin $false)
+    ) -join '|'
+}
+Test-Case '止めるときは UAC を出さずに止めたことと、bootstrap を流し直すと MSI の PowerShell 7 が入ることを ※ で出す' "UAC は出さずに止めた (この pwsh は MSIX: $msixPwsh)|True" {
+    $lines = @(Format-ElevationStopNote -CurrentHost $msixPwsh -MsiPwsh $msiPwsh)
+    $bootstrap = $lines[1].Contains('管理者でない PC には MSI の PowerShell 7 が入る')
+    "$($lines[0])|$bootstrap"
+}
+Test-Case '昇格した側で winget が見つからなければ、そのアカウントと、Add-AppxPackage で登録する手を ※ で出す' 'winget が見つからない (昇格した側のアカウント: it-admin)|True' {
+    $lines = @(Format-WingetMissingNote -Account 'it-admin')
+    $how = $lines[1].Contains('Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe')
+    "$($lines[0])|$how"
+}
+
+# Invoke-Elevated: 選んだ host で起動し直す・止める・子がログを書かずに落ちたときの行。Get-Process・Test-AccountAdmin・Start-Process・Write-Host を
+# 偽物に替え、ProgramFiles (MSI の pwsh の置き場所) は一時ディレクトリにする
+function Invoke-ElevatedHostScenario {
+    param([string]$HostExe, [bool]$Admin = $true, [bool]$Msi = $false, [int]$ExitCode = 0)
+    $said = [System.Collections.Generic.List[string]]::new()
+    $started = [System.Collections.Generic.List[string]]::new()
+    function Get-Process { param($Id) [pscustomobject]@{ Path = $HostExe } }
+    function Test-AccountAdmin { $Admin }
+    function Start-Process {
+        param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$Wait, [switch]$PassThru)
+        $started.Add($FilePath)
+        [pscustomobject]@{ ExitCode = $ExitCode }
+    }
+    function Write-Host { param($Object, $ForegroundColor) $said.Add("$Object") }
+    $savedPf = $env:ProgramFiles
+    $root = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-elevated-host-$PID"
+    $env:ProgramFiles = Join-Path $root 'pf'
+    $msiPath = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    if ($Msi) {
+        New-Item -ItemType Directory -Force -Path (Join-Path (Join-Path $env:ProgramFiles 'PowerShell') '7') | Out-Null
+        Set-Content -LiteralPath $msiPath -Value ''
+    }
+    try {
+        $result = Invoke-Elevated -User 'alice' -CopyPath 'C:\k\authorized_keys' -StateDir (Join-Path $root 'state') -KeysFrom 'runner' -AllowPath 'C:\k\allow.json'
+    } finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        $env:ProgramFiles = $savedPf
+    }
+    [pscustomobject]@{ Result = $result; Started = (@($started) -join ','); Said = @($said); MsiPath = $msiPath }
+}
+Test-Case '管理者でない PC で今の pwsh が MSIX でも、MSI の pwsh があればそれで昇格し直す' 'True|True' {
+    $r = Invoke-ElevatedHostScenario -HostExe $msixPwsh -Admin $false -Msi $true; "$($r.Result)|$($r.Started -eq $r.MsiPath)"
+}
+Test-Case '管理者でない PC で今の pwsh が MSIX で MSI の pwsh が無ければ、UAC を出さずに止め、※ を出す' 'False||True' {
+    $r = Invoke-ElevatedHostScenario -HostExe $msixPwsh -Admin $false -Msi $false
+    "$($r.Result)|$($r.Started)|$(@($r.Said | Where-Object { $_.StartsWith('※ 普段のアカウントが管理者でない PC では') }).Count -eq 1)"
+}
+Test-Case '子がログを書かずに落ちたら、終了コードを出して失敗にする (MSIX の ※ は出さない)' 'False|True|0' {
+    $r = Invoke-ElevatedHostScenario -HostExe $msiPwsh -ExitCode -1073741515
+    "$($r.Result)|$(@($r.Said | Where-Object { $_ -eq '管理者の PowerShell がログを書く前に終わった (終了コード 0xC0000135)' }).Count -eq 1)|$(@($r.Said | Where-Object { $_.StartsWith('※') }).Count)"
 }
 
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。

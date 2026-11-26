@@ -1,35 +1,56 @@
 ﻿<#
 .SYNOPSIS
-新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・GitHub CLI・Visual Studio Build Tools・
-rustup と、dotfiles・dotfiles-private・claude-skills の clone) を揃える。
+新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・PowerShell 7・Visual Studio Build Tools・rustup と、
+dotfiles の clone) を揃える。-Private では、GitHub CLI とそのログイン・dotfiles-private・claude-skills の clone も揃える。
 
 .DESCRIPTION
 dotfiles の win/bootstrap/Install-Bootstrap.ps1。新しい Windows では GitHub の raw の URL からファイルに落として流し、clone した後は
 clone の中のものを流す (win/README.md の「bootstrap (新しい Windows で最初に流す)」。経緯は dotfiles-private の
-docs/adr/058_win_runner_bootstrap_*)。manifest では配らない。
+docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。manifest では配らない。
+
+形は 2 つ:
+  既定 (引数なし)  gh を入れず、ログインもしない (gh にログインできない PC・pollenjp の private な repo を取れない PC でも流せる)。public な
+                   dotfiles だけを匿名の HTTPS で clone し (origin は https://github.com/pollenjp/dotfiles.git)、雛形
+                   win/templates/host.minimum.toml を %USERPROFILE%\.config\dotfiles\host.toml に写す (あれば上書きしない。dotfiles-private の
+                   clone がある PC でも写さない: ホストの値はそこから引く)
+  -Private         gh を入れて github.com にログインし、dotfiles・dotfiles-private・claude-skills を gh の資格情報で clone する (origin は
+                   WSL と同じ ssh の URL)。ホストの値は dotfiles-private の win/hosts/ から引くので、雛形は写さない。ホストの値の道具の switch
+                   privateRepos を on にした PC で流す
 
 すること (この順):
   0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと cargo が
      作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
-  1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)
-  2. Git for Windows → GitHub CLI → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で winget から入れ、pin を
-     足す (winget upgrade --all から外す)。Build Tools には C++ のワークロード・MSVC (x64)・Windows SDK を入れ、入っている Build Tools に
-     足りないものは Visual Studio Installer で足す。rustup は MSVC の host (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を
-     止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に入れる)。GNU の host にしないのは、windows-sys 0.61
-     (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の toolchain に同梱のものだけでは作れないため
-  3. gh が github.com にログインしていなければ gh auth login を流す (一回限りのコードはクリップボードに入る。ブラウザーで認める)。
-     ログインの途中で Ctrl+C を押すと gh は止まるが、この script は止まらずに締めの表まで出し、終了コード 1 で終える
-  4. dotfiles・dotfiles-private・claude-skills を %USERPROFILE%\ghq\github.com\pollenjp\ に clone する。gh の資格情報で HTTPS を通す組
-     (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡し、origin は WSL と同じ ssh の URL のまま。core.autocrlf=false で、WSL が配った
-     ものとバイト列をそろえる。~/.gitconfig は書かない
+  1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)・普段のアカウントが管理者か (トークンに BUILTIN\Administrators が
+     あるか。UAC で権限を落としていても管理者。PowerShell 7 の入れ方を決める)
+  2. Git for Windows → (-Private なら GitHub CLI →) PowerShell 7 → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で
+     winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は入れ方を問わず (MSI・MSIX (Microsoft Store・winget)・PATH の
+     ほかの pwsh)、7.6.0 より古くなければ入っているとみなし、版も pin も揃えない。入っていなければ 7.6 (LTS) の版を winget で入れ、7.6 の線に
+     留める pin (7.6.*) を足す。普段のアカウントが管理者の PC は MSIX (ユーザー単位で入り、UAC は出ない)、管理者でない PC は MSI (マシン単位。
+     UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC は UAC で別の管理者のアカウントに昇格し、その側では
+     使う人ごとに登録される MSIX の pwsh を起こせないので、MSIX の pwsh しか無ければ MSI も入れる (--force で直に入れる。入っている MSIX があると、
+     winget の install は upgrade に替わって止まる)。Build Tools には C++ のワークロード・MSVC (x64)・
+     Windows SDK を入れ、入っている Build Tools に足りないものは Visual Studio Installer で足す。rustup は MSVC の host
+     (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より
+     先に入れる)。GNU の host にしないのは、windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の
+     toolchain に同梱のものだけでは作れないため
+  3. (-Private だけ) gh が github.com にログインしていなければ gh auth login を流す (一回限りのコードはクリップボードに入る。ブラウザーで
+     認める)。ログインの途中で Ctrl+C を押すと gh は止まるが、この script は止まらずに締めの表まで出し、終了コード 1 で終える
+  4. clone する。既定の形は dotfiles を資格情報なしの HTTPS で、-Private は dotfiles・dotfiles-private・claude-skills を gh の資格情報で
+     HTTPS を通す組 (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡して (origin は ssh の URL のまま)、%USERPROFILE%\ghq\github.com\pollenjp\ に
+     clone する。core.autocrlf=false で、WSL が配ったものとバイト列をそろえる。~/.gitconfig は書かない
+  5. (既定の形だけ) 雛形を手元のホストの値に写す (上の「形は 2 つ」)
+  6. 揃え終えたら (終了コード 0)、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) を出す。-Check では出さない (runner の
+     手順 bootstrap が毎回 -Check を流すので)
 
-入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち)。※ の上げ方の
+入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち。PowerShell 7 は版を
+固定した版と比べず、7.6.0 より古いときだけ ⚠ を出す。管理者でない PC で MSIX の pwsh しか無いときは、入っていないものとして MSI を足す)。※ の上げ方の
 winget upgrade には --include-pinned を付ける (付けないと、bootstrap が足した pin に止められる)。あるディレクトリと clone には触らない
 (確かめるだけ。取得もしない)。
 
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
 x64 でない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
-UAC は winget と Visual Studio Installer が道具ごとに出す。
+UAC は winget と Visual Studio Installer が道具ごとに出す (管理者の PC の PowerShell 7 (MSIX) と rustup はユーザー単位に入るので出ない。
+管理者でない PC の PowerShell 7 は MSI なので出る)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。新しい Windows には 5.1 しか
 無いので、PowerShell 7 にしか無い書き方を使わない (Install-Bootstrap.Tests.ps1 が見る)。
@@ -38,7 +59,13 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 Git for Windows (winget の Git.Git) の固定する版。版を変えるときはここの既定値を変える (nix/scripts/check-winget-version.sh git が読む)。
 
 .PARAMETER GhVersion
-GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。
+GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。入れるのは -Private のときだけ。
+
+.PARAMETER PwshVersion
+PowerShell 7 (winget の Microsoft.PowerShell) の、入っていないときに入れる版 (check-winget-version.sh pwsh が読む。管理者の PC は MSIX、
+管理者でない PC は MSI で入れる)。7.6 (LTS) の線の版にする: winget の 7.6 の MSIX は package Microsoft.PowerShell-LTS (Microsoft Store の
+PowerShell-LTS と同じ) で、7.7 からの MSIX は別の package Microsoft.PowerShell (Store の PowerShell と同じ) なので、7.6 の MSIX の上げ先に
+ならない。7.7 からは MSI も無いので、管理者でない PC に入れる MSI も 7.6 の線にしか無い。
 
 .PARAMETER VsBuildToolsVersion
 Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools) の固定する版 (check-winget-version.sh vs-buildtools が読む)。
@@ -46,6 +73,10 @@ Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTool
 .PARAMETER RustupVersion
 rustup (winget の Rustlang.Rustup) の固定する版 (check-winget-version.sh rustup が読む)。toolchain は入れない (Rust の runner の
 rust-toolchain.toml が決める)。
+
+.PARAMETER Private
+gh を入れて github.com にログインし、pollenjp の private な repo (dotfiles-private・claude-skills) も clone する形にする。ホストの値の
+道具の switch privateRepos を on にした PC で使う (runner の手順 bootstrap も、そのホストでは -Check -Private を流す)。
 
 .PARAMETER Check
 今の状態を出すだけで、何も変えない (SAC の警告は同じく最初に出す)。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ
@@ -55,8 +86,10 @@ rust-toolchain.toml が決める)。
 param(
     [string]$GitVersion = '2.56.0.4',
     [string]$GhVersion = '2.103.3',
+    [string]$PwshVersion = '7.6.10.0',
     [string]$VsBuildToolsVersion = '17.14.44',
     [string]$RustupVersion = '1.29.3',
+    [switch]$Private,
     [switch]$Check
 )
 
@@ -73,6 +106,10 @@ $script:RustHost = 'x86_64-pc-windows-msvc'
 $script:VsWorkload = 'Microsoft.VisualStudio.Workload.VCTools'
 $script:VsToolsComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 $script:VsSdkComponent = 'Microsoft.VisualStudio.Component.Windows11SDK.26100'
+
+# PowerShell 7 として認める一番古い版。入れ方 (MSI・MSIX・ほかの形) は問わない。7.4 (LTS) と 7.5 は 2026-11-10 でサポートが終わり、
+# dotfiles の PowerShell のテストも 7.6 の線で流す (dotfiles-private の ADR 111)
+$script:PwshMinimumVersion = '7.6.0'
 
 # git --version の出力 ("git version 2.56.0.windows.4") を winget の Git.Git の版にする。.windows.1 は 3 つの数 (2.56.0)、
 # ほかは 4 つ目に足す (2.56.0.4)。読めなければ $null
@@ -96,6 +133,117 @@ function Get-GhVersionFromOutput {
         if ("$line".Trim() -match '^gh version (\d+\.\d+\.\d+)(\s|$)') { return $Matches[1] }
     }
     $null
+}
+
+# pwsh --version の出力 ("PowerShell 7.6.10") から版 (3 つの数。7.6.10) を拾う。preview などは読まない。無ければ $null
+function Get-PwshVersionFromOutput {
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        if ("$line".Trim() -match '^PowerShell (\d+\.\d+\.\d+)$') { return $Matches[1] }
+    }
+    $null
+}
+
+# PowerShell 7 として認める版か ($script:PwshMinimumVersion より古くない)。読めない版は認めない
+function Test-PwshVersionAccepted {
+    param([string]$Version, [string]$Minimum = $script:PwshMinimumVersion)
+    $v = $null
+    $m = $null
+    if (-not [version]::TryParse("$Version", [ref]$v)) { return $false }
+    if (-not [version]::TryParse("$Minimum", [ref]$m)) { return $false }
+    $v -ge $m
+}
+
+# pwsh を探す場所。新しい窓の PATH (レジストリのマシン → ユーザーの Path。runner と herdr はこの PATH の pwsh を起こす) のディレクトリごとの
+# pwsh.exe を順に並べ、その後ろに MSI の既定の置き場所と MSIX の実行エイリアス (PATH から外れていても見つけるため) を足す。同じパス
+# (大文字小文字は問わない) は 1 つにする。OnPath は PATH のディレクトリから組んだものか。Windows のパスは字でつなぐ (Join-Path は、
+# テストを流す Linux の pwsh で C: のドライブを探しに行く)
+function Get-PwshCandidates {
+    param([string]$PathValue, [string]$MsiPath, [string]$AliasPath)
+    # @{} の鍵は大文字小文字を区別しない
+    $seen = @{}
+    foreach ($entry in ("$PathValue" -split ';')) {
+        $dir = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\')
+        if (-not $dir) { continue }
+        $path = "$dir\pwsh.exe"
+        if ($seen.ContainsKey($path)) { continue }
+        $seen[$path] = $true
+        [pscustomobject]@{ Path = $path; OnPath = $true }
+    }
+    foreach ($path in @($MsiPath, $AliasPath)) {
+        if ((-not $path) -or $seen.ContainsKey($path)) { continue }
+        $seen[$path] = $true
+        [pscustomobject]@{ Path = $path; OnPath = $false }
+    }
+}
+
+# pwsh の入れ方。WindowsApps の下 (MSIX の実行エイリアス・実体) は msix、MSI の既定の置き場所は msi、ほかは other
+function Get-PwshInstallKind {
+    param([string]$Path, [string]$MsiPath)
+    if ("$Path" -match '\\WindowsApps\\') { return 'msix' }
+    if ($MsiPath -and ("$Path" -eq $MsiPath)) { return 'msi' }
+    'other'
+}
+
+# 表の行に出す PowerShell 7 の入れ方 (MSIX・MSI。ほかの形はパス)
+function Format-PwshInstallKind {
+    param([string]$Kind, [string]$Path)
+    switch ($Kind) {
+        'msix' { return 'MSIX' }
+        'msi' { return 'MSI' }
+    }
+    $Path
+}
+
+# bootstrap が入れた PowerShell 7 に足す pin の版 (固定した版の線。7.6.10.0 → 7.6.*)。winget upgrade --all は、この線の中でだけ上げ、
+# 7.7 (MSI が無く、MSIX は別の package) へは上げない。読めなければ $null (pin を足さない)
+function Get-PwshPinVersion {
+    param([string]$Version)
+    if ("$Version" -match '^(\d+)\.(\d+)\.') { return "$($Matches[1]).$($Matches[2]).*" }
+    $null
+}
+
+# トークンのグループの SID。WindowsIdentity の Claims のうち、種類が有効なグループ (groupsid) か deny-only のグループ (denyonlysid) のものの
+# 値を、並びのまま返す。種類の名前空間は種類ごとに違う (groupsid は http://schemas.microsoft.com/ws/2008/06/identity/claims/、denyonlysid は
+# http://schemas.xmlsoap.org/ws/2005/05/identity/claims/) ので、最後の語で見る。WindowsIdentity.Groups は deny-only のグループを除く
+# (UAC で権限を落とした管理者の BUILTIN\Administrators が入らない) ので使わない
+function Select-TokenGroupSids {
+    param([object[]]$Claims)
+    foreach ($claim in @($Claims | Where-Object { $null -ne $_ })) {
+        if ("$($claim.Type)" -match '/(groupsid|denyonlysid)$') { "$($claim.Value)" }
+    }
+}
+
+# 普段のアカウントが管理者か (トークンのグループの SID の並びに BUILTIN\Administrators (S-1-5-32-544) があるか)。UAC で権限を落とした
+# 管理者のトークンでも deny-only のグループで入るので、管理者とみなす。管理者でない PC (UAC で別の管理者のアカウントの資格情報を入れて
+# 昇格する) には、PowerShell 7 を MSI で入れる
+function Test-AdministratorsSid {
+    param([string[]]$Sids)
+    @($Sids) -contains 'S-1-5-32-544'
+}
+
+# PowerShell 7 を入れるか。入っていないときと、普段のアカウントが管理者でない PC で MSIX でない pwsh (PATH のディレクトリ・MSI の置き場所) が
+# 無いとき (MSI を入れる。UAC で別の管理者のアカウントに昇格した側では、使う人ごとに登録される MSIX の pwsh を起こせないため)
+function Test-PwshInstallNeeded {
+    param($Package, [bool]$AccountAdmin)
+    if (-not $Package.Exists) { return $true }
+    (-not $AccountAdmin) -and (-not $Package.NonMsix)
+}
+
+# PowerShell 7 の MSI を --force で直に入れるか。pwsh がもう入っている (管理者でない PC で MSIX しか無い) ときだけ。winget の install は、
+# 入っている package (MSIX も Microsoft.PowerShell に結ばれる) が見つかると upgrade に替わり、--version が入っている版より新しくなければ止まり、
+# 新しくても入れ方 (MSIX → MSI) を替えない (winget-cli の InstallCommand.cpp・UpdateFlow.cpp。winget install --help の文: 既定では入っているかを
+# 見て upgrade を試み、--force で直に入れる)。入っていない PC には付けない (--force は安全に関わらない問題も越えて続ける意味も持つ)
+function Test-PwshForceInstall {
+    param($Package, [bool]$AccountAdmin)
+    [bool]$Package.Exists -and (Test-PwshInstallNeeded -Package $Package -AccountAdmin $AccountAdmin)
+}
+
+# PowerShell 7 の MSI に渡す property (winget の --custom。msiexec の引数の後ろに足される)。Microsoft Update の更新に入れない (どちらも
+# 既定は 1。ENABLE_MU=1 は Microsoft Update を自動更新に使う側へ入れる)。版の線は winget の pin で留め、Windows Update の設定にも触らない
+# (管理者でない PC は、管理する人が更新の設定を決めていることが多い)
+function Get-PwshMsiCustomArgument {
+    'USE_MU=0 ENABLE_MU=0'
 }
 
 # rustup --version の出力から rustup の版 ("rustup 1.29.3 (…)") を拾う。info の行や rustc の行は読まない。無ければ $null
@@ -239,38 +387,62 @@ function Get-WingetInstallArguments {
         '--disable-interactivity', '--version', $Version, '--accept-package-agreements') + @($Extra | Where-Object { $_ })
 }
 
+# winget pin add の引数。-Version を渡すと、その版の範囲 (7.6.* など) に留める pin (gating) にする。渡さなければ pin (pinning)
+function Get-WingetPinAddArguments {
+    param([string]$PackageId, [string]$Version)
+    $versionArgs = @()
+    if ($Version) { $versionArgs = @('--version', $Version) }
+    @('pin', 'add', '--id', $PackageId, '--exact') + $versionArgs + @('--accept-source-agreements', '--disable-interactivity')
+}
+
 # rustup-init に渡す引数 (winget の --custom。rustup-init の -y -q の後ろに足される)。MSVC の host にし、toolchain は入れない
 function Get-RustupInitArgument {
     "--default-host $script:RustHost --default-toolchain none"
 }
 
-# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)
+# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)。gh は -Private のときだけ。
+# AccountAdmin は普段のアカウントが管理者か (PowerShell 7 の入れ方を決める。Test-AccountAdmin)
 function Get-BootstrapPackages {
-    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [bool]$AccountAdmin)
     # パッケージ ID は 1 行ずつの変数に書く (nix/scripts/check-winget-version.sh がこの行を読む)
     $gitPackageId = 'Git.Git'
     $ghPackageId = 'GitHub.cli'
+    $pwshPackageId = 'Microsoft.PowerShell'
     $vsBuildToolsPackageId = 'Microsoft.VisualStudio.2022.BuildTools'
     $rustupPackageId = 'Rustlang.Rustup'
     $vsCustom = Get-VsInstallCustomArgument -Components @(Get-VsRequiredComponents)
     # Git は machine の scope (C:\Program Files\Git。インストーラーの選択肢は既定のまま)、gh は MSI (C:\Program Files\GitHub CLI。
-    # zip の portable もある)、rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
+    # zip の portable もある)、PowerShell 7 は普段のアカウントが管理者の PC なら MSIX (ユーザー単位。7.6 の winget の版は MSI もあるので、
+    # msix を名指しする)、管理者でない PC なら MSI (マシン単位。UAC で別の管理者のアカウントに昇格した側でも起こせる。Microsoft Update の
+    # 更新には入れない)、rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
     # Silent: gh の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに落ちる
-    # (Error 1925)。gh は --silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
-    # 数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。Git の installer は自分で昇格し、rustup は
-    # user に入るので --silent でよい
-    @(
+    # (Error 1925)。--silent を付けず、winget の既定 (/passive) で UAC を出させる (管理者でない PC の PowerShell 7 の MSI も同じ)。
+    # Build Tools も --silent を付けず (--passive)、数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。
+    # Git の installer は自分で昇格し、管理者の PC の PowerShell 7 (MSIX) と rustup は user に入るので --silent でよい
+    $pwshSilent = $true
+    $pwshArgs = @('--installer-type', 'msix')
+    if (-not $AccountAdmin) {
+        $pwshSilent = $false
+        $pwshArgs = @('--installer-type', 'wix', '--custom', (Get-PwshMsiCustomArgument))
+    }
+    $all = @(
         [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
         [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
+        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $pwshSilent; Args = $pwshArgs }
         [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom) }
         [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
     )
+    $all | Where-Object { $Private -or ($_.Name -ne 'gh') }
 }
 
-# clone する repo と置き場 (ghq の既定の root の下。後で ghq を入れても ghq root は同じ所を指す)
+# clone する repo と置き場 (ghq の既定の root の下。後で ghq を入れても ghq root は同じ所を指す)。既定の形は public な dotfiles だけを
+# 資格情報なしの HTTPS の URL で、-Private は 3 つを WSL と同じ ssh の URL で
 function Get-RepoTargets {
-    param([string]$GhqRoot)
+    param([string]$GhqRoot, [switch]$Private)
     $root = $GhqRoot.TrimEnd('\')
+    if (-not $Private) {
+        return [pscustomobject]@{ Name = 'dotfiles'; Url = 'https://github.com/pollenjp/dotfiles.git'; Directory = "$root\github.com\pollenjp\dotfiles" }
+    }
     foreach ($name in @('dotfiles', 'dotfiles-private', 'claude-skills')) {
         [pscustomobject]@{ Name = $name; Url = "git@github.com:pollenjp/$name.git"; Directory = "$root\github.com\pollenjp\$name" }
     }
@@ -300,6 +472,34 @@ function Get-GitCloneArguments {
         'clone', '-c', 'core.autocrlf=false', $Url, $Directory)
 }
 
+# 既定の形の clone の git の引数。github.com の credential helper を空にし (Git Credential Manager を呼ばない。public な repo は資格情報を
+# 求められない)、HTTPS の URL のまま clone する。clone -c core.autocrlf=false は、その repo の設定に残る
+function Get-GitAnonymousCloneArguments {
+    param([string]$Url, [string]$Directory)
+    @('-c', 'credential.https://github.com.helper=', 'clone', '-c', 'core.autocrlf=false', $Url, $Directory)
+}
+
+# 揃え終えたときに出す、次に打つコマンド (runner の dotfiles 関数を clone から読み込み、dotfiles apply を流す)。dotfiles apply の手順
+# powershell-profile が $PROFILE に読み込みの 1 行を足すので、2 回目からは新しい PowerShell で dotfiles を打てる。HostFile は手元の
+# ホストの値の置き場、HostFileExists はそれがあるか
+function Format-BootstrapNextSteps {
+    param([string]$DotfilesDir, [switch]$Private, [string]$HostFile, [bool]$HostFileExists)
+    # Windows のパスは字でつなぐ (Join-Path は、テストを流す Linux の pwsh で C: のドライブを探しに行く)
+    $ps1 = "$($DotfilesDir.TrimEnd('\'))\win\powershell\dotfiles.ps1" -replace "'", "''"
+    ''
+    '次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):'
+    "  . '$ps1'"
+    '  dotfiles apply'
+    if ($Private) {
+        'ホストの値は dotfiles-private の win\hosts\<ユーザー>@<PC>.toml。無ければ dotfiles check が ⚠ を出し、apply は止まる (先に書く。書き方は dotfiles の win\README.md の「ホストの値」)'
+        if ($HostFileExists) {
+            "※ 手元のホストの値 ($HostFile) もある。dotfiles-private の win\hosts\ のファイルもあると、dotfiles apply は止まる (どちらを使うか決まらない)。dotfiles-private の値を使うなら、手元の host.toml を退ける"
+        }
+    } else {
+        "ホストの値は $HostFile (minimum の雛形を写したもの)。使う道具は [tools] に 1 行ずつ足す (書き方は dotfiles の win\README.md の「ホストの値」)"
+    }
+}
+
 # gh auth login の引数。ブラウザーで認める。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
 # (https を選ぶと、書くかを聞いてくる)。ssh の鍵は作らない・上げない。一回限りのコードは gh がクリップボードに入れる (--clipboard。
 # 手で写そうとして Ctrl+C を押すと、gh が止まる)
@@ -312,6 +512,41 @@ function Get-GhLoginArguments {
 function New-BootstrapRow {
     param([string]$Label, [string]$Text, [string]$Kind, [string]$Note)
     [pscustomobject]@{ Label = $Label; Text = $Text; Kind = $Kind; Note = $Note }
+}
+
+# PowerShell 7 の行。入れ方を問わず、$script:PwshMinimumVersion より古くなければ揃っている (固定した版と比べず、pin も見ない。Microsoft
+# Store が上げる MSIX もあるため)。PATH の外でだけ見つかったときは、runner と herdr が起こせないので直すことにする。
+# 普段のアカウントが管理者でない PC (AccountAdmin が $false) は、入れるのが MSI で、MSIX でない pwsh (PATH のディレクトリ・MSI の置き場所) が
+# 無ければ入っていないもの (流せば MSI を足す) にする (Test-PwshInstallNeeded)
+function Get-PwshRow {
+    param($Package, [bool]$AccountAdmin)
+    $msiNote = '※ 普段のアカウントが管理者でない PC では、UAC で別の管理者のアカウントの資格情報を入れて昇格する。MSIX の PowerShell 7 は使う人ごとに登録されるので、昇格した側 (そのアカウント) では起こせず、Install-OpenSSH・Install-Sshd が自分を昇格し直せない。MSI はマシン単位に入り、どのアカウントからも起こせる (win/README.md の「PowerShell 7 の MSIX の限り」)'
+    if (-not $Package.Exists) {
+        if (-not $AccountAdmin) {
+            return New-BootstrapRow $Package.Title "入っていない → $($Package.Target) を winget の MSI で入れる (管理者でない PC。マシン単位に入り、UAC で管理者の資格情報を入れる)" 'missing' $msiNote
+        }
+        return New-BootstrapRow $Package.Title "入っていない → $($Package.Target) を winget の MSIX で入れる (ユーザー単位。UAC は出ない)" 'missing' ''
+    }
+    $how = Format-PwshInstallKind -Kind $Package.Kind -Path $Package.Path
+    if (Test-PwshInstallNeeded -Package $Package -AccountAdmin $AccountAdmin) {
+        # 管理者でない PC で MSIX しか無い。古い・PATH の外でも、MSI を足せばマシンの PATH の MSI が先に当たる
+        $found = "$($Package.Installed)"
+        if (-not $found) { $found = '版が読めない' }
+        return New-BootstrapRow $Package.Title "$found ($how) → 管理者でない PC なので、MSI の $($Package.Target) も入れる (UAC で管理者の資格情報を入れる)" 'missing' $msiNote
+    }
+    # 外してから流し直すときに入る形 (管理者の PC は MSIX、管理者でない PC は MSI)
+    $reinstall = 'winget の MSIX'
+    if (-not $AccountAdmin) { $reinstall = 'winget の MSI' }
+    if (-not $Package.Installed) {
+        return New-BootstrapRow $Package.Title "入っているが版が読めない ($how)" 'manual' "※ PowerShell 7 ($($Package.Path)) の版が読めない。--version で確かめる ($script:PwshMinimumVersion より古くなければ、入れ方は問わない)"
+    }
+    if (-not (Test-PwshVersionAccepted -Version $Package.Installed)) {
+        return New-BootstrapRow $Package.Title "$($Package.Installed) ($how) → $script:PwshMinimumVersion より古い" 'manual' "※ PowerShell 7 ($($Package.Path)) が古い。入れた形のまま上げる (MSI は winget upgrade --id $($Package.PackageId) --exact --version $($Package.Target) --include-pinned --installer-type wix で、UAC が出る。Microsoft Store の MSIX は Store のライブラリで更新する) か、外してから流し直す ($reinstall で $($Package.Target) を入れる)"
+    }
+    if (-not $Package.OnPath) {
+        return New-BootstrapRow $Package.Title "$($Package.Installed) ($how) → PATH に無い" 'manual' "※ PowerShell 7 ($($Package.Path)) のディレクトリが PATH に無い (runner と herdr は PATH の pwsh を起こす)。ユーザーの環境変数 Path に足す"
+    }
+    New-BootstrapRow $Package.Title "$($Package.Installed) ($how)" '' ''
 }
 
 # 状態から表の行を作る。状態の形は Get-BootstrapState (テストでは New-State) が返すもの
@@ -336,6 +571,10 @@ function Get-BootstrapRows {
         New-BootstrapRow 'CPU' "$($State.Arch) → 対象外 (x64 だけ。Rust は MSVC の host $script:RustHost を使う)" 'blocker' ''
     }
     foreach ($p in @($State.Packages)) {
+        if ($p.Name -eq 'pwsh') {
+            Get-PwshRow -Package $p -AccountAdmin ([bool]$State.AccountAdmin)
+            continue
+        }
         if (-not $p.Exists) {
             New-BootstrapRow $p.Title "入っていない → $($p.Target) を入れる" 'missing' ''
             continue
@@ -367,12 +606,15 @@ function Get-BootstrapRows {
             }
         }
     }
-    if ($null -eq $State.GhLoggedIn) {
-        New-BootstrapRow 'gh のログイン' 'gh を入れた後にログインする (ブラウザーで認める)' 'missing' ''
-    } elseif (-not $State.GhLoggedIn) {
-        New-BootstrapRow 'gh のログイン' 'していない → gh auth login で github.com にログインする (ブラウザーで認める)' 'fix' ''
-    } else {
-        New-BootstrapRow 'gh のログイン' 'github.com にログインしている' '' ''
+    # gh のログインは -Private の形だけ (既定の形は gh を使わない)
+    if ($State.Private) {
+        if ($null -eq $State.GhLoggedIn) {
+            New-BootstrapRow 'gh のログイン' 'gh を入れた後にログインする (ブラウザーで認める)' 'missing' ''
+        } elseif (-not $State.GhLoggedIn) {
+            New-BootstrapRow 'gh のログイン' 'していない → gh auth login で github.com にログインする (ブラウザーで認める)' 'fix' ''
+        } else {
+            New-BootstrapRow 'gh のログイン' 'github.com にログインしている' '' ''
+        }
     }
     foreach ($r in @($State.Repos)) {
         switch ($r.State) {
@@ -382,6 +624,16 @@ function Get-BootstrapRows {
             'other-origin' { New-BootstrapRow $r.Name "origin が $($r.Origin) ($($r.Url) ではない)" 'manual' "※ $($r.Directory) は別の repo の clone。退けて流し直すと clone する" }
             'autocrlf' { New-BootstrapRow $r.Name "core.autocrlf が $($r.AutoCrlf) (false でないと、WSL が配ったものとバイト列がずれる)" 'manual' "※ $($r.Directory) を退けて流し直すと、core.autocrlf=false で clone し直す" }
             default { New-BootstrapRow $r.Name $r.Directory '' '' }
+        }
+    }
+    # 手元のホストの値 (既定の形だけ。-Private はホストの値を dotfiles-private から引く)
+    if ((-not $State.Private) -and $State.HostFile) {
+        if ($State.HostFile.Exists) {
+            New-BootstrapRow 'ホストの値 (手元)' $State.HostFile.Path '' ''
+        } elseif ($State.HostFile.PrivateClone) {
+            New-BootstrapRow 'ホストの値 (手元)' '写さない (dotfiles-private の clone がある。ホストの値はそこから引く)' '' ''
+        } else {
+            New-BootstrapRow 'ホストの値 (手元)' "無い → 雛形 (win\templates\host.minimum.toml) を $($State.HostFile.Path) に写す" 'missing' ''
         }
     }
 }
@@ -454,14 +706,17 @@ function Get-OsArchitecture {
     "$a".ToUpperInvariant()
 }
 
-# 道具の置き場所。Git と gh は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、
-# vswhere と Visual Studio Installer は Program Files (x86) の下。
+# 道具の置き場所。Git・gh は machine の scope の既定の置き場所、PowerShell 7 は MSI の既定の置き場所と MSIX の実行エイリアス (どちらも
+# PATH の pwsh の後ろに見る。Get-PwshCandidates)、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、vswhere と Visual Studio
+# Installer は Program Files (x86) の下。手元のホストの値は %USERPROFILE%\.config\dotfiles\host.toml。
 # 32 ビットの PowerShell では ProgramFiles が (x86) を指すので、64 ビットの方 (ProgramW6432) を先に見る
 function Get-BootstrapPaths {
     $cargoHome = $env:CARGO_HOME
     if (-not $cargoHome) { $cargoHome = Join-Path $env:USERPROFILE '.cargo' }
     $rustupHome = $env:RUSTUP_HOME
     if (-not $rustupHome) { $rustupHome = Join-Path $env:USERPROFILE '.rustup' }
+    $localAppData = $env:LOCALAPPDATA
+    if (-not $localAppData) { $localAppData = Join-Path $env:USERPROFILE 'AppData\Local' }
     $programFiles = $env:ProgramW6432
     if (-not $programFiles) { $programFiles = $env:ProgramFiles }
     $programFilesX86 = ${env:ProgramFiles(x86)}
@@ -470,11 +725,14 @@ function Get-BootstrapPaths {
     [pscustomobject]@{
         Git            = Join-Path $programFiles 'Git\cmd\git.exe'
         Gh             = Join-Path $programFiles 'GitHub CLI\gh.exe'
+        Pwsh           = Join-Path $programFiles 'PowerShell\7\pwsh.exe'
+        PwshAlias      = Join-Path $localAppData 'Microsoft\WindowsApps\pwsh.exe'
         Rustup         = Join-Path $cargoHome 'bin\rustup.exe'
         RustupSettings = Join-Path $rustupHome 'settings.toml'
         VsWhere        = Join-Path $installer 'vswhere.exe'
         VsSetup        = Join-Path $installer 'setup.exe'
         GhqRoot        = Join-Path $env:USERPROFILE 'ghq'
+        HostFile       = Join-Path $env:USERPROFILE '.config\dotfiles\host.toml'
     }
 }
 
@@ -539,10 +797,14 @@ function Invoke-GitClone {
     }
 }
 
+# 新しい窓の PATH (レジストリのマシン → ユーザーの Path を ; でつないだもの)
+function Get-RegistryPathValue {
+    (@([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }) -join ';'
+}
+
 # PATH をレジストリ (マシン → ユーザー) から読み直す。winget で入れた道具を、このプロセスと、ここから起こす git などから引けるように
 function Update-ProcessPath {
-    $parts = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }
-    $env:Path = $parts -join ';'
+    $env:Path = Get-RegistryPathValue
 }
 
 # 入っている Build Tools に部品を足す (Visual Studio Installer。UAC が出る)。終了コードを返す (3010 は再起動待ちで、足せている)。
@@ -626,6 +888,22 @@ function Invoke-GhLogin {
     }
 }
 
+# 雛形 (clone の win\templates\host.minimum.toml) を手元のホストの値に写す (親のディレクトリを作る)。copied (写した)・no-template (clone に
+# 雛形が無い。古い clone)・failed (写せなかった) を返す
+function Copy-HostTemplate {
+    param([string]$Template, [string]$Destination)
+    if (-not (Test-Path -LiteralPath $Template -PathType Leaf)) { return 'no-template' }
+    try {
+        $parent = Split-Path -Parent $Destination
+        if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+        Copy-Item -LiteralPath $Template -Destination $Destination -ErrorAction Stop
+        return 'copied'
+    } catch {
+        Write-Host "雛形を写せなかった ($Destination): $($_.Exception.Message)"
+        return 'failed'
+    }
+}
+
 # clone の置き場の親ディレクトリを作る (%USERPROFILE%\ghq\github.com\pollenjp)
 function New-CloneParent {
     param([string]$Directory)
@@ -637,6 +915,19 @@ function New-CloneParent {
 function Test-Elevated {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     (New-Object Security.Principal.WindowsPrincipal $id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# 普段のアカウントが管理者か。今のトークンのグループの SID (WindowsIdentity の Claims。UAC で権限を落としたトークンでも、BUILTIN\Administrators は
+# deny-only のグループで入る) から決める (Test-AdministratorsSid)。読めなければ (Windows でない・例外) 管理者でないとみなす (MSI はどちらの PC
+# でも動く)
+function Test-AccountAdmin {
+    $sids = @()
+    try {
+        $sids = @(Select-TokenGroupSids -Claims @([Security.Principal.WindowsIdentity]::GetCurrent().Claims))
+    } catch {
+        $sids = @()
+    }
+    Test-AdministratorsSid -Sids $sids
 }
 
 # Smart App Control の値を、レジストリと Defender から読む (どちらも管理者は要らない。読めなければ $null)
@@ -711,9 +1002,10 @@ function Get-RepoState {
     [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf }
 }
 
-# 今の状態を読む (何も変えない。管理者は要らない)
+# 今の状態を読む (何も変えない。管理者は要らない)。-Private なら gh のログインを、既定の形なら手元のホストの値を読む。AccountAdmin は
+# 普段のアカウントが管理者か (Test-AccountAdmin で 1 回読んだもの。状態に持たせ、PowerShell 7 の行を決める)
 function Get-BootstrapState {
-    param([object[]]$Packages, $Paths, [string]$Arch)
+    param([object[]]$Packages, $Paths, [string]$Arch, [switch]$Private, [bool]$AccountAdmin)
     $states = foreach ($p in $Packages) {
         $exists = $false
         $installed = $null
@@ -721,6 +1013,10 @@ function Get-BootstrapState {
         $lacking = @()
         $selfUpdateDisabled = $true
         $defaultHost = $null
+        $foundPath = $null
+        $onPath = $false
+        $kind = $null
+        $nonMsix = $false
         switch ($p.Name) {
             'git' {
                 $exists = Test-Path -LiteralPath $Paths.Git -PathType Leaf
@@ -729,6 +1025,25 @@ function Get-BootstrapState {
             'gh' {
                 $exists = Test-Path -LiteralPath $Paths.Gh -PathType Leaf
                 if ($exists) { $installed = Get-GhVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Gh -Arguments @('--version')).Lines }
+            }
+            'pwsh' {
+                # 入れ方を問わず、新しい窓の PATH で先に当たる pwsh を読む (PATH に無ければ、MSI の置き場所・MSIX の実行エイリアス)。
+                # 後ろの候補も見て、MSIX でない pwsh (PATH のほかの形・MSI) があるかを控える (管理者でない PC は、無ければ MSI を足す)
+                foreach ($c in @(Get-PwshCandidates -PathValue (Get-RegistryPathValue) -MsiPath $Paths.Pwsh -AliasPath $Paths.PwshAlias)) {
+                    if (-not (Test-Path -LiteralPath $c.Path -PathType Leaf)) { continue }
+                    $candidateKind = Get-PwshInstallKind -Path $c.Path -MsiPath $Paths.Pwsh
+                    if (-not $exists) {
+                        $exists = $true
+                        $foundPath = $c.Path
+                        $onPath = $c.OnPath
+                        $kind = $candidateKind
+                        $installed = Get-PwshVersionFromOutput -Lines (Invoke-Native -FilePath $c.Path -Arguments @('--version')).Lines
+                    }
+                    if ($candidateKind -ne 'msix') {
+                        $nonMsix = $true
+                        break
+                    }
+                }
             }
             'vs-buildtools' {
                 $instance = Get-VsBuildToolsInstance -Json (Read-VsWhere -VsWhere $Paths.VsWhere) -Major 17
@@ -751,31 +1066,44 @@ function Get-BootstrapState {
                 }
             }
         }
+        # PowerShell 7 の pin は見ない (入れ方を問わず認める。bootstrap が入れたときだけ、入れた直後に足す)
         $pinned = $false
-        if ($exists) {
+        if ($exists -and ($p.Name -ne 'pwsh')) {
             $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $p.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
             $pinned = Test-WingetPinned -Lines $pins.Lines -PackageId $p.PackageId
         }
         [pscustomobject]@{
             Name = $p.Name; Title = $p.Title; PackageId = $p.PackageId; Target = $p.Version; Exists = [bool]$exists; Installed = $installed
             Pinned = $pinned; InstallPath = $installPath; MissingComponents = $lacking; SelfUpdateDisabled = [bool]$selfUpdateDisabled
-            DefaultHost = $defaultHost
+            DefaultHost = $defaultHost; Path = $foundPath; OnPath = [bool]$onPath; Kind = $kind; NonMsix = [bool]$nonMsix
         }
     }
     $states = @($states)
     $git = @($states | Where-Object { $_.Name -eq 'git' })[0]
-    $gh = @($states | Where-Object { $_.Name -eq 'gh' })[0]
-    # gh が無ければ $null (入れた後にログインする)。gh auth status は token を GitHub に確かめる (0 = ログインしている)
+    # gh のログインは -Private の形だけ読む。gh が無ければ $null (入れた後にログインする)。gh auth status は token を GitHub に確かめる
+    # (0 = ログインしている)
     $loggedIn = $null
-    if ($gh.Exists) { $loggedIn = ((Invoke-Native -FilePath $Paths.Gh -Arguments @('auth', 'status', '--hostname', 'github.com')).ExitCode -eq 0) }
-    $repos = foreach ($t in @(Get-RepoTargets -GhqRoot $Paths.GhqRoot)) { Get-RepoState -Target $t -GitPath $Paths.Git -HaveGit $git.Exists }
+    if ($Private) {
+        $gh = @($states | Where-Object { $_.Name -eq 'gh' })[0]
+        if ($gh.Exists) { $loggedIn = ((Invoke-Native -FilePath $Paths.Gh -Arguments @('auth', 'status', '--hostname', 'github.com')).ExitCode -eq 0) }
+    }
+    # 手元のホストの値と、dotfiles-private の clone があるか (既定の形は、どちらも無ければ雛形を写す。-Private は、手元の値があれば締めで知らせる)
+    $hostFile = [pscustomobject]@{
+        Path         = $Paths.HostFile
+        Exists       = [bool](Test-Path -LiteralPath $Paths.HostFile)
+        PrivateClone = [bool](Test-Path -LiteralPath (Join-Path $Paths.GhqRoot 'github.com\pollenjp\dotfiles-private'))
+    }
+    $repos = foreach ($t in @(Get-RepoTargets -GhqRoot $Paths.GhqRoot -Private:$Private)) { Get-RepoState -Target $t -GitPath $Paths.Git -HaveGit $git.Exists }
     [pscustomobject]@{
-        Elevated   = [bool](Test-Elevated)
-        Arch       = $Arch
-        Sac        = Get-BootstrapSac
-        Packages   = $states
-        GhLoggedIn = $loggedIn
-        Repos      = @($repos)
+        Elevated     = [bool](Test-Elevated)
+        AccountAdmin = [bool]$AccountAdmin
+        Arch         = $Arch
+        Sac          = Get-BootstrapSac
+        Private      = [bool]$Private
+        Packages     = $states
+        GhLoggedIn   = $loggedIn
+        Repos        = @($repos)
+        HostFile     = $hostFile
     }
 }
 
@@ -799,8 +1127,17 @@ function Write-Tail {
     $Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
 }
 
+# 揃え終えたときの、次に打つコマンドを出す (dotfiles の clone の場所と、手元のホストの値は状態から引く)
+function Write-BootstrapNextSteps {
+    param($State)
+    $dotfiles = @($State.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
+    foreach ($line in @(Format-BootstrapNextSteps -DotfilesDir $dotfiles.Directory -Private:$State.Private -HostFile $State.HostFile.Path -HostFileExists $State.HostFile.Exists)) {
+        Write-Host $line
+    }
+}
+
 function Invoke-InstallBootstrap {
-    param([string]$GitVersion, [string]$GhVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Check)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [switch]$Check)
     # 最初に SAC を確かめ、オフでなければ警告して続ける (止めない。オフにするのはユーザー)
     $sacWarning = @(Format-SacWarning -Sac (Get-BootstrapSac))
     if ($sacWarning.Count -gt 0) {
@@ -812,11 +1149,17 @@ function Invoke-InstallBootstrap {
         return 2
     }
     $arch = Get-OsArchitecture
-    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion)
+    # 普段のアカウントが管理者か (1 回だけ読む)。PowerShell 7 の入れ方 (管理者の PC は MSIX、管理者でない PC は MSI) と表の行を決める
+    $accountAdmin = [bool](Test-AccountAdmin)
+    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -AccountAdmin $accountAdmin)
     $paths = Get-BootstrapPaths
-    Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1)'
+    if ($Private) {
+        Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1 -Private。gh で github.com にログインし、dotfiles・dotfiles-private・claude-skills を clone する)'
+    } else {
+        Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1。gh を使わず、public な dotfiles だけを clone する。private な repo も使う PC は -Private)'
+    }
 
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
     $rows = @(Get-BootstrapRows -State $state)
     Write-BootstrapRows -Rows $rows
     $code = Get-BootstrapExitCode -Rows $rows
@@ -829,6 +1172,7 @@ function Invoke-InstallBootstrap {
     }
     if ($code -eq 0) {
         Write-Host '揃っている。何もしない'
+        Write-BootstrapNextSteps -State $state
         return 0
     }
     # 止める理由 (管理者の PowerShell・x64 でない CPU) があれば、何も変えない
@@ -837,14 +1181,22 @@ function Invoke-InstallBootstrap {
         return 1
     }
 
-    # 1. 入っていない道具を、固定した版で入れる (入れた順に PATH を読み直す)
+    # 1. 入っていない道具を、固定した版で入れる (入れた順に PATH を読み直す)。PowerShell 7 は、管理者でない PC で MSIX しか無ければ MSI も入れる
     foreach ($p in $packages) {
         $s = @($state.Packages | Where-Object { $_.Name -eq $p.Name })[0]
-        if ($s.Exists) { continue }
-        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $p.Args)
+        if ($p.Name -eq 'pwsh') {
+            if (-not (Test-PwshInstallNeeded -Package $s -AccountAdmin $accountAdmin)) { continue }
+        } elseif ($s.Exists) {
+            continue
+        }
+        $extra = @($p.Args)
+        # MSIX しか無い管理者でない PC で MSI を足すときは、入っている MSIX に引かれて upgrade に替わらないよう、直に入れる
+        if (($p.Name -eq 'pwsh') -and (Test-PwshForceInstall -Package $s -AccountAdmin $accountAdmin)) { $extra += '--force' }
+        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $extra)
         Write-Host ''
         Write-Host "winget $($arguments -join ' ')"
         if ($p.Name -eq 'vs-buildtools') { Write-Host '  (Build Tools は数 GB を落として入れるので、10 分以上かかることがある。UAC と進み具合の窓が出る)' }
+        if (($p.Name -eq 'pwsh') -and (-not $accountAdmin)) { Write-Host '  (管理者でない PC なので、PowerShell 7 は MSI (マシン単位) で入れる。UAC で管理者の資格情報を入れる)' }
         $result = Invoke-Winget -Arguments $arguments
         Write-Tail -Lines $result.Lines
         if ($result.ExitCode -ne 0) {
@@ -854,15 +1206,28 @@ function Invoke-InstallBootstrap {
                 Write-Host "$($p.Title) のインストーラーが取り消された (UAC で「はい」を押さなかった・窓を閉じた)。流し直すと、もう一度入れる" -ForegroundColor Yellow
             }
         }
+        # PowerShell 7 は、入れたときだけ固定した版の線に留める pin (gating) を足す (MSIX も MSI も。ほかの形で入っていた PowerShell 7 には
+        # 足さない。線の中の新しい版は winget upgrade --all でも Microsoft Store でも上がってよい)。MSIX と MSI が並んで入っていても、--id を
+        # 渡した pin add は入っているものを探さず、available の package (ID と source) に付けるので、1 つに決められずに落ちることは無い
+        # (winget-cli の PinCommand.cpp)
+        if (($p.Name -eq 'pwsh') -and ($result.ExitCode -eq 0)) {
+            $pinVersion = Get-PwshPinVersion -Version $p.Version
+            if ($pinVersion) {
+                $pin = Invoke-Winget -Arguments (Get-WingetPinAddArguments -PackageId $p.PackageId -Version $pinVersion)
+                if ($pin.ExitCode -eq 0) { Write-Host "$($p.Title): winget pin を足した ($pinVersion に留める。winget upgrade --all は 7.7 へ上げない)" }
+                else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $p.Title, $pin.ExitCode) }
+            }
+        }
         Update-ProcessPath
     }
 
-    # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す (PowerShell 7 の pin は
+    # 1 で入れたときだけ)
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
     foreach ($s in @($state.Packages)) {
         if (-not $s.Exists) { continue }
-        if (-not $s.Pinned) {
-            $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $s.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ((-not $s.Pinned) -and ($s.Name -ne 'pwsh')) {
+            $pin = Invoke-Winget -Arguments (Get-WingetPinAddArguments -PackageId $s.PackageId)
             if ($pin.ExitCode -eq 0) { Write-Host "$($s.Title): winget pin を足した (winget upgrade --all から外れる)" }
             else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $s.Title, $pin.ExitCode) }
         }
@@ -885,48 +1250,83 @@ function Invoke-InstallBootstrap {
         }
     }
 
-    # 3. gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す。
+    # 3. (-Private だけ) gh が github.com にログインしていなければ、ログインする (ブラウザーで認める)。したら読み直す。
     # 途中で止めても (Ctrl+C)、ここで止まらずに読み直しと締めの表まで流し、終了コード 1 で終える
-    $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
-    if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
-        Write-Host ''
-        Write-Host 'gh を github.com にログインさせる。一回限りのコードはクリップボードに入るので、Enter で開いたブラウザーに貼り付けて認める (Ctrl+C は押さない。gh が止まる)'
-        $login = Invoke-GhLogin -GhPath $paths.Gh
-        if ($login -ne 0) {
-            Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
+    if ($Private) {
+        $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+        if ($gh.Exists -and ($state.GhLoggedIn -eq $false)) {
+            Write-Host ''
+            Write-Host 'gh を github.com にログインさせる。一回限りのコードはクリップボードに入るので、Enter で開いたブラウザーに貼り付けて認める (Ctrl+C は押さない。gh が止まる)'
+            $login = Invoke-GhLogin -GhPath $paths.Gh
+            if ($login -ne 0) {
+                Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
+            }
+            $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
         }
-        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
     }
 
-    # 4. 無い repo を clone する (gh の資格情報で HTTPS。origin は ssh の URL のまま)
+    # 4. 無い repo を clone する。-Private は gh の資格情報で HTTPS を通し (origin は ssh の URL のまま)、既定の形は public な dotfiles を
+    # 資格情報なしの HTTPS で
     $missingRepos = @($state.Repos | Where-Object { $_.State -eq 'missing' })
     if ($missingRepos.Count -gt 0) {
         $git = @($state.Packages | Where-Object { $_.Name -eq 'git' })[0]
-        $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
-        if (-not ($git.Exists -and $gh.Exists -and ($state.GhLoggedIn -eq $true))) {
+        $ready = $git.Exists
+        if ($Private) {
+            $gh = @($state.Packages | Where-Object { $_.Name -eq 'gh' })[0]
+            $ready = $git.Exists -and $gh.Exists -and ($state.GhLoggedIn -eq $true)
+        }
+        if (-not $ready) {
             Write-Host ''
-            Write-Host 'Git for Windows か gh が入っていない・gh が github.com にログインしていないので、clone しない'
+            if ($Private) {
+                Write-Host 'Git for Windows か gh が入っていない・gh が github.com にログインしていないので、clone しない'
+            } else {
+                Write-Host 'Git for Windows が入っていないので、clone しない'
+            }
         } else {
             foreach ($r in $missingRepos) {
                 New-CloneParent -Directory $r.Directory
                 Write-Host ''
                 Write-Host "clone: $($r.Url) → $($r.Directory)"
-                $result = Invoke-GitClone -GitPath $paths.Git -Arguments @(Get-GitCloneArguments -GhPath $paths.Gh -Url $r.Url -Directory $r.Directory)
+                if ($Private) {
+                    $cloneArgs = @(Get-GitCloneArguments -GhPath $paths.Gh -Url $r.Url -Directory $r.Directory)
+                } else {
+                    $cloneArgs = @(Get-GitAnonymousCloneArguments -Url $r.Url -Directory $r.Directory)
+                }
+                $result = Invoke-GitClone -GitPath $paths.Git -Arguments $cloneArgs
                 if ($result.ExitCode -ne 0) {
                     Write-Tail -Lines $result.Lines
-                    Write-Host "clone が失敗した (終了コード $($result.ExitCode))。gh auth status で、この repo を読めるアカウントか確かめる"
+                    if ($Private) {
+                        Write-Host "clone が失敗した (終了コード $($result.ExitCode))。gh auth status で、この repo を読めるアカウントか確かめる"
+                    } else {
+                        Write-Host "clone が失敗した (終了コード $($result.ExitCode))。github.com につながるか確かめる (プロキシの内側なら、git の http.proxy)"
+                    }
                 }
+            }
+        }
+    }
+
+    # 5. (既定の形だけ) 手元のホストの値が無く、dotfiles-private の clone も無ければ、clone の雛形を写す (あれば上書きしない)
+    if (-not $Private) {
+        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+        $dotfiles = @($state.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
+        if ((-not $state.HostFile.Exists) -and (-not $state.HostFile.PrivateClone) -and ($dotfiles.State -eq 'ok')) {
+            $template = "$($dotfiles.Directory.TrimEnd('\'))\win\templates\host.minimum.toml"
+            Write-Host ''
+            switch (Copy-HostTemplate -Template $template -Destination $state.HostFile.Path) {
+                'copied' { Write-Host "ホストの値の雛形を写した: $template → $($state.HostFile.Path) (設定グループ minimum。使う道具は [tools] に足す)" }
+                'no-template' { Write-Host "dotfiles の clone に雛形が無い ($template)。clone が古いなら進めてから流し直す" -ForegroundColor Yellow }
             }
         }
     }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch
+    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
     $rows = @(Get-BootstrapRows -State $after)
     Write-BootstrapRows -Rows $rows
     if ((Get-BootstrapExitCode -Rows $rows) -eq 0) {
         Write-Host '揃った'
+        Write-BootstrapNextSteps -State $after
         return 0
     }
     Write-BootstrapVerdict -Rows $rows
@@ -943,7 +1343,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     Set-StrictMode -Version Latest
     $exitCode = $null
     try {
-        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Check:$Check
+        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -Check:$Check
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

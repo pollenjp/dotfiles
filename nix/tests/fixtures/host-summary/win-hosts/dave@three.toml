@@ -1,11 +1,13 @@
 # nix/tests/host-summary.nix の作り物 (dotfiles-private の win/hosts/<Windows のユーザー名>@<PC の名前>.toml の形)。
 # hosts/carol@three.nix と同じ PC (three) の Windows。minimum のグループを選び、Windows の ntn を足し、1Password を足さずに
-# SSH の中継を on にした (効く条件の onePassword が off なので効かない)。鍵とアドレスは作り物
+# SSH の中継を on にした (効く条件の onePassword が off なので効かない)。中継に要る privateRepos (runner だけが読む道具) は足した。
+# 鍵とアドレスは作り物
 group = "minimum"
 
 [tools]
 windowsNtn = true
 opReasonSshRelay = true
+privateRepos = true
 
 [runner]
 enable = true

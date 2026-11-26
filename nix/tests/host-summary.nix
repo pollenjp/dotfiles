@@ -14,7 +14,7 @@
 #     ホストで on にしたのに環境が合わない道具 (win/ を配らないホストの Windows の ntn) は「–」で、合わない条件の文を持つ。グループに入らない
 #     道具の off は「–」でない
 #   - 図の列: 基本の道具 (base)・minimum の道具の switch (min)・all の道具 2 列 (a1・a2)・Windows の道具 (win)。どの道具も箱に出す短い名前を
-#     持つ。groups.nix の runnerTools は全部が表の道具で、runner の印の数と同じ
+#     持つ。groups.nix の runnerTools は全部が表の道具か runner だけの道具 (runnerOnlyTools) で、runner の印と runner だけの道具の数の和
 #   - pages (setup.sh が比べる 1 台ぶん) は nix/<名前>.md と nix/html/<名前>.html だけで、files (summaries が書く全部) の同じ
 #     ファイルと 1 字も違わない
 #   - md は h1 (code span のホスト名) から始まり、3 行目が HTML 版の跡の行 (Notion に写す道具が h1 の下に行を足せるように)、
@@ -22,9 +22,11 @@
 #   - HTML 版は doctype と charset から始まる 1 ファイルで、外のファイルを読まない。#data の JSON は < を逃がしてあり、読み直すと
 #     タブ (このホスト・既定・重ねて比べる)・領域 (minimum ⊂ all)・列・基本の道具と表の全部の道具・option の頭 (dotfiles.) を持つ。
 #     リンクは新しいタブで開く GitHub の URL
-#   - winData: グループ・[tools] の上書き (host) とグループの既定 (group)・効く条件 (opReasonSshRelay は onePassword) で効かない道具・
-#     runner の道具だけ・図に描けない値 (受け持ち・鍵の本数とコメント (鍵そのものは出さない)・ユーザー・送り元の数)。group を書かない
-#     ホストは minimum で unset。やめたグループ (company など)・知らないグループ・知らない道具・bool でない道具の値は評価で止める。
+#   - winData: グループ・[tools] の上書き (host) とグループの既定 (group)・効く条件 (opReasonSshRelay は onePassword と privateRepos) で効かない
+#     道具・runner の道具だけ (runner だけが読む privateRepos の行は最後で、効く条件は無い)・図に描けない値 (受け持ち・鍵の本数とコメント
+#     (鍵そのものは出さない)・ユーザー・送り元の数)。group を書かないホストは minimum で unset。やめたグループ (company など)・知らない
+#     グループ・知らない道具・bool でない道具の値と、privateRepos が off なのにそれが要る道具 (claudePrivateSkills・herdrHub・
+#     opReasonSshRelay) が on のホスト (all に privateRepos = false だけを書いたホストも) は評価で止める。
 #     図の領域の値は、minimum がいつも on、all はグループが all のときだけ on
 #   - files: 入口 (README.md と html/hosts.html)・Nix と Windows のホストのページを出し、入口の表で同じ PC (@ の後ろを小文字で比べる)
 #     の Nix と Windows のホストを結ぶ。入口の図は Nix と Windows の 2 つで、重ねるタブは 2 台以上のときだけ。ホストが 0 台でも
@@ -207,7 +209,7 @@ let
         && !(rowOf carolData "windowsNtn").blocked;
     }
     {
-      name = "図の列は base・min・a1・a2・win で、どの道具も短い名前を持つ。runnerTools は表の道具で、runner の印と同じ数";
+      name = "図の列は base・min・a1・a2・win で、どの道具も短い名前を持つ。runnerTools は表の道具か runner だけの道具で、runner の印と runner だけの道具の数の和";
       ok =
         map (c: c.id) carolFig.columns == [
           "base"
@@ -224,9 +226,12 @@ let
             "cleanup"
           ]
         && builtins.all (r: r.short != "") carolData.tools
-        && builtins.all (k: builtins.any (t: t.key == k) groups.tools) groups.runnerTools
+        && builtins.all (
+          k: builtins.any (t: t.key == k) (groups.tools ++ groups.runnerOnlyTools)
+        ) groups.runnerTools
         &&
-          builtins.length (builtins.filter (t: t.runner) groups.tools) == builtins.length groups.runnerTools;
+          builtins.length (builtins.filter (t: t.runner) groups.tools)
+          + builtins.length groups.runnerOnlyTools == builtins.length groups.runnerTools;
     }
     {
       name = "pages は nix/<名前>.md と nix/html/<名前>.html だけで、files の同じファイルと同じ";
@@ -314,7 +319,7 @@ let
         && (builtins.elemAt carolFig.views 1).tools.ntn.e == false;
     }
     {
-      name = "winData: グループ・[tools] の上書き・グループの既定・効く条件 (onePassword) と、runner の道具だけ";
+      name = "winData: グループ・[tools] の上書き・グループの既定・効く条件 (onePassword・privateRepos) と、runner の道具だけ (runner だけが読む privateRepos も)";
       ok =
         dave.group == {
           value = "minimum";
@@ -327,11 +332,23 @@ let
         && !(rowOf dave "windowsClaudeCode").effective
         && !(rowOf dave "windowsClaudeCode").blocked
         && (rowOf dave "opReasonSshRelay").blocked
+        &&
+          (rowOf dave "opReasonSshRelay").requires == [
+            "[tools] onePassword"
+            "[tools] privateRepos"
+          ]
         && (rowOf dave "opReasonSshRelay").requiresOff == [ "[tools] onePassword" ]
         && (rowOf dave "windowsClaudeAccounts").requires == [ "[tools] windowsClaudeCode" ]
+        && (rowOf dave "claudePrivateSkills").requires == [ "[tools] privateRepos" ]
+        && (rowOf dave "privateRepos").source == "host"
+        && (rowOf dave "privateRepos").effective
+        && (rowOf dave "privateRepos").default == false
+        && (rowOf dave "privateRepos").option == "[tools] privateRepos"
+        && !(rowOf dave "privateRepos").windows
         &&
           map (r: r.key) dave.tools
           == builtins.filter (k: builtins.elem k groups.runnerTools) (map (t: t.key) groups.tools)
+          ++ map (r: r.key) groups.runnerOnlyTools
         && dave.runner;
     }
     {
@@ -368,12 +385,39 @@ let
         && (builtins.head (builtins.head (dataOfHtml allHost).figures).views).regions.all.value;
     }
     {
-      name = "winData: やめたグループ・知らないグループ・知らない道具・bool でない道具の値は評価で止める";
+      name = "winData: やめたグループ・知らないグループ・知らない道具・bool でない道具の値と、privateRepos が off なのにそれが要る道具が on のホストは評価で止める";
       ok =
         throws (hostSummary.winData windowsGroups "x@y" { group = "company"; })
         && throws (hostSummary.winData windowsGroups "x@y" { group = "nope"; })
         && throws (hostSummary.winData windowsGroups "x@y" { tools.noSuchTool = true; })
-        && throws (hostSummary.winData windowsGroups "x@y" { tools.windowsNtn = "yes"; });
+        && throws (hostSummary.winData windowsGroups "x@y" { tools.windowsNtn = "yes"; })
+        && throws (hostSummary.winData windowsGroups "x@y" { tools.claudePrivateSkills = true; })
+        && throws (hostSummary.winData windowsGroups "x@y" { tools.herdrHub = true; })
+        && throws (
+          hostSummary.winData windowsGroups "x@y" {
+            group = "all";
+            tools.privateRepos = false;
+          }
+        )
+        && !(throws (
+          hostSummary.winData windowsGroups "x@y" {
+            tools = {
+              claudePrivateSkills = true;
+              privateRepos = true;
+            };
+          }
+        ))
+        && !(throws (
+          hostSummary.winData windowsGroups "x@y" {
+            group = "all";
+            tools = {
+              privateRepos = false;
+              claudePrivateSkills = false;
+              herdrHub = false;
+              opReasonSshRelay = false;
+            };
+          }
+        ));
     }
     {
       name = "files: 入口・Nix と Windows のホストのページを出し、入口の表で同じ PC の Nix と Windows のホストを結ぶ";

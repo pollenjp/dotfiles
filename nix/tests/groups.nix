@@ -22,12 +22,15 @@
 #   - ホストが素の値で書いた環境の誤り (WSL でないのに wsl.exeExecTrace.enable = true) は、今までどおり評価で止まる
 #   - やめたグループの名前 (personal・company・client)・知らないグループ ("customer")・やめた段の switch (aiTools.enable・
 #     personalAccounts.enable) は評価で止まる
-#   - runnerTools は全部が表の道具で、表の runner の印と同じ数 (15)
+#   - runnerTools は全部が表の道具か runner だけの道具 (runnerOnlyTools) で、表の runner の印と runner だけの道具の数の和 (16)
+#   - runner の groups.json (lib.windowsGroups) は、表の道具と runner だけの道具 (privateRepos) を持つ。privateRepos は minimum で false、
+#     all で true。group.json の tools には入らない (上の「表の key を全部持つ tools だけ」。Linux の世代を変えない)
 {
   lib,
   pkgs,
   mkHome,
   system,
+  windowsGroups,
 }:
 
 let
@@ -296,12 +299,29 @@ let
         });
     }
     {
-      name = "runnerTools は全部が表の道具で、表の runner の印と同じ数 (15)";
+      name = "runnerTools は全部が表の道具か runner だけの道具で、表の runner の印と runner だけの道具の数の和 (16)";
       ok =
-        builtins.all (k: builtins.any (t: t.key == k) groups.tools) groups.runnerTools
+        builtins.all (
+          k: builtins.any (t: t.key == k) (groups.tools ++ groups.runnerOnlyTools)
+        ) groups.runnerTools
         &&
-          builtins.length (builtins.filter (t: t.runner) groups.tools) == builtins.length groups.runnerTools
-        && builtins.length groups.runnerTools == 15;
+          builtins.length (builtins.filter (t: t.runner) groups.tools)
+          + builtins.length groups.runnerOnlyTools == builtins.length groups.runnerTools
+        && builtins.length groups.runnerTools == 16
+        && builtins.all (r: builtins.elem r.key groups.runnerTools) groups.runnerOnlyTools
+        && builtins.all (r: !(builtins.any (t: t.key == r.key) groups.tools)) groups.runnerOnlyTools;
+    }
+    {
+      name = "runner の groups.json は表の道具と privateRepos を持ち、privateRepos は minimum で false・all で true (group.json には入らない)";
+      ok =
+        let
+          keys = lib.sort (a: b: a < b) (map (t: t.key) (groups.tools ++ groups.runnerOnlyTools));
+        in
+        builtins.attrNames windowsGroups.groups.minimum.tools == keys
+        && builtins.attrNames windowsGroups.groups.all.tools == keys
+        && windowsGroups.groups.minimum.tools.privateRepos == false
+        && windowsGroups.groups.all.tools.privateRepos
+        && !((json all).tools ? privateRepos);
     }
   ];
 

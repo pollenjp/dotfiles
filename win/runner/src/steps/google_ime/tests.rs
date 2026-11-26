@@ -32,8 +32,12 @@ use crate::testutil::TempDir;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-const WSL_HOST: &str = "group = \"minimum\"\n";
+/// 辞書の正本 (dotfiles-private) を使うホスト (privateRepos が on)。受け持ちは runner
+const RUNNER_HOST: &str = "[runner]\nenable = true\n[tools]\nprivateRepos = true\n";
+/// 同じく辞書を使うホストで、受け持ちは WSL の setup
+const WSL_HOST: &str = "group = \"minimum\"\n[tools]\nprivateRepos = true\n";
+/// 辞書を扱わないホスト (privateRepos が off。gh にログインできない PC など)。受け持ちは runner
+const NO_PRIVATE_HOST: &str = "[runner]\nenable = true\n";
 const APPLY: Mode = Mode::Apply { force: false };
 const FORCE: Mode = Mode::Apply { force: true };
 const DRY: Mode = Mode::DryRun { force: false };
@@ -521,6 +525,36 @@ fn missing_dictionary_texts_skip_the_dictionary_only() {
         pc.win_file(ime::DICTIONARY_DB).unwrap(),
         b"windows-dictionary"
     );
+}
+
+/// privateRepos が off のホストは辞書を扱わない: 辞書の正本が無くても ⚠ にせず (「辞書は飛ばします」も出さない)、設定だけを置き、Windows の
+/// 辞書には触らない。取り込みも辞書を書かない (dotfiles-private の clone があっても、辞書のディレクトリを作らない)
+#[test]
+fn dictionary_is_not_used_without_private_repos() {
+    let mut pc = Pc::new(true);
+    pc.host = NO_PRIVATE_HOST;
+    std::fs::remove_dir_all(pc.dict_dir()).unwrap();
+    std::fs::write(pc.ime().join(ime::DICTIONARY_DB), "windows-dictionary").unwrap();
+    let (o, out) = pc.run(APPLY);
+    assert_eq!(o.kind, Kind::Ok, "{out}");
+    assert!(
+        out.contains("辞書は扱いません (privateRepos が off。"),
+        "{out}"
+    );
+    assert!(!out.contains("辞書は飛ばします"), "{out}");
+    assert!(o.text.contains("(辞書は扱わない)"), "{}", o.text);
+    assert!(pc.win_file(ime::CONFIG_DB).is_some());
+    assert_eq!(
+        pc.win_file(ime::DICTIONARY_DB).unwrap(),
+        b"windows-dictionary"
+    );
+    // check も ⚠ にしない
+    let (o, out) = pc.run(CHECK);
+    assert_eq!(o.kind, Kind::Ok, "{out}");
+    // 取り込みは辞書を書かない (dotfiles-private の clone があっても)
+    std::fs::create_dir_all(pc.root().join("dotfiles-private").join(".git")).unwrap();
+    let _ = pc.import();
+    assert!(!pc.dict_dir().exists());
 }
 
 #[test]

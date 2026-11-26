@@ -524,7 +524,7 @@ exit "${rc}"
                 Relay::Off => host(one_password),
                 Relay::On => host(one_password).replacen(
                     "[tools]\n",
-                    "[tools]\nopReasonSshRelay = true\n",
+                    "[tools]\nopReasonSshRelay = true\nprivateRepos = true\n",
                     1,
                 ),
             };

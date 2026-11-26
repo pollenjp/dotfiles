@@ -1,5 +1,5 @@
-//! winget で入れるもの (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship と、bootstrap の git・gh・vs-buildtools・
-//! rustup) の、
+//! winget で入れるもの (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship と、bootstrap の git・gh・pwsh・
+//! vs-buildtools・rustup) の、
 //! 固定した版より新しい版。WSL の `nix/scripts/check-winget-version.sh --json` (出た日を引かない形。setup が使うもの) を写した: ps1 から固定した版と
 //! パッケージ ID を、隣の見送りの一覧から見送った版を読み、winget-pkgs の manifest のディレクトリの一覧 (`gh api repos/microsoft/winget-pkgs/contents/…`)
 //! の版のうち固定した版より新しいものを、古い順に出す。確かめられなければ、WSL の口が stderr に出す行を返す (文も同じ)。
@@ -34,6 +34,8 @@ pub struct WingetSpec {
     pub version_example: &'static str,
     /// manifest のディレクトリに並ぶ、ID の続く別のパッケージのディレクトリ (版ではない)
     pub nested_dirs: &'static [&'static str],
+    /// 候補の線 (WSL の series_re。`^7\.6\.` を `7.6.` の頭の字にしたもの)。Some なら、この字で始まる版だけを読む (線の外の版は新しい版に数えない)
+    pub series: Option<&'static str>,
 }
 
 /// 版の形 `^[0-9]+(\.[0-9]+){1,3}$`
@@ -42,6 +44,8 @@ const PARTS_2_TO_4: (usize, usize) = (2, 4);
 const PARTS_3: (usize, usize) = (3, 3);
 /// 版の形 `^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$`
 const PARTS_3_TO_4: (usize, usize) = (3, 4);
+/// 版の形 `^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$`
+const PARTS_4: (usize, usize) = (4, 4);
 
 pub const SPECS: &[WingetSpec] = &[
     WingetSpec {
@@ -55,6 +59,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "10.1.0.0",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "herdr",
@@ -67,6 +72,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "0.9.5",
         nested_dirs: &["Preview"],
+        series: None,
     },
     WingetSpec {
         name: "google-japanese-input",
@@ -79,6 +85,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "3.35.6300.0",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "ntn",
@@ -91,6 +98,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "0.23.28",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "claude-code",
@@ -103,6 +111,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "2.1.318",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "tailscale",
@@ -115,6 +124,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: Some(PARTS_3),
         version_example: "1.104.5",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "ghq",
@@ -127,6 +137,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "1.12.0",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "fzf",
@@ -139,6 +150,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "0.75.0",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "starship",
@@ -151,6 +163,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "1.27.0",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "git",
@@ -163,6 +176,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "2.56.0.4",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "gh",
@@ -175,6 +189,22 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "2.103.3",
         nested_dirs: &[],
+        series: None,
+    },
+    WingetSpec {
+        name: "pwsh",
+        title: "Windows の PowerShell 7",
+        ps1: "win/bootstrap/Install-Bootstrap.ps1",
+        skipped: "win/bootstrap/skipped-versions/pwsh.txt",
+        version_param: "PwshVersion",
+        id_var: "pwshPackageId",
+        version_parts: PARTS_4,
+        pinned_parts: None,
+        version_example: "7.6.10.0",
+        nested_dirs: &["Preview"],
+        // bootstrap が入れる 7.6 (LTS) は、管理者の PC の MSIX (Microsoft.PowerShell-LTS) も管理者でない PC の MSI も 7.7 (MSI が無く、MSIX は
+        // 別の package) へ上がらないので、7.6 の線の版だけを読む
+        series: Some("7.6."),
     },
     WingetSpec {
         name: "vs-buildtools",
@@ -187,6 +217,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "17.14.44",
         nested_dirs: &[],
+        series: None,
     },
     WingetSpec {
         name: "rustup",
@@ -199,6 +230,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "1.29.3",
         nested_dirs: &[],
+        series: None,
     },
 ];
 
@@ -427,9 +459,11 @@ pub fn check(ctx: &Ctx, gh: &Path, spec: &WingetSpec, deadline: Instant) -> Resu
     if names.iter().all(|n| n.is_empty()) {
         return Err(gone(&format!("{dir} に版のディレクトリが無い")));
     }
+    // 候補の線を決めた名前は、その線の版だけを読む (WSL の `grep -E "${series_re}"`。線の外の版は新しい版に数えない)
     let mut versions: Vec<&String> = names
         .iter()
         .filter(|n| version_form(n, spec.version_parts))
+        .filter(|n| spec.series.is_none_or(|prefix| n.starts_with(prefix)))
         .collect();
     versions.sort_by(|a, b| version_cmp(a, b));
     let newer = versions

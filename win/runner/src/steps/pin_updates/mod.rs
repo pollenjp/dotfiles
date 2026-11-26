@@ -6,7 +6,7 @@
 //!
 //! - 確かめる名前は WSL と同じ順 (`NAMES`)。on/off は、WSL の記録 (windows-files.json の ntn・claudeCode、group.json の tools.windowsHerdr・
 //!   windowsTailscale) の代わりに、同じものを入れる手順と同じ道具の switch (ntn は windowsNtn、claude-code は windowsClaudeCode、herdr・herdr-app・
-//!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 4 つ (git・gh・vs-buildtools・rustup) と、runner の手順 ghq・fzf・
+//!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 5 つ (git・gh・pwsh・vs-buildtools・rustup) と、runner の手順 ghq・fzf・
 //!   starship が入れる ghq・fzf・starship は、WSL と同じく Windows の ghq に dotfiles の clone がある (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。
 //!   bootstrap を流した) ときだけ
 //! - GitHub は Windows の gh で読む (`gh api`。HTTP の crate を足さない)。herdr-app・herdr-core は、版ごとの Windows の成果物が releases.herdr.dev に
@@ -25,6 +25,8 @@
 //! - 依存の更新の skill が読む JSON の口 (`--list --json`・`--candidates --json`) と、人が読む `--candidates` は写さない (WSL の script に残す)。
 //!   読む側は Linux の会話から repo の root で打ち、口は WSL の記録を見ないので、受け持ちを runner に切り替えた後も Linux で動く
 //! - Windows にも記録の置き場にも何も書かない。check・dry-run・apply は同じことをする (GitHub を読んで知らせるだけ)
+//! - on/off は道具の switch `privateRepos` (gh にログインして pollenjp の private な repo を使うホスト。dotfiles-private の
+//!   docs/adr/111_win_runner_without_gh_*)。gh にログインできない PC (客先の PC など) では流さない (↷)
 
 mod herdr;
 mod winget;
@@ -34,6 +36,7 @@ mod tests;
 
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, ghq_owner_dir};
+use crate::host::PRIVATE_REPOS;
 use crate::process::{CommandSpec, Exit};
 use crate::report::Kind;
 use std::cmp::Ordering;
@@ -53,6 +56,7 @@ pub const NAMES: &[&str] = &[
     "starship",
     "git",
     "gh",
+    "pwsh",
     "vs-buildtools",
     "rustup",
     "herdr-app",
@@ -73,7 +77,7 @@ pub const KEYS_NOTE: [&str; 2] = [
     "  → 上げる版までの更新ノート (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) で keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、Windows で効くキーを win/herdr-app/keys.json に足す (dotfiles のキーと重なる既定のキーは、その既定の値を keys.defaults.json に書く。win/README.md の「固定した版を上げる」)",
 ];
 /// gh が見つからないとき (WSL の「home-manager switch の後に流し直す」は Windows では bootstrap)
-pub const NO_GH: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh が見つからない。gh は bootstrap (win/bootstrap/Install-Bootstrap.ps1) が入れる。入れた後に流し直す)。";
+pub const NO_GH: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh が見つからない。gh は -Private の bootstrap (win/bootstrap/Install-Bootstrap.ps1 -Private) が入れる。入れた後に流し直す)。";
 /// gh がログインしていないとき (WSL と同じ字)
 pub const NOT_LOGGED_IN: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh にログインしていない。gh auth login の後に流し直す)。";
 /// 新しい版が無いとき (WSL と同じ字。後ろに確かめた名前と「)。」)
@@ -92,7 +96,7 @@ pub enum NameGate {
     Always,
     /// 道具の switch が true なら (同じものを入れる手順と同じ switch)
     Tool(&'static str),
-    /// Windows の ghq に dotfiles の clone がある (bootstrap を流した) なら (bootstrap の 4 つと、bootstrap の clone の runner が入れる ghq・fzf・starship)
+    /// Windows の ghq に dotfiles の clone がある (bootstrap を流した) なら (bootstrap の 5 つと、bootstrap の clone の runner が入れる ghq・fzf・starship)
     Bootstrapped,
 }
 
@@ -103,7 +107,7 @@ pub fn name_gate(name: &str) -> NameGate {
         "claude-code" => NameGate::Tool("windowsClaudeCode"),
         "herdr" | "herdr-app" | "herdr-core" => NameGate::Tool("windowsHerdr"),
         "tailscale" => NameGate::Tool("windowsTailscale"),
-        "git" | "gh" | "vs-buildtools" | "rustup" | "ghq" | "fzf" | "starship" => {
+        "git" | "gh" | "pwsh" | "vs-buildtools" | "rustup" | "ghq" | "fzf" | "starship" => {
             NameGate::Bootstrapped
         }
         _ => NameGate::Always,
@@ -166,7 +170,8 @@ impl Step for PinUpdates {
             id: "pin-updates",
             order: 97,
             title: "固定した版より新しい版が出ていないかを知らせる",
-            gate: Gate::Always,
+            // GitHub は gh (ログイン) で読む。privateRepos (gh のログインを使うホスト) が off なら流さない (ADR 111)
+            gate: Gate::Tool(PRIVATE_REPOS),
             ported: true,
             windows_only: false,
         }

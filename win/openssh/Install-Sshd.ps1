@@ -33,7 +33,10 @@ dotfiles の win/openssh/Install-Sshd.ps1 を %USERPROFILE%\.config\powershell\ 
    元は .dotfiles-bak-<日時> に退避する)。写しが無ければ中身に触らず、ファイルが無ければ空で作る。どちらも、読み書きできるのを管理者と SYSTEM だけにする
 5. サービス sshd: 自動で起こし、動かす。sshd_config を書き直したら起こし直す (つないでいる SSH が切れることがある)
 
-管理者が要るのは揃える段だけで、そのときだけ UAC で自分を起動し直す。-Check は何も変えない。管理者でないと
+管理者が要るのは揃える段だけで、そのときだけ UAC で自分を起動し直す。-Check は何も変えない。起動し直す host は今の pwsh だが、今の pwsh が
+MSIX (WindowsApps の下) なら MSI の pwsh を使い、MSI の pwsh も無く普段のアカウントが管理者でなければ、UAC を出さずに止める (管理者でない PC は
+UAC で別の管理者のアカウントに昇格し、その側では使う人ごとに登録される MSIX の pwsh を起こせない。bootstrap を流し直すと MSI が入る)。昇格した
+側で winget が見つからない (そのアカウントに App Installer が登録されていない) ときは、わけと登録の手を書いて止まる (登録はしない)。管理者でないと
 administrators_authorized_keys (と、読めなければ sshd_config) は読めないので、そのときは揃えたときの記録 (StateDir の
 deployed.json。書いた中身の sha256) と比べる。管理者の PowerShell で -Check を打つと、中身そのものと比べる。
 
@@ -1002,6 +1005,53 @@ function Get-SshdCheckMessage {
     }
 }
 
+# トークンのグループの SID (Install-Bootstrap.ps1・Install-OpenSSH.ps1 と同じ)。WindowsIdentity の Claims のうち、種類が有効なグループ (groupsid) か
+# deny-only のグループ (denyonlysid) のものの値。種類の名前空間は種類ごとに違うので、最後の語で見る。WindowsIdentity.Groups は deny-only の
+# グループを除く (UAC で権限を落とした管理者の BUILTIN\Administrators が入らない) ので使わない
+function Select-TokenGroupSids {
+    param([object[]]$Claims)
+    foreach ($claim in @($Claims | Where-Object { $null -ne $_ })) {
+        if ("$($claim.Type)" -match '/(groupsid|denyonlysid)$') { "$($claim.Value)" }
+    }
+}
+
+# 普段のアカウントが管理者か (Install-Bootstrap.ps1・Install-OpenSSH.ps1 と同じ)。トークンのグループの SID の並びに BUILTIN\Administrators
+# (S-1-5-32-544) があれば管理者 (UAC で権限を落とした管理者のトークンでも deny-only のグループで入る)
+function Test-AdministratorsSid {
+    param([string[]]$Sids)
+    @($Sids) -contains 'S-1-5-32-544'
+}
+
+# 自分を管理者で起動し直すときの host (Install-OpenSSH.ps1 と同じ)。今の pwsh が MSIX (WindowsApps の下) なら、MSI の pwsh があればそれを使う
+# (MSIX は使う人ごとに登録されるので、UAC で別の管理者のアカウントの資格情報を入れると、昇格した側で起こせない)。MSI の pwsh が無く、普段の
+# アカウントが管理者でなければ空を返す (UAC を出さずに止める。管理者でない PC は UAC で別の管理者のアカウントに昇格する)。ほか (管理者の PC の
+# MSIX・MSI・Windows PowerShell 5.1・ほかの pwsh) は今の host
+function Select-ElevationHost {
+    param([string]$CurrentHost, [string]$MsiPwsh, [bool]$MsiPwshExists, [bool]$AccountAdmin)
+    if ("$CurrentHost" -notmatch '\\WindowsApps\\') { return $CurrentHost }
+    if ($MsiPwshExists) { return $MsiPwsh }
+    if ($AccountAdmin) { return $CurrentHost }
+    ''
+}
+
+# 昇格し直さずに止めるとき (Select-ElevationHost が空) の行 (Install-OpenSSH.ps1 と同じ)。管理者でない PC には、bootstrap が MSI の PowerShell 7 を
+# 入れる
+function Format-ElevationStopNote {
+    param([string]$CurrentHost, [string]$MsiPwsh)
+    "UAC は出さずに止めた (この pwsh は MSIX: $CurrentHost)"
+    "※ 普段のアカウントが管理者でない PC では、UAC で別の管理者のアカウントの資格情報を入れて昇格する。MSIX の PowerShell 7 は使う人ごとに登録されるので、昇格した側 (そのアカウント) では起こせない。MSI の PowerShell 7 ($MsiPwsh) も無い。bootstrap (dotfiles の clone の win\bootstrap\Install-Bootstrap.ps1) を普通の PowerShell で流し直すと、管理者でない PC には MSI の PowerShell 7 が入る (UAC で管理者の資格情報を入れる。bootstrap を流さない PC は、win/README.md の「PowerShell 7 の MSIX の限り」の winget のコマンドで MSI を足す)。入ったら、新しい窓で打ち直す"
+}
+
+# 管理者で起動し直した側で winget が見つからないときの行 (Install-OpenSSH.ps1 と同じ)。UAC で別の管理者のアカウントの資格情報を入れて昇格すると、
+# そのアカウントには App Installer (winget) が登録されていないことがある (winget は Windows にサインインしたときに使う人ごとに登録される。その PC に
+# 一度もサインインしていないアカウントには無い)。登録はこちらではしない (別のアカウントの状態を変えるため)。手は Microsoft の winget の文書
+# (https://learn.microsoft.com/windows/package-manager/winget/) のもの
+function Format-WingetMissingNote {
+    param([string]$Account)
+    "winget が見つからない (昇格した側のアカウント: $Account)"
+    '※ UAC で別の管理者のアカウントの資格情報を入れたなら、そのアカウントには winget (App Installer) が登録されていないことがある (winget は Windows にサインインしたときに使う人ごとに登録され、この PC に一度もサインインしていないアカウントには無い)。そのアカウントでこの PC に一度サインインするか、そのアカウントの管理者の PowerShell (Windows PowerShell を「管理者として実行」で開き、UAC でそのアカウントの資格情報を入れる) で Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe を打ってから、流し直す。普段のアカウントのまま昇格したなら、Microsoft Store の「アプリ インストーラー」を入れる (更新する)'
+}
+
 # ---------------------------------------------------------------------------
 # Windows に触る関数 (実機で -Check と本番を打って確かめる)
 # ---------------------------------------------------------------------------
@@ -1016,6 +1066,18 @@ function Write-Step {
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# 普段のアカウントが管理者か (Install-Bootstrap.ps1・Install-OpenSSH.ps1 と同じ)。今のトークンのグループの SID (WindowsIdentity の Claims) から
+# 決める (Test-AdministratorsSid)。読めなければ (Windows でない・例外) 管理者でないとみなす
+function Test-AccountAdmin {
+    $sids = @()
+    try {
+        $sids = @(Select-TokenGroupSids -Claims @([Security.Principal.WindowsIdentity]::GetCurrent().Claims))
+    } catch {
+        $sids = @()
+    }
+    Test-AdministratorsSid -Sids $sids
 }
 
 # SSH の会話の中で動いているか (sshd が SSH_CONNECTION・SSH_CLIENT を渡す)
@@ -1422,7 +1484,8 @@ function Invoke-MsiAddServer {
         return $false
     }
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Step 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
+        # 昇格した側 (UAC で資格情報を入れた別の管理者のアカウント) に winget が登録されていないことがある。わけと手を書いて止まる (登録はしない)
+        foreach ($line in @(Format-WingetMissingNote -Account $env:USERNAME)) { Write-Step $line }
         return $false
     }
     # 落とす先は、管理者と SYSTEM だけが書ける場所 (利用者の %LOCALAPPDATA% だと、winget が sha256 を照らした後に差し替えられうる)。
@@ -1659,19 +1722,30 @@ function Invoke-SshdFix {
     $true
 }
 
-# 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true
+# 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true。起動し直す host は Select-ElevationHost で選ぶ (今の pwsh が
+# MSIX なら MSI の pwsh を使い、それも無い管理者でない PC では UAC を出さずに止める。win/README.md の「PowerShell 7 の MSIX の限り」)
 function Invoke-Elevated {
     param([string]$User, [string]$CopyPath, [string]$StateDir, [string]$KeysFrom, [string]$AllowPath)
+    $current = (Get-Process -Id $PID).Path
+    # MSI の既定の置き場所 (字でつなぐ。Join-Path は、テストを流す Linux の pwsh で ProgramFiles が無いと落ちる)
+    $msiPwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    $hostExe = Select-ElevationHost -CurrentHost $current -MsiPwsh $msiPwsh -MsiPwshExists (Test-Path -LiteralPath $msiPwsh -PathType Leaf) -AccountAdmin (Test-AccountAdmin)
+    if (-not $hostExe) {
+        foreach ($line in @(Format-ElevationStopNote -CurrentHost $current -MsiPwsh $msiPwsh)) { Write-Host $line }
+        return $false
+    }
     New-Item -ItemType Directory -Force -Path $StateDir | Out-Null
     $log = Join-Path $StateDir 'Install-Sshd.log'
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
-    $hostExe = (Get-Process -Id $PID).Path
     # Start-Process は配列を空白でつなぐだけなので、パスは自分で "" で囲む (どれも \ で終わらない)。ユーザーと送り元の写しも、親の場所を
     # 渡す (別の管理者のアカウントで昇格すると、子の LOCALAPPDATA は親と違う)
     $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
         '-LogPath', ('"{0}"' -f $log), '-KeysCopy', ('"{0}"' -f $CopyPath), '-AllowCopy', ('"{0}"' -f $AllowPath),
         '-AllowUser', $User, '-StateDir', ('"{0}"' -f $StateDir))
     if ($KeysFrom) { $argumentList += @('-KeysFrom', $KeysFrom) }
+    if ($hostExe -ne $current) {
+        Write-Host "昇格した側は MSI の PowerShell 7 ($hostExe) で動かす (今の pwsh は MSIX で、UAC で別の管理者のアカウントに昇格すると起こせない)"
+    }
     Write-Host 'UAC で管理者の PowerShell を起動する (終わると閉じる)。Windows のデスクトップに UAC の確認が出たら「はい」を押す'
     try {
         $process = Start-Process -FilePath $hostExe -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
@@ -1681,6 +1755,9 @@ function Invoke-Elevated {
     }
     if (Test-Path -LiteralPath $log) {
         Get-Content -LiteralPath $log -Encoding utf8 | ForEach-Object { Write-Host "  [管理者] $_" }
+    } elseif ($process.ExitCode -ne 0) {
+        # 子がログを書く前に落ちた
+        Write-Host ('管理者の PowerShell がログを書く前に終わった (終了コード 0x{0:X8})' -f $process.ExitCode)
     }
     $process.ExitCode -eq 0
 }

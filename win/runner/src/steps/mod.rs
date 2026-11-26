@@ -489,4 +489,34 @@ mod tests {
             "windowsClaudeAccounts・windowsClaudeCode"
         );
     }
+
+    /// private な repo (dotfiles-private) か gh のログインを読む手順 (ssh-config・port-forward・pin-updates) は privateRepos で on/off。bootstrap は
+    /// いつも on (privateRepos のホストは -Private で確かめる)。google-ime はいつも on (辞書だけを privateRepos で扱う)
+    #[test]
+    fn private_repos_gates() {
+        let parse_host =
+            |text: &str| parse(text, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap();
+        let minimum = parse_host("group = \"minimum\"\n");
+        let private = parse_host("[tools]\nprivateRepos = true\n");
+        let gate_of = |id: &str| {
+            all()
+                .into_iter()
+                .find(|s| s.info().id == id)
+                .unwrap()
+                .info()
+                .gate
+        };
+        for id in ["ssh-config", "port-forward", "pin-updates"] {
+            assert_eq!(gate_of(id), Gate::Tool("privateRepos"), "{id}");
+            assert_eq!(
+                gate_of(id).off_reason(&minimum).unwrap(),
+                "このホストでは off (privateRepos = false。グループ minimum の既定)",
+                "{id}"
+            );
+            assert_eq!(gate_of(id).off_reason(&private), None, "{id}");
+        }
+        for id in ["bootstrap", "google-ime"] {
+            assert_eq!(gate_of(id), Gate::Always, "{id}");
+        }
+    }
 }

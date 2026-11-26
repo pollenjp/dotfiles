@@ -20,6 +20,9 @@
 //!   書いたもの) には触らない
 //! - 正本は dotfiles-private の clone (runner の clone の隣か bootstrap の置き場。`Ctx::sibling`) の `ssh/` 直下の `*.ssh_config` (通常のファイル
 //!   だけ。`.` で始まる名前は bash の glob と同じく読まない)。無い・空なら何も書かず消さない
+//! - on/off は道具の switch `privateRepos` (pollenjp の private な repo を使うホスト。dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
+//!   off のホストでは流さない (↷。前に置いたファイルも消さない)。SSH の中継 (`opReasonSshRelay`) は privateRepos が要る道具なので、
+//!   中継を使うホストではいつも流れる
 //! - check と apply は `ssh -v -G nonexistent.invalid` を流し、読んだファイルを確かめる (WSL は書いた後にいつも流す。dry-run は流さない)。アクセス権で
 //!   弾かれる・読み終えられない・置いたファイルが読まれない・旧 clone の `ssh_config` を読んだ、なら manual。ssh を呼べない・応答しないときは、手で
 //!   打つコマンドを添えて進む
@@ -48,6 +51,7 @@ use super::ps1::ps_quote;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil;
+use crate::host::PRIVATE_REPOS;
 use crate::process::{CommandSpec, Exit};
 use crate::record::FileRecords;
 use crate::report::Kind;
@@ -103,7 +107,8 @@ impl Step for SshConfig {
             id: "ssh-config",
             order: 91,
             title: "dotfiles-private の ssh の設定を %USERPROFILE%\\.ssh へ写す",
-            gate: Gate::Always,
+            // 正本は private な dotfiles-private。privateRepos が off のホストでは流さない (ADR 111。前に置いたファイルはそのまま)
+            gate: Gate::Tool(PRIVATE_REPOS),
             ported: true,
             windows_only: false,
         }
@@ -171,7 +176,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
             "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
         )
         .note(format!(
-            "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
+            "dotfiles-private の clone を確かめる ({})。-Private の bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
             src_dir.display()
         ));
         for l in relay {
@@ -900,8 +905,7 @@ mod tests {
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
     /// SSH の中継を使うホスト (1Password の switch も要る)
-    const RELAY_HOST: &str =
-        "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
+    const RELAY_HOST: &str = "[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n";
     const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const FORCE: Mode = Mode::Apply { force: true };
@@ -1189,7 +1193,7 @@ mod tests {
         for host in [
             RUNNER_HOST,
             "[tools]\nonePassword = true\nopReasonSshRelay = false\n[runner]\nenable = true\n",
-            "[tools]\nopReasonSshRelay = true\n[runner]\nenable = true\n",
+            "[tools]\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n",
         ] {
             let e = Env::new();
             e.put_relay_exe();
@@ -2079,7 +2083,9 @@ mod tests {
                 .any(|l| l == format!("# order: {}", info.order))
         );
         assert!(!text.lines().any(|l| l.starts_with("# tool: ")));
-        assert_eq!(info.gate, Gate::Always);
+        // WSL の script は `# tool:` を持たない (win/ を配る WSL は dotfiles-private を読める)。runner は private な repo を使わない PC のために
+        // privateRepos で on/off する (dotfiles-private の docs/adr/111_win_runner_without_gh_*)
+        assert_eq!(info.gate, Gate::Tool("privateRepos"));
         let body = text
             .split_once("config_body() {\n  cat <<'EOF'\n")
             .and_then(|(_, rest)| rest.split_once("\nEOF\n"))
