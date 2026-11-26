@@ -17,6 +17,7 @@ ghq
 git
 git-gh
 git-lfs
+glab
 hm-session-vars.fish
 hm-session-vars.sh
 home-configuration-reference-manpage
