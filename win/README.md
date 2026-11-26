@@ -35,7 +35,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr-app/mods/pjp-prefix/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-prefix\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。旧 herdr の prefix (`Ctrl+K`) の小窓で、次の 1 キーで分割・タブ・worktree などの命令を流す ([後述](#herdr-app-のキー)) |
 | `herdr-app/mods/pjp-worktree-remove/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-worktree-remove\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。prefix の後の `d` と `Ctrl+Q` が開く小窓で、今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([後述](#herdr-app-のキー)) |
 | `herdr-app/mods/pjp-sidebar-tabs/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-sidebar-tabs\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。左のサイドパネルの上端に、Spaces と Agents を切り替えるアイコンのタブを描く (layout pjp-main の stack `sidebar-lists` の header。[後述](#サイドパネルのタブ-pjp-sidebar-tabs)) |
-| `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`・worktree を消す確かめの小窓の `Ctrl+Q`・サイドパネルのタブを切り替える `Ctrl+Shift+←→`) ([後述](#herdr-app-のキー)) |
+| `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`・worktree を消す確かめの小窓の `Ctrl+Q`・サイドパネルのタブを切り替える `Ctrl+Alt+←→`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
 | (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替え、Spaces と Agents を上端のタブ (`pjp-sidebar-tabs`) で切り替える layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
@@ -1240,7 +1240,7 @@ mod を置くのは `herdr-app-mods` ([前節](#herdr-app-の-mod))。どちら�
 (`docs/adr/100_win_herdr_app_prefix_worktree_remove_*`)、そのキーを `Shift+Q` から `Shift+D` に替えた ADR 102
 (`docs/adr/102_win_herdr_app_prefix_worktree_remove_shift_d_*`)、さらに Shift なしの `d` に替え、prefix なしの `Ctrl+Q` でも開けるようにした
 ADR 103 (`docs/adr/103_win_herdr_app_prefix_worktree_remove_d_*`)、サイドパネルのタブを `Ctrl+Shift+←→` で切り替えるキーを足した ADR 108
-(`docs/adr/108_win_herdr_app_sidebar_tab_keys_*`)。
+(`docs/adr/108_win_herdr_app_sidebar_tab_keys_*`)、そのキーを `Ctrl+Alt+←→` に替えた ADR 110 (`docs/adr/110_win_herdr_app_sidebar_tab_keys_ctrl_alt_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-mods,herdr-app-keys             # 差を見る (何も書かない)
@@ -1254,7 +1254,7 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 | `Ctrl+Alt+↑`・`Ctrl+Alt+↓` | 同じく前・次の space | 同じキー (`previous_workspace`・`next_workspace`) |
 | `Ctrl+↑`・`Ctrl+↓` | 前・次のタブ (`tab.prev`・`tab.next`) | `previous_tab`・`next_tab` |
 | `Ctrl+K` | prefix の小窓を開く (`mod.open:pjp-prefix`) | `prefix` |
-| `Ctrl+Shift+←`・`Ctrl+Shift+→` | layout pjp-main を出している間だけ、左のサイドパネルのタブの Spaces・Agents を出す (`layout.select` で stack `sidebar-lists` の子 `spaces`・`agents` を選ぶ。端で回らない。[サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs)) | (無い) |
+| `Ctrl+Alt+←`・`Ctrl+Alt+→` | layout pjp-main を出している間だけ、左のサイドパネルのタブの Spaces・Agents を出す (`layout.select` で stack `sidebar-lists` の子 `spaces`・`agents` を選ぶ。端で回らない。[サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs)) | (無い) |
 | `Ctrl+Q` | prefix の後の `d` と同じ確かめの小窓を開く (`mod.open:pjp-worktree-remove`。今の space の端末を全部止めて worktree を消す。下の `d` の説明) | (無い) |
 | prefix → `Shift+C` | 名前を自動で付けた worktree を作り、新しい space で開く | `new_worktree` |
 | prefix → `Shift+G` | 同じく worktree を作り、新しい space の最初のタブで Claude Code を起動する | `new_worktree` (旧 herdr は `Shift+C` と同じ) |
@@ -1282,11 +1282,13 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
   keys.json の section `mod:pjp-worktree-remove` が mod の命令 (`pjp-worktree-remove.again`) にし、`Esc` と同じに扱う (小窓を閉じる。止めている間は
   閉じない)。無いと `global` の `Ctrl+Q` (mod.open の 2 回目) が小窓を閉じ、止めている途中の仕事を打ち切る。focus が小窓の外 (端末を押した後など) に
   あるときの `Ctrl+Q` は `global` のまま小窓を閉じるので、止めている間は押さない (途中で止まったら通知が出て、もう一度開いて続きを流せる)
-- `Ctrl+Shift+←→` (サイドパネルのタブ) は keys.json の section `layout:pjp-main` に書く (その layout を出している間だけ効き、`global` より勝つ)。
+- `Ctrl+Alt+←→` (サイドパネルのタブ) は keys.json の section `layout:pjp-main` に書く (その layout を出している間だけ効き、`global` より勝つ)。
   action は名前つきの引数のオブジェクト (`{"command": "layout.select", "args": {"stack": "sidebar-lists", "child": "spaces"}}`)。左のタブが Spaces、
   右が Agents なので、`←` で Spaces、`→` で Agents (今出ているタブで押しても何も替わらない)。**pjp-main を出している間は、このキーは端末のプログラムに
-  届かない** (PowerShell の PSReadLine の `Ctrl+Shift+←→` (単語ごとに選ぶ)・bash や fish の端末での同じキーなど)。表示を main に戻せば、
-  section が効かず端末に届く。section `terminal` に同じキーを書くと (herdr-app の既定には無い)、そちらが勝ってタブは替わらない
+  届かない**。表示を main に戻せば、section が効かず端末に届く。section `terminal` に同じキーを書くと (herdr-app の既定には無い)、そちらが勝って
+  タブは替わらない。`Ctrl+Alt+↑↓` (space の移動) と同じく、Ctrl+Alt は Windows で AltGr として読まれるが、矢印は字を打たないので打てなくなる字は無い。
+  グラフィックのドライバーなどが `Ctrl+Alt+矢印` を global hotkey に取っている PC では、herdr-app に届かずタブが替わらない。前に当てた
+  `Ctrl+Shift+←→` は割り当てない (記録どおりの値なら、次の apply で keys.json から外れ、端末のプログラムに届く)
 - space の移動は `Ctrl+PageUp`・`Ctrl+PageDown` と `Ctrl+Alt+↑↓` の両方。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定ではタブの移動
   (`tab.prev`・`tab.next`) に使うキーなので、repo の `herdr-app/keys.defaults.json` にその既定の値を書いて上書きする (下の「書き足し方」)。タブの移動は
   `Ctrl+↑↓` と、herdr-app の既定の `Ctrl+Tab`・`Ctrl+Shift+Tab`・`Alt+]`・`Alt+[` が残る。`Ctrl+PageUp`・`Ctrl+PageDown` は herdr-app の既定でも取って
@@ -1464,9 +1466,9 @@ header の mod を置く) にする。子 (spaces・agents の block) はその�
 - 今どちらが出ているかは layout から読むので、ほかの手 (コマンドの `layout.select`・clicks の復元) で替わっても描き直しで追いつく。blocked の
   数も agent の状態が変わるたびに描き直る (timer は回さない)。sidebar を 160px 未満 (rail) に細めると、タブは小さなアイコンだけになり、数の印は
   点になる (数は hover で出る。rail から広げるのは brand の行の sidebar のボタン)
-- キーでも切り替えられる: `Ctrl+Shift+←` で Spaces、`Ctrl+Shift+→` で Agents (タブの左右の位置どおり。端で回らない)。タブを押したときと同じ
+- キーでも切り替えられる: `Ctrl+Alt+←` で Spaces、`Ctrl+Alt+→` で Agents (タブの左右の位置どおり。端で回らない)。タブを押したときと同じ
   `layout.select {stack: "sidebar-lists", child}` を、keys.json の section `layout:pjp-main` に書いてある (runner の `herdr-app-keys` が書き足す。
-  [herdr-app のキー](#herdr-app-のキー))。pjp-main を出している間、このキーは端末のプログラムに届かない (PowerShell の PSReadLine の単語ごとの選択など)
+  [herdr-app のキー](#herdr-app-のキー))。pjp-main を出している間、このキーは端末のプログラムに届かない
 - Agents のタブを出していない間は、`pjp-sidebar-tabs` が agents の一覧の順 (`agent.next`・`agent.prev` が辿る順。prefix の小窓の `Shift+O`) を
   代わりに渡す。herdr-app は出ていない slot の mod を描かず、同梱の agents は描くときにだけ順を渡すため。並べ方は同梱の agents の既定 (ピン留め →
   blocked → done → working → idle、同じなら新しく変わった順。並べ方を grouped にしていれば一覧の順) に寄せた (sub-agent の急ぎは親に寄せない)
