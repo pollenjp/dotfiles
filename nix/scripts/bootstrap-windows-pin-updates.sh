@@ -34,7 +34,7 @@
 #                                                                        check-winget-version.sh --json (Windows の ghq に dotfiles の clone
 #                                                                         があるマシンだけ。下の「何をするか」の 1)
 #   starship                win/starship/Install-Starship.ps1            check-winget-version.sh --json (ghq・fzf と同じ)
-#   git・gh・vs-buildtools・rustup
+#   git・gh・pwsh・vs-buildtools・rustup
 #                           win/bootstrap/Install-Bootstrap.ps1          check-winget-version.sh --json (Windows の ghq に dotfiles の clone
 #                                                                         があるマシンだけ。下の「何をするか」の 1)
 #   herdr-app・herdr-core   nix/pkgs/herdr-core/releases.json            check-herdr-app-version.sh --json (1 回で 2 つ)
@@ -51,7 +51,7 @@
 #    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)。
 #    tailscale は group.json の tools.windowsTailscale (dotfiles.wsl.windowsFiles.tailscale.enable) が true のときだけ確かめる (前は
 #    どのグループでも既定が off だったので、ファイル・欄が無い前の世代は false と読む)。
-#    bootstrap が入れる 4 つ (git・gh・vs-buildtools・rustup) は、Windows で bootstrap を流したマシン (windows-files.json の windowsHome の
+#    bootstrap が入れる 5 つ (git・gh・pwsh・vs-buildtools・rustup) は、Windows で bootstrap を流したマシン (windows-files.json の windowsHome の
 #    下に ghq/github.com/pollenjp/dotfiles/.git がある) だけ確かめる (入れていない道具の版を知らせない。dotfiles-private の
 #    docs/adr/058_win_runner_bootstrap_*)。ghq・fzf・starship も同じマシンだけ確かめる (入れるのは Windows の runner の手順 ghq・fzf・starship
 #    だけで、runner は bootstrap が clone した dotfiles から動く。WSL の setup は入れない。dotfiles-private の docs/adr/092_win_cdrepo_ghq_fzf_*・
@@ -110,7 +110,7 @@ script_dir=$(
 )
 state_file="${HOME}/.local/state/dotfiles/windows-files.json"
 group_file="${HOME}/.local/state/dotfiles/group.json"
-all_names=(openssh herdr google-japanese-input ntn claude-code tailscale ghq fzf starship git gh vs-buildtools rustup herdr-app herdr-core)
+all_names=(openssh herdr google-japanese-input ntn claude-code tailscale ghq fzf starship git gh pwsh vs-buildtools rustup herdr-app herdr-core)
 
 usage() {
   cat <<'EOS'
@@ -122,7 +122,7 @@ Windows に固定した版で入れているものに、固定した版より新
   bootstrap-windows-pin-updates.sh --candidates --json [--grace 1,3,7] [<名前>…]  同じものを JSON で出す
   bootstrap-windows-pin-updates.sh --list --json [<名前>…]                        固定した版を JSON で出す (ネットワークを使わない)
 
-  名前: openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・vs-buildtools・rustup・herdr-app・herdr-core (省けば全部)
+  名前: openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・pwsh・vs-buildtools・rustup・herdr-app・herdr-core (省けば全部)
 EOS
 }
 
@@ -459,7 +459,7 @@ if [[ -r ${group_file} ]]; then
   windows_tailscale=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsTailscale")) then .tools.windowsTailscale | tostring else "false" end' \
     "${group_file}" 2>/dev/null) || windows_tailscale=false
 fi
-# bootstrap が入れる 4 つと、runner が入れる ghq・fzf・starship は、Windows で bootstrap を流した (Windows の ghq に dotfiles の clone がある)
+# bootstrap が入れる 5 つと、runner が入れる ghq・fzf・starship は、Windows で bootstrap を流した (Windows の ghq に dotfiles の clone がある)
 # マシンでだけ確かめる
 windows_home=$(jq -r '.windowsHome // empty' "${state_file}")
 bootstrapped=0
@@ -483,7 +483,7 @@ for n in "${all_names[@]}"; do
     tailscale)
       [[ ${windows_tailscale} == true ]] || continue
       ;;
-    git | gh | vs-buildtools | rustup | ghq | fzf | starship)
+    git | gh | pwsh | vs-buildtools | rustup | ghq | fzf | starship)
       ((bootstrapped)) || continue
       ;;
   esac
