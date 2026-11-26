@@ -14,7 +14,7 @@ PowerShell (System32 のもの) で流す。UAC の確認は入れる・上げ�
 winget の出力を一時ファイルに書いて winget の終了コードで終わり、こちらがそのファイルを読んで出す。MSIX は打ったユーザーに入る (UAC で
 昇格しても同じユーザー)。
 
-runner (手順 claude-desktop。ホストの値の [tools] windowsClaudeDesktop が on のマシンだけ。既定は personal) は入っていないときだけ
+runner (手順 claude-desktop。ホストの値の [tools] windowsClaudeDesktop が on のマシンだけ。既定はグループで決まり、all で on) は入っていないときだけ
 -IfMissing で入れ、上げはしない。Claude Desktop は自分で上がる (約 4 時間ごと) ので、入っている版の方が新しくても下げず、揃っている
 扱いにする (固定した版は、新しく入れるときの版)。古いときは知らせ、上げるのは人がこのスクリプトを打つ。
 

@@ -902,7 +902,7 @@ mod tests {
     /// SSH の中継を使うホスト (1Password の switch も要る)
     const RELAY_HOST: &str =
         "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const FORCE: Mode = Mode::Apply { force: true };
     const A: &str = "Host a\n  HostName a.example.test\n";

@@ -44,8 +44,8 @@ let
   # (mkIf の中身は条件が false なら評価されないので null 補間にならない)。
   opSshSignPath = "/mnt/c/Users/${wsl.onePassword.windowsUserName}/AppData/Local/Microsoft/WindowsApps/op-ssh-sign-wsl.exe";
 
-  # git の名前とメールを個人のアカウント (pollenjp・pollenjp-sub) にするか (既定は設定グループの ③ 個人の道具)。
-  # false のホスト (自社・客先) には名前もメールも書かない。そのホストで使うものをホストの modules に
+  # git の名前とメールを個人のアカウント (pollenjp・pollenjp-sub) にするか (既定はグループ all だけ on)。
+  # false のホスト (足していない minimum のホスト) には名前もメールも書かない。そのホストで使うものをホストの modules に
   # programs.git.settings.user で書く (書かなければ git が commit の前に止まる。個人の名前で commit してしまわない)。
   useIdentity = config.dotfiles.git.identity.enable;
 

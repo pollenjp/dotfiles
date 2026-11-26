@@ -86,7 +86,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `git`・`gh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 4 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない) |
 
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
-  `enable` が false。herdr-app・herdr-core は `herdr` の値。`tailscale` はどのグループでも既定が false) では、setup はその名前を確かめも
+  `enable` が false。herdr-app・herdr-core は `herdr` の値。グループ minimum では、どれも足さなければ false) では、setup はその名前を確かめも
   揃えもしない (`nix/README.md` の「設定グループ」)。受け持ちを runner に切り替えたホストでは、Nix の値でなく、Windows のホストの値の `[tools]`
   (`windowsNtn`・`windowsClaudeCode`・`windowsHerdr`・`windowsTailscale`) と `win/runner/groups.json` の既定で決まる (`win/README.md` の「ホストの値」)
 

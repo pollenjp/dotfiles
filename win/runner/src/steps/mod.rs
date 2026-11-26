@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn gates() {
         let h = parse(
-            "group = \"company\"",
+            "group = \"minimum\"\n[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\n",
             Path::new("h.toml"),
             Groups::embedded().unwrap(),
         )
@@ -471,14 +471,14 @@ mod tests {
         assert_eq!(Gate::Tool("windowsHerdr").off_reason(&h), None);
         assert_eq!(
             Gate::Tool("windowsNtn").off_reason(&h).unwrap(),
-            "このホストでは off (windowsNtn = false。グループ company の既定)"
+            "このホストでは off (windowsNtn = false。グループ minimum の既定)"
         );
         // 効く条件のある道具: どれも true のときだけ on。off のわけは最初の false の道具
         assert_eq!(
             Gate::AllTools(&["windowsHerdr", "windowsNtn"])
                 .off_reason(&h)
                 .unwrap(),
-            "このホストでは off (windowsNtn = false。グループ company の既定)"
+            "このホストでは off (windowsNtn = false。グループ minimum の既定)"
         );
         assert_eq!(
             Gate::AllTools(&["windowsClaudeCode", "windowsHerdr"]).off_reason(&h),

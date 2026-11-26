@@ -53,11 +53,11 @@
 #
 # ## ホストの要約 (summary・summaries)
 #
-# ホストの設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles-private の docs/adr/057_host_setting_groups_*。
+# ホストの設定グループ・道具の on/off と、その値がどこで決まったか (dotfiles-private の docs/adr/057_host_setting_groups_*・109_host_groups_minimum_all_*。
 # 図の HTML にしたのは docs/adr/093_host_summary_html_*)。中身は nix/lib/host-summary/ (mkHome が組み立てたホストに足す
 # hostSummary と、flake の lib.hostSummaryFiles) で、ここは評価して出す・書くだけ。
 #
-#   summary     1 ホストの要約を stdout に出す (既定は setup が --host なしで選ぶホスト。客先の PC の tmp でも)。ローカル flake の
+#   summary     1 ホストの要約を stdout に出す (既定は setup が --host なしで選ぶホスト。ローカル flake の tmp でも)。ローカル flake の
 #               写しで評価する (--nix-dir を渡したときだけ写しの本体を替える)。--out <dir> なら、そのホストのページ (md と HTML 版。
 #               <dir>/nix/<ホスト>.md・<dir>/nix/html/<ホスト>.html) を書く (登録しない PC でもブラウザで図を見られる)
 #   summaries   dotfiles-private の作業ツリーの nix/hosts/*.nix と win/hosts/*.toml の全ホストを、compare の新しい形と同じく
@@ -114,7 +114,7 @@ usage() {
       0 = 同じ (shared/ を外すと同じ = shared/ の値だけ違うときも)、1 = 違う (config.dotfiles の違いを出す)、
       2 = 使い方の誤り・登録のファイルが無い、3 = 旧い形が評価できない、4 = 新しい形 (shared/ を足した形) が評価できない
   private-host.sh summary [--host <ホスト>] [--flake <dir>] [--nix-dir <本体の nix>] [--out <dir>]
-      ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか) を出す。既定のホストは setup が --host なしで
+      ホストの要約 (設定グループ・道具の on/off と、その値がどこで決まったか) を出す。既定のホストは setup が --host なしで
       選ぶもの (決まらなければ 2)。ローカル flake の写しで評価し、--nix-dir を渡せば写しの本体をそこに替える。--out なら、
       そのホストのページ (dotfiles-private の docs/hosts/ に置くのと同じ md と HTML 版) を <dir>/nix/ に書く (<dir> は無い場所。
       在れば 2)。ホストを評価できなければ 3
@@ -1089,7 +1089,7 @@ cmd_summary() {
   fi
   # $(…) は末尾の改行を落とすので、出すときに 1 つ足す (要約の文は改行で終わる)
   printf '==> ホスト %s の要約 (設定グループ。ローカル flake %s で評価)\n%s\n' "${host}" "${flake_dir}" "${text}"
-  echo "  (段・道具の switch の直し方は本体の nix/README.md「設定グループ」。グループごとの既定は nix/groups.md。図は --out <dir> で書く HTML 版)"
+  echo "  (グループ・道具の switch の直し方は本体の nix/README.md「設定グループ」。グループごとの既定は nix/groups.md。図は --out <dir> で書く HTML 版)"
 }
 
 summary_eval_failed() {

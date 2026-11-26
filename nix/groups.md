@@ -4,95 +4,105 @@
 
 # 設定グループ
 
-ホストは設定グループを 1 つ選び (`mkHome` の `group`)、グループは「どの段の道具まで入れるか」で決まる (dotfiles-private の ADR 057)。選び方・直し方・setup の振る舞いは [README の「設定グループ」](./README.md#設定グループ)。ここは `nix/lib/groups.nix` の表と、作り物のホストの値から作った生成物。登録したホストごとの図 (段の入れ子の領域と、ホストごとの囲みの線) は dotfiles-private の `docs/hosts/` にある (dotfiles-private の ADR 093)。
+ホストは設定グループを 1 つ選ぶ (`mkHome` の `group`)。グループは道具の集合で、グループに入る道具の switch は全部既定で on、入らない道具は既定で off になる (dotfiles-private の ADR 109)。選び方・直し方・setup の振る舞いは [README の「設定グループ」](./README.md#設定グループ)。ここは `nix/lib/groups.nix` の表と、作り物のホストの値から作った生成物。登録したホストごとの図 (グループの入れ子の領域と、ホストごとの囲みの線) は dotfiles-private の `docs/hosts/` にある (dotfiles-private の ADR 093)。
 
 ## グループ
 
-| グループ | 使う PC と何を入れるか | ① エンジニアの道具 | ② AI の道具 | ③ 個人の道具 |
+| グループ | 使う PC と何を入れるか | 入る道具の switch |
+| --- | --- | --- |
+| `minimum` | どの PC にも初めからあってほしいもの (基本の道具と、証明書の束・掃除)。ほとんどのホストはこれにして、使う道具をホストのファイルで足す (グループを書かないホストもこれ) | 2 / 28 |
+| `all` | 道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない。道具の前提 (1Password の署名の鍵・Windows の側の SSH の中継・Notion の宛先など) もそろう PC で選ぶ (README の「設定グループ」) | 28 / 28 |
+
+`minimum` ⊂ `all`。グループを書かないホストは `minimum`。
+
+## 基本の道具 (switch なし)
+
+どのグループにも入り、いつも入る (`minimum` の中)。外したいホストが出たら、そのとき switch を足す。
+
+- shell (fish・bash)
+- starship (prompt)
+- git
+- ssh
+- vim と neovim
+- tmux と zellij
+- CLI (rg・fd・jq・fzf・gh・ghq など)
+- mise
+- direnv
+- python
+
+## 道具の switch と、グループに入るか
+
+on の道具は、そのグループのホストで既定で on になる。ただし効く条件 (そのマシンの環境と、頼るほかの道具) が合わなければ、グループに入っていても既定で off になる (要約の表と図では「–」)。グループに入らない道具も、ホストのファイルで on にできる。
+
+| 道具 | option (`dotfiles.…`) | `minimum` | `all` | 効く条件 |
 | --- | --- | --- | --- | --- |
-| `personal` | 個人の開発用の PC。① ② ③ を全部入れる (グループを選ばないホストもこれ) | on | on | on |
-| `company` | 自社の PC。① と ② を入れ、③ は要るものだけをホストで足す | on | on | off |
-| `client` | 客先の PC。① だけを入れ、許可の出た道具をホストで 1 つずつ足す | on | off | off |
-
-## 道具の switch と、グループごとの既定
-
-グループだけを書いた (ほかの値を書かない) ホストの値。Windows の道具は `wsl.windowsFiles.enable` のマシンでだけ効く (効く条件の列)。既定が段によらない道具 (`onePassword.enable` など) は、どのグループでも off で、使うホストが入れる。
-
-| 段 | 道具 | option (`dotfiles.…`) | `personal` | `company` | `client` | 効く条件 |
-| --- | --- | --- | --- | --- | --- | --- |
-| ① | WSL の手当て | `wsl.enable` | off | off | off |  |
-| ① | Windows のアプリと設定 (win/) | `wsl.windowsFiles.enable` | off | off | off |  |
-| ① | .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | off | off |  |
-| ① | eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | off | off |  |
-| ① | 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | on | on |  |
-| ① | 使わない store path・mise の版の掃除 | `cleanup.enable` | on | on | on |  |
-| ② | Claude Code 一式 | `claude.enable` | on | on | off |  |
-| ② | herdr | `herdr.enable` | on | on | off |  |
-| ② | herdr-core (hc) | `herdrCore.enable` | on | on | off |  |
-| ② | systemd の linger (ログアウトしても user の service を止めない) | `linger.enable` | on | on | off |  |
-| ② | Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | on | on | off | `wsl.windowsFiles.enable` |
-| ② | Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | on | on | off | `wsl.windowsFiles.enable` |
-| ② | cursor-agent | `cursorAgent.enable` | off | off | off |  |
-| ② | T3 Code (t3 と t3code.service) | `t3Code.enable` | off | off | off | `claude.enable` |
-| ② | Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | off | off | `wsl.windowsFiles.enable` |
-| ②③ | private な skill (claude-skills の clone) | `claude.privateSkills.enable` | on | off | off |  |
-| ②③ | cc-pages | `ccPages.enable` | on | off | off |  |
-| ②③ | 集約ハブ ~/h | `herdr.hub.enable` | on | off | off |  |
-| ②③ | Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | on | off | off | `wsl.windowsFiles.enable`・`wsl.windowsFiles.claudeCode.enable` |
-| ②③ | Windows の Claude Desktop (MSIX) | `wsl.windowsFiles.claudeDesktop.enable` | on | off | off | `wsl.windowsFiles.enable` |
-| ②③ | Notion Dev Tracker | `claude.devTracker.enable` | off | off | off |  |
-| ②③ | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | off | off |  |
-| ③ | 1Password | `onePassword.enable` | off | off | off |  |
-| ③ | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | off | off | `onePassword.enable` |
-| ③ | ntn (Notion の CLI) | `ntn.enable` | on | off | off |  |
-| ③ | Windows の ntn | `wsl.windowsFiles.ntn.enable` | on | off | off | `wsl.windowsFiles.enable` |
-| ③ | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | off | off | `wsl.windowsFiles.enable` |
-| ③ | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | off | off | `wsl.windowsFiles.enable` |
-| ③ | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | off | off | `wsl.windowsFiles.enable` |
-| ③ | git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | on | off | off |  |
+| .exe の起動の記録 (WSL) | `wsl.exeExecTrace.enable` | off | on | `wsl.enable` |
+| eth0 の MTU の見張り (WSL) | `wsl.mtuGuard.enable` | off | on | `wsl.enable` |
+| 証明書の束を OS の信頼ストアに寄せる | `osCaBundle.enable` | on | on |  |
+| 使わない store path・mise の版の掃除 | `cleanup.enable` | on | on |  |
+| Claude Code 一式 | `claude.enable` | off | on |  |
+| herdr | `herdr.enable` | off | on |  |
+| herdr-core (hc) | `herdrCore.enable` | off | on | Linux (macOS でない) |
+| systemd の linger (ログアウトしても user の service を止めない) | `linger.enable` | off | on | 既定は `herdrCore.enable` に従う・Linux (macOS でない) |
+| Windows の Claude Code | `wsl.windowsFiles.claudeCode.enable` | off | on | `wsl.windowsFiles.enable` |
+| Windows の herdr・herdr-app | `wsl.windowsFiles.herdr.enable` | off | on | `wsl.windowsFiles.enable` |
+| cursor-agent | `cursorAgent.enable` | off | on |  |
+| T3 Code (t3 と t3code.service) | `t3Code.enable` | off | on | Linux (macOS でない)・`claude.enable` |
+| Windows の T3 Code | `wsl.windowsFiles.t3Code.enable` | off | on | `wsl.windowsFiles.enable` |
+| private な skill (claude-skills の clone) | `claude.privateSkills.enable` | off | on |  |
+| cc-pages | `ccPages.enable` | off | on |  |
+| 集約ハブ ~/h | `herdr.hub.enable` | off | on |  |
+| Windows の claude-personal・claude-work | `wsl.windowsFiles.claudeAccounts.enable` | off | on | `wsl.windowsFiles.enable`・`wsl.windowsFiles.claudeCode.enable` |
+| Windows の Claude Desktop (MSIX) | `wsl.windowsFiles.claudeDesktop.enable` | off | on | `wsl.windowsFiles.enable` |
+| Notion Dev Tracker | `claude.devTracker.enable` | off | on |  |
+| Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | on | Linux (macOS でない) |
+| 1Password | `onePassword.enable` | off | on | WSL なら `wsl.onePassword.windowsUserName` (既定は `wsl.windowsUserName`) が null でない (WSL でなければいつも) |
+| op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | on | `wsl.enable`・`wsl.windowsFiles.enable` が false・`onePassword.enable` |
+| ntn (Notion の CLI) | `ntn.enable` | off | on |  |
+| Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | on | `wsl.windowsFiles.enable` |
+| Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | on | `wsl.windowsFiles.enable` |
+| Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | on | `wsl.windowsFiles.enable` |
+| Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | on | `wsl.windowsFiles.enable` |
+| git の名前とメール (pollenjp・pollenjp-sub) | `git.identity.enable` | off | on |  |
 
 ## 作り物のホストの値
 
-`nix/lib/group-examples.nix` のホスト (どれも WSL で `win/` を配る。値は作り物)。**太字**はホストで決めた値。「–」は値は on だが、効く条件が off で効かない。
+`nix/lib/group-examples.nix` のホスト (値は作り物)。**太字**はホストで決めた値。「–」は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)。
 
-- `personal`: personal (個人の PC。グループの既定のまま)
-- `company`: company (自社の PC。③ の道具を足していない)
-- `client`: client (客先の PC)
-- `client-claude`: client に Claude Code だけを足したホスト (`claude.enable = true`)
+- `minimum`: minimum (グループの既定のまま。WSL で win/ を配る)
+- `minimum-claude`: minimum に Claude Code だけを足したホスト (`claude.enable = true`。WSL で win/ を配る)
+- `all-wsl`: all (WSL で win/ を配る)
+- `all-linux`: all (WSL でない Linux)
 
-| 道具 | `personal` | `company` | `client` | `client-claude` |
+| 道具 | `minimum` | `minimum-claude` | `all-wsl` | `all-linux` |
 | --- | --- | --- | --- | --- |
-| グループ | **`personal`** | **`company`** | **`client`** | **`client`** |
-| ① エンジニアの道具 | on | on | on | on |
-| ② AI の道具 | on | on | off | off |
-| ③ 個人の道具 | on | off | off | off |
-| ① WSL の手当て | **on** | **on** | **on** | **on** |
-| ① Windows のアプリと設定 (win/) | **on** | **on** | **on** | **on** |
-| ① .exe の起動の記録 (WSL) | off | off | off | off |
-| ① eth0 の MTU の見張り (WSL) | off | off | off | off |
-| ① 証明書の束を OS の信頼ストアに寄せる | on | on | on | on |
-| ① 使わない store path・mise の版の掃除 | on | on | on | on |
-| ② Claude Code 一式 | on | on | off | **on** |
-| ② herdr | on | on | off | off |
-| ② herdr-core (hc) | on | on | off | off |
-| ② systemd の linger (ログアウトしても user の service を止めない) | on | on | off | off |
-| ② Windows の Claude Code | on | on | off | off |
-| ② Windows の herdr・herdr-app | on | on | off | off |
-| ② cursor-agent | off | off | off | off |
-| ② T3 Code (t3 と t3code.service) | off | off | off | off |
-| ② Windows の T3 Code | off | off | off | off |
-| ②③ private な skill (claude-skills の clone) | on | off | off | off |
-| ②③ cc-pages | on | off | off | off |
-| ②③ 集約ハブ ~/h | on | off | off | off |
-| ②③ Windows の claude-personal・claude-work | on | off | off | off |
-| ②③ Windows の Claude Desktop (MSIX) | on | off | off | off |
-| ②③ Notion Dev Tracker | off | off | off | off |
-| ②③ Dev Tracker の見回り役 | off | off | off | off |
-| ③ 1Password | off | off | off | off |
-| ③ op-reason の SSH の中継 | off | off | off | off |
-| ③ ntn (Notion の CLI) | on | off | off | off |
-| ③ Windows の ntn | on | off | off | off |
-| ③ Windows の Tailscale | off | off | off | off |
-| ③ Windows の sshd (Tailscale から鍵で入る) | off | off | off | off |
-| ③ Windows の type-clipboard | off | off | off | off |
-| ③ git の名前とメール (pollenjp・pollenjp-sub) | on | off | off | off |
+| グループ | **`minimum`** | **`minimum`** | **`all`** | **`all`** |
+| 環境 | WSL · win/ を配る | WSL · win/ を配る | WSL · win/ を配る | Linux (WSL でない) |
+| .exe の起動の記録 (WSL) | off | off | on | – |
+| eth0 の MTU の見張り (WSL) | off | off | on | – |
+| 証明書の束を OS の信頼ストアに寄せる | on | on | on | on |
+| 使わない store path・mise の版の掃除 | on | on | on | on |
+| Claude Code 一式 | off | **on** | on | on |
+| herdr | off | off | on | on |
+| herdr-core (hc) | off | off | on | on |
+| systemd の linger (ログアウトしても user の service を止めない) | off | off | on | on |
+| Windows の Claude Code | off | off | on | – |
+| Windows の herdr・herdr-app | off | off | on | – |
+| cursor-agent | off | off | on | on |
+| T3 Code (t3 と t3code.service) | off | off | on | on |
+| Windows の T3 Code | off | off | on | – |
+| private な skill (claude-skills の clone) | off | off | on | on |
+| cc-pages | off | off | on | on |
+| 集約ハブ ~/h | off | off | on | on |
+| Windows の claude-personal・claude-work | off | off | on | – |
+| Windows の Claude Desktop (MSIX) | off | off | on | – |
+| Notion Dev Tracker | off | off | on | on |
+| Dev Tracker の見回り役 | off | off | on | on |
+| 1Password | off | off | on | on |
+| op-reason の SSH の中継 | off | off | – | – |
+| ntn (Notion の CLI) | off | off | on | on |
+| Windows の ntn | off | off | on | – |
+| Windows の Tailscale | off | off | on | – |
+| Windows の sshd (Tailscale から鍵で入る) | off | off | on | – |
+| Windows の type-clipboard | off | off | on | – |
+| git の名前とメール (pollenjp・pollenjp-sub) | off | off | on | on |

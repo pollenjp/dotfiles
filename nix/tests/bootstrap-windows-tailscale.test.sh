@@ -261,10 +261,10 @@ warn_lines() { outerr "$1" | grep -c '⚠️'; }
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
 state_off='{"enable":false,"version":1,"windowsHome":null}'
-group_on='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true,"windowsTailscale":true},"version":1}'
-group_off='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true,"windowsTailscale":false},"version":1}'
+group_on='{"group":"all","tools":{"windowsTailscale":true},"version":2}'
+group_off='{"group":"all","tools":{"windowsTailscale":false},"version":2}'
 # 道具を足す前の世代の group.json (windowsTailscale の欄が無い)
-group_absent='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true},"version":1}'
+group_absent='{"group":"all","tools":{"claude":true},"version":2}'
 
 echo "== bootstrap-windows-tailscale.sh: ${script}"
 

@@ -6,7 +6,7 @@
 # ## 確かめること
 #
 #   評価時 (assert。CI の `nix flake check --all-systems --no-build` でも落ちる)
-#     - 既定 (personal) では home.sessionPath が ~/bin・~/.local/bin・~/.cargo/bin の順。dotfiles.claude.privateSkills.enable =
+#     - グループ all の既定では home.sessionPath が ~/bin・~/.local/bin・~/.cargo/bin の順。dotfiles.claude.privateSkills.enable =
 #       false では ~/.cargo/bin が無い
 #     - Linux の既定 (dotfiles.herdrCore.enable) では home.sessionVariablesExtra に mise の shim を PATH の最後に足す行がある。
 #       dotfiles.herdrCore.enable = false と macOS の既定には無い
@@ -30,15 +30,20 @@ let
     (mkHome {
       username = "tester";
       inherit system modules;
+      # グループ all のホスト (claude-skills が入り、herdr-core は Linux でだけ既定で入る)
+      group = "all";
     }).config;
 
   cfgs = {
     all = configWith [ ];
-    # 集約ハブ (herdr.hub) は claude-skills の clone を要る (group.nix の assertion) ので、一緒に外す
+    # 集約ハブ (herdr.hub) と Dev Tracker (見回り役も) は claude-skills の clone を要る (group.nix・dev-tracker-inbox.nix の
+    # assertion) ので、一緒に外す
     noCargo = configWith [
       {
         dotfiles.claude.privateSkills.enable = false;
         dotfiles.herdr.hub.enable = false;
+        dotfiles.claude.devTracker.enable = false;
+        dotfiles.claude.devTracker.inbox.enable = false;
       }
     ];
     noShims = configWith [ { dotfiles.herdrCore.enable = false; } ];

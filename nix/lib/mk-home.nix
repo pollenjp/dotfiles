@@ -5,8 +5,8 @@
 # home の pkgs には、nixpkgs の猶予の例外 (release-age.nix の一部の例外) の overlay を当て、消し時の警告を
 # home-manager の warnings に出す (releaseAge は flake.nix が lib/release-age.nix を inputs で呼んだもの。ADR 032)。
 #
-# 組み立てたホスト (homeManagerConfiguration の結果) には hostSummary を足す: 設定グループ・段・道具の on/off と、その値が
-# どこで決まったかの要約 (lib/host-summary/。ADR 057)。nix/scripts/private-host.sh (summary・summaries) と setup.sh
+# 組み立てたホスト (homeManagerConfiguration の結果) には hostSummary を足す: 設定グループ・道具の on/off と、その値が
+# どこで決まったかの要約 (lib/host-summary/。ADR 057・109)。nix/scripts/private-host.sh (summary・summaries) と setup.sh
 # (この PC の要約の古さ) が `homeConfigurations.<ホスト>.hostSummary` を評価して使う。足すのは attr 1 つで、activationPackage
 # は変えない (読まれたときだけ評価する)。
 { inputs, releaseAge }:
@@ -62,12 +62,13 @@
   # dotfiles-private に登録したホストには、dotfiles-private の nix/shared/*.nix の module も modules の前に足される
   # (登録した全 PC に効かせる値。mise の遅延の上書きなど)。
   claude ? { },
-  # 設定グループ (dotfiles.group に入る。dotfiles-private の docs/adr/057_host_setting_groups_*)。段の switch の既定を決める。
+  # 設定グループ (dotfiles.group に入る。dotfiles-private の docs/adr/109_host_groups_minimum_all_*)。グループは道具の集合で、
+  # グループに入る道具の switch が既定で on になる。
   #
-  #   group = "company";   # personal (個人の PC。既定)・company (自社の PC)・client (客先の PC)
+  #   group = "minimum";   # minimum (どの PC にも初めからあってほしいもの。既定)・all (道具を全部)
   #
-  # 省略すれば定義しない (option の既定の personal のまま。ホストの要約は「選んでいない」と出す)。段・道具の switch は
-  # claude の引数 (claude.enable など) か modules (dotfiles.ntn.enable など) で上書きする。
+  # 省略すれば定義しない (option の既定の minimum のまま。ホストの要約は「選んでいない」と出す)。道具の switch は
+  # claude の引数 (claude.enable など) か modules (dotfiles.ntn.enable など) で足す・外す。
   group ? null,
   modules ? [ ],
 }:

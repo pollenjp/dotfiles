@@ -21,6 +21,8 @@
 #     何も出さずに進む。対象ホストが決まっていなければ nix を呼ばない
 #   - switch の手順の頭でもう一度評価し、実行の頭に出した行と同じなら出さない (1 回だけ)。変わっていれば (取得でグループが
 #     変わった) 「グループ (前に出したものから変わった): …」と出し直す
+#   - グループを選んでいないホスト (「(選んでいない。既定)」) なら、前の既定 (personal) の道具を保つ書き方の場所をもう 1 行出す
+#     (既定が personal から minimum に替わり、グループを書いていない tmp は縮むため。ADR 109)。選んだホストには出さない
 #
 # ## 作り
 #
@@ -143,21 +145,26 @@ show() {
     "$(cd "$1/home" && printf '%s ' ran-* 2>/dev/null)" "$(cat "$1/home/nix-calls" 2>/dev/null)"
 }
 
-off_claude='{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"claude":false,"claudePrivateSkills":true},"version":1}'
-all_on='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"claude":true,"claudePrivateSkills":true},"version":1}'
-off_skills='{"group":"company","tiers":{"aiTools":true,"personalAccounts":false},"tools":{"claude":true,"claudePrivateSkills":false},"version":1}'
+off_claude='{"group":"minimum","tools":{"claude":false,"claudePrivateSkills":true},"version":2}'
+all_on='{"group":"all","tools":{"claude":true,"claudePrivateSkills":true},"version":2}'
+off_skills='{"group":"minimum","tools":{"claude":true,"claudePrivateSkills":false},"version":2}'
+# 前の版 (ADR 057 の version 1。段の tiers を持つ) の group.json も、tools の字で同じに読む
+off_claude_v1='{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"claude":false,"claudePrivateSkills":true},"version":1}'
 
 echo "== setup.sh: 設定グループで手順を飛ばす (${setup})"
 
 # 1. off の key の手順は飛ばし、結果に ↷ を出す。見出しの無い手順・true の手順・40 行より後ろの見出しの手順は流す
 c=$(new_case off "${off_claude}")
 run "${c}" --steps "${steps}"
+cv1=$(new_case off-v1 "${off_claude_v1}")
+run "${cv1}" --steps "${steps}"
 if [[ $(rc "${c}") == 0 ]] && ! ran "${c}" claude && ran "${c}" skills && ran "${c}" plain && ran "${c}" late \
   && grep -Fq 'このホストでは dotfiles.claude.enable が off なので飛ばします' "${c}/out" \
-  && grep -Fq '↷ ./nix/scripts/bootstrap-claude.sh (このホストでは off)' "${c}/out"; then
-  ok "group.json で false の道具の手順は飛ばして ↷ を出し、見出しの無い・true の・40 行より後ろに見出しのある手順は流す"
+  && grep -Fq '↷ ./nix/scripts/bootstrap-claude.sh (このホストでは off)' "${c}/out" \
+  && [[ $(rc "${cv1}") == 0 ]] && ! ran "${cv1}" claude && ran "${cv1}" skills; then
+  ok "group.json で false の道具の手順は飛ばして ↷ を出し、見出しの無い・true の・40 行より後ろに見出しのある手順は流す (前の版の group.json も同じ)"
 else
-  ng "off の道具" "$(show "${c}")"
+  ng "off の道具" "$(show "${c}")"$'\n'"--- 前の版"$'\n'"$(show "${cv1}")"
 fi
 
 # 2. 名前の頭が同じ別の key を取り違えない (claudePrivateSkills だけが false)
@@ -199,15 +206,16 @@ fi
 
 # 5. 対象ホストが決まっていれば、実行の頭にグループを 1 行出す (1 回だけ)。nix eval が落ちれば黙って進む
 c=$(new_case group-line "${all_on}")
-FAKE_GROUP_LINE='client (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 off · ③ 個人の道具 off' \
+FAKE_GROUP_LINE='minimum (ホストで選んだ)' \
   run "${c}" --host testhost --steps bootstrap-plain
-lines=$(grep -c '^  グループ: client (ホストで選んだ)' "${c}/out" || true)
+lines=$(grep -c '^  グループ: minimum (ホストで選んだ)' "${c}/out" || true)
 evals=$(grep -c '^eval --raw --no-write-lock-file .*homeConfigurations\."testhost"' "${c}/home/nix-calls" 2>/dev/null || true)
 c2=$(new_case group-line-fail "${all_on}")
 FAKE_NIX_FAIL=1 run "${c2}" --host testhost --steps bootstrap-plain
 c3=$(new_case group-line-nohost "${all_on}")
-FAKE_GROUP_LINE='client' run "${c3}" --steps bootstrap-plain
+FAKE_GROUP_LINE='minimum' run "${c3}" --steps bootstrap-plain
 if [[ $(rc "${c}") == 0 && ${lines} == 1 && ${evals} == 1 ]] && ran "${c}" plain \
+  && ! grep -Fq '前のグループから移す' "${c}/out" \
   && [[ $(rc "${c2}") == 0 ]] && ! grep -Fq 'グループ:' "${c2}/out" && ran "${c2}" plain \
   && [[ $(rc "${c3}") == 0 && ! -e ${c3}/home/nix-calls ]]; then
   ok "対象ホストが決まっていれば実行の頭にグループを 1 回出し、nix eval が落ちれば黙る。決まっていなければ nix を呼ばない"
@@ -217,20 +225,30 @@ fi
 
 # 6. switch の頭でもう一度評価し、同じ行なら出さない (1 回だけ)。変わっていれば「前に出したものから変わった」と出し直す
 c=$(new_case group-switch "${all_on}")
-FAKE_GROUP_LINE='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 off' \
+FAKE_GROUP_LINE='all (ホストで選んだ)' \
   run "${c}" --host testhost --steps switch
 same_lines=$(grep -c 'グループ' "${c}/out" || true)
 same_evals=$(grep -c -- '--apply hc:' "${c}/home/nix-calls" 2>/dev/null || true)
 c2=$(new_case group-switch-changed "${all_on}")
-FAKE_GROUP_LINE='personal (選んでいない。既定) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 on' \
-  FAKE_GROUP_LINE2='company (ホストで選んだ) · ① エンジニアの道具 on · ② AI の道具 on · ③ 個人の道具 off' \
+FAKE_GROUP_LINE='minimum (選んでいない。既定)' \
+  FAKE_GROUP_LINE2='minimum (ホストで選んだ)' \
   run "${c2}" --host testhost --steps switch
 if [[ $(rc "${c}") == 0 && ${same_lines} == 1 && ${same_evals} == 2 && $(rc "${c2}") == 0 ]] \
-  && grep -Fq '  グループ: personal (選んでいない。既定)' "${c2}/out" \
-  && grep -Fq '  グループ (前に出したものから変わった): company (ホストで選んだ)' "${c2}/out"; then
+  && grep -Fq '  グループ: minimum (選んでいない。既定)' "${c2}/out" \
+  && grep -Fq '  グループ (前に出したものから変わった): minimum (ホストで選んだ)' "${c2}/out"; then
   ok "switch の頭で評価し直し、同じ行なら出さず (1 回だけ)、変わっていれば「前に出したものから変わった」と出し直す"
 else
   ng "switch の頭のグループ" "lines=${same_lines} evals=${same_evals}"$'\n'"$(show "${c}")"$'\n'"--- 変わる"$'\n'"$(show "${c2}")"
+fi
+
+# 7. グループを選んでいないホストは、前の既定の道具を保つ書き方の場所をもう 1 行出す (選んだホストには出さない。5 で見た)
+c=$(new_case group-unset "${all_on}")
+FAKE_GROUP_LINE='minimum (選んでいない。既定)' run "${c}" --host testhost --steps bootstrap-plain
+if [[ $(rc "${c}") == 0 ]] && grep -Fq '  グループ: minimum (選んでいない。既定)' "${c}/out" \
+  && grep -Fq 'グループを書かないホストは minimum (足した道具だけが入る)。前の既定 personal の道具を保つ書き方は、nix/README.md「設定グループ」の「前のグループから移す」' "${c}/out"; then
+  ok "グループを選んでいないホストは、前の既定 (personal) の道具を保つ書き方の場所をもう 1 行出す"
+else
+  ng "選んでいないホストの 2 行目" "$(show "${c}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

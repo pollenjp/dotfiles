@@ -56,8 +56,8 @@
 #
 # ## cc-pages を入れるホストだけ
 #
-# unit と config.toml は dotfiles.ccPages.enable のホストにだけ置く (既定は設定グループの ② AI の道具と ③ 個人の道具が
-# 両方 on のとき。private な repo を clone して build する Claude Code の道具なので)。false のホストでは setup も
+# unit と config.toml は dotfiles.ccPages.enable のホストにだけ置く (既定はグループ all だけ on。private な repo を clone して
+# build する Claude Code の道具なので、minimum のホストは使うときに足す)。false のホストでは setup も
 # bootstrap-cc-pages を飛ばす。Claude Code の footer の規則と status line の 📄top は cc-pages が無くても置く (リンクが開けないだけ)。
 { config, lib, ... }:
 

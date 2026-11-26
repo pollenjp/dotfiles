@@ -186,7 +186,7 @@ in
       zdel-all = "z delete-all-sessions";
 
     }
-    # herdr を入れるホスト (dotfiles.herdr.enable。既定は ② AI の道具) だけに置く
+    # herdr を入れるホスト (dotfiles.herdr.enable。既定はグループで決まり、all で on) だけに置く
     // lib.optionalAttrs config.dotfiles.herdr.enable {
       # herdr。zellij の z* の先頭を h に変えただけ。対応表・`hd` を作れない
       # 理由・落としたものは fish.nix の同じ節に書いてある。
@@ -211,7 +211,7 @@ in
       hr = "herdr --remote";
 
     }
-    # Claude Code を入れるホスト (dotfiles.claude.enable。既定は ② AI の道具) だけに置く
+    # Claude Code を入れるホスト (dotfiles.claude.enable。既定はグループで決まり、all で on) だけに置く
     // lib.optionalAttrs config.dotfiles.claude.enable {
       #########################
       # Claude Code

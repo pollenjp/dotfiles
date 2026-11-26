@@ -416,7 +416,7 @@ mod tests {
     /// WSL の script が足す 1 行 (nix/tests/bootstrap-windows-powershell-profile.test.sh の `line` と同じ字を手で書いたもの)
     const WSL_LINE: &str = r#"if (Test-Path "$HOME\.config\powershell\dotfiles.ps1") { . "$HOME\.config\powershell\dotfiles.ps1" }"#;
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
 
     struct Env {

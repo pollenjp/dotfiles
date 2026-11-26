@@ -131,7 +131,7 @@ fn files_flow() {
 
 #[test]
 fn apply_is_blocked_while_wsl_owns_the_host() {
-    let w = World::new("group = \"personal\"\n");
+    let w = World::new("group = \"minimum\"\n");
     let (code, out, _) = w.run(&["apply", "--steps", "files"], true);
     assert_eq!(code, 1, "{out}");
     assert!(out.contains("apply は止めた"));
@@ -153,15 +153,15 @@ fn default_host_path_uses_username_and_hostname() {
     let w = World::new("");
     w.t.write(
         &format!("g/dotfiles-private/win/hosts/tester@{pc}.toml"),
-        "group = \"company\"\n",
+        "group = \"minimum\"\n",
     );
     let (code, out, err) = w.run(&["list"], false);
     assert_eq!(code, 0, "{out}{err}");
     assert!(
-        out.contains(&format!("tester@{pc}.toml (グループ company)")),
+        out.contains(&format!("tester@{pc}.toml (グループ minimum)")),
         "{out}"
     );
-    // company では Windows の ntn が off
+    // minimum では Windows の ntn が off
     assert!(out.contains("windowsNtn = false"), "{out}");
 }
 

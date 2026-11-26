@@ -827,11 +827,11 @@ mod tests {
 
         #[test]
         fn check_writes_nothing() {
-            let w = World::new(Some("group = \"personal\"\n"));
+            let w = World::new(Some("group = \"minimum\"\n"));
             let (code, out, _) = w.run(&["check", "--steps", "files"]);
             assert_eq!(code, 3, "{out}");
             assert!(out.contains("==> dotfiles check"));
-            assert!(out.contains("alice@example-host.toml (グループ personal)"));
+            assert!(out.contains("alice@example-host.toml (グループ minimum)"));
             assert!(out.contains("受け持ち: WSL の setup"));
             assert!(out.contains("⚠️ 入っていない・無いものがある → dotfiles apply で揃える ⚠️"));
             assert!(!w.dst().exists());
@@ -859,7 +859,9 @@ mod tests {
         /// 受け持ちが WSL のホストでも、Windows にしか無い手順 (claude-notion) は apply が書き、WSL と同じ手順 (files) は流さない
         #[test]
         fn wsl_host_applies_windows_only_steps() {
-            let w = World::new(Some("[claude.notion]\nprofile = \"personal\"\n"));
+            let w = World::new(Some(
+                "[tools]\nwindowsClaudeCode = true\n[claude.notion]\nprofile = \"personal\"\n",
+            ));
             let notion =
                 w.t.path()
                     .join("home")
@@ -930,13 +932,13 @@ mod tests {
                     "{out}"
                 ),
             }
-            // 移した op-reason は onePassword (どのグループも既定は off) で on/off
+            // 移した op-reason は onePassword (minimum では既定が off) で on/off
             let op_reason = out
                 .lines()
                 .find(|l| l.contains("] op-reason "))
                 .unwrap_or_else(|| panic!("{out}"));
             assert!(
-                op_reason.contains("  off  WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える (onePassword = false。グループ personal の既定)"),
+                op_reason.contains("  off  WSL の op の Windows の部品 (op-reason の zip) を固定した版に揃える (onePassword = false。グループ minimum の既定)"),
                 "{op_reason}"
             );
             assert!(out.contains("[97] type-clipboard"));
@@ -957,7 +959,9 @@ mod tests {
         /// 呼ばない)、check は今の $PROFILE を確かめて、揃えるのは WSL の setup だと添える
         #[test]
         fn wsl_host_leaves_powershell_profile_to_wsl() {
-            let w = World::new(Some("[claude.notion]\nprofile = \"personal\"\n"));
+            let w = World::new(Some(
+                "[tools]\nwindowsClaudeCode = true\n[claude.notion]\nprofile = \"personal\"\n",
+            ));
             w.t.write("home/.config/powershell/dotfiles.ps1", "# dotfiles.ps1\n");
             let home = w.t.path().join("home");
             let profile = home
@@ -1119,7 +1123,7 @@ mod tests {
         /// `!!` の行 (赤)。端末かは出す先ごとに見る
         #[test]
         fn colors_only_terminals_without_no_color() {
-            let w = World::new(Some("group = \"personal\"\n"));
+            let w = World::new(Some("group = \"minimum\"\n"));
             let tty = || {
                 w.sys()
                     .with_terminal(Stream::Stdout)
@@ -1207,7 +1211,7 @@ mod tests {
             let w = World::new(None);
             w.t.write(
                 "home/ghq/github.com/pollenjp/dotfiles-private/win/hosts/alice@example-host.toml",
-                "group = \"company\"\n",
+                "group = \"all\"\n",
             );
             let (code, out, _) = w.run(&["list"]);
             assert_eq!(code, 0, "{out}");
@@ -1222,10 +1226,7 @@ mod tests {
                     .join("hosts")
                     .join("alice@example-host.toml");
             assert!(
-                out.contains(&format!(
-                    "ホストの値: {} (グループ company)",
-                    want.display()
-                )),
+                out.contains(&format!("ホストの値: {} (グループ all)", want.display())),
                 "{out}"
             );
         }
@@ -1267,7 +1268,7 @@ mod tests {
             let (code, out, _) = w.run_with(&sys, &["list"]);
             assert_eq!(code, 0);
             assert!(
-                out.contains("alice@example-host.toml (グループ personal)"),
+                out.contains("alice@example-host.toml (グループ minimum)"),
                 "{out}"
             );
         }

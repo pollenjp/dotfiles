@@ -1,6 +1,0 @@
-# tests/group-client.nix が比べる、客先の作り物のホスト (lib/group-examples.nix の client) の units。1 行 1 つ、名前の順。
-# 道具を足して違いが出たら、段 (lib/groups.nix) を決めて switch で止めるか、① の道具ならここに足す (ADR 057)。
-mise-prune.service
-mise-prune.timer
-nix-gc.service
-nix-gc.timer

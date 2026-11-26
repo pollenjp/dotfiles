@@ -52,6 +52,8 @@ let
       {
         username = "tester";
         inherit system;
+        # Claude の hook (op-reason-guard.sh) は Claude Code 一式と一緒に置く。Claude Code は minimum に入らないので足す
+        claude.enable = true;
       }
       // args
     )).config;

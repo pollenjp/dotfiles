@@ -112,6 +112,24 @@ compare の読み方 (この移し方で出るもの):
 - 本体の Dev Tracker の既定は false になった。`local` の `devTracker.enable = false` は既定と同じなので、型のホストの drvPath は変わらない
 - 段階 3 の前の setup は推測していた。移したら `~/dotfiles/setup --which-host` で対象ホストを確かめる (決まらなければ止まって選べる道を出す)
 
+## グループの既定が minimum に替わった版へ移すとき
+
+dotfiles の ADR 109 で、設定グループは道具の集合 (`minimum`・`all`) になり、グループを書かないホストの既定が `personal` (Claude Code
+一式・herdr・herdr-core・claude-skills・cc-pages・`~/h`・ntn・git の名前とメール) から `minimum` (switch の無い基本の道具と、証明書の束・
+掃除だけ) に替わった。雛形の `tmp` の例も、`group = "minimum";` と道具の行を書く形になった (雛形の版の印が変わる)。
+
+- 本体を新しくした時点で、グループを書いていない手元の `tmp` は `minimum` に縮む (雛形を移すかどうかによらない)。compare は旧い flake と
+  移した flake を同じ (新しい) 本体で比べるので、この縮みは「違い」に出ない。移す前に、手元の `tmp` がグループを書いているかを見る
+- 今の道具を保つなら、手元の `tmp` に `group = "minimum";` と、前の既定で入っていた道具の行を書く (雛形の `tmp` の例と同じ行。本体の
+  `nix/README.md` の「設定グループ」の「前のグループから移す」)。書く前と後の要約 (本体の `nix/scripts/private-host.sh summary`) を見せて、
+  入る道具が前と同じかをユーザーと確かめる
+- `group = "personal"`・`"company"`・`"client"` を書いた `tmp` は、評価が止まる (案内が出る)。同じく `group = "minimum";` と道具の行に
+  書き直す
+- 前の版の `setup-local-flake.sh --initial` が書いた `initial` (グループを書いていない。登録の途中の PC) も `minimum` に縮む。initial の
+  ほかに手で足した値の無い雛形なので、値を移さずに `~/dotfiles/setup-local-flake.sh --force --initial` で今の `initial` に作り直す
+- 縮んだ後は、この skill (`~/.claude/skills/`) も世代から外れていることがある。そのときは本体の
+  `nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md` を読んで進める
+
 ## 衝突の解き方
 
 prepare は「片側が元の行の前後に足しただけ」の衝突 (コメントを外した行の直後に、雛形が新しい節を足した、など) を

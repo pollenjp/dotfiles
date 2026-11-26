@@ -52,7 +52,8 @@
 #   - ローカル flake に初期用のホスト initial (setup-local-flake.sh --initial が書く) があれば、--which-host は
 #     initial<TAB>local。対象が initial なら、残りの手作業に次の段 (1Password と gh・dotfiles-private の取得・登録・
 #     --force で外す) を出す。clone にこの PC のファイルがあれば、代わりに外し方 (setup-local-flake.sh --force) を出し、
-#     「読んでいない」の案内 (local-flake-migrate.sh prepare) と次の段は出さない
+#     「読んでいない」の案内 (local-flake-migrate.sh prepare) と次の段は出さない。グループを書いていない前の版の initial
+#     (グループの 1 行が「選んでいない。既定」) なら、次の段の前に今の initial に作り直す案内 (--force --initial) を出す
 #   - 対象ホストが決まらないときの選べる道に、新しい WSL の PC の setup-local-flake.sh --initial を出す
 #
 # ## 作り
@@ -123,7 +124,8 @@ chmod +x "${sys_bin}/uname"
 # nix は引数を <HOME>/nix-calls に書き、`hash path <dir>` なら sha256-<dir/.fakehash の中身> (無ければ sha256-FAKE) を
 # 出す。ホストの要約 (hostSummary) を --write-to <dir> で書き出す eval なら、<HOME>/fake-summary があるときだけ、その中身を
 # <dir>/nix/<ホスト>.md に、<HOME>/fake-summary-html (無ければ「HTML」) を <dir>/nix/html/<ホスト>.html に書く (無ければ何も
-# 書かない)。ほかは何も出さずに 0 (eval の warnings は空)
+# 書かない)。グループの 1 行の eval (--apply hc: …) なら、<HOME>/fake-group-line があるときだけその中身を出す。ほかは何も出さずに 0
+# (eval の warnings は空)
 fake_hm_bin() {
   local b="$1/fake-bin"
   mkdir -p "${b}"
@@ -142,6 +144,9 @@ if [[ $1 == hash ]]; then
   last=""
   for a in "$@"; do last=$a; done
   if [[ -f ${last}/.fakehash ]]; then echo "sha256-$(cat "${last}/.fakehash")"; else echo sha256-FAKE; fi
+fi
+if [[ $1 == eval && $* == *"(ホストで選んだ)"* && -f ${HOME}/fake-group-line ]]; then
+  cat "${HOME}/fake-group-line"
 fi
 if [[ $1 == eval && $* == *.hostSummary* && -f ${HOME}/fake-summary ]]; then
   wt=""
@@ -629,6 +634,30 @@ if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" -F '初期用のホ�
   ok "残りの手作業: 対象が initial なら、次の段 (取得・登録・--force で外す) を出す"
 else
   ng "残りの手作業 (initial・未登録)" "rc=$(rc "${c}") $(after_post_notes "${c}")"
+fi
+
+# 17b. 対象が initial で、グループを書いていない前の版 (グループの 1 行が「選んでいない」): 次の段の前に、今の initial に
+#      作り直す案内を出す。グループを選んだ initial (今の版) には出さない
+c=$(new_case t17b)
+mv "${c}/private/nix/hosts/alice@box.nix" "${c}/alice@box.nix"
+local_flake "${c}" "${c}/repo/nix/private-stub" "${initial_line}"
+b=$(fake_hm_bin "${c}")
+printf '%s' 'minimum (選んでいない。既定)' >"${c}/home/fake-group-line"
+PATH_EXTRA=${b} run "${c}" --steps bootstrap-a
+c2=$(new_case t17b-now)
+mv "${c2}/private/nix/hosts/alice@box.nix" "${c2}/alice@box.nix"
+local_flake "${c2}" "${c2}/repo/nix/private-stub" "${initial_line}"
+b2=$(fake_hm_bin "${c2}")
+printf '%s' 'minimum (ホストで選んだ)' >"${c2}/home/fake-group-line"
+PATH_EXTRA=${b2} run "${c2}" --steps bootstrap-a
+if [[ $(rc "${c}") == 0 ]] && seen_after_post_notes "${c}" -F 'グループを書いていない前の版' \
+  && seen_after_post_notes "${c}" -F 'setup-local-flake.sh --force --initial' \
+  && seen_after_post_notes "${c}" -F '初期用のホスト initial で当てています' \
+  && [[ $(rc "${c2}") == 0 ]] && seen_after_post_notes "${c2}" -F '初期用のホスト initial で当てています' \
+  && ! seen_after_post_notes "${c2}" -F 'グループを書いていない前の版'; then
+  ok "残りの手作業: グループを書いていない前の版の initial なら、次の段の前に --force --initial で作り直す案内を出す"
+else
+  ng "残りの手作業 (前の版の initial)" "rc=$(rc "${c}") $(after_post_notes "${c}") / 今の版: $(after_post_notes "${c2}")"
 fi
 
 # 18. 対象が initial で、clone にこの PC のファイルがある: 外し方を出し、「読んでいない」の案内と次の段は出さない

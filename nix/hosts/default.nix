@@ -13,9 +13,9 @@
 #   username        Linux/macOS 側のユーザー名 (必須)
 #   system          x86_64-linux / aarch64-linux / aarch64-darwin (必須)
 #   homeDirectory   既定は /home/<username> (darwin は /Users/<username>)
-#   group           設定グループ。personal (個人の PC。既定)・company (自社の PC)・client (客先の PC)。どの段の道具まで
-#                   入れるか (② AI の道具・③ 個人の道具) の既定を決める。段・道具の switch
-#                   (claude.enable・dotfiles.ntn.enable など) で上書きできる (nix/README.md「設定グループ」)
+#   group           設定グループ (道具の集合)。minimum (どの PC にも初めからあってほしいもの。既定)・all (道具を全部)。
+#                   グループに入る道具の switch が既定で on になる。道具の switch (claude.enable・dotfiles.ntn.enable など)
+#                   で足す・外す (nix/README.md「設定グループ」)
 #   wsl             WSL 固有の設定 (下記)。省略すれば非 WSL マシン。
 #                   wsl.exeExecTrace.enable = true で、WSL から起動された Windows の .exe を
 #                   祖先付きで journald に常時記録する (ADR 012。unit を /etc へ入れるのは
@@ -56,32 +56,75 @@
 # wsl.windowsFiles.enable = true で、repo 直下の win/ を Windows 側へ配るマシンになる
 # (windowsUserName が要る。dotfiles-private の docs/adr/010_win_files_from_wsl_*)。
 # そのうえで wsl.windowsFiles.typeClipboard.enable = true にすると、Windows に自作の type-clipboard を
-# 固定した版で入れる (既定は入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
-# ntn と Claude Code は既定で入れる (winget で固定した版。入れないマシンは wsl.windowsFiles.ntn.enable = false・
-# wsl.windowsFiles.claudeCode.enable = false。win/README.md の「ntn」「Claude Code」)。
-# Tailscale は既定で入れない (VPN の道具。入れるマシンは wsl.windowsFiles.tailscale.enable = true。win/README.md の「Tailscale」)。
-# T3 Code は既定で入れない (入れるのは Windows の runner だけ。入れるマシンは Windows のホストの値の [tools] windowsT3Code = true。
-# win/README.md の「T3 Code」)。
-# Claude Desktop (MSIX) は personal だけ既定で入れる (入れるのは Windows の runner だけ。入れるときに UAC の確認が出る。company・client で
-# 入れるマシンは Windows のホストの値の [tools] windowsClaudeDesktop = true。win/README.md の「Claude Desktop」)。
-# sshd (OpenSSH Server) も既定で入れない (PC に外から入る口。入れるマシンは wsl.windowsFiles.sshd.enable = true と、鍵の
-# wsl.windowsFiles.sshd.authorizedKeys。Tailscale と localhost からだけ、鍵でだけ入れる。win/README.md の「sshd」)。
+# 固定した版で入れる (minimum では既定で入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
+# Windows の道具 (wsl.windowsFiles.<道具>.enable) は、グループ all のマシンでだけ既定で入る (minimum のマシンは使うものを true にする):
+# ntn と Claude Code と herdr (winget などで固定した版。win/README.md の「ntn」「Claude Code」「herdr」)・Tailscale (VPN の道具。
+# win/README.md の「Tailscale」)・sshd (OpenSSH Server。PC に外から入る口で、鍵は wsl.windowsFiles.sshd.authorizedKeys。Tailscale と
+# localhost からだけ、鍵でだけ入れる。win/README.md の「sshd」)・type-clipboard。T3 Code と Claude Desktop (MSIX) と claude-personal・
+# claude-work は Windows の runner だけが入れる (Windows のホストの値の [tools]。win/README.md の「T3 Code」「Claude Desktop」)。
 { mkHome }:
 
+# 型と sandbox は minimum に、前の既定 (ADR 057 の personal) で入っていた道具を足した形 (Claude Code 一式・claude-skills・herdr・集約ハブ・
+# herdr-core (Linux だけ)・cc-pages・ntn・git の名前とメール)。グループを minimum・all にしたとき (dotfiles-private の ADR 109)、入るものを
+# 変えないように書き直した。macOS の型は herdr-core (Linux だけ) を書かない (linger も herdrCore に従って off のまま)
 {
   "pollenjp@x86_64-linux" = mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
+    group = "minimum";
+    claude = {
+      enable = true;
+      privateSkills.enable = true;
+    };
+    modules = [
+      {
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.herdrCore.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
   };
 
   "pollenjp@aarch64-linux" = mkHome {
     username = "pollenjp";
     system = "aarch64-linux";
+    group = "minimum";
+    claude = {
+      enable = true;
+      privateSkills.enable = true;
+    };
+    modules = [
+      {
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.herdrCore.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
   };
 
   "pollenjp@aarch64-darwin" = mkHome {
     username = "pollenjp";
     system = "aarch64-darwin";
+    group = "minimum";
+    claude = {
+      enable = true;
+      privateSkills.enable = true;
+    };
+    modules = [
+      {
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
   };
 
   # 検証専用。実際の $HOME を汚さずに activate を試すためのもの。
@@ -90,12 +133,25 @@
     username = "user";
     system = "x86_64-linux";
     homeDirectory = "/tmp/hm-sandbox";
-    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。Dev Tracker の既定は「使わない」
-    # なので、CI の「warnings が空」の確かめがその経路を通るよう明示する。宛先を選ばないと
-    # home/modules/claude.nix が warnings を出し、CI の「warnings が空」で落ちる。
+    group = "minimum";
+    # Dev Tracker を使い、Notion の宛先も選んだマシンとして検証する。Dev Tracker は minimum に入らない (使うホストが書く) ので、
+    # CI の「warnings が空」の確かめがその経路を通るよう明示する。宛先を選ばないと home/modules/claude.nix が warnings を出し、
+    # CI の「warnings が空」で落ちる。Dev Tracker の skill に要る Claude Code と claude-skills と、型と同じ道具も書く
     claude = {
+      enable = true;
+      privateSkills.enable = true;
       devTracker.enable = true;
       notion.profile = "personal";
     };
+    modules = [
+      {
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.herdrCore.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
   };
 }

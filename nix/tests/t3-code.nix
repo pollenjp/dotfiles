@@ -7,7 +7,7 @@
 #
 # ## 確かめること
 #
-#   - enable と clearClaudeEntrypoint の既定は false (どのグループでも。personal でも入らない)。off なら launcher・unit・状態ファイル・
+#   - enable と clearClaudeEntrypoint の既定は、minimum では false (Claude Code を足しても入らない)。off なら launcher・unit・状態ファイル・
 #     activation を置かず、claude の既定のアカウントに t3 が無い
 #   - Linux で on なら:
 #     - unit (~/.config/systemd/user/t3code.service) は t3 0.1.11 が書く unit と同じ文字列 (example-host で `t3 up` が書いたものを tester の home に
@@ -42,22 +42,19 @@ let
   xdg = cfg: name: cfg.xdg.configFile.${name} or null;
   accounts = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/claude-accounts.json".text;
 
-  byDefault = configWith [ ];
+  # Claude Code を入れ、T3 Code を書かないホスト (minimum に Claude Code だけを足した)
+  byDefault = configWith [ { dotfiles.claude.enable = true; } ];
   enabled = configWith [
     {
+      dotfiles.claude.enable = true;
       dotfiles.t3Code = {
         enable = true;
         clearClaudeEntrypoint = true;
       };
     }
   ];
-  noClaude = configWith [
-    {
-      # 段 ② を切って claude.enable を既定で false にする (claude だけを false にすると、② と ③ の両方の skill の置き場が止める)
-      dotfiles.aiTools.enable = false;
-      dotfiles.t3Code.enable = true;
-    }
-  ];
+  # minimum のまま (Claude Code は既定で false) T3 Code だけを書いたホスト
+  noClaude = configWith [ { dotfiles.t3Code.enable = true; } ];
 
   managed = lib.importJSON ../files/t3-code/managed-settings.json;
   pkg = pkgs.callPackage ../pkgs/t3-code { };

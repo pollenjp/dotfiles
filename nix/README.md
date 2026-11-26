@@ -876,7 +876,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
 | `bootstrap-ssh-config.sh` | 60 | dotfiles-private（50）の `ssh/*.ssh_config` を `~/.ssh/config.d/` へ張る（[後述](#ssh-について)） |
 | `bootstrap-dev-tracker-inbox.sh` | 70 | `bootstrap-claude-skills.sh`（50）が claude-skills を進め、`bootstrap-herdr-hub.sh`（60）が `~/h` を作った後に、見回り役 `pjp-dev-tracker-inbox` を起こし直す（[後述](#チケットのコメントをハブの会話へ届ける見回り役-pjp-dev-tracker-inbox)） |
-| `bootstrap-t3-code.sh` | 70 | `bootstrap-claude-accounts.sh`（60）が claude のアカウント `t3`（`~/.claude-t3`）を用意した後に、T3 Code の settings.json の決めたキーを合わせ、状態（service・nix-ld・linger・claude-t3 のログイン・T3 Connect）を出す（`dotfiles.t3Code.enable = true` のマシンだけ（`# tool: t3Code`。どのグループでも既定は false）。[後述](#t3-code)） |
+| `bootstrap-t3-code.sh` | 70 | `bootstrap-claude-accounts.sh`（60）が claude のアカウント `t3`（`~/.claude-t3`）を用意した後に、T3 Code の settings.json の決めたキーを合わせ、状態（service・nix-ld・linger・claude-t3 のログイン・T3 Connect）を出す（`dotfiles.t3Code.enable = true` のマシンだけ（`# tool: t3Code`。minimum では既定で false）。[後述](#t3-code)） |
 | `bootstrap-windows-files.sh` | 90 | 衝突で exit 1 しても、90 より前の bootstrap は済んでいる (setup は失敗した手順で止まるので、後ろの 91〜99 と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-op-reason.sh` | 90 | `bootstrap-windows-files.sh` (同じ 90。辞書順でこちらが後) が置いた `Install-OpReason.ps1` で、Windows の op-reason (WSL の op の Windows の部品。自作の OSS) を固定した版に揃える (WSL の op の wrapper を入れ (`# tool: onePassword`)、win/ を配るマシンだけ。入っていなければ GitHub の Release から入れ、版がずれていれば入れ替える。WSL の実行ファイルと版が違うと op が断るため)。Windows の runner の手順 `op-reason` と同じ 90 で、ssh の設定 (91) より前 (runner は、SSH の中継を使うホストで、ここで起こした中継が答えるのを手順 `ssh-config` が見てから `IdentityAgent` を書く。WSL の setup は中継に触らない)。衝突で exit 1 しうる `bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98) より前 |
 | `bootstrap-windows-powertoys.sh` | 91 | `bootstrap-windows-files.sh` が置いた `Install-PowerToys.ps1` で PowerToys が入っているかを確かめ (無ければ入れる)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、置いた `default.json` を Keyboard Manager に読み直させる (exit 1 にしない) |
@@ -885,13 +885,13 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
 | `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
-| `bootstrap-windows-sshd.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Sshd.ps1` で、Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ (`# tool: windowsSshd`。どのグループでも既定は false)。先に鍵の写しを置き、入っていなければ OpenSSH の MSI に Server を足して揃える。UAC の確認が出る。入っていてずれていれば ⚠ で知らせ、揃えはしない)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なので openssh (sshd を足す MSI を入れる) の後・tailscale の前 |
-| `bootstrap-windows-tailscale.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Tailscale.ps1` で、Windows の Tailscale を固定した版で入れる (`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ (`# tool: windowsTailscale`。どのグループでも既定は false)。入っていなければ入れる。UAC の確認が出る。入っていれば上げず、古ければ ⚠ で知らせる。入っている版の方が新しいのは Tailscale の自動更新で、揃っている扱い)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
+| `bootstrap-windows-sshd.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Sshd.ps1` で、Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ (`# tool: windowsSshd`。minimum では既定で false)。先に鍵の写しを置き、入っていなければ OpenSSH の MSI に Server を足して揃える。UAC の確認が出る。入っていてずれていれば ⚠ で知らせ、揃えはしない)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なので openssh (sshd を足す MSI を入れる) の後・tailscale の前 |
+| `bootstrap-windows-tailscale.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Tailscale.ps1` で、Windows の Tailscale を固定した版で入れる (`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ (`# tool: windowsTailscale`。minimum では既定で false)。入っていなければ入れる。UAC の確認が出る。入っていれば上げず、古ければ ⚠ で知らせる。入っている版の方が新しいのは Tailscale の自動更新で、揃っている扱い)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
-| `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
+| `bootstrap-windows-claude-code.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-ClaudeCode.ps1` で、Windows の Claude Code (winget の `Anthropic.ClaudeCode`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.claudeCode.enable = true` のマシン。既定はグループで決まり、`all` の `win/` を配るマシンで on。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr-app より先 (どれも相手を使わない) |
 | `bootstrap-windows-herdr.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Herdr.ps1` で、Windows の herdr が固定した版に揃っているかを確かめる (入っていなければ入れる。入れ替えはしない) |
 | `bootstrap-windows-pin-updates.sh` | 97 | Windows に固定した版で入れているもの (OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・herdr-app・herdr-core と、Windows の ghq に dotfiles の clone があるマシンでは bootstrap の Git for Windows・gh・Visual Studio Build Tools・rustup と、Windows の runner が入れる ghq・fzf・starship) に、固定した版より新しい版 (見送っていないもの) があるかを GitHub API で確かめ、あれば名前ごとに 1 行と、上げるかを決める頼み方 (Claude Code に「dotfiles の Windows に固定した版を上げて」と頼む) を警告のまとめに残す (herdr-app の新しい版には、keys.json に新しい既定のキーを足す注意も添える)。Windows には触らない。確かめられなくても exit 1 にしない。repo の拡張 (`.claude/skills/pjp-dotfiles-deps/`) が読む JSON の口 (`--list --json`・`--candidates --json`) も持つ |
-| `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` (既定) のマシン。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
+| `bootstrap-windows-ntn.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-Ntn.ps1` で、Windows の ntn (winget の `Notion.ntn`) を固定した版に揃える (`dotfiles.wsl.windowsFiles.ntn.enable = true` のマシン。既定はグループで決まり、`all` の `win/` を配るマシンで on。入っていなければ入れ、版か pin がずれていれば揃える。動いていれば揃えずに ⚠ で知らせ、exit 1 にしない)。同じ 97 は辞書順なので、herdr の後・type-clipboard の前 (どれも相手を使わない) |
 | `bootstrap-windows-type-clipboard.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-TypeClipboard.ps1` で、Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。入っていなければ GitHub の Release から入れる。入れ替えはしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-google-ime.sh` | 98 | Google 日本語入力の設定を組み立てて配る。衝突や設定画面が開いているときに exit 1 しても、98 より前の bootstrap は済んでいる (後ろの `bootstrap-windows-international.sh`・`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` (どれも 99) と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
 | `bootstrap-windows-international.sh` | 99 | `win/international/managed.json` の値だけを、Windows の日付と時刻の形式 (`HKCU\Control Panel\International`) へ `pwsh.exe` の SetLocaleInfoW で書く。ほかの bootstrap が置くものは使わない。`bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と同じ 99 で、同じ値は辞書順なのでこちらが先に走る。衝突で exit 1 しても、それより前の bootstrap は済んでいる (後ろの `bootstrap-windows-port-forward.sh`・`bootstrap-windows-terminal.sh` と wsl-mtu-guard・exe-exec-trace、最後の「残りの手作業」は、直して流し直すまで走らない) |
@@ -988,7 +988,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 2.4 | dotfiles-private を取得 | `private-fetch` | clone があれば switch の前に取得して fast-forward する（無ければ何もしない。6.5.1 が clone する） |
 | 2.5 | `./nix/scripts/setup-local-flake.sh` | `local-flake` | `~/dotfiles` を用意する（[前述](#置き場所)） |
 | 3 | `nix run ~/dotfiles#home-manager -- switch --flake ~/dotfiles#<host>` | `switch` | 初回はこの形。既存ファイルの扱いは[前述](#既存ファイルを退避するか選ぶ) |
-| 3.5 | systemd の linger を有効にする | `linger` | `dotfiles.linger.enable = true`（既定は herdr-core と同じ。② の段で Linux なら true）のマシンで、linger が有効でなければ `sudo loginctl enable-linger` を打つ（ほかのマシンでは何もしない。NixOS では打たずに nixos-config を案内する。[後述](#ログアウトしても止めない-linger)） |
+| 3.5 | systemd の linger を有効にする | `linger` | `dotfiles.linger.enable = true`（既定は herdr-core と同じ。herdr-core を足した Linux か、グループ all の Linux なら true）のマシンで、linger が有効でなければ `sudo loginctl enable-linger` を打つ（ほかのマシンでは何もしない。NixOS では打たずに nixos-config を案内する。[後述](#ログアウトしても止めない-linger)） |
 | 4 | `./nix/scripts/bootstrap-mise.sh` | `bootstrap-mise` | mise のグローバル設定・言語ランタイム・`claude`（[後述](#claude-だけ-mise-に置いている理由)）・`cursor-agent`（`dotfiles.cursorAgent.enable` のホストだけ。[後述](#cursor-agent-も-mise-に置いている理由)）・rust（rustup。`claude.privateSkills.enable` のホストだけ。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | 4.1 | `./nix/scripts/bootstrap-claude-plugins.sh` | `bootstrap-claude-plugins` | Claude Code の公式プラグイン導入（後述） |
 | 5 | `~/.config/mise/config.toml` を手で整理 | — | 既存マシンのみ（後述） |
@@ -1010,12 +1010,12 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
 | 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
-| 6.10.1 | `./nix/scripts/bootstrap-windows-sshd.sh` | `bootstrap-windows-sshd` | Windows に sshd を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる（`wsl.windowsFiles.sshd.enable = true` のマシンだけ。どのグループでも既定は false。鍵の写しを置き、無ければ入れる (UAC の確認が出る)。ずれは揃えない。[`win/README.md`](../win/README.md#sshd)） |
-| 6.10.2 | `./nix/scripts/bootstrap-windows-tailscale.sh` | `bootstrap-windows-tailscale` | Windows の Tailscale を固定した版で入れる（`wsl.windowsFiles.tailscale.enable = true` のマシンだけ。どのグループでも既定は false。無ければ winget で入れる (UAC の確認が出る)。上げはしない。ログインは手でする。[`win/README.md`](../win/README.md#tailscale)） |
-| 6.10.3 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
+| 6.10.1 | `./nix/scripts/bootstrap-windows-sshd.sh` | `bootstrap-windows-sshd` | Windows に sshd を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる（`wsl.windowsFiles.sshd.enable = true` のマシンだけ。minimum では既定で false。鍵の写しを置き、無ければ入れる (UAC の確認が出る)。ずれは揃えない。[`win/README.md`](../win/README.md#sshd)） |
+| 6.10.2 | `./nix/scripts/bootstrap-windows-tailscale.sh` | `bootstrap-windows-tailscale` | Windows の Tailscale を固定した版で入れる（`wsl.windowsFiles.tailscale.enable = true` のマシンだけ。minimum では既定で false。無ければ winget で入れる (UAC の確認が出る)。上げはしない。ログインは手でする。[`win/README.md`](../win/README.md#tailscale)） |
+| 6.10.3 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` のマシン。既定は `all` の `win/` を配るマシンで on。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
 | 6.10.4 | `./nix/scripts/bootstrap-windows-herdr-app.sh` | `bootstrap-windows-herdr-app` | Windows の herdr-app と herdr-core を、dotfiles が固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える（公式の install.ps1 と同じ置き場所。下げはしない。[`win/README.md`](../win/README.md#herdr-app)） |
 | 6.11 | `./nix/scripts/bootstrap-windows-herdr.sh` | `bootstrap-windows-herdr` | Windows の herdr が固定した版に揃っているかを確かめる（無ければ入れる。入れ替えはしない。[`win/README.md`](../win/README.md#herdr-を入れる-winget)） |
-| 6.11.1 | `./nix/scripts/bootstrap-windows-ntn.sh` | `bootstrap-windows-ntn` | Windows の ntn (Notion の CLI) を固定した版に揃える（`wsl.windowsFiles.ntn.enable = true` (既定) のマシン。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#ntn)） |
+| 6.11.1 | `./nix/scripts/bootstrap-windows-ntn.sh` | `bootstrap-windows-ntn` | Windows の ntn (Notion の CLI) を固定した版に揃える（`wsl.windowsFiles.ntn.enable = true` のマシン。既定は `all` の `win/` を配るマシンで on。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#ntn)） |
 | 6.11.2 | `./nix/scripts/bootstrap-windows-pin-updates.sh` | `bootstrap-windows-pin-updates` | Windows に固定した版より新しい版があれば短く知らせる（上げるかは Claude Code に「dotfiles の Windows に固定した版を上げて」と頼んで決める。[`win/README.md`](../win/README.md#固定した版より新しい版の知らせ)） |
 | 6.11.3 | `./nix/scripts/bootstrap-windows-type-clipboard.sh` | `bootstrap-windows-type-clipboard` | Windows の type-clipboard (自作のアプリ) が固定した版に揃っているかを確かめる（`wsl.windowsFiles.typeClipboard.enable = true` のマシンだけ。無ければ GitHub の Release から入れる。入れ替えはしない。[`win/README.md`](../win/README.md#type-clipboard)） |
 | 6.11.4 | `./nix/scripts/bootstrap-windows-google-ime.sh` | `bootstrap-windows-google-ime` | Google 日本語入力の設定とユーザー辞書を、テキストから組み立てて配る。新しいマシンで置き先がまだ無い (「まだ使われていません」と出る) ときは、Google 日本語入力を一度使ってから setup を流し直す（[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
@@ -1055,8 +1055,10 @@ git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dot
 ~/dotfiles/setup --update
 ```
 
-- `initial` に書くのは `username`・`system`・`wsl.enable`・`wsl.windowsUserName`・`wsl.windowsFiles.enable` だけ。1Password
-  (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
+- `initial` に書くのは `username`・`system`・`group = "minimum"`・`wsl.enable`・`wsl.windowsUserName`・`wsl.windowsFiles.enable` と、
+  minimum に足す道具 (Claude Code 一式・claude-skills・herdr・集約ハブ・herdr-core・cc-pages・ntn・git の名前とメールと、Windows の
+  Claude Code・herdr・ntn・claude-personal と claude-work・Claude Desktop。設定グループの既定が personal だったときと同じ道具。
+  [前のグループから移す](#前のグループから移す)) だけ。1Password (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
 - Windows のユーザー名は `private-host.sh windows-user` (`$env:USERNAME`) で引き、`/mnt/c/Users/<名前>` があるかを確かめる。
   ユーザーのフォルダの名前を変えた PC では、止まって候補を出すので、`--windows-user <フォルダの名前>` で渡す
 - 既に `~/dotfiles/flake.nix` があるとき: `initial` があれば触らない。今の雛形のまま (手を入れていない。`tmp` の例の
@@ -1103,7 +1105,7 @@ option の値を書く（[遅延を期間付きで緩める](#遅延-minimum_rel
 
 `claude` もここで入る。グローバルな CLI なので役割分担どおりなら Nix 側だが、
 例外にしている（[理由](#claude-だけ-mise-に置いている理由)）。Cursor の CLI（`cursor-agent`）も同じ理由でここで入るが、
-入れるのはホストで `dotfiles.cursorAgent.enable = true` にしたマシンだけ（既定は入れない。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)）。
+入れるのは `dotfiles.cursorAgent.enable` が true のマシンだけ（`minimum` では既定で入れず、`all` では入れる。[理由と入れ方](#cursor-agent-も-mise-に置いている理由)）。
 
 #### 2.1 Claude Code の公式プラグイン (手順 4.1)
 
@@ -1242,10 +1244,10 @@ Nix インストーラが用意する profile スクリプトを読み込む (�
 | `username` | (必須) | Linux / macOS 側のユーザー名。`$USER` と一致しないと activate が中断する |
 | `system` | (必須) | `x86_64-linux` / `aarch64-linux` / `aarch64-darwin` |
 | `homeDirectory` | `/home/<username>`（darwin は `/Users/<username>`） | 検証用に逃がしたいときだけ指定する |
-| `group` | （書かない = `"personal"`） | 設定グループ（`"personal"`・`"company"`・`"client"`）。どの段の道具まで入れるかの既定を決める（[設定グループ](#設定グループ)） |
+| `group` | （書かない = `"minimum"`） | 設定グループ（`"minimum"`・`"all"`。道具の集合）。グループに入る道具の switch が既定で on になる（[設定グループ](#設定グループ)） |
 | `wsl` | `{ }` | WSL 固有の設定（下記）。省略すれば非 WSL マシン |
 | `onePassword` | `{ }` | `onePassword.enable = true` で 1Password を git の署名に使う（WSL ならホスト側 Windows の、それ以外はこのマシンの 1Password。[git について](#git-について)） |
-| `claude` | `{ }` | Claude Code まわり（`enable`（既定は ② の段）・`privateSkills.enable`・`devTracker.enable`（既定 false）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`・`heavyJobs.limitPercent`。[足したホストに書く値](#足したホストに書く値)） |
+| `claude` | `{ }` | Claude Code まわり（`enable`・`privateSkills.enable`・`devTracker.enable`（どれも既定は all だけ on）・`gitViaGh.enable`・`notion.*`・`videoOffer.autoStart.enable`・`heavyJobs.limitPercent`。[足したホストに書く値](#足したホストに書く値)） |
 | `modules` | `[ ]` | `mkHome` の引数に無い option（`dotfiles.ccPages.port` など）と、home-manager の設定 |
 
 ### WSL 固有の設定は入れ子で渡す
@@ -1306,81 +1308,85 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 ### 設定グループ
 
-ホストは**設定グループ**を 1 つ選び（`mkHome` の `group`）、グループは「どの段の道具まで入れるか」で決まる
-（[ADR 057](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/057_host_setting_groups_20261115T111656JST/README.md)）。
-選んだ時点でそのグループの既定が入り、そのあとはホストのファイルで道具ごとに直す。グループを書かないホストは `personal`。
+ホストは**設定グループ**を 1 つ選ぶ（`mkHome` の `group`）。グループは**道具の集合**で、グループに入る道具の switch は全部既定で on、
+入らない道具は既定で off になる（[ADR 109](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/109_host_groups_minimum_all_20261126T113247JST/README.md)。
+前は道具の種類の段の組だった。[ADR 057](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/057_host_setting_groups_20261115T111656JST/README.md)）。
+グループを書かないホストは `minimum`。
 
-| グループ | 使う PC | ① エンジニアの道具 | ② AI の道具 | ③ 個人の道具 |
-| --- | --- | --- | --- | --- |
-| `personal`（既定） | 個人の開発用の PC | on | on | on |
-| `company` | 自社の PC（個人ほどではないが、ある程度自由） | on | on | off |
-| `client` | 客先の PC（エンジニアの道具を最低限） | on | off | off |
+| グループ | 入る道具 |
+| --- | --- |
+| `minimum`（既定） | どの PC にも初めからあってほしいもの: switch の無い基本の道具（shell（fish・bash）・starship・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python）と、証明書の束（`osCaBundle.enable`）・掃除（`cleanup.enable`） |
+| `all` | 道具を全部（`minimum` の全部と、ほかの道具の switch の全部） |
 
-| 段 | 入るもの | 段の switch |
-| --- | --- | --- |
-| ① エンジニアの道具 | shell（fish・bash・starship）・git・ssh・vim と neovim・tmux と zellij・CLI（rg・fd・jq・fzf・gh・ghq など）・mise・direnv・python・CA の束・WSL の手当て・Windows のアプリ（OpenSSH・Terminal・Google 日本語入力・PowerToys） | 無い（どのグループも入れる） |
-| ② AI の道具 | Claude Code 一式（設定・hook・skill・status line・plugin・mise の claude）・herdr（WSL と Windows）・herdr-core と systemd の linger・Windows の Claude Code・cursor-agent | `dotfiles.aiTools.enable` |
-| ③ 個人の道具（個人のアカウントにつながるもの） | 1Password・ntn（Notion の CLI）・Windows の ntn・Windows の Tailscale・Windows の sshd（Tailscale から鍵で入る）・Windows の type-clipboard（自作のアプリ。個人の GitHub の repo の Release）・個人の git の名前とメール（pollenjp・pollenjp-sub） | `dotfiles.personalAccounts.enable` |
-| ② と ③ の両方 | claude-skills の clone・cc-pages・集約ハブ `~/h`・Notion Dev Tracker（両方が on のときだけ既定で入る） | — |
+ほとんどのホストは `minimum` にして、使う道具をホストのファイルで 1 つずつ足す（何に頼っているかが、ホストのファイルで分かる）。`all` は
+道具が増えるとそれも既定で入るので、全部入れてよい PC だけにする。
 
-既定は 3 つの高さで決まり、どれも option の既定（優先度 1500）なので、ホストのファイルは今と同じ素の値でどの高さでも上書きできる
-（`mkForce` は要らない）。
+- **`all` は、道具の前提もそろう PC で選ぶ。** 前は既定で off だった道具も入る。評価は止まらないが、前提が無いと使うときに困るものがある:
+  - `onePassword.enable`: git の commit を 1Password の SSH agent の鍵で署名する（agent に Signing の鍵が無いと `git commit` が止まる）
+  - `opReason.sshRelay.enable`（`win/` を配らない WSL）: WSL の ssh が op-reason の中継へ向く。Windows の側を置くのは runner なので、
+    Windows のホストの値（`win/hosts/*.toml`）も `all` にするか `[tools]` に `opReasonSshRelay = true` を書く
+  - `claude.devTracker.enable`: Notion の宛先 `claude.notion.profile` を書く（書かないと評価のたびに warning が出る）
+  - 前提のそろわない道具は、`all` のホストのファイルで `false` を書いて外す（親の道具を外したら、それに頼る道具も外す。下の「道具どうしの依存」）
 
-1. グループ（`dotfiles.group`）が、段の switch の既定を決める
-2. 段の switch が、その段の道具の switch の既定を決める（道具の既定 = 段の switch && 今までの既定。`personal` は段が全部 on なので、
-   どの道具も今までと同じ既定になる）
-3. 道具の switch（`claude.enable`・`dotfiles.ntn.enable` など）が、その道具の module と setup の手順を決める
+- 道具の switch の既定は「グループに入る && そのマシンで効く」。WSL だけの道具（`wsl.exeExecTrace.enable`・`wsl.mtuGuard.enable`）・`win/` を
+  配るマシンだけの道具（`wsl.windowsFiles.<道具>.enable`）・Linux だけの道具（`herdrCore.enable`・`t3Code.enable`・
+  `claude.devTracker.inbox.enable`）などは、合わないマシンでは `all` でも既定で off になる（評価は止まらない。ホストが素の値で on にすると、
+  今までどおり評価で止まるものもある）。道具ごとの効く条件は [`nix/groups.md`](./groups.md)
+- `wsl.enable`・`wsl.windowsFiles.enable`・`wsl.windowsUserName` は道具でなくマシンの事実で、グループでは決めない（ホストが書く）
+- `linger.enable` は `herdrCore.enable` に従う（herdr-core を足せば付いてくる。[後述](#ログアウトしても止めない-linger)）
+- どれも option の既定（優先度 1500）なので、ホストのファイルは素の値でどの道具も足し引きできる（`mkForce` は要らない）
 
-| 道具の switch | 段 | 止めるもの |
-| --- | --- | --- |
-| `claude.enable` | ② | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）と mise の claude |
-| `dotfiles.herdr.enable` | ② | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
-| `dotfiles.herdrCore.enable` | ②（Linux だけ） | herdr-core（hc） |
-| `dotfiles.linger.enable` | ②（既定は `herdrCore.enable` と同じ） | setup の手順 linger（`sudo loginctl enable-linger`。有効にした linger は外さない。[後述](#ログアウトしても止めない-linger)） |
-| `wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable` | ② | Windows の Claude Code・herdr と herdr-app（`windowsFiles.enable` のマシンだけで効く） |
-| `claude.privateSkills.enable` | ② と ③ | setup の bootstrap-claude-skills（claude-skills の clone） |
-| `dotfiles.ccPages.enable` | ② と ③ | cc-pages の unit と config.toml・setup の bootstrap-cc-pages |
-| `dotfiles.herdr.hub.enable` | ② と ③ | setup の bootstrap-herdr-hub（`~/h`） |
-| `dotfiles.ntn.enable` | ③ | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
-| `wsl.windowsFiles.ntn.enable` | ③ | Windows の ntn |
-| `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` | ③ (既定は off) | Windows の Tailscale・sshd・type-clipboard（`windowsFiles.enable` のマシンだけで効く。どのグループでも既定は false） |
-| `dotfiles.git.identity.enable` | ③ | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
+| 道具の switch | 止めるもの |
+| --- | --- |
+| `claude.enable` | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）と mise の claude |
+| `dotfiles.herdr.enable` | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
+| `dotfiles.herdrCore.enable` | herdr-core（hc。Linux だけ） |
+| `dotfiles.linger.enable` | setup の手順 linger（`sudo loginctl enable-linger`。既定は `herdrCore.enable` と同じ。有効にした linger は外さない） |
+| `wsl.windowsFiles.claudeCode.enable`・`wsl.windowsFiles.herdr.enable` | Windows の Claude Code・herdr と herdr-app（`windowsFiles.enable` のマシンだけで効く） |
+| `claude.privateSkills.enable` | setup の bootstrap-claude-skills（claude-skills の clone） |
+| `dotfiles.ccPages.enable` | cc-pages の unit と config.toml・setup の bootstrap-cc-pages |
+| `dotfiles.herdr.hub.enable` | setup の bootstrap-herdr-hub（`~/h`） |
+| `dotfiles.ntn.enable` | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
+| `wsl.windowsFiles.ntn.enable` | Windows の ntn |
+| `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` | Windows の Tailscale・sshd・type-clipboard（`windowsFiles.enable` のマシンだけで効く） |
+| `dotfiles.git.identity.enable` | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
 
-既定が `false` の option（`onePassword.enable`・`claude.devTracker.enable`・`cursorAgent.enable`・`wsl.windowsFiles.enable`・
-`wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` など）は今のまま（段によらず、使うホストが
-入れる。Windows の Tailscale は VPN の道具、Windows の sshd は PC に外から入る口で、`personal` でも既定で入れない。Windows の type-clipboard も
-`personal` で既定で入れず、使う PC が入れる）。段への割り当ての表は `nix/lib/groups.nix` にあり、`options.nix` の既定と合っていることを
-flake の checks の `groups-state` が段の on/off の 4 通りで確かめる。
+ほかの道具（`onePassword.enable`・`claude.devTracker.enable`・`cursorAgent.enable`・`t3Code.enable` など）も同じく、`all` なら既定で on、
+`minimum` なら使うホストが入れる。グループと道具の表は `nix/lib/groups.nix` にあり、`options.nix` の既定（`config.dotfiles.group == "all"` と
+効く条件の素の式）と合っていることを flake の checks の `groups-state` が環境の組（WSL で `win/` を配る・配らない・Windows のユーザー名なし・
+WSL でない Linux・macOS）ごとに確かめる。
 
 ```nix
-# 自社の PC (例。値は作り物): ① ② はグループの既定で入る。③ は要るものだけを 1 つずつ足す
+# minimum に使う道具を足したホスト (例。値は作り物)
 mkHome {
   username = "alice";
   system = "x86_64-linux";
-  group = "company";
-  onePassword.enable = true;          # ③ (既定 false のまま。書けば入る)
+  group = "minimum";
+  onePassword.enable = true;
   claude = {
-    privateSkills.enable = true;      # ② と ③ (claude-skills。Dev Tracker に要る)
+    enable = true;
+    privateSkills.enable = true;      # claude-skills (Dev Tracker に要る)
     devTracker.enable = true;
     notion.profile = "work";
   };
   modules = [
     {
-      dotfiles.ntn.enable = true;           # ③
-      dotfiles.git.identity.enable = true;  # ③ (個人の名前とメールで commit する PC なら)
+      dotfiles.herdr.enable = true;
+      dotfiles.ntn.enable = true;
+      dotfiles.git.identity.enable = true;  # 個人の名前とメールで commit する PC なら
     }
   ];
 }
 
-# 客先の PC (~/dotfiles/flake.nix の tmp。例。値は作り物): ① だけ。許可の出た道具を 1 つずつ足す
+# 道具をほとんど足さない PC (~/dotfiles/flake.nix の tmp。例。値は作り物): 許可の出た道具だけを足す
 tmp = dotfiles.lib.mkHome {
   username = "alice";
   system = "x86_64-linux";
-  group = "client";
+  group = "minimum";
   claude.enable = true;   # Claude Code の利用の許可が出たら (claude-skills・cc-pages・herdr は入らない)
   modules = [
     {
-      # 客先のグループでは git の名前とメールが入らない。そこで使うものを書く
+      # minimum では git の名前とメールが入らない。そこで使うものを書く
       programs.git.settings.user = {
         name = "Alice Example";
         email = "alice@example.com";
@@ -1390,40 +1396,66 @@ tmp = dotfiles.lib.mkHome {
 };
 ```
 
-- **客先の PC は git の名前とメールを書く。** 書かなければ git は commit の前に「Please tell me who you are」で止まる（個人の名前で
+- **git の名前とメールを足さない PC は、使うものを書く。** 書かなければ git は commit の前に「Please tell me who you are」で止まる（個人の名前で
   commit してしまうことは無い）
 - **道具どうしの依存は評価で止まる。** `claude.privateSkills.enable` は `claude.enable` が、`claude.devTracker.enable` は
   `claude.privateSkills.enable` が、`dotfiles.herdr.hub.enable` は `dotfiles.herdr.enable` と `claude.privateSkills.enable` が要る
-  （自社・客先のホストで道具を 1 つずつ足すときの、足し忘れに気づくため）
-- **setup も段に従う。** home-manager が on/off を `~/.local/state/dotfiles/group.json` に置き、setup は bootstrap-*.sh の冒頭の
-  `# tool: <key> (<option>)` の道具が off のホストで、その手順を流さずに飛ばす（結果に `↷ … (このホストでは off)`）。`group.json` が無い
-  前の世代は今までどおり全部流す。実行の頭には、対象ホストのグループと段の on/off を 1 行出す（`グループ: client (ホストで選んだ) · …`。
-  選んでいなければ「選んでいない。既定」。客先の PC で選び忘れたときに、switch の前に気づける）
+  （`minimum` のホストで道具を 1 つずつ足すときの、足し忘れに気づくため）。`all` で親の道具を `false` にしたら、それに頼る道具にも
+  `false` を書く（止まったときの文が、どれを書くかを出す）
+- **setup もグループに従う。** home-manager が on/off を `~/.local/state/dotfiles/group.json`（version 2。`group` と `tools`）に置き、setup は
+  bootstrap-*.sh の冒頭の `# tool: <key> (<option>)` の道具が off のホストで、その手順を流さずに飛ばす（結果に `↷ … (このホストでは off)`）。
+  `group.json` が無い前の世代は今までどおり全部流す。実行の頭には、対象ホストのグループを 1 行出す（`グループ: minimum (ホストで選んだ)`。
+  選んでいなければ「選んでいない。既定」と、下の「前のグループから移す」の場所をもう 1 行）
 - **off にしても、前に入れたものは消さない。** setup が見なくなるだけ（mise の claude は外すコマンドを 1 行出す。clone した repo・
   `~/bin/cc-pages`・`~/h`・Windows のアプリは残る。消し方はそれぞれの節）
-- 客先の PC は今までどおり `~/dotfiles/flake.nix` の `tmp` に置く（dotfiles-private を読めないため）。雛形の tmp の例（コメント）に、
-  グループの選び方が入っている
-- CI は客先のグループの作り物のホスト（`nix/lib/group-examples.nix`）を build し、② ③ のものが無いことと、入る package・ファイル・
-  unit の並びが fixture（`nix/tests/fixtures/group-client/`）と同じことを確かめる（`group-client-state`）。**道具を足したら段を決める**:
-  ② ③ なら道具の switch で止め、① なら fixture に足す（決め忘れると客先の PC に入り、ここで違いとして出る）
+- dotfiles-private を読めない PC は今までどおり `~/dotfiles/flake.nix` の `tmp` に置く。雛形の tmp の例（コメント）に、グループの選び方と
+  道具の行が入っている
+- CI は `minimum` の作り物のホスト（`nix/lib/group-examples.nix`）を build し、`minimum` に入らない道具のものが無いことと、入る package・
+  ファイル・unit の並びが fixture（`nix/tests/fixtures/group-minimum/`）と同じことを確かめる（`group-minimum-state`）。`all` の作り物のホスト
+  （WSL で `win/` を配る・WSL でない Linux）も build し、道具が全部 on でも止まらないことを見る。**道具を足したら `minimum` に入れるかを決める
+  （`all` には必ず入る）**: 入れないなら道具の switch で止め（既定は `config.dotfiles.group == "all"` と効く条件）、入れるなら fixture に足す
+  （決め忘れると、どの PC にも入り、ここで違いとして出る）
 
-グループごとの段・道具の既定の表と、作り物のホスト（個人・自社・客先・客先に Claude Code だけを足したもの）の値の表は
-[`nix/groups.md`](./groups.md)（生成物。`nix eval --raw ./nix#lib.groupsDoc > nix/groups.md` で出し直し、古ければ CI の `groups-doc` が落ちる）。
+グループと道具の表（`minimum`・`all` に入るかと効く条件）と、作り物のホスト（`minimum`・`minimum` に Claude Code だけを足したもの・`all` の
+2 つ）の値の表は [`nix/groups.md`](./groups.md)（生成物。`nix eval --raw ./nix#lib.groupsDoc > nix/groups.md` で出し直し、古ければ CI の
+`groups-doc` が落ちる）。
+
+#### 前のグループから移す
+
+前のグループ（`personal`・`company`・`client`）と段の switch（`aiTools.enable`・`personalAccounts.enable`）は、書くと評価が止まる（移し方の
+案内が出る）。黙って読み替えない。前と同じ道具にするには、`group = "minimum";` に次の行を足す。
+
+| 前 | 足す行 |
+| --- | --- |
+| `personal`（前の既定。グループを書かなかったホストも） | `claude.enable`・`claude.privateSkills.enable`・`dotfiles.herdr.enable`・`dotfiles.herdr.hub.enable`・`dotfiles.herdrCore.enable`（Linux だけ）・`dotfiles.ccPages.enable`・`dotfiles.ntn.enable`・`dotfiles.git.identity.enable`。`win/` を配るマシンは `wsl.windowsFiles.claudeCode.enable`・`herdr.enable`・`claudeAccounts.enable`・`claudeDesktop.enable`・`ntn.enable` も |
+| `company` | `claude.enable`・`dotfiles.herdr.enable`・`dotfiles.herdrCore.enable`（Linux だけ）と、ホストで足していた道具。`win/` を配るマシンは `wsl.windowsFiles.claudeCode.enable`・`herdr.enable` も |
+| `client` | ホストで足していた道具だけ |
+
+- どれも `true` にする行（`dotfiles.<…>` の行は `modules` に、`claude.<…>`・`wsl.<…>` は mkHome の引数の組にも書ける）。`linger` は
+  `herdrCore` に従うので書かなくてよい
+- 登録簿の型・`sandbox`（`nix/hosts/default.nix`）・`setup-local-flake.sh --initial` の `initial`・雛形の `tmp` の例は、`personal` の行を書いた形
+- 前の版の `setup-local-flake.sh --initial` が書いた `initial`（グループを書いていない）で当てている PC（登録の途中）は、本体を新しくすると
+  `minimum` に縮む（Claude Code と dotfiles の skill が世代から外れる）。登録の前なら `~/dotfiles/setup-local-flake.sh --force --initial` で今の
+  `initial` に書き直す（initial のほかに手で足した値の無い雛形なので、作り直してよい。setup も案内する）
+- Windows のホストの値（dotfiles-private の `win/hosts/*.toml`）は `group = "minimum"` と、`[tools]` に同じ道具の行
+  （[`win/README.md` の「ホストの値」](../win/README.md#ホストの値)）
+- 書き直す前と後で、ホストの要約（下の `private-host.sh summary`）の「入る道具」が同じかを見る
 
 #### ホストの要約
 
-ホストがどのグループで、どの道具が on か・その値がどこで決まったか（グループの既定・段の既定・ホストのファイル・dotfiles-private の
+ホストがどのグループで、どの道具が on か・その値がどこで決まったか（グループの既定・従う道具・ホストのファイル・dotfiles-private の
 `nix/shared/`）を出す（`mkHome` が組み立てたホストに `hostSummary` として足す。`nix/lib/host-summary/`）。
 
 ```sh
 p=~/ghq/github.com/pollenjp/dotfiles/nix/scripts/private-host.sh
-bash $p summary                                  # setup が選ぶホスト (客先の PC の tmp でも) の要約を端末に出す
+bash $p summary                                  # setup が選ぶホスト (ローカル flake の tmp でも) の要約を端末に出す
 bash $p summary --out <無い dir>                  # そのホストのページ (md と図の HTML 版) を <dir>/nix/ に書く (HTML 版をブラウザで開く)
 bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホストのページを docs/hosts/ に書く (--check は違いだけ)
 ```
 
-- 要約は図の HTML 版にして見る: 段（① エンジニアの道具 ⊂ ② AI の道具 ⊂ ③ 個人の道具）を入れ子の領域に、道具を箱に、ホストを
-  「入る道具だけを囲む色の線」に描く。タブで「このホスト」「既定（ホストで何も書かなかったとき）」「重ねて比べる」を切り替え、箱を押すと
+- 要約は図の HTML 版にして見る: グループ（`minimum` ⊂ `all`）を入れ子の領域に、道具を箱に（基本の道具は `minimum` の領域の「常に入る」の箱）、
+  ホストを「入る道具だけを囲む色の線」に描く。環境（WSL か・`win/` を配るか・Linux か）は図の外に 1 行で出す。グループに入るのにそのマシンで
+  効かない道具は細かい点線の箱（–）。タブで「このホスト」「既定（ホストで道具を何も書かなかったとき）」「重ねて比べる」を切り替え、箱を押すと
   option・値・どこで決まったかが出る。HTML 版は 1 ファイルで完結し（外のファイルを読まない）、明るい色と暗い色を OS の設定で選ぶ。
   雛形は `nix/lib/host-summary/` の `page.html`・`page.css`・`page.js`、並び・配置・囲みは node のテスト（`host-summary-page-test`）が見る
 - dotfiles-private では `docs/hosts/` に置く: 入口の `README.md`（全ホストの一覧。HTML 版 `html/hosts.html` はタブでホストを替える全ホストの図）、
@@ -1439,7 +1471,7 @@ bash $p summaries --private <dotfiles-private の作業ツリー>   # 全ホス�
   HTML 版が埋め込まれる。リンクの字は名前のまま
 - setup は switch のたびに、この PC のホスト（dotfiles-private に登録したもの）のページ（`docs/hosts/nix/<ホスト>.md` と HTML 版）を作り直して
   clone のものと比べ、違えば・無ければ警告のまとめに 1 件出す（`pjp-dotfiles-register-host` skill の名前と出し直すコマンドつき）。dotfiles-private
-  には CI が無く、本体の変更（段の割り当て・既定・図の作り）でもページは古くなるため。本体の checkout が upstream より遅れていれば、出し直さずに
+  には CI が無く、本体の変更（グループの表・既定・図の作り）でもページは古くなるため。本体の checkout が upstream より遅れていれば、出し直さずに
   先に本体を進める（`--self-update`）よう出す（古い本体で出し直すと、新しいページを古い形に戻す。出し直すときは dotfiles の origin/main の本体で
   `summaries` を流す）。Windows のホストのページは setup では見ない（`summaries --check` で見る）
 
@@ -1451,7 +1483,7 @@ dotfiles-private を読めない PC（会社の PC など）や一時的な環�
 （[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）。
 
 `setup-local-flake.sh --initial` が書く初期用のホスト `initial` も、ここに足すホストの 1 つ。新しい WSL の PC を登録するまでの
-踏み台で、値は WSL と windowsFiles だけ（[前述](#新しい-wsl-の-pc)）。登録しない PC は、値の全部を `tmp` に書く。
+踏み台で、値は WSL と windowsFiles と、minimum に足す道具だけ（[前述](#新しい-wsl-の-pc)）。登録しない PC は、値の全部を `tmp` に書く。
 
 ```nix
 outputs =
@@ -1466,7 +1498,7 @@ outputs =
       tmp = dotfiles.lib.mkHome {
         username = "pollenjp";
         system = "x86_64-linux";
-        # group = "client";            # 設定グループ (書かなければ personal。客先の PC なら client。後述の「設定グループ」)
+        group = "minimum";             # 設定グループ (書かなければ minimum。道具は下で足す。後述の「設定グループ」)
         wsl = {
           enable = true;
           windowsUserName = "alice";   # ホスト側 Windows のユーザー名 (例は作り物)
@@ -1474,12 +1506,15 @@ outputs =
         };
         onePassword.enable = true;
         claude = {
-          devTracker.enable = true;    # Notion Dev Tracker を使う (既定は使わない)
+          enable = true;               # Claude Code 一式 (minimum に入らないので足す)
+          privateSkills.enable = true; # claude-skills (Dev Tracker の skill がここ)
+          devTracker.enable = true;    # Notion Dev Tracker を使う (minimum では使わない)
           notion.profile = "work";
         };
         # mkHome の引数に無い option と、home-manager の設定
         modules = [
           {
+            dotfiles.ccPages.enable = true;
             dotfiles.ccPages.port = 7778;
           }
         ];
@@ -1510,8 +1545,8 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 
 | 値 | 既定 | 書くマシン |
 | --- | --- | --- |
-| `group` | `"personal"` | 自社の PC は `"company"`、客先の PC は `"client"`（[設定グループ](#設定グループ)。段・道具の switch もここで直せる） |
-| `claude.devTracker.enable` | `false` | Notion Dev Tracker を使うマシン（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)） |
+| `group` | `"minimum"` | どの PC も `"minimum"` にして、使う道具 (`claude.enable` など) を足す。道具を全部入れる PC だけ `"all"`（[設定グループ](#設定グループ)） |
+| `claude.devTracker.enable` | `false`（minimum） | Notion Dev Tracker を使うマシン（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)） |
 | `claude.notion.profile` | `null` | Notion へ書く skill を使うマシン。`"personal"` / `"work"`（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)） |
 | `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
 | `claude.videoOffer.autoStart.enable` | `false` | 解説動画の短尺を聞かずに作り始めたいマシンだけ `true`（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)） |
@@ -1520,8 +1555,8 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `dotfiles.osCaBundle.enable`（`modules`） | `true` | 証明書の束を OS の信頼ストアに寄せる 4 つの環境変数を入れたくないマシンだけ `false`（[入れる変数を選ぶ](#入れる変数を選ぶ)） |
 | `dotfiles.osCaBundle.requestsCaBundle.enable`（`modules`） | `true` | そのうち `REQUESTS_CA_BUNDLE` だけを外したいマシンは `false`（同上） |
 | `dotfiles.ntn.keyring`（`modules`） | `null`（触らない） | ntn の token を keychain でなくファイル（`auth.json`）に置くマシンは `false`（[ntn (Notion CLI) の token をファイルに置く](#ntn-notion-cli-の-token-をファイルに置く-keyring)） |
-| `dotfiles.herdrCore.enable`（`modules`） | ② の段で Linux なら `true` | herdr-core (hc) を入れない Linux のマシンだけ `false`（releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
-| `dotfiles.cursorAgent.enable`（`modules`） | `false`（入れない） | Cursor の CLI（`cursor-agent`）を使うマシンだけ `true`（[`cursor-agent` も mise に置いている理由](#cursor-agent-も-mise-に置いている理由)） |
+| `dotfiles.herdrCore.enable`（`modules`） | グループ all の Linux なら `true`（minimum では `false`） | herdr-core (hc) を入れる Linux のマシンは `true`（all で入れないなら `false`。releases.herdr.dev から落とせないときに switch を止めないためにも使える。[herdr-core (hc) を Nix で入れる](#herdr-core-hc-を-nix-で入れる)） |
+| `dotfiles.cursorAgent.enable`（`modules`） | `false`（minimum では入れない） | Cursor の CLI（`cursor-agent`）を使うマシンだけ `true`（[`cursor-agent` も mise に置いている理由](#cursor-agent-も-mise-に置いている理由)） |
 
 - 前の雛形（ADR 007〜026 の版）は、登録簿のホストにも当たる「このマシンだけの設定」（`local`。`dotfiles.lib.hostsWith [ local ]` で
   当てる）を持っていた。今の雛形は持たない: 登録した PC では使われず、登録していない PC の値は足したホストに書けば足りる。
@@ -1575,6 +1610,12 @@ $m apply "$w"                # flake.nix.bak-<日時> と flake.lock.bak-<日時
 ```
 
 - 先に本体を新しくしておく（新しい雛形の option が旧い本体に無いと、評価が止まる）
+- 設定グループの既定が `personal` から `minimum` に替わった版（[ADR 109](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/109_host_groups_minimum_all_20261126T113247JST/README.md)。
+  雛形の版の印 `4f170c76`）へ移すとき: グループを書いていない手元の `tmp` は、本体を新しくした時点で `minimum` に縮む（Claude Code・herdr などが
+  世代から外れる）。compare は旧い flake と移した flake を同じ本体で比べるので、この縮みは違いに出ない。今の道具を保つには、`tmp` に
+  `group = "minimum";` と前の既定の道具の行を書く（雛形の `tmp` の例と同じ行。[前のグループから移す](#前のグループから移す)）。
+  `group = "personal"`・`"company"`・`"client"` を書いた `tmp` は評価が止まるので、同じく書き直す。前の版の `--initial` が書いた `initial`
+  （登録の途中の PC）は、`~/dotfiles/setup-local-flake.sh --force --initial` で今の `initial` に作り直す（[前のグループから移す](#前のグループから移す)）
 - `local` を持つ前の雛形から今の雛形（[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）へ移すと、`local` の塊が消える。dotfiles-private に登録した PC
   （登録の仕上げで `local` を雛形の既定に戻してある）は衝突なく移る。`local` に値が残っていれば、塊ごと衝突として残るので、
   値を dotfiles-private の登録か足したホスト（`tmp`）へ移してから、雛形どおりに消す。移したあとは型のホストに `local` の値が
@@ -1649,8 +1690,8 @@ dotfiles-private/
 
 中身は[登録簿](#マシン登録簿-hostsdefaultnix)の 1 エントリと同じ形で、`mkHome` を受け取って呼ぶ関数にする。その PC の値は全部
 このファイルに書く（`group`・`claude.*`・`wsl.*`・`onePassword.*` は `mkHome` の引数、ほかの `dotfiles.*` は `modules`。前の雛形の
-`local` に書いていた値も）。Dev Tracker を使う PC は `claude.devTracker.enable = true` を書く（本体の既定は使わない）。自社の PC は
-`group = "company";` を書き、要る ③ の道具を 1 つずつ足す（[設定グループ](#設定グループ)）。
+`local` に書いていた値も）。グループは `group = "minimum";` にし、使う道具を 1 つずつ足す（Claude Code・claude-skills・Dev Tracker・herdr
+など。[設定グループ](#設定グループ)）。
 
 ```nix
 # 例 (値は作り物)
@@ -1658,12 +1699,16 @@ dotfiles-private/
 mkHome {
   username = "alice";
   system = "x86_64-linux";
+  group = "minimum";
   claude = {
+    enable = true;
+    privateSkills.enable = true;
     devTracker.enable = true;
     notion.profile = "work";
   };
   modules = [
     {
+      dotfiles.ccPages.enable = true;
       dotfiles.ccPages.port = 7801;
     }
   ];
@@ -1839,7 +1884,7 @@ darwin では同じものが launchd の agent (`org.nix-community.home.nix-gc` 
 | `pjp-ghq-pull` (PATH) | `nix/pkgs/pjp-ghq-pull/` (全ホスト。Rust。[後述](#ghq-の-repo-をまとめて最新にする-pjp-ghq-pull)) |
 | `claude-selector` (PATH) | `nix/pkgs/claude-selector/` (`claude.enable` のマシン。Rust。略語は `cs`。[後述](#アカウントと-option-を矢印キーで選んで起こす-claude-selector)) |
 | `ntn` (PATH) | `nix/pkgs/ntn/` (全ホスト。Notion の CLI の公式の配布物を版と sha256 で固定したもの。[後述](#ntn-notion-cli-を-nix-で入れる)) |
-| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は Linux の全ホスト。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は core を立てたシェルに固有の env (旧 herdr の pane の印・`RUSTUP_TOOLCHAIN`) を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
+| `herdr-core`・`hc` (PATH)・`~/.local/bin/herdr-core`・`~/.local/bin/hc` | `nix/pkgs/herdr-core/` (`dotfiles.herdrCore.enable` のマシン。既定は `all` の Linux のホストで on。公式の Linux 版を Windows と同じ版と sha256 で固定したもの。`bin/` は core を立てたシェルに固有の env (旧 herdr の pane の印・`RUSTUP_TOOLCHAIN`) を外して本物を起こす包みで、`~/.local/bin` のものは同じ包みへのリンク。[後述](#herdr-core-hc-を-nix-で入れる)) |
 | `~/.claude/skills/hc/SKILL.md` | `nix/pkgs/herdr-core/claude-skill.nix` (生成。同じ package の `hc --skill` に `claude-skill-head.md` の frontmatter を足したもの。`dotfiles.herdrCore.enable` のマシン。[後述](#hc-の-skill-claudeskillshc)) |
 | `~/.cargo/bin/pjp` | `nix/scripts/bootstrap-pjp.sh` (claude-skills の `crates/pjp-shim` を `cargo install` したもの。Nix 管理ではない。`dotfiles.claude.privateSkills.enable` のマシン。[後述](#claude-skills-の-rust-の道具-shim-の-pjp)) |
 | `herdr`・`pjp-agent-link`・`ssh-agent-link` (PATH) | `nix/pkgs/pjp-agent-link/` (全ホスト。herdr は固定名を渡す実行ファイルで包んだもの。[後述](#forward-された-agent-を固定名で見せる)) |
@@ -1985,22 +2030,22 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   `%USERPROFILE%\.config\port-forward\hosts.json` へ置く。前回置いた中身 (`~/.local/state/dotfiles/windows-port-forward.deployed.json`
   の sha256) と比べて衝突を見るのは ssh の設定の手順と同じ。その PC で足した組は pf が同じ場所の `local.json` に持ち、この手順は触らない
   （[`win/README.md`](../win/README.md#port-forwarding-pf)、[設計](https://github.com/pollenjp/dotfiles-private/blob/main/docs/superpowers/specs/2026-11-07-pf-port-forward-design.md)）
-- 自作の Windows のアプリ type-clipboard は winget に無いので、`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシン (既定は
-  false) だけ、`bootstrap-windows-type-clipboard.sh` (order 97) が配った `Install-TypeClipboard.ps1` を `pwsh.exe` で呼び、入っていなければ
+- 自作の Windows のアプリ type-clipboard は winget に無いので、`dotfiles.wsl.windowsFiles.typeClipboard.enable = true` のマシン (`minimum` では
+  既定で false、`all` の `win/` を配るマシンでは true) だけ、`bootstrap-windows-type-clipboard.sh` (order 97) が配った `Install-TypeClipboard.ps1` を `pwsh.exe` で呼び、入っていなければ
   GitHub の Release から固定した版の exe を落として、SHA-256 が合えば `%LOCALAPPDATA%\Programs\type-clipboard` に置きスタートメニューに出す。
   版と SHA-256 は ps1 で固定し、ずれは ⚠ で知らせるだけ（[`win/README.md`](../win/README.md#type-clipboard)、
   [ADR 049](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/049_win_type_clipboard_release_pin_20261110T001612JST/README.md)）
 - ntn (Notion の CLI) と Claude Code は、`dotfiles.wsl.windowsFiles.ntn.enable`・`dotfiles.wsl.windowsFiles.claudeCode.enable` が true の
-  マシン (どちらも既定は true) で、`bootstrap-windows-ntn.sh`・`bootstrap-windows-claude-code.sh` (order 97) が配った `Install-Ntn.ps1`・
+  マシン (どちらも既定はグループで決まり、`all` の `win/` を配るマシンで true) で、`bootstrap-windows-ntn.sh`・`bootstrap-windows-claude-code.sh` (order 97) が配った `Install-Ntn.ps1`・
   `Install-ClaudeCode.ps1` を `pwsh.exe` で呼び、winget の `Notion.ntn`・`Anthropic.ClaudeCode` で入れ、版か pin がずれていれば固定した版に
   揃える (herdr と違い、常駐も UAC も無いので揃える。置き場所の exe が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で
   固定する（[`win/README.md`](../win/README.md#ntn)・[`win/README.md`](../win/README.md#claude-code)、[ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)）
-- Tailscale は、`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシン (どのグループでも既定は false。VPN の道具で、会社の PC などに
+- Tailscale は、`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシン (minimum では既定で false。VPN の道具で、会社の PC などに
   勝手に入れない) だけ、`bootstrap-windows-tailscale.sh` (order 96) が配った `Install-Tailscale.ps1` を `pwsh.exe` で呼び、入っていなければ
   winget の `Tailscale.Tailscale` (MSI) を固定した版で入れる (UAC の確認が出る)。入っていれば上げない (Tailscale が自分で上がるので、
   入っている版の方が新しくても揃っている扱い。古ければ ⚠ で知らせる)。tailnet へのログインは入れた後に手でする
   （[`win/README.md`](../win/README.md#tailscale)、dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`)）
-- sshd (OpenSSH Server) は、`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシン (どのグループでも既定は false。PC に外から入る口を開け
+- sshd (OpenSSH Server) は、`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシン (minimum では既定で false。PC に外から入る口を開け
   るので、会社の PC などに勝手に入れない) だけ、`bootstrap-windows-sshd.sh` (order 96) が鍵の写しを置いてから、配った `Install-Sshd.ps1` を
   `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers と Match Address で tailnet と localhost に
   限る `sshd_config`、Windows Firewall の拒否の規則 (tailnet からは 22 番だけ、22 番には tailnet と localhost からだけ)、鍵
@@ -2847,7 +2892,7 @@ op-reason の SSH の中継（`op-reason.exe --ssh-agent`。1Password の SSH ag
 
 | option | 中身 |
 | --- | --- |
-| `dotfiles.opReason.sshRelay.enable` | WSL の側で中継を使うか（既定 false）。on にできるのは `wsl.enable`・`onePassword.enable` が true で `wsl.windowsFiles.enable` が false（受け持ちが runner）のホストだけ（ほかでは評価で止まる）。ホストは `modules` に書く（`modules = [ { dotfiles.opReason.sshRelay.enable = true; } ];`） |
+| `dotfiles.opReason.sshRelay.enable` | WSL の側で中継を使うか（`minimum` では既定で false。`all` では、下の条件がそろう WSL で既定で true）。on にできるのは `wsl.enable`・`onePassword.enable` が true で `wsl.windowsFiles.enable` が false（受け持ちが runner）のホストだけ（ほかでは評価で止まる）。ホストは `modules` に書く（`modules = [ { dotfiles.opReason.sshRelay.enable = true; } ];`） |
 | `dotfiles.opReason.sshRelay.mode` | `per-call`（既定。許可は op-reason の窓で押す）か `show-only`（決めるのは 1Password の画面で、窓は誰が・何のためにを並べる）。Windows のホストの値の `[opReason] sshRelayMode` と同じ値にする |
 
 on のマシンでは:
@@ -4455,7 +4500,7 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 
 使う skill はマシンごとに違う。例えば会社のマシンでは Notion Dev Tracker の
 `pjp-dev-tracker` を発火させたくない。その宣言は host option
-**`dotfiles.claude.devTracker.enable`**（既定 false。使うマシンだけ true）に置き、1 つの値から 2 つが決まる。
+**`dotfiles.claude.devTracker.enable`**（`minimum` では既定で false で、使うマシンだけ true。`all` では既定で true）に置き、1 つの値から 2 つが決まる。
 
 | 層 | enable = true | enable = false | 決める場所 |
 | --- | --- | --- | --- |
@@ -4474,9 +4519,10 @@ bootstrap が警告し、`setup` の最後の[警告のまとめ](#途中の警�
 
 #### 値の置き場
 
-- 本体の既定は false（使わない）。**Dev Tracker を使うマシンだけ** `mkHome` に `claude.devTracker.enable = true;` を書く:
-  dotfiles-private に登録したファイル、`~/dotfiles/flake.nix` に足したホスト（[前述](#足したホストに書く値)。雛形の `tmp` の例は
-  true を書く）。公開の登録簿では検証用の `sandbox` だけが true
+- グループ `minimum` の既定は false（使わない。`all` なら true）。**Dev Tracker を使うマシンだけ** `mkHome` に `claude.devTracker.enable = true;` を書く
+  （skill は claude-skills にあるので `claude.enable`・`claude.privateSkills.enable` も要る）: dotfiles-private に登録したファイル、
+  `~/dotfiles/flake.nix` に足したホスト（[前述](#足したホストに書く値)。雛形の `tmp` の例は true を書く）。公開の登録簿では検証用の
+  `sandbox` だけが true
 - 型のホスト（`--host <型>`）で当てたマシンでは使わない（前は既定が true で、ローカル flake の雛形の `local` が false を書いて
   いた。[ADR 027](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/027_stop_guessing_host_20261021T143517JST/README.md)）
 
@@ -5069,7 +5115,7 @@ claude-skills を進めても unit ファイルは変わらないので、`switc
 
 #### 使うホストだけ有効にする
 
-既定では置かない。herdr でハブの会話を回すホストの `mkHome`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に
+`minimum` では既定で置かない (`all` の Linux のホストでは置く)。herdr でハブの会話を回すホストの `mkHome`（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に
 足した tmp）で有効にし、`~/dotfiles/setup --update` で効かせる。`devTracker.enable` が false のホストで true にすると評価で止まる。
 
 ```nix
@@ -5653,7 +5699,7 @@ cloud の VM は home-manager を通らないので、ntn は環境の setup scr
 ## T3 Code
 
 T3 Code (pingdotgg/t3code) の CLI `t3` と、そのサーバーを常駐させる systemd の user service (`t3code.service`) を、`dotfiles.t3Code.enable = true`
-のマシンにだけ入れる (どのグループでも既定は false。効くのは Linux で `claude.enable` も true のマシン。dotfiles-private の ADR 091
+のマシンにだけ入れる (minimum では既定で false。効くのは Linux で `claude.enable` も true のマシン。dotfiles-private の ADR 091
 (`docs/adr/091_t3_code_opt_in_*`))。Windows の desktop app は Windows の runner が入れる (win/README.md の「T3 Code」)。入れるホストは、そのホストの
 modules に書く:
 
@@ -5721,8 +5767,8 @@ dotfiles は対話の要るものに触らない。`~/dotfiles/setup --update` �
 claude-skills は skill の script を Rust に移している (Windows のハブでも同じ道具を動かすため。claude-skills の
 `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md`)。道具は shim の `pjp` から `pjp <道具> …` で打ち、shim は clone の
 `rust-toolchain.toml` の版で `cargo build` してから道具を起こす (clone を pull すれば、次の呼び出しから新しいコードで動く)。Linux で
-それを動かすための用意を、claude-skills の clone を持つホスト (`dotfiles.claude.privateSkills.enable`。既定は ② と ③ の両方が on の
-personal) に 3 つ置く。
+それを動かすための用意を、claude-skills の clone を持つホスト (`dotfiles.claude.privateSkills.enable`。既定はグループ all だけ on で、
+minimum のホストは使うときに足す) に 3 つ置く。
 
 | もの | 置き場所 | 入れるもの |
 | --- | --- | --- |
@@ -5847,7 +5893,7 @@ herdr-core の server は、user の service (`hc-serve-<id>.service`) として
 無いと、最後の login session が消えてから logind の `UserStopDelaySec` (既定 10 秒) で user manager ごと止まり、server と agent も止まる。
 Windows の herdr-app は、linger の無い Linux のホストを machine add すると「Agents on <ホスト> stop when you disconnect」と警告する。
 そこで、herdr-core を入れるホストでは linger も既定で有効にする (`dotfiles.linger.enable`。既定は `dotfiles.herdrCore.enable` と同じで、
-② の段で Linux なら true。[ADR 101](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/101_linger_with_herdr_core_20261125T152150JST/README.md))。
+herdr-core を足した Linux か、グループ all の Linux なら true。グループからは on にならず、herdr-core に付いてくる。dotfiles-private の ADR 109・[ADR 101](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/101_linger_with_herdr_core_20261125T152150JST/README.md))。
 有効にすると、user manager と user の service はマシンの起動の時から動く (ログインを待たない)。cc-pages・Dev Tracker の見回り役・T3 Code
 なども、同じわけでログアウトしても止まらなくなる。
 

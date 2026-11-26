@@ -146,7 +146,7 @@ new_case() {
 group_json() {
   local d="$1/home/.local/state/dotfiles"
   mkdir -p "${d}"
-  printf '{"group":"personal","tools":{%s},"version":1}\n' "$2" >"${d}/group.json"
+  printf '{"group":"all","tools":{%s},"version":2}\n' "$2" >"${d}/group.json"
 }
 on='"herdrCore":true,"linger":true'
 

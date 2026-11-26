@@ -392,7 +392,7 @@ impl Step for GitConfig {
             id: "git-config",
             order: 50,
             title: "git の設定 (~/.config/git/config・ignore) を、WSL の home-manager と同じ git.toml から置く (署名と delta は除く)",
-            // Linux の git.nix (① エンジニアの道具) と同じくどのホストにも置く。名前とメールだけ gitIdentity で切り替える
+            // Linux の git.nix (minimum の基本の道具) と同じくどのホストにも置く。名前とメールだけ gitIdentity で切り替える
             gate: Gate::Always,
             ported: true,
             windows_only: true,
@@ -840,6 +840,9 @@ postBuffer = 524288000
         }
     }
 
+    /// 名前とメールを書くホスト (gitIdentity は minimum に入らないので、使うホストが [tools] に書く)
+    const IDENTITY: &str = "[tools]\ngitIdentity = true\n";
+
     fn kinds(o: &[Outcome]) -> Vec<Kind> {
         o.iter().map(|x| x.kind).collect()
     }
@@ -848,11 +851,11 @@ postBuffer = 524288000
     fn places_and_records() {
         let e = Env::new();
         for mode in [Mode::Check, Mode::DryRun { force: false }] {
-            let (o, out) = e.run(mode, "");
+            let (o, out) = e.run(mode, IDENTITY);
             assert_eq!(kinds(&o), vec![Kind::Missing], "{mode:?} {o:?}\n{out}");
             assert!(!e.git("config").exists());
         }
-        let (o, out) = e.run(Mode::Apply { force: false }, "");
+        let (o, out) = e.run(Mode::Apply { force: false }, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
         assert!(
             o[0].text.starts_with("追加 3 / 更新 0 / 削除 0 / 同じ 0"),
@@ -869,16 +872,16 @@ postBuffer = 524288000
         )
         .unwrap();
         assert_eq!(record.as_object().unwrap().len(), 3);
-        let (o, _) = e.run(Mode::Check, "");
+        let (o, _) = e.run(Mode::Check, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
         // git.toml を変えると、記録どおりの中身なので上書きする
         e.t.write(
             "dotfiles/nix/home/modules/git.toml",
             &TOML.replace("editor = \"vim\"", "editor = \"nano\""),
         );
-        let (o, _) = e.run(Mode::Check, "");
+        let (o, _) = e.run(Mode::Check, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}");
-        let (o, _) = e.run(Mode::Apply { force: false }, "");
+        let (o, _) = e.run(Mode::Apply { force: false }, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
         assert!(
             std::fs::read_to_string(e.git("config"))
@@ -890,14 +893,14 @@ postBuffer = 524288000
     #[test]
     fn edited_config_conflicts() {
         let e = Env::new();
-        e.run(Mode::Apply { force: false }, "");
+        e.run(Mode::Apply { force: false }, IDENTITY);
         // git config --global が足した (~/.gitconfig が無いと、ここの config に書く)
         let edited = format!(
             "{}[credential \"https://github.com\"]\n\thelper = !gh auth git-credential\n",
             std::fs::read_to_string(e.git("config")).unwrap()
         );
         std::fs::write(e.git("config"), &edited).unwrap();
-        let (o, _) = e.run(Mode::Apply { force: false }, "");
+        let (o, _) = e.run(Mode::Apply { force: false }, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
         assert!(
             o[1].notes.iter().any(|n| n
@@ -913,7 +916,7 @@ postBuffer = 524288000
             "{o:?}"
         );
         assert_eq!(std::fs::read_to_string(e.git("config")).unwrap(), edited);
-        let (o, _) = e.run(Mode::Apply { force: true }, "");
+        let (o, _) = e.run(Mode::Apply { force: true }, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
         assert!(
             !std::fs::read_to_string(e.git("config"))
@@ -923,7 +926,7 @@ postBuffer = 524288000
         // 記録の無い違う中身 (手で置いた config) も衝突
         let e = Env::new();
         e.t.write("home/.config/git/config", "[user]\n\tname = hand\n");
-        let (o, _) = e.run(Mode::Apply { force: false }, "");
+        let (o, _) = e.run(Mode::Apply { force: false }, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
         assert!(
             o[1].notes.iter().any(|n| n.contains("置いた記録が無い")),
@@ -938,7 +941,7 @@ postBuffer = 524288000
     #[test]
     fn identity_off_removes_the_include() {
         let e = Env::new();
-        e.run(Mode::Apply { force: false }, "");
+        e.run(Mode::Apply { force: false }, IDENTITY);
         let off = "[tools]\ngitIdentity = false\n";
         let (o, out) = e.run(Mode::Check, off);
         assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
@@ -957,7 +960,7 @@ postBuffer = 524288000
                 .contains("[user]")
         );
         // 変えた include のファイルは消さずに知らせる
-        e.run(Mode::Apply { force: false }, "");
+        e.run(Mode::Apply { force: false }, IDENTITY);
         std::fs::write(e.git("config.me-sub"), "[user]\n\tname = edited\n").unwrap();
         let (o, _) = e.run(Mode::Apply { force: false }, off);
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Manual], "{o:?}");
@@ -1066,7 +1069,7 @@ postBuffer = 524288000
             "dotfiles/nix/home/modules/git.toml",
             "[identity]\nname = \"a\"\n",
         );
-        let (o, out) = e.run(Mode::Check, "");
+        let (o, out) = e.run(Mode::Check, IDENTITY);
         assert_eq!(kinds(&o), vec![Kind::Failed], "{o:?}");
         assert!(o[0].text.contains("email を空でない文字列"), "{o:?}");
         assert!(out.contains("!! "), "{out}");

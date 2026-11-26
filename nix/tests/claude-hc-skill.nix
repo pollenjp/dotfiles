@@ -28,6 +28,8 @@ let
     (mkHome {
       username = "tester";
       inherit system modules;
+      # グループ all のホスト (Claude Code 一式が入り、herdr-core は Linux でだけ既定で入る)
+      group = "all";
     }).config;
 
   byDefault = configWith [ ];

@@ -2,7 +2,7 @@
 # shellcheck shell=bash
 #
 # Windows の Claude Code (winget の Anthropic.ClaudeCode) を、dotfiles で固定した版に揃える。
-# 冪等。`setup.sh --update` でも毎回走る。dotfiles.wsl.windowsFiles.claudeCode.enable = true (既定) のマシンが対象。
+# 冪等。`setup.sh --update` でも毎回走る。dotfiles.wsl.windowsFiles.claudeCode.enable = true のマシンが対象 (既定はグループで決まる)。
 # 入っていなければ winget で入れ、版か pin がずれていれば固定した版に揃える (Windows の Claude Code が動いていれば揃えずに ⚠ で知らせる)。
 # PATH のずれ (native の installer などのほかの claude.exe が先に引かれる) は揃える手順では直らないので、⚠ で囲んで直し方を知らせる。
 #
@@ -39,7 +39,7 @@ set -eu -o pipefail
 usage() {
   cat <<'EOS'
 Windows の Claude Code (winget の Anthropic.ClaudeCode) を、dotfiles で固定した版に揃える。
-dotfiles.wsl.windowsFiles.claudeCode.enable = true (既定) のマシンが対象。
+dotfiles.wsl.windowsFiles.claudeCode.enable = true のマシンが対象 (既定はグループで決まり、all の win/ を配るマシンで on)。
 
 使い方:
   bootstrap-windows-claude-code.sh            確かめて、入っていなければ入れ、ずれていれば揃える (揃わなければ ⚠ で知らせる)

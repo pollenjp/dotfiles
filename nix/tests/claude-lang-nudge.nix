@@ -22,6 +22,8 @@ let
     (mkHome {
       username = "tester";
       inherit system;
+      # Claude Code 一式は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      claude.enable = true;
     }).config;
 
   hook = cfg.home.file.".claude/hooks/lang-nudge.sh" or null;

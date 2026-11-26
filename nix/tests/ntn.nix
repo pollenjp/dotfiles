@@ -23,7 +23,9 @@ let
     modules:
     (mkHome {
       username = "tester";
-      inherit system modules;
+      inherit system;
+      # ntn は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      modules = [ { dotfiles.ntn.enable = true; } ] ++ modules;
     }).config;
 
   state = cfg: cfg.home.file.".local/state/dotfiles/ntn.json".text;

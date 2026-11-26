@@ -18,8 +18,8 @@
 #     頭のコメントに元にしたホストと notes を書く。fixtures/host-draft/ の期待のファイルと 1 字も違わない (WSL のホストも)
 #   - 期待のファイル (= 描いた下書き) を import したホストは、元のホストと drvPath が同じ。値を 1 つ変えたホストとは違う
 #   - 字句にできない値 (関数) は、値を書かずに「# TODO: dotfiles.<path>」の行にする
-#   - 設定グループ (group) を書いたホストは、下書きの mkHome の引数に `group = "company";` を system の行の後ろに描き、modules には
-#     入れない。グループで off になる段の道具を足した値 (claude.privateSkills.enable・ntn.enable など) は今の決まりどおり
+#   - 設定グループ (group) を書いたホストは、下書きの mkHome の引数に `group = "minimum";` を system の行の後ろに描き、modules には
+#     入れない。グループに入らない道具を足した値 (claude.enable・claude.privateSkills.enable・ntn.enable など) は今の決まりどおり
 #     (claude は引数の組、ほかは modules)。fixtures/host-draft/grace@box.nix と 1 字も違わず、import すると drvPath が同じ
 {
   lib,
@@ -45,6 +45,9 @@ let
       onePassword.enable = true;
       modules = [
         {
+          # Dev Tracker の skill は claude-skills (Claude Code の道具) にある。どちらも minimum に入らないので足す
+          dotfiles.claude.enable = true;
+          dotfiles.claude.privateSkills.enable = true;
           dotfiles.claude.devTracker.enable = true;
           dotfiles.claude.notion.profile = "work";
           dotfiles.ccPages.port = port;
@@ -82,12 +85,13 @@ let
     values = daveValues;
   };
 
-  # 設定グループを選び、グループで off になる ③ の道具を足した自社のホスト (ADR 057)
+  # 設定グループ minimum を選び、使う道具を足したホスト (ADR 109)
   grace = mkHome {
     username = "grace";
     system = hostSystem;
-    group = "company";
+    group = "minimum";
     claude = {
+      enable = true;
       privateSkills.enable = true;
       devTracker.enable = true;
       notion.profile = "work";
@@ -142,7 +146,9 @@ let
         map (v: lib.concatStringsSep "." v.path) carolValues == [
           "ccPages.port"
           "claude.devTracker.enable"
+          "claude.enable"
           "claude.notion.profile"
+          "claude.privateSkills.enable"
           "onePassword.enable"
         ];
     }
@@ -152,7 +158,9 @@ let
         map (v: v.value) carolValues == [
           7801
           true
+          true
           "work"
+          true
           true
         ];
     }

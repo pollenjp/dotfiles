@@ -9,8 +9,9 @@
 # ## 確かめること
 #
 #   - tmp の例は、雛形に local が無くても mkForce なしで評価でき、activationPackage の drvPath が出る
-#   - 例の有効な行の値が config に入る: WSL (windowsUserName・windowsFiles・exeExecTrace)・1Password・
-#     Dev Tracker (true)・Notion の宛先 ("personal")
+#   - 例の有効な行の値が config に入る: 設定グループ (minimum)・WSL (windowsUserName・windowsFiles・exeExecTrace)・1Password・
+#     minimum に足す道具 (Claude Code・claude-skills・herdr・集約ハブ・herdr-core・cc-pages・ntn・git の名前とメールと、Windows の
+#     Claude Code・herdr・ntn・claude-personal と claude-work・Claude Desktop)・Dev Tracker (true)・Notion の宛先 ("personal")
 #   - 例の中でコメントのままの行 (gitViaGh・Notion の routes と override・解説動画の autoStart・cc-pages の port) と、
 #     例に無い重い処理の資源の上限の割合 (heavyJobs.limitPercent) は、本体の既定のまま
 #   - 例のままなら config.warnings は空 (Dev Tracker を使い、宛先も選んでいる)。ただし nixpkgs の猶予の例外の消し時
@@ -40,6 +41,24 @@ let
         && d.wsl.windowsFiles.enable
         && d.wsl.exeExecTrace.enable
         && d.onePassword.enable;
+    }
+    {
+      name = "設定グループは minimum で、例の道具の行が入る (Claude Code・claude-skills・herdr・集約ハブ・herdr-core・cc-pages・ntn・git の名前とメール・Windows の 5 つ)";
+      ok =
+        d.group == "minimum"
+        && d.claude.enable
+        && d.claude.privateSkills.enable
+        && d.herdr.enable
+        && d.herdr.hub.enable
+        && d.herdrCore.enable
+        && d.ccPages.enable
+        && d.ntn.enable
+        && d.git.identity.enable
+        && d.wsl.windowsFiles.claudeCode.enable
+        && d.wsl.windowsFiles.herdr.enable
+        && d.wsl.windowsFiles.ntn.enable
+        && d.wsl.windowsFiles.claudeAccounts.enable
+        && d.wsl.windowsFiles.claudeDesktop.enable;
     }
     {
       name = "Dev Tracker を使い (true)、Notion の宛先は personal";

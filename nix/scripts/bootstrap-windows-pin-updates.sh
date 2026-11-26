@@ -49,8 +49,8 @@
 #    (欄が無い前の世代は true と読む)。herdr・herdr-app・herdr-core は、~/.local/state/dotfiles/group.json (設定グループ。
 #    home/modules/group.nix) の tools.windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable) が false なら確かめない (ファイル・欄が
 #    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)。
-#    tailscale は group.json の tools.windowsTailscale (dotfiles.wsl.windowsFiles.tailscale.enable) が true のときだけ確かめる (どの
-#    グループでも既定は off なので、ファイル・欄が無い前の世代は false と読む)。
+#    tailscale は group.json の tools.windowsTailscale (dotfiles.wsl.windowsFiles.tailscale.enable) が true のときだけ確かめる (前は
+#    どのグループでも既定が off だったので、ファイル・欄が無い前の世代は false と読む)。
 #    bootstrap が入れる 4 つ (git・gh・vs-buildtools・rustup) は、Windows で bootstrap を流したマシン (windows-files.json の windowsHome の
 #    下に ghq/github.com/pollenjp/dotfiles/.git がある) だけ確かめる (入れていない道具の版を知らせない。dotfiles-private の
 #    docs/adr/058_win_runner_bootstrap_*)。ghq・fzf・starship も同じマシンだけ確かめる (入れるのは Windows の runner の手順 ghq・fzf・starship
@@ -453,7 +453,7 @@ if [[ -r ${group_file} ]]; then
   windows_herdr=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsHerdr")) then .tools.windowsHerdr | tostring else "true" end' \
     "${group_file}" 2>/dev/null) || windows_herdr=true
 fi
-# tailscale は group.json の tools.windowsTailscale が true のときだけ (どのグループでも既定は off。ファイル・欄が無い前の世代は入れない)
+# tailscale は group.json の tools.windowsTailscale が true のときだけ (minimum では既定で off。ファイル・欄が無い前の世代は入れない)
 windows_tailscale=false
 if [[ -r ${group_file} ]]; then
   windows_tailscale=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsTailscale")) then .tools.windowsTailscale | tostring else "false" end' \

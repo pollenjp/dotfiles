@@ -103,8 +103,8 @@
 #
 # ## Claude Code を入れるホストだけ (dotfiles.claude.enable)
 #
-# ここで置くものは、dotfiles.claude.enable のホスト (既定は設定グループの ② AI の道具) にだけ置く。false のホスト (客先の PC
-# など) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
+# ここで置くものは、dotfiles.claude.enable のホスト (既定はグループ all だけ on) にだけ置く。false のホスト (Claude Code を
+# 足していない minimum のホストなど) には ~/.claude も claude-<名前> のコマンドも置かず、setup は bootstrap-claude-* を飛ばし、mise の claude を入れない。
 # ただし git-via-gh.json (gitViaGh.enable の値) は Claude Code によらず置く (setup の取得と fetch 系の abbr / alias が読む)。
 # herdr の skill は herdr も入れるホスト (dotfiles.herdr.enable) だけ。hc の skill は herdr-core も入れるホスト
 # (dotfiles.herdrCore.enable) だけ。
@@ -249,7 +249,7 @@ lib.mkMerge [
     # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
     # 評価時に警告を出す (option の値しか見ないので、宛先のキーの意味には立ち入らない)。
     warnings = lib.optional (cfg.devTracker.enable && cfg.notion.profile == null) ''
-      dotfiles.claude.notion.profile が未設定です (dotfiles.claude.devTracker.enable = true のマシン)。
+      dotfiles.claude.notion.profile が未設定です (Dev Tracker (dotfiles.claude.devTracker.enable) が on のマシン。設定グループ all では既定で on)。
       規則 (routes) に当たらない repo と repo の外で、Notion へ書く skill (pjp-dev-tracker など) が止まります。
       このホストの mkHome (dotfiles-private に登録したファイルか、~/dotfiles/flake.nix に足した tmp) に
       claude.notion.profile = "personal"; (か "work") を書いて switch してください

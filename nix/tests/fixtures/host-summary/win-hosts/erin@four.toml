@@ -1,4 +1,4 @@
-# nix/tests/host-summary.nix の作り物 (Windows のホストの値)。グループを書かない (既定の personal) Windows で、type-clipboard だけを
+# nix/tests/host-summary.nix の作り物 (Windows のホストの値)。グループを書かない (既定の minimum) Windows で、type-clipboard だけを
 # 足した。受け持ちは WSL の setup のまま
 [tools]
 windowsTypeClipboard = true
