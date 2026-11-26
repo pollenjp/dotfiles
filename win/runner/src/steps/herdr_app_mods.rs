@@ -770,7 +770,8 @@ mod tests {
         );
     }
 
-    /// 本物の repo の mod の置き場: pjp-hub-panel の 3 つのファイルを置く。.gitignore が herdr-app の書くファイルを入れない
+    /// 本物の repo の mod の置き場: pjp-hub-panel の 4 つのファイル (main.js が読む ring.svg・copy.svg も) を置く。.gitignore が herdr-app の
+    /// 書くファイルを入れない
     #[test]
     fn real_repo_mods() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
@@ -780,7 +781,7 @@ mod tests {
             .iter()
             .find(|m| m.name == "pjp-hub-panel")
             .expect("pjp-hub-panel がある");
-        for f in ["main.js", "mod.json", "ring.svg"] {
+        for f in ["main.js", "mod.json", "ring.svg", "copy.svg"] {
             assert!(hub.files.iter().any(|x| x == f), "{f} が無い: {hub:?}");
         }
         assert!(hub.odd.is_empty(), "{hub:?}");
