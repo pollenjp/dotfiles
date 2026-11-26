@@ -1,11 +1,12 @@
 // ホストの道具の図 (dotfiles の nix/lib/host-summary/page.js)。page.html の <script> に差し込む (生成物の HTML 版の JS)。
 //
-// #data の JSON ({ figures: [ … ] }) から、図ごとに段の入れ子の領域・道具の箱・ホストごとの囲みの線を SVG に描き、タブで
+// #data の JSON ({ figures: [ … ] }) から、図ごとにグループの入れ子の領域・道具の箱・ホストごとの囲みの線を SVG に描き、タブで
 // 見せる線を替える。pjp-diagram-motion の選択モードの雛形 (タブ・← →・▶ の自動再生・変わった所だけ点滅・箱の詳細を押した箱の
 // 近くに出すポップアップ・動きを減らす設定) を元にしている。
 //
 // 図の形:
-//   - 段の領域を内から ① → ② → ③ と左から並べ、外の段ほど外に入れ子にする。列は ①・②・②③ (② と ③ の両方の段で入る道具)・③
+//   - グループの領域を内から minimum → all と左から並べ、外のグループほど外に入れ子にする (minimum ⊂ all)。列は minimum の
+//     基本の道具 (switch なし。常に入る)・minimum の道具の switch・all の道具 (2 列)・Windows の道具 (win/ を配るマシン・runner)
 //   - 列の中の箱の並びは、ホストのページ (order "host") なら「ホストで足した → どちらでも入る → ホストで外した → どちらでも
 //     入らない」、入口 (order "count") なら入るホストの多い順 (同じなら groups.nix の順)。ホストの入る道具が列の上から並ぶので、
 //     隣どうしの列の入る箱が一番上の行で接し、囲みの線が 1 つの形 (階段) になる
@@ -18,9 +19,9 @@
 "use strict";
 
 const HostMap = (() => {
-  // 箱の幅と高さ・隙間 (列の間 gx・行の間 gy)・段の領域の入れ子の幅 (inset)・領域の縁から箱までの間 (pad)・外の余白
-  // (margin)・一番内の領域の上の縁から 1 行目の箱まで (top。段の名前を置く)・箱の角の丸み
-  const L = { bw: 144, bh: 42, gx: 24, gy: 20, inset: 14, pad: 28, margin: 8, top: 52, rx: 7 };
+  // 箱の幅と高さ・隙間 (列の間 gx・行の間 gy)・グループの領域の入れ子の幅 (inset)・領域の縁から箱までの間 (pad)・外の余白
+  // (margin)・一番内の領域の上の縁から 1 行目の箱まで (top。領域の名前と列の見出しを置く)・箱の角の丸み
+  const L = { bw: 144, bh: 42, gx: 24, gy: 20, inset: 14, pad: 28, margin: 8, top: 60, rx: 7 };
 
   // ---- 並び・配置・囲み (DOM を使わない) ----
 
@@ -47,7 +48,7 @@ const HostMap = (() => {
       .filter((c) => c.tools.length > 0);
   }
 
-  // 箱と段の領域の位置。regions は内 → 外の順 (fig.regions と同じ)
+  // 箱とグループの領域の位置。regions は内 → 外の順 (fig.regions と同じ)
   function layout(fig, cols) {
     const R = fig.regions.length;
     const left = [], top = [], right = [], bottom = [];
@@ -94,12 +95,8 @@ const HostMap = (() => {
       labelX: labelX[k],
       labelY: top[k] + 19,
     }));
-    // 2 列以上を持つ領域だけ、列の見出しを出す (③ の領域の「②③」と「③」)
-    const heads = [];
-    fig.regions.forEach((r) => {
-      const own = cols.filter((c) => c.region === r.id);
-      if (own.length > 1) own.forEach((c) => heads.push({ id: c.id, text: c.head, x: colX.get(c.id), y: top[0] + 19 }));
-    });
+    // 見出しのある列だけ、列の見出しを出す (minimum の「常に入る」・all の Windows の列など)。領域の名前の下の行に置く
+    const heads = cols.filter((c) => c.head).map((c) => ({ id: c.id, text: c.head, x: colX.get(c.id), y: top[0] + 40 }));
     return {
       W: right[R - 1] + L.margin,
       H: bottom[R - 1] + L.margin,
@@ -387,22 +384,28 @@ const HostMap = (() => {
       const hostViews = views.filter((v) => v.kind === "host");
       const withDots = fig.order === "count" && hostViews.length >= 2;
       const regionOf = new Map(fig.regions.map((r) => [r.id, r]));
-      const markText = (marks) => {
-        const r = fig.regions.find((x) => x.mark === marks);
-        if (r) return `${r.mark} ${r.label}`;
-        return `${marks} (${[...marks].map((m) => (fig.regions.find((x) => x.mark === m) || {}).label).filter(Boolean).join(" と ")} の両方の段が on のとき既定で入る)`;
+      // 箱がどのグループに入るか
+      const groupText = (meta) => {
+        if (meta.base) return "minimum (基本の道具。switch が無く、いつも入る)";
+        if (meta.region === "minimum") return "minimum (どのグループでも既定で on)";
+        return "all だけ (minimum のホストは、使うならホストで足す)";
       };
       const onoff = (b) => (b ? "on" : "off");
+      // 箱の状態: on (入る)・na (効かない。値は on か、グループに入るが、環境の条件か効く条件が合わない)・off
       const stateOf = (v, key) => {
         const s = v.tools[key];
         if (!s) return "off";
-        return s.e ? "on" : s.v ? "na" : "off";
+        return s.e ? "on" : (s.x ?? s.v) ? "na" : "off";
       };
       const valueText = (v, key) => {
         const s = v.tools[key];
         if (!s) return "—";
+        if (s.s === "fixed") return "on (常に入る)";
         if (s.e) return "on (入る)";
-        if (s.v) return `on だが効かない (${(s.off && s.off.length ? s.off : ["効く条件"]).join("・")} が off)`;
+        if (s.x ?? s.v) {
+          const why = s.off && s.off.length ? s.off.map((o) => (o.includes(".") || o.startsWith("[tools]") ? `${o} が off` : o)) : ["効く条件が合わない"];
+          return `効かない (${why.join("・")})`;
+        }
         return "off";
       };
       const srcShort = (s) => (s === "host" ? "ホスト" : s === "shared" ? "shared/" : "");
@@ -451,7 +454,7 @@ const HostMap = (() => {
         class: "map",
         viewBox: `0 0 ${lay.W} ${lay.H}`,
         role: "group",
-        "aria-label": "道具の図: 灰色の入れ子の領域が段、箱が道具、色の線の中がそのホストで入る道具 (箱や段の名前を押すと詳細が出る)",
+        "aria-label": "道具の図: 灰色の入れ子の領域がグループ (minimum ⊂ all)、箱が道具、色の線の中がそのホストで入る道具 (箱やグループの名前を押すと詳細が出る)",
       });
       svg.style.maxWidth = `${Math.round(lay.W * 1.25)}px`;
       const defs = sv("defs");
@@ -472,8 +475,8 @@ const HostMap = (() => {
       svg.append(olLayer);
       lay.regions.forEach((r) => {
         const g = sv("g", { class: "rg-btn", role: "button", tabindex: 0, "aria-haspopup": "dialog" });
-        const text = `${r.mark} ${r.label}`;
-        const w = textWidth(`${text} · off`, 13) + 12;
+        const text = `${r.label} (${r.short})`;
+        const w = textWidth(`${text} · グループの外`, 13) + 12;
         g.append(sv("rect", { class: "rg-hit", x: r.labelX - 6, y: r.labelY - 15, width: w, height: 21, rx: 5 }));
         const t = sv("text", { class: "rg-label", x: r.labelX, y: r.labelY });
         t.textContent = text;
@@ -542,10 +545,10 @@ const HostMap = (() => {
       view.append(figbox, panel);
       root.append(controls, legend, view);
 
-      // ---- 箱・段の詳細 ----
+      // ---- 箱・グループの領域の詳細 ----
       function boxCard(key) {
         const meta = fig.tools[key], tab = views[cur], rows = [];
-        rows.push({ k: "段", v: markText(meta.marks) });
+        rows.push({ k: "グループ", v: groupText(meta) });
         if (tab.kind === "overlay") {
           for (const id of tab.members) {
             const m = byId.get(id), s = m.tools[key];
@@ -555,34 +558,32 @@ const HostMap = (() => {
           const s = tab.tools[key];
           rows.push({ k: "値", v: valueText(tab, key) });
           rows.push({ k: "どこで決まったか", v: s.t });
-          if (tab.kind === "host") {
-            rows.push({ k: "書かなかったら", v: `${onoff(s.d)} (${fig.kind === "win" ? "グループの既定" : "option の既定"})` });
+          if (tab.kind === "host" && s.s !== "fixed") {
+            rows.push({ k: "書かなかったら", v: `${onoff(s.d)} (グループの既定)` });
           }
         }
-        rows.push({ k: fig.kind === "win" ? "ホストの値のキー" : "option", v: meta.option, code: true });
-        if (meta.requires.length) rows.push({ k: "効く条件", v: `${meta.requires.join("・")} が on` });
+        if (meta.option) rows.push({ k: fig.kind === "win" ? "ホストの値のキー" : "option", v: meta.option, code: true });
+        const conds = [...(meta.env || []), ...meta.requires.map((o) => `${o} が on`)];
+        if (conds.length) rows.push({ k: "効く条件", v: conds.join("・") });
         return { title: meta.label, rows };
       }
-      function tierRow(v, rid) {
-        const s = v.tiers && v.tiers[rid];
-        return s ? `${onoff(s.value)} (${s.text})` : "—";
+      function regionRow(v, rid) {
+        const s = v.regions && v.regions[rid];
+        return s ? s.text : "—";
       }
       function regionCard(rid) {
         const r = regionOf.get(rid), tab = views[cur], rows = [];
         if (tab.kind === "overlay") {
-          for (const id of tab.members) { const m = byId.get(id); rows.push({ k: m.label, v: tierRow(m, rid) }); }
+          for (const id of tab.members) { const m = byId.get(id); rows.push({ k: m.label, v: regionRow(m, rid) }); }
         } else {
-          rows.push({ k: "値", v: tierRow(tab, rid) });
-          rows.push({ k: "グループ", v: `${tab.group.value} (${tab.group.text})` });
+          rows.push({ k: "このホスト", v: regionRow(tab, rid) });
+          rows.push({ k: "選んだグループ", v: `${tab.group.value} (${tab.group.text})` });
         }
-        const opt = (views.find((v) => v.tiers && v.tiers[rid]) || { tiers: {} }).tiers[rid];
-        if (opt && opt.option) rows.push({ k: "option", v: `dotfiles.${opt.option}`, code: true });
         const note = rid === fig.regions[0].id
-          ? "どのグループでも入る段 (段の switch は無い)。道具はホストで 1 つずつ入れる"
-          : fig.kind === "win"
-            ? "段はグループで決まる (Windows のホストの値には段の switch が無い)。道具の既定はグループの既定 (groups.json)"
-            : "段の switch は、この段の道具の switch の既定になる (道具はホストで 1 つずつ足し引きできる)";
-        return { title: `${r.mark} ${r.label}`, rows, note };
+          ? `${r.sub}。どのグループにも入り、中の道具は既定で on (基本の道具は switch が無く、いつも入る)`
+          : `${r.sub}。all を選んだホストは中の道具が全部既定で on。minimum のホストは、使う道具をホストで足す`
+            + (fig.kind === "win" ? " (Windows のホストの値の [tools]。書いていない道具はグループの既定の groups.json)" : "");
+        return { title: `${r.label} (${r.short})`, rows, note };
       }
 
       // ---- タブを替える ----
@@ -615,10 +616,11 @@ const HostMap = (() => {
           flag = s && (s.s === "host" || s.s === "shared") ? s.s : "";
           // 入口の図 (箱の右下に点の列がある) では字を短くし、ホストで決めた値は右上の ● だけで見せる
           const tag = tab.kind === "host" && !withDots ? srcShort(s && s.s) : "";
-          text = { on: "on", off: "off", na: "– 効かない" }[st] + (tag ? ` · ${tag}` : "");
+          text = s && s.s === "fixed" ? "on · 常に入る" : { on: "on", off: "off", na: "– 効かない" }[st] + (tag ? ` · ${tag}` : "");
         }
-        g.classList.remove("st-on", "st-off", "st-na", "st-mix", "set", "sh");
+        g.classList.remove("st-on", "st-off", "st-na", "st-mix", "set", "sh", "fixed");
         g.classList.add(`st-${st}`);
+        if (meta.base) g.classList.add("fixed");
         if (flag === "host") g.classList.add("set");
         if (flag === "shared") g.classList.add("sh");
         v.textContent = text;
@@ -633,15 +635,16 @@ const HostMap = (() => {
         const label = tab.kind === "overlay" && fig.order !== "host" ? text : valueText(tab.kind === "overlay" ? byId.get(tab.members[0]) : tab, key);
         g.setAttribute("aria-label", `${meta.label}: ${label}`);
       }
+      // 領域の線は、そのホストのグループの外なら点線 (中の道具は既定で off。ホストで足した道具だけ入る)
       function paintRegions(tab) {
         const src = tab.kind === "overlay" ? (fig.order === "host" ? byId.get(tab.members[0]) : null) : tab;
         for (const r of fig.regions) {
-          const s = src && src.tiers ? src.tiers[r.id] : null;
+          const s = src && src.regions ? src.regions[r.id] : null;
           const off = !!(s && !s.value);
           regionEls.get(r.id).classList.toggle("rg-off", off);
           const { t, text, g } = regionLabels.get(r.id);
-          t.textContent = off ? `${text} · off` : text;
-          g.setAttribute("aria-label", `${text}${s ? `: ${s.value ? "on" : "off"}` : ""}`);
+          t.textContent = off ? `${text} · グループの外` : text;
+          g.setAttribute("aria-label", `${text}${s ? `: ${s.text}` : ""}`);
         }
       }
       function paintLegend(tab) {
@@ -660,7 +663,7 @@ const HostMap = (() => {
           items.push(el("span", null, tab.kind === "overlay" ? "(線の中が入る道具)" : "の線の中が入る道具"));
         }
         const box = (cls, t) => { const s = el("span"); s.append(el("i", `lg-box ${cls}`), document.createTextNode(t)); return s; };
-        items.push(box("", "on"), box("off", "off"), box("na", "効かない (–)"));
+        items.push(box("fixed", "常に入る (switch なし)"), box("", "on"), box("off", "off"), box("na", "効かない (–)"));
         const flagItem = (cls, t) => { const s = el("span"); s.append(el("i", `lg-flag ${cls}`), document.createTextNode(t)); return s; };
         items.push(flagItem("", fig.kind === "win" ? "ホストの値で決めた" : "ホストで決めた"));
         if (fig.kind !== "win") items.push(flagItem("sh", "nix/shared/ で決めた"));
@@ -740,7 +743,7 @@ const HostMap = (() => {
       return { fig, boxEls, regionLabels, boxCard, regionCard, root };
     }
 
-    // #pop-<図>-<道具の key> (段は #pop-<図>-r-<段>) なら、その箱のポップアップを開いた状態から始める (撮って確かめる口)
+    // #pop-<図>-<道具の key> (グループの領域は #pop-<図>-r-<グループ>) なら、その箱のポップアップを開いた状態から始める (撮って確かめる口)
     const pop = location.hash.match(/^#pop-([^-]+)-(.+)$/);
     nextFrame(() => {
       document.body.classList.add("ready");

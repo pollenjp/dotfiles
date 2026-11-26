@@ -48,6 +48,7 @@ button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .lg-box { display: inline-block; width: 18px; height: 12px; border-radius: 3px; border: 1.5px solid var(--box-on-line); background: var(--box-on); }
 .lg-box.off { border-style: dashed; border-color: var(--box-off-line); background: var(--box-off); }
 .lg-box.na { border-style: dotted; border-color: var(--box-off-line); background: var(--box-off); }
+.lg-box.fixed { background: var(--card); }
 .lg-flag { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .lg-flag.sh { background: transparent; border: 1.5px solid var(--accent); }
 .figbox { border: 1px solid var(--line); border-radius: 10px; padding: 6px; overflow-x: auto; }
@@ -83,6 +84,7 @@ svg.map { display: block; width: 100%; min-width: 600px; height: auto; margin: 0
 .node.st-off rect { fill: var(--box-off); stroke: var(--box-off-line); stroke-dasharray: 5 4; }
 .node.st-na rect { fill: var(--box-off); stroke: var(--box-off-line); stroke-dasharray: 1.5 3.5; }
 .node.st-mix rect { fill: var(--box-on); stroke: var(--line-strong); }
+.node.fixed rect { fill: var(--card); }
 .node .name { font-weight: 700; font-family: system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif; fill: var(--fg); }
 .node.st-off .name, .node.st-na .name { fill: var(--muted); }
 .node .v { font: 11px system-ui, -apple-system, "Segoe UI", "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", Meiryo, sans-serif; fill: var(--muted); }

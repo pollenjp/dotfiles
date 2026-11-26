@@ -1,0 +1,6 @@
+# tests/group-minimum.nix が比べる、minimum の作り物のホスト (lib/group-examples.nix の minimum) の units。1 行 1 つ、名前の順。
+# 道具を足して違いが出たら、minimum に入れるか (lib/groups.nix) を決め、入れないなら switch で止める。入れるならここに足す (ADR 109)。
+mise-prune.service
+mise-prune.timer
+nix-gc.service
+nix-gc.timer

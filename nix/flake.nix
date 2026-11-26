@@ -69,7 +69,7 @@
       # dotfiles-private の nix/shared/*.nix の module は、登録した全ホストの modules の前に足す (ADR 030)。
       privateHosts = import ./lib/private-hosts.nix { inherit lib mkHome; };
 
-      # ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか。ADR 057・093)。mkHome が組み立てたホストに
+      # ホストの要約 (設定グループ・道具の on/off と、その値がどこで決まったか。ADR 057・093・109)。mkHome が組み立てたホストに
       # hostSummary として足す。ここの組は、dotfiles-private の docs/hosts/ に書くファイル (files。private-host.sh summaries が
       # hostSummaryFiles で呼ぶ) と nix/groups.md (groupsDoc) を作るのに使う
       hostSummary = import ./lib/host-summary { inherit lib; };
@@ -87,17 +87,10 @@
           inherit windowsGroups;
         };
 
-      # nix/groups.md の中身。グループごとの素のホスト (グループだけを書いたもの) と、作り物のホスト (lib/group-examples.nix) の
-      # 要約から作る。どの system でも同じ文になるので x86_64-linux で評価する。古いかは checks の groups-doc が見る
+      # nix/groups.md の中身。表 (lib/groups.nix) と、作り物のホスト (lib/group-examples.nix) の要約から作る。どの system でも同じ
+      # 文になるので x86_64-linux で評価する。古いかは checks の groups-doc が見る
       groupsDoc =
         let
-          plainHost =
-            group:
-            (mkHome {
-              username = "user";
-              system = "x86_64-linux";
-              inherit group;
-            }).hostSummary.data;
           examples = import ./lib/group-examples.nix { inherit mkHome; };
           example = name: title: {
             inherit title;
@@ -106,50 +99,32 @@
           };
         in
         hostSummary.groupsDoc {
-          plain = lib.genAttrs [
-            "personal"
-            "company"
-            "client"
-          ] plainHost;
           examples = [
-            (example "personal" "personal (個人の PC。グループの既定のまま)")
-            (example "company" "company (自社の PC。③ の道具を足していない)")
-            (example "client" "client (客先の PC)")
-            (example "client-claude" "client に Claude Code だけを足したホスト (`claude.enable = true`)")
+            (example "minimum" "minimum (グループの既定のまま。WSL で win/ を配る)")
+            (example "minimum-claude" "minimum に Claude Code だけを足したホスト (`claude.enable = true`。WSL で win/ を配る)")
+            (example "all-wsl" "all (WSL で win/ を配る)")
+            (example "all-linux" "all (WSL でない Linux)")
           ];
         };
 
-      # win/runner/groups.json (生成物) の中身。グループごとの素のホスト (グループだけを書いたもの) の group.json (段と道具の switch の値。
-      # home/modules/group.nix) を集める。Windows の runner が、ホストの値 (dotfiles-private の win/hosts/*.toml) に書いていない道具の
-      # 既定を引くのに使う (dotfiles-private の docs/adr/060_win_runner_core_*)。flake からは win/ が見えないので、古いかは CI の lint が見る。
-      # 出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json`
+      # win/runner/groups.json (生成物) の中身。グループごとの道具の既定 (グループに入るか) を、表 (lib/groups.nix) から作る。Windows の
+      # runner が、ホストの値 (dotfiles-private の win/hosts/*.toml) に書いていない道具の既定を引くのに使う (dotfiles-private の
+      # docs/adr/060_win_runner_core_*)。ホストを評価せずに表から作るのは、runner は Nix の環境の switch (WSL か・win/ を配るか) を
+      # 持たず、all では runner が読む道具が全部 on であってほしいため (ADR 109)。flake からは win/ が見えないので、古いかは CI の lint が
+      # 見る。出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.windowsGroupsJson > win/runner/groups.json`
       windowsGroupsJson = builtins.toJSON windowsGroups + "\n";
       # その中身 (attrset)。ホストの要約の Windows のホストのページ (hostSummaryFiles) も、書いていない道具の既定をここから引く
       windowsGroups =
         let
-          plainGroupJson =
-            group:
-            builtins.fromJSON
-              (mkHome {
-                username = "user";
-                system = "x86_64-linux";
-                inherit group;
-              }).config.home.file.".local/state/dotfiles/group.json".text;
-          names = map (g: g.name) (import ./lib/groups.nix).groups;
+          table = import ./lib/groups.nix;
         in
         {
-          version = 1;
+          version = 2;
           # ホストの値に group を書かなかったときのグループ (options.nix の dotfiles.group の既定)
-          default = "personal";
-          groups = lib.genAttrs names (
-            group:
-            let
-              j = plainGroupJson group;
-            in
-            {
-              inherit (j) tiers tools;
-            }
-          );
+          default = "minimum";
+          groups = lib.genAttrs table.groupNames (group: {
+            tools = builtins.listToAttrs (map (t: lib.nameValuePair t.key (table.inGroup group t)) table.tools);
+          });
         };
     in
     {
@@ -234,13 +209,14 @@
                 touch $out
               '';
           # home の設定 (modules) から作った ~/.local/state/dotfiles/claude-footer-links.json (footer の規則。cc-page の規則の
-          # port を埋めたもの)。規則を当てる node の試験に渡す
+          # port を埋めたもの)。規則を当てる node の試験に渡す。Claude Code 一式は minimum に入らないので足す
           footerLinksJson =
             modules:
             pkgs.writeText "claude-footer-links.json"
               (mkHome {
                 username = "tester";
                 inherit system modules;
+                claude.enable = true;
               }).config.home.file.".local/state/dotfiles/claude-footer-links.json".text;
         in
         lib.mapAttrs' (name: cfg: lib.nameValuePair "home-${name}" cfg.activationPackage) (
@@ -270,11 +246,16 @@
           home-wsl-initial-example =
             (import ./tests/fixtures/local-flake-initial/initial.nix { dotfiles.lib = { inherit mkHome; }; })
             .initial.activationPackage;
-          # 客先のグループの作り物のホスト (lib/group-examples.nix の client。WSL で win/ を配る) を build する (ADR 057)。
-          # ② ③ のものが入らないこと・入るものの並びが fixture と同じことは group-client-state が評価で見る
-          home-group-client-example =
-            (import ./lib/group-examples.nix { inherit mkHome; }).client.activationPackage;
-          group-client-state = import ./tests/group-client.nix { inherit lib pkgs mkHome; };
+          # 設定グループの作り物のホスト (lib/group-examples.nix) を build する (ADR 109): minimum (WSL で win/ を配る) と、all の 2 つ
+          # (WSL で win/ を配る・WSL でない Linux。道具が全部 on でも、環境が合わない道具で止まらない)。minimum に入らない道具のものが
+          # 入らないこと・入るものの並びが fixture と同じことは group-minimum-state が評価で見る
+          home-group-minimum-example =
+            (import ./lib/group-examples.nix { inherit mkHome; }).minimum.activationPackage;
+          home-group-all-wsl-example =
+            (import ./lib/group-examples.nix { inherit mkHome; }).all-wsl.activationPackage;
+          home-group-all-linux-example =
+            (import ./lib/group-examples.nix { inherit mkHome; }).all-linux.activationPackage;
+          group-minimum-state = import ./tests/group-minimum.nix { inherit lib pkgs mkHome; };
           # nix/groups.md (生成物) が lib.groupsDoc と同じか。違えば出し直すコマンドを出して落ちる
           groups-doc =
             pkgs.runCommand "groups-doc"
@@ -367,6 +348,7 @@
               (mkHome {
                 username = "tester";
                 inherit system;
+                claude.enable = true;
               }).config.home.file.".claude/statusline-command.sh".text
           );
           setup-post-notes-test = scriptTest "setup-post-notes" ./scripts;

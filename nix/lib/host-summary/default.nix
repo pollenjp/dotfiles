@@ -1,10 +1,10 @@
-# ホストの要約 (設定グループ・段・道具の on/off と、その値がどこで決まったか) を作る (dotfiles-private の
-# docs/adr/057_host_setting_groups_*。図の HTML にしたのは docs/adr/093_host_summary_html_*)。表は lib/groups.nix。
+# ホストの要約 (設定グループ・道具の on/off と、その値がどこで決まったか) を作る (dotfiles-private の
+# docs/adr/109_host_groups_minimum_all_*。始めは ADR 057、図の HTML にしたのは docs/adr/093_host_summary_html_*)。表は lib/groups.nix。
 #
 # mkHome (lib/mk-home.nix) が、組み立てたホストに hostSummary として足す (activationPackage は変えない):
 #
 #   hostSummary.data    要約の値 (JSON にできる値だけ。下の「data」)
-#   hostSummary.line    グループと段の 1 行
+#   hostSummary.line    グループと環境の 1 行
 #   hostSummary.text    端末に出す要約 (nix/scripts/private-host.sh summary)
 #   hostSummary.pages   name -> そのホストのページ。dotfiles-private の docs/hosts/ からの path の組
 #                       ({ nix = { "<name>.md" = …; html."<name>.html" = …; }; })。private-host.sh summaries が書くものと
@@ -20,9 +20,11 @@
 #   docs/hosts/nix/<ホスト>.md          Nix のホスト 1 台 (Notion では 1 ページ)。HTML 版は nix/html/<ホスト>.html
 #   docs/hosts/win/<ホスト>.md          Windows のホスト 1 台。HTML 版は win/html/<ホスト>.html
 #
-# md は短くする (ホストの値へのリンク・グループ・HTML 版の跡の行・図に描けない注記)。図は HTML 版の JS (page.js) が #data の
-# JSON から描く: 段を入れ子の領域、道具を箱、ホストを「入る道具だけを囲む色の線」にし、タブで見せる線を替える。HTML 版は
-# 雛形 page.html に page.css・page.js・本文・JSON を差し込んだ 1 ファイル (CDN も外のファイルも読まない)。
+# md は短くする (ホストの値へのリンク・グループと環境・HTML 版の跡の行・図に描けない注記)。図は HTML 版の JS (page.js) が #data の
+# JSON から描く: グループを入れ子の領域 (all ⊃ minimum)、道具を箱、ホストを「入る道具だけを囲む色の線」にし、タブで見せる線を替える。
+# 基本の道具 (switch なし) は minimum の領域に「常に入る」の箱で出す。環境 (WSL か・win/ を配るか・Linux か) は道具でなくマシンの事実
+# なので、図の領域には描かず、ホストの値の節と図の下の説明に 1 行で出す。HTML 版は雛形 page.html に page.css・page.js・本文・JSON を
+# 差し込んだ 1 ファイル (CDN も外のファイルも読まない)。
 #
 # md は h1 から始め、生成物の断りは末尾に置く。Notion に写す道具 (claude-skills の pjp-docs-to-notion) は、ページを作ると
 # h1 の下 (3 行目) に「📝 [Notion で開く](…)」の行と空行を書く。private-host.sh summaries はその行を残して書き、setup.sh と
@@ -42,16 +44,13 @@
 #   host     優先度が option の既定 (1500) より強い定義がある (mkHome の引数・ホストのファイルの modules・ローカル flake の tmp)。
 #            Windows のホストでは、TOML の [tools] (と group) に書いた値
 #   shared   そのうち、定義が全部 dotfiles-private の nix/shared/*.nix (登録した全ホストに足す module) のもの
-#   unset    グループを選んでいない (既定の personal)
-#   group    段の switch がグループの既定のまま。Windows のホストでは、道具の switch もグループの既定 (groups.json) のまま
-#   tier     道具の switch が段の既定のまま
-#   default  ほかの既定のまま (① の道具・既定が段によらない道具)
+#   unset    グループを選んでいない (既定の minimum)
+#   group    道具の switch がグループの既定のまま (グループに入る && 環境の条件 && 効く条件。Windows のホストでは groups.json の値)
+#   follows  道具の switch が、従う先の道具の値のまま (linger は herdrCore に従う)
 #
-# 「既定」(default・defaultEffective) は、ホストで何も書かなかったときの値。段の switch は option の既定 (グループで決まる)。
-# 段から既定が決まる道具 (derived で段を持つもの) は、その段のどれかのグループの既定が off なら off、全部 on なら option の既定
-# (ホストが段の switch を書いていなければ、ホストの文脈で読んだ option の既定がそのまま当たる。書いていれば段の既定の積で、
-# herdrCore の Linux だけのような段の外の条件は読めないので on とみなす)。ほかの道具は option の既定 (段によらない)。効く条件も
-# 同じ既定で見る。
+# 「既定」(default) は、ホストが道具の switch を何も書かなかったときの値。グループと環境はホストのまま見る (環境はマシンの事実で、
+# ホストの選び方ではないため)。「–」(効かない) は、値は on だが環境の条件か効く条件が合わない道具と、グループに入るのに環境の条件か
+# 効く条件が合わず既定で off の道具。グループに入らずに off の道具は「off」。
 #
 # 文は毎回同じになるようにする (並びは表の順・ホストは名前の順。日時・store のパス・dotfiles の版は書かない)。setup が
 # この PC のページを作り直して比べ、違えば古いと知らせるため。ホストのページは、そのホストの値と表だけから作る (ほかの
@@ -61,47 +60,68 @@
 let
   groups = import ../groups.nix;
 
-  tierOf = name: builtins.head (builtins.filter (t: t.name == name) groups.tiers);
-  tierMarks = names: lib.concatMapStringsSep "" (n: (tierOf n).mark) names;
-  # 道具の段の印 (① の道具は ①)
-  toolMarks = t: if t.tiers == [ ] then "①" else tierMarks t.tiers;
-
   dotted = lib.concatStringsSep ".";
   onoff = b: if b then "on" else "off";
+  toolNamed = key: builtins.head (builtins.filter (t: t.key == key) groups.tools);
+  keyOfOption = path: (builtins.head (builtins.filter (t: t.option == path) groups.tools)).key;
 
-  # 図の列。段の入れ子の領域を内から外へ ① → ② → ③ と並べ、③ の領域には ② と ③ の両方が要る道具の列 (②③) と ③ の列を置く
-  columnOf =
-    t:
-    if t.tiers == [ ] then
-      "c1"
-    else if t.tiers == [ "aiTools" ] then
-      "c2"
-    else if t.tiers == [ "personalAccounts" ] then
-      "c3"
-    else
-      "c23";
-  columnDefs = [
+  # 図の領域 (内 → 外)。グループの入れ子 (minimum ⊂ all)
+  regionDefs = [
     {
-      id = "c1";
-      region = "engineer";
-      head = "①";
+      id = "minimum";
+      label = "minimum";
+      short = "どの PC にも";
+      sub = "どの PC にも初めからあってほしいもの";
     }
     {
-      id = "c2";
-      region = "aiTools";
-      head = "②";
-    }
-    {
-      id = "c23";
-      region = "personalAccounts";
-      head = "②③ (両方の段で入る)";
-    }
-    {
-      id = "c3";
-      region = "personalAccounts";
-      head = "③";
+      id = "all";
+      label = "all";
+      short = "道具を全部";
+      sub = "道具を全部 (minimum の全部と、ほかの道具の switch の全部)";
     }
   ];
+
+  # 図の列。minimum の領域に基本の道具 (switch なし) と minimum の道具の switch、all の領域にほかの道具を 2 列と Windows の道具を 1 列。
+  # 列は箱を並べる場所で、道具の種類のラベルではない (Windows の道具の列だけ、効く環境 (win/ を配るマシン・runner) で分ける)
+  columnsFor =
+    base: rows:
+    let
+      rest = builtins.filter (r: !r.minimum && !r.windows) rows;
+      half = (builtins.length rest + 1) / 2;
+      keys = map (r: r.key);
+    in
+    builtins.filter (c: c.tools != [ ]) [
+      {
+        id = "base";
+        region = "minimum";
+        head = "常に入る (switch なし)";
+        tools = keys base;
+      }
+      {
+        id = "min";
+        region = "minimum";
+        head = "switch あり";
+        tools = keys (builtins.filter (r: r.minimum) rows);
+      }
+      {
+        id = "a1";
+        region = "all";
+        head = "";
+        tools = keys (lib.take half rest);
+      }
+      {
+        id = "a2";
+        region = "all";
+        head = "";
+        tools = keys (lib.drop half rest);
+      }
+      {
+        id = "win";
+        region = "all";
+        head = "Windows (win/ を配るマシン・runner)";
+        tools = keys (builtins.filter (r: r.windows) rows);
+      }
+    ];
 
   # dotfiles-private の nix/shared/*.nix の定義か (privateHosts が path のまま足す module。定義の files がその path になる)
   isShared = f: builtins.match ".*/shared/[^/]+\\.nix" (toString f) != null;
@@ -119,8 +139,7 @@ let
       shared = "dotfiles-private の nix/shared/";
       unset = "既定 (選んでいない)";
       group = "グループ (${group}) の既定";
-      tier = "段 (${lib.concatStringsSep " と " (map (n: (tierOf n).mark) row.tiers)}) の既定";
-      default = "既定";
+      follows = "既定 (${row.follows or ""} に従う)";
     }
     .${row.source};
   # Windows のホストの道具の値の出どころ
@@ -130,11 +149,23 @@ let
       host = "ホストの値 ([tools])";
       group = "グループ (${group}) の既定";
       unset = "既定 (選んでいない)";
-      default = "既定";
     }
     .${row.source};
 
   isHost = row: row.source == "host" || row.source == "shared";
+
+  # 環境の 1 行 (図の領域の外に出す)
+  envLine =
+    env:
+    if !env.linux then
+      "macOS"
+    else if env.wsl then
+      "WSL · ${if env.windowsFiles then "win/ を配る" else "win/ を配らない (Windows は runner)"}"
+    else
+      "Linux (WSL でない)";
+
+  # 効かない理由の文 (環境の条件は「… でない」、効く条件は「`dotfiles.<path>` が off」)。wrap は option の書き方
+  reasonsOf = wrap: r: r.envOff ++ map (p: "${wrap p} が off") r.requiresOff;
 
   data =
     hc:
@@ -143,82 +174,90 @@ let
       opts = hc.options.dotfiles;
       get = path: lib.getAttrFromPath path cfg;
       opt = path: lib.getAttrFromPath path opts;
-      # option の default の式 (ホストの文脈で読む)
-      optDefault = path: (opt path).default or false;
-      # 段の既定 (グループで決まる) と、ホストの値がその既定のままか
-      tierDefault = name: optDefault (tierOf name).option;
-      tierAsDefault = name: get (tierOf name).option == tierDefault name;
-      # ホストで何も書かなかったときの値 (冒頭の「既定」)。path は道具の option か、効く条件の option
-      defaultOf =
-        path:
-        let
-          found = builtins.filter (t: t.option == path) groups.tools;
-          t = builtins.head found;
-        in
-        if found == [ ] || !(t.derived && t.tiers != [ ]) then
-          optDefault path
-        else if !(builtins.all tierDefault t.tiers) then
-          false
-        else if builtins.all tierAsDefault t.tiers then
-          optDefault path
-        else
-          true;
+      isLinux = hc.pkgs.stdenv.hostPlatform.isLinux;
+      holds = groups.envHolds { inherit cfg isLinux; };
       group = cfg.group;
+      # ホストが道具の switch を何も書かなかったときの値 (グループと環境はホストのまま)。従う道具は従う先の既定
+      defaults = builtins.listToAttrs (
+        map (
+          t:
+          lib.nameValuePair t.key (
+            if t.follows != null then
+              defaults.${t.follows}
+            else
+              groups.inGroup group t
+              && builtins.all holds t.env
+              && builtins.all (p: defaults.${keyOfOption p}) t.requires
+          )
+        ) groups.tools
+      );
     in
     {
       group = {
         value = group;
         source = sourceOf opts.group "unset";
       };
-      tiers = map (
-        t:
-        if t.option == null then
-          {
-            inherit (t) name mark label;
-            option = null;
-            value = true;
-            default = true;
-            source = "default";
-          }
-        else
-          {
-            inherit (t) name mark label;
-            option = dotted t.option;
-            value = get t.option;
-            default = optDefault t.option;
-            source = sourceOf (opt t.option) "group";
-          }
-      ) groups.tiers;
+      env = {
+        wsl = cfg.wsl.enable;
+        windowsFiles = cfg.wsl.windowsFiles.enable;
+        linux = isLinux;
+      };
+      base = map (b: { inherit (b) key label short; }) groups.base;
       tools = map (
         t:
         let
           value = get t.option;
-          default = defaultOf t.option;
+          envOff = builtins.filter (e: !holds e) t.env;
+          reqOff = builtins.filter (p: !(get p)) t.requires;
+          inGroup = groups.inGroup group t;
+          source = sourceOf (opt t.option) (if t.follows != null then "follows" else "group");
+          effective = value && envOff == [ ] && reqOff == [ ];
+          default = defaults.${t.key};
         in
         {
           inherit (t)
             key
             label
             short
-            tiers
+            minimum
             ;
-          marks = toolMarks t;
-          column = columnOf t;
+          windows = builtins.elem "windowsFiles" t.env;
           option = dotted t.option;
-          inherit value default;
-          # 効く条件 (requires) が全部 on のときだけ効く。値が off ならそのまま off
-          effective = value && builtins.all get t.requires;
-          blocked = value && !(builtins.all get t.requires);
-          defaultEffective = default && builtins.all defaultOf t.requires;
+          inherit
+            value
+            default
+            effective
+            inGroup
+            source
+            ;
+          # 値は on か、グループに入るのにグループの既定のまま off で、環境の条件か効く条件が合わない
+          blocked =
+            !effective
+            && (value || (inGroup && !(source == "host" || source == "shared")))
+            && (envOff != [ ] || reqOff != [ ]);
+          defaultEffective = default;
+          # 既定 (書かなかったとき) で、グループに入るのに環境の条件か効く条件で入らない
+          defaultBlocked = inGroup && !default;
+          env = map (e: groups.envs.${e}.label) t.env;
+          envOff = map (e: groups.envs.${e}.off) envOff;
           requires = map dotted t.requires;
-          requiresOff = map dotted (builtins.filter (p: !(get p)) t.requires);
-          source = sourceOf (opt t.option) (if t.derived && t.tiers != [ ] then "tier" else "default");
+          requiresOff = map dotted reqOff;
+          # 既定で効かない効く条件 (既定が off の、頼るほかの道具)
+          defaultRequiresOff = map dotted (builtins.filter (p: !defaults.${keyOfOption p}) t.requires);
+          follows = if t.follows == null then null else dotted (toolNamed t.follows).option;
         }
       ) groups.tools;
     };
 
-  # 値の見え方 (on / off / –)。– は値は on だが、効く条件が off で効かない
-  shown = row: if row.blocked then "–" else onoff row.value;
+  # 値の見え方 (on / off / –)。– は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)
+  shown =
+    row:
+    if row.effective then
+      "on"
+    else if row.blocked then
+      "–"
+    else
+      "off";
 
   groupSource =
     d:
@@ -229,33 +268,24 @@ let
     else
       "ホストで選んだ";
 
-  tierLine = d: lib.concatMapStringsSep " · " (t: "${t.mark} ${onoff t.value}") d.tiers;
-
-  line =
-    d:
-    "${d.group.value} (${groupSource d}) · "
-    + lib.concatMapStringsSep " · " (t: "${t.mark} ${t.label} ${onoff t.value}") d.tiers;
+  line = d: "${d.group.value} (${groupSource d}) · 環境: ${envLine d.env}";
 
   text =
     d:
     let
-      tierLine' =
-        t:
-        "    ${t.mark} ${t.label}: ${onoff t.value}"
-        + (if t.option == null then " (どのグループでも)" else " (${sourceLabel d.group.value t}) [${t.option}]");
       toolLine =
         r:
-        "    ${r.marks} ${r.label}: ${shown r}"
-        + lib.optionalString r.blocked " (${lib.concatStringsSep "・" r.requiresOff} が off なので効かない)"
+        "    ${r.label}: ${shown r}"
+        + lib.optionalString r.blocked " (${lib.concatStringsSep "・" (reasonsOf (p: p) r)})"
         + " (${sourceLabel d.group.value r}) [${r.option}]";
     in
     lib.concatStringsSep "\n" (
       [
         "  グループ: ${d.group.value} (${groupSource d})"
-        "  段:"
+        "  環境: ${envLine d.env}"
+        "  基本の道具 (minimum。switch なし・常に入る): ${lib.concatMapStringsSep "・" (b: b.short) d.base}"
+        "  道具 (– は効かない。値はホストのファイル・shared/・グループの既定のどれで決まったか):"
       ]
-      ++ map tierLine' d.tiers
-      ++ [ "  道具 (– は効かない。値はホストのファイル・shared/・既定のどれで決まったか):" ]
       ++ map toolLine d.tools
     )
     + "\n";
@@ -321,60 +351,76 @@ let
 
   countOn = rows: builtins.length (builtins.filter (r: r.effective) rows);
   listOr = none: xs: if xs == [ ] then none else lib.concatStringsSep "・" xs;
+  # 入る道具の数の文 (基本の道具は常に入るので、別に添える)
+  countText = d: "${toString (countOn d.tools)} / ${toString (builtins.length d.tools)}";
+  baseNote = d: "ほかに基本の道具 (switch なし) が ${toString (builtins.length d.base)} 個いつも入る";
 
   # ---- 図のデータ (page.js が読む #data) ----
 
-  regionsData = map (t: {
-    id = t.name;
-    inherit (t) mark label;
-  }) groups.tiers;
-
-  columnsFor =
-    rows:
-    map (c: c // { tools = map (r: r.key) (builtins.filter (r: r.column == c.id) rows); }) columnDefs;
-
   # 図の箱の名前と option。prefix は option の頭 (Nix のホストは dotfiles.、Windows のホストは option に [tools] を持つので空)
   toolsMeta =
-    prefix: rows:
+    prefix: base: rows:
     builtins.listToAttrs (
       map (
+        b:
+        lib.nameValuePair b.key {
+          inherit (b) label short;
+          region = "minimum";
+          base = true;
+          option = null;
+          requires = [ ];
+          env = [ ];
+        }
+      ) base
+      ++ map (
         r:
         lib.nameValuePair r.key {
-          inherit (r) label short marks;
+          inherit (r) label short env;
+          region = if r.minimum then "minimum" else "all";
+          base = false;
           option = prefix + r.option;
           requires = map (p: prefix + p) r.requires;
         }
       ) rows
     );
 
-  # タブ 1 つぶんの、段と道具の値。useDefault なら、ホストで書かなかったときの値
-  tierStates =
-    srcLabel: d: useDefault:
+  # タブ 1 つぶんの、領域 (グループ) と道具の値。useDefault なら、ホストが道具を書かなかったときの値
+  regionStates =
+    d:
     builtins.listToAttrs (
       map (
-        t:
-        let
-          # ① は段の switch が無く、どのグループでも入る (Windows のホストは段の option を持たないので、表の段で見る)
-          fixed = (tierOf t.name).option == null;
-          src =
-            if fixed then
-              "default"
-            else if useDefault then
-              "group"
+        r:
+        lib.nameValuePair r.id {
+          value = r.id == "minimum" || d.group.value == "all";
+          text =
+            if r.id == "minimum" then
+              "どのグループにも入る"
+            else if d.group.value == "all" then
+              "このホストのグループ (all)"
             else
-              t.source;
-        in
-        lib.nameValuePair t.name {
-          value = if useDefault then t.default else t.value;
-          source = src;
-          text = if fixed then "どのグループでも" else srcLabel d.group.value (t // { source = src; });
-          inherit (t) option;
+              "このホストのグループ (${d.group.value}) の外。ホストで足した道具だけ入る";
         }
-      ) d.tiers
+      ) regionDefs
+    );
+  baseStates =
+    base:
+    builtins.listToAttrs (
+      map (
+        b:
+        lib.nameValuePair b.key {
+          v = true;
+          e = true;
+          x = false;
+          s = "fixed";
+          t = "常に入る (minimum の基本の道具。switch なし)";
+          d = true;
+        }
+      ) base
     );
   toolStates =
     prefix: srcLabel: d: useDefault:
-    builtins.listToAttrs (
+    baseStates d.base
+    // builtins.listToAttrs (
       map (
         r:
         lib.nameValuePair r.key (
@@ -382,18 +428,21 @@ let
             {
               v = r.default;
               e = r.defaultEffective;
+              x = r.defaultBlocked;
               s = "default";
               t = "書かなかったときの既定";
               d = r.default;
+              off = r.envOff ++ map (p: prefix + p) r.defaultRequiresOff;
             }
           else
             {
               v = r.value;
               e = r.effective;
+              x = r.blocked;
               s = r.source;
               t = srcLabel d.group.value r;
               d = r.default;
-              off = map (p: prefix + p) r.requiresOff;
+              off = r.envOff ++ map (p: prefix + p) r.requiresOff;
             }
         )
       ) d.tools
@@ -407,16 +456,19 @@ let
   hostNotes =
     kindLabel: d:
     [
-      "グループ: ${d.group.value} (${groupSource d}) · ${tierLine d}"
-      "入る道具: ${toString (countOn d.tools)} / ${toString (builtins.length d.tools)} (囲みの線の中。${kindLabel}で決めた値は箱の右上に ●)"
+      "グループ: ${d.group.value} (${groupSource d})"
+    ]
+    ++ lib.optional (d ? env) "環境: ${envLine d.env}"
+    ++ [
+      "入る道具: ${countText d} (囲みの線の中。${kindLabel}で決めた値は箱の右上に ●。${baseNote d})"
     ]
     ++
       lib.optional (builtins.any (r: r.blocked) d.tools)
-        "効かない道具 (値は on だが効く条件が off。細かい点線の箱): ${
+        "効かない道具 (細かい点線の箱): ${
           lib.concatMapStringsSep "・" (r: r.short) (builtins.filter (r: r.blocked) d.tools)
         }";
   defaultNotes = d: [
-    "グループ ${d.group.value} の既定のまま、ホストで何も書かなかったときの値 (option の既定)"
+    "グループ ${d.group.value} の既定のまま、ホストで道具を何も書かなかったときの値 (環境はこのホストのまま)"
     "入る道具: ${
       toString (builtins.length (builtins.filter (r: r.defaultEffective) d.tools))
     } / ${toString (builtins.length d.tools)}"
@@ -446,9 +498,9 @@ let
       id = "h";
       inherit kind;
       order = "host";
-      regions = regionsData;
-      columns = columnsFor d.tools;
-      tools = toolsMeta prefix d.tools;
+      regions = regionDefs;
+      columns = columnsFor d.base d.tools;
+      tools = toolsMeta prefix d.base d.tools;
       views = [
         {
           id = "host";
@@ -456,7 +508,7 @@ let
           kind = "host";
           color = 2;
           group = groupState d;
-          tiers = tierStates srcLabel d false;
+          regions = regionStates d;
           tools = toolStates prefix srcLabel d false;
           note = hostNotes kindLabel d;
         }
@@ -466,7 +518,7 @@ let
           kind = "default";
           color = 0;
           group = groupState d;
-          tiers = tierStates srcLabel d true;
+          regions = regionStates d;
           tools = toolStates prefix srcLabel d true;
           note = defaultNotes d;
         }
@@ -501,12 +553,13 @@ let
         kind = "host";
         color = i;
         group = groupState e.d;
-        tiers = tierStates srcLabel e.d false;
+        regions = regionStates e.d;
         tools = toolStates prefix srcLabel e.d false;
         note = [
-          "グループ: ${e.d.group.value} (${groupSource e.d}) · ${tierLine e.d}"
-          "入る道具: ${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)}"
-        ];
+          "グループ: ${e.d.group.value} (${groupSource e.d})"
+        ]
+        ++ lib.optional (e.d ? env) "環境: ${envLine e.d.env}"
+        ++ [ "入る道具: ${countText e.d}" ];
       }) entries;
       everyOn = builtins.filter (r: builtins.all (e: (byKey e.d r.key).effective) entries) first.tools;
       noneOn = builtins.filter (r: !(builtins.any (e: (byKey e.d r.key).effective) entries)) first.tools;
@@ -514,9 +567,9 @@ let
     {
       inherit id kind title;
       order = "count";
-      regions = regionsData;
-      columns = columnsFor first.tools;
-      tools = toolsMeta prefix first.tools;
+      regions = regionDefs;
+      columns = columnsFor first.base first.tools;
+      tools = toolsMeta prefix first.base first.tools;
       views =
         views
         ++ lib.optional (builtins.length entries > 1) {
@@ -568,12 +621,13 @@ let
           v = shown row;
         in
         if isHost row then "<td><b>${v}</b></td>" else "<td>${v}</td>";
+      groupOf = r: if r.minimum then "minimum" else "all";
     in
     ''<div class="tablewrap"><table class="tools">''
-    + "<thead><tr><th>段</th><th>道具</th><th>${optHead}</th>"
+    + "<thead><tr><th>グループ</th><th>道具</th><th>${optHead}</th>"
     + lib.concatMapStrings (c: "<th>${c.head}</th>") cols
     + "</tr></thead><tbody>"
-    + "<tr><td>—</td><td>グループ</td><td>${codeTag "group"}</td>"
+    + "<tr><td>—</td><td>設定グループ</td><td>${codeTag "group"}</td>"
     + lib.concatMapStrings (
       c:
       let
@@ -582,17 +636,15 @@ let
       if isHost c.d.group then "<td><b>${g}</b></td>" else "<td>${g}</td>"
     ) cols
     + "</tr>"
-    + lib.concatImapStrings (
-      i: t:
-      "<tr><td>${t.mark}</td><td>${esc t.label}</td><td>${
-        if t.option == null then "—" else codeBreak t.option
-      }</td>"
-      + lib.concatMapStrings (c: "<td>${onoff (builtins.elemAt c.d.tiers (i - 1)).value}</td>") cols
+    + lib.concatMapStrings (
+      b:
+      "<tr><td>minimum</td><td>${esc b.label}</td><td>— (常に入る)</td>"
+      + lib.concatMapStrings (_: "<td>on</td>") cols
       + "</tr>"
-    ) first.tiers
+    ) first.base
     + lib.concatMapStrings (
       r:
-      "<tr><td>${r.marks}</td><td>${esc r.label}</td><td>${codeBreak r.option}</td>"
+      "<tr><td>${groupOf r}</td><td>${esc r.label}</td><td>${codeBreak r.option}</td>"
       + lib.concatMapStrings (c: cell c r) cols
       + "</tr>"
     ) first.tools
@@ -600,13 +652,13 @@ let
 
   readingList = winNote: ''
     <ul class="reading">
-    <li>灰色の入れ子の領域が段: 内から ① エンジニアの道具・② AI の道具・③ 個人の道具。③ の領域の「②③」の列は、② と ③ の両方の段が on のときだけ既定で入る道具</li>
-    <li>箱が道具。実線の箱は on、点線の箱は off、細かい点線の箱は値は on だが効く条件が off で効かない (–)。箱の右上の ● はホストで決めた値、○ は dotfiles-private の nix/shared/ で決めた値</li>
-    <li>色の線がホスト。線の中の箱が、そのホストで入る道具。段の領域の線が点線なら、その段の switch は off (道具はホストで 1 つずつ足せる)</li>
-    <li>箱や段の名前を押すと、option・値・どこで決まったかが出る。タブは ← → でも替えられる</li>
+    <li>灰色の入れ子の領域がグループ: 内が minimum (どの PC にも初めからあってほしいもの)、外が all (道具を全部)。グループに入る道具は全部既定で on。領域の線が点線なら、そのホストのグループの外 (中の道具はホストで 1 つずつ足せる)</li>
+    <li>箱が道具。実線の箱は on、点線の箱は off、細かい点線の箱は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない。–)。minimum の「常に入る」の箱は switch の無い基本の道具。箱の右上の ● はホストで決めた値、○ は dotfiles-private の nix/shared/ で決めた値</li>
+    <li>色の線がホスト。線の中の箱が、そのホストで入る道具</li>
+    <li>箱やグループの名前を押すと、option・値・どこで決まったかが出る。タブは ← → でも替えられる</li>
     ${winNote}</ul>
   '';
-  winReadingNote = "<li>Windows のホストの値 (win/hosts/ の TOML) が持つのは、グループと道具の switch の上書き ([tools]) だけ。段はグループで決まり、書いていない道具はグループの既定 (dotfiles の win/runner/groups.json)</li>\n";
+  winReadingNote = "<li>Windows のホストの値 (win/hosts/ の TOML) が持つのは、グループと道具の switch の上書き ([tools]) だけ。書いていない道具はグループの既定 (dotfiles の win/runner/groups.json)。minimum の箱は runner がいつも流す手順</li>\n";
 
   # ---- Nix のホストのページ ----
 
@@ -617,18 +669,14 @@ let
       shared = builtins.filter (r: r.source == "shared") d.tools;
       blocked = builtins.filter (r: r.blocked) d.tools;
       vals = rows: map (r: "${r.label} ${onoff r.value}") rows;
-      reasons =
-        wrap: rows:
-        map (
-          r: "${r.label} (${lib.concatMapStringsSep "・" (p: wrap "dotfiles.${p}") r.requiresOff} が off)"
-        ) rows;
+      reasons = wrap: rows: map (r: "${r.label} (${lib.concatStringsSep "・" (reasonsOf wrap r)})") rows;
     in
     {
       inherit set shared blocked;
       setText = listOr "なし" (vals set);
       sharedText = listOr "なし" (vals shared);
-      blockedText = listOr "なし" (reasons (p: p) blocked);
-      blockedMd = listOr "なし" (reasons (p: "`${p}`") blocked);
+      blockedText = listOr "なし" (reasons (p: "dotfiles.${p}") blocked);
+      blockedMd = listOr "なし" (reasons (p: "`dotfiles.${p}`") blocked);
     };
 
   nixMd =
@@ -638,13 +686,13 @@ let
     in
     "# `${name}`\n\n"
     + "🌐 ${mdLink "HTML 版: ${name} の道具" "./html/${name}.html"}\n\n"
-    + "設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 057・ADR 093)。図 (段の入れ子の領域・道具の箱・このホストの囲み) は HTML 版にある。\n\n"
+    + "設定グループ・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 109・ADR 093)。図 (グループの入れ子の領域・道具の箱・このホストの囲み) は HTML 版にある。\n\n"
     + "- ホストの値: ${mdLink "`nix/hosts/${name}.nix`" "../../../nix/hosts/${name}.nix"}\n"
-    + "- グループ: `${d.group.value}` (${groupSource d}) · ${tierLine d}\n"
-    + "- 入る道具: ${toString (countOn d.tools)} / ${toString (builtins.length d.tools)}\n"
+    + "- グループ: `${d.group.value}` (${groupSource d}) · 環境: ${envLine d.env}\n"
+    + "- 入る道具: ${countText d} (${baseNote d})\n"
     + "- ホストのファイルで決めた値: ${f.setText}\n"
     + lib.optionalString (f.shared != [ ]) "- dotfiles-private の `nix/shared/` で決めた値: ${f.sharedText}\n"
-    + lib.optionalString (f.blocked != [ ]) "- 効かない道具 (値は on だが、効く条件が off): ${f.blockedMd}\n"
+    + lib.optionalString (f.blocked != [ ]) "- 効かない道具 (値は on か、グループに入るが、そのマシンで効かない): ${f.blockedMd}\n"
     + "\n全ホストの図と一覧は ${mdLink "入口" "../README.md"}。\n\n"
     + mdGen;
 
@@ -655,21 +703,23 @@ let
       hostFile = "nix/hosts/${name}.nix";
     in
     "<header><h1>${codeTag name} の道具</h1>"
-    + ''<p class="lead">設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 057・ADR 093)。''
-    + "タブで「このホスト」「既定 (ホストで何も書かなかったとき)」「重ねて比べる」を切り替える。箱を押すと option・値・どこで決まったかが出る。</p></header>\n"
+    + ''<p class="lead">設定グループ・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 109・ADR 093)。''
+    + "タブで「このホスト」「既定 (ホストで道具を何も書かなかったとき)」「重ねて比べる」を切り替える。箱を押すと option・値・どこで決まったかが出る。</p></header>\n"
     + figureSlot 0
     + "\n<h2>ホストの値</h2>\n<ul>"
     + "<li>ホストの値: ${aTag (blob privateRepo hostFile) (codeTag hostFile)}</li>"
-    + "<li>グループ: ${codeTag d.group.value} (${esc (groupSource d)}) · ${esc (tierLine d)}</li>"
-    + "<li>入る道具: ${toString (countOn d.tools)} / ${toString (builtins.length d.tools)}</li>"
+    + "<li>グループ: ${codeTag d.group.value} (${esc (groupSource d)}) · 環境: ${esc (envLine d.env)}</li>"
+    + "<li>入る道具: ${countText d} (${esc (baseNote d)})</li>"
     + "<li>ホストのファイルで決めた値: ${esc f.setText}</li>"
     + lib.optionalString (
       f.shared != [ ]
     ) "<li>dotfiles-private の nix/shared/ で決めた値: ${esc f.sharedText}</li>"
-    + lib.optionalString (f.blocked != [ ]) "<li>効かない道具 (値は on だが、効く条件が off): ${esc f.blockedText}</li>"
+    + lib.optionalString (
+      f.blocked != [ ]
+    ) "<li>効かない道具 (値は on か、グループに入るが、そのマシンで効かない): ${esc f.blockedText}</li>"
     + "<li>全ホストの図と一覧: ${aTag (blob privateRepo "docs/hosts/README.md") "docs/hosts/ の入口"}</li>"
     + "</ul>\n<h2>道具の一覧</h2>\n"
-    + "<p>太字はホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが効く条件が off で効かない。</p>\n"
+    + "<p>太字はホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)。</p>\n"
     + toolTable "option (dotfiles.…)" [
       {
         head = "このホスト";
@@ -727,25 +777,36 @@ let
     else
       lib.concatStringsSep " " rest;
 
-  # Windows のホストの要約の値。windowsGroups はグループごとの段と道具の既定 (win/runner/groups.json と同じ中身。flake の
+  # Windows のホストの minimum の箱 (runner がいつも流す手順)。Nix のホストの基本の道具の箱に当たる
+  winBase = [
+    {
+      key = "winAlways";
+      label = "いつも流す手順 (OpenSSH・Windows Terminal・PowerShell・Google 日本語入力・PowerToys など)";
+      short = "いつも流す手順";
+    }
+  ];
+
+  # Windows のホストの要約の値。windowsGroups はグループごとの道具の既定 (win/runner/groups.json と同じ中身。flake の
   # lib.windowsGroups)、toml はホストの値のファイル (builtins.fromTOML の結果)。道具は Windows の runner が読むものだけ
-  # (groups.nix の runner)。効く条件は groups.nix の requires から、WSL が win/ を配るかの条件 (windowsFiles) を外したもの
-  # (runner は Windows で動くので)
+  # (groups.nix の runner)。効く条件は groups.nix の requires のうち runner の道具のもの (環境の条件は持たない。runner は Windows で
+  # 動き、Windows のホストの値には WSL や win/ の配りの switch が無いので)
   winData =
     windowsGroups: name: toml:
     let
       group = toml.group or windowsGroups.default;
       g =
-        windowsGroups.groups.${group}
-          or (throw "host-summary: ${name} の group が知らないグループです: ${group} (${lib.concatStringsSep "・" (builtins.attrNames windowsGroups.groups)} のどれか)");
+        if groups.removedGroups ? ${group} then
+          throw "host-summary: ${name} の group = \"${group}\" は、もう使えません (設定グループは minimum・all。dotfiles-private の ADR 109)。group = \"minimum\" にして、使う道具を [tools] に書いてください (dotfiles の win/README.md の「ホストの値」)"
+        else
+          windowsGroups.groups.${group}
+            or (throw "host-summary: ${name} の group が知らないグループです: ${group} (${lib.concatStringsSep "・" (builtins.attrNames windowsGroups.groups)} のどれか)");
       overrides = toml.tools or { };
       unknown = builtins.filter (k: !(g.tools ? ${k})) (builtins.attrNames overrides);
       notBool = builtins.filter (k: !(builtins.isBool overrides.${k})) (builtins.attrNames overrides);
-      keyOf = path: (builtins.head (builtins.filter (t: t.option == path) groups.tools)).key;
-      winReq = t: builtins.filter (k: k != "windowsFiles") (map keyOf t.requires);
+      runnerRows = builtins.filter (t: t.runner) groups.tools;
+      winReq = t: builtins.filter (k: builtins.elem k groups.runnerTools) (map keyOfOption t.requires);
       val = k: overrides.${k} or g.tools.${k};
       def = k: g.tools.${k};
-      runnerRows = builtins.filter (t: t.runner) groups.tools;
       sshd = toml.sshd or { };
       notion = (toml.claude or { }).notion or { };
       listText =
@@ -768,37 +829,43 @@ let
         value = group;
         source = if toml ? group then "host" else "unset";
       };
-      tiers = map (t: {
-        inherit (t) name mark label;
-        option = null;
-        value = if t.option == null then true else g.tiers.${t.name};
-        default = if t.option == null then true else g.tiers.${t.name};
-        source = if t.option == null then "default" else "group";
-      }) groups.tiers;
+      base = map (b: { inherit (b) key label short; }) winBase;
       tools = map (
         t:
         let
           req = winReq t;
           value = val t.key;
           default = def t.key;
+          reqOff = builtins.filter (k: !(val k)) req;
+          inGroup = groups.inGroup group t;
+          source = if overrides ? ${t.key} then "host" else "group";
+          effective = value && reqOff == [ ];
         in
         {
           inherit (t)
             key
             label
             short
-            tiers
+            minimum
             ;
-          marks = toolMarks t;
-          column = columnOf t;
+          windows = builtins.elem "windowsFiles" t.env;
           option = "[tools] ${t.key}";
-          inherit value default;
-          effective = value && builtins.all val req;
-          blocked = value && !(builtins.all val req);
+          inherit
+            value
+            default
+            effective
+            inGroup
+            source
+            ;
+          blocked = !effective && (value || (inGroup && source == "group")) && reqOff != [ ];
           defaultEffective = default && builtins.all def req;
+          defaultBlocked = inGroup && !(default && builtins.all def req);
+          env = [ ];
+          envOff = [ ];
           requires = map (k: "[tools] ${k}") req;
-          requiresOff = map (k: "[tools] ${k}") (builtins.filter (k: !(val k)) req);
-          source = if overrides ? ${t.key} then "host" else "group";
+          requiresOff = map (k: "[tools] ${k}") reqOff;
+          defaultRequiresOff = map (k: "[tools] ${k}") (builtins.filter (k: !(def k)) req);
+          follows = null;
         }
       ) runnerRows;
       runner = (toml.runner or { }).enable or false;
@@ -878,16 +945,16 @@ let
     in
     "# `${name}`\n\n"
     + "🌐 ${mdLink "HTML 版: ${name} の道具 (Windows)" "./html/${name}.html"}\n\n"
-    + "Windows の runner が読むホストの値から、設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 093)。図は HTML 版にある。\n\n"
+    + "Windows の runner が読むホストの値から、設定グループ・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 109・ADR 093)。図は HTML 版にある。\n\n"
     + "- ホストの値: ${mdLink "`win/hosts/${name}.toml`" "../../../win/hosts/${name}.toml"} (書き方は dotfiles の `win/README.md` の「ホストの値」)\n"
-    + "- グループ: `${wd.group.value}` (${groupSource wd}) · ${tierLine wd}\n"
-    + "- 入る道具: ${toString (countOn wd.tools)} / ${toString (builtins.length wd.tools)}\n"
+    + "- グループ: `${wd.group.value}` (${groupSource wd})\n"
+    + "- 入る道具: ${countText wd}\n"
     + "- ホストの値 ([tools]) で決めた値: ${listOr "なし" (map (r: "${r.label} ${onoff r.value}") set)}\n"
     +
       lib.optionalString (blocked != [ ])
         "- 効かない道具 (値は on だが、効く条件が off): ${
           lib.concatMapStringsSep "・" (
-            r: "${r.label} (${lib.concatMapStringsSep "・" (p: "`${p}`") r.requiresOff} が off)"
+            r: "${r.label} (${lib.concatMapStringsSep "・" (p: "`${p}` が off") r.requiresOff})"
           ) blocked
         }\n"
     + lib.concatMapStrings (x: "- ${x.k}: ${x.v}\n") wd.extras
@@ -902,13 +969,13 @@ let
       hostFile = "win/hosts/${name}.toml";
     in
     "<header><h1>${codeTag name} の道具 (Windows)</h1>"
-    + ''<p class="lead">Windows の runner が読むホストの値から、設定グループ・段・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 093)。''
-    + "タブで「このホスト」「既定 (ホストの値に何も書かなかったとき)」「重ねて比べる」を切り替える。箱を押すと値とどこで決まったかが出る。</p></header>\n"
+    + ''<p class="lead">Windows の runner が読むホストの値から、設定グループ・道具の on/off と、その値がどこで決まったか (dotfiles の ADR 109・ADR 093)。''
+    + "タブで「このホスト」「既定 (ホストの値に道具を何も書かなかったとき)」「重ねて比べる」を切り替える。箱を押すと値とどこで決まったかが出る。</p></header>\n"
     + figureSlot 0
     + "\n<h2>ホストの値</h2>\n<ul>"
     + "<li>ホストの値: ${aTag (blob privateRepo hostFile) (codeTag hostFile)} (書き方は ${aTag "${blob bodyRepo "win/README.md"}#ホストの値" "dotfiles の win/README.md の「ホストの値」"})</li>"
-    + "<li>グループ: ${codeTag wd.group.value} (${esc (groupSource wd)}) · ${esc (tierLine wd)}</li>"
-    + "<li>入る道具: ${toString (countOn wd.tools)} / ${toString (builtins.length wd.tools)}</li>"
+    + "<li>グループ: ${codeTag wd.group.value} (${esc (groupSource wd)})</li>"
+    + "<li>入る道具: ${countText wd}</li>"
     + "<li>ホストの値 ([tools]) で決めた値: ${
       esc (listOr "なし" (map (r: "${r.label} ${onoff r.value}") set))
     }</li>"
@@ -917,14 +984,14 @@ let
         "<li>効かない道具 (値は on だが、効く条件が off): ${
           esc (
             lib.concatMapStringsSep "・" (
-              r: "${r.label} (${lib.concatStringsSep "・" r.requiresOff} が off)"
+              r: "${r.label} (${lib.concatMapStringsSep "・" (p: "${p} が off") r.requiresOff})"
             ) blocked
           )
         }</li>"
     + lib.concatMapStrings (x: "<li>${esc x.k}: ${esc x.v}</li>") wd.extras
     + "<li>全ホストの図と一覧: ${aTag (blob privateRepo "docs/hosts/README.md") "docs/hosts/ の入口"}</li>"
     + "</ul>\n<h2>道具の一覧</h2>\n"
-    + "<p>太字はホストの値 ([tools]) で決めた値。「–」は値は on だが効く条件が off で効かない。</p>\n"
+    + "<p>太字はホストの値 ([tools]) で決めた値。「–」は効かない (値は on だが、効く条件が off)。</p>\n"
     + toolTable "ホストの値のキー" [
       {
         head = "このホスト";
@@ -967,31 +1034,27 @@ let
       page' = dir: n: mdLink "`${n}`" "./${dir}/${n}.md";
       nixRow =
         e:
-        "| ${page' "nix" e.name} | `${e.d.group.value}` (${groupSource e.d}) | ${
-          lib.concatMapStringsSep " · " (t: onoff t.value) e.d.tiers
-        } | ${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)} | ${
+        "| ${page' "nix" e.name} | `${e.d.group.value}` (${groupSource e.d}) | ${envLine e.d.env} | ${countText e.d} | ${
           listOr "—" (map (w: page' "win" w.name) (winOf e.name))
         } |\n";
       winRow =
         e:
         "| ${page' "win" e.name} | `${e.d.group.value}` (${groupSource e.d}) | ${
           if e.d.runner then "runner" else "WSL の setup"
-        } | ${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)} | ${
-          listOr "—" (map (x: page' "nix" x.name) (nixOf e.name))
-        } |\n";
+        } | ${countText e.d} | ${listOr "—" (map (x: page' "nix" x.name) (nixOf e.name))} |\n";
     in
     "# 登録したホストの道具\n\n"
     + "🌐 ${mdLink "HTML 版: 登録したホストの道具" "./html/hosts.html"}\n\n"
-    + "登録したホストごとに、どの道具が入るかを見せる (dotfiles の ADR 057・ADR 093)。"
-    + "段 (① エンジニアの道具 ⊂ ② AI の道具 ⊂ ③ 個人の道具) を入れ子の領域に、道具を箱に、ホストを「入る道具だけを囲む色の線」に描いた図は HTML 版にある "
+    + "登録したホストごとに、どの道具が入るかを見せる (dotfiles の ADR 109・ADR 093)。"
+    + "グループ (minimum ⊂ all) を入れ子の領域に、道具を箱に、ホストを「入る道具だけを囲む色の線」に描いた図は HTML 版にある "
     + "(タブでホストを切り替え、全部を重ねても比べられる。箱を押すと option・値・どこで決まったかが出る)。\n\n"
     + "## Nix のホスト (WSL・Linux)\n\n"
-    + "dotfiles-private の `nix/hosts/` のホスト (home-manager の値)。\n\n"
+    + "dotfiles-private の `nix/hosts/` のホスト (home-manager の値)。入る道具の数は道具の switch の数で、ほかに基本の道具 (switch なし) がいつも入る。\n\n"
     + (
       if nixEntries == [ ] then
         "登録したホストはありません。\n"
       else
-        "| ホスト | グループ | 段 (① ② ③) | 入る道具 | 同じ PC の Windows のホスト |\n| --- | --- | --- | --- | --- |\n"
+        "| ホスト | グループ | 環境 | 入る道具 | 同じ PC の Windows のホスト |\n| --- | --- | --- | --- | --- |\n"
         + lib.concatMapStrings nixRow nixEntries
     )
     + "\n## Windows のホスト (runner)\n\n"
@@ -1004,8 +1067,8 @@ let
         + lib.concatMapStrings winRow winEntries
     )
     + "\n## 図の読み方\n\n"
-    + "- 灰色の入れ子の領域が段。③ の領域の「②③」の列は、② と ③ の両方の段が on のときだけ既定で入る道具\n"
-    + "- 箱が道具。実線の箱は on、点線の箱は off、細かい点線の箱は値は on だが効く条件が off で効かない\n"
+    + "- 灰色の入れ子の領域がグループ: 内が minimum (どの PC にも初めからあってほしいもの)、外が all (道具を全部)。グループに入る道具は全部既定で on\n"
+    + "- 箱が道具。実線の箱は on、点線の箱は off、細かい点線の箱は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)\n"
     + "- 色の線がホスト。線の中の箱が、そのホストで入る道具\n"
     + "- 同じ PC は、ホストの名前の @ の後ろ (PC の名前) を小文字にして比べた\n\n"
     + mdGen;
@@ -1018,16 +1081,14 @@ let
       page' = dir: n: aTag (blob privateRepo "docs/hosts/${dir}/${n}.md") (codeTag n);
       nixRow =
         e:
-        "<tr><td>${page' "nix" e.name}</td><td>${codeTag e.d.group.value} (${esc (groupSource e.d)})</td><td>${
-          lib.concatMapStringsSep " · " (t: onoff t.value) e.d.tiers
-        }</td><td>${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)}</td><td>${
+        "<tr><td>${page' "nix" e.name}</td><td>${codeTag e.d.group.value} (${esc (groupSource e.d)})</td><td>${esc (envLine e.d.env)}</td><td>${countText e.d}</td><td>${
           listOr "—" (map (w: page' "win" w.name) (winOf e.name))
         }</td></tr>";
       winRow =
         e:
         "<tr><td>${page' "win" e.name}</td><td>${codeTag e.d.group.value} (${esc (groupSource e.d)})</td><td>${
           if e.d.runner then "runner" else "WSL の setup"
-        }</td><td>${toString (countOn e.d.tools)} / ${toString (builtins.length e.d.tools)}</td><td>${
+        }</td><td>${countText e.d}</td><td>${
           listOr "—" (map (x: page' "nix" x.name) (nixOf e.name))
         }</td></tr>";
       tableCols =
@@ -1038,7 +1099,7 @@ let
         }) entries;
     in
     "<header><h1>登録したホストの道具</h1>"
-    + ''<p class="lead">登録したホストごとに、どの道具が入るかを見せる (dotfiles の ADR 057・ADR 093)。''
+    + ''<p class="lead">登録したホストごとに、どの道具が入るかを見せる (dotfiles の ADR 109・ADR 093)。''
     + "タブでホストを切り替え、「重ねて比べる」で全部の線を重ねる。箱を押すと option・値・どこで決まったかが出る。</p></header>\n"
     + "<h2>Nix のホスト (WSL・Linux)</h2>\n"
     + (if nixFig == null then "<p>登録したホストはありません。</p>\n" else figureSlot nixFig + "\n")
@@ -1047,7 +1108,7 @@ let
     + "<h2>ホストの一覧</h2>\n"
     + lib.optionalString (nixEntries != [ ]) (
       "<h3>Nix のホスト (dotfiles-private の nix/hosts/)</h3>\n"
-      + ''<div class="tablewrap"><table><thead><tr><th>ホスト</th><th>グループ</th><th>段 (① ② ③)</th><th>入る道具</th><th>同じ PC の Windows のホスト</th></tr></thead><tbody>''
+      + ''<div class="tablewrap"><table><thead><tr><th>ホスト</th><th>グループ</th><th>環境</th><th>入る道具</th><th>同じ PC の Windows のホスト</th></tr></thead><tbody>''
       + lib.concatMapStrings nixRow nixEntries
       + "</tbody></table></div>\n"
     )
@@ -1057,10 +1118,10 @@ let
       + lib.concatMapStrings winRow winEntries
       + "</tbody></table></div>\n"
     )
-    + "<p>同じ PC は、ホストの名前の @ の後ろ (PC の名前) を小文字にして比べた。</p>\n"
+    + "<p>同じ PC は、ホストの名前の @ の後ろ (PC の名前) を小文字にして比べた。入る道具の数は道具の switch の数で、ほかに基本の道具 (switch なし) がいつも入る。</p>\n"
     + lib.optionalString (nixEntries != [ ]) (
       "<h2>道具の一覧 (Nix のホスト)</h2>\n"
-      + "<p>太字はホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は値は on だが効く条件が off で効かない。</p>\n"
+      + "<p>太字はホストのファイル (か dotfiles-private の nix/shared/) で決めた値。「–」は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)。</p>\n"
       + toolTable "option (dotfiles.…)" (tableCols nixEntries)
       + "\n"
     )
@@ -1081,7 +1142,7 @@ let
   # docs/hosts/ に書くファイルの全部 (path の組。private-host.sh summaries が nix eval --write-to で書き出す)。
   #   hosts           privateHosts の結果 (名前 → mkHome のホスト)
   #   winHosts        名前 → Windows のホストの値 (builtins.fromTOML の結果。flake の lib.windowsHosts)
-  #   windowsGroups   グループごとの段と道具の既定 (flake の lib.windowsGroups)
+  #   windowsGroups   グループごとの道具の既定 (flake の lib.windowsGroups)
   files =
     {
       hosts,
@@ -1132,72 +1193,65 @@ let
       };
     } (map (e: pages e.name e.d) nixEntries ++ map (e: winPages e.name e.d) winEntries);
 
-  # nix/groups.md の全文。plain はグループごとの素のホスト (グループだけを書いたもの) の data、examples は
-  # [ { title; head; data; } ] (lib/group-examples.nix のホスト)
+  # nix/groups.md の全文。examples は [ { title; head; data; } ] (lib/group-examples.nix のホスト)
   groupsDoc =
-    { plain, examples }:
+    { examples }:
     let
-      groupRow =
-        g:
-        "| `${g.name}` | ${g.description} | ${
-          lib.concatMapStringsSep " | " (
-            t: if t.option == null then "on" else onoff (groups.groupHasTier g.name t.name)
-          ) groups.tiers
-        } |";
+      envDoc = t: map (e: groups.envs.${e}.doc) t.env ++ map (o: "`${dotted o}`") t.requires;
       toolRow =
-        i: t:
-        "| ${toolMarks t} | ${t.label} | `${dotted t.option}` | ${
-          lib.concatMapStringsSep " | " (
-            g: onoff (builtins.elemAt plain.${g.name}.tools i).value
-          ) groups.groups
+        t:
+        "| ${t.label} | `${dotted t.option}` | ${
+          lib.concatMapStringsSep " | " (g: onoff (groups.inGroup g.name t)) groups.groups
         } | ${
-          if t.requires == [ ] then "" else lib.concatMapStringsSep "・" (o: "`${dotted o}`") t.requires
-        } |";
+          if t.follows != null then
+            "既定は `${dotted (toolNamed t.follows).option}` に従う" + lib.optionalString (t.env != [ ]) "・"
+          else
+            ""
+        }${lib.concatStringsSep "・" (envDoc t)} |";
       # 作り物のホストの値の表の升。ホストで決めた値は太字
       cell = row: text: if isHost row then "**${text}**" else text;
       first = (builtins.head examples).data;
       exampleRow = label: cells: "| ${label} | ${lib.concatStringsSep " | " cells} |";
+      countGroup = g: builtins.length (builtins.filter (t: groups.inGroup g.name t) groups.tools);
     in
     "<!-- 生成物 (dotfiles の nix/lib/host-summary/)。手で直さない -->\n\n"
     + "> 生成物。手で直さない。出し直すのは dotfiles の root で `nix eval --raw ./nix#lib.groupsDoc > nix/groups.md`。古ければ CI (flake の checks の groups-doc) が落ちる。\n"
     + "\n# 設定グループ\n\n"
-    + "ホストは設定グループを 1 つ選び (`mkHome` の `group`)、グループは「どの段の道具まで入れるか」で決まる (dotfiles-private の ADR 057)。"
+    + "ホストは設定グループを 1 つ選ぶ (`mkHome` の `group`)。グループは道具の集合で、グループに入る道具の switch は全部既定で on、入らない道具は既定で off になる (dotfiles-private の ADR 109)。"
     + "選び方・直し方・setup の振る舞いは [README の「設定グループ」](./README.md#設定グループ)。ここは `nix/lib/groups.nix` の表と、作り物のホストの値から作った生成物。"
-    + "登録したホストごとの図 (段の入れ子の領域と、ホストごとの囲みの線) は dotfiles-private の `docs/hosts/` にある (dotfiles-private の ADR 093)。\n\n"
+    + "登録したホストごとの図 (グループの入れ子の領域と、ホストごとの囲みの線) は dotfiles-private の `docs/hosts/` にある (dotfiles-private の ADR 093)。\n\n"
     + "## グループ\n\n"
-    + "| グループ | 使う PC と何を入れるか | ${
-      lib.concatMapStringsSep " | " (t: "${t.mark} ${t.label}") groups.tiers
-    } |\n"
-    + "| --- | --- | ${lib.concatMapStringsSep " | " (_: "---") groups.tiers} |\n"
-    + lib.concatMapStrings (g: groupRow g + "\n") groups.groups
-    + "\n## 道具の switch と、グループごとの既定\n\n"
-    + "グループだけを書いた (ほかの値を書かない) ホストの値。Windows の道具は `wsl.windowsFiles.enable` のマシンでだけ効く (効く条件の列)。"
-    + "既定が段によらない道具 (`onePassword.enable` など) は、どのグループでも off で、使うホストが入れる。\n\n"
-    + "| 段 | 道具 | option (`dotfiles.…`) | ${
+    + "| グループ | 使う PC と何を入れるか | 入る道具の switch |\n"
+    + "| --- | --- | --- |\n"
+    + lib.concatMapStrings (
+      g:
+      "| `${g.name}` | ${g.description} | ${toString (countGroup g)} / ${toString (builtins.length groups.tools)} |\n"
+    ) groups.groups
+    + "\n`minimum` ⊂ `all`。グループを書かないホストは `minimum`。\n"
+    + "\n## 基本の道具 (switch なし)\n\n"
+    + "どのグループにも入り、いつも入る (`minimum` の中)。外したいホストが出たら、そのとき switch を足す。\n\n"
+    + lib.concatMapStrings (b: "- ${b.label}\n") groups.base
+    + "\n## 道具の switch と、グループに入るか\n\n"
+    + "on の道具は、そのグループのホストで既定で on になる。ただし効く条件 (そのマシンの環境と、頼るほかの道具) が合わなければ、グループに入っていても既定で off になる (要約の表と図では「–」)。"
+    + "グループに入らない道具も、ホストのファイルで on にできる。\n\n"
+    + "| 道具 | option (`dotfiles.…`) | ${
       lib.concatMapStringsSep " | " (g: "`${g.name}`") groups.groups
     } | 効く条件 |\n"
-    + "| --- | --- | --- | ${lib.concatMapStringsSep " | " (_: "---") groups.groups} | --- |\n"
-    + lib.concatImapStrings (i: t: toolRow (i - 1) t + "\n") groups.tools
+    + "| --- | --- | ${lib.concatMapStringsSep " | " (_: "---") groups.groups} | --- |\n"
+    + lib.concatMapStrings (t: toolRow t + "\n") groups.tools
     + "\n## 作り物のホストの値\n\n"
-    + "`nix/lib/group-examples.nix` のホスト (どれも WSL で `win/` を配る。値は作り物)。**太字**はホストで決めた値。"
-    + "「–」は値は on だが、効く条件が off で効かない。\n\n"
+    + "`nix/lib/group-examples.nix` のホスト (値は作り物)。**太字**はホストで決めた値。"
+    + "「–」は効かない (値は on か、グループに入るが、環境の条件か効く条件が合わない)。\n\n"
     + lib.concatMapStrings (e: "- `${e.head}`: ${e.title}\n") examples
     + "\n| 道具 | ${lib.concatMapStringsSep " | " (e: "`${e.head}`") examples} |\n"
     + "| --- | ${lib.concatMapStringsSep " | " (_: "---") examples} |\n"
     + exampleRow "グループ" (map (e: cell e.data.group "`${e.data.group.value}`") examples)
     + "\n"
-    + lib.concatImapStrings (
-      i: t:
-      exampleRow "${t.mark} ${t.label}" (
-        map (
-          e: cell (builtins.elemAt e.data.tiers (i - 1)) (onoff (builtins.elemAt e.data.tiers (i - 1)).value)
-        ) examples
-      )
-      + "\n"
-    ) first.tiers
+    + exampleRow "環境" (map (e: envLine e.data.env) examples)
+    + "\n"
     + lib.concatImapStrings (
       i: r:
-      exampleRow "${r.marks} ${r.label}" (
+      exampleRow r.label (
         map (
           e: cell (builtins.elemAt e.data.tools (i - 1)) (shown (builtins.elemAt e.data.tools (i - 1)))
         ) examples

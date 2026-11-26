@@ -10,14 +10,14 @@
 // ## 確かめること
 //
 //   - page.js は node で読める (構文の誤りが無い) と、DOM の無いところでは描かずに関数だけを出す
-//   - どのページのどの図でも、箱は重ならず、それぞれの列の段の領域の中 (縁から pad の内) にある。段の領域は内の段ほど内に入れ子
+//   - どのページのどの図でも、箱は重ならず、それぞれの列のグループの領域の中 (縁から pad の内) にある。グループの領域は内のグループほど内に入れ子
 //     (内の領域が外の領域の中に、inset 以上の間を空けて収まる)
 //   - ホストのページ (order "host") の 1 つめのタブ (このホスト) は、列ごとに入る箱が上から並び (入らない箱より前)、入る箱は
 //     1 つの島にまとまる (隣どうしの列の入る箱は一番上の行で接し、入る箱の無い列は一番上の行の水路で渡る)
 //   - 2 つめのタブ (既定) の入る箱も、列ごとに 1 つの区間にまとまる (ホストで足した → どちらも → ホストで外した の並び)
 //   - どのタブの囲みの矩形の組も、線の太さぶん広げても入らない箱に重ならない (線が入らない箱に触れない)。線 (箱からの間 d と太さ t) は、
 //     箱と箱の隙間の中に収まる (重ねるタブでは、重ねる線の数ごとに全部の線が収まる)
-//   - 入る箱の列が途中で空く (② の列に入る箱が無い) と、一番上の行の水路で空いた列の箱の上を渡り、その箱を囲まずに 1 つの島になる
+//   - 入る箱の列が途中で空く (真ん中の列に入る箱が無い) と、一番上の行の水路で空いた列の箱の上を渡り、その箱を囲まずに 1 つの島になる
 //   - 重ねる線が 1〜30 本のどれでも、どの線 (箱からの間 d と太さ t) も箱と箱の隙間に収まり、水路の下の縁の線が空いた列の箱に
 //     触れない (d > t + 1)。線は外ほど箱から離れる
 //   - 入口 (order "count") の箱の並びは、入るホストの多い順 (同じなら表の順)
@@ -85,13 +85,13 @@ for (const { path, fig } of figures) {
   const lay = layout(fig, cols);
   const regionOfCol = new Map(cols.map((c) => [c.id, lay.regions.find((r) => r.id === c.region)]));
 
-  ok(`${tag}: 箱は重ならず、列の段の領域の中にあり、段の領域は入れ子`, () => {
+  ok(`${tag}: 箱は重ならず、列のグループの領域の中にあり、グループの領域は入れ子`, () => {
     for (let i = 0; i < lay.boxes.length; i++) {
       for (let j = i + 1; j < lay.boxes.length; j++) assert.ok(!overlap(lay.boxes[i], lay.boxes[j]), `${lay.boxes[i].key} と ${lay.boxes[j].key} が重なる`);
       const b = lay.boxes[i];
-      assert.ok(inside(b, regionOfCol.get(cols[b.ci].id), L.pad), `${b.key} が段の領域の外`);
+      assert.ok(inside(b, regionOfCol.get(cols[b.ci].id), L.pad), `${b.key} がグループの領域の外`);
     }
-    for (let k = 0; k + 1 < lay.regions.length; k++) assert.ok(inside(lay.regions[k], lay.regions[k + 1], L.inset), `段 ${lay.regions[k].id} が外の段に収まらない`);
+    for (let k = 0; k + 1 < lay.regions.length; k++) assert.ok(inside(lay.regions[k], lay.regions[k + 1], L.inset), `領域 ${lay.regions[k].id} が外の領域に収まらない`);
   });
 
   const singles = fig.views.filter((v) => v.kind !== "overlay");
@@ -145,11 +145,11 @@ for (const { path, fig } of figures) {
 ok("入る箱の列が途中で空くと、一番上の行の水路で空いた列の箱の上を渡り、その箱を囲まずに 1 つの島になる", () => {
   const fig = {
     order: "host",
-    regions: [{ id: "a", mark: "①", label: "A" }, { id: "b", mark: "②", label: "B" }, { id: "c", mark: "③", label: "C" }],
+    regions: [{ id: "a", label: "A", short: "a" }, { id: "b", label: "B", short: "b" }, { id: "c", label: "C", short: "c" }],
     columns: [
-      { id: "c1", region: "a", head: "①", tools: ["x1", "x2"] },
-      { id: "c2", region: "b", head: "②", tools: ["y1"] },
-      { id: "c3", region: "c", head: "③", tools: ["z1", "z2"] },
+      { id: "c1", region: "a", head: "", tools: ["x1", "x2"] },
+      { id: "c2", region: "b", head: "", tools: ["y1"] },
+      { id: "c3", region: "c", head: "", tools: ["z1", "z2"] },
     ],
     views: [
       { id: "host", kind: "host", tools: { x1: { e: true }, x2: { e: true }, y1: { e: false }, z1: { e: true }, z2: { e: false } } },

@@ -23,7 +23,7 @@
 #
 #   groups         グループ。並びは既定の minimum から
 #   removedGroups  やめたグループの名前 (ADR 057 の 3 つ) → 前のグループと同じ道具にするために足す道具の説明。書いたホストは評価で止める
-#   envs           環境の条件の名前 → 要約と nix/groups.md に出す名前 (label) と、何で決まるか (doc)
+#   envs           環境の条件の名前 → 要約と nix/groups.md に出す名前 (label)・何で決まるか (doc)・合わないときの文 (off)
 #   base           switch の無い基本の道具 (常に入る。minimum の中)。要約の図と nix/groups.md に出すだけ
 #   tools          道具の switch。並びは前の表 (ADR 057) の順 (段の印は出さない)
 #     key       group.json の tools のキーと、setup が読む bootstrap の見出し (# tool: <key>) の名前
@@ -61,22 +61,27 @@ let
     linux = {
       label = "Linux";
       doc = "Linux (macOS でない)";
+      off = "Linux でない";
     };
     wsl = {
       label = "WSL";
       doc = "`wsl.enable`";
+      off = "WSL でない";
     };
     windowsFiles = {
       label = "win/ を配る";
       doc = "`wsl.windowsFiles.enable`";
+      off = "win/ を配らない";
     };
     noWindowsFiles = {
       label = "win/ を配らない (Windows は runner)";
       doc = "`wsl.windowsFiles.enable` が false";
+      off = "win/ を配る (Windows は WSL の setup)";
     };
     windowsUser = {
       label = "Windows のユーザー名がある (WSL)";
       doc = "WSL なら `wsl.windowsUserName` (WSL でなければいつも)";
+      off = "Windows のユーザー名が無い";
     };
   };
 
