@@ -2160,7 +2160,7 @@ exit "${rc}"
                 .map(|l| {
                     l.replace(
                         "gh が見つからない。home-manager switch の後に流し直す",
-                        "gh が見つからない。gh は bootstrap (win/bootstrap/Install-Bootstrap.ps1) が入れる。入れた後に流し直す",
+                        "gh が見つからない。gh は -Private の bootstrap (win/bootstrap/Install-Bootstrap.ps1 -Private) が入れる。入れた後に流し直す",
                     )
                 })
                 .collect();

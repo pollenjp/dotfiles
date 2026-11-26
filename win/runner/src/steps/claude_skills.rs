@@ -64,7 +64,7 @@ impl Step for ClaudeSkills {
             return vec![Outcome::new(
                 Kind::Manual,
                 format!(
-                    "claude-skills の clone が無い ({}) → bootstrap (Install-Bootstrap.ps1) が clone する",
+                    "claude-skills の clone が無い ({}) → -Private の bootstrap (Install-Bootstrap.ps1 -Private) が clone する",
                     clone.display()
                 ),
             )];

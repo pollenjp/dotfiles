@@ -77,7 +77,7 @@ pub const KEYS_NOTE: [&str; 2] = [
     "  → 上げる版までの更新ノート (What's new。中身は herdrdev/herdr-app の CHANGELOG.md) で keys.json に触れた項 (「if you edited keys.json, add …」など) を探し、Windows で効くキーを win/herdr-app/keys.json に足す (dotfiles のキーと重なる既定のキーは、その既定の値を keys.defaults.json に書く。win/README.md の「固定した版を上げる」)",
 ];
 /// gh が見つからないとき (WSL の「home-manager switch の後に流し直す」は Windows では bootstrap)
-pub const NO_GH: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh が見つからない。gh は bootstrap (win/bootstrap/Install-Bootstrap.ps1) が入れる。入れた後に流し直す)。";
+pub const NO_GH: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh が見つからない。gh は -Private の bootstrap (win/bootstrap/Install-Bootstrap.ps1 -Private) が入れる。入れた後に流し直す)。";
 /// gh がログインしていないとき (WSL と同じ字)
 pub const NOT_LOGGED_IN: &str = "Windows に固定した版より新しい版があるかを確かめられませんでした (gh にログインしていない。gh auth login の後に流し直す)。";
 /// 新しい版が無いとき (WSL と同じ字。後ろに確かめた名前と「)。」)

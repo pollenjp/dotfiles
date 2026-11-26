@@ -199,7 +199,7 @@ fn missing_source(ctx: &mut Ctx, clone: &Path, src: &Path, placed: bool) -> Outc
             ctx,
             Kind::Manual,
             format!(
-                "claude-skills の clone が無い ({}) → bootstrap (Install-Bootstrap.ps1) が clone する",
+                "claude-skills の clone が無い ({}) → -Private の bootstrap (Install-Bootstrap.ps1 -Private) が clone する",
                 clone.display()
             ),
         );

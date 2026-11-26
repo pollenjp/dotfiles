@@ -5,7 +5,7 @@ description: >-
   この repo を流すときに見つけて段ごとに読む。「dotfiles を更新して」「dotfiles の依存を上げて」「dotfiles に package update して」
   「Windows に固定した版を上げて」と言われてこの skill を先に開いたら、ここから始めず、依存の更新の skill の流れで進め、その段で
   ここの節を読む。閉包スキャンが whitelist に無い findings で止めたとき、Windows に固定した版 (OpenSSH・herdr・Google 日本語入力・
-  ntn・Claude Code・Tailscale・ghq・fzf・starship・herdr-app・herdr-core と、bootstrap の Git for Windows・gh・Visual Studio Build Tools・rustup) の上げ先を聞くとき、
+  ntn・Claude Code・Tailscale・ghq・fzf・starship・herdr-app・herdr-core と、bootstrap の Git for Windows・gh・PowerShell 7・Visual Studio Build Tools・rustup) の上げ先を聞くとき、
   merge の後の反映 (setup・mise の go と node・Windows のアプリ) を案内するときに読む。
 metadata:
   pjp-extends: deps
@@ -33,7 +33,7 @@ dotfiles の依存の更新の、この repo 固有の手順と設定 (repo の�
 
 | 対象 | わけ |
 | --- | --- |
-| Windows に固定した版 (`deps.toml` の `[[pins]]` の `windows`): OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・herdr-app・herdr-core と、bootstrap の git・gh・vs-buildtools・rustup | 版を `win/<名前>/Install-*.ps1`・`win/bootstrap/Install-Bootstrap.ps1` (bootstrap の 4 つ。名前ごとの param) と `nix/pkgs/herdr-core/releases.json` に固定している。repo の口 (`nix/scripts/bootstrap-windows-pin-updates.sh --candidates --json`) が、猶予ごとの上げ先を出す |
+| Windows に固定した版 (`deps.toml` の `[[pins]]` の `windows`): OpenSSH・herdr・Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・herdr-app・herdr-core と、bootstrap の git・gh・pwsh・vs-buildtools・rustup | 版を `win/<名前>/Install-*.ps1`・`win/bootstrap/Install-Bootstrap.ps1` (bootstrap の 5 つ。名前ごとの param) と `nix/pkgs/herdr-core/releases.json` に固定している。repo の口 (`nix/scripts/bootstrap-windows-pin-updates.sh --candidates --json`) が、猶予ごとの上げ先を出す |
 
 外すもの:
 

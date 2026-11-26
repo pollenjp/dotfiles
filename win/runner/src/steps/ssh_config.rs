@@ -176,7 +176,7 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
             "正本 (dotfiles-private の ssh/*.ssh_config) が無いので配らない (Windows 側のファイルはそのまま)",
         )
         .note(format!(
-            "dotfiles-private の clone を確かめる ({})。bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
+            "dotfiles-private の clone を確かめる ({})。-Private の bootstrap が %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles-private に clone する",
             src_dir.display()
         ));
         for l in relay {

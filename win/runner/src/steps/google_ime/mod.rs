@@ -232,7 +232,7 @@ fn prepare(ctx: &mut Ctx, for_import: bool) -> Result<Prepared, Outcome> {
                 paths.dict_dir.display()
             ));
             notes.push(format!(
-                "辞書のテキスト ({}) が無いので、辞書は飛ばした。dotfiles-private の clone を用意する (bootstrap が clone する)",
+                "辞書のテキスト ({}) が無いので、辞書は飛ばした。dotfiles-private の clone を用意する (-Private の bootstrap が clone する)",
                 paths.dict_dir.display()
             ));
             dict = None;
