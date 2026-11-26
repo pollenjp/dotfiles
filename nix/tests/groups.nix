@@ -9,7 +9,8 @@
 #   - 表の各道具の既定が、環境の組 5 つ (WSL で win/ を配る・WSL で win/ を配らない・WSL で Windows のユーザー名を書かない・WSL でない
 #     Linux・macOS) と 2 つのグループのどれでも「グループに入る && 全部の環境の条件 && 全部の効く条件の値」になる (従う道具 (follows) は、
 #     従う先の道具の値)。options.nix の既定の式と表がずれたら、ここで落ちる
-#   - all を選んだホストは、5 つの組のどれでも評価が止まらない (グループの既定から来た値で assertion が起きない)
+#   - all を選んだホストは、5 つの組のどれでも世代の derivation (activationPackage の drvPath) まで評価できる (グループの既定から
+#     来た値で assertion が起きず、その system に無い package も入らない)
 #   - minimum で on の道具は minimum に入る道具 (osCaBundle・cleanup) だけ
 #   - 表の option が全部ホストの options.dotfiles にあり、bool の option
 #   - グループを書かないホストと group = "minimum" のホストで、表の全 option の値が同じ
@@ -110,7 +111,11 @@ let
   evaluates = args: (builtins.tryEval (cfgOf args).home.username).success;
   throwsOn = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
 
-  allStops = builtins.filter (n: !(evaluates (envs.${n} // { group = "all"; }))) (
+  # 世代の derivation まで評価できるか (assertion のほか、その system に無い package の誤りも見る。build はしない)
+  drvEvaluates =
+    args: (builtins.tryEval (builtins.seq (hostWith args).activationPackage.drvPath true)).success;
+
+  allStops = builtins.filter (n: !(drvEvaluates (envs.${n} // { group = "all"; }))) (
     builtins.attrNames envs
   );
 
@@ -141,7 +146,7 @@ let
     }
     {
       name =
-        "all を選んだホストは、環境の組 5 つのどれでも評価が止まらない"
+        "all を選んだホストは、環境の組 5 つのどれでも世代の derivation まで評価できる"
         + lib.optionalString (allStops != [ ]) " (止まる組: ${lib.concatStringsSep "・" allStops})";
       ok = allStops == [ ];
     }
