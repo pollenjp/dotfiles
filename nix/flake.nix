@@ -532,6 +532,7 @@
                 touch $out
               '';
           bootstrap-ntn-test = scriptTest "bootstrap-ntn" ./scripts/bootstrap-ntn.sh;
+          bootstrap-notion-tokens-test = scriptTest "bootstrap-notion-tokens" ./scripts/bootstrap-notion-tokens.sh;
           # settings.json に合わせる値の 1 か所 (nix/files/t3-code/managed-settings.json。Windows の runner と共有) も渡す
           bootstrap-t3-code-test =
             pkgs.runCommand "bootstrap-t3-code-test" { nativeBuildInputs = [ pkgs.jq ]; }
@@ -773,6 +774,14 @@
               ;
           };
           claude-notion-state = import ./tests/claude-notion.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-notion-tokens-state = import ./tests/claude-notion-tokens.nix {
             inherit
               lib
               pkgs

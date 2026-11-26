@@ -32,6 +32,7 @@
 #   dotfiles.claude.notion.profile               Notion へ書く skill が既定に使う宛先のプロファイル名
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
+#   dotfiles.claude.notion.tokens                このマシンで Notion の API キーを使うプロファイルと、その種類 (integration・personal)・1Password の項目の参照 (値は持たない)
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
 #   dotfiles.claude.heavyJobs.limitPercent       重い処理 (動画の書き出し・推論など) が使ってよい CPU とメモリの、マシン全体に対する割合 (既定 70)
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
@@ -464,6 +465,78 @@ in
 
           キーの綴りはここでは検査しない (キーの形は claude-skills が持つ)。
           skill が使うときに resolver が知らないキーとして止める。
+        '';
+      };
+
+      tokens = lib.mkOption {
+        type = lib.types.attrsOf (
+          lib.types.submodule {
+            options = {
+              kind = lib.mkOption {
+                type = lib.types.enum [
+                  "integration"
+                  "personal"
+                ];
+                example = "personal";
+                description = ''
+                  そのプロファイルの API キーの種類。
+
+                  - `integration`: Notion の integration の API キー。接続したページにだけ届く狭い token で、
+                    integration の秘密を作り直せば古いものが無効になるので回しやすい
+                  - `personal`: 個人用アクセストークン (Notion の web で発行する。ユーザーの権限が届く範囲)
+                '';
+              };
+              item = lib.mkOption {
+                # 欄まで書いた op://<vault>/<項目>/<欄> (セクションがあれば op://<vault>/<項目>/<セクション>/<欄>) だけを受ける。
+                # 形は型 (strMatching) でなく lib/notion-tokens.nix の assertions (home/modules/claude.nix が渡す) で確かめる。
+                # 型の誤りの文は定義の値をそのまま出すので、値 (ntn_…) を書いてしまったときに、評価の誤りの文から端末や CI の
+                # ログへ値が出る
+                type = lib.types.nullOr lib.types.str;
+                default = null;
+                example = lib.literalExpression ''"op://<vault の ID>/<項目の ID>/<欄の ID>"'';
+                description = ''
+                  元の値を置いた 1Password の参照。欄まで書く: `op://<vault の ID>/<項目の ID>/<欄の ID>` (セクションがあれば
+                  `op://<vault>/<項目>/<セクション>/<欄>`)。そのまま `op read '<item>'` に渡せる、`pjp-op-ref` が出す ID の形の
+                  参照で、値ではない。分かるまで null。
+
+                  欄まで書いた `op://` の参照でない字 (値そのもの・欄の無い `op://<vault>/<項目>` など) は評価で止まる (止めるときの
+                  文には、書いた字を出さずにプロファイルの名前だけを出す)。
+
+                  dotfiles は読まない。棚卸しと token を回す手順 (claude-skills) が、どの参照の値を入れ直すかを示すのに使う
+                  (`op read '<item>' | pjp notion-profile set-token <名前>`)。
+                '';
+              };
+            };
+          }
+        );
+        default = { };
+        example = lib.literalExpression ''
+          {
+            personal = {
+              kind = "integration";
+              item = null;
+            };
+          }
+        '';
+        description = ''
+          このマシンで Notion の API キーを使うプロファイルと、その種類の宣言。キーはプロファイルの名前 (profiles.toml の名前と
+          同じ形。英小文字か数字で始まり、英小文字・数字・- と _ だけ)。値 (token) はここに書かない。
+
+          値は各ホストの `~/.config/pjp/env` の `PJP_NOTION_TOKEN_<名前>` (名前を大文字にし、- を _ にする) に、ユーザーが自分の
+          端末で `pjp notion-profile set-token <名前>` で入れる。Claude は値を読まない・書かない・出さない
+          (dotfiles-private の docs/adr/112_notion_api_token_local_*)。
+
+          home/modules/claude.nix が `~/.local/state/dotfiles/notion-tokens.json` に書き出す (宣言が無くても `{"tokens":{}}` を
+          置く。Claude Code を入れるホストだけ):
+
+              {"tokens": {"personal": {"kind": "integration", "item": null, "var": "PJP_NOTION_TOKEN_PERSONAL"}}}
+
+          `~/dotfiles/setup --update` の bootstrap-notion-tokens.sh がこれを読み、宣言のあるプロファイルごとに
+          `~/.config/pjp/env` を値を出さずに見て、変数の行が無い・ファイルの権限が 600 より広いときに知らせる (止めない)。
+          claude-skills の棚卸しの skill も読む。名前の形が違う・同じ変数になる 2 つの名前 (my-ws と my_ws) は評価で止まる。
+
+          mkHome の引数 (`claude.notion.tokens.personal = { … };`) でも、modules (`dotfiles.claude.notion.tokens`) でも書ける。
+          書き方は nix/README.md の「Notion の API キーの種類を宣言する」。
         '';
       };
     };

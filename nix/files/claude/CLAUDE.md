@@ -91,3 +91,8 @@ API キー・パスワード・token の値は、会話に貼らせない・フ�
 例外: Claude Code の token のファイル (`~/.config/claude-accounts/<名前>.env` の `CLAUDE_CODE_OAUTH_TOKEN`) は、ユーザーの決定
 (2026-11-19) でローカルに値を置く。値はユーザーが `claude-account set-token <名前>` で入れ、Claude は読まない・書かない・出さない
 (有る無しと権限は `claude-account check <名前>` で見る)。わけと守りは dotfiles-private の ADR 082。
+
+例外: Notion の API キー (`~/.config/pjp/env` の `PJP_NOTION_TOKEN_<名前>`) は、ユーザーの決定 (2026-11-26) でローカルに値を置く。
+値はユーザーが `pjp notion-profile set-token <名前>` で入れ、Claude は `set-token` を打たず、そのファイルを開かず (Read・cat も)、
+値を読まない・書かない・出さない (確かめるのは棚卸しの skill と setup の知らせで、有る無しと権限と日数だけ)。わけと守りは
+dotfiles-private の ADR 112。

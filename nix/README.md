@@ -871,6 +871,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | その他 | 50（既定） | 依存なし |
 | `bootstrap-dotfiles-private.sh` | 50 | private な dotfiles-private を取る。中身を読む `bootstrap-ssh-config.sh` (60)・`bootstrap-windows-ssh-config.sh` (91)・`bootstrap-windows-google-ime.sh` (98)・`bootstrap-windows-port-forward.sh` (99) より先ならよい (既定と同じ値を書いてある)。clone があれば、手順 2.4 `private-fetch` が同じ script を switch の前にも流し、そのときはこの手順を飛ばす |
 | `bootstrap-pjp.sh` | 55 | `bootstrap-claude-skills.sh`（50）が取得した claude-skills の clone から、shim の `pjp` を入れて道具を作る。cargo は `bootstrap-mise.sh`（10）の rust が入れる（[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
+| `bootstrap-notion-tokens.sh` | 55 | `bootstrap-local-env.sh`（50）が `~/.config/pjp/env` を置き、group と other の権限を外した後に、Notion の API キーの行と権限を見る（[後述](#notion-の-api-キーの種類を宣言する)）。同じ 55 は辞書順なので `bootstrap-pjp.sh` より先（どちらも相手を使わない） |
 | `bootstrap-claude-accounts.sh` | 60 | `bootstrap-claude-skills.sh`（50）が `~/.claude/skills` へ張ったリンクを写す |
 | `bootstrap-claude-skill-overrides.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill の `SKILL.md`（pack の割り当て）と入口の skill（`pjp-pack-<pack>`）を読む（[後述](#skill-の一覧を枠に収める-pack-と同期された-skill)） |
 | `bootstrap-herdr-hub.sh` | 60 | `bootstrap-claude-skills.sh`（50）が張った skill `pjp-herdr-hub` の `hub-init.sh` を打つ（[後述](#herdr-の集約ハブ-h)） |
@@ -1001,6 +1002,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.5.1 | `./nix/scripts/bootstrap-dotfiles-private.sh` | `bootstrap-dotfiles-private` | private な dotfiles-private の取得 (取れなくても止めない。[`win/README.md`](../win/README.md#google-日本語入力)) |
 | 6.5.2 | `./nix/scripts/bootstrap-pjp.sh` | `bootstrap-pjp` | claude-skills の Rust の道具の入口 (shim の `pjp`) を入れ、道具を作る (`pjp --build`)。6.5 の後に走る（[後述](#claude-skills-の-rust-の道具-shim-の-pjp)） |
 | 6.6 | `./nix/scripts/bootstrap-local-env.sh` | `bootstrap-local-env` | `~/.config/pjp/env` を置き、頭の「dotfiles が書く欄」を書き直す（[後述](#マシンローカルの環境変数-configpjpenv)） |
+| 6.6.1 | `./nix/scripts/bootstrap-notion-tokens.sh` | `bootstrap-notion-tokens` | Notion の API キーを宣言したプロファイル（`dotfiles.claude.notion.tokens`）ごとに、`~/.config/pjp/env` に変数の行があるかと権限を、値を出さずに確かめて知らせる（書き換えない。`claude.enable` のマシンだけ。[後述](#notion-の-api-キーの種類を宣言する)） |
 | 6.7 | `./nix/scripts/bootstrap-claude-accounts.sh` | `bootstrap-claude-accounts` | `claude-personal` / `claude-work` が使う `~/.claude-<名前>/` を用意（[後述](#claude-code-のアカウントを分ける-claude-personal--claude-work)） |
 | 6.7.1 | `./nix/scripts/bootstrap-herdr-hub.sh` | `bootstrap-herdr-hub` | herdr の集約ハブ `~/h` を作る・雛形との差を直す（claude-skills の `pjp-herdr-hub` が張られているマシンだけ。[後述](#herdr-の集約ハブ-h)） |
 | 6.7.2 | `./nix/scripts/bootstrap-t3-code.sh` | `bootstrap-t3-code` | T3 Code の settings.json の決めたキーを合わせ、状態を出す（`dotfiles.t3Code.enable = true` のマシンだけ。[後述](#t3-code)） |
@@ -1338,7 +1340,7 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 
 | 道具の switch | 止めるもの |
 | --- | --- |
-| `claude.enable` | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）と mise の claude |
+| `claude.enable` | `~/.claude`（CLAUDE.md・hook・skill・agent・command・status line）・Claude Code 向けの state・`claude-<名前>`・`claude-selector`・abbr / alias の `c`・`cs`・setup の bootstrap-claude-*（7 本）・bootstrap-notion-tokens と mise の claude |
 | `dotfiles.herdr.enable` | herdr の包み・ssh 先の agent の固定名の仕組み（`~/.ssh/rc`・見張りの unit・`SetEnv PJP_SSH_CLIENT`）・`~/.config/herdr/config.toml`・abbr / alias の `h*`・Claude Code の herdr の skill |
 | `dotfiles.herdrCore.enable` | herdr-core（hc。Linux だけ） |
 | `dotfiles.linger.enable` | setup の手順 linger（`sudo loginctl enable-linger`。既定は `herdrCore.enable` と同じ。有効にした linger は外さない） |
@@ -1548,6 +1550,7 @@ WSL の PC で描いた雛形なら、例の `windowsUserName` にはその PC �
 | `group` | `"minimum"` | どの PC も `"minimum"` にして、使う道具 (`claude.enable` など) を足す。道具を全部入れる PC だけ `"all"`（[設定グループ](#設定グループ)） |
 | `claude.devTracker.enable` | `false`（minimum） | Notion Dev Tracker を使うマシン（[Claude Code の skill を host ごとに止める](#claude-code-の-skill-を-host-ごとに止める)） |
 | `claude.notion.profile` | `null` | Notion へ書く skill を使うマシン。`"personal"` / `"work"`（[Notion の宛先を host ごとに選ぶ](#notion-の宛先を-host-ごとに選ぶ)） |
+| `claude.notion.tokens` | `{}` | Notion を API キーで使うマシン。プロファイルごとに種類（`kind = "integration"` / `"personal"`）と 1Password の参照（`item`。欄まで）を書く。値は書かない（[Notion の API キーの種類を宣言する](#notion-の-api-キーの種類を宣言する)） |
 | `claude.gitViaGh.enable` | `true` | gh にログインしないマシンだけ `false`（[Claude のセッションだけ git の設定を変える](#claude-のセッションだけ-git-の設定を変える)・[fetch 系を gh の資格情報で通す](#fetch-系を-gh-の資格情報で通す-git-gh)） |
 | `claude.videoOffer.autoStart.enable` | `false` | 解説動画の短尺を聞かずに作り始めたいマシンだけ `true`（[解説動画を作る場面を知らせるフック](#解説動画を作る場面を知らせるフック)） |
 | `claude.heavyJobs.limitPercent` | `70` | 重い処理（動画の書き出し・推論など）に使わせる CPU とメモリの割合（整数 1〜100）を変えたいマシン（[重い処理の資源の上限を host ごとに決める](#重い処理の資源の上限を-host-ごとに決める)） |
@@ -3414,6 +3417,10 @@ Windows では `%USERPROFILE%\.config\pjp\env` で、runner の手順 `local-env
 1 バイトも変えない。** 実際の API キーが入っているファイルなので、値は欄より下に書く。group と other の
 権限があれば外す（644 なら 600。600 より狭くしてあれば広げない）。
 
+Notion の API キー（`PJP_NOTION_TOKEN_<名前>`）を宣言したマシンでは、手順 6.6.1（`bootstrap-notion-tokens`）が、このファイルに
+変数の行があるかと権限を、値を出さずに確かめて知らせる（[Notion の API キーの種類を宣言する](#notion-の-api-キーの種類を宣言する)）。
+その値はユーザーが `pjp notion-profile set-token <名前>` で入れる（Claude は入れない・このファイルを開かない）。
+
 ### ⚠️ `home.sessionVariables` に書かないこと
 
 あれは `/nix/store` 経由で `~/.config/environment.d/10-home-manager.conf` として
@@ -3492,7 +3499,8 @@ PJP_NOTION_TOKEN_PERSONAL=ntn_…
 | 印が壊れている・symlink・書けない・NUL を含む（UTF-16 で保存した）・`env.bak` がディレクトリ | 書かずに `!!` で知らせる（setup は止めない） |
 
 - 書き上がりが今と同じなら何も書かない。違えば前の版を `env.bak`（600、1 世代）に写し、同じディレクトリの
-  一時ファイルから `mv` する。値は画面に出さない
+  一時ファイルから `mv` する。値は画面に出さない。API キーを入れ替えた（回した）後も、次に欄が変わるまでは `env.bak` に
+  古い値の写しが残る（回す手順で古い token を無効にするので、無効な値の写しになる）
 - 欄の中に手で書いたコメントは、次に欄が変わったときに消える（`env.bak` に 1 世代だけ残る）
 - テンプレートを手で直していたファイルは、テンプレートを残したまま欄が頭に足される。要らなければ欄の下に
   残った古いテンプレートを手で消す
@@ -3605,6 +3613,7 @@ ls -ld ~/.config/notion ~/.config/notion/auth.json   # keyring: false なら drw
 | `~/.claude/CLAUDE.md` | `nix/files/claude/CLAUDE.md` | ファイル（生成。下の節を末尾に連結） |
 | （同上）「タスク管理」の節 | `nix/files/claude/CLAUDE.dev-tracker.md` | `dotfiles.claude.devTracker.enable` のマシンでだけ連結（[後述](#claude-code-の-skill-を-host-ごとに止める)） |
 | `~/.local/state/dotfiles/claude-notion.json` | `dotfiles.claude.notion.{profile,routes,override}` から生成 | ファイル（Notion の宛先。[後述](#notion-の宛先を-host-ごとに選ぶ)） |
+| `~/.local/state/dotfiles/notion-tokens.json` | `dotfiles.claude.notion.tokens` から生成（`nix/lib/notion-tokens.nix`） | ファイル（Notion の API キーを使うプロファイルと種類。値は持たない。[後述](#notion-の-api-キーの種類を宣言する)） |
 | `~/.local/state/dotfiles/claude-video-offer.json` | `dotfiles.claude.videoOffer.autoStart.enable` から生成 | ファイル（解説動画を答えを待たずに作り始めるか。[後述](#解説動画を作る場面を知らせるフック)） |
 | `~/.local/state/dotfiles/claude-heavy-jobs.json` | `dotfiles.claude.heavyJobs.limitPercent` から生成 | ファイル（重い処理の資源の上限の割合。[後述](#重い処理の資源の上限を-host-ごとに決める)） |
 | `~/.local/state/dotfiles/claude-ssh-agent-notice.json` | `dotfiles.claude.sshAgentNotice.extraCommands` から生成 | ファイル（中で ssh を打つ道具の一覧。[後述](#1password-の-ssh-承認を知らせるフック)） |
@@ -4645,7 +4654,8 @@ Notion へ書く skill（`claude-skills` の `pjp-dev-tracker`・`pjp-notion-aut
 | このマシンだけの差し替え | 同じく `claude.notion.override` | `{ personal = { scanData = "https://app.notion.com/p/…"; }; }` |
 | プロファイルの値（workspace・ページ・DB の id） | `claude-skills` の `profiles.toml` | `[personal.devTracker]` の `hub = "…"` |
 | repo にチケットの ID と URL を書くか | `claude-skills` の `profiles.toml`（マシンだけ変えるなら override） | `[work.devTracker]` の `linkFromRepo = false` |
-| API キー（そのマシンでそのプロファイルを API キーで使うとき） | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
+| API キーを使うプロファイルと、その種類（このマシンでそのプロファイルを API キーで使うとき） | 同じく `claude.notion.tokens`（[下](#notion-の-api-キーの種類を宣言する)） | `{ personal = { kind = "integration"; item = null; }; }` |
+| API キーの値 | `~/.config/pjp/env`（[マシンローカルの環境変数](#マシンローカルの環境変数-configpjpenv)。ユーザーが `pjp notion-profile set-token <名前>` で入れる） | `PJP_NOTION_TOKEN_PERSONAL=ntn_…` |
 
 見る順番は、このマシンの `routes` → 共通の `[routes]` → このマシンの `profile`（既定）→ 止まる。
 各層の中では `owner/repo` の行が `owner/*` の行に勝つが、層の順番が先なので、
@@ -4658,9 +4668,10 @@ Notion の URL を書くかを決める真偽値（書かなければ `true`）�
 Dev Tracker が個人の private ページの下にあり、チームの repo に書いても他のメンバーは開けないため。
 このマシンだけ変えるなら `claude.notion.override = { work = { devTracker.linkFromRepo = true; }; };`（`mkHome` の引数）。
 
-認証は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
+認証の値は host option に持たせない。そのマシンに `PJP_NOTION_TOKEN_<名前>`（環境変数か `~/.config/pjp/env`）が
 あればその API キー、無ければ workspace ごとの `ntn login` を使う。変数名はプロファイル名を大文字にし
-`-` を `_` にする（personal → `PJP_NOTION_TOKEN_PERSONAL`）。
+`-` を `_` にする（personal → `PJP_NOTION_TOKEN_PERSONAL`）。API キーを使うマシンは、どのプロファイルにどの種類の
+API キーを使うかだけを `claude.notion.tokens` で宣言する（[下](#notion-の-api-キーの種類を宣言する)）。
 
 **`NOTION_API_TOKEN` は `~/.config/pjp/env` に書かない。** 環境に `NOTION_API_TOKEN` があれば
 （repo の devShell が `.env` を読んだときなど）、repo の規則で決まる認証（`PJP_NOTION_TOKEN_<名前>` か
@@ -4699,6 +4710,62 @@ JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profi
   残るマシンでも、switch のときに警告は出ない。skill を使った最初に resolver が
   書き直し方（`{ <プロファイル名> = { … }; }`）を出して止まるので、更新するときに書き直しておく
 
+#### Notion の API キーの種類を宣言する
+
+Notion を `ntn login` でなく API キーで使うマシンは、どのプロファイルにどの種類の API キーを使うかを、そのホストの
+`mkHome` に書く（dotfiles-private に登録したファイルか、`~/dotfiles/flake.nix` に足したホスト）。値（token）は書かない。
+
+```nix
+claude = {
+  notion.profile = "personal";
+  notion.tokens.personal = {
+    kind = "integration";  # "integration" (integration の API キー) か "personal" (個人用アクセストークン)
+    item = null;           # 元の値の 1Password の参照。欄まで書く: "op://<vault の ID>/<項目の ID>/<欄の ID>"。分かるまで null
+  };
+};
+```
+
+`mkHome` の引数の `claude` はそのまま `dotfiles.claude` に入るので、`modules` に `{ dotfiles.claude.notion.tokens.personal = { … }; }`
+と書いても同じになる。
+
+| キー | 値 |
+| --- | --- |
+| `tokens` のキー | プロファイルの名前（`profiles.toml` の名前と同じ形。英小文字か数字で始まり、英小文字・数字・`-` と `_` だけ）。変数名は名前を大文字にし、`-` を `_` にしたもの（personal → `PJP_NOTION_TOKEN_PERSONAL`） |
+| `kind` | `integration`（integration の API キー。接続したページにだけ届く狭い token で、秘密を作り直せば古いものが無効になるので回しやすい）・`personal`（個人用アクセストークン。Notion の web で発行し、ユーザーの権限が届く範囲） |
+| `item` | 元の値を置いた 1Password の参照。欄まで書く: `op://<vault の ID>/<項目の ID>/<欄の ID>`（セクションがあれば `op://<vault>/<項目>/<セクション>/<欄>`）。そのまま `op read '<item>'` に渡せる、`pjp-op-ref` が出す ID の形の参照。分かるまで `null`。dotfiles は読まず、claude-skills の棚卸しと回す手順が使う |
+
+次のときは評価で止まる: 名前の形が違う・同じ変数になる 2 つの名前（`my-ws` と `my_ws`）・`kind` が 2 つの外・`item` が欄まで書いた
+`op://` の参照でない（値そのものを書いたときも。止めるときの文には、書いた字を出さずにプロファイルの名前だけを出す。型の誤りの文は
+定義の値をそのまま出すので、`item` の形は型でなく assertions で確かめる）。
+
+`switch` が `~/.local/state/dotfiles/notion-tokens.json` を置く（`claude-notion.json` とは別のファイル。古い resolver が知らない
+キーで止まらないように。宣言が無くても `{"tokens":{}}` を置く。Claude Code を入れるマシンだけ）。上の例なら:
+
+```json
+{"tokens":{"personal":{"item":null,"kind":"integration","var":"PJP_NOTION_TOKEN_PERSONAL"}}}
+```
+
+値はユーザーがそのマシンの端末で入れる（`pjp notion-profile set-token <名前>`。1Password から入れるなら
+`op read '<item>' | pjp notion-profile set-token <名前>`）。Claude は `set-token` を打たず、`~/.config/pjp/env` を開かず、値を読まない・
+書かない・出さない（`nix/files/claude/CLAUDE.md` の「シークレット」の例外と `pjp-secrets`。わけと守りは dotfiles-private の
+`docs/adr/112_notion_api_token_local_*`）。
+
+`~/dotfiles/setup --update` の手順 6.6.1（`bootstrap-notion-tokens.sh`）が、宣言のあるプロファイルごとに `~/.config/pjp/env` を値を
+出さずに見て、次のときに `!!` で知らせる（止めない。[警告のまとめ](#途中の警告のまとめ)に `[bootstrap-notion-tokens]` で出る）:
+
+- 変数の行が無い（ファイルが無いときも）。行は、頭が `<var>=` で、`=` の後ろが空でない行（行の末尾の CR は値に数えない。`#` で
+  始まる行・頭に空白のある行はローダも読まないので数えない）。入れ方（`pjp notion-profile set-token <名前>`）と、`item` があれば
+  その参照を添える
+- ファイルの権限が 600 より広い（rwx の 9 桁のうち 600 の外の桁がある。644・640・700 など。400 のように狭いものは知らせない。
+  symlink なら指す先）。group と other の権限は手順 6.6 が先に外すので、ふだん残るのは外せなかったときと持ち主の実行の桁
+- 状態ファイルが無い（この宣言を持つ世代へまだ switch していない）・形が違う・jq が無い・`~/.config/pjp/env` が普通のファイルで
+  ない・読めない（確かめずに飛ばす）
+
+行は awk が数え、件数だけを受け取る（値をシェルの変数に入れない・出さない。長さも）。ファイルは書き換えない（group と other の
+権限を外すのは手順 6.6、値を入れるのは `set-token`）。宣言のあるホストの token を定期に点検して回す棚卸しは、claude-skills の
+skill が受け持つ（`pjp-periodic` の一覧）。回した後も、手順 6.6 が欄を書き直したときの前の版 `env.bak`（600）に古い値の写しが
+しばらく残る（回す手順で古い token を無効にするので、無効な値の写しになる）。
+
 #### 確認
 
 宛先は cwd の repo で決まるので、`show` と `check` は確かめたい repo の中で打つ
@@ -4708,9 +4775,12 @@ JSON の中身は、上の例（`profile` だけ）なら `{"override":{},"profi
 cat ~/.local/state/dotfiles/claude-notion.json
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh show    # 解決後の値と、どの規則で決まったか
 ~/.claude/skills/pjp-notion-profile/scripts/notion-profile.sh check   # ntn の workspace と合うか
+cat ~/.local/state/dotfiles/notion-tokens.json                       # API キーの宣言 (値は入っていない)
+~/dotfiles/setup --steps bootstrap-notion-tokens                      # 宣言した API キーの行と権限を、値を出さずに確かめる
 ```
 
 経緯は [ADR 011](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/011_claude_notion_profile_20260929T155545JST/README.md)（プロファイル）と [ADR 014](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/014_claude_notion_routes_20261010T014639JST/README.md)（repo ごとに決める）。
+API キーの宣言と、値をローカルに置く例外は dotfiles-private の `docs/adr/112_notion_api_token_local_*`。
 
 ### 重い処理の資源の上限を host ごとに決める
 
