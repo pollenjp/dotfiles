@@ -9,6 +9,16 @@
     "ctrl-pageup": "space.prev",
     "ctrl-pagedown": "space.next"
   },
+  "layout:pjp-main": {
+    "ctrl-shift-left": {
+      "command": "layout.select",
+      "args": { "stack": "sidebar-lists", "child": "spaces" }
+    },
+    "ctrl-shift-right": {
+      "command": "layout.select",
+      "args": { "stack": "sidebar-lists", "child": "agents" }
+    }
+  },
   "mod:pjp-prefix": {
     "ctrl-k": "pjp-prefix.literal"
   },
