@@ -50,6 +50,7 @@
   #   claude.gitViaGh.enable = false;     # gh にログインしないマシン (Claude の git と plugin の取得・fetch 系の abbr / alias・setup の取得を ssh で通す)
   #   claude.notion.profile = "personal";  # Notion へ書く skill の既定の宛先 (claude-skills の profiles.toml の名前)
   #   claude.notion.routes = { "pollenjp/*" = "work"; };  # このマシンだけの宛先の規則 (例: 会社の PC で pollenjp の repo も work に書く)
+  #   claude.notion.tokens.personal = { kind = "integration"; item = null; };  # このマシンで Notion の API キー (~/.config/pjp/env の PJP_NOTION_TOKEN_<名前>) を使うプロファイルと種類 (値は書かない)
   #   claude.videoOffer.autoStart.enable = true;  # 設計・PR のときに解説動画の短尺を答えを待たずに作り始めるマシン (既定は先に聞く)
   #   claude.heavyJobs.limitPercent = 40;  # 重い処理 (動画の書き出し・推論など) が使ってよい CPU とメモリの、マシン全体に対する割合 (%。既定 70)
   #   claude.sshAgentNotice.extraCommands = [ "nix run .#vm" ];  # 中で ssh を打つ道具も、打つ前に 1Password の承認を知らせる

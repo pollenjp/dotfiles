@@ -19,6 +19,9 @@
 #                                     (ssh-agent-notice.sh が読む、中で ssh を打つ道具の一覧。下記)
 #   dotfiles.claude.iacGuard.enable -> ~/.local/state/dotfiles/claude-iac-guard.json
 #                                     (install-iac-guard.sh が読む、IaC の実物を変える操作を止めるか。下記)
+#   dotfiles.claude.notion.tokens -> ~/.local/state/dotfiles/notion-tokens.json
+#                                     (Notion の API キーを使うプロファイルと種類。setup の bootstrap-notion-tokens.sh と
+#                                     claude-skills の棚卸しの skill が読む。下記)
 #   (op-reason-guard.sh が読む ~/.local/state/dotfiles/claude-op-reason.json は home/modules/op-reason.nix が書く)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。cc-page の規則の
@@ -80,6 +83,10 @@
 # dotfiles.claude.notion.{profile,routes,override} を ~/.local/state/dotfiles/claude-notion.json に
 # 書き出す。値の中身 (workspace・ページ・DB の id) は private の claude-skills
 # (skills/pjp-notion-profile/profiles.toml) が持ち、その resolver がこの JSON と重ねる。
+#
+# dotfiles.claude.notion.tokens (このマシンで API キーを使うプロファイルと、その種類) は別のファイル
+# ~/.local/state/dotfiles/notion-tokens.json に書き出す (古い resolver が知らないキーで止まらないため)。値 (token) は
+# 持たない。値は ~/.config/pjp/env の PJP_NOTION_TOKEN_<名前> にユーザーが入れる (dotfiles-private の ADR 112)。
 #
 # ## ログインアカウントを分ける (claude-personal / claude-work と claude-account)
 #
@@ -214,6 +221,9 @@ let
       }
     ) entries;
 
+  # Notion の API キーを使うプロファイルの宣言 (notion.tokens) から、notion-tokens.json の中身と、宣言を確かめる assertions を作る
+  notionTokens = import ../../lib/notion-tokens.nix { inherit lib; };
+
   # hc (herdr-core) の agent skill。home/modules/herdr-core.nix が入れるのと同じ package の `hc --skill` から作る
   # (pkgs/herdr-core/claude-skill.nix)。herdrCore.enable でないホスト (macOS) では評価しない (package が Linux だけ)
   hcSkill = pkgs.callPackage ../../pkgs/herdr-core/claude-skill.nix {
@@ -243,7 +253,9 @@ lib.mkMerge [
           programs.bash.package を null にしないでください (既定は bashInteractive)。
         '';
       }
-    ];
+    ]
+    # notion.tokens の名前の形・同じ変数になる名前・item の形 (値を書けないように。止めるときの文に書いた字を出さない)
+    ++ notionTokens.assertions cfg.notion.tokens;
 
     # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
     # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
@@ -379,6 +391,18 @@ lib.mkMerge [
             inherit (cfg.notion) profile routes override;
           }
           + "\n";
+      }
+
+      # Notion の API キーを使うプロファイルと、その種類の宣言 (notion.tokens)。
+      #
+      # claude-notion.json とは別のファイルにする (古い resolver が知らないキーで止まらないため)。宣言が無くても
+      # {"tokens":{}} を書く。ファイルが無いのは「dotfiles が古い」と、読み手が見分けられるように。読むのは setup の
+      # bootstrap-notion-tokens.sh (~/.config/pjp/env に変数の行があるかと権限を、値を出さずに見て知らせる) と、
+      # claude-skills の棚卸しの skill。値 (token) は持たない (dotfiles-private の ADR 112)。中身の形は lib/notion-tokens.nix:
+      #
+      #   {"tokens": {"personal": {"kind": "integration", "item": null, "var": "PJP_NOTION_TOKEN_PERSONAL"}}}
+      {
+        ".local/state/dotfiles/notion-tokens.json".text = notionTokens.stateText cfg.notion.tokens;
       }
 
       # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
