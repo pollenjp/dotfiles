@@ -789,8 +789,9 @@ let
 
   # Windows のホストの要約の値。windowsGroups はグループごとの道具の既定 (win/runner/groups.json と同じ中身。flake の
   # lib.windowsGroups)、toml はホストの値のファイル (builtins.fromTOML の結果)。道具は Windows の runner が読むものだけ
-  # (groups.nix の runner)。効く条件は groups.nix の requires のうち runner の道具のもの (環境の条件は持たない。runner は Windows で
-  # 動き、Windows のホストの値には WSL や win/ の配りの switch が無いので)
+  # (groups.nix の runner と、runner だけが読む runnerOnlyTools)。効く条件は groups.nix の requires のうち runner の道具のものと、
+  # runnerOnlyTools の requiredBy (環境の条件は持たない。runner は Windows で動き、Windows のホストの値には WSL や win/ の配りの switch が
+  # 無いので)。runnerOnlyTools が off なのに、それが要る道具が on のホストは、runner と同じく止める (評価の誤り)
   winData =
     windowsGroups: name: toml:
     let
@@ -805,9 +806,17 @@ let
       unknown = builtins.filter (k: !(g.tools ? ${k})) (builtins.attrNames overrides);
       notBool = builtins.filter (k: !(builtins.isBool overrides.${k})) (builtins.attrNames overrides);
       runnerRows = builtins.filter (t: t.runner) groups.tools;
-      winReq = t: builtins.filter (k: builtins.elem k groups.runnerTools) (map keyOfOption t.requires);
+      # Windows の runner だけが読む道具 (groups.nix の runnerOnlyTools。privateRepos) のうち、key の道具が要るもの (ADR 111)
+      onlyReq =
+        key: map (r: r.key) (builtins.filter (r: builtins.elem key r.requiredBy) groups.runnerOnlyTools);
+      winReq =
+        t:
+        builtins.filter (k: builtins.elem k groups.runnerTools) (map keyOfOption t.requires)
+        ++ onlyReq t.key;
       val = k: overrides.${k} or g.tools.${k};
       def = k: g.tools.${k};
+      # runner が止めるホスト: runner だけが読む道具が off なのに、それが要る道具が on (runner はホストの値を読むときに止める)
+      needsOff = builtins.filter (t: val t.key && builtins.any (k: !(val k)) (onlyReq t.key)) runnerRows;
       sshd = toml.sshd or { };
       notion = (toml.claude or { }).notion or { };
       listText =
@@ -825,50 +834,88 @@ let
     assert lib.assertMsg (
       notBool == [ ]
     ) "host-summary: ${name} の [tools] の値は true か false で書いてください: ${lib.concatStringsSep ", " notBool}";
+    assert lib.assertMsg (needsOff == [ ])
+      "host-summary: ${name} の [tools] で ${
+        lib.concatStringsSep "・" (lib.unique (lib.concatMap (t: onlyReq t.key) needsOff))
+      } が off なのに、それが要る道具が on です: ${
+        lib.concatMapStringsSep ", " (t: t.key) needsOff
+      } (runner もホストの値を読むときに止める。privateRepos = true を書くか、その道具を false にする。dotfiles の win/README.md の「ホストの値」)";
     {
       group = {
         value = group;
         source = if toml ? group then "host" else "unset";
       };
       base = map (b: { inherit (b) key label short; }) winBase;
-      tools = map (
-        t:
-        let
-          req = winReq t;
-          value = val t.key;
-          default = def t.key;
-          reqOff = builtins.filter (k: !(val k)) req;
-          inGroup = groups.inGroup group t;
-          source = if overrides ? ${t.key} then "host" else "group";
-          effective = value && reqOff == [ ];
-        in
-        {
-          inherit (t)
-            key
-            label
-            short
-            minimum
-            ;
-          windows = builtins.elem "windowsFiles" t.env;
-          option = "[tools] ${t.key}";
-          inherit
-            value
-            default
-            effective
-            inGroup
-            source
-            ;
-          blocked = !effective && (value || (inGroup && source == "group")) && reqOff != [ ];
-          defaultEffective = default && builtins.all def req;
-          defaultBlocked = inGroup && !(default && builtins.all def req);
-          env = [ ];
-          envOff = [ ];
-          requires = map (k: "[tools] ${k}") req;
-          requiresOff = map (k: "[tools] ${k}") reqOff;
-          defaultRequiresOff = map (k: "[tools] ${k}") (builtins.filter (k: !(def k)) req);
-          follows = null;
-        }
-      ) runnerRows;
+      tools =
+        map (
+          t:
+          let
+            req = winReq t;
+            value = val t.key;
+            default = def t.key;
+            reqOff = builtins.filter (k: !(val k)) req;
+            inGroup = groups.inGroup group t;
+            source = if overrides ? ${t.key} then "host" else "group";
+            effective = value && reqOff == [ ];
+          in
+          {
+            inherit (t)
+              key
+              label
+              short
+              minimum
+              ;
+            windows = builtins.elem "windowsFiles" t.env;
+            option = "[tools] ${t.key}";
+            inherit
+              value
+              default
+              effective
+              inGroup
+              source
+              ;
+            blocked = !effective && (value || (inGroup && source == "group")) && reqOff != [ ];
+            defaultEffective = default && builtins.all def req;
+            defaultBlocked = inGroup && !(default && builtins.all def req);
+            env = [ ];
+            envOff = [ ];
+            requires = map (k: "[tools] ${k}") req;
+            requiresOff = map (k: "[tools] ${k}") reqOff;
+            defaultRequiresOff = map (k: "[tools] ${k}") (builtins.filter (k: !(def k)) req);
+            follows = null;
+          }
+        ) runnerRows
+        # Windows の runner だけが読む道具 (privateRepos)。効く条件は無く、値がそのまま効く
+        ++ map (
+          r:
+          let
+            value = val r.key;
+            default = def r.key;
+          in
+          {
+            inherit (r)
+              key
+              label
+              short
+              minimum
+              ;
+            windows = false;
+            option = "[tools] ${r.key}";
+            inherit value default;
+            effective = value;
+            inGroup = groups.inGroup group r;
+            source = if overrides ? ${r.key} then "host" else "group";
+            blocked = false;
+            defaultEffective = default;
+            defaultBlocked = false;
+            env = [ ];
+            envOff = [ ];
+            requires = [ ];
+            requiresOff = [ ];
+            defaultRequiresOff = [ ];
+            follows = null;
+          }
+        ) groups.runnerOnlyTools;
       runner = (toml.runner or { }).enable or false;
       # 図に描けない値 (md と HTML 版の「ホストの値」の節に並べる)
       extras = [

@@ -810,8 +810,8 @@ mod tests {
         parse(text, Path::new("h.toml"), groups())
     }
 
-    /// runner が手順の gate で読む道具 (Nix の lib/groups.nix の runnerTools と同じ)
-    const RUNNER_TOOLS: [&str; 15] = [
+    /// runner が手順の gate で読む道具 (Nix の lib/groups.nix の runnerTools と同じ。最後の privateRepos は runner だけが読む道具)
+    const RUNNER_TOOLS: [&str; 16] = [
         "windowsClaudeCode",
         "windowsHerdr",
         "windowsT3Code",
@@ -827,6 +827,7 @@ mod tests {
         "windowsSshd",
         "windowsTypeClipboard",
         "gitIdentity",
+        "privateRepos",
     ];
 
     #[test]

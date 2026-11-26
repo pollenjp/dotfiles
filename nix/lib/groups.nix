@@ -34,6 +34,7 @@
 #     follows   既定がグループでなく、ほかの道具 (key) の値に従う (linger は herdrCore に従う。ADR 101)。従う先の値が既定になる
 #     short     ホストの要約の図の箱に出す短い名前 (下の shorts。無ければ label)
 #     runner    Windows の runner (win/runner/) が手順の gate で読む道具か (下の runnerTools)
+#   runnerOnlyTools  Windows の runner だけが読む道具 (Nix の option が無く、group.json にも入らない。privateRepos。下の runnerOnlyTools)
 let
   groups = [
     {
@@ -129,7 +130,8 @@ let
   };
 
   # Windows の runner が手順の gate で読む道具 (win/README.md の「ホストの値」の一覧と同じ)。ホストの要約は、dotfiles-private の
-  # win/hosts/*.toml (Windows のホストの値) のページに、この道具だけを箱にして出す。runner に道具を足したら、ここにも足す
+  # win/hosts/*.toml (Windows のホストの値) のページに、この道具だけを箱にして出す。runner に道具を足したら、ここにも足す。
+  # 表 (tools) の道具 (runner の印) と、下の runnerOnlyTools の道具 (Nix の option が無い) の両方を並べる
   runnerTools = [
     "windowsClaudeCode"
     "windowsHerdr"
@@ -146,6 +148,29 @@ let
     "windowsSshd"
     "windowsTypeClipboard"
     "gitIdentity"
+    "privateRepos"
+  ];
+
+  # Windows の runner だけが読む道具 (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。Nix の option を持たず、group.json にも
+  # 入らない (Linux の setup は読まない。Linux で private な repo を読めない PC は、ローカルの flake で扱う)。runner の groups.json (flake の
+  # lib.windowsGroups) と、ホストの要約の Windows のホストのページにだけ出る
+  #   key         groups.json の tools のキーと、ホストの値 (win/hosts/*.toml) の [tools] の名前
+  #   minimum     minimum に入るか (all には必ず入る)
+  #   requiredBy  この道具が off なのに on にできない道具 (runner の道具の key)。runner はホストの値を読むときに止め (終了コード 2)、ホストの
+  #               要約は評価で止める
+  runnerOnlyTools = [
+    {
+      key = "privateRepos";
+      label = "pollenjp の private な repo と gh のログイン (Windows)";
+      short = "private な repo と gh";
+      minimum = false;
+      # claude-skills の clone を読む・claude-skills の pjp でハブを作る・中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む
+      requiredBy = [
+        "claudePrivateSkills"
+        "herdrHub"
+        "opReasonSshRelay"
+      ];
+    }
   ];
 
   # switch の無い基本の道具 (今の module が常に入れるもの。minimum の中)。外したいホストが出たら、そのとき switch を足して tools に移す
@@ -313,6 +338,7 @@ in
     base
     tools
     runnerTools
+    runnerOnlyTools
     groupNamed
     ;
 
