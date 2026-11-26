@@ -17,6 +17,7 @@
       windowsFiles.enable = true;
       windowsFiles.claudeCode.enable = true;
       windowsFiles.herdr.enable = true;
+      # claude-personal・claude-work と Claude Desktop は Windows の runner の道具 (WSL の setup は入れない。要約に出る)
       windowsFiles.claudeAccounts.enable = true;
       windowsFiles.claudeDesktop.enable = true;
       windowsFiles.ntn.enable = true;

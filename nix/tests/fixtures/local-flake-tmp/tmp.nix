@@ -26,7 +26,8 @@
       # repo 直下の win/ を Windows 側へ配る (反映は ~/dotfiles/setup --update)。
       windowsFiles.enable = true;
       # win/ を配るマシンで入れる Windows の道具 (minimum に入らないので足す。使わない行は消す):
-      # Claude Code・herdr と herdr-app・ntn・claude-personal と claude-work・Claude Desktop。
+      # Claude Code・herdr と herdr-app・ntn・claude-personal と claude-work・Claude Desktop。最後の 2 つは Windows の
+      # runner の道具で、WSL の setup は入れない (要約に出る。runner では win/hosts の toml の [tools] に書く)。
       windowsFiles.claudeCode.enable = true;
       windowsFiles.herdr.enable = true;
       windowsFiles.ntn.enable = true;
