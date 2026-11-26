@@ -19,13 +19,15 @@
 //   ペインの一番下の行に出す。
 //   どの role のペインも、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
 //   ユーザーが選択肢をクリックしたときだけ。図を大きく見る小窓は別で、開いたときに focus する)。
-//   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
+//   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じる。mod は自分のペインの ID を
 //   知る手段が無い (props にも、panes() の mod のペインの行にも無い) ので、送信の頭で、この panel の handle がキーボードを持つ
 //   (is_focused) ときだけ focused() の pane (キーボードのあるペイン) を控え、その panes() の行が端末を持たず (terminal が null)、
-//   mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のときだけ、Enter まで済んだ後にその ID で pane.close を打つ
+//   mod がこの mod (pjp-hub-panel か、写しの pjp-hub-panel-<何か>) のときだけ、送れた後にその ID で pane.close を打つ
 //   (同じ mod のまとめのペインがキーボードを持つときに、まとめを閉じない)。確かめられなければ閉じず「送った (閉じるのはハブ)」と
 //   出す。pane.close を pane なしで打たない (キーボードのあるペインを閉じる。それが端末なら、その端末が終わる)。「入力欄に入れる」
-//   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。
+//   では閉じない (端末で直に答えたときと同じく、閉じるのはハブ)。閉じたら、ユーザーがその時にハブの端末のある tab を見ているとき
+//   (閉じる前の focused() の tab に、props.terminal を出すペインがある) だけ、キーボードを terminal へ戻す (pane.focus)。見ていない・
+//   分からないときは戻さない (pane.focus は、その端末のある space・tab へ画面を移すので、送る間に別の space へ移ったユーザーを引き戻す)。
 // props.image (ハブは渡さない): 図の節 (panel.json の sections の type "image" の 1 つ) がオブジェクトで来たら、その図だけを出す
 //   小窓になる (panel の図のクリックで、この mod が自分を開くときに渡す。下の「図の大きさと、大きく見る小窓」)。
 //
@@ -98,7 +100,7 @@
 //
 // ID を写すボタン: チケットの行 (tickets の一覧の行と、木の kind が ticket の行) の ID の右に、小さなコピーのボタン (mod のフォルダの copy.svg を
 //   字の色で塗ったアイコン) を出す。押すと ID の字 (前後の空白を除いたもの) だけを、herdr-app のクリックの cx の write_to_clipboard で
-//   クリップボードに入れる (押した中ですぐ入れる。powershell は起こさない。端末には貼らず、Enter も押さない)。ID を押すと url を開くのは
+//   クリップボードに入れる (押した中ですぐ入れる。端末には貼らず、Enter も押さない)。ID を押すと url を開くのは
 //   今までどおり。ID の無い・空白だけの行と、PR・item の行 (prs の一覧の行も) には出さない。ID とボタンは 1 つの組で、狭いときもボタンだけが
 //   次の段へ回らない (ID は縮んで折り返す)。
 //   - 入れたら 1.5 秒 (COPY_MARK_MS) ✓ (ok の色) にする。write_to_clipboard は入ったかを返さない (GPUI 本家は、Windows でクリップボードを
@@ -106,12 +108,11 @@
 //     分からない)。写さなかったら (下の送っている間・write_to_clipboard が投げたとき) 1.5 秒 ✗ (blocked の色) にし、わけ (「<ID> を写せない:
 //     <わけ>」) をわけの行に出す (次に写せたら、そのわけは消す。ほかのわけは残す)。✓・✗ は最後に押したボタンにだけ出す。ダブルクリックの
 //     2 回目は数えない。ボタンの大きさは panel の文字の % に従う。
-//   - panel のペインが答えを送っている間 (下の「答えの送り方」の送っている印がある間) は写さない。送る途中 (答えをクリップボードに入れてから
-//     端末に貼るまで) にクリップボードを ID に替えると、答えの代わりに ID が貼られて Enter で送られるため。この panel が送っている間は、どの
+//   - panel のペインが答えを送っている間 (下の「答えの送り方」の送っている印がある間) は写さない。「入力欄に入れる」の途中 (答えをクリップボードに
+//     入れてから端末に貼るまで) にクリップボードを ID に替えると、答えの代わりに ID が入力欄に貼られるため。「送信」(hc send) はクリップボードを
+//     使わないが、印を分けずに同じく写さない (送信はふつう 1 秒ほどで済む)。この panel が送っている間は、どの
 //     写すボタンも押せない (薄く出す)。ほかの写しのペインが送っている間に押すと、写さずに ✗ とわけを出す。写す側は印を置かない (写すのは
-//     押した中で済み、送信を待たせない)。送る途中で herdr-app がペインを閉じて印が残ると、印が切れるまで (30 秒) 写せない (送信と同じ)。
-//     逆に、送る仕事が 30 秒を超える (hc get や powershell が止まった) と、端末に貼る前に印が切れ、ほかのペインの写しが入り込みうる (ほかの
-//     ペインの送信と同じ、印の限界。同じペインの写しは busy で止まる)。
+//     押した中で済み、送信を待たせない)。送る途中で herdr-app がペインを閉じて印が残ると、印が切れるまで (35 秒) 写せない (送信と同じ)。
 //   - アイコンのパスは MOD から作る (MOD を書き換えた写しは、写しのフォルダの copy.svg を読む)。
 //
 // Q&A (type "qa"): ユーザーの問いと、ハブの答えを 1 つの項目にして、問いごとに開け閉めする (アコーディオン)。答えがほかの子の返答に
@@ -160,10 +161,11 @@
 //   - 札: 押せる段に、ポインタの形・hover (地を raised に)・ヒントを付ける。色・印 (✓・●・■)・点滅は今までの札のまま。
 //   - 押す (①): 押した印 (下) を書き、その行の段の並びのすぐ下に、枠のついた小さな確かめ「「<answer>」を送る?」と「送る」「やめる」を出す (②)。
 //     押した段が 2 つあれば、段の順に 1 つずつ出す。もう一度その段を押すと「やめる」と同じ。ダブルクリックの 2 回目は数えない。
-//   - 「送る」: 問いの「送信」と同じ手 (下の「答えの送り方」。クリップボード → props.terminal の端末に terminal.paste → hc keys で Enter を
-//     1 回) で answer を送る。Enter まで押せたら印の sent を true にし、確かめの代わりに「「<answer>」を送った」と出して、段を押せない札に戻す
-//     (印が外れるまで。下)。送れなかったら (クリップボードに入れられない・props.terminal が無い・端末が無い・端末が確かめの画面で止まっている・
-//     Enter を押せない)、確かめの中にわけを出し、印は sent が false のまま残す (もう一度「送る」か「やめる」)。送っている間は、同じペインのどの段の
+//   - 「送る」: 問いの「送信」と同じ手 (下の「答えの送り方」。hc send で props.terminal の端末へ送る。hc が貼って Enter を 1 回押す) で answer を
+//     送る。送れたら印の sent を true にし、確かめの代わりに「「<answer>」を送った」と出して、段を押せない札に戻す
+//     (印が外れるまで。下)。送れなかったら (props.terminal が無い・端末が無い・端末が確かめの画面で止まっている・hc send が断った・hc が止まった)、
+//     確かめの中にわけを出し、印は sent が false のまま残す (もう一度「送る」か「やめる」)。送るのが長くかかると、確かめの中に打ちかけの文の
+//     わけと手を出す (下の「答えの送り方」)。送っている間は、同じペインのどの段の
 //     「送る」も問いの「送信」も押せず、送っている段は押しても閉じない。ほかの写しのペイン (問いのペインなど) が送っている間に押すと、送らずに
 //     わけを出す (1 つずつ送る。下の「答えの送り方」)。
 //   - 「やめる」: 何も送らず、印を外して確かめを閉じる。
@@ -245,24 +247,44 @@
 //   SVG の font-family は名前を引用符で囲む ('Yu Gothic UI', 'Meiryo UI', Meiryo, sans-serif)。囲まないと日本語を
 //   混ぜた行が BIZ UDGothic などに落ち、~ が ‾ に、\ が ¥ に化ける。色は暗い theme 向きに描く (SVG は theme に従わない)。
 //
-// 答えの送り方: 問いの答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないでクリップボードに入れてから、端末に 1 回で貼る (terminal.paste)。
-// 「送信」(このペインで Enter も) は、貼ったあと hc keys で Enter を 1 回押す。段の answer (上の「段の answer」) の「送る」も同じ手で、1 行を
-// 貼って Enter を 1 回押す。改行を含む文が Claude Code の入力欄に 1 つの入力として入るのは、terminal.paste が bracketed paste で渡すことを
-// 当てにしている (herdr-app の文書には書かれていない。渡らなければ、Claude Code は 1 行目で送ってしまう)。panel の答えの欄 (上の帯のすぐ下) にも、
-// 答えを 1 行ずつ出す。hc send は使わない (エージェントの端末への hc send は <hc from=…> の札が付き、ユーザーの発言と見分けられなくなる)。
-//   - 貼る前に hc get --json で端末を見て、エージェントが人を待っている (status が blocked。許可・問いの画面) なら、クリップボードにも入れずに
-//     止めてわけを出す (貼った字は画面に無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる。hc send も blocked の端末には送らない。
-//     「入力欄に入れる」も同じ)。貼った後の hc get で blocked になっていれば、Enter を押さない。hc get を読めなければ止めない (今までどおり)。
-//   - 写しのペイン (まとめと問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。送っている間は shared の
+// 答えの送り方: 問いの答えは問いの順に 1 つ 1 行にし、改行 (LF) でつないで 1 つの文にする。panel の答えの欄 (上の帯のすぐ下) にも、答えを
+// 1 行ずつ出す。
+//   - 「送信」(このペインで Enter も) と、段の answer (上の「段の answer」) の「送る」は、文を hc send で props.terminal の端末へ送る (hc() で
+//     hc send -- <端末> <文> を 1 回打つ。-- は、- で始まる文を option に読ませないため)。hc が文を 1 回で貼り、少し間を置いて Enter を押す。
+//     クリップボードは使わず、ペインのフォーカスも動かさない (ユーザーが別の space・tab にいても、画面を引き戻さない。問いのペインが送ったあとに
+//     閉じたときの、キーボードの戻し方は頭の props の項)。改行を含む文が Claude Code の
+//     入力欄に 1 つの入力として入るのは、hc が bracketed paste で貼ることを当てにしている (hc は、program が bracketed paste を求めていればそうする。
+//     Claude Code は求める。渡らなければ、Claude Code は 1 行目で送ってしまう)。
+//   - 「送信」を terminal.paste で貼ってから hc keys で Enter を押す形にしない: herdr-app の terminal.paste は端末に人が打った入力として渡り、
+//     hc keys は人の入力から 3 秒の静けさを待つので、Enter が 3 秒ほど遅れる。貼る前の pane.focus も、別の space にいるユーザーを引き戻す。
+//   - 送った文には <hc from=…> の札が付かず、ユーザーの発言と同じに届く。hc は送り手を、打った hc の環境の HC_TERMINAL_ID で見分け、送り手が
+//     status を報せるエージェントの端末のときだけ札を付ける。mod の hc() は herdr-app (端末の外) の環境のまま hc を起こすので、送り手が無い
+//     (herdr-app を hc の端末の中から起こしていれば別)。
+//   - hc send は、端末のエージェントが人を待っている (status が blocked。許可・問いの画面) なら打たずに断る (終了コード 9。貼った字は画面に無視
+//     されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる)。確かめは打つ直前に hc の core の中でするので、mod は前に hc get を打たない。
+//     blocked で断られたらそのわけを、ほかのわけで断られたら hc が stderr に出す error の message を出す。
+//   - hc send は、人がその端末に打ちかけの文 (下書き) を残していれば、送られるか消されるまで待つ (人の最後のキーから最長 60 秒。下書きが無くても、
+//     人が 3 秒以内にキーを押していれば 3 秒の間を置く)。hc は、最後の Enter (か Ctrl+C・Ctrl+U) の後に押された字を、画面によらず打ちかけと
+//     数える (Backspace で減る)。確かめの画面にキーで答えた後・打った字を Esc で消した後なども、入力欄が空に見えて打ちかけになる。送るのが
+//     4 秒 (SEND_SLOW_MS) を超えたら、わけと手 (入力欄の文を送るか消す。空なら、その端末で Enter を 1 回押す。どちらでも hc は待つのをやめて
+//     送る) をわけの字に出す。herdr-app の hc() は 30 秒で hc を止めて投げるので、それより長く待つと止まる。止めたのが打つ前なら hc は打たないが、
+//     打った後 (Enter の後にエージェントが動き出すのを待つ間) なら届いているので、「届いたか分からない」とわけを出す (hc を起こせずにすぐ
+//     投げたときは「送れなかった」)。
+//   - 「入力欄に入れる」(Enter は押さない) は、文を herdr-app の write_to_clipboard でクリップボードに入れ、props.terminal の端末にフォーカスを
+//     移して 1 回で貼る (terminal.paste。キーボードのある端末に貼る)。貼る前に hc get --json で端末を見て、blocked ならクリップボードにも入れずに
+//     止めてわけを出す (hc get を読めなければ止めない)。write_to_clipboard は、クリップボードを開けなくても投げずに herdr-app のログへ出すだけなので、
+//     入れた後に read_from_clipboard で読み返し、同じ文 (CRLF は LF、NUL は空白とみる) でなければ、50 ms 待って 3 回まで入れ直す (クリップボードの
+//     履歴などほかのアプリが、書き換えの直後に一瞬開いていることがある)。それでも違えば貼らずに止める (前からクリップボードにある字を貼らない)。
+//   - 写しのペイン (まとめと問いのペインなど) が同時に送ると、送る文が重なる。送っている間 (「送信」も「入力欄に入れる」も) は shared の
 //     "pjp-hub-panel.sendingUntil" (名前は MOD から作る) にこの時刻 (Date.now() の ms) までは送らないという値を置き、ほかの写しはその時刻まで
-//     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、30 秒で送れるようになる)。ID を写すボタン (上の「ID を写す
-//     ボタン」) は、印のある間は写さない (写す側は印を置かない)。
+//     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、35 秒で送れるようになる。hc() が hc を止める 30 秒より長くし、
+//     送る仕事の間に印が切れないようにする)。ID を写すボタン (上の「ID を写すボタン」) は、印のある間は写さない (写す側は印を置かない)。
 // ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す)。
 
 import { View, div, image, svg } from "gpui-kit";
 import { writeTextFile } from "herdr"; // 節を消す印・段の押した印のファイル (panel.json の隣) を書く
 import { v_flex, h_flex, TextView } from "gpui-base";
-import { exec, hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared, settings, openOverlay, closeOverlay, appHome } from "herdr";
+import { hc, run, props, theme, readTextFile, watchFolder, nextCommand, focused, panes, shared, setShared, settings, openOverlay, closeOverlay, appHome } from "herdr";
 
 const MOD = "mods/pjp-hub-panel";
 const NAME = MOD.slice(MOD.lastIndexOf("/") + 1); // この mod の名前
@@ -486,10 +508,41 @@ const PRESS = { what: "押した印", pathOf: stepsPathOf, parse: parsePresses, 
 
 // ---- 答えの送り方 (頭のコメントの「答えの送り方」) ----
 // 送っている印: shared に、この時刻 (Date.now() の ms) まで、ほかの写しのペインは送らない、という値を置く (送り終えたら 0)。写しのペイン (まとめと
-// 問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。herdr-app が送る途中で落ちても、時刻を過ぎれば送れる。
-// ID を写すボタン (copyId) は、この印のある間は写さない (写す側は印を置かない)
+// 問いのペインなど) が同時に送ると、送る文が重なる (「入力欄に入れる」はクリップボードも取り合う)。herdr-app が送る途中で落ちても、時刻を過ぎれば
+// 送れる。長さは、herdr-app の hc() が hc を止めるまでの 30 秒より長くする (送る仕事の間に印が切れない)。ID を写すボタン (copyId) は、この印の
+// ある間は写さない (写す側は印を置かない)
 const SEND_KEY = `${NAME}.sendingUntil`;
-const SEND_LOCK_MS = 30000;
+const SEND_LOCK_MS = 35000;
+// 端末のエージェントが人を待っている (blocked) ので送らなかったときのわけ
+const blockedMsg = (term) => `端末 ${term} が確かめの画面で止まっている (blocked)。端末で答えてから送る`;
+// 断った hc の結果 (exec と同じ形) から、わけを読む。hc は失敗を {error: {kind, message, hint}} の JSON で stderr に出す (hint は CLI 向けの
+// 手 (hc read …) なので使わない)。JSON でなければ stderr の字、空なら終了コード
+const hcFailure = (r) => {
+  const text = String(r?.stderr ?? "").trim();
+  try {
+    const e = JSON.parse(text)?.error;
+    if (e && typeof e === "object") {
+      const message = typeof e.message === "string" ? e.message.trim() : "";
+      return { kind: typeof e.kind === "string" ? e.kind : null, why: message || text };
+    }
+  } catch {
+    // JSON でない
+  }
+  return { kind: null, why: text || `終了コード ${r?.code}` };
+};
+// クリップボードの字を比べる形にする。GPUI の write_to_clipboard は NUL を空白にして入れ、版によっては改行を CRLF に替えて入れる
+const clipForm = (s) => String(s).replace(/\0/g, " ").replace(/\r\n/g, "\n");
+// 「入力欄に入れる」で、入れた字を読み返して違ったときに入れ直す回数と間 (ms)。クリップボードの履歴などほかのアプリが、書き換えの直後に
+// クリップボードを一瞬開いていることがある
+const CLIP_TRIES = 3;
+const CLIP_RETRY_MS = 50;
+// 送信 (hc send) がこれより長くかかったら (ms)、hc が端末の打ちかけの文を待っているかもしれないので、わけと手を出す (ふつうは 1 秒ほどで済み、
+// 人がキーを押した後に hc が置く間は 3 秒)。hc() がこれより後に投げたら、herdr-app の 30 秒の打ち切りとみる (hc を起こせないときは、すぐ投げる)
+const SEND_SLOW_MS = 4000;
+// hc が端末の打ちかけの文を待っているときの、わけと手 (頭のコメントの「答えの送り方」)
+const draftHint = (term) =>
+  `端末 ${term} に打ちかけの文があると、hc はそれが送られるか消されるまで待つ (確かめの画面にキーで答えた後などは、入力欄が空でも打ちかけとみる)。` +
+  "入力欄の文を送るか消す。空なら、その端末で Enter を 1 回押す";
 // hc get --json の出力から、端末のエージェントが人を待っている (status が blocked。許可・問いの画面) かを読む。status は平らな字でも
 // { state, … } の形でも読む (pjp-spaces と同じ)。読めなければ false
 const blockedOf = (out) => {
@@ -872,42 +925,107 @@ export default class HubPanel extends View {
       .children(String(text).split(/\r?\n/).map((t) => div().min_w(0).child(t)));
   }
 
-  // 字をクリップボードに入れて props.terminal の端末に 1 回で貼り (terminal.paste)、submit なら hc keys で Enter を 1 回押す (頭のコメントの
-  // 「答えの送り方」。問いの送信と段の answer の「送る」で使う)。返すのは { ok: 貼れた (submit なら Enter まで押せた) か, term: 端末, msg: 止まった
-  // わけ }。cx は使わない (await をまたぐので、呼ぶ側が cx.spawn の中で待つ)。exec などが投げたら、呼ぶ側が受ける
-  async pasteToTerminal(text, submit) {
-    // ほかの写しのペインが送っている間は送らない (クリップボードと端末への貼り付けは 1 つずつ)
+  // 送っている印 (SEND_KEY) を置いて fn を待ち、済んだら外す (頭のコメントの「答えの送り方」)。ほかの写しのペインが送っている間は、fn を
+  // 走らせずに断る (送るのは 1 つずつ)。返すのは fn の返す { ok, term, msg }
+  async withSendLock(fn) {
     const until = shared(SEND_KEY);
     if (typeof until === "number" && until > Date.now()) return { ok: false, msg: "ほかの panel のペインが送っている。少し待ってから送る" };
     const lock = Date.now() + SEND_LOCK_MS;
     setShared(SEND_KEY, lock);
     try {
-      const term = props()?.terminal;
-      // 端末のエージェントが人を待っている (許可・問いの画面。hc の status が blocked) 間は、クリップボードにも入れずに止める。貼った字は画面に
-      // 無視されるか選択肢を選び、Enter は選ばれている選択肢を確定しうる (hc send も blocked の端末には送らない)。確かめられなければ止めない
-      if (term) {
-        const g0 = await hc(["get", term, "--json"]);
-        if (g0.code === 0 && blockedOf(g0.stdout)) return { ok: false, term, msg: `端末 ${term} が確かめの画面で止まっている (blocked)。端末で答えてから送る` };
-      }
-      // 字を code point の並びで渡す (改行・引用符・日本語を PowerShell の引用の外に置く)。改行は LF のまま入れる
-      const codes = Array.from(text).map((ch) => ch.codePointAt(0));
-      const ps = `Set-Clipboard -Value (-join (@(${codes.join(",")}) | ForEach-Object { [char]::ConvertFromUtf32($_) }))`;
-      const r = await exec("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", ps], { timeout: 15000 });
-      if (r.code !== 0) return { ok: false, msg: `クリップボードに入れられない: ${r.stderr.trim()}` };
-      if (!term) return { ok: false, msg: "クリップボードに入れた (props.terminal が無い)" };
-      run("pane.focus", { terminal: term });
-      run("terminal.paste");
-      if (!submit) return { ok: true, term };
-      // 貼った文が届いてから Enter を押す。端末がいるかの確かめを兼ねて hc get を 1 回挟んで間を置く。その間に確かめの画面になったら押さない
-      const g = await hc(["get", term, "--json"]);
-      if (g.code !== 0) return { ok: false, term, msg: `端末 ${term} が見つからない。入力欄に入れたところで止めた` };
-      if (blockedOf(g.stdout)) return { ok: false, term, msg: `端末 ${term} が確かめの画面で止まったので、Enter を押さなかった` };
-      const k = await hc(["keys", term, "enter"]);
-      if (k.code !== 0) return { ok: false, term, msg: `Enter を押せなかった: ${k.stderr.trim()}。入力欄で Enter を押して送る` };
-      return { ok: true, term };
+      return await fn();
     } finally {
       // 送っている印を戻す (ほかの写しが後から置いた印は消さない)
       if (shared(SEND_KEY) === lock) setShared(SEND_KEY, 0);
+    }
+  }
+
+  // 「送信」と段の answer の「送る」: 字を hc send で props.terminal の端末へ送る (頭のコメントの「答えの送り方」。hc が 1 回で貼って Enter を
+  // 1 回押す。クリップボードは使わず、ペインのフォーカスも動かさない)。返すのは { ok: 送れたか, term: 端末, msg: 送れなかったわけ }。cx は
+  // 呼ぶ側の cx.spawn の cx (await をまたぐので、呼ぶ側が cx.spawn の中で待つ)。送るのが SEND_SLOW_MS より長くかかったら、onSlow (わけの字を
+  // 受ける) を 1 回呼んで描き直す (送り終えた後は呼ばない)
+  async sendToTerminal(text, cx, onSlow) {
+    return this.withSendLock(async () => {
+      const term = props()?.terminal;
+      if (!term) return { ok: false, msg: "送れない: props.terminal が無い" };
+      const t0 = Date.now();
+      let done = false;
+      cx.spawn(async (cx) => {
+        try {
+          await cx.sleep(SEND_SLOW_MS);
+        } catch {
+          return; // 閉じた写しの cx
+        }
+        if (done || this.closed) return;
+        onSlow(`送っています…\n${draftHint(term)}`);
+        cx.notify();
+      });
+      let r;
+      try {
+        // 文が - で始まっても option に読まれないよう、-- の後ろに置く
+        r = await hc(["send", "--", term, text]);
+      } catch (e) {
+        // herdr-app の hc() は 30 秒で hc を止めて投げる。止めたのが打つ前 (打ちかけの文を待つ間) なら hc は打たないが、打った後 (Enter の後に
+        // エージェントが動き出すのを待つ間) なら届いている。すぐ投げたら、hc を起こせていない
+        if (Date.now() - t0 >= SEND_SLOW_MS) {
+          return { ok: false, term, msg: `端末 ${term} に届いたか分からない: ${e}\n端末を見て、届いていなければ送り直す。${draftHint(term)}` };
+        }
+        return { ok: false, term, msg: `端末 ${term} に送れなかった: ${e}` };
+      } finally {
+        done = true;
+      }
+      if (r.code === 0) return { ok: true, term };
+      const f = hcFailure(r);
+      // エージェントが人を待っている (blocked) と、hc send は打たずに断る (終了コード 9)
+      if (r.code === 9 || f.kind === "blocked") return { ok: false, term, msg: blockedMsg(term) };
+      return { ok: false, term, msg: `端末 ${term} に送れなかった: ${f.why}` };
+    });
+  }
+
+  // 「入力欄に入れる」: 字を cx (cx.spawn の cx) の write_to_clipboard でクリップボードに入れ、props.terminal の端末にフォーカスを移して 1 回で
+  // 貼る (terminal.paste。Enter は押さない。頭のコメントの「答えの送り方」)。返すのは { ok: 貼れたか, term: 端末, msg: 止まったわけ }。hc が
+  // 投げたら、呼ぶ側が受ける
+  async pasteToInput(text, cx) {
+    return this.withSendLock(async () => {
+      const term = props()?.terminal;
+      // 端末のエージェントが人を待っている (許可・問いの画面。hc の status が blocked) 間は、クリップボードにも入れずに止める。貼った字は画面に
+      // 無視されるか選択肢を選びうる。確かめられなければ止めない
+      if (term) {
+        const g = await hc(["get", term, "--json"]);
+        if (g.code === 0 && blockedOf(g.stdout)) return { ok: false, term, msg: blockedMsg(term) };
+      }
+      // write_to_clipboard は、クリップボードを開けなくても投げずにログへ出すだけなので、読み返して確かめる。違えば CLIP_RETRY_MS 待って
+      // CLIP_TRIES 回まで入れ直し、それでも違えば、前からある字を貼らないよう止める (読み返した字はわけに出さない)。cx は await の後に使える
+      // cx.spawn の cx。入れ直しを待つ間も送っている印は置いたまま
+      let same = false;
+      try {
+        for (let i = 0; i < CLIP_TRIES && !same; i++) {
+          if (i > 0) await cx.sleep(CLIP_RETRY_MS);
+          cx.write_to_clipboard(text);
+          const back = cx.read_from_clipboard();
+          same = typeof back === "string" && clipForm(back) === clipForm(text);
+        }
+      } catch (e) {
+        return { ok: false, term, msg: `クリップボードに入れられない: ${e}` };
+      }
+      if (!same) {
+        return { ok: false, term, msg: "クリップボードに入れられない: 入れた字を読み返せない (ほかのアプリがクリップボードを使っているかもしれない)。もう一度押す" };
+      }
+      if (!term) return { ok: false, msg: "クリップボードに入れた (props.terminal が無い)" };
+      // terminal.paste はキーボードのある端末に貼るので、先にキーボードを移す (ユーザーが押して入れるのを選んだので、画面が動いてよい)
+      run("pane.focus", { terminal: term });
+      run("terminal.paste");
+      return { ok: true, term };
+    });
+  }
+
+  // ユーザーがいま term の端末のある tab を見ているか (focused() の tab に、term を出すペインがある)。分からなければ false
+  seesTerminal(term) {
+    try {
+      const tab = focused()?.tab;
+      return typeof tab === "string" && panes().some((p) => p?.terminal === term && p?.tab === tab);
+    } catch {
+      return false;
     }
   }
 
@@ -915,7 +1033,7 @@ export default class HubPanel extends View {
     const text = this.answerText();
     if (!text || this.busy) return;
     // 問いのペインは、送ったら自分を閉じる。閉じるのは、送信の頭でこの panel の handle がキーボードを持つときの、キーボードのある
-    // ペイン (この後の pane.focus で端末へ移る前に控える)。この panel のペインかは、Enter まで済んだ後に ownPane で確かめる
+    // ペイン (送る間にユーザーがキーボードを動かしても替わらないよう、頭で控える)。この panel のペインかは、送れた後に ownPane で確かめる
     const closing = submit && this.role() === "questions";
     const self = closing && this.holdsKeyboard() ? (focused()?.pane ?? null) : null;
     this.busy = true;
@@ -924,7 +1042,11 @@ export default class HubPanel extends View {
     cx.spawn(async (cx) => {
       let closed = false;
       try {
-        const res = await this.pasteToTerminal(text, submit);
+        const res = submit
+          ? await this.sendToTerminal(text, cx, (msg) => {
+              this.status = msg;
+            })
+          : await this.pasteToInput(text, cx);
         if (!res.ok) {
           this.status = res.msg;
           return;
@@ -942,9 +1064,12 @@ export default class HubPanel extends View {
             this.status = `${term} に送った (閉じるのはハブ):\n${text}`;
             return;
           }
+          // キーボードを端末へ戻すのは、ユーザーがいまハブの端末のある tab を見ているときだけ (pane.focus は端末のある space・tab へ画面を
+          // 移すので、別の space・tab にいるユーザーを引き戻さない)。閉じる前に見る (閉じると、キーボードは同じ tab のほかのペインへ移る)
+          const back = this.seesTerminal(term);
           run("pane.close", { pane });
           closed = true;
-          run("pane.focus", { terminal: term });
+          if (back) run("pane.focus", { terminal: term });
         }
       } catch (e) {
         this.status = `止まった: ${e}`;
@@ -1653,8 +1778,9 @@ export default class HubPanel extends View {
   }
 
   // ID を写すボタンを押した: text (ID の字) だけを、クリックの cx の write_to_clipboard でクリップボードに入れる (押した中ですぐ入れる。端末には
-  // 貼らない)。panel のペインが送っている間 (この panel の busy か、shared の送っている印がある間) は入れない (送る途中でクリップボードを ID に
-  // 替えると、答えの代わりに ID が貼られて Enter で送られる)。印は置かない。入れたら ✓ (入ったかは write_to_clipboard が返さない)、写さなかったら
+  // 貼らない)。panel のペインが送っている間 (この panel の busy か、shared の送っている印がある間) は入れない (「入力欄に入れる」の途中で
+  // クリップボードを ID に替えると、答えの代わりに ID が入力欄に貼られる。「送信」の hc send はクリップボードを使わないが、印を分けない)。印は
+  // 置かない。入れたら ✓ (入ったかは write_to_clipboard が返さない)、写さなかったら
   // ✗ を COPY_MARK_MS の間出し、写さなかったわけはわけの行に出す (次に写せたら消す。ほかのわけは残す)
   copyId(eid, text, cx) {
     const until = shared(SEND_KEY);
@@ -2074,7 +2200,7 @@ export default class HubPanel extends View {
     );
   }
 
-  // 「送る」: 押した段の answer を、問いの「送信」と同じ手 (pasteToTerminal) で送り、Enter まで押せたら印の sent を true にする。送れなければ
+  // 「送る」: 押した段の answer を、問いの「送信」と同じ手 (sendToTerminal。hc send) で送り、送れたら印の sent を true にする。送れなければ
   // 確かめの中にわけを出し、印は sent が false のまま残す。送るのは 1 つずつ (問いの送信とも。busy)
   sendStep(pk, cx) {
     const m = this.sp.cur.get(pk);
@@ -2085,7 +2211,9 @@ export default class HubPanel extends View {
     // await をまたぐ仕事は cx.spawn の cx でする (クリックの cx は、await の後には使えない)
     cx.spawn(async (cx) => {
       try {
-        const res = await this.pasteToTerminal(m.answer, true);
+        const res = await this.sendToTerminal(m.answer, cx, (msg) => {
+          this.stepMsg[pk] = msg;
+        });
         if (!res.ok) {
           this.stepMsg[pk] = res.msg;
           return;
